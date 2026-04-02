@@ -35,6 +35,7 @@
                 renderBucklingCurve();
                 populatePostSelects();
                 renderModeShape2D();
+                renderModeShape3DWrapper();
                 switchTab('postprocessor');
                 break;
             case 'analysisError':
@@ -462,8 +463,41 @@
             selMode.appendChild(opt);
         }
 
-        selLen.addEventListener('change', renderModeShape2D);
-        selMode.addEventListener('change', renderModeShape2D);
+        selLen.addEventListener('change', () => { renderModeShape2D(); renderModeShape3DWrapper(); });
+        selMode.addEventListener('change', () => { renderModeShape2D(); renderModeShape3DWrapper(); });
+    }
+
+    // ============================================================
+    // 3D 모드형상 래퍼
+    // ============================================================
+    function renderModeShape3DWrapper() {
+        const canvas = document.getElementById('mode-shape-3d-canvas');
+        if (!canvas || !analysisResult || !analysisResult.shapes || !model) { return; }
+        if (typeof window.renderModeShape3D !== 'function') { return; }
+
+        const selLen = document.getElementById('select-length');
+        const selMode = document.getElementById('select-mode');
+        if (!selLen || !selMode) { return; }
+
+        const lengthIdx = parseInt(selLen.value) || 0;
+        const modeIdx = parseInt(selMode.value) || 0;
+        const shapes = analysisResult.shapes;
+
+        if (!shapes[lengthIdx]) { return; }
+        const shapeMatrix = shapes[lengthIdx];
+
+        // 모드 벡터 추출
+        let modeVec;
+        if (Array.isArray(shapeMatrix[0])) {
+            modeVec = shapeMatrix.map(row => row[modeIdx] || 0);
+        } else {
+            modeVec = shapeMatrix;
+        }
+
+        const curveRow = analysisResult.curve[lengthIdx];
+        const length = curveRow ? curveRow[0] : 100;
+
+        window.renderModeShape3D(canvas, model.node, model.elem, modeVec, length, model.BC || 'S-S');
     }
 
     // ============================================================

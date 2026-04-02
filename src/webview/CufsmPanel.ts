@@ -244,13 +244,18 @@ export class CufsmPanel {
                             <label>Mode</label>
                             <select id="select-mode"></select>
                         </div>
-                        <canvas id="mode-shape-canvas" width="400" height="400"></canvas>
+                        <canvas id="mode-shape-canvas" width="400" height="300"></canvas>
+                        <h3>3D Mode Shape</h3>
+                        <canvas id="mode-shape-3d-canvas" width="500" height="400"></canvas>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
+    <script nonce="${nonce}" src="${webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'charts', 'modeShape3D.js')
+        )}"></script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

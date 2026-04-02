@@ -12,6 +12,11 @@ import numpy as np
 from engine.fsm_solver import stripmain
 from engine.properties import grosprop
 from engine.template import generate_section
+from cfsm.classify import classify
+from vibration.solver import stripmain_vib
+from plastic.pmm_plastic import pmm_plastic
+from fileio.mat_loader import load_mat_file
+from fileio.project_io import save_project, load_project
 from models.data import CufsmModel, CufsmResult, GBTConfig
 
 
@@ -52,6 +57,52 @@ def handle_request(request: dict) -> dict:
                 'node': result['node'].tolist(),
                 'elem': result['elem'].tolist(),
             }}
+
+        elif method == 'classify':
+            model = CufsmModel.from_dict(params.get('model', {}))
+            shapes = [np.array(s) for s in params.get('shapes', [])]
+            clas = classify(
+                model.prop, model.node, model.elem,
+                model.lengths, shapes, model.GBTcon, model.BC, model.m_all
+            )
+            return {'id': req_id, 'result': [c.tolist() for c in clas]}
+
+        elif method == 'vibration':
+            model = CufsmModel.from_dict(params)
+            result = stripmain_vib(
+                model.prop, model.node, model.elem,
+                model.lengths, model.BC, model.m_all
+            )
+            return {'id': req_id, 'result': {
+                'frequencies': [f.tolist() for f in result['frequencies']],
+            }}
+
+        elif method == 'plastic':
+            node = np.array(params['node'], dtype=float)
+            elem = np.array(params['elem'], dtype=float)
+            fy = params.get('fy', 50.0)
+            result = pmm_plastic(node, elem, fy)
+            return {'id': req_id, 'result': {
+                'P': result['P'].tolist(),
+                'Mxx': result['Mxx'].tolist(),
+                'Mzz': result['Mzz'].tolist(),
+            }}
+
+        elif method == 'load_mat':
+            filepath = params.get('filepath', '')
+            model = load_mat_file(filepath)
+            return {'id': req_id, 'result': model.to_dict()}
+
+        elif method == 'save_project':
+            model = CufsmModel.from_dict(params.get('model', {}))
+            filepath = params.get('filepath', '')
+            save_project(model, filepath)
+            return {'id': req_id, 'result': 'saved'}
+
+        elif method == 'load_project':
+            filepath = params.get('filepath', '')
+            model = load_project(filepath)
+            return {'id': req_id, 'result': model.to_dict()}
 
         elif method == 'ping':
             return {'id': req_id, 'result': 'pong'}
