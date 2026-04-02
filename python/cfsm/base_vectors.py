@@ -10,7 +10,7 @@ import numpy as np
 from scipy.linalg import block_diag, orth, null_space
 
 from .node_utils import node_class, mode_nr
-from ..engine.properties import elemprop
+from engine.properties import elemprop
 
 
 def base_column(node: np.ndarray, elem: np.ndarray, prop: np.ndarray,

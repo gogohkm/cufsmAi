@@ -608,9 +608,7 @@
     // 3D 모드형상 래퍼
     // ============================================================
     function renderModeShape3DWrapper() {
-        const canvas = document.getElementById('mode-shape-3d-canvas');
-        if (!canvas || !analysisResult || !analysisResult.shapes || !model) { return; }
-        if (typeof window.renderModeShape3D !== 'function') { return; }
+        if (!analysisResult || !analysisResult.shapes || !model) { return; }
 
         const selLen = document.getElementById('select-length');
         const selMode = document.getElementById('select-mode');
@@ -619,11 +617,9 @@
         const lengthIdx = parseInt(selLen.value) || 0;
         const modeIdx = parseInt(selMode.value) || 0;
         const shapes = analysisResult.shapes;
-
         if (!shapes[lengthIdx]) { return; }
-        const shapeMatrix = shapes[lengthIdx];
 
-        // 모드 벡터 추출
+        const shapeMatrix = shapes[lengthIdx];
         let modeVec;
         if (Array.isArray(shapeMatrix[0])) {
             modeVec = shapeMatrix.map(row => row[modeIdx] || 0);
@@ -634,7 +630,28 @@
         const curveRow = analysisResult.curve[lengthIdx];
         const length = curveRow ? curveRow[0] : 100;
 
-        window.renderModeShape3D(canvas, model.node, model.elem, modeVec, length, model.BC || 'S-S');
+        // Babylon.js 3D 렌더러 우선 시도
+        if (window.CufsmViewer3D) {
+            try {
+                window.CufsmViewer3D.render({
+                    nodes: model.node,
+                    elems: model.elem,
+                    modeVec: modeVec,
+                    length: length,
+                    BC: model.BC || 'S-S',
+                    scale: 0.3,
+                });
+                return;
+            } catch (e) {
+                console.warn('Babylon.js 3D failed, falling back to Canvas:', e);
+            }
+        }
+
+        // Canvas 2D 등각투영 폴백
+        const canvas = document.getElementById('mode-shape-3d-canvas');
+        if (canvas && typeof window.renderModeShape3D === 'function') {
+            window.renderModeShape3D(canvas, model.node, model.elem, modeVec, length, model.BC || 'S-S');
+        }
     }
 
     // ============================================================

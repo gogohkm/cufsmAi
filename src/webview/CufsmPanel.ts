@@ -288,6 +288,16 @@ export class CufsmPanel {
                 <label>Number of eigenvalues</label>
                 <input type="number" id="input-neigs" value="20" step="1">
             </div>
+            <div class="section-group">
+                <label>cFSM Mode Classification</label>
+                <div class="input-row">
+                    <label><input type="checkbox" id="chk-cfsm-enable"> Enable cFSM</label>
+                    <label><input type="checkbox" id="chk-cfsm-G" checked> Global</label>
+                    <label><input type="checkbox" id="chk-cfsm-D" checked> Distortional</label>
+                    <label><input type="checkbox" id="chk-cfsm-L" checked> Local</label>
+                    <label><input type="checkbox" id="chk-cfsm-O" checked> Other</label>
+                </div>
+            </div>
             <div class="button-row">
                 <button id="btn-run-analysis" class="btn-primary">Run Analysis</button>
             </div>
@@ -321,6 +331,9 @@ export class CufsmPanel {
         </div>
     </div>
 
+    <script nonce="${nonce}" src="${webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'viewer3d.js')
+        )}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'charts', 'modeShape3D.js')
         )}"></script>

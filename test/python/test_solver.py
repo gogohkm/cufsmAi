@@ -1,15 +1,15 @@
 """FSM 솔버 + 통합 테스트"""
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 import numpy as np
-from python.engine.fsm_solver import stripmain
-from python.engine.properties import grosprop, elemprop
-from python.engine.transform import trans
-from python.engine.assembly import assemble
-from python.engine.stress import stresgen, yieldMP
-from python.engine.template import generate_section
-from python.models.data import CufsmModel, GBTConfig
+from engine.fsm_solver import stripmain
+from engine.properties import grosprop, elemprop
+from engine.transform import trans
+from engine.assembly import assemble
+from engine.stress import stresgen, yieldMP
+from engine.template import generate_section
+from models.data import CufsmModel, GBTConfig
 from scipy import sparse
 
 
@@ -57,7 +57,7 @@ def test_elemprop():
 
 def test_trans():
     """좌표 변환 — 회전 불변"""
-    from python.engine.element import klocal
+    from engine.element import klocal
     m_a = np.array([1.0])
     k = klocal(29500, 29500, 0.3, 0.3, 11346, 0.1, 100, 5, 'S-S', m_a)
     kg = np.zeros_like(k)
@@ -76,7 +76,7 @@ def test_assembly():
     K = sparse.lil_matrix((ndof, ndof))
     Kg = sparse.lil_matrix((ndof, ndof))
 
-    from python.engine.element import klocal, kglocal
+    from engine.element import klocal, kglocal
     ep = elemprop(node, elem)
 
     k_loc = klocal(29500, 29500, 0.3, 0.3, 11346, 0.1, 100, ep[0,1], 'S-S', m_a)

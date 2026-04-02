@@ -12,11 +12,11 @@ import numpy as np
 from scipy import sparse
 from scipy.linalg import eig
 
-from ..engine.element import klocal
-from ..engine.transform import trans
-from ..engine.assembly import assemble
-from ..engine.properties import elemprop
-from ..engine.boundary import BC_I1_5
+from engine.element import klocal
+from engine.transform import trans
+from engine.assembly import assemble
+from engine.properties import elemprop
+from engine.boundary import BC_I1_5
 
 PI = math.pi
 
@@ -147,7 +147,7 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
                            m_glob, np.zeros_like(m_glob), ni, nj, nnodes, m_a)
 
         # DOF 구속
-        from ..engine.fsm_solver import _get_free_dofs
+        from engine.fsm_solver import _get_free_dofs
         free_dofs = _get_free_dofs(node, nnodes, totalm)
 
         Kff = K.tocsr()[free_dofs, :][:, free_dofs].toarray()

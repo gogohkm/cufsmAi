@@ -15,6 +15,7 @@ from engine.template import generate_section
 from engine.stress import stresgen, yieldMP
 from cfsm.classify import classify
 from vibration.solver import stripmain_vib
+from fcfsm.solver import stripmain_fcfsm
 from plastic.pmm_plastic import pmm_plastic
 from fileio.mat_loader import load_mat_file
 from fileio.project_io import save_project, load_project
@@ -95,6 +96,18 @@ def handle_request(request: dict) -> dict:
                 model.lengths, shapes, model.GBTcon, model.BC, model.m_all
             )
             return {'id': req_id, 'result': [c.tolist() for c in clas]}
+
+        elif method == 'fcfsm':
+            model = CufsmModel.from_dict(params)
+            result = stripmain_fcfsm(
+                model.prop, model.node, model.elem,
+                model.lengths, model.BC, model.m_all, model.neigs
+            )
+            return {'id': req_id, 'result': {
+                'curve': [c.tolist() for c in result['curve']],
+                'classification': [c.tolist() for c in result['classification']],
+                'n_lengths': len(result['curve']),
+            }}
 
         elif method == 'vibration':
             model = CufsmModel.from_dict(params)

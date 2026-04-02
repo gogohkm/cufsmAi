@@ -1,10 +1,10 @@
 """요소 강성행렬 단위 테스트"""
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 import numpy as np
-from python.engine.element import klocal, kglocal, spring_klocal
-from python.engine.boundary import BC_I1_5
+from engine.element import klocal, kglocal, spring_klocal
+from engine.boundary import BC_I1_5
 
 
 def test_bc_i1_5_ss():

@@ -23,7 +23,7 @@ from .element import klocal, kglocal, spring_klocal
 from .transform import trans
 from .assembly import assemble, spring_assemble
 from .properties import elemprop
-from ..models.data import CufsmResult
+from models.data import CufsmResult
 
 
 def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
