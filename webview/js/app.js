@@ -44,6 +44,22 @@
             case 'propertiesResult':
                 renderProperties(msg.data);
                 break;
+            case 'templateGenerated':
+                if (model && msg.data) {
+                    model.node = msg.data.node;
+                    model.elem = msg.data.elem;
+                    renderPreprocessor();
+                }
+                break;
+            case 'stressApplied':
+                if (model && msg.data && msg.data.node) {
+                    model.node = msg.data.node;
+                    renderNodeTable();
+                }
+                break;
+            case 'classifyResult':
+                renderClassifyCurve(msg.data);
+                break;
         }
     });
 
@@ -172,6 +188,36 @@
             Ixx = ${fmt(props.Ixx)}  |  Izz = ${fmt(props.Izz)}  |  Ixz = ${fmt(props.Ixz)}<br>
             θp = ${fmt(props.thetap)}°  |  I11 = ${fmt(props.I11)}  |  I22 = ${fmt(props.I22)}
         `;
+    }
+
+    // ============================================================
+    // 템플릿 생성
+    // ============================================================
+    const btnGenTemplate = document.getElementById('btn-generate-template');
+    if (btnGenTemplate) {
+        btnGenTemplate.addEventListener('click', () => {
+            const selTemplate = document.getElementById('select-template');
+            const sectionType = selTemplate ? selTemplate.value : '';
+            if (!sectionType) { return; }
+
+            const params = {
+                H: getNum('tpl-H', 9),
+                B: getNum('tpl-B', 5),
+                D: getNum('tpl-D', 1),
+                t: getNum('tpl-t', 0.1),
+                r: getNum('tpl-r', 0),
+            };
+
+            // CHS는 D만 사용
+            if (sectionType === 'chs') {
+                params.D = params.H; // 직경으로 사용
+            }
+
+            vscode.postMessage({
+                command: 'generateTemplate',
+                data: { section_type: sectionType, params }
+            });
+        });
     }
 
     // ============================================================
@@ -465,6 +511,97 @@
 
         selLen.addEventListener('change', () => { renderModeShape2D(); renderModeShape3DWrapper(); });
         selMode.addEventListener('change', () => { renderModeShape2D(); renderModeShape3DWrapper(); });
+    }
+
+    // ============================================================
+    // 모드 분류 곡선 (G/D/L/O stackplot)
+    // ============================================================
+    function renderClassifyCurve(clasData) {
+        const canvas = document.getElementById('classify-curve-canvas');
+        if (!canvas || !clasData || !analysisResult) { return; }
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { return; }
+        const w = canvas.width;
+        const h = canvas.height;
+        const pad = { top: 20, right: 30, bottom: 40, left: 70 };
+
+        // clasData: [ [%G,%D,%L,%O], ... ] — 각 길이의 1st 모드
+        const points = [];
+        for (let i = 0; i < clasData.length; i++) {
+            const row = clasData[i];
+            if (!row || row.length === 0) { continue; }
+            const gdlo = Array.isArray(row[0]) ? row[0] : row; // 1st 모드
+            const curveRow = analysisResult.curve[i];
+            const length = curveRow ? curveRow[0] : i + 1;
+            points.push({ length, G: gdlo[0] || 0, D: gdlo[1] || 0, L: gdlo[2] || 0, O: gdlo[3] || 0 });
+        }
+        if (points.length < 2) { return; }
+
+        const xMin = Math.log10(Math.min(...points.map(p => p.length)));
+        const xMax = Math.log10(Math.max(...points.map(p => p.length)));
+        const toX = (val) => pad.left + (Math.log10(val) - xMin) / (xMax - xMin) * (w - pad.left - pad.right);
+
+        const plotH = h - pad.top - pad.bottom;
+        const toY = (pct, base) => pad.top + plotH - (base + pct) / 100 * plotH;
+
+        ctx.clearRect(0, 0, w, h);
+
+        const colors = { G: '#e57373', D: '#ffb74d', L: '#4fc3f7', O: '#b0bec5' };
+        const labels = ['G', 'D', 'L', 'O'];
+        const keys = ['G', 'D', 'L', 'O'];
+
+        // 누적 영역 (아래에서 위로)
+        for (let k = 0; k < keys.length; k++) {
+            const key = keys[k];
+            ctx.fillStyle = colors[key];
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+
+            // 아래 경계
+            for (let i = 0; i < points.length; i++) {
+                let base = 0;
+                for (let j = 0; j < k; j++) { base += points[i][keys[j]]; }
+                const x = toX(points[i].length);
+                const y = toY(0, base);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            // 위 경계 (역순)
+            for (let i = points.length - 1; i >= 0; i--) {
+                let base = 0;
+                for (let j = 0; j <= k; j++) { base += points[i][keys[j]]; }
+                ctx.lineTo(toX(points[i].length), toY(0, base));
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+
+        // 범례
+        const style = getComputedStyle(document.body);
+        const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
+        ctx.font = '11px sans-serif';
+        let lx = pad.left + 5;
+        for (let k = 0; k < keys.length; k++) {
+            ctx.fillStyle = colors[keys[k]];
+            ctx.fillRect(lx, 4, 12, 12);
+            ctx.fillStyle = fg;
+            ctx.fillText(labels[k], lx + 15, 14);
+            lx += 50;
+        }
+
+        // X축
+        ctx.fillStyle = fg;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
+            ctx.fillText(Math.pow(10, exp).toString(), toX(Math.pow(10, exp)), h - pad.bottom + 16);
+        }
+
+        // Y축 라벨
+        ctx.textAlign = 'right';
+        ctx.fillText('0%', pad.left - 5, h - pad.bottom);
+        ctx.fillText('100%', pad.left - 5, pad.top + 10);
     }
 
     // ============================================================

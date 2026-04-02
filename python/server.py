@@ -12,6 +12,7 @@ import numpy as np
 from engine.fsm_solver import stripmain
 from engine.properties import grosprop
 from engine.template import generate_section
+from engine.stress import stresgen, yieldMP
 from cfsm.classify import classify
 from vibration.solver import stripmain_vib
 from plastic.pmm_plastic import pmm_plastic
@@ -57,6 +58,34 @@ def handle_request(request: dict) -> dict:
                 'node': result['node'].tolist(),
                 'elem': result['elem'].tolist(),
             }}
+
+        elif method == 'stresgen':
+            node = np.array(params['node'], dtype=float)
+            props = params.get('props', {})
+            loads = params.get('loads', {})
+            node = stresgen(
+                node,
+                P=loads.get('P', 0), Mxx=loads.get('Mxx', 0),
+                Mzz=loads.get('Mzz', 0), M11=loads.get('M11', 0),
+                M22=loads.get('M22', 0),
+                A=props['A'], xcg=props['xcg'], zcg=props['zcg'],
+                Ixx=props['Ixx'], Izz=props['Izz'], Ixz=props['Ixz'],
+                thetap=props['thetap'], I11=props['I11'], I22=props['I22'],
+                unsymm=loads.get('unsymm', 0),
+            )
+            return {'id': req_id, 'result': {'node': node.tolist()}}
+
+        elif method == 'yieldMP':
+            node = np.array(params['node'], dtype=float)
+            elem = np.array(params['elem'], dtype=float)
+            fy = params.get('fy', 50.0)
+            props = grosprop(node, elem)
+            result = yieldMP(
+                node, fy, props['A'], props['xcg'], props['zcg'],
+                props['Ixx'], props['Izz'], props['Ixz'],
+                props['thetap'], props['I11'], props['I22'],
+            )
+            return {'id': req_id, 'result': result}
 
         elif method == 'classify':
             model = CufsmModel.from_dict(params.get('model', {}))

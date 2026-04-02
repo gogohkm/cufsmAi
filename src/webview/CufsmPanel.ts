@@ -87,6 +87,18 @@ export class CufsmPanel {
             case 'updateModel':
                 this._model = { ...this._model, ...message.data };
                 break;
+
+            case 'generateTemplate':
+                await this._generateTemplate(message.data);
+                break;
+
+            case 'applyStress':
+                await this._applyStress(message.data);
+                break;
+
+            case 'classifyModes':
+                await this._classifyModes(message.data);
+                break;
         }
     }
 
@@ -109,6 +121,36 @@ export class CufsmPanel {
             this._postMessage('propertiesResult', props);
         } catch (err: any) {
             this._postMessage('propertiesError', { error: err.message });
+        }
+    }
+
+    /** cFSM 모드 분류 */
+    private async _classifyModes(data: any): Promise<void> {
+        try {
+            const result = await this._pythonBridge.call('classify', data);
+            this._postMessage('classifyResult', result);
+        } catch (err: any) {
+            this._postMessage('classifyError', { error: err.message });
+        }
+    }
+
+    /** 단면 템플릿 생성 */
+    private async _generateTemplate(data: { section_type: string; params: any }): Promise<void> {
+        try {
+            const result = await this._pythonBridge.call('generate_section', data);
+            this._postMessage('templateGenerated', result);
+        } catch (err: any) {
+            this._postMessage('templateError', { error: err.message });
+        }
+    }
+
+    /** 응력 분포 적용 */
+    private async _applyStress(data: any): Promise<void> {
+        try {
+            const result = await this._pythonBridge.call('stresgen', data);
+            this._postMessage('stressApplied', result);
+        } catch (err: any) {
+            this._postMessage('stressError', { error: err.message });
         }
     }
 
@@ -161,6 +203,30 @@ export class CufsmPanel {
             <div class="panel-row">
                 <div class="panel-left">
                     <h3>Section Input</h3>
+                    <div class="section-group">
+                        <label>Section Template</label>
+                        <div class="input-row">
+                            <select id="select-template">
+                                <option value="">-- Manual Input --</option>
+                                <option value="lippedc" selected>Lipped C-Channel</option>
+                                <option value="lippedz">Lipped Z-Section</option>
+                                <option value="hat">Hat Section</option>
+                                <option value="rhs">RHS (Rectangular Hollow)</option>
+                                <option value="chs">CHS (Circular Hollow)</option>
+                                <option value="angle">Angle (L)</option>
+                                <option value="isect">I-Section</option>
+                                <option value="tee">T-Section</option>
+                            </select>
+                            <button id="btn-generate-template" class="btn-small">Generate</button>
+                        </div>
+                        <div id="template-params" class="input-row" style="margin-top:4px; flex-wrap:wrap;">
+                            <label>H</label><input type="number" id="tpl-H" value="9" step="0.5" style="width:60px">
+                            <label>B</label><input type="number" id="tpl-B" value="5" step="0.5" style="width:60px">
+                            <label>D</label><input type="number" id="tpl-D" value="1" step="0.1" style="width:60px">
+                            <label>t</label><input type="number" id="tpl-t" value="0.1" step="0.01" style="width:60px">
+                            <label>r</label><input type="number" id="tpl-r" value="0" step="0.1" style="width:60px">
+                        </div>
+                    </div>
                     <div class="section-group">
                         <label>Material</label>
                         <div class="input-row">
@@ -234,6 +300,8 @@ export class CufsmPanel {
                 <div class="panel-left">
                     <h3>Buckling Curve</h3>
                     <canvas id="buckling-curve-canvas" width="700" height="400"></canvas>
+                    <h3>Mode Classification (G/D/L/O)</h3>
+                    <canvas id="classify-curve-canvas" width="700" height="200"></canvas>
                 </div>
                 <div class="panel-right">
                     <h3>Mode Shape</h3>

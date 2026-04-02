@@ -7,6 +7,7 @@
 import * as vscode from 'vscode';
 import { PythonBridge } from './bridge/PythonBridge';
 import { CufsmPanel } from './webview/CufsmPanel';
+import { ProjectExplorerProvider } from './webview/ProjectExplorerProvider';
 
 let pythonBridge: PythonBridge | undefined;
 
@@ -18,6 +19,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // PythonBridge 초기화
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
+
+    // 프로젝트 탐색기 등록
+    const projectExplorer = new ProjectExplorerProvider();
+    vscode.window.registerTreeDataProvider('cufsm.projectExplorer', projectExplorer);
 
     // 커맨드 등록
     context.subscriptions.push(
@@ -33,12 +38,12 @@ export async function activate(context: vscode.ExtensionContext) {
                     `Ensure Python is installed with numpy and scipy.\n${err.message}`
                 );
             }
-        })
-    );
-
-    context.subscriptions.push(
+        }),
         vscode.commands.registerCommand('cufsm.newProject', () => {
             vscode.window.showInformationMessage('CUFSM: New Project - Coming soon');
+        }),
+        vscode.commands.registerCommand('cufsm.refreshProjects', () => {
+            projectExplorer.refresh();
         })
     );
 }

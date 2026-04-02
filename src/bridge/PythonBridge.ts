@@ -82,7 +82,12 @@ export class PythonBridge {
         return this._call('get_properties', { node, elem });
     }
 
-    /** JSON-RPC 요청 전송 */
+    /** 범용 JSON-RPC 요청 전송 */
+    async call(method: string, params: any): Promise<any> {
+        return this._call(method, params);
+    }
+
+    /** JSON-RPC 요청 전송 (내부) */
     private async _call(method: string, params: any): Promise<any> {
         if (!this._process || !this._process.stdin) {
             throw new Error('Python process is not running. Call start() first.');
