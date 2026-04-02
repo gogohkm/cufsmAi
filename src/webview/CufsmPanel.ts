@@ -8,27 +8,34 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { PythonBridge } from '../bridge/PythonBridge';
+import { ProjectExplorerProvider } from './ProjectExplorerProvider';
 import { CufsmModel, CufsmResult, WebviewToExtMessage, createDefaultModel } from '../models/types';
 
 export class CufsmPanel {
     public static readonly viewType = 'cufsm.designer';
-    private static _instance: CufsmPanel | undefined;
+    public static currentPanel: CufsmPanel | undefined;
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
     private readonly _pythonBridge: PythonBridge;
+    private readonly _treeProvider?: ProjectExplorerProvider;
     private _disposed = false;
+    private _currentSection = 'preprocessor';
 
     private _model: CufsmModel;
 
-    public static createOrShow(extensionUri: vscode.Uri, pythonBridge: PythonBridge): CufsmPanel {
+    public static createOrShow(
+        extensionUri: vscode.Uri,
+        pythonBridge: PythonBridge,
+        treeProvider?: ProjectExplorerProvider
+    ): void {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        if (CufsmPanel._instance) {
-            CufsmPanel._instance._panel.reveal(column);
-            return CufsmPanel._instance;
+        if (CufsmPanel.currentPanel) {
+            CufsmPanel.currentPanel._panel.reveal(column);
+            return;
         }
 
         const panel = vscode.window.createWebviewPanel(
@@ -45,18 +52,19 @@ export class CufsmPanel {
             }
         );
 
-        CufsmPanel._instance = new CufsmPanel(panel, extensionUri, pythonBridge);
-        return CufsmPanel._instance;
+        CufsmPanel.currentPanel = new CufsmPanel(panel, extensionUri, pythonBridge, treeProvider);
     }
 
     private constructor(
         panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
-        pythonBridge: PythonBridge
+        pythonBridge: PythonBridge,
+        treeProvider?: ProjectExplorerProvider
     ) {
         this._panel = panel;
         this._extensionUri = extensionUri;
         this._pythonBridge = pythonBridge;
+        this._treeProvider = treeProvider;
         this._model = createDefaultModel();
 
         this._panel.webview.html = this._getHtmlForWebview();
@@ -66,6 +74,34 @@ export class CufsmPanel {
         );
 
         this._panel.onDidDispose(() => this._dispose());
+
+        // 초기 트리 갱신
+        setTimeout(() => this._updateTreeView(), 500);
+    }
+
+    /** 트리 클릭 → 해당 섹션으로 이동 */
+    public showSection(sectionId: string): void {
+        this._currentSection = sectionId;
+        this._postMessage('showSection', { sectionId });
+    }
+
+    /** WebView로 메시지 전송 */
+    public postMessage(command: string, data: any): void {
+        this._postMessage(command, data);
+    }
+
+    /** 트리뷰 갱신 */
+    private _updateTreeView(): void {
+        if (this._treeProvider) {
+            this._treeProvider.updateProjectData({
+                name: 'Current Section',
+                nnodes: this._model.node?.length || 0,
+                nelems: this._model.elem?.length || 0,
+                BC: this._model.BC || 'S-S',
+                nlengths: this._model.lengths?.length || 0,
+                hasResults: false,
+            });
+        }
     }
 
     /** WebView에서 수신한 메시지 처리 */
@@ -86,6 +122,7 @@ export class CufsmPanel {
 
             case 'updateModel':
                 this._model = { ...this._model, ...message.data };
+                this._updateTreeView();
                 break;
 
             case 'generateTemplate':
@@ -112,6 +149,17 @@ export class CufsmPanel {
         try {
             const result = await this._pythonBridge.analyze(model);
             this._postMessage('analysisComplete', result);
+            // 트리뷰에 결과 표시
+            if (this._treeProvider) {
+                this._treeProvider.updateProjectData({
+                    name: 'Current Section',
+                    nnodes: model.node?.length || 0,
+                    nelems: model.elem?.length || 0,
+                    BC: model.BC || 'S-S',
+                    nlengths: model.lengths?.length || 0,
+                    hasResults: true,
+                });
+            }
         } catch (err: any) {
             this._postMessage('analysisError', { error: err.message });
             vscode.window.showErrorMessage(`CUFSM Analysis Error: ${err.message}`);
@@ -363,7 +411,7 @@ export class CufsmPanel {
     }
 
     private _dispose(): void {
-        CufsmPanel._instance = undefined;
+        CufsmPanel.currentPanel = undefined;
         this._disposed = true;
         this._panel.dispose();
     }

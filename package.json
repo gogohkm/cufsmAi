@@ -14,23 +14,65 @@
         "commands": [
             {
                 "command": "cufsm.openDesigner",
-                "title": "CUFSM: Open Section Designer"
+                "title": "CUFSM: Open Section Designer",
+                "icon": "$(tools)"
             },
             {
                 "command": "cufsm.newProject",
                 "title": "CUFSM: New Project"
             },
             {
-                "command": "cufsm.openProject",
-                "title": "CUFSM: Open Project"
+                "command": "cufsm.navigateSection",
+                "title": "CUFSM: Navigate Section"
+            },
+            {
+                "command": "cufsm.refreshProjects",
+                "title": "CUFSM: Refresh Projects",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "cufsm.runAnalysis",
+                "title": "Run Analysis",
+                "icon": "$(play)"
             }
         ],
+        "menus": {
+            "view/title": [
+                {
+                    "command": "cufsm.openDesigner",
+                    "when": "view == cufsm.projectExplorer",
+                    "group": "navigation"
+                },
+                {
+                    "command": "cufsm.refreshProjects",
+                    "when": "view == cufsm.projectExplorer",
+                    "group": "navigation"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "cufsm.runAnalysis",
+                    "when": "view == cufsm.projectExplorer && viewItem == section-analysis",
+                    "group": "navigation"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "cufsm.navigateSection",
+                    "when": "false"
+                },
+                {
+                    "command": "cufsm.runAnalysis",
+                    "when": "false"
+                }
+            ]
+        },
         "viewsContainers": {
             "activitybar": [
                 {
                     "id": "cufsm-explorer",
                     "title": "CUFSM",
-                    "icon": "media/icon.svg"
+                    "icon": "media/cufsm-icon.svg"
                 }
             ]
         },
@@ -38,7 +80,7 @@
             "cufsm-explorer": [
                 {
                     "id": "cufsm.projectExplorer",
-                    "name": "Projects"
+                    "name": "Section Designer"
                 }
             ]
         }

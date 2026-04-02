@@ -11,13 +11,13 @@ import sys
 import os
 import time
 
-# 프로젝트 루트를 경로에 추가
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+# python/ 디렉토리를 경로에 추가
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 import numpy as np
-from python.engine.fsm_solver import stripmain
-from python.engine.properties import grosprop
-from python.models.data import GBTConfig
+from engine.fsm_solver import stripmain
+from engine.properties import grosprop
+from models.data import GBTConfig
 
 
 def create_default_model():

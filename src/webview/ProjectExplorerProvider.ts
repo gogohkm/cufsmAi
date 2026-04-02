@@ -1,116 +1,198 @@
 /**
  * CUFSM 프로젝트 탐색기 — VS Code 사이드바 트리뷰
  *
- * 참조: 컨버전전략.md §8 package.json — viewsContainers, views
- *
- * .cufsm 프로젝트 파일을 워크스페이스에서 검색하여 트리 구조로 표시한다.
+ * epvscode ProjectExplorerProvider 패턴 따름:
+ * - CufsmTreeItem: sectionId를 가진 트리 항목
+ * - 트리 클릭 → CufsmPanel.showSection(sectionId) 호출
+ * - 프로젝트 데이터 변경 시 트리 자동 갱신
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
 
-export class ProjectExplorerProvider implements vscode.TreeDataProvider<ProjectItem> {
-    private _onDidChangeTreeData = new vscode.EventEmitter<ProjectItem | undefined>();
-    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
-
-    private _projects: ProjectItem[] = [];
-
-    constructor() {
-        this.refresh();
-    }
-
-    refresh(): void {
-        this._findProjects().then(projects => {
-            this._projects = projects;
-            this._onDidChangeTreeData.fire(undefined);
-        });
-    }
-
-    getTreeItem(element: ProjectItem): vscode.TreeItem {
-        return element;
-    }
-
-    getChildren(element?: ProjectItem): ProjectItem[] {
-        if (!element) {
-            return this._projects;
-        }
-        return element.children || [];
-    }
-
-    private async _findProjects(): Promise<ProjectItem[]> {
-        const items: ProjectItem[] = [];
-
-        if (!vscode.workspace.workspaceFolders) {
-            return items;
-        }
-
-        for (const folder of vscode.workspace.workspaceFolders) {
-            const pattern = new vscode.RelativePattern(folder, '**/*.cufsm');
-            const files = await vscode.workspace.findFiles(pattern, '**/node_modules/**', 50);
-
-            for (const file of files) {
-                const name = path.basename(file.fsPath, '.cufsm');
-                const item = new ProjectItem(
-                    name,
-                    file,
-                    vscode.TreeItemCollapsibleState.Collapsed,
-                    [
-                        new ProjectItem('Section', file, vscode.TreeItemCollapsibleState.None, [], 'section'),
-                        new ProjectItem('Analysis', file, vscode.TreeItemCollapsibleState.None, [], 'analysis'),
-                        new ProjectItem('Results', file, vscode.TreeItemCollapsibleState.None, [], 'results'),
-                    ],
-                    'project'
-                );
-                items.push(item);
-            }
-        }
-
-        if (items.length === 0) {
-            items.push(new ProjectItem(
-                'No .cufsm projects found',
-                undefined,
-                vscode.TreeItemCollapsibleState.None,
-                [],
-                'empty'
-            ));
-        }
-
-        return items;
-    }
-}
-
-class ProjectItem extends vscode.TreeItem {
-    children: ProjectItem[];
-    fileUri?: vscode.Uri;
+export class CufsmTreeItem extends vscode.TreeItem {
+    public sectionId?: string;
 
     constructor(
         label: string,
-        fileUri: vscode.Uri | undefined,
         collapsibleState: vscode.TreeItemCollapsibleState,
-        children: ProjectItem[] = [],
-        contextValue: string = ''
+        options?: {
+            sectionId?: string;
+            description?: string;
+            tooltip?: string;
+            iconPath?: vscode.ThemeIcon;
+            contextValue?: string;
+        }
     ) {
         super(label, collapsibleState);
-        this.children = children;
-        this.fileUri = fileUri;
-        this.contextValue = contextValue;
-
-        if (contextValue === 'project') {
-            this.iconPath = new vscode.ThemeIcon('file-code');
-            this.tooltip = fileUri?.fsPath;
-            this.command = {
-                command: 'cufsm.openProject',
-                title: 'Open Project',
-                arguments: [fileUri],
-            };
-        } else if (contextValue === 'section') {
-            this.iconPath = new vscode.ThemeIcon('symbol-structure');
-        } else if (contextValue === 'analysis') {
-            this.iconPath = new vscode.ThemeIcon('beaker');
-        } else if (contextValue === 'results') {
-            this.iconPath = new vscode.ThemeIcon('graph');
-        } else if (contextValue === 'empty') {
-            this.iconPath = new vscode.ThemeIcon('info');
+        if (options) {
+            this.sectionId = options.sectionId;
+            this.description = options.description;
+            this.tooltip = options.tooltip;
+            this.iconPath = options.iconPath;
+            this.contextValue = options.contextValue;
         }
+    }
+}
+
+export interface ProjectSummary {
+    name: string;
+    nnodes: number;
+    nelems: number;
+    BC: string;
+    nlengths: number;
+    hasResults: boolean;
+}
+
+export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTreeItem> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<CufsmTreeItem | undefined | null>();
+    readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+    private _summary: ProjectSummary | null = null;
+
+    updateProjectData(summary: ProjectSummary | null): void {
+        this._summary = summary;
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    refresh(): void {
+        this._onDidChangeTreeData.fire(undefined);
+    }
+
+    getTreeItem(element: CufsmTreeItem): vscode.TreeItem {
+        return element;
+    }
+
+    getChildren(element?: CufsmTreeItem): CufsmTreeItem[] {
+        if (!element) {
+            return this._getRootItems();
+        }
+        return this._getChildItems(element);
+    }
+
+    private _getRootItems(): CufsmTreeItem[] {
+        const items: CufsmTreeItem[] = [];
+
+        if (!this._summary) {
+            items.push(new CufsmTreeItem(
+                'No section loaded',
+                vscode.TreeItemCollapsibleState.None,
+                {
+                    description: 'Click to open designer',
+                    iconPath: new vscode.ThemeIcon('info'),
+                    sectionId: 'open-designer',
+                }
+            ));
+            return items;
+        }
+
+        // 전처리 섹션
+        items.push(new CufsmTreeItem(
+            'Preprocessor',
+            vscode.TreeItemCollapsibleState.Expanded,
+            {
+                sectionId: 'preprocessor',
+                iconPath: new vscode.ThemeIcon('symbol-structure'),
+                contextValue: 'section-preprocessor',
+            }
+        ));
+
+        // 해석 섹션
+        items.push(new CufsmTreeItem(
+            'Analysis',
+            vscode.TreeItemCollapsibleState.Expanded,
+            {
+                sectionId: 'analysis',
+                iconPath: new vscode.ThemeIcon('beaker'),
+                contextValue: 'section-analysis',
+            }
+        ));
+
+        // 후처리 섹션
+        items.push(new CufsmTreeItem(
+            'Postprocessor',
+            vscode.TreeItemCollapsibleState.Expanded,
+            {
+                sectionId: 'postprocessor',
+                description: this._summary.hasResults ? 'Results available' : '',
+                iconPath: new vscode.ThemeIcon('graph'),
+                contextValue: 'section-postprocessor',
+            }
+        ));
+
+        return items;
+    }
+
+    private _getChildItems(parent: CufsmTreeItem): CufsmTreeItem[] {
+        const items: CufsmTreeItem[] = [];
+        const s = this._summary;
+
+        switch (parent.sectionId) {
+            case 'preprocessor':
+                items.push(new CufsmTreeItem('Section Template', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'template',
+                    iconPath: new vscode.ThemeIcon('symbol-class'),
+                    description: s ? `${s.nnodes} nodes, ${s.nelems} elems` : '',
+                }));
+                items.push(new CufsmTreeItem('Material Properties', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'material',
+                    iconPath: new vscode.ThemeIcon('symbol-property'),
+                }));
+                items.push(new CufsmTreeItem('Node / Element Editor', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'node-elem',
+                    iconPath: new vscode.ThemeIcon('table'),
+                }));
+                items.push(new CufsmTreeItem('Section Preview', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'section-preview',
+                    iconPath: new vscode.ThemeIcon('eye'),
+                }));
+                break;
+
+            case 'analysis':
+                items.push(new CufsmTreeItem('Boundary Condition', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'boundary-condition',
+                    iconPath: new vscode.ThemeIcon('lock'),
+                    description: s?.BC || 'S-S',
+                }));
+                items.push(new CufsmTreeItem('Lengths', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'lengths',
+                    iconPath: new vscode.ThemeIcon('symbol-ruler'),
+                    description: s ? `${s.nlengths} points` : '',
+                }));
+                items.push(new CufsmTreeItem('cFSM Settings', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'cfsm-settings',
+                    iconPath: new vscode.ThemeIcon('settings-gear'),
+                }));
+                items.push(new CufsmTreeItem('Run Analysis', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'run-analysis',
+                    iconPath: new vscode.ThemeIcon('play'),
+                    contextValue: 'section-analysis',
+                }));
+                break;
+
+            case 'postprocessor':
+                items.push(new CufsmTreeItem('Buckling Curve', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'buckling-curve',
+                    iconPath: new vscode.ThemeIcon('graph-line'),
+                }));
+                items.push(new CufsmTreeItem('Mode Shape 2D', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'mode-shape-2d',
+                    iconPath: new vscode.ThemeIcon('symbol-misc'),
+                }));
+                items.push(new CufsmTreeItem('Mode Shape 3D', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'mode-shape-3d',
+                    iconPath: new vscode.ThemeIcon('preview'),
+                }));
+                items.push(new CufsmTreeItem('Mode Classification', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'classification',
+                    iconPath: new vscode.ThemeIcon('list-tree'),
+                }));
+                items.push(new CufsmTreeItem('Plastic Surface', vscode.TreeItemCollapsibleState.None, {
+                    sectionId: 'plastic-surface',
+                    iconPath: new vscode.ThemeIcon('circle-outline'),
+                }));
+                break;
+        }
+
+        return items;
     }
 }

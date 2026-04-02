@@ -57,6 +57,11 @@
                     renderNodeTable();
                 }
                 break;
+            case 'showSection':
+                if (msg.data && msg.data.sectionId) {
+                    handleShowSection(msg.data.sectionId);
+                }
+                break;
             case 'classifyResult':
                 renderClassifyCurve(msg.data);
                 break;
@@ -191,6 +196,40 @@
             Ixx = ${fmt(props.Ixx)}  |  Izz = ${fmt(props.Izz)}  |  Ixz = ${fmt(props.Ixz)}<br>
             θp = ${fmt(props.thetap)}°  |  I11 = ${fmt(props.I11)}  |  I22 = ${fmt(props.I22)}
         `;
+    }
+
+    // ============================================================
+    // 트리 네비게이션 — showSection
+    // ============================================================
+    function handleShowSection(sectionId) {
+        // sectionId → 탭 매핑
+        const tabMap = {
+            'preprocessor': 'preprocessor',
+            'template': 'preprocessor',
+            'material': 'preprocessor',
+            'node-elem': 'preprocessor',
+            'section-preview': 'preprocessor',
+            'analysis': 'analysis',
+            'boundary-condition': 'analysis',
+            'lengths': 'analysis',
+            'cfsm-settings': 'analysis',
+            'run-analysis': 'analysis',
+            'postprocessor': 'postprocessor',
+            'buckling-curve': 'postprocessor',
+            'mode-shape-2d': 'postprocessor',
+            'mode-shape-3d': 'postprocessor',
+            'classification': 'postprocessor',
+            'plastic-surface': 'postprocessor',
+        };
+
+        const tabId = tabMap[sectionId] || 'preprocessor';
+        switchTab(tabId);
+
+        // run-analysis 클릭 시 자동 실행
+        if (sectionId === 'run-analysis') {
+            const btn = document.getElementById('btn-run-analysis');
+            if (btn) { btn.click(); }
+        }
     }
 
     // ============================================================
