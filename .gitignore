@@ -28,3 +28,17 @@ codegen/
 
 # Octave session info:
 octave-workspace
+
+.venv/
+
+# Node.js
+node_modules/
+package-lock.json
+
+# TypeScript output
+out/
+
+# Python
+__pycache__/
+*.pyc
+

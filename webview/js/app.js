@@ -1,0 +1,509 @@
+/**
+ * CUFSM WebView 앱 — 메인 진입점
+ *
+ * 참조: 컨버전전략.md §3 데이터 흐름
+ * Extension Host ↔ WebView postMessage 통신
+ */
+
+// @ts-check
+(function () {
+    // VS Code API
+    // @ts-ignore
+    const vscode = acquireVsCodeApi();
+
+    /** 현재 모델 */
+    let model = null;
+    /** 해석 결과 */
+    let analysisResult = null;
+
+    // ============================================================
+    // 메시지 핸들러
+    // ============================================================
+    window.addEventListener('message', event => {
+        const msg = event.data;
+        switch (msg.command) {
+            case 'modelLoaded':
+                model = msg.data;
+                renderPreprocessor();
+                break;
+            case 'analysisStarted':
+                setStatus('Running analysis...', 'running');
+                break;
+            case 'analysisComplete':
+                analysisResult = msg.data;
+                setStatus(`Analysis complete — ${msg.data.n_lengths} lengths`, 'success');
+                renderBucklingCurve();
+                populatePostSelects();
+                renderModeShape2D();
+                switchTab('postprocessor');
+                break;
+            case 'analysisError':
+                setStatus(`Error: ${msg.data.error}`, 'error');
+                break;
+            case 'propertiesResult':
+                renderProperties(msg.data);
+                break;
+        }
+    });
+
+    // ============================================================
+    // 탭 전환
+    // ============================================================
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            switchTab(btn.getAttribute('data-tab'));
+        });
+    });
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+        const panel = document.getElementById(`tab-${tabId}`);
+        if (btn) { btn.classList.add('active'); }
+        if (panel) { panel.classList.add('active'); }
+    }
+
+    // ============================================================
+    // 전처리 렌더링
+    // ============================================================
+    function renderPreprocessor() {
+        if (!model) { return; }
+        renderNodeTable();
+        renderElemTable();
+        renderSectionSVG();
+
+        // 재료 입력 초기값
+        if (model.prop && model.prop.length > 0) {
+            const p = model.prop[0];
+            setValue('input-E', p[1]);
+            setValue('input-v', p[3]);
+            setValue('input-G', p[5]);
+        }
+    }
+
+    function renderNodeTable() {
+        const tbody = document.querySelector('#node-table tbody');
+        if (!tbody || !model) { return; }
+        tbody.innerHTML = '';
+        model.node.forEach((n, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${i + 1}</td>
+                <td><input type="number" value="${n[1]}" step="0.1" data-row="${i}" data-col="1"></td>
+                <td><input type="number" value="${n[2]}" step="0.1" data-row="${i}" data-col="2"></td>
+                <td><input type="number" value="${n[7]}" step="1" data-row="${i}" data-col="7"></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function renderElemTable() {
+        const tbody = document.querySelector('#elem-table tbody');
+        if (!tbody || !model) { return; }
+        tbody.innerHTML = '';
+        model.elem.forEach((e, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${i + 1}</td>
+                <td>${e[1]}</td>
+                <td>${e[2]}</td>
+                <td><input type="number" value="${e[3]}" step="0.01" data-row="${i}" data-col="3"></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    // ============================================================
+    // 단면 SVG 미리보기
+    // ============================================================
+    function renderSectionSVG() {
+        const svg = document.getElementById('section-svg');
+        if (!svg || !model || !model.node || model.node.length === 0) { return; }
+
+        // 범위 계산
+        let xMin = Infinity, xMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+        model.node.forEach(n => {
+            xMin = Math.min(xMin, n[1]); xMax = Math.max(xMax, n[1]);
+            zMin = Math.min(zMin, n[2]); zMax = Math.max(zMax, n[2]);
+        });
+        const pad = Math.max(xMax - xMin, zMax - zMin) * 0.15 || 1;
+        svg.setAttribute('viewBox',
+            `${xMin - pad} ${zMin - pad} ${xMax - xMin + 2 * pad} ${zMax - zMin + 2 * pad}`
+        );
+
+        let content = '';
+
+        // 요소 (선분)
+        if (model.elem) {
+            model.elem.forEach(e => {
+                const ni = e[1] - 1; // 1-based → 0-based
+                const nj = e[2] - 1;
+                if (ni >= 0 && ni < model.node.length && nj >= 0 && nj < model.node.length) {
+                    const n1 = model.node[ni];
+                    const n2 = model.node[nj];
+                    content += `<line x1="${n1[1]}" y1="${n1[2]}" x2="${n2[1]}" y2="${n2[2]}"
+                        stroke="var(--vscode-charts-blue, #4fc3f7)" stroke-width="0.15"
+                        stroke-linecap="round"/>`;
+                }
+            });
+        }
+
+        // 절점 (원)
+        model.node.forEach((n, i) => {
+            content += `<circle cx="${n[1]}" cy="${n[2]}" r="0.12"
+                fill="var(--vscode-charts-orange, #ff9800)"/>`;
+            content += `<text x="${n[1] + 0.2}" y="${n[2] - 0.2}"
+                font-size="0.4" fill="var(--vscode-descriptionForeground)">${i + 1}</text>`;
+        });
+
+        svg.innerHTML = content;
+    }
+
+    // ============================================================
+    // 단면 성질 표시
+    // ============================================================
+    function renderProperties(props) {
+        const el = document.getElementById('section-props');
+        if (!el) { return; }
+        el.innerHTML = `
+            A = ${fmt(props.A)}  |  xcg = ${fmt(props.xcg)}  |  zcg = ${fmt(props.zcg)}<br>
+            Ixx = ${fmt(props.Ixx)}  |  Izz = ${fmt(props.Izz)}  |  Ixz = ${fmt(props.Ixz)}<br>
+            θp = ${fmt(props.thetap)}°  |  I11 = ${fmt(props.I11)}  |  I22 = ${fmt(props.I22)}
+        `;
+    }
+
+    // ============================================================
+    // 해석 실행
+    // ============================================================
+    const btnRun = document.getElementById('btn-run-analysis');
+    if (btnRun) {
+        btnRun.addEventListener('click', () => {
+            if (!model) { return; }
+
+            const lenMin = getNum('input-len-min', 1);
+            const lenMax = getNum('input-len-max', 1000);
+            const lenN = getNum('input-len-n', 50);
+            const neigs = getNum('input-neigs', 20);
+            const BC = /** @type {HTMLSelectElement} */ (document.getElementById('select-bc'))?.value || 'S-S';
+
+            // logspace 생성
+            const lengths = logspace(Math.log10(lenMin), Math.log10(lenMax), lenN);
+            const m_all = lengths.map(() => [1]);
+
+            const E = getNum('input-E', 29500);
+            const v = getNum('input-v', 0.3);
+            const G = getNum('input-G', 11346);
+
+            // 모델 업데이트
+            model.prop = [[100, E, E, v, v, G]];
+            model.lengths = lengths;
+            model.m_all = m_all;
+            model.BC = BC;
+            model.neigs = neigs;
+
+            vscode.postMessage({ command: 'runAnalysis', data: model });
+        });
+    }
+
+    // ============================================================
+    // 좌굴 곡선 (Canvas)
+    // ============================================================
+    function renderBucklingCurve() {
+        const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('buckling-curve-canvas'));
+        if (!canvas || !analysisResult || !analysisResult.curve) { return; }
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { return; }
+        const w = canvas.width;
+        const h = canvas.height;
+        const pad = { top: 30, right: 30, bottom: 50, left: 70 };
+
+        // 데이터 추출: [length, lf1]
+        const points = [];
+        analysisResult.curve.forEach(row => {
+            if (row && row.length >= 2 && row[1] > 0) {
+                points.push([row[0], row[1]]);
+            }
+        });
+        if (points.length === 0) { return; }
+
+        const xMin = Math.log10(Math.min(...points.map(p => p[0])));
+        const xMax = Math.log10(Math.max(...points.map(p => p[0])));
+        const yMax = Math.max(...points.map(p => p[1])) * 1.15;
+        const yMin = 0;
+
+        const toX = (val) => pad.left + (Math.log10(val) - xMin) / (xMax - xMin) * (w - pad.left - pad.right);
+        const toY = (val) => h - pad.bottom - ((val - yMin) / (yMax - yMin)) * (h - pad.top - pad.bottom);
+
+        // 클리어
+        ctx.clearRect(0, 0, w, h);
+
+        // 배경
+        const style = getComputedStyle(document.body);
+        const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
+        const gridColor = style.getPropertyValue('--vscode-panel-border').trim() || '#333';
+
+        // 그리드
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 0.5;
+        for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
+            const x = toX(Math.pow(10, exp));
+            ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, h - pad.bottom); ctx.stroke();
+        }
+
+        // 다중 모드 곡선 (2nd, 3rd 모드 — 반투명)
+        const modeColors = ['#4fc3f7', '#81c784', '#ffb74d', '#e57373', '#ba68c8'];
+        const maxModes = Math.min(analysisResult.curve[0] ? analysisResult.curve[0].length - 1 : 1, 5);
+
+        for (let modeIdx = maxModes - 1; modeIdx >= 0; modeIdx--) {
+            const modePoints = [];
+            analysisResult.curve.forEach(row => {
+                if (row && row.length > modeIdx + 1 && row[modeIdx + 1] > 0) {
+                    modePoints.push([row[0], row[modeIdx + 1]]);
+                }
+            });
+            if (modePoints.length < 2) { continue; }
+
+            ctx.beginPath();
+            ctx.strokeStyle = modeColors[modeIdx % modeColors.length];
+            ctx.lineWidth = modeIdx === 0 ? 2 : 1;
+            ctx.globalAlpha = modeIdx === 0 ? 1.0 : 0.4;
+            modePoints.forEach((pt, i) => {
+                const px = toX(pt[0]);
+                const py = toY(pt[1]);
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            });
+            ctx.stroke();
+        }
+        ctx.globalAlpha = 1.0;
+
+        // 최소값 마커
+        let minPt = points[0];
+        points.forEach(p => { if (p[1] < minPt[1]) { minPt = p; } });
+        ctx.beginPath();
+        ctx.arc(toX(minPt[0]), toY(minPt[1]), 5, 0, 2 * Math.PI);
+        ctx.fillStyle = '#ff5722';
+        ctx.fill();
+
+        // 축 라벨
+        ctx.fillStyle = fg;
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Half-wavelength', w / 2, h - 8);
+        ctx.save();
+        ctx.translate(14, h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('Load Factor', 0, 0);
+        ctx.restore();
+
+        // 최소값 텍스트
+        ctx.fillStyle = '#ff5722';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`min = ${minPt[1].toFixed(4)} @ L=${minPt[0].toFixed(1)}`,
+            toX(minPt[0]) + 10, toY(minPt[1]) - 5);
+
+        // X축 눈금
+        ctx.fillStyle = fg;
+        ctx.textAlign = 'center';
+        for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
+            ctx.fillText(Math.pow(10, exp).toString(), toX(Math.pow(10, exp)), h - pad.bottom + 16);
+        }
+    }
+
+    // ============================================================
+    // 2D 모드형상 (Canvas)
+    // ============================================================
+    function renderModeShape2D() {
+        const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('mode-shape-canvas'));
+        if (!canvas || !analysisResult || !analysisResult.shapes || !model) { return; }
+
+        const selLen = document.getElementById('select-length');
+        const selMode = document.getElementById('select-mode');
+        if (!selLen || !selMode) { return; }
+
+        const lengthIdx = parseInt(selLen.value) || 0;
+        const modeIdx = parseInt(selMode.value) || 0;
+        const shapes = analysisResult.shapes;
+
+        if (!shapes[lengthIdx]) { return; }
+        const shapeMatrix = shapes[lengthIdx];
+        const nnodes = model.node.length;
+
+        // 모드형상 벡터 추출 — DOF: [u1,v1,...un,vn, w1,θ1,...wn,θn]
+        const skip = 2 * nnodes;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { return; }
+        const w = canvas.width;
+        const h = canvas.height;
+        const pad = 40;
+
+        // 원래 절점 좌표
+        const xs = model.node.map(n => n[1]);
+        const zs = model.node.map(n => n[2]);
+        let xMin = Math.min(...xs), xMax = Math.max(...xs);
+        let zMin = Math.min(...zs), zMax = Math.max(...zs);
+        const range = Math.max(xMax - xMin, zMax - zMin) || 1;
+        const scale = (Math.min(w, h) - 2 * pad) / range;
+
+        const toX = (v) => pad + (v - xMin) * scale;
+        const toY = (v) => h - pad - (v - zMin) * scale;
+
+        ctx.clearRect(0, 0, w, h);
+        const style = getComputedStyle(document.body);
+        const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
+
+        // 미변형 단면 (회색)
+        ctx.strokeStyle = fg;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.3;
+        if (model.elem) {
+            model.elem.forEach(e => {
+                const ni = e[1] - 1, nj = e[2] - 1;
+                if (ni >= 0 && ni < nnodes && nj >= 0 && nj < nnodes) {
+                    ctx.beginPath();
+                    ctx.moveTo(toX(xs[ni]), toY(zs[ni]));
+                    ctx.lineTo(toX(xs[nj]), toY(zs[nj]));
+                    ctx.stroke();
+                }
+            });
+        }
+        ctx.globalAlpha = 1.0;
+
+        // 변형 단면 (파란색)
+        // shapeMatrix가 1D 배열이면 modeIdx 번째 모드를 추출
+        let modeVec;
+        if (Array.isArray(shapeMatrix[0])) {
+            // 2D: [ndof][nmodes]
+            modeVec = shapeMatrix.map(row => row[modeIdx] || 0);
+        } else {
+            modeVec = shapeMatrix;
+        }
+
+        if (!modeVec || modeVec.length < 4 * nnodes) {
+            ctx.fillStyle = fg;
+            ctx.font = '12px sans-serif';
+            ctx.fillText('No mode shape data available', 20, 30);
+            return;
+        }
+
+        // 변위 추출: w(면외) 방향을 단면 법선 방향으로 표시
+        // DOF 배치: [u1,v1,...un,vn | w1,θ1,...wn,θn]
+        const dispScale = range * 0.15; // 변형 스케일
+
+        const dxs = [];
+        const dzs = [];
+        for (let n = 0; n < nnodes; n++) {
+            // 멤브레인: u(면내 축방향) — 작으므로 무시 가능
+            // 휨: w(면외) — 단면 변형의 주요 성분
+            const w_disp = modeVec[skip + 2 * n] || 0;  // w
+            // 면외 변위를 표시하려면 요소 법선 방향 필요
+            // 간단히: x방향=u 변위, z방향=w 변위로 근사
+            const u_disp = modeVec[2 * n] || 0;
+            dxs.push(u_disp * dispScale);
+            dzs.push(w_disp * dispScale);
+        }
+
+        ctx.strokeStyle = '#4fc3f7';
+        ctx.lineWidth = 2;
+        if (model.elem) {
+            model.elem.forEach(e => {
+                const ni = e[1] - 1, nj = e[2] - 1;
+                if (ni >= 0 && ni < nnodes && nj >= 0 && nj < nnodes) {
+                    ctx.beginPath();
+                    ctx.moveTo(toX(xs[ni] + dxs[ni]), toY(zs[ni] + dzs[ni]));
+                    ctx.lineTo(toX(xs[nj] + dxs[nj]), toY(zs[nj] + dzs[nj]));
+                    ctx.stroke();
+                }
+            });
+        }
+
+        // 변형 절점
+        ctx.fillStyle = '#ff9800';
+        for (let n = 0; n < nnodes; n++) {
+            ctx.beginPath();
+            ctx.arc(toX(xs[n] + dxs[n]), toY(zs[n] + dzs[n]), 3, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+
+        // 제목
+        ctx.fillStyle = fg;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        const curveRow = analysisResult.curve[lengthIdx];
+        const lf = curveRow ? (curveRow[modeIdx + 1] || 0).toFixed(4) : '?';
+        ctx.fillText(`Mode ${modeIdx + 1}  |  LF = ${lf}`, 10, 16);
+    }
+
+    /** 후처리 탭의 길이/모드 셀렉트 갱신 */
+    function populatePostSelects() {
+        if (!analysisResult || !analysisResult.curve) { return; }
+        const selLen = document.getElementById('select-length');
+        const selMode = document.getElementById('select-mode');
+        if (!selLen || !selMode) { return; }
+
+        selLen.innerHTML = '';
+        analysisResult.curve.forEach((row, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = row ? row[0].toFixed(1) : i;
+            selLen.appendChild(opt);
+        });
+
+        // 첫 번째 길이의 모드 수
+        const firstRow = analysisResult.curve[0];
+        const nModes = firstRow ? firstRow.length - 1 : 1;
+        selMode.innerHTML = '';
+        for (let m = 0; m < Math.min(nModes, 10); m++) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = `Mode ${m + 1}`;
+            selMode.appendChild(opt);
+        }
+
+        selLen.addEventListener('change', renderModeShape2D);
+        selMode.addEventListener('change', renderModeShape2D);
+    }
+
+    // ============================================================
+    // 유틸리티
+    // ============================================================
+    function setStatus(text, cls) {
+        const el = document.getElementById('analysis-status');
+        if (el) {
+            el.textContent = text;
+            el.className = 'status-bar ' + (cls || '');
+        }
+    }
+
+    function setValue(id, val) {
+        const el = document.getElementById(id);
+        if (el) { el.value = val; }
+    }
+
+    function getNum(id, fallback) {
+        const el = document.getElementById(id);
+        const v = el ? parseFloat(el.value) : NaN;
+        return isNaN(v) ? fallback : v;
+    }
+
+    function fmt(v) {
+        if (typeof v !== 'number') { return '-'; }
+        return Math.abs(v) < 0.01 ? v.toExponential(3) : v.toFixed(4);
+    }
+
+    function logspace(a, b, n) {
+        const arr = [];
+        for (let i = 0; i < n; i++) {
+            arr.push(Math.pow(10, a + (b - a) * i / (n - 1)));
+        }
+        return arr;
+    }
+
+    // ============================================================
+    // 초기화
+    // ============================================================
+    vscode.postMessage({ command: 'webviewReady' });
+
+})();
