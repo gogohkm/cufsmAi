@@ -99,6 +99,10 @@ export class CufsmPanel {
             case 'classifyModes':
                 await this._classifyModes(message.data);
                 break;
+
+            case 'runPlastic':
+                await this._runPlastic(message.data);
+                break;
         }
     }
 
@@ -121,6 +125,16 @@ export class CufsmPanel {
             this._postMessage('propertiesResult', props);
         } catch (err: any) {
             this._postMessage('propertiesError', { error: err.message });
+        }
+    }
+
+    /** 소성곡면 생성 */
+    private async _runPlastic(data: { node: number[][]; elem: number[][]; fy: number }): Promise<void> {
+        try {
+            const result = await this._pythonBridge.call('plastic', data);
+            this._postMessage('plasticResult', result);
+        } catch (err: any) {
+            this._postMessage('plasticError', { error: err.message });
         }
     }
 
@@ -312,6 +326,12 @@ export class CufsmPanel {
                     <canvas id="buckling-curve-canvas" width="700" height="400"></canvas>
                     <h3>Mode Classification (G/D/L/O)</h3>
                     <canvas id="classify-curve-canvas" width="700" height="200"></canvas>
+                    <h3>Plastic Interaction Surface (P-Mxx-Mzz)</h3>
+                    <div class="input-row" style="margin-bottom:6px">
+                        <label>fy</label><input type="number" id="input-fy" value="50" step="5" style="width:60px">
+                        <button id="btn-run-plastic" class="btn-small">Generate Surface</button>
+                    </div>
+                    <canvas id="plastic-surface-canvas" width="500" height="400"></canvas>
                 </div>
                 <div class="panel-right">
                     <h3>Mode Shape</h3>

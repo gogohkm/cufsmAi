@@ -60,6 +60,9 @@
             case 'classifyResult':
                 renderClassifyCurve(msg.data);
                 break;
+            case 'plasticResult':
+                renderPlasticSurface(msg.data);
+                break;
         }
     });
 
@@ -188,6 +191,81 @@
             Ixx = ${fmt(props.Ixx)}  |  Izz = ${fmt(props.Izz)}  |  Ixz = ${fmt(props.Ixz)}<br>
             θp = ${fmt(props.thetap)}°  |  I11 = ${fmt(props.I11)}  |  I22 = ${fmt(props.I22)}
         `;
+    }
+
+    // ============================================================
+    // 소성곡면 생성
+    // ============================================================
+    const btnPlastic = document.getElementById('btn-run-plastic');
+    if (btnPlastic) {
+        btnPlastic.addEventListener('click', () => {
+            if (!model || !model.node || model.node.length === 0) { return; }
+            const fy = getNum('input-fy', 50);
+            vscode.postMessage({
+                command: 'runPlastic',
+                data: { node: model.node, elem: model.elem, fy }
+            });
+        });
+    }
+
+    function renderPlasticSurface(data) {
+        // Babylon.js 3D 우선 시도
+        if (window.CufsmViewer3D && window.CufsmViewer3D.renderPlastic) {
+            try {
+                window.CufsmViewer3D.renderPlastic(data);
+                return;
+            } catch (e) {
+                console.warn('Babylon.js plastic surface failed:', e);
+            }
+        }
+
+        // Canvas 2D 폴백 — P vs Mxx 2D 곡선
+        const canvas = document.getElementById('plastic-surface-canvas');
+        if (!canvas || !data || !data.P) { return; }
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { return; }
+        const w = canvas.width, h = canvas.height;
+        const pad = { top: 30, right: 30, bottom: 40, left: 60 };
+
+        ctx.clearRect(0, 0, w, h);
+        const style = getComputedStyle(document.body);
+        const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
+
+        const P = data.P, Mxx = data.Mxx;
+        const pMax = Math.max(...P.map(Math.abs)) || 1;
+        const mMax = Math.max(...Mxx.map(Math.abs)) || 1;
+
+        const toX = (m) => pad.left + (m / mMax + 1) / 2 * (w - pad.left - pad.right);
+        const toY = (p) => h - pad.bottom - (p / pMax + 1) / 2 * (h - pad.top - pad.bottom);
+
+        ctx.fillStyle = 'rgba(79,195,247,0.15)';
+        ctx.beginPath();
+        for (let i = 0; i < P.length; i++) {
+            const x = toX(Mxx[i]), y = toY(P[i]);
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = '#4fc3f7';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i < P.length; i++) {
+            const x = toX(Mxx[i]), y = toY(P[i]);
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // 축 라벨
+        ctx.fillStyle = fg;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Mxx', w / 2, h - 5);
+        ctx.save();
+        ctx.translate(12, h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('P', 0, 0);
+        ctx.restore();
     }
 
     // ============================================================
