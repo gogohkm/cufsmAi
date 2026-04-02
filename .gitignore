@@ -30,6 +30,7 @@ codegen/
 octave-workspace
 
 .venv/
+.claude/skills
 
 # Node.js
 node_modules/
