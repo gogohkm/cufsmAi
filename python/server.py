@@ -13,6 +13,8 @@ from engine.fsm_solver import stripmain
 from engine.properties import grosprop
 from engine.template import generate_section
 from engine.stress import stresgen, yieldMP
+from engine.helpers import doubler, add_corner, signature_ss, firstyield, msort
+from engine.cutwp import cutwp_prop
 from cfsm.classify import classify
 from vibration.solver import stripmain_vib
 from fcfsm.solver import stripmain_fcfsm
@@ -145,6 +147,33 @@ def handle_request(request: dict) -> dict:
             filepath = params.get('filepath', '')
             model = load_project(filepath)
             return {'id': req_id, 'result': model.to_dict()}
+
+        elif method == 'doubler':
+            node = np.array(params['node'], dtype=float)
+            elem = np.array(params['elem'], dtype=float)
+            n_out, e_out = doubler(node, elem)
+            return {'id': req_id, 'result': {'node': n_out.tolist(), 'elem': e_out.tolist()}}
+
+        elif method == 'signature_ss':
+            model = CufsmModel.from_dict(params)
+            result = signature_ss(model.prop, model.node, model.elem)
+            return {'id': req_id, 'result': {
+                'curve': [c.tolist() for c in result['curve']],
+                'lengths': result['lengths'].tolist(),
+            }}
+
+        elif method == 'firstyield':
+            node = np.array(params['node'], dtype=float)
+            elem = np.array(params['elem'], dtype=float)
+            fy = params.get('fy', 50.0)
+            result = firstyield(node, elem, fy)
+            return {'id': req_id, 'result': result}
+
+        elif method == 'cutwp':
+            node = np.array(params['node'], dtype=float)
+            elem = np.array(params['elem'], dtype=float)
+            result = cutwp_prop(node, elem)
+            return {'id': req_id, 'result': result}
 
         elif method == 'ping':
             return {'id': req_id, 'result': 'pong'}
