@@ -185,16 +185,17 @@ export class CufsmPanel {
             const result = await this._pythonBridge.analyze(model);
             this._postMessage('analysisComplete', result);
 
-            // DSM 설계값 자동 추출
+            // DSM 설계값 자동 추출 — P(축력)와 Mxx(휨) 모두
             try {
-                const dsmResult = await this._pythonBridge.call('dsm', {
-                    node: model.node,
-                    elem: model.elem,
-                    curve: result.curve,
-                    fy: 50.0,
-                    load_type: 'P',
+                const dsmP = await this._pythonBridge.call('dsm', {
+                    node: model.node, elem: model.elem,
+                    curve: result.curve, fy: 50.0, load_type: 'P',
                 });
-                this._postMessage('dsmResult', dsmResult);
+                const dsmM = await this._pythonBridge.call('dsm', {
+                    node: model.node, elem: model.elem,
+                    curve: result.curve, fy: 50.0, load_type: 'Mxx',
+                });
+                this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM });
             } catch (dsmErr: any) {
                 console.error('[CUFSM] DSM extraction failed:', dsmErr.message);
             }
