@@ -17,7 +17,7 @@ let pythonBridge: PythonBridge | undefined;
 export async function activate(context: vscode.ExtensionContext) {
     console.log('CUFSM extension activating...');
 
-    const pythonPath = getPythonPath();
+    const pythonPath = getPythonPath(context.extensionPath);
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
 
     // Step 1: 트리 프로바이더 생성
@@ -121,9 +121,32 @@ async function ensurePythonRunning(): Promise<void> {
     }
 }
 
-function getPythonPath(): string {
-    const config = vscode.workspace.getConfiguration('python');
-    const configPath = config.get<string>('defaultInterpreterPath');
-    if (configPath) { return configPath; }
-    return process.platform === 'win32' ? 'python' : 'python3';
+function getPythonPath(extensionPath: string): string {
+    const fs = require('fs');
+    const path = require('path');
+
+    // 1) Extension 디렉토리 내 .venv 확인 (최우선)
+    const venvCandidates = [
+        path.join(extensionPath, '.venv', 'Scripts', 'python.exe'),  // Windows
+        path.join(extensionPath, '.venv', 'bin', 'python'),          // Mac/Linux
+    ];
+    for (const venvPath of venvCandidates) {
+        if (fs.existsSync(venvPath)) {
+            console.log(`[CUFSM] Using project venv: ${venvPath}`);
+            return venvPath;
+        }
+    }
+
+    // 2) VS Code Python 확장 설정
+    const pyConfig = vscode.workspace.getConfiguration('python');
+    const pyPath = pyConfig.get<string>('defaultInterpreterPath');
+    if (pyPath && pyPath !== 'python') {
+        console.log(`[CUFSM] Using python.defaultInterpreterPath: ${pyPath}`);
+        return pyPath;
+    }
+
+    // 3) 기본
+    const fallback = process.platform === 'win32' ? 'python' : 'python3';
+    console.log(`[CUFSM] Using fallback: ${fallback}`);
+    return fallback;
 }

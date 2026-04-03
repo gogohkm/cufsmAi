@@ -66,21 +66,32 @@ export class PythonBridge {
                 console.error('[CUFSM Python stderr]', data.trim());
             });
 
-            // ping으로 시작 확인 (3초 대기)
+            // stderr에서 import 에러 등을 감지
+            let stderrBuffer = '';
+            this._process.stderr!.on('data', (chunk: string) => {
+                stderrBuffer += chunk;
+            });
+
+            // ping으로 시작 확인 (2초 대기)
             setTimeout(async () => {
+                if (!this._process || this._process.exitCode !== null) {
+                    const msg = `Python exited immediately. stderr: ${stderrBuffer.substring(0, 500)}`;
+                    console.error(`[CUFSM] ${msg}`);
+                    reject(new Error(msg));
+                    return;
+                }
                 try {
                     const result = await this.ping();
                     console.log(`[CUFSM] Python engine ready: ${result}`);
                     this._started = true;
                     resolve();
                 } catch (err: any) {
-                    console.error('[CUFSM] Python ping failed:', err.message);
-                    // 프로세스는 살아있을 수 있으므로 kill하지 않음
-                    // 그래도 started로 표시하여 이후 호출 시도 허용
+                    const msg = `Ping failed. stderr: ${stderrBuffer.substring(0, 500)}`;
+                    console.error(`[CUFSM] ${msg}`);
                     this._started = true;
-                    resolve();
+                    resolve(); // 에러여도 계속 시도 허용
                 }
-            }, 1000);
+            }, 2000);
         });
     }
 
