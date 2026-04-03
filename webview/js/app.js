@@ -31,7 +31,16 @@
                 break;
             case 'analysisComplete':
                 analysisResult = msg.data;
-                setStatus(`Analysis complete — ${msg.data.n_lengths} lengths`, 'success');
+                // curve 데이터 정규화: [[10, 0.05, ...]] → [10, 0.05, ...]
+                if (analysisResult && analysisResult.curve) {
+                    analysisResult.curve = analysisResult.curve.map(row => {
+                        if (Array.isArray(row) && row.length === 1 && Array.isArray(row[0])) {
+                            return row[0]; // 이중 배열 풀기
+                        }
+                        return row;
+                    });
+                }
+                setStatus(`Analysis complete — ${analysisResult.n_lengths} lengths`, 'success');
                 renderBucklingCurve();
                 populatePostSelects();
                 renderModeShape2D();
