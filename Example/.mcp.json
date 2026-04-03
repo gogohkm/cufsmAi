@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "epvscode": {
+      "command": "node",
+      "args": [
+        "c:\\Users\\USER\\.vscode\\extensions\\epvscode.epvscode-0.1.0\\out\\mcp\\server.js"
+      ]
+    }
+  }
+}
