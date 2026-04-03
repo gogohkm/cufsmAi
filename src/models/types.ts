@@ -42,6 +42,8 @@ export interface GBTConfig {
 export interface CufsmResult {
     /** 좌굴 곡선 — curve[i] = [length, lf1, lf2, ...] */
     curve: number[][];
+    /** 모드형상 */
+    shapes?: any[][];
     /** 길이 수 */
     n_lengths: number;
 }

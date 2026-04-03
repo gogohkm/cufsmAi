@@ -96,6 +96,9 @@
             case 'plasticResult':
                 renderPlasticSurface(msg.data);
                 break;
+            case 'dsmResult':
+                renderDsmResults(msg.data);
+                break;
         }
     });
 
@@ -224,6 +227,87 @@
             Ixx = ${fmt(props.Ixx)}  |  Izz = ${fmt(props.Izz)}  |  Ixz = ${fmt(props.Ixz)}<br>
             θp = ${fmt(props.thetap)}°  |  I11 = ${fmt(props.I11)}  |  I22 = ${fmt(props.I22)}
         `;
+    }
+
+    // ============================================================
+    // DSM 설계값 테이블
+    // ============================================================
+    function renderDsmResults(dsm) {
+        const el = document.getElementById('dsm-table-container');
+        if (!el || !dsm) { return; }
+
+        const lt = dsm.load_type || 'P';
+        const pref = dsm.P_ref || 0;
+        const unit_f = lt === 'P' ? '' : '';
+
+        // 항복 하중
+        let html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
+        html += '<tr style="border-bottom:2px solid var(--vscode-panel-border);">';
+        html += '<th style="text-align:left; padding:4px 8px;">Property</th>';
+        html += '<th style="text-align:right; padding:4px 8px;">Value</th>';
+        html += '<th style="text-align:right; padding:4px 8px;">Half-wavelength</th>';
+        html += '<th style="text-align:right; padding:4px 8px;">Load Factor</th>';
+        html += '</tr>';
+
+        // Py, My
+        html += _dsmRow('Py (yield axial)', dsm.Py, '', '');
+        html += _dsmRow('My,xx (yield moment)', dsm.My_xx, '', '');
+        html += _dsmRow('My,zz (yield moment)', dsm.My_zz, '', '');
+
+        html += '<tr><td colspan="4" style="border-bottom:1px solid var(--vscode-panel-border);"></td></tr>';
+
+        // 국부 좌굴
+        const pcrl_key = lt + 'crl';
+        html += _dsmRow(
+            lt + 'crl (local buckling)',
+            dsm[pcrl_key] || 0,
+            dsm.Lcrl ? dsm.Lcrl.toFixed(2) : '-',
+            dsm.LF_local ? dsm.LF_local.toFixed(4) : '-'
+        );
+
+        // 뒤틀림 좌굴
+        const pcrd_key = lt + 'crd';
+        html += _dsmRow(
+            lt + 'crd (distortional)',
+            dsm[pcrd_key] || 0,
+            dsm.Lcrd ? dsm.Lcrd.toFixed(2) : '-',
+            dsm.LF_dist ? dsm.LF_dist.toFixed(4) : '-'
+        );
+
+        // 전체 좌굴
+        const pcre_key = lt + 'cre';
+        html += _dsmRow(
+            lt + 'cre (global)',
+            dsm[pcre_key] || 0,
+            dsm.Lcre ? dsm.Lcre.toFixed(2) : '-',
+            dsm.LF_global ? dsm.LF_global.toFixed(4) : '-'
+        );
+
+        html += '</table>';
+
+        // 극소점 정보
+        if (dsm.n_minima !== undefined) {
+            html += `<div style="margin-top:6px; font-size:11px; color:var(--vscode-descriptionForeground);">`;
+            html += `Detected ${dsm.n_minima} minima on signature curve`;
+            if (dsm.minima) {
+                dsm.minima.forEach((m, i) => {
+                    html += ` | Min ${i+1}: L=${m.length.toFixed(1)}, LF=${m.load_factor.toFixed(4)}`;
+                });
+            }
+            html += '</div>';
+        }
+
+        el.innerHTML = html;
+    }
+
+    function _dsmRow(label, value, length, lf) {
+        const v = typeof value === 'number' ? value.toFixed(2) : value;
+        return `<tr>
+            <td style="padding:3px 8px;">${label}</td>
+            <td style="text-align:right; padding:3px 8px; font-weight:600;">${v}</td>
+            <td style="text-align:right; padding:3px 8px;">${length}</td>
+            <td style="text-align:right; padding:3px 8px;">${lf}</td>
+        </tr>`;
     }
 
     // ============================================================

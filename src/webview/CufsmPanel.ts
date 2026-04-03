@@ -184,6 +184,32 @@ export class CufsmPanel {
         try {
             const result = await this._pythonBridge.analyze(model);
             this._postMessage('analysisComplete', result);
+
+            // DSM 설계값 자동 추출
+            try {
+                const dsmResult = await this._pythonBridge.call('dsm', {
+                    node: model.node,
+                    elem: model.elem,
+                    curve: result.curve,
+                    fy: 50.0,
+                    load_type: 'P',
+                });
+                this._postMessage('dsmResult', dsmResult);
+            } catch (dsmErr: any) {
+                console.error('[CUFSM] DSM extraction failed:', dsmErr.message);
+            }
+
+            // cFSM 모드 분류 자동 실행
+            try {
+                const classResult = await this._pythonBridge.call('classify', {
+                    model: model,
+                    shapes: result.shapes || [],
+                });
+                this._postMessage('classifyResult', classResult);
+            } catch (clsErr: any) {
+                console.error('[CUFSM] Classification failed:', clsErr.message);
+            }
+
             // 트리뷰에 결과 표시
             if (this._treeProvider) {
                 this._treeProvider.updateProjectData({
@@ -403,6 +429,13 @@ export class CufsmPanel {
 
         <!-- 후처리 탭 -->
         <div id="tab-postprocessor" class="tab-panel">
+            <!-- DSM 설계값 테이블 -->
+            <div id="dsm-results" class="section-group" style="margin-bottom:12px">
+                <h3>DSM Design Values</h3>
+                <div id="dsm-table-container" class="props-display" style="font-size:13px;">
+                    <em>Run analysis to see results</em>
+                </div>
+            </div>
             <div class="panel-row">
                 <div class="panel-left">
                     <h3>Buckling Curve</h3>

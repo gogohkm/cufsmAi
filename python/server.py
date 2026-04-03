@@ -13,6 +13,7 @@ from engine.fsm_solver import stripmain
 from engine.properties import grosprop
 from engine.template import generate_section
 from engine.stress import stresgen, yieldMP
+from engine.dsm import extract_dsm_values
 from engine.helpers import doubler, add_corner, signature_ss, firstyield, msort
 from engine.cutwp import cutwp_prop
 from cfsm.classify import classify
@@ -167,6 +168,15 @@ def handle_request(request: dict) -> dict:
             elem = np.array(params['elem'], dtype=float)
             fy = params.get('fy', 50.0)
             result = firstyield(node, elem, fy)
+            return {'id': req_id, 'result': result}
+
+        elif method == 'dsm':
+            node = np.array(params['node'], dtype=float)
+            elem = np.array(params['elem'], dtype=float)
+            curve = params.get('curve', [])
+            fy = params.get('fy', 50.0)
+            load_type = params.get('load_type', 'P')
+            result = extract_dsm_values(curve, node, elem, fy, load_type)
             return {'id': req_id, 'result': result}
 
         elif method == 'cutwp':
