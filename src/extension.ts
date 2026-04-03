@@ -33,12 +33,21 @@ export async function activate(context: vscode.ExtensionContext) {
     // Step 3: 커맨드 등록
     context.subscriptions.push(
         vscode.commands.registerCommand('cufsm.openDesigner', async () => {
-            await ensurePythonRunning();
+            try {
+                await ensurePythonRunning();
+            } catch (e) {
+                // Python 실패해도 패널은 열기 (에러는 WebView에 표시)
+                console.error('[CUFSM] Python start failed, opening panel anyway');
+            }
             CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 
         vscode.commands.registerCommand('cufsm.newProject', async () => {
-            await ensurePythonRunning();
+            try {
+                await ensurePythonRunning();
+            } catch (e) {
+                console.error('[CUFSM] Python start failed');
+            }
             CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 

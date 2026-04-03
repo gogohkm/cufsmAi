@@ -1,11 +1,5 @@
 /**
  * Python 해석 엔진 브릿지
- *
- * 참조: 컨버전전략.md §2 전체 아키텍처, §5.1 Extension Host
- * stgen dxfEditorProvider 패턴 참조
- *
- * child_process.spawn()으로 Python 프로세스를 관리하고
- * JSON-RPC 프로토콜로 stdin/stdout 통신한다.
  */
 
 import { spawn, ChildProcess } from 'child_process';
@@ -18,79 +12,107 @@ export class PythonBridge {
     private _protocol: JsonRpcProtocol;
     private _extensionPath: string;
     private _pythonPath: string;
+    private _started = false;
 
     constructor(extensionPath: string, pythonPath: string = 'python') {
         this._extensionPath = extensionPath;
         this._pythonPath = pythonPath;
-        this._protocol = new JsonRpcProtocol(60000); // 60초 타임아웃
+        this._protocol = new JsonRpcProtocol(60000);
     }
 
-    /** Python 프로세스 시작 */
     async start(): Promise<void> {
-        if (this._process) {
+        if (this._process && this._started) {
             return;
         }
 
         const enginePath = path.join(this._extensionPath, 'python');
+        console.log(`[CUFSM] Starting Python: ${this._pythonPath} -u server.py`);
+        console.log(`[CUFSM] CWD: ${enginePath}`);
 
-        this._process = spawn(this._pythonPath, ['-u', 'server.py'], {
-            cwd: enginePath,
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, PYTHONUNBUFFERED: '1' },
+        return new Promise<void>((resolve, reject) => {
+            try {
+                this._process = spawn(this._pythonPath, ['-u', 'server.py'], {
+                    cwd: enginePath,
+                    stdio: ['pipe', 'pipe', 'pipe'],
+                    env: { ...process.env, PYTHONUNBUFFERED: '1' },
+                });
+            } catch (err: any) {
+                console.error('[CUFSM] Failed to spawn Python:', err.message);
+                reject(err);
+                return;
+            }
+
+            // 프로세스 즉시 종료 감지
+            this._process.on('error', (err) => {
+                console.error('[CUFSM] Python process error:', err.message);
+                this._process = null;
+                this._started = false;
+                reject(err);
+            });
+
+            this._process.on('exit', (code, signal) => {
+                console.log(`[CUFSM] Python process exited: code=${code}, signal=${signal}`);
+                this._process = null;
+                this._started = false;
+            });
+
+            this._process.stdout!.setEncoding('utf-8');
+            this._process.stdout!.on('data', (data: string) => {
+                this._protocol.onData(data);
+            });
+
+            this._process.stderr!.setEncoding('utf-8');
+            this._process.stderr!.on('data', (data: string) => {
+                console.error('[CUFSM Python stderr]', data.trim());
+            });
+
+            // ping으로 시작 확인 (3초 대기)
+            setTimeout(async () => {
+                try {
+                    const result = await this.ping();
+                    console.log(`[CUFSM] Python engine ready: ${result}`);
+                    this._started = true;
+                    resolve();
+                } catch (err: any) {
+                    console.error('[CUFSM] Python ping failed:', err.message);
+                    // 프로세스는 살아있을 수 있으므로 kill하지 않음
+                    // 그래도 started로 표시하여 이후 호출 시도 허용
+                    this._started = true;
+                    resolve();
+                }
+            }, 1000);
         });
-
-        this._process.stdout!.setEncoding('utf-8');
-        this._process.stdout!.on('data', (data: string) => {
-            this._protocol.onData(data);
-        });
-
-        this._process.stderr!.setEncoding('utf-8');
-        this._process.stderr!.on('data', (data: string) => {
-            console.error('[CUFSM Python]', data.trim());
-        });
-
-        this._process.on('exit', (code) => {
-            console.log(`[CUFSM] Python process exited with code ${code}`);
-            this._process = null;
-        });
-
-        // 시작 확인
-        await this.ping();
     }
 
-    /** Python 프로세스 종료 */
     stop(): void {
         this._protocol.dispose();
         if (this._process) {
             this._process.kill();
             this._process = null;
         }
+        this._started = false;
     }
 
-    /** 연결 확인 */
     async ping(): Promise<string> {
         return this._call('ping', {});
     }
 
-    /** 좌굴 해석 실행 */
     async analyze(model: CufsmModel): Promise<CufsmResult> {
         return this._call('analyze', model);
     }
 
-    /** 단면 성질 계산 */
     async getProperties(node: number[][], elem: number[][]): Promise<SectionProperties> {
         return this._call('get_properties', { node, elem });
     }
 
-    /** 범용 JSON-RPC 요청 전송 */
     async call(method: string, params: any): Promise<any> {
         return this._call(method, params);
     }
 
-    /** JSON-RPC 요청 전송 (내부) */
     private async _call(method: string, params: any): Promise<any> {
         if (!this._process || !this._process.stdin) {
-            throw new Error('Python process is not running. Call start() first.');
+            console.error(`[CUFSM] _call(${method}): Python process not running`);
+            throw new Error(`Python process is not running (method: ${method})`);
         }
 
         const request = this._protocol.createRequest(method, params);
@@ -102,9 +124,8 @@ export class PythonBridge {
         return promise;
     }
 
-    /** 프로세스 실행 중인지 확인 */
     get isRunning(): boolean {
-        return this._process !== null && !this._process.killed;
+        return this._process !== null && this._started;
     }
 
     dispose(): void {

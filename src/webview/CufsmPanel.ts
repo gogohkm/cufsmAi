@@ -277,7 +277,7 @@ export class CufsmPanel {
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'none';
         style-src ${webview.cspSource} 'unsafe-inline';
-        script-src 'nonce-${nonce}';
+        script-src 'nonce-${nonce}' 'unsafe-eval';
         img-src ${webview.cspSource} data: blob:;
         font-src ${webview.cspSource};
     ">
@@ -434,13 +434,13 @@ export class CufsmPanel {
         </div>
     </div>
 
-    <script nonce="${nonce}" src="${webview.asWebviewUri(
-            vscode.Uri.joinPath(this._extensionUri, 'media', 'viewer3d.js')
-        )}"></script>
+    <script nonce="${nonce}" src="${scriptUri}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'charts', 'modeShape3D.js')
-        )}"></script>
-    <script nonce="${nonce}" src="${scriptUri}"></script>
+        )}" defer></script>
+    <script nonce="${nonce}" src="${webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'media', 'viewer3d.js')
+        )}" defer></script>
 </body>
 </html>`;
     }
