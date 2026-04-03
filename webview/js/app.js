@@ -38,9 +38,6 @@
                 renderModeShape3DWrapper();
                 switchTab('postprocessor');
                 break;
-            case 'analysisError':
-                setStatus(`Error: ${msg.data.error}`, 'error');
-                break;
             case 'propertiesResult':
                 renderProperties(msg.data);
                 break;
@@ -48,8 +45,30 @@
                 if (model && msg.data) {
                     model.node = msg.data.node;
                     model.elem = msg.data.elem;
+                    // 균일 응력 기본값
+                    if (model.node) {
+                        model.node.forEach(n => { if (n[7] === 1) { n[7] = 50.0; } });
+                    }
                     renderPreprocessor();
+                    setStatus(`Template generated: ${model.node.length} nodes, ${model.elem.length} elements`, 'success');
                 }
+                break;
+            case 'templateError':
+                setStatus('Template error: ' + (msg.data && msg.data.error || 'Unknown'), 'error');
+                console.error('[CUFSM] templateError:', msg.data);
+                break;
+            case 'analysisError':
+                setStatus('Analysis error: ' + (msg.data && msg.data.error || 'Unknown'), 'error');
+                console.error('[CUFSM] analysisError:', msg.data);
+                break;
+            case 'stressError':
+                console.error('[CUFSM] stressError:', msg.data);
+                break;
+            case 'plasticError':
+                console.error('[CUFSM] plasticError:', msg.data);
+                break;
+            case 'classifyError':
+                console.error('[CUFSM] classifyError:', msg.data);
                 break;
             case 'stressApplied':
                 if (model && msg.data && msg.data.node) {

@@ -90,6 +90,41 @@ export class CufsmPanel {
         this._postMessage(command, data);
     }
 
+    /** 초기 기본 단면 생성 후 모델 전송 */
+    private async _initializeWithDefaultSection(): Promise<void> {
+        try {
+            // Python 엔진으로 Lipped C-channel 기본 단면 생성
+            const result = await this._pythonBridge.call('generate_section', {
+                section_type: 'lippedc',
+                params: { H: 9, B: 5, D: 1, t: 0.1, r: 0 }
+            });
+            if (result && result.node && result.elem) {
+                this._model.node = result.node;
+                this._model.elem = result.elem;
+                // 균일 축압축 응력 기본값
+                for (const n of this._model.node) {
+                    n[7] = 50.0;
+                }
+            }
+        } catch (err: any) {
+            console.error('[CUFSM] Failed to generate default section:', err.message);
+            // Python 미연결 시에도 빈 모델로 진행
+        }
+
+        // 기본 길이 설정
+        if (!this._model.lengths || this._model.lengths.length === 0) {
+            const lengths: number[] = [];
+            for (let i = 0; i < 50; i++) {
+                lengths.push(Math.pow(10, 0 + 3 * i / 49));
+            }
+            this._model.lengths = lengths;
+            this._model.m_all = lengths.map(() => [1]);
+        }
+
+        this._postMessage('modelLoaded', this._model);
+        this._updateTreeView();
+    }
+
     /** 트리뷰 갱신 */
     private _updateTreeView(): void {
         if (this._treeProvider) {
@@ -108,8 +143,8 @@ export class CufsmPanel {
     private async _handleMessage(message: WebviewToExtMessage): Promise<void> {
         switch (message.command) {
             case 'webviewReady':
-                // WebView 초기화 완료 → 기본 모델 전송
-                this._postMessage('modelLoaded', this._model);
+                // WebView 초기화 완료 → 기본 템플릿으로 초기 단면 생성
+                await this._initializeWithDefaultSection();
                 break;
 
             case 'runAnalysis':
