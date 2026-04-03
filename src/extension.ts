@@ -26,9 +26,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // MCP Bridge 시작
     const mcpPort = 52790;
-    mcpBridge = new McpBridgeServer(() => CufsmPanel.currentPanel, mcpPort);
+    mcpBridge = new McpBridgeServer(() => CufsmPanel.currentPanel || undefined, mcpPort);
     mcpBridge.start();
-    CufsmPanel.setMcpBridge(mcpBridge);
 
     // .mcp.json 자동 생성
     setupMcpConfig(context, mcpPort);

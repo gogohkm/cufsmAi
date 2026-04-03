@@ -9,10 +9,10 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
-import { McpBridgeServer } from '../mcp/bridge';
+import { McpBridgeServer, McpPanelInterface } from '../mcp/bridge';
 import { CufsmModel, CufsmResult, WebviewToExtMessage, createDefaultModel } from '../models/types';
 
-export class CufsmPanel {
+export class CufsmPanel implements McpPanelInterface {
     public static readonly viewType = 'cufsm.designer';
     public static currentPanel: CufsmPanel | undefined;
 
@@ -20,7 +20,6 @@ export class CufsmPanel {
     private readonly _extensionUri: vscode.Uri;
     private readonly _pythonBridge: PythonBridge;
     private readonly _treeProvider?: ProjectExplorerProvider;
-    private static _mcpBridge?: McpBridgeServer;
     private _disposed = false;
     private _currentSection = 'preprocessor';
 
@@ -79,11 +78,6 @@ export class CufsmPanel {
 
         // 초기 트리 갱신
         setTimeout(() => this._updateTreeView(), 500);
-    }
-
-    /** MCP Bridge 설정 */
-    public static setMcpBridge(bridge: McpBridgeServer): void {
-        CufsmPanel._mcpBridge = bridge;
     }
 
     /** 트리 클릭 → 해당 섹션으로 이동 */
@@ -183,9 +177,6 @@ export class CufsmPanel {
                 await this._runPlastic(message.data);
                 break;
 
-            case 'mcpRequest':
-                await this._handleMcpRequest(message.data);
-                break;
         }
     }
 
@@ -249,41 +240,19 @@ export class CufsmPanel {
         }
     }
 
-    /** MCP 요청 처리 — Python 엔진 호출 후 결과를 MCP Bridge로 반환 */
-    private async _handleMcpRequest(data: any): Promise<void> {
-        const { type, requestId, options } = data;
-
-        try {
-            let result: any;
-
-            if (type === 'mcp_get_status') {
-                result = {
-                    nnodes: this._model.node?.length || 0,
-                    nelems: this._model.elem?.length || 0,
-                    BC: this._model.BC,
-                    nlengths: this._model.lengths?.length || 0,
-                    hasModel: (this._model.node?.length || 0) > 0,
-                };
-            } else if (type === 'mcp_action') {
-                result = await this._handleMcpAction(options);
-            } else {
-                result = { error: `Unknown MCP type: ${type}` };
-            }
-
-            // MCP Bridge로 응답 직접 전달
-            if (CufsmPanel._mcpBridge) {
-                CufsmPanel._mcpBridge.handleMcpResponse(requestId, result);
-            }
-
-        } catch (err: any) {
-            if (CufsmPanel._mcpBridge) {
-                CufsmPanel._mcpBridge.handleMcpResponse(requestId, { error: err.message });
-            }
-        }
+    /** MCP: 현재 상태 반환 */
+    public getStatus(): any {
+        return {
+            nnodes: this._model.node?.length || 0,
+            nelems: this._model.elem?.length || 0,
+            BC: this._model.BC,
+            nlengths: this._model.lengths?.length || 0,
+            hasModel: (this._model.node?.length || 0) > 0,
+        };
     }
 
-    /** MCP 액션 처리 */
-    private async _handleMcpAction(options: any): Promise<any> {
+    /** MCP: 액션 처리 — Bridge에서 직접 호출 */
+    public async handleMcpAction(options: any): Promise<any> {
         const action = options?.action;
 
         switch (action) {
