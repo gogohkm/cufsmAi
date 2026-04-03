@@ -12,7 +12,25 @@
             "outFiles": [
                 "${workspaceFolder}/out/**/*.js"
             ],
-            "preLaunchTask": "npm: compile"
+            "preLaunchTask": "npm: compile",
+            "env": {
+                "CUFSM_MCP_PORT": "52790"
+            }
+        },
+        {
+            "name": "Run Extension (Empty Window)",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/out/**/*.js"
+            ],
+            "preLaunchTask": "npm: compile",
+            "env": {
+                "CUFSM_MCP_PORT": "52790"
+            }
         }
     ]
 }

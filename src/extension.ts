@@ -145,49 +145,68 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
         env: { CUFSM_MCP_PORT: String(port) }
     };
 
-    // 1) 워크스페이스 .mcp.json
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (workspaceFolders) {
-        const mcpJsonPath = path.join(workspaceFolders[0].uri.fsPath, '.mcp.json');
-        const mcpConfig = { mcpServers: { "cufsm-section-designer": mcpServerConfig } };
-        try {
-            fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
-            console.log(`[CUFSM] MCP config: ${mcpJsonPath}`);
-        } catch (err) {
-            console.warn('[CUFSM] Failed to write .mcp.json:', err);
-        }
-    }
+    const mcpJson = JSON.stringify({ mcpServers: { "cufsm-section-designer": mcpServerConfig } }, null, 2);
 
-    // 2) Claude Code — .claude/mcp.json (프로젝트 루트)
-    if (workspaceFolders) {
-        const claudeDir = path.join(workspaceFolders[0].uri.fsPath, '.claude');
-        const claudeMcpPath = path.join(claudeDir, 'mcp.json');
-        try {
-            if (!fs.existsSync(claudeDir)) { fs.mkdirSync(claudeDir, { recursive: true }); }
-            const claudeConfig = { mcpServers: { "cufsm-section-designer": mcpServerConfig } };
-            fs.writeFileSync(claudeMcpPath, JSON.stringify(claudeConfig, null, 2));
-            console.log(`[CUFSM] Claude MCP config: ${claudeMcpPath}`);
-        } catch (err) {
-            console.warn('[CUFSM] Failed to write .claude/mcp.json:', err);
-        }
-    }
+    // 1) 워크스페이스 폴더에 .mcp.json 쓰기
+    _writeMcpToWorkspace(mcpJson);
 
-    // 3) Codex CLI — ~/.codex/config.toml
+    // 2) 워크스페이스 변경 시 다시 쓰기
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        _writeMcpToWorkspace(mcpJson);
+    });
+
+    // 3) Extension 설치 디렉토리 자체에도 쓰기 (폴백)
     try {
-        const homeDir = process.env.USERPROFILE || process.env.HOME || '';
-        const codexDir = path.join(homeDir, '.codex');
-        const codexConfigPath = path.join(codexDir, 'config.toml');
-        if (fs.existsSync(codexDir)) {
-            const tomlContent = `\n[mcp_servers.cufsm-section-designer]\ncommand = "node"\nargs = ["${serverPath}"]\n[mcp_servers.cufsm-section-designer.env]\nCUFSM_MCP_PORT = "${port}"\n`;
-            // 기존 파일에 추가 (중복 방지)
-            const existing = fs.existsSync(codexConfigPath) ? fs.readFileSync(codexConfigPath, 'utf-8') : '';
-            if (!existing.includes('cufsm-section-designer')) {
-                fs.appendFileSync(codexConfigPath, tomlContent);
-                console.log(`[CUFSM] Codex config updated: ${codexConfigPath}`);
-            }
-        }
+        const extMcpPath = path.join(context.extensionPath, '.mcp.json');
+        fs.writeFileSync(extMcpPath, mcpJson);
+        console.log(`[CUFSM] MCP config (extension dir): ${extMcpPath}`);
     } catch (err) {
         // 무시
+    }
+
+    // 4) 사용자 홈 디렉토리 — Claude Code 글로벌 설정
+    try {
+        const homeDir = process.env.USERPROFILE || process.env.HOME || '';
+        if (homeDir) {
+            // ~/.claude/mcp.json (Claude Code 글로벌)
+            const claudeDir = path.join(homeDir, '.claude');
+            if (!fs.existsSync(claudeDir)) { fs.mkdirSync(claudeDir, { recursive: true }); }
+            const claudeMcpPath = path.join(claudeDir, 'mcp.json');
+            // 기존 설정 병합
+            let existing: any = {};
+            if (fs.existsSync(claudeMcpPath)) {
+                try { existing = JSON.parse(fs.readFileSync(claudeMcpPath, 'utf-8')); } catch {}
+            }
+            if (!existing.mcpServers) { existing.mcpServers = {}; }
+            existing.mcpServers['cufsm-section-designer'] = mcpServerConfig;
+            fs.writeFileSync(claudeMcpPath, JSON.stringify(existing, null, 2));
+            console.log(`[CUFSM] Claude global MCP: ${claudeMcpPath}`);
+        }
+    } catch (err) {
+        console.warn('[CUFSM] Failed to write global MCP config:', err);
+    }
+
+    console.log(`[CUFSM] MCP server path: ${serverPath}`);
+    console.log(`[CUFSM] MCP bridge port: ${port}`);
+}
+
+function _writeMcpToWorkspace(mcpJson: string): void {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) {
+        console.log('[CUFSM] No workspace folder — .mcp.json not written to workspace');
+        return;
+    }
+    const wsRoot = folders[0].uri.fsPath;
+    try {
+        // .mcp.json
+        fs.writeFileSync(path.join(wsRoot, '.mcp.json'), mcpJson);
+        // .claude/mcp.json
+        const claudeDir = path.join(wsRoot, '.claude');
+        if (!fs.existsSync(claudeDir)) { fs.mkdirSync(claudeDir, { recursive: true }); }
+        fs.writeFileSync(path.join(claudeDir, 'mcp.json'), mcpJson);
+        console.log(`[CUFSM] MCP config written to workspace: ${wsRoot}`);
+    } catch (err) {
+        console.warn(`[CUFSM] Failed to write MCP to workspace ${wsRoot}:`, err);
     }
 }
 
