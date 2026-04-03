@@ -9,6 +9,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
+import { McpBridgeServer } from '../mcp/bridge';
 import { CufsmModel, CufsmResult, WebviewToExtMessage, createDefaultModel } from '../models/types';
 
 export class CufsmPanel {
@@ -19,6 +20,7 @@ export class CufsmPanel {
     private readonly _extensionUri: vscode.Uri;
     private readonly _pythonBridge: PythonBridge;
     private readonly _treeProvider?: ProjectExplorerProvider;
+    private static _mcpBridge?: McpBridgeServer;
     private _disposed = false;
     private _currentSection = 'preprocessor';
 
@@ -77,6 +79,11 @@ export class CufsmPanel {
 
         // 초기 트리 갱신
         setTimeout(() => this._updateTreeView(), 500);
+    }
+
+    /** MCP Bridge 설정 */
+    public static setMcpBridge(bridge: McpBridgeServer): void {
+        CufsmPanel._mcpBridge = bridge;
     }
 
     /** 트리 클릭 → 해당 섹션으로 이동 */
@@ -175,6 +182,10 @@ export class CufsmPanel {
             case 'runPlastic':
                 await this._runPlastic(message.data);
                 break;
+
+            case 'mcpRequest':
+                await this._handleMcpRequest(message.data);
+                break;
         }
     }
 
@@ -235,6 +246,176 @@ export class CufsmPanel {
             this._postMessage('propertiesResult', props);
         } catch (err: any) {
             this._postMessage('propertiesError', { error: err.message });
+        }
+    }
+
+    /** MCP 요청 처리 — Python 엔진 호출 후 결과를 MCP Bridge로 반환 */
+    private async _handleMcpRequest(data: any): Promise<void> {
+        const { type, requestId, options } = data;
+
+        try {
+            let result: any;
+
+            if (type === 'mcp_get_status') {
+                result = {
+                    nnodes: this._model.node?.length || 0,
+                    nelems: this._model.elem?.length || 0,
+                    BC: this._model.BC,
+                    nlengths: this._model.lengths?.length || 0,
+                    hasModel: (this._model.node?.length || 0) > 0,
+                };
+            } else if (type === 'mcp_action') {
+                result = await this._handleMcpAction(options);
+            } else {
+                result = { error: `Unknown MCP type: ${type}` };
+            }
+
+            // MCP Bridge로 응답 직접 전달
+            if (CufsmPanel._mcpBridge) {
+                CufsmPanel._mcpBridge.handleMcpResponse(requestId, result);
+            }
+
+        } catch (err: any) {
+            if (CufsmPanel._mcpBridge) {
+                CufsmPanel._mcpBridge.handleMcpResponse(requestId, { error: err.message });
+            }
+        }
+    }
+
+    /** MCP 액션 처리 */
+    private async _handleMcpAction(options: any): Promise<any> {
+        const action = options?.action;
+
+        switch (action) {
+            case 'generate_template': {
+                const result = await this._pythonBridge.call('generate_section', {
+                    section_type: options.section_type,
+                    params: options.params,
+                });
+                if (result?.node) {
+                    this._model.node = result.node;
+                    this._model.elem = result.elem;
+                    for (const n of this._model.node) { n[7] = 50.0; }
+                    this._postMessage('modelLoaded', this._model);
+                    this._updateTreeView();
+                }
+                return { success: true, nnodes: result?.node?.length, nelems: result?.elem?.length };
+            }
+
+            case 'set_material': {
+                const E = options.E || 29500;
+                const v = options.v || 0.3;
+                const G = options.G || E / (2 * (1 + v));
+                this._model.prop = [[100, E, E, v, v, G]];
+                this._postMessage('modelLoaded', this._model);
+                return { success: true, E, v, G };
+            }
+
+            case 'set_bc': {
+                this._model.BC = options.BC || 'S-S';
+                this._postMessage('modelLoaded', this._model);
+                this._updateTreeView();
+                return { success: true, BC: this._model.BC };
+            }
+
+            case 'set_lengths': {
+                const min = options.min || 1;
+                const max = options.max || 1000;
+                const n = options.n || 50;
+                const lengths: number[] = [];
+                for (let i = 0; i < n; i++) {
+                    lengths.push(Math.pow(10, Math.log10(min) + (Math.log10(max) - Math.log10(min)) * i / (n - 1)));
+                }
+                this._model.lengths = lengths;
+                this._model.m_all = lengths.map(() => [1]);
+                this._postMessage('modelLoaded', this._model);
+                this._updateTreeView();
+                return { success: true, n: lengths.length };
+            }
+
+            case 'set_stress': {
+                if (options.type === 'uniform_compression') {
+                    for (const n of this._model.node) { n[7] = options.fy || 50; }
+                } else if (options.type === 'pure_bending') {
+                    const result = await this._pythonBridge.call('stresgen', {
+                        node: this._model.node,
+                        props: await this._pythonBridge.call('get_properties', {
+                            node: this._model.node, elem: this._model.elem
+                        }),
+                        loads: { P: 0, Mxx: 1, Mzz: 0, M11: 0, M22: 0 },
+                    });
+                    if (result?.node) { this._model.node = result.node; }
+                }
+                this._postMessage('modelLoaded', this._model);
+                return { success: true };
+            }
+
+            case 'run_analysis': {
+                const result = await this._pythonBridge.analyze(this._model as any);
+                this._postMessage('analysisComplete', result);
+
+                // DSM 자동 추출
+                try {
+                    const dsmP = await this._pythonBridge.call('dsm', {
+                        node: this._model.node, elem: this._model.elem,
+                        curve: result.curve, fy: 50, load_type: 'P',
+                    });
+                    const dsmM = await this._pythonBridge.call('dsm', {
+                        node: this._model.node, elem: this._model.elem,
+                        curve: result.curve, fy: 50, load_type: 'Mxx',
+                    });
+                    this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM });
+                    return { success: true, n_lengths: result.n_lengths, dsm_P: dsmP, dsm_Mxx: dsmM };
+                } catch {
+                    return { success: true, n_lengths: result.n_lengths };
+                }
+            }
+
+            case 'get_dsm': {
+                const dsmP = await this._pythonBridge.call('dsm', {
+                    node: this._model.node, elem: this._model.elem,
+                    curve: (this as any)._lastCurve || [], fy: options.fy || 50, load_type: 'P',
+                });
+                const dsmM = await this._pythonBridge.call('dsm', {
+                    node: this._model.node, elem: this._model.elem,
+                    curve: (this as any)._lastCurve || [], fy: options.fy || 50, load_type: 'Mxx',
+                });
+                return { P: dsmP, Mxx: dsmM };
+            }
+
+            case 'get_properties': {
+                return await this._pythonBridge.getProperties(this._model.node, this._model.elem);
+            }
+
+            case 'get_nodes': {
+                return { nodes: this._model.node };
+            }
+
+            case 'get_elements': {
+                return { elements: this._model.elem };
+            }
+
+            case 'doubler': {
+                const result = await this._pythonBridge.call('doubler', {
+                    node: this._model.node, elem: this._model.elem,
+                });
+                if (result?.node) {
+                    this._model.node = result.node;
+                    this._model.elem = result.elem;
+                    this._postMessage('modelLoaded', this._model);
+                    this._updateTreeView();
+                }
+                return { success: true, nnodes: result?.node?.length };
+            }
+
+            case 'cutwp': {
+                return await this._pythonBridge.call('cutwp', {
+                    node: this._model.node, elem: this._model.elem,
+                });
+            }
+
+            default:
+                return { error: `Unknown action: ${action}` };
         }
     }
 

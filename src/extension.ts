@@ -8,17 +8,30 @@
  */
 
 import * as vscode from 'vscode';
+import * as path from 'path';
+import * as fs from 'fs';
 import { PythonBridge } from './bridge/PythonBridge';
 import { CufsmPanel } from './webview/CufsmPanel';
 import { ProjectExplorerProvider, CufsmTreeItem } from './webview/ProjectExplorerProvider';
+import { McpBridgeServer } from './mcp/bridge';
 
 let pythonBridge: PythonBridge | undefined;
+let mcpBridge: McpBridgeServer | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('CUFSM extension activating...');
 
     const pythonPath = getPythonPath(context.extensionPath);
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
+
+    // MCP Bridge 시작
+    const mcpPort = 52790;
+    mcpBridge = new McpBridgeServer(() => CufsmPanel.currentPanel, mcpPort);
+    mcpBridge.start();
+    CufsmPanel.setMcpBridge(mcpBridge);
+
+    // .mcp.json 자동 생성
+    setupMcpConfig(context, mcpPort);
 
     // Step 1: 트리 프로바이더 생성
     const projectExplorer = new ProjectExplorerProvider();
@@ -103,6 +116,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+    mcpBridge?.stop();
     pythonBridge?.dispose();
 }
 
@@ -117,6 +131,33 @@ async function ensurePythonRunning(): Promise<void> {
                 `Ensure Python is installed with numpy and scipy.\n${err.message}`
             );
             throw err;
+        }
+    }
+}
+
+function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
+    const serverPath = path.join(context.extensionPath, 'media', 'mcp-server.js')
+        .replace(/\\/g, '/');
+
+    const mcpConfig = {
+        mcpServers: {
+            "cufsm-section-designer": {
+                command: "node",
+                args: [serverPath],
+                env: { CUFSM_MCP_PORT: String(port) }
+            }
+        }
+    };
+
+    // 워크스페이스에 .mcp.json 생성
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (workspaceFolders) {
+        const mcpJsonPath = path.join(workspaceFolders[0].uri.fsPath, '.mcp.json');
+        try {
+            fs.writeFileSync(mcpJsonPath, JSON.stringify(mcpConfig, null, 2));
+            console.log(`[CUFSM] MCP config written to ${mcpJsonPath}`);
+        } catch (err) {
+            console.warn('[CUFSM] Failed to write .mcp.json:', err);
         }
     }
 }

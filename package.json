@@ -7,7 +7,9 @@
     "engines": {
         "vscode": "^1.85.0"
     },
-    "categories": ["Other"],
+    "categories": [
+        "Other"
+    ],
     "activationEvents": [],
     "main": "./out/extension.js",
     "contributes": {
@@ -88,19 +90,22 @@
     "scripts": {
         "compile": "tsc -p ./",
         "watch": "tsc -watch -p ./",
-        "build:webview": "webpack --mode production",
-        "build": "npm run compile && npm run build:webview",
+        "build:webview": "webpack --config webpack.config.js --mode production",
+        "build:mcp": "webpack --config webpack.mcp.config.js --mode production",
+        "build": "npm run compile && npm run build:webview && npm run build:mcp",
         "lint": "eslint src --ext ts"
     },
     "devDependencies": {
-        "@types/vscode": "^1.85.0",
         "@types/node": "^20.0.0",
+        "@types/vscode": "^1.85.0",
+        "ts-loader": "^9.5.0",
         "typescript": "^5.3.0",
         "webpack": "^5.89.0",
-        "webpack-cli": "^5.1.4",
-        "ts-loader": "^9.5.0"
+        "webpack-cli": "^5.1.4"
     },
     "dependencies": {
-        "@babylonjs/core": "^7.43.2"
+        "@babylonjs/core": "^7.43.2",
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "zod": "^4.3.6"
     }
 }

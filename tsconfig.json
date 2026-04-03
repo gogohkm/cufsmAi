@@ -12,5 +12,5 @@
         "forceConsistentCasingInFileNames": true,
         "resolveJsonModule": true
     },
-    "exclude": ["node_modules", "webview", "python", "test", "media", "src/webview/viewer3d"]
+    "exclude": ["node_modules", "webview", "python", "test", "media", "src/webview/viewer3d", "src/mcp/server.ts"]
 }
