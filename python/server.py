@@ -209,6 +209,64 @@ def handle_request(request: dict) -> dict:
                 'n_elements': len(se),
             }}
 
+        elif method == 'aisi_design':
+            from design.aisi_s100 import design_member
+            result = design_member(params)
+            return {'id': req_id, 'result': result}
+
+        elif method == 'aisi_guide':
+            from design.aisi_s100 import design_guide
+            result = design_guide(params)
+            return {'id': req_id, 'result': result}
+
+        elif method == 'steel_grades':
+            from design.steel_grades import list_grades
+            return {'id': req_id, 'result': list_grades()}
+
+        elif method == 'web_crippling':
+            from design.shear import web_crippling
+            result = web_crippling(
+                h=params.get('h', 0),
+                t=params.get('t', 0),
+                R=params.get('R', 0),
+                N=params.get('N', 0),
+                Fy=params.get('Fy', 50),
+                theta=params.get('theta', 90),
+                support=params.get('support', 'EOF'),
+                fastened=params.get('fastened', 'fastened'),
+            )
+            return {'id': req_id, 'result': result}
+
+        elif method == 'analyze_loads':
+            from design.loads.required_strength import analyze_loads
+            result = analyze_loads(
+                member_app=params.get('member_app', 'roof-purlin'),
+                span_type=params.get('span_type', 'simple'),
+                span_ft=params.get('span_ft', 25),
+                loads=params.get('loads', {}),
+                design_method=params.get('design_method', 'LRFD'),
+                spacing_ft=params.get('spacing_ft', 5.0),
+                laps=params.get('laps'),
+                deck=params.get('deck'),
+                section=params.get('section'),
+            )
+            return {'id': req_id, 'result': result}
+
+        elif method == 'calc_deck_stiffness':
+            from design.loads.bracing import calc_rotational_stiffness, calc_lateral_stiffness
+            kphi = calc_rotational_stiffness(
+                t_panel=params.get('t_panel', 0.018),
+                t_purlin=params.get('t_purlin', 0.059),
+                fastener_spacing=params.get('fastener_spacing', 12),
+                flange_width=params.get('flange_width', 2.5),
+            )
+            kx = calc_lateral_stiffness(
+                t_panel=params.get('t_panel', 0.018),
+                t_purlin=params.get('t_purlin', 0.059),
+                fastener_spacing=params.get('fastener_spacing', 12),
+            )
+            return {'id': req_id, 'result': {'kphi': round(kphi, 4), 'kx': round(kx, 3)}}
+
         elif method == 'ping':
             return {'id': req_id, 'result': 'pong'}
 

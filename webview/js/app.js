@@ -103,6 +103,12 @@
                 renderDsmResults(msg.data);
                 renderBucklingCurve(); // DSM 극점 표시를 위해 다시 그리기
                 break;
+            case 'designResult':
+                renderDesignResult(msg.data);
+                break;
+            case 'loadAnalysisComplete':
+                renderLoadAnalysisResult(msg.data);
+                break;
         }
     });
 
@@ -409,6 +415,7 @@
             'mode-shape-3d': 'postprocessor',
             'classification': 'postprocessor',
             'plastic-surface': 'postprocessor',
+            'design': 'design',
         };
 
         const tabId = tabMap[sectionId] || 'preprocessor';
@@ -1410,6 +1417,521 @@
             arr.push(Math.pow(10, a + (b - a) * i / (n - 1)));
         }
         return arr;
+    }
+
+    // ============================================================
+    // Design 탭 — AISI S100-16 설계
+    // ============================================================
+
+    // 강재 등급 선택 시 Fy/Fu 자동 설정
+    const selGrade = document.getElementById('select-steel-grade');
+    if (selGrade) {
+        const gradeMap = {
+            'A653-33': [33,45], 'A653-50': [50,65], 'A653-55': [55,70], 'A653-80': [80,82],
+            'A792-33': [33,45], 'A792-50': [50,65], 'A792-80': [80,82],
+            'A1003-33': [33,45], 'A1003-50': [50,65],
+        };
+        selGrade.addEventListener('change', () => {
+            const v = gradeMap[selGrade.value];
+            if (v) {
+                setValue('design-fy', v[0]);
+                setValue('design-fu', v[1]);
+            }
+        });
+    }
+
+    // Calculator 모드 판별
+    const CALC_MODES = ['roof-purlin', 'floor-joist', 'wall-girt', 'wall-stud'];
+    function isCalcMode(t) { return CALC_MODES.includes(t); }
+
+    // PSF → PLF 자동 변환
+    function updatePLF() {
+        const spacing = getNum('config-spacing', 5);
+        ['D', 'Lr', 'S', 'Wu', 'L'].forEach(lt => {
+            const psf = getNum('load-' + lt + '-psf', 0);
+            const plf = Math.round(psf * spacing);
+            const el = document.getElementById('load-' + lt + '-plf');
+            if (el) el.textContent = '→' + plf + ' PLF';
+        });
+    }
+    ['config-spacing', 'load-D-psf', 'load-Lr-psf', 'load-S-psf', 'load-Wu-psf', 'load-L-psf'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', updatePLF);
+    });
+    updatePLF();
+
+    // Span Type에 따라 랩/N-span 필드 토글
+    const selSpanType = document.getElementById('select-span-type');
+    if (selSpanType) {
+        function updateSpanTypeUI() {
+            const st = selSpanType.value;
+            const noLap = (st === 'simple' || st === 'cantilever');
+            const lapRow = document.getElementById('config-lap-row');
+            const nInput = document.getElementById('config-n-spans');
+            if (lapRow) lapRow.style.display = noLap ? 'none' : 'flex';
+            if (nInput) nInput.style.display = (st === 'cont-n') ? 'inline-block' : 'none';
+        }
+        selSpanType.addEventListener('change', updateSpanTypeUI);
+        updateSpanTypeUI();
+    }
+
+    // 부재 유형에 따라 입력 필드 표시/숨김
+    const selMemberType = document.getElementById('select-member-type');
+    if (selMemberType) {
+        function updateDesignFieldVisibility() {
+            const t = selMemberType.value;
+            const isCalc = isCalcMode(t);
+
+            // Calculator 모드 섹션 표시/숨김
+            const calcSection = document.getElementById('calc-mode-section');
+            if (calcSection) calcSection.style.display = isCalc ? 'block' : 'none';
+
+            // Load Analysis 결과 섹션
+            const loadSection = document.getElementById('load-analysis-section');
+            if (loadSection) loadSection.style.display = isCalc ? 'block' : 'none';
+
+            // 부재 유형별 하중 행 표시 (Floor→L, Roof→Lr/S)
+            const lrRow = document.getElementById('load-Lr-row');
+            const sRow = document.getElementById('load-S-row');
+            const wRow = document.getElementById('load-W-row');
+            const lRow = document.getElementById('load-L-row');
+            const isFloor = (t === 'floor-joist');
+            if (lrRow) lrRow.style.display = (isCalc && !isFloor) ? 'flex' : 'none';
+            if (sRow) sRow.style.display = (isCalc && !isFloor) ? 'flex' : 'none';
+            if (wRow) wRow.style.display = isCalc ? 'flex' : 'none';
+            if (lRow) lRow.style.display = (isCalc && isFloor) ? 'flex' : 'none';
+
+            // Calculator에서는 flexure로 매핑
+            const effectiveType = isCalc ? 'flexure' : t;
+            const needsKL = (effectiveType === 'compression' || effectiveType === 'combined');
+            const needsLbCb = (effectiveType === 'flexure' || effectiveType === 'combined');
+            const needsLengths = needsKL || needsLbCb;
+
+            const kxRow = document.getElementById('design-KxLx-row');
+            const ktRow = document.getElementById('design-KtLt-row');
+            const cbRow = document.getElementById('design-Cb-row');
+            const lbRow = document.getElementById('design-Lb-row');
+            const lenTitle = document.getElementById('design-lengths-title');
+
+            const cmRow = document.getElementById('design-Cm-row');
+
+            if (kxRow) kxRow.style.display = needsKL ? 'flex' : 'none';
+            if (ktRow) ktRow.style.display = needsKL ? 'flex' : 'none';
+            if (cbRow) cbRow.style.display = needsLbCb ? 'flex' : 'none';
+            if (lbRow) lbRow.style.display = needsLbCb ? 'flex' : 'none';
+            const wcSection = document.getElementById('design-wc-section');
+            if (cmRow) cmRow.style.display = (t === 'combined') ? 'flex' : 'none';
+            if (wcSection) wcSection.style.display = (t === 'flexure' || t === 'combined') ? 'block' : 'none';
+            if (lenTitle) lenTitle.style.display = needsLengths ? 'block' : 'none';
+        }
+        selMemberType.addEventListener('change', updateDesignFieldVisibility);
+        updateDesignFieldVisibility();
+    }
+
+    // Design 실행
+    const btnDesign = document.getElementById('btn-run-design');
+    if (btnDesign) {
+        btnDesign.addEventListener('click', () => {
+            const rawMemberType = /** @type {HTMLSelectElement} */ (document.getElementById('select-member-type'))?.value || 'compression';
+            if (!model && !isCalcMode(rawMemberType)) { return; }
+            const memberType = isCalcMode(rawMemberType) ? 'flexure' : rawMemberType;
+            const designMethod = /** @type {HTMLSelectElement} */ (document.getElementById('select-design-method'))?.value || 'LRFD';
+
+            const data = {
+                member_type: memberType,
+                design_method: designMethod,
+                Fy: getNum('design-fy', 50),
+                Fu: getNum('design-fu', 65),
+                KxLx: getNum('design-KxLx', 120),
+                KyLy: getNum('design-KyLy', 120),
+                KtLt: getNum('design-KtLt', 120),
+                Lb: getNum('design-Lb', 120),
+                Cb: getNum('design-Cb', 1.0),
+                Cmx: getNum('design-Cmx', 0.85),
+                Cmy: getNum('design-Cmy', 0.85),
+                Pu: getNum('design-P', 0),
+                Mu: getNum('design-Mx', 0),
+                Mux: getNum('design-Mx', 0),
+                Muy: getNum('design-My', 0),
+                Vu: getNum('design-V', 0),
+                Tu: getNum('design-P', 0), // tension uses same input
+                wc_N: getNum('design-wc-N', 0),
+                wc_R: getNum('design-wc-R', 0),
+                wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
+            };
+
+            vscode.postMessage({ command: 'runDesign', data });
+        });
+    }
+
+    // ============================================================
+    // Analyze Loads 버튼 핸들러 (Calculator 모드)
+    // ============================================================
+    const btnAnalyze = document.getElementById('btn-analyze-loads');
+    if (btnAnalyze) {
+        btnAnalyze.addEventListener('click', () => {
+            const memberApp = selMemberType ? selMemberType.value : '';
+            if (!isCalcMode(memberApp)) return;
+
+            const spacing = getNum('config-spacing', 5);
+            let spanType = /** @type {HTMLSelectElement} */ (document.getElementById('select-span-type'))?.value || 'simple';
+            if (spanType === 'cont-n') {
+                const n = getNum('config-n-spans', 5);
+                spanType = 'cont-' + n;
+            }
+            const data = {
+                member_app: memberApp,
+                span_type: spanType,
+                span_ft: getNum('config-span', 25),
+                spacing_ft: spacing,
+                loads: {
+                    D: getNum('load-D-psf', 0) * spacing,
+                    Lr: getNum('load-Lr-psf', 0) * spacing,
+                    S: getNum('load-S-psf', 0) * spacing,
+                    W: -(getNum('load-Wu-psf', 0) * spacing),  // 양력 → 음수
+                    L: getNum('load-L-psf', 0) * spacing,
+                },
+                design_method: /** @type {HTMLSelectElement} */ (document.getElementById('select-design-method'))?.value || 'LRFD',
+                laps: {
+                    left_ft: getNum('config-lap-left', 0),
+                    right_ft: getNum('config-lap-right', 0),
+                },
+                deck: {
+                    type: /** @type {HTMLSelectElement} */ (document.getElementById('select-deck-type'))?.value || 'none',
+                    t_panel: getNum('deck-t-panel', 0.018),
+                    fastener_spacing: getNum('deck-fastener-spacing', 12),
+                    kphi_override: getNum('deck-kphi-override', null) || null,
+                },
+            };
+
+            btnAnalyze.textContent = 'Analyzing...';
+            btnAnalyze.disabled = true;
+            vscode.postMessage({ command: 'analyzeLoads', data });
+        });
+    }
+
+    // M/V 다이어그램 SVG 렌더링
+    function renderDiagramSVG(values, label, color, flipSign) {
+        const W = 360, H = 80, PAD = 5;
+        const n = values.length;
+        if (n < 2) return '';
+
+        const vals = flipSign ? values.map(v => -v) : values; // 구조관행: +M 아래
+        const maxAbs = Math.max(...vals.map(v => Math.abs(v)), 0.001);
+        const scaleX = (W - 2 * PAD) / (n - 1);
+        const scaleY = (H / 2 - PAD) / maxAbs;
+        const midY = H / 2;
+
+        let pathD = '';
+        for (let i = 0; i < n; i++) {
+            const x = PAD + i * scaleX;
+            const y = midY - vals[i] * scaleY;
+            pathD += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+        }
+
+        // 채우기 영역
+        let fillD = pathD + 'L' + (PAD + (n-1)*scaleX).toFixed(1) + ',' + midY + 'L' + PAD + ',' + midY + 'Z';
+
+        return '<div style="margin:4px 0"><svg width="' + W + '" height="' + H + '" style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">'
+            + '<line x1="' + PAD + '" y1="' + midY + '" x2="' + (W-PAD) + '" y2="' + midY + '" stroke="var(--vscode-foreground)" stroke-opacity="0.3" stroke-dasharray="3"/>'
+            + '<path d="' + fillD + '" fill="' + color + '" fill-opacity="0.15"/>'
+            + '<path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>'
+            + '<text x="' + PAD + '" y="12" fill="var(--vscode-foreground)" font-size="10">' + label + '</text>'
+            + '<text x="' + PAD + '" y="' + (H-3) + '" fill="var(--vscode-descriptionForeground)" font-size="9">max=' + Math.max(...values).toFixed(1) + ' / min=' + Math.min(...values).toFixed(1) + '</text>'
+            + '</svg></div>';
+    }
+
+    // Analyze Loads 결과 렌더링
+    let _lastLoadAnalysis = null;
+    function renderLoadAnalysisResult(data) {
+        const el = document.getElementById('load-analysis-result');
+        if (!el) return;
+
+        if (data.error) {
+            el.innerHTML = '<p style="color:var(--vscode-errorForeground)">' + data.error + '</p>';
+            return;
+        }
+
+        _lastLoadAnalysis = data;
+        let html = '';
+
+        // M/V Diagram SVG
+        if (data.gravity && data.gravity.M_diagram && data.gravity.M_diagram.length > 2) {
+            html += renderDiagramSVG(data.gravity.M_diagram, 'Moment (kip-ft)', '#4fc3f7', true);
+        }
+
+        // 중력 지배 결과
+        if (data.gravity) {
+            html += '<strong>Gravity: ' + data.gravity.combo + '</strong>';
+            html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(k-ft)</th><th>Vu(k)</th><th>Ru(k)</th></tr>';
+            for (const loc of data.gravity.locations) {
+                const m = loc.Mu != null ? loc.Mu.toFixed(2) : '—';
+                const v = loc.Vu != null ? loc.Vu.toFixed(2) : '—';
+                const r = loc.Ru != null ? loc.Ru.toFixed(2) : '—';
+                html += '<tr><td>' + loc.name + '</td><td>' + m + '</td><td>' + v + '</td><td>' + r + '</td></tr>';
+            }
+            html += '</table>';
+        }
+
+        // 양력 결과
+        if (data.uplift) {
+            html += '<strong>Uplift: ' + data.uplift.combo + '</strong>';
+            html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(k-ft)</th></tr>';
+            for (const loc of data.uplift.locations) {
+                const m = loc.Mu != null ? loc.Mu.toFixed(2) : '—';
+                html += '<tr><td>' + loc.name + '</td><td>' + m + '</td></tr>';
+            }
+            html += '</table>';
+        }
+
+        // Auto params
+        if (data.auto_params) {
+            const ap = data.auto_params;
+            html += '<div style="font-size:11px;margin-top:6px;padding:4px;border:1px solid var(--vscode-panel-border);border-radius:3px">';
+            html += '<strong>Auto Parameters:</strong><br>';
+            if (ap.deck) html += 'Deck: k&phi;=' + ap.deck.kphi + ', kx=' + ap.deck.kx + '<br>';
+            if (ap.positive_region) html += 'Positive: braced=' + ap.positive_region.braced + '<br>';
+            if (ap.negative_region) html += 'Negative: Ly=' + ap.negative_region.Ly_in + 'in, Cb=' + ap.negative_region.Cb + '<br>';
+            if (ap.uplift_R != null) html += 'Uplift R=' + ap.uplift_R;
+            html += '</div>';
+
+            // Auto-fill required strengths into design inputs
+            if (data.gravity && data.gravity.locations.length > 0) {
+                // 절대값 최대 Mu 위치
+                let maxLoc = data.gravity.locations[0];
+                for (const loc of data.gravity.locations) {
+                    if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxLoc.Mu || 0)) maxLoc = loc;
+                }
+                if (maxLoc.Mu != null) setValue('design-Mx', Math.abs(maxLoc.Mu * 12).toFixed(1));  // kip-ft → kip-in
+                if (maxLoc.Vu != null) setValue('design-V', maxLoc.Vu.toFixed(2));
+                // Unbraced lengths
+                if (ap.negative_region) {
+                    setValue('design-Lb', ap.negative_region.Ly_in || 0);
+                    setValue('design-Cb', ap.negative_region.Cb || 1.0);
+                }
+            }
+        }
+
+        el.innerHTML = html;
+
+        // 버튼 복원
+        if (btnAnalyze) {
+            btnAnalyze.textContent = '📊 Analyze Loads';
+            btnAnalyze.disabled = false;
+        }
+    }
+
+    // Copy Report 버튼
+    let _lastReport = '';
+    const btnCopyReport = document.getElementById('btn-copy-report');
+    if (btnCopyReport) {
+        btnCopyReport.addEventListener('click', () => {
+            if (_lastReport) {
+                navigator.clipboard.writeText(_lastReport).then(() => {
+                    btnCopyReport.textContent = 'Copied!';
+                    setTimeout(() => { btnCopyReport.textContent = 'Copy Report to Clipboard'; }, 1500);
+                });
+            }
+        });
+    }
+
+    // 설계 결과 렌더링
+    function renderDesignResult(data) {
+        if (!data) { return; }
+        const summaryEl = document.getElementById('design-summary');
+        const stepsEl = document.getElementById('design-steps');
+        const interTitle = document.getElementById('design-interaction-title');
+        const interEl = document.getElementById('design-interaction');
+        const refEl = document.getElementById('design-reference');
+
+        if (!summaryEl || !stepsEl) { return; }
+
+        // 에러 처리
+        if (data.error) {
+            summaryEl.innerHTML = `<p style="color:var(--vscode-errorForeground)">${data.error}</p>`;
+            stepsEl.innerHTML = '';
+            return;
+        }
+
+        // --- Summary ---
+        const mt = data.member_type || '';
+        const mode = data.controlling_mode || '';
+        const dm = data.design_method || 'LRFD';
+        const pass = data.pass;
+        const util = data.utilization;
+
+        let summaryHtml = '<table style="width:100%;font-size:12px">';
+
+        if (mt === 'compression') {
+            summaryHtml += _summaryRow('Pn (nominal)', data.Pn, 'kips');
+            summaryHtml += _summaryRow('Pne (global)', data.Pne, 'kips');
+            summaryHtml += _summaryRow('Pnl (local)', data.Pnl, 'kips');
+            summaryHtml += _summaryRow('Pnd (distortional)', data.Pnd, 'kips');
+            summaryHtml += _summaryRow('Controlling mode', mode, '');
+            if (dm === 'LRFD') {
+                summaryHtml += _summaryRow('φPn', data.phi_Pn, 'kips', '#4fc3f7');
+            } else {
+                summaryHtml += _summaryRow('Pn/Ω', data.Pn_omega, 'kips', '#4fc3f7');
+            }
+        } else if (mt === 'flexure') {
+            summaryHtml += _summaryRow('Mn (nominal)', data.Mn, 'kip-in');
+            summaryHtml += _summaryRow('Mne (global)', data.Mne, 'kip-in');
+            summaryHtml += _summaryRow('Mnl (local)', data.Mnl, 'kip-in');
+            summaryHtml += _summaryRow('Mnd (distortional)', data.Mnd, 'kip-in');
+            summaryHtml += _summaryRow('Controlling mode', mode, '');
+            if (dm === 'LRFD') {
+                summaryHtml += _summaryRow('φMn', data.phi_Mn, 'kip-in', '#4fc3f7');
+            } else {
+                summaryHtml += _summaryRow('Mn/Ω', data.Mn_omega, 'kip-in', '#4fc3f7');
+            }
+        } else if (mt === 'tension') {
+            summaryHtml += _summaryRow('Tn (yield)', data.Tn_yield, 'kips');
+            summaryHtml += _summaryRow('Tn (rupture)', data.Tn_rupture, 'kips');
+            summaryHtml += _summaryRow('Controlling mode', mode, '');
+            summaryHtml += _summaryRow('Design strength', data.design_strength, 'kips', '#4fc3f7');
+        } else if (mt === 'combined') {
+            const c = data.compression || {};
+            const f = data.flexure_x || {};
+            const fy = data.flexure_y || null;
+            summaryHtml += _summaryRow('Pn', c.Pn, 'kips');
+            summaryHtml += _summaryRow('Compression mode', c.controlling_mode, '');
+            summaryHtml += _summaryRow('Design Pn', c.design_strength, 'kips', '#4fc3f7');
+            summaryHtml += _summaryRow('Mn (x)', f.Mn, 'kip-in');
+            summaryHtml += _summaryRow('Flexure mode', f.controlling_mode, '');
+            summaryHtml += _summaryRow('Design Mn(x)', f.design_strength, 'kip-in', '#4fc3f7');
+            if (fy) {
+                summaryHtml += _summaryRow('Mn (y)', fy.Mn, 'kip-in');
+                summaryHtml += _summaryRow('Design Mn(y)', fy.design_strength, 'kip-in', '#4fc3f7');
+            }
+            if (data.amplification) {
+                const amp = data.amplification;
+                summaryHtml += _summaryRow('§C1 αx', amp.alpha_x?.toFixed(3), '', '#ffab00');
+                summaryHtml += _summaryRow('§C1 αy', amp.alpha_y?.toFixed(3), '', '#ffab00');
+            }
+            if (data.shear) {
+                summaryHtml += _summaryRow('Vn', data.shear.Vn, 'kips');
+                summaryHtml += _summaryRow('Design Vn', data.shear.design_strength, 'kips', '#4fc3f7');
+            }
+        } else if (mt === 'connection') {
+            const ls = data.limit_states || [];
+            ls.forEach(l => {
+                const mark = l.governs ? ' *' : '';
+                summaryHtml += _summaryRow(l.name + mark, l.design_strength, 'kips', l.governs ? '#ffab00' : undefined);
+            });
+            summaryHtml += _summaryRow('Governing', data.governing_mode, '');
+            summaryHtml += _summaryRow('Design strength', data.design_strength, 'kips', '#4fc3f7');
+        }
+
+        if (util != null) {
+            const clr = pass ? '#4caf50' : '#ff5252';
+            summaryHtml += _summaryRow('Utilization', (util * 100).toFixed(1) + '%', '', clr);
+            summaryHtml += _summaryRow('Status', pass ? 'OK' : 'NG', '', clr);
+        }
+        summaryHtml += '</table>';
+        summaryEl.innerHTML = summaryHtml;
+
+        // --- Steps ---
+        const steps = data.steps || [];
+        let stepsHtml = '';
+        if (steps.length > 0) {
+            steps.forEach(s => {
+                const eq = s.equation ? ` <span style="color:#888">[${s.equation}]</span>` : '';
+                const modeTag = s.controlling_mode ? ` <span style="color:#ffab00">← ${s.controlling_mode}</span>` : '';
+                stepsHtml += `<div style="margin-bottom:6px;border-bottom:1px solid var(--vscode-panel-border,#333);padding-bottom:4px">`;
+                stepsHtml += `<b>Step ${s.step}: ${s.name}</b>${eq}${modeTag}<br>`;
+                stepsHtml += `<span style="color:#aaa">${s.formula || ''}</span>`;
+                if (s.value != null) {
+                    stepsHtml += `<br><b style="color:#4fc3f7">${s.value} ${s.unit || ''}</b>`;
+                }
+                stepsHtml += `</div>`;
+            });
+        } else if (data.limit_states) {
+            // 접합부: limit_states 기반 렌더링
+            data.limit_states.forEach((ls, i) => {
+                const eq = ls.equation ? ` <span style="color:#888">[${ls.equation}]</span>` : '';
+                const gov = ls.governs ? ` <span style="color:#ffab00">← Governing</span>` : '';
+                stepsHtml += `<div style="margin-bottom:6px;border-bottom:1px solid var(--vscode-panel-border,#333);padding-bottom:4px">`;
+                stepsHtml += `<b>${i+1}. ${ls.name}</b>${eq}${gov}<br>`;
+                stepsHtml += `<span style="color:#aaa">${ls.formula || ''}</span>`;
+                stepsHtml += `<br>Rn = <b>${ls.Rn}</b> kips → Design = <b style="color:#4fc3f7">${ls.design_strength}</b> kips`;
+                stepsHtml += `</div>`;
+            });
+        }
+        stepsEl.innerHTML = stepsHtml || '<p class="hint">No steps</p>';
+
+        // --- Interaction ---
+        if (data.interaction) {
+            if (interTitle) { interTitle.style.display = 'block'; }
+            if (interEl) {
+                interEl.style.display = 'block';
+                const ir = data.interaction;
+                const clr = ir.pass ? '#4caf50' : '#ff5252';
+                interEl.innerHTML = `
+                    <table style="width:100%;font-size:12px">
+                        ${_summaryRow('P/Pa', ir.P_ratio?.toFixed(3), '')}
+                        ${_summaryRow('Mx/Max', ir.Mx_ratio?.toFixed(3), '')}
+                        ${_summaryRow('My/May', ir.My_ratio?.toFixed(3), '')}
+                        ${_summaryRow('Total', ir.total?.toFixed(3), '≤ 1.0', clr)}
+                        ${_summaryRow('Result', ir.pass ? 'OK' : 'NG', '', clr)}
+                    </table>
+                    <p style="font-size:11px;color:#888">Eq. ${ir.equation}</p>`;
+            }
+        } else {
+            if (interTitle) { interTitle.style.display = 'none'; }
+            if (interEl) { interEl.style.display = 'none'; }
+        }
+
+        // --- H3 Web Crippling + Bending Interaction ---
+        if (data.h3_interaction && interEl) {
+            if (interTitle) { interTitle.style.display = 'block'; }
+            interEl.style.display = 'block';
+            const h3 = data.h3_interaction;
+            const wc = data.web_crippling || {};
+            const h3clr = h3.pass ? '#4caf50' : '#ff5252';
+            interEl.innerHTML += `
+                <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--vscode-panel-border,#333)">
+                <b>Web Crippling + Bending (§H3)</b>
+                <table style="width:100%;font-size:12px;margin-top:4px">
+                    ${_summaryRow('Pn (web crippling)', wc.Pn, 'kips')}
+                    ${_summaryRow('Support', wc.support, '')}
+                    ${_summaryRow('0.91(P/Pn)', h3.P_term?.toFixed(3), '')}
+                    ${_summaryRow('M/Mnfo', h3.M_term?.toFixed(3), '')}
+                    ${_summaryRow('Total', h3.total?.toFixed(3), '≤ ' + h3.limit?.toFixed(2), h3clr)}
+                    ${_summaryRow('Result', h3.pass ? 'OK' : 'NG', '', h3clr)}
+                </table>
+                <p style="font-size:11px;color:#888">Eq. ${h3.equation}</p>
+                </div>`;
+        }
+
+        // --- Reference ---
+        if (refEl) {
+            const sections = data.spec_sections || [];
+            let refHtml = sections.length > 0
+                ? `<p>AISI S100-16 Sections: <b>${sections.map(s => '§' + s).join(', ')}</b></p>`
+                : '<p class="hint">No specification sections referenced</p>';
+
+            // DSM 적용 한계 경고
+            const warnings = data.dsm_warnings || [];
+            if (warnings.length > 0) {
+                refHtml += `<div style="margin-top:6px;padding:6px;background:rgba(255,87,34,0.15);border-radius:4px">`;
+                refHtml += `<b style="color:#ff5722">DSM Applicability Warnings:</b><ul style="margin:4px 0;padding-left:20px">`;
+                warnings.forEach(w => { refHtml += `<li style="color:#ffab00;font-size:11px">${w}</li>`; });
+                refHtml += `</ul></div>`;
+            }
+            refEl.innerHTML = refHtml;
+        }
+
+        // Report 저장 + 버튼 표시
+        _lastReport = data.report || '';
+        if (btnCopyReport) {
+            btnCopyReport.style.display = _lastReport ? 'block' : 'none';
+        }
+    }
+
+    function _summaryRow(label, value, unit, color) {
+        const style = color ? ` style="color:${color}"` : '';
+        return `<tr><td style="padding:2px 6px;color:#aaa">${label}</td>
+                <td style="padding:2px 6px;text-align:right"${style}><b>${value ?? '-'}</b> ${unit || ''}</td></tr>`;
     }
 
     // ============================================================

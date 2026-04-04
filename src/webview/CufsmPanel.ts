@@ -182,6 +182,23 @@ export class CufsmPanel implements McpPanelInterface {
                 await this._runPlastic(message.data);
                 break;
 
+            case 'runDesign':
+                try {
+                    await this.handleMcpAction({ action: 'aisi_design', ...message.data });
+                } catch (e: any) {
+                    this._postMessage('designResult', { error: e.message || String(e) });
+                }
+                break;
+
+            case 'analyzeLoads':
+                try {
+                    const loadResult = await this.handleMcpAction({ action: 'analyze_loads', ...message.data });
+                    this._postMessage('loadAnalysisComplete', loadResult);
+                } catch (e: any) {
+                    this._postMessage('loadAnalysisComplete', { error: e.message || String(e) });
+                }
+                break;
+
         }
     }
 
@@ -530,6 +547,205 @@ export class CufsmPanel implements McpPanelInterface {
                 return result;
             }
 
+            // --- AISI Design ---
+            case 'aisi_design': {
+                // 접합부는 단면성질/DSM 불필요 → 바로 호출
+                if (options.member_type === 'connection') {
+                    const result = await this._pythonBridge.call('aisi_design', options);
+                    this._postMessage('designResult', result);
+                    return result;
+                }
+
+                // 단면 정의 확인
+                if (!this._model.node || this._model.node.length === 0) {
+                    const err = {
+                        error: 'No section defined. Please set up a section in the Preprocessor tab first (e.g., set_section_template), then run Analysis before design.',
+                        member_type: options.member_type,
+                    };
+                    this._postMessage('designResult', err);
+                    return err;
+                }
+
+                // 부재 설계: 단면 성질 + DSM 값을 자동 수집하여 설계 엔진에 전달
+                const props = await this._pythonBridge.call('get_properties', {
+                    node: this._model.node, elem: this._model.elem
+                });
+                // cutwp로 J, Cw, xo 보강
+                let cutwpProps: any = {};
+                try {
+                    cutwpProps = await this._pythonBridge.call('cutwp', {
+                        node: this._model.node, elem: this._model.elem
+                    });
+                } catch { /* cutwp 실패해도 진행 */ }
+
+                const rx_calc = props.A > 0 ? Math.sqrt((props.Ixx || 0) / props.A) : 0;
+                const ry_calc = props.A > 0 ? Math.sqrt((props.Izz || 0) / props.A) : 0;
+                const xo_val = cutwpProps.xo ?? props.xo ?? 0;
+                const ro_fallback = Math.sqrt(rx_calc ** 2 + ry_calc ** 2 + xo_val ** 2);
+
+                const mergedProps = {
+                    ...props,
+                    J: cutwpProps.J ?? props.J ?? 0,
+                    Cw: cutwpProps.Cw ?? props.Cw ?? 0,
+                    xo: xo_val,
+                    ro: cutwpProps.ro || ro_fallback,
+                    Sf: props.Sxx ?? (props.Ixx && props.zcg ? props.Ixx / Math.max(props.zcg, (props as any).h_web || 1) : 0),
+                    Sxx: props.Sxx ?? 0,
+                    Sy: props.Szz && props.xcg ? props.Szz / Math.max(Math.abs(props.xcg), 0.001) : (props.Sy ?? 0),
+                    Szz: props.Szz ?? 0,
+                    rx: props.rx ?? (props.A > 0 ? Math.sqrt(props.Ixx / props.A) : 0),
+                    ry: props.ry ?? (props.A > 0 ? Math.sqrt(props.Izz / props.A) : 0),
+                };
+
+                // DSM 값 자동 추출
+                let dsmValues: any = {};
+                try {
+                    const fy = options.Fy || 50;
+                    // 압축용 DSM
+                    const dsmP = await this._pythonBridge.call('dsm', {
+                        node: this._model.node, elem: this._model.elem,
+                        curve: this._lastAnalysisResult?.curve || [],
+                        fy, load_type: 'P',
+                    });
+                    // 휨용 DSM
+                    const dsmM = await this._pythonBridge.call('dsm', {
+                        node: this._model.node, elem: this._model.elem,
+                        curve: this._lastAnalysisResult?.curve || [],
+                        fy, load_type: 'Mxx',
+                    });
+                    dsmValues = {
+                        Pcrl: dsmP?.Pcrl ?? 0,
+                        Pcrd: dsmP?.Pcrd ?? 0,
+                        Py: dsmP?.Py ?? 0,
+                        Mcrl: dsmM?.Mcrl ?? 0,
+                        Mcrd: dsmM?.Mcrd ?? 0,
+                        My: dsmM?.My ?? 0,
+                    };
+                } catch { /* 해석 미실행 시 DSM 없이 진행 */ }
+
+                const designParams = {
+                    ...options,
+                    props: mergedProps,
+                    dsm: dsmValues,
+                };
+
+                const result = await this._pythonBridge.call('aisi_design', designParams);
+                this._postMessage('designResult', result);
+                return result;
+            }
+
+            case 'aisi_guide': {
+                const result = await this._pythonBridge.call('aisi_guide', options);
+                this._postMessage('designGuide', result);
+                return result;
+            }
+
+            case 'steel_grades': {
+                const result = await this._pythonBridge.call('steel_grades', {});
+                return result;
+            }
+
+            case 'web_crippling': {
+                const result = await this._pythonBridge.call('web_crippling', options);
+                return result;
+            }
+
+            case 'analyze_loads': {
+                const result = await this._pythonBridge.call('analyze_loads', options);
+                return result;
+            }
+
+            case 'calc_deck_stiffness': {
+                const result = await this._pythonBridge.call('calc_deck_stiffness', options);
+                return result;
+            }
+
+            case 'apply_deck_springs': {
+                // 데크 강성(kφ, kx)을 CUFSM 모델의 압축 플랜지에 스프링으로 적용
+                const kphi = options.kphi || 0;
+                const kx = options.kx || 0;
+                const flange_node = options.flange_node; // 압축 플랜지 중앙 노드 번호
+
+                if (!flange_node && this._model.node && this._model.node.length > 0) {
+                    // 자동: 최상단 노드(정모멘트) 또는 최하단 노드(부모멘트)
+                    const nodes = this._model.node;
+                    const topIdx = nodes.reduce((best: number, n: any, i: number) =>
+                        n[2] > (nodes[best]?.[2] ?? -Infinity) ? i : best, 0);
+                    const topNodeNum = nodes[topIdx][0];
+
+                    const springs: number[][] = [];
+                    if (kx > 0) {
+                        // [node, kx, kz, kq, x_off, z_off, 'foundation'=0]
+                        springs.push([topNodeNum, kx, 0, 0, 0, 0, 0]);
+                    }
+                    if (kphi > 0) {
+                        springs.push([topNodeNum, 0, 0, kphi, 0, 0, 0]);
+                    }
+                    (this._model as any).springs = springs;
+                    return { success: true, nsprings: springs.length, node: topNodeNum };
+                }
+                return { success: true, nsprings: 0 };
+            }
+
+            case 'design_purlin': {
+                // 퍼린 전체 설계 (analyze_loads → dual CUFSM → aisi_design)
+                if (!this._model.node || this._model.node.length === 0) {
+                    return { error: 'No section defined. Set up section in Preprocessor first.' };
+                }
+
+                // Step 1: 하중 분석
+                const loadResult = await this._pythonBridge.call('analyze_loads', options);
+
+                // Step 2: 데크 강성
+                const deckInfo = loadResult?.auto_params?.deck || { kphi: 0, kx: 0 };
+
+                // Step 3: 정모멘트 CUFSM (데크 스프링 ON)
+                const savedSprings = (this._model as any).springs || [];
+                await this.handleMcpAction({
+                    action: 'apply_deck_springs',
+                    kphi: deckInfo.kphi, kx: deckInfo.kx,
+                });
+                const analysisPos = await this._pythonBridge.analyze(this._model);
+                const fy = options.Fy || options.loads?.Fy || 55;
+                const dsmPos = await this._pythonBridge.call('dsm', {
+                    node: this._model.node, elem: this._model.elem,
+                    curve: analysisPos?.curve || [], fy, load_type: 'Mxx',
+                });
+
+                // Step 4: 부모멘트 CUFSM (스프링 OFF)
+                (this._model as any).springs = [];
+                const analysisNeg = await this._pythonBridge.analyze(this._model);
+                const dsmNeg = await this._pythonBridge.call('dsm', {
+                    node: this._model.node, elem: this._model.elem,
+                    curve: analysisNeg?.curve || [], fy, load_type: 'Mxx',
+                });
+
+                // 스프링 원복
+                (this._model as any).springs = savedSprings;
+
+                // Step 5: 단면 성질
+                const propsRaw = await this._pythonBridge.call('get_properties', {
+                    node: this._model.node, elem: this._model.elem
+                });
+                let cutwp: any = {};
+                try {
+                    cutwp = await this._pythonBridge.call('cutwp', {
+                        node: this._model.node, elem: this._model.elem
+                    });
+                } catch { }
+
+                const result = {
+                    load_analysis: loadResult,
+                    dsm_positive: dsmPos,
+                    dsm_negative: dsmNeg,
+                    props: propsRaw,
+                    cutwp: cutwp,
+                    deck: deckInfo,
+                };
+                this._postMessage('designPurlinResult', result);
+                return result;
+            }
+
             // --- #21: save_project ---
             case 'save_project': {
                 const fs = require('fs');
@@ -870,6 +1086,7 @@ export class CufsmPanel implements McpPanelInterface {
         <button class="tab-btn active" data-tab="preprocessor">Preprocessor</button>
         <button class="tab-btn" data-tab="analysis">Analysis</button>
         <button class="tab-btn" data-tab="postprocessor">Postprocessor</button>
+        <button class="tab-btn" data-tab="design">Design</button>
     </div>
 
     <!-- 탭 내용 -->
@@ -1061,6 +1278,242 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
             </div>
         </div>
+    <!-- ========== Design Tab ========== -->
+    <div id="tab-design" class="tab-panel">
+        <div class="panel-row">
+            <div class="panel-left" style="max-width:320px">
+                <h3>Material</h3>
+                <div class="input-row">
+                    <label>Steel Grade</label>
+                    <select id="select-steel-grade">
+                        <option value="custom">Custom</option>
+                        <optgroup label="ASTM A653 (Galvanized)">
+                            <option value="A653-33">A653 Gr.33 (33/45)</option>
+                            <option value="A653-50" selected>A653 Gr.50 (50/65)</option>
+                            <option value="A653-55">A653 Gr.55 (55/70)</option>
+                            <option value="A653-80">A653 Gr.80 (80/82)</option>
+                        </optgroup>
+                        <optgroup label="ASTM A792 (Al-Zn)">
+                            <option value="A792-33">A792 Gr.33 (33/45)</option>
+                            <option value="A792-50">A792 Gr.50 (50/65)</option>
+                            <option value="A792-80">A792 Gr.80 (80/82)</option>
+                        </optgroup>
+                        <optgroup label="ASTM A1003 (Structural)">
+                            <option value="A1003-33">A1003 SS-33 (33/45)</option>
+                            <option value="A1003-50">A1003 SS-50 (50/65)</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <div class="input-row">
+                    <label>Fy<span class="hint-inline">ksi</span></label>
+                    <input type="number" id="design-fy" value="50" step="1" style="width:55px">
+                    <label>Fu<span class="hint-inline">ksi</span></label>
+                    <input type="number" id="design-fu" value="65" step="1" style="width:55px">
+                </div>
+
+                <h3>Design Method</h3>
+                <div class="input-row">
+                    <select id="select-design-method" style="width:130px">
+                        <option value="LRFD">LRFD (φRn≥Ru)</option>
+                        <option value="ASD">ASD (Rn/Ω≥Ra)</option>
+                    </select>
+                    <select id="select-analysis-method" style="width:130px">
+                        <option value="DSM">DSM</option>
+                    </select>
+                </div>
+
+                <h3>Member Type</h3>
+                <div class="input-row">
+                    <select id="select-member-type">
+                        <optgroup label="Application (Calculator)">
+                            <option value="roof-purlin">Roof Purlin (지붕 퍼린)</option>
+                            <option value="floor-joist">Floor Joist (바닥 장선)</option>
+                            <option value="wall-girt">Wall Girt (벽체 거트)</option>
+                            <option value="wall-stud">Wall Stud (벽 스터드)</option>
+                        </optgroup>
+                        <optgroup label="General (Direct Input)">
+                            <option value="flexure">General Beam (휨)</option>
+                            <option value="compression">General Column (압축)</option>
+                            <option value="combined">Beam-Column (조합)</option>
+                            <option value="tension">Tension (인장)</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div id="calc-mode-section" style="display:none">
+                <h3 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">▸ Member Configuration</h3>
+                <div>
+                    <div class="input-row">
+                        <label>Span Type</label>
+                        <select id="select-span-type" style="width:140px">
+                            <option value="simple">Simple Span</option>
+                            <option value="cantilever">Cantilever</option>
+                            <option value="cont-2">2-Span Cont.</option>
+                            <option value="cont-3">3-Span Cont.</option>
+                            <option value="cont-4" selected>4-Span Cont.</option>
+                            <option value="cont-n">N-Span Cont.</option>
+                        </select>
+                        <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:40px;display:none" title="Number of spans">
+                    </div>
+                    <div class="input-row">
+                        <label>Span<span class="hint-inline">ft</span></label>
+                        <input type="number" id="config-span" value="25" step="0.5" style="width:55px">
+                        <label>Spacing<span class="hint-inline">ft</span></label>
+                        <input type="number" id="config-spacing" value="5" step="0.5" style="width:55px">
+                    </div>
+                    <div class="input-row" id="config-lap-row">
+                        <label>Lap L<span class="hint-inline">ft</span></label>
+                        <input type="number" id="config-lap-left" value="1.25" step="0.25" style="width:50px">
+                        <label>Lap R<span class="hint-inline">ft</span></label>
+                        <input type="number" id="config-lap-right" value="2.75" step="0.25" style="width:50px">
+                    </div>
+                </div>
+
+                <h3 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">▸ Service Loads</h3>
+                <div>
+                    <div class="input-row">
+                        <label>D<span class="hint-inline">psf</span></label>
+                        <input type="number" id="load-D-psf" value="3" step="0.5" style="width:50px">
+                        <span id="load-D-plf" class="hint-inline" style="min-width:50px">→15 PLF</span>
+                    </div>
+                    <div class="input-row" id="load-Lr-row">
+                        <label>Lr<span class="hint-inline">psf</span></label>
+                        <input type="number" id="load-Lr-psf" value="20" step="1" style="width:50px">
+                        <span id="load-Lr-plf" class="hint-inline" style="min-width:50px">→100 PLF</span>
+                    </div>
+                    <div class="input-row" id="load-S-row">
+                        <label>S<span class="hint-inline">psf</span></label>
+                        <input type="number" id="load-S-psf" value="0" step="1" style="width:50px">
+                        <span id="load-S-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
+                    </div>
+                    <div class="input-row" id="load-W-row">
+                        <label>Wu<span class="hint-inline">psf↑</span></label>
+                        <input type="number" id="load-Wu-psf" value="0" step="1" style="width:50px">
+                        <span id="load-Wu-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
+                    </div>
+                    <div class="input-row" id="load-L-row" style="display:none">
+                        <label>L<span class="hint-inline">psf</span></label>
+                        <input type="number" id="load-L-psf" value="0" step="1" style="width:50px">
+                        <span id="load-L-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
+                    </div>
+                </div>
+
+                <h3 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">▸ Deck & Bracing</h3>
+                <div>
+                    <div class="input-row">
+                        <label>Deck</label>
+                        <select id="select-deck-type" style="width:140px">
+                            <option value="through-fastened">Through-fastened</option>
+                            <option value="standing-seam">Standing Seam</option>
+                            <option value="none">None</option>
+                        </select>
+                    </div>
+                    <div class="input-row" id="deck-detail-row">
+                        <label>t<span class="hint-inline">in</span></label>
+                        <input type="number" id="deck-t-panel" value="0.018" step="0.001" style="width:55px">
+                        <label>@<span class="hint-inline">in</span></label>
+                        <input type="number" id="deck-fastener-spacing" value="12" step="1" style="width:40px">
+                    </div>
+                    <div class="input-row" id="deck-kphi-row">
+                        <label>kφ override<span class="hint-inline">k-in/rad/in</span></label>
+                        <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
+                    </div>
+                </div>
+
+                <button id="btn-analyze-loads" class="btn-secondary" style="margin-top:8px;width:100%">📊 Analyze Loads</button>
+                </div>
+
+                <h3 id="design-lengths-title">Unbraced Lengths</h3>
+                <div class="input-row" id="design-KxLx-row">
+                    <label>KxLx<span class="hint-inline">in</span></label>
+                    <input type="number" id="design-KxLx" value="120" step="1" style="width:65px">
+                    <label>KyLy</label>
+                    <input type="number" id="design-KyLy" value="120" step="1" style="width:65px">
+                </div>
+                <div class="input-row" id="design-KtLt-row">
+                    <label>KtLt<span class="hint-inline">in</span></label>
+                    <input type="number" id="design-KtLt" value="120" step="1" style="width:65px">
+                </div>
+                <div class="input-row" id="design-Cb-row">
+                    <label>Cb</label>
+                    <input type="number" id="design-Cb" value="1.0" step="0.01" style="width:65px">
+                </div>
+                <div class="input-row" id="design-Lb-row">
+                    <label>Lb<span class="hint-inline">in (LTB)</span></label>
+                    <input type="number" id="design-Lb" value="120" step="1" style="width:65px">
+                </div>
+                <div class="input-row" id="design-Cm-row" style="display:none">
+                    <label>Cmx</label>
+                    <input type="number" id="design-Cmx" value="0.85" step="0.01" style="width:55px">
+                    <label>Cmy</label>
+                    <input type="number" id="design-Cmy" value="0.85" step="0.01" style="width:55px">
+                </div>
+
+                <h3>Required Loads</h3>
+                <div class="input-row">
+                    <label>P<span class="hint-inline">kips</span></label>
+                    <input type="number" id="design-P" value="0" step="0.1" style="width:65px">
+                    <label>V<span class="hint-inline">kips</span></label>
+                    <input type="number" id="design-V" value="0" step="0.1" style="width:65px">
+                </div>
+                <div class="input-row">
+                    <label>Mx<span class="hint-inline">kip-in</span></label>
+                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px">
+                    <label>My<span class="hint-inline">kip-in</span></label>
+                    <input type="number" id="design-My" value="0" step="0.1" style="width:65px">
+                </div>
+
+                <div id="design-wc-section" style="display:none">
+                    <h3>Web Crippling (§G5)</h3>
+                    <div class="input-row">
+                        <label>N<span class="hint-inline">in</span></label>
+                        <input type="number" id="design-wc-N" value="3.5" step="0.1" style="width:55px">
+                        <label>R<span class="hint-inline">in</span></label>
+                        <input type="number" id="design-wc-R" value="0.1875" step="0.01" style="width:65px">
+                    </div>
+                    <div class="input-row">
+                        <label>Support</label>
+                        <select id="design-wc-support" style="width:120px">
+                            <option value="EOF">EOF (End 1-flange)</option>
+                            <option value="IOF">IOF (Int. 1-flange)</option>
+                            <option value="ETF">ETF (End 2-flange)</option>
+                            <option value="ITF">ITF (Int. 2-flange)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">Run Design Check</button>
+                <p class="hint" style="margin-top:6px">해석(Analysis) 실행 후 설계하면 DSM 좌굴값이 자동 연계됩니다.</p>
+            </div>
+
+            <div class="panel-right">
+                <div id="load-analysis-section" style="display:none">
+                <h3>Load Analysis Results</h3>
+                <div id="load-analysis-result" class="result-box" style="max-height:300px;overflow-y:auto;font-size:12px">
+                </div>
+                </div>
+
+                <h3>Design Summary</h3>
+                <div id="design-summary" class="result-box" style="min-height:80px">
+                    <p class="hint">Run design check to see results</p>
+                </div>
+
+                <h3>Step-by-Step Calculation</h3>
+                <div id="design-steps" class="result-box" style="max-height:450px;overflow-y:auto;font-family:monospace;font-size:12px">
+                </div>
+
+                <h3 id="design-interaction-title" style="display:none">Interaction Check (H1.2)</h3>
+                <div id="design-interaction" class="result-box" style="display:none">
+                </div>
+
+                <h3>Specification Reference</h3>
+                <div id="design-reference" class="result-box">
+                    <p class="hint">AISI S100-16 applicable sections will appear here</p>
+                </div>
+                <button id="btn-copy-report" class="btn-secondary" style="margin-top:8px;width:100%;display:none">Copy Report to Clipboard</button>
+            </div>
+        </div>
+    </div>
     </div>
 
     <script nonce="${nonce}" src="${scriptUri}"></script>

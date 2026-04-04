@@ -469,6 +469,280 @@ server.tool("get_energy_recovery", "Calculate element-wise strain energy (membra
 );
 
 // ============================================================
+// AISI S100-16 설계 도구
+// ============================================================
+
+server.tool("aisi_design_compression", "AISI S100-16 DSM compression member design (Chapters E2, E3.2, E4)",
+    {
+        design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        KxLx: z.number().describe("Effective length about x-axis (in)"),
+        KyLy: z.number().describe("Effective length about y-axis (in)"),
+        KtLt: z.number().optional().describe("Effective torsional length (in, default=KyLy)"),
+        Pu: z.number().optional().describe("Required axial strength (kips)"),
+    },
+    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Pu }) => {
+        const r = await callBridgePost('/action', {
+            action: 'aisi_design',
+            member_type: 'compression',
+            design_method: design_method || 'LRFD',
+            Fy: Fy || 50, Fu: Fu || 65,
+            KxLx, KyLy, KtLt: KtLt ?? KyLy,
+            Pu: Pu || 0,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Chapters F2, F3.2, F4)",
+    {
+        design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        Lb: z.number().describe("Unbraced length for LTB (in)"),
+        Cb: z.number().optional().describe("Moment gradient factor (default 1.0)"),
+        Mu: z.number().optional().describe("Required flexural strength (kip-in)"),
+    },
+    async ({ design_method, Fy, Fu, Lb, Cb, Mu }) => {
+        const r = await callBridgePost('/action', {
+            action: 'aisi_design',
+            member_type: 'flexure',
+            design_method: design_method || 'LRFD',
+            Fy: Fy || 50, Fu: Fu || 65,
+            Lb, Cb: Cb || 1.0,
+            Mu: Mu || 0,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("aisi_design_combined", "AISI S100-16 combined axial+bending design check (Chapter H1.2, C1 amplification)",
+    {
+        design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        KxLx: z.number().describe("Effective length x-axis (in)"),
+        KyLy: z.number().describe("Effective length y-axis (in)"),
+        KtLt: z.number().optional().describe("Effective torsional length (in)"),
+        Lb: z.number().describe("Unbraced length for LTB (in)"),
+        Cb: z.number().optional().describe("Moment gradient factor (default 1.0)"),
+        Cmx: z.number().optional().describe("Equivalent moment factor x-axis §C1 (default 0.85)"),
+        Cmy: z.number().optional().describe("Equivalent moment factor y-axis §C1 (default 0.85)"),
+        Pu: z.number().describe("Required axial strength (kips)"),
+        Mux: z.number().describe("Required moment about x-axis (kip-in)"),
+        Muy: z.number().optional().describe("Required moment about y-axis (kip-in)"),
+        Vu: z.number().optional().describe("Required shear (kips)"),
+    },
+    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Lb, Cb, Cmx, Cmy, Pu, Mux, Muy, Vu }) => {
+        const r = await callBridgePost('/action', {
+            action: 'aisi_design',
+            member_type: 'combined',
+            design_method: design_method || 'LRFD',
+            Fy: Fy || 50, Fu: Fu || 65,
+            KxLx, KyLy, KtLt: KtLt ?? KyLy,
+            Lb, Cb: Cb || 1.0,
+            Cmx: Cmx || 0.85, Cmy: Cmy || 0.85,
+            Pu, Mux, Muy: Muy || 0, Vu: Vu || 0,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("aisi_design_tension", "AISI S100-16 tension member design (Chapters D2, D3)",
+    {
+        design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        Fu: z.number().optional().describe("Ultimate stress ksi (default 65)"),
+        Tu: z.number().optional().describe("Required tensile force kips"),
+        An: z.number().optional().describe("Net section area in² (default = gross area)"),
+    },
+    async ({ design_method, Fy, Fu, Tu, An }) => {
+        const r = await callBridgePost('/action', {
+            action: 'aisi_design',
+            member_type: 'tension',
+            design_method: design_method || 'LRFD',
+            Fy: Fy || 50, Fu: Fu || 65,
+            Tu: Tu || 0, An,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("aisi_design_connection", "AISI S100-16 connection design (Chapter J) — bolt, screw, fillet/arc-spot/groove weld",
+    {
+        connection_type: z.enum(["bolt", "screw", "fillet_weld", "arc_spot", "arc_seam", "groove", "paf"]).describe("Connection type"),
+        design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
+        Fy: z.number().describe("Yield stress of connected sheet ksi"),
+        Fu: z.number().describe("Ultimate stress of connected sheet ksi"),
+        t1: z.number().describe("Thickness of sheet 1 (in)"),
+        t2: z.number().optional().describe("Thickness of sheet 2 (in, default = t1)"),
+        d: z.number().optional().describe("Bolt/screw diameter (in)"),
+        Fub: z.number().optional().describe("Bolt/screw ultimate strength ksi"),
+        n: z.number().optional().describe("Number of fasteners (default 1)"),
+        e: z.number().optional().describe("Edge distance (in)"),
+        s: z.number().optional().describe("Fastener spacing (in)"),
+        weld_length: z.number().optional().describe("Weld length (in, fillet/groove weld)"),
+        weld_size: z.number().optional().describe("Weld leg size (in, fillet weld)"),
+        da: z.number().optional().describe("Arc spot/seam weld visible diameter (in)"),
+        groove_type: z.enum(["complete", "partial"]).optional().describe("Groove weld type (default complete)"),
+        Fxx: z.number().optional().describe("Weld electrode strength ksi (default 60)"),
+        Fuf: z.number().optional().describe("PAF pin ultimate strength ksi (default 60)"),
+        Pu: z.number().optional().describe("Required force kips"),
+    },
+    async ({ connection_type, design_method, Fy, Fu, t1, t2, d, Fub, n, e, s, weld_length, weld_size, da, groove_type, Fxx, Fuf, Pu }) => {
+        const r = await callBridgePost('/action', {
+            action: 'aisi_design',
+            member_type: 'connection',
+            connection_type,
+            design_method: design_method || 'LRFD',
+            Fy, Fu, t1, t2: t2 || t1,
+            d, Fub, n: n || 1, e, s,
+            weld_length, weld_size, da,
+            groove_type: groove_type || 'complete',
+            Fxx: Fxx || 60, Fuf: Fuf || 60,
+            Pu: Pu || 0,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("steel_grades", "List available CFS steel grades (ASTM A653, A792, A1003) with Fy/Fu values",
+    {},
+    async () => {
+        const r = await callBridgePost('/action', { action: 'steel_grades' });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("aisi_design_guide", "Get AISI S100-16 design workflow guide for AI — returns steps, formulas, examples",
+    {
+        query_type: z.enum(["column", "beam", "beam_column", "tension", "connection"]).describe("Design type"),
+    },
+    async ({ query_type }) => {
+        const r = await callBridgePost('/action', {
+            action: 'aisi_guide',
+            query_type,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling strength calculation",
+    {
+        h: z.number().describe("Web flat width (in)"),
+        t: z.number().describe("Web thickness (in)"),
+        R: z.number().describe("Inside bend radius (in)"),
+        N: z.number().describe("Bearing length (in)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        theta: z.number().optional().describe("Angle between web and bearing surface deg (default 90)"),
+        support: z.enum(["EOF", "IOF", "ETF", "ITF"]).optional().describe("Support condition (default EOF)"),
+        fastened: z.enum(["fastened", "unfastened"]).optional().describe("Fastened to support? (default fastened)"),
+    },
+    async ({ h, t, R, N, Fy, theta, support, fastened }) => {
+        const r = await callBridgePost('/action', {
+            action: 'web_crippling',
+            h, t, R, N,
+            Fy: Fy || 50,
+            theta: theta || 90,
+            support: support || 'EOF',
+            fastened: fastened || 'fastened',
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("analyze_loads", "Analyze service loads → structural analysis → required strengths for CFS members (purlins, joists, studs)",
+    {
+        member_app: z.enum(["roof-purlin", "floor-joist", "wall-girt", "wall-stud"]).describe("Application type"),
+        span_type: z.enum(["simple", "cont-2", "cont-3", "cont-4", "cont-n"]).describe("Span configuration"),
+        span_ft: z.number().describe("Span length in feet"),
+        loads: z.object({
+            D: z.number().optional().describe("Dead load PLF"),
+            L: z.number().optional().describe("Floor live load PLF"),
+            Lr: z.number().optional().describe("Roof live load PLF"),
+            S: z.number().optional().describe("Snow load PLF"),
+            W: z.number().optional().describe("Wind load PLF (negative=uplift)"),
+        }).describe("Service loads in PLF"),
+        design_method: z.enum(["ASD", "LRFD"]).optional().describe("Design method (default LRFD)"),
+        spacing_ft: z.number().optional().describe("Member spacing ft (default 5)"),
+        laps: z.object({
+            left_ft: z.number().optional(),
+            right_ft: z.number().optional(),
+        }).optional().describe("Lap lengths at supports"),
+        deck: z.object({
+            type: z.enum(["through-fastened", "standing-seam", "none"]).optional(),
+            t_panel: z.number().optional().describe("Panel thickness in."),
+            fastener_spacing: z.number().optional().describe("Fastener spacing in. (default 12)"),
+            kphi_override: z.number().optional().describe("Override rotational stiffness kip-in/rad/in"),
+        }).optional().describe("Deck/panel properties"),
+    },
+    async ({ member_app, span_type, span_ft, loads, design_method, spacing_ft, laps, deck }) => {
+        const r = await callBridgePost('/action', {
+            action: 'analyze_loads',
+            member_app, span_type, span_ft,
+            loads: loads || {},
+            design_method: design_method || 'LRFD',
+            spacing_ft: spacing_ft || 5.0,
+            laps, deck,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("calc_deck_stiffness", "Calculate deck/panel rotational (kφ) and lateral (kx) stiffness for CFS design",
+    {
+        t_panel: z.number().describe("Panel thickness (in)"),
+        t_purlin: z.number().describe("Purlin thickness (in)"),
+        fastener_spacing: z.number().optional().describe("Fastener spacing in. (default 12)"),
+        flange_width: z.number().optional().describe("Flange width in. (default 2.5)"),
+    },
+    async ({ t_panel, t_purlin, fastener_spacing, flange_width }) => {
+        const r = await callBridgePost('/action', {
+            action: 'calc_deck_stiffness',
+            t_panel, t_purlin,
+            fastener_spacing: fastener_spacing || 12,
+            flange_width: flange_width || 2.5,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("design_purlin", "Complete purlin design: analyze loads → dual CUFSM (positive/negative moment with deck springs) → DSM design",
+    {
+        member_app: z.enum(["roof-purlin", "floor-joist", "wall-girt", "wall-stud"]).describe("Application type"),
+        span_type: z.string().describe("Span type: simple, cantilever, cont-2, cont-3, cont-4, cont-N"),
+        span_ft: z.number().describe("Span length in feet"),
+        loads: z.object({
+            D: z.number().optional(),
+            L: z.number().optional(),
+            Lr: z.number().optional(),
+            S: z.number().optional(),
+            W: z.number().optional(),
+        }).describe("Service loads in PLF"),
+        design_method: z.enum(["ASD", "LRFD"]).optional(),
+        Fy: z.number().optional().describe("Yield stress ksi"),
+        spacing_ft: z.number().optional(),
+        laps: z.object({
+            left_ft: z.number().optional(),
+            right_ft: z.number().optional(),
+        }).optional(),
+        deck: z.object({
+            type: z.enum(["through-fastened", "standing-seam", "none"]).optional(),
+            t_panel: z.number().optional(),
+            fastener_spacing: z.number().optional(),
+            kphi_override: z.number().optional(),
+        }).optional(),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', {
+            action: 'design_purlin', ...params,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+// ============================================================
 // 서버 시작
 // ============================================================
 async function main() {
