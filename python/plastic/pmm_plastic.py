@@ -1,101 +1,126 @@
-"""소성 상호작용곡면 생성 (P-Mxx-Mzz)
+"""소성 상호작용곡면 생성 (P-M11-M22)
 
 참조: 프로젝트개요.md §5.4 소성 해석
 원본: Ref_Source/analysis/plastic/PMM_Plastic.m, fiber4elem.m
 
-파이버 기반 단면 이산화로 P-Mxx-Mzz 소성 상호작용 곡면을 생성한다.
+파이버 기반 단면 이산화로 P-M11-M22 소성 상호작용 곡면을 생성한다.
+주축(principal axis) 좌표계에서 계산하여 정규화된 결과를 반환한다.
 """
 
 import math
 
 import numpy as np
 
+from engine.properties import grosprop
+from engine.stress import yieldMP
+
 
 def pmm_plastic(node: np.ndarray, elem: np.ndarray,
-                fy: float, n_theta: int = 36, n_phi: int = 19) -> dict:
-    """소성 상호작용곡면 계산
+                fy: float, n_theta: int = 36, n_na: int = 21) -> dict:
+    """소성 상호작용곡면 계산 (주축 좌표계)
+
+    MATLAB PMM_Plastic.m 알고리즘을 충실히 포팅:
+    1. 파이버 생성 → 도심 이동 → 주축 회전
+    2. 중립축 각도(theta) × 위치(e) 를 순회하며 (P, M11, M22) 계산
+    3. 항복값(Py, M11_y, M22_y)으로 정규화
 
     Args:
-        node: (nnodes, 8) — 절점 좌표 (1-based)
-        elem: (nelems, 5) — 요소 (1-based)
+        node: (nnodes, 8) — 절점 배열
+        elem: (nelems, 5) — 요소 배열
         fy: 항복 응력
-        n_theta: theta 분할 수 (방위각)
-        n_phi: phi 분할 수 (극각)
+        n_theta: 중립축 각도 분할 수
+        n_na: 중립축 위치 분할 수
 
     Returns:
-        dict: {
-            'P': (n_points,), 'Mxx': (n_points,), 'Mzz': (n_points,),
-            'theta': (n_points,), 'phi': (n_points,)
-        }
+        dict: 정규화된 곡면 + 항복값 + 메타 정보
     """
-    # 파이버 생성
+    # --- 단면 성질 ---
+    props = grosprop(node, elem)
+    A = props['A']
+    xcg, zcg = props['xcg'], props['zcg']
+    Ixx, Izz, Ixz = props['Ixx'], props['Izz'], props['Ixz']
+    thetap = props['thetap']
+    I11, I22 = props['I11'], props['I22']
+
+    # --- 항복값 ---
+    ymp = yieldMP(node, fy, A, xcg, zcg, Ixx, Izz, Ixz, thetap, I11, I22)
+    Py = ymp['Py']
+    M11_y = ymp['M11_y']
+    M22_y = ymp['M22_y']
+    Mxx_y = ymp['Mxx_y']
+    Mzz_y = ymp['Mzz_y']
+
+    # --- 파이버 생성 ---
     fibers = _create_fibers(node, elem)
     n_fibers = len(fibers)
 
-    # 각 파이버: (x, z, area)
-    # 전소성 상태: 모든 파이버가 +fy 또는 -fy
+    # --- 도심 이동 + 주축 회전 ---
+    th_rad = math.radians(-thetap)
+    cos_r = math.cos(th_rad)
+    sin_r = math.sin(th_rad)
 
-    P_list = []
-    Mxx_list = []
-    Mzz_list = []
-    theta_list = []
-    phi_list = []
+    fib_x = np.empty(n_fibers)
+    fib_z = np.empty(n_fibers)
+    fib_a = np.empty(n_fibers)
 
-    # 도심 계산
-    total_A = sum(f[2] for f in fibers)
-    xcg = sum(f[0] * f[2] for f in fibers) / total_A if total_A > 0 else 0
-    zcg = sum(f[1] * f[2] for f in fibers) / total_A if total_A > 0 else 0
+    for i, (x, z, area) in enumerate(fibers):
+        dx = x - xcg
+        dz = z - zcg
+        fib_x[i] = cos_r * dx - sin_r * dz
+        fib_z[i] = sin_r * dx + cos_r * dz
+        fib_a[i] = area
 
-    # P-M 상호작용: 중립축 위치/각도를 변화시키면서 계산
-    for i_theta in range(n_theta):
-        theta = 2 * math.pi * i_theta / n_theta  # 중립축 방향
+    # --- 중립축 순회 ---
+    thetas = np.linspace(0, 2 * math.pi, n_theta, endpoint=False)
+
+    P_grid = np.zeros((n_na, n_theta))
+    M11_grid = np.zeros((n_na, n_theta))
+    M22_grid = np.zeros((n_na, n_theta))
+
+    for k in range(n_theta):
+        theta = thetas[k]
         cos_t = math.cos(theta)
         sin_t = math.sin(theta)
 
-        for i_phi in range(n_phi + 1):
-            # 중립축 위치 (-최대 ~ +최대)
-            phi = -1.0 + 2.0 * i_phi / n_phi
+        # 각 파이버의 중립축까지 거리 (MATLAB: CL = z*cos(theta) - x*sin(theta) - e)
+        dists = fib_z * cos_t - fib_x * sin_t
 
-            # 중립축까지의 거리 기반 스케일
-            dists = [(f[0] - xcg) * cos_t + (f[1] - zcg) * sin_t for f in fibers]
-            d_min = min(dists) if dists else 0
-            d_max = max(dists) if dists else 0
-            d_range = d_max - d_min if d_max != d_min else 1.0
+        # 중립축 범위 (MATLAB: emin ~ emax, 약간 여유)
+        d_min = np.min(dists)
+        d_max = np.max(dists)
+        r = max(abs(d_min), abs(d_max)) * 1.02
+        na_positions = np.linspace(-r, r, n_na)
 
-            # 중립축 위치
-            na_pos = d_min + (phi + 1) / 2.0 * d_range
+        for i in range(n_na):
+            e = na_positions[i]
+            CL = dists - e  # 각 파이버의 중립축 대비 위치
 
-            # 각 파이버의 응력 결정
-            P = 0.0
-            Mxx = 0.0
-            Mzz = 0.0
+            # 응력 결정: CL > 0 → -fy, CL < 0 → +fy, CL == 0 → 0
+            stress = np.where(CL > 0, -fy, np.where(CL < 0, fy, 0.0))
+            force = stress * fib_a
 
-            for f_idx in range(n_fibers):
-                x, z, area = fibers[f_idx]
-                dist = (x - xcg) * cos_t + (z - zcg) * sin_t
+            P_grid[i, k] = np.sum(force)
+            M11_grid[i, k] = -np.sum(force * fib_z)  # M about axis 1
+            M22_grid[i, k] = -np.sum(force * fib_x)  # M about axis 2
 
-                if dist >= na_pos:
-                    stress = fy
-                else:
-                    stress = -fy
-
-                force = stress * area
-                P += force
-                Mxx += force * (z - zcg)
-                Mzz += force * (x - xcg)
-
-            P_list.append(P)
-            Mxx_list.append(Mxx)
-            Mzz_list.append(Mzz)
-            theta_list.append(theta)
-            phi_list.append(phi)
+    # --- 정규화 ---
+    P_n = P_grid / Py if abs(Py) > 1e-20 else P_grid
+    M11_n = M11_grid / M11_y if abs(M11_y) > 1e-20 else M11_grid
+    M22_n = M22_grid / M22_y if abs(M22_y) > 1e-20 else M22_grid
 
     return {
-        'P': np.array(P_list),
-        'Mxx': np.array(Mxx_list),
-        'Mzz': np.array(Mzz_list),
-        'theta': np.array(theta_list),
-        'phi': np.array(phi_list),
+        'P': P_n,
+        'M11': M11_n,
+        'M22': M22_n,
+        'Py': float(Py),
+        'M11_y': float(M11_y),
+        'M22_y': float(M22_y),
+        'Mxx_y': float(Mxx_y),
+        'Mzz_y': float(Mzz_y),
+        'thetap': float(thetap),
+        'fy': float(fy),
+        'n_theta': n_theta,
+        'n_na': n_na,
     }
 
 

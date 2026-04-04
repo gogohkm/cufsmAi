@@ -128,11 +128,18 @@ def handle_request(request: dict) -> dict:
             fy = params.get('fy', 50.0)
             result = pmm_plastic(node, elem, fy)
             return {'id': req_id, 'result': {
-                'P': result['P'].tolist(),
-                'Mxx': result['Mxx'].tolist(),
-                'Mzz': result['Mzz'].tolist(),
-                'theta': result['theta'].tolist(),
-                'fy': fy,
+                'P': result['P'].flatten().tolist(),
+                'M11': result['M11'].flatten().tolist(),
+                'M22': result['M22'].flatten().tolist(),
+                'Py': result['Py'],
+                'M11_y': result['M11_y'],
+                'M22_y': result['M22_y'],
+                'Mxx_y': result['Mxx_y'],
+                'Mzz_y': result['Mzz_y'],
+                'thetap': result['thetap'],
+                'fy': result['fy'],
+                'n_theta': result['n_theta'],
+                'n_na': result['n_na'],
             }}
 
         elif method == 'load_mat':

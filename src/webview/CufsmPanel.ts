@@ -1036,12 +1036,12 @@ export class CufsmPanel implements McpPanelInterface {
                     <p class="hint">cFSM 기반 모드 분류. 각 반파장에서 1차 좌굴 모드의 G/D/L/O 구성비를 누적 영역으로 표시합니다.</p>
                     <canvas id="classify-curve-canvas" width="700" height="200"></canvas>
                     <h3>Plastic Interaction Surface</h3>
-                    <p class="hint">P-Mxx 소성 상호작용 곡면. 중립축 위치/각도를 변화시켜 전소성 상태의 축력-모멘트 조합을 계산합니다.</p>
+                    <p class="hint">주축(principal axis) 좌표계 기준 P-M 소성 상호작용 다이어그램. 항복값으로 정규화된 축력-모멘트 조합을 표시합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
                         <label>fy<span class="hint-inline">항복응력</span></label><input type="number" id="input-fy" value="50" step="5" style="width:60px">
                         <button id="btn-run-plastic" class="btn-small">곡면 생성</button>
                     </div>
-                    <canvas id="plastic-surface-canvas" width="500" height="400"></canvas>
+                    <canvas id="plastic-surface-canvas" width="700" height="420"></canvas>
                 </div>
                 <div class="panel-right">
                     <h3>Mode Shape</h3>

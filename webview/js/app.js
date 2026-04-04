@@ -437,65 +437,151 @@
     }
 
     function renderPlasticSurface(data) {
-        // Babylon.js 3D 우선 시도
-        if (window.CufsmViewer3D && window.CufsmViewer3D.renderPlastic) {
-            try {
-                window.CufsmViewer3D.renderPlastic(data);
-                return;
-            } catch (e) {
-                console.warn('Babylon.js plastic surface failed:', e);
-            }
-        }
-
-        // Canvas 2D — P-Mxx 소성 상호작용 다이어그램
-        const canvas = document.getElementById('plastic-surface-canvas');
+        const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('plastic-surface-canvas'));
         if (!canvas || !data || !data.P) { return; }
         const ctx = canvas.getContext('2d');
         if (!ctx) { return; }
-        const w = canvas.width, h = canvas.height;
-        const pad = { top: 30, right: 30, bottom: 50, left: 70 };
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
 
-        ctx.clearRect(0, 0, w, h);
         const style = getComputedStyle(document.body);
         const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
         const gridColor = style.getPropertyValue('--vscode-panel-border').trim() || '#333';
 
-        const P = data.P, Mxx = data.Mxx;
+        const P = data.P, M11 = data.M11, M22 = data.M22;
+        if (!M11 || !M22) { return; }
 
-        // 핵심 수치 추출
-        const Py_pos = Math.max(...P);           // 인장 항복 축력
-        const Py_neg = Math.min(...P);           // 압축 항복 축력
-        const My_pos = Math.max(...Mxx);         // 양 항복 모멘트
-        const My_neg = Math.min(...Mxx);         // 음 항복 모멘트
-        const pMax = Math.max(Math.abs(Py_pos), Math.abs(Py_neg)) * 1.1 || 1;
-        const mMax = Math.max(Math.abs(My_pos), Math.abs(My_neg)) * 1.1 || 1;
+        // --- Convex Hull 추출 (정규화된 좌표) ---
+        const pts11 = [], pts22 = [];
+        for (let i = 0; i < P.length; i++) {
+            pts11.push([M11[i], P[i]]);
+            pts22.push([M22[i], P[i]]);
+        }
+        const hull11 = _convexHull(pts11);
+        const hull22 = _convexHull(pts22);
 
-        const plotL = pad.left, plotR = w - pad.right;
-        const plotT = pad.top, plotB = h - pad.bottom;
-        const toX = (m) => plotL + (m / mMax + 1) / 2 * (plotR - plotL);
-        const toY = (p) => plotB - (p / pMax + 1) / 2 * (plotB - plotT);
+        // --- 두 차트 영역 설정 ---
+        const gap = 20;
+        const chartW = Math.floor((W - gap) / 2);
+        const infoH = 50; // 하단 정보 영역
+        const chartH = H - infoH;
+
+        // 왼쪽: P/Py vs M11/M11y
+        _drawPMChart(ctx, hull11, 0, 0, chartW, chartH,
+            'P/Py vs M\u2081\u2081/M\u2081\u2081y', 'M\u2081\u2081 / M\u2081\u2081y', 'P / Py',
+            '#4fc3f7', 'rgba(79,195,247,', fg, gridColor);
+
+        // 오른쪽: P/Py vs M22/M22y
+        _drawPMChart(ctx, hull22, chartW + gap, 0, chartW, chartH,
+            'P/Py vs M\u2082\u2082/M\u2082\u2082y', 'M\u2082\u2082 / M\u2082\u2082y', 'P / Py',
+            '#ff7043', 'rgba(255,112,67,', fg, gridColor);
+
+        // --- 하단 정보 패널 ---
+        const fy = data.fy || '?';
+        const tp = (data.thetap || 0).toFixed(1);
+        const infoY = chartH + 8;
+
+        ctx.fillStyle = 'rgba(30,30,30,0.85)';
+        ctx.fillRect(0, chartH, W, infoH);
+
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#4fc3f7';
+        const c1x = 10;
+        ctx.fillText(`Py = ${(data.Py || 0).toFixed(2)}`, c1x, infoY + 14);
+        ctx.fillText(`M\u2081\u2081y = ${(data.M11_y || 0).toFixed(2)}`, c1x, infoY + 30);
+
+        ctx.fillStyle = '#ff7043';
+        const c2x = 185;
+        ctx.fillText(`M\u2082\u2082y = ${(data.M22_y || 0).toFixed(2)}`, c2x, infoY + 14);
+        ctx.fillText(`\u03B8p = ${tp}\u00B0`, c2x, infoY + 30);
+
+        ctx.fillStyle = '#aaa';
+        const c3x = 370;
+        ctx.fillText(`fy = ${fy} ksi`, c3x, infoY + 14);
+        ctx.fillText(`Mxxy = ${(data.Mxx_y || 0).toFixed(2)}  Mzzy = ${(data.Mzz_y || 0).toFixed(2)}`, c3x, infoY + 30);
+    }
+
+    /**
+     * P-M 상호작용 다이어그램 1개 그리기 (정규화된 좌표)
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {number[][]} hull - convex hull [[m, p], ...]
+     * @param {number} ox - 차트 영역 왼쪽 x
+     * @param {number} oy - 차트 영역 위쪽 y
+     * @param {number} cw - 차트 영역 너비
+     * @param {number} ch - 차트 영역 높이
+     * @param {string} title - 차트 제목
+     * @param {string} xLabel - x축 라벨
+     * @param {string} yLabel - y축 라벨
+     * @param {string} color - 곡선/채움 색상
+     * @param {string} colorBase - rgba 접두어 (예: 'rgba(79,195,247,')
+     * @param {string} fg - 전경색
+     * @param {string} gridColor - 그리드색
+     */
+    function _drawPMChart(ctx, hull, ox, oy, cw, ch,
+                          title, xLabel, yLabel, color, colorBase, fg, gridColor) {
+        const pad = { top: 28, right: 12, bottom: 38, left: 48 };
+        const plotL = ox + pad.left;
+        const plotR = ox + cw - pad.right;
+        const plotT = oy + pad.top;
+        const plotB = oy + ch - pad.bottom;
+        const pw = plotR - plotL;
+        const ph = plotB - plotT;
+
+        // 데이터 범위 (정규화 → 대략 ±1.x)
+        let mMin = 0, mMax = 0, pMin = 0, pMax = 0;
+        hull.forEach(pt => {
+            if (pt[0] < mMin) { mMin = pt[0]; }
+            if (pt[0] > mMax) { mMax = pt[0]; }
+            if (pt[1] < pMin) { pMin = pt[1]; }
+            if (pt[1] > pMax) { pMax = pt[1]; }
+        });
+        // 대칭 범위 + 10% 여유
+        const mAbs = Math.max(Math.abs(mMin), Math.abs(mMax), 0.1) * 1.15;
+        const pAbs = Math.max(Math.abs(pMin), Math.abs(pMax), 0.1) * 1.15;
+
+        const toX = (m) => plotL + (m / mAbs + 1) / 2 * pw;
+        const toY = (p) => plotB - (p / pAbs + 1) / 2 * ph;
+
+        // --- 배경 ---
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(plotL, plotT, pw, ph);
+        ctx.clip();
 
         // --- 그리드 ---
         ctx.strokeStyle = gridColor;
-        ctx.lineWidth = 0.5;
-        // 수직/수평 중심선
-        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 0.4;
+        const ticks = [-1.0, -0.5, 0.5, 1.0];
+        ticks.forEach(v => {
+            // 수직선 (M축)
+            if (Math.abs(v) <= mAbs) {
+                const x = toX(v);
+                ctx.beginPath(); ctx.moveTo(x, plotT); ctx.lineTo(x, plotB); ctx.stroke();
+            }
+            // 수평선 (P축)
+            if (Math.abs(v) <= pAbs) {
+                const y = toY(v);
+                ctx.beginPath(); ctx.moveTo(plotL, y); ctx.lineTo(plotR, y); ctx.stroke();
+            }
+        });
+
+        // 중심축 (진한 점선)
+        ctx.strokeStyle = fg;
+        ctx.lineWidth = 0.6;
+        ctx.globalAlpha = 0.4;
+        ctx.setLineDash([4, 3]);
         ctx.beginPath(); ctx.moveTo(toX(0), plotT); ctx.lineTo(toX(0), plotB); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(plotL, toY(0)); ctx.lineTo(plotR, toY(0)); ctx.stroke();
         ctx.setLineDash([]);
+        ctx.globalAlpha = 1.0;
 
-        // --- Convex Hull로 깨끗한 외곽 면 ---
-        const allPts = [];
-        for (let i = 0; i < P.length; i++) {
-            allPts.push([Mxx[i], P[i]]);
-        }
-        const hull = _convexHull(allPts);
-
+        // --- 상호작용 곡면 채움 ---
         if (hull.length > 2) {
-            // 면 채움 (그라디언트)
-            const grad = ctx.createRadialGradient(toX(0), toY(0), 0, toX(0), toY(0), (plotR - plotL) * 0.6);
-            grad.addColorStop(0, 'rgba(79,195,247,0.25)');
-            grad.addColorStop(1, 'rgba(79,195,247,0.05)');
+            const cx0 = toX(0), cy0 = toY(0);
+            const grad = ctx.createRadialGradient(cx0, cy0, 0, cx0, cy0, pw * 0.55);
+            grad.addColorStop(0, colorBase + '0.30)');
+            grad.addColorStop(1, colorBase + '0.05)');
             ctx.fillStyle = grad;
             ctx.beginPath();
             hull.forEach((pt, i) => {
@@ -506,7 +592,7 @@
             ctx.fill();
 
             // 외곽선
-            ctx.strokeStyle = '#4fc3f7';
+            ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.beginPath();
             hull.forEach((pt, i) => {
@@ -517,85 +603,78 @@
             ctx.stroke();
         }
 
-        // --- 핵심 점 마커 + 수치 ---
-        const keyPoints = [
-            { m: 0,      p: Py_pos,  label: `Py = ${Py_pos.toFixed(1)}`,  align: 'left',  dx: 8,  dy: -8,  color: '#ff5722' },
-            { m: 0,      p: Py_neg,  label: `Py = ${Py_neg.toFixed(1)}`,  align: 'left',  dx: 8,  dy: 14,  color: '#ff5722' },
-            { m: My_pos, p: 0,       label: `My = ${My_pos.toFixed(1)}`,  align: 'left',  dx: 6,  dy: -8,  color: '#ffab00' },
-            { m: My_neg, p: 0,       label: `My = ${My_neg.toFixed(1)}`,  align: 'right', dx: -6, dy: -8,  color: '#ffab00' },
+        // --- 핵심 마커: ±1 포인트 ---
+        const markers = [
+            { m: 0, p: 1,  label: '1.0',  dx: 6,  dy: -6 },
+            { m: 0, p: -1, label: '-1.0', dx: 6,  dy: 14 },
+            { m: 1, p: 0,  label: '1.0',  dx: 4,  dy: -6 },
+            { m: -1, p: 0, label: '-1.0', dx: -4, dy: -6 },
         ];
-
-        keyPoints.forEach(kp => {
-            const px = toX(kp.m), py = toY(kp.p);
-            // 마커
+        markers.forEach(mk => {
+            if (Math.abs(mk.m) > mAbs || Math.abs(mk.p) > pAbs) { return; }
+            const px = toX(mk.m), py = toY(mk.p);
+            // 마커 점
             ctx.beginPath();
-            ctx.arc(px, py, 5, 0, 2 * Math.PI);
-            ctx.fillStyle = kp.color;
+            ctx.arc(px, py, 4, 0, 2 * Math.PI);
+            ctx.fillStyle = color;
             ctx.fill();
-            ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+            ctx.lineWidth = 1;
             ctx.stroke();
             // 라벨
-            ctx.font = 'bold 11px sans-serif';
-            ctx.fillStyle = kp.color;
-            ctx.textAlign = kp.align;
-            ctx.fillText(kp.label, px + kp.dx, py + kp.dy);
+            ctx.font = 'bold 10px sans-serif';
+            ctx.fillStyle = color;
+            ctx.textAlign = mk.dx < 0 ? 'right' : 'left';
+            ctx.fillText(mk.label, px + mk.dx, py + mk.dy);
         });
+
+        ctx.restore(); // clip 해제
+
+        // --- 축 눈금 라벨 ---
+        ctx.font = '9px sans-serif';
+        ctx.fillStyle = fg;
+        ctx.globalAlpha = 0.7;
+        // X축 눈금
+        ctx.textAlign = 'center';
+        [-1.0, -0.5, 0, 0.5, 1.0].forEach(v => {
+            if (Math.abs(v) > mAbs) { return; }
+            const x = toX(v);
+            if (x < plotL + 5 || x > plotR - 5) { return; }
+            ctx.fillText(v.toFixed(1), x, plotB + 12);
+        });
+        // Y축 눈금
+        ctx.textAlign = 'right';
+        [-1.0, -0.5, 0, 0.5, 1.0].forEach(v => {
+            if (Math.abs(v) > pAbs) { return; }
+            const y = toY(v);
+            if (y < plotT + 5 || y > plotB - 5) { return; }
+            ctx.fillText(v.toFixed(1), plotL - 4, y + 3);
+        });
+        ctx.globalAlpha = 1.0;
 
         // --- 축 라벨 ---
         ctx.fillStyle = fg;
-        ctx.font = '12px sans-serif';
+        ctx.font = '11px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Mxx (kip-in)', w / 2, h - 5);
+        ctx.fillText(xLabel, (plotL + plotR) / 2, plotB + 28);
         ctx.save();
-        ctx.translate(14, h / 2);
+        ctx.translate(ox + 11, (plotT + plotB) / 2);
         ctx.rotate(-Math.PI / 2);
-        ctx.fillText('P (kips)', 0, 0);
+        ctx.fillText(yLabel, 0, 0);
         ctx.restore();
 
-        // --- 축 눈금 ---
-        ctx.font = '10px sans-serif';
-        ctx.fillStyle = fg;
-        // X축
-        ctx.textAlign = 'center';
-        const mStep = _niceStep(mMax * 2, 6);
-        for (let mv = -Math.floor(mMax / mStep) * mStep; mv <= mMax; mv += mStep) {
-            if (Math.abs(mv) < mStep * 0.01) { continue; }
-            const px = toX(mv);
-            if (px < plotL + 10 || px > plotR - 10) { continue; }
-            ctx.fillText(mv.toFixed(0), px, plotB + 16);
-            ctx.strokeStyle = gridColor; ctx.lineWidth = 0.3;
-            ctx.beginPath(); ctx.moveTo(px, plotT); ctx.lineTo(px, plotB); ctx.stroke();
-        }
-        // Y축
-        ctx.textAlign = 'right';
-        const pStep = _niceStep(pMax * 2, 6);
-        for (let pv = -Math.floor(pMax / pStep) * pStep; pv <= pMax; pv += pStep) {
-            if (Math.abs(pv) < pStep * 0.01) { continue; }
-            const py = toY(pv);
-            if (py < plotT + 5 || py > plotB - 5) { continue; }
-            ctx.fillText(pv.toFixed(1), plotL - 6, py + 4);
-            ctx.strokeStyle = gridColor; ctx.lineWidth = 0.3;
-            ctx.beginPath(); ctx.moveTo(plotL, py); ctx.lineTo(plotR, py); ctx.stroke();
-        }
+        // --- 차트 프레임 ---
+        ctx.strokeStyle = fg;
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(plotL, plotT, pw, ph);
+        ctx.globalAlpha = 1.0;
 
-        // --- 정보 박스 (우상단) ---
-        const infoLines = [
-            `Py(+) = ${Py_pos.toFixed(2)} kips`,
-            `Py(-) = ${Py_neg.toFixed(2)} kips`,
-            `My(+) = ${My_pos.toFixed(1)} kip-in`,
-            `My(-) = ${My_neg.toFixed(1)} kip-in`,
-            `fy = ${data.fy || '?'} ksi`,
-        ];
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'right';
-        const boxW = 170, boxH = infoLines.length * 14 + 8;
-        ctx.fillStyle = 'rgba(30,30,30,0.85)';
-        ctx.fillRect(plotR - boxW - 4, plotT + 4, boxW, boxH);
-        ctx.fillStyle = '#aaa';
-        infoLines.forEach((line, i) => {
-            ctx.fillText(line, plotR - 10, plotT + 18 + i * 14);
-        });
+        // --- 제목 ---
+        ctx.fillStyle = color;
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(title, (plotL + plotR) / 2, oy + 16);
     }
 
     // 축 눈금 간격 계산 (1, 2, 5, 10, 20, 50, ... 패턴)
