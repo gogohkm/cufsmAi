@@ -1423,6 +1423,118 @@
     // Design 탭 — AISI S100-16 설계
     // ============================================================
 
+    // --- Collapsible section toggle ---
+    document.querySelectorAll('#tab-design .collapsible').forEach(h3 => {
+        h3.addEventListener('click', () => {
+            const body = h3.nextElementSibling;
+            if (!body) return;
+            const expanded = h3.dataset.expanded === 'true';
+            body.style.display = expanded ? 'none' : 'block';
+            const icon = h3.querySelector('.collapse-icon');
+            if (icon) icon.textContent = expanded ? '▸' : '▾';
+            h3.dataset.expanded = String(!expanded);
+        });
+    });
+
+    // --- Step indicator ---
+    function setDesignStep(stepNum, markDone) {
+        document.querySelectorAll('#design-step-indicator .step-item').forEach(el => {
+            const s = parseInt(el.dataset.step);
+            el.classList.toggle('active', s === stepNum);
+            if (markDone && s < stepNum) {
+                el.classList.add('done');
+            }
+        });
+        document.querySelectorAll('#design-step-indicator .step-line').forEach(el => {
+            const id = el.id;
+            if (id === 'step-line-12') el.classList.toggle('done', stepNum >= 2);
+            if (id === 'step-line-23') el.classList.toggle('done', stepNum >= 3);
+        });
+    }
+
+    // --- Input validation ---
+    const VALIDATION_RULES = {
+        'design-fy':  { min: 1, max: 100, label: 'Fy' },
+        'design-fu':  { min: 1, max: 120, label: 'Fu' },
+        'design-KxLx': { min: 0.1, max: 10000, label: 'KxLx' },
+        'design-KyLy': { min: 0.1, max: 10000, label: 'KyLy' },
+        'design-KtLt': { min: 0.1, max: 10000, label: 'KtLt' },
+        'design-Lb':  { min: 0, max: 10000, label: 'Lb' },
+        'design-Cb':  { min: 1.0, max: 3.0, label: 'Cb' },
+        'config-span': { min: 0.5, max: 200, label: 'Span' },
+    };
+
+    function validateDesignInput(id) {
+        const el = document.getElementById(id);
+        const rule = VALIDATION_RULES[id];
+        if (!el || !rule) return true;
+        const val = parseFloat(el.value);
+        const valid = !isNaN(val) && val >= rule.min && val <= rule.max;
+        el.classList.toggle('input-invalid', !valid);
+        return valid;
+    }
+
+    // Validate on input
+    Object.keys(VALIDATION_RULES).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', () => validateDesignInput(id));
+    });
+
+    // Validate Fu >= Fy
+    const fyEl = document.getElementById('design-fy');
+    const fuEl = document.getElementById('design-fu');
+    if (fyEl && fuEl) {
+        function checkFuFy() {
+            const fy = parseFloat(fyEl.value) || 0;
+            const fu = parseFloat(fuEl.value) || 0;
+            fuEl.classList.toggle('input-invalid', fu > 0 && fu < fy);
+        }
+        fyEl.addEventListener('input', checkFuFy);
+        fuEl.addEventListener('input', checkFuFy);
+    }
+
+    // --- Keyboard navigation (Enter → next field) ---
+    const designInputs = document.querySelectorAll('#tab-design input[type="number"]');
+    designInputs.forEach((inp, i) => {
+        inp.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                for (let j = i + 1; j < designInputs.length; j++) {
+                    if (designInputs[j].offsetParent !== null) { designInputs[j].focus(); break; }
+                }
+            }
+        });
+    });
+
+    // --- Spec tooltip data ---
+    const SPEC_TIPS = {
+        'E2': 'Flexural / Torsional / Flexural-Torsional Buckling',
+        'E3.2': 'DSM Local Buckling — λℓ = √(Pne/Pcrl)',
+        'E3.2.1': 'DSM Local Buckling Compression Strength',
+        'E4': 'DSM Distortional Buckling — λd = √(Py/Pcrd)',
+        'E4.1': 'DSM Distortional Buckling Compression Strength',
+        'F2': 'Lateral-Torsional Buckling — Mne = Sf × Fn',
+        'F2.1': 'LTB Critical Stress Fcre',
+        'F3.2': 'DSM Local Buckling Flexural Strength',
+        'F3.2.1': 'DSM Local Buckling Flexural Strength',
+        'F4': 'DSM Distortional Buckling Flexural Strength',
+        'F4.1': 'DSM Distortional Buckling Flexural Strength',
+        'G2.1': 'Shear Strength Without Transverse Stiffeners',
+        'G5': 'Web Crippling Strength — Pn = Ct²Fy sin θ...',
+        'H1.2': 'Combined Axial + Bending: P/Pa + Mx/Max + My/May ≤ 1.0',
+        'H2': 'Combined Bending + Shear: √((M/Ma)² + (V/Va)²) ≤ 1.0',
+        'H3': 'Combined Bending + Web Crippling',
+        'I6.2.1': 'Through-Fastened Sheathing Uplift Reduction R',
+        'D2': 'Yielding of Tension Members — Tn = Ag × Fy',
+        'D3': 'Rupture of Net Section — Tn = An × Fu',
+        'C1': 'Moment Amplification (P-δ effect)',
+    };
+
+    function specRefSpan(section) {
+        const tip = SPEC_TIPS[section] || SPEC_TIPS[section.replace(/\.\d+$/, '')] || '';
+        return '<span class="spec-ref" data-tip="' + section + ': ' + tip + '">§' + section + '</span>';
+    }
+
     // 강재 등급 선택 시 Fy/Fu 자동 설정
     const selGrade = document.getElementById('select-steel-grade');
     if (selGrade) {
@@ -1523,6 +1635,13 @@
             if (cmRow) cmRow.style.display = (t === 'combined') ? 'flex' : 'none';
             if (wcSection) wcSection.style.display = (t === 'flexure' || t === 'combined') ? 'block' : 'none';
             if (lenTitle) lenTitle.style.display = needsLengths ? 'block' : 'none';
+
+            // Step indicator: hide step 2 (Loads) for direct input modes
+            const step2 = document.getElementById('step-item-2');
+            const line12 = document.getElementById('step-line-12');
+            if (step2) step2.style.display = isCalc ? 'flex' : 'none';
+            if (line12) line12.style.display = isCalc ? 'block' : 'none';
+            setDesignStep(1, false);
         }
         selMemberType.addEventListener('change', updateDesignFieldVisibility);
         updateDesignFieldVisibility();
@@ -1560,6 +1679,14 @@
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
             };
 
+            // Show loading
+            const loadingEl = document.getElementById('design-loading');
+            const summaryEl2 = document.getElementById('design-summary');
+            if (loadingEl) loadingEl.style.display = 'flex';
+            if (summaryEl2) summaryEl2.style.display = 'none';
+            btnDesign.textContent = 'Calculating...';
+            btnDesign.disabled = true;
+            setDesignStep(3, true);
             vscode.postMessage({ command: 'runDesign', data });
         });
     }
@@ -1606,39 +1733,66 @@
 
             btnAnalyze.textContent = 'Analyzing...';
             btnAnalyze.disabled = true;
+            setDesignStep(2, true);
             vscode.postMessage({ command: 'analyzeLoads', data });
         });
     }
 
-    // M/V 다이어그램 SVG 렌더링
+    // M/V 다이어그램 SVG 렌더링 (확대 + 지점마커 + max/min 라벨)
     function renderDiagramSVG(values, label, color, flipSign) {
-        const W = 360, H = 80, PAD = 5;
+        const W = 480, H = 110, PAD_L = 6, PAD_R = 6, PAD_T = 18, PAD_B = 16;
         const n = values.length;
         if (n < 2) return '';
 
-        const vals = flipSign ? values.map(v => -v) : values; // 구조관행: +M 아래
+        const vals = flipSign ? values.map(v => -v) : values;
         const maxAbs = Math.max(...vals.map(v => Math.abs(v)), 0.001);
-        const scaleX = (W - 2 * PAD) / (n - 1);
-        const scaleY = (H / 2 - PAD) / maxAbs;
-        const midY = H / 2;
+        const plotW = W - PAD_L - PAD_R;
+        const plotH = H - PAD_T - PAD_B;
+        const scaleX = plotW / (n - 1);
+        const scaleY = (plotH / 2) / maxAbs;
+        const midY = PAD_T + plotH / 2;
 
         let pathD = '';
+        let maxI = 0, minI = 0;
         for (let i = 0; i < n; i++) {
-            const x = PAD + i * scaleX;
+            const x = PAD_L + i * scaleX;
             const y = midY - vals[i] * scaleY;
             pathD += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+            if (vals[i] > vals[maxI]) maxI = i;
+            if (vals[i] < vals[minI]) minI = i;
         }
 
-        // 채우기 영역
-        let fillD = pathD + 'L' + (PAD + (n-1)*scaleX).toFixed(1) + ',' + midY + 'L' + PAD + ',' + midY + 'Z';
+        let fillD = pathD + 'L' + (PAD_L + (n-1)*scaleX).toFixed(1) + ',' + midY + 'L' + PAD_L + ',' + midY + 'Z';
 
-        return '<div style="margin:4px 0"><svg width="' + W + '" height="' + H + '" style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">'
-            + '<line x1="' + PAD + '" y1="' + midY + '" x2="' + (W-PAD) + '" y2="' + midY + '" stroke="var(--vscode-foreground)" stroke-opacity="0.3" stroke-dasharray="3"/>'
-            + '<path d="' + fillD + '" fill="' + color + '" fill-opacity="0.15"/>'
-            + '<path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>'
-            + '<text x="' + PAD + '" y="12" fill="var(--vscode-foreground)" font-size="10">' + label + '</text>'
-            + '<text x="' + PAD + '" y="' + (H-3) + '" fill="var(--vscode-descriptionForeground)" font-size="9">max=' + Math.max(...values).toFixed(1) + ' / min=' + Math.min(...values).toFixed(1) + '</text>'
-            + '</svg></div>';
+        // Max/min labels
+        const maxX = PAD_L + maxI * scaleX;
+        const maxY = midY - vals[maxI] * scaleY;
+        const minX = PAD_L + minI * scaleX;
+        const minY = midY - vals[minI] * scaleY;
+        const origMax = flipSign ? -vals[maxI] : vals[maxI];
+        const origMin = flipSign ? -vals[minI] : vals[minI];
+
+        let svg = '<div style="margin:4px 0"><svg width="' + W + '" height="' + H + '" style="width:100%;max-width:' + W + 'px;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
+        // baseline
+        svg += '<line x1="' + PAD_L + '" y1="' + midY + '" x2="' + (W-PAD_R) + '" y2="' + midY + '" stroke="var(--vscode-foreground)" stroke-opacity="0.25" stroke-dasharray="4"/>';
+        // fill + line
+        svg += '<path d="' + fillD + '" fill="' + color + '" fill-opacity="0.12"/>';
+        svg += '<path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>';
+        // title
+        svg += '<text x="' + PAD_L + '" y="13" fill="var(--vscode-foreground)" font-size="10" font-weight="600">' + label + '</text>';
+        // max/min value labels on diagram
+        if (Math.abs(vals[maxI]) > 0.01) {
+            svg += '<circle cx="' + maxX.toFixed(1) + '" cy="' + maxY.toFixed(1) + '" r="2.5" fill="' + color + '"/>';
+            svg += '<text x="' + (maxX + 3).toFixed(1) + '" y="' + (maxY - 4).toFixed(1) + '" fill="' + color + '" font-size="9" font-weight="600">' + origMax.toFixed(1) + '</text>';
+        }
+        if (Math.abs(vals[minI]) > 0.01 && minI !== maxI) {
+            svg += '<circle cx="' + minX.toFixed(1) + '" cy="' + minY.toFixed(1) + '" r="2.5" fill="#ff8a65"/>';
+            svg += '<text x="' + (minX + 3).toFixed(1) + '" y="' + (minY + 11).toFixed(1) + '" fill="#ff8a65" font-size="9" font-weight="600">' + origMin.toFixed(1) + '</text>';
+        }
+        // footer
+        svg += '<text x="' + (W - PAD_R) + '" y="' + (H - 2) + '" fill="var(--vscode-descriptionForeground)" font-size="9" text-anchor="end">max=' + Math.max(...values).toFixed(1) + '  min=' + Math.min(...values).toFixed(1) + '</text>';
+        svg += '</svg></div>';
+        return svg;
     }
 
     // Analyze Loads 결과 렌더링
@@ -1744,6 +1898,12 @@
         const interEl = document.getElementById('design-interaction');
         const refEl = document.getElementById('design-reference');
 
+        // Hide loading, restore button
+        const loadingEl = document.getElementById('design-loading');
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (summaryEl) summaryEl.style.display = 'block';
+        if (btnDesign) { btnDesign.textContent = '▶ Run Design Check'; btnDesign.disabled = false; }
+
         if (!summaryEl || !stepsEl) { return; }
 
         // 에러 처리
@@ -1753,108 +1913,124 @@
             return;
         }
 
-        // --- Summary ---
+        // --- Summary with Strength Cards + Gauge ---
         const mt = data.member_type || '';
         const mode = data.controlling_mode || '';
         const dm = data.design_method || 'LRFD';
         const pass = data.pass;
         const util = data.utilization;
 
-        let summaryHtml = '<table style="width:100%;font-size:12px">';
+        let summaryHtml = '';
 
-        if (mt === 'compression') {
-            summaryHtml += _summaryRow('Pn (nominal)', data.Pn, 'kips');
-            summaryHtml += _summaryRow('Pne (global)', data.Pne, 'kips');
-            summaryHtml += _summaryRow('Pnl (local)', data.Pnl, 'kips');
-            summaryHtml += _summaryRow('Pnd (distortional)', data.Pnd, 'kips');
-            summaryHtml += _summaryRow('Controlling mode', mode, '');
-            if (dm === 'LRFD') {
-                summaryHtml += _summaryRow('φPn', data.phi_Pn, 'kips', '#4fc3f7');
-            } else {
-                summaryHtml += _summaryRow('Pn/Ω', data.Pn_omega, 'kips', '#4fc3f7');
-            }
-        } else if (mt === 'flexure') {
-            summaryHtml += _summaryRow('Mn (nominal)', data.Mn, 'kip-in');
-            summaryHtml += _summaryRow('Mne (global)', data.Mne, 'kip-in');
-            summaryHtml += _summaryRow('Mnl (local)', data.Mnl, 'kip-in');
-            summaryHtml += _summaryRow('Mnd (distortional)', data.Mnd, 'kip-in');
-            summaryHtml += _summaryRow('Controlling mode', mode, '');
-            if (dm === 'LRFD') {
-                summaryHtml += _summaryRow('φMn', data.phi_Mn, 'kip-in', '#4fc3f7');
-            } else {
-                summaryHtml += _summaryRow('Mn/Ω', data.Mn_omega, 'kip-in', '#4fc3f7');
-            }
+        // Strength comparison cards for compression/flexure
+        if (mt === 'compression' || mt === 'flexure') {
+            const isC = mt === 'compression';
+            const vals = isC
+                ? [{l:'Global',k:'Pne',v:data.Pne},{l:'Local',k:'Pnl',v:data.Pnl},{l:'Distort.',k:'Pnd',v:data.Pnd}]
+                : [{l:'Global',k:'Mne',v:data.Mne},{l:'Local',k:'Mnl',v:data.Mnl},{l:'Distort.',k:'Mnd',v:data.Mnd}];
+            const unit = isC ? 'kips' : 'kip-in';
+            const nominal = isC ? data.Pn : data.Mn;
+            const designVal = dm === 'LRFD' ? (isC ? data.phi_Pn : data.phi_Mn) : (isC ? data.Pn_omega : data.Mn_omega);
+            const designLabel = dm === 'LRFD' ? (isC ? 'φPn' : 'φMn') : (isC ? 'Pn/Ω' : 'Mn/Ω');
+
+            summaryHtml += '<div class="strength-cards">';
+            vals.forEach(v => {
+                const gov = (v.v != null && nominal != null && Math.abs(v.v - nominal) < 0.01) ? ' governing' : '';
+                summaryHtml += '<div class="strength-card' + gov + '">';
+                summaryHtml += '<div class="sc-label">' + v.l + '</div>';
+                summaryHtml += '<div class="sc-value">' + (v.v != null ? v.v.toFixed(1) : '-') + '</div>';
+                summaryHtml += '<div class="sc-label">' + unit + '</div>';
+                if (gov) summaryHtml += '<div><span class="governing-badge">GOVERNS</span></div>';
+                summaryHtml += '</div>';
+            });
+            summaryHtml += '</div>';
+
+            summaryHtml += '<div style="font-size:12px;margin:4px 0">';
+            summaryHtml += '<b style="color:#4fc3f7">' + designLabel + ' = ' + (designVal != null ? designVal.toFixed(1) : '-') + ' ' + unit + '</b>';
+            summaryHtml += ' <span style="color:var(--vscode-descriptionForeground)">(' + mode + ')</span>';
+            summaryHtml += '</div>';
         } else if (mt === 'tension') {
+            summaryHtml += '<table style="width:100%;font-size:12px">';
             summaryHtml += _summaryRow('Tn (yield)', data.Tn_yield, 'kips');
             summaryHtml += _summaryRow('Tn (rupture)', data.Tn_rupture, 'kips');
             summaryHtml += _summaryRow('Controlling mode', mode, '');
             summaryHtml += _summaryRow('Design strength', data.design_strength, 'kips', '#4fc3f7');
+            summaryHtml += '</table>';
         } else if (mt === 'combined') {
             const c = data.compression || {};
             const f = data.flexure_x || {};
-            const fy = data.flexure_y || null;
-            summaryHtml += _summaryRow('Pn', c.Pn, 'kips');
-            summaryHtml += _summaryRow('Compression mode', c.controlling_mode, '');
+            const fy2 = data.flexure_y || null;
+            summaryHtml += '<table style="width:100%;font-size:12px">';
+            summaryHtml += _summaryRow('Pn (' + (c.controlling_mode||'') + ')', c.Pn, 'kips');
             summaryHtml += _summaryRow('Design Pn', c.design_strength, 'kips', '#4fc3f7');
-            summaryHtml += _summaryRow('Mn (x)', f.Mn, 'kip-in');
-            summaryHtml += _summaryRow('Flexure mode', f.controlling_mode, '');
+            summaryHtml += _summaryRow('Mn(x) (' + (f.controlling_mode||'') + ')', f.Mn, 'kip-in');
             summaryHtml += _summaryRow('Design Mn(x)', f.design_strength, 'kip-in', '#4fc3f7');
-            if (fy) {
-                summaryHtml += _summaryRow('Mn (y)', fy.Mn, 'kip-in');
-                summaryHtml += _summaryRow('Design Mn(y)', fy.design_strength, 'kip-in', '#4fc3f7');
+            if (fy2) {
+                summaryHtml += _summaryRow('Mn(y)', fy2.Mn, 'kip-in');
+                summaryHtml += _summaryRow('Design Mn(y)', fy2.design_strength, 'kip-in', '#4fc3f7');
             }
             if (data.amplification) {
-                const amp = data.amplification;
-                summaryHtml += _summaryRow('§C1 αx', amp.alpha_x?.toFixed(3), '', '#ffab00');
-                summaryHtml += _summaryRow('§C1 αy', amp.alpha_y?.toFixed(3), '', '#ffab00');
+                summaryHtml += _summaryRow('§C1 αx', data.amplification.alpha_x?.toFixed(3), '', '#ffab00');
+                summaryHtml += _summaryRow('§C1 αy', data.amplification.alpha_y?.toFixed(3), '', '#ffab00');
             }
             if (data.shear) {
                 summaryHtml += _summaryRow('Vn', data.shear.Vn, 'kips');
                 summaryHtml += _summaryRow('Design Vn', data.shear.design_strength, 'kips', '#4fc3f7');
             }
+            summaryHtml += '</table>';
         } else if (mt === 'connection') {
             const ls = data.limit_states || [];
+            summaryHtml += '<table style="width:100%;font-size:12px">';
             ls.forEach(l => {
-                const mark = l.governs ? ' *' : '';
+                const mark = l.governs ? ' <span class="governing-badge">GOVERNS</span>' : '';
                 summaryHtml += _summaryRow(l.name + mark, l.design_strength, 'kips', l.governs ? '#ffab00' : undefined);
             });
-            summaryHtml += _summaryRow('Governing', data.governing_mode, '');
             summaryHtml += _summaryRow('Design strength', data.design_strength, 'kips', '#4fc3f7');
+            summaryHtml += '</table>';
         }
 
+        // Utilization gauge bar
         if (util != null) {
-            const clr = pass ? '#4caf50' : '#ff5252';
-            summaryHtml += _summaryRow('Utilization', (util * 100).toFixed(1) + '%', '', clr);
-            summaryHtml += _summaryRow('Status', pass ? 'OK' : 'NG', '', clr);
+            const pct = Math.min(util * 100, 120).toFixed(0);
+            const cls = util <= 0.75 ? 'ok' : (util <= 1.0 ? 'warn' : 'fail');
+            summaryHtml += '<div class="utilization-bar">';
+            summaryHtml += '<div class="utilization-fill ' + cls + '" style="width:' + Math.min(pct, 100) + '%"></div>';
+            summaryHtml += '<span class="utilization-label">' + pct + '% ' + (pass ? '✓ OK' : '✗ NG') + '</span>';
+            summaryHtml += '</div>';
         }
-        summaryHtml += '</table>';
+
         summaryEl.innerHTML = summaryHtml;
 
-        // --- Steps ---
+        // --- Steps as cards ---
         const steps = data.steps || [];
         let stepsHtml = '';
         if (steps.length > 0) {
             steps.forEach(s => {
-                const eq = s.equation ? ` <span style="color:#888">[${s.equation}]</span>` : '';
-                const modeTag = s.controlling_mode ? ` <span style="color:#ffab00">← ${s.controlling_mode}</span>` : '';
-                stepsHtml += `<div style="margin-bottom:6px;border-bottom:1px solid var(--vscode-panel-border,#333);padding-bottom:4px">`;
-                stepsHtml += `<b>Step ${s.step}: ${s.name}</b>${eq}${modeTag}<br>`;
-                stepsHtml += `<span style="color:#aaa">${s.formula || ''}</span>`;
-                if (s.value != null) {
-                    stepsHtml += `<br><b style="color:#4fc3f7">${s.value} ${s.unit || ''}</b>`;
-                }
-                stepsHtml += `</div>`;
+                const isGov = !!s.controlling_mode;
+                stepsHtml += '<div class="calc-step' + (isGov ? ' governing' : '') + '">';
+                stepsHtml += '<div class="calc-step-header">';
+                stepsHtml += '<span>' + s.step + '. ' + s.name + '</span>';
+                stepsHtml += '<span>';
+                if (isGov) stepsHtml += '<span class="governing-badge">GOVERNS</span>';
+                if (s.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(s.equation) + '</span>';
+                stepsHtml += '</span></div>';
+                if (s.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + s.formula + '</div>';
+                if (s.value != null) stepsHtml += '<div class="calc-step-value">' + s.value + ' ' + (s.unit || '') + '</div>';
+                stepsHtml += '</div>';
             });
         } else if (data.limit_states) {
-            // 접합부: limit_states 기반 렌더링
             data.limit_states.forEach((ls, i) => {
-                const eq = ls.equation ? ` <span style="color:#888">[${ls.equation}]</span>` : '';
-                const gov = ls.governs ? ` <span style="color:#ffab00">← Governing</span>` : '';
-                stepsHtml += `<div style="margin-bottom:6px;border-bottom:1px solid var(--vscode-panel-border,#333);padding-bottom:4px">`;
-                stepsHtml += `<b>${i+1}. ${ls.name}</b>${eq}${gov}<br>`;
-                stepsHtml += `<span style="color:#aaa">${ls.formula || ''}</span>`;
-                stepsHtml += `<br>Rn = <b>${ls.Rn}</b> kips → Design = <b style="color:#4fc3f7">${ls.design_strength}</b> kips`;
-                stepsHtml += `</div>`;
+                const isGov = !!ls.governs;
+                stepsHtml += '<div class="calc-step' + (isGov ? ' governing' : '') + '">';
+                stepsHtml += '<div class="calc-step-header">';
+                stepsHtml += '<span>' + (i+1) + '. ' + ls.name + '</span>';
+                stepsHtml += '<span>';
+                if (isGov) stepsHtml += '<span class="governing-badge">GOVERNS</span>';
+                if (ls.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(ls.equation) + '</span>';
+                stepsHtml += '</span></div>';
+                if (ls.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + ls.formula + '</div>';
+                stepsHtml += '<div>Rn = <b>' + ls.Rn + '</b> kips → <span class="calc-step-value">' + ls.design_strength + ' kips</span></div>';
+                stepsHtml += '</div>';
             });
         }
         stepsEl.innerHTML = stepsHtml || '<p class="hint">No steps</p>';
@@ -1903,11 +2079,11 @@
                 </div>`;
         }
 
-        // --- Reference ---
+        // --- Reference with tooltips ---
         if (refEl) {
             const sections = data.spec_sections || [];
             let refHtml = sections.length > 0
-                ? `<p>AISI S100-16 Sections: <b>${sections.map(s => '§' + s).join(', ')}</b></p>`
+                ? '<p>AISI S100-16: ' + sections.map(s => specRefSpan(s)).join(' &nbsp;') + '</p>'
                 : '<p class="hint">No specification sections referenced</p>';
 
             // DSM 적용 한계 경고

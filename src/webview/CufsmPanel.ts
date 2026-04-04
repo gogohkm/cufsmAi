@@ -1280,9 +1280,18 @@ export class CufsmPanel implements McpPanelInterface {
         </div>
     <!-- ========== Design Tab ========== -->
     <div id="tab-design" class="tab-panel">
+        <!-- Step Indicator -->
+        <div class="step-indicator" id="design-step-indicator">
+            <div class="step-item active" data-step="1"><span class="step-num">1</span><span>Inputs</span></div>
+            <div class="step-line" id="step-line-12"></div>
+            <div class="step-item" data-step="2" id="step-item-2"><span class="step-num">2</span><span>Loads</span></div>
+            <div class="step-line" id="step-line-23"></div>
+            <div class="step-item" data-step="3"><span class="step-num">3</span><span>Design</span></div>
+        </div>
         <div class="panel-row">
-            <div class="panel-left" style="max-width:320px">
-                <h3>Material</h3>
+            <div class="panel-left" style="max-width:340px">
+                <h3 class="collapsible" id="sec-material" data-expanded="true"><span class="collapse-icon">▾</span> Material</h3>
+                <div id="sec-material-body">
                 <div class="input-row">
                     <label>Steel Grade</label>
                     <select id="select-steel-grade">
@@ -1306,12 +1315,14 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
                 <div class="input-row">
                     <label>Fy<span class="hint-inline">ksi</span></label>
-                    <input type="number" id="design-fy" value="50" step="1" style="width:55px">
+                    <input type="number" id="design-fy" value="50" step="1" style="width:55px" min="1" max="100">
                     <label>Fu<span class="hint-inline">ksi</span></label>
-                    <input type="number" id="design-fu" value="65" step="1" style="width:55px">
+                    <input type="number" id="design-fu" value="65" step="1" style="width:55px" min="1" max="120">
+                </div>
                 </div>
 
-                <h3>Design Method</h3>
+                <h3 class="collapsible" id="sec-method" data-expanded="true"><span class="collapse-icon">▾</span> Design Method</h3>
+                <div id="sec-method-body">
                 <div class="input-row">
                     <select id="select-design-method" style="width:130px">
                         <option value="LRFD">LRFD (φRn≥Ru)</option>
@@ -1320,6 +1331,7 @@ export class CufsmPanel implements McpPanelInterface {
                     <select id="select-analysis-method" style="width:130px">
                         <option value="DSM">DSM</option>
                     </select>
+                </div>
                 </div>
 
                 <h3>Member Type</h3>
@@ -1341,7 +1353,7 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
 
                 <div id="calc-mode-section" style="display:none">
-                <h3 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">▸ Member Configuration</h3>
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> Member Configuration</h3>
                 <div>
                     <div class="input-row">
                         <label>Span Type</label>
@@ -1369,7 +1381,7 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                 </div>
 
-                <h3 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">▸ Service Loads</h3>
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> Service Loads</h3>
                 <div>
                     <div class="input-row">
                         <label>D<span class="hint-inline">psf</span></label>
@@ -1398,8 +1410,8 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                 </div>
 
-                <h3 style="cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">▸ Deck & Bracing</h3>
-                <div>
+                <h3 class="collapsible" data-expanded="false"><span class="collapse-icon">▸</span> Deck & Bracing</h3>
+                <div style="display:none">
                     <div class="input-row">
                         <label>Deck</label>
                         <select id="select-deck-type" style="width:140px">
@@ -1482,8 +1494,8 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                 </div>
 
-                <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">Run Design Check</button>
-                <p class="hint" style="margin-top:6px">해석(Analysis) 실행 후 설계하면 DSM 좌굴값이 자동 연계됩니다.</p>
+                <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">▶ Run Design Check</button>
+                <p class="hint" style="margin-top:6px">Run Analysis first for automatic DSM buckling values.</p>
             </div>
 
             <div class="panel-right">
@@ -1494,12 +1506,15 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
 
                 <h3>Design Summary</h3>
+                <div id="design-loading" class="loading-overlay" style="display:none">
+                    <div class="loading-spinner"></div><span>Calculating...</span>
+                </div>
                 <div id="design-summary" class="result-box" style="min-height:80px">
                     <p class="hint">Run design check to see results</p>
                 </div>
 
                 <h3>Step-by-Step Calculation</h3>
-                <div id="design-steps" class="result-box" style="max-height:450px;overflow-y:auto;font-family:monospace;font-size:12px">
+                <div id="design-steps" class="result-box" style="max-height:450px;overflow-y:auto">
                 </div>
 
                 <h3 id="design-interaction-title" style="display:none">Interaction Check (H1.2)</h3>

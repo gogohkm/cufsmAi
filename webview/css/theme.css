@@ -299,3 +299,295 @@ canvas {
     border-radius: 2px;
     max-width: 100%;
 }
+
+/* === Design Tab — Step Indicator === */
+.step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.step-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 0.35;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.step-item.active {
+    opacity: 1;
+    font-weight: 600;
+}
+
+.step-item.done {
+    opacity: 0.7;
+}
+
+.step-num {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.step-item.done .step-num {
+    background: #4caf50;
+}
+
+.step-line {
+    flex: 1;
+    height: 2px;
+    background: var(--vscode-panel-border);
+    margin: 0 2px;
+    min-width: 10px;
+}
+
+.step-line.done {
+    background: #4caf50;
+}
+
+/* === Design Tab — Collapsible Sections === */
+.collapsible {
+    cursor: pointer;
+    user-select: none;
+    padding: 5px 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.collapsible:hover {
+    color: var(--vscode-textLink-foreground);
+}
+
+.collapse-icon {
+    font-size: 10px;
+    width: 12px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.section-check {
+    margin-left: auto;
+    color: #4caf50;
+    font-size: 11px;
+}
+
+/* === Design Tab — Utilization Gauge Bar === */
+.utilization-bar {
+    height: 22px;
+    border-radius: 3px;
+    background: var(--vscode-input-background);
+    overflow: hidden;
+    margin: 6px 0;
+    position: relative;
+}
+
+.utilization-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+}
+
+.utilization-fill.ok {
+    background: linear-gradient(90deg, #2e7d32, #4caf50);
+}
+
+.utilization-fill.warn {
+    background: linear-gradient(90deg, #e65100, #ff9800);
+}
+
+.utilization-fill.fail {
+    background: linear-gradient(90deg, #b71c1c, #f44336);
+}
+
+.utilization-label {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* === Design Tab — Calculation Step Cards === */
+.calc-step {
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-bottom: 5px;
+    font-size: 12px;
+    font-family: var(--vscode-editor-fontFamily, monospace);
+    line-height: 1.5;
+}
+
+.calc-step.governing {
+    border-left: 3px solid #ffab40;
+    background: rgba(255, 171, 64, 0.06);
+}
+
+.calc-step-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.calc-step-ref {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    font-weight: 400;
+}
+
+.calc-step-value {
+    color: #4fc3f7;
+    font-weight: 600;
+}
+
+.governing-badge {
+    font-size: 9px;
+    background: #ffab40;
+    color: #000;
+    padding: 1px 5px;
+    border-radius: 2px;
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+/* === Design Tab — Strength Cards === */
+.strength-cards {
+    display: flex;
+    gap: 4px;
+    margin: 6px 0;
+}
+
+.strength-card {
+    flex: 1;
+    text-align: center;
+    padding: 5px 3px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px;
+    font-size: 11px;
+    min-width: 0;
+}
+
+.strength-card.governing {
+    border-color: #ffab40;
+    background: rgba(255, 171, 64, 0.08);
+}
+
+.strength-card .sc-value {
+    font-size: 13px;
+    font-weight: 700;
+    color: #4fc3f7;
+    margin: 2px 0;
+}
+
+.strength-card .sc-label {
+    font-size: 9px;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* === Design Tab — Loading Overlay === */
+.loading-overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+
+.loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--vscode-panel-border);
+    border-top-color: var(--vscode-button-background);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* === Design Tab — Input Validation === */
+.input-invalid {
+    border-color: var(--vscode-inputValidation-errorBorder, #f44) !important;
+    background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.08)) !important;
+}
+
+.input-error-msg {
+    font-size: 9px;
+    color: var(--vscode-inputValidation-errorForeground, #f44);
+    margin-left: 4px;
+}
+
+/* === Design Tab — Spec Tooltip === */
+.spec-ref {
+    color: var(--vscode-textLink-foreground);
+    cursor: help;
+    border-bottom: 1px dotted;
+    position: relative;
+    font-size: 11px;
+}
+
+.spec-ref:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 0;
+    background: var(--vscode-editorHoverWidget-background, #2d2d2d);
+    color: var(--vscode-editorHoverWidget-foreground, #ccc);
+    border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+    padding: 6px 10px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: normal;
+    width: 260px;
+    z-index: 100;
+    line-height: 1.4;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    pointer-events: none;
+}
+
+/* === Design Tab — btn-secondary === */
+.btn-secondary {
+    background: var(--vscode-button-secondaryBackground, var(--vscode-button-background));
+    color: var(--vscode-button-secondaryForeground, var(--vscode-button-foreground));
+    padding: 6px 16px;
+    font-size: 13px;
+    cursor: pointer;
+    border: none;
+    border-radius: 2px;
+}
+
+.btn-secondary:hover {
+    opacity: 0.9;
+}
+
+.btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}

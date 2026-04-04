@@ -282,7 +282,7 @@ def _design_flexure(params: dict) -> dict:
     Fy = params.get('Fy', 50)
     Fu = params.get('Fu', 65)
     design_method = params.get('design_method', 'LRFD')
-    Mu = params.get('Mu', 0)
+    Mu = abs(params.get('Mu', 0))  # 부호는 방향만 나타내므로 절대값 사용
     Lb = params.get('Lb', 120)
     Cb = params.get('Cb', 1.0)
 

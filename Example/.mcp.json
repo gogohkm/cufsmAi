@@ -3,7 +3,7 @@
     "cufsm-section-designer": {
       "command": "node",
       "args": [
-        "c:/Coding_Works/cufsmAi/media/mcp-server.js"
+        "/Users/hi/2026Coding_Prj/cufsmAi/media/mcp-server.js"
       ],
       "env": {
         "CUFSM_MCP_PORT": "52790"

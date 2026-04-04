@@ -337,7 +337,7 @@ def extract_critical_locations(result: BeamResult, spans: List[float],
     locations = []
     n_spans = len(spans)
 
-    # 1. 각 스팬의 최대 정모멘트
+    # 1. 각 스팬의 최대 정모멘트 및 최대 부모멘트
     x_offset = 0.0
     for i in range(n_spans):
         L = spans[i]
@@ -347,10 +347,16 @@ def extract_critical_locations(result: BeamResult, spans: List[float],
         # 이 스팬 범위의 점들
         max_M = -1e30
         max_x = span_start
+        min_M = 1e30
+        min_x = span_start
         for j, x in enumerate(result.x):
-            if span_start <= x <= span_end and result.M[j] > max_M:
-                max_M = result.M[j]
-                max_x = x
+            if span_start <= x <= span_end:
+                if result.M[j] > max_M:
+                    max_M = result.M[j]
+                    max_x = x
+                if result.M[j] < min_M:
+                    min_M = result.M[j]
+                    min_x = x
 
         if max_M > 0:
             label = 'End span +M' if i == 0 or i == n_spans - 1 else f'Int span {i+1} +M'
@@ -359,6 +365,16 @@ def extract_critical_locations(result: BeamResult, spans: List[float],
                 'Mu': round(max_M, 3), 'Vu': None, 'Ru': None,
                 'region': 'positive',
             })
+
+        # 스팬 내 부모멘트 (캔틸레버 등 음수 모멘트 지배 구간)
+        if min_M < 0:
+            label = 'End span -M' if i == 0 or i == n_spans - 1 else f'Int span {i+1} -M'
+            locations.append({
+                'name': label, 'x_ft': round(min_x, 2),
+                'Mu': round(min_M, 3), 'Vu': None, 'Ru': None,
+                'region': 'negative',
+            })
+
         x_offset += L
 
     # 2. 각 내부 지점의 부모멘트 + 전단 + 반력
@@ -424,17 +440,21 @@ def extract_critical_locations(result: BeamResult, spans: List[float],
                     })
             x_offset = x_offset_end
 
-    # 4. 단부 지점 반력 (웹크리플링용)
+    # 4. 단부 지점 반력 (웹크리플링용 + 모멘트)
     if result.R:
+        M_left = result.M[0] if result.M else 0
+        M_right = result.M[-1] if result.M else 0
         locations.append({
             'name': 'End support (left)', 'x_ft': 0,
-            'Mu': None, 'Vu': round(abs(result.V[0]), 3),
+            'Mu': round(M_left, 3) if abs(M_left) > 1e-6 else None,
+            'Vu': round(abs(result.V[0]), 3),
             'Ru': round(abs(result.R[0]), 3),
             'region': 'support_end',
         })
         locations.append({
             'name': 'End support (right)', 'x_ft': round(sum(spans), 2),
-            'Mu': None, 'Vu': round(abs(result.V[-1]), 3),
+            'Mu': round(M_right, 3) if abs(M_right) > 1e-6 else None,
+            'Vu': round(abs(result.V[-1]), 3),
             'Ru': round(abs(result.R[-1]), 3),
             'region': 'support_end',
         })
