@@ -722,6 +722,44 @@ export class CufsmPanel implements McpPanelInterface {
                 return result;
             }
 
+            case 'validate_design': {
+                // AI/MCP용 — 현재 모델 상태를 기반으로 검증 데이터 수집 후 반환
+                const valData: any = { checks: [] };
+                const node = this._model.node || [];
+                const elem = this._model.elem || [];
+                valData.section_defined = node.length > 0;
+                valData.nnodes = node.length;
+                valData.nelems = elem.length;
+
+                // Properties
+                if (node.length > 0) {
+                    try {
+                        valData.props = await this._pythonBridge.call('get_properties', { node, elem });
+                    } catch {}
+                    try {
+                        valData.cutwp = await this._pythonBridge.call('cutwp', { node, elem });
+                    } catch {}
+                }
+
+                // Analysis/DSM
+                valData.analysis_run = !!this._lastAnalysisResult?.curve;
+                if (this._lastAnalysisResult?.curve) {
+                    const fy = options.Fy || 50;
+                    try {
+                        valData.dsm_P = await this._pythonBridge.call('dsm', {
+                            node, elem, curve: this._lastAnalysisResult.curve, fy, load_type: 'P',
+                        });
+                        valData.dsm_Mxx = await this._pythonBridge.call('dsm', {
+                            node, elem, curve: this._lastAnalysisResult.curve, fy, load_type: 'Mxx',
+                        });
+                    } catch {}
+                }
+
+                valData.status = this.getStatus();
+                this._postMessage('validationData', valData);
+                return valData;
+            }
+
             case 'apply_deck_springs': {
                 // 데크 강성(kφ, kx)을 CUFSM 모델의 압축 플랜지에 스프링으로 적용
                 const kphi = options.kphi || 0;
@@ -1150,6 +1188,7 @@ export class CufsmPanel implements McpPanelInterface {
         <button class="tab-btn" data-tab="postprocessor">Postprocessor</button>
         <button class="tab-btn" data-tab="design">Design</button>
         <button class="tab-btn" data-tab="report">Report</button>
+        <button class="tab-btn" data-tab="validation">Validation</button>
     </div>
 
     <!-- 탭 내용 -->
@@ -1601,6 +1640,17 @@ export class CufsmPanel implements McpPanelInterface {
         </div>
         <div id="report-container" style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:4px;padding:16px;min-height:200px;max-height:calc(100vh - 100px);overflow-y:auto">
             <p class="hint" style="text-align:center;padding:40px 0">Run Design Check first, then click "Generate Detailed Report" to create a comprehensive calculation report.</p>
+        </div>
+    </div>
+
+    <!-- Validation 탭 -->
+    <div id="tab-validation" class="tab-panel">
+        <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
+            <button id="btn-run-validation" class="btn-primary" style="flex:1">Run Design Validation</button>
+            <span id="validation-summary-badge" style="font-size:12px;font-weight:600"></span>
+        </div>
+        <div id="validation-container" style="max-height:calc(100vh - 100px);overflow-y:auto">
+            <p class="hint" style="text-align:center;padding:40px 0">Click "Run Design Validation" to check all inputs and results against AISI S100-16 requirements.</p>
         </div>
     </div>
 

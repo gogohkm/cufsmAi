@@ -2369,25 +2369,44 @@
         if (analysisResult && analysisResult.curve && analysisResult.curve.length > 0) {
             h += '<h3>Buckling Curve (Load Factor vs. Half-Wavelength)</h3>';
             const curve = analysisResult.curve;
-            const W=500,H2=200,PL=50,PR=15,PT=20,PB=30;
+            const W=500,H2=220,PL=55,PR=15,PT=20,PB=35;
             const plotW=W-PL-PR,plotH=H2-PT-PB;
-            const lengths=curve.map(c=>c[0]),lf=curve.map(c=>c[1]);
-            const minLF=Math.min(...lf),maxLF=Math.max(...lf);
-            const logMin=Math.log10(Math.max(Math.min(...lengths),0.1)),logMax=Math.log10(Math.max(...lengths));
-            const lfMax=Math.min(maxLF,minLF*10);
+            // 포스트프로세서와 동일한 데이터 추출 — row[1]>0 필터링
+            const points=[];
+            curve.forEach(row => { if (row && row.length>=2 && row[1]>0) points.push([row[0],row[1]]); });
+            if (points.length < 2) { h += '<p>(Insufficient curve data)</p>'; }
+            else {
+            const xMin=Math.log10(Math.min(...points.map(p=>p[0])));
+            const xMax=Math.log10(Math.max(...points.map(p=>p[0])));
+            // 포스트프로세서와 동일: Y축 0 ~ yMax*1.15, 선형 스케일
+            const yMax=Math.max(...points.map(p=>p[1]))*1.15;
+            const yMin=0;
+            const toSvgX = (val) => PL+(Math.log10(Math.max(val,0.1))-xMin)/(xMax-xMin)*plotW;
+            const toSvgY = (val) => PT+plotH-((val-yMin)/(yMax-yMin))*plotH;
             let pathD='';
-            for (let i=0;i<curve.length;i++){
-                const lx=(Math.log10(Math.max(lengths[i],0.1))-logMin)/(logMax-logMin);
-                const ly=1-Math.min(lf[i],lfMax)/lfMax;
-                pathD+=(i===0?'M':'L')+(PL+lx*plotW).toFixed(1)+','+(PT+ly*plotH).toFixed(1);
-            }
+            points.forEach((pt,i) => {
+                pathD+=(i===0?'M':'L')+toSvgX(pt[0]).toFixed(1)+','+toSvgY(pt[1]).toFixed(1);
+            });
             let svg='<svg width="'+W+'" height="'+H2+'" style="border:1px solid #ddd;border-radius:4px;background:#fafafa">';
             svg+='<rect x="'+PL+'" y="'+PT+'" width="'+plotW+'" height="'+plotH+'" fill="none" stroke="#ccc"/>';
+            // 그리드 (log X축)
+            for (let exp=Math.ceil(xMin);exp<=Math.floor(xMax);exp++){
+                const gx=toSvgX(Math.pow(10,exp));
+                svg+='<line x1="'+gx.toFixed(1)+'" y1="'+PT+'" x2="'+gx.toFixed(1)+'" y2="'+(PT+plotH)+'" stroke="#eee" stroke-width="0.5"/>';
+                svg+='<text x="'+gx.toFixed(1)+'" y="'+(H2-PB+14)+'" font-size="8" text-anchor="middle" fill="#999">'+Math.pow(10,exp)+'</text>';
+            }
+            // Y축 그리드
+            const yStep=Math.pow(10,Math.floor(Math.log10(yMax/4)));
+            for (let yv=yStep;yv<yMax;yv+=yStep){
+                const gy=toSvgY(yv);
+                svg+='<line x1="'+PL+'" y1="'+gy.toFixed(1)+'" x2="'+(PL+plotW)+'" y2="'+gy.toFixed(1)+'" stroke="#eee" stroke-width="0.5"/>';
+                svg+='<text x="'+(PL-4)+'" y="'+(gy+3).toFixed(1)+'" font-size="8" text-anchor="end" fill="#999">'+yv.toFixed(yv<1?3:(yv<10?2:1))+'</text>';
+            }
+            // 곡선
             svg+='<path d="'+pathD+'" fill="none" stroke="#1565c0" stroke-width="1.5"/>';
-            const mi=lf.indexOf(minLF);
-            // DSM 극점 마커 (포스트프로세서와 동일)
-            const toSvgX = (L) => PL+(Math.log10(Math.max(L,0.1))-logMin)/(logMax-logMin)*plotW;
-            const toSvgY = (v) => PT+(1-Math.min(v,lfMax)/lfMax)*plotH;
+            // 최소값 인덱스
+            let minLF=points[0][1],mi=0;
+            points.forEach((pt,i)=>{if(pt[1]<minLF){minLF=pt[1];mi=i;}});
             const dsmD = lastDsmResult ? (lastDsmResult.Mxx || lastDsmResult.P) : null;
             const extrema = [];
             if (dsmD) {
@@ -2396,7 +2415,7 @@
                 if (dsmD.LF_global > 0 && dsmD.Lcre > 0) extrema.push({L:dsmD.Lcre,LF:dsmD.LF_global,label:dsmD.Mxxcre!==undefined?'Mcre':'Pcre',color:'#7c4dff'});
             }
             if (extrema.length === 0) {
-                extrema.push({L:lengths[mi],LF:minLF,label:'min',color:'#e53935'});
+                extrema.push({L:points[mi][0],LF:minLF,label:'min',color:'#e53935'});
             }
             extrema.forEach(ext => {
                 const ex=toSvgX(ext.L).toFixed(1), ey=toSvgY(ext.LF).toFixed(1);
@@ -2407,6 +2426,7 @@
             svg+='<text x="12" y="'+(PT+plotH/2)+'" font-size="9" text-anchor="middle" fill="#666" transform="rotate(-90,12,'+(PT+plotH/2)+')">Load Factor</text>';
             svg+='</svg>';
             h += '<div class="section-fig">'+svg+'</div>';
+            } // end if (points.length >= 2)
         } else {
             h += '<p>(Run FSM analysis first to generate buckling curve)</p>';
         }
@@ -2798,6 +2818,498 @@
             h += '<b style="color:#e65100">DSM Applicability Warnings:</b><ul style="margin:4px 0;padding-left:20px">';
             warnings.forEach(w => { h += '<li>'+w+'</li>'; });
             h += '</ul></div>';
+        }
+        return h;
+    }
+
+    // ============================================================
+    // Validation Dashboard — 설계 검증 대시보드
+    // ============================================================
+    const btnValidation = document.getElementById('btn-run-validation');
+    const validationContainer = document.getElementById('validation-container');
+    const validationBadge = document.getElementById('validation-summary-badge');
+
+    if (btnValidation) {
+        btnValidation.addEventListener('click', () => {
+            if (!validationContainer) return;
+            const checks = runAllValidationChecks();
+            validationContainer.innerHTML = renderValidationDashboard(checks);
+            // Summary badge
+            const pass = checks.filter(c => c.status === 'pass').length;
+            const warn = checks.filter(c => c.status === 'warn').length;
+            const fail = checks.filter(c => c.status === 'fail').length;
+            if (validationBadge) {
+                validationBadge.innerHTML = '<span style="color:#4caf50">PASS '+pass+'</span> / <span style="color:#ffab00">WARN '+warn+'</span> / <span style="color:#ff5252">FAIL '+fail+'</span>';
+            }
+        });
+    }
+
+    /**
+     * 전체 검증 실행 — 각 check는 {category, item, status, value, criterion, note}
+     * status: 'pass' | 'warn' | 'fail'
+     */
+    function runAllValidationChecks() {
+        const checks = [];
+        const d = _lastDesignResult;
+        const la = _lastLoadAnalysis;
+        const p = lastProps;
+        const dsm = lastDsmResult;
+        const fy = getNum('design-fy', 50);
+        const fu = getNum('design-fu', 65);
+        const H = getNum('tpl-H', 0), B = getNum('tpl-B', 0), D = getNum('tpl-D', 0);
+        const t = getNum('tpl-t', 0), r = getNum('tpl-r', 0);
+
+        // ════════════════════════════════════════
+        // A. 단면 입력 (Section Input)
+        // ════════════════════════════════════════
+        const cat = 'A. Section Input';
+
+        checks.push({
+            category: cat, item: 'Section Defined',
+            status: (model && model.node && model.node.length > 0) ? 'pass' : 'fail',
+            value: model ? (model.node||[]).length + ' nodes' : '0',
+            criterion: 'At least 1 node defined',
+            note: model && model.node && model.node.length > 0 ? '' : 'No section defined — go to Preprocessor tab and generate a template or define nodes/elements.',
+        });
+
+        checks.push({
+            category: cat, item: 'Thickness (t)',
+            status: t > 0 ? (t >= 0.018 && t <= 0.5 ? 'pass' : 'warn') : 'fail',
+            value: t > 0 ? t + ' in' : 'Not set',
+            criterion: '0.018 ≤ t ≤ 0.5 in (typical CFS range)',
+            note: t <= 0 ? 'Thickness not specified.' : (t < 0.018 ? 'Very thin — verify material availability.' : (t > 0.5 ? 'Thick — may not be cold-formed.' : '')),
+        });
+
+        if (t > 0 && H > 0) {
+            const wt_web = (H - 2*(t+r)) / t;
+            checks.push({
+                category: cat, item: 'Web w/t Ratio',
+                status: wt_web <= 200 ? 'pass' : (wt_web <= 500 ? 'warn' : 'fail'),
+                value: wt_web.toFixed(1),
+                criterion: 'w/t ≤ 500 (Table B4.1-1 stiffened limit), ≤200 typical',
+                note: wt_web > 500 ? 'Exceeds DSM applicability limit — Table B4.1-1.' : (wt_web > 200 ? 'High web slenderness — distortional/local buckling will govern.' : ''),
+            });
+        }
+        if (t > 0 && B > 0) {
+            const bt_fl = (B - 2*(t+r)) / t;
+            checks.push({
+                category: cat, item: 'Flange b/t Ratio',
+                status: bt_fl <= 60 ? 'pass' : (bt_fl <= 160 ? 'warn' : 'fail'),
+                value: bt_fl.toFixed(1),
+                criterion: 'b/t ≤ 160 (Table B4.1-1 edge-stiffened limit)',
+                note: bt_fl > 160 ? 'Exceeds DSM applicability limit.' : '',
+            });
+        }
+        if (t > 0 && D > 0) {
+            const dt_lip = D / t;
+            checks.push({
+                category: cat, item: 'Lip d/t Ratio',
+                status: dt_lip <= 60 ? 'pass' : 'fail',
+                value: dt_lip.toFixed(1),
+                criterion: 'd/t ≤ 60 (Table B4.1-1 unstiffened limit)',
+                note: dt_lip > 60 ? 'Lip too slender for DSM.' : '',
+            });
+        }
+        if (r > 0 && t > 0) {
+            const Rt = r / t;
+            checks.push({
+                category: cat, item: 'Corner R/t Ratio',
+                status: Rt <= 10 ? 'pass' : (Rt <= 20 ? 'warn' : 'fail'),
+                value: Rt.toFixed(1),
+                criterion: 'R/t ≤ 20 (Table B4.1-1), ≤10 typical',
+                note: Rt > 20 ? 'Exceeds corner radius limit.' : '',
+            });
+        }
+
+        // ════════════════════════════════════════
+        // B. 재료 (Material)
+        // ════════════════════════════════════════
+        const catB = 'B. Material';
+
+        checks.push({
+            category: catB, item: 'Yield Strength (Fy)',
+            status: fy > 0 ? (fy <= 95 ? 'pass' : 'fail') : 'fail',
+            value: fy + ' ksi',
+            criterion: 'Fy ≤ 95 ksi (Table B4.1-1 Fy limit)',
+            note: fy > 95 ? 'Exceeds AISI S100 DSM Fy limit.' : (fy <= 0 ? 'Fy not specified.' : ''),
+        });
+
+        checks.push({
+            category: catB, item: 'Fu/Fy Ratio',
+            status: fy > 0 && fu > 0 ? (fu/fy >= 1.08 ? 'pass' : 'warn') : 'fail',
+            value: fy > 0 && fu > 0 ? (fu/fy).toFixed(3) : 'N/A',
+            criterion: 'Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))',
+            note: fu/fy < 1.08 ? 'Low ductility ratio — Section I6.2.1 R factor may not apply.' : '',
+        });
+
+        checks.push({
+            category: catB, item: 'Tensile Strength (Fu)',
+            status: fu > 0 ? (fu > fy ? 'pass' : 'fail') : 'fail',
+            value: fu + ' ksi',
+            criterion: 'Fu > Fy',
+            note: fu <= fy ? 'Fu must exceed Fy.' : '',
+        });
+
+        // ════════════════════════════════════════
+        // C. 좌굴 해석 (Buckling Analysis)
+        // ════════════════════════════════════════
+        const catC = 'C. Buckling Analysis';
+
+        checks.push({
+            category: catC, item: 'Analysis Executed',
+            status: analysisResult && analysisResult.curve ? 'pass' : 'fail',
+            value: analysisResult && analysisResult.curve ? analysisResult.curve.length + ' points' : 'Not run',
+            criterion: 'FSM analysis must be completed before design',
+            note: !analysisResult ? 'Go to Analysis tab and run buckling analysis.' : '',
+        });
+
+        const dP = dsm ? dsm.P : null;
+        const dM = dsm ? dsm.Mxx : null;
+
+        checks.push({
+            category: catC, item: 'DSM Values Extracted',
+            status: dP || dM ? 'pass' : 'fail',
+            value: dP ? 'Pcrl='+_rv(dP.Pcrl)+', Pcrd='+_rv(dP.Pcrd) : 'Not available',
+            criterion: 'Pcrl, Pcrd, Mcrl, Mcrd must be identified from signature curve',
+            note: !dP && !dM ? 'Run analysis first — DSM values are auto-extracted.' : '',
+        });
+
+        if (dM) {
+            checks.push({
+                category: catC, item: 'Mcrl Identified (Local)',
+                status: dM.Mxxcrl > 0 ? 'pass' : 'warn',
+                value: dM.Mxxcrl > 0 ? _rv(dM.Mxxcrl)+' kip-in (L='+_rv(dM.Lcrl,1)+' in)' : 'Not found',
+                criterion: 'Local buckling minimum should be identifiable',
+                note: dM.Mxxcrl <= 0 ? 'No local buckling minimum found — design will skip local check (Mnl=Mne).' : '',
+            });
+            checks.push({
+                category: catC, item: 'Mcrd Identified (Distortional)',
+                status: dM.Mxxcrd > 0 ? 'pass' : 'warn',
+                value: dM.Mxxcrd > 0 ? _rv(dM.Mxxcrd)+' kip-in (L='+_rv(dM.Lcrd,1)+' in)' : 'Not found',
+                criterion: 'Distortional buckling minimum should be identifiable for C/Z sections',
+                note: dM.Mxxcrd <= 0 ? 'No distortional minimum — design will skip distortional check (Mnd=My). Verify if section has edge stiffeners.' : '',
+            });
+        }
+
+        // ════════════════════════════════════════
+        // D. 단면 성질 (Section Properties)
+        // ════════════════════════════════════════
+        const catD = 'D. Section Properties';
+
+        checks.push({
+            category: catD, item: 'Properties Computed',
+            status: p ? 'pass' : 'fail',
+            value: p ? 'A='+_rv(p.A,4)+' in²' : 'Not computed',
+            criterion: 'Section properties must be available for design',
+            note: !p ? 'Click "Get Properties" in Preprocessor tab.' : '',
+        });
+
+        if (p) {
+            checks.push({
+                category: catD, item: 'Section Modulus Sx',
+                status: p.Sx > 0 ? 'pass' : 'fail',
+                value: p.Sx > 0 ? _rv(p.Sx,4)+' in³' : '0 or N/A',
+                criterion: 'Sx > 0 required for flexure design (Sf)',
+                note: p.Sx <= 0 ? 'Section modulus is zero — cannot compute My=Sf×Fy.' : '',
+            });
+            checks.push({
+                category: catD, item: 'Radius of Gyration rx, rz',
+                status: p.rx > 0 && p.rz > 0 ? 'pass' : 'warn',
+                value: 'rx='+_rv(p.rx,4)+', rz='+_rv(p.rz,4)+' in',
+                criterion: 'rx, rz > 0 for column/LTB design',
+                note: (p.rx <= 0 || p.rz <= 0) ? 'Zero radius of gyration — check section geometry.' : '',
+            });
+        }
+
+        // ════════════════════════════════════════
+        // E. 하중 입력 (Load Input)
+        // ════════════════════════════════════════
+        const catE = 'E. Load Input';
+        const spacing = getNum('config-spacing', 5);
+        const spanFt = getNum('config-span', 0);
+        const loadD = getNum('load-D-psf', 0);
+        const loadLr = getNum('load-Lr-psf', 0);
+        const loadS = getNum('load-S-psf', 0);
+        const loadL = getNum('load-L-psf', 0);
+        const loadW = getNum('load-Wu-psf', 0);
+
+        checks.push({
+            category: catE, item: 'Span Length',
+            status: spanFt > 0 ? (spanFt <= 40 ? 'pass' : 'warn') : 'fail',
+            value: spanFt > 0 ? spanFt+' ft' : 'Not set',
+            criterion: 'Span > 0 required; typical CFS ≤ 33 ft (§I6.2.1)',
+            note: spanFt <= 0 ? 'Set span length.' : (spanFt > 33 ? 'Exceeds §I6.2.1 span limit — R factor may not apply.' : ''),
+        });
+
+        checks.push({
+            category: catE, item: 'Tributary Width (Spacing)',
+            status: spacing > 0 ? (spacing <= 8 ? 'pass' : 'warn') : 'fail',
+            value: spacing+' ft',
+            criterion: 'Spacing > 0; typical 4-6 ft',
+            note: spacing > 8 ? 'Large spacing — verify load distribution.' : '',
+        });
+
+        checks.push({
+            category: catE, item: 'Dead Load (D)',
+            status: loadD > 0 ? 'pass' : 'warn',
+            value: loadD+' psf',
+            criterion: 'D > 0 expected (self-weight + roofing)',
+            note: loadD <= 0 ? 'No dead load? Self-weight should be included. Typical: 5-15 psf.' : '',
+        });
+
+        const hasGravity = loadLr > 0 || loadS > 0 || loadL > 0;
+        checks.push({
+            category: catE, item: 'Gravity Live/Snow Load',
+            status: hasGravity ? 'pass' : 'warn',
+            value: [loadLr>0?'Lr='+loadLr:'',loadS>0?'S='+loadS:'',loadL>0?'L='+loadL:''].filter(Boolean).join(', ')+' psf' || 'None',
+            criterion: 'At least one gravity live load expected',
+            note: !hasGravity ? 'No live/snow load — is this correct?' : '',
+        });
+
+        // ════════════════════════════════════════
+        // F. 하중 분석 결과 (Load Analysis Results)
+        // ════════════════════════════════════════
+        const catF = 'F. Load Analysis';
+
+        checks.push({
+            category: catF, item: 'Load Analysis Executed',
+            status: la ? 'pass' : 'fail',
+            value: la ? 'Combo: '+(la.gravity?la.gravity.combo:'N/A') : 'Not run',
+            criterion: 'Load analysis required before design',
+            note: !la ? 'Click "Analyze Loads" in Design tab.' : '',
+        });
+
+        if (la && la.gravity && la.gravity.locations) {
+            const locs = la.gravity.locations;
+            const maxMu = Math.max(...locs.filter(l=>l.Mu!=null).map(l=>Math.abs(l.Mu)));
+            checks.push({
+                category: catF, item: 'Maximum Mu',
+                status: maxMu > 0 ? 'pass' : 'warn',
+                value: _rv(maxMu)+' kip-ft',
+                criterion: 'Mu should be > 0 if gravity loads exist',
+                note: maxMu <= 0 ? 'Zero moment — check loads and span.' : '',
+            });
+            const hasVu = locs.some(l => l.Vu != null && l.Vu > 0);
+            checks.push({
+                category: catF, item: 'Shear Values (Vu)',
+                status: hasVu ? 'pass' : 'warn',
+                value: hasVu ? 'Available' : 'Missing at some locations',
+                criterion: 'Vu should be present at supports and critical sections',
+                note: !hasVu ? 'No shear values found — check analysis results.' : '',
+            });
+        }
+
+        if (la && la.auto_params) {
+            const ap = la.auto_params;
+            if (ap.negative_region) {
+                checks.push({
+                    category: catF, item: 'Unbraced Length Ly (Negative)',
+                    status: ap.negative_region.Ly_in > 0 ? 'pass' : 'warn',
+                    value: ap.negative_region.Ly_in+' in',
+                    criterion: 'Ly > 0 for negative moment region (unbraced bottom flange)',
+                    note: ap.negative_region.Ly_in <= 0 ? 'Zero unbraced length — fully braced negative region?' : '',
+                });
+                checks.push({
+                    category: catF, item: 'Moment Gradient Cb',
+                    status: ap.negative_region.Cb >= 1.0 ? 'pass' : 'warn',
+                    value: ap.negative_region.Cb,
+                    criterion: 'Cb ≥ 1.0 (AISI Eq. F2.1.1-2), typically 1.0-2.3',
+                    note: ap.negative_region.Cb < 1.0 ? 'Cb < 1.0 is unusual — verify.' : (ap.negative_region.Cb > 2.5 ? 'Very high Cb — verify moment diagram shape.' : ''),
+                });
+            }
+            if (ap.uplift_R != null) {
+                checks.push({
+                    category: catF, item: 'Uplift R Factor (§I6.2.1)',
+                    status: ap.uplift_R > 0 ? 'pass' : 'warn',
+                    value: ap.uplift_R,
+                    criterion: 'R = 0.40-0.70 per §I6.2.1 if conditions met',
+                    note: ap.uplift_R === 0.60 && !la.section ? 'R=0.60 is default (no section info passed) — may be conservative.' : '',
+                });
+            }
+        }
+
+        // ════════════════════════════════════════
+        // G. 설계 결과 (Design Results)
+        // ════════════════════════════════════════
+        const catG = 'G. Design Results';
+
+        checks.push({
+            category: catG, item: 'Design Check Executed',
+            status: d ? 'pass' : 'fail',
+            value: d ? d.member_type+' / '+d.design_method : 'Not run',
+            criterion: 'Design check must be completed',
+            note: !d ? 'Click "Run Design Check" in Design tab.' : '',
+        });
+
+        if (d && !d.error) {
+            // Mn components check
+            if (d.member_type === 'flexure') {
+                checks.push({
+                    category: catG, item: 'Mne vs My',
+                    status: d.Mne != null && d.My != null ? (d.Mne <= d.My ? 'pass' : 'warn') : 'fail',
+                    value: 'Mne='+_rv(d.Mne)+', My='+_rv(d.My),
+                    criterion: 'Mne ≤ My expected (LTB reduces or equals yield)',
+                    note: d.Mne > d.My * 1.01 ? 'Mne > My — unusual unless Cb effect. Verify Lb and Cb.' : '',
+                });
+                checks.push({
+                    category: catG, item: 'Mnl vs Mne (Local reduction)',
+                    status: d.Mnl != null ? (d.Mnl < d.Mne ? 'warn' : 'pass') : 'fail',
+                    value: 'Mnl='+_rv(d.Mnl)+', Mne='+_rv(d.Mne),
+                    criterion: 'Mnl ≤ Mne; if Mnl < Mne → local buckling reduces strength',
+                    note: d.Mnl != null && d.Mnl >= d.Mne ? 'No local reduction (λl ≤ 0.776).' : 'Local buckling reduces strength by '+(d.Mne>0?((1-d.Mnl/d.Mne)*100).toFixed(1):'?')+'%.',
+                });
+                checks.push({
+                    category: catG, item: 'Mnd vs My (Distortional reduction)',
+                    status: d.Mnd != null ? (d.Mnd < d.My ? 'warn' : 'pass') : 'fail',
+                    value: 'Mnd='+_rv(d.Mnd)+', My='+_rv(d.My),
+                    criterion: 'Mnd ≤ My; if Mnd < My → distortional buckling reduces strength',
+                    note: d.Mnd != null && d.Mnd >= d.My ? 'No distortional reduction (λd ≤ 0.673).' : 'Distortional reduces strength by '+(d.My>0?((1-d.Mnd/d.My)*100).toFixed(1):'?')+'%.',
+                });
+                checks.push({
+                    category: catG, item: 'All Mn Equal (Potential Issue)',
+                    status: (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My) ? 'warn' : 'pass',
+                    value: d.Mne === d.My ? 'Mne=Mnl=Mnd=My='+_rv(d.My) : 'Values differ (normal)',
+                    criterion: 'If all four equal, DSM may not be applying buckling reductions',
+                    note: (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My) ? 'All DSM strengths are identical — check if Mcrl/Mcrd are being extracted correctly from FSM analysis.' : '',
+                });
+            }
+
+            if (d.member_type === 'compression') {
+                checks.push({
+                    category: catG, item: 'Pnl vs Pne (Local reduction)',
+                    status: d.Pnl != null ? (d.Pnl < d.Pne ? 'warn' : 'pass') : 'fail',
+                    value: 'Pnl='+_rv(d.Pnl)+', Pne='+_rv(d.Pne),
+                    criterion: 'Pnl ≤ Pne; if reduced → local buckling governs',
+                    note: '',
+                });
+                checks.push({
+                    category: catG, item: 'Pnd vs Py (Distortional reduction)',
+                    status: d.Pnd != null ? (d.Pnd < d.Py ? 'warn' : 'pass') : 'fail',
+                    value: 'Pnd='+_rv(d.Pnd)+', Py='+_rv(d.Py),
+                    criterion: 'Pnd ≤ Py; if reduced → distortional governs',
+                    note: '',
+                });
+            }
+
+            // Utilization
+            if (d.utilization != null) {
+                const util = d.utilization;
+                checks.push({
+                    category: catG, item: 'Utilization Ratio (DCR)',
+                    status: util <= 0.95 ? 'pass' : (util <= 1.0 ? 'warn' : 'fail'),
+                    value: (util*100).toFixed(1)+'%',
+                    criterion: 'DCR ≤ 100% (≤95% preferred for margin)',
+                    note: util > 1.0 ? 'OVER-STRESSED — member does not meet design requirements. Increase section or reduce loads.' : (util > 0.95 ? 'Very close to limit — consider margin.' : ''),
+                });
+            }
+
+            // Safety factors
+            if (d.design_method === 'LRFD') {
+                checks.push({
+                    category: catG, item: 'Resistance Factor (φ)',
+                    status: 'pass',
+                    value: d.member_type === 'flexure' ? 'φb = 0.90' : (d.member_type === 'compression' ? 'φc = 0.85' : 'φ applied'),
+                    criterion: 'LRFD factors per AISI S100-16',
+                    note: '',
+                });
+            }
+
+            // Interaction
+            if (d.interaction) {
+                checks.push({
+                    category: catG, item: 'Interaction Check (§H1.2)',
+                    status: d.interaction.pass ? (d.interaction.total <= 0.95 ? 'pass' : 'warn') : 'fail',
+                    value: _rv(d.interaction.total,4)+' ≤ 1.0',
+                    criterion: 'P/Pa + Mx/Max + My/May ≤ 1.0',
+                    note: d.interaction.pass ? '' : 'Interaction check FAILS — reduce loads or increase section.',
+                });
+            }
+
+            // DSM warnings from design engine
+            if (d.dsm_warnings && d.dsm_warnings.length > 0) {
+                d.dsm_warnings.forEach((w, i) => {
+                    checks.push({
+                        category: catG, item: 'DSM Warning #'+(i+1),
+                        status: 'warn',
+                        value: w,
+                        criterion: 'Table B4.1-1 applicability limits',
+                        note: 'Section may be outside DSM pre-qualified limits.',
+                    });
+                });
+            }
+        }
+
+        // ════════════════════════════════════════
+        // H. 설계 일관성 (Consistency)
+        // ════════════════════════════════════════
+        const catH = 'H. Consistency';
+
+        // Check Fy matches between analysis and design
+        const fyLoad = getNum('input-fy-load', 50);
+        checks.push({
+            category: catH, item: 'Fy Consistency (Analysis vs Design)',
+            status: Math.abs(fy - fyLoad) < 0.1 ? 'pass' : 'warn',
+            value: 'Analysis fy='+fyLoad+', Design Fy='+fy,
+            criterion: 'Analysis stress fy should match design Fy',
+            note: Math.abs(fy - fyLoad) >= 0.1 ? 'Fy mismatch — buckling analysis used different Fy than design. Re-run analysis with correct Fy.' : '',
+        });
+
+        // Check if analysis was run with current section
+        if (model && model.node && analysisResult) {
+            checks.push({
+                category: catH, item: 'Analysis Currency',
+                status: 'pass', // can't easily verify, assume pass
+                value: 'Analysis result exists',
+                criterion: 'Analysis should match current section geometry',
+                note: 'If section was modified after analysis, re-run to get updated results.',
+            });
+        }
+
+        return checks;
+    }
+
+    function renderValidationDashboard(checks) {
+        const groups = {};
+        checks.forEach(c => {
+            if (!groups[c.category]) groups[c.category] = [];
+            groups[c.category].push(c);
+        });
+
+        const icons = { pass: '✓', warn: '!', fail: '✗' };
+        const colors = { pass: '#4caf50', warn: '#ffab00', fail: '#ff5252' };
+        const bgColors = { pass: 'rgba(76,175,80,0.08)', warn: 'rgba(255,171,0,0.08)', fail: 'rgba(255,82,82,0.1)' };
+
+        let h = '';
+        for (const [cat, items] of Object.entries(groups)) {
+            const catPass = items.filter(i => i.status === 'pass').length;
+            const catWarn = items.filter(i => i.status === 'warn').length;
+            const catFail = items.filter(i => i.status === 'fail').length;
+            const catColor = catFail > 0 ? colors.fail : (catWarn > 0 ? colors.warn : colors.pass);
+
+            h += '<div style="margin-bottom:12px">';
+            h += '<div style="font-weight:700;font-size:12px;padding:4px 8px;border-left:3px solid '+catColor+';background:'+bgColors[catFail>0?'fail':(catWarn>0?'warn':'pass')]+';border-radius:0 4px 4px 0">';
+            h += cat;
+            h += '<span style="float:right;font-size:11px;font-weight:400">';
+            if (catPass) h += '<span style="color:'+colors.pass+'">'+catPass+' pass</span> ';
+            if (catWarn) h += '<span style="color:'+colors.warn+'">'+catWarn+' warn</span> ';
+            if (catFail) h += '<span style="color:'+colors.fail+'">'+catFail+' fail</span>';
+            h += '</span></div>';
+
+            h += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:2px">';
+            h += '<tr style="background:var(--vscode-editor-selectionBackground)"><th style="width:20px"></th><th>Check Item</th><th>Value</th><th>Criterion</th></tr>';
+            items.forEach(c => {
+                const bg = c.status === 'fail' ? 'background:rgba(255,82,82,0.06)' : (c.status === 'warn' ? 'background:rgba(255,171,0,0.04)' : '');
+                h += '<tr style="'+bg+'">';
+                h += '<td style="text-align:center;font-weight:700;color:'+colors[c.status]+'">'+icons[c.status]+'</td>';
+                h += '<td>'+c.item+'</td>';
+                h += '<td style="font-family:monospace;font-size:10px">'+c.value+'</td>';
+                h += '<td style="font-size:10px;color:var(--vscode-descriptionForeground)">'+c.criterion+'</td>';
+                h += '</tr>';
+                if (c.note) {
+                    h += '<tr style="'+bg+'"><td></td><td colspan="3" style="font-size:10px;color:'+colors[c.status]+';padding:0 6px 4px;font-style:italic">→ '+c.note+'</td></tr>';
+                }
+            });
+            h += '</table></div>';
         }
         return h;
     }

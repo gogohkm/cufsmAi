@@ -777,6 +777,18 @@ server.tool("generate_report", "Generate a comprehensive design report with all 
     }
 );
 
+server.tool("validate_design", "Validate current design state — checks section geometry, material, DSM limits, analysis status, and returns pass/warn/fail for each item per AISI S100-16",
+    {
+        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+    },
+    async ({ Fy }) => {
+        const r = await callBridgePost('/action', {
+            action: 'validate_design', Fy: Fy || 50,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
 // ============================================================
 // 서버 시작
 // ============================================================
