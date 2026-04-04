@@ -17,6 +17,10 @@
     let analysisResult = null;
     /** DSM 결과 (극점 표시용) */
     let lastDsmResult = null;
+    /** 설계 결과 (Report용) */
+    let _lastDesignResult = null;
+    /** 단면 성질 (Report용) */
+    let lastProps = null;
 
     // ============================================================
     // 메시지 핸들러
@@ -104,6 +108,7 @@
                 renderBucklingCurve(); // DSM 극점 표시를 위해 다시 그리기
                 break;
             case 'designResult':
+                _lastDesignResult = msg.data;
                 renderDesignResult(msg.data);
                 break;
             case 'loadAnalysisComplete':
@@ -293,6 +298,7 @@
     // 단면 성질 표시
     // ============================================================
     function renderProperties(props) {
+        lastProps = props;
         const el = document.getElementById('section-props');
         if (!el) { return; }
         const rows = [
@@ -1706,6 +1712,20 @@
                 const n = getNum('config-n-spans', 5);
                 spanType = 'cont-' + n;
             }
+            // 프리프로세서 단면 템플릿 파라미터 → §I6.2.1 R 계산에 필요
+            const selTemplate = document.getElementById('select-template');
+            const secType = selTemplate ? selTemplate.value : '';
+            const sectionInfo = {
+                depth: getNum('tpl-H', 0),
+                flange_width: getNum('tpl-B', 0),
+                thickness: getNum('tpl-t', 0),
+                lip_depth: getNum('tpl-D', 0),
+                R_corner: getNum('tpl-r', 0),
+                type: secType === 'lippedz' ? 'Z' : 'C',
+                Fy: getNum('design-fy', 50),
+                Fu: getNum('design-fu', 65),
+            };
+
             const data = {
                 member_app: memberApp,
                 span_type: spanType,
@@ -1729,6 +1749,7 @@
                     fastener_spacing: getNum('deck-fastener-spacing', 12),
                     kphi_override: getNum('deck-kphi-override', null) || null,
                 },
+                section: (sectionInfo.depth > 0 && sectionInfo.thickness > 0) ? sectionInfo : null,
             };
 
             btnAnalyze.textContent = 'Analyzing...';
@@ -1736,6 +1757,58 @@
             setDesignStep(2, true);
             vscode.postMessage({ command: 'analyzeLoads', data });
         });
+    }
+
+    // 보 개략도 + 치수선 SVG
+    function renderBeamSchematic(data) {
+        const W = 480, H = 44, PAD_L = 6, PAD_R = 6;
+        const nSpans = data.n_spans || 1;
+        // 전체 길이 추정: locations에서 최대 x_ft
+        let totalL = 0;
+        if (data.gravity && data.gravity.locations) {
+            for (const loc of data.gravity.locations) {
+                if (loc.x_ft > totalL) totalL = loc.x_ft;
+            }
+        }
+        if (totalL <= 0) return '';
+        const spanL = totalL / nSpans;
+
+        const plotW = W - PAD_L - PAD_R;
+        const beamY = 16;
+        const supH = 8;
+
+        let svg = '<div style="margin:4px 0"><svg width="' + W + '" height="' + H + '" style="width:100%;max-width:' + W + 'px">';
+
+        // 보 선
+        svg += '<line x1="' + PAD_L + '" y1="' + beamY + '" x2="' + (W - PAD_R) + '" y2="' + beamY + '" stroke="var(--vscode-foreground)" stroke-width="2"/>';
+
+        // 지점 삼각형 + 치수선
+        for (let i = 0; i <= nSpans; i++) {
+            const x = PAD_L + (i / nSpans) * plotW;
+            // 삼각형 지점
+            const triW = 5;
+            svg += '<polygon points="' + x + ',' + beamY + ' ' + (x - triW) + ',' + (beamY + supH) + ' ' + (x + triW) + ',' + (beamY + supH) + '" fill="var(--vscode-foreground)" fill-opacity="0.6"/>';
+        }
+
+        // 스팬별 치수선
+        const dimY = beamY + supH + 8;
+        for (let i = 0; i < nSpans; i++) {
+            const x1 = PAD_L + (i / nSpans) * plotW;
+            const x2 = PAD_L + ((i + 1) / nSpans) * plotW;
+            const midX = (x1 + x2) / 2;
+            // 치수 선
+            svg += '<line x1="' + x1 + '" y1="' + dimY + '" x2="' + x2 + '" y2="' + dimY + '" stroke="var(--vscode-descriptionForeground)" stroke-width="0.8"/>';
+            // 화살표 (좌)
+            svg += '<line x1="' + x1 + '" y1="' + (dimY - 3) + '" x2="' + x1 + '" y2="' + (dimY + 3) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="0.8"/>';
+            // 화살표 (우)
+            svg += '<line x1="' + x2 + '" y1="' + (dimY - 3) + '" x2="' + x2 + '" y2="' + (dimY + 3) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="0.8"/>';
+            // 치수 텍스트
+            const dimText = spanL.toFixed(1) + ' ft';
+            svg += '<text x="' + midX + '" y="' + (dimY + 11) + '" fill="var(--vscode-descriptionForeground)" font-size="9" text-anchor="middle">' + dimText + '</text>';
+        }
+
+        svg += '</svg></div>';
+        return svg;
     }
 
     // M/V 다이어그램 SVG 렌더링 (확대 + 지점마커 + max/min 라벨)
@@ -1773,8 +1846,15 @@
         const origMin = flipSign ? -vals[minI] : vals[minI];
 
         let svg = '<div style="margin:4px 0"><svg width="' + W + '" height="' + H + '" style="width:100%;max-width:' + W + 'px;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
-        // baseline
+        // baseline + support markers
         svg += '<line x1="' + PAD_L + '" y1="' + midY + '" x2="' + (W-PAD_R) + '" y2="' + midY + '" stroke="var(--vscode-foreground)" stroke-opacity="0.25" stroke-dasharray="4"/>';
+        if (_lastLoadAnalysis) {
+            const ns = _lastLoadAnalysis.n_spans || 1;
+            for (let si = 0; si <= ns; si++) {
+                const sx = PAD_L + (si / ns) * plotW;
+                svg += '<line x1="' + sx.toFixed(1) + '" y1="' + (midY - 3) + '" x2="' + sx.toFixed(1) + '" y2="' + (midY + 3) + '" stroke="var(--vscode-foreground)" stroke-opacity="0.4" stroke-width="1"/>';
+            }
+        }
         // fill + line
         svg += '<path d="' + fillD + '" fill="' + color + '" fill-opacity="0.12"/>';
         svg += '<path d="' + pathD + '" fill="none" stroke="' + color + '" stroke-width="1.5"/>';
@@ -1809,9 +1889,19 @@
         _lastLoadAnalysis = data;
         let html = '';
 
-        // M/V Diagram SVG
+        // Beam schematic with dimension lines
+        if (data.gravity && data.gravity.M_diagram && data.gravity.M_diagram.length > 2) {
+            html += renderBeamSchematic(data);
+        }
+
+        // M Diagram SVG
         if (data.gravity && data.gravity.M_diagram && data.gravity.M_diagram.length > 2) {
             html += renderDiagramSVG(data.gravity.M_diagram, 'Moment (kip-ft)', '#4fc3f7', true);
+        }
+
+        // V Diagram SVG
+        if (data.gravity && data.gravity.V_diagram && data.gravity.V_diagram.length > 2) {
+            html += renderDiagramSVG(data.gravity.V_diagram, 'Shear (kips)', '#ff8a65', false);
         }
 
         // 중력 지배 결과
@@ -2108,6 +2198,608 @@
         const style = color ? ` style="color:${color}"` : '';
         return `<tr><td style="padding:2px 6px;color:#aaa">${label}</td>
                 <td style="padding:2px 6px;text-align:right"${style}><b>${value ?? '-'}</b> ${unit || ''}</td></tr>`;
+    }
+
+    // ============================================================
+    // Report 탭 — 상세 리포트 생성
+    // ============================================================
+
+    const btnGenReport = document.getElementById('btn-generate-report');
+    const btnPrintReport = document.getElementById('btn-print-report');
+    const reportContainer = document.getElementById('report-container');
+
+    if (btnGenReport) {
+        btnGenReport.addEventListener('click', () => {
+            if (!_lastDesignResult && !_lastLoadAnalysis) {
+                if (reportContainer) reportContainer.innerHTML = '<p style="color:var(--vscode-errorForeground);text-align:center;padding:20px">No design results available. Please run "Analyze Loads" and "Run Design Check" first.</p>';
+                return;
+            }
+            if (reportContainer) {
+                reportContainer.innerHTML = generateDetailedReport();
+                if (btnPrintReport) btnPrintReport.style.display = 'inline-block';
+            }
+        });
+    }
+
+    if (btnPrintReport) {
+        btnPrintReport.addEventListener('click', () => {
+            if (!reportContainer) return;
+            const w = window.open('', '_blank');
+            if (!w) return;
+            w.document.write(`<!DOCTYPE html><html><head><title>CUFSM Design Report</title>
+            <style>
+                body{font-family:'Segoe UI',sans-serif;font-size:11px;color:#222;max-width:800px;margin:0 auto;padding:20px;line-height:1.7}
+                h1{font-size:16px;border-bottom:2px solid #333;padding-bottom:6px;margin-top:0;margin-bottom:16px}
+                h2{font-size:14px;color:#1565c0;border-bottom:1px solid #ccc;padding-bottom:4px;margin-top:28px;margin-bottom:12px}
+                h3{font-size:12px;color:#333;margin-top:18px;margin-bottom:8px}
+                p{margin:6px 0;line-height:1.7}
+                table{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:11px}
+                th,td{border:1px solid #ccc;padding:4px 8px;text-align:left;line-height:1.5}
+                th{background:#f0f0f0;font-weight:600}
+                .eq{font-family:'Cambria Math','Times New Roman',serif;font-style:italic;font-size:12px;padding:6px 10px;background:#f8f8ff;border-left:3px solid #1565c0;margin:8px 0;display:block;line-height:1.8}
+                .result{font-weight:700;color:#1565c0}
+                .pass{color:#2e7d32;font-weight:700} .fail{color:#c62828;font-weight:700}
+                .section-fig{text-align:center;margin:12px 0}
+                svg text{font-family:'Segoe UI',sans-serif}
+                hr{margin:16px 0;border:none;border-top:1px solid #ddd}
+                @media print{body{font-size:10px;line-height:1.6} .no-print{display:none} h2{page-break-before:auto}}
+            </style></head><body>${reportContainer.innerHTML}</body></html>`);
+            w.document.close();
+            w.print();
+        });
+    }
+
+    // ─── Report utility ───
+    function _rv(v, dec) { return v != null ? Number(v).toFixed(dec != null ? dec : 2) : '—'; }
+
+    function generateDetailedReport() {
+        const d = _lastDesignResult;
+        const la = _lastLoadAnalysis;
+        const now = new Date().toLocaleString();
+        let h = '', sec = 0;
+
+        // ── Header ──
+        h += '<h1>CUFSM — Cold-Formed Steel Design Report</h1>';
+        h += '<table style="border:none"><tr style="border:none"><td style="border:none;width:50%">Date: '+now+'</td>';
+        h += '<td style="border:none;text-align:right">AISI S100-16 / Direct Strength Method (DSM)</td></tr></table><hr>';
+
+        // ── 1. Section ──
+        h += '<h2>'+(++sec)+'. Cross Section</h2>';
+        h += _rptSection();
+
+        // ── 2. Section Analysis (Buckling + DSM) ──
+        h += '<h2>'+(++sec)+'. Elastic Buckling Analysis</h2>';
+        h += _rptBuckling();
+
+        // ── 3. Design Input ──
+        h += '<h2>'+(++sec)+'. Design Input</h2>';
+        h += _rptDesignInput(la, d);
+
+        // ── 4. Load Analysis ──
+        if (la) {
+            h += '<h2>'+(++sec)+'. Load Analysis Results</h2>';
+            h += _rptLoadAnalysis(la);
+        }
+
+        // ── 5. Design Calculation ──
+        if (d) {
+            const mtLabel = {compression:'Compression (Chapter E)',flexure:'Flexure (Chapter F)',combined:'Combined (Chapters E+F+H)',tension:'Tension (Chapter D)'}[d.member_type||''] || d.member_type;
+            h += '<h2>'+(++sec)+'. Design Calculation — '+mtLabel+'</h2>';
+            h += _rptDesignCalc(d);
+        }
+
+        // ── 6. Design Summary ──
+        if (d) {
+            h += '<h2>'+(++sec)+'. Design Summary</h2>';
+            h += _rptSummary(d, la);
+        }
+
+        h += '<hr><p style="text-align:center;color:#999;font-size:9px">Generated by CUFSM Cold-Formed Steel Section Designer — AISI S100-16 DSM</p>';
+        return h;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 1. Section — 그림 + 규격 + 속성
+    // ═══════════════════════════════════════════════════════
+    function _rptSection() {
+        let h = '';
+        if (!model || !model.node || model.node.length === 0) return '<p>(No section defined)</p>';
+
+        // SVG
+        let xMin=Infinity,xMax=-Infinity,zMin=Infinity,zMax=-Infinity;
+        model.node.forEach(n => { xMin=Math.min(xMin,n[1]);xMax=Math.max(xMax,n[1]);zMin=Math.min(zMin,n[2]);zMax=Math.max(zMax,n[2]); });
+        const pad = Math.max(xMax-xMin,zMax-zMin)*0.2||1;
+        const vb = (xMin-pad)+' '+(zMin-pad)+' '+(xMax-xMin+2*pad)+' '+(zMax-zMin+2*pad);
+        let svg = '<svg width="180" height="180" viewBox="'+vb+'" style="border:1px solid #ddd;border-radius:4px;background:#fafafa">';
+        if (model.elem) model.elem.forEach(e => {
+            const ni=e[1]-1,nj=e[2]-1;
+            if (ni>=0&&ni<model.node.length&&nj>=0&&nj<model.node.length)
+                svg += '<line x1="'+model.node[ni][1]+'" y1="'+model.node[ni][2]+'" x2="'+model.node[nj][1]+'" y2="'+model.node[nj][2]+'" stroke="#1565c0" stroke-width="0.12" stroke-linecap="round"/>';
+        });
+        model.node.forEach(n => { svg += '<circle cx="'+n[1]+'" cy="'+n[2]+'" r="0.06" fill="#ff9800"/>'; });
+        svg += '</svg>';
+
+        // 규격 표 (그림 옆에)
+        const selT = document.getElementById('select-template');
+        const secType = selT ? selT.value : '';
+        const typeNames = {lippedc:'Lipped C-Channel',lippedz:'Lipped Z-Section',hat:'Hat Section',track:'Track Section',rhs:'Rectangular HSS',chs:'Circular HSS',angle:'Angle',isect:'I-Section',tee:'Tee Section'};
+        const H0=getNum('tpl-H',0),B0=getNum('tpl-B',0),D0=getNum('tpl-D',0),t0=getNum('tpl-t',0),r0=getNum('tpl-r',0);
+
+        h += '<div style="display:flex;gap:16px;align-items:flex-start">';
+        h += '<div>'+svg+'</div>';
+        h += '<div style="flex:1"><h3>Section Designation</h3>';
+        h += '<table><tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>';
+        h += '<tr><td>Section Type</td><td colspan="2"><b>'+(typeNames[secType]||secType||'Custom')+'</b></td></tr>';
+        if (H0) h += '<tr><td>H (Depth)</td><td>'+H0+'</td><td>in</td></tr>';
+        if (B0) h += '<tr><td>B (Flange width)</td><td>'+B0+'</td><td>in</td></tr>';
+        if (D0) h += '<tr><td>D (Lip depth)</td><td>'+D0+'</td><td>in</td></tr>';
+        if (t0) h += '<tr><td>t (Thickness)</td><td>'+t0+'</td><td>in</td></tr>';
+        if (r0) h += '<tr><td>r (Corner radius)</td><td>'+r0+'</td><td>in</td></tr>';
+        h += '<tr><td>Nodes / Elements</td><td colspan="2">'+model.node.length+' / '+(model.elem?model.elem.length:0)+'</td></tr>';
+        h += '</table></div></div>';
+
+        // 단면 성질
+        if (lastProps) {
+            const p = lastProps;
+            h += '<h3>Computed Section Properties</h3>';
+            h += '<table><tr><th>Property</th><th>Symbol</th><th>Value</th><th>Unit</th></tr>';
+            const rows = [
+                ['Gross Area','A',p.A,'in²'],
+                ['Strong-axis Inertia','I<sub>xx</sub>',p.Ixx,'in⁴'],['Weak-axis Inertia','I<sub>zz</sub>',p.Izz,'in⁴'],
+                ['Product of Inertia','I<sub>xz</sub>',p.Ixz,'in⁴'],
+                ['Strong-axis Section Modulus','S<sub>x</sub>',p.Sx,'in³'],['Weak-axis Section Modulus','S<sub>z</sub>',p.Sz,'in³'],
+                ['Strong-axis Plastic Modulus','Z<sub>x</sub>',p.Zx,'in³'],['Weak-axis Plastic Modulus','Z<sub>z</sub>',p.Zz,'in³'],
+                ['Strong-axis Radius of Gyration','r<sub>x</sub>',p.rx,'in'],['Weak-axis Radius of Gyration','r<sub>z</sub>',p.rz,'in'],
+                ['Centroid x','x<sub>cg</sub>',p.xcg,'in'],['Centroid z','z<sub>cg</sub>',p.zcg,'in'],
+                ['Principal Axis Angle','&theta;<sub>p</sub>',p.thetap,'°'],
+                ['Principal Inertia 1','I<sub>11</sub>',p.I11,'in⁴'],['Principal Inertia 2','I<sub>22</sub>',p.I22,'in⁴'],
+            ];
+            rows.forEach(r => { if (r[2]!=null) h += '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+_rv(r[2],4)+'</td><td>'+r[3]+'</td></tr>'; });
+            h += '</table>';
+        }
+        return h;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 2. Elastic Buckling — Signature Curve + DSM Values
+    // ═══════════════════════════════════════════════════════
+    function _rptBuckling() {
+        let h = '';
+        // Signature curve
+        if (analysisResult && analysisResult.curve && analysisResult.curve.length > 0) {
+            h += '<h3>Buckling Curve (Load Factor vs. Half-Wavelength)</h3>';
+            const curve = analysisResult.curve;
+            const W=500,H2=200,PL=50,PR=15,PT=20,PB=30;
+            const plotW=W-PL-PR,plotH=H2-PT-PB;
+            const lengths=curve.map(c=>c[0]),lf=curve.map(c=>c[1]);
+            const minLF=Math.min(...lf),maxLF=Math.max(...lf);
+            const logMin=Math.log10(Math.max(Math.min(...lengths),0.1)),logMax=Math.log10(Math.max(...lengths));
+            const lfMax=Math.min(maxLF,minLF*10);
+            let pathD='';
+            for (let i=0;i<curve.length;i++){
+                const lx=(Math.log10(Math.max(lengths[i],0.1))-logMin)/(logMax-logMin);
+                const ly=1-Math.min(lf[i],lfMax)/lfMax;
+                pathD+=(i===0?'M':'L')+(PL+lx*plotW).toFixed(1)+','+(PT+ly*plotH).toFixed(1);
+            }
+            let svg='<svg width="'+W+'" height="'+H2+'" style="border:1px solid #ddd;border-radius:4px;background:#fafafa">';
+            svg+='<rect x="'+PL+'" y="'+PT+'" width="'+plotW+'" height="'+plotH+'" fill="none" stroke="#ccc"/>';
+            svg+='<path d="'+pathD+'" fill="none" stroke="#1565c0" stroke-width="1.5"/>';
+            const mi=lf.indexOf(minLF);
+            // DSM 극점 마커 (포스트프로세서와 동일)
+            const toSvgX = (L) => PL+(Math.log10(Math.max(L,0.1))-logMin)/(logMax-logMin)*plotW;
+            const toSvgY = (v) => PT+(1-Math.min(v,lfMax)/lfMax)*plotH;
+            const dsmD = lastDsmResult ? (lastDsmResult.Mxx || lastDsmResult.P) : null;
+            const extrema = [];
+            if (dsmD) {
+                if (dsmD.LF_local > 0 && dsmD.Lcrl > 0) extrema.push({L:dsmD.Lcrl,LF:dsmD.LF_local,label:dsmD.Mxxcrl!==undefined?'Mcrl':'Pcrl',color:'#ff5722'});
+                if (dsmD.LF_dist > 0 && dsmD.Lcrd > 0) extrema.push({L:dsmD.Lcrd,LF:dsmD.LF_dist,label:dsmD.Mxxcrd!==undefined?'Mcrd':'Pcrd',color:'#ffab00'});
+                if (dsmD.LF_global > 0 && dsmD.Lcre > 0) extrema.push({L:dsmD.Lcre,LF:dsmD.LF_global,label:dsmD.Mxxcre!==undefined?'Mcre':'Pcre',color:'#7c4dff'});
+            }
+            if (extrema.length === 0) {
+                extrema.push({L:lengths[mi],LF:minLF,label:'min',color:'#e53935'});
+            }
+            extrema.forEach(ext => {
+                const ex=toSvgX(ext.L).toFixed(1), ey=toSvgY(ext.LF).toFixed(1);
+                svg+='<circle cx="'+ex+'" cy="'+ey+'" r="4" fill="'+ext.color+'" stroke="#fff" stroke-width="1"/>';
+                svg+='<text x="'+(parseFloat(ex)+6)+'" y="'+(parseFloat(ey)-6)+'" font-size="8" fill="'+ext.color+'" font-weight="600">'+ext.label+'='+ext.LF.toFixed(3)+' @ L='+ext.L.toFixed(1)+'</text>';
+            });
+            svg+='<text x="'+(PL+plotW/2)+'" y="'+(H2-3)+'" font-size="9" text-anchor="middle" fill="#666">Half-wavelength (in)</text>';
+            svg+='<text x="12" y="'+(PT+plotH/2)+'" font-size="9" text-anchor="middle" fill="#666" transform="rotate(-90,12,'+(PT+plotH/2)+')">Load Factor</text>';
+            svg+='</svg>';
+            h += '<div class="section-fig">'+svg+'</div>';
+        } else {
+            h += '<p>(Run FSM analysis first to generate buckling curve)</p>';
+        }
+
+        // DSM Design Values — 포스트프로세서와 동일한 필드명 사용
+        h += '<h3>DSM Design Values (Extracted from Buckling Curve)</h3>';
+        if (lastDsmResult) {
+            const dP=lastDsmResult.P||{},dM=lastDsmResult.Mxx||{};
+            h += '<table><tr><th>Property</th><th>Value</th><th>Half-wavelength</th><th>Load Factor</th></tr>';
+            // Compression
+            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Compression (Axial)</td></tr>';
+            h += '<tr><td>P<sub>y</sub> (Yield)</td><td>'+_rv(dP.Py)+' kips</td><td></td><td></td></tr>';
+            h += '<tr><td>P<sub>crl</sub> (Local)</td><td>'+_rv(dP.Pcrl)+' kips</td><td>'+_rv(dP.Lcrl,1)+' in</td><td>'+_rv(dP.LF_local,4)+'</td></tr>';
+            h += '<tr><td>P<sub>crd</sub> (Distortional)</td><td>'+_rv(dP.Pcrd)+' kips</td><td>'+_rv(dP.Lcrd,1)+' in</td><td>'+_rv(dP.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>P<sub>cre</sub> (Global)</td><td>'+_rv(dP.Pcre)+' kips</td><td>'+_rv(dP.Lcre,1)+' in</td><td>'+_rv(dP.LF_global,4)+'</td></tr>';
+            // Flexure
+            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Bending (M<sub>xx</sub>)</td></tr>';
+            h += '<tr><td>M<sub>y</sub> (Yield)</td><td>'+_rv(dM.My_xx)+' kip-in</td><td></td><td></td></tr>';
+            h += '<tr><td>M<sub>crl</sub> (Local)</td><td>'+_rv(dM.Mxxcrl)+' kip-in</td><td>'+_rv(dM.Lcrl,1)+' in</td><td>'+_rv(dM.LF_local,4)+'</td></tr>';
+            h += '<tr><td>M<sub>crd</sub> (Distortional)</td><td>'+_rv(dM.Mxxcrd)+' kip-in</td><td>'+_rv(dM.Lcrd,1)+' in</td><td>'+_rv(dM.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>M<sub>cre</sub> (Global)</td><td>'+_rv(dM.Mxxcre)+' kip-in</td><td>'+_rv(dM.Lcre,1)+' in</td><td>'+_rv(dM.LF_global,4)+'</td></tr>';
+            h += '</table>';
+            // 극소점 정보
+            const dsm0 = dP.n_minima !== undefined ? dP : dM;
+            if (dsm0.n_minima !== undefined) {
+                h += '<p style="font-size:10px;color:#666">Detected '+dsm0.n_minima+' minima in signature curve.';
+                if (dsm0.minima) dsm0.minima.forEach((m,i) => { h += ' Min '+(i+1)+': L='+m.length.toFixed(1)+' in, LF='+m.load_factor.toFixed(4)+'.'; });
+                h += '</p>';
+            }
+        } else {
+            h += '<p>(No DSM results — run FSM analysis first)</p>';
+        }
+        return h;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 3. Design Input — 하중, 재료, 부재 구성
+    // ═══════════════════════════════════════════════════════
+    function _rptDesignInput(la, d) {
+        let h = '';
+
+        // 재료
+        const fy = getNum('design-fy',50), fu = getNum('design-fu',65);
+        const gradeEl = document.getElementById('select-steel-grade');
+        const gradeName = gradeEl ? gradeEl.options[gradeEl.selectedIndex].text : 'Custom';
+        h += '<h3>Material</h3>';
+        h += '<table><tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>';
+        h += '<tr><td>Steel Grade</td><td colspan="2">'+gradeName+'</td></tr>';
+        h += '<tr><td>Yield Strength, F<sub>y</sub></td><td>'+fy+'</td><td>ksi</td></tr>';
+        h += '<tr><td>Tensile Strength, F<sub>u</sub></td><td>'+fu+'</td><td>ksi</td></tr>';
+        h += '<tr><td>Elastic Modulus, E</td><td>29,500</td><td>ksi</td></tr>';
+        h += '<tr><td>Poisson\'s Ratio, &nu;</td><td>0.30</td><td></td></tr>';
+        h += '</table>';
+
+        // 부재 구성
+        const memberApp = document.getElementById('select-member-type');
+        const memberName = memberApp ? memberApp.options[memberApp.selectedIndex].text : '';
+        const spanEl = document.getElementById('select-span-type');
+        const spanName = spanEl ? spanEl.options[spanEl.selectedIndex].text : '';
+        const spanFt = getNum('config-span',0);
+        const spacing = getNum('config-spacing',5);
+        const dm = document.getElementById('select-design-method');
+        const dmName = dm ? dm.value : 'LRFD';
+
+        h += '<h3>Member Configuration</h3>';
+        h += '<table><tr><th>Parameter</th><th>Value</th></tr>';
+        if (memberName) h += '<tr><td>Member Application</td><td>'+memberName+'</td></tr>';
+        if (spanName) h += '<tr><td>Span Type</td><td>'+spanName+(la?' ('+la.n_spans+' spans)':'')+'</td></tr>';
+        if (spanFt) h += '<tr><td>Span Length</td><td>'+spanFt+' ft</td></tr>';
+        h += '<tr><td>Tributary Width (Spacing)</td><td>'+spacing+' ft</td></tr>';
+        h += '<tr><td>Design Method</td><td>'+dmName+'</td></tr>';
+        const lapL = getNum('config-lap-left',0), lapR = getNum('config-lap-right',0);
+        if (lapL || lapR) h += '<tr><td>Lap Lengths (left / right)</td><td>'+lapL+' / '+lapR+' ft</td></tr>';
+        h += '</table>';
+
+        // 설계하중
+        h += '<h3>Design Loads</h3>';
+        h += '<table><tr><th>Load Type</th><th>PSF Value</th><th>PLF Value (×'+spacing+' ft)</th><th>Description</th></tr>';
+        const loadDefs = [
+            ['D','load-D-psf','Dead Load (self-weight + superimposed)'],
+            ['Lr','load-Lr-psf','Roof Live Load'],
+            ['S','load-S-psf','Snow Load'],
+            ['L','load-L-psf','Floor Live Load'],
+            ['W (uplift)','load-Wu-psf','Wind Uplift Load'],
+        ];
+        loadDefs.forEach(ld => {
+            const psf = getNum(ld[1],0);
+            if (psf > 0) h += '<tr><td>'+ld[0]+'</td><td>'+psf+' psf</td><td>'+(psf*spacing).toFixed(1)+' plf</td><td>'+ld[2]+'</td></tr>';
+        });
+        h += '</table>';
+
+        // 데크 정보
+        const deckType = document.getElementById('select-deck-type');
+        const deckName = deckType ? deckType.options[deckType.selectedIndex].text : 'None';
+        if (deckName !== 'None' && deckName !== 'none') {
+            h += '<h3>Deck Information</h3>';
+            h += '<table><tr><th>Parameter</th><th>Value</th></tr>';
+            h += '<tr><td>Deck Type</td><td>'+deckName+'</td></tr>';
+            h += '<tr><td>Panel Thickness, t<sub>panel</sub></td><td>'+getNum('deck-t-panel',0.018)+' in</td></tr>';
+            h += '<tr><td>Fastener Spacing</td><td>'+getNum('deck-fastener-spacing',12)+' in</td></tr>';
+            h += '</table>';
+        }
+        return h;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 4. Load Analysis — 다이어그램 + 위치 + Auto Params
+    // ═══════════════════════════════════════════════════════
+    function _rptLoadAnalysis(la) {
+        let h = '';
+        if (la.gravity && la.gravity.M_diagram && la.gravity.M_diagram.length > 2) {
+            h += renderBeamSchematic(la);
+            h += renderDiagramSVG(la.gravity.M_diagram, 'Moment Diagram (kip-ft)', '#1565c0', true);
+        }
+        if (la.gravity && la.gravity.V_diagram && la.gravity.V_diagram.length > 2)
+            h += renderDiagramSVG(la.gravity.V_diagram, 'Shear Diagram (kips)', '#e65100', false);
+
+        if (la.gravity) {
+            h += '<h3>Gravity Controlling Combination: '+la.gravity.combo+'</h3>';
+            h += '<table><tr><th>Location</th><th>x (ft)</th><th>M<sub>u</sub> (kip-ft)</th><th>V<sub>u</sub> (kips)</th><th>R<sub>u</sub> (kips)</th><th>Region</th></tr>';
+            la.gravity.locations.forEach(loc => {
+                h += '<tr><td>'+loc.name+'</td><td>'+_rv(loc.x_ft,2)+'</td><td>'+_rv(loc.Mu)+'</td><td>'+_rv(loc.Vu)+'</td><td>'+_rv(loc.Ru)+'</td><td>'+( loc.region||'')+'</td></tr>';
+            });
+            h += '</table>';
+        }
+        if (la.uplift) {
+            h += '<h3>Uplift Controlling Combination: '+la.uplift.combo+'</h3>';
+            h += '<table><tr><th>Location</th><th>M<sub>u</sub> (kip-ft)</th></tr>';
+            la.uplift.locations.forEach(loc => { h += '<tr><td>'+loc.name+'</td><td>'+_rv(loc.Mu)+'</td></tr>'; });
+            h += '</table>';
+        }
+
+        // Auto-Determined Parameters with explanation
+        if (la.auto_params) {
+            const ap = la.auto_params;
+            h += '<h3>Auto-Determined Design Parameters</h3>';
+            h += '<p style="font-size:10px;color:#555">The following parameters are automatically computed from the load analysis results, deck configuration, and moment diagram shape:</p>';
+            h += '<table><tr><th>Parameter</th><th>Value</th><th>Calculation Method</th></tr>';
+            if (ap.deck && ap.deck.type !== 'none') {
+                h += '<tr><td>k<sub>&phi;</sub> (Rotational Stiffness)</td><td>'+ap.deck.kphi+' kip-in/rad/in</td>';
+                h += '<td>Chen & Moen (2011): k<sub>&phi;</sub> = 1/(1/(k&middot;c&sup2;) + c&sup3;/(3EIc&sup2;)), where k=fastener stiffness/spacing, c=flange/2</td></tr>';
+                h += '<tr><td>k<sub>x</sub> (Lateral Stiffness)</td><td>'+ap.deck.kx+' kip/in/in</td>';
+                h += '<td>2-ply series spring: k<sub>x</sub> = (1/(1/(Et<sub>1</sub>)+1/(Et<sub>2</sub>)))/s &times; 0.04 reduction factor</td></tr>';
+            }
+            if (ap.positive_region) {
+                h += '<tr><td>Positive Region Bracing</td><td>Fully braced (L<sub>y</sub>=0)</td>';
+                h += '<td>Top flange in compression, continuously braced by deck panel — no LTB check required</td></tr>';
+            }
+            if (ap.negative_region) {
+                h += '<tr><td>Negative L<sub>y</sub></td><td>'+ap.negative_region.Ly_in+' in</td>';
+                h += '<td>Distance from inflection point (M=0) to lap end or support. Bottom flange in compression — unbraced.</td></tr>';
+                h += '<tr><td>Negative C<sub>b</sub></td><td>'+ap.negative_region.Cb+'</td>';
+                h += '<td>AISI Eq. F2.1.1-2: C<sub>b</sub> = 12.5M<sub>max</sub> / (2.5M<sub>max</sub>+3M<sub>A</sub>+4M<sub>B</sub>+3M<sub>C</sub>), computed from moment diagram over unbraced segment</td></tr>';
+            }
+            if (ap.uplift_R != null) {
+                h += '<tr><td>Uplift R (§I6.2.1)</td><td>'+ap.uplift_R+'</td>';
+                h += '<td>Reduction factor per AISI S100 §I6.2.1 — based on section geometry checks (d/t, d/b, b&ge;2.125, flat_b/t, etc.)</td></tr>';
+            }
+            if (ap.unbraced && ap.unbraced.inflection_points_ft) {
+                h += '<tr><td>Inflection Points</td><td>'+ap.unbraced.inflection_points_ft.join(', ')+' ft</td>';
+                h += '<td>Locations where moment = 0, found by linear interpolation of moment diagram</td></tr>';
+            }
+            h += '</table>';
+        }
+        return h;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 5. Design Calculation — 상세 수식 + 조건문
+    // ═══════════════════════════════════════════════════════
+    function _rptDesignCalc(d) {
+        const mt = d.member_type || '';
+        const dm = d.design_method || 'LRFD';
+        let h = '';
+        if (mt === 'flexure') h += _rptFlexure(d, dm);
+        else if (mt === 'compression') h += _rptCompression(d, dm);
+        else if (mt === 'combined') h += _rptCombined(d, dm);
+        else if (mt === 'tension') h += _rptTension(d, dm);
+
+        // Interaction check
+        if (d.interaction) {
+            const ir = d.interaction;
+            h += '<h3>Interaction Check — §H1.2 (Eq. '+( ir.equation||'H1.2-1')+')</h3>';
+            h += '<span class="eq">P<sub>u</sub>/P<sub>a</sub> + M<sub>ux</sub>/M<sub>ax</sub> + M<sub>uy</sub>/M<sub>ay</sub> &le; 1.0</span>';
+            h += '<table><tr><th>Term</th><th>Demand</th><th>Capacity</th><th>Ratio</th></tr>';
+            h += '<tr><td>Axial P/Pa</td><td></td><td></td><td>'+_rv(ir.P_ratio,4)+'</td></tr>';
+            h += '<tr><td>Flexure Mx/Max</td><td></td><td></td><td>'+_rv(ir.Mx_ratio,4)+'</td></tr>';
+            h += '<tr><td>Flexure My/May</td><td></td><td></td><td>'+_rv(ir.My_ratio,4)+'</td></tr>';
+            h += '<tr style="font-weight:700"><td>Total</td><td colspan="2"></td><td class="'+(ir.pass?'pass':'fail')+'">'+_rv(ir.total,4)+' &le; 1.0 '+(ir.pass?'OK':'NG')+'</td></tr>';
+            h += '</table>';
+        }
+        if (d.shear_interaction) {
+            const si = d.shear_interaction;
+            h += '<h3>Bending + Shear Interaction — §H2 (Eq. '+(si.equation||'H2-1')+')</h3>';
+            h += '<span class="eq">(M<sub>u</sub>/M<sub>ao</sub>)&sup2; + (V<sub>u</sub>/V<sub>a</sub>)&sup2; &le; 1.0</span>';
+            h += '<table><tr><th>Term</th><th>Ratio</th></tr>';
+            h += '<tr><td>M/Mao</td><td>'+_rv(si.M_ratio,4)+'</td></tr>';
+            h += '<tr><td>V/Va</td><td>'+_rv(si.V_ratio,4)+'</td></tr>';
+            h += '<tr style="font-weight:700"><td>Total (SRSS)</td><td class="'+(si.pass?'pass':'fail')+'">'+_rv(si.total,4)+' &le; 1.0 '+(si.pass?'OK':'NG')+'</td></tr>';
+            h += '</table>';
+        }
+
+        // Step summary table
+        const steps = d.steps || [];
+        if (steps.length > 0) {
+            h += '<h3>Calculation Step Summary</h3>';
+            h += '<table><tr><th>#</th><th>Step</th><th>Formula</th><th>Result</th><th>Unit</th></tr>';
+            steps.forEach(s => {
+                const gov = s.controlling_mode ? ' style="background:#fff3e0;font-weight:600"' : '';
+                h += '<tr'+gov+'><td>'+s.step+'</td><td>'+s.name+(s.controlling_mode?' <b>[GOVERNS]</b>':'')+'</td>';
+                h += '<td style="font-size:10px">'+(s.formula||'')+'</td>';
+                h += '<td style="text-align:right;font-weight:600">'+(s.value!=null?s.value:'')+'</td><td>'+(s.unit||'')+'</td></tr>';
+            });
+            h += '</table>';
+        }
+        return h;
+    }
+
+    function _rptFlexure(d, dm) {
+        let h = '';
+        const phi=0.90,omega=1.67;
+        // Step 1: My
+        h += '<h3>Step 1: Yield Moment, M<sub>y</sub></h3>';
+        h += '<span class="eq">M<sub>y</sub> = S<sub>f</sub> &times; F<sub>y</sub> = '+_rv(d.My)+' kip-in</span>';
+
+        // Step 2: Global/LTB — Mne
+        h += '<h3>Step 2: Global Buckling / Lateral-Torsional Buckling — §F2</h3>';
+        h += '<p>The global buckling stress F<sub>cre</sub> is computed based on the unbraced length L<sub>b</sub>, moment gradient C<sub>b</sub>, and section properties (r<sub>y</sub>, J, C<sub>w</sub>).</p>';
+        h += '<span class="eq">F<sub>cre</sub> = C<sub>b</sub> &middot; r<sub>o</sub> &middot; A / S<sub>f</sub> &middot; &radic;(&sigma;<sub>ey</sub> &middot; &sigma;<sub>t</sub>)</span>';
+        h += '<p>Depending on F<sub>cre</sub> relative to F<sub>y</sub>:</p>';
+        h += '<table><tr><th>Condition</th><th>Equation</th><th>Regime</th></tr>';
+        h += '<tr><td>F<sub>cre</sub> &ge; 2.78 F<sub>y</sub></td><td>F<sub>n</sub> = F<sub>y</sub></td><td>Yielding (compact)</td></tr>';
+        h += '<tr><td>2.78 F<sub>y</sub> &gt; F<sub>cre</sub> &gt; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = (10/9)F<sub>y</sub>(1 - 10F<sub>y</sub>/(36F<sub>cre</sub>))</td><td>Inelastic LTB</td></tr>';
+        h += '<tr><td>F<sub>cre</sub> &le; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = F<sub>cre</sub></td><td>Elastic LTB</td></tr>';
+        h += '</table>';
+        h += '<span class="eq">M<sub>ne</sub> = S<sub>f</sub> &times; F<sub>n</sub> = <b>'+_rv(d.Mne)+'</b> kip-in</span>';
+
+        // Step 3: Local — Mnl
+        h += '<h3>Step 3: Local Buckling — §F3.2</h3>';
+        h += '<p>Local buckling reduces the global strength M<sub>ne</sub> when the local slenderness &lambda;<sub>l</sub> exceeds 0.776:</p>';
+        h += '<span class="eq">&lambda;<sub>l</sub> = &radic;(M<sub>ne</sub> / M<sub>crl</sub>)</span>';
+        h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
+        h += '<tr><td>&lambda;<sub>l</sub> &le; 0.776</td><td>M<sub>nl</sub> = M<sub>ne</sub> (no reduction)</td></tr>';
+        h += '<tr><td>&lambda;<sub>l</sub> &gt; 0.776</td><td>M<sub>nl</sub> = [1 - 0.15(M<sub>crl</sub>/M<sub>ne</sub>)<sup>0.4</sup>] &middot; (M<sub>crl</sub>/M<sub>ne</sub>)<sup>0.4</sup> &middot; M<sub>ne</sub></td></tr>';
+        h += '</table>';
+        const govL = d.Mnl < d.Mne ? ' (local buckling reduces strength by '+(100*(1-d.Mnl/d.Mne)).toFixed(1)+'%)' : ' (no reduction)';
+        h += '<span class="eq">M<sub>nl</sub> = <b>'+_rv(d.Mnl)+'</b> kip-in'+govL+'</span>';
+
+        // Step 4: Distortional — Mnd
+        h += '<h3>Step 4: Distortional Buckling — §F4</h3>';
+        h += '<p>Distortional buckling is checked independently against M<sub>y</sub>:</p>';
+        h += '<span class="eq">&lambda;<sub>d</sub> = &radic;(M<sub>y</sub> / M<sub>crd</sub>)</span>';
+        h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
+        h += '<tr><td>&lambda;<sub>d</sub> &le; 0.673</td><td>M<sub>nd</sub> = M<sub>y</sub> (no reduction)</td></tr>';
+        h += '<tr><td>&lambda;<sub>d</sub> &gt; 0.673</td><td>M<sub>nd</sub> = [1 - 0.22(M<sub>crd</sub>/M<sub>y</sub>)<sup>0.5</sup>] &middot; (M<sub>crd</sub>/M<sub>y</sub>)<sup>0.5</sup> &middot; M<sub>y</sub></td></tr>';
+        h += '</table>';
+        h += '<span class="eq">M<sub>nd</sub> = <b>'+_rv(d.Mnd)+'</b> kip-in</span>';
+
+        // Step 5: Nominal & Design
+        h += '<h3>Step 5: Nominal Strength & Design Strength</h3>';
+        h += '<span class="eq">M<sub>n</sub> = min(M<sub>ne</sub>, M<sub>nl</sub>, M<sub>nd</sub>) = min('+_rv(d.Mne)+', '+_rv(d.Mnl)+', '+_rv(d.Mnd)+') = <b>'+_rv(d.Mn)+'</b> kip-in</span>';
+        h += '<span class="eq">Controlling failure mode: <b>'+(d.controlling_mode||'')+'</b></span>';
+        if (dm==='LRFD') {
+            h += '<span class="eq">&phi;<sub>b</sub> = '+phi+' (LRFD)</span>';
+            h += '<span class="eq">&phi;M<sub>n</sub> = '+phi+' &times; '+_rv(d.Mn)+' = <b class="result">'+_rv(d.phi_Mn)+'</b> kip-in</span>';
+        } else {
+            h += '<span class="eq">&Omega;<sub>b</sub> = '+omega+' (ASD)</span>';
+            h += '<span class="eq">M<sub>n</sub>/&Omega; = '+_rv(d.Mn)+' / '+omega+' = <b class="result">'+_rv(d.Mn_omega)+'</b> kip-in</span>';
+        }
+        if (d.utilization != null) {
+            const Mu = d.design_strength > 0 ? (d.utilization * d.design_strength) : 0;
+            h += '<span class="eq">M<sub>u</sub> / '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+' = '+_rv(Mu)+' / '+_rv(d.design_strength)+' = <b class="'+(d.pass?'pass':'fail')+'">'+_rv(d.utilization*100,1)+'%</b></span>';
+        }
+        return h;
+    }
+
+    function _rptCompression(d, dm) {
+        let h = '';
+        const phi=0.85,omega=1.80;
+        h += '<h3>Step 1: Yield Load, P<sub>y</sub></h3>';
+        h += '<span class="eq">P<sub>y</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_rv(d.Py)+' kips</span>';
+
+        h += '<h3>Step 2: Global Buckling — §E2</h3>';
+        h += '<p>Flexural, torsional, or flexural-torsional buckling stress F<sub>cre</sub> is determined from KL/r, J, C<sub>w</sub>, and section symmetry.</p>';
+        h += '<span class="eq">&lambda;<sub>c</sub> = &radic;(F<sub>y</sub> / F<sub>cre</sub>)</span>';
+        h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
+        h += '<tr><td>&lambda;<sub>c</sub> &le; 1.5</td><td>F<sub>n</sub> = (0.658<sup>&lambda;<sub>c</sub>&sup2;</sup>) F<sub>y</sub></td></tr>';
+        h += '<tr><td>&lambda;<sub>c</sub> &gt; 1.5</td><td>F<sub>n</sub> = (0.877/&lambda;<sub>c</sub>&sup2;) F<sub>y</sub></td></tr>';
+        h += '</table>';
+        h += '<span class="eq">P<sub>ne</sub> = A<sub>g</sub> &times; F<sub>n</sub> = <b>'+_rv(d.Pne)+'</b> kips</span>';
+
+        h += '<h3>Step 3: Local Buckling — §E3.2</h3>';
+        h += '<span class="eq">&lambda;<sub>l</sub> = &radic;(P<sub>ne</sub>/P<sub>crl</sub>)</span>';
+        h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
+        h += '<tr><td>&lambda;<sub>l</sub> &le; 0.776</td><td>P<sub>nl</sub> = P<sub>ne</sub></td></tr>';
+        h += '<tr><td>&lambda;<sub>l</sub> &gt; 0.776</td><td>P<sub>nl</sub> = [1-0.15(P<sub>crl</sub>/P<sub>ne</sub>)<sup>0.4</sup>](P<sub>crl</sub>/P<sub>ne</sub>)<sup>0.4</sup> P<sub>ne</sub></td></tr>';
+        h += '</table>';
+        h += '<span class="eq">P<sub>nl</sub> = <b>'+_rv(d.Pnl)+'</b> kips</span>';
+
+        h += '<h3>Step 4: Distortional Buckling — §E4</h3>';
+        h += '<span class="eq">&lambda;<sub>d</sub> = &radic;(P<sub>y</sub>/P<sub>crd</sub>)</span>';
+        h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
+        h += '<tr><td>&lambda;<sub>d</sub> &le; 0.561</td><td>P<sub>nd</sub> = P<sub>y</sub></td></tr>';
+        h += '<tr><td>&lambda;<sub>d</sub> &gt; 0.561</td><td>P<sub>nd</sub> = [1-0.25(P<sub>crd</sub>/P<sub>y</sub>)<sup>0.6</sup>](P<sub>crd</sub>/P<sub>y</sub>)<sup>0.6</sup> P<sub>y</sub></td></tr>';
+        h += '</table>';
+        h += '<span class="eq">P<sub>nd</sub> = <b>'+_rv(d.Pnd)+'</b> kips</span>';
+
+        h += '<h3>Step 5: Nominal & Design Strength</h3>';
+        h += '<span class="eq">P<sub>n</sub> = min(P<sub>ne</sub>,P<sub>nl</sub>,P<sub>nd</sub>) = min('+_rv(d.Pne)+','+_rv(d.Pnl)+','+_rv(d.Pnd)+') = <b>'+_rv(d.Pn)+'</b> kips</span>';
+        h += '<span class="eq">Controlling: <b>'+(d.controlling_mode||'')+'</b></span>';
+        if (dm==='LRFD') h += '<span class="eq">&phi;P<sub>n</sub> = '+phi+' &times; '+_rv(d.Pn)+' = <b class="result">'+_rv(d.phi_Pn)+'</b> kips</span>';
+        else h += '<span class="eq">P<sub>n</sub>/&Omega; = '+_rv(d.Pn)+'/'+omega+' = <b class="result">'+_rv(d.Pn_omega)+'</b> kips</span>';
+        return h;
+    }
+
+    function _rptCombined(d, dm) {
+        let h = '';
+        const c=d.compression||{},f=d.flexure_x||{};
+        h += '<h3>Compression Strength</h3>';
+        h += '<span class="eq">P<sub>n</sub> = '+_rv(c.Pn)+' kips ('+(c.controlling_mode||'')+'), Design = <b>'+_rv(c.design_strength)+'</b> kips</span>';
+        h += '<h3>Flexure Strength (x-axis)</h3>';
+        h += '<span class="eq">M<sub>n</sub> = '+_rv(f.Mn)+' kip-in ('+(f.controlling_mode||'')+'), Design = <b>'+_rv(f.design_strength)+'</b> kip-in</span>';
+        if (d.amplification) {
+            const amp = d.amplification;
+            h += '<h3>§C1 Moment Amplification (P-&delta; Effect)</h3>';
+            h += '<p>Second-order P-&delta; effect amplifies moments in compression members:</p>';
+            h += '<span class="eq">P<sub>Ex</sub> = &pi;&sup2;EA<sub>g</sub>/(KL/r<sub>x</sub>)&sup2; = '+_rv(amp.PEx)+' kips</span>';
+            h += '<span class="eq">&alpha;<sub>x</sub> = C<sub>mx</sub> / (1 - P<sub>u</sub>/P<sub>Ex</sub>) = '+_rv(amp.alpha_x,4)+' &ge; 1.0</span>';
+            h += '<span class="eq">M<sub>ux,amp</sub> = M<sub>ux</sub> &times; &alpha;<sub>x</sub> = '+_rv(amp.Mux_amp)+' kip-in</span>';
+        }
+        return h;
+    }
+
+    function _rptTension(d, dm) {
+        let h = '';
+        h += '<h3>§D2 — Tensile Yielding on Gross Section</h3>';
+        h += '<span class="eq">T<sub>n</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_rv(d.Tn_yield)+' kips, &phi;<sub>t</sub>=0.90, &Omega;<sub>t</sub>=1.67</span>';
+        h += '<h3>§D3 — Tensile Rupture on Net Section</h3>';
+        h += '<span class="eq">T<sub>n</sub> = A<sub>n</sub> &times; F<sub>u</sub> = '+_rv(d.Tn_rupture)+' kips, &phi;<sub>t</sub>=0.75, &Omega;<sub>t</sub>=2.00</span>';
+        h += '<span class="eq">Controlling: <b>'+(d.controlling_mode||'')+'</b>, Design Strength = <b class="result">'+_rv(d.design_strength)+'</b> kips</span>';
+        return h;
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // 6. Design Summary
+    // ═══════════════════════════════════════════════════════
+    function _rptSummary(d, la) {
+        const mt = d.member_type||'', dm = d.design_method||'LRFD';
+        const mtNames = {flexure:'Flexural Member (Beam/Purlin)',compression:'Compression Member (Column/Stud)',combined:'Combined Axial + Bending Member',tension:'Tension Member'};
+        let h = '';
+
+        h += '<p>This report presents the design check of a <b>'+(mtNames[mt]||mt)+'</b> per AISI S100-16 using the Direct Strength Method (DSM). ';
+        h += 'The design method is <b>'+dm+'</b>. ';
+        if (la) h += 'The member spans <b>'+la.n_spans+'</b> span(s) and the governing gravity load combination is <b>'+((la.gravity||{}).combo||'N/A')+'</b>. ';
+        h += 'The controlling failure mode is <b>'+(d.controlling_mode||'N/A')+'</b>.</p>';
+
+        h += '<table>';
+        h += '<tr><th style="width:50%">Item</th><th>Value</th></tr>';
+        h += '<tr><td>Design Standard</td><td>AISI S100-16</td></tr>';
+        h += '<tr><td>Analysis Method</td><td>Direct Strength Method (DSM) — Finite Strip</td></tr>';
+        h += '<tr><td>Member Type</td><td>'+(mtNames[mt]||mt)+'</td></tr>';
+        h += '<tr><td>Design Method</td><td>'+dm+'</td></tr>';
+        h += '<tr><td>Controlling Failure Mode</td><td><b>'+(d.controlling_mode||'')+'</b></td></tr>';
+
+        if (mt==='flexure') {
+            h += '<tr><td>Nominal Moment, M<sub>n</sub></td><td>'+_rv(d.Mn)+' kip-in</td></tr>';
+            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+'</td><td><b>'+_rv(d.design_strength)+'</b> kip-in</td></tr>';
+        } else if (mt==='compression') {
+            h += '<tr><td>Nominal Strength, P<sub>n</sub></td><td>'+_rv(d.Pn)+' kips</td></tr>';
+            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;P<sub>n</sub>':'P<sub>n</sub>/&Omega;')+'</td><td><b>'+_rv(d.design_strength)+'</b> kips</td></tr>';
+        } else {
+            h += '<tr><td>Design Strength</td><td><b>'+_rv(d.design_strength)+'</b></td></tr>';
+        }
+
+        if (d.utilization != null) {
+            const pct = (d.utilization*100).toFixed(1);
+            h += '<tr><td>Demand/Capacity Ratio (DCR)</td><td class="'+(d.pass?'pass':'fail')+'" style="font-size:14px"><b>'+pct+'% — '+(d.pass?'OK':'NG')+'</b></td></tr>';
+        }
+        if (d.interaction) {
+            h += '<tr><td>Interaction Check (§H1.2)</td><td class="'+(d.interaction.pass?'pass':'fail')+'"><b>'+_rv(d.interaction.total,4)+'</b> &le; 1.0 — '+(d.interaction.pass?'OK':'NG')+'</td></tr>';
+        }
+        h += '<tr><td>Referenced Spec Sections</td><td>'+(d.spec_sections||[]).join(', ')+'</td></tr>';
+        h += '</table>';
+
+        // DSM warnings
+        const warnings = d.dsm_warnings || [];
+        if (warnings.length > 0) {
+            h += '<div style="margin-top:8px;padding:6px;background:#fff3e0;border:1px solid #ff9800;border-radius:4px">';
+            h += '<b style="color:#e65100">DSM Applicability Warnings:</b><ul style="margin:4px 0;padding-left:20px">';
+            warnings.forEach(w => { h += '<li>'+w+'</li>'; });
+            h += '</ul></div>';
+        }
+        return h;
     }
 
     // ============================================================

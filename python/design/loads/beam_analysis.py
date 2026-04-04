@@ -347,31 +347,41 @@ def extract_critical_locations(result: BeamResult, spans: List[float],
         # 이 스팬 범위의 점들
         max_M = -1e30
         max_x = span_start
+        max_j = 0
         min_M = 1e30
         min_x = span_start
+        min_j = 0
         for j, x in enumerate(result.x):
             if span_start <= x <= span_end:
                 if result.M[j] > max_M:
                     max_M = result.M[j]
                     max_x = x
+                    max_j = j
                 if result.M[j] < min_M:
                     min_M = result.M[j]
                     min_x = x
+                    min_j = j
 
         if max_M > 0:
             label = 'End span +M' if i == 0 or i == n_spans - 1 else f'Int span {i+1} +M'
+            V_at_max = abs(result.V[max_j]) if max_j < len(result.V) else None
             locations.append({
                 'name': label, 'x_ft': round(max_x, 2),
-                'Mu': round(max_M, 3), 'Vu': None, 'Ru': None,
+                'Mu': round(max_M, 3),
+                'Vu': round(V_at_max, 3) if V_at_max is not None else None,
+                'Ru': None,
                 'region': 'positive',
             })
 
         # 스팬 내 부모멘트 (캔틸레버 등 음수 모멘트 지배 구간)
         if min_M < 0:
             label = 'End span -M' if i == 0 or i == n_spans - 1 else f'Int span {i+1} -M'
+            V_at_min = abs(result.V[min_j]) if min_j < len(result.V) else None
             locations.append({
                 'name': label, 'x_ft': round(min_x, 2),
-                'Mu': round(min_M, 3), 'Vu': None, 'Ru': None,
+                'Mu': round(min_M, 3),
+                'Vu': round(V_at_min, 3) if V_at_min is not None else None,
+                'Ru': None,
                 'region': 'negative',
             })
 

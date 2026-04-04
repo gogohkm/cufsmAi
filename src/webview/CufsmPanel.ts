@@ -583,18 +583,23 @@ export class CufsmPanel implements McpPanelInterface {
                 const xo_val = cutwpProps.xo ?? props.xo ?? 0;
                 const ro_fallback = Math.sqrt(rx_calc ** 2 + ry_calc ** 2 + xo_val ** 2);
 
+                // NaN 방어: ?? 연산자는 NaN을 통과시키므로 명시적으로 체크
+                const safeNum = (v: any, fallback = 0) =>
+                    (v != null && Number.isFinite(v)) ? v : fallback;
+
                 const mergedProps = {
                     ...props,
-                    J: cutwpProps.J ?? props.J ?? 0,
-                    Cw: cutwpProps.Cw ?? props.Cw ?? 0,
-                    xo: xo_val,
-                    ro: cutwpProps.ro || ro_fallback,
-                    Sf: props.Sxx ?? (props.Ixx && props.zcg ? props.Ixx / Math.max(props.zcg, (props as any).h_web || 1) : 0),
-                    Sxx: props.Sxx ?? 0,
-                    Sy: props.Szz && props.xcg ? props.Szz / Math.max(Math.abs(props.xcg), 0.001) : (props.Sy ?? 0),
-                    Szz: props.Szz ?? 0,
+                    J: safeNum(cutwpProps.J, safeNum(props.J)),
+                    Cw: safeNum(cutwpProps.Cw, safeNum(props.Cw)),
+                    xo: safeNum(xo_val),
+                    ro: safeNum(cutwpProps.ro, ro_fallback),
+                    // Python grosprop() returns Sx, Sz, rz — map to design engine names
+                    Sf: props.Sx ?? (props.Ixx && props.zcg ? props.Ixx / Math.max(props.zcg, (props as any).h_web || 1) : 0),
+                    Sxx: props.Sx ?? 0,
+                    Sy: props.Sz ?? 0,
+                    Szz: props.Sz ?? 0,
                     rx: props.rx ?? (props.A > 0 ? Math.sqrt(props.Ixx / props.A) : 0),
-                    ry: props.ry ?? (props.A > 0 ? Math.sqrt(props.Izz / props.A) : 0),
+                    ry: props.rz ?? (props.A > 0 ? Math.sqrt(props.Izz / props.A) : 0),
                 };
 
                 // DSM 값 자동 추출
@@ -613,13 +618,14 @@ export class CufsmPanel implements McpPanelInterface {
                         curve: this._lastAnalysisResult?.curve || [],
                         fy, load_type: 'Mxx',
                     });
+                    // Python dsm returns dynamic keys: Pcrl/Pcrd for P, Mxxcrl/Mxxcrd for Mxx
                     dsmValues = {
                         Pcrl: dsmP?.Pcrl ?? 0,
                         Pcrd: dsmP?.Pcrd ?? 0,
                         Py: dsmP?.Py ?? 0,
-                        Mcrl: dsmM?.Mcrl ?? 0,
-                        Mcrd: dsmM?.Mcrd ?? 0,
-                        My: dsmM?.My ?? 0,
+                        Mcrl: dsmM?.Mxxcrl ?? 0,
+                        Mcrd: dsmM?.Mxxcrd ?? 0,
+                        My: dsmM?.My_xx ?? 0,
                     };
                 } catch { /* 해석 미실행 시 DSM 없이 진행 */ }
 
@@ -653,6 +659,62 @@ export class CufsmPanel implements McpPanelInterface {
             case 'analyze_loads': {
                 const result = await this._pythonBridge.call('analyze_loads', options);
                 return result;
+            }
+
+            case 'generate_report': {
+                // 리포트에 필요한 모든 데이터를 수집하여 반환
+                const reportData: any = {
+                    timestamp: new Date().toISOString(),
+                    model_summary: this.getStatus(),
+                };
+
+                // 1. 단면 성질
+                if (this._model.node && this._model.node.length > 0) {
+                    try {
+                        reportData.section_props = await this._pythonBridge.call('get_properties', {
+                            node: this._model.node, elem: this._model.elem
+                        });
+                    } catch {}
+                    try {
+                        reportData.cutwp_props = await this._pythonBridge.call('cutwp', {
+                            node: this._model.node, elem: this._model.elem
+                        });
+                    } catch {}
+                }
+
+                // 2. DSM 값
+                if (this._lastAnalysisResult?.curve) {
+                    const fy = options.Fy || 50;
+                    try {
+                        reportData.dsm_P = await this._pythonBridge.call('dsm', {
+                            node: this._model.node, elem: this._model.elem,
+                            curve: this._lastAnalysisResult.curve, fy, load_type: 'P',
+                        });
+                        reportData.dsm_Mxx = await this._pythonBridge.call('dsm', {
+                            node: this._model.node, elem: this._model.elem,
+                            curve: this._lastAnalysisResult.curve, fy, load_type: 'Mxx',
+                        });
+                    } catch {}
+                    reportData.curve_length = this._lastAnalysisResult.curve.length;
+                }
+
+                // 3. 하중 분석 (옵션)
+                if (options.loads) {
+                    try {
+                        reportData.load_analysis = await this._pythonBridge.call('analyze_loads', options);
+                    } catch {}
+                }
+
+                // 4. 설계 결과
+                if (options.member_type) {
+                    try {
+                        const designResult = await this.handleMcpAction({ action: 'aisi_design', ...options });
+                        reportData.design_result = designResult;
+                    } catch {}
+                }
+
+                this._postMessage('reportGenerated', reportData);
+                return reportData;
             }
 
             case 'calc_deck_stiffness': {
@@ -1087,6 +1149,7 @@ export class CufsmPanel implements McpPanelInterface {
         <button class="tab-btn" data-tab="analysis">Analysis</button>
         <button class="tab-btn" data-tab="postprocessor">Postprocessor</button>
         <button class="tab-btn" data-tab="design">Design</button>
+        <button class="tab-btn" data-tab="report">Report</button>
     </div>
 
     <!-- 탭 내용 -->
@@ -1529,6 +1592,18 @@ export class CufsmPanel implements McpPanelInterface {
             </div>
         </div>
     </div>
+
+    <!-- Report 탭 -->
+    <div id="tab-report" class="tab-panel">
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+            <button id="btn-generate-report" class="btn-primary" style="flex:1">Generate Detailed Report</button>
+            <button id="btn-print-report" class="btn-secondary" style="width:100px;display:none">Print</button>
+        </div>
+        <div id="report-container" style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:4px;padding:16px;min-height:200px;max-height:calc(100vh - 100px);overflow-y:auto">
+            <p class="hint" style="text-align:center;padding:40px 0">Run Design Check first, then click "Generate Detailed Report" to create a comprehensive calculation report.</p>
+        </div>
+    </div>
+
     </div>
 
     <script nonce="${nonce}" src="${scriptUri}"></script>

@@ -37,7 +37,17 @@ def cutwp_prop(node: np.ndarray, elem: np.ndarray) -> dict:
     # thetap는 _cutwp_prop2에서 라디안으로 반환됨 → 도(degrees)로 변환
     thetap_deg = math.degrees(thetap)
 
-    # wn이 nan인 경우 (폐단면) 0으로 대체
+    # 폐단면(RHS/CHS 등)에서 NaN 반환 → JSON 직렬화 불가이므로 적절한 기본값으로 대체
+    # 폐단면: Cw ≈ 0 (뒤틀림 무시), 전단중심 = 도심, B1=B2=0
+    def _safe(val, default=0.0):
+        return default if (isinstance(val, float) and math.isnan(val)) else val
+
+    Xs = _safe(Xs, xcg)
+    Zs = _safe(Zs, zcg)
+    Cw = _safe(Cw, 0.0)
+    B1 = _safe(B1, 0.0)
+    B2 = _safe(B2, 0.0)
+
     if isinstance(wn, np.ndarray) and np.any(np.isnan(wn)):
         wn = np.zeros(node.shape[0])
 

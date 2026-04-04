@@ -192,11 +192,51 @@ class CufsmResult:
 
 
 def _json_serializer(obj: Any) -> Any:
-    """numpy 배열을 JSON 직렬화 가능하도록 변환"""
+    """numpy 배열을 JSON 직렬화 가능하도록 변환 (NaN/Inf → null)"""
+    import math
+    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
+        return None
     if isinstance(obj, np.ndarray):
-        return obj.tolist()
+        cleaned = np.where(np.isfinite(obj), obj, 0.0) if obj.dtype.kind == 'f' else obj
+        return cleaned.tolist()
     if isinstance(obj, np.integer):
         return int(obj)
     if isinstance(obj, np.floating):
-        return float(obj)
+        val = float(obj)
+        return None if (math.isnan(val) or math.isinf(val)) else val
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+
+class SafeJsonEncoder(json.JSONEncoder):
+    """NaN/Infinity를 null로 변환하는 JSON 인코더.
+
+    json.dumps의 default 함수는 native float에 호출되지 않으므로,
+    iterencode를 오버라이드하여 float('nan'), float('inf')를 근본 차단한다.
+    """
+
+    def default(self, obj: Any) -> Any:
+        return _json_serializer(obj)
+
+    def iterencode(self, o, _one_shot=False):
+        """재귀적으로 dict/list를 순회하며 NaN/Inf float를 None으로 치환"""
+        return super().iterencode(self._sanitize(o), _one_shot)
+
+    @staticmethod
+    def _sanitize(obj):
+        import math
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+        elif isinstance(obj, dict):
+            return {k: SafeJsonEncoder._sanitize(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [SafeJsonEncoder._sanitize(v) for v in obj]
+        elif isinstance(obj, np.ndarray):
+            cleaned = np.where(np.isfinite(obj), obj, 0.0) if obj.dtype.kind == 'f' else obj
+            return cleaned.tolist()
+        elif isinstance(obj, np.floating):
+            val = float(obj)
+            return None if (math.isnan(val) or math.isinf(val)) else val
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        return obj

@@ -743,6 +743,41 @@ server.tool("design_purlin", "Complete purlin design: analyze loads → dual CUF
 );
 
 // ============================================================
+// Report Generation
+// ============================================================
+server.tool("generate_report", "Generate a comprehensive design report with all calculation details — section, buckling, loads, DSM design, and summary",
+    {
+        member_type: z.enum(["compression", "flexure", "combined", "tension"]).optional().describe("Member type for design calculation"),
+        design_method: z.enum(["ASD", "LRFD"]).optional().describe("Design method (default LRFD)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        Mu: z.number().optional().describe("Required flexural strength kip-in"),
+        Pu: z.number().optional().describe("Required axial strength kips"),
+        Lb: z.number().optional().describe("Unbraced length in"),
+        Cb: z.number().optional().describe("Moment gradient factor"),
+        KxLx: z.number().optional().describe("Effective length x-axis in"),
+        KyLy: z.number().optional().describe("Effective length y-axis in"),
+        member_app: z.string().optional().describe("Member application for load analysis"),
+        span_type: z.string().optional().describe("Span type for load analysis"),
+        span_ft: z.number().optional().describe("Span length ft"),
+        spacing_ft: z.number().optional().describe("Tributary width ft"),
+        loads: z.object({
+            D: z.number().optional(),
+            L: z.number().optional(),
+            Lr: z.number().optional(),
+            S: z.number().optional(),
+            W: z.number().optional(),
+        }).optional().describe("Service loads in PLF"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', {
+            action: 'generate_report', ...params,
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+// ============================================================
 // 서버 시작
 // ============================================================
 async function main() {

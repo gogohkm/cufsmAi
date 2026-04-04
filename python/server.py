@@ -22,7 +22,7 @@ from fcfsm.solver import stripmain_fcfsm
 from plastic.pmm_plastic import pmm_plastic
 from fileio.mat_loader import load_mat_file
 from fileio.project_io import save_project, load_project
-from models.data import CufsmModel, CufsmResult, GBTConfig, _json_serializer
+from models.data import CufsmModel, CufsmResult, GBTConfig, _json_serializer, SafeJsonEncoder
 
 
 def handle_request(request: dict) -> dict:
@@ -290,7 +290,7 @@ def main():
         try:
             request = json.loads(line)
             response = handle_request(request)
-            sys.stdout.write(json.dumps(response, default=_json_serializer) + '\n')
+            sys.stdout.write(json.dumps(response, cls=SafeJsonEncoder) + '\n')
             sys.stdout.flush()
         except json.JSONDecodeError as e:
             error_response = {'id': 0, 'error': f'JSON parse error: {e}'}
