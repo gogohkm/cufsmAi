@@ -64,6 +64,8 @@ def BC_I1_5(BC: str, kk: float, nn: float, a: float) -> tuple:
 
     elif BC in ('S-C', 'C-S'):
         # Simply-Clamped
+        if kk == 0 or nn == 0:
+            return (0.0, 0.0, 0.0, 0.0, 0.0)
         if kk == nn:
             I1 = (1 + (kk + 1)**2 / kk**2) * a / 2.0
             I2 = -(kk + 1)**2 * PI**2 / a

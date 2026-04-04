@@ -227,13 +227,17 @@ def master_slave(master: int, slave_nodes: list,
         r = math.sqrt(dx**2 + dz**2)
         theta = math.atan2(dz, dx) if r > 0 else 0
 
-        uq = -r * math.sin(theta)
-        wq = r * math.cos(theta)
+        uq = -r * math.sin(theta)  # = -(zs - zm)
+        wq = r * math.cos(theta)   # = (xs - xm)
 
         # u_slave = u_master + uq * theta_master
         rows.append([sn, 1, 1.0, master, 1])   # u: coeff=1 on u_master
+        rows.append([sn, 1, uq, master, 4])    # u: coeff=uq on theta_master
+        # v_slave = v_master (axial DOF, dof=2)
+        rows.append([sn, 2, 1.0, master, 2])   # v: coeff=1 on v_master
         # w_slave = w_master + wq * theta_master
         rows.append([sn, 3, 1.0, master, 3])   # w: coeff=1 on w_master
+        rows.append([sn, 3, wq, master, 4])     # w: coeff=wq on theta_master
         # theta_slave = theta_master
         rows.append([sn, 4, 1.0, master, 4])   # theta: coeff=1
 
@@ -290,13 +294,16 @@ def firstyield(node: np.ndarray, elem: np.ndarray, fy: float) -> dict:
 
 
 def energy_recovery(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
-                    mode: np.ndarray, L: float) -> np.ndarray:
+                    mode: np.ndarray, L: float,
+                    m_a: np.ndarray = None, BC: str = 'S-S') -> np.ndarray:
     """요소별 변형 에너지 계산
 
     Args:
         prop, node, elem: 모델
         mode: 전체 DOF 변위 벡터
         L: half-wavelength
+        m_a: 종방향 항 배열 (기본값: [1.0])
+        BC: 경계조건 문자열 (기본값: 'S-S')
 
     Returns:
         (nelems, 2) [membrane_energy, bending_energy]
@@ -310,7 +317,8 @@ def energy_recovery(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
     skip = 2 * nnodes
 
     se = np.zeros((nelems, 2))
-    m_a = np.array([1.0])
+    if m_a is None:
+        m_a = np.array([1.0])
 
     for e in range(nelems):
         ni = int(elem[e, 1]) - 1
@@ -348,7 +356,7 @@ def energy_recovery(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         d_local[6] = -s * d_global[2] + c * d_global[6]
 
         # 로컬 강성
-        k = klocal(Ex, Ey, vx, vy, G, t, L, b, 'S-S', m_a)
+        k = klocal(Ex, Ey, vx, vy, G, t, L, b, BC, m_a)
 
         # 멤브레인 에너지
         dm = d_local[:4]

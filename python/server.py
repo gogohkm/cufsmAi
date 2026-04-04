@@ -22,7 +22,7 @@ from fcfsm.solver import stripmain_fcfsm
 from plastic.pmm_plastic import pmm_plastic
 from fileio.mat_loader import load_mat_file
 from fileio.project_io import save_project, load_project
-from models.data import CufsmModel, CufsmResult, GBTConfig
+from models.data import CufsmModel, CufsmResult, GBTConfig, _json_serializer
 
 
 def handle_request(request: dict) -> dict:
@@ -131,6 +131,8 @@ def handle_request(request: dict) -> dict:
                 'P': result['P'].tolist(),
                 'Mxx': result['Mxx'].tolist(),
                 'Mzz': result['Mzz'].tolist(),
+                'theta': result['theta'].tolist(),
+                'fy': fy,
             }}
 
         elif method == 'load_mat':
@@ -185,6 +187,21 @@ def handle_request(request: dict) -> dict:
             result = cutwp_prop(node, elem)
             return {'id': req_id, 'result': result}
 
+        elif method == 'energy_recovery':
+            from engine.helpers import energy_recovery
+            node = np.array(params['node'], dtype=float)
+            elem = np.array(params['elem'], dtype=float)
+            prop = np.array(params['prop'], dtype=float)
+            mode = np.array(params['mode'], dtype=float)
+            length = float(params['length'])
+            BC = params.get('BC', 'S-S')
+            se = energy_recovery(prop, node, elem, mode, length, BC=BC)
+            return {'id': req_id, 'result': {
+                'energy': se.tolist(),
+                'columns': ['membrane', 'bending'],
+                'n_elements': len(se),
+            }}
+
         elif method == 'ping':
             return {'id': req_id, 'result': 'pong'}
 
@@ -208,22 +225,12 @@ def main():
         try:
             request = json.loads(line)
             response = handle_request(request)
-            sys.stdout.write(json.dumps(response, default=_json_default) + '\n')
+            sys.stdout.write(json.dumps(response, default=_json_serializer) + '\n')
             sys.stdout.flush()
         except json.JSONDecodeError as e:
             error_response = {'id': 0, 'error': f'JSON parse error: {e}'}
             sys.stdout.write(json.dumps(error_response) + '\n')
             sys.stdout.flush()
-
-
-def _json_default(obj):
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    if isinstance(obj, (np.integer,)):
-        return int(obj)
-    if isinstance(obj, (np.floating,)):
-        return float(obj)
-    raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
 if __name__ == '__main__':

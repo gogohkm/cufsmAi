@@ -15,6 +15,8 @@
     let model = null;
     /** 해석 결과 */
     let analysisResult = null;
+    /** DSM 결과 (극점 표시용) */
+    let lastDsmResult = null;
 
     // ============================================================
     // 메시지 핸들러
@@ -97,7 +99,9 @@
                 renderPlasticSurface(msg.data);
                 break;
             case 'dsmResult':
+                lastDsmResult = msg.data;
                 renderDsmResults(msg.data);
+                renderBucklingCurve(); // DSM 극점 표시를 위해 다시 그리기
                 break;
         }
     });
@@ -135,6 +139,11 @@
             setValue('input-E', p[1]);
             setValue('input-v', p[3]);
             setValue('input-G', p[5]);
+        }
+
+        // 단면 속성 자동 계산
+        if (model.node && model.node.length > 0) {
+            vscode.postMessage({ command: 'getProperties', data: { node: model.node, elem: model.elem } });
         }
     }
 
@@ -222,11 +231,29 @@
     function renderProperties(props) {
         const el = document.getElementById('section-props');
         if (!el) { return; }
-        el.innerHTML = `
-            A = ${fmt(props.A)}  |  xcg = ${fmt(props.xcg)}  |  zcg = ${fmt(props.zcg)}<br>
-            Ixx = ${fmt(props.Ixx)}  |  Izz = ${fmt(props.Izz)}  |  Ixz = ${fmt(props.Ixz)}<br>
-            θp = ${fmt(props.thetap)}°  |  I11 = ${fmt(props.I11)}  |  I22 = ${fmt(props.I22)}
-        `;
+        const rows = [
+            ['A (단면적)', fmt(props.A), 'in²'],
+            ['Ixx (강축 2차모멘트)', fmt(props.Ixx), 'in⁴'],
+            ['Izz (약축 2차모멘트)', fmt(props.Izz), 'in⁴'],
+            ['Ixz (상승적 2차모멘트)', fmt(props.Ixz), 'in⁴'],
+            ['Sx (강축 단면계수)', fmt(props.Sx), 'in³'],
+            ['Sz (약축 단면계수)', fmt(props.Sz), 'in³'],
+            ['Zx (강축 소성단면계수)', fmt(props.Zx), 'in³'],
+            ['Zz (약축 소성단면계수)', fmt(props.Zz), 'in³'],
+            ['rx (강축 회전반경)', fmt(props.rx), 'in'],
+            ['rz (약축 회전반경)', fmt(props.rz), 'in'],
+            ['xcg (도심 x)', fmt(props.xcg), 'in'],
+            ['zcg (도심 z)', fmt(props.zcg), 'in'],
+            ['θp (주축 회전각)', fmt(props.thetap), '°'],
+            ['I11 (제1주축)', fmt(props.I11), 'in⁴'],
+            ['I22 (제2주축)', fmt(props.I22), 'in⁴'],
+        ];
+        let html = '<table class="props-table"><tbody>';
+        rows.forEach(([name, val, unit]) => {
+            html += `<tr><td>${name}</td><td style="text-align:right;font-family:monospace">${val}</td><td>${unit}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
     }
 
     // ============================================================
@@ -359,53 +386,188 @@
             }
         }
 
-        // Canvas 2D 폴백 — P vs Mxx 2D 곡선
+        // Canvas 2D — P-Mxx 소성 상호작용 다이어그램
         const canvas = document.getElementById('plastic-surface-canvas');
         if (!canvas || !data || !data.P) { return; }
         const ctx = canvas.getContext('2d');
         if (!ctx) { return; }
         const w = canvas.width, h = canvas.height;
-        const pad = { top: 30, right: 30, bottom: 40, left: 60 };
+        const pad = { top: 30, right: 30, bottom: 50, left: 70 };
 
         ctx.clearRect(0, 0, w, h);
         const style = getComputedStyle(document.body);
         const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
+        const gridColor = style.getPropertyValue('--vscode-panel-border').trim() || '#333';
 
         const P = data.P, Mxx = data.Mxx;
-        const pMax = Math.max(...P.map(Math.abs)) || 1;
-        const mMax = Math.max(...Mxx.map(Math.abs)) || 1;
 
-        const toX = (m) => pad.left + (m / mMax + 1) / 2 * (w - pad.left - pad.right);
-        const toY = (p) => h - pad.bottom - (p / pMax + 1) / 2 * (h - pad.top - pad.bottom);
+        // 핵심 수치 추출
+        const Py_pos = Math.max(...P);           // 인장 항복 축력
+        const Py_neg = Math.min(...P);           // 압축 항복 축력
+        const My_pos = Math.max(...Mxx);         // 양 항복 모멘트
+        const My_neg = Math.min(...Mxx);         // 음 항복 모멘트
+        const pMax = Math.max(Math.abs(Py_pos), Math.abs(Py_neg)) * 1.1 || 1;
+        const mMax = Math.max(Math.abs(My_pos), Math.abs(My_neg)) * 1.1 || 1;
 
-        ctx.fillStyle = 'rgba(79,195,247,0.15)';
-        ctx.beginPath();
+        const plotL = pad.left, plotR = w - pad.right;
+        const plotT = pad.top, plotB = h - pad.bottom;
+        const toX = (m) => plotL + (m / mMax + 1) / 2 * (plotR - plotL);
+        const toY = (p) => plotB - (p / pMax + 1) / 2 * (plotB - plotT);
+
+        // --- 그리드 ---
+        ctx.strokeStyle = gridColor;
+        ctx.lineWidth = 0.5;
+        // 수직/수평 중심선
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(toX(0), plotT); ctx.lineTo(toX(0), plotB); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(plotL, toY(0)); ctx.lineTo(plotR, toY(0)); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // --- Convex Hull로 깨끗한 외곽 면 ---
+        const allPts = [];
         for (let i = 0; i < P.length; i++) {
-            const x = toX(Mxx[i]), y = toY(P[i]);
-            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            allPts.push([Mxx[i], P[i]]);
         }
-        ctx.closePath();
-        ctx.fill();
+        const hull = _convexHull(allPts);
 
-        ctx.strokeStyle = '#4fc3f7';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let i = 0; i < P.length; i++) {
-            const x = toX(Mxx[i]), y = toY(P[i]);
-            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        if (hull.length > 2) {
+            // 면 채움 (그라디언트)
+            const grad = ctx.createRadialGradient(toX(0), toY(0), 0, toX(0), toY(0), (plotR - plotL) * 0.6);
+            grad.addColorStop(0, 'rgba(79,195,247,0.25)');
+            grad.addColorStop(1, 'rgba(79,195,247,0.05)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            hull.forEach((pt, i) => {
+                const px = toX(pt[0]), py = toY(pt[1]);
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            });
+            ctx.closePath();
+            ctx.fill();
+
+            // 외곽선
+            ctx.strokeStyle = '#4fc3f7';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            hull.forEach((pt, i) => {
+                const px = toX(pt[0]), py = toY(pt[1]);
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            });
+            ctx.closePath();
+            ctx.stroke();
         }
-        ctx.stroke();
 
-        // 축 라벨
+        // --- 핵심 점 마커 + 수치 ---
+        const keyPoints = [
+            { m: 0,      p: Py_pos,  label: `Py = ${Py_pos.toFixed(1)}`,  align: 'left',  dx: 8,  dy: -8,  color: '#ff5722' },
+            { m: 0,      p: Py_neg,  label: `Py = ${Py_neg.toFixed(1)}`,  align: 'left',  dx: 8,  dy: 14,  color: '#ff5722' },
+            { m: My_pos, p: 0,       label: `My = ${My_pos.toFixed(1)}`,  align: 'left',  dx: 6,  dy: -8,  color: '#ffab00' },
+            { m: My_neg, p: 0,       label: `My = ${My_neg.toFixed(1)}`,  align: 'right', dx: -6, dy: -8,  color: '#ffab00' },
+        ];
+
+        keyPoints.forEach(kp => {
+            const px = toX(kp.m), py = toY(kp.p);
+            // 마커
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = kp.color;
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            // 라벨
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillStyle = kp.color;
+            ctx.textAlign = kp.align;
+            ctx.fillText(kp.label, px + kp.dx, py + kp.dy);
+        });
+
+        // --- 축 라벨 ---
         ctx.fillStyle = fg;
-        ctx.font = '11px sans-serif';
+        ctx.font = '12px sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('Mxx', w / 2, h - 5);
+        ctx.fillText('Mxx (kip-in)', w / 2, h - 5);
         ctx.save();
-        ctx.translate(12, h / 2);
+        ctx.translate(14, h / 2);
         ctx.rotate(-Math.PI / 2);
-        ctx.fillText('P', 0, 0);
+        ctx.fillText('P (kips)', 0, 0);
         ctx.restore();
+
+        // --- 축 눈금 ---
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = fg;
+        // X축
+        ctx.textAlign = 'center';
+        const mStep = _niceStep(mMax * 2, 6);
+        for (let mv = -Math.floor(mMax / mStep) * mStep; mv <= mMax; mv += mStep) {
+            if (Math.abs(mv) < mStep * 0.01) { continue; }
+            const px = toX(mv);
+            if (px < plotL + 10 || px > plotR - 10) { continue; }
+            ctx.fillText(mv.toFixed(0), px, plotB + 16);
+            ctx.strokeStyle = gridColor; ctx.lineWidth = 0.3;
+            ctx.beginPath(); ctx.moveTo(px, plotT); ctx.lineTo(px, plotB); ctx.stroke();
+        }
+        // Y축
+        ctx.textAlign = 'right';
+        const pStep = _niceStep(pMax * 2, 6);
+        for (let pv = -Math.floor(pMax / pStep) * pStep; pv <= pMax; pv += pStep) {
+            if (Math.abs(pv) < pStep * 0.01) { continue; }
+            const py = toY(pv);
+            if (py < plotT + 5 || py > plotB - 5) { continue; }
+            ctx.fillText(pv.toFixed(1), plotL - 6, py + 4);
+            ctx.strokeStyle = gridColor; ctx.lineWidth = 0.3;
+            ctx.beginPath(); ctx.moveTo(plotL, py); ctx.lineTo(plotR, py); ctx.stroke();
+        }
+
+        // --- 정보 박스 (우상단) ---
+        const infoLines = [
+            `Py(+) = ${Py_pos.toFixed(2)} kips`,
+            `Py(-) = ${Py_neg.toFixed(2)} kips`,
+            `My(+) = ${My_pos.toFixed(1)} kip-in`,
+            `My(-) = ${My_neg.toFixed(1)} kip-in`,
+            `fy = ${data.fy || '?'} ksi`,
+        ];
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        const boxW = 170, boxH = infoLines.length * 14 + 8;
+        ctx.fillStyle = 'rgba(30,30,30,0.85)';
+        ctx.fillRect(plotR - boxW - 4, plotT + 4, boxW, boxH);
+        ctx.fillStyle = '#aaa';
+        infoLines.forEach((line, i) => {
+            ctx.fillText(line, plotR - 10, plotT + 18 + i * 14);
+        });
+    }
+
+    // 축 눈금 간격 계산 (1, 2, 5, 10, 20, 50, ... 패턴)
+    function _niceStep(range, maxTicks) {
+        const rough = range / maxTicks;
+        const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+        const norm = rough / mag;
+        let nice;
+        if (norm <= 1.5) { nice = 1; }
+        else if (norm <= 3.5) { nice = 2; }
+        else if (norm <= 7.5) { nice = 5; }
+        else { nice = 10; }
+        return nice * mag;
+    }
+
+    // Convex Hull (Graham Scan)
+    function _convexHull(points) {
+        if (points.length < 3) { return points.slice(); }
+        const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+        const cross = (O, A, B) => (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
+        const lower = [];
+        for (const p of pts) {
+            while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) { lower.pop(); }
+            lower.push(p);
+        }
+        const upper = [];
+        for (let i = pts.length - 1; i >= 0; i--) {
+            const p = pts[i];
+            while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) { upper.pop(); }
+            upper.push(p);
+        }
+        upper.pop(); lower.pop();
+        return lower.concat(upper);
     }
 
     // ============================================================
@@ -441,6 +603,17 @@
     // ============================================================
     // 해석 실행
     // ============================================================
+    // Load Case 선택 시 custom 입력 표시/숨김
+    const selLoadCase = document.getElementById('select-load-case');
+    if (selLoadCase) {
+        selLoadCase.addEventListener('change', () => {
+            const customDiv = document.getElementById('custom-load-inputs');
+            if (customDiv) {
+                customDiv.style.display = selLoadCase.value === 'custom' ? 'flex' : 'none';
+            }
+        });
+    }
+
     const btnRun = document.getElementById('btn-run-analysis');
     if (btnRun) {
         btnRun.addEventListener('click', () => {
@@ -467,7 +640,41 @@
             model.BC = BC;
             model.neigs = neigs;
 
-            vscode.postMessage({ command: 'runAnalysis', data: model });
+            // Load Case에 따라 stress 자동 설정
+            const loadCase = /** @type {HTMLSelectElement} */ (document.getElementById('select-load-case'))?.value || 'compression';
+            const fyLoad = getNum('input-fy-load', 50);
+
+            if (loadCase === 'compression') {
+                vscode.postMessage({
+                    command: 'setStress',
+                    data: { type: 'uniform_compression', fy: fyLoad }
+                });
+            } else if (loadCase === 'bending_xx') {
+                vscode.postMessage({
+                    command: 'setStress',
+                    data: { type: 'pure_bending', fy: fyLoad }
+                });
+            } else if (loadCase === 'bending_zz') {
+                vscode.postMessage({
+                    command: 'setStress',
+                    data: { type: 'custom', P: 0, Mxx: 0, Mzz: 1, fy: fyLoad }
+                });
+            } else if (loadCase === 'custom') {
+                vscode.postMessage({
+                    command: 'setStress',
+                    data: {
+                        type: 'custom',
+                        P: getNum('input-load-P', 0),
+                        Mxx: getNum('input-load-Mxx', 0),
+                        Mzz: getNum('input-load-Mzz', 0),
+                    }
+                });
+            }
+
+            // stress 설정 후 해석 실행 (약간의 지연으로 stress 반영 보장)
+            setTimeout(() => {
+                vscode.postMessage({ command: 'runAnalysis', data: model });
+            }, 200);
         });
     }
 
@@ -498,83 +705,231 @@
         const yMax = Math.max(...points.map(p => p[1])) * 1.15;
         const yMin = 0;
 
-        const toX = (val) => pad.left + (Math.log10(val) - xMin) / (xMax - xMin) * (w - pad.left - pad.right);
-        const toY = (val) => h - pad.bottom - ((val - yMin) / (yMax - yMin)) * (h - pad.top - pad.bottom);
+        const plotLeft = pad.left;
+        const plotRight = w - pad.right;
+        const plotTop = pad.top;
+        const plotBottom = h - pad.bottom;
 
-        // 클리어
-        ctx.clearRect(0, 0, w, h);
+        const toX = (val) => plotLeft + (Math.log10(val) - xMin) / (xMax - xMin) * (plotRight - plotLeft);
+        const toY = (val) => plotBottom - ((val - yMin) / (yMax - yMin)) * (plotBottom - plotTop);
+        const fromX = (px) => Math.pow(10, xMin + (px - plotLeft) / (plotRight - plotLeft) * (xMax - xMin));
+        const fromY = (py) => yMin + (plotBottom - py) / (plotBottom - plotTop) * (yMax - yMin);
 
-        // 배경
-        const style = getComputedStyle(document.body);
-        const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
-        const gridColor = style.getPropertyValue('--vscode-panel-border').trim() || '#333';
+        function drawChart(mouseX, mouseY) {
+            ctx.clearRect(0, 0, w, h);
 
-        // 그리드
-        ctx.strokeStyle = gridColor;
-        ctx.lineWidth = 0.5;
-        for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
-            const x = toX(Math.pow(10, exp));
-            ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, h - pad.bottom); ctx.stroke();
-        }
+            const style = getComputedStyle(document.body);
+            const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
+            const gridColor = style.getPropertyValue('--vscode-panel-border').trim() || '#333';
 
-        // 다중 모드 곡선 (2nd, 3rd 모드 — 반투명)
-        const modeColors = ['#4fc3f7', '#81c784', '#ffb74d', '#e57373', '#ba68c8'];
-        const maxModes = Math.min(analysisResult.curve[0] ? analysisResult.curve[0].length - 1 : 1, 5);
+            // 그리드
+            ctx.strokeStyle = gridColor;
+            ctx.lineWidth = 0.5;
+            for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
+                const x = toX(Math.pow(10, exp));
+                ctx.beginPath(); ctx.moveTo(x, plotTop); ctx.lineTo(x, plotBottom); ctx.stroke();
+            }
+            // Y 그리드
+            const yStep = Math.pow(10, Math.floor(Math.log10(yMax / 4)));
+            for (let yv = yStep; yv < yMax; yv += yStep) {
+                const y = toY(yv);
+                ctx.beginPath(); ctx.moveTo(plotLeft, y); ctx.lineTo(plotRight, y); ctx.stroke();
+            }
 
-        for (let modeIdx = maxModes - 1; modeIdx >= 0; modeIdx--) {
-            const modePoints = [];
-            analysisResult.curve.forEach(row => {
-                if (row && row.length > modeIdx + 1 && row[modeIdx + 1] > 0) {
-                    modePoints.push([row[0], row[modeIdx + 1]]);
+            // 다중 모드 곡선
+            const modeColors = ['#4fc3f7', '#81c784', '#ffb74d', '#e57373', '#ba68c8'];
+            const maxModes = Math.min(analysisResult.curve[0] ? analysisResult.curve[0].length - 1 : 1, 5);
+
+            for (let modeIdx = maxModes - 1; modeIdx >= 0; modeIdx--) {
+                const modePoints = [];
+                analysisResult.curve.forEach(row => {
+                    if (row && row.length > modeIdx + 1 && row[modeIdx + 1] > 0) {
+                        modePoints.push([row[0], row[modeIdx + 1]]);
+                    }
+                });
+                if (modePoints.length < 2) { continue; }
+
+                ctx.beginPath();
+                ctx.strokeStyle = modeColors[modeIdx % modeColors.length];
+                ctx.lineWidth = modeIdx === 0 ? 2.5 : 1;
+                ctx.globalAlpha = modeIdx === 0 ? 1.0 : 0.35;
+                modePoints.forEach((pt, i) => {
+                    const px = toX(pt[0]);
+                    const py = toY(pt[1]);
+                    i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+                });
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1.0;
+
+            // === 모드 범례 (좌상단) ===
+            const legendX = plotLeft + 8;
+            const legendY = plotTop + 6;
+            const legendLabels = ['Mode 1 (설계값)', 'Mode 2', 'Mode 3', 'Mode 4', 'Mode 5'];
+            const visibleModes = Math.min(maxModes, 5);
+            ctx.font = '10px sans-serif';
+            const legendH = visibleModes * 14 + 6;
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillRect(legendX, legendY, 110, legendH);
+            ctx.strokeStyle = gridColor;
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(legendX, legendY, 110, legendH);
+            for (let mi = 0; mi < visibleModes; mi++) {
+                const ly = legendY + 12 + mi * 14;
+                // 색상 선
+                ctx.strokeStyle = modeColors[mi % modeColors.length];
+                ctx.lineWidth = mi === 0 ? 2.5 : 1;
+                ctx.globalAlpha = mi === 0 ? 1.0 : 0.5;
+                ctx.beginPath(); ctx.moveTo(legendX + 4, ly - 3); ctx.lineTo(legendX + 22, ly - 3); ctx.stroke();
+                // 텍스트
+                ctx.globalAlpha = 1.0;
+                ctx.fillStyle = fg;
+                ctx.textAlign = 'left';
+                ctx.fillText(legendLabels[mi] || `Mode ${mi+1}`, legendX + 26, ly);
+            }
+
+            // === DSM 극점 마커 (Mcrl, Mcrd 라벨) ===
+            const dsm = lastDsmResult;
+            const markerColors = { local: '#ff5722', dist: '#ffab00', global: '#7c4dff' };
+
+            // 극점 데이터 수집
+            const extrema = [];
+            if (dsm) {
+                const d = dsm.Mxx || dsm.P;
+                if (d) {
+                    if (d.LF_local > 0 && d.Lcrl > 0) {
+                        extrema.push({ L: d.Lcrl, LF: d.LF_local, label: d.Mxxcrl !== undefined ? 'Mcrl' : 'Pcrl', color: markerColors.local });
+                    }
+                    if (d.LF_dist > 0 && d.Lcrd > 0) {
+                        extrema.push({ L: d.Lcrd, LF: d.LF_dist, label: d.Mxxcrd !== undefined ? 'Mcrd' : 'Pcrd', color: markerColors.dist });
+                    }
                 }
+            }
+
+            // 극점이 DSM에서 없으면 곡선에서 최소값 찾기
+            if (extrema.length === 0) {
+                let minPt = points[0];
+                points.forEach(p => { if (p[1] < minPt[1]) { minPt = p; } });
+                extrema.push({ L: minPt[0], LF: minPt[1], label: 'min', color: markerColors.local });
+            }
+
+            // 극점 마커 + 라벨 그리기
+            extrema.forEach(ext => {
+                const px = toX(ext.L);
+                const py = toY(ext.LF);
+                // 원형 마커
+                ctx.beginPath();
+                ctx.arc(px, py, 6, 0, 2 * Math.PI);
+                ctx.fillStyle = ext.color;
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                // 라벨 배경
+                const labelText = `${ext.label} = ${ext.LF.toFixed(3)} @ L=${ext.L.toFixed(1)}`;
+                ctx.font = 'bold 11px sans-serif';
+                const tw = ctx.measureText(labelText).width;
+                const lx = Math.min(px + 12, plotRight - tw - 8);
+                const ly = Math.max(py - 12, plotTop + 14);
+                ctx.fillStyle = 'rgba(30,30,30,0.85)';
+                ctx.fillRect(lx - 4, ly - 12, tw + 8, 16);
+                ctx.fillStyle = ext.color;
+                ctx.textAlign = 'left';
+                ctx.fillText(labelText, lx, ly);
             });
-            if (modePoints.length < 2) { continue; }
 
-            ctx.beginPath();
-            ctx.strokeStyle = modeColors[modeIdx % modeColors.length];
-            ctx.lineWidth = modeIdx === 0 ? 2 : 1;
-            ctx.globalAlpha = modeIdx === 0 ? 1.0 : 0.4;
-            modePoints.forEach((pt, i) => {
-                const px = toX(pt[0]);
-                const py = toY(pt[1]);
-                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-            });
-            ctx.stroke();
+            // 축 라벨
+            ctx.fillStyle = fg;
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Half-wavelength (in.)', w / 2, h - 8);
+            ctx.save();
+            ctx.translate(14, h / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('Load Factor', 0, 0);
+            ctx.restore();
+
+            // X축 눈금
+            ctx.fillStyle = fg;
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
+                ctx.fillText(Math.pow(10, exp).toString(), toX(Math.pow(10, exp)), plotBottom + 16);
+            }
+
+            // Y축 눈금
+            ctx.textAlign = 'right';
+            for (let yv = yStep; yv < yMax; yv += yStep) {
+                ctx.fillText(yv.toFixed(2), plotLeft - 6, toY(yv) + 4);
+            }
+
+            // === 십자 커서 → 곡선점 스냅 + 좌표 표시 ===
+            if (mouseX !== null && mouseY !== null &&
+                mouseX >= plotLeft && mouseX <= plotRight &&
+                mouseY >= plotTop && mouseY <= plotBottom) {
+
+                // 마우스 x에 가장 가까운 곡선 점 찾기
+                let snapPt = null;
+                let minDist = Infinity;
+                for (const pt of points) {
+                    const px = toX(pt[0]);
+                    const dist = Math.abs(px - mouseX);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        snapPt = pt;
+                    }
+                }
+
+                const snapX = snapPt ? toX(snapPt[0]) : mouseX;
+                const snapY = snapPt ? toY(snapPt[1]) : mouseY;
+
+                // 십자선 — 곡선점 기준, 플롯 전체 영역
+                ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([]);
+                ctx.beginPath(); ctx.moveTo(snapX, plotTop); ctx.lineTo(snapX, plotBottom); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(plotLeft, snapY); ctx.lineTo(plotRight, snapY); ctx.stroke();
+
+                // 곡선점 마커
+                if (snapPt) {
+                    ctx.beginPath();
+                    ctx.arc(snapX, snapY, 4, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#fff';
+                    ctx.fill();
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                // 곡선점 좌표 (우상단)
+                const dispL = snapPt ? snapPt[0] : fromX(mouseX);
+                const dispLF = snapPt ? snapPt[1] : fromY(mouseY);
+                const coordText = `L = ${dispL.toFixed(2)},  LF = ${dispLF.toFixed(4)}`;
+                ctx.font = '11px monospace';
+                const ctw = ctx.measureText(coordText).width;
+                ctx.fillStyle = 'rgba(30,30,30,0.85)';
+                ctx.fillRect(plotRight - ctw - 14, plotTop + 2, ctw + 10, 18);
+                ctx.fillStyle = '#fff';
+                ctx.textAlign = 'right';
+                ctx.fillText(coordText, plotRight - 8, plotTop + 15);
+            }
         }
-        ctx.globalAlpha = 1.0;
 
-        // 최소값 마커
-        let minPt = points[0];
-        points.forEach(p => { if (p[1] < minPt[1]) { minPt = p; } });
-        ctx.beginPath();
-        ctx.arc(toX(minPt[0]), toY(minPt[1]), 5, 0, 2 * Math.PI);
-        ctx.fillStyle = '#ff5722';
-        ctx.fill();
+        // 초기 그리기 (커서 없이)
+        drawChart(null, null);
 
-        // 축 라벨
-        ctx.fillStyle = fg;
-        ctx.font = '12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('Half-wavelength', w / 2, h - 8);
-        ctx.save();
-        ctx.translate(14, h / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.fillText('Load Factor', 0, 0);
-        ctx.restore();
-
-        // 최소값 텍스트
-        ctx.fillStyle = '#ff5722';
-        ctx.font = '11px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`min = ${minPt[1].toFixed(4)} @ L=${minPt[0].toFixed(1)}`,
-            toX(minPt[0]) + 10, toY(minPt[1]) - 5);
-
-        // X축 눈금
-        ctx.fillStyle = fg;
-        ctx.textAlign = 'center';
-        for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
-            ctx.fillText(Math.pow(10, exp).toString(), toX(Math.pow(10, exp)), h - pad.bottom + 16);
-        }
+        // 마우스 이벤트 — 커서 추적
+        canvas.onmousemove = function(e) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            const mx = (e.clientX - rect.left) * scaleX;
+            const my = (e.clientY - rect.top) * scaleY;
+            drawChart(mx, my);
+        };
+        canvas.onmouseleave = function() {
+            drawChart(null, null);
+        };
     }
 
     // ============================================================

@@ -8,6 +8,65 @@ import math
 import numpy as np
 
 
+def _calc_plastic_modulus(node, elem, xcg, zcg, axis='x'):
+    """소성단면계수 계산 (파이버 적분)
+
+    소성중립축(PNA)을 찾아 단면을 면적이 같은 두 부분으로 나누고,
+    각 부분의 면적 × 도심거리의 합으로 Z를 계산.
+
+    axis='x': Zx (강축, z방향 분할)
+    axis='z': Zz (약축, x방향 분할)
+    """
+    nelems = elem.shape[0]
+
+    # 파이버 생성 (요소당 10개 분할)
+    fibers = []
+    for i in range(nelems):
+        ni = int(elem[i, 1]) - 1
+        nj = int(elem[i, 2]) - 1
+        t = elem[i, 3]
+        xi, zi = node[ni, 1], node[ni, 2]
+        xj, zj = node[nj, 1], node[nj, 2]
+        L = math.sqrt((xj - xi)**2 + (zj - zi)**2)
+        n_fib = max(10, int(L / 0.1))
+        for k in range(n_fib):
+            frac = (k + 0.5) / n_fib
+            fx = xi + frac * (xj - xi)
+            fz = zi + frac * (zj - zi)
+            fa = L * t / n_fib
+            fibers.append((fx, fz, fa))
+
+    if not fibers:
+        return 0.0
+
+    total_A = sum(f[2] for f in fibers)
+    half_A = total_A / 2.0
+
+    # 소성중립축 위치 탐색 (이분법)
+    if axis == 'x':
+        coords = [f[1] for f in fibers]  # z좌표 기준
+    else:
+        coords = [f[0] for f in fibers]  # x좌표 기준
+
+    lo, hi = min(coords), max(coords)
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        area_below = sum(f[2] for f in fibers if (f[1] if axis == 'x' else f[0]) <= mid)
+        if area_below < half_A:
+            lo = mid
+        else:
+            hi = mid
+    pna = (lo + hi) / 2.0
+
+    # Z = Σ|거리| × 면적
+    Z = 0.0
+    for f in fibers:
+        c = f[1] if axis == 'x' else f[0]
+        Z += abs(c - pna) * f[2]
+
+    return Z
+
+
 def elemprop(node: np.ndarray, elem: np.ndarray) -> np.ndarray:
     """요소별 폭(width)과 회전각(alpha) 계산
 
@@ -115,8 +174,29 @@ def grosprop(node: np.ndarray, elem: np.ndarray) -> dict:
     I11 = Ixx * c**2 + Izz * s**2 - 2 * Ixz * s * c
     I22 = Ixx * s**2 + Izz * c**2 + 2 * Ixz * s * c
 
+    # 단면계수 Sx, Sz (극한 섬유까지 거리)
+    xs = node[:, 1]
+    zs = node[:, 2]
+    cx_pos = max(xs) - xcg  # xcg에서 오른쪽 극한 섬유
+    cx_neg = xcg - min(xs)  # xcg에서 왼쪽 극한 섬유
+    cz_pos = max(zs) - zcg
+    cz_neg = zcg - min(zs)
+    cx = max(cx_pos, cx_neg) if max(cx_pos, cx_neg) > 0 else 1.0
+    cz = max(cz_pos, cz_neg) if max(cz_pos, cz_neg) > 0 else 1.0
+    Sx = Ixx / cz  # 강축 단면계수
+    Sz = Izz / cx  # 약축 단면계수
+
+    # 회전반경
+    rx = math.sqrt(Ixx / A_total) if A_total > 0 else 0.0
+    rz = math.sqrt(Izz / A_total) if A_total > 0 else 0.0
+
+    # 소성단면계수 Zx, Zz (파이버 적분)
+    Zx = _calc_plastic_modulus(node, elem, xcg, zcg, axis='x')
+    Zz = _calc_plastic_modulus(node, elem, xcg, zcg, axis='z')
+
     return dict(
         A=A_total, xcg=xcg, zcg=zcg,
         Ixx=Ixx, Izz=Izz, Ixz=Ixz,
         thetap=thetap, I11=I11, I22=I22,
+        Sx=Sx, Sz=Sz, rx=rx, rz=rz, Zx=Zx, Zz=Zz,
     )

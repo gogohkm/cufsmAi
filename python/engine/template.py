@@ -1,10 +1,11 @@
 """파라메트릭 단면 템플릿 생성
 
 참조: 프로젝트개요.md §2 단면 템플릿
-원본: Ref_Source/helpers/templatecalc.m
+원본: Ref_Source/interface/snakey.m, Ref_Source/interface/template/template_build_model.m
 
-각 단면 유형에 대해 절점 좌표를 직접 계산하여 node/elem 배열을 생성한다.
-치수는 out-to-out 기준, 좌표는 중심선(centerline) 기준으로 변환.
+MATLAB snakey 알고리즘을 Python으로 포팅:
+  - 직선 세그먼트 + 코너 반경 원호 요소 생성
+  - 치수는 out-to-out 기준, 좌표는 중심선(centerline) 기준으로 변환
 """
 
 import math
@@ -35,19 +36,202 @@ def generate_section(section_type: str, params: dict) -> dict:
     return gen(params)
 
 
-def _build_from_coords(coords: list, t: float, mat: int = 100,
-                        closed: bool = False) -> dict:
-    """좌표 리스트로부터 node/elem 배열 생성
+# ============================================================
+# snakey: MATLAB snakey.m 포팅
+# ============================================================
+
+def _wrap_pi(d: float) -> float:
+    """각도를 (-pi, pi] 범위로 랩핑"""
+    return (d + PI) % (2 * PI) - PI
+
+
+def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
+            radii=None, rn=None, rt=None, rid=None,
+            closed=False) -> dict:
+    """MATLAB snakey 함수의 Python 포팅
+
+    직선 세그먼트와 코너 반경으로부터 node/elem 배열 생성.
 
     Args:
-        coords: [(x1,z1), (x2,z2), ...] 중심선 좌표
-        t: 두께
-        mat: 재료 번호
-        closed: True면 마지막→첫번째 연결
+        lengths: 각 직선 세그먼트의 중심선 길이
+        angles: 각 세그먼트의 방향각 (라디안)
+        n_strips: 각 세그먼트의 요소 분할 수
+        thicknesses: 각 세그먼트의 두께
+        mat_ids: 각 세그먼트의 재료 번호
+        radii: 코너 반경 (N-1개, 인접 세그먼트 사이)
+        rn: 코너당 원호 요소 수
+        rt: 코너 요소 두께
+        rid: 코너 요소 재료 번호
+        closed: True면 폐합 단면
 
     Returns:
-        dict with 'node' and 'elem'
+        dict with 'node' (nnodes,8) and 'elem' (nelems,5)
     """
+    nl = len(lengths)
+    nr = 0 if radii is None or len(radii) == 0 else len(radii)
+
+    # --- 세그먼트 빌드: 직선 + 원호 교차 배열 ---
+    seg_l = []
+    seg_q1 = []
+    seg_q2 = []
+    seg_n = []
+    seg_t = []
+    seg_id = []
+
+    for j in range(nl):
+        L_flat = lengths[j]
+        q_flat = angles[j]
+        n_flat = n_strips[j]
+        t_flat = thicknesses[j]
+        id_flat = mat_ids[j]
+
+        # 왼쪽 코너 기여 (세그먼트 j-1과 j 사이)
+        r_left = 0.0
+        dtheta_left = 0.0
+        if j > 0 and nr >= j:
+            r_left = radii[j - 1]
+            dtheta_left = _wrap_pi(angles[j] - angles[j - 1])
+        elif closed and nr == nl and j == 0:
+            r_left = radii[-1]
+            dtheta_left = _wrap_pi(angles[0] - angles[-1])
+
+        # 오른쪽 코너 기여 (세그먼트 j와 j+1 사이)
+        r_right = 0.0
+        dtheta_right = 0.0
+        if j < nl - 1 and nr > j:
+            r_right = radii[j]
+            dtheta_right = _wrap_pi(angles[j + 1] - angles[j])
+        elif closed and nr == nl and j == nl - 1:
+            r_right = radii[-1]
+            dtheta_right = _wrap_pi(angles[0] - angles[-1])
+
+        # 코너 반경만큼 직선 길이 트림
+        L_eff = L_flat
+        if r_left > 0 and dtheta_left != 0:
+            L_eff -= r_left * abs(math.tan(dtheta_left / 2))
+        if r_right > 0 and dtheta_right != 0:
+            L_eff -= r_right * abs(math.tan(dtheta_right / 2))
+        L_eff = max(L_eff, 0.0)
+
+        # 직선 세그먼트 추가
+        seg_l.append(L_eff)
+        seg_q1.append(q_flat)
+        seg_q2.append(q_flat)
+        seg_n.append(n_flat)
+        seg_t.append(t_flat)
+        seg_id.append(id_flat)
+
+        # 코너 원호 (세그먼트 j와 j+1 사이)
+        corner_idx = -1
+        q_in = 0.0
+        q_out = 0.0
+
+        if j < nl - 1 and nr > j:
+            corner_idx = j
+            q_in = angles[j]
+            q_out = angles[j + 1]
+        elif closed and nr == nl and j == nl - 1:
+            corner_idx = nl - 1
+            q_in = angles[-1]
+            q_out = angles[0]
+
+        if corner_idx >= 0:
+            r_corner = radii[corner_idx]
+            n_corner = rn[corner_idx] if rn else 4
+            t_corner = rt[corner_idx] if rt else t_flat
+            id_corner = rid[corner_idx] if rid else id_flat
+
+            if r_corner > 0 and n_corner > 0 and q_in != q_out:
+                dtheta = _wrap_pi(q_out - q_in)
+                L_arc = r_corner * abs(dtheta)
+                q2_arc = q_in + dtheta
+
+                seg_l.append(L_arc)
+                seg_q1.append(q_in)
+                seg_q2.append(q2_arc)
+                seg_n.append(n_corner)
+                seg_t.append(t_corner)
+                seg_id.append(id_corner)
+
+    # --- 노드/요소 생성 (snakey march) ---
+    nodes = []
+    elems = []
+    x, y = 0.0, 0.0
+    started = False
+    node_idx = 1
+
+    for j in range(len(seg_l)):
+        n = seg_n[j]
+        l = seg_l[j]
+        q1 = seg_q1[j]
+        q2 = seg_q2[j]
+        t = seg_t[j]
+        mid = seg_id[j]
+
+        if n == 0 or l == 0:
+            continue
+
+        dq = (q2 - q1) / max(n, 1)
+
+        if q1 == q2:
+            le = l / n
+        else:
+            dtheta = _wrap_pi(q2 - q1)
+            r = l / abs(dtheta)
+            le = 2 * r * math.sin(abs(dtheta) / (2 * n))
+
+        for k in range(n):
+            if not started:
+                x1, y1 = 0.0, 0.0
+                nodes.append([node_idx, x1, y1, 1, 1, 1, 1, 1.0])
+                node_idx += 1
+                started = True
+            else:
+                x1, y1 = x2, y2
+
+            angle_mid = q1 + (k + 0.5) * dq
+            x2 = x1 + le * math.cos(angle_mid)
+            y2 = y1 + le * math.sin(angle_mid)
+            nodes.append([node_idx, x2, y2, 1, 1, 1, 1, 1.0])
+            elems.append([node_idx - 1, node_idx - 1, node_idx, t, mid])
+            node_idx += 1
+
+    node = np.array(nodes)
+    elem = np.array(elems)
+
+    # 폐합 처리
+    if closed and len(node) > 1:
+        n_nodes = len(node)
+        if nr == 0:
+            node[-1, 1:3] = node[0, 1:3]
+        else:
+            xm = 0.5 * (node[0, 1] + node[-1, 1])
+            ym = 0.5 * (node[0, 2] + node[-1, 2])
+            node[0, 1:3] = [xm, ym]
+
+        last_id = n_nodes
+        first_id = 1
+        elem[elem[:, 1] == last_id, 1] = first_id
+        elem[elem[:, 2] == last_id, 2] = first_id
+        node = node[:-1]
+
+    # 원점을 좌하단으로 이동
+    if len(node) > 0:
+        xo = np.min(node[:, 1])
+        zo = np.min(node[:, 2])
+        node[:, 1] -= xo
+        node[:, 2] -= zo
+
+    return {'node': node, 'elem': elem}
+
+
+# ============================================================
+# 레거시 헬퍼 (I-section, Tee 등 분기 단면용)
+# ============================================================
+
+def _build_from_coords(coords: list, t: float, mat: int = 100,
+                        closed: bool = False) -> dict:
+    """좌표 리스트로부터 node/elem 배열 생성"""
     n = len(coords)
     node = np.zeros((n, 8))
     for i, (x, z) in enumerate(coords):
@@ -79,7 +263,6 @@ def _chain(*segments) -> list:
     coords = []
     for seg in segments:
         if coords and len(seg) > 0:
-            # 이전 마지막 점과 현재 첫 점이 같으면 건너뜀
             start = 1 if _close(coords[-1], seg[0]) else 0
             coords.extend(seg[start:])
         else:
@@ -91,158 +274,143 @@ def _close(p1, p2, tol=1e-6):
     return abs(p1[0]-p2[0]) < tol and abs(p1[1]-p2[1]) < tol
 
 
+# ============================================================
+# 단면 생성기 (snakey 기반)
+# ============================================================
+
 def _gen_lipped_c(params: dict) -> dict:
-    """Lipped C-channel (out-to-out)
+    """Lipped C-channel (out-to-out) — MATLAB template_build_model.m 'lippedc' 포팅
 
-    립이 안쪽(웹 쪽)으로 향함:
-
-        1 ─ 2
-              │
-    3 ─────── 4  상단 플랜지
-    │
-    │  웹 (H)
-    │
-    5 ─────── 6  하단 플랜지
-              │
-        8 ─ 7
+    strips.l= [d   b   h  b  d]
+    strips.q= [270 180 90 0 -90] (degrees)
     """
     H = params.get('H', 9.0)
     B = params.get('B', 5.0)
     D = params.get('D', 1.0)
     t = params.get('t', 0.1)
-    nseg = params.get('nseg', 1)
+    rin = params.get('r', 0.0)
+    nseg = max(1, params.get('nseg', 1))
 
     h = H - t
     b = B - t
     d = D - t / 2.0
+    r = (rin + t / 2.0) if rin > 0 else 0.0
 
-    # 상단 립(안쪽) → 상단 플랜지 → 웹 → 하단 플랜지 → 하단 립(안쪽)
-    corners = [
-        (0, h),       # 상단 립 끝 (안쪽, 웹 쪽)
-        (0, h - d),   # 상단 립-플랜지 연결점
-        (b, h - d),   # 상단 플랜지 끝 (웹 반대쪽)
-        (b, d),       # 하단 플랜지 끝 (웹 반대쪽)
-        (0, d),       # 하단 립-플랜지 연결점
-        (0, 0),       # 하단 립 끝 (안쪽, 웹 쪽)
-    ]
+    lengths = [d, b, h, b, d]
+    angles = [270, 180, 90, 0, -90]
+    angles = [a * PI / 180 for a in angles]
+    n_strips = [2 * nseg, 4 * nseg, 8 * nseg, 4 * nseg, 2 * nseg]
+    thicknesses = [t] * 5
+    mat_ids = [100] * 5
 
-    coords = []
-    segs = [2, 4, 8, 4, 2]
-    for i in range(len(corners) - 1):
-        n = segs[i] * nseg
-        seg = _subdivide(corners[i], corners[i + 1], n)
-        coords = _chain(coords, seg)
+    radii = [r, r, r, r] if r > 0 else []
+    rn = [4, 4, 4, 4] if r > 0 else []
+    rt = [t, t, t, t] if r > 0 else []
+    rid = [100, 100, 100, 100] if r > 0 else []
 
-    return _build_from_coords(coords, t)
+    return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
+                   radii=radii, rn=rn, rt=rt, rid=rid)
 
 
 def _gen_lipped_z(params: dict) -> dict:
-    """Lipped Z-section (out-to-out)
+    """Lipped Z-section (out-to-out) — MATLAB template_build_model.m 'lippedz' 포팅
 
-    상하 플랜지 반대 방향, 립은 안쪽:
-
-        1 ─ 2             상단 립 (안쪽=아래로)
-              │
-              3 ─── 4     상단 플랜지 (오른쪽)
-                    │
-                웹  │ H
-                    │
-        6 ─── 5           하단 플랜지 (왼쪽)
-        │
-        7 ─ 8             하단 립 (안쪽=위로)
+    strips.l= [d,  b,  h,  b,  d]
+    strips.q= [-q, 0, 90,  0, -q] (degrees, q=90 for standard Z)
     """
     H = params.get('H', 9.0)
     B = params.get('B', 5.0)
     D = params.get('D', 1.0)
     t = params.get('t', 0.1)
-    nseg = params.get('nseg', 1)
+    rin = params.get('r', 0.0)
+    qlip = params.get('qlip', 90.0)
+    nseg = max(1, params.get('nseg', 1))
 
     h = H - t
     b = B - t
     d = D - t / 2.0
+    r = (rin + t / 2.0) if rin > 0 else 0.0
 
-    # 하단 립(안쪽=위) → 하단 플랜지(왼쪽) → 웹 → 상단 플랜지(오른쪽) → 상단 립(안쪽=아래)
-    corners = [
-        (-b, d),       # 하단 립 끝 (안쪽=위로)
-        (-b, 0),       # 하단 립-플랜지 연결
-        (0, 0),        # 웹 하단
-        (0, h),        # 웹 상단
-        (b, h),        # 상단 플랜지 끝 (오른쪽)
-        (b, h - d),    # 상단 립 끝 (안쪽=아래로)
-    ]
+    lengths = [d, b, h, b, d]
+    angles = [-qlip, 0, 90, 0, -qlip]
+    angles = [a * PI / 180 for a in angles]
+    n_strips = [2 * nseg, 4 * nseg, 8 * nseg, 4 * nseg, 2 * nseg]
+    thicknesses = [t] * 5
+    mat_ids = [100] * 5
 
-    segs = [2, 4, 8, 4, 2]
-    coords = []
-    for i in range(len(corners) - 1):
-        n = segs[i] * nseg
-        seg = _subdivide(corners[i], corners[i + 1], n)
-        coords = _chain(coords, seg)
+    radii = [r, r, r, r] if r > 0 else []
+    rn = [4, 4, 4, 4] if r > 0 else []
+    rt = [t, t, t, t] if r > 0 else []
+    rid = [100, 100, 100, 100] if r > 0 else []
 
-    return _build_from_coords(coords, t)
+    return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
+                   radii=radii, rn=rn, rt=rt, rid=rid)
 
 
 def _gen_hat(params: dict) -> dict:
-    """Hat section (out-to-out)
+    """Hat section (out-to-out) — MATLAB template_build_model.m 'hat' 포팅
 
-    B_bot     B_bot
-    ┌───┐     ┌───┐
-    │   └─────┘   │
-    │    B_top    │
-    H             H
-    │             │
+    strips.l= [d,  b,  h,  b,  d]
+    strips.q= [0, 90,  0, -90, 0] (degrees)
     """
     H = params.get('H', 6.0)
-    B_top = params.get('B', 4.0)  # B → top width
-    B_bot = params.get('D', 2.0)  # D → bottom flange width
+    B_top = params.get('B', 4.0)
+    D = params.get('D', 2.0)
     t = params.get('t', 0.1)
-    nseg = params.get('nseg', 1)
+    rin = params.get('r', 0.0)
+    nseg = max(1, params.get('nseg', 1))
 
     h = H - t
-    bt = B_top - t
-    bb = B_bot - t / 2.0
+    b = B_top - t
+    d = D - t / 2.0
+    r = (rin + t / 2.0) if rin > 0 else 0.0
 
-    # Hat: 왼쪽 플랜지 → 왼쪽 웹 → 상단 → 오른쪽 웹 → 오른쪽 플랜지
-    half = bt / 2.0
-    corners = [
-        (-half - bb, 0),   # 왼쪽 플랜지 끝
-        (-half, 0),        # 왼쪽 웹 하단
-        (-half, h),        # 왼쪽 웹 상단 = 상판 왼쪽
-        (half, h),         # 상판 오른쪽
-        (half, 0),         # 오른쪽 웹 하단
-        (half + bb, 0),    # 오른쪽 플랜지 끝
-    ]
+    lengths = [d, b, h, b, d]
+    angles = [0, 90, 0, -90, 0]
+    angles = [a * PI / 180 for a in angles]
+    n_strips = [2 * nseg, 4 * nseg, 8 * nseg, 4 * nseg, 2 * nseg]
+    thicknesses = [t] * 5
+    mat_ids = [100] * 5
 
-    segs = [3, 6, 4, 6, 3]
-    coords = []
-    for i in range(len(corners) - 1):
-        n = segs[i] * nseg
-        seg = _subdivide(corners[i], corners[i + 1], n)
-        coords = _chain(coords, seg)
+    radii = [r, r, r, r] if r > 0 else []
+    rn = [4, 4, 4, 4] if r > 0 else []
+    rt = [t, t, t, t] if r > 0 else []
+    rid = [100, 100, 100, 100] if r > 0 else []
 
-    return _build_from_coords(coords, t)
+    return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
+                   radii=radii, rn=rn, rt=rt, rid=rid)
 
 
 def _gen_rhs(params: dict) -> dict:
-    """Rectangular Hollow Section"""
+    """Rectangular Hollow Section — MATLAB template_build_model.m 'rhs' 포팅
+
+    strips.l= [b h b h]
+    strips.q= [0 90 180 270] (degrees)
+    """
     H = params.get('H', 6.0)
     B = params.get('B', 4.0)
     t = params.get('t', 0.1)
-    nseg = params.get('nseg', 1)
+    rin = params.get('r', 0.0)
+    nseg = max(1, params.get('nseg', 1))
 
     h = H - t
     b = B - t
+    r = (rin + t / 2.0) if rin > 0 else 0.0
 
-    corners = [(0, 0), (b, 0), (b, h), (0, h)]
-    segs = [4, 6, 4, 6]
-    coords = []
-    for i in range(len(corners)):
-        ni = i
-        nj = (i + 1) % len(corners)
-        n = segs[i] * nseg
-        seg = _subdivide(corners[ni], corners[nj], n)
-        coords = _chain(coords, seg)
+    lengths = [b, h, b, h]
+    angles = [0, 90, 180, 270]
+    angles = [a * PI / 180 for a in angles]
+    n_strips = [4 * nseg, 8 * nseg, 4 * nseg, 8 * nseg]
+    thicknesses = [t] * 4
+    mat_ids = [100] * 4
 
-    return _build_from_coords(coords, t, closed=True)
+    radii = [r, r, r, r] if r > 0 else []
+    rn = [4, 4, 4, 4] if r > 0 else []
+    rt = [t, t, t, t] if r > 0 else []
+    rid = [100, 100, 100, 100] if r > 0 else []
+
+    return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
+                   radii=radii, rn=rn, rt=rt, rid=rid, closed=True)
 
 
 def _gen_chs(params: dict) -> dict:
@@ -261,43 +429,39 @@ def _gen_chs(params: dict) -> dict:
 
 
 def _gen_angle(params: dict) -> dict:
-    """Angle (L-section)
+    """Angle (L-section) — MATLAB template_build_model.m 'angle' 포팅
 
-    │
-    │ H
-    │
-    └────── B
+    strips.l= [d b]
+    strips.q= [-90 0] (degrees)
     """
     H = params.get('H', 6.0)
     B = params.get('B', 4.0)
     t = params.get('t', 0.1)
-    nseg = params.get('nseg', 1)
+    rin = params.get('r', 0.0)
+    nseg = max(1, params.get('nseg', 1))
 
-    h = H - t / 2.0
+    d = H - t / 2.0
     b = B - t / 2.0
+    r = (rin + t / 2.0) if rin > 0 else 0.0
 
-    corners = [(0, 0), (b, 0), (b, t), (t, t), (t, h), (0, h)]
-    # 단순화: 두꺼운 표현 대신 중심선 L
-    corners = [(0, 0), (b, 0), (b, h)]
-    segs = [4, 6]
-    coords = []
-    for i in range(len(corners) - 1):
-        n = segs[i] * nseg
-        seg = _subdivide(corners[i], corners[i + 1], n)
-        coords = _chain(coords, seg)
+    lengths = [d, b]
+    angles = [-90, 0]
+    angles = [a * PI / 180 for a in angles]
+    n_strips = [6 * nseg, 6 * nseg]
+    thicknesses = [t, t]
+    mat_ids = [100, 100]
 
-    return _build_from_coords(coords, t)
+    radii = [r] if r > 0 else []
+    rn = [4] if r > 0 else []
+    rt = [t] if r > 0 else []
+    rid = [100] if r > 0 else []
+
+    return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
+                   radii=radii, rn=rn, rt=rt, rid=rid)
 
 
 def _gen_isect(params: dict) -> dict:
-    """I-section (중심선)
-
-    ┌──────────┐  상부 플랜지
-         │
-    H    │         웹
-         │
-    └──────────┘  하부 플랜지
-    """
+    """I-section (중심선) — 분기 단면, 레거시 방식 유지"""
     H = params.get('H', 10.0)
     B = params.get('B', 5.0)
     t = params.get('t', 0.1)
@@ -305,59 +469,15 @@ def _gen_isect(params: dict) -> dict:
 
     h = H - t
     b = B - t
-
-    # 하부 플랜지 왼쪽 → 중앙 → 오른쪽 (한 방향)
-    # 그 다음 웹 올라감
-    # 상부 플랜지 왼쪽 → 오른쪽
-
-    # 3개 부분으로 분리: 하부 플랜지, 웹, 상부 플랜지
     half_b = b / 2.0
 
-    seg1 = _subdivide((-half_b, 0), (0, 0), 2 * nseg)            # 하부 플랜지 왼쪽
-    seg2 = _subdivide((0, 0), (half_b, 0), 2 * nseg)             # 하부 플랜지 오른쪽
-    # 웹 시작점은 (0,0) — 하부 플랜지 중앙에서 올라감
-    # 그런데 I-section은 분기점이 있음. FSM에서는 분기를 허용하지 않으므로
-    # 단일 경로로 펼쳐야 함:
-    # 하부플랜지 좌끝 → 중앙 → 하부플랜지 우끝은 분기 문제
-    #
-    # CUFSM 원본 방식: 하부플랜지좌 → 중앙, 중앙에서 꺾어서 웹 위로,
-    # 상부플랜지좌 → 우
-    # 즉: [-B/2,0] → [0,0] → [0,H] → [-B/2,H]... 이 아니라
-    # [-B/2,0] → [B/2,0] (하부 전체) → [B/2,0]에서 웹...
-    #
-    # 실제로는: 하부좌 → 하부우 → (뒤로 중앙으로) → 웹 위로 → 상부좌 → 상부우
-    # 이것은 겹치는 경로가 됨.
-    #
-    # CUFSM 원래 방식 (snakey):
-    # 하부플랜지좌절반: (-B/2,0) → (0,0)
-    # 하부플랜지우절반: (0,0) → (B/2,0)
-    # 웹: (0,0) → (0,H)   ← 분기점! 중앙으로 돌아가서 올라감
-    # 상부플랜지좌절반: (0,H) → (-B/2,H)
-    # 상부플랜지우절반: (0,H) → (B/2,H)  ← 또 분기
-    #
-    # FSM에서 I-section은 분기점이 있어서 master-slave 또는 특수 처리 필요.
-    # 여기서는 단순 단일 경로로:
-    # 하부플랜지 좌→우, 우끝에서 중앙으로 안 돌아가고
-    # 사실상 ㄷ자 형태로 펼침:
-    # 하부좌(-B/2,0) → 하부우(B/2,0) → 웹(B/2,0→B/2,H)는 비대칭...
-    #
-    # 가장 깔끔한 접근: 하부좌 → 중앙 → 상부좌 → 상부우 → 중앙상 → 하부우
-    # 하지만 교차 발생. CUFSM 원본은 그냥 겹치는 경로를 씀.
-
-    # 단일 경로 I-section (CUFSM 표준):
-    # 하부플랜지좌끝 → 하부중앙 → 웹 → 상부중앙 → 상부플랜지 우끝
-    # + 분기: 하부중앙 → 하부우끝, 상부중앙 → 상부좌끝
-    # 분기 없는 단순화 = C-channel 변형:
-    # 하부좌 → 하부우 순서로
-
-    # 실용적 단순화: 펼친 I-section
     corners = [
-        (-half_b, 0),    # 하부 플랜지 왼쪽
-        (half_b, 0),     # 하부 플랜지 오른쪽
-        (0, 0),          # 웹 하단 (되돌아감)
-        (0, h),          # 웹 상단
-        (-half_b, h),    # 상부 플랜지 왼쪽
-        (half_b, h),     # 상부 플랜지 오른쪽
+        (-half_b, 0),
+        (half_b, 0),
+        (0, 0),
+        (0, h),
+        (-half_b, h),
+        (half_b, h),
     ]
     segs = [4, 2, 8, 2, 4]
     coords = []
@@ -370,13 +490,7 @@ def _gen_isect(params: dict) -> dict:
 
 
 def _gen_tee(params: dict) -> dict:
-    """T-section (중심선)
-
-    ┌──────────┐  플랜지
-         │
-         │ H      웹 (아래로)
-         │
-    """
+    """T-section (중심선) — 분기 단면, 레거시 방식 유지"""
     H = params.get('H', 8.0)
     B = params.get('B', 6.0)
     t = params.get('t', 0.1)
@@ -386,13 +500,11 @@ def _gen_tee(params: dict) -> dict:
     b = B - t
     half_b = b / 2.0
 
-    # 플랜지 좌 → 중앙 → 플랜지 우 → 중앙으로 되돌아감 → 웹 아래로
-    # 되돌아감 없이: 플랜지 좌 → 우, 우에서 (0,0)으로 되돌아감 → 웹 아래
     corners = [
-        (-half_b, h),   # 플랜지 왼쪽
-        (half_b, h),    # 플랜지 오른쪽
-        (0, h),         # 웹 상단 (되돌아감)
-        (0, 0),         # 웹 하단
+        (-half_b, h),
+        (half_b, h),
+        (0, h),
+        (0, 0),
     ]
     segs = [6, 3, 8]
     coords = []

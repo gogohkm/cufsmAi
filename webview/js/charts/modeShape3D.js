@@ -51,24 +51,37 @@ function renderModeShape3D(canvas, nodes, elems, modeVec, length, BC) {
     const zRange = Math.max(...zs) - Math.min(...zs) || 1;
     const sectionSize = Math.max(xRange, zRange);
 
+    // 반파장이 단면보다 짧으면 반파 수를 늘려서 부재를 충분히 길게 표시
+    const minDisplayLength = sectionSize * 2;
+    const nHalfWaves = Math.max(1, Math.ceil(minDisplayLength / length));
+    const displayLength = length * nHalfWaves;
+
     // 등각투영 변환 파라미터
     const isoAngle = Math.PI / 6; // 30도
     const cosA = Math.cos(isoAngle);
     const sinA = Math.sin(isoAngle);
 
-    // 스케일 계산
-    const totalSpan = sectionSize + length * sinA;
-    const scale = (Math.min(w, h) - 80) / totalSpan;
+    // 스케일 계산 — 모든 축을 동일 스케일로 렌더링
+    const isoW = sectionSize * 2 * cosA;
+    const isoH = sectionSize * 2 * sinA + displayLength;
+    const margin = 80;
+    const scale = Math.min((w - margin) / isoW, (h - margin) / isoH);
     const cx = w / 2;
-    const cy = h / 2 + length * sinA * scale * 0.2;
+    const cy = h / 2 + displayLength * scale * 0.3;
 
-    // 경계조건에 따른 형상함수
+    // 경계조건에 따른 형상함수 (다중 반파 지원)
     function shapeFunc(y) {
-        const ya = y / length;
-        if (BC === 'S-S') { return Math.sin(Math.PI * ya); }
-        if (BC === 'C-C') { return Math.sin(Math.PI * ya) * Math.sin(Math.PI * ya); }
-        if (BC === 'C-F') { return 1 - Math.cos(Math.PI * ya / 2); }
-        return Math.sin(Math.PI * ya);
+        // y는 0 ~ displayLength 범위, 각 반파장 내 위치로 변환
+        const yLocal = y % length;
+        const halfIdx = Math.floor(y / length);
+        const sign = (halfIdx % 2 === 0) ? 1 : -1; // 반파마다 부호 교번
+        const ya = yLocal / length;
+        let val;
+        if (BC === 'S-S') { val = Math.sin(Math.PI * ya); }
+        else if (BC === 'C-C') { val = Math.sin(Math.PI * ya) * Math.sin(Math.PI * ya); }
+        else if (BC === 'C-F') { val = 1 - Math.cos(Math.PI * ya / 2); }
+        else { val = Math.sin(Math.PI * ya); }
+        return sign * val;
     }
 
     // 2D → isometric 변환
@@ -78,8 +91,8 @@ function renderModeShape3D(canvas, nodes, elems, modeVec, length, BC) {
         return [ix, iy];
     }
 
-    // 종방향 스텝
-    const nSteps = 16;
+    // 종방향 스텝 — 반파당 최소 4개 샘플 보장 (앨리어싱 방지)
+    const nSteps = Math.max(20, nHalfWaves * 4);
     const style = getComputedStyle(document.body);
     const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
 
@@ -103,7 +116,7 @@ function renderModeShape3D(canvas, nodes, elems, modeVec, length, BC) {
 
     // === 미변형 단면 (뒤쪽 → 앞쪽 순서로 그려서 깊이감 표현) ===
     for (let s = 0; s <= nSteps; s++) {
-        const y = (s / nSteps) * length;
+        const y = (s / nSteps) * displayLength;
         const Ym = shapeFunc(y);
         const alpha = s / nSteps; // 깊이 기반 투명도
 
@@ -157,7 +170,7 @@ function renderModeShape3D(canvas, nodes, elems, modeVec, length, BC) {
     for (let n = 0; n < nnodes; n++) {
         ctx.beginPath();
         for (let s = 0; s <= nSteps; s++) {
-            const y = (s / nSteps) * length;
+            const y = (s / nSteps) * displayLength;
             const Ym = shapeFunc(y);
             const dx = uDisp[n] * Ym;
             const dz = wDisp[n] * Ym;
@@ -171,7 +184,10 @@ function renderModeShape3D(canvas, nodes, elems, modeVec, length, BC) {
     ctx.fillStyle = fg;
     ctx.font = '11px sans-serif';
     ctx.globalAlpha = 0.7;
-    ctx.fillText(`L = ${length.toFixed(1)}  |  BC: ${BC}`, 10, h - 10);
+    const labelText = nHalfWaves > 1
+        ? `L = ${length.toFixed(1)} x ${nHalfWaves} half-waves  |  BC: ${BC}`
+        : `L = ${length.toFixed(1)}  |  BC: ${BC}`;
+    ctx.fillText(labelText, 10, h - 10);
     ctx.globalAlpha = 1.0;
 }
 

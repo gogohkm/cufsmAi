@@ -15,15 +15,17 @@
       f. 결과 정리
 """
 
+import math
+
 import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import eigsh
 
 from .element import klocal, kglocal, spring_klocal
-from .transform import trans
+from .transform import trans, spring_trans
 from .assembly import assemble, spring_assemble
 from .properties import elemprop
-from models.data import CufsmResult
+from models.data import CufsmResult, GBTConfig
 
 
 def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
@@ -90,9 +92,9 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             b = elprop[e, 1]
             alpha = elprop[e, 2]
 
-            # 절점 응력 (MATLAB 1-based → Python 0-based)
-            Ty1 = node[ni - 1, 7]
-            Ty2 = node[nj - 1, 7]
+            # 절점 응력 × 두께 = 응력 결과력 (MATLAB: node(nodei,8)*t)
+            Ty1 = node[ni - 1, 7] * t
+            Ty2 = node[nj - 1, 7] * t
 
             # 로컬 요소 행렬
             k_local = klocal(Ex, Ey, vx, vy, G, t, a, b, BC, m_a)
@@ -117,39 +119,114 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
                 discrete = int(springs[s, 8])
                 ys = springs[s, 9] if discrete else 0.0
 
-                ks = spring_klocal(ku, kv, kw, kq, a, BC, m_a,
-                                   bool(discrete), ys)
+                ks_l = spring_klocal(ku, kv, kw, kq, a, BC, m_a,
+                                     bool(discrete), ys)
+
+                # 스프링 좌표변환 (stripmain.m line 226-259)
+                if snj == 0:
+                    # 접지 스프링 — 글로벌 좌표계
+                    sp_alpha = 0.0
+                else:
+                    xi = node[sni - 1, 1]
+                    zi = node[sni - 1, 2]
+                    xj = node[snj - 1, 1]
+                    zj = node[snj - 1, 2]
+                    dx = xj - xi
+                    dz = zj - zi
+                    width = math.sqrt(dx * dx + dz * dz)
+                    if width < 1e-10 or int(springs[s, 7]) == 0:
+                        sp_alpha = 0.0
+                    else:
+                        sp_alpha = math.atan2(dz, dx)
+
+                ks = spring_trans(sp_alpha, ks_l, m_a)
                 K = spring_assemble(K, ks, sni, snj, nnodes, m_a)
 
-        # === DOF 구속 적용 (고정 DOF 제거) ===
-        # node 열 3~6: dofx, dofz, dofy, dofrot (1=자유, 0=고정)
-        # 자유 DOF만 남김
-        free_dofs = _get_free_dofs(node, nnodes, totalm)
+        # === DOF 구속 및 제약 행렬 적용 ===
+        # (1) BCFlag 판별: 사용자 구속 또는 절점 고정이 있는지 확인
+        #     (stripmain.m line 84: constr_BCFlag)
+        BCFlag = _constr_BCFlag(node, constraints)
 
-        K_csr = K.tocsr()
-        Kg_csr = Kg.tocsr()
+        # (2) cFSM 모드 분류 활성화 여부
+        cFSM_analysis = (isinstance(GBTcon, GBTConfig) and GBTcon.is_active())
 
-        # 자유 DOF만 추출
-        Kff = K_csr[free_dofs, :][:, free_dofs]
-        Kgff = Kg_csr[free_dofs, :][:, free_dofs]
+        K_dense = K.toarray()
+        Kg_dense = Kg.toarray()
+
+        if BCFlag == 0 and not cFSM_analysis:
+            # 단순 케이스: 고정 DOF만 제거 (기존 방식)
+            free_dofs = _get_free_dofs(node, nnodes, totalm)
+            Kff = K_dense[np.ix_(free_dofs, free_dofs)]
+            Kgff = Kg_dense[np.ix_(free_dofs, free_dofs)]
+            R = None  # 제약 행렬 없음
+        else:
+            # 제약 행렬 R 접근 (stripmain.m line 265-315)
+            from cfsm.constraints import constr_user
+
+            # Ruser 생성 및 null space
+            if BCFlag != 0:
+                Ruser = constr_user(node, constraints, m_a)
+                Ru0 = _null_space(Ruser.T)
+            else:
+                Ru0 = np.zeros((ndof, 0))
+
+            # cFSM 모드 제약 (stripmain.m line 282-294)
+            if cFSM_analysis:
+                from cfsm.base_vectors import base_column, base_update, mode_select
+                b_v_l, ngm, ndm, nlm = base_column(node, elem, prop, a, BC, m_a)
+                b_v = base_update(
+                    GBTcon.ospace, 0, b_v_l, a, m_a, node, elem, prop,
+                    ngm, ndm, nlm, BC, GBTcon.couple, GBTcon.orth
+                )
+                b_v = mode_select(
+                    b_v, ngm, ndm, nlm,
+                    GBTcon.glob, GBTcon.dist, GBTcon.local, GBTcon.other,
+                    4 * nnodes, m_a
+                )
+                Rmode = b_v
+            else:
+                Rmode = np.eye(ndof)
+
+            # 최종 제약 행렬 R 생성 (stripmain.m line 296-315)
+            if BCFlag == 0:
+                R = Rmode
+            else:
+                if cFSM_analysis:
+                    Rm0 = _null_space(Rmode.T)
+                    nm0 = Rm0.shape[1]
+                    nu0 = Ru0.shape[1]
+                    if nm0 > 0 or nu0 > 0:
+                        R0_parts = []
+                        if nm0 > 0:
+                            R0_parts.append(Rm0)
+                        if nu0 > 0:
+                            R0_parts.append(Ru0)
+                        R0 = np.hstack(R0_parts)
+                        R = _null_space(R0.T)
+                    else:
+                        R = np.eye(ndof)
+                else:
+                    R = _null_space(Ru0.T)
+
+            # R'*K*R, R'*Kg*R (stripmain.m line 318-319)
+            Kff = R.T @ K_dense @ R
+            Kgff = R.T @ Kg_dense @ R
 
         # === 고유치 풀이 ===
-        n_free = len(free_dofs)
-        n_eigs = min(2 * neigs, n_free - 1)
-        if n_eigs <= 0:
+        n_free = Kff.shape[0]
+        n_eigs = max(min(2 * neigs, n_free), 1)
+        if n_free <= 0:
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
             continue
 
         # Kg 대칭화
         Kgff_sym = (Kgff + Kgff.T) / 2.0
-        Kff_dense = Kff.toarray()
-        Kgff_dense = Kgff_sym.toarray()
 
         try:
             # 일반화 고유치 문제: K*x = lambda*Kg*x
             eigenvalues, eigenvectors = _solve_eigenproblem(
-                Kff_dense, Kgff_dense, n_eigs)
+                Kff, Kgff_sym, n_eigs)
         except Exception:
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
@@ -170,16 +247,23 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         lf = lf[sort_idx[:neigs]]
         modes_valid = modes_valid[:, sort_idx[:neigs]]
 
-        # 모드형상을 전체 DOF로 복원
+        # 모드형상을 전체 DOF로 복원 (stripmain.m line 381: mode = R*modes)
         n_modes = len(lf)
+        if R is not None:
+            full_modes_raw = R @ modes_valid
+        else:
+            # R == None: free_dofs 방식
+            full_modes_raw = np.zeros((ndof, n_modes))
+            full_modes_raw[free_dofs, :] = modes_valid
+
+        # 정규화: 최대 절대값을 1.0으로
         full_modes = np.zeros((ndof, n_modes))
         for m_idx in range(n_modes):
-            mode_vec = modes_valid[:, m_idx]
-            # 최대값으로 정규화
+            mode_vec = full_modes_raw[:, m_idx]
             max_val = np.max(np.abs(mode_vec))
             if max_val > 0:
                 mode_vec = mode_vec / max_val
-            full_modes[free_dofs, m_idx] = mode_vec
+            full_modes[:, m_idx] = mode_vec
 
         # 곡선 데이터: [길이, 하중비1, 하중비2, ...]
         curve_row = np.zeros(n_modes + 1)
@@ -236,3 +320,35 @@ def _solve_eigenproblem(K: np.ndarray, Kg: np.ndarray,
     eigenvalues, eigenvectors = eig(K, Kg)
 
     return eigenvalues, eigenvectors
+
+
+def _constr_BCFlag(node: np.ndarray, constraints: np.ndarray) -> int:
+    """사용자 구속 또는 절점 고정 여부 판별
+
+    원본: Ref_Source/analysis/constr_BCFlag.m
+
+    Returns:
+        1 if there are user constraints or node fixities, 0 otherwise
+    """
+    nnodes = node.shape[0]
+    for i in range(nnodes):
+        for j in range(3, 7):  # dofx, dofz, dofy, dofrot
+            if node[i, j] == 0:
+                return 1
+    # Check user constraints
+    if constraints is None or constraints.size == 0:
+        return 0
+    if constraints.ndim == 1 and np.all(constraints == 0):
+        return 0
+    return 1
+
+
+def _null_space(A: np.ndarray) -> np.ndarray:
+    """행렬 A의 영공간 (null space) 계산
+
+    scipy.linalg.null_space 래퍼
+    """
+    from scipy.linalg import null_space
+    if A.size == 0:
+        return np.eye(A.shape[1]) if A.ndim == 2 and A.shape[1] > 0 else np.zeros((0, 0))
+    return null_space(A)

@@ -127,7 +127,7 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             vx = prop[mat_idx, 3]
             vy = prop[mat_idx, 4]
             G = prop[mat_idx, 5]
-            rho = prop[mat_idx, 6] if prop.shape[1] > 6 else 1.0
+            rho = prop[mat_idx, 6] if prop.shape[1] > 6 else 1.0  # density defaults to 1.0 if not provided in prop
 
             b = elprop_arr[e, 1]
             alpha = elprop_arr[e, 2]

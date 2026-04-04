@@ -161,8 +161,8 @@ def _classify_fcfsm(modes: np.ndarray, sec_data: dict,
                 cl_d += np.sum(np.abs(coeffs[ngm:ngm+ndm])**2)
                 cl_l += np.sum(np.abs(coeffs[ngm+ndm:ngm+ndm+nlm])**2)
                 cl_o += np.sum(np.abs(coeffs[ngm+ndm+nlm:])**2)
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # classification coefficient solve failed
 
         total = cl_g + cl_d + cl_l + cl_o
         if total > 1e-15:

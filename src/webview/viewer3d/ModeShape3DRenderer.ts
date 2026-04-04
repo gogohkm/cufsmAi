@@ -64,7 +64,7 @@ export class ModeShape3DRenderer {
 
         this._scene = new Scene(this._engine);
         this._scene.useRightHandedSystem = true;
-        this._scene.clearColor = new Color4(0.12, 0.12, 0.12, 1);
+        this._scene.clearColor = new Color4(0.95, 0.95, 0.95, 1); // 흰색 배경
 
         // 카메라
         this._camera = new FreeCamera("cam", new Vector3(0, 0, 0), this._scene);
@@ -72,9 +72,15 @@ export class ModeShape3DRenderer {
         this._camera.maxZ = 10000;
         this._camera.detachControl();
 
-        // 조명
-        const light = new HemisphericLight("light", new Vector3(0, 1, 0.5), this._scene);
-        light.intensity = 0.9;
+        // 조명 — 금속 질감을 위한 2광원
+        const light1 = new HemisphericLight("light1", new Vector3(0.3, 1, 0.5), this._scene);
+        light1.intensity = 0.85;
+        light1.diffuse = new Color3(1, 0.98, 0.95);
+        light1.groundColor = new Color3(0.3, 0.35, 0.4); // 바닥 반사 (그림자 효과)
+
+        const light2 = new HemisphericLight("light2", new Vector3(-0.5, -0.3, -1), this._scene);
+        light2.intensity = 0.3;
+        light2.diffuse = new Color3(0.7, 0.8, 1.0); // 파란 보조광
 
         // 마우스 인터랙션
         this._setupMouseControls();
@@ -100,7 +106,6 @@ export class ModeShape3DRenderer {
         const dispScale = data.scale || 0.3;
         const nnodes = nodes.length;
         const skip = 2 * nnodes;
-        const nSteps = 20;
 
         // 단면 크기 계산
         const xs = nodes.map(n => n[1]);
@@ -112,7 +117,17 @@ export class ModeShape3DRenderer {
             Math.max(...zs) - Math.min(...zs)
         ) || 1;
 
-        this._distance = Math.max(sectionSize * 2, length * 0.8);
+        // 반파장이 단면보다 짧으면 반파 수를 늘려서 부재를 충분히 길게 표시
+        const minDisplayLength = sectionSize * 2;
+        const nHalfWaves = Math.max(1, Math.ceil(minDisplayLength / length));
+        const displayLength = length * nHalfWaves;
+
+        // 반파당 최소 4개 샘플 보장 (앨리어싱 방지)
+        const nSteps = Math.max(20, nHalfWaves * 4);
+
+        // 카메라 거리: 실제 치수 기반
+        const diagonal = Math.sqrt(sectionSize * sectionSize + displayLength * displayLength);
+        this._distance = diagonal * 1.2;
 
         // 변위 추출
         const uDisp: number[] = [];
@@ -132,13 +147,18 @@ export class ModeShape3DRenderer {
             }
         }
 
-        // 형상함수
+        // 형상함수 (다중 반파 지원)
         const shapeFunc = (y: number): number => {
-            const ya = y / length;
-            if (BC === 'C-C') { return Math.sin(Math.PI * ya) ** 2; }
-            if (BC === 'C-F') { return 1 - Math.cos(Math.PI * ya / 2); }
-            if (BC === 'S-C') { return Math.sin(Math.PI * ya) + ya * Math.sin(2 * Math.PI * ya) / (1 + ya); }
-            return Math.sin(Math.PI * ya); // S-S default
+            const yLocal = y % length;
+            const halfIdx = Math.floor(y / length);
+            const sign = (halfIdx % 2 === 0) ? 1 : -1;
+            const ya = yLocal / length;
+            let val: number;
+            if (BC === 'C-C') { val = Math.sin(Math.PI * ya) ** 2; }
+            else if (BC === 'C-F') { val = 1 - Math.cos(Math.PI * ya / 2); }
+            else if (BC === 'S-C') { val = Math.sin(Math.PI * ya) + ya * Math.sin(2 * Math.PI * ya) / (1 + ya); }
+            else { val = Math.sin(Math.PI * ya); }
+            return sign * val;
         };
 
         // === 변형 메시 (면) ===
@@ -155,7 +175,7 @@ export class ModeShape3DRenderer {
             const baseIdx = positions.length / 3;
 
             for (let s = 0; s <= nSteps; s++) {
-                const y = (s / nSteps) * length;
+                const y = (s / nSteps) * displayLength;
                 const Ym = shapeFunc(y);
 
                 // 절점 i
@@ -163,7 +183,7 @@ export class ModeShape3DRenderer {
                 const dzi = wDisp[ni] * Ym;
                 positions.push(
                     xs[ni] + dxi - xMid,
-                    y - length / 2,
+                    y - displayLength / 2,
                     zs[ni] + dzi - zMid
                 );
 
@@ -172,15 +192,16 @@ export class ModeShape3DRenderer {
                 const dzj = wDisp[nj] * Ym;
                 positions.push(
                     xs[nj] + dxj - xMid,
-                    y - length / 2,
+                    y - displayLength / 2,
                     zs[nj] + dzj - zMid
                 );
 
-                // 색상: 변위 크기 → 파랑(0)→빨강(1)
+                // 색상: 변위 크기 → 은색(0) → 구리/금색(1) 금속 계열
                 const magI = Math.sqrt(dxi * dxi + dzi * dzi) / maxDisp;
                 const magJ = Math.sqrt(dxj * dxj + dzj * dzj) / maxDisp;
-                colors.push(magI, 0.3 * (1 - magI), 1 - magI, 1);
-                colors.push(magJ, 0.3 * (1 - magJ), 1 - magJ, 1);
+                // 은색(0.75,0.75,0.78) → 구리색(0.85,0.55,0.25)
+                colors.push(0.75 + magI * 0.10, 0.75 - magI * 0.20, 0.78 - magI * 0.53, 1);
+                colors.push(0.75 + magJ * 0.10, 0.75 - magJ * 0.20, 0.78 - magJ * 0.53, 1);
             }
 
             // 삼각형 인덱스
@@ -204,27 +225,29 @@ export class ModeShape3DRenderer {
 
         const mat = new StandardMaterial("mat", this._scene!);
         mat.backFaceCulling = false;
-        mat.emissiveColor = new Color3(0.4, 0.4, 0.4);
-        mat.alpha = 0.85;
+        mat.diffuseColor = new Color3(0.8, 0.8, 0.82);  // 밝은 금속
+        mat.specularColor = new Color3(0.5, 0.5, 0.5);   // 광택 반사
+        mat.specularPower = 32;
+        mat.emissiveColor = new Color3(0.15, 0.15, 0.15);
         mesh.material = mat;
-        mesh.hasVertexAlpha = true;
+        mesh.hasVertexAlpha = false;
         this._mesh = mesh;
 
         // === 미변형 와이어프레임 ===
         for (const [ni, nj] of elemPairs) {
             const linePoints: Vector3[] = [];
             for (let s = 0; s <= nSteps; s++) {
-                const y = (s / nSteps) * length;
+                const y = (s / nSteps) * displayLength;
                 linePoints.push(new Vector3(
                     (xs[ni] + xs[nj]) / 2 - xMid,
-                    y - length / 2,
+                    y - displayLength / 2,
                     (zs[ni] + zs[nj]) / 2 - zMid
                 ));
             }
         }
 
         // 단면 윤곽선 (시작/끝)
-        for (const yPos of [0, length]) {
+        for (const yPos of [0, displayLength]) {
             const Ym = shapeFunc(yPos);
             const points: Vector3[] = [];
             // 절점 순서대로 연결
@@ -243,7 +266,7 @@ export class ModeShape3DRenderer {
                     { points },
                     this._scene!
                 );
-                lines.color = new Color3(0.3, 0.8, 1.0);
+                lines.color = new Color3(0.2, 0.2, 0.25);
                 this._wireframes.push(lines);
             }
         }

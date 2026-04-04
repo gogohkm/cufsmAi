@@ -88,6 +88,14 @@ server.tool("get_status", "Get current section and analysis status", {},
     }
 );
 
+server.tool("get_full_state", "Get complete model state: section dimensions, material, stress, BC, lengths, analysis results summary, and minima",
+    {},
+    async () => {
+        const r = await callBridgePost('/action', { action: 'get_full_state' });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
 server.tool("get_section_properties", "Get cross-section properties (A, Ixx, Izz, J, Cw, etc.)", {},
     async () => {
         const r = await callBridgePost('/action', { action: 'get_properties' });
@@ -149,7 +157,24 @@ server.tool("set_material", "Set material properties",
     }
 );
 
-server.tool("set_stress", "Set nodal stress distribution",
+server.tool("set_load_case", "Set load case and automatically apply stress distribution before analysis",
+    {
+        load_case: z.enum(['compression', 'bending_xx', 'bending_zz', 'custom'])
+            .describe("compression=uniform axial, bending_xx=strong-axis bending, bending_zz=weak-axis bending, custom=P+Mxx+Mzz combination"),
+        fy: z.number().optional().describe("Yield stress (default 50)"),
+        P: z.number().optional().describe("Axial force for custom (kips)"),
+        Mxx: z.number().optional().describe("Strong-axis moment for custom (kip-in)"),
+        Mzz: z.number().optional().describe("Weak-axis moment for custom (kip-in)"),
+    },
+    async ({ load_case, fy, P, Mxx, Mzz }) => {
+        const r = await callBridgePost('/action', {
+            action: 'set_load_case', load_case, fy: fy || 50, P: P || 0, Mxx: Mxx || 0, Mzz: Mzz || 0
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("set_stress", "Set nodal stress distribution (low-level, prefer set_load_case)",
     {
         type: z.enum(['uniform_compression', 'pure_bending', 'custom']).describe("Stress type"),
         fy: z.number().optional().describe("Yield stress for reference (default 50)"),
@@ -220,7 +245,7 @@ server.tool("classify_modes", "Classify buckling modes into G/D/L/O using cFSM",
 );
 
 // ============================================================
-// 4. NODE/ELEMENT EDITING (4 tools)
+// 4. NODE/ELEMENT EDITING (11 tools)
 // ============================================================
 server.tool("get_nodes", "Get all node coordinates and stresses", {},
     async () => {
@@ -245,6 +270,104 @@ server.tool("set_node_stress", "Set stress value for specific nodes",
         const r = await callBridgePost('/action', {
             action: 'set_node_stress', node_ids, stress
         });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("set_nodes", "Replace entire node array. Each row: [node#, x, z, dofx, dofz, dofy, dofrot, stress]",
+    {
+        nodes: z.array(z.array(z.number())).describe("Full node array (1-based node#, 8 columns)"),
+    },
+    async ({ nodes }) => {
+        const r = await callBridgePost('/action', { action: 'set_nodes', nodes });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("set_elements", "Replace entire element array. Each row: [elem#, nodei, nodej, thickness, matnum]",
+    {
+        elements: z.array(z.array(z.number())).describe("Full element array (1-based, 5 columns)"),
+    },
+    async ({ elements }) => {
+        const r = await callBridgePost('/action', { action: 'set_elements', elements });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("add_node", "Add a single node to the model",
+    {
+        x: z.number().describe("X coordinate"),
+        z: z.number().describe("Z coordinate"),
+        stress: z.number().optional().describe("Stress value (default 0)"),
+    },
+    async ({ x, z: zc, stress }) => {
+        const r = await callBridgePost('/action', {
+            action: 'add_node', x, z: zc, stress: stress ?? 0
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("add_element", "Add a single element connecting two nodes",
+    {
+        nodei: z.number().describe("Start node ID (1-based)"),
+        nodej: z.number().describe("End node ID (1-based)"),
+        thickness: z.number().describe("Element thickness"),
+    },
+    async ({ nodei, nodej, thickness }) => {
+        const r = await callBridgePost('/action', {
+            action: 'add_element', nodei, nodej, thickness
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("modify_node", "Modify coordinates and/or stress of an existing node",
+    {
+        node_id: z.number().describe("Node ID (1-based)"),
+        x: z.number().optional().describe("New X coordinate"),
+        z: z.number().optional().describe("New Z coordinate"),
+        stress: z.number().optional().describe("New stress value"),
+    },
+    async ({ node_id, x, z: zc, stress }) => {
+        const r = await callBridgePost('/action', {
+            action: 'modify_node', node_id, x, z: zc, stress
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("delete_node", "Delete a node and its connected elements",
+    {
+        node_id: z.number().describe("Node ID to delete (1-based)"),
+    },
+    async ({ node_id }) => {
+        const r = await callBridgePost('/action', { action: 'delete_node', node_id });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("modify_element", "Modify thickness or connectivity of an existing element",
+    {
+        elem_id: z.number().describe("Element ID (1-based)"),
+        thickness: z.number().optional().describe("New thickness"),
+        nodei: z.number().optional().describe("New start node ID"),
+        nodej: z.number().optional().describe("New end node ID"),
+    },
+    async ({ elem_id, thickness, nodei, nodej }) => {
+        const r = await callBridgePost('/action', {
+            action: 'modify_element', elem_id, thickness, nodei, nodej
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("delete_element", "Delete an element",
+    {
+        elem_id: z.number().describe("Element ID to delete (1-based)"),
+    },
+    async ({ elem_id }) => {
+        const r = await callBridgePost('/action', { action: 'delete_element', elem_id });
         return textResult(JSON.stringify(r, null, 2));
     }
 );
@@ -287,6 +410,61 @@ server.tool("save_project", "Save current model to .cufsm JSON file",
     async ({ filepath }) => {
         const r = await callBridgePost('/action', { action: 'save_project', filepath });
         return textResult(`Project saved to ${filepath}`);
+    }
+);
+
+// ============================================================
+// 6. CONSTRAINTS & SPRINGS (3 tools)
+// ============================================================
+server.tool("set_springs", "Add spring restraints to model",
+    {
+        springs: z.array(z.array(z.number())).describe(
+            "Spring data rows: [[spring#, nodei, nodej, ku, kv, kw, kq, orient_flag, discrete, ys], ...]"
+        ),
+    },
+    async ({ springs }) => {
+        const r = await callBridgePost('/action', { action: 'set_springs', springs });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("set_constraints", "Set master-slave DOF constraints",
+    {
+        constraints: z.array(z.array(z.number())).describe(
+            "Constraint rows: [[node_e, dof_e, coeff, node_k, dof_k], ...] where dof: 1=x,2=z,3=y,4=theta"
+        ),
+    },
+    async ({ constraints }) => {
+        const r = await callBridgePost('/action', { action: 'set_constraints', constraints });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("set_gbtcon", "Set cFSM/GBT classification options",
+    {
+        ospace: z.number().optional().describe("O-space: 1=ST basis, 2=K null, 3=Kg null, 4=vector null (default 1)"),
+        norm: z.number().optional().describe("Normalization: 0=none, 1=vector, 2=strain energy, 3=work (default 0)"),
+        couple: z.number().optional().describe("Coupling: 1=uncoupled (block diagonal), 2=coupled (default 1)"),
+        orth: z.number().optional().describe("Orthogonalization: 1=natural, 2=modal axial, 3=modal load-dependent (default 1)"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', { action: 'set_gbtcon', ...params });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("get_energy_recovery", "Calculate element-wise strain energy (membrane vs bending) for a buckling mode",
+    {
+        length_index: z.number().optional().describe("Index of half-wavelength in analysis results (default 0)"),
+        mode_index: z.number().optional().describe("Index of buckling mode (default 0, first mode)"),
+    },
+    async ({ length_index, mode_index }) => {
+        const r = await callBridgePost('/action', {
+            action: 'energy_recovery',
+            length_index: length_index ?? 0,
+            mode_index: mode_index ?? 0,
+        });
+        return textResult(JSON.stringify(r, null, 2));
     }
 );
 

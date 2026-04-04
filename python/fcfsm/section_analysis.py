@@ -9,8 +9,8 @@ import math
 
 import numpy as np
 
-from cfsm.node_utils import node_class, mode_nr
-from cfsm.base_vectors import _create_base_vectors_simple
+from cfsm.node_utils import meta_elems, base_properties
+from cfsm.base_vectors import base_column
 from engine.properties import elemprop
 
 
@@ -33,36 +33,35 @@ def section_analysis_fcfsm(node: np.ndarray, elem: np.ndarray,
     nnodes = node.shape[0]
     nelems = elem.shape[0]
 
-    # 절점 분류
-    nmno, ncno, nsno, node_prop = node_class(node, elem)
-    ngm, ndm, nlm = mode_nr(nmno, ncno, nsno)
+    # 절점 분류 — base_properties로 모든 데이터 한번에 획득
+    (elprop_arr, m_node, m_elem, node_prop,
+     nmno, ncno, nsno, ndm, nlm, DOFperm) = base_properties(node, elem)
 
     # 요소 분류: 평판 vs 곡선
-    elprop_arr = elemprop(node, elem)
     flat_elems = []
     curved_elems = []
 
     for e in range(nelems):
         ni = int(elem[e, 1]) - 1
         nj = int(elem[e, 2]) - 1
-        # 이웃 요소와의 각도 차이로 곡선 판별
         is_curved = _is_curved_element(e, ni, nj, elem, node)
         if is_curved:
             curved_elems.append(e)
         else:
             flat_elems.append(e)
 
-    # 기저벡터 생성 (단일 m=1 기준)
-    basis = _create_base_vectors_simple(
-        node, elem, elprop_arr, nnodes, nmno, ncno, nsno,
-        ngm, ndm, nlm, 1.0, 100.0, 'S-S'
-    )
+    # 기저벡터 생성 — base_column 사용
+    m_a = np.array([1.0])
+    a = 100.0
+    BC = 'S-S'
+    b_v_l, ngm, ndm_out, nlm_out = base_column(node, elem, prop, a, BC, m_a)
+    basis = b_v_l
 
     return {
         'basis': basis,
         'ngm': ngm,
-        'ndm': ndm,
-        'nlm': nlm,
+        'ndm': ndm_out,
+        'nlm': nlm_out,
         'flat_elems': flat_elems,
         'curved_elems': curved_elems,
     }
