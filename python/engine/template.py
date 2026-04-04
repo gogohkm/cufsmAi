@@ -24,6 +24,7 @@ def generate_section(section_type: str, params: dict) -> dict:
         'lippedc': _gen_lipped_c,
         'lippedz': _gen_lipped_z,
         'hat': _gen_hat,
+        'track': _gen_track,
         'rhs': _gen_rhs,
         'chs': _gen_chs,
         'angle': _gen_angle,
@@ -277,6 +278,41 @@ def _close(p1, p2, tol=1e-6):
 # ============================================================
 # 단면 생성기 (snakey 기반)
 # ============================================================
+
+def _gen_track(params: dict) -> dict:
+    """Track / Unlipped C-channel (out-to-out)
+
+    립이 없는 트랙 단면. 3개 세그먼트: 플랜지-웹-플랜지
+    플랜지 끝이 자유단이므로 b = B - t/2 (웹쪽 코너만 차감)
+
+    strips.l= [b  h  b]
+    strips.q= [180 90 0] (degrees)
+    """
+    H = params.get('H', 6.0)
+    B = params.get('B', 2.0)
+    t = params.get('t', 0.1)
+    rin = params.get('r', 0.0)
+    nseg = max(1, params.get('nseg', 1))
+
+    h = H - t
+    b = B - t / 2.0  # 플랜지: 웹쪽 코너만 차감, 끝은 자유단
+    r = (rin + t / 2.0) if rin > 0 else 0.0
+
+    lengths = [b, h, b]
+    angles = [180, 90, 0]
+    angles = [a * PI / 180 for a in angles]
+    n_strips = [4 * nseg, 8 * nseg, 4 * nseg]
+    thicknesses = [t] * 3
+    mat_ids = [100] * 3
+
+    radii = [r, r] if r > 0 else []
+    rn = [4, 4] if r > 0 else []
+    rt = [t, t] if r > 0 else []
+    rid = [100, 100] if r > 0 else []
+
+    return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
+                   radii=radii, rn=rn, rt=rt, rid=rid)
+
 
 def _gen_lipped_c(params: dict) -> dict:
     """Lipped C-channel (out-to-out) — MATLAB template_build_model.m 'lippedc' 포팅

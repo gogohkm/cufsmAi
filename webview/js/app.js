@@ -225,6 +225,64 @@
         svg.innerHTML = content;
     }
 
+    /** Cross Section Preview에 도심 좌표축 + 주축 표시 */
+    function renderSectionAxes(props) {
+        const svg = document.getElementById('section-svg');
+        if (!svg || !props || !model || !model.node || model.node.length === 0) { return; }
+
+        const xcg = props.xcg;
+        const zcg = props.zcg;
+        const thetap = (props.thetap || 0) * Math.PI / 180;
+
+        // 축 길이 = 단면 크기의 40%
+        let xMin = Infinity, xMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+        model.node.forEach(n => {
+            xMin = Math.min(xMin, n[1]); xMax = Math.max(xMax, n[1]);
+            zMin = Math.min(zMin, n[2]); zMax = Math.max(zMax, n[2]);
+        });
+        const axLen = Math.max(xMax - xMin, zMax - zMin) * 0.35;
+        const arrSz = axLen * 0.08; // 화살표 크기
+        const fs = axLen * 0.12; // 폰트 크기
+
+        let axes = '';
+
+        // --- 기하축 (x, z) 점선 ---
+        // x축 (가로)
+        const x1 = xcg - axLen; const x2 = xcg + axLen;
+        axes += '<line x1="' + x1 + '" y1="' + zcg + '" x2="' + x2 + '" y2="' + zcg + '" stroke="#4fc3f7" stroke-width="0.06" stroke-dasharray="0.15,0.1" opacity="0.7"/>';
+        // x축 화살표
+        axes += '<polygon points="' + x2 + ',' + zcg + ' ' + (x2-arrSz) + ',' + (zcg-arrSz/2) + ' ' + (x2-arrSz) + ',' + (zcg+arrSz/2) + '" fill="#4fc3f7" opacity="0.7"/>';
+        axes += '<text x="' + (x2+fs*0.3) + '" y="' + (zcg+fs*0.3) + '" font-size="' + fs + '" fill="#4fc3f7" font-weight="bold">x</text>';
+        // z축 (세로, SVG에서 y가 아래방향이므로 z+는 위로)
+        const z1 = zcg - axLen; const z2 = zcg + axLen;
+        axes += '<line x1="' + xcg + '" y1="' + z1 + '" x2="' + xcg + '" y2="' + z2 + '" stroke="#ff9800" stroke-width="0.06" stroke-dasharray="0.15,0.1" opacity="0.7"/>';
+        // z축 화살표 (위로)
+        axes += '<polygon points="' + xcg + ',' + z2 + ' ' + (xcg-arrSz/2) + ',' + (z2-arrSz) + ' ' + (xcg+arrSz/2) + ',' + (z2-arrSz) + '" fill="#ff9800" opacity="0.7"/>';
+        axes += '<text x="' + (xcg+fs*0.3) + '" y="' + (z2+fs) + '" font-size="' + fs + '" fill="#ff9800" font-weight="bold">z</text>';
+        // 원점 표시
+        axes += '<circle cx="' + xcg + '" cy="' + zcg + '" r="' + (arrSz*0.6) + '" fill="none" stroke="#fff" stroke-width="0.05"/>';
+        axes += '<text x="' + (xcg-fs*1.2) + '" y="' + (zcg+fs*0.3) + '" font-size="' + (fs*0.8) + '" fill="#aaa">CG</text>';
+
+        // --- 주축 (1, 2) 실선 ---
+        if (Math.abs(thetap) > 0.001) {
+            const c = Math.cos(thetap);
+            const s = Math.sin(thetap);
+            const pLen = axLen * 0.8;
+            // 주축 1
+            axes += '<line x1="' + (xcg - pLen*c) + '" y1="' + (zcg - pLen*s) + '" x2="' + (xcg + pLen*c) + '" y2="' + (zcg + pLen*s) + '" stroke="#e57373" stroke-width="0.05" opacity="0.6"/>';
+            axes += '<text x="' + (xcg + pLen*c + fs*0.3) + '" y="' + (zcg + pLen*s) + '" font-size="' + (fs*0.8) + '" fill="#e57373">1</text>';
+            // 주축 2
+            axes += '<line x1="' + (xcg + pLen*s) + '" y1="' + (zcg - pLen*c) + '" x2="' + (xcg - pLen*s) + '" y2="' + (zcg + pLen*c) + '" stroke="#e57373" stroke-width="0.05" opacity="0.6"/>';
+            axes += '<text x="' + (xcg - pLen*s + fs*0.3) + '" y="' + (zcg + pLen*c) + '" font-size="' + (fs*0.8) + '" fill="#e57373">2</text>';
+            // 회전각 표시
+            const angDeg = (props.thetap).toFixed(1);
+            axes += '<text x="' + (xcg + fs*0.5) + '" y="' + (zcg - fs*0.5) + '" font-size="' + (fs*0.7) + '" fill="#e57373" opacity="0.8">θp=' + angDeg + '°</text>';
+        }
+
+        // 기존 SVG에 축 추가
+        svg.innerHTML += axes;
+    }
+
     // ============================================================
     // 단면 성질 표시
     // ============================================================
@@ -254,6 +312,9 @@
         });
         html += '</tbody></table>';
         el.innerHTML = html;
+
+        // SVG에 좌표축 표시
+        renderSectionAxes(props);
     }
 
     // ============================================================
@@ -649,15 +710,25 @@
                     command: 'setStress',
                     data: { type: 'uniform_compression', fy: fyLoad }
                 });
-            } else if (loadCase === 'bending_xx') {
+            } else if (loadCase === 'bending_xx_pos') {
                 vscode.postMessage({
                     command: 'setStress',
                     data: { type: 'pure_bending', fy: fyLoad }
                 });
-            } else if (loadCase === 'bending_zz') {
+            } else if (loadCase === 'bending_xx_neg') {
+                vscode.postMessage({
+                    command: 'setStress',
+                    data: { type: 'custom', P: 0, Mxx: -1, Mzz: 0, fy: fyLoad }
+                });
+            } else if (loadCase === 'bending_zz_pos') {
                 vscode.postMessage({
                     command: 'setStress',
                     data: { type: 'custom', P: 0, Mxx: 0, Mzz: 1, fy: fyLoad }
+                });
+            } else if (loadCase === 'bending_zz_neg') {
+                vscode.postMessage({
+                    command: 'setStress',
+                    data: { type: 'custom', P: 0, Mxx: 0, Mzz: -1, fy: fyLoad }
                 });
             } else if (loadCase === 'custom') {
                 vscode.postMessage({

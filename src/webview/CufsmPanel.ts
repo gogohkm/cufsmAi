@@ -360,11 +360,16 @@ export class CufsmPanel implements McpPanelInterface {
                 let stressOpts: any;
                 if (lc === 'compression') {
                     stressOpts = { action: 'set_stress', type: 'uniform_compression', fy };
-                } else if (lc === 'bending_xx') {
+                } else if (lc === 'bending_xx' || lc === 'bending_xx_pos') {
                     stressOpts = { action: 'set_stress', type: 'pure_bending', fy };
-                } else if (lc === 'bending_zz') {
-                    // 약축 휨: Mzz=1 단위모멘트 → fy 스케일링
+                } else if (lc === 'bending_xx_neg') {
+                    // -Mxx: z- 쪽 압축 → Mxx=-1로 반전
+                    stressOpts = { action: 'set_stress', type: 'custom', P: 0, Mxx: -1, Mzz: 0, fy };
+                } else if (lc === 'bending_zz' || lc === 'bending_zz_pos') {
                     stressOpts = { action: 'set_stress', type: 'custom', P: 0, Mxx: 0, Mzz: 1, fy };
+                } else if (lc === 'bending_zz_neg') {
+                    // -Mzz: x- 쪽 압축 → Mzz=-1
+                    stressOpts = { action: 'set_stress', type: 'custom', P: 0, Mxx: 0, Mzz: -1, fy };
                 } else {
                     stressOpts = { action: 'set_stress', type: 'custom', P: options.P || 0, Mxx: options.Mxx || 0, Mzz: options.Mzz || 0 };
                 }
@@ -805,6 +810,10 @@ export class CufsmPanel implements McpPanelInterface {
     private async _generateTemplate(data: { section_type: string; params: any }): Promise<void> {
         try {
             const result = await this._pythonBridge.call('generate_section', data);
+            if (result?.node) {
+                this._model.node = result.node;
+                this._model.elem = result.elem;
+            }
             this._postMessage('templateGenerated', result);
         } catch (err: any) {
             this._postMessage('templateError', { error: err.message });
@@ -879,6 +888,7 @@ export class CufsmPanel implements McpPanelInterface {
                                 <option value="">-- 직접 입력 --</option>
                                 <option value="lippedc" selected>Lipped C (립부 채널)</option>
                                 <option value="lippedz">Lipped Z (립부 Z형강)</option>
+                                <option value="track">Track (무립 채널)</option>
                                 <option value="hat">Hat (모자형)</option>
                                 <option value="rhs">RHS (직사각 중공)</option>
                                 <option value="chs">CHS (원형 중공)</option>
@@ -907,12 +917,14 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                     <div class="section-group">
                         <label>Load Case</label>
-                        <p class="hint">좌굴 해석의 기준 하중 상태를 선택합니다. 선택에 따라 각 절점의 응력(stress)이 자동 설정됩니다.</p>
+                        <p class="hint">좌굴 해석의 기준 하중 상태를 선택합니다. 휨 방향(+/-)은 단면 좌표축 기준으로 어느 쪽이 압축인지를 결정합니다. Cross Section Preview의 좌표축을 참고하세요.</p>
                         <div class="input-row" style="flex-wrap:wrap;">
                             <select id="select-load-case" style="width:180px">
                                 <option value="compression" selected>압축 (Compression)</option>
-                                <option value="bending_xx">강축 휨 (Bending Mxx)</option>
-                                <option value="bending_zz">약축 휨 (Bending Mzz)</option>
+                                <option value="bending_xx_pos">강축 휨 +Mxx (z+ 압축)</option>
+                                <option value="bending_xx_neg">강축 휨 -Mxx (z- 압축)</option>
+                                <option value="bending_zz_pos">약축 휨 +Mzz (x+ 압축)</option>
+                                <option value="bending_zz_neg">약축 휨 -Mzz (x- 압축)</option>
                                 <option value="custom">조합 (P + Mxx + Mzz)</option>
                             </select>
                             <label>Fy<span class="hint-inline">항복</span></label>

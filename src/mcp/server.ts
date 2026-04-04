@@ -124,7 +124,7 @@ server.tool("get_buckling_curve", "Get buckling curve data (half-wavelength vs l
 server.tool("set_section_template",
     "Generate a parametric section. Types: lippedc, lippedz, hat, rhs, chs, angle, isect, tee",
     {
-        type: z.enum(['lippedc', 'lippedz', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee'])
+        type: z.enum(['lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee'])
             .describe("Section type"),
         H: z.number().describe("Height (web height, out-to-out)"),
         B: z.number().describe("Width (flange width, out-to-out)"),
@@ -159,8 +159,8 @@ server.tool("set_material", "Set material properties",
 
 server.tool("set_load_case", "Set load case and automatically apply stress distribution before analysis",
     {
-        load_case: z.enum(['compression', 'bending_xx', 'bending_zz', 'custom'])
-            .describe("compression=uniform axial, bending_xx=strong-axis bending, bending_zz=weak-axis bending, custom=P+Mxx+Mzz combination"),
+        load_case: z.enum(['compression', 'bending_xx_pos', 'bending_xx_neg', 'bending_zz_pos', 'bending_zz_neg', 'custom'])
+            .describe("compression=uniform axial, bending_xx_pos=strong-axis z+ compression, bending_xx_neg=strong-axis z- compression, bending_zz_pos=weak-axis x+ compression, bending_zz_neg=weak-axis x- compression, custom=P+Mxx+Mzz"),
         fy: z.number().optional().describe("Yield stress (default 50)"),
         P: z.number().optional().describe("Axial force for custom (kips)"),
         Mxx: z.number().optional().describe("Strong-axis moment for custom (kip-in)"),
