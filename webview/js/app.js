@@ -117,13 +117,19 @@
             case 'loadAnalysisComplete':
                 renderLoadAnalysisResult(msg.data);
                 break;
+            case 'collectDesignData':
+                vscode.postMessage({ command: 'designDataCollected', data: collectAllDesignInputs() });
+                break;
+            case 'restoreDesignInputs':
+                restoreAllDesignInputs(msg.data);
+                break;
         }
     });
 
     // ============================================================
     // 탭 전환
     // ============================================================
-    document.querySelectorAll('.tab-btn').forEach(btn => {
+    document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
         btn.addEventListener('click', () => {
             switchTab(btn.getAttribute('data-tab'));
         });
@@ -1647,19 +1653,67 @@
     });
     updatePLF();
 
-    // Span Type에 따라 랩/N-span 필드 토글
+    // Span Type에 따라 테이블 동적 생성
     const selSpanType = document.getElementById('select-span-type');
     if (selSpanType) {
-        function updateSpanTypeUI() {
-            const st = selSpanType.value;
-            const noLap = (st === 'simple' || st === 'cantilever');
-            const lapRow = document.getElementById('config-lap-row');
+        function getSpanCount() {
+            const st = /** @type {HTMLSelectElement} */ (selSpanType).value;
+            if (st === 'simple' || st === 'cantilever') return 1;
+            if (st === 'cont-n') return getNum('config-n-spans', 5);
+            const m = st.match(/cont-(\d+)/);
+            return m ? parseInt(m[1]) : 1;
+        }
+
+        function buildSpanTable() {
+            const tbody = document.getElementById('span-config-tbody');
+            if (!tbody) return;
+            const n = getSpanCount();
+            const st = /** @type {HTMLSelectElement} */ (selSpanType).value;
+            const isSimple = (st === 'simple' || st === 'cantilever');
+
+            let html = '';
+            // 지점 수 = 스팬 수 + 1
+            for (let i = 0; i <= n; i++) {
+                const isEnd = (i === 0 || i === n);
+                const defaultSup = isEnd ? 'P' : 'P';
+                const supOptions = '<option value="P">P (Pin)</option><option value="R">R (Roller)</option><option value="F">F (Fixed)</option>';
+
+                html += '<tr>';
+                // 지점 번호
+                html += '<td style="padding:2px;text-align:center;color:var(--vscode-descriptionForeground)">' + (i + 1) + '</td>';
+                // 지점 조건
+                html += '<td style="padding:1px"><select class="span-tbl-sup" data-idx="' + i + '" style="width:100%;font-size:10px;padding:1px">' + supOptions + '</select></td>';
+                // 스팬 길이 (지점 i 오른쪽 스팬, 마지막 지점에는 없음)
+                if (i < n) {
+                    html += '<td style="padding:1px"><input type="number" class="span-tbl-len" data-idx="' + i + '" value="25" step="0.5" style="width:100%;font-size:10px;padding:1px;text-align:right"></td>';
+                } else {
+                    html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
+                }
+                // Lap L (해당 지점 좌측 랩, 첫 지점은 없음)
+                if (i > 0 && !isSimple) {
+                    html += '<td style="padding:1px"><input type="number" class="span-tbl-lapl" data-idx="' + i + '" value="' + (isEnd ? '0' : '1.25') + '" step="0.25" style="width:100%;font-size:10px;padding:1px;text-align:right"></td>';
+                } else {
+                    html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
+                }
+                // Lap R (해당 지점 우측 랩, 마지막 지점은 없음)
+                if (i < n && !isSimple) {
+                    html += '<td style="padding:1px"><input type="number" class="span-tbl-lapr" data-idx="' + i + '" value="' + (isEnd ? '0' : '2.75') + '" step="0.25" style="width:100%;font-size:10px;padding:1px;text-align:right"></td>';
+                } else {
+                    html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
+                }
+                html += '</tr>';
+            }
+            tbody.innerHTML = html;
+
+            // N-span 입력 표시
             const nInput = document.getElementById('config-n-spans');
-            if (lapRow) lapRow.style.display = noLap ? 'none' : 'flex';
             if (nInput) nInput.style.display = (st === 'cont-n') ? 'inline-block' : 'none';
         }
-        selSpanType.addEventListener('change', updateSpanTypeUI);
-        updateSpanTypeUI();
+
+        selSpanType.addEventListener('change', buildSpanTable);
+        const nSpanInput = document.getElementById('config-n-spans');
+        if (nSpanInput) nSpanInput.addEventListener('change', buildSpanTable);
+        buildSpanTable();
     }
 
     // 부재 유형에 따라 입력 필드 표시/숨김
@@ -1795,22 +1849,49 @@
                 Fu: getNum('design-fu', 65),
             };
 
+            // 테이블에서 스팬/지점/랩 데이터 수집
+            const spanLens = [];
+            const supports = [];
+            const lapsPerSupport = [];
+            document.querySelectorAll('.span-tbl-len').forEach(el => {
+                spanLens.push(parseFloat(/** @type {HTMLInputElement} */ (el).value) || 25);
+            });
+            document.querySelectorAll('.span-tbl-sup').forEach(el => {
+                supports.push(/** @type {HTMLSelectElement} */ (el).value);
+            });
+            // 각 지점별 lap 수집
+            const nSup = supports.length;
+            for (let si = 0; si < nSup; si++) {
+                const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + si + '"]');
+                const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + si + '"]');
+                lapsPerSupport.push({
+                    left_ft: lEl ? parseFloat(/** @type {HTMLInputElement} */ (lEl).value) || 0 : 0,
+                    right_ft: rEl ? parseFloat(/** @type {HTMLInputElement} */ (rEl).value) || 0 : 0,
+                });
+            }
+            // 등스팬 여부 판별: 모든 스팬이 같으면 단일 값 사용
+            const allSame = spanLens.every(v => Math.abs(v - spanLens[0]) < 0.01);
+            const spanFt = allSame ? spanLens[0] : spanLens[0];
+
             const data = {
                 member_app: memberApp,
                 span_type: spanType,
-                span_ft: getNum('config-span', 25),
+                span_ft: spanFt,
+                spans_ft: spanLens,           // 부등스팬 지원
+                supports: supports,           // 지점 조건 배열
+                laps_per_support: lapsPerSupport, // 지점별 랩
                 spacing_ft: spacing,
                 loads: {
                     D: getNum('load-D-psf', 0) * spacing,
                     Lr: getNum('load-Lr-psf', 0) * spacing,
                     S: getNum('load-S-psf', 0) * spacing,
-                    W: -(getNum('load-Wu-psf', 0) * spacing),  // 양력 → 음수
+                    W: -(getNum('load-Wu-psf', 0) * spacing),
                     L: getNum('load-L-psf', 0) * spacing,
                 },
                 design_method: /** @type {HTMLSelectElement} */ (document.getElementById('select-design-method'))?.value || 'LRFD',
                 laps: {
-                    left_ft: getNum('config-lap-left', 0),
-                    right_ft: getNum('config-lap-right', 0),
+                    left_ft: lapsPerSupport[1]?.left_ft || 0,
+                    right_ft: lapsPerSupport[1]?.right_ft || 0,
                 },
                 deck: {
                     type: /** @type {HTMLSelectElement} */ (document.getElementById('select-deck-type'))?.value || 'none',
@@ -3381,6 +3462,174 @@
             h += '</table></div>';
         }
         return h;
+    }
+
+    // ============================================================
+    // ============================================================
+    // Design 입력값 수집/복원 (파일 저장/열기용)
+    // ============================================================
+    function collectAllDesignInputs() {
+        const data = {};
+        // Material
+        data.steelGrade = document.getElementById('select-steel-grade')?.value || 'custom';
+        data.fy = getNum('design-fy', 50);
+        data.fu = getNum('design-fu', 65);
+        // Design method
+        data.designMethod = document.getElementById('select-design-method')?.value || 'LRFD';
+        data.analysisMethod = document.getElementById('select-analysis-method')?.value || 'DSM';
+        // Member type
+        data.memberType = document.getElementById('select-member-type')?.value || 'flexure';
+        // Span config
+        data.spanType = document.getElementById('select-span-type')?.value || 'simple';
+        data.nSpans = getNum('config-n-spans', 5);
+        data.spacing = getNum('config-spacing', 5);
+        // 스팬 테이블 데이터
+        const spanLens = []; const sups = []; const laps = [];
+        document.querySelectorAll('.span-tbl-len').forEach(el => spanLens.push(parseFloat(el.value) || 25));
+        document.querySelectorAll('.span-tbl-sup').forEach(el => sups.push(el.value));
+        const nSup = sups.length;
+        for (let i = 0; i < nSup; i++) {
+            const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + i + '"]');
+            const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + i + '"]');
+            laps.push({ left: lEl ? parseFloat(lEl.value) || 0 : 0, right: rEl ? parseFloat(rEl.value) || 0 : 0 });
+        }
+        data.spans = spanLens;
+        data.supports = sups;
+        data.lapsPerSupport = laps;
+        // Loads
+        data.loadD = getNum('load-D-psf', 0);
+        data.loadLr = getNum('load-Lr-psf', 0);
+        data.loadS = getNum('load-S-psf', 0);
+        data.loadWu = getNum('load-Wu-psf', 0);
+        data.loadL = getNum('load-L-psf', 0);
+        // Deck
+        data.deckType = document.getElementById('select-deck-type')?.value || 'none';
+        data.deckTPanel = getNum('deck-t-panel', 0.018);
+        data.deckFastenerSpacing = getNum('deck-fastener-spacing', 12);
+        data.deckKphiOverride = getNum('deck-kphi-override', 0);
+        // Unbraced lengths
+        data.KxLx = getNum('design-KxLx', 120);
+        data.KyLy = getNum('design-KyLy', 120);
+        data.KtLt = getNum('design-KtLt', 120);
+        data.Lb = getNum('design-Lb', 120);
+        data.Cb = getNum('design-Cb', 1.0);
+        data.Cmx = getNum('design-Cmx', 0.85);
+        data.Cmy = getNum('design-Cmy', 0.85);
+        // Required loads
+        data.Pu = getNum('design-P', 0);
+        data.Vu = getNum('design-V', 0);
+        data.Mux = getNum('design-Mx', 0);
+        data.Muy = getNum('design-My', 0);
+        // Web crippling
+        data.wcN = getNum('design-wc-N', 3.5);
+        data.wcR = getNum('design-wc-R', 0.1875);
+        data.wcSupport = document.getElementById('design-wc-support')?.value || 'EOF';
+        // Template params
+        data.templateType = document.getElementById('select-template')?.value || '';
+        data.tplH = getNum('tpl-H', 9);
+        data.tplB = getNum('tpl-B', 5);
+        data.tplD = getNum('tpl-D', 1);
+        data.tplT = getNum('tpl-t', 0.1);
+        data.tplR = getNum('tpl-r', 0);
+        data.tplQlip = getNum('tpl-qlip', 90);
+        // Analysis config
+        data.fyLoad = getNum('input-fy-load', 50);
+        return data;
+    }
+
+    function restoreAllDesignInputs(data) {
+        if (!data) return;
+        function setValue(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
+        function setSelect(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
+        // Material
+        if (data.steelGrade) setSelect('select-steel-grade', data.steelGrade);
+        if (data.fy) setValue('design-fy', data.fy);
+        if (data.fu) setValue('design-fu', data.fu);
+        // Design method
+        if (data.designMethod) setSelect('select-design-method', data.designMethod);
+        if (data.analysisMethod) setSelect('select-analysis-method', data.analysisMethod);
+        // Member type
+        if (data.memberType) setSelect('select-member-type', data.memberType);
+        // Span config
+        if (data.spanType) {
+            setSelect('select-span-type', data.spanType);
+            if (data.nSpans) setValue('config-n-spans', data.nSpans);
+        }
+        if (data.spacing) setValue('config-spacing', data.spacing);
+        // 스팬 테이블 재생성 후 값 복원
+        if (typeof buildSpanTable === 'function') buildSpanTable();
+        setTimeout(() => {
+            if (data.spans) {
+                document.querySelectorAll('.span-tbl-len').forEach((el, i) => {
+                    if (data.spans[i] != null) el.value = data.spans[i];
+                });
+            }
+            if (data.supports) {
+                document.querySelectorAll('.span-tbl-sup').forEach((el, i) => {
+                    if (data.supports[i]) el.value = data.supports[i];
+                });
+            }
+            if (data.lapsPerSupport) {
+                data.lapsPerSupport.forEach((lap, i) => {
+                    const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + i + '"]');
+                    const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + i + '"]');
+                    if (lEl && lap.left != null) lEl.value = lap.left;
+                    if (rEl && lap.right != null) rEl.value = lap.right;
+                });
+            }
+        }, 100);
+        // Loads
+        if (data.loadD != null) setValue('load-D-psf', data.loadD);
+        if (data.loadLr != null) setValue('load-Lr-psf', data.loadLr);
+        if (data.loadS != null) setValue('load-S-psf', data.loadS);
+        if (data.loadWu != null) setValue('load-Wu-psf', data.loadWu);
+        if (data.loadL != null) setValue('load-L-psf', data.loadL);
+        // Deck
+        if (data.deckType) setSelect('select-deck-type', data.deckType);
+        if (data.deckTPanel) setValue('deck-t-panel', data.deckTPanel);
+        if (data.deckFastenerSpacing) setValue('deck-fastener-spacing', data.deckFastenerSpacing);
+        if (data.deckKphiOverride) setValue('deck-kphi-override', data.deckKphiOverride);
+        // Unbraced lengths
+        if (data.KxLx) setValue('design-KxLx', data.KxLx);
+        if (data.KyLy) setValue('design-KyLy', data.KyLy);
+        if (data.KtLt) setValue('design-KtLt', data.KtLt);
+        if (data.Lb) setValue('design-Lb', data.Lb);
+        if (data.Cb) setValue('design-Cb', data.Cb);
+        if (data.Cmx) setValue('design-Cmx', data.Cmx);
+        if (data.Cmy) setValue('design-Cmy', data.Cmy);
+        // Required loads
+        if (data.Pu != null) setValue('design-P', data.Pu);
+        if (data.Vu != null) setValue('design-V', data.Vu);
+        if (data.Mux != null) setValue('design-Mx', data.Mux);
+        if (data.Muy != null) setValue('design-My', data.Muy);
+        // Web crippling
+        if (data.wcN) setValue('design-wc-N', data.wcN);
+        if (data.wcR) setValue('design-wc-R', data.wcR);
+        if (data.wcSupport) setSelect('design-wc-support', data.wcSupport);
+        // Template
+        if (data.templateType) setSelect('select-template', data.templateType);
+        if (data.tplH) setValue('tpl-H', data.tplH);
+        if (data.tplB) setValue('tpl-B', data.tplB);
+        if (data.tplD) setValue('tpl-D', data.tplD);
+        if (data.tplT) setValue('tpl-t', data.tplT);
+        if (data.tplR) setValue('tpl-r', data.tplR);
+        if (data.tplQlip) setValue('tpl-qlip', data.tplQlip);
+        if (data.fyLoad) setValue('input-fy-load', data.fyLoad);
+    }
+
+    // 파일 저장/열기 버튼
+    // ============================================================
+    const btnFileOpen = document.getElementById('btn-file-open');
+    const btnFileSave = document.getElementById('btn-file-save');
+    if (btnFileOpen) {
+        btnFileOpen.addEventListener('click', () => {
+            vscode.postMessage({ command: 'openProject' });
+        });
+    }
+    if (btnFileSave) {
+        btnFileSave.addEventListener('click', () => {
+            vscode.postMessage({ command: 'saveProject' });
+        });
     }
 
     // ============================================================

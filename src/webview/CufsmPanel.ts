@@ -168,6 +168,20 @@ export class CufsmPanel implements McpPanelInterface {
                 this._updateTreeView();
                 break;
 
+            case 'saveProject':
+                // WebView에서 Design 탭 데이터를 수집하도록 요청
+                this._postMessage('collectDesignData', null);
+                // 응답은 'designDataCollected' 메시지로 옴
+                break;
+
+            case 'designDataCollected':
+                await this._saveProject(message.data);
+                break;
+
+            case 'openProject':
+                await this._openProject();
+                break;
+
             case 'generateTemplate':
                 await this._generateTemplate(message.data);
                 break;
@@ -1222,7 +1236,7 @@ export class CufsmPanel implements McpPanelInterface {
     <title>CUFSM Section Designer</title>
 </head>
 <body>
-    <!-- 탭 바 -->
+    <!-- 탭 바 + 파일 버튼 -->
     <div class="tab-bar">
         <button class="tab-btn active" data-tab="preprocessor">Preprocessor</button>
         <button class="tab-btn" data-tab="analysis">Analysis</button>
@@ -1230,6 +1244,9 @@ export class CufsmPanel implements McpPanelInterface {
         <button class="tab-btn" data-tab="design">Design</button>
         <button class="tab-btn" data-tab="report">Report</button>
         <button class="tab-btn" data-tab="validation">Validation</button>
+        <span style="flex:1"></span>
+        <button id="btn-file-open" class="btn-file" title="Open .csd file">Open</button>
+        <button id="btn-file-save" class="btn-file" title="Save .csd file">Save</button>
     </div>
 
     <!-- 탭 내용 -->
@@ -1257,7 +1274,7 @@ export class CufsmPanel implements McpPanelInterface {
                                 <option value="tee">T-Section (T형강)</option>
                                 <option value="lipped_angle">Lipped Angle (립부 앵글)</option>
                             </select>
-                            <button id="btn-generate-template" class="btn-small">생성</button>
+                            <button id="btn-generate-template" class="btn-action-green" style="padding:4px 12px">Generate</button>
                         </div>
                         <div id="template-params" class="input-row" style="margin-top:4px; flex-wrap:wrap;">
                             <label>H<span class="hint-inline">높이</span></label><input type="number" id="tpl-H" value="9" step="0.5" style="width:60px">
@@ -1513,18 +1530,27 @@ export class CufsmPanel implements McpPanelInterface {
                             <option value="cont-n">N-Span Cont.</option>
                         </select>
                         <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:40px;display:none" title="Number of spans">
-                    </div>
-                    <div class="input-row">
-                        <label>Span<span class="hint-inline">ft</span></label>
-                        <input type="number" id="config-span" value="25" step="0.5" style="width:55px">
                         <label>Spacing<span class="hint-inline">ft</span></label>
                         <input type="number" id="config-spacing" value="5" step="0.5" style="width:55px">
                     </div>
-                    <div class="input-row" id="config-lap-row">
-                        <label>Lap L<span class="hint-inline">ft</span></label>
-                        <input type="number" id="config-lap-left" value="1.25" step="0.25" style="width:50px">
-                        <label>Lap R<span class="hint-inline">ft</span></label>
-                        <input type="number" id="config-lap-right" value="2.75" step="0.25" style="width:50px">
+
+                    <!-- 스팬/지점/랩 테이블 -->
+                    <div id="span-table-container" style="margin-top:6px;overflow-x:auto">
+                        <table id="span-config-table" style="width:100%;font-size:10px;border-collapse:collapse">
+                            <thead>
+                                <tr style="background:var(--vscode-editor-selectionBackground)">
+                                    <th style="padding:2px 4px;width:30px">Sup#</th>
+                                    <th style="padding:2px 4px;width:50px">Support</th>
+                                    <th style="padding:2px 4px;width:55px">Span(ft)</th>
+                                    <th style="padding:2px 4px;width:45px">Lap L(ft)</th>
+                                    <th style="padding:2px 4px;width:45px">Lap R(ft)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="span-config-tbody">
+                                <!-- JS에서 동적 생성 -->
+                            </tbody>
+                        </table>
+                        <p class="hint" style="font-size:9px;margin-top:2px">Support: P=Pin, R=Roller, F=Fixed. Lap=overlap length at each side of support.</p>
                     </div>
                 </div>
 
@@ -1579,7 +1605,7 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                 </div>
 
-                <button id="btn-analyze-loads" class="btn-secondary" style="margin-top:8px;width:100%">📊 Analyze Loads</button>
+                <button id="btn-analyze-loads" class="btn-action-green" style="margin-top:8px;width:100%">Analyze Loads</button>
                 </div>
 
                 <h3 id="design-lengths-title">Unbraced Lengths</h3>
@@ -1710,6 +1736,108 @@ export class CufsmPanel implements McpPanelInterface {
         )}" defer></script>
 </body>
 </html>`;
+    }
+
+    /** 프로젝트 저장 (.csd) */
+    private async _saveProject(designData?: any): Promise<void> {
+        const uri = await vscode.window.showSaveDialog({
+            filters: { 'CUFSM Section Design': ['csd'] },
+            saveLabel: 'Save Project',
+        });
+        if (!uri) return;
+
+        const projectData: any = {
+            version: '1.1',
+            format: 'cufsm-section-design',
+            timestamp: new Date().toISOString(),
+            model: this._model,
+            analysisResult: this._lastAnalysisResult ? {
+                curve: this._lastAnalysisResult.curve,
+            } : null,
+            // Design 탭 입력값 (WebView에서 수집됨)
+            designInputs: designData || null,
+        };
+
+        // DSM 값 추출 (있으면)
+        if (this._lastAnalysisResult?.curve && this._model.node?.length > 0) {
+            try {
+                const fy = designData?.fy || 50;
+                const dsmP = await this._pythonBridge.call('dsm', {
+                    node: this._model.node, elem: this._model.elem,
+                    curve: this._lastAnalysisResult.curve, fy, load_type: 'P',
+                });
+                const dsmM = await this._pythonBridge.call('dsm', {
+                    node: this._model.node, elem: this._model.elem,
+                    curve: this._lastAnalysisResult.curve, fy, load_type: 'Mxx',
+                });
+                projectData.dsm = { P: dsmP, Mxx: dsmM };
+            } catch {}
+        }
+
+        // 단면 성질
+        if (this._model.node?.length > 0) {
+            try {
+                projectData.properties = await this._pythonBridge.call('get_properties', {
+                    node: this._model.node, elem: this._model.elem,
+                });
+            } catch {}
+        }
+
+        const fs = require('fs');
+        const json = JSON.stringify(projectData, null, 2);
+        fs.writeFileSync(uri.fsPath, json, 'utf-8');
+        vscode.window.showInformationMessage(`Project saved: ${uri.fsPath}`);
+    }
+
+    /** 프로젝트 열기 (.csd) */
+    private async _openProject(): Promise<void> {
+        const uris = await vscode.window.showOpenDialog({
+            filters: { 'CUFSM Section Design': ['csd'] },
+            canSelectMany: false,
+            openLabel: 'Open Project',
+        });
+        if (!uris || uris.length === 0) return;
+
+        const fs = require('fs');
+        const raw = fs.readFileSync(uris[0].fsPath, 'utf-8');
+        let projectData: any;
+        try {
+            projectData = JSON.parse(raw);
+        } catch (e) {
+            vscode.window.showErrorMessage('Invalid .csd file format');
+            return;
+        }
+
+        if (!projectData.model) {
+            vscode.window.showErrorMessage('No model data in file');
+            return;
+        }
+
+        // 모델 복원
+        this._model = { ...this._model, ...projectData.model };
+        this._postMessage('modelLoaded', this._model);
+        this._updateTreeView();
+
+        // 해석 결과 복원
+        if (projectData.analysisResult) {
+            this._lastAnalysisResult = projectData.analysisResult;
+            this._postMessage('analysisComplete', projectData.analysisResult);
+            if (projectData.dsm) {
+                this._postMessage('dsmResult', projectData.dsm);
+            }
+        }
+
+        // 단면 성질 복원
+        if (projectData.properties) {
+            this._postMessage('propertiesResult', projectData.properties);
+        }
+
+        // Design 탭 입력값 복원
+        if (projectData.designInputs) {
+            this._postMessage('restoreDesignInputs', projectData.designInputs);
+        }
+
+        vscode.window.showInformationMessage(`Project loaded: ${uris[0].fsPath}`);
     }
 
     private _dispose(): void {

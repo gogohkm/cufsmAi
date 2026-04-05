@@ -49,6 +49,53 @@ body {
     color: var(--vscode-foreground);
 }
 
+/* 파일 Open/Save 버튼 */
+.btn-file {
+    padding: 4px 14px;
+    margin: 4px 2px;
+    border: none;
+    border-radius: 3px;
+    background: #e65100;
+    color: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.btn-file:hover {
+    background: #ff6d00;
+}
+
+.btn-file:active {
+    background: #bf360c;
+}
+
+/* Analyze Loads 등 액션 버튼 (녹색) */
+.btn-action-green {
+    padding: 8px 24px;
+    border: none;
+    border-radius: 3px;
+    background: #2e7d32;
+    color: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.btn-action-green:hover {
+    background: #43a047;
+}
+
+.btn-action-green:active {
+    background: #1b5e20;
+}
+
+.btn-action-green:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* === 탭 내용 === */
 .tab-content {
     flex: 1;
