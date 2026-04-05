@@ -17,7 +17,7 @@ export class PythonBridge {
     constructor(extensionPath: string, pythonPath: string = 'python') {
         this._extensionPath = extensionPath;
         this._pythonPath = pythonPath;
-        this._protocol = new JsonRpcProtocol(60000);
+        this._protocol = new JsonRpcProtocol(300000);  // 5분 (큰 메시 FSM 해석용)
     }
 
     async start(): Promise<void> {

@@ -111,6 +111,9 @@
                 _lastDesignResult = msg.data;
                 renderDesignResult(msg.data);
                 break;
+            case 'captureSection':
+                captureSectionPreview();
+                break;
             case 'loadAnalysisComplete':
                 renderLoadAnalysisResult(msg.data);
                 break;
@@ -191,6 +194,55 @@
     }
 
     // ============================================================
+    // 단면 SVG → PNG 캡처 (MCP get_section_preview용)
+    // ============================================================
+    function captureSectionPreview() {
+        const svgEl = document.getElementById('section-svg');
+        if (!svgEl || !model || !model.node || model.node.length === 0) {
+            vscode.postMessage({ command: 'sectionPreviewResult', data: { error: 'No section defined' } });
+            return;
+        }
+
+        // SVG를 완전한 SVG 문서로 만들기
+        const svgClone = /** @type {SVGElement} */ (svgEl.cloneNode(true));
+        svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        // 배경 추가
+        const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        bg.setAttribute('width', '100%');
+        bg.setAttribute('height', '100%');
+        bg.setAttribute('fill', '#1e1e1e');
+        svgClone.insertBefore(bg, svgClone.firstChild);
+
+        const svgData = new XMLSerializer().serializeToString(svgClone);
+        const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(svgBlob);
+
+        const img = new Image();
+        img.onload = function () {
+            const canvas = document.createElement('canvas');
+            canvas.width = 400;
+            canvas.height = 400;
+            const ctx = /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d'));
+            if (!ctx) { vscode.postMessage({ command: 'sectionPreviewResult', data: { error: 'Canvas ctx null' } }); return; }
+            ctx.fillStyle = '#1e1e1e';
+            ctx.fillRect(0, 0, 400, 400);
+            ctx.drawImage(img, 0, 0, 400, 400);
+            URL.revokeObjectURL(url);
+
+            const dataUrl = canvas.toDataURL('image/png');
+            vscode.postMessage({
+                command: 'sectionPreviewResult',
+                data: { png_base64: dataUrl, width: 400, height: 400 }
+            });
+        };
+        img.onerror = function () {
+            URL.revokeObjectURL(url);
+            vscode.postMessage({ command: 'sectionPreviewResult', data: { error: 'Image render failed' } });
+        };
+        img.src = url;
+    }
+
+    // ============================================================
     // 단면 SVG 미리보기
     // ============================================================
     function renderSectionSVG() {
@@ -204,8 +256,10 @@
             zMin = Math.min(zMin, n[2]); zMax = Math.max(zMax, n[2]);
         });
         const pad = Math.max(xMax - xMin, zMax - zMin) * 0.15 || 1;
+        // SVG y축은 아래로 증가, 구조공학 z축은 위로 증가
+        // z좌표를 -z로 반전하여 SVG에 표시 (아래에서 -n[2] 사용)
         svg.setAttribute('viewBox',
-            `${xMin - pad} ${zMin - pad} ${xMax - xMin + 2 * pad} ${zMax - zMin + 2 * pad}`
+            `${xMin - pad} ${-(zMax + pad)} ${xMax - xMin + 2 * pad} ${zMax - zMin + 2 * pad}`
         );
 
         let content = '';
@@ -218,18 +272,18 @@
                 if (ni >= 0 && ni < model.node.length && nj >= 0 && nj < model.node.length) {
                     const n1 = model.node[ni];
                     const n2 = model.node[nj];
-                    content += `<line x1="${n1[1]}" y1="${n1[2]}" x2="${n2[1]}" y2="${n2[2]}"
+                    content += `<line x1="${n1[1]}" y1="${-n1[2]}" x2="${n2[1]}" y2="${-n2[2]}"
                         stroke="var(--vscode-charts-blue, #4fc3f7)" stroke-width="0.15"
                         stroke-linecap="round"/>`;
                 }
             });
         }
 
-        // 절점 (원)
+        // 절점 (원) — z좌표 반전 (-z)으로 위쪽이 양수
         model.node.forEach((n, i) => {
-            content += `<circle cx="${n[1]}" cy="${n[2]}" r="0.12"
+            content += `<circle cx="${n[1]}" cy="${-n[2]}" r="0.12"
                 fill="var(--vscode-charts-orange, #ff9800)"/>`;
-            content += `<text x="${n[1] + 0.2}" y="${n[2] - 0.2}"
+            content += `<text x="${n[1] + 0.2}" y="${-n[2] - 0.2}"
                 font-size="0.4" fill="var(--vscode-descriptionForeground)">${i + 1}</text>`;
         });
 
@@ -242,8 +296,8 @@
         if (!svg || !props || !model || !model.node || model.node.length === 0) { return; }
 
         const xcg = props.xcg;
-        const zcg = props.zcg;
-        const thetap = (props.thetap || 0) * Math.PI / 180;
+        const zcg = -props.zcg;  // z축 반전 (SVG y=아래 vs 구조 z=위)
+        const thetap = -(props.thetap || 0) * Math.PI / 180;  // 각도도 반전
 
         // 축 길이 = 단면 크기의 40%
         let xMin = Infinity, xMax = -Infinity, zMin = Infinity, zMax = -Infinity;
@@ -264,12 +318,12 @@
         // x축 화살표
         axes += '<polygon points="' + x2 + ',' + zcg + ' ' + (x2-arrSz) + ',' + (zcg-arrSz/2) + ' ' + (x2-arrSz) + ',' + (zcg+arrSz/2) + '" fill="#4fc3f7" opacity="0.7"/>';
         axes += '<text x="' + (x2+fs*0.3) + '" y="' + (zcg+fs*0.3) + '" font-size="' + fs + '" fill="#4fc3f7" font-weight="bold">x</text>';
-        // z축 (세로, SVG에서 y가 아래방향이므로 z+는 위로)
-        const z1 = zcg - axLen; const z2 = zcg + axLen;
+        // z축 (세로, 좌표 반전됨: SVG에서 음수방향 = z+ = 위쪽)
+        const z1 = zcg + axLen; const z2 = zcg - axLen;  // z2가 위(SVG 음수)
         axes += '<line x1="' + xcg + '" y1="' + z1 + '" x2="' + xcg + '" y2="' + z2 + '" stroke="#ff9800" stroke-width="0.06" stroke-dasharray="0.15,0.1" opacity="0.7"/>';
-        // z축 화살표 (위로)
-        axes += '<polygon points="' + xcg + ',' + z2 + ' ' + (xcg-arrSz/2) + ',' + (z2-arrSz) + ' ' + (xcg+arrSz/2) + ',' + (z2-arrSz) + '" fill="#ff9800" opacity="0.7"/>';
-        axes += '<text x="' + (xcg+fs*0.3) + '" y="' + (z2+fs) + '" font-size="' + fs + '" fill="#ff9800" font-weight="bold">z</text>';
+        // z축 화살표 (위로 = SVG 음수 방향)
+        axes += '<polygon points="' + xcg + ',' + z2 + ' ' + (xcg-arrSz/2) + ',' + (z2+arrSz) + ' ' + (xcg+arrSz/2) + ',' + (z2+arrSz) + '" fill="#ff9800" opacity="0.7"/>';
+        axes += '<text x="' + (xcg+fs*0.3) + '" y="' + (z2-fs*0.3) + '" font-size="' + fs + '" fill="#ff9800" font-weight="bold">z</text>';
         // 원점 표시
         axes += '<circle cx="' + xcg + '" cy="' + zcg + '" r="' + (arrSz*0.6) + '" fill="none" stroke="#fff" stroke-width="0.05"/>';
         axes += '<text x="' + (xcg-fs*1.2) + '" y="' + (zcg+fs*0.3) + '" font-size="' + (fs*0.8) + '" fill="#aaa">CG</text>';
@@ -726,6 +780,16 @@
     // ============================================================
     // 템플릿 생성
     // ============================================================
+    // 립 각도 필드 표시/숨김
+    const selTemplateEl = document.getElementById('select-template');
+    const qlipGroup = document.getElementById('tpl-qlip-group');
+    if (selTemplateEl && qlipGroup) {
+        selTemplateEl.addEventListener('change', () => {
+            const v = /** @type {HTMLSelectElement} */ (selTemplateEl).value;
+            qlipGroup.style.display = (v === 'lippedc' || v === 'lippedz' || v === 'lipped_angle') ? 'inline' : 'none';
+        });
+    }
+
     const btnGenTemplate = document.getElementById('btn-generate-template');
     if (btnGenTemplate) {
         btnGenTemplate.addEventListener('click', () => {
@@ -740,6 +804,11 @@
                 t: getNum('tpl-t', 0.1),
                 r: getNum('tpl-r', 0),
             };
+
+            // 립 각도 (Lipped C/Z/Angle)
+            if (sectionType === 'lippedc' || sectionType === 'lippedz' || sectionType === 'lipped_angle') {
+                params.qlip = getNum('tpl-qlip', 90);
+            }
 
             // CHS는 D만 사용
             if (sectionType === 'chs') {

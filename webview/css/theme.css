@@ -121,11 +121,62 @@ input[type="number"] {
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    margin-bottom: 2px;
 }
 
 .input-row label {
     font-size: 12px;
     min-width: 20px;
+}
+
+/* ── Design 탭 입력 패널 정렬 ── */
+#tab-design .panel-left h3 {
+    margin-top: 14px;
+    margin-bottom: 6px;
+    padding-bottom: 3px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    font-size: 12px;
+}
+
+#tab-design .panel-left h3:first-child {
+    margin-top: 0;
+}
+
+#tab-design .panel-left .input-row {
+    margin-bottom: 5px;
+    gap: 6px;
+}
+
+#tab-design .panel-left .input-row label {
+    min-width: 48px;
+    font-size: 11px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+#tab-design .panel-left .input-row input[type="number"] {
+    width: 62px;
+    padding: 3px 6px;
+    font-size: 12px;
+}
+
+#tab-design .panel-left .input-row select {
+    font-size: 12px;
+    padding: 3px 4px;
+}
+
+#tab-design .panel-left .hint-inline {
+    font-size: 10px;
+    opacity: 0.6;
+}
+
+#tab-design .panel-right h3 {
+    margin-top: 16px;
+    margin-bottom: 6px;
+}
+
+#tab-design .panel-right h3:first-child {
+    margin-top: 0;
 }
 
 /* === 버튼 === */

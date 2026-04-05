@@ -69,7 +69,7 @@ You can design cross-sections, run finite strip buckling analysis, and extract D
 
 Workflow:
 1. get_status → check current state
-2. set_section_template → generate a section (lippedc, lippedz, hat, rhs, chs, angle, isect, tee)
+2. set_section_template → generate a section (lippedc, lippedz, track, hat, rhs, chs, angle, isect, tee, lipped_angle)
 3. set_material / set_boundary_condition / set_lengths → configure analysis
 4. run_analysis → execute FSM buckling analysis
 5. get_dsm_values → extract Pcrl, Pcrd, Mcrl, Mcrd, Py, My
@@ -122,23 +122,248 @@ server.tool("get_buckling_curve", "Get buckling curve data (half-wavelength vs l
 // 2. SECTION DEFINITION (5 tools)
 // ============================================================
 server.tool("set_section_template",
-    "Generate a parametric section. Types: lippedc, lippedz, hat, rhs, chs, angle, isect, tee",
+    "Generate a parametric section. Types: lippedc, lippedz, track, hat, rhs, chs, angle, isect, tee, lipped_angle",
     {
-        type: z.enum(['lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee'])
+        type: z.enum(['lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee', 'lipped_angle'])
             .describe("Section type"),
         H: z.number().describe("Height (web height, out-to-out)"),
         B: z.number().describe("Width (flange width, out-to-out)"),
         D: z.number().optional().describe("Lip length or secondary dimension"),
         t: z.number().describe("Thickness"),
         r: z.number().optional().describe("Corner radius (default 0)"),
+        qlip: z.number().optional().describe("Lip angle in degrees (default 90). For lippedc/lippedz: 90=vertical, <90=inward, >90=outward"),
     },
     async (params) => {
         const r = await callBridgePost('/action', {
             action: 'generate_template',
             section_type: params.type,
-            params: { H: params.H, B: params.B, D: params.D || 1, t: params.t, r: params.r || 0 }
+            params: {
+                H: params.H, B: params.B, D: params.D || 1, t: params.t, r: params.r || 0,
+                qlip: params.qlip,
+            }
         });
         return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("set_custom_section",
+    "Generate an arbitrary open section from outer corner coordinates. Uses the CFS centerline algorithm: outer corners → t/2 offset → fillet → centroid shift. Works for any open section: sigma, rack, modified C/Z, etc.",
+    {
+        outer_corners: z.array(z.array(z.number()).length(2))
+            .describe("Outer (outside face) sharp corner coordinates [[x0,y0],[x1,y1],...] in path order from one free end to the other. Use out-to-out dimensions, no corner radius."),
+        t: z.number().describe("Sheet thickness"),
+        R_inner: z.number().optional().describe("Inside corner bend radius (default 0, same for all corners)"),
+        corner_radii: z.array(z.number()).optional()
+            .describe("Per-corner inside radii (length = N-2 inner corners). Overrides R_inner. Use 0 for sharp corners."),
+        n_arc: z.number().optional().describe("Arc subdivisions per corner (default 4)"),
+        outer_side: z.enum(['left', 'right']).optional()
+            .describe("Which side of the path is the outer face. 'left'=outer face is left of travel direction (default for C/sigma). 'right'=outer face is right."),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', {
+            action: 'generate_template',
+            section_type: 'custom',
+            params: {
+                outer_corners: params.outer_corners,
+                t: params.t,
+                R_inner: params.R_inner || 0,
+                corner_radii: params.corner_radii,
+                n_arc: params.n_arc || 4,
+                outer_side: params.outer_side || 'left',
+            }
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("build_section",
+    "Build a section from structural elements (building blocks) instead of raw coordinates. Uses SectionBuilder: start point → add elements (lip, flange, web, stiffener, track_flange) with direction keywords. Much safer than raw coordinates.",
+    {
+        steps: z.array(z.object({
+            type: z.enum(['start', 'lip', 'lip_inward', 'flange', 'web', 'stiffener', 'track_flange', 'go'])
+                .describe("Element type. 'lip_inward' automatically points lip toward section center."),
+            length: z.number().optional().describe("Length/width of element"),
+            direction: z.string().optional().describe("Direction: up, down, left, right"),
+            x: z.number().optional().describe("For 'start': x coordinate"),
+            y: z.number().optional().describe("For 'start': y coordinate"),
+            protrusion: z.number().optional().describe("For 'stiffener': horizontal protrusion"),
+            height: z.number().optional().describe("For 'stiffener': vertical height"),
+            width: z.number().optional().describe("For 'track_flange': flange width"),
+            depth: z.number().optional().describe("For 'track_flange': C-depth"),
+            lip_length: z.number().optional().describe("For 'track_flange': lip length"),
+            flange_dir: z.string().optional().describe("For 'track_flange': flange direction"),
+            lip_dir: z.string().optional().describe("For 'track_flange': lip direction"),
+            dx: z.number().optional().describe("For 'go': delta x"),
+            dy: z.number().optional().describe("For 'go': delta y"),
+        })).describe("Build steps in order"),
+        t: z.number().describe("Sheet thickness"),
+        R_inner: z.number().optional().describe("Inside corner radius"),
+        n_arc: z.number().optional().describe("Arc subdivisions per corner (default 4)"),
+        outer_side: z.enum(['left', 'right']).optional().describe("Outer face side"),
+        expected_center: z.array(z.number()).length(2).optional()
+            .describe("Expected section centroid [x,y] for accurate lip_inward at path start. E.g. [0, 4] for H=8 section."),
+    },
+    async (params) => {
+        // SectionBuilder steps → outer_corners → generate_template(custom)
+        const r = await callBridgePost('/action', {
+            action: 'generate_template',
+            section_type: 'custom_builder',
+            params: {
+                steps: params.steps,
+                t: params.t,
+                R_inner: params.R_inner || 0,
+                n_arc: params.n_arc || 4,
+                outer_side: params.outer_side || 'left',
+                expected_center: params.expected_center,
+            }
+        });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("get_section_preview",
+    "Capture the current cross-section preview as a PNG image file. Returns the file path to a temporary PNG that can be read with the Read tool to visually verify the section shape.",
+    {},
+    async () => {
+        const r = await callBridgePost('/action', { action: 'capture_section_preview' });
+        if (r?.file_path) {
+            return textResult(`Section preview saved to: ${r.file_path}\nUse the Read tool to view this image file.`);
+        }
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("custom_section_guide",
+    "Get step-by-step guide for modeling arbitrary cold-formed steel sections using set_custom_section. Includes lessons learned from sigma section modeling, path tracing rules, outer_side determination, and common pitfalls.",
+    {
+        section_type: z.string().optional().describe("Section type for specific guidance: 'sigma', 'rack', 'general'. Default 'general'."),
+    },
+    async ({ section_type }) => {
+        const st = section_type || 'general';
+        let guide = `
+=== CUSTOM SECTION MODELING GUIDE ===
+
+⭐ PREFERRED: Use build_section instead of set_custom_section!
+build_section uses structural elements (lip, flange, web, stiffener) with
+direction keywords (up/down/left/right). Much safer than raw coordinates.
+
+Example (sigma section):
+  build_section(steps=[
+    {type:'start', x:2.75, y:7.125},
+    {type:'lip', length:0.875, direction:'up'},
+    {type:'flange', length:2.75, direction:'left'},
+    {type:'web', length:0.875, direction:'down'},      // ← reversal!
+    {type:'web', length:2.0, direction:'down'},
+    {type:'stiffener', protrusion:0.5, height:2.25, direction:'right'},
+    {type:'web', length:2.0, direction:'down'},
+    {type:'flange', length:2.75, direction:'right'},
+    {type:'web', length:0.875, direction:'down'},      // ← reversal!
+    {type:'lip', length:0.5, direction:'left'},
+  ], t=0.0451, R_inner=0.1875, outer_side='left')
+
+STEP 1: STRUCTURAL ELEMENT IDENTIFICATION
+Before any coordinate calculation, identify the structural elements:
+- How many elements? (lips, flanges, webs, stiffeners)
+- Which direction does each element extend? (horizontal/vertical/diagonal)
+- Is the section symmetric? (mirror / point / none)
+- Where are the free ends? (lip tips)
+
+STEP 2: PATH TRACING (CRITICAL!)
+Trace the path from one free end to the other. Mark direction at each corner:
+- Does the path go straight, turn left, turn right, or U-TURN (reverse)?
+- ⚠ U-TURNS ARE COMMON in track/sigma flanges! The path goes one direction then comes back.
+- Example: sigma flange = lip_end → down(D) → left(B) → UP(D, reversal!) → web continues
+
+STEP 3: OUTER CORNER COORDINATES
+Convert the path to outer (outside face) coordinates:
+- Use OUT-TO-OUT dimensions from the drawing
+- Each corner is a sharp point (no radius)
+- Path order: free_end_1 → ... → free_end_2
+- ALWAYS ask: "what structural element does this dimension belong to?"
+
+STEP 4: outer_side DETERMINATION
+- Face the direction from P0 to P1
+- If the OUTSIDE face of the sheet is on your LEFT → outer_side = 'left'
+- If on your RIGHT → outer_side = 'right'
+- Wrong outer_side = section offset in wrong direction (shape gets bigger or smaller)
+
+STEP 5: CALL set_custom_section
+- outer_corners: [[x0,y0], [x1,y1], ...]
+- t: sheet thickness
+- R_inner: inside corner radius (0 for sharp)
+- outer_side: 'left' or 'right'
+
+STEP 6: VISUAL VERIFICATION (MANDATORY!)
+- Call get_section_preview() after EVERY set_custom_section
+- Read the PNG file to visually verify shape
+- Compare with the reference drawing
+- If shape is wrong → go back to Step 2 and re-trace the path
+
+STEP 7: PROPERTY VERIFICATION
+- Call get_section_properties()
+- Check: theta_p ≈ 0° for symmetric sections
+- Check: A ≈ expected (within 10%)
+- Check: Ixx, Sx reasonable for the section depth
+
+=== COMMON PITFALLS ===
+
+1. FLANGE U-TURN: Track/sigma flanges reverse direction. The path goes:
+   down → left(flange) → UP(reversal) → down(web continues)
+   NOT: down → left → down (this is wrong!)
+
+2. DIMENSION IDENTITY: "0.875 in." could be:
+   - Web depth? Flange width? Lip depth? C-shape depth?
+   Always identify WHICH structural element the dimension describes.
+
+3. SYMMETRY TYPE:
+   - Mirror symmetry: top and bottom flanges face SAME direction
+   - Point symmetry: top and bottom flanges face OPPOSITE directions (like Z)
+   - "상하 대칭" usually means MIRROR symmetry
+
+4. PATH CROSSING: If the path crosses itself, the coordinates are wrong.
+   Call validate before analysis.
+
+5. outer_side WRONG: If the generated shape looks "inflated" or "deflated",
+   try switching outer_side from 'left' to 'right' or vice versa.
+`;
+
+        if (st === 'sigma') {
+            guide += `
+=== SIGMA (Σ) SECTION SPECIFIC GUIDE ===
+
+Structure: Upper ∪-flange + Upper web + Stiffener + Lower web + Lower ∩-flange
+
+The sigma section has TRACK-TYPE flanges (3-sided, not simple L-lips).
+Each flange is a ∪ or ∩ shape with the path reversing direction.
+
+Correct path (12 points):
+P0: upper lip end (free end)
+P1: lip top corner → up(D)
+P2: flange top-left → left(B)
+P3: flange bottom-left = web junction → down(D) ← PATH REVERSAL!
+P4: stiffener top → down(web_seg)
+P5: stiffener right-top → right(Ds)
+P6: stiffener right-bottom → down(Ws)
+P7: stiffener end → left(Ds), back to web
+P8: lower flange top = web junction → down(web_seg)
+P9: lower flange bottom-right → right(B) ← PATH REVERSAL at P10!
+P10: lower lip corner → down(D)
+P11: lower lip end (free end) → left(D_lip)
+
+Key dimensions:
+H = total depth = 2*D + 2*web_seg + Ws
+B = flange width (web to lip end, horizontal)
+D = flange C-depth (vertical, ∪/∩ depth)
+D_lip = lip width (horizontal extension beyond flange)
+Ds = stiffener horizontal protrusion
+Ws = stiffener vertical height
+
+Python factory: from engine.cfs_centerline import sigma_outer_corners
+corners = sigma_outer_corners(H=8, B=2.25, D=0.875, D_lip=0.5, Ds=0.5, Ws=2.25)
+`;
+        }
+
+        return textResult(guide);
     }
 );
 

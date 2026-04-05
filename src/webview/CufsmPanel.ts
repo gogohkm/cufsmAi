@@ -25,6 +25,8 @@ export class CufsmPanel implements McpPanelInterface {
 
     private _model: CufsmModel;
     private _lastAnalysisResult: any = null;
+    private _lastPreviewPath: string = '';
+    private _previewResolve: ((value: any) => void) | null = null;
 
     public static createOrShow(
         extensionUri: vscode.Uri,
@@ -196,6 +198,27 @@ export class CufsmPanel implements McpPanelInterface {
                     this._postMessage('loadAnalysisComplete', loadResult);
                 } catch (e: any) {
                     this._postMessage('loadAnalysisComplete', { error: e.message || String(e) });
+                }
+                break;
+
+            case 'sectionPreviewResult':
+                // WebView에서 PNG 캡처 완료 → 파일로 저장
+                if (message.data?.png_base64) {
+                    try {
+                        const base64 = message.data.png_base64.replace(/^data:image\/png;base64,/, '');
+                        const buf = Buffer.from(base64, 'base64');
+                        const fs = require('fs');
+                        const os = require('os');
+                        const path = require('path');
+                        const filePath = path.join(os.tmpdir(), 'cufsm_section_preview.png');
+                        fs.writeFileSync(filePath, buf);
+                        this._lastPreviewPath = filePath;
+                    } catch {}
+                }
+                // resolve pending promise
+                if (this._previewResolve) {
+                    this._previewResolve(message.data);
+                    this._previewResolve = null;
                 }
                 break;
 
@@ -717,6 +740,24 @@ export class CufsmPanel implements McpPanelInterface {
                 return reportData;
             }
 
+            case 'capture_section_preview': {
+                // WebView에 캡처 요청 → sectionPreviewResult 메시지로 응답 대기
+                return new Promise((resolve) => {
+                    this._previewResolve = resolve;
+                    this._postMessage('captureSection', null);
+                    // 타임아웃 5초
+                    setTimeout(() => {
+                        if (this._previewResolve) {
+                            this._previewResolve({ error: 'Capture timeout' });
+                            this._previewResolve = null;
+                        }
+                    }, 5000);
+                }).then((result: any) => {
+                    const path = this._lastPreviewPath;
+                    return { success: true, file_path: path, ...result };
+                });
+            }
+
             case 'calc_deck_stiffness': {
                 const result = await this._pythonBridge.call('calc_deck_stiffness', options);
                 return result;
@@ -1214,6 +1255,7 @@ export class CufsmPanel implements McpPanelInterface {
                                 <option value="angle">Angle (ㄱ형강)</option>
                                 <option value="isect">I-Section (I형강)</option>
                                 <option value="tee">T-Section (T형강)</option>
+                                <option value="lipped_angle">Lipped Angle (립부 앵글)</option>
                             </select>
                             <button id="btn-generate-template" class="btn-small">생성</button>
                         </div>
@@ -1223,6 +1265,9 @@ export class CufsmPanel implements McpPanelInterface {
                             <label>D<span class="hint-inline">립</span></label><input type="number" id="tpl-D" value="1" step="0.1" style="width:60px">
                             <label>t<span class="hint-inline">두께</span></label><input type="number" id="tpl-t" value="0.1" step="0.01" style="width:60px">
                             <label>r<span class="hint-inline">반경</span></label><input type="number" id="tpl-r" value="0" step="0.1" style="width:60px">
+                            <span id="tpl-qlip-group" style="display:none">
+                                <label>lip°<span class="hint-inline">립각도</span></label><input type="number" id="tpl-qlip" value="90" step="5" min="0" max="180" style="width:55px">
+                            </span>
                         </div>
                     </div>
                     <div class="section-group">
@@ -1391,7 +1436,7 @@ export class CufsmPanel implements McpPanelInterface {
             <div class="step-item" data-step="3"><span class="step-num">3</span><span>Design</span></div>
         </div>
         <div class="panel-row">
-            <div class="panel-left" style="max-width:340px">
+            <div class="panel-left" style="max-width:360px">
                 <h3 class="collapsible" id="sec-material" data-expanded="true"><span class="collapse-icon">▾</span> Material</h3>
                 <div id="sec-material-body">
                 <div class="input-row">
