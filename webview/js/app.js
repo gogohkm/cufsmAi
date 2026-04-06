@@ -21,12 +21,14 @@
     let _lastDesignResult = null;
     /** 단면 성질 (Report용) */
     let lastProps = null;
+    /** 하중 분석 결과 */
+    let _lastLoadAnalysis = null;
 
     // ============================================================
     // 단위 변환 시스템 (SI ↔ US)
     // 내부 저장: 항상 US 단위. 표시/입력 레이어에서만 변환.
     // ============================================================
-    let _unitSystem = 'US'; // 'US' or 'SI'
+    let _unitSystem = 'SI'; // 'US' or 'SI'
 
     const UNIT = {
         // 변환 계수: US값 × factor = SI값
@@ -274,6 +276,11 @@
         document.getElementById('btn-unit-US')?.classList.remove('active');
         refreshUnits(oldSys);
     });
+
+    // 기본 SI ���위계 초기화: 입력 필드 값을 SI로 변환
+    if (_unitSystem === 'SI') {
+        refreshUnits('US');
+    }
 
     // ============================================================
     // 전처리 렌더링
@@ -1678,7 +1685,6 @@
         'design-KtLt': { min: 0.1, max: 10000, label: 'KtLt', ut: 'length' },
         'design-Lb':  { min: 0, max: 10000, label: 'Lb', ut: 'length' },
         'design-Cb':  { min: 1.0, max: 3.0, label: 'Cb', ut: null },
-        'config-span': { min: 0.5, max: 200, label: 'Span', ut: 'length_ft' },
     };
 
     function validateDesignInput(id) {
@@ -1817,8 +1823,9 @@
             // 지점 수 = 스팬 수 + 1
             for (let i = 0; i <= n; i++) {
                 const isEnd = (i === 0 || i === n);
-                const defaultSup = isEnd ? 'P' : 'P';
-                const supOptions = '<option value="P">P (Pin)</option><option value="R">R (Roller)</option><option value="F">F (Fixed)</option>';
+                const isCantilever = (st === 'cantilever');
+                const defaultSup = isCantilever ? (i === 0 ? 'F' : 'N') : (isEnd ? 'P' : 'P');
+                const supOptions = '<option value="P">P (Pin)</option><option value="R">R (Roller)</option><option value="F">F (Fixed)</option><option value="N">N (Free)</option>';
 
                 html += '<tr>';
                 // 지점 번호
@@ -1846,6 +1853,14 @@
                 html += '</tr>';
             }
             tbody.innerHTML = html;
+
+            // 캔틸레버 기본 지점조건 설정 (F-N)
+            if (st === 'cantilever') {
+                const supSels = tbody.querySelectorAll('.span-tbl-sup');
+                supSels.forEach((el, idx) => {
+                    /** @type {HTMLSelectElement} */ (el).value = (idx === 0) ? 'F' : 'N';
+                });
+            }
 
             // N-span 입력 표시
             const nInput = document.getElementById('config-n-spans');
@@ -2057,7 +2072,7 @@
                 section: (sectionInfo.depth > 0 && sectionInfo.thickness > 0) ? sectionInfo : null,
             };
 
-            btnAnalyze.textContent = 'Analyzing...';
+            btnAnalyze.textContent = '분석 중...';
             btnAnalyze.disabled = true;
             setDesignStep(2, true);
             vscode.postMessage({ command: 'analyzeLoads', data });
@@ -2137,7 +2152,10 @@
             const x = ftToX(supFt[i]);
             const type = (supports[i] || 'P').toUpperCase().charAt(0);
             const tw = 6; // 삼각형 반폭
-            if (type === 'F') {
+            if (type === 'N') {
+                // 자유단(Free end): 작은 원 (지지 없음 표시)
+                svg += '<circle cx="' + x + '" cy="' + beamY + '" r="3" fill="none" stroke="' + fg + '" stroke-width="1.2" stroke-dasharray="2,1"/>';
+            } else if (type === 'F') {
                 // 고정단: 채워진 삼각형 + 수직선 + 해치
                 svg += '<polygon points="' + x + ',' + beamY + ' ' + (x-tw) + ',' + (beamY+supH) + ' ' + (x+tw) + ',' + (beamY+supH) + '" fill="' + fg + '" fill-opacity="0.7"/>';
                 svg += '<line x1="' + (x-tw-1) + '" y1="' + (beamY+supH) + '" x2="' + (x+tw+1) + '" y2="' + (beamY+supH) + '" stroke="' + fg + '" stroke-width="2"/>';
@@ -2249,7 +2267,6 @@
     }
 
     // Analyze Loads 결과 렌더링
-    let _lastLoadAnalysis = null;
     function renderLoadAnalysisResult(data) {
         const el = document.getElementById('load-analysis-result');
         if (!el) return;
@@ -2346,7 +2363,7 @@
 
         // 버튼 복원
         if (btnAnalyze) {
-            btnAnalyze.textContent = '📊 Analyze Loads';
+            btnAnalyze.textContent = '📊 하중 분석 실행';
             btnAnalyze.disabled = false;
         }
     }
@@ -2358,8 +2375,8 @@
         btnCopyReport.addEventListener('click', () => {
             if (_lastReport) {
                 navigator.clipboard.writeText(_lastReport).then(() => {
-                    btnCopyReport.textContent = 'Copied!';
-                    setTimeout(() => { btnCopyReport.textContent = 'Copy Report to Clipboard'; }, 1500);
+                    btnCopyReport.textContent = '복사 완료!';
+                    setTimeout(() => { btnCopyReport.textContent = '보고서 클립보드 복사'; }, 1500);
                 });
             }
         });
@@ -2378,7 +2395,7 @@
         const loadingEl = document.getElementById('design-loading');
         if (loadingEl) loadingEl.style.display = 'none';
         if (summaryEl) summaryEl.style.display = 'block';
-        if (btnDesign) { btnDesign.textContent = '▶ Run Design Check'; btnDesign.disabled = false; }
+        if (btnDesign) { btnDesign.textContent = '▶ 설계 검토 실행'; btnDesign.disabled = false; }
 
         if (!summaryEl || !stepsEl) { return; }
 
@@ -2417,7 +2434,7 @@
                 summaryHtml += '<div class="sc-label">' + v.l + '</div>';
                 summaryHtml += '<div class="sc-value">' + (v.v != null ? fmtVal(v.v, uType) : '-') + '</div>';
                 summaryHtml += '<div class="sc-label">' + unit + '</div>';
-                if (gov) summaryHtml += '<div><span class="governing-badge">GOVERNS</span></div>';
+                if (gov) summaryHtml += '<div><span class="governing-badge">지배</span></div>';
                 summaryHtml += '</div>';
             });
             summaryHtml += '</div>';
@@ -2429,10 +2446,10 @@
         } else if (mt === 'tension') {
             const fU = unitLabel('force');
             summaryHtml += '<table style="width:100%;font-size:12px">';
-            summaryHtml += _summaryRow('Tn (yield)', data.Tn_yield, fU, null, 'force');
-            summaryHtml += _summaryRow('Tn (rupture)', data.Tn_rupture, fU, null, 'force');
-            summaryHtml += _summaryRow('Controlling mode', mode, '');
-            summaryHtml += _summaryRow('Design strength', data.design_strength, fU, '#4fc3f7', 'force');
+            summaryHtml += _summaryRow('Tn (항복)', data.Tn_yield, fU, null, 'force');
+            summaryHtml += _summaryRow('Tn (파단)', data.Tn_rupture, fU, null, 'force');
+            summaryHtml += _summaryRow('지배 모드', mode, '');
+            summaryHtml += _summaryRow('설계강도', data.design_strength, fU, '#4fc3f7', 'force');
             summaryHtml += '</table>';
         } else if (mt === 'combined') {
             const c = data.compression || {};
@@ -2441,12 +2458,12 @@
             const fU = unitLabel('force'), mU = unitLabel('moment');
             summaryHtml += '<table style="width:100%;font-size:12px">';
             summaryHtml += _summaryRow('Pn (' + (c.controlling_mode||'') + ')', c.Pn, fU, null, 'force');
-            summaryHtml += _summaryRow('Design Pn', c.design_strength, fU, '#4fc3f7', 'force');
+            summaryHtml += _summaryRow('설계 Pn', c.design_strength, fU, '#4fc3f7', 'force');
             summaryHtml += _summaryRow('Mn(x) (' + (f.controlling_mode||'') + ')', f.Mn, mU, null, 'moment');
-            summaryHtml += _summaryRow('Design Mn(x)', f.design_strength, mU, '#4fc3f7', 'moment');
+            summaryHtml += _summaryRow('설계 Mn(x)', f.design_strength, mU, '#4fc3f7', 'moment');
             if (fy2) {
                 summaryHtml += _summaryRow('Mn(y)', fy2.Mn, mU, null, 'moment');
-                summaryHtml += _summaryRow('Design Mn(y)', fy2.design_strength, mU, '#4fc3f7', 'moment');
+                summaryHtml += _summaryRow('설계 Mn(y)', fy2.design_strength, mU, '#4fc3f7', 'moment');
             }
             if (data.amplification) {
                 summaryHtml += _summaryRow('§C1 αx', data.amplification.alpha_x?.toFixed(3), '', '#ffab00');
@@ -2454,7 +2471,7 @@
             }
             if (data.shear) {
                 summaryHtml += _summaryRow('Vn', data.shear.Vn, fU, null, 'force');
-                summaryHtml += _summaryRow('Design Vn', data.shear.design_strength, fU, '#4fc3f7', 'force');
+                summaryHtml += _summaryRow('설계 Vn', data.shear.design_strength, fU, '#4fc3f7', 'force');
             }
             summaryHtml += '</table>';
         } else if (mt === 'connection') {
@@ -2462,14 +2479,14 @@
             const fU = unitLabel('force');
             summaryHtml += '<table style="width:100%;font-size:12px">';
             ls.forEach(l => {
-                const mark = l.governs ? ' <span class="governing-badge">GOVERNS</span>' : '';
+                const mark = l.governs ? ' <span class="governing-badge">지배</span>' : '';
                 summaryHtml += _summaryRow(l.name + mark, l.design_strength, fU, l.governs ? '#ffab00' : undefined, 'force');
             });
-            summaryHtml += _summaryRow('Design strength', data.design_strength, fU, '#4fc3f7', 'force');
+            summaryHtml += _summaryRow('설계강도', data.design_strength, fU, '#4fc3f7', 'force');
             summaryHtml += '</table>';
         }
 
-        // Utilization gauge bar
+        // 이용률 게이지 바
         if (util != null) {
             const pct = Math.min(util * 100, 120).toFixed(0);
             const cls = util <= 0.75 ? 'ok' : (util <= 1.0 ? 'warn' : 'fail');
@@ -2491,7 +2508,7 @@
                 stepsHtml += '<div class="calc-step-header">';
                 stepsHtml += '<span>' + s.step + '. ' + s.name + '</span>';
                 stepsHtml += '<span>';
-                if (isGov) stepsHtml += '<span class="governing-badge">GOVERNS</span>';
+                if (isGov) stepsHtml += '<span class="governing-badge">지배</span>';
                 if (s.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(s.equation) + '</span>';
                 stepsHtml += '</span></div>';
                 if (s.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + s.formula + '</div>';
@@ -2510,7 +2527,7 @@
                 stepsHtml += '<div class="calc-step-header">';
                 stepsHtml += '<span>' + (i+1) + '. ' + ls.name + '</span>';
                 stepsHtml += '<span>';
-                if (isGov) stepsHtml += '<span class="governing-badge">GOVERNS</span>';
+                if (isGov) stepsHtml += '<span class="governing-badge">지배</span>';
                 if (ls.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(ls.equation) + '</span>';
                 stepsHtml += '</span></div>';
                 if (ls.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + ls.formula + '</div>';
@@ -2624,7 +2641,7 @@
     if (btnGenReport) {
         btnGenReport.addEventListener('click', () => {
             if (!_lastDesignResult && !_lastLoadAnalysis) {
-                if (reportContainer) reportContainer.innerHTML = '<p style="color:var(--vscode-errorForeground);text-align:center;padding:20px">No design results available. Please run "Analyze Loads" and "Run Design Check" first.</p>';
+                if (reportContainer) reportContainer.innerHTML = '<p style="color:var(--vscode-errorForeground);text-align:center;padding:20px">설계 결과가 없습니다. 먼저 "하중 분석 실행"과 "설계 검토 실행"을 수행하세요.</p>';
                 return;
             }
             if (reportContainer) {
@@ -2676,42 +2693,42 @@
         let h = '', sec = 0;
 
         // ── Header ──
-        h += '<h1>CUFSM — Cold-Formed Steel Design Report</h1>';
-        h += '<table style="border:none"><tr style="border:none"><td style="border:none;width:50%">Date: '+now+'</td>';
-        h += '<td style="border:none;text-align:right">AISI S100-16 / Direct Strength Method (DSM)</td></tr></table><hr>';
+        h += '<h1>CUFSM — 냉간성형강 설계 보고서</h1>';
+        h += '<table style="border:none"><tr style="border:none"><td style="border:none;width:50%">날짜: '+now+'</td>';
+        h += '<td style="border:none;text-align:right">AISI S100-16 / 직접강도법 (DSM)</td></tr></table><hr>';
 
-        // ── 1. Section ──
-        h += '<h2>'+(++sec)+'. Cross Section</h2>';
+        // ── 1. 단면 ──
+        h += '<h2>'+(++sec)+'. 단면</h2>';
         h += _rptSection();
 
-        // ── 2. Section Analysis (Buckling + DSM) ──
-        h += '<h2>'+(++sec)+'. Elastic Buckling Analysis</h2>';
+        // ── 2. 좌굴 해석 ──
+        h += '<h2>'+(++sec)+'. 탄성 좌굴 해석</h2>';
         h += _rptBuckling();
 
-        // ── 3. Design Input ──
-        h += '<h2>'+(++sec)+'. Design Input</h2>';
+        // ── 3. 설계 입력 ──
+        h += '<h2>'+(++sec)+'. 설계 입력</h2>';
         h += _rptDesignInput(la, d);
 
-        // ── 4. Load Analysis ──
+        // ── 4. 하중 분석 ──
         if (la) {
-            h += '<h2>'+(++sec)+'. Load Analysis Results</h2>';
+            h += '<h2>'+(++sec)+'. 하중 분석 결과</h2>';
             h += _rptLoadAnalysis(la);
         }
 
-        // ── 5. Design Calculation ──
+        // ── 5. 설계 계산 ──
         if (d) {
-            const mtLabel = {compression:'Compression (Chapter E)',flexure:'Flexure (Chapter F)',combined:'Combined (Chapters E+F+H)',tension:'Tension (Chapter D)'}[d.member_type||''] || d.member_type;
-            h += '<h2>'+(++sec)+'. Design Calculation — '+mtLabel+'</h2>';
+            const mtLabel = {compression:'압축 (Chapter E)',flexure:'휨 (Chapter F)',combined:'조합 (Chapters E+F+H)',tension:'인장 (Chapter D)'}[d.member_type||''] || d.member_type;
+            h += '<h2>'+(++sec)+'. 설계 계산 — '+mtLabel+'</h2>';
             h += _rptDesignCalc(d);
         }
 
-        // ── 6. Design Summary ──
+        // ── 6. 설계 요약 ──
         if (d) {
-            h += '<h2>'+(++sec)+'. Design Summary</h2>';
+            h += '<h2>'+(++sec)+'. 설계 요약</h2>';
             h += _rptSummary(d, la);
         }
 
-        h += '<hr><p style="text-align:center;color:#999;font-size:9px">Generated by CUFSM Cold-Formed Steel Section Designer — AISI S100-16 DSM</p>';
+        h += '<hr><p style="text-align:center;color:#999;font-size:9px">CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM</p>';
         return h;
     }
 
@@ -2720,7 +2737,7 @@
     // ═══════════════════════════════════════════════════════
     function _rptSection() {
         let h = '';
-        if (!model || !model.node || model.node.length === 0) return '<p>(No section defined)</p>';
+        if (!model || !model.node || model.node.length === 0) return '<p>(단면 미정의)</p>';
 
         // SVG
         let xMin=Infinity,xMax=-Infinity,zMin=Infinity,zMax=-Infinity;
@@ -2739,37 +2756,37 @@
         // 규격 표 (그림 옆에)
         const selT = document.getElementById('select-template');
         const secType = selT ? selT.value : '';
-        const typeNames = {lippedc:'Lipped C-Channel',lippedz:'Lipped Z-Section',hat:'Hat Section',track:'Track Section',rhs:'Rectangular HSS',chs:'Circular HSS',angle:'Angle',isect:'I-Section',tee:'Tee Section'};
+        const typeNames = {lippedc:'립 C형강',lippedz:'립 Z형강',hat:'모자 단면',track:'트랙 단면',rhs:'각형 강관',chs:'원형 강관',angle:'앵글',isect:'I형강',tee:'T형강'};
         const H0=getNum('tpl-H',0),B0=getNum('tpl-B',0),D0=getNum('tpl-D',0),t0=getNum('tpl-t',0),r0=getNum('tpl-r',0);
 
         h += '<div style="display:flex;gap:16px;align-items:flex-start">';
         h += '<div>'+svg+'</div>';
-        h += '<div style="flex:1"><h3>Section Designation</h3>';
-        h += '<table><tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>';
-        h += '<tr><td>Section Type</td><td colspan="2"><b>'+(typeNames[secType]||secType||'Custom')+'</b></td></tr>';
-        if (H0) h += '<tr><td>H (Depth)</td><td>'+H0+'</td><td>'+_rul('length')+'</td></tr>';
-        if (B0) h += '<tr><td>B (Flange width)</td><td>'+B0+'</td><td>'+_rul('length')+'</td></tr>';
-        if (D0) h += '<tr><td>D (Lip depth)</td><td>'+D0+'</td><td>'+_rul('length')+'</td></tr>';
-        if (t0) h += '<tr><td>t (Thickness)</td><td>'+t0+'</td><td>'+_rul('thickness')+'</td></tr>';
-        if (r0) h += '<tr><td>r (Corner radius)</td><td>'+r0+'</td><td>'+_rul('radius')+'</td></tr>';
-        h += '<tr><td>Nodes / Elements</td><td colspan="2">'+model.node.length+' / '+(model.elem?model.elem.length:0)+'</td></tr>';
+        h += '<div style="flex:1"><h3>단면 제원</h3>';
+        h += '<table><tr><th>항목</th><th>값</th><th>단위</th></tr>';
+        h += '<tr><td>단면 유형</td><td colspan="2"><b>'+(typeNames[secType]||secType||'사용자 정의')+'</b></td></tr>';
+        if (H0) h += '<tr><td>H (높이)</td><td>'+H0+'</td><td>'+_rul('length')+'</td></tr>';
+        if (B0) h += '<tr><td>B (플랜지 폭)</td><td>'+B0+'</td><td>'+_rul('length')+'</td></tr>';
+        if (D0) h += '<tr><td>D (립 깊이)</td><td>'+D0+'</td><td>'+_rul('length')+'</td></tr>';
+        if (t0) h += '<tr><td>t (두께)</td><td>'+t0+'</td><td>'+_rul('thickness')+'</td></tr>';
+        if (r0) h += '<tr><td>r (코너 반경)</td><td>'+r0+'</td><td>'+_rul('radius')+'</td></tr>';
+        h += '<tr><td>절점 / 요소</td><td colspan="2">'+model.node.length+' / '+(model.elem?model.elem.length:0)+'</td></tr>';
         h += '</table></div></div>';
 
         // 단면 성질
         if (lastProps) {
             const p = lastProps;
-            h += '<h3>Computed Section Properties</h3>';
-            h += '<table><tr><th>Property</th><th>Symbol</th><th>Value</th><th>Unit</th></tr>';
+            h += '<h3>계산된 단면 성질</h3>';
+            h += '<table><tr><th>성질</th><th>기호</th><th>값</th><th>단위</th></tr>';
             const rows = [
-                ['Gross Area','A',p.A,'area'],
-                ['Strong-axis Inertia','I<sub>xx</sub>',p.Ixx,'inertia'],['Weak-axis Inertia','I<sub>zz</sub>',p.Izz,'inertia'],
-                ['Product of Inertia','I<sub>xz</sub>',p.Ixz,'inertia'],
-                ['Strong-axis Section Modulus','S<sub>x</sub>',p.Sx,'modulus'],['Weak-axis Section Modulus','S<sub>z</sub>',p.Sz,'modulus'],
-                ['Strong-axis Plastic Modulus','Z<sub>x</sub>',p.Zx,'modulus'],['Weak-axis Plastic Modulus','Z<sub>z</sub>',p.Zz,'modulus'],
-                ['Strong-axis Radius of Gyration','r<sub>x</sub>',p.rx,'length'],['Weak-axis Radius of Gyration','r<sub>z</sub>',p.rz,'length'],
-                ['Centroid x','x<sub>cg</sub>',p.xcg,'length'],['Centroid z','z<sub>cg</sub>',p.zcg,'length'],
-                ['Principal Axis Angle','&theta;<sub>p</sub>',p.thetap,null],
-                ['Principal Inertia 1','I<sub>11</sub>',p.I11,'inertia'],['Principal Inertia 2','I<sub>22</sub>',p.I22,'inertia'],
+                ['총단면적','A',p.A,'area'],
+                ['강축 단면2차모멘트','I<sub>xx</sub>',p.Ixx,'inertia'],['약축 단면2차모멘트','I<sub>zz</sub>',p.Izz,'inertia'],
+                ['단면상승모멘트','I<sub>xz</sub>',p.Ixz,'inertia'],
+                ['강축 단면계수','S<sub>x</sub>',p.Sx,'modulus'],['약축 단면계수','S<sub>z</sub>',p.Sz,'modulus'],
+                ['강축 소성단면계수','Z<sub>x</sub>',p.Zx,'modulus'],['약축 소성단면계수','Z<sub>z</sub>',p.Zz,'modulus'],
+                ['강축 회전반경','r<sub>x</sub>',p.rx,'length'],['약축 회전반경','r<sub>z</sub>',p.rz,'length'],
+                ['도심 x','x<sub>cg</sub>',p.xcg,'length'],['도심 z','z<sub>cg</sub>',p.zcg,'length'],
+                ['주축 각도','&theta;<sub>p</sub>',p.thetap,null],
+                ['주축 단면2차모멘트 1','I<sub>11</sub>',p.I11,'inertia'],['주축 단면2차모멘트 2','I<sub>22</sub>',p.I22,'inertia'],
             ];
             rows.forEach(r => { if (r[2]!=null) h += '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+(r[3]?_ruv(r[2],r[3]):_rv(r[2],1))+'</td><td>'+(r[3]?_rul(r[3]):'\u00B0')+'</td></tr>'; });
             h += '</table>';
@@ -2784,14 +2801,14 @@
         let h = '';
         // Signature curve
         if (analysisResult && analysisResult.curve && analysisResult.curve.length > 0) {
-            h += '<h3>Buckling Curve (Load Factor vs. Half-Wavelength)</h3>';
+            h += '<h3>좌굴 곡선 (하중계수 vs. 반파장)</h3>';
             const curve = analysisResult.curve;
             const W=500,H2=220,PL=55,PR=15,PT=20,PB=35;
             const plotW=W-PL-PR,plotH=H2-PT-PB;
             // 포스트프로세서와 동일한 데이터 추출 — row[1]>0 필터링
             const points=[];
             curve.forEach(row => { if (row && row.length>=2 && row[1]>0) points.push([row[0],row[1]]); });
-            if (points.length < 2) { h += '<p>(Insufficient curve data)</p>'; }
+            if (points.length < 2) { h += '<p>(곡선 데이터 부족)</p>'; }
             else {
             const xMin=Math.log10(Math.min(...points.map(p=>p[0])));
             const xMax=Math.log10(Math.max(...points.map(p=>p[0])));
@@ -2839,41 +2856,40 @@
                 svg+='<circle cx="'+ex+'" cy="'+ey+'" r="4" fill="'+ext.color+'" stroke="#fff" stroke-width="1"/>';
                 svg+='<text x="'+(parseFloat(ex)+6)+'" y="'+(parseFloat(ey)-6)+'" font-size="8" fill="'+ext.color+'" font-weight="600">'+ext.label+'='+ext.LF.toFixed(3)+' @ L='+_ruv(ext.L,'length')+'</text>';
             });
-            svg+='<text x="'+(PL+plotW/2)+'" y="'+(H2-3)+'" font-size="9" text-anchor="middle" fill="#666">Half-wavelength ('+_rul('length')+')</text>';
-            svg+='<text x="12" y="'+(PT+plotH/2)+'" font-size="9" text-anchor="middle" fill="#666" transform="rotate(-90,12,'+(PT+plotH/2)+')">Load Factor</text>';
+            svg+='<text x="'+(PL+plotW/2)+'" y="'+(H2-3)+'" font-size="9" text-anchor="middle" fill="#666">반파장 ('+_rul('length')+')</text>';
+            svg+='<text x="12" y="'+(PT+plotH/2)+'" font-size="9" text-anchor="middle" fill="#666" transform="rotate(-90,12,'+(PT+plotH/2)+')">하중계수</text>';
             svg+='</svg>';
             h += '<div class="section-fig">'+svg+'</div>';
             } // end if (points.length >= 2)
         } else {
-            h += '<p>(Run FSM analysis first to generate buckling curve)</p>';
+            h += '<p>(좌굴 곡선을 생성하려면 FSM 해석을 먼저 실행하세요)</p>';
         }
 
-        // DSM Design Values — 포스트프로세서와 동일한 필드명 사용
-        h += '<h3>DSM Design Values (Extracted from Buckling Curve)</h3>';
+        // DSM 설계값
+        h += '<h3>DSM 설계값 (좌굴 곡선에서 추출)</h3>';
         if (lastDsmResult) {
             const dP=lastDsmResult.P||{},dM=lastDsmResult.Mxx||{};
-            h += '<table><tr><th>Property</th><th>Value</th><th>Half-wavelength</th><th>Load Factor</th></tr>';
-            // Compression
+            h += '<table><tr><th>성질</th><th>값</th><th>반파장</th><th>하중계수</th></tr>';
             const _fU=_rul('force'),_mU=_rul('moment'),_lU=_rul('length');
-            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Compression ('+_fU+')</td></tr>';
-            h += '<tr><td>P<sub>y</sub> (Yield)</td><td>'+_ruv(dP.Py,'force')+' '+_fU+'</td><td></td><td></td></tr>';
-            h += '<tr><td>P<sub>crl</sub> (Local)</td><td>'+_ruv(dP.Pcrl,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_local,4)+'</td></tr>';
-            h += '<tr><td>P<sub>crd</sub> (Distortional)</td><td>'+_ruv(dP.Pcrd,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_dist,4)+'</td></tr>';
-            h += '<tr><td>P<sub>cre</sub> (Global)</td><td>'+_ruv(dP.Pcre,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_global,4)+'</td></tr>';
-            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Bending ('+_mU+')</td></tr>';
-            h += '<tr><td>M<sub>y</sub> (Yield)</td><td>'+_ruv(dM.My_xx,'moment')+' '+_mU+'</td><td></td><td></td></tr>';
-            h += '<tr><td>M<sub>crl</sub> (Local)</td><td>'+_ruv(dM.Mxxcrl,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_local,4)+'</td></tr>';
-            h += '<tr><td>M<sub>crd</sub> (Distortional)</td><td>'+_ruv(dM.Mxxcrd,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_dist,4)+'</td></tr>';
-            h += '<tr><td>M<sub>cre</sub> (Global)</td><td>'+_ruv(dM.Mxxcre,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_global,4)+'</td></tr>';
+            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">압축 ('+_fU+')</td></tr>';
+            h += '<tr><td>P<sub>y</sub> (항복)</td><td>'+_ruv(dP.Py,'force')+' '+_fU+'</td><td></td><td></td></tr>';
+            h += '<tr><td>P<sub>crl</sub> (국부)</td><td>'+_ruv(dP.Pcrl,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_local,4)+'</td></tr>';
+            h += '<tr><td>P<sub>crd</sub> (뒤틀림)</td><td>'+_ruv(dP.Pcrd,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>P<sub>cre</sub> (전체)</td><td>'+_ruv(dP.Pcre,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_global,4)+'</td></tr>';
+            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">휨 ('+_mU+')</td></tr>';
+            h += '<tr><td>M<sub>y</sub> (항복)</td><td>'+_ruv(dM.My_xx,'moment')+' '+_mU+'</td><td></td><td></td></tr>';
+            h += '<tr><td>M<sub>crl</sub> (국부)</td><td>'+_ruv(dM.Mxxcrl,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_local,4)+'</td></tr>';
+            h += '<tr><td>M<sub>crd</sub> (뒤틀림)</td><td>'+_ruv(dM.Mxxcrd,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>M<sub>cre</sub> (전체)</td><td>'+_ruv(dM.Mxxcre,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_global,4)+'</td></tr>';
             h += '</table>';
             const dsm0 = dP.n_minima !== undefined ? dP : dM;
             if (dsm0.n_minima !== undefined) {
-                h += '<p style="font-size:10px;color:#666">Detected '+dsm0.n_minima+' minima.';
-                if (dsm0.minima) dsm0.minima.forEach((m,i) => { h += ' Min '+(i+1)+': L='+_ruv(m.length,'length')+' '+_lU+', LF='+m.load_factor.toFixed(4)+'.'; });
+                h += '<p style="font-size:10px;color:#666">'+dsm0.n_minima+'개 최솟값 검출.';
+                if (dsm0.minima) dsm0.minima.forEach((m,i) => { h += ' 최솟값 '+(i+1)+': L='+_ruv(m.length,'length')+' '+_lU+', LF='+m.load_factor.toFixed(4)+'.'; });
                 h += '</p>';
             }
         } else {
-            h += '<p>(No DSM results — run FSM analysis first)</p>';
+            h += '<p>(DSM 결과 없음 — FSM 해석을 먼저 실행하세요)</p>';
         }
         return h;
     }
@@ -2888,13 +2904,13 @@
         const fy = getNum('design-fy',50), fu = getNum('design-fu',65);
         const gradeEl = document.getElementById('select-steel-grade');
         const gradeName = gradeEl ? gradeEl.options[gradeEl.selectedIndex].text : 'Custom';
-        h += '<h3>Material</h3>';
-        h += '<table><tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>';
-        h += '<tr><td>Steel Grade</td><td colspan="2">'+gradeName+'</td></tr>';
-        h += '<tr><td>Yield Strength, F<sub>y</sub></td><td>'+fy+'</td><td>'+_rul('stress')+'</td></tr>';
-        h += '<tr><td>Tensile Strength, F<sub>u</sub></td><td>'+fu+'</td><td>'+_rul('stress')+'</td></tr>';
-        h += '<tr><td>Elastic Modulus, E</td><td>'+_ruv(29500,'stress')+'</td><td>'+_rul('stress')+'</td></tr>';
-        h += '<tr><td>Poisson\'s Ratio, &nu;</td><td>0.30</td><td></td></tr>';
+        h += '<h3>재료</h3>';
+        h += '<table><tr><th>항목</th><th>값</th><th>단위</th></tr>';
+        h += '<tr><td>강종</td><td colspan="2">'+gradeName+'</td></tr>';
+        h += '<tr><td>항복강도, F<sub>y</sub></td><td>'+fy+'</td><td>'+_rul('stress')+'</td></tr>';
+        h += '<tr><td>인장강도, F<sub>u</sub></td><td>'+fu+'</td><td>'+_rul('stress')+'</td></tr>';
+        h += '<tr><td>탄성계수, E</td><td>'+_ruv(29500,'stress')+'</td><td>'+_rul('stress')+'</td></tr>';
+        h += '<tr><td>포아송비, &nu;</td><td>0.30</td><td></td></tr>';
         h += '</table>';
 
         // 부재 구성
@@ -2902,31 +2918,32 @@
         const memberName = memberApp ? memberApp.options[memberApp.selectedIndex].text : '';
         const spanEl = document.getElementById('select-span-type');
         const spanName = spanEl ? spanEl.options[spanEl.selectedIndex].text : '';
-        const spanFt = getNum('config-span',0);
+        const _spanTblEls = document.querySelectorAll('.span-tbl-len');
+        const spanFt = _spanTblEls.length > 0 ? (parseFloat(/** @type {HTMLInputElement} */ (_spanTblEls[0]).value) || 0) : 0;
         const spacing = getNum('config-spacing',5);
         const dm = document.getElementById('select-design-method');
         const dmName = dm ? dm.value : 'LRFD';
 
-        h += '<h3>Member Configuration</h3>';
-        h += '<table><tr><th>Parameter</th><th>Value</th></tr>';
-        if (memberName) h += '<tr><td>Member Application</td><td>'+memberName+'</td></tr>';
-        if (spanName) h += '<tr><td>Span Type</td><td>'+spanName+(la?' ('+la.n_spans+' spans)':'')+'</td></tr>';
-        if (spanFt) h += '<tr><td>Span Length</td><td>'+spanFt+' '+_rul('length_ft')+'</td></tr>';
-        h += '<tr><td>Tributary Width (Spacing)</td><td>'+spacing+' '+_rul('length_ft')+'</td></tr>';
-        h += '<tr><td>Design Method</td><td>'+dmName+'</td></tr>';
+        h += '<h3>부재 구성</h3>';
+        h += '<table><tr><th>항목</th><th>값</th></tr>';
+        if (memberName) h += '<tr><td>부재 적용</td><td>'+memberName+'</td></tr>';
+        if (spanName) h += '<tr><td>스팬 유형</td><td>'+spanName+(la?' ('+la.n_spans+'경간)':'')+'</td></tr>';
+        if (spanFt) h += '<tr><td>스팬 길이</td><td>'+spanFt+' '+_rul('length_ft')+'</td></tr>';
+        h += '<tr><td>분담폭 (간격)</td><td>'+spacing+' '+_rul('length_ft')+'</td></tr>';
+        h += '<tr><td>설계 방법</td><td>'+dmName+'</td></tr>';
         const lapL = getNum('config-lap-left',0), lapR = getNum('config-lap-right',0);
-        if (lapL || lapR) h += '<tr><td>Lap Lengths (left / right)</td><td>'+lapL+' / '+lapR+' '+_rul('length_ft')+'</td></tr>';
+        if (lapL || lapR) h += '<tr><td>랩 길이 (좌 / 우)</td><td>'+lapL+' / '+lapR+' '+_rul('length_ft')+'</td></tr>';
         h += '</table>';
 
         // 설계하중 (psf, spacing은 이미 표시 단위값)
-        h += '<h3>Design Loads</h3>';
-        h += '<table><tr><th>Load Type</th><th>'+_rul('pressure')+'</th><th>'+_rul('linload')+' (&times;'+spacing+' '+_rul('length_ft')+')</th><th>Description</th></tr>';
+        h += '<h3>설계 하중</h3>';
+        h += '<table><tr><th>하중 유형</th><th>'+_rul('pressure')+'</th><th>'+_rul('linload')+' (&times;'+spacing+' '+_rul('length_ft')+')</th><th>설명</th></tr>';
         const loadDefs = [
-            ['D','load-D-psf','Dead Load (self-weight + superimposed)'],
-            ['Lr','load-Lr-psf','Roof Live Load'],
-            ['S','load-S-psf','Snow Load'],
-            ['L','load-L-psf','Floor Live Load'],
-            ['W (uplift)','load-Wu-psf','Wind Uplift Load'],
+            ['D','load-D-psf','고정하중 (자중 + 부가하중)'],
+            ['Lr','load-Lr-psf','지붕 활하중'],
+            ['S','load-S-psf','적설하중'],
+            ['L','load-L-psf','바닥 활하중'],
+            ['W (양력)','load-Wu-psf','풍양력 하중'],
         ];
         loadDefs.forEach(ld => {
             const psf = getNum(ld[1],0);
@@ -2941,11 +2958,11 @@
         const deckType = document.getElementById('select-deck-type');
         const deckName = deckType ? deckType.options[deckType.selectedIndex].text : 'None';
         if (deckName !== 'None' && deckName !== 'none') {
-            h += '<h3>Deck Information</h3>';
-            h += '<table><tr><th>Parameter</th><th>Value</th></tr>';
-            h += '<tr><td>Deck Type</td><td>'+deckName+'</td></tr>';
-            h += '<tr><td>Panel Thickness, t<sub>panel</sub></td><td>'+getNum('deck-t-panel',0.018)+' '+_rul('thickness')+'</td></tr>';
-            h += '<tr><td>Fastener Spacing</td><td>'+getNum('deck-fastener-spacing',12)+' '+_rul('length')+'</td></tr>';
+            h += '<h3>데크 정보</h3>';
+            h += '<table><tr><th>항목</th><th>값</th></tr>';
+            h += '<tr><td>데크 유형</td><td>'+deckName+'</td></tr>';
+            h += '<tr><td>패널 두께, t<sub>panel</sub></td><td>'+getNum('deck-t-panel',0.018)+' '+_rul('thickness')+'</td></tr>';
+            h += '<tr><td>체결구 간격</td><td>'+getNum('deck-fastener-spacing',12)+' '+_rul('length')+'</td></tr>';
             h += '</table>';
         }
         return h;
@@ -2959,24 +2976,24 @@
         if (la.gravity && la.gravity.M_diagram && la.gravity.M_diagram.length > 2) {
             h += renderBeamSchematic(la);
             const mVals = _unitSystem === 'SI' ? la.gravity.M_diagram.map(v => toDisplay(v,'moment_ft')) : la.gravity.M_diagram;
-            h += renderDiagramSVG(mVals, 'Moment Diagram ('+_rul('moment_ft')+')', '#1565c0', true);
+            h += renderDiagramSVG(mVals, '모멘트 다이어그램 ('+_rul('moment_ft')+')', '#1565c0', true);
         }
         if (la.gravity && la.gravity.V_diagram && la.gravity.V_diagram.length > 2) {
             const vVals = _unitSystem === 'SI' ? la.gravity.V_diagram.map(v => toDisplay(v,'force')) : la.gravity.V_diagram;
-            h += renderDiagramSVG(vVals, 'Shear Diagram ('+_rul('force')+')', '#e65100', false);
+            h += renderDiagramSVG(vVals, '전단력 다이어그램 ('+_rul('force')+')', '#e65100', false);
         }
 
         if (la.gravity) {
-            h += '<h3>Gravity Controlling Combination: '+la.gravity.combo+'</h3>';
-            h += '<table><tr><th>Location</th><th>x ('+_rul('length_ft')+')</th><th>M<sub>u</sub> ('+_rul('moment_ft')+')</th><th>V<sub>u</sub> ('+_rul('force')+')</th><th>R<sub>u</sub> ('+_rul('force')+')</th><th>Region</th></tr>';
+            h += '<h3>중력 지배 하중조합: '+la.gravity.combo+'</h3>';
+            h += '<table><tr><th>위치</th><th>x ('+_rul('length_ft')+')</th><th>M<sub>u</sub> ('+_rul('moment_ft')+')</th><th>V<sub>u</sub> ('+_rul('force')+')</th><th>R<sub>u</sub> ('+_rul('force')+')</th><th>구간</th></tr>';
             la.gravity.locations.forEach(loc => {
                 h += '<tr><td>'+loc.name+'</td><td>'+_ruv(loc.x_ft,'length_ft')+'</td><td>'+_ruv(loc.Mu,'moment_ft')+'</td><td>'+_ruv(loc.Vu,'force')+'</td><td>'+_ruv(loc.Ru,'force')+'</td><td>'+( loc.region||'')+'</td></tr>';
             });
             h += '</table>';
         }
         if (la.uplift) {
-            h += '<h3>Uplift Controlling Combination: '+la.uplift.combo+'</h3>';
-            h += '<table><tr><th>Location</th><th>M<sub>u</sub> ('+_rul('moment_ft')+')</th></tr>';
+            h += '<h3>양력 지배 하중조합: '+la.uplift.combo+'</h3>';
+            h += '<table><tr><th>위치</th><th>M<sub>u</sub> ('+_rul('moment_ft')+')</th></tr>';
             la.uplift.locations.forEach(loc => { h += '<tr><td>'+loc.name+'</td><td>'+_ruv(loc.Mu,'moment_ft')+'</td></tr>'; });
             h += '</table>';
         }
@@ -2984,32 +3001,32 @@
         // Auto-Determined Parameters with explanation
         if (la.auto_params) {
             const ap = la.auto_params;
-            h += '<h3>Auto-Determined Design Parameters</h3>';
-            h += '<p style="font-size:10px;color:#555">The following parameters are automatically computed from the load analysis results, deck configuration, and moment diagram shape:</p>';
-            h += '<table><tr><th>Parameter</th><th>Value</th><th>Calculation Method</th></tr>';
+            h += '<h3>자동 결정 설계 매개변수</h3>';
+            h += '<p style="font-size:10px;color:#555">다음 매개변수는 하중 분석 결과, 데크 구성 및 모멘트 다이어그램 형태에서 자동 계산됩니다:</p>';
+            h += '<table><tr><th>매개변수</th><th>값</th><th>계산 방법</th></tr>';
             if (ap.deck && ap.deck.type !== 'none') {
-                h += '<tr><td>k<sub>&phi;</sub> (Rotational Stiffness)</td><td>'+_ruv(ap.deck.kphi,'rotStiff')+' '+_rul('rotStiff')+'</td>';
-                h += '<td>Chen & Moen (2011): k<sub>&phi;</sub> = 1/(1/(k&middot;c&sup2;) + c&sup3;/(3EIc&sup2;)), where k=fastener stiffness/spacing, c=flange/2</td></tr>';
-                h += '<tr><td>k<sub>x</sub> (Lateral Stiffness)</td><td>'+ap.deck.kx+' kip/in/in</td>';
-                h += '<td>2-ply series spring: k<sub>x</sub> = (1/(1/(Et<sub>1</sub>)+1/(Et<sub>2</sub>)))/s &times; 0.04 reduction factor</td></tr>';
+                h += '<tr><td>k<sub>&phi;</sub> (회전강성)</td><td>'+_ruv(ap.deck.kphi,'rotStiff')+' '+_rul('rotStiff')+'</td>';
+                h += '<td>Chen & Moen (2011): k<sub>&phi;</sub> = 1/(1/(k&middot;c&sup2;) + c&sup3;/(3EIc&sup2;)), k=체결구강성/간격, c=플랜지/2</td></tr>';
+                h += '<tr><td>k<sub>x</sub> (횡강성)</td><td>'+ap.deck.kx+' kip/in/in</td>';
+                h += '<td>2겹 직렬 스프링: k<sub>x</sub> = (1/(1/(Et<sub>1</sub>)+1/(Et<sub>2</sub>)))/s &times; 0.04 감소계수</td></tr>';
             }
             if (ap.positive_region) {
-                h += '<tr><td>Positive Region Bracing</td><td>Fully braced (L<sub>y</sub>=0)</td>';
-                h += '<td>Top flange in compression, continuously braced by deck panel — no LTB check required</td></tr>';
+                h += '<tr><td>정모멘트 구간 가새</td><td>완전 지지 (L<sub>y</sub>=0)</td>';
+                h += '<td>상부 플랜지 압축, 데크 패널로 연속 지지 — LTB 검토 불필요</td></tr>';
             }
             if (ap.negative_region) {
-                h += '<tr><td>Negative L<sub>y</sub></td><td>'+_ruv(ap.negative_region.Ly_in,'length')+' '+_rul('length')+'</td>';
-                h += '<td>Distance from inflection point (M=0) to lap end or support. Bottom flange in compression — unbraced.</td></tr>';
-                h += '<tr><td>Negative C<sub>b</sub></td><td>'+ap.negative_region.Cb+'</td>';
-                h += '<td>AISI Eq. F2.1.1-2: C<sub>b</sub> = 12.5M<sub>max</sub> / (2.5M<sub>max</sub>+3M<sub>A</sub>+4M<sub>B</sub>+3M<sub>C</sub>), computed from moment diagram over unbraced segment</td></tr>';
+                h += '<tr><td>부모멘트 L<sub>y</sub></td><td>'+_ruv(ap.negative_region.Ly_in,'length')+' '+_rul('length')+'</td>';
+                h += '<td>변곡점(M=0)에서 랩 끝단 또는 지점까지 거리. 하부 플랜지 압축 — 비지지.</td></tr>';
+                h += '<tr><td>부모멘트 C<sub>b</sub></td><td>'+ap.negative_region.Cb+'</td>';
+                h += '<td>AISI Eq. F2.1.1-2: C<sub>b</sub> = 12.5M<sub>max</sub> / (2.5M<sub>max</sub>+3M<sub>A</sub>+4M<sub>B</sub>+3M<sub>C</sub>), 비지지 구간 모멘트 다이어그램에서 계산</td></tr>';
             }
             if (ap.uplift_R != null) {
-                h += '<tr><td>Uplift R (§I6.2.1)</td><td>'+ap.uplift_R+'</td>';
-                h += '<td>Reduction factor per AISI S100 §I6.2.1 — based on section geometry checks (d/t, d/b, b&ge;2.125, flat_b/t, etc.)</td></tr>';
+                h += '<tr><td>양력 R (§I6.2.1)</td><td>'+ap.uplift_R+'</td>';
+                h += '<td>AISI S100 §I6.2.1 감소계수 — 단면 형상 검토 기반 (d/t, d/b, b&ge;2.125, flat_b/t 등)</td></tr>';
             }
             if (ap.unbraced && ap.unbraced.inflection_points_ft) {
-                h += '<tr><td>Inflection Points</td><td>'+ap.unbraced.inflection_points_ft.map(v=>_ruv(v,'length_ft')).join(', ')+' '+_rul('length_ft')+'</td>';
-                h += '<td>Locations where moment = 0, found by linear interpolation of moment diagram</td></tr>';
+                h += '<tr><td>변곡점</td><td>'+ap.unbraced.inflection_points_ft.map(v=>_ruv(v,'length_ft')).join(', ')+' '+_rul('length_ft')+'</td>';
+                h += '<td>모멘트 = 0인 위치, 모멘트 다이어그램의 선형보간으로 산출</td></tr>';
             }
             h += '</table>';
         }
@@ -3031,34 +3048,34 @@
         // Interaction check
         if (d.interaction) {
             const ir = d.interaction;
-            h += '<h3>Interaction Check — §H1.2 (Eq. '+( ir.equation||'H1.2-1')+')</h3>';
+            h += '<h3>조합 검토 — §H1.2 (Eq. '+( ir.equation||'H1.2-1')+')</h3>';
             h += '<span class="eq">P<sub>u</sub>/P<sub>a</sub> + M<sub>ux</sub>/M<sub>ax</sub> + M<sub>uy</sub>/M<sub>ay</sub> &le; 1.0</span>';
-            h += '<table><tr><th>Term</th><th>Demand</th><th>Capacity</th><th>Ratio</th></tr>';
-            h += '<tr><td>Axial P/Pa</td><td></td><td></td><td>'+_rv(ir.P_ratio,4)+'</td></tr>';
-            h += '<tr><td>Flexure Mx/Max</td><td></td><td></td><td>'+_rv(ir.Mx_ratio,4)+'</td></tr>';
-            h += '<tr><td>Flexure My/May</td><td></td><td></td><td>'+_rv(ir.My_ratio,4)+'</td></tr>';
-            h += '<tr style="font-weight:700"><td>Total</td><td colspan="2"></td><td class="'+(ir.pass?'pass':'fail')+'">'+_rv(ir.total,4)+' &le; 1.0 '+(ir.pass?'OK':'NG')+'</td></tr>';
+            h += '<table><tr><th>항</th><th>소요</th><th>저항</th><th>비율</th></tr>';
+            h += '<tr><td>축력 P/Pa</td><td></td><td></td><td>'+_rv(ir.P_ratio,4)+'</td></tr>';
+            h += '<tr><td>휨 Mx/Max</td><td></td><td></td><td>'+_rv(ir.Mx_ratio,4)+'</td></tr>';
+            h += '<tr><td>휨 My/May</td><td></td><td></td><td>'+_rv(ir.My_ratio,4)+'</td></tr>';
+            h += '<tr style="font-weight:700"><td>합계</td><td colspan="2"></td><td class="'+(ir.pass?'pass':'fail')+'">'+_rv(ir.total,4)+' &le; 1.0 '+(ir.pass?'OK':'NG')+'</td></tr>';
             h += '</table>';
         }
         if (d.shear_interaction) {
             const si = d.shear_interaction;
-            h += '<h3>Bending + Shear Interaction — §H2 (Eq. '+(si.equation||'H2-1')+')</h3>';
+            h += '<h3>휨 + 전단 조합 검토 — §H2 (Eq. '+(si.equation||'H2-1')+')</h3>';
             h += '<span class="eq">(M<sub>u</sub>/M<sub>ao</sub>)&sup2; + (V<sub>u</sub>/V<sub>a</sub>)&sup2; &le; 1.0</span>';
-            h += '<table><tr><th>Term</th><th>Ratio</th></tr>';
+            h += '<table><tr><th>항</th><th>비율</th></tr>';
             h += '<tr><td>M/Mao</td><td>'+_rv(si.M_ratio,4)+'</td></tr>';
             h += '<tr><td>V/Va</td><td>'+_rv(si.V_ratio,4)+'</td></tr>';
-            h += '<tr style="font-weight:700"><td>Total (SRSS)</td><td class="'+(si.pass?'pass':'fail')+'">'+_rv(si.total,4)+' &le; 1.0 '+(si.pass?'OK':'NG')+'</td></tr>';
+            h += '<tr style="font-weight:700"><td>합계 (SRSS)</td><td class="'+(si.pass?'pass':'fail')+'">'+_rv(si.total,4)+' &le; 1.0 '+(si.pass?'OK':'NG')+'</td></tr>';
             h += '</table>';
         }
 
         // Step summary table
         const steps = d.steps || [];
         if (steps.length > 0) {
-            h += '<h3>Calculation Step Summary</h3>';
-            h += '<table><tr><th>#</th><th>Step</th><th>Formula</th><th>Result</th><th>Unit</th></tr>';
+            h += '<h3>계산 단계 요약</h3>';
+            h += '<table><tr><th>#</th><th>단계</th><th>수식</th><th>결과</th><th>단위</th></tr>';
             steps.forEach(s => {
                 const gov = s.controlling_mode ? ' style="background:#fff3e0;font-weight:600"' : '';
-                h += '<tr'+gov+'><td>'+s.step+'</td><td>'+s.name+(s.controlling_mode?' <b>[GOVERNS]</b>':'')+'</td>';
+                h += '<tr'+gov+'><td>'+s.step+'</td><td>'+s.name+(s.controlling_mode?' <b>[지배]</b>':'')+'</td>';
                 h += '<td style="font-size:10px">'+(s.formula||'')+'</td>';
                 const sut = _mapUSUnit(s.unit);
                 const sv = (s.value != null && sut) ? _ruv(s.value, sut) : (s.value != null ? s.value : '');
@@ -3074,46 +3091,46 @@
         let h = '';
         const phi=0.90,omega=1.67;
         // Step 1: My
-        h += '<h3>Step 1: Yield Moment, M<sub>y</sub></h3>';
+        h += '<h3>단계 1: 항복 모멘트, M<sub>y</sub></h3>';
         h += '<span class="eq">M<sub>y</sub> = S<sub>f</sub> &times; F<sub>y</sub> = '+_ruv(d.My,'moment')+' '+_rul('moment')+'</span>';
 
         // Step 2: Global/LTB — Mne
-        h += '<h3>Step 2: Global Buckling / Lateral-Torsional Buckling — §F2</h3>';
-        h += '<p>The global buckling stress F<sub>cre</sub> is computed based on the unbraced length L<sub>b</sub>, moment gradient C<sub>b</sub>, and section properties (r<sub>y</sub>, J, C<sub>w</sub>).</p>';
+        h += '<h3>단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2</h3>';
+        h += '<p>전체좌굴 응력 F<sub>cre</sub>는 비지지 길이 L<sub>b</sub>, 모멘트 구배 C<sub>b</sub>, 단면 성질(r<sub>y</sub>, J, C<sub>w</sub>)로 산정합니다.</p>';
         h += '<span class="eq">F<sub>cre</sub> = C<sub>b</sub> &middot; r<sub>o</sub> &middot; A / S<sub>f</sub> &middot; &radic;(&sigma;<sub>ey</sub> &middot; &sigma;<sub>t</sub>)</span>';
-        h += '<p>Depending on F<sub>cre</sub> relative to F<sub>y</sub>:</p>';
-        h += '<table><tr><th>Condition</th><th>Equation</th><th>Regime</th></tr>';
-        h += '<tr><td>F<sub>cre</sub> &ge; 2.78 F<sub>y</sub></td><td>F<sub>n</sub> = F<sub>y</sub></td><td>Yielding (compact)</td></tr>';
-        h += '<tr><td>2.78 F<sub>y</sub> &gt; F<sub>cre</sub> &gt; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = (10/9)F<sub>y</sub>(1 - 10F<sub>y</sub>/(36F<sub>cre</sub>))</td><td>Inelastic LTB</td></tr>';
-        h += '<tr><td>F<sub>cre</sub> &le; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = F<sub>cre</sub></td><td>Elastic LTB</td></tr>';
+        h += '<p>F<sub>cre</sub>와 F<sub>y</sub>의 관계에 따라:</p>';
+        h += '<table><tr><th>조건</th><th>수식</th><th>영역</th></tr>';
+        h += '<tr><td>F<sub>cre</sub> &ge; 2.78 F<sub>y</sub></td><td>F<sub>n</sub> = F<sub>y</sub></td><td>항복 (조밀)</td></tr>';
+        h += '<tr><td>2.78 F<sub>y</sub> &gt; F<sub>cre</sub> &gt; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = (10/9)F<sub>y</sub>(1 - 10F<sub>y</sub>/(36F<sub>cre</sub>))</td><td>비탄성 LTB</td></tr>';
+        h += '<tr><td>F<sub>cre</sub> &le; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = F<sub>cre</sub></td><td>탄성 LTB</td></tr>';
         h += '</table>';
         h += '<span class="eq">M<sub>ne</sub> = S<sub>f</sub> &times; F<sub>n</sub> = <b>'+_ruv(d.Mne,'moment')+'</b> '+_rul('moment')+'</span>';
 
         // Step 3: Local — Mnl
-        h += '<h3>Step 3: Local Buckling — §F3.2</h3>';
-        h += '<p>Local buckling reduces the global strength M<sub>ne</sub> when the local slenderness &lambda;<sub>l</sub> exceeds 0.776:</p>';
+        h += '<h3>단계 3: 국부좌굴 — §F3.2</h3>';
+        h += '<p>국부 세장비 &lambda;<sub>l</sub>이 0.776을 초과하면 국부좌굴이 전체강도 M<sub>ne</sub>를 감소시킵니다:</p>';
         h += '<span class="eq">&lambda;<sub>l</sub> = &radic;(M<sub>ne</sub> / M<sub>crl</sub>)</span>';
-        h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
-        h += '<tr><td>&lambda;<sub>l</sub> &le; 0.776</td><td>M<sub>nl</sub> = M<sub>ne</sub> (no reduction)</td></tr>';
+        h += '<table><tr><th>조건</th><th>수식</th></tr>';
+        h += '<tr><td>&lambda;<sub>l</sub> &le; 0.776</td><td>M<sub>nl</sub> = M<sub>ne</sub> (감소 없음)</td></tr>';
         h += '<tr><td>&lambda;<sub>l</sub> &gt; 0.776</td><td>M<sub>nl</sub> = [1 - 0.15(M<sub>crl</sub>/M<sub>ne</sub>)<sup>0.4</sup>] &middot; (M<sub>crl</sub>/M<sub>ne</sub>)<sup>0.4</sup> &middot; M<sub>ne</sub></td></tr>';
         h += '</table>';
-        const govL = d.Mnl < d.Mne ? ' (local buckling reduces strength by '+(100*(1-d.Mnl/d.Mne)).toFixed(1)+'%)' : ' (no reduction)';
+        const govL = d.Mnl < d.Mne ? ' (국부좌굴로 강도 '+(100*(1-d.Mnl/d.Mne)).toFixed(1)+'% 감소)' : ' (감소 없음)';
         h += '<span class="eq">M<sub>nl</sub> = <b>'+_ruv(d.Mnl,'moment')+'</b> '+_rul('moment')+govL+'</span>';
 
         // Step 4: Distortional — Mnd
-        h += '<h3>Step 4: Distortional Buckling — §F4</h3>';
-        h += '<p>Distortional buckling is checked independently against M<sub>y</sub>:</p>';
+        h += '<h3>단계 4: 뒤틀림좌굴 — §F4</h3>';
+        h += '<p>뒤틀림좌굴은 M<sub>y</sub>에 대해 독립적으로 검토합니다:</p>';
         h += '<span class="eq">&lambda;<sub>d</sub> = &radic;(M<sub>y</sub> / M<sub>crd</sub>)</span>';
-        h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
-        h += '<tr><td>&lambda;<sub>d</sub> &le; 0.673</td><td>M<sub>nd</sub> = M<sub>y</sub> (no reduction)</td></tr>';
+        h += '<table><tr><th>조건</th><th>수식</th></tr>';
+        h += '<tr><td>&lambda;<sub>d</sub> &le; 0.673</td><td>M<sub>nd</sub> = M<sub>y</sub> (감소 없음)</td></tr>';
         h += '<tr><td>&lambda;<sub>d</sub> &gt; 0.673</td><td>M<sub>nd</sub> = [1 - 0.22(M<sub>crd</sub>/M<sub>y</sub>)<sup>0.5</sup>] &middot; (M<sub>crd</sub>/M<sub>y</sub>)<sup>0.5</sup> &middot; M<sub>y</sub></td></tr>';
         h += '</table>';
         h += '<span class="eq">M<sub>nd</sub> = <b>'+_ruv(d.Mnd,'moment')+'</b> '+_rul('moment')+'</span>';
 
         // Step 5: Nominal & Design
-        h += '<h3>Step 5: Nominal Strength & Design Strength</h3>';
+        h += '<h3>단계 5: 공칭강도 & 설계강도</h3>';
         h += '<span class="eq">M<sub>n</sub> = min(M<sub>ne</sub>, M<sub>nl</sub>, M<sub>nd</sub>) = min('+_ruv(d.Mne,'moment')+', '+_ruv(d.Mnl,'moment')+', '+_ruv(d.Mnd,'moment')+') = <b>'+_ruv(d.Mn,'moment')+'</b> '+_rul('moment')+'</span>';
-        h += '<span class="eq">Controlling failure mode: <b>'+(d.controlling_mode||'')+'</b></span>';
+        h += '<span class="eq">지배 파괴 모드: <b>'+(d.controlling_mode||'')+'</b></span>';
         if (dm==='LRFD') {
             h += '<span class="eq">&phi;<sub>b</sub> = '+phi+' (LRFD)</span>';
             h += '<span class="eq">&phi;M<sub>n</sub> = '+phi+' &times; '+_ruv(d.Mn,'moment')+' = <b class="result">'+_ruv(d.phi_Mn,'moment')+'</b> '+_rul('moment')+'</span>';
@@ -3131,11 +3148,11 @@
     function _rptCompression(d, dm) {
         let h = '';
         const phi=0.85,omega=1.80;
-        h += '<h3>Step 1: Yield Load, P<sub>y</sub></h3>';
+        h += '<h3>단계 1: 항복 하중, P<sub>y</sub></h3>';
         h += '<span class="eq">P<sub>y</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_ruv(d.Py,'force')+' '+_rul('force')+'</span>';
 
-        h += '<h3>Step 2: Global Buckling — §E2</h3>';
-        h += '<p>Flexural, torsional, or flexural-torsional buckling stress F<sub>cre</sub> is determined from KL/r, J, C<sub>w</sub>, and section symmetry.</p>';
+        h += '<h3>단계 2: 전체좌굴 — §E2</h3>';
+        h += '<p>휨, 비틀림 또는 휨-비틀림 좌굴응력 F<sub>cre</sub>는 KL/r, J, C<sub>w</sub> 및 단면 대칭성에서 결정됩니다.</p>';
         h += '<span class="eq">&lambda;<sub>c</sub> = &radic;(F<sub>y</sub> / F<sub>cre</sub>)</span>';
         h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
         h += '<tr><td>&lambda;<sub>c</sub> &le; 1.5</td><td>F<sub>n</sub> = (0.658<sup>&lambda;<sub>c</sub>&sup2;</sup>) F<sub>y</sub></td></tr>';
@@ -3143,7 +3160,7 @@
         h += '</table>';
         h += '<span class="eq">P<sub>ne</sub> = A<sub>g</sub> &times; F<sub>n</sub> = <b>'+_ruv(d.Pne,'force')+'</b> '+_rul('force')+'</span>';
 
-        h += '<h3>Step 3: Local Buckling — §E3.2</h3>';
+        h += '<h3>단계 3: 국부좌굴 — §E3.2</h3>';
         h += '<span class="eq">&lambda;<sub>l</sub> = &radic;(P<sub>ne</sub>/P<sub>crl</sub>)</span>';
         h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
         h += '<tr><td>&lambda;<sub>l</sub> &le; 0.776</td><td>P<sub>nl</sub> = P<sub>ne</sub></td></tr>';
@@ -3151,7 +3168,7 @@
         h += '</table>';
         h += '<span class="eq">P<sub>nl</sub> = <b>'+_ruv(d.Pnl,'force')+'</b> '+_rul('force')+'</span>';
 
-        h += '<h3>Step 4: Distortional Buckling — §E4</h3>';
+        h += '<h3>단계 4: 뒤틀림좌굴 — §E4</h3>';
         h += '<span class="eq">&lambda;<sub>d</sub> = &radic;(P<sub>y</sub>/P<sub>crd</sub>)</span>';
         h += '<table><tr><th>Condition</th><th>Equation</th></tr>';
         h += '<tr><td>&lambda;<sub>d</sub> &le; 0.561</td><td>P<sub>nd</sub> = P<sub>y</sub></td></tr>';
@@ -3159,9 +3176,9 @@
         h += '</table>';
         h += '<span class="eq">P<sub>nd</sub> = <b>'+_ruv(d.Pnd,'force')+'</b> '+_rul('force')+'</span>';
 
-        h += '<h3>Step 5: Nominal & Design Strength</h3>';
+        h += '<h3>단계 5: 공칭강도 & 설계강도</h3>';
         h += '<span class="eq">P<sub>n</sub> = min(P<sub>ne</sub>,P<sub>nl</sub>,P<sub>nd</sub>) = min('+_ruv(d.Pne,'force')+','+_ruv(d.Pnl,'force')+','+_ruv(d.Pnd,'force')+') = <b>'+_ruv(d.Pn,'force')+'</b> '+_rul('force')+'</span>';
-        h += '<span class="eq">Controlling: <b>'+(d.controlling_mode||'')+'</b></span>';
+        h += '<span class="eq">지배 모드: <b>'+(d.controlling_mode||'')+'</b></span>';
         if (dm==='LRFD') h += '<span class="eq">&phi;P<sub>n</sub> = '+phi+' &times; '+_ruv(d.Pn,'force')+' = <b class="result">'+_ruv(d.phi_Pn,'force')+'</b> '+_rul('force')+'</span>';
         else h += '<span class="eq">P<sub>n</sub>/&Omega; = '+_ruv(d.Pn,'force')+'/'+omega+' = <b class="result">'+_ruv(d.Pn_omega,'force')+'</b> '+_rul('force')+'</span>';
         return h;
@@ -3170,14 +3187,14 @@
     function _rptCombined(d, dm) {
         let h = '';
         const c=d.compression||{},f=d.flexure_x||{};
-        h += '<h3>Compression Strength</h3>';
-        h += '<span class="eq">P<sub>n</sub> = '+_ruv(c.Pn,'force')+' '+_rul('force')+' ('+(c.controlling_mode||'')+'), Design = <b>'+_ruv(c.design_strength,'force')+'</b> '+_rul('force')+'</span>';
-        h += '<h3>Flexure Strength (x-axis)</h3>';
-        h += '<span class="eq">M<sub>n</sub> = '+_ruv(f.Mn,'moment')+' '+_rul('moment')+' ('+(f.controlling_mode||'')+'), Design = <b>'+_ruv(f.design_strength,'moment')+'</b> '+_rul('moment')+'</span>';
+        h += '<h3>압축 강도</h3>';
+        h += '<span class="eq">P<sub>n</sub> = '+_ruv(c.Pn,'force')+' '+_rul('force')+' ('+(c.controlling_mode||'')+'), 설계강도 = <b>'+_ruv(c.design_strength,'force')+'</b> '+_rul('force')+'</span>';
+        h += '<h3>휨 강도 (x축)</h3>';
+        h += '<span class="eq">M<sub>n</sub> = '+_ruv(f.Mn,'moment')+' '+_rul('moment')+' ('+(f.controlling_mode||'')+'), 설계강도 = <b>'+_ruv(f.design_strength,'moment')+'</b> '+_rul('moment')+'</span>';
         if (d.amplification) {
             const amp = d.amplification;
-            h += '<h3>§C1 Moment Amplification (P-&delta; Effect)</h3>';
-            h += '<p>Second-order P-&delta; effect amplifies moments in compression members:</p>';
+            h += '<h3>§C1 모멘트 확대 (P-&delta; 효과)</h3>';
+            h += '<p>2차 P-&delta; 효과가 압축부재의 모멘트를 확대합니다:</p>';
             h += '<span class="eq">P<sub>Ex</sub> = &pi;&sup2;EA<sub>g</sub>/(KL/r<sub>x</sub>)&sup2; = '+_ruv(amp.PEx,'force')+' '+_rul('force')+'</span>';
             h += '<span class="eq">&alpha;<sub>x</sub> = C<sub>mx</sub> / (1 - P<sub>u</sub>/P<sub>Ex</sub>) = '+_rv(amp.alpha_x,4)+' &ge; 1.0</span>';
             h += '<span class="eq">M<sub>ux,amp</sub> = M<sub>ux</sub> &times; &alpha;<sub>x</sub> = '+_ruv(amp.Mux_amp,'moment')+' '+_rul('moment')+'</span>';
@@ -3187,11 +3204,11 @@
 
     function _rptTension(d, dm) {
         let h = '';
-        h += '<h3>§D2 — Tensile Yielding on Gross Section</h3>';
+        h += '<h3>§D2 — 총단면 인장항복</h3>';
         h += '<span class="eq">T<sub>n</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_ruv(d.Tn_yield,'force')+' '+_rul('force')+', &phi;<sub>t</sub>=0.90, &Omega;<sub>t</sub>=1.67</span>';
-        h += '<h3>§D3 — Tensile Rupture on Net Section</h3>';
+        h += '<h3>§D3 — 순단면 인장파단</h3>';
         h += '<span class="eq">T<sub>n</sub> = A<sub>n</sub> &times; F<sub>u</sub> = '+_ruv(d.Tn_rupture,'force')+' '+_rul('force')+', &phi;<sub>t</sub>=0.75, &Omega;<sub>t</sub>=2.00</span>';
-        h += '<span class="eq">Controlling: <b>'+(d.controlling_mode||'')+'</b>, Design Strength = <b class="result">'+_ruv(d.design_strength,'force')+'</b> '+_rul('force')+'</span>';
+        h += '<span class="eq">지배 모드: <b>'+(d.controlling_mode||'')+'</b>, 설계강도 = <b class="result">'+_ruv(d.design_strength,'force')+'</b> '+_rul('force')+'</span>';
         return h;
     }
 
@@ -3200,47 +3217,47 @@
     // ═══════════════════════════════════════════════════════
     function _rptSummary(d, la) {
         const mt = d.member_type||'', dm = d.design_method||'LRFD';
-        const mtNames = {flexure:'Flexural Member (Beam/Purlin)',compression:'Compression Member (Column/Stud)',combined:'Combined Axial + Bending Member',tension:'Tension Member'};
+        const mtNames = {flexure:'휨 부재 (보/퍼린)',compression:'압축 부재 (기둥/스터드)',combined:'축력+휨 조합 부재',tension:'인장 부재'};
         let h = '';
 
-        h += '<p>This report presents the design check of a <b>'+(mtNames[mt]||mt)+'</b> per AISI S100-16 using the Direct Strength Method (DSM). ';
-        h += 'The design method is <b>'+dm+'</b>. ';
-        if (la) h += 'The member spans <b>'+la.n_spans+'</b> span(s) and the governing gravity load combination is <b>'+((la.gravity||{}).combo||'N/A')+'</b>. ';
-        h += 'The controlling failure mode is <b>'+(d.controlling_mode||'N/A')+'</b>.</p>';
+        h += '<p>본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 <b>'+(mtNames[mt]||mt)+'</b>의 설계 검토 결과입니다. ';
+        h += '설계 방법은 <b>'+dm+'</b>입니다. ';
+        if (la) h += '부재는 <b>'+la.n_spans+'</b>경간이며, 중력 지배 하중조합은 <b>'+((la.gravity||{}).combo||'N/A')+'</b>입니다. ';
+        h += '지배 파괴 모드는 <b>'+(d.controlling_mode||'N/A')+'</b>입니다.</p>';
 
         h += '<table>';
-        h += '<tr><th style="width:50%">Item</th><th>Value</th></tr>';
-        h += '<tr><td>Design Standard</td><td>AISI S100-16</td></tr>';
-        h += '<tr><td>Analysis Method</td><td>Direct Strength Method (DSM) — Finite Strip</td></tr>';
-        h += '<tr><td>Member Type</td><td>'+(mtNames[mt]||mt)+'</td></tr>';
-        h += '<tr><td>Design Method</td><td>'+dm+'</td></tr>';
-        h += '<tr><td>Controlling Failure Mode</td><td><b>'+(d.controlling_mode||'')+'</b></td></tr>';
+        h += '<tr><th style="width:50%">항목</th><th>값</th></tr>';
+        h += '<tr><td>설계 기준</td><td>AISI S100-16</td></tr>';
+        h += '<tr><td>해석 방법</td><td>직접강도법 (DSM) — 유한스트립법</td></tr>';
+        h += '<tr><td>부재 유형</td><td>'+(mtNames[mt]||mt)+'</td></tr>';
+        h += '<tr><td>설계 방법</td><td>'+dm+'</td></tr>';
+        h += '<tr><td>지배 파괴 모드</td><td><b>'+(d.controlling_mode||'')+'</b></td></tr>';
 
         if (mt==='flexure') {
-            h += '<tr><td>Nominal Moment, M<sub>n</sub></td><td>'+_ruv(d.Mn,'moment')+' '+_rul('moment')+'</td></tr>';
-            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'moment')+'</b> '+_rul('moment')+'</td></tr>';
+            h += '<tr><td>공칭 모멘트, M<sub>n</sub></td><td>'+_ruv(d.Mn,'moment')+' '+_rul('moment')+'</td></tr>';
+            h += '<tr><td>설계강도, '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'moment')+'</b> '+_rul('moment')+'</td></tr>';
         } else if (mt==='compression') {
-            h += '<tr><td>Nominal Strength, P<sub>n</sub></td><td>'+_ruv(d.Pn,'force')+' '+_rul('force')+'</td></tr>';
-            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;P<sub>n</sub>':'P<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'force')+'</b> '+_rul('force')+'</td></tr>';
+            h += '<tr><td>공칭강도, P<sub>n</sub></td><td>'+_ruv(d.Pn,'force')+' '+_rul('force')+'</td></tr>';
+            h += '<tr><td>설계강도, '+(dm==='LRFD'?'&phi;P<sub>n</sub>':'P<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'force')+'</b> '+_rul('force')+'</td></tr>';
         } else {
-            h += '<tr><td>Design Strength</td><td><b>'+_rv(d.design_strength)+'</b></td></tr>';
+            h += '<tr><td>설계강도</td><td><b>'+_rv(d.design_strength)+'</b></td></tr>';
         }
 
         if (d.utilization != null) {
             const pct = (d.utilization*100).toFixed(1);
-            h += '<tr><td>Demand/Capacity Ratio (DCR)</td><td class="'+(d.pass?'pass':'fail')+'" style="font-size:14px"><b>'+pct+'% — '+(d.pass?'OK':'NG')+'</b></td></tr>';
+            h += '<tr><td>소요/저항 비율 (DCR)</td><td class="'+(d.pass?'pass':'fail')+'" style="font-size:14px"><b>'+pct+'% — '+(d.pass?'OK':'NG')+'</b></td></tr>';
         }
         if (d.interaction) {
-            h += '<tr><td>Interaction Check (§H1.2)</td><td class="'+(d.interaction.pass?'pass':'fail')+'"><b>'+_rv(d.interaction.total,4)+'</b> &le; 1.0 — '+(d.interaction.pass?'OK':'NG')+'</td></tr>';
+            h += '<tr><td>조합 검토 (§H1.2)</td><td class="'+(d.interaction.pass?'pass':'fail')+'"><b>'+_rv(d.interaction.total,4)+'</b> &le; 1.0 — '+(d.interaction.pass?'OK':'NG')+'</td></tr>';
         }
-        h += '<tr><td>Referenced Spec Sections</td><td>'+(d.spec_sections||[]).join(', ')+'</td></tr>';
+        h += '<tr><td>참조 규준 조항</td><td>'+(d.spec_sections||[]).join(', ')+'</td></tr>';
         h += '</table>';
 
-        // DSM warnings
+        // DSM 경고
         const warnings = d.dsm_warnings || [];
         if (warnings.length > 0) {
             h += '<div style="margin-top:8px;padding:6px;background:#fff3e0;border:1px solid #ff9800;border-radius:4px">';
-            h += '<b style="color:#e65100">DSM Applicability Warnings:</b><ul style="margin:4px 0;padding-left:20px">';
+            h += '<b style="color:#e65100">DSM 적용성 경고:</b><ul style="margin:4px 0;padding-left:20px">';
             warnings.forEach(w => { h += '<li>'+w+'</li>'; });
             h += '</ul></div>';
         }
@@ -3264,7 +3281,7 @@
             const warn = checks.filter(c => c.status === 'warn').length;
             const fail = checks.filter(c => c.status === 'fail').length;
             if (validationBadge) {
-                validationBadge.innerHTML = '<span style="color:#4caf50">PASS '+pass+'</span> / <span style="color:#ffab00">WARN '+warn+'</span> / <span style="color:#ff5252">FAIL '+fail+'</span>';
+                validationBadge.innerHTML = '<span style="color:#4caf50">통과 '+pass+'</span> / <span style="color:#ffab00">주의 '+warn+'</span> / <span style="color:#ff5252">실패 '+fail+'</span>';
             }
         });
     }
@@ -3285,173 +3302,178 @@
         const t = getNum('tpl-t', 0), r = getNum('tpl-r', 0);
 
         // ════════════════════════════════════════
-        // A. 단면 입력 (Section Input)
+        // A. 단면 입력
         // ════════════════════════════════════════
-        const cat = 'A. Section Input';
+        const cat = 'A. 단면 입력';
 
         checks.push({
-            category: cat, item: 'Section Defined',
+            category: cat, item: '단면 정의',
             status: (model && model.node && model.node.length > 0) ? 'pass' : 'fail',
-            value: model ? (model.node||[]).length + ' nodes' : '0',
-            criterion: 'At least 1 node defined',
-            note: model && model.node && model.node.length > 0 ? '' : 'No section defined — go to Preprocessor tab and generate a template or define nodes/elements.',
+            value: model ? (model.node||[]).length + ' 절점' : '0',
+            criterion: '최소 1개 절점 정의 필요',
+            note: model && model.node && model.node.length > 0 ? '' : '단면 미정의 — 전처리 탭에서 템플릿을 생성하거나 절점/요소를 정의하세요.',
         });
 
         checks.push({
-            category: cat, item: 'Thickness (t)',
+            category: cat, item: '두께 (t)',
             status: t > 0 ? (t >= toDisplay(0.018,'thickness') && t <= toDisplay(0.5,'thickness') ? 'pass' : 'warn') : 'fail',
-            value: t > 0 ? t+' '+_rul('thickness') : 'Not set',
-            criterion: _ruv(0.018,'thickness')+' ≤ t ≤ '+_ruv(0.5,'thickness')+' '+_rul('thickness')+' (typical CFS range)',
-            note: t <= 0 ? 'Thickness not specified.' : (t < 0.018 ? 'Very thin — verify material availability.' : (t > 0.5 ? 'Thick — may not be cold-formed.' : '')),
+            value: t > 0 ? t+' '+_rul('thickness') : '미설정',
+            criterion: _ruv(0.018,'thickness')+' ≤ t ≤ '+_ruv(0.5,'thickness')+' '+_rul('thickness')+' (CFS 일반 범위)',
+            note: t <= 0 ? '두께가 지정되지 않았습니다.' : (t < toDisplay(0.018,'thickness') ? '매우 얇음 — 재료 가용성을 확인하세요.' : (t > toDisplay(0.5,'thickness') ? '두꺼움 — 냉간성형이 아닐 수 있습니다.' : '')),
         });
 
         if (t > 0 && H > 0) {
             const wt_web = (H - 2*(t+r)) / t;
             checks.push({
-                category: cat, item: 'Web w/t Ratio',
+                category: cat, item: '웹 w/t 비',
                 status: wt_web <= 200 ? 'pass' : (wt_web <= 500 ? 'warn' : 'fail'),
                 value: wt_web.toFixed(1),
-                criterion: 'w/t ≤ 500 (Table B4.1-1 stiffened limit), ≤200 typical',
-                note: wt_web > 500 ? 'Exceeds DSM applicability limit — Table B4.1-1.' : (wt_web > 200 ? 'High web slenderness — distortional/local buckling will govern.' : ''),
+                criterion: 'w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200',
+                note: wt_web > 500 ? 'DSM 적용 한계 초과 — Table B4.1-1.' : (wt_web > 200 ? '높은 웹 세장비 — 뒤틀림/국부좌굴이 지배합니다.' : ''),
             });
         }
         if (t > 0 && B > 0) {
             const bt_fl = (B - 2*(t+r)) / t;
             checks.push({
-                category: cat, item: 'Flange b/t Ratio',
+                category: cat, item: '플랜지 b/t 비',
                 status: bt_fl <= 60 ? 'pass' : (bt_fl <= 160 ? 'warn' : 'fail'),
                 value: bt_fl.toFixed(1),
-                criterion: 'b/t ≤ 160 (Table B4.1-1 edge-stiffened limit)',
-                note: bt_fl > 160 ? 'Exceeds DSM applicability limit.' : '',
+                criterion: 'b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)',
+                note: bt_fl > 160 ? 'DSM 적용 한계 초과.' : '',
             });
         }
         if (t > 0 && D > 0) {
             const dt_lip = D / t;
             checks.push({
-                category: cat, item: 'Lip d/t Ratio',
+                category: cat, item: '립 d/t 비',
                 status: dt_lip <= 60 ? 'pass' : 'fail',
                 value: dt_lip.toFixed(1),
-                criterion: 'd/t ≤ 60 (Table B4.1-1 unstiffened limit)',
-                note: dt_lip > 60 ? 'Lip too slender for DSM.' : '',
+                criterion: 'd/t ≤ 60 (Table B4.1-1 비보강요소 한계)',
+                note: dt_lip > 60 ? 'DSM 적용에 립이 너무 세장합니다.' : '',
             });
         }
         if (r > 0 && t > 0) {
             const Rt = r / t;
             checks.push({
-                category: cat, item: 'Corner R/t Ratio',
+                category: cat, item: '코너 R/t 비',
                 status: Rt <= 10 ? 'pass' : (Rt <= 20 ? 'warn' : 'fail'),
                 value: Rt.toFixed(1),
-                criterion: 'R/t ≤ 20 (Table B4.1-1), ≤10 typical',
-                note: Rt > 20 ? 'Exceeds corner radius limit.' : '',
+                criterion: 'R/t ≤ 20 (Table B4.1-1), 일반 ≤10',
+                note: Rt > 20 ? '코너 반경 한계 초과.' : '',
             });
         }
 
         // ════════════════════════════════════════
-        // B. 재료 (Material)
+        // B. 재료
         // ════════════════════════════════════════
-        const catB = 'B. Material';
+        const catB = 'B. 재료';
 
         checks.push({
-            category: catB, item: 'Yield Strength (Fy)',
+            category: catB, item: '항복강도 (Fy)',
             status: fy > 0 ? (fy <= toDisplay(95,'stress') ? 'pass' : 'fail') : 'fail',
             value: fy+' '+_rul('stress'),
-            criterion: 'Fy ≤ '+_ruv(95,'stress')+' '+_rul('stress')+' (Table B4.1-1 Fy limit)',
-            note: fy > 95 ? 'Exceeds AISI S100 DSM Fy limit.' : (fy <= 0 ? 'Fy not specified.' : ''),
+            criterion: 'Fy ≤ '+_ruv(95,'stress')+' '+_rul('stress')+' (Table B4.1-1 Fy 한계)',
+            note: fy > toDisplay(95,'stress') ? 'AISI S100 DSM Fy 한계 초과.' : (fy <= 0 ? 'Fy가 지정되지 않았습니다.' : ''),
         });
 
         checks.push({
-            category: catB, item: 'Fu/Fy Ratio',
+            category: catB, item: 'Fu/Fy 비',
             status: fy > 0 && fu > 0 ? (fu/fy >= 1.08 ? 'pass' : 'warn') : 'fail',
             value: fy > 0 && fu > 0 ? (fu/fy).toFixed(3) : 'N/A',
             criterion: 'Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))',
-            note: fu/fy < 1.08 ? 'Low ductility ratio — Section I6.2.1 R factor may not apply.' : '',
+            note: fu/fy < 1.08 ? '낮은 연성비 — §I6.2.1 R 계수가 적용되지 않을 수 있습니다.' : '',
         });
 
         checks.push({
-            category: catB, item: 'Tensile Strength (Fu)',
+            category: catB, item: '인장강도 (Fu)',
             status: fu > 0 ? (fu > fy ? 'pass' : 'fail') : 'fail',
             value: fu+' '+_rul('stress'),
             criterion: 'Fu > Fy',
-            note: fu <= fy ? 'Fu must exceed Fy.' : '',
+            note: fu <= fy ? 'Fu는 Fy보다 커야 합니다.' : '',
         });
 
         // ════════════════════════════════════════
-        // C. 좌굴 해석 (Buckling Analysis)
+        // C. 좌굴 해석
         // ════════════════════════════════════════
-        const catC = 'C. Buckling Analysis';
+        const catC = 'C. 좌굴 해석';
 
         checks.push({
-            category: catC, item: 'Analysis Executed',
+            category: catC, item: '해석 실행 여부',
             status: analysisResult && analysisResult.curve ? 'pass' : 'fail',
-            value: analysisResult && analysisResult.curve ? analysisResult.curve.length + ' points' : 'Not run',
-            criterion: 'FSM analysis must be completed before design',
-            note: !analysisResult ? 'Go to Analysis tab and run buckling analysis.' : '',
+            value: analysisResult && analysisResult.curve ? analysisResult.curve.length + ' 점' : '미실행',
+            criterion: '설계 전 FSM 좌굴해석 완료 필요',
+            note: !analysisResult ? '해석 탭에서 좌굴해석을 실행하세요.' : '',
         });
 
         const dP = dsm ? dsm.P : null;
         const dM = dsm ? dsm.Mxx : null;
 
         checks.push({
-            category: catC, item: 'DSM Values Extracted',
+            category: catC, item: 'DSM 값 추출',
             status: dP || dM ? 'pass' : 'fail',
-            value: dP ? 'Pcrl='+_rv(dP.Pcrl)+', Pcrd='+_rv(dP.Pcrd) : 'Not available',
-            criterion: 'Pcrl, Pcrd, Mcrl, Mcrd must be identified from signature curve',
-            note: !dP && !dM ? 'Run analysis first — DSM values are auto-extracted.' : '',
+            value: dP ? 'Pcrl='+_rv(dP.Pcrl)+', Pcrd='+_rv(dP.Pcrd) : '미추출',
+            criterion: 'Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함',
+            note: !dP && !dM ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : '',
         });
 
         if (dM) {
             checks.push({
-                category: catC, item: 'Mcrl Identified (Local)',
+                category: catC, item: 'Mcrl 식별 (국부좌굴)',
                 status: dM.Mxxcrl > 0 ? 'pass' : 'warn',
-                value: dM.Mxxcrl > 0 ? _ruv(dM.Mxxcrl,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrl,'length')+' '+_rul('length')+')' : 'Not found',
-                criterion: 'Local buckling minimum should be identifiable',
-                note: dM.Mxxcrl <= 0 ? 'No local buckling minimum found — design will skip local check (Mnl=Mne).' : '',
+                value: dM.Mxxcrl > 0 ? _ruv(dM.Mxxcrl,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrl,'length')+' '+_rul('length')+')' : '미발견',
+                criterion: '국부좌굴 최솟값이 식별 가능해야 함',
+                note: dM.Mxxcrl <= 0 ? '국부좌굴 최솟값 미발견 — 국부검토를 건너뜁니다 (Mnl=Mne).' : '',
             });
             checks.push({
-                category: catC, item: 'Mcrd Identified (Distortional)',
+                category: catC, item: 'Mcrd 식별 (뒤틀림좌굴)',
                 status: dM.Mxxcrd > 0 ? 'pass' : 'warn',
-                value: dM.Mxxcrd > 0 ? _ruv(dM.Mxxcrd,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrd,'length')+' '+_rul('length')+')' : 'Not found',
-                criterion: 'Distortional buckling minimum should be identifiable for C/Z sections',
-                note: dM.Mxxcrd <= 0 ? 'No distortional minimum — design will skip distortional check (Mnd=My). Verify if section has edge stiffeners.' : '',
+                value: dM.Mxxcrd > 0 ? _ruv(dM.Mxxcrd,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrd,'length')+' '+_rul('length')+')' : '미발견',
+                criterion: 'C/Z 단면에서 뒤틀림좌굴 최솟값이 식별 가능해야 함',
+                note: dM.Mxxcrd <= 0 ? '뒤틀림좌굴 미발견 — 뒤틀림 검토를 건너뜁니다 (Mnd=My). 에지 보강재 유무를 확인하세요.' : '',
             });
         }
 
         // ════════════════════════════════════════
-        // D. 단면 성질 (Section Properties)
+        // D. 단면 성질
         // ════════════════════════════════════════
-        const catD = 'D. Section Properties';
+        const catD = 'D. 단면 성질';
 
         checks.push({
-            category: catD, item: 'Properties Computed',
+            category: catD, item: '성질 계산 여부',
             status: p ? 'pass' : 'fail',
-            value: p ? 'A='+_ruv(p.A,'area')+' '+_rul('area') : 'Not computed',
-            criterion: 'Section properties must be available for design',
-            note: !p ? 'Click "Get Properties" in Preprocessor tab.' : '',
+            value: p ? 'A='+_ruv(p.A,'area')+' '+_rul('area') : '미계산',
+            criterion: '설계에 단면 성질이 필요합니다',
+            note: !p ? '전처리 탭에서 "성질 계산"을 클릭하세요.' : '',
         });
 
         if (p) {
             checks.push({
-                category: catD, item: 'Section Modulus Sx',
+                category: catD, item: '단면계수 Sx',
                 status: p.Sx > 0 ? 'pass' : 'fail',
-                value: p.Sx > 0 ? _ruv(p.Sx,'modulus')+' '+_rul('modulus') : '0 or N/A',
-                criterion: 'Sx > 0 required for flexure design (Sf)',
-                note: p.Sx <= 0 ? 'Section modulus is zero — cannot compute My=Sf×Fy.' : '',
+                value: p.Sx > 0 ? _ruv(p.Sx,'modulus')+' '+_rul('modulus') : '0 또는 N/A',
+                criterion: '휨 설계에 Sx > 0 필요 (Sf)',
+                note: p.Sx <= 0 ? '단면계수가 0 — My=Sf×Fy를 계산할 수 없습니다.' : '',
             });
             checks.push({
-                category: catD, item: 'Radius of Gyration rx, rz',
+                category: catD, item: '회전반경 rx, rz',
                 status: p.rx > 0 && p.rz > 0 ? 'pass' : 'warn',
                 value: 'rx='+_ruv(p.rx,'length')+', rz='+_ruv(p.rz,'length')+' '+_rul('length'),
-                criterion: 'rx, rz > 0 for column/LTB design',
-                note: (p.rx <= 0 || p.rz <= 0) ? 'Zero radius of gyration — check section geometry.' : '',
+                criterion: '기둥/LTB 설계에 rx, rz > 0 필요',
+                note: (p.rx <= 0 || p.rz <= 0) ? '회전반경이 0 — 단면 형상을 확인하세요.' : '',
             });
         }
 
         // ════════════════════════════════════════
         // E. 하중 입력 (Load Input)
         // ════════════════════════════════════════
-        const catE = 'E. Load Input';
+        const catE = 'E. 하중 입력';
         const spacing = getNum('config-spacing', 5);
-        const spanFt = getNum('config-span', 0);
+        // config-span 요소가 없으므로 스팬 테이블에서 첫 번째 스팬 길이를 읽음
+        const spanTblEls = document.querySelectorAll('.span-tbl-len');
+        let spanFt = 0;
+        if (spanTblEls.length > 0) {
+            spanFt = parseFloat(/** @type {HTMLInputElement} */ (spanTblEls[0]).value) || 0;
+        }
         const loadD = getNum('load-D-psf', 0);
         const loadLr = getNum('load-Lr-psf', 0);
         const loadS = getNum('load-S-psf', 0);
@@ -3459,68 +3481,68 @@
         const loadW = getNum('load-Wu-psf', 0);
 
         checks.push({
-            category: catE, item: 'Span Length',
-            status: spanFt > 0 ? (spanFt <= 40 ? 'pass' : 'warn') : 'fail',
-            value: spanFt > 0 ? spanFt+' '+_rul('length_ft') : 'Not set',
-            criterion: 'Span > 0 required; typical CFS ≤ '+_ruv(33,'length_ft')+' '+_rul('length_ft')+' (§I6.2.1)',
-            note: spanFt <= 0 ? 'Set span length.' : (spanFt > 33 ? 'Exceeds §I6.2.1 span limit — R factor may not apply.' : ''),
+            category: catE, item: '스팬 길이',
+            status: spanFt > 0 ? (spanFt <= toDisplay(40,'length_ft') ? 'pass' : 'warn') : 'fail',
+            value: spanFt > 0 ? spanFt+' '+_rul('length_ft') : '미설정',
+            criterion: '스팬 > 0 필요; CFS 일반 ≤ '+_ruv(33,'length_ft')+' '+_rul('length_ft')+' (§I6.2.1)',
+            note: spanFt <= 0 ? '스팬 길이를 설정하세요.' : (spanFt > toDisplay(33,'length_ft') ? '§I6.2.1 스팬 한계 초과 — R 계수가 적용되지 않을 수 있습니다.' : ''),
         });
 
         checks.push({
-            category: catE, item: 'Tributary Width (Spacing)',
-            status: spacing > 0 ? (spacing <= 8 ? 'pass' : 'warn') : 'fail',
+            category: catE, item: '분담폭 (간격)',
+            status: spacing > 0 ? (spacing <= toDisplay(8,'length_ft') ? 'pass' : 'warn') : 'fail',
             value: spacing+' '+_rul('length_ft'),
-            criterion: 'Spacing > 0; typical '+_ruv(4,'length_ft')+'-'+_ruv(6,'length_ft')+' '+_rul('length_ft'),
-            note: spacing > 8 ? 'Large spacing — verify load distribution.' : '',
+            criterion: '간격 > 0; 일반 '+_ruv(4,'length_ft')+'-'+_ruv(6,'length_ft')+' '+_rul('length_ft'),
+            note: spacing > toDisplay(8,'length_ft') ? '큰 간격 — 하중 분배를 확인하세요.' : '',
         });
 
         checks.push({
-            category: catE, item: 'Dead Load (D)',
+            category: catE, item: '고정하중 (D)',
             status: loadD > 0 ? 'pass' : 'warn',
             value: loadD+' '+_rul('pressure'),
-            criterion: 'D > 0 expected (self-weight + roofing)',
-            note: loadD <= 0 ? 'No dead load? Self-weight should be included. Typical: '+_ruv(5,'pressure')+'-'+_ruv(15,'pressure')+' '+_rul('pressure')+'.' : '',
+            criterion: 'D > 0 예상 (자중 + 지붕재)',
+            note: loadD <= 0 ? '고정하중 없음? 자중은 포함해야 합니다. 일반: '+_ruv(5,'pressure')+'-'+_ruv(15,'pressure')+' '+_rul('pressure')+'.' : '',
         });
 
         const hasGravity = loadLr > 0 || loadS > 0 || loadL > 0;
         checks.push({
-            category: catE, item: 'Gravity Live/Snow Load',
+            category: catE, item: '중력 활하중/적설하중',
             status: hasGravity ? 'pass' : 'warn',
-            value: [loadLr>0?'Lr='+loadLr:'',loadS>0?'S='+loadS:'',loadL>0?'L='+loadL:''].filter(Boolean).join(', ')+' '+_rul('pressure') || 'None',
-            criterion: 'At least one gravity live load expected',
-            note: !hasGravity ? 'No live/snow load — is this correct?' : '',
+            value: [loadLr>0?'Lr='+loadLr:'',loadS>0?'S='+loadS:'',loadL>0?'L='+loadL:''].filter(Boolean).join(', ')+' '+_rul('pressure') || '없음',
+            criterion: '최소 하나의 중력 활하중 예상',
+            note: !hasGravity ? '활하중/적설하중 없음 — 맞습니까?' : '',
         });
 
         // ════════════════════════════════════════
         // F. 하중 분석 결과 (Load Analysis Results)
         // ════════════════════════════════════════
-        const catF = 'F. Load Analysis';
+        const catF = 'F. 하중 분석';
 
         checks.push({
-            category: catF, item: 'Load Analysis Executed',
+            category: catF, item: '하중 분석 실행 여부',
             status: la ? 'pass' : 'fail',
-            value: la ? 'Combo: '+(la.gravity?la.gravity.combo:'N/A') : 'Not run',
-            criterion: 'Load analysis required before design',
-            note: !la ? 'Click "Analyze Loads" in Design tab.' : '',
+            value: la ? '조합: '+(la.gravity?la.gravity.combo:'N/A') : '미실행',
+            criterion: '설계 전 하중 분석 필요',
+            note: !la ? '설계 탭에서 "하중 분석 실행"을 클릭하세요.' : '',
         });
 
         if (la && la.gravity && la.gravity.locations) {
             const locs = la.gravity.locations;
             const maxMu = Math.max(...locs.filter(l=>l.Mu!=null).map(l=>Math.abs(l.Mu)));
             checks.push({
-                category: catF, item: 'Maximum Mu',
+                category: catF, item: '최대 Mu',
                 status: maxMu > 0 ? 'pass' : 'warn',
                 value: _ruv(maxMu,'moment_ft')+' '+_rul('moment_ft'),
-                criterion: 'Mu should be > 0 if gravity loads exist',
-                note: maxMu <= 0 ? 'Zero moment — check loads and span.' : '',
+                criterion: '중력하중 존재 시 Mu > 0 이어야 함',
+                note: maxMu <= 0 ? '모멘트가 0 — 하중과 스팬을 확인하세요.' : '',
             });
             const hasVu = locs.some(l => l.Vu != null && l.Vu > 0);
             checks.push({
-                category: catF, item: 'Shear Values (Vu)',
+                category: catF, item: '전단력 (Vu)',
                 status: hasVu ? 'pass' : 'warn',
-                value: hasVu ? 'Available' : 'Missing at some locations',
-                criterion: 'Vu should be present at supports and critical sections',
-                note: !hasVu ? 'No shear values found — check analysis results.' : '',
+                value: hasVu ? '확인됨' : '일부 위치에서 누락',
+                criterion: '지점 및 임계 단면에서 Vu가 존재해야 함',
+                note: !hasVu ? '전단력 값이 없음 — 분석 결과를 확인하세요.' : '',
             });
         }
 
@@ -3528,27 +3550,27 @@
             const ap = la.auto_params;
             if (ap.negative_region) {
                 checks.push({
-                    category: catF, item: 'Unbraced Length Ly (Negative)',
+                    category: catF, item: '비지지 길이 Ly (부모멘트)',
                     status: ap.negative_region.Ly_in > 0 ? 'pass' : 'warn',
                     value: _ruv(ap.negative_region.Ly_in,'length')+' '+_rul('length'),
-                    criterion: 'Ly > 0 for negative moment region (unbraced bottom flange)',
-                    note: ap.negative_region.Ly_in <= 0 ? 'Zero unbraced length — fully braced negative region?' : '',
+                    criterion: '부모멘트 구간에서 Ly > 0 (비지지 하부 플랜지)',
+                    note: ap.negative_region.Ly_in <= 0 ? '비지지 길이 0 — 부모멘트 구간이 완전 지지?' : '',
                 });
                 checks.push({
-                    category: catF, item: 'Moment Gradient Cb',
+                    category: catF, item: '모멘트 구배 Cb',
                     status: ap.negative_region.Cb >= 1.0 ? 'pass' : 'warn',
                     value: ap.negative_region.Cb,
-                    criterion: 'Cb ≥ 1.0 (AISI Eq. F2.1.1-2), typically 1.0-2.3',
-                    note: ap.negative_region.Cb < 1.0 ? 'Cb < 1.0 is unusual — verify.' : (ap.negative_region.Cb > 2.5 ? 'Very high Cb — verify moment diagram shape.' : ''),
+                    criterion: 'Cb ≥ 1.0 (AISI Eq. F2.1.1-2), 일반 1.0-2.3',
+                    note: ap.negative_region.Cb < 1.0 ? 'Cb < 1.0은 비정상 — 확인하세요.' : (ap.negative_region.Cb > 2.5 ? '매우 높은 Cb — 모멘트 다이어그램 형태를 확인하세요.' : ''),
                 });
             }
             if (ap.uplift_R != null) {
                 checks.push({
-                    category: catF, item: 'Uplift R Factor (§I6.2.1)',
+                    category: catF, item: '양력 R 계수 (§I6.2.1)',
                     status: ap.uplift_R > 0 ? 'pass' : 'warn',
                     value: ap.uplift_R,
-                    criterion: 'R = 0.40-0.70 per §I6.2.1 if conditions met',
-                    note: ap.uplift_R === 0.60 && !la.section ? 'R=0.60 is default (no section info passed) — may be conservative.' : '',
+                    criterion: '조건 충족 시 R = 0.40-0.70 (§I6.2.1)',
+                    note: ap.uplift_R === 0.60 && !la.section ? 'R=0.60은 기본값 (단면 정보 미전달) — 보수적일 수 있습니다.' : '',
                 });
             }
         }
@@ -3556,109 +3578,109 @@
         // ════════════════════════════════════════
         // G. 설계 결과 (Design Results)
         // ════════════════════════════════════════
-        const catG = 'G. Design Results';
+        const catG = 'G. 설계 결과';
 
         checks.push({
-            category: catG, item: 'Design Check Executed',
+            category: catG, item: '설계 검토 실행 여부',
             status: d ? 'pass' : 'fail',
-            value: d ? d.member_type+' / '+d.design_method : 'Not run',
-            criterion: 'Design check must be completed',
-            note: !d ? 'Click "Run Design Check" in Design tab.' : '',
+            value: d ? d.member_type+' / '+d.design_method : '미실행',
+            criterion: '설계 검토가 완료되어야 함',
+            note: !d ? '설계 탭에서 "설계 검토 실행"을 클릭하세요.' : '',
         });
 
         if (d && !d.error) {
-            // Mn components check
+            // Mn 구성요소 검토
             if (d.member_type === 'flexure') {
                 checks.push({
                     category: catG, item: 'Mne vs My',
                     status: d.Mne != null && d.My != null ? (d.Mne <= d.My ? 'pass' : 'warn') : 'fail',
                     value: 'Mne='+_rv(d.Mne)+', My='+_rv(d.My),
-                    criterion: 'Mne ≤ My expected (LTB reduces or equals yield)',
-                    note: d.Mne > d.My * 1.01 ? 'Mne > My — unusual unless Cb effect. Verify Lb and Cb.' : '',
+                    criterion: 'Mne ≤ My 예상 (LTB가 항복 이하로 감소)',
+                    note: d.Mne > d.My * 1.01 ? 'Mne > My — Cb 효과가 아니면 비정상. Lb와 Cb를 확인하세요.' : '',
                 });
                 checks.push({
-                    category: catG, item: 'Mnl vs Mne (Local reduction)',
+                    category: catG, item: 'Mnl vs Mne (국부좌굴 감소)',
                     status: d.Mnl != null ? (d.Mnl < d.Mne ? 'warn' : 'pass') : 'fail',
                     value: 'Mnl='+_rv(d.Mnl)+', Mne='+_rv(d.Mne),
-                    criterion: 'Mnl ≤ Mne; if Mnl < Mne → local buckling reduces strength',
-                    note: d.Mnl != null && d.Mnl >= d.Mne ? 'No local reduction (λl ≤ 0.776).' : 'Local buckling reduces strength by '+(d.Mne>0?((1-d.Mnl/d.Mne)*100).toFixed(1):'?')+'%.',
+                    criterion: 'Mnl ≤ Mne; Mnl < Mne → 국부좌굴이 강도를 감소시킴',
+                    note: d.Mnl != null && d.Mnl >= d.Mne ? '국부좌굴 감소 없음 (λl ≤ 0.776).' : '국부좌굴로 강도 '+(d.Mne>0?((1-d.Mnl/d.Mne)*100).toFixed(1):'?')+'% 감소.',
                 });
                 checks.push({
-                    category: catG, item: 'Mnd vs My (Distortional reduction)',
+                    category: catG, item: 'Mnd vs My (뒤틀림좌굴 감소)',
                     status: d.Mnd != null ? (d.Mnd < d.My ? 'warn' : 'pass') : 'fail',
                     value: 'Mnd='+_rv(d.Mnd)+', My='+_rv(d.My),
-                    criterion: 'Mnd ≤ My; if Mnd < My → distortional buckling reduces strength',
-                    note: d.Mnd != null && d.Mnd >= d.My ? 'No distortional reduction (λd ≤ 0.673).' : 'Distortional reduces strength by '+(d.My>0?((1-d.Mnd/d.My)*100).toFixed(1):'?')+'%.',
+                    criterion: 'Mnd ≤ My; Mnd < My → 뒤틀림좌굴이 강도를 감소시킴',
+                    note: d.Mnd != null && d.Mnd >= d.My ? '뒤틀림좌굴 감소 없음 (λd ≤ 0.673).' : '뒤틀림좌굴로 강도 '+(d.My>0?((1-d.Mnd/d.My)*100).toFixed(1):'?')+'% 감소.',
                 });
                 checks.push({
-                    category: catG, item: 'All Mn Equal (Potential Issue)',
+                    category: catG, item: '모든 Mn 동일 (잠재적 문제)',
                     status: (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My) ? 'warn' : 'pass',
-                    value: d.Mne === d.My ? 'Mne=Mnl=Mnd=My='+_rv(d.My) : 'Values differ (normal)',
-                    criterion: 'If all four equal, DSM may not be applying buckling reductions',
-                    note: (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My) ? 'All DSM strengths are identical — check if Mcrl/Mcrd are being extracted correctly from FSM analysis.' : '',
+                    value: d.Mne === d.My ? 'Mne=Mnl=Mnd=My='+_rv(d.My) : '값이 상이함 (정상)',
+                    criterion: '네 값 모두 같으면 DSM이 좌굴 감소를 적용하지 않을 수 있음',
+                    note: (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My) ? 'DSM 강도가 모두 동일 — FSM 해석에서 Mcrl/Mcrd가 올바르게 추출되었는지 확인하세요.' : '',
                 });
             }
 
             if (d.member_type === 'compression') {
                 checks.push({
-                    category: catG, item: 'Pnl vs Pne (Local reduction)',
+                    category: catG, item: 'Pnl vs Pne (국부좌굴 감소)',
                     status: d.Pnl != null ? (d.Pnl < d.Pne ? 'warn' : 'pass') : 'fail',
                     value: 'Pnl='+_rv(d.Pnl)+', Pne='+_rv(d.Pne),
-                    criterion: 'Pnl ≤ Pne; if reduced → local buckling governs',
+                    criterion: 'Pnl ≤ Pne; 감소 시 → 국부좌굴 지배',
                     note: '',
                 });
                 checks.push({
-                    category: catG, item: 'Pnd vs Py (Distortional reduction)',
+                    category: catG, item: 'Pnd vs Py (뒤틀림좌굴 감소)',
                     status: d.Pnd != null ? (d.Pnd < d.Py ? 'warn' : 'pass') : 'fail',
                     value: 'Pnd='+_rv(d.Pnd)+', Py='+_rv(d.Py),
-                    criterion: 'Pnd ≤ Py; if reduced → distortional governs',
+                    criterion: 'Pnd ≤ Py; 감소 시 → 뒤틀림좌굴 지배',
                     note: '',
                 });
             }
 
-            // Utilization
+            // 이용률
             if (d.utilization != null) {
                 const util = d.utilization;
                 checks.push({
-                    category: catG, item: 'Utilization Ratio (DCR)',
+                    category: catG, item: '이용률 (DCR)',
                     status: util <= 0.95 ? 'pass' : (util <= 1.0 ? 'warn' : 'fail'),
                     value: (util*100).toFixed(1)+'%',
-                    criterion: 'DCR ≤ 100% (≤95% preferred for margin)',
-                    note: util > 1.0 ? 'OVER-STRESSED — member does not meet design requirements. Increase section or reduce loads.' : (util > 0.95 ? 'Very close to limit — consider margin.' : ''),
+                    criterion: 'DCR ≤ 100% (여유를 위해 ≤95% 권장)',
+                    note: util > 1.0 ? '과응력 — 설계 요구사항 미충족. 단면을 키우거나 하중을 줄이세요.' : (util > 0.95 ? '한계에 매우 근접 — 여유를 고려하세요.' : ''),
                 });
             }
 
-            // Safety factors
+            // 안전계수
             if (d.design_method === 'LRFD') {
                 checks.push({
-                    category: catG, item: 'Resistance Factor (φ)',
+                    category: catG, item: '저항계수 (φ)',
                     status: 'pass',
-                    value: d.member_type === 'flexure' ? 'φb = 0.90' : (d.member_type === 'compression' ? 'φc = 0.85' : 'φ applied'),
-                    criterion: 'LRFD factors per AISI S100-16',
+                    value: d.member_type === 'flexure' ? 'φb = 0.90' : (d.member_type === 'compression' ? 'φc = 0.85' : 'φ 적용됨'),
+                    criterion: 'AISI S100-16 LRFD 저항계수',
                     note: '',
                 });
             }
 
-            // Interaction
+            // 조합 검토
             if (d.interaction) {
                 checks.push({
-                    category: catG, item: 'Interaction Check (§H1.2)',
+                    category: catG, item: '조합 검토 (§H1.2)',
                     status: d.interaction.pass ? (d.interaction.total <= 0.95 ? 'pass' : 'warn') : 'fail',
                     value: _rv(d.interaction.total,4)+' ≤ 1.0',
                     criterion: 'P/Pa + Mx/Max + My/May ≤ 1.0',
-                    note: d.interaction.pass ? '' : 'Interaction check FAILS — reduce loads or increase section.',
+                    note: d.interaction.pass ? '' : '조합 검토 실패 — 하중을 줄이거나 단면을 키우세요.',
                 });
             }
 
-            // DSM warnings from design engine
+            // 설계 엔진의 DSM 경고
             if (d.dsm_warnings && d.dsm_warnings.length > 0) {
                 d.dsm_warnings.forEach((w, i) => {
                     checks.push({
-                        category: catG, item: 'DSM Warning #'+(i+1),
+                        category: catG, item: 'DSM 경고 #'+(i+1),
                         status: 'warn',
                         value: w,
-                        criterion: 'Table B4.1-1 applicability limits',
-                        note: 'Section may be outside DSM pre-qualified limits.',
+                        criterion: 'Table B4.1-1 적용 한계',
+                        note: '단면이 DSM 사전검증 한계 밖일 수 있습니다.',
                     });
                 });
             }
@@ -3667,26 +3689,26 @@
         // ════════════════════════════════════════
         // H. 설계 일관성 (Consistency)
         // ════════════════════════════════════════
-        const catH = 'H. Consistency';
+        const catH = 'H. 일관성';
 
-        // Check Fy matches between analysis and design
+        // Fy 일치 여부 확인
         const fyLoad = getNum('input-fy-load', 50);
         checks.push({
-            category: catH, item: 'Fy Consistency (Analysis vs Design)',
+            category: catH, item: 'Fy 일관성 (해석 vs 설계)',
             status: Math.abs(fy - fyLoad) < 0.1 ? 'pass' : 'warn',
-            value: 'Analysis fy='+fyLoad+', Design Fy='+fy+' '+_rul('stress'),
-            criterion: 'Analysis stress fy should match design Fy',
-            note: Math.abs(fy - fyLoad) >= 0.1 ? 'Fy mismatch — buckling analysis used different Fy than design. Re-run analysis with correct Fy.' : '',
+            value: '해석 fy='+fyLoad+', 설계 Fy='+fy+' '+_rul('stress'),
+            criterion: '해석 응력 fy와 설계 Fy가 일치해야 함',
+            note: Math.abs(fy - fyLoad) >= 0.1 ? 'Fy 불일치 — 좌굴해석에 다른 Fy가 사용됨. 올바른 Fy로 해석을 재실행하세요.' : '',
         });
 
-        // Check if analysis was run with current section
+        // 현재 단면으로 해석 여부 확인
         if (model && model.node && analysisResult) {
             checks.push({
-                category: catH, item: 'Analysis Currency',
-                status: 'pass', // can't easily verify, assume pass
-                value: 'Analysis result exists',
-                criterion: 'Analysis should match current section geometry',
-                note: 'If section was modified after analysis, re-run to get updated results.',
+                category: catH, item: '해석 최신성',
+                status: 'pass',
+                value: '해석 결과 존재',
+                criterion: '해석이 현재 단면 형상과 일치해야 함',
+                note: '해석 후 단면이 변경되었으면 재실행하여 결과를 갱신하세요.',
             });
         }
 
@@ -3715,13 +3737,13 @@
             h += '<div style="font-weight:700;font-size:12px;padding:4px 8px;border-left:3px solid '+catColor+';background:'+bgColors[catFail>0?'fail':(catWarn>0?'warn':'pass')]+';border-radius:0 4px 4px 0">';
             h += cat;
             h += '<span style="float:right;font-size:11px;font-weight:400">';
-            if (catPass) h += '<span style="color:'+colors.pass+'">'+catPass+' pass</span> ';
-            if (catWarn) h += '<span style="color:'+colors.warn+'">'+catWarn+' warn</span> ';
-            if (catFail) h += '<span style="color:'+colors.fail+'">'+catFail+' fail</span>';
+            if (catPass) h += '<span style="color:'+colors.pass+'">'+catPass+' 통과</span> ';
+            if (catWarn) h += '<span style="color:'+colors.warn+'">'+catWarn+' 주의</span> ';
+            if (catFail) h += '<span style="color:'+colors.fail+'">'+catFail+' 실패</span>';
             h += '</span></div>';
 
             h += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:2px">';
-            h += '<tr style="background:var(--vscode-editor-selectionBackground)"><th style="width:20px"></th><th>Check Item</th><th>Value</th><th>Criterion</th></tr>';
+            h += '<tr style="background:var(--vscode-editor-selectionBackground)"><th style="width:20px"></th><th>검토 항목</th><th>값</th><th>기준</th></tr>';
             items.forEach(c => {
                 const bg = c.status === 'fail' ? 'background:rgba(255,82,82,0.06)' : (c.status === 'warn' ? 'background:rgba(255,171,0,0.04)' : '');
                 h += '<tr style="'+bg+'">';

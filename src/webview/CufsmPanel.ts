@@ -1238,12 +1238,12 @@ export class CufsmPanel implements McpPanelInterface {
 <body>
     <!-- 탭 바 + 파일 버튼 -->
     <div class="tab-bar">
-        <button class="tab-btn active" data-tab="preprocessor">Preprocessor</button>
-        <button class="tab-btn" data-tab="analysis">Analysis</button>
-        <button class="tab-btn" data-tab="postprocessor">Postprocessor</button>
-        <button class="tab-btn" data-tab="design">Design</button>
-        <button class="tab-btn" data-tab="report">Report</button>
-        <button class="tab-btn" data-tab="validation">Validation</button>
+        <button class="tab-btn active" data-tab="preprocessor">전처리</button>
+        <button class="tab-btn" data-tab="analysis">해석</button>
+        <button class="tab-btn" data-tab="postprocessor">후처리</button>
+        <button class="tab-btn" data-tab="design">설계</button>
+        <button class="tab-btn" data-tab="report">보고서</button>
+        <button class="tab-btn" data-tab="validation">검증</button>
         <span style="flex:1"></span>
         <button id="btn-file-open" class="btn-file" title="Open .csd file">Open</button>
         <button id="btn-file-save" class="btn-file" title="Save .csd file">Save</button>
@@ -1254,9 +1254,9 @@ export class CufsmPanel implements McpPanelInterface {
         <!-- 전처리 탭 -->
         <div id="tab-preprocessor" class="tab-panel active">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:4px 6px;background:var(--vscode-editor-selectionBackground);border-radius:4px">
-                <span style="font-size:11px;font-weight:600">Unit System</span>
-                <button id="btn-unit-US" class="btn-toggle active" style="font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer">US (ksi, in)</button>
-                <button id="btn-unit-SI" class="btn-toggle" style="font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer">SI (MPa, mm)</button>
+                <span style="font-size:11px;font-weight:600">단위계</span>
+                <button id="btn-unit-US" class="btn-toggle" style="font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer">US (ksi, in)</button>
+                <button id="btn-unit-SI" class="btn-toggle active" style="font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer">SI (MPa, mm)</button>
             </div>
             <div class="panel-row">
                 <div class="panel-left">
@@ -1490,7 +1490,7 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
                 </div>
 
-                <h3 class="collapsible" id="sec-method" data-expanded="true"><span class="collapse-icon">▾</span> Design Method</h3>
+                <h3 class="collapsible" id="sec-method" data-expanded="true"><span class="collapse-icon">▾</span> 설계 방법</h3>
                 <div id="sec-method-body">
                 <div class="input-row">
                     <select id="select-design-method" style="width:130px">
@@ -1503,39 +1503,39 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
                 </div>
 
-                <h3>Member Type</h3>
+                <h3>부재 유형</h3>
                 <div class="input-row">
                     <select id="select-member-type">
-                        <optgroup label="Application (Calculator)">
-                            <option value="roof-purlin">Roof Purlin (지붕 퍼린)</option>
-                            <option value="floor-joist">Floor Joist (바닥 장선)</option>
-                            <option value="wall-girt">Wall Girt (벽체 거트)</option>
-                            <option value="wall-stud">Wall Stud (벽 스터드)</option>
+                        <optgroup label="적용 (자동 계산)">
+                            <option value="roof-purlin">지붕 퍼린 (Roof Purlin)</option>
+                            <option value="floor-joist">바닥 장선 (Floor Joist)</option>
+                            <option value="wall-girt">벽체 거트 (Wall Girt)</option>
+                            <option value="wall-stud">벽 스터드 (Wall Stud)</option>
                         </optgroup>
-                        <optgroup label="General (Direct Input)">
-                            <option value="flexure">General Beam (휨)</option>
-                            <option value="compression">General Column (압축)</option>
-                            <option value="combined">Beam-Column (조합)</option>
-                            <option value="tension">Tension (인장)</option>
+                        <optgroup label="일반 (직접 입력)">
+                            <option value="flexure">일반 보 (휨)</option>
+                            <option value="compression">일반 기둥 (압축)</option>
+                            <option value="combined">보-기둥 (조합)</option>
+                            <option value="tension">인장 부재</option>
                         </optgroup>
                     </select>
                 </div>
 
                 <div id="calc-mode-section" style="display:none">
-                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> Member Configuration</h3>
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 부재 구성</h3>
                 <div>
                     <div class="input-row">
-                        <label>Span Type</label>
+                        <label>스팬 유형</label>
                         <select id="select-span-type" style="width:140px">
-                            <option value="simple">Simple Span</option>
-                            <option value="cantilever">Cantilever</option>
-                            <option value="cont-2">2-Span Cont.</option>
-                            <option value="cont-3">3-Span Cont.</option>
-                            <option value="cont-4" selected>4-Span Cont.</option>
-                            <option value="cont-n">N-Span Cont.</option>
+                            <option value="simple">단순보</option>
+                            <option value="cantilever">캔틸레버</option>
+                            <option value="cont-2">2경간 연속보</option>
+                            <option value="cont-3">3경간 연속보</option>
+                            <option value="cont-4" selected>4경간 연속보</option>
+                            <option value="cont-n">N경간 연속보</option>
                         </select>
-                        <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:40px;display:none" title="Number of spans">
-                        <label>Spacing<span class="hint-inline" data-unit="length_ft">ft</span></label>
+                        <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:40px;display:none" title="경간 수">
+                        <label>간격<span class="hint-inline" data-unit="length_ft">ft</span></label>
                         <input type="number" id="config-spacing" value="5" step="0.5" style="width:55px">
                     </div>
 
@@ -1544,22 +1544,22 @@ export class CufsmPanel implements McpPanelInterface {
                         <table id="span-config-table" style="width:100%;font-size:10px;border-collapse:collapse">
                             <thead>
                                 <tr style="background:var(--vscode-editor-selectionBackground)">
-                                    <th style="padding:2px 4px;width:30px">Sup#</th>
-                                    <th style="padding:2px 4px;width:50px">Support</th>
-                                    <th style="padding:2px 4px;width:55px">Span(<span data-unit="length_ft">ft</span>)</th>
-                                    <th style="padding:2px 4px;width:45px">Lap L(<span data-unit="length_ft">ft</span>)</th>
-                                    <th style="padding:2px 4px;width:45px">Lap R(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:2px 4px;width:30px">지점#</th>
+                                    <th style="padding:2px 4px;width:50px">지점조건</th>
+                                    <th style="padding:2px 4px;width:55px">스팬(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:2px 4px;width:45px">랩 L(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:2px 4px;width:45px">랩 R(<span data-unit="length_ft">ft</span>)</th>
                                 </tr>
                             </thead>
                             <tbody id="span-config-tbody">
                                 <!-- JS에서 동적 생성 -->
                             </tbody>
                         </table>
-                        <p class="hint" style="font-size:9px;margin-top:2px">Support: P=Pin, R=Roller, F=Fixed. Lap=overlap length at each side of support.</p>
+                        <p class="hint" style="font-size:9px;margin-top:2px">지점: P=핀, R=롤러, F=고정단, N=자유단. 랩=지점 양측 겹침 길이.</p>
                     </div>
                 </div>
 
-                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> Service Loads</h3>
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 사용 하중</h3>
                 <div>
                     <div class="input-row">
                         <label>D<span class="hint-inline" data-unit="pressure">psf</span></label>
@@ -1588,14 +1588,14 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                 </div>
 
-                <h3 class="collapsible" data-expanded="false"><span class="collapse-icon">▸</span> Deck & Bracing</h3>
+                <h3 class="collapsible" data-expanded="false"><span class="collapse-icon">▸</span> 데크 & 가새</h3>
                 <div style="display:none">
                     <div class="input-row">
-                        <label>Deck</label>
+                        <label>데크</label>
                         <select id="select-deck-type" style="width:140px">
-                            <option value="through-fastened">Through-fastened</option>
-                            <option value="standing-seam">Standing Seam</option>
-                            <option value="none">None</option>
+                            <option value="through-fastened">관통 체결</option>
+                            <option value="standing-seam">스탠딩 심</option>
+                            <option value="none">없음</option>
                         </select>
                     </div>
                     <div class="input-row" id="deck-detail-row">
@@ -1610,10 +1610,10 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                 </div>
 
-                <button id="btn-analyze-loads" class="btn-action-green" style="margin-top:8px;width:100%">Analyze Loads</button>
+                <button id="btn-analyze-loads" class="btn-action-green" style="margin-top:8px;width:100%">하중 분석 실행</button>
                 </div>
 
-                <h3 id="design-lengths-title">Unbraced Lengths</h3>
+                <h3 id="design-lengths-title">비지지 길이</h3>
                 <div class="input-row" id="design-KxLx-row">
                     <label>KxLx<span class="hint-inline" data-unit="length">in</span></label>
                     <input type="number" id="design-KxLx" value="120" step="1" style="width:65px">
@@ -1639,7 +1639,7 @@ export class CufsmPanel implements McpPanelInterface {
                     <input type="number" id="design-Cmy" value="0.85" step="0.01" style="width:55px">
                 </div>
 
-                <h3>Required Loads</h3>
+                <h3>소요 하중</h3>
                 <div class="input-row">
                     <label>P<span class="hint-inline" data-unit="force">kips</span></label>
                     <input type="number" id="design-P" value="0" step="0.1" style="width:65px">
@@ -1654,7 +1654,7 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
 
                 <div id="design-wc-section" style="display:none">
-                    <h3>Web Crippling (§G5)</h3>
+                    <h3>웹 크리플링 (§G5)</h3>
                     <div class="input-row">
                         <label>N<span class="hint-inline" data-unit="length">in</span></label>
                         <input type="number" id="design-wc-N" value="3.5" step="0.1" style="width:55px">
@@ -1662,48 +1662,48 @@ export class CufsmPanel implements McpPanelInterface {
                         <input type="number" id="design-wc-R" value="0.1875" step="0.01" style="width:65px">
                     </div>
                     <div class="input-row">
-                        <label>Support</label>
+                        <label>지점 조건</label>
                         <select id="design-wc-support" style="width:120px">
-                            <option value="EOF">EOF (End 1-flange)</option>
-                            <option value="IOF">IOF (Int. 1-flange)</option>
-                            <option value="ETF">ETF (End 2-flange)</option>
-                            <option value="ITF">ITF (Int. 2-flange)</option>
+                            <option value="EOF">EOF (단부 1면)</option>
+                            <option value="IOF">IOF (내부 1면)</option>
+                            <option value="ETF">ETF (단부 2면)</option>
+                            <option value="ITF">ITF (내부 2면)</option>
                         </select>
                     </div>
                 </div>
 
-                <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">▶ Run Design Check</button>
-                <p class="hint" style="margin-top:6px">Run Analysis first for automatic DSM buckling values.</p>
+                <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">▶ 설계 검토 실행</button>
+                <p class="hint" style="margin-top:6px">자동 DSM 좌굴값 적용을 위해 먼저 해석을 실행하세요.</p>
             </div>
 
             <div class="panel-right">
                 <div id="load-analysis-section" style="display:none">
-                <h3>Load Analysis Results</h3>
+                <h3>하중 분석 결과</h3>
                 <div id="load-analysis-result" class="result-box" style="max-height:300px;overflow-y:auto;font-size:12px">
                 </div>
                 </div>
 
-                <h3>Design Summary</h3>
+                <h3>설계 요약</h3>
                 <div id="design-loading" class="loading-overlay" style="display:none">
-                    <div class="loading-spinner"></div><span>Calculating...</span>
+                    <div class="loading-spinner"></div><span>계산 중...</span>
                 </div>
                 <div id="design-summary" class="result-box" style="min-height:80px">
-                    <p class="hint">Run design check to see results</p>
+                    <p class="hint">설계 검토를 실행하면 결과가 표시됩니다</p>
                 </div>
 
-                <h3>Step-by-Step Calculation</h3>
+                <h3>단계별 계산</h3>
                 <div id="design-steps" class="result-box" style="max-height:450px;overflow-y:auto">
                 </div>
 
-                <h3 id="design-interaction-title" style="display:none">Interaction Check (H1.2)</h3>
+                <h3 id="design-interaction-title" style="display:none">조합 검토 (H1.2)</h3>
                 <div id="design-interaction" class="result-box" style="display:none">
                 </div>
 
-                <h3>Specification Reference</h3>
+                <h3>규준 참조</h3>
                 <div id="design-reference" class="result-box">
-                    <p class="hint">AISI S100-16 applicable sections will appear here</p>
+                    <p class="hint">AISI S100-16 해당 조항이 여기에 표시됩니다</p>
                 </div>
-                <button id="btn-copy-report" class="btn-secondary" style="margin-top:8px;width:100%;display:none">Copy Report to Clipboard</button>
+                <button id="btn-copy-report" class="btn-secondary" style="margin-top:8px;width:100%;display:none">보고서 클립보드 복사</button>
             </div>
         </div>
     </div>
@@ -1711,22 +1711,22 @@ export class CufsmPanel implements McpPanelInterface {
     <!-- Report 탭 -->
     <div id="tab-report" class="tab-panel">
         <div style="display:flex;gap:8px;margin-bottom:8px">
-            <button id="btn-generate-report" class="btn-primary" style="flex:1">Generate Detailed Report</button>
-            <button id="btn-print-report" class="btn-secondary" style="width:100px;display:none">Print</button>
+            <button id="btn-generate-report" class="btn-primary" style="flex:1">상세 보고서 생성</button>
+            <button id="btn-print-report" class="btn-secondary" style="width:100px;display:none">인쇄</button>
         </div>
         <div id="report-container" style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:4px;padding:16px;min-height:200px;max-height:calc(100vh - 100px);overflow-y:auto">
-            <p class="hint" style="text-align:center;padding:40px 0">Run Design Check first, then click "Generate Detailed Report" to create a comprehensive calculation report.</p>
+            <p class="hint" style="text-align:center;padding:40px 0">먼저 설계 검토를 실행한 후, "상세 보고서 생성" 버튼을 클릭하여 계산서를 생성하세요.</p>
         </div>
     </div>
 
     <!-- Validation 탭 -->
     <div id="tab-validation" class="tab-panel">
         <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
-            <button id="btn-run-validation" class="btn-primary" style="flex:1">Run Design Validation</button>
+            <button id="btn-run-validation" class="btn-primary" style="flex:1">설계 검증 실행</button>
             <span id="validation-summary-badge" style="font-size:12px;font-weight:600"></span>
         </div>
         <div id="validation-container" style="max-height:calc(100vh - 100px);overflow-y:auto">
-            <p class="hint" style="text-align:center;padding:40px 0">Click "Run Design Validation" to check all inputs and results against AISI S100-16 requirements.</p>
+            <p class="hint" style="text-align:center;padding:40px 0">"설계 검증 실행" 버튼을 클릭하여 모든 입력값과 결과를 AISI S100-16 요구사항과 대조 검증합니다.</p>
         </div>
     </div>
 

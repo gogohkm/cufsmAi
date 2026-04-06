@@ -222,20 +222,33 @@ def analyze_continuous_beam_general(
         supports = ['P'] * (n_spans + 1)
     sup = [s[0].upper() if s else 'P' for s in supports]
 
+    # 자유단(N) 캔틸레버 특수 처리: 1스팬 고정-자유 → 전용 함수
+    if n_spans == 1 and sup[0] == 'F' and sup[1] == 'N':
+        return analyze_cantilever_beam(spans[0], w_plf_list[0], n_pts_per_span)
+    if n_spans == 1 and sup[0] == 'N' and sup[1] == 'F':
+        # 역방향 캔틸레버: 좌측 자유, 우측 고정 → 좌표 반전
+        res = analyze_cantilever_beam(spans[0], w_plf_list[0], n_pts_per_span)
+        L = spans[0]
+        res.x = [L - x for x in reversed(res.x)]
+        res.M = list(reversed(res.M))
+        res.V = [-v for v in reversed(res.V)]
+        res.R = list(reversed(res.R))
+        return res
+
     # 단순보 특수 처리
-    if n_spans == 1 and sup[0] != 'F' and sup[1] != 'F':
+    if n_spans == 1 and sup[0] != 'F' and sup[1] != 'F' and sup[0] != 'N' and sup[1] != 'N':
         return analyze_simple_beam(spans[0], w_plf_list[0], n_pts_per_span)
 
     w_list = [w / 1000.0 for w in w_plf_list]  # kip/ft
 
-    # 고정단(F) 포함 시 확장된 3-모멘트 방정식
-    # 좌측 고정단: M0도 미지수 → 가상 스팬(L=0) 추가로 모델링
-    #   3-moment eq: 2*M0*L1 + M1*L1 = -w1*L1^3/4 (좌측 고정단 조건)
-    # 우측 고정단: M_n도 미지수 → 동일 처리
-    # 핀/롤러: M=0 (기존 경계조건)
-
+    # 경계조건 판별
+    # F(고정단): M≠0, slope=0, R≠0  →  미지수에 추가
+    # P/R(핀/롤러): M=0, R≠0        →  기존 경계
+    # N(자유단): M=0, R=0            →  인접 내부지점에 R=0 조건 부여
     left_fixed = (sup[0] == 'F')
     right_fixed = (sup[-1] == 'F')
+    left_free = (sup[0] == 'N')
+    right_free = (sup[-1] == 'N')
 
     # 미지수: 내부 지점 모멘트 + 고정단 모멘트
     # 인덱스 매핑: unknowns[0..n-1] = M_support[1..n_spans-1]
@@ -272,7 +285,7 @@ def analyze_continuous_beam_general(
             A[row][idx_of_support[1]] = L1
         b_vec[row] = -w1 * L1 ** 3 / 4.0
 
-    # 내부 지점 방정식 (기존 3-moment)
+    # 내부 지점 방정식 (3-moment / 자유단 R=0 조건)
     for j in range(1, n_spans):
         row = idx_of_support[j]
         Li = spans[j - 1]
@@ -280,6 +293,23 @@ def analyze_continuous_beam_general(
         wi = w_list[j - 1]
         wi1 = w_list[j] if j < n_spans else 0
 
+        # 좌측 자유단(N): 첫 번째 내부 지점에 R[0]=0 조건 적용
+        # R[0] = w1*L1/2 + (M[1]-M[0])/L1 = 0, M[0]=0
+        # → M[1] = -w1*L1^2/2
+        if left_free and j == 1:
+            A[row][row] = 1.0
+            b_vec[row] = -wi * Li ** 2 / 2.0
+            continue
+
+        # 우측 자유단(N): 마지막 내부 지점에 R[n]=0 조건 적용
+        # R[n] = wn*Ln/2 - (M[n]-M[n-1])/Ln = 0, M[n]=0
+        # → M[n-1] = -wn*Ln^2/2
+        if right_free and j == n_spans - 1:
+            A[row][row] = 1.0
+            b_vec[row] = -wi1 * Li1 ** 2 / 2.0
+            continue
+
+        # 기존 3-moment 방정식
         # M_{j-1} * Li + 2*M_j*(Li+Li1) + M_{j+1} * Li1 = -(...)/4
         A[row][row] = 2.0 * (Li + Li1)
         if idx_of_support[j - 1] >= 0:
@@ -313,11 +343,13 @@ def analyze_continuous_beam_general(
         if idx_of_support[j] >= 0:
             M_sup[j] = M_solution[idx_of_support[j]]
 
-    # 반력
+    # 반력 (자유단은 R=0)
     reactions = []
     for j in range(n_spans + 1):
         R_j = 0.0
-        if j == 0:
+        if sup[j] == 'N':
+            R_j = 0.0  # 자유단: 반력 없음
+        elif j == 0:
             w0 = w_list[0]
             L0 = spans[0]
             R_j = w0 * L0 / 2.0 + (M_sup[1] - M_sup[0]) / L0

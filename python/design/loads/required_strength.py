@@ -67,12 +67,14 @@ def analyze_loads(
     load_types = {k: v for k, v in loads.items() if v is not None and v != 0}
     load_results = {}
 
+    # 자유단(N) 포함 여부 확인 → 캔틸레버/일반 해석 경로 결정
+    has_free = any(s.upper().startswith('N') for s in supports)
+
     for load_type, w_plf in load_types.items():
-        if span_type == 'cantilever':
-            result = analyze_cantilever_beam(span_ft, w_plf)
-        elif n_spans == 1:
+        if n_spans == 1 and not has_free and sup_type_simple(supports):
             result = analyze_simple_beam(spans[0], w_plf)
         else:
+            # cantilever, 자유단 포함, 고정단 포함, 다경간 → 일반 해석
             w_list = [w_plf] * n_spans
             result = analyze_continuous_beam_general(
                 spans, w_list, supports=supports,
@@ -189,6 +191,17 @@ def analyze_loads(
 # ---------------------------------------------------------------------------
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
+
+def sup_type_simple(supports: list) -> bool:
+    """양단 핀/롤러인 단순보인지 확인 (고정단·자유단 아닌 경우)"""
+    if not supports or len(supports) < 2:
+        return True
+    for s in supports:
+        c = s[0].upper() if s else 'P'
+        if c in ('F', 'N'):
+            return False
+    return True
+
 
 def _parse_n_spans(span_type: str) -> int:
     mapping = {
