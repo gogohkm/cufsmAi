@@ -22,8 +22,8 @@ export class McpBridgeServer {
         this._port = port;
     }
 
-    start(): void {
-        if (this._server) { return; }
+    start(): Promise<void> {
+        if (this._server) { return Promise.resolve(); }
 
         this._server = http.createServer(async (req, res) => {
             res.setHeader('Content-Type', 'application/json');
@@ -59,16 +59,21 @@ export class McpBridgeServer {
             }
         });
 
-        this._server.listen(this._port, () => {
-            console.log(`[CUFSM MCP Bridge] Listening on port ${this._port}`);
-        });
+        return new Promise((resolve, reject) => {
+            const server = this._server!;
+            const onError = (err: Error) => {
+                server.off('listening', onListening);
+                reject(err);
+            };
+            const onListening = () => {
+                server.off('error', onError);
+                console.log(`[CUFSM MCP Bridge] Listening on port ${this._port}`);
+                resolve();
+            };
 
-        this._server.on('error', (err: any) => {
-            if (err.code === 'EADDRINUSE') {
-                console.warn(`[CUFSM MCP Bridge] Port ${this._port} in use, trying ${this._port + 1}`);
-                this._port++;
-                this._server?.listen(this._port);
-            }
+            server.once('error', onError);
+            server.once('listening', onListening);
+            server.listen(this._port, '127.0.0.1');
         });
     }
 

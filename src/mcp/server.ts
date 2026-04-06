@@ -104,9 +104,9 @@ server.tool("get_section_properties", "Get cross-section properties (A, Ixx, Izz
 );
 
 server.tool("get_dsm_values", "Get DSM design values: Pcrl, Pcrd, Mcrl, Mcrd, Py, My",
-    { fy: z.number().optional().describe("Yield stress (default 50)") },
+    { fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)") },
     async ({ fy }) => {
-        const r = await callBridgePost('/action', { action: 'get_dsm', fy: fy || 50 });
+        const r = await callBridgePost('/action', { action: 'get_dsm', fy: fy || 52.94 });
         return textResult(JSON.stringify(r, null, 2));
     }
 );
@@ -386,14 +386,14 @@ server.tool("set_load_case", "Set load case and automatically apply stress distr
     {
         load_case: z.enum(['compression', 'bending_xx_pos', 'bending_xx_neg', 'bending_zz_pos', 'bending_zz_neg', 'custom'])
             .describe("compression=uniform axial, bending_xx_pos=strong-axis z+ compression, bending_xx_neg=strong-axis z- compression, bending_zz_pos=weak-axis x+ compression, bending_zz_neg=weak-axis x- compression, custom=P+Mxx+Mzz"),
-        fy: z.number().optional().describe("Yield stress (default 50)"),
+        fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
         P: z.number().optional().describe("Axial force for custom (kips)"),
         Mxx: z.number().optional().describe("Strong-axis moment for custom (kip-in)"),
         Mzz: z.number().optional().describe("Weak-axis moment for custom (kip-in)"),
     },
     async ({ load_case, fy, P, Mxx, Mzz }) => {
         const r = await callBridgePost('/action', {
-            action: 'set_load_case', load_case, fy: fy || 50, P: P || 0, Mxx: Mxx || 0, Mzz: Mzz || 0
+            action: 'set_load_case', load_case, fy: fy || 52.94, P: P || 0, Mxx: Mxx || 0, Mzz: Mzz || 0
         });
         return textResult(JSON.stringify(r, null, 2));
     }
@@ -402,7 +402,7 @@ server.tool("set_load_case", "Set load case and automatically apply stress distr
 server.tool("set_stress", "Set nodal stress distribution (low-level, prefer set_load_case)",
     {
         type: z.enum(['uniform_compression', 'pure_bending', 'custom']).describe("Stress type"),
-        fy: z.number().optional().describe("Yield stress for reference (default 50)"),
+        fy: z.number().optional().describe("Yield stress for reference ksi (default 52.94 = 365 MPa, SGC490)"),
         P: z.number().optional().describe("Axial force (for custom)"),
         Mxx: z.number().optional().describe("Moment about xx axis (for custom)"),
         Mzz: z.number().optional().describe("Moment about zz axis (for custom)"),
@@ -434,9 +434,9 @@ server.tool("set_lengths", "Set analysis half-wavelength range",
     },
     async ({ min, max, n }) => {
         const r = await callBridgePost('/action', {
-            action: 'set_lengths', min, max, n: n || 50
+            action: 'set_lengths', min, max, n: n || 60
         });
-        return textResult(`Lengths set: ${n || 50} points from ${min} to ${max}`);
+        return textResult(`Lengths set: ${n || 60} points from ${min} to ${max}`);
     }
 );
 
@@ -615,9 +615,9 @@ server.tool("get_cutwp", "Calculate warping properties (J, Cw, shear center, war
 );
 
 server.tool("run_plastic_surface", "Generate P-Mxx-Mzz plastic interaction surface",
-    { fy: z.number().optional().describe("Yield stress (default 50)") },
+    { fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)") },
     async ({ fy }) => {
-        const r = await callBridgePost('/action', { action: 'plastic', fy: fy || 50 });
+        const r = await callBridgePost('/action', { action: 'plastic', fy: fy || 52.94 });
         return textResult(JSON.stringify(r, null, 2));
     }
 );
@@ -700,8 +700,8 @@ server.tool("get_energy_recovery", "Calculate element-wise strain energy (membra
 server.tool("aisi_design_compression", "AISI S100-16 DSM compression member design (Chapters E2, E3.2, E4)",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
-        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 71.08 = 490 MPa, SGC490)"),
         KxLx: z.number().describe("Effective length about x-axis (in)"),
         KyLy: z.number().describe("Effective length about y-axis (in)"),
         KtLt: z.number().optional().describe("Effective torsional length (in, default=KyLy)"),
@@ -712,7 +712,7 @@ server.tool("aisi_design_compression", "AISI S100-16 DSM compression member desi
             action: 'aisi_design',
             member_type: 'compression',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 50, Fu: Fu || 65,
+            Fy: Fy || 52.94, Fu: Fu || 71.08,
             KxLx, KyLy, KtLt: KtLt ?? KyLy,
             Pu: Pu || 0,
         });
@@ -723,8 +723,8 @@ server.tool("aisi_design_compression", "AISI S100-16 DSM compression member desi
 server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Chapters F2, F3.2, F4)",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
-        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 71.08 = 490 MPa, SGC490)"),
         Lb: z.number().describe("Unbraced length for LTB (in)"),
         Cb: z.number().optional().describe("Moment gradient factor (default 1.0)"),
         Mu: z.number().optional().describe("Required flexural strength (kip-in)"),
@@ -734,7 +734,7 @@ server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Cha
             action: 'aisi_design',
             member_type: 'flexure',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 50, Fu: Fu || 65,
+            Fy: Fy || 52.94, Fu: Fu || 71.08,
             Lb, Cb: Cb || 1.0,
             Mu: Mu || 0,
         });
@@ -745,8 +745,8 @@ server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Cha
 server.tool("aisi_design_combined", "AISI S100-16 combined axial+bending design check (Chapter H1.2, C1 amplification)",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
-        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 71.08 = 490 MPa, SGC490)"),
         KxLx: z.number().describe("Effective length x-axis (in)"),
         KyLy: z.number().describe("Effective length y-axis (in)"),
         KtLt: z.number().optional().describe("Effective torsional length (in)"),
@@ -764,7 +764,7 @@ server.tool("aisi_design_combined", "AISI S100-16 combined axial+bending design 
             action: 'aisi_design',
             member_type: 'combined',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 50, Fu: Fu || 65,
+            Fy: Fy || 52.94, Fu: Fu || 71.08,
             KxLx, KyLy, KtLt: KtLt ?? KyLy,
             Lb, Cb: Cb || 1.0,
             Cmx: Cmx || 0.85, Cmy: Cmy || 0.85,
@@ -777,8 +777,8 @@ server.tool("aisi_design_combined", "AISI S100-16 combined axial+bending design 
 server.tool("aisi_design_tension", "AISI S100-16 tension member design (Chapters D2, D3)",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
-        Fu: z.number().optional().describe("Ultimate stress ksi (default 65)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
+        Fu: z.number().optional().describe("Ultimate stress ksi (default 71.08 = 490 MPa, SGC490)"),
         Tu: z.number().optional().describe("Required tensile force kips"),
         An: z.number().optional().describe("Net section area in² (default = gross area)"),
     },
@@ -787,7 +787,7 @@ server.tool("aisi_design_tension", "AISI S100-16 tension member design (Chapters
             action: 'aisi_design',
             member_type: 'tension',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 50, Fu: Fu || 65,
+            Fy: Fy || 52.94, Fu: Fu || 71.08,
             Tu: Tu || 0, An,
         });
         return textResult(JSON.stringify(r, null, 2));
@@ -832,7 +832,7 @@ server.tool("aisi_design_connection", "AISI S100-16 connection design (Chapter J
     }
 );
 
-server.tool("steel_grades", "List available CFS steel grades (ASTM A653, A792, A1003) with Fy/Fu values",
+server.tool("steel_grades", "List available CFS steel grades (KS SGC490/570, ASTM A653/A792/A1003) with Fy/Fu values",
     {},
     async () => {
         const r = await callBridgePost('/action', { action: 'steel_grades' });
@@ -859,7 +859,7 @@ server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling strength calcu
         t: z.number().describe("Web thickness (in)"),
         R: z.number().describe("Inside bend radius (in)"),
         N: z.number().describe("Bearing length (in)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
         theta: z.number().optional().describe("Angle between web and bearing surface deg (default 90)"),
         support: z.enum(["EOF", "IOF", "ETF", "ITF"]).optional().describe("Support condition (default EOF)"),
         fastened: z.enum(["fastened", "unfastened"]).optional().describe("Fastened to support? (default fastened)"),
@@ -868,7 +868,7 @@ server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling strength calcu
         const r = await callBridgePost('/action', {
             action: 'web_crippling',
             h, t, R, N,
-            Fy: Fy || 50,
+            Fy: Fy || 52.94,
             theta: theta || 90,
             support: support || 'EOF',
             fastened: fastened || 'fastened',
@@ -980,8 +980,8 @@ server.tool("generate_report", "Generate a comprehensive design report with all 
     {
         member_type: z.enum(["compression", "flexure", "combined", "tension"]).optional().describe("Member type for design calculation"),
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("Design method (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
-        Fu: z.number().optional().describe("Tensile stress ksi (default 65)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
+        Fu: z.number().optional().describe("Tensile stress ksi (default 71.08 = 490 MPa, SGC490)"),
         Mu: z.number().optional().describe("Required flexural strength kip-in"),
         Pu: z.number().optional().describe("Required axial strength kips"),
         Lb: z.number().optional().describe("Unbraced length in"),
@@ -1010,11 +1010,11 @@ server.tool("generate_report", "Generate a comprehensive design report with all 
 
 server.tool("validate_design", "Validate current design state — checks section geometry, material, DSM limits, analysis status, and returns pass/warn/fail for each item per AISI S100-16",
     {
-        Fy: z.number().optional().describe("Yield stress ksi (default 50)"),
+        Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
     },
     async ({ Fy }) => {
         const r = await callBridgePost('/action', {
-            action: 'validate_design', Fy: Fy || 50,
+            action: 'validate_design', Fy: Fy || 52.94,
         });
         return textResult(JSON.stringify(r, null, 2));
     }

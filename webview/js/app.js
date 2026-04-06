@@ -744,7 +744,7 @@
     if (btnPlastic) {
         btnPlastic.addEventListener('click', () => {
             if (!model || !model.node || model.node.length === 0) { return; }
-            const fy = fromDisplay(getNum('input-fy', 50), 'stress');
+            const fy = fromDisplay(getNum('input-fy', 52.94), 'stress');
             vscode.postMessage({
                 command: 'runPlastic',
                 data: { node: model.node, elem: model.elem, fy }
@@ -1047,11 +1047,11 @@
             if (!sectionType) { return; }
 
             const params = {
-                H: fromDisplay(getNum('tpl-H', 9), 'length'),
-                B: fromDisplay(getNum('tpl-B', 5), 'length'),
-                D: fromDisplay(getNum('tpl-D', 1), 'length'),
-                t: fromDisplay(getNum('tpl-t', 0.1), 'thickness'),
-                r: fromDisplay(getNum('tpl-r', 0), 'radius'),
+                H: fromDisplay(getNum('tpl-H', 7.874), 'length'),
+                B: fromDisplay(getNum('tpl-B', 2.953), 'length'),
+                D: fromDisplay(getNum('tpl-D', 0.787), 'length'),
+                t: fromDisplay(getNum('tpl-t', 0.0906), 'thickness'),
+                r: fromDisplay(getNum('tpl-r', 0.157), 'radius'),
             };
 
             // 립 각도 (Lipped C/Z/Angle)
@@ -1084,7 +1084,7 @@
         }
 
         const loadCase = document.getElementById('select-load-case')?.value || 'compression';
-        const fy = fromDisplay(getNum('input-fy-load', 50), 'stress');
+        const fy = fromDisplay(getNum('input-fy-load', 52.94), 'stress');
         const nodes = model.node;
 
         // 선택된 Load Case에 따른 응력 계산 (해석 전 프리뷰용 간이 계산)
@@ -1259,9 +1259,9 @@
         btnRun.addEventListener('click', () => {
             if (!model) { return; }
 
-            const lenMin = fromDisplay(getNum('input-len-min', 1), 'length');
-            const lenMax = fromDisplay(getNum('input-len-max', 1000), 'length');
-            const lenN = getNum('input-len-n', 50);
+            const lenMin = fromDisplay(getNum('input-len-min', 0.394), 'length');
+            const lenMax = fromDisplay(getNum('input-len-max', 393.7), 'length');
+            const lenN = getNum('input-len-n', 60);
             const neigs = getNum('input-neigs', 20);
             const BC = /** @type {HTMLSelectElement} */ (document.getElementById('select-bc'))?.value || 'S-S';
 
@@ -1269,9 +1269,9 @@
             const lengths = logspace(Math.log10(lenMin), Math.log10(lenMax), lenN);
             const m_all = lengths.map(() => [1]);
 
-            const E = fromDisplay(getNum('input-E', 29500), 'stress');
+            const E = fromDisplay(getNum('input-E', 29435), 'stress');
             const v = getNum('input-v', 0.3);
-            const G = fromDisplay(getNum('input-G', 11346), 'stress');
+            const G = fromDisplay(getNum('input-G', 11326), 'stress');
 
             // 모델 업데이트
             model.prop = [[100, E, E, v, v, G]];
@@ -1282,7 +1282,7 @@
 
             // Load Case에 따라 stress 자동 설정
             const loadCase = /** @type {HTMLSelectElement} */ (document.getElementById('select-load-case'))?.value || 'compression';
-            const fyLoad = fromDisplay(getNum('input-fy-load', 50), 'stress');
+            const fyLoad = fromDisplay(getNum('input-fy-load', 52.94), 'stress');
 
             if (loadCase === 'compression') {
                 vscode.postMessage({
@@ -2035,6 +2035,12 @@
     const selGrade = document.getElementById('select-steel-grade');
     if (selGrade) {
         const gradeMap = {
+            // KS D 3506 (용융아연도금) — Fy/Fu in ksi (내부 US 단위)
+            'SGC400': [35.53, 58.02], 'SGC440': [42.79, 63.82],
+            'SGC490': [52.94, 71.08], 'SGC570': [81.22, 82.67],
+            // KS D 3530 (경량형강)
+            'SSC400': [35.53, 58.02],
+            // ASTM
             'A653-33': [33,45], 'A653-50': [50,65], 'A653-55': [55,70], 'A653-80': [80,82],
             'A792-33': [33,45], 'A792-50': [50,65], 'A792-80': [80,82],
             'A1003-33': [33,45], 'A1003-50': [50,65],
@@ -2054,7 +2060,7 @@
 
     // PSF/kPa → PLF/kN-m 자동 변환 (표시용)
     function updatePLF() {
-        const spacingRaw = getNum('config-spacing', 5);
+        const spacingRaw = getNum('config-spacing', 4.921);
         const spacingUS = fromDisplay(spacingRaw, 'length_ft');
         ['D', 'Lr', 'S', 'Wu', 'L'].forEach(lt => {
             const psfRaw = getNum('load-' + lt + '-psf', 0);
@@ -2215,12 +2221,12 @@
             const data = {
                 member_type: memberType,
                 design_method: designMethod,
-                Fy: fromDisplay(getNum('design-fy', 50), 'stress'),
-                Fu: fromDisplay(getNum('design-fu', 65), 'stress'),
-                KxLx: fromDisplay(getNum('design-KxLx', 120), 'length'),
-                KyLy: fromDisplay(getNum('design-KyLy', 120), 'length'),
-                KtLt: fromDisplay(getNum('design-KtLt', 120), 'length'),
-                Lb: fromDisplay(getNum('design-Lb', 120), 'length'),
+                Fy: fromDisplay(getNum('design-fy', 52.94), 'stress'),
+                Fu: fromDisplay(getNum('design-fu', 71.08), 'stress'),
+                KxLx: fromDisplay(getNum('design-KxLx', 118.11), 'length'),
+                KyLy: fromDisplay(getNum('design-KyLy', 118.11), 'length'),
+                KtLt: fromDisplay(getNum('design-KtLt', 118.11), 'length'),
+                Lb: fromDisplay(getNum('design-Lb', 118.11), 'length'),
                 Cb: getNum('design-Cb', 1.0),
                 Cmx: getNum('design-Cmx', 0.85),
                 Cmy: getNum('design-Cmy', 0.85),
@@ -2256,7 +2262,7 @@
             const memberApp = selMemberType ? selMemberType.value : '';
             if (!isCalcMode(memberApp)) return;
 
-            const spacing = getNum('config-spacing', 5);
+            const spacing = getNum('config-spacing', 4.921);
             let spanType = /** @type {HTMLSelectElement} */ (document.getElementById('select-span-type'))?.value || 'simple';
             if (spanType === 'cont-n') {
                 const n = getNum('config-n-spans', 5);
@@ -2273,8 +2279,8 @@
                 lip_depth: fromDisplay(getNum('tpl-D', 0), 'length'),
                 R_corner: fromDisplay(getNum('tpl-r', 0), 'radius'),
                 type: secType === 'lippedz' ? 'Z' : 'C',
-                Fy: fromDisplay(getNum('design-fy', 50), 'stress'),
-                Fu: fromDisplay(getNum('design-fu', 65), 'stress'),
+                Fy: fromDisplay(getNum('design-fy', 52.94), 'stress'),
+                Fu: fromDisplay(getNum('design-fu', 71.08), 'stress'),
                 Ixx: lastProps ? lastProps.Ixx : 0,  // US in^4 (내부값)
             };
 
@@ -2336,8 +2342,8 @@
                 },
                 deck: {
                     type: /** @type {HTMLSelectElement} */ (document.getElementById('select-deck-type'))?.value || 'none',
-                    t_panel: fromDisplay(getNum('deck-t-panel', 0.018), 'thickness'),
-                    fastener_spacing: fromDisplay(getNum('deck-fastener-spacing', 12), 'length'),
+                    t_panel: fromDisplay(getNum('deck-t-panel', 0.0197), 'thickness'),
+                    fastener_spacing: fromDisplay(getNum('deck-fastener-spacing', 11.81), 'length'),
                     kphi_override: getNum('deck-kphi-override', null) || null,
                 },
                 section: (sectionInfo.depth > 0 && sectionInfo.thickness > 0) ? sectionInfo : null,
@@ -3250,7 +3256,7 @@
         let h = '';
 
         // 재료 (입력 필드값은 이미 표시 단위 → 직접 사용, US 상수는 _ruv로 변환)
-        const fy = getNum('design-fy',50), fu = getNum('design-fu',65);
+        const fy = getNum('design-fy',52.94), fu = getNum('design-fu',71.08);
         const gradeEl = document.getElementById('select-steel-grade');
         const gradeName = gradeEl ? gradeEl.options[gradeEl.selectedIndex].text : 'Custom';
         h += '<h3>재료</h3>';
@@ -3258,7 +3264,7 @@
         h += '<tr><td>강종</td><td colspan="2">'+gradeName+'</td></tr>';
         h += '<tr><td>항복강도, F<sub>y</sub></td><td>'+fy+'</td><td>'+_rul('stress')+'</td></tr>';
         h += '<tr><td>인장강도, F<sub>u</sub></td><td>'+fu+'</td><td>'+_rul('stress')+'</td></tr>';
-        h += '<tr><td>탄성계수, E</td><td>'+_ruv(29500,'stress')+'</td><td>'+_rul('stress')+'</td></tr>';
+        h += '<tr><td>탄성계수, E</td><td>'+_ruv(29435,'stress')+'</td><td>'+_rul('stress')+'</td></tr>';
         h += '<tr><td>포아송비, &nu;</td><td>0.30</td><td></td></tr>';
         h += '</table>';
 
@@ -3702,8 +3708,8 @@
         const la = _lastLoadAnalysis;
         const p = lastProps;
         const dsm = lastDsmResult;
-        const fy = getNum('design-fy', 50);
-        const fu = getNum('design-fu', 65);
+        const fy = getNum('design-fy', 52.94);
+        const fu = getNum('design-fu', 71.08);
         const H = getNum('tpl-H', 0), B = getNum('tpl-B', 0), D = getNum('tpl-D', 0);
         const t = getNum('tpl-t', 0), r = getNum('tpl-r', 0);
 
@@ -3953,7 +3959,7 @@
         // E. 하중 입력 (Load Input)
         // ════════════════════════════════════════
         const catE = 'E. 하중 입력';
-        const spacing = getNum('config-spacing', 5);
+        const spacing = getNum('config-spacing', 4.921);
         // config-span 요소가 없으므로 스팬 테이블에서 첫 번째 스팬 길이를 읽음
         const spanTblEls = document.querySelectorAll('.span-tbl-len');
         let spanFt = 0;
@@ -4212,7 +4218,7 @@
         const catH = 'H. 일관성';
 
         // Fy 일치 여부 확인
-        const fyLoad = getNum('input-fy-load', 50);
+        const fyLoad = getNum('input-fy-load', 52.94);
         checks.push({
             category: catH, item: 'Fy 일관성 (해석 vs 설계)',
             status: Math.abs(fy - fyLoad) < 0.1 ? 'pass' : 'warn',
@@ -4289,8 +4295,8 @@
         const data = {};
         // Material
         data.steelGrade = document.getElementById('select-steel-grade')?.value || 'custom';
-        data.fy = fromDisplay(getNum('design-fy', 50), 'stress');
-        data.fu = fromDisplay(getNum('design-fu', 65), 'stress');
+        data.fy = fromDisplay(getNum('design-fy', 52.94), 'stress');
+        data.fu = fromDisplay(getNum('design-fu', 71.08), 'stress');
         // Design method
         data.designMethod = document.getElementById('select-design-method')?.value || 'LRFD';
         data.analysisMethod = document.getElementById('select-analysis-method')?.value || 'DSM';
@@ -4299,7 +4305,7 @@
         // Span config
         data.spanType = document.getElementById('select-span-type')?.value || 'simple';
         data.nSpans = getNum('config-n-spans', 5);
-        data.spacing = fromDisplay(getNum('config-spacing', 5), 'length_ft');
+        data.spacing = fromDisplay(getNum('config-spacing', 4.921), 'length_ft');
         // 스팬 테이블 데이터
         const spanLens = []; const sups = []; const laps = [];
         document.querySelectorAll('.span-tbl-len').forEach(el => spanLens.push(fromDisplay(parseFloat(el.value) || 25, 'length_ft')));
@@ -4321,14 +4327,14 @@
         data.loadL = fromDisplay(getNum('load-L-psf', 0), 'pressure');
         // Deck
         data.deckType = document.getElementById('select-deck-type')?.value || 'none';
-        data.deckTPanel = fromDisplay(getNum('deck-t-panel', 0.018), 'thickness');
-        data.deckFastenerSpacing = fromDisplay(getNum('deck-fastener-spacing', 12), 'length');
+        data.deckTPanel = fromDisplay(getNum('deck-t-panel', 0.0197), 'thickness');
+        data.deckFastenerSpacing = fromDisplay(getNum('deck-fastener-spacing', 11.81), 'length');
         data.deckKphiOverride = fromDisplay(getNum('deck-kphi-override', 0), 'rotStiff');
         // Unbraced lengths
-        data.KxLx = fromDisplay(getNum('design-KxLx', 120), 'length');
-        data.KyLy = fromDisplay(getNum('design-KyLy', 120), 'length');
-        data.KtLt = fromDisplay(getNum('design-KtLt', 120), 'length');
-        data.Lb = fromDisplay(getNum('design-Lb', 120), 'length');
+        data.KxLx = fromDisplay(getNum('design-KxLx', 118.11), 'length');
+        data.KyLy = fromDisplay(getNum('design-KyLy', 118.11), 'length');
+        data.KtLt = fromDisplay(getNum('design-KtLt', 118.11), 'length');
+        data.Lb = fromDisplay(getNum('design-Lb', 118.11), 'length');
         data.Cb = getNum('design-Cb', 1.0);
         data.Cmx = getNum('design-Cmx', 0.85);
         data.Cmy = getNum('design-Cmy', 0.85);
@@ -4338,19 +4344,19 @@
         data.Mux = fromDisplay(getNum('design-Mx', 0), 'moment');
         data.Muy = fromDisplay(getNum('design-My', 0), 'moment');
         // Web crippling
-        data.wcN = fromDisplay(getNum('design-wc-N', 3.5), 'length');
+        data.wcN = fromDisplay(getNum('design-wc-N', 3.504), 'length');
         data.wcR = fromDisplay(getNum('design-wc-R', 0.1875), 'radius');
         data.wcSupport = document.getElementById('design-wc-support')?.value || 'EOF';
         // Template params
         data.templateType = document.getElementById('select-template')?.value || '';
-        data.tplH = fromDisplay(getNum('tpl-H', 9), 'length');
-        data.tplB = fromDisplay(getNum('tpl-B', 5), 'length');
-        data.tplD = fromDisplay(getNum('tpl-D', 1), 'length');
-        data.tplT = fromDisplay(getNum('tpl-t', 0.1), 'thickness');
-        data.tplR = fromDisplay(getNum('tpl-r', 0), 'radius');
+        data.tplH = fromDisplay(getNum('tpl-H', 7.874), 'length');
+        data.tplB = fromDisplay(getNum('tpl-B', 2.953), 'length');
+        data.tplD = fromDisplay(getNum('tpl-D', 0.787), 'length');
+        data.tplT = fromDisplay(getNum('tpl-t', 0.0906), 'thickness');
+        data.tplR = fromDisplay(getNum('tpl-r', 0.157), 'radius');
         data.tplQlip = getNum('tpl-qlip', 90);
         // Analysis config
-        data.fyLoad = fromDisplay(getNum('input-fy-load', 50), 'stress');
+        data.fyLoad = fromDisplay(getNum('input-fy-load', 52.94), 'stress');
         return data;
     }
 

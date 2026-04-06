@@ -13,6 +13,7 @@ export class PythonBridge {
     private _extensionPath: string;
     private _pythonPath: string;
     private _started = false;
+    private _startupPromise: Promise<void> | null = null;
 
     constructor(extensionPath: string, pythonPath: string = 'python') {
         this._extensionPath = extensionPath;
@@ -24,12 +25,30 @@ export class PythonBridge {
         if (this._process && this._started) {
             return;
         }
+        if (this._startupPromise) {
+            return this._startupPromise;
+        }
 
         const enginePath = path.join(this._extensionPath, 'python');
         console.log(`[CUFSM] Starting Python: ${this._pythonPath} -u server.py`);
         console.log(`[CUFSM] CWD: ${enginePath}`);
 
-        return new Promise<void>((resolve, reject) => {
+        this._startupPromise = new Promise<void>((resolve, reject) => {
+            let settled = false;
+            const finishResolve = () => {
+                if (settled) { return; }
+                settled = true;
+                this._startupPromise = null;
+                resolve();
+            };
+            const finishReject = (err: Error) => {
+                if (settled) { return; }
+                settled = true;
+                this._startupPromise = null;
+                this._cleanupProcess();
+                reject(err);
+            };
+
             try {
                 this._process = spawn(this._pythonPath, ['-u', 'server.py'], {
                     cwd: enginePath,
@@ -38,22 +57,23 @@ export class PythonBridge {
                 });
             } catch (err: any) {
                 console.error('[CUFSM] Failed to spawn Python:', err.message);
-                reject(err);
+                finishReject(err);
                 return;
             }
 
             // 프로세스 즉시 종료 감지
             this._process.on('error', (err) => {
                 console.error('[CUFSM] Python process error:', err.message);
-                this._process = null;
-                this._started = false;
-                reject(err);
+                finishReject(err instanceof Error ? err : new Error(String(err)));
             });
 
             this._process.on('exit', (code, signal) => {
                 console.log(`[CUFSM] Python process exited: code=${code}, signal=${signal}`);
                 this._process = null;
                 this._started = false;
+                if (!settled) {
+                    finishReject(new Error(`Python exited during startup (code=${code}, signal=${signal ?? 'none'})`));
+                }
             });
 
             this._process.stdout!.setEncoding('utf-8');
@@ -77,31 +97,29 @@ export class PythonBridge {
                 if (!this._process || this._process.exitCode !== null) {
                     const msg = `Python exited immediately. stderr: ${stderrBuffer.substring(0, 500)}`;
                     console.error(`[CUFSM] ${msg}`);
-                    reject(new Error(msg));
+                    finishReject(new Error(msg));
                     return;
                 }
                 try {
                     const result = await this.ping();
                     console.log(`[CUFSM] Python engine ready: ${result}`);
                     this._started = true;
-                    resolve();
+                    finishResolve();
                 } catch (err: any) {
                     const msg = `Ping failed. stderr: ${stderrBuffer.substring(0, 500)}`;
                     console.error(`[CUFSM] ${msg}`);
-                    this._started = true;
-                    resolve(); // 에러여도 계속 시도 허용
+                    finishReject(new Error(msg));
                 }
             }, 2000);
         });
+
+        return this._startupPromise;
     }
 
     stop(): void {
         this._protocol.dispose();
-        if (this._process) {
-            this._process.kill();
-            this._process = null;
-        }
-        this._started = false;
+        this._startupPromise = null;
+        this._cleanupProcess();
     }
 
     async ping(): Promise<string> {
@@ -141,5 +159,13 @@ export class PythonBridge {
 
     dispose(): void {
         this.stop();
+    }
+
+    private _cleanupProcess(): void {
+        if (this._process) {
+            this._process.kill();
+            this._process = null;
+        }
+        this._started = false;
     }
 }

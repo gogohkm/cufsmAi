@@ -1,14 +1,22 @@
-"""ASTM 냉간성형강 강재 등급 데이터베이스
+"""냉간성형강 강재 등급 데이터베이스
 
-AISI S100-16 Chapter A3 참조
+KS D 3506, KS D 3530, AISI S100-16 Chapter A3 참조
+내부 저장 단위: ksi (US)
 """
 
 # 공통 물성 (모든 강재)
-E = 29500.0   # ksi — 탄성계수
-G = 11300.0   # ksi — 전단탄성계수
+E = 29435.0   # ksi — 탄성계수 (203,000 MPa)
+G = 11326.0   # ksi — 전단탄성계수 (78,077 MPa)
 nu = 0.30     # 포아송비
 
 STEEL_GRADES = {
+    # KS D 3506 — 용융 아연 도금 강판 (Hot-Dip Zinc-Coated)
+    'SGC400':   {'Fy': 35.53, 'Fu': 58.02, 'coating': '용융아연도금', 'spec': 'KS D 3506'},
+    'SGC440':   {'Fy': 42.79, 'Fu': 63.82, 'coating': '용융아연도금', 'spec': 'KS D 3506'},
+    'SGC490':   {'Fy': 52.94, 'Fu': 71.08, 'coating': '용융아연도금', 'spec': 'KS D 3506'},
+    'SGC570':   {'Fy': 81.22, 'Fu': 82.67, 'coating': '용융아연도금', 'spec': 'KS D 3506'},
+    # KS D 3530 — 일반 구조용 경량 형강
+    'SSC400':   {'Fy': 35.53, 'Fu': 58.02, 'coating': 'None', 'spec': 'KS D 3530'},
     # ASTM A653 — Hot-Dip Galvanized
     'A653-33':  {'Fy': 33, 'Fu': 45, 'coating': 'Galvanized', 'spec': 'ASTM A653'},
     'A653-37':  {'Fy': 37, 'Fu': 52, 'coating': 'Galvanized', 'spec': 'ASTM A653'},

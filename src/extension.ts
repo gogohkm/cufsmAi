@@ -10,6 +10,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as net from 'net';
 import { PythonBridge } from './bridge/PythonBridge';
 import { CufsmPanel } from './webview/CufsmPanel';
 import { ProjectExplorerProvider, CufsmTreeItem } from './webview/ProjectExplorerProvider';
@@ -25,9 +26,9 @@ export async function activate(context: vscode.ExtensionContext) {
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
 
     // MCP Bridge 시작
-    const mcpPort = 52790;
+    const mcpPort = await findAvailablePort(52790);
     mcpBridge = new McpBridgeServer(() => CufsmPanel.currentPanel || undefined, mcpPort);
-    mcpBridge.start();
+    await mcpBridge.start();
 
     // .mcp.json 자동 생성
     setupMcpConfig(context, mcpPort);
@@ -47,20 +48,19 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('cufsm.openDesigner', async () => {
             try {
                 await ensurePythonRunning();
+                CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
             } catch (e) {
-                // Python 실패해도 패널은 열기 (에러는 WebView에 표시)
-                console.error('[CUFSM] Python start failed, opening panel anyway');
+                console.error('[CUFSM] Python start failed, designer not opened');
             }
-            CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 
         vscode.commands.registerCommand('cufsm.newProject', async () => {
             try {
                 await ensurePythonRunning();
+                CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
             } catch (e) {
-                console.error('[CUFSM] Python start failed');
+                console.error('[CUFSM] Python start failed, new project view not opened');
             }
-            CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 
         vscode.commands.registerCommand('cufsm.navigateSection', (sectionId: string) => {
@@ -81,7 +81,7 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     // Step 4: 트리 아이템 클릭 → WebView 네비게이션
-    treeView.onDidChangeSelection(e => {
+    treeView.onDidChangeSelection(async e => {
         if (e.selection.length === 0) { return; }
         const item = e.selection[0] as CufsmTreeItem;
         const sectionId = item.sectionId;
@@ -96,7 +96,8 @@ export async function activate(context: vscode.ExtensionContext) {
         // 패널이 없으면 먼저 생성
         const panelExisted = !!CufsmPanel.currentPanel;
         if (!panelExisted) {
-            ensurePythonRunning().then(() => {
+            try {
+                await ensurePythonRunning();
                 CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
                 // WebView 초기화 대기 후 섹션 이동
                 setTimeout(() => {
@@ -104,7 +105,9 @@ export async function activate(context: vscode.ExtensionContext) {
                         CufsmPanel.currentPanel.showSection(sectionId);
                     }
                 }, 800);
-            });
+            } catch (err) {
+                console.error(`[CUFSM] Tree navigation blocked while starting Python for section ${sectionId}`);
+            }
         } else {
             CufsmPanel.currentPanel!.showSection(sectionId);
         }
@@ -150,9 +153,9 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
     _writeMcpToWorkspace(mcpJson);
 
     // 2) 워크스페이스 변경 시 다시 쓰기
-    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+    context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
         _writeMcpToWorkspace(mcpJson);
-    });
+    }));
 
     // 3) Extension 설치 디렉토리 자체에도 쓰기 (폴백)
     try {
@@ -187,6 +190,29 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
 
     console.log(`[CUFSM] MCP server path: ${serverPath}`);
     console.log(`[CUFSM] MCP bridge port: ${port}`);
+}
+
+async function findAvailablePort(preferredPort: number, maxAttempts: number = 20): Promise<number> {
+    for (let offset = 0; offset < maxAttempts; offset++) {
+        const candidate = preferredPort + offset;
+        const isFree = await new Promise<boolean>((resolve) => {
+            const server = net.createServer();
+            server.once('error', () => resolve(false));
+            server.once('listening', () => {
+                server.close(() => resolve(true));
+            });
+            server.listen(candidate, '127.0.0.1');
+        });
+
+        if (isFree) {
+            if (candidate !== preferredPort) {
+                console.warn(`[CUFSM] Preferred MCP port ${preferredPort} unavailable, using ${candidate}`);
+            }
+            return candidate;
+        }
+    }
+
+    throw new Error(`CUFSM: failed to reserve an MCP bridge port near ${preferredPort}`);
 }
 
 function _writeMcpToWorkspace(mcpJson: string): void {
