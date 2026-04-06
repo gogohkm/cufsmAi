@@ -1253,6 +1253,11 @@ export class CufsmPanel implements McpPanelInterface {
     <div class="tab-content">
         <!-- 전처리 탭 -->
         <div id="tab-preprocessor" class="tab-panel active">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:4px 6px;background:var(--vscode-editor-selectionBackground);border-radius:4px">
+                <span style="font-size:11px;font-weight:600">Unit System</span>
+                <button id="btn-unit-US" class="btn-toggle active" style="font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer">US (ksi, in)</button>
+                <button id="btn-unit-SI" class="btn-toggle" style="font-size:11px;padding:2px 10px;border-radius:3px;cursor:pointer">SI (MPa, mm)</button>
+            </div>
             <div class="panel-row">
                 <div class="panel-left">
                     <h3>Section Input</h3>
@@ -1277,11 +1282,11 @@ export class CufsmPanel implements McpPanelInterface {
                             <button id="btn-generate-template" class="btn-action-green" style="padding:4px 12px">Generate</button>
                         </div>
                         <div id="template-params" class="input-row" style="margin-top:4px; flex-wrap:wrap;">
-                            <label>H<span class="hint-inline">높이</span></label><input type="number" id="tpl-H" value="9" step="0.5" style="width:60px">
-                            <label>B<span class="hint-inline">폭</span></label><input type="number" id="tpl-B" value="5" step="0.5" style="width:60px">
-                            <label>D<span class="hint-inline">립</span></label><input type="number" id="tpl-D" value="1" step="0.1" style="width:60px">
-                            <label>t<span class="hint-inline">두께</span></label><input type="number" id="tpl-t" value="0.1" step="0.01" style="width:60px">
-                            <label>r<span class="hint-inline">반경</span></label><input type="number" id="tpl-r" value="0" step="0.1" style="width:60px">
+                            <label>H<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-H" value="9" step="0.5" style="width:60px">
+                            <label>B<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-B" value="5" step="0.5" style="width:60px">
+                            <label>D<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-D" value="1" step="0.1" style="width:60px">
+                            <label>t<span class="hint-inline" data-unit="thickness">in</span></label><input type="number" id="tpl-t" value="0.1" step="0.01" style="width:60px">
+                            <label>r<span class="hint-inline" data-unit="radius">in</span></label><input type="number" id="tpl-r" value="0" step="0.1" style="width:60px">
                             <span id="tpl-qlip-group" style="display:none">
                                 <label>lip°<span class="hint-inline">립각도</span></label><input type="number" id="tpl-qlip" value="90" step="5" min="0" max="180" style="width:55px">
                             </span>
@@ -1289,11 +1294,11 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                     <div class="section-group">
                         <label>Material</label>
-                        <p class="hint">E = 탄성계수(ksi), v = 포아송비, G = 전단탄성계수(자동 계산 가능)</p>
+                        <p class="hint">E = 탄성계수, v = 포아송비, G = 전단탄성계수(자동 계산 가능)</p>
                         <div class="input-row">
-                            <label>E</label><input type="number" id="input-E" value="29500" step="100">
+                            <label>E<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-E" value="29500" step="100">
                             <label>v</label><input type="number" id="input-v" value="0.3" step="0.01">
-                            <label>G</label><input type="number" id="input-G" value="11346" step="100">
+                            <label>G<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-G" value="11346" step="100">
                         </div>
                     </div>
                     <div class="section-group">
@@ -1308,15 +1313,15 @@ export class CufsmPanel implements McpPanelInterface {
                                 <option value="bending_zz_neg">약축 휨 -Mzz (x- 압축)</option>
                                 <option value="custom">조합 (P + Mxx + Mzz)</option>
                             </select>
-                            <label>Fy<span class="hint-inline">항복</span></label>
+                            <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label>
                             <input type="number" id="input-fy-load" value="50" step="5" style="width:60px">
                         </div>
                         <div id="custom-load-inputs" class="input-row" style="display:none; margin-top:4px;">
-                            <label>P<span class="hint-inline">kips</span></label>
+                            <label>P<span class="hint-inline" data-unit="force">kips</span></label>
                             <input type="number" id="input-load-P" value="0" step="1" style="width:70px">
-                            <label>Mxx<span class="hint-inline">kip-in</span></label>
+                            <label>Mxx<span class="hint-inline" data-unit="moment">kip-in</span></label>
                             <input type="number" id="input-load-Mxx" value="0" step="10" style="width:70px">
-                            <label>Mzz<span class="hint-inline">kip-in</span></label>
+                            <label>Mzz<span class="hint-inline" data-unit="moment">kip-in</span></label>
                             <input type="number" id="input-load-Mzz" value="0" step="10" style="width:70px">
                         </div>
                     </div>
@@ -1370,8 +1375,8 @@ export class CufsmPanel implements McpPanelInterface {
                 <label>Lengths (반파장)</label>
                 <p class="hint">좌굴 곡선을 계산할 반파장 범위. 국부좌굴은 짧은 파장, 전체좌굴은 긴 파장에서 나타남.</p>
                 <div class="input-row">
-                    <label>최소</label><input type="number" id="input-len-min" value="1" step="1">
-                    <label>최대</label><input type="number" id="input-len-max" value="1000" step="100">
+                    <label>최소<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="input-len-min" value="1" step="1">
+                    <label>최대<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="input-len-max" value="1000" step="100">
                     <label>개수</label><input type="number" id="input-len-n" value="50" step="10">
                 </div>
             </div>
@@ -1419,7 +1424,7 @@ export class CufsmPanel implements McpPanelInterface {
                     <h3>Plastic Interaction Surface</h3>
                     <p class="hint">주축(principal axis) 좌표계 기준 P-M 소성 상호작용 다이어그램. 항복값으로 정규화된 축력-모멘트 조합을 표시합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
-                        <label>fy<span class="hint-inline">항복응력</span></label><input type="number" id="input-fy" value="50" step="5" style="width:60px">
+                        <label>fy<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-fy" value="50" step="5" style="width:60px">
                         <button id="btn-run-plastic" class="btn-small">곡면 생성</button>
                     </div>
                     <canvas id="plastic-surface-canvas" width="700" height="420"></canvas>
@@ -1478,9 +1483,9 @@ export class CufsmPanel implements McpPanelInterface {
                     </select>
                 </div>
                 <div class="input-row">
-                    <label>Fy<span class="hint-inline">ksi</span></label>
+                    <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label>
                     <input type="number" id="design-fy" value="50" step="1" style="width:55px" min="1" max="100">
-                    <label>Fu<span class="hint-inline">ksi</span></label>
+                    <label>Fu<span class="hint-inline" data-unit="stress">ksi</span></label>
                     <input type="number" id="design-fu" value="65" step="1" style="width:55px" min="1" max="120">
                 </div>
                 </div>
@@ -1530,7 +1535,7 @@ export class CufsmPanel implements McpPanelInterface {
                             <option value="cont-n">N-Span Cont.</option>
                         </select>
                         <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:40px;display:none" title="Number of spans">
-                        <label>Spacing<span class="hint-inline">ft</span></label>
+                        <label>Spacing<span class="hint-inline" data-unit="length_ft">ft</span></label>
                         <input type="number" id="config-spacing" value="5" step="0.5" style="width:55px">
                     </div>
 
@@ -1541,9 +1546,9 @@ export class CufsmPanel implements McpPanelInterface {
                                 <tr style="background:var(--vscode-editor-selectionBackground)">
                                     <th style="padding:2px 4px;width:30px">Sup#</th>
                                     <th style="padding:2px 4px;width:50px">Support</th>
-                                    <th style="padding:2px 4px;width:55px">Span(ft)</th>
-                                    <th style="padding:2px 4px;width:45px">Lap L(ft)</th>
-                                    <th style="padding:2px 4px;width:45px">Lap R(ft)</th>
+                                    <th style="padding:2px 4px;width:55px">Span(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:2px 4px;width:45px">Lap L(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:2px 4px;width:45px">Lap R(<span data-unit="length_ft">ft</span>)</th>
                                 </tr>
                             </thead>
                             <tbody id="span-config-tbody">
@@ -1557,27 +1562,27 @@ export class CufsmPanel implements McpPanelInterface {
                 <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> Service Loads</h3>
                 <div>
                     <div class="input-row">
-                        <label>D<span class="hint-inline">psf</span></label>
+                        <label>D<span class="hint-inline" data-unit="pressure">psf</span></label>
                         <input type="number" id="load-D-psf" value="3" step="0.5" style="width:50px">
                         <span id="load-D-plf" class="hint-inline" style="min-width:50px">→15 PLF</span>
                     </div>
                     <div class="input-row" id="load-Lr-row">
-                        <label>Lr<span class="hint-inline">psf</span></label>
+                        <label>Lr<span class="hint-inline" data-unit="pressure">psf</span></label>
                         <input type="number" id="load-Lr-psf" value="20" step="1" style="width:50px">
                         <span id="load-Lr-plf" class="hint-inline" style="min-width:50px">→100 PLF</span>
                     </div>
                     <div class="input-row" id="load-S-row">
-                        <label>S<span class="hint-inline">psf</span></label>
+                        <label>S<span class="hint-inline" data-unit="pressure">psf</span></label>
                         <input type="number" id="load-S-psf" value="0" step="1" style="width:50px">
                         <span id="load-S-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                     <div class="input-row" id="load-W-row">
-                        <label>Wu<span class="hint-inline">psf↑</span></label>
+                        <label>Wu<span class="hint-inline" data-unit="pressure">psf</span>↑</label>
                         <input type="number" id="load-Wu-psf" value="0" step="1" style="width:50px">
                         <span id="load-Wu-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                     <div class="input-row" id="load-L-row" style="display:none">
-                        <label>L<span class="hint-inline">psf</span></label>
+                        <label>L<span class="hint-inline" data-unit="pressure">psf</span></label>
                         <input type="number" id="load-L-psf" value="0" step="1" style="width:50px">
                         <span id="load-L-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
@@ -1594,13 +1599,13 @@ export class CufsmPanel implements McpPanelInterface {
                         </select>
                     </div>
                     <div class="input-row" id="deck-detail-row">
-                        <label>t<span class="hint-inline">in</span></label>
+                        <label>t<span class="hint-inline" data-unit="length">in</span></label>
                         <input type="number" id="deck-t-panel" value="0.018" step="0.001" style="width:55px">
-                        <label>@<span class="hint-inline">in</span></label>
+                        <label>@<span class="hint-inline" data-unit="length">in</span></label>
                         <input type="number" id="deck-fastener-spacing" value="12" step="1" style="width:40px">
                     </div>
                     <div class="input-row" id="deck-kphi-row">
-                        <label>kφ override<span class="hint-inline">k-in/rad/in</span></label>
+                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">k-in/rad/in</span></label>
                         <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
                     </div>
                 </div>
@@ -1610,13 +1615,13 @@ export class CufsmPanel implements McpPanelInterface {
 
                 <h3 id="design-lengths-title">Unbraced Lengths</h3>
                 <div class="input-row" id="design-KxLx-row">
-                    <label>KxLx<span class="hint-inline">in</span></label>
+                    <label>KxLx<span class="hint-inline" data-unit="length">in</span></label>
                     <input type="number" id="design-KxLx" value="120" step="1" style="width:65px">
-                    <label>KyLy</label>
+                    <label>KyLy<span class="hint-inline" data-unit="length">in</span></label>
                     <input type="number" id="design-KyLy" value="120" step="1" style="width:65px">
                 </div>
                 <div class="input-row" id="design-KtLt-row">
-                    <label>KtLt<span class="hint-inline">in</span></label>
+                    <label>KtLt<span class="hint-inline" data-unit="length">in</span></label>
                     <input type="number" id="design-KtLt" value="120" step="1" style="width:65px">
                 </div>
                 <div class="input-row" id="design-Cb-row">
@@ -1624,7 +1629,7 @@ export class CufsmPanel implements McpPanelInterface {
                     <input type="number" id="design-Cb" value="1.0" step="0.01" style="width:65px">
                 </div>
                 <div class="input-row" id="design-Lb-row">
-                    <label>Lb<span class="hint-inline">in (LTB)</span></label>
+                    <label>Lb<span class="hint-inline" data-unit="length">in</span> (LTB)</label>
                     <input type="number" id="design-Lb" value="120" step="1" style="width:65px">
                 </div>
                 <div class="input-row" id="design-Cm-row" style="display:none">
@@ -1636,24 +1641,24 @@ export class CufsmPanel implements McpPanelInterface {
 
                 <h3>Required Loads</h3>
                 <div class="input-row">
-                    <label>P<span class="hint-inline">kips</span></label>
+                    <label>P<span class="hint-inline" data-unit="force">kips</span></label>
                     <input type="number" id="design-P" value="0" step="0.1" style="width:65px">
-                    <label>V<span class="hint-inline">kips</span></label>
+                    <label>V<span class="hint-inline" data-unit="force">kips</span></label>
                     <input type="number" id="design-V" value="0" step="0.1" style="width:65px">
                 </div>
                 <div class="input-row">
-                    <label>Mx<span class="hint-inline">kip-in</span></label>
+                    <label>Mx<span class="hint-inline" data-unit="moment">kip-in</span></label>
                     <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px">
-                    <label>My<span class="hint-inline">kip-in</span></label>
+                    <label>My<span class="hint-inline" data-unit="moment">kip-in</span></label>
                     <input type="number" id="design-My" value="0" step="0.1" style="width:65px">
                 </div>
 
                 <div id="design-wc-section" style="display:none">
                     <h3>Web Crippling (§G5)</h3>
                     <div class="input-row">
-                        <label>N<span class="hint-inline">in</span></label>
+                        <label>N<span class="hint-inline" data-unit="length">in</span></label>
                         <input type="number" id="design-wc-N" value="3.5" step="0.1" style="width:55px">
-                        <label>R<span class="hint-inline">in</span></label>
+                        <label>R<span class="hint-inline" data-unit="length">in</span></label>
                         <input type="number" id="design-wc-R" value="0.1875" step="0.01" style="width:65px">
                     </div>
                     <div class="input-row">

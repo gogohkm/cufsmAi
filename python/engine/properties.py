@@ -162,8 +162,12 @@ def grosprop(node: np.ndarray, elem: np.ndarray) -> dict:
     Ixz = Ixz_o + Axz - A_total * xcg * zcg
 
     # 주축 각도
-    if abs(Ixx - Izz) < 1e-14:
-        thetap = 0.0 if abs(Ixz) < 1e-14 else 45.0
+    # 상대 허용치: Ixx≈Izz인 원형/정방형 단면에서 수치 잡음 방지
+    I_ref = max(abs(Ixx), abs(Izz), 1e-30)
+    if abs(Ixx - Izz) < 1e-10 * I_ref and abs(Ixz) < 1e-10 * I_ref:
+        thetap = 0.0
+    elif abs(Ixx - Izz) < 1e-10 * I_ref:
+        thetap = 45.0 if Ixz < 0 else -45.0
     else:
         thetap = math.degrees(math.atan2(-2 * Ixz, Ixx - Izz) / 2.0)
 

@@ -4,13 +4,16 @@
  * 참조: 컨버전전략.md §11
  */
 
+/* === Font === */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
 /* === Reset === */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
     background: var(--vscode-editor-background);
     color: var(--vscode-editor-foreground);
-    font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+    font-family: 'Inter', var(--vscode-font-family, 'Segoe UI', sans-serif);
     font-size: var(--vscode-font-size, 13px);
     padding: 0;
     overflow: hidden;
@@ -94,6 +97,23 @@ body {
 .btn-action-green:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.btn-toggle {
+    background: transparent;
+    border: 1px solid var(--vscode-input-border, #555);
+    color: var(--vscode-foreground);
+    font-family: inherit;
+    transition: background 0.15s, color 0.15s;
+}
+.btn-toggle.active {
+    background: var(--vscode-button-background, #0e639c);
+    color: var(--vscode-button-foreground, #fff);
+    border-color: var(--vscode-button-background, #0e639c);
+    font-weight: 600;
+}
+.btn-toggle:hover:not(.active) {
+    background: var(--vscode-list-hoverBackground, #2a2d2e);
 }
 
 /* === 탭 내용 === */

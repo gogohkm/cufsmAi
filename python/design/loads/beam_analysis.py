@@ -201,6 +201,7 @@ def analyze_continuous_beam_general(
     w_plf_list: List[float],
     Ix_list: Optional[List[float]] = None,
     n_pts_per_span: int = 51,
+    supports: Optional[List[str]] = None,
 ) -> BeamResult:
     """부등경간·부등하중 연속보 해석
 
@@ -210,63 +211,107 @@ def analyze_continuous_beam_general(
     w_plf_list : list of float — 각 스팬의 등분포하중 (plf)
     Ix_list : list of float, optional — 각 스팬의 Ix (in^4), 비등단면 시
     n_pts_per_span : int
+    supports : list of str, optional — 지점 조건 ['P','P',...,'P']
+               'P'=Pin, 'R'=Roller, 'F'=Fixed.
+               P와 R은 해석에 동일 (M=0), F는 고정단 (M!=0).
     """
     n_spans = len(spans)
-    if n_spans == 1:
+
+    # 지점 조건 정규화
+    if not supports:
+        supports = ['P'] * (n_spans + 1)
+    sup = [s[0].upper() if s else 'P' for s in supports]
+
+    # 단순보 특수 처리
+    if n_spans == 1 and sup[0] != 'F' and sup[1] != 'F':
         return analyze_simple_beam(spans[0], w_plf_list[0], n_pts_per_span)
 
     w_list = [w / 1000.0 for w in w_plf_list]  # kip/ft
-    n_unknowns = n_spans - 1
 
-    # 일반 3-모멘트 방정식:
-    # M_{i-1}*L_i/(6EI_i) + 2*M_i*(L_i/(6EI_i) + L_{i+1}/(6EI_{i+1}))
-    #   + M_{i+1}*L_{i+1}/(6EI_{i+1})
-    #   = -(w_i*L_i^3/(24EI_i) + w_{i+1}*L_{i+1}^3/(24EI_{i+1}))
-    #
-    # 등단면이면 EI 소거 가능
+    # 고정단(F) 포함 시 확장된 3-모멘트 방정식
+    # 좌측 고정단: M0도 미지수 → 가상 스팬(L=0) 추가로 모델링
+    #   3-moment eq: 2*M0*L1 + M1*L1 = -w1*L1^3/4 (좌측 고정단 조건)
+    # 우측 고정단: M_n도 미지수 → 동일 처리
+    # 핀/롤러: M=0 (기존 경계조건)
 
-    if Ix_list is None:
-        # 등단면 — EI 소거
-        A = [[0.0] * n_unknowns for _ in range(n_unknowns)]
-        b_vec = [0.0] * n_unknowns
+    left_fixed = (sup[0] == 'F')
+    right_fixed = (sup[-1] == 'F')
 
-        for i in range(n_unknowns):
-            # 스팬 i (왼쪽), 스팬 i+1 (오른쪽)
-            Li = spans[i]
-            Li1 = spans[i + 1] if i + 1 < n_spans else 0
-            wi = w_list[i]
-            wi1 = w_list[i + 1] if i + 1 < n_spans else 0
+    # 미지수: 내부 지점 모멘트 + 고정단 모멘트
+    # 인덱스 매핑: unknowns[0..n-1] = M_support[1..n_spans-1]
+    #              + left_fixed → M0, right_fixed → M_n
+    n_inner = n_spans - 1
+    n_total = n_inner + (1 if left_fixed else 0) + (1 if right_fixed else 0)
 
-            A[i][i] = 2.0 * (Li + Li1)
-            if i > 0:
-                A[i][i - 1] = spans[i]
-            if i < n_unknowns - 1:
-                A[i][i + 1] = spans[i + 1]
+    if n_total == 0:
+        # 단순보 (1 스팬, 양단 핀)
+        return analyze_simple_beam(spans[0], w_plf_list[0], n_pts_per_span)
 
-            b_vec[i] = -(wi * Li ** 3 + wi1 * Li1 ** 3) / 4.0
-    else:
-        # 비등단면 — EI 포함
-        A = [[0.0] * n_unknowns for _ in range(n_unknowns)]
-        b_vec = [0.0] * n_unknowns
+    # 미지수 인덱스: [left_fixed_M0?, M1, M2, ..., M_{n-1}, right_fixed_Mn?]
+    idx_offset = 1 if left_fixed else 0
+    # idx_of_support[j] = 미지수 배열의 인덱스 (-1이면 M=0 고정)
+    idx_of_support = [-1] * (n_spans + 1)
+    if left_fixed:
+        idx_of_support[0] = 0
+    for j in range(1, n_spans):
+        idx_of_support[j] = j - 1 + idx_offset
+    if right_fixed:
+        idx_of_support[n_spans] = n_total - 1
 
-        for i in range(n_unknowns):
-            Li = spans[i]
-            Li1 = spans[i + 1] if i + 1 < n_spans else 0
-            Ii = Ix_list[i]
-            Ii1 = Ix_list[i + 1] if i + 1 < n_spans else Ii
-            wi = w_list[i]
-            wi1 = w_list[i + 1] if i + 1 < n_spans else 0
+    A = [[0.0] * n_total for _ in range(n_total)]
+    b_vec = [0.0] * n_total
 
-            A[i][i] = 2.0 * (Li / Ii + Li1 / Ii1)
-            if i > 0:
-                A[i][i - 1] = spans[i] / Ii
-            if i < n_unknowns - 1:
-                A[i][i + 1] = spans[i + 1] / Ii1
+    # 좌측 고정단 방정식: slope=0 at support 0
+    # 3-moment: 2*M0*L1 + M1*L1 = -w1*L1^3/4
+    if left_fixed:
+        L1 = spans[0]
+        w1 = w_list[0]
+        row = 0
+        A[row][idx_of_support[0]] = 2.0 * L1
+        if idx_of_support[1] >= 0:
+            A[row][idx_of_support[1]] = L1
+        b_vec[row] = -w1 * L1 ** 3 / 4.0
 
-            b_vec[i] = -(wi * Li ** 3 / Ii + wi1 * Li1 ** 3 / Ii1) / 4.0
+    # 내부 지점 방정식 (기존 3-moment)
+    for j in range(1, n_spans):
+        row = idx_of_support[j]
+        Li = spans[j - 1]
+        Li1 = spans[j] if j < n_spans else 0
+        wi = w_list[j - 1]
+        wi1 = w_list[j] if j < n_spans else 0
 
-    M_support = _solve_tridiagonal(A, b_vec) if n_unknowns > 0 else []
-    M_sup = [0.0] + M_support + [0.0]
+        # M_{j-1} * Li + 2*M_j*(Li+Li1) + M_{j+1} * Li1 = -(...)/4
+        A[row][row] = 2.0 * (Li + Li1)
+        if idx_of_support[j - 1] >= 0:
+            A[row][idx_of_support[j - 1]] = Li
+        else:
+            pass  # M_{j-1} = 0 (핀), 이미 0
+        if idx_of_support[j + 1] >= 0:
+            A[row][idx_of_support[j + 1]] = Li1
+        else:
+            pass  # M_{j+1} = 0 (핀)
+
+        b_vec[row] = -(wi * Li ** 3 + wi1 * Li1 ** 3) / 4.0
+
+    # 우측 고정단 방정식: slope=0 at support n_spans
+    # 3-moment: M_{n-1}*Ln + 2*Mn*Ln = -wn*Ln^3/4
+    if right_fixed:
+        Ln = spans[-1]
+        wn = w_list[-1]
+        row = idx_of_support[n_spans]
+        A[row][row] = 2.0 * Ln
+        if idx_of_support[n_spans - 1] >= 0:
+            A[row][idx_of_support[n_spans - 1]] = Ln
+        b_vec[row] = -wn * Ln ** 3 / 4.0
+
+    # 연립방정식 풀기
+    M_solution = _solve_general(A, b_vec)
+
+    # M_sup 배열 복원
+    M_sup = [0.0] * (n_spans + 1)
+    for j in range(n_spans + 1):
+        if idx_of_support[j] >= 0:
+            M_sup[j] = M_solution[idx_of_support[j]]
 
     # 반력
     reactions = []
@@ -301,7 +346,7 @@ def analyze_continuous_beam_general(
         wi = w_list[span_i]
         ML = M_sup[span_i]
         MR = M_sup[span_i + 1]
-        R_span_left = wi * Li / 2.0 - (MR - ML) / Li
+        R_span_left = wi * Li / 2.0 + (MR - ML) / Li
 
         dx = Li / (n_pts_per_span - 1) if n_pts_per_span > 1 else Li
         for k in range(n_pts_per_span):
@@ -565,6 +610,38 @@ def compute_deflection(result: BeamResult, E_ksi: float, I_in4: float,
     # cantilever: delta[0]=0, theta[0]=0 (이미 만족)
 
     return [round(d, 5) for d in delta]
+
+
+def _solve_general(A: list, b: list) -> list:
+    """일반 연립방정식 Ax=b 풀이 (가우스 소거법)"""
+    n = len(b)
+    if n == 0:
+        return []
+    # 증강행렬 생성
+    aug = [row[:] + [bi] for row, bi in zip(A, b)]
+    # Forward elimination with partial pivoting
+    for col in range(n):
+        # 피벗 선택
+        max_row = col
+        for row in range(col + 1, n):
+            if abs(aug[row][col]) > abs(aug[max_row][col]):
+                max_row = row
+        aug[col], aug[max_row] = aug[max_row], aug[col]
+        pivot = aug[col][col]
+        if abs(pivot) < 1e-15:
+            continue
+        for row in range(col + 1, n):
+            factor = aug[row][col] / pivot
+            for k in range(col, n + 1):
+                aug[row][k] -= factor * aug[col][k]
+    # Back substitution
+    x = [0.0] * n
+    for i in range(n - 1, -1, -1):
+        s = aug[i][n]
+        for j in range(i + 1, n):
+            s -= aug[i][j] * x[j]
+        x[i] = s / aug[i][i] if abs(aug[i][i]) > 1e-15 else 0.0
+    return x
 
 
 def _solve_tridiagonal(A: list, b: list) -> list:

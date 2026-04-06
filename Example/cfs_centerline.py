@@ -328,21 +328,22 @@ def apply_fillet(
         start_ang = math.atan2(t1y - cy, t1x - cx)
         end_ang = math.atan2(t2y - cy, t2x - cx)
 
-        # 호 방향 결정
+        # 호 방향 결정 (modular arithmetic으로 정확한 최소 호 보장)
         # cross > 0: u1→u2가 CCW → 호는 CW (짧은 쪽)
         # cross < 0: u1→u2가 CW → 호는 CCW (짧은 쪽)
+        TWO_PI = 2 * math.pi
         if cross > 0:
-            # CW 호 (end < start)
-            while end_ang >= start_ang:
-                end_ang -= 2 * math.pi
-            if start_ang - end_ang > math.pi + 0.01:
-                end_ang += 2 * math.pi
+            # CW 호: end_ang < start_ang, 차이를 (0, 2π) 범위로
+            diff = (start_ang - end_ang) % TWO_PI
+            if diff < 1e-10:
+                diff = TWO_PI
+            end_ang = start_ang - diff
         else:
-            # CCW 호 (end > start)
-            while end_ang <= start_ang:
-                end_ang += 2 * math.pi
-            if end_ang - start_ang > math.pi + 0.01:
-                end_ang -= 2 * math.pi
+            # CCW 호: end_ang > start_ang, 차이를 (0, 2π) 범위로
+            diff = (end_ang - start_ang) % TWO_PI
+            if diff < 1e-10:
+                diff = TWO_PI
+            end_ang = start_ang + diff
 
         # 호 좌표 생성
         for j in range(n_arc + 1):
@@ -533,7 +534,7 @@ class ColdFormedSection:
 
         # 필렛 반경 결정
         if self.corner_radii is not None:
-            r_list = self.corner_radii
+            r_list = [r + self.t / 2 if r > 0 else 0.0 for r in self.corner_radii]
         elif self.R_inner > 0:
             r_c = self.R_inner + self.t / 2
             r_list = [r_c] * n_inner
@@ -679,7 +680,7 @@ def make_c_section(
     labels = []
 
     if D > 0:
-        corners.append((0, -D))
+        corners.append((0, D))
         labels.append("하단 립 끝")
 
     corners.append((0, 0))
@@ -734,7 +735,7 @@ def make_z_section(
     labels = []
 
     if D > 0:
-        corners.append((B_bot, -D))
+        corners.append((B_bot, D))
         labels.append("하단 립 끝")
 
     corners.append((B_bot, 0))
@@ -826,25 +827,10 @@ def make_sigma_section(
                          │  web(하)
         lip(하) ─── flange(하)
     """
-    h_web = (H - 2 * sigma_transition) / 3  # 상/하 웹과 시그마 중심 각각
-
-    # 실제로는 이미지에서 직접 읽은 치수 사용
-    # 여기서는 총 높이에서 역산
-    # H = web_lower + sigma_trans + sigma_center + sigma_trans + web_upper
-    # 대칭 가정: web_lower = web_upper = h_web_outer
-    # h_web_outer = (H - sigma_center - 2*sigma_trans) / 2
-    # 시그마 단면 이미지에서: h_web_outer = 2.25, sigma_center = 2.25, sigma_trans = 0.625
-    # → 사용자가 직접 지정하는 것이 더 정확
-
-    # 범용 공식: 시그마 중심 높이 = H - 2*h_web - 2*sigma_transition
-    # 여기서는 h_web를 매개변수로 받지 않으므로 대칭 분할
-    sigma_center_h = H - 2 * sigma_transition  # 이건 틀림... 
-
-    # 실제로는 외측 꼭짓점을 직접 정의하는 것이 가장 정확
-    # 하지만 팩토리 함수에서는 표준 시그마 구조를 가정
-
-    # 수정: 사용자가 직접 외측 꼭짓점을 지정하도록 유도하되,
-    # 여기서는 이미지와 동일한 구조를 생성
+    # 시그마 구조: H = web_lower + sigma_trans + sigma_center + sigma_trans + web_upper
+    # 대칭 가정: web_lower = web_upper
+    # 3등분: 상/하 웹과 시그마 중심부를 동일 높이로 분배
+    # h_segment = (H - 2 * sigma_transition) / 3
 
     corners = [
         (0, -D_bot),                                           # 하단 립 끝
@@ -973,7 +959,9 @@ if __name__ == "__main__":
         axes[1][2].set_visible(False)
         
         plt.tight_layout()
-        plt.savefig('/home/claude/cfs_sections_test.png', dpi=150)
-        print("\n✅ 검증 플롯 저장: /home/claude/cfs_sections_test.png")
+        import os
+        save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cfs_sections_test.png')
+        plt.savefig(save_path, dpi=150)
+        print(f"\n검증 플롯 저장: {save_path}")
     except ImportError:
         print("matplotlib 없음, 플롯 생략")

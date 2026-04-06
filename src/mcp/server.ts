@@ -880,8 +880,10 @@ server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling strength calcu
 server.tool("analyze_loads", "Analyze service loads → structural analysis → required strengths for CFS members (purlins, joists, studs)",
     {
         member_app: z.enum(["roof-purlin", "floor-joist", "wall-girt", "wall-stud"]).describe("Application type"),
-        span_type: z.enum(["simple", "cont-2", "cont-3", "cont-4", "cont-n"]).describe("Span configuration"),
-        span_ft: z.number().describe("Span length in feet"),
+        span_type: z.enum(["simple", "cantilever", "cont-2", "cont-3", "cont-4", "cont-5", "cont-n"]).describe("Span configuration"),
+        span_ft: z.number().describe("Span length in feet (equal spans default)"),
+        spans_ft: z.array(z.number()).optional().describe("Per-span lengths in feet for unequal spans (overrides span_ft)"),
+        supports: z.array(z.string()).optional().describe("Support conditions per support: 'P'=Pin, 'R'=Roller, 'F'=Fixed (default all 'P')"),
         loads: z.object({
             D: z.number().optional().describe("Dead load PLF"),
             L: z.number().optional().describe("Floor live load PLF"),
@@ -894,7 +896,11 @@ server.tool("analyze_loads", "Analyze service loads → structural analysis → 
         laps: z.object({
             left_ft: z.number().optional(),
             right_ft: z.number().optional(),
-        }).optional().describe("Lap lengths at supports"),
+        }).optional().describe("Lap lengths at first interior support"),
+        laps_per_support: z.array(z.object({
+            left_ft: z.number().optional(),
+            right_ft: z.number().optional(),
+        })).optional().describe("Per-support lap lengths array"),
         deck: z.object({
             type: z.enum(["through-fastened", "standing-seam", "none"]).optional(),
             t_panel: z.number().optional().describe("Panel thickness in."),
@@ -902,14 +908,14 @@ server.tool("analyze_loads", "Analyze service loads → structural analysis → 
             kphi_override: z.number().optional().describe("Override rotational stiffness kip-in/rad/in"),
         }).optional().describe("Deck/panel properties"),
     },
-    async ({ member_app, span_type, span_ft, loads, design_method, spacing_ft, laps, deck }) => {
+    async ({ member_app, span_type, span_ft, spans_ft, supports, loads, design_method, spacing_ft, laps, laps_per_support, deck }) => {
         const r = await callBridgePost('/action', {
             action: 'analyze_loads',
-            member_app, span_type, span_ft,
+            member_app, span_type, span_ft, spans_ft, supports,
             loads: loads || {},
             design_method: design_method || 'LRFD',
             spacing_ft: spacing_ft || 5.0,
-            laps, deck,
+            laps, laps_per_support, deck,
         });
         return textResult(JSON.stringify(r, null, 2));
     }

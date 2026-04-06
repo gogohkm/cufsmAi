@@ -23,6 +23,117 @@
     let lastProps = null;
 
     // ============================================================
+    // 단위 변환 시스템 (SI ↔ US)
+    // 내부 저장: 항상 US 단위. 표시/입력 레이어에서만 변환.
+    // ============================================================
+    let _unitSystem = 'US'; // 'US' or 'SI'
+
+    const UNIT = {
+        // 변환 계수: US값 × factor = SI값
+        length:   { factor: 25.4,      us: 'in',    si: 'mm',   decimals: {us: 4, si: 1} },
+        length_ft:{ factor: 0.3048,    us: 'ft',    si: 'm',    decimals: {us: 2, si: 2} },
+        area:     { factor: 645.16,    us: 'in\u00B2',  si: 'mm\u00B2', decimals: {us: 4, si: 0} },
+        inertia:  { factor: 416231.0,  us: 'in\u2074',  si: 'mm\u2074', decimals: {us: 4, si: 0} },
+        modulus:  { factor: 16387.064, us: 'in\u00B3',  si: 'mm\u00B3', decimals: {us: 4, si: 0} },
+        stress:   { factor: 6.89476,   us: 'ksi',   si: 'MPa',  decimals: {us: 1, si: 1} },
+        force:    { factor: 4.44822,   us: 'kips',  si: 'kN',   decimals: {us: 2, si: 2} },
+        moment:   { factor: 0.11298,   us: 'kip-in',si: 'kN-m', decimals: {us: 2, si: 2} },
+        moment_ft:{ factor: 1.35582,   us: 'kip-ft',si: 'kN-m', decimals: {us: 2, si: 2} },
+        pressure: { factor: 0.04788,   us: 'psf',   si: 'kPa',  decimals: {us: 1, si: 3} },
+        linload:  { factor: 0.01459,   us: 'plf',   si: 'kN/m', decimals: {us: 0, si: 3} },
+        thickness:{ factor: 25.4,      us: 'in',    si: 'mm',   decimals: {us: 4, si: 2} },
+        radius:   { factor: 25.4,      us: 'in',    si: 'mm',   decimals: {us: 4, si: 1} },
+        rotStiff: { factor: 0.004448/0.0254, us: 'k-in/rad/in', si: 'kN-m/rad/m', decimals: {us: 4, si: 4} },
+    };
+
+    /** US 내부값 → 표시값 변환 */
+    function toDisplay(usValue, unitType) {
+        if (_unitSystem === 'US' || !UNIT[unitType]) return usValue;
+        return usValue * UNIT[unitType].factor;
+    }
+    /** 표시값 → US 내부값 변환 */
+    function fromDisplay(displayValue, unitType) {
+        if (_unitSystem === 'US' || !UNIT[unitType]) return displayValue;
+        return displayValue / UNIT[unitType].factor;
+    }
+    /** 현재 단위계의 단위 라벨 반환 */
+    function unitLabel(unitType) {
+        const u = UNIT[unitType];
+        if (!u) return '';
+        return _unitSystem === 'SI' ? u.si : u.us;
+    }
+    /** 현재 단위계의 소수점 자릿수 */
+    function unitDec(unitType) {
+        const u = UNIT[unitType];
+        if (!u) return 2;
+        return _unitSystem === 'SI' ? u.decimals.si : u.decimals.us;
+    }
+    /** 값을 표시 형식으로 변환 + 포맷 */
+    function fmtVal(usValue, unitType) {
+        if (usValue == null || isNaN(usValue)) return '\u2014';
+        const v = toDisplay(usValue, unitType);
+        return v.toFixed(unitDec(unitType));
+    }
+
+    /** 단위 토글 시 모든 동적 라벨/값 갱신
+     *  oldSys → newSys: 입력 필드의 값을 변환해야 함.
+     *  공식: newDisplayVal = usVal * newFactor = (oldDisplayVal / oldFactor) * newFactor
+     */
+    function refreshUnits(oldSys) {
+        // (0) 입력 필드 값 변환 (data-unit-input 매핑)
+        const inputUnitMap = [
+            // [inputId, unitType]
+            ['tpl-H','length'],['tpl-B','length'],['tpl-D','length'],
+            ['tpl-t','thickness'],['tpl-r','radius'],
+            ['input-E','stress'],['input-G','stress'],
+            ['input-fy-load','stress'],['input-fy','stress'],
+            ['input-len-min','length'],['input-len-max','length'],
+            ['design-fy','stress'],['design-fu','stress'],
+            ['design-KxLx','length'],['design-KyLy','length'],
+            ['design-KtLt','length'],['design-Lb','length'],
+            ['design-P','force'],['design-V','force'],
+            ['design-Mx','moment'],['design-My','moment'],
+            ['design-wc-N','length'],['design-wc-R','radius'],
+            ['config-spacing','length_ft'],
+            ['deck-t-panel','thickness'],['deck-fastener-spacing','length'],
+            ['load-D-psf','pressure'],['load-Lr-psf','pressure'],
+            ['load-S-psf','pressure'],['load-Wu-psf','pressure'],
+            ['load-L-psf','pressure'],
+        ];
+        // span/lap 테이블 동적 입력
+        document.querySelectorAll('.span-tbl-len, .span-tbl-lapl, .span-tbl-lapr').forEach(el => {
+            inputUnitMap.push([null, 'length_ft', el]);
+        });
+
+        if (oldSys && oldSys !== _unitSystem) {
+            inputUnitMap.forEach(([id, ut, directEl]) => {
+                const el = directEl || document.getElementById(id);
+                if (!el) return;
+                const oldVal = parseFloat(el.value);
+                if (isNaN(oldVal) || oldVal === 0) return;
+                const oldFactor = oldSys === 'SI' ? UNIT[ut].factor : 1.0;
+                const newFactor = _unitSystem === 'SI' ? UNIT[ut].factor : 1.0;
+                const usVal = oldVal / oldFactor;
+                const newVal = usVal * newFactor;
+                el.value = newVal.toPrecision(6).replace(/\.?0+$/, '');
+            });
+        }
+
+        // (1) 모든 data-unit 속성을 가진 라벨 텍스트 갱신
+        document.querySelectorAll('[data-unit]').forEach(el => {
+            if (el.tagName === 'INPUT' || el.tagName === 'SELECT') return; // 입력 필드 제외
+            const ut = el.getAttribute('data-unit');
+            el.textContent = unitLabel(ut);
+        });
+        // (2) 단면 성질 테이블이 표시 중이면 다시 렌더링
+        if (lastProps) updatePropertiesTable(lastProps);
+        // (3) 하중 해석 결과가 있으면 다시 렌더링
+        if (_lastLoadAnalysis) renderLoadAnalysisResult(_lastLoadAnalysis);
+        // (4) PLF 표시 갱신
+        if (typeof updatePLF === 'function') updatePLF();
+    }
+
+    // ============================================================
     // 메시지 핸들러
     // ============================================================
     window.addEventListener('message', event => {
@@ -145,6 +256,26 @@
     }
 
     // ============================================================
+    // 단위 토글 (SI ↔ US)
+    // ============================================================
+    document.getElementById('btn-unit-US')?.addEventListener('click', () => {
+        if (_unitSystem === 'US') return;
+        const oldSys = _unitSystem;
+        _unitSystem = 'US';
+        document.getElementById('btn-unit-US')?.classList.add('active');
+        document.getElementById('btn-unit-SI')?.classList.remove('active');
+        refreshUnits(oldSys);
+    });
+    document.getElementById('btn-unit-SI')?.addEventListener('click', () => {
+        if (_unitSystem === 'SI') return;
+        const oldSys = _unitSystem;
+        _unitSystem = 'SI';
+        document.getElementById('btn-unit-SI')?.classList.add('active');
+        document.getElementById('btn-unit-US')?.classList.remove('active');
+        refreshUnits(oldSys);
+    });
+
+    // ============================================================
     // 전처리 렌더링
     // ============================================================
     function renderPreprocessor() {
@@ -153,12 +284,12 @@
         renderElemTable();
         renderSectionSVG();
 
-        // 재료 입력 초기값
+        // 재료 입력 초기값 (US 내부값 → 표시값 변환)
         if (model.prop && model.prop.length > 0) {
             const p = model.prop[0];
-            setValue('input-E', p[1]);
+            setValue('input-E', toDisplay(p[1], 'stress'));
             setValue('input-v', p[3]);
-            setValue('input-G', p[5]);
+            setValue('input-G', toDisplay(p[5], 'stress'));
         }
 
         // 단면 속성 자동 계산
@@ -359,34 +490,39 @@
     // ============================================================
     function renderProperties(props) {
         lastProps = props;
+        updatePropertiesTable(props);
+        renderSectionAxes(props);
+    }
+
+    function updatePropertiesTable(props) {
         const el = document.getElementById('section-props');
-        if (!el) { return; }
+        if (!el || !props) { return; }
+        // [이름, US값, unitType] — 값은 항상 US 내부값
         const rows = [
-            ['A (단면적)', fmt(props.A), 'in²'],
-            ['Ixx (강축 2차모멘트)', fmt(props.Ixx), 'in⁴'],
-            ['Izz (약축 2차모멘트)', fmt(props.Izz), 'in⁴'],
-            ['Ixz (상승적 2차모멘트)', fmt(props.Ixz), 'in⁴'],
-            ['Sx (강축 단면계수)', fmt(props.Sx), 'in³'],
-            ['Sz (약축 단면계수)', fmt(props.Sz), 'in³'],
-            ['Zx (강축 소성단면계수)', fmt(props.Zx), 'in³'],
-            ['Zz (약축 소성단면계수)', fmt(props.Zz), 'in³'],
-            ['rx (강축 회전반경)', fmt(props.rx), 'in'],
-            ['rz (약축 회전반경)', fmt(props.rz), 'in'],
-            ['xcg (도심 x)', fmt(props.xcg), 'in'],
-            ['zcg (도심 z)', fmt(props.zcg), 'in'],
-            ['θp (주축 회전각)', fmt(props.thetap), '°'],
-            ['I11 (제1주축)', fmt(props.I11), 'in⁴'],
-            ['I22 (제2주축)', fmt(props.I22), 'in⁴'],
+            ['A (단면적)',             props.A,      'area'],
+            ['Ixx (강축 2차모멘트)',    props.Ixx,    'inertia'],
+            ['Izz (약축 2차모멘트)',    props.Izz,    'inertia'],
+            ['Ixz (상승적 2차모멘트)',  props.Ixz,    'inertia'],
+            ['Sx (강축 단면계수)',      props.Sx,     'modulus'],
+            ['Sz (약축 단면계수)',      props.Sz,     'modulus'],
+            ['Zx (강축 소성단면계수)',  props.Zx,     'modulus'],
+            ['Zz (약축 소성단면계수)',  props.Zz,     'modulus'],
+            ['rx (강축 회전반경)',      props.rx,     'length'],
+            ['rz (약축 회전반경)',      props.rz,     'length'],
+            ['xcg (도심 x)',           props.xcg,    'length'],
+            ['zcg (도심 z)',           props.zcg,    'length'],
+            ['θp (주축 회전각)',       props.thetap, null],
+            ['I11 (제1주축)',          props.I11,    'inertia'],
+            ['I22 (제2주축)',          props.I22,    'inertia'],
         ];
         let html = '<table class="props-table"><tbody>';
-        rows.forEach(([name, val, unit]) => {
-            html += `<tr><td>${name}</td><td style="text-align:right;font-family:monospace">${val}</td><td>${unit}</td></tr>`;
+        rows.forEach(([name, val, ut]) => {
+            const disp = ut ? fmtVal(val, ut) : fmt(val);
+            const uLbl = ut ? unitLabel(ut) : '\u00B0';
+            html += '<tr><td>' + name + '</td><td style="text-align:right;font-family:monospace">' + disp + '</td><td>' + uLbl + '</td></tr>';
         });
         html += '</tbody></table>';
         el.innerHTML = html;
-
-        // SVG에 좌표축 표시
-        renderSectionAxes(props);
     }
 
     // ============================================================
@@ -398,6 +534,7 @@
 
         const dsmP = data.P;   // 축력 기준 DSM
         const dsmM = data.Mxx; // Mxx 휨 기준 DSM
+        const fU = unitLabel('force'), mU = unitLabel('moment'), lU = unitLabel('length');
 
         let html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
         html += '<tr style="border-bottom:2px solid var(--vscode-panel-border);">';
@@ -408,21 +545,19 @@
         html += '</tr>';
 
         if (dsmP) {
-            // === 축력 (Compression) ===
-            html += _dsmHeader('Compression (Axial)');
-            html += _dsmRow('Py', dsmP.Py, '', '');
-            html += _dsmRow('Pcrl (local)', dsmP.Pcrl, dsmP.Lcrl, dsmP.LF_local);
-            html += _dsmRow('Pcrd (distortional)', dsmP.Pcrd, dsmP.Lcrd, dsmP.LF_dist);
-            html += _dsmRow('Pcre (global)', dsmP.Pcre, dsmP.Lcre, dsmP.LF_global);
+            html += _dsmHeader('Compression (' + fU + ')');
+            html += _dsmRow('Py', dsmP.Py, 'force', '', '', '');
+            html += _dsmRow('Pcrl (local)', dsmP.Pcrl, 'force', dsmP.Lcrl, 'length', dsmP.LF_local);
+            html += _dsmRow('Pcrd (distortional)', dsmP.Pcrd, 'force', dsmP.Lcrd, 'length', dsmP.LF_dist);
+            html += _dsmRow('Pcre (global)', dsmP.Pcre, 'force', dsmP.Lcre, 'length', dsmP.LF_global);
         }
 
         if (dsmM) {
-            // === 휨 (Bending) ===
-            html += _dsmHeader('Bending (Mxx)');
-            html += _dsmRow('My', dsmM.My_xx, '', '');
-            html += _dsmRow('Mcrl (local)', dsmM.Mxxcrl, dsmM.Lcrl, dsmM.LF_local);
-            html += _dsmRow('Mcrd (distortional)', dsmM.Mxxcrd, dsmM.Lcrd, dsmM.LF_dist);
-            html += _dsmRow('Mcre (global)', dsmM.Mxxcre, dsmM.Lcre, dsmM.LF_global);
+            html += _dsmHeader('Bending (' + mU + ')');
+            html += _dsmRow('My', dsmM.My_xx, 'moment', '', '', '');
+            html += _dsmRow('Mcrl (local)', dsmM.Mxxcrl, 'moment', dsmM.Lcrl, 'length', dsmM.LF_local);
+            html += _dsmRow('Mcrd (distortional)', dsmM.Mxxcrd, 'moment', dsmM.Lcrd, 'length', dsmM.LF_dist);
+            html += _dsmRow('Mcre (global)', dsmM.Mxxcre, 'moment', dsmM.Lcre, 'length', dsmM.LF_global);
         }
 
         html += '</table>';
@@ -431,10 +566,10 @@
         const dsm = dsmP || dsmM;
         if (dsm && dsm.n_minima !== undefined) {
             html += '<div style="margin-top:6px; font-size:11px; color:var(--vscode-descriptionForeground);">';
-            html += `Detected ${dsm.n_minima} minima`;
+            html += 'Detected ' + dsm.n_minima + ' minima';
             if (dsm.minima) {
                 dsm.minima.forEach((m, i) => {
-                    html += ` | Min ${i+1}: L=${m.length.toFixed(1)}, LF=${m.load_factor.toFixed(4)}`;
+                    html += ' | Min ' + (i+1) + ': L=' + fmtVal(m.length, 'length') + ' ' + lU + ', LF=' + m.load_factor.toFixed(4);
                 });
             }
             html += '</div>';
@@ -444,19 +579,19 @@
     }
 
     function _dsmHeader(title) {
-        return `<tr><td colspan="4" style="padding:6px 8px 2px; font-weight:700; border-top:1px solid var(--vscode-panel-border);">${title}</td></tr>`;
+        return '<tr><td colspan="4" style="padding:6px 8px 2px; font-weight:700; border-top:1px solid var(--vscode-panel-border);">' + title + '</td></tr>';
     }
 
-    function _dsmRow(label, value, length, lf) {
-        const v = typeof value === 'number' ? value.toFixed(2) : (value || '-');
-        const l = typeof length === 'number' ? length.toFixed(2) : (length || '');
+    function _dsmRow(label, value, valUnit, length, lenUnit, lf) {
+        const v = typeof value === 'number' ? fmtVal(value, valUnit) : (value || '-');
+        const l = typeof length === 'number' ? fmtVal(length, lenUnit) : (length || '');
         const f = typeof lf === 'number' ? lf.toFixed(4) : (lf || '');
-        return `<tr>
-            <td style="padding:3px 8px;">${label}</td>
-            <td style="text-align:right; padding:3px 8px; font-weight:600;">${v}</td>
-            <td style="text-align:right; padding:3px 8px;">${l}</td>
-            <td style="text-align:right; padding:3px 8px;">${f}</td>
-        </tr>`;
+        return '<tr>' +
+            '<td style="padding:3px 8px;">' + label + '</td>' +
+            '<td style="text-align:right; padding:3px 8px; font-weight:600;">' + v + '</td>' +
+            '<td style="text-align:right; padding:3px 8px;">' + l + '</td>' +
+            '<td style="text-align:right; padding:3px 8px;">' + f + '</td>' +
+        '</tr>';
     }
 
     // ============================================================
@@ -501,7 +636,7 @@
     if (btnPlastic) {
         btnPlastic.addEventListener('click', () => {
             if (!model || !model.node || model.node.length === 0) { return; }
-            const fy = getNum('input-fy', 50);
+            const fy = fromDisplay(getNum('input-fy', 50), 'stress');
             vscode.postMessage({
                 command: 'runPlastic',
                 data: { node: model.node, elem: model.elem, fy }
@@ -561,18 +696,18 @@
         ctx.textAlign = 'left';
         ctx.fillStyle = '#4fc3f7';
         const c1x = 10;
-        ctx.fillText(`Py = ${(data.Py || 0).toFixed(2)}`, c1x, infoY + 14);
-        ctx.fillText(`M\u2081\u2081y = ${(data.M11_y || 0).toFixed(2)}`, c1x, infoY + 30);
+        ctx.fillText('Py = ' + fmtVal(data.Py, 'force') + ' ' + unitLabel('force'), c1x, infoY + 14);
+        ctx.fillText('M\u2081\u2081y = ' + fmtVal(data.M11_y, 'moment') + ' ' + unitLabel('moment'), c1x, infoY + 30);
 
         ctx.fillStyle = '#ff7043';
         const c2x = 185;
-        ctx.fillText(`M\u2082\u2082y = ${(data.M22_y || 0).toFixed(2)}`, c2x, infoY + 14);
-        ctx.fillText(`\u03B8p = ${tp}\u00B0`, c2x, infoY + 30);
+        ctx.fillText('M\u2082\u2082y = ' + fmtVal(data.M22_y, 'moment') + ' ' + unitLabel('moment'), c2x, infoY + 14);
+        ctx.fillText('\u03B8p = ' + tp + '\u00B0', c2x, infoY + 30);
 
         ctx.fillStyle = '#aaa';
         const c3x = 370;
-        ctx.fillText(`fy = ${fy} ksi`, c3x, infoY + 14);
-        ctx.fillText(`Mxxy = ${(data.Mxx_y || 0).toFixed(2)}  Mzzy = ${(data.Mzz_y || 0).toFixed(2)}`, c3x, infoY + 30);
+        ctx.fillText('fy = ' + fmtVal(fy, 'stress') + ' ' + unitLabel('stress'), c3x, infoY + 14);
+        ctx.fillText('Mxxy = ' + fmtVal(data.Mxx_y, 'moment') + '  Mzzy = ' + fmtVal(data.Mzz_y, 'moment'), c3x, infoY + 30);
     }
 
     /**
@@ -804,11 +939,11 @@
             if (!sectionType) { return; }
 
             const params = {
-                H: getNum('tpl-H', 9),
-                B: getNum('tpl-B', 5),
-                D: getNum('tpl-D', 1),
-                t: getNum('tpl-t', 0.1),
-                r: getNum('tpl-r', 0),
+                H: fromDisplay(getNum('tpl-H', 9), 'length'),
+                B: fromDisplay(getNum('tpl-B', 5), 'length'),
+                D: fromDisplay(getNum('tpl-D', 1), 'length'),
+                t: fromDisplay(getNum('tpl-t', 0.1), 'thickness'),
+                r: fromDisplay(getNum('tpl-r', 0), 'radius'),
             };
 
             // 립 각도 (Lipped C/Z/Angle)
@@ -847,8 +982,8 @@
         btnRun.addEventListener('click', () => {
             if (!model) { return; }
 
-            const lenMin = getNum('input-len-min', 1);
-            const lenMax = getNum('input-len-max', 1000);
+            const lenMin = fromDisplay(getNum('input-len-min', 1), 'length');
+            const lenMax = fromDisplay(getNum('input-len-max', 1000), 'length');
             const lenN = getNum('input-len-n', 50);
             const neigs = getNum('input-neigs', 20);
             const BC = /** @type {HTMLSelectElement} */ (document.getElementById('select-bc'))?.value || 'S-S';
@@ -857,9 +992,9 @@
             const lengths = logspace(Math.log10(lenMin), Math.log10(lenMax), lenN);
             const m_all = lengths.map(() => [1]);
 
-            const E = getNum('input-E', 29500);
+            const E = fromDisplay(getNum('input-E', 29500), 'stress');
             const v = getNum('input-v', 0.3);
-            const G = getNum('input-G', 11346);
+            const G = fromDisplay(getNum('input-G', 11346), 'stress');
 
             // 모델 업데이트
             model.prop = [[100, E, E, v, v, G]];
@@ -870,7 +1005,7 @@
 
             // Load Case에 따라 stress 자동 설정
             const loadCase = /** @type {HTMLSelectElement} */ (document.getElementById('select-load-case'))?.value || 'compression';
-            const fyLoad = getNum('input-fy-load', 50);
+            const fyLoad = fromDisplay(getNum('input-fy-load', 50), 'stress');
 
             if (loadCase === 'compression') {
                 vscode.postMessage({
@@ -1064,7 +1199,7 @@
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
                 // 라벨 배경
-                const labelText = `${ext.label} = ${ext.LF.toFixed(3)} @ L=${ext.L.toFixed(1)}`;
+                const labelText = ext.label + ' = ' + ext.LF.toFixed(3) + ' @ L=' + fmtVal(ext.L, 'length') + ' ' + unitLabel('length');
                 ctx.font = 'bold 11px sans-serif';
                 const tw = ctx.measureText(labelText).width;
                 const lx = Math.min(px + 12, plotRight - tw - 8);
@@ -1080,7 +1215,7 @@
             ctx.fillStyle = fg;
             ctx.font = '12px sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText('Half-wavelength (in.)', w / 2, h - 8);
+            ctx.fillText('Half-wavelength (' + unitLabel('length') + ')', w / 2, h - 8);
             ctx.save();
             ctx.translate(14, h / 2);
             ctx.rotate(-Math.PI / 2);
@@ -1092,7 +1227,8 @@
             ctx.font = '10px sans-serif';
             ctx.textAlign = 'center';
             for (let exp = Math.ceil(xMin); exp <= Math.floor(xMax); exp++) {
-                ctx.fillText(Math.pow(10, exp).toString(), toX(Math.pow(10, exp)), plotBottom + 16);
+                const tickUS = Math.pow(10, exp);
+                ctx.fillText(toDisplay(tickUS, 'length').toFixed(0), toX(tickUS), plotBottom + 16);
             }
 
             // Y축 눈금
@@ -1142,7 +1278,7 @@
                 // 곡선점 좌표 (우상단)
                 const dispL = snapPt ? snapPt[0] : fromX(mouseX);
                 const dispLF = snapPt ? snapPt[1] : fromY(mouseY);
-                const coordText = `L = ${dispL.toFixed(2)},  LF = ${dispLF.toFixed(4)}`;
+                const coordText = 'L = ' + fmtVal(dispL, 'length') + ' ' + unitLabel('length') + ',  LF = ' + dispLF.toFixed(4);
                 ctx.font = '11px monospace';
                 const ctw = ctx.measureText(coordText).width;
                 ctx.fillStyle = 'rgba(30,30,30,0.85)';
@@ -1305,7 +1441,7 @@
         analysisResult.curve.forEach((row, i) => {
             const opt = document.createElement('option');
             opt.value = i;
-            opt.textContent = row ? row[0].toFixed(1) : i;
+            opt.textContent = row ? fmtVal(row[0], 'length') : i;
             selLen.appendChild(opt);
         });
 
@@ -1533,16 +1669,16 @@
         });
     }
 
-    // --- Input validation ---
+    // --- Input validation (min/max are in US units, auto-convert for SI) ---
     const VALIDATION_RULES = {
-        'design-fy':  { min: 1, max: 100, label: 'Fy' },
-        'design-fu':  { min: 1, max: 120, label: 'Fu' },
-        'design-KxLx': { min: 0.1, max: 10000, label: 'KxLx' },
-        'design-KyLy': { min: 0.1, max: 10000, label: 'KyLy' },
-        'design-KtLt': { min: 0.1, max: 10000, label: 'KtLt' },
-        'design-Lb':  { min: 0, max: 10000, label: 'Lb' },
-        'design-Cb':  { min: 1.0, max: 3.0, label: 'Cb' },
-        'config-span': { min: 0.5, max: 200, label: 'Span' },
+        'design-fy':  { min: 1, max: 100, label: 'Fy', ut: 'stress' },
+        'design-fu':  { min: 1, max: 120, label: 'Fu', ut: 'stress' },
+        'design-KxLx': { min: 0.1, max: 10000, label: 'KxLx', ut: 'length' },
+        'design-KyLy': { min: 0.1, max: 10000, label: 'KyLy', ut: 'length' },
+        'design-KtLt': { min: 0.1, max: 10000, label: 'KtLt', ut: 'length' },
+        'design-Lb':  { min: 0, max: 10000, label: 'Lb', ut: 'length' },
+        'design-Cb':  { min: 1.0, max: 3.0, label: 'Cb', ut: null },
+        'config-span': { min: 0.5, max: 200, label: 'Span', ut: 'length_ft' },
     };
 
     function validateDesignInput(id) {
@@ -1550,7 +1686,10 @@
         const rule = VALIDATION_RULES[id];
         if (!el || !rule) return true;
         const val = parseFloat(el.value);
-        const valid = !isNaN(val) && val >= rule.min && val <= rule.max;
+        // min/max를 현재 단위계로 변환 (US 기준 정의)
+        const minV = rule.ut ? toDisplay(rule.min, rule.ut) : rule.min;
+        const maxV = rule.ut ? toDisplay(rule.max, rule.ut) : rule.max;
+        const valid = !isNaN(val) && val >= minV && val <= maxV;
         el.classList.toggle('input-invalid', !valid);
         return valid;
     }
@@ -1627,8 +1766,8 @@
         selGrade.addEventListener('change', () => {
             const v = gradeMap[selGrade.value];
             if (v) {
-                setValue('design-fy', v[0]);
-                setValue('design-fu', v[1]);
+                setValue('design-fy', toDisplay(v[0], 'stress'));
+                setValue('design-fu', toDisplay(v[1], 'stress'));
             }
         });
     }
@@ -1637,14 +1776,17 @@
     const CALC_MODES = ['roof-purlin', 'floor-joist', 'wall-girt', 'wall-stud'];
     function isCalcMode(t) { return CALC_MODES.includes(t); }
 
-    // PSF → PLF 자동 변환
+    // PSF/kPa → PLF/kN-m 자동 변환 (표시용)
     function updatePLF() {
-        const spacing = getNum('config-spacing', 5);
+        const spacingRaw = getNum('config-spacing', 5);
+        const spacingUS = fromDisplay(spacingRaw, 'length_ft');
         ['D', 'Lr', 'S', 'Wu', 'L'].forEach(lt => {
-            const psf = getNum('load-' + lt + '-psf', 0);
-            const plf = Math.round(psf * spacing);
+            const psfRaw = getNum('load-' + lt + '-psf', 0);
+            const psfUS = fromDisplay(psfRaw, 'pressure');
+            const plfUS = psfUS * spacingUS; // plf (US)
+            const plfDisp = toDisplay(plfUS, 'linload');
             const el = document.getElementById('load-' + lt + '-plf');
-            if (el) el.textContent = '→' + plf + ' PLF';
+            if (el) el.textContent = '\u2192' + plfDisp.toFixed(unitDec('linload')) + ' ' + unitLabel('linload');
         });
     }
     ['config-spacing', 'load-D-psf', 'load-Lr-psf', 'load-S-psf', 'load-Wu-psf', 'load-L-psf'].forEach(id => {
@@ -1788,23 +1930,23 @@
             const data = {
                 member_type: memberType,
                 design_method: designMethod,
-                Fy: getNum('design-fy', 50),
-                Fu: getNum('design-fu', 65),
-                KxLx: getNum('design-KxLx', 120),
-                KyLy: getNum('design-KyLy', 120),
-                KtLt: getNum('design-KtLt', 120),
-                Lb: getNum('design-Lb', 120),
+                Fy: fromDisplay(getNum('design-fy', 50), 'stress'),
+                Fu: fromDisplay(getNum('design-fu', 65), 'stress'),
+                KxLx: fromDisplay(getNum('design-KxLx', 120), 'length'),
+                KyLy: fromDisplay(getNum('design-KyLy', 120), 'length'),
+                KtLt: fromDisplay(getNum('design-KtLt', 120), 'length'),
+                Lb: fromDisplay(getNum('design-Lb', 120), 'length'),
                 Cb: getNum('design-Cb', 1.0),
                 Cmx: getNum('design-Cmx', 0.85),
                 Cmy: getNum('design-Cmy', 0.85),
-                Pu: getNum('design-P', 0),
-                Mu: getNum('design-Mx', 0),
-                Mux: getNum('design-Mx', 0),
-                Muy: getNum('design-My', 0),
-                Vu: getNum('design-V', 0),
-                Tu: getNum('design-P', 0), // tension uses same input
-                wc_N: getNum('design-wc-N', 0),
-                wc_R: getNum('design-wc-R', 0),
+                Pu: fromDisplay(getNum('design-P', 0), 'force'),
+                Mu: fromDisplay(getNum('design-Mx', 0), 'moment'),
+                Mux: fromDisplay(getNum('design-Mx', 0), 'moment'),
+                Muy: fromDisplay(getNum('design-My', 0), 'moment'),
+                Vu: fromDisplay(getNum('design-V', 0), 'force'),
+                Tu: fromDisplay(getNum('design-P', 0), 'force'),
+                wc_N: fromDisplay(getNum('design-wc-N', 0), 'length'),
+                wc_R: fromDisplay(getNum('design-wc-R', 0), 'radius'),
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
             };
 
@@ -1838,23 +1980,25 @@
             // 프리프로세서 단면 템플릿 파라미터 → §I6.2.1 R 계산에 필요
             const selTemplate = document.getElementById('select-template');
             const secType = selTemplate ? selTemplate.value : '';
+            // UI 입력 → US 내부값 변환 (엔진은 항상 US 단위)
             const sectionInfo = {
-                depth: getNum('tpl-H', 0),
-                flange_width: getNum('tpl-B', 0),
-                thickness: getNum('tpl-t', 0),
-                lip_depth: getNum('tpl-D', 0),
-                R_corner: getNum('tpl-r', 0),
+                depth: fromDisplay(getNum('tpl-H', 0), 'length'),
+                flange_width: fromDisplay(getNum('tpl-B', 0), 'length'),
+                thickness: fromDisplay(getNum('tpl-t', 0), 'thickness'),
+                lip_depth: fromDisplay(getNum('tpl-D', 0), 'length'),
+                R_corner: fromDisplay(getNum('tpl-r', 0), 'radius'),
                 type: secType === 'lippedz' ? 'Z' : 'C',
-                Fy: getNum('design-fy', 50),
-                Fu: getNum('design-fu', 65),
+                Fy: fromDisplay(getNum('design-fy', 50), 'stress'),
+                Fu: fromDisplay(getNum('design-fu', 65), 'stress'),
             };
 
-            // 테이블에서 스팬/지점/랩 데이터 수집
+            // 테이블에서 스팬/지점/랩 데이터 수집 (→ US ft 변환)
             const spanLens = [];
             const supports = [];
             const lapsPerSupport = [];
             document.querySelectorAll('.span-tbl-len').forEach(el => {
-                spanLens.push(parseFloat(/** @type {HTMLInputElement} */ (el).value) || 25);
+                const raw = parseFloat(/** @type {HTMLInputElement} */ (el).value) || 25;
+                spanLens.push(fromDisplay(raw, 'length_ft'));
             });
             document.querySelectorAll('.span-tbl-sup').forEach(el => {
                 supports.push(/** @type {HTMLSelectElement} */ (el).value);
@@ -1864,29 +2008,40 @@
             for (let si = 0; si < nSup; si++) {
                 const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + si + '"]');
                 const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + si + '"]');
+                const lRaw = lEl ? parseFloat(/** @type {HTMLInputElement} */ (lEl).value) || 0 : 0;
+                const rRaw = rEl ? parseFloat(/** @type {HTMLInputElement} */ (rEl).value) || 0 : 0;
                 lapsPerSupport.push({
-                    left_ft: lEl ? parseFloat(/** @type {HTMLInputElement} */ (lEl).value) || 0 : 0,
-                    right_ft: rEl ? parseFloat(/** @type {HTMLInputElement} */ (rEl).value) || 0 : 0,
+                    left_ft: fromDisplay(lRaw, 'length_ft'),
+                    right_ft: fromDisplay(rRaw, 'length_ft'),
                 });
             }
-            // 등스팬 여부 판별: 모든 스팬이 같으면 단일 값 사용
+            // 등스팬 여부 판별
             const allSame = spanLens.every(v => Math.abs(v - spanLens[0]) < 0.01);
             const spanFt = allSame ? spanLens[0] : spanLens[0];
+
+            // spacing도 변환 (UI ft/m → US ft)
+            const spacingUS = fromDisplay(spacing, 'length_ft');
+            // 하중: UI psf/kPa → US plf (= psf × spacing_ft)
+            const loadD_psf = fromDisplay(getNum('load-D-psf', 0), 'pressure');
+            const loadLr_psf = fromDisplay(getNum('load-Lr-psf', 0), 'pressure');
+            const loadS_psf = fromDisplay(getNum('load-S-psf', 0), 'pressure');
+            const loadWu_psf = fromDisplay(getNum('load-Wu-psf', 0), 'pressure');
+            const loadL_psf = fromDisplay(getNum('load-L-psf', 0), 'pressure');
 
             const data = {
                 member_app: memberApp,
                 span_type: spanType,
                 span_ft: spanFt,
-                spans_ft: spanLens,           // 부등스팬 지원
-                supports: supports,           // 지점 조건 배열
-                laps_per_support: lapsPerSupport, // 지점별 랩
-                spacing_ft: spacing,
+                spans_ft: spanLens,           // US ft
+                supports: supports,
+                laps_per_support: lapsPerSupport,
+                spacing_ft: spacingUS,
                 loads: {
-                    D: getNum('load-D-psf', 0) * spacing,
-                    Lr: getNum('load-Lr-psf', 0) * spacing,
-                    S: getNum('load-S-psf', 0) * spacing,
-                    W: -(getNum('load-Wu-psf', 0) * spacing),
-                    L: getNum('load-L-psf', 0) * spacing,
+                    D: loadD_psf * spacingUS,      // plf (US)
+                    Lr: loadLr_psf * spacingUS,
+                    S: loadS_psf * spacingUS,
+                    W: -(loadWu_psf * spacingUS),
+                    L: loadL_psf * spacingUS,
                 },
                 design_method: /** @type {HTMLSelectElement} */ (document.getElementById('select-design-method'))?.value || 'LRFD',
                 laps: {
@@ -1895,8 +2050,8 @@
                 },
                 deck: {
                     type: /** @type {HTMLSelectElement} */ (document.getElementById('select-deck-type'))?.value || 'none',
-                    t_panel: getNum('deck-t-panel', 0.018),
-                    fastener_spacing: getNum('deck-fastener-spacing', 12),
+                    t_panel: fromDisplay(getNum('deck-t-panel', 0.018), 'thickness'),
+                    fastener_spacing: fromDisplay(getNum('deck-fastener-spacing', 12), 'length'),
                     kphi_override: getNum('deck-kphi-override', null) || null,
                 },
                 section: (sectionInfo.depth > 0 && sectionInfo.thickness > 0) ? sectionInfo : null,
@@ -1909,52 +2064,109 @@
         });
     }
 
-    // 보 개략도 + 치수선 SVG
+    // 보 개략도 + 지점 조건 + 랩 구간 + 치수선 SVG
     function renderBeamSchematic(data) {
-        const W = 480, H = 44, PAD_L = 6, PAD_R = 6;
+        const W = 480, H_SVG = 80, PAD_L = 20, PAD_R = 20;
         const nSpans = data.n_spans || 1;
-        // 전체 길이 추정: locations에서 최대 x_ft
-        let totalL = 0;
-        if (data.gravity && data.gravity.locations) {
-            for (const loc of data.gravity.locations) {
-                if (loc.x_ft > totalL) totalL = loc.x_ft;
+
+        // 스팬 길이 배열 (부등스팬 지원)
+        let spanLens = data.spans_ft || [];
+        if (!spanLens.length || spanLens.length !== nSpans) {
+            let totalL = 0;
+            if (data.gravity && data.gravity.locations) {
+                for (const loc of data.gravity.locations) {
+                    if (loc.x_ft > totalL) totalL = loc.x_ft;
+                }
             }
+            if (totalL <= 0) return '';
+            spanLens = Array(nSpans).fill(totalL / nSpans);
         }
+        const totalL = spanLens.reduce((a, b) => a + b, 0);
         if (totalL <= 0) return '';
-        const spanL = totalL / nSpans;
+
+        // 지점 조건 배열
+        const supports = data.supports || Array(nSpans + 1).fill('P');
+        // 지점별 랩 배열
+        const lapsArr = data.laps_per_support || Array(nSpans + 1).fill({left_ft: 0, right_ft: 0});
 
         const plotW = W - PAD_L - PAD_R;
-        const beamY = 16;
-        const supH = 8;
+        const beamY = 18;
+        const supH = 9;
+        const fg = 'var(--vscode-foreground)';
+        const dim = 'var(--vscode-descriptionForeground)';
+        const lapColor = '#4fc3f7';
 
-        let svg = '<div style="margin:4px 0"><svg width="' + W + '" height="' + H + '" style="width:100%;max-width:' + W + 'px">';
+        // ft → px 변환
+        function ftToX(ft) { return PAD_L + (ft / totalL) * plotW; }
 
-        // 보 선
-        svg += '<line x1="' + PAD_L + '" y1="' + beamY + '" x2="' + (W - PAD_R) + '" y2="' + beamY + '" stroke="var(--vscode-foreground)" stroke-width="2"/>';
+        // 지점 x 좌표 (ft 기준)
+        const supFt = [0];
+        for (let i = 0; i < nSpans; i++) supFt.push(supFt[i] + spanLens[i]);
 
-        // 지점 삼각형 + 치수선
+        let svg = '<div style="margin:4px 0"><svg width="' + W + '" height="' + H_SVG + '" style="width:100%;max-width:' + W + 'px">';
+
+        // (1) 보 선 (기본 두께)
+        svg += '<line x1="' + ftToX(0) + '" y1="' + beamY + '" x2="' + ftToX(totalL) + '" y2="' + beamY + '" stroke="' + fg + '" stroke-width="2"/>';
+
+        // (2) 랩 구간: 굵은 선 + 치수
+        const lapDimY = beamY - 10;
         for (let i = 0; i <= nSpans; i++) {
-            const x = PAD_L + (i / nSpans) * plotW;
-            // 삼각형 지점
-            const triW = 5;
-            svg += '<polygon points="' + x + ',' + beamY + ' ' + (x - triW) + ',' + (beamY + supH) + ' ' + (x + triW) + ',' + (beamY + supH) + '" fill="var(--vscode-foreground)" fill-opacity="0.6"/>';
+            const lap = lapsArr[i] || {left_ft: 0, right_ft: 0};
+            const lL = lap.left_ft || 0;
+            const lR = lap.right_ft || 0;
+            if (lL <= 0 && lR <= 0) continue;
+            const sxFt = supFt[i];
+            const x1Ft = Math.max(0, sxFt - lL);
+            const x2Ft = Math.min(totalL, sxFt + lR);
+            const x1 = ftToX(x1Ft);
+            const x2 = ftToX(x2Ft);
+            // 굵은 오버레이 선
+            svg += '<line x1="' + x1.toFixed(1) + '" y1="' + beamY + '" x2="' + x2.toFixed(1) + '" y2="' + beamY + '" stroke="' + lapColor + '" stroke-width="5" stroke-opacity="0.5"/>';
+            // 랩 치수선 (보 위쪽)
+            const lapTotal = lL + lR;
+            if (lapTotal > 0) {
+                svg += '<line x1="' + x1.toFixed(1) + '" y1="' + lapDimY + '" x2="' + x2.toFixed(1) + '" y2="' + lapDimY + '" stroke="' + lapColor + '" stroke-width="0.7"/>';
+                svg += '<line x1="' + x1.toFixed(1) + '" y1="' + (lapDimY-2) + '" x2="' + x1.toFixed(1) + '" y2="' + (lapDimY+2) + '" stroke="' + lapColor + '" stroke-width="0.7"/>';
+                svg += '<line x1="' + x2.toFixed(1) + '" y1="' + (lapDimY-2) + '" x2="' + x2.toFixed(1) + '" y2="' + (lapDimY+2) + '" stroke="' + lapColor + '" stroke-width="0.7"/>';
+                svg += '<text x="' + ((x1+x2)/2).toFixed(1) + '" y="' + (lapDimY-2) + '" fill="' + lapColor + '" font-size="8" text-anchor="middle">' + fmtVal(lapTotal, 'length_ft') + ' ' + unitLabel('length_ft') + ' lap</text>';
+            }
         }
 
-        // 스팬별 치수선
-        const dimY = beamY + supH + 8;
+        // (3) 지점 그래픽 (P/R/F 구분)
+        for (let i = 0; i <= nSpans; i++) {
+            const x = ftToX(supFt[i]);
+            const type = (supports[i] || 'P').toUpperCase().charAt(0);
+            const tw = 6; // 삼각형 반폭
+            if (type === 'F') {
+                // 고정단: 채워진 삼각형 + 수직선 + 해치
+                svg += '<polygon points="' + x + ',' + beamY + ' ' + (x-tw) + ',' + (beamY+supH) + ' ' + (x+tw) + ',' + (beamY+supH) + '" fill="' + fg + '" fill-opacity="0.7"/>';
+                svg += '<line x1="' + (x-tw-1) + '" y1="' + (beamY+supH) + '" x2="' + (x+tw+1) + '" y2="' + (beamY+supH) + '" stroke="' + fg + '" stroke-width="2"/>';
+                for (let h = -tw; h <= tw; h += 3) {
+                    svg += '<line x1="' + (x+h) + '" y1="' + (beamY+supH) + '" x2="' + (x+h-2) + '" y2="' + (beamY+supH+4) + '" stroke="' + fg + '" stroke-width="0.7" stroke-opacity="0.5"/>';
+                }
+            } else if (type === 'R') {
+                // 롤러: 삼각형 + 원 (이동 가능)
+                svg += '<polygon points="' + x + ',' + beamY + ' ' + (x-tw) + ',' + (beamY+supH-2) + ' ' + (x+tw) + ',' + (beamY+supH-2) + '" fill="' + fg + '" fill-opacity="0.5" stroke="' + fg + '" stroke-width="0.5"/>';
+                svg += '<circle cx="' + x + '" cy="' + (beamY+supH+1) + '" r="2.5" fill="none" stroke="' + fg + '" stroke-width="1"/>';
+            } else {
+                // 핀: 삼각형 + 수평선
+                svg += '<polygon points="' + x + ',' + beamY + ' ' + (x-tw) + ',' + (beamY+supH) + ' ' + (x+tw) + ',' + (beamY+supH) + '" fill="' + fg + '" fill-opacity="0.5" stroke="' + fg + '" stroke-width="0.5"/>';
+                svg += '<line x1="' + (x-tw-1) + '" y1="' + (beamY+supH+1) + '" x2="' + (x+tw+1) + '" y2="' + (beamY+supH+1) + '" stroke="' + fg + '" stroke-width="1"/>';
+            }
+            // 지점 라벨
+            svg += '<text x="' + x.toFixed(1) + '" y="' + (beamY+supH+12) + '" fill="' + dim + '" font-size="8" text-anchor="middle">' + type + '</text>';
+        }
+
+        // (4) 스팬별 치수선
+        const dimY = beamY + supH + 18;
         for (let i = 0; i < nSpans; i++) {
-            const x1 = PAD_L + (i / nSpans) * plotW;
-            const x2 = PAD_L + ((i + 1) / nSpans) * plotW;
+            const x1 = ftToX(supFt[i]);
+            const x2 = ftToX(supFt[i + 1]);
             const midX = (x1 + x2) / 2;
-            // 치수 선
-            svg += '<line x1="' + x1 + '" y1="' + dimY + '" x2="' + x2 + '" y2="' + dimY + '" stroke="var(--vscode-descriptionForeground)" stroke-width="0.8"/>';
-            // 화살표 (좌)
-            svg += '<line x1="' + x1 + '" y1="' + (dimY - 3) + '" x2="' + x1 + '" y2="' + (dimY + 3) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="0.8"/>';
-            // 화살표 (우)
-            svg += '<line x1="' + x2 + '" y1="' + (dimY - 3) + '" x2="' + x2 + '" y2="' + (dimY + 3) + '" stroke="var(--vscode-descriptionForeground)" stroke-width="0.8"/>';
-            // 치수 텍스트
-            const dimText = spanL.toFixed(1) + ' ft';
-            svg += '<text x="' + midX + '" y="' + (dimY + 11) + '" fill="var(--vscode-descriptionForeground)" font-size="9" text-anchor="middle">' + dimText + '</text>';
+            svg += '<line x1="' + x1.toFixed(1) + '" y1="' + dimY + '" x2="' + x2.toFixed(1) + '" y2="' + dimY + '" stroke="' + dim + '" stroke-width="0.8"/>';
+            svg += '<line x1="' + x1.toFixed(1) + '" y1="' + (dimY-3) + '" x2="' + x1.toFixed(1) + '" y2="' + (dimY+3) + '" stroke="' + dim + '" stroke-width="0.8"/>';
+            svg += '<line x1="' + x2.toFixed(1) + '" y1="' + (dimY-3) + '" x2="' + x2.toFixed(1) + '" y2="' + (dimY+3) + '" stroke="' + dim + '" stroke-width="0.8"/>';
+            svg += '<text x="' + midX.toFixed(1) + '" y="' + (dimY+11) + '" fill="' + dim + '" font-size="9" text-anchor="middle">' + fmtVal(spanLens[i], 'length_ft') + ' ' + unitLabel('length_ft') + '</text>';
         }
 
         svg += '</svg></div>';
@@ -2000,9 +2212,20 @@
         svg += '<line x1="' + PAD_L + '" y1="' + midY + '" x2="' + (W-PAD_R) + '" y2="' + midY + '" stroke="var(--vscode-foreground)" stroke-opacity="0.25" stroke-dasharray="4"/>';
         if (_lastLoadAnalysis) {
             const ns = _lastLoadAnalysis.n_spans || 1;
-            for (let si = 0; si <= ns; si++) {
-                const sx = PAD_L + (si / ns) * plotW;
-                svg += '<line x1="' + sx.toFixed(1) + '" y1="' + (midY - 3) + '" x2="' + sx.toFixed(1) + '" y2="' + (midY + 3) + '" stroke="var(--vscode-foreground)" stroke-opacity="0.4" stroke-width="1"/>';
+            const sft = _lastLoadAnalysis.spans_ft;
+            const totalLft = sft ? sft.reduce((a,b) => a+b, 0) : 0;
+            if (sft && totalLft > 0) {
+                let cumFt = 0;
+                for (let si = 0; si <= ns; si++) {
+                    const sx = PAD_L + (cumFt / totalLft) * plotW;
+                    svg += '<line x1="' + sx.toFixed(1) + '" y1="' + (midY - 3) + '" x2="' + sx.toFixed(1) + '" y2="' + (midY + 3) + '" stroke="var(--vscode-foreground)" stroke-opacity="0.4" stroke-width="1"/>';
+                    if (si < ns) cumFt += sft[si];
+                }
+            } else {
+                for (let si = 0; si <= ns; si++) {
+                    const sx = PAD_L + (si / ns) * plotW;
+                    svg += '<line x1="' + sx.toFixed(1) + '" y1="' + (midY - 3) + '" x2="' + sx.toFixed(1) + '" y2="' + (midY + 3) + '" stroke="var(--vscode-foreground)" stroke-opacity="0.4" stroke-width="1"/>';
+                }
             }
         }
         // fill + line
@@ -2046,22 +2269,31 @@
 
         // M Diagram SVG
         if (data.gravity && data.gravity.M_diagram && data.gravity.M_diagram.length > 2) {
-            html += renderDiagramSVG(data.gravity.M_diagram, 'Moment (kip-ft)', '#4fc3f7', true);
+            const mLabel = 'Moment (' + unitLabel('moment_ft') + ')';
+            const mVals = _unitSystem === 'SI'
+                ? data.gravity.M_diagram.map(v => toDisplay(v, 'moment_ft'))
+                : data.gravity.M_diagram;
+            html += renderDiagramSVG(mVals, mLabel, '#4fc3f7', true);
         }
 
         // V Diagram SVG
         if (data.gravity && data.gravity.V_diagram && data.gravity.V_diagram.length > 2) {
-            html += renderDiagramSVG(data.gravity.V_diagram, 'Shear (kips)', '#ff8a65', false);
+            const vLabel = 'Shear (' + unitLabel('force') + ')';
+            const vVals = _unitSystem === 'SI'
+                ? data.gravity.V_diagram.map(v => toDisplay(v, 'force'))
+                : data.gravity.V_diagram;
+            html += renderDiagramSVG(vVals, vLabel, '#ff8a65', false);
         }
 
         // 중력 지배 결과
         if (data.gravity) {
+            const mU = unitLabel('moment_ft'), fU = unitLabel('force');
             html += '<strong>Gravity: ' + data.gravity.combo + '</strong>';
-            html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(k-ft)</th><th>Vu(k)</th><th>Ru(k)</th></tr>';
+            html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(' + mU + ')</th><th>Vu(' + fU + ')</th><th>Ru(' + fU + ')</th></tr>';
             for (const loc of data.gravity.locations) {
-                const m = loc.Mu != null ? loc.Mu.toFixed(2) : '—';
-                const v = loc.Vu != null ? loc.Vu.toFixed(2) : '—';
-                const r = loc.Ru != null ? loc.Ru.toFixed(2) : '—';
+                const m = fmtVal(loc.Mu, 'moment_ft');
+                const v = fmtVal(loc.Vu, 'force');
+                const r = fmtVal(loc.Ru, 'force');
                 html += '<tr><td>' + loc.name + '</td><td>' + m + '</td><td>' + v + '</td><td>' + r + '</td></tr>';
             }
             html += '</table>';
@@ -2070,9 +2302,9 @@
         // 양력 결과
         if (data.uplift) {
             html += '<strong>Uplift: ' + data.uplift.combo + '</strong>';
-            html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(k-ft)</th></tr>';
+            html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(' + unitLabel('moment_ft') + ')</th></tr>';
             for (const loc of data.uplift.locations) {
-                const m = loc.Mu != null ? loc.Mu.toFixed(2) : '—';
+                const m = fmtVal(loc.Mu, 'moment_ft');
                 html += '<tr><td>' + loc.name + '</td><td>' + m + '</td></tr>';
             }
             html += '</table>';
@@ -2085,7 +2317,7 @@
             html += '<strong>Auto Parameters:</strong><br>';
             if (ap.deck) html += 'Deck: k&phi;=' + ap.deck.kphi + ', kx=' + ap.deck.kx + '<br>';
             if (ap.positive_region) html += 'Positive: braced=' + ap.positive_region.braced + '<br>';
-            if (ap.negative_region) html += 'Negative: Ly=' + ap.negative_region.Ly_in + 'in, Cb=' + ap.negative_region.Cb + '<br>';
+            if (ap.negative_region) html += 'Negative: Ly=' + fmtVal(ap.negative_region.Ly_in, 'length') + ' ' + unitLabel('length') + ', Cb=' + ap.negative_region.Cb + '<br>';
             if (ap.uplift_R != null) html += 'Uplift R=' + ap.uplift_R;
             html += '</div>';
 
@@ -2096,11 +2328,15 @@
                 for (const loc of data.gravity.locations) {
                     if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxLoc.Mu || 0)) maxLoc = loc;
                 }
-                if (maxLoc.Mu != null) setValue('design-Mx', Math.abs(maxLoc.Mu * 12).toFixed(1));  // kip-ft → kip-in
-                if (maxLoc.Vu != null) setValue('design-V', maxLoc.Vu.toFixed(2));
+                // US 내부값 → 표시값 변환하여 입력 필드에 설정
+                if (maxLoc.Mu != null) {
+                    const mu_kipIn = Math.abs(maxLoc.Mu * 12); // kip-ft → kip-in (US)
+                    setValue('design-Mx', toDisplay(mu_kipIn, 'moment').toFixed(unitDec('moment')));
+                }
+                if (maxLoc.Vu != null) setValue('design-V', toDisplay(maxLoc.Vu, 'force').toFixed(unitDec('force')));
                 // Unbraced lengths
                 if (ap.negative_region) {
-                    setValue('design-Lb', ap.negative_region.Ly_in || 0);
+                    setValue('design-Lb', toDisplay(ap.negative_region.Ly_in || 0, 'length').toFixed(unitDec('length')));
                     setValue('design-Cb', ap.negative_region.Cb || 1.0);
                 }
             }
@@ -2168,7 +2404,8 @@
             const vals = isC
                 ? [{l:'Global',k:'Pne',v:data.Pne},{l:'Local',k:'Pnl',v:data.Pnl},{l:'Distort.',k:'Pnd',v:data.Pnd}]
                 : [{l:'Global',k:'Mne',v:data.Mne},{l:'Local',k:'Mnl',v:data.Mnl},{l:'Distort.',k:'Mnd',v:data.Mnd}];
-            const unit = isC ? 'kips' : 'kip-in';
+            const uType = isC ? 'force' : 'moment';
+            const unit = unitLabel(uType);
             const nominal = isC ? data.Pn : data.Mn;
             const designVal = dm === 'LRFD' ? (isC ? data.phi_Pn : data.phi_Mn) : (isC ? data.Pn_omega : data.Mn_omega);
             const designLabel = dm === 'LRFD' ? (isC ? 'φPn' : 'φMn') : (isC ? 'Pn/Ω' : 'Mn/Ω');
@@ -2178,7 +2415,7 @@
                 const gov = (v.v != null && nominal != null && Math.abs(v.v - nominal) < 0.01) ? ' governing' : '';
                 summaryHtml += '<div class="strength-card' + gov + '">';
                 summaryHtml += '<div class="sc-label">' + v.l + '</div>';
-                summaryHtml += '<div class="sc-value">' + (v.v != null ? v.v.toFixed(1) : '-') + '</div>';
+                summaryHtml += '<div class="sc-value">' + (v.v != null ? fmtVal(v.v, uType) : '-') + '</div>';
                 summaryHtml += '<div class="sc-label">' + unit + '</div>';
                 if (gov) summaryHtml += '<div><span class="governing-badge">GOVERNS</span></div>';
                 summaryHtml += '</div>';
@@ -2186,46 +2423,49 @@
             summaryHtml += '</div>';
 
             summaryHtml += '<div style="font-size:12px;margin:4px 0">';
-            summaryHtml += '<b style="color:#4fc3f7">' + designLabel + ' = ' + (designVal != null ? designVal.toFixed(1) : '-') + ' ' + unit + '</b>';
+            summaryHtml += '<b style="color:#4fc3f7">' + designLabel + ' = ' + (designVal != null ? fmtVal(designVal, uType) : '-') + ' ' + unit + '</b>';
             summaryHtml += ' <span style="color:var(--vscode-descriptionForeground)">(' + mode + ')</span>';
             summaryHtml += '</div>';
         } else if (mt === 'tension') {
+            const fU = unitLabel('force');
             summaryHtml += '<table style="width:100%;font-size:12px">';
-            summaryHtml += _summaryRow('Tn (yield)', data.Tn_yield, 'kips');
-            summaryHtml += _summaryRow('Tn (rupture)', data.Tn_rupture, 'kips');
+            summaryHtml += _summaryRow('Tn (yield)', data.Tn_yield, fU, null, 'force');
+            summaryHtml += _summaryRow('Tn (rupture)', data.Tn_rupture, fU, null, 'force');
             summaryHtml += _summaryRow('Controlling mode', mode, '');
-            summaryHtml += _summaryRow('Design strength', data.design_strength, 'kips', '#4fc3f7');
+            summaryHtml += _summaryRow('Design strength', data.design_strength, fU, '#4fc3f7', 'force');
             summaryHtml += '</table>';
         } else if (mt === 'combined') {
             const c = data.compression || {};
             const f = data.flexure_x || {};
             const fy2 = data.flexure_y || null;
+            const fU = unitLabel('force'), mU = unitLabel('moment');
             summaryHtml += '<table style="width:100%;font-size:12px">';
-            summaryHtml += _summaryRow('Pn (' + (c.controlling_mode||'') + ')', c.Pn, 'kips');
-            summaryHtml += _summaryRow('Design Pn', c.design_strength, 'kips', '#4fc3f7');
-            summaryHtml += _summaryRow('Mn(x) (' + (f.controlling_mode||'') + ')', f.Mn, 'kip-in');
-            summaryHtml += _summaryRow('Design Mn(x)', f.design_strength, 'kip-in', '#4fc3f7');
+            summaryHtml += _summaryRow('Pn (' + (c.controlling_mode||'') + ')', c.Pn, fU, null, 'force');
+            summaryHtml += _summaryRow('Design Pn', c.design_strength, fU, '#4fc3f7', 'force');
+            summaryHtml += _summaryRow('Mn(x) (' + (f.controlling_mode||'') + ')', f.Mn, mU, null, 'moment');
+            summaryHtml += _summaryRow('Design Mn(x)', f.design_strength, mU, '#4fc3f7', 'moment');
             if (fy2) {
-                summaryHtml += _summaryRow('Mn(y)', fy2.Mn, 'kip-in');
-                summaryHtml += _summaryRow('Design Mn(y)', fy2.design_strength, 'kip-in', '#4fc3f7');
+                summaryHtml += _summaryRow('Mn(y)', fy2.Mn, mU, null, 'moment');
+                summaryHtml += _summaryRow('Design Mn(y)', fy2.design_strength, mU, '#4fc3f7', 'moment');
             }
             if (data.amplification) {
                 summaryHtml += _summaryRow('§C1 αx', data.amplification.alpha_x?.toFixed(3), '', '#ffab00');
                 summaryHtml += _summaryRow('§C1 αy', data.amplification.alpha_y?.toFixed(3), '', '#ffab00');
             }
             if (data.shear) {
-                summaryHtml += _summaryRow('Vn', data.shear.Vn, 'kips');
-                summaryHtml += _summaryRow('Design Vn', data.shear.design_strength, 'kips', '#4fc3f7');
+                summaryHtml += _summaryRow('Vn', data.shear.Vn, fU, null, 'force');
+                summaryHtml += _summaryRow('Design Vn', data.shear.design_strength, fU, '#4fc3f7', 'force');
             }
             summaryHtml += '</table>';
         } else if (mt === 'connection') {
             const ls = data.limit_states || [];
+            const fU = unitLabel('force');
             summaryHtml += '<table style="width:100%;font-size:12px">';
             ls.forEach(l => {
                 const mark = l.governs ? ' <span class="governing-badge">GOVERNS</span>' : '';
-                summaryHtml += _summaryRow(l.name + mark, l.design_strength, 'kips', l.governs ? '#ffab00' : undefined);
+                summaryHtml += _summaryRow(l.name + mark, l.design_strength, fU, l.governs ? '#ffab00' : undefined, 'force');
             });
-            summaryHtml += _summaryRow('Design strength', data.design_strength, 'kips', '#4fc3f7');
+            summaryHtml += _summaryRow('Design strength', data.design_strength, fU, '#4fc3f7', 'force');
             summaryHtml += '</table>';
         }
 
@@ -2255,7 +2495,12 @@
                 if (s.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(s.equation) + '</span>';
                 stepsHtml += '</span></div>';
                 if (s.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + s.formula + '</div>';
-                if (s.value != null) stepsHtml += '<div class="calc-step-value">' + s.value + ' ' + (s.unit || '') + '</div>';
+                if (s.value != null) {
+                    const sut = _mapUSUnit(s.unit);
+                    const sv = sut ? fmtVal(s.value, sut) : s.value;
+                    const su = sut ? unitLabel(sut) : (s.unit || '');
+                    stepsHtml += '<div class="calc-step-value">' + sv + ' ' + su + '</div>';
+                }
                 stepsHtml += '</div>';
             });
         } else if (data.limit_states) {
@@ -2269,7 +2514,7 @@
                 if (ls.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(ls.equation) + '</span>';
                 stepsHtml += '</span></div>';
                 if (ls.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + ls.formula + '</div>';
-                stepsHtml += '<div>Rn = <b>' + ls.Rn + '</b> kips → <span class="calc-step-value">' + ls.design_strength + ' kips</span></div>';
+                stepsHtml += '<div>Rn = <b>' + fmtVal(ls.Rn, 'force') + '</b> ' + unitLabel('force') + ' → <span class="calc-step-value">' + fmtVal(ls.design_strength, 'force') + ' ' + unitLabel('force') + '</span></div>';
                 stepsHtml += '</div>';
             });
         }
@@ -2308,7 +2553,7 @@
                 <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--vscode-panel-border,#333)">
                 <b>Web Crippling + Bending (§H3)</b>
                 <table style="width:100%;font-size:12px;margin-top:4px">
-                    ${_summaryRow('Pn (web crippling)', wc.Pn, 'kips')}
+                    ${_summaryRow('Pn (web crippling)', wc.Pn, _rul('force'), '', 'force')}
                     ${_summaryRow('Support', wc.support, '')}
                     ${_summaryRow('0.91(P/Pn)', h3.P_term?.toFixed(3), '')}
                     ${_summaryRow('M/Mnfo', h3.M_term?.toFixed(3), '')}
@@ -2344,10 +2589,28 @@
         }
     }
 
-    function _summaryRow(label, value, unit, color) {
-        const style = color ? ` style="color:${color}"` : '';
-        return `<tr><td style="padding:2px 6px;color:#aaa">${label}</td>
-                <td style="padding:2px 6px;text-align:right"${style}><b>${value ?? '-'}</b> ${unit || ''}</td></tr>`;
+    function _summaryRow(label, value, unit, color, unitType) {
+        const style = color ? ' style="color:' + color + '"' : '';
+        const dispVal = (unitType && typeof value === 'number') ? fmtVal(value, unitType) : (value ?? '-');
+        return '<tr><td style="padding:2px 6px;color:#aaa">' + label + '</td>' +
+               '<td style="padding:2px 6px;text-align:right"' + style + '><b>' + dispVal + '</b> ' + (unit || '') + '</td></tr>';
+    }
+
+    /** US 단위 문자열 → unitType 매핑 (Python step.unit → UNIT key) */
+    function _mapUSUnit(u) {
+        if (!u) return null;
+        const map = {
+            'kips': 'force', 'kip': 'force', 'kN': 'force',
+            'kip-in': 'moment', 'kN-m': 'moment',
+            'kip-ft': 'moment_ft',
+            'ksi': 'stress', 'MPa': 'stress',
+            'in': 'length', 'mm': 'length',
+            'ft': 'length_ft', 'm': 'length_ft',
+            'in^2': 'area', 'in²': 'area', 'mm²': 'area',
+            'in^3': 'modulus', 'in³': 'modulus', 'mm³': 'modulus',
+            'in^4': 'inertia', 'in⁴': 'inertia', 'mm⁴': 'inertia',
+        };
+        return map[u] || null;
     }
 
     // ============================================================
@@ -2401,6 +2664,10 @@
 
     // ─── Report utility ───
     function _rv(v, dec) { return v != null ? Number(v).toFixed(dec != null ? dec : 2) : '—'; }
+    /** Report용 단위 변환 값 포맷: _ruv(value, unitType) */
+    function _ruv(v, ut) { return fmtVal(v, ut); }
+    /** Report용 단위 라벨: _rul(unitType) */
+    function _rul(ut) { return unitLabel(ut); }
 
     function generateDetailedReport() {
         const d = _lastDesignResult;
@@ -2480,11 +2747,11 @@
         h += '<div style="flex:1"><h3>Section Designation</h3>';
         h += '<table><tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>';
         h += '<tr><td>Section Type</td><td colspan="2"><b>'+(typeNames[secType]||secType||'Custom')+'</b></td></tr>';
-        if (H0) h += '<tr><td>H (Depth)</td><td>'+H0+'</td><td>in</td></tr>';
-        if (B0) h += '<tr><td>B (Flange width)</td><td>'+B0+'</td><td>in</td></tr>';
-        if (D0) h += '<tr><td>D (Lip depth)</td><td>'+D0+'</td><td>in</td></tr>';
-        if (t0) h += '<tr><td>t (Thickness)</td><td>'+t0+'</td><td>in</td></tr>';
-        if (r0) h += '<tr><td>r (Corner radius)</td><td>'+r0+'</td><td>in</td></tr>';
+        if (H0) h += '<tr><td>H (Depth)</td><td>'+H0+'</td><td>'+_rul('length')+'</td></tr>';
+        if (B0) h += '<tr><td>B (Flange width)</td><td>'+B0+'</td><td>'+_rul('length')+'</td></tr>';
+        if (D0) h += '<tr><td>D (Lip depth)</td><td>'+D0+'</td><td>'+_rul('length')+'</td></tr>';
+        if (t0) h += '<tr><td>t (Thickness)</td><td>'+t0+'</td><td>'+_rul('thickness')+'</td></tr>';
+        if (r0) h += '<tr><td>r (Corner radius)</td><td>'+r0+'</td><td>'+_rul('radius')+'</td></tr>';
         h += '<tr><td>Nodes / Elements</td><td colspan="2">'+model.node.length+' / '+(model.elem?model.elem.length:0)+'</td></tr>';
         h += '</table></div></div>';
 
@@ -2494,17 +2761,17 @@
             h += '<h3>Computed Section Properties</h3>';
             h += '<table><tr><th>Property</th><th>Symbol</th><th>Value</th><th>Unit</th></tr>';
             const rows = [
-                ['Gross Area','A',p.A,'in²'],
-                ['Strong-axis Inertia','I<sub>xx</sub>',p.Ixx,'in⁴'],['Weak-axis Inertia','I<sub>zz</sub>',p.Izz,'in⁴'],
-                ['Product of Inertia','I<sub>xz</sub>',p.Ixz,'in⁴'],
-                ['Strong-axis Section Modulus','S<sub>x</sub>',p.Sx,'in³'],['Weak-axis Section Modulus','S<sub>z</sub>',p.Sz,'in³'],
-                ['Strong-axis Plastic Modulus','Z<sub>x</sub>',p.Zx,'in³'],['Weak-axis Plastic Modulus','Z<sub>z</sub>',p.Zz,'in³'],
-                ['Strong-axis Radius of Gyration','r<sub>x</sub>',p.rx,'in'],['Weak-axis Radius of Gyration','r<sub>z</sub>',p.rz,'in'],
-                ['Centroid x','x<sub>cg</sub>',p.xcg,'in'],['Centroid z','z<sub>cg</sub>',p.zcg,'in'],
-                ['Principal Axis Angle','&theta;<sub>p</sub>',p.thetap,'°'],
-                ['Principal Inertia 1','I<sub>11</sub>',p.I11,'in⁴'],['Principal Inertia 2','I<sub>22</sub>',p.I22,'in⁴'],
+                ['Gross Area','A',p.A,'area'],
+                ['Strong-axis Inertia','I<sub>xx</sub>',p.Ixx,'inertia'],['Weak-axis Inertia','I<sub>zz</sub>',p.Izz,'inertia'],
+                ['Product of Inertia','I<sub>xz</sub>',p.Ixz,'inertia'],
+                ['Strong-axis Section Modulus','S<sub>x</sub>',p.Sx,'modulus'],['Weak-axis Section Modulus','S<sub>z</sub>',p.Sz,'modulus'],
+                ['Strong-axis Plastic Modulus','Z<sub>x</sub>',p.Zx,'modulus'],['Weak-axis Plastic Modulus','Z<sub>z</sub>',p.Zz,'modulus'],
+                ['Strong-axis Radius of Gyration','r<sub>x</sub>',p.rx,'length'],['Weak-axis Radius of Gyration','r<sub>z</sub>',p.rz,'length'],
+                ['Centroid x','x<sub>cg</sub>',p.xcg,'length'],['Centroid z','z<sub>cg</sub>',p.zcg,'length'],
+                ['Principal Axis Angle','&theta;<sub>p</sub>',p.thetap,null],
+                ['Principal Inertia 1','I<sub>11</sub>',p.I11,'inertia'],['Principal Inertia 2','I<sub>22</sub>',p.I22,'inertia'],
             ];
-            rows.forEach(r => { if (r[2]!=null) h += '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+_rv(r[2],4)+'</td><td>'+r[3]+'</td></tr>'; });
+            rows.forEach(r => { if (r[2]!=null) h += '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+(r[3]?_ruv(r[2],r[3]):_rv(r[2],1))+'</td><td>'+(r[3]?_rul(r[3]):'\u00B0')+'</td></tr>'; });
             h += '</table>';
         }
         return h;
@@ -2570,9 +2837,9 @@
             extrema.forEach(ext => {
                 const ex=toSvgX(ext.L).toFixed(1), ey=toSvgY(ext.LF).toFixed(1);
                 svg+='<circle cx="'+ex+'" cy="'+ey+'" r="4" fill="'+ext.color+'" stroke="#fff" stroke-width="1"/>';
-                svg+='<text x="'+(parseFloat(ex)+6)+'" y="'+(parseFloat(ey)-6)+'" font-size="8" fill="'+ext.color+'" font-weight="600">'+ext.label+'='+ext.LF.toFixed(3)+' @ L='+ext.L.toFixed(1)+'</text>';
+                svg+='<text x="'+(parseFloat(ex)+6)+'" y="'+(parseFloat(ey)-6)+'" font-size="8" fill="'+ext.color+'" font-weight="600">'+ext.label+'='+ext.LF.toFixed(3)+' @ L='+_ruv(ext.L,'length')+'</text>';
             });
-            svg+='<text x="'+(PL+plotW/2)+'" y="'+(H2-3)+'" font-size="9" text-anchor="middle" fill="#666">Half-wavelength (in)</text>';
+            svg+='<text x="'+(PL+plotW/2)+'" y="'+(H2-3)+'" font-size="9" text-anchor="middle" fill="#666">Half-wavelength ('+_rul('length')+')</text>';
             svg+='<text x="12" y="'+(PT+plotH/2)+'" font-size="9" text-anchor="middle" fill="#666" transform="rotate(-90,12,'+(PT+plotH/2)+')">Load Factor</text>';
             svg+='</svg>';
             h += '<div class="section-fig">'+svg+'</div>';
@@ -2587,23 +2854,22 @@
             const dP=lastDsmResult.P||{},dM=lastDsmResult.Mxx||{};
             h += '<table><tr><th>Property</th><th>Value</th><th>Half-wavelength</th><th>Load Factor</th></tr>';
             // Compression
-            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Compression (Axial)</td></tr>';
-            h += '<tr><td>P<sub>y</sub> (Yield)</td><td>'+_rv(dP.Py)+' kips</td><td></td><td></td></tr>';
-            h += '<tr><td>P<sub>crl</sub> (Local)</td><td>'+_rv(dP.Pcrl)+' kips</td><td>'+_rv(dP.Lcrl,1)+' in</td><td>'+_rv(dP.LF_local,4)+'</td></tr>';
-            h += '<tr><td>P<sub>crd</sub> (Distortional)</td><td>'+_rv(dP.Pcrd)+' kips</td><td>'+_rv(dP.Lcrd,1)+' in</td><td>'+_rv(dP.LF_dist,4)+'</td></tr>';
-            h += '<tr><td>P<sub>cre</sub> (Global)</td><td>'+_rv(dP.Pcre)+' kips</td><td>'+_rv(dP.Lcre,1)+' in</td><td>'+_rv(dP.LF_global,4)+'</td></tr>';
-            // Flexure
-            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Bending (M<sub>xx</sub>)</td></tr>';
-            h += '<tr><td>M<sub>y</sub> (Yield)</td><td>'+_rv(dM.My_xx)+' kip-in</td><td></td><td></td></tr>';
-            h += '<tr><td>M<sub>crl</sub> (Local)</td><td>'+_rv(dM.Mxxcrl)+' kip-in</td><td>'+_rv(dM.Lcrl,1)+' in</td><td>'+_rv(dM.LF_local,4)+'</td></tr>';
-            h += '<tr><td>M<sub>crd</sub> (Distortional)</td><td>'+_rv(dM.Mxxcrd)+' kip-in</td><td>'+_rv(dM.Lcrd,1)+' in</td><td>'+_rv(dM.LF_dist,4)+'</td></tr>';
-            h += '<tr><td>M<sub>cre</sub> (Global)</td><td>'+_rv(dM.Mxxcre)+' kip-in</td><td>'+_rv(dM.Lcre,1)+' in</td><td>'+_rv(dM.LF_global,4)+'</td></tr>';
+            const _fU=_rul('force'),_mU=_rul('moment'),_lU=_rul('length');
+            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Compression ('+_fU+')</td></tr>';
+            h += '<tr><td>P<sub>y</sub> (Yield)</td><td>'+_ruv(dP.Py,'force')+' '+_fU+'</td><td></td><td></td></tr>';
+            h += '<tr><td>P<sub>crl</sub> (Local)</td><td>'+_ruv(dP.Pcrl,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_local,4)+'</td></tr>';
+            h += '<tr><td>P<sub>crd</sub> (Distortional)</td><td>'+_ruv(dP.Pcrd,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>P<sub>cre</sub> (Global)</td><td>'+_ruv(dP.Pcre,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_global,4)+'</td></tr>';
+            h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">Bending ('+_mU+')</td></tr>';
+            h += '<tr><td>M<sub>y</sub> (Yield)</td><td>'+_ruv(dM.My_xx,'moment')+' '+_mU+'</td><td></td><td></td></tr>';
+            h += '<tr><td>M<sub>crl</sub> (Local)</td><td>'+_ruv(dM.Mxxcrl,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_local,4)+'</td></tr>';
+            h += '<tr><td>M<sub>crd</sub> (Distortional)</td><td>'+_ruv(dM.Mxxcrd,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>M<sub>cre</sub> (Global)</td><td>'+_ruv(dM.Mxxcre,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_global,4)+'</td></tr>';
             h += '</table>';
-            // 극소점 정보
             const dsm0 = dP.n_minima !== undefined ? dP : dM;
             if (dsm0.n_minima !== undefined) {
-                h += '<p style="font-size:10px;color:#666">Detected '+dsm0.n_minima+' minima in signature curve.';
-                if (dsm0.minima) dsm0.minima.forEach((m,i) => { h += ' Min '+(i+1)+': L='+m.length.toFixed(1)+' in, LF='+m.load_factor.toFixed(4)+'.'; });
+                h += '<p style="font-size:10px;color:#666">Detected '+dsm0.n_minima+' minima.';
+                if (dsm0.minima) dsm0.minima.forEach((m,i) => { h += ' Min '+(i+1)+': L='+_ruv(m.length,'length')+' '+_lU+', LF='+m.load_factor.toFixed(4)+'.'; });
                 h += '</p>';
             }
         } else {
@@ -2618,16 +2884,16 @@
     function _rptDesignInput(la, d) {
         let h = '';
 
-        // 재료
+        // 재료 (입력 필드값은 이미 표시 단위 → 직접 사용, US 상수는 _ruv로 변환)
         const fy = getNum('design-fy',50), fu = getNum('design-fu',65);
         const gradeEl = document.getElementById('select-steel-grade');
         const gradeName = gradeEl ? gradeEl.options[gradeEl.selectedIndex].text : 'Custom';
         h += '<h3>Material</h3>';
         h += '<table><tr><th>Parameter</th><th>Value</th><th>Unit</th></tr>';
         h += '<tr><td>Steel Grade</td><td colspan="2">'+gradeName+'</td></tr>';
-        h += '<tr><td>Yield Strength, F<sub>y</sub></td><td>'+fy+'</td><td>ksi</td></tr>';
-        h += '<tr><td>Tensile Strength, F<sub>u</sub></td><td>'+fu+'</td><td>ksi</td></tr>';
-        h += '<tr><td>Elastic Modulus, E</td><td>29,500</td><td>ksi</td></tr>';
+        h += '<tr><td>Yield Strength, F<sub>y</sub></td><td>'+fy+'</td><td>'+_rul('stress')+'</td></tr>';
+        h += '<tr><td>Tensile Strength, F<sub>u</sub></td><td>'+fu+'</td><td>'+_rul('stress')+'</td></tr>';
+        h += '<tr><td>Elastic Modulus, E</td><td>'+_ruv(29500,'stress')+'</td><td>'+_rul('stress')+'</td></tr>';
         h += '<tr><td>Poisson\'s Ratio, &nu;</td><td>0.30</td><td></td></tr>';
         h += '</table>';
 
@@ -2645,16 +2911,16 @@
         h += '<table><tr><th>Parameter</th><th>Value</th></tr>';
         if (memberName) h += '<tr><td>Member Application</td><td>'+memberName+'</td></tr>';
         if (spanName) h += '<tr><td>Span Type</td><td>'+spanName+(la?' ('+la.n_spans+' spans)':'')+'</td></tr>';
-        if (spanFt) h += '<tr><td>Span Length</td><td>'+spanFt+' ft</td></tr>';
-        h += '<tr><td>Tributary Width (Spacing)</td><td>'+spacing+' ft</td></tr>';
+        if (spanFt) h += '<tr><td>Span Length</td><td>'+spanFt+' '+_rul('length_ft')+'</td></tr>';
+        h += '<tr><td>Tributary Width (Spacing)</td><td>'+spacing+' '+_rul('length_ft')+'</td></tr>';
         h += '<tr><td>Design Method</td><td>'+dmName+'</td></tr>';
         const lapL = getNum('config-lap-left',0), lapR = getNum('config-lap-right',0);
-        if (lapL || lapR) h += '<tr><td>Lap Lengths (left / right)</td><td>'+lapL+' / '+lapR+' ft</td></tr>';
+        if (lapL || lapR) h += '<tr><td>Lap Lengths (left / right)</td><td>'+lapL+' / '+lapR+' '+_rul('length_ft')+'</td></tr>';
         h += '</table>';
 
-        // 설계하중
+        // 설계하중 (psf, spacing은 이미 표시 단위값)
         h += '<h3>Design Loads</h3>';
-        h += '<table><tr><th>Load Type</th><th>PSF Value</th><th>PLF Value (×'+spacing+' ft)</th><th>Description</th></tr>';
+        h += '<table><tr><th>Load Type</th><th>'+_rul('pressure')+'</th><th>'+_rul('linload')+' (&times;'+spacing+' '+_rul('length_ft')+')</th><th>Description</th></tr>';
         const loadDefs = [
             ['D','load-D-psf','Dead Load (self-weight + superimposed)'],
             ['Lr','load-Lr-psf','Roof Live Load'],
@@ -2664,19 +2930,22 @@
         ];
         loadDefs.forEach(ld => {
             const psf = getNum(ld[1],0);
-            if (psf > 0) h += '<tr><td>'+ld[0]+'</td><td>'+psf+' psf</td><td>'+(psf*spacing).toFixed(1)+' plf</td><td>'+ld[2]+'</td></tr>';
+            const psfUS = fromDisplay(psf, 'pressure');
+            const spacingUS = fromDisplay(spacing, 'length_ft');
+            const plfUS = psfUS * spacingUS;
+            if (psf > 0) h += '<tr><td>'+ld[0]+'</td><td>'+psf+' '+_rul('pressure')+'</td><td>'+_ruv(plfUS,'linload')+' '+_rul('linload')+'</td><td>'+ld[2]+'</td></tr>';
         });
         h += '</table>';
 
-        // 데크 정보
+        // 데크 정보 (입력 표시값 직접 사용)
         const deckType = document.getElementById('select-deck-type');
         const deckName = deckType ? deckType.options[deckType.selectedIndex].text : 'None';
         if (deckName !== 'None' && deckName !== 'none') {
             h += '<h3>Deck Information</h3>';
             h += '<table><tr><th>Parameter</th><th>Value</th></tr>';
             h += '<tr><td>Deck Type</td><td>'+deckName+'</td></tr>';
-            h += '<tr><td>Panel Thickness, t<sub>panel</sub></td><td>'+getNum('deck-t-panel',0.018)+' in</td></tr>';
-            h += '<tr><td>Fastener Spacing</td><td>'+getNum('deck-fastener-spacing',12)+' in</td></tr>';
+            h += '<tr><td>Panel Thickness, t<sub>panel</sub></td><td>'+getNum('deck-t-panel',0.018)+' '+_rul('thickness')+'</td></tr>';
+            h += '<tr><td>Fastener Spacing</td><td>'+getNum('deck-fastener-spacing',12)+' '+_rul('length')+'</td></tr>';
             h += '</table>';
         }
         return h;
@@ -2689,23 +2958,26 @@
         let h = '';
         if (la.gravity && la.gravity.M_diagram && la.gravity.M_diagram.length > 2) {
             h += renderBeamSchematic(la);
-            h += renderDiagramSVG(la.gravity.M_diagram, 'Moment Diagram (kip-ft)', '#1565c0', true);
+            const mVals = _unitSystem === 'SI' ? la.gravity.M_diagram.map(v => toDisplay(v,'moment_ft')) : la.gravity.M_diagram;
+            h += renderDiagramSVG(mVals, 'Moment Diagram ('+_rul('moment_ft')+')', '#1565c0', true);
         }
-        if (la.gravity && la.gravity.V_diagram && la.gravity.V_diagram.length > 2)
-            h += renderDiagramSVG(la.gravity.V_diagram, 'Shear Diagram (kips)', '#e65100', false);
+        if (la.gravity && la.gravity.V_diagram && la.gravity.V_diagram.length > 2) {
+            const vVals = _unitSystem === 'SI' ? la.gravity.V_diagram.map(v => toDisplay(v,'force')) : la.gravity.V_diagram;
+            h += renderDiagramSVG(vVals, 'Shear Diagram ('+_rul('force')+')', '#e65100', false);
+        }
 
         if (la.gravity) {
             h += '<h3>Gravity Controlling Combination: '+la.gravity.combo+'</h3>';
-            h += '<table><tr><th>Location</th><th>x (ft)</th><th>M<sub>u</sub> (kip-ft)</th><th>V<sub>u</sub> (kips)</th><th>R<sub>u</sub> (kips)</th><th>Region</th></tr>';
+            h += '<table><tr><th>Location</th><th>x ('+_rul('length_ft')+')</th><th>M<sub>u</sub> ('+_rul('moment_ft')+')</th><th>V<sub>u</sub> ('+_rul('force')+')</th><th>R<sub>u</sub> ('+_rul('force')+')</th><th>Region</th></tr>';
             la.gravity.locations.forEach(loc => {
-                h += '<tr><td>'+loc.name+'</td><td>'+_rv(loc.x_ft,2)+'</td><td>'+_rv(loc.Mu)+'</td><td>'+_rv(loc.Vu)+'</td><td>'+_rv(loc.Ru)+'</td><td>'+( loc.region||'')+'</td></tr>';
+                h += '<tr><td>'+loc.name+'</td><td>'+_ruv(loc.x_ft,'length_ft')+'</td><td>'+_ruv(loc.Mu,'moment_ft')+'</td><td>'+_ruv(loc.Vu,'force')+'</td><td>'+_ruv(loc.Ru,'force')+'</td><td>'+( loc.region||'')+'</td></tr>';
             });
             h += '</table>';
         }
         if (la.uplift) {
             h += '<h3>Uplift Controlling Combination: '+la.uplift.combo+'</h3>';
-            h += '<table><tr><th>Location</th><th>M<sub>u</sub> (kip-ft)</th></tr>';
-            la.uplift.locations.forEach(loc => { h += '<tr><td>'+loc.name+'</td><td>'+_rv(loc.Mu)+'</td></tr>'; });
+            h += '<table><tr><th>Location</th><th>M<sub>u</sub> ('+_rul('moment_ft')+')</th></tr>';
+            la.uplift.locations.forEach(loc => { h += '<tr><td>'+loc.name+'</td><td>'+_ruv(loc.Mu,'moment_ft')+'</td></tr>'; });
             h += '</table>';
         }
 
@@ -2716,7 +2988,7 @@
             h += '<p style="font-size:10px;color:#555">The following parameters are automatically computed from the load analysis results, deck configuration, and moment diagram shape:</p>';
             h += '<table><tr><th>Parameter</th><th>Value</th><th>Calculation Method</th></tr>';
             if (ap.deck && ap.deck.type !== 'none') {
-                h += '<tr><td>k<sub>&phi;</sub> (Rotational Stiffness)</td><td>'+ap.deck.kphi+' kip-in/rad/in</td>';
+                h += '<tr><td>k<sub>&phi;</sub> (Rotational Stiffness)</td><td>'+_ruv(ap.deck.kphi,'rotStiff')+' '+_rul('rotStiff')+'</td>';
                 h += '<td>Chen & Moen (2011): k<sub>&phi;</sub> = 1/(1/(k&middot;c&sup2;) + c&sup3;/(3EIc&sup2;)), where k=fastener stiffness/spacing, c=flange/2</td></tr>';
                 h += '<tr><td>k<sub>x</sub> (Lateral Stiffness)</td><td>'+ap.deck.kx+' kip/in/in</td>';
                 h += '<td>2-ply series spring: k<sub>x</sub> = (1/(1/(Et<sub>1</sub>)+1/(Et<sub>2</sub>)))/s &times; 0.04 reduction factor</td></tr>';
@@ -2726,7 +2998,7 @@
                 h += '<td>Top flange in compression, continuously braced by deck panel — no LTB check required</td></tr>';
             }
             if (ap.negative_region) {
-                h += '<tr><td>Negative L<sub>y</sub></td><td>'+ap.negative_region.Ly_in+' in</td>';
+                h += '<tr><td>Negative L<sub>y</sub></td><td>'+_ruv(ap.negative_region.Ly_in,'length')+' '+_rul('length')+'</td>';
                 h += '<td>Distance from inflection point (M=0) to lap end or support. Bottom flange in compression — unbraced.</td></tr>';
                 h += '<tr><td>Negative C<sub>b</sub></td><td>'+ap.negative_region.Cb+'</td>';
                 h += '<td>AISI Eq. F2.1.1-2: C<sub>b</sub> = 12.5M<sub>max</sub> / (2.5M<sub>max</sub>+3M<sub>A</sub>+4M<sub>B</sub>+3M<sub>C</sub>), computed from moment diagram over unbraced segment</td></tr>';
@@ -2736,7 +3008,7 @@
                 h += '<td>Reduction factor per AISI S100 §I6.2.1 — based on section geometry checks (d/t, d/b, b&ge;2.125, flat_b/t, etc.)</td></tr>';
             }
             if (ap.unbraced && ap.unbraced.inflection_points_ft) {
-                h += '<tr><td>Inflection Points</td><td>'+ap.unbraced.inflection_points_ft.join(', ')+' ft</td>';
+                h += '<tr><td>Inflection Points</td><td>'+ap.unbraced.inflection_points_ft.map(v=>_ruv(v,'length_ft')).join(', ')+' '+_rul('length_ft')+'</td>';
                 h += '<td>Locations where moment = 0, found by linear interpolation of moment diagram</td></tr>';
             }
             h += '</table>';
@@ -2788,7 +3060,10 @@
                 const gov = s.controlling_mode ? ' style="background:#fff3e0;font-weight:600"' : '';
                 h += '<tr'+gov+'><td>'+s.step+'</td><td>'+s.name+(s.controlling_mode?' <b>[GOVERNS]</b>':'')+'</td>';
                 h += '<td style="font-size:10px">'+(s.formula||'')+'</td>';
-                h += '<td style="text-align:right;font-weight:600">'+(s.value!=null?s.value:'')+'</td><td>'+(s.unit||'')+'</td></tr>';
+                const sut = _mapUSUnit(s.unit);
+                const sv = (s.value != null && sut) ? _ruv(s.value, sut) : (s.value != null ? s.value : '');
+                const su = sut ? _rul(sut) : (s.unit || '');
+                h += '<td style="text-align:right;font-weight:600">'+sv+'</td><td>'+su+'</td></tr>';
             });
             h += '</table>';
         }
@@ -2800,7 +3075,7 @@
         const phi=0.90,omega=1.67;
         // Step 1: My
         h += '<h3>Step 1: Yield Moment, M<sub>y</sub></h3>';
-        h += '<span class="eq">M<sub>y</sub> = S<sub>f</sub> &times; F<sub>y</sub> = '+_rv(d.My)+' kip-in</span>';
+        h += '<span class="eq">M<sub>y</sub> = S<sub>f</sub> &times; F<sub>y</sub> = '+_ruv(d.My,'moment')+' '+_rul('moment')+'</span>';
 
         // Step 2: Global/LTB — Mne
         h += '<h3>Step 2: Global Buckling / Lateral-Torsional Buckling — §F2</h3>';
@@ -2812,7 +3087,7 @@
         h += '<tr><td>2.78 F<sub>y</sub> &gt; F<sub>cre</sub> &gt; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = (10/9)F<sub>y</sub>(1 - 10F<sub>y</sub>/(36F<sub>cre</sub>))</td><td>Inelastic LTB</td></tr>';
         h += '<tr><td>F<sub>cre</sub> &le; 0.56 F<sub>y</sub></td><td>F<sub>n</sub> = F<sub>cre</sub></td><td>Elastic LTB</td></tr>';
         h += '</table>';
-        h += '<span class="eq">M<sub>ne</sub> = S<sub>f</sub> &times; F<sub>n</sub> = <b>'+_rv(d.Mne)+'</b> kip-in</span>';
+        h += '<span class="eq">M<sub>ne</sub> = S<sub>f</sub> &times; F<sub>n</sub> = <b>'+_ruv(d.Mne,'moment')+'</b> '+_rul('moment')+'</span>';
 
         // Step 3: Local — Mnl
         h += '<h3>Step 3: Local Buckling — §F3.2</h3>';
@@ -2823,7 +3098,7 @@
         h += '<tr><td>&lambda;<sub>l</sub> &gt; 0.776</td><td>M<sub>nl</sub> = [1 - 0.15(M<sub>crl</sub>/M<sub>ne</sub>)<sup>0.4</sup>] &middot; (M<sub>crl</sub>/M<sub>ne</sub>)<sup>0.4</sup> &middot; M<sub>ne</sub></td></tr>';
         h += '</table>';
         const govL = d.Mnl < d.Mne ? ' (local buckling reduces strength by '+(100*(1-d.Mnl/d.Mne)).toFixed(1)+'%)' : ' (no reduction)';
-        h += '<span class="eq">M<sub>nl</sub> = <b>'+_rv(d.Mnl)+'</b> kip-in'+govL+'</span>';
+        h += '<span class="eq">M<sub>nl</sub> = <b>'+_ruv(d.Mnl,'moment')+'</b> '+_rul('moment')+govL+'</span>';
 
         // Step 4: Distortional — Mnd
         h += '<h3>Step 4: Distortional Buckling — §F4</h3>';
@@ -2833,22 +3108,22 @@
         h += '<tr><td>&lambda;<sub>d</sub> &le; 0.673</td><td>M<sub>nd</sub> = M<sub>y</sub> (no reduction)</td></tr>';
         h += '<tr><td>&lambda;<sub>d</sub> &gt; 0.673</td><td>M<sub>nd</sub> = [1 - 0.22(M<sub>crd</sub>/M<sub>y</sub>)<sup>0.5</sup>] &middot; (M<sub>crd</sub>/M<sub>y</sub>)<sup>0.5</sup> &middot; M<sub>y</sub></td></tr>';
         h += '</table>';
-        h += '<span class="eq">M<sub>nd</sub> = <b>'+_rv(d.Mnd)+'</b> kip-in</span>';
+        h += '<span class="eq">M<sub>nd</sub> = <b>'+_ruv(d.Mnd,'moment')+'</b> '+_rul('moment')+'</span>';
 
         // Step 5: Nominal & Design
         h += '<h3>Step 5: Nominal Strength & Design Strength</h3>';
-        h += '<span class="eq">M<sub>n</sub> = min(M<sub>ne</sub>, M<sub>nl</sub>, M<sub>nd</sub>) = min('+_rv(d.Mne)+', '+_rv(d.Mnl)+', '+_rv(d.Mnd)+') = <b>'+_rv(d.Mn)+'</b> kip-in</span>';
+        h += '<span class="eq">M<sub>n</sub> = min(M<sub>ne</sub>, M<sub>nl</sub>, M<sub>nd</sub>) = min('+_ruv(d.Mne,'moment')+', '+_ruv(d.Mnl,'moment')+', '+_ruv(d.Mnd,'moment')+') = <b>'+_ruv(d.Mn,'moment')+'</b> '+_rul('moment')+'</span>';
         h += '<span class="eq">Controlling failure mode: <b>'+(d.controlling_mode||'')+'</b></span>';
         if (dm==='LRFD') {
             h += '<span class="eq">&phi;<sub>b</sub> = '+phi+' (LRFD)</span>';
-            h += '<span class="eq">&phi;M<sub>n</sub> = '+phi+' &times; '+_rv(d.Mn)+' = <b class="result">'+_rv(d.phi_Mn)+'</b> kip-in</span>';
+            h += '<span class="eq">&phi;M<sub>n</sub> = '+phi+' &times; '+_ruv(d.Mn,'moment')+' = <b class="result">'+_ruv(d.phi_Mn,'moment')+'</b> '+_rul('moment')+'</span>';
         } else {
             h += '<span class="eq">&Omega;<sub>b</sub> = '+omega+' (ASD)</span>';
-            h += '<span class="eq">M<sub>n</sub>/&Omega; = '+_rv(d.Mn)+' / '+omega+' = <b class="result">'+_rv(d.Mn_omega)+'</b> kip-in</span>';
+            h += '<span class="eq">M<sub>n</sub>/&Omega; = '+_ruv(d.Mn,'moment')+' / '+omega+' = <b class="result">'+_ruv(d.Mn_omega,'moment')+'</b> '+_rul('moment')+'</span>';
         }
         if (d.utilization != null) {
             const Mu = d.design_strength > 0 ? (d.utilization * d.design_strength) : 0;
-            h += '<span class="eq">M<sub>u</sub> / '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+' = '+_rv(Mu)+' / '+_rv(d.design_strength)+' = <b class="'+(d.pass?'pass':'fail')+'">'+_rv(d.utilization*100,1)+'%</b></span>';
+            h += '<span class="eq">M<sub>u</sub> / '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+' = '+_ruv(Mu,'moment')+' / '+_ruv(d.design_strength,'moment')+' = <b class="'+(d.pass?'pass':'fail')+'">'+_rv(d.utilization*100,1)+'%</b></span>';
         }
         return h;
     }
@@ -2857,7 +3132,7 @@
         let h = '';
         const phi=0.85,omega=1.80;
         h += '<h3>Step 1: Yield Load, P<sub>y</sub></h3>';
-        h += '<span class="eq">P<sub>y</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_rv(d.Py)+' kips</span>';
+        h += '<span class="eq">P<sub>y</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_ruv(d.Py,'force')+' '+_rul('force')+'</span>';
 
         h += '<h3>Step 2: Global Buckling — §E2</h3>';
         h += '<p>Flexural, torsional, or flexural-torsional buckling stress F<sub>cre</sub> is determined from KL/r, J, C<sub>w</sub>, and section symmetry.</p>';
@@ -2866,7 +3141,7 @@
         h += '<tr><td>&lambda;<sub>c</sub> &le; 1.5</td><td>F<sub>n</sub> = (0.658<sup>&lambda;<sub>c</sub>&sup2;</sup>) F<sub>y</sub></td></tr>';
         h += '<tr><td>&lambda;<sub>c</sub> &gt; 1.5</td><td>F<sub>n</sub> = (0.877/&lambda;<sub>c</sub>&sup2;) F<sub>y</sub></td></tr>';
         h += '</table>';
-        h += '<span class="eq">P<sub>ne</sub> = A<sub>g</sub> &times; F<sub>n</sub> = <b>'+_rv(d.Pne)+'</b> kips</span>';
+        h += '<span class="eq">P<sub>ne</sub> = A<sub>g</sub> &times; F<sub>n</sub> = <b>'+_ruv(d.Pne,'force')+'</b> '+_rul('force')+'</span>';
 
         h += '<h3>Step 3: Local Buckling — §E3.2</h3>';
         h += '<span class="eq">&lambda;<sub>l</sub> = &radic;(P<sub>ne</sub>/P<sub>crl</sub>)</span>';
@@ -2874,7 +3149,7 @@
         h += '<tr><td>&lambda;<sub>l</sub> &le; 0.776</td><td>P<sub>nl</sub> = P<sub>ne</sub></td></tr>';
         h += '<tr><td>&lambda;<sub>l</sub> &gt; 0.776</td><td>P<sub>nl</sub> = [1-0.15(P<sub>crl</sub>/P<sub>ne</sub>)<sup>0.4</sup>](P<sub>crl</sub>/P<sub>ne</sub>)<sup>0.4</sup> P<sub>ne</sub></td></tr>';
         h += '</table>';
-        h += '<span class="eq">P<sub>nl</sub> = <b>'+_rv(d.Pnl)+'</b> kips</span>';
+        h += '<span class="eq">P<sub>nl</sub> = <b>'+_ruv(d.Pnl,'force')+'</b> '+_rul('force')+'</span>';
 
         h += '<h3>Step 4: Distortional Buckling — §E4</h3>';
         h += '<span class="eq">&lambda;<sub>d</sub> = &radic;(P<sub>y</sub>/P<sub>crd</sub>)</span>';
@@ -2882,13 +3157,13 @@
         h += '<tr><td>&lambda;<sub>d</sub> &le; 0.561</td><td>P<sub>nd</sub> = P<sub>y</sub></td></tr>';
         h += '<tr><td>&lambda;<sub>d</sub> &gt; 0.561</td><td>P<sub>nd</sub> = [1-0.25(P<sub>crd</sub>/P<sub>y</sub>)<sup>0.6</sup>](P<sub>crd</sub>/P<sub>y</sub>)<sup>0.6</sup> P<sub>y</sub></td></tr>';
         h += '</table>';
-        h += '<span class="eq">P<sub>nd</sub> = <b>'+_rv(d.Pnd)+'</b> kips</span>';
+        h += '<span class="eq">P<sub>nd</sub> = <b>'+_ruv(d.Pnd,'force')+'</b> '+_rul('force')+'</span>';
 
         h += '<h3>Step 5: Nominal & Design Strength</h3>';
-        h += '<span class="eq">P<sub>n</sub> = min(P<sub>ne</sub>,P<sub>nl</sub>,P<sub>nd</sub>) = min('+_rv(d.Pne)+','+_rv(d.Pnl)+','+_rv(d.Pnd)+') = <b>'+_rv(d.Pn)+'</b> kips</span>';
+        h += '<span class="eq">P<sub>n</sub> = min(P<sub>ne</sub>,P<sub>nl</sub>,P<sub>nd</sub>) = min('+_ruv(d.Pne,'force')+','+_ruv(d.Pnl,'force')+','+_ruv(d.Pnd,'force')+') = <b>'+_ruv(d.Pn,'force')+'</b> '+_rul('force')+'</span>';
         h += '<span class="eq">Controlling: <b>'+(d.controlling_mode||'')+'</b></span>';
-        if (dm==='LRFD') h += '<span class="eq">&phi;P<sub>n</sub> = '+phi+' &times; '+_rv(d.Pn)+' = <b class="result">'+_rv(d.phi_Pn)+'</b> kips</span>';
-        else h += '<span class="eq">P<sub>n</sub>/&Omega; = '+_rv(d.Pn)+'/'+omega+' = <b class="result">'+_rv(d.Pn_omega)+'</b> kips</span>';
+        if (dm==='LRFD') h += '<span class="eq">&phi;P<sub>n</sub> = '+phi+' &times; '+_ruv(d.Pn,'force')+' = <b class="result">'+_ruv(d.phi_Pn,'force')+'</b> '+_rul('force')+'</span>';
+        else h += '<span class="eq">P<sub>n</sub>/&Omega; = '+_ruv(d.Pn,'force')+'/'+omega+' = <b class="result">'+_ruv(d.Pn_omega,'force')+'</b> '+_rul('force')+'</span>';
         return h;
     }
 
@@ -2896,16 +3171,16 @@
         let h = '';
         const c=d.compression||{},f=d.flexure_x||{};
         h += '<h3>Compression Strength</h3>';
-        h += '<span class="eq">P<sub>n</sub> = '+_rv(c.Pn)+' kips ('+(c.controlling_mode||'')+'), Design = <b>'+_rv(c.design_strength)+'</b> kips</span>';
+        h += '<span class="eq">P<sub>n</sub> = '+_ruv(c.Pn,'force')+' '+_rul('force')+' ('+(c.controlling_mode||'')+'), Design = <b>'+_ruv(c.design_strength,'force')+'</b> '+_rul('force')+'</span>';
         h += '<h3>Flexure Strength (x-axis)</h3>';
-        h += '<span class="eq">M<sub>n</sub> = '+_rv(f.Mn)+' kip-in ('+(f.controlling_mode||'')+'), Design = <b>'+_rv(f.design_strength)+'</b> kip-in</span>';
+        h += '<span class="eq">M<sub>n</sub> = '+_ruv(f.Mn,'moment')+' '+_rul('moment')+' ('+(f.controlling_mode||'')+'), Design = <b>'+_ruv(f.design_strength,'moment')+'</b> '+_rul('moment')+'</span>';
         if (d.amplification) {
             const amp = d.amplification;
             h += '<h3>§C1 Moment Amplification (P-&delta; Effect)</h3>';
             h += '<p>Second-order P-&delta; effect amplifies moments in compression members:</p>';
-            h += '<span class="eq">P<sub>Ex</sub> = &pi;&sup2;EA<sub>g</sub>/(KL/r<sub>x</sub>)&sup2; = '+_rv(amp.PEx)+' kips</span>';
+            h += '<span class="eq">P<sub>Ex</sub> = &pi;&sup2;EA<sub>g</sub>/(KL/r<sub>x</sub>)&sup2; = '+_ruv(amp.PEx,'force')+' '+_rul('force')+'</span>';
             h += '<span class="eq">&alpha;<sub>x</sub> = C<sub>mx</sub> / (1 - P<sub>u</sub>/P<sub>Ex</sub>) = '+_rv(amp.alpha_x,4)+' &ge; 1.0</span>';
-            h += '<span class="eq">M<sub>ux,amp</sub> = M<sub>ux</sub> &times; &alpha;<sub>x</sub> = '+_rv(amp.Mux_amp)+' kip-in</span>';
+            h += '<span class="eq">M<sub>ux,amp</sub> = M<sub>ux</sub> &times; &alpha;<sub>x</sub> = '+_ruv(amp.Mux_amp,'moment')+' '+_rul('moment')+'</span>';
         }
         return h;
     }
@@ -2913,10 +3188,10 @@
     function _rptTension(d, dm) {
         let h = '';
         h += '<h3>§D2 — Tensile Yielding on Gross Section</h3>';
-        h += '<span class="eq">T<sub>n</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_rv(d.Tn_yield)+' kips, &phi;<sub>t</sub>=0.90, &Omega;<sub>t</sub>=1.67</span>';
+        h += '<span class="eq">T<sub>n</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_ruv(d.Tn_yield,'force')+' '+_rul('force')+', &phi;<sub>t</sub>=0.90, &Omega;<sub>t</sub>=1.67</span>';
         h += '<h3>§D3 — Tensile Rupture on Net Section</h3>';
-        h += '<span class="eq">T<sub>n</sub> = A<sub>n</sub> &times; F<sub>u</sub> = '+_rv(d.Tn_rupture)+' kips, &phi;<sub>t</sub>=0.75, &Omega;<sub>t</sub>=2.00</span>';
-        h += '<span class="eq">Controlling: <b>'+(d.controlling_mode||'')+'</b>, Design Strength = <b class="result">'+_rv(d.design_strength)+'</b> kips</span>';
+        h += '<span class="eq">T<sub>n</sub> = A<sub>n</sub> &times; F<sub>u</sub> = '+_ruv(d.Tn_rupture,'force')+' '+_rul('force')+', &phi;<sub>t</sub>=0.75, &Omega;<sub>t</sub>=2.00</span>';
+        h += '<span class="eq">Controlling: <b>'+(d.controlling_mode||'')+'</b>, Design Strength = <b class="result">'+_ruv(d.design_strength,'force')+'</b> '+_rul('force')+'</span>';
         return h;
     }
 
@@ -2942,11 +3217,11 @@
         h += '<tr><td>Controlling Failure Mode</td><td><b>'+(d.controlling_mode||'')+'</b></td></tr>';
 
         if (mt==='flexure') {
-            h += '<tr><td>Nominal Moment, M<sub>n</sub></td><td>'+_rv(d.Mn)+' kip-in</td></tr>';
-            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+'</td><td><b>'+_rv(d.design_strength)+'</b> kip-in</td></tr>';
+            h += '<tr><td>Nominal Moment, M<sub>n</sub></td><td>'+_ruv(d.Mn,'moment')+' '+_rul('moment')+'</td></tr>';
+            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'moment')+'</b> '+_rul('moment')+'</td></tr>';
         } else if (mt==='compression') {
-            h += '<tr><td>Nominal Strength, P<sub>n</sub></td><td>'+_rv(d.Pn)+' kips</td></tr>';
-            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;P<sub>n</sub>':'P<sub>n</sub>/&Omega;')+'</td><td><b>'+_rv(d.design_strength)+'</b> kips</td></tr>';
+            h += '<tr><td>Nominal Strength, P<sub>n</sub></td><td>'+_ruv(d.Pn,'force')+' '+_rul('force')+'</td></tr>';
+            h += '<tr><td>Design Strength, '+(dm==='LRFD'?'&phi;P<sub>n</sub>':'P<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'force')+'</b> '+_rul('force')+'</td></tr>';
         } else {
             h += '<tr><td>Design Strength</td><td><b>'+_rv(d.design_strength)+'</b></td></tr>';
         }
@@ -3024,9 +3299,9 @@
 
         checks.push({
             category: cat, item: 'Thickness (t)',
-            status: t > 0 ? (t >= 0.018 && t <= 0.5 ? 'pass' : 'warn') : 'fail',
-            value: t > 0 ? t + ' in' : 'Not set',
-            criterion: '0.018 ≤ t ≤ 0.5 in (typical CFS range)',
+            status: t > 0 ? (t >= toDisplay(0.018,'thickness') && t <= toDisplay(0.5,'thickness') ? 'pass' : 'warn') : 'fail',
+            value: t > 0 ? t+' '+_rul('thickness') : 'Not set',
+            criterion: _ruv(0.018,'thickness')+' ≤ t ≤ '+_ruv(0.5,'thickness')+' '+_rul('thickness')+' (typical CFS range)',
             note: t <= 0 ? 'Thickness not specified.' : (t < 0.018 ? 'Very thin — verify material availability.' : (t > 0.5 ? 'Thick — may not be cold-formed.' : '')),
         });
 
@@ -3078,9 +3353,9 @@
 
         checks.push({
             category: catB, item: 'Yield Strength (Fy)',
-            status: fy > 0 ? (fy <= 95 ? 'pass' : 'fail') : 'fail',
-            value: fy + ' ksi',
-            criterion: 'Fy ≤ 95 ksi (Table B4.1-1 Fy limit)',
+            status: fy > 0 ? (fy <= toDisplay(95,'stress') ? 'pass' : 'fail') : 'fail',
+            value: fy+' '+_rul('stress'),
+            criterion: 'Fy ≤ '+_ruv(95,'stress')+' '+_rul('stress')+' (Table B4.1-1 Fy limit)',
             note: fy > 95 ? 'Exceeds AISI S100 DSM Fy limit.' : (fy <= 0 ? 'Fy not specified.' : ''),
         });
 
@@ -3095,7 +3370,7 @@
         checks.push({
             category: catB, item: 'Tensile Strength (Fu)',
             status: fu > 0 ? (fu > fy ? 'pass' : 'fail') : 'fail',
-            value: fu + ' ksi',
+            value: fu+' '+_rul('stress'),
             criterion: 'Fu > Fy',
             note: fu <= fy ? 'Fu must exceed Fy.' : '',
         });
@@ -3128,14 +3403,14 @@
             checks.push({
                 category: catC, item: 'Mcrl Identified (Local)',
                 status: dM.Mxxcrl > 0 ? 'pass' : 'warn',
-                value: dM.Mxxcrl > 0 ? _rv(dM.Mxxcrl)+' kip-in (L='+_rv(dM.Lcrl,1)+' in)' : 'Not found',
+                value: dM.Mxxcrl > 0 ? _ruv(dM.Mxxcrl,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrl,'length')+' '+_rul('length')+')' : 'Not found',
                 criterion: 'Local buckling minimum should be identifiable',
                 note: dM.Mxxcrl <= 0 ? 'No local buckling minimum found — design will skip local check (Mnl=Mne).' : '',
             });
             checks.push({
                 category: catC, item: 'Mcrd Identified (Distortional)',
                 status: dM.Mxxcrd > 0 ? 'pass' : 'warn',
-                value: dM.Mxxcrd > 0 ? _rv(dM.Mxxcrd)+' kip-in (L='+_rv(dM.Lcrd,1)+' in)' : 'Not found',
+                value: dM.Mxxcrd > 0 ? _ruv(dM.Mxxcrd,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrd,'length')+' '+_rul('length')+')' : 'Not found',
                 criterion: 'Distortional buckling minimum should be identifiable for C/Z sections',
                 note: dM.Mxxcrd <= 0 ? 'No distortional minimum — design will skip distortional check (Mnd=My). Verify if section has edge stiffeners.' : '',
             });
@@ -3149,7 +3424,7 @@
         checks.push({
             category: catD, item: 'Properties Computed',
             status: p ? 'pass' : 'fail',
-            value: p ? 'A='+_rv(p.A,4)+' in²' : 'Not computed',
+            value: p ? 'A='+_ruv(p.A,'area')+' '+_rul('area') : 'Not computed',
             criterion: 'Section properties must be available for design',
             note: !p ? 'Click "Get Properties" in Preprocessor tab.' : '',
         });
@@ -3158,14 +3433,14 @@
             checks.push({
                 category: catD, item: 'Section Modulus Sx',
                 status: p.Sx > 0 ? 'pass' : 'fail',
-                value: p.Sx > 0 ? _rv(p.Sx,4)+' in³' : '0 or N/A',
+                value: p.Sx > 0 ? _ruv(p.Sx,'modulus')+' '+_rul('modulus') : '0 or N/A',
                 criterion: 'Sx > 0 required for flexure design (Sf)',
                 note: p.Sx <= 0 ? 'Section modulus is zero — cannot compute My=Sf×Fy.' : '',
             });
             checks.push({
                 category: catD, item: 'Radius of Gyration rx, rz',
                 status: p.rx > 0 && p.rz > 0 ? 'pass' : 'warn',
-                value: 'rx='+_rv(p.rx,4)+', rz='+_rv(p.rz,4)+' in',
+                value: 'rx='+_ruv(p.rx,'length')+', rz='+_ruv(p.rz,'length')+' '+_rul('length'),
                 criterion: 'rx, rz > 0 for column/LTB design',
                 note: (p.rx <= 0 || p.rz <= 0) ? 'Zero radius of gyration — check section geometry.' : '',
             });
@@ -3186,32 +3461,32 @@
         checks.push({
             category: catE, item: 'Span Length',
             status: spanFt > 0 ? (spanFt <= 40 ? 'pass' : 'warn') : 'fail',
-            value: spanFt > 0 ? spanFt+' ft' : 'Not set',
-            criterion: 'Span > 0 required; typical CFS ≤ 33 ft (§I6.2.1)',
+            value: spanFt > 0 ? spanFt+' '+_rul('length_ft') : 'Not set',
+            criterion: 'Span > 0 required; typical CFS ≤ '+_ruv(33,'length_ft')+' '+_rul('length_ft')+' (§I6.2.1)',
             note: spanFt <= 0 ? 'Set span length.' : (spanFt > 33 ? 'Exceeds §I6.2.1 span limit — R factor may not apply.' : ''),
         });
 
         checks.push({
             category: catE, item: 'Tributary Width (Spacing)',
             status: spacing > 0 ? (spacing <= 8 ? 'pass' : 'warn') : 'fail',
-            value: spacing+' ft',
-            criterion: 'Spacing > 0; typical 4-6 ft',
+            value: spacing+' '+_rul('length_ft'),
+            criterion: 'Spacing > 0; typical '+_ruv(4,'length_ft')+'-'+_ruv(6,'length_ft')+' '+_rul('length_ft'),
             note: spacing > 8 ? 'Large spacing — verify load distribution.' : '',
         });
 
         checks.push({
             category: catE, item: 'Dead Load (D)',
             status: loadD > 0 ? 'pass' : 'warn',
-            value: loadD+' psf',
+            value: loadD+' '+_rul('pressure'),
             criterion: 'D > 0 expected (self-weight + roofing)',
-            note: loadD <= 0 ? 'No dead load? Self-weight should be included. Typical: 5-15 psf.' : '',
+            note: loadD <= 0 ? 'No dead load? Self-weight should be included. Typical: '+_ruv(5,'pressure')+'-'+_ruv(15,'pressure')+' '+_rul('pressure')+'.' : '',
         });
 
         const hasGravity = loadLr > 0 || loadS > 0 || loadL > 0;
         checks.push({
             category: catE, item: 'Gravity Live/Snow Load',
             status: hasGravity ? 'pass' : 'warn',
-            value: [loadLr>0?'Lr='+loadLr:'',loadS>0?'S='+loadS:'',loadL>0?'L='+loadL:''].filter(Boolean).join(', ')+' psf' || 'None',
+            value: [loadLr>0?'Lr='+loadLr:'',loadS>0?'S='+loadS:'',loadL>0?'L='+loadL:''].filter(Boolean).join(', ')+' '+_rul('pressure') || 'None',
             criterion: 'At least one gravity live load expected',
             note: !hasGravity ? 'No live/snow load — is this correct?' : '',
         });
@@ -3235,7 +3510,7 @@
             checks.push({
                 category: catF, item: 'Maximum Mu',
                 status: maxMu > 0 ? 'pass' : 'warn',
-                value: _rv(maxMu)+' kip-ft',
+                value: _ruv(maxMu,'moment_ft')+' '+_rul('moment_ft'),
                 criterion: 'Mu should be > 0 if gravity loads exist',
                 note: maxMu <= 0 ? 'Zero moment — check loads and span.' : '',
             });
@@ -3255,7 +3530,7 @@
                 checks.push({
                     category: catF, item: 'Unbraced Length Ly (Negative)',
                     status: ap.negative_region.Ly_in > 0 ? 'pass' : 'warn',
-                    value: ap.negative_region.Ly_in+' in',
+                    value: _ruv(ap.negative_region.Ly_in,'length')+' '+_rul('length'),
                     criterion: 'Ly > 0 for negative moment region (unbraced bottom flange)',
                     note: ap.negative_region.Ly_in <= 0 ? 'Zero unbraced length — fully braced negative region?' : '',
                 });
@@ -3399,7 +3674,7 @@
         checks.push({
             category: catH, item: 'Fy Consistency (Analysis vs Design)',
             status: Math.abs(fy - fyLoad) < 0.1 ? 'pass' : 'warn',
-            value: 'Analysis fy='+fyLoad+', Design Fy='+fy,
+            value: 'Analysis fy='+fyLoad+', Design Fy='+fy+' '+_rul('stress'),
             criterion: 'Analysis stress fy should match design Fy',
             note: Math.abs(fy - fyLoad) >= 0.1 ? 'Fy mismatch — buckling analysis used different Fy than design. Re-run analysis with correct Fy.' : '',
         });
@@ -3472,8 +3747,8 @@
         const data = {};
         // Material
         data.steelGrade = document.getElementById('select-steel-grade')?.value || 'custom';
-        data.fy = getNum('design-fy', 50);
-        data.fu = getNum('design-fu', 65);
+        data.fy = fromDisplay(getNum('design-fy', 50), 'stress');
+        data.fu = fromDisplay(getNum('design-fu', 65), 'stress');
         // Design method
         data.designMethod = document.getElementById('select-design-method')?.value || 'LRFD';
         data.analysisMethod = document.getElementById('select-analysis-method')?.value || 'DSM';
@@ -3482,58 +3757,58 @@
         // Span config
         data.spanType = document.getElementById('select-span-type')?.value || 'simple';
         data.nSpans = getNum('config-n-spans', 5);
-        data.spacing = getNum('config-spacing', 5);
+        data.spacing = fromDisplay(getNum('config-spacing', 5), 'length_ft');
         // 스팬 테이블 데이터
         const spanLens = []; const sups = []; const laps = [];
-        document.querySelectorAll('.span-tbl-len').forEach(el => spanLens.push(parseFloat(el.value) || 25));
+        document.querySelectorAll('.span-tbl-len').forEach(el => spanLens.push(fromDisplay(parseFloat(el.value) || 25, 'length_ft')));
         document.querySelectorAll('.span-tbl-sup').forEach(el => sups.push(el.value));
         const nSup = sups.length;
         for (let i = 0; i < nSup; i++) {
             const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + i + '"]');
             const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + i + '"]');
-            laps.push({ left: lEl ? parseFloat(lEl.value) || 0 : 0, right: rEl ? parseFloat(rEl.value) || 0 : 0 });
+            laps.push({ left: lEl ? fromDisplay(parseFloat(lEl.value) || 0, 'length_ft') : 0, right: rEl ? fromDisplay(parseFloat(rEl.value) || 0, 'length_ft') : 0 });
         }
         data.spans = spanLens;
         data.supports = sups;
         data.lapsPerSupport = laps;
         // Loads
-        data.loadD = getNum('load-D-psf', 0);
-        data.loadLr = getNum('load-Lr-psf', 0);
-        data.loadS = getNum('load-S-psf', 0);
-        data.loadWu = getNum('load-Wu-psf', 0);
-        data.loadL = getNum('load-L-psf', 0);
+        data.loadD = fromDisplay(getNum('load-D-psf', 0), 'pressure');
+        data.loadLr = fromDisplay(getNum('load-Lr-psf', 0), 'pressure');
+        data.loadS = fromDisplay(getNum('load-S-psf', 0), 'pressure');
+        data.loadWu = fromDisplay(getNum('load-Wu-psf', 0), 'pressure');
+        data.loadL = fromDisplay(getNum('load-L-psf', 0), 'pressure');
         // Deck
         data.deckType = document.getElementById('select-deck-type')?.value || 'none';
-        data.deckTPanel = getNum('deck-t-panel', 0.018);
-        data.deckFastenerSpacing = getNum('deck-fastener-spacing', 12);
-        data.deckKphiOverride = getNum('deck-kphi-override', 0);
+        data.deckTPanel = fromDisplay(getNum('deck-t-panel', 0.018), 'thickness');
+        data.deckFastenerSpacing = fromDisplay(getNum('deck-fastener-spacing', 12), 'length');
+        data.deckKphiOverride = fromDisplay(getNum('deck-kphi-override', 0), 'rotStiff');
         // Unbraced lengths
-        data.KxLx = getNum('design-KxLx', 120);
-        data.KyLy = getNum('design-KyLy', 120);
-        data.KtLt = getNum('design-KtLt', 120);
-        data.Lb = getNum('design-Lb', 120);
+        data.KxLx = fromDisplay(getNum('design-KxLx', 120), 'length');
+        data.KyLy = fromDisplay(getNum('design-KyLy', 120), 'length');
+        data.KtLt = fromDisplay(getNum('design-KtLt', 120), 'length');
+        data.Lb = fromDisplay(getNum('design-Lb', 120), 'length');
         data.Cb = getNum('design-Cb', 1.0);
         data.Cmx = getNum('design-Cmx', 0.85);
         data.Cmy = getNum('design-Cmy', 0.85);
         // Required loads
-        data.Pu = getNum('design-P', 0);
-        data.Vu = getNum('design-V', 0);
-        data.Mux = getNum('design-Mx', 0);
-        data.Muy = getNum('design-My', 0);
+        data.Pu = fromDisplay(getNum('design-P', 0), 'force');
+        data.Vu = fromDisplay(getNum('design-V', 0), 'force');
+        data.Mux = fromDisplay(getNum('design-Mx', 0), 'moment');
+        data.Muy = fromDisplay(getNum('design-My', 0), 'moment');
         // Web crippling
-        data.wcN = getNum('design-wc-N', 3.5);
-        data.wcR = getNum('design-wc-R', 0.1875);
+        data.wcN = fromDisplay(getNum('design-wc-N', 3.5), 'length');
+        data.wcR = fromDisplay(getNum('design-wc-R', 0.1875), 'radius');
         data.wcSupport = document.getElementById('design-wc-support')?.value || 'EOF';
         // Template params
         data.templateType = document.getElementById('select-template')?.value || '';
-        data.tplH = getNum('tpl-H', 9);
-        data.tplB = getNum('tpl-B', 5);
-        data.tplD = getNum('tpl-D', 1);
-        data.tplT = getNum('tpl-t', 0.1);
-        data.tplR = getNum('tpl-r', 0);
+        data.tplH = fromDisplay(getNum('tpl-H', 9), 'length');
+        data.tplB = fromDisplay(getNum('tpl-B', 5), 'length');
+        data.tplD = fromDisplay(getNum('tpl-D', 1), 'length');
+        data.tplT = fromDisplay(getNum('tpl-t', 0.1), 'thickness');
+        data.tplR = fromDisplay(getNum('tpl-r', 0), 'radius');
         data.tplQlip = getNum('tpl-qlip', 90);
         // Analysis config
-        data.fyLoad = getNum('input-fy-load', 50);
+        data.fyLoad = fromDisplay(getNum('input-fy-load', 50), 'stress');
         return data;
     }
 
@@ -3543,8 +3818,8 @@
         function setSelect(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
         // Material
         if (data.steelGrade) setSelect('select-steel-grade', data.steelGrade);
-        if (data.fy) setValue('design-fy', data.fy);
-        if (data.fu) setValue('design-fu', data.fu);
+        if (data.fy) setValue('design-fy', toDisplay(data.fy, 'stress'));
+        if (data.fu) setValue('design-fu', toDisplay(data.fu, 'stress'));
         // Design method
         if (data.designMethod) setSelect('select-design-method', data.designMethod);
         if (data.analysisMethod) setSelect('select-analysis-method', data.analysisMethod);
@@ -3555,13 +3830,13 @@
             setSelect('select-span-type', data.spanType);
             if (data.nSpans) setValue('config-n-spans', data.nSpans);
         }
-        if (data.spacing) setValue('config-spacing', data.spacing);
+        if (data.spacing) setValue('config-spacing', toDisplay(data.spacing, 'length_ft'));
         // 스팬 테이블 재생성 후 값 복원
         if (typeof buildSpanTable === 'function') buildSpanTable();
         setTimeout(() => {
             if (data.spans) {
                 document.querySelectorAll('.span-tbl-len').forEach((el, i) => {
-                    if (data.spans[i] != null) el.value = data.spans[i];
+                    if (data.spans[i] != null) el.value = toDisplay(data.spans[i], 'length_ft');
                 });
             }
             if (data.supports) {
@@ -3573,48 +3848,48 @@
                 data.lapsPerSupport.forEach((lap, i) => {
                     const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + i + '"]');
                     const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + i + '"]');
-                    if (lEl && lap.left != null) lEl.value = lap.left;
-                    if (rEl && lap.right != null) rEl.value = lap.right;
+                    if (lEl && lap.left != null) lEl.value = toDisplay(lap.left, 'length_ft');
+                    if (rEl && lap.right != null) rEl.value = toDisplay(lap.right, 'length_ft');
                 });
             }
         }, 100);
         // Loads
-        if (data.loadD != null) setValue('load-D-psf', data.loadD);
-        if (data.loadLr != null) setValue('load-Lr-psf', data.loadLr);
-        if (data.loadS != null) setValue('load-S-psf', data.loadS);
-        if (data.loadWu != null) setValue('load-Wu-psf', data.loadWu);
-        if (data.loadL != null) setValue('load-L-psf', data.loadL);
+        if (data.loadD != null) setValue('load-D-psf', toDisplay(data.loadD, 'pressure'));
+        if (data.loadLr != null) setValue('load-Lr-psf', toDisplay(data.loadLr, 'pressure'));
+        if (data.loadS != null) setValue('load-S-psf', toDisplay(data.loadS, 'pressure'));
+        if (data.loadWu != null) setValue('load-Wu-psf', toDisplay(data.loadWu, 'pressure'));
+        if (data.loadL != null) setValue('load-L-psf', toDisplay(data.loadL, 'pressure'));
         // Deck
         if (data.deckType) setSelect('select-deck-type', data.deckType);
-        if (data.deckTPanel) setValue('deck-t-panel', data.deckTPanel);
-        if (data.deckFastenerSpacing) setValue('deck-fastener-spacing', data.deckFastenerSpacing);
-        if (data.deckKphiOverride) setValue('deck-kphi-override', data.deckKphiOverride);
+        if (data.deckTPanel) setValue('deck-t-panel', toDisplay(data.deckTPanel, 'thickness'));
+        if (data.deckFastenerSpacing) setValue('deck-fastener-spacing', toDisplay(data.deckFastenerSpacing, 'length'));
+        if (data.deckKphiOverride) setValue('deck-kphi-override', toDisplay(data.deckKphiOverride, 'rotStiff'));
         // Unbraced lengths
-        if (data.KxLx) setValue('design-KxLx', data.KxLx);
-        if (data.KyLy) setValue('design-KyLy', data.KyLy);
-        if (data.KtLt) setValue('design-KtLt', data.KtLt);
-        if (data.Lb) setValue('design-Lb', data.Lb);
+        if (data.KxLx) setValue('design-KxLx', toDisplay(data.KxLx, 'length'));
+        if (data.KyLy) setValue('design-KyLy', toDisplay(data.KyLy, 'length'));
+        if (data.KtLt) setValue('design-KtLt', toDisplay(data.KtLt, 'length'));
+        if (data.Lb) setValue('design-Lb', toDisplay(data.Lb, 'length'));
         if (data.Cb) setValue('design-Cb', data.Cb);
         if (data.Cmx) setValue('design-Cmx', data.Cmx);
         if (data.Cmy) setValue('design-Cmy', data.Cmy);
         // Required loads
-        if (data.Pu != null) setValue('design-P', data.Pu);
-        if (data.Vu != null) setValue('design-V', data.Vu);
-        if (data.Mux != null) setValue('design-Mx', data.Mux);
-        if (data.Muy != null) setValue('design-My', data.Muy);
+        if (data.Pu != null) setValue('design-P', toDisplay(data.Pu, 'force'));
+        if (data.Vu != null) setValue('design-V', toDisplay(data.Vu, 'force'));
+        if (data.Mux != null) setValue('design-Mx', toDisplay(data.Mux, 'moment'));
+        if (data.Muy != null) setValue('design-My', toDisplay(data.Muy, 'moment'));
         // Web crippling
-        if (data.wcN) setValue('design-wc-N', data.wcN);
-        if (data.wcR) setValue('design-wc-R', data.wcR);
+        if (data.wcN) setValue('design-wc-N', toDisplay(data.wcN, 'length'));
+        if (data.wcR) setValue('design-wc-R', toDisplay(data.wcR, 'radius'));
         if (data.wcSupport) setSelect('design-wc-support', data.wcSupport);
         // Template
         if (data.templateType) setSelect('select-template', data.templateType);
-        if (data.tplH) setValue('tpl-H', data.tplH);
-        if (data.tplB) setValue('tpl-B', data.tplB);
-        if (data.tplD) setValue('tpl-D', data.tplD);
-        if (data.tplT) setValue('tpl-t', data.tplT);
-        if (data.tplR) setValue('tpl-r', data.tplR);
+        if (data.tplH) setValue('tpl-H', toDisplay(data.tplH, 'length'));
+        if (data.tplB) setValue('tpl-B', toDisplay(data.tplB, 'length'));
+        if (data.tplD) setValue('tpl-D', toDisplay(data.tplD, 'length'));
+        if (data.tplT) setValue('tpl-t', toDisplay(data.tplT, 'thickness'));
+        if (data.tplR) setValue('tpl-r', toDisplay(data.tplR, 'radius'));
         if (data.tplQlip) setValue('tpl-qlip', data.tplQlip);
-        if (data.fyLoad) setValue('input-fy-load', data.fyLoad);
+        if (data.fyLoad) setValue('input-fy-load', toDisplay(data.fyLoad, 'stress'));
     }
 
     // 파일 저장/열기 버튼

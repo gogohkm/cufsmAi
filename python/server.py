@@ -249,6 +249,9 @@ def handle_request(request: dict) -> dict:
                 laps=params.get('laps'),
                 deck=params.get('deck'),
                 section=params.get('section'),
+                supports=params.get('supports'),
+                spans_ft=params.get('spans_ft'),
+                laps_per_support=params.get('laps_per_support'),
             )
             return {'id': req_id, 'result': result}
 

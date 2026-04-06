@@ -27,6 +27,9 @@ def analyze_loads(
     laps: dict = None,
     deck: dict = None,
     section: dict = None,
+    supports: list = None,
+    spans_ft: list = None,
+    laps_per_support: list = None,
 ) -> dict:
     """통합 하중 분석
 
@@ -50,8 +53,15 @@ def analyze_loads(
     # 경간 수 결정
     n_spans = _parse_n_spans(span_type)
 
-    # 등경간 스팬 리스트
-    spans = [span_ft] * n_spans
+    # 부등스팬 지원: spans_ft 배열이 제공되면 사용
+    if spans_ft and len(spans_ft) == n_spans:
+        spans = [float(s) for s in spans_ft]
+    else:
+        spans = [span_ft] * n_spans
+
+    # 지점 조건 기본값
+    if not supports:
+        supports = ['P'] * (n_spans + 1)
 
     # 각 하중 케이스별 구조해석
     load_types = {k: v for k, v in loads.items() if v is not None and v != 0}
@@ -61,9 +71,12 @@ def analyze_loads(
         if span_type == 'cantilever':
             result = analyze_cantilever_beam(span_ft, w_plf)
         elif n_spans == 1:
-            result = analyze_simple_beam(span_ft, w_plf)
+            result = analyze_simple_beam(spans[0], w_plf)
         else:
-            result = analyze_continuous_beam(n_spans, span_ft, w_plf)
+            w_list = [w_plf] * n_spans
+            result = analyze_continuous_beam_general(
+                spans, w_list, supports=supports,
+            )
         load_results[load_type] = result.to_dict()
 
     # 하중조합 적용 → 지배조합 결정
@@ -167,6 +180,9 @@ def analyze_loads(
         'auto_params': auto_params,
         'wc_reactions': wc_reactions,
         'all_combos': [name for name, _ in controlling.get('all', [])],
+        'supports': supports,
+        'spans_ft': spans,
+        'laps_per_support': laps_per_support,
     }
 
 
