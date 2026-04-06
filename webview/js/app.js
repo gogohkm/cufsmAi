@@ -144,6 +144,7 @@
             case 'modelLoaded':
                 model = msg.data;
                 renderPreprocessor();
+                sendTreeUpdate();
                 break;
             case 'analysisStarted':
                 setStatus('Running analysis...', 'running');
@@ -168,6 +169,7 @@
                 break;
             case 'propertiesResult':
                 renderProperties(msg.data);
+                sendTreeUpdate();
                 break;
             case 'templateGenerated':
                 if (model && msg.data) {
@@ -179,6 +181,7 @@
                     }
                     renderPreprocessor();
                     setStatus(`Template generated: ${model.node.length} nodes, ${model.elem.length} elements`, 'success');
+                    sendTreeUpdate();
                 }
                 break;
             case 'templateError':
@@ -219,16 +222,19 @@
                 lastDsmResult = msg.data;
                 renderDsmResults(msg.data);
                 renderBucklingCurve(); // DSM 극점 표시를 위해 다시 그리기
+                sendTreeUpdate();
                 break;
             case 'designResult':
                 _lastDesignResult = msg.data;
                 renderDesignResult(msg.data);
+                sendTreeUpdate();
                 break;
             case 'captureSection':
                 captureSectionPreview();
                 break;
             case 'loadAnalysisComplete':
                 renderLoadAnalysisResult(msg.data);
+                sendTreeUpdate();
                 break;
             case 'collectDesignData':
                 vscode.postMessage({ command: 'designDataCollected', data: collectAllDesignInputs() });
@@ -607,33 +613,126 @@
     function handleShowSection(sectionId) {
         // sectionId → 탭 매핑
         const tabMap = {
-            'preprocessor': 'preprocessor',
-            'template': 'preprocessor',
-            'material': 'preprocessor',
-            'node-elem': 'preprocessor',
+            'preprocessor': 'preprocessor', 'template': 'preprocessor',
+            'material': 'preprocessor', 'node-elem': 'preprocessor',
             'section-preview': 'preprocessor',
-            'analysis': 'analysis',
-            'boundary-condition': 'analysis',
-            'lengths': 'analysis',
-            'cfsm-settings': 'analysis',
+            'analysis': 'analysis', 'boundary-condition': 'analysis',
+            'lengths': 'analysis', 'cfsm-settings': 'analysis',
             'run-analysis': 'analysis',
-            'postprocessor': 'postprocessor',
-            'buckling-curve': 'postprocessor',
-            'mode-shape-2d': 'postprocessor',
-            'mode-shape-3d': 'postprocessor',
-            'classification': 'postprocessor',
-            'plastic-surface': 'postprocessor',
-            'design': 'design',
+            'postprocessor': 'postprocessor', 'buckling-curve': 'postprocessor',
+            'mode-shape-2d': 'postprocessor', 'mode-shape-3d': 'postprocessor',
+            'classification': 'postprocessor', 'plastic-surface': 'postprocessor',
+            'design': 'design', 'report': 'report', 'validation': 'validation',
         };
+
+        // focus-* 시리즈는 설계 탭으로 이동 후 해당 요소에 포커스
+        const focusMap = {
+            'focus-template': ['preprocessor', 'select-template'],
+            'focus-tpl-H': ['preprocessor', 'tpl-H'],
+            'focus-design-fy': ['design', 'design-fy'],
+            'focus-props': ['preprocessor', null],
+            'focus-dsm-P': ['postprocessor', null],
+            'focus-dsm-M': ['postprocessor', null],
+            'focus-member-type': ['design', 'select-member-type'],
+            'focus-span-type': ['design', 'select-span-type'],
+            'focus-spacing': ['design', 'config-spacing'],
+            'focus-design-Lb': ['design', 'design-Lb'],
+            'focus-load-D': ['design', 'load-D-psf'],
+            'focus-load-Lr': ['design', 'load-Lr-psf'],
+            'focus-load-S': ['design', 'load-S-psf'],
+            'focus-load-L': ['design', 'load-L-psf'],
+            'focus-load-W': ['design', 'load-Wu-psf'],
+            'focus-gravity-combo': ['design', 'load-analysis-result'],
+            'focus-max-Mu': ['design', 'design-Mx'],
+            'focus-max-Vu': ['design', 'design-V'],
+            'focus-deflection': ['design', 'load-analysis-result'],
+            'focus-controlling-mode': ['design', 'design-summary'],
+            'focus-design-Mn': ['design', 'design-summary'],
+            'focus-design-Pn': ['design', 'design-summary'],
+            'focus-utilization': ['design', 'design-summary'],
+            'focus-validation-fail': ['validation', 'validation-container'],
+            'focus-validation-warn': ['validation', 'validation-container'],
+            'focus-validation-pass': ['validation', 'validation-container'],
+        };
+
+        if (focusMap[sectionId]) {
+            const [tab, elId] = focusMap[sectionId];
+            switchTab(tab);
+            if (elId) {
+                setTimeout(() => {
+                    const el = document.getElementById(elId);
+                    if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
+                }, 100);
+            }
+            return;
+        }
 
         const tabId = tabMap[sectionId] || 'preprocessor';
         switchTab(tabId);
 
-        // run-analysis 클릭 시 자동 실행
+        // 자동 실행
         if (sectionId === 'run-analysis') {
             const btn = document.getElementById('btn-run-analysis');
             if (btn) { btn.click(); }
         }
+        if (sectionId === 'run-validation') {
+            const btn = document.getElementById('btn-run-validation');
+            if (btn) { btn.click(); }
+        }
+    }
+
+    /** 트리뷰에 현재 상태 데이터 전송 */
+    function sendTreeUpdate() {
+        const selT = document.getElementById('select-template');
+        const selM = document.getElementById('select-member-type');
+        const selS = document.getElementById('select-span-type');
+        const selG = document.getElementById('select-steel-grade');
+        const dm = document.getElementById('select-design-method');
+        const d = _lastDesignResult;
+        const la = _lastLoadAnalysis;
+
+        const data = {
+            sectionType: selT ? selT.options[selT.selectedIndex]?.text || '' : '',
+            H: getNum('tpl-H', 0) ? getNum('tpl-H', 0) + ' ' + _rul('length') : '',
+            B: getNum('tpl-B', 0) ? getNum('tpl-B', 0) + ' ' + _rul('length') : '',
+            D: getNum('tpl-D', 0) ? getNum('tpl-D', 0) + ' ' + _rul('length') : '',
+            t: getNum('tpl-t', 0) ? getNum('tpl-t', 0) + ' ' + _rul('thickness') : '',
+            steelGrade: selG ? selG.options[selG.selectedIndex]?.text || '' : '',
+            Fy: getNum('design-fy', 0) ? getNum('design-fy', 0) + ' ' + _rul('stress') : '',
+            Fu: getNum('design-fu', 0) ? getNum('design-fu', 0) + ' ' + _rul('stress') : '',
+            A: lastProps ? _ruv(lastProps.A, 'area') + ' ' + _rul('area') : '',
+            Ixx: lastProps ? _ruv(lastProps.Ixx, 'inertia') + ' ' + _rul('inertia') : '',
+            Sx: lastProps ? _ruv(lastProps.Sx, 'modulus') : '',
+            rx: lastProps ? _ruv(lastProps.rx, 'length') : '',
+            rz: lastProps ? _ruv(lastProps.rz, 'length') : '',
+            Pcrl: lastDsmResult && lastDsmResult.P ? _ruv(lastDsmResult.P.Pcrl, 'force') : '',
+            Pcrd: lastDsmResult && lastDsmResult.P ? _ruv(lastDsmResult.P.Pcrd, 'force') : '',
+            Mcrl: lastDsmResult && lastDsmResult.Mxx ? _ruv(lastDsmResult.Mxx.Mxxcrl, 'moment') : '',
+            Mcrd: lastDsmResult && lastDsmResult.Mxx ? _ruv(lastDsmResult.Mxx.Mxxcrd, 'moment') : '',
+            memberType: selM ? selM.options[selM.selectedIndex]?.text || '' : '',
+            spanType: selS ? selS.options[selS.selectedIndex]?.text || '' : '',
+            designMethod: dm ? dm.value : 'LRFD',
+            spanLength: (() => { const els = document.querySelectorAll('.span-tbl-len'); return els.length > 0 ? parseFloat(els[0].value) + ' ' + _rul('length_ft') : ''; })(),
+            spacing: getNum('config-spacing', 0) ? getNum('config-spacing', 0) + ' ' + _rul('length_ft') : '',
+            loadD: getNum('load-D-psf', 0) ? getNum('load-D-psf', 0) + ' ' + _rul('pressure') : '',
+            loadLr: getNum('load-Lr-psf', 0) ? getNum('load-Lr-psf', 0) + ' ' + _rul('pressure') : '',
+            loadS: getNum('load-S-psf', 0) ? getNum('load-S-psf', 0) + ' ' + _rul('pressure') : '',
+            loadW: getNum('load-Wu-psf', 0) ? getNum('load-Wu-psf', 0) + ' ' + _rul('pressure') : '',
+            loadL: getNum('load-L-psf', 0) ? getNum('load-L-psf', 0) + ' ' + _rul('pressure') : '',
+            hasLoadAnalysis: !!la,
+            gravityCombo: la && la.gravity ? la.gravity.combo : '',
+            maxMu: la && la.gravity && la.gravity.locations ? fmtVal(Math.max(...la.gravity.locations.map(l => Math.abs(l.Mu || 0))), 'moment_ft') + ' ' + _rul('moment_ft') : '',
+            maxVu: la && la.gravity && la.gravity.locations ? fmtVal(Math.max(...la.gravity.locations.filter(l => l.Vu != null).map(l => Math.abs(l.Vu))), 'force') + ' ' + _rul('force') : '',
+            maxDeflection: la && la.deflection && la.deflection.per_span ? fmtVal(Math.max(...la.deflection.per_span.map(p => p.abs_delta_in)), 'length') + ' ' + _rul('length') : '',
+            deflectionRatio: la && la.deflection && la.deflection.per_span ? Math.min(...la.deflection.per_span.map(p => p.L_over_delta)).toFixed(0) : '',
+            hasDesignResult: !!(d && !d.error),
+            designMn: d && d.Mn ? fmtVal(d.design_strength || d.phi_Mn || d.Mn_omega, 'moment') + ' ' + _rul('moment') : '',
+            designPn: d && d.Pn ? fmtVal(d.design_strength || d.phi_Pn || d.Pn_omega, 'force') + ' ' + _rul('force') : '',
+            controllingMode: d ? d.controlling_mode || '' : '',
+            utilization: d && d.utilization != null ? (d.utilization * 100).toFixed(1) + '%' : '',
+            passOrFail: d ? (d.pass ? 'OK' : 'NG') : '',
+        };
+        vscode.postMessage({ command: 'treeUpdate', data });
     }
 
     // ============================================================
@@ -3415,6 +3514,10 @@
             if (validationBadge) {
                 validationBadge.innerHTML = '<span style="color:#4caf50">통과 '+pass+'</span> / <span style="color:#ffab00">주의 '+warn+'</span> / <span style="color:#ff5252">실패 '+fail+'</span>';
             }
+            // 트리뷰에 검증 결과 전송
+            vscode.postMessage({ command: 'treeUpdate', data: {
+                validationPass: pass, validationWarn: warn, validationFail: fail,
+            }});
         });
     }
 

@@ -130,7 +130,7 @@ export class CufsmPanel implements McpPanelInterface {
     }
 
     /** 트리뷰 갱신 */
-    private _updateTreeView(): void {
+    private _updateTreeView(extra?: Record<string, any>): void {
         if (this._treeProvider) {
             this._treeProvider.updateProjectData({
                 name: 'Current Section',
@@ -138,7 +138,8 @@ export class CufsmPanel implements McpPanelInterface {
                 nelems: this._model.elem?.length || 0,
                 BC: this._model.BC || 'S-S',
                 nlengths: this._model.lengths?.length || 0,
-                hasResults: false,
+                hasResults: !!this._lastAnalysisResult,
+                ...(extra || {}),
             });
         }
     }
@@ -213,6 +214,11 @@ export class CufsmPanel implements McpPanelInterface {
                 } catch (e: any) {
                     this._postMessage('loadAnalysisComplete', { error: e.message || String(e) });
                 }
+                break;
+
+            case 'treeUpdate':
+                // WebView에서 상세 트리 데이터 전송 → 트리뷰 갱신
+                this._updateTreeView(message.data || {});
                 break;
 
             case 'sectionPreviewResult':
