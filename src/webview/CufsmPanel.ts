@@ -1308,32 +1308,8 @@ export class CufsmPanel implements McpPanelInterface {
                         </div>
                     </div>
                     <div class="section-group">
-                        <label>Load Case</label>
-                        <p class="hint">좌굴 해석의 기준 하중 상태를 선택합니다. 휨 방향(+/-)은 단면 좌표축 기준으로 어느 쪽이 압축인지를 결정합니다. Cross Section Preview의 좌표축을 참고하세요.</p>
-                        <div class="input-row" style="flex-wrap:wrap;">
-                            <select id="select-load-case" style="width:180px">
-                                <option value="compression" selected>압축 (Compression)</option>
-                                <option value="bending_xx_pos">강축 휨 +Mxx (z+ 압축)</option>
-                                <option value="bending_xx_neg">강축 휨 -Mxx (z- 압축)</option>
-                                <option value="bending_zz_pos">약축 휨 +Mzz (x+ 압축)</option>
-                                <option value="bending_zz_neg">약축 휨 -Mzz (x- 압축)</option>
-                                <option value="custom">조합 (P + Mxx + Mzz)</option>
-                            </select>
-                            <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label>
-                            <input type="number" id="input-fy-load" value="50" step="5" style="width:60px">
-                        </div>
-                        <div id="custom-load-inputs" class="input-row" style="display:none; margin-top:4px;">
-                            <label>P<span class="hint-inline" data-unit="force">kips</span></label>
-                            <input type="number" id="input-load-P" value="0" step="1" style="width:70px">
-                            <label>Mxx<span class="hint-inline" data-unit="moment">kip-in</span></label>
-                            <input type="number" id="input-load-Mxx" value="0" step="10" style="width:70px">
-                            <label>Mzz<span class="hint-inline" data-unit="moment">kip-in</span></label>
-                            <input type="number" id="input-load-Mzz" value="0" step="10" style="width:70px">
-                        </div>
-                    </div>
-                    <div class="section-group">
                         <label>Nodes <button id="btn-add-node" class="btn-small">+ 추가</button></label>
-                        <p class="hint">절점 좌표(x, z)와 응력(stress). Load Case 선택 시 해석 실행 전에 자동 설정됩니다.</p>
+                        <p class="hint">절점 좌표(x, z)와 응력(stress). 해석 탭의 Load Case 선택 시 해석 실행 전에 자동 설정됩니다.</p>
                         <div id="node-table-container" class="table-container">
                             <table id="node-table">
                                 <thead><tr><th>#</th><th>x</th><th>z</th><th>stress</th></tr></thead>
@@ -1365,9 +1341,35 @@ export class CufsmPanel implements McpPanelInterface {
 
         <!-- 해석 탭 -->
         <div id="tab-analysis" class="tab-panel">
-            <p class="hint">유한스트립법(FSM) 좌굴 해석 설정. 경계조건과 반파장 범위를 지정하고 해석을 실행합니다.</p>
+            <div style="display:flex;gap:12px">
+            <div style="flex:1;min-width:0">
+            <p class="hint">유한스트립법(FSM) 좌굴 해석 설정.</p>
             <div class="section-group">
-                <label>Boundary Condition</label>
+                <label>하중 케이스 (Load Case)</label>
+                <p class="hint">좌굴 해석의 기준 하중 상태. 휨 방향(+/-)은 단면 좌표축 기준.</p>
+                <div class="input-row" style="flex-wrap:wrap;">
+                    <select id="select-load-case" style="width:180px">
+                        <option value="compression" selected>압축 (Compression)</option>
+                        <option value="bending_xx_pos">강축 휨 +Mxx (z+ 압축)</option>
+                        <option value="bending_xx_neg">강축 휨 -Mxx (z- 압축)</option>
+                        <option value="bending_zz_pos">약축 휨 +Mzz (x+ 압축)</option>
+                        <option value="bending_zz_neg">약축 휨 -Mzz (x- 압축)</option>
+                        <option value="custom">조합 (P + Mxx + Mzz)</option>
+                    </select>
+                    <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label>
+                    <input type="number" id="input-fy-load" value="50" step="5" style="width:60px">
+                </div>
+                <div id="custom-load-inputs" class="input-row" style="display:none; margin-top:4px;">
+                    <label>P<span class="hint-inline" data-unit="force">kips</span></label>
+                    <input type="number" id="input-load-P" value="0" step="1" style="width:70px">
+                    <label>Mxx<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <input type="number" id="input-load-Mxx" value="0" step="10" style="width:70px">
+                    <label>Mzz<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <input type="number" id="input-load-Mzz" value="0" step="10" style="width:70px">
+                </div>
+            </div>
+            <div class="section-group">
+                <label>경계조건 (Boundary Condition)</label>
                 <p class="hint">부재 양단의 경계조건. S=단순지지, C=고정, F=자유, G=가이드.</p>
                 <select id="select-bc">
                     <option value="S-S" selected>S-S (단순-단순)</option>
@@ -1378,8 +1380,11 @@ export class CufsmPanel implements McpPanelInterface {
                 </select>
             </div>
             <div class="section-group">
-                <label>Lengths (반파장)</label>
-                <p class="hint">좌굴 곡선을 계산할 반파장 범위. 국부좌굴은 짧은 파장, 전체좌굴은 긴 파장에서 나타남.</p>
+                <label>반파장 범위 (Half-Wavelength)</label>
+                <p class="hint">좌굴 곡선의 x축 범위를 설정합니다. 각 좌굴 모드가 서로 다른 반파장 영역에서 나타납니다.</p>
+                <p class="hint" style="margin-top:2px"><b>최솟값</b>: 국부좌굴을 포착하기 위한 하한. 일반적으로 <b>단면 최대 판폭</b> 이하로 설정합니다. 예: 웹 높이 230mm인 C형강 → 최소 ~25mm. 너무 크면 국부좌굴 곡선이 잘립니다.</p>
+                <p class="hint" style="margin-top:2px"><b>최댓값</b>: 전체좌굴(LTB, 유연좌굴)을 포착하기 위한 상한. <b>부재의 비지지 길이 이상</b>으로 설정해야 합니다. 예: 지점간격 5m → 최대 ≥ 5000mm (5m). 일반적으로 비지지 길이의 1.5~3배를 권장합니다.</p>
+                <p class="hint" style="margin-top:2px"><b>개수</b>: 곡선의 해상도. 50점이면 대부분 충분하며, 복잡한 단면은 80~100점 권장.</p>
                 <div class="input-row">
                     <label>최소<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="input-len-min" value="1" step="1">
                     <label>최대<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="input-len-max" value="1000" step="100">
@@ -1405,6 +1410,20 @@ export class CufsmPanel implements McpPanelInterface {
             </div>
             <div class="button-row">
                 <button id="btn-run-analysis" class="btn-primary">해석 실행</button>
+            </div>
+            </div>
+            <!-- 우측: 응력 분포 프리뷰 -->
+            <div style="width:200px;flex-shrink:0">
+                <label style="font-weight:600;font-size:12px">응력 분포 프리뷰</label>
+                <p class="hint" style="margin:2px 0 4px">선택한 Load Case의 절점 응력 분포</p>
+                <div id="stress-preview" style="border:1px solid var(--vscode-panel-border);border-radius:4px;background:var(--vscode-editor-background);min-height:180px;display:flex;align-items:center;justify-content:center">
+                    <svg id="stress-preview-svg" width="190" height="220" viewBox="0 0 190 220"></svg>
+                </div>
+                <div id="stress-legend" style="font-size:9px;margin-top:4px;color:var(--vscode-descriptionForeground)">
+                    <span style="color:#ef5350">■ 압축(-)</span>&nbsp;
+                    <span style="color:#42a5f5">■ 인장(+)</span>
+                </div>
+            </div>
             </div>
             <div id="analysis-status" class="status-bar"></div>
         </div>

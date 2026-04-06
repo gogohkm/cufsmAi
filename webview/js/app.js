@@ -144,6 +144,7 @@
             case 'modelLoaded':
                 model = msg.data;
                 renderPreprocessor();
+                renderStressPreview();
                 sendTreeUpdate();
                 break;
             case 'analysisStarted':
@@ -180,6 +181,7 @@
                         model.node.forEach(n => { if (n[7] === 1) { n[7] = 50.0; } });
                     }
                     renderPreprocessor();
+                    renderStressPreview();
                     setStatus(`Template generated: ${model.node.length} nodes, ${model.elem.length} elements`, 'success');
                     sendTreeUpdate();
                 }
@@ -1073,6 +1075,163 @@
     // 해석 실행
     // ============================================================
     // Load Case 선택 시 custom 입력 표시/숨김
+    // ── 응력 분포 프리뷰 SVG ──
+    function renderStressPreview() {
+        const svgEl = document.getElementById('stress-preview-svg');
+        if (!svgEl || !model || !model.node || model.node.length < 2) {
+            if (svgEl) svgEl.innerHTML = '<text x="95" y="110" text-anchor="middle" fill="#999" font-size="11">단면을 먼저 생성하세요</text>';
+            return;
+        }
+
+        const loadCase = document.getElementById('select-load-case')?.value || 'compression';
+        const fy = fromDisplay(getNum('input-fy-load', 50), 'stress');
+        const nodes = model.node;
+
+        // 선택된 Load Case에 따른 응력 계산 (해석 전 프리뷰용 간이 계산)
+        const stresses = [];
+        let xMin = Infinity, xMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+        for (const n of nodes) {
+            xMin = Math.min(xMin, n[1]); xMax = Math.max(xMax, n[1]);
+            zMin = Math.min(zMin, n[2]); zMax = Math.max(zMax, n[2]);
+        }
+        const zMid = (zMin + zMax) / 2;
+        const xMid = (xMin + xMax) / 2;
+        const zRange = (zMax - zMin) || 1;
+        const xRange = (xMax - xMin) || 1;
+
+        for (const n of nodes) {
+            let s = 0;
+            if (loadCase === 'compression') {
+                s = fy; // 균일 압축 (양수 = 압축)
+            } else if (loadCase === 'bending_xx_pos') {
+                // +Mxx: z+ 압축, z- 인장 → 선형 분포
+                s = fy * (n[2] - zMid) / (zRange / 2);
+            } else if (loadCase === 'bending_xx_neg') {
+                s = -fy * (n[2] - zMid) / (zRange / 2);
+            } else if (loadCase === 'bending_zz_pos') {
+                s = fy * (n[1] - xMid) / (xRange / 2);
+            } else if (loadCase === 'bending_zz_neg') {
+                s = -fy * (n[1] - xMid) / (xRange / 2);
+            } else if (loadCase === 'custom') {
+                const P = getNum('input-load-P', 0);
+                const Mxx = getNum('input-load-Mxx', 0);
+                const Mzz = getNum('input-load-Mzz', 0);
+                const pStress = (P !== 0) ? fy : 0;
+                const mxxStress = (Mxx !== 0) ? fy * (n[2] - zMid) / (zRange / 2) * Math.sign(Mxx) : 0;
+                const mzzStress = (Mzz !== 0) ? fy * (n[1] - xMid) / (xRange / 2) * Math.sign(Mzz) : 0;
+                s = pStress + mxxStress + mzzStress;
+            }
+            stresses.push(s);
+        }
+
+        const maxAbsS = Math.max(...stresses.map(s => Math.abs(s)), 0.001);
+
+        // SVG 그리기
+        const W = 190, H = 220;
+        const PAD = 20;
+        const secW = W - PAD * 2;
+        const secH = H - PAD * 2 - 30; // 하단 범례 여유
+        const scaleX = xRange > 0 ? secW / xRange : 1;
+        const scaleZ = zRange > 0 ? secH / zRange : 1;
+        const scale = Math.min(scaleX, scaleZ) * 0.7;
+        const offX = W / 2;
+        const offZ = (H - 30) / 2;
+
+        function toSvg(x, z) {
+            return [offX + (x - (xMin + xMax) / 2) * scale, offZ - (z - (zMin + zMax) / 2) * scale];
+        }
+
+        let svg = '';
+
+        // 단면 요소 (회색 선)
+        if (model.elem) {
+            for (const e of model.elem) {
+                const ni = e[1] - 1, nj = e[2] - 1;
+                if (ni >= 0 && ni < nodes.length && nj >= 0 && nj < nodes.length) {
+                    const [x1, y1] = toSvg(nodes[ni][1], nodes[ni][2]);
+                    const [x2, y2] = toSvg(nodes[nj][1], nodes[nj][2]);
+                    svg += '<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="#666" stroke-width="2" stroke-linecap="round"/>';
+                }
+            }
+        }
+
+        // 응력 화살표 (각 절점에서 법선 방향)
+        const arrowLen = 25; // 최대 화살표 길이 (px)
+        for (let i = 0; i < nodes.length; i++) {
+            const [cx, cy] = toSvg(nodes[i][1], nodes[i][2]);
+            const s = stresses[i];
+            const ratio = s / maxAbsS;
+            const len = Math.abs(ratio) * arrowLen;
+            if (len < 1) continue;
+
+            // 색상: 압축(+) = 빨강, 인장(-) = 파랑
+            const color = s >= 0 ? '#ef5350' : '#42a5f5';
+
+            // 법선 방향 결정 (인접 요소의 평균 법선)
+            let nx = 0, nz = 0;
+            if (model.elem) {
+                for (const e of model.elem) {
+                    const ni = e[1] - 1, nj = e[2] - 1;
+                    if (ni === i || nj === i) {
+                        const dx = nodes[nj][1] - nodes[ni][1];
+                        const dz = nodes[nj][2] - nodes[ni][2];
+                        const mag = Math.sqrt(dx * dx + dz * dz) || 1;
+                        nx += -dz / mag;
+                        nz += dx / mag;
+                    }
+                }
+            }
+            const nmag = Math.sqrt(nx * nx + nz * nz) || 1;
+            nx /= nmag; nz /= nmag;
+
+            // SVG 좌표에서의 법선 방향 (z 반전)
+            const dx = nx * len * scale / Math.max(scaleX, scaleZ);
+            const dy = -nz * len * scale / Math.max(scaleX, scaleZ);
+            // 방향: 압축은 단면 안쪽, 인장은 바깥쪽
+            const dir = s >= 0 ? -1 : 1;
+            const ex = cx + dx * dir;
+            const ey = cy + dy * dir;
+
+            svg += '<line x1="' + cx.toFixed(1) + '" y1="' + cy.toFixed(1) + '" x2="' + ex.toFixed(1) + '" y2="' + ey.toFixed(1) + '" stroke="' + color + '" stroke-width="1.5" stroke-opacity="0.8"/>';
+            // 화살표 머리
+            const alen = 3;
+            const adx = ex - cx, ady = ey - cy;
+            const amag = Math.sqrt(adx * adx + ady * ady) || 1;
+            const ux = adx / amag, uy = ady / amag;
+            svg += '<polygon points="' +
+                ex.toFixed(1) + ',' + ey.toFixed(1) + ' ' +
+                (ex - alen * ux + alen * uy * 0.5).toFixed(1) + ',' + (ey - alen * uy - alen * ux * 0.5).toFixed(1) + ' ' +
+                (ex - alen * ux - alen * uy * 0.5).toFixed(1) + ',' + (ey - alen * uy + alen * ux * 0.5).toFixed(1) +
+                '" fill="' + color + '" fill-opacity="0.8"/>';
+        }
+
+        // 절점 점 (응력 색상)
+        for (let i = 0; i < nodes.length; i++) {
+            const [cx, cy] = toSvg(nodes[i][1], nodes[i][2]);
+            const s = stresses[i];
+            const ratio = s / maxAbsS;
+            // 빨강(압축) ~ 흰색(0) ~ 파랑(인장) 그라데이션
+            const r = s >= 0 ? 239 : Math.round(239 + (66 - 239) * Math.abs(ratio));
+            const g = s >= 0 ? Math.round(83 + (165 - 83) * (1 - Math.abs(ratio))) : Math.round(83 + (165 - 83) * (1 - Math.abs(ratio)));
+            const b = s >= 0 ? Math.round(80 + (245 - 80) * (1 - Math.abs(ratio))) : 245;
+            svg += '<circle cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="3" fill="rgb(' + r + ',' + g + ',' + b + ')" stroke="#fff" stroke-width="0.5"/>';
+        }
+
+        // Load Case 라벨
+        const caseLabels = {
+            compression: '균일 압축',
+            bending_xx_pos: '+Mxx 강축 휨',
+            bending_xx_neg: '-Mxx 강축 휨',
+            bending_zz_pos: '+Mzz 약축 휨',
+            bending_zz_neg: '-Mzz 약축 휨',
+            custom: '조합 하중',
+        };
+        svg += '<text x="95" y="' + (H - 8) + '" text-anchor="middle" fill="var(--vscode-foreground)" font-size="10" font-weight="600">' + (caseLabels[loadCase] || loadCase) + '</text>';
+        svg += '<text x="95" y="' + (H - 0) + '" text-anchor="middle" fill="var(--vscode-descriptionForeground)" font-size="8">Fy=' + toDisplay(fy, 'stress').toFixed(unitDec('stress')) + ' ' + unitLabel('stress') + '</text>';
+
+        svgEl.innerHTML = svg;
+    }
+
     const selLoadCase = document.getElementById('select-load-case');
     if (selLoadCase) {
         selLoadCase.addEventListener('change', () => {
@@ -1080,8 +1239,20 @@
             if (customDiv) {
                 customDiv.style.display = selLoadCase.value === 'custom' ? 'flex' : 'none';
             }
+            renderStressPreview();
+        });
+        // Fy 변경 시에도 프리뷰 갱신
+        const fyInput = document.getElementById('input-fy-load');
+        if (fyInput) fyInput.addEventListener('input', renderStressPreview);
+        // custom 하중 변경 시
+        ['input-load-P', 'input-load-Mxx', 'input-load-Mzz'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', renderStressPreview);
         });
     }
+
+    // 초기 프리뷰 (모델 로드 후)
+    setTimeout(renderStressPreview, 500);
 
     const btnRun = document.getElementById('btn-run-analysis');
     if (btnRun) {
@@ -3631,6 +3802,86 @@
         // C. 좌굴 해석
         // ════════════════════════════════════════
         const catC = 'C. 좌굴 해석';
+
+        // 반파장 설정 검증
+        const lenMin = fromDisplay(getNum('input-len-min', 1), 'length');
+        const lenMax = fromDisplay(getNum('input-len-max', 1000), 'length');
+        const lenN = getNum('input-len-n', 50);
+        const bcVal = /** @type {HTMLSelectElement} */ (document.getElementById('select-bc'))?.value || 'S-S';
+        const webH = fromDisplay(getNum('tpl-H', 0), 'length'); // 웹 높이 (US in)
+
+        // 최솟값 검증: 국부좌굴 포착을 위해 단면 최대 판폭 이하여야 함
+        const localOK = webH > 0 ? (lenMin <= webH * 0.8) : (lenMin <= 5);
+        checks.push({
+            category: catC, item: '반파장 최솟값',
+            status: localOK ? 'pass' : 'warn',
+            value: _ruv(lenMin,'length')+' '+_rul('length'),
+            criterion: '국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈'+_ruv(webH,'length')+' '+_rul('length')+') 필요',
+            note: !localOK ? '최솟값이 너무 큼 — 국부좌굴 곡선이 잘릴 수 있습니다. 단면 높이의 0.3~0.5배 이하로 설정하세요.' : '',
+        });
+
+        // 최댓값 검증: 전체좌굴 포착을 위해 비지지 길이 이상이어야 함
+        const designLb = fromDisplay(getNum('design-Lb', 0), 'length');
+        const spanTblEls2 = document.querySelectorAll('.span-tbl-len');
+        const spanIn = spanTblEls2.length > 0 ? fromDisplay(parseFloat(/** @type {HTMLInputElement} */ (spanTblEls2[0]).value) || 0, 'length_ft') * 12 : 0;
+        const refLen = Math.max(designLb, spanIn, 120); // 비교용 참조 길이 (in)
+        const globalOK = lenMax >= refLen;
+        checks.push({
+            category: catC, item: '반파장 최댓값',
+            status: globalOK ? (lenMax >= refLen * 1.5 ? 'pass' : 'warn') : 'fail',
+            value: _ruv(lenMax,'length')+' '+_rul('length'),
+            criterion: '전체좌굴 포착을 위해 최댓값 ≥ 비지지 길이(≈'+_ruv(refLen,'length')+' '+_rul('length')+') 필요. 1.5~3배 권장',
+            note: !globalOK ? '최댓값이 비지지 길이보다 짧음 — 전체좌굴(LTB)이 곡선에 나타나지 않습니다. 최소 '+_ruv(refLen*1.5,'length')+' '+_rul('length')+' 이상으로 설정하세요.' : (lenMax < refLen * 1.5 ? '비지지 길이의 1.5배 미만 — 전체좌굴 영역이 부족할 수 있습니다.' : ''),
+        });
+
+        // 개수 검증
+        checks.push({
+            category: catC, item: '반파장 개수',
+            status: lenN >= 30 ? 'pass' : 'warn',
+            value: lenN + '점',
+            criterion: '곡선 해상도 ≥ 30점 권장 (일반 50점, 복잡단면 80~100점)',
+            note: lenN < 30 ? '점 수가 부족하면 좌굴 최솟값을 놓칠 수 있습니다.' : '',
+        });
+
+        // 경계조건 검증
+        const loadCase = /** @type {HTMLSelectElement} */ (document.getElementById('select-load-case'))?.value || 'compression';
+        const memberApp2 = /** @type {HTMLSelectElement} */ (document.getElementById('select-member-type'))?.value || '';
+        let bcExpected = 'S-S';
+        let bcNote = '';
+        if (memberApp2 === 'roof-purlin' || memberApp2 === 'floor-joist' || memberApp2 === 'wall-girt') {
+            bcExpected = 'S-S';
+            bcNote = '퍼린/장선/거트는 일반적으로 S-S (단순-단순) 사용';
+        } else if (memberApp2 === 'wall-stud') {
+            bcExpected = 'S-S';
+            bcNote = '벽 스터드는 일반적으로 S-S 사용 (상하단 트랙 지지)';
+        }
+        checks.push({
+            category: catC, item: '경계조건 (BC)',
+            status: 'pass', // 경계조건은 엔지니어 판단이므로 pass 기본
+            value: bcVal,
+            criterion: bcNote || '부재 양단 지지 상태에 맞는 경계조건 선택 필요',
+            note: bcVal !== bcExpected && bcNote ? '현재 '+bcVal+' 설정됨 — '+bcNote+'.' : '',
+        });
+
+        // Load Case vs 설계 부재유형 일관성
+        const isFlexureMember = (memberApp2 === 'roof-purlin' || memberApp2 === 'floor-joist' || memberApp2 === 'wall-girt' || memberApp2 === 'flexure');
+        const isCompMember = (memberApp2 === 'wall-stud' || memberApp2 === 'compression');
+        let lcOK = true;
+        let lcNote = '';
+        if (isFlexureMember && loadCase === 'compression') {
+            lcOK = false;
+            lcNote = '휨 부재인데 압축 Load Case가 선택됨 — 강축 휨 (+Mxx 또는 -Mxx)으로 변경하세요.';
+        } else if (isCompMember && loadCase !== 'compression' && loadCase !== 'custom') {
+            lcOK = false;
+            lcNote = '압축 부재인데 휨 Load Case가 선택됨 — 압축(Compression)으로 변경하세요.';
+        }
+        checks.push({
+            category: catC, item: 'Load Case 적합성',
+            status: lcOK ? 'pass' : 'warn',
+            value: loadCase,
+            criterion: '설계 부재유형과 해석 Load Case가 일치해야 함',
+            note: lcNote,
+        });
 
         checks.push({
             category: catC, item: '해석 실행 여부',
