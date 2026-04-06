@@ -10,6 +10,8 @@ from design.loads.beam_analysis import (
     analyze_simple_beam, analyze_continuous_beam,
     analyze_continuous_beam_general, analyze_cantilever_beam,
     extract_critical_locations, compute_deflection,
+    compute_deflection_variable_I, extract_max_deflection_per_span,
+    BeamResult,
 )
 from design.loads.bracing import (
     calc_rotational_stiffness, calc_lateral_stiffness,
@@ -172,6 +174,42 @@ def analyze_loads(
     # 웹크리플링용 반력 추출
     wc_reactions = _extract_wc_reactions(gravity_result, spans)
 
+    # ── 처짐 계산 (사용하중 조합) ──
+    deflection_result = None
+    if gravity_result and section:
+        E_ksi = 29500.0  # CFS 표준 탄성계수
+        Ixx = section.get('Ixx') or section.get('Ix') or 0
+        if Ixx > 0:
+            # 사용하중 조합(비계수 하중)으로 처짐 계산 — ASD 조합 사용
+            service_controlling = find_controlling_combo(loads, load_results, 'ASD')
+            service_gravity = service_controlling.get('gravity')
+            if service_gravity:
+                svc_name, svc_combined = service_gravity
+                svc_M = svc_combined.get('M', [])
+                svc_V = svc_combined.get('V', [])
+                svc_R = svc_combined.get('R', [])
+                if len(svc_M) > 2:
+                    total_L = sum(spans)
+                    n_pts = len(svc_M)
+                    svc_x = [i * total_L / (n_pts - 1) for i in range(n_pts)]
+                    svc_result = BeamResult(svc_x, svc_M, svc_V, svc_R, n_pts)
+
+                    defl = compute_deflection_variable_I(
+                        svc_result, E_ksi, Ixx,
+                        spans=spans,
+                        supports=supports,
+                        laps_per_support=laps_per_support,
+                        I_lap_ratio=2.0,
+                    )
+                    per_span = extract_max_deflection_per_span(svc_x, defl, spans)
+                    deflection_result = {
+                        'combo': svc_name,
+                        'D_diagram': defl,
+                        'per_span': per_span,
+                        'E_ksi': E_ksi,
+                        'Ixx': Ixx,
+                    }
+
     return {
         'member_app': member_app,
         'span_type': span_type,
@@ -179,9 +217,13 @@ def analyze_loads(
         'design_method': design_method,
         'gravity': gravity_result,
         'uplift': uplift_result,
+        'deflection': deflection_result,
         'auto_params': auto_params,
         'wc_reactions': wc_reactions,
         'all_combos': [name for name, _ in controlling.get('all', [])],
+        'all_combos_detail': controlling.get('all_detail', []),
+        'input_loads_plf': {k: round(v, 3) for k, v in loads.items()
+                           if v is not None and v != 0},
         'supports': supports,
         'spans_ft': spans,
         'laps_per_support': laps_per_support,

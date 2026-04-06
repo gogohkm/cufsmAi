@@ -598,7 +598,7 @@ def compute_deflection(result: BeamResult, E_ksi: float, I_in4: float,
     ----------
     result : BeamResult (x in ft, M in kip-ft)
     E_ksi : 탄성계수 (ksi)
-    I_in4 : 단면 2차모멘트 (in^4)
+    I_in4 : 단면 2차모멘트 (in^4) — 단일값 또는 비등단면 시 None
     boundary : 'simple' (양단 δ=0) or 'cantilever' (좌단 δ=0, θ=0)
 
     Returns
@@ -642,6 +642,182 @@ def compute_deflection(result: BeamResult, E_ksi: float, I_in4: float,
     # cantilever: delta[0]=0, theta[0]=0 (이미 만족)
 
     return [round(d, 5) for d in delta]
+
+
+def compute_deflection_variable_I(
+    result: BeamResult, E_ksi: float, I_base_in4: float,
+    spans: List[float],
+    supports: List[str],
+    laps_per_support: list = None,
+    I_lap_ratio: float = 2.0,
+) -> list:
+    """비등단면(랩 구간 Ix 증가)을 고려한 처짐 계산
+
+    연속보의 각 지점 경계조건(P/R/F/N)에 따른 적분 경계를 적용하고,
+    랩 구간에서는 Ix를 증가시켜 강성 변화를 반영한다.
+
+    Parameters
+    ----------
+    result : BeamResult (x in ft, M in kip-ft)
+    E_ksi : 탄성계수 (ksi)
+    I_base_in4 : 기본 단면2차모멘트 (in^4)
+    spans : 각 스팬 길이 (ft) 리스트
+    supports : 지점 조건 리스트 ['P','P',...] — P/R/F/N
+    laps_per_support : 지점별 랩 정보 [{'left_ft':..,'right_ft':..}, ...]
+    I_lap_ratio : 랩 구간 Ix 배율 (기본 2.0 — 2겹 단면)
+
+    Returns
+    -------
+    list of deflections (in.) at each x point
+    """
+    n = len(result.x)
+    if n < 3 or E_ksi <= 0 or I_base_in4 <= 0:
+        return [0.0] * n
+
+    E = E_ksi
+    x_in = [x * 12.0 for x in result.x]
+    M_kipin = [m * 12.0 for m in result.M]
+    total_L_ft = sum(spans)
+
+    # --- 지점 x좌표 (ft → in) ---
+    sup_x_in = [0.0]
+    for s in spans:
+        sup_x_in.append(sup_x_in[-1] + s * 12.0)
+    n_sup = len(sup_x_in)
+
+    # --- 각 x점의 Ix 결정 (랩 구간이면 I_base × ratio) ---
+    I_at_x = [I_base_in4] * n
+    if laps_per_support:
+        for si in range(min(n_sup, len(laps_per_support))):
+            lap = laps_per_support[si]
+            if not lap:
+                continue
+            lL = (lap.get('left_ft') or lap.get('left') or 0) * 12.0
+            lR = (lap.get('right_ft') or lap.get('right') or 0) * 12.0
+            if lL <= 0 and lR <= 0:
+                continue
+            sx = sup_x_in[si]
+            x_start = sx - lL
+            x_end = sx + lR
+            for i in range(n):
+                if x_start <= x_in[i] <= x_end:
+                    I_at_x[i] = I_base_in4 * I_lap_ratio
+
+    # --- M/EI 곡선 (비등단면) ---
+    kappa = [M_kipin[i] / (E * I_at_x[i]) for i in range(n)]
+
+    # --- 지점 조건 판별 ---
+    sup = [s[0].upper() if s else 'P' for s in supports]
+
+    left_type = sup[0] if sup else 'P'
+    right_type = sup[-1] if sup else 'P'
+
+    # --- 캔틸레버 특수 처리 ---
+    if left_type == 'F' and right_type == 'N':
+        # 좌측 고정, 우측 자유: θ[0]=0, δ[0]=0 — 좌측부터 적분
+        theta = [0.0] * n
+        delta = [0.0] * n
+        for i in range(1, n):
+            dx = x_in[i] - x_in[i - 1]
+            theta[i] = theta[i - 1] + 0.5 * (kappa[i - 1] + kappa[i]) * dx
+        for i in range(1, n):
+            dx = x_in[i] - x_in[i - 1]
+            delta[i] = delta[i - 1] + 0.5 * (theta[i - 1] + theta[i]) * dx
+        return [round(d, 5) for d in delta]
+
+    if left_type == 'N' and right_type == 'F':
+        # 좌측 자유, 우측 고정: θ[-1]=0, δ[-1]=0 — 우측부터 역적분
+        theta = [0.0] * n
+        delta = [0.0] * n
+        for i in range(n - 2, -1, -1):
+            dx = x_in[i + 1] - x_in[i]
+            theta[i] = theta[i + 1] - 0.5 * (kappa[i] + kappa[i + 1]) * dx
+        for i in range(n - 2, -1, -1):
+            dx = x_in[i + 1] - x_in[i]
+            delta[i] = delta[i + 1] - 0.5 * (theta[i] + theta[i + 1]) * dx
+        return [round(d, 5) for d in delta]
+
+    # --- 연속보/단순보: 스팬별 독립 적분 (각 지점에서 δ=0 보장) ---
+    # 지점 인덱스 찾기 (δ=0 조건이 있는 지점: P, R, F)
+    sup_indices = []
+    for si, sx in enumerate(sup_x_in):
+        if si < len(sup) and sup[si] != 'N':
+            best_i = min(range(n), key=lambda idx: abs(x_in[idx] - sx))
+            sup_indices.append(best_i)
+
+    if len(sup_indices) < 2:
+        return [0.0] * n
+
+    delta = [0.0] * n
+
+    # 각 인접 지점 쌍(스팬)별로 독립 적분 & 경계조건 적용
+    for seg in range(len(sup_indices) - 1):
+        ia = sup_indices[seg]      # 스팬 시작 지점 인덱스
+        ib = sup_indices[seg + 1]  # 스팬 끝 지점 인덱스
+        if ib <= ia:
+            continue
+
+        # 이 스팬 구간 M/EI → θ → δ 적분
+        seg_theta = [0.0] * (ib - ia + 1)
+        for j in range(1, ib - ia + 1):
+            gi = ia + j
+            dx = x_in[gi] - x_in[gi - 1]
+            seg_theta[j] = seg_theta[j - 1] + 0.5 * (kappa[gi - 1] + kappa[gi]) * dx
+
+        seg_delta = [0.0] * (ib - ia + 1)
+        for j in range(1, ib - ia + 1):
+            gi = ia + j
+            dx = x_in[gi] - x_in[gi - 1]
+            seg_delta[j] = seg_delta[j - 1] + 0.5 * (seg_theta[j - 1] + seg_theta[j]) * dx
+
+        # δ[ia]=0 (이미 만족), δ[ib]=0 → 선형 보정
+        L_seg = x_in[ib] - x_in[ia]
+        if L_seg > 0 and abs(seg_delta[-1]) > 1e-12:
+            corr_slope = seg_delta[-1] / L_seg
+            for j in range(ib - ia + 1):
+                gi = ia + j
+                seg_delta[j] -= corr_slope * (x_in[gi] - x_in[ia])
+
+        # 결과 병합
+        for j in range(ib - ia + 1):
+            delta[ia + j] = seg_delta[j]
+
+    return [round(d, 5) for d in delta]
+
+
+def extract_max_deflection_per_span(
+    x_ft: list, defl_in: list, spans: List[float],
+) -> list:
+    """각 스팬별 최대 처짐 위치와 값 추출
+
+    Returns
+    -------
+    list of dicts: [{'span': 1, 'x_ft': ..., 'delta_in': ..., 'L_ft': ...}, ...]
+    """
+    results = []
+    x_offset = 0.0
+    for si, L in enumerate(spans):
+        span_start = x_offset
+        span_end = x_offset + L
+        max_abs = 0.0
+        max_x = span_start
+        max_d = 0.0
+        for i, x in enumerate(x_ft):
+            if span_start <= x <= span_end and i < len(defl_in):
+                if abs(defl_in[i]) > max_abs:
+                    max_abs = abs(defl_in[i])
+                    max_x = x
+                    max_d = defl_in[i]
+        results.append({
+            'span': si + 1,
+            'x_ft': round(max_x, 2),
+            'delta_in': round(max_d, 5),
+            'abs_delta_in': round(max_abs, 5),
+            'L_ft': L,
+            'L_over_delta': round(L * 12.0 / max_abs, 0) if max_abs > 1e-6 else float('inf'),
+        })
+        x_offset += L
+    return results
 
 
 def _solve_general(A: list, b: list) -> list:

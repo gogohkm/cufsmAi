@@ -136,6 +136,7 @@ def find_controlling_combo(loads: dict, load_results: dict,
         'gravity': (name, combined) — |M|max가 최대인 중력 조합
         'uplift': (name, combined) — M이 최소(음수)인 양력 조합
         'all': list of (name, combined)
+        'all_detail': list of dicts — 모든 조합의 상세 결과
     """
     combos = get_applicable_combos(loads, method)
 
@@ -144,34 +145,62 @@ def find_controlling_combo(loads: dict, load_results: dict,
         combined = apply_combination(factors, load_results)
         all_results.append((name, factors, combined))
 
-    # 중력 조합: D ��수 ≥ 1.0 (1.2D+1.6Lr 등)
-    # 양력 조합: D 계수 < 1.0 (0.9D+1.0W 등)
     gravity = None
     gravity_max = 0
     uplift = None
     uplift_min = 0
 
+    all_detail = []
+
     for name, factors, combined in all_results:
         M = combined.get('M', [])
+        V = combined.get('V', [])
+        R = combined.get('R', [])
         if not M:
             continue
-        max_abs = max(abs(m) for m in M)
-        min_m = min(M)
+
+        max_M = max(M)
+        min_M = min(M)
+        max_abs_M = max(abs(m) for m in M)
+        max_abs_V = max(abs(v) for v in V) if V else 0
+        max_R = max(abs(r) for r in R) if R else 0
 
         d_factor = factors.get('D', 0)
         w_factor = factors.get('W', 0)
-        is_uplift_combo = (d_factor < 1.0 and w_factor != 0)
+        is_uplift = (d_factor < 1.0 and w_factor != 0)
 
-        if not is_uplift_combo and max_abs > gravity_max:
-            gravity_max = max_abs
+        detail = {
+            'name': name,
+            'factors': factors,
+            'max_pos_M': round(max_M, 3),
+            'max_neg_M': round(min_M, 3),
+            'max_abs_M': round(max_abs_M, 3),
+            'max_abs_V': round(max_abs_V, 3),
+            'max_R': round(max_R, 3),
+            'is_uplift': is_uplift,
+            'governs_gravity': False,
+            'governs_uplift': False,
+        }
+        all_detail.append(detail)
+
+        if not is_uplift and max_abs_M > gravity_max:
+            gravity_max = max_abs_M
             gravity = (name, combined)
 
-        if is_uplift_combo and min_m < uplift_min:
-            uplift_min = min_m
+        if is_uplift and min_M < uplift_min:
+            uplift_min = min_M
             uplift = (name, combined)
+
+    # 지배 조합 표시
+    for d in all_detail:
+        if gravity and d['name'] == gravity[0]:
+            d['governs_gravity'] = True
+        if uplift and d['name'] == uplift[0]:
+            d['governs_uplift'] = True
 
     return {
         'gravity': gravity,
         'uplift': uplift,
         'all': [(n, c) for n, _, c in all_results],
+        'all_detail': all_detail,
     }

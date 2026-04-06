@@ -2005,6 +2005,7 @@
                 type: secType === 'lippedz' ? 'Z' : 'C',
                 Fy: fromDisplay(getNum('design-fy', 50), 'stress'),
                 Fu: fromDisplay(getNum('design-fu', 65), 'stress'),
+                Ixx: lastProps ? lastProps.Ixx : 0,  // US in^4 (내부값)
             };
 
             // 테이블에서 스팬/지점/랩 데이터 수집 (→ US ft 변환)
@@ -2325,6 +2326,84 @@
                 html += '<tr><td>' + loc.name + '</td><td>' + m + '</td></tr>';
             }
             html += '</table>';
+        }
+
+        // ── 하중조합 상세 결과 ──
+        if (data.all_combos_detail && data.all_combos_detail.length > 0) {
+            const mU = _rul('moment_ft'), fU = _rul('force');
+            const plf = data.input_loads_plf || {};
+            const dm = data.design_method || 'LRFD';
+
+            // 입력 하중 요약
+            html += '<div style="margin-top:8px;padding:6px;border:1px solid var(--vscode-panel-border);border-radius:3px;font-size:11px">';
+            html += '<strong>입력 하중 (' + _rul('linload') + ')</strong><br>';
+            const loadLabels = {D:'고정(D)',Lr:'지붕활(Lr)',S:'적설(S)',L:'활(L)',W:'풍(W)',E:'지진(E)',R:'우수(R)'};
+            for (const [k, v] of Object.entries(plf)) {
+                html += '<span style="margin-right:8px"><b>' + (loadLabels[k]||k) + '</b> = ' + fmtVal(Math.abs(v), 'linload') + '</span>';
+            }
+            html += '</div>';
+
+            // 조합 상세 테이블
+            html += '<div style="margin-top:6px;font-size:10px">';
+            html += '<strong>' + dm + ' 하중조합 상세 (ASCE 7)</strong>';
+            html += '<table style="width:100%;font-size:10px;margin:4px 0;border-collapse:collapse">';
+            html += '<tr style="background:var(--vscode-editor-selectionBackground)">';
+            html += '<th style="padding:2px 4px;text-align:left">조합</th>';
+            html += '<th style="padding:2px 4px">조합 수식</th>';
+            html += '<th style="padding:2px 4px">|M|<sub>max</sub></th>';
+            html += '<th style="padding:2px 4px">|V|<sub>max</sub></th>';
+            html += '<th style="padding:2px 4px">지배</th>';
+            html += '</tr>';
+
+            data.all_combos_detail.forEach(cd => {
+                const isGov = cd.governs_gravity || cd.governs_uplift;
+                const bg = isGov ? 'background:rgba(76,175,80,0.12);font-weight:600' : '';
+
+                // 조합 수식 생성: "1.2×15 + 1.6×90 = ..." 형태
+                let formula = '';
+                const terms = [];
+                for (const [lt, factor] of Object.entries(cd.factors)) {
+                    const w = plf[lt];
+                    if (w == null) continue;
+                    const wAbs = Math.abs(w);
+                    const fStr = factor === 1.0 ? '' : factor + '×';
+                    const wDisp = fmtVal(wAbs, 'linload');
+                    terms.push('<b>' + fStr + '</b>' + (loadLabels[lt]||lt) + '(' + wDisp + ')');
+                }
+                formula = terms.join(' + ');
+
+                html += '<tr style="' + bg + '">';
+                html += '<td style="padding:2px 4px;white-space:nowrap">' + cd.name + '</td>';
+                html += '<td style="padding:2px 4px">' + formula + '</td>';
+                html += '<td style="padding:2px 4px;text-align:right"><b>' + fmtVal(cd.max_abs_M, 'moment_ft') + '</b></td>';
+                html += '<td style="padding:2px 4px;text-align:right">' + fmtVal(cd.max_abs_V, 'force') + '</td>';
+                html += '<td style="padding:2px 4px;text-align:center">';
+                if (cd.governs_gravity) html += '<span style="color:#4caf50">중력▲</span>';
+                if (cd.governs_uplift) html += '<span style="color:#ff9800">양력▼</span>';
+                html += '</td>';
+                html += '</tr>';
+            });
+            html += '</table></div>';
+        }
+
+        // 처짐 다이어그램 & 스팬별 최대 처짐
+        if (data.deflection && data.deflection.D_diagram && data.deflection.D_diagram.length > 2) {
+            const dVals = _unitSystem === 'SI'
+                ? data.deflection.D_diagram.map(v => toDisplay(v, 'length'))
+                : data.deflection.D_diagram;
+            html += renderDiagramSVG(dVals, '처짐 (' + _rul('length') + ') — ' + data.deflection.combo, '#66bb6a', false);
+
+            if (data.deflection.per_span && data.deflection.per_span.length > 0) {
+                const lU = _rul('length_ft'), dU = _rul('length');
+                html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>스팬</th><th>위치('+lU+')</th><th>최대처짐('+dU+')</th><th>L/δ</th></tr>';
+                for (const ps of data.deflection.per_span) {
+                    const xVal = fmtVal(ps.x_ft, 'length_ft');
+                    const dVal = fmtVal(ps.abs_delta_in, 'length');
+                    const ld = ps.L_over_delta === Infinity ? '∞' : ps.L_over_delta.toFixed(0);
+                    html += '<tr><td>' + ps.span + '</td><td>' + xVal + '</td><td>' + dVal + '</td><td>L/' + ld + '</td></tr>';
+                }
+                html += '</table>';
+            }
         }
 
         // Auto params
@@ -2998,6 +3077,37 @@
             h += '</table>';
         }
 
+        // 하중조합 상세 결과 (보고서용)
+        if (la.all_combos_detail && la.all_combos_detail.length > 0) {
+            const plf = la.input_loads_plf || {};
+            const _loadLabels = {D:'고정(D)',Lr:'지붕활(Lr)',S:'적설(S)',L:'활(L)',W:'풍(W)',E:'지진(E)',R:'우수(R)'};
+            h += '<h3>하중조합 상세 ('+la.design_method+', ASCE 7)</h3>';
+            // 입력하중 표
+            h += '<table><tr><th>하중</th><th>'+_rul('linload')+'</th></tr>';
+            for (const [k, v] of Object.entries(plf)) {
+                h += '<tr><td>'+(_loadLabels[k]||k)+'</td><td><b>'+_ruv(Math.abs(v),'linload')+'</b></td></tr>';
+            }
+            h += '</table>';
+            // 조합 결과 표
+            h += '<table><tr><th>조합</th><th>조합 수식</th><th>|M|<sub>max</sub> ('+_rul('moment_ft')+')</th><th>|V|<sub>max</sub> ('+_rul('force')+')</th><th>지배</th></tr>';
+            la.all_combos_detail.forEach(cd => {
+                const isGov = cd.governs_gravity || cd.governs_uplift;
+                const bld = isGov ? 'font-weight:700;background:#f0f7f0' : '';
+                const terms = [];
+                for (const [lt, factor] of Object.entries(cd.factors)) {
+                    const w = plf[lt];
+                    if (w == null) continue;
+                    const fStr = factor === 1.0 ? '' : factor+'&times;';
+                    terms.push('<b>'+fStr+'</b>'+(_loadLabels[lt]||lt)+'('+_ruv(Math.abs(w),'linload')+')');
+                }
+                let govTag = '';
+                if (cd.governs_gravity) govTag += '<b style="color:#4caf50">중력 지배</b>';
+                if (cd.governs_uplift) govTag += '<b style="color:#ff9800">양력 지배</b>';
+                h += '<tr style="'+bld+'"><td>'+cd.name+'</td><td>'+terms.join(' + ')+'</td><td><b>'+_ruv(cd.max_abs_M,'moment_ft')+'</b></td><td>'+_ruv(cd.max_abs_V,'force')+'</td><td>'+govTag+'</td></tr>';
+            });
+            h += '</table>';
+        }
+
         // Auto-Determined Parameters with explanation
         if (la.auto_params) {
             const ap = la.auto_params;
@@ -3030,6 +3140,28 @@
             }
             h += '</table>';
         }
+
+        // 처짐 결과
+        if (la.deflection && la.deflection.D_diagram && la.deflection.D_diagram.length > 2) {
+            h += '<h3>처짐 검토 (사용하중: '+la.deflection.combo+')</h3>';
+            const dVals = _unitSystem === 'SI'
+                ? la.deflection.D_diagram.map(v => toDisplay(v, 'length'))
+                : la.deflection.D_diagram;
+            h += renderDiagramSVG(dVals, '처짐 다이어그램 ('+_rul('length')+')', '#66bb6a', false);
+
+            if (la.deflection.per_span) {
+                h += '<table><tr><th>스팬</th><th>위치</th><th>최대 처짐</th><th>L/δ</th></tr>';
+                la.deflection.per_span.forEach(ps => {
+                    h += '<tr><td>'+ps.span+'</td>';
+                    h += '<td>'+_ruv(ps.x_ft,'length_ft')+' '+_rul('length_ft')+'</td>';
+                    h += '<td>'+_ruv(ps.abs_delta_in,'length')+' '+_rul('length')+'</td>';
+                    h += '<td>L/'+(ps.L_over_delta === Infinity ? '∞' : ps.L_over_delta.toFixed(0))+'</td></tr>';
+                });
+                h += '</table>';
+                h += '<p style="font-size:10px;color:#555">E='+_ruv(la.deflection.E_ksi,'stress')+' '+_rul('stress')+', Ixx='+_ruv(la.deflection.Ixx,'inertia')+' '+_rul('inertia')+'</p>';
+            }
+        }
+
         return h;
     }
 
@@ -3575,7 +3707,41 @@
             }
         }
 
-        // ════════════════════════════════════════
+        // ── 처짐 검증 (IBC Table 1604.3) ──
+        if (la && la.deflection && la.deflection.per_span) {
+            // 부재 유형별 한계 처짐비
+            const memberApp = document.getElementById('select-member-type');
+            const mType = memberApp ? memberApp.value : '';
+            // IBC Table 1604.3 기준 (활하중)
+            let limitLL, limitTL, limitLabel;
+            if (mType === 'floor-joist') {
+                limitLL = 360; limitTL = 240; limitLabel = '바닥 장선';
+            } else {
+                limitLL = 240; limitTL = 180; limitLabel = '지붕 퍼린';
+            }
+
+            la.deflection.per_span.forEach((ps, idx) => {
+                const ld = ps.L_over_delta;
+                const ldOK = ld >= limitLL;
+                checks.push({
+                    category: catF, item: '처짐 — 스팬 '+(idx+1)+' (L/δ)',
+                    status: ldOK ? (ld >= limitLL * 1.1 ? 'pass' : 'warn') : 'fail',
+                    value: 'L/'+ld.toFixed(0)+' (δ='+_ruv(ps.abs_delta_in,'length')+' '+_rul('length')+')',
+                    criterion: limitLabel+': L/δ ≥ '+limitLL+' (활하중), ≥ '+limitTL+' (전체하중) — IBC Table 1604.3',
+                    note: !ldOK ? '처짐 한계 초과 (L/'+limitLL+') — 단면을 키우거나 스팬을 줄이세요.' : (ld < limitLL * 1.1 ? '한계에 근접 — 여유를 확인하세요.' : ''),
+                });
+            });
+        } else if (la && !la.deflection) {
+            checks.push({
+                category: catF, item: '처짐 검토',
+                status: 'warn',
+                value: '미계산',
+                criterion: 'IBC Table 1604.3 처짐 한계 검증 필요',
+                note: '단면 성질(Ixx)이 필요합니다. 전처리 탭에서 단면을 생성하고 해석을 재실행하세요.',
+            });
+        }
+
+        // ═══════��════════════════════════════════
         // G. 설계 결과 (Design Results)
         // ════════════════════════════════════════
         const catG = 'G. 설계 결과';
