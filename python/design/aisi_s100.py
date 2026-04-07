@@ -150,6 +150,13 @@ def _design_compression(params: dict) -> dict:
 
     steps = []
     spec_sections = []
+    warnings = []
+
+    if Pcrl == 0 and Pcrd == 0:
+        warnings.append(
+            'Pcrl=0, Pcrd=0: 좌굴 해석 결과가 없어 좌굴 감소가 적용되지 않습니다. '
+            'FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).'
+        )
 
     # Step 1: Py
     Py = Ag * Fy
@@ -270,6 +277,7 @@ def _design_compression(params: dict) -> dict:
         'pass': utilization <= 1.0 if Pu > 0 else None,
         'steps': steps,
         'spec_sections': list(set(spec_sections)),
+        'warnings': warnings,
     }
 
 
@@ -299,6 +307,13 @@ def _design_flexure(params: dict) -> dict:
 
     steps = []
     spec_sections = []
+    warnings = []
+
+    if Mcrl == 0 and Mcrd == 0:
+        warnings.append(
+            'Mcrl=0, Mcrd=0: 좌굴 해석 결과가 없어 좌굴 감소가 적용되지 않습니다. '
+            'FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).'
+        )
 
     # Step 1: My
     My = Sf * Fy
@@ -354,13 +369,37 @@ def _design_flexure(params: dict) -> dict:
     })
 
     # Step 5: 공칭강도
-    Mn = min(Mne, Mnl, Mnd)
-    if Mn == Mnl and Mnl < Mne:
+    Mn_dsm = min(Mne, Mnl, Mnd)
+    if Mn_dsm == Mnl and Mnl < Mne:
         mode = 'Local Buckling'
-    elif Mn == Mnd and Mnd < Mne:
+    elif Mn_dsm == Mnd and Mnd < Mne:
         mode = 'Distortional Buckling'
     else:
         mode = 'Global/LTB'
+
+    steps.append({
+        'step': 5, 'name': 'Nominal Strength — DSM (Mn)',
+        'value': round(Mn_dsm, 2), 'unit': 'kip-in',
+        'formula': f'Mn = min(Mne={Mne:.2f}, Mnl={Mnl:.2f}, Mnd={Mnd:.2f}) = {Mn_dsm:.2f}',
+        'controlling_mode': mode,
+    })
+
+    # Step 5b: §I6.2.1 양력 감소계수 R 적용 (through-fastened panel)
+    R_uplift = params.get('R_uplift')
+    Mn = Mn_dsm
+    if R_uplift is not None and R_uplift > 0:
+        Mn_R = R_uplift * Sf * Fy  # R × Se × Fy (Se ≈ Sf, 보수적)
+        if Mn_R < Mn_dsm:
+            Mn = Mn_R
+            mode = f'§I6.2.1 R-factor (R={R_uplift})'
+        steps.append({
+            'step': '5b', 'name': 'Uplift R-factor (§I6.2.1)',
+            'value': round(Mn_R, 2), 'unit': 'kip-in',
+            'formula': f'Mn_R = R × Sf × Fy = {R_uplift} × {Sf:.4f} × {Fy} = {Mn_R:.2f}',
+            'R': R_uplift,
+            'controls': Mn_R < Mn_dsm,
+        })
+        spec_sections.append('I6.2.1')
 
     phi = PHI['flexure']
     omega = OMEGA['flexure']
@@ -368,9 +407,9 @@ def _design_flexure(params: dict) -> dict:
     Mn_omega = Mn / omega
 
     steps.append({
-        'step': 5, 'name': 'Nominal Strength (Mn)',
+        'step': 6, 'name': 'Final Nominal Strength (Mn)',
         'value': round(Mn, 2), 'unit': 'kip-in',
-        'formula': f'Mn = min(Mne={Mne:.2f}, Mnl={Mnl:.2f}, Mnd={Mnd:.2f}) = {Mn:.2f}',
+        'formula': f'Mn = {Mn:.2f} — {mode}',
         'controlling_mode': mode,
     })
 
@@ -382,7 +421,7 @@ def _design_flexure(params: dict) -> dict:
         elif Mu > 0 and phi_Mn <= 0:
             utilization = float('inf')
         steps.append({
-            'step': 6, 'name': 'Design Strength (LRFD)',
+            'step': 7, 'name': 'Design Strength (LRFD)',
             'value': round(phi_Mn, 2), 'unit': 'kip-in',
             'formula': f'φMn = {phi} × {Mn:.2f} = {phi_Mn:.2f}',
         })
@@ -393,7 +432,7 @@ def _design_flexure(params: dict) -> dict:
         elif Mu > 0 and Mn_omega <= 0:
             utilization = float('inf')
         steps.append({
-            'step': 6, 'name': 'Allowable Strength (ASD)',
+            'step': 7, 'name': 'Allowable Strength (ASD)',
             'value': round(Mn_omega, 2), 'unit': 'kip-in',
             'formula': f'Mn/Ω = {Mn:.2f}/{omega} = {Mn_omega:.2f}',
         })
@@ -403,10 +442,12 @@ def _design_flexure(params: dict) -> dict:
         'method': 'DSM',
         'design_method': design_method,
         'Mn': round(Mn, 2),
+        'Mn_dsm': round(Mn_dsm, 2),
         'Mne': round(Mne, 2),
         'Mnl': round(Mnl, 2),
         'Mnd': round(Mnd, 2),
         'My': round(My, 2),
+        'R_uplift': R_uplift,
         'controlling_mode': mode,
         'phi_Mn': round(phi_Mn, 2),
         'Mn_omega': round(Mn_omega, 2),
@@ -415,6 +456,7 @@ def _design_flexure(params: dict) -> dict:
         'pass': utilization <= 1.0 if Mu > 0 else None,
         'steps': steps,
         'spec_sections': list(set(spec_sections)),
+        'warnings': warnings,
     }
 
     # §H3 웹 크리플링 + 휨 상호작용

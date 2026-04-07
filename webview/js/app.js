@@ -2851,6 +2851,18 @@
             summaryHtml += '</div>';
         }
 
+        // DSM / 설계 경고 표시
+        const allWarnings = [
+            ...(data.warnings || []),
+            ...(data.dsm_warning ? [data.dsm_warning] : []),
+            ...(data.flexure_x?.warnings || []),
+        ];
+        if (allWarnings.length > 0) {
+            summaryHtml += '<div style="background:var(--vscode-inputValidation-warningBackground,#5c5000);border:1px solid var(--vscode-inputValidation-warningBorder,#ffab00);border-radius:4px;padding:6px 8px;margin:6px 0;font-size:11px">';
+            allWarnings.forEach(w => { summaryHtml += '<div>⚠ ' + w + '</div>'; });
+            summaryHtml += '</div>';
+        }
+
         summaryEl.innerHTML = summaryHtml;
 
         // --- Steps as cards ---

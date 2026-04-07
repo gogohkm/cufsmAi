@@ -254,14 +254,15 @@ export class CufsmPanel implements McpPanelInterface {
             this._postMessage('analysisComplete', result);
 
             // DSM 설계값 자동 추출 — P(축력)와 Mxx(휨) 모두
+            const aFy = this._getAnalysisFy();
             try {
                 const dsmP = await this._pythonBridge.call('dsm', {
                     node: model.node, elem: model.elem,
-                    curve: result.curve, fy: 50.0, load_type: 'P',
+                    curve: result.curve, fy: aFy, load_type: 'P',
                 });
                 const dsmM = await this._pythonBridge.call('dsm', {
                     node: model.node, elem: model.elem,
-                    curve: result.curve, fy: 50.0, load_type: 'Mxx',
+                    curve: result.curve, fy: aFy, load_type: 'Mxx',
                 });
                 this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM });
             } catch (dsmErr: any) {
@@ -361,6 +362,13 @@ export class CufsmPanel implements McpPanelInterface {
             nsprings: ((this._model as any).springs || []).length,
             nconstraints: ((this._model as any).constraints || []).length,
         };
+    }
+
+    /** 해석 시 사용된 Fy 반환 (loadFy → 노드 최대응력 → 50 fallback) */
+    private _getAnalysisFy(): number {
+        return (this._model as any).loadFy
+            || Math.max(...this._model.node.map((n: number[]) => Math.abs(n[7] || 0)), 0)
+            || 50.0;
     }
 
     /** MCP: 액션 처리 — Bridge에서 직접 호출 */
@@ -497,13 +505,14 @@ export class CufsmPanel implements McpPanelInterface {
 
                 // DSM 자동 추출
                 try {
+                    const aFy = this._getAnalysisFy();
                     const dsmP = await this._pythonBridge.call('dsm', {
                         node: this._model.node, elem: this._model.elem,
-                        curve: result.curve, fy: 50, load_type: 'P',
+                        curve: result.curve, fy: aFy, load_type: 'P',
                     });
                     const dsmM = await this._pythonBridge.call('dsm', {
                         node: this._model.node, elem: this._model.elem,
-                        curve: result.curve, fy: 50, load_type: 'Mxx',
+                        curve: result.curve, fy: aFy, load_type: 'Mxx',
                     });
                     this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM });
                     return { success: true, n_lengths: result.n_lengths, dsm_P: dsmP, dsm_Mxx: dsmM };
@@ -518,15 +527,16 @@ export class CufsmPanel implements McpPanelInterface {
                     return { error: 'No analysis result. Run analysis first.' };
                 }
 
+                const aFy = options.fy || this._getAnalysisFy();
                 const dsmP = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
-                    curve, fy: options.fy || 50, load_type: 'P',
+                    curve, fy: aFy, load_type: 'P',
                 });
                 const dsmM = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
-                    curve, fy: options.fy || 50, load_type: 'Mxx',
+                    curve, fy: aFy, load_type: 'Mxx',
                 });
-                return { P: dsmP, Mxx: dsmM };
+                return { P: dsmP, Mxx: dsmM, fy_used: aFy };
             }
 
             case 'get_properties': {
@@ -651,31 +661,43 @@ export class CufsmPanel implements McpPanelInterface {
                 };
 
                 // DSM 값 자동 추출
+                // 해석 시 사용한 Fy로 DSM 추출 → 설계 Fy와 무관하게 정확한 Mcrl 산출
                 let dsmValues: any = {};
-                try {
-                    const fy = options.Fy || 50;
-                    // 압축용 DSM
-                    const dsmP = await this._pythonBridge.call('dsm', {
-                        node: this._model.node, elem: this._model.elem,
-                        curve: this._lastAnalysisResult?.curve || [],
-                        fy, load_type: 'P',
-                    });
-                    // 휨용 DSM
-                    const dsmM = await this._pythonBridge.call('dsm', {
-                        node: this._model.node, elem: this._model.elem,
-                        curve: this._lastAnalysisResult?.curve || [],
-                        fy, load_type: 'Mxx',
-                    });
-                    // Python dsm returns dynamic keys: Pcrl/Pcrd for P, Mxxcrl/Mxxcrd for Mxx
-                    dsmValues = {
-                        Pcrl: dsmP?.Pcrl ?? 0,
-                        Pcrd: dsmP?.Pcrd ?? 0,
-                        Py: dsmP?.Py ?? 0,
-                        Mcrl: dsmM?.Mxxcrl ?? 0,
-                        Mcrd: dsmM?.Mxxcrd ?? 0,
-                        My: dsmM?.My_xx ?? 0,
-                    };
-                } catch { /* 해석 미실행 시 DSM 없이 진행 */ }
+                let dsmWarning: string | null = null;
+                if (!this._lastAnalysisResult?.curve || this._lastAnalysisResult.curve.length === 0) {
+                    dsmWarning = 'No analysis results. Run FSM analysis first to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
+                } else {
+                    const aFy = this._getAnalysisFy();
+                    try {
+                        // 압축용 DSM
+                        const dsmP = await this._pythonBridge.call('dsm', {
+                            node: this._model.node, elem: this._model.elem,
+                            curve: this._lastAnalysisResult.curve,
+                            fy: aFy, load_type: 'P',
+                        });
+                        // 휨용 DSM
+                        const dsmM = await this._pythonBridge.call('dsm', {
+                            node: this._model.node, elem: this._model.elem,
+                            curve: this._lastAnalysisResult.curve,
+                            fy: aFy, load_type: 'Mxx',
+                        });
+                        // Python dsm returns dynamic keys: Pcrl/Pcrd for P, Mxxcrl/Mxxcrd for Mxx
+                        dsmValues = {
+                            Pcrl: dsmP?.Pcrl ?? 0,
+                            Pcrd: dsmP?.Pcrd ?? 0,
+                            Py: dsmP?.Py ?? 0,
+                            Mcrl: dsmM?.Mxxcrl ?? 0,
+                            Mcrd: dsmM?.Mxxcrd ?? 0,
+                            My: dsmM?.My_xx ?? 0,
+                        };
+                        if (dsmValues.Mcrl === 0 && dsmValues.Mcrd === 0) {
+                            dsmWarning = 'DSM extraction found no buckling minima in curve. Check that stress distribution matches design type (bending vs compression).';
+                        }
+                    } catch (e: any) {
+                        dsmWarning = `DSM extraction failed: ${e.message || String(e)}`;
+                        console.error('[CUFSM] DSM extraction error:', e);
+                    }
+                }
 
                 const designParams = {
                     ...options,
@@ -684,6 +706,9 @@ export class CufsmPanel implements McpPanelInterface {
                 };
 
                 const result = await this._pythonBridge.call('aisi_design', designParams);
+                if (dsmWarning) {
+                    result.dsm_warning = dsmWarning;
+                }
                 this._postMessage('designResult', result);
                 return result;
             }
@@ -732,15 +757,15 @@ export class CufsmPanel implements McpPanelInterface {
 
                 // 2. DSM 값
                 if (this._lastAnalysisResult?.curve) {
-                    const fy = options.Fy || 50;
+                    const aFy = this._getAnalysisFy();
                     try {
                         reportData.dsm_P = await this._pythonBridge.call('dsm', {
                             node: this._model.node, elem: this._model.elem,
-                            curve: this._lastAnalysisResult.curve, fy, load_type: 'P',
+                            curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'P',
                         });
                         reportData.dsm_Mxx = await this._pythonBridge.call('dsm', {
                             node: this._model.node, elem: this._model.elem,
-                            curve: this._lastAnalysisResult.curve, fy, load_type: 'Mxx',
+                            curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
                         });
                     } catch {}
                     reportData.curve_length = this._lastAnalysisResult.curve.length;
@@ -810,13 +835,13 @@ export class CufsmPanel implements McpPanelInterface {
                 // Analysis/DSM
                 valData.analysis_run = !!this._lastAnalysisResult?.curve;
                 if (this._lastAnalysisResult?.curve) {
-                    const fy = options.Fy || 50;
+                    const aFy = this._getAnalysisFy();
                     try {
                         valData.dsm_P = await this._pythonBridge.call('dsm', {
-                            node, elem, curve: this._lastAnalysisResult.curve, fy, load_type: 'P',
+                            node, elem, curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'P',
                         });
                         valData.dsm_Mxx = await this._pythonBridge.call('dsm', {
-                            node, elem, curve: this._lastAnalysisResult.curve, fy, load_type: 'Mxx',
+                            node, elem, curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
                         });
                     } catch {}
                 }
@@ -872,10 +897,10 @@ export class CufsmPanel implements McpPanelInterface {
                     kphi: deckInfo.kphi, kx: deckInfo.kx,
                 });
                 const analysisPos = await this._pythonBridge.analyze(this._model);
-                const fy = options.Fy || options.loads?.Fy || 55;
+                const aFy = this._getAnalysisFy();
                 const dsmPos = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
-                    curve: analysisPos?.curve || [], fy, load_type: 'Mxx',
+                    curve: analysisPos?.curve || [], fy: aFy, load_type: 'Mxx',
                 });
 
                 // Step 4: 부모멘트 CUFSM (스프링 OFF)
@@ -883,7 +908,7 @@ export class CufsmPanel implements McpPanelInterface {
                 const analysisNeg = await this._pythonBridge.analyze(this._model);
                 const dsmNeg = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
-                    curve: analysisNeg?.curve || [], fy, load_type: 'Mxx',
+                    curve: analysisNeg?.curve || [], fy: aFy, load_type: 'Mxx',
                 });
 
                 // 스프링 원복
@@ -900,10 +925,14 @@ export class CufsmPanel implements McpPanelInterface {
                     });
                 } catch { }
 
+                // Step 6: R-factor 추출 (§I6.2.1)
+                const upliftR = loadResult?.auto_params?.uplift_R ?? null;
+
                 const result = {
                     load_analysis: loadResult,
                     dsm_positive: dsmPos,
                     dsm_negative: dsmNeg,
+                    uplift_R: upliftR,
                     props: propsRaw,
                     cutwp: cutwp,
                     deck: deckInfo,
@@ -1805,14 +1834,14 @@ export class CufsmPanel implements McpPanelInterface {
         // DSM 값 추출 (있으면)
         if (this._lastAnalysisResult?.curve && this._model.node?.length > 0) {
             try {
-                const fy = designData?.fy || 50;
+                const aFy = this._getAnalysisFy();
                 const dsmP = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
-                    curve: this._lastAnalysisResult.curve, fy, load_type: 'P',
+                    curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'P',
                 });
                 const dsmM = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
-                    curve: this._lastAnalysisResult.curve, fy, load_type: 'Mxx',
+                    curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
                 });
                 projectData.dsm = { P: dsmP, Mxx: dsmM };
             } catch {}

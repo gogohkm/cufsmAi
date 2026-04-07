@@ -720,7 +720,7 @@ server.tool("aisi_design_compression", "AISI S100-16 DSM compression member desi
     }
 );
 
-server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Chapters F2, F3.2, F4)",
+server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Chapters F2, F3.2, F4, I6.2.1)",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
         Fy: z.number().optional().describe("Yield stress ksi (default 52.94 = 365 MPa, SGC490)"),
@@ -728,8 +728,9 @@ server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Cha
         Lb: z.number().describe("Unbraced length for LTB (in)"),
         Cb: z.number().optional().describe("Moment gradient factor (default 1.0)"),
         Mu: z.number().optional().describe("Required flexural strength (kip-in)"),
+        R_uplift: z.number().optional().describe("Uplift reduction factor R per §I6.2.1 for through-fastened panels (e.g. 0.60 for C, 0.70 for Z)"),
     },
-    async ({ design_method, Fy, Fu, Lb, Cb, Mu }) => {
+    async ({ design_method, Fy, Fu, Lb, Cb, Mu, R_uplift }) => {
         const r = await callBridgePost('/action', {
             action: 'aisi_design',
             member_type: 'flexure',
@@ -737,6 +738,7 @@ server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Cha
             Fy: Fy || 52.94, Fu: Fu || 71.08,
             Lb, Cb: Cb || 1.0,
             Mu: Mu || 0,
+            ...(R_uplift != null && { R_uplift }),
         });
         return textResult(JSON.stringify(r, null, 2));
     }
