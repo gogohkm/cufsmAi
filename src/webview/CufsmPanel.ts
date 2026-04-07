@@ -94,25 +94,28 @@ export class CufsmPanel implements McpPanelInterface {
         this._postMessage(command, data);
     }
 
-    /** 초기 기본 단면 생성 후 모델 전송 */
+    /** 초기 기본 단면 생성 후 모델 전송 — UI 기본값과 일치시킴 */
     private async _initializeWithDefaultSection(): Promise<void> {
         try {
-            // Python 엔진으로 Lipped C-channel 기본 단면 생성
+            // UI 기본값: H=100mm(3.937in), B=50mm(1.969in), D=20mm(0.787in),
+            //           t=2.3mm(0.0906in), r=4mm(0.157in) — SGC400
             const result = await this._pythonBridge.call('generate_section', {
                 section_type: 'lippedc',
-                params: { H: 9, B: 5, D: 1, t: 0.1, r: 0 }
+                params: { H: 3.937, B: 1.969, D: 0.787, t: 0.0906, r: 0.157 }
             });
             if (result && result.node && result.elem) {
                 this._model.node = result.node;
                 this._model.elem = result.elem;
-                // 균일 축압축 응력 기본값
-                for (const n of this._model.node) {
-                    n[7] = 50.0;
-                }
+                (this._model as any).sectionType = 'C';
             }
+            // 기본 강종 SGC400: Fy=35.53 ksi → 휨 응력 설정
+            const fy = 35.53;
+            (this._model as any).loadFy = fy;
+            await this.handleMcpAction({
+                action: 'set_stress', type: 'pure_bending', fy
+            });
         } catch (err: any) {
             console.error('[CUFSM] Failed to generate default section:', err.message);
-            // Python 미연결 시에도 빈 모델로 진행
         }
 
         // 기본 길이 설정
@@ -153,7 +156,16 @@ export class CufsmPanel implements McpPanelInterface {
                 break;
 
             case 'runAnalysis':
-                await this._runAnalysis(message.data);
+                // 프론트엔드 model을 익스텐션 모델에 병합 (prop, lengths, BC 등)
+                // 단, node/elem은 setStress에서 이미 설정된 this._model 것을 사용
+                if (message.data) {
+                    if (message.data.prop) this._model.prop = message.data.prop;
+                    if (message.data.lengths) this._model.lengths = message.data.lengths;
+                    if (message.data.m_all) this._model.m_all = message.data.m_all;
+                    if (message.data.BC) this._model.BC = message.data.BC;
+                    if (message.data.neigs) this._model.neigs = message.data.neigs;
+                }
+                await this._runAnalysis(this._model);
                 break;
 
             case 'setStress':
@@ -364,11 +376,11 @@ export class CufsmPanel implements McpPanelInterface {
         };
     }
 
-    /** 해석 시 사용된 Fy 반환 (loadFy → 노드 최대응력 → 50 fallback) */
+    /** 해석 시 사용된 Fy 반환 (loadFy → 노드 최대응력 → MCP 기본값 fallback) */
     private _getAnalysisFy(): number {
         return (this._model as any).loadFy
             || Math.max(...this._model.node.map((n: number[]) => Math.abs(n[7] || 0)), 0)
-            || 50.0;
+            || 35.53;
     }
 
     /** MCP: 액션 처리 — Bridge에서 직접 호출 */
@@ -384,7 +396,9 @@ export class CufsmPanel implements McpPanelInterface {
                 if (result?.node) {
                     this._model.node = result.node;
                     this._model.elem = result.elem;
-                    for (const n of this._model.node) { n[7] = 50.0; }
+                    const fy = (this._model as any).loadFy || 35.53;
+                    for (const n of this._model.node) { n[7] = fy; }
+                    (this._model as any).loadFy = fy;
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                 }
@@ -424,7 +438,7 @@ export class CufsmPanel implements McpPanelInterface {
 
             case 'set_load_case': {
                 const lc = options.load_case || 'compression';
-                const fy = options.fy || 50;
+                const fy = options.fy || 35.53;
                 let stressOpts: any;
                 if (lc === 'compression') {
                     stressOpts = { action: 'set_stress', type: 'uniform_compression', fy };
@@ -448,7 +462,7 @@ export class CufsmPanel implements McpPanelInterface {
             }
 
             case 'set_stress': {
-                const fy = options.fy || 50;
+                const fy = options.fy || (this._model as any).loadFy || 35.53;
                 if (options.type === 'uniform_compression') {
                     for (const n of this._model.node) { n[7] = fy; }
                 } else if (options.type === 'pure_bending') {
@@ -494,6 +508,7 @@ export class CufsmPanel implements McpPanelInterface {
                         this._model.node = result.node;
                     }
                 }
+                (this._model as any).loadFy = fy;
                 this._postMessage('modelLoaded', this._model);
                 return { success: true };
             }
@@ -599,7 +614,7 @@ export class CufsmPanel implements McpPanelInterface {
             case 'plastic': {
                 const result = await this._pythonBridge.call('plastic', {
                     node: this._model.node, elem: this._model.elem,
-                    fy: options.fy || 50,
+                    fy: options.fy || 35.53,
                 });
                 this._postMessage('plasticResult', result);
                 return result;
@@ -699,10 +714,37 @@ export class CufsmPanel implements McpPanelInterface {
                     }
                 }
 
+                // 단면 기하 정보 추출 (뒤틀림좌굴 해석적 fallback용)
+                const nodeArr = this._model.node;
+                const elemArr = this._model.elem;
+                let sectionInfo: any = {};
+                if (nodeArr.length > 0 && elemArr.length > 0) {
+                    const xs = nodeArr.map((n: number[]) => n[1]);
+                    const zs = nodeArr.map((n: number[]) => n[2]);
+                    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+                    const zMin = Math.min(...zs), zMax = Math.max(...zs);
+                    const tArr = elemArr.map((e: number[]) => e[3]);
+                    const t = tArr.length > 0 ? tArr[0] : 0;
+                    sectionInfo = {
+                        depth: +(zMax - zMin).toFixed(4),
+                        flange_width: +((xMax - xMin) / 2).toFixed(4),  // C-section: half of total width
+                        thickness: +t.toFixed(4),
+                        type: (this._model as any).sectionType || 'C',
+                    };
+                    // 립 높이 추정: z 최소 근처에서 x ≈ 0인 노드의 z 범위
+                    const lipNodes = nodeArr.filter((n: number[]) =>
+                        Math.abs(n[1] - xMin) < t * 3 && n[2] < zMin + (zMax - zMin) * 0.15);
+                    if (lipNodes.length >= 2) {
+                        const lipZs = lipNodes.map((n: number[]) => n[2]);
+                        sectionInfo.lip_depth = +(Math.max(...lipZs) - Math.min(...lipZs)).toFixed(4);
+                    }
+                }
+
                 const designParams = {
                     ...options,
                     props: mergedProps,
                     dsm: dsmValues,
+                    section: sectionInfo,
                 };
 
                 const result = await this._pythonBridge.call('aisi_design', designParams);
@@ -913,21 +955,6 @@ export class CufsmPanel implements McpPanelInterface {
                     curve: analysisNeg?.curve || [], fy: aFy, load_type: 'Mxx',
                 });
 
-                // Step 4b: Lap 구간 CUFSM (스프링 OFF, 2t 두께)
-                let dsmLap: any = null;
-                const hasLaps = options.laps && (options.laps.left_ft > 0 || options.laps.right_ft > 0);
-                if (hasLaps) {
-                    // 요소 두께를 2배로 설정
-                    for (const e of this._model.elem) { e[3] *= 2; }
-                    const analysisLap = await this._pythonBridge.analyze(this._model);
-                    dsmLap = await this._pythonBridge.call('dsm', {
-                        node: this._model.node, elem: this._model.elem,
-                        curve: analysisLap?.curve || [], fy: aFy, load_type: 'Mxx',
-                    });
-                    // 요소 두께 원복
-                    this._model.elem = savedElem.map((e: number[]) => [...e]);
-                }
-
                 // 스프링/단면 원복
                 (this._model as any).springs = savedSprings;
                 this._model.node = savedNode.map((n: number[]) => [...n]);
@@ -943,34 +970,37 @@ export class CufsmPanel implements McpPanelInterface {
                     });
                 } catch { }
 
-                // Step 6: 정/부모멘트 별도 AISI 설계
+                // Step 6: 정/부모멘트/Lap 별도 AISI 설계
                 const fy = options.Fy || options.loads?.Fy || aFy;
+                const fu = options.Fu || options.loads?.Fu || fy * 1.34;
+                const dm = options.design_method || 'LRFD';
                 const posRegion = loadResult?.auto_params?.positive_region || {};
                 const negRegion = loadResult?.auto_params?.negative_region || {};
                 const gravLocs = loadResult?.gravity?.locations || [];
                 const upliftR = loadResult?.auto_params?.uplift_R ?? null;
+                const hasLaps = options.laps && (options.laps.left_ft > 0 || options.laps.right_ft > 0);
+                const spanType = options.span_type || 'simple';
+                const isMultiSpan = spanType !== 'simple' && spanType !== 'cantilever';
+
+                const mergedProps = { ...propsRaw, ...cutwp,
+                    Sf: propsRaw.Sx ?? 0, Sxx: propsRaw.Sx ?? 0 };
 
                 // 정모멘트 소요강도 (지배 위치)
-                const posMu = Math.max(...gravLocs
-                    .filter((l: any) => l.M > 0)
-                    .map((l: any) => Math.abs(l.M)), 0);
+                const posMoments = gravLocs.filter((l: any) => l.M > 0).map((l: any) => Math.abs(l.M));
+                const posMu = posMoments.length > 0 ? Math.max(...posMoments) : 0;
                 // 부모멘트 소요강도 (지배 위치)
-                const negMu = Math.max(...gravLocs
-                    .filter((l: any) => l.M < 0)
-                    .map((l: any) => Math.abs(l.M)), 0);
+                const negMoments = gravLocs.filter((l: any) => l.M < 0).map((l: any) => Math.abs(l.M));
+                const negMu = negMoments.length > 0 ? Math.max(...negMoments) : 0;
 
-                // 정모멘트 설계 (데크 브레이싱, dsmPos)
+                // 6a. 정모멘트 설계 (데크 브레이싱, dsmPos)
                 let designPos: any = null;
                 if (posMu > 0 || gravLocs.length === 0) {
                     designPos = await this._pythonBridge.call('aisi_design', {
-                        member_type: 'flexure',
-                        design_method: options.design_method || 'LRFD',
-                        Fy: fy, Fu: options.Fu || options.loads?.Fu || fy * 1.34,
-                        Lb: posRegion.Ly_in || 0,
-                        Cb: posRegion.Cb || 1.0,
+                        member_type: 'flexure', design_method: dm,
+                        Fy: fy, Fu: fu,
+                        Lb: posRegion.Ly_in || 0, Cb: posRegion.Cb || 1.0,
                         Mu: posMu,
-                        props: { ...propsRaw, ...cutwp,
-                            Sf: propsRaw.Sx ?? 0, Sxx: propsRaw.Sx ?? 0 },
+                        props: mergedProps,
                         dsm: {
                             Mcrl: dsmPos?.Mxxcrl ?? 0,
                             Mcrd: dsmPos?.Mxxcrd ?? 0,
@@ -979,39 +1009,77 @@ export class CufsmPanel implements McpPanelInterface {
                     });
                 }
 
-                // 부모멘트 설계 (비지지, dsmNeg 또는 dsmLap)
+                // 6b. 부모멘트 설계 — Lap 끝~변곡점 구간 (비지지, dsmNeg, 단일 t)
                 let designNeg: any = null;
                 if (negMu > 0) {
-                    const negDsm = dsmLap || dsmNeg;
                     designNeg = await this._pythonBridge.call('aisi_design', {
-                        member_type: 'flexure',
-                        design_method: options.design_method || 'LRFD',
-                        Fy: fy, Fu: options.Fu || options.loads?.Fu || fy * 1.34,
-                        Lb: negRegion.Ly_in || 0,
-                        Cb: negRegion.Cb || 1.67,
+                        member_type: 'flexure', design_method: dm,
+                        Fy: fy, Fu: fu,
+                        Lb: negRegion.Ly_in || 0, Cb: negRegion.Cb || 1.67,
                         Mu: negMu,
-                        R_uplift: upliftR,
-                        props: { ...propsRaw, ...cutwp,
-                            Sf: propsRaw.Sx ?? 0, Sxx: propsRaw.Sx ?? 0 },
+                        props: mergedProps,
                         dsm: {
-                            Mcrl: negDsm?.Mxxcrl ?? 0,
-                            Mcrd: negDsm?.Mxxcrd ?? 0,
-                            My: negDsm?.My_xx ?? 0,
+                            Mcrl: dsmNeg?.Mxxcrl ?? 0,
+                            Mcrd: dsmNeg?.Mxxcrd ?? 0,
+                            My: dsmNeg?.My_xx ?? 0,
                         },
                     });
+                }
+
+                // 6c. Lap 구간 설계 — AISI 방식: 개별 부재 Mnl 합산
+                // "The strength within lapped portions is the sum of the individual members"
+                // LTB/뒤틀림은 Lap 구간에서 발생하지 않는 것으로 가정 (Mne=Mnd=My)
+                let designLap: any = null;
+                if (isMultiSpan && negMu > 0) {
+                    // 단일 부재 강도 (dsmNeg 기반, 스프링 없음)
+                    const singleMnl = await this._pythonBridge.call('aisi_design', {
+                        member_type: 'flexure', design_method: dm,
+                        Fy: fy, Fu: fu,
+                        Lb: 0, Cb: 1.0,  // Lap에서 LTB 구속
+                        Mu: 0,  // 이용률 불필요
+                        props: mergedProps,
+                        dsm: {
+                            Mcrl: dsmNeg?.Mxxcrl ?? 0,
+                            Mcrd: 0,  // 뒤틀림 제외
+                            My: dsmNeg?.My_xx ?? 0,
+                        },
+                    });
+                    // Lap에서 2개 부재 겹침 → 강도 합산
+                    const nLap = hasLaps ? 2 : 1;
+                    const lapMn = (singleMnl?.Mn ?? 0) * nLap;
+                    const lapPhiMn = (singleMnl?.phi_Mn ?? 0) * nLap;
+                    const lapMnOmega = (singleMnl?.Mn_omega ?? 0) * nLap;
+                    designLap = {
+                        ...singleMnl,
+                        Mn: Math.round(lapMn * 100) / 100,
+                        phi_Mn: Math.round(lapPhiMn * 100) / 100,
+                        Mn_omega: Math.round(lapMnOmega * 100) / 100,
+                        design_strength: dm === 'LRFD'
+                            ? Math.round(lapPhiMn * 100) / 100
+                            : Math.round(lapMnOmega * 100) / 100,
+                        n_members: nLap,
+                        note: `Lap: ${nLap} members summed, LTB/distortional excluded`,
+                        utilization: negMu > 0 && lapPhiMn > 0
+                            ? Math.round(negMu / (dm === 'LRFD' ? lapPhiMn : lapMnOmega) * 10000) / 10000
+                            : null,
+                        pass: negMu > 0 && lapPhiMn > 0
+                            ? negMu <= (dm === 'LRFD' ? lapPhiMn : lapMnOmega)
+                            : null,
+                    };
                 }
 
                 const result = {
                     load_analysis: loadResult,
                     dsm_positive: dsmPos,
                     dsm_negative: dsmNeg,
-                    dsm_lap: dsmLap,
                     design_positive: designPos,
                     design_negative: designNeg,
+                    design_lap: designLap,
                     uplift_R: upliftR,
                     props: propsRaw,
                     cutwp: cutwp,
                     deck: deckInfo,
+                    span_type: spanType,
                 };
                 this._postMessage('designPurlinResult', result);
                 return result;
@@ -1398,23 +1466,40 @@ export class CufsmPanel implements McpPanelInterface {
                             <button id="btn-generate-template" class="btn-action-green" style="padding:4px 12px">Generate</button>
                         </div>
                         <div id="template-params" class="input-row" style="margin-top:4px; flex-wrap:wrap;">
-                            <label>H<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-H" value="7.874" step="0.5" style="width:60px">
-                            <label>B<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-B" value="2.953" step="0.5" style="width:60px">
+                            <label>H<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-H" value="3.937" step="0.5" style="width:60px">
+                            <label>B<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-B" value="1.969" step="0.5" style="width:60px">
                             <label>D<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-D" value="0.787" step="0.1" style="width:60px">
                             <label>t<span class="hint-inline" data-unit="thickness">in</span></label><input type="number" id="tpl-t" value="0.0906" step="0.01" style="width:60px">
                             <label>r<span class="hint-inline" data-unit="radius">in</span></label><input type="number" id="tpl-r" value="0.157" step="0.1" style="width:60px">
                             <span id="tpl-qlip-group" style="display:none">
-                                <label>lip°<span class="hint-inline">립각도</span></label><input type="number" id="tpl-qlip" value="90" step="5" min="0" max="180" style="width:55px">
+                                <label>lip°<span class="hint-inline">립각도</span></label><input type="number" id="tpl-qlip" value="90" step="5" min="0" max="180" style="width:68px">
                             </span>
                         </div>
                     </div>
                     <div class="section-group">
                         <label>Material</label>
-                        <p class="hint">E = 탄성계수, v = 포아송비, G = 전단탄성계수(자동 계산 가능)</p>
+                        <p class="hint">강종 선택 시 Fy, Fu, E, G가 자동 설정됩니다.</p>
                         <div class="input-row">
-                            <label>E<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-E" value="29500" step="100">
+                            <label>Steel</label>
+                            <select id="input-steel-grade" style="width:110px">
+                                <option value="">-- Manual --</option>
+                                <option value="SGC400" selected>SGC400 (245/400 MPa)</option>
+                                <option value="SGC440">SGC440 (295/440 MPa)</option>
+                                <option value="SGC490">SGC490 (365/490 MPa)</option>
+                                <option value="SGC570">SGC570 (560/570 MPa)</option>
+                                <option value="A653-33">A653-33 (33/45 ksi)</option>
+                                <option value="A653-50">A653-50 (50/65 ksi)</option>
+                                <option value="A653-80">A653-80 (80/82 ksi)</option>
+                            </select>
+                        </div>
+                        <div class="input-row">
+                            <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-fy" value="35.53" step="1" style="width:60px">
+                            <label>Fu<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-fu" value="58.02" step="1" style="width:60px">
+                        </div>
+                        <div class="input-row">
+                            <label>E<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-E" value="29733" step="100">
                             <label>v</label><input type="number" id="input-v" value="0.3" step="0.01">
-                            <label>G<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-G" value="11346" step="100">
+                            <label>G<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-G" value="11436" step="100">
                         </div>
                     </div>
                     <div class="section-group">
@@ -1466,8 +1551,7 @@ export class CufsmPanel implements McpPanelInterface {
                         <option value="bending_zz_neg">약축 휨 -Mzz (x- 압축)</option>
                         <option value="custom">조합 (P + Mxx + Mzz)</option>
                     </select>
-                    <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label>
-                    <input type="number" id="input-fy-load" value="52.94" step="5" style="width:60px">
+                    <span class="hint" style="margin-left:8px" id="analysis-fy-display">Fy: 35.53 ksi</span>
                 </div>
                 <div id="custom-load-inputs" class="input-row" style="display:none; margin-top:4px;">
                     <label>P<span class="hint-inline" data-unit="force">kips</span></label>
@@ -1559,7 +1643,7 @@ export class CufsmPanel implements McpPanelInterface {
                     <h3>Plastic Interaction Surface</h3>
                     <p class="hint">주축(principal axis) 좌표계 기준 P-M 소성 상호작용 다이어그램. 항복값으로 정규화된 축력-모멘트 조합을 표시합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
-                        <label>fy<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-fy" value="52.94" step="5" style="width:60px">
+                        <label>fy<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="plastic-fy" value="35.53" step="5" style="width:60px">
                         <button id="btn-run-plastic" class="btn-small">곡면 생성</button>
                     </div>
                     <canvas id="plastic-surface-canvas" width="700" height="420"></canvas>
@@ -1594,43 +1678,13 @@ export class CufsmPanel implements McpPanelInterface {
         </div>
         <div class="panel-row">
             <div class="panel-left" style="max-width:360px">
-                <h3 class="collapsible" id="sec-material" data-expanded="true"><span class="collapse-icon">▾</span> Material</h3>
+                <h3 class="collapsible" id="sec-material" data-expanded="true"><span class="collapse-icon">▾</span> Material <span class="hint-inline" style="font-weight:normal">(전처리 탭에서 설정)</span></h3>
                 <div id="sec-material-body">
                 <div class="input-row">
-                    <label>Steel Grade</label>
-                    <select id="select-steel-grade">
-                        <option value="custom">Custom</option>
-                        <optgroup label="KS D 3506 (용융아연도금)">
-                            <option value="SGC400">SGC400 (245/400 MPa)</option>
-                            <option value="SGC440">SGC440 (295/440 MPa)</option>
-                            <option value="SGC490" selected>SGC490 (365/490 MPa)</option>
-                            <option value="SGC570">SGC570 (560/570 MPa)</option>
-                        </optgroup>
-                        <optgroup label="KS D 3530 (경량형강)">
-                            <option value="SSC400">SSC400 (245/400 MPa)</option>
-                        </optgroup>
-                        <optgroup label="ASTM A653 (Galvanized)">
-                            <option value="A653-33">A653 Gr.33 (33/45)</option>
-                            <option value="A653-50">A653 Gr.50 (50/65)</option>
-                            <option value="A653-55">A653 Gr.55 (55/70)</option>
-                            <option value="A653-80">A653 Gr.80 (80/82)</option>
-                        </optgroup>
-                        <optgroup label="ASTM A792 (Al-Zn)">
-                            <option value="A792-33">A792 Gr.33 (33/45)</option>
-                            <option value="A792-50">A792 Gr.50 (50/65)</option>
-                            <option value="A792-80">A792 Gr.80 (80/82)</option>
-                        </optgroup>
-                        <optgroup label="ASTM A1003 (Structural)">
-                            <option value="A1003-33">A1003 SS-33 (33/45)</option>
-                            <option value="A1003-50">A1003 SS-50 (50/65)</option>
-                        </optgroup>
-                    </select>
-                </div>
-                <div class="input-row">
                     <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label>
-                    <input type="number" id="design-fy" value="52.94" step="1" style="width:55px" min="1" max="100">
+                    <input type="number" id="design-fy" value="35.53" style="width:68px" readonly tabindex="-1" class="input-readonly">
                     <label>Fu<span class="hint-inline" data-unit="stress">ksi</span></label>
-                    <input type="number" id="design-fu" value="71.08" step="1" style="width:55px" min="1" max="120">
+                    <input type="number" id="design-fu" value="58.02" style="width:68px" readonly tabindex="-1" class="input-readonly">
                 </div>
                 </div>
 
@@ -1678,21 +1732,21 @@ export class CufsmPanel implements McpPanelInterface {
                             <option value="cont-4" selected>4경간 연속보</option>
                             <option value="cont-n">N경간 연속보</option>
                         </select>
-                        <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:40px;display:none" title="경간 수">
+                        <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:55px;display:none" title="경간 수">
                         <label>간격<span class="hint-inline" data-unit="length_ft">ft</span></label>
-                        <input type="number" id="config-spacing" value="4.921" step="0.5" style="width:55px">
+                        <input type="number" id="config-spacing" value="4.921" step="0.5" style="width:68px">
                     </div>
 
                     <!-- 스팬/지점/랩 테이블 -->
                     <div id="span-table-container" style="margin-top:6px;overflow-x:auto">
-                        <table id="span-config-table" style="width:100%;font-size:10px;border-collapse:collapse">
+                        <table id="span-config-table" style="width:100%;font-size:10px;border-collapse:collapse;border:1px solid var(--vscode-panel-border)">
                             <thead>
                                 <tr style="background:var(--vscode-editor-selectionBackground)">
-                                    <th style="padding:2px 4px;width:30px">지점#</th>
-                                    <th style="padding:2px 4px;width:50px">지점조건</th>
-                                    <th style="padding:2px 4px;width:55px">스팬(<span data-unit="length_ft">ft</span>)</th>
-                                    <th style="padding:2px 4px;width:45px">랩 L(<span data-unit="length_ft">ft</span>)</th>
-                                    <th style="padding:2px 4px;width:45px">랩 R(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:3px 4px;width:32px">#</th>
+                                    <th style="padding:3px 4px;width:60px">지점</th>
+                                    <th style="padding:3px 4px;width:70px">스팬(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:3px 4px;width:60px">랩L(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:3px 4px;width:60px">랩R(<span data-unit="length_ft">ft</span>)</th>
                                 </tr>
                             </thead>
                             <tbody id="span-config-tbody">
@@ -1744,12 +1798,12 @@ export class CufsmPanel implements McpPanelInterface {
                     </div>
                     <div class="input-row" id="deck-detail-row">
                         <label>t<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="deck-t-panel" value="0.0197" step="0.001" style="width:55px">
+                        <input type="number" id="deck-t-panel" value="0.0197" step="0.001" style="width:68px">
                         <label>@<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="deck-fastener-spacing" value="11.81" step="1" style="width:40px">
+                        <input type="number" id="deck-fastener-spacing" value="11.81" step="1" style="width:55px">
                     </div>
                     <div class="input-row" id="deck-kphi-row">
-                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">k-in/rad/in</span></label>
+                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">kip-in/rad/in</span></label>
                         <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
                     </div>
                 </div>
@@ -1778,9 +1832,9 @@ export class CufsmPanel implements McpPanelInterface {
                 </div>
                 <div class="input-row" id="design-Cm-row" style="display:none">
                     <label>Cmx</label>
-                    <input type="number" id="design-Cmx" value="0.85" step="0.01" style="width:55px">
+                    <input type="number" id="design-Cmx" value="0.85" step="0.01" style="width:68px">
                     <label>Cmy</label>
-                    <input type="number" id="design-Cmy" value="0.85" step="0.01" style="width:55px">
+                    <input type="number" id="design-Cmy" value="0.85" step="0.01" style="width:68px">
                 </div>
 
                 <h3>소요 하중</h3>
@@ -1801,7 +1855,7 @@ export class CufsmPanel implements McpPanelInterface {
                     <h3>웹 크리플링 (§G5)</h3>
                     <div class="input-row">
                         <label>N<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="design-wc-N" value="3.504" step="0.1" style="width:55px">
+                        <input type="number" id="design-wc-N" value="3.504" step="0.1" style="width:68px">
                         <label>R<span class="hint-inline" data-unit="length">in</span></label>
                         <input type="number" id="design-wc-R" value="0.1875" step="0.01" style="width:65px">
                     </div>

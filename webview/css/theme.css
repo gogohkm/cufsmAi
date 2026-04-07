@@ -222,7 +222,7 @@ input[type="number"] {
 }
 
 #tab-design .panel-left .input-row input[type="number"] {
-    width: 62px;
+    width: 72px;
     padding: 3px 6px;
     font-size: 12px;
 }
@@ -288,6 +288,7 @@ table {
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
+    border: 1px solid var(--vscode-panel-border);
 }
 
 thead {
@@ -306,8 +307,21 @@ th {
 }
 
 td {
-    padding: 2px 8px;
-    border-bottom: 1px solid var(--vscode-panel-border, transparent);
+    padding: 3px 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    border-right: 1px solid var(--vscode-panel-border);
+}
+
+td:last-child {
+    border-right: none;
+}
+
+th {
+    border-right: 1px solid var(--vscode-panel-border);
+}
+
+th:last-child {
+    border-right: none;
 }
 
 td input {
@@ -788,4 +802,12 @@ canvas {
     margin: 16px 0;
     border: none;
     border-top: 1px solid var(--vscode-panel-border);
+}
+
+/* 읽기전용 입력 필드 (전처리 탭에서 설정된 값) */
+.input-readonly {
+    opacity: 0.7;
+    background: var(--vscode-input-background);
+    cursor: default;
+    border-color: transparent;
 }

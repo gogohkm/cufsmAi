@@ -241,6 +241,18 @@ def analyze_continuous_beam_general(
 
     w_list = [w / 1000.0 for w in w_plf_list]  # kip/ft
 
+    # 비등단면 계수 (Ix_list가 있으면 L/I 비율 사용)
+    if Ix_list and len(Ix_list) == n_spans:
+        I_ref = Ix_list[0]  # 기준 Ix
+        LI_ratio = [spans[i] / Ix_list[i] if Ix_list[i] > 0 else spans[i]
+                     for i in range(n_spans)]
+        wLI_ratio = [w_list[i] * spans[i] ** 3 / (4.0 * Ix_list[i])
+                      if Ix_list[i] > 0 else w_list[i] * spans[i] ** 3 / 4.0
+                      for i in range(n_spans)]
+    else:
+        LI_ratio = list(spans)  # L/I = L (I 소거됨, 등단면)
+        wLI_ratio = [w_list[i] * spans[i] ** 3 / 4.0 for i in range(n_spans)]
+
     # 경계조건 판별
     # F(고정단): M≠0, slope=0, R≠0  →  미지수에 추가
     # P/R(핀/롤러): M=0, R≠0        →  기존 경계
@@ -275,15 +287,14 @@ def analyze_continuous_beam_general(
     b_vec = [0.0] * n_total
 
     # 좌측 고정단 방정식: slope=0 at support 0
-    # 3-moment: 2*M0*L1 + M1*L1 = -w1*L1^3/4
+    # 3-moment (비등단면): 2*M0*(L1/I1) + M1*(L1/I1) = -w1*L1^3/(4*I1)
     if left_fixed:
-        L1 = spans[0]
-        w1 = w_list[0]
+        LI1 = LI_ratio[0]
         row = 0
-        A[row][idx_of_support[0]] = 2.0 * L1
+        A[row][idx_of_support[0]] = 2.0 * LI1
         if idx_of_support[1] >= 0:
-            A[row][idx_of_support[1]] = L1
-        b_vec[row] = -w1 * L1 ** 3 / 4.0
+            A[row][idx_of_support[1]] = LI1
+        b_vec[row] = -wLI_ratio[0]
 
     # 내부 지점 방정식 (3-moment / 자유단 R=0 조건)
     for j in range(1, n_spans):
@@ -292,47 +303,42 @@ def analyze_continuous_beam_general(
         Li1 = spans[j] if j < n_spans else 0
         wi = w_list[j - 1]
         wi1 = w_list[j] if j < n_spans else 0
+        # 비등단면 L/I 비율
+        LIi = LI_ratio[j - 1]
+        LIi1 = LI_ratio[j] if j < n_spans else 0
 
         # 좌측 자유단(N): 첫 번째 내부 지점에 R[0]=0 조건 적용
-        # R[0] = w1*L1/2 + (M[1]-M[0])/L1 = 0, M[0]=0
-        # → M[1] = -w1*L1^2/2
         if left_free and j == 1:
             A[row][row] = 1.0
             b_vec[row] = -wi * Li ** 2 / 2.0
             continue
 
         # 우측 자유단(N): 마지막 내부 지점에 R[n]=0 조건 적용
-        # R[n] = wn*Ln/2 - (M[n]-M[n-1])/Ln = 0, M[n]=0
-        # → M[n-1] = -wn*Ln^2/2
         if right_free and j == n_spans - 1:
             A[row][row] = 1.0
             b_vec[row] = -wi1 * Li1 ** 2 / 2.0
             continue
 
-        # 기존 3-moment 방정식
-        # M_{j-1} * Li + 2*M_j*(Li+Li1) + M_{j+1} * Li1 = -(...)/4
-        A[row][row] = 2.0 * (Li + Li1)
+        # 비등단면 3-moment 방정식:
+        # M_{j-1}*(Li/Ii) + 2*M_j*(Li/Ii + Li1/Ii1) + M_{j+1}*(Li1/Ii1)
+        #   = -(wi*Li^3/(4*Ii) + wi1*Li1^3/(4*Ii1))
+        A[row][row] = 2.0 * (LIi + LIi1)
         if idx_of_support[j - 1] >= 0:
-            A[row][idx_of_support[j - 1]] = Li
-        else:
-            pass  # M_{j-1} = 0 (핀), 이미 0
+            A[row][idx_of_support[j - 1]] = LIi
         if idx_of_support[j + 1] >= 0:
-            A[row][idx_of_support[j + 1]] = Li1
-        else:
-            pass  # M_{j+1} = 0 (핀)
+            A[row][idx_of_support[j + 1]] = LIi1
 
-        b_vec[row] = -(wi * Li ** 3 + wi1 * Li1 ** 3) / 4.0
+        b_vec[row] = -(wLI_ratio[j - 1] + (wLI_ratio[j] if j < n_spans else 0))
 
     # 우측 고정단 방정식: slope=0 at support n_spans
     # 3-moment: M_{n-1}*Ln + 2*Mn*Ln = -wn*Ln^3/4
     if right_fixed:
-        Ln = spans[-1]
-        wn = w_list[-1]
+        LIn = LI_ratio[-1]
         row = idx_of_support[n_spans]
-        A[row][row] = 2.0 * Ln
+        A[row][row] = 2.0 * LIn
         if idx_of_support[n_spans - 1] >= 0:
-            A[row][idx_of_support[n_spans - 1]] = Ln
-        b_vec[row] = -wn * Ln ** 3 / 4.0
+            A[row][idx_of_support[n_spans - 1]] = LIn
+        b_vec[row] = -wLI_ratio[-1]
 
     # 연립방정식 풀기
     M_solution = _solve_general(A, b_vec)
@@ -737,8 +743,12 @@ def compute_deflection_variable_I(
             delta[i] = delta[i + 1] - 0.5 * (theta[i] + theta[i + 1]) * dx
         return [round(d, 5) for d in delta]
 
-    # --- 연속보/단순보: 스팬별 독립 적분 (각 지점에서 δ=0 보장) ---
-    # 지점 인덱스 찾기 (δ=0 조건이 있는 지점: P, R, F)
+    # --- 연속보/단순보: Beam FE 직접 강성법 ---
+    # 등단면/비등단면 모두 일관된 방법으로 처짐 계산
+    # 하중 → 모멘트 → 처짐을 한 번에 계산하여 EI 변화를 정확히 반영
+    import numpy as _np
+
+    # 지점 인덱스 찾기 (δ=0 조건)
     sup_indices = []
     for si, sx in enumerate(sup_x_in):
         if si < len(sup) and sup[si] != 'N':
@@ -748,41 +758,260 @@ def compute_deflection_variable_I(
     if len(sup_indices) < 2:
         return [0.0] * n
 
-    delta = [0.0] * n
+    # 등분포하중 복원: 반력 합 또는 V 다이어그램에서 추정
+    total_L_in = x_in[-1] - x_in[0]
+    total_R = sum(abs(r) for r in result.R) if result.R else 0
+    if total_R > 1e-10 and total_L_in > 0:
+        w_klin = total_R / total_L_in  # kip/in
+    elif len(result.V) >= 2 and total_L_in > 0:
+        # V 다이어그램 최대/최소 차이에서 하중 추정
+        V_kipin = [v * 1.0 for v in result.V]  # kips (already)
+        w_klin = (max(V_kipin) - min(V_kipin)) / total_L_in
+    else:
+        w_klin = 0.0
 
-    # 각 인접 지점 쌍(스팬)별로 독립 적분 & 경계조건 적용
-    for seg in range(len(sup_indices) - 1):
-        ia = sup_indices[seg]      # 스팬 시작 지점 인덱스
-        ib = sup_indices[seg + 1]  # 스팬 끝 지점 인덱스
-        if ib <= ia:
+    # Beam FE: 각 절점 2 DOF (δ, θ), 총 2n DOF
+    ndof = 2 * n
+    K_global = _np.zeros((ndof, ndof))
+    F_global = _np.zeros(ndof)
+
+    for i in range(n - 1):
+        Le = x_in[i + 1] - x_in[i]
+        if Le < 1e-10:
             continue
+        EI_e = E * (I_at_x[i] + I_at_x[i + 1]) / 2.0
 
-        # 이 스팬 구간 M/EI → θ → δ 적분
-        seg_theta = [0.0] * (ib - ia + 1)
-        for j in range(1, ib - ia + 1):
-            gi = ia + j
-            dx = x_in[gi] - x_in[gi - 1]
-            seg_theta[j] = seg_theta[j - 1] + 0.5 * (kappa[gi - 1] + kappa[gi]) * dx
+        # Euler-Bernoulli 보 요소 강성행렬 (4×4)
+        c = EI_e / Le ** 3
+        ke = c * _np.array([
+            [12,    6*Le,   -12,    6*Le],
+            [6*Le,  4*Le**2, -6*Le, 2*Le**2],
+            [-12,  -6*Le,    12,   -6*Le],
+            [6*Le,  2*Le**2, -6*Le, 4*Le**2],
+        ])
 
-        seg_delta = [0.0] * (ib - ia + 1)
-        for j in range(1, ib - ia + 1):
-            gi = ia + j
-            dx = x_in[gi] - x_in[gi - 1]
-            seg_delta[j] = seg_delta[j - 1] + 0.5 * (seg_theta[j - 1] + seg_theta[j]) * dx
+        # 등분포하중 등가절점하중
+        fe = w_klin * Le / 2.0 * _np.array([1.0, Le/6.0, 1.0, -Le/6.0])
 
-        # δ[ia]=0 (이미 만족), δ[ib]=0 → 선형 보정
-        L_seg = x_in[ib] - x_in[ia]
-        if L_seg > 0 and abs(seg_delta[-1]) > 1e-12:
-            corr_slope = seg_delta[-1] / L_seg
-            for j in range(ib - ia + 1):
-                gi = ia + j
-                seg_delta[j] -= corr_slope * (x_in[gi] - x_in[ia])
+        # 조립
+        dofs = [2*i, 2*i+1, 2*(i+1), 2*(i+1)+1]
+        for a in range(4):
+            F_global[dofs[a]] += fe[a]
+            for b in range(4):
+                K_global[dofs[a], dofs[b]] += ke[a, b]
 
-        # 결과 병합
-        for j in range(ib - ia + 1):
-            delta[ia + j] = seg_delta[j]
+    # 경계조건: 지점에서 δ=0, 고정단에서 θ=0
+    bc_dofs = set()
+    for si_idx, si in enumerate(sup_indices):
+        bc_dofs.add(2 * si)  # δ = 0
+    # 고정단 처리
+    for si, sx in enumerate(sup_x_in):
+        if si < len(sup) and sup[si] == 'F':
+            best_i = min(range(n), key=lambda idx: abs(x_in[idx] - sx))
+            bc_dofs.add(2 * best_i + 1)  # θ = 0
+
+    free_dofs = sorted(i for i in range(ndof) if i not in bc_dofs)
+    Kff = K_global[_np.ix_(free_dofs, free_dofs)]
+    Ff = F_global[free_dofs]
+
+    try:
+        d_free = _np.linalg.solve(Kff, Ff)
+        d_full = _np.zeros(ndof)
+        for i, fi in enumerate(free_dofs):
+            d_full[fi] = d_free[i]
+        delta = [d_full[2 * i] for i in range(n)]
+    except Exception:
+        delta = [0.0] * n
 
     return [round(d, 5) for d in delta]
+
+
+def analyze_beam_fe(
+    spans: List[float],
+    w_plf_list: List[float],
+    supports: List[str] = None,
+    laps_per_support: list = None,
+    I_base_in4: float = 1.0,
+    I_lap_ratio: float = 2.0,
+    E_ksi: float = 29500.0,
+    n_pts_per_span: int = 51,
+) -> BeamResult:
+    """직접 강성법(FE)으로 연속보의 M, V, R, δ를 동시 계산
+
+    비등단면(Lap 구간 EI 증가)을 정확히 반영하여
+    모멘트 재분배와 처짐을 일관되게 산출한다.
+
+    Parameters
+    ----------
+    spans : 각 스팬 길이 (ft)
+    w_plf_list : 각 스팬의 등분포하중 (plf)
+    supports : 지점 조건 ['P','P',...] — P/R/F/N
+    laps_per_support : 지점별 랩 [{left_ft:, right_ft:}, ...]
+    I_base_in4 : 기본 단면2차모멘트 (in^4)
+    I_lap_ratio : 랩 구간 Ix 배율 (기본 2.0)
+    E_ksi : 탄성계수 (ksi)
+    n_pts_per_span : 스팬당 절점 수
+
+    Returns
+    -------
+    BeamResult with M (kip-ft), V (kips), R (kips), D (in.)
+    """
+    import numpy as _np
+
+    n_spans = len(spans)
+    if not supports:
+        supports = ['P'] * (n_spans + 1)
+    sup = [s[0].upper() if s else 'P' for s in supports]
+
+    # 전체 절점 생성 (ft 단위)
+    x_ft = []
+    for si in range(n_spans):
+        n_seg = n_pts_per_span if si < n_spans - 1 else n_pts_per_span
+        x_start = sum(spans[:si])
+        for j in range(n_seg):
+            x_ft.append(x_start + spans[si] * j / (n_seg - 1))
+    # 마지막 점 중복 제거
+    x_ft_clean = [x_ft[0]]
+    for i in range(1, len(x_ft)):
+        if x_ft[i] > x_ft_clean[-1] + 1e-8:
+            x_ft_clean.append(x_ft[i])
+    x_ft = x_ft_clean
+    n = len(x_ft)
+    x_in = [x * 12.0 for x in x_ft]  # ft → in
+
+    # 지점 x좌표 (in)
+    sup_x_in = [0.0]
+    for s in spans:
+        sup_x_in.append(sup_x_in[-1] + s * 12.0)
+
+    # 각 절점의 I 결정 (Lap 구간이면 I × ratio)
+    I_at_x = [I_base_in4] * n
+    if laps_per_support:
+        for si in range(min(len(sup_x_in), len(laps_per_support))):
+            lap = laps_per_support[si]
+            if not lap:
+                continue
+            lL = (lap.get('left_ft') or lap.get('left') or 0) * 12.0
+            lR = (lap.get('right_ft') or lap.get('right') or 0) * 12.0
+            if lL <= 0 and lR <= 0:
+                continue
+            sx = sup_x_in[si]
+            for i in range(n):
+                if (sx - lL) <= x_in[i] <= (sx + lR):
+                    I_at_x[i] = I_base_in4 * I_lap_ratio
+
+    # 각 절점의 등분포하중 (kip/in)
+    w_at_x = [0.0] * n
+    for si in range(n_spans):
+        w_kip_in = w_plf_list[si] / 1000.0 / 12.0  # plf → kip/in
+        x_start = sum(spans[:si]) * 12.0
+        x_end = x_start + spans[si] * 12.0
+        for i in range(n):
+            if x_start - 1e-6 <= x_in[i] <= x_end + 1e-6:
+                w_at_x[i] = w_kip_in
+
+    # Beam FE 조립: 2 DOF/node (δ, θ)
+    ndof = 2 * n
+    K = _np.zeros((ndof, ndof))
+    F = _np.zeros(ndof)
+
+    for i in range(n - 1):
+        Le = x_in[i + 1] - x_in[i]
+        if Le < 1e-10:
+            continue
+        EI_e = E_ksi * (I_at_x[i] + I_at_x[i + 1]) / 2.0
+        w_e = (w_at_x[i] + w_at_x[i + 1]) / 2.0  # 요소 평균 하중
+
+        # Euler-Bernoulli 보 요소 강성행렬
+        c = EI_e / Le ** 3
+        ke = c * _np.array([
+            [12,    6*Le,   -12,    6*Le],
+            [6*Le,  4*Le**2, -6*Le, 2*Le**2],
+            [-12,  -6*Le,    12,   -6*Le],
+            [6*Le,  2*Le**2, -6*Le, 4*Le**2],
+        ])
+
+        # 등분포하중 등가절점하중
+        fe = w_e * Le / 2.0 * _np.array([1.0, Le/6.0, 1.0, -Le/6.0])
+
+        dofs = [2*i, 2*i+1, 2*(i+1), 2*(i+1)+1]
+        for a in range(4):
+            F[dofs[a]] += fe[a]
+            for b in range(4):
+                K[dofs[a], dofs[b]] += ke[a, b]
+
+    # 경계조건
+    bc_dofs = set()
+    sup_node_indices = []
+    for si, sx in enumerate(sup_x_in):
+        if si < len(sup) and sup[si] != 'N':
+            best_i = min(range(n), key=lambda idx: abs(x_in[idx] - sx))
+            bc_dofs.add(2 * best_i)  # δ = 0
+            sup_node_indices.append(best_i)
+            if sup[si] == 'F':
+                bc_dofs.add(2 * best_i + 1)  # θ = 0
+
+    free_dofs = sorted(i for i in range(ndof) if i not in bc_dofs)
+
+    try:
+        Kff = K[_np.ix_(free_dofs, free_dofs)]
+        Ff = F[free_dofs]
+        d_free = _np.linalg.solve(Kff, Ff)
+        d_full = _np.zeros(ndof)
+        for i, fi in enumerate(free_dofs):
+            d_full[fi] = d_free[i]
+    except Exception:
+        d_full = _np.zeros(ndof)
+
+    # 처짐 추출
+    delta = [d_full[2 * i] for i in range(n)]
+
+    # 요소 내력 추출 (M, V)
+    M_kipin = [0.0] * n
+    V_kips = [0.0] * n
+
+    for i in range(n - 1):
+        Le = x_in[i + 1] - x_in[i]
+        if Le < 1e-10:
+            continue
+        EI_e = E_ksi * (I_at_x[i] + I_at_x[i + 1]) / 2.0
+        w_e = (w_at_x[i] + w_at_x[i + 1]) / 2.0
+
+        # 요소 절점 변위
+        de = _np.array([d_full[2*i], d_full[2*i+1], d_full[2*(i+1)], d_full[2*(i+1)+1]])
+
+        # 요소 강성행렬 × 절점변위 = 절점력
+        c = EI_e / Le ** 3
+        ke = c * _np.array([
+            [12,    6*Le,   -12,    6*Le],
+            [6*Le,  4*Le**2, -6*Le, 2*Le**2],
+            [-12,  -6*Le,    12,   -6*Le],
+            [6*Le,  2*Le**2, -6*Le, 4*Le**2],
+        ])
+        fe_fixed = w_e * Le / 2.0 * _np.array([1.0, Le/6.0, 1.0, -Le/6.0])
+        f_elem = ke @ de - fe_fixed  # 요소 절점력 (고정단 하중 제거)
+
+        # V = -f_elem[0] (좌측 전단력), M = f_elem[1] (좌측 모멘트)
+        V_kips[i] = -f_elem[0]     # 좌측 전단
+        M_kipin[i] = f_elem[1]     # 좌측 모멘트
+        # 우측 값 (마지막 요소에서 n-1 절점)
+        if i == n - 2:
+            V_kips[i + 1] = f_elem[2]
+            M_kipin[i + 1] = -f_elem[3]
+
+    # 단위 변환: M kip-in → kip-ft, V는 그대로 kips
+    M_kipft = [m / 12.0 for m in M_kipin]
+
+    # 지점 반력 추출: R = F_internal - F_applied (구속 DOF)
+    F_internal = K @ d_full
+    reactions = []
+    for si_node in sup_node_indices:
+        R_i = F_internal[2 * si_node] - F[2 * si_node]
+        reactions.append(round(abs(R_i), 4))
+
+    result = BeamResult(x_ft, M_kipft, V_kips, reactions, n)
+    result.D = [round(d, 5) for d in delta]
+    return result
 
 
 def extract_max_deflection_per_span(

@@ -82,7 +82,7 @@ def handle_request(request: dict) -> dict:
         elif method == 'yieldMP':
             node = np.array(params['node'], dtype=float)
             elem = np.array(params['elem'], dtype=float)
-            fy = params.get('fy', 50.0)
+            fy = params.get('fy', 52.94)
             props = grosprop(node, elem)
             result = yieldMP(
                 node, fy, props['A'], props['xcg'], props['zcg'],
@@ -125,7 +125,7 @@ def handle_request(request: dict) -> dict:
         elif method == 'plastic':
             node = np.array(params['node'], dtype=float)
             elem = np.array(params['elem'], dtype=float)
-            fy = params.get('fy', 50.0)
+            fy = params.get('fy', 52.94)
             result = pmm_plastic(node, elem, fy)
             return {'id': req_id, 'result': {
                 'P': result['P'].flatten().tolist(),
@@ -175,7 +175,7 @@ def handle_request(request: dict) -> dict:
         elif method == 'firstyield':
             node = np.array(params['node'], dtype=float)
             elem = np.array(params['elem'], dtype=float)
-            fy = params.get('fy', 50.0)
+            fy = params.get('fy', 52.94)
             result = firstyield(node, elem, fy)
             return {'id': req_id, 'result': result}
 
@@ -183,7 +183,7 @@ def handle_request(request: dict) -> dict:
             node = np.array(params['node'], dtype=float)
             elem = np.array(params['elem'], dtype=float)
             curve = params.get('curve', [])
-            fy = params.get('fy', 50.0)
+            fy = params.get('fy', 52.94)
             load_type = params.get('load_type', 'P')
             result = extract_dsm_values(curve, node, elem, fy, load_type)
             return {'id': req_id, 'result': result}
@@ -230,7 +230,7 @@ def handle_request(request: dict) -> dict:
                 t=params.get('t', 0),
                 R=params.get('R', 0),
                 N=params.get('N', 0),
-                Fy=params.get('Fy', 50),
+                Fy=params.get('Fy', 52.94),
                 theta=params.get('theta', 90),
                 support=params.get('support', 'EOF'),
                 fastened=params.get('fastened', 'fastened'),

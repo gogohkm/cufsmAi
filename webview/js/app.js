@@ -45,7 +45,8 @@
         linload:  { factor: 0.01459,   us: 'plf',   si: 'kN/m', decimals: {us: 0, si: 3} },
         thickness:{ factor: 25.4,      us: 'in',    si: 'mm',   decimals: {us: 4, si: 2} },
         radius:   { factor: 25.4,      us: 'in',    si: 'mm',   decimals: {us: 4, si: 1} },
-        rotStiff: { factor: 0.004448/0.0254, us: 'k-in/rad/in', si: 'kN-m/rad/m', decimals: {us: 4, si: 4} },
+        rotStiff: { factor: 4.44822,   us: 'kip-in/rad/in', si: 'kN-m/rad/m', decimals: {us: 4, si: 4} },
+        latStiff: { factor: 4.44822 / (0.0254 * 0.0254), us: 'kip/in/in', si: 'kN/m/m', decimals: {us: 3, si: 1} },
     };
 
     /** US 내부값 → 표시값 변환 */
@@ -88,8 +89,9 @@
             ['tpl-H','length'],['tpl-B','length'],['tpl-D','length'],
             ['tpl-t','thickness'],['tpl-r','radius'],
             ['input-E','stress'],['input-G','stress'],
-            ['input-fy-load','stress'],['input-fy','stress'],
+            ['input-fy','stress'],['input-fu','stress'],['plastic-fy','stress'],
             ['input-len-min','length'],['input-len-max','length'],
+            ['input-load-P','force'],['input-load-Mxx','moment'],['input-load-Mzz','moment'],
             ['design-fy','stress'],['design-fu','stress'],
             ['design-KxLx','length'],['design-KyLy','length'],
             ['design-KtLt','length'],['design-Lb','length'],
@@ -97,7 +99,7 @@
             ['design-Mx','moment'],['design-My','moment'],
             ['design-wc-N','length'],['design-wc-R','radius'],
             ['config-spacing','length_ft'],
-            ['deck-t-panel','thickness'],['deck-fastener-spacing','length'],
+            ['deck-t-panel','thickness'],['deck-fastener-spacing','length'],['deck-kphi-override','rotStiff'],
             ['load-D-psf','pressure'],['load-Lr-psf','pressure'],
             ['load-S-psf','pressure'],['load-Wu-psf','pressure'],
             ['load-L-psf','pressure'],
@@ -127,6 +129,24 @@
             const ut = el.getAttribute('data-unit');
             el.textContent = unitLabel(ut);
         });
+        if (model) {
+            renderNodeTable();
+            renderElemTable();
+            renderStressPreview();
+        }
+        if (typeof propagateFyFuFromPreprocessor === 'function') {
+            propagateFyFuFromPreprocessor();
+        }
+        if (lastDsmResult) {
+            renderDsmResults(lastDsmResult);
+        }
+        if (_lastDesignResult) {
+            renderDesignResult(_lastDesignResult);
+        }
+        const activeReportContainer = document.getElementById('report-container');
+        if (activeReportContainer && activeReportContainer.innerHTML && typeof generateDetailedReport === 'function') {
+            activeReportContainer.innerHTML = generateDetailedReport();
+        }
         // (2) 단면 성질 테이블이 표시 중이면 다시 렌더링
         if (lastProps) updatePropertiesTable(lastProps);
         // (3) 하중 해석 결과가 있으면 다시 렌더링
@@ -178,7 +198,8 @@
                     model.elem = msg.data.elem;
                     // 균일 응력 기본값
                     if (model.node) {
-                        model.node.forEach(n => { if (n[7] === 1) { n[7] = 50.0; } });
+                        const defaultFy = fromDisplay(getNum('input-fy', 35.53), 'stress');
+                        model.node.forEach(n => { n[7] = defaultFy; });
                     }
                     renderPreprocessor();
                     renderStressPreview();
@@ -321,9 +342,9 @@
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${i + 1}</td>
-                <td><input type="number" value="${n[1]}" step="0.1" data-row="${i}" data-col="1"></td>
-                <td><input type="number" value="${n[2]}" step="0.1" data-row="${i}" data-col="2"></td>
-                <td><input type="number" value="${n[7]}" step="1" data-row="${i}" data-col="7"></td>
+                <td><input type="number" value="${toDisplay(n[1], 'length')}" step="${_unitSystem === 'SI' ? '1' : '0.1'}" data-row="${i}" data-col="1"></td>
+                <td><input type="number" value="${toDisplay(n[2], 'length')}" step="${_unitSystem === 'SI' ? '1' : '0.1'}" data-row="${i}" data-col="2"></td>
+                <td><input type="number" value="${toDisplay(n[7], 'stress')}" step="${_unitSystem === 'SI' ? '5' : '1'}" data-row="${i}" data-col="7"></td>
             `;
             tbody.appendChild(tr);
         });
@@ -339,7 +360,7 @@
                 <td>${i + 1}</td>
                 <td>${e[1]}</td>
                 <td>${e[2]}</td>
-                <td><input type="number" value="${e[3]}" step="0.01" data-row="${i}" data-col="3"></td>
+                <td><input type="number" value="${toDisplay(e[3], 'thickness')}" step="${_unitSystem === 'SI' ? '0.1' : '0.01'}" data-row="${i}" data-col="3"></td>
             `;
             tbody.appendChild(tr);
         });
@@ -744,7 +765,7 @@
     if (btnPlastic) {
         btnPlastic.addEventListener('click', () => {
             if (!model || !model.node || model.node.length === 0) { return; }
-            const fy = fromDisplay(getNum('input-fy', 52.94), 'stress');
+            const fy = fromDisplay(getNum('plastic-fy', getNum('input-fy', 35.53)), 'stress');
             vscode.postMessage({
                 command: 'runPlastic',
                 data: { node: model.node, elem: model.elem, fy }
@@ -1047,8 +1068,8 @@
             if (!sectionType) { return; }
 
             const params = {
-                H: fromDisplay(getNum('tpl-H', 7.874), 'length'),
-                B: fromDisplay(getNum('tpl-B', 2.953), 'length'),
+                H: fromDisplay(getNum('tpl-H', 3.937), 'length'),
+                B: fromDisplay(getNum('tpl-B', 1.969), 'length'),
                 D: fromDisplay(getNum('tpl-D', 0.787), 'length'),
                 t: fromDisplay(getNum('tpl-t', 0.0906), 'thickness'),
                 r: fromDisplay(getNum('tpl-r', 0.157), 'radius'),
@@ -1084,7 +1105,7 @@
         }
 
         const loadCase = document.getElementById('select-load-case')?.value || 'compression';
-        const fy = fromDisplay(getNum('input-fy-load', 52.94), 'stress');
+        const fy = fromDisplay(getNum('input-fy', 35.53), 'stress');
         const nodes = model.node;
 
         // 선택된 Load Case에 따른 응력 계산 (해석 전 프리뷰용 간이 계산)
@@ -1241,16 +1262,10 @@
             }
             renderStressPreview();
         });
-        // Fy 변경 시에도 프리뷰 갱신
-        const fyInput = document.getElementById('input-fy-load');
+        // Fy 변경 시에도 프리뷰 갱신 (전처리 탭의 input-fy)
+        const fyInput = document.getElementById('input-fy');
         if (fyInput) {
             fyInput.addEventListener('input', renderStressPreview);
-            // input-fy-load 변경 시 다른 탭 Fy 동기화
-            fyInput.addEventListener('input', () => {
-                const v = fyInput.value;
-                setValue('input-fy', v);
-                setValue('design-fy', v);
-            });
         }
         // custom 하중 변경 시
         ['input-load-P', 'input-load-Mxx', 'input-load-Mzz'].forEach(id => {
@@ -1261,7 +1276,7 @@
 
     // E 또는 v 변경 시 G = E / (2*(1+v)) 자동 계산
     function updateG() {
-        const E = getNum('input-E', 29500);
+        const E = getNum('input-E', 29733);
         const v = getNum('input-v', 0.3);
         if (E > 0 && v >= 0 && v < 0.5) {
             const G = E / (2 * (1 + v));
@@ -1291,9 +1306,9 @@
             const lengths = logspace(Math.log10(lenMin), Math.log10(lenMax), lenN);
             const m_all = lengths.map(() => [1]);
 
-            const E = fromDisplay(getNum('input-E', 29500), 'stress');
+            const E = fromDisplay(getNum('input-E', 29733), 'stress');
             const v = getNum('input-v', 0.3);
-            const G = fromDisplay(getNum('input-G', 11346), 'stress');
+            const G = fromDisplay(getNum('input-G', 11436), 'stress');
 
             // 모델 업데이트
             model.prop = [[100, E, E, v, v, G]];
@@ -1304,7 +1319,7 @@
 
             // Load Case에 따라 stress 자동 설정
             const loadCase = /** @type {HTMLSelectElement} */ (document.getElementById('select-load-case'))?.value || 'compression';
-            const fyLoad = fromDisplay(getNum('input-fy-load', 52.94), 'stress');
+            const fyLoad = fromDisplay(getNum('input-fy', 35.53), 'stress');
 
             if (loadCase === 'compression') {
                 vscode.postMessage({
@@ -1336,9 +1351,9 @@
                     command: 'setStress',
                     data: {
                         type: 'custom',
-                        P: getNum('input-load-P', 0),
-                        Mxx: getNum('input-load-Mxx', 0),
-                        Mzz: getNum('input-load-Mzz', 0),
+                        P: fromDisplay(getNum('input-load-P', 0), 'force'),
+                        Mxx: fromDisplay(getNum('input-load-Mxx', 0), 'moment'),
+                        Mzz: fromDisplay(getNum('input-load-Mzz', 0), 'moment'),
                     }
                 });
             }
@@ -2012,8 +2027,8 @@
         // design-fy 변경 시 다른 탭 Fy 동기화
         fyEl.addEventListener('input', () => {
             const v = fyEl.value;
-            setValue('input-fy-load', v);
             setValue('input-fy', v);
+            setValue('plastic-fy', v);
         });
     }
 
@@ -2059,52 +2074,92 @@
         return '<span class="spec-ref" data-tip="' + section + ': ' + tip + '">§' + section + '</span>';
     }
 
-    // --- Fy 동기화: 3개 탭의 Fy 필드를 일괄 갱신 ---
-    // 모든 Fy 필드는 display 단위(SI이면 MPa, US이면 ksi)로 저장
-    function syncFy(fyDisplayValue) {
-        setValue('input-fy-load', fyDisplayValue);
-        setValue('input-fy', fyDisplayValue);
-        setValue('design-fy', fyDisplayValue);
+    // --- Fy/Fu 단일 소스: 전처리 탭 input-fy, input-fu ---
+    // 전처리 Fy 변경 → 설계탭 읽기전용 필드 + 해석탭 표시 갱신
+    const gradeMap = {
+        'SGC400': [35.53, 58.02], 'SGC440': [42.79, 63.82],
+        'SGC490': [52.94, 71.08], 'SGC570': [81.22, 82.67],
+        'SSC400': [35.53, 58.02],
+        'A653-33': [33,45], 'A653-50': [50,65], 'A653-55': [55,70], 'A653-80': [80,82],
+        'A792-33': [33,45], 'A792-50': [50,65], 'A792-80': [80,82],
+        'A1003-33': [33,45], 'A1003-50': [50,65],
+    };
+
+    function syncFyValue(fyVal) {
+        setValue('input-fy', fyVal);
+        setValue('design-fy', fyVal);
+        setValue('plastic-fy', fyVal);
     }
 
-    // input-fy (후처리 탭) 변경 시 다른 탭 Fy 동기화
-    const fyPostEl = document.getElementById('input-fy');
-    if (fyPostEl) {
-        fyPostEl.addEventListener('input', () => {
-            const v = fyPostEl.value;
-            setValue('input-fy-load', v);
-            setValue('design-fy', v);
-        });
+    function syncFuValue(fuVal) {
+        setValue('input-fu', fuVal);
+        setValue('design-fu', fuVal);
     }
 
-    // 강재 등급 선택 시 Fy/Fu 자동 설정
-    const selGrade = document.getElementById('select-steel-grade');
-    if (selGrade) {
-        const gradeMap = {
-            // KS D 3506 (용융아연도금) — Fy/Fu in ksi (내부 US 단위)
-            'SGC400': [35.53, 58.02], 'SGC440': [42.79, 63.82],
-            'SGC490': [52.94, 71.08], 'SGC570': [81.22, 82.67],
-            // KS D 3530 (경량형강)
-            'SSC400': [35.53, 58.02],
-            // ASTM
-            'A653-33': [33,45], 'A653-50': [50,65], 'A653-55': [55,70], 'A653-80': [80,82],
-            'A792-33': [33,45], 'A792-50': [50,65], 'A792-80': [80,82],
-            'A1003-33': [33,45], 'A1003-50': [50,65],
-        };
-        selGrade.addEventListener('change', () => {
-            const v = gradeMap[selGrade.value];
+    function updateAnalysisFyDisplay(fyVal) {
+        const fyDisp = document.getElementById('analysis-fy-display');
+        if (fyDisp) {
+            const unit = unitLabel('stress');
+            fyDisp.textContent = 'Fy: ' + fyVal + ' ' + unit;
+        }
+        // 재해석 필요 경고
+        if (analysisResult) {
+            const fyDisp2 = document.getElementById('analysis-fy-display');
+            if (fyDisp2) fyDisp2.style.color = 'var(--vscode-inputValidation-warningForeground, #ffab00)';
+        }
+    }
+
+    function propagateFyFuFromPreprocessor() {
+        const fyVal = document.getElementById('input-fy')?.value || '35.53';
+        const fuVal = document.getElementById('input-fu')?.value || '58.02';
+        syncFyValue(fyVal);
+        syncFuValue(fuVal);
+        updateAnalysisFyDisplay(fyVal);
+    }
+
+    function propagateFyFromPlastic() {
+        const fyVal = document.getElementById('plastic-fy')?.value
+            || document.getElementById('input-fy')?.value
+            || '35.53';
+        syncFyValue(fyVal);
+        updateAnalysisFyDisplay(fyVal);
+    }
+
+    // 전처리 강종 선택
+    const selGradePre = document.getElementById('input-steel-grade');
+    if (selGradePre) {
+        selGradePre.addEventListener('change', () => {
+            const v = gradeMap[selGradePre.value];
             if (v) {
-                const fyDisp = toDisplay(v[0], 'stress');
-                setValue('design-fu', toDisplay(v[1], 'stress'));
-                syncFy(fyDisp);                // 3개 탭 Fy 일괄 동기화
-                // 유효성 검증 및 프리뷰 갱신을 위해 input 이벤트 dispatch
-                ['design-fy', 'design-fu', 'input-fy-load'].forEach(id => {
-                    const el = document.getElementById(id);
-                    if (el) el.dispatchEvent(new Event('input'));
-                });
+                setValue('input-fy', toDisplay(v[0], 'stress'));
+                setValue('input-fu', toDisplay(v[1], 'stress'));
+                propagateFyFuFromPreprocessor();
             }
         });
     }
+
+    // 전처리 Fy/Fu 수동 변경
+    const fyPreEl = document.getElementById('input-fy');
+    const fuPreEl = document.getElementById('input-fu');
+    const fyPlasticEl = document.getElementById('plastic-fy');
+    if (fyPreEl) fyPreEl.addEventListener('input', propagateFyFuFromPreprocessor);
+    if (fuPreEl) fuPreEl.addEventListener('input', propagateFyFuFromPreprocessor);
+    if (fyPlasticEl) fyPlasticEl.addEventListener('input', propagateFyFromPlastic);
+
+    // 설계탭 강종 선택 (하위호환: 아직 HTML에 남아있을 경우)
+    const selGrade = document.getElementById('select-steel-grade');
+    if (selGrade) {
+        selGrade.addEventListener('change', () => {
+            const v = gradeMap[selGrade.value];
+            if (v) {
+                setValue('input-fy', toDisplay(v[0], 'stress'));
+                setValue('input-fu', toDisplay(v[1], 'stress'));
+                propagateFyFuFromPreprocessor();
+            }
+        });
+    }
+
+    propagateFyFuFromPreprocessor();
 
     // Calculator 모드 판별
     const CALC_MODES = ['roof-purlin', 'floor-joist', 'wall-girt', 'wall-stud'];
@@ -2159,22 +2214,22 @@
                 // 지점 번호
                 html += '<td style="padding:2px;text-align:center;color:var(--vscode-descriptionForeground)">' + (i + 1) + '</td>';
                 // 지점 조건
-                html += '<td style="padding:1px"><select class="span-tbl-sup" data-idx="' + i + '" style="width:100%;font-size:10px;padding:1px">' + supOptions + '</select></td>';
+                html += '<td style="padding:2px 3px"><select class="span-tbl-sup" data-idx="' + i + '" style="width:100%;font-size:10px;padding:2px 4px">' + supOptions + '</select></td>';
                 // 스팬 길이 (지점 i 오른쪽 스팬, 마지막 지점에는 없음)
                 if (i < n) {
-                    html += '<td style="padding:1px"><input type="number" class="span-tbl-len" data-idx="' + i + '" value="25" step="0.5" style="width:100%;font-size:10px;padding:1px;text-align:right"></td>';
+                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-len" data-idx="' + i + '" value="16.404" step="0.5" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }
                 // Lap L (해당 지점 좌측 랩, 첫 지점은 없음)
                 if (i > 0 && !isSimple) {
-                    html += '<td style="padding:1px"><input type="number" class="span-tbl-lapl" data-idx="' + i + '" value="' + (isEnd ? '0' : '1.25') + '" step="0.25" style="width:100%;font-size:10px;padding:1px;text-align:right"></td>';
+                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-lapl" data-idx="' + i + '" value="' + (isEnd ? '0' : '1.640') + '" step="0.25" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }
                 // Lap R (해당 지점 우측 랩, 마지막 지점은 없음)
                 if (i < n && !isSimple) {
-                    html += '<td style="padding:1px"><input type="number" class="span-tbl-lapr" data-idx="' + i + '" value="' + (isEnd ? '0' : '2.75') + '" step="0.25" style="width:100%;font-size:10px;padding:1px;text-align:right"></td>';
+                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-lapr" data-idx="' + i + '" value="' + (isEnd ? '0' : '1.640') + '" step="0.25" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }
@@ -2273,8 +2328,8 @@
             const data = {
                 member_type: memberType,
                 design_method: designMethod,
-                Fy: fromDisplay(getNum('design-fy', 52.94), 'stress'),
-                Fu: fromDisplay(getNum('design-fu', 71.08), 'stress'),
+                Fy: fromDisplay(getNum('design-fy', 35.53), 'stress'),
+                Fu: fromDisplay(getNum('design-fu', 58.02), 'stress'),
                 KxLx: fromDisplay(getNum('design-KxLx', 118.11), 'length'),
                 KyLy: fromDisplay(getNum('design-KyLy', 118.11), 'length'),
                 KtLt: fromDisplay(getNum('design-KtLt', 118.11), 'length'),
@@ -2325,14 +2380,14 @@
             const secType = selTemplate ? selTemplate.value : '';
             // UI 입력 → US 내부값 변환 (엔진은 항상 US 단위)
             const sectionInfo = {
-                depth: fromDisplay(getNum('tpl-H', 0), 'length'),
-                flange_width: fromDisplay(getNum('tpl-B', 0), 'length'),
-                thickness: fromDisplay(getNum('tpl-t', 0), 'thickness'),
-                lip_depth: fromDisplay(getNum('tpl-D', 0), 'length'),
-                R_corner: fromDisplay(getNum('tpl-r', 0), 'radius'),
+                depth: fromDisplay(getNum('tpl-H', 3.937), 'length'),
+                flange_width: fromDisplay(getNum('tpl-B', 1.969), 'length'),
+                thickness: fromDisplay(getNum('tpl-t', 0.0906), 'thickness'),
+                lip_depth: fromDisplay(getNum('tpl-D', 0.787), 'length'),
+                R_corner: fromDisplay(getNum('tpl-r', 0.157), 'radius'),
                 type: secType === 'lippedz' ? 'Z' : 'C',
-                Fy: fromDisplay(getNum('design-fy', 52.94), 'stress'),
-                Fu: fromDisplay(getNum('design-fu', 71.08), 'stress'),
+                Fy: fromDisplay(getNum('design-fy', 35.53), 'stress'),
+                Fu: fromDisplay(getNum('design-fu', 58.02), 'stress'),
                 Ixx: lastProps ? lastProps.Ixx : 0,  // US in^4 (내부값)
             };
 
@@ -2396,7 +2451,11 @@
                     type: /** @type {HTMLSelectElement} */ (document.getElementById('select-deck-type'))?.value || 'none',
                     t_panel: fromDisplay(getNum('deck-t-panel', 0.0197), 'thickness'),
                     fastener_spacing: fromDisplay(getNum('deck-fastener-spacing', 11.81), 'length'),
-                    kphi_override: getNum('deck-kphi-override', null) || null,
+                    kphi_override: (() => {
+                        const raw = /** @type {HTMLInputElement} */ (document.getElementById('deck-kphi-override'))?.value;
+                        if (raw == null || raw.trim() === '') { return null; }
+                        return fromDisplay(parseFloat(raw), 'rotStiff');
+                    })(),
                 },
                 section: (sectionInfo.depth > 0 && sectionInfo.thickness > 0) ? sectionInfo : null,
             };
@@ -2719,7 +2778,7 @@
             const dVals = _unitSystem === 'SI'
                 ? data.deflection.D_diagram.map(v => toDisplay(v, 'length'))
                 : data.deflection.D_diagram;
-            html += renderDiagramSVG(dVals, '처짐 (' + _rul('length') + ') — ' + data.deflection.combo, '#66bb6a', false);
+            html += renderDiagramSVG(dVals, '처짐 (' + _rul('length') + ') — ' + data.deflection.combo, '#66bb6a', true);
 
             if (data.deflection.per_span && data.deflection.per_span.length > 0) {
                 const lU = _rul('length_ft'), dU = _rul('length');
@@ -2739,7 +2798,10 @@
             const ap = data.auto_params;
             html += '<div style="font-size:11px;margin-top:6px;padding:4px;border:1px solid var(--vscode-panel-border);border-radius:3px">';
             html += '<strong>Auto Parameters:</strong><br>';
-            if (ap.deck) html += 'Deck: k&phi;=' + ap.deck.kphi + ', kx=' + ap.deck.kx + '<br>';
+            if (ap.deck) {
+                html += 'Deck: k&phi;=' + _ruv(ap.deck.kphi, 'rotStiff') + ' ' + _rul('rotStiff') +
+                    ', kx=' + _ruv(ap.deck.kx, 'latStiff') + ' ' + _rul('latStiff') + '<br>';
+            }
             if (ap.positive_region) html += 'Positive: braced=' + ap.positive_region.braced + '<br>';
             if (ap.negative_region) html += 'Negative: Ly=' + fmtVal(ap.negative_region.Ly_in, 'length') + ' ' + unitLabel('length') + ', Cb=' + ap.negative_region.Cb + '<br>';
             if (ap.uplift_R != null) html += 'Uplift R=' + ap.uplift_R;
@@ -2930,7 +2992,7 @@
                 if (isGov) stepsHtml += '<span class="governing-badge">지배</span>';
                 if (s.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(s.equation) + '</span>';
                 stepsHtml += '</span></div>';
-                if (s.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + s.formula + '</div>';
+                if (s.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + _convertFormulaUnits(s.formula) + '</div>';
                 if (s.value != null) {
                     const sut = _mapUSUnit(s.unit);
                     const sv = sut ? fmtVal(s.value, sut) : s.value;
@@ -2949,7 +3011,7 @@
                 if (isGov) stepsHtml += '<span class="governing-badge">지배</span>';
                 if (ls.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(ls.equation) + '</span>';
                 stepsHtml += '</span></div>';
-                if (ls.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + ls.formula + '</div>';
+                if (ls.formula) stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">' + _convertFormulaUnits(ls.formula) + '</div>';
                 stepsHtml += '<div>Rn = <b>' + fmtVal(ls.Rn, 'force') + '</b> ' + unitLabel('force') + ' → <span class="calc-step-value">' + fmtVal(ls.design_strength, 'force') + ' ' + unitLabel('force') + '</span></div>';
                 stepsHtml += '</div>';
             });
@@ -3030,6 +3092,17 @@
         const dispVal = (unitType && typeof value === 'number') ? fmtVal(value, unitType) : (value ?? '-');
         return '<tr><td style="padding:2px 6px;color:#aaa">' + label + '</td>' +
                '<td style="padding:2px 6px;text-align:right"' + style + '><b>' + dispVal + '</b> ' + (unit || '') + '</td></tr>';
+    }
+
+    /** formula 문자열 내의 US 단위 값을 현재 표시 단위로 변환 */
+    function _convertFormulaUnits(formula) {
+        if (!formula || _unitSystem === 'US') return formula;
+        // "123.45 ksi" → "850.52 MPa", "456.78 kip-in" → "51.61 kN-m" 등
+        return formula
+            .replace(/([\d.]+)\s*kip-in/g, (_, n) => fmtVal(parseFloat(n), 'moment') + ' ' + unitLabel('moment'))
+            .replace(/([\d.]+)\s*kips?/g, (_, n) => fmtVal(parseFloat(n), 'force') + ' ' + unitLabel('force'))
+            .replace(/([\d.]+)\s*ksi/g, (_, n) => fmtVal(parseFloat(n), 'stress') + ' ' + unitLabel('stress'))
+            .replace(/([\d.]+)\s*in\./g, (_, n) => fmtVal(parseFloat(n), 'length') + ' ' + unitLabel('length'));
     }
 
     /** US 단위 문자열 → unitType 매핑 (Python step.unit → UNIT key) */
@@ -3320,7 +3393,7 @@
         let h = '';
 
         // 재료 (입력 필드값은 이미 표시 단위 → 직접 사용, US 상수는 _ruv로 변환)
-        const fy = getNum('design-fy',52.94), fu = getNum('design-fu',71.08);
+        const fy = getNum('design-fy',35.53), fu = getNum('design-fu',58.02);
         const gradeEl = document.getElementById('select-steel-grade');
         const gradeName = gradeEl ? gradeEl.options[gradeEl.selectedIndex].text : 'Custom';
         h += '<h3>재료</h3>';
@@ -3457,7 +3530,7 @@
             if (ap.deck && ap.deck.type !== 'none') {
                 h += '<tr><td>k<sub>&phi;</sub> (회전강성)</td><td>'+_ruv(ap.deck.kphi,'rotStiff')+' '+_rul('rotStiff')+'</td>';
                 h += '<td>Chen & Moen (2011): k<sub>&phi;</sub> = 1/(1/(k&middot;c&sup2;) + c&sup3;/(3EIc&sup2;)), k=체결구강성/간격, c=플랜지/2</td></tr>';
-                h += '<tr><td>k<sub>x</sub> (횡강성)</td><td>'+ap.deck.kx+' kip/in/in</td>';
+                h += '<tr><td>k<sub>x</sub> (횡강성)</td><td>'+_ruv(ap.deck.kx,'latStiff')+' '+_rul('latStiff')+'</td>';
                 h += '<td>2겹 직렬 스프링: k<sub>x</sub> = (1/(1/(Et<sub>1</sub>)+1/(Et<sub>2</sub>)))/s &times; 0.04 감소계수</td></tr>';
             }
             if (ap.positive_region) {
@@ -3487,7 +3560,7 @@
             const dVals = _unitSystem === 'SI'
                 ? la.deflection.D_diagram.map(v => toDisplay(v, 'length'))
                 : la.deflection.D_diagram;
-            h += renderDiagramSVG(dVals, '처짐 다이어그램 ('+_rul('length')+')', '#66bb6a', false);
+            h += renderDiagramSVG(dVals, '처짐 다이어그램 ('+_rul('length')+')', '#66bb6a', true);
 
             if (la.deflection.per_span) {
                 h += '<table><tr><th>스팬</th><th>위치</th><th>최대 처짐</th><th>L/δ</th></tr>';
@@ -3772,8 +3845,8 @@
         const la = _lastLoadAnalysis;
         const p = lastProps;
         const dsm = lastDsmResult;
-        const fy = getNum('design-fy', 52.94);
-        const fu = getNum('design-fu', 71.08);
+        const fy = getNum('design-fy', 35.53);
+        const fu = getNum('design-fu', 58.02);
         const H = getNum('tpl-H', 0), B = getNum('tpl-B', 0), D = getNum('tpl-D', 0);
         const t = getNum('tpl-t', 0), r = getNum('tpl-r', 0);
 
@@ -3980,12 +4053,26 @@
                 criterion: '국부좌굴 최솟값이 식별 가능해야 함',
                 note: dM.Mxxcrl <= 0 ? '국부좌굴 최솟값 미발견 — 국부검토를 건너뜁니다 (Mnl=Mne).' : '',
             });
+            // Mcrd: FSM 미발견 시 해석적 fallback 가능 여부 확인
+            const hasFsmMcrd = dM.Mxxcrd > 0;
+            const hasSectionInfo = H > 0 && B > 0 && D > 0 && t > 0;
+            const canFallback = !hasFsmMcrd && hasSectionInfo;
+            let mcrdNote = '';
+            if (hasFsmMcrd) {
+                mcrdNote = '';
+            } else if (canFallback) {
+                mcrdNote = 'FSM 곡선에서 뒤틀림 극소 미검출 → 설계 시 Appendix 2 §2.3.3.3 해석적 공식으로 자동 계산됩니다.';
+            } else {
+                mcrdNote = '뒤틀림좌굴 미발견, 단면 정보 부족으로 해석적 fallback 불가 — Mnd=My. 에지 보강재 유무를 확인하세요.';
+            }
             checks.push({
                 category: catC, item: 'Mcrd 식별 (뒤틀림좌굴)',
-                status: dM.Mxxcrd > 0 ? 'pass' : 'warn',
-                value: dM.Mxxcrd > 0 ? _ruv(dM.Mxxcrd,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrd,'length')+' '+_rul('length')+')' : '미발견',
-                criterion: 'C/Z 단면에서 뒤틀림좌굴 최솟값이 식별 가능해야 함',
-                note: dM.Mxxcrd <= 0 ? '뒤틀림좌굴 미발견 — 뒤틀림 검토를 건너뜁니다 (Mnd=My). 에지 보강재 유무를 확인하세요.' : '',
+                status: hasFsmMcrd ? 'pass' : (canFallback ? 'warn' : 'warn'),
+                value: hasFsmMcrd
+                    ? _ruv(dM.Mxxcrd,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrd,'length')+' '+_rul('length')+')'
+                    : (canFallback ? 'FSM 미발견 → §2.3.3.3 fallback' : '미발견'),
+                criterion: 'C/Z 단면에서 뒤틀림좌굴이 식별되어야 함. 미발견 시 해석적 공식(§2.3.3.3) 사용.',
+                note: mcrdNote,
             });
         }
 
@@ -4202,12 +4289,28 @@
                     criterion: 'Mnd ≤ My; Mnd < My → 뒤틀림좌굴이 강도를 감소시킴',
                     note: d.Mnd != null && d.Mnd >= d.My ? '뒤틀림좌굴 감소 없음 (λd ≤ 0.673).' : '뒤틀림좌굴로 강도 '+(d.My>0?((1-d.Mnd/d.My)*100).toFixed(1):'?')+'% 감소.',
                 });
+                const allSame = (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My);
+                let allSameNote = '';
+                if (allSame) {
+                    const reasons = [];
+                    if (dM && dM.Mxxcrl > 0 && dM.My_xx > 0) {
+                        const lam_l = Math.sqrt(dM.My_xx / dM.Mxxcrl);
+                        if (lam_l < 0.776) reasons.push('λl='+lam_l.toFixed(3)+' < 0.776 (국부좌굴 compact)');
+                    }
+                    if (dM && (dM.Mxxcrd || 0) <= 0) reasons.push('Mcrd 미검출 (해석적 fallback §2.3.3.3 시도)');
+                    if (dM && dM.Mxxcrd > 0 && dM.My_xx > 0) {
+                        const lam_d = Math.sqrt(dM.My_xx / dM.Mxxcrd);
+                        if (lam_d < 0.673) reasons.push('λd='+lam_d.toFixed(3)+' < 0.673 (뒤틀림 compact)');
+                    }
+                    if (reasons.length === 0) reasons.push('DSM 좌굴 감소가 적용되지 않음');
+                    allSameNote = reasons.join('; ') + '. 두께를 줄이거나, Fy를 높이거나, 높이를 키우면 좌굴이 지배할 수 있습니다.';
+                }
                 checks.push({
                     category: catG, item: '모든 Mn 동일 (잠재적 문제)',
-                    status: (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My) ? 'warn' : 'pass',
-                    value: d.Mne === d.My ? 'Mne=Mnl=Mnd=My='+_rv(d.My) : '값이 상이함 (정상)',
+                    status: allSame ? 'warn' : 'pass',
+                    value: allSame ? 'Mne=Mnl=Mnd=My='+_rv(d.My) : '값이 상이함 (정상)',
                     criterion: '네 값 모두 같으면 DSM이 좌굴 감소를 적용하지 않을 수 있음',
-                    note: (d.Mne === d.Mnl && d.Mnl === d.Mnd && d.Mnd === d.My) ? 'DSM 강도가 모두 동일 — FSM 해석에서 Mcrl/Mcrd가 올바르게 추출되었는지 확인하세요.' : '',
+                    note: allSameNote,
                 });
             }
 
@@ -4274,6 +4377,31 @@
                     });
                 });
             }
+
+            // 설계 결과 warnings (Mcrd fallback, R-factor 등)
+            if (d.warnings && d.warnings.length > 0) {
+                d.warnings.forEach((w, i) => {
+                    const isFallback = w.includes('§2.3.3.3') || w.includes('§2.3.1.3');
+                    checks.push({
+                        category: catG, item: isFallback ? '뒤틀림좌굴 해석적 Fallback' : '설계 경고 #'+(i+1),
+                        status: isFallback ? 'pass' : 'warn',
+                        value: w,
+                        criterion: isFallback ? 'FSM 미검출 시 Appendix 2 해석적 공식으로 Fcrd 자동 계산' : '설계 엔진 경고',
+                        note: isFallback ? '§2.3.3.3 해석적 공식이 적용되었습니다.' : '',
+                    });
+                });
+            }
+
+            // dsm_warning (DSM 추출 경고)
+            if (d.dsm_warning) {
+                checks.push({
+                    category: catG, item: 'DSM 추출 경고',
+                    status: 'warn',
+                    value: d.dsm_warning,
+                    criterion: 'DSM 값이 올바르게 추출되어야 함',
+                    note: '',
+                });
+            }
         }
 
         // ════════════════════════════════════════
@@ -4282,7 +4410,7 @@
         const catH = 'H. 일관성';
 
         // Fy 일치 여부 확인
-        const fyLoad = getNum('input-fy-load', 52.94);
+        const fyLoad = getNum('input-fy', 35.53);
         checks.push({
             category: catH, item: 'Fy 일관성 (해석 vs 설계)',
             status: Math.abs(fy - fyLoad) < 0.1 ? 'pass' : 'warn',
@@ -4359,8 +4487,8 @@
         const data = {};
         // Material
         data.steelGrade = document.getElementById('select-steel-grade')?.value || 'custom';
-        data.fy = fromDisplay(getNum('design-fy', 52.94), 'stress');
-        data.fu = fromDisplay(getNum('design-fu', 71.08), 'stress');
+        data.fy = fromDisplay(getNum('design-fy', 35.53), 'stress');
+        data.fu = fromDisplay(getNum('design-fu', 58.02), 'stress');
         // Design method
         data.designMethod = document.getElementById('select-design-method')?.value || 'LRFD';
         data.analysisMethod = document.getElementById('select-analysis-method')?.value || 'DSM';
@@ -4393,7 +4521,10 @@
         data.deckType = document.getElementById('select-deck-type')?.value || 'none';
         data.deckTPanel = fromDisplay(getNum('deck-t-panel', 0.0197), 'thickness');
         data.deckFastenerSpacing = fromDisplay(getNum('deck-fastener-spacing', 11.81), 'length');
-        data.deckKphiOverride = fromDisplay(getNum('deck-kphi-override', 0), 'rotStiff');
+        const deckKphiOverrideEl = /** @type {HTMLInputElement} */ (document.getElementById('deck-kphi-override'));
+        data.deckKphiOverride = deckKphiOverrideEl && deckKphiOverrideEl.value.trim() !== ''
+            ? fromDisplay(parseFloat(deckKphiOverrideEl.value), 'rotStiff')
+            : null;
         // Unbraced lengths
         data.KxLx = fromDisplay(getNum('design-KxLx', 118.11), 'length');
         data.KyLy = fromDisplay(getNum('design-KyLy', 118.11), 'length');
@@ -4420,7 +4551,7 @@
         data.tplR = fromDisplay(getNum('tpl-r', 0.157), 'radius');
         data.tplQlip = getNum('tpl-qlip', 90);
         // Analysis config
-        data.fyLoad = fromDisplay(getNum('input-fy-load', 52.94), 'stress');
+        data.fyLoad = fromDisplay(getNum('input-fy', 35.53), 'stress');
         return data;
     }
 
@@ -4430,8 +4561,12 @@
         function setSelect(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
         // Material
         if (data.steelGrade) setSelect('select-steel-grade', data.steelGrade);
-        if (data.fy) setValue('design-fy', toDisplay(data.fy, 'stress'));
-        if (data.fu) setValue('design-fu', toDisplay(data.fu, 'stress'));
+        if (data.fy != null) setValue('design-fy', toDisplay(data.fy, 'stress'));
+        if (data.fu != null) {
+            const fuDisplay = toDisplay(data.fu, 'stress');
+            setValue('design-fu', fuDisplay);
+            setValue('input-fu', fuDisplay);
+        }
         // Design method
         if (data.designMethod) setSelect('select-design-method', data.designMethod);
         if (data.analysisMethod) setSelect('select-analysis-method', data.analysisMethod);
@@ -4440,9 +4575,9 @@
         // Span config
         if (data.spanType) {
             setSelect('select-span-type', data.spanType);
-            if (data.nSpans) setValue('config-n-spans', data.nSpans);
+            if (data.nSpans != null) setValue('config-n-spans', data.nSpans);
         }
-        if (data.spacing) setValue('config-spacing', toDisplay(data.spacing, 'length_ft'));
+        if (data.spacing != null) setValue('config-spacing', toDisplay(data.spacing, 'length_ft'));
         // 스팬 테이블 재생성 후 값 복원
         if (typeof buildSpanTable === 'function') buildSpanTable();
         setTimeout(() => {
@@ -4473,43 +4608,49 @@
         if (data.loadL != null) setValue('load-L-psf', toDisplay(data.loadL, 'pressure'));
         // Deck
         if (data.deckType) setSelect('select-deck-type', data.deckType);
-        if (data.deckTPanel) setValue('deck-t-panel', toDisplay(data.deckTPanel, 'thickness'));
-        if (data.deckFastenerSpacing) setValue('deck-fastener-spacing', toDisplay(data.deckFastenerSpacing, 'length'));
-        if (data.deckKphiOverride) setValue('deck-kphi-override', toDisplay(data.deckKphiOverride, 'rotStiff'));
+        if (data.deckTPanel != null) setValue('deck-t-panel', toDisplay(data.deckTPanel, 'thickness'));
+        if (data.deckFastenerSpacing != null) setValue('deck-fastener-spacing', toDisplay(data.deckFastenerSpacing, 'length'));
+        if (data.deckKphiOverride != null) setValue('deck-kphi-override', toDisplay(data.deckKphiOverride, 'rotStiff'));
+        else setValue('deck-kphi-override', '');
         // Unbraced lengths
-        if (data.KxLx) setValue('design-KxLx', toDisplay(data.KxLx, 'length'));
-        if (data.KyLy) setValue('design-KyLy', toDisplay(data.KyLy, 'length'));
-        if (data.KtLt) setValue('design-KtLt', toDisplay(data.KtLt, 'length'));
-        if (data.Lb) setValue('design-Lb', toDisplay(data.Lb, 'length'));
-        if (data.Cb) setValue('design-Cb', data.Cb);
-        if (data.Cmx) setValue('design-Cmx', data.Cmx);
-        if (data.Cmy) setValue('design-Cmy', data.Cmy);
+        if (data.KxLx != null) setValue('design-KxLx', toDisplay(data.KxLx, 'length'));
+        if (data.KyLy != null) setValue('design-KyLy', toDisplay(data.KyLy, 'length'));
+        if (data.KtLt != null) setValue('design-KtLt', toDisplay(data.KtLt, 'length'));
+        if (data.Lb != null) setValue('design-Lb', toDisplay(data.Lb, 'length'));
+        if (data.Cb != null) setValue('design-Cb', data.Cb);
+        if (data.Cmx != null) setValue('design-Cmx', data.Cmx);
+        if (data.Cmy != null) setValue('design-Cmy', data.Cmy);
         // Required loads
         if (data.Pu != null) setValue('design-P', toDisplay(data.Pu, 'force'));
         if (data.Vu != null) setValue('design-V', toDisplay(data.Vu, 'force'));
         if (data.Mux != null) setValue('design-Mx', toDisplay(data.Mux, 'moment'));
         if (data.Muy != null) setValue('design-My', toDisplay(data.Muy, 'moment'));
         // Web crippling
-        if (data.wcN) setValue('design-wc-N', toDisplay(data.wcN, 'length'));
-        if (data.wcR) setValue('design-wc-R', toDisplay(data.wcR, 'radius'));
+        if (data.wcN != null) setValue('design-wc-N', toDisplay(data.wcN, 'length'));
+        if (data.wcR != null) setValue('design-wc-R', toDisplay(data.wcR, 'radius'));
         if (data.wcSupport) setSelect('design-wc-support', data.wcSupport);
         // Template
         if (data.templateType) setSelect('select-template', data.templateType);
-        if (data.tplH) setValue('tpl-H', toDisplay(data.tplH, 'length'));
-        if (data.tplB) setValue('tpl-B', toDisplay(data.tplB, 'length'));
-        if (data.tplD) setValue('tpl-D', toDisplay(data.tplD, 'length'));
-        if (data.tplT) setValue('tpl-t', toDisplay(data.tplT, 'thickness'));
-        if (data.tplR) setValue('tpl-r', toDisplay(data.tplR, 'radius'));
-        if (data.tplQlip) setValue('tpl-qlip', data.tplQlip);
-        if (data.fyLoad) setValue('input-fy-load', toDisplay(data.fyLoad, 'stress'));
+        if (data.tplH != null) setValue('tpl-H', toDisplay(data.tplH, 'length'));
+        if (data.tplB != null) setValue('tpl-B', toDisplay(data.tplB, 'length'));
+        if (data.tplD != null) setValue('tpl-D', toDisplay(data.tplD, 'length'));
+        if (data.tplT != null) setValue('tpl-t', toDisplay(data.tplT, 'thickness'));
+        if (data.tplR != null) setValue('tpl-r', toDisplay(data.tplR, 'radius'));
+        if (data.tplQlip != null) setValue('tpl-qlip', data.tplQlip);
+        if (data.fyLoad != null) {
+            const fyDisplay = toDisplay(data.fyLoad, 'stress');
+            setValue('input-fy', fyDisplay);
+            setValue('plastic-fy', fyDisplay);
+        }
         // 복원 후 Fy 동기화: design-fy 또는 fyLoad 중 있는 값으로 통일
-        const restoredFy = data.fy ? toDisplay(data.fy, 'stress')
-                         : data.fyLoad ? toDisplay(data.fyLoad, 'stress')
+        const restoredFy = data.fy != null ? toDisplay(data.fy, 'stress')
+                         : data.fyLoad != null ? toDisplay(data.fyLoad, 'stress')
                          : null;
         if (restoredFy != null) {
-            setValue('input-fy-load', restoredFy);
             setValue('input-fy', restoredFy);
+            setValue('plastic-fy', restoredFy);
             setValue('design-fy', restoredFy);
+            updateAnalysisFyDisplay(restoredFy);
         }
     }
 

@@ -78,7 +78,7 @@ def check_dsm_limits(params: dict) -> list:
     Returns: list of warnings (빈 리스트면 모두 통과)
     """
     props = params.get('props', {})
-    Fy = params.get('Fy', 52.94)
+    Fy = params.get('Fy', 35.53)
     t = props.get('t', 0)
     warnings = []
 
@@ -126,8 +126,8 @@ def check_dsm_limits(params: dict) -> list:
 
 def _design_compression(params: dict) -> dict:
     """DSM 압축 부재 설계 (§E2, §E3.2, §E4)"""
-    Fy = params.get('Fy', 52.94)
-    Fu = params.get('Fu', 71.08)
+    Fy = params.get('Fy', 35.53)
+    Fu = params.get('Fu', 58.02)
     design_method = params.get('design_method', 'LRFD')
     Pu = params.get('Pu', 0)
 
@@ -141,7 +141,7 @@ def _design_compression(params: dict) -> dict:
     dsm = params.get('dsm', {})
     Pcrl = dsm.get('Pcrl', 0)
     Pcrd = dsm.get('Pcrd', 0)
-    Py_dsm = dsm.get('Py', Ag * Fy)
+    Py_dsm = dsm.get('Py', 0)
 
     # 유효좌굴길이
     KxLx = params.get('KxLx', 120)
@@ -158,18 +158,20 @@ def _design_compression(params: dict) -> dict:
             'FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).'
         )
 
-    # Step 1: Py
-    Py = Ag * Fy
+    # Step 1: Py — DSM에서 전달된 Py 우선 사용 (yieldMP 기반)
+    # Pcrl = LF × Py_dsm 이므로, Py도 동일한 Py_dsm을 사용해야 λ가 일관됨
+    Py = Py_dsm if Py_dsm > 0 else Ag * Fy
+    Ag_eff = Py / Fy if Fy > 0 else Ag
     steps.append({
         'step': 1, 'name': 'Yield Load (Py)',
         'value': round(Py, 2), 'unit': 'kips',
-        'formula': f'Py = Ag × Fy = {Ag:.4f} × {Fy} = {Py:.2f}',
+        'formula': f'Py = {"DSM" if Py_dsm > 0 else "Ag×Fy"} = {Py:.2f} kips (Ag={Ag_eff:.4f})',
     })
 
     # Step 2: 전체좌굴 (E2)
     Fcre_result = compute_column_Fcre(props, Fy, KxLx, KyLy, KtLt)
     Fcre = Fcre_result['Fcre']
-    global_result = column_global_strength(Fy, Fcre, Ag)
+    global_result = column_global_strength(Fy, Fcre, Ag_eff)
     Pne = global_result['Pne']
     spec_sections.append('E2')
 
@@ -177,7 +179,7 @@ def _design_compression(params: dict) -> dict:
         'step': 2, 'name': 'Global Buckling (Pne)',
         'value': round(Pne, 2), 'unit': 'kips',
         'formula': f'Fcre = {Fcre:.2f} ksi, λc = {global_result["lambda_c"]:.3f}, '
-                   f'Fn = {global_result["Fn"]:.2f} ksi → Pne = {Pne:.2f}',
+                   f'Fn = {global_result["Fn"]:.2f} ksi → Pne = {Pne:.2f} kips',
         'equation': global_result['equation'],
         'buckling_type': Fcre_result.get('buckling_type', ''),
     })
@@ -194,11 +196,47 @@ def _design_compression(params: dict) -> dict:
     steps.append({
         'step': 3, 'name': 'Local Buckling (Pnl)',
         'value': round(Pnl, 2), 'unit': 'kips',
-        'formula': f'Pcrl = {Pcrl:.2f}, λl = {local_result["lambda_l"]:.3f} → Pnl = {Pnl:.2f}',
+        'formula': (
+            f'Pcrl = {Pcrl:.2f} kips, '
+            f'λl = √(Pne/Pcrl) = √({Pne:.2f}/{Pcrl:.2f}) = {local_result["lambda_l"]:.3f} '
+            f'{"≤" if local_result["lambda_l"] <= 0.776 else ">"} 0.776 → '
+            f'Pnl = {Pnl:.2f} kips'
+        ) if Pcrl > 0 else f'Pcrl = 0 → Pnl = Pne = {Pnl:.2f} kips',
         'equation': local_result['equation'],
     })
 
     # Step 4: 왜곡좌굴 (E4)
+    # Pcrd=0 fallback: signature curve에서 뒤틀림 극소 미검출 시
+    # AISI Appendix 2, §2.3.1.3 해석적 공식으로 Fcrd 계산
+    Pcrd_source = 'FSM'
+    if Pcrd == 0 and Ag > 0:
+        section = params.get('section', {})
+        ho = props.get('h_web', 0) or section.get('depth', 0)
+        bo = props.get('b_flange', 0) or section.get('flange_width', 0)
+        do = section.get('lip_depth', 0) or props.get('d_lip', 0)
+        t = props.get('t', 0) or section.get('thickness', 0)
+        sec_type = section.get('type', 'C')
+        if ho > 0 and bo > 0 and t > 0 and do > 0:
+            try:
+                from design.loads.distortional_params import (
+                    calc_flange_properties, calc_Fcrd
+                )
+                b_cl = bo - t
+                d_cl = do - t / 2.0
+                fp = calc_flange_properties(b_cl, d_cl, t, 90.0, sec_type)
+                fcrd_result = calc_Fcrd(fp, ho, t, xi_web=0)  # compression
+                Fcrd_calc = fcrd_result['Fcrd']
+                if Fcrd_calc > 0:
+                    Pcrd = Fcrd_calc * Ag_eff
+                    Pcrd_source = '§2.3.1.3'
+                    warnings.append(
+                        f'Pcrd: signature curve에서 뒤틀림 극소 미검출 → '
+                        f'Appendix 2 §2.3.1.3 해석적 공식 사용 '
+                        f'(Fcrd={Fcrd_calc:.2f} ksi, Lcrd={fcrd_result["Lcrd"]} in)'
+                    )
+            except Exception:
+                pass
+
     if Pcrd > 0:
         dist_result = compression_distortional(Py, Pcrd)
         Pnd = dist_result['Pnd']
@@ -210,7 +248,12 @@ def _design_compression(params: dict) -> dict:
     steps.append({
         'step': 4, 'name': 'Distortional Buckling (Pnd)',
         'value': round(Pnd, 2), 'unit': 'kips',
-        'formula': f'Pcrd = {Pcrd:.2f}, λd = {dist_result["lambda_d"]:.3f} → Pnd = {Pnd:.2f}',
+        'formula': (
+            f'Pcrd = {Pcrd:.2f} kips ({Pcrd_source}), '
+            f'λd = √(Py/Pcrd) = √({Py:.2f}/{Pcrd:.2f}) = {dist_result["lambda_d"]:.3f} '
+            f'{"≤" if dist_result["lambda_d"] <= 0.561 else ">"} 0.561 → '
+            f'Pnd = {Pnd:.2f} kips'
+        ) if Pcrd > 0 else f'Pcrd = 0 → Pnd = Py = {Pnd:.2f} kips',
         'equation': dist_result['equation'],
     })
 
@@ -231,7 +274,7 @@ def _design_compression(params: dict) -> dict:
     steps.append({
         'step': 5, 'name': 'Nominal Strength (Pn)',
         'value': round(Pn, 2), 'unit': 'kips',
-        'formula': f'Pn = min(Pne={Pne:.2f}, Pnl={Pnl:.2f}, Pnd={Pnd:.2f}) = {Pn:.2f}',
+        'formula': f'Pn = min(Pne={Pne:.2f}, Pnl={Pnl:.2f}, Pnd={Pnd:.2f}) = {Pn:.2f} kips',
         'controlling_mode': mode,
     })
 
@@ -246,7 +289,7 @@ def _design_compression(params: dict) -> dict:
         steps.append({
             'step': 6, 'name': 'Design Strength (LRFD)',
             'value': round(phi_Pn, 2), 'unit': 'kips',
-            'formula': f'φPn = {phi} × {Pn:.2f} = {phi_Pn:.2f}',
+            'formula': f'φPn = {phi} × {Pn:.2f} = {phi_Pn:.2f} kips',
         })
     else:
         design_strength = Pn_omega
@@ -257,7 +300,7 @@ def _design_compression(params: dict) -> dict:
         steps.append({
             'step': 6, 'name': 'Allowable Strength (ASD)',
             'value': round(Pn_omega, 2), 'unit': 'kips',
-            'formula': f'Pn/Ω = {Pn:.2f}/{omega} = {Pn_omega:.2f}',
+            'formula': f'Pn/Ω = {Pn:.2f}/{omega} = {Pn_omega:.2f} kips',
         })
 
     return {
@@ -287,8 +330,8 @@ def _design_compression(params: dict) -> dict:
 
 def _design_flexure(params: dict) -> dict:
     """DSM 휨 부재 설계 (§F2, §F3.2, §F4)"""
-    Fy = params.get('Fy', 52.94)
-    Fu = params.get('Fu', 71.08)
+    Fy = params.get('Fy', 35.53)
+    Fu = params.get('Fu', 58.02)
     design_method = params.get('design_method', 'LRFD')
     Mu = abs(params.get('Mu', 0))  # 부호는 방향만 나타내므로 절대값 사용
     Lb = params.get('Lb', 120)
@@ -303,7 +346,7 @@ def _design_flexure(params: dict) -> dict:
     dsm = params.get('dsm', {})
     Mcrl = dsm.get('Mcrl', 0)
     Mcrd = dsm.get('Mcrd', 0)
-    My_dsm = dsm.get('My', Sf * Fy)
+    My_dsm = dsm.get('My', 0)
 
     steps = []
     spec_sections = []
@@ -315,24 +358,27 @@ def _design_flexure(params: dict) -> dict:
             'FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).'
         )
 
-    # Step 1: My
-    My = Sf * Fy
+    # Step 1: My — DSM에서 전달된 My 우선 사용 (yieldMP 기반, Ixz 고려)
+    # Mcrl = LF × My_dsm 이므로, My도 동일한 My_dsm을 사용해야 λ가 일관됨
+    My = My_dsm if My_dsm > 0 else Sf * Fy
     steps.append({
         'step': 1, 'name': 'Yield Moment (My)',
         'value': round(My, 2), 'unit': 'kip-in',
-        'formula': f'My = Sf × Fy = {Sf:.4f} × {Fy} = {My:.2f}',
+        'formula': f'My = {"DSM" if My_dsm > 0 else "Sf×Fy"} = {My:.2f} kip-in (Sf={Sf_eff:.4f})',
     })
 
     # Step 2: 전체좌굴 LTB (F2)
+    # Sf_eff: My와 일관된 유효 단면계수 (My_dsm/Fy, Ixz 고려)
+    Sf_eff = My / Fy if Fy > 0 else Sf
     Fcre = compute_beam_Fcre(props, Cb, Lb)
-    global_result = beam_global_strength(Fy, Fcre, Sf)
+    global_result = beam_global_strength(Fy, Fcre, Sf_eff)
     Mne = global_result['Mne']
     spec_sections.append('F2')
 
     steps.append({
         'step': 2, 'name': 'Global/LTB (Mne)',
         'value': round(Mne, 2), 'unit': 'kip-in',
-        'formula': f'Fcre = {Fcre:.2f} ksi, Fn = {global_result["Fn"]:.2f} ksi → Mne = {Mne:.2f}',
+        'formula': f'Fcre = {Fcre:.2f} ksi, Fn = {global_result["Fn"]:.2f} ksi → Mne = {Mne:.2f} kip-in',
         'equation': global_result['equation'],
     })
 
@@ -348,11 +394,53 @@ def _design_flexure(params: dict) -> dict:
     steps.append({
         'step': 3, 'name': 'Local Buckling (Mnl)',
         'value': round(Mnl, 2), 'unit': 'kip-in',
-        'formula': f'Mcrl = {Mcrl:.2f}, λl = {local_result["lambda_l"]:.3f} → Mnl = {Mnl:.2f}',
+        'formula': (
+            f'Mcrl = {Mcrl:.2f} kip-in, '
+            f'λl = √(Mne/Mcrl) = √({Mne:.2f}/{Mcrl:.2f}) = {local_result["lambda_l"]:.3f} '
+            f'{"≤" if local_result["lambda_l"] <= 0.776 else ">"} 0.776 → '
+            f'Mnl = {Mnl:.2f} kip-in'
+        ) if Mcrl > 0 else f'Mcrl = 0 → Mnl = Mne = {Mnl:.2f} kip-in',
         'equation': local_result['equation'],
     })
 
     # Step 4: 왜곡좌굴 (F4)
+    # Mcrd=0 fallback: signature curve에서 뒤틀림 극소 미검출 시
+    # AISI Appendix 2, §2.3.3.3 해석적 공식으로 Fcrd 계산
+    Mcrd_source = 'FSM'
+    if Mcrd == 0 and Sf > 0:
+        section = params.get('section', {})
+        ho = props.get('h_web', 0) or section.get('depth', 0)
+        bo = props.get('b_flange', 0) or section.get('flange_width', 0)
+        do = section.get('lip_depth', 0) or props.get('d_lip', 0)
+        t = props.get('t', 0) or section.get('thickness', 0)
+        sec_type = section.get('type', 'C')
+        kphi_ext = params.get('kphi', 0)
+        if ho > 0 and bo > 0 and t > 0 and do > 0:
+            try:
+                from design.loads.distortional_params import (
+                    calc_flange_properties, calc_Fcrd
+                )
+                b_cl = bo - t        # centerline flange width
+                d_cl = do - t / 2.0  # centerline lip depth
+                fp = calc_flange_properties(b_cl, d_cl, t, 90.0, sec_type)
+                fcrd_result = calc_Fcrd(
+                    fp, ho, t,
+                    kphi_external=kphi_ext,
+                    beta=1.0,
+                    xi_web=2,  # pure bending
+                )
+                Fcrd_calc = fcrd_result['Fcrd']
+                if Fcrd_calc > 0:
+                    Mcrd = Fcrd_calc * Sf_eff
+                    Mcrd_source = '§2.3.3.3'
+                    warnings.append(
+                        f'Mcrd: signature curve에서 뒤틀림 극소 미검출 → '
+                        f'Appendix 2 §2.3.3.3 해석적 공식 사용 '
+                        f'(Fcrd={Fcrd_calc:.2f} ksi, Lcrd={fcrd_result["Lcrd"]} in)'
+                    )
+            except Exception:
+                pass  # 단면 정보 부족 시 Mcrd=0 유지
+
     if Mcrd > 0:
         dist_result = flexure_distortional(My, Mcrd)
         Mnd = dist_result['Mnd']
@@ -364,7 +452,12 @@ def _design_flexure(params: dict) -> dict:
     steps.append({
         'step': 4, 'name': 'Distortional Buckling (Mnd)',
         'value': round(Mnd, 2), 'unit': 'kip-in',
-        'formula': f'Mcrd = {Mcrd:.2f}, λd = {dist_result["lambda_d"]:.3f} → Mnd = {Mnd:.2f}',
+        'formula': (
+            f'Mcrd = {Mcrd:.2f} kip-in ({Mcrd_source}), '
+            f'λd = √(My/Mcrd) = √({My:.2f}/{Mcrd:.2f}) = {dist_result["lambda_d"]:.3f} '
+            f'{"≤" if dist_result["lambda_d"] <= 0.673 else ">"} 0.673 → '
+            f'Mnd = {Mnd:.2f} kip-in'
+        ) if Mcrd > 0 else f'Mcrd = 0 → Mnd = My = {Mnd:.2f} kip-in',
         'equation': dist_result['equation'],
     })
 
@@ -380,24 +473,39 @@ def _design_flexure(params: dict) -> dict:
     steps.append({
         'step': 5, 'name': 'Nominal Strength — DSM (Mn)',
         'value': round(Mn_dsm, 2), 'unit': 'kip-in',
-        'formula': f'Mn = min(Mne={Mne:.2f}, Mnl={Mnl:.2f}, Mnd={Mnd:.2f}) = {Mn_dsm:.2f}',
+        'formula': f'Mn = min(Mne={Mne:.2f}, Mnl={Mnl:.2f}, Mnd={Mnd:.2f}) = {Mn_dsm:.2f} kip-in',
         'controlling_mode': mode,
     })
 
     # Step 5b: §I6.2.1 양력 감소계수 R 적용 (through-fastened panel)
+    # AISI 예제 방식: Mn = R × Mnfo (Mnfo = Mnl with Mne=My, 뒤틀림좌굴 제외)
     R_uplift = params.get('R_uplift')
     Mn = Mn_dsm
     if R_uplift is not None and R_uplift > 0:
-        Mn_R = R_uplift * Sf * Fy  # R × Se × Fy (Se ≈ Sf, 보수적)
-        if Mn_R < Mn_dsm:
-            Mn = Mn_R
+        # Mnfo: 국부좌굴 강도만 고려 (Fn=Fy, Mne=My 조건)
+        # DSM: Mnl (이미 Mne=My일 때의 값), 뒤틀림좌굴(Mnd) 제외
+        if Mcrl > 0:
+            Mnfo_result = flexure_local(My, Mcrl)
+            Mnfo = Mnfo_result['Mnl']
+        else:
+            Mnfo = My
+        Mn_R = R_uplift * Mnfo
+        # R-factor 적용 시 Mnd 검토 불필요 (§I6.2.1)
+        Mn = min(Mne, Mnl, Mn_R)  # Mnd 제외
+        if Mn == Mn_R:
             mode = f'§I6.2.1 R-factor (R={R_uplift})'
+        elif Mn == Mnl and Mnl < Mne:
+            mode = 'Local Buckling'
+        else:
+            mode = 'Global/LTB'
         steps.append({
             'step': '5b', 'name': 'Uplift R-factor (§I6.2.1)',
             'value': round(Mn_R, 2), 'unit': 'kip-in',
-            'formula': f'Mn_R = R × Sf × Fy = {R_uplift} × {Sf:.4f} × {Fy} = {Mn_R:.2f}',
+            'formula': f'Mnfo(Mne=My) = {Mnfo:.2f} kip-in, Mn_R = R × Mnfo = {R_uplift} × {Mnfo:.2f} = {Mn_R:.2f} kip-in',
             'R': R_uplift,
-            'controls': Mn_R < Mn_dsm,
+            'Mnfo': round(Mnfo, 2),
+            'controls': Mn == Mn_R,
+            'note': 'Distortional buckling excluded per §I6.2.1',
         })
         spec_sections.append('I6.2.1')
 
@@ -409,7 +517,7 @@ def _design_flexure(params: dict) -> dict:
     steps.append({
         'step': 6, 'name': 'Final Nominal Strength (Mn)',
         'value': round(Mn, 2), 'unit': 'kip-in',
-        'formula': f'Mn = {Mn:.2f} — {mode}',
+        'formula': f'Mn = {Mn:.2f} kip-in — {mode}',
         'controlling_mode': mode,
     })
 
@@ -423,7 +531,7 @@ def _design_flexure(params: dict) -> dict:
         steps.append({
             'step': 7, 'name': 'Design Strength (LRFD)',
             'value': round(phi_Mn, 2), 'unit': 'kip-in',
-            'formula': f'φMn = {phi} × {Mn:.2f} = {phi_Mn:.2f}',
+            'formula': f'φMn = {phi} × {Mn:.2f} = {phi_Mn:.2f} kip-in',
         })
     else:
         design_strength = Mn_omega
@@ -434,7 +542,7 @@ def _design_flexure(params: dict) -> dict:
         steps.append({
             'step': 7, 'name': 'Allowable Strength (ASD)',
             'value': round(Mn_omega, 2), 'unit': 'kip-in',
-            'formula': f'Mn/Ω = {Mn:.2f}/{omega} = {Mn_omega:.2f}',
+            'formula': f'Mn/Ω = {Mn:.2f}/{omega} = {Mn_omega:.2f} kip-in',
         })
 
     result = {
@@ -492,7 +600,7 @@ def _design_flexure(params: dict) -> dict:
 def _design_combined(params: dict) -> dict:
     """조합 하중 설계 (압축 + 휨x + 휨y + 전단, §C1 모멘트 증폭 포함)"""
     design_method = params.get('design_method', 'LRFD')
-    Fy = params.get('Fy', 52.94)
+    Fy = params.get('Fy', 35.53)
 
     # 소요 하중
     Pu = abs(params.get('Pu', 0))
@@ -629,8 +737,8 @@ def _design_combined(params: dict) -> dict:
 
 def _design_tension(params: dict) -> dict:
     """인장 부재 설계 (§D2, §D3)"""
-    Fy = params.get('Fy', 52.94)
-    Fu = params.get('Fu', 71.08)
+    Fy = params.get('Fy', 35.53)
+    Fu = params.get('Fu', 58.02)
     design_method = params.get('design_method', 'LRFD')
     Tu = params.get('Tu', 0)
 

@@ -11,6 +11,7 @@ from design.loads.load_combinations import (
 from design.loads.beam_analysis import (
     analyze_simple_beam, analyze_continuous_beam,
     analyze_continuous_beam_general, analyze_cantilever_beam,
+    analyze_beam_fe,
     extract_critical_locations, compute_deflection,
     compute_deflection_variable_I, extract_max_deflection_per_span,
     BeamResult,
@@ -76,11 +77,28 @@ def analyze_loads(
     # 자유단(N) 포함 여부 확인 → 캔틸레버/일반 해석 경로 결정
     has_free = any(s.upper().startswith('N') for s in supports)
 
+    # Lap 유무 판별
+    has_laps = laps_per_support and any(
+        lp and (lp.get('left_ft', 0) > 0 or lp.get('right_ft', 0) > 0)
+        for lp in laps_per_support if lp
+    )
+    # 단면2차모멘트 (FE 해석용)
+    Ixx_fe = (section.get('Ixx') or section.get('Ix') or 1.0) if section else 1.0
+    E_fe = E or (section.get('E') if section else None) or E_STEEL
+
     for load_type, w_plf in load_types.items():
-        if n_spans == 1 and not has_free and sup_type_simple(supports):
+        if has_laps and n_spans > 1:
+            # Lap 비등단면 → FE 직접 강성법 (M, V, R, δ 동시 계산)
+            w_list = [w_plf] * n_spans
+            result = analyze_beam_fe(
+                spans, w_list, supports=supports,
+                laps_per_support=laps_per_support,
+                I_base_in4=Ixx_fe, I_lap_ratio=2.0,
+                E_ksi=E_fe,
+            )
+        elif n_spans == 1 and not has_free and sup_type_simple(supports):
             result = analyze_simple_beam(spans[0], w_plf)
         else:
-            # cantilever, 자유단 포함, 고정단 포함, 다경간 → 일반 해석
             w_list = [w_plf] * n_spans
             result = analyze_continuous_beam_general(
                 spans, w_list, supports=supports,
@@ -163,8 +181,8 @@ def analyze_loads(
     # I6.2.1 양력 R 검증
     if section:
         i621 = check_i621_conditions(
-            section=section, Fy=section.get('Fy', 52.94),
-            Fu=section.get('Fu', 71.08), span_ft=span_ft,
+            section=section, Fy=section.get('Fy', 35.53),
+            Fu=section.get('Fu', 58.02), span_ft=span_ft,
             span_type='continuous' if n_spans > 1 else 'simple',
             lap_length_in=min(laps.get('left_ft', 0), laps.get('right_ft', 0)) * 12
             if laps else None,
@@ -198,10 +216,11 @@ def analyze_loads(
                     svc_x = [i * total_L / (n_pts - 1) for i in range(n_pts)]
                     svc_result = BeamResult(svc_x, svc_M, svc_V, svc_R, n_pts)
 
+                    # Lap이 있으면 비등단면 보 해석으로 모멘트 재분배 후 처짐 계산
+                    # Lap 구간의 EI 증가 → 지점 모멘트 증가 → 경간 모멘트 감소 → 처짐 감소
                     defl = compute_deflection_variable_I(
                         svc_result, E_ksi, Ixx,
-                        spans=spans,
-                        supports=supports,
+                        spans=spans, supports=supports,
                         laps_per_support=laps_per_support,
                         I_lap_ratio=2.0,
                     )
