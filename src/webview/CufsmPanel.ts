@@ -879,7 +879,7 @@ export class CufsmPanel implements McpPanelInterface {
             }
 
             case 'design_purlin': {
-                // 퍼린 전체 설계 (analyze_loads → dual CUFSM → aisi_design)
+                // 퍼린 전체 설계 (analyze_loads → dual CUFSM → region-specific design)
                 if (!this._model.node || this._model.node.length === 0) {
                     return { error: 'No section defined. Set up section in Preprocessor first.' };
                 }
@@ -889,21 +889,23 @@ export class CufsmPanel implements McpPanelInterface {
 
                 // Step 2: 데크 강성
                 const deckInfo = loadResult?.auto_params?.deck || { kphi: 0, kx: 0 };
-
-                // Step 3: 정모멘트 CUFSM (데크 스프링 ON)
+                const aFy = this._getAnalysisFy();
                 const savedSprings = (this._model as any).springs || [];
+                const savedNode = this._model.node.map((n: number[]) => [...n]);
+                const savedElem = this._model.elem.map((e: number[]) => [...e]);
+
+                // Step 3: 정모멘트 CUFSM (데크 스프링 ON, 단일 t)
                 await this.handleMcpAction({
                     action: 'apply_deck_springs',
                     kphi: deckInfo.kphi, kx: deckInfo.kx,
                 });
                 const analysisPos = await this._pythonBridge.analyze(this._model);
-                const aFy = this._getAnalysisFy();
                 const dsmPos = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
                     curve: analysisPos?.curve || [], fy: aFy, load_type: 'Mxx',
                 });
 
-                // Step 4: 부모멘트 CUFSM (스프링 OFF)
+                // Step 4: 부모멘트 CUFSM (스프링 OFF, 단일 t)
                 (this._model as any).springs = [];
                 const analysisNeg = await this._pythonBridge.analyze(this._model);
                 const dsmNeg = await this._pythonBridge.call('dsm', {
@@ -911,8 +913,24 @@ export class CufsmPanel implements McpPanelInterface {
                     curve: analysisNeg?.curve || [], fy: aFy, load_type: 'Mxx',
                 });
 
-                // 스프링 원복
+                // Step 4b: Lap 구간 CUFSM (스프링 OFF, 2t 두께)
+                let dsmLap: any = null;
+                const hasLaps = options.laps && (options.laps.left_ft > 0 || options.laps.right_ft > 0);
+                if (hasLaps) {
+                    // 요소 두께를 2배로 설정
+                    for (const e of this._model.elem) { e[3] *= 2; }
+                    const analysisLap = await this._pythonBridge.analyze(this._model);
+                    dsmLap = await this._pythonBridge.call('dsm', {
+                        node: this._model.node, elem: this._model.elem,
+                        curve: analysisLap?.curve || [], fy: aFy, load_type: 'Mxx',
+                    });
+                    // 요소 두께 원복
+                    this._model.elem = savedElem.map((e: number[]) => [...e]);
+                }
+
+                // 스프링/단면 원복
                 (this._model as any).springs = savedSprings;
+                this._model.node = savedNode.map((n: number[]) => [...n]);
 
                 // Step 5: 단면 성질
                 const propsRaw = await this._pythonBridge.call('get_properties', {
@@ -925,13 +943,71 @@ export class CufsmPanel implements McpPanelInterface {
                     });
                 } catch { }
 
-                // Step 6: R-factor 추출 (§I6.2.1)
+                // Step 6: 정/부모멘트 별도 AISI 설계
+                const fy = options.Fy || options.loads?.Fy || aFy;
+                const posRegion = loadResult?.auto_params?.positive_region || {};
+                const negRegion = loadResult?.auto_params?.negative_region || {};
+                const gravLocs = loadResult?.gravity?.locations || [];
                 const upliftR = loadResult?.auto_params?.uplift_R ?? null;
+
+                // 정모멘트 소요강도 (지배 위치)
+                const posMu = Math.max(...gravLocs
+                    .filter((l: any) => l.M > 0)
+                    .map((l: any) => Math.abs(l.M)), 0);
+                // 부모멘트 소요강도 (지배 위치)
+                const negMu = Math.max(...gravLocs
+                    .filter((l: any) => l.M < 0)
+                    .map((l: any) => Math.abs(l.M)), 0);
+
+                // 정모멘트 설계 (데크 브레이싱, dsmPos)
+                let designPos: any = null;
+                if (posMu > 0 || gravLocs.length === 0) {
+                    designPos = await this._pythonBridge.call('aisi_design', {
+                        member_type: 'flexure',
+                        design_method: options.design_method || 'LRFD',
+                        Fy: fy, Fu: options.Fu || options.loads?.Fu || fy * 1.34,
+                        Lb: posRegion.Ly_in || 0,
+                        Cb: posRegion.Cb || 1.0,
+                        Mu: posMu,
+                        props: { ...propsRaw, ...cutwp,
+                            Sf: propsRaw.Sx ?? 0, Sxx: propsRaw.Sx ?? 0 },
+                        dsm: {
+                            Mcrl: dsmPos?.Mxxcrl ?? 0,
+                            Mcrd: dsmPos?.Mxxcrd ?? 0,
+                            My: dsmPos?.My_xx ?? 0,
+                        },
+                    });
+                }
+
+                // 부모멘트 설계 (비지지, dsmNeg 또는 dsmLap)
+                let designNeg: any = null;
+                if (negMu > 0) {
+                    const negDsm = dsmLap || dsmNeg;
+                    designNeg = await this._pythonBridge.call('aisi_design', {
+                        member_type: 'flexure',
+                        design_method: options.design_method || 'LRFD',
+                        Fy: fy, Fu: options.Fu || options.loads?.Fu || fy * 1.34,
+                        Lb: negRegion.Ly_in || 0,
+                        Cb: negRegion.Cb || 1.67,
+                        Mu: negMu,
+                        R_uplift: upliftR,
+                        props: { ...propsRaw, ...cutwp,
+                            Sf: propsRaw.Sx ?? 0, Sxx: propsRaw.Sx ?? 0 },
+                        dsm: {
+                            Mcrl: negDsm?.Mxxcrl ?? 0,
+                            Mcrd: negDsm?.Mxxcrd ?? 0,
+                            My: negDsm?.My_xx ?? 0,
+                        },
+                    });
+                }
 
                 const result = {
                     load_analysis: loadResult,
                     dsm_positive: dsmPos,
                     dsm_negative: dsmNeg,
+                    dsm_lap: dsmLap,
+                    design_positive: designPos,
+                    design_negative: designNeg,
                     uplift_R: upliftR,
                     props: propsRaw,
                     cutwp: cutwp,
@@ -1336,9 +1412,9 @@ export class CufsmPanel implements McpPanelInterface {
                         <label>Material</label>
                         <p class="hint">E = 탄성계수, v = 포아송비, G = 전단탄성계수(자동 계산 가능)</p>
                         <div class="input-row">
-                            <label>E<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-E" value="29435" step="100">
+                            <label>E<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-E" value="29500" step="100">
                             <label>v</label><input type="number" id="input-v" value="0.3" step="0.01">
-                            <label>G<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-G" value="11326" step="100">
+                            <label>G<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-G" value="11346" step="100">
                         </div>
                     </div>
                     <div class="section-group">

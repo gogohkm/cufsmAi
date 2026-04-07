@@ -619,8 +619,8 @@ def design_connection(params: dict) -> dict:
     """접합부 설계 디스패처"""
     conn_type = params.get('connection_type', 'bolt')
     design_method = params.get('design_method', 'LRFD')
-    Fy = params.get('Fy', 50)
-    Fu = params.get('Fu', 65)
+    Fy = params.get('Fy', 52.94)
+    Fu = params.get('Fu', 71.08)
     t1 = params.get('t1', 0.059)
     t2 = params.get('t2', t1)
     Pu = params.get('Pu', 0)

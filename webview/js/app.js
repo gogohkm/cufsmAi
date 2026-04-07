@@ -1243,13 +1243,35 @@
         });
         // Fy 변경 시에도 프리뷰 갱신
         const fyInput = document.getElementById('input-fy-load');
-        if (fyInput) fyInput.addEventListener('input', renderStressPreview);
+        if (fyInput) {
+            fyInput.addEventListener('input', renderStressPreview);
+            // input-fy-load 변경 시 다른 탭 Fy 동기화
+            fyInput.addEventListener('input', () => {
+                const v = fyInput.value;
+                setValue('input-fy', v);
+                setValue('design-fy', v);
+            });
+        }
         // custom 하중 변경 시
         ['input-load-P', 'input-load-Mxx', 'input-load-Mzz'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.addEventListener('input', renderStressPreview);
         });
     }
+
+    // E 또는 v 변경 시 G = E / (2*(1+v)) 자동 계산
+    function updateG() {
+        const E = getNum('input-E', 29500);
+        const v = getNum('input-v', 0.3);
+        if (E > 0 && v >= 0 && v < 0.5) {
+            const G = E / (2 * (1 + v));
+            setValue('input-G', +G.toFixed(0));
+        }
+    }
+    const elE = document.getElementById('input-E');
+    const elV = document.getElementById('input-v');
+    if (elE) elE.addEventListener('input', updateG);
+    if (elV) elV.addEventListener('input', updateG);
 
     // 초기 프리뷰 (모델 로드 후)
     setTimeout(renderStressPreview, 500);
@@ -1269,9 +1291,9 @@
             const lengths = logspace(Math.log10(lenMin), Math.log10(lenMax), lenN);
             const m_all = lengths.map(() => [1]);
 
-            const E = fromDisplay(getNum('input-E', 29435), 'stress');
+            const E = fromDisplay(getNum('input-E', 29500), 'stress');
             const v = getNum('input-v', 0.3);
-            const G = fromDisplay(getNum('input-G', 11326), 'stress');
+            const G = fromDisplay(getNum('input-G', 11346), 'stress');
 
             // 모델 업데이트
             model.prop = [[100, E, E, v, v, G]];
@@ -1987,6 +2009,12 @@
         }
         fyEl.addEventListener('input', checkFuFy);
         fuEl.addEventListener('input', checkFuFy);
+        // design-fy 변경 시 다른 탭 Fy 동기화
+        fyEl.addEventListener('input', () => {
+            const v = fyEl.value;
+            setValue('input-fy-load', v);
+            setValue('input-fy', v);
+        });
     }
 
     // --- Keyboard navigation (Enter → next field) ---
@@ -2031,6 +2059,24 @@
         return '<span class="spec-ref" data-tip="' + section + ': ' + tip + '">§' + section + '</span>';
     }
 
+    // --- Fy 동기화: 3개 탭의 Fy 필드를 일괄 갱신 ---
+    // 모든 Fy 필드는 display 단위(SI이면 MPa, US이면 ksi)로 저장
+    function syncFy(fyDisplayValue) {
+        setValue('input-fy-load', fyDisplayValue);
+        setValue('input-fy', fyDisplayValue);
+        setValue('design-fy', fyDisplayValue);
+    }
+
+    // input-fy (후처리 탭) 변경 시 다른 탭 Fy 동기화
+    const fyPostEl = document.getElementById('input-fy');
+    if (fyPostEl) {
+        fyPostEl.addEventListener('input', () => {
+            const v = fyPostEl.value;
+            setValue('input-fy-load', v);
+            setValue('design-fy', v);
+        });
+    }
+
     // 강재 등급 선택 시 Fy/Fu 자동 설정
     const selGrade = document.getElementById('select-steel-grade');
     if (selGrade) {
@@ -2048,8 +2094,14 @@
         selGrade.addEventListener('change', () => {
             const v = gradeMap[selGrade.value];
             if (v) {
-                setValue('design-fy', toDisplay(v[0], 'stress'));
+                const fyDisp = toDisplay(v[0], 'stress');
                 setValue('design-fu', toDisplay(v[1], 'stress'));
+                syncFy(fyDisp);                // 3개 탭 Fy 일괄 동기화
+                // 유효성 검증 및 프리뷰 갱신을 위해 input 이벤트 dispatch
+                ['design-fy', 'design-fu', 'input-fy-load'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.dispatchEvent(new Event('input'));
+                });
             }
         });
     }
@@ -3276,7 +3328,7 @@
         h += '<tr><td>강종</td><td colspan="2">'+gradeName+'</td></tr>';
         h += '<tr><td>항복강도, F<sub>y</sub></td><td>'+fy+'</td><td>'+_rul('stress')+'</td></tr>';
         h += '<tr><td>인장강도, F<sub>u</sub></td><td>'+fu+'</td><td>'+_rul('stress')+'</td></tr>';
-        h += '<tr><td>탄성계수, E</td><td>'+_ruv(29435,'stress')+'</td><td>'+_rul('stress')+'</td></tr>';
+        h += '<tr><td>탄성계수, E</td><td>'+_ruv(29500,'stress')+'</td><td>'+_rul('stress')+'</td></tr>';
         h += '<tr><td>포아송비, &nu;</td><td>0.30</td><td></td></tr>';
         h += '</table>';
 
@@ -4450,6 +4502,15 @@
         if (data.tplR) setValue('tpl-r', toDisplay(data.tplR, 'radius'));
         if (data.tplQlip) setValue('tpl-qlip', data.tplQlip);
         if (data.fyLoad) setValue('input-fy-load', toDisplay(data.fyLoad, 'stress'));
+        // 복원 후 Fy 동기화: design-fy 또는 fyLoad 중 있는 값으로 통일
+        const restoredFy = data.fy ? toDisplay(data.fy, 'stress')
+                         : data.fyLoad ? toDisplay(data.fyLoad, 'stress')
+                         : null;
+        if (restoredFy != null) {
+            setValue('input-fy-load', restoredFy);
+            setValue('input-fy', restoredFy);
+            setValue('design-fy', restoredFy);
+        }
     }
 
     // 파일 저장/열기 버튼

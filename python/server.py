@@ -252,6 +252,7 @@ def handle_request(request: dict) -> dict:
                 supports=params.get('supports'),
                 spans_ft=params.get('spans_ft'),
                 laps_per_support=params.get('laps_per_support'),
+                E=params.get('E'),
             )
             return {'id': req_id, 'result': result}
 

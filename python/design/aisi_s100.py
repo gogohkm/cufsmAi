@@ -78,7 +78,7 @@ def check_dsm_limits(params: dict) -> list:
     Returns: list of warnings (빈 리스트면 모두 통과)
     """
     props = params.get('props', {})
-    Fy = params.get('Fy', 50)
+    Fy = params.get('Fy', 52.94)
     t = props.get('t', 0)
     warnings = []
 
@@ -126,8 +126,8 @@ def check_dsm_limits(params: dict) -> list:
 
 def _design_compression(params: dict) -> dict:
     """DSM 압축 부재 설계 (§E2, §E3.2, §E4)"""
-    Fy = params.get('Fy', 50)
-    Fu = params.get('Fu', 65)
+    Fy = params.get('Fy', 52.94)
+    Fu = params.get('Fu', 71.08)
     design_method = params.get('design_method', 'LRFD')
     Pu = params.get('Pu', 0)
 
@@ -287,8 +287,8 @@ def _design_compression(params: dict) -> dict:
 
 def _design_flexure(params: dict) -> dict:
     """DSM 휨 부재 설계 (§F2, §F3.2, §F4)"""
-    Fy = params.get('Fy', 50)
-    Fu = params.get('Fu', 65)
+    Fy = params.get('Fy', 52.94)
+    Fu = params.get('Fu', 71.08)
     design_method = params.get('design_method', 'LRFD')
     Mu = abs(params.get('Mu', 0))  # 부호는 방향만 나타내므로 절대값 사용
     Lb = params.get('Lb', 120)
@@ -492,7 +492,7 @@ def _design_flexure(params: dict) -> dict:
 def _design_combined(params: dict) -> dict:
     """조합 하중 설계 (압축 + 휨x + 휨y + 전단, §C1 모멘트 증폭 포함)"""
     design_method = params.get('design_method', 'LRFD')
-    Fy = params.get('Fy', 50)
+    Fy = params.get('Fy', 52.94)
 
     # 소요 하중
     Pu = abs(params.get('Pu', 0))
@@ -629,8 +629,8 @@ def _design_combined(params: dict) -> dict:
 
 def _design_tension(params: dict) -> dict:
     """인장 부재 설계 (§D2, §D3)"""
-    Fy = params.get('Fy', 50)
-    Fu = params.get('Fu', 65)
+    Fy = params.get('Fy', 52.94)
+    Fu = params.get('Fu', 71.08)
     design_method = params.get('design_method', 'LRFD')
     Tu = params.get('Tu', 0)
 

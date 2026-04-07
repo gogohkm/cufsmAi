@@ -3,6 +3,8 @@
 사용자 입력(부재구성, 하중, 데크) → 구조해석 → 하중조합 → 소요강도 추출
 """
 
+E_STEEL = 29500.0  # ksi — CFS 표준 탄성계수 (기본값)
+
 from design.loads.load_combinations import (
     get_applicable_combos, apply_combination, find_controlling_combo,
 )
@@ -32,6 +34,7 @@ def analyze_loads(
     supports: list = None,
     spans_ft: list = None,
     laps_per_support: list = None,
+    E: float = None,
 ) -> dict:
     """통합 하중 분석
 
@@ -45,7 +48,8 @@ def analyze_loads(
     spacing_ft : 부재 간격 (ft), PSF→PLF 변환은 호출자가 수행
     laps : dict — {'left_ft': float, 'right_ft': float}
     deck : dict — {'type', 't_panel', 'fastener_spacing', ...}
-    section : dict — 단면 정보 (I6.2.1 검증용)
+    section : dict — 단면 정보 (I6.2.1 검증용), section['E']가 있으면 탄성계수로 사용
+    E : float — 탄성계수 (ksi), 지정 시 section['E']보다 우선. 미지정 시 29500.0 사용
 
     Returns
     -------
@@ -115,7 +119,7 @@ def analyze_loads(
         }
 
     # 데크 강성 계산
-    deck_info = _calc_deck_info(deck, section)
+    deck_info = _calc_deck_info(deck, section, E=E)
 
     # 비지지길이 자동 결정
     auto_params = {}
@@ -159,8 +163,8 @@ def analyze_loads(
     # I6.2.1 양력 R 검증
     if section:
         i621 = check_i621_conditions(
-            section=section, Fy=section.get('Fy', 55),
-            Fu=section.get('Fu', 70), span_ft=span_ft,
+            section=section, Fy=section.get('Fy', 52.94),
+            Fu=section.get('Fu', 71.08), span_ft=span_ft,
             span_type='continuous' if n_spans > 1 else 'simple',
             lap_length_in=min(laps.get('left_ft', 0), laps.get('right_ft', 0)) * 12
             if laps else None,
@@ -177,7 +181,7 @@ def analyze_loads(
     # ── 처짐 계산 (사용하중 조합) ──
     deflection_result = None
     if gravity_result and section:
-        E_ksi = 29500.0  # CFS 표준 탄성계수
+        E_ksi = E or (section.get('E') if section else None) or E_STEEL
         Ixx = section.get('Ixx') or section.get('Ix') or 0
         if Ixx > 0:
             # 사용하중 조합(비계수 하중)으로 처짐 계산 — ASD 조합 사용
@@ -276,10 +280,13 @@ def _extract_locations_from_combined(combined: dict, spans: list,
     return extract_critical_locations(temp, spans, laps)
 
 
-def _calc_deck_info(deck: dict, section: dict = None) -> dict:
+def _calc_deck_info(deck: dict, section: dict = None,
+                    E: float = None) -> dict:
     """데크 강성 정보 계산"""
     if not deck or deck.get('type') == 'none':
         return {'kphi': 0, 'kx': 0, 'type': 'none'}
+
+    E_val = E or E_STEEL
 
     kphi_override = deck.get('kphi_override')
     if kphi_override is not None and kphi_override > 0:
@@ -292,6 +299,7 @@ def _calc_deck_info(deck: dict, section: dict = None) -> dict:
             t_purlin=t_purlin,
             fastener_spacing=deck.get('fastener_spacing', 12),
             flange_width=flange_w,
+            E=E_val,
         )
 
     t_purlin = section.get('thickness', 0.059) if section else 0.059
@@ -302,6 +310,7 @@ def _calc_deck_info(deck: dict, section: dict = None) -> dict:
         d_screw=deck.get('d_screw', 0.17),
         Fu_panel=deck.get('Fu_panel', 70),
         fastener_spacing=deck.get('fastener_spacing', 12),
+        E=E_val,
     )
 
     return {
