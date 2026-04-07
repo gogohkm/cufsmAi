@@ -1,27 +1,151 @@
-# CUFSM
+# CUFSM — Cold-Formed Steel Buckling Analysis
 
-This is the GitHub repository for the cross-section elastic buckling analysis tool CUFSM written in MATLAB.
+A VS Code extension for **elastic buckling analysis** of cold-formed steel members using the **Finite Strip Method (FSM)**, with built-in **Direct Strength Method (DSM)** design value extraction and **AI-powered MCP** integration.
 
-## Description
+Based on the open-source [CUFSM](https://github.com/thinwalled/cufsm-git) by B.W. Schafer, S. Adany, Z. Li, and S. Jin (Johns Hopkins University).
 
-CUFSM - is the Constrained and Unconstrained Finite Strip Method - and provides elastic buckling for member cross-sections as utilized by structural engineers. The method employs the finite strip method, a variant of the finite element method. The implementation allows for general end boundary conditions through series approximations or provides the signature curve analysis aligned with classical buckling solutions with idealized end conditions. Vibration analysis is also supported at the command line (not in GUI) as is a a variant of the constrained Finite Strip Method - fcFSM.
+---
 
-## Installation
+## Features
 
-The latest version of the software is available for download on [the latest release page](https://github.com/thinwalled/cufsm-git/releases). The software is provided as both (1) the MATLAB source code and (2) compiled standalone applications. For researchers, students, or anyone with access to MATLAB, it is highly recommended to use the source code directly in MATLAB, this is much more stable and manageable.
+### Section Designer (WebView GUI)
 
-Note installation of the standalone version (PC or Mac) will also require downloading of libraries from Matlab (Mathworks). In addition, be patient at boot up of the standalone version it takes a few moments for the code to load.
+| Preprocessor | Postprocessor |
+|:---:|:---:|
+| Parametric section templates | Buckling curve (semilog) |
+| Node/element table editor | 2D / 3D mode shapes |
+| SVG cross-section preview | G/D/L/O modal classification |
+| Material & BC selection | DSM design values table |
 
-Note installation of the matlab toolbox or app version will place an icon for cufsm in the matlab app toolbar and allow users to use the GUI without knowing underlying file structures etc., Anyone using cufsm for research, or in batch mode, should use the source files. Open cufsm5.m and modify your directory for location of installation and then run cufsm5 from the command line in matlab to start the GUI.
+### Parametric Section Templates
+
+8 built-in section types with customizable dimensions:
+
+- **Lipped C-Channel** — lips pointing inward
+- **Lipped Z-Section** — opposing flanges with inward lips
+- **Hat Section** — symmetric trapezoid
+- **RHS** — Rectangular Hollow Section
+- **CHS** — Circular Hollow Section
+- **Angle (L)** — single angle
+- **I-Section** — doubly symmetric
+- **T-Section**
+
+### DSM Design Values (Automatic)
+
+After analysis completes, the extension automatically extracts:
+
+| Value | Description |
+|-------|-------------|
+| **Py** | Yield axial load |
+| **My** | Yield moment |
+| **Pcrl / Mcrl** | Local buckling critical load/moment |
+| **Pcrd / Mcrd** | Distortional buckling critical load/moment |
+| **Pcre / Mcre** | Global buckling critical load/moment |
+
+Each value includes the corresponding **half-wavelength** and **load factor**.
+
+### Boundary Conditions
+
+5 end boundary condition types supported:
+
+| Code | Description |
+|------|-------------|
+| S-S | Simply-Simply Supported |
+| C-C | Clamped-Clamped |
+| S-C | Simply-Clamped |
+| C-F | Clamped-Free |
+| C-G | Clamped-Guided |
+
+### 3D Mode Shape Visualization
+
+Interactive 3D buckling mode shapes rendered with **Babylon.js**:
+- Mouse drag to rotate, scroll to zoom
+- Displacement-based color mapping
+- Multi-half-wave display for short wavelengths
+- Canvas 2D isometric fallback
+
+### AI Integration (MCP)
+
+20 MCP tools for AI-driven structural analysis via **Claude Code**, **Cursor**, or **Codex**:
+
+```
+AI: "Design a Lipped C-channel H=200 B=75 D=20 t=2.0 and find Pcrl, Mcrl"
+
+→ set_section_template(type="lippedc", H=200, B=75, D=20, t=2.0)
+→ run_analysis(neigs=10)
+→ get_dsm_values(fy=350)
+→ Pcrl=45.2kN, Pcrd=52.8kN, Mcrl=8.9kNm, Mcrd=10.4kNm
+```
+
+All changes are reflected in the WebView GUI in real-time.
+
+---
+
+## Requirements
+
+- **Python 3.10+** with `numpy` and `scipy`
+- The extension automatically detects `.venv` in the project directory
+
+```bash
+pip install numpy scipy
+```
+
+---
+
+## Getting Started
+
+1. Install the extension from VS Code Marketplace
+2. Click the **CUFSM icon** in the Activity Bar (left sidebar)
+3. Click **"CUFSM: Open Section Designer"** in the tree view toolbar
+4. Select a section template → **Generate** → **Run Analysis**
+5. View results in the **Postprocessor** tab
+
+---
+
+## MCP Tools
+
+| Category | Tools |
+|----------|-------|
+| **Status** | `get_status`, `get_section_properties`, `get_dsm_values`, `get_buckling_curve` |
+| **Section** | `set_section_template`, `set_material`, `set_stress`, `set_boundary_condition`, `set_lengths` |
+| **Analysis** | `run_analysis`, `run_signature_curve`, `classify_modes` |
+| **Edit** | `get_nodes`, `get_elements`, `set_node_stress`, `double_mesh` |
+| **Advanced** | `get_cutwp`, `run_plastic_surface`, `run_vibration`, `save_project` |
+
+---
+
+## Analysis Engine
+
+The Python backend implements the complete FSM analysis pipeline:
+
+- **Element matrices**: `klocal`, `kglocal` (elastic + geometric stiffness)
+- **Assembly**: Sparse matrix assembly with spring support
+- **Boundary conditions**: 5 types via closed-form integral evaluation
+- **Eigenvalue solver**: `scipy.linalg.eig` for generalized eigenvalue problem
+- **cFSM**: Constrained FSM with GBT-based mode classification (G/D/L/O)
+- **fcFSM**: Force-based constrained FSM
+- **Vibration**: Free vibration analysis with mass matrix
+- **Plastic**: P-Mxx-Mzz interaction surface (fiber-based)
+- **CUTWP**: Warping properties (J, Cw, shear center)
+
+---
+
+## References
+
+- Schafer, B.W. & Li, Z. (2010). "Buckling analysis of cold-formed steel members with general boundary conditions using CUFSM." *Proc. 20th ISCCSS*, pp. 17-32.
+- Schafer, B.W. & Adany, S. (2006). "Buckling analysis of cold-formed steel members using CUFSM." *Proc. 18th ISCCSS*, pp. 39-54.
+- Jin, S., Adany, S. & Schafer, B.W. (2024). "Constrained Finite Strip Method: kinematic- and force-based approaches." *SSRC Annual Stability Conference*.
+
+---
 
 ## License
 
-Software is open source and distributed under [MIT license](https://github.com/thinwalled/cufsm-git/blob/main/LICENSE).
+MIT License. See [LICENSE](LICENSE) for details.
 
-## Help and Support
+---
 
-For assistance with the package, please raise an issue on the Github Issues page. Please use the appropriate labels to indicate the specific functionality you are inquiring about.
+## Publisher
 
-## Additional Information
+**Jeil Structural Engineering Consultants**
 
-The websites [www.ce.jhu.edu/cufsm](www.ce.jhu.edu/cufsm) and [www.ce.jhu.edu/bschafer](www.ce.jhu.edu/bschafer) provide more information on the software.
+- GitHub: [gogohkm/cufsmAi](https://github.com/gogohkm/cufsmAi)
