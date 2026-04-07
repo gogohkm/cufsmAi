@@ -1,5 +1,5 @@
 /**
- * CUFSM MCP Server — AI가 단면 해석을 제어하는 도구 모음
+ * StCFSD MCP Server — AI가 단면 해석을 제어하는 도구 모음
  *
  * stgen MCP 패턴 따름:
  * - stdio 프로토콜로 AI 클라이언트와 통신
@@ -13,7 +13,7 @@ import { z } from "zod";
 import * as http from "http";
 
 const DEFAULT_PORT = 52790;
-const BRIDGE_PORT = parseInt(process.env.CUFSM_MCP_PORT || String(DEFAULT_PORT));
+const BRIDGE_PORT = parseInt(process.env.STCFSD_MCP_PORT || String(DEFAULT_PORT));
 
 // ============================================================
 // HTTP Bridge 호출 헬퍼
@@ -60,10 +60,10 @@ function textResult(text: string) {
 // MCP Server 생성
 // ============================================================
 const server = new McpServer({
-    name: "cufsm-section-designer",
+    name: "stcfsd-section-designer",
     version: "1.0.0",
 }, {
-    instructions: `CUFSM - Cold-Formed Steel Section Buckling Analysis Tool.
+    instructions: `StCFSD - Cold-Formed Steel Section Buckling Analysis Tool.
 
 You can design cross-sections, run finite strip buckling analysis, and extract DSM design values (Pcrl, Pcrd, Mcrl, Mcrd).
 
@@ -630,7 +630,7 @@ server.tool("run_vibration", "Run free vibration analysis",
     }
 );
 
-server.tool("save_project", "Save current model to .cufsm JSON file",
+server.tool("save_project", "Save current model to .stcfsd JSON file",
     { filepath: z.string().describe("File path to save") },
     async ({ filepath }) => {
         const r = await callBridgePost('/action', { action: 'save_project', filepath });
@@ -941,7 +941,7 @@ server.tool("calc_deck_stiffness", "Calculate deck/panel rotational (kφ) and la
     }
 );
 
-server.tool("design_purlin", "Complete purlin design: analyze loads → dual CUFSM (positive/negative moment with deck springs) → DSM design",
+server.tool("design_purlin", "Complete purlin design: analyze loads → dual StCFSD (positive/negative moment with deck springs) → DSM design",
     {
         member_app: z.enum(["roof-purlin", "floor-joist", "wall-girt", "wall-stud"]).describe("Application type"),
         span_type: z.string().describe("Span type: simple, cantilever, cont-2, cont-3, cont-4, cont-N"),

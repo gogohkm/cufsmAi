@@ -5,7 +5,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import { JsonRpcProtocol } from './JsonRpcProtocol';
-import { CufsmModel, CufsmResult, SectionProperties } from '../models/types';
+import { StcfsdModel, StcfsdResult, SectionProperties } from '../models/types';
 
 export class PythonBridge {
     private _process: ChildProcess | null = null;
@@ -30,8 +30,8 @@ export class PythonBridge {
         }
 
         const enginePath = path.join(this._extensionPath, 'python');
-        console.log(`[CUFSM] Starting Python: ${this._pythonPath} -u server.py`);
-        console.log(`[CUFSM] CWD: ${enginePath}`);
+        console.log(`[StCFSD] Starting Python: ${this._pythonPath} -u server.py`);
+        console.log(`[StCFSD] CWD: ${enginePath}`);
 
         this._startupPromise = new Promise<void>((resolve, reject) => {
             let settled = false;
@@ -56,19 +56,19 @@ export class PythonBridge {
                     env: { ...process.env, PYTHONUNBUFFERED: '1' },
                 });
             } catch (err: any) {
-                console.error('[CUFSM] Failed to spawn Python:', err.message);
+                console.error('[StCFSD] Failed to spawn Python:', err.message);
                 finishReject(err);
                 return;
             }
 
             // 프로세스 즉시 종료 감지
             this._process.on('error', (err) => {
-                console.error('[CUFSM] Python process error:', err.message);
+                console.error('[StCFSD] Python process error:', err.message);
                 finishReject(err instanceof Error ? err : new Error(String(err)));
             });
 
             this._process.on('exit', (code, signal) => {
-                console.log(`[CUFSM] Python process exited: code=${code}, signal=${signal}`);
+                console.log(`[StCFSD] Python process exited: code=${code}, signal=${signal}`);
                 this._process = null;
                 this._started = false;
                 if (!settled) {
@@ -83,7 +83,7 @@ export class PythonBridge {
 
             this._process.stderr!.setEncoding('utf-8');
             this._process.stderr!.on('data', (data: string) => {
-                console.error('[CUFSM Python stderr]', data.trim());
+                console.error('[StCFSD Python stderr]', data.trim());
             });
 
             // stderr에서 import 에러 등을 감지
@@ -96,18 +96,18 @@ export class PythonBridge {
             setTimeout(async () => {
                 if (!this._process || this._process.exitCode !== null) {
                     const msg = `Python exited immediately. stderr: ${stderrBuffer.substring(0, 500)}`;
-                    console.error(`[CUFSM] ${msg}`);
+                    console.error(`[StCFSD] ${msg}`);
                     finishReject(new Error(msg));
                     return;
                 }
                 try {
                     const result = await this.ping();
-                    console.log(`[CUFSM] Python engine ready: ${result}`);
+                    console.log(`[StCFSD] Python engine ready: ${result}`);
                     this._started = true;
                     finishResolve();
                 } catch (err: any) {
                     const msg = `Ping failed. stderr: ${stderrBuffer.substring(0, 500)}`;
-                    console.error(`[CUFSM] ${msg}`);
+                    console.error(`[StCFSD] ${msg}`);
                     finishReject(new Error(msg));
                 }
             }, 2000);
@@ -126,7 +126,7 @@ export class PythonBridge {
         return this._call('ping', {});
     }
 
-    async analyze(model: CufsmModel): Promise<CufsmResult> {
+    async analyze(model: StcfsdModel): Promise<StcfsdResult> {
         return this._call('analyze', model);
     }
 
@@ -140,7 +140,7 @@ export class PythonBridge {
 
     private async _call(method: string, params: any): Promise<any> {
         if (!this._process || !this._process.stdin) {
-            console.error(`[CUFSM] _call(${method}): Python process not running`);
+            console.error(`[StCFSD] _call(${method}): Python process not running`);
             throw new Error(`Python process is not running (method: ${method})`);
         }
 

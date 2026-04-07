@@ -1,6 +1,6 @@
 {
-    "name": "cufsm",
-    "displayName": "CUFSM - Cold-Formed Steel Buckling Analysis",
+    "name": "stcfsd",
+    "displayName": "StCFSD - Cold-Formed Steel Buckling Analysis",
     "description": "Finite Strip Method (FSM) buckling analysis and DSM design for cold-formed steel sections with AI-powered MCP integration",
     "version": "0.1.0",
     "publisher": "Jeil-StructuralEngineering-Consultants",
@@ -26,7 +26,7 @@
         "finite strip method",
         "DSM",
         "structural engineering",
-        "CUFSM",
+        "StCFSD",
         "section design",
         "MCP"
     ],
@@ -36,20 +36,20 @@
         "commands": [
             {
                 "command": "cufsm.openDesigner",
-                "title": "CUFSM: Open Section Designer",
+                "title": "StCFSD: Open Section Designer",
                 "icon": "$(tools)"
             },
             {
                 "command": "cufsm.newProject",
-                "title": "CUFSM: New Project"
+                "title": "StCFSD: New Project"
             },
             {
                 "command": "cufsm.navigateSection",
-                "title": "CUFSM: Navigate Section"
+                "title": "StCFSD: Navigate Section"
             },
             {
                 "command": "cufsm.refreshProjects",
-                "title": "CUFSM: Refresh Projects",
+                "title": "StCFSD: Refresh Projects",
                 "icon": "$(refresh)"
             },
             {
@@ -93,8 +93,8 @@
             "activitybar": [
                 {
                     "id": "cufsm-explorer",
-                    "title": "CUFSM",
-                    "icon": "media/cufsm-icon.svg"
+                    "title": "StCFSD",
+                    "icon": "media/stcfsd-icon.svg"
                 }
             ]
         },

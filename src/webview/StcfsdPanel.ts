@@ -10,11 +10,11 @@ import * as path from 'path';
 import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
 import { McpBridgeServer, McpPanelInterface } from '../mcp/bridge';
-import { CufsmModel, CufsmResult, WebviewToExtMessage, createDefaultModel } from '../models/types';
+import { StcfsdModel, StcfsdResult, WebviewToExtMessage, createDefaultModel } from '../models/types';
 
-export class CufsmPanel implements McpPanelInterface {
-    public static readonly viewType = 'cufsm.designer';
-    public static currentPanel: CufsmPanel | undefined;
+export class StcfsdPanel implements McpPanelInterface {
+    public static readonly viewType = 'stcfsd.designer';
+    public static currentPanel: StcfsdPanel | undefined;
 
     private readonly _panel: vscode.WebviewPanel;
     private readonly _extensionUri: vscode.Uri;
@@ -23,7 +23,7 @@ export class CufsmPanel implements McpPanelInterface {
     private _disposed = false;
     private _currentSection = 'preprocessor';
 
-    private _model: CufsmModel;
+    private _model: StcfsdModel;
     private _lastAnalysisResult: any = null;
     private _lastPreviewPath: string = '';
     private _previewResolve: ((value: any) => void) | null = null;
@@ -37,14 +37,14 @@ export class CufsmPanel implements McpPanelInterface {
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        if (CufsmPanel.currentPanel) {
-            CufsmPanel.currentPanel._panel.reveal(column);
+        if (StcfsdPanel.currentPanel) {
+            StcfsdPanel.currentPanel._panel.reveal(column);
             return;
         }
 
         const panel = vscode.window.createWebviewPanel(
-            CufsmPanel.viewType,
-            'CUFSM Section Designer',
+            StcfsdPanel.viewType,
+            'StCFSD Section Designer',
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -56,7 +56,7 @@ export class CufsmPanel implements McpPanelInterface {
             }
         );
 
-        CufsmPanel.currentPanel = new CufsmPanel(panel, extensionUri, pythonBridge, treeProvider);
+        StcfsdPanel.currentPanel = new StcfsdPanel(panel, extensionUri, pythonBridge, treeProvider);
     }
 
     private constructor(
@@ -115,7 +115,7 @@ export class CufsmPanel implements McpPanelInterface {
                 action: 'set_stress', type: 'pure_bending', fy
             });
         } catch (err: any) {
-            console.error('[CUFSM] Failed to generate default section:', err.message);
+            console.error('[StCFSD] Failed to generate default section:', err.message);
         }
 
         // 기본 길이 설정
@@ -258,7 +258,7 @@ export class CufsmPanel implements McpPanelInterface {
     }
 
     /** 좌굴 해석 실행 */
-    private async _runAnalysis(model: CufsmModel): Promise<void> {
+    private async _runAnalysis(model: StcfsdModel): Promise<void> {
         this._postMessage('analysisStarted', null);
         try {
             const result = await this._pythonBridge.analyze(model);
@@ -278,7 +278,7 @@ export class CufsmPanel implements McpPanelInterface {
                 });
                 this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM });
             } catch (dsmErr: any) {
-                console.error('[CUFSM] DSM extraction failed:', dsmErr.message);
+                console.error('[StCFSD] DSM extraction failed:', dsmErr.message);
             }
 
             // cFSM 모드 분류 자동 실행
@@ -289,7 +289,7 @@ export class CufsmPanel implements McpPanelInterface {
                 });
                 this._postMessage('classifyResult', classResult);
             } catch (clsErr: any) {
-                console.error('[CUFSM] Classification failed:', clsErr.message);
+                console.error('[StCFSD] Classification failed:', clsErr.message);
             }
 
             // 트리뷰에 결과 표시
@@ -710,7 +710,7 @@ export class CufsmPanel implements McpPanelInterface {
                         }
                     } catch (e: any) {
                         dsmWarning = `DSM extraction failed: ${e.message || String(e)}`;
-                        console.error('[CUFSM] DSM extraction error:', e);
+                        console.error('[StCFSD] DSM extraction error:', e);
                     }
                 }
 
@@ -1417,7 +1417,7 @@ export class CufsmPanel implements McpPanelInterface {
     ">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="${styleUri}" rel="stylesheet">
-    <title>CUFSM Section Designer</title>
+    <title>StCFSD Section Designer</title>
 </head>
 <body>
     <!-- 탭 바 + 파일 버튼 -->
@@ -1944,7 +1944,7 @@ export class CufsmPanel implements McpPanelInterface {
     /** 프로젝트 저장 (.csd) */
     private async _saveProject(designData?: any): Promise<void> {
         const uri = await vscode.window.showSaveDialog({
-            filters: { 'CUFSM Section Design': ['csd'] },
+            filters: { 'StCFSD Section Design': ['csd'] },
             saveLabel: 'Save Project',
         });
         if (!uri) return;
@@ -1995,7 +1995,7 @@ export class CufsmPanel implements McpPanelInterface {
     /** 프로젝트 열기 (.csd) */
     private async _openProject(): Promise<void> {
         const uris = await vscode.window.showOpenDialog({
-            filters: { 'CUFSM Section Design': ['csd'] },
+            filters: { 'StCFSD Section Design': ['csd'] },
             canSelectMany: false,
             openLabel: 'Open Project',
         });
@@ -2044,7 +2044,7 @@ export class CufsmPanel implements McpPanelInterface {
     }
 
     private _dispose(): void {
-        CufsmPanel.currentPanel = undefined;
+        StcfsdPanel.currentPanel = undefined;
         this._disposed = true;
         this._panel.dispose();
     }

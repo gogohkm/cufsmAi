@@ -209,20 +209,20 @@
                 break;
             case 'templateError':
                 setStatus('Template error: ' + (msg.data && msg.data.error || 'Unknown'), 'error');
-                console.error('[CUFSM] templateError:', msg.data);
+                console.error('[StCFSD] templateError:', msg.data);
                 break;
             case 'analysisError':
                 setStatus('Analysis error: ' + (msg.data && msg.data.error || 'Unknown'), 'error');
-                console.error('[CUFSM] analysisError:', msg.data);
+                console.error('[StCFSD] analysisError:', msg.data);
                 break;
             case 'stressError':
-                console.error('[CUFSM] stressError:', msg.data);
+                console.error('[StCFSD] stressError:', msg.data);
                 break;
             case 'plasticError':
-                console.error('[CUFSM] plasticError:', msg.data);
+                console.error('[StCFSD] plasticError:', msg.data);
                 break;
             case 'classifyError':
-                console.error('[CUFSM] classifyError:', msg.data);
+                console.error('[StCFSD] classifyError:', msg.data);
                 break;
             case 'stressApplied':
                 if (model && msg.data && msg.data.node) {

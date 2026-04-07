@@ -5,7 +5,7 @@
  * 참조: 컨버전전략.md §3 메시지 프로토콜
  */
 
-export interface CufsmModel {
+export interface StcfsdModel {
     /** 재료 물성 [matnum, Ex, Ey, vx, vy, G] */
     prop: number[][];
     /** 절점 [node#, x, z, dofx, dofz, dofy, dofrot, stress] */
@@ -39,7 +39,7 @@ export interface GBTConfig {
     norm: number;
 }
 
-export interface CufsmResult {
+export interface StcfsdResult {
     /** 좌굴 곡선 — curve[i] = [length, lf1, lf2, ...] */
     curve: number[][];
     /** 모드형상 */
@@ -88,7 +88,7 @@ export interface JsonRpcResponse {
 }
 
 /** 기본 모델 생성 */
-export function createDefaultModel(): CufsmModel {
+export function createDefaultModel(): StcfsdModel {
     return {
         prop: [[100, 29500, 29500, 0.3, 0.3, 11346.15]],
         node: [],

@@ -1,8 +1,8 @@
-# CUFSM — Cold-Formed Steel Buckling Analysis
+# StCFSD — Cold-Formed Steel Buckling Analysis
 
 A VS Code extension for **elastic buckling analysis** of cold-formed steel members using the **Finite Strip Method (FSM)**, with built-in **Direct Strength Method (DSM)** design value extraction and **AI-powered MCP** integration.
 
-Based on the open-source [CUFSM](https://github.com/thinwalled/cufsm-git) by B.W. Schafer, S. Adany, Z. Li, and S. Jin (Johns Hopkins University).
+Based on the open-source [StCFSD](https://github.com/thinwalled/cufsm-git) by B.W. Schafer, S. Adany, Z. Li, and S. Jin (Johns Hopkins University).
 
 ---
 
@@ -95,8 +95,8 @@ pip install numpy scipy
 ## Getting Started
 
 1. Install the extension from VS Code Marketplace
-2. Click the **CUFSM icon** in the Activity Bar (left sidebar)
-3. Click **"CUFSM: Open Section Designer"** in the tree view toolbar
+2. Click the **StCFSD icon** in the Activity Bar (left sidebar)
+3. Click **"StCFSD: Open Section Designer"** in the tree view toolbar
 4. Select a section template → **Generate** → **Run Analysis**
 5. View results in the **Postprocessor** tab
 

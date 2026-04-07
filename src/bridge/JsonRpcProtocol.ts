@@ -58,7 +58,7 @@ export class JsonRpcProtocol {
                 const response: JsonRpcResponse = JSON.parse(trimmed);
                 this._handleResponse(response);
             } catch {
-                console.error('[CUFSM] Failed to parse JSON-RPC response:', trimmed.substring(0, 200));
+                console.error('[StCFSD] Failed to parse JSON-RPC response:', trimmed.substring(0, 200));
             }
         }
     }
@@ -66,7 +66,7 @@ export class JsonRpcProtocol {
     private _handleResponse(response: JsonRpcResponse): void {
         const pending = this._pending.get(response.id);
         if (!pending) {
-            console.warn(`[CUFSM] No pending request for id ${response.id}`);
+            console.warn(`[StCFSD] No pending request for id ${response.id}`);
             return;
         }
 

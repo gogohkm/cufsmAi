@@ -1,12 +1,12 @@
 /**
- * CUFSM MCP Bridge — HTTP 서버로 MCP Server ↔ CufsmPanel 연결
+ * StCFSD MCP Bridge — HTTP 서버로 MCP Server ↔ StcfsdPanel 연결
  *
- * MCP Server (stdio) ─HTTP→ Bridge (localhost:52790) ─직접호출→ CufsmPanel
+ * MCP Server (stdio) ─HTTP→ Bridge (localhost:52790) ─직접호출→ StcfsdPanel
  */
 
 import * as http from 'http';
 
-/** CufsmPanel이 구현해야 하는 인터페이스 */
+/** StcfsdPanel이 구현해야 하는 인터페이스 */
 export interface McpPanelInterface {
     handleMcpAction(options: any): Promise<any>;
     getStatus(): any;
@@ -67,7 +67,7 @@ export class McpBridgeServer {
             };
             const onListening = () => {
                 server.off('error', onError);
-                console.log(`[CUFSM MCP Bridge] Listening on port ${this._port}`);
+                console.log(`[StCFSD MCP Bridge] Listening on port ${this._port}`);
                 resolve();
             };
 

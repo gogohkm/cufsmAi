@@ -12,22 +12,22 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as net from 'net';
 import { PythonBridge } from './bridge/PythonBridge';
-import { CufsmPanel } from './webview/CufsmPanel';
-import { ProjectExplorerProvider, CufsmTreeItem } from './webview/ProjectExplorerProvider';
+import { StcfsdPanel } from './webview/StcfsdPanel';
+import { ProjectExplorerProvider, StcfsdTreeItem } from './webview/ProjectExplorerProvider';
 import { McpBridgeServer } from './mcp/bridge';
 
 let pythonBridge: PythonBridge | undefined;
 let mcpBridge: McpBridgeServer | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('CUFSM extension activating...');
+    console.log('StCFSD extension activating...');
 
     const pythonPath = getPythonPath(context.extensionPath);
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
 
     // MCP Bridge 시작
     const mcpPort = await findAvailablePort(52790);
-    mcpBridge = new McpBridgeServer(() => CufsmPanel.currentPanel || undefined, mcpPort);
+    mcpBridge = new McpBridgeServer(() => StcfsdPanel.currentPanel || undefined, mcpPort);
     await mcpBridge.start();
 
     // .mcp.json 자동 생성
@@ -37,7 +37,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const projectExplorer = new ProjectExplorerProvider();
 
     // Step 2: 트리뷰 등록
-    const treeView = vscode.window.createTreeView('cufsm.projectExplorer', {
+    const treeView = vscode.window.createTreeView('stcfsd.projectExplorer', {
         treeDataProvider: projectExplorer,
         showCollapseAll: true,
     });
@@ -45,37 +45,37 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Step 3: 커맨드 등록
     context.subscriptions.push(
-        vscode.commands.registerCommand('cufsm.openDesigner', async () => {
+        vscode.commands.registerCommand('stcfsd.openDesigner', async () => {
             try {
                 await ensurePythonRunning();
-                CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
+                StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
             } catch (e) {
-                console.error('[CUFSM] Python start failed, designer not opened');
+                console.error('[StCFSD] Python start failed, designer not opened');
             }
         }),
 
-        vscode.commands.registerCommand('cufsm.newProject', async () => {
+        vscode.commands.registerCommand('stcfsd.newProject', async () => {
             try {
                 await ensurePythonRunning();
-                CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
+                StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
             } catch (e) {
-                console.error('[CUFSM] Python start failed, new project view not opened');
+                console.error('[StCFSD] Python start failed, new project view not opened');
             }
         }),
 
-        vscode.commands.registerCommand('cufsm.navigateSection', (sectionId: string) => {
-            if (CufsmPanel.currentPanel) {
-                CufsmPanel.currentPanel.showSection(sectionId);
+        vscode.commands.registerCommand('stcfsd.navigateSection', (sectionId: string) => {
+            if (StcfsdPanel.currentPanel) {
+                StcfsdPanel.currentPanel.showSection(sectionId);
             }
         }),
 
-        vscode.commands.registerCommand('cufsm.refreshProjects', () => {
+        vscode.commands.registerCommand('stcfsd.refreshProjects', () => {
             projectExplorer.refresh();
         }),
 
-        vscode.commands.registerCommand('cufsm.runAnalysis', () => {
-            if (CufsmPanel.currentPanel) {
-                CufsmPanel.currentPanel.showSection('run-analysis');
+        vscode.commands.registerCommand('stcfsd.runAnalysis', () => {
+            if (StcfsdPanel.currentPanel) {
+                StcfsdPanel.currentPanel.showSection('run-analysis');
             }
         }),
     );
@@ -83,33 +83,33 @@ export async function activate(context: vscode.ExtensionContext) {
     // Step 4: 트리 아이템 클릭 → WebView 네비게이션
     treeView.onDidChangeSelection(async e => {
         if (e.selection.length === 0) { return; }
-        const item = e.selection[0] as CufsmTreeItem;
+        const item = e.selection[0] as StcfsdTreeItem;
         const sectionId = item.sectionId;
         if (!sectionId) { return; }
 
         // 'open-designer' → 패널 열기
         if (sectionId === 'open-designer') {
-            vscode.commands.executeCommand('cufsm.openDesigner');
+            vscode.commands.executeCommand('stcfsd.openDesigner');
             return;
         }
 
         // 패널이 없으면 먼저 생성
-        const panelExisted = !!CufsmPanel.currentPanel;
+        const panelExisted = !!StcfsdPanel.currentPanel;
         if (!panelExisted) {
             try {
                 await ensurePythonRunning();
-                CufsmPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
+                StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
                 // WebView 초기화 대기 후 섹션 이동
                 setTimeout(() => {
-                    if (CufsmPanel.currentPanel) {
-                        CufsmPanel.currentPanel.showSection(sectionId);
+                    if (StcfsdPanel.currentPanel) {
+                        StcfsdPanel.currentPanel.showSection(sectionId);
                     }
                 }, 800);
             } catch (err) {
-                console.error(`[CUFSM] Tree navigation blocked while starting Python for section ${sectionId}`);
+                console.error(`[StCFSD] Tree navigation blocked while starting Python for section ${sectionId}`);
             }
         } else {
-            CufsmPanel.currentPanel!.showSection(sectionId);
+            StcfsdPanel.currentPanel!.showSection(sectionId);
         }
     });
 
@@ -129,7 +129,7 @@ async function ensurePythonRunning(): Promise<void> {
             await pythonBridge.start();
         } catch (err: any) {
             vscode.window.showErrorMessage(
-                `CUFSM: Failed to start Python engine. ` +
+                `StCFSD: Failed to start Python engine. ` +
                 `Ensure Python is installed with numpy and scipy.\n${err.message}`
             );
             throw err;
@@ -144,10 +144,10 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
     const mcpServerConfig = {
         command: "node",
         args: [serverPath],
-        env: { CUFSM_MCP_PORT: String(port) }
+        env: { STCFSD_MCP_PORT: String(port) }
     };
 
-    const mcpJson = JSON.stringify({ mcpServers: { "cufsm-section-designer": mcpServerConfig } }, null, 2);
+    const mcpJson = JSON.stringify({ mcpServers: { "stcfsd-section-designer": mcpServerConfig } }, null, 2);
 
     // 1) 워크스페이스 폴더에 .mcp.json 쓰기
     _writeMcpToWorkspace(mcpJson);
@@ -161,7 +161,7 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
     try {
         const extMcpPath = path.join(context.extensionPath, '.mcp.json');
         fs.writeFileSync(extMcpPath, mcpJson);
-        console.log(`[CUFSM] MCP config (extension dir): ${extMcpPath}`);
+        console.log(`[StCFSD] MCP config (extension dir): ${extMcpPath}`);
     } catch (err) {
         // 무시
     }
@@ -180,16 +180,16 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
                 try { existing = JSON.parse(fs.readFileSync(claudeMcpPath, 'utf-8')); } catch {}
             }
             if (!existing.mcpServers) { existing.mcpServers = {}; }
-            existing.mcpServers['cufsm-section-designer'] = mcpServerConfig;
+            existing.mcpServers['stcfsd-section-designer'] = mcpServerConfig;
             fs.writeFileSync(claudeMcpPath, JSON.stringify(existing, null, 2));
-            console.log(`[CUFSM] Claude global MCP: ${claudeMcpPath}`);
+            console.log(`[StCFSD] Claude global MCP: ${claudeMcpPath}`);
         }
     } catch (err) {
-        console.warn('[CUFSM] Failed to write global MCP config:', err);
+        console.warn('[StCFSD] Failed to write global MCP config:', err);
     }
 
-    console.log(`[CUFSM] MCP server path: ${serverPath}`);
-    console.log(`[CUFSM] MCP bridge port: ${port}`);
+    console.log(`[StCFSD] MCP server path: ${serverPath}`);
+    console.log(`[StCFSD] MCP bridge port: ${port}`);
 }
 
 async function findAvailablePort(preferredPort: number, maxAttempts: number = 20): Promise<number> {
@@ -206,19 +206,19 @@ async function findAvailablePort(preferredPort: number, maxAttempts: number = 20
 
         if (isFree) {
             if (candidate !== preferredPort) {
-                console.warn(`[CUFSM] Preferred MCP port ${preferredPort} unavailable, using ${candidate}`);
+                console.warn(`[StCFSD] Preferred MCP port ${preferredPort} unavailable, using ${candidate}`);
             }
             return candidate;
         }
     }
 
-    throw new Error(`CUFSM: failed to reserve an MCP bridge port near ${preferredPort}`);
+    throw new Error(`StCFSD: failed to reserve an MCP bridge port near ${preferredPort}`);
 }
 
 function _writeMcpToWorkspace(mcpJson: string): void {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
-        console.log('[CUFSM] No workspace folder — .mcp.json not written to workspace');
+        console.log('[StCFSD] No workspace folder — .mcp.json not written to workspace');
         return;
     }
     const wsRoot = folders[0].uri.fsPath;
@@ -229,9 +229,9 @@ function _writeMcpToWorkspace(mcpJson: string): void {
         const claudeDir = path.join(wsRoot, '.claude');
         if (!fs.existsSync(claudeDir)) { fs.mkdirSync(claudeDir, { recursive: true }); }
         fs.writeFileSync(path.join(claudeDir, 'mcp.json'), mcpJson);
-        console.log(`[CUFSM] MCP config written to workspace: ${wsRoot}`);
+        console.log(`[StCFSD] MCP config written to workspace: ${wsRoot}`);
     } catch (err) {
-        console.warn(`[CUFSM] Failed to write MCP to workspace ${wsRoot}:`, err);
+        console.warn(`[StCFSD] Failed to write MCP to workspace ${wsRoot}:`, err);
     }
 }
 
@@ -246,7 +246,7 @@ function getPythonPath(extensionPath: string): string {
     ];
     for (const venvPath of venvCandidates) {
         if (fs.existsSync(venvPath)) {
-            console.log(`[CUFSM] Using project venv: ${venvPath}`);
+            console.log(`[StCFSD] Using project venv: ${venvPath}`);
             return venvPath;
         }
     }
@@ -255,12 +255,12 @@ function getPythonPath(extensionPath: string): string {
     const pyConfig = vscode.workspace.getConfiguration('python');
     const pyPath = pyConfig.get<string>('defaultInterpreterPath');
     if (pyPath && pyPath !== 'python') {
-        console.log(`[CUFSM] Using python.defaultInterpreterPath: ${pyPath}`);
+        console.log(`[StCFSD] Using python.defaultInterpreterPath: ${pyPath}`);
         return pyPath;
     }
 
     // 3) 기본
     const fallback = process.platform === 'win32' ? 'python' : 'python3';
-    console.log(`[CUFSM] Using fallback: ${fallback}`);
+    console.log(`[StCFSD] Using fallback: ${fallback}`);
     return fallback;
 }

@@ -7,7 +7,7 @@
 
 import * as vscode from 'vscode';
 
-export class CufsmTreeItem extends vscode.TreeItem {
+export class StcfsdTreeItem extends vscode.TreeItem {
     public sectionId?: string;
 
     constructor(
@@ -98,8 +98,8 @@ const EMPTY: ProjectSummary = {
     validationPass: 0, validationWarn: 0, validationFail: 0,
 };
 
-export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTreeItem> {
-    private _onDidChangeTreeData = new vscode.EventEmitter<CufsmTreeItem | undefined | null>();
+export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTreeItem> {
+    private _onDidChangeTreeData = new vscode.EventEmitter<StcfsdTreeItem | undefined | null>();
     readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
     private _summary: ProjectSummary | null = null;
@@ -117,19 +117,19 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
         this._onDidChangeTreeData.fire(undefined);
     }
 
-    getTreeItem(element: CufsmTreeItem): vscode.TreeItem {
+    getTreeItem(element: StcfsdTreeItem): vscode.TreeItem {
         return element;
     }
 
-    getChildren(element?: CufsmTreeItem): CufsmTreeItem[] {
+    getChildren(element?: StcfsdTreeItem): StcfsdTreeItem[] {
         if (!element) { return this._getRootItems(); }
         return this._getChildItems(element);
     }
 
     // ─── 루트 (6개 탭) ───
-    private _getRootItems(): CufsmTreeItem[] {
+    private _getRootItems(): StcfsdTreeItem[] {
         if (!this._summary) {
-            return [new CufsmTreeItem('단면 미로드', vscode.TreeItemCollapsibleState.None, {
+            return [new StcfsdTreeItem('단면 미로드', vscode.TreeItemCollapsibleState.None, {
                 description: '클릭하여 디자이너 열기',
                 iconPath: new vscode.ThemeIcon('info'),
                 sectionId: 'open-designer',
@@ -137,32 +137,32 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
         }
         const s = this._summary;
         return [
-            new CufsmTreeItem('전처리', vscode.TreeItemCollapsibleState.Expanded, {
+            new StcfsdTreeItem('전처리', vscode.TreeItemCollapsibleState.Expanded, {
                 sectionId: 'preprocessor',
                 iconPath: new vscode.ThemeIcon('symbol-structure'),
                 description: s.nnodes > 0 ? `${s.sectionType || ''} ${s.nnodes}절점` : '',
             }),
-            new CufsmTreeItem('해석', vscode.TreeItemCollapsibleState.Collapsed, {
+            new StcfsdTreeItem('해석', vscode.TreeItemCollapsibleState.Collapsed, {
                 sectionId: 'analysis',
                 iconPath: new vscode.ThemeIcon('beaker'),
                 description: s.hasResults ? '결과 있음' : '',
                 contextValue: 'section-analysis',
             }),
-            new CufsmTreeItem('후처리', vscode.TreeItemCollapsibleState.Collapsed, {
+            new StcfsdTreeItem('후처리', vscode.TreeItemCollapsibleState.Collapsed, {
                 sectionId: 'postprocessor',
                 iconPath: new vscode.ThemeIcon('graph'),
                 description: s.hasResults ? 'DSM 추출' : '',
             }),
-            new CufsmTreeItem('설계', vscode.TreeItemCollapsibleState.Expanded, {
+            new StcfsdTreeItem('설계', vscode.TreeItemCollapsibleState.Expanded, {
                 sectionId: 'design',
                 iconPath: new vscode.ThemeIcon('tools'),
                 description: s.hasDesignResult ? s.passOrFail : '',
             }),
-            new CufsmTreeItem('보고서', vscode.TreeItemCollapsibleState.None, {
+            new StcfsdTreeItem('보고서', vscode.TreeItemCollapsibleState.None, {
                 sectionId: 'report',
                 iconPath: new vscode.ThemeIcon('file-text'),
             }),
-            new CufsmTreeItem('검증', vscode.TreeItemCollapsibleState.Collapsed, {
+            new StcfsdTreeItem('검증', vscode.TreeItemCollapsibleState.Collapsed, {
                 sectionId: 'validation',
                 iconPath: new vscode.ThemeIcon('checklist'),
                 description: (s.validationPass + s.validationWarn + s.validationFail) > 0
@@ -173,8 +173,8 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
     }
 
     // ─── 하위 항목 ───
-    private _getChildItems(parent: CufsmTreeItem): CufsmTreeItem[] {
-        const items: CufsmTreeItem[] = [];
+    private _getChildItems(parent: StcfsdTreeItem): StcfsdTreeItem[] {
+        const items: StcfsdTreeItem[] = [];
         const s = this._summary || EMPTY;
 
         switch (parent.sectionId) {
@@ -201,7 +201,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
                 'symbol-ruler', `${s.nlengths}점`));
             items.push(this._leaf('cFSM 설정', 'cfsm-settings',
                 'settings-gear', ''));
-            items.push(new CufsmTreeItem('해석 실행', vscode.TreeItemCollapsibleState.None, {
+            items.push(new StcfsdTreeItem('해석 실행', vscode.TreeItemCollapsibleState.None, {
                 sectionId: 'run-analysis',
                 iconPath: new vscode.ThemeIcon('play'),
                 contextValue: 'section-analysis',
@@ -232,7 +232,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
             items.push(this._leaf('간격', 'focus-spacing',
                 'move', s.spacing || ''));
             // 하중
-            items.push(new CufsmTreeItem('하중', vscode.TreeItemCollapsibleState.Collapsed, {
+            items.push(new StcfsdTreeItem('하중', vscode.TreeItemCollapsibleState.Collapsed, {
                 sectionId: 'design-loads',
                 iconPath: new vscode.ThemeIcon('cloud-download'),
                 description: s.loadD ? `D=${s.loadD}` : '',
@@ -242,7 +242,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
                 'symbol-ruler', ''));
             // 하중 분석 결과
             if (s.hasLoadAnalysis) {
-                items.push(new CufsmTreeItem('하중 분석 결과', vscode.TreeItemCollapsibleState.Collapsed, {
+                items.push(new StcfsdTreeItem('하중 분석 결과', vscode.TreeItemCollapsibleState.Collapsed, {
                     sectionId: 'design-load-results',
                     iconPath: new vscode.ThemeIcon('pulse'),
                     description: s.gravityCombo || '',
@@ -250,7 +250,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
             }
             // 설계 결과
             if (s.hasDesignResult) {
-                items.push(new CufsmTreeItem('설계 결과', vscode.TreeItemCollapsibleState.Collapsed, {
+                items.push(new StcfsdTreeItem('설계 결과', vscode.TreeItemCollapsibleState.Collapsed, {
                     sectionId: 'design-results',
                     iconPath: new vscode.ThemeIcon(s.passOrFail === 'OK' ? 'pass' : 'error'),
                     description: `${s.utilization} ${s.passOrFail}`,
@@ -303,7 +303,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
                     'warning', `${s.validationWarn}개`));
             items.push(this._leaf('통과 항목', 'focus-validation-pass',
                 'pass', `${s.validationPass}개`));
-            items.push(new CufsmTreeItem('검증 실행', vscode.TreeItemCollapsibleState.None, {
+            items.push(new StcfsdTreeItem('검증 실행', vscode.TreeItemCollapsibleState.None, {
                 sectionId: 'run-validation',
                 iconPath: new vscode.ThemeIcon('play'),
             }));
@@ -315,8 +315,8 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<CufsmTre
 
     // ─── 리프 노드 헬퍼 ───
     private _leaf(label: string, sectionId: string,
-                  icon: string, desc: string): CufsmTreeItem {
-        return new CufsmTreeItem(label, vscode.TreeItemCollapsibleState.None, {
+                  icon: string, desc: string): StcfsdTreeItem {
+        return new StcfsdTreeItem(label, vscode.TreeItemCollapsibleState.None, {
             sectionId,
             iconPath: new vscode.ThemeIcon(icon),
             description: desc,
