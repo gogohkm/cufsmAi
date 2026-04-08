@@ -46,21 +46,17 @@ export async function activate(context: vscode.ExtensionContext) {
     // Step 3: 커맨드 등록
     context.subscriptions.push(
         vscode.commands.registerCommand('stcfsd.openDesigner', async () => {
-            try {
-                await ensurePythonRunning();
-                StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
-            } catch (e) {
-                console.error('[StCFSD] Python start failed, designer not opened');
+            try { await ensurePythonRunning(); } catch (e) {
+                console.warn('[StCFSD] Python not available — panel opens without engine');
             }
+            StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 
         vscode.commands.registerCommand('stcfsd.newProject', async () => {
-            try {
-                await ensurePythonRunning();
-                StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
-            } catch (e) {
-                console.error('[StCFSD] Python start failed, new project view not opened');
+            try { await ensurePythonRunning(); } catch (e) {
+                console.warn('[StCFSD] Python not available — panel opens without engine');
             }
+            StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 
         vscode.commands.registerCommand('stcfsd.navigateSection', (sectionId: string) => {
