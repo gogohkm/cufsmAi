@@ -870,7 +870,28 @@ def analyze_beam_fe(
         x_start = sum(spans[:si])
         for j in range(n_seg):
             x_ft.append(x_start + spans[si] * j / (n_seg - 1))
-    # 마지막 점 중복 제거
+
+    # Lap 경계에 추가 절점 삽입 (정확한 I 계단 변화 포착)
+    if laps_per_support:
+        sup_x_ft = [0.0]
+        for s in spans:
+            sup_x_ft.append(sup_x_ft[-1] + s)
+        for si in range(min(len(sup_x_ft), len(laps_per_support))):
+            lap = laps_per_support[si]
+            if not lap:
+                continue
+            lL = lap.get('left_ft') or lap.get('left') or 0
+            lR = lap.get('right_ft') or lap.get('right') or 0
+            sx = sup_x_ft[si]
+            if lL > 0:
+                x_ft.append(sx - lL)       # Lap 왼쪽 경계
+                x_ft.append(sx - lL + 0.01) # 경계 바로 안쪽
+            if lR > 0:
+                x_ft.append(sx + lR)       # Lap 오른쪽 경계
+                x_ft.append(sx + lR - 0.01) # 경계 바로 안쪽
+
+    # 마지막 점 중복 제거 + 정렬
+    x_ft = sorted(set(x_ft))
     x_ft_clean = [x_ft[0]]
     for i in range(1, len(x_ft)):
         if x_ft[i] > x_ft_clean[-1] + 1e-8:
@@ -919,7 +940,8 @@ def analyze_beam_fe(
         Le = x_in[i + 1] - x_in[i]
         if Le < 1e-10:
             continue
-        EI_e = E_ksi * (I_at_x[i] + I_at_x[i + 1]) / 2.0
+        # Lap 구간: I가 step function → max(양 끝 I) 사용
+        EI_e = E_ksi * max(I_at_x[i], I_at_x[i + 1])
         w_e = (w_at_x[i] + w_at_x[i + 1]) / 2.0  # 요소 평균 하중
 
         # Euler-Bernoulli 보 요소 강성행렬
@@ -974,7 +996,8 @@ def analyze_beam_fe(
         Le = x_in[i + 1] - x_in[i]
         if Le < 1e-10:
             continue
-        EI_e = E_ksi * (I_at_x[i] + I_at_x[i + 1]) / 2.0
+        # Lap 구간: I가 step function → max(양 끝 I) 사용
+        EI_e = E_ksi * max(I_at_x[i], I_at_x[i + 1])
         w_e = (w_at_x[i] + w_at_x[i + 1]) / 2.0
 
         # 요소 절점 변위
