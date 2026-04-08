@@ -40,6 +40,10 @@ OMEGA = {
 
 def design_member(params: dict) -> dict:
     """부재 설계 계산 메인 디스패처"""
+    # props가 없으면 단면 템플릿에서 자동 생성
+    if not params.get('props') or not params['props'].get('A'):
+        params = _auto_generate_props(params)
+
     member_type = params.get('member_type', 'compression')
 
     if member_type == 'compression':
@@ -339,7 +343,7 @@ def _design_flexure(params: dict) -> dict:
 
     props = params.get('props', {})
     Ag = props.get('A', 0)
-    Sf = props.get('Sf', 0) or props.get('Sxx', 0)
+    Sf = props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
     if Sf <= 0:
         return {'error': 'Section modulus not available (Sf=0)'}
 
@@ -361,6 +365,8 @@ def _design_flexure(params: dict) -> dict:
     # Step 1: My — DSM에서 전달된 My 우선 사용 (yieldMP 기반, Ixz 고려)
     # Mcrl = LF × My_dsm 이므로, My도 동일한 My_dsm을 사용해야 λ가 일관됨
     My = My_dsm if My_dsm > 0 else Sf * Fy
+    # Sf_eff: My와 일관된 유효 단면계수 (My_dsm/Fy, Ixz 고려)
+    Sf_eff = My / Fy if Fy > 0 else Sf
     steps.append({
         'step': 1, 'name': 'Yield Moment (My)',
         'value': round(My, 2), 'unit': 'kip-in',
@@ -368,8 +374,6 @@ def _design_flexure(params: dict) -> dict:
     })
 
     # Step 2: 전체좌굴 LTB (F2)
-    # Sf_eff: My와 일관된 유효 단면계수 (My_dsm/Fy, Ixz 고려)
-    Sf_eff = My / Fy if Fy > 0 else Sf
     Fcre = compute_beam_Fcre(props, Cb, Lb)
     global_result = beam_global_strength(Fy, Fcre, Sf_eff)
     Mne = global_result['Mne']
@@ -1065,3 +1069,88 @@ def generate_report(result: dict, params: dict = None) -> str:
     lines.append('')
     lines.append('=' * 60)
     return '\n'.join(lines)
+
+
+# ============================================================
+# 단면 자동 생성 + props 계산
+# ============================================================
+
+def _auto_generate_props(params: dict) -> dict:
+    """단면 템플릿에서 node/elem → grosprop → props 자동 생성"""
+    import sys, os
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from engine.template import generate_section
+    from engine.properties import grosprop
+    from engine.cutwp import cutwp_prop
+
+    params = dict(params)  # 원본 변경 방지
+
+    section_type = params.get('section_type', 'lippedc')
+    H = params.get('H', 8.0)
+    B = params.get('B', 2.5)
+    D = params.get('D', 0.625)
+    t = params.get('t', 0.0451)
+
+    try:
+        sec = generate_section(section_type, {'H': H, 'B': B, 'D': D, 't': t})
+        node = sec['node']
+        elem = sec['elem']
+
+        props = grosprop(node, elem)
+
+        # CUTWP 성질 추가
+        try:
+            cw = cutwp_prop(node, elem)
+            props['J'] = cw.get('J', 0)
+            props['Cw'] = cw.get('Cw', 0)
+            props['Xs'] = cw.get('Xs', 0)
+            props['Zs'] = cw.get('Zs', 0)
+        except Exception:
+            props['J'] = 0
+            props['Cw'] = 0
+
+        # Sf = Sx (호환성)
+        props['Sf'] = props.get('Sx', 0)
+        props['t'] = t
+
+        # DSM 값도 자동 계산
+        if not params.get('dsm'):
+            try:
+                from engine.fsm_solver import stripmain
+                from engine.dsm import extract_dsm_values
+                from models.data import GBTConfig
+                import numpy as np
+
+                prop_mat = np.array([[100, 29500, 29500, 0.3, 0.3, 11346]])
+                for n in node:
+                    n[7] = params.get('Fy', 50.0)
+
+                lengths = np.logspace(0, 3, 60)
+                m_all = [np.array([1.0]) for _ in lengths]
+                result = stripmain(prop_mat, node, elem, lengths,
+                                   np.array([]), np.array([]),
+                                   GBTConfig(), 'S-S', m_all, neigs=10)
+
+                Fy = params.get('Fy', 50.0)
+                dsmP = extract_dsm_values(result.curve, node, elem, Fy, 'P')
+                dsmM = extract_dsm_values(result.curve, node, elem, Fy, 'Mxx')
+
+                params['dsm'] = {
+                    'Pcrl': dsmP.get('Pcrl', 0),
+                    'Pcrd': dsmP.get('Pcrd', 0),
+                    'Py': dsmP.get('Py', 0),
+                    'Mcrl': dsmM.get('Mxxcrl', 0),
+                    'Mcrd': dsmM.get('Mxxcrd', 0),
+                    'My': dsmM.get('My_xx', 0),
+                }
+            except Exception as e:
+                print(f'[StCFSD] Auto DSM failed: {e}')
+
+        params['props'] = props
+        params['node'] = node.tolist()
+        params['elem'] = elem.tolist()
+
+    except Exception as e:
+        print(f'[StCFSD] Auto props failed: {e}')
+
+    return params
