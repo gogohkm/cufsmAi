@@ -731,6 +731,9 @@
             html += '</div>';
         }
 
+        // Lap SVG 다이어그램
+        html += _drawLapSvg(result);
+
         html += '<table class="props-table">';
         html += '<tr><td>Lap 길이 검증</td><td>' + (result.lap_ok ? '✅ OK' : '❌ NG') + '</td><td>≥ ' + fmtVal(result.min_lap, 'length') + ' ' + unitLabel('length') + '</td></tr>';
         html += '<tr><td>전달 전단력</td><td>' + fmtVal(result.V_transfer, 'force') + ' ' + unitLabel('force') + '</td><td></td></tr>';
@@ -759,6 +762,9 @@
             return;
         }
         let html = '<h4>' + (result.connection_type || '접합부') + ' 강도 결과</h4>';
+
+        // 접합부 SVG 다이어그램
+        html += _drawConnectionSvg(result);
 
         // 핵심 결과 요약
         html += '<table class="props-table">';
@@ -794,6 +800,153 @@
         }
 
         el.innerHTML = html;
+    }
+
+    // ============================================================
+    // 접합부 SVG 다이어그램
+    // ============================================================
+    function _drawLapSvg(r) {
+        const w = 320, h = 120;
+        const fg = 'var(--vscode-foreground)';
+        const accent = '#4fc3f7';
+        const warn = '#ff5722';
+
+        const lapL = r.lap_left_in || 12;
+        const lapR = r.lap_right_in || 12;
+        const nPerRow = r.n_per_row || 2;
+        const nRows = r.n_rows || 2;
+        const spacing = r.spacing || 3;
+        const total = lapL + lapR + 40;
+        const sc = (w - 40) / total;
+
+        const x0 = 20, y1 = 40, y2 = 55, tH = 12;
+        const supX = x0 + lapL * sc + 20 * sc;
+
+        let s = '<svg width="'+w+'" height="'+h+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
+
+        // 부재 1 (상부)
+        s += '<rect x="'+x0+'" y="'+(y1)+'" width="'+(lapL*sc+20*sc)+'" height="'+tH+'" fill="'+accent+'" opacity="0.3" stroke="'+accent+'" stroke-width="1"/>';
+        // 부재 2 (하부, Lap 영역에서 겹침)
+        s += '<rect x="'+(supX - lapL*sc)+'" y="'+(y2)+'" width="'+(lapR*sc+lapL*sc+20*sc)+'" height="'+tH+'" fill="#81c784" opacity="0.3" stroke="#81c784" stroke-width="1"/>';
+
+        // 지점 삼각형
+        s += '<polygon points="'+(supX-6)+','+(y2+tH+2)+' '+(supX+6)+','+(y2+tH+2)+' '+supX+','+(y2+tH+10)+'" fill="'+fg+'" opacity="0.5"/>';
+
+        // 패스너 (왼쪽 Lap)
+        for (let i = 0; i < nPerRow; i++) {
+            const fx = supX - (i + 1) * spacing * sc;
+            for (let j = 0; j < nRows; j++) {
+                const fy = y1 + tH/2 + (j === 0 ? -2 : tH + 2);
+                s += '<circle cx="'+fx+'" cy="'+fy+'" r="3" fill="'+warn+'" opacity="0.8"/>';
+            }
+        }
+        // 패스너 (오른쪽 Lap)
+        for (let i = 0; i < nPerRow; i++) {
+            const fx = supX + (i + 1) * spacing * sc;
+            for (let j = 0; j < nRows; j++) {
+                const fy = y1 + tH/2 + (j === 0 ? -2 : tH + 2);
+                s += '<circle cx="'+fx+'" cy="'+fy+'" r="3" fill="'+warn+'" opacity="0.8"/>';
+            }
+        }
+
+        // 치수선
+        const dimY = y2 + tH + 18;
+        s += _dimLine(supX - lapL*sc, dimY, supX, dimY, fmtVal(lapL, 'length'), fg);
+        s += _dimLine(supX, dimY, supX + lapR*sc, dimY, fmtVal(lapR, 'length'), fg);
+
+        // 라벨
+        s += '<text x="'+w/2+'" y="14" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7">'+r.n_total+' '+r.fastener_label+' ('+nRows+'×'+nPerRow+')</text>';
+
+        s += '</svg>';
+        return s;
+    }
+
+    function _drawConnectionSvg(r) {
+        const ct = r.connection_type || '';
+        const w = 280, h = 140;
+        const fg = 'var(--vscode-foreground)';
+        const blue = '#4fc3f7';
+        const green = '#81c784';
+        const t1 = r.t1 || 0.059;
+        const t2 = r.t2 || t1;
+        const d = r.d || 0.19;
+        const n = r.n || 1;
+
+        let s = '<svg width="'+w+'" height="'+h+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
+
+        const x0 = 30, y0 = 30;
+        const plateW = 100, gapX = 10;
+        const t1H = Math.max(8, Math.min(20, t1 * 150));
+        const t2H = Math.max(8, Math.min(20, t2 * 150));
+
+        if (['screw','bolt','paf'].includes(ct)) {
+            // 기계적 접합: 두 판재 겹침 + 패스너
+            // 판재 1 (왼쪽)
+            s += '<rect x="'+x0+'" y="'+(y0)+'" width="'+(plateW+20)+'" height="'+t1H+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'"/>';
+            // 판재 2 (오른쪽, 아래)
+            s += '<rect x="'+(x0+plateW-20)+'" y="'+(y0+t1H)+'" width="'+(plateW+20)+'" height="'+t2H+'" fill="'+green+'" opacity="0.25" stroke="'+green+'"/>';
+            // 겹침 영역
+            s += '<rect x="'+(x0+plateW-20)+'" y="'+y0+'" width="40" height="'+(t1H+t2H)+'" fill="var(--vscode-focusBorder)" opacity="0.1" stroke="none"/>';
+            // 패스너
+            const fSpacing = 30 / Math.max(n, 1);
+            for (let i = 0; i < Math.min(n, 4); i++) {
+                const fx = x0 + plateW - 15 + i * fSpacing;
+                const fy = y0 + t1H;
+                s += '<circle cx="'+fx+'" cy="'+fy+'" r="4" fill="#ff5722" opacity="0.7"/>';
+                s += '<line x1="'+(fx-3)+'" y1="'+(fy-3)+'" x2="'+(fx+3)+'" y2="'+(fy+3)+'" stroke="#fff" stroke-width="1"/>';
+            }
+            // 치수
+            s += _dimLine(x0, y0+t1H+t2H+10, x0+plateW+20, y0+t1H+t2H+10, '', fg);
+            s += '<text x="'+(x0-2)+'" y="'+(y0+t1H/2+3)+'" text-anchor="end" fill="'+fg+'" font-size="9">t1='+fmtVal(t1,'thickness')+'</text>';
+            s += '<text x="'+(x0+2*plateW+22)+'" y="'+(y0+t1H+t2H/2+3)+'" fill="'+fg+'" font-size="9">t2='+fmtVal(t2,'thickness')+'</text>';
+            s += '<text x="'+(x0+plateW)+'" y="'+(y0-6)+'" text-anchor="middle" fill="'+fg+'" font-size="9">d='+fmtVal(d,'length')+' ×'+n+'</text>';
+            // 이름
+            const names = {screw:'Screw §J4', bolt:'Bolt §J3', paf:'PAF §J5'};
+            s += '<text x="'+w/2+'" y="'+(h-6)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.6">'+names[ct]+'</text>';
+
+        } else if (['fillet_weld','arc_spot','arc_seam'].includes(ct)) {
+            // 용접: 두 판재 + 용접 심볼
+            s += '<rect x="'+x0+'" y="'+(y0+15)+'" width="'+(plateW)+'" height="'+t1H+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'"/>';
+            s += '<rect x="'+(x0+plateW)+'" y="'+(y0+15+t1H)+'" width="'+(plateW)+'" height="'+t2H+'" fill="'+green+'" opacity="0.25" stroke="'+green+'"/>';
+            // 용접 심볼 (삼각형)
+            const wx = x0 + plateW;
+            const wy = y0 + 15;
+            if (ct === 'fillet_weld') {
+                s += '<polygon points="'+(wx-8)+','+(wy+t1H)+' '+wx+','+(wy)+' '+wx+','+(wy+t1H)+'" fill="#ff9800" opacity="0.5"/>';
+                s += '<polygon points="'+wx+','+(wy+t1H)+' '+wx+','+(wy+t1H+t2H)+' '+(wx+8)+','+(wy+t1H)+'" fill="#ff9800" opacity="0.5"/>';
+            } else if (ct === 'arc_spot') {
+                s += '<circle cx="'+wx+'" cy="'+(wy+t1H)+'" r="6" fill="#ff9800" opacity="0.4" stroke="#ff9800"/>';
+            } else {
+                s += '<ellipse cx="'+wx+'" cy="'+(wy+t1H)+'" rx="12" ry="5" fill="#ff9800" opacity="0.4" stroke="#ff9800"/>';
+            }
+            s += '<text x="'+(x0-2)+'" y="'+(y0+15+t1H/2+3)+'" text-anchor="end" fill="'+fg+'" font-size="9">t1</text>';
+            s += '<text x="'+(x0+2*plateW+4)+'" y="'+(y0+15+t1H+t2H/2+3)+'" fill="'+fg+'" font-size="9">t2</text>';
+            const names2 = {fillet_weld:'Fillet §J2.1', arc_spot:'Arc Spot §J2.2', arc_seam:'Arc Seam §J2.4'};
+            s += '<text x="'+w/2+'" y="'+(h-6)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.6">'+names2[ct]+'</text>';
+
+        } else if (ct === 'groove') {
+            // 그루브 용접: 맞대기
+            s += '<rect x="'+x0+'" y="'+(y0+20)+'" width="'+(plateW-5)+'" height="'+t1H+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'"/>';
+            s += '<rect x="'+(x0+plateW+5)+'" y="'+(y0+20)+'" width="'+(plateW-5)+'" height="'+t2H+'" fill="'+green+'" opacity="0.25" stroke="'+green+'"/>';
+            // 용접부 (V형)
+            s += '<polygon points="'+(x0+plateW-5)+','+(y0+20)+' '+(x0+plateW)+','+(y0+20+t1H)+' '+(x0+plateW+5)+','+(y0+20)+'" fill="#ff9800" opacity="0.4"/>';
+            s += '<text x="'+w/2+'" y="'+(y0+12)+'" text-anchor="middle" fill="'+fg+'" font-size="9">'+(r.groove_type==='complete'?'CJP':'PJP')+'</text>';
+            s += '<text x="'+w/2+'" y="'+(h-6)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.6">Groove §J2.3</text>';
+        }
+
+        s += '</svg>';
+        return s;
+    }
+
+    function _dimLine(x1, y1, x2, y2, label, color) {
+        let s = '';
+        s += '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+color+'" stroke-width="0.5" opacity="0.5"/>';
+        s += '<line x1="'+x1+'" y1="'+(y1-3)+'" x2="'+x1+'" y2="'+(y1+3)+'" stroke="'+color+'" stroke-width="0.5" opacity="0.5"/>';
+        s += '<line x1="'+x2+'" y1="'+(y2-3)+'" x2="'+x2+'" y2="'+(y2+3)+'" stroke="'+color+'" stroke-width="0.5" opacity="0.5"/>';
+        if (label) {
+            s += '<text x="'+((x1+x2)/2)+'" y="'+(y1-4)+'" text-anchor="middle" fill="'+color+'" font-size="9" opacity="0.7">'+label+'</text>';
+        }
+        return s;
     }
 
     function handleShowSection(sectionId) {
