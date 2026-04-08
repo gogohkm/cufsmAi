@@ -4268,12 +4268,47 @@
         if (d && !d.error) {
             // Mn 구성요소 검토
             if (d.member_type === 'flexure') {
+                // Inelastic Reserve 적용 여부 확인
+                const irApplied = d.steps && d.steps.some(s => s.equation && s.equation.includes('F2.4.2'));
+                const mneLimit = irApplied ? (d.Mp || d.My * 1.5) : d.My;
                 checks.push({
                     category: catG, item: 'Mne vs My',
-                    status: d.Mne != null && d.My != null ? (d.Mne <= d.My ? 'pass' : 'warn') : 'fail',
-                    value: 'Mne='+_rv(d.Mne)+', My='+_rv(d.My),
-                    criterion: 'Mne ≤ My 예상 (LTB가 항복 이하로 감소)',
-                    note: d.Mne > d.My * 1.01 ? 'Mne > My — Cb 효과가 아니면 비정상. Lb와 Cb를 확인하세요.' : '',
+                    status: d.Mne != null && d.My != null ? (d.Mne <= mneLimit * 1.01 ? 'pass' : 'warn') : 'fail',
+                    value: 'Mne='+_rv(d.Mne)+', My='+_rv(d.My) + (irApplied ? ', Mp='+_rv(d.Mp) : ''),
+                    criterion: irApplied
+                        ? '§F2.4.2 Inelastic Reserve: My ≤ Mne ≤ Mp'
+                        : 'Mne ≤ My 예상 (LTB가 항복 이하로 감소)',
+                    note: irApplied
+                        ? 'Inelastic Reserve 적용됨 — Mne가 My를 초과합니다 (정상).'
+                        : (d.Mne > d.My * 1.01 ? 'Mne > My — Cb 효과가 아니면 비정상. Lb와 Cb를 확인하세요.' : ''),
+                });
+
+                // §F2.4.2 Inelastic Reserve Strength 검증
+                const hasZf = p && (p.Zx > 0 || p.Zf > 0);
+                checks.push({
+                    category: catG, item: '§F2.4.2 Inelastic Reserve',
+                    status: irApplied ? 'pass' : (hasZf ? 'warn' : 'warn'),
+                    value: irApplied
+                        ? 'Mne='+_rv(d.Mne)+' > My='+_rv(d.My)+' (+'+(((d.Mne/d.My)-1)*100).toFixed(1)+'%)'
+                        : '미적용',
+                    criterion: '조건: Mcre > 2.78My, 횡좌굴 억제 (deck braced), Zf > 0',
+                    note: !irApplied
+                        ? (hasZf
+                            ? 'Zf(소성단면계수) 존재 — use_inelastic_reserve 옵션 활성화 시 Mne 최대 25% 증가 가능. Mcre > 2.78My 조건을 확인하세요.'
+                            : 'Zf(소성단면계수) 미계산 — 단면 성질을 재계산하세요.')
+                        : '',
+                });
+
+                // R-factor (§I6.2.1) 양력 감소계수 검증
+                const rApplied = d.R_uplift != null && d.R_uplift > 0;
+                checks.push({
+                    category: catG, item: '§I6.2.1 R-factor (양력)',
+                    status: rApplied ? 'pass' : 'pass',
+                    value: rApplied ? 'R='+d.R_uplift : '미적용',
+                    criterion: 'Through-fastened 패널 + 양력 시 R=0.40~0.70 적용 (§I6.2.1)',
+                    note: rApplied
+                        ? 'R 감소계수 적용됨 — Mn=R×Mnfo로 양력 강도 결정.'
+                        : '양력 하중이 없거나 R-factor 조건 미충족. 양력 설계 시 R 값을 입력하세요.',
                 });
                 checks.push({
                     category: catG, item: 'Mnl vs Mne (국부좌굴 감소)',
