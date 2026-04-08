@@ -180,6 +180,7 @@ def find_controlling_combo(loads: dict, load_results: dict,
             'is_uplift': is_uplift,
             'governs_gravity': False,
             'governs_uplift': False,
+            'governs_overall': False,
         }
         all_detail.append(detail)
 
@@ -191,16 +192,30 @@ def find_controlling_combo(loads: dict, load_results: dict,
             uplift_min = min_M
             uplift = (name, combined)
 
+    # 전체 조합 중 절대 최대 |M|인 지배 조합
+    overall = None
+    overall_max = 0
+    for name, factors, combined in all_results:
+        M = combined.get('M', [])
+        if M:
+            abs_max = max(abs(m) for m in M)
+            if abs_max > overall_max:
+                overall_max = abs_max
+                overall = (name, combined)
+
     # 지배 조합 표시
     for d in all_detail:
         if gravity and d['name'] == gravity[0]:
             d['governs_gravity'] = True
         if uplift and d['name'] == uplift[0]:
             d['governs_uplift'] = True
+        if overall and d['name'] == overall[0]:
+            d['governs_overall'] = True
 
     return {
         'gravity': gravity,
         'uplift': uplift,
+        'overall': overall,
         'all': [(n, c) for n, _, c in all_results],
         'all_detail': all_detail,
     }

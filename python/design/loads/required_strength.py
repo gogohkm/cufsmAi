@@ -233,11 +233,26 @@ def analyze_loads(
                         'Ixx': Ixx,
                     }
 
+    # 전체 조합 중 절대 최대 |M| 지배 조합 (gravity/uplift 구분 없음)
+    governing_result = None
+    if controlling.get('overall'):
+        gov_name, gov_combined = controlling['overall']
+        gov_locations = _extract_locations_from_combined(
+            gov_combined, spans, laps
+        )
+        governing_result = {
+            'combo': gov_name,
+            'locations': gov_locations,
+            'M_diagram': gov_combined.get('M', []),
+            'V_diagram': gov_combined.get('V', []),
+        }
+
     return {
         'member_app': member_app,
         'span_type': span_type,
         'n_spans': n_spans,
         'design_method': design_method,
+        'governing': governing_result,
         'gravity': gravity_result,
         'uplift': uplift_result,
         'deflection': deflection_result,

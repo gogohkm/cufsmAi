@@ -938,46 +938,30 @@
         return s;
     }
 
-    /** 모든 하중 조합에서 최대 |Mu| (kip-ft) */
+    /** 지배 조합에서 최대 |Mu| (kip-ft) */
     function _getMaxMuFromAll(la) {
-        let maxMu = 0;
-        if (la.gravity && la.gravity.locations) {
-            for (const loc of la.gravity.locations) {
+        const gov = la.governing || la.gravity;
+        if (gov && gov.locations) {
+            let maxMu = 0;
+            for (const loc of gov.locations) {
                 if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
             }
+            return Math.abs(maxMu);
         }
-        if (la.uplift && la.uplift.locations) {
-            for (const loc of la.uplift.locations) {
-                if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
-            }
-        }
-        if (la.all_combos_detail) {
-            for (const cd of la.all_combos_detail) {
-                if (Math.abs(cd.max_M || 0) > Math.abs(maxMu)) maxMu = cd.max_M;
-            }
-        }
-        return Math.abs(maxMu);
+        return 0;
     }
 
-    /** 모든 하중 조합에서 최대 |Vu| (kips) */
+    /** 지배 조합에서 최대 |Vu| (kips) */
     function _getMaxVuFromAll(la) {
-        let maxVu = 0;
-        if (la.gravity && la.gravity.locations) {
-            for (const loc of la.gravity.locations) {
+        const gov = la.governing || la.gravity;
+        if (gov && gov.locations) {
+            let maxVu = 0;
+            for (const loc of gov.locations) {
                 if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) maxVu = loc.Vu;
             }
+            return Math.abs(maxVu);
         }
-        if (la.uplift && la.uplift.locations) {
-            for (const loc of la.uplift.locations) {
-                if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) maxVu = loc.Vu;
-            }
-        }
-        if (la.all_combos_detail) {
-            for (const cd of la.all_combos_detail) {
-                if (Math.abs(cd.max_V || 0) > Math.abs(maxVu)) maxVu = cd.max_V;
-            }
-        }
-        return Math.abs(maxVu);
+        return 0;
     }
 
     function _dimLine(x1, y1, x2, y2, label, color) {
@@ -2527,7 +2511,7 @@
 
     // PSF/kPa → PLF/kN-m 자동 변환 (표시용)
     function updatePLF() {
-        const spacingRaw = getNum('config-spacing', 4.921);
+        const spacingRaw = getNum('config-spacing', 3.281);
         const spacingUS = fromDisplay(spacingRaw, 'length_ft');
         ['D', 'Lr', 'S', 'Wu', 'L'].forEach(lt => {
             const psfRaw = getNum('load-' + lt + '-psf', 0);
@@ -2583,13 +2567,13 @@
                 }
                 // Lap L (해당 지점 좌측 랩, 첫 지점은 없음)
                 if (i > 0 && !isSimple) {
-                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-lapl" data-idx="' + i + '" value="' + (isEnd ? '0' : '1.640') + '" step="0.25" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
+                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-lapl" data-idx="' + i + '" value="0" step="0.25" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }
                 // Lap R (해당 지점 우측 랩, 마지막 지점은 없음)
                 if (i < n && !isSimple) {
-                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-lapr" data-idx="' + i + '" value="' + (isEnd ? '0' : '1.640') + '" step="0.25" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
+                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-lapr" data-idx="' + i + '" value="0" step="0.25" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }
@@ -2708,6 +2692,8 @@
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
                 use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
                 use_cold_work: /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'))?.checked || false,
+                R: fromDisplay(getNum('tpl-r', 0), 'radius'),
+                t: fromDisplay(getNum('tpl-t', 0), 'thickness'),
                 R_uplift: (/** @type {HTMLInputElement} */ (document.getElementById('chk-r-factor'))?.checked)
                     ? parseFloat(/** @type {HTMLSelectElement} */ (document.getElementById('select-r-value'))?.value || '0')
                     : undefined,
@@ -2725,6 +2711,27 @@
         });
     }
 
+    // §A3.3.2 ↔ §F2.4.2 배타 관계 UI 경고
+    const chkIR = /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'));
+    const chkCW = /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'));
+    if (chkIR && chkCW) {
+        const warnExclusion = () => {
+            const both = chkIR.checked && chkCW.checked;
+            let hint = chkCW.parentElement?.querySelector('.cw-ir-warn');
+            if (both && !hint) {
+                hint = document.createElement('span');
+                hint.className = 'cw-ir-warn';
+                hint.style.cssText = 'color:var(--vscode-editorWarning-foreground,#f90);font-size:11px;margin-left:6px';
+                hint.textContent = '⚠ IR과 동시 적용 시 Mne에는 원래 Fy 사용';
+                chkCW.parentElement?.appendChild(hint);
+            } else if (!both && hint) {
+                hint.remove();
+            }
+        };
+        chkIR.addEventListener('change', warnExclusion);
+        chkCW.addEventListener('change', warnExclusion);
+    }
+
     // ============================================================
     // Analyze Loads 버튼 핸들러 (Calculator 모드)
     // ============================================================
@@ -2734,7 +2741,7 @@
             const memberApp = selMemberType ? selMemberType.value : '';
             if (!isCalcMode(memberApp)) return;
 
-            const spacing = getNum('config-spacing', 4.921);
+            const spacing = getNum('config-spacing', 3.281);
             let spanType = /** @type {HTMLSelectElement} */ (document.getElementById('select-span-type'))?.value || 'simple';
             if (spanType === 'cont-n') {
                 const n = getNum('config-n-spans', 5);
@@ -3032,33 +3039,50 @@
         _lastLoadAnalysis = data;
         let html = '';
 
+        // 지배 조합 결정: governing(전체 최대) > gravity > uplift
+        const gov = data.governing || data.gravity || data.uplift;
+
         // Beam schematic with dimension lines
-        if (data.gravity && data.gravity.M_diagram && data.gravity.M_diagram.length > 2) {
+        if (gov && gov.M_diagram && gov.M_diagram.length > 2) {
             html += renderBeamSchematic(data);
         }
 
-        // M Diagram SVG
-        if (data.gravity && data.gravity.M_diagram && data.gravity.M_diagram.length > 2) {
-            const mLabel = 'Moment (' + unitLabel('moment_ft') + ')';
+        // M Diagram SVG — 지배 조합
+        if (gov && gov.M_diagram && gov.M_diagram.length > 2) {
+            const mLabel = '지배 조합 Moment: ' + gov.combo + ' (' + unitLabel('moment_ft') + ')';
             const mVals = _unitSystem === 'SI'
-                ? data.gravity.M_diagram.map(v => toDisplay(v, 'moment_ft'))
-                : data.gravity.M_diagram;
+                ? gov.M_diagram.map(v => toDisplay(v, 'moment_ft'))
+                : gov.M_diagram;
             html += renderDiagramSVG(mVals, mLabel, '#4fc3f7', true);
         }
 
-        // V Diagram SVG
-        if (data.gravity && data.gravity.V_diagram && data.gravity.V_diagram.length > 2) {
-            const vLabel = 'Shear (' + unitLabel('force') + ')';
+        // V Diagram SVG — 지배 조합
+        if (gov && gov.V_diagram && gov.V_diagram.length > 2) {
+            const vLabel = '지배 조합 Shear: ' + gov.combo + ' (' + unitLabel('force') + ')';
             const vVals = _unitSystem === 'SI'
-                ? data.gravity.V_diagram.map(v => toDisplay(v, 'force'))
-                : data.gravity.V_diagram;
+                ? gov.V_diagram.map(v => toDisplay(v, 'force'))
+                : gov.V_diagram;
             html += renderDiagramSVG(vVals, vLabel, '#ff8a65', false);
         }
 
-        // 중력 지배 결과
-        if (data.gravity) {
+        // 지배 조합 결과 테이블
+        if (gov) {
             const mU = unitLabel('moment_ft'), fU = unitLabel('force');
-            html += '<strong>Gravity: ' + data.gravity.combo + '</strong>';
+            html += '<strong style="color:var(--vscode-charts-green)">▶ 지배 조합: ' + gov.combo + '</strong>';
+            html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(' + mU + ')</th><th>Vu(' + fU + ')</th><th>Ru(' + fU + ')</th></tr>';
+            for (const loc of gov.locations) {
+                const m = fmtVal(loc.Mu, 'moment_ft');
+                const v = fmtVal(loc.Vu, 'force');
+                const r = fmtVal(loc.Ru, 'force');
+                html += '<tr><td>' + loc.name + '</td><td>' + m + '</td><td>' + v + '</td><td>' + r + '</td></tr>';
+            }
+            html += '</table>';
+        }
+
+        // 중력 지배 결과 (지배 조합과 다를 경우 추가 표시)
+        if (data.gravity && gov && data.gravity.combo !== gov.combo) {
+            const mU = unitLabel('moment_ft'), fU = unitLabel('force');
+            html += '<details style="margin-top:4px"><summary style="cursor:pointer;font-size:11px;color:var(--vscode-descriptionForeground)">Gravity: ' + data.gravity.combo + '</summary>';
             html += '<table style="width:100%;font-size:11px;margin:4px 0"><tr style="background:var(--vscode-editor-selectionBackground)"><th>Location</th><th>Mu(' + mU + ')</th><th>Vu(' + fU + ')</th><th>Ru(' + fU + ')</th></tr>';
             for (const loc of data.gravity.locations) {
                 const m = fmtVal(loc.Mu, 'moment_ft');
@@ -3066,7 +3090,7 @@
                 const r = fmtVal(loc.Ru, 'force');
                 html += '<tr><td>' + loc.name + '</td><td>' + m + '</td><td>' + v + '</td><td>' + r + '</td></tr>';
             }
-            html += '</table>';
+            html += '</table></details>';
         }
 
         // 양력 결과
@@ -3108,8 +3132,10 @@
             html += '</tr>';
 
             data.all_combos_detail.forEach(cd => {
-                const isGov = cd.governs_gravity || cd.governs_uplift;
-                const bg = isGov ? 'background:rgba(76,175,80,0.12);font-weight:600' : '';
+                const isGov = cd.governs_gravity || cd.governs_uplift || cd.governs_overall;
+                const bg = cd.governs_overall
+                    ? 'background:rgba(33,150,243,0.15);font-weight:700;border-left:3px solid #2196f3'
+                    : (isGov ? 'background:rgba(76,175,80,0.12);font-weight:600' : '');
 
                 // 조합 수식 생성: "1.2×15 + 1.6×90 = ..." 형태
                 let formula = '';
@@ -3130,6 +3156,7 @@
                 html += '<td style="padding:2px 4px;text-align:right"><b>' + fmtVal(cd.max_abs_M, 'moment_ft') + '</b></td>';
                 html += '<td style="padding:2px 4px;text-align:right">' + fmtVal(cd.max_abs_V, 'force') + '</td>';
                 html += '<td style="padding:2px 4px;text-align:center">';
+                if (cd.governs_overall) html += '<span style="color:#2196f3;font-weight:700">★지배</span> ';
                 if (cd.governs_gravity) html += '<span style="color:#4caf50">중력▲</span>';
                 if (cd.governs_uplift) html += '<span style="color:#ff9800">양력▼</span>';
                 html += '</td>';
@@ -3172,58 +3199,28 @@
             if (ap.uplift_R != null) html += 'Uplift R=' + ap.uplift_R;
             html += '</div>';
 
-            // Auto-fill required strengths — 모든 조합(gravity+uplift) 중 최대 Mu/Vu 사용
+            // Auto-fill: governing 조합의 최대 Mu/Vu를 설계 입력에 자동 채움
             {
-                let maxMu = 0, maxVu = 0, govCombo = '';
+                const govData = data.governing || data.gravity;
+                let maxMu = 0, maxVu = 0;
+                const govCombo = govData ? govData.combo : '';
 
-                // Gravity 조합
-                if (data.gravity && data.gravity.locations) {
-                    for (const loc of data.gravity.locations) {
-                        if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) {
-                            maxMu = loc.Mu;
-                            govCombo = data.gravity.combo || 'gravity';
-                        }
-                        if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) {
-                            maxVu = loc.Vu;
-                        }
+                if (govData && govData.locations) {
+                    for (const loc of govData.locations) {
+                        if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
+                        if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) maxVu = loc.Vu;
                     }
                 }
 
-                // Uplift 조합 — gravity보다 크면 채택
-                if (data.uplift && data.uplift.locations) {
-                    for (const loc of data.uplift.locations) {
-                        if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) {
-                            maxMu = loc.Mu;
-                            govCombo = data.uplift.combo || 'uplift';
-                        }
-                        if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) {
-                            maxVu = loc.Vu;
-                        }
-                    }
-                }
-
-                // 전체 조합 상세에서도 비교 (풍하중이 큰 경우 대비)
-                if (data.all_combos_detail) {
-                    for (const cd of data.all_combos_detail) {
-                        const cdMu = Math.abs(cd.max_M || 0);
-                        const cdVu = Math.abs(cd.max_V || 0);
-                        if (cdMu > Math.abs(maxMu)) {
-                            maxMu = cd.max_M;
-                            govCombo = cd.combo || '';
-                        }
-                        if (cdVu > Math.abs(maxVu)) {
-                            maxVu = cd.max_V;
-                        }
-                    }
-                }
-
-                // 설계 입력에 최대값 설정
-                if (maxMu !== 0) {
-                    const mu_kipIn = Math.abs(maxMu * 12); // kip-ft → kip-in
+                // 설계 입력에 최대값 설정 (maxMu: kip-ft)
+                const absMu = Math.abs(maxMu);
+                const absVu = Math.abs(maxVu);
+                if (absMu > 0) {
+                    const mu_kipIn = absMu * 12; // kip-ft → kip-in
                     setValue('design-Mx', toDisplay(mu_kipIn, 'moment').toFixed(unitDec('moment')));
                 }
-                if (maxVu !== 0) {
-                    setValue('design-V', toDisplay(Math.abs(maxVu), 'force').toFixed(unitDec('force')));
+                if (absVu > 0) {
+                    setValue('design-V', toDisplay(absVu, 'force').toFixed(unitDec('force')));
                 }
 
                 // Unbraced lengths
@@ -3234,7 +3231,7 @@
 
                 // 지배 조합 표시
                 if (govCombo) {
-                    setStatus('지배 조합: ' + govCombo + ' (Mu=' + fmtVal(Math.abs(maxMu * 12), 'moment') + ' ' + unitLabel('moment') + ')', 'success');
+                    setStatus('지배 조합: ' + govCombo + ' (Mu=' + fmtVal(absMu * 12, 'moment') + ' ' + unitLabel('moment') + ')', 'success');
                 }
             }
         }
@@ -3876,20 +3873,21 @@
     // ═══════════════════════════════════════════════════════
     function _rptLoadAnalysis(la) {
         let h = '';
-        if (la.gravity && la.gravity.M_diagram && la.gravity.M_diagram.length > 2) {
+        const rptGov = la.governing || la.gravity;
+        if (rptGov && rptGov.M_diagram && rptGov.M_diagram.length > 2) {
             h += renderBeamSchematic(la);
-            const mVals = _unitSystem === 'SI' ? la.gravity.M_diagram.map(v => toDisplay(v,'moment_ft')) : la.gravity.M_diagram;
-            h += renderDiagramSVG(mVals, '모멘트 다이어그램 ('+_rul('moment_ft')+')', '#1565c0', true);
+            const mVals = _unitSystem === 'SI' ? rptGov.M_diagram.map(v => toDisplay(v,'moment_ft')) : rptGov.M_diagram;
+            h += renderDiagramSVG(mVals, '지배 조합 모멘트: '+rptGov.combo+' ('+_rul('moment_ft')+')', '#1565c0', true);
         }
-        if (la.gravity && la.gravity.V_diagram && la.gravity.V_diagram.length > 2) {
-            const vVals = _unitSystem === 'SI' ? la.gravity.V_diagram.map(v => toDisplay(v,'force')) : la.gravity.V_diagram;
-            h += renderDiagramSVG(vVals, '전단력 다이어그램 ('+_rul('force')+')', '#e65100', false);
+        if (rptGov && rptGov.V_diagram && rptGov.V_diagram.length > 2) {
+            const vVals = _unitSystem === 'SI' ? rptGov.V_diagram.map(v => toDisplay(v,'force')) : rptGov.V_diagram;
+            h += renderDiagramSVG(vVals, '지배 조합 전단력: '+rptGov.combo+' ('+_rul('force')+')', '#e65100', false);
         }
 
-        if (la.gravity) {
-            h += '<h3>중력 지배 하중조합: '+la.gravity.combo+'</h3>';
+        if (rptGov) {
+            h += '<h3>지배 하중조합: '+rptGov.combo+'</h3>';
             h += '<table><tr><th>위치</th><th>x ('+_rul('length_ft')+')</th><th>M<sub>u</sub> ('+_rul('moment_ft')+')</th><th>V<sub>u</sub> ('+_rul('force')+')</th><th>R<sub>u</sub> ('+_rul('force')+')</th><th>구간</th></tr>';
-            la.gravity.locations.forEach(loc => {
+            rptGov.locations.forEach(loc => {
                 h += '<tr><td>'+loc.name+'</td><td>'+_ruv(loc.x_ft,'length_ft')+'</td><td>'+_ruv(loc.Mu,'moment_ft')+'</td><td>'+_ruv(loc.Vu,'force')+'</td><td>'+_ruv(loc.Ru,'force')+'</td><td>'+( loc.region||'')+'</td></tr>';
             });
             h += '</table>';
@@ -3915,8 +3913,8 @@
             // 조합 결과 표
             h += '<table><tr><th>조합</th><th>조합 수식</th><th>|M|<sub>max</sub> ('+_rul('moment_ft')+')</th><th>|V|<sub>max</sub> ('+_rul('force')+')</th><th>지배</th></tr>';
             la.all_combos_detail.forEach(cd => {
-                const isGov = cd.governs_gravity || cd.governs_uplift;
-                const bld = isGov ? 'font-weight:700;background:#f0f7f0' : '';
+                const isGov = cd.governs_gravity || cd.governs_uplift || cd.governs_overall;
+                const bld = cd.governs_overall ? 'font-weight:700;background:#e3f2fd' : (isGov ? 'font-weight:700;background:#f0f7f0' : '');
                 const terms = [];
                 for (const [lt, factor] of Object.entries(cd.factors)) {
                     const w = plf[lt];
@@ -3925,6 +3923,7 @@
                     terms.push('<b>'+fStr+'</b>'+(_loadLabels[lt]||lt)+'('+_ruv(Math.abs(w),'linload')+')');
                 }
                 let govTag = '';
+                if (cd.governs_overall) govTag += '<b style="color:#2196f3">★지배</b> ';
                 if (cd.governs_gravity) govTag += '<b style="color:#4caf50">중력 지배</b>';
                 if (cd.governs_uplift) govTag += '<b style="color:#ff9800">양력 지배</b>';
                 h += '<tr style="'+bld+'"><td>'+cd.name+'</td><td>'+terms.join(' + ')+'</td><td><b>'+_ruv(cd.max_abs_M,'moment_ft')+'</b></td><td>'+_ruv(cd.max_abs_V,'force')+'</td><td>'+govTag+'</td></tr>';
@@ -4178,7 +4177,7 @@
 
         h += '<p>본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 <b>'+(mtNames[mt]||mt)+'</b>의 설계 검토 결과입니다. ';
         h += '설계 방법은 <b>'+dm+'</b>입니다. ';
-        if (la) h += '부재는 <b>'+la.n_spans+'</b>경간이며, 중력 지배 하중조합은 <b>'+((la.gravity||{}).combo||'N/A')+'</b>입니다. ';
+        if (la) h += '부재는 <b>'+la.n_spans+'</b>경간이며, 지배 하중조합은 <b>'+((la.governing||la.gravity||{}).combo||'N/A')+'</b>입니다. ';
         h += '지배 파괴 모드는 <b>'+(d.controlling_mode||'N/A')+'</b>입니다.</p>';
 
         h += '<table>';
@@ -4521,7 +4520,7 @@
         // E. 하중 입력 (Load Input)
         // ════════════════════════════════════════
         const catE = 'E. 하중 입력';
-        const spacing = getNum('config-spacing', 4.921);
+        const spacing = getNum('config-spacing', 3.281);
         // config-span 요소가 없으므로 스팬 테이블에서 첫 번째 스팬 길이를 읽음
         const spanTblEls = document.querySelectorAll('.span-tbl-len');
         let spanFt = 0;
@@ -4575,7 +4574,7 @@
         checks.push({
             category: catF, item: '하중 분석 실행 여부',
             status: la ? 'pass' : 'fail',
-            value: la ? '조합: '+(la.gravity?la.gravity.combo:'N/A') : '미실행',
+            value: la ? '지배 조합: '+((la.governing||la.gravity||{}).combo||'N/A') : '미실행',
             criterion: '설계 전 하중 분석 필요',
             note: !la ? '설계 탭에서 "하중 분석 실행"을 클릭하세요.' : '',
         });
@@ -4723,20 +4722,54 @@
                 });
                 // §A3.3.2 Cold Work of Forming 검증
                 const cwApplied = d.cold_work && d.cold_work.applicable;
-                const cwAndIR = cwApplied && d.steps && d.steps.some(s => s.equation && s.equation.includes('F2.4.2'));
+                const cwRequested = d.use_cold_work === true;
+                const irActive = d.use_inelastic_reserve === true;
+                const cwBlockedByIR = cwRequested && irActive;
+                let cwStatus = 'pass';
+                let cwValue = '';
+                let cwNote = '';
+                if (cwBlockedByIR && !cwApplied) {
+                    cwStatus = 'warn';
+                    cwValue = '비활성 — Inelastic Reserve와 동시 적용 불가';
+                    cwNote = '§A3.3.2 적용 범위에서 §F2.4(Inelastic Reserve)가 명시적으로 제외됩니다. IR을 해제하면 Cold Work 적용 가능.';
+                } else if (cwApplied) {
+                    if (irActive) {
+                        cwStatus = 'warn';
+                        cwValue = 'Fya=' + _rv(d.Fy_used) + ' ksi (+' + d.cold_work.increase_pct + '%) — IR에는 원래 Fy 사용';
+                        cwNote = '⚠ §A3.3.2: Cold Work(Fya)는 DSM 국부/뒤틀림에 적용되지만, Inelastic Reserve(Mne)에는 Fy_original=' + _rv(d.Fy_original) + ' ksi 사용.';
+                    } else {
+                        cwStatus = 'pass';
+                        cwValue = 'Fya=' + _rv(d.Fy_used) + ' ksi (+' + d.cold_work.increase_pct + '%)';
+                        cwNote = 'Fya=' + _rv(d.Fy_used) + ' > Fy=' + _rv(d.Fy_original) + ' — 코너부 냉간가공 효과 반영됨.';
+                    }
+                } else if (cwRequested) {
+                    cwStatus = 'fail';
+                    cwValue = '적용 실패 — R/t 조건 미충족 또는 R=0';
+                    cwNote = '코너 반경(R)과 두께(t)를 전처리에서 확인하세요. 조건: Fu/Fy≥1.2, R/t≤7, 각도≤120°.';
+                } else {
+                    cwValue = '미적용 (Fy=' + _rv(d.Fy_original) + ' ksi)';
+                    cwNote = 'Cold Work 미적용. 고급 옵션에서 체크박스를 켜면 활성화됩니다.';
+                }
                 checks.push({
                     category: catG, item: '§A3.3.2 Cold Work (냉간가공)',
-                    status: cwApplied ? (cwAndIR ? 'warn' : 'pass') : 'pass',
-                    value: cwApplied
-                        ? 'Fya='+_rv(d.Fy_used)+' ksi (+'+d.cold_work.increase_pct+'%)'
-                        : '미적용 (Fy='+_rv(d.Fy_original)+' ksi)',
-                    criterion: '§A3.3.2: Fu/Fy≥1.2, R/t≤7, 각도≤120°. §F2.4 제외.',
-                    note: cwApplied
-                        ? (cwAndIR
-                            ? '⚠ Cold Work와 Inelastic Reserve 동시 적용 — IR에는 원래 Fy 사용 (§A3.3.2 제한).'
-                            : 'Fya='+_rv(d.Fy_used)+' > Fy='+_rv(d.Fy_original)+' — 코너부 냉간가공 효과 반영됨.')
-                        : 'Cold Work 미적용. 코너 반경(R)과 두께(t)가 있으면 활성화 가능.',
+                    status: cwStatus,
+                    value: cwValue,
+                    criterion: '§A3.3.2: Fu/Fy≥1.2, R/t≤7, 각도≤120°. §F2.4(Inelastic Reserve) 제외.',
+                    note: cwNote,
                 });
+
+                // §A3.3.2 + §F2.4.2 배타 관계 검증
+                if (cwRequested && irActive) {
+                    checks.push({
+                        category: catG, item: '§A3.3.2 ↔ §F2.4.2 배타 관계',
+                        status: 'warn',
+                        value: 'Cold Work + Inelastic Reserve 동시 선택됨',
+                        criterion: '§A3.3.2 적용 범위에서 §F2.4(Inelastic Reserve)가 명시적으로 제외됨',
+                        note: cwApplied
+                            ? 'Cold Work(Fya)는 Mnl/Mnd에만 적용, Mne(IR)에는 원래 Fy=' + _rv(d.Fy_original) + ' ksi 사용. 두 옵션 중 하나만 사용을 권장.'
+                            : 'Cold Work 조건 미충족으로 Fya 미적용. IR만 활성 상태.',
+                    });
+                }
 
                 checks.push({
                     category: catG, item: 'Mnl vs Mne (국부좌굴 감소)',
@@ -4960,7 +4993,7 @@
         // Span config
         data.spanType = document.getElementById('select-span-type')?.value || 'simple';
         data.nSpans = getNum('config-n-spans', 5);
-        data.spacing = fromDisplay(getNum('config-spacing', 4.921), 'length_ft');
+        data.spacing = fromDisplay(getNum('config-spacing', 3.281), 'length_ft');
         // 스팬 테이블 데이터
         const spanLens = []; const sups = []; const laps = [];
         document.querySelectorAll('.span-tbl-len').forEach(el => spanLens.push(fromDisplay(parseFloat(el.value) || 25, 'length_ft')));

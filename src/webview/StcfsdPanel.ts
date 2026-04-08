@@ -1770,13 +1770,13 @@ export class StcfsdPanel implements McpPanelInterface {
                             <option value="simple">단순보</option>
                             <option value="cantilever">캔틸레버</option>
                             <option value="cont-2">2경간 연속보</option>
-                            <option value="cont-3">3경간 연속보</option>
-                            <option value="cont-4" selected>4경간 연속보</option>
+                            <option value="cont-3" selected>3경간 연속보</option>
+                            <option value="cont-4">4경간 연속보</option>
                             <option value="cont-n">N경간 연속보</option>
                         </select>
                         <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:55px;display:none" title="경간 수">
                         <label>간격<span class="hint-inline" data-unit="length_ft">ft</span></label>
-                        <input type="number" id="config-spacing" value="4.921" step="0.5" style="width:68px">
+                        <input type="number" id="config-spacing" value="3.281" step="0.5" style="width:68px">
                     </div>
 
                     <!-- 스팬/지점/랩 테이블 -->
@@ -1803,22 +1803,22 @@ export class StcfsdPanel implements McpPanelInterface {
                 <div>
                     <div class="input-row">
                         <label>D<span class="hint-inline" data-unit="pressure">psf</span></label>
-                        <input type="number" id="load-D-psf" value="4.18" step="0.5" style="width:50px">
+                        <input type="number" id="load-D-psf" value="6.265" step="0.5" style="width:50px">
                         <span id="load-D-plf" class="hint-inline" style="min-width:50px">→15 PLF</span>
                     </div>
                     <div class="input-row" id="load-Lr-row">
                         <label>Lr<span class="hint-inline" data-unit="pressure">psf</span></label>
-                        <input type="number" id="load-Lr-psf" value="12.53" step="1" style="width:50px">
+                        <input type="number" id="load-Lr-psf" value="20.885" step="1" style="width:50px">
                         <span id="load-Lr-plf" class="hint-inline" style="min-width:50px">→100 PLF</span>
                     </div>
                     <div class="input-row" id="load-S-row">
                         <label>S<span class="hint-inline" data-unit="pressure">psf</span></label>
-                        <input type="number" id="load-S-psf" value="10.44" step="1" style="width:50px">
+                        <input type="number" id="load-S-psf" value="10.443" step="1" style="width:50px">
                         <span id="load-S-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                     <div class="input-row" id="load-W-row">
                         <label>Wu<span class="hint-inline" data-unit="pressure">psf</span>↑</label>
-                        <input type="number" id="load-Wu-psf" value="20.89" step="1" style="width:50px">
+                        <input type="number" id="load-Wu-psf" value="20.885" step="1" style="width:50px">
                         <span id="load-Wu-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                     <div class="input-row" id="load-L-row" style="display:none">

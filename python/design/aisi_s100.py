@@ -594,6 +594,8 @@ def _design_flexure(params: dict) -> dict:
         'My': round(My, 2),
         'R_uplift': R_uplift,
         'cold_work': cold_work_info,
+        'use_cold_work': params.get('use_cold_work', False),
+        'use_inelastic_reserve': use_ir,
         'Fy_used': round(Fy, 2),
         'Fy_original': round(Fy_original, 2),
         'controlling_mode': mode,
@@ -1148,6 +1150,10 @@ def _auto_generate_props(params: dict) -> dict:
         # Sf = Sx (호환성)
         props['Sf'] = props.get('Sx', 0)
         props['t'] = t
+        # 코너 반경: params에서 가져오거나, 템플릿의 기본 r 사용
+        R = params.get('R', 0) or params.get('r', 0)
+        if R > 0:
+            props['R'] = R
 
         # DSM 값도 자동 계산
         if not params.get('dsm'):
