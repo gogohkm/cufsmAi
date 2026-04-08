@@ -2346,6 +2346,7 @@
                 wc_N: fromDisplay(getNum('design-wc-N', 0), 'length'),
                 wc_R: fromDisplay(getNum('design-wc-R', 0), 'radius'),
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
+                use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
             };
 
             // Show loading

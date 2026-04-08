@@ -1870,6 +1870,14 @@ export class StcfsdPanel implements McpPanelInterface {
                     </div>
                 </div>
 
+                <div class="section-group" style="margin-top:10px; padding:6px 8px; border:1px solid var(--vscode-panel-border); border-radius:3px;">
+                    <label style="font-size:12px; font-weight:600;">고급 옵션</label>
+                    <div class="input-row" style="margin-top:4px">
+                        <label><input type="checkbox" id="chk-inelastic-reserve"> §F2.4.2 Inelastic Reserve</label>
+                        <span class="hint-inline">(Mne: My→Mp, deck braced 시)</span>
+                    </div>
+                </div>
+
                 <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">▶ 설계 검토 실행</button>
                 <p class="hint" style="margin-top:6px">자동 DSM 좌굴값 적용을 위해 먼저 해석을 실행하세요.</p>
             </div>
