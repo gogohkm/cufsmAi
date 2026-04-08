@@ -373,16 +373,29 @@ def _design_flexure(params: dict) -> dict:
         'formula': f'My = {"DSM" if My_dsm > 0 else "Sf×Fy"} = {My:.2f} kip-in (Sf={Sf_eff:.4f})',
     })
 
-    # Step 2: 전체좌굴 LTB (F2)
+    # Step 2: 전체좌굴 LTB (F2 / F2.4.2)
     Fcre = compute_beam_Fcre(props, Cb, Lb)
-    global_result = beam_global_strength(Fy, Fcre, Sf_eff)
+    Zf = props.get('Zx', 0) or props.get('Zf', 0)  # 소성단면계수
+    use_ir = params.get('use_inelastic_reserve', False)
+    global_result = beam_global_strength(Fy, Fcre, Sf_eff, Zf=Zf,
+                                          use_inelastic_reserve=use_ir)
     Mne = global_result['Mne']
     spec_sections.append('F2')
+    if global_result.get('inelastic_reserve'):
+        spec_sections.append('F2.4.2')
+
+    ir_note = ''
+    if use_ir and Zf > 0:
+        Mp = global_result.get('Mp', 0)
+        if global_result.get('inelastic_reserve'):
+            ir_note = f' [§F2.4.2 Inelastic Reserve: Mp={Mp:.2f} kip-in]'
+        else:
+            ir_note = f' [§F2.4.2 not applicable: Mcre≤2.78My]'
 
     steps.append({
         'step': 2, 'name': 'Global/LTB (Mne)',
         'value': round(Mne, 2), 'unit': 'kip-in',
-        'formula': f'Fcre = {Fcre:.2f} ksi, Fn = {global_result["Fn"]:.2f} ksi → Mne = {Mne:.2f} kip-in',
+        'formula': f'Fcre = {Fcre:.2f} ksi, Fn = {global_result["Fn"]:.2f} ksi → Mne = {Mne:.2f} kip-in{ir_note}',
         'equation': global_result['equation'],
     })
 

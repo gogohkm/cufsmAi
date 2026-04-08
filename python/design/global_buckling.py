@@ -122,19 +122,25 @@ def compute_column_Fcre(props: dict, Fy: float,
 # 휨 — Chapter F2
 # ============================================================
 
-def beam_global_strength(Fy: float, Fcre: float, Sf: float) -> dict:
-    """전체좌굴(LTB) 휨강도 (§F2)
+def beam_global_strength(Fy: float, Fcre: float, Sf: float,
+                          Zf: float = 0, use_inelastic_reserve: bool = False) -> dict:
+    """전체좌굴(LTB) 휨강도 (§F2, §F2.4.2 Inelastic Reserve)
 
     Args:
         Fy: 항복강도 (ksi)
         Fcre: 횡-비틀림좌굴 임계응력 (ksi)
         Sf: 총단면 단면계수 (in³)
+        Zf: 소성단면계수 (in³) — Inelastic Reserve 적용 시 필요
+        use_inelastic_reserve: True면 §F2.4.2 적용
     """
+    import math
     My = Sf * Fy
 
     if Fcre <= 0:
-        return {'Mne': 0, 'Fn': 0, 'My': My, 'equation': 'F2 (Fcre=0)'}
+        return {'Mne': 0, 'Fn': 0, 'My': My, 'equation': 'F2 (Fcre=0)',
+                'inelastic_reserve': False}
 
+    # §F2.1 기본 (Mne ≤ My)
     if Fcre >= 2.78 * Fy:
         Fn = Fy
         eq = 'F2-1 (yielding)'
@@ -146,7 +152,30 @@ def beam_global_strength(Fy: float, Fcre: float, Sf: float) -> dict:
         eq = 'F2-1 (elastic LTB)'
 
     Mne = Sf * Fn
-    return {'Mne': Mne, 'Fn': Fn, 'My': My, 'Fcre': Fcre, 'equation': eq}
+    inelastic_applied = False
+
+    # §F2.4.2 Inelastic Reserve (DSM)
+    # 조건: Mcre > 2.78 × My, Zf > 0
+    if use_inelastic_reserve and Zf > 0:
+        Mcre = Sf * Fcre
+        Mp = Zf * Fy
+
+        if Mcre > 2.78 * My:
+            # Eq. F2.4.2-1
+            ratio = math.sqrt(My / Mcre)
+            Mne_ir = Mp - (Mp - My) * (ratio - 0.23) / 0.37
+            Mne_ir = min(Mne_ir, Mp)  # ≤ Mp
+            Mne_ir = max(Mne_ir, My)  # ≥ My (안전)
+
+            if Mne_ir > Mne:
+                Mne = Mne_ir
+                Fn = Mne / Sf if Sf > 0 else Fy
+                eq = f'F2.4.2-1 (inelastic reserve, Mp={Mp:.2f})'
+                inelastic_applied = True
+
+    return {'Mne': Mne, 'Fn': Fn, 'My': My, 'Fcre': Fcre, 'equation': eq,
+            'inelastic_reserve': inelastic_applied,
+            'Mp': Zf * Fy if Zf > 0 else 0}
 
 
 def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
