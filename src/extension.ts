@@ -22,7 +22,10 @@ let mcpBridge: McpBridgeServer | undefined;
 export async function activate(context: vscode.ExtensionContext) {
     console.log('StCFSD extension activating...');
 
+    // Python 환경 자동 검사 + 설치
     const pythonPath = getPythonPath(context.extensionPath);
+    await checkAndInstallDependencies(context, pythonPath);
+
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
 
     // MCP Bridge 시작
@@ -116,6 +119,100 @@ export async function activate(context: vscode.ExtensionContext) {
 export function deactivate() {
     mcpBridge?.stop();
     pythonBridge?.dispose();
+}
+
+// ============================================================
+// Python 의존성 자동 검사 + 설치
+// ============================================================
+async function checkAndInstallDependencies(
+    context: vscode.ExtensionContext, pythonPath: string
+): Promise<void> {
+    const { execSync, exec } = require('child_process');
+
+    // 1) Python 존재 여부 확인
+    let hasPython = false;
+    try {
+        execSync(`"${pythonPath}" --version`, { stdio: 'pipe', timeout: 10000 });
+        hasPython = true;
+        console.log(`[StCFSD] Python found: ${pythonPath}`);
+    } catch {
+        console.warn(`[StCFSD] Python not found at: ${pythonPath}`);
+    }
+
+    if (!hasPython) {
+        const action = await vscode.window.showWarningMessage(
+            'StCFSD: Python을 찾을 수 없습니다. 해석 엔진을 사용하려면 Python 3.10+ 설치가 필요합니다.',
+            'Python 다운로드 페이지 열기',
+            '무시'
+        );
+        if (action === 'Python 다운로드 페이지 열기') {
+            vscode.env.openExternal(vscode.Uri.parse('https://www.python.org/downloads/'));
+        }
+        return;
+    }
+
+    // 2) numpy / scipy 설치 여부 확인
+    let missingPackages: string[] = [];
+    for (const pkg of ['numpy', 'scipy']) {
+        try {
+            execSync(`"${pythonPath}" -c "import ${pkg}"`, { stdio: 'pipe', timeout: 10000 });
+        } catch {
+            missingPackages.push(pkg);
+        }
+    }
+
+    if (missingPackages.length === 0) {
+        console.log('[StCFSD] All Python dependencies OK');
+        return;
+    }
+
+    console.warn(`[StCFSD] Missing packages: ${missingPackages.join(', ')}`);
+
+    // 3) 사용자에게 설치 여부 질문
+    const install = await vscode.window.showWarningMessage(
+        `StCFSD: 필수 Python 패키지가 없습니다: ${missingPackages.join(', ')}. 자동 설치하시겠습니까?`,
+        '설치',
+        '나중에'
+    );
+
+    if (install !== '설치') {
+        return;
+    }
+
+    // 4) 터미널에서 pip install 실행
+    await vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: 'StCFSD: Python 패키지 설치 중...',
+            cancellable: false,
+        },
+        async (progress) => {
+            const pkgList = missingPackages.join(' ');
+            progress.report({ message: pkgList });
+
+            return new Promise<void>((resolve) => {
+                exec(
+                    `"${pythonPath}" -m pip install ${pkgList}`,
+                    { timeout: 300000 },
+                    (error: any, stdout: string, stderr: string) => {
+                        if (error) {
+                            console.error('[StCFSD] pip install failed:', stderr);
+                            vscode.window.showErrorMessage(
+                                `StCFSD: 패키지 설치 실패. 수동으로 실행하세요:\n` +
+                                `${pythonPath} -m pip install ${pkgList}`
+                            );
+                        } else {
+                            console.log('[StCFSD] pip install success:', stdout.trim());
+                            vscode.window.showInformationMessage(
+                                `StCFSD: ${pkgList} 설치 완료!`
+                            );
+                        }
+                        resolve();
+                    }
+                );
+            });
+        }
+    );
 }
 
 async function ensurePythonRunning(): Promise<void> {
