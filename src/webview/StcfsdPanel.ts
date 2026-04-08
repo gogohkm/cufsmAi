@@ -1919,6 +1919,10 @@ export class StcfsdPanel implements McpPanelInterface {
                         <span class="hint-inline">(Mne: My→Mp, deck braced 시)</span>
                     </div>
                     <div class="input-row" style="margin-top:4px">
+                        <label><input type="checkbox" id="chk-cold-work"> §A3.3.2 Cold Work (냉간가공 Fya)</label>
+                        <span class="hint-inline">(코너부 강도 증가)</span>
+                    </div>
+                    <div class="input-row" style="margin-top:4px">
                         <label><input type="checkbox" id="chk-r-factor"> §I6.2.1 R-factor (양력)</label>
                         <select id="select-r-value" style="width:auto; font-size:11px; margin-left:4px">
                             <option value="0">미적용</option>

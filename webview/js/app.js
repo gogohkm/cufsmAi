@@ -2707,6 +2707,7 @@
                 wc_R: fromDisplay(getNum('design-wc-R', 0), 'radius'),
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
                 use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
+                use_cold_work: /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'))?.checked || false,
                 R_uplift: (/** @type {HTMLInputElement} */ (document.getElementById('chk-r-factor'))?.checked)
                     ? parseFloat(/** @type {HTMLSelectElement} */ (document.getElementById('select-r-value'))?.value || '0')
                     : undefined,
@@ -4720,6 +4721,23 @@
                         ? 'R 감소계수 적용됨 — Mn=R×Mnfo로 양력 강도 결정.'
                         : '양력 하중이 없거나 R-factor 조건 미충족. 양력 설계 시 R 값을 입력하세요.',
                 });
+                // §A3.3.2 Cold Work of Forming 검증
+                const cwApplied = d.cold_work && d.cold_work.applicable;
+                const cwAndIR = cwApplied && d.steps && d.steps.some(s => s.equation && s.equation.includes('F2.4.2'));
+                checks.push({
+                    category: catG, item: '§A3.3.2 Cold Work (냉간가공)',
+                    status: cwApplied ? (cwAndIR ? 'warn' : 'pass') : 'pass',
+                    value: cwApplied
+                        ? 'Fya='+_rv(d.Fy_used)+' ksi (+'+d.cold_work.increase_pct+'%)'
+                        : '미적용 (Fy='+_rv(d.Fy_original)+' ksi)',
+                    criterion: '§A3.3.2: Fu/Fy≥1.2, R/t≤7, 각도≤120°. §F2.4 제외.',
+                    note: cwApplied
+                        ? (cwAndIR
+                            ? '⚠ Cold Work와 Inelastic Reserve 동시 적용 — IR에는 원래 Fy 사용 (§A3.3.2 제한).'
+                            : 'Fya='+_rv(d.Fy_used)+' > Fy='+_rv(d.Fy_original)+' — 코너부 냉간가공 효과 반영됨.')
+                        : 'Cold Work 미적용. 코너 반경(R)과 두께(t)가 있으면 활성화 가능.',
+                });
+
                 checks.push({
                     category: catG, item: 'Mnl vs Mne (국부좌굴 감소)',
                     status: d.Mnl != null ? (d.Mnl < d.Mne ? 'warn' : 'pass') : 'fail',

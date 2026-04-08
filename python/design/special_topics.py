@@ -110,57 +110,108 @@ def block_shear(Agv: float, Anv: float, Ant: float,
 
 
 def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
-                        n_bends: int = 4) -> dict:
-    """냉간가공 항복강도 증가 (§A7.2, Eq. A7.2-1)
+                        n_corners: int = 4,
+                        corner_angle: float = 90.0,
+                        A_corners: float = 0,
+                        A_flange: float = 0) -> dict:
+    """냉간가공 항복강도 증가 (§A3.3.2, Eq. A3.3.2-1~4)
 
-    냉간 성형 과정에서 코너부의 항복강도가 증가하는 효과
+    AISI S100-16 §A3.3.2: Fya를 Fy 대신 사용 가능
+    적용 범위: Chapters D, E, F (§F2.4 제외), §H1, §I4, §I6.2
+    조건: Pn=Pne(E3), Pnd=Py(E4), Mn=Mne(F3), Mnd=My(F4) — 좌굴 미지배 시만
 
     Args:
-        Fyv: 원래 항복강도 (ksi)
-        Fuv: 인장강도 (ksi)
+        Fyv: Virgin 항복강도 (ksi)
+        Fuv: Virgin 인장강도 (ksi)
         R: 내부 코너 반경 (in)
         t: 두께 (in)
-        n_bends: 굽힘 횟수 (기본 4 = C-channel 4개 코너)
+        n_corners: 코너 수 (C-channel=4, Z=4, Hat=4)
+        corner_angle: 코너 각도 (degrees, 기본 90)
+        A_corners: 코너부 총 단면적 (in²) — 0이면 자동 계산
+        A_flange: 제어 플랜지 총 단면적 (in²) — 0이면 전체 사용
 
     Returns:
-        dict: {Fya, Bc, increase_pct}
+        dict with Fya, Fyc, Bc, m, C, applicable, steps, warnings
     """
-    # Eq. A7.2-1: Fya = Fyv + (Fuv - Fyv) × Bc × (t/R)
-    # Bc = 1/(5R/t) × (1 - (R/t)/(2R/t + 1))  simplified
+    warnings = []
     Rt = R / t if t > 0 else 0
 
-    if Rt <= 0:
-        return {'Fya': Fyv, 'Bc': 0, 'increase_pct': 0, 'note': 'R/t = 0 (sharp corner)'}
+    # 적용 조건 검사
+    applicable = True
+    if Fuv / Fyv < 1.2:
+        applicable = False
+        warnings.append(f'Fu/Fy = {Fuv/Fyv:.3f} < 1.2 — Eq. A3.3.2-2 적용 불가')
+    if Rt > 7:
+        applicable = False
+        warnings.append(f'R/t = {Rt:.2f} > 7 — Eq. A3.3.2-2 적용 불가')
+    if corner_angle > 120:
+        applicable = False
+        warnings.append(f'코너 각도 {corner_angle}° > 120° — Eq. A3.3.2-2 적용 불가')
 
-    # Simplified Bc (§A7.2)
-    Bc = 3.69 * (Fuv / Fyv) - 0.819 * (Fuv / Fyv) ** 2 - 1.79
+    if not applicable or Rt <= 0:
+        return {
+            'Fya': Fyv, 'Fyc': Fyv, 'Bc': 0, 'm': 0, 'C': 0,
+            'increase_pct': 0, 'applicable': False,
+            'steps': [], 'warnings': warnings,
+        }
+
+    # Eq. A3.3.2-3: Bc
+    ratio = Fuv / Fyv
+    Bc = 3.69 * ratio - 0.819 * ratio ** 2 - 1.79
     Bc = max(Bc, 0)
 
-    # Full-section average
-    # Corner area fraction
-    corner_length = math.pi / 2 * (R + t / 2)  # arc length of one corner
-    total_perimeter = 100  # placeholder — should come from section geometry
-    corner_fraction = min(n_bends * corner_length / total_perimeter, 0.5)
+    # Eq. A3.3.2-4: m
+    m = 0.192 * ratio - 0.068
 
-    Fyc = Fyv + Bc * (Fuv - Fyv)  # corner Fy
-    Fyc = min(Fyc, Fuv)  # cannot exceed Fu
+    # Eq. A3.3.2-2: Fyc = Bc × Fyv / (R/t)^m
+    Fyc = Bc * Fyv / (Rt ** m)
+    Fyc = min(Fyc, Fuv)  # ≤ Fuv
 
-    # Average across section
-    Fya = Fyv * (1 - corner_fraction) + Fyc * corner_fraction
+    # 코너부 면적 비율 C (Eq. A3.3.2-1)
+    if A_corners > 0 and A_flange > 0:
+        C = A_corners / A_flange
+    else:
+        # 자동 계산: 코너 arc 길이 × t
+        arc_length = (corner_angle * math.pi / 180) * (R + t / 2)
+        A_corner_each = arc_length * t
+        A_corners_total = n_corners * A_corner_each
+
+        # 전체 단면 둘레 × t (근사)
+        # C-channel: 2×lip + 2×flange + web ≈ perimeter
+        # 여기서는 A_flange가 없으면 보수적으로 전체 단면 사용
+        if A_flange > 0:
+            C = A_corners_total / A_flange
+        else:
+            C = min(A_corners_total / (A_corners_total / 0.15), 0.3)  # 보수적 15~30%
+
+    C = min(C, 1.0)
+
+    # Eq. A3.3.2-1: Fya = C × Fyc + (1-C) × Fyf
+    # Fyf = virgin Fy (시험 미실시 시)
+    Fyf = Fyv
+    Fya = C * Fyc + (1 - C) * Fyf
+    Fya = min(Fya, Fuv)  # ≤ Fuv
 
     increase = (Fya / Fyv - 1) * 100
 
     return {
         'Fya': round(Fya, 2),
-        'Fyc_corner': round(Fyc, 2),
+        'Fyc': round(Fyc, 2),
         'Bc': round(Bc, 4),
+        'm': round(m, 4),
+        'C': round(C, 4),
         'R_over_t': round(Rt, 2),
         'increase_pct': round(increase, 1),
+        'applicable': True,
+        'excluded_sections': '§F2.4 (Inelastic Reserve)',
         'steps': [
-            {'name': 'Bc coefficient', 'formula': f'Bc = 3.69(Fu/Fy) - 0.819(Fu/Fy)² - 1.79 = {Bc:.4f}'},
-            {'name': 'Corner Fy', 'formula': f'Fyc = Fy + Bc(Fu-Fy) = {Fyv} + {Bc:.4f}×({Fuv}-{Fyv}) = {Fyc:.2f} ksi'},
-            {'name': 'Average Fya', 'formula': f'Fya = {Fya:.2f} ksi (+{increase:.1f}%)'},
+            {'name': 'Bc (Eq. A3.3.2-3)', 'formula': f'Bc = 3.69×{ratio:.3f} - 0.819×{ratio:.3f}² - 1.79 = {Bc:.4f}'},
+            {'name': 'm (Eq. A3.3.2-4)', 'formula': f'm = 0.192×{ratio:.3f} - 0.068 = {m:.4f}'},
+            {'name': 'Fyc (Eq. A3.3.2-2)', 'formula': f'Fyc = Bc×Fyv/(R/t)^m = {Bc:.4f}×{Fyv}/{Rt:.2f}^{m:.4f} = {Fyc:.2f} ksi'},
+            {'name': 'C (corner ratio)', 'formula': f'C = A_corners/A_total = {C:.4f}'},
+            {'name': 'Fya (Eq. A3.3.2-1)', 'formula': f'Fya = C×Fyc + (1-C)×Fyf = {C:.4f}×{Fyc:.2f} + {1-C:.4f}×{Fyf:.2f} = {Fya:.2f} ksi (+{increase:.1f}%)'},
         ],
+        'warnings': warnings,
     }
 
 

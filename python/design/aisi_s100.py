@@ -337,7 +337,7 @@ def _design_flexure(params: dict) -> dict:
     Fy = params.get('Fy', 35.53)
     Fu = params.get('Fu', 58.02)
     design_method = params.get('design_method', 'LRFD')
-    Mu = abs(params.get('Mu', 0))  # 부호는 방향만 나타내므로 절대값 사용
+    Mu = abs(params.get('Mu', 0))
     Lb = params.get('Lb', 120)
     Cb = params.get('Cb', 1.0)
 
@@ -346,6 +346,19 @@ def _design_flexure(params: dict) -> dict:
     Sf = props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
     if Sf <= 0:
         return {'error': 'Section modulus not available (Sf=0)'}
+
+    # §A3.3.2 냉간가공 효과: Fya > Fy (좌굴 미지배 시만)
+    Fy_original = Fy
+    cold_work_info = None
+    if params.get('use_cold_work', False):
+        from design.special_topics import cold_work_strength
+        R = props.get('R', 0) or params.get('R', 0) or params.get('r', 0)
+        t = props.get('t', 0) or params.get('t', 0)
+        if R > 0 and t > 0:
+            cw = cold_work_strength(Fyv=Fy, Fuv=Fu, R=R, t=t)
+            if cw['applicable'] and cw['Fya'] > Fy:
+                Fy = cw['Fya']
+                cold_work_info = cw
 
     dsm = params.get('dsm', {})
     Mcrl = dsm.get('Mcrl', 0)
@@ -378,8 +391,14 @@ def _design_flexure(params: dict) -> dict:
     Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type)
     Zf = props.get('Zx', 0) or props.get('Zf', 0)  # 소성단면계수
     use_ir = params.get('use_inelastic_reserve', False)
-    global_result = beam_global_strength(Fy, Fcre, Sf_eff, Zf=Zf,
-                                          use_inelastic_reserve=use_ir)
+    # §A3.3.2: Cold Work + Inelastic Reserve 동시 적용 불가
+    if use_ir and cold_work_info:
+        warnings.append('§A3.3.2: Cold Work(Fya)와 §F2.4.2 Inelastic Reserve는 동시 적용 불가. Inelastic Reserve에는 원래 Fy 사용.')
+        global_result = beam_global_strength(Fy_original, Fcre, Sf_eff, Zf=Zf,
+                                              use_inelastic_reserve=use_ir)
+    else:
+        global_result = beam_global_strength(Fy, Fcre, Sf_eff, Zf=Zf,
+                                              use_inelastic_reserve=use_ir)
     Mne = global_result['Mne']
     spec_sections.append('F2')
     if global_result.get('inelastic_reserve'):
@@ -574,6 +593,9 @@ def _design_flexure(params: dict) -> dict:
         'Mnd': round(Mnd, 2),
         'My': round(My, 2),
         'R_uplift': R_uplift,
+        'cold_work': cold_work_info,
+        'Fy_used': round(Fy, 2),
+        'Fy_original': round(Fy_original, 2),
         'controlling_mode': mode,
         'phi_Mn': round(phi_Mn, 2),
         'Mn_omega': round(Mn_omega, 2),
