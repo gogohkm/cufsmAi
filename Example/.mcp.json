@@ -1,12 +1,12 @@
 {
   "mcpServers": {
-    "cufsm-section-designer": {
+    "stcfsd-section-designer": {
       "command": "node",
       "args": [
         "c:/Coding_Works/cufsmAi/media/mcp-server.js"
       ],
       "env": {
-        "CUFSM_MCP_PORT": "52790"
+        "STCFSD_MCP_PORT": "52790"
       }
     }
   }
