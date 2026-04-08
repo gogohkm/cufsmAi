@@ -183,20 +183,50 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     """횡-비틀림좌굴 임계응력 Fcre (§F2.1)
 
     Fcre = Cb * ro * A / Sf * sqrt(sigma_ey * sigma_t)
+
+    props 키 호환: Sf/Sxx/Sx, ry/rz, J, Cw, xo/Xs/xcg, ro
     """
     Ag = props.get('A', 0)
-    Sf = props.get('Sf', 0) or props.get('Sxx', 0)
-    ry = props.get('ry', 0)
+
+    # Sf — 여러 키 이름 호환
+    Sf = props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
+
+    # ry — 약축 회전반경 (냉간성형강: z축이 약축)
+    ry = props.get('ry', 0) or props.get('rz', 0)
+
+    # J, Cw — cutwp에서 계산된 값
     J = props.get('J', 0)
     Cw = props.get('Cw', 0)
+
+    # xo — 전단중심 편심 (도심~전단중심 거리)
     xo = abs(props.get('xo', 0))
+    if xo == 0:
+        # Xs(전단중심 x좌표)와 xcg(도심 x좌표)에서 계산
+        Xs = props.get('Xs', 0)
+        xcg = props.get('xcg', 0)
+        if Xs != 0 or xcg != 0:
+            xo = abs(Xs - xcg)
+
+    # ro — 극관성반경 (전단중심 기준)
+    # ro² = rx² + ry² + xo²  (단축대칭 단면)
     ro = props.get('ro', 0)
+    if ro <= 0:
+        rx = props.get('rx', 0)
+        if rx > 0 and ry > 0:
+            ro = math.sqrt(rx ** 2 + ry ** 2 + xo ** 2)
 
     if Ag <= 0 or Sf <= 0 or ry <= 0 or ro <= 0:
         return 0.0
 
+    # Lb가 0이면 완전 구속 → Fcre = 매우 큰 값
+    if Lb <= 0:
+        return 1e6
+
     sigma_ey = math.pi ** 2 * E / (Lb / ry) ** 2
     sigma_t = (1 / (Ag * ro ** 2)) * (G * J + math.pi ** 2 * E * Cw / Lb ** 2)
+
+    if sigma_ey <= 0 or sigma_t <= 0:
+        return 0.0
 
     Fcre = Cb * ro * Ag / Sf * math.sqrt(sigma_ey * sigma_t)
     return Fcre
