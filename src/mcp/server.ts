@@ -65,7 +65,14 @@ const server = new McpServer({
 }, {
     instructions: `StCFSD - Cold-Formed Steel Section Buckling Analysis Tool.
 
-You can design cross-sections, run finite strip buckling analysis, and extract DSM design values (Pcrl, Pcrd, Mcrl, Mcrd).
+IMPORTANT: All values must be in US customary units:
+- Dimensions (H, B, D, t, r): inches
+- Stress (Fy, Fu, E): ksi
+- Force: kips
+- Moment: kip-in
+- Length (half-wavelength, Lb): inches
+
+Default steel: SGC400 (Fy=35.53 ksi, Fu=58.02 ksi, E=29500 ksi)
 
 Workflow:
 1. get_status → check current state
@@ -126,11 +133,11 @@ server.tool("set_section_template",
     {
         type: z.enum(['lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee', 'lipped_angle'])
             .describe("Section type"),
-        H: z.number().describe("Height (web height, out-to-out)"),
-        B: z.number().describe("Width (flange width, out-to-out)"),
-        D: z.number().optional().describe("Lip length or secondary dimension"),
-        t: z.number().describe("Thickness"),
-        r: z.number().optional().describe("Corner radius (default 0)"),
+        H: z.number().describe("Height in inches (web height, out-to-out)"),
+        B: z.number().describe("Width in inches (flange width, out-to-out)"),
+        D: z.number().optional().describe("Lip length in inches"),
+        t: z.number().describe("Thickness in inches"),
+        r: z.number().optional().describe("Corner radius in inches (default 0)"),
         qlip: z.number().optional().describe("Lip angle in degrees (default 90). For lippedc/lippedz: 90=vertical, <90=inward, >90=outward"),
     },
     async (params) => {
@@ -369,9 +376,9 @@ corners = sigma_outer_corners(H=8, B=2.25, D=0.875, D_lip=0.5, Ds=0.5, Ws=2.25)
 
 server.tool("set_material", "Set material properties",
     {
-        E: z.number().describe("Young's modulus"),
-        v: z.number().describe("Poisson's ratio"),
-        G: z.number().optional().describe("Shear modulus (auto-calculated if omitted)"),
+        E: z.number().describe("Young's modulus in ksi (default 29500)"),
+        v: z.number().describe("Poisson's ratio (default 0.3)"),
+        G: z.number().optional().describe("Shear modulus in ksi (auto-calculated if omitted)"),
     },
     async ({ E, v, G }) => {
         const Gval = G || E / (2 * (1 + v));
@@ -428,8 +435,8 @@ server.tool("set_boundary_condition", "Set end boundary condition",
 
 server.tool("set_lengths", "Set analysis half-wavelength range",
     {
-        min: z.number().describe("Minimum half-wavelength"),
-        max: z.number().describe("Maximum half-wavelength"),
+        min: z.number().describe("Minimum half-wavelength in inches"),
+        max: z.number().describe("Maximum half-wavelength in inches"),
         n: z.number().optional().describe("Number of points (default 50)"),
     },
     async ({ min, max, n }) => {

@@ -19,7 +19,7 @@ from .stress import yieldMP
 
 
 def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
-                        fy: float = 50.0, load_type: str = 'P') -> dict:
+                        fy: float = 35.53, load_type: str = 'P') -> dict:
     """좌굴 곡선에서 DSM 설계값 추출
 
     Args:

@@ -1123,7 +1123,7 @@ def _auto_generate_props(params: dict) -> dict:
 
                 prop_mat = np.array([[100, 29500, 29500, 0.3, 0.3, 11346]])
                 for n in node:
-                    n[7] = params.get('Fy', 50.0)
+                    n[7] = params.get('Fy', 35.53)
 
                 lengths = np.logspace(0, 3, 60)
                 m_all = [np.array([1.0]) for _ in lengths]
@@ -1131,7 +1131,7 @@ def _auto_generate_props(params: dict) -> dict:
                                    np.array([]), np.array([]),
                                    GBTConfig(), 'S-S', m_all, neigs=10)
 
-                Fy = params.get('Fy', 50.0)
+                Fy = params.get('Fy', 35.53)
                 dsmP = extract_dsm_values(result.curve, node, elem, Fy, 'P')
                 dsmM = extract_dsm_values(result.curve, node, elem, Fy, 'Mxx')
 
