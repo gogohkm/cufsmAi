@@ -158,6 +158,10 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTr
                 iconPath: new vscode.ThemeIcon('tools'),
                 description: s.hasDesignResult ? s.passOrFail : '',
             }),
+            new StcfsdTreeItem('접합부', vscode.TreeItemCollapsibleState.Collapsed, {
+                sectionId: 'connection',
+                iconPath: new vscode.ThemeIcon('plug'),
+            }),
             new StcfsdTreeItem('보고서', vscode.TreeItemCollapsibleState.None, {
                 sectionId: 'report',
                 iconPath: new vscode.ThemeIcon('file-text'),
@@ -291,6 +295,14 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTr
                 'arrow-down', s.designPn));
             items.push(this._leaf('이용률 DCR', 'focus-utilization',
                 s.passOrFail === 'OK' ? 'pass' : 'error', s.utilization));
+            break;
+
+        // ━━━ 접합부 ━━━
+        case 'connection':
+            items.push(this._leaf('Lap Splice 설계', 'lap-connection',
+                'plug', '§I6.2.1, §J3, §J4'));
+            items.push(this._leaf('단일 접합부', 'single-connection',
+                'link', 'Bolt/Screw/Weld'));
             break;
 
         // ━━━ 검증 ━━━

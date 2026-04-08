@@ -211,6 +211,24 @@ export class StcfsdPanel implements McpPanelInterface {
                 await this._runPlastic(message.data);
                 break;
 
+            case 'runLapConnection':
+                try {
+                    const lapResult = await this._pythonBridge.call('lap_connection', message.data);
+                    this._postMessage('lapConnectionResult', lapResult);
+                } catch (e: any) {
+                    this._postMessage('lapConnectionResult', { error: e.message });
+                }
+                break;
+
+            case 'runConnection':
+                try {
+                    const connResult = await this._pythonBridge.call('design_connection', message.data);
+                    this._postMessage('connectionResult', connResult);
+                } catch (e: any) {
+                    this._postMessage('connectionResult', { error: e.message });
+                }
+                break;
+
             case 'runDesign':
                 try {
                     await this.handleMcpAction({ action: 'aisi_design', ...message.data });
@@ -1442,6 +1460,7 @@ export class StcfsdPanel implements McpPanelInterface {
         <button class="tab-btn" data-tab="analysis">해석</button>
         <button class="tab-btn" data-tab="postprocessor">후처리</button>
         <button class="tab-btn" data-tab="design">설계</button>
+        <button class="tab-btn" data-tab="connection">접합부</button>
         <button class="tab-btn" data-tab="report">보고서</button>
         <button class="tab-btn" data-tab="validation">검증</button>
         <span style="flex:1"></span>
@@ -1939,6 +1958,86 @@ export class StcfsdPanel implements McpPanelInterface {
                     <p class="hint">AISI S100-16 해당 조항이 여기에 표시됩니다</p>
                 </div>
                 <button id="btn-copy-report" class="btn-secondary" style="margin-top:8px;width:100%;display:none">보고서 클립보드 복사</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 접합부 (Connection) 탭 -->
+    <div id="tab-connection" class="tab-panel">
+        <div class="panel-row">
+            <div class="panel-left">
+                <h3>Lap Splice 접합부 설계 (§I6.2.1, §J3, §J4)</h3>
+                <p class="hint">연속 경간 Lap 접합부의 패스너 개수/배치를 산정합니다.</p>
+
+                <div class="section-group">
+                    <label>Lap 설정</label>
+                    <div class="input-row">
+                        <label>좌측 Lap</label><input type="number" id="conn-lap-left" value="12" step="1" style="width:65px">
+                        <label>우측 Lap</label><input type="number" id="conn-lap-right" value="12" step="1" style="width:65px">
+                        <span class="hint-inline" id="conn-lap-unit">in</span>
+                    </div>
+                    <div class="input-row">
+                        <label>지점 Mu</label><input type="number" id="conn-Mu" value="0" step="0.1" style="width:65px">
+                        <span class="hint-inline" id="conn-Mu-unit">kip-in</span>
+                        <label>지점 Vu</label><input type="number" id="conn-Vu" value="0" step="0.1" style="width:65px">
+                        <span class="hint-inline" id="conn-Vu-unit">kips</span>
+                    </div>
+                </div>
+
+                <div class="section-group">
+                    <label>패스너</label>
+                    <div class="input-row">
+                        <label>유형</label>
+                        <select id="conn-fastener-type" style="width:auto">
+                            <option value="screw" selected>Screw (나사)</option>
+                            <option value="bolt">Bolt (볼트)</option>
+                        </select>
+                        <label>직경</label><input type="number" id="conn-fastener-dia" value="0.19" step="0.01" style="width:60px">
+                        <span class="hint-inline">in (#12≈0.19)</span>
+                    </div>
+                    <div class="input-row">
+                        <label>행 수</label><input type="number" id="conn-n-rows" value="2" min="1" max="4" step="1" style="width:50px">
+                    </div>
+                </div>
+
+                <button id="btn-run-lap-design" class="btn-primary" style="margin-top:10px;width:100%">▶ Lap 접합부 설계</button>
+
+                <hr style="margin:16px 0;border-color:var(--vscode-panel-border)">
+
+                <h3>단일 접합부 설계 (Chapter J)</h3>
+                <p class="hint">볼트, 스크류, 용접 접합부의 강도를 계산합니다.</p>
+
+                <div class="section-group">
+                    <div class="input-row">
+                        <label>유형</label>
+                        <select id="conn-single-type" style="width:auto">
+                            <option value="screw">Screw (§J4)</option>
+                            <option value="bolt">Bolt (§J3)</option>
+                            <option value="fillet_weld">Fillet Weld (§J2.1)</option>
+                            <option value="arc_spot">Arc Spot Weld (§J2.2)</option>
+                        </select>
+                    </div>
+                    <div class="input-row">
+                        <label>t1</label><input type="number" id="conn-t1" value="0.059" step="0.001" style="width:65px">
+                        <label>t2</label><input type="number" id="conn-t2" value="0.059" step="0.001" style="width:65px">
+                        <span class="hint-inline">in</span>
+                    </div>
+                    <div class="input-row">
+                        <label>직경/크기</label><input type="number" id="conn-d" value="0.19" step="0.01" style="width:65px">
+                        <label>개수</label><input type="number" id="conn-n" value="4" min="1" step="1" style="width:50px">
+                        <label>Fu</label><input type="number" id="conn-Fu" value="58.02" step="1" style="width:65px">
+                        <span class="hint-inline">ksi</span>
+                    </div>
+                </div>
+
+                <button id="btn-run-single-conn" class="btn-primary" style="margin-top:6px;width:100%">▶ 접합부 강도 계산</button>
+            </div>
+
+            <div class="panel-right">
+                <h3>접합부 설계 결과</h3>
+                <div id="connection-result" class="props-display">
+                    <em>접합부 설계를 실행하세요.</em>
+                </div>
             </div>
         </div>
     </div>

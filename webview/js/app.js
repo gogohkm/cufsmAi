@@ -247,6 +247,12 @@
                 renderBucklingCurve(); // DSM 극점 표시를 위해 다시 그리기
                 sendTreeUpdate();
                 break;
+            case 'lapConnectionResult':
+                renderLapConnectionResult(msg.data);
+                break;
+            case 'connectionResult':
+                renderConnectionResult(msg.data);
+                break;
             case 'designResult':
                 _lastDesignResult = msg.data;
                 renderDesignResult(msg.data);
@@ -633,6 +639,91 @@
     // ============================================================
     // 트리 네비게이션 — showSection
     // ============================================================
+    // ============================================================
+    // 접합부 탭 — Lap 접합부 + 단일 접합부
+    // ============================================================
+    const btnLapDesign = document.getElementById('btn-run-lap-design');
+    if (btnLapDesign) {
+        btnLapDesign.addEventListener('click', () => {
+            const data = {
+                d: fromDisplay(getNum('tpl-H', 8), 'length'),
+                t: fromDisplay(getNum('tpl-t', 0.059), 'thickness'),
+                Fy: fromDisplay(getNum('design-fy', 35.53), 'stress'),
+                Fu: fromDisplay(getNum('design-fu', 58.02), 'stress'),
+                lap_left_in: fromDisplay(getNum('conn-lap-left', 12), 'length'),
+                lap_right_in: fromDisplay(getNum('conn-lap-right', 12), 'length'),
+                Mu_support: fromDisplay(getNum('conn-Mu', 0), 'moment'),
+                Vu_support: fromDisplay(getNum('conn-Vu', 0), 'force'),
+                fastener_type: document.getElementById('conn-fastener-type')?.value || 'screw',
+                fastener_dia: getNum('conn-fastener-dia', 0.19),
+                n_rows: getNum('conn-n-rows', 2),
+            };
+            vscode.postMessage({ command: 'runLapConnection', data });
+        });
+    }
+
+    const btnSingleConn = document.getElementById('btn-run-single-conn');
+    if (btnSingleConn) {
+        btnSingleConn.addEventListener('click', () => {
+            const data = {
+                connection_type: document.getElementById('conn-single-type')?.value || 'screw',
+                t1: getNum('conn-t1', 0.059),
+                t2: getNum('conn-t2', 0.059),
+                d: getNum('conn-d', 0.19),
+                n: getNum('conn-n', 4),
+                Fu: fromDisplay(getNum('conn-Fu', 58.02), 'stress'),
+            };
+            vscode.postMessage({ command: 'runConnection', data });
+        });
+    }
+
+    function renderLapConnectionResult(result) {
+        const el = document.getElementById('connection-result');
+        if (!el || !result) return;
+        let html = '<h4>Lap Splice 설계 결과</h4>';
+
+        if (result.warnings && result.warnings.length > 0) {
+            html += '<div style="background:rgba(255,0,0,0.1);padding:6px;margin-bottom:8px;border-radius:3px">';
+            result.warnings.forEach(w => { html += '<div style="color:#f44;font-size:12px">' + w + '</div>'; });
+            html += '</div>';
+        }
+
+        html += '<table class="props-table">';
+        html += '<tr><td>Lap 길이 검증</td><td>' + (result.lap_ok ? '✅ OK' : '❌ NG') + '</td><td>≥ ' + fmtVal(result.min_lap, 'length') + ' ' + unitLabel('length') + '</td></tr>';
+        html += '<tr><td>전달 전단력</td><td>' + fmtVal(result.V_transfer, 'force') + ' ' + unitLabel('force') + '</td><td></td></tr>';
+        html += '<tr><td>패스너 강도</td><td>' + fmtVal(result.Pns, 'force') + ' ' + unitLabel('force') + '/ea</td><td>' + result.fastener_label + '</td></tr>';
+        html += '<tr><td><b>필요 패스너 수</b></td><td><b>' + result.n_total + ' ea</b></td><td>' + result.n_rows + ' rows × ' + result.n_per_row + '/row</td></tr>';
+        html += '<tr><td>패스너 간격</td><td>' + fmtVal(result.spacing, 'length') + ' ' + unitLabel('length') + '</td><td></td></tr>';
+        html += '<tr><td>Edge 거리</td><td>' + fmtVal(result.edge_distance, 'length') + ' ' + unitLabel('length') + '</td><td></td></tr>';
+        html += '</table>';
+
+        if (result.steps) {
+            html += '<h4 style="margin-top:12px">단계별 계산</h4>';
+            result.steps.forEach(s => {
+                const icon = s.pass === false ? '❌' : (s.pass === true ? '✅' : '•');
+                html += '<div style="font-size:12px;margin:3px 0">' + icon + ' Step ' + s.step + ': ' + s.name + ' = ' + s.value + ' ' + (s.unit||'') + '</div>';
+                if (s.formula) html += '<div style="font-size:11px;color:var(--vscode-descriptionForeground);margin-left:16px">' + s.formula + '</div>';
+            });
+        }
+        el.innerHTML = html;
+    }
+
+    function renderConnectionResult(result) {
+        const el = document.getElementById('connection-result');
+        if (!el || !result) return;
+        if (result.error) {
+            el.innerHTML = '<div style="color:#f44">' + result.error + '</div>';
+            return;
+        }
+        let html = '<h4>접합부 강도 결과</h4><table class="props-table">';
+        for (const [k, v] of Object.entries(result)) {
+            if (k === 'steps' || k === 'warnings') continue;
+            html += '<tr><td>' + k + '</td><td>' + (typeof v === 'number' ? v.toFixed(3) : v) + '</td></tr>';
+        }
+        html += '</table>';
+        el.innerHTML = html;
+    }
+
     function handleShowSection(sectionId) {
         // sectionId → 탭 매핑
         const tabMap = {
@@ -645,7 +736,9 @@
             'postprocessor': 'postprocessor', 'buckling-curve': 'postprocessor',
             'mode-shape-2d': 'postprocessor', 'mode-shape-3d': 'postprocessor',
             'classification': 'postprocessor', 'plastic-surface': 'postprocessor',
-            'design': 'design', 'report': 'report', 'validation': 'validation',
+            'design': 'design',
+            'connection': 'connection', 'lap-connection': 'connection',
+            'report': 'report', 'validation': 'validation',
         };
 
         // focus-* 시리즈는 설계 탭으로 이동 후 해당 요소에 포커스
