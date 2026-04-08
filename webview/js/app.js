@@ -103,6 +103,14 @@
             ['load-D-psf','pressure'],['load-Lr-psf','pressure'],
             ['load-S-psf','pressure'],['load-Wu-psf','pressure'],
             ['load-L-psf','pressure'],
+            // 접합부 탭
+            ['conn-lap-left','length'],['conn-lap-right','length'],
+            ['conn-Mu','moment'],['conn-Vu','force'],
+            ['conn-t1','thickness'],['conn-t2','thickness'],
+            ['conn-d','length'],['conn-Fy','stress'],['conn-Fu','stress'],
+            ['conn-Fub','stress'],['conn-Pu','force'],
+            ['conn-weld-L','length'],['conn-weld-size','length'],
+            ['conn-fastener-dia','length'],
         ];
         // span/lap 테이블 동적 입력
         document.querySelectorAll('.span-tbl-len, .span-tbl-lapl, .span-tbl-lapr').forEach(el => {
@@ -125,10 +133,16 @@
 
         // (1) 모든 data-unit 속성을 가진 라벨 텍스트 갱신
         document.querySelectorAll('[data-unit]').forEach(el => {
-            if (el.tagName === 'INPUT' || el.tagName === 'SELECT') return; // 입력 필드 제외
+            if (el.tagName === 'INPUT' || el.tagName === 'SELECT') return;
             const ut = el.getAttribute('data-unit');
             el.textContent = unitLabel(ut);
         });
+        // 접합부 탭 동적 단위 라벨
+        document.querySelectorAll('.conn-unit-length').forEach(el => { el.textContent = unitLabel('length'); });
+        document.querySelectorAll('.conn-unit-thickness').forEach(el => { el.textContent = unitLabel('thickness'); });
+        document.querySelectorAll('.conn-unit-stress').forEach(el => { el.textContent = unitLabel('stress'); });
+        document.querySelectorAll('.conn-unit-force').forEach(el => { el.textContent = unitLabel('force'); });
+        document.querySelectorAll('.conn-unit-moment').forEach(el => { el.textContent = unitLabel('moment'); });
         if (model) {
             renderNodeTable();
             renderElemTable();
@@ -665,15 +679,44 @@
     const btnSingleConn = document.getElementById('btn-run-single-conn');
     if (btnSingleConn) {
         btnSingleConn.addEventListener('click', () => {
+            const connType = document.getElementById('conn-single-type')?.value || 'screw';
             const data = {
-                connection_type: document.getElementById('conn-single-type')?.value || 'screw',
-                t1: getNum('conn-t1', 0.059),
-                t2: getNum('conn-t2', 0.059),
-                d: getNum('conn-d', 0.19),
+                connection_type: connType,
+                t1: fromDisplay(getNum('conn-t1', 1.5), 'thickness'),
+                t2: fromDisplay(getNum('conn-t2', 1.5), 'thickness'),
+                d: fromDisplay(getNum('conn-d', 4.8), 'length'),
                 n: getNum('conn-n', 4),
-                Fu: fromDisplay(getNum('conn-Fu', 58.02), 'stress'),
+                Fy: fromDisplay(getNum('conn-Fy', 245), 'stress'),
+                Fu: fromDisplay(getNum('conn-Fu', 400), 'stress'),
+                Pu: fromDisplay(getNum('conn-Pu', 0), 'force'),
+                design_method: document.getElementById('select-design-method')?.value || 'LRFD',
             };
+            // 용접 추가 파라미터
+            if (['fillet_weld', 'arc_spot', 'arc_seam', 'groove'].includes(connType)) {
+                data.weld_length = fromDisplay(getNum('conn-weld-L', 50), 'length');
+                data.weld_size = fromDisplay(getNum('conn-weld-size', 3), 'length');
+            }
+            if (connType === 'groove') {
+                data.groove_type = document.getElementById('conn-groove-type')?.value || 'complete';
+            }
+            if (connType === 'bolt') {
+                data.Fub = fromDisplay(getNum('conn-Fub', 827), 'stress');
+            }
             vscode.postMessage({ command: 'runConnection', data });
+        });
+    }
+
+    // 접합부 유형 변경 시 관련 행 표시/숨김
+    const connTypeSelect = document.getElementById('conn-single-type');
+    if (connTypeSelect) {
+        connTypeSelect.addEventListener('change', () => {
+            const ct = connTypeSelect.value;
+            const weldRow = document.getElementById('conn-weld-row');
+            const grooveRow = document.getElementById('conn-groove-row');
+            const boltRow = document.getElementById('conn-bolt-row');
+            if (weldRow) weldRow.style.display = ['fillet_weld','arc_spot','arc_seam','groove'].includes(ct) ? '' : 'none';
+            if (grooveRow) grooveRow.style.display = ct === 'groove' ? '' : 'none';
+            if (boltRow) boltRow.style.display = ct === 'bolt' ? '' : 'none';
         });
     }
 
@@ -715,12 +758,41 @@
             el.innerHTML = '<div style="color:#f44">' + result.error + '</div>';
             return;
         }
-        let html = '<h4>접합부 강도 결과</h4><table class="props-table">';
-        for (const [k, v] of Object.entries(result)) {
-            if (k === 'steps' || k === 'warnings') continue;
-            html += '<tr><td>' + k + '</td><td>' + (typeof v === 'number' ? v.toFixed(3) : v) + '</td></tr>';
-        }
+        let html = '<h4>' + (result.connection_type || '접합부') + ' 강도 결과</h4>';
+
+        // 핵심 결과 요약
+        html += '<table class="props-table">';
+        if (result.Rn != null) html += '<tr><td>공칭강도 Rn</td><td><b>' + fmtVal(result.Rn, 'force') + ' ' + unitLabel('force') + '</b></td></tr>';
+        if (result.design_strength != null) html += '<tr><td>설계강도</td><td><b>' + fmtVal(result.design_strength, 'force') + ' ' + unitLabel('force') + '</b></td></tr>';
+        if (result.governing_mode) html += '<tr><td>지배 모드</td><td>' + result.governing_mode + '</td></tr>';
+        if (result.pass != null) html += '<tr><td>판정</td><td>' + (result.pass ? '✅ OK' : '❌ NG') + '</td></tr>';
+        if (result.utilization != null) html += '<tr><td>이용률</td><td>' + (result.utilization * 100).toFixed(1) + '%</td></tr>';
         html += '</table>';
+
+        // 한계상태 상세
+        if (result.limit_states && result.limit_states.length > 0) {
+            html += '<h4 style="margin-top:10px">한계상태 (Limit States)</h4>';
+            html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+            html += '<tr><th style="text-align:left;padding:3px">모드</th><th style="text-align:right;padding:3px">Rn</th><th style="text-align:right;padding:3px">φRn</th><th style="padding:3px">지배?</th></tr>';
+            result.limit_states.forEach(ls => {
+                const isGov = ls.mode === result.governing_mode;
+                html += '<tr style="' + (isGov ? 'font-weight:700;background:rgba(79,195,247,0.1)' : '') + '">';
+                html += '<td style="padding:3px">' + ls.mode + '</td>';
+                html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.Rn, 'force') + '</td>';
+                html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.phi_Rn || ls.Rn_omega || 0, 'force') + '</td>';
+                html += '<td style="text-align:center;padding:3px">' + (isGov ? '★' : '') + '</td>';
+                html += '</tr>';
+            });
+            html += '</table>';
+        }
+
+        // 경고
+        if (result.warnings && result.warnings.length > 0) {
+            html += '<div style="margin-top:8px;background:rgba(255,171,0,0.1);padding:6px;border-radius:3px">';
+            result.warnings.forEach(w => { html += '<div style="font-size:11px;color:#f90">' + w + '</div>'; });
+            html += '</div>';
+        }
+
         el.innerHTML = html;
     }
 

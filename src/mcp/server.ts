@@ -1067,18 +1067,54 @@ server.tool("check_lap_length",
 );
 
 server.tool("design_connection",
-    "Design a single connection (bolt, screw, weld) per AISI Chapter J",
+    "Design a single connection per AISI Chapter J (7 types: bolt, screw, PAF, fillet/arc_spot/arc_seam/groove weld)",
     {
-        connection_type: z.enum(['bolt', 'screw', 'fillet_weld', 'arc_spot']).describe("Connection type"),
-        t1: z.number().describe("Thickness of connected sheet 1 in inches"),
-        t2: z.number().optional().describe("Thickness of connected sheet 2 in inches"),
+        connection_type: z.enum(['bolt', 'screw', 'paf', 'fillet_weld', 'arc_spot', 'arc_seam', 'groove']).describe("Connection type"),
+        t1: z.number().describe("Thickness of sheet 1 in inches"),
+        t2: z.number().optional().describe("Thickness of sheet 2 in inches"),
         d: z.number().optional().describe("Fastener diameter or weld size in inches"),
+        Fy: z.number().optional().describe("Yield strength ksi"),
         Fu: z.number().optional().describe("Tensile strength ksi"),
         n: z.number().optional().describe("Number of fasteners"),
-        L_weld: z.number().optional().describe("Weld length in inches (for welds)"),
+        Pu: z.number().optional().describe("Required strength kips (0=capacity only)"),
+        weld_length: z.number().optional().describe("Weld length in inches"),
+        weld_size: z.number().optional().describe("Weld size in inches"),
+        groove_type: z.enum(['complete', 'partial']).optional().describe("Groove weld type"),
+        Fub: z.number().optional().describe("Bolt tensile strength ksi"),
     },
     async (params) => {
         const r = await callBridgePost('/action', { action: 'design_connection', ...params });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("check_shear_lag",
+    "Calculate shear lag coefficient U and effective net area (§D3)",
+    {
+        Ag: z.number().describe("Gross area in²"),
+        An_net: z.number().describe("Net area in² (holes deducted)"),
+        x_bar: z.number().describe("Distance from connection plane to centroid of unconnected elements, in inches"),
+        L_conn: z.number().describe("Connection length in inches"),
+        Fu: z.number().describe("Tensile strength ksi"),
+        Fy: z.number().describe("Yield strength ksi"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', { action: 'shear_lag', ...params });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("check_block_shear",
+    "Calculate block shear rupture strength (§J7)",
+    {
+        Agv: z.number().describe("Gross shear area in²"),
+        Anv: z.number().describe("Net shear area in²"),
+        Ant: z.number().describe("Net tension area in²"),
+        Fy: z.number().describe("Yield strength ksi"),
+        Fu: z.number().describe("Tensile strength ksi"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', { action: 'block_shear', ...params });
         return textResult(JSON.stringify(r, null, 2));
     }
 );

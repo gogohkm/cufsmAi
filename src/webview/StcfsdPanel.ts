@@ -619,6 +619,13 @@ export class StcfsdPanel implements McpPanelInterface {
                 return connResult;
             }
 
+            case 'shear_lag':
+            case 'block_shear':
+            case 'cold_work':
+            case 'flange_curling': {
+                return await this._pythonBridge.call(action, options);
+            }
+
             case 'classify': {
                 if (!this._lastAnalysisResult) {
                     return { error: 'No analysis result. Run analysis first.' };
@@ -1974,13 +1981,13 @@ export class StcfsdPanel implements McpPanelInterface {
                     <div class="input-row">
                         <label>좌측 Lap</label><input type="number" id="conn-lap-left" value="12" step="1" style="width:65px">
                         <label>우측 Lap</label><input type="number" id="conn-lap-right" value="12" step="1" style="width:65px">
-                        <span class="hint-inline" id="conn-lap-unit">in</span>
+                        <span class="hint-inline conn-unit-length"></span>
                     </div>
                     <div class="input-row">
-                        <label>지점 Mu</label><input type="number" id="conn-Mu" value="0" step="0.1" style="width:65px">
-                        <span class="hint-inline" id="conn-Mu-unit">kip-in</span>
-                        <label>지점 Vu</label><input type="number" id="conn-Vu" value="0" step="0.1" style="width:65px">
-                        <span class="hint-inline" id="conn-Vu-unit">kips</span>
+                        <label>지점 Mu</label><input type="number" id="conn-Mu" value="0" step="0.1" style="width:65px" data-unit="moment">
+                        <span class="hint-inline conn-unit-moment"></span>
+                        <label>지점 Vu</label><input type="number" id="conn-Vu" value="0" step="0.1" style="width:65px" data-unit="force">
+                        <span class="hint-inline conn-unit-force"></span>
                     </div>
                 </div>
 
@@ -2005,28 +2012,59 @@ export class StcfsdPanel implements McpPanelInterface {
                 <hr style="margin:16px 0;border-color:var(--vscode-panel-border)">
 
                 <h3>단일 접합부 설계 (Chapter J)</h3>
-                <p class="hint">볼트, 스크류, 용접 접합부의 강도를 계산합니다.</p>
+                <p class="hint">AISI S100 §J2~§J5 기준 7종 접합부 강도를 계산합니다.</p>
 
                 <div class="section-group">
                     <div class="input-row">
                         <label>유형</label>
                         <select id="conn-single-type" style="width:auto">
-                            <option value="screw">Screw (§J4)</option>
-                            <option value="bolt">Bolt (§J3)</option>
-                            <option value="fillet_weld">Fillet Weld (§J2.1)</option>
-                            <option value="arc_spot">Arc Spot Weld (§J2.2)</option>
+                            <optgroup label="기계적 접합">
+                                <option value="screw">Screw — 나사 (§J4)</option>
+                                <option value="bolt">Bolt — 볼트 (§J3)</option>
+                                <option value="paf">PAF — 화약고정 (§J5)</option>
+                            </optgroup>
+                            <optgroup label="용접 접합">
+                                <option value="fillet_weld">Fillet Weld — 필릿 (§J2.1)</option>
+                                <option value="arc_spot">Arc Spot Weld — 아크점 (§J2.2)</option>
+                                <option value="arc_seam">Arc Seam Weld — 아크심 (§J2.4)</option>
+                                <option value="groove">Groove Weld — 그루브 (§J2.3)</option>
+                            </optgroup>
                         </select>
                     </div>
                     <div class="input-row">
-                        <label>t1</label><input type="number" id="conn-t1" value="0.059" step="0.001" style="width:65px">
-                        <label>t2</label><input type="number" id="conn-t2" value="0.059" step="0.001" style="width:65px">
-                        <span class="hint-inline">in</span>
+                        <label>t1</label><input type="number" id="conn-t1" value="1.5" step="0.1" style="width:65px" data-unit="thickness">
+                        <label>t2</label><input type="number" id="conn-t2" value="1.5" step="0.1" style="width:65px" data-unit="thickness">
+                        <span class="hint-inline conn-unit-thickness"></span>
                     </div>
                     <div class="input-row">
-                        <label>직경/크기</label><input type="number" id="conn-d" value="0.19" step="0.01" style="width:65px">
+                        <label>직경/크기</label><input type="number" id="conn-d" value="4.8" step="0.1" style="width:65px" data-unit="length">
+                        <span class="hint-inline conn-unit-length"></span>
                         <label>개수</label><input type="number" id="conn-n" value="4" min="1" step="1" style="width:50px">
-                        <label>Fu</label><input type="number" id="conn-Fu" value="58.02" step="1" style="width:65px">
-                        <span class="hint-inline">ksi</span>
+                    </div>
+                    <div class="input-row">
+                        <label>Fy</label><input type="number" id="conn-Fy" value="245" step="10" style="width:65px" data-unit="stress">
+                        <label>Fu</label><input type="number" id="conn-Fu" value="400" step="10" style="width:65px" data-unit="stress">
+                        <span class="hint-inline conn-unit-stress"></span>
+                    </div>
+                    <div class="input-row" id="conn-weld-row" style="display:none">
+                        <label>용접길이</label><input type="number" id="conn-weld-L" value="50" step="1" style="width:65px" data-unit="length">
+                        <label>용접크기</label><input type="number" id="conn-weld-size" value="3" step="0.5" style="width:65px" data-unit="length">
+                        <span class="hint-inline conn-unit-length"></span>
+                    </div>
+                    <div class="input-row" id="conn-groove-row" style="display:none">
+                        <label>그루브 유형</label>
+                        <select id="conn-groove-type" style="width:auto">
+                            <option value="complete">완전용입 (CJP)</option>
+                            <option value="partial">부분용입 (PJP)</option>
+                        </select>
+                    </div>
+                    <div class="input-row" id="conn-bolt-row" style="display:none">
+                        <label>Fub</label><input type="number" id="conn-Fub" value="827" step="10" style="width:65px" data-unit="stress">
+                        <span class="hint-inline">볼트 인장강도</span>
+                    </div>
+                    <div class="input-row">
+                        <label>Pu</label><input type="number" id="conn-Pu" value="0" step="0.1" style="width:65px" data-unit="force">
+                        <span class="hint-inline conn-unit-force">소요 강도 (0=강도만 계산)</span>
                     </div>
                 </div>
 

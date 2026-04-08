@@ -276,6 +276,22 @@ def handle_request(request: dict) -> dict:
             result = design_lap_connection(params)
             return {'id': req_id, 'result': result}
 
+        elif method == 'shear_lag':
+            from design.special_topics import shear_lag
+            return {'id': req_id, 'result': shear_lag(**params)}
+
+        elif method == 'block_shear':
+            from design.special_topics import block_shear
+            return {'id': req_id, 'result': block_shear(**params)}
+
+        elif method == 'cold_work':
+            from design.special_topics import cold_work_strength
+            return {'id': req_id, 'result': cold_work_strength(**params)}
+
+        elif method == 'flange_curling':
+            from design.special_topics import flange_curling
+            return {'id': req_id, 'result': flange_curling(**params)}
+
         elif method == 'design_connection':
             from design.connections import design_connection
             result = design_connection(params)
