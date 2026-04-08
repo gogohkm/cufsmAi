@@ -938,6 +938,48 @@
         return s;
     }
 
+    /** 모든 하중 조합에서 최대 |Mu| (kip-ft) */
+    function _getMaxMuFromAll(la) {
+        let maxMu = 0;
+        if (la.gravity && la.gravity.locations) {
+            for (const loc of la.gravity.locations) {
+                if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
+            }
+        }
+        if (la.uplift && la.uplift.locations) {
+            for (const loc of la.uplift.locations) {
+                if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
+            }
+        }
+        if (la.all_combos_detail) {
+            for (const cd of la.all_combos_detail) {
+                if (Math.abs(cd.max_M || 0) > Math.abs(maxMu)) maxMu = cd.max_M;
+            }
+        }
+        return Math.abs(maxMu);
+    }
+
+    /** 모든 하중 조합에서 최대 |Vu| (kips) */
+    function _getMaxVuFromAll(la) {
+        let maxVu = 0;
+        if (la.gravity && la.gravity.locations) {
+            for (const loc of la.gravity.locations) {
+                if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) maxVu = loc.Vu;
+            }
+        }
+        if (la.uplift && la.uplift.locations) {
+            for (const loc of la.uplift.locations) {
+                if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) maxVu = loc.Vu;
+            }
+        }
+        if (la.all_combos_detail) {
+            for (const cd of la.all_combos_detail) {
+                if (Math.abs(cd.max_V || 0) > Math.abs(maxVu)) maxVu = cd.max_V;
+            }
+        }
+        return Math.abs(maxVu);
+    }
+
     function _dimLine(x1, y1, x2, y2, label, color) {
         let s = '';
         s += '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+color+'" stroke-width="0.5" opacity="0.5"/>';
@@ -1062,8 +1104,8 @@
             loadL: getNum('load-L-psf', 0) ? getNum('load-L-psf', 0) + ' ' + _rul('pressure') : '',
             hasLoadAnalysis: !!la,
             gravityCombo: la && la.gravity ? la.gravity.combo : '',
-            maxMu: la && la.gravity && la.gravity.locations ? fmtVal(Math.max(...la.gravity.locations.map(l => Math.abs(l.Mu || 0))), 'moment_ft') + ' ' + _rul('moment_ft') : '',
-            maxVu: la && la.gravity && la.gravity.locations ? fmtVal(Math.max(...la.gravity.locations.filter(l => l.Vu != null).map(l => Math.abs(l.Vu))), 'force') + ' ' + _rul('force') : '',
+            maxMu: la ? fmtVal(_getMaxMuFromAll(la), 'moment_ft') + ' ' + _rul('moment_ft') : '',
+            maxVu: la ? fmtVal(_getMaxVuFromAll(la), 'force') + ' ' + _rul('force') : '',
             maxDeflection: la && la.deflection && la.deflection.per_span ? fmtVal(Math.max(...la.deflection.per_span.map(p => p.abs_delta_in)), 'length') + ' ' + _rul('length') : '',
             deflectionRatio: la && la.deflection && la.deflection.per_span ? Math.min(...la.deflection.per_span.map(p => p.L_over_delta)).toFixed(0) : '',
             hasDesignResult: !!(d && !d.error),
@@ -3129,23 +3171,69 @@
             if (ap.uplift_R != null) html += 'Uplift R=' + ap.uplift_R;
             html += '</div>';
 
-            // Auto-fill required strengths into design inputs
-            if (data.gravity && data.gravity.locations.length > 0) {
-                // 절대값 최대 Mu 위치
-                let maxLoc = data.gravity.locations[0];
-                for (const loc of data.gravity.locations) {
-                    if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxLoc.Mu || 0)) maxLoc = loc;
+            // Auto-fill required strengths — 모든 조합(gravity+uplift) 중 최대 Mu/Vu 사용
+            {
+                let maxMu = 0, maxVu = 0, govCombo = '';
+
+                // Gravity 조합
+                if (data.gravity && data.gravity.locations) {
+                    for (const loc of data.gravity.locations) {
+                        if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) {
+                            maxMu = loc.Mu;
+                            govCombo = data.gravity.combo || 'gravity';
+                        }
+                        if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) {
+                            maxVu = loc.Vu;
+                        }
+                    }
                 }
-                // US 내부값 → 표시값 변환하여 입력 필드에 설정
-                if (maxLoc.Mu != null) {
-                    const mu_kipIn = Math.abs(maxLoc.Mu * 12); // kip-ft → kip-in (US)
+
+                // Uplift 조합 — gravity보다 크면 채택
+                if (data.uplift && data.uplift.locations) {
+                    for (const loc of data.uplift.locations) {
+                        if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) {
+                            maxMu = loc.Mu;
+                            govCombo = data.uplift.combo || 'uplift';
+                        }
+                        if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) {
+                            maxVu = loc.Vu;
+                        }
+                    }
+                }
+
+                // 전체 조합 상세에서도 비교 (풍하중이 큰 경우 대비)
+                if (data.all_combos_detail) {
+                    for (const cd of data.all_combos_detail) {
+                        const cdMu = Math.abs(cd.max_M || 0);
+                        const cdVu = Math.abs(cd.max_V || 0);
+                        if (cdMu > Math.abs(maxMu)) {
+                            maxMu = cd.max_M;
+                            govCombo = cd.combo || '';
+                        }
+                        if (cdVu > Math.abs(maxVu)) {
+                            maxVu = cd.max_V;
+                        }
+                    }
+                }
+
+                // 설계 입력에 최대값 설정
+                if (maxMu !== 0) {
+                    const mu_kipIn = Math.abs(maxMu * 12); // kip-ft → kip-in
                     setValue('design-Mx', toDisplay(mu_kipIn, 'moment').toFixed(unitDec('moment')));
                 }
-                if (maxLoc.Vu != null) setValue('design-V', toDisplay(maxLoc.Vu, 'force').toFixed(unitDec('force')));
+                if (maxVu !== 0) {
+                    setValue('design-V', toDisplay(Math.abs(maxVu), 'force').toFixed(unitDec('force')));
+                }
+
                 // Unbraced lengths
-                if (ap.negative_region) {
+                if (ap && ap.negative_region) {
                     setValue('design-Lb', toDisplay(ap.negative_region.Ly_in || 0, 'length').toFixed(unitDec('length')));
                     setValue('design-Cb', ap.negative_region.Cb || 1.0);
+                }
+
+                // 지배 조합 표시
+                if (govCombo) {
+                    setStatus('지배 조합: ' + govCombo + ' (Mu=' + fmtVal(Math.abs(maxMu * 12), 'moment') + ' ' + unitLabel('moment') + ')', 'success');
                 }
             }
         }
