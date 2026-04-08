@@ -202,7 +202,7 @@ def _design_compression(params: dict) -> dict:
         'value': round(Pnl, 2), 'unit': 'kips',
         'formula': (
             f'Pcrl = {Pcrl:.2f} kips, '
-            f'λl = √(Pne/Pcrl) = √({Pne:.2f}/{Pcrl:.2f}) = {local_result["lambda_l"]:.3f} '
+            f'λl = √(Pne/Pcrl) = √({Pne:.2f} kips/{Pcrl:.2f} kips) = {local_result["lambda_l"]:.3f} '
             f'{"≤" if local_result["lambda_l"] <= 0.776 else ">"} 0.776 → '
             f'Pnl = {Pnl:.2f} kips'
         ) if Pcrl > 0 else f'Pcrl = 0 → Pnl = Pne = {Pnl:.2f} kips',
@@ -254,7 +254,7 @@ def _design_compression(params: dict) -> dict:
         'value': round(Pnd, 2), 'unit': 'kips',
         'formula': (
             f'Pcrd = {Pcrd:.2f} kips ({Pcrd_source}), '
-            f'λd = √(Py/Pcrd) = √({Py:.2f}/{Pcrd:.2f}) = {dist_result["lambda_d"]:.3f} '
+            f'λd = √(Py/Pcrd) = √({Py:.2f} kips/{Pcrd:.2f} kips) = {dist_result["lambda_d"]:.3f} '
             f'{"≤" if dist_result["lambda_d"] <= 0.561 else ">"} 0.561 → '
             f'Pnd = {Pnd:.2f} kips'
         ) if Pcrd > 0 else f'Pcrd = 0 → Pnd = Py = {Pnd:.2f} kips',
@@ -400,7 +400,7 @@ def _design_flexure(params: dict) -> dict:
         'value': round(Mnl, 2), 'unit': 'kip-in',
         'formula': (
             f'Mcrl = {Mcrl:.2f} kip-in, '
-            f'λl = √(Mne/Mcrl) = √({Mne:.2f}/{Mcrl:.2f}) = {local_result["lambda_l"]:.3f} '
+            f'λl = √(Mne/Mcrl) = √({Mne:.2f} kip-in/{Mcrl:.2f} kip-in) = {local_result["lambda_l"]:.3f} '
             f'{"≤" if local_result["lambda_l"] <= 0.776 else ">"} 0.776 → '
             f'Mnl = {Mnl:.2f} kip-in'
         ) if Mcrl > 0 else f'Mcrl = 0 → Mnl = Mne = {Mnl:.2f} kip-in',
@@ -458,7 +458,7 @@ def _design_flexure(params: dict) -> dict:
         'value': round(Mnd, 2), 'unit': 'kip-in',
         'formula': (
             f'Mcrd = {Mcrd:.2f} kip-in ({Mcrd_source}), '
-            f'λd = √(My/Mcrd) = √({My:.2f}/{Mcrd:.2f}) = {dist_result["lambda_d"]:.3f} '
+            f'λd = √(My/Mcrd) = √({My:.2f} kip-in/{Mcrd:.2f} kip-in) = {dist_result["lambda_d"]:.3f} '
             f'{"≤" if dist_result["lambda_d"] <= 0.673 else ">"} 0.673 → '
             f'Mnd = {Mnd:.2f} kip-in'
         ) if Mcrd > 0 else f'Mcrd = 0 → Mnd = My = {Mnd:.2f} kip-in',
