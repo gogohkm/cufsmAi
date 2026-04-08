@@ -76,7 +76,7 @@ def web_crippling(h: float, t: float, R: float, N: float,
                   fastened: str = 'fastened') -> dict:
     """웹 크리플링 강도 (§G5, Eq. G5-1)
 
-    Pn = C × t² × sin(θ) × (1 - Cr√(R/t)) × (1 + CN√(N/t)) × (1 - Ch√(h/t)) × √(E×Fy)
+    Pn = C × t² × Fy × sin(θ) × (1 - Cr√(R/t)) × (1 + CN√(N/t)) × (1 - Ch√(h/t))
 
     Args:
         h: 웹 평면폭 (in)

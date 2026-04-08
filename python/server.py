@@ -271,6 +271,25 @@ def handle_request(request: dict) -> dict:
             )
             return {'id': req_id, 'result': {'kphi': round(kphi, 4), 'kx': round(kx, 3)}}
 
+        elif method == 'lap_connection':
+            from design.lap_connection import design_lap_connection
+            result = design_lap_connection(params)
+            return {'id': req_id, 'result': result}
+
+        elif method == 'design_connection':
+            from design.connections import design_connection
+            result = design_connection(params)
+            return {'id': req_id, 'result': result}
+
+        elif method == 'check_lap_length':
+            from design.lap_connection import check_lap_length
+            result = check_lap_length(
+                d=params.get('d', 8.0),
+                lap_left=params.get('lap_left', 0),
+                lap_right=params.get('lap_right', 0),
+            )
+            return {'id': req_id, 'result': result}
+
         elif method == 'ping':
             return {'id': req_id, 'result': 'pong'}
 

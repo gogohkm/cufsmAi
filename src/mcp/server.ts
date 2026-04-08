@@ -1030,6 +1030,60 @@ server.tool("validate_design", "Validate current design state — checks section
 );
 
 // ============================================================
+// CONNECTION DESIGN (3 tools)
+// ============================================================
+server.tool("design_lap_connection",
+    "Design lap splice connection — calculate required fasteners (§J3, §J4, §I6.2.1(g))",
+    {
+        d: z.number().describe("Member depth in inches"),
+        t: z.number().describe("Member thickness in inches"),
+        Fy: z.number().optional().describe("Yield stress ksi"),
+        Fu: z.number().optional().describe("Tensile stress ksi"),
+        lap_left_in: z.number().describe("Left lap length in inches"),
+        lap_right_in: z.number().describe("Right lap length in inches"),
+        Mu_support: z.number().optional().describe("Support moment kip-in"),
+        Vu_support: z.number().optional().describe("Support shear kips"),
+        fastener_type: z.enum(['screw', 'bolt']).optional().describe("Fastener type (default screw)"),
+        fastener_dia: z.number().optional().describe("Fastener diameter in inches"),
+        n_rows: z.number().optional().describe("Number of fastener rows (default 2)"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', { action: 'lap_connection', ...params });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("check_lap_length",
+    "Check if lap length meets §I6.2.1(g) requirement: Lap ≥ 1.5d",
+    {
+        d: z.number().describe("Member depth in inches"),
+        lap_left: z.number().describe("Left lap length in inches"),
+        lap_right: z.number().describe("Right lap length in inches"),
+    },
+    async ({ d, lap_left, lap_right }) => {
+        const r = await callBridgePost('/action', { action: 'check_lap_length', d, lap_left, lap_right });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("design_connection",
+    "Design a single connection (bolt, screw, weld) per AISI Chapter J",
+    {
+        connection_type: z.enum(['bolt', 'screw', 'fillet_weld', 'arc_spot']).describe("Connection type"),
+        t1: z.number().describe("Thickness of connected sheet 1 in inches"),
+        t2: z.number().optional().describe("Thickness of connected sheet 2 in inches"),
+        d: z.number().optional().describe("Fastener diameter or weld size in inches"),
+        Fu: z.number().optional().describe("Tensile strength ksi"),
+        n: z.number().optional().describe("Number of fasteners"),
+        L_weld: z.number().optional().describe("Weld length in inches (for welds)"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', { action: 'design_connection', ...params });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+// ============================================================
 // 서버 시작
 // ============================================================
 async function main() {

@@ -585,6 +585,22 @@ export class StcfsdPanel implements McpPanelInterface {
                 });
             }
 
+            case 'lap_connection': {
+                const result = await this._pythonBridge.call('lap_connection', options);
+                this._postMessage('lapConnectionResult', result);
+                return result;
+            }
+
+            case 'check_lap_length': {
+                return await this._pythonBridge.call('check_lap_length', options);
+            }
+
+            case 'design_connection': {
+                const connResult = await this._pythonBridge.call('design_connection', options);
+                this._postMessage('connectionResult', connResult);
+                return connResult;
+            }
+
             case 'classify': {
                 if (!this._lastAnalysisResult) {
                     return { error: 'No analysis result. Run analysis first.' };

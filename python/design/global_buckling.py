@@ -179,12 +179,16 @@ def beam_global_strength(Fy: float, Fcre: float, Sf: float,
 
 
 def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
-                       E: float = E_STEEL, G: float = G_STEEL) -> float:
+                       E: float = E_STEEL, G: float = G_STEEL,
+                       section_type: str = 'C') -> float:
     """횡-비틀림좌굴 임계응력 Fcre (§F2.1)
 
-    Fcre = Cb * ro * A / Sf * sqrt(sigma_ey * sigma_t)
+    C-section (§F2.1.1): Fcre = Cb × ro × A / Sf × √(σey × σt)
+    Z-section (§F2.1.3): Fcre = Cb × ro × A / (2×Sf) × √(σey × σt)
+                          → 분모에 **2** (점대칭 단면, Eq. F2.1.3-1)
 
-    props 키 호환: Sf/Sxx/Sx, ry/rz, J, Cw, xo/Xs/xcg, ro
+    Args:
+        section_type: 'C' or 'Z' — Z-section은 Fcre에 /2 적용
     """
     Ag = props.get('A', 0)
 
@@ -229,4 +233,10 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
         return 0.0
 
     Fcre = Cb * ro * Ag / Sf * math.sqrt(sigma_ey * sigma_t)
+
+    # Z-section (§F2.1.3): 분모에 2 — 점대칭 단면
+    sec = (section_type or 'C').upper()
+    if sec.startswith('Z') or sec == 'LIPPEDZ':
+        Fcre /= 2.0
+
     return Fcre

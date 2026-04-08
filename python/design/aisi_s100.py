@@ -374,7 +374,8 @@ def _design_flexure(params: dict) -> dict:
     })
 
     # Step 2: 전체좌굴 LTB (F2 / F2.4.2)
-    Fcre = compute_beam_Fcre(props, Cb, Lb)
+    section_type = params.get('section_type', 'C')
+    Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type)
     Zf = props.get('Zx', 0) or props.get('Zf', 0)  # 소성단면계수
     use_ir = params.get('use_inelastic_reserve', False)
     global_result = beam_global_strength(Fy, Fcre, Sf_eff, Zf=Zf,
