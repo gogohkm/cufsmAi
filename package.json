@@ -35,25 +35,25 @@
     "contributes": {
         "commands": [
             {
-                "command": "cufsm.openDesigner",
+                "command": "stcfsd.openDesigner",
                 "title": "StCFSD: Open Section Designer",
                 "icon": "$(tools)"
             },
             {
-                "command": "cufsm.newProject",
+                "command": "stcfsd.newProject",
                 "title": "StCFSD: New Project"
             },
             {
-                "command": "cufsm.navigateSection",
+                "command": "stcfsd.navigateSection",
                 "title": "StCFSD: Navigate Section"
             },
             {
-                "command": "cufsm.refreshProjects",
+                "command": "stcfsd.refreshProjects",
                 "title": "StCFSD: Refresh Projects",
                 "icon": "$(refresh)"
             },
             {
-                "command": "cufsm.runAnalysis",
+                "command": "stcfsd.runAnalysis",
                 "title": "Run Analysis",
                 "icon": "$(play)"
             }
@@ -61,30 +61,30 @@
         "menus": {
             "view/title": [
                 {
-                    "command": "cufsm.openDesigner",
-                    "when": "view == cufsm.projectExplorer",
+                    "command": "stcfsd.openDesigner",
+                    "when": "view == stcfsd.projectExplorer",
                     "group": "navigation"
                 },
                 {
-                    "command": "cufsm.refreshProjects",
-                    "when": "view == cufsm.projectExplorer",
+                    "command": "stcfsd.refreshProjects",
+                    "when": "view == stcfsd.projectExplorer",
                     "group": "navigation"
                 }
             ],
             "view/item/context": [
                 {
-                    "command": "cufsm.runAnalysis",
-                    "when": "view == cufsm.projectExplorer && viewItem == section-analysis",
+                    "command": "stcfsd.runAnalysis",
+                    "when": "view == stcfsd.projectExplorer && viewItem == section-analysis",
                     "group": "navigation"
                 }
             ],
             "commandPalette": [
                 {
-                    "command": "cufsm.navigateSection",
+                    "command": "stcfsd.navigateSection",
                     "when": "false"
                 },
                 {
-                    "command": "cufsm.runAnalysis",
+                    "command": "stcfsd.runAnalysis",
                     "when": "false"
                 }
             ]
@@ -92,16 +92,16 @@
         "viewsContainers": {
             "activitybar": [
                 {
-                    "id": "cufsm-explorer",
+                    "id": "stcfsd-explorer",
                     "title": "StCFSD",
                     "icon": "media/stcfsd-icon.svg"
                 }
             ]
         },
         "views": {
-            "cufsm-explorer": [
+            "stcfsd-explorer": [
                 {
-                    "id": "cufsm.projectExplorer",
+                    "id": "stcfsd.projectExplorer",
                     "name": "Section Designer"
                 }
             ]
