@@ -2347,6 +2347,9 @@
                 wc_R: fromDisplay(getNum('design-wc-R', 0), 'radius'),
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
                 use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
+                R_uplift: (/** @type {HTMLInputElement} */ (document.getElementById('chk-r-factor'))?.checked)
+                    ? parseFloat(/** @type {HTMLSelectElement} */ (document.getElementById('select-r-value'))?.value || '0')
+                    : undefined,
             };
 
             // Show loading

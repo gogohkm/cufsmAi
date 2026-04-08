@@ -1876,6 +1876,19 @@ export class StcfsdPanel implements McpPanelInterface {
                         <label><input type="checkbox" id="chk-inelastic-reserve"> §F2.4.2 Inelastic Reserve</label>
                         <span class="hint-inline">(Mne: My→Mp, deck braced 시)</span>
                     </div>
+                    <div class="input-row" style="margin-top:4px">
+                        <label><input type="checkbox" id="chk-r-factor"> §I6.2.1 R-factor (양력)</label>
+                        <select id="select-r-value" style="width:auto; font-size:11px; margin-left:4px">
+                            <option value="0">미적용</option>
+                            <option value="0.70">0.70 — C/Z ≤6.5in simple</option>
+                            <option value="0.65">0.65 — C/Z 6.5~8.5in simple</option>
+                            <option value="0.50">0.50 — Z 8.5~12in simple</option>
+                            <option value="0.40">0.40 — C 8.5~12in simple</option>
+                            <option value="0.60" selected>0.60 — C continuous</option>
+                            <option value="0.70">0.70 — Z continuous</option>
+                        </select>
+                    </div>
+                    <p class="hint" style="margin:2px 0 0 20px">Through-fastened panel + 양력 시: Mn = R × Mnfo</p>
                 </div>
 
                 <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">▶ 설계 검토 실행</button>
