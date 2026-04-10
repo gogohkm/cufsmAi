@@ -9,6 +9,7 @@ Lap 구간은 접합부(connection)로 설계 — 전단 전달용 볼트/스크
 """
 
 import math
+from design.connections import design_connection
 
 
 def design_lap_connection(params: dict) -> dict:
@@ -80,18 +81,31 @@ def design_lap_connection(params: dict) -> dict:
             else f'V_transfer = Vu = {Vu:.3f} kips',
     })
 
-    # Step 3: 개별 패스너 강도
+    # Step 3: 개별 패스너 설계강도
+    conn_type = 'screw' if fastener_type == 'screw' else 'bolt'
+    conn_result = design_connection({
+        'connection_type': conn_type,
+        'design_method': params.get('design_method', 'LRFD'),
+        'Fy': Fy,
+        'Fu': Fu,
+        't1': t,
+        't2': t,
+        'd': fastener_dia,
+        'n': 1,
+        'Pu': 0,
+    })
+    if conn_result.get('error'):
+        return conn_result
+    Pns = conn_result.get('design_strength', 0)
     if fastener_type == 'screw':
-        Pns = _screw_shear_strength(t, t, fastener_dia, Fu)
         fastener_label = f'Screw #{_screw_gauge(fastener_dia)}'
     else:
-        Pns = _bolt_bearing_strength(t, fastener_dia, Fu)
         fastener_label = f'Bolt d={fastener_dia:.3f} in'
 
     steps.append({
         'step': 3, 'name': f'Fastener Strength ({fastener_label})',
         'value': round(Pns, 3), 'unit': 'kips',
-        'formula': f'Pns = {Pns:.3f} kips per fastener ({fastener_type})',
+        'formula': f'Pdesign = {Pns:.3f} kips per fastener ({fastener_type})',
     })
 
     # Step 4: 필요 패스너 수
@@ -108,7 +122,7 @@ def design_lap_connection(params: dict) -> dict:
     steps.append({
         'step': 4, 'name': 'Required Fasteners',
         'value': n_total, 'unit': 'ea',
-        'formula': f'n = V/{{"Pns"}} = {V_transfer:.3f}/{Pns:.3f} = {n_required} → {n_rows} rows × {n_per_row}/row = {n_total} ea'
+        'formula': f'n = V/Pdesign = {V_transfer:.3f}/{Pns:.3f} = {n_required} → {n_rows} rows × {n_per_row}/row = {n_total} ea'
             if Pns > 0 else 'N/A',
     })
 
@@ -151,6 +165,7 @@ def design_lap_connection(params: dict) -> dict:
         'edge_distance': edge_dist,
         'V_transfer': V_transfer,
         'Pns': Pns,
+        'fastener_design': conn_result,
         'lap_ok': lap_ok,
         'min_lap': min_lap,
         'steps': steps,

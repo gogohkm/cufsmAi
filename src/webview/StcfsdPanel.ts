@@ -25,6 +25,8 @@ export class StcfsdPanel implements McpPanelInterface {
 
     private _model: StcfsdModel;
     private _lastAnalysisResult: any = null;
+    private _lastLoadAnalysis: any = null;
+    private _lastDesignResult: any = null;
     private _lastPreviewPath: string = '';
     private _previewResolve: ((value: any) => void) | null = null;
 
@@ -178,6 +180,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'updateModel':
                 this._model = { ...this._model, ...message.data };
+                this._invalidateAnalysisState('Model updated');
                 this._updateTreeView();
                 break;
 
@@ -280,8 +283,8 @@ export class StcfsdPanel implements McpPanelInterface {
         this._postMessage('analysisStarted', null);
         try {
             const result = await this._pythonBridge.analyze(model);
-            this._lastAnalysisResult = result;
-            this._postMessage('analysisComplete', result);
+            this._setAnalysisResult(result, (this._model as any).loadCase || 'unknown');
+            this._postMessage('analysisComplete', this._lastAnalysisResult);
 
             // DSM 설계값 자동 추출 — P(축력)와 Mxx(휨) 모두
             const aFy = this._getAnalysisFy();
@@ -401,6 +404,59 @@ export class StcfsdPanel implements McpPanelInterface {
             || 35.53;
     }
 
+    private _currentModelSignature(): string {
+        const nodeSig = (this._model.node || []).map((n: number[]) =>
+            [n[1], n[2], n[7]].map(v => Number(v || 0).toFixed(6)).join(':')
+        ).join('|');
+        const elemSig = (this._model.elem || []).map((e: number[]) =>
+            [e[1], e[2], e[3]].map(v => Number(v || 0).toFixed(6)).join(':')
+        ).join('|');
+        return [
+            nodeSig,
+            elemSig,
+            this._model.BC || 'S-S',
+            (this._model.lengths || []).join(','),
+            (this._model as any).loadCase || 'unknown',
+            this._getAnalysisFy().toFixed(4),
+        ].join('::');
+    }
+
+    private _setAnalysisResult(result: any, loadType: string): void {
+        this._lastAnalysisResult = {
+            ...result,
+            _meta: {
+                load_type: loadType,
+                fy: this._getAnalysisFy(),
+                signature: this._currentModelSignature(),
+                timestamp: new Date().toISOString(),
+            },
+        };
+    }
+
+    private _invalidateAnalysisState(reason: string): void {
+        this._lastAnalysisResult = null;
+        this._postMessage('analysisInvalidated', { reason });
+        this._updateTreeView();
+    }
+
+    private _isAnalysisCurrent(loadType?: string): boolean {
+        const meta = this._lastAnalysisResult?._meta;
+        if (!meta) { return false; }
+        if (meta.signature !== this._currentModelSignature()) { return false; }
+        if (loadType && meta.load_type && meta.load_type !== loadType) { return false; }
+        return Array.isArray(this._lastAnalysisResult.curve) && this._lastAnalysisResult.curve.length > 0;
+    }
+
+    private _normalizeSectionType(sectionType?: string): string {
+        const st = (sectionType || '').toLowerCase();
+        if (st.includes('z')) { return 'Z'; }
+        if (st.includes('hat')) { return 'Hat'; }
+        if (st.includes('track')) { return 'Track'; }
+        if (st.includes('tee')) { return 'Tee'; }
+        if (st.includes('angle')) { return 'Angle'; }
+        return 'C';
+    }
+
     /** MCP: 액션 처리 — Bridge에서 직접 호출 */
     public async handleMcpAction(options: any): Promise<any> {
         const action = options?.action;
@@ -414,9 +470,11 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (result?.node) {
                     this._model.node = result.node;
                     this._model.elem = result.elem;
+                    (this._model as any).sectionType = this._normalizeSectionType(options.section_type);
                     const fy = (this._model as any).loadFy || 35.53;
                     for (const n of this._model.node) { n[7] = fy; }
                     (this._model as any).loadFy = fy;
+                    this._invalidateAnalysisState('Section template changed');
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                 }
@@ -428,12 +486,14 @@ export class StcfsdPanel implements McpPanelInterface {
                 const v = options.v || 0.3;
                 const G = options.G || E / (2 * (1 + v));
                 this._model.prop = [[100, E, E, v, v, G]];
+                this._invalidateAnalysisState('Material changed');
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, E, v, G };
             }
 
             case 'set_bc': {
                 this._model.BC = options.BC || 'S-S';
+                this._invalidateAnalysisState('Boundary condition changed');
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, BC: this._model.BC };
@@ -449,6 +509,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 this._model.lengths = lengths;
                 this._model.m_all = lengths.map(() => [1]);
+                this._invalidateAnalysisState('Length range changed');
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, n: lengths.length };
@@ -457,6 +518,7 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'set_load_case': {
                 const lc = options.load_case || 'compression';
                 const fy = options.fy || 35.53;
+                this._invalidateAnalysisState(`Load case changed: ${lc}`);
                 let stressOpts: any;
                 if (lc === 'compression') {
                     stressOpts = { action: 'set_stress', type: 'uniform_compression', fy };
@@ -527,14 +589,15 @@ export class StcfsdPanel implements McpPanelInterface {
                     }
                 }
                 (this._model as any).loadFy = fy;
+                this._invalidateAnalysisState('Stress distribution changed');
                 this._postMessage('modelLoaded', this._model);
                 return { success: true };
             }
 
             case 'run_analysis': {
                 const result = await this._pythonBridge.analyze(this._model as any);
-                this._lastAnalysisResult = result;
-                this._postMessage('analysisComplete', result);
+                this._setAnalysisResult(result, (this._model as any).loadCase || 'unknown');
+                this._postMessage('analysisComplete', this._lastAnalysisResult);
 
                 // DSM 자동 추출
                 try {
@@ -555,7 +618,7 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'get_dsm': {
-                const curve = this._lastAnalysisResult?.curve;
+                const curve = this._isAnalysisCurrent() ? this._lastAnalysisResult?.curve : null;
                 if (!curve || curve.length === 0) {
                     return { error: 'No analysis result. Run analysis first.' };
                 }
@@ -694,7 +757,10 @@ export class StcfsdPanel implements McpPanelInterface {
 
                 const rx_calc = props.A > 0 ? Math.sqrt((props.Ixx || 0) / props.A) : 0;
                 const ry_calc = props.A > 0 ? Math.sqrt((props.Izz || 0) / props.A) : 0;
-                const xo_val = cutwpProps.xo ?? props.xo ?? 0;
+                const xo_val = cutwpProps.xo
+                    ?? (cutwpProps.Xs != null && props.xcg != null ? cutwpProps.Xs - props.xcg : undefined)
+                    ?? props.xo
+                    ?? 0;
                 const ro_fallback = Math.sqrt(rx_calc ** 2 + ry_calc ** 2 + xo_val ** 2);
 
                 // NaN 방어: ?? 연산자는 NaN을 통과시키므로 명시적으로 체크
@@ -706,6 +772,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     J: safeNum(cutwpProps.J, safeNum(props.J)),
                     Cw: safeNum(cutwpProps.Cw, safeNum(props.Cw)),
                     xo: safeNum(xo_val),
+                    Xs: safeNum(cutwpProps.Xs, safeNum((props as any).Xs, safeNum(props.xcg))),
+                    Zs: safeNum(cutwpProps.Zs, safeNum((props as any).Zs, safeNum(props.zcg))),
                     ro: safeNum(cutwpProps.ro, ro_fallback),
                     // Python grosprop() returns Sx, Sz, rz — map to design engine names
                     Sf: props.Sx ?? (props.Ixx && props.zcg ? props.Ixx / Math.max(props.zcg, (props as any).h_web || 1) : 0),
@@ -720,7 +788,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 // 해석 시 사용한 Fy로 DSM 추출 → 설계 Fy와 무관하게 정확한 Mcrl 산출
                 let dsmValues: any = {};
                 let dsmWarning: string | null = null;
-                if (!this._lastAnalysisResult?.curve || this._lastAnalysisResult.curve.length === 0) {
+                if (!this._isAnalysisCurrent()) {
                     dsmWarning = 'No analysis results. Run FSM analysis first to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
                 } else {
                     const aFy = this._getAnalysisFy();
@@ -792,6 +860,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (dsmWarning) {
                     result.dsm_warning = dsmWarning;
                 }
+                this._lastDesignResult = result;
                 this._postMessage('designResult', result);
                 return result;
             }
@@ -814,6 +883,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'analyze_loads': {
                 const result = await this._pythonBridge.call('analyze_loads', options);
+                this._lastLoadAnalysis = result;
                 return result;
             }
 
@@ -839,7 +909,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
 
                 // 2. DSM 값
-                if (this._lastAnalysisResult?.curve) {
+                if (this._isAnalysisCurrent()) {
                     const aFy = this._getAnalysisFy();
                     try {
                         reportData.dsm_P = await this._pythonBridge.call('dsm', {
@@ -852,17 +922,22 @@ export class StcfsdPanel implements McpPanelInterface {
                         });
                     } catch {}
                     reportData.curve_length = this._lastAnalysisResult.curve.length;
+                    reportData.analysis_meta = this._lastAnalysisResult._meta || null;
                 }
 
                 // 3. 하중 분석 (옵션)
-                if (options.loads) {
+                if (this._lastLoadAnalysis) {
+                    reportData.load_analysis = this._lastLoadAnalysis;
+                } else if (options.loads) {
                     try {
                         reportData.load_analysis = await this._pythonBridge.call('analyze_loads', options);
                     } catch {}
                 }
 
                 // 4. 설계 결과
-                if (options.member_type) {
+                if (this._lastDesignResult) {
+                    reportData.design_result = this._lastDesignResult;
+                } else if (options.member_type) {
                     try {
                         const designResult = await this.handleMcpAction({ action: 'aisi_design', ...options });
                         reportData.design_result = designResult;
@@ -904,6 +979,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 valData.section_defined = node.length > 0;
                 valData.nnodes = node.length;
                 valData.nelems = elem.length;
+                valData.analysis_current = this._isAnalysisCurrent();
+                valData.last_load_analysis = this._lastLoadAnalysis || null;
+                valData.last_design_result = this._lastDesignResult || null;
 
                 // Properties
                 if (node.length > 0) {
@@ -916,8 +994,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
 
                 // Analysis/DSM
-                valData.analysis_run = !!this._lastAnalysisResult?.curve;
-                if (this._lastAnalysisResult?.curve) {
+                valData.analysis_run = this._isAnalysisCurrent();
+                if (this._isAnalysisCurrent()) {
                     const aFy = this._getAnalysisFy();
                     try {
                         valData.dsm_P = await this._pythonBridge.call('dsm', {
@@ -1016,7 +1094,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 const fu = options.Fu || options.loads?.Fu || fy * 1.34;
                 const dm = options.design_method || 'LRFD';
                 const posRegion = loadResult?.auto_params?.positive_region || {};
-                const negRegion = loadResult?.auto_params?.negative_region || {};
+                const negRegion = loadResult?.auto_params?.negative_region_gov
+                    || loadResult?.auto_params?.negative_region
+                    || (loadResult?.auto_params?.negative_regions || [])[0]
+                    || {};
                 const gravLocs = loadResult?.gravity?.locations || [];
                 const upliftR = loadResult?.auto_params?.uplift_R ?? null;
                 const hasLaps = options.laps && (options.laps.left_ft > 0 || options.laps.right_ft > 0);
@@ -1027,10 +1108,10 @@ export class StcfsdPanel implements McpPanelInterface {
                     Sf: propsRaw.Sx ?? 0, Sxx: propsRaw.Sx ?? 0 };
 
                 // 정모멘트 소요강도 (지배 위치)
-                const posMoments = gravLocs.filter((l: any) => l.M > 0).map((l: any) => Math.abs(l.M));
+                const posMoments = gravLocs.filter((l: any) => l.Mu > 0).map((l: any) => Math.abs(l.Mu));
                 const posMu = posMoments.length > 0 ? Math.max(...posMoments) : 0;
                 // 부모멘트 소요강도 (지배 위치)
-                const negMoments = gravLocs.filter((l: any) => l.M < 0).map((l: any) => Math.abs(l.M));
+                const negMoments = gravLocs.filter((l: any) => l.Mu < 0).map((l: any) => Math.abs(l.Mu));
                 const negMu = negMoments.length > 0 ? Math.max(...negMoments) : 0;
 
                 // 6a. 정모멘트 설계 (데크 브레이싱, dsmPos)
@@ -1122,6 +1203,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     deck: deckInfo,
                     span_type: spanType,
                 };
+                this._lastLoadAnalysis = loadResult;
+                this._lastDesignResult = result;
                 this._postMessage('designPurlinResult', result);
                 return result;
             }
@@ -1409,6 +1492,8 @@ export class StcfsdPanel implements McpPanelInterface {
             if (result?.node) {
                 this._model.node = result.node;
                 this._model.elem = result.elem;
+                (this._model as any).sectionType = this._normalizeSectionType(data.section_type);
+                this._invalidateAnalysisState('Template generated');
             }
             this._postMessage('templateGenerated', result);
         } catch (err: any) {
@@ -1420,6 +1505,7 @@ export class StcfsdPanel implements McpPanelInterface {
     private async _applyStress(data: any): Promise<void> {
         try {
             const result = await this._pythonBridge.call('stresgen', data);
+            this._invalidateAnalysisState('Stress distribution regenerated');
             this._postMessage('stressApplied', result);
         } catch (err: any) {
             this._postMessage('stressError', { error: err.message });
@@ -1892,6 +1978,11 @@ export class StcfsdPanel implements McpPanelInterface {
                     <label>My<span class="hint-inline" data-unit="moment">kip-in</span></label>
                     <input type="number" id="design-My" value="0" step="0.1" style="width:65px">
                 </div>
+                <div class="input-row">
+                    <label>May<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <input type="number" id="design-May-strength" value="0" step="0.1" style="width:65px">
+                    <span class="hint-inline">약축 가용강도 직접 입력</span>
+                </div>
 
                 <div id="design-wc-section" style="display:none">
                     <h3>웹 크리플링 (§G5)</h3>
@@ -2088,9 +2179,9 @@ export class StcfsdPanel implements McpPanelInterface {
             format: 'cufsm-section-design',
             timestamp: new Date().toISOString(),
             model: this._model,
-            analysisResult: this._lastAnalysisResult ? {
-                curve: this._lastAnalysisResult.curve,
-            } : null,
+            analysisResult: this._lastAnalysisResult,
+            loadAnalysis: this._lastLoadAnalysis || null,
+            designResult: this._lastDesignResult || null,
             // Design 탭 입력값 (WebView에서 수집됨)
             designInputs: designData || null,
         };
@@ -2162,6 +2253,14 @@ export class StcfsdPanel implements McpPanelInterface {
             if (projectData.dsm) {
                 this._postMessage('dsmResult', projectData.dsm);
             }
+        }
+        this._lastLoadAnalysis = projectData.loadAnalysis || null;
+        this._lastDesignResult = projectData.designResult || null;
+        if (projectData.loadAnalysis) {
+            this._postMessage('loadAnalysisComplete', projectData.loadAnalysis);
+        }
+        if (projectData.designResult) {
+            this._postMessage('designResult', projectData.designResult);
         }
 
         // 단면 성질 복원

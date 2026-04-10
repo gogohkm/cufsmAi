@@ -12,7 +12,7 @@ import math
 from typing import List, Optional
 
 E_STEEL = 29500.0  # ksi
-G_STEEL = 11300.0  # ksi
+G_STEEL = 11346.15  # ksi
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +195,7 @@ def determine_unbraced_lengths(
     x_diagram: list,
     spans: list,
     laps: dict = None,
+    laps_per_support: list = None,
     deck_type: str = 'through-fastened',
 ) -> dict:
     """모멘트 다이어그램과 지지조건으로부터 정/부모멘트 영역별 비지지길이를 결정
@@ -222,10 +223,15 @@ def determine_unbraced_lengths(
     # 랩 끝 위치
     lap_ends = []
     if laps and len(spans) > 1:
-        lap_left = laps.get('left_ft', 0)
-        lap_right = laps.get('right_ft', 0)
         for j in range(1, len(supports) - 1):
             sup = supports[j]
+            if laps_per_support and j < len(laps_per_support):
+                lap_data = laps_per_support[j] or {}
+                lap_left = lap_data.get('left_ft', 0)
+                lap_right = lap_data.get('right_ft', 0)
+            else:
+                lap_left = laps.get('left_ft', 0) if laps else 0
+                lap_right = laps.get('right_ft', 0) if laps else 0
             if lap_right > 0:
                 lap_ends.append(sup - lap_right)
             if lap_left > 0:
@@ -251,8 +257,13 @@ def determine_unbraced_lengths(
         for j in range(1, len(supports) - 1):
             sup = supports[j]
             # 좌측: sup - lap_right ~ 가장 가까운 좌측 변곡점
-            lap_right = laps.get('right_ft', 0) if laps else 0
-            lap_left = laps.get('left_ft', 0) if laps else 0
+            if laps_per_support and j < len(laps_per_support):
+                lap_data = laps_per_support[j] or {}
+                lap_left = lap_data.get('left_ft', 0)
+                lap_right = lap_data.get('right_ft', 0)
+            else:
+                lap_right = laps.get('right_ft', 0) if laps else 0
+                lap_left = laps.get('left_ft', 0) if laps else 0
 
             brace_start_left = sup - lap_right if lap_right > 0 else sup
             closest_infl_left = None

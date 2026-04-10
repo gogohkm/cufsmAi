@@ -44,3 +44,5 @@ __pycache__/
 *.pyc
 
 *.vsix
+
+.codex-skill-staging/

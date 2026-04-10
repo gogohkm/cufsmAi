@@ -160,23 +160,26 @@ def screw_connection(t1: float, t2: float, d: float,
     """
     limit_states = []
 
-    # (a) 전단 지압 — 얇은 판 지배 (J4.3.1)
+    # (a) 전단 지압 — J4.3.1
+    # 중간 두께비 구간은 t2/t1 = 1.0~2.5 사이에서 선형보간한다.
     t_min = min(t1, t2)
-    if t2 / t1 <= 1.0:
-        # t2 ≤ t1: tilting+bearing
-        alpha = 4.2 * (t2 / d) ** 0.5 if t2 / d <= 1.0 else 2.7
-        Pns = alpha * t2 * d * Fu * n
-        eq_bear = 'J4.3.1-1 (tilting)'
-    elif t2 / t1 >= 2.5:
-        # t2/t1 ≥ 2.5
-        Pns = 2.7 * t1 * d * Fu * n
+    ratio = t2 / t1 if t1 > 0 else float('inf')
+    Pns_eq1 = 4.2 * math.sqrt(max(t2 ** 3 * d, 0.0)) * Fu * n
+    Pns_eq2 = 2.7 * t2 * d * Fu * n
+    Pns_eq3 = 2.7 * t1 * d * Fu * n
+    if ratio <= 1.0:
+        Pns = min(Pns_eq1, Pns_eq2, Pns_eq3)
+        eq_bear = 'J4.3.1-1/2/3'
+    elif ratio >= 2.5:
+        Pns = Pns_eq3
         eq_bear = 'J4.3.1-3'
     else:
-        # 보간
-        Pns1 = 4.2 * (t2 / d) ** 0.5 * t2 * d * Fu * n
-        Pns2 = 2.7 * t1 * d * Fu * n
-        Pns = min(Pns1, Pns2)
-        eq_bear = 'J4.3.1 (interpolated)'
+        Pn_ratio_1 = min(4.2 * math.sqrt(max(t1 ** 3 * d, 0.0)) * Fu * n,
+                         2.7 * t1 * d * Fu * n)
+        Pn_ratio_25 = 2.7 * t1 * d * Fu * n
+        interp = (ratio - 1.0) / 1.5
+        Pns = (1 - interp) * Pn_ratio_1 + interp * Pn_ratio_25
+        eq_bear = 'J4.3.1 (linear interpolation)'
 
     limit_states.append({
         'name': 'Bearing/Tilting (J4.3.1)',
@@ -211,14 +214,14 @@ def screw_connection(t1: float, t2: float, d: float,
     })
 
     # (d) 풀오버 (J4.4.2)
-    dw = min(d * 2.0, 0.75)  # 와셔 직경 (보수적 추정)
-    Pnov = 0.85 * t2 * dw * Fu * n
+    dw = min(d * 2.0, 0.75)  # 유효 와셔 직경 보수 추정
+    Pnov = 1.5 * t1 * dw * Fu * n
     limit_states.append({
         'name': 'Pull-over (J4.4.2)',
         'Rn': round(Pnov, 3),
         'phi': PHI_SCREW['pullover'],
         'omega': OMEGA_SCREW['pullover'],
-        'formula': f'Pnov = 0.85×{t2}×{dw:.3f}×{Fu}×{n} = {Pnov:.3f}',
+        'formula': f'Pnov = 1.5×{t1}×{dw:.3f}×{Fu}×{n} = {Pnov:.3f}',
         'equation': 'J4.4.2-1',
     })
 
@@ -333,8 +336,8 @@ def arc_spot_weld_connection(t1: float, t2: float,
     t_min = min(t1, t2)
     limit_states = []
 
-    # 유효 직경: de = 0.7d - 1.5t ≥ 0.55d (J2.2.1)
-    de = max(0.7 * da - 1.5 * t_min, 0.55 * da)
+    # 유효 직경: de = min(0.7d - 1.5t, 0.55d)
+    de = min(max(0.7 * da - 1.5 * t_min, 0.0), 0.55 * da)
 
     # (a) 용접부 전단 (J2.2.1.1)
     Ae_weld = math.pi / 4 * de ** 2
@@ -476,29 +479,29 @@ def arc_seam_weld_connection(t1: float, t2: float,
     limit_states = []
 
     # 유효 너비
-    de = max(0.7 * d - 1.5 * t_min, 0.55 * d)
+    de = min(max(0.7 * d - 1.5 * t_min, 0.0), 0.55 * d)
 
     # (a) 용접부 전단 (J2.2.2.1)
-    # Rn = 0.75 × Fxx × (2.5t × L + π/4 × de²)  per seam
-    Ae_weld = 2.5 * t_min * L_seam + math.pi / 4 * de ** 2
+    # Rn = 0.75 × Fxx × (L×de + π/4 × de²) per seam
+    Ae_weld = L_seam * de + math.pi / 4 * de ** 2
     Rn_weld = 0.75 * Fxx * Ae_weld * n
     limit_states.append({
         'name': 'Weld Seam Shear (J2.2.2.1)',
         'Rn': round(Rn_weld, 3),
         'phi': 0.60,
         'omega': 2.50,
-        'formula': f'Rn = 0.75×{Fxx}×(2.5×{t_min}×{L_seam}+π/4×{de:.3f}²)×{n} = {Rn_weld:.3f}',
+        'formula': f'Rn = 0.75×{Fxx}×({L_seam}×{de:.3f}+π/4×{de:.3f}²)×{n} = {Rn_weld:.3f}',
         'equation': 'J2.2.2.1',
     })
 
     # (b) 모재 인열 (J2.2.2.1)
-    Rn_tear = 2.5 * t_min * Fu * (0.25 * L_seam + de) * n
+    Rn_tear = 2.5 * t_min * Fu * (0.25 * L_seam + 0.96 * d) * n
     limit_states.append({
         'name': 'Sheet Tear (J2.2.2.1)',
         'Rn': round(Rn_tear, 3),
         'phi': 0.60,
         'omega': 2.50,
-        'formula': f'Rn = 2.5×{t_min}×{Fu}×(0.25×{L_seam}+{de:.3f})×{n} = {Rn_tear:.3f}',
+        'formula': f'Rn = 2.5×{t_min}×{Fu}×(0.25×{L_seam}+0.96×{d})×{n} = {Rn_tear:.3f}',
         'equation': 'J2.2.2.1-2',
     })
 
@@ -526,8 +529,8 @@ def arc_seam_weld_connection(t1: float, t2: float,
 # ============================================================
 
 # PAF φ and Ω
-PHI_PAF = {'shear': 0.50, 'pullout': 0.50, 'pullover': 0.50}
-OMEGA_PAF = {'shear': 3.00, 'pullout': 3.00, 'pullover': 3.00}
+PHI_PAF = {'pin_shear': 0.60, 'bearing': 0.80, 'pullout': 0.50, 'pullover': 0.50}
+OMEGA_PAF = {'pin_shear': 2.65, 'bearing': 2.05, 'pullout': 3.00, 'pullover': 3.00}
 
 
 def paf_connection(t1: float, t2: float, d: float,
@@ -546,26 +549,26 @@ def paf_connection(t1: float, t2: float, d: float,
     """
     limit_states = []
 
-    # (a) 전단 지압 (J5.3.1) — 얇은 판 지배
-    Pns = 3.2 * t1 * d * Fu * n
+    # (a) 핀 전단 (J5.3.1)
+    Af = math.pi / 4 * d ** 2
+    Pns = 0.60 * Fuf * Af * n
     limit_states.append({
-        'name': 'Bearing (J5.3.1)',
+        'name': 'Pin Shear (J5.3.1)',
         'Rn': round(Pns, 3),
-        'phi': PHI_PAF['shear'],
-        'omega': OMEGA_PAF['shear'],
-        'formula': f'Pns = 3.2×{t1}×{d}×{Fu}×{n} = {Pns:.3f}',
+        'phi': PHI_PAF['pin_shear'],
+        'omega': OMEGA_PAF['pin_shear'],
+        'formula': f'Pns = 0.60×{Fuf}×{Af:.4f}×{n} = {Pns:.3f}',
         'equation': 'J5.3.1',
     })
 
-    # (b) 핀 전단 (J5.3.2)
-    Af = math.pi / 4 * d ** 2
-    Pnf = 0.50 * Fuf * Af * n
+    # (b) 지압/tilting (J5.3.2)
+    Pnf = 3.2 * t1 * d * Fu * n
     limit_states.append({
-        'name': 'Pin Shear (J5.3.2)',
+        'name': 'Bearing/Tilting (J5.3.2)',
         'Rn': round(Pnf, 3),
-        'phi': PHI_PAF['shear'],
-        'omega': OMEGA_PAF['shear'],
-        'formula': f'Pnf = 0.50×{Fuf}×{Af:.4f}×{n} = {Pnf:.3f}',
+        'phi': PHI_PAF['bearing'],
+        'omega': OMEGA_PAF['bearing'],
+        'formula': f'Pnf = 3.2×{t1}×{d}×{Fu}×{n} = {Pnf:.3f}',
         'equation': 'J5.3.2',
     })
 
@@ -658,7 +661,7 @@ def design_connection(params: dict) -> dict:
     elif conn_type == 'arc_spot':
         result = arc_spot_weld_connection(
             t1=t1, t2=t2,
-            da=params.get('da', 0.625),
+            da=params.get('da', params.get('d', 0.625)),
             Fy=Fy, Fu=Fu,
             Fxx=params.get('Fxx', 60),
             n=int(params.get('n', 1)),

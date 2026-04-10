@@ -51,7 +51,7 @@ def combined_bending_shear(M: float, Mao: float,
 
 def combined_bending_web_crippling(P: float, Pn: float,
                                     M: float, Mnfo: float,
-                                    phi: float = 0.75) -> dict:
+                                    phi: float = 0.90) -> dict:
     """휨 + 웹 크리플링 상호작용 검토 (§H3, Eq. H3-1)
 
     0.91(P/Pn) + (M/Mnfo) ≤ 1.33φ  (단일 비보강 웹)
@@ -68,4 +68,5 @@ def combined_bending_web_crippling(P: float, Pn: float,
         'limit': round(limit, 4),
         'pass': total <= limit,
         'equation': 'H3-1',
+        'applicability': 'single-unstiffened-web-only',
     }

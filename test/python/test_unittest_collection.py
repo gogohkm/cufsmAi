@@ -43,6 +43,10 @@ TEST_FUNCTIONS = (
         "test_deck_stiffness",
         "test_interaction_checks",
         "test_connection_bolt",
+        "test_shear_lag_design_strength_split",
+        "test_connection_arc_spot_uses_diameter_input",
+        "test_combined_requires_explicit_weak_axis_strength",
+        "test_lap_connection_uses_shared_connection_engine",
     )),
 )
 

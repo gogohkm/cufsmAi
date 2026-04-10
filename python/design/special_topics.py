@@ -1,17 +1,18 @@
 """AISI S100 특수 주제
 
-§D3: Shear Lag (전단지연)
-§D5: Block Shear (블록 전단)
-§A7.2: Cold Work of Forming (냉간가공 효과)
-§C3.1.4: Flange Curling (플랜지 컬링)
+J6.2: Shear Lag (전단지연)
+J6.3: Block Shear (블록 전단)
+A3.3.2: Cold Work of Forming (냉간가공 효과)
+L3: Flange Curling (플랜지 컬링 서비스성)
 """
 
 import math
 
 
 def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
-              Fu: float, Fy: float, design_method: str = 'LRFD') -> dict:
-    """전단지연 계수 및 유효 순단면적 (§D3, Eq. D3-1)
+              Fu: float, Fy: float, design_method: str = 'LRFD',
+              Usl: float = None, connection_case: str = 'generic') -> dict:
+    """전단지연 계수 및 유효 순단면적 (AISI J6.2 simplified)
 
     인장 부재에서 접합부가 전체 단면을 연결하지 않을 때
     비균일 응력 분포를 반영하는 감소계수
@@ -28,13 +29,20 @@ def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
     Returns:
         dict: {U, Ae, Tn_yield, Tn_rupture, Tn, phi_Tn, pass, steps}
     """
-    # Shear lag coefficient (Eq. D3-1)
-    if L_conn > 0:
+    warnings = []
+    if Usl is not None:
+        U = Usl
+    elif L_conn > 0:
         U = min(1.0, 1.0 - x_bar / L_conn)
+        warnings.append(
+            'Usl not provided; using generic 1 - x_bar/L_conn approximation. '
+            'Verify against AISI Table J6.2-1 for the actual connection case.'
+        )
     else:
         U = 1.0
+        warnings.append('L_conn <= 0; assuming Usl = 1.0.')
 
-    U = max(U, 0.0)
+    U = max(min(U, 1.0), 0.0)
 
     # Effective net area
     Ae = An_net * U
@@ -43,13 +51,16 @@ def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
     Tn_yield = Ag * Fy        # §D2.1 Yielding
     Tn_rupture = Ae * Fu      # §D3 Rupture with shear lag
 
-    Tn = min(Tn_yield, Tn_rupture)
+    if design_method == 'LRFD':
+        design_yield = 0.90 * Tn_yield
+        design_rupture = 0.75 * Tn_rupture
+    else:
+        design_yield = Tn_yield / 1.67
+        design_rupture = Tn_rupture / 2.00
 
-    phi = 0.90 if design_method == 'LRFD' else None
-    omega = 1.67 if design_method == 'ASD' else None
-    phi_Tn = phi * Tn if phi else Tn / omega
-
-    governing = 'Yielding (§D2)' if Tn == Tn_yield else 'Rupture with shear lag (§D3)'
+    phi_Tn = min(design_yield, design_rupture)
+    Tn = Tn_yield if design_yield <= design_rupture else Tn_rupture
+    governing = 'Yielding (§D2)' if design_yield <= design_rupture else 'Rupture with shear lag (§D3/J6.2)'
 
     return {
         'U': round(U, 4),
@@ -60,19 +71,24 @@ def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
         'Tn': round(Tn, 3),
         'phi_Tn': round(phi_Tn, 3),
         'governing': governing,
+        'connection_case': connection_case,
         'steps': [
             {'name': 'Shear Lag Coefficient', 'formula': f'U = 1 - x̄/L = 1 - {x_bar:.3f}/{L_conn:.3f} = {U:.4f}'},
             {'name': 'Effective Net Area', 'formula': f'Ae = An × U = {An_net:.4f} × {U:.4f} = {Ae:.4f} in²'},
             {'name': 'Yield Strength', 'formula': f'Tn_yield = Ag × Fy = {Ag:.4f} × {Fy:.1f} = {Tn_yield:.3f} kips'},
             {'name': 'Rupture Strength', 'formula': f'Tn_rupture = Ae × Fu = {Ae:.4f} × {Fu:.1f} = {Tn_rupture:.3f} kips'},
         ],
+        'warnings': warnings,
     }
 
 
 def block_shear(Agv: float, Anv: float, Ant: float,
                 Fy: float, Fu: float,
-                design_method: str = 'LRFD') -> dict:
-    """블록 전단 파단 강도 (§J7, Eq. J7-1)
+                design_method: str = 'LRFD',
+                Ubs: float = 1.0,
+                phi_factor: float = None,
+                omega_factor: float = None) -> dict:
+    """블록 전단 파단 강도 (AISI J6.3)
 
     Args:
         Agv: 전단면 총면적 (in²)
@@ -84,15 +100,15 @@ def block_shear(Agv: float, Anv: float, Ant: float,
     Returns:
         dict: {Rn, phi_Rn, steps}
     """
-    # Eq. J7-1: Rn = min(0.6Fy×Agv + Fu×Ant, 0.6Fu×Anv + Fu×Ant)
-    Rn1 = 0.6 * Fy * Agv + Fu * Ant  # Yield on shear + rupture on tension
-    Rn2 = 0.6 * Fu * Anv + Fu * Ant  # Rupture on shear + rupture on tension
+    # Eq. J6.3-1 / J6.3-2
+    Rn1 = 0.6 * Fy * Agv + Ubs * Fu * Ant
+    Rn2 = 0.6 * Fu * Anv + Ubs * Fu * Ant
 
     Rn = min(Rn1, Rn2)
     governing = 'Shear yield + tension rupture' if Rn == Rn1 else 'Shear rupture + tension rupture'
 
-    phi = 0.65 if design_method == 'LRFD' else None
-    omega = 2.50 if design_method == 'ASD' else None
+    phi = phi_factor if phi_factor is not None else (0.65 if design_method == 'LRFD' else None)
+    omega = omega_factor if omega_factor is not None else (2.50 if design_method == 'ASD' else None)
     phi_Rn = phi * Rn if phi else Rn / omega
 
     return {
@@ -101,10 +117,14 @@ def block_shear(Agv: float, Anv: float, Ant: float,
         'Rn2': round(Rn2, 3),
         'phi_Rn': round(phi_Rn, 3),
         'governing': governing,
+        'Ubs': Ubs,
         'steps': [
-            {'name': 'Path 1', 'formula': f'0.6Fy×Agv + Fu×Ant = 0.6×{Fy}×{Agv:.4f} + {Fu}×{Ant:.4f} = {Rn1:.3f} kips'},
-            {'name': 'Path 2', 'formula': f'0.6Fu×Anv + Fu×Ant = 0.6×{Fu}×{Anv:.4f} + {Fu}×{Ant:.4f} = {Rn2:.3f} kips'},
+            {'name': 'Path 1', 'formula': f'0.6Fy×Agv + Ubs×Fu×Ant = 0.6×{Fy}×{Agv:.4f} + {Ubs:.2f}×{Fu}×{Ant:.4f} = {Rn1:.3f} kips'},
+            {'name': 'Path 2', 'formula': f'0.6Fu×Anv + Ubs×Fu×Ant = 0.6×{Fu}×{Anv:.4f} + {Ubs:.2f}×{Fu}×{Ant:.4f} = {Rn2:.3f} kips'},
             {'name': 'Block Shear', 'formula': f'Rn = min({Rn1:.3f}, {Rn2:.3f}) = {Rn:.3f} kips'},
+        ],
+        'warnings': [] if (phi_factor is not None or omega_factor is not None) else [
+            'Using default connection resistance factors. Override phi_factor/omega_factor for connection-specific AISI J6.3 design.'
         ],
     }
 
@@ -216,8 +236,9 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
 
 
 def flange_curling(bf: float, t: float, h: float,
-                   f_avg: float, E: float = 29500) -> dict:
-    """플랜지 컬링 검토 (§C3.1.4)
+                   f_avg: float, E: float = 29500,
+                   allowable_cf: float = None) -> dict:
+    """플랜지 컬링 검토 (AISI L3 serviceability reference)
 
     넓은 플랜지에서 압축응력에 의한 플랜지 면외 변형
 
@@ -229,7 +250,7 @@ def flange_curling(bf: float, t: float, h: float,
         E: 탄성계수 (ksi)
 
     Returns:
-        dict: {cf, limit, ok}
+        dict: {cf, allowable_cf, ok}
     """
     if t <= 0 or E <= 0:
         return {'cf': 0, 'limit': 0, 'ok': True, 'note': 'Invalid input'}
@@ -237,17 +258,22 @@ def flange_curling(bf: float, t: float, h: float,
     # Eq. C3.1.4-1: cf = 0.061 × bf⁴ × f_avg / (E × t² × h)
     cf = 0.061 * bf ** 4 * abs(f_avg) / (E * t ** 2 * h) if h > 0 else 0
 
-    # Limit: cf ≤ 0.5t (recommended)
-    limit = 0.5 * t
+    # AISI는 고정 허용치를 제시하지 않으므로 기본값은 commentary-style reference만 둔다.
+    limit = allowable_cf if allowable_cf is not None else 0.05 * h
     ok = cf <= limit
 
     return {
         'cf': round(cf, 6),
-        'limit': round(limit, 6),
+        'allowable_cf': round(limit, 6),
         'ok': ok,
         'bf_over_t': round(bf / t, 1) if t > 0 else 0,
+        'criterion_type': 'serviceability',
         'steps': [
             {'name': 'Curling', 'formula': f'cf = 0.061 × {bf}⁴ × {abs(f_avg):.1f} / ({E} × {t}² × {h}) = {cf:.6f} in'},
-            {'name': 'Limit', 'formula': f'0.5t = {limit:.6f} in → {"OK" if ok else "NG"}'},
+            {'name': 'Allowable Curling', 'formula': f'cf_allow = {limit:.6f} in → {"OK" if ok else "NG"}'},
+        ],
+        'warnings': [] if allowable_cf is not None else [
+            'AISI L3 does not prescribe a universal allowable curling limit. '
+            'Defaulting to 5% of section depth as a serviceability reference.'
         ],
     }

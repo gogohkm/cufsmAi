@@ -346,28 +346,18 @@ def _design_flexure(params: dict) -> dict:
     Sf = props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
     if Sf <= 0:
         return {'error': 'Section modulus not available (Sf=0)'}
-
-    # §A3.3.2 냉간가공 효과: Fya > Fy (좌굴 미지배 시만)
     Fy_original = Fy
     cold_work_info = None
-    if params.get('use_cold_work', False):
-        from design.special_topics import cold_work_strength
-        R = props.get('R', 0) or params.get('R', 0) or params.get('r', 0)
-        t = props.get('t', 0) or params.get('t', 0)
-        if R > 0 and t > 0:
-            cw = cold_work_strength(Fyv=Fy, Fuv=Fu, R=R, t=t)
-            if cw['applicable'] and cw['Fya'] > Fy:
-                Fy = cw['Fya']
-                cold_work_info = cw
-
     dsm = params.get('dsm', {})
     Mcrl = dsm.get('Mcrl', 0)
     Mcrd = dsm.get('Mcrd', 0)
     My_dsm = dsm.get('My', 0)
-
+    warnings = []
     steps = []
     spec_sections = []
-    warnings = []
+    section_type = params.get('section_type', 'C')
+    Zf = props.get('Zx', 0) or props.get('Zf', 0)
+    use_ir = params.get('use_inelastic_reserve', False)
 
     if Mcrl == 0 and Mcrd == 0:
         warnings.append(
@@ -375,34 +365,126 @@ def _design_flexure(params: dict) -> dict:
             'FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).'
         )
 
-    # Step 1: My — DSM에서 전달된 My 우선 사용 (yieldMP 기반, Ixz 고려)
-    # Mcrl = LF × My_dsm 이므로, My도 동일한 My_dsm을 사용해야 λ가 일관됨
-    My = My_dsm if My_dsm > 0 else Sf * Fy
-    # Sf_eff: My와 일관된 유효 단면계수 (My_dsm/Fy, Ixz 고려)
-    Sf_eff = My / Fy if Fy > 0 else Sf
+    def _calc_flexure_state(Fy_eval: float, allow_ir: bool) -> dict:
+        scale = Fy_eval / Fy_original if Fy_original > 0 else 1.0
+        My = (My_dsm * scale) if My_dsm > 0 else (Sf * Fy_eval)
+        Sf_eff = My / Fy_eval if Fy_eval > 0 else Sf
+        Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type)
+        global_result = beam_global_strength(Fy_eval, Fcre, Sf_eff, Zf=Zf, use_inelastic_reserve=allow_ir)
+        Mne = global_result['Mne']
+
+        Mcrl_eff = Mcrl * scale if Mcrl > 0 else 0
+        if Mcrl_eff > 0:
+            local_result = flexure_local(Mne, Mcrl_eff)
+            Mnl = local_result['Mnl']
+        else:
+            local_result = {'lambda_l': 0, 'equation': 'N/A'}
+            Mnl = Mne
+
+        Mcrd_eff = Mcrd * scale if Mcrd > 0 else 0
+        Mcrd_source = 'FSM'
+        if Mcrd_eff == 0 and Sf > 0:
+            section = params.get('section', {})
+            ho = props.get('h_web', 0) or section.get('depth', 0)
+            bo = props.get('b_flange', 0) or section.get('flange_width', 0)
+            do = section.get('lip_depth', 0) or props.get('d_lip', 0)
+            t = props.get('t', 0) or section.get('thickness', 0)
+            sec_type = section.get('type', 'C')
+            kphi_ext = params.get('kphi', 0)
+            if ho > 0 and bo > 0 and t > 0 and do > 0:
+                try:
+                    from design.loads.distortional_params import calc_flange_properties, calc_Fcrd
+                    b_cl = bo - t
+                    d_cl = do - t / 2.0
+                    fp = calc_flange_properties(b_cl, d_cl, t, 90.0, sec_type)
+                    fcrd_result = calc_Fcrd(
+                        fp, ho, t,
+                        kphi_external=kphi_ext,
+                        beta=1.0,
+                        xi_web=2,
+                    )
+                    Fcrd_calc = fcrd_result['Fcrd']
+                    if Fcrd_calc > 0:
+                        Mcrd_eff = Fcrd_calc * Sf_eff
+                        Mcrd_source = '§2.3.3.3'
+                except Exception:
+                    pass
+
+        if Mcrd_eff > 0:
+            dist_result = flexure_distortional(My, Mcrd_eff)
+            Mnd = dist_result['Mnd']
+        else:
+            dist_result = {'lambda_d': 0, 'equation': 'N/A'}
+            Mnd = My
+
+        Mnfo = flexure_local(My, Mcrl_eff)['Mnl'] if Mcrl_eff > 0 else My
+        return {
+            'Fy': Fy_eval,
+            'My': My,
+            'Sf_eff': Sf_eff,
+            'Fcre': Fcre,
+            'global_result': global_result,
+            'Mne': Mne,
+            'Mcrl': Mcrl_eff,
+            'local_result': local_result,
+            'Mnl': Mnl,
+            'Mcrd': Mcrd_eff,
+            'Mcrd_source': Mcrd_source,
+            'dist_result': dist_result,
+            'Mnd': Mnd,
+            'Mnfo': Mnfo,
+        }
+
+    state = _calc_flexure_state(Fy_original, use_ir)
+    if params.get('use_cold_work', False):
+        from design.special_topics import cold_work_strength
+        R = props.get('R', 0) or params.get('R', 0) or params.get('r', 0)
+        t = props.get('t', 0) or params.get('t', 0)
+        if R > 0 and t > 0:
+            cold_work_info = cold_work_strength(Fyv=Fy_original, Fuv=Fu, R=R, t=t)
+            if use_ir:
+                warnings.append('§A3.3.2: Cold Work(Fya)와 §F2.4.2 Inelastic Reserve는 동시 적용 불가. Cold Work를 적용하지 않았습니다.')
+            elif cold_work_info['applicable'] and cold_work_info['Fya'] > Fy_original:
+                tol_local = max(1e-6 * max(state['Mne'], 1.0), 0.01)
+                tol_dist = max(1e-6 * max(state['My'], 1.0), 0.01)
+                if abs(state['Mnl'] - state['Mne']) <= tol_local and abs(state['Mnd'] - state['My']) <= tol_dist:
+                    Fy = cold_work_info['Fya']
+                    state = _calc_flexure_state(Fy, False)
+                else:
+                    warnings.append(
+                        '§A3.3.2 cold work requested, but local/distortional buckling still governs. '
+                        'Using virgin Fy.'
+                    )
+            else:
+                warnings.extend(cold_work_info.get('warnings', []))
+
+    Fy = state['Fy']
+    My = state['My']
+    Fcre = state['Fcre']
+    global_result = state['global_result']
+    Mne = state['Mne']
+    Mcrl = state['Mcrl']
+    local_result = state['local_result']
+    Mnl = state['Mnl']
+    Mcrd = state['Mcrd']
+    Mcrd_source = state['Mcrd_source']
+    dist_result = state['dist_result']
+    Mnd = state['Mnd']
+    Mnfo = state['Mnfo']
+
     steps.append({
         'step': 1, 'name': 'Yield Moment (My)',
         'value': round(My, 2), 'unit': 'kip-in',
-        'formula': f'My = {"DSM" if My_dsm > 0 else "Sf×Fy"} = {My:.2f} kip-in (Sf={Sf_eff:.4f})',
+        'formula': f'My = {"DSM-scaled" if My_dsm > 0 else "Sf×Fy"} = {My:.2f} kip-in (Sf={state["Sf_eff"]:.4f})',
     })
 
-    # Step 2: 전체좌굴 LTB (F2 / F2.4.2)
-    section_type = params.get('section_type', 'C')
-    Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type)
-    Zf = props.get('Zx', 0) or props.get('Zf', 0)  # 소성단면계수
-    use_ir = params.get('use_inelastic_reserve', False)
-    # §A3.3.2: Cold Work + Inelastic Reserve 동시 적용 불가
-    if use_ir and cold_work_info:
-        warnings.append('§A3.3.2: Cold Work(Fya)와 §F2.4.2 Inelastic Reserve는 동시 적용 불가. Inelastic Reserve에는 원래 Fy 사용.')
-        global_result = beam_global_strength(Fy_original, Fcre, Sf_eff, Zf=Zf,
-                                              use_inelastic_reserve=use_ir)
-    else:
-        global_result = beam_global_strength(Fy, Fcre, Sf_eff, Zf=Zf,
-                                              use_inelastic_reserve=use_ir)
-    Mne = global_result['Mne']
     spec_sections.append('F2')
     if global_result.get('inelastic_reserve'):
         spec_sections.append('F2.4.2')
+    if Mcrl > 0:
+        spec_sections.append('F3.2')
+    if Mcrd > 0:
+        spec_sections.append('F4')
 
     ir_note = ''
     if use_ir and Zf > 0:
@@ -410,7 +492,7 @@ def _design_flexure(params: dict) -> dict:
         if global_result.get('inelastic_reserve'):
             ir_note = f' [§F2.4.2 Inelastic Reserve: Mp={Mp:.2f} kip-in]'
         else:
-            ir_note = f' [§F2.4.2 not applicable: Mcre≤2.78My]'
+            ir_note = ' [§F2.4.2 not applicable]'
 
     steps.append({
         'step': 2, 'name': 'Global/LTB (Mne)',
@@ -419,80 +501,26 @@ def _design_flexure(params: dict) -> dict:
         'equation': global_result['equation'],
     })
 
-    # Step 3: 국부좌굴 (F3.2)
-    if Mcrl > 0:
-        local_result = flexure_local(Mne, Mcrl)
-        Mnl = local_result['Mnl']
-        spec_sections.append('F3.2')
-    else:
-        Mnl = Mne
-        local_result = {'lambda_l': 0, 'equation': 'N/A'}
-
     steps.append({
         'step': 3, 'name': 'Local Buckling (Mnl)',
         'value': round(Mnl, 2), 'unit': 'kip-in',
         'formula': (
             f'Mcrl = {Mcrl:.2f} kip-in, '
-            f'λl = √(Mne/Mcrl) = √({Mne:.2f} kip-in/{Mcrl:.2f} kip-in) = {local_result["lambda_l"]:.3f} '
-            f'{"≤" if local_result["lambda_l"] <= 0.776 else ">"} 0.776 → '
+            f'λl = √(Mne/Mcrl) = √({Mne:.2f}/{Mcrl:.2f}) = {local_result["lambda_l"]:.3f} → '
             f'Mnl = {Mnl:.2f} kip-in'
         ) if Mcrl > 0 else f'Mcrl = 0 → Mnl = Mne = {Mnl:.2f} kip-in',
         'equation': local_result['equation'],
     })
 
-    # Step 4: 왜곡좌굴 (F4)
-    # Mcrd=0 fallback: signature curve에서 뒤틀림 극소 미검출 시
-    # AISI Appendix 2, §2.3.3.3 해석적 공식으로 Fcrd 계산
-    Mcrd_source = 'FSM'
-    if Mcrd == 0 and Sf > 0:
-        section = params.get('section', {})
-        ho = props.get('h_web', 0) or section.get('depth', 0)
-        bo = props.get('b_flange', 0) or section.get('flange_width', 0)
-        do = section.get('lip_depth', 0) or props.get('d_lip', 0)
-        t = props.get('t', 0) or section.get('thickness', 0)
-        sec_type = section.get('type', 'C')
-        kphi_ext = params.get('kphi', 0)
-        if ho > 0 and bo > 0 and t > 0 and do > 0:
-            try:
-                from design.loads.distortional_params import (
-                    calc_flange_properties, calc_Fcrd
-                )
-                b_cl = bo - t        # centerline flange width
-                d_cl = do - t / 2.0  # centerline lip depth
-                fp = calc_flange_properties(b_cl, d_cl, t, 90.0, sec_type)
-                fcrd_result = calc_Fcrd(
-                    fp, ho, t,
-                    kphi_external=kphi_ext,
-                    beta=1.0,
-                    xi_web=2,  # pure bending
-                )
-                Fcrd_calc = fcrd_result['Fcrd']
-                if Fcrd_calc > 0:
-                    Mcrd = Fcrd_calc * Sf_eff
-                    Mcrd_source = '§2.3.3.3'
-                    warnings.append(
-                        f'Mcrd: signature curve에서 뒤틀림 극소 미검출 → '
-                        f'Appendix 2 §2.3.3.3 해석적 공식 사용 '
-                        f'(Fcrd={Fcrd_calc:.2f} ksi, Lcrd={fcrd_result["Lcrd"]} in)'
-                    )
-            except Exception:
-                pass  # 단면 정보 부족 시 Mcrd=0 유지
-
-    if Mcrd > 0:
-        dist_result = flexure_distortional(My, Mcrd)
-        Mnd = dist_result['Mnd']
-        spec_sections.append('F4')
-    else:
-        Mnd = My
-        dist_result = {'lambda_d': 0, 'equation': 'N/A'}
+    if Mcrd_source == '§2.3.3.3':
+        warnings.append('Mcrd: signature curve에서 뒤틀림 극소 미검출 → Appendix 2 §2.3.3.3 해석적 공식 사용')
 
     steps.append({
         'step': 4, 'name': 'Distortional Buckling (Mnd)',
         'value': round(Mnd, 2), 'unit': 'kip-in',
         'formula': (
             f'Mcrd = {Mcrd:.2f} kip-in ({Mcrd_source}), '
-            f'λd = √(My/Mcrd) = √({My:.2f} kip-in/{Mcrd:.2f} kip-in) = {dist_result["lambda_d"]:.3f} '
-            f'{"≤" if dist_result["lambda_d"] <= 0.673 else ">"} 0.673 → '
+            f'λd = √(My/Mcrd) = √({My:.2f}/{Mcrd:.2f}) = {dist_result["lambda_d"]:.3f} → '
             f'Mnd = {Mnd:.2f} kip-in'
         ) if Mcrd > 0 else f'Mcrd = 0 → Mnd = My = {Mnd:.2f} kip-in',
         'equation': dist_result['equation'],
@@ -622,13 +650,14 @@ def _design_flexure(params: dict) -> dict:
             from design.interaction import combined_bending_web_crippling
             # 집중하중 P = 소요 반력 (Vu를 사용하거나, Pu를 사용)
             Vu = params.get('Vu', 0) or params.get('Pu', 0)
-            h3 = combined_bending_web_crippling(Vu, Pn_wc, Mu, Mn, wc['phi'])
+            h3 = combined_bending_web_crippling(Vu, Pn_wc, Mu, Mnfo, 0.90)
             result['web_crippling'] = {
                 'Pn': round(Pn_wc, 2),
                 'support': wc_support,
                 'phi': wc['phi'],
             }
             result['h3_interaction'] = h3
+            result['Mnfo'] = round(Mnfo, 2)
             result['spec_sections'].append('G5')
             result['spec_sections'].append('H3')
 
@@ -669,24 +698,21 @@ def _design_combined(params: dict) -> dict:
     # 휨 설계 (y축 — 약축)
     props = params.get('props', {})
     Ag = props.get('A', 0)
-    Sy = props.get('Sy', 0) or props.get('Szz', 0)
     flex_y = None
-    if Muy > 0 and Sy > 0:
-        # 약축 휨: LTB 없음 → Mny = Sy × Fy (항복 지배)
-        Mny = Sy * Fy
-        phi_b = PHI['flexure']
-        omega_b = OMEGA['flexure']
-        if design_method == 'LRFD':
-            May_strength = phi_b * Mny
-        else:
-            May_strength = Mny / omega_b
+    May_strength = params.get('May_strength', 0)
+    if Muy > 0:
+        if May_strength <= 0:
+            return {
+                'error': 'Weak-axis flexure requires explicit May_strength. Automatic weak-axis DSM strength is not implemented.',
+                'member_type': 'combined',
+            }
         flex_y = {
-            'Mn': round(Mny, 2),
+            'Mn': round(May_strength, 2),
             'design_strength': round(May_strength, 2),
-            'controlling_mode': 'Yielding (weak axis)',
+            'controlling_mode': 'User-supplied weak-axis strength',
         }
     else:
-        May_strength = 1e10  # y축 휨 불필요
+        May_strength = 1e10
 
     # §C1 모멘트 증폭 (P-δ 효과)
     KxLx = params.get('KxLx', 120)
@@ -740,8 +766,8 @@ def _design_combined(params: dict) -> dict:
             'step': len(result['steps']) + 1,
             'name': 'Weak-axis Flexure (Mny)',
             'value': flex_y['Mn'], 'unit': 'kip-in',
-            'formula': f'Mny = Sy × Fy = {Sy:.4f} × {Fy} = {flex_y["Mn"]}',
-            'equation': 'F2 (yielding)',
+            'formula': f'May = {flex_y["Mn"]} kip-in (user-supplied available weak-axis strength)',
+            'equation': 'User input',
         })
 
     # 모멘트 증폭 정보

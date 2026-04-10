@@ -704,7 +704,7 @@ server.tool("get_energy_recovery", "Calculate element-wise strain energy (membra
 // AISI S100-16 설계 도구
 // ============================================================
 
-server.tool("aisi_design_compression", "AISI S100-16 DSM compression member design (Chapters E2, E3.2, E4)",
+server.tool("aisi_design_compression", "Run compression design on the current section model using current section properties and available DSM inputs (requires an active section in the extension session).",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
         Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
@@ -727,7 +727,7 @@ server.tool("aisi_design_compression", "AISI S100-16 DSM compression member desi
     }
 );
 
-server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Chapters F2, F3.2, F4, I6.2.1)",
+server.tool("aisi_design_flexure", "Run flexural design on the current section model using current section properties and available DSM inputs (requires an active section in the extension session).",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
         Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
@@ -751,7 +751,7 @@ server.tool("aisi_design_flexure", "AISI S100-16 DSM flexural member design (Cha
     }
 );
 
-server.tool("aisi_design_combined", "AISI S100-16 combined axial+bending design check (Chapter H1.2, C1 amplification)",
+server.tool("aisi_design_combined", "Run combined axial+bending design on the current section model. Requires an active section; weak-axis bending requires explicit available strength input.",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
         Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
@@ -766,9 +766,10 @@ server.tool("aisi_design_combined", "AISI S100-16 combined axial+bending design 
         Pu: z.number().describe("Required axial strength (kips)"),
         Mux: z.number().describe("Required moment about x-axis (kip-in)"),
         Muy: z.number().optional().describe("Required moment about y-axis (kip-in)"),
+        May_strength: z.number().optional().describe("Explicit available weak-axis flexural strength kip-in; required when Muy > 0 because weak-axis DSM reduction is not auto-derived"),
         Vu: z.number().optional().describe("Required shear (kips)"),
     },
-    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Lb, Cb, Cmx, Cmy, Pu, Mux, Muy, Vu }) => {
+    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Lb, Cb, Cmx, Cmy, Pu, Mux, Muy, May_strength, Vu }) => {
         const r = await callBridgePost('/action', {
             action: 'aisi_design',
             member_type: 'combined',
@@ -777,13 +778,14 @@ server.tool("aisi_design_combined", "AISI S100-16 combined axial+bending design 
             KxLx, KyLy, KtLt: KtLt ?? KyLy,
             Lb, Cb: Cb || 1.0,
             Cmx: Cmx || 0.85, Cmy: Cmy || 0.85,
-            Pu, Mux, Muy: Muy || 0, Vu: Vu || 0,
+            Pu, Mux, Muy: Muy || 0, May_strength,
+            Vu: Vu || 0,
         });
         return textResult(JSON.stringify(r, null, 2));
     }
 );
 
-server.tool("aisi_design_tension", "AISI S100-16 tension member design (Chapters D2, D3)",
+server.tool("aisi_design_tension", "Run tension design on the current section model using current section properties (requires an active section in the extension session).",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
         Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
@@ -803,7 +805,7 @@ server.tool("aisi_design_tension", "AISI S100-16 tension member design (Chapters
     }
 );
 
-server.tool("aisi_design_connection", "AISI S100-16 connection design (Chapter J) — bolt, screw, fillet/arc-spot/groove weld",
+server.tool("aisi_design_connection", "Run the project's Chapter J connection-design implementation for a single connection case.",
     {
         connection_type: z.enum(["bolt", "screw", "fillet_weld", "arc_spot", "arc_seam", "groove", "paf"]).describe("Connection type"),
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
@@ -862,7 +864,7 @@ server.tool("aisi_design_guide", "Get AISI S100-16 design workflow guide for AI 
     }
 );
 
-server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling strength calculation",
+server.tool("get_web_crippling", "Calculate a simplified single-web web-crippling case using the project implementation. This does not cover all AISI G5 table branches.",
     {
         h: z.number().describe("Web flat width (in)"),
         t: z.number().describe("Web thickness (in)"),
@@ -985,7 +987,7 @@ server.tool("design_purlin", "Complete purlin design: analyze loads → dual StC
 // ============================================================
 // Report Generation
 // ============================================================
-server.tool("generate_report", "Generate a comprehensive design report with all calculation details — section, buckling, loads, DSM design, and summary",
+server.tool("generate_report", "Collect the current session's section, buckling, optional load-analysis, and optional design data into a JSON report packet. This is not the full HTML report.",
     {
         member_type: z.enum(["compression", "flexure", "combined", "tension"]).optional().describe("Member type for design calculation"),
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("Design method (default LRFD)"),
@@ -1017,7 +1019,7 @@ server.tool("generate_report", "Generate a comprehensive design report with all 
     }
 );
 
-server.tool("validate_design", "Validate current design state — checks section geometry, material, DSM limits, analysis status, and returns pass/warn/fail for each item per AISI S100-16",
+server.tool("validate_design", "Collect current design-state data for validation. The returned JSON is session state, not a fully evaluated pass/warn/fail checklist.",
     {
         Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
     },
@@ -1033,7 +1035,7 @@ server.tool("validate_design", "Validate current design state — checks section
 // CONNECTION DESIGN (3 tools)
 // ============================================================
 server.tool("design_lap_connection",
-    "Design lap splice connection — calculate required fasteners (§J3, §J4, §I6.2.1(g))",
+    "Design lap splice connection using the project's current lap-splice implementation. This uses the shared connection engine plus §I6.2.1(g) lap checks.",
     {
         d: z.number().describe("Member depth in inches"),
         t: z.number().describe("Member thickness in inches"),
@@ -1067,7 +1069,7 @@ server.tool("check_lap_length",
 );
 
 server.tool("design_connection",
-    "Design a single connection per AISI Chapter J (7 types: bolt, screw, PAF, fillet/arc_spot/arc_seam/groove weld)",
+    "Run the project's single-connection design implementation for bolt/screw/PAF/weld cases.",
     {
         connection_type: z.enum(['bolt', 'screw', 'paf', 'fillet_weld', 'arc_spot', 'arc_seam', 'groove']).describe("Connection type"),
         t1: z.number().describe("Thickness of sheet 1 in inches"),
@@ -1089,7 +1091,7 @@ server.tool("design_connection",
 );
 
 server.tool("check_shear_lag",
-    "Calculate shear lag coefficient U and effective net area (§D3)",
+    "Calculate a generic shear-lag coefficient and effective net area using the project's simplified implementation. Verify against AISI Table J6.2-1 for connection-specific cases.",
     {
         Ag: z.number().describe("Gross area in²"),
         An_net: z.number().describe("Net area in² (holes deducted)"),
@@ -1097,6 +1099,8 @@ server.tool("check_shear_lag",
         L_conn: z.number().describe("Connection length in inches"),
         Fu: z.number().describe("Tensile strength ksi"),
         Fy: z.number().describe("Yield strength ksi"),
+        Usl: z.number().optional().describe("Optional explicit AISI shear-lag coefficient override"),
+        connection_case: z.string().optional().describe("Optional note such as flat-sheet, bolted-angle, welded-channel"),
     },
     async (params) => {
         const r = await callBridgePost('/action', { action: 'shear_lag', ...params });
@@ -1105,13 +1109,16 @@ server.tool("check_shear_lag",
 );
 
 server.tool("check_block_shear",
-    "Calculate block shear rupture strength (§J7)",
+    "Calculate block shear strength using the project's J6.3-style implementation. Provide Ubs/connection-specific factors externally if a detailed code check is required.",
     {
         Agv: z.number().describe("Gross shear area in²"),
         Anv: z.number().describe("Net shear area in²"),
         Ant: z.number().describe("Net tension area in²"),
         Fy: z.number().describe("Yield strength ksi"),
         Fu: z.number().describe("Tensile strength ksi"),
+        Ubs: z.number().optional().describe("Block-shear tension factor Ubs (default 1.0)"),
+        phi_factor: z.number().optional().describe("Optional connection-specific LRFD resistance factor override"),
+        omega_factor: z.number().optional().describe("Optional connection-specific ASD safety factor override"),
     },
     async (params) => {
         const r = await callBridgePost('/action', { action: 'block_shear', ...params });

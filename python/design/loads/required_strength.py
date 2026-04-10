@@ -150,6 +150,7 @@ def analyze_loads(
 
         unbraced = determine_unbraced_lengths(
             M_diag, x_diag, spans, laps,
+            laps_per_support=laps_per_support,
             deck_type=deck.get('type', 'none') if deck else 'none',
         )
         auto_params['unbraced'] = unbraced
@@ -165,27 +166,41 @@ def analyze_loads(
         # 부모멘트 영역: 비지지 (첫 번째 부모멘트 구간 대표)
         neg_regions = unbraced.get('negative_regions', [])
         if neg_regions:
-            nr = neg_regions[0]
-            auto_params['negative_region'] = {
+            nr = max(neg_regions, key=lambda r: r.get('Ly_in', 0))
+            auto_params['negative_regions'] = neg_regions
+            auto_params['negative_region_gov'] = {
                 'Ly_in': nr.get('Ly_in', 0),
                 'Lt_in': nr.get('Lt_in', 0),
                 'Cb': nr.get('Cb', 1.67),
                 'kphi': 0,  # 부모멘트: 하부 플랜지 비지지
             }
+            auto_params['negative_region'] = auto_params['negative_region_gov']
         else:
-            auto_params['negative_region'] = {
-                'Ly_in': span_ft * 12, 'Lt_in': span_ft * 12,
+            auto_params['negative_region_gov'] = {
+                'Ly_in': max(spans) * 12, 'Lt_in': max(spans) * 12,
                 'Cb': 1.0, 'kphi': 0,
             }
+            auto_params['negative_region'] = auto_params['negative_region_gov']
 
     # I6.2.1 양력 R 검증
     if section:
+        lap_lengths_in = []
+        if laps_per_support:
+            for lap in laps_per_support:
+                if not lap:
+                    continue
+                for key in ('left_ft', 'right_ft'):
+                    if lap.get(key, 0) > 0:
+                        lap_lengths_in.append(lap.get(key, 0) * 12)
+        elif laps:
+            for key in ('left_ft', 'right_ft'):
+                if laps.get(key, 0) > 0:
+                    lap_lengths_in.append(laps.get(key, 0) * 12)
         i621 = check_i621_conditions(
             section=section, Fy=section.get('Fy', 35.53),
-            Fu=section.get('Fu', 58.02), span_ft=span_ft,
+            Fu=section.get('Fu', 58.02), span_ft=max(spans),
             span_type='continuous' if n_spans > 1 else 'simple',
-            lap_length_in=min(laps.get('left_ft', 0), laps.get('right_ft', 0)) * 12
-            if laps else None,
+            lap_length_in=max(lap_lengths_in) if lap_lengths_in else None,
         )
         auto_params['uplift_R'] = i621.get('R')
         auto_params['i621_check'] = i621
@@ -225,12 +240,18 @@ def analyze_loads(
                         I_lap_ratio=2.0,
                     )
                     per_span = extract_max_deflection_per_span(svc_x, defl, spans)
+                    deflection_valid = not (
+                        any(abs(v) > 1e-8 for v in svc_M) and
+                        all(abs(d) < 1e-12 for d in defl)
+                    )
                     deflection_result = {
                         'combo': svc_name,
                         'D_diagram': defl,
                         'per_span': per_span,
                         'E_ksi': E_ksi,
                         'Ixx': Ixx,
+                        'valid': deflection_valid,
+                        'note': None if deflection_valid else 'FE deflection solve failed or returned a zero displacement field.',
                     }
 
     # 전체 조합 중 절대 최대 |M| 지배 조합 (gravity/uplift 구분 없음)

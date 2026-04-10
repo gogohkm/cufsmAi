@@ -421,6 +421,143 @@ def test_connection_bolt():
     return all_pass
 
 
+def test_shear_lag_design_strength_split():
+    """Shear lag는 항복/파단 저항계수를 분리 적용해야 한다."""
+    print('\n=== TEST: Shear Lag Design Strength Split ===')
+    from design.special_topics import shear_lag
+
+    result = shear_lag(
+        Ag=1.0,
+        An_net=0.5,
+        x_bar=0.25,
+        L_conn=2.0,
+        Fu=65,
+        Fy=50,
+        design_method='LRFD',
+    )
+
+    all_pass = True
+    expected_u = 1.0 - 0.25 / 2.0
+    expected_ae = 0.5 * expected_u
+    expected_rupture = expected_ae * 65.0
+    expected_design = 0.75 * expected_rupture
+    all_pass &= approx(result['U'], expected_u, label='U')
+    all_pass &= approx(result['Ae'], expected_ae, label='Ae')
+    all_pass &= approx(result['phi_Tn'], expected_design, label='phi_Tn uses D3 factor')
+    all_pass &= approx(1 if 'Rupture' in result['governing'] else 0, 1, label='Rupture governs')
+    return all_pass
+
+
+def test_connection_arc_spot_uses_diameter_input():
+    """Arc spot connection은 d 입력을 visible diameter로 반영해야 한다."""
+    print('\n=== TEST: Arc Spot Uses d Input ===')
+    from design.connections import design_connection
+
+    small = design_connection({
+        'connection_type': 'arc_spot',
+        't1': 0.06,
+        't2': 0.06,
+        'd': 0.5,
+        'Fy': 50,
+        'Fu': 65,
+        'n': 1,
+        'design_method': 'LRFD',
+    })
+    large = design_connection({
+        'connection_type': 'arc_spot',
+        't1': 0.06,
+        't2': 0.06,
+        'd': 0.75,
+        'Fy': 50,
+        'Fu': 65,
+        'n': 1,
+        'design_method': 'LRFD',
+    })
+
+    all_pass = True
+    all_pass &= approx(1 if large['design_strength'] > small['design_strength'] else 0, 1, label='larger da increases strength')
+    return all_pass
+
+
+def test_combined_requires_explicit_weak_axis_strength():
+    """약축 휨 조합설계는 명시적인 May_strength 없이 진행하면 안 된다."""
+    print('\n=== TEST: Combined Requires Explicit Weak-axis Strength ===')
+    from design.aisi_s100 import design_member
+
+    result = design_member({
+        'member_type': 'combined',
+        'design_method': 'LRFD',
+        'Fy': 50,
+        'Fu': 65,
+        'Pu': 5.0,
+        'Mux': 10.0,
+        'Muy': 3.0,
+        'KxLx': 120.0,
+        'KyLy': 120.0,
+        'KtLt': 120.0,
+        'Lb': 120.0,
+        'props': {
+            'A': 1.2,
+            'Sf': 2.0,
+            'Sxx': 2.0,
+            'Sy': 0.8,
+            'rx': 1.5,
+            'ry': 0.8,
+            'ro': 2.0,
+            'J': 0.01,
+            'Cw': 1.0,
+            'xo': 0.2,
+            'h_web': 6.0,
+            't': 0.08,
+        },
+        'dsm': {
+            'Pcrl': 80.0, 'Pcrd': 90.0, 'Py': 60.0,
+            'Mcrl': 150.0, 'Mcrd': 180.0, 'My': 100.0,
+        },
+    })
+
+    all_pass = True
+    all_pass &= approx(1 if 'May_strength' in (result.get('error') or '') else 0, 1, label='error requires May_strength')
+    return all_pass
+
+
+def test_lap_connection_uses_shared_connection_engine():
+    """Lap connection은 shared connection engine의 single-fastener strength를 사용해야 한다."""
+    print('\n=== TEST: Lap Connection Uses Shared Connection Engine ===')
+    from design.lap_connection import design_lap_connection
+    from design.connections import design_connection
+
+    lap = design_lap_connection({
+        'd': 8.0,
+        't': 0.059,
+        'Fy': 50,
+        'Fu': 65,
+        'lap_left_in': 14.0,
+        'lap_right_in': 14.0,
+        'Mu_support': 8.0,
+        'Vu_support': 2.0,
+        'fastener_type': 'screw',
+        'fastener_dia': 0.19,
+        'n_rows': 2,
+        'design_method': 'LRFD',
+    })
+    conn = design_connection({
+        'connection_type': 'screw',
+        'design_method': 'LRFD',
+        'Fy': 50,
+        'Fu': 65,
+        't1': 0.059,
+        't2': 0.059,
+        'd': 0.19,
+        'n': 1,
+    })
+
+    all_pass = True
+    all_pass &= approx(lap['Pns'], conn['design_strength'], label='lap Pns equals shared design strength')
+    all_pass &= approx(1 if lap.get('fastener_design') else 0, 1, label='shared design result attached')
+    return all_pass
+
+
 # ============================================================
 # 실행
 # ============================================================
@@ -441,6 +578,10 @@ if __name__ == '__main__':
         test_deck_stiffness,
         test_interaction_checks,
         test_connection_bolt,
+        test_shear_lag_design_strength_split,
+        test_connection_arc_spot_uses_diameter_input,
+        test_combined_requires_explicit_weak_axis_strength,
+        test_lap_connection_uses_shared_connection_engine,
     ]
 
     results = {}
