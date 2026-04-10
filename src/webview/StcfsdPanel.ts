@@ -1980,10 +1980,10 @@ export class StcfsdPanel implements McpPanelInterface {
             <div class="panel-left" style="max-width:380px">
 
                 <!-- ── Lap Splice ── -->
-                <div class="collapsible" onclick="this.classList.toggle('open');this.nextElementSibling.style.display=this.classList.contains('open')?'block':'none'">
-                    <span style="font-size:11px">▶</span> Lap Splice 접합부 <span class="hint-inline">§I6.2.1, §J3, §J4</span>
+                <div class="conn-collapsible" data-expanded="false" style="cursor:pointer;padding:4px 6px;font-weight:600;border-bottom:1px solid var(--vscode-panel-border)">
+                    <span class="conn-collapse-icon" style="font-size:11px">▶</span> Lap Splice 접합부 <span class="hint-inline">§I6.2.1, §J3, §J4</span>
                 </div>
-                <div style="display:none;padding:4px 0 8px 0">
+                <div class="conn-collapse-body" style="display:none;padding:4px 0 8px 0">
                     <p class="hint" style="margin-bottom:6px">연속 경간 Lap의 패스너 개수/배치를 산정합니다.</p>
                     <div class="input-row"><label style="min-width:56px;text-align:right">좌측 Lap</label><input type="number" id="conn-lap-left" value="305" step="10" style="width:72px"><span class="hint-inline conn-unit-length"></span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">우측 Lap</label><input type="number" id="conn-lap-right" value="305" step="10" style="width:72px"><span class="hint-inline conn-unit-length"></span></div>
@@ -1998,10 +1998,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 </div>
 
                 <!-- ── 단일 접합부 ── -->
-                <div class="collapsible open" onclick="this.classList.toggle('open');this.nextElementSibling.style.display=this.classList.contains('open')?'block':'none'">
-                    <span style="font-size:11px">▼</span> 단일 접합부 설계 <span class="hint-inline">Chapter J — 7종</span>
+                <div class="conn-collapsible" data-expanded="true" style="cursor:pointer;padding:4px 6px;font-weight:600;border-bottom:1px solid var(--vscode-panel-border)">
+                    <span class="conn-collapse-icon" style="font-size:11px">▼</span> 단일 접합부 설계 <span class="hint-inline">Chapter J — 7종</span>
                 </div>
-                <div style="padding:4px 0 8px 0">
+                <div class="conn-collapse-body" style="padding:4px 0 8px 0">
                     <div class="input-row" style="margin-bottom:6px">
                         <label style="min-width:56px;text-align:right">유형</label>
                         <select id="conn-single-type" style="font-size:12px;flex:1">

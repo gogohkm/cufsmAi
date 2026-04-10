@@ -654,6 +654,20 @@
     // 트리 네비게이션 — showSection
     // ============================================================
     // ============================================================
+    // 접합부 탭 — Collapsible 토글 (CSP 호환)
+    // ============================================================
+    document.querySelectorAll('#tab-connection .conn-collapsible').forEach(hdr => {
+        hdr.addEventListener('click', () => {
+            const body = hdr.nextElementSibling;
+            if (!body) return;
+            const expanded = hdr.dataset.expanded === 'true';
+            body.style.display = expanded ? 'none' : 'block';
+            const icon = hdr.querySelector('.conn-collapse-icon');
+            if (icon) icon.textContent = expanded ? '▶' : '▼';
+            hdr.dataset.expanded = String(!expanded);
+        });
+    });
+
     // 접합부 탭 — Lap 접합부 + 단일 접합부
     // ============================================================
     const btnLapDesign = document.getElementById('btn-run-lap-design');
@@ -806,7 +820,7 @@
     // 접합부 SVG 다이어그램
     // ============================================================
     function _drawLapSvg(r) {
-        const w = 320, h = 120;
+        const w = 480, h = 180;
         const fg = 'var(--vscode-foreground)';
         const accent = '#4fc3f7';
         const warn = '#ff5722';
@@ -863,7 +877,7 @@
 
     function _drawConnectionSvg(r) {
         const ct = r.connection_type || '';
-        const w = 280, h = 140;
+        const w = 420, h = 210;
         const fg = 'var(--vscode-foreground)';
         const blue = '#4fc3f7';
         const green = '#81c784';
@@ -2096,10 +2110,28 @@
         if (!selLen || !selMode) { return; }
 
         selLen.innerHTML = '';
+        // DSM에서 min(Mcrl, Mcrd) 반파장 → 기본 선택 인덱스
+        let defaultLenIdx = 0;
+        const dsmM = lastDsmResult && lastDsmResult.Mxx;
+        if (dsmM) {
+            const lcrl = dsmM.Lcrl || Infinity;
+            const lcrd = dsmM.Lcrd || Infinity;
+            const targetLen = Math.min(lcrl, lcrd);
+            if (isFinite(targetLen) && targetLen > 0) {
+                let bestDist = Infinity;
+                analysisResult.curve.forEach((row, i) => {
+                    if (row) {
+                        const dist = Math.abs(row[0] - targetLen);
+                        if (dist < bestDist) { bestDist = dist; defaultLenIdx = i; }
+                    }
+                });
+            }
+        }
         analysisResult.curve.forEach((row, i) => {
             const opt = document.createElement('option');
             opt.value = i;
             opt.textContent = row ? fmtVal(row[0], 'length') : i;
+            if (i === defaultLenIdx) opt.selected = true;
             selLen.appendChild(opt);
         });
 
@@ -2561,7 +2593,8 @@
                 html += '<td style="padding:2px 3px"><select class="span-tbl-sup" data-idx="' + i + '" style="width:100%;font-size:10px;padding:2px 4px">' + supOptions + '</select></td>';
                 // 스팬 길이 (지점 i 오른쪽 스팬, 마지막 지점에는 없음)
                 if (i < n) {
-                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-len" data-idx="' + i + '" value="16.404" step="0.5" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
+                    const defSpan = toDisplay(16.404, 'length_ft').toFixed(unitDec('length_ft'));
+                    html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-len" data-idx="' + i + '" value="' + defSpan + '" step="0.5" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }

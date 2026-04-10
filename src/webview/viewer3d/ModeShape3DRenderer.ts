@@ -44,11 +44,15 @@ export class ModeShape3DRenderer {
 
     // 마우스 회전 상태
     private _isDragging = false;
+    private _isPanning = false;
     private _lastMouseX = 0;
     private _lastMouseY = 0;
     private _rotX = -0.5;
     private _rotY = 0.4;
     private _distance = 30;
+    private _targetX = 0;
+    private _targetY = 0;
+    private _targetZ = 0;
 
     constructor(canvas: HTMLCanvasElement) {
         this._canvas = canvas;
@@ -125,9 +129,12 @@ export class ModeShape3DRenderer {
         // 반파당 최소 4개 샘플 보장 (앨리어싱 방지)
         const nSteps = Math.max(20, nHalfWaves * 4);
 
-        // 카메라 거리: 실제 치수 기반
+        // 카메라: 실제 치수 기반 자동 조정
         const diagonal = Math.sqrt(sectionSize * sectionSize + displayLength * displayLength);
-        this._distance = diagonal * 1.2;
+        this._distance = diagonal * 1.5;
+        this._targetX = 0;
+        this._targetY = 0;
+        this._targetZ = displayLength / 2; // 부재 중앙을 바라봄
 
         // 변위 추출
         const uDisp: number[] = [];
@@ -281,37 +288,74 @@ export class ModeShape3DRenderer {
 
     private _updateCamera(): void {
         if (!this._camera) { return; }
-        const x = this._distance * Math.cos(this._rotY) * Math.sin(this._rotX);
-        const y = this._distance * Math.sin(this._rotY);
-        const z = this._distance * Math.cos(this._rotY) * Math.cos(this._rotX);
+        const x = this._targetX + this._distance * Math.cos(this._rotY) * Math.sin(this._rotX);
+        const y = this._targetY + this._distance * Math.sin(this._rotY);
+        const z = this._targetZ + this._distance * Math.cos(this._rotY) * Math.cos(this._rotX);
         this._camera.position = new Vector3(x, y, z);
-        this._camera.setTarget(Vector3.Zero());
+        this._camera.setTarget(new Vector3(this._targetX, this._targetY, this._targetZ));
     }
 
     private _setupMouseControls(): void {
         this._canvas.addEventListener('pointerdown', (e: PointerEvent) => {
-            this._isDragging = true;
+            // 우클릭 또는 Shift+좌클릭 → 팬, 좌클릭 → 회전
+            if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
+                this._isPanning = true;
+                this._isDragging = false;
+            } else if (e.button === 0) {
+                this._isDragging = true;
+                this._isPanning = false;
+            }
             this._lastMouseX = e.clientX;
             this._lastMouseY = e.clientY;
+            e.preventDefault();
         });
 
         this._canvas.addEventListener('pointermove', (e: PointerEvent) => {
-            if (!this._isDragging) { return; }
             const dx = e.clientX - this._lastMouseX;
             const dy = e.clientY - this._lastMouseY;
-            this._rotX += dx * 0.01;
-            this._rotY = Math.max(-1.5, Math.min(1.5, this._rotY + dy * 0.01));
             this._lastMouseX = e.clientX;
             this._lastMouseY = e.clientY;
+
+            if (this._isDragging) {
+                // 회전
+                this._rotX += dx * 0.005;
+                this._rotY = Math.max(-1.5, Math.min(1.5, this._rotY + dy * 0.005));
+            } else if (this._isPanning) {
+                // 팬 — 카메라 평면 기준 이동
+                const panSpeed = this._distance * 0.002;
+                const sinR = Math.sin(this._rotX);
+                const cosR = Math.cos(this._rotX);
+                this._targetX += (-dx * cosR) * panSpeed;
+                this._targetZ += (dx * sinR) * panSpeed;
+                this._targetY += dy * panSpeed;
+            }
         });
 
-        this._canvas.addEventListener('pointerup', () => { this._isDragging = false; });
-        this._canvas.addEventListener('pointerleave', () => { this._isDragging = false; });
+        this._canvas.addEventListener('pointerup', () => {
+            this._isDragging = false;
+            this._isPanning = false;
+        });
+        this._canvas.addEventListener('pointerleave', () => {
+            this._isDragging = false;
+            this._isPanning = false;
+        });
+
+        // 우클릭 컨텍스트 메뉴 방지
+        this._canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
         this._canvas.addEventListener('wheel', (e: WheelEvent) => {
             this._distance *= e.deltaY > 0 ? 1.1 : 0.9;
-            this._distance = Math.max(1, Math.min(10000, this._distance));
+            this._distance = Math.max(0.5, Math.min(50000, this._distance));
             e.preventDefault();
+        });
+
+        // 더블클릭 → 뷰 초기화
+        this._canvas.addEventListener('dblclick', () => {
+            this._targetX = 0;
+            this._targetY = 0;
+            this._targetZ = 0;
+            this._rotX = -0.5;
+            this._rotY = 0.4;
         });
     }
 
