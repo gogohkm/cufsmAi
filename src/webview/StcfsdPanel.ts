@@ -221,6 +221,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (message.data.m_all) this._model.m_all = message.data.m_all;
                     if (message.data.BC) this._model.BC = message.data.BC;
                     if (message.data.neigs) this._model.neigs = message.data.neigs;
+                    if (message.data.loadCase) (this._model as any).loadCase = message.data.loadCase;
                 }
                 await this._runAnalysis(this._model);
                 break;
@@ -728,6 +729,22 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'set_stress': {
                 await this._applyStressToModel(this._model as any, options);
+                // stress 타입에서 loadCase 추론 (해석탭에서 setStress만 보내는 경우 대비)
+                if (options.type === 'uniform_compression') {
+                    (this._model as any).loadCase = 'compression';
+                } else if (options.type === 'pure_bending') {
+                    (this._model as any).loadCase = 'bending_xx_pos';
+                } else if (options.type === 'custom') {
+                    if (options.P && !options.Mxx && !options.Mzz) {
+                        (this._model as any).loadCase = 'compression';
+                    } else if (options.Mxx && !options.P) {
+                        (this._model as any).loadCase = options.Mxx > 0 ? 'bending_xx_pos' : 'bending_xx_neg';
+                    } else if (options.Mzz && !options.P) {
+                        (this._model as any).loadCase = options.Mzz > 0 ? 'bending_zz_pos' : 'bending_zz_neg';
+                    } else {
+                        (this._model as any).loadCase = 'custom';
+                    }
+                }
                 this._invalidateAnalysisState('Stress distribution changed');
                 this._postMessage('modelLoaded', this._model);
                 return { success: true };
@@ -775,7 +792,7 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'prepare_design_dsm': {
-                const fy = options.fy || 35.53;
+                const fy = options.fy || options.Fy || 35.53;
                 const memberType = String(options.member_type || 'flexure');
                 if (!this._model.node?.length || !this._model.elem?.length) {
                     return { error: 'No section model available. Generate or load a section first.' };
@@ -982,12 +999,12 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (this._preparedDsmMatchesCurrent(designFy)) {
                     const prepared = this._preparedDesignDsm || {};
                     dsmValues = {
-                        Pcrl: prepared.P?.Pcrl ?? 0,
-                        Pcrd: prepared.P?.Pcrd ?? 0,
-                        Py: prepared.P?.Py ?? 0,
-                        Mcrl: prepared.Mxx?.Mxxcrl ?? 0,
-                        Mcrd: prepared.Mxx?.Mxxcrd ?? 0,
-                        My: prepared.Mxx?.My_xx ?? 0,
+                        Pcrl: prepared.P?.crl ?? 0,
+                        Pcrd: prepared.P?.crd ?? 0,
+                        Py: prepared.P?.P_y ?? 0,
+                        Mcrl: prepared.Mxx?.crl ?? 0,
+                        Mcrd: prepared.Mxx?.crd ?? 0,
+                        My: prepared.Mxx?.P_y ?? 0,
                     };
                 } else if (!this._isAnalysisCurrent()) {
                     dsmWarning = 'No analysis results. Run FSM analysis first or use "설계용 FSM 해석 준비" to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
@@ -1011,12 +1028,12 @@ export class StcfsdPanel implements McpPanelInterface {
                             });
                         }
                         dsmValues = {
-                            Pcrl: dsmP?.Pcrl ?? 0,
-                            Pcrd: dsmP?.Pcrd ?? 0,
-                            Py: dsmP?.Py ?? 0,
-                            Mcrl: dsmM?.Mxxcrl ?? 0,
-                            Mcrd: dsmM?.Mxxcrd ?? 0,
-                            My: dsmM?.My_xx ?? 0,
+                            Pcrl: dsmP?.crl ?? 0,
+                            Pcrd: dsmP?.crd ?? 0,
+                            Py: dsmP?.P_y ?? 0,
+                            Mcrl: dsmM?.crl ?? 0,
+                            Mcrd: dsmM?.crd ?? 0,
+                            My: dsmM?.P_y ?? 0,
                         };
                         const missingFamilies: string[] = [];
                         if (!this._analysisSupportsDsmLoadType('P')) { missingFamilies.push('compression'); }
@@ -1373,9 +1390,9 @@ export class StcfsdPanel implements McpPanelInterface {
                         Mu: posMu,
                         props: mergedProps,
                         dsm: {
-                            Mcrl: dsmPos?.Mxxcrl ?? 0,
-                            Mcrd: dsmPos?.Mxxcrd ?? 0,
-                            My: dsmPos?.My_xx ?? 0,
+                            Mcrl: dsmPos?.crl ?? 0,
+                            Mcrd: dsmPos?.crd ?? 0,
+                            My: dsmPos?.P_y ?? 0,
                         },
                     });
                 }
@@ -1390,9 +1407,9 @@ export class StcfsdPanel implements McpPanelInterface {
                         Mu: negMu,
                         props: mergedProps,
                         dsm: {
-                            Mcrl: dsmNeg?.Mxxcrl ?? 0,
-                            Mcrd: dsmNeg?.Mxxcrd ?? 0,
-                            My: dsmNeg?.My_xx ?? 0,
+                            Mcrl: dsmNeg?.crl ?? 0,
+                            Mcrd: dsmNeg?.crd ?? 0,
+                            My: dsmNeg?.P_y ?? 0,
                         },
                     });
                 }
@@ -1410,9 +1427,9 @@ export class StcfsdPanel implements McpPanelInterface {
                         Mu: 0,  // 이용률 불필요
                         props: mergedProps,
                         dsm: {
-                            Mcrl: dsmNeg?.Mxxcrl ?? 0,
+                            Mcrl: dsmNeg?.crl ?? 0,
                             Mcrd: 0,  // 뒤틀림 제외
-                            My: dsmNeg?.My_xx ?? 0,
+                            My: dsmNeg?.P_y ?? 0,
                         },
                     });
                     // Lap에서 2개 부재 겹침 → 강도 합산
@@ -1974,7 +1991,7 @@ export class StcfsdPanel implements McpPanelInterface {
             <div class="section-group">
                 <label>고유치 수</label>
                 <p class="hint">각 반파장에서 계산할 좌굴 모드 수. 1차 모드가 가장 중요합니다.</p>
-                <input type="number" id="input-neigs" value="20" step="1">
+                <input type="number" id="input-neigs" value="10" step="1">
             </div>
             <div class="section-group">
                 <label>cFSM 모드 분류</label>

@@ -1361,12 +1361,12 @@ def _auto_generate_props(params: dict) -> dict:
                 dsmM = extract_dsm_values(result_m.curve, node_m, elem, Fy, 'Mxx')
 
                 params['dsm'] = {
-                    'Pcrl': dsmP.get('Pcrl', 0),
-                    'Pcrd': dsmP.get('Pcrd', 0),
-                    'Py': dsmP.get('Py', 0),
-                    'Mcrl': dsmM.get('Mxxcrl', 0),
-                    'Mcrd': dsmM.get('Mxxcrd', 0),
-                    'My': dsmM.get('My_xx', 0),
+                    'Pcrl': dsmP.get('crl', 0),
+                    'Pcrd': dsmP.get('crd', 0),
+                    'Py': dsmP.get('P_y', 0),
+                    'Mcrl': dsmM.get('crl', 0),
+                    'Mcrd': dsmM.get('crd', 0),
+                    'My': dsmM.get('P_y', 0),
                 }
             except Exception as e:
                 print(f'[StCFSD] Auto DSM failed: {e}')

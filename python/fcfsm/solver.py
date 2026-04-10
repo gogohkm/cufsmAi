@@ -23,7 +23,7 @@ from scipy import sparse
 
 def stripmain_fcfsm(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
                     lengths: np.ndarray, BC: str, m_all: list,
-                    neigs: int = 20) -> dict:
+                    neigs: int = 10) -> dict:
     """fcFSM 좌굴 해석 + 모드 분류
 
     Returns:

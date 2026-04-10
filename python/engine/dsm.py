@@ -149,18 +149,24 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
 
         # 국부 좌굴
         f'{label}crl': Pcrl,
+        'crl': Pcrl,
         'Lcrl': Lcrl,
         'LF_local': Pcrl / P_ref if P_ref > 0 else 0,
 
         # 뒤틀림 좌굴
         f'{label}crd': Pcrd,
+        'crd': Pcrd,
         'Lcrd': Lcrd,
         'LF_dist': Pcrd / P_ref if P_ref > 0 else 0,
 
         # 전체 좌굴
         f'{label}cre': Pcre,
+        'cre': Pcre,
         'Lcre': Lcre,
         'LF_global': Pcre / P_ref if P_ref > 0 else 0,
+
+        # 기준 항복값 (load_type에 무관한 정규화 키)
+        'P_y': P_ref,
 
         # 극소점 목록
         'minima': minima,
@@ -176,8 +182,9 @@ def _empty_result(Py, My_xx, My_zz, label, P_ref):
         'Py': Py, 'My_xx': My_xx, 'My_zz': My_zz,
         'A': 0, 'Ixx': 0, 'Izz': 0,
         'load_type': label, 'P_ref': P_ref,
-        f'{label}crl': 0, 'Lcrl': 0, 'LF_local': 0,
-        f'{label}crd': 0, 'Lcrd': 0, 'LF_dist': 0,
-        f'{label}cre': 0, 'Lcre': 0, 'LF_global': 0,
+        f'{label}crl': 0, 'crl': 0, 'Lcrl': 0, 'LF_local': 0,
+        f'{label}crd': 0, 'crd': 0, 'Lcrd': 0, 'LF_dist': 0,
+        f'{label}cre': 0, 'cre': 0, 'Lcre': 0, 'LF_global': 0,
+        'P_y': P_ref,
         'minima': [], 'n_minima': 0,
     }

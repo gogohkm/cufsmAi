@@ -85,7 +85,7 @@ class CufsmModel:
     BC: str = 'S-S'           # 경계조건
     m_all: list = field(default_factory=list)   # list[np.ndarray]
     GBTcon: GBTConfig = field(default_factory=GBTConfig)
-    neigs: int = 20
+    neigs: int = 10
 
     @property
     def nnodes(self) -> int:
@@ -129,7 +129,7 @@ class CufsmModel:
             BC=d.get('BC', 'S-S'),
             m_all=[np.array(m, dtype=float) for m in d.get('m_all', [])],
             GBTcon=GBTConfig.from_dict(d.get('GBTcon', {})),
-            neigs=d.get('neigs', 20),
+            neigs=d.get('neigs', 10),
         )
 
     def to_json(self) -> str:

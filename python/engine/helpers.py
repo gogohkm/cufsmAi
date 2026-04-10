@@ -245,7 +245,7 @@ def master_slave(master: int, slave_nodes: list,
 
 
 def signature_ss(prop: np.ndarray, node: np.ndarray,
-                 elem: np.ndarray, neigs: int = 20) -> dict:
+                 elem: np.ndarray, neigs: int = 10) -> dict:
     """시그니처 곡선 계산 (S-S 경계조건)
 
     Args:

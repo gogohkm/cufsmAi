@@ -31,7 +31,7 @@ from models.data import CufsmResult, GBTConfig
 def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
               lengths: np.ndarray, springs: np.ndarray,
               constraints: np.ndarray, GBTcon, BC: str,
-              m_all: list, neigs: int = 20) -> CufsmResult:
+              m_all: list, neigs: int = 10) -> CufsmResult:
     """FSM 좌굴 해석 메인 루틴
 
     Args:

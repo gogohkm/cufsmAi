@@ -102,6 +102,6 @@ export function createDefaultModel(): StcfsdModel {
             glob: [], dist: [], local: [], other: [],
             ospace: 1, orth: 1, couple: 1, norm: 0,
         },
-        neigs: 20,
+        neigs: 10,
     };
 }

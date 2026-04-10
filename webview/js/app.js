@@ -642,17 +642,17 @@
         if (dsmP) {
             html += _dsmHeader('Compression (' + fU + ')');
             html += _dsmRow('Py', dsmP.Py, 'force', '', '', '');
-            html += _dsmRow('Pcrl (local)', dsmP.Pcrl, 'force', dsmP.Lcrl, 'length', dsmP.LF_local);
-            html += _dsmRow('Pcrd (distortional)', dsmP.Pcrd, 'force', dsmP.Lcrd, 'length', dsmP.LF_dist);
-            html += _dsmRow('Pcre (global)', dsmP.Pcre, 'force', dsmP.Lcre, 'length', dsmP.LF_global);
+            html += _dsmRow('Pcrl (local)', dsmP.crl, 'force', dsmP.Lcrl, 'length', dsmP.LF_local);
+            html += _dsmRow('Pcrd (distortional)', dsmP.crd, 'force', dsmP.Lcrd, 'length', dsmP.LF_dist);
+            html += _dsmRow('Pcre (global)', dsmP.cre, 'force', dsmP.Lcre, 'length', dsmP.LF_global);
         }
 
         if (dsmM) {
             html += _dsmHeader('Bending (' + mU + ')');
-            html += _dsmRow('My', dsmM.My_xx, 'moment', '', '', '');
-            html += _dsmRow('Mcrl (local)', dsmM.Mxxcrl, 'moment', dsmM.Lcrl, 'length', dsmM.LF_local);
-            html += _dsmRow('Mcrd (distortional)', dsmM.Mxxcrd, 'moment', dsmM.Lcrd, 'length', dsmM.LF_dist);
-            html += _dsmRow('Mcre (global)', dsmM.Mxxcre, 'moment', dsmM.Lcre, 'length', dsmM.LF_global);
+            html += _dsmRow('My', dsmM.P_y, 'moment', '', '', '');
+            html += _dsmRow('Mcrl (local)', dsmM.crl, 'moment', dsmM.Lcrl, 'length', dsmM.LF_local);
+            html += _dsmRow('Mcrd (distortional)', dsmM.crd, 'moment', dsmM.Lcrd, 'length', dsmM.LF_dist);
+            html += _dsmRow('Mcre (global)', dsmM.cre, 'moment', dsmM.Lcre, 'length', dsmM.LF_global);
         }
 
         html += '</table>';
@@ -1125,10 +1125,10 @@
             Sx: lastProps ? _ruv(lastProps.Sx, 'modulus') : '',
             rx: lastProps ? _ruv(lastProps.rx, 'length') : '',
             rz: lastProps ? _ruv(lastProps.rz, 'length') : '',
-            Pcrl: lastDsmResult && lastDsmResult.P ? _ruv(lastDsmResult.P.Pcrl, 'force') : '',
-            Pcrd: lastDsmResult && lastDsmResult.P ? _ruv(lastDsmResult.P.Pcrd, 'force') : '',
-            Mcrl: lastDsmResult && lastDsmResult.Mxx ? _ruv(lastDsmResult.Mxx.Mxxcrl, 'moment') : '',
-            Mcrd: lastDsmResult && lastDsmResult.Mxx ? _ruv(lastDsmResult.Mxx.Mxxcrd, 'moment') : '',
+            Pcrl: lastDsmResult && lastDsmResult.P ? _ruv(lastDsmResult.P.crl, 'force') : '',
+            Pcrd: lastDsmResult && lastDsmResult.P ? _ruv(lastDsmResult.P.crd, 'force') : '',
+            Mcrl: lastDsmResult && lastDsmResult.Mxx ? _ruv(lastDsmResult.Mxx.crl, 'moment') : '',
+            Mcrd: lastDsmResult && lastDsmResult.Mxx ? _ruv(lastDsmResult.Mxx.crd, 'moment') : '',
             memberType: selM ? selM.options[selM.selectedIndex]?.text || '' : '',
             spanType: selS ? selS.options[selS.selectedIndex]?.text || '' : '',
             designMethod: dm ? dm.value : 'LRFD',
@@ -1720,7 +1720,7 @@
             const lenMin = fromDisplay(getNum('input-len-min', 0.394), 'length');
             const lenMax = fromDisplay(getNum('input-len-max', 393.7), 'length');
             const lenN = getNum('input-len-n', 60);
-            const neigs = getNum('input-neigs', 20);
+            const neigs = getNum('input-neigs', 10);
             const BC = /** @type {HTMLSelectElement} */ (document.getElementById('select-bc'))?.value || 'S-S';
 
             // logspace 생성
@@ -1780,6 +1780,7 @@
             }
 
             // stress 설정 후 해석 실행 (약간의 지연으로 stress 반영 보장)
+            model.loadCase = loadCase;
             setTimeout(() => {
                 vscode.postMessage({ command: 'runAnalysis', data: model });
             }, 200);
@@ -1905,11 +1906,12 @@
             if (dsm) {
                 const d = dsm.Mxx || dsm.P;
                 if (d) {
+                    const isM = d.load_type && d.load_type !== 'P';
                     if (d.LF_local > 0 && d.Lcrl > 0) {
-                        extrema.push({ L: d.Lcrl, LF: d.LF_local, label: d.Mxxcrl !== undefined ? 'Mcrl' : 'Pcrl', color: markerColors.local });
+                        extrema.push({ L: d.Lcrl, LF: d.LF_local, label: isM ? 'Mcrl' : 'Pcrl', color: markerColors.local });
                     }
                     if (d.LF_dist > 0 && d.Lcrd > 0) {
-                        extrema.push({ L: d.Lcrd, LF: d.LF_dist, label: d.Mxxcrd !== undefined ? 'Mcrd' : 'Pcrd', color: markerColors.dist });
+                        extrema.push({ L: d.Lcrd, LF: d.LF_dist, label: isM ? 'Mcrd' : 'Pcrd', color: markerColors.dist });
                     }
                 }
             }
@@ -3896,9 +3898,10 @@
             const dsmD = lastDsmResult ? (lastDsmResult.Mxx || lastDsmResult.P) : null;
             const extrema = [];
             if (dsmD) {
-                if (dsmD.LF_local > 0 && dsmD.Lcrl > 0) extrema.push({L:dsmD.Lcrl,LF:dsmD.LF_local,label:dsmD.Mxxcrl!==undefined?'Mcrl':'Pcrl',color:'#ff5722'});
-                if (dsmD.LF_dist > 0 && dsmD.Lcrd > 0) extrema.push({L:dsmD.Lcrd,LF:dsmD.LF_dist,label:dsmD.Mxxcrd!==undefined?'Mcrd':'Pcrd',color:'#ffab00'});
-                if (dsmD.LF_global > 0 && dsmD.Lcre > 0) extrema.push({L:dsmD.Lcre,LF:dsmD.LF_global,label:dsmD.Mxxcre!==undefined?'Mcre':'Pcre',color:'#7c4dff'});
+                const _isM = dsmD.load_type && dsmD.load_type !== 'P';
+                if (dsmD.LF_local > 0 && dsmD.Lcrl > 0) extrema.push({L:dsmD.Lcrl,LF:dsmD.LF_local,label:_isM?'Mcrl':'Pcrl',color:'#ff5722'});
+                if (dsmD.LF_dist > 0 && dsmD.Lcrd > 0) extrema.push({L:dsmD.Lcrd,LF:dsmD.LF_dist,label:_isM?'Mcrd':'Pcrd',color:'#ffab00'});
+                if (dsmD.LF_global > 0 && dsmD.Lcre > 0) extrema.push({L:dsmD.Lcre,LF:dsmD.LF_global,label:_isM?'Mcre':'Pcre',color:'#7c4dff'});
             }
             if (extrema.length === 0) {
                 extrema.push({L:points[mi][0],LF:minLF,label:'min',color:'#e53935'});
@@ -3925,14 +3928,14 @@
             const _fU=_rul('force'),_mU=_rul('moment'),_lU=_rul('length');
             h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">압축 ('+_fU+')</td></tr>';
             h += '<tr><td>P<sub>y</sub> (항복)</td><td>'+_ruv(dP.Py,'force')+' '+_fU+'</td><td></td><td></td></tr>';
-            h += '<tr><td>P<sub>crl</sub> (국부)</td><td>'+_ruv(dP.Pcrl,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_local,4)+'</td></tr>';
-            h += '<tr><td>P<sub>crd</sub> (뒤틀림)</td><td>'+_ruv(dP.Pcrd,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_dist,4)+'</td></tr>';
-            h += '<tr><td>P<sub>cre</sub> (전체)</td><td>'+_ruv(dP.Pcre,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_global,4)+'</td></tr>';
+            h += '<tr><td>P<sub>crl</sub> (국부)</td><td>'+_ruv(dP.crl,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_local,4)+'</td></tr>';
+            h += '<tr><td>P<sub>crd</sub> (뒤틀림)</td><td>'+_ruv(dP.crd,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>P<sub>cre</sub> (전체)</td><td>'+_ruv(dP.cre,'force')+' '+_fU+'</td><td>'+_ruv(dP.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dP.LF_global,4)+'</td></tr>';
             h += '<tr><td colspan="4" style="font-weight:600;background:#f0f0f0">휨 ('+_mU+')</td></tr>';
-            h += '<tr><td>M<sub>y</sub> (항복)</td><td>'+_ruv(dM.My_xx,'moment')+' '+_mU+'</td><td></td><td></td></tr>';
-            h += '<tr><td>M<sub>crl</sub> (국부)</td><td>'+_ruv(dM.Mxxcrl,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_local,4)+'</td></tr>';
-            h += '<tr><td>M<sub>crd</sub> (뒤틀림)</td><td>'+_ruv(dM.Mxxcrd,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_dist,4)+'</td></tr>';
-            h += '<tr><td>M<sub>cre</sub> (전체)</td><td>'+_ruv(dM.Mxxcre,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_global,4)+'</td></tr>';
+            h += '<tr><td>M<sub>y</sub> (항복)</td><td>'+_ruv(dM.P_y,'moment')+' '+_mU+'</td><td></td><td></td></tr>';
+            h += '<tr><td>M<sub>crl</sub> (국부)</td><td>'+_ruv(dM.crl,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrl,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_local,4)+'</td></tr>';
+            h += '<tr><td>M<sub>crd</sub> (뒤틀림)</td><td>'+_ruv(dM.crd,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcrd,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_dist,4)+'</td></tr>';
+            h += '<tr><td>M<sub>cre</sub> (전체)</td><td>'+_ruv(dM.cre,'moment')+' '+_mU+'</td><td>'+_ruv(dM.Lcre,'length')+' '+_lU+'</td><td>'+_rv(dM.LF_global,4)+'</td></tr>';
             h += '</table>';
             const dsm0 = dP.n_minima !== undefined ? dP : dM;
             if (dsm0.n_minima !== undefined) {
@@ -4613,7 +4616,7 @@
         checks.push({
             category: catC, item: 'DSM 값 추출',
             status: dP || dM ? 'pass' : 'fail',
-            value: dP ? 'Pcrl='+_rv(dP.Pcrl)+', Pcrd='+_rv(dP.Pcrd) : '미추출',
+            value: dP ? 'Pcrl='+_rv(dP.crl)+', Pcrd='+_rv(dP.crd) : '미추출',
             criterion: 'Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함',
             note: !dP && !dM ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : '',
         });
@@ -4621,13 +4624,13 @@
         if (dM) {
             checks.push({
                 category: catC, item: 'Mcrl 식별 (국부좌굴)',
-                status: dM.Mxxcrl > 0 ? 'pass' : 'warn',
-                value: dM.Mxxcrl > 0 ? _ruv(dM.Mxxcrl,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrl,'length')+' '+_rul('length')+')' : '미발견',
+                status: dM.crl > 0 ? 'pass' : 'warn',
+                value: dM.crl > 0 ? _ruv(dM.crl,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrl,'length')+' '+_rul('length')+')' : '미발견',
                 criterion: '국부좌굴 최솟값이 식별 가능해야 함',
-                note: dM.Mxxcrl <= 0 ? '국부좌굴 최솟값 미발견 — 국부검토를 건너뜁니다 (Mnl=Mne).' : '',
+                note: dM.crl <= 0 ? '국부좌굴 최솟값 미발견 — 국부검토를 건너뜁니다 (Mnl=Mne).' : '',
             });
             // Mcrd: FSM 미발견 시 해석적 fallback 가능 여부 확인
-            const hasFsmMcrd = dM.Mxxcrd > 0;
+            const hasFsmMcrd = dM.crd > 0;
             const hasSectionInfo = H > 0 && B > 0 && D > 0 && t > 0;
             const canFallback = !hasFsmMcrd && hasSectionInfo;
             let mcrdNote = '';
@@ -4642,7 +4645,7 @@
                 category: catC, item: 'Mcrd 식별 (뒤틀림좌굴)',
                 status: hasFsmMcrd ? 'pass' : (canFallback ? 'warn' : 'warn'),
                 value: hasFsmMcrd
-                    ? _ruv(dM.Mxxcrd,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrd,'length')+' '+_rul('length')+')'
+                    ? _ruv(dM.crd,'moment')+' '+_rul('moment')+' (L='+_ruv(dM.Lcrd,'length')+' '+_rul('length')+')'
                     : (canFallback ? 'FSM 미발견 → §2.3.3.3 fallback' : '미발견'),
                 criterion: 'C/Z 단면에서 뒤틀림좌굴이 식별되어야 함. 미발견 시 해석적 공식(§2.3.3.3) 사용.',
                 note: mcrdNote,
@@ -4961,13 +4964,13 @@
                 let allSameNote = '';
                 if (allSame) {
                     const reasons = [];
-                    if (dM && dM.Mxxcrl > 0 && dM.My_xx > 0) {
-                        const lam_l = Math.sqrt(dM.My_xx / dM.Mxxcrl);
+                    if (dM && dM.crl > 0 && dM.P_y > 0) {
+                        const lam_l = Math.sqrt(dM.P_y / dM.crl);
                         if (lam_l < 0.776) reasons.push('λl='+lam_l.toFixed(3)+' < 0.776 (국부좌굴 compact)');
                     }
-                    if (dM && (dM.Mxxcrd || 0) <= 0) reasons.push('Mcrd 미검출 (해석적 fallback §2.3.3.3 시도)');
-                    if (dM && dM.Mxxcrd > 0 && dM.My_xx > 0) {
-                        const lam_d = Math.sqrt(dM.My_xx / dM.Mxxcrd);
+                    if (dM && (dM.crd || 0) <= 0) reasons.push('Mcrd 미검출 (해석적 fallback §2.3.3.3 시도)');
+                    if (dM && dM.crd > 0 && dM.P_y > 0) {
+                        const lam_d = Math.sqrt(dM.P_y / dM.crd);
                         if (lam_d < 0.673) reasons.push('λd='+lam_d.toFixed(3)+' < 0.673 (뒤틀림 compact)');
                     }
                     if (reasons.length === 0) reasons.push('DSM 좌굴 감소가 적용되지 않음');
