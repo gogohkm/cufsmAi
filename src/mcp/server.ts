@@ -932,7 +932,7 @@ server.tool("aisi_design_guide", "Get AISI S100-16 design workflow guide for AI 
     }
 );
 
-server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling (single-web C/Z, Table G5-2/G5-3). Does not cover hat/multi-web/overhang cases.",
+server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling. Supports G5-1 for built-up I/C/Z/hat/multi-web and G5-2 overhang for C/Z with metadata and applicability warnings.",
     {
         h: z.number().describe("Web flat width (in)"),
         t: z.number().describe("Web thickness (in)"),
@@ -942,9 +942,18 @@ server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling (single-web C/
         theta: z.number().optional().describe("Angle between web and bearing surface deg (default 90)"),
         support: z.enum(["EOF", "IOF", "ETF", "ITF"]).optional().describe("Support condition (default EOF)"),
         fastened: z.enum(["fastened", "unfastened"]).optional().describe("Fastened to support? (default fastened)"),
-        section_type: z.enum(["C", "Z"]).optional().describe("Section type: C (Table G5-2) or Z (Table G5-3). Default C."),
+        section_type: z.enum(["C", "Z", "HAT", "I"]).optional().describe("Legacy section type hint. Prefer section_family for G5 general cases."),
+        section_family: z.enum(["built_up_i", "C", "Z", "hat", "multi_web"]).optional().describe("G5 section family. built_up_i→G5-1, C→G5-2, Z→G5-3, hat→G5-4, multi_web→G5-5."),
+        flange_condition: z.enum(["stiffened", "unstiffened"]).optional().describe("C/Z flange condition. Default stiffened."),
+        Lo: z.number().optional().describe("Overhang length from bearing edge to member end (in). Applies G5-2 only for EOF C/Z."),
+        edge_distance: z.number().optional().describe("Distance from bearing edge to member end (in). Used to verify the ITF ≥1.5h/2.5h applicability requirement for C/Z."),
+        n_webs: z.number().optional().describe("Number of webs at the section. Used for hat and multi-web total strength."),
+        web_config: z.enum(["single", "nested_z", "multi_web"]).optional().describe("H3 interaction classifier hint returned with metadata."),
+        bearing_case: z.enum(["end_bearing", "interior_bearing", "overhang_bearing"]).optional().describe("Optional explicit bearing-case override."),
+        support_fastener_spacing: z.number().optional().describe("Multi-web deck support fastener spacing (in). >18 in is treated as unfastened."),
     },
-    async ({ h, t, R, N, Fy, theta, support, fastened, section_type }) => {
+    async ({ h, t, R, N, Fy, theta, support, fastened, section_type, section_family,
+             flange_condition, Lo, edge_distance, n_webs, web_config, bearing_case, support_fastener_spacing }) => {
         const r = await callBridgePost('/action', {
             action: 'web_crippling',
             h, t, R, N,
@@ -953,6 +962,14 @@ server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling (single-web C/
             support: support || 'EOF',
             fastened: fastened || 'fastened',
             section_type: section_type || 'C',
+            section_family,
+            flange_condition,
+            Lo,
+            edge_distance,
+            n_webs,
+            web_config: web_config || 'single',
+            bearing_case,
+            support_fastener_spacing,
         });
         return textResult(JSON.stringify(r, null, 2));
     }

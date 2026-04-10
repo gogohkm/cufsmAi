@@ -472,6 +472,32 @@ export class StcfsdPanel implements McpPanelInterface {
         return 'C';
     }
 
+    private _estimateWebCount(nodeArr: number[][], elemArr: number[][]): number | undefined {
+        if (!nodeArr.length || !elemArr.length) {
+            return undefined;
+        }
+        const zs = nodeArr.map((n: number[]) => n[2]);
+        const depth = Math.max(...zs) - Math.min(...zs);
+        if (depth <= 0) {
+            return undefined;
+        }
+
+        let count = 0;
+        for (const elem of elemArr) {
+            const ni = nodeArr.find((n: number[]) => n[0] === elem[1]);
+            const nj = nodeArr.find((n: number[]) => n[0] === elem[2]);
+            if (!ni || !nj) {
+                continue;
+            }
+            const dx = Math.abs((nj[1] || 0) - (ni[1] || 0));
+            const dz = Math.abs((nj[2] || 0) - (ni[2] || 0));
+            if (dz >= 0.35 * depth && dx <= 0.9 * dz) {
+                count += 1;
+            }
+        }
+        return count || undefined;
+    }
+
     /** MCP: 액션 처리 — Bridge에서 직접 호출 */
     public async handleMcpAction(options: any): Promise<any> {
         const action = options?.action;
@@ -881,6 +907,21 @@ export class StcfsdPanel implements McpPanelInterface {
                         thickness: +t.toFixed(4),
                         type: secType,
                     };
+                    const webCount = this._estimateWebCount(nodeArr, elemArr);
+                    if (webCount != null) {
+                        sectionInfo.web_count = webCount;
+                    }
+                    if (secType === 'HAT') {
+                        sectionInfo.family_hint = 'hat';
+                    } else if (secType === 'I') {
+                        sectionInfo.family_hint = 'built_up_i';
+                    } else if (secType === 'Z') {
+                        sectionInfo.family_hint = 'Z';
+                    } else if (secType === 'C' || secType === 'TRACK') {
+                        sectionInfo.family_hint = 'C';
+                    } else if ((webCount || 0) >= 3) {
+                        sectionInfo.family_hint = 'multi_web';
+                    }
 
                     // 립 높이 추정: z 최소(하단) 근처에서 x ≈ xMin인 노드의 z 범위
                     const lipTol = Math.max(t * 3, 0.01);
@@ -1575,6 +1616,9 @@ export class StcfsdPanel implements McpPanelInterface {
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'css', 'theme.css')
         );
+        const designStateUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'designState.js')
+        );
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'app.js')
         );
@@ -2062,8 +2106,34 @@ export class StcfsdPanel implements McpPanelInterface {
                             <option value="multi_web">multi-web</option>
                         </select>
                     </div>
+                    <div class="input-row">
+                        <label>G5 단면군</label>
+                        <select id="design-wc-family" style="width:140px">
+                            <option value="auto">auto from model</option>
+                            <option value="built_up_i">built-up I</option>
+                            <option value="C">C / channel</option>
+                            <option value="Z">Z section</option>
+                            <option value="hat">hat section</option>
+                            <option value="multi_web">multi-web deck</option>
+                        </select>
+                        <label>플랜지 조건</label>
+                        <select id="design-wc-flange-condition" style="width:130px">
+                            <option value="stiffened">stiffened</option>
+                            <option value="unstiffened">unstiffened</option>
+                        </select>
+                    </div>
+                    <div class="input-row">
+                        <label>L<sub>o</sub><span class="hint-inline" data-unit="length">in</span></label>
+                        <input type="number" id="design-wc-Lo" value="0" step="0.1" style="width:68px">
+                        <label>e<sub>ITF</sub><span class="hint-inline" data-unit="length">in</span></label>
+                        <input type="number" id="design-wc-edge-distance" value="0" step="0.1" style="width:68px">
+                        <label>n<sub>web</sub></label>
+                        <input type="number" id="design-wc-nwebs" value="1" step="1" style="width:65px">
+                        <label>s<sub>f</sub><span class="hint-inline" data-unit="length">in</span></label>
+                        <input type="number" id="design-wc-fastener-spacing" value="0" step="0.1" style="width:65px">
+                    </div>
                     <p class="hint" style="font-size:10px;margin-top:4px">
-                        section type은 현재 모델 형상에서 자동 추정합니다. overhang / hat / multi-web 일반화는 별도 입력 경로가 필요합니다.
+                        Lo ≤ 1.5h 인 EOF C/Z만 G5-2 overhang으로 계산합니다. eITF는 C/Z의 ITF에서 끝단 연장거리(≥1.5h/2.5h) 검증에 사용합니다. hat/multi-web은 per-web 강도를 nweb로 합산합니다.
                     </p>
                 </div>
 
@@ -2219,6 +2289,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
     </div>
 
+    <script nonce="${nonce}" src="${designStateUri}"></script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'charts', 'modeShape3D.js')

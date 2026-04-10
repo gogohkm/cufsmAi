@@ -2775,6 +2775,15 @@
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
                 wc_fastened: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-fastened'))?.value || 'fastened',
                 wc_web_config: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-web-config'))?.value || 'single',
+                wc_section_family: (() => {
+                    const v = /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-family'))?.value || 'auto';
+                    return v === 'auto' ? undefined : v;
+                })(),
+                wc_flange_condition: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-flange-condition'))?.value || 'stiffened',
+                wc_overhang: fromDisplay(getNum('design-wc-Lo', 0), 'length'),
+                wc_edge_distance: fromDisplay(getNum('design-wc-edge-distance', 0), 'length'),
+                wc_n_webs: getNum('design-wc-nwebs', 1),
+                wc_support_fastener_spacing: fromDisplay(getNum('design-wc-fastener-spacing', 0), 'length'),
                 use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
                 use_cold_work: /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'))?.checked || false,
                 R: fromDisplay(getNum('tpl-r', 0), 'radius'),
@@ -3544,25 +3553,34 @@
             if (interEl) { interEl.style.display = 'none'; }
         }
 
-        // --- H3 Web Crippling + Bending Interaction ---
-        if (data.h3_interaction && interEl) {
+        // --- H3 / G5 Web Crippling Interaction ---
+        if (data.web_crippling && interEl) {
             if (interTitle) { interTitle.style.display = 'block'; }
             interEl.style.display = 'block';
-            const h3 = data.h3_interaction;
             const wc = data.web_crippling || {};
-            const h3clr = h3.pass ? '#4caf50' : '#ff5252';
+            const h3 = data.h3_interaction || null;
+            const h3clr = h3 ? (h3.pass ? '#4caf50' : '#ff5252') : '#ffab00';
+            const pTermLabel = h3?.P_term_label || 'P/Pn';
             interEl.innerHTML += `
                 <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--vscode-panel-border,#333)">
-                <b>Web Crippling + Bending (§H3)</b>
+                <b>Web Crippling (§G5)</b>
                 <table style="width:100%;font-size:12px;margin-top:4px">
                     ${_summaryRow('Pn (web crippling)', wc.Pn, _rul('force'), '', 'force')}
+                    ${_summaryRow('Equation', wc.equation || '-', '')}
+                    ${_summaryRow('Table', wc.table || '-', '')}
+                    ${_summaryRow('Section family', wc.section_family || wc.section_type || '-', '')}
                     ${_summaryRow('Support', wc.support, '')}
-                    ${_summaryRow('0.91(P/Pn)', h3.P_term?.toFixed(3), '')}
-                    ${_summaryRow('M/Mnfo', h3.M_term?.toFixed(3), '')}
-                    ${_summaryRow('Total', h3.total?.toFixed(3), '≤ ' + h3.limit?.toFixed(2), h3clr)}
-                    ${_summaryRow('Result', h3.pass ? 'OK' : 'NG', '', h3clr)}
+                    ${_summaryRow('Fastened', wc.fastened || '-', '')}
+                    ${wc.Lo ? _summaryRow('Lo', wc.Lo, _rul('length'), '', 'length') : ''}
+                    ${wc.edge_distance ? _summaryRow('ITF edge dist.', wc.edge_distance, _rul('length'), '', 'length') : ''}
+                    ${_summaryRow('Assumptions', (wc.assumptions && wc.assumptions.length > 0) ? wc.assumptions.join('; ') : '-', '')}
+                    ${_summaryRow('Warnings', (wc.warnings && wc.warnings.length > 0) ? wc.warnings.join('; ') : '-', '')}
+                    ${h3 ? _summaryRow(pTermLabel, h3.P_term?.toFixed(3), '') : ''}
+                    ${h3 ? _summaryRow('M/Mnfo', h3.M_term?.toFixed(3), '') : ''}
+                    ${h3 ? _summaryRow('Total', h3.total?.toFixed(3), '≤ ' + h3.limit?.toFixed(2), h3clr) : ''}
+                    ${h3 ? _summaryRow('Result', h3.pass ? 'OK' : 'NG', '', h3clr) : _summaryRow('H3 applicability', wc.h3_applicable ? 'Yes' : 'No', '', h3clr)}
                 </table>
-                <p style="font-size:11px;color:#888">Eq. ${h3.equation}</p>
+                <p style="font-size:11px;color:#888">${h3 ? ('Eq. ' + h3.equation) : (wc.h3_not_applicable_reason || '')}</p>
                 </div>`;
         }
 
@@ -5099,180 +5117,29 @@
     // Design 입력값 수집/복원 (파일 저장/열기용)
     // ============================================================
     function collectAllDesignInputs() {
-        const data = {};
-        // Material
-        data.steelGrade = document.getElementById('select-steel-grade')?.value || 'custom';
-        data.fy = fromDisplay(getNum('design-fy', 35.53), 'stress');
-        data.fu = fromDisplay(getNum('design-fu', 58.02), 'stress');
-        // Design method
-        data.designMethod = document.getElementById('select-design-method')?.value || 'LRFD';
-        data.analysisMethod = document.getElementById('select-analysis-method')?.value || 'DSM';
-        // Member type
-        data.memberType = document.getElementById('select-member-type')?.value || 'flexure';
-        // Span config
-        data.spanType = document.getElementById('select-span-type')?.value || 'simple';
-        data.nSpans = getNum('config-n-spans', 5);
-        data.spacing = fromDisplay(getNum('config-spacing', 3.281), 'length_ft');
-        // 스팬 테이블 데이터
-        const spanLens = []; const sups = []; const laps = [];
-        document.querySelectorAll('.span-tbl-len').forEach(el => spanLens.push(fromDisplay(parseFloat(el.value) || 25, 'length_ft')));
-        document.querySelectorAll('.span-tbl-sup').forEach(el => sups.push(el.value));
-        const nSup = sups.length;
-        for (let i = 0; i < nSup; i++) {
-            const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + i + '"]');
-            const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + i + '"]');
-            laps.push({ left: lEl ? fromDisplay(parseFloat(lEl.value) || 0, 'length_ft') : 0, right: rEl ? fromDisplay(parseFloat(rEl.value) || 0, 'length_ft') : 0 });
+        const helper = globalThis.StcfsdDesignState;
+        if (!helper?.collectDesignInputs) {
+            throw new Error('Design-state helper is not available');
         }
-        data.spans = spanLens;
-        data.supports = sups;
-        data.lapsPerSupport = laps;
-        // Loads
-        data.loadD = fromDisplay(getNum('load-D-psf', 0), 'pressure');
-        data.loadLr = fromDisplay(getNum('load-Lr-psf', 0), 'pressure');
-        data.loadS = fromDisplay(getNum('load-S-psf', 0), 'pressure');
-        data.loadWu = fromDisplay(getNum('load-Wu-psf', 0), 'pressure');
-        data.loadL = fromDisplay(getNum('load-L-psf', 0), 'pressure');
-        // Deck
-        data.deckType = document.getElementById('select-deck-type')?.value || 'none';
-        data.deckTPanel = fromDisplay(getNum('deck-t-panel', 0.0197), 'thickness');
-        data.deckFastenerSpacing = fromDisplay(getNum('deck-fastener-spacing', 11.81), 'length');
-        const deckKphiOverrideEl = /** @type {HTMLInputElement} */ (document.getElementById('deck-kphi-override'));
-        data.deckKphiOverride = deckKphiOverrideEl && deckKphiOverrideEl.value.trim() !== ''
-            ? fromDisplay(parseFloat(deckKphiOverrideEl.value), 'rotStiff')
-            : null;
-        // Unbraced lengths
-        data.KxLx = fromDisplay(getNum('design-KxLx', 118.11), 'length');
-        data.KyLy = fromDisplay(getNum('design-KyLy', 118.11), 'length');
-        data.KtLt = fromDisplay(getNum('design-KtLt', 118.11), 'length');
-        data.Lb = fromDisplay(getNum('design-Lb', 118.11), 'length');
-        data.Cb = getNum('design-Cb', 1.0);
-        data.Cmx = getNum('design-Cmx', 0.85);
-        data.Cmy = getNum('design-Cmy', 0.85);
-        // Required loads
-        data.Pu = fromDisplay(getNum('design-P', 0), 'force');
-        data.Vu = fromDisplay(getNum('design-V', 0), 'force');
-        data.Mux = fromDisplay(getNum('design-Mx', 0), 'moment');
-        data.Muy = fromDisplay(getNum('design-My', 0), 'moment');
-        data.MayStrength = fromDisplay(getNum('design-May-strength', 0), 'moment');
-        // Web crippling
-        data.wcN = fromDisplay(getNum('design-wc-N', 3.504), 'length');
-        data.wcR = fromDisplay(getNum('design-wc-R', 0.1875), 'radius');
-        data.wcSupport = document.getElementById('design-wc-support')?.value || 'EOF';
-        data.wcFastened = document.getElementById('design-wc-fastened')?.value || 'fastened';
-        data.wcWebConfig = document.getElementById('design-wc-web-config')?.value || 'single';
-        // Template params
-        data.templateType = document.getElementById('select-template')?.value || '';
-        data.tplH = fromDisplay(getNum('tpl-H', 7.874), 'length');
-        data.tplB = fromDisplay(getNum('tpl-B', 2.953), 'length');
-        data.tplD = fromDisplay(getNum('tpl-D', 0.787), 'length');
-        data.tplT = fromDisplay(getNum('tpl-t', 0.0906), 'thickness');
-        data.tplR = fromDisplay(getNum('tpl-r', 0.157), 'radius');
-        data.tplQlip = getNum('tpl-qlip', 90);
-        // Analysis config
-        data.fyLoad = fromDisplay(getNum('input-fy', 35.53), 'stress');
-        return data;
+        return helper.collectDesignInputs({
+            document,
+            fromDisplay,
+            getNum,
+        });
     }
 
     function restoreAllDesignInputs(data) {
-        if (!data) return;
-        function setValue(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
-        function setSelect(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
-        // Material
-        if (data.steelGrade) setSelect('select-steel-grade', data.steelGrade);
-        if (data.fy != null) setValue('design-fy', toDisplay(data.fy, 'stress'));
-        if (data.fu != null) {
-            const fuDisplay = toDisplay(data.fu, 'stress');
-            setValue('design-fu', fuDisplay);
-            setValue('input-fu', fuDisplay);
+        const helper = globalThis.StcfsdDesignState;
+        if (!helper?.restoreDesignInputs) {
+            throw new Error('Design-state helper is not available');
         }
-        // Design method
-        if (data.designMethod) setSelect('select-design-method', data.designMethod);
-        if (data.analysisMethod) setSelect('select-analysis-method', data.analysisMethod);
-        // Member type
-        if (data.memberType) setSelect('select-member-type', data.memberType);
-        // Span config
-        if (data.spanType) {
-            setSelect('select-span-type', data.spanType);
-            if (data.nSpans != null) setValue('config-n-spans', data.nSpans);
-        }
-        if (data.spacing != null) setValue('config-spacing', toDisplay(data.spacing, 'length_ft'));
-        // 스팬 테이블 재생성 후 값 복원
-        if (typeof buildSpanTable === 'function') buildSpanTable();
-        setTimeout(() => {
-            if (data.spans) {
-                document.querySelectorAll('.span-tbl-len').forEach((el, i) => {
-                    if (data.spans[i] != null) el.value = toDisplay(data.spans[i], 'length_ft');
-                });
-            }
-            if (data.supports) {
-                document.querySelectorAll('.span-tbl-sup').forEach((el, i) => {
-                    if (data.supports[i]) el.value = data.supports[i];
-                });
-            }
-            if (data.lapsPerSupport) {
-                data.lapsPerSupport.forEach((lap, i) => {
-                    const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + i + '"]');
-                    const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + i + '"]');
-                    if (lEl && lap.left != null) lEl.value = toDisplay(lap.left, 'length_ft');
-                    if (rEl && lap.right != null) rEl.value = toDisplay(lap.right, 'length_ft');
-                });
-            }
-        }, 100);
-        // Loads
-        if (data.loadD != null) setValue('load-D-psf', toDisplay(data.loadD, 'pressure'));
-        if (data.loadLr != null) setValue('load-Lr-psf', toDisplay(data.loadLr, 'pressure'));
-        if (data.loadS != null) setValue('load-S-psf', toDisplay(data.loadS, 'pressure'));
-        if (data.loadWu != null) setValue('load-Wu-psf', toDisplay(data.loadWu, 'pressure'));
-        if (data.loadL != null) setValue('load-L-psf', toDisplay(data.loadL, 'pressure'));
-        // Deck
-        if (data.deckType) setSelect('select-deck-type', data.deckType);
-        if (data.deckTPanel != null) setValue('deck-t-panel', toDisplay(data.deckTPanel, 'thickness'));
-        if (data.deckFastenerSpacing != null) setValue('deck-fastener-spacing', toDisplay(data.deckFastenerSpacing, 'length'));
-        if (data.deckKphiOverride != null) setValue('deck-kphi-override', toDisplay(data.deckKphiOverride, 'rotStiff'));
-        else setValue('deck-kphi-override', '');
-        // Unbraced lengths
-        if (data.KxLx != null) setValue('design-KxLx', toDisplay(data.KxLx, 'length'));
-        if (data.KyLy != null) setValue('design-KyLy', toDisplay(data.KyLy, 'length'));
-        if (data.KtLt != null) setValue('design-KtLt', toDisplay(data.KtLt, 'length'));
-        if (data.Lb != null) setValue('design-Lb', toDisplay(data.Lb, 'length'));
-        if (data.Cb != null) setValue('design-Cb', data.Cb);
-        if (data.Cmx != null) setValue('design-Cmx', data.Cmx);
-        if (data.Cmy != null) setValue('design-Cmy', data.Cmy);
-        // Required loads
-        if (data.Pu != null) setValue('design-P', toDisplay(data.Pu, 'force'));
-        if (data.Vu != null) setValue('design-V', toDisplay(data.Vu, 'force'));
-        if (data.Mux != null) setValue('design-Mx', toDisplay(data.Mux, 'moment'));
-        if (data.Muy != null) setValue('design-My', toDisplay(data.Muy, 'moment'));
-        if (data.MayStrength != null) setValue('design-May-strength', toDisplay(data.MayStrength, 'moment'));
-        // Web crippling
-        if (data.wcN != null) setValue('design-wc-N', toDisplay(data.wcN, 'length'));
-        if (data.wcR != null) setValue('design-wc-R', toDisplay(data.wcR, 'radius'));
-        if (data.wcSupport) setSelect('design-wc-support', data.wcSupport);
-        if (data.wcFastened) setSelect('design-wc-fastened', data.wcFastened);
-        if (data.wcWebConfig) setSelect('design-wc-web-config', data.wcWebConfig);
-        // Template
-        if (data.templateType) setSelect('select-template', data.templateType);
-        if (data.tplH != null) setValue('tpl-H', toDisplay(data.tplH, 'length'));
-        if (data.tplB != null) setValue('tpl-B', toDisplay(data.tplB, 'length'));
-        if (data.tplD != null) setValue('tpl-D', toDisplay(data.tplD, 'length'));
-        if (data.tplT != null) setValue('tpl-t', toDisplay(data.tplT, 'thickness'));
-        if (data.tplR != null) setValue('tpl-r', toDisplay(data.tplR, 'radius'));
-        if (data.tplQlip != null) setValue('tpl-qlip', data.tplQlip);
-        if (data.fyLoad != null) {
-            const fyDisplay = toDisplay(data.fyLoad, 'stress');
-            setValue('input-fy', fyDisplay);
-            setValue('plastic-fy', fyDisplay);
-        }
-        // 복원 후 Fy 동기화: design-fy 또는 fyLoad 중 있는 값으로 통일
-        const restoredFy = data.fy != null ? toDisplay(data.fy, 'stress')
-                         : data.fyLoad != null ? toDisplay(data.fyLoad, 'stress')
-                         : null;
-        if (restoredFy != null) {
-            setValue('input-fy', restoredFy);
-            setValue('plastic-fy', restoredFy);
-            setValue('design-fy', restoredFy);
-            updateAnalysisFyDisplay(restoredFy);
-        }
+        helper.restoreDesignInputs({
+            document,
+            toDisplay,
+            buildSpanTable: typeof buildSpanTable === 'function' ? buildSpanTable : undefined,
+            setTimeoutFn: window.setTimeout.bind(window),
+            updateAnalysisFyDisplay,
+        }, data);
     }
 
     // 파일 저장/열기 버튼

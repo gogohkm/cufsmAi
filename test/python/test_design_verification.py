@@ -5,7 +5,7 @@
 검증 허용 오차: 2% (프리즈매틱 해석 등 근사에 의한 허용)
 """
 
-import sys, os, math
+import sys, os, math, subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 TOLERANCE = 0.02  # 2%
@@ -596,6 +596,175 @@ def test_web_crippling_c_z_separation():
     return all_pass
 
 
+def test_web_crippling_overhang_eq_g52():
+    """웹크리플링 overhang — Eq. G5-2 / G5-3 및 interior cap 검증"""
+    print('\n=== TEST: Web Crippling Overhang Eq. G5-2 (F-038~040) ===')
+    from design.shear import web_crippling
+
+    # Example II-2A values from AISI manual
+    result = web_crippling(
+        h=7.485, t=0.070, R=0.1875, N=5.0, Fy=55,
+        support='EOF', fastened='fastened', section_type='Z',
+        Lo=9.5
+    )
+
+    all_pass = True
+    all_pass &= approx(1 if result.get('equation') == 'G5-2' else 0, 1, label='uses Eq. G5-2')
+    all_pass &= approx(result.get('alpha', 0), 1.13, tol=0.02, label='alpha per Eq. G5-3')
+    all_pass &= approx(result.get('Pn', 0), 2.95, tol=0.03, label='Pnc overhang strength')
+    all_pass &= approx(1 if result.get('Pn_interior_cap', 0) > result.get('Pn', 0) else 0, 1,
+                        label='interior cap larger than Pnc')
+    all_pass &= approx(1 if not result.get('h3_applicable', True) else 0, 1,
+                        label='H3 disabled for overhang')
+    return all_pass
+
+
+def test_web_crippling_overhang_definition_limit():
+    """Lo > 1.5h 는 overhang가 아니라 standard EOF로 분류되어야 함"""
+    print('\n=== TEST: Web Crippling Overhang Definition Limit ===')
+    from design.shear import web_crippling
+
+    h = 7.5
+    result = web_crippling(
+        h=h, t=0.059, R=0.157, N=3.5, Fy=50,
+        support='EOF', fastened='fastened', section_type='C',
+        Lo=1.6 * h
+    )
+
+    all_pass = True
+    all_pass &= approx(1 if result.get('equation') == 'G5-1' else 0, 1, label='Lo > 1.5h falls back to G5-1')
+    all_pass &= approx(1 if result.get('bearing_case') == 'end_bearing' else 0, 1, label='treated as end bearing')
+    all_pass &= approx(1 if any('standard EOF instead of overhang' in msg for msg in result.get('assumptions', [])) else 0, 1,
+                        label='fallback assumption recorded')
+    return all_pass
+
+
+def test_web_crippling_itf_edge_distance_validation():
+    """C/Z ITF edge distance requirement를 입력값으로 직접 검증"""
+    print('\n=== TEST: Web Crippling ITF Edge Distance Validation ===')
+    from design.shear import web_crippling
+
+    h = 7.5
+    short_case = web_crippling(
+        h=h, t=0.059, R=0.157, N=3.5, Fy=50,
+        support='ITF', fastened='fastened', section_type='C',
+        edge_distance=18.0
+    )
+    ok_case = web_crippling(
+        h=h, t=0.059, R=0.157, N=3.5, Fy=50,
+        support='ITF', fastened='fastened', section_type='C',
+        edge_distance=19.0
+    )
+
+    all_pass = True
+    all_pass &= approx(1 if any('smaller than the required' in msg for msg in short_case.get('warnings', [])) else 0, 1,
+                        label='short edge distance warning emitted')
+    all_pass &= approx(1 if any('satisfies the ≥' in msg for msg in ok_case.get('assumptions', [])) else 0, 1,
+                        label='sufficient edge distance accepted')
+    all_pass &= approx(ok_case.get('edge_distance', 0), 19.0, tol=0.001, label='edge distance metadata returned')
+    return all_pass
+
+
+def test_web_crippling_built_up_i_table_g51():
+    """built-up I-section — Table G5-1 계수와 H3 비적용 메타데이터 검증"""
+    print('\n=== TEST: Built-Up I-Section Web Crippling (G5-1) ===')
+    from design.shear import web_crippling
+
+    h = 7.0
+    t = 0.08
+    R = 0.16
+    N = 3.0
+    Fy = 50.0
+    result = web_crippling(
+        h=h, t=t, R=R, N=N, Fy=Fy,
+        support='ETF', fastened='unfastened',
+        section_family='built_up_i',
+        flange_condition='stiffened'
+    )
+
+    expected = 15.5 * t**2 * Fy * (1 - 0.09 * math.sqrt(R / t)) * (1 + 0.08 * math.sqrt(N / t)) * (1 - 0.04 * math.sqrt(h / t))
+
+    all_pass = True
+    all_pass &= approx(1 if result.get('table') == 'G5-1' else 0, 1, label='uses Table G5-1')
+    all_pass &= approx(result.get('Pn', 0), expected, tol=0.02, label='built-up I ETF Pn')
+    all_pass &= approx(1 if not result.get('h3_applicable', True) else 0, 1, label='H3 disabled for built-up I')
+    all_pass &= approx(1 if any('Table G5-1 directly' in msg for msg in result.get('assumptions', [])) else 0, 1,
+                        label='built-up assumption recorded')
+    return all_pass
+
+
+def test_web_crippling_built_up_i_unsupported_unstiffened_two_flange():
+    """built-up I-section unstiffened two-flange rows는 미구현 error를 반환해야 함"""
+    print('\n=== TEST: Built-Up I Unsupported Unstiffened Two-Flange ===')
+    from design.shear import web_crippling
+
+    result = web_crippling(
+        h=7.0, t=0.08, R=0.16, N=3.0, Fy=50.0,
+        support='ETF', fastened='unfastened',
+        section_family='built_up_i',
+        flange_condition='unstiffened'
+    )
+
+    all_pass = True
+    all_pass &= approx(1 if 'error' in result else 0, 1, label='returns unsupported-row error')
+    all_pass &= approx(1 if any('unstiffened two-flange rows are not implemented' in msg for msg in result.get('warnings', [])) else 0, 1,
+                        label='unsupported-row warning returned')
+    return all_pass
+
+
+def test_web_crippling_hat_per_web_multiplier():
+    """hat section — Table G5-4 per-web 강도와 n_web 합산 검증"""
+    print('\n=== TEST: Hat Section Web Crippling Multiplier (G5-4) ===')
+    from design.shear import web_crippling
+
+    h = 6.0
+    t = 0.06
+    R = 0.12
+    N = 3.0
+    Fy = 50.0
+    result = web_crippling(
+        h=h, t=t, R=R, N=N, Fy=Fy,
+        support='ETF', fastened='fastened',
+        section_family='hat'
+    )
+
+    all_pass = True
+    expected_per_web = 9.0 * t**2 * Fy * (1 - 0.10 * math.sqrt(R / t)) * (1 + 0.07 * math.sqrt(N / t)) * (1 - 0.03 * math.sqrt(h / t))
+    all_pass &= approx(1 if result.get('table') == 'G5-4' else 0, 1, label='uses Table G5-4')
+    all_pass &= approx(result.get('Pn_per_web', 0), expected_per_web, tol=0.02, label='hat per-web Pn')
+    all_pass &= approx(result.get('Pn', 0), expected_per_web * 2.0, tol=0.02, label='hat total Pn = 2 webs')
+    all_pass &= approx(1 if result.get('n_webs') == 2 else 0, 1, label='hat defaults to 2 webs')
+    return all_pass
+
+
+def test_web_crippling_multiweb_spacing_override():
+    """multi-web deck — G5-5와 18in spacing unfastened override 검증"""
+    print('\n=== TEST: Multi-Web Deck Web Crippling (G5-5) ===')
+    from design.shear import web_crippling
+
+    h = 6.0
+    t = 0.05
+    R = 0.10
+    N = 3.0
+    Fy = 50.0
+    result = web_crippling(
+        h=h, t=t, R=R, N=N, Fy=Fy,
+        support='EOF', fastened='fastened',
+        section_family='multi_web',
+        n_webs=3,
+        support_fastener_spacing=24.0
+    )
+
+    all_pass = True
+    expected_per_web = 3.0 * t**2 * Fy * (1 - 0.04 * math.sqrt(R / t)) * (1 + 0.29 * math.sqrt(N / t)) * (1 - 0.028 * math.sqrt(h / t))
+    all_pass &= approx(1 if result.get('table') == 'G5-5' else 0, 1, label='uses Table G5-5')
+    all_pass &= approx(1 if result.get('fastened') == 'unfastened' else 0, 1, label='spacing override → unfastened')
+    all_pass &= approx(result.get('Pn_per_web', 0), expected_per_web, tol=0.02, label='multi-web per-web Pn')
+    all_pass &= approx(result.get('Pn', 0), expected_per_web * 3.0, tol=0.02, label='multi-web total Pn = 3 webs')
+    all_pass &= approx(result.get('phi', 0), 0.60, tol=0.01, label='unfastened EOF phi=0.60')
+    return all_pass
+
+
 def test_dsm_boundary_minima():
     """DSM 극소 탐지 — 경계점 검출 및 반파장 분류 (F-003)"""
     print('\n=== TEST: DSM Boundary Minima Detection (F-003) ===')
@@ -1002,6 +1171,8 @@ def test_flexure_h3_respects_fastened_and_web_config():
         'wc_support': 'ETF',
         'wc_fastened': 'unfastened',
         'wc_web_config': 'multi_web',
+        'wc_section_family': 'multi_web',
+        'wc_n_webs': 3,
         'props': {
             'A': 1.0, 'Sf': 2.0, 'Sxx': 2.0, 'Zx': 2.1,
             'Ixx': 8.0, 'Izz': 2.0, 'Ixz': 0.0,
@@ -1017,8 +1188,163 @@ def test_flexure_h3_respects_fastened_and_web_config():
     all_pass = True
     all_pass &= approx(1 if result.get('web_crippling', {}).get('fastened') == 'unfastened' else 0, 1,
                         label='H3 passes wc_fastened')
+    all_pass &= approx(1 if result.get('web_crippling', {}).get('table') == 'G5-5' else 0, 1,
+                        label='uses G5-5 multi-web table')
+    all_pass &= approx(1 if result.get('web_crippling', {}).get('n_webs') == 3 else 0, 1,
+                        label='passes wc_n_webs')
     all_pass &= approx(1 if result.get('h3_interaction', {}).get('equation') == 'H3-3' else 0, 1,
                         label='H3 uses requested multi_web equation')
+    return all_pass
+
+
+def test_flexure_design_passes_built_up_i_and_edge_distance():
+    """상위 설계 경로가 built_up_i와 edge distance를 §G5까지 전달해야 함"""
+    print('\n=== TEST: Flexure Design Passes Built-Up I and Edge Distance ===')
+    from design.aisi_s100 import design_member
+
+    result = design_member({
+        'member_type': 'flexure',
+        'design_method': 'LRFD',
+        'analysis_method': 'DSM',
+        'Fy': 50,
+        'Fu': 65,
+        'Mu': 12.0,
+        'Vu': 4.0,
+        'Lb': 120.0,
+        'Cb': 1.0,
+        'wc_N': 3.0,
+        'wc_R': 0.16,
+        'wc_support': 'ITF',
+        'wc_fastened': 'unfastened',
+        'wc_section_family': 'built_up_i',
+        'wc_flange_condition': 'stiffened',
+        'wc_edge_distance': 12.0,
+        'props': {
+            'A': 1.2, 'Sf': 2.4, 'Sxx': 2.4, 'Zx': 2.6,
+            'Ixx': 11.0, 'Izz': 2.2, 'Ixz': 0.0,
+            'xcg': 0.0, 'zcg': 4.0, 'thetap': 0.0,
+            'I11': 11.0, 'I22': 2.2,
+            'J': 0.02, 'Cw': 7.0, 'xo': 0.3,
+            'h_web': 7.0, 't': 0.08,
+        },
+        'section': {'type': 'I', 'depth': 8.0, 'flange_width': 2.5, 'lip_depth': 0.0, 'thickness': 0.08},
+        'dsm': {'Mcrl': 170.0, 'Mcrd': 0.0, 'My': 120.0},
+    })
+
+    wc = result.get('web_crippling', {})
+    all_pass = True
+    all_pass &= approx(1 if wc.get('table') == 'G5-1' else 0, 1, label='design path uses G5-1')
+    all_pass &= approx(1 if wc.get('section_family') == 'built_up_i' else 0, 1, label='passes built_up_i family')
+    all_pass &= approx(wc.get('edge_distance', 0), 12.0, tol=0.001, label='passes edge distance')
+    all_pass &= approx(1 if not wc.get('h3_applicable', True) else 0, 1, label='H3 marked not applicable')
+    all_pass &= approx(1 if result.get('h3_interaction') is None else 0, 1, label='no H3 interaction result')
+    return all_pass
+
+
+def test_webview_design_state_roundtrip():
+    """WebView 설계 상태 저장/복원 round-trip — G5 확장 입력 포함"""
+    print('\n=== TEST: WebView Design State Roundtrip ===')
+    script_path = os.path.join(os.path.dirname(__file__), '..', 'webview', 'design_state_roundtrip.js')
+    result = subprocess.run(
+        ['node', script_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        print(result.stderr.strip())
+    if result.returncode != 0:
+        raise AssertionError(f'Node roundtrip test failed with exit code {result.returncode}')
+    return True
+
+
+def test_flexure_design_auto_infers_hat_family_and_webs():
+    """wc_section_family auto일 때 Hat 단면 family/n_webs를 추론해야 함"""
+    print('\n=== TEST: Flexure Design Auto-Infers Hat Family and Webs ===')
+    from design.aisi_s100 import design_member
+
+    result = design_member({
+        'member_type': 'flexure',
+        'design_method': 'LRFD',
+        'analysis_method': 'DSM',
+        'Fy': 50,
+        'Fu': 65,
+        'Mu': 8.0,
+        'Vu': 3.5,
+        'Lb': 120.0,
+        'Cb': 1.0,
+        'wc_N': 3.0,
+        'wc_R': 0.12,
+        'wc_support': 'ETF',
+        'section_type': 'Hat',
+        'props': {
+            'A': 1.0, 'Sf': 2.0, 'Sxx': 2.0, 'Zx': 2.1,
+            'Ixx': 8.0, 'Izz': 2.0, 'Ixz': 0.0,
+            'xcg': 0.0, 'zcg': 3.0, 'thetap': 0.0,
+            'I11': 8.0, 'I22': 2.0,
+            'J': 0.01, 'Cw': 5.0, 'xo': 0.2,
+            'h_web': 6.0, 't': 0.06,
+        },
+        'section': {'type': 'Hat', 'depth': 6.5, 'flange_width': 4.0, 'thickness': 0.06},
+        'dsm': {'Mcrl': 120.0, 'Mcrd': 150.0, 'My': 100.0},
+    })
+
+    wc = result.get('web_crippling', {})
+    all_pass = True
+    all_pass &= approx(1 if wc.get('section_family') == 'hat' else 0, 1, label='auto family → hat')
+    all_pass &= approx(1 if wc.get('table') == 'G5-4' else 0, 1, label='uses hat table')
+    all_pass &= approx(wc.get('n_webs', 0), 2, tol=0.001, label='auto n_webs=2')
+    return all_pass
+
+
+def test_flexure_design_auto_infers_multiweb_family_from_section_hint():
+    """section.family_hint/web_count로 multi-web family를 추론해야 함"""
+    print('\n=== TEST: Flexure Design Auto-Infers Multi-Web Family ===')
+    from design.aisi_s100 import design_member
+
+    result = design_member({
+        'member_type': 'flexure',
+        'design_method': 'LRFD',
+        'analysis_method': 'DSM',
+        'Fy': 50,
+        'Fu': 65,
+        'Mu': 8.0,
+        'Vu': 3.5,
+        'Lb': 120.0,
+        'Cb': 1.0,
+        'wc_N': 3.0,
+        'wc_R': 0.10,
+        'wc_support': 'EOF',
+        'wc_fastened': 'fastened',
+        'wc_support_fastener_spacing': 24.0,
+        'section_type': 'CustomDeck',
+        'props': {
+            'A': 1.0, 'Sf': 2.0, 'Sxx': 2.0, 'Zx': 2.1,
+            'Ixx': 8.0, 'Izz': 2.0, 'Ixz': 0.0,
+            'xcg': 0.0, 'zcg': 3.0, 'thetap': 0.0,
+            'I11': 8.0, 'I22': 2.0,
+            'J': 0.01, 'Cw': 5.0, 'xo': 0.2,
+            'h_web': 6.0, 't': 0.05,
+        },
+        'section': {
+            'type': 'CustomDeck',
+            'family_hint': 'multi_web',
+            'web_count': 3,
+            'depth': 6.5,
+            'flange_width': 5.0,
+            'thickness': 0.05,
+        },
+        'dsm': {'Mcrl': 120.0, 'Mcrd': 150.0, 'My': 100.0},
+    })
+
+    wc = result.get('web_crippling', {})
+    all_pass = True
+    all_pass &= approx(1 if wc.get('section_family') == 'multi_web' else 0, 1, label='auto family → multi_web')
+    all_pass &= approx(1 if wc.get('table') == 'G5-5' else 0, 1, label='uses multi-web table')
+    all_pass &= approx(wc.get('n_webs', 0), 3, tol=0.001, label='auto n_webs=3')
+    all_pass &= approx(1 if wc.get('fastened') == 'unfastened' else 0, 1, label='spacing override retained')
     return all_pass
 
 
@@ -1048,6 +1374,13 @@ if __name__ == '__main__':
         test_lap_connection_uses_shared_connection_engine,
         # --- F-xxx 수정 검증 테스트 ---
         test_web_crippling_c_z_separation,
+        test_web_crippling_overhang_eq_g52,
+        test_web_crippling_overhang_definition_limit,
+        test_web_crippling_itf_edge_distance_validation,
+        test_web_crippling_built_up_i_table_g51,
+        test_web_crippling_built_up_i_unsupported_unstiffened_two_flange,
+        test_web_crippling_hat_per_web_multiplier,
+        test_web_crippling_multiweb_spacing_override,
         test_dsm_boundary_minima,
         test_uplift_combo_reaction_based,
         test_auto_generate_passes_corner_radius,
@@ -1063,6 +1396,10 @@ if __name__ == '__main__':
         test_flexure_design_section_type_affects_fcre,
         test_cold_work_uses_estimated_corner_ratio,
         test_flexure_h3_respects_fastened_and_web_config,
+        test_flexure_design_passes_built_up_i_and_edge_distance,
+        test_webview_design_state_roundtrip,
+        test_flexure_design_auto_infers_hat_family_and_webs,
+        test_flexure_design_auto_infers_multiweb_family_from_section_hint,
     ]
 
     results = {}

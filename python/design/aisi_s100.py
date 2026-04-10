@@ -44,6 +44,60 @@ def _effective_section_type(params: dict) -> str:
     return str(params.get('section_type') or section.get('type') or 'C')
 
 
+def _infer_web_crippling_family(params: dict, section_type: str) -> str:
+    """§G5 family inference for auto-mode UI/save paths."""
+    section = params.get('section', {}) or {}
+    explicit = params.get('wc_section_family')
+    if explicit:
+        return str(explicit)
+
+    family_hint = section.get('family_hint')
+    if family_hint:
+        return str(family_hint)
+
+    st = str(section_type or section.get('type') or 'C').strip().lower().replace('-', '_')
+    if st in ('i', 'i_section', 'isect'):
+        return 'built_up_i'
+    if st.startswith('z'):
+        return 'Z'
+    if st.startswith('hat'):
+        return 'hat'
+    if st.startswith('track'):
+        return 'C'
+
+    web_count = section.get('web_count')
+    try:
+        if web_count is not None and int(float(web_count)) >= 3:
+            return 'multi_web'
+    except Exception:
+        pass
+    return 'C'
+
+
+def _infer_web_crippling_n_webs(params: dict, section_family: str) -> int | None:
+    """Infer n_webs only for families where total strength depends on it."""
+    explicit = params.get('wc_n_webs')
+    if explicit not in (None, ''):
+        try:
+            return int(float(explicit))
+        except Exception:
+            return None
+
+    section = params.get('section', {}) or {}
+    web_count = section.get('web_count')
+    if section_family == 'hat':
+        try:
+            return max(2, int(float(web_count))) if web_count is not None else 2
+        except Exception:
+            return 2
+    if section_family == 'multi_web':
+        try:
+            return max(2, int(float(web_count))) if web_count is not None else None
+        except Exception:
+            return None
+    return None
+
+
 def _estimate_cold_work_areas(section: dict, props: dict, R: float, t: float) -> dict:
     """냉간가공 코너면적비용 단순 형상 추정.
 
@@ -693,26 +747,44 @@ def _design_flexure(params: dict) -> dict:
         t = props.get('t', 0)
         if h > 0 and t > 0:
             wc_sec_type = params.get('wc_section_type') or _effective_section_type(params)
+            wc_section_family = _infer_web_crippling_family(params, wc_sec_type)
             wc_fastened = params.get('wc_fastened', 'fastened')
             wc_web_config = params.get('wc_web_config', 'single')
+            wc_flange_condition = params.get('wc_flange_condition')
+            wc_overhang = params.get('wc_overhang', 0)
+            wc_edge_distance = params.get('wc_edge_distance')
+            wc_n_webs = _infer_web_crippling_n_webs(params, wc_section_family)
+            wc_spacing = params.get('wc_support_fastener_spacing')
             wc = web_crippling(h, t, wc_R, wc_N, Fy, support=wc_support,
-                               fastened=wc_fastened, section_type=wc_sec_type)
+                               fastened=wc_fastened,
+                               section_type=wc_sec_type,
+                               section_family=wc_section_family,
+                               flange_condition=wc_flange_condition,
+                               Lo=wc_overhang,
+                               edge_distance=wc_edge_distance,
+                               n_webs=wc_n_webs,
+                               web_config=wc_web_config,
+                               support_fastener_spacing=wc_spacing)
+            if 'error' in wc:
+                warnings.append(f'§G5 web crippling could not be evaluated: {wc["error"]}')
+                result['web_crippling'] = wc
+                return result
             Pn_wc = wc['Pn']
             from design.interaction import combined_bending_web_crippling
             # 집중하중 P = 소요 반력 (Vu를 사용하거나, Pu를 사용)
             Vu = params.get('Vu', 0) or params.get('Pu', 0)
-            h3 = combined_bending_web_crippling(Vu, Pn_wc, Mu, Mnfo, 0.90, wc_web_config)
-            result['web_crippling'] = {
-                'Pn': round(Pn_wc, 2),
-                'support': wc_support,
-                'phi': wc['phi'],
-                'fastened': wc_fastened,
-                'section_type': wc_sec_type,
-            }
-            result['h3_interaction'] = h3
+            wc_result = {**wc, 'Pn': round(Pn_wc, 2)}
+            result['web_crippling'] = wc_result
+            result['warnings'].extend(wc.get('warnings', []))
+            if wc.get('h3_applicable', True):
+                h3 = combined_bending_web_crippling(Vu, Pn_wc, Mu, Mnfo, 0.90, wc_web_config)
+                result['h3_interaction'] = h3
+            elif wc.get('h3_not_applicable_reason'):
+                result['warnings'].append(wc['h3_not_applicable_reason'])
             result['Mnfo'] = round(Mnfo, 2)
             result['spec_sections'].append('G5')
-            result['spec_sections'].append('H3')
+            if result.get('h3_interaction'):
+                result['spec_sections'].append('H3')
 
     return result
 

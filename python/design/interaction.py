@@ -67,19 +67,23 @@ def combined_bending_web_crippling(P: float, Pn: float,
         p_term = 0.86 * p_ratio
         limit = 1.65 * phi
         eq = 'H3-2'
+        p_label = '0.86(P/Pn)'
     elif web_config == 'multi_web':
         p_term = p_ratio
         limit = 1.52 * phi
         eq = 'H3-3'
+        p_label = 'P/Pn'
     else:
         p_term = 0.91 * p_ratio
         limit = 1.33 * phi
         eq = 'H3-1'
+        p_label = '0.91(P/Pn)'
 
     total = p_term + m_term
 
     return {
         'P_term': round(p_term, 4),
+        'P_term_label': p_label,
         'M_term': round(m_term, 4),
         'total': round(total, 4),
         'limit': round(limit, 4),

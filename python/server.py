@@ -235,6 +235,14 @@ def handle_request(request: dict) -> dict:
                 support=params.get('support', 'EOF'),
                 fastened=params.get('fastened', 'fastened'),
                 section_type=params.get('section_type', 'C'),
+                section_family=params.get('section_family'),
+                flange_condition=params.get('flange_condition'),
+                Lo=params.get('Lo'),
+                edge_distance=params.get('edge_distance'),
+                n_webs=params.get('n_webs'),
+                web_config=params.get('web_config', 'single'),
+                bearing_case=params.get('bearing_case'),
+                support_fastener_spacing=params.get('support_fastener_spacing'),
             )
             return {'id': req_id, 'result': result}
 
