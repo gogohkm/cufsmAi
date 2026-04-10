@@ -12,6 +12,10 @@ import { ProjectExplorerProvider } from './ProjectExplorerProvider';
 import { McpBridgeServer, McpPanelInterface } from '../mcp/bridge';
 import { StcfsdModel, StcfsdResult, WebviewToExtMessage, createDefaultModel } from '../models/types';
 
+function isTestMode(): boolean {
+    return process.env.STCFSD_TEST_MODE === '1';
+}
+
 export class StcfsdPanel implements McpPanelInterface {
     public static readonly viewType = 'stcfsd.designer';
     public static currentPanel: StcfsdPanel | undefined;
@@ -27,8 +31,11 @@ export class StcfsdPanel implements McpPanelInterface {
     private _lastAnalysisResult: any = null;
     private _lastLoadAnalysis: any = null;
     private _lastDesignResult: any = null;
+    private _preparedDesignDsm: any = null;
+    private _preparedDesignDsmSig = '';
     private _lastPreviewPath: string = '';
     private _previewResolve: ((value: any) => void) | null = null;
+    private _testPostedMessages: Array<{ command: string; data: any }> = [];
 
     public static createOrShow(
         extensionUri: vscode.Uri,
@@ -94,6 +101,54 @@ export class StcfsdPanel implements McpPanelInterface {
     /** WebView로 메시지 전송 */
     public postMessage(command: string, data: any): void {
         this._postMessage(command, data);
+    }
+
+    public async __testDispatchMessage(message: WebviewToExtMessage): Promise<void> {
+        if (!isTestMode()) {
+            throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
+        }
+        await this._handleMessage(message);
+    }
+
+    public __testGetPostedMessages(): Array<{ command: string; data: any }> {
+        if (!isTestMode()) {
+            throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
+        }
+        return JSON.parse(JSON.stringify(this._testPostedMessages));
+    }
+
+    public __testClearPostedMessages(): void {
+        if (!isTestMode()) {
+            throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
+        }
+        this._testPostedMessages = [];
+    }
+
+    public __testGetState(): any {
+        if (!isTestMode()) {
+            throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
+        }
+        return JSON.parse(JSON.stringify({
+            currentSection: this._currentSection,
+            model: {
+                nodeCount: this._model.node?.length || 0,
+                elemCount: this._model.elem?.length || 0,
+                loadCase: (this._model as any).loadCase || null,
+                loadFy: (this._model as any).loadFy || null,
+                signature: this._currentModelSignature(),
+            },
+            lastAnalysisMeta: this._lastAnalysisResult?._meta || null,
+            preparedDesignDsm: this._preparedDesignDsm || null,
+            preparedDesignDsmSig: this._preparedDesignDsmSig || '',
+            lastDesignResult: this._lastDesignResult || null,
+        }));
+    }
+
+    public __testGetHtml(): string {
+        if (!isTestMode()) {
+            throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
+        }
+        return this._panel.webview.html;
     }
 
     /** 초기 기본 단면 생성 후 모델 전송 — UI 기본값과 일치시킴 */
@@ -237,6 +292,15 @@ export class StcfsdPanel implements McpPanelInterface {
                     await this.handleMcpAction({ action: 'aisi_design', ...message.data });
                 } catch (e: any) {
                     this._postMessage('designResult', { error: e.message || String(e) });
+                }
+                break;
+
+            case 'prepareDesignDsm':
+                try {
+                    const prepResult = await this.handleMcpAction({ action: 'prepare_design_dsm', ...message.data });
+                    this._postMessage('designDsmPrepared', prepResult);
+                } catch (e: any) {
+                    this._postMessage('designDsmPrepared', { error: e.message || String(e) });
                 }
                 break;
 
@@ -421,6 +485,94 @@ export class StcfsdPanel implements McpPanelInterface {
         ].join('::');
     }
 
+    private _currentDesignDsmSignature(fy?: number): string {
+        const nodeSig = (this._model.node || []).map((n: number[]) =>
+            [n[1], n[2]].map(v => Number(v || 0).toFixed(6)).join(':')
+        ).join('|');
+        const elemSig = (this._model.elem || []).map((e: number[]) =>
+            [e[1], e[2], e[3]].map(v => Number(v || 0).toFixed(6)).join(':')
+        ).join('|');
+        return [
+            nodeSig,
+            elemSig,
+            this._model.BC || 'S-S',
+            (this._model.lengths || []).join(','),
+            Number(fy ?? this._getAnalysisFy()).toFixed(4),
+        ].join('::');
+    }
+
+    private _cloneModel<T>(model: T): T {
+        return JSON.parse(JSON.stringify(model));
+    }
+
+    private async _applyStressToModel(model: any, options: any): Promise<any> {
+        const fy = options.fy || model.loadFy || 35.53;
+        if (options.type === 'uniform_compression') {
+            for (const n of model.node) { n[7] = fy; }
+        } else if (options.type === 'pure_bending') {
+            const result = await this._pythonBridge.call('stresgen', {
+                node: model.node,
+                props: await this._pythonBridge.call('get_properties', {
+                    node: model.node, elem: model.elem
+                }),
+                loads: { P: 0, Mxx: 1, Mzz: 0, M11: 0, M22: 0 },
+            });
+            if (result?.node) {
+                let maxStress = 0;
+                for (const n of result.node) {
+                    maxStress = Math.max(maxStress, Math.abs(n[7]));
+                }
+                if (maxStress > 0) {
+                    const scale = fy / maxStress;
+                    for (const n of result.node) { n[7] *= scale; }
+                }
+                model.node = result.node;
+            }
+        } else if (options.type === 'custom') {
+            const result = await this._pythonBridge.call('stresgen', {
+                node: model.node,
+                props: await this._pythonBridge.call('get_properties', {
+                    node: model.node, elem: model.elem
+                }),
+                loads: { P: options.P || 0, Mxx: options.Mxx || 0, Mzz: options.Mzz || 0, M11: 0, M22: 0 },
+            });
+            if (result?.node) {
+                if (options.fy) {
+                    let maxStress = 0;
+                    for (const n of result.node) {
+                        maxStress = Math.max(maxStress, Math.abs(n[7]));
+                    }
+                    if (maxStress > 0) {
+                        const scale = options.fy / maxStress;
+                        for (const n of result.node) { n[7] *= scale; }
+                    }
+                }
+                model.node = result.node;
+            }
+        }
+        model.loadFy = fy;
+        return { success: true };
+    }
+
+    private async _setLoadCaseOnModel(model: any, loadCase: string, fy: number): Promise<void> {
+        let stressOpts: any;
+        if (loadCase === 'compression') {
+            stressOpts = { type: 'uniform_compression', fy };
+        } else if (loadCase === 'bending_xx' || loadCase === 'bending_xx_pos') {
+            stressOpts = { type: 'pure_bending', fy };
+        } else if (loadCase === 'bending_xx_neg') {
+            stressOpts = { type: 'custom', P: 0, Mxx: -1, Mzz: 0, fy };
+        } else if (loadCase === 'bending_zz' || loadCase === 'bending_zz_pos') {
+            stressOpts = { type: 'custom', P: 0, Mxx: 0, Mzz: 1, fy };
+        } else if (loadCase === 'bending_zz_neg') {
+            stressOpts = { type: 'custom', P: 0, Mxx: 0, Mzz: -1, fy };
+        } else {
+            stressOpts = { type: 'custom', P: 0, Mxx: 0, Mzz: 0, fy };
+        }
+        await this._applyStressToModel(model, stressOpts);
+        model.loadCase = loadCase;
+    }
+
     private _setAnalysisResult(result: any, loadType: string): void {
         this._lastAnalysisResult = {
             ...result,
@@ -435,6 +587,8 @@ export class StcfsdPanel implements McpPanelInterface {
 
     private _invalidateAnalysisState(reason: string): void {
         this._lastAnalysisResult = null;
+        this._preparedDesignDsm = null;
+        this._preparedDesignDsmSig = '';
         this._postMessage('analysisInvalidated', { reason });
         this._updateTreeView();
     }
@@ -460,6 +614,10 @@ export class StcfsdPanel implements McpPanelInterface {
         if (!this._isAnalysisCurrent()) { return false; }
         const family = this._analysisFamily(this._lastAnalysisResult?._meta?.load_type);
         return family === target;
+    }
+
+    private _preparedDsmMatchesCurrent(fy: number): boolean {
+        return !!this._preparedDesignDsm && this._preparedDesignDsmSig === this._currentDesignDsmSignature(fy);
     }
 
     private _normalizeSectionType(sectionType?: string): string {
@@ -560,76 +718,16 @@ export class StcfsdPanel implements McpPanelInterface {
                 const lc = options.load_case || 'compression';
                 const fy = options.fy || 35.53;
                 this._invalidateAnalysisState(`Load case changed: ${lc}`);
-                let stressOpts: any;
-                if (lc === 'compression') {
-                    stressOpts = { action: 'set_stress', type: 'uniform_compression', fy };
-                } else if (lc === 'bending_xx' || lc === 'bending_xx_pos') {
-                    stressOpts = { action: 'set_stress', type: 'pure_bending', fy };
-                } else if (lc === 'bending_xx_neg') {
-                    // -Mxx: z- 쪽 압축 → Mxx=-1로 반전
-                    stressOpts = { action: 'set_stress', type: 'custom', P: 0, Mxx: -1, Mzz: 0, fy };
-                } else if (lc === 'bending_zz' || lc === 'bending_zz_pos') {
-                    stressOpts = { action: 'set_stress', type: 'custom', P: 0, Mxx: 0, Mzz: 1, fy };
-                } else if (lc === 'bending_zz_neg') {
-                    // -Mzz: x- 쪽 압축 → Mzz=-1
-                    stressOpts = { action: 'set_stress', type: 'custom', P: 0, Mxx: 0, Mzz: -1, fy };
-                } else {
-                    stressOpts = { action: 'set_stress', type: 'custom', P: options.P || 0, Mxx: options.Mxx || 0, Mzz: options.Mzz || 0 };
-                }
-                const lcResult = await this.handleMcpAction(stressOpts);
+                await this._setLoadCaseOnModel(this._model as any, lc, fy);
+                const lcResult = { success: true };
                 (this._model as any).loadCase = lc;
                 (this._model as any).loadFy = fy;
+                this._postMessage('modelLoaded', this._model);
                 return { success: true, load_case: lc, fy, stress_result: lcResult };
             }
 
             case 'set_stress': {
-                const fy = options.fy || (this._model as any).loadFy || 35.53;
-                if (options.type === 'uniform_compression') {
-                    for (const n of this._model.node) { n[7] = fy; }
-                } else if (options.type === 'pure_bending') {
-                    const result = await this._pythonBridge.call('stresgen', {
-                        node: this._model.node,
-                        props: await this._pythonBridge.call('get_properties', {
-                            node: this._model.node, elem: this._model.elem
-                        }),
-                        loads: { P: 0, Mxx: 1, Mzz: 0, M11: 0, M22: 0 },
-                    });
-                    if (result?.node) {
-                        // Mxx=1 단위모멘트 → fy로 스케일링하여 극한섬유 응력 = fy
-                        let maxStress = 0;
-                        for (const n of result.node) {
-                            maxStress = Math.max(maxStress, Math.abs(n[7]));
-                        }
-                        if (maxStress > 0) {
-                            const scale = fy / maxStress;
-                            for (const n of result.node) { n[7] *= scale; }
-                        }
-                        this._model.node = result.node;
-                    }
-                } else if (options.type === 'custom') {
-                    const result = await this._pythonBridge.call('stresgen', {
-                        node: this._model.node,
-                        props: await this._pythonBridge.call('get_properties', {
-                            node: this._model.node, elem: this._model.elem
-                        }),
-                        loads: { P: options.P || 0, Mxx: options.Mxx || 0, Mzz: options.Mzz || 0, M11: 0, M22: 0 },
-                    });
-                    if (result?.node) {
-                        // fy가 지정되면 극한섬유 응력을 fy로 스케일링
-                        if (options.fy) {
-                            let maxStress = 0;
-                            for (const n of result.node) {
-                                maxStress = Math.max(maxStress, Math.abs(n[7]));
-                            }
-                            if (maxStress > 0) {
-                                const scale = options.fy / maxStress;
-                                for (const n of result.node) { n[7] *= scale; }
-                            }
-                        }
-                        this._model.node = result.node;
-                    }
-                }
-                (this._model as any).loadFy = fy;
+                await this._applyStressToModel(this._model as any, options);
                 this._invalidateAnalysisState('Stress distribution changed');
                 this._postMessage('modelLoaded', this._model);
                 return { success: true };
@@ -674,6 +772,57 @@ export class StcfsdPanel implements McpPanelInterface {
                     curve, fy: aFy, load_type: 'Mxx',
                 });
                 return { P: dsmP, Mxx: dsmM, fy_used: aFy };
+            }
+
+            case 'prepare_design_dsm': {
+                const fy = options.fy || 35.53;
+                const memberType = String(options.member_type || 'flexure');
+                if (!this._model.node?.length || !this._model.elem?.length) {
+                    return { error: 'No section model available. Generate or load a section first.' };
+                }
+
+                const requiredFamilies: Array<'P' | 'Mxx'> = memberType === 'compression'
+                    ? ['P']
+                    : memberType === 'combined'
+                        ? ['P', 'Mxx']
+                        : memberType === 'flexure'
+                            ? ['Mxx']
+                            : [];
+                if (requiredFamilies.length === 0) {
+                    return { success: true, message: 'This member type does not require DSM buckling values.' };
+                }
+
+                const prepared: any = {};
+                const preparedCases: string[] = [];
+                for (const family of requiredFamilies) {
+                    const loadCase = family === 'P' ? 'compression' : 'bending_xx_pos';
+                    const tempModel = this._cloneModel(this._model as any);
+                    await this._setLoadCaseOnModel(tempModel, loadCase, fy);
+                    const analysis = await this._pythonBridge.analyze(tempModel as any);
+
+                    if (family === 'P') {
+                        prepared.P = await this._pythonBridge.call('dsm', {
+                            node: tempModel.node, elem: tempModel.elem,
+                            curve: analysis.curve, fy, load_type: 'P',
+                        });
+                    } else {
+                        prepared.Mxx = await this._pythonBridge.call('dsm', {
+                            node: tempModel.node, elem: tempModel.elem,
+                            curve: analysis.curve, fy, load_type: 'Mxx',
+                        });
+                    }
+                    preparedCases.push(loadCase);
+                }
+
+                this._preparedDesignDsm = prepared;
+                this._preparedDesignDsmSig = this._currentDesignDsmSignature(fy);
+                return {
+                    success: true,
+                    member_type: memberType,
+                    load_cases: preparedCases,
+                    dsm: prepared,
+                    message: `Prepared FSM analyses for ${preparedCases.join(', ')} without changing the current analysis view.`,
+                };
             }
 
             case 'get_properties': {
@@ -829,8 +978,19 @@ export class StcfsdPanel implements McpPanelInterface {
                 // 해석 시 사용한 Fy로 DSM 추출 → 설계 Fy와 무관하게 정확한 Mcrl 산출
                 let dsmValues: any = {};
                 let dsmWarning: string | null = null;
-                if (!this._isAnalysisCurrent()) {
-                    dsmWarning = 'No analysis results. Run FSM analysis first to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
+                const designFy = options.Fy || 35.53;
+                if (this._preparedDsmMatchesCurrent(designFy)) {
+                    const prepared = this._preparedDesignDsm || {};
+                    dsmValues = {
+                        Pcrl: prepared.P?.Pcrl ?? 0,
+                        Pcrd: prepared.P?.Pcrd ?? 0,
+                        Py: prepared.P?.Py ?? 0,
+                        Mcrl: prepared.Mxx?.Mxxcrl ?? 0,
+                        Mcrd: prepared.Mxx?.Mxxcrd ?? 0,
+                        My: prepared.Mxx?.My_xx ?? 0,
+                    };
+                } else if (!this._isAnalysisCurrent()) {
+                    dsmWarning = 'No analysis results. Run FSM analysis first or use "설계용 FSM 해석 준비" to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
                 } else {
                     const aFy = this._getAnalysisFy();
                     try {
@@ -862,7 +1022,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         if (!this._analysisSupportsDsmLoadType('P')) { missingFamilies.push('compression'); }
                         if (!this._analysisSupportsDsmLoadType('Mxx')) { missingFamilies.push('strong-axis bending'); }
                         if (missingFamilies.length > 0) {
-                            dsmWarning = `Current analysis load case does not match ${missingFamilies.join(' / ')} DSM extraction. Run a matching FSM analysis before design.`;
+                            dsmWarning = `Current analysis load case does not match ${missingFamilies.join(' / ')} DSM extraction. Run a matching FSM analysis before design, or use "설계용 FSM 해석 준비".`;
                         }
                         if (dsmValues.Mcrl === 0 && dsmValues.Mcrd === 0) {
                             dsmWarning = dsmWarning
@@ -1603,6 +1763,12 @@ export class StcfsdPanel implements McpPanelInterface {
 
     /** WebView로 메시지 전송 */
     private _postMessage(command: string, data: any): void {
+        if (isTestMode()) {
+            this._testPostedMessages.push(JSON.parse(JSON.stringify({ command, data })));
+            if (this._testPostedMessages.length > 100) {
+                this._testPostedMessages.shift();
+            }
+        }
         if (!this._disposed) {
             this._panel.webview.postMessage({ command, data });
         }
@@ -2162,8 +2328,11 @@ export class StcfsdPanel implements McpPanelInterface {
                     <p class="hint" style="margin:2px 0 0 20px">Through-fastened panel + 양력 시: Mn = R × Mnfo</p>
                 </div>
 
-                <button id="btn-run-design" class="btn-primary" style="margin-top:12px;width:100%">▶ 설계 검토 실행</button>
-                <p class="hint" style="margin-top:6px">자동 DSM 좌굴값 적용을 위해 먼저 해석을 실행하세요.</p>
+                <div style="display:flex;gap:8px;margin-top:12px">
+                    <button id="btn-prepare-design-dsm" class="btn-secondary" style="flex:1">FSM 결과 준비</button>
+                    <button id="btn-run-design" class="btn-primary" style="flex:1">▶ 설계 검토 실행</button>
+                </div>
+                <p class="hint" style="margin-top:6px">DSM 설계용 좌굴값이 없거나 하중 케이스가 맞지 않으면 먼저 "FSM 결과 준비"를 실행하세요.</p>
             </div>
 
             <div class="panel-right">

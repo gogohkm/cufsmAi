@@ -21,10 +21,13 @@ let mcpBridge: McpBridgeServer | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('StCFSD extension activating...');
+    const isTestMode = process.env.STCFSD_TEST_MODE === '1';
 
     // Python 환경 자동 검사 + 설치
     const pythonPath = getPythonPath(context.extensionPath);
-    await checkAndInstallDependencies(context, pythonPath);
+    if (!isTestMode) {
+        await checkAndInstallDependencies(context, pythonPath);
+    }
 
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
 

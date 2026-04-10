@@ -114,11 +114,14 @@
         "build:mcp": "webpack --config webpack.mcp.config.js --mode production",
         "build": "npm run compile && npm run build:webview && npm run build:mcp",
         "package": "npm run build && vsce package",
-        "lint": "eslint src --ext ts"
+        "lint": "eslint src --ext ts",
+        "test:webview-contract": "node ./test/webview/design_prepare_contract.js",
+        "test:vscode": "npm run compile && node ./test/vscode/runTest.js"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",
         "@types/vscode": "^1.85.0",
+        "@vscode/test-electron": "^2.5.2",
         "@vscode/vsce": "^3.7.1",
         "ts-loader": "^9.5.0",
         "typescript": "^5.3.0",

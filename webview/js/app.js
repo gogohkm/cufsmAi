@@ -304,6 +304,20 @@
                 renderLoadAnalysisResult(msg.data);
                 sendTreeUpdate();
                 break;
+            case 'designDsmPrepared': {
+                const prepBtn = document.getElementById('btn-prepare-design-dsm');
+                if (prepBtn) {
+                    prepBtn.textContent = 'FSM 결과 준비';
+                    prepBtn.disabled = false;
+                }
+                if (msg.data?.error) {
+                    setStatus('설계용 FSM 준비 실패: ' + msg.data.error, 'error');
+                } else {
+                    const preparedCases = (msg.data?.load_cases || []).join(', ');
+                    setStatus('설계용 FSM 준비 완료: ' + preparedCases, 'success');
+                }
+                break;
+            }
             case 'collectDesignData':
                 vscode.postMessage({ command: 'designDataCollected', data: collectAllDesignInputs() });
                 break;
@@ -2744,54 +2758,59 @@
 
     // Design 실행
     const btnDesign = document.getElementById('btn-run-design');
+    const btnPrepareDesignDsm = document.getElementById('btn-prepare-design-dsm');
+    function collectDesignRunPayload() {
+        const rawMemberType = /** @type {HTMLSelectElement} */ (document.getElementById('select-member-type'))?.value || 'compression';
+        if (!model && !isCalcMode(rawMemberType)) { return null; }
+        const memberType = isCalcMode(rawMemberType) ? 'flexure' : rawMemberType;
+        const designMethod = /** @type {HTMLSelectElement} */ (document.getElementById('select-design-method'))?.value || 'LRFD';
+
+        return {
+            member_type: memberType,
+            design_method: designMethod,
+            Fy: fromDisplay(getNum('design-fy', 35.53), 'stress'),
+            Fu: fromDisplay(getNum('design-fu', 58.02), 'stress'),
+            KxLx: fromDisplay(getNum('design-KxLx', 118.11), 'length'),
+            KyLy: fromDisplay(getNum('design-KyLy', 118.11), 'length'),
+            KtLt: fromDisplay(getNum('design-KtLt', 118.11), 'length'),
+            Lb: fromDisplay(getNum('design-Lb', 118.11), 'length'),
+            Cb: getNum('design-Cb', 1.0),
+            Cmx: getNum('design-Cmx', 0.85),
+            Cmy: getNum('design-Cmy', 0.85),
+            Pu: fromDisplay(getNum('design-P', 0), 'force'),
+            Mu: fromDisplay(getNum('design-Mx', 0), 'moment'),
+            Mux: fromDisplay(getNum('design-Mx', 0), 'moment'),
+            Muy: fromDisplay(getNum('design-My', 0), 'moment'),
+            May_strength: fromDisplay(getNum('design-May-strength', 0), 'moment'),
+            Vu: fromDisplay(getNum('design-V', 0), 'force'),
+            Tu: fromDisplay(getNum('design-P', 0), 'force'),
+            wc_N: fromDisplay(getNum('design-wc-N', 0), 'length'),
+            wc_R: fromDisplay(getNum('design-wc-R', 0), 'radius'),
+            wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
+            wc_fastened: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-fastened'))?.value || 'fastened',
+            wc_web_config: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-web-config'))?.value || 'single',
+            wc_section_family: (() => {
+                const v = /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-family'))?.value || 'auto';
+                return v === 'auto' ? undefined : v;
+            })(),
+            wc_flange_condition: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-flange-condition'))?.value || 'stiffened',
+            wc_overhang: fromDisplay(getNum('design-wc-Lo', 0), 'length'),
+            wc_edge_distance: fromDisplay(getNum('design-wc-edge-distance', 0), 'length'),
+            wc_n_webs: getNum('design-wc-nwebs', 1),
+            wc_support_fastener_spacing: fromDisplay(getNum('design-wc-fastener-spacing', 0), 'length'),
+            use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
+            use_cold_work: /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'))?.checked || false,
+            R: fromDisplay(getNum('tpl-r', 0), 'radius'),
+            t: fromDisplay(getNum('tpl-t', 0), 'thickness'),
+            R_uplift: (/** @type {HTMLInputElement} */ (document.getElementById('chk-r-factor'))?.checked)
+                ? parseFloat(/** @type {HTMLSelectElement} */ (document.getElementById('select-r-value'))?.value || '0')
+                : undefined,
+        };
+    }
     if (btnDesign) {
         btnDesign.addEventListener('click', () => {
-            const rawMemberType = /** @type {HTMLSelectElement} */ (document.getElementById('select-member-type'))?.value || 'compression';
-            if (!model && !isCalcMode(rawMemberType)) { return; }
-            const memberType = isCalcMode(rawMemberType) ? 'flexure' : rawMemberType;
-            const designMethod = /** @type {HTMLSelectElement} */ (document.getElementById('select-design-method'))?.value || 'LRFD';
-
-            const data = {
-                member_type: memberType,
-                design_method: designMethod,
-                Fy: fromDisplay(getNum('design-fy', 35.53), 'stress'),
-                Fu: fromDisplay(getNum('design-fu', 58.02), 'stress'),
-                KxLx: fromDisplay(getNum('design-KxLx', 118.11), 'length'),
-                KyLy: fromDisplay(getNum('design-KyLy', 118.11), 'length'),
-                KtLt: fromDisplay(getNum('design-KtLt', 118.11), 'length'),
-                Lb: fromDisplay(getNum('design-Lb', 118.11), 'length'),
-                Cb: getNum('design-Cb', 1.0),
-                Cmx: getNum('design-Cmx', 0.85),
-                Cmy: getNum('design-Cmy', 0.85),
-                Pu: fromDisplay(getNum('design-P', 0), 'force'),
-                Mu: fromDisplay(getNum('design-Mx', 0), 'moment'),
-                Mux: fromDisplay(getNum('design-Mx', 0), 'moment'),
-                Muy: fromDisplay(getNum('design-My', 0), 'moment'),
-                May_strength: fromDisplay(getNum('design-May-strength', 0), 'moment'),
-                Vu: fromDisplay(getNum('design-V', 0), 'force'),
-                Tu: fromDisplay(getNum('design-P', 0), 'force'),
-                wc_N: fromDisplay(getNum('design-wc-N', 0), 'length'),
-                wc_R: fromDisplay(getNum('design-wc-R', 0), 'radius'),
-                wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
-                wc_fastened: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-fastened'))?.value || 'fastened',
-                wc_web_config: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-web-config'))?.value || 'single',
-                wc_section_family: (() => {
-                    const v = /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-family'))?.value || 'auto';
-                    return v === 'auto' ? undefined : v;
-                })(),
-                wc_flange_condition: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-flange-condition'))?.value || 'stiffened',
-                wc_overhang: fromDisplay(getNum('design-wc-Lo', 0), 'length'),
-                wc_edge_distance: fromDisplay(getNum('design-wc-edge-distance', 0), 'length'),
-                wc_n_webs: getNum('design-wc-nwebs', 1),
-                wc_support_fastener_spacing: fromDisplay(getNum('design-wc-fastener-spacing', 0), 'length'),
-                use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
-                use_cold_work: /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'))?.checked || false,
-                R: fromDisplay(getNum('tpl-r', 0), 'radius'),
-                t: fromDisplay(getNum('tpl-t', 0), 'thickness'),
-                R_uplift: (/** @type {HTMLInputElement} */ (document.getElementById('chk-r-factor'))?.checked)
-                    ? parseFloat(/** @type {HTMLSelectElement} */ (document.getElementById('select-r-value'))?.value || '0')
-                    : undefined,
-            };
+            const data = collectDesignRunPayload();
+            if (!data) { return; }
 
             // Show loading
             const loadingEl = document.getElementById('design-loading');
@@ -2802,6 +2821,22 @@
             btnDesign.disabled = true;
             setDesignStep(3, true);
             vscode.postMessage({ command: 'runDesign', data });
+        });
+    }
+    if (btnPrepareDesignDsm) {
+        btnPrepareDesignDsm.addEventListener('click', () => {
+            const data = collectDesignRunPayload();
+            if (!data) { return; }
+            btnPrepareDesignDsm.textContent = 'FSM 준비 중...';
+            btnPrepareDesignDsm.disabled = true;
+            setStatus('설계용 FSM 해석을 준비하는 중...', 'running');
+            vscode.postMessage({
+                command: 'prepareDesignDsm',
+                data: {
+                    member_type: data.member_type,
+                    Fy: data.Fy,
+                }
+            });
         });
     }
 

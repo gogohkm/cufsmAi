@@ -72,6 +72,7 @@ TEST_FUNCTIONS = (
         "test_flexure_h3_respects_fastened_and_web_config",
         "test_flexure_design_passes_built_up_i_and_edge_distance",
         "test_webview_design_state_roundtrip",
+        "test_webview_design_prepare_contract",
         "test_flexure_design_auto_infers_hat_family_and_webs",
         "test_flexure_design_auto_infers_multiweb_family_from_section_hint",
     )),

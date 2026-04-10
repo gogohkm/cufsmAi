@@ -1260,6 +1260,25 @@ def test_webview_design_state_roundtrip():
     return True
 
 
+def test_webview_design_prepare_contract():
+    """WebView 설계탭 FSM 준비 UI 계약 — 버튼/메시지 배선 포함"""
+    print('\n=== TEST: WebView Design Prepare Contract ===')
+    script_path = os.path.join(os.path.dirname(__file__), '..', 'webview', 'design_prepare_contract.js')
+    result = subprocess.run(
+        ['node', script_path],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.stderr:
+        print(result.stderr.strip())
+    if result.returncode != 0:
+        raise AssertionError(f'Node design-prepare contract test failed with exit code {result.returncode}')
+    return True
+
+
 def test_flexure_design_auto_infers_hat_family_and_webs():
     """wc_section_family auto일 때 Hat 단면 family/n_webs를 추론해야 함"""
     print('\n=== TEST: Flexure Design Auto-Infers Hat Family and Webs ===')
@@ -1398,6 +1417,7 @@ if __name__ == '__main__':
         test_flexure_h3_respects_fastened_and_web_config,
         test_flexure_design_passes_built_up_i_and_edge_distance,
         test_webview_design_state_roundtrip,
+        test_webview_design_prepare_contract,
         test_flexure_design_auto_infers_hat_family_and_webs,
         test_flexure_design_auto_infers_multiweb_family_from_section_hint,
     ]
