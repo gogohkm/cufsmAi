@@ -376,7 +376,7 @@ def _design_compression(params: dict) -> dict:
     steps.append({
         'step': 5, 'name': 'Nominal Strength (Pn)',
         'value': round(Pn, 2), 'unit': 'kips',
-        'formula': f'Pn = min(Pne={Pne:.2f}, Pnl={Pnl:.2f}, Pnd={Pnd:.2f}) = {Pn:.2f} kips',
+        'formula': f'Pn = min(Pne={Pne:.2f} kips, Pnl={Pnl:.2f} kips, Pnd={Pnd:.2f} kips) = {Pn:.2f} kips',
         'controlling_mode': mode,
     })
 
@@ -391,7 +391,7 @@ def _design_compression(params: dict) -> dict:
         steps.append({
             'step': 6, 'name': 'Design Strength (LRFD)',
             'value': round(phi_Pn, 2), 'unit': 'kips',
-            'formula': f'φPn = {phi} × {Pn:.2f} = {phi_Pn:.2f} kips',
+            'formula': f'φPn = {phi} × {Pn:.2f} kips = {phi_Pn:.2f} kips',
         })
     else:
         design_strength = Pn_omega
@@ -402,7 +402,7 @@ def _design_compression(params: dict) -> dict:
         steps.append({
             'step': 6, 'name': 'Allowable Strength (ASD)',
             'value': round(Pn_omega, 2), 'unit': 'kips',
-            'formula': f'Pn/Ω = {Pn:.2f}/{omega} = {Pn_omega:.2f} kips',
+            'formula': f'Pn/Ω = {Pn:.2f} kips/{omega} = {Pn_omega:.2f} kips',
         })
 
     return {
@@ -607,7 +607,7 @@ def _design_flexure(params: dict) -> dict:
         'value': round(Mnl, 2), 'unit': 'kip-in',
         'formula': (
             f'Mcrl = {Mcrl:.2f} kip-in, '
-            f'λl = √(Mne/Mcrl) = √({Mne:.2f}/{Mcrl:.2f}) = {local_result["lambda_l"]:.3f} → '
+            f'λl = √(Mne/Mcrl) = √({Mne:.2f} kip-in/{Mcrl:.2f} kip-in) = {local_result["lambda_l"]:.3f} → '
             f'Mnl = {Mnl:.2f} kip-in'
         ) if Mcrl > 0 else f'Mcrl = 0 → Mnl = Mne = {Mnl:.2f} kip-in',
         'equation': local_result['equation'],
@@ -621,7 +621,7 @@ def _design_flexure(params: dict) -> dict:
         'value': round(Mnd, 2), 'unit': 'kip-in',
         'formula': (
             f'Mcrd = {Mcrd:.2f} kip-in ({Mcrd_source}), '
-            f'λd = √(My/Mcrd) = √({My:.2f}/{Mcrd:.2f}) = {dist_result["lambda_d"]:.3f} → '
+            f'λd = √(My/Mcrd) = √({My:.2f} kip-in/{Mcrd:.2f} kip-in) = {dist_result["lambda_d"]:.3f} → '
             f'Mnd = {Mnd:.2f} kip-in'
         ) if Mcrd > 0 else f'Mcrd = 0 → Mnd = My = {Mnd:.2f} kip-in',
         'equation': dist_result['equation'],
@@ -639,7 +639,7 @@ def _design_flexure(params: dict) -> dict:
     steps.append({
         'step': 5, 'name': 'Nominal Strength — DSM (Mn)',
         'value': round(Mn_dsm, 2), 'unit': 'kip-in',
-        'formula': f'Mn = min(Mne={Mne:.2f}, Mnl={Mnl:.2f}, Mnd={Mnd:.2f}) = {Mn_dsm:.2f} kip-in',
+        'formula': f'Mn = min(Mne={Mne:.2f} kip-in, Mnl={Mnl:.2f} kip-in, Mnd={Mnd:.2f} kip-in) = {Mn_dsm:.2f} kip-in',
         'controlling_mode': mode,
     })
 
@@ -697,7 +697,7 @@ def _design_flexure(params: dict) -> dict:
         steps.append({
             'step': 7, 'name': 'Design Strength (LRFD)',
             'value': round(phi_Mn, 2), 'unit': 'kip-in',
-            'formula': f'φMn = {phi} × {Mn:.2f} = {phi_Mn:.2f} kip-in',
+            'formula': f'φMn = {phi} × {Mn:.2f} kip-in = {phi_Mn:.2f} kip-in',
         })
     else:
         design_strength = Mn_omega
@@ -708,7 +708,7 @@ def _design_flexure(params: dict) -> dict:
         steps.append({
             'step': 7, 'name': 'Allowable Strength (ASD)',
             'value': round(Mn_omega, 2), 'unit': 'kip-in',
-            'formula': f'Mn/Ω = {Mn:.2f}/{omega} = {Mn_omega:.2f} kip-in',
+            'formula': f'Mn/Ω = {Mn:.2f} kip-in/{omega} = {Mn_omega:.2f} kip-in',
         })
 
     result = {

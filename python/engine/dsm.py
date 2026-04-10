@@ -172,6 +172,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         'minima': minima,
         'n_minima': len(minima),
         'classification': classification,
+
     }
 
     return result

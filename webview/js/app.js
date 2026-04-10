@@ -1738,52 +1738,34 @@
             model.BC = BC;
             model.neigs = neigs;
 
-            // Load Case에 따라 stress 자동 설정
+            // Load Case에 따라 stress 옵션 결정
             const loadCase = /** @type {HTMLSelectElement} */ (document.getElementById('select-load-case'))?.value || 'compression';
             const fyLoad = fromDisplay(getNum('input-fy', 35.53), 'stress');
 
+            let stressOpts;
             if (loadCase === 'compression') {
-                vscode.postMessage({
-                    command: 'setStress',
-                    data: { type: 'uniform_compression', fy: fyLoad }
-                });
+                stressOpts = { type: 'uniform_compression', fy: fyLoad };
             } else if (loadCase === 'bending_xx_pos') {
-                vscode.postMessage({
-                    command: 'setStress',
-                    data: { type: 'pure_bending', fy: fyLoad }
-                });
+                stressOpts = { type: 'pure_bending', fy: fyLoad };
             } else if (loadCase === 'bending_xx_neg') {
-                vscode.postMessage({
-                    command: 'setStress',
-                    data: { type: 'custom', P: 0, Mxx: -1, Mzz: 0, fy: fyLoad }
-                });
+                stressOpts = { type: 'custom', P: 0, Mxx: -1, Mzz: 0, fy: fyLoad };
             } else if (loadCase === 'bending_zz_pos') {
-                vscode.postMessage({
-                    command: 'setStress',
-                    data: { type: 'custom', P: 0, Mxx: 0, Mzz: 1, fy: fyLoad }
-                });
+                stressOpts = { type: 'custom', P: 0, Mxx: 0, Mzz: 1, fy: fyLoad };
             } else if (loadCase === 'bending_zz_neg') {
-                vscode.postMessage({
-                    command: 'setStress',
-                    data: { type: 'custom', P: 0, Mxx: 0, Mzz: -1, fy: fyLoad }
-                });
+                stressOpts = { type: 'custom', P: 0, Mxx: 0, Mzz: -1, fy: fyLoad };
             } else if (loadCase === 'custom') {
-                vscode.postMessage({
-                    command: 'setStress',
-                    data: {
-                        type: 'custom',
-                        P: fromDisplay(getNum('input-load-P', 0), 'force'),
-                        Mxx: fromDisplay(getNum('input-load-Mxx', 0), 'moment'),
-                        Mzz: fromDisplay(getNum('input-load-Mzz', 0), 'moment'),
-                    }
-                });
+                stressOpts = {
+                    type: 'custom',
+                    P: fromDisplay(getNum('input-load-P', 0), 'force'),
+                    Mxx: fromDisplay(getNum('input-load-Mxx', 0), 'moment'),
+                    Mzz: fromDisplay(getNum('input-load-Mzz', 0), 'moment'),
+                };
             }
 
-            // stress 설정 후 해석 실행 (약간의 지연으로 stress 반영 보장)
+            // stress 설정 + 해석을 단일 메시지로 전달 (레이스 컨디션 방지)
             model.loadCase = loadCase;
-            setTimeout(() => {
-                vscode.postMessage({ command: 'runAnalysis', data: model });
-            }, 200);
+            model.stressOpts = stressOpts;
+            vscode.postMessage({ command: 'runAnalysis', data: model });
         });
     }
 

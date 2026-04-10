@@ -214,7 +214,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'runAnalysis':
                 // 프론트엔드 model을 익스텐션 모델에 병합 (prop, lengths, BC 등)
-                // 단, node/elem은 setStress에서 이미 설정된 this._model 것을 사용
+                // 단, node/elem은 이미 설정된 this._model 것을 사용
                 if (message.data) {
                     if (message.data.prop) this._model.prop = message.data.prop;
                     if (message.data.lengths) this._model.lengths = message.data.lengths;
@@ -222,6 +222,11 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (message.data.BC) this._model.BC = message.data.BC;
                     if (message.data.neigs) this._model.neigs = message.data.neigs;
                     if (message.data.loadCase) (this._model as any).loadCase = message.data.loadCase;
+                    // 응력 설정을 해석 직전에 동기적으로 처리 (레이스 컨디션 방지)
+                    if (message.data.stressOpts) {
+                        await this._applyStressToModel(this._model as any, message.data.stressOpts);
+                        (this._model as any).loadFy = message.data.stressOpts.fy || (this._model as any).loadFy;
+                    }
                 }
                 await this._runAnalysis(this._model);
                 break;
