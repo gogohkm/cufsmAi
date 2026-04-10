@@ -168,10 +168,12 @@ def find_controlling_combo(loads: dict, load_results: dict,
         d_factor = factors.get('D', 0)
         w_factor = factors.get('W', 0)
         has_uplift_wind = loads.get('W', 0) < 0 and w_factor != 0
+        combined_R = combined.get('R', [])
+        has_net_uplift_R = any(r < 0 for r in combined_R) if combined_R else False
         is_uplift = bool(
             has_uplift_wind
             and min_M < 0
-            and (d_factor < 1.0 or abs(min_M) >= max_M)
+            and (has_net_uplift_R or d_factor < 1.0 or abs(min_M) >= max_M)
         )
 
         detail = {

@@ -46,34 +46,44 @@ def shear_strength(h: float, t: float, Fy: float,
 # 웹 크리플링 (§G5)
 # ============================================================
 
-# Table G5-3 계수 (단일 비보강 웹, C/Z 형강)
+# AISI S100-16 Table G5-2 (C-section) / G5-3 (Z-section) 계수
+# 키: (section_type, support, fastened) → (C, Cr, CN, Ch, phi_LRFD, omega_ASD)
+# Stiffened or Partially Stiffened Flanges, One-Flange / Two-Flange Loading
 _WC_COEFFS = {
-    # (support, load_case): (C, Cr, CN, Ch)
-    # EOF = End One-Flange, IOF = Interior One-Flange
-    # ETF = End Two-Flange,  ITF = Interior Two-Flange
-    ('EOF', 'fastened'): (4.0, 0.14, 0.35, 0.02),
-    ('EOF', 'unfastened'): (4.0, 0.14, 0.35, 0.02),
-    ('IOF', 'fastened'): (13.0, 0.23, 0.14, 0.01),
-    ('IOF', 'unfastened'): (13.0, 0.23, 0.14, 0.01),
-    ('ETF', 'fastened'): (6.9, 0.06, 0.16, 0.05),
-    ('ETF', 'unfastened'): (6.9, 0.06, 0.16, 0.05),
-    ('ITF', 'fastened'): (13.0, 0.32, 0.05, 0.04),
-    ('ITF', 'unfastened'): (13.0, 0.32, 0.05, 0.04),
+    # ── Table G5-2: Single Web Channel and C-Sections ──
+    ('C', 'EOF', 'fastened'):   (4.0,  0.14, 0.35, 0.02,  0.85, 1.75),
+    ('C', 'EOF', 'unfastened'): (4.0,  0.14, 0.35, 0.02,  0.80, 1.85),
+    ('C', 'IOF', 'fastened'):   (13.0, 0.23, 0.14, 0.01,  0.90, 1.65),
+    ('C', 'IOF', 'unfastened'): (13.0, 0.23, 0.14, 0.01,  0.90, 1.65),
+    ('C', 'ETF', 'fastened'):   (7.5,  0.08, 0.12, 0.048, 0.85, 1.75),
+    ('C', 'ETF', 'unfastened'): (13.0, 0.32, 0.05, 0.04,  0.90, 1.65),
+    ('C', 'ITF', 'fastened'):   (20.0, 0.10, 0.08, 0.031, 0.85, 1.75),
+    ('C', 'ITF', 'unfastened'): (24.0, 0.52, 0.15, 0.001, 0.90, 1.65),
+    # ── Table G5-3: Single Web Z-Sections ──
+    ('Z', 'EOF', 'fastened'):   (4.0,  0.14, 0.35, 0.02,  0.85, 1.75),
+    ('Z', 'EOF', 'unfastened'): (5.0,  0.09, 0.02, 0.001, 0.85, 1.80),
+    ('Z', 'IOF', 'fastened'):   (13.0, 0.23, 0.14, 0.01,  0.90, 1.65),
+    ('Z', 'IOF', 'unfastened'): (13.0, 0.23, 0.14, 0.01,  0.90, 1.65),
+    ('Z', 'ETF', 'fastened'):   (9.0,  0.05, 0.16, 0.052, 0.85, 1.75),
+    ('Z', 'ETF', 'unfastened'): (13.0, 0.32, 0.05, 0.04,  0.90, 1.65),
+    ('Z', 'ITF', 'fastened'):   (24.0, 0.07, 0.07, 0.04,  0.80, 1.85),
+    ('Z', 'ITF', 'unfastened'): (24.0, 0.52, 0.15, 0.001, 0.80, 1.90),
 }
 
-# φ and Ω per load case
+# 하위 호환 fallback용 약식 φ/Ω (section_type 미지정 시)
 _WC_FACTORS = {
-    'EOF': {'phi': 0.85, 'omega': 1.76},
+    'EOF': {'phi': 0.85, 'omega': 1.75},
     'IOF': {'phi': 0.90, 'omega': 1.65},
-    'ETF': {'phi': 0.75, 'omega': 2.00},
-    'ITF': {'phi': 0.90, 'omega': 1.65},
+    'ETF': {'phi': 0.85, 'omega': 1.75},
+    'ITF': {'phi': 0.85, 'omega': 1.75},
 }
 
 
 def web_crippling(h: float, t: float, R: float, N: float,
                   Fy: float, theta: float = 90,
                   support: str = 'EOF',
-                  fastened: str = 'fastened') -> dict:
+                  fastened: str = 'fastened',
+                  section_type: str = 'C') -> dict:
     """웹 크리플링 강도 (§G5, Eq. G5-1)
 
     Pn = C × t² × Fy × sin(θ) × (1 - Cr√(R/t)) × (1 + CN√(N/t)) × (1 - Ch√(h/t))
@@ -87,17 +97,27 @@ def web_crippling(h: float, t: float, R: float, N: float,
         theta: 웹과 지압면 사이 각도 (deg, 기본 90)
         support: 'EOF' | 'IOF' | 'ETF' | 'ITF'
         fastened: 'fastened' | 'unfastened'
+        section_type: 'C' (Table G5-2) | 'Z' (Table G5-3)
 
     Returns:
         dict: {Pn, phi, omega, equation, ...}
     """
-    key = (support.upper(), fastened.lower())
+    sec = section_type.upper()[0] if section_type else 'C'
+    if sec not in ('C', 'Z'):
+        sec = 'C'
+    sup = support.upper()
+    fas = fastened.lower()
+
+    key = (sec, sup, fas)
     coeffs = _WC_COEFFS.get(key)
+    if coeffs is None:
+        # fallback: C-section 값 사용
+        key = ('C', sup, fas)
+        coeffs = _WC_COEFFS.get(key)
     if coeffs is None:
         return {'error': f'Unknown web crippling case: {key}'}
 
-    C, Cr, CN, Ch = coeffs
-    factors = _WC_FACTORS[support.upper()]
+    C, Cr, CN, Ch, phi, omega = coeffs
 
     theta_rad = math.radians(theta)
     sin_theta = math.sin(theta_rad)
@@ -116,15 +136,18 @@ def web_crippling(h: float, t: float, R: float, N: float,
 
     Pn = C * t ** 2 * Fy * sin_theta * term1 * term2 * term3
 
+    table = 'G5-2' if sec == 'C' else 'G5-3'
     return {
         'Pn': round(Pn, 3),
-        'phi': factors['phi'],
-        'omega': factors['omega'],
-        'support': support.upper(),
-        'fastened': fastened.lower(),
+        'phi': phi,
+        'omega': omega,
+        'support': sup,
+        'fastened': fas,
+        'section_type': sec,
         'equation': 'G5-1',
+        'table': table,
         'formula': (f'Pn = {C}×t²×Fy×sin({theta}°)'
                     f'×(1-{Cr}√(R/t))×(1+{CN}√(N/t))×(1-{Ch}√(h/t))'
-                    f' = {Pn:.3f} kips'),
+                    f' = {Pn:.3f} kips [{table}]'),
         'spec_sections': ['G5'],
     }

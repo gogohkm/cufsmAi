@@ -2773,6 +2773,8 @@
                 wc_N: fromDisplay(getNum('design-wc-N', 0), 'length'),
                 wc_R: fromDisplay(getNum('design-wc-R', 0), 'radius'),
                 wc_support: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-support'))?.value || 'EOF',
+                wc_fastened: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-fastened'))?.value || 'fastened',
+                wc_web_config: /** @type {HTMLSelectElement} */ (document.getElementById('design-wc-web-config'))?.value || 'single',
                 use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
                 use_cold_work: /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'))?.checked || false,
                 R: fromDisplay(getNum('tpl-r', 0), 'radius'),
@@ -3599,12 +3601,15 @@
     /** formula 문자열 내의 US 단위 값을 현재 표시 단위로 변환 */
     function _convertFormulaUnits(formula) {
         if (!formula || _unitSystem === 'US') return formula;
-        // "123.45 ksi" → "850.52 MPa", "456.78 kip-in" → "51.61 kN-m" 등
         return formula
             .replace(/([\d.]+)\s*kip-in/g, (_, n) => fmtVal(parseFloat(n), 'moment') + ' ' + unitLabel('moment'))
+            .replace(/([\d.]+)\s*kip-ft/g, (_, n) => fmtVal(parseFloat(n), 'moment_ft') + ' ' + unitLabel('moment_ft'))
             .replace(/([\d.]+)\s*kips?/g, (_, n) => fmtVal(parseFloat(n), 'force') + ' ' + unitLabel('force'))
             .replace(/([\d.]+)\s*ksi/g, (_, n) => fmtVal(parseFloat(n), 'stress') + ' ' + unitLabel('stress'))
-            .replace(/([\d.]+)\s*in\./g, (_, n) => fmtVal(parseFloat(n), 'length') + ' ' + unitLabel('length'));
+            .replace(/([\d.]+)\s*in\u2074/g, (_, n) => fmtVal(parseFloat(n), 'inertia') + ' ' + unitLabel('inertia'))
+            .replace(/([\d.]+)\s*in\u00B3/g, (_, n) => fmtVal(parseFloat(n), 'modulus') + ' ' + unitLabel('modulus'))
+            .replace(/([\d.]+)\s*in\u00B2/g, (_, n) => fmtVal(parseFloat(n), 'area') + ' ' + unitLabel('area'))
+            .replace(/([\d.]+)\s*in\.?(?=[\s,)$])/g, (_, n) => fmtVal(parseFloat(n), 'length') + ' ' + unitLabel('length'));
     }
 
     /** US 단위 문자열 → unitType 매핑 (Python step.unit → UNIT key) */
@@ -5153,6 +5158,8 @@
         data.wcN = fromDisplay(getNum('design-wc-N', 3.504), 'length');
         data.wcR = fromDisplay(getNum('design-wc-R', 0.1875), 'radius');
         data.wcSupport = document.getElementById('design-wc-support')?.value || 'EOF';
+        data.wcFastened = document.getElementById('design-wc-fastened')?.value || 'fastened';
+        data.wcWebConfig = document.getElementById('design-wc-web-config')?.value || 'single';
         // Template params
         data.templateType = document.getElementById('select-template')?.value || '';
         data.tplH = fromDisplay(getNum('tpl-H', 7.874), 'length');
@@ -5241,6 +5248,8 @@
         if (data.wcN != null) setValue('design-wc-N', toDisplay(data.wcN, 'length'));
         if (data.wcR != null) setValue('design-wc-R', toDisplay(data.wcR, 'radius'));
         if (data.wcSupport) setSelect('design-wc-support', data.wcSupport);
+        if (data.wcFastened) setSelect('design-wc-fastened', data.wcFastened);
+        if (data.wcWebConfig) setSelect('design-wc-web-config', data.wcWebConfig);
         // Template
         if (data.templateType) setSelect('select-template', data.templateType);
         if (data.tplH != null) setValue('tpl-H', toDisplay(data.tplH, 'length'));

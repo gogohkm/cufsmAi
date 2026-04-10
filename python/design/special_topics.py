@@ -202,7 +202,12 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
         if A_flange > 0:
             C = A_corners_total / A_flange
         else:
-            C = min(A_corners_total / (A_corners_total / 0.15), 0.3)  # 보수적 15~30%
+            # A_flange 미제공 시 보수적 추정: C = 0.15 (일반적 CFS 범위 0.05~0.30)
+            C = 0.15
+            warnings.append(
+                'A_flange 미제공 → 보수적 C=0.15 사용. '
+                '정확한 계산을 위해 A_corners, A_flange를 제공하세요.'
+            )
 
     C = min(C, 1.0)
 
@@ -255,7 +260,7 @@ def flange_curling(bf: float, t: float, h: float,
     if t <= 0 or E <= 0:
         return {'cf': 0, 'limit': 0, 'ok': True, 'note': 'Invalid input'}
 
-    # Eq. C3.1.4-1: cf = 0.061 × bf⁴ × f_avg / (E × t² × h)
+    # AISI S100-16 Eq. L3-1: cf = 0.061 × bf⁴ × f_avg / (E × t² × h)
     cf = 0.061 * bf ** 4 * abs(f_avg) / (E * t ** 2 * h) if h > 0 else 0
 
     # AISI는 고정 허용치를 제시하지 않으므로 기본값은 commentary-style reference만 둔다.

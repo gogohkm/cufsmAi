@@ -234,6 +234,7 @@ def handle_request(request: dict) -> dict:
                 theta=params.get('theta', 90),
                 support=params.get('support', 'EOF'),
                 fastened=params.get('fastened', 'fastened'),
+                section_type=params.get('section_type', 'C'),
             )
             return {'id': req_id, 'result': result}
 

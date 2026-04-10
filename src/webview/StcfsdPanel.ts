@@ -447,6 +447,21 @@ export class StcfsdPanel implements McpPanelInterface {
         return Array.isArray(this._lastAnalysisResult.curve) && this._lastAnalysisResult.curve.length > 0;
     }
 
+    private _analysisFamily(loadType?: string): 'P' | 'Mxx' | 'Mzz' | 'custom' | 'unknown' {
+        const lc = String(loadType || '').toLowerCase();
+        if (lc === 'compression') { return 'P'; }
+        if (lc.startsWith('bending_xx') || lc === 'pure_bending' || lc === 'signature_ss') { return 'Mxx'; }
+        if (lc.startsWith('bending_zz')) { return 'Mzz'; }
+        if (lc === 'custom') { return 'custom'; }
+        return 'unknown';
+    }
+
+    private _analysisSupportsDsmLoadType(target: 'P' | 'Mxx'): boolean {
+        if (!this._isAnalysisCurrent()) { return false; }
+        const family = this._analysisFamily(this._lastAnalysisResult?._meta?.load_type);
+        return family === target;
+    }
+
     private _normalizeSectionType(sectionType?: string): string {
         const st = (sectionType || '').toLowerCase();
         if (st.includes('z')) { return 'Z'; }
@@ -793,19 +808,22 @@ export class StcfsdPanel implements McpPanelInterface {
                 } else {
                     const aFy = this._getAnalysisFy();
                     try {
-                        // 압축용 DSM
-                        const dsmP = await this._pythonBridge.call('dsm', {
-                            node: this._model.node, elem: this._model.elem,
-                            curve: this._lastAnalysisResult.curve,
-                            fy: aFy, load_type: 'P',
-                        });
-                        // 휨용 DSM
-                        const dsmM = await this._pythonBridge.call('dsm', {
-                            node: this._model.node, elem: this._model.elem,
-                            curve: this._lastAnalysisResult.curve,
-                            fy: aFy, load_type: 'Mxx',
-                        });
-                        // Python dsm returns dynamic keys: Pcrl/Pcrd for P, Mxxcrl/Mxxcrd for Mxx
+                        let dsmP: any = null;
+                        let dsmM: any = null;
+                        if (this._analysisSupportsDsmLoadType('P')) {
+                            dsmP = await this._pythonBridge.call('dsm', {
+                                node: this._model.node, elem: this._model.elem,
+                                curve: this._lastAnalysisResult.curve,
+                                fy: aFy, load_type: 'P',
+                            });
+                        }
+                        if (this._analysisSupportsDsmLoadType('Mxx')) {
+                            dsmM = await this._pythonBridge.call('dsm', {
+                                node: this._model.node, elem: this._model.elem,
+                                curve: this._lastAnalysisResult.curve,
+                                fy: aFy, load_type: 'Mxx',
+                            });
+                        }
                         dsmValues = {
                             Pcrl: dsmP?.Pcrl ?? 0,
                             Pcrd: dsmP?.Pcrd ?? 0,
@@ -814,8 +832,16 @@ export class StcfsdPanel implements McpPanelInterface {
                             Mcrd: dsmM?.Mxxcrd ?? 0,
                             My: dsmM?.My_xx ?? 0,
                         };
+                        const missingFamilies: string[] = [];
+                        if (!this._analysisSupportsDsmLoadType('P')) { missingFamilies.push('compression'); }
+                        if (!this._analysisSupportsDsmLoadType('Mxx')) { missingFamilies.push('strong-axis bending'); }
+                        if (missingFamilies.length > 0) {
+                            dsmWarning = `Current analysis load case does not match ${missingFamilies.join(' / ')} DSM extraction. Run a matching FSM analysis before design.`;
+                        }
                         if (dsmValues.Mcrl === 0 && dsmValues.Mcrd === 0) {
-                            dsmWarning = 'DSM extraction found no buckling minima in curve. Check that stress distribution matches design type (bending vs compression).';
+                            dsmWarning = dsmWarning
+                                ? `${dsmWarning} DSM extraction found no buckling minima in curve.`
+                                : 'DSM extraction found no buckling minima in curve. Check that stress distribution matches design type (bending vs compression).';
                         }
                     } catch (e: any) {
                         dsmWarning = `DSM extraction failed: ${e.message || String(e)}`;
@@ -834,23 +860,45 @@ export class StcfsdPanel implements McpPanelInterface {
                     const zMin = Math.min(...zs), zMax = Math.max(...zs);
                     const tArr = elemArr.map((e: number[]) => e[3]);
                     const t = tArr.length > 0 ? tArr[0] : 0;
+                    const secType = ((this._model as any).sectionType || 'C').toUpperCase();
+
+                    // 단면 유형별 flange_width 추정
+                    let flangeWidth: number;
+                    if (secType === 'HAT') {
+                        // Hat section: 전체 x범위가 단일 플랜지 폭
+                        flangeWidth = xMax - xMin;
+                    } else if (secType === 'TRACK') {
+                        // Track: 전체 x범위의 절반 (립 없는 C)
+                        flangeWidth = (xMax - xMin) / 2;
+                    } else {
+                        // C, Z, angle, etc: 전체 x범위의 절반
+                        flangeWidth = (xMax - xMin) / 2;
+                    }
+
                     sectionInfo = {
                         depth: +(zMax - zMin).toFixed(4),
-                        flange_width: +((xMax - xMin) / 2).toFixed(4),  // C-section: half of total width
+                        flange_width: +flangeWidth.toFixed(4),
                         thickness: +t.toFixed(4),
-                        type: (this._model as any).sectionType || 'C',
+                        type: secType,
                     };
-                    // 립 높이 추정: z 최소 근처에서 x ≈ 0인 노드의 z 범위
+
+                    // 립 높이 추정: z 최소(하단) 근처에서 x ≈ xMin인 노드의 z 범위
+                    const lipTol = Math.max(t * 3, 0.01);
                     const lipNodes = nodeArr.filter((n: number[]) =>
-                        Math.abs(n[1] - xMin) < t * 3 && n[2] < zMin + (zMax - zMin) * 0.15);
+                        Math.abs(n[1] - xMin) < lipTol && n[2] < zMin + (zMax - zMin) * 0.15);
                     if (lipNodes.length >= 2) {
                         const lipZs = lipNodes.map((n: number[]) => n[2]);
                         sectionInfo.lip_depth = +(Math.max(...lipZs) - Math.min(...lipZs)).toFixed(4);
+                    }
+                    // 코너 반경
+                    if ((this._model as any).cornerRadius) {
+                        sectionInfo.R_corner = (this._model as any).cornerRadius;
                     }
                 }
 
                 const designParams = {
                     ...options,
+                    section_type: sectionInfo.type || (this._model as any).sectionType || 'C',
                     props: mergedProps,
                     dsm: dsmValues,
                     section: sectionInfo,
@@ -1232,8 +1280,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._postMessage('modelLoaded', this._model);
 
                 const result = await this._pythonBridge.analyze(this._model as any);
-                this._lastAnalysisResult = result;
-                this._postMessage('analysisComplete', result);
+                this._setAnalysisResult(result, (this._model as any).loadCase || 'signature_ss');
+                this._postMessage('analysisComplete', this._lastAnalysisResult);
                 return { success: true, n_lengths: result.n_lengths };
             }
 
@@ -2001,6 +2049,22 @@ export class StcfsdPanel implements McpPanelInterface {
                             <option value="ITF">ITF (내부 2면)</option>
                         </select>
                     </div>
+                    <div class="input-row">
+                        <label>지지 연결</label>
+                        <select id="design-wc-fastened" style="width:120px">
+                            <option value="fastened">fastened</option>
+                            <option value="unfastened">unfastened</option>
+                        </select>
+                        <label>H3 분기</label>
+                        <select id="design-wc-web-config" style="width:120px">
+                            <option value="single">single web</option>
+                            <option value="nested_z">nested Z</option>
+                            <option value="multi_web">multi-web</option>
+                        </select>
+                    </div>
+                    <p class="hint" style="font-size:10px;margin-top:4px">
+                        section type은 현재 모델 형상에서 자동 추정합니다. overhang / hat / multi-web 일반화는 별도 입력 경로가 필요합니다.
+                    </p>
                 </div>
 
                 <div class="section-group" style="margin-top:10px; padding:6px 8px; border:1px solid var(--vscode-panel-border); border-radius:3px;">

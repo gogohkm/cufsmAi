@@ -38,6 +38,50 @@ OMEGA = {
 }
 
 
+def _effective_section_type(params: dict) -> str:
+    """우선순위: 명시 section_type → section.type → 기본 C"""
+    section = params.get('section', {}) or {}
+    return str(params.get('section_type') or section.get('type') or 'C')
+
+
+def _estimate_cold_work_areas(section: dict, props: dict, R: float, t: float) -> dict:
+    """냉간가공 코너면적비용 단순 형상 추정.
+
+    상세 형상 분해가 없을 때 C/Z/track/hat 단면의 압축 플랜지 폭과 lip 깊이로
+    제어 플랜지 조립부 면적을 근사한다. 값이 충분치 않으면 빈 dict 반환.
+    """
+    if R <= 0 or t <= 0:
+        return {}
+
+    sec_type = str(section.get('type') or 'C').upper()
+    flange_width = float(section.get('flange_width') or props.get('b_flange') or 0)
+    lip_depth = float(section.get('lip_depth') or props.get('d_lip') or 0)
+
+    if flange_width <= 0:
+        return {}
+
+    if sec_type == 'HAT':
+        n_corners = 4 if lip_depth <= 0 else 6
+        flange_projection = flange_width + 2.0 * max(lip_depth, 0.0)
+    elif sec_type in ('TRACK',):
+        n_corners = 2
+        flange_projection = flange_width
+    else:
+        n_corners = 4 if lip_depth > 0 else 2
+        flange_projection = flange_width + max(lip_depth, 0.0)
+
+    arc_length = (math.pi / 2.0) * (R + t / 2.0)
+    a_corners = n_corners * arc_length * t
+    a_flange = flange_projection * t
+    if a_flange <= 0:
+        return {}
+    return {
+        'n_corners': n_corners,
+        'A_corners': a_corners,
+        'A_flange': a_flange,
+    }
+
+
 def design_member(params: dict) -> dict:
     """부재 설계 계산 메인 디스패처"""
     # props가 없으면 단면 템플릿에서 자동 생성
@@ -355,7 +399,7 @@ def _design_flexure(params: dict) -> dict:
     warnings = []
     steps = []
     spec_sections = []
-    section_type = params.get('section_type', 'C')
+    section_type = _effective_section_type(params)
     Zf = props.get('Zx', 0) or props.get('Zf', 0)
     use_ir = params.get('use_inelastic_reserve', False)
 
@@ -441,7 +485,10 @@ def _design_flexure(params: dict) -> dict:
         R = props.get('R', 0) or params.get('R', 0) or params.get('r', 0)
         t = props.get('t', 0) or params.get('t', 0)
         if R > 0 and t > 0:
-            cold_work_info = cold_work_strength(Fyv=Fy_original, Fuv=Fu, R=R, t=t)
+            cw_area_kwargs = _estimate_cold_work_areas(params.get('section', {}) or {}, props, R, t)
+            cold_work_info = cold_work_strength(
+                Fyv=Fy_original, Fuv=Fu, R=R, t=t, **cw_area_kwargs
+            )
             if use_ir:
                 warnings.append('§A3.3.2: Cold Work(Fya)와 §F2.4.2 Inelastic Reserve는 동시 적용 불가. Cold Work를 적용하지 않았습니다.')
             elif cold_work_info['applicable'] and cold_work_info['Fya'] > Fy_original:
@@ -645,16 +692,22 @@ def _design_flexure(params: dict) -> dict:
         h = props.get('h_web', 0)
         t = props.get('t', 0)
         if h > 0 and t > 0:
-            wc = web_crippling(h, t, wc_R, wc_N, Fy, support=wc_support)
+            wc_sec_type = params.get('wc_section_type') or _effective_section_type(params)
+            wc_fastened = params.get('wc_fastened', 'fastened')
+            wc_web_config = params.get('wc_web_config', 'single')
+            wc = web_crippling(h, t, wc_R, wc_N, Fy, support=wc_support,
+                               fastened=wc_fastened, section_type=wc_sec_type)
             Pn_wc = wc['Pn']
             from design.interaction import combined_bending_web_crippling
             # 집중하중 P = 소요 반력 (Vu를 사용하거나, Pu를 사용)
             Vu = params.get('Vu', 0) or params.get('Pu', 0)
-            h3 = combined_bending_web_crippling(Vu, Pn_wc, Mu, Mnfo, 0.90)
+            h3 = combined_bending_web_crippling(Vu, Pn_wc, Mu, Mnfo, 0.90, wc_web_config)
             result['web_crippling'] = {
                 'Pn': round(Pn_wc, 2),
                 'support': wc_support,
                 'phi': wc['phi'],
+                'fastened': wc_fastened,
+                'section_type': wc_sec_type,
             }
             result['h3_interaction'] = h3
             result['Mnfo'] = round(Mnfo, 2)
@@ -1154,9 +1207,10 @@ def _auto_generate_props(params: dict) -> dict:
     B = params.get('B', 2.5)
     D = params.get('D', 0.625)
     t = params.get('t', 0.0451)
+    R_val = params.get('R', 0) or params.get('r', 0)
 
     try:
-        sec = generate_section(section_type, {'H': H, 'B': B, 'D': D, 't': t})
+        sec = generate_section(section_type, {'H': H, 'B': B, 'D': D, 't': t, 'r': R_val})
         node = sec['node']
         elem = sec['elem']
 
@@ -1186,22 +1240,53 @@ def _auto_generate_props(params: dict) -> dict:
             try:
                 from engine.fsm_solver import stripmain
                 from engine.dsm import extract_dsm_values
+                from engine.stress import stresgen, yieldMP
                 from models.data import GBTConfig
                 import numpy as np
 
                 prop_mat = np.array([[100, 29500, 29500, 0.3, 0.3, 11346]])
-                for n in node:
-                    n[7] = params.get('Fy', 35.53)
+                Fy = params.get('Fy', 35.53)
+
+                node_p = node.copy()
+                for n in node_p:
+                    n[7] = Fy
+
+                yield_vals = yieldMP(
+                    node.copy(), Fy,
+                    props['A'], props['xcg'], props['zcg'],
+                    props['Ixx'], props['Izz'], props['Ixz'],
+                    props['thetap'], props['I11'], props['I22'],
+                )
+                node_m = stresgen(
+                    node.copy(),
+                    P=0.0,
+                    Mxx=yield_vals.get('Mxx_y', 0.0),
+                    Mzz=0.0,
+                    M11=0.0,
+                    M22=0.0,
+                    A=props['A'],
+                    xcg=props['xcg'],
+                    zcg=props['zcg'],
+                    Ixx=props['Ixx'],
+                    Izz=props['Izz'],
+                    Ixz=props['Ixz'],
+                    thetap=props['thetap'],
+                    I11=props['I11'],
+                    I22=props['I22'],
+                    unsymm=1 if abs(props.get('Ixz', 0)) > 1e-9 else 0,
+                )
 
                 lengths = np.logspace(0, 3, 60)
                 m_all = [np.array([1.0]) for _ in lengths]
-                result = stripmain(prop_mat, node, elem, lengths,
-                                   np.array([]), np.array([]),
-                                   GBTConfig(), 'S-S', m_all, neigs=10)
+                result_p = stripmain(prop_mat, node_p, elem, lengths,
+                                     np.array([]), np.array([]),
+                                     GBTConfig(), 'S-S', m_all, neigs=10)
+                result_m = stripmain(prop_mat, node_m, elem, lengths,
+                                     np.array([]), np.array([]),
+                                     GBTConfig(), 'S-S', m_all, neigs=10)
 
-                Fy = params.get('Fy', 35.53)
-                dsmP = extract_dsm_values(result.curve, node, elem, Fy, 'P')
-                dsmM = extract_dsm_values(result.curve, node, elem, Fy, 'Mxx')
+                dsmP = extract_dsm_values(result_p.curve, node_p, elem, Fy, 'P')
+                dsmM = extract_dsm_values(result_m.curve, node_m, elem, Fy, 'Mxx')
 
                 params['dsm'] = {
                     'Pcrl': dsmP.get('Pcrl', 0),

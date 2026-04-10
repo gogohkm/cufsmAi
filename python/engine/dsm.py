@@ -85,30 +85,52 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                 'index': i,
             })
 
-    # 4) 극소점을 국부/뒤틀림으로 분류
-    # 첫 번째 극소 = 국부 (짧은 파장), 두 번째 = 뒤틀림 (긴 파장)
+    # 3b) 경계 극소 검출 (첫/마지막 점이 인접 점보다 작은 경우)
+    if len(lf_vals) >= 2:
+        if lf_vals[0] < lf_vals[1]:
+            minima.insert(0, {'length': lengths[0], 'load_factor': lf_vals[0], 'index': 0})
+        if lf_vals[-1] < lf_vals[-2]:
+            minima.append({'length': lengths[-1], 'load_factor': lf_vals[-1], 'index': len(lf_vals)-1})
+
+    # 4) 극소점을 국부/뒤틀림으로 분류 (반파장 휴리스틱)
+    # 일반 CFS: 국부 Lcrl < ~20 in (웹/플랜지 폭 수준)
+    #           뒤틀림 Lcrd ~10-50 in (플랜지+립 회전)
+    # 분류 기준: 가장 짧은 극소 = 국부, 그다음 = 뒤틀림
+    # 단일 극소 시: 반파장 > 10 in이면 뒤틀림으로 재분류
     Pcrl = Pcrd = Pcre = 0.0
     Lcrl = Lcrd = Lcre = 0.0
-
-    if len(minima) >= 1:
-        Pcrl = minima[0]['load_factor'] * P_ref
-        Lcrl = minima[0]['length']
-
-    if len(minima) >= 2:
-        Pcrd = minima[1]['load_factor'] * P_ref
-        Lcrd = minima[1]['length']
+    classification = 'auto'
 
     # 전체 좌굴: 가장 긴 파장 영역의 값
     Pcre = lf_vals[-1] * P_ref
     Lcre = lengths[-1]
 
-    # 극소가 1개만 있으면: 뒤틀림이 없는 단면 (예: 원형관)
-    # 극소가 0개면: 단조 감소 곡선 → 전체 좌굴만
-    if len(minima) == 0:
-        # 곡선 최소값을 국부로
-        min_idx = np.argmin(lf_vals)
+    if len(minima) >= 2:
+        # 2개 이상: 짧은 쪽 = 국부, 긴 쪽 = 뒤틀림
+        Pcrl = minima[0]['load_factor'] * P_ref
+        Lcrl = minima[0]['length']
+        Pcrd = minima[1]['load_factor'] * P_ref
+        Lcrd = minima[1]['length']
+        classification = 'two_minima'
+    elif len(minima) == 1:
+        L_min = minima[0]['length']
+        # 단일 극소: 반파장이 짧으면 국부, 길면 뒤틀림
+        if L_min > 10.0:
+            # 긴 파장 극소 → 뒤틀림으로 분류, 국부 없음
+            Pcrd = minima[0]['load_factor'] * P_ref
+            Lcrd = L_min
+            classification = 'single_distortional'
+        else:
+            # 짧은 파장 극소 → 국부
+            Pcrl = minima[0]['load_factor'] * P_ref
+            Lcrl = L_min
+            classification = 'single_local'
+    else:
+        # 극소 0개: 단조 감소 곡선 → 곡선 최소값을 국부로
+        min_idx = int(np.argmin(lf_vals))
         Pcrl = lf_vals[min_idx] * P_ref
         Lcrl = lengths[min_idx]
+        classification = 'monotone'
 
     result = {
         # 항복 하중
@@ -143,6 +165,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         # 극소점 목록
         'minima': minima,
         'n_minima': len(minima),
+        'classification': classification,
     }
 
     return result

@@ -51,15 +51,32 @@ def combined_bending_shear(M: float, Mao: float,
 
 def combined_bending_web_crippling(P: float, Pn: float,
                                     M: float, Mnfo: float,
-                                    phi: float = 0.90) -> dict:
-    """휨 + 웹 크리플링 상호작용 검토 (§H3, Eq. H3-1)
+                                    phi: float = 0.90,
+                                    web_config: str = 'single') -> dict:
+    """휨 + 웹 크리플링 상호작용 검토 (§H3)
 
-    0.91(P/Pn) + (M/Mnfo) ≤ 1.33φ  (단일 비보강 웹)
+    web_config:
+      'single'   → Eq. H3-1: 0.91(P/Pn) + (M/Mnfo) ≤ 1.33φ
+      'nested_z'  → Eq. H3-2: 0.86(P/Pn) + (M/Mnfo) ≤ 1.65φ
+      'multi_web' → Eq. H3-3: (P/Pn) + (M/Mnfo) ≤ 1.52φ
     """
-    p_term = 0.91 * (P / Pn) if Pn > 0 else 0
+    p_ratio = (P / Pn) if Pn > 0 else 0
     m_term = (M / Mnfo) if Mnfo > 0 else 0
+
+    if web_config == 'nested_z':
+        p_term = 0.86 * p_ratio
+        limit = 1.65 * phi
+        eq = 'H3-2'
+    elif web_config == 'multi_web':
+        p_term = p_ratio
+        limit = 1.52 * phi
+        eq = 'H3-3'
+    else:
+        p_term = 0.91 * p_ratio
+        limit = 1.33 * phi
+        eq = 'H3-1'
+
     total = p_term + m_term
-    limit = 1.33 * phi
 
     return {
         'P_term': round(p_term, 4),
@@ -67,6 +84,6 @@ def combined_bending_web_crippling(P: float, Pn: float,
         'total': round(total, 4),
         'limit': round(limit, 4),
         'pass': total <= limit,
-        'equation': 'H3-1',
-        'applicability': 'single-unstiffened-web-only',
+        'equation': eq,
+        'web_config': web_config,
     }

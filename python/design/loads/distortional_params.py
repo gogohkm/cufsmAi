@@ -7,7 +7,7 @@ C-단면/Z-단면의 플랜지+립 기하 성질과
 import math
 
 E_STEEL = 29500.0  # ksi
-G_STEEL = 11300.0  # ksi
+G_STEEL = 11346.0  # ksi — E/(2(1+ν)) = 29500/(2×1.3)
 MU = 0.3           # Poisson's ratio
 
 

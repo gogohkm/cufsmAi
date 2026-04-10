@@ -239,6 +239,8 @@ def analyze_loads(
                         laps_per_support=laps_per_support,
                         I_lap_ratio=2.0,
                     )
+                    if defl is None:
+                        defl = [0.0] * n_pts  # fallback
                     per_span = extract_max_deflection_per_span(svc_x, defl, spans)
                     deflection_valid = not (
                         any(abs(v) > 1e-8 for v in svc_M) and

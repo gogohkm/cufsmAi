@@ -14,12 +14,14 @@ from typing import List, Tuple, Optional
 class BeamResult:
     """단일 하중 케이스의 구조해석 결과"""
 
-    def __init__(self, x: list, M: list, V: list, R: list, n_pts: int):
+    def __init__(self, x: list, M: list, V: list, R: list, n_pts: int,
+                 is_valid: bool = True):
         self.x = x          # 좌표 (in. 단위)
         self.M = M          # 모멘트 (kip-ft)
         self.V = V          # 전단력 (kips)
         self.R = R          # 지점 반력 (kips)
         self.n_pts = n_pts
+        self.is_valid = is_valid  # FE 풀이 성공 여부
 
     def max_positive_M(self) -> Tuple[float, float]:
         """최대 정모멘트 (x_ft, M_kft)"""
@@ -53,6 +55,7 @@ class BeamResult:
             'V': self.V,
             'R': self.R,
             'D': getattr(self, 'D', []),
+            'is_valid': self.is_valid,
         }
 
 
@@ -821,7 +824,7 @@ def compute_deflection_variable_I(
             d_full[fi] = d_free[i]
         delta = [d_full[2 * i] for i in range(n)]
     except Exception:
-        delta = [0.0] * n
+        return None  # FE 풀이 실패 → None 반환으로 호출자에서 감지
 
     return [round(d, 5) for d in delta]
 
@@ -975,6 +978,7 @@ def analyze_beam_fe(
 
     free_dofs = sorted(i for i in range(ndof) if i not in bc_dofs)
 
+    fe_solve_ok = True
     try:
         Kff = K[_np.ix_(free_dofs, free_dofs)]
         Ff = F[free_dofs]
@@ -984,6 +988,7 @@ def analyze_beam_fe(
             d_full[fi] = d_free[i]
     except Exception:
         d_full = _np.zeros(ndof)
+        fe_solve_ok = False
 
     # 처짐 추출
     delta = [d_full[2 * i] for i in range(n)]
@@ -1032,7 +1037,7 @@ def analyze_beam_fe(
         R_i = F_internal[2 * si_node] - F[2 * si_node]
         reactions.append(round(abs(R_i), 4))
 
-    result = BeamResult(x_ft, M_kipft, V_kips, reactions, n)
+    result = BeamResult(x_ft, M_kipft, V_kips, reactions, n, is_valid=fe_solve_ok)
     result.D = [round(d, 5) for d in delta]
     return result
 

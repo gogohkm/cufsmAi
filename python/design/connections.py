@@ -80,19 +80,21 @@ def bolt_connection(t1: float, t2: float, d: float,
     limit_states = []
 
     # (a) 지압 강도 (J3.3.1)
-    # 단일 볼트당: Pnb = C × mf × d × t × Fu
-    # C = min(e/d, 3.0)  [끝단 볼트], C = min(s/d, 3.0) [내부 볼트]
-    # 단순화: 끝단 볼트 C 사용
-    C = min(e / d, 3.0)
+    # C_end = min(e/d, 3.0) [끝단 볼트], C_int = min(s/d, 3.0) [내부 볼트]
+    C_end = min(e / d, 3.0)
+    C_int = min(s / d, 3.0) if n > 1 else C_end
     mf = 1.0  # 와셔 없는 경우 기본값
-    Pnb_per = C * mf * d * t_min * Fu
-    Pnb = n * Pnb_per
+    Pnb_end = C_end * mf * d * t_min * Fu
+    Pnb_int = C_int * mf * d * t_min * Fu
+    n_end = min(n, 2)  # 양쪽 끝단 볼트 (최대 2개)
+    n_int = max(n - n_end, 0)
+    Pnb = n_end * Pnb_end + n_int * Pnb_int
     limit_states.append({
         'name': 'Bearing (J3.3.1)',
         'Rn': round(Pnb, 3),
         'phi': PHI_BOLT['bearing'],
         'omega': OMEGA_BOLT['bearing'],
-        'formula': f'Pnb = {n}×{C:.2f}×{mf}×{d}×{t_min}×{Fu} = {Pnb:.3f}',
+        'formula': f'Pnb = {n_end}×{C_end:.2f}×{mf}×{d}×{t_min}×{Fu} + {n_int}×{C_int:.2f}×... = {Pnb:.3f}',
         'equation': 'J3.3.1-1',
     })
 

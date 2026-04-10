@@ -558,6 +558,470 @@ def test_lap_connection_uses_shared_connection_engine():
     return all_pass
 
 
+def test_web_crippling_c_z_separation():
+    """웹크리플링 — C vs Z, fastened vs unfastened 계수 분리 검증"""
+    print('\n=== TEST: Web Crippling C/Z Table Separation (F-038~040) ===')
+    from design.shear import web_crippling
+
+    all_pass = True
+
+    # C-section EOF fastened: C=4.0, phi=0.85
+    wc_c_f = web_crippling(h=7.5, t=0.059, R=0.157, N=3.5, Fy=50,
+                            support='EOF', fastened='fastened', section_type='C')
+    all_pass &= approx(wc_c_f['phi'], 0.85, label='C EOF fast phi=0.85')
+
+    # C-section EOF unfastened: phi=0.80 (different from fastened!)
+    wc_c_u = web_crippling(h=7.5, t=0.059, R=0.157, N=3.5, Fy=50,
+                            support='EOF', fastened='unfastened', section_type='C')
+    all_pass &= approx(wc_c_u['phi'], 0.80, label='C EOF unfas phi=0.80')
+
+    # Z-section EOF unfastened: C=5 (not 4!)
+    wc_z_u = web_crippling(h=7.5, t=0.059, R=0.157, N=3.5, Fy=50,
+                            support='EOF', fastened='unfastened', section_type='Z')
+    # Z unfastened EOF Pn should differ from C unfastened EOF (different C, Cr, CN, Ch)
+    all_pass &= approx(1 if abs(wc_z_u['Pn'] - wc_c_u['Pn']) > 0.001 else 0, 1,
+                        label='Z-EOF-unfas ≠ C-EOF-unfas')
+
+    # C ETF fastened: C=7.5 (not 6.9)
+    wc_etf_f = web_crippling(h=7.5, t=0.059, R=0.157, N=3.5, Fy=50,
+                              support='ETF', fastened='fastened', section_type='C')
+    all_pass &= approx(wc_etf_f['phi'], 0.85, label='C ETF fast phi=0.85')
+
+    # section_type in result
+    all_pass &= approx(1 if wc_z_u.get('section_type') == 'Z' else 0, 1,
+                        label='result has section_type=Z')
+    all_pass &= approx(1 if wc_c_f.get('table') == 'G5-2' else 0, 1,
+                        label='C uses table G5-2')
+
+    return all_pass
+
+
+def test_dsm_boundary_minima():
+    """DSM 극소 탐지 — 경계점 검출 및 반파장 분류 (F-003)"""
+    print('\n=== TEST: DSM Boundary Minima Detection (F-003) ===')
+    import numpy as np
+    from engine.dsm import extract_dsm_values
+    from engine.template import generate_section
+    from engine.properties import grosprop
+
+    all_pass = True
+
+    # 테스트용 곡선: 경계 극소가 있는 경우
+    # [length, lf] — 첫 점이 최소
+    sec = generate_section('lippedc', {'H': 8, 'B': 2.5, 'D': 0.625, 't': 0.059})
+    node = sec['node']
+    elem = sec['elem']
+
+    # 인위적 곡선: 첫 점이 극소 (lf=0.5), 중간에 극소 (lf=0.3), 끝은 상승 (lf=1.0)
+    fake_curve = [
+        np.array([1.0, 0.5]),   # 경계 극소
+        np.array([2.0, 0.8]),
+        np.array([5.0, 0.3]),   # 내부 극소
+        np.array([10.0, 0.4]),
+        np.array([50.0, 0.6]),
+        np.array([100.0, 1.0]),
+    ]
+
+    result = extract_dsm_values(fake_curve, node, elem, 50.0, 'P')
+    # 경계 극소(lf=0.5)가 감지되어야 함 → Pcrl = 0.5 * Py
+    # 내부 극소(lf=0.3)도 감지 → Pcrd = 0.3 * Py (또는 반대)
+    n_min = result.get('n_minima', 0)
+    all_pass &= approx(1 if n_min >= 2 else 0, 1, label=f'n_minima={n_min} >= 2 (boundary detected)')
+
+    # classification 필드 존재
+    all_pass &= approx(1 if result.get('classification') else 0, 1, label='has classification field')
+
+    return all_pass
+
+
+def test_uplift_combo_reaction_based():
+    """양력 조합 판정 — 반력 기반 개선 (F-001)"""
+    print('\n=== TEST: Uplift Combo Reaction-Based Detection (F-001) ===')
+    from design.loads.load_combinations import find_controlling_combo
+
+    all_pass = True
+
+    # 하중: D=15 plf, W=-150 plf (양력)
+    loads = {'D': 15, 'W': -150}
+    # 가상 해석 결과: D 단독
+    load_results = {
+        'D': {'M': [0, 5, 8, 5, 0], 'V': [3, 1, 0, -1, -3], 'R': [3, 0, 0, 0, 3]},
+        'W': {'M': [0, -30, -50, -30, 0], 'V': [-15, -5, 0, 5, 15], 'R': [-15, 0, 0, 0, -15]},
+    }
+
+    result = find_controlling_combo(loads, load_results, 'LRFD')
+    uplift = result.get('uplift')
+
+    # 양력 조합이 탐지되어야 함
+    all_pass &= approx(1 if uplift is not None else 0, 1, label='uplift combo detected')
+
+    return all_pass
+
+
+def test_auto_generate_passes_corner_radius():
+    """자동 생성 경로에서 코너 반경 전달 (F-002)"""
+    print('\n=== TEST: Auto Generate Passes Corner Radius (F-002) ===')
+    from design.aisi_s100 import _auto_generate_props
+
+    all_pass = True
+
+    # R=0.157 전달 후 생성된 단면 확인
+    params = {'H': 8, 'B': 2.5, 'D': 0.625, 't': 0.059, 'r': 0.157, 'Fy': 50}
+    result = _auto_generate_props(params)
+    props = result.get('props', {})
+
+    # 단면적이 코너 없는 경우와 달라야 함
+    params_no_r = {'H': 8, 'B': 2.5, 'D': 0.625, 't': 0.059, 'r': 0, 'Fy': 50}
+    result_no_r = _auto_generate_props(params_no_r)
+    props_no_r = result_no_r.get('props', {})
+
+    A_with_r = props.get('A', 0)
+    A_no_r = props_no_r.get('A', 0)
+    # 코너 반경이 있으면 면적이 다름 (코너 호 길이 차이)
+    all_pass &= approx(1 if A_with_r > 0 else 0, 1, label=f'A_with_r={A_with_r:.4f} > 0')
+    all_pass &= approx(1 if abs(A_with_r - A_no_r) > 0.001 else 0, 1,
+                        label=f'A_with_r={A_with_r:.4f} ≠ A_no_r={A_no_r:.4f}')
+
+    return all_pass
+
+
+def test_h3_web_configs():
+    """H3 상호작용 — single/nested_z/multi_web 분기 (F-023)"""
+    print('\n=== TEST: H3 Web Config Variants (F-023) ===')
+    from design.interaction import combined_bending_web_crippling
+
+    all_pass = True
+
+    # H3-1: 0.91P/Pn + M/Mn ≤ 1.33φ
+    h1 = combined_bending_web_crippling(3, 5, 10, 20, 0.90, 'single')
+    all_pass &= approx(1 if h1['equation'] == 'H3-1' else 0, 1, label='single → H3-1')
+    all_pass &= approx(h1['limit'], 1.33 * 0.90, label='H3-1 limit=1.197')
+
+    # H3-2: 0.86P/Pn + M/Mn ≤ 1.65φ
+    h2 = combined_bending_web_crippling(3, 5, 10, 20, 0.90, 'nested_z')
+    all_pass &= approx(h2['limit'], 1.65 * 0.90, label='H3-2 limit=1.485')
+
+    # H3-3: P/Pn + M/Mn ≤ 1.52φ
+    h3 = combined_bending_web_crippling(3, 5, 10, 20, 0.90, 'multi_web')
+    all_pass &= approx(h3['limit'], 1.52 * 0.90, label='H3-3 limit=1.368')
+
+    return all_pass
+
+
+def test_kx_responds_to_pss():
+    """kx 횡강성 — Pss 입력 시 결과 변화 (F-008)"""
+    print('\n=== TEST: kx Responds to Pss Input (F-008) ===')
+    from design.loads.bracing import calc_lateral_stiffness
+
+    all_pass = True
+
+    # Pss=0 → 근사식
+    kx_approx = calc_lateral_stiffness(t_panel=0.018, t_purlin=0.059, fastener_spacing=12)
+
+    # Pss 입력 → RP17-2 기반
+    kx_rp17 = calc_lateral_stiffness(t_panel=0.018, t_purlin=0.059, fastener_spacing=12,
+                                      Pss=1.8, d_screw=0.17, Fu_panel=70)
+
+    all_pass &= approx(1 if kx_approx > 0 else 0, 1, label=f'kx_approx={kx_approx:.4f} > 0')
+    all_pass &= approx(1 if kx_rp17 > 0 else 0, 1, label=f'kx_rp17={kx_rp17:.4f} > 0')
+    # 두 값이 달라야 함
+    all_pass &= approx(1 if abs(kx_approx - kx_rp17) > 0.001 else 0, 1,
+                        label=f'kx_approx={kx_approx:.4f} ≠ kx_rp17={kx_rp17:.4f}')
+
+    return all_pass
+
+
+def test_multi_bolt_c_factor():
+    """다볼트 지압강도 — 끝단/내부 C 분리 (F-013)"""
+    print('\n=== TEST: Multi-Bolt End/Interior C Factor (F-013) ===')
+    from design.connections import bolt_connection
+
+    all_pass = True
+
+    # 1볼트: e/d 기준
+    r1 = bolt_connection(t1=0.059, t2=0.059, d=0.5, Fy=50, Fu=65, Fub=120,
+                          e=1.5, s=2.0, n=1)
+    # 3볼트: 끝단(e/d) + 내부(s/d) 분리
+    r3 = bolt_connection(t1=0.059, t2=0.059, d=0.5, Fy=50, Fu=65, Fub=120,
+                          e=1.5, s=2.0, n=3)
+
+    Rn1 = [ls for ls in r1['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
+    Rn3 = [ls for ls in r3['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
+    # 3볼트 강도는 1볼트 × 3이 아님 (e/d ≠ s/d이면)
+    all_pass &= approx(1 if Rn3 > 0 else 0, 1, label=f'3-bolt Rn={Rn3:.3f} > 0')
+    # e=1.5, d=0.5 → C_end=3.0; s=2.0, d=0.5 → C_int=3.0 (이 경우 동일)
+    # 다른 e/s로 확인
+    r3b = bolt_connection(t1=0.059, t2=0.059, d=0.5, Fy=50, Fu=65, Fub=120,
+                           e=0.75, s=2.0, n=3)
+    Rn3b = [ls for ls in r3b['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
+    # e/d=1.5 (C_end=1.5), s/d=4.0 (C_int=3.0) → 끝단 < 내부
+    all_pass &= approx(1 if Rn3b > 0 else 0, 1, label=f'3-bolt(small e) Rn={Rn3b:.3f} > 0')
+
+    return all_pass
+
+
+def test_beam_fe_solve_flag():
+    """FE 보 해석 — solve 실패 시 is_valid 플래그 (F-047)"""
+    print('\n=== TEST: Beam FE Solve Validity Flag (F-047) ===')
+    from design.loads.beam_analysis import BeamResult
+
+    all_pass = True
+
+    # 정상 결과: is_valid=True
+    r = BeamResult([0, 1], [0, 1], [1, -1], [1, 1], 2, is_valid=True)
+    all_pass &= approx(1 if r.is_valid else 0, 1, label='normal result is_valid=True')
+
+    # 실패 결과: is_valid=False
+    r2 = BeamResult([0, 1], [0, 0], [0, 0], [0, 0], 2, is_valid=False)
+    all_pass &= approx(1 if not r2.is_valid else 0, 1, label='failed result is_valid=False')
+
+    # to_dict에 포함
+    d = r2.to_dict()
+    all_pass &= approx(1 if d.get('is_valid') is False else 0, 1, label='to_dict has is_valid=False')
+
+    return all_pass
+
+
+def test_screw_connection_interpolation_and_pullover():
+    """나사 접합 — J4.3.1 보간 및 J4.4.2 풀오버 식 검증 (F-015)"""
+    print('\n=== TEST: Screw Connection Interpolation and Pullover (F-015) ===')
+    from design.connections import screw_connection
+
+    t1 = 0.05
+    t2 = 0.075  # ratio = 1.5
+    d = 0.2
+    Fu = 65
+    Fub = 100
+    n = 2
+    result = screw_connection(t1=t1, t2=t2, d=d, Fy=50, Fu=Fu, Fub=Fub, n=n)
+
+    all_pass = True
+    bearing = [ls for ls in result['limit_states'] if ls['name'].startswith('Bearing')][0]
+    pullover = [ls for ls in result['limit_states'] if ls['name'].startswith('Pull-over')][0]
+
+    pn_ratio_1 = min(4.2 * math.sqrt(t1 ** 3 * d) * Fu * n, 2.7 * t1 * d * Fu * n)
+    pn_ratio_25 = 2.7 * t1 * d * Fu * n
+    interp = (t2 / t1 - 1.0) / 1.5
+    expected_bearing = (1 - interp) * pn_ratio_1 + interp * pn_ratio_25
+    dw = min(d * 2.0, 0.75)
+    expected_pullover = 1.5 * t1 * dw * Fu * n
+
+    all_pass &= approx(bearing['Rn'], expected_bearing, label='J4.3.1 interpolated bearing')
+    all_pass &= approx(pullover['Rn'], expected_pullover, label='J4.4.2 pull-over')
+    return all_pass
+
+
+def test_arc_spot_effective_diameter_cap():
+    """아크 스팟 용접 — de 상한은 min(...)이어야 함 (F-016)"""
+    print('\n=== TEST: Arc Spot Effective Diameter Cap (F-016) ===')
+    from design.connections import arc_spot_weld_connection
+
+    da = 0.625
+    t = 0.12
+    result = arc_spot_weld_connection(t1=t, t2=t, da=da, Fy=50, Fu=65, n=1)
+    nugget = [ls for ls in result['limit_states'] if ls['name'].startswith('Weld Nugget')][0]
+
+    all_pass = True
+    de = min(max(0.7 * da - 1.5 * t, 0.0), 0.55 * da)
+    expected = 0.75 * 60 * (math.pi / 4) * de ** 2
+    all_pass &= approx(nugget['Rn'], expected, label='J2.2.1 nugget shear with capped de')
+    return all_pass
+
+
+def test_arc_seam_formula_terms():
+    """아크 시임 용접 — L*de 및 0.96da 항 반영 검증 (F-017)"""
+    print('\n=== TEST: Arc Seam Formula Terms (F-017) ===')
+    from design.connections import arc_seam_weld_connection
+
+    t = 0.06
+    d = 0.5
+    L = 1.75
+    result = arc_seam_weld_connection(t1=t, t2=t, d=d, L_seam=L, Fy=50, Fu=65, n=1)
+    weld = [ls for ls in result['limit_states'] if ls['name'].startswith('Weld Seam')][0]
+    tear = [ls for ls in result['limit_states'] if ls['name'].startswith('Sheet Tear')][0]
+
+    all_pass = True
+    de = min(max(0.7 * d - 1.5 * t, 0.0), 0.55 * d)
+    expected_weld = 0.75 * 60 * (L * de + math.pi / 4 * de ** 2)
+    expected_tear = 2.5 * t * 65 * (0.25 * L + 0.96 * d)
+    all_pass &= approx(weld['Rn'], expected_weld, label='J2.2.2 seam weld term L*de')
+    all_pass &= approx(tear['Rn'], expected_tear, label='J2.2.2 sheet tear term 0.96da')
+    return all_pass
+
+
+def test_paf_limit_state_mapping():
+    """PAF 접합 — J5.3.1/J5.3.2 식 매핑 검증 (F-018)"""
+    print('\n=== TEST: PAF Limit-State Mapping (F-018) ===')
+    from design.connections import paf_connection
+
+    t1 = 0.06
+    t2 = 0.08
+    d = 0.2
+    Fu = 65
+    Fuf = 60
+    n = 2
+    result = paf_connection(t1=t1, t2=t2, d=d, Fy=50, Fu=Fu, Fuf=Fuf, n=n)
+
+    all_pass = True
+    pin = [ls for ls in result['limit_states'] if ls['name'].startswith('Pin Shear')][0]
+    bearing = [ls for ls in result['limit_states'] if ls['name'].startswith('Bearing')][0]
+    expected_pin = 0.60 * Fuf * (math.pi / 4 * d ** 2) * n
+    expected_bearing = 3.2 * t1 * d * Fu * n
+    all_pass &= approx(pin['Rn'], expected_pin, label='J5.3.1 pin shear')
+    all_pass &= approx(bearing['Rn'], expected_bearing, label='J5.3.2 bearing/tilting')
+    return all_pass
+
+
+def test_auto_generate_uses_bending_curve_for_flexure_dsm():
+    """자동 생성 DSM — 휨은 압축 곡선 재사용이 아니라 별도 응력분포를 써야 함 (F-002)"""
+    print('\n=== TEST: Auto Generate Uses Separate Bending Curve (F-002) ===')
+    import numpy as np
+    from design.aisi_s100 import _auto_generate_props
+    from engine.template import generate_section
+    from engine.properties import grosprop
+    from engine.fsm_solver import stripmain
+    from engine.dsm import extract_dsm_values
+    from models.data import GBTConfig
+
+    params = {'section_type': 'lippedc', 'H': 8, 'B': 2.5, 'D': 0.625, 't': 0.059, 'r': 0.157, 'Fy': 50}
+    result = _auto_generate_props(params)
+    auto_dsm = result.get('dsm', {})
+
+    sec = generate_section('lippedc', {'H': 8, 'B': 2.5, 'D': 0.625, 't': 0.059, 'r': 0.157})
+    node = sec['node']
+    elem = sec['elem']
+    props = grosprop(node, elem)
+    node_p = node.copy()
+    for n in node_p:
+        n[7] = 50
+    prop_mat = np.array([[100, 29500, 29500, 0.3, 0.3, 11346]])
+    lengths = np.logspace(0, 3, 60)
+    m_all = [np.array([1.0]) for _ in lengths]
+    legacy = stripmain(prop_mat, node_p, elem, lengths, np.array([]), np.array([]), GBTConfig(), 'S-S', m_all, neigs=10)
+    legacy_dsm_m = extract_dsm_values(legacy.curve, node_p, elem, 50, 'Mxx')
+
+    all_pass = True
+    all_pass &= approx(1 if auto_dsm.get('Mcrl', 0) > 0 else 0, 1, label='auto Mcrl > 0')
+    legacy_mcrl = legacy_dsm_m.get('Mxxcrl', 0)
+    all_pass &= approx(1 if abs(auto_dsm.get('Mcrl', 0) - legacy_mcrl) > 0.01 else 0, 1,
+                        label='auto flexural DSM differs from legacy compression-curve reuse')
+    return all_pass
+
+
+def test_flexure_design_section_type_affects_fcre():
+    """휨 설계 — Z 단면 section_type 전달 시 Fcre가 달라져야 함 (F-012)"""
+    print('\n=== TEST: Flexure Design Uses Section Type (F-012) ===')
+    from design.aisi_s100 import design_member
+
+    base = {
+        'member_type': 'flexure',
+        'design_method': 'LRFD',
+        'Fy': 50,
+        'Fu': 65,
+        'Mu': 10.0,
+        'Lb': 120.0,
+        'Cb': 1.0,
+        'props': {
+            'A': 1.2, 'Sf': 2.0, 'Sxx': 2.0, 'Zx': 2.3,
+            'Ixx': 10.0, 'Izz': 1.8, 'Ixz': 0.0,
+            'xcg': 0.0, 'zcg': 4.0, 'thetap': 0.0,
+            'I11': 10.0, 'I22': 1.8,
+            'rx': 2.886, 'ry': 1.225, 'ro': 3.2,
+            'J': 0.02, 'Cw': 8.0, 'xo': 0.6,
+            'h_web': 7.5, 't': 0.06, 'b_flange': 2.25, 'd_lip': 0.625, 'R': 0.157,
+        },
+        'section': {
+            'type': 'Z', 'depth': 8.0, 'flange_width': 2.25, 'lip_depth': 0.625, 'thickness': 0.06,
+        },
+        'dsm': {'Mcrl': 120.0, 'Mcrd': 140.0, 'My': 100.0},
+    }
+
+    res_c = design_member({**base, 'section_type': 'C'})
+    res_z = design_member({**base, 'section_type': 'Z'})
+
+    all_pass = True
+    all_pass &= approx(1 if abs(res_c.get('Mne', 0) - res_z.get('Mne', 0)) > 0.01 else 0, 1,
+                        label='C vs Z section_type changes Mne')
+    return all_pass
+
+
+def test_cold_work_uses_estimated_corner_ratio():
+    """냉간가공 — 설계 경로가 고정 C=0.15만 쓰지 않도록 형상비 추정 사용 (F-011)"""
+    print('\n=== TEST: Cold Work Uses Estimated Corner Ratio (F-011) ===')
+    from design.aisi_s100 import design_member
+
+    params = {
+        'member_type': 'flexure',
+        'design_method': 'LRFD',
+        'Fy': 50,
+        'Fu': 70,
+        'Mu': 10.0,
+        'Lb': 24.0,
+        'Cb': 1.0,
+        'use_cold_work': True,
+        'section_type': 'C',
+        'props': {
+            'A': 0.9, 'Sf': 2.0, 'Sxx': 2.0, 'Zx': 2.2,
+            'Ixx': 9.0, 'Izz': 2.0, 'Ixz': 0.0,
+            'xcg': 0.0, 'zcg': 4.0, 'thetap': 0.0,
+            'I11': 9.0, 'I22': 2.0,
+            'J': 0.01, 'Cw': 5.0, 'xo': 0.3,
+            'h_web': 7.5, 't': 0.06, 'b_flange': 2.5, 'd_lip': 0.75, 'R': 0.157,
+        },
+        'section': {
+            'type': 'C', 'depth': 8.0, 'flange_width': 2.5, 'lip_depth': 0.75, 'thickness': 0.06,
+        },
+        'dsm': {'Mcrl': 1000.0, 'Mcrd': 1000.0, 'My': 100.0},
+    }
+    result = design_member(params)
+    cw = result.get('cold_work', {})
+
+    all_pass = True
+    all_pass &= approx(1 if cw.get('C', 0) > 0 else 0, 1, label='cold-work C > 0')
+    all_pass &= approx(1 if abs(cw.get('C', 0) - 0.15) > 0.001 else 0, 1, label='cold-work C not fixed at 0.15')
+    return all_pass
+
+
+def test_flexure_h3_respects_fastened_and_web_config():
+    """휨 설계 H3 — fastened 및 web_config 입력 전달 검증 (F-023/F-040)"""
+    print('\n=== TEST: Flexure H3 Uses Fastened and Web Config (F-023/F-040) ===')
+    from design.aisi_s100 import design_member
+
+    result = design_member({
+        'member_type': 'flexure',
+        'design_method': 'LRFD',
+        'Fy': 50,
+        'Fu': 65,
+        'Mu': 8.0,
+        'Vu': 2.0,
+        'Lb': 48.0,
+        'Cb': 1.0,
+        'section_type': 'Z',
+        'wc_N': 3.5,
+        'wc_R': 0.1875,
+        'wc_support': 'ETF',
+        'wc_fastened': 'unfastened',
+        'wc_web_config': 'multi_web',
+        'props': {
+            'A': 1.0, 'Sf': 2.0, 'Sxx': 2.0, 'Zx': 2.1,
+            'Ixx': 8.0, 'Izz': 2.0, 'Ixz': 0.0,
+            'xcg': 0.0, 'zcg': 4.0, 'thetap': 0.0,
+            'I11': 8.0, 'I22': 2.0,
+            'J': 0.01, 'Cw': 5.0, 'xo': 0.2,
+            'h_web': 7.5, 't': 0.06,
+        },
+        'section': {'type': 'Z', 'depth': 8.0, 'flange_width': 2.25, 'lip_depth': 0.75, 'thickness': 0.06},
+        'dsm': {'Mcrl': 150.0, 'Mcrd': 180.0, 'My': 110.0},
+    })
+
+    all_pass = True
+    all_pass &= approx(1 if result.get('web_crippling', {}).get('fastened') == 'unfastened' else 0, 1,
+                        label='H3 passes wc_fastened')
+    all_pass &= approx(1 if result.get('h3_interaction', {}).get('equation') == 'H3-3' else 0, 1,
+                        label='H3 uses requested multi_web equation')
+    return all_pass
+
+
 # ============================================================
 # 실행
 # ============================================================
@@ -582,6 +1046,23 @@ if __name__ == '__main__':
         test_connection_arc_spot_uses_diameter_input,
         test_combined_requires_explicit_weak_axis_strength,
         test_lap_connection_uses_shared_connection_engine,
+        # --- F-xxx 수정 검증 테스트 ---
+        test_web_crippling_c_z_separation,
+        test_dsm_boundary_minima,
+        test_uplift_combo_reaction_based,
+        test_auto_generate_passes_corner_radius,
+        test_h3_web_configs,
+        test_kx_responds_to_pss,
+        test_multi_bolt_c_factor,
+        test_beam_fe_solve_flag,
+        test_screw_connection_interpolation_and_pullover,
+        test_arc_spot_effective_diameter_cap,
+        test_arc_seam_formula_terms,
+        test_paf_limit_state_mapping,
+        test_auto_generate_uses_bending_curve_for_flexure_dsm,
+        test_flexure_design_section_type_affects_fcre,
+        test_cold_work_uses_estimated_corner_ratio,
+        test_flexure_h3_respects_fastened_and_web_config,
     ]
 
     results = {}

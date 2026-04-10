@@ -57,6 +57,51 @@ function textResult(text: string) {
 }
 
 // ============================================================
+// SI → US 단위 변환 헬퍼 (F-006)
+// ============================================================
+const SI_TO_US = {
+    length:   1 / 25.4,        // mm → in
+    stress:   1 / 6.89476,     // MPa → ksi
+    force:    1 / 4.44822,     // kN → kips
+    moment:   1 / 0.11298,     // kN-m → kip-in
+    pressure: 1 / 0.04788,     // kPa → psf
+    linload:  1 / 0.01459,     // kN/m → plf
+    length_ft: 1 / 0.3048,     // m → ft
+};
+const US_TO_SI = {
+    length:   25.4,
+    stress:   6.89476,
+    force:    4.44822,
+    moment:   0.11298,
+    pressure: 0.04788,
+    linload:  0.01459,
+    length_ft: 0.3048,
+};
+type UnitKey = keyof typeof SI_TO_US;
+
+/** 지정된 키의 값을 SI→US로 변환 */
+function convertInputSI(params: Record<string, any>, mapping: Record<string, UnitKey>): Record<string, any> {
+    const out = { ...params };
+    for (const [key, unitType] of Object.entries(mapping)) {
+        if (out[key] != null && typeof out[key] === 'number') {
+            out[key] = out[key] * SI_TO_US[unitType];
+        }
+    }
+    return out;
+}
+
+/** 결과 dict의 지정 키를 US→SI로 변환 */
+function convertOutputSI(result: Record<string, any>, mapping: Record<string, UnitKey>): Record<string, any> {
+    const out = { ...result };
+    for (const [key, unitType] of Object.entries(mapping)) {
+        if (out[key] != null && typeof out[key] === 'number') {
+            out[key] = Math.round(out[key] * US_TO_SI[unitType] * 1e4) / 1e4;
+        }
+    }
+    return out;
+}
+
+// ============================================================
 // MCP Server 생성
 // ============================================================
 const server = new McpServer({
@@ -65,14 +110,11 @@ const server = new McpServer({
 }, {
     instructions: `StCFSD - Cold-Formed Steel Section Buckling Analysis Tool.
 
-IMPORTANT: All values must be in US customary units:
-- Dimensions (H, B, D, t, r): inches
-- Stress (Fy, Fu, E): ksi
-- Force: kips
-- Moment: kip-in
-- Length (half-wavelength, Lb): inches
+Unit system: Default is US customary. Key design tools support an optional 'units' parameter:
+- units="US" (default): inches, ksi, kips, kip-in
+- units="SI": mm, MPa, kN, kN-m — values are auto-converted internally
 
-Default steel: SGC400 (Fy=35.53 ksi, Fu=58.02 ksi, E=29500 ksi)
+Default steel: SGC400 (Fy=35.53 ksi / 245 MPa, Fu=58.02 ksi / 400 MPa, E=29500 ksi / 203000 MPa)
 
 Workflow:
 1. get_status → check current state
@@ -129,27 +171,32 @@ server.tool("get_buckling_curve", "Get buckling curve data (half-wavelength vs l
 // 2. SECTION DEFINITION (5 tools)
 // ============================================================
 server.tool("set_section_template",
-    "Generate a parametric section. Types: lippedc, lippedz, track, hat, rhs, chs, angle, isect, tee, lipped_angle",
+    "Generate a parametric section. Types: lippedc, lippedz, track, hat, rhs, chs, angle, isect, tee, lipped_angle. Set units='SI' to input in mm.",
     {
         type: z.enum(['lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee', 'lipped_angle'])
             .describe("Section type"),
-        H: z.number().describe("Height in inches (web height, out-to-out)"),
-        B: z.number().describe("Width in inches (flange width, out-to-out)"),
-        D: z.number().optional().describe("Lip length in inches"),
-        t: z.number().describe("Thickness in inches"),
-        r: z.number().optional().describe("Corner radius in inches (default 0)"),
-        qlip: z.number().optional().describe("Lip angle in degrees (default 90). For lippedc/lippedz: 90=vertical, <90=inward, >90=outward"),
+        H: z.number().describe("Height (web height, out-to-out) — inches or mm if units='SI'"),
+        B: z.number().describe("Width (flange width, out-to-out) — inches or mm if units='SI'"),
+        D: z.number().optional().describe("Lip length — inches or mm if units='SI'"),
+        t: z.number().describe("Thickness — inches or mm if units='SI'"),
+        r: z.number().optional().describe("Corner radius — inches or mm if units='SI' (default 0)"),
+        qlip: z.number().optional().describe("Lip angle in degrees (default 90)"),
+        units: z.enum(['US', 'SI']).optional().describe("Unit system: 'US' (default, inches/ksi) or 'SI' (mm/MPa)"),
     },
     async (params) => {
-        const r = await callBridgePost('/action', {
+        let { H, B, D, t, r, qlip } = params;
+        if (params.units === 'SI') {
+            const c = SI_TO_US.length;
+            H *= c; B *= c; t *= c;
+            if (D != null) D *= c;
+            if (r != null) r *= c;
+        }
+        const result = await callBridgePost('/action', {
             action: 'generate_template',
             section_type: params.type,
-            params: {
-                H: params.H, B: params.B, D: params.D || 1, t: params.t, r: params.r || 0,
-                qlip: params.qlip,
-            }
+            params: { H, B, D: D || 1, t, r: r || 0, qlip }
         });
-        return textResult(JSON.stringify(r, null, 2));
+        return textResult(JSON.stringify(result, null, 2));
     }
 );
 
@@ -704,47 +751,58 @@ server.tool("get_energy_recovery", "Calculate element-wise strain energy (membra
 // AISI S100-16 설계 도구
 // ============================================================
 
-server.tool("aisi_design_compression", "Run compression design on the current section model using current section properties and available DSM inputs (requires an active section in the extension session).",
+server.tool("aisi_design_compression", "Run compression design on the current section model. Set units='SI' to input in MPa/mm/kN.",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
-        Fu: z.number().optional().describe("Tensile stress ksi (default 58.02 = 400 MPa, SGC400)"),
-        KxLx: z.number().describe("Effective length about x-axis (in)"),
-        KyLy: z.number().describe("Effective length about y-axis (in)"),
-        KtLt: z.number().optional().describe("Effective torsional length (in, default=KyLy)"),
-        Pu: z.number().optional().describe("Required axial strength (kips)"),
+        Fy: z.number().optional().describe("Yield stress — ksi or MPa if units='SI' (default 35.53 ksi)"),
+        Fu: z.number().optional().describe("Tensile stress — ksi or MPa if units='SI' (default 58.02 ksi)"),
+        KxLx: z.number().describe("Effective length x-axis — in or mm if units='SI'"),
+        KyLy: z.number().describe("Effective length y-axis — in or mm if units='SI'"),
+        KtLt: z.number().optional().describe("Effective torsional length — in or mm (default=KyLy)"),
+        Pu: z.number().optional().describe("Required axial strength — kips or kN if units='SI'"),
+        units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI'"),
     },
-    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Pu }) => {
+    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Pu, units }) => {
+        let fy = Fy || (units === 'SI' ? 245 : 35.53);
+        let fu = Fu || (units === 'SI' ? 400 : 58.02);
+        let kxlx = KxLx, kyly = KyLy, ktlt = KtLt ?? KyLy, pu = Pu || 0;
+        if (units === 'SI') {
+            fy *= SI_TO_US.stress; fu *= SI_TO_US.stress;
+            kxlx *= SI_TO_US.length; kyly *= SI_TO_US.length; ktlt *= SI_TO_US.length;
+            pu *= SI_TO_US.force;
+        }
         const r = await callBridgePost('/action', {
-            action: 'aisi_design',
-            member_type: 'compression',
+            action: 'aisi_design', member_type: 'compression',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 35.53, Fu: Fu || 58.02,
-            KxLx, KyLy, KtLt: KtLt ?? KyLy,
-            Pu: Pu || 0,
+            Fy: fy, Fu: fu, KxLx: kxlx, KyLy: kyly, KtLt: ktlt, Pu: pu,
         });
         return textResult(JSON.stringify(r, null, 2));
     }
 );
 
-server.tool("aisi_design_flexure", "Run flexural design on the current section model using current section properties and available DSM inputs (requires an active section in the extension session).",
+server.tool("aisi_design_flexure", "Run flexural design on the current section model. Set units='SI' to input in MPa/mm/kN-m.",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
-        Fu: z.number().optional().describe("Tensile stress ksi (default 58.02 = 400 MPa, SGC400)"),
-        Lb: z.number().describe("Unbraced length for LTB (in)"),
+        Fy: z.number().optional().describe("Yield stress — ksi or MPa if units='SI' (default 35.53 ksi)"),
+        Fu: z.number().optional().describe("Tensile stress — ksi or MPa if units='SI' (default 58.02 ksi)"),
+        Lb: z.number().describe("Unbraced length for LTB — in or mm if units='SI'"),
         Cb: z.number().optional().describe("Moment gradient factor (default 1.0)"),
-        Mu: z.number().optional().describe("Required flexural strength (kip-in)"),
-        R_uplift: z.number().optional().describe("Uplift reduction factor R per §I6.2.1 for through-fastened panels (e.g. 0.60 for C, 0.70 for Z)"),
+        Mu: z.number().optional().describe("Required flexural strength — kip-in or kN-m if units='SI'"),
+        R_uplift: z.number().optional().describe("Uplift reduction factor R per §I6.2.1"),
+        units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI'"),
     },
-    async ({ design_method, Fy, Fu, Lb, Cb, Mu, R_uplift }) => {
+    async ({ design_method, Fy, Fu, Lb, Cb, Mu, R_uplift, units }) => {
+        let fy = Fy || (units === 'SI' ? 245 : 35.53);
+        let fu = Fu || (units === 'SI' ? 400 : 58.02);
+        let lb = Lb, mu = Mu || 0;
+        if (units === 'SI') {
+            fy *= SI_TO_US.stress; fu *= SI_TO_US.stress;
+            lb *= SI_TO_US.length; mu *= SI_TO_US.moment;
+        }
         const r = await callBridgePost('/action', {
-            action: 'aisi_design',
-            member_type: 'flexure',
+            action: 'aisi_design', member_type: 'flexure',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 35.53, Fu: Fu || 58.02,
-            Lb, Cb: Cb || 1.0,
-            Mu: Mu || 0,
+            Fy: fy, Fu: fu, Lb: lb, Cb: Cb || 1.0, Mu: mu,
             ...(R_uplift != null && { R_uplift }),
         });
         return textResult(JSON.stringify(r, null, 2));
@@ -805,40 +863,50 @@ server.tool("aisi_design_tension", "Run tension design on the current section mo
     }
 );
 
-server.tool("aisi_design_connection", "Run the project's Chapter J connection-design implementation for a single connection case.",
+server.tool("aisi_design_connection", "Chapter J connection design. Set units='SI' to input in MPa/mm/kN.",
     {
         connection_type: z.enum(["bolt", "screw", "fillet_weld", "arc_spot", "arc_seam", "groove", "paf"]).describe("Connection type"),
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().describe("Yield stress of connected sheet ksi"),
-        Fu: z.number().describe("Ultimate stress of connected sheet ksi"),
-        t1: z.number().describe("Thickness of sheet 1 (in)"),
-        t2: z.number().optional().describe("Thickness of sheet 2 (in, default = t1)"),
-        d: z.number().optional().describe("Bolt/screw diameter (in)"),
-        Fub: z.number().optional().describe("Bolt/screw ultimate strength ksi"),
+        Fy: z.number().describe("Yield stress — ksi or MPa if units='SI'"),
+        Fu: z.number().describe("Ultimate stress — ksi or MPa if units='SI'"),
+        t1: z.number().describe("Thickness sheet 1 — in or mm if units='SI'"),
+        t2: z.number().optional().describe("Thickness sheet 2 — in or mm (default=t1)"),
+        d: z.number().optional().describe("Bolt/screw diameter — in or mm if units='SI'"),
+        Fub: z.number().optional().describe("Bolt/screw strength — ksi or MPa if units='SI'"),
         n: z.number().optional().describe("Number of fasteners (default 1)"),
-        e: z.number().optional().describe("Edge distance (in)"),
-        s: z.number().optional().describe("Fastener spacing (in)"),
-        weld_length: z.number().optional().describe("Weld length (in, fillet/groove weld)"),
-        weld_size: z.number().optional().describe("Weld leg size (in, fillet weld)"),
-        da: z.number().optional().describe("Arc spot/seam weld visible diameter (in)"),
-        groove_type: z.enum(["complete", "partial"]).optional().describe("Groove weld type (default complete)"),
-        Fxx: z.number().optional().describe("Weld electrode strength ksi (default 60)"),
-        Fuf: z.number().optional().describe("PAF pin ultimate strength ksi (default 60)"),
-        Pu: z.number().optional().describe("Required force kips"),
+        e: z.number().optional().describe("Edge distance — in or mm if units='SI'"),
+        s: z.number().optional().describe("Fastener spacing — in or mm if units='SI'"),
+        weld_length: z.number().optional().describe("Weld length — in or mm if units='SI'"),
+        weld_size: z.number().optional().describe("Weld leg size — in or mm if units='SI'"),
+        da: z.number().optional().describe("Arc spot/seam visible diameter — in or mm if units='SI'"),
+        groove_type: z.enum(["complete", "partial"]).optional().describe("Groove weld type"),
+        Fxx: z.number().optional().describe("Weld electrode strength — ksi or MPa if units='SI' (default 60 ksi)"),
+        Fuf: z.number().optional().describe("PAF pin strength — ksi or MPa if units='SI' (default 60 ksi)"),
+        Pu: z.number().optional().describe("Required force — kips or kN if units='SI'"),
+        units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI'"),
     },
-    async ({ connection_type, design_method, Fy, Fu, t1, t2, d, Fub, n, e, s, weld_length, weld_size, da, groove_type, Fxx, Fuf, Pu }) => {
-        const r = await callBridgePost('/action', {
-            action: 'aisi_design',
-            member_type: 'connection',
-            connection_type,
+    async ({ connection_type, design_method, Fy, Fu, t1, t2, d, Fub, n, e, s,
+             weld_length, weld_size, da, groove_type, Fxx, Fuf, Pu, units }) => {
+        let body: Record<string, any> = {
+            action: 'aisi_design', member_type: 'connection', connection_type,
             design_method: design_method || 'LRFD',
             Fy, Fu, t1, t2: t2 || t1,
             d, Fub, n: n || 1, e, s,
             weld_length, weld_size, da,
             groove_type: groove_type || 'complete',
-            Fxx: Fxx || 60, Fuf: Fuf || 60,
+            Fxx: Fxx || (units === 'SI' ? 414 : 60),
+            Fuf: Fuf || (units === 'SI' ? 414 : 60),
             Pu: Pu || 0,
-        });
+        };
+        if (units === 'SI') {
+            body = convertInputSI(body, {
+                Fy: 'stress', Fu: 'stress', Fub: 'stress', Fxx: 'stress', Fuf: 'stress',
+                t1: 'length', t2: 'length', d: 'length', e: 'length', s: 'length',
+                weld_length: 'length', weld_size: 'length', da: 'length',
+                Pu: 'force',
+            });
+        }
+        const r = await callBridgePost('/action', body);
         return textResult(JSON.stringify(r, null, 2));
     }
 );
@@ -864,7 +932,7 @@ server.tool("aisi_design_guide", "Get AISI S100-16 design workflow guide for AI 
     }
 );
 
-server.tool("get_web_crippling", "Calculate a simplified single-web web-crippling case using the project implementation. This does not cover all AISI G5 table branches.",
+server.tool("get_web_crippling", "AISI S100-16 §G5 web crippling (single-web C/Z, Table G5-2/G5-3). Does not cover hat/multi-web/overhang cases.",
     {
         h: z.number().describe("Web flat width (in)"),
         t: z.number().describe("Web thickness (in)"),
@@ -874,8 +942,9 @@ server.tool("get_web_crippling", "Calculate a simplified single-web web-cripplin
         theta: z.number().optional().describe("Angle between web and bearing surface deg (default 90)"),
         support: z.enum(["EOF", "IOF", "ETF", "ITF"]).optional().describe("Support condition (default EOF)"),
         fastened: z.enum(["fastened", "unfastened"]).optional().describe("Fastened to support? (default fastened)"),
+        section_type: z.enum(["C", "Z"]).optional().describe("Section type: C (Table G5-2) or Z (Table G5-3). Default C."),
     },
-    async ({ h, t, R, N, Fy, theta, support, fastened }) => {
+    async ({ h, t, R, N, Fy, theta, support, fastened, section_type }) => {
         const r = await callBridgePost('/action', {
             action: 'web_crippling',
             h, t, R, N,
@@ -883,6 +952,7 @@ server.tool("get_web_crippling", "Calculate a simplified single-web web-cripplin
             theta: theta || 90,
             support: support || 'EOF',
             fastened: fastened || 'fastened',
+            section_type: section_type || 'C',
         });
         return textResult(JSON.stringify(r, null, 2));
     }
