@@ -110,7 +110,7 @@
             ['conn-Mu','moment'],['conn-Vu','force'],
             ['conn-t1','thickness'],['conn-t2','thickness'],
             ['conn-d','length'],['conn-Fy','stress'],['conn-Fu','stress'],
-            ['conn-Fub','stress'],['conn-Pu','force'],
+            ['conn-Fub','stress'],['conn-Fuf','stress'],['conn-Pu','force'],
             ['conn-weld-L','length'],['conn-weld-size','length'],
             ['conn-fastener-dia','length'],
         ];
@@ -712,6 +712,9 @@
     const btnLapDesign = document.getElementById('btn-run-lap-design');
     if (btnLapDesign) {
         btnLapDesign.addEventListener('click', () => {
+            // 단면 속성에서 Se, Sf 가져오기 (Lap 휨강도 검토용)
+            var lpSx = lastProps ? (lastProps.Sx || 0) : 0;  // Sf = Sx (총 단면계수)
+            var lpSe = (_lastDesignResult && _lastDesignResult.Se) ? _lastDesignResult.Se : lpSx;
             const data = {
                 d: fromDisplay(getNum('tpl-H', 8), 'length'),
                 t: fromDisplay(getNum('tpl-t', 0.059), 'thickness'),
@@ -724,6 +727,9 @@
                 fastener_type: document.getElementById('conn-fastener-type')?.value || 'screw',
                 fastener_dia: fromDisplay(getNum('conn-fastener-dia', 0.19), 'length'),
                 n_rows: getNum('conn-n-rows', 2),
+                design_method: document.getElementById('select-design-method')?.value || 'LRFD',
+                Se: lpSe,   // 유효 단면계수 (in³)
+                Sf: lpSx,   // 총 단면계수 (in³)
             };
             vscode.postMessage({ command: 'runLapConnection', data });
         });
@@ -755,6 +761,9 @@
             if (connType === 'bolt') {
                 data.Fub = fromDisplay(getNum('conn-Fub', 827), 'stress');
             }
+            if (connType === 'paf') {
+                data.Fuf = fromDisplay(getNum('conn-Fuf', 414), 'stress');
+            }
             vscode.postMessage({ command: 'runConnection', data });
         });
     }
@@ -767,9 +776,11 @@
             const weldRow = document.getElementById('conn-weld-row');
             const grooveRow = document.getElementById('conn-groove-row');
             const boltRow = document.getElementById('conn-bolt-row');
+            const pafRow = document.getElementById('conn-paf-row');
             if (weldRow) weldRow.style.display = ['fillet_weld','arc_spot','arc_seam','groove'].includes(ct) ? '' : 'none';
             if (grooveRow) grooveRow.style.display = ct === 'groove' ? '' : 'none';
             if (boltRow) boltRow.style.display = ct === 'bolt' ? '' : 'none';
+            if (pafRow) pafRow.style.display = ct === 'paf' ? '' : 'none';
         });
     }
 
@@ -787,13 +798,37 @@
         // Lap SVG 다이어그램
         html += _drawLapSvg(result);
 
+        // 종합 판정
+        var passLabel = result.pass ? '✅ OK' : '❌ NG';
+        var passColor = result.pass ? 'rgba(0,200,0,0.15)' : 'rgba(255,0,0,0.15)';
+        html += '<div style="background:' + passColor + ';padding:8px;margin-bottom:8px;border-radius:4px;font-weight:bold;text-align:center">';
+        html += '종합 판정: ' + passLabel;
+        var dcrParts = [];
+        if (result.utilization != null && isFinite(result.utilization)) {
+            dcrParts.push('패스너 DCR=' + result.utilization.toFixed(3));
+        }
+        if (result.flexure_dcr != null && isFinite(result.flexure_dcr)) {
+            dcrParts.push('휨 DCR=' + result.flexure_dcr.toFixed(3));
+        }
+        if (dcrParts.length > 0) html += '  (' + dcrParts.join(', ') + ')';
+        html += '</div>';
+
         html += '<table class="props-table">';
         html += '<tr><td>Lap 길이 검증</td><td>' + (result.lap_ok ? '✅ OK' : '❌ NG') + '</td><td>≥ ' + fmtVal(result.min_lap, 'length') + ' ' + unitLabel('length') + '</td></tr>';
         html += '<tr><td>전달 전단력</td><td>' + fmtVal(result.V_transfer, 'force') + ' ' + unitLabel('force') + '</td><td></td></tr>';
         html += '<tr><td>패스너 강도</td><td>' + fmtVal(result.Pns, 'force') + ' ' + unitLabel('force') + '/ea</td><td>' + result.fastener_label + '</td></tr>';
-        html += '<tr><td><b>필요 패스너 수</b></td><td><b>' + result.n_total + ' ea</b></td><td>' + result.n_rows + ' rows × ' + result.n_per_row + '/row</td></tr>';
+        html += '<tr><td>필요 패스너 수</td><td>' + (result.n_required || result.n_total) + ' ea</td><td></td></tr>';
+        html += '<tr><td>배치 가능 최대</td><td>' + (result.n_max_total || '-') + ' ea</td><td>Lap 길이 제약</td></tr>';
+        html += '<tr><td><b>실제 배치</b></td><td><b>' + result.n_total + ' ea</b></td><td>' + result.n_rows + ' rows × ' + result.n_per_row + '/row</td></tr>';
+        html += '<tr><td>용량</td><td>' + fmtVal(result.capacity, 'force') + ' ' + unitLabel('force') + '</td><td>' + result.n_total + ' × ' + fmtVal(result.Pns, 'force') + '</td></tr>';
         html += '<tr><td>패스너 간격</td><td>' + fmtVal(result.spacing, 'length') + ' ' + unitLabel('length') + '</td><td></td></tr>';
         html += '<tr><td>Edge 거리</td><td>' + fmtVal(result.edge_distance, 'length') + ' ' + unitLabel('length') + '</td><td></td></tr>';
+        // 휨강도 검토 (Lap 구간)
+        if (result.Mn_lap != null && result.Mn_lap > 0) {
+            var fIcon = result.flexure_dcr != null && result.flexure_dcr <= 1.0 ? '✅' : '❌';
+            html += '<tr style="border-top:1px solid var(--vscode-panel-border)"><td><b>Lap 휨강도 (§F3)</b></td><td>' + fIcon + ' DCR=' + (result.flexure_dcr != null ? result.flexure_dcr.toFixed(3) : 'N/A') + '</td>';
+            html += '<td>\u03c6Mn=' + fmtVal(result.phi_Mn_lap, 'moment') + ' ' + unitLabel('moment') + ' (2\u00d7Se\u00d7Fy)</td></tr>';
+        }
         html += '</table>';
 
         if (result.steps) {
@@ -834,11 +869,11 @@
             html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
             html += '<tr><th style="text-align:left;padding:3px">모드</th><th style="text-align:right;padding:3px">Rn</th><th style="text-align:right;padding:3px">φRn</th><th style="padding:3px">지배?</th></tr>';
             result.limit_states.forEach(ls => {
-                const isGov = ls.mode === result.governing_mode;
+                const isGov = ls.name === result.governing_mode;
                 html += '<tr style="' + (isGov ? 'font-weight:700;background:rgba(79,195,247,0.1)' : '') + '">';
-                html += '<td style="padding:3px">' + ls.mode + '</td>';
+                html += '<td style="padding:3px">' + ls.name + '</td>';
                 html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.Rn, 'force') + '</td>';
-                html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.phi_Rn || ls.Rn_omega || 0, 'force') + '</td>';
+                html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.design_strength || 0, 'force') + '</td>';
                 html += '<td style="text-align:center;padding:3px">' + (isGov ? '★' : '') + '</td>';
                 html += '</tr>';
             });
@@ -859,132 +894,368 @@
     // 접합부 SVG 다이어그램
     // ============================================================
     function _drawLapSvg(r) {
-        const w = 480, h = 180;
-        const fg = 'var(--vscode-foreground)';
-        const accent = '#4fc3f7';
-        const warn = '#ff5722';
+        var w = 480, h = 220;
+        var fg = 'var(--vscode-foreground)';
+        var dim = 'var(--vscode-descriptionForeground)';
+        var blue = '#4fc3f7';
+        var green = '#66bb6a';
+        var fastColor = r.pass === false ? '#f44336' : '#ff9800';
+        var okColor = r.pass === false ? '#f44336' : '#4caf50';
 
-        const lapL = r.lap_left_in || 12;
-        const lapR = r.lap_right_in || 12;
-        const nPerRow = r.n_per_row || 2;
-        const nRows = r.n_rows || 2;
-        const spacing = r.spacing || 3;
-        const total = lapL + lapR + 40;
-        const sc = (w - 40) / total;
+        var lapL = r.lap_left_in || 12;
+        var lapR = r.lap_right_in || 12;
+        var nPerRow = r.n_per_row || 2;
+        var nRows = r.n_rows || 2;
+        var spacing = r.spacing || 3;
+        var edgeDist = r.edge_distance || 0.5;
+        var total = lapL + lapR + 30;
+        var sc = (w - 60) / total;
 
-        const x0 = 20, y1 = 40, y2 = 55, tH = 12;
-        const supX = x0 + lapL * sc + 20 * sc;
+        var x0 = 30;
+        var webH = 48;
+        var flangeW = 14;
+        var lipH = 8;
+        var tH = 5;
+        var gap = 3;
+        var topY = 38;
+        var supX = x0 + lapL * sc + 15 * sc;
 
-        let s = '<svg width="'+w+'" height="'+h+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
+        var s = '<svg width="'+w+'" height="'+h+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
 
-        // 부재 1 (상부)
-        s += '<rect x="'+x0+'" y="'+(y1)+'" width="'+(lapL*sc+20*sc)+'" height="'+tH+'" fill="'+accent+'" opacity="0.3" stroke="'+accent+'" stroke-width="1"/>';
-        // 부재 2 (하부, Lap 영역에서 겹침)
-        s += '<rect x="'+(supX - lapL*sc)+'" y="'+(y2)+'" width="'+(lapR*sc+lapL*sc+20*sc)+'" height="'+tH+'" fill="#81c784" opacity="0.3" stroke="#81c784" stroke-width="1"/>';
+        // 타이틀
+        var passText = r.pass === true ? 'OK' : (r.pass === false ? 'NG' : '');
+        var titleExtra = passText ? '  [' + passText + ']' : '';
+        s += '<text x="'+w/2+'" y="14" text-anchor="middle" fill="'+fg+'" font-size="10.5" font-weight="600">Lap Splice — '+(r.n_total||0)+' '+( r.fastener_label||'fasteners')+' ('+nRows+'×'+nPerRow+')'+titleExtra+'</text>';
 
-        // 지점 삼각형
-        s += '<polygon points="'+(supX-6)+','+(y2+tH+2)+' '+(supX+6)+','+(y2+tH+2)+' '+supX+','+(y2+tH+10)+'" fill="'+fg+'" opacity="0.5"/>';
+        // ── 부재 1 (좌측, C단면 측면) ──
+        var m1Left = x0;
+        var m1Right = supX + 5*sc;
+        // 상부 플랜지
+        s += '<rect x="'+m1Left+'" y="'+topY+'" width="'+(m1Right-m1Left)+'" height="'+tH+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 웹
+        s += '<rect x="'+m1Left+'" y="'+(topY)+'" width="'+tH+'" height="'+webH+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 하부 플랜지
+        s += '<rect x="'+m1Left+'" y="'+(topY+webH-tH)+'" width="'+flangeW+'" height="'+tH+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 립 (상단)
+        s += '<rect x="'+m1Left+'" y="'+(topY-lipH)+'" width="'+tH+'" height="'+lipH+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.8"/>';
+        s += '<text x="'+(m1Left+8)+'" y="'+(topY+webH/2+3)+'" fill="'+blue+'" font-size="8" opacity="0.7">Member 1</text>';
 
-        // 패스너 (왼쪽 Lap)
-        for (let i = 0; i < nPerRow; i++) {
-            const fx = supX - (i + 1) * spacing * sc;
-            for (let j = 0; j < nRows; j++) {
-                const fy = y1 + tH/2 + (j === 0 ? -2 : tH + 2);
-                s += '<circle cx="'+fx+'" cy="'+fy+'" r="3" fill="'+warn+'" opacity="0.8"/>';
+        // ── 부재 2 (우측, C단면 측면) ──
+        var m2Left = supX - 5*sc;
+        var m2Right = x0 + (lapL+lapR)*sc + 30*sc;
+        // 상부 플랜지
+        s += '<rect x="'+m2Left+'" y="'+(topY+gap)+'" width="'+(m2Right-m2Left)+'" height="'+tH+'" fill="'+green+'" opacity="0.25" stroke="'+green+'" stroke-width="0.8"/>';
+        // 웹 (오른쪽 끝)
+        s += '<rect x="'+(m2Right-tH)+'" y="'+(topY+gap)+'" width="'+tH+'" height="'+webH+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.8"/>';
+        // 하부 플랜지
+        s += '<rect x="'+(m2Right-flangeW)+'" y="'+(topY+gap+webH-tH)+'" width="'+flangeW+'" height="'+tH+'" fill="'+green+'" opacity="0.25" stroke="'+green+'" stroke-width="0.8"/>';
+        // 립 (상단)
+        s += '<rect x="'+(m2Right-tH)+'" y="'+(topY+gap-lipH)+'" width="'+tH+'" height="'+lipH+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.8"/>';
+        s += '<text x="'+(m2Right-50)+'" y="'+(topY+gap+webH/2+3)+'" fill="'+green+'" font-size="8" opacity="0.7">Member 2</text>';
+
+        // ── 겹침 영역 음영 ──
+        var overlapL = Math.max(m2Left, m1Left);
+        var overlapR = Math.min(m1Right, m2Right);
+        if (overlapR > overlapL) {
+            s += '<rect x="'+overlapL+'" y="'+(topY-lipH-2)+'" width="'+(overlapR-overlapL)+'" height="'+(webH+gap+lipH+6)+'" fill="var(--vscode-focusBorder)" opacity="0.06" rx="2"/>';
+            s += '<text x="'+((overlapL+overlapR)/2)+'" y="'+(topY-lipH-5)+'" text-anchor="middle" fill="'+dim+'" font-size="7.5">Lap zone (2t)</text>';
+        }
+
+        // ── 지점 ──
+        var supY = topY + webH + gap + 8;
+        s += '<polygon points="'+(supX-8)+','+supY+' '+(supX+8)+','+supY+' '+supX+','+(supY+12)+'" fill="'+fg+'" opacity="0.4"/>';
+        s += '<line x1="'+(supX-12)+'" y1="'+(supY+13)+'" x2="'+(supX+12)+'" y2="'+(supY+13)+'" stroke="'+fg+'" stroke-width="1" opacity="0.4"/>';
+        s += '<text x="'+supX+'" y="'+(supY+24)+'" text-anchor="middle" fill="'+dim+'" font-size="8">Support</text>';
+
+        // ── 패스너 ──
+        var fY1 = topY + tH/2 + gap/2;
+        var fY2 = fY1 + (nRows > 1 ? webH*0.5 : 0);
+        var fYarr = nRows === 1 ? [fY1] : (nRows === 2 ? [fY1, fY2] : [fY1, (fY1+fY2)/2, fY2]);
+        if (nRows === 4) fYarr = [fY1, fY1+(fY2-fY1)/3, fY1+2*(fY2-fY1)/3, fY2];
+
+        // 좌측 패스너
+        for (var i = 0; i < nPerRow; i++) {
+            var fx = supX - edgeDist*sc - i * spacing * sc;
+            for (var j = 0; j < fYarr.length; j++) {
+                s += '<circle cx="'+fx.toFixed(1)+'" cy="'+fYarr[j].toFixed(1)+'" r="3.5" fill="'+fastColor+'" opacity="0.85"/>';
+                s += '<line x1="'+(fx-2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx+2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
+                s += '<line x1="'+(fx+2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx-2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
             }
         }
-        // 패스너 (오른쪽 Lap)
-        for (let i = 0; i < nPerRow; i++) {
-            const fx = supX + (i + 1) * spacing * sc;
-            for (let j = 0; j < nRows; j++) {
-                const fy = y1 + tH/2 + (j === 0 ? -2 : tH + 2);
-                s += '<circle cx="'+fx+'" cy="'+fy+'" r="3" fill="'+warn+'" opacity="0.8"/>';
+        // 우측 패스너
+        for (var i = 0; i < nPerRow; i++) {
+            var fx = supX + edgeDist*sc + i * spacing * sc;
+            for (var j = 0; j < fYarr.length; j++) {
+                s += '<circle cx="'+fx.toFixed(1)+'" cy="'+fYarr[j].toFixed(1)+'" r="3.5" fill="'+fastColor+'" opacity="0.85"/>';
+                s += '<line x1="'+(fx-2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx+2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
+                s += '<line x1="'+(fx+2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx-2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
             }
         }
 
-        // 치수선
-        const dimY = y2 + tH + 18;
-        s += _dimLine(supX - lapL*sc, dimY, supX, dimY, fmtVal(lapL, 'length'), fg);
-        s += _dimLine(supX, dimY, supX + lapR*sc, dimY, fmtVal(lapR, 'length'), fg);
+        // ── 치수선 ──
+        var dimY1 = supY + 32;
+        // Lap 길이
+        var lapLstart = supX - lapL * sc;
+        var lapRend = supX + lapR * sc;
+        s += _dimLineArrow(lapLstart, dimY1, supX, dimY1, fmtVal(lapL, 'length')+' '+unitLabel('length'), blue);
+        s += _dimLineArrow(supX, dimY1, lapRend, dimY1, fmtVal(lapR, 'length')+' '+unitLabel('length'), green);
 
-        // 라벨
-        s += '<text x="'+w/2+'" y="14" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.7">'+r.n_total+' '+r.fastener_label+' ('+nRows+'×'+nPerRow+')</text>';
+        // 최소 Lap 길이 표시
+        if (r.min_lap) {
+            var minLapLabel = 'min 1.5d=' + fmtVal(r.min_lap, 'length') + ' ' + unitLabel('length');
+            var lapCheckColor = r.lap_ok ? '#4caf50' : '#f44336';
+            s += '<text x="'+supX+'" y="'+(dimY1+14)+'" text-anchor="middle" fill="'+lapCheckColor+'" font-size="8">'+(r.lap_ok?'\u2713':'\u2717')+' '+minLapLabel+'</text>';
+        }
+
+        // 패스너 간격 (상단 치수)
+        if (nPerRow > 1 && spacing > 0) {
+            var sDimY = topY - lipH - 14;
+            var sx1 = supX + edgeDist*sc;
+            var sx2 = sx1 + spacing*sc;
+            s += _dimLineArrow(sx1, sDimY, sx2, sDimY, 's='+fmtVal(spacing,'length'), dim);
+        }
+
+        // edge distance (상단)
+        if (edgeDist > 0) {
+            var eDimY = topY - lipH - 24;
+            s += _dimLineArrow(supX, eDimY, supX + edgeDist*sc, eDimY, 'e='+fmtVal(edgeDist,'length'), dim);
+        }
+
+        // ── 용량 정보 ──
+        if (r.V_transfer != null && r.capacity != null) {
+            var infoY = h - 8;
+            s += '<text x="12" y="'+infoY+'" fill="'+dim+'" font-size="8.5">V='+fmtVal(r.V_transfer,'force')+' '+unitLabel('force')+'</text>';
+            s += '<text x="'+(w/2)+'" y="'+infoY+'" text-anchor="middle" fill="'+dim+'" font-size="8.5">Cap='+fmtVal(r.capacity,'force')+' '+unitLabel('force')+'</text>';
+            if (r.utilization != null && isFinite(r.utilization)) {
+                s += '<text x="'+(w-12)+'" y="'+infoY+'" text-anchor="end" fill="'+okColor+'" font-size="9" font-weight="600">DCR='+r.utilization.toFixed(3)+'</text>';
+            }
+        }
 
         s += '</svg>';
         return s;
     }
 
+    function _dimLineArrow(x1, y, x2, y2, label, color) {
+        var s = '';
+        var len = Math.abs(x2 - x1);
+        if (len < 2) return s;
+        // 수평선
+        s += '<line x1="'+x1.toFixed(1)+'" y1="'+y+'" x2="'+x2.toFixed(1)+'" y2="'+y2+'" stroke="'+color+'" stroke-width="0.6" opacity="0.6"/>';
+        // 화살표 (양쪽)
+        var dir = x2 > x1 ? 1 : -1;
+        s += '<polygon points="'+x1.toFixed(1)+','+y+' '+(x1+dir*4).toFixed(1)+','+(y-2)+' '+(x1+dir*4).toFixed(1)+','+(y+2)+'" fill="'+color+'" opacity="0.6"/>';
+        s += '<polygon points="'+x2.toFixed(1)+','+y2+' '+(x2-dir*4).toFixed(1)+','+(y2-2)+' '+(x2-dir*4).toFixed(1)+','+(y2+2)+'" fill="'+color+'" opacity="0.6"/>';
+        // 수직 틱
+        s += '<line x1="'+x1.toFixed(1)+'" y1="'+(y-4)+'" x2="'+x1.toFixed(1)+'" y2="'+(y+4)+'" stroke="'+color+'" stroke-width="0.5" opacity="0.5"/>';
+        s += '<line x1="'+x2.toFixed(1)+'" y1="'+(y2-4)+'" x2="'+x2.toFixed(1)+'" y2="'+(y2+4)+'" stroke="'+color+'" stroke-width="0.5" opacity="0.5"/>';
+        // 라벨
+        if (label) {
+            s += '<text x="'+((x1+x2)/2).toFixed(1)+'" y="'+(y-5)+'" text-anchor="middle" fill="'+color+'" font-size="8" opacity="0.8">'+label+'</text>';
+        }
+        return s;
+    }
+
     function _drawConnectionSvg(r) {
-        const ct = r.connection_type || '';
-        const w = 420, h = 210;
-        const fg = 'var(--vscode-foreground)';
-        const blue = '#4fc3f7';
-        const green = '#81c784';
-        const t1 = r.t1 || 0.059;
-        const t2 = r.t2 || t1;
-        const d = r.d || 0.19;
-        const n = r.n || 1;
+        var ct = r.connection_type || '';
+        var w = 440, h = 220;
+        var fg = 'var(--vscode-foreground)';
+        var dim = 'var(--vscode-descriptionForeground)';
+        var blue = '#4fc3f7';
+        var green = '#66bb6a';
+        var orange = '#ff9800';
+        var red = '#f44336';
+        var t1 = r.t1 || 0.059;
+        var t2 = r.t2 || t1;
+        var d = r.d || 0.19;
+        var n = r.n || 1;
+        var passColor = r.pass === true ? '#4caf50' : (r.pass === false ? red : dim);
 
-        let s = '<svg width="'+w+'" height="'+h+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
+        var s = '<svg width="'+w+'" height="'+h+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
 
-        const x0 = 30, y0 = 30;
-        const plateW = 100, gapX = 10;
-        const t1H = Math.max(8, Math.min(20, t1 * 150));
-        const t2H = Math.max(8, Math.min(20, t2 * 150));
+        // 접합 유형 이름 + 조항
+        var typeNames = {screw:'Screw Connection §J4', bolt:'Bolt Connection §J3', paf:'PAF Connection §J5',
+            fillet_weld:'Fillet Weld §J2.1', arc_spot:'Arc Spot Weld §J2.2', arc_seam:'Arc Seam Weld §J2.4', groove:'Groove Weld §J2.3'};
+        s += '<text x="'+w/2+'" y="15" text-anchor="middle" fill="'+fg+'" font-size="10.5" font-weight="600">'+(typeNames[ct]||ct)+'</text>';
+
+        var x0 = 50, y0 = 36;
+        var plateW = 130;
+        var t1H = Math.max(10, Math.min(28, t1 * 200));
+        var t2H = Math.max(10, Math.min(28, t2 * 200));
+        var overlapW = 50;
 
         if (['screw','bolt','paf'].includes(ct)) {
-            // 기계적 접합: 두 판재 겹침 + 패스너
-            // 판재 1 (왼쪽)
-            s += '<rect x="'+x0+'" y="'+(y0)+'" width="'+(plateW+20)+'" height="'+t1H+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'"/>';
-            // 판재 2 (오른쪽, 아래)
-            s += '<rect x="'+(x0+plateW-20)+'" y="'+(y0+t1H)+'" width="'+(plateW+20)+'" height="'+t2H+'" fill="'+green+'" opacity="0.25" stroke="'+green+'"/>';
-            // 겹침 영역
-            s += '<rect x="'+(x0+plateW-20)+'" y="'+y0+'" width="40" height="'+(t1H+t2H)+'" fill="var(--vscode-focusBorder)" opacity="0.1" stroke="none"/>';
-            // 패스너
-            const fSpacing = 30 / Math.max(n, 1);
-            for (let i = 0; i < Math.min(n, 4); i++) {
-                const fx = x0 + plateW - 15 + i * fSpacing;
-                const fy = y0 + t1H;
-                s += '<circle cx="'+fx+'" cy="'+fy+'" r="4" fill="#ff5722" opacity="0.7"/>';
-                s += '<line x1="'+(fx-3)+'" y1="'+(fy-3)+'" x2="'+(fx+3)+'" y2="'+(fy+3)+'" stroke="#fff" stroke-width="1"/>';
+            // ── 기계적 접합: 단면도 ──
+            // 판재 1 (왼쪽 → 오른쪽으로 연장)
+            var p1x = x0, p1y = y0, p1w = plateW + overlapW/2;
+            s += '<rect x="'+p1x+'" y="'+p1y+'" width="'+p1w+'" height="'+t1H+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="1"/>';
+            // 해칭 (사선)
+            for (var hi = 0; hi < p1w; hi += 6) {
+                s += '<line x1="'+(p1x+hi)+'" y1="'+p1y+'" x2="'+(p1x+hi+t1H*0.6)+'" y2="'+(p1y+t1H)+'" stroke="'+blue+'" stroke-width="0.3" opacity="0.3"/>';
             }
-            // 치수
-            s += _dimLine(x0, y0+t1H+t2H+10, x0+plateW+20, y0+t1H+t2H+10, '', fg);
-            s += '<text x="'+(x0-2)+'" y="'+(y0+t1H/2+3)+'" text-anchor="end" fill="'+fg+'" font-size="9">t1='+fmtVal(t1,'thickness')+'</text>';
-            s += '<text x="'+(x0+2*plateW+22)+'" y="'+(y0+t1H+t2H/2+3)+'" fill="'+fg+'" font-size="9">t2='+fmtVal(t2,'thickness')+'</text>';
-            s += '<text x="'+(x0+plateW)+'" y="'+(y0-6)+'" text-anchor="middle" fill="'+fg+'" font-size="9">d='+fmtVal(d,'length')+' ×'+n+'</text>';
-            // 이름
-            const names = {screw:'Screw §J4', bolt:'Bolt §J3', paf:'PAF §J5'};
-            s += '<text x="'+w/2+'" y="'+(h-6)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.6">'+names[ct]+'</text>';
+
+            // 판재 2 (오른쪽, 아래에 겹침)
+            var p2x = x0 + plateW - overlapW/2, p2y = y0 + t1H, p2w = plateW + overlapW/2;
+            s += '<rect x="'+p2x+'" y="'+p2y+'" width="'+p2w+'" height="'+t2H+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="1"/>';
+            for (var hi = 0; hi < p2w; hi += 6) {
+                s += '<line x1="'+(p2x+hi)+'" y1="'+p2y+'" x2="'+(p2x+hi+t2H*0.6)+'" y2="'+(p2y+t2H)+'" stroke="'+green+'" stroke-width="0.3" opacity="0.3"/>';
+            }
+
+            // 겹침 영역 강조
+            var olx = p2x, olw = p1x + p1w - p2x;
+            s += '<rect x="'+olx+'" y="'+(p1y-2)+'" width="'+olw+'" height="'+(t1H+t2H+4)+'" fill="var(--vscode-focusBorder)" opacity="0.06" rx="2"/>';
+
+            // 패스너
+            var fSpacing = Math.min(overlapW / (n + 1), overlapW * 0.8 / n);
+            var fStart = olx + (olw - fSpacing * (n - 1)) / 2;
+            var fMidY = p1y + t1H;
+            for (var i = 0; i < Math.min(n, 6); i++) {
+                var fx = fStart + i * fSpacing;
+                // 패스너 본체 (관통선)
+                s += '<line x1="'+fx+'" y1="'+(p1y-6)+'" x2="'+fx+'" y2="'+(p2y+t2H+6)+'" stroke="'+orange+'" stroke-width="1.2" opacity="0.5" stroke-dasharray="2,1"/>';
+                // 패스너 머리
+                if (ct === 'screw') {
+                    s += '<circle cx="'+fx+'" cy="'+(p1y-4)+'" r="4" fill="'+orange+'" opacity="0.8"/>';
+                    s += '<line x1="'+(fx-2.5)+'" y1="'+(p1y-4)+'" x2="'+(fx+2.5)+'" y2="'+(p1y-4)+'" stroke="#fff" stroke-width="1"/>';
+                    s += '<circle cx="'+fx+'" cy="'+fMidY+'" r="2.5" fill="'+orange+'" opacity="0.9"/>';
+                } else if (ct === 'bolt') {
+                    // 육각 머리
+                    s += '<rect x="'+(fx-4.5)+'" y="'+(p1y-9)+'" width="9" height="5" fill="'+orange+'" opacity="0.8" rx="1"/>';
+                    s += '<rect x="'+(fx-4.5)+'" y="'+(p2y+t2H+1)+'" width="9" height="4" fill="'+orange+'" opacity="0.6" rx="1"/>';
+                    s += '<circle cx="'+fx+'" cy="'+fMidY+'" r="2.5" fill="'+orange+'" opacity="0.9"/>';
+                } else {
+                    // PAF
+                    s += '<polygon points="'+(fx-3)+','+(p1y-6)+' '+(fx+3)+','+(p1y-6)+' '+fx+','+(p1y-1)+'" fill="'+orange+'" opacity="0.8"/>';
+                    s += '<circle cx="'+fx+'" cy="'+fMidY+'" r="2.5" fill="'+orange+'" opacity="0.9"/>';
+                }
+            }
+            if (n > 6) {
+                s += '<text x="'+(fStart + 5*fSpacing + 12)+'" y="'+(fMidY+4)+'" fill="'+dim+'" font-size="8">...+'+(n-6)+'</text>';
+            }
+
+            // 하중 화살표
+            s += '<line x1="'+(p1x-8)+'" y1="'+(p1y+t1H/2)+'" x2="'+(p1x+16)+'" y2="'+(p1y+t1H/2)+'" stroke="'+red+'" stroke-width="1.5" marker-end="url(#arrowR)"/>';
+            s += '<line x1="'+(p2x+p2w+8)+'" y1="'+(p2y+t2H/2)+'" x2="'+(p2x+p2w-16)+'" y2="'+(p2y+t2H/2)+'" stroke="'+red+'" stroke-width="1.5" marker-end="url(#arrowR)"/>';
+            s += '<text x="'+(p1x-10)+'" y="'+(p1y+t1H/2+4)+'" text-anchor="end" fill="'+red+'" font-size="8.5">Pu</text>';
+
+            // 치수: t1
+            var tdx = p1x - 18;
+            s += '<line x1="'+tdx+'" y1="'+p1y+'" x2="'+tdx+'" y2="'+(p1y+t1H)+'" stroke="'+dim+'" stroke-width="0.6"/>';
+            s += '<text x="'+(tdx-2)+'" y="'+(p1y+t1H/2+3)+'" text-anchor="end" fill="'+dim+'" font-size="8.5">t\u2081='+fmtVal(t1,'thickness')+'</text>';
+            // 치수: t2
+            var tdx2 = p2x + p2w + 18;
+            s += '<line x1="'+tdx2+'" y1="'+p2y+'" x2="'+tdx2+'" y2="'+(p2y+t2H)+'" stroke="'+dim+'" stroke-width="0.6"/>';
+            s += '<text x="'+(tdx2+2)+'" y="'+(p2y+t2H/2+3)+'" fill="'+dim+'" font-size="8.5">t\u2082='+fmtVal(t2,'thickness')+'</text>';
+            // 치수: d
+            s += '<text x="'+((olx+olx+olw)/2)+'" y="'+(p1y-14)+'" text-anchor="middle" fill="'+orange+'" font-size="9">d='+fmtVal(d,'length')+' \u00d7'+n+'</text>';
 
         } else if (['fillet_weld','arc_spot','arc_seam'].includes(ct)) {
-            // 용접: 두 판재 + 용접 심볼
-            s += '<rect x="'+x0+'" y="'+(y0+15)+'" width="'+(plateW)+'" height="'+t1H+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'"/>';
-            s += '<rect x="'+(x0+plateW)+'" y="'+(y0+15+t1H)+'" width="'+(plateW)+'" height="'+t2H+'" fill="'+green+'" opacity="0.25" stroke="'+green+'"/>';
-            // 용접 심볼 (삼각형)
-            const wx = x0 + plateW;
-            const wy = y0 + 15;
-            if (ct === 'fillet_weld') {
-                s += '<polygon points="'+(wx-8)+','+(wy+t1H)+' '+wx+','+(wy)+' '+wx+','+(wy+t1H)+'" fill="#ff9800" opacity="0.5"/>';
-                s += '<polygon points="'+wx+','+(wy+t1H)+' '+wx+','+(wy+t1H+t2H)+' '+(wx+8)+','+(wy+t1H)+'" fill="#ff9800" opacity="0.5"/>';
-            } else if (ct === 'arc_spot') {
-                s += '<circle cx="'+wx+'" cy="'+(wy+t1H)+'" r="6" fill="#ff9800" opacity="0.4" stroke="#ff9800"/>';
-            } else {
-                s += '<ellipse cx="'+wx+'" cy="'+(wy+t1H)+'" rx="12" ry="5" fill="#ff9800" opacity="0.4" stroke="#ff9800"/>';
+            // ── 용접 접합 ──
+            var wy0 = y0 + 10;
+            // 판재 1 (수평)
+            s += '<rect x="'+x0+'" y="'+wy0+'" width="'+plateW+'" height="'+t1H+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="1"/>';
+            for (var hi = 0; hi < plateW; hi += 6) {
+                s += '<line x1="'+(x0+hi)+'" y1="'+wy0+'" x2="'+(x0+hi+t1H*0.5)+'" y2="'+(wy0+t1H)+'" stroke="'+blue+'" stroke-width="0.3" opacity="0.25"/>';
             }
-            s += '<text x="'+(x0-2)+'" y="'+(y0+15+t1H/2+3)+'" text-anchor="end" fill="'+fg+'" font-size="9">t1</text>';
-            s += '<text x="'+(x0+2*plateW+4)+'" y="'+(y0+15+t1H+t2H/2+3)+'" fill="'+fg+'" font-size="9">t2</text>';
-            const names2 = {fillet_weld:'Fillet §J2.1', arc_spot:'Arc Spot §J2.2', arc_seam:'Arc Seam §J2.4'};
-            s += '<text x="'+w/2+'" y="'+(h-6)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.6">'+names2[ct]+'</text>';
+            // 판재 2 (겹침)
+            var p2x = x0 + plateW * 0.35;
+            s += '<rect x="'+p2x+'" y="'+(wy0+t1H)+'" width="'+(plateW*0.65)+'" height="'+t2H+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="1"/>';
+            for (var hi = 0; hi < plateW*0.65; hi += 6) {
+                s += '<line x1="'+(p2x+hi)+'" y1="'+(wy0+t1H)+'" x2="'+(p2x+hi+t2H*0.5)+'" y2="'+(wy0+t1H+t2H)+'" stroke="'+green+'" stroke-width="0.3" opacity="0.25"/>';
+            }
+
+            var wx = p2x;
+            var weldY = wy0 + t1H;
+            if (ct === 'fillet_weld') {
+                // 필릿 용접 삼각형 (양쪽)
+                var wSz = Math.max(6, Math.min(12, (r.weld_size||3) * 3));
+                s += '<polygon points="'+(wx-wSz)+','+weldY+' '+wx+','+(weldY-wSz)+' '+wx+','+weldY+'" fill="'+orange+'" opacity="0.5" stroke="'+orange+'" stroke-width="0.5"/>';
+                s += '<polygon points="'+wx+','+weldY+' '+wx+','+(weldY+wSz)+' '+(wx+wSz)+','+weldY+'" fill="'+orange+'" opacity="0.5" stroke="'+orange+'" stroke-width="0.5"/>';
+                // AWS 심볼선
+                s += '<line x1="'+wx+'" y1="'+(wy0-10)+'" x2="'+(wx+50)+'" y2="'+(wy0-10)+'" stroke="'+fg+'" stroke-width="0.8"/>';
+                s += '<polygon points="'+wx+','+(wy0-10)+' '+(wx+8)+','+(wy0-14)+' '+(wx+8)+','+(wy0-10)+'" fill="'+fg+'" opacity="0.7"/>';
+                s += '<text x="'+(wx+12)+'" y="'+(wy0-12)+'" fill="'+dim+'" font-size="8">'+fmtVal(r.weld_size||0,'length')+'</text>';
+                if (r.weld_L) s += '<text x="'+(wx+40)+'" y="'+(wy0-12)+'" fill="'+dim+'" font-size="8">L='+fmtVal(r.weld_L,'length')+'</text>';
+            } else if (ct === 'arc_spot') {
+                // 원형 너겟
+                s += '<circle cx="'+wx+'" cy="'+weldY+'" r="8" fill="'+orange+'" opacity="0.3" stroke="'+orange+'" stroke-width="1.5"/>';
+                s += '<circle cx="'+wx+'" cy="'+weldY+'" r="3" fill="'+orange+'" opacity="0.7"/>';
+                // 추가 점 (n>1)
+                if (n > 1) {
+                    for (var si = 1; si < Math.min(n, 4); si++) {
+                        var sx = wx + si * 24;
+                        s += '<circle cx="'+sx+'" cy="'+weldY+'" r="8" fill="'+orange+'" opacity="0.3" stroke="'+orange+'" stroke-width="1.5"/>';
+                        s += '<circle cx="'+sx+'" cy="'+weldY+'" r="3" fill="'+orange+'" opacity="0.7"/>';
+                    }
+                }
+                s += '<text x="'+wx+'" y="'+(wy0-6)+'" text-anchor="middle" fill="'+orange+'" font-size="8.5">d='+fmtVal(d,'length')+' \u00d7'+n+'</text>';
+            } else {
+                // Arc Seam: 타원 너겟
+                s += '<ellipse cx="'+(wx+15)+'" cy="'+weldY+'" rx="18" ry="7" fill="'+orange+'" opacity="0.25" stroke="'+orange+'" stroke-width="1.5"/>';
+                s += '<ellipse cx="'+(wx+15)+'" cy="'+weldY+'" rx="6" ry="3" fill="'+orange+'" opacity="0.6"/>';
+                s += '<text x="'+(wx+15)+'" y="'+(wy0-6)+'" text-anchor="middle" fill="'+orange+'" font-size="8.5">d='+fmtVal(d,'length')+(r.weld_L ? ' L='+fmtVal(r.weld_L,'length'):'')+'</text>';
+            }
+
+            // 치수: t1, t2
+            s += '<text x="'+(x0-4)+'" y="'+(wy0+t1H/2+3)+'" text-anchor="end" fill="'+dim+'" font-size="8.5">t\u2081='+fmtVal(t1,'thickness')+'</text>';
+            s += '<text x="'+(x0+plateW+4)+'" y="'+(wy0+t1H+t2H/2+3)+'" fill="'+dim+'" font-size="8.5">t\u2082='+fmtVal(t2,'thickness')+'</text>';
 
         } else if (ct === 'groove') {
-            // 그루브 용접: 맞대기
-            s += '<rect x="'+x0+'" y="'+(y0+20)+'" width="'+(plateW-5)+'" height="'+t1H+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'"/>';
-            s += '<rect x="'+(x0+plateW+5)+'" y="'+(y0+20)+'" width="'+(plateW-5)+'" height="'+t2H+'" fill="'+green+'" opacity="0.25" stroke="'+green+'"/>';
-            // 용접부 (V형)
-            s += '<polygon points="'+(x0+plateW-5)+','+(y0+20)+' '+(x0+plateW)+','+(y0+20+t1H)+' '+(x0+plateW+5)+','+(y0+20)+'" fill="#ff9800" opacity="0.4"/>';
-            s += '<text x="'+w/2+'" y="'+(y0+12)+'" text-anchor="middle" fill="'+fg+'" font-size="9">'+(r.groove_type==='complete'?'CJP':'PJP')+'</text>';
-            s += '<text x="'+w/2+'" y="'+(h-6)+'" text-anchor="middle" fill="'+fg+'" font-size="10" opacity="0.6">Groove §J2.3</text>';
+            // ── 그루브 용접: 맞대기 ──
+            var gy0 = y0 + 15;
+            var gapW = 8;
+            var p1w = plateW - gapW/2;
+
+            // 판재 1 (좌)
+            s += '<rect x="'+x0+'" y="'+gy0+'" width="'+p1w+'" height="'+t1H+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="1"/>';
+            for (var hi = 0; hi < p1w; hi += 6) {
+                s += '<line x1="'+(x0+hi)+'" y1="'+gy0+'" x2="'+(x0+hi+t1H*0.5)+'" y2="'+(gy0+t1H)+'" stroke="'+blue+'" stroke-width="0.3" opacity="0.25"/>';
+            }
+            // 판재 2 (우)
+            var g2x = x0 + plateW + gapW/2;
+            s += '<rect x="'+g2x+'" y="'+gy0+'" width="'+p1w+'" height="'+t2H+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="1"/>';
+            for (var hi = 0; hi < p1w; hi += 6) {
+                s += '<line x1="'+(g2x+hi)+'" y1="'+gy0+'" x2="'+(g2x+hi+t2H*0.5)+'" y2="'+(gy0+t2H)+'" stroke="'+green+'" stroke-width="0.3" opacity="0.25"/>';
+            }
+            // 루트 갭 + V형 용접부
+            var gcx = x0 + plateW;
+            var isComplete = r.groove_type === 'complete';
+            if (isComplete) {
+                // CJP: 전체 관통
+                s += '<polygon points="'+(gcx-gapW*1.5)+','+gy0+' '+gcx+','+(gy0+t1H)+' '+(gcx+gapW*1.5)+','+gy0+'" fill="'+orange+'" opacity="0.4" stroke="'+orange+'" stroke-width="0.8"/>';
+            } else {
+                // PJP: 부분 관통
+                s += '<polygon points="'+(gcx-gapW)+','+(gy0)+' '+gcx+','+(gy0+t1H*0.6)+' '+(gcx+gapW)+','+(gy0)+'" fill="'+orange+'" opacity="0.4" stroke="'+orange+'" stroke-width="0.8"/>';
+                s += '<line x1="'+(gcx-gapW/2)+'" y1="'+(gy0+t1H*0.6)+'" x2="'+(gcx+gapW/2)+'" y2="'+(gy0+t1H*0.6)+'" stroke="'+orange+'" stroke-width="1" opacity="0.6"/>';
+            }
+            // AWS 심볼선
+            s += '<line x1="'+gcx+'" y1="'+(gy0-8)+'" x2="'+(gcx+55)+'" y2="'+(gy0-8)+'" stroke="'+fg+'" stroke-width="0.8"/>';
+            s += '<text x="'+(gcx+4)+'" y="'+(gy0-10)+'" fill="'+dim+'" font-size="8.5">'+(isComplete ? 'CJP' : 'PJP')+'</text>';
+
+            // 치수
+            s += '<text x="'+(x0-4)+'" y="'+(gy0+t1H/2+3)+'" text-anchor="end" fill="'+dim+'" font-size="8.5">t\u2081='+fmtVal(t1,'thickness')+'</text>';
+            s += '<text x="'+(g2x+p1w+4)+'" y="'+(gy0+t2H/2+3)+'" fill="'+dim+'" font-size="8.5">t\u2082='+fmtVal(t2,'thickness')+'</text>';
+
+            // 하중 화살표
+            s += '<line x1="'+(x0-8)+'" y1="'+(gy0+t1H/2)+'" x2="'+(x0+16)+'" y2="'+(gy0+t1H/2)+'" stroke="'+red+'" stroke-width="1.5" marker-end="url(#arrowR)"/>';
+            s += '<line x1="'+(g2x+p1w+8)+'" y1="'+(gy0+t2H/2)+'" x2="'+(g2x+p1w-16)+'" y2="'+(gy0+t2H/2)+'" stroke="'+red+'" stroke-width="1.5" marker-end="url(#arrowR)"/>';
+        }
+
+        // 화살표 마커 정의
+        s += '<defs><marker id="arrowR" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="'+red+'"/></marker></defs>';
+
+        // 결과 요약 (하단)
+        var botY = h - 8;
+        if (r.Rn != null) {
+            s += '<text x="12" y="'+botY+'" fill="'+dim+'" font-size="8.5">Rn='+fmtVal(r.Rn,'force')+' '+unitLabel('force')+'</text>';
+        }
+        if (r.design_strength != null) {
+            s += '<text x="'+(w/2)+'" y="'+botY+'" text-anchor="middle" fill="'+dim+'" font-size="8.5">\u03c6Rn='+fmtVal(r.design_strength,'force')+' '+unitLabel('force')+'</text>';
+        }
+        if (r.utilization != null && isFinite(r.utilization)) {
+            s += '<text x="'+(w-12)+'" y="'+botY+'" text-anchor="end" fill="'+passColor+'" font-size="9" font-weight="600">DCR='+r.utilization.toFixed(3)+'</text>';
+        }
+        if (r.governing_mode) {
+            s += '<text x="'+(w/2)+'" y="'+(botY-12)+'" text-anchor="middle" fill="'+orange+'" font-size="8.5">\u25B6 '+r.governing_mode+'</text>';
         }
 
         s += '</svg>';
@@ -2784,6 +3055,11 @@
             wc_support_fastener_spacing: fromDisplay(getNum('design-wc-fastener-spacing', 0), 'length'),
             use_inelastic_reserve: /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'))?.checked || false,
             use_cold_work: /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'))?.checked || false,
+            // §2.3.3.3 β 보정계수
+            dist_M1_M2: (/** @type {HTMLInputElement} */ (document.getElementById('chk-beta-dist'))?.checked)
+                ? getNum('design-dist-M1M2', 0) : undefined,
+            dist_Lm: (/** @type {HTMLInputElement} */ (document.getElementById('chk-beta-dist'))?.checked)
+                ? fromDisplay(getNum('design-dist-Lm', 0), 'length') : undefined,
             R: fromDisplay(getNum('tpl-r', 0), 'radius'),
             t: fromDisplay(getNum('tpl-t', 0), 'thickness'),
             R_uplift: (/** @type {HTMLInputElement} */ (document.getElementById('chk-r-factor'))?.checked)
@@ -2843,6 +3119,82 @@
         };
         chkIR.addEventListener('change', warnExclusion);
         chkCW.addEventListener('change', warnExclusion);
+    }
+
+    // β 보정계수 토글 및 실시간 미리보기
+    const chkBeta = /** @type {HTMLInputElement} */ (document.getElementById('chk-beta-dist'));
+    const betaInputs = document.getElementById('design-beta-inputs');
+    const betaResult = document.getElementById('design-beta-result');
+    /** @type {Function} */
+    var updateBetaPreview = function() {};
+    if (chkBeta && betaInputs) {
+        const toggleBeta = () => {
+            betaInputs.style.display = chkBeta.checked ? 'block' : 'none';
+            // 체크 시 자동입력: 하중분석 결과 또는 Lb에서 값 채움
+            if (chkBeta.checked) {
+                const curLm = getNum('design-dist-Lm', 0);
+                if (curLm <= 0) {
+                    // 하중분석 결과에서 가져오기
+                    const ap = _lastLoadAnalysis && _lastLoadAnalysis.auto_params;
+                    const negRegions = ap ? (ap.negative_regions || (ap.negative_region ? [ap.negative_region] : [])) : [];
+                    const nr = negRegions[0];
+                    if (nr && nr.M1 !== undefined && nr.M2 !== undefined) {
+                        const M2abs = Math.abs(nr.M2);
+                        const M1abs = Math.abs(nr.M1);
+                        const m1m2 = M2abs > 1e-10 ? -(M1abs / M2abs) : 0;
+                        setValue('design-dist-M1M2', m1m2.toFixed(3));
+                        setValue('design-dist-Lm', toDisplay(nr.Ly_in || 0, 'length').toFixed(unitDec('length')));
+                    } else {
+                        // 하중분석 없으면 Lb를 Lm 기본값으로
+                        const lbVal = getNum('design-Lb', 0);
+                        if (lbVal > 0) {
+                            setValue('design-dist-Lm', lbVal);
+                        }
+                        // M1/M2 = 0 (변곡점 한쪽 0모멘트 가정)
+                        setValue('design-dist-M1M2', '0');
+                    }
+                }
+            }
+            updateBetaPreview();
+        };
+        chkBeta.addEventListener('change', toggleBeta);
+
+        updateBetaPreview = () => {
+            if (!betaResult || !chkBeta.checked) { if (betaResult) betaResult.textContent = ''; return; }
+            const M1M2 = getNum('design-dist-M1M2', 0);
+            const Lm = fromDisplay(getNum('design-dist-Lm', 0), 'length');
+            // Lcrd는 DSM 결과에서 가져옴 (없으면 Lm 사용)
+            const Lcrd = (lastDsmResult && lastDsmResult.Mxx) ? lastDsmResult.Mxx.Lcrd || 0 : 0;
+            if (Lm <= 0) { betaResult.textContent = 'Lm을 입력하세요'; return; }
+            const Lv = Lcrd > 0 ? Math.min(Lcrd, Lm) : Lm;
+            const ratioL = Lv / Lm;
+            const ratioM = 1 + M1M2;
+            let beta = 1.0;
+            if (ratioM > 0) beta = 1.0 + 0.4 * Math.pow(ratioL, 0.7) * Math.pow(ratioM, 0.7);
+            beta = Math.max(1.0, Math.min(beta, 1.3));
+            const Lcrd_disp = Lcrd > 0 ? fmtVal(Lcrd, 'length') + ' ' + unitLabel('length') : 'N/A';
+            betaResult.innerHTML =
+                'L = min(Lcrd, Lm) = min(' + Lcrd_disp + ', ' + fmtVal(Lm, 'length') + ' ' + unitLabel('length') + ') = ' + fmtVal(Lv, 'length') + ' ' + unitLabel('length') + '<br>'
+                + 'β = 1 + 0.4×(L/Lm)<sup>0.7</sup>×(1+M1/M2)<sup>0.7</sup> = 1 + 0.4×' + ratioL.toFixed(3) + '<sup>0.7</sup>×' + ratioM.toFixed(3) + '<sup>0.7</sup> = <b>' + beta.toFixed(3) + '</b>'
+                + (beta >= 1.3 ? ' (capped at 1.3)' : '');
+        };
+        const m1m2El = document.getElementById('design-dist-M1M2');
+        const lmEl = document.getElementById('design-dist-Lm');
+        if (m1m2El) m1m2El.addEventListener('input', updateBetaPreview);
+        if (lmEl) lmEl.addEventListener('input', updateBetaPreview);
+    }
+
+    // Cb 계산 도우미: 12.5Mmax / (2.5Mmax + 3MA + 4MB + 3MC) 참조 표시
+    const cbEl = document.getElementById('design-Cb');
+    const cbCalcEl = document.getElementById('design-Cb-calc');
+    if (cbEl && cbCalcEl) {
+        cbEl.addEventListener('input', () => {
+            const cb = parseFloat(cbEl.value) || 1.0;
+            if (cb === 1.0) { cbCalcEl.textContent = '(균일 모멘트)'; }
+            else { cbCalcEl.textContent = '§F2.1.1'; }
+        });
+        // 초기 표시
+        cbCalcEl.textContent = parseFloat(cbEl.value) === 1.0 ? '(균일 모멘트)' : '§F2.1.1';
     }
 
     // ============================================================
@@ -3075,8 +3427,9 @@
     }
 
     // M/V 다이어그램 SVG 렌더링 (확대 + 지점마커 + max/min 라벨)
-    function renderDiagramSVG(values, label, color, flipSign) {
-        const W = 480, H = 110, PAD_L = 6, PAD_R = 6, PAD_T = 18, PAD_B = 16;
+    function renderDiagramSVG(values, label, color, flipSign, dimLines, annotations) {
+        var hasAnn = annotations && annotations.length > 0;
+        const W = 480, H = dimLines && dimLines.length > 0 ? 170 : (hasAnn ? 150 : 130), PAD_L = 6, PAD_R = 6, PAD_T = 22, PAD_B = dimLines && dimLines.length > 0 ? 48 : 18;
         const n = values.length;
         if (n < 2) return '';
 
@@ -3143,6 +3496,53 @@
             svg += '<circle cx="' + minX.toFixed(1) + '" cy="' + minY.toFixed(1) + '" r="2.5" fill="#ff8a65"/>';
             svg += '<text x="' + (minX + 3).toFixed(1) + '" y="' + (minY + 11).toFixed(1) + '" fill="#ff8a65" font-size="9" font-weight="600">' + origMin.toFixed(1) + '</text>';
         }
+        // 치수선 (dimLines: [{startFrac, endFrac, label, color}])
+        if (dimLines && dimLines.length > 0) {
+            const dimY = midY + plotH / 2 + 10;
+            dimLines.forEach((dl, di) => {
+                const x1 = PAD_L + dl.startFrac * plotW;
+                const x2 = PAD_L + dl.endFrac * plotW;
+                const dColor = dl.color || '#ff9800';
+                const yOff = dimY + di * 14;
+                // 변곡점 세로선
+                svg += '<line x1="' + x1.toFixed(1) + '" y1="' + (midY - plotH/2) + '" x2="' + x1.toFixed(1) + '" y2="' + (yOff + 2) + '" stroke="' + dColor + '" stroke-opacity="0.4" stroke-dasharray="2,2" stroke-width="0.7"/>';
+                // 지점 세로선 (이미 있으므로 치수선 영역까지만 연장)
+                svg += '<line x1="' + x2.toFixed(1) + '" y1="' + (midY + 3) + '" x2="' + x2.toFixed(1) + '" y2="' + (yOff + 2) + '" stroke="' + dColor + '" stroke-opacity="0.4" stroke-dasharray="2,2" stroke-width="0.7"/>';
+                // 수평 치수선
+                svg += '<line x1="' + x1.toFixed(1) + '" y1="' + yOff + '" x2="' + x2.toFixed(1) + '" y2="' + yOff + '" stroke="' + dColor + '" stroke-width="1"/>';
+                // 화살표
+                svg += '<polygon points="' + x1.toFixed(1) + ',' + yOff + ' ' + (x1+4).toFixed(1) + ',' + (yOff-2) + ' ' + (x1+4).toFixed(1) + ',' + (yOff+2) + '" fill="' + dColor + '"/>';
+                svg += '<polygon points="' + x2.toFixed(1) + ',' + yOff + ' ' + (x2-4).toFixed(1) + ',' + (yOff-2) + ' ' + (x2-4).toFixed(1) + ',' + (yOff+2) + '" fill="' + dColor + '"/>';
+                // 라벨
+                const midX = (x1 + x2) / 2;
+                svg += '<text x="' + midX.toFixed(1) + '" y="' + (yOff - 3) + '" fill="' + dColor + '" font-size="9" font-weight="600" text-anchor="middle">' + dl.label + '</text>';
+            });
+        }
+
+        // annotations: [{frac, value, label, color}] — Lap 끝 등 특정 위치 표시
+        if (annotations && annotations.length > 0) {
+            annotations.forEach(function(ann) {
+                var idx = Math.round(ann.frac * (n - 1));
+                if (idx < 0) idx = 0;
+                if (idx >= n) idx = n - 1;
+                var ax = PAD_L + idx * scaleX;
+                var ay = midY - vals[idx] * scaleY;
+                var aColor = ann.color || '#ab47bc';
+                var aVal = flipSign ? -vals[idx] : vals[idx];
+                // 세로 점선
+                svg += '<line x1="' + ax.toFixed(1) + '" y1="' + (midY - plotH/2) + '" x2="' + ax.toFixed(1) + '" y2="' + (midY + plotH/2) + '" stroke="' + aColor + '" stroke-opacity="0.5" stroke-dasharray="3,2" stroke-width="0.8"/>';
+                // 점 마커
+                svg += '<circle cx="' + ax.toFixed(1) + '" cy="' + ay.toFixed(1) + '" r="3" fill="' + aColor + '" stroke="#fff" stroke-width="0.5"/>';
+                // 값 라벨
+                var labelY = ay > midY ? ay + 12 : ay - 5;
+                svg += '<text x="' + (ax + 4).toFixed(1) + '" y="' + labelY.toFixed(1) + '" fill="' + aColor + '" font-size="8.5" font-weight="600">' + aVal.toFixed(1) + '</text>';
+                // 위치 라벨
+                if (ann.label) {
+                    svg += '<text x="' + ax.toFixed(1) + '" y="' + (midY - plotH/2 - 2) + '" fill="' + aColor + '" font-size="7.5" text-anchor="middle">' + ann.label + '</text>';
+                }
+            });
+        }
+
         // footer
         svg += '<text x="' + (W - PAD_R) + '" y="' + (H - 2) + '" fill="var(--vscode-descriptionForeground)" font-size="9" text-anchor="end">max=' + Math.max(...values).toFixed(1) + '  min=' + Math.min(...values).toFixed(1) + '</text>';
         svg += '</svg></div>';
@@ -3170,13 +3570,58 @@
             html += renderBeamSchematic(data);
         }
 
-        // M Diagram SVG — 지배 조합
+        // M Diagram SVG — 지배 조합 + 비지지길이 치수선
         if (gov && gov.M_diagram && gov.M_diagram.length > 2) {
             const mLabel = '지배 조합 Moment: ' + gov.combo + ' (' + unitLabel('moment_ft') + ')';
             const mVals = _unitSystem === 'SI'
                 ? gov.M_diagram.map(v => toDisplay(v, 'moment_ft'))
                 : gov.M_diagram;
-            html += renderDiagramSVG(mVals, mLabel, '#4fc3f7', true);
+
+            // 변곡점-지점 치수선 데이터 생성
+            const dimLines = [];
+            const ap = data.auto_params;
+            const negRegions = ap ? (ap.negative_regions || (ap.negative_region ? [ap.negative_region] : [])) : [];
+            if (negRegions.length > 0) {
+                const sft = data.spans_ft || [];
+                const totalLft = sft.reduce((a, b) => a + b, 0);
+                if (totalLft > 0) {
+                    negRegions.forEach(nr => {
+                        const startFrac = (nr.start_ft || 0) / totalLft;
+                        const endFrac = (nr.end_ft || 0) / totalLft;
+                        const lyDisp = fmtVal(nr.Ly_in || 0, 'length');
+                        const lyUnit = unitLabel('length');
+                        dimLines.push({
+                            startFrac: Math.min(startFrac, endFrac),
+                            endFrac: Math.max(startFrac, endFrac),
+                            label: 'Ly=' + lyDisp + ' ' + lyUnit,
+                            color: '#ff9800',
+                        });
+                    });
+                }
+            }
+
+            // Lap 끝 위치 annotations 생성
+            const mAnnotations = [];
+            const vAnnotations = [];
+            if (gov.locations) {
+                const sft = data.spans_ft || [];
+                const totalLft = sft.reduce((a, b) => a + b, 0);
+                if (totalLft > 0) {
+                    gov.locations.forEach(function(loc) {
+                        if ((loc.name || '').indexOf('Lap end') === 0 && loc.x_ft != null) {
+                            var frac = loc.x_ft / totalLft;
+                            var mVal = _unitSystem === 'SI' ? toDisplay(loc.Mu, 'moment_ft') : loc.Mu;
+                            var vVal = _unitSystem === 'SI' ? toDisplay(loc.Vu, 'force') : loc.Vu;
+                            mAnnotations.push({ frac: frac, value: mVal, label: 'Lap end', color: '#ab47bc' });
+                            if (loc.Vu != null) {
+                                vAnnotations.push({ frac: frac, value: vVal, label: 'Lap end', color: '#ab47bc' });
+                            }
+                        }
+                    });
+                }
+            }
+
+            html += renderDiagramSVG(mVals, mLabel, '#4fc3f7', true, dimLines, mAnnotations);
         }
 
         // V Diagram SVG — 지배 조합
@@ -3185,7 +3630,23 @@
             const vVals = _unitSystem === 'SI'
                 ? gov.V_diagram.map(v => toDisplay(v, 'force'))
                 : gov.V_diagram;
-            html += renderDiagramSVG(vVals, vLabel, '#ff8a65', false);
+
+            // V diagram에도 Lap 끝 annotations 재사용
+            var vAnn = [];
+            if (gov.locations) {
+                var sft2 = data.spans_ft || [];
+                var totalL2 = sft2.reduce(function(a,b){return a+b;}, 0);
+                if (totalL2 > 0) {
+                    gov.locations.forEach(function(loc) {
+                        if ((loc.name || '').indexOf('Lap end') === 0 && loc.x_ft != null && loc.Vu != null) {
+                            var frac2 = loc.x_ft / totalL2;
+                            var vv = _unitSystem === 'SI' ? toDisplay(loc.Vu, 'force') : loc.Vu;
+                            vAnn.push({ frac: frac2, value: vv, label: 'Lap end', color: '#ab47bc' });
+                        }
+                    });
+                }
+            }
+            html += renderDiagramSVG(vVals, vLabel, '#ff8a65', false, null, vAnn);
         }
 
         // 지배 조합 결과 테이블
@@ -3347,10 +3808,44 @@
                     setValue('design-V', toDisplay(absVu, 'force').toFixed(unitDec('force')));
                 }
 
-                // Unbraced lengths
+                // Unbraced lengths + Cb/β 자동 설정
                 if (ap && ap.negative_region) {
-                    setValue('design-Lb', toDisplay(ap.negative_region.Ly_in || 0, 'length').toFixed(unitDec('length')));
-                    setValue('design-Cb', ap.negative_region.Cb || 1.0);
+                    const nr = ap.negative_region;
+                    setValue('design-Lb', toDisplay(nr.Ly_in || 0, 'length').toFixed(unitDec('length')));
+                    setValue('design-Cb', nr.Cb || 1.0);
+
+                    // Lb 계산 근거 표시
+                    const _lbCalcEl = document.getElementById('design-Lb-calc');
+                    if (_lbCalcEl) {
+                        _lbCalcEl.textContent = '(변곡점~랩단 ' + fmtVal(nr.Ly_in || 0, 'length') + ' ' + unitLabel('length') + ')';
+                    }
+
+                    // Cb 계산과정 표시
+                    const _cbCalcEl = document.getElementById('design-Cb-calc');
+                    if (_cbCalcEl && nr.Cb_detail) {
+                        const d = nr.Cb_detail;
+                        _cbCalcEl.innerHTML = '§F2.1.1: 12.5Mmax/(2.5Mmax+3MA+4MB+3MC) = 12.5×' + d.Mmax.toFixed(2) + '/(2.5×' + d.Mmax.toFixed(2) + '+3×' + d.MA.toFixed(2) + '+4×' + d.MB.toFixed(2) + '+3×' + d.MC.toFixed(2) + ') = <b>' + d.Cb.toFixed(2) + '</b>';
+                    } else if (_cbCalcEl) {
+                        _cbCalcEl.textContent = (nr.Cb || 1.0) === 1.0 ? '(균일 모멘트)' : '§F2.1.1';
+                    }
+
+                    // β 보정 자동 설정: M1/M2, Lm
+                    if (nr.M1 !== undefined && nr.M2 !== undefined) {
+                        const chkB = /** @type {HTMLInputElement} */ (document.getElementById('chk-beta-dist'));
+                        if (chkB) {
+                            chkB.checked = true;
+                            const bInputs = document.getElementById('design-beta-inputs');
+                            if (bInputs) bInputs.style.display = 'block';
+                        }
+                        const M2abs = Math.abs(nr.M2);
+                        const M1abs = Math.abs(nr.M1);
+                        // 단일곡률(같은 부호): M1/M2 음수, 역곡률: 양수
+                        const m1m2 = M2abs > 1e-10 ? -(M1abs / M2abs) : 0;  // 부모멘트 구간 = 단일곡률 → 음수
+                        setValue('design-dist-M1M2', m1m2.toFixed(3));
+                        setValue('design-dist-Lm', toDisplay(nr.Ly_in || 0, 'length').toFixed(unitDec('length')));
+                        // β 미리보기 트리거
+                        if (typeof updateBetaPreview === 'function') updateBetaPreview();
+                    }
                 }
 
                 // 지배 조합 표시
@@ -3362,10 +3857,56 @@
 
         el.innerHTML = html;
 
+        // 접합부 탭 Lap Splice 입력 자동 채우기
+        _autoFillLapInputs(data);
+
         // 버튼 복원
         if (btnAnalyze) {
             btnAnalyze.textContent = '📊 하중 분석 실행';
             btnAnalyze.disabled = false;
+        }
+    }
+
+    function _autoFillLapInputs(data) {
+        if (!data) return;
+        // Lap 길이: laps_per_support에서 최대값
+        var maxLapL = 0, maxLapR = 0;
+        var lps = data.laps_per_support;
+        if (lps && lps.length > 0) {
+            lps.forEach(function(lp) {
+                if (!lp) return;
+                var lft = (lp.left_ft || 0) * 12;   // ft → in
+                var rft = (lp.right_ft || 0) * 12;
+                if (lft > maxLapL) maxLapL = lft;
+                if (rft > maxLapR) maxLapR = rft;
+            });
+        }
+        if (maxLapL > 0) {
+            var elL = document.getElementById('conn-lap-left');
+            if (elL) elL.value = toDisplay(maxLapL, 'length').toFixed(1);
+        }
+        if (maxLapR > 0) {
+            var elR = document.getElementById('conn-lap-right');
+            if (elR) elR.value = toDisplay(maxLapR, 'length').toFixed(1);
+        }
+        // 지점 Mu, Vu: 지점 위치(Lap end 제외)에서 최대 절대값
+        var gov = data.governing || data.gravity;
+        if (gov && gov.locations) {
+            var maxMu = 0, maxVu = 0;
+            gov.locations.forEach(function(loc) {
+                if ((loc.name || '').indexOf('Lap end') === 0) return;
+                if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
+                if (loc.Vu != null && Math.abs(loc.Vu) > maxVu) maxVu = Math.abs(loc.Vu);
+            });
+            if (maxMu !== 0) {
+                var elMu = document.getElementById('conn-Mu');
+                // locations.Mu는 kip-ft, conn-Mu는 moment(kip-in) 단위 → ×12 변환 필요
+                if (elMu) elMu.value = toDisplay(Math.abs(maxMu) * 12, 'moment').toFixed(2);
+            }
+            if (maxVu > 0) {
+                var elVu = document.getElementById('conn-Vu');
+                if (elVu) elVu.value = toDisplay(maxVu, 'force').toFixed(2);
+            }
         }
     }
 
@@ -4018,14 +4559,28 @@
     function _rptLoadAnalysis(la) {
         let h = '';
         const rptGov = la.governing || la.gravity;
+        // Lap 끝 annotations (보고서용)
+        var rptMann = [], rptVann = [];
+        if (rptGov && rptGov.locations && la.spans_ft) {
+            var rptTotalL = la.spans_ft.reduce(function(a,b){return a+b;}, 0);
+            if (rptTotalL > 0) {
+                rptGov.locations.forEach(function(loc) {
+                    if ((loc.name || '').indexOf('Lap end') === 0 && loc.x_ft != null) {
+                        var fr = loc.x_ft / rptTotalL;
+                        rptMann.push({ frac: fr, value: _unitSystem === 'SI' ? toDisplay(loc.Mu,'moment_ft') : loc.Mu, label: 'Lap end', color: '#ab47bc' });
+                        if (loc.Vu != null) rptVann.push({ frac: fr, value: _unitSystem === 'SI' ? toDisplay(loc.Vu,'force') : loc.Vu, label: 'Lap end', color: '#ab47bc' });
+                    }
+                });
+            }
+        }
         if (rptGov && rptGov.M_diagram && rptGov.M_diagram.length > 2) {
             h += renderBeamSchematic(la);
             const mVals = _unitSystem === 'SI' ? rptGov.M_diagram.map(v => toDisplay(v,'moment_ft')) : rptGov.M_diagram;
-            h += renderDiagramSVG(mVals, '지배 조합 모멘트: '+rptGov.combo+' ('+_rul('moment_ft')+')', '#1565c0', true);
+            h += renderDiagramSVG(mVals, '지배 조합 모멘트: '+rptGov.combo+' ('+_rul('moment_ft')+')', '#1565c0', true, null, rptMann);
         }
         if (rptGov && rptGov.V_diagram && rptGov.V_diagram.length > 2) {
             const vVals = _unitSystem === 'SI' ? rptGov.V_diagram.map(v => toDisplay(v,'force')) : rptGov.V_diagram;
-            h += renderDiagramSVG(vVals, '지배 조합 전단력: '+rptGov.combo+' ('+_rul('force')+')', '#e65100', false);
+            h += renderDiagramSVG(vVals, '지배 조합 전단력: '+rptGov.combo+' ('+_rul('force')+')', '#e65100', false, null, rptVann);
         }
 
         if (rptGov) {

@@ -108,13 +108,18 @@ def analyze_loads(
     # 하중조합 적용 → 지배조합 결정
     controlling = find_controlling_combo(loads, load_results, design_method)
 
+    # laps에 지점별 정보 첨부 (extract_critical_locations에서 사용)
+    laps_with_detail = dict(laps) if laps else {}
+    if laps_per_support:
+        laps_with_detail['_per_support'] = laps_per_support
+
     # 중력 지배 결과
     gravity_result = None
     gravity_name = None
     if controlling.get('gravity'):
         gravity_name, gravity_combined = controlling['gravity']
         gravity_locations = _extract_locations_from_combined(
-            gravity_combined, spans, laps
+            gravity_combined, spans, laps_with_detail
         )
         gravity_result = {
             'combo': gravity_name,
@@ -128,7 +133,7 @@ def analyze_loads(
     if controlling.get('uplift'):
         uplift_name, uplift_combined = controlling['uplift']
         uplift_locations = _extract_locations_from_combined(
-            uplift_combined, spans, laps
+            uplift_combined, spans, laps_with_detail
         )
         uplift_result = {
             'combo': uplift_name,
@@ -261,7 +266,7 @@ def analyze_loads(
     if controlling.get('overall'):
         gov_name, gov_combined = controlling['overall']
         gov_locations = _extract_locations_from_combined(
-            gov_combined, spans, laps
+            gov_combined, spans, laps_with_detail
         )
         governing_result = {
             'combo': gov_name,

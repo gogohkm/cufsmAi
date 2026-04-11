@@ -126,45 +126,144 @@ def design_lap_connection(params: dict) -> dict:
             if Pns > 0 else 'N/A',
     })
 
-    # Step 5: 패스너 배치 간격
-    if n_per_row > 1 and lap_each > 0:
-        spacing = lap_each / (n_per_row + 1)
-        min_spacing = 3 * fastener_dia
-        spacing_ok = spacing >= min_spacing
+    # Step 5: 배치 가능 최대 패스너 수 (Lap 길이 제약)
+    edge_dist = max(1.5 * fastener_dia, 0.375)  # §J3.3, §J4
+    min_spacing = 3 * fastener_dia
+    if lap_each > 0 and min_spacing > 0:
+        n_max_per_row = max(1, int((lap_each - 2 * edge_dist) / min_spacing) + 1)
+    else:
+        n_max_per_row = n_per_row
+    n_max_total = n_max_per_row * n_rows
+
+    # 패스너 배치 간격
+    n_per_row_actual = min(n_per_row, n_max_per_row)
+    n_total_actual = n_per_row_actual * n_rows
+    if n_per_row_actual > 1 and lap_each > 0:
+        spacing = (lap_each - 2 * edge_dist) / (n_per_row_actual - 1) if n_per_row_actual > 1 else 0
     else:
         spacing = 0
-        spacing_ok = True
+    spacing_ok = spacing >= min_spacing if spacing > 0 else True
 
     steps.append({
-        'step': 5, 'name': 'Fastener Spacing',
+        'step': 5, 'name': 'Fastener Spacing & Layout',
         'value': round(spacing, 2), 'unit': 'in',
-        'formula': f's = {lap_each:.2f} / ({n_per_row}+1) = {spacing:.2f} in {"≥" if spacing_ok else "<"} 3d = {3*fastener_dia:.2f} in',
-        'pass': spacing_ok,
+        'formula': (
+            f'Required: {n_total} ea, Max fit: {n_max_total} ea '
+            f'(Lap={lap_each:.2f} in, edge={edge_dist:.3f} in, min s=3d={min_spacing:.2f} in), '
+            f's = {spacing:.2f} in {"≥" if spacing_ok else "<"} {min_spacing:.2f} in'
+        ),
+        'pass': spacing_ok and n_total <= n_max_total,
     })
+
+    if n_total > n_max_total:
+        warnings.append(
+            f'필요 패스너 {n_total} ea > Lap 내 최대 배치 {n_max_total} ea — '
+            f'Lap 길이를 늘리거나 패스너 사양을 변경하세요.'
+        )
     if not spacing_ok:
-        warnings.append(f'패스너 간격 {spacing:.2f} in < 최소 3d = {3*fastener_dia:.2f} in')
+        warnings.append(f'패스너 간격 {spacing:.2f} in < 최소 3d = {min_spacing:.2f} in')
 
     # Step 6: Edge/End distance
-    edge_dist = max(1.5 * fastener_dia, 0.375)  # §J3.3, §J4
-    end_dist = max(1.5 * fastener_dia, 0.375)
-
     steps.append({
         'step': 6, 'name': 'Edge/End Distance',
         'value': round(edge_dist, 3), 'unit': 'in',
         'formula': f'e = max(1.5d, 3/8") = {edge_dist:.3f} in',
     })
 
+    # Step 7: 용량 검증 (Demand vs Capacity)
+    capacity = n_total_actual * Pns if Pns > 0 else 0
+    utilization = V_transfer / capacity if capacity > 0 else float('inf')
+    capacity_ok = utilization <= 1.0
+
+    steps.append({
+        'step': 7, 'name': 'Demand vs Capacity',
+        'value': round(utilization, 3), 'unit': '',
+        'formula': (
+            f'Capacity = {n_total_actual} ea × {Pns:.3f} kips = {capacity:.3f} kips, '
+            f'DCR = V_transfer / Capacity = {V_transfer:.3f} / {capacity:.3f} = {utilization:.3f}'
+            if capacity > 0 else 'Capacity = 0'
+        ),
+        'pass': capacity_ok,
+    })
+
+    # Step 8: Lap 구간 휨강도 검토 (AISI §F3 — 2겹 부재 합산)
+    # Lap 구간: LTB/뒤틀림 없음 (Fn = Fy), 국부좌굴만 고려
+    # Mn_lap = Se × Fy × 2 (동일 단면 2겹)
+    Se = params.get('Se', 0) or params.get('Sf', 0)  # 유효 단면계수
+    Sf = params.get('Sf', Se)  # 총 단면계수
+    design_method = params.get('design_method', 'LRFD')
+    flexure_ok = True
+    flexure_dcr = None
+    Mn_lap = 0
+    phi_Mn_lap = 0
+
+    if Se > 0 and Fy > 0 and Mu > 0:
+        # 단일 부재 국부좌굴 강도: Mnl = Se × Fy (§F3.1, Fn=Fy)
+        Mnl_single = Se * Fy  # kip-in
+        # 2겹 합산 (AISI Example II-2A 방식)
+        n_members = 2
+        Mn_lap = Mnl_single * n_members  # kip-in
+
+        if design_method == 'LRFD':
+            phi_b = 0.90
+            phi_Mn_lap = phi_b * Mn_lap
+            flexure_dcr = Mu / phi_Mn_lap if phi_Mn_lap > 0 else float('inf')
+        else:  # ASD
+            omega_b = 1.67
+            phi_Mn_lap = Mn_lap / omega_b
+            flexure_dcr = Mu / phi_Mn_lap if phi_Mn_lap > 0 else float('inf')
+
+        flexure_ok = flexure_dcr <= 1.0
+
+        steps.append({
+            'step': 8, 'name': 'Lap Flexural Strength (§F3, 2-member sum)',
+            'value': round(flexure_dcr, 3), 'unit': '',
+            'formula': (
+                f'Se = {Se:.4f} in³, Mnl = Se×Fy = {Se:.4f}×{Fy:.2f} = {Mnl_single:.2f} kip-in, '
+                f'Mn_lap = {n_members}×{Mnl_single:.2f} = {Mn_lap:.2f} kip-in, '
+                f'{"φ" if design_method == "LRFD" else "1/Ω"}Mn = {phi_Mn_lap:.2f} kip-in, '
+                f'Mu = {Mu:.2f} kip-in, DCR = {flexure_dcr:.3f}'
+            ),
+            'pass': flexure_ok,
+        })
+        if not flexure_ok:
+            warnings.append(
+                f'Lap 구간 휨강도 부족: Mu = {Mu:.2f} kip-in > '
+                f'{"φ" if design_method == "LRFD" else ""}Mn = {phi_Mn_lap:.2f} kip-in '
+                f'(DCR = {flexure_dcr:.2f})'
+            )
+    elif Mu > 0 and Se <= 0:
+        warnings.append(
+            'Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행할 수 없습니다. '
+            '설계 탭에서 단면 정보를 확인하세요.'
+        )
+
+    overall_pass = lap_ok and capacity_ok and spacing_ok and (n_total <= n_max_total) and flexure_ok
+    if not capacity_ok:
+        warnings.append(
+            f'용량 부족: V_transfer = {V_transfer:.3f} kips > Capacity = {capacity:.3f} kips '
+            f'(DCR = {utilization:.2f}). 패스너 수 또는 사양을 변경하세요.'
+        )
+
     return {
         'fastener_type': fastener_type,
         'fastener_dia': fastener_dia,
         'fastener_label': fastener_label,
-        'n_total': n_total,
+        'n_required': n_total,
+        'n_total': n_total_actual,
+        'n_max_total': n_max_total,
         'n_rows': n_rows,
-        'n_per_row': n_per_row,
+        'n_per_row': n_per_row_actual,
         'spacing': spacing,
         'edge_distance': edge_dist,
         'V_transfer': V_transfer,
+        'capacity': capacity,
         'Pns': Pns,
+        'utilization': round(utilization, 4),
+        'flexure_dcr': round(flexure_dcr, 4) if flexure_dcr is not None else None,
+        'Mn_lap': round(Mn_lap, 2),
+        'phi_Mn_lap': round(phi_Mn_lap, 2),
+        'pass': overall_pass,
         'fastener_design': conn_result,
         'lap_ok': lap_ok,
         'min_lap': min_lap,

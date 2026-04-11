@@ -1010,6 +1010,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         Mcrl: prepared.Mxx?.crl ?? 0,
                         Mcrd: prepared.Mxx?.crd ?? 0,
                         My: prepared.Mxx?.P_y ?? 0,
+                        Lcrd: prepared.Mxx?.Lcrd ?? 0,
                     };
                 } else if (!this._isAnalysisCurrent()) {
                     dsmWarning = 'No analysis results. Run FSM analysis first or use "설계용 FSM 해석 준비" to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
@@ -1039,6 +1040,7 @@ export class StcfsdPanel implements McpPanelInterface {
                             Mcrl: dsmM?.crl ?? 0,
                             Mcrd: dsmM?.crd ?? 0,
                             My: dsmM?.P_y ?? 0,
+                            Lcrd: dsmM?.Lcrd ?? 0,
                         };
                         const missingFamilies: string[] = [];
                         if (!this._analysisSupportsDsmLoadType('P')) { missingFamilies.push('compression'); }
@@ -1119,12 +1121,17 @@ export class StcfsdPanel implements McpPanelInterface {
                     }
                 }
 
+                // §I6.1.2 적용 여부: 스프링(kφ/kx) 존재 시
+                const hasDecKSprings = Array.isArray((this._model as any).springs)
+                    && (this._model as any).springs.length > 0;
+
                 const designParams = {
                     ...options,
                     section_type: sectionInfo.type || (this._model as any).sectionType || 'C',
                     props: mergedProps,
                     dsm: dsmValues,
                     section: sectionInfo,
+                    through_fastened: hasDecKSprings,
                 };
 
                 const result = await this._pythonBridge.call('aisi_design', designParams);
@@ -1381,9 +1388,18 @@ export class StcfsdPanel implements McpPanelInterface {
                 // 정모멘트 소요강도 (지배 위치)
                 const posMoments = gravLocs.filter((l: any) => l.Mu > 0).map((l: any) => Math.abs(l.Mu));
                 const posMu = posMoments.length > 0 ? Math.max(...posMoments) : 0;
-                // 부모멘트 소요강도 (지배 위치)
-                const negMoments = gravLocs.filter((l: any) => l.Mu < 0).map((l: any) => Math.abs(l.Mu));
-                const negMu = negMoments.length > 0 ? Math.max(...negMoments) : 0;
+
+                // 부모멘트 소요강도 — Lap 구분
+                // negMuSupport: 지점 최대 부모멘트 → Lap 구간(2겹) 설계용
+                // negMuLapEnd: Lap 끝단 부모멘트 → 단일 단면 부재 강도검토용
+                const supportLocs = gravLocs.filter((l: any) => l.Mu < 0 && !(l.name || '').startsWith('Lap end'));
+                const lapEndLocs = gravLocs.filter((l: any) => l.Mu < 0 && (l.name || '').startsWith('Lap end'));
+                const negMuSupport = supportLocs.length > 0
+                    ? Math.max(...supportLocs.map((l: any) => Math.abs(l.Mu))) : 0;
+                const negMuLapEnd = lapEndLocs.length > 0
+                    ? Math.max(...lapEndLocs.map((l: any) => Math.abs(l.Mu))) : 0;
+                // Lap이 없거나 Lap end 위치가 없으면 지점 최대값을 부재 검토에도 사용
+                const negMu = (hasLaps && negMuLapEnd > 0) ? negMuLapEnd : negMuSupport;
 
                 // 6a. 정모멘트 설계 (데크 브레이싱, dsmPos)
                 let designPos: any = null;
@@ -1423,7 +1439,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 // "The strength within lapped portions is the sum of the individual members"
                 // LTB/뒤틀림은 Lap 구간에서 발생하지 않는 것으로 가정 (Mne=Mnd=My)
                 let designLap: any = null;
-                if (isMultiSpan && negMu > 0) {
+                if (isMultiSpan && negMuSupport > 0) {
                     // 단일 부재 강도 (dsmNeg 기반, 스프링 없음)
                     const singleMnl = await this._pythonBridge.call('aisi_design', {
                         member_type: 'flexure', design_method: dm,
@@ -1442,6 +1458,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     const lapMn = (singleMnl?.Mn ?? 0) * nLap;
                     const lapPhiMn = (singleMnl?.phi_Mn ?? 0) * nLap;
                     const lapMnOmega = (singleMnl?.Mn_omega ?? 0) * nLap;
+                    // Lap 구간은 지점 최대 부모멘트(negMuSupport)로 검토
                     designLap = {
                         ...singleMnl,
                         Mn: Math.round(lapMn * 100) / 100,
@@ -1452,11 +1469,11 @@ export class StcfsdPanel implements McpPanelInterface {
                             : Math.round(lapMnOmega * 100) / 100,
                         n_members: nLap,
                         note: `Lap: ${nLap} members summed, LTB/distortional excluded`,
-                        utilization: negMu > 0 && lapPhiMn > 0
-                            ? Math.round(negMu / (dm === 'LRFD' ? lapPhiMn : lapMnOmega) * 10000) / 10000
+                        utilization: negMuSupport > 0 && lapPhiMn > 0
+                            ? Math.round(negMuSupport / (dm === 'LRFD' ? lapPhiMn : lapMnOmega) * 10000) / 10000
                             : null,
-                        pass: negMu > 0 && lapPhiMn > 0
-                            ? negMu <= (dm === 'LRFD' ? lapPhiMn : lapMnOmega)
+                        pass: negMuSupport > 0 && lapPhiMn > 0
+                            ? negMuSupport <= (dm === 'LRFD' ? lapPhiMn : lapMnOmega)
                             : null,
                     };
                 }
@@ -2233,10 +2250,27 @@ export class StcfsdPanel implements McpPanelInterface {
                 <div class="input-row" id="design-Cb-row">
                     <label>Cb</label>
                     <input type="number" id="design-Cb" value="1.0" step="0.01" style="width:65px">
+                    <span id="design-Cb-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
                 </div>
                 <div class="input-row" id="design-Lb-row">
                     <label>Lb<span class="hint-inline" data-unit="length">in</span> (LTB)</label>
                     <input type="number" id="design-Lb" value="118.11" step="1" style="width:65px">
+                    <span id="design-Lb-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
+                </div>
+
+                <h3 style="margin-top:10px">§2.3.3.3 뒤틀림 모멘트구배 (β)</h3>
+                <p class="hint">부모멘트 구간 등 비균일 모멘트 분포 시 Mcrd를 β배 증가시킵니다. 균일 모멘트는 β=1.0.</p>
+                <div class="input-row" id="design-beta-row">
+                    <label><input type="checkbox" id="chk-beta-dist"> β 보정 적용</label>
+                </div>
+                <div id="design-beta-inputs" style="display:none">
+                    <div class="input-row">
+                        <label>M1/M2</label>
+                        <input type="number" id="design-dist-M1M2" value="0" step="0.1" style="width:60px" title="양: 역곡률, 음: 단일곡률, 0: 한쪽 0모멘트">
+                        <label>Lm<span class="hint-inline" data-unit="length">in</span></label>
+                        <input type="number" id="design-dist-Lm" value="0" step="1" style="width:60px" title="뒤틀림좌굴 구속점 간격">
+                    </div>
+                    <div id="design-beta-result" style="font-size:11px;color:var(--vscode-descriptionForeground);padding:4px 0"></div>
                 </div>
                 <div class="input-row" id="design-Cm-row" style="display:none">
                     <label>Cmx</label>
@@ -2396,28 +2430,29 @@ export class StcfsdPanel implements McpPanelInterface {
             <div class="panel-left" style="max-width:380px">
 
                 <!-- ── Lap Splice ── -->
-                <div class="conn-collapsible" data-expanded="false" style="cursor:pointer;padding:4px 6px;font-weight:600;border-bottom:1px solid var(--vscode-panel-border)">
-                    <span class="conn-collapse-icon" style="font-size:11px">▶</span> Lap Splice 접합부 <span class="hint-inline">§I6.2.1, §J3, §J4</span>
+                <div class="conn-collapsible" data-expanded="true" style="cursor:pointer;padding:4px 6px;font-weight:600;border-bottom:1px solid var(--vscode-panel-border)">
+                    <span class="conn-collapse-icon" style="font-size:11px">▼</span> Lap Splice 접합부 <span class="hint-inline">§I6.2.1, §J3, §J4</span>
                 </div>
-                <div class="conn-collapse-body" style="display:none;padding:4px 0 8px 0">
-                    <p class="hint" style="margin-bottom:6px">연속 경간 Lap의 패스너 개수/배치를 산정합니다.</p>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">좌측 Lap</label><input type="number" id="conn-lap-left" value="305" step="10" style="width:72px"><span class="hint-inline conn-unit-length"></span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">우측 Lap</label><input type="number" id="conn-lap-right" value="305" step="10" style="width:72px"><span class="hint-inline conn-unit-length"></span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Mu</label><input type="number" id="conn-Mu" value="0" step="0.1" style="width:72px" data-unit="moment"><span class="hint-inline conn-unit-moment"></span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Vu</label><input type="number" id="conn-Vu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force"></span></div>
+                <div class="conn-collapse-body" style="padding:4px 0 8px 0">
+                    <p class="hint" style="margin-bottom:6px">연속 경간 퍼린의 Lap 구간 패스너 개수/배치를 산정하고 용량을 검증합니다. 하중분석 실행 시 자동으로 값이 채워집니다.</p>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">좌측 Lap</label><input type="number" id="conn-lap-left" value="305" step="10" style="width:72px"><span class="hint-inline conn-unit-length">지점 좌측 겹침 길이</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">우측 Lap</label><input type="number" id="conn-lap-right" value="305" step="10" style="width:72px"><span class="hint-inline conn-unit-length">지점 우측 겹침 길이</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Mu</label><input type="number" id="conn-Mu" value="0" step="0.1" style="width:72px" data-unit="moment"><span class="hint-inline conn-unit-moment">지점 최대 부모멘트</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Vu</label><input type="number" id="conn-Vu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">지점 최대 전단력</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">패스너</label>
                         <select id="conn-fastener-type" style="font-size:12px"><option value="screw" selected>Screw</option><option value="bolt">Bolt</option></select>
-                        <label>d</label><input type="number" id="conn-fastener-dia" value="4.8" step="0.1" style="width:56px"><span class="hint-inline conn-unit-length"></span>
+                        <label>d</label><input type="number" id="conn-fastener-dia" value="4.8" step="0.1" style="width:56px"><span class="hint-inline conn-unit-length">패스너 직경</span>
                     </div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">행 수</label><input type="number" id="conn-n-rows" value="2" min="1" max="4" step="1" style="width:56px"></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">행 수</label><input type="number" id="conn-n-rows" value="2" min="1" max="4" step="1" style="width:56px"><span class="hint-inline">웹 높이 방향 패스너 열 수</span></div>
                     <button id="btn-run-lap-design" class="btn-action-green" style="margin-top:8px;width:100%;padding:6px">Lap 접합부 설계</button>
                 </div>
 
                 <!-- ── 단일 접합부 ── -->
                 <div class="conn-collapsible" data-expanded="true" style="cursor:pointer;padding:4px 6px;font-weight:600;border-bottom:1px solid var(--vscode-panel-border)">
-                    <span class="conn-collapse-icon" style="font-size:11px">▼</span> 단일 접합부 설계 <span class="hint-inline">Chapter J — 7종</span>
+                    <span class="conn-collapse-icon" style="font-size:11px">▼</span> 단일 접합부 강도 계산 <span class="hint-inline">Chapter J — 7종</span>
                 </div>
                 <div class="conn-collapse-body" style="padding:4px 0 8px 0">
+                    <p class="hint" style="margin-bottom:6px">개별 패스너 또는 용접의 공칭강도/설계강도를 AISI Chapter J에 따라 계산합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
                         <label style="min-width:56px;text-align:right">유형</label>
                         <select id="conn-single-type" style="font-size:12px;flex:1">
@@ -2434,13 +2469,14 @@ export class StcfsdPanel implements McpPanelInterface {
                             </optgroup>
                         </select>
                     </div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">t1</label><input type="number" id="conn-t1" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><label>t2</label><input type="number" id="conn-t2" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><span class="hint-inline conn-unit-thickness"></span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">직경 d</label><input type="number" id="conn-d" value="4.8" step="0.1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length"></span><label>개수 n</label><input type="number" id="conn-n" value="4" min="1" step="1" style="width:56px"></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">Fy</label><input type="number" id="conn-Fy" value="245" step="10" style="width:72px" data-unit="stress"><label>Fu</label><input type="number" id="conn-Fu" value="400" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress"></span></div>
-                    <div class="input-row" id="conn-weld-row" style="display:none"><label style="min-width:56px;text-align:right">용접길이</label><input type="number" id="conn-weld-L" value="50" step="1" style="width:72px" data-unit="length"><label>크기</label><input type="number" id="conn-weld-size" value="3" step="0.5" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length"></span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">t1</label><input type="number" id="conn-t1" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><label>t2</label><input type="number" id="conn-t2" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><span class="hint-inline conn-unit-thickness">접합 부재 두께</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">직경 d</label><input type="number" id="conn-d" value="4.8" step="0.1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">패스너/용접 직경</span><label>개수 n</label><input type="number" id="conn-n" value="4" min="1" step="1" style="width:56px"></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">Fy</label><input type="number" id="conn-Fy" value="245" step="10" style="width:72px" data-unit="stress"><label>Fu</label><input type="number" id="conn-Fu" value="400" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">접합 부재 강도</span></div>
+                    <div class="input-row" id="conn-weld-row" style="display:none"><label style="min-width:56px;text-align:right">용접길이</label><input type="number" id="conn-weld-L" value="50" step="1" style="width:72px" data-unit="length"><label>크기</label><input type="number" id="conn-weld-size" value="3" step="0.5" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">용접 유효 길이/크기</span></div>
                     <div class="input-row" id="conn-groove-row" style="display:none"><label style="min-width:56px;text-align:right">그루브</label><select id="conn-groove-type" style="font-size:12px"><option value="complete">완전용입 CJP</option><option value="partial">부분용입 PJP</option></select></div>
                     <div class="input-row" id="conn-bolt-row" style="display:none"><label style="min-width:56px;text-align:right">Fub</label><input type="number" id="conn-Fub" value="827" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">볼트 인장강도</span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">Pu</label><input type="number" id="conn-Pu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">소요 강도</span></div>
+                    <div class="input-row" id="conn-paf-row" style="display:none"><label style="min-width:56px;text-align:right">Fuf</label><input type="number" id="conn-Fuf" value="414" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">PAF 핀 인장강도 (§J5)</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">Pu</label><input type="number" id="conn-Pu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">소요 강도 (이용률 계산용)</span></div>
                     <button id="btn-run-single-conn" class="btn-action-green" style="margin-top:8px;width:100%;padding:6px">접합부 강도 계산</button>
                 </div>
 

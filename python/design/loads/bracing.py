@@ -117,7 +117,8 @@ def calc_lateral_stiffness(
 # 모멘트 구배계수 Cb (AISI Eq. F2.1.1-2)
 # ---------------------------------------------------------------------------
 
-def calc_Cb(M_max: float, M_A: float, M_B: float, M_C: float) -> float:
+def calc_Cb(M_max: float, M_A: float, M_B: float, M_C: float,
+            return_detail: bool = False):
     """횡-비틀림좌굴 모멘트 구배계수
 
     Parameters (all absolute values of moments in unbraced segment)
@@ -126,16 +127,27 @@ def calc_Cb(M_max: float, M_A: float, M_B: float, M_C: float) -> float:
     M_A : 1/4점 모멘트 |M|
     M_B : 중앙점 모멘트 |M|
     M_C : 3/4점 모멘트 |M|
+    return_detail : True이면 dict 반환 (Cb + 상세)
 
     Returns
     -------
-    Cb (≥ 1.0)
+    Cb (≥ 1.0), or dict if return_detail=True
     """
     denom = 2.5 * M_max + 3.0 * M_A + 4.0 * M_B + 3.0 * M_C
     if denom < 1e-15:
-        return 1.0
-    Cb = 12.5 * M_max / denom
-    return max(Cb, 1.0)
+        Cb = 1.0
+    else:
+        Cb = 12.5 * M_max / denom
+    Cb = max(Cb, 1.0)
+    if return_detail:
+        return {
+            'Cb': round(Cb, 4),
+            'Mmax': round(M_max, 4),
+            'MA': round(M_A, 4),
+            'MB': round(M_B, 4),
+            'MC': round(M_C, 4),
+        }
+    return Cb
 
 
 def calc_Cb_from_diagram(M_list: list, x_list: list,
@@ -172,6 +184,41 @@ def calc_Cb_from_diagram(M_list: list, x_list: list,
     M_C = interp_M(x_start + L * 0.75)
 
     return calc_Cb(M_max, M_A, M_B, M_C)
+
+
+def _get_Cb_detail(M_list, x_list, x_start, x_end):
+    """Cb 계산 상세 (MA, MB, MC, Mmax) 반환"""
+    seg_M, seg_x = [], []
+    for i, x in enumerate(x_list):
+        if x_start - 0.01 <= x <= x_end + 0.01:
+            seg_M.append(M_list[i]); seg_x.append(x)
+    if len(seg_M) < 3:
+        return None
+    M_abs = [abs(m) for m in seg_M]
+    M_max = max(M_abs)
+    L = x_end - x_start
+    if L < 1e-10:
+        return None
+    def _interp(tx):
+        for j in range(len(seg_x) - 1):
+            if seg_x[j] <= tx <= seg_x[j + 1]:
+                r = (tx - seg_x[j]) / (seg_x[j+1] - seg_x[j]) if (seg_x[j+1] - seg_x[j]) > 1e-10 else 0
+                return abs(seg_M[j] + r * (seg_M[j+1] - seg_M[j]))
+        return 0.0
+    MA = _interp(x_start + L * 0.25)
+    MB = _interp(x_start + L * 0.50)
+    MC = _interp(x_start + L * 0.75)
+    return calc_Cb(M_max, MA, MB, MC, return_detail=True)
+
+
+def _interp_moment(M_list, x_list, target_x):
+    """모멘트 다이어그램에서 특정 위치의 모멘트 보간"""
+    for j in range(len(x_list) - 1):
+        if x_list[j] <= target_x <= x_list[j + 1]:
+            dx = x_list[j + 1] - x_list[j]
+            r = (target_x - x_list[j]) / dx if dx > 1e-10 else 0
+            return M_list[j] + r * (M_list[j + 1] - M_list[j])
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +337,12 @@ def determine_unbraced_lengths(
                 Ly = (brace_start_left - closest_infl_left) * 12.0  # ft→in.
                 Cb_val = calc_Cb_from_diagram(M_diagram, x_diagram,
                                               closest_infl_left, brace_start_left)
+                # Cb 상세 계산 (MA, MB, MC)
+                Cb_detail = _get_Cb_detail(M_diagram, x_diagram,
+                                            closest_infl_left, brace_start_left)
+                # 단부 모멘트 (M1=변곡점≈0, M2=지점)
+                M1_at_infl = _interp_moment(M_diagram, x_diagram, closest_infl_left)
+                M2_at_sup = _interp_moment(M_diagram, x_diagram, brace_start_left)
                 negative_regions.append({
                     'support': j, 'side': 'left',
                     'start_ft': closest_infl_left,
@@ -297,6 +350,9 @@ def determine_unbraced_lengths(
                     'Ly_in': round(Ly, 1),
                     'Lt_in': round(Ly, 1),
                     'Cb': round(Cb_val, 2),
+                    'Cb_detail': Cb_detail,
+                    'M1': round(M1_at_infl, 4),
+                    'M2': round(M2_at_sup, 4),
                 })
 
             # 우측
@@ -311,6 +367,10 @@ def determine_unbraced_lengths(
                 Ly = (closest_infl_right - brace_start_right) * 12.0
                 Cb_val = calc_Cb_from_diagram(M_diagram, x_diagram,
                                               brace_start_right, closest_infl_right)
+                Cb_detail = _get_Cb_detail(M_diagram, x_diagram,
+                                            brace_start_right, closest_infl_right)
+                M1_at_infl = _interp_moment(M_diagram, x_diagram, closest_infl_right)
+                M2_at_sup = _interp_moment(M_diagram, x_diagram, brace_start_right)
                 negative_regions.append({
                     'support': j, 'side': 'right',
                     'start_ft': brace_start_right,
@@ -318,6 +378,9 @@ def determine_unbraced_lengths(
                     'Ly_in': round(Ly, 1),
                     'Lt_in': round(Ly, 1),
                     'Cb': round(Cb_val, 2),
+                    'Cb_detail': Cb_detail,
+                    'M1': round(M1_at_infl, 4),
+                    'M2': round(M2_at_sup, 4),
                 })
 
     return {

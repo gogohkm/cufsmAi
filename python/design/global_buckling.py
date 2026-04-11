@@ -236,7 +236,19 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
 
     # Z-section (§F2.1.3): 분모에 2 — 점대칭 단면
     sec = (section_type or 'C').upper()
+    z_factor = 1.0
     if sec.startswith('Z') or sec == 'LIPPEDZ':
         Fcre /= 2.0
+        z_factor = 2.0
+
+    # 상세 계산과정을 함수 속성에 저장 (선택적 참조용)
+    compute_beam_Fcre._last_detail = {
+        'Cb': Cb, 'Lb': Lb, 'ro': round(ro, 4), 'Ag': round(Ag, 4),
+        'Sf': round(Sf, 4), 'ry': round(ry, 4),
+        'J': J, 'Cw': Cw, 'xo': round(xo, 4),
+        'sigma_ey': round(sigma_ey, 2), 'sigma_t': round(sigma_t, 2),
+        'z_factor': z_factor, 'Fcre': round(Fcre, 2),
+        'equation': 'F2.1.1' if z_factor == 1.0 else 'F2.1.3',
+    }
 
     return Fcre

@@ -498,15 +498,28 @@ def extract_critical_locations(result: BeamResult, spans: List[float],
             })
 
     # 3. 랩 끝 위치의 부모멘트 (laps 정보가 있는 경우)
+    # laps: 단일 dict {'left_ft', 'right_ft'} — 모든 내부 지점에 동일 적용
+    # laps_per_support: 지점별 리스트 — 각 지점의 Lap 유무 개별 확인
+    laps_per_sup = laps.get('_per_support') if isinstance(laps, dict) else None
     if laps and n_spans > 1:
-        lap_left = laps.get('left_ft', 0)
-        lap_right = laps.get('right_ft', 0)
-
         x_offset = 0.0
         for i in range(n_spans):
             x_offset_end = x_offset + spans[i]
             if i < n_spans - 1:
-                # 지점 = x_offset_end
+                sup_idx = i + 1  # 내부 지점 인덱스 (supports 배열 기준)
+                # 지점별 Lap 길이 결정
+                if laps_per_sup and sup_idx < len(laps_per_sup) and laps_per_sup[sup_idx]:
+                    lap_left = laps_per_sup[sup_idx].get('left_ft', 0)
+                    lap_right = laps_per_sup[sup_idx].get('right_ft', 0)
+                else:
+                    lap_left = laps.get('left_ft', 0)
+                    lap_right = laps.get('right_ft', 0)
+
+                # 이 지점에 Lap이 없으면 건너뜀
+                if lap_left <= 0 and lap_right <= 0:
+                    x_offset = x_offset_end
+                    continue
+
                 sup_x = x_offset_end
                 # 좌측 랩 끝: 지점 - lap_right (왼쪽 스팬에서)
                 if lap_right > 0:
