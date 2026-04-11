@@ -314,8 +314,9 @@ def determine_unbraced_lengths(
                 })
                 break  # 대표 하나만
 
-        # 부모멘트: 하부 플랜지 압축 → 비지지
-        # 비지지길이 = 랩끝 ~ 변곡점
+    # 부모멘트: 하부 플랜지 압축 → 비지지 (데크 유무와 무관하게 항상 계산)
+    # 비지지길이 = 랩끝 ~ 변곡점
+    if len(supports) > 2:
         for j in range(1, len(supports) - 1):
             sup = supports[j]
             # 좌측: sup - lap_right ~ 가장 가까운 좌측 변곡점
@@ -381,6 +382,29 @@ def determine_unbraced_lengths(
                     'Cb_detail': Cb_detail,
                     'M1': round(M1_at_infl, 4),
                     'M2': round(M2_at_sup, 4),
+                })
+
+    # 데크 없음: 정모멘트 구간도 비지지로 처리
+    if deck_type not in ('through-fastened', 'standing-seam'):
+        # 정모멘트 구간 = 인접 변곡점 사이 (또는 지점~변곡점)
+        # 변곡점 + 지점을 포함한 경계점 목록
+        boundaries = sorted(set([0.0] + inflections + [supports[-1]]))
+        for k in range(len(boundaries) - 1):
+            seg_start = boundaries[k]
+            seg_end = boundaries[k + 1]
+            seg_mid = (seg_start + seg_end) / 2.0
+            # 구간 중앙의 모멘트 부호 확인
+            M_mid = _interp_moment(M_diagram, x_diagram, seg_mid)
+            if M_mid > 0:
+                Ly = (seg_end - seg_start) * 12.0  # ft → in
+                Cb_val = calc_Cb_from_diagram(M_diagram, x_diagram, seg_start, seg_end)
+                positive_regions.append({
+                    'start_ft': seg_start,
+                    'end_ft': seg_end,
+                    'Ly': round(Ly, 1),
+                    'Lt': round(Ly, 1),
+                    'Cb': round(Cb_val, 2),
+                    'braced': False,
                 })
 
     return {

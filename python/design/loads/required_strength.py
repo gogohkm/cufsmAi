@@ -161,12 +161,59 @@ def analyze_loads(
         auto_params['unbraced'] = unbraced
         auto_params['deck'] = deck_info
 
-        # 정모멘트 영역: fully braced (deck)
-        auto_params['positive_region'] = {
-            'Ly_in': 0, 'Lt_in': 0, 'Cb': 1.0,
-            'kphi': deck_info.get('kphi', 0),
-            'braced': True,
-        }
+        # 정모멘트 영역
+        deck_braces_top = deck and deck.get('type', 'none') in ('through-fastened', 'standing-seam')
+        if deck_braces_top:
+            # 데크가 상부 플랜지를 연속 지지 → LTB 불필요
+            auto_params['positive_region'] = {
+                'Ly_in': 0, 'Lt_in': 0, 'Cb': 1.0,
+                'kphi': deck_info.get('kphi', 0),
+                'braced': True,
+            }
+        else:
+            # 데크 없음 → 정모멘트 구간도 비지지, Lb/Cb 계산 필요
+            pos_regions = unbraced.get('positive_regions', [])
+            if pos_regions and pos_regions[0].get('Ly', 0) > 0:
+                pr = pos_regions[0]
+                auto_params['positive_region'] = {
+                    'Ly_in': pr.get('Ly', 0),
+                    'Lt_in': pr.get('Lt', 0),
+                    'Cb': pr.get('Cb', 1.0),
+                    'kphi': 0,
+                    'braced': False,
+                }
+            else:
+                # positive_regions에서 Ly 계산이 없으면 변곡점 간 거리 사용
+                inflections = unbraced.get('inflection_points_ft', [])
+                if len(inflections) >= 2:
+                    # 가장 긴 정모멘트 구간 ≈ 인접 변곡점 간 최대 거리
+                    max_pos_span = 0
+                    for k in range(len(inflections) - 1):
+                        seg = inflections[k + 1] - inflections[k]
+                        if seg > max_pos_span:
+                            max_pos_span = seg
+                    Ly_pos = max_pos_span * 12.0  # ft → in
+                elif len(inflections) == 1:
+                    # 단순보: 전체 스팬
+                    Ly_pos = max(spans) * 12.0
+                else:
+                    Ly_pos = max(spans) * 12.0
+                # 정모멘트 구간 Cb 계산
+                Cb_pos = 1.0
+                if inflections and len(M_diag) > 2:
+                    from design.loads.bracing import calc_Cb_from_diagram
+                    if len(inflections) >= 2:
+                        Cb_pos = calc_Cb_from_diagram(M_diag, x_diag,
+                                                       inflections[0], inflections[1])
+                    elif len(inflections) == 1:
+                        Cb_pos = calc_Cb_from_diagram(M_diag, x_diag, 0, inflections[0])
+                auto_params['positive_region'] = {
+                    'Ly_in': round(Ly_pos, 1),
+                    'Lt_in': round(Ly_pos, 1),
+                    'Cb': round(max(Cb_pos, 1.0), 2),
+                    'kphi': 0,
+                    'braced': False,
+                }
 
         # 부모멘트 영역: 비지지 (첫 번째 부모멘트 구간 대표)
         neg_regions = unbraced.get('negative_regions', [])
@@ -174,18 +221,38 @@ def analyze_loads(
             nr = max(neg_regions, key=lambda r: r.get('Ly_in', 0))
             auto_params['negative_regions'] = neg_regions
             auto_params['negative_region_gov'] = {
+                'start_ft': nr.get('start_ft', 0),
+                'end_ft': nr.get('end_ft', 0),
                 'Ly_in': nr.get('Ly_in', 0),
                 'Lt_in': nr.get('Lt_in', 0),
                 'Cb': nr.get('Cb', 1.67),
+                'Cb_detail': nr.get('Cb_detail'),
+                'M1': nr.get('M1'),
+                'M2': nr.get('M2'),
                 'kphi': 0,  # 부모멘트: 하부 플랜지 비지지
             }
             auto_params['negative_region'] = auto_params['negative_region_gov']
         else:
-            auto_params['negative_region_gov'] = {
-                'Ly_in': max(spans) * 12, 'Lt_in': max(spans) * 12,
+            # 부모멘트 영역 없음 (단순보 또는 변곡점 없음) → 전체 스팬 사용
+            inflections = unbraced.get('inflection_points_ft', [])
+            total_L = sum(spans)
+            # 변곡점이 있으면 변곡점~마지막 지점 구간 사용
+            if inflections:
+                fb_start = inflections[-1]
+                fb_end = total_L
+                fb_Ly = (fb_end - fb_start) * 12
+            else:
+                fb_start = 0
+                fb_end = total_L
+                fb_Ly = total_L * 12
+            fallback_nr = {
+                'start_ft': fb_start, 'end_ft': fb_end,
+                'Ly_in': round(fb_Ly, 1), 'Lt_in': round(fb_Ly, 1),
                 'Cb': 1.0, 'kphi': 0,
             }
-            auto_params['negative_region'] = auto_params['negative_region_gov']
+            auto_params['negative_regions'] = [fallback_nr]
+            auto_params['negative_region_gov'] = fallback_nr
+            auto_params['negative_region'] = fallback_nr
 
     # I6.2.1 양력 R 검증
     if section:

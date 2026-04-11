@@ -96,7 +96,7 @@
             ['input-load-P','force'],['input-load-Mxx','moment'],['input-load-Mzz','moment'],
             ['design-fy','stress'],['design-fu','stress'],
             ['design-KxLx','length'],['design-KyLy','length'],
-            ['design-KtLt','length'],['design-Lb','length'],
+            ['design-KtLt','length'],['design-Lb','length'],['design-Lb-pos','length'],
             ['design-P','force'],['design-V','force'],
             ['design-Mx','moment'],['design-My','moment'],
             ['design-wc-N','length'],['design-wc-R','radius'],
@@ -3030,6 +3030,8 @@
             KtLt: fromDisplay(getNum('design-KtLt', 118.11), 'length'),
             Lb: fromDisplay(getNum('design-Lb', 118.11), 'length'),
             Cb: getNum('design-Cb', 1.0),
+            Lb_pos: fromDisplay(getNum('design-Lb-pos', 0), 'length'),
+            Cb_pos: getNum('design-Cb-pos', 1.0),
             Cmx: getNum('design-Cmx', 0.85),
             Cmy: getNum('design-Cmy', 0.85),
             Pu: fromDisplay(getNum('design-P', 0), 'force'),
@@ -3785,15 +3787,30 @@
             html += '</div>';
 
             // Auto-fill: governing 조합의 최대 Mu/Vu를 설계 입력에 자동 채움
+            // Lap이 있으면 단일 단면 설계용 Mu = Lap 끝단 부모멘트 사용
             {
                 const govData = data.governing || data.gravity;
                 let maxMu = 0, maxVu = 0;
                 const govCombo = govData ? govData.combo : '';
+                const _hasLaps = data.laps_per_support && data.laps_per_support.some(
+                    lp => lp && ((lp.left_ft || 0) > 0 || (lp.right_ft || 0) > 0)
+                );
 
                 if (govData && govData.locations) {
+                    // Lap end 위치의 부모멘트 (단일 단면이 저항해야 할 최대값)
+                    let maxMuLapEnd = 0;
                     for (const loc of govData.locations) {
-                        if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
                         if (loc.Vu != null && Math.abs(loc.Vu) > Math.abs(maxVu)) maxVu = loc.Vu;
+                        if (loc.Mu == null) continue;
+                        if ((loc.name || '').startsWith('Lap end')) {
+                            if (Math.abs(loc.Mu) > Math.abs(maxMuLapEnd)) maxMuLapEnd = loc.Mu;
+                        } else {
+                            if (Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
+                        }
+                    }
+                    // Lap이 있고 Lap end 값이 있으면 단일 단면 검토용 Mu 사용
+                    if (_hasLaps && Math.abs(maxMuLapEnd) > 0) {
+                        maxMu = maxMuLapEnd;
                     }
                 }
 
@@ -3845,6 +3862,23 @@
                         setValue('design-dist-Lm', toDisplay(nr.Ly_in || 0, 'length').toFixed(unitDec('length')));
                         // β 미리보기 트리거
                         if (typeof updateBetaPreview === 'function') updateBetaPreview();
+                    }
+                }
+
+                // 정모멘트 구간 Lb/Cb 자동 설정
+                if (ap && ap.positive_region) {
+                    const pr = ap.positive_region;
+                    setValue('design-Lb-pos', toDisplay(pr.Ly_in || 0, 'length').toFixed(unitDec('length')));
+                    setValue('design-Cb-pos', pr.Cb || 1.0);
+                    const _lbPosCalcEl = document.getElementById('design-Lb-pos-calc');
+                    if (_lbPosCalcEl) {
+                        _lbPosCalcEl.textContent = pr.braced
+                            ? '(데크 연속 구속)'
+                            : '(변곡점 간 ' + fmtVal(pr.Ly_in || 0, 'length') + ' ' + unitLabel('length') + ')';
+                    }
+                    const _cbPosCalcEl = document.getElementById('design-Cb-pos-calc');
+                    if (_cbPosCalcEl) {
+                        _cbPosCalcEl.textContent = pr.braced ? '(구속)' : ('§F2.1.1 Cb=' + (pr.Cb || 1.0));
                     }
                 }
 
@@ -3959,6 +3993,12 @@
 
         // Strength comparison cards for compression/flexure
         if (mt === 'compression' || mt === 'flexure') {
+            // 부모멘트(또는 단일 구간) 구간 라벨
+            if (mt === 'flexure' && data.positive_region) {
+                var _negLb = fromDisplay(getNum('design-Lb', 0), 'length');
+                var _negCb = getNum('design-Cb', 1.0);
+                summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:2px;color:#ff9800">부모멘트 구간 (-M) — Lb=' + fmtVal(_negLb, 'length') + ' ' + unitLabel('length') + ', Cb=' + _negCb + '</div>';
+            }
             const isC = mt === 'compression';
             const vals = isC
                 ? [{l:'Global',k:'Pne',v:data.Pne},{l:'Local',k:'Pnl',v:data.Pnl},{l:'Distort.',k:'Pnd',v:data.Pnd}]
@@ -4036,6 +4076,22 @@
             summaryHtml += '<div class="utilization-fill ' + cls + '" style="width:' + Math.min(pct, 100) + '%"></div>';
             summaryHtml += '<span class="utilization-label">' + pct + '% ' + (pass ? '✓ OK' : '✗ NG') + '</span>';
             summaryHtml += '</div>';
+        }
+
+        // 정모멘트 구간 결과 표시
+        if (data.positive_region && mt === 'flexure') {
+            const pr = data.positive_region;
+            var mU2 = unitLabel('moment');
+            summaryHtml += '<div style="margin-top:8px;padding:6px 8px;background:rgba(76,175,80,0.08);border:1px solid rgba(76,175,80,0.3);border-radius:4px">';
+            summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">정모멘트 구간 (+M) — Lb=' + fmtVal(pr.Lb, 'length') + ' ' + unitLabel('length') + ', Cb=' + pr.Cb + '</div>';
+            summaryHtml += '<table style="width:100%;font-size:11px">';
+            summaryHtml += '<tr><td>Fcre</td><td>' + pr.Fcre + ' ksi</td><td>' + (pr.equation||'') + '</td></tr>';
+            summaryHtml += '<tr><td>Mne</td><td>' + fmtVal(pr.Mne, 'moment') + ' ' + mU2 + '</td><td></td></tr>';
+            summaryHtml += '<tr><td>Mnl</td><td>' + fmtVal(pr.Mnl, 'moment') + ' ' + mU2 + '</td><td></td></tr>';
+            summaryHtml += '<tr><td>Mnd</td><td>' + fmtVal(pr.Mnd, 'moment') + ' ' + mU2 + '</td><td></td></tr>';
+            summaryHtml += '<tr><td><b>Mn</b></td><td><b>' + fmtVal(pr.Mn, 'moment') + ' ' + mU2 + '</b></td><td></td></tr>';
+            summaryHtml += '<tr><td><b>' + (dm === 'LRFD' ? 'φMn' : 'Mn/Ω') + '</b></td><td><b style="color:#4caf50">' + fmtVal(pr.phi_Mn, 'moment') + ' ' + mU2 + '</b></td><td></td></tr>';
+            summaryHtml += '</table></div>';
         }
 
         // DSM / 설계 경고 표시

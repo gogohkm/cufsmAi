@@ -2247,13 +2247,25 @@ export class StcfsdPanel implements McpPanelInterface {
                     <label>KtLt<span class="hint-inline" data-unit="length">in</span></label>
                     <input type="number" id="design-KtLt" value="118.11" step="1" style="width:65px">
                 </div>
+                <p class="hint" style="margin:6px 0 2px;font-weight:600">정모멘트 구간 (+M)</p>
+                <div class="input-row" id="design-Cb-pos-row">
+                    <label>Cb(+)</label>
+                    <input type="number" id="design-Cb-pos" value="1.0" step="0.01" style="width:65px">
+                    <span id="design-Cb-pos-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
+                </div>
+                <div class="input-row" id="design-Lb-pos-row">
+                    <label>Lb(+)<span class="hint-inline" data-unit="length">in</span></label>
+                    <input type="number" id="design-Lb-pos" value="0" step="1" style="width:65px">
+                    <span id="design-Lb-pos-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px">데크 구속 시 0</span>
+                </div>
+                <p class="hint" style="margin:6px 0 2px;font-weight:600">부모멘트 구간 (-M)</p>
                 <div class="input-row" id="design-Cb-row">
-                    <label>Cb</label>
+                    <label>Cb(-)</label>
                     <input type="number" id="design-Cb" value="1.0" step="0.01" style="width:65px">
                     <span id="design-Cb-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
                 </div>
                 <div class="input-row" id="design-Lb-row">
-                    <label>Lb<span class="hint-inline" data-unit="length">in</span> (LTB)</label>
+                    <label>Lb(-)<span class="hint-inline" data-unit="length">in</span></label>
                     <input type="number" id="design-Lb" value="118.11" step="1" style="width:65px">
                     <span id="design-Lb-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
                 </div>

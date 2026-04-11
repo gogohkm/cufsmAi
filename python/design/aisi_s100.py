@@ -99,10 +99,11 @@ def _infer_web_crippling_n_webs(params: dict, section_family: str) -> int | None
 
 
 def _estimate_cold_work_areas(section: dict, props: dict, R: float, t: float) -> dict:
-    """냉간가공 코너면적비용 단순 형상 추정.
+    """냉간가공 코너면적비 추정 — AISI §A3.3.2 Eq. A3.3.2-1용.
 
-    상세 형상 분해가 없을 때 C/Z/track/hat 단면의 압축 플랜지 폭과 lip 깊이로
-    제어 플랜지 조립부 면적을 근사한다. 값이 충분치 않으면 빈 dict 반환.
+    휨부재: C = 제어 플랜지의 코너면적 / 제어 플랜지 전체면적
+    - 제어 플랜지 코너 수: C/Z = 2개 (웹-플랜지, 플랜지-립)
+    - 제어 플랜지 면적: flat 플랜지 + flat 립 + 코너 arc (전체)
     """
     if R <= 0 or t <= 0:
         return {}
@@ -114,25 +115,35 @@ def _estimate_cold_work_areas(section: dict, props: dict, R: float, t: float) ->
     if flange_width <= 0:
         return {}
 
-    if sec_type == 'HAT':
-        n_corners = 4 if lip_depth <= 0 else 6
-        flange_projection = flange_width + 2.0 * max(lip_depth, 0.0)
-    elif sec_type in ('TRACK',):
-        n_corners = 2
-        flange_projection = flange_width
-    else:
-        n_corners = 4 if lip_depth > 0 else 2
-        flange_projection = flange_width + max(lip_depth, 0.0)
-
     arc_length = (math.pi / 2.0) * (R + t / 2.0)
-    a_corners = n_corners * arc_length * t
-    a_flange = flange_projection * t
-    if a_flange <= 0:
+    A_corner_each = arc_length * t
+
+    # 제어 플랜지 (압축 플랜지) 기준 코너 수 및 면적
+    if sec_type == 'HAT':
+        # Hat: 상부 플랜지 기준 — 웹-플랜지 코너 2개
+        n_corners_flange = 2
+        flat_flange = max(flange_width - 2 * (R + t / 2.0), 0)
+        A_flange = flat_flange * t + n_corners_flange * A_corner_each
+    elif sec_type in ('TRACK',):
+        # Track: 플랜지-웹 코너 1개 (립 없음)
+        n_corners_flange = 1
+        flat_flange = max(flange_width - (R + t / 2.0), 0)
+        A_flange = flat_flange * t + n_corners_flange * A_corner_each
+    else:
+        # C/Z: 제어 플랜지 = 플랜지 flat + 립 flat + 2 코너(웹-플랜지, 플랜지-립)
+        n_corners_flange = 2 if lip_depth > 0 else 1
+        flat_flange = max(flange_width - (R + t / 2.0) * 2, 0) if lip_depth > 0 else max(flange_width - (R + t / 2.0), 0)
+        flat_lip = max(lip_depth - (R + t / 2.0) / 2.0, 0) if lip_depth > 0 else 0
+        A_flange = (flat_flange + flat_lip) * t + n_corners_flange * A_corner_each
+
+    A_corners = n_corners_flange * A_corner_each
+
+    if A_flange <= 0:
         return {}
     return {
-        'n_corners': n_corners,
-        'A_corners': a_corners,
-        'A_flange': a_flange,
+        'n_corners': n_corners_flange,
+        'A_corners': A_corners,
+        'A_flange': A_flange,
     }
 
 
@@ -832,6 +843,46 @@ def _design_flexure(params: dict) -> dict:
         'spec_sections': list(set(spec_sections)),
         'warnings': warnings,
     }
+
+    # ── 정모멘트 구간 별도 검토 (Lb_pos, Cb_pos가 있는 경우) ──
+    Lb_pos = params.get('Lb_pos', 0)
+    Cb_pos = params.get('Cb_pos', 1.0)
+    if Lb_pos > 0 or (Lb_pos == 0 and params.get('Lb', 0) > 0):
+        # 정모멘트 구간: Lb_pos, Cb_pos로 별도 Fcre/Mne 계산
+        Fcre_pos = compute_beam_Fcre(props, Cb_pos, Lb_pos, section_type=section_type)
+        global_pos = beam_global_strength(Fy, Fcre_pos, Sf)
+        Mne_pos = global_pos['Mne']
+
+        # 정모멘트: Mcrl, Mcrd는 동일 단면이므로 같은 값 사용
+        if Mcrl > 0:
+            local_pos = flexure_local(Mne_pos, Mcrl)
+            Mnl_pos = local_pos['Mnl']
+        else:
+            Mnl_pos = Mne_pos
+
+        if Mcrd > 0:
+            dist_pos = flexure_distortional(Sf * Fy, Mcrd)
+            Mnd_pos = dist_pos['Mnd']
+        else:
+            Mnd_pos = Sf * Fy
+
+        Mn_pos = min(Mne_pos, Mnl_pos, Mnd_pos)
+        if design_method == 'LRFD':
+            phi_Mn_pos = phi * Mn_pos
+        else:
+            phi_Mn_pos = Mn_pos / omega
+
+        result['positive_region'] = {
+            'Lb': round(Lb_pos, 1),
+            'Cb': round(Cb_pos, 2),
+            'Fcre': round(Fcre_pos, 2),
+            'Mne': round(Mne_pos, 2),
+            'Mnl': round(Mnl_pos, 2),
+            'Mnd': round(Mnd_pos, 2),
+            'Mn': round(Mn_pos, 2),
+            'phi_Mn': round(phi_Mn_pos, 2),
+            'equation': global_pos.get('equation', ''),
+        }
 
     # §H3 웹 크리플링 + 휨 상호작용
     wc_N = params.get('wc_N', 0)
