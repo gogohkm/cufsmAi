@@ -5945,15 +5945,57 @@
                 });
             }
 
-            // 이용률
-            if (d.utilization != null) {
-                const util = d.utilization;
+            // ── 이용률: 부모멘트 ──
+            if (d.utilization != null && d.member_type === 'flexure') {
+                var _negUtil = d.utilization;
+                var _negLb2 = fromDisplay(getNum('design-Lb', 0), 'length');
+                var _negCb2 = getNum('design-Cb', 1.0);
+                checks.push({
+                    category: catG, item: '이용률 — 부모멘트 (-M)',
+                    status: _negUtil <= 0.95 ? 'pass' : (_negUtil <= 1.0 ? 'warn' : 'fail'),
+                    value: (_negUtil*100).toFixed(1)+'%',
+                    criterion: 'Mu(-) / φMn(-) ≤ 1.0',
+                    note: _negUtil > 1.0 ? '부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요.' : '',
+                });
+                checks.push({
+                    category: catG, item: 'Lb(-) / Cb(-) (부모멘트)',
+                    status: _negLb2 > 0 ? 'pass' : 'warn',
+                    value: 'Lb(-)=' + fmtVal(_negLb2, 'length') + ' ' + unitLabel('length') + ', Cb(-)=' + _negCb2,
+                    criterion: '부모멘트 구간: 변곡점~Lap끝 또는 지점까지 비지지 길이',
+                    note: _negLb2 <= 0 ? 'Lb=0 → 완전 구속 가정. 실제 조건을 확인하세요.' : (_negCb2 > 2.3 ? 'Cb > 2.3 — 매우 높은 값. 모멘트 다이어그램을 확인하세요.' : ''),
+                });
+            } else if (d.utilization != null) {
                 checks.push({
                     category: catG, item: '이용률 (DCR)',
-                    status: util <= 0.95 ? 'pass' : (util <= 1.0 ? 'warn' : 'fail'),
-                    value: (util*100).toFixed(1)+'%',
-                    criterion: 'DCR ≤ 100% (여유를 위해 ≤95% 권장)',
-                    note: util > 1.0 ? '과응력 — 설계 요구사항 미충족. 단면을 키우거나 하중을 줄이세요.' : (util > 0.95 ? '한계에 매우 근접 — 여유를 고려하세요.' : ''),
+                    status: d.utilization <= 0.95 ? 'pass' : (d.utilization <= 1.0 ? 'warn' : 'fail'),
+                    value: (d.utilization*100).toFixed(1)+'%',
+                    criterion: 'DCR ≤ 100%',
+                    note: d.utilization > 1.0 ? '과응력 — 설계 요구사항 미충족.' : '',
+                });
+            }
+
+            // ── 이용률: 정모멘트 ──
+            if (d.positive_region && d.member_type === 'flexure') {
+                var _posR = d.positive_region;
+                checks.push({
+                    category: catG, item: '이용률 — 정모멘트 (+M)',
+                    status: _posR.utilization != null ? (_posR.utilization <= 0.95 ? 'pass' : (_posR.utilization <= 1.0 ? 'warn' : 'fail')) : 'warn',
+                    value: _posR.utilization != null ? (_posR.utilization*100).toFixed(1)+'%' : 'Mu(+) 미입력',
+                    criterion: 'Mu(+) / φMn(+) ≤ 1.0',
+                    note: _posR.utilization != null && _posR.utilization > 1.0
+                        ? '정모멘트 구간 과응력 — Lb(+)를 줄이거나 가새를 추가하세요.'
+                        : (_posR.utilization == null ? '설계탭에서 Mu(+) 값을 입력하세요.' : ''),
+                });
+                checks.push({
+                    category: catG, item: 'Lb(+) / Cb(+) (정모멘트)',
+                    status: _posR.Lb === 0 ? 'pass' : (_posR.Fcre >= 2.78 * (d.Fy_used || 35.53) ? 'pass' : 'warn'),
+                    value: 'Lb(+)=' + fmtVal(_posR.Lb, 'length') + ' ' + unitLabel('length') + ', Cb(+)=' + _posR.Cb + ', Fcre(+)=' + _posR.Fcre + ' ksi',
+                    criterion: '정모멘트 구간: 데크 구속 시 Lb=0, 미구속 시 변곡점 간 거리',
+                    note: _posR.Lb === 0
+                        ? '데크에 의한 연속 구속 — LTB 없음.'
+                        : (_posR.Fcre < 2.78 * (d.Fy_used || 35.53)
+                            ? 'LTB 발생 — Fcre(+)=' + _posR.Fcre + ' ksi < 2.78Fy. 가새 추가 또는 Lb 감소를 검토하세요.'
+                            : 'Fcre(+) ≥ 2.78Fy — LTB 없음.'),
                 });
             }
 
@@ -5992,9 +6034,11 @@
                 });
             }
 
-            // 설계 결과 warnings (Mcrd fallback, R-factor 등)
+            // 설계 결과 warnings (Mcrd fallback, R-factor 등 — 정모멘트 NG 중복 제외)
             if (d.warnings && d.warnings.length > 0) {
                 d.warnings.forEach((w, i) => {
+                    // 정모멘트 NG 경고는 이용률 항목에서 이미 표시하므로 제외
+                    if (w.includes('정모멘트 구간 NG')) return;
                     const isFallback = w.includes('§2.3.3.3') || w.includes('§2.3.1.3');
                     checks.push({
                         category: catG, item: isFallback ? '뒤틀림좌굴 해석적 Fallback' : '설계 경고 #'+(i+1),
