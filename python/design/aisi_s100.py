@@ -844,10 +844,11 @@ def _design_flexure(params: dict) -> dict:
         'warnings': warnings,
     }
 
-    # ── 정모멘트 구간 별도 검토 (Lb_pos, Cb_pos가 있는 경우) ──
+    # ── 정모멘트 구간 별도 검토 ──
     Lb_pos = params.get('Lb_pos', 0)
     Cb_pos = params.get('Cb_pos', 1.0)
-    if Lb_pos > 0 or (Lb_pos == 0 and params.get('Lb', 0) > 0):
+    Mu_pos = abs(params.get('Mu_pos', 0))
+    if Lb_pos > 0 or Mu_pos > 0 or (Lb_pos == 0 and params.get('Lb', 0) > 0):
         # 정모멘트 구간: Lb_pos, Cb_pos로 별도 Fcre/Mne 계산
         Fcre_pos = compute_beam_Fcre(props, Cb_pos, Lb_pos, section_type=section_type)
         global_pos = beam_global_strength(Fy, Fcre_pos, Sf)
@@ -872,6 +873,13 @@ def _design_flexure(params: dict) -> dict:
         else:
             phi_Mn_pos = Mn_pos / omega
 
+        # 정모멘트 구간 이용률
+        util_pos = None
+        pass_pos = None
+        if Mu_pos > 0 and phi_Mn_pos > 0:
+            util_pos = round(Mu_pos / phi_Mn_pos, 4)
+            pass_pos = util_pos <= 1.0
+
         result['positive_region'] = {
             'Lb': round(Lb_pos, 1),
             'Cb': round(Cb_pos, 2),
@@ -881,8 +889,22 @@ def _design_flexure(params: dict) -> dict:
             'Mnd': round(Mnd_pos, 2),
             'Mn': round(Mn_pos, 2),
             'phi_Mn': round(phi_Mn_pos, 2),
+            'Mu_pos': round(Mu_pos, 2),
+            'utilization': util_pos,
+            'pass': pass_pos,
             'equation': global_pos.get('equation', ''),
         }
+
+        # 정모멘트 구간이 지배하는지 체크 → 전체 판정에 반영
+        if pass_pos is not None and not pass_pos:
+            result['pass'] = False
+            if 'warnings' not in result:
+                result['warnings'] = []
+            result['warnings'].append(
+                f'정모멘트 구간 NG: Mu(+)={Mu_pos:.2f} > '
+                f'{"φ" if design_method == "LRFD" else ""}Mn(+)={phi_Mn_pos:.2f} kip-in '
+                f'(DCR={util_pos:.3f})'
+            )
 
     # §H3 웹 크리플링 + 휨 상호작용
     wc_N = params.get('wc_N', 0)

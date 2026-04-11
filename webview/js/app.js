@@ -25,6 +25,8 @@
     let lastProps = null;
     /** 하중 분석 결과 */
     let _lastLoadAnalysis = null;
+    /** Lap 접합부 설계 결과 */
+    let _lastLapResult = null;
 
     // ============================================================
     // 단위 변환 시스템 (SI ↔ US)
@@ -98,7 +100,7 @@
             ['design-KxLx','length'],['design-KyLy','length'],
             ['design-KtLt','length'],['design-Lb','length'],['design-Lb-pos','length'],
             ['design-P','force'],['design-V','force'],
-            ['design-Mx','moment'],['design-My','moment'],
+            ['design-Mx','moment'],['design-Mx-pos','moment'],['design-My','moment'],
             ['design-wc-N','length'],['design-wc-R','radius'],
             ['config-spacing','length_ft'],
             ['deck-t-panel','thickness'],['deck-fastener-spacing','length'],['deck-kphi-override','rotStiff'],
@@ -272,6 +274,7 @@
                 sendTreeUpdate();
                 break;
             case 'lapConnectionResult':
+                _lastLapResult = msg.data;
                 renderLapConnectionResult(msg.data);
                 break;
             case 'connectionResult':
@@ -3036,6 +3039,7 @@
             Cmy: getNum('design-Cmy', 0.85),
             Pu: fromDisplay(getNum('design-P', 0), 'force'),
             Mu: fromDisplay(getNum('design-Mx', 0), 'moment'),
+            Mu_pos: fromDisplay(getNum('design-Mx-pos', 0), 'moment'),
             Mux: fromDisplay(getNum('design-Mx', 0), 'moment'),
             Muy: fromDisplay(getNum('design-My', 0), 'moment'),
             May_strength: fromDisplay(getNum('design-May-strength', 0), 'moment'),
@@ -3814,12 +3818,23 @@
                     }
                 }
 
+                // 정모멘트 최대값 추출
+                let maxMuPos = 0;
+                if (govData && govData.locations) {
+                    for (const loc of govData.locations) {
+                        if (loc.Mu != null && loc.Mu > 0 && loc.Mu > maxMuPos) maxMuPos = loc.Mu;
+                    }
+                }
+
                 // 설계 입력에 최대값 설정 (maxMu: kip-ft)
-                const absMu = Math.abs(maxMu);
+                const absMu = Math.abs(maxMu);   // 부모멘트 (Lap end 또는 지점)
+                const absMuPos = Math.abs(maxMuPos); // 정모멘트
                 const absVu = Math.abs(maxVu);
                 if (absMu > 0) {
-                    const mu_kipIn = absMu * 12; // kip-ft → kip-in
-                    setValue('design-Mx', toDisplay(mu_kipIn, 'moment').toFixed(unitDec('moment')));
+                    setValue('design-Mx', toDisplay(absMu * 12, 'moment').toFixed(unitDec('moment')));
+                }
+                if (absMuPos > 0) {
+                    setValue('design-Mx-pos', toDisplay(absMuPos * 12, 'moment').toFixed(unitDec('moment')));
                 }
                 if (absVu > 0) {
                     setValue('design-V', toDisplay(absVu, 'force').toFixed(unitDec('force')));
@@ -3997,7 +4012,8 @@
             if (mt === 'flexure' && data.positive_region) {
                 var _negLb = fromDisplay(getNum('design-Lb', 0), 'length');
                 var _negCb = getNum('design-Cb', 1.0);
-                summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:2px;color:#ff9800">부모멘트 구간 (-M) — Lb=' + fmtVal(_negLb, 'length') + ' ' + unitLabel('length') + ', Cb=' + _negCb + '</div>';
+                var _negMu = fromDisplay(getNum('design-Mx', 0), 'moment');
+                summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:2px;color:#ff9800">부모멘트 구간 (-M) — Mu(-)=' + fmtVal(_negMu, 'moment') + ' ' + unitLabel('moment') + ', Lb=' + fmtVal(_negLb, 'length') + ' ' + unitLabel('length') + ', Cb=' + _negCb + '</div>';
             }
             const isC = mt === 'compression';
             const vals = isC
@@ -4068,30 +4084,55 @@
             summaryHtml += '</table>';
         }
 
-        // 이용률 게이지 바
+        // 이용률 게이지 바 (부모멘트)
         if (util != null) {
             const pct = Math.min(util * 100, 120).toFixed(0);
             const cls = util <= 0.75 ? 'ok' : (util <= 1.0 ? 'warn' : 'fail');
             summaryHtml += '<div class="utilization-bar">';
             summaryHtml += '<div class="utilization-fill ' + cls + '" style="width:' + Math.min(pct, 100) + '%"></div>';
-            summaryHtml += '<span class="utilization-label">' + pct + '% ' + (pass ? '✓ OK' : '✗ NG') + '</span>';
+            summaryHtml += '<span class="utilization-label">' + pct + '% ' + (pass !== false ? '✓ OK' : '✗ NG') + '</span>';
             summaryHtml += '</div>';
         }
 
-        // 정모멘트 구간 결과 표시
+        // ── 정모멘트 구간: 부모멘트와 동일한 양식 (강도 카드 + 이용률 바) ──
         if (data.positive_region && mt === 'flexure') {
             const pr = data.positive_region;
             var mU2 = unitLabel('moment');
-            summaryHtml += '<div style="margin-top:8px;padding:6px 8px;background:rgba(76,175,80,0.08);border:1px solid rgba(76,175,80,0.3);border-radius:4px">';
-            summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:4px">정모멘트 구간 (+M) — Lb=' + fmtVal(pr.Lb, 'length') + ' ' + unitLabel('length') + ', Cb=' + pr.Cb + '</div>';
-            summaryHtml += '<table style="width:100%;font-size:11px">';
-            summaryHtml += '<tr><td>Fcre</td><td>' + pr.Fcre + ' ksi</td><td>' + (pr.equation||'') + '</td></tr>';
-            summaryHtml += '<tr><td>Mne</td><td>' + fmtVal(pr.Mne, 'moment') + ' ' + mU2 + '</td><td></td></tr>';
-            summaryHtml += '<tr><td>Mnl</td><td>' + fmtVal(pr.Mnl, 'moment') + ' ' + mU2 + '</td><td></td></tr>';
-            summaryHtml += '<tr><td>Mnd</td><td>' + fmtVal(pr.Mnd, 'moment') + ' ' + mU2 + '</td><td></td></tr>';
-            summaryHtml += '<tr><td><b>Mn</b></td><td><b>' + fmtVal(pr.Mn, 'moment') + ' ' + mU2 + '</b></td><td></td></tr>';
-            summaryHtml += '<tr><td><b>' + (dm === 'LRFD' ? 'φMn' : 'Mn/Ω') + '</b></td><td><b style="color:#4caf50">' + fmtVal(pr.phi_Mn, 'moment') + ' ' + mU2 + '</b></td><td></td></tr>';
-            summaryHtml += '</table></div>';
+            var posMuVal = pr.Mu_pos || 0;
+            var posDesignLabel = dm === 'LRFD' ? 'φMn(+)' : 'Mn(+)/Ω';
+
+            // 구간 라벨
+            summaryHtml += '<div style="font-weight:600;font-size:11px;margin:10px 0 2px;color:#4caf50">정모멘트 구간 (+M) — Mu(+)=' + fmtVal(posMuVal, 'moment') + ' ' + mU2 + ', Lb=' + fmtVal(pr.Lb, 'length') + ' ' + unitLabel('length') + ', Cb=' + pr.Cb + '</div>';
+
+            // 강도 카드 (부모멘트와 동일)
+            var posVals = [{l:'Global',v:pr.Mne},{l:'Local',v:pr.Mnl},{l:'Distort.',v:pr.Mnd}];
+            summaryHtml += '<div class="strength-cards">';
+            posVals.forEach(function(v) {
+                var gov2 = (v.v != null && pr.Mn != null && Math.abs(v.v - pr.Mn) < 0.01) ? ' governing' : '';
+                summaryHtml += '<div class="strength-card' + gov2 + '">';
+                summaryHtml += '<div class="sc-label">' + v.l + '</div>';
+                summaryHtml += '<div class="sc-value">' + (v.v != null ? fmtVal(v.v, 'moment') : '-') + '</div>';
+                summaryHtml += '<div class="sc-label">' + mU2 + '</div>';
+                if (gov2) summaryHtml += '<div><span class="governing-badge">지배</span></div>';
+                summaryHtml += '</div>';
+            });
+            summaryHtml += '</div>';
+
+            // 설계강도 라인
+            summaryHtml += '<div style="font-size:12px;margin:4px 0">';
+            summaryHtml += '<b style="color:#4caf50">' + posDesignLabel + ' = ' + fmtVal(pr.phi_Mn, 'moment') + ' ' + mU2 + '</b>';
+            summaryHtml += ' <span style="color:var(--vscode-descriptionForeground)">(' + (pr.equation || '') + ')</span>';
+            summaryHtml += '</div>';
+
+            // 이용률 게이지 바 (정모멘트)
+            if (pr.utilization != null) {
+                var posPct = Math.min(pr.utilization * 100, 120).toFixed(0);
+                var posCls = pr.utilization <= 0.75 ? 'ok' : (pr.utilization <= 1.0 ? 'warn' : 'fail');
+                summaryHtml += '<div class="utilization-bar">';
+                summaryHtml += '<div class="utilization-fill ' + posCls + '" style="width:' + Math.min(posPct, 100) + '%"></div>';
+                summaryHtml += '<span class="utilization-label">' + posPct + '% ' + (pr.pass !== false ? '✓ OK' : '✗ NG') + '</span>';
+                summaryHtml += '</div>';
+            }
         }
 
         // DSM / 설계 경고 표시
@@ -4111,6 +4152,12 @@
         // --- Steps as cards ---
         const steps = data.steps || [];
         let stepsHtml = '';
+
+        // 정모멘트 구간이 있으면 섹션 제목 추가
+        if (steps.length > 0 && data.positive_region && mt === 'flexure') {
+            stepsHtml += '<div style="font-weight:700;font-size:13px;margin:8px 0 4px;padding:4px 8px;background:rgba(255,152,0,0.1);border-left:3px solid #ff9800;border-radius:0 4px 4px 0">1) 부모멘트 구간 (-M)</div>';
+        }
+
         if (steps.length > 0) {
             steps.forEach(s => {
                 const isGov = !!s.controlling_mode;
@@ -4130,7 +4177,77 @@
                 }
                 stepsHtml += '</div>';
             });
-        } else if (data.limit_states) {
+        }
+
+        // ── 정모멘트 구간 단계별 계산 (부모멘트와 동일 형식) ──
+        if (data.positive_region && mt === 'flexure') {
+            var _pr = data.positive_region;
+            var _mU = unitLabel('moment');
+            var _lU = unitLabel('length');
+            var _Fy = data.Fy_used || data.Fy_original || 35.53;
+            var _phi2 = 0.90, _omega2 = 1.67;
+            var _dsL2 = dm === 'LRFD' ? 'φMn(+)' : 'Mn(+)/Ω';
+
+            stepsHtml += '<div style="font-weight:700;font-size:13px;margin:12px 0 4px;padding:4px 8px;background:rgba(76,175,80,0.1);border-left:3px solid #4caf50;border-radius:0 4px 4px 0">2) 정모멘트 구간 (+M)</div>';
+
+            // Step 1: My
+            stepsHtml += '<div class="calc-step"><div class="calc-step-header"><span>1. Yield Moment (My)</span></div>';
+            stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">My = Sf × Fy = ' + fmtVal(data.My, 'moment') + ' ' + _mU + ' (부모멘트와 동일)</div>';
+            stepsHtml += '<div class="calc-step-value">' + fmtVal(data.My, 'moment') + ' ' + _mU + '</div></div>';
+
+            // Step 2: LTB — Mne(+)
+            var _fcreCond = '';
+            if (_pr.Fcre >= 2.78 * _Fy) _fcreCond = 'Fcre ≥ 2.78Fy → Fn = Fy (항복)';
+            else if (_pr.Fcre > 0.56 * _Fy) _fcreCond = '0.56Fy < Fcre < 2.78Fy → 비탄성 LTB';
+            else _fcreCond = 'Fcre ≤ 0.56Fy → 탄성 LTB';
+            stepsHtml += '<div class="calc-step"><div class="calc-step-header"><span>2. Global/LTB — Mne(+)</span>';
+            stepsHtml += '<span><span class="calc-step-ref">' + specRefSpan(_pr.equation || 'F2.1') + '</span></span></div>';
+            stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">Lb(+) = ' + fmtVal(_pr.Lb, 'length') + ' ' + _lU + ', Cb(+) = ' + _pr.Cb + ' → Fcre(+) = ' + _pr.Fcre + ' ksi, ' + _fcreCond + '</div>';
+            stepsHtml += '<div class="calc-step-value">' + fmtVal(_pr.Mne, 'moment') + ' ' + _mU + '</div></div>';
+
+            // Step 3: Local — Mnl(+)
+            var _lGov = _pr.Mnl < _pr.Mne ? ' (국부좌굴 ' + (100 * (1 - _pr.Mnl / _pr.Mne)).toFixed(1) + '% 감소)' : ' (감소 없음)';
+            stepsHtml += '<div class="calc-step"><div class="calc-step-header"><span>3. Local Buckling — Mnl(+)</span>';
+            stepsHtml += '<span><span class="calc-step-ref">' + specRefSpan('F3.2.1') + '</span></span></div>';
+            stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">λl = √(Mne/Mcrl)' + _lGov + '</div>';
+            stepsHtml += '<div class="calc-step-value">' + fmtVal(_pr.Mnl, 'moment') + ' ' + _mU + '</div></div>';
+
+            // Step 4: Distortional — Mnd(+)
+            stepsHtml += '<div class="calc-step"><div class="calc-step-header"><span>4. Distortional Buckling — Mnd(+)</span>';
+            stepsHtml += '<span><span class="calc-step-ref">' + specRefSpan('F4.1') + '</span></span></div>';
+            stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">λd = √(My/Mcrd)</div>';
+            stepsHtml += '<div class="calc-step-value">' + fmtVal(_pr.Mnd, 'moment') + ' ' + _mU + '</div></div>';
+
+            // Step 5: Nominal — Mn(+)
+            var _mnGov = '';
+            if (_pr.Mn === _pr.Mnl && _pr.Mnl < _pr.Mne) _mnGov = 'Local Buckling';
+            else if (_pr.Mn === _pr.Mnd && _pr.Mnd < _pr.Mne) _mnGov = 'Distortional Buckling';
+            else _mnGov = 'Global/LTB';
+            stepsHtml += '<div class="calc-step governing"><div class="calc-step-header"><span>5. Nominal Strength — DSM Mn(+)</span>';
+            stepsHtml += '<span><span class="governing-badge">지배</span></span></div>';
+            stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">Mn(+) = min(Mne, Mnl, Mnd) = min(' + fmtVal(_pr.Mne, 'moment') + ', ' + fmtVal(_pr.Mnl, 'moment') + ', ' + fmtVal(_pr.Mnd, 'moment') + ') → ' + _mnGov + '</div>';
+            stepsHtml += '<div class="calc-step-value">' + fmtVal(_pr.Mn, 'moment') + ' ' + _mU + '</div></div>';
+
+            // Step 6: Design Strength
+            stepsHtml += '<div class="calc-step"><div class="calc-step-header"><span>6. Design Strength — ' + _dsL2 + '</span></div>';
+            if (dm === 'LRFD') {
+                stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">φMn(+) = ' + _phi2 + ' × ' + fmtVal(_pr.Mn, 'moment') + ' = ' + fmtVal(_pr.phi_Mn, 'moment') + ' ' + _mU + '</div>';
+            } else {
+                stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">Mn(+)/Ω = ' + fmtVal(_pr.Mn, 'moment') + ' / ' + _omega2 + ' = ' + fmtVal(_pr.phi_Mn, 'moment') + ' ' + _mU + '</div>';
+            }
+            stepsHtml += '<div class="calc-step-value">' + fmtVal(_pr.phi_Mn, 'moment') + ' ' + _mU + '</div></div>';
+
+            // Step 7: Utilization
+            if (_pr.Mu_pos > 0 && _pr.utilization != null) {
+                var _pOK = _pr.pass !== false;
+                stepsHtml += '<div class="calc-step' + (_pOK ? '' : ' governing') + '"><div class="calc-step-header"><span>7. Utilization — Mu(+) / ' + _dsL2 + '</span>';
+                stepsHtml += '<span>' + (_pOK ? '' : '<span class="governing-badge" style="background:#ff5252">NG</span>') + '</span></div>';
+                stepsHtml += '<div style="color:var(--vscode-descriptionForeground);font-size:11px">Mu(+) = ' + fmtVal(_pr.Mu_pos, 'moment') + ' / ' + fmtVal(_pr.phi_Mn, 'moment') + ' = ' + (_pr.utilization * 100).toFixed(1) + '%</div>';
+                stepsHtml += '<div class="calc-step-value" style="color:' + (_pOK ? '#4caf50' : '#ff5252') + '">' + (_pr.utilization * 100).toFixed(1) + '% ' + (_pOK ? 'OK' : 'NG') + '</div></div>';
+            }
+        }
+
+        if (!steps.length && data.limit_states) {
             data.limit_states.forEach((ls, i) => {
                 const isGov = !!ls.governs;
                 stepsHtml += '<div class="calc-step' + (isGov ? ' governing' : '') + '">';
@@ -4699,8 +4816,15 @@
                 h += '<td>2겹 직렬 스프링: k<sub>x</sub> = (1/(1/(Et<sub>1</sub>)+1/(Et<sub>2</sub>)))/s &times; 0.04 감소계수</td></tr>';
             }
             if (ap.positive_region) {
-                h += '<tr><td>정모멘트 구간 가새</td><td>완전 지지 (L<sub>y</sub>=0)</td>';
-                h += '<td>상부 플랜지 압축, 데크 패널로 연속 지지 — LTB 검토 불필요</td></tr>';
+                if (ap.positive_region.braced) {
+                    h += '<tr><td>정모멘트 L<sub>y</sub>(+)</td><td>0 (완전 지지)</td>';
+                    h += '<td>상부 플랜지 압축, 데크 패널로 연속 지지 — LTB 검토 불필요</td></tr>';
+                } else {
+                    h += '<tr><td>정모멘트 L<sub>y</sub>(+)</td><td>'+_ruv(ap.positive_region.Ly_in,'length')+' '+_rul('length')+'</td>';
+                    h += '<td>상부 플랜지 비지지 — 변곡점 간 거리 기준 LTB 검토 필요</td></tr>';
+                    h += '<tr><td>정모멘트 C<sub>b</sub>(+)</td><td>'+ap.positive_region.Cb+'</td>';
+                    h += '<td>AISI Eq. F2.1.1-2 — 정모멘트 구간 모멘트 다이어그램에서 계산</td></tr>';
+                }
             }
             if (ap.negative_region) {
                 h += '<tr><td>부모멘트 L<sub>y</sub></td><td>'+_ruv(ap.negative_region.Ly_in,'length')+' '+_rul('length')+'</td>';
@@ -4802,6 +4926,15 @@
     function _rptFlexure(d, dm) {
         let h = '';
         const phi=0.90,omega=1.67;
+
+        // 정/부 모멘트 구간이 모두 있으면 섹션 제목 추가
+        if (d.positive_region) {
+            h += '<h2 style="color:#ff9800">1) 부모멘트 구간 (-M)</h2>';
+            var _nLb = fromDisplay(getNum('design-Lb', 0), 'length');
+            var _nCb = getNum('design-Cb', 1.0);
+            h += '<p>Lb(-) = '+_ruv(_nLb,'length')+' '+_rul('length')+', Cb(-) = '+_nCb+'</p>';
+        }
+
         // Step 1: My
         h += '<h3>단계 1: 항복 모멘트, M<sub>y</sub></h3>';
         h += '<span class="eq">M<sub>y</sub> = S<sub>f</sub> &times; F<sub>y</sub> = '+_ruv(d.My,'moment')+' '+_rul('moment')+'</span>';
@@ -4839,20 +4972,138 @@
         h += '</table>';
         h += '<span class="eq">M<sub>nd</sub> = <b>'+_ruv(d.Mnd,'moment')+'</b> '+_rul('moment')+'</span>';
 
-        // Step 5: Nominal & Design
-        h += '<h3>단계 5: 공칭강도 & 설계강도</h3>';
-        h += '<span class="eq">M<sub>n</sub> = min(M<sub>ne</sub>, M<sub>nl</sub>, M<sub>nd</sub>) = min('+_ruv(d.Mne,'moment')+', '+_ruv(d.Mnl,'moment')+', '+_ruv(d.Mnd,'moment')+') = <b>'+_ruv(d.Mn,'moment')+'</b> '+_rul('moment')+'</span>';
+        // Step 5: 부모멘트 구간 공칭강도 & 설계강도
+        if (d.positive_region) {
+            h += '<h3>단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도</h3>';
+        } else {
+            h += '<h3>단계 5: 공칭강도 & 설계강도</h3>';
+        }
+        h += '<span class="eq">M<sub>n</sub>(-) = min(M<sub>ne</sub>, M<sub>nl</sub>, M<sub>nd</sub>) = min('+_ruv(d.Mne,'moment')+', '+_ruv(d.Mnl,'moment')+', '+_ruv(d.Mnd,'moment')+') = <b>'+_ruv(d.Mn,'moment')+'</b> '+_rul('moment')+'</span>';
         h += '<span class="eq">지배 파괴 모드: <b>'+(d.controlling_mode||'')+'</b></span>';
         if (dm==='LRFD') {
             h += '<span class="eq">&phi;<sub>b</sub> = '+phi+' (LRFD)</span>';
-            h += '<span class="eq">&phi;M<sub>n</sub> = '+phi+' &times; '+_ruv(d.Mn,'moment')+' = <b class="result">'+_ruv(d.phi_Mn,'moment')+'</b> '+_rul('moment')+'</span>';
+            h += '<span class="eq">&phi;M<sub>n</sub>(-) = '+phi+' &times; '+_ruv(d.Mn,'moment')+' = <b class="result">'+_ruv(d.phi_Mn,'moment')+'</b> '+_rul('moment')+'</span>';
         } else {
             h += '<span class="eq">&Omega;<sub>b</sub> = '+omega+' (ASD)</span>';
-            h += '<span class="eq">M<sub>n</sub>/&Omega; = '+_ruv(d.Mn,'moment')+' / '+omega+' = <b class="result">'+_ruv(d.Mn_omega,'moment')+'</b> '+_rul('moment')+'</span>';
+            h += '<span class="eq">M<sub>n</sub>(-)/&Omega; = '+_ruv(d.Mn,'moment')+' / '+omega+' = <b class="result">'+_ruv(d.Mn_omega,'moment')+'</b> '+_rul('moment')+'</span>';
         }
         if (d.utilization != null) {
             const Mu = d.design_strength > 0 ? (d.utilization * d.design_strength) : 0;
-            h += '<span class="eq">M<sub>u</sub> / '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+' = '+_ruv(Mu,'moment')+' / '+_ruv(d.design_strength,'moment')+' = <b class="'+(d.pass?'pass':'fail')+'">'+_rv(d.utilization*100,1)+'%</b></span>';
+            h += '<span class="eq">M<sub>u</sub>(-) / '+(dm==='LRFD'?'&phi;M<sub>n</sub>(-)':'M<sub>n</sub>(-)/&Omega;')+' = '+_ruv(Mu,'moment')+' / '+_ruv(d.design_strength,'moment')+' = <b class="'+(d.pass !== false?'pass':'fail')+'">'+_rv(d.utilization*100,1)+'%</b> '+(d.utilization <= 1.0 ? 'OK' : 'NG')+'</span>';
+        }
+
+        // ── 정모멘트 구간: 부모멘트와 동일한 단계별 형식 ──
+        if (d.positive_region) {
+            var pr = d.positive_region;
+
+            h += '<hr style="margin:16px 0;border:none;border-top:2px solid #4caf50;opacity:0.4">';
+            h += '<h2 style="color:#4caf50">2) 정모멘트 구간 (+M)</h2>';
+            h += '<p>Lb(+) = '+_ruv(pr.Lb,'length')+' '+_rul('length')+', Cb(+) = '+pr.Cb+'</p>';
+
+            // Step 1: My (동일)
+            h += '<h3>단계 1: 항복 모멘트, M<sub>y</sub></h3>';
+            h += '<span class="eq">M<sub>y</sub> = S<sub>f</sub> &times; F<sub>y</sub> = '+_ruv(d.My,'moment')+' '+_rul('moment')+' (부모멘트 구간과 동일)</span>';
+
+            // Step 2: Global/LTB — Mne(+)
+            h += '<h3>단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)</h3>';
+            h += '<p>정모멘트 구간의 Lb(+)='+_ruv(pr.Lb,'length')+' '+_rul('length')+', Cb(+)='+pr.Cb+'로 Fcre를 재산정합니다.</p>';
+            h += '<span class="eq">F<sub>cre</sub>(+) = '+pr.Fcre+' ksi → '+( pr.equation||'§F2.1')+'</span>';
+            // Fcre vs 2.78Fy 판별
+            var Fy_val = d.Fy_used || d.Fy_original || 35.53;
+            if (pr.Fcre >= 2.78 * Fy_val) {
+                h += '<span class="eq">F<sub>cre</sub>(+) = '+pr.Fcre+' ksi &ge; 2.78F<sub>y</sub> = '+_rv(2.78*Fy_val,1)+' ksi → F<sub>n</sub> = F<sub>y</sub> (항복)</span>';
+            } else if (pr.Fcre > 0.56 * Fy_val) {
+                h += '<span class="eq">0.56F<sub>y</sub> < F<sub>cre</sub>(+) = '+pr.Fcre+' ksi < 2.78F<sub>y</sub> → 비탄성 LTB</span>';
+            } else {
+                h += '<span class="eq">F<sub>cre</sub>(+) = '+pr.Fcre+' ksi &le; 0.56F<sub>y</sub> = '+_rv(0.56*Fy_val,1)+' ksi → 탄성 LTB</span>';
+            }
+            h += '<span class="eq">M<sub>ne</sub>(+) = <b>'+_ruv(pr.Mne,'moment')+'</b> '+_rul('moment')+'</span>';
+
+            // Step 3: Local — Mnl(+)
+            h += '<h3>단계 3: 국부좌굴 — §F3.2 (정모멘트)</h3>';
+            var govLpos = pr.Mnl < pr.Mne ? ' (국부좌굴로 '+(100*(1-pr.Mnl/pr.Mne)).toFixed(1)+'% 감소)' : ' (감소 없음)';
+            h += '<span class="eq">M<sub>nl</sub>(+) = <b>'+_ruv(pr.Mnl,'moment')+'</b> '+_rul('moment')+govLpos+'</span>';
+
+            // Step 4: Distortional — Mnd(+)
+            h += '<h3>단계 4: 뒤틀림좌굴 — §F4 (정모멘트)</h3>';
+            h += '<span class="eq">M<sub>nd</sub>(+) = <b>'+_ruv(pr.Mnd,'moment')+'</b> '+_rul('moment')+'</span>';
+
+            // Step 5: Nominal & Design
+            h += '<h3>단계 5: 공칭강도 & 설계강도 (정모멘트)</h3>';
+            h += '<span class="eq">M<sub>n</sub>(+) = min(M<sub>ne</sub>, M<sub>nl</sub>, M<sub>nd</sub>) = min('+_ruv(pr.Mne,'moment')+', '+_ruv(pr.Mnl,'moment')+', '+_ruv(pr.Mnd,'moment')+') = <b>'+_ruv(pr.Mn,'moment')+'</b> '+_rul('moment')+'</span>';
+            var dsLabel = dm==='LRFD'?'&phi;M<sub>n</sub>(+)':'M<sub>n</sub>(+)/&Omega;';
+            if (dm==='LRFD') {
+                h += '<span class="eq">&phi;<sub>b</sub> = '+phi+' (LRFD)</span>';
+                h += '<span class="eq">'+dsLabel+' = '+phi+' &times; '+_ruv(pr.Mn,'moment')+' = <b class="result">'+_ruv(pr.phi_Mn,'moment')+'</b> '+_rul('moment')+'</span>';
+            } else {
+                h += '<span class="eq">&Omega;<sub>b</sub> = '+omega+' (ASD)</span>';
+                h += '<span class="eq">'+dsLabel+' = '+_ruv(pr.Mn,'moment')+' / '+omega+' = <b class="result">'+_ruv(pr.phi_Mn,'moment')+'</b> '+_rul('moment')+'</span>';
+            }
+            if (pr.Mu_pos > 0) {
+                var prDCR = pr.utilization != null ? pr.utilization : 0;
+                var prOK = pr.pass !== false;
+                h += '<span class="eq">M<sub>u</sub>(+) / '+dsLabel+' = '+_ruv(pr.Mu_pos,'moment')+' / '+_ruv(pr.phi_Mn,'moment')+' = <b class="'+(prOK?'pass':'fail')+'">'+_rv(prDCR*100,1)+'%</b> '+(prOK?'OK':'NG')+'</span>';
+            }
+
+            // ── 종합 판정 요약 ──
+            h += '<hr style="margin:16px 0;border:none;border-top:2px solid var(--vscode-foreground);opacity:0.2">';
+            h += '<h2>종합 판정</h2>';
+            h += '<table><tr><th>구간</th><th>M<sub>u</sub></th><th>'+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+'</th><th>DCR</th><th>판정</th></tr>';
+            // 부모멘트
+            var negMuVal = d.design_strength > 0 && d.utilization != null ? (d.utilization * d.design_strength) : 0;
+            var negOK = d.utilization != null ? d.utilization <= 1.0 : true;
+            h += '<tr><td>부모멘트 (-M)</td><td>'+_ruv(negMuVal,'moment')+'</td><td>'+_ruv(d.design_strength,'moment')+'</td><td>'+_rv((d.utilization||0)*100,1)+'%</td><td class="'+(negOK?'pass':'fail')+'">'+(negOK?'OK':'NG')+'</td></tr>';
+            // 정모멘트
+            if (pr.Mu_pos > 0) {
+                h += '<tr><td>정모멘트 (+M)</td><td>'+_ruv(pr.Mu_pos,'moment')+'</td><td>'+_ruv(pr.phi_Mn,'moment')+'</td><td>'+_rv((pr.utilization||0)*100,1)+'%</td><td class="'+(pr.pass!==false?'pass':'fail')+'">'+(pr.pass!==false?'OK':'NG')+'</td></tr>';
+            }
+            h += '</table>';
+            var overallOK = negOK && (pr.pass !== false);
+            h += '<span class="eq" style="font-size:14px">종합: <b class="'+(overallOK?'pass':'fail')+'">'+(overallOK ? 'OK' : 'NG')+'</b></span>';
+        }
+
+        // ── Cold Work of Forming (§A3.3.2) ──
+        if (d.cold_work && d.cold_work.applicable && d.Fy_used !== d.Fy_original) {
+            h += '<h3>§A3.3.2 Cold Work of Forming</h3>';
+            h += '<p>냉간가공에 의한 코너부 항복강도 증가를 고려합니다.</p>';
+            var cw = d.cold_work;
+            h += '<table><tr><th>항목</th><th>값</th></tr>';
+            h += '<tr><td>F<sub>yv</sub> (virgin)</td><td>'+_rv(d.Fy_original)+' ksi</td></tr>';
+            h += '<tr><td>F<sub>ya</sub> (cold work)</td><td>'+_rv(d.Fy_used)+' ksi (+'+cw.increase_pct+'%)</td></tr>';
+            h += '<tr><td>Bc</td><td>'+_rv(cw.Bc,4)+'</td></tr>';
+            h += '<tr><td>m</td><td>'+_rv(cw.m,4)+'</td></tr>';
+            h += '<tr><td>C (코너면적비)</td><td>'+_rv(cw.C,4)+'</td></tr>';
+            h += '<tr><td>R/t</td><td>'+_rv(cw.R_over_t,2)+'</td></tr>';
+            h += '</table>';
+        }
+
+        // ── Lap Splice 접합부 결과 ──
+        if (_lastLapResult && !_lastLapResult.error) {
+            var lr = _lastLapResult;
+            h += '<h3>Lap Splice 접합부 검토 (§I6.2.1, §J3/§J4)</h3>';
+            h += '<p>연속 경간 지점의 Lap 구간에서 패스너 전단 전달과 2겹 부재 휨강도를 검토합니다.</p>';
+
+            h += '<table><tr><th>항목</th><th>값</th><th>판정</th></tr>';
+            // Lap 길이
+            var lapL = lr.lap_left_in || (lr.steps && lr.steps[0] ? lr.steps[0].value : 0);
+            h += '<tr><td>Lap 길이 (§I6.2.1(g))</td><td>' + _ruv(lapL, 'length') + ' ' + _rul('length') + '</td>';
+            h += '<td class="' + (lr.lap_ok ? 'pass' : 'fail') + '">' + (lr.lap_ok ? 'OK' : 'NG') + ' (&ge; 1.5d = ' + _ruv(lr.min_lap, 'length') + ')</td></tr>';
+            // 패스너
+            h += '<tr><td>패스너</td><td>' + (lr.fastener_label || '') + ' &times; ' + lr.n_total + ' ea (' + lr.n_rows + ' rows &times; ' + lr.n_per_row + '/row)</td>';
+            h += '<td>간격 s=' + _ruv(lr.spacing, 'length') + ' ' + _rul('length') + '</td></tr>';
+            // 전단 전달
+            h += '<tr><td>전달 전단력</td><td>' + _ruv(lr.V_transfer, 'force') + ' ' + _rul('force') + '</td><td></td></tr>';
+            h += '<tr><td>패스너 용량</td><td>' + _ruv(lr.capacity, 'force') + ' ' + _rul('force') + '</td>';
+            h += '<td class="' + (lr.utilization <= 1.0 ? 'pass' : 'fail') + '">DCR = ' + _rv(lr.utilization, 3) + (lr.utilization <= 1.0 ? ' OK' : ' NG') + '</td></tr>';
+            // 휨강도
+            if (lr.Mn_lap > 0) {
+                h += '<tr><td>Lap 휨강도 (2겹 §F3)</td><td>' + _ruv(lr.phi_Mn_lap, 'moment') + ' ' + _rul('moment') + '</td>';
+                h += '<td class="' + (lr.flexure_dcr != null && lr.flexure_dcr <= 1.0 ? 'pass' : 'fail') + '">DCR = ' + _rv(lr.flexure_dcr, 3) + (lr.flexure_dcr <= 1.0 ? ' OK' : ' NG') + '</td></tr>';
+            }
+            // 종합
+            h += '<tr style="font-weight:700"><td>Lap 접합부 종합</td><td></td>';
+            h += '<td class="' + (lr.pass ? 'pass' : 'fail') + '">' + (lr.pass ? 'OK' : 'NG') + '</td></tr>';
+            h += '</table>';
         }
         return h;
     }
@@ -4946,8 +5197,28 @@
         h += '<tr><td>지배 파괴 모드</td><td><b>'+(d.controlling_mode||'')+'</b></td></tr>';
 
         if (mt==='flexure') {
-            h += '<tr><td>공칭 모멘트, M<sub>n</sub></td><td>'+_ruv(d.Mn,'moment')+' '+_rul('moment')+'</td></tr>';
-            h += '<tr><td>설계강도, '+(dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'moment')+'</b> '+_rul('moment')+'</td></tr>';
+            var _dsLbl = dm==='LRFD'?'&phi;M<sub>n</sub>':'M<sub>n</sub>/&Omega;';
+            // 부모멘트 구간
+            if (d.positive_region) {
+                h += '<tr><td colspan="2" style="font-weight:700;background:rgba(255,152,0,0.08);border-left:3px solid #ff9800">부모멘트 구간 (-M)</td></tr>';
+            }
+            h += '<tr><td>M<sub>n</sub>(-)</td><td>'+_ruv(d.Mn,'moment')+' '+_rul('moment')+' <span style="color:var(--vscode-descriptionForeground)">'+(d.controlling_mode||'')+'</span></td></tr>';
+            h += '<tr><td>'+_dsLbl+'(-)</td><td><b>'+_ruv(d.design_strength,'moment')+'</b> '+_rul('moment')+'</td></tr>';
+            if (d.utilization != null) {
+                var _negPct = (d.utilization*100).toFixed(1);
+                h += '<tr><td>DCR(-)</td><td class="'+(d.utilization<=1.0?'pass':'fail')+'"><b>'+_negPct+'% — '+(d.utilization<=1.0?'OK':'NG')+'</b></td></tr>';
+            }
+            // 정모멘트 구간
+            if (d.positive_region) {
+                var _pr2 = d.positive_region;
+                h += '<tr><td colspan="2" style="font-weight:700;background:rgba(76,175,80,0.08);border-left:3px solid #4caf50">정모멘트 구간 (+M)</td></tr>';
+                h += '<tr><td>M<sub>n</sub>(+)</td><td>'+_ruv(_pr2.Mn,'moment')+' '+_rul('moment')+'</td></tr>';
+                h += '<tr><td>'+_dsLbl+'(+)</td><td><b>'+_ruv(_pr2.phi_Mn,'moment')+'</b> '+_rul('moment')+'</td></tr>';
+                if (_pr2.utilization != null) {
+                    var _posPct = (_pr2.utilization*100).toFixed(1);
+                    h += '<tr><td>DCR(+)</td><td class="'+(_pr2.pass!==false?'pass':'fail')+'"><b>'+_posPct+'% — '+(_pr2.pass!==false?'OK':'NG')+'</b></td></tr>';
+                }
+            }
         } else if (mt==='compression') {
             h += '<tr><td>공칭강도, P<sub>n</sub></td><td>'+_ruv(d.Pn,'force')+' '+_rul('force')+'</td></tr>';
             h += '<tr><td>설계강도, '+(dm==='LRFD'?'&phi;P<sub>n</sub>':'P<sub>n</sub>/&Omega;')+'</td><td><b>'+_ruv(d.design_strength,'force')+'</b> '+_rul('force')+'</td></tr>';
@@ -4955,8 +5226,13 @@
             h += '<tr><td>설계강도</td><td><b>'+_rv(d.design_strength)+'</b></td></tr>';
         }
 
-        if (d.utilization != null) {
-            const pct = (d.utilization*100).toFixed(1);
+        if (mt === 'flexure' && d.positive_region) {
+            // 종합 판정 (정+부 모두 반영)
+            var _allOK = (d.utilization == null || d.utilization <= 1.0) && (d.positive_region.pass !== false);
+            h += '<tr><td colspan="2" style="font-weight:700;background:rgba(33,150,243,0.08);border-left:3px solid #2196f3">종합 판정</td></tr>';
+            h += '<tr><td>종합 결과</td><td class="'+(_allOK?'pass':'fail')+'" style="font-size:14px"><b>'+(_allOK?'OK':'NG')+'</b></td></tr>';
+        } else if (d.utilization != null) {
+            var pct = (d.utilization*100).toFixed(1);
             h += '<tr><td>소요/저항 비율 (DCR)</td><td class="'+(d.pass?'pass':'fail')+'" style="font-size:14px"><b>'+pct+'% — '+(d.pass?'OK':'NG')+'</b></td></tr>';
         }
         if (d.interaction) {
@@ -5388,6 +5664,59 @@
             }
         }
 
+        // ── 정모멘트 구간 Lb/Cb 검증 ──
+        if (la && la.auto_params && la.auto_params.positive_region) {
+            var posR = la.auto_params.positive_region;
+            if (!posR.braced) {
+                checks.push({
+                    category: catF, item: '비지지 길이 Ly(+) (정모멘트)',
+                    status: posR.Ly_in > 0 ? 'pass' : 'warn',
+                    value: _ruv(posR.Ly_in, 'length') + ' ' + _rul('length'),
+                    criterion: '데크 미구속 시 정모멘트 구간 Ly > 0 (변곡점 간 거리)',
+                    note: '데크 없음 — 상부 플랜지가 비지지. Ly(+)를 확인하세요.',
+                });
+                checks.push({
+                    category: catF, item: '모멘트 구배 Cb(+)',
+                    status: posR.Cb >= 1.0 ? 'pass' : 'warn',
+                    value: posR.Cb,
+                    criterion: 'Cb ≥ 1.0 (AISI Eq. F2.1.1-2)',
+                    note: '',
+                });
+            } else {
+                checks.push({
+                    category: catF, item: '정모멘트 구간 구속',
+                    status: 'pass',
+                    value: '데크 연속 지지 (Ly=0)',
+                    criterion: 'Through-fastened/Standing-seam 데크 시 LTB 불필요',
+                    note: '',
+                });
+            }
+        }
+
+        // ── Lap 끝단 Mu 분리 검증 ──
+        if (la && la.laps_per_support) {
+            var _hasLaps2 = la.laps_per_support.some(function(lp) {
+                return lp && ((lp.left_ft || 0) > 0 || (lp.right_ft || 0) > 0);
+            });
+            if (_hasLaps2) {
+                var govLocs2 = (la.governing || la.gravity || {}).locations || [];
+                var lapEndMu = govLocs2.filter(function(l) { return (l.name||'').startsWith('Lap end') && l.Mu != null; });
+                var supMu = govLocs2.filter(function(l) { return l.Mu != null && l.Mu < 0 && !(l.name||'').startsWith('Lap end'); });
+                var hasLapEnd = lapEndMu.length > 0;
+                checks.push({
+                    category: catF, item: 'Lap 끝단 Mu 추출',
+                    status: hasLapEnd ? 'pass' : 'warn',
+                    value: hasLapEnd
+                        ? 'Lap end Mu=' + _ruv(Math.max(...lapEndMu.map(function(l){return Math.abs(l.Mu);})), 'moment_ft') + ' ' + _rul('moment_ft')
+                        : '미추출',
+                    criterion: 'Lap이 있으면 단일 단면 검토용 Mu는 Lap 끝단 부모멘트 사용 (AISI Ex. II-2A)',
+                    note: hasLapEnd
+                        ? '지점 최대 Mu=' + _ruv(supMu.length > 0 ? Math.max(...supMu.map(function(l){return Math.abs(l.Mu);})) : 0, 'moment_ft') + ' ' + _rul('moment_ft') + ' (Lap 2겹 검토용)'
+                        : 'Lap end 위치가 모멘트도에서 추출되지 않았습니다.',
+                });
+            }
+        }
+
         // ── 처짐 검증 (IBC Table 1604.3) ──
         if (la && la.deflection && la.deflection.valid !== false && la.deflection.per_span) {
             // 부재 유형별 한계 처짐비
@@ -5576,6 +5905,27 @@
                     criterion: '네 값 모두 같으면 DSM이 좌굴 감소를 적용하지 않을 수 있음',
                     note: allSameNote,
                 });
+
+                // 정모멘트 구간 결과 검증
+                if (d.positive_region) {
+                    var prV = d.positive_region;
+                    checks.push({
+                        category: catG, item: '정모멘트 φMn(+)',
+                        status: prV.phi_Mn > 0 ? 'pass' : 'warn',
+                        value: _ruv(prV.phi_Mn, 'moment') + ' ' + _rul('moment') + ' (Lb=' + _ruv(prV.Lb, 'length') + ', Cb=' + prV.Cb + ')',
+                        criterion: '정모멘트 구간 설계강도 > 0',
+                        note: prV.Mn < d.Mn ? '정모멘트 구간 Mn(' + _rv(prV.Mn) + ') < 부모멘트 Mn(' + _rv(d.Mn) + ') — 정모멘트가 지배할 수 있음' : '',
+                    });
+                    if (prV.Fcre < 2.78 * (d.Fy_used || 35.53)) {
+                        checks.push({
+                            category: catG, item: '정모멘트 LTB',
+                            status: 'warn',
+                            value: 'Fcre(+)=' + prV.Fcre + ' ksi < 2.78Fy=' + _rv(2.78 * (d.Fy_used || 35.53)) + ' ksi',
+                            criterion: '정모멘트 구간에서 LTB 발생 — Lb를 줄이거나 가새를 추가하세요',
+                            note: '데크 없이 긴 비지지 길이에서 LTB가 휨강도를 크게 감소시킵니다.',
+                        });
+                    }
+                }
             }
 
             if (d.member_type === 'compression') {
@@ -5665,6 +6015,88 @@
                     criterion: 'DSM 값이 올바르게 추출되어야 함',
                     note: '',
                 });
+            }
+        }
+
+        // ════════════════════════════════════════
+        // G2. Lap 접합부 (연속 경간)
+        // ════════════════════════════════════════
+        if (la && la.laps_per_support) {
+            var _hasLaps3 = la.laps_per_support.some(function(lp) {
+                return lp && ((lp.left_ft || 0) > 0 || (lp.right_ft || 0) > 0);
+            });
+            if (_hasLaps3 && d && d.member_type === 'flexure') {
+                var catG2 = 'G2. Lap 접합부';
+
+                // Lap 구간 휨강도 (2겹 합산)
+                var lapDesign = d.design_lap || null;
+                if (lapDesign) {
+                    checks.push({
+                        category: catG2, item: 'Lap 구간 휨강도 (§F3, 2겹)',
+                        status: lapDesign.pass != null ? (lapDesign.pass ? 'pass' : 'fail') : 'warn',
+                        value: lapDesign.phi_Mn ? (_ruv(lapDesign.phi_Mn, 'moment') + ' ' + _rul('moment') + ' (' + lapDesign.n_members + '겹)') : '미계산',
+                        criterion: '2겹 합산 φMn ≥ 지점 Mu (AISI Ex. II-2A)',
+                        note: lapDesign.utilization != null ? 'DCR=' + lapDesign.utilization.toFixed(3) : '',
+                    });
+                }
+
+                // Lap 길이 ≥ 1.5d
+                la.laps_per_support.forEach(function(lp, idx) {
+                    if (!lp || ((lp.left_ft || 0) <= 0 && (lp.right_ft || 0) <= 0)) return;
+                    var lapIn = Math.min(lp.left_ft || 999, lp.right_ft || 999) * 12;
+                    var Hval = fromDisplay(getNum('tpl-H', 0), 'length');
+                    var minLap = 1.5 * Hval;
+                    var lapOK = lapIn >= minLap;
+                    checks.push({
+                        category: catG2, item: 'Lap 길이 (지점 ' + (idx + 1) + ') §I6.2.1(g)',
+                        status: lapOK ? 'pass' : 'fail',
+                        value: _ruv(lapIn, 'length') + ' ' + _rul('length') + (lapOK ? ' ≥ ' : ' < ') + '1.5d=' + _ruv(minLap, 'length'),
+                        criterion: 'Lap ≥ 1.5d (§I6.2.1(g))',
+                        note: !lapOK ? 'Lap 길이 부족 — 최소 ' + _ruv(minLap, 'length') + ' ' + _rul('length') + ' 필요' : '',
+                    });
+                });
+
+                // 접합부 패스너 설계 실행 여부 + 결과
+                if (_lastLapResult && !_lastLapResult.error) {
+                    var _lr = _lastLapResult;
+                    // 패스너 전단 DCR
+                    checks.push({
+                        category: catG2, item: 'Lap 패스너 전단 (DCR)',
+                        status: _lr.utilization != null ? (_lr.utilization <= 1.0 ? 'pass' : 'fail') : 'warn',
+                        value: _lr.utilization != null
+                            ? 'DCR=' + _lr.utilization.toFixed(3) + ' (V=' + _ruv(_lr.V_transfer, 'force') + ' / Cap=' + _ruv(_lr.capacity, 'force') + ' ' + _rul('force') + ')'
+                            : '미계산',
+                        criterion: '패스너 전단 DCR ≤ 1.0',
+                        note: _lr.utilization > 1.0 ? '패스너 용량 부족 — 패스너 수 또는 사양을 변경하세요.' : '',
+                    });
+                    // Lap 휨강도 DCR
+                    if (_lr.flexure_dcr != null) {
+                        checks.push({
+                            category: catG2, item: 'Lap 휨강도 DCR (2겹 §F3)',
+                            status: _lr.flexure_dcr <= 1.0 ? 'pass' : 'fail',
+                            value: 'DCR=' + _lr.flexure_dcr.toFixed(3) + ' (φMn=' + _ruv(_lr.phi_Mn_lap, 'moment') + ' ' + _rul('moment') + ')',
+                            criterion: '2겹 합산 휨강도 DCR ≤ 1.0',
+                            note: _lr.flexure_dcr > 1.0 ? 'Lap 구간 휨강도 부족 — 단면을 키우거나 Fy를 높이세요.' : '',
+                        });
+                    }
+                    // 종합
+                    checks.push({
+                        category: catG2, item: 'Lap 접합부 종합 판정',
+                        status: _lr.pass ? 'pass' : 'fail',
+                        value: _lr.pass ? 'OK' : 'NG',
+                        criterion: 'Lap 길이 + 패스너 전단 + 휨강도 모두 OK',
+                        note: !_lr.pass ? '접합부 탭에서 상세 결과를 확인하세요.' : '',
+                    });
+                } else {
+                    // Lap 접합부 설계 미실행
+                    checks.push({
+                        category: catG2, item: 'Lap 접합부 설계 실행 여부',
+                        status: 'fail',
+                        value: '미실행',
+                        criterion: 'Lap이 있으면 접합부 설계를 실행하여 패스너/휨강도를 검증해야 함',
+                        note: '접합부 탭 → "Lap 접합부 설계" 버튼을 클릭하세요. 하중분석 후 Mu/Vu가 자동 입력됩니다.',
+                    });
+                }
             }
         }
 

@@ -2299,8 +2299,12 @@ export class StcfsdPanel implements McpPanelInterface {
                     <input type="number" id="design-V" value="0" step="0.1" style="width:65px">
                 </div>
                 <div class="input-row">
-                    <label>Mx<span class="hint-inline" data-unit="moment">kip-in</span></label>
-                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px">
+                    <label>Mu(+)<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <input type="number" id="design-Mx-pos" value="0" step="0.1" style="width:65px" title="정모멘트 소요강도">
+                    <label>Mu(-)<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px" title="부모멘트 소요강도">
+                </div>
+                <div class="input-row">
                     <label>My<span class="hint-inline" data-unit="moment">kip-in</span></label>
                     <input type="number" id="design-My" value="0" step="0.1" style="width:65px">
                 </div>
