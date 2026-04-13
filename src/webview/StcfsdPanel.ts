@@ -7,6 +7,9 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
+import * as cp from 'child_process';
+import * as fs from 'fs';
 import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
 import { McpBridgeServer, McpPanelInterface } from '../mcp/bridge';
@@ -257,6 +260,10 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'openProject':
                 await this._openProject();
+                break;
+
+            case 'saveReportPdf':
+                await this._saveReportPdf(message.data);
                 break;
 
             case 'generateTemplate':
@@ -1763,6 +1770,123 @@ export class StcfsdPanel implements McpPanelInterface {
         }
     }
 
+    /** 보고서 PDF 저장 (Edge/Chrome headless --print-to-pdf) */
+    private async _saveReportPdf(data: { html: string }): Promise<void> {
+        try {
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file('CUFSM_Report.pdf'),
+                filters: { 'PDF Files': ['pdf'], 'HTML Files': ['html'] },
+                title: '보고서 PDF 저장',
+            });
+            if (!uri) return;
+
+            // HTML로 저장 선택 시 기존 방식
+            if (uri.fsPath.endsWith('.html')) {
+                const encoder = new TextEncoder();
+                await vscode.workspace.fs.writeFile(uri, encoder.encode(data.html));
+                vscode.window.showInformationMessage(`보고서가 저장되었습니다: ${uri.fsPath}`);
+                return;
+            }
+
+            // PDF: 임시 HTML 파일 생성 → headless 브라우저로 변환
+            const tmpHtml = path.join(os.tmpdir(), `cufsm_report_${Date.now()}.html`);
+            fs.writeFileSync(tmpHtml, data.html, 'utf-8');
+
+            const browserPath = this._findBrowser();
+            if (!browserPath) {
+                // 브라우저 없으면 HTML 폴백
+                fs.unlinkSync(tmpHtml);
+                const htmlPath = uri.fsPath.replace(/\.pdf$/i, '.html');
+                fs.writeFileSync(htmlPath, data.html, 'utf-8');
+                vscode.window.showWarningMessage(
+                    `Edge/Chrome을 찾을 수 없어 HTML로 저장했습니다: ${htmlPath}`
+                );
+                return;
+            }
+
+            // 임시 사용자 데이터 디렉터리 (실행 중인 Edge와 프로필 충돌 방지)
+            const tmpUserData = path.join(os.tmpdir(), `cufsm_pdf_${Date.now()}`);
+            fs.mkdirSync(tmpUserData, { recursive: true });
+
+            const fileUrl = 'file:///' + tmpHtml.split(path.sep).join('/');
+            const pdfPath = uri.fsPath;
+
+            // spawn 사용 (execFile/spawnSync는 Windows에서 PDF flush 문제 발생)
+            await new Promise<void>((resolve, reject) => {
+                const proc = cp.spawn(browserPath, [
+                    '--headless=new',
+                    '--disable-gpu',
+                    '--no-sandbox',
+                    '--no-pdf-header-footer',
+                    '--user-data-dir=' + tmpUserData,
+                    '--print-to-pdf=' + pdfPath,
+                    fileUrl,
+                ], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'] });
+
+                proc.on('error', (err) => {
+                    this._cleanupTempFiles(tmpHtml, tmpUserData);
+                    reject(err);
+                });
+
+                proc.on('close', (code) => {
+                    // Edge가 종료 후에도 PDF가 디스크에 flush되는 데 시간이 걸림
+                    const checkPdf = (retries: number) => {
+                        try {
+                            const stat = fs.statSync(pdfPath);
+                            if (stat.size > 0) {
+                                this._cleanupTempFiles(tmpHtml, tmpUserData);
+                                resolve();
+                                return;
+                            }
+                        } catch { /* not yet */ }
+                        if (retries > 0) {
+                            setTimeout(() => checkPdf(retries - 1), 500);
+                        } else {
+                            this._cleanupTempFiles(tmpHtml, tmpUserData);
+                            reject(new Error('PDF 파일이 생성되지 않았습니다 (Edge headless 실패)'));
+                        }
+                    };
+                    // 500ms 간격으로 최대 10회 (5초) 대기
+                    setTimeout(() => checkPdf(10), 500);
+                });
+            });
+
+            vscode.window.showInformationMessage(`PDF가 저장되었습니다: ${uri.fsPath}`);
+        } catch (err: any) {
+            vscode.window.showErrorMessage(`PDF 저장 실패: ${err.message}`);
+        }
+    }
+
+    private _cleanupTempFiles(tmpHtml: string, tmpUserData: string): void {
+        try { fs.unlinkSync(tmpHtml); } catch { /* ignore */ }
+        try { fs.rmSync(tmpUserData, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+
+    /** 시스템에 설치된 Edge 또는 Chrome 경로 탐색 */
+    private _findBrowser(): string | null {
+        const candidates = process.platform === 'win32'
+            ? [
+                path.join(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+                path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+                path.join(process.env['PROGRAMFILES'] || 'C:\\Program Files', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+            ]
+            : process.platform === 'darwin'
+            ? [
+                '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            ]
+            : ['/usr/bin/microsoft-edge', '/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium'];
+
+        for (const p of candidates) {
+            try {
+                fs.accessSync(p, fs.constants.X_OK);
+                return p;
+            } catch { /* not found, try next */ }
+        }
+        return null;
+    }
+
     /** cFSM 모드 분류 */
     private async _classifyModes(data: any): Promise<void> {
         try {
@@ -1891,11 +2015,11 @@ export class StcfsdPanel implements McpPanelInterface {
                             <button id="btn-generate-template" class="btn-action-green" style="padding:4px 12px">Generate</button>
                         </div>
                         <div id="template-params" class="input-row" style="margin-top:4px; flex-wrap:wrap;">
-                            <label>H<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-H" value="3.937" step="0.5" style="width:60px">
-                            <label>B<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-B" value="1.969" step="0.5" style="width:60px">
-                            <label>D<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="tpl-D" value="0.787" step="0.1" style="width:60px">
-                            <label>t<span class="hint-inline" data-unit="thickness">in</span></label><input type="number" id="tpl-t" value="0.0906" step="0.01" style="width:60px">
-                            <label>r<span class="hint-inline" data-unit="radius">in</span></label><input type="number" id="tpl-r" value="0.157" step="0.1" style="width:60px">
+                            <label>H<span class="hint-inline" data-unit="length">mm</span></label><input type="number" id="tpl-H" value="100" step="1" style="width:60px">
+                            <label>B<span class="hint-inline" data-unit="length">mm</span></label><input type="number" id="tpl-B" value="50" step="1" style="width:60px">
+                            <label>D<span class="hint-inline" data-unit="length">mm</span></label><input type="number" id="tpl-D" value="20" step="1" style="width:60px">
+                            <label>t<span class="hint-inline" data-unit="thickness">mm</span></label><input type="number" id="tpl-t" value="2.3" step="0.1" style="width:60px">
+                            <label>r<span class="hint-inline" data-unit="radius">mm</span></label><input type="number" id="tpl-r" value="2.3" step="0.5" style="width:60px">
                             <span id="tpl-qlip-group" style="display:none">
                                 <label>lip°<span class="hint-inline">립각도</span></label><input type="number" id="tpl-qlip" value="90" step="5" min="0" max="180" style="width:68px">
                             </span>
@@ -1918,13 +2042,17 @@ export class StcfsdPanel implements McpPanelInterface {
                             </select>
                         </div>
                         <div class="input-row">
-                            <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-fy" value="35.53" step="1" style="width:60px">
-                            <label>Fu<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-fu" value="58.02" step="1" style="width:60px">
+                            <label>Fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-fy" value="245" step="5" style="width:60px">
+                            <label>Fu<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-fu" value="400" step="5" style="width:60px">
                         </div>
                         <div class="input-row">
-                            <label>E<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-E" value="29733" step="100">
+                            <label>E<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-E" value="205000" step="1000">
                             <label>v</label><input type="number" id="input-v" value="0.3" step="0.01">
-                            <label>G<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="input-G" value="11436" step="100">
+                            <label>G<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-G" value="78846" step="1000">
+                        </div>
+                        <div class="input-row" style="margin-top:6px">
+                            <label><input type="checkbox" id="chk-cold-work" checked> §A3.3.2 Cold Work (냉간가공 Fya)</label>
+                            <span class="hint-inline">(코너부 강도 증가)</span>
                         </div>
                     </div>
                     <div class="section-group">
@@ -1976,15 +2104,15 @@ export class StcfsdPanel implements McpPanelInterface {
                         <option value="bending_zz_neg">약축 휨 -Mzz (x- 압축)</option>
                         <option value="custom">조합 (P + Mxx + Mzz)</option>
                     </select>
-                    <span class="hint" style="margin-left:8px" id="analysis-fy-display">Fy: 35.53 ksi</span>
+                    <span class="hint" style="margin-left:8px" id="analysis-fy-display">Fy: 245 MPa</span>
                 </div>
                 <div id="custom-load-inputs" class="input-row" style="display:none; margin-top:4px;">
-                    <label>P<span class="hint-inline" data-unit="force">kips</span></label>
+                    <label>P<span class="hint-inline" data-unit="force">kN</span></label>
                     <input type="number" id="input-load-P" value="0" step="1" style="width:70px">
-                    <label>Mxx<span class="hint-inline" data-unit="moment">kip-in</span></label>
-                    <input type="number" id="input-load-Mxx" value="0" step="10" style="width:70px">
-                    <label>Mzz<span class="hint-inline" data-unit="moment">kip-in</span></label>
-                    <input type="number" id="input-load-Mzz" value="0" step="10" style="width:70px">
+                    <label>Mxx<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="input-load-Mxx" value="0" step="1" style="width:70px">
+                    <label>Mzz<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="input-load-Mzz" value="0" step="1" style="width:70px">
                 </div>
             </div>
             <div class="section-group">
@@ -2005,8 +2133,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 <p class="hint" style="margin-top:2px"><b>최댓값</b>: 전체좌굴(LTB, 유연좌굴)을 포착하기 위한 상한. <b>부재의 비지지 길이 이상</b>으로 설정해야 합니다. 예: 지점간격 5m → 최대 ≥ 5000mm (5m). 일반적으로 비지지 길이의 1.5~3배를 권장합니다.</p>
                 <p class="hint" style="margin-top:2px"><b>개수</b>: 곡선의 해상도. 50점이면 대부분 충분하며, 복잡한 단면은 80~100점 권장.</p>
                 <div class="input-row">
-                    <label>최소<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="input-len-min" value="0.394" step="1">
-                    <label>최대<span class="hint-inline" data-unit="length">in</span></label><input type="number" id="input-len-max" value="393.7" step="100">
+                    <label>최소<span class="hint-inline" data-unit="length">mm</span></label><input type="number" id="input-len-min" value="10" step="10">
+                    <label>최대<span class="hint-inline" data-unit="length">mm</span></label><input type="number" id="input-len-max" value="10000" step="1000">
                     <label>개수</label><input type="number" id="input-len-n" value="60" step="10">
                 </div>
             </div>
@@ -2019,7 +2147,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 <label>cFSM 모드 분류</label>
                 <p class="hint">구속 유한스트립법(cFSM)으로 각 좌굴 모드의 G(전체)/D(뒤틀림)/L(국부)/O(기타) 구성 비율을 계산합니다.</p>
                 <div class="input-row">
-                    <label><input type="checkbox" id="chk-cfsm-enable"> 활성화</label>
+                    <label><input type="checkbox" id="chk-cfsm-enable" checked> 활성화</label>
                     <label><input type="checkbox" id="chk-cfsm-G" checked> Global</label>
                     <label><input type="checkbox" id="chk-cfsm-D" checked> Distortional</label>
                     <label><input type="checkbox" id="chk-cfsm-L" checked> Local</label>
@@ -2068,7 +2196,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     <h3>Plastic Interaction Surface</h3>
                     <p class="hint">주축(principal axis) 좌표계 기준 P-M 소성 상호작용 다이어그램. 항복값으로 정규화된 축력-모멘트 조합을 표시합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
-                        <label>fy<span class="hint-inline" data-unit="stress">ksi</span></label><input type="number" id="plastic-fy" value="35.53" step="5" style="width:60px">
+                        <label>fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="plastic-fy" value="245" step="5" style="width:60px">
                         <button id="btn-run-plastic" class="btn-small">곡면 생성</button>
                     </div>
                     <canvas id="plastic-surface-canvas" width="700" height="420"></canvas>
@@ -2106,10 +2234,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 <h3 class="collapsible" id="sec-material" data-expanded="true"><span class="collapse-icon">▾</span> Material <span class="hint-inline" style="font-weight:normal">(전처리 탭에서 설정)</span></h3>
                 <div id="sec-material-body">
                 <div class="input-row">
-                    <label>Fy<span class="hint-inline" data-unit="stress">ksi</span></label>
-                    <input type="number" id="design-fy" value="35.53" style="width:68px" readonly tabindex="-1" class="input-readonly">
-                    <label>Fu<span class="hint-inline" data-unit="stress">ksi</span></label>
-                    <input type="number" id="design-fu" value="58.02" style="width:68px" readonly tabindex="-1" class="input-readonly">
+                    <label>Fy<span class="hint-inline" data-unit="stress">MPa</span></label>
+                    <input type="number" id="design-fy" value="245" style="width:68px" readonly tabindex="-1" class="input-readonly">
+                    <label>Fu<span class="hint-inline" data-unit="stress">MPa</span></label>
+                    <input type="number" id="design-fu" value="400" style="width:68px" readonly tabindex="-1" class="input-readonly">
                 </div>
                 </div>
 
@@ -2158,8 +2286,8 @@ export class StcfsdPanel implements McpPanelInterface {
                             <option value="cont-n">N경간 연속보</option>
                         </select>
                         <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:55px;display:none" title="경간 수">
-                        <label>간격<span class="hint-inline" data-unit="length_ft">ft</span></label>
-                        <input type="number" id="config-spacing" value="3.281" step="0.5" style="width:68px">
+                        <label>간격<span class="hint-inline" data-unit="length_ft">m</span></label>
+                        <input type="number" id="config-spacing" value="1.0" step="0.1" style="width:68px">
                     </div>
 
                     <!-- 스팬/지점/랩 테이블 -->
@@ -2169,9 +2297,9 @@ export class StcfsdPanel implements McpPanelInterface {
                                 <tr style="background:var(--vscode-editor-selectionBackground)">
                                     <th style="padding:3px 4px;width:32px">#</th>
                                     <th style="padding:3px 4px;width:60px">지점</th>
-                                    <th style="padding:3px 4px;width:70px">스팬(<span data-unit="length_ft">ft</span>)</th>
-                                    <th style="padding:3px 4px;width:60px">랩L(<span data-unit="length_ft">ft</span>)</th>
-                                    <th style="padding:3px 4px;width:60px">랩R(<span data-unit="length_ft">ft</span>)</th>
+                                    <th style="padding:3px 4px;width:70px">스팬(<span data-unit="length_ft">m</span>)</th>
+                                    <th style="padding:3px 4px;width:60px">랩L(<span data-unit="length_ft">m</span>)</th>
+                                    <th style="padding:3px 4px;width:60px">랩R(<span data-unit="length_ft">m</span>)</th>
                                 </tr>
                             </thead>
                             <tbody id="span-config-tbody">
@@ -2185,50 +2313,50 @@ export class StcfsdPanel implements McpPanelInterface {
                 <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 사용 하중</h3>
                 <div>
                     <div class="input-row">
-                        <label>D<span class="hint-inline" data-unit="pressure">psf</span></label>
-                        <input type="number" id="load-D-psf" value="6.265" step="0.5" style="width:50px">
+                        <label>D<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-D-psf" value="0.3" step="0.05" style="width:50px">
                         <span id="load-D-plf" class="hint-inline" style="min-width:50px">→15 PLF</span>
                     </div>
                     <div class="input-row" id="load-Lr-row">
-                        <label>Lr<span class="hint-inline" data-unit="pressure">psf</span></label>
-                        <input type="number" id="load-Lr-psf" value="20.885" step="1" style="width:50px">
+                        <label>Lr<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-Lr-psf" value="1.0" step="0.1" style="width:50px">
                         <span id="load-Lr-plf" class="hint-inline" style="min-width:50px">→100 PLF</span>
                     </div>
                     <div class="input-row" id="load-S-row">
-                        <label>S<span class="hint-inline" data-unit="pressure">psf</span></label>
-                        <input type="number" id="load-S-psf" value="10.443" step="1" style="width:50px">
+                        <label>S<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-S-psf" value="0.5" step="0.1" style="width:50px">
                         <span id="load-S-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                     <div class="input-row" id="load-W-row">
-                        <label>Wu<span class="hint-inline" data-unit="pressure">psf</span>↑</label>
-                        <input type="number" id="load-Wu-psf" value="20.885" step="1" style="width:50px">
+                        <label>Wu<span class="hint-inline" data-unit="pressure">kPa</span>↑</label>
+                        <input type="number" id="load-Wu-psf" value="1.0" step="0.1" style="width:50px">
                         <span id="load-Wu-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                     <div class="input-row" id="load-L-row" style="display:none">
-                        <label>L<span class="hint-inline" data-unit="pressure">psf</span></label>
-                        <input type="number" id="load-L-psf" value="0" step="1" style="width:50px">
+                        <label>L<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-L-psf" value="0" step="0.1" style="width:50px">
                         <span id="load-L-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                 </div>
 
-                <h3 class="collapsible" data-expanded="false"><span class="collapse-icon">▸</span> 데크 & 가새</h3>
-                <div style="display:none">
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 데크 & 가새</h3>
+                <div>
                     <div class="input-row">
                         <label>데크</label>
                         <select id="select-deck-type" style="width:140px">
                             <option value="through-fastened">관통 체결</option>
                             <option value="standing-seam">스탠딩 심</option>
-                            <option value="none">없음</option>
+                            <option value="none" selected>없음</option>
                         </select>
                     </div>
                     <div class="input-row" id="deck-detail-row">
-                        <label>t<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="deck-t-panel" value="0.0197" step="0.001" style="width:68px">
-                        <label>@<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="deck-fastener-spacing" value="11.81" step="1" style="width:55px">
+                        <label>t<span class="hint-inline" data-unit="thickness">mm</span></label>
+                        <input type="number" id="deck-t-panel" value="0.5" step="0.1" style="width:68px">
+                        <label>@<span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="deck-fastener-spacing" value="300" step="10" style="width:55px">
                     </div>
                     <div class="input-row" id="deck-kphi-row">
-                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">kip-in/rad/in</span></label>
+                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">kN-m/rad/m</span></label>
                         <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
                     </div>
                 </div>
@@ -2238,14 +2366,14 @@ export class StcfsdPanel implements McpPanelInterface {
 
                 <h3 id="design-lengths-title">비지지 길이</h3>
                 <div class="input-row" id="design-KxLx-row">
-                    <label>KxLx<span class="hint-inline" data-unit="length">in</span></label>
-                    <input type="number" id="design-KxLx" value="118.11" step="1" style="width:65px">
-                    <label>KyLy<span class="hint-inline" data-unit="length">in</span></label>
-                    <input type="number" id="design-KyLy" value="118.11" step="1" style="width:65px">
+                    <label>KxLx<span class="hint-inline" data-unit="length">mm</span></label>
+                    <input type="number" id="design-KxLx" value="3000" step="100" style="width:65px">
+                    <label>KyLy<span class="hint-inline" data-unit="length">mm</span></label>
+                    <input type="number" id="design-KyLy" value="3000" step="100" style="width:65px">
                 </div>
                 <div class="input-row" id="design-KtLt-row">
-                    <label>KtLt<span class="hint-inline" data-unit="length">in</span></label>
-                    <input type="number" id="design-KtLt" value="118.11" step="1" style="width:65px">
+                    <label>KtLt<span class="hint-inline" data-unit="length">mm</span></label>
+                    <input type="number" id="design-KtLt" value="3000" step="100" style="width:65px">
                 </div>
                 <p class="hint" style="margin:6px 0 2px;font-weight:600">정모멘트 구간 (+M)</p>
                 <div class="input-row" id="design-Cb-pos-row">
@@ -2254,8 +2382,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     <span id="design-Cb-pos-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
                 </div>
                 <div class="input-row" id="design-Lb-pos-row">
-                    <label>Lb(+)<span class="hint-inline" data-unit="length">in</span></label>
-                    <input type="number" id="design-Lb-pos" value="0" step="1" style="width:65px">
+                    <label>Lb(+)<span class="hint-inline" data-unit="length">mm</span></label>
+                    <input type="number" id="design-Lb-pos" value="0" step="100" style="width:65px">
                     <span id="design-Lb-pos-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px">데크 구속 시 0</span>
                 </div>
                 <p class="hint" style="margin:6px 0 2px;font-weight:600">부모멘트 구간 (-M)</p>
@@ -2265,22 +2393,22 @@ export class StcfsdPanel implements McpPanelInterface {
                     <span id="design-Cb-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
                 </div>
                 <div class="input-row" id="design-Lb-row">
-                    <label>Lb(-)<span class="hint-inline" data-unit="length">in</span></label>
-                    <input type="number" id="design-Lb" value="118.11" step="1" style="width:65px">
+                    <label>Lb(-)<span class="hint-inline" data-unit="length">mm</span></label>
+                    <input type="number" id="design-Lb" value="3000" step="100" style="width:65px">
                     <span id="design-Lb-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
                 </div>
 
                 <h3 style="margin-top:10px">§2.3.3.3 뒤틀림 모멘트구배 (β)</h3>
                 <p class="hint">부모멘트 구간 등 비균일 모멘트 분포 시 Mcrd를 β배 증가시킵니다. 균일 모멘트는 β=1.0.</p>
                 <div class="input-row" id="design-beta-row">
-                    <label><input type="checkbox" id="chk-beta-dist"> β 보정 적용</label>
+                    <label><input type="checkbox" id="chk-beta-dist" checked> β 보정 적용</label>
                 </div>
-                <div id="design-beta-inputs" style="display:none">
+                <div id="design-beta-inputs">
                     <div class="input-row">
                         <label>M1/M2</label>
                         <input type="number" id="design-dist-M1M2" value="0" step="0.1" style="width:60px" title="양: 역곡률, 음: 단일곡률, 0: 한쪽 0모멘트">
-                        <label>Lm<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="design-dist-Lm" value="0" step="1" style="width:60px" title="뒤틀림좌굴 구속점 간격">
+                        <label>Lm<span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="design-dist-Lm" value="0" step="100" style="width:60px" title="뒤틀림좌굴 구속점 간격">
                     </div>
                     <div id="design-beta-result" style="font-size:11px;color:var(--vscode-descriptionForeground);padding:4px 0"></div>
                 </div>
@@ -2293,23 +2421,23 @@ export class StcfsdPanel implements McpPanelInterface {
 
                 <h3>소요 하중</h3>
                 <div class="input-row">
-                    <label>P<span class="hint-inline" data-unit="force">kips</span></label>
-                    <input type="number" id="design-P" value="0" step="0.1" style="width:65px">
-                    <label>V<span class="hint-inline" data-unit="force">kips</span></label>
-                    <input type="number" id="design-V" value="0" step="0.1" style="width:65px">
+                    <label>P<span class="hint-inline" data-unit="force">kN</span></label>
+                    <input type="number" id="design-P" value="0" step="1" style="width:65px">
+                    <label>V<span class="hint-inline" data-unit="force">kN</span></label>
+                    <input type="number" id="design-V" value="0" step="1" style="width:65px">
                 </div>
                 <div class="input-row">
-                    <label>Mu(+)<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <label>Mu(+)<span class="hint-inline" data-unit="moment">kN-m</span></label>
                     <input type="number" id="design-Mx-pos" value="0" step="0.1" style="width:65px" title="정모멘트 소요강도">
-                    <label>Mu(-)<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <label>Mu(-)<span class="hint-inline" data-unit="moment">kN-m</span></label>
                     <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px" title="부모멘트 소요강도">
                 </div>
                 <div class="input-row">
-                    <label>My<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <label>My<span class="hint-inline" data-unit="moment">kN-m</span></label>
                     <input type="number" id="design-My" value="0" step="0.1" style="width:65px">
                 </div>
                 <div class="input-row">
-                    <label>May<span class="hint-inline" data-unit="moment">kip-in</span></label>
+                    <label>May<span class="hint-inline" data-unit="moment">kN-m</span></label>
                     <input type="number" id="design-May-strength" value="0" step="0.1" style="width:65px">
                     <span class="hint-inline">약축 가용강도 직접 입력</span>
                 </div>
@@ -2317,10 +2445,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 <div id="design-wc-section" style="display:none">
                     <h3>웹 크리플링 (§G5)</h3>
                     <div class="input-row">
-                        <label>N<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="design-wc-N" value="3.504" step="0.1" style="width:68px">
-                        <label>R<span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="design-wc-R" value="0.1875" step="0.01" style="width:65px">
+                        <label>N<span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="design-wc-N" value="89" step="1" style="width:68px">
+                        <label>R<span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="design-wc-R" value="4.8" step="0.1" style="width:65px">
                     </div>
                     <div class="input-row">
                         <label>지점 조건</label>
@@ -2361,14 +2489,14 @@ export class StcfsdPanel implements McpPanelInterface {
                         </select>
                     </div>
                     <div class="input-row">
-                        <label>L<sub>o</sub><span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="design-wc-Lo" value="0" step="0.1" style="width:68px">
-                        <label>e<sub>ITF</sub><span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="design-wc-edge-distance" value="0" step="0.1" style="width:68px">
+                        <label>L<sub>o</sub><span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="design-wc-Lo" value="0" step="1" style="width:68px">
+                        <label>e<sub>ITF</sub><span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="design-wc-edge-distance" value="0" step="1" style="width:68px">
                         <label>n<sub>web</sub></label>
                         <input type="number" id="design-wc-nwebs" value="1" step="1" style="width:65px">
-                        <label>s<sub>f</sub><span class="hint-inline" data-unit="length">in</span></label>
-                        <input type="number" id="design-wc-fastener-spacing" value="0" step="0.1" style="width:65px">
+                        <label>s<sub>f</sub><span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="design-wc-fastener-spacing" value="0" step="1" style="width:65px">
                     </div>
                     <p class="hint" style="font-size:10px;margin-top:4px">
                         Lo ≤ 1.5h 인 EOF C/Z만 G5-2 overhang으로 계산합니다. eITF는 C/Z의 ITF에서 끝단 연장거리(≥1.5h/2.5h) 검증에 사용합니다. hat/multi-web은 per-web 강도를 nweb로 합산합니다.
@@ -2381,9 +2509,8 @@ export class StcfsdPanel implements McpPanelInterface {
                         <label><input type="checkbox" id="chk-inelastic-reserve"> §F2.4.2 Inelastic Reserve</label>
                         <span class="hint-inline">(Mne: My→Mp, deck braced 시)</span>
                     </div>
-                    <div class="input-row" style="margin-top:4px">
-                        <label><input type="checkbox" id="chk-cold-work"> §A3.3.2 Cold Work (냉간가공 Fya)</label>
-                        <span class="hint-inline">(코너부 강도 증가)</span>
+                    <div class="input-row" style="margin-top:4px" id="cold-work-notice">
+                        <span style="font-size:11px;color:var(--vscode-descriptionForeground)">§A3.3.2 Cold Work — <span id="cold-work-status" style="font-weight:600"></span> <span class="hint-inline">(전처리 Material 탭에서 설정)</span></span>
                     </div>
                     <div class="input-row" style="margin-top:4px">
                         <label><input type="checkbox" id="chk-r-factor"> §I6.2.1 R-factor (양력)</label>
@@ -2512,7 +2639,7 @@ export class StcfsdPanel implements McpPanelInterface {
     <div id="tab-report" class="tab-panel">
         <div style="display:flex;gap:8px;margin-bottom:8px">
             <button id="btn-generate-report" class="btn-primary" style="flex:1">상세 보고서 생성</button>
-            <button id="btn-print-report" class="btn-secondary" style="width:100px;display:none">인쇄</button>
+            <button id="btn-print-report" class="btn-secondary" style="width:100px;display:none">PDF 저장</button>
         </div>
         <div id="report-container" style="background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:4px;padding:16px;min-height:200px;max-height:calc(100vh - 100px);overflow-y:auto">
             <p class="hint" style="text-align:center;padding:40px 0">먼저 설계 검토를 실행한 후, "상세 보고서 생성" 버튼을 클릭하여 계산서를 생성하세요.</p>

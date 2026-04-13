@@ -53,6 +53,58 @@
         latStiff: { factor: 4.44822 / (0.0254 * 0.0254), us: 'kip/in/in', si: 'kN/m/m', decimals: {us: 3, si: 1} },
     };
 
+    /** SI 네이티브 기본값 — SI를 원본으로 정의하여 깔끔한 숫자 표시 */
+    const DEFAULTS = {
+        // 템플릿 치수 (mm)
+        'tpl-H': [100, 'length'],
+        'tpl-B': [50, 'length'],
+        'tpl-D': [20, 'length'],
+        'tpl-t': [2.3, 'thickness'],
+        'tpl-r': [2.3, 'radius'],
+        // 재료 물성 (MPa)
+        'input-fy': [245, 'stress'],
+        'input-fu': [400, 'stress'],
+        'input-E': [205000, 'stress'],
+        'input-G': [78846, 'stress'],
+        // 해석 길이 (mm)
+        'input-len-min': [10, 'length'],
+        'input-len-max': [10000, 'length'],
+        // 설계 탭 — 재료
+        'design-fy': [245, 'stress'],
+        'design-fu': [400, 'stress'],
+        // 설계 탭 — 비지지 길이 (mm)
+        'design-KxLx': [3000, 'length'],
+        'design-KyLy': [3000, 'length'],
+        'design-KtLt': [3000, 'length'],
+        'design-Lb': [3000, 'length'],
+        // 설계 탭 — 웹 크리플링
+        'design-wc-N': [89, 'length'],
+        'design-wc-R': [4.8, 'radius'],
+        // 부재 구성
+        'config-spacing': [1.0, 'length_ft'],
+        // 하중 (kPa)
+        'load-D-psf': [0.3, 'pressure'],
+        'load-Lr-psf': [1.0, 'pressure'],
+        'load-S-psf': [0.5, 'pressure'],
+        'load-Wu-psf': [1.0, 'pressure'],
+        // 데크
+        'deck-t-panel': [0.5, 'thickness'],
+        'deck-fastener-spacing': [300, 'length'],
+        // 접합부
+        'conn-lap-left': [305, 'length'],
+        'conn-lap-right': [305, 'length'],
+        'conn-t1': [1.5, 'thickness'],
+        'conn-t2': [1.5, 'thickness'],
+        'conn-d': [4.8, 'length'],
+        'conn-Fy': [245, 'stress'],
+        'conn-Fu': [400, 'stress'],
+        'conn-weld-L': [50, 'length'],
+        'conn-weld-size': [3, 'length'],
+        'conn-Fub': [827, 'stress'],
+        'conn-Fuf': [414, 'stress'],
+        'conn-fastener-dia': [4.8, 'length'],
+    };
+
     /** US 내부값 → 표시값 변환 */
     function toDisplay(usValue, unitType) {
         if (_unitSystem === 'US' || !UNIT[unitType]) return usValue;
@@ -368,9 +420,9 @@
         refreshUnits(oldSys);
     });
 
-    // 기본 SI ���위계 초기화: 입력 필드 값을 SI로 변환
+    // 기본 SI 단위계 초기화: 라벨만 갱신 (HTML 기본값이 이미 SI)
     if (_unitSystem === 'SI') {
-        refreshUnits('US');
+        refreshUnits(null);
     }
 
     // ============================================================
@@ -499,6 +551,9 @@
 
         let content = '';
 
+        // 단면 크기 계산 (스케일 적응형)
+        const span = Math.max(xMax - xMin, zMax - zMin) || 1;
+
         // 요소 (선분)
         if (model.elem) {
             model.elem.forEach(e => {
@@ -508,18 +563,21 @@
                     const n1 = model.node[ni];
                     const n2 = model.node[nj];
                     content += `<line x1="${n1[1]}" y1="${-n1[2]}" x2="${n2[1]}" y2="${-n2[2]}"
-                        stroke="var(--vscode-charts-blue, #4fc3f7)" stroke-width="0.15"
-                        stroke-linecap="round"/>`;
+                        stroke="var(--vscode-charts-blue, #4fc3f7)" stroke-width="${(span * 0.012).toFixed(4)}"
+                        stroke-linecap="round" stroke-linejoin="round"/>`;
                 }
             });
         }
 
         // 절점 (원) — z좌표 반전 (-z)으로 위쪽이 양수
+        const nr = span * 0.006;  // 절점 반지름 (단면 크기의 0.6%)
+        const nfs = span * 0.028; // 절점 번호 폰트 (단면 크기의 2.8%)
+        const noff = span * 0.015; // 텍스트 오프셋
         model.node.forEach((n, i) => {
-            content += `<circle cx="${n[1]}" cy="${-n[2]}" r="0.12"
-                fill="var(--vscode-charts-orange, #ff9800)"/>`;
-            content += `<text x="${n[1] + 0.2}" y="${-n[2] - 0.2}"
-                font-size="0.4" fill="var(--vscode-descriptionForeground)">${i + 1}</text>`;
+            content += `<circle cx="${n[1]}" cy="${-n[2]}" r="${nr.toFixed(4)}"
+                fill="var(--vscode-charts-orange, #ff9800)" stroke="var(--vscode-editor-background, #1e1e1e)" stroke-width="${(nr * 0.5).toFixed(4)}"/>`;
+            content += `<text x="${(n[1] + noff).toFixed(4)}" y="${(-n[2] - noff).toFixed(4)}"
+                font-size="${nfs.toFixed(4)}" fill="var(--vscode-descriptionForeground)" opacity="0.7">${i + 1}</text>`;
         });
 
         svg.innerHTML = content;
@@ -540,28 +598,31 @@
             xMin = Math.min(xMin, n[1]); xMax = Math.max(xMax, n[1]);
             zMin = Math.min(zMin, n[2]); zMax = Math.max(zMax, n[2]);
         });
-        const axLen = Math.max(xMax - xMin, zMax - zMin) * 0.35;
+        const span = Math.max(xMax - xMin, zMax - zMin) || 1;
+        const axLen = span * 0.35;
+        const sw = span * 0.005;   // 축 선 두께 (단면 비례)
+        const dash = (span * 0.03).toFixed(3) + ',' + (span * 0.02).toFixed(3);
         const arrSz = axLen * 0.08; // 화살표 크기
-        const fs = axLen * 0.12; // 폰트 크기
+        const fs = axLen * 0.10;   // 폰트 크기
 
         let axes = '';
 
         // --- 기하축 (x, z) 점선 ---
         // x축 (가로)
         const x1 = xcg - axLen; const x2 = xcg + axLen;
-        axes += '<line x1="' + x1 + '" y1="' + zcg + '" x2="' + x2 + '" y2="' + zcg + '" stroke="#4fc3f7" stroke-width="0.06" stroke-dasharray="0.15,0.1" opacity="0.7"/>';
+        axes += '<line x1="' + x1 + '" y1="' + zcg + '" x2="' + x2 + '" y2="' + zcg + '" stroke="#4fc3f7" stroke-width="' + sw + '" stroke-dasharray="' + dash + '" opacity="0.6"/>';
         // x축 화살표
-        axes += '<polygon points="' + x2 + ',' + zcg + ' ' + (x2-arrSz) + ',' + (zcg-arrSz/2) + ' ' + (x2-arrSz) + ',' + (zcg+arrSz/2) + '" fill="#4fc3f7" opacity="0.7"/>';
-        axes += '<text x="' + (x2+fs*0.3) + '" y="' + (zcg+fs*0.3) + '" font-size="' + fs + '" fill="#4fc3f7" font-weight="bold">x</text>';
+        axes += '<polygon points="' + x2 + ',' + zcg + ' ' + (x2-arrSz) + ',' + (zcg-arrSz/2) + ' ' + (x2-arrSz) + ',' + (zcg+arrSz/2) + '" fill="#4fc3f7" opacity="0.6"/>';
+        axes += '<text x="' + (x2+fs*0.3) + '" y="' + (zcg+fs*0.3) + '" font-size="' + fs + '" fill="#4fc3f7" font-weight="600">x</text>';
         // z축 (세로, 좌표 반전됨: SVG에서 음수방향 = z+ = 위쪽)
         const z1 = zcg + axLen; const z2 = zcg - axLen;  // z2가 위(SVG 음수)
-        axes += '<line x1="' + xcg + '" y1="' + z1 + '" x2="' + xcg + '" y2="' + z2 + '" stroke="#ff9800" stroke-width="0.06" stroke-dasharray="0.15,0.1" opacity="0.7"/>';
+        axes += '<line x1="' + xcg + '" y1="' + z1 + '" x2="' + xcg + '" y2="' + z2 + '" stroke="#ff9800" stroke-width="' + sw + '" stroke-dasharray="' + dash + '" opacity="0.6"/>';
         // z축 화살표 (위로 = SVG 음수 방향)
-        axes += '<polygon points="' + xcg + ',' + z2 + ' ' + (xcg-arrSz/2) + ',' + (z2+arrSz) + ' ' + (xcg+arrSz/2) + ',' + (z2+arrSz) + '" fill="#ff9800" opacity="0.7"/>';
-        axes += '<text x="' + (xcg+fs*0.3) + '" y="' + (z2-fs*0.3) + '" font-size="' + fs + '" fill="#ff9800" font-weight="bold">z</text>';
+        axes += '<polygon points="' + xcg + ',' + z2 + ' ' + (xcg-arrSz/2) + ',' + (z2+arrSz) + ' ' + (xcg+arrSz/2) + ',' + (z2+arrSz) + '" fill="#ff9800" opacity="0.6"/>';
+        axes += '<text x="' + (xcg+fs*0.3) + '" y="' + (z2-fs*0.3) + '" font-size="' + fs + '" fill="#ff9800" font-weight="600">z</text>';
         // 원점 표시
-        axes += '<circle cx="' + xcg + '" cy="' + zcg + '" r="' + (arrSz*0.6) + '" fill="none" stroke="#fff" stroke-width="0.05"/>';
-        axes += '<text x="' + (xcg-fs*1.2) + '" y="' + (zcg+fs*0.3) + '" font-size="' + (fs*0.8) + '" fill="#aaa">CG</text>';
+        axes += '<circle cx="' + xcg + '" cy="' + zcg + '" r="' + (arrSz*0.5) + '" fill="none" stroke="#aaa" stroke-width="' + (sw*0.8) + '"/>';
+        axes += '<text x="' + (xcg-fs*1.2) + '" y="' + (zcg+fs*0.3) + '" font-size="' + (fs*0.7) + '" fill="#999" opacity="0.8">CG</text>';
 
         // --- 주축 (1, 2) 실선 ---
         if (Math.abs(thetap) > 0.001) {
@@ -569,14 +630,14 @@
             const s = Math.sin(thetap);
             const pLen = axLen * 0.8;
             // 주축 1
-            axes += '<line x1="' + (xcg - pLen*c) + '" y1="' + (zcg - pLen*s) + '" x2="' + (xcg + pLen*c) + '" y2="' + (zcg + pLen*s) + '" stroke="#e57373" stroke-width="0.05" opacity="0.6"/>';
-            axes += '<text x="' + (xcg + pLen*c + fs*0.3) + '" y="' + (zcg + pLen*s) + '" font-size="' + (fs*0.8) + '" fill="#e57373">1</text>';
+            axes += '<line x1="' + (xcg - pLen*c) + '" y1="' + (zcg - pLen*s) + '" x2="' + (xcg + pLen*c) + '" y2="' + (zcg + pLen*s) + '" stroke="#e57373" stroke-width="' + (sw*0.8) + '" opacity="0.5"/>';
+            axes += '<text x="' + (xcg + pLen*c + fs*0.3) + '" y="' + (zcg + pLen*s) + '" font-size="' + (fs*0.7) + '" fill="#e57373">1</text>';
             // 주축 2
-            axes += '<line x1="' + (xcg + pLen*s) + '" y1="' + (zcg - pLen*c) + '" x2="' + (xcg - pLen*s) + '" y2="' + (zcg + pLen*c) + '" stroke="#e57373" stroke-width="0.05" opacity="0.6"/>';
-            axes += '<text x="' + (xcg - pLen*s + fs*0.3) + '" y="' + (zcg + pLen*c) + '" font-size="' + (fs*0.8) + '" fill="#e57373">2</text>';
+            axes += '<line x1="' + (xcg + pLen*s) + '" y1="' + (zcg - pLen*c) + '" x2="' + (xcg - pLen*s) + '" y2="' + (zcg + pLen*c) + '" stroke="#e57373" stroke-width="' + (sw*0.8) + '" opacity="0.5"/>';
+            axes += '<text x="' + (xcg - pLen*s + fs*0.3) + '" y="' + (zcg + pLen*c) + '" font-size="' + (fs*0.7) + '" fill="#e57373">2</text>';
             // 회전각 표시
             const angDeg = (props.thetap).toFixed(1);
-            axes += '<text x="' + (xcg + fs*0.5) + '" y="' + (zcg - fs*0.5) + '" font-size="' + (fs*0.7) + '" fill="#e57373" opacity="0.8">θp=' + angDeg + '°</text>';
+            axes += '<text x="' + (xcg + fs*0.5) + '" y="' + (zcg - fs*0.5) + '" font-size="' + (fs*0.6) + '" fill="#e57373" opacity="0.7">θp=' + angDeg + '°</text>';
         }
 
         // 기존 SVG에 축 추가
@@ -1763,11 +1824,11 @@
             if (!sectionType) { return; }
 
             const params = {
-                H: fromDisplay(getNum('tpl-H', 3.937), 'length'),
-                B: fromDisplay(getNum('tpl-B', 1.969), 'length'),
-                D: fromDisplay(getNum('tpl-D', 0.787), 'length'),
-                t: fromDisplay(getNum('tpl-t', 0.0906), 'thickness'),
-                r: fromDisplay(getNum('tpl-r', 0.157), 'radius'),
+                H: fromDisplay(getNum('tpl-H', 3.93701), 'length'),
+                B: fromDisplay(getNum('tpl-B', 1.9685), 'length'),
+                D: fromDisplay(getNum('tpl-D', 0.7874), 'length'),
+                t: fromDisplay(getNum('tpl-t', 0.09055), 'thickness'),
+                r: fromDisplay(getNum('tpl-r', 0.09055), 'radius'),
             };
 
             // 립 각도 (Lipped C/Z/Angle)
@@ -2631,7 +2692,14 @@
     function getNum(id, fallback) {
         const el = document.getElementById(id);
         const v = el ? parseFloat(el.value) : NaN;
-        return isNaN(v) ? fallback : v;
+        if (!isNaN(v)) return v;
+        // SI 네이티브 기본값이 있으면 현재 단위계에 맞게 반환
+        const d = DEFAULTS[id];
+        if (d) {
+            const [siVal, ut] = d;
+            return _unitSystem === 'SI' ? siVal : siVal / UNIT[ut].factor;
+        }
+        return fallback;
     }
 
     function fmt(v) {
@@ -2807,17 +2875,20 @@
     }
 
     function propagateFyFuFromPreprocessor() {
-        const fyVal = document.getElementById('input-fy')?.value || '35.53';
-        const fuVal = document.getElementById('input-fu')?.value || '58.02';
+        const fyDef = _unitSystem === 'SI' ? '245' : '35.53';
+        const fuDef = _unitSystem === 'SI' ? '400' : '58.02';
+        const fyVal = document.getElementById('input-fy')?.value || fyDef;
+        const fuVal = document.getElementById('input-fu')?.value || fuDef;
         syncFyValue(fyVal);
         syncFuValue(fuVal);
         updateAnalysisFyDisplay(fyVal);
     }
 
     function propagateFyFromPlastic() {
+        const fyDef = _unitSystem === 'SI' ? '245' : '35.53';
         const fyVal = document.getElementById('plastic-fy')?.value
             || document.getElementById('input-fy')?.value
-            || '35.53';
+            || fyDef;
         syncFyValue(fyVal);
         updateAnalysisFyDisplay(fyVal);
     }
@@ -2914,7 +2985,7 @@
                 html += '<td style="padding:2px 3px"><select class="span-tbl-sup" data-idx="' + i + '" style="width:100%;font-size:10px;padding:2px 4px">' + supOptions + '</select></td>';
                 // 스팬 길이 (지점 i 오른쪽 스팬, 마지막 지점에는 없음)
                 if (i < n) {
-                    const defSpan = toDisplay(16.404, 'length_ft').toFixed(unitDec('length_ft'));
+                    const defSpan = toDisplay(5.0 / UNIT.length_ft.factor, 'length_ft').toFixed(unitDec('length_ft'));
                     html += '<td style="padding:2px 3px"><input type="number" class="span-tbl-len" data-idx="' + i + '" value="' + defSpan + '" step="0.5" style="width:100%;font-size:10px;padding:2px 4px;text-align:right"></td>';
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
@@ -3106,26 +3177,28 @@
         });
     }
 
-    // §A3.3.2 ↔ §F2.4.2 배타 관계 UI 경고
+    // §A3.3.2 Cold Work 상태 알림 (전처리 탭 체크박스 → 설계탭 알림)
     const chkIR = /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'));
     const chkCW = /** @type {HTMLInputElement} */ (document.getElementById('chk-cold-work'));
-    if (chkIR && chkCW) {
-        const warnExclusion = () => {
-            const both = chkIR.checked && chkCW.checked;
-            let hint = chkCW.parentElement?.querySelector('.cw-ir-warn');
-            if (both && !hint) {
-                hint = document.createElement('span');
-                hint.className = 'cw-ir-warn';
-                hint.style.cssText = 'color:var(--vscode-editorWarning-foreground,#f90);font-size:11px;margin-left:6px';
-                hint.textContent = '⚠ IR과 동시 적용 시 Mne에는 원래 Fy 사용';
-                chkCW.parentElement?.appendChild(hint);
-            } else if (!both && hint) {
-                hint.remove();
-            }
-        };
-        chkIR.addEventListener('change', warnExclusion);
-        chkCW.addEventListener('change', warnExclusion);
-    }
+    const cwStatusEl = document.getElementById('cold-work-status');
+    const updateColdWorkNotice = () => {
+        if (!cwStatusEl || !chkCW) return;
+        const cwOn = chkCW.checked;
+        const irOn = chkIR ? chkIR.checked : false;
+        if (cwOn && irOn) {
+            cwStatusEl.textContent = '적용 (⚠ IR과 동시 적용 시 Mne에는 원래 Fy 사용)';
+            cwStatusEl.style.color = 'var(--vscode-editorWarning-foreground,#f90)';
+        } else if (cwOn) {
+            cwStatusEl.textContent = '적용';
+            cwStatusEl.style.color = '#4caf50';
+        } else {
+            cwStatusEl.textContent = '미적용';
+            cwStatusEl.style.color = 'var(--vscode-descriptionForeground)';
+        }
+    };
+    if (chkCW) chkCW.addEventListener('change', updateColdWorkNotice);
+    if (chkIR) chkIR.addEventListener('change', updateColdWorkNotice);
+    updateColdWorkNotice();
 
     // β 보정계수 토글 및 실시간 미리보기
     const chkBeta = /** @type {HTMLInputElement} */ (document.getElementById('chk-beta-dist'));
@@ -3230,11 +3303,11 @@
                 return 'C';
             })();
             const sectionInfo = {
-                depth: fromDisplay(getNum('tpl-H', 3.937), 'length'),
-                flange_width: fromDisplay(getNum('tpl-B', 1.969), 'length'),
-                thickness: fromDisplay(getNum('tpl-t', 0.0906), 'thickness'),
-                lip_depth: fromDisplay(getNum('tpl-D', 0.787), 'length'),
-                R_corner: fromDisplay(getNum('tpl-r', 0.157), 'radius'),
+                depth: fromDisplay(getNum('tpl-H', 3.93701), 'length'),
+                flange_width: fromDisplay(getNum('tpl-B', 1.9685), 'length'),
+                thickness: fromDisplay(getNum('tpl-t', 0.09055), 'thickness'),
+                lip_depth: fromDisplay(getNum('tpl-D', 0.7874), 'length'),
+                R_corner: fromDisplay(getNum('tpl-r', 0.09055), 'radius'),
                 type: normalizedSectionType,
                 Fy: fromDisplay(getNum('design-fy', 35.53), 'stress'),
                 Fu: fromDisplay(getNum('design-fu', 58.02), 'stress'),
@@ -4013,7 +4086,7 @@
                 var _negLb = fromDisplay(getNum('design-Lb', 0), 'length');
                 var _negCb = getNum('design-Cb', 1.0);
                 var _negMu = fromDisplay(getNum('design-Mx', 0), 'moment');
-                summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:2px;color:#ff9800">부모멘트 구간 (-M) — Mu(-)=' + fmtVal(_negMu, 'moment') + ' ' + unitLabel('moment') + ', Lb=' + fmtVal(_negLb, 'length') + ' ' + unitLabel('length') + ', Cb=' + _negCb + '</div>';
+                summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:2px;color:#4fc3f7">부모멘트 구간 (-M) — Mu(-)=' + fmtVal(_negMu, 'moment') + ' ' + unitLabel('moment') + ', Lb=' + fmtVal(_negLb, 'length') + ' ' + unitLabel('length') + ', Cb=' + _negCb + '</div>';
             }
             const isC = mt === 'compression';
             const vals = isC
@@ -4102,7 +4175,7 @@
             var posDesignLabel = dm === 'LRFD' ? 'φMn(+)' : 'Mn(+)/Ω';
 
             // 구간 라벨
-            summaryHtml += '<div style="font-weight:600;font-size:11px;margin:10px 0 2px;color:#4caf50">정모멘트 구간 (+M) — Mu(+)=' + fmtVal(posMuVal, 'moment') + ' ' + mU2 + ', Lb=' + fmtVal(pr.Lb, 'length') + ' ' + unitLabel('length') + ', Cb=' + pr.Cb + '</div>';
+            summaryHtml += '<div style="font-weight:600;font-size:11px;margin:10px 0 2px;color:#4fc3f7">정모멘트 구간 (+M) — Mu(+)=' + fmtVal(posMuVal, 'moment') + ' ' + mU2 + ', Lb=' + fmtVal(pr.Lb, 'length') + ' ' + unitLabel('length') + ', Cb=' + pr.Cb + '</div>';
 
             // 강도 카드 (부모멘트와 동일)
             var posVals = [{l:'Global',v:pr.Mne},{l:'Local',v:pr.Mnl},{l:'Distort.',v:pr.Mnd}];
@@ -4120,7 +4193,7 @@
 
             // 설계강도 라인
             summaryHtml += '<div style="font-size:12px;margin:4px 0">';
-            summaryHtml += '<b style="color:#4caf50">' + posDesignLabel + ' = ' + fmtVal(pr.phi_Mn, 'moment') + ' ' + mU2 + '</b>';
+            summaryHtml += '<b style="color:#4fc3f7">' + posDesignLabel + ' = ' + fmtVal(pr.phi_Mn, 'moment') + ' ' + mU2 + '</b>';
             summaryHtml += ' <span style="color:var(--vscode-descriptionForeground)">(' + (pr.equation || '') + ')</span>';
             summaryHtml += '</div>';
 
@@ -4155,7 +4228,7 @@
 
         // 정모멘트 구간이 있으면 섹션 제목 추가
         if (steps.length > 0 && data.positive_region && mt === 'flexure') {
-            stepsHtml += '<div style="font-weight:700;font-size:13px;margin:8px 0 4px;padding:4px 8px;background:rgba(255,152,0,0.1);border-left:3px solid #ff9800;border-radius:0 4px 4px 0">1) 부모멘트 구간 (-M)</div>';
+            stepsHtml += '<div style="font-weight:700;font-size:13px;margin:8px 0 4px;padding:4px 8px;background:rgba(79,195,247,0.1);border-left:3px solid #4fc3f7;border-radius:0 4px 4px 0">1) 부모멘트 구간 (-M)</div>';
         }
 
         if (steps.length > 0) {
@@ -4188,7 +4261,7 @@
             var _phi2 = 0.90, _omega2 = 1.67;
             var _dsL2 = dm === 'LRFD' ? 'φMn(+)' : 'Mn(+)/Ω';
 
-            stepsHtml += '<div style="font-weight:700;font-size:13px;margin:12px 0 4px;padding:4px 8px;background:rgba(76,175,80,0.1);border-left:3px solid #4caf50;border-radius:0 4px 4px 0">2) 정모멘트 구간 (+M)</div>';
+            stepsHtml += '<div style="font-weight:700;font-size:13px;margin:12px 0 4px;padding:4px 8px;background:rgba(79,195,247,0.1);border-left:3px solid #4fc3f7;border-radius:0 4px 4px 0">2) 정모멘트 구간 (+M)</div>';
 
             // Step 1: My
             stepsHtml += '<div class="calc-step"><div class="calc-step-header"><span>1. Yield Moment (My)</span></div>';
@@ -4404,10 +4477,17 @@
     if (btnPrintReport) {
         btnPrintReport.addEventListener('click', () => {
             if (!reportContainer) return;
-            const w = window.open('', '_blank');
-            if (!w) return;
-            w.document.write(`<!DOCTYPE html><html><head><title>CUFSM Design Report</title>
+            const reportHtml = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>CUFSM Design Report</title>
             <style>
+                :root{
+                    --vscode-foreground:#222;
+                    --vscode-descriptionForeground:#666;
+                    --vscode-editor-background:#fff;
+                    --vscode-panel-border:#ccc;
+                    --vscode-errorForeground:#c62828;
+                    --vscode-editor-selectionBackground:#e3f2fd;
+                    --vscode-inputValidation-warningForeground:#e65100;
+                }
                 body{font-family:'Segoe UI',sans-serif;font-size:11px;color:#222;max-width:800px;margin:0 auto;padding:20px;line-height:1.7}
                 h1{font-size:16px;border-bottom:2px solid #333;padding-bottom:6px;margin-top:0;margin-bottom:16px}
                 h2{font-size:14px;color:#1565c0;border-bottom:1px solid #ccc;padding-bottom:4px;margin-top:28px;margin-bottom:12px}
@@ -4422,10 +4502,12 @@
                 .section-fig{text-align:center;margin:12px 0}
                 svg text{font-family:'Segoe UI',sans-serif}
                 hr{margin:16px 0;border:none;border-top:1px solid #ddd}
+                svg line[stroke-opacity]{stroke-opacity:0.6}
+                svg path[fill-opacity]{fill-opacity:0.25}
+                svg polygon[fill-opacity]{fill-opacity:0.7}
                 @media print{body{font-size:10px;line-height:1.6} .no-print{display:none} h2{page-break-before:auto}}
-            </style></head><body>${reportContainer.innerHTML}</body></html>`);
-            w.document.close();
-            w.print();
+            </style></head><body>${reportContainer.innerHTML}</body></html>`;
+            vscode.postMessage({ command: 'saveReportPdf', data: { html: reportHtml } });
         });
     }
 
