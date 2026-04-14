@@ -6,8 +6,13 @@
     root.StcfsdDesignState = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     function collectDesignInputs(deps) {
-        const { document, fromDisplay, getNum } = deps;
+        const { document, fromDisplay, getNum, getUnitSystem } = deps;
         const data = {};
+
+        // 단위 시스템
+        if (typeof getUnitSystem === 'function') {
+            data.unitSystem = getUnitSystem();
+        }
 
         data.steelGrade = document.getElementById('select-steel-grade')?.value || 'custom';
         data.fy = fromDisplay(getNum('design-fy', 35.53), 'stress');
@@ -91,6 +96,54 @@
         data.tplQlip = getNum('tpl-qlip', 90);
 
         data.fyLoad = fromDisplay(getNum('input-fy', 35.53), 'stress');
+
+        // 해석 탭 설정
+        data.analysisBC = document.getElementById('select-bc')?.value || 'S-S';
+        data.analysisLoadCase = document.getElementById('select-load-case')?.value || 'compression';
+        data.analysisNeigs = getNum('input-neigs', 10);
+        data.analysisLenMin = fromDisplay(getNum('input-len-min', 10), 'length');
+        data.analysisLenMax = fromDisplay(getNum('input-len-max', 10000), 'length');
+        data.analysisLenN = getNum('input-len-n', 60);
+        data.analysisLoadP = getNum('input-load-P', 0);
+        data.analysisLoadMxx = getNum('input-load-Mxx', 0);
+        data.analysisLoadMzz = getNum('input-load-Mzz', 0);
+
+        // 체크박스 옵션
+        data.chkColdWork = !!document.getElementById('chk-cold-work')?.checked;
+        data.chkInelasticReserve = !!document.getElementById('chk-inelastic-reserve')?.checked;
+        data.chkBetaDist = !!document.getElementById('chk-beta-dist')?.checked;
+        data.chkRFactor = !!document.getElementById('chk-r-factor')?.checked;
+        data.chkCfsmEnable = !!document.getElementById('chk-cfsm-enable')?.checked;
+        data.chkCfsmG = !!document.getElementById('chk-cfsm-G')?.checked;
+        data.chkCfsmD = !!document.getElementById('chk-cfsm-D')?.checked;
+        data.chkCfsmL = !!document.getElementById('chk-cfsm-L')?.checked;
+        data.chkCfsmO = !!document.getElementById('chk-cfsm-O')?.checked;
+
+        // 전처리 강종 선택
+        data.presteelGrade = document.getElementById('input-steel-grade')?.value || '';
+
+        // 접합부 탭 입력값
+        data.connFastenerType = document.getElementById('conn-fastener-type')?.value || 'screw';
+        data.connSingleType = document.getElementById('conn-single-type')?.value || 'shear';
+        data.connGrooveType = document.getElementById('conn-groove-type')?.value || 'flare-bevel';
+        data.connLapLeft = fromDisplay(getNum('conn-lap-left', 0), 'length');
+        data.connLapRight = fromDisplay(getNum('conn-lap-right', 0), 'length');
+        data.connT1 = fromDisplay(getNum('conn-t1', 0), 'thickness');
+        data.connT2 = fromDisplay(getNum('conn-t2', 0), 'thickness');
+        data.connD = fromDisplay(getNum('conn-d', 0), 'length');
+        data.connFy = fromDisplay(getNum('conn-Fy', 0), 'stress');
+        data.connFu = fromDisplay(getNum('conn-Fu', 0), 'stress');
+        data.connFub = fromDisplay(getNum('conn-Fub', 0), 'stress');
+        data.connFuf = fromDisplay(getNum('conn-Fuf', 0), 'stress');
+        data.connPu = fromDisplay(getNum('conn-Pu', 0), 'force');
+        data.connMu = fromDisplay(getNum('conn-Mu', 0), 'moment');
+        data.connVu = fromDisplay(getNum('conn-Vu', 0), 'force');
+        data.connWeldL = fromDisplay(getNum('conn-weld-L', 0), 'length');
+        data.connWeldSize = fromDisplay(getNum('conn-weld-size', 0), 'length');
+        data.connFastenerDia = fromDisplay(getNum('conn-fastener-dia', 0), 'length');
+        data.connNRows = getNum('conn-n-rows', 1);
+        data.connN = getNum('conn-n', 4);
+
         return data;
     }
 
@@ -104,7 +157,13 @@
             buildSpanTable,
             setTimeoutFn,
             updateAnalysisFyDisplay,
+            setUnitSystem,
         } = deps;
+
+        // 단위 시스템 복원 (다른 값 복원 전에 먼저 설정)
+        if (data.unitSystem && typeof setUnitSystem === 'function') {
+            setUnitSystem(data.unitSystem);
+        }
 
         function setValue(id, val) {
             const el = document.getElementById(id);
@@ -228,6 +287,62 @@
                 updateAnalysisFyDisplay(restoredFy);
             }
         }
+
+        // 해석 탭 설정 복원
+        if (data.analysisBC) setSelect('select-bc', data.analysisBC);
+        if (data.analysisLoadCase) setSelect('select-load-case', data.analysisLoadCase);
+        if (data.analysisNeigs != null) setValue('input-neigs', data.analysisNeigs);
+        if (data.analysisLenMin != null) setValue('input-len-min', toDisplay(data.analysisLenMin, 'length'));
+        if (data.analysisLenMax != null) setValue('input-len-max', toDisplay(data.analysisLenMax, 'length'));
+        if (data.analysisLenN != null) setValue('input-len-n', data.analysisLenN);
+        if (data.analysisLoadP != null) setValue('input-load-P', data.analysisLoadP);
+        if (data.analysisLoadMxx != null) setValue('input-load-Mxx', data.analysisLoadMxx);
+        if (data.analysisLoadMzz != null) setValue('input-load-Mzz', data.analysisLoadMzz);
+
+        // 체크박스 옵션 복원
+        const chkCW = document.getElementById('chk-cold-work');
+        if (chkCW && data.chkColdWork != null) chkCW.checked = data.chkColdWork;
+        const chkIR = document.getElementById('chk-inelastic-reserve');
+        if (chkIR && data.chkInelasticReserve != null) chkIR.checked = data.chkInelasticReserve;
+        const chkBD = document.getElementById('chk-beta-dist');
+        if (chkBD && data.chkBetaDist != null) chkBD.checked = data.chkBetaDist;
+        const chkRF = document.getElementById('chk-r-factor');
+        if (chkRF && data.chkRFactor != null) chkRF.checked = data.chkRFactor;
+        const chkCE = document.getElementById('chk-cfsm-enable');
+        if (chkCE && data.chkCfsmEnable != null) chkCE.checked = data.chkCfsmEnable;
+        const chkCG = document.getElementById('chk-cfsm-G');
+        if (chkCG && data.chkCfsmG != null) chkCG.checked = data.chkCfsmG;
+        const chkCD = document.getElementById('chk-cfsm-D');
+        if (chkCD && data.chkCfsmD != null) chkCD.checked = data.chkCfsmD;
+        const chkCL = document.getElementById('chk-cfsm-L');
+        if (chkCL && data.chkCfsmL != null) chkCL.checked = data.chkCfsmL;
+        const chkCO = document.getElementById('chk-cfsm-O');
+        if (chkCO && data.chkCfsmO != null) chkCO.checked = data.chkCfsmO;
+
+        // 전처리 강종 선택 복원
+        if (data.presteelGrade) setSelect('input-steel-grade', data.presteelGrade);
+
+        // 접합부 탭 입력값 복원
+        if (data.connFastenerType) setSelect('conn-fastener-type', data.connFastenerType);
+        if (data.connSingleType) setSelect('conn-single-type', data.connSingleType);
+        if (data.connGrooveType) setSelect('conn-groove-type', data.connGrooveType);
+        if (data.connLapLeft != null) setValue('conn-lap-left', toDisplay(data.connLapLeft, 'length'));
+        if (data.connLapRight != null) setValue('conn-lap-right', toDisplay(data.connLapRight, 'length'));
+        if (data.connT1 != null) setValue('conn-t1', toDisplay(data.connT1, 'thickness'));
+        if (data.connT2 != null) setValue('conn-t2', toDisplay(data.connT2, 'thickness'));
+        if (data.connD != null) setValue('conn-d', toDisplay(data.connD, 'length'));
+        if (data.connFy != null) setValue('conn-Fy', toDisplay(data.connFy, 'stress'));
+        if (data.connFu != null) setValue('conn-Fu', toDisplay(data.connFu, 'stress'));
+        if (data.connFub != null) setValue('conn-Fub', toDisplay(data.connFub, 'stress'));
+        if (data.connFuf != null) setValue('conn-Fuf', toDisplay(data.connFuf, 'stress'));
+        if (data.connPu != null) setValue('conn-Pu', toDisplay(data.connPu, 'force'));
+        if (data.connMu != null) setValue('conn-Mu', toDisplay(data.connMu, 'moment'));
+        if (data.connVu != null) setValue('conn-Vu', toDisplay(data.connVu, 'force'));
+        if (data.connWeldL != null) setValue('conn-weld-L', toDisplay(data.connWeldL, 'length'));
+        if (data.connWeldSize != null) setValue('conn-weld-size', toDisplay(data.connWeldSize, 'length'));
+        if (data.connFastenerDia != null) setValue('conn-fastener-dia', toDisplay(data.connFastenerDia, 'length'));
+        if (data.connNRows != null) setValue('conn-n-rows', data.connNRows);
+        if (data.connN != null) setValue('conn-n', data.connN);
     }
 
     return {

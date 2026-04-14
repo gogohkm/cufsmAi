@@ -403,22 +403,24 @@
     // ============================================================
     // 단위 토글 (SI ↔ US)
     // ============================================================
-    document.getElementById('btn-unit-US')?.addEventListener('click', () => {
+    function switchToUS() {
         if (_unitSystem === 'US') return;
         const oldSys = _unitSystem;
         _unitSystem = 'US';
         document.getElementById('btn-unit-US')?.classList.add('active');
         document.getElementById('btn-unit-SI')?.classList.remove('active');
         refreshUnits(oldSys);
-    });
-    document.getElementById('btn-unit-SI')?.addEventListener('click', () => {
+    }
+    function switchToSI() {
         if (_unitSystem === 'SI') return;
         const oldSys = _unitSystem;
         _unitSystem = 'SI';
         document.getElementById('btn-unit-SI')?.classList.add('active');
         document.getElementById('btn-unit-US')?.classList.remove('active');
         refreshUnits(oldSys);
-    });
+    }
+    document.getElementById('btn-unit-US')?.addEventListener('click', switchToUS);
+    document.getElementById('btn-unit-SI')?.addEventListener('click', switchToSI);
 
     // 기본 SI 단위계 초기화: 라벨만 갱신 (HTML 기본값이 이미 SI)
     if (_unitSystem === 'SI') {
@@ -6342,6 +6344,7 @@
             document,
             fromDisplay,
             getNum,
+            getUnitSystem: function() { return _unitSystem; },
         });
     }
 
@@ -6356,6 +6359,10 @@
             buildSpanTable: typeof buildSpanTable === 'function' ? buildSpanTable : undefined,
             setTimeoutFn: window.setTimeout.bind(window),
             updateAnalysisFyDisplay,
+            setUnitSystem: function(sys) {
+                if (sys === 'US' && _unitSystem !== 'US') switchToUS();
+                else if (sys === 'SI' && _unitSystem !== 'SI') switchToSI();
+            },
         }, data);
     }
 
