@@ -98,6 +98,7 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
     combined_M = None
     combined_V = None
     combined_R = None
+    combined_x = None
 
     for load_type, factor in factors.items():
         res = load_results.get(load_type)
@@ -106,6 +107,9 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
         M = res.get('M', [])
         V = res.get('V', [])
         R = res.get('R', [])
+
+        if combined_x is None:
+            combined_x = res.get('x', [])
 
         if combined_M is None:
             combined_M = [0.0] * len(M)
@@ -120,6 +124,7 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
             combined_R[i] += factor * R[i]
 
     return {
+        'x': combined_x or [],
         'M': combined_M or [],
         'V': combined_V or [],
         'R': combined_R or [],

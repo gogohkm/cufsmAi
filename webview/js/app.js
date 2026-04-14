@@ -3506,7 +3506,7 @@
     }
 
     // M/V 다이어그램 SVG 렌더링 (확대 + 지점마커 + max/min 라벨)
-    function renderDiagramSVG(values, label, color, flipSign, dimLines, annotations) {
+    function renderDiagramSVG(values, label, color, flipSign, dimLines, annotations, xCoords) {
         var hasAnn = annotations && annotations.length > 0;
         const W = 480, H = dimLines && dimLines.length > 0 ? 170 : (hasAnn ? 150 : 130), PAD_L = 6, PAD_R = 6, PAD_T = 22, PAD_B = dimLines && dimLines.length > 0 ? 48 : 18;
         const n = values.length;
@@ -3516,26 +3516,36 @@
         const maxAbs = Math.max(...vals.map(v => Math.abs(v)), 0.001);
         const plotW = W - PAD_L - PAD_R;
         const plotH = H - PAD_T - PAD_B;
-        const scaleX = plotW / (n - 1);
         const scaleY = (plotH / 2) / maxAbs;
         const midY = PAD_T + plotH / 2;
+
+        // x좌표 → 픽셀 매핑: 실제 물리좌표가 있으면 사용, 없으면 균등 인덱스
+        const hasXCoords = xCoords && xCoords.length === n;
+        const totalL = hasXCoords ? (xCoords[n - 1] - xCoords[0]) : 1;
+        const x0 = hasXCoords ? xCoords[0] : 0;
+        function idxToPixelX(i) {
+            if (hasXCoords) {
+                return PAD_L + ((xCoords[i] - x0) / totalL) * plotW;
+            }
+            return PAD_L + (i / (n - 1)) * plotW;
+        }
 
         let pathD = '';
         let maxI = 0, minI = 0;
         for (let i = 0; i < n; i++) {
-            const x = PAD_L + i * scaleX;
+            const x = idxToPixelX(i);
             const y = midY - vals[i] * scaleY;
             pathD += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
             if (vals[i] > vals[maxI]) maxI = i;
             if (vals[i] < vals[minI]) minI = i;
         }
 
-        let fillD = pathD + 'L' + (PAD_L + (n-1)*scaleX).toFixed(1) + ',' + midY + 'L' + PAD_L + ',' + midY + 'Z';
+        let fillD = pathD + 'L' + idxToPixelX(n - 1).toFixed(1) + ',' + midY + 'L' + PAD_L + ',' + midY + 'Z';
 
         // Max/min labels
-        const maxX = PAD_L + maxI * scaleX;
+        const maxX = idxToPixelX(maxI);
         const maxY = midY - vals[maxI] * scaleY;
-        const minX = PAD_L + minI * scaleX;
+        const minX = idxToPixelX(minI);
         const minY = midY - vals[minI] * scaleY;
         const origMax = flipSign ? -vals[maxI] : vals[maxI];
         const origMin = flipSign ? -vals[minI] : vals[minI];
@@ -3601,10 +3611,22 @@
         // annotations: [{frac, value, label, color}] — Lap 끝 등 특정 위치 표시
         if (annotations && annotations.length > 0) {
             annotations.forEach(function(ann) {
-                var idx = Math.round(ann.frac * (n - 1));
+                // 물리좌표 기반 인덱스 탐색 (부등경간 정확도)
+                var idx;
+                if (hasXCoords) {
+                    var targetX = x0 + ann.frac * totalL;
+                    idx = 0;
+                    var bestDist = Math.abs(xCoords[0] - targetX);
+                    for (var j = 1; j < n; j++) {
+                        var d = Math.abs(xCoords[j] - targetX);
+                        if (d < bestDist) { bestDist = d; idx = j; }
+                    }
+                } else {
+                    idx = Math.round(ann.frac * (n - 1));
+                }
                 if (idx < 0) idx = 0;
                 if (idx >= n) idx = n - 1;
-                var ax = PAD_L + idx * scaleX;
+                var ax = idxToPixelX(idx);
                 var ay = midY - vals[idx] * scaleY;
                 var aColor = ann.color || '#ab47bc';
                 var aVal = flipSign ? -vals[idx] : vals[idx];
@@ -3700,7 +3722,8 @@
                 }
             }
 
-            html += renderDiagramSVG(mVals, mLabel, '#4fc3f7', true, dimLines, mAnnotations);
+            const mXCoords = gov.x_diagram || null;
+            html += renderDiagramSVG(mVals, mLabel, '#4fc3f7', true, dimLines, mAnnotations, mXCoords);
         }
 
         // V Diagram SVG — 지배 조합
@@ -3725,7 +3748,8 @@
                     });
                 }
             }
-            html += renderDiagramSVG(vVals, vLabel, '#ff8a65', false, null, vAnn);
+            const vXCoords = gov.x_diagram || null;
+            html += renderDiagramSVG(vVals, vLabel, '#ff8a65', false, null, vAnn, vXCoords);
         }
 
         // 지배 조합 결과 테이블
@@ -3833,7 +3857,8 @@
             const dVals = _unitSystem === 'SI'
                 ? data.deflection.D_diagram.map(v => toDisplay(v, 'length'))
                 : data.deflection.D_diagram;
-            html += renderDiagramSVG(dVals, '처짐 (' + _rul('length') + ') — ' + data.deflection.combo, '#66bb6a', true);
+            const dXCoords = (gov && gov.x_diagram) || null;
+            html += renderDiagramSVG(dVals, '처짐 (' + _rul('length') + ') — ' + data.deflection.combo, '#66bb6a', true, null, null, dXCoords);
 
             if (data.deflection.per_span && data.deflection.per_span.length > 0) {
                 const lU = _rul('length_ft'), dU = _rul('length');
@@ -4831,11 +4856,13 @@
         if (rptGov && rptGov.M_diagram && rptGov.M_diagram.length > 2) {
             h += renderBeamSchematic(la);
             const mVals = _unitSystem === 'SI' ? rptGov.M_diagram.map(v => toDisplay(v,'moment_ft')) : rptGov.M_diagram;
-            h += renderDiagramSVG(mVals, '지배 조합 모멘트: '+rptGov.combo+' ('+_rul('moment_ft')+')', '#1565c0', true, null, rptMann);
+            const rptXCoords = rptGov.x_diagram || null;
+            h += renderDiagramSVG(mVals, '지배 조합 모멘트: '+rptGov.combo+' ('+_rul('moment_ft')+')', '#1565c0', true, null, rptMann, rptXCoords);
         }
         if (rptGov && rptGov.V_diagram && rptGov.V_diagram.length > 2) {
             const vVals = _unitSystem === 'SI' ? rptGov.V_diagram.map(v => toDisplay(v,'force')) : rptGov.V_diagram;
-            h += renderDiagramSVG(vVals, '지배 조합 전단력: '+rptGov.combo+' ('+_rul('force')+')', '#e65100', false, null, rptVann);
+            const rptVXCoords = rptGov.x_diagram || null;
+            h += renderDiagramSVG(vVals, '지배 조합 전단력: '+rptGov.combo+' ('+_rul('force')+')', '#e65100', false, null, rptVann, rptVXCoords);
         }
 
         if (rptGov) {
@@ -4931,7 +4958,8 @@
             const dVals = _unitSystem === 'SI'
                 ? la.deflection.D_diagram.map(v => toDisplay(v, 'length'))
                 : la.deflection.D_diagram;
-            h += renderDiagramSVG(dVals, '처짐 다이어그램 ('+_rul('length')+')', '#66bb6a', true);
+            const rptDXCoords = (rptGov && rptGov.x_diagram) || null;
+            h += renderDiagramSVG(dVals, '처짐 다이어그램 ('+_rul('length')+')', '#66bb6a', true, null, null, rptDXCoords);
 
             if (la.deflection.per_span) {
                 h += '<table><tr><th>스팬</th><th>위치</th><th>최대 처짐</th><th>L/δ</th></tr>';

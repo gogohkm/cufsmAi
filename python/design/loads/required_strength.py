@@ -126,6 +126,7 @@ def analyze_loads(
             'locations': gravity_locations,
             'M_diagram': gravity_combined.get('M', []),
             'V_diagram': gravity_combined.get('V', []),
+            'x_diagram': gravity_combined.get('x', []),
         }
 
     # 양력 결과
@@ -139,6 +140,7 @@ def analyze_loads(
             'combo': uplift_name,
             'locations': uplift_locations,
             'M_diagram': uplift_combined.get('M', []),
+            'x_diagram': uplift_combined.get('x', []),
         }
 
     # 데크 강성 계산
@@ -148,10 +150,12 @@ def analyze_loads(
     auto_params = {}
     if gravity_result:
         M_diag = gravity_result['M_diagram']
-        # x 좌표 생성 (간단한 등간격)
+        # 해석에서 전달된 실제 x좌표 사용 (부등경간 정확도 보장)
         total_L = sum(spans)
         n_pts = len(M_diag)
-        x_diag = [i * total_L / (n_pts - 1) for i in range(n_pts)] if n_pts > 1 else [0]
+        x_diag = gravity_result.get('x_diagram', [])
+        if not x_diag or len(x_diag) != n_pts:
+            x_diag = [i * total_L / (n_pts - 1) for i in range(n_pts)] if n_pts > 1 else [0]
 
         unbraced = determine_unbraced_lengths(
             M_diag, x_diag, spans, laps,
@@ -300,7 +304,9 @@ def analyze_loads(
                 if len(svc_M) > 2:
                     total_L = sum(spans)
                     n_pts = len(svc_M)
-                    svc_x = [i * total_L / (n_pts - 1) for i in range(n_pts)]
+                    svc_x = svc_combined.get('x', [])
+                    if not svc_x or len(svc_x) != n_pts:
+                        svc_x = [i * total_L / (n_pts - 1) for i in range(n_pts)]
                     svc_result = BeamResult(svc_x, svc_M, svc_V, svc_R, n_pts)
 
                     # Lap이 있으면 비등단면 보 해석으로 모멘트 재분배 후 처짐 계산
@@ -340,6 +346,7 @@ def analyze_loads(
             'locations': gov_locations,
             'M_diagram': gov_combined.get('M', []),
             'V_diagram': gov_combined.get('V', []),
+            'x_diagram': gov_combined.get('x', []),
         }
 
     return {
@@ -399,9 +406,13 @@ def _extract_locations_from_combined(combined: dict, spans: list,
     if not M:
         return []
 
-    total_L = sum(spans)
     n_pts = len(M)
-    x = [i * total_L / (n_pts - 1) for i in range(n_pts)] if n_pts > 1 else [0]
+    # 해석에서 전달된 실제 x좌표 사용 (부등경간 정확도 보장)
+    x = combined.get('x', [])
+    if not x or len(x) != n_pts:
+        # fallback: 균등 간격 (등경간이면 정확, 부등경간이면 근사)
+        total_L = sum(spans)
+        x = [i * total_L / (n_pts - 1) for i in range(n_pts)] if n_pts > 1 else [0]
 
     # BeamResult 호환 임시 객체 생성
     from design.loads.beam_analysis import BeamResult
