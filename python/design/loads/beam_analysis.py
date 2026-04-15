@@ -16,7 +16,7 @@ class BeamResult:
 
     def __init__(self, x: list, M: list, V: list, R: list, n_pts: int,
                  is_valid: bool = True):
-        self.x = x          # 좌표 (in. 단위)
+        self.x = x          # 좌표 (ft 단위)
         self.M = M          # 모멘트 (kip-ft)
         self.V = V          # 전단력 (kips)
         self.R = R          # 지점 반력 (kips)
@@ -795,7 +795,8 @@ def compute_deflection_variable_I(
         Le = x_in[i + 1] - x_in[i]
         if Le < 1e-10:
             continue
-        EI_e = E * (I_at_x[i] + I_at_x[i + 1]) / 2.0
+        # Lap 구간: I가 step function → max(양 끝 I) 사용 (analyze_beam_fe와 일치)
+        EI_e = E * max(I_at_x[i], I_at_x[i + 1])
 
         # Euler-Bernoulli 보 요소 강성행렬 (4×4)
         c = EI_e / Le ** 3

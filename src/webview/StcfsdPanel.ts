@@ -1415,7 +1415,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         member_type: 'flexure', design_method: dm,
                         Fy: fy, Fu: fu,
                         Lb: posRegion.Ly_in || 0, Cb: posRegion.Cb || 1.0,
-                        Mu: posMu,
+                        Mu: posMu * 12,  // kip-ft → kip-in
                         props: mergedProps,
                         dsm: {
                             Mcrl: dsmPos?.crl ?? 0,
@@ -1432,7 +1432,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         member_type: 'flexure', design_method: dm,
                         Fy: fy, Fu: fu,
                         Lb: negRegion.Ly_in || 0, Cb: negRegion.Cb || 1.67,
-                        Mu: negMu,
+                        Mu: negMu * 12,  // kip-ft → kip-in
                         props: mergedProps,
                         dsm: {
                             Mcrl: dsmNeg?.crl ?? 0,
@@ -1466,6 +1466,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     const lapPhiMn = (singleMnl?.phi_Mn ?? 0) * nLap;
                     const lapMnOmega = (singleMnl?.Mn_omega ?? 0) * nLap;
                     // Lap 구간은 지점 최대 부모멘트(negMuSupport)로 검토
+                    // negMuSupport는 kip-ft 단위 → kip-in 변환 (×12) 후 phi_Mn(kip-in)과 비교
+                    const negMuSupport_kipin = negMuSupport * 12;
                     designLap = {
                         ...singleMnl,
                         Mn: Math.round(lapMn * 100) / 100,
@@ -1476,13 +1478,40 @@ export class StcfsdPanel implements McpPanelInterface {
                             : Math.round(lapMnOmega * 100) / 100,
                         n_members: nLap,
                         note: `Lap: ${nLap} members summed, LTB/distortional excluded`,
-                        utilization: negMuSupport > 0 && lapPhiMn > 0
-                            ? Math.round(negMuSupport / (dm === 'LRFD' ? lapPhiMn : lapMnOmega) * 10000) / 10000
+                        utilization: negMuSupport_kipin > 0 && lapPhiMn > 0
+                            ? Math.round(negMuSupport_kipin / (dm === 'LRFD' ? lapPhiMn : lapMnOmega) * 10000) / 10000
                             : null,
-                        pass: negMuSupport > 0 && lapPhiMn > 0
-                            ? negMuSupport <= (dm === 'LRFD' ? lapPhiMn : lapMnOmega)
+                        pass: negMuSupport_kipin > 0 && lapPhiMn > 0
+                            ? negMuSupport_kipin <= (dm === 'LRFD' ? lapPhiMn : lapMnOmega)
                             : null,
                     };
+                }
+
+                // 6d. 양력 설계 — uplift_bracing Lb/Cb 사용
+                let designUplift: any = null;
+                const upliftBracing = loadResult?.auto_params?.uplift_bracing;
+                const upliftLocs = loadResult?.uplift?.locations || [];
+                if (upliftBracing && upliftLocs.length > 0) {
+                    // 양력 시 경간 중앙이 하부 압축 → 비지지
+                    // uplift_bracing.negative_region이 양력의 비지지 영역 (반전 후)
+                    const uNeg = upliftBracing.negative_region || {};
+                    // 양력 최대 |Mu| (양력 조합의 경간 모멘트)
+                    const upliftMoments = upliftLocs.map((l: any) => Math.abs(l.Mu || 0));
+                    const upliftMu = upliftMoments.length > 0 ? Math.max(...upliftMoments) : 0;
+                    if (upliftMu > 0) {
+                        designUplift = await this._pythonBridge.call('aisi_design', {
+                            member_type: 'flexure', design_method: dm,
+                            Fy: fy, Fu: fu,
+                            Lb: uNeg.Ly_in || 0, Cb: uNeg.Cb || 1.0,
+                            Mu: upliftMu * 12,  // kip-ft → kip-in
+                            props: mergedProps,
+                            dsm: {
+                                Mcrl: dsmPos?.crl ?? 0,
+                                Mcrd: dsmPos?.crd ?? 0,
+                                My: dsmPos?.P_y ?? 0,
+                            },
+                        });
+                    }
                 }
 
                 const result = {
@@ -1492,6 +1521,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     design_positive: designPos,
                     design_negative: designNeg,
                     design_lap: designLap,
+                    design_uplift: designUplift,
                     uplift_R: upliftR,
                     props: propsRaw,
                     cutwp: cutwp,
@@ -2331,6 +2361,11 @@ export class StcfsdPanel implements McpPanelInterface {
                         <label>Wu<span class="hint-inline" data-unit="pressure">kPa</span>↑</label>
                         <input type="number" id="load-Wu-psf" value="1.0" step="0.1" style="width:50px">
                         <span id="load-Wu-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
+                    </div>
+                    <div class="input-row" id="load-Wp-row">
+                        <label>Wp<span class="hint-inline" data-unit="pressure">kPa</span>↓</label>
+                        <input type="number" id="load-Wp-psf" value="0" step="0.1" style="width:50px">
+                        <span id="load-Wp-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
                     </div>
                     <div class="input-row" id="load-L-row" style="display:none">
                         <label>L<span class="hint-inline" data-unit="pressure">kPa</span></label>

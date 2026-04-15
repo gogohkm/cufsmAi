@@ -71,8 +71,12 @@ def analyze_loads(
         supports = ['P'] * (n_spans + 1)
 
     # 각 하중 케이스별 구조해석
-    load_types = {k: v for k, v in loads.items() if v is not None and v != 0}
+    load_types = {k: v for k, v in loads.items()
+                  if v is not None and v != 0 and k != 'Wp'}
     load_results = {}
+
+    # 풍정압(Wp) 분리: Wp는 'W'와 같은 하중계수를 사용하지만 부호가 양수(하향)
+    Wp_plf = loads.get('Wp', 0) or 0
 
     # 자유단(N) 포함 여부 확인 → 캔틸레버/일반 해석 경로 결정
     has_free = any(s.upper().startswith('N') for s in supports)
@@ -86,27 +90,46 @@ def analyze_loads(
     Ixx_fe = (section.get('Ixx') or section.get('Ix') or 1.0) if section else 1.0
     E_fe = E or (section.get('E') if section else None) or E_STEEL
 
-    for load_type, w_plf in load_types.items():
+    def _run_analysis(w_plf):
         if has_laps and n_spans > 1:
-            # Lap 비등단면 → FE 직접 강성법 (M, V, R, δ 동시 계산)
             w_list = [w_plf] * n_spans
-            result = analyze_beam_fe(
+            return analyze_beam_fe(
                 spans, w_list, supports=supports,
                 laps_per_support=laps_per_support,
                 I_base_in4=Ixx_fe, I_lap_ratio=2.0,
                 E_ksi=E_fe,
             )
         elif n_spans == 1 and not has_free and sup_type_simple(supports):
-            result = analyze_simple_beam(spans[0], w_plf)
+            return analyze_simple_beam(spans[0], w_plf)
         else:
             w_list = [w_plf] * n_spans
-            result = analyze_continuous_beam_general(
+            return analyze_continuous_beam_general(
                 spans, w_list, supports=supports,
             )
-        load_results[load_type] = result.to_dict()
+
+    for load_type, w_plf in load_types.items():
+        load_results[load_type] = _run_analysis(w_plf).to_dict()
+
+    # Wp 해석 (풍정압): 별도로 'Wp' 키에 저장
+    Wp_result = None
+    if Wp_plf > 0:
+        Wp_result = _run_analysis(Wp_plf).to_dict()
 
     # 하중조합 적용 → 지배조합 결정
+    # 1차: W(부압/양력) 조합
     controlling = find_controlling_combo(loads, load_results, design_method)
+
+    # 2차: Wp(정압) 조합 — 'W' 슬롯에 Wp 결과를 대입하여 재계산
+    if Wp_result:
+        wp_load_results = dict(load_results)
+        wp_load_results['W'] = Wp_result
+        wp_loads = dict(loads)
+        wp_loads['W'] = Wp_plf  # 양수 → is_uplift=False
+        wp_loads.pop('Wp', None)
+        controlling_wp = find_controlling_combo(wp_loads, wp_load_results,
+                                                design_method)
+        # Wp 중력 조합이 Wu 중력보다 클 경우 교체
+        controlling = _merge_controlling(controlling, controlling_wp)
 
     # laps에 지점별 정보 첨부 (extract_critical_locations에서 사용)
     laps_with_detail = dict(laps) if laps else {}
@@ -258,6 +281,81 @@ def analyze_loads(
             auto_params['negative_region_gov'] = fallback_nr
             auto_params['negative_region'] = fallback_nr
 
+    # ── 양력 지배 시 Lb/Cb 별도 계산 ──
+    # 양력 시 압축 플랜지가 반전됨:
+    #   중력: 정모멘트=상부압축(데크지지), 부모멘트=하부압축(비지지)
+    #   양력: 정모멘트=상부압축(데크지지), 부모멘트=하부압축(비지지)
+    # → 양력 M_diagram을 부호 반전(-M)하면 중력과 동일한 로직 적용 가능
+    if uplift_result:
+        uM = uplift_result.get('M_diagram', [])
+        ux = uplift_result.get('x_diagram', [])
+        if uM and len(uM) > 2:
+            total_L_u = sum(spans)
+            n_pts_u = len(uM)
+            if not ux or len(ux) != n_pts_u:
+                ux = [i * total_L_u / (n_pts_u - 1) for i in range(n_pts_u)]
+
+            # 양력 M을 부호 반전 → 중력과 동일한 정/부 판정으로 변환
+            uM_flipped = [-m for m in uM]
+
+            # 데크 지지 반전: 양력 시 데크(상부)는 원래의 부모멘트(=반전 후 정모멘트) 구간 지지
+            # → 반전 후 정모멘트 구간이 데크 지지 = 중력과 동일 로직
+            deck_type_u = deck.get('type', 'none') if deck else 'none'
+            unbraced_u = determine_unbraced_lengths(
+                uM_flipped, ux, spans, laps,
+                laps_per_support=laps_per_support,
+                deck_type=deck_type_u,
+            )
+
+            uplift_auto = {}
+            deck_braces = deck and deck_type_u in ('through-fastened', 'standing-seam')
+
+            # 양력 정모멘트 영역 (= 원래 부모멘트 방향 → 반전 후 정모멘트)
+            if deck_braces:
+                uplift_auto['positive_region'] = {
+                    'Ly_in': 0, 'Lt_in': 0, 'Cb': 1.0,
+                    'kphi': deck_info.get('kphi', 0), 'braced': True,
+                }
+            else:
+                upos = unbraced_u.get('positive_regions', [])
+                if upos and upos[0].get('Ly', 0) > 0:
+                    pr = upos[0]
+                    uplift_auto['positive_region'] = {
+                        'Ly_in': pr.get('Ly', 0), 'Lt_in': pr.get('Lt', 0),
+                        'Cb': pr.get('Cb', 1.0), 'kphi': 0, 'braced': False,
+                    }
+                else:
+                    uplift_auto['positive_region'] = {
+                        'Ly_in': round(max(spans) * 12.0, 1),
+                        'Lt_in': round(max(spans) * 12.0, 1),
+                        'Cb': 1.0, 'kphi': 0, 'braced': False,
+                    }
+
+            # 양력 부모멘트 영역 (= 원래 정모멘트 방향 → 반전 후 부모멘트)
+            uneg = unbraced_u.get('negative_regions', [])
+            if uneg:
+                unr = max(uneg, key=lambda r: r.get('Ly_in', 0))
+                uplift_auto['negative_regions'] = uneg
+                uplift_auto['negative_region'] = {
+                    'start_ft': unr.get('start_ft', 0),
+                    'end_ft': unr.get('end_ft', 0),
+                    'Ly_in': unr.get('Ly_in', 0),
+                    'Lt_in': unr.get('Lt_in', 0),
+                    'Cb': unr.get('Cb', 1.67),
+                    'Cb_detail': unr.get('Cb_detail'),
+                    'M1': unr.get('M1'), 'M2': unr.get('M2'),
+                    'kphi': 0,
+                }
+            else:
+                fb = {'start_ft': 0, 'end_ft': total_L_u,
+                      'Ly_in': round(total_L_u * 12, 1),
+                      'Lt_in': round(total_L_u * 12, 1),
+                      'Cb': 1.0, 'kphi': 0}
+                uplift_auto['negative_regions'] = [fb]
+                uplift_auto['negative_region'] = fb
+
+            auto_params['uplift_bracing'] = uplift_auto
+
     # I6.2.1 양력 R 검증
     if section:
         lap_lengths_in = []
@@ -301,22 +399,30 @@ def analyze_loads(
                 svc_M = svc_combined.get('M', [])
                 svc_V = svc_combined.get('V', [])
                 svc_R = svc_combined.get('R', [])
+                svc_D_combined = svc_combined.get('D', [])
                 if len(svc_M) > 2:
                     total_L = sum(spans)
                     n_pts = len(svc_M)
                     svc_x = svc_combined.get('x', [])
                     if not svc_x or len(svc_x) != n_pts:
                         svc_x = [i * total_L / (n_pts - 1) for i in range(n_pts)]
-                    svc_result = BeamResult(svc_x, svc_M, svc_V, svc_R, n_pts)
 
-                    # Lap이 있으면 비등단면 보 해석으로 모멘트 재분배 후 처짐 계산
-                    # Lap 구간의 EI 증가 → 지점 모멘트 증가 → 경간 모멘트 감소 → 처짐 감소
-                    defl = compute_deflection_variable_I(
-                        svc_result, E_ksi, Ixx,
-                        spans=spans, supports=supports,
-                        laps_per_support=laps_per_support,
-                        I_lap_ratio=2.0,
-                    )
+                    # FE 해석에서 이미 계산된 D(랩 효과 반영)를 선형 조합한 결과 우선 사용
+                    # FE D 조합이 없거나 유효하지 않으면 fallback으로 재계산
+                    defl = None
+                    if (svc_D_combined and len(svc_D_combined) == n_pts
+                            and any(abs(d) > 1e-12 for d in svc_D_combined)):
+                        defl = [round(d, 5) for d in svc_D_combined]
+                    else:
+                        # Fallback: 비등단면 FE 재계산
+                        svc_result = BeamResult(svc_x, svc_M, svc_V, svc_R, n_pts)
+                        defl = compute_deflection_variable_I(
+                            svc_result, E_ksi, Ixx,
+                            spans=spans, supports=supports,
+                            laps_per_support=laps_per_support,
+                            I_lap_ratio=2.0,
+                        )
+
                     if defl is None:
                         defl = [0.0] * n_pts  # fallback
                     per_span = extract_max_deflection_per_span(svc_x, defl, spans)
@@ -373,6 +479,39 @@ def analyze_loads(
 # ---------------------------------------------------------------------------
 # 내부 헬퍼
 # ---------------------------------------------------------------------------
+
+def _merge_controlling(base: dict, wp: dict) -> dict:
+    """Wu 조합과 Wp 조합 결과를 병합하여 더 큰 쪽 채택"""
+    merged = dict(base)
+
+    def _max_abs_M(combo_tuple):
+        if not combo_tuple:
+            return 0
+        _, combined = combo_tuple
+        M = combined.get('M', [])
+        return max((abs(m) for m in M), default=0) if M else 0
+
+    # gravity: |M|max가 더 큰 쪽
+    if _max_abs_M(wp.get('gravity')) > _max_abs_M(base.get('gravity')):
+        merged['gravity'] = wp['gravity']
+    # uplift: min(M)이 더 작은(더 음수인) 쪽
+    base_uplift_min = min((m for m in (base['uplift'][1].get('M', []) if base.get('uplift') else [])), default=0)
+    wp_uplift_min = min((m for m in (wp['uplift'][1].get('M', []) if wp.get('uplift') else [])), default=0)
+    if wp_uplift_min < base_uplift_min:
+        merged['uplift'] = wp['uplift']
+    # overall: |M|max 절대 최대
+    if _max_abs_M(wp.get('overall')) > _max_abs_M(base.get('overall')):
+        merged['overall'] = wp['overall']
+    # all_detail 병합
+    merged['all_detail'] = base.get('all_detail', []) + [
+        {**d, 'name': d['name'] + ' [Wp]'}
+        for d in wp.get('all_detail', [])
+    ]
+    merged['all'] = base.get('all', []) + [
+        (n + ' [Wp]', c) for n, c in wp.get('all', [])
+    ]
+    return merged
+
 
 def sup_type_simple(supports: list) -> bool:
     """양단 핀/롤러인 단순보인지 확인 (고정단·자유단 아닌 경우)"""

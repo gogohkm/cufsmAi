@@ -33,6 +33,7 @@ ASD_COMBOS = [
 # LRFD (Load and Resistance Factor Design) — ASCE 7 Section 2.3.1
 LRFD_COMBOS = [
     ('1: 1.4D',                      {'D': 1.4}),
+    ('2: 1.2D+1.6L',                {'D': 1.2, 'L': 1.6}),
     ('2: 1.2D+1.6L+0.5Lr',          {'D': 1.2, 'L': 1.6, 'Lr': 0.5}),
     ('2: 1.2D+1.6L+0.5S',           {'D': 1.2, 'L': 1.6, 'S': 0.5}),
     ('3: 1.2D+1.6Lr',               {'D': 1.2, 'Lr': 1.6}),
@@ -98,6 +99,7 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
     combined_M = None
     combined_V = None
     combined_R = None
+    combined_D = None
     combined_x = None
 
     for load_type, factor in factors.items():
@@ -107,6 +109,7 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
         M = res.get('M', [])
         V = res.get('V', [])
         R = res.get('R', [])
+        D = res.get('D', [])
 
         if combined_x is None:
             combined_x = res.get('x', [])
@@ -115,6 +118,8 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
             combined_M = [0.0] * len(M)
             combined_V = [0.0] * len(V)
             combined_R = [0.0] * len(R)
+            if D:
+                combined_D = [0.0] * len(D)
 
         for i in range(len(M)):
             combined_M[i] += factor * M[i]
@@ -122,12 +127,17 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
             combined_V[i] += factor * V[i]
         for i in range(len(R)):
             combined_R[i] += factor * R[i]
+        # 처짐(D)도 선형 조합 — FE 해석에서 이미 랩 효과가 반영된 D를 직접 합산
+        if D and combined_D is not None:
+            for i in range(min(len(D), len(combined_D))):
+                combined_D[i] += factor * D[i]
 
     return {
         'x': combined_x or [],
         'M': combined_M or [],
         'V': combined_V or [],
         'R': combined_R or [],
+        'D': combined_D or [],
     }
 
 

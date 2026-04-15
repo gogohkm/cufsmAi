@@ -269,6 +269,11 @@ def design_lap_connection(params: dict) -> dict:
         'min_lap': min_lap,
         'steps': steps,
         'warnings': warnings,
+        # 도면용 단면/랩 치수
+        'd': d,
+        't': t,
+        'lap_left_in': lap_left,
+        'lap_right_in': lap_right,
     }
 
 

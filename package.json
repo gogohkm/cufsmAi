@@ -2,7 +2,7 @@
     "name": "stcfsd",
     "displayName": "StCFSD - Cold-Formed Steel Buckling Analysis",
     "description": "Finite Strip Method (FSM) buckling analysis and DSM design for cold-formed steel sections with AI-powered MCP integration",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "publisher": "Jeil-StructuralEngineering-Consultants",
     "license": "MIT",
     "repository": {

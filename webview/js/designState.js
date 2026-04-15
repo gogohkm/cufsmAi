@@ -51,6 +51,7 @@
         data.loadLr = fromDisplay(getNum('load-Lr-psf', 0), 'pressure');
         data.loadS = fromDisplay(getNum('load-S-psf', 0), 'pressure');
         data.loadWu = fromDisplay(getNum('load-Wu-psf', 0), 'pressure');
+        data.loadWp = fromDisplay(getNum('load-Wp-psf', 0), 'pressure');
         data.loadL = fromDisplay(getNum('load-L-psf', 0), 'pressure');
 
         data.deckType = document.getElementById('select-deck-type')?.value || 'none';
@@ -226,6 +227,7 @@
         if (data.loadLr != null) setValue('load-Lr-psf', toDisplay(data.loadLr, 'pressure'));
         if (data.loadS != null) setValue('load-S-psf', toDisplay(data.loadS, 'pressure'));
         if (data.loadWu != null) setValue('load-Wu-psf', toDisplay(data.loadWu, 'pressure'));
+        if (data.loadWp != null) setValue('load-Wp-psf', toDisplay(data.loadWp, 'pressure'));
         if (data.loadL != null) setValue('load-L-psf', toDisplay(data.loadL, 'pressure'));
 
         if (data.deckType) setSelect('select-deck-type', data.deckType);

@@ -87,6 +87,7 @@
         'load-Lr-psf': [1.0, 'pressure'],
         'load-S-psf': [0.5, 'pressure'],
         'load-Wu-psf': [1.0, 'pressure'],
+        'load-Wp-psf': [0, 'pressure'],
         // 데크
         'deck-t-panel': [0.5, 'thickness'],
         'deck-fastener-spacing': [300, 'length'],
@@ -157,7 +158,7 @@
             ['config-spacing','length_ft'],
             ['deck-t-panel','thickness'],['deck-fastener-spacing','length'],['deck-kphi-override','rotStiff'],
             ['load-D-psf','pressure'],['load-Lr-psf','pressure'],
-            ['load-S-psf','pressure'],['load-Wu-psf','pressure'],
+            ['load-S-psf','pressure'],['load-Wu-psf','pressure'],['load-Wp-psf','pressure'],
             ['load-L-psf','pressure'],
             // 접합부 탭
             ['conn-lap-left','length'],['conn-lap-right','length'],
@@ -960,13 +961,16 @@
     // 접합부 SVG 다이어그램
     // ============================================================
     function _drawLapSvg(r) {
-        var w = 480, h = 220;
-        var fg = 'var(--vscode-foreground)';
-        var dim = 'var(--vscode-descriptionForeground)';
-        var blue = '#4fc3f7';
-        var green = '#66bb6a';
-        var fastColor = r.pass === false ? '#f44336' : '#ff9800';
-        var okColor = r.pass === false ? '#f44336' : '#4caf50';
+        // ── 실제 단면 치수 (in) ──
+        var dMem = r.d || (r.min_lap ? r.min_lap / 1.5 : 8);  // 부재 높이
+        var tMem = r.t || 0.059;   // 두께
+        // UI에서 플랜지/립 읽기
+        var bFlange = parseFloat((document.getElementById('tpl-B') || {}).value) || 0;
+        if (bFlange > 0 && _unitSystem === 'SI') bFlange = bFlange / 25.4;
+        if (bFlange <= 0) bFlange = Math.max(dMem * 0.25, 1.625);
+        var cLip = parseFloat((document.getElementById('tpl-C') || {}).value) || 0;
+        if (cLip > 0 && _unitSystem === 'SI') cLip = cLip / 25.4;
+        if (cLip <= 0) cLip = Math.max(bFlange * 0.45, 0.5);
 
         var lapL = r.lap_left_in || 12;
         var lapR = r.lap_right_in || 12;
@@ -974,128 +978,265 @@
         var nRows = r.n_rows || 2;
         var spacing = r.spacing || 3;
         var edgeDist = r.edge_distance || 0.5;
-        var total = lapL + lapR + 30;
-        var sc = (w - 60) / total;
+        var fastDia = r.fastener_dia || 0.19;
+        var isScrew = (r.fastener_type || 'screw') === 'screw';
 
-        var x0 = 30;
-        var webH = 48;
-        var flangeW = 14;
-        var lipH = 8;
-        var tH = 5;
-        var gap = 3;
-        var topY = 38;
-        var supX = x0 + lapL * sc + 15 * sc;
+        var svgW = 540, svgH = 310;
+        var fg = 'var(--vscode-foreground)';
+        var dim = 'var(--vscode-descriptionForeground)';
+        var blue = '#4fc3f7';
+        var green = '#66bb6a';
+        var fastColor = r.pass === false ? '#f44336' : '#ff9800';
+        var okColor = r.pass === false ? '#f44336' : '#4caf50';
 
-        var s = '<svg width="'+w+'" height="'+h+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
+        // ── 측면도(Elevation) 영역 (좌측 65%) ──
+        var elev = { x: 10, y: 30, w: 340, h: 195 };
+        // 측면도 스케일: 수평은 Lap 구간 + 양쪽 연장부
+        var ext = Math.max(dMem * 0.5, 3);  // 연장 길이 (in)
+        var totalHoriz = lapL + lapR + 2 * ext;
+        var scH = elev.w / totalHoriz;  // px/in (수평)
+        var scV = Math.min(elev.h * 0.55 / dMem, scH * 0.8);  // px/in (수직, 비례 유지)
+        // 부재 픽셀 치수
+        var pxD = dMem * scV;        // 부재 높이 px
+        var pxT = Math.max(tMem * scV, 1.5);  // 두께 px (최소 1.5)
+        var pxB = bFlange * scV;     // 플랜지폭 px
+        var pxC = cLip * scV;        // 립 높이 px
+        var gap = Math.max(pxT * 0.6, 2);  // 부재 간 간격 px
 
-        // 타이틀
+        // 기준점: 지점(support) 중심
+        var supPxX = elev.x + (ext + lapL) * scH;
+        var topY = elev.y + 12;
+
+        var s = '<svg width="'+svgW+'" height="'+svgH+'" style="display:block;margin:8px auto;background:var(--vscode-editor-background);border:1px solid var(--vscode-panel-border);border-radius:3px">';
+
+        // ── 타이틀 ──
         var passText = r.pass === true ? 'OK' : (r.pass === false ? 'NG' : '');
         var titleExtra = passText ? '  [' + passText + ']' : '';
-        s += '<text x="'+w/2+'" y="14" text-anchor="middle" fill="'+fg+'" font-size="10.5" font-weight="600">Lap Splice — '+(r.n_total||0)+' '+( r.fastener_label||'fasteners')+' ('+nRows+'×'+nPerRow+')'+titleExtra+'</text>';
+        s += '<text x="'+svgW/2+'" y="14" text-anchor="middle" fill="'+fg+'" font-size="10.5" font-weight="600">Lap Splice Detail — '+(r.n_total||0)+' '+(r.fastener_label||'fasteners')+' ('+nRows+'\u00d7'+nPerRow+')'+titleExtra+'</text>';
 
-        // ── 부재 1 (좌측, C단면 측면) ──
-        var m1Left = x0;
-        var m1Right = supX + 5*sc;
-        // 상부 플랜지
-        s += '<rect x="'+m1Left+'" y="'+topY+'" width="'+(m1Right-m1Left)+'" height="'+tH+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'" stroke-width="0.8"/>';
-        // 웹
-        s += '<rect x="'+m1Left+'" y="'+(topY)+'" width="'+tH+'" height="'+webH+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.8"/>';
-        // 하부 플랜지
-        s += '<rect x="'+m1Left+'" y="'+(topY+webH-tH)+'" width="'+flangeW+'" height="'+tH+'" fill="'+blue+'" opacity="0.25" stroke="'+blue+'" stroke-width="0.8"/>';
-        // 립 (상단)
-        s += '<rect x="'+m1Left+'" y="'+(topY-lipH)+'" width="'+tH+'" height="'+lipH+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.8"/>';
-        s += '<text x="'+(m1Left+8)+'" y="'+(topY+webH/2+3)+'" fill="'+blue+'" font-size="8" opacity="0.7">Member 1</text>';
+        // ── 섹션 라벨 ──
+        s += '<text x="'+(elev.x+elev.w/2)+'" y="'+(topY-2)+'" text-anchor="middle" fill="'+dim+'" font-size="8">ELEVATION</text>';
 
-        // ── 부재 2 (우측, C단면 측면) ──
-        var m2Left = supX - 5*sc;
-        var m2Right = x0 + (lapL+lapR)*sc + 30*sc;
+        // ── 부재 1 (좌측→지점 우측, C단면 측면 — 웹 좌측) ──
+        var m1L = elev.x;
+        var m1R = supPxX + ext * 0.3 * scH;
         // 상부 플랜지
-        s += '<rect x="'+m2Left+'" y="'+(topY+gap)+'" width="'+(m2Right-m2Left)+'" height="'+tH+'" fill="'+green+'" opacity="0.25" stroke="'+green+'" stroke-width="0.8"/>';
-        // 웹 (오른쪽 끝)
-        s += '<rect x="'+(m2Right-tH)+'" y="'+(topY+gap)+'" width="'+tH+'" height="'+webH+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.8"/>';
+        s += '<rect x="'+m1L+'" y="'+topY+'" width="'+(m1R-m1L)+'" height="'+pxT+'" fill="'+blue+'" opacity="0.3" stroke="'+blue+'" stroke-width="0.8"/>';
         // 하부 플랜지
-        s += '<rect x="'+(m2Right-flangeW)+'" y="'+(topY+gap+webH-tH)+'" width="'+flangeW+'" height="'+tH+'" fill="'+green+'" opacity="0.25" stroke="'+green+'" stroke-width="0.8"/>';
-        // 립 (상단)
-        s += '<rect x="'+(m2Right-tH)+'" y="'+(topY+gap-lipH)+'" width="'+tH+'" height="'+lipH+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.8"/>';
-        s += '<text x="'+(m2Right-50)+'" y="'+(topY+gap+webH/2+3)+'" fill="'+green+'" font-size="8" opacity="0.7">Member 2</text>';
+        s += '<rect x="'+m1L+'" y="'+(topY+pxD-pxT)+'" width="'+(m1R-m1L)+'" height="'+pxT+'" fill="'+blue+'" opacity="0.3" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 웹 (좌측 끝)
+        s += '<rect x="'+m1L+'" y="'+topY+'" width="'+pxT+'" height="'+pxD+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 립 (좌측 끝, 상하)
+        s += '<rect x="'+m1L+'" y="'+(topY-pxC)+'" width="'+pxT+'" height="'+pxC+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.6"/>';
+        s += '<rect x="'+m1L+'" y="'+(topY+pxD)+'" width="'+pxT+'" height="'+pxC+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.6"/>';
+        s += '<text x="'+(m1L+6)+'" y="'+(topY+pxD/2+3)+'" fill="'+blue+'" font-size="7.5" opacity="0.7">M1</text>';
+
+        // ── 부재 2 (지점 좌측→우측, C단면 측면 — 웹 우측) ──
+        var m2L = supPxX - ext * 0.3 * scH;
+        var m2R = elev.x + elev.w;
+        var m2TopY = topY + gap;
+        // 상부 플랜지
+        s += '<rect x="'+m2L+'" y="'+m2TopY+'" width="'+(m2R-m2L)+'" height="'+pxT+'" fill="'+green+'" opacity="0.3" stroke="'+green+'" stroke-width="0.8"/>';
+        // 하부 플랜지
+        s += '<rect x="'+m2L+'" y="'+(m2TopY+pxD-pxT)+'" width="'+(m2R-m2L)+'" height="'+pxT+'" fill="'+green+'" opacity="0.3" stroke="'+green+'" stroke-width="0.8"/>';
+        // 웹 (우측 끝)
+        s += '<rect x="'+(m2R-pxT)+'" y="'+m2TopY+'" width="'+pxT+'" height="'+pxD+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.8"/>';
+        // 립 (우측 끝, 상하)
+        s += '<rect x="'+(m2R-pxT)+'" y="'+(m2TopY-pxC)+'" width="'+pxT+'" height="'+pxC+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.6"/>';
+        s += '<rect x="'+(m2R-pxT)+'" y="'+(m2TopY+pxD)+'" width="'+pxT+'" height="'+pxC+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.6"/>';
+        s += '<text x="'+(m2R-18)+'" y="'+(m2TopY+pxD/2+3)+'" fill="'+green+'" font-size="7.5" opacity="0.7">M2</text>';
 
         // ── 겹침 영역 음영 ──
-        var overlapL = Math.max(m2Left, m1Left);
-        var overlapR = Math.min(m1Right, m2Right);
+        var overlapL = Math.max(m2L, m1L);
+        var overlapR = Math.min(m1R, m2R);
         if (overlapR > overlapL) {
-            s += '<rect x="'+overlapL+'" y="'+(topY-lipH-2)+'" width="'+(overlapR-overlapL)+'" height="'+(webH+gap+lipH+6)+'" fill="var(--vscode-focusBorder)" opacity="0.06" rx="2"/>';
-            s += '<text x="'+((overlapL+overlapR)/2)+'" y="'+(topY-lipH-5)+'" text-anchor="middle" fill="'+dim+'" font-size="7.5">Lap zone (2t)</text>';
+            s += '<rect x="'+overlapL+'" y="'+(topY-pxC-2)+'" width="'+(overlapR-overlapL)+'" height="'+(pxD+gap+2*pxC+6)+'" fill="var(--vscode-focusBorder)" opacity="0.06" rx="2"/>';
         }
 
-        // ── 지점 ──
-        var supY = topY + webH + gap + 8;
-        s += '<polygon points="'+(supX-8)+','+supY+' '+(supX+8)+','+supY+' '+supX+','+(supY+12)+'" fill="'+fg+'" opacity="0.4"/>';
-        s += '<line x1="'+(supX-12)+'" y1="'+(supY+13)+'" x2="'+(supX+12)+'" y2="'+(supY+13)+'" stroke="'+fg+'" stroke-width="1" opacity="0.4"/>';
-        s += '<text x="'+supX+'" y="'+(supY+24)+'" text-anchor="middle" fill="'+dim+'" font-size="8">Support</text>';
+        // ── Lap 경계 세로 점선 ──
+        var lapLx = supPxX - lapL * scH;
+        var lapRx = supPxX + lapR * scH;
+        s += '<line x1="'+lapLx.toFixed(1)+'" y1="'+(topY-pxC-6)+'" x2="'+lapLx.toFixed(1)+'" y2="'+(topY+pxD+gap+pxC+6)+'" stroke="'+blue+'" stroke-dasharray="3,2" stroke-width="0.6" opacity="0.5"/>';
+        s += '<line x1="'+lapRx.toFixed(1)+'" y1="'+(topY-pxC-6)+'" x2="'+lapRx.toFixed(1)+'" y2="'+(topY+pxD+gap+pxC+6)+'" stroke="'+green+'" stroke-dasharray="3,2" stroke-width="0.6" opacity="0.5"/>';
 
-        // ── 패스너 ──
-        var fY1 = topY + tH/2 + gap/2;
-        var fY2 = fY1 + (nRows > 1 ? webH*0.5 : 0);
-        var fYarr = nRows === 1 ? [fY1] : (nRows === 2 ? [fY1, fY2] : [fY1, (fY1+fY2)/2, fY2]);
-        if (nRows === 4) fYarr = [fY1, fY1+(fY2-fY1)/3, fY1+2*(fY2-fY1)/3, fY2];
+        // ── 지점(삼각형) ──
+        var supY = topY + pxD + gap + pxC + 8;
+        s += '<polygon points="'+(supPxX-7)+','+supY+' '+(supPxX+7)+','+supY+' '+supPxX+','+(supY-7)+'" fill="none" stroke="'+fg+'" stroke-width="1" opacity="0.5"/>';
+        s += '<line x1="'+(supPxX-10)+'" y1="'+supY+'" x2="'+(supPxX+10)+'" y2="'+supY+'" stroke="'+fg+'" stroke-width="1" opacity="0.4"/>';
 
-        // 좌측 패스너
+        // ── 패스너 (측면도) ──
+        var fCenterY = topY + pxD / 2 + gap / 2;  // 부재 중앙
+        // 패스너 행 Y좌표: 웹 높이 기준 균등 배분
+        var webTop = topY + pxT + gap/2;
+        var webBot = topY + pxD - pxT + gap/2;
+        var fYarr = [];
+        if (nRows === 1) { fYarr = [fCenterY]; }
+        else if (nRows === 2) { fYarr = [webTop + (webBot-webTop)*0.25, webTop + (webBot-webTop)*0.75]; }
+        else if (nRows === 3) { fYarr = [webTop + (webBot-webTop)*0.2, fCenterY, webTop + (webBot-webTop)*0.8]; }
+        else { for (var ri=0; ri<nRows; ri++) fYarr.push(webTop + (webBot-webTop)*((ri+0.5)/nRows)); }
+
+        var pxFastR = Math.max(fastDia * scH * 0.5, 2.5);  // 패스너 반경 px
+        // 좌측 패스너 (지점 왼쪽)
         for (var i = 0; i < nPerRow; i++) {
-            var fx = supX - edgeDist*sc - i * spacing * sc;
+            var fx = supPxX - edgeDist * scH - i * spacing * scH;
             for (var j = 0; j < fYarr.length; j++) {
-                s += '<circle cx="'+fx.toFixed(1)+'" cy="'+fYarr[j].toFixed(1)+'" r="3.5" fill="'+fastColor+'" opacity="0.85"/>';
-                s += '<line x1="'+(fx-2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx+2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
-                s += '<line x1="'+(fx+2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx-2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
+                s += '<circle cx="'+fx.toFixed(1)+'" cy="'+fYarr[j].toFixed(1)+'" r="'+pxFastR.toFixed(1)+'" fill="'+fastColor+'" opacity="0.85" stroke="#fff" stroke-width="0.5"/>';
+                if (isScrew) {
+                    s += '<line x1="'+(fx-pxFastR*0.6).toFixed(1)+'" y1="'+(fYarr[j]-pxFastR*0.6).toFixed(1)+'" x2="'+(fx+pxFastR*0.6).toFixed(1)+'" y2="'+(fYarr[j]+pxFastR*0.6).toFixed(1)+'" stroke="#fff" stroke-width="0.7"/>';
+                    s += '<line x1="'+(fx+pxFastR*0.6).toFixed(1)+'" y1="'+(fYarr[j]-pxFastR*0.6).toFixed(1)+'" x2="'+(fx-pxFastR*0.6).toFixed(1)+'" y2="'+(fYarr[j]+pxFastR*0.6).toFixed(1)+'" stroke="#fff" stroke-width="0.7"/>';
+                } else {
+                    s += '<line x1="'+(fx-pxFastR*0.5).toFixed(1)+'" y1="'+fYarr[j].toFixed(1)+'" x2="'+(fx+pxFastR*0.5).toFixed(1)+'" y2="'+fYarr[j].toFixed(1)+'" stroke="#fff" stroke-width="0.7"/>';
+                }
             }
         }
-        // 우측 패스너
+        // 우측 패스너 (지점 오른쪽)
         for (var i = 0; i < nPerRow; i++) {
-            var fx = supX + edgeDist*sc + i * spacing * sc;
+            var fx = supPxX + edgeDist * scH + i * spacing * scH;
             for (var j = 0; j < fYarr.length; j++) {
-                s += '<circle cx="'+fx.toFixed(1)+'" cy="'+fYarr[j].toFixed(1)+'" r="3.5" fill="'+fastColor+'" opacity="0.85"/>';
-                s += '<line x1="'+(fx-2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx+2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
-                s += '<line x1="'+(fx+2).toFixed(1)+'" y1="'+(fYarr[j]-2).toFixed(1)+'" x2="'+(fx-2).toFixed(1)+'" y2="'+(fYarr[j]+2).toFixed(1)+'" stroke="#fff" stroke-width="0.8"/>';
+                s += '<circle cx="'+fx.toFixed(1)+'" cy="'+fYarr[j].toFixed(1)+'" r="'+pxFastR.toFixed(1)+'" fill="'+fastColor+'" opacity="0.85" stroke="#fff" stroke-width="0.5"/>';
+                if (isScrew) {
+                    s += '<line x1="'+(fx-pxFastR*0.6).toFixed(1)+'" y1="'+(fYarr[j]-pxFastR*0.6).toFixed(1)+'" x2="'+(fx+pxFastR*0.6).toFixed(1)+'" y2="'+(fYarr[j]+pxFastR*0.6).toFixed(1)+'" stroke="#fff" stroke-width="0.7"/>';
+                    s += '<line x1="'+(fx+pxFastR*0.6).toFixed(1)+'" y1="'+(fYarr[j]-pxFastR*0.6).toFixed(1)+'" x2="'+(fx-pxFastR*0.6).toFixed(1)+'" y2="'+(fYarr[j]+pxFastR*0.6).toFixed(1)+'" stroke="#fff" stroke-width="0.7"/>';
+                } else {
+                    s += '<line x1="'+(fx-pxFastR*0.5).toFixed(1)+'" y1="'+fYarr[j].toFixed(1)+'" x2="'+(fx+pxFastR*0.5).toFixed(1)+'" y2="'+fYarr[j].toFixed(1)+'" stroke="#fff" stroke-width="0.7"/>';
+                }
             }
         }
 
-        // ── 치수선 ──
-        var dimY1 = supY + 32;
-        // Lap 길이
-        var lapLstart = supX - lapL * sc;
-        var lapRend = supX + lapR * sc;
-        s += _dimLineArrow(lapLstart, dimY1, supX, dimY1, fmtVal(lapL, 'length')+' '+unitLabel('length'), blue);
-        s += _dimLineArrow(supX, dimY1, lapRend, dimY1, fmtVal(lapR, 'length')+' '+unitLabel('length'), green);
+        // ── 측면도 치수선 ──
+        // Lap 길이 (하단)
+        var dimY1 = supY + 10;
+        s += _dimLineArrow(lapLx, dimY1, supPxX, dimY1, fmtVal(lapL, 'length')+' '+unitLabel('length'), blue);
+        s += _dimLineArrow(supPxX, dimY1, lapRx, dimY1, fmtVal(lapR, 'length')+' '+unitLabel('length'), green);
 
         // 최소 Lap 길이 표시
         if (r.min_lap) {
             var minLapLabel = 'min 1.5d=' + fmtVal(r.min_lap, 'length') + ' ' + unitLabel('length');
             var lapCheckColor = r.lap_ok ? '#4caf50' : '#f44336';
-            s += '<text x="'+supX+'" y="'+(dimY1+14)+'" text-anchor="middle" fill="'+lapCheckColor+'" font-size="8">'+(r.lap_ok?'\u2713':'\u2717')+' '+minLapLabel+'</text>';
+            s += '<text x="'+supPxX+'" y="'+(dimY1+13)+'" text-anchor="middle" fill="'+lapCheckColor+'" font-size="7.5">'+(r.lap_ok?'\u2713':'\u2717')+' '+minLapLabel+'</text>';
         }
 
         // 패스너 간격 (상단 치수)
         if (nPerRow > 1 && spacing > 0) {
-            var sDimY = topY - lipH - 14;
-            var sx1 = supX + edgeDist*sc;
-            var sx2 = sx1 + spacing*sc;
-            s += _dimLineArrow(sx1, sDimY, sx2, sDimY, 's='+fmtVal(spacing,'length'), dim);
+            var sDimY = topY - pxC - 14;
+            var sx1 = supPxX + edgeDist * scH;
+            var sx2 = sx1 + spacing * scH;
+            s += _dimLineArrow(sx1, sDimY, sx2, sDimY, 's='+fmtVal(spacing,'length')+' '+unitLabel('length'), dim);
         }
 
         // edge distance (상단)
         if (edgeDist > 0) {
-            var eDimY = topY - lipH - 24;
-            s += _dimLineArrow(supX, eDimY, supX + edgeDist*sc, eDimY, 'e='+fmtVal(edgeDist,'length'), dim);
+            var eDimY = topY - pxC - 24;
+            s += _dimLineArrow(supPxX, eDimY, supPxX + edgeDist * scH, eDimY, 'e='+fmtVal(edgeDist,'length')+' '+unitLabel('length'), dim);
         }
 
-        // ── 용량 정보 ──
-        if (r.V_transfer != null && r.capacity != null) {
-            var infoY = h - 8;
-            s += '<text x="12" y="'+infoY+'" fill="'+dim+'" font-size="8.5">V='+fmtVal(r.V_transfer,'force')+' '+unitLabel('force')+'</text>';
-            s += '<text x="'+(w/2)+'" y="'+infoY+'" text-anchor="middle" fill="'+dim+'" font-size="8.5">Cap='+fmtVal(r.capacity,'force')+' '+unitLabel('force')+'</text>';
-            if (r.utilization != null && isFinite(r.utilization)) {
-                s += '<text x="'+(w-12)+'" y="'+infoY+'" text-anchor="end" fill="'+okColor+'" font-size="9" font-weight="600">DCR='+r.utilization.toFixed(3)+'</text>';
+        // 부재 높이 d (우측 세로 치수)
+        var dDimX = elev.x + elev.w + 5;
+        s += '<line x1="'+dDimX+'" y1="'+topY+'" x2="'+dDimX+'" y2="'+(topY+pxD)+'" stroke="'+dim+'" stroke-width="0.6" opacity="0.6"/>';
+        s += '<polygon points="'+dDimX+','+topY+' '+(dDimX-2)+','+(topY+4)+' '+(dDimX+2)+','+(topY+4)+'" fill="'+dim+'" opacity="0.6"/>';
+        s += '<polygon points="'+dDimX+','+(topY+pxD)+' '+(dDimX-2)+','+(topY+pxD-4)+' '+(dDimX+2)+','+(topY+pxD-4)+'" fill="'+dim+'" opacity="0.6"/>';
+        s += '<text x="'+(dDimX+3)+'" y="'+(topY+pxD/2+3)+'" fill="'+dim+'" font-size="7.5">d='+fmtVal(dMem,'length')+'</text>';
+
+        // ── Cut line A-A (측면도에 절단선 표시) ──
+        var cutX = supPxX + edgeDist * scH + (nPerRow > 1 ? spacing * scH * 0.5 : 0);
+        s += '<line x1="'+cutX.toFixed(1)+'" y1="'+(topY-pxC-8)+'" x2="'+cutX.toFixed(1)+'" y2="'+(topY+pxD+gap+pxC+12)+'" stroke="#e91e63" stroke-dasharray="8,3,2,3" stroke-width="0.8"/>';
+        s += '<text x="'+(cutX-8)+'" y="'+(topY-pxC-10)+'" fill="#e91e63" font-size="8" font-weight="600">A</text>';
+        s += '<text x="'+(cutX-8)+'" y="'+(topY+pxD+gap+pxC+20)+'" fill="#e91e63" font-size="8" font-weight="600">A</text>';
+
+        // ══════════════════════════════════════════════════════════
+        // ── 단면도 (Cut A-A) — 우측 35% ──
+        // ══════════════════════════════════════════════════════════
+        var csX = 380, csY = 30, csW = 150, csH = 195;
+        s += '<text x="'+(csX+csW/2)+'" y="'+(csY-2)+'" text-anchor="middle" fill="#e91e63" font-size="8" font-weight="600">CUT A\u2012A</text>';
+
+        // 단면도 스케일
+        var csScaleV = (csH * 0.6) / dMem;
+        var csScaleH = Math.min(csScaleV, (csW * 0.35) / bFlange);
+        var csScale = Math.min(csScaleV, csScaleH);  // 동일 비율
+        var csPxD = dMem * csScale;
+        var csPxB = bFlange * csScale;
+        var csPxC = cLip * csScale;
+        var csPxT = Math.max(tMem * csScale, 1.2);
+
+        // 단면도 중앙
+        var csCenterX = csX + csW / 2;
+        var csCenterY = csY + csH * 0.45;
+        var csTopY = csCenterY - csPxD / 2;
+
+        // Member 1 C단면 (웹 좌측, 플랜지 우측으로 열림)
+        var m1cx = csCenterX - csPxT/2 - 1;  // 약간의 갭
+        // 웹 (수직)
+        s += '<rect x="'+(m1cx-csPxT)+'" y="'+csTopY+'" width="'+csPxT+'" height="'+csPxD+'" fill="'+blue+'" opacity="0.3" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 상부 플랜지 (우측)
+        s += '<rect x="'+(m1cx-csPxT)+'" y="'+csTopY+'" width="'+csPxB+'" height="'+csPxT+'" fill="'+blue+'" opacity="0.3" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 하부 플랜지 (우측)
+        s += '<rect x="'+(m1cx-csPxT)+'" y="'+(csTopY+csPxD-csPxT)+'" width="'+csPxB+'" height="'+csPxT+'" fill="'+blue+'" opacity="0.3" stroke="'+blue+'" stroke-width="0.8"/>';
+        // 상부 립 (아래로)
+        s += '<rect x="'+(m1cx-csPxT+csPxB-csPxT)+'" y="'+csTopY+'" width="'+csPxT+'" height="'+csPxC+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.6"/>';
+        // 하부 립 (위로)
+        s += '<rect x="'+(m1cx-csPxT+csPxB-csPxT)+'" y="'+(csTopY+csPxD-csPxC)+'" width="'+csPxT+'" height="'+csPxC+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="0.6"/>';
+        s += '<text x="'+(m1cx-csPxT-3)+'" y="'+(csCenterY+3)+'" fill="'+blue+'" font-size="7" text-anchor="end">M1</text>';
+
+        // Member 2 C단면 (웹 우측, 플랜지 좌측으로 열림 — nested 겹침)
+        var m2cx = csCenterX + csPxT/2 + 1;
+        // 웹 (수직)
+        s += '<rect x="'+m2cx+'" y="'+csTopY+'" width="'+csPxT+'" height="'+csPxD+'" fill="'+green+'" opacity="0.3" stroke="'+green+'" stroke-width="0.8"/>';
+        // 상부 플랜지 (좌측)
+        s += '<rect x="'+(m2cx+csPxT-csPxB)+'" y="'+csTopY+'" width="'+csPxB+'" height="'+csPxT+'" fill="'+green+'" opacity="0.3" stroke="'+green+'" stroke-width="0.8"/>';
+        // 하부 플랜지 (좌측)
+        s += '<rect x="'+(m2cx+csPxT-csPxB)+'" y="'+(csTopY+csPxD-csPxT)+'" width="'+csPxB+'" height="'+csPxT+'" fill="'+green+'" opacity="0.3" stroke="'+green+'" stroke-width="0.8"/>';
+        // 상부 립 (아래로)
+        s += '<rect x="'+(m2cx+csPxT-csPxB)+'" y="'+csTopY+'" width="'+csPxT+'" height="'+csPxC+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.6"/>';
+        // 하부 립 (위로)
+        s += '<rect x="'+(m2cx+csPxT-csPxB)+'" y="'+(csTopY+csPxD-csPxC)+'" width="'+csPxT+'" height="'+csPxC+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="0.6"/>';
+        s += '<text x="'+(m2cx+csPxT+4)+'" y="'+(csCenterY+3)+'" fill="'+green+'" font-size="7">M2</text>';
+
+        // 단면도 패스너 위치 (웹 사이)
+        for (var j = 0; j < fYarr.length; j++) {
+            var csfy = csTopY + (fYarr[j] - topY) / pxD * csPxD;
+            s += '<circle cx="'+csCenterX+'" cy="'+csfy.toFixed(1)+'" r="'+(pxFastR*0.9).toFixed(1)+'" fill="'+fastColor+'" opacity="0.85" stroke="#fff" stroke-width="0.5"/>';
+            if (isScrew) {
+                s += '<line x1="'+(csCenterX-pxFastR*0.5).toFixed(1)+'" y1="'+(csfy-pxFastR*0.5).toFixed(1)+'" x2="'+(csCenterX+pxFastR*0.5).toFixed(1)+'" y2="'+(csfy+pxFastR*0.5).toFixed(1)+'" stroke="#fff" stroke-width="0.6"/>';
+                s += '<line x1="'+(csCenterX+pxFastR*0.5).toFixed(1)+'" y1="'+(csfy-pxFastR*0.5).toFixed(1)+'" x2="'+(csCenterX-pxFastR*0.5).toFixed(1)+'" y2="'+(csfy+pxFastR*0.5).toFixed(1)+'" stroke="#fff" stroke-width="0.6"/>';
             }
         }
+
+        // 단면도 치수선 — d
+        var csDimX = csX + csW - 8;
+        s += '<line x1="'+csDimX+'" y1="'+csTopY+'" x2="'+csDimX+'" y2="'+(csTopY+csPxD)+'" stroke="'+dim+'" stroke-width="0.6" opacity="0.7"/>';
+        s += '<polygon points="'+csDimX+','+csTopY+' '+(csDimX-2)+','+(csTopY+3)+' '+(csDimX+2)+','+(csTopY+3)+'" fill="'+dim+'" opacity="0.6"/>';
+        s += '<polygon points="'+csDimX+','+(csTopY+csPxD)+' '+(csDimX-2)+','+(csTopY+csPxD-3)+' '+(csDimX+2)+','+(csTopY+csPxD-3)+'" fill="'+dim+'" opacity="0.6"/>';
+        s += '<text x="'+(csDimX+3)+'" y="'+(csCenterY+3)+'" fill="'+dim+'" font-size="7">d='+fmtVal(dMem,'length')+'</text>';
+
+        // 단면도 치수선 — b (상부 플랜지 폭)
+        var csBdimY = csTopY - 8;
+        var bLeft = m2cx + csPxT - csPxB;
+        var bRight = bLeft + csPxB;
+        s += '<line x1="'+bLeft.toFixed(1)+'" y1="'+csBdimY+'" x2="'+bRight.toFixed(1)+'" y2="'+csBdimY+'" stroke="'+dim+'" stroke-width="0.5" opacity="0.6"/>';
+        s += '<text x="'+((bLeft+bRight)/2).toFixed(1)+'" y="'+(csBdimY-2)+'" text-anchor="middle" fill="'+dim+'" font-size="6.5">b='+fmtVal(bFlange,'length')+'</text>';
+
+        // 단면도 치수선 — t (두께 표시)
+        s += '<text x="'+csCenterX+'" y="'+(csTopY+csPxD+12)+'" text-anchor="middle" fill="'+dim+'" font-size="6.5">t='+fmtVal(tMem,'thickness')+'</text>';
+
+        // 단면도 치수선 — c (립)
+        if (csPxC > 4) {
+            var csLipDimX = csX + 8;
+            s += '<line x1="'+csLipDimX+'" y1="'+csTopY+'" x2="'+csLipDimX+'" y2="'+(csTopY+csPxC)+'" stroke="'+dim+'" stroke-width="0.5" opacity="0.6"/>';
+            s += '<text x="'+(csLipDimX-2)+'" y="'+(csTopY+csPxC/2+2)+'" text-anchor="end" fill="'+dim+'" font-size="6">c='+fmtVal(cLip,'length')+'</text>';
+        }
+
+        // ── 하단 정보 바 ──
+        var infoY = svgH - 8;
+        if (r.V_transfer != null && r.capacity != null) {
+            s += '<text x="12" y="'+infoY+'" fill="'+dim+'" font-size="8.5">V='+fmtVal(r.V_transfer,'force')+' '+unitLabel('force')+'</text>';
+            s += '<text x="'+(svgW/2)+'" y="'+infoY+'" text-anchor="middle" fill="'+dim+'" font-size="8.5">Cap='+fmtVal(r.capacity,'force')+' '+unitLabel('force')+'</text>';
+            if (r.utilization != null && isFinite(r.utilization)) {
+                s += '<text x="'+(svgW-12)+'" y="'+infoY+'" text-anchor="end" fill="'+okColor+'" font-size="9" font-weight="600">DCR='+r.utilization.toFixed(3)+'</text>';
+            }
+        }
+
+        // 패스너 타입/사이즈 정보
+        s += '<text x="12" y="'+(infoY-12)+'" fill="'+dim+'" font-size="7.5">'+(r.fastener_label||'')+' d='+fmtVal(fastDia,'length')+' '+unitLabel('length')+'</text>';
 
         s += '</svg>';
         return s;
@@ -1474,7 +1615,8 @@
             loadD: getNum('load-D-psf', 0) ? getNum('load-D-psf', 0) + ' ' + _rul('pressure') : '',
             loadLr: getNum('load-Lr-psf', 0) ? getNum('load-Lr-psf', 0) + ' ' + _rul('pressure') : '',
             loadS: getNum('load-S-psf', 0) ? getNum('load-S-psf', 0) + ' ' + _rul('pressure') : '',
-            loadW: getNum('load-Wu-psf', 0) ? getNum('load-Wu-psf', 0) + ' ' + _rul('pressure') : '',
+            loadWu: getNum('load-Wu-psf', 0) ? getNum('load-Wu-psf', 0) + ' ' + _rul('pressure') + ' ↑' : '',
+            loadWp: getNum('load-Wp-psf', 0) ? getNum('load-Wp-psf', 0) + ' ' + _rul('pressure') + ' ↓' : '',
             loadL: getNum('load-L-psf', 0) ? getNum('load-L-psf', 0) + ' ' + _rul('pressure') : '',
             hasLoadAnalysis: !!la,
             gravityCombo: la && la.gravity ? la.gravity.combo : '',
@@ -2939,7 +3081,7 @@
     function updatePLF() {
         const spacingRaw = getNum('config-spacing', 3.281);
         const spacingUS = fromDisplay(spacingRaw, 'length_ft');
-        ['D', 'Lr', 'S', 'Wu', 'L'].forEach(lt => {
+        ['D', 'Lr', 'S', 'Wu', 'Wp', 'L'].forEach(lt => {
             const psfRaw = getNum('load-' + lt + '-psf', 0);
             const psfUS = fromDisplay(psfRaw, 'pressure');
             const plfUS = psfUS * spacingUS; // plf (US)
@@ -2948,7 +3090,7 @@
             if (el) el.textContent = '\u2192' + plfDisp.toFixed(unitDec('linload')) + ' ' + unitLabel('linload');
         });
     }
-    ['config-spacing', 'load-D-psf', 'load-Lr-psf', 'load-S-psf', 'load-Wu-psf', 'load-L-psf'].forEach(id => {
+    ['config-spacing', 'load-D-psf', 'load-Lr-psf', 'load-S-psf', 'load-Wu-psf', 'load-Wp-psf', 'load-L-psf'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.addEventListener('input', updatePLF);
     });
@@ -3353,6 +3495,7 @@
             const loadLr_psf = fromDisplay(getNum('load-Lr-psf', 0), 'pressure');
             const loadS_psf = fromDisplay(getNum('load-S-psf', 0), 'pressure');
             const loadWu_psf = fromDisplay(getNum('load-Wu-psf', 0), 'pressure');
+            const loadWp_psf = fromDisplay(getNum('load-Wp-psf', 0), 'pressure');
             const loadL_psf = fromDisplay(getNum('load-L-psf', 0), 'pressure');
 
             const data = {
@@ -3367,7 +3510,8 @@
                     D: loadD_psf * spacingUS,      // plf (US)
                     Lr: loadLr_psf * spacingUS,
                     S: loadS_psf * spacingUS,
-                    W: -(loadWu_psf * spacingUS),
+                    W: -(loadWu_psf * spacingUS),  // 부압(양력): 음수
+                    Wp: loadWp_psf * spacingUS,     // 정압(하향): 양수
                     L: loadL_psf * spacingUS,
                 },
                 design_method: /** @type {HTMLSelectElement} */ (document.getElementById('select-design-method'))?.value || 'LRFD',
@@ -4038,19 +4182,21 @@
             var elR = document.getElementById('conn-lap-right');
             if (elR) elR.value = toDisplay(maxLapR, 'length').toFixed(1);
         }
-        // 지점 Mu, Vu: 지점 위치(Lap end 제외)에서 최대 절대값
+        // 지점 Mu, Vu: 지점 부모멘트(Mu<0)에서 최대 절대값 — Lap 접합부에 전달
+        // Lap end 제외, 정모멘트(Mu>0) 제외 → 지점 부모멘트만 선택
         var gov = data.governing || data.gravity;
         if (gov && gov.locations) {
-            var maxMu = 0, maxVu = 0;
+            var maxNegMu = 0, maxVu = 0;
             gov.locations.forEach(function(loc) {
                 if ((loc.name || '').indexOf('Lap end') === 0) return;
-                if (loc.Mu != null && Math.abs(loc.Mu) > Math.abs(maxMu)) maxMu = loc.Mu;
+                // 부모멘트(Mu < 0)인 지점 위치만 필터링
+                if (loc.Mu != null && loc.Mu < 0 && Math.abs(loc.Mu) > Math.abs(maxNegMu)) maxNegMu = loc.Mu;
                 if (loc.Vu != null && Math.abs(loc.Vu) > maxVu) maxVu = Math.abs(loc.Vu);
             });
-            if (maxMu !== 0) {
+            if (maxNegMu !== 0) {
                 var elMu = document.getElementById('conn-Mu');
                 // locations.Mu는 kip-ft, conn-Mu는 moment(kip-in) 단위 → ×12 변환 필요
-                if (elMu) elMu.value = toDisplay(Math.abs(maxMu) * 12, 'moment').toFixed(2);
+                if (elMu) elMu.value = toDisplay(Math.abs(maxNegMu) * 12, 'moment').toFixed(2);
             }
             if (maxVu > 0) {
                 var elVu = document.getElementById('conn-Vu');
@@ -4810,7 +4956,8 @@
             ['Lr','load-Lr-psf','지붕 활하중'],
             ['S','load-S-psf','적설하중'],
             ['L','load-L-psf','바닥 활하중'],
-            ['W (양력)','load-Wu-psf','풍양력 하중'],
+            ['Wu (양력)','load-Wu-psf','풍양력 하중(부압)'],
+            ['Wp (정압)','load-Wp-psf','풍정압 하중'],
         ];
         loadDefs.forEach(ld => {
             const psf = getNum(ld[1],0);
