@@ -59,38 +59,3 @@ def cutwp_prop(node: np.ndarray, elem: np.ndarray) -> dict:
         'Cw': Cw, 'B1': B1, 'B2': B2,
         'warp': wn.tolist() if isinstance(wn, np.ndarray) else [0.0] * node.shape[0],
     }
-
-
-def _trace_section_path(elem: np.ndarray, nnodes: int) -> list:
-    """요소 연결 순서대로 절점 경로 추적 (개단면)"""
-    adj = {i: [] for i in range(nnodes)}
-    for e in range(elem.shape[0]):
-        ni = int(elem[e, 1]) - 1
-        nj = int(elem[e, 2]) - 1
-        adj[ni].append(nj)
-        adj[nj].append(ni)
-
-    # 단부 절점 찾기 (인접 1개)
-    start = 0
-    for n in range(nnodes):
-        if len(adj[n]) == 1:
-            start = n
-            break
-
-    # DFS로 경로 추적
-    path = [start]
-    visited = {start}
-    current = start
-    while True:
-        found = False
-        for neighbor in adj[current]:
-            if neighbor not in visited:
-                path.append(neighbor)
-                visited.add(neighbor)
-                current = neighbor
-                found = True
-                break
-        if not found:
-            break
-
-    return path

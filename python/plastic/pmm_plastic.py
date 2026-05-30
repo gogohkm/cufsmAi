@@ -16,7 +16,8 @@ from engine.stress import yieldMP
 
 
 def pmm_plastic(node: np.ndarray, elem: np.ndarray,
-                fy: float, n_theta: int = 36, n_na: int = 21) -> dict:
+                fy: float, n_theta: int = 36, n_na: int = 21,
+                n_fibers_per_elem: int = None) -> dict:
     """소성 상호작용곡면 계산 (주축 좌표계)
 
     MATLAB PMM_Plastic.m 알고리즘을 충실히 포팅:
@@ -30,6 +31,8 @@ def pmm_plastic(node: np.ndarray, elem: np.ndarray,
         fy: 항복 응력
         n_theta: 중립축 각도 분할 수
         n_na: 중립축 위치 분할 수
+        n_fibers_per_elem: 요소당 파이버 수. None이면 요소 길이 기반으로
+            자동 산정(요소당 max(10, int(L/0.1)))하여 곡면을 매끄럽게 한다.
 
     Returns:
         dict: 정규화된 곡면 + 항복값 + 메타 정보
@@ -51,7 +54,7 @@ def pmm_plastic(node: np.ndarray, elem: np.ndarray,
     Mzz_y = ymp['Mzz_y']
 
     # --- 파이버 생성 ---
-    fibers = _create_fibers(node, elem)
+    fibers = _create_fibers(node, elem, n_fibers_per_elem)
     n_fibers = len(fibers)
 
     # --- 도심 이동 + 주축 회전 ---
@@ -125,16 +128,24 @@ def pmm_plastic(node: np.ndarray, elem: np.ndarray,
 
 
 def _create_fibers(node: np.ndarray, elem: np.ndarray,
-                    n_fibers_per_elem: int = 4) -> list:
+                   n_fibers_per_elem: int = None) -> list:
     """요소를 파이버로 이산화
 
     Args:
         node: (nnodes, 8)
         elem: (nelems, 5) — 1-based
-        n_fibers_per_elem: 요소당 파이버 수
+        n_fibers_per_elem: 요소당 파이버 수. None이면 요소 길이에 따라
+            요소마다 max(10, int(L/0.1)) 개로 자동 분할한다(아래 참조).
 
     Returns:
         list of (x, z, area) tuples
+
+    Note:
+        기본값(None)일 때 요소당 파이버 수를 길이 기반으로 산정하여
+        engine.properties._calc_plastic_modulus 와 일치시킨다
+        (요소당 최소 10개, 길이가 길면 0.1 길이마다 1개). 고정된 4개는
+        긴 웹/플랜지 요소에서 응력 분포를 과소이산화하여 상호작용곡면이
+        들쭉날쭉해지므로, 곡면 매끄러움을 위해 밀도를 높인다.
     """
     fibers = []
     nelems = elem.shape[0]
@@ -148,11 +159,14 @@ def _create_fibers(node: np.ndarray, elem: np.ndarray,
         xj, zj = node[nj, 1], node[nj, 2]
 
         L = math.sqrt((xj - xi)**2 + (zj - zi)**2)
-        fiber_length = L / n_fibers_per_elem
+        # 길이 기반 분할 (properties._calc_plastic_modulus 와 동일)
+        n_fib = n_fibers_per_elem if n_fibers_per_elem is not None \
+            else max(10, int(L / 0.1))
+        fiber_length = L / n_fib
         area = fiber_length * t
 
-        for f in range(n_fibers_per_elem):
-            frac = (f + 0.5) / n_fibers_per_elem
+        for f in range(n_fib):
+            frac = (f + 0.5) / n_fib
             x = xi + frac * (xj - xi)
             z = zi + frac * (zj - zi)
             fibers.append((x, z, area))

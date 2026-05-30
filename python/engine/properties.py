@@ -145,7 +145,12 @@ def grosprop(node: np.ndarray, elem: np.ndarray) -> dict:
         Azz += A_e * z_c**2
         Axz += A_e * x_c * z_c
 
-        # 요소 자체의 관성모멘트 (중심축)
+        # 요소 자체의 관성모멘트 (중심축) — thin-wall convention.
+        # grosprop.m은 두께방향 자기관성항 t^2*sin^2(theta)를 포함하지만
+        # (Ref_Source/helpers/grosprop.m L29-32), 여기서는 이를 의도적으로 생략하여
+        # cutwp_prop2.m(Ref_Source/analysis/cutwp_prop2.m L150-152, Ix=yd^2/12*L*t)의
+        # 박벽 관례와 일치시킨다. 이로써 grosprop과 cutwp(FSM/DSM 경로)가 서로 일관되며
+        # Sf 기반 My가 FSM 경로와 어긋나지 않는다. (t/width)^2 ~0.01-0.25% 수준의 차이만 발생.
         Ixx_o += t * L**3 * dz**2 / L**2 / 12.0  # = t * L * dz^2 / 12
         Izz_o += t * L**3 * dx**2 / L**2 / 12.0
         Ixz_o += t * L**3 * dx * dz / L**2 / 12.0

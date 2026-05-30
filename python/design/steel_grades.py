@@ -6,7 +6,7 @@ KS D 3506, KS D 3530, AISI S100-16 Chapter A3 참조
 
 # 공통 물성 (모든 강재) — AISI S100-16 §A3.1
 E = 29500.0   # ksi — 탄성계수 (203,395 MPa)
-G = 11346.0   # ksi — 전단탄성계수 (78,230 MPa) = E / (2*(1+nu))
+G = 11300.0   # ksi — 전단탄성계수 (77,900 MPa) — AISI S100-16 §A3.1 published constant (rounded, not E/(2*(1+nu))=11346)
 nu = 0.30     # 포아송비
 
 STEEL_GRADES = {

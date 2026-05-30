@@ -149,6 +149,20 @@ def _estimate_cold_work_areas(section: dict, props: dict, R: float, t: float) ->
 
 def design_member(params: dict) -> dict:
     """부재 설계 계산 메인 디스패처"""
+    # design_method 정규화/검증: 인식 불가 값이 ASD로 위장(silent fallthrough)하는 것을 막는다.
+    # Chapters E~H는 LRFD(φ)/ASD(Ω)와 LSD(φ, 캐나다)를 정의한다. 본 도구는 LRFD/ASD만 구현하며,
+    # LSD는 미지원이므로 명시적으로 거부한다(자동 ASD 처리 금지).
+    dm = params.get('design_method', 'LRFD')
+    dm_norm = str(dm).strip().upper()
+    if dm_norm not in ('LRFD', 'ASD'):
+        if dm_norm == 'LSD':
+            return {
+                'error': 'LSD(Limit States Design, 캐나다) φ 계수(예: φc=0.80)는 미구현입니다. '
+                         'LRFD 또는 ASD를 사용하세요.'
+            }
+        return {'error': f"Unrecognized design_method '{dm}'. Use 'LRFD' or 'ASD'."}
+    params = {**params, 'design_method': dm_norm}
+
     # props가 없으면 단면 템플릿에서 자동 생성
     if not params.get('props') or not params['props'].get('A'):
         params = _auto_generate_props(params)
@@ -170,9 +184,23 @@ def design_member(params: dict) -> dict:
 
     # DSM 적용 한계 검증 (접합부 제외)
     if 'error' not in result:
-        dsm_warnings = check_dsm_limits(params)
+        dsm_warnings = check_dsm_limits(params, member_type=member_type)
         if dsm_warnings:
             result['dsm_warnings'] = dsm_warnings
+            # §B3.3 / §B4.2: Table B4.1-1 한계를 벗어난 부재는 Chapters E~H의
+            # φ/Ω를 자동으로 사용할 수 없다. A1.2(c) 합리적 해석 또는 K2 시험자료로
+            # φ/Ω를 재정립해야 한다. 따라서 기본 φ/Ω로 산출된 강도/이용률을
+            # '코드 적합(green pass)'으로 표시하지 않는다.
+            result['b4_limits_exceeded'] = True
+            result['utilization_valid'] = False
+            result['pass'] = None  # 'OK' 표시 차단 — B4.2 절차 필요
+            result.setdefault('warnings', [])
+            result['warnings'].append(
+                '§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. '
+                'Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, '
+                'A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. '
+                '내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다.'
+            )
 
     # 보고서 생성
     if 'error' not in result:
@@ -185,25 +213,48 @@ def design_member(params: dict) -> dict:
 # DSM 적용 한계 검증 (Table B4.1-1)
 # ============================================================
 
-def check_dsm_limits(params: dict) -> list:
+def check_dsm_limits(params: dict, member_type: str = None) -> list:
     """DSM 적용 한계 검증 (AISI S100-16 Table B4.1-1)
+
+    member_type: 'compression' / 'flexure' / 'combined' / 'tension' — 웹 한계가
+    응력 상태에 따라 달라지므로 전달한다. 휨/조합 부재의 웹은 응력 구배 하에 있어
+    Table B4.1-1 '응력 구배 하의 보강 요소(웹)' 행의 DSM 한계 h/t ≤ 300이 적용된다.
+    압축(균일 응력) 부재의 보강 요소는 w/t ≤ 500이다.
+
+    참고: EWM 하위 한계(무보강 웹 <200, 보강 시 ≤260/≤300)는 본 도구가 DSM 기반이므로
+    구현하지 않는다.
 
     Returns: list of warnings (빈 리스트면 모두 통과)
     """
     props = params.get('props', {})
     Fy = params.get('Fy', 35.53)
     t = props.get('t', 0)
+    if member_type is None:
+        member_type = params.get('member_type', 'compression')
     warnings = []
 
     if t <= 0:
         return warnings
 
-    # 보강 요소 (웹): w/t ≤ 500
+    # 보강 요소 (웹): Table B4.1-1
+    #  - 압축(균일 응력): w/t ≤ 500 'stiffened element in compression'
+    #  - 휨/조합(응력 구배): h/t ≤ 300 'stiffened element in bending'
+    #    (조합 부재 웹은 축력+휨을 동시에 받으므로 더 엄격한 300이 지배)
     h_web = props.get('h_web', 0)
     if h_web > 0:
         wt_web = h_web / t
-        if wt_web > 500:
-            warnings.append(f'Web w/t = {wt_web:.1f} > 500 (Table B4.1-1 stiffened limit)')
+        if member_type in ('flexure', 'combined'):
+            if wt_web > 300:
+                warnings.append(
+                    f'Web h/t = {wt_web:.1f} > 300 '
+                    '(Table B4.1-1 stiffened element in bending limit)'
+                )
+        else:
+            if wt_web > 500:
+                warnings.append(
+                    f'Web w/t = {wt_web:.1f} > 500 '
+                    '(Table B4.1-1 stiffened element in compression limit)'
+                )
 
     # 연단보강 요소 (플랜지): b/t ≤ 160
     b_flange = props.get('b_flange', 0)
@@ -265,6 +316,14 @@ def _design_compression(params: dict) -> dict:
     spec_sections = []
     warnings = []
 
+    # 유효좌굴길이가 전달되지 않으면 기본 120 in이 강도를 결정하므로 경고를 남긴다.
+    # (실제 지정값과 무관하게 부재가 존재할 수 있으므로 멤버십으로 부재 여부만 판단)
+    if not any(k in params for k in ('KxLx', 'KyLy', 'KtLt')):
+        warnings.append(
+            'Effective length defaulted to KxLx=KyLy=KtLt=120 in — '
+            'verify against actual unbraced/braced lengths'
+        )
+
     if Pcrl == 0 and Pcrd == 0:
         warnings.append(
             'Pcrl=0, Pcrd=0: 좌굴 해석 결과가 없어 좌굴 감소가 적용되지 않습니다. '
@@ -287,6 +346,17 @@ def _design_compression(params: dict) -> dict:
     global_result = column_global_strength(Fy, Fcre, Ag_eff)
     Pne = global_result['Pne']
     spec_sections.append('E2')
+
+    # §E2: Fcre를 계산할 수 없으면(rx/ry/ro/J/Cw 누락 시 compute_column_Fcre가 0 반환)
+    # Pne=0 → Pn=0이 되어 강도가 0으로 잠긴다. 이를 유효한 설계(0강도 통과)로 오인하지
+    # 않도록 명시적 경고를 남긴다. 근본 원인은 보통 cutwp 실패로 J/Cw가 0이 된 경우다.
+    if Fcre <= 0 or Pne <= 0:
+        _cutwp_note = ' (cutwp 해석 실패로 J/Cw=0이 되었습니다)' if props.get('cutwp_failed') else ''
+        warnings.append(
+            '§E2: 전체 탄성좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). '
+            f'비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{_cutwp_note}. '
+            '0 강도를 유효한 설계로 해석하지 마십시오.'
+        )
 
     steps.append({
         'step': 2, 'name': 'Global Buckling (Pne)',
@@ -349,6 +419,7 @@ def _design_compression(params: dict) -> dict:
     # Pcrd=0 fallback: signature curve에서 뒤틀림 극소 미검출 시
     # AISI Appendix 2, §2.3.1.3 해석적 공식으로 Fcrd 계산
     Pcrd_source = 'FSM'
+    distortional_not_evaluated = False
     if Pcrd == 0 and Ag > 0:
         section = params.get('section', {})
         ho = props.get('h_web', 0) or section.get('depth', 0)
@@ -366,16 +437,24 @@ def _design_compression(params: dict) -> dict:
                 fp = calc_flange_properties(b_cl, d_cl, t, 90.0, sec_type)
                 fcrd_result = calc_Fcrd(fp, ho, t, xi_web=0)  # compression
                 Fcrd_calc = fcrd_result['Fcrd']
+                Lcrd_val = fcrd_result.get('Lcrd', '')
                 if Fcrd_calc > 0:
                     Pcrd = Fcrd_calc * Ag_eff
                     Pcrd_source = '§2.3.1.3'
                     warnings.append(
                         f'Pcrd: signature curve에서 뒤틀림 극소 미검출 → '
                         f'Appendix 2 §2.3.1.3 해석적 공식 사용 '
-                        f'(Fcrd={Fcrd_calc:.2f} ksi, Lcrd={fcrd_result["Lcrd"]} in)'
+                        f'(Fcrd={Fcrd_calc:.2f} ksi, Lcrd={Lcrd_val} in)'
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                # 해석적 fallback이 시도되었으나 실패 — 삼키지 않고 표면화한다.
+                # 왜곡좌굴(E4)이 실제 지배할 경우 Pn=min(Pne,Pnl,Py)가 과대평가될 수 있다.
+                distortional_not_evaluated = True
+                warnings.append(
+                    f'Pcrd 해석적 fallback(Appendix 2 §2.3.1.3) 실패: {e} — '
+                    '왜곡좌굴(E4)이 평가되지 않았습니다. Pn에 왜곡좌굴 한계상태가 누락되었으므로 '
+                    '유효한 공칭강도로 단정하지 마십시오.'
+                )
 
     if Pcrd > 0:
         dist_result = compression_distortional(Py, Pcrd)
@@ -398,10 +477,13 @@ def _design_compression(params: dict) -> dict:
     })
 
     # Step 5: 공칭강도
+    # 지배 모드는 실제로 좌굴이 강도를 감소시킨 경우에만 국부/왜곡으로 표시한다.
+    # Pcrl=0이면 Pnl=Pne(직접 대입), Pcrd=0이면 Pnd=Py이므로, 전체좌굴이 지배할 때
+    # bare float equality(Pn==Pnl)만으로는 국부좌굴로 오표시된다(휨 경로 line 736 방식과 일치).
     Pn = min(Pne, Pnl, Pnd)
-    if Pn == Pnl:
+    if Pn == Pnl and Pnl < Pne:
         mode = 'Local Buckling'
-    elif Pn == Pnd:
+    elif Pn == Pnd and Pnd < Pne:
         mode = 'Distortional Buckling'
     else:
         mode = f'Global Buckling ({Fcre_result.get("buckling_type", "")})'
@@ -443,6 +525,14 @@ def _design_compression(params: dict) -> dict:
             'formula': f'Pn/Ω = {Pn:.2f} kips/{omega} = {Pn_omega:.2f} kips',
         })
 
+    # 0 공칭강도는 어떤 경우에도 유효한 설계가 아니다 → Pu 유무와 무관하게 pass=False.
+    if Pn <= 0:
+        pass_flag = False
+    elif Pu > 0:
+        pass_flag = utilization <= 1.0
+    else:
+        pass_flag = None
+
     return {
         'member_type': 'compression',
         'method': 'DSM',
@@ -457,7 +547,8 @@ def _design_compression(params: dict) -> dict:
         'Pn_omega': round(Pn_omega, 2),
         'design_strength': round(design_strength, 2),
         'utilization': round(utilization, 4) if Pu > 0 else None,
-        'pass': utilization <= 1.0 if Pu > 0 else None,
+        'pass': pass_flag,
+        'distortional_not_evaluated': distortional_not_evaluated,
         'steps': steps,
         'spec_sections': list(set(spec_sections)),
         'warnings': warnings,
@@ -494,6 +585,10 @@ def _design_flexure(params: dict) -> dict:
     section_type = _effective_section_type(params)
     Zf = props.get('Zx', 0) or props.get('Zf', 0)
     use_ir = params.get('use_inelastic_reserve', False)
+
+    # Lb 미지정 시 기본 120 in이 LTB 강도를 결정하므로 경고를 남긴다.
+    if 'Lb' not in params:
+        warnings.append('Lb defaulted to 120 in — verify lateral unbraced length')
 
     if Mcrl == 0 and Mcrd == 0:
         warnings.append(
@@ -543,15 +638,34 @@ def _design_flexure(params: dict) -> dict:
                 except Exception:
                     pass
 
+        # §F2.4.2-3: 부재 소성모멘트 Mp = Zf×Fy (탄성 임계값과 달리 Fy/Fya에 비례)
+        Mp = Zf * Fy_eval if Zf > 0 else 0.0
+
         if Mcrl_eff > 0:
             local_result = flexure_local(Mne, Mcrl_eff)
             Mnl = local_result['Mnl']
+            # §F3.2.3 국부 비탄성 예비강도: λl=√(My/Mcrl)≤0.776 이고 Mne≥My 일 때.
+            # 주의: §F3.2.3-3의 λl은 √(My/Mcrl)이며 §F3.2.1-3의 √(Mne/Mcrl)과 다르다.
+            if allow_ir and Mp > Mne and My > 0 and Mne >= My:
+                lam_l_ir = math.sqrt(My / Mcrl_eff)
+                if lam_l_ir <= 0.776:
+                    Cyl = min(math.sqrt(0.776 / lam_l_ir), 3.0) if lam_l_ir > 0 else 3.0
+                    Mnl_ir = My + (1 - 1 / Cyl ** 2) * (Mp - My)  # Eq. F3.2.3-1
+                    # F3.2.3은 소성 기반으로 Mnl을 끌어올린다(비탄성 예비). non-IR 값보다 클 때만 채택.
+                    if Mnl_ir > Mnl:
+                        Mnl = Mnl_ir
+                        local_result = {
+                            'lambda_l': lam_l_ir,
+                            'equation': 'F3.2.3-1 (local inelastic reserve)',
+                            'Cyl': Cyl,
+                        }
         else:
             local_result = {'lambda_l': 0, 'equation': 'N/A'}
             Mnl = Mne
 
         Mcrd_eff = Mcrd if Mcrd > 0 else 0
         Mcrd_source = 'FSM'
+        mcrd_fallback_failed = False
 
         # §2.3.3.3 해석적 Fcrd fallback
         if Mcrd_eff == 0 and Sf > 0:
@@ -578,14 +692,25 @@ def _design_flexure(params: dict) -> dict:
                     if Fcrd_calc > 0:
                         Mcrd_eff = Fcrd_calc * Sf_eff
                         Mcrd_source = '§2.3.3.3'
-                except Exception:
-                    pass
+                except Exception as e:
+                    # 해석적 fallback이 시도되었으나 실패 — 삼키지 않고 표면화한다.
+                    # 왜곡좌굴(F4)이 실제 지배하면 Mn=min(Mne,Mnl,My)가 과대평가될 수 있다.
+                    mcrd_fallback_failed = True
+                    warnings.append(
+                        f'Mcrd 해석적 fallback(Appendix 2 §2.3.3.3) 실패: {e} — '
+                        '왜곡좌굴(F4)이 평가되지 않았습니다. Mn에 왜곡좌굴 한계상태가 누락되었으므로 '
+                        '유효한 공칭강도로 단정하지 마십시오.'
+                    )
+
+        # 정모멘트 구간 등 다른 곡률을 위한 β 미적용 기준 Mcrd 보존 (positive-region용)
+        Mcrd_base = Mcrd_eff
 
         # [문제4] §2.3.3.3 Eq. 2.3.3.3-3: β 모멘트 구배 보정
         beta_dist = 1.0
         beta_note = ''
         if Mcrd_eff > 0 and dist_M1_M2 is not None and dist_Lm > 0:
-            import math
+            # math는 모듈 최상단에서 import됨 (함수 내 재-import 시 math가 지역변수로
+            # 묶여 IR 분기의 선행 math.sqrt 호출이 UnboundLocalError를 일으킨다 — 제거).
             Lcrd_val = dist_Lcrd if dist_Lcrd > 0 else dist_Lm
             L_beta = min(Lcrd_val, dist_Lm)
             ratio_L = L_beta / dist_Lm if dist_Lm > 0 else 1.0
@@ -603,11 +728,35 @@ def _design_flexure(params: dict) -> dict:
         if Mcrd_eff > 0:
             dist_result = flexure_distortional(My, Mcrd_eff)
             Mnd = dist_result['Mnd']
+            # §F4.3 왜곡 비탄성 예비강도: λd=√(My/Mcrd)≤0.673 일 때.
+            if allow_ir and Mp > My and My > 0:
+                lam_d_ir = math.sqrt(My / Mcrd_eff)
+                if lam_d_ir <= 0.673:
+                    Cyd = min(math.sqrt(0.673 / lam_d_ir), 3.0) if lam_d_ir > 0 else 3.0
+                    Mnd_ir = My + (1 - 1 / Cyd ** 2) * (Mp - My)  # Eq. F4.3-1
+                    if Mnd_ir > Mnd:
+                        Mnd = Mnd_ir
+                        dist_result = {
+                            'lambda_d': lam_d_ir,
+                            'equation': 'F4.3-1 (distortional inelastic reserve)',
+                            'Cyd': Cyd,
+                        }
         else:
             dist_result = {'lambda_d': 0, 'equation': 'N/A'}
             Mnd = My
 
-        Mnfo = flexure_local(My, Mcrl_eff)['Mnl'] if Mcrl_eff > 0 else My
+        # Mnfo: Mne=My 가정의 국부좌굴 강도(§I6.2.1, Fn=Fy → Mne=My).
+        # IR 활성 시 §F3.2.3 소성값(λl=√(My/Mcrl)≤0.776)으로 끌어올리되 소성 상한을 초과하지 않게 한다.
+        if Mcrl_eff > 0:
+            Mnfo = flexure_local(My, Mcrl_eff)['Mnl']
+            if allow_ir and Mp > My and My > 0:
+                lam_l_fo = math.sqrt(My / Mcrl_eff)
+                if lam_l_fo <= 0.776:
+                    Cyl_fo = min(math.sqrt(0.776 / lam_l_fo), 3.0) if lam_l_fo > 0 else 3.0
+                    Mnfo_ir = My + (1 - 1 / Cyl_fo ** 2) * (Mp - My)  # Eq. F3.2.3-1
+                    Mnfo = max(Mnfo, Mnfo_ir)
+        else:
+            Mnfo = My
         return {
             'Fy': Fy_eval,
             'My': My,
@@ -620,11 +769,14 @@ def _design_flexure(params: dict) -> dict:
             'local_result': local_result,
             'Mnl': Mnl,
             'Mcrd': Mcrd_eff,
+            'Mcrd_base': Mcrd_base,
             'Mcrd_source': Mcrd_source,
             'beta_dist': beta_dist,
             'dist_result': dist_result,
             'Mnd': Mnd,
             'Mnfo': Mnfo,
+            'Mp': Mp,
+            'mcrd_fallback_failed': mcrd_fallback_failed,
         }
 
     state = _calc_flexure_state(Fy_original, use_ir)
@@ -637,15 +789,27 @@ def _design_flexure(params: dict) -> dict:
             cold_work_info = cold_work_strength(
                 Fyv=Fy_original, Fuv=Fu, R=R, t=t, **cw_area_kwargs
             )
+            # §A3.3.2 적용한계: 냉간가공 증가는 "Fy 응력 수준에서 국부/왜곡좌굴에 의한
+            # 강도 감소를 받지 않는 단면"에만 허용된다 — 보 부재의 경우 Mnl=Mne(국부 비지배)
+            # AND Mnd=My(왜곡 비지배). 둘 중 하나라도 강도를 줄이면 Fya를 적용해서는 안 된다.
+            # virgin-Fy 상태(이미 계산된 state)에서 부동소수 허용오차로 판정한다.
+            _ir_tol = 1e-6
+            _cw_applicable_geom = (
+                abs(state['Mnl'] - state['Mne']) <= _ir_tol * max(state['Mne'], 1.0)
+                and abs(state['Mnd'] - state['My']) <= _ir_tol * max(state['My'], 1.0)
+            )
             if use_ir:
                 warnings.append('§A3.3.2: Cold Work(Fya)와 §F2.4.2 Inelastic Reserve는 동시 적용 불가. Cold Work를 적용하지 않았습니다.')
+            elif not _cw_applicable_geom:
+                # 국부 또는 왜곡좌굴이 강도를 감소시키는 단면 → §A3.3.2 적용 불가.
+                warnings.append(
+                    '§A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키므로 '
+                    '(Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.'
+                )
             elif cold_work_info['applicable'] and cold_work_info['Fya'] > Fy_original:
-                # §A3.3.2: Fya를 Fy 대신 대입하여 재계산 — DSM이 좌굴 감소를 자동 반영.
-                # §A3.3.2 한정: 냉간가공 증가는 "Fy 응력 수준에서 국부/왜곡좌굴에 의한
-                # 강도 감소를 받지 않는 단면"(즉 Mn=Mne, Mnd=My)에만 적용 가능.
-                # Mcrl/Mcrd는 탄성값으로 Fya에 비례하지 않으므로(위 _calc_flexure_state 참조),
-                # 국부/왜곡좌굴 지배 단면은 Fya 적용 시 λl/λd가 커져 강도가 늘지 않는다.
-                # 아래 Mn_cw ≤ Mn_virgin 가드가 이 §A3.3.2 적용한계를 보수적으로 구현한다.
+                # §A3.3.2: Fya를 Fy 대신 대입하여 재계산.
+                # 위 _cw_applicable_geom 게이트가 "국부/왜곡좌굴 비지배(Mnl=Mne, Mnd=My)" 조건을
+                # virgin-Fy 상태에서 명시적으로 확인했다. 아래 Mn_cw ≤ Mn_virgin 가드는 2차 안전장치다.
                 Mn_virgin = min(state['Mne'], state['Mnl'], state['Mnd'])
                 Fy = cold_work_info['Fya']
                 state = _calc_flexure_state(Fy, False)
@@ -710,6 +874,11 @@ def _design_flexure(params: dict) -> dict:
         spec_sections.append('F3.2')
     if Mcrd > 0:
         spec_sections.append('F4')
+    # §F3.2.3 / §F4.3: 국부/왜곡 비탄성 예비강도가 실제로 적용된 경우에만 인용
+    if str(local_result.get('equation', '')).startswith('F3.2.3'):
+        spec_sections.append('F3.2.3')
+    if str(dist_result.get('equation', '')).startswith('F4.3'):
+        spec_sections.append('F4.3')
     # [문제3] §I6.1.2 관통체결 조항 인용
     if params.get('through_fastened', False):
         spec_sections.append('I6.1.2')
@@ -717,10 +886,21 @@ def _design_flexure(params: dict) -> dict:
     ir_note = ''
     if use_ir and Zf > 0:
         Mp = global_result.get('Mp', 0)
-        if global_result.get('inelastic_reserve'):
+        # §F2.4.2/§F3.2.3/§F4.3 비탄성 예비강도가 실제로 한 한계상태라도 비-IR 값을
+        # 초과했는지 확인 — 그렇지 않으면 'Inelastic Reserve applied' 라벨이 오해를 부른다.
+        _ir_engaged = (
+            bool(global_result.get('inelastic_reserve'))
+            or str(local_result.get('equation', '')).startswith('F3.2.3')
+            or str(dist_result.get('equation', '')).startswith('F4.3')
+        )
+        if _ir_engaged:
             ir_note = f' [§F2.4.2 Inelastic Reserve: Mp={Mp:.2f} kip-in]'
         else:
             ir_note = ' [§F2.4.2 not applicable]'
+            warnings.append(
+                '§F2.4.2: Inelastic Reserve를 요청했으나 어떤 한계상태(F2.4.2/F3.2.3/F4.3)도 '
+                '비탄성 예비강도를 발휘하지 못했습니다(λ 한계 초과 또는 Mp≤My). My로 상한됩니다.'
+            )
 
     # [문제5] Cb + Fcre 상세 계산과정
     fcre_detail = getattr(compute_beam_Fcre, '_last_detail', {})
@@ -817,13 +997,10 @@ def _design_flexure(params: dict) -> dict:
     R_uplift = params.get('R_uplift')
     Mn = Mn_dsm
     if R_uplift is not None and R_uplift > 0:
-        # Mnfo: 국부좌굴 강도만 고려 (Fn=Fy, Mne=My 조건)
-        # DSM: Mnl (이미 Mne=My일 때의 값), 뒤틀림좌굴(Mnd) 제외
-        if Mcrl > 0:
-            Mnfo_result = flexure_local(My, Mcrl)
-            Mnfo = Mnfo_result['Mnl']
-        else:
-            Mnfo = My
+        # Mnfo: 국부좌굴 강도만 고려 (Fn=Fy, Mne=My 조건). state['Mnfo']는 IR 활성 시
+        # §F3.2.3 소성 상한(λl=√(My/Mcrl)≤0.776)을 이미 반영하므로, 왜곡(Mnd)이 제외된
+        # 이 경로에서도 국부 비탄성 상한을 초과하지 않는다(§A3.3.2/§F3.2.3 일관성).
+        Mnfo = state['Mnfo']
         Mn_R = R_uplift * Mnfo
         # R-factor 적용 시 Mnd 검토 불필요 (§I6.2.1)
         Mn = min(Mne, Mnl, Mn_R)  # Mnd 제외
@@ -895,6 +1072,7 @@ def _design_flexure(params: dict) -> dict:
         'use_cold_work': params.get('use_cold_work', False),
         'use_inelastic_reserve': use_ir,
         'beta_dist': state.get('beta_dist', 1.0),
+        'distortional_not_evaluated': state.get('mcrd_fallback_failed', False),
         'Fcre_detail': fcre_detail if fcre_detail else None,
         'Fy_used': round(Fy, 2),
         'Fy_original': round(Fy_original, 2),
@@ -926,8 +1104,13 @@ def _design_flexure(params: dict) -> dict:
         else:
             Mnl_pos = Mne_pos
 
-        if Mcrd > 0:
-            dist_pos = flexure_distortional(Sf * Fy, Mcrd)
+        # 정모멘트 구간의 왜곡좌굴: 부모멘트 구간에서 곱한 β(역곡률 증대)를 그대로
+        # 재사용하면 안 된다(§Appendix 2 Eq. 2.3.3.3-3의 β는 구간 곡률에 의존). 따라서
+        # β 미적용 기준값 Mcrd_base를 사용하여 정모멘트 구간은 β=1.0을 기본으로 한다.
+        # My_pos = Sf×Fy(총단면계수×Fy)는 Eq. F4.1-4에 부합하며 주 구간과 동일하다.
+        Mcrd_pos = state.get('Mcrd_base', Mcrd)
+        if Mcrd_pos > 0:
+            dist_pos = flexure_distortional(Sf * Fy, Mcrd_pos)
             Mnd_pos = dist_pos['Mnd']
         else:
             Mnd_pos = Sf * Fy
@@ -1032,19 +1215,41 @@ def _design_flexure(params: dict) -> dict:
 # ============================================================
 
 def _design_combined(params: dict) -> dict:
-    """조합 하중 설계 (압축 + 휨x + 휨y + 전단, §C1 모멘트 증폭 포함)"""
+    """조합 하중 설계 (압축 + 휨x + 휨y + 전단, §C1 모멘트 증폭 포함)
+
+    부호 규약: params['Pu'] 양수 = 압축(§H1.2), 음수 = 인장(§H1.1).
+    """
     design_method = params.get('design_method', 'LRFD')
     Fy = params.get('Fy', 35.53)
 
+    # §H1.1 vs §H1.2 분기: abs() 적용 전 원래 부호로 인장/압축을 판정한다.
+    Pu_raw = params.get('Pu', 0)
+    if Pu_raw < 0:
+        return _design_combined_tension(params, abs(Pu_raw))
+
     # 소요 하중
-    Pu = abs(params.get('Pu', 0))
+    Pu = abs(Pu_raw)
     Mux = abs(params.get('Mux', 0))
     Muy = abs(params.get('Muy', 0))
     Vu = abs(params.get('Vu', 0))
 
-    # Cm 등가모멘트 계수 (§C1, 기본 0.85 — 횡이동 없는 골조)
-    Cmx = params.get('Cmx', 0.85)
-    Cmy = params.get('Cmy', 0.85)
+    # Cm 등가모멘트 계수 (§C1.2.1.1 Eq. C1.2.1.1-4)
+    #  (a) 지간 사이 횡하중 없음: Cm = 0.6 - 0.4(M1/M2), M1/M2는 역곡률 양수/단일곡률 음수
+    #  (b) 지간 사이 횡하중 있음: Cm = 1.0 (보수적 기본값)
+    # 하중 구성을 알 수 없으면 0.85가 아니라 사양이 허용하는 보수적 1.0을 기본으로 한다.
+    M1_M2 = params.get('dist_M1_M2', None)
+    if params.get('Cmx') is not None:
+        Cmx = params.get('Cmx')
+    elif M1_M2 is not None and not params.get('transverse_load', False):
+        Cmx = 0.6 - 0.4 * M1_M2  # Eq. C1.2.1.1-4
+    else:
+        Cmx = 1.0
+    if params.get('Cmy') is not None:
+        Cmy = params.get('Cmy')
+    elif M1_M2 is not None and not params.get('transverse_load', False):
+        Cmy = 0.6 - 0.4 * M1_M2
+    else:
+        Cmy = 1.0
 
     # 압축 설계
     comp_params = {**params, 'member_type': 'compression', 'Pu': Pu}
@@ -1106,6 +1311,32 @@ def _design_combined(params: dict) -> dict:
     Max = flex_x['design_strength']
     May = flex_y['design_strength'] if flex_y else 1e10
 
+    # §H1.2 2번째 단락: 각형(angle) 단면(비대칭 무보강 각형의 미감소 Ae 또는 Pnl=Pne인
+    # 예외 경우 제외)은 My를 Muy 또는 Muy+(P)L/1000 중 P 허용값이 더 낮아지는 쪽으로 취한다.
+    # L은 부재 비지지 길이(in) — 본 코드의 단위계가 in이므로 P*L/1000은 kip-in 모멘트가 된다.
+    sec_type_eff = _effective_section_type(params).strip().lower()
+    is_angle = 'angle' in sec_type_eff
+    # 예외(L/1000 불필요): 비대칭 무보강 각형의 미감소 Ae 이거나 Pnl=Pne
+    angle_exempt = (comp.get('Pnl', 0) >= comp.get('Pne', 0)) if is_angle else True
+    angle_l1000_note = None
+    if is_angle and not angle_exempt:
+        L_angle = params.get('L', 0) or KyLy
+        Padd = Pu * L_angle / 1000.0
+        Muy_with_ecc = Muy_amp + Padd
+        # 두 경우를 모두 평가하여 P 허용값이 낮은(이용률이 큰) 쪽을 지배 케이스로 채택
+        inter_no_ecc = combined_axial_bending(Pu, Pa, Mux_amp, Max, Muy_amp, May)
+        inter_ecc = combined_axial_bending(Pu, Pa, Mux_amp, Max, Muy_with_ecc, May)
+        if inter_ecc['total'] >= inter_no_ecc['total']:
+            Muy_amp = Muy_with_ecc
+            angle_l1000_note = (
+                f'§H1.2: 각형 단면 → My = Muy + (P)L/1000 = {Muy_with_ecc:.2f} kip-in '
+                f'(P={Pu:.2f} kips, L={L_angle:.1f} in, 추가편심모멘트={Padd:.2f} kip-in)이 지배'
+            )
+        else:
+            angle_l1000_note = (
+                f'§H1.2: 각형 단면 추가편심 (P)L/1000={Padd:.2f} kip-in 검토 — Muy만 사용한 경우가 지배'
+            )
+
     # 상호작용 검토 (증폭된 모멘트 사용)
     interaction = combined_axial_bending(Pu, Pa, Mux_amp, Max, Muy_amp, May)
 
@@ -1126,6 +1357,9 @@ def _design_combined(params: dict) -> dict:
         'steps': comp['steps'] + flex_x['steps'],
         'spec_sections': list(set(comp['spec_sections'] + flex_x['spec_sections'] + ['H1.2'])),
     }
+    if angle_l1000_note:
+        result.setdefault('warnings', []).append(angle_l1000_note)
+        result['angle_l1000'] = angle_l1000_note
 
     # y축 휨 결과
     if flex_y:
@@ -1166,6 +1400,107 @@ def _design_combined(params: dict) -> dict:
             result['spec_sections'].append('H2')
 
     return result
+
+
+def _design_combined_tension(params: dict, T_abs: float) -> dict:
+    """§H1.1 조합 인장축력 + 휨 (Eq. H1.1-1, H1.1-2).
+
+    순 인장 부재는 P-δ 모멘트 증폭을 받지 않으므로(α=1.0, 증폭 없음) Mux/Muy를 증폭하지 않는다.
+    Eq. H1.1-1: Mx/Maxt + My/Mayt + T/Ta ≤ 1.0  (인장 플랜지 항복, Maxt=φb·Sft·Fy)
+    Eq. H1.1-2: Mx/Max  + My/May  - T/Ta ≤ 1.0  (좌굴 — Chapter F 강도)
+    """
+    design_method = params.get('design_method', 'LRFD')
+    Fy = params.get('Fy', 35.53)
+    Mux = abs(params.get('Mux', 0))
+    Muy = abs(params.get('Muy', 0))
+    props = params.get('props', {})
+
+    # Ta — Chapter D (항복/파단)
+    tens = _design_tension({**params, 'member_type': 'tension', 'Tu': T_abs})
+    if 'error' in tens:
+        return tens
+    Ta = tens['design_strength']
+
+    # 휨 (x축) — Chapter F 압축좌굴 강도 (Max, Eq. H1.1-2)
+    flex_x = _design_flexure({**params, 'member_type': 'flexure', 'Mu': Mux})
+    if 'error' in flex_x:
+        return flex_x
+    Max = flex_x['design_strength']
+
+    # y축 휨: 사용자 제공 강도 (자동 약축 DSM 미구현)
+    May_strength = params.get('May_strength', 0)
+    if Muy > 0 and May_strength <= 0:
+        return {
+            'error': 'Weak-axis flexure requires explicit May_strength. Automatic weak-axis DSM strength is not implemented.',
+            'member_type': 'combined',
+        }
+    May = May_strength if May_strength > 0 else 1e10
+
+    # Maxt / Mayt — 인장 플랜지 항복 (Eq. H1.1-3): φb·Sft·Fy (LRFD/LSD), Sft·Fy/Ωb (ASD)
+    # Sft = 극인장섬유 기준 총(미감소)단면계수. 본 코드는 Sx를 대표 단면계수로 사용한다.
+    Sft = props.get('Sft', 0) or props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
+    phi_b = PHI['flexure']
+    omega_b = OMEGA['flexure']
+    if design_method == 'LRFD':
+        Maxt = phi_b * Sft * Fy
+    else:
+        Maxt = Sft * Fy / omega_b
+    # 약축 인장항복 단면계수가 별도로 제공되지 않으면 사용자 제공 약축강도(May)로 대체
+    Sft_y = props.get('Sft_y', 0)
+    if Sft_y > 0:
+        Mayt = (phi_b * Sft_y * Fy) if design_method == 'LRFD' else (Sft_y * Fy / omega_b)
+    else:
+        Mayt = May
+
+    def _ratio(num, den):
+        return abs(num) / den if den and den > 0 else 0.0
+
+    # Eq. H1.1-1
+    r11 = _ratio(Mux, Maxt) + _ratio(Muy, Mayt) + _ratio(T_abs, Ta)
+    # Eq. H1.1-2 (-T/Ta 항)
+    r12 = _ratio(Mux, Max) + _ratio(Muy, May) - _ratio(T_abs, Ta)
+    total = max(r11, r12)
+    governing = 'H1.1-1' if r11 >= r12 else 'H1.1-2'
+
+    interaction = {
+        'eq_H1_1_1': round(r11, 4),
+        'eq_H1_1_2': round(r12, 4),
+        'total': round(total, 4),
+        'governing': governing,
+        'pass': total <= 1.0,
+        'equation': governing,
+        # UI 호환 키 (combined_axial_bending과 동일한 표시 키 일부 제공)
+        'P_ratio': round(_ratio(T_abs, Ta), 4),
+        'Mx_ratio': round(_ratio(Mux, Maxt if governing == 'H1.1-1' else Max), 4),
+        'My_ratio': round(_ratio(Muy, Mayt if governing == 'H1.1-1' else May), 4),
+    }
+
+    return {
+        'member_type': 'combined',
+        'load_type': 'tension+bending',
+        'design_method': design_method,
+        'tension': {
+            'Tn': tens.get('Tn'),
+            'design_strength': Ta,
+            'controlling_mode': tens.get('controlling_mode'),
+        },
+        'flexure_x': {
+            'Mn': flex_x['Mn'],
+            'design_strength': Max,
+            'controlling_mode': flex_x['controlling_mode'],
+        },
+        'Maxt': round(Maxt, 2),
+        'Mayt': round(Mayt, 2) if Mayt < 1e9 else None,
+        'interaction': interaction,
+        'steps': tens.get('steps', []) + flex_x.get('steps', []),
+        'spec_sections': list(set(tens.get('spec_sections', []) + flex_x['spec_sections'] + ['H1.1'])),
+        'warnings': [
+            '§H1.1: 순 인장축력 + 휨으로 평가했습니다(P-δ 모멘트 증폭 미적용). '
+            'Maxt=φb·Sft·Fy(인장항복), Max=Chapter F(압축좌굴). Pu 부호 규약: 음수=인장.'
+        ],
+        'pass': interaction['pass'],
+        'utilization': round(total, 4),
+    }
 
 
 # ============================================================
@@ -1369,7 +1704,8 @@ def design_guide(params: dict) -> dict:
         'cufsm_needed': True,
         **guide,
         'dsm_limits': {
-            'stiffened_wt': 500,
+            'stiffened_compression_wt': 500,   # 압축(균일 응력) 보강요소
+            'stiffened_bending_ht': 300,       # 휨(응력 구배) 보강요소(웹), Table B4.1-1
             'edge_stiffened_bt': 160,
             'unstiffened_dt': 60,
             'R_t': 20,
@@ -1539,9 +1875,13 @@ def _auto_generate_props(params: dict) -> dict:
             props['Cw'] = cw.get('Cw', 0)
             props['Xs'] = cw.get('Xs', 0)
             props['Zs'] = cw.get('Zs', 0)
-        except Exception:
+        except Exception as e:
+            # cutwp 실패 시 J/Cw=0 → 하류 compute_column_Fcre가 Fcre=0(→Pne=0)을 산출하는
+            # 근본 원인이다. 삼키지 않고 표면화하여 0강도가 유효 설계로 오인되지 않게 한다.
             props['J'] = 0
             props['Cw'] = 0
+            props['cutwp_failed'] = True
+            print(f'[StCFSD] cutwp_prop failed (J/Cw=0 → Fcre may be 0): {e}')
 
         # §E2.2/§F2.1: 전단중심 편심 xo = |Xs - xcg| (도심~전단중심 x거리).
         # 단축대칭 C-단면은 xo≠0 → compute_column_Fcre가 휨-비틀림좌굴 분기를 탄다.
@@ -1556,6 +1896,50 @@ def _auto_generate_props(params: dict) -> dict:
         R = params.get('R', 0) or params.get('r', 0)
         if R > 0:
             props['R'] = R
+
+        # ── DSM 적용한계/해석적 fallback/웹 크리플링용 기하 키 생성 ──
+        # check_dsm_limits(h_web/b_flange/d_lip)와 Pcrd/Mcrd 해석적 fallback, §H3 웹 크리플링은
+        # props['h_web']/['b_flange']/['d_lip']와 params['section']을 필요로 한다. grosprop은
+        # 이를 제공하지 않으므로 H/B/D/t/R(이미 스코프 내)로부터 Table B4.1-1 / Appendix 1의
+        # FLAT(평탄) 폭 규약으로 산정한다(out-to-out 아님). 요소별 내측 코너 수가 다르므로
+        # 웹(2 코너)·플랜지(웹코너+립코너)·립(1 코너)에 각각 다른 환산을 적용한다.
+        st_norm = str(section_type or 'lippedc').strip().lower().replace('-', '_')
+        Rf = R if R > 0 else 0.0
+        corner = Rf + t  # 한 내측 코너의 평탄폭 환산량 (out-to-out → flat)
+        has_lip = ('lipped' in st_norm) or (st_norm in ('c', 'z', 'lippedc', 'lippedz', 'lipped_angle'))
+        is_track = st_norm.startswith('track')
+        is_angle = 'angle' in st_norm
+        # 웹: 양 끝 2개 내측 코너
+        h_web_flat = max(H - 2 * corner, 0.0)
+        # 플랜지: 웹-플랜지 코너 1개 + (립 있으면) 플랜지-립 코너 1개
+        if has_lip and not is_angle:
+            b_flange_flat = max(B - 2 * corner, 0.0)
+        elif is_angle:
+            # 앵글 다리: 코너 1개(다리-다리 접합부)
+            b_flange_flat = max(B - corner, 0.0)
+        else:
+            # 무립(track/플랜지만): 웹-플랜지 코너 1개
+            b_flange_flat = max(B - corner, 0.0)
+        # 립: 끝단 자유, 플랜지-립 코너 1개
+        d_lip_flat = max(D - corner, 0.0) if (has_lip and D > 0) else 0.0
+        if h_web_flat > 0:
+            props.setdefault('h_web', h_web_flat)
+        if b_flange_flat > 0:
+            props.setdefault('b_flange', b_flange_flat)
+        if d_lip_flat > 0:
+            props.setdefault('d_lip', d_lip_flat)
+
+        # 해석적 fallback이 읽는 section dict(깊이/플랜지폭/립깊이/두께/유형 = out-to-out 치수)
+        sect = params.get('section') or {}
+        sect.setdefault('type', section_type)
+        sect.setdefault('depth', H)
+        sect.setdefault('flange_width', B)
+        if D > 0:
+            sect.setdefault('lip_depth', D)
+        sect.setdefault('thickness', t)
+        if R > 0:
+            sect.setdefault('r', R)
+        params['section'] = sect
 
         # DSM 값도 자동 계산
         if not params.get('dsm'):

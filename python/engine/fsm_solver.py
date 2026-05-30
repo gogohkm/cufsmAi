@@ -76,12 +76,14 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             t = elem[e, 3]
             matnum = int(elem[e, 4])
 
-            # 재료 물성 찾기
+            # 재료 물성 찾기 (MATLAB: row=find(matnum==prop(:,1)) — 미정의 시 fail-fast)
             mat_idx = np.where(prop[:, 0] == matnum)[0]
             if len(mat_idx) == 0:
-                mat_idx = 0
-            else:
-                mat_idx = mat_idx[0]
+                raise ValueError(
+                    f"Element {int(elem[e, 0])} references undefined material "
+                    f"{matnum}; available: {prop[:, 0].astype(int).tolist()}"
+                )
+            mat_idx = mat_idx[0]
             Ex = prop[mat_idx, 1]
             Ey = prop[mat_idx, 2]
             vx = prop[mat_idx, 3]
@@ -233,7 +235,13 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             continue
 
         # 양의 실수 고유치만 필터링 및 정렬
-        valid = np.where((np.isreal(eigenvalues)) & (np.real(eigenvalues) > 0))[0]
+        # stripmain.m line 364: find(lf>0 & imag(abs(lf))<0.00001) 의 의도(real() cast 포함)는
+        # |imag(lf)|<1e-5. 더불어 singular Kg 에서 나오는 inf(+0j) 를 isfinite 로 명시 제거.
+        valid = np.where(
+            (np.abs(np.imag(eigenvalues)) < 1e-5)
+            & (np.real(eigenvalues) > 0)
+            & np.isfinite(np.real(eigenvalues))
+        )[0]
         if len(valid) == 0:
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
@@ -291,15 +299,18 @@ def _get_free_dofs(node: np.ndarray, nnodes: int, totalm: int) -> np.ndarray:
     for m_idx in range(totalm):
         base = 4 * nnodes * m_idx
         for n in range(nnodes):
-            # 멤브레인 DOF: u (dofx=col3), v (dofz=col4)
-            if node[n, 3] == 1:  # dofx → u
+            # CUFSM DOF 규약 (constr_user.m, assemble.m 기준):
+            #   col3 dofx → 멤브레인 slot1 u (base+2n)
+            #   col4 dofz → 휨 slot1 w (base+skip+2n)   [out-of-plane]
+            #   col5 dofy → 멤브레인 slot2 v (base+2n+1) [longitudinal]
+            #   col6 dofrot → 휨 slot2 θ (base+skip+2n+1)
+            if node[n, 3] == 1:  # dofx → u (멤브레인)
                 free.append(base + 2 * n)
-            if node[n, 4] == 1:  # dofz → v
-                free.append(base + 2 * n + 1)
-            # 휨 DOF: w (dofy=col5), θ (dofrot=col6)
-            if node[n, 5] == 1:  # dofy → w
+            if node[n, 4] == 1:  # dofz → w (휨)
                 free.append(base + skip + 2 * n)
-            if node[n, 6] == 1:  # dofrot → θ
+            if node[n, 5] == 1:  # dofy → v (멤브레인)
+                free.append(base + 2 * n + 1)
+            if node[n, 6] == 1:  # dofrot → θ (휨)
                 free.append(base + skip + 2 * n + 1)
 
     return np.array(free, dtype=int)

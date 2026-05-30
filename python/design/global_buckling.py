@@ -76,14 +76,25 @@ def compute_column_Fcre(props: dict, Fy: float,
     """단면 성질로부터 압축 Fcre 계산 (§E2)
 
     Args:
-        props: {A, Ixx, Izz, J, Cw, xcg, zcg, rx, ry, xo, ro, ...}
+        props: {A, Ixx, Izz, Ixz, thetap, I11, I22, J, Cw, xcg, zcg,
+                rx, ry, xo, ro, section_type, ...}
               (get_section_properties + get_cutwp 결과)
+              I11/I22/thetap는 주관성모멘트/회전각 — §E2.3 점대칭(Z) 분기에서
+              약축(MINOR PRINCIPAL) 회전반경 r=√(I22/Ag) 산정에 사용한다.
     """
     Ag = props.get('A', 0)
     rx = props.get('rx', 0) or (math.sqrt(props.get('Ixx', 0) / Ag) if Ag > 0 else 0)
     ry = props.get('ry', 0) or (math.sqrt(props.get('Izz', 0) / Ag) if Ag > 0 else 0)
     J = props.get('J', 0)
     Cw = props.get('Cw', 0)
+
+    # §E2.2-4 주: rx, ry는 도심 PRINCIPAL 축 기준 회전반경이다. Ixz≠0 (thetap≠0)인
+    # Z 단면에서는 geometric Ixx/Izz가 주축이 아니므로 주관성모멘트 I11/I22로부터
+    # 주축 회전반경을 산출한다 (있을 때만; C 단면은 Ixz=0이라 영향 없음).
+    I11 = props.get('I11', 0)
+    I22 = props.get('I22', 0)
+    r_major = math.sqrt(I11 / Ag) if (I11 > 0 and Ag > 0) else 0.0   # 강축 주축
+    r_minor = math.sqrt(I22 / Ag) if (I22 > 0 and Ag > 0) else 0.0   # 약축(MINOR) 주축
 
     # xo — 전단중심 편심 (도심~전단중심 거리, §E2.2-4의 x_o)
     # props['xo']가 비어 있으면 compute_beam_Fcre와 동일하게 Xs - xcg로 복원한다
@@ -110,18 +121,29 @@ def compute_column_Fcre(props: dict, Fy: float,
     sigma_t = torsional_buckling_stress(E, G, Ag, J, Cw, ro, 1.0, KtLt)
 
     # 대칭 분류로 분기 결정 (§E2.1/E2.2/E2.3).
-    # 점대칭 단면(Z)은 xo≈0 이므로 이중대칭 분기(min σex/σey/σt)가 §E2.3와 일치한다.
-    # 단축대칭 단면(C, hat, 립앵글)은 xo≠0 이므로 휨-비틀림좌굴(E2.2-1)을 실행한다.
+    # 점대칭 단면(Z)은 §E2.3을 별도 분기로 처리한다 (아래). xo≈0만으로는
+    # 이중대칭/점대칭이 구분되지 않으므로 점대칭 분기가 우선한다.
     sec = str(props.get('section_type', '') or '').strip().upper().replace('-', '').replace('_', '')
     is_point_symmetric = sec.startswith('Z') or sec.startswith('LIPPEDZ')
+    # 형식이 미지정이어도 전단중심≈도심(xo≈0)이면서 Ixz≠0(주축이 회전)이면 점대칭으로 본다.
+    if not is_point_symmetric and abs(xo) < 1e-6 and abs(props.get('Ixz', 0)) > 1e-12 \
+            and not sec:
+        is_point_symmetric = True
     is_closed = sec in ('RHS', 'CHS', 'HSS', 'BOX', 'PIPE', 'TUBE')
 
     # 단축대칭 휨-비틀림 분기 게이트: 수치적으로 의미 있는 xo가 있고,
     # 점대칭/폐합/이중대칭으로 분류되지 않은 경우에만 E2.2를 적용한다.
     use_ft = (abs(xo) >= 1e-6) and not is_point_symmetric and not is_closed
 
-    if not use_ft:
-        # 이중대칭/폐합/점대칭: §E2.1 + §E2.2(이중대칭 비틀림) / §E2.3 → min(σex, σey, σt)
+    if is_point_symmetric:
+        # §E2.3 점대칭 단면(Z): Fcre = min(σt, 약축(MINOR PRINCIPAL)에 대한 유연좌굴응력).
+        # 약축 유연좌굴은 주관성모멘트 I22 기반 r_minor를 사용한다 (geometric Izz 아님).
+        r_use = r_minor if r_minor > 0 else ry
+        sigma_e_minor = flexural_buckling_stress(E, 1.0, KyLy, r_use) if r_use > 0 else 1e10
+        Fcre = min(sigma_t, sigma_e_minor)
+        buckling_type = 'torsional' if Fcre == sigma_t else 'flexural'
+    elif not use_ft:
+        # 이중대칭/폐합: §E2.1 + §E2.2(이중대칭 비틀림) → min(σex, σey, σt)
         Fcre = min(sigma_ex, sigma_ey, sigma_t)
         buckling_type = 'flexural' if Fcre in (sigma_ex, sigma_ey) else 'torsional'
     else:
@@ -146,18 +168,60 @@ def compute_column_Fcre(props: dict, Fy: float,
 # ============================================================
 
 def beam_global_strength(Fy: float, Fcre: float, Sf: float,
-                          Zf: float = 0, use_inelastic_reserve: bool = False) -> dict:
-    """전체좌굴(LTB) 휨강도 (§F2, §F2.4.2 Inelastic Reserve)
+                          Zf: float = 0, use_inelastic_reserve: bool = False,
+                          Sfy: float = None,
+                          section_type: str = 'C',
+                          D_over_t: float = None, E: float = E_STEEL) -> dict:
+    """전체좌굴(LTB) 휨강도 (§F2, §F2.3 round HSS, §F2.4.2 Inelastic Reserve)
 
     Args:
         Fy: 항복강도 (ksi)
         Fcre: 횡-비틀림좌굴 임계응력 (ksi)
-        Sf: 총단면 단면계수 (in³)
+        Sf: 총단면 단면계수 — 극단 압축섬유 기준 (in³).
+            Mne=Sf·Fn, Mcre=Sf·Fcre 에 사용.
         Zf: 소성단면계수 (in³) — Inelastic Reserve 적용 시 필요
         use_inelastic_reserve: True면 §F2.4.2 적용
+        Sfy: 첫 항복섬유 기준 단면계수 (in³). My=Sfy·Fy 에 사용 (§F2.1-2, My=Sfy·Fy).
+             None이면 Sf 사용. 대칭축 휨인 C/Z 단면은 Sfy=Sf 이므로 현재 코드가 정확하며,
+             이 인자는 비대칭 단면에서 첫 항복섬유가 극단 압축섬유와 다를 때만 의미가 있다.
+        section_type: 단면형식. 'CHS'/'ROUND'/'PIPE' + D_over_t 제공 시 §F2.3 적용.
+        D_over_t: 원형관의 외경/두께 비 — §F2.3 분기 판정에 사용 (CHS일 때만).
+        E: 탄성계수 (ksi) — §F2.3 D/t 한계 산정용.
+
+    Note (§F2.3 — round HSS): φ_b=0.95(LRFD)/Ω_b=1.67. φ_b 선택은 본 함수가 아니라
+    호출측(_design_flexure)에서 controlling 한계상태/단면형식에 따라 적용해야 한다.
+    반환 dict의 'equation'에 'F2.3'이 포함되면 호출측이 φ_b=0.95를 써야 함을 의미한다.
     """
     import math
-    My = Sf * Fy
+    # §F2.1-2: My = Sfy·Fy (첫 항복섬유 기준). 대칭 C/Z는 Sfy=Sf.
+    Sfy_eff = Sfy if (Sfy is not None and Sfy > 0) else Sf
+    My = Sfy_eff * Fy
+
+    sec = (section_type or 'C').upper().replace('-', '').replace('_', '')
+    is_round = sec in ('CHS', 'ROUND', 'PIPE', 'CYLINDRICAL') or sec.startswith('CHS') or sec.startswith('ROUND')
+
+    # ---- §F2.3 폐합 원형관 (Initiation of Yielding) -----------------------
+    # D/t ≤ 0.441 E/Fy 인 원형관은 개단면 LTB 곡선 대신 F2.3 직접식 사용.
+    if is_round and D_over_t is not None and D_over_t > 0 and Fy > 0 and E > 0:
+        ratio = (E / Fy) / D_over_t  # = (E/Fy)/(D/t)
+        lim_yield = 0.0714 * E / Fy
+        lim_inel = 0.318 * E / Fy
+        lim_max = 0.441 * E / Fy
+        if D_over_t <= lim_max:
+            if D_over_t <= lim_yield:
+                Fn = 1.25 * Fy                       # Eq. F2.3-2
+                eq = 'F2.3-2 (round HSS, Fn=1.25Fy)'
+            elif D_over_t <= lim_inel:
+                Fn = (0.970 + 0.020 * ratio) * Fy    # Eq. F2.3-3
+                eq = 'F2.3-3 (round HSS)'
+            else:
+                Fn = 0.328 * E / D_over_t            # Eq. F2.3-4
+                eq = 'F2.3-4 (round HSS)'
+            Mne = Sf * Fn                            # Eq. F2.3-1
+            # F2.3는 Fn이 1.25Fy까지 허용 → Mne를 Fy로 캡하지 않는다.
+            return {'Mne': Mne, 'Fn': Fn, 'My': My, 'Fcre': Fcre,
+                    'equation': eq, 'inelastic_reserve': False,
+                    'Mp': Zf * Fy if Zf > 0 else 0}
 
     if Fcre <= 0:
         return {'Mne': 0, 'Fn': 0, 'My': My, 'equation': 'F2 (Fcre=0)',
@@ -203,27 +267,80 @@ def beam_global_strength(Fy: float, Fcre: float, Sf: float,
 
 def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
                        E: float = E_STEEL, G: float = G_STEEL,
-                       section_type: str = 'C') -> float:
+                       section_type: str = 'C',
+                       Ly: float = None, Lt: float = None,
+                       Ky: float = 1.0, Kt: float = 1.0,
+                       Fy: float = 0.0) -> float:
     """횡-비틀림좌굴 임계응력 Fcre (§F2.1)
 
     C-section (§F2.1.1): Fcre = Cb × ro × A / Sf × √(σey × σt)
     Z-section (§F2.1.3): Fcre = Cb × ro × A / (2×Sf) × √(σey × σt)
                           → 분모에 **2** (점대칭 단면, Eq. F2.1.3-1)
+    Closed-box (§F2.1.4): Lb ≤ Lu이면 Fcre=∞(=1e6), 아니면
+                          Fcre = Cb×π/(Ky×Ly×Sf)×√(E×G×J×Iy)  (Eq. F2.1.4-2)
+                          → 개단면 σey·σt 공식을 사용하지 않음.
 
     Args:
-        section_type: 'C' or 'Z' — Z-section은 Fcre에 /2 적용
+        section_type: 'C', 'Z', 또는 폐합단면('RHS'/'BOX' 등). Z는 /2, 폐합은 F2.1.4.
+        Ly, Lt: 약축휨/비틀림 비지지길이 (in). 기본 None이면 둘 다 Lb로 설정
+                (하위호환). Ly≠Lt 허용 — §F2.1.1-4는 Ky·Ly, §F2.1.1-5는 Kt·Lt 사용.
+        Ky, Kt: 유효길이계수 (기본 1.0).
+        Fy: 항복강도 (ksi) — 폐합단면 §F2.1.4-1의 Lu 판정에만 사용 (선택).
     """
+    # §F2.1.1-4/-5: 약축휨(Ky·Ly)과 비틀림(Kt·Lt)에 별도 길이 허용.
+    # 하위호환: Ly/Lt 미지정 시 둘 다 Lb로 둔다 (Ky=Kt=1.0이면 기존 동작과 동일).
+    if Ly is None:
+        Ly = Lb
+    if Lt is None:
+        Lt = Lb
+
     Ag = props.get('A', 0)
 
     # Sf — 여러 키 이름 호환
     Sf = props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
 
-    # ry — 약축 회전반경 (냉간성형강: z축이 약축)
-    ry = props.get('ry', 0) or props.get('rz', 0)
-
     # J, Cw — cutwp에서 계산된 값
     J = props.get('J', 0)
     Cw = props.get('Cw', 0)
+
+    sec = (section_type or 'C').upper().replace('-', '').replace('_', '')
+
+    # ---- 폐합-박스 단면 (§F2.1.4) ----------------------------------------
+    # 개단면 LTB 공식(σey·σt 곱)은 폐합단면에 유효하지 않으므로 별도 분기.
+    is_closed_box = sec in ('RHS', 'BOX', 'HSS', 'TUBE') or sec.startswith('RHS') or sec.startswith('BOX')
+    if is_closed_box:
+        # Iy — 웹에 평행한 도심축에 대한 관성모멘트 (냉간성형강: 약축 = z축)
+        Iy = props.get('Iy', 0) or props.get('Izz', 0) or props.get('Iz', 0)
+        if Ag <= 0 or Sf <= 0 or Iy <= 0 or Ky <= 0:
+            return 0.0
+        if Lb <= 0:
+            return 1e6
+        root = E * G * J * Iy
+        if root <= 0:
+            return 0.0
+        # Eq. F2.1.4-1: Lu (Fy>0 알려진 경우에만 판정; 모르면 F2.1.4-2로 진행)
+        Lu = 0.0
+        if Fy > 0:
+            Lu = (0.36 * Cb * math.pi) / (Fy * Sf) * math.sqrt(root)
+        if Fy > 0 and Lb <= Lu:
+            # 글로벌 좌굴 비고려 → Fcre 사실상 무한대 (Fn=Fy)
+            Fcre = 1e6
+            eq = 'F2.1.4-1 (Lb<=Lu, Fn=Fy)'
+        else:
+            # Eq. F2.1.4-2
+            Fcre = (Cb * math.pi) / (Ky * Ly * Sf) * math.sqrt(root)
+            eq = 'F2.1.4-2 (closed-box)'
+        compute_beam_Fcre._last_detail = {
+            'Cb': Cb, 'Lb': Lb, 'Ly': Ly, 'Ky': Ky, 'Ag': round(Ag, 4),
+            'Sf': round(Sf, 4), 'Iy': round(Iy, 4), 'J': J,
+            'Lu': round(Lu, 4) if Lu else 0.0, 'Fcre': round(Fcre, 2),
+            'equation': eq,
+        }
+        return Fcre
+
+    # ---- 개단면 (§F2.1.1 C / §F2.1.3 Z) ----------------------------------
+    # ry — 약축 회전반경 (냉간성형강: z축이 약축)
+    ry = props.get('ry', 0) or props.get('rz', 0)
 
     # xo — 전단중심 편심 (도심~전단중심 거리)
     xo = abs(props.get('xo', 0))
@@ -248,9 +365,13 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     # Lb가 0이면 완전 구속 → Fcre = 매우 큰 값
     if Lb <= 0:
         return 1e6
+    if Ky * Ly <= 0 or Kt * Lt <= 0:
+        return 0.0
 
-    sigma_ey = math.pi ** 2 * E / (Lb / ry) ** 2
-    sigma_t = (1 / (Ag * ro ** 2)) * (G * J + math.pi ** 2 * E * Cw / Lb ** 2)
+    # §F2.1.1-4: σey = π²E/(Ky·Ly/ry)²   (약축휨)
+    sigma_ey = math.pi ** 2 * E / ((Ky * Ly) / ry) ** 2
+    # §F2.1.1-5: σt = 1/(A·ro²)·[GJ + π²E·Cw/(Kt·Lt)²]   (비틀림)
+    sigma_t = (1 / (Ag * ro ** 2)) * (G * J + math.pi ** 2 * E * Cw / (Kt * Lt) ** 2)
 
     if sigma_ey <= 0 or sigma_t <= 0:
         return 0.0
@@ -258,7 +379,6 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     Fcre = Cb * ro * Ag / Sf * math.sqrt(sigma_ey * sigma_t)
 
     # Z-section (§F2.1.3): 분모에 2 — 점대칭 단면
-    sec = (section_type or 'C').upper()
     z_factor = 1.0
     if sec.startswith('Z') or sec == 'LIPPEDZ':
         Fcre /= 2.0
@@ -266,7 +386,8 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
 
     # 상세 계산과정을 함수 속성에 저장 (선택적 참조용)
     compute_beam_Fcre._last_detail = {
-        'Cb': Cb, 'Lb': Lb, 'ro': round(ro, 4), 'Ag': round(Ag, 4),
+        'Cb': Cb, 'Lb': Lb, 'Ly': Ly, 'Lt': Lt, 'Ky': Ky, 'Kt': Kt,
+        'ro': round(ro, 4), 'Ag': round(Ag, 4),
         'Sf': round(Sf, 4), 'ry': round(ry, 4),
         'J': J, 'Cw': Cw, 'xo': round(xo, 4),
         'sigma_ey': round(sigma_ey, 2), 'sigma_t': round(sigma_t, 2),

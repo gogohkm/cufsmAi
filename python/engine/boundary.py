@@ -154,12 +154,14 @@ def BC_I1_5_atpoint(BC: str, kk: float, nn: float, a: float, ys: float) -> tuple
         Yn_p = (nn * PI / a * math.cos(nn * PI * y / a) * math.sin(PI * y / a) +
                 math.sin(nn * PI * y / a) * PI / a * math.cos(PI * y / a))
     elif BC in ('S-C', 'C-S'):
-        Ym = math.sin(kk * PI * y / a) + kk / (kk + 1) * math.sin((kk + 1) * PI * y / a)
-        Yn = math.sin(nn * PI * y / a) + nn / (nn + 1) * math.sin((nn + 1) * PI * y / a)
-        Ym_p = (kk * PI / a * math.cos(kk * PI * y / a) +
-                kk * PI / a * math.cos((kk + 1) * PI * y / a))
-        Yn_p = (nn * PI / a * math.cos(nn * PI * y / a) +
-                nn * PI / a * math.cos((nn + 1) * PI * y / a))
+        # 원본 Ym_at_ys.m / Ymprime_at_ys.m (S-C):
+        #   Ym = sin((m+1)*pi*ys/a) + (m+1)/m * sin(m*pi*ys/a)
+        #   Ym' = (m+1)*pi/a * [cos((m+1)*pi*ys/a) + cos(m*pi*ys/a)]
+        # kk/nn은 0이 아님이 보장됨 (BC_I1_5 S-C 분기가 kk==0/nn==0에서 0 반환)
+        Ym = math.sin((kk + 1) * PI * y / a) + (kk + 1) / kk * math.sin(kk * PI * y / a)
+        Yn = math.sin((nn + 1) * PI * y / a) + (nn + 1) / nn * math.sin(nn * PI * y / a)
+        Ym_p = (kk + 1) * PI / a * (math.cos((kk + 1) * PI * y / a) + math.cos(kk * PI * y / a))
+        Yn_p = (nn + 1) * PI / a * (math.cos((nn + 1) * PI * y / a) + math.cos(nn * PI * y / a))
     elif BC in ('C-F', 'F-C'):
         Ym = 1 - math.cos((kk - 0.5) * PI * y / a)
         Yn = 1 - math.cos((nn - 0.5) * PI * y / a)

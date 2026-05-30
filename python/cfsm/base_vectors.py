@@ -365,17 +365,19 @@ def yDOFs(node, elem, m_node, nmno, ndm, Ryd, Rud):
     # Create y-DOFs for distortional buckling
     if ndm > 0:
         # Cholesky decomposition of Ryd
+        # MATLAB yDOFs.m:80 does ch=chol(Ryd) with no fallback: for a valid open
+        # thin-walled meta-section Ryd (=Rysm'*A*Rysm) is symmetric positive definite.
+        # A non-PD Ryd indicates degenerate/closed/branched geometry the cFSM modal
+        # decomposition cannot meaningfully handle, so fail loudly rather than
+        # regularize (which would perturb the distortional basis inconsistently with
+        # the Ryd reused below in the Rayleigh-quotient eigenproblem).
         try:
             ch = la.cholesky(Ryd, lower=False)  # upper triangular
-        except la.LinAlgError:
-            # If Ryd is not positive definite, use regularization
-            eigvals = np.linalg.eigvalsh(Ryd)
-            min_eig = min(eigvals)
-            if min_eig <= 0:
-                Ryd_reg = Ryd + (-min_eig + 1e-10) * np.eye(nmno)
-                ch = la.cholesky(Ryd_reg, lower=False)
-            else:
-                ch = la.cholesky(Ryd, lower=False)
+        except la.LinAlgError as exc:
+            raise np.linalg.LinAlgError(
+                "distortional Ryd not positive definite -- check section geometry "
+                "(cFSM requires an open, non-branched meta-cross-section)"
+            ) from exc
 
         # null space of (ch * dy_global)'
         junk = la.null_space((ch @ dy[:, :ngm]).T)
@@ -414,15 +416,20 @@ def yDOFs(node, elem, m_node, nmno, ndm, Ryd, Rud):
             else:
                 dy = np.hstack([dy, dy_dist])
         else:
-            # Not enough vectors - pad with zeros
-            if jjunk4.shape[1] > 0:
-                junk3 = jjunk4.T @ Ryd @ jjunk4
-                eigvals, V = la.eigh(junk3)
-                dy_dist = jjunk4 @ V
-                dy = np.hstack([dy, dy_dist])
-            remaining = ndm - (dy.shape[1] - ngm)
-            if remaining > 0:
-                dy = np.hstack([dy, np.zeros((nmno, remaining))])
+            # MATLAB yDOFs.m:101 (dy(:,(ngm+1):(ngm+ndm))=jjunk4*V) requires the
+            # distortional null-space jjunk4 to supply exactly ndm independent
+            # vectors. A shortfall means the meta-cross-section is geometrically
+            # degenerate (branched/near-degenerate). Silently zero-padding here would
+            # produce rank-deficient distortional base vectors, make b_v singular,
+            # and let mode_class mis-apportion the %D participation across degenerate
+            # columns. ndm is consumed downstream (b_v_m column slicing, classify
+            # bookkeeping), so it cannot be reduced locally without corrupting column
+            # counts -- fail loudly instead.
+            raise np.linalg.LinAlgError(
+                f"distortional null-space provides only {jjunk4.shape[1]} "
+                f"independent vector(s) but {ndm} distortional mode(s) are required "
+                "-- check section geometry (degenerate/branched meta-cross-section)"
+            )
 
     return dy, ngm
 

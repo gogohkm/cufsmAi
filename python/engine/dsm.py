@@ -4,9 +4,13 @@
 
 핵심 출력값:
   Py, My          — 항복 하중/모멘트
-  Pcrl, Mcrl      — 국부 좌굴 임계값 (첫 번째 극소)
-  Pcrd, Mcrd      — 뒤틀림 좌굴 임계값 (두 번째 극소)
-  Pcre, Mcre      — 전체 좌굴 임계값 (장파장 영역)
+  Pcrl, Mcrl      — 국부 좌굴 임계값 (cFSM modal 또는 휴리스틱으로 식별)
+  Pcrd, Mcrd      — 뒤틀림 좌굴 임계값 (cFSM modal 또는 휴리스틱으로 식별)
+  Pcre, Mcre      — signature-curve(S-S) 장파장 점근값.
+                    주의: AISI S100-16 Eq.E2-4 의 설계용 글로벌 Fcre/Pcre 가
+                    아니다(부재 비지지길이/유효길이계수 KL·K 의 함수). 설계용
+                    전체좌굴값은 compute_column_Fcre/compute_beam_Fcre 로 별도
+                    계산한다. 결과 dict 'global_is_signature_asymptote'=True.
 
 관계식:
   Pcrl = LF_local_min × Py
@@ -102,14 +106,18 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                 'curve_index': curve_idx[i],
             })
 
-    # 3b) 경계 극소 검출 (첫/마지막 점이 인접 점보다 작은 경우)
+    # 3b) 경계 극소 검출 (첫 점이 인접 점보다 작은 경우)
+    # 짧은 끝(index 0)만 국부 후보로 삽입한다. 긴 끝(index -1)은 전체좌굴
+    # 장파장 꼬리(global tail)로, S-S 곡선이 단조 감소하는 인공물일 뿐
+    # 물리적 국부/뒤틀림 극소가 아니다. 이를 minima 에 넣으면 뒤틀림으로
+    # 오분류되어 Pcrd 를 오염시키므로 삽입하지 않는다. 장파장 꼬리값은
+    # 아래 Pcre/Lcre 로 이미 포착된다.
+    # (AISI S100-16 Appendix 2 §2.2: 모드 메커니즘이 적절해야 함 —
+    #  격자 경계 인공물을 물리 모드로 취급 금지)
     if len(lf_vals) >= 2:
         if lf_vals[0] < lf_vals[1]:
             minima.insert(0, {'length': lengths[0], 'load_factor': lf_vals[0],
                               'index': 0, 'curve_index': curve_idx[0]})
-        if lf_vals[-1] < lf_vals[-2]:
-            minima.append({'length': lengths[-1], 'load_factor': lf_vals[-1],
-                           'index': len(lf_vals) - 1, 'curve_index': curve_idx[-1]})
 
     # 4) 극소점을 국부/뒤틀림으로 분류
     # 우선순위:
@@ -122,7 +130,18 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     local_detected = False
     dist_detected = False
 
-    # 전체 좌굴: 가장 긴 파장 영역의 값
+    # 전체 좌굴(SIGNATURE-CURVE 점근값 — 주의: AISI 설계용 글로벌 Pcre 아님):
+    #   여기서 Pcre 는 단순지지(S-S) signature curve 의 가장 긴 샘플 반파장
+    #   에서의 하중비일 뿐, 부재 실제 비지지길이(KxLx/KyLy/KtLt)에서의 탄성
+    #   전체좌굴값이 아니다. AISI S100-16 Eq. E2-4 의 Fcre 와 lambda_c
+    #   =sqrt(Fy/Fcre) 는 (KL/r)^2, (KtLt)^2 의 함수이므로 부재 길이/유효길이
+    #   계수 없이는 구할 수 없다(Appendix 2 §2.3.1.1 Eq.2.3.1.1-3..5).
+    #   따라서 설계 경로(design/aisi_s100.py)는 이 값을 사용하지 않고
+    #   compute_column_Fcre / compute_beam_Fcre 로 폐형식 Fcre 를 재계산한다.
+    #   본 키(cre/Lcre/LF_global)는 signature-curve 점근 정보로만 제공되며,
+    #   결과 dict 의 'global_is_signature_asymptote'=True 로 명시한다.
+    #   부재 설계용 전체좌굴값이 필요하면 KL 과 K 계수를 별도 폐형식 경로에
+    #   공급해야 한다.
     Pcre = lf_vals[-1] * P_ref
     Lcre = lengths[-1]
 
@@ -154,12 +173,22 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     if not modal_available:
         # (b) 휴리스틱 폴백: 반파장 순서. 임의 인치 임계(구 10.0) 미사용.
         if len(minima) >= 2:
-            # 2개 이상: 짧은 쪽 = 국부, 긴 쪽 = 뒤틀림
-            Pcrl = minima[0]['load_factor'] * P_ref
-            Lcrl = minima[0]['length']
+            # 2개 이상: 가장 짧은 파장 극소 = 국부, 그 외(더 긴 파장) 극소 중
+            # 임계(최저 하중비) 극소 = 뒤틀림.
+            # minima[0]/minima[1] 을 고정 인덱싱하지 않는다: 3개 이상 극소나
+            # index 1 의 스퍼리어스/2차 국부 극소가 진짜 뒤틀림 극소(index 2)를
+            # 가리지 않도록, 국부 이후 구간 전체에서 최저 하중비를 선택한다.
+            # (AISI S100-16 Appendix 2 §2.3.1.3: 뒤틀림 임계 하중)
+            minima_sorted = sorted(minima, key=lambda m: m['length'])
+            local_min = minima_sorted[0]
+            Pcrl = local_min['load_factor'] * P_ref
+            Lcrl = local_min['length']
             local_detected = True
-            Pcrd = minima[1]['load_factor'] * P_ref
-            Lcrd = minima[1]['length']
+            # 국부보다 긴 파장의 극소들 중 최저 하중비를 뒤틀림으로 채택
+            longer = [m for m in minima_sorted[1:]]
+            dist_min = min(longer, key=lambda m: m['load_factor'])
+            Pcrd = dist_min['load_factor'] * P_ref
+            Lcrd = dist_min['length']
             dist_detected = True
             classification = 'two_minima'
         elif len(minima) == 1:
@@ -208,11 +237,15 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         'Lcrd': Lcrd,
         'LF_dist': Pcrd / P_ref if P_ref > 0 else 0,
 
-        # 전체 좌굴
+        # 전체 좌굴 — 주의: 아래 값은 signature-curve(S-S) 장파장 점근값이며
+        # AISI S100-16 Eq.E2-4 의 설계용 글로벌 Fcre/Pcre 가 아니다.
+        # 부재 설계값은 KL/K 계수를 사용하는 폐형식(compute_column/beam_Fcre)
+        # 으로 별도 계산해야 한다. 'global_is_signature_asymptote' 플래그로 명시.
         f'{label}cre': Pcre,
         'cre': Pcre,
         'Lcre': Lcre,
         'LF_global': Pcre / P_ref if P_ref > 0 else 0,
+        'global_is_signature_asymptote': True,
 
         # 기준 항복값 (load_type에 무관한 정규화 키)
         'P_y': P_ref,
@@ -291,6 +324,7 @@ def _empty_result(Py, My_xx, My_zz, label, P_ref):
         f'{label}crl': 0, 'crl': 0, 'Lcrl': 0, 'LF_local': 0,
         f'{label}crd': 0, 'crd': 0, 'Lcrd': 0, 'LF_dist': 0,
         f'{label}cre': 0, 'cre': 0, 'Lcre': 0, 'LF_global': 0,
+        'global_is_signature_asymptote': True,
         'P_y': P_ref,
         'minima': [], 'n_minima': 0,
         # 모드 검출 플래그 (Contract #3, 추가 키 — 하위호환)

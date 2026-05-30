@@ -9,17 +9,25 @@ def shear_strength(h: float, t: float, Fy: float,
                    E: float = E_STEEL, kv: float = 5.34) -> dict:
     """웹 전단 강도 (§G2.1, 횡보강재 없음)
 
+    범위 한정: 본 함수는 §G2.1 (횡보강재 없는 웹)만 구현한다. 횡보강재가 있는
+    웹에 대한 §G2.2 곡선(λv≤0.776에서 Vn=Vy)과 §G2.3(b) Eq. G2.3-3/4 의 kv
+    (=4.00+5.34/(a/h)² 또는 5.34+4.00/(a/h)²)는 미구현이며, 이는 보수적
+    (더 낮은 강도) 결과를 준다. 기본 kv=5.34는 §G2.3(a) 비보강 웹 값이다.
+
     Args:
         h: 웹 평면폭 (in)
         t: 웹 두께 (in)
         Fy: 항복강도 (ksi)
-        kv: 전단좌굴 계수 (기본 5.34)
+        kv: 전단좌굴 계수 (기본 5.34, §G2.3(a) 비보강 웹)
     """
+    # 퇴화/무효 입력 가드 (§G2.1): Vcr 계산의 (t/h)**2 평가 전에 검증하여
+    # h=0 등에서 ZeroDivisionError 방지. 정상 경로와 동일한 키 집합/일관된
+    # 점표기(G2.1) 라벨로 반환.
+    if h <= 0 or t <= 0 or Fy <= 0:
+        return {'Vn': 0, 'Vy': 0, 'Vcr': 0, 'lambda_v': 0, 'equation': 'G2.1 (degenerate)'}
+
     Vy = 0.60 * Fy * h * t
     Vcr = (math.pi ** 2 * E * kv) / (12 * (1 - 0.3 ** 2)) * (t / h) ** 2 * h * t
-
-    if Vy <= 0:
-        return {'Vn': 0, 'lambda_v': 0, 'equation': 'G2-1'}
 
     lam_v = math.sqrt(Vy / Vcr) if Vcr > 0 else float('inf')
 
@@ -315,6 +323,15 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
         )
     if row.get('rt_limit') is not None and R_t > row['rt_limit']:
         warnings.append(f'R/t={R_t:.2f} exceeds row applicability limit of {row["rt_limit"]:.1f}.')
+    # §G5 정의: N = Bearing length (3/4 in. (19 mm) minimum). 최소 지압길이 미만은
+    # Table G5-1..G5-5 계수가 보정되지 않은 영역이므로 경고만 발행한다(N을 강제로
+    # 0.75로 올리면 사용자의 실제(더 작은) 지압길이보다 Pn이 커져 비보수적이 될 수
+    # 있으므로 하한 클램프는 적용하지 않는다 — 현재의 보수성 유지).
+    if 0 < N < 0.75:
+        warnings.append(
+            f'N={N:.3f} in is below the §G5 minimum bearing length of 0.75 in (19 mm); '
+            f'the Table G5-1..G5-5 web crippling coefficients are not calibrated below this bearing length.'
+        )
     if family in ('built_up_i', 'c', 'z') and sup == 'ITF':
         req = 2.5 if fas == 'fastened' else 1.5
         required_edge_distance = req * h

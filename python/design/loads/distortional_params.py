@@ -212,17 +212,21 @@ def calc_Fcrd(fp: dict, ho: float, t: float,
 
     stiff = calc_distortional_stiffness(ho, t, fp, L, xi_web, E, G, mu)
 
+    # 모멘트 구배 보정 beta는 휨 왜곡좌굴(Eq. 2.3.3.3-2)에만 적용.
+    # 압축 왜곡좌굴(Eq. 2.3.1.3-2)에는 beta가 없으므로 강제로 1.0 사용.
+    beta_eff = beta if is_flexure else 1.0
+
     denom = stiff['k_tilde_phi_fg'] + stiff['k_tilde_phi_wg']
     if denom < 1e-15:
         Fcrd = 0.0
     else:
-        Fcrd = beta * (stiff['k_phi_fe'] + stiff['k_phi_we'] + kphi_external) / denom
+        Fcrd = beta_eff * (stiff['k_phi_fe'] + stiff['k_phi_we'] + kphi_external) / denom
 
     return {
         'Fcrd': Fcrd,
         'Lcrd': round(Lcrd, 1),
         'L_used': round(L, 1),
-        'beta': beta,
+        'beta': beta_eff,
         'k_phi_fe': round(stiff['k_phi_fe'], 4),
         'k_phi_we': round(stiff['k_phi_we'], 4),
         'k_tilde_phi_fg': round(stiff['k_tilde_phi_fg'], 5),

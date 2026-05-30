@@ -1,8 +1,9 @@
 """접합부 설계 — AISI S100-16 Chapter J
 
-볼트(J3), 나사(J4), 필릿용접(J2.5), 아크스팟(J2.2), PAF(J5) 접합부의 공칭강도 계산.
-각 파괴 모드별 강도를 계산하고 지배 모드를 결정한다.
-J6 파단(전단파단/순단면 인장파단/블록전단) 한계상태를 모든 패스너 접합에 포함한다.
+볼트(J3), 나사(J4), 필릿용접(J2.5), 아크스팟(J2.2), 그루브(J2.1 버트/J2.6 플레어),
+PAF(J5) 접합부의 공칭강도 계산. 각 파괴 모드별 강도를 계산하고 지배 모드를 결정한다.
+J6 파단(전단파단/순단면 인장파단/블록전단) 한계상태를 모든 패스너 접합에 포함하며,
+member_tension=True 시 §D1 요구에 따라 Chapter D 부재 인장강도(D2/D3)로도 제한한다.
 """
 
 import math
@@ -246,6 +247,63 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
     return ls, warnings
 
 
+# Chapter D 인장 한계상태 계수
+PHI_TENSION = {'yield': 0.90, 'rupture': 0.75}   # D2 / D3 (LRFD)
+OMEGA_TENSION = {'yield': 1.67, 'rupture': 2.00}  # D2 / D3 (ASD)
+
+
+def _chapter_d_tension_caps(Fy: float, Fu: float, t: float, dh: float,
+                            n: int, Ag: float = None, width: float = None,
+                            Ae: float = None) -> tuple:
+    """Chapter D 부재 인장 한계상태(D2 항복/D3 순단면 파단)를 한계상태로 반환.
+
+    §J3/J4/J5 는 패스너 접합 공칭강도가 Chapter D 부재 인장강도(D2/D3)로도
+    제한됨을 요구한다(§D1). 부재 총단면적 Ag(또는 폭 width)가 주어질 때만 평가하며,
+    인장(축력)이 작용하는 부재에만 의미가 있다. 반환: (limit_states, warnings)
+
+    Args:
+        Fy, Fu: 부재 항복/인장강도 (ksi)
+        t: 부재 두께 (in)
+        dh: 구멍 직경 (in) — 순단면 An 산정용
+        n: 임계단면 패스너 개수
+        Ag: 부재 총단면적 (in^2). None이면 width·t.
+        width: 부재 폭 (in).
+        Ae: 유효 순단면적 (in^2). None이면 An=Ag-n·dh·t 사용 (shear-lag 미반영, 보수적 상한).
+    """
+    ls = []
+    warnings = []
+    if Ag is None and width is not None:
+        Ag = width * t
+    if Ag is None or Ag <= 0:
+        return ls, warnings
+    # D2 총단면 항복 (Eq. D2-1): Tn = Ag·Fy
+    Tn_y = Ag * Fy
+    ls.append({
+        'name': 'Member Tension Yield (D2)',
+        'Rn': round(Tn_y, 3),
+        'phi': PHI_TENSION['yield'],
+        'omega': OMEGA_TENSION['yield'],
+        'formula': f'Tn = Ag({Ag:.4f})×Fy({Fy}) = {Tn_y:.3f}',
+        'equation': 'D2-1',
+    })
+    # D3 순단면 파단 (Eq. D3-1): Tn = An·Fu (Ae 미입력 시 shear-lag 미반영 — 상한)
+    An = Ae if Ae is not None else max(Ag - n * dh * t, 0.0)
+    Tn_r = An * Fu
+    ls.append({
+        'name': 'Member Tension Rupture (D3)',
+        'Rn': round(Tn_r, 3),
+        'phi': PHI_TENSION['rupture'],
+        'omega': OMEGA_TENSION['rupture'],
+        'formula': f'Tn = An({An:.4f})×Fu({Fu}) = {Tn_r:.3f}',
+        'equation': 'D3-1',
+    })
+    if Ae is None:
+        warnings.append(
+            'Chapter D 캡: 유효순단면 Ae 미입력 — An=Ag−n·dh·t 사용(전단지연 미반영, '
+            '비보수적일 수 있음). 부재 인장 시 §J6 전단지연계수로 Ae 산정 권장.')
+    return ls, warnings
+
+
 # ============================================================
 # 볼트 접합 (J3)
 # ============================================================
@@ -262,7 +320,8 @@ def bolt_connection(t1: float, t2: float, d: float,
                     pattern_length: float = None,
                     Ag: float = None, width: float = None,
                     g: float = None, s_pitch: float = None,
-                    Vu: float = None, Tu: float = None) -> dict:
+                    Vu: float = None, Tu: float = None,
+                    member_tension: bool = False, Ae: float = None) -> dict:
     """볼트 접합 설계 (§J3 + §J6)
 
     Args:
@@ -282,6 +341,9 @@ def bolt_connection(t1: float, t2: float, d: float,
         Ag, width, g, s_pitch: J6 순단면/블록전단 평가용 부재 기하 (선택)
         Vu: 소요 전단력 (kips) — J3.4 전단-인장 상호작용용 (선택)
         Tu: 소요 인장력 (kips) — 주어지면 J3.4 전단-인장 상호작용 검토 수행 (선택)
+        member_tension: True이면 §D1 요구에 따라 Chapter D 부재 인장강도(D2/D3)로
+            접합 강도를 제한한다. 부재가 축인장을 받는 경우에만 의미 있음. (선택)
+        Ae: 유효 순단면적 (in^2) — Chapter D D3 파단용. None이면 An=Ag-n·dh·t 사용.
     """
     if e is None:
         e = 1.5 * d  # J3.2 최소 끝단거리
@@ -348,6 +410,13 @@ def bolt_connection(t1: float, t2: float, d: float,
     limit_states.extend(j6_ls)
     warnings.extend(j6_warn)
 
+    # (c-2) §D1: 접합 강도는 Chapter D 부재 인장강도(D2/D3)로도 제한 (인장 부재 시)
+    if member_tension:
+        d_ls, d_warn = _chapter_d_tension_caps(
+            Fy=Fy, Fu=Fu, t=t_min, dh=dh, n=n, Ag=Ag, width=width, Ae=Ae)
+        limit_states.extend(d_ls)
+        warnings.extend(d_warn)
+
     # (d) J3.4 전단-인장 상호작용 (Eq. J3.4-2 ASD / J3.4-3 LRFD)
     # Tu(소요 인장력)가 주어지면, 소요 전단응력 fv에 의해 감소된 공칭 인장응력 F'nt로
     # 볼트 인장 적정성을 검토한다. fv = Vu/(n·Ab). F'nt ≤ Fnt 상한.
@@ -403,13 +472,16 @@ def bolt_connection(t1: float, t2: float, d: float,
     governing = min(limit_states, key=lambda x: x['design_strength'])
     governing['governs'] = True
 
+    spec_sections = ['J3.3.1', 'J3.4', 'J6.1', 'J6.2', 'J6.3']
+    if member_tension:
+        spec_sections += ['D2', 'D3']
     result = {
         'connection_type': 'bolt',
         'limit_states': limit_states,
         'governing_mode': governing['name'],
         'design_strength': governing['design_strength'],
         'Rn': governing['Rn'],
-        'spec_sections': ['J3.3.1', 'J3.4', 'J6.1', 'J6.2', 'J6.3'],
+        'spec_sections': spec_sections,
     }
     if shear_tension is not None:
         result['shear_tension_interaction'] = shear_tension
@@ -433,7 +505,8 @@ def screw_connection(t1: float, t2: float, d: float,
                      tc: float = None, dw: float = None,
                      e: float = None,
                      Ag: float = None, width: float = None,
-                     g: float = None) -> dict:
+                     g: float = None,
+                     member_tension: bool = False, Ae: float = None) -> dict:
     """나사 접합 설계 (§J4 + §J6)
 
     AISI S100-16 §J4 표기:
@@ -446,6 +519,9 @@ def screw_connection(t1: float, t2: float, d: float,
     dw: 유효 풀오버 직경 d'w (in, J4.4.2). None이면 보수 추정.
     e: 끝단 거리 (in). None이면 1.5d (J4.2 최소).
     Ag, width, g: J6 순단면 평가용 (선택)
+    member_tension: True이면 §J4 요구(접합 강도는 Chapter D로도 제한)에 따라
+        Chapter D 부재 인장강도(D2/D3) 캡을 적용한다. 부재 축인장 시에만 의미. (선택)
+    Ae: 유효 순단면적 (in^2) — Chapter D D3 파단용. None이면 An=Ag-n·dh·t. (선택)
     """
     if Fu1 is None:
         Fu1 = Fu
@@ -536,6 +612,13 @@ def screw_connection(t1: float, t2: float, d: float,
     limit_states.extend(j6_ls)
     warnings.extend(j6_warn)
 
+    # (f) §J4: 나사 접합 공칭강도는 Chapter D 부재 인장강도(D2/D3)로도 제한
+    if member_tension:
+        d_ls, d_warn = _chapter_d_tension_caps(
+            Fy=Fy, Fu=Fu_crit, t=t_crit, dh=dh, n=n, Ag=Ag, width=width, Ae=Ae)
+        limit_states.extend(d_ls)
+        warnings.extend(d_warn)
+
     # 설계강도 계산
     for ls in limit_states:
         if design_method == 'LRFD':
@@ -546,13 +629,16 @@ def screw_connection(t1: float, t2: float, d: float,
     governing = min(limit_states, key=lambda x: x['design_strength'])
     governing['governs'] = True
 
+    spec_sections = ['J4.3.1', 'J4.3.2', 'J4.4.1', 'J4.4.2', 'J6.1', 'J6.2']
+    if member_tension:
+        spec_sections += ['D2', 'D3']
     result = {
         'connection_type': 'screw',
         'limit_states': limit_states,
         'governing_mode': governing['name'],
         'design_strength': governing['design_strength'],
         'Rn': governing['Rn'],
-        'spec_sections': ['J4.3.1', 'J4.3.2', 'J4.4.1', 'J4.4.2', 'J6.1', 'J6.2'],
+        'spec_sections': spec_sections,
     }
     if warnings:
         result['warnings'] = warnings
@@ -742,7 +828,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
 
 
 # ============================================================
-# 그루브 용접 (J2.3)
+# 그루브 용접 (J2.1 Butt-Joint, J2.6 Flare Groove)
 # ============================================================
 
 def groove_weld_connection(t1: float, t2: float,
@@ -750,50 +836,122 @@ def groove_weld_connection(t1: float, t2: float,
                            Fy: float, Fu: float,
                            Fxx: float = 60,
                            groove_type: str = 'complete',
-                           design_method: str = 'LRFD') -> dict:
-    """그루브 용접 접합 설계 (§J2.3)
+                           design_method: str = 'LRFD',
+                           load_direction: str = 'tension',
+                           te: float = None,
+                           w1: float = None, w2: float = None,
+                           R: float = None, h: float = None,
+                           process: str = None) -> dict:
+    """그루브 용접 접합 설계
+
+    버트조인트 그루브 용접은 §J2.1, 플레어 그루브 용접은 §J2.6 을 적용한다.
+    (AISI S100-16: 그루브 용접은 J2.1, 플레어 그루브는 J2.6 — 과거 'J2.3' 라벨은 오기)
 
     Args:
         t1, t2: 연결판 두께 (in)
-        weld_length: 용접 길이 (in)
-        groove_type: 'complete' (완전용입) or 'partial' (부분용입)
+        weld_length: 용접 길이 L (in)
+        Fy, Fu: 모재 항복/인장강도 (ksi)
+        Fxx: 용접봉 강도 (ksi)
+        groove_type: 'complete'(CJP) | 'partial'(PJP) | 'flare_bevel' | 'flare_v'
+        load_direction: 'tension'|'compression'|'shear' (J2.1) /
+                        'transverse'|'longitudinal' (J2.6 플레어)
+        te: 유효 목두께 (in, J2.1). None이면 CJP는 t_min, PJP는 0.5·t_min(추정)으로 가정.
+        w1, w2: 플레어 그루브 용접 레그 (in, J2.6-5)
+        R: 굽힘 외측 반경 (in, J2.6-5)
+        h: 립 높이 (in, J2.6 longitudinal 분기 h<L 판정)
+        process: 용접 프로세스 (Table J2.6-1/-2 twf/η 선택) — 미구현 시 보수 추정
     """
     t_min = min(t1, t2)
     limit_states = []
+    warnings = []
 
-    if groove_type == 'complete':
-        # 완전용입 그루브 용접: 모재 강도 = 용접 강도
-        # 인장/압축: Rn = t × L × Fu
-        Rn_base = t_min * weld_length * Fu
-        limit_states.append({
-            'name': 'Base Metal (J2.3)',
-            'Rn': round(Rn_base, 3),
-            'phi': 0.90,
-            'omega': 1.67,
-            'formula': f'Rn = {t_min}×{weld_length}×{Fu} = {Rn_base:.3f}',
-            'equation': 'J2.3 (CJP)',
-        })
+    flare = str(groove_type).lower().startswith('flare')
+
+    if not flare:
+        # --- §J2.1 Groove Welds in Butt Joints ---
+        # 유효 목두께 te: CJP는 모재 두께, PJP는 입력값 또는 0.5·t 추정(비-코드 traceable)
+        if te is None:
+            if groove_type == 'complete':
+                te = t_min  # CJP: 유효목두께 = 모재 두께
+            else:
+                te = 0.5 * t_min  # PJP: 실 유효목두께 입력 부재 시 보수 추정
+                warnings.append(
+                    '§J2.1 PJP: 유효 목두께 te 미입력 — te=0.5·t 추정값 사용 '
+                    '(코드 traceable 아님; 실제 용접 디테일로 te 산정 필요)')
+        L = weld_length
+        sval = str(load_direction).lower()
+        if sval.startswith('shear'):
+            # J2.1(b): 전단 = min(J2.1-2, J2.1-3)
+            Rn_2 = L * te * 0.6 * Fxx     # Eq. J2.1-2 (용접금속 전단)
+            Rn_3 = L * te * Fy / math.sqrt(3.0)  # Eq. J2.1-3 (모재 전단)
+            if Rn_2 / 1.90 <= Rn_3 / 1.70:  # ASD 가용강도 기준 지배 판정
+                Rn_g, phi_g, omega_g, eq_g = Rn_2, 0.80, 1.90, 'J2.1-2'
+            else:
+                Rn_g, phi_g, omega_g, eq_g = Rn_3, 0.90, 1.70, 'J2.1-3'
+            limit_states.append({
+                'name': 'Groove Weld Shear (J2.1)',
+                'Rn': round(Rn_g, 3),
+                'phi': phi_g,
+                'omega': omega_g,
+                'formula': f'Pn = min(L·te·0.6Fxx, L·te·Fy/√3) = {Rn_g:.3f} (te={te:.4f})',
+                'equation': eq_g,
+            })
+        else:
+            # J2.1(a): 인장/압축 = L·te·Fy (Eq. J2.1-1), φ=0.90/Ω=1.70
+            Rn_g = L * te * Fy
+            limit_states.append({
+                'name': 'Groove Weld Tension/Compression (J2.1)',
+                'Rn': round(Rn_g, 3),
+                'phi': 0.90,
+                'omega': 1.70,
+                'formula': f'Pn = L({L})×te({te:.4f})×Fy({Fy}) = {Rn_g:.3f}',
+                'equation': 'J2.1-1',
+            })
     else:
-        # 부분용입: 유효 목두께 = 모재 두께의 보수적 비율
-        te = t_min * 0.5  # 보수적 유효 목두께
-        Rn_weld = 0.75 * Fxx * te * weld_length
-        Rn_base = t_min * weld_length * Fu
-
+        # --- §J2.6 Flare Groove Welds ---
+        t = t_min  # 용접 부재 두께 (Fig. J2.6-1..3)
+        L = weld_length
+        # 유효 목두께 tw (Eq. J2.6-5 플레어 베벨). w1,w2,R 입력 시 산정, 미입력 시 추정.
+        if w1 is not None and w2 is not None and R is not None and w1 > 0:
+            # 보수적: twf≈0, η≈0 (Table J2.6-1/-2 미구현 — 플러시 채움 가정 하한)
+            wf = math.sqrt(w1 ** 2 + w2 ** 2)  # Eq. J2.6-6 face width
+            tw = (w2 - R + math.sqrt(max(2.0 * R * w1 - w1 ** 2, 0.0))) * (w1 / wf)
+            tw = max(tw, 0.0)
+            tw_note = f'tw(J2.6-5)={tw:.4f}'
+        else:
+            tw = 0.707 * t  # 레그/반경 미입력 시 보수 추정 (코드 traceable 아님)
+            tw_note = f'tw≈0.707t={tw:.4f} (추정)'
+            warnings.append(
+                '§J2.6 플레어 그루브: 레그(w1,w2)/반경(R) 미입력 — '
+                'tw≈0.707t 추정값 사용 (Eq. J2.6-5/-7 미적용)')
+        sval = str(load_direction).lower()
+        if sval.startswith('trans'):
+            # (a) 플레어 베벨, 횡방향 하중 (Eq. J2.6-1)
+            Pnv = 0.833 * t * L * Fu
+            phi_f, omega_f, eq_f = 0.60, 2.55, 'J2.6-1'
+        else:
+            # (b) 종방향 하중: tw>=2t & h>=L 이면 J2.6-3, 아니면 J2.6-2
+            if tw >= 2.0 * t and (h is not None and h >= L):
+                Pnv = 1.50 * t * L * Fu      # Eq. J2.6-3
+                eq_f = 'J2.6-3'
+            else:
+                Pnv = 0.75 * t * L * Fu      # Eq. J2.6-2
+                eq_f = 'J2.6-2'
+            phi_f, omega_f = 0.55, 2.80
+        # (c) t>0.10 in 이면 용접금속 한계 Eq. J2.6-4 로 상한
+        if t > 0.10:
+            Pn_cap = 0.75 * tw * L * Fxx
+            if Pn_cap < Pnv:
+                Pnv = Pn_cap
+                eq_f = f'{eq_f}≤J2.6-4'
+                phi_f, omega_f = 0.60, 2.55
         limit_states.append({
-            'name': 'Weld Throat (J2.3)',
-            'Rn': round(Rn_weld, 3),
-            'phi': 0.60,
-            'omega': 2.50,
-            'formula': f'Rn = 0.75×{Fxx}×{te:.3f}×{weld_length} = {Rn_weld:.3f}',
-            'equation': 'J2.3 (PJP weld)',
-        })
-        limit_states.append({
-            'name': 'Base Metal (J2.3)',
-            'Rn': round(Rn_base, 3),
-            'phi': 0.90,
-            'omega': 1.67,
-            'formula': f'Rn = {t_min}×{weld_length}×{Fu} = {Rn_base:.3f}',
-            'equation': 'J2.3 (PJP base)',
+            'name': 'Flare Groove Shear (J2.6)',
+            'Rn': round(Pnv, 3),
+            'phi': phi_f,
+            'omega': omega_f,
+            'formula': f'Pnv = {Pnv:.3f} ({tw_note}, t={t})',
+            'equation': eq_f,
         })
 
     for ls in limit_states:
@@ -805,14 +963,17 @@ def groove_weld_connection(t1: float, t2: float,
     governing = min(limit_states, key=lambda x: x['design_strength'])
     governing['governs'] = True
 
-    return {
+    result = {
         'connection_type': 'groove_weld',
         'limit_states': limit_states,
         'governing_mode': governing['name'],
         'design_strength': governing['design_strength'],
         'Rn': governing['Rn'],
-        'spec_sections': ['J2.3'],
+        'spec_sections': ['J2.6'] if flare else ['J2.1'],
     }
+    if warnings:
+        result['warnings'] = warnings
+    return result
 
 
 # ============================================================
@@ -972,10 +1133,16 @@ def paf_connection(t1: float, t2: float, d: float,
     })
 
     # (d) 풀오버 (J5.2.3, Eq. J5.2.3-1): Pnov = αw·t1·d'w·Fu1, αw=1.5, φ=0.50/Ω=3.00
+    # d'w(=dw) = 머리/와셔의 실제 접촉 직경 (J5.2.3 정의). 와셔 직경 <=0.875 in (§J5).
+    # αw=1.5 (단순 플랫헤드/단순 PAF). 테이퍼/스프링와셔(1.25/2.0) 변형은 별도 입력 필요.
     if dw is None:
-        dw = min(d * 2.5, 0.875)  # 와셔 직경 보수 추정 (<=0.875 in 한계, J5)
+        # 실제 머리/와셔 직경 미입력 시 d'w≈2.5·ds 추정 (코드 traceable 아님).
+        dw = min(d * 2.5, 0.875)
+        warnings.append(
+            '§J5.2.3 풀오버: 머리/와셔 실제 직경 d\'w 미입력 — d\'w≈2.5·ds 추정값 사용 '
+            '(<=0.875 in 한계). 실제 머리/와셔 직경으로 d\'w 지정 권장.')
     else:
-        dw = min(dw, 0.875)
+        dw = min(dw, 0.875)  # 실제 d'w, 와셔 직경 한계 적용
     Pnov = 1.5 * t1 * dw * Fu1 * n
     limit_states.append({
         'name': 'Pull-over (J5.2.3)',
@@ -1067,6 +1234,8 @@ def design_connection(params: dict) -> dict:
             Ag=params.get('Ag'), width=params.get('width'),
             g=params.get('g'), s_pitch=params.get('s_pitch'),
             Vu=params.get('Vu'), Tu=params.get('Tu'),
+            member_tension=bool(params.get('member_tension', False)),
+            Ae=params.get('Ae'),
         )
     elif conn_type == 'screw':
         result = screw_connection(
@@ -1081,6 +1250,8 @@ def design_connection(params: dict) -> dict:
             e=params.get('e'),
             Ag=params.get('Ag'), width=params.get('width'),
             g=params.get('g'),
+            member_tension=bool(params.get('member_tension', False)),
+            Ae=params.get('Ae'),
         )
     elif conn_type == 'fillet_weld':
         result = fillet_weld_connection(
@@ -1113,6 +1284,11 @@ def design_connection(params: dict) -> dict:
             Fxx=params.get('Fxx', 60),
             groove_type=params.get('groove_type', 'complete'),
             design_method=design_method,
+            load_direction=params.get('load_direction', 'tension'),
+            te=params.get('te'),
+            w1=params.get('w1'), w2=params.get('w2'),
+            R=params.get('R'), h=params.get('h'),
+            process=params.get('process'),
         )
     elif conn_type == 'arc_seam':
         result = arc_seam_weld_connection(
