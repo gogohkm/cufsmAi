@@ -1051,6 +1051,48 @@ def test_paf_limit_state_mapping():
     return all_pass
 
 
+def test_bolt_shear_tension_interaction_j34():
+    """볼트 전단-인장 상호작용 J3.4-2/-3 + 기하 제공 시 J6.2/J6.3 평가 (F-024)"""
+    print('\n=== TEST: Bolt Shear-Tension Interaction J3.4 + J6 geometry (F-024) ===')
+    from design.connections import bolt_connection
+
+    all_pass = True
+    d, n = 0.5, 2
+    Ab = math.pi / 4 * d ** 2
+    Fnv, Fnt = 54.0, 90.0  # A325, threads-in, d>=1/2 in (Table J3.4-1)
+    Vu, Tu = 5.0, 8.0
+    fv = Vu / (n * Ab)
+
+    # LRFD: F'nt = 1.3*Fnt - (Fnt/(phi_v*Fnv))*fv ≤ Fnt (Eq. J3.4-3), phi_v=0.75
+    r = bolt_connection(t1=0.1, t2=0.1, d=d, Fy=50, Fu=65, Fub=120, n=n,
+                        bolt_grade='A325', design_method='LRFD', Vu=Vu, Tu=Tu)
+    st = r.get('shear_tension_interaction')
+    all_pass &= approx(1 if st else 0, 1, label='J3.4 interaction block present')
+    fnt_red = min(1.3 * Fnt - (Fnt / (0.75 * Fnv)) * fv, Fnt)
+    avail_T = 0.75 * n * Ab * fnt_red
+    all_pass &= approx(st['Fnt_reduced'], fnt_red, label="LRFD F'nt reduced")
+    all_pass &= approx(st['available_tension'], avail_T, label='LRFD available tension')
+    all_pass &= approx(st['ratio'], Tu / avail_T, label='LRFD interaction ratio')
+    all_pass &= approx(1 if st['equation'].startswith('J3.4-3') else 0, 1, label='LRFD eq J3.4-3')
+
+    # ASD: F'nt = 1.3*Fnt - (Omega_v*Fnt/Fnv)*fv ≤ Fnt (Eq. J3.4-2), Omega_v=2.0
+    r2 = bolt_connection(t1=0.1, t2=0.1, d=d, Fy=50, Fu=65, Fub=120, n=n,
+                         bolt_grade='A325', design_method='ASD', Vu=Vu, Tu=Tu)
+    st2 = r2['shear_tension_interaction']
+    fnt_red2 = min(1.3 * Fnt - (2.0 * Fnt / Fnv) * fv, Fnt)
+    all_pass &= approx(st2['Fnt_reduced'], fnt_red2, label="ASD F'nt reduced")
+    all_pass &= approx(1 if st2['equation'].startswith('J3.4-2') else 0, 1, label='ASD eq J3.4-2')
+
+    # J6.2 net-section tension rupture & J6.3 block shear evaluate when member geometry given
+    r3 = bolt_connection(t1=0.1, t2=0.1, d=d, Fy=50, Fu=65, Fub=120, n=n,
+                         bolt_grade='A325', e=1.0, width=3.0, g=1.5)
+    names = [ls['name'] for ls in r3['limit_states']]
+    all_pass &= approx(1 if any('J6.2' in x for x in names) else 0, 1, label='J6.2 tension rupture present')
+    all_pass &= approx(1 if any('J6.3' in x for x in names) else 0, 1, label='J6.3 block shear present')
+    all_pass &= approx(1 if r3.get('j6_verified') else 0, 1, label='j6_verified True with geometry')
+    return all_pass
+
+
 def test_auto_generate_uses_bending_curve_for_flexure_dsm():
     """자동 생성 DSM — 휨은 압축 곡선 재사용이 아니라 별도 응력분포를 써야 함 (F-002)"""
     print('\n=== TEST: Auto Generate Uses Separate Bending Curve (F-002) ===')

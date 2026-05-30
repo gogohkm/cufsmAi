@@ -66,6 +66,7 @@ TEST_FUNCTIONS = (
         "test_arc_spot_effective_diameter_cap",
         "test_arc_seam_formula_terms",
         "test_paf_limit_state_mapping",
+        "test_bolt_shear_tension_interaction_j34",
         "test_auto_generate_uses_bending_curve_for_flexure_dsm",
         "test_flexure_design_section_type_affects_fcre",
         "test_cold_work_uses_estimated_corner_ratio",

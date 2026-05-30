@@ -61,6 +61,7 @@ function textResult(text: string) {
 // ============================================================
 const SI_TO_US = {
     length:   1 / 25.4,        // mm → in
+    area:     1 / (25.4 * 25.4), // mm² → in²
     stress:   1 / 6.89476,     // MPa → ksi
     force:    1 / 4.44822,     // kN → kips
     moment:   1 / 0.11298,     // kN-m → kip-in
@@ -70,6 +71,7 @@ const SI_TO_US = {
 };
 const US_TO_SI = {
     length:   25.4,
+    area:     25.4 * 25.4,
     stress:   6.89476,
     force:    4.44822,
     moment:   0.11298,
@@ -905,10 +907,23 @@ server.tool("aisi_design_connection", "Chapter J connection design. Set units='S
         Fxx: z.number().optional().describe("Weld electrode strength — ksi or MPa if units='SI' (default 60 ksi)"),
         Fuf: z.number().optional().describe("PAF pin strength — ksi or MPa if units='SI' (default 60 ksi)"),
         Pu: z.number().optional().describe("Required force — kips or kN if units='SI'"),
+        // J6 member-rupture geometry (bolt/screw): without these, J6.2 net-section tension
+        // rupture and J6.3 block shear are NOT evaluated (warned, j6_verified=false).
+        Ag: z.number().optional().describe("Connected member gross area for J6.2 — in² or mm² if units='SI'"),
+        width: z.number().optional().describe("Connected member width for J6.2/J6.3 — in or mm if units='SI'"),
+        g: z.number().optional().describe("Gage (transverse fastener spacing) for J6.3 block shear — in or mm if units='SI'"),
+        s_pitch: z.number().optional().describe("Longitudinal pitch (stagger) for J6.2 — in or mm if units='SI'"),
+        // J3.4 bolt shear-tension interaction
+        Vu: z.number().optional().describe("Required shear force for J3.4 interaction — kips or kN if units='SI'"),
+        Tu: z.number().optional().describe("Required tension force; if given, J3.4 bolt shear-tension interaction is checked — kips or kN if units='SI'"),
+        bolt_grade: z.enum(["A307", "A325", "A354BD", "A449", "A490"]).optional().describe("Bolt grade for Table J3.4-1 Fnv/Fnt"),
+        threads_excluded: z.boolean().optional().describe("Threads excluded from shear plane (Table J3.4-1)"),
+        hole_type: z.enum(["standard", "oversized", "short_slotted"]).optional().describe("Bolt hole type for bearing factor C (Table J3.3.1-1)"),
         units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI'"),
     },
     async ({ connection_type, design_method, Fy, Fu, t1, t2, d, Fub, n, e, s,
-             weld_length, weld_size, da, groove_type, Fxx, Fuf, Pu, units }) => {
+             weld_length, weld_size, da, groove_type, Fxx, Fuf, Pu,
+             Ag, width, g, s_pitch, Vu, Tu, bolt_grade, threads_excluded, hole_type, units }) => {
         let body: Record<string, any> = {
             action: 'aisi_design', member_type: 'connection', connection_type,
             design_method: design_method || 'LRFD',
@@ -919,13 +934,15 @@ server.tool("aisi_design_connection", "Chapter J connection design. Set units='S
             Fxx: Fxx || (units === 'SI' ? 414 : 60),
             Fuf: Fuf || (units === 'SI' ? 414 : 60),
             Pu: Pu || 0,
+            Ag, width, g, s_pitch, Vu, Tu, bolt_grade, threads_excluded, hole_type,
         };
         if (units === 'SI') {
             body = convertInputSI(body, {
                 Fy: 'stress', Fu: 'stress', Fub: 'stress', Fxx: 'stress', Fuf: 'stress',
                 t1: 'length', t2: 'length', d: 'length', e: 'length', s: 'length',
                 weld_length: 'length', weld_size: 'length', da: 'length',
-                Pu: 'force',
+                width: 'length', g: 'length', s_pitch: 'length', Ag: 'area',
+                Pu: 'force', Vu: 'force', Tu: 'force',
             });
         }
         const r = await callBridgePost('/action', body);

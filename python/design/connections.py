@@ -261,7 +261,8 @@ def bolt_connection(t1: float, t2: float, d: float,
                     hole_type: str = 'standard',
                     pattern_length: float = None,
                     Ag: float = None, width: float = None,
-                    g: float = None, s_pitch: float = None) -> dict:
+                    g: float = None, s_pitch: float = None,
+                    Vu: float = None, Tu: float = None) -> dict:
     """볼트 접합 설계 (§J3 + §J6)
 
     Args:
@@ -279,6 +280,8 @@ def bolt_connection(t1: float, t2: float, d: float,
         hole_type: 'standard'|'oversized' (Table J3.3.1-1 C 산정)
         pattern_length: 패스너 패턴 길이 (in) — >38 in 이면 end-loaded Fnv×0.833 (note a)
         Ag, width, g, s_pitch: J6 순단면/블록전단 평가용 부재 기하 (선택)
+        Vu: 소요 전단력 (kips) — J3.4 전단-인장 상호작용용 (선택)
+        Tu: 소요 인장력 (kips) — 주어지면 J3.4 전단-인장 상호작용 검토 수행 (선택)
     """
     if e is None:
         e = 1.5 * d  # J3.2 최소 끝단거리
@@ -345,6 +348,50 @@ def bolt_connection(t1: float, t2: float, d: float,
     limit_states.extend(j6_ls)
     warnings.extend(j6_warn)
 
+    # (d) J3.4 전단-인장 상호작용 (Eq. J3.4-2 ASD / J3.4-3 LRFD)
+    # Tu(소요 인장력)가 주어지면, 소요 전단응력 fv에 의해 감소된 공칭 인장응력 F'nt로
+    # 볼트 인장 적정성을 검토한다. fv = Vu/(n·Ab). F'nt ≤ Fnt 상한.
+    shear_tension = None
+    if Tu is not None and Tu > 0:
+        phi_v = PHI_BOLT['shear']
+        omega_v = OMEGA_BOLT['shear']
+        phi_t = PHI_BOLT['tension']
+        omega_t = OMEGA_BOLT['tension']
+        V_req = abs(Vu) if Vu else 0.0
+        fv = V_req / (n * Ab) if (n > 0 and Ab > 0) else 0.0  # 소요 전단응력 (ksi)
+        st_warn = []
+        # fv는 허용/설계 전단응력을 초과할 수 없음
+        fv_cap = phi_v * Fnv if design_method == 'LRFD' else Fnv / omega_v
+        if fv > fv_cap:
+            st_warn.append(
+                f'§J3.4: 소요 전단응력 fv={fv:.2f} ksi가 허용 전단응력 {fv_cap:.2f} ksi 초과 — '
+                f'전단 단독으로 볼트 부적합')
+        # 감소된 공칭 인장응력 F'nt
+        if design_method == 'LRFD':
+            Fnt_red = 1.3 * Fnt - (Fnt / (phi_v * Fnv)) * fv if Fnv > 0 else 0.0
+        else:
+            Fnt_red = 1.3 * Fnt - (omega_v * Fnt / Fnv) * fv if Fnv > 0 else 0.0
+        Fnt_red = max(min(Fnt_red, Fnt), 0.0)
+        Pnt_prime = n * Ab * Fnt_red  # 감소된 공칭 인장강도 (kips)
+        avail_T = phi_t * Pnt_prime if design_method == 'LRFD' else Pnt_prime / omega_t
+        ratio = (Tu / avail_T) if avail_T > 0 else float('inf')
+        shear_tension = {
+            'V_required': round(V_req, 3),
+            'T_required': round(Tu, 3),
+            'fv': round(fv, 3),
+            'Fnt': round(Fnt, 2),
+            'Fnv': round(Fnv, 2),
+            'Fnt_reduced': round(Fnt_red, 3),
+            'Pnt_prime': round(Pnt_prime, 3),
+            'available_tension': round(avail_T, 3),
+            'ratio': round(ratio, 4),
+            'pass': ratio <= 1.0,
+            'equation': 'J3.4-3 (LRFD)' if design_method == 'LRFD' else 'J3.4-2 (ASD)',
+        }
+        if st_warn:
+            shear_tension['warnings'] = st_warn
+            warnings.extend(st_warn)
+
     # 각 한계상태별 설계강도
     for ls in limit_states:
         if design_method == 'LRFD':
@@ -364,6 +411,8 @@ def bolt_connection(t1: float, t2: float, d: float,
         'Rn': governing['Rn'],
         'spec_sections': ['J3.3.1', 'J3.4', 'J6.1', 'J6.2', 'J6.3'],
     }
+    if shear_tension is not None:
+        result['shear_tension_interaction'] = shear_tension
     if warnings:
         result['warnings'] = warnings
         result['j6_verified'] = False
@@ -1017,6 +1066,7 @@ def design_connection(params: dict) -> dict:
             pattern_length=params.get('pattern_length'),
             Ag=params.get('Ag'), width=params.get('width'),
             g=params.get('g'), s_pitch=params.get('s_pitch'),
+            Vu=params.get('Vu'), Tu=params.get('Tu'),
         )
     elif conn_type == 'screw':
         result = screw_connection(
