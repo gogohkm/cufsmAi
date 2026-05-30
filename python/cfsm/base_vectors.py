@@ -328,13 +328,17 @@ def yDOFs(node, elem, m_node, nmno, ndm, Ryd, Rud):
     th = thetap
     rot = np.array([[math.cos(th), -math.sin(th)],
                     [math.sin(th),  math.cos(th)]])
-    CG = rot @ np.array([xcg, zcg])
+    # MATLAB yDOFs.m:34 uses the row-vector convention CG=[xcg,zcg]*rot, which is
+    # mathematically rot.T @ [xcg,zcg] (a rotation by -th), NOT rot @ [xcg,zcg].
+    # For thetap != 0 these differ, so use rot.T to reproduce MATLAB exactly.
+    CG = rot.T @ np.array([xcg, zcg])
 
     # Create y-DOFs for global buckling
     dy = np.zeros((nmno, 4))
     for i in range(nmno):
         orig_node = int(m_node[i, 3])  # 1-based original node number
-        XZi = rot @ np.array([m_node[i, 1], m_node[i, 2]])
+        # MATLAB yDOFs.m:42  XZi=[m_node(i,2),m_node(i,3)]*rot  ==  rot.T @ v
+        XZi = rot.T @ np.array([m_node[i, 1], m_node[i, 2]])
         dy[i, 0] = 1.0                  # axial
         dy[i, 1] = XZi[1] - CG[1]      # bending about 1-axis
         dy[i, 2] = XZi[0] - CG[0]      # bending about 2-axis

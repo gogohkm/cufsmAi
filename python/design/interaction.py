@@ -52,32 +52,61 @@ def combined_bending_shear(M: float, Mao: float,
 def combined_bending_web_crippling(P: float, Pn: float,
                                     M: float, Mnfo: float,
                                     phi: float = 0.90,
-                                    web_config: str = 'single') -> dict:
+                                    web_config: str = 'single',
+                                    design_method: str = 'LRFD',
+                                    omega: float = 1.70) -> dict:
     """휨 + 웹 크리플링 상호작용 검토 (§H3)
 
-    web_config:
-      'single'   → Eq. H3-1: 0.91(P/Pn) + (M/Mnfo) ≤ 1.33φ
-      'nested_z'  → Eq. H3-2: 0.86(P/Pn) + (M/Mnfo) ≤ 1.65φ
-      'multi_web' → Eq. H3-3: (P/Pn) + (M/Mnfo) ≤ 1.52φ
+    web_config (force-coefficient / limit-coefficient / equation):
+      'single'    → Eq. H3-1: 0.91(P/Pn) + (M/Mnfo) ≤ 1.33·(φ or 1/Ω)
+      'multi_web' → Eq. H3-2: 0.88(P/Pn) + (M/Mnfo) ≤ 1.46·(φ or 1/Ω)
+      'nested_z'  → Eq. H3-3: 0.86(P/Pn) + (M/Mnfo) ≤ 1.65·(φ or 1/Ω)
+
+    The left-hand side (force-coefficient·P/Pn + M/Mnfo) is identical for
+    ASD/LRFD/LSD and uses NOMINAL strengths Pn, Mnfo. Only the right-hand
+    side limit differs by design method:
+      LRFD/LSD → limit = limit_coef · φ
+      ASD      → limit = limit_coef / Ω   (Ω = 1.70 for all three, §H3 spec)
+
+    Args:
+        P, Pn:   소요/공칭 집중하중(웹 크리플링) (kips)
+        M, Mnfo: 소요/공칭 휨강도 (kip-in)
+        phi:     LRFD/LSD 저항계수 (LRFD=0.90; LSD H3-1/H3-2=0.75, H3-3=0.80)
+        web_config: 'single' | 'multi_web' | 'nested_z'
+        design_method: 'LRFD' | 'LSD' | 'ASD'
+        omega:   ASD 안전계수 (§H3 Eq. H3-1a/H3-2a/H3-3a 모두 Ω=1.70)
     """
     p_ratio = (P / Pn) if Pn > 0 else 0
     m_term = (M / Mnfo) if Mnfo > 0 else 0
 
+    # §H3 force-coefficient / limit-coefficient / equation label per web config.
     if web_config == 'nested_z':
-        p_term = 0.86 * p_ratio
-        limit = 1.65 * phi
-        eq = 'H3-2'
-        p_label = '0.86(P/Pn)'
-    elif web_config == 'multi_web':
-        p_term = p_ratio
-        limit = 1.52 * phi
+        # Eq. H3-3: two nested Z-shapes (AISI S100-16 §H3(c)).
+        p_coef = 0.86
+        limit_coef = 1.65
         eq = 'H3-3'
-        p_label = 'P/Pn'
+    elif web_config == 'multi_web':
+        # Eq. H3-2: multiple unreinforced webs, e.g. back-to-back I (§H3(b)).
+        p_coef = 0.88
+        limit_coef = 1.46
+        eq = 'H3-2'
     else:
-        p_term = 0.91 * p_ratio
-        limit = 1.33 * phi
+        # Eq. H3-1: single unreinforced web (§H3(a)).
+        p_coef = 0.91
+        limit_coef = 1.33
         eq = 'H3-1'
-        p_label = '0.91(P/Pn)'
+
+    p_term = p_coef * p_ratio
+    p_label = f'{p_coef:g}(P/Pn)'
+
+    # RHS limit by design method (§H3: ASD uses Ω=1.70, LRFD/LSD use φ).
+    method = str(design_method or 'LRFD').strip().upper()
+    if method == 'ASD':
+        # Conservative, spec-correct: Ω = 1.70 for Eq. H3-1a/H3-2a/H3-3a.
+        limit = limit_coef / omega
+    else:
+        # LRFD/LSD: limit_coef · φ (φ supplied by caller; LRFD=0.90).
+        limit = limit_coef * phi
 
     total = p_term + m_term
 
@@ -90,4 +119,5 @@ def combined_bending_web_crippling(P: float, Pn: float,
         'pass': total <= limit,
         'equation': eq,
         'web_config': web_config,
+        'design_method': method,
     }

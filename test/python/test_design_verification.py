@@ -866,13 +866,15 @@ def test_h3_web_configs():
     all_pass &= approx(1 if h1['equation'] == 'H3-1' else 0, 1, label='single → H3-1')
     all_pass &= approx(h1['limit'], 1.33 * 0.90, label='H3-1 limit=1.197')
 
-    # H3-2: 0.86P/Pn + M/Mn ≤ 1.65φ
+    # H3-3: 0.86P/Pn + M/Mn ≤ 1.65φ (two nested Z-shapes, AISI S100-16 Eq. H3-3)
     h2 = combined_bending_web_crippling(3, 5, 10, 20, 0.90, 'nested_z')
-    all_pass &= approx(h2['limit'], 1.65 * 0.90, label='H3-2 limit=1.485')
+    all_pass &= approx(h2['limit'], 1.65 * 0.90, label='nested_z → H3-3 limit=1.485')
+    all_pass &= approx(1 if h2['equation'] == 'H3-3' else 0, 1, label='nested_z → eq H3-3')
 
-    # H3-3: P/Pn + M/Mn ≤ 1.52φ
+    # H3-2: 0.88P/Pn + M/Mn ≤ 1.46φ (multiple unreinforced webs, AISI S100-16 Eq. H3-2)
     h3 = combined_bending_web_crippling(3, 5, 10, 20, 0.90, 'multi_web')
-    all_pass &= approx(h3['limit'], 1.52 * 0.90, label='H3-3 limit=1.368')
+    all_pass &= approx(h3['limit'], 1.46 * 0.90, label='multi_web → H3-2 limit=1.314')
+    all_pass &= approx(1 if h3['equation'] == 'H3-2' else 0, 1, label='multi_web → eq H3-2')
 
     return all_pass
 
@@ -968,8 +970,14 @@ def test_screw_connection_interpolation_and_pullover():
     bearing = [ls for ls in result['limit_states'] if ls['name'].startswith('Bearing')][0]
     pullover = [ls for ls in result['limit_states'] if ls['name'].startswith('Pull-over')][0]
 
-    pn_ratio_1 = min(4.2 * math.sqrt(t1 ** 3 * d) * Fu * n, 2.7 * t1 * d * Fu * n)
-    pn_ratio_25 = 2.7 * t1 * d * Fu * n
+    # AISI S100-16 Eq. J4.3.1: for 1.0 < t2/t1 < 2.5, linear interpolation between
+    # the t2/t1<=1.0 case (min of the three eqs; the 4.2-sqrt term uses the FAR member t2)
+    # and the t2/t1>=2.5 case (min of the two bearing eqs).
+    eq1 = 4.2 * math.sqrt(t2 ** 3 * d) * Fu * n
+    eq2 = 2.7 * t1 * d * Fu * n
+    eq3 = 2.7 * t2 * d * Fu * n
+    pn_ratio_1 = min(eq1, eq2, eq3)
+    pn_ratio_25 = min(eq2, eq3)
     interp = (t2 / t1 - 1.0) / 1.5
     expected_bearing = (1 - interp) * pn_ratio_1 + interp * pn_ratio_25
     dw = min(d * 2.0, 0.75)
@@ -1034,7 +1042,9 @@ def test_paf_limit_state_mapping():
     all_pass = True
     pin = [ls for ls in result['limit_states'] if ls['name'].startswith('Pin Shear')][0]
     bearing = [ls for ls in result['limit_states'] if ls['name'].startswith('Bearing')][0]
-    expected_pin = 0.60 * Fuf * (math.pi / 4 * d ** 2) * n
+    # AISI S100-16 Eq. J5.3.1-1: pin shear uses the HARDENED PAF steel tensile
+    # strength Fuh (default 120 ksi, §J5.2.1) — NOT the member/fastener Fuf argument.
+    expected_pin = 0.60 * 120.0 * (math.pi / 4 * d ** 2) * n
     expected_bearing = 3.2 * t1 * d * Fu * n
     all_pass &= approx(pin['Rn'], expected_pin, label='J5.3.1 pin shear')
     all_pass &= approx(bearing['Rn'], expected_bearing, label='J5.3.2 bearing/tilting')
@@ -1134,6 +1144,9 @@ def test_cold_work_uses_estimated_corner_ratio():
             'Ixx': 9.0, 'Izz': 2.0, 'Ixz': 0.0,
             'xcg': 0.0, 'zcg': 4.0, 'thetap': 0.0,
             'I11': 9.0, 'I22': 2.0,
+            # radii consistent with Ixx/Izz/A so compute_beam_Fcre>0 (braced → yielding
+            # governs → §A3.3.2 cold work legitimately applies for this stocky section)
+            'rx': 3.162, 'ry': 1.491, 'ro': 3.509,
             'J': 0.01, 'Cw': 5.0, 'xo': 0.3,
             'h_web': 7.5, 't': 0.06, 'b_flange': 2.5, 'd_lip': 0.75, 'R': 0.157,
         },
@@ -1143,7 +1156,7 @@ def test_cold_work_uses_estimated_corner_ratio():
         'dsm': {'Mcrl': 1000.0, 'Mcrd': 1000.0, 'My': 100.0},
     }
     result = design_member(params)
-    cw = result.get('cold_work', {})
+    cw = result.get('cold_work') or {}  # design_member returns None when A3.3.2 yields no benefit
 
     all_pass = True
     all_pass &= approx(1 if cw.get('C', 0) > 0 else 0, 1, label='cold-work C > 0')
@@ -1192,8 +1205,8 @@ def test_flexure_h3_respects_fastened_and_web_config():
                         label='uses G5-5 multi-web table')
     all_pass &= approx(1 if result.get('web_crippling', {}).get('n_webs') == 3 else 0, 1,
                         label='passes wc_n_webs')
-    all_pass &= approx(1 if result.get('h3_interaction', {}).get('equation') == 'H3-3' else 0, 1,
-                        label='H3 uses requested multi_web equation')
+    all_pass &= approx(1 if result.get('h3_interaction', {}).get('equation') == 'H3-2' else 0, 1,
+                        label='H3 uses requested multi_web equation (Eq. H3-2)')
     return all_pass
 
 

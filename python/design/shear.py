@@ -347,11 +347,11 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
         h3_reason = 'H3 applicability for this section family is not implemented.'
 
     if web_cfg == 'nested_z':
-        h3_candidate = 'H3-2'
+        h3_candidate = 'H3-3'  # §H3(c) two nested Z-shapes
     elif web_cfg == 'multi_web':
-        h3_candidate = 'H3-3'
+        h3_candidate = 'H3-2'  # §H3(b) multiple unreinforced webs (back-to-back I)
     else:
-        h3_candidate = 'H3-1'
+        h3_candidate = 'H3-1'  # §H3(a) single unreinforced web
 
     return {
         'section_family': family,

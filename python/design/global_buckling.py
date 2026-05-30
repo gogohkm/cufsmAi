@@ -84,9 +84,21 @@ def compute_column_Fcre(props: dict, Fy: float,
     ry = props.get('ry', 0) or (math.sqrt(props.get('Izz', 0) / Ag) if Ag > 0 else 0)
     J = props.get('J', 0)
     Cw = props.get('Cw', 0)
-    xo = abs(props.get('xo', 0))
-    ro = props.get('ro', 0)
 
+    # xo — 전단중심 편심 (도심~전단중심 거리, §E2.2-4의 x_o)
+    # props['xo']가 비어 있으면 compute_beam_Fcre와 동일하게 Xs - xcg로 복원한다
+    # (Contract #2). 이 fallback이 없으면 xo가 항상 0이 되어 단축대칭 단면(C, hat)에서
+    # 휨-비틀림좌굴 분기(E2.2)가 실행되지 않아 Pne가 과대평가된다.
+    xo = abs(props.get('xo', 0))
+    if xo == 0:
+        Xs = props.get('Xs', 0)
+        xcg = props.get('xcg', 0)
+        if Xs != 0 or xcg != 0:
+            xo = abs(Xs - xcg)
+
+    # ro — 극관성반경 (전단중심 기준). §E2.2-4: ro = √(rx² + ry² + xo²)
+    # ro fallback은 위에서 복원된 xo를 사용한다.
+    ro = props.get('ro', 0)
     if ro <= 0 and Ag > 0:
         ro = math.sqrt(rx ** 2 + ry ** 2 + xo ** 2)
 
@@ -97,13 +109,24 @@ def compute_column_Fcre(props: dict, Fy: float,
     # 비틀림좌굴 응력
     sigma_t = torsional_buckling_stress(E, G, Ag, J, Cw, ro, 1.0, KtLt)
 
-    # 대칭 여부 판정 (xo ≈ 0이면 이중대칭 또는 폐합단면)
-    if abs(xo) < 1e-6:
-        # 이중대칭: min(σex, σey, σt)
+    # 대칭 분류로 분기 결정 (§E2.1/E2.2/E2.3).
+    # 점대칭 단면(Z)은 xo≈0 이므로 이중대칭 분기(min σex/σey/σt)가 §E2.3와 일치한다.
+    # 단축대칭 단면(C, hat, 립앵글)은 xo≠0 이므로 휨-비틀림좌굴(E2.2-1)을 실행한다.
+    sec = str(props.get('section_type', '') or '').strip().upper().replace('-', '').replace('_', '')
+    is_point_symmetric = sec.startswith('Z') or sec.startswith('LIPPEDZ')
+    is_closed = sec in ('RHS', 'CHS', 'HSS', 'BOX', 'PIPE', 'TUBE')
+
+    # 단축대칭 휨-비틀림 분기 게이트: 수치적으로 의미 있는 xo가 있고,
+    # 점대칭/폐합/이중대칭으로 분류되지 않은 경우에만 E2.2를 적용한다.
+    use_ft = (abs(xo) >= 1e-6) and not is_point_symmetric and not is_closed
+
+    if not use_ft:
+        # 이중대칭/폐합/점대칭: §E2.1 + §E2.2(이중대칭 비틀림) / §E2.3 → min(σex, σey, σt)
         Fcre = min(sigma_ex, sigma_ey, sigma_t)
         buckling_type = 'flexural' if Fcre in (sigma_ex, sigma_ey) else 'torsional'
     else:
-        # 단축대칭: 휨-비틀림좌굴
+        # 단축대칭: 휨-비틀림좌굴 (§E2.2-1). 대칭축을 x축으로 보고 σex와 σt를 결합.
+        # Fcre = min(E2.1 flexural about y, E2.2-1 flexural-torsional)
         Fcre_ft = flexural_torsional_stress(sigma_ex, sigma_t, xo, ro)
         Fcre = min(sigma_ey, Fcre_ft)
         buckling_type = 'flexural' if Fcre == sigma_ey else 'flexural-torsional'

@@ -776,7 +776,18 @@ server.tool("aisi_design_compression", "Run compression design on the current se
             design_method: design_method || 'LRFD',
             Fy: fy, Fu: fu, KxLx: kxlx, KyLy: kyly, KtLt: ktlt, Pu: pu,
         });
-        return textResult(JSON.stringify(r, null, 2));
+        // SI 출력 변환: Python 엔진은 US 단위(kips)로 강도를 반환하므로
+        // units='SI'일 때 force-valued 키만 US→SI(kN)로 되돌린다.
+        // 무차원(utilization/pass)·중첩 dict(steps)는 그대로 둔다.
+        let out = r;
+        if (units === 'SI') {
+            out = convertOutputSI(r, {
+                Pne: 'force', Pnl: 'force', Pnd: 'force', Py: 'force',
+                Pn: 'force', phi_Pn: 'force', Pn_omega: 'force',
+                design_strength: 'force',
+            });
+        }
+        return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }
 );
 
@@ -805,7 +816,18 @@ server.tool("aisi_design_flexure", "Run flexural design on the current section m
             Fy: fy, Fu: fu, Lb: lb, Cb: Cb || 1.0, Mu: mu,
             ...(R_uplift != null && { R_uplift }),
         });
-        return textResult(JSON.stringify(r, null, 2));
+        // SI 출력 변환: Python 엔진은 US 단위(kip-in)로 강도를 반환하므로
+        // units='SI'일 때 moment-valued 키만 US→SI(kN-m)로 되돌린다.
+        // 무차원(utilization/pass)·중첩 dict(positive_region 등)는 그대로 둔다.
+        let out = r;
+        if (units === 'SI') {
+            out = convertOutputSI(r, {
+                Mne: 'moment', Mnl: 'moment', Mnd: 'moment', My: 'moment',
+                Mn: 'moment', Mn_dsm: 'moment', phi_Mn: 'moment', Mn_omega: 'moment',
+                design_strength: 'moment',
+            });
+        }
+        return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }
 );
 
@@ -907,7 +929,16 @@ server.tool("aisi_design_connection", "Chapter J connection design. Set units='S
             });
         }
         const r = await callBridgePost('/action', body);
-        return textResult(JSON.stringify(r, null, 2));
+        // SI 출력 변환: Python 엔진은 US 단위(kips)로 접합부 강도를 반환하므로
+        // units='SI'일 때 force-valued 키만 US→SI(kN)로 되돌린다.
+        // 중첩 dict(limit_states[]·각 Rn/design_strength)와 무차원 값은 그대로 둔다.
+        let out = r;
+        if (units === 'SI') {
+            out = convertOutputSI(r, {
+                Rn: 'force', design_strength: 'force',
+            });
+        }
+        return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }
 );
 

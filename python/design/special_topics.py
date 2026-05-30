@@ -260,8 +260,17 @@ def flange_curling(bf: float, t: float, h: float,
     if t <= 0 or E <= 0:
         return {'cf': 0, 'limit': 0, 'ok': True, 'note': 'Invalid input'}
 
-    # AISI S100-16 Eq. L3-1: cf = 0.061 × bf⁴ × f_avg / (E × t² × h)
-    cf = 0.061 * bf ** 4 * abs(f_avg) / (E * t ** 2 * h) if h > 0 else 0
+    # AISI S100-16 Eq. L3-1 (Chapter L): wf = sqrt(0.061·t·d·E/f_av)·(100·cf/d)^(1/4)
+    # where wf = width of flange projecting beyond the web (or half the clear
+    # distance between webs for box/U sections), d = depth of beam, f_av = average
+    # flange stress. Solving Eq. L3-1 for the curling displacement cf gives:
+    #   cf = wf⁴ · f_av² / (100 · d · 0.061² · t² · E²)
+    # (Verified against CFS Design Manual Example I-18: wf=1.193, d=5.698,
+    #  t=0.0566, f_av=23.82 → cf≈0.000194 in.)
+    wf = bf - t  # projection of flange beyond the web (conservative; for box/U
+                 # sections pass bf = half the clear distance between webs)
+    cf = (wf ** 4 * abs(f_avg) ** 2) / (100.0 * h * (0.061 ** 2) * t ** 2 * E ** 2) \
+        if (h > 0 and abs(f_avg) > 0) else 0
 
     # AISI는 고정 허용치를 제시하지 않으므로 기본값은 commentary-style reference만 둔다.
     limit = allowable_cf if allowable_cf is not None else 0.05 * h
@@ -274,7 +283,7 @@ def flange_curling(bf: float, t: float, h: float,
         'bf_over_t': round(bf / t, 1) if t > 0 else 0,
         'criterion_type': 'serviceability',
         'steps': [
-            {'name': 'Curling', 'formula': f'cf = 0.061 × {bf}⁴ × {abs(f_avg):.1f} / ({E} × {t}² × {h}) = {cf:.6f} in'},
+            {'name': 'Curling', 'formula': f'cf = wf⁴ × f_av² / (100 × d × 0.061² × t² × E²) = {wf:.4f}⁴ × {abs(f_avg):.1f}² / (100 × {h} × 0.061² × {t}² × {E}²) = {cf:.6f} in'},
             {'name': 'Allowable Curling', 'formula': f'cf_allow = {limit:.6f} in → {"OK" if ok else "NG"}'},
         ],
         'warnings': [] if allowable_cf is not None else [

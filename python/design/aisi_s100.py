@@ -298,6 +298,33 @@ def _design_compression(params: dict) -> dict:
     })
 
     # Step 3: 국부좌굴 (E3.2)
+    # Pcrl=0 fallback: signature curve에서 국부좌굴 극소 미검출 시
+    # Appendix 1 §1.1 Eq. 1.1-4 판좌굴 공식으로 Fcrl 산정 (Pcrl_local = Fcrl × Ag_eff)
+    Pcrl_source = 'FSM'
+    if Pcrl == 0 and Ag_eff > 0:
+        section = params.get('section', {})
+        ho = props.get('h_web', 0) or section.get('depth', 0)
+        bo = props.get('b_flange', 0) or section.get('flange_width', 0)
+        do = section.get('lip_depth', 0) or props.get('d_lip', 0)
+        t = props.get('t', 0) or section.get('thickness', 0)
+        R_loc = props.get('R', 0) or props.get('r', 0) or section.get('r', 0)
+        sec_type = section.get('type', 'C')
+        if ho > 0 and bo > 0 and t > 0:
+            try:
+                from design.loads.local_params import calc_Fcrl
+                fcrl_result = calc_Fcrl(ho, bo, do, t, R=R_loc, section_type=sec_type)
+                Fcrl_calc = fcrl_result['Fcrl']
+                if Fcrl_calc > 0:
+                    Pcrl = Fcrl_calc * Ag_eff
+                    Pcrl_source = '§App.1 Eq.1.1-4'
+                    warnings.append(
+                        f'Pcrl: signature curve에서 국부좌굴 극소 미검출 → '
+                        f'Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 '
+                        f'(Fcrl={Fcrl_calc:.2f} ksi, 지배요소={fcrl_result["governing"]})'
+                    )
+            except Exception:
+                pass
+
     if Pcrl > 0:
         local_result = compression_local(Pne, Pcrl)
         Pnl = local_result['Pnl']
@@ -310,7 +337,7 @@ def _design_compression(params: dict) -> dict:
         'step': 3, 'name': 'Local Buckling (Pnl)',
         'value': round(Pnl, 2), 'unit': 'kips',
         'formula': (
-            f'Pcrl = {Pcrl:.2f} kips, '
+            f'Pcrl = {Pcrl:.2f} kips ({Pcrl_source}), '
             f'λl = √(Pne/Pcrl) = √({Pne:.2f} kips/{Pcrl:.2f} kips) = {local_result["lambda_l"]:.3f} '
             f'{"≤" if local_result["lambda_l"] <= 0.776 else ">"} 0.776 → '
             f'Pnl = {Pnl:.2f} kips'
@@ -487,7 +514,35 @@ def _design_flexure(params: dict) -> dict:
         global_result = beam_global_strength(Fy_eval, Fcre, Sf_eff, Zf=Zf, use_inelastic_reserve=allow_ir)
         Mne = global_result['Mne']
 
-        Mcrl_eff = Mcrl * scale if Mcrl > 0 else 0
+        # §F3.2.1/§F4: Mcrl, Mcrd are ELASTIC critical buckling moments (Appendix 2),
+        # functions of E and gross geometry only — independent of Fy/Fya. They must NOT
+        # be scaled by Fya in the cold-work path; only My and Mne respond to the elevated
+        # yield. Scaling them would mask the increase in local/distortional slenderness
+        # (λl=√(Mne/Mcrl), λd=√(My/Mcrd)) and overpredict Mnl/Mnd (unconservative).
+        Mcrl_eff = Mcrl if Mcrl > 0 else 0
+        Mcrl_source = 'FSM'
+
+        # Mcrl=0 fallback: signature curve에서 국부좌굴 극소 미검출 시
+        # Appendix 1 §1.1 Eq. 1.1-4 판좌굴 공식으로 Fcrl 산정 (Mcrl_local = Fcrl × Sf)
+        if Mcrl_eff == 0 and Sf_eff > 0:
+            section = params.get('section', {})
+            ho = props.get('h_web', 0) or section.get('depth', 0)
+            bo = props.get('b_flange', 0) or section.get('flange_width', 0)
+            do = section.get('lip_depth', 0) or props.get('d_lip', 0)
+            t = props.get('t', 0) or section.get('thickness', 0)
+            R_loc = props.get('R', 0) or props.get('r', 0) or section.get('r', 0)
+            sec_type = section.get('type', 'C')
+            if ho > 0 and bo > 0 and t > 0:
+                try:
+                    from design.loads.local_params import calc_Fcrl
+                    fcrl_result = calc_Fcrl(ho, bo, do, t, R=R_loc, section_type=sec_type)
+                    Fcrl_calc = fcrl_result['Fcrl']
+                    if Fcrl_calc > 0:
+                        Mcrl_eff = Fcrl_calc * Sf_eff
+                        Mcrl_source = '§App.1 Eq.1.1-4'
+                except Exception:
+                    pass
+
         if Mcrl_eff > 0:
             local_result = flexure_local(Mne, Mcrl_eff)
             Mnl = local_result['Mnl']
@@ -495,7 +550,7 @@ def _design_flexure(params: dict) -> dict:
             local_result = {'lambda_l': 0, 'equation': 'N/A'}
             Mnl = Mne
 
-        Mcrd_eff = Mcrd * scale if Mcrd > 0 else 0
+        Mcrd_eff = Mcrd if Mcrd > 0 else 0
         Mcrd_source = 'FSM'
 
         # §2.3.3.3 해석적 Fcrd fallback
@@ -561,6 +616,7 @@ def _design_flexure(params: dict) -> dict:
             'global_result': global_result,
             'Mne': Mne,
             'Mcrl': Mcrl_eff,
+            'Mcrl_source': Mcrl_source,
             'local_result': local_result,
             'Mnl': Mnl,
             'Mcrd': Mcrd_eff,
@@ -584,7 +640,12 @@ def _design_flexure(params: dict) -> dict:
             if use_ir:
                 warnings.append('§A3.3.2: Cold Work(Fya)와 §F2.4.2 Inelastic Reserve는 동시 적용 불가. Cold Work를 적용하지 않았습니다.')
             elif cold_work_info['applicable'] and cold_work_info['Fya'] > Fy_original:
-                # §A3.3.2: Fya를 Fy 대신 대입하여 재계산 — DSM이 좌굴 감소를 자동 반영
+                # §A3.3.2: Fya를 Fy 대신 대입하여 재계산 — DSM이 좌굴 감소를 자동 반영.
+                # §A3.3.2 한정: 냉간가공 증가는 "Fy 응력 수준에서 국부/왜곡좌굴에 의한
+                # 강도 감소를 받지 않는 단면"(즉 Mn=Mne, Mnd=My)에만 적용 가능.
+                # Mcrl/Mcrd는 탄성값으로 Fya에 비례하지 않으므로(위 _calc_flexure_state 참조),
+                # 국부/왜곡좌굴 지배 단면은 Fya 적용 시 λl/λd가 커져 강도가 늘지 않는다.
+                # 아래 Mn_cw ≤ Mn_virgin 가드가 이 §A3.3.2 적용한계를 보수적으로 구현한다.
                 Mn_virgin = min(state['Mne'], state['Mnl'], state['Mnd'])
                 Fy = cold_work_info['Fya']
                 state = _calc_flexure_state(Fy, False)
@@ -607,6 +668,7 @@ def _design_flexure(params: dict) -> dict:
     global_result = state['global_result']
     Mne = state['Mne']
     Mcrl = state['Mcrl']
+    Mcrl_source = state.get('Mcrl_source', 'FSM')
     local_result = state['local_result']
     Mnl = state['Mnl']
     Mcrd = state['Mcrd']
@@ -706,11 +768,14 @@ def _design_flexure(params: dict) -> dict:
         'equation': global_result['equation'],
     })
 
+    if Mcrl_source.startswith('§App.1'):
+        warnings.append('Mcrl: signature curve에서 국부좌굴 극소 미검출 → Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용')
+
     steps.append({
         'step': 3, 'name': 'Local Buckling (Mnl)',
         'value': round(Mnl, 2), 'unit': 'kip-in',
         'formula': (
-            f'Mcrl = {Mcrl:.2f} kip-in, '
+            f'Mcrl = {Mcrl:.2f} kip-in ({Mcrl_source}), '
             f'λl = √(Mne/Mcrl) = √({Mne:.2f} kip-in/{Mcrl:.2f} kip-in) = {local_result["lambda_l"]:.3f} → '
             f'Mnl = {Mnl:.2f} kip-in'
         ) if Mcrl > 0 else f'Mcrl = 0 → Mnl = Mne = {Mnl:.2f} kip-in',
@@ -945,7 +1010,12 @@ def _design_flexure(params: dict) -> dict:
             result['web_crippling'] = wc_result
             result['warnings'].extend(wc.get('warnings', []))
             if wc.get('h3_applicable', True):
-                h3 = combined_bending_web_crippling(Vu, Pn_wc, Mu, Mnfo, 0.90, wc_web_config)
+                # §H3 Eq. H3-1/2/3: limit is method-dependent (LRFD/LSD → coeff·φ;
+                # ASD → coeff/Ω with Ω=1.70 per spec). Pass design_method (in scope)
+                # instead of hardcoding φ=0.90 so the ASD (Ω) form is used for ASD runs.
+                h3 = combined_bending_web_crippling(
+                    Vu, Pn_wc, Mu, Mnfo,
+                    web_config=wc_web_config, design_method=design_method)
                 result['h3_interaction'] = h3
             elif wc.get('h3_not_applicable_reason'):
                 result['warnings'].append(wc['h3_not_applicable_reason'])
@@ -1014,13 +1084,18 @@ def _design_combined(params: dict) -> dict:
     ry = props.get('ry', 0)
     alpha_x, alpha_y = 1.0, 1.0
     PEx, PEy = 1e10, 1e10
+    # §C1.2.1.1 Eq. C1.2.1.1-3: B1 = Cm/(1 - α·P̄/Pe1) ≥ 1.0
+    # α = 1.00 (LRFD/LSD), 1.60 (ASD). Pu is the required axial force in the
+    # corresponding load combination (passed in unmodified, so applying 1.60
+    # here is the single place the ASD destabilizing-ratio amplifier is applied).
+    c1_alpha = 1.60 if design_method == 'ASD' else 1.00
     if Pu > 0 and rx > 0 and Ag > 0:
         PEx = math.pi ** 2 * E * Ag / (KxLx / rx) ** 2
-        alpha_x = Cmx / max(1 - Pu / PEx, 0.01)
+        alpha_x = Cmx / max(1 - c1_alpha * Pu / PEx, 0.01)
         alpha_x = max(alpha_x, 1.0)
     if Pu > 0 and ry > 0 and Ag > 0:
         PEy = math.pi ** 2 * E * Ag / (KyLy / ry) ** 2
-        alpha_y = Cmy / max(1 - Pu / PEy, 0.01)
+        alpha_y = Cmy / max(1 - c1_alpha * Pu / PEy, 0.01)
         alpha_y = max(alpha_y, 1.0)
 
     Mux_amp = Mux * alpha_x
@@ -1067,6 +1142,7 @@ def _design_combined(params: dict) -> dict:
     if alpha_x > 1.0 or alpha_y > 1.0:
         result['amplification'] = {
             'Cmx': Cmx, 'Cmy': Cmy,
+            'alpha': c1_alpha,  # §C1.2.1.1-3 α: 1.00 (LRFD/LSD), 1.60 (ASD)
             'PEx': round(PEx, 2), 'PEy': round(PEy, 2),
             'alpha_x': round(alpha_x, 4), 'alpha_y': round(alpha_y, 4),
             'Mux_amp': round(Mux_amp, 2), 'Muy_amp': round(Muy_amp, 2),
@@ -1466,6 +1542,12 @@ def _auto_generate_props(params: dict) -> dict:
         except Exception:
             props['J'] = 0
             props['Cw'] = 0
+
+        # §E2.2/§F2.1: 전단중심 편심 xo = |Xs - xcg| (도심~전단중심 x거리).
+        # 단축대칭 C-단면은 xo≠0 → compute_column_Fcre가 휨-비틀림좌굴 분기를 탄다.
+        # ro는 하류(compute_column_Fcre)에서 rx,ry,xo로부터 유도하도록 두고 여기서
+        # 미리 계산하지 않는다(ro 정의 분기 방지). 점대칭 Z-단면은 xo≈0 → 이중대칭 분기 유지.
+        props['xo'] = abs(props.get('Xs', 0) - props.get('xcg', 0))
 
         # Sf = Sx (호환성)
         props['Sf'] = props.get('Sx', 0)
