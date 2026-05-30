@@ -792,13 +792,19 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
 
                 const aFy = options.fy || this._getAnalysisFy();
+                // 선택: 유효좌굴길이 제공 시 전체좌굴값을 AISI 폐형식(Eq.E2-4 / §F2.1)으로 산정.
+                // 컬럼 유효길이(KxLx/KyLy/KtLt)는 압축(P) 호출로, 휨 비지지길이(Lb)는 Mxx 호출로 전달.
+                // section_type/Cb 는 양쪽 분기에서 공통으로 사용.
                 const dsmP = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
                     curve, fy: aFy, load_type: 'P',
+                    KxLx: options.KxLx, KyLy: options.KyLy, KtLt: options.KtLt,
+                    Cb: options.Cb, section_type: options.section_type,
                 });
                 const dsmM = await this._pythonBridge.call('dsm', {
                     node: this._model.node, elem: this._model.elem,
                     curve, fy: aFy, load_type: 'Mxx',
+                    Lb: options.Lb, Cb: options.Cb, section_type: options.section_type,
                 });
                 return { P: dsmP, Mxx: dsmM, fy_used: aFy };
             }

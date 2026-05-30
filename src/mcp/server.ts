@@ -154,10 +154,30 @@ server.tool("get_section_properties", "Get cross-section properties (A, Ixx, Izz
     }
 );
 
-server.tool("get_dsm_values", "Get DSM design values: Pcrl, Pcrd, Mcrl, Mcrd, Py, My",
-    { fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)") },
-    async ({ fy }) => {
-        const r = await callBridgePost('/action', { action: 'get_dsm', fy: fy || 35.53 });
+server.tool("get_dsm_values",
+    "Get DSM design values: Pcrl, Pcrd, Mcrl, Mcrd, Py, My. Optionally supply effective lengths (KxLx/KyLy/KtLt for columns, Lb for beams) to get the TRUE global elastic buckling Pcre/Mcre (AISI S100-16 Eq.E2-4 / §F2.1) instead of the finite-strip signature-curve longest-half-wavelength asymptote. When effective lengths are omitted, the global value is the signature-curve asymptote (global_is_signature_asymptote=true).",
+    {
+        fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
+        KxLx: z.number().optional().describe("Column effective length about x (strong) axis K·L — inches or mm if units='SI'"),
+        KyLy: z.number().optional().describe("Column effective length about y (weak) axis K·L — inches or mm if units='SI'"),
+        KtLt: z.number().optional().describe("Column torsional effective length Kt·Lt — inches or mm if units='SI'"),
+        Lb: z.number().optional().describe("Beam laterally unbraced length Lb (for Mxx/Mzz global LTB) — inches or mm if units='SI'"),
+        Cb: z.number().optional().describe("Beam moment gradient factor Cb (default 1.0)"),
+        section_type: z.string().optional().describe("Section type for closed-form global branch ('C', 'Z', 'RHS', ...; default 'C')"),
+        units: z.enum(['US', 'SI']).optional().describe("Unit system: 'US' (default, inches/ksi) or 'SI' (mm). Converts the effective lengths."),
+    },
+    async ({ fy, KxLx, KyLy, KtLt, Lb, Cb, section_type, units }) => {
+        if (units === 'SI') {
+            const c = SI_TO_US.length;
+            if (KxLx != null) KxLx *= c;
+            if (KyLy != null) KyLy *= c;
+            if (KtLt != null) KtLt *= c;
+            if (Lb != null) Lb *= c;
+        }
+        const r = await callBridgePost('/action', {
+            action: 'get_dsm', fy: fy || 35.53,
+            KxLx, KyLy, KtLt, Lb, Cb, section_type,
+        });
         return textResult(JSON.stringify(r, null, 2));
     }
 );

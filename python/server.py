@@ -185,7 +185,15 @@ def handle_request(request: dict) -> dict:
             curve = params.get('curve', [])
             fy = params.get('fy', 35.53)
             load_type = params.get('load_type', 'P')
-            result = extract_dsm_values(curve, node, elem, fy, load_type)
+            # 선택: 유효좌굴길이 제공 시 전체좌굴값을 AISI 폐형식(Eq.E2-4 / §F2.1)으로
+            # 산정한다. 미제공(None)이면 종전대로 signature-curve 점근값을 사용한다.
+            result = extract_dsm_values(
+                curve, node, elem, fy, load_type,
+                KxLx=params.get('KxLx'), KyLy=params.get('KyLy'),
+                KtLt=params.get('KtLt'), Lb=params.get('Lb'),
+                Cb=params.get('Cb', 1.0),
+                section_type=params.get('section_type', 'C'),
+            )
             return {'id': req_id, 'result': result}
 
         elif method == 'cutwp':

@@ -25,6 +25,7 @@ from design.steel_grades import E, G, STEEL_GRADES
 PHI = {
     'compression': 0.85,
     'flexure': 0.90,
+    'flexure_round_hss': 0.95,  # §F2.3 폐합 원형관 (round HSS) — φ_b=0.95
     'tension_yield': 0.90,
     'tension_rupture': 0.75,
     'shear': 0.95,
@@ -32,6 +33,7 @@ PHI = {
 OMEGA = {
     'compression': 1.80,
     'flexure': 1.67,
+    'flexure_round_hss': 1.67,  # §F2.3 폐합 원형관 (round HSS) — Ω_b=1.67
     'tension_yield': 1.67,
     'tension_rupture': 2.00,
     'shear': 1.60,
@@ -300,6 +302,12 @@ def _design_compression(params: dict) -> dict:
     Ag = props.get('A', 0)
     if Ag <= 0:
         return {'error': 'Section properties not available (A=0)'}
+
+    # §E2 분기 판정용 section_type 주입: compute_column_Fcre는 props['section_type']로
+    # 점대칭(Z, §E2.3)/폐합(§E2.1)을 분류한다. 디스패처가 이를 채워야 §E2.3이 발동한다.
+    # (이미 명시된 경우엔 보존; lippedC는 'C'로 분류되어 기존 휨-비틀림 경로 불변.)
+    props = dict(props)
+    props.setdefault('section_type', _effective_section_type(params))
 
     # DSM 값 (외부에서 전달 — get_dsm_values 결과)
     dsm = params.get('dsm', {})
@@ -586,6 +594,23 @@ def _design_flexure(params: dict) -> dict:
     Zf = props.get('Zx', 0) or props.get('Zf', 0)
     use_ir = params.get('use_inelastic_reserve', False)
 
+    # §F2.3 round-HSS 분기용 D/t 산정 (원형관 'chs'일 때만; 그 외 None).
+    # 외경 D는 section.diameter 또는 params['D'](템플릿 CHS의 외경)이며 두께 t로 나눈다.
+    # §F2.1.4 closed-box('rhs')는 compute_beam_Fcre가 props['Izz']를 약축 Iy로 사용하므로
+    # 추가 키 주입이 불필요하다(grosprop이 Izz를 제공). D_over_t는 round-HSS 전용.
+    _sec_norm = str(section_type or '').strip().lower().replace('-', '').replace('_', '')
+    _is_round = _sec_norm in ('chs', 'round', 'pipe', 'cylindrical') or _sec_norm.startswith('chs')
+    D_over_t = None
+    if _is_round:
+        _section = params.get('section', {}) or {}
+        _t = props.get('t', 0) or _section.get('thickness', 0) or params.get('t', 0)
+        # 외경 우선순위: 명시 diameter → CHS 템플릿 외경 params['D'] → section.depth/H fallback.
+        # CHS는 params['D']가 외경이므로 section.depth(=H)보다 우선한다.
+        _D = (_section.get('diameter', 0) or params.get('D', 0)
+              or _section.get('depth', 0) or params.get('H', 0))
+        if _D > 0 and _t > 0:
+            D_over_t = _D / _t
+
     # Lb 미지정 시 기본 120 in이 LTB 강도를 결정하므로 경고를 남긴다.
     if 'Lb' not in params:
         warnings.append('Lb defaulted to 120 in — verify lateral unbraced length')
@@ -605,8 +630,12 @@ def _design_flexure(params: dict) -> dict:
         scale = Fy_eval / Fy_original if Fy_original > 0 else 1.0
         My = (My_dsm * scale) if My_dsm > 0 else (Sf * Fy_eval)
         Sf_eff = My / Fy_eval if Fy_eval > 0 else Sf
-        Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type)
-        global_result = beam_global_strength(Fy_eval, Fcre, Sf_eff, Zf=Zf, use_inelastic_reserve=allow_ir)
+        # §F2.1.4 closed-box는 Lb<=Lu 판정에 Fy가 필요하므로 Fy_eval을 전달한다.
+        Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type, Fy=Fy_eval)
+        # §F2.3 round-HSS는 section_type/D_over_t/E를 받아 직접 Mne 곡선을 산정한다.
+        global_result = beam_global_strength(
+            Fy_eval, Fcre, Sf_eff, Zf=Zf, use_inelastic_reserve=allow_ir,
+            section_type=section_type, D_over_t=D_over_t, E=E)
         Mne = global_result['Mne']
 
         # §F3.2.1/§F4: Mcrl, Mcrd are ELASTIC critical buckling moments (Appendix 2),
@@ -641,7 +670,19 @@ def _design_flexure(params: dict) -> dict:
         # §F2.4.2-3: 부재 소성모멘트 Mp = Zf×Fy (탄성 임계값과 달리 Fy/Fya에 비례)
         Mp = Zf * Fy_eval if Zf > 0 else 0.0
 
-        if Mcrl_eff > 0:
+        # §F3.1.1: 원형관(round HSS)으로 D/t ≤ 0.441 E/Fy 이면 국부좌굴(Mnl)을 검토하지
+        # 않는다(local buckling need not be checked). 원형관 국부좌굴은 이미 §F2.3 Mne
+        # 곡선에 반영되어 있으므로 Mnl 감소를 건너뛰고 Mnl=Mne로 둔다.
+        _skip_round_local = (
+            _is_round and D_over_t is not None and D_over_t > 0
+            and Fy_eval > 0 and D_over_t <= 0.441 * E / Fy_eval
+        )
+
+        if _skip_round_local:
+            local_result = {'lambda_l': 0,
+                            'equation': 'F3.1.1 (round HSS, local buckling not checked)'}
+            Mnl = Mne
+        elif Mcrl_eff > 0:
             local_result = flexure_local(Mne, Mcrl_eff)
             Mnl = local_result['Mnl']
             # §F3.2.3 국부 비탄성 예비강도: λl=√(My/Mcrl)≤0.776 이고 Mne≥My 일 때.
@@ -668,7 +709,9 @@ def _design_flexure(params: dict) -> dict:
         mcrd_fallback_failed = False
 
         # §2.3.3.3 해석적 Fcrd fallback
-        if Mcrd_eff == 0 and Sf > 0:
+        # round HSS(폐합 원형관)는 왜곡좌굴(§F4) 한계상태가 없으므로 해석적 fallback을
+        # 건너뛴다 — 그렇지 않으면 CHS에 기본 H/B로 산정된 허위 Mcrd가 §F2.3 Mne를 깎는다.
+        if Mcrd_eff == 0 and Sf > 0 and not _skip_round_local:
             section = params.get('section', {})
             ho = props.get('h_web', 0) or section.get('depth', 0)
             bo = props.get('b_flange', 0) or section.get('flange_width', 0)
@@ -741,6 +784,11 @@ def _design_flexure(params: dict) -> dict:
                             'equation': 'F4.3-1 (distortional inelastic reserve)',
                             'Cyd': Cyd,
                         }
+        elif _skip_round_local:
+            # round HSS: 왜곡좌굴(§F4) 미적용. §F2.3 Mne가 1.25Fy까지 허용되므로
+            # Mnd를 My로 캡하지 않고 Mne로 둔다 → Mn=min(Mne,Mnl,Mnd)=Mne.
+            dist_result = {'lambda_d': 0, 'equation': 'N/A (round HSS, §F4 not applicable)'}
+            Mnd = Mne
         else:
             dist_result = {'lambda_d': 0, 'equation': 'N/A'}
             Mnd = My
@@ -1021,8 +1069,12 @@ def _design_flexure(params: dict) -> dict:
         })
         spec_sections.append('I6.2.1')
 
-    phi = PHI['flexure']
-    omega = OMEGA['flexure']
+    # §F2.3 round HSS는 φ_b=0.95(LRFD)/Ω_b=1.67(ASD)를 사용한다. global_result의
+    # equation에 'F2.3'이 포함되면(즉 §F2.3 곡선으로 Mne를 산정한 round HSS) 0.95를 적용한다.
+    # 그 외 모든 단면(C/Z 개단면, closed-box 등)은 기존 φ_b=0.90으로 불변.
+    _is_f2_3 = 'F2.3' in str(global_result.get('equation', ''))
+    phi = PHI['flexure_round_hss'] if _is_f2_3 else PHI['flexure']
+    omega = OMEGA['flexure_round_hss'] if _is_f2_3 else OMEGA['flexure']
     phi_Mn = phi * Mn
     Mn_omega = Mn / omega
 
@@ -1092,13 +1144,22 @@ def _design_flexure(params: dict) -> dict:
     Cb_pos = params.get('Cb_pos', 1.0)
     Mu_pos = abs(params.get('Mu_pos', 0))
     if Lb_pos > 0 or Mu_pos > 0 or (Lb_pos == 0 and params.get('Lb', 0) > 0):
-        # 정모멘트 구간: Lb_pos, Cb_pos로 별도 Fcre/Mne 계산
-        Fcre_pos = compute_beam_Fcre(props, Cb_pos, Lb_pos, section_type=section_type)
-        global_pos = beam_global_strength(Fy, Fcre_pos, Sf)
+        # 정모멘트 구간: Lb_pos, Cb_pos로 별도 Fcre/Mne 계산.
+        # §F2.1.4 box(Fy)/§F2.3 round HSS(section_type/D_over_t/E) 분기를 주 구간과 일관되게 전달.
+        Fcre_pos = compute_beam_Fcre(props, Cb_pos, Lb_pos, section_type=section_type, Fy=Fy)
+        global_pos = beam_global_strength(
+            Fy, Fcre_pos, Sf, section_type=section_type, D_over_t=D_over_t, E=E)
         Mne_pos = global_pos['Mne']
 
+        # §F3.1.1: round HSS로 D/t ≤ 0.441 E/Fy 이면 국부좌굴 미검토 (Mnl_pos=Mne_pos).
+        _skip_round_local_pos = (
+            _is_round and D_over_t is not None and D_over_t > 0
+            and Fy > 0 and D_over_t <= 0.441 * E / Fy
+        )
         # 정모멘트: Mcrl, Mcrd는 동일 단면이므로 같은 값 사용
-        if Mcrl > 0:
+        if _skip_round_local_pos:
+            Mnl_pos = Mne_pos
+        elif Mcrl > 0:
             local_pos = flexure_local(Mne_pos, Mcrl)
             Mnl_pos = local_pos['Mnl']
         else:
@@ -1109,7 +1170,10 @@ def _design_flexure(params: dict) -> dict:
         # β 미적용 기준값 Mcrd_base를 사용하여 정모멘트 구간은 β=1.0을 기본으로 한다.
         # My_pos = Sf×Fy(총단면계수×Fy)는 Eq. F4.1-4에 부합하며 주 구간과 동일하다.
         Mcrd_pos = state.get('Mcrd_base', Mcrd)
-        if Mcrd_pos > 0:
+        if _skip_round_local_pos:
+            # round HSS: 왜곡좌굴 미적용 → Mnd_pos=Mne_pos (§F2.3 Mne 보존).
+            Mnd_pos = Mne_pos
+        elif Mcrd_pos > 0:
             dist_pos = flexure_distortional(Sf * Fy, Mcrd_pos)
             Mnd_pos = dist_pos['Mnd']
         else:
