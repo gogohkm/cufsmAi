@@ -121,7 +121,12 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             matnum = int(elem[e, 4])
 
             mat_idx = np.where(prop[:, 0] == matnum)[0]
-            mat_idx = mat_idx[0] if len(mat_idx) > 0 else 0
+            if len(mat_idx) == 0:
+                # fail-fast like MATLAB stripmain.m find(); no silent fallback to material 0
+                raise ValueError(
+                    f'Element {e}: material number {matnum} not found in prop '
+                    f'(available: {prop[:, 0].tolist()})')
+            mat_idx = mat_idx[0]
             Ex = prop[mat_idx, 1]
             Ey = prop[mat_idx, 2]
             vx = prop[mat_idx, 3]
@@ -155,7 +160,12 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
 
         try:
             eigenvalues, eigenvectors = eig(Kff, Mff)
-            valid = np.where((np.isreal(eigenvalues)) & (np.real(eigenvalues) > 0))[0]
+            # tolerance-based real-positive-finite filter (cf. engine.fsm_solver / stripmain.m:364):
+            # keep modes with sub-1e-5 imaginary roundoff, reject inf from singular Mff
+            valid = np.where(
+                (np.abs(np.imag(eigenvalues)) < 1e-5)
+                & (np.real(eigenvalues) > 0)
+                & np.isfinite(np.real(eigenvalues)))[0]
             lam = np.real(eigenvalues[valid])
             sort_idx = np.argsort(lam)
             lam = lam[sort_idx[:neigs]]

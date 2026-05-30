@@ -1950,7 +1950,7 @@ def _auto_generate_props(params: dict) -> dict:
                 from models.data import GBTConfig
                 import numpy as np
 
-                prop_mat = np.array([[100, 29500, 29500, 0.3, 0.3, 11346]])
+                prop_mat = np.array([[100, 29500, 29500, 0.3, 0.3, 11300]])  # G per AISI §A3.1
                 Fy = params.get('Fy', 35.53)
 
                 node_p = node.copy()

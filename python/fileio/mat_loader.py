@@ -24,7 +24,7 @@ def load_mat_file(filepath: str) -> CufsmModel:
     data = loadmat(filepath, simplify_cells=True)
 
     # prop
-    prop = np.array(data.get('prop', [[100, 29500, 29500, 0.3, 0.3, 11346]]),
+    prop = np.array(data.get('prop', [[100, 29500, 29500, 0.3, 0.3, 11300]]),
                     dtype=float)
     if prop.ndim == 1:
         prop = prop.reshape(1, -1)

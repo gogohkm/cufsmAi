@@ -12,7 +12,7 @@ import math
 from typing import List, Optional
 
 E_STEEL = 29500.0  # ksi
-G_STEEL = 11346.15  # ksi
+G_STEEL = 11300.0  # ksi — AISI S100-16 §A3.1 published shear modulus (77,900 MPa)
 
 
 # ---------------------------------------------------------------------------
