@@ -27,8 +27,6 @@
     let _lastLoadAnalysis = null;
     /** Lap 접합부 설계 결과 */
     let _lastLapResult = null;
-    /** 백테스트 결과 */
-    let _lastBacktestResult = null;
 
     // ============================================================
     // 단위 변환 시스템 (SI ↔ US)
@@ -361,9 +359,6 @@
             case 'loadAnalysisComplete':
                 renderLoadAnalysisResult(msg.data);
                 sendTreeUpdate();
-                break;
-            case 'backtestResult':
-                applyBacktestResult(msg.data);
                 break;
             case 'designDsmPrepared': {
                 const prepBtn = document.getElementById('btn-prepare-design-dsm');
@@ -1523,7 +1518,6 @@
             'postprocessor': 'postprocessor', 'buckling-curve': 'postprocessor',
             'mode-shape-2d': 'postprocessor', 'mode-shape-3d': 'postprocessor',
             'classification': 'postprocessor', 'plastic-surface': 'postprocessor',
-            'results': 'results', 'asset-curve': 'results', 'trade-list': 'results',
             'design': 'design',
             'connection': 'connection', 'lap-connection': 'connection',
             'report': 'report', 'validation': 'validation',
@@ -6485,350 +6479,6 @@
     }
 
     // ============================================================
-    // 백테스트 결과 탭
-    // ============================================================
-    function escapeHtml(value) {
-        return String(value ?? '')
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
-    }
-
-    function formatMetric(value, digits) {
-        if (value == null || Number.isNaN(Number(value))) {
-            return '—';
-        }
-        return Number(value).toLocaleString(undefined, {
-            minimumFractionDigits: digits,
-            maximumFractionDigits: digits,
-        });
-    }
-
-    function normalizeCurvePoint(point, index) {
-        if (Array.isArray(point)) {
-            if (point.length < 2) return null;
-            return {
-                label: point[0] == null ? String(index + 1) : String(point[0]),
-                value: Number(point[1]),
-            };
-        }
-        if (point && typeof point === 'object') {
-            const label = point.label ?? point.time ?? point.timestamp ?? point.date ?? point.x ?? index + 1;
-            const rawValue = point.value ?? point.equity ?? point.asset ?? point.balance ?? point.y;
-            const value = Number(rawValue);
-            if (!Number.isFinite(value)) return null;
-            return { label: String(label), value };
-        }
-        return null;
-    }
-
-    function normalizeTrade(trade, index) {
-        if (!trade || typeof trade !== 'object') {
-            return {
-                index: index + 1,
-                side: '—',
-                symbol: '—',
-                entryTime: '—',
-                exitTime: '—',
-                entryPrice: null,
-                exitPrice: null,
-                quantity: null,
-                pnl: null,
-                returnPct: null,
-                note: '',
-            };
-        }
-        return {
-            index: trade.index ?? index + 1,
-            side: trade.side ?? trade.direction ?? '—',
-            symbol: trade.symbol ?? trade.ticker ?? trade.asset ?? '—',
-            entryTime: trade.entryTime ?? trade.entry_date ?? trade.entry ?? trade.openTime ?? trade.date ?? '—',
-            exitTime: trade.exitTime ?? trade.exit_date ?? trade.exit ?? trade.closeTime ?? '—',
-            entryPrice: trade.entryPrice ?? trade.entry_price ?? trade.openPrice ?? null,
-            exitPrice: trade.exitPrice ?? trade.exit_price ?? trade.closePrice ?? null,
-            quantity: trade.quantity ?? trade.qty ?? trade.size ?? null,
-            pnl: trade.pnl ?? trade.profit ?? trade.netProfit ?? null,
-            returnPct: trade.returnPct ?? trade.return_pct ?? trade.roc ?? null,
-            note: trade.note ?? trade.memo ?? '',
-        };
-    }
-
-    function computeBacktestSummary(curve, trades) {
-        const values = curve.map(p => p.value).filter(v => Number.isFinite(v));
-        const startValue = values.length ? values[0] : null;
-        const endValue = values.length ? values[values.length - 1] : null;
-        let maxDrawdownPct = null;
-        if (values.length) {
-            let peak = values[0];
-            let maxDrawdown = 0;
-            values.forEach(v => {
-                peak = Math.max(peak, v);
-                if (peak > 0) {
-                    maxDrawdown = Math.max(maxDrawdown, (peak - v) / peak);
-                }
-            });
-            maxDrawdownPct = maxDrawdown * 100;
-        }
-        const closedTrades = trades.filter(t => Number.isFinite(Number(t.pnl)));
-        const wins = closedTrades.filter(t => Number(t.pnl) > 0).length;
-        const tradeCount = trades.length;
-        return {
-            startValue,
-            endValue,
-            returnPct: startValue && endValue != null ? ((endValue - startValue) / startValue) * 100 : null,
-            maxDrawdownPct,
-            tradeCount,
-            winRatePct: closedTrades.length ? (wins / closedTrades.length) * 100 : null,
-            realizedPnL: closedTrades.reduce((sum, t) => sum + Number(t.pnl || 0), 0),
-        };
-    }
-
-    function normalizeBacktestResult(raw) {
-        const source = raw && typeof raw === 'object' ? raw : {};
-        const rawCurve = source.assetCurve || source.equityCurve || source.curve || source.equity || [];
-        const rawTrades = source.trades || source.tradeList || source.transactions || [];
-        const assetCurve = Array.isArray(rawCurve)
-            ? rawCurve.map(normalizeCurvePoint).filter(Boolean)
-            : [];
-        const trades = Array.isArray(rawTrades)
-            ? rawTrades.map((trade, index) => normalizeTrade(trade, index))
-            : [];
-        const computed = computeBacktestSummary(assetCurve, trades);
-        const summary = {
-            startValue: source.summary?.startValue ?? source.startCapital ?? computed.startValue,
-            endValue: source.summary?.endValue ?? source.endCapital ?? computed.endValue,
-            returnPct: source.summary?.returnPct ?? source.totalReturnPct ?? computed.returnPct,
-            maxDrawdownPct: source.summary?.maxDrawdownPct ?? source.maxDrawdownPct ?? computed.maxDrawdownPct,
-            tradeCount: source.summary?.tradeCount ?? source.tradeCount ?? computed.tradeCount,
-            winRatePct: source.summary?.winRatePct ?? source.winRate ?? computed.winRatePct,
-            realizedPnL: source.summary?.realizedPnL ?? source.realizedPnL ?? computed.realizedPnL,
-        };
-        return {
-            name: source.name || source.strategyName || 'Backtest Result',
-            symbol: source.symbol || source.market || '',
-            timeframe: source.timeframe || '',
-            currency: source.currency || 'USD',
-            assetCurve,
-            trades,
-            summary,
-            raw: source,
-        };
-    }
-
-    function renderResultSummary(result) {
-        const container = document.getElementById('results-summary');
-        if (!container) return;
-        if (!result) {
-            container.innerHTML = '<p class="hint" style="margin:0">결과 JSON을 적용하거나 `backtestResult` 메시지를 보내면 요약이 표시됩니다.</p>';
-            return;
-        }
-        const cards = [
-            ['전략', escapeHtml(result.name)],
-            ['시작 자산', formatMetric(result.summary.startValue, 2)],
-            ['종료 자산', formatMetric(result.summary.endValue, 2)],
-            ['총 수익률', result.summary.returnPct == null ? '—' : formatMetric(result.summary.returnPct, 2) + '%'],
-            ['최대 낙폭', result.summary.maxDrawdownPct == null ? '—' : formatMetric(result.summary.maxDrawdownPct, 2) + '%'],
-            ['승률', result.summary.winRatePct == null ? '—' : formatMetric(result.summary.winRatePct, 2) + '%'],
-            ['거래 수', formatMetric(result.summary.tradeCount, 0)],
-            ['실현 손익', formatMetric(result.summary.realizedPnL, 2)],
-        ];
-        container.innerHTML = cards.map(([label, value]) => (
-            '<div style="padding:10px 12px;border:1px solid var(--vscode-panel-border);border-radius:6px;background:var(--vscode-editor-background)">'
-            + '<div style="font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:4px">' + label + '</div>'
-            + '<div style="font-size:16px;font-weight:700">' + value + '</div>'
-            + '</div>'
-        )).join('');
-    }
-
-    function renderAssetCurve(result) {
-        const canvas = /** @type {HTMLCanvasElement|null} */ (document.getElementById('asset-curve-canvas'));
-        const empty = document.getElementById('asset-curve-empty');
-        if (!canvas || !empty) return;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        if (!result || !result.assetCurve.length) {
-            empty.style.display = 'block';
-            return;
-        }
-        empty.style.display = 'none';
-
-        const values = result.assetCurve.map(p => p.value);
-        const minValue = Math.min(...values);
-        const maxValue = Math.max(...values);
-        const spread = maxValue - minValue || Math.max(Math.abs(maxValue) * 0.05, 1);
-        const yMin = minValue - spread * 0.1;
-        const yMax = maxValue + spread * 0.1;
-        const pad = { top: 24, right: 18, bottom: 36, left: 56 };
-        const plotWidth = canvas.width - pad.left - pad.right;
-        const plotHeight = canvas.height - pad.top - pad.bottom;
-        const toX = i => pad.left + (result.assetCurve.length === 1 ? plotWidth / 2 : (i / (result.assetCurve.length - 1)) * plotWidth);
-        const toY = value => pad.top + (1 - (value - yMin) / (yMax - yMin || 1)) * plotHeight;
-
-        ctx.strokeStyle = 'rgba(127,127,127,0.25)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let i = 0; i < 4; i++) {
-            const y = pad.top + (plotHeight / 3) * i;
-            ctx.moveTo(pad.left, y);
-            ctx.lineTo(canvas.width - pad.right, y);
-        }
-        ctx.stroke();
-
-        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-foreground') || '#ddd';
-        ctx.font = '11px sans-serif';
-        ctx.fillText(formatMetric(yMax, 2), 8, pad.top + 4);
-        ctx.fillText(formatMetric((yMin + yMax) / 2, 2), 8, pad.top + plotHeight / 2 + 4);
-        ctx.fillText(formatMetric(yMin, 2), 8, pad.top + plotHeight + 4);
-
-        ctx.beginPath();
-        result.assetCurve.forEach((point, index) => {
-            const x = toX(index);
-            const y = toY(point.value);
-            if (index === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        });
-        ctx.strokeStyle = '#4ec9b0';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        ctx.lineTo(toX(result.assetCurve.length - 1), pad.top + plotHeight);
-        ctx.lineTo(toX(0), pad.top + plotHeight);
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(78, 201, 176, 0.14)';
-        ctx.fill();
-
-        const last = result.assetCurve[result.assetCurve.length - 1];
-        ctx.fillStyle = '#4ec9b0';
-        ctx.beginPath();
-        ctx.arc(toX(result.assetCurve.length - 1), toY(last.value), 3.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-foreground') || '#ddd';
-        ctx.textAlign = 'left';
-        ctx.fillText(result.assetCurve[0].label, pad.left, canvas.height - 10);
-        ctx.textAlign = 'right';
-        ctx.fillText(last.label, canvas.width - pad.right, canvas.height - 10);
-        ctx.textAlign = 'left';
-    }
-
-    function renderTradeList(result) {
-        const body = document.querySelector('#trade-list-table tbody');
-        const empty = document.getElementById('trade-list-empty');
-        if (!body || !empty) return;
-        body.innerHTML = '';
-        if (!result || !result.trades.length) {
-            empty.style.display = 'block';
-            return;
-        }
-        empty.style.display = 'none';
-        result.trades.forEach(trade => {
-            const tr = document.createElement('tr');
-            const pnl = Number(trade.pnl);
-            const pnlStyle = Number.isFinite(pnl)
-                ? `color:${pnl >= 0 ? '#4ec9b0' : '#f48771'};font-weight:600`
-                : '';
-            tr.innerHTML = `
-                <td>${escapeHtml(trade.index)}</td>
-                <td>${escapeHtml(trade.side)}</td>
-                <td>${escapeHtml(trade.symbol)}</td>
-                <td>${escapeHtml(trade.entryTime)}</td>
-                <td>${escapeHtml(trade.exitTime)}</td>
-                <td>${formatMetric(trade.entryPrice, 2)}</td>
-                <td>${formatMetric(trade.exitPrice, 2)}</td>
-                <td>${formatMetric(trade.quantity, 4)}</td>
-                <td style="${pnlStyle}">${formatMetric(trade.pnl, 2)}</td>
-                <td>${trade.returnPct == null ? '—' : formatMetric(trade.returnPct, 2) + '%'}</td>
-                <td>${escapeHtml(trade.note)}</td>
-            `;
-            body.appendChild(tr);
-        });
-    }
-
-    function syncResultsJsonInput(result) {
-        const input = /** @type {HTMLTextAreaElement|null} */ (document.getElementById('results-json-input'));
-        if (!input) return;
-        input.value = result ? JSON.stringify(result.raw, null, 2) : '';
-    }
-
-    function renderBacktestResult(result) {
-        renderResultSummary(result);
-        renderAssetCurve(result);
-        renderTradeList(result);
-    }
-
-    function applyBacktestResult(raw, options) {
-        const normalized = normalizeBacktestResult(raw);
-        _lastBacktestResult = normalized;
-        renderBacktestResult(normalized);
-        if (!options || !options.skipInputSync) {
-            syncResultsJsonInput(normalized);
-        }
-        if (!options || !options.quiet) {
-            setStatus(`결과 반영 완료 — ${normalized.assetCurve.length} points, ${normalized.trades.length} trades`, 'success');
-        }
-    }
-
-    function clearBacktestResult(options) {
-        _lastBacktestResult = null;
-        renderBacktestResult(null);
-        if (!options || !options.keepInput) {
-            syncResultsJsonInput(null);
-        }
-    }
-
-    function buildExampleBacktestResult() {
-        return {
-            name: 'Sample Momentum',
-            symbol: 'BTCUSDT',
-            timeframe: '1D',
-            currency: 'USD',
-            assetCurve: [
-                ['2025-01-02', 100000],
-                ['2025-01-15', 101800],
-                ['2025-02-01', 99850],
-                ['2025-02-18', 104200],
-                ['2025-03-03', 107500],
-                ['2025-03-20', 105900],
-                ['2025-04-01', 109800],
-                ['2025-04-10', 112450],
-            ],
-            trades: [
-                { side: 'LONG', symbol: 'BTCUSDT', entryTime: '2025-01-03', exitTime: '2025-01-14', entryPrice: 42150, exitPrice: 43490, quantity: 0.5, pnl: 670, returnPct: 3.18, note: 'breakout' },
-                { side: 'LONG', symbol: 'BTCUSDT', entryTime: '2025-02-03', exitTime: '2025-02-16', entryPrice: 43820, exitPrice: 45600, quantity: 0.45, pnl: 801, returnPct: 4.06, note: 'trend follow' },
-                { side: 'SHORT', symbol: 'BTCUSDT', entryTime: '2025-03-06', exitTime: '2025-03-11', entryPrice: 48210, exitPrice: 47500, quantity: 0.4, pnl: 284, returnPct: 1.47, note: 'mean reversion' },
-                { side: 'LONG', symbol: 'BTCUSDT', entryTime: '2025-03-24', exitTime: '2025-04-09', entryPrice: 50100, exitPrice: 52840, quantity: 0.35, pnl: 959, returnPct: 5.47, note: 'range break' },
-            ],
-        };
-    }
-
-    function wireResultsTabActions() {
-        document.getElementById('btn-results-apply-json')?.addEventListener('click', () => {
-            const input = /** @type {HTMLTextAreaElement|null} */ (document.getElementById('results-json-input'));
-            if (!input || !input.value.trim()) {
-                setStatus('결과 JSON이 비어 있습니다.', 'warn');
-                return;
-            }
-            try {
-                applyBacktestResult(JSON.parse(input.value), { skipInputSync: true });
-                switchTab('results');
-            } catch (error) {
-                setStatus('결과 JSON 파싱 실패: ' + (error.message || String(error)), 'error');
-            }
-        });
-        document.getElementById('btn-results-load-example')?.addEventListener('click', () => {
-            applyBacktestResult(buildExampleBacktestResult());
-            switchTab('results');
-        });
-        document.getElementById('btn-results-clear')?.addEventListener('click', () => {
-            clearBacktestResult();
-            setStatus('결과 데이터를 초기화했습니다.', 'success');
-        });
-    }
-
-    // ============================================================
     // ============================================================
     // Design 입력값 수집/복원 (파일 저장/열기용)
     // ============================================================
@@ -6843,7 +6493,6 @@
             getNum,
             getUnitSystem: function() { return _unitSystem; },
         });
-        data.backtestResult = _lastBacktestResult ? _lastBacktestResult.raw : null;
         return data;
     }
 
@@ -6863,13 +6512,6 @@
                 else if (sys === 'SI' && _unitSystem !== 'SI') switchToSI();
             },
         }, data);
-        if (data && data.backtestResult && !_lastBacktestResult) {
-            applyBacktestResult(data.backtestResult);
-        } else if (!_lastBacktestResult) {
-            clearBacktestResult();
-        } else {
-            syncResultsJsonInput(_lastBacktestResult);
-        }
     }
 
     // 파일 저장/열기 버튼
@@ -6886,8 +6528,6 @@
             vscode.postMessage({ command: 'saveProject' });
         });
     }
-    wireResultsTabActions();
-    renderBacktestResult(null);
 
     // ============================================================
     // 초기화
