@@ -2009,6 +2009,7 @@ export class StcfsdPanel implements McpPanelInterface {
         <button class="tab-btn active" data-tab="preprocessor">전처리</button>
         <button class="tab-btn" data-tab="analysis">해석</button>
         <button class="tab-btn" data-tab="postprocessor">후처리</button>
+        <button class="tab-btn" data-tab="results">결과</button>
         <button class="tab-btn" data-tab="design">설계</button>
         <button class="tab-btn" data-tab="connection">접합부</button>
         <button class="tab-btn" data-tab="report">보고서</button>
@@ -2252,6 +2253,69 @@ export class StcfsdPanel implements McpPanelInterface {
                     <h3>3D Mode Shape</h3>
                     <p class="hint">좌굴 변형의 3D 시각화. Length 값이 바뀌면 해당 반파장에서의 좌굴 모드가 달라집니다 — 짧은 Length(~1~10in)는 국부좌굴(웹/플랜지 파형), 중간 Length(~15~40in)는 뒤틀림좌굴(립-플랜지 회전), 긴 Length(~100in+)는 전체좌굴(횡비틀림)을 보여줍니다. 마우스 드래그=회전, 스크롤=확대/축소.</p>
                     <canvas id="mode-shape-3d-canvas" width="600" height="400"></canvas>
+                </div>
+            </div>
+        </div>
+        <!-- 결과 탭 -->
+        <div id="tab-results" class="tab-panel">
+            <div style="display:flex;gap:12px;align-items:flex-start">
+                <div style="flex:1.2;min-width:0">
+                    <div class="section-group" style="margin-bottom:12px">
+                        <h3>결과 요약</h3>
+                        <p class="hint">백테스트/전략 결과 JSON을 붙여넣거나 Extension Host에서 <code>backtestResult</code> 메시지를 보내면 자산곡선과 거래목록을 렌더링합니다.</p>
+                        <div id="results-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+                            <p class="hint" style="margin:0">결과 JSON을 적용하거나 <code>backtestResult</code> 메시지를 보내면 요약이 표시됩니다.</p>
+                        </div>
+                    </div>
+                    <div class="section-group">
+                        <h3>자산곡선</h3>
+                        <p class="hint">x축은 시점, y축은 누적 자산 값입니다.</p>
+                        <div style="position:relative">
+                            <canvas id="asset-curve-canvas" width="820" height="320" style="width:100%;max-width:100%;border:1px solid var(--vscode-panel-border);border-radius:4px;background:var(--vscode-editor-background)"></canvas>
+                            <div id="asset-curve-empty" class="hint" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.02)">자산곡선 데이터가 없습니다.</div>
+                        </div>
+                    </div>
+                    <div class="section-group" style="margin-top:12px">
+                        <h3>거래목록</h3>
+                        <p class="hint">표시 필드: 방향, 종목, 진입/청산 시각, 가격, 수량, 손익, 수익률.</p>
+                        <div id="trade-list-empty" class="hint" style="padding:12px 0">거래 데이터가 없습니다.</div>
+                        <div style="overflow:auto;border:1px solid var(--vscode-panel-border);border-radius:4px">
+                            <table id="trade-list-table" style="width:100%;border-collapse:collapse;font-size:12px">
+                                <thead>
+                                    <tr style="background:var(--vscode-editor-selectionBackground)">
+                                        <th style="padding:6px">#</th>
+                                        <th style="padding:6px">방향</th>
+                                        <th style="padding:6px">종목</th>
+                                        <th style="padding:6px">진입</th>
+                                        <th style="padding:6px">청산</th>
+                                        <th style="padding:6px">진입가</th>
+                                        <th style="padding:6px">청산가</th>
+                                        <th style="padding:6px">수량</th>
+                                        <th style="padding:6px">손익</th>
+                                        <th style="padding:6px">수익률</th>
+                                        <th style="padding:6px">비고</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div style="width:360px;max-width:38%">
+                    <div class="section-group">
+                        <h3>결과 JSON</h3>
+                        <p class="hint">허용 키 예시: <code>assetCurve</code>/<code>equityCurve</code>, <code>trades</code>/<code>tradeList</code>, <code>summary</code>.</p>
+                        <textarea id="results-json-input" style="width:100%;min-height:460px;font-family:var(--vscode-editor-font-family);font-size:12px;resize:vertical" placeholder='{
+  "name": "Sample Strategy",
+  "assetCurve": [["2025-01-01", 100000], ["2025-01-31", 103500]],
+  "trades": [{"side":"LONG","symbol":"BTCUSDT","entryTime":"2025-01-03","exitTime":"2025-01-05","entryPrice":42000,"exitPrice":43100,"quantity":0.5,"pnl":550,"returnPct":2.62}]
+}'></textarea>
+                        <div style="display:flex;gap:8px;margin-top:8px">
+                            <button id="btn-results-apply-json" class="btn-primary" style="flex:1">JSON 적용</button>
+                            <button id="btn-results-load-example" class="btn-secondary" style="width:110px">예시 로드</button>
+                            <button id="btn-results-clear" class="btn-secondary" style="width:90px">초기화</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2728,6 +2792,7 @@ export class StcfsdPanel implements McpPanelInterface {
             analysisResult: this._lastAnalysisResult,
             loadAnalysis: this._lastLoadAnalysis || null,
             designResult: this._lastDesignResult || null,
+            backtestResult: designData?.backtestResult || null,
             // Design 탭 입력값 (WebView에서 수집됨)
             designInputs: designData || null,
         };
@@ -2807,6 +2872,9 @@ export class StcfsdPanel implements McpPanelInterface {
         }
         if (projectData.designResult) {
             this._postMessage('designResult', projectData.designResult);
+        }
+        if (projectData.backtestResult) {
+            this._postMessage('backtestResult', projectData.backtestResult);
         }
 
         // 단면 성질 복원
