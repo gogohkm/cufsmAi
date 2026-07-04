@@ -287,6 +287,10 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
         Ky, Kt: 유효길이계수 (기본 1.0).
         Fy: 항복강도 (ksi) — 폐합단면 §F2.1.4-1의 Lu 판정에만 사용 (선택).
     """
+    # 조기 반환(물성 부족/Ky·Ly≤0 등) 시 이전 호출의 상세가 하류 계산서에
+    # 그대로 남지 않도록 매 호출마다 초기화한다.
+    compute_beam_Fcre._last_detail = {}
+
     # §F2.1.1-4/-5: 약축휨(Ky·Ly)과 비틀림(Kt·Lt)에 별도 길이 허용.
     # 하위호환: Ly/Lt 미지정 시 둘 다 Lb로 둔다 (Ky=Kt=1.0이면 기존 동작과 동일).
     if Ly is None:

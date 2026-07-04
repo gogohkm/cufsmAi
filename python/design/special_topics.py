@@ -138,7 +138,8 @@ def block_shear(Agv: float, Anv: float, Ant: float,
                 design_method: str = 'LRFD',
                 Ubs: float = 1.0,
                 phi_factor: float = None,
-                omega_factor: float = None) -> dict:
+                omega_factor: float = None,
+                connection_type: str = 'bolted') -> dict:
     """블록 전단 파단 강도 (AISI J6.3)
 
     Args:
@@ -147,6 +148,9 @@ def block_shear(Agv: float, Anv: float, Ant: float,
         Ant: 인장면 순면적 (in²)
         Fy: 항복강도 (ksi)
         Fu: 인장강도 (ksi)
+        design_method: 'LRFD'(φRn) 또는 'ASD'(Rn/Ω) — 가용강도 산정 기준
+        connection_type: 'bolted' 또는 'welded' — Table J6-1의 φ/Ω 기본값 선택
+                         (볼트: φ=0.65/Ω=2.22, 용접: φ=0.60/Ω=2.50)
 
     Returns:
         dict: {Rn, phi_Rn, steps}
@@ -158,24 +162,43 @@ def block_shear(Agv: float, Anv: float, Ant: float,
     Rn = min(Rn1, Rn2)
     governing = 'Shear yield + tension rupture' if Rn == Rn1 else 'Shear rupture + tension rupture'
 
-    phi = phi_factor if phi_factor is not None else (0.65 if design_method == 'LRFD' else None)
-    omega = omega_factor if omega_factor is not None else (2.50 if design_method == 'ASD' else None)
-    phi_Rn = phi * Rn if phi else Rn / omega
+    # Table J6-1: 체결재 유형별 φ·Ω를 짝 맞춰 선택한다.
+    # (볼트 φ=0.65와 용접 Ω=2.50을 섞어 쓰면 LRFD/ASD가 서로 다른 체결재를 가정하게 된다.)
+    if str(connection_type).lower().startswith('weld'):
+        phi_default, omega_default = 0.60, 2.50   # Welds 행
+    else:
+        phi_default, omega_default = 0.65, 2.22   # Bolts 행 (기본)
+    phi = phi_factor if phi_factor is not None else phi_default
+    omega = omega_factor if omega_factor is not None else omega_default
+
+    # 가용강도는 φ의 truthy 여부가 아니라 design_method로 선택한다 —
+    # omega_factor만 넘긴 ASD 의도 호출이 LRFD 값(φRn)으로 계산되는 것을 방지.
+    is_asd = str(design_method).upper() == 'ASD'
+    phi_Rn = Rn / omega if is_asd else phi * Rn
 
     return {
         'Rn': round(Rn, 3),
         'Rn1': round(Rn1, 3),
         'Rn2': round(Rn2, 3),
         'phi_Rn': round(phi_Rn, 3),
+        'design_method': 'ASD' if is_asd else 'LRFD',
+        'phi': phi,
+        'omega': omega,
+        'connection_type': 'welded' if str(connection_type).lower().startswith('weld') else 'bolted',
         'governing': governing,
         'Ubs': Ubs,
         'steps': [
             {'name': 'Path 1', 'formula': f'0.6Fy×Agv + Ubs×Fu×Ant = 0.6×{Fy}×{Agv:.4f} + {Ubs:.2f}×{Fu}×{Ant:.4f} = {Rn1:.3f} kips'},
             {'name': 'Path 2', 'formula': f'0.6Fu×Anv + Ubs×Fu×Ant = 0.6×{Fu}×{Anv:.4f} + {Ubs:.2f}×{Fu}×{Ant:.4f} = {Rn2:.3f} kips'},
             {'name': 'Block Shear', 'formula': f'Rn = min({Rn1:.3f}, {Rn2:.3f}) = {Rn:.3f} kips'},
+            {'name': 'Available Strength',
+             'formula': (f'Rn/Ω = {Rn:.3f}/{omega} = {phi_Rn:.3f} kips' if is_asd
+                         else f'φRn = {phi} × {Rn:.3f} = {phi_Rn:.3f} kips')},
         ],
         'warnings': [] if (phi_factor is not None or omega_factor is not None) else [
-            'Using default connection resistance factors. Override phi_factor/omega_factor for connection-specific AISI J6.3 design.'
+            f'Using Table J6-1 default factors for {connection_type} connection '
+            f'(phi={phi}, omega={omega}). Override phi_factor/omega_factor for '
+            'connection-specific AISI J6.3 design.'
         ],
     }
 

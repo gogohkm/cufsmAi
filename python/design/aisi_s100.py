@@ -1109,6 +1109,16 @@ def _design_flexure(params: dict) -> dict:
             'formula': f'Mn/Ω = {Mn:.2f} kip-in/{omega} = {Mn_omega:.2f} kip-in',
         })
 
+    # 0 공칭강도는 어떤 경우에도 유효한 설계가 아니다 → Mu 유무와 무관하게 pass=False.
+    # (_design_compression의 Pn<=0 가드와 동일 — 단면물성 실패로 Mn=0이 나온 경우
+    #  pass=None('미검토')으로 표시되어 0강도 실패가 가려지는 것을 방지.)
+    if Mn <= 0:
+        pass_flag = False
+    elif Mu > 0:
+        pass_flag = utilization <= 1.0
+    else:
+        pass_flag = None
+
     result = {
         'member_type': 'flexure',
         'method': 'DSM',
@@ -1133,7 +1143,7 @@ def _design_flexure(params: dict) -> dict:
         'Mn_omega': round(Mn_omega, 2),
         'design_strength': round(design_strength, 2),
         'utilization': round(utilization, 4) if Mu > 0 else None,
-        'pass': utilization <= 1.0 if Mu > 0 else None,
+        'pass': pass_flag,
         'steps': steps,
         'spec_sections': list(set(spec_sections)),
         'warnings': warnings,
@@ -1350,7 +1360,9 @@ def _design_combined(params: dict) -> dict:
     KxLx = params.get('KxLx', 120)
     KyLy = params.get('KyLy', 120)
     rx = props.get('rx', 0)
-    ry = props.get('ry', 0)
+    # 약축 회전반경: grosprop 계열 props는 'rz' 키만 제공하므로 fallback 필수
+    # (없으면 alpha_y가 항상 1.0으로 고정되어 §C1.2.1.1 약축 증폭이 누락된다).
+    ry = props.get('ry', 0) or props.get('rz', 0)
     alpha_x, alpha_y = 1.0, 1.0
     PEx, PEy = 1e10, 1e10
     # §C1.2.1.1 Eq. C1.2.1.1-3: B1 = Cm/(1 - α·P̄/Pe1) ≥ 1.0
@@ -1955,6 +1967,9 @@ def _auto_generate_props(params: dict) -> dict:
 
         # Sf = Sx (호환성)
         props['Sf'] = props.get('Sx', 0)
+        # grosprop은 약축 회전반경을 'rz'로만 반환한다 — §C1.2.1.1 약축 P-δ 증폭 등
+        # 'ry' 키를 읽는 하류 소비자가 0을 받지 않도록 별칭을 둔다.
+        props.setdefault('ry', props.get('rz', 0))
         props['t'] = t
         # 코너 반경: params에서 가져오거나, 템플릿의 기본 r 사용
         R = params.get('R', 0) or params.get('r', 0)

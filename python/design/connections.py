@@ -882,9 +882,15 @@ def groove_weld_connection(t1: float, t2: float,
         sval = str(load_direction).lower()
         if sval.startswith('shear'):
             # J2.1(b): 전단 = min(J2.1-2, J2.1-3)
-            Rn_2 = L * te * 0.6 * Fxx     # Eq. J2.1-2 (용접금속 전단)
-            Rn_3 = L * te * Fy / math.sqrt(3.0)  # Eq. J2.1-3 (모재 전단)
-            if Rn_2 / 1.90 <= Rn_3 / 1.70:  # ASD 가용강도 기준 지배 판정
+            Rn_2 = L * te * 0.6 * Fxx     # Eq. J2.1-2 (용접금속 전단, φ=0.80/Ω=1.90)
+            Rn_3 = L * te * Fy / math.sqrt(3.0)  # Eq. J2.1-3 (모재 전단, φ=0.90/Ω=1.70)
+            # 두 식의 φ/Ω가 다르므로 지배식은 실제 사용하는 설계법의 가용강도로
+            # 비교해야 한다 (LRFD: φRn, ASD: Rn/Ω — 교차점이 서로 다름).
+            if design_method == 'ASD':
+                weld_metal_governs = Rn_2 / 1.90 <= Rn_3 / 1.70
+            else:
+                weld_metal_governs = 0.80 * Rn_2 <= 0.90 * Rn_3
+            if weld_metal_governs:
                 Rn_g, phi_g, omega_g, eq_g = Rn_2, 0.80, 1.90, 'J2.1-2'
             else:
                 Rn_g, phi_g, omega_g, eq_g = Rn_3, 0.90, 1.70, 'J2.1-3'
