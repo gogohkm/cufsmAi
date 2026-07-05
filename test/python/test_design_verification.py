@@ -553,8 +553,18 @@ def test_lap_connection_uses_shared_connection_engine():
     })
 
     all_pass = True
-    all_pass &= approx(lap['Pns'], conn['design_strength'], label='lap Pns equals shared design strength')
+    # 새 계약: Lap 패스너 수요는 전단이므로 Pns는 shared engine 한계상태 중
+    # '전단 전달' 모드(틸팅/지압/나사전단/J6.1)의 최소 설계강도와 같아야 한다.
+    # 인장계(풀아웃 J4.4.1/풀오버 J4.4.2)와 부재 검토(J6.2/J6.3/D)는 제외
+    # (과거에는 전체 최소값 = 풀아웃이 지배해 전단 패스너 수가 과대 산정됐음).
+    _tension_keys = ('Pull-out (J4.4', 'Pull-over (J4.4', 'Tension', 'Block Shear', 'Member')
+    shear_ls = [ls for ls in conn['limit_states']
+                if not any(k in ls['name'] for k in _tension_keys)]
+    expected_pns = min(ls['design_strength'] for ls in shear_ls)
+    all_pass &= approx(lap['Pns'], expected_pns, label='lap Pns = shared shear-mode governing strength')
     all_pass &= approx(1 if lap.get('fastener_design') else 0, 1, label='shared design result attached')
+    all_pass &= approx(1 if 'Pull-out' not in lap.get('Pns_governing_mode', '') else 0, 1,
+                       label='tension mode not governing shear sizing')
     return all_pass
 
 
@@ -1035,19 +1045,25 @@ def test_paf_limit_state_mapping():
     t2 = 0.08
     d = 0.2
     Fu = 65
-    Fuf = 60
     n = 2
-    result = paf_connection(t1=t1, t2=t2, d=d, Fy=50, Fu=Fu, Fuf=Fuf, n=n)
 
     all_pass = True
+    # AISI S100-16 Eq. J5.3.1-1: pin shear = 0.6·Fuh·(π/4·d²) — Fuh는 핀(경화강)
+    # 인장강도. Fuf 미지정 시 §J5 기본 120 ksi, 지정 시 사용자 값을 Fuh로 사용
+    # (GUI/MCP의 Fuf 입력이 실제로 핀 전단에 반영되는 새 계약 — 과거에는 무시됐음).
+    result = paf_connection(t1=t1, t2=t2, d=d, Fy=50, Fu=Fu, Fuf=None, n=n)
     pin = [ls for ls in result['limit_states'] if ls['name'].startswith('Pin Shear')][0]
     bearing = [ls for ls in result['limit_states'] if ls['name'].startswith('Bearing')][0]
-    # AISI S100-16 Eq. J5.3.1-1: pin shear uses the HARDENED PAF steel tensile
-    # strength Fuh (default 120 ksi, §J5.2.1) — NOT the member/fastener Fuf argument.
-    expected_pin = 0.60 * 120.0 * (math.pi / 4 * d ** 2) * n
+    expected_pin_default = 0.60 * 120.0 * (math.pi / 4 * d ** 2) * n
     expected_bearing = 3.2 * t1 * d * Fu * n
-    all_pass &= approx(pin['Rn'], expected_pin, label='J5.3.1 pin shear')
+    all_pass &= approx(pin['Rn'], expected_pin_default, label='J5.3.1 pin shear (default Fuh=120)')
     all_pass &= approx(bearing['Rn'], expected_bearing, label='J5.3.2 bearing/tilting')
+
+    # 명시적 Fuf(=Fuh) 지정 시 핀 전단에 반영되는지
+    result2 = paf_connection(t1=t1, t2=t2, d=d, Fy=50, Fu=Fu, Fuf=260, n=n)
+    pin2 = [ls for ls in result2['limit_states'] if ls['name'].startswith('Pin Shear')][0]
+    expected_pin_260 = 0.60 * 260.0 * (math.pi / 4 * d ** 2) * n
+    all_pass &= approx(pin2['Rn'], expected_pin_260, label='J5.3.1 pin shear (user Fuh=260)')
     return all_pass
 
 

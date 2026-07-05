@@ -925,7 +925,7 @@ server.tool("aisi_design_connection", "Chapter J connection design. Set units='S
         da: z.number().optional().describe("Arc spot/seam visible diameter — in or mm if units='SI'"),
         groove_type: z.enum(["complete", "partial"]).optional().describe("Groove weld type"),
         Fxx: z.number().optional().describe("Weld electrode strength — ksi or MPa if units='SI' (default 60 ksi)"),
-        Fuf: z.number().optional().describe("PAF pin strength — ksi or MPa if units='SI' (default 60 ksi)"),
+        Fuf: z.number().optional().describe("PAF pin (hardened steel) tensile strength Fuh — ksi or MPa if units='SI' (default 120 ksi per AISI §J5)"),
         Pu: z.number().optional().describe("Required force — kips or kN if units='SI'"),
         // J6 member-rupture geometry (bolt/screw): without these, J6.2 net-section tension
         // rupture and J6.3 block shear are NOT evaluated (warned, j6_verified=false).
@@ -952,7 +952,9 @@ server.tool("aisi_design_connection", "Chapter J connection design. Set units='S
             weld_length, weld_size, da,
             groove_type: groove_type || 'complete',
             Fxx: Fxx || (units === 'SI' ? 414 : 60),
-            Fuf: Fuf || (units === 'SI' ? 414 : 60),
+            // Fuf는 이제 paf_connection 핀 전단에 실제 반영됨 — §J5 기본 Fuh=120 ksi(827 MPa).
+            // (과거 기본 60 ksi는 무시되던 값이라 무해했지만, 반영 후에는 핀 전단을 절반으로 만든다)
+            Fuf: Fuf || (units === 'SI' ? 827 : 120),
             Pu: Pu || 0,
             Ag, width, g, s_pitch, Vu, Tu, bolt_grade, threads_excluded, hole_type,
         };

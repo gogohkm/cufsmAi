@@ -992,7 +992,7 @@ def arc_seam_weld_connection(t1: float, t2: float,
                               Fxx: float = 60,
                               n: int = 1,
                               design_method: str = 'LRFD') -> dict:
-    """아크 시임 용접 접합 설계 (§J2.2.2)
+    """아크 시임 용접 접합 설계 (§J2.3 — S100-16에서 아크 시임은 J2.3, J2.2는 아크 스폿)
 
     Args:
         t1, t2: 연결판 두께 (in)
@@ -1008,28 +1008,28 @@ def arc_seam_weld_connection(t1: float, t2: float,
     # 유효 너비
     de = min(max(0.7 * d - 1.5 * t_min, 0.0), 0.55 * d)
 
-    # (a) 용접부 전단 (J2.2.2.1)
+    # (a) 용접부 전단 (Eq. J2.3.2-1)
     # Rn = 0.75 × Fxx × (L×de + π/4 × de²) per seam
     Ae_weld = L_seam * de + math.pi / 4 * de ** 2
     Rn_weld = 0.75 * Fxx * Ae_weld * n
     limit_states.append({
-        'name': 'Weld Seam Shear (J2.2.2.1)',
+        'name': 'Weld Seam Shear (J2.3.2)',
         'Rn': round(Rn_weld, 3),
         'phi': 0.60,
         'omega': 2.50,
         'formula': f'Rn = 0.75×{Fxx}×({L_seam}×{de:.3f}+π/4×{de:.3f}²)×{n} = {Rn_weld:.3f}',
-        'equation': 'J2.2.2.1',
+        'equation': 'J2.3.2-1',
     })
 
-    # (b) 모재 인열 (J2.2.2.1)
+    # (b) 모재 인열 (Eq. J2.3.2-2)
     Rn_tear = 2.5 * t_min * Fu * (0.25 * L_seam + 0.96 * d) * n
     limit_states.append({
-        'name': 'Sheet Tear (J2.2.2.1)',
+        'name': 'Sheet Tear (J2.3.2)',
         'Rn': round(Rn_tear, 3),
         'phi': 0.60,
         'omega': 2.50,
         'formula': f'Rn = 2.5×{t_min}×{Fu}×(0.25×{L_seam}+0.96×{d})×{n} = {Rn_tear:.3f}',
-        'equation': 'J2.2.2.1-2',
+        'equation': 'J2.3.2-2',
     })
 
     for ls in limit_states:
@@ -1047,7 +1047,7 @@ def arc_seam_weld_connection(t1: float, t2: float,
         'governing_mode': governing['name'],
         'design_strength': governing['design_strength'],
         'Rn': governing['Rn'],
-        'spec_sections': ['J2.2.2'],
+        'spec_sections': ['J2.3.2'],
     }
 
 
@@ -1082,7 +1082,7 @@ def paf_connection(t1: float, t2: float, d: float,
         t2: PAF 머리/와셔와 접촉하지 않는 (far) 부재 두께 (in)
         d: PAF 핀 직경 ds (in)
         Fy, Fu: t1(머리측) 부재 강도 (ksi). Fu1 미지정 시 Fu 사용.
-        Fuf: (미사용 보존) — 핀 전단은 Fuh(경화강)로 계산
+        Fuf: PAF 핀(경화강) 인장강도 Fuh (ksi). 미지정/0이면 §J5 기본 120 ksi 사용.
         n: 체결재 개수
         Fy2: far member 항복강도 (ksi, J5.3.3). None이면 Fy 사용.
         Fu1: 머리측 부재 인장강도 (ksi). None이면 Fu.
@@ -1105,13 +1105,16 @@ def paf_connection(t1: float, t2: float, d: float,
     warnings = []
 
     # (a) 핀 전단 (J5.3.1, Eq. J5.3.1-1): Pnvp = 0.6·(d/2)²·π·Fuh, φ=0.60/Ω=2.65
-    Pns = 0.6 * (d / 2.0) ** 2 * math.pi * PAF_FUH * n
+    # Fuh: 사용자가 Fuf(핀 인장강도)를 지정하면 그 값을 사용 — 과거에는 입력을 받고도
+    # 무시하고 항상 120 ksi를 사용해 GUI 입력이 죽은 값이었음.
+    Fuh = Fuf if (Fuf is not None and Fuf > 0) else PAF_FUH
+    Pns = 0.6 * (d / 2.0) ** 2 * math.pi * Fuh * n
     limit_states.append({
         'name': 'Pin Shear (J5.3.1)',
         'Rn': round(Pns, 3),
         'phi': PHI_PAF['pin_shear'],
         'omega': OMEGA_PAF['pin_shear'],
-        'formula': f'Pnvp = 0.6×(d/2)²π×Fuh({PAF_FUH})×{n} = {Pns:.3f}',
+        'formula': f'Pnvp = 0.6×(d/2)²π×Fuh({Fuh})×{n} = {Pns:.3f}',
         'equation': 'J5.3.1-1',
     })
 
@@ -1311,7 +1314,9 @@ def design_connection(params: dict) -> dict:
             t1=t1, t2=t2,
             d=params.get('d', 0.145),
             Fy=Fy, Fu=Fu,
-            Fuf=params.get('Fuf', params.get('Fub', 60)),
+            # Fuf 미지정 시 None → paf_connection이 §J5 기본 Fuh(120 ksi) 사용.
+            # (과거 기본 60은 이제 Fuf가 실제로 반영되므로 핀 전단을 절반으로 만들었을 것)
+            Fuf=params.get('Fuf', params.get('Fub')),
             n=int(params.get('n', 1)),
             design_method=design_method,
             Fy2=params.get('Fy2'), Fu1=params.get('Fu1'),

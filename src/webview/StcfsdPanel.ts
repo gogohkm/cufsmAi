@@ -294,7 +294,10 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'runConnection':
                 try {
                     const connResult = await this._pythonBridge.call('design_connection', message.data);
-                    this._postMessage('connectionResult', connResult);
+                    // 요청 입력(t1/t2/d/n/weld_size/groove_type 등)을 결과에 병합 —
+                    // SVG 도면이 실제 입력을 그리도록 (python 결과가 에코하지 않음).
+                    // 결과 필드가 우선하도록 result를 나중에 전개한다.
+                    this._postMessage('connectionResult', { request: message.data, ...message.data, ...connResult });
                 } catch (e: any) {
                     this._postMessage('connectionResult', { error: e.message });
                 }
@@ -1923,10 +1926,18 @@ export class StcfsdPanel implements McpPanelInterface {
         return null;
     }
 
-    /** cFSM 모드 분류 */
+    /** cFSM 모드 분류 — 웹뷰 버튼에서 호출. 모델/해석결과는 확장 측 상태에서 구성한다. */
     private async _classifyModes(data: any): Promise<void> {
         try {
-            const result = await this._pythonBridge.call('classify', data);
+            if (!this._lastAnalysisResult) {
+                this._postMessage('classifyError', { error: '해석 결과가 없습니다. 먼저 해석을 실행하세요.' });
+                return;
+            }
+            const result = await this._pythonBridge.call('classify', {
+                model: this._model,
+                shapes: this._lastAnalysisResult.shapes || [],
+                GBTcon: (data && data.GBTcon) || (this._model as any).GBTcon,
+            });
             this._postMessage('classifyResult', result);
         } catch (err: any) {
             this._postMessage('classifyError', { error: err.message });
@@ -2004,13 +2015,14 @@ export class StcfsdPanel implements McpPanelInterface {
     <title>StCFSD Section Designer</title>
 </head>
 <body>
-    <!-- 탭 바 + 파일 버튼 -->
+    <!-- 탭 바 + 파일 버튼: [좌굴해석 ①②③] | [부재설계 ④⑤] | [출력] 3그룹 워크플로 -->
     <div class="tab-bar">
-        <button class="tab-btn active" data-tab="preprocessor">전처리</button>
-        <button class="tab-btn" data-tab="analysis">해석</button>
-        <button class="tab-btn" data-tab="postprocessor">후처리</button>
-        <button class="tab-btn" data-tab="design">설계</button>
-        <button class="tab-btn" data-tab="connection">접합부</button>
+        <button class="tab-btn active" data-tab="preprocessor">① 단면·재료</button>
+        <button class="tab-btn" data-tab="loads">② 하중계산</button>
+        <span class="tab-sep"></span>
+        <button class="tab-btn" data-tab="design">③ 좌굴해석·부재설계</button>
+        <button class="tab-btn" data-tab="connection">④ 접합부</button>
+        <span class="tab-sep"></span>
         <button class="tab-btn" data-tab="report">보고서</button>
         <button class="tab-btn" data-tab="validation">검증</button>
         <span style="flex:1"></span>
@@ -2029,10 +2041,10 @@ export class StcfsdPanel implements McpPanelInterface {
             </div>
             <div class="panel-row">
                 <div class="panel-left">
-                    <h3>Section Input</h3>
+                    <h3>단면 입력 (Section Input)</h3>
                     <p class="hint">템플릿 또는 절점/요소 직접 입력으로 단면 형상을 정의합니다.</p>
                     <div class="section-group">
-                        <label>Section Template</label>
+                        <label>단면 템플릿 (Section Template)</label>
                         <p class="hint">표준 단면 유형을 선택하고 외측(out-to-out) 치수를 입력하세요. r(코너 반경)은 플랜지-웹 접합부에 원호 요소를 생성합니다.</p>
                         <div class="input-row">
                             <select id="select-template">
@@ -2048,7 +2060,7 @@ export class StcfsdPanel implements McpPanelInterface {
                                 <option value="tee">T-Section (T형강)</option>
                                 <option value="lipped_angle">Lipped Angle (립부 앵글)</option>
                             </select>
-                            <button id="btn-generate-template" class="btn-action-green" style="padding:4px 12px">Generate</button>
+                            <button id="btn-generate-template" class="btn-action-green" style="padding:4px 12px">단면 생성</button>
                         </div>
                         <div id="template-params" class="input-row" style="margin-top:4px; flex-wrap:wrap;">
                             <label>H<span class="hint-inline" data-unit="length">mm</span></label><input type="number" id="tpl-H" value="100" step="1" style="width:60px">
@@ -2062,8 +2074,8 @@ export class StcfsdPanel implements McpPanelInterface {
                         </div>
                     </div>
                     <div class="section-group">
-                        <label>Material</label>
-                        <p class="hint">강종 선택 시 Fy, Fu, E, G가 자동 설정됩니다.</p>
+                        <label>재료 (Material)</label>
+                        <p class="hint">강종 선택 시 Fy, Fu, E, G가 자동 설정됩니다. 여기서 설정한 Fy/Fu가 해석·설계·접합부 탭 전체에 적용됩니다 (단일 소스).</p>
                         <div class="input-row">
                             <label>Steel</label>
                             <select id="input-steel-grade" style="width:110px">
@@ -2092,8 +2104,8 @@ export class StcfsdPanel implements McpPanelInterface {
                         </div>
                     </div>
                     <div class="section-group">
-                        <label>Nodes <button id="btn-add-node" class="btn-small">+ 추가</button></label>
-                        <p class="hint">절점 좌표(x, z)와 응력(stress). 해석 탭의 Load Case 선택 시 해석 실행 전에 자동 설정됩니다.</p>
+                        <label>절점 (Nodes) <button id="btn-add-node" class="btn-small">+ 추가</button></label>
+                        <p class="hint">절점 좌표(x, z)와 응력(stress). 표에서 직접 수정하면 단면·성질이 즉시 갱신됩니다. 응력은 해석 탭의 Load Case 선택 시 해석 실행 전에 자동 설정됩니다.</p>
                         <div id="node-table-container" class="table-container">
                             <table id="node-table">
                                 <thead><tr><th>#</th><th>x</th><th>z</th><th>stress</th></tr></thead>
@@ -2102,8 +2114,8 @@ export class StcfsdPanel implements McpPanelInterface {
                         </div>
                     </div>
                     <div class="section-group">
-                        <label>Elements <button id="btn-add-elem" class="btn-small">+ 추가</button></label>
-                        <p class="hint">요소 연결(ni→nj)과 두께(t). 각 요소는 하나의 판(strip)을 나타냅니다.</p>
+                        <label>요소 (Elements) <button id="btn-add-elem" class="btn-small">+ 추가</button></label>
+                        <p class="hint">요소 연결(ni→nj)과 두께(t). 각 요소는 하나의 판(strip)을 나타내며, 두께를 표에서 직접 수정할 수 있습니다.</p>
                         <div id="elem-table-container" class="table-container">
                             <table id="elem-table">
                                 <thead><tr><th>#</th><th>ni</th><th>nj</th><th>t</th></tr></thead>
@@ -2113,7 +2125,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     </div>
                 </div>
                 <div class="panel-right">
-                    <h3>Cross Section Preview</h3>
+                    <h3>단면 미리보기 (Cross Section Preview)</h3>
                     <p class="hint">중심선(centerline) 모델. 주황색 점 = 절점, 파란색 선 = 요소.</p>
                     <div id="section-preview">
                         <svg id="section-svg" viewBox="-1 -1 12 12" preserveAspectRatio="xMidYMid meet"></svg>
@@ -2123,8 +2135,138 @@ export class StcfsdPanel implements McpPanelInterface {
             </div>
         </div>
 
-        <!-- 해석 탭 -->
-        <div id="tab-analysis" class="tab-panel">
+        <!-- ② 하중계산 탭 -->
+        <div id="tab-loads" class="tab-panel">
+            <p class="hint">부재 구성(스팬·지점·랩)과 사용하중(미계수 면압)을 입력하고 "하중 분석 실행"을 누르면, 하중조합(LRFD/ASD)을 적용한 소요강도(Mu·Vu)와 비지지길이·Cb가 ③좌굴해석·부재설계 탭에, 랩 길이·지점 Mu/Vu가 ④접합부 탭에 자동 입력됩니다.</p>
+            <p id="loads-tab-hint" class="hint" style="display:none;color:var(--vscode-editorWarning-foreground,#f90)">현재 부재 유형(③탭)이 "직접 입력" 모드입니다 — 하중계산은 자동 계산 모드(지붕 퍼린/바닥 장선/벽체 거트/벽 스터드)에서 사용됩니다. 직접 입력 모드에서는 ③탭에서 소요강도를 직접 입력하세요.</p>
+            <div class="panel-row">
+                <div class="panel-left" style="max-width:360px">
+                <div id="calc-mode-section" style="display:none">
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 부재 구성</h3>
+                <div>
+                    <div class="input-row">
+                        <label>스팬 유형</label>
+                        <select id="select-span-type" style="width:140px">
+                            <option value="simple">단순보</option>
+                            <option value="cantilever">캔틸레버</option>
+                            <option value="cont-2">2경간 연속보</option>
+                            <option value="cont-3" selected>3경간 연속보</option>
+                            <option value="cont-4">4경간 연속보</option>
+                            <option value="cont-n">N경간 연속보</option>
+                        </select>
+                        <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:55px;display:none" title="경간 수">
+                        <label>간격<span class="hint-inline" data-unit="length_ft">m</span></label>
+                        <input type="number" id="config-spacing" value="1.0" step="0.1" style="width:68px">
+                    </div>
+
+                    <!-- 스팬/지점/랩 테이블 -->
+                    <div id="span-table-container" style="margin-top:6px;overflow-x:auto">
+                        <table id="span-config-table" style="width:100%;font-size:10px;border-collapse:collapse;border:1px solid var(--vscode-panel-border)">
+                            <thead>
+                                <tr style="background:var(--vscode-editor-selectionBackground)">
+                                    <th style="padding:3px 4px;width:32px">#</th>
+                                    <th style="padding:3px 4px;width:60px">지점</th>
+                                    <th style="padding:3px 4px;width:70px">스팬(<span data-unit="length_ft">m</span>)</th>
+                                    <th style="padding:3px 4px;width:60px">랩L(<span data-unit="length_ft">m</span>)</th>
+                                    <th style="padding:3px 4px;width:60px">랩R(<span data-unit="length_ft">m</span>)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="span-config-tbody">
+                                <!-- JS에서 동적 생성 -->
+                            </tbody>
+                        </table>
+                        <p class="hint" style="font-size:9px;margin-top:2px">지점: P=핀, R=롤러, F=고정단, N=자유단. 랩=지점 양측 겹침 길이.</p>
+                    </div>
+                </div>
+
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 사용하중 입력 <span class="hint-inline" style="font-weight:normal">(미계수 면압, Service Loads)</span></h3>
+                <div>
+                    <p class="hint" style="margin-bottom:4px">지붕/벽 면압(D·Lr·S·W)을 입력하면 "하중 분석 실행"이 하중조합을 적용해 ③좌굴해석·부재설계 탭의 <b>소요강도</b>(Mu·Vu)와 비지지길이·Cb를 자동 계산·입력합니다.</p>
+                    <div class="input-row">
+                        <label>D<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-D-psf" value="0.3" step="0.05" style="width:50px">
+                        <span id="load-D-plf" class="hint-inline" style="min-width:50px">→</span>
+                    </div>
+                    <div class="input-row" id="load-Lr-row">
+                        <label>Lr<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-Lr-psf" value="1.0" step="0.1" style="width:50px">
+                        <span id="load-Lr-plf" class="hint-inline" style="min-width:50px">→</span>
+                    </div>
+                    <div class="input-row" id="load-S-row">
+                        <label>S<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-S-psf" value="0.5" step="0.1" style="width:50px">
+                        <span id="load-S-plf" class="hint-inline" style="min-width:50px">→</span>
+                    </div>
+                    <div class="input-row" id="load-W-row">
+                        <label>Wu<span class="hint-inline" data-unit="pressure">kPa</span>↑</label>
+                        <input type="number" id="load-Wu-psf" value="1.0" step="0.1" style="width:50px">
+                        <span id="load-Wu-plf" class="hint-inline" style="min-width:50px">→</span>
+                    </div>
+                    <div class="input-row" id="load-Wp-row">
+                        <label>Wp<span class="hint-inline" data-unit="pressure">kPa</span>↓</label>
+                        <input type="number" id="load-Wp-psf" value="0" step="0.1" style="width:50px">
+                        <span id="load-Wp-plf" class="hint-inline" style="min-width:50px">→</span>
+                    </div>
+                    <div class="input-row" id="load-L-row" style="display:none">
+                        <label>L<span class="hint-inline" data-unit="pressure">kPa</span></label>
+                        <input type="number" id="load-L-psf" value="0" step="0.1" style="width:50px">
+                        <span id="load-L-plf" class="hint-inline" style="min-width:50px">→</span>
+                    </div>
+                </div>
+
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 데크 & 가새</h3>
+                <div>
+                    <div class="input-row">
+                        <label>데크</label>
+                        <select id="select-deck-type" style="width:140px">
+                            <option value="through-fastened">관통 체결</option>
+                            <option value="standing-seam">스탠딩 심</option>
+                            <option value="none" selected>없음</option>
+                        </select>
+                    </div>
+                    <div class="input-row" id="deck-detail-row">
+                        <label>t<span class="hint-inline" data-unit="thickness">mm</span></label>
+                        <input type="number" id="deck-t-panel" value="0.5" step="0.1" style="width:68px">
+                        <label>@<span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="deck-fastener-spacing" value="300" step="10" style="width:55px">
+                    </div>
+                    <div class="input-row" id="deck-kphi-row">
+                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">kN-m/rad/m</span></label>
+                        <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
+                    </div>
+                </div>
+
+                <button id="btn-analyze-loads" class="btn-action-green" style="margin-top:8px;width:100%">하중 분석 실행</button>
+                </div>
+                </div>
+                <div class="panel-right">
+                <div id="load-analysis-section" style="display:none">
+                <h3>하중 분석 결과</h3>
+                <div id="load-analysis-result" class="result-box" style="max-height:300px;overflow-y:auto;font-size:12px">
+                </div>
+                </div>
+                </div>
+            </div>
+        </div>
+
+    <!-- ========== Design Tab ========== -->
+    <div id="tab-design" class="tab-panel">
+        <!-- Step Indicator -->
+        <div class="step-indicator" id="design-step-indicator">
+            <div class="step-item active" data-step="1"><span class="step-num">1</span><span>입력</span></div>
+            <div class="step-line" id="step-line-12"></div>
+            <div class="step-item" data-step="2" id="step-item-2"><span class="step-num">2</span><span>하중 분석</span></div>
+            <div class="step-line" id="step-line-23"></div>
+            <div class="step-item" data-step="3"><span class="step-num">3</span><span>설계 검토</span></div>
+        </div>
+        <!-- 좌굴해석(①~③) 연동 상태: 설계는 FSM/DSM 좌굴값을 소비한다 -->
+        <div id="design-dsm-status" class="hint" style="margin:0 0 10px;padding:5px 8px;border:1px solid var(--vscode-panel-border);border-radius:3px">
+            FSM 좌굴값 없음 — 아래 "A. 좌굴해석" 섹션에서 해석을 실행하거나, "설계용 FSM 해석 준비"를 사용하세요.
+        </div>
+
+        <!-- ── A. 좌굴해석 (구 해석 탭 통합) ── -->
+        <h3 class="collapsible" id="sec-fsm" data-expanded="true" style="margin-bottom:6px"><span class="collapse-icon">▾</span> A. 좌굴해석 (FSM) — 입력·실행</h3>
+        <div id="sec-fsm-body">
             <div style="display:flex;gap:12px">
             <div style="flex:1;min-width:0">
             <p class="hint">유한스트립법(FSM) 좌굴 해석 설정.</p>
@@ -2211,11 +2353,12 @@ export class StcfsdPanel implements McpPanelInterface {
             <div id="analysis-status" class="status-bar"></div>
         </div>
 
-        <!-- 후처리 탭 -->
-        <div id="tab-postprocessor" class="tab-panel">
+        <!-- ── B. 좌굴해석 결과 (구 후처리 탭 통합) ── -->
+        <h3 class="collapsible" id="sec-fsm-res" data-expanded="false" style="margin-bottom:6px"><span class="collapse-icon">▸</span> B. 좌굴해석 결과 (DSM 설계값·좌굴곡선·모드형상)</h3>
+        <div id="sec-fsm-res-body" style="display:none">
             <!-- DSM 설계값 테이블 -->
             <div id="dsm-results" class="section-group" style="margin-bottom:12px">
-                <h3>DSM Design Values</h3>
+                <h3>DSM 설계값 (DSM Design Values)</h3>
                 <p class="hint">직접강도법(DSM) 설계값. Pcrl/Mcrl = 국부좌굴, Pcrd/Mcrd = 뒤틀림좌굴, Pcre/Mcre = 전체좌굴 임계하중.</p>
                 <div id="dsm-table-container" class="props-display" style="font-size:13px;">
                     <em>해석을 실행하면 결과가 표시됩니다</em>
@@ -2223,13 +2366,13 @@ export class StcfsdPanel implements McpPanelInterface {
             </div>
             <div class="panel-row">
                 <div class="panel-left">
-                    <h3>Buckling Curve</h3>
+                    <h3>좌굴 곡선 (Signature Curve)</h3>
                     <p class="hint">반파장(x축) 대비 하중계수(y축) 곡선. 극소점이 좌굴 임계값을 나타냅니다. 마우스를 올리면 십자 커서와 좌표가 표시됩니다.</p>
                     <canvas id="buckling-curve-canvas" width="700" height="400"></canvas>
-                    <h3>Mode Classification (G/D/L/O)</h3>
-                    <p class="hint">cFSM 기반 모드 분류. 각 반파장에서 1차 좌굴 모드의 G/D/L/O 구성비를 누적 영역으로 표시합니다.</p>
+                    <h3>모드 분류 (G/D/L/O) <button id="btn-run-classify" class="btn-small" style="margin-left:8px">모드 분류 실행</button></h3>
+                    <p class="hint">cFSM 기반 모드 분류. 각 반파장에서 1차 좌굴 모드의 전체(G)/뒤틀림(D)/국부(L)/기타(O) 구성비를 누적 영역으로 표시합니다. 해석 실행 후 버튼을 눌러 분류를 실행하세요.</p>
                     <canvas id="classify-curve-canvas" width="700" height="200"></canvas>
-                    <h3>Plastic Interaction Surface</h3>
+                    <h3>소성 상호작용 곡면 (P-M Surface)</h3>
                     <p class="hint">주축(principal axis) 좌표계 기준 P-M 소성 상호작용 다이어그램. 항복값으로 정규화된 축력-모멘트 조합을 표시합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
                         <label>fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="plastic-fy" value="245" step="5" style="width:60px">
@@ -2238,7 +2381,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     <canvas id="plastic-surface-canvas" width="700" height="420"></canvas>
                 </div>
                 <div class="panel-right">
-                    <h3>Mode Shape</h3>
+                    <h3>모드 형상 (2D)</h3>
                     <p class="hint">선택한 반파장/모드에서의 단면 변형 형상. 주황색 = 변형, 회색 = 미변형. Length 드롭다운에서 반파장을 선택하세요.</p>
                     <div id="mode-shape-container">
                         <div class="input-row">
@@ -2249,25 +2392,19 @@ export class StcfsdPanel implements McpPanelInterface {
                         </div>
                         <canvas id="mode-shape-canvas" width="600" height="340"></canvas>
                     </div>
-                    <h3>3D Mode Shape</h3>
+                    <h3>모드 형상 (3D)</h3>
                     <p class="hint">좌굴 변형의 3D 시각화. Length 값이 바뀌면 해당 반파장에서의 좌굴 모드가 달라집니다 — 짧은 Length(~1~10in)는 국부좌굴(웹/플랜지 파형), 중간 Length(~15~40in)는 뒤틀림좌굴(립-플랜지 회전), 긴 Length(~100in+)는 전체좌굴(횡비틀림)을 보여줍니다. 마우스 드래그=회전, 스크롤=확대/축소.</p>
                     <canvas id="mode-shape-3d-canvas" width="600" height="400"></canvas>
                 </div>
             </div>
         </div>
-    <!-- ========== Design Tab ========== -->
-    <div id="tab-design" class="tab-panel">
-        <!-- Step Indicator -->
-        <div class="step-indicator" id="design-step-indicator">
-            <div class="step-item active" data-step="1"><span class="step-num">1</span><span>Inputs</span></div>
-            <div class="step-line" id="step-line-12"></div>
-            <div class="step-item" data-step="2" id="step-item-2"><span class="step-num">2</span><span>Loads</span></div>
-            <div class="step-line" id="step-line-23"></div>
-            <div class="step-item" data-step="3"><span class="step-num">3</span><span>Design</span></div>
-        </div>
+
+        <!-- ── C. 부재 설계 ── -->
+        <h3 class="collapsible" id="sec-member-design" data-expanded="true" style="margin-bottom:6px"><span class="collapse-icon">▾</span> C. 부재 설계 (AISI S100-16 DSM)</h3>
+        <div id="sec-member-design-body">
         <div class="panel-row">
             <div class="panel-left" style="max-width:360px">
-                <h3 class="collapsible" id="sec-material" data-expanded="true"><span class="collapse-icon">▾</span> Material <span class="hint-inline" style="font-weight:normal">(전처리 탭에서 설정)</span></h3>
+                <h3 class="collapsible" id="sec-material" data-expanded="true"><span class="collapse-icon">▾</span> 재료 (Material) <span class="hint-inline" style="font-weight:normal">(①단면·재료 탭에서 설정 — 읽기전용)</span></h3>
                 <div id="sec-material-body">
                 <div class="input-row">
                     <label>Fy<span class="hint-inline" data-unit="stress">MPa</span></label>
@@ -2284,9 +2421,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         <option value="LRFD">LRFD (φRn≥Ru)</option>
                         <option value="ASD">ASD (Rn/Ω≥Ra)</option>
                     </select>
-                    <select id="select-analysis-method" style="width:130px">
-                        <option value="DSM">DSM</option>
-                    </select>
+                    <span class="hint-inline" style="font-size:11px">해석법: DSM (직접강도법, Appendix 2)</span>
                 </div>
                 </div>
 
@@ -2307,105 +2442,33 @@ export class StcfsdPanel implements McpPanelInterface {
                         </optgroup>
                     </select>
                 </div>
+                <p id="member-mode-badge" class="hint" style="margin:2px 0 8px"></p>
 
-                <div id="calc-mode-section" style="display:none">
-                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 부재 구성</h3>
-                <div>
-                    <div class="input-row">
-                        <label>스팬 유형</label>
-                        <select id="select-span-type" style="width:140px">
-                            <option value="simple">단순보</option>
-                            <option value="cantilever">캔틸레버</option>
-                            <option value="cont-2">2경간 연속보</option>
-                            <option value="cont-3" selected>3경간 연속보</option>
-                            <option value="cont-4">4경간 연속보</option>
-                            <option value="cont-n">N경간 연속보</option>
-                        </select>
-                        <input type="number" id="config-n-spans" value="5" min="2" max="20" step="1" style="width:55px;display:none" title="경간 수">
-                        <label>간격<span class="hint-inline" data-unit="length_ft">m</span></label>
-                        <input type="number" id="config-spacing" value="1.0" step="0.1" style="width:68px">
-                    </div>
-
-                    <!-- 스팬/지점/랩 테이블 -->
-                    <div id="span-table-container" style="margin-top:6px;overflow-x:auto">
-                        <table id="span-config-table" style="width:100%;font-size:10px;border-collapse:collapse;border:1px solid var(--vscode-panel-border)">
-                            <thead>
-                                <tr style="background:var(--vscode-editor-selectionBackground)">
-                                    <th style="padding:3px 4px;width:32px">#</th>
-                                    <th style="padding:3px 4px;width:60px">지점</th>
-                                    <th style="padding:3px 4px;width:70px">스팬(<span data-unit="length_ft">m</span>)</th>
-                                    <th style="padding:3px 4px;width:60px">랩L(<span data-unit="length_ft">m</span>)</th>
-                                    <th style="padding:3px 4px;width:60px">랩R(<span data-unit="length_ft">m</span>)</th>
-                                </tr>
-                            </thead>
-                            <tbody id="span-config-tbody">
-                                <!-- JS에서 동적 생성 -->
-                            </tbody>
-                        </table>
-                        <p class="hint" style="font-size:9px;margin-top:2px">지점: P=핀, R=롤러, F=고정단, N=자유단. 랩=지점 양측 겹침 길이.</p>
-                    </div>
+                <h3>소요강도 <span class="hint-inline" style="font-weight:normal">(계수하중 조합값, Required Strength)</span></h3>
+                <p class="hint" style="margin-bottom:4px">자동 계산 모드: 위 사용하중으로 "하중 분석 실행" 시 지배 조합의 Mu·Vu가 자동 입력됩니다. 직접 입력 모드: 하중조합(LRFD/ASD)으로 산정한 값을 직접 입력하세요.</p>
+                <div class="input-row">
+                    <label>Pu<span class="hint-inline" data-unit="force">kN</span></label>
+                    <input type="number" id="design-P" value="0" step="1" style="width:65px" title="소요 압축강도 (계수 축력)">
+                    <label>Vu<span class="hint-inline" data-unit="force">kN</span></label>
+                    <input type="number" id="design-V" value="0" step="1" style="width:65px" title="소요 전단강도 (계수 전단력)">
+                </div>
+                <div class="input-row">
+                    <label>Mu(+)<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-Mx-pos" value="0" step="0.1" style="width:65px" title="정모멘트 소요강도">
+                    <label>Mu(-)<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px" title="부모멘트 소요강도">
+                </div>
+                <div class="input-row">
+                    <label>Muy<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-My" value="0" step="0.1" style="width:65px" title="약축 모멘트 소요강도">
+                </div>
+                <div class="input-row">
+                    <label>May<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-May-strength" value="0" step="0.1" style="width:65px">
+                    <span class="hint-inline">약축 가용강도 직접 입력 (Muy 검토용)</span>
                 </div>
 
-                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 사용 하중</h3>
-                <div>
-                    <div class="input-row">
-                        <label>D<span class="hint-inline" data-unit="pressure">kPa</span></label>
-                        <input type="number" id="load-D-psf" value="0.3" step="0.05" style="width:50px">
-                        <span id="load-D-plf" class="hint-inline" style="min-width:50px">→15 PLF</span>
-                    </div>
-                    <div class="input-row" id="load-Lr-row">
-                        <label>Lr<span class="hint-inline" data-unit="pressure">kPa</span></label>
-                        <input type="number" id="load-Lr-psf" value="1.0" step="0.1" style="width:50px">
-                        <span id="load-Lr-plf" class="hint-inline" style="min-width:50px">→100 PLF</span>
-                    </div>
-                    <div class="input-row" id="load-S-row">
-                        <label>S<span class="hint-inline" data-unit="pressure">kPa</span></label>
-                        <input type="number" id="load-S-psf" value="0.5" step="0.1" style="width:50px">
-                        <span id="load-S-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
-                    </div>
-                    <div class="input-row" id="load-W-row">
-                        <label>Wu<span class="hint-inline" data-unit="pressure">kPa</span>↑</label>
-                        <input type="number" id="load-Wu-psf" value="1.0" step="0.1" style="width:50px">
-                        <span id="load-Wu-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
-                    </div>
-                    <div class="input-row" id="load-Wp-row">
-                        <label>Wp<span class="hint-inline" data-unit="pressure">kPa</span>↓</label>
-                        <input type="number" id="load-Wp-psf" value="0" step="0.1" style="width:50px">
-                        <span id="load-Wp-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
-                    </div>
-                    <div class="input-row" id="load-L-row" style="display:none">
-                        <label>L<span class="hint-inline" data-unit="pressure">kPa</span></label>
-                        <input type="number" id="load-L-psf" value="0" step="0.1" style="width:50px">
-                        <span id="load-L-plf" class="hint-inline" style="min-width:50px">→0 PLF</span>
-                    </div>
-                </div>
-
-                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 데크 & 가새</h3>
-                <div>
-                    <div class="input-row">
-                        <label>데크</label>
-                        <select id="select-deck-type" style="width:140px">
-                            <option value="through-fastened">관통 체결</option>
-                            <option value="standing-seam">스탠딩 심</option>
-                            <option value="none" selected>없음</option>
-                        </select>
-                    </div>
-                    <div class="input-row" id="deck-detail-row">
-                        <label>t<span class="hint-inline" data-unit="thickness">mm</span></label>
-                        <input type="number" id="deck-t-panel" value="0.5" step="0.1" style="width:68px">
-                        <label>@<span class="hint-inline" data-unit="length">mm</span></label>
-                        <input type="number" id="deck-fastener-spacing" value="300" step="10" style="width:55px">
-                    </div>
-                    <div class="input-row" id="deck-kphi-row">
-                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">kN-m/rad/m</span></label>
-                        <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
-                    </div>
-                </div>
-
-                <button id="btn-analyze-loads" class="btn-action-green" style="margin-top:8px;width:100%">하중 분석 실행</button>
-                </div>
-
-                <h3 id="design-lengths-title">비지지 길이</h3>
+                <h3 id="design-lengths-title">좌굴 길이 (유효좌굴 K·L / 비지지 Lb)</h3>
                 <div class="input-row" id="design-KxLx-row">
                     <label>KxLx<span class="hint-inline" data-unit="length">mm</span></label>
                     <input type="number" id="design-KxLx" value="3000" step="100" style="width:65px">
@@ -2458,29 +2521,6 @@ export class StcfsdPanel implements McpPanelInterface {
                     <input type="number" id="design-Cmx" value="0.85" step="0.01" style="width:68px">
                     <label>Cmy</label>
                     <input type="number" id="design-Cmy" value="0.85" step="0.01" style="width:68px">
-                </div>
-
-                <h3>소요 하중</h3>
-                <div class="input-row">
-                    <label>P<span class="hint-inline" data-unit="force">kN</span></label>
-                    <input type="number" id="design-P" value="0" step="1" style="width:65px">
-                    <label>V<span class="hint-inline" data-unit="force">kN</span></label>
-                    <input type="number" id="design-V" value="0" step="1" style="width:65px">
-                </div>
-                <div class="input-row">
-                    <label>Mu(+)<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-Mx-pos" value="0" step="0.1" style="width:65px" title="정모멘트 소요강도">
-                    <label>Mu(-)<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px" title="부모멘트 소요강도">
-                </div>
-                <div class="input-row">
-                    <label>My<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-My" value="0" step="0.1" style="width:65px">
-                </div>
-                <div class="input-row">
-                    <label>May<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-May-strength" value="0" step="0.1" style="width:65px">
-                    <span class="hint-inline">약축 가용강도 직접 입력</span>
                 </div>
 
                 <div id="design-wc-section" style="display:none">
@@ -2569,19 +2609,13 @@ export class StcfsdPanel implements McpPanelInterface {
                 </div>
 
                 <div style="display:flex;gap:8px;margin-top:12px">
-                    <button id="btn-prepare-design-dsm" class="btn-secondary" style="flex:1">FSM 결과 준비</button>
+                    <button id="btn-prepare-design-dsm" class="btn-secondary" style="flex:1">설계용 FSM 해석 준비</button>
                     <button id="btn-run-design" class="btn-primary" style="flex:1">▶ 설계 검토 실행</button>
                 </div>
-                <p class="hint" style="margin-top:6px">DSM 설계용 좌굴값이 없거나 하중 케이스가 맞지 않으면 먼저 "FSM 결과 준비"를 실행하세요.</p>
+                <p class="hint" style="margin-top:6px">DSM 설계용 좌굴값이 없거나 하중 케이스가 맞지 않으면 먼저 "설계용 FSM 해석 준비"를 실행하세요.</p>
             </div>
 
             <div class="panel-right">
-                <div id="load-analysis-section" style="display:none">
-                <h3>하중 분석 결과</h3>
-                <div id="load-analysis-result" class="result-box" style="max-height:300px;overflow-y:auto;font-size:12px">
-                </div>
-                </div>
-
                 <h3>설계 요약</h3>
                 <div id="design-loading" class="loading-overlay" style="display:none">
                     <div class="loading-spinner"></div><span>계산 중...</span>
@@ -2605,6 +2639,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 <button id="btn-copy-report" class="btn-secondary" style="margin-top:8px;width:100%;display:none">보고서 클립보드 복사</button>
             </div>
         </div>
+        </div><!-- /sec-member-design-body -->
     </div>
 
     <!-- 접합부 (Connection) 탭 -->
@@ -2628,6 +2663,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         <label>d</label><input type="number" id="conn-fastener-dia" value="4.8" step="0.1" style="width:56px"><span class="hint-inline conn-unit-length">패스너 직경</span>
                     </div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">행 수</label><input type="number" id="conn-n-rows" value="2" min="1" max="4" step="1" style="width:56px"><span class="hint-inline">웹 높이 방향 패스너 열 수</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">단부거리 e</label><input type="number" id="conn-edge-dist" value="0" step="1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">0=자동(1.5d). 볼트는 e를 늘리면 §J6.1 인열 완화 → 개수 감소</span></div>
                     <button id="btn-run-lap-design" class="btn-action-green" style="margin-top:8px;width:100%;padding:6px">Lap 접합부 설계</button>
                 </div>
 
@@ -2646,20 +2682,21 @@ export class StcfsdPanel implements McpPanelInterface {
                                 <option value="paf">PAF — 화약고정 (§J5)</option>
                             </optgroup>
                             <optgroup label="용접 접합">
-                                <option value="fillet_weld">Fillet Weld — 필릿 (§J2.1)</option>
+                                <option value="fillet_weld">Fillet Weld — 필릿 (§J2.5)</option>
                                 <option value="arc_spot">Arc Spot — 아크점 (§J2.2)</option>
-                                <option value="arc_seam">Arc Seam — 아크심 (§J2.4)</option>
-                                <option value="groove">Groove — 그루브 (§J2.3)</option>
+                                <option value="arc_seam">Arc Seam — 아크심 (§J2.3)</option>
+                                <option value="groove">Groove — 그루브 (§J2.1/J2.6)</option>
                             </optgroup>
                         </select>
                     </div>
+                    <p id="conn-single-hint" class="hint" style="margin:0 0 6px"></p>
                     <div class="input-row"><label style="min-width:56px;text-align:right">t1</label><input type="number" id="conn-t1" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><label>t2</label><input type="number" id="conn-t2" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><span class="hint-inline conn-unit-thickness">접합 부재 두께</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">직경 d</label><input type="number" id="conn-d" value="4.8" step="0.1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">패스너/용접 직경</span><label>개수 n</label><input type="number" id="conn-n" value="4" min="1" step="1" style="width:56px"></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">Fy</label><input type="number" id="conn-Fy" value="245" step="10" style="width:72px" data-unit="stress"><label>Fu</label><input type="number" id="conn-Fu" value="400" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">접합 부재 강도</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">Fy</label><input type="number" id="conn-Fy" value="245" step="10" style="width:72px" data-unit="stress"><label>Fu</label><input type="number" id="conn-Fu" value="400" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">전처리 재료와 자동 동기화 (수정 가능)</span></div>
                     <div class="input-row" id="conn-weld-row" style="display:none"><label style="min-width:56px;text-align:right">용접길이</label><input type="number" id="conn-weld-L" value="50" step="1" style="width:72px" data-unit="length"><label>크기</label><input type="number" id="conn-weld-size" value="3" step="0.5" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">용접 유효 길이/크기</span></div>
                     <div class="input-row" id="conn-groove-row" style="display:none"><label style="min-width:56px;text-align:right">그루브</label><select id="conn-groove-type" style="font-size:12px"><option value="complete">완전용입 CJP</option><option value="partial">부분용입 PJP</option></select></div>
-                    <div class="input-row" id="conn-bolt-row" style="display:none"><label style="min-width:56px;text-align:right">Fub</label><input type="number" id="conn-Fub" value="827" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">볼트 인장강도</span></div>
-                    <div class="input-row" id="conn-paf-row" style="display:none"><label style="min-width:56px;text-align:right">Fuf</label><input type="number" id="conn-Fuf" value="414" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">PAF 핀 인장강도 (§J5)</span></div>
+                    <div class="input-row" id="conn-bolt-row" style="display:none"><label style="min-width:56px;text-align:right">Fub</label><input type="number" id="conn-Fub" value="827" step="10" style="width:72px" data-unit="stress"><span id="conn-Fub-hint" class="hint-inline conn-unit-stress">볼트 인장강도</span></div>
+                    <div class="input-row" id="conn-paf-row" style="display:none"><label style="min-width:56px;text-align:right">Fuf</label><input type="number" id="conn-Fuf" value="827" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">PAF 핀(경화강) 인장강도 — §J5 기본 120 ksi</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">Pu</label><input type="number" id="conn-Pu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">소요 강도 (이용률 계산용)</span></div>
                     <button id="btn-run-single-conn" class="btn-action-green" style="margin-top:8px;width:100%;padding:6px">접합부 강도 계산</button>
                 </div>

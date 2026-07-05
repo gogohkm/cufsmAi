@@ -4,8 +4,9 @@
  * 참조: 컨버전전략.md §11
  */
 
-/* === Font === */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+/* === Font ===
+   웹뷰 CSP(font-src ${webview.cspSource})가 외부 폰트를 차단하므로
+   구글 폰트 @import는 항상 실패하는 죽은 요청이었음 — VS Code 폰트 변수 사용. */
 
 /* === Reset === */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -13,7 +14,7 @@
 body {
     background: var(--vscode-editor-background);
     color: var(--vscode-editor-foreground);
-    font-family: 'Inter', var(--vscode-font-family, 'Segoe UI', sans-serif);
+    font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
     font-size: var(--vscode-font-size, 13px);
     padding: 0;
     overflow: hidden;
@@ -50,6 +51,14 @@ body {
     opacity: 1;
     border-bottom-color: var(--vscode-focusBorder);
     color: var(--vscode-foreground);
+}
+
+/* 탭 그룹 구분선: [좌굴해석] | [부재설계] | [출력] */
+.tab-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 6px 4px;
+    background: var(--vscode-panel-border);
 }
 
 /* 파일 Open/Save 버튼 */
@@ -204,7 +213,8 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 
 /* ── Design 탭 입력 패널 정렬 ── */
-#tab-design .panel-left h3 {
+#tab-design .panel-left h3,
+#tab-loads .panel-left h3 {
     margin-top: 14px;
     margin-bottom: 6px;
     padding-bottom: 3px;
@@ -212,44 +222,52 @@ input[type="number"]::-webkit-outer-spin-button {
     font-size: 12px;
 }
 
-#tab-design .panel-left h3:first-child {
+#tab-design .panel-left h3:first-child,
+#tab-loads .panel-left h3:first-child {
     margin-top: 0;
 }
 
-#tab-design .panel-left .input-row {
+#tab-design .panel-left .input-row,
+#tab-loads .panel-left .input-row {
     margin-bottom: 5px;
     gap: 6px;
 }
 
-#tab-design .panel-left .input-row label {
+#tab-design .panel-left .input-row label,
+#tab-loads .panel-left .input-row label {
     min-width: 48px;
     font-size: 11px;
     text-align: right;
     flex-shrink: 0;
 }
 
-#tab-design .panel-left .input-row input[type="number"] {
+#tab-design .panel-left .input-row input[type="number"],
+#tab-loads .panel-left .input-row input[type="number"] {
     width: 82px;
     padding: 3px 6px;
     font-size: 12px;
 }
 
-#tab-design .panel-left .input-row select {
+#tab-design .panel-left .input-row select,
+#tab-loads .panel-left .input-row select {
     font-size: 12px;
     padding: 3px 4px;
 }
 
-#tab-design .panel-left .hint-inline {
+#tab-design .panel-left .hint-inline,
+#tab-loads .panel-left .hint-inline {
     font-size: 10px;
     opacity: 0.6;
 }
 
-#tab-design .panel-right h3 {
+#tab-design .panel-right h3,
+#tab-loads .panel-right h3 {
     margin-top: 16px;
     margin-bottom: 6px;
 }
 
-#tab-design .panel-right h3:first-child {
+#tab-design .panel-right h3:first-child,
+#tab-loads .panel-right h3:first-child {
     margin-top: 0;
 }
 

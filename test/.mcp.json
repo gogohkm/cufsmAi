@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "stcfsd-section-designer": {
+      "command": "node",
+      "args": [
+        "/Users/hi/2026Coding_Prj/cufsmAi/media/mcp-server.js"
+      ],
+      "env": {
+        "STCFSD_MCP_PORT": "52790"
+      }
+    }
+  }
+}

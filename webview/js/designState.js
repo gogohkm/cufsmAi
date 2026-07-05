@@ -14,12 +14,12 @@
             data.unitSystem = getUnitSystem();
         }
 
-        data.steelGrade = document.getElementById('select-steel-grade')?.value || 'custom';
+        // (구 select-steel-grade는 존재하지 않는 요소 — 실제 강종은 presteelGrade(input-steel-grade)로 저장)
         data.fy = fromDisplay(getNum('design-fy', 35.53), 'stress');
         data.fu = fromDisplay(getNum('design-fu', 58.02), 'stress');
 
         data.designMethod = document.getElementById('select-design-method')?.value || 'LRFD';
-        data.analysisMethod = document.getElementById('select-analysis-method')?.value || 'DSM';
+        data.analysisMethod = 'DSM'; // 해석법은 DSM 고정 (구 select-analysis-method 드롭다운 제거됨)
         data.memberType = document.getElementById('select-member-type')?.value || 'flexure';
 
         data.spanType = document.getElementById('select-span-type')?.value || 'simple';
@@ -180,7 +180,7 @@
             }
         }
 
-        if (data.steelGrade) setSelect('select-steel-grade', data.steelGrade);
+        // (구 select-steel-grade / select-analysis-method 복원 제거 — 요소 미존재로 항상 no-op이었음)
         if (data.fy != null) setValue('design-fy', toDisplay(data.fy, 'stress'));
         if (data.fu != null) {
             const fuDisplay = toDisplay(data.fu, 'stress');
@@ -189,7 +189,6 @@
         }
 
         if (data.designMethod) setSelect('select-design-method', data.designMethod);
-        if (data.analysisMethod) setSelect('select-analysis-method', data.analysisMethod);
         if (data.memberType) setSelect('select-member-type', data.memberType);
 
         if (data.spanType) {
