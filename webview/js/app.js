@@ -259,6 +259,8 @@
                 renderModeShape2D();
                 renderModeShape3DWrapper();
                 switchTab('design');
+                // 설계용 좌굴값(P/Mxx) 자동 준비 — 구 "설계용 FSM 해석 준비" 버튼 통합
+                _autoPrepareDesignDsm();
                 break;
             case 'analysisInvalidated':
                 analysisResult = null;
@@ -374,17 +376,12 @@
                 sendTreeUpdate();
                 break;
             case 'designDsmPrepared': {
-                const prepBtn = document.getElementById('btn-prepare-design-dsm');
-                if (prepBtn) {
-                    prepBtn.textContent = '설계용 FSM 해석 준비';
-                    prepBtn.disabled = false;
-                }
                 if (msg.data?.error) {
                     setStatus('설계용 FSM 준비 실패: ' + msg.data.error, 'error');
                 } else {
                     const preparedCases = (msg.data?.load_cases || []).join(', ');
                     setStatus('설계용 FSM 준비 완료: ' + preparedCases, 'success');
-                    updateDesignDsmStatus('✓ 설계용 FSM 좌굴값 준비됨 (' + preparedCases + ') — 설계 검토 실행 가능', true);
+                    updateDesignDsmStatus('✓ 좌굴해석 연동 + 설계용 좌굴값 준비 완료 (' + preparedCases + ') — 설계 검토 실행 가능', true);
                 }
                 break;
             }
@@ -413,6 +410,21 @@
         const panel = document.getElementById(`tab-${tabId}`);
         if (btn) { btn.classList.add('active'); }
         if (panel) { panel.classList.add('active'); }
+    }
+
+    /** 해석 완료 후 부재 유형에 맞는 설계용 DSM 좌굴값을 자동 준비
+        (구 "설계용 FSM 해석 준비" 버튼 기능을 해석 실행에 통합) */
+    function _autoPrepareDesignDsm() {
+        const rawT = document.getElementById('select-member-type')?.value || 'flexure';
+        const mt = isCalcMode(rawT) ? 'flexure' : rawT;
+        if (mt === 'tension') { return; }  // 인장 부재는 DSM 좌굴값 불필요
+        vscode.postMessage({
+            command: 'prepareDesignDsm',
+            data: {
+                member_type: mt,
+                Fy: fromDisplay(getNum('design-fy', 35.53), 'stress'),
+            },
+        });
     }
 
     /** 접이식 섹션 펼치기 (headerId = collapsible h3의 id, 본문 = 다음 형제 요소) */
@@ -1687,7 +1699,7 @@
             'focus-props': ['preprocessor', null],
             'focus-dsm-P': ['design', 'dsm-table-container'],
             'focus-dsm-M': ['design', 'dsm-table-container'],
-            'focus-member-type': ['design', 'select-member-type'],
+            'focus-member-type': ['loads', 'select-member-type'],
             'focus-span-type': ['loads', 'select-span-type'],
             'focus-spacing': ['loads', 'config-spacing'],
             'focus-design-Lb': ['design', 'design-Lb'],
@@ -1697,8 +1709,8 @@
             'focus-load-L': ['loads', 'load-L-psf'],
             'focus-load-W': ['loads', 'load-Wu-psf'],
             'focus-gravity-combo': ['loads', 'load-analysis-result'],
-            'focus-max-Mu': ['design', 'design-Mx'],
-            'focus-max-Vu': ['design', 'design-V'],
+            'focus-max-Mu': ['loads', 'design-Mx'],
+            'focus-max-Vu': ['loads', 'design-V'],
             'focus-deflection': ['loads', 'load-analysis-result'],
             'focus-controlling-mode': ['design', 'design-summary'],
             'focus-design-Mn': ['design', 'design-summary'],
@@ -2846,6 +2858,65 @@
         });
     }
 
+    // ── 좌굴해석 결과 보고서 (별도 웹뷰 패널, PDF 저장 가능) ──
+    function _canvasPng(id) {
+        const c = document.getElementById(id);
+        if (!c || typeof c.toDataURL !== 'function') { return ''; }
+        try {
+            const u = c.toDataURL('image/png');
+            // 빈 캔버스(수백 바이트)나 실패는 제외
+            return (u && u.length > 3000) ? u : '';
+        } catch (e) { return ''; }
+    }
+
+    function _buildBucklingReportHtml() {
+        const selT = document.getElementById('select-template');
+        const secName = (selT && selT.selectedIndex >= 0) ? (selT.options[selT.selectedIndex].text || '직접 입력') : '직접 입력';
+        const lc = document.getElementById('select-load-case');
+        const lcName = (lc && lc.selectedIndex >= 0) ? lc.options[lc.selectedIndex].text : '';
+        const bc = document.getElementById('select-bc')?.value || 'S-S';
+        const uL = unitLabel('length');
+        let h = '<h1>좌굴해석 결과 보고서 (FSM — Signature Curve)</h1>';
+        h += '<h2>해석 조건</h2><table>';
+        h += '<tr><th>항목</th><th>값</th></tr>';
+        h += '<tr><td>단면</td><td>' + secName + ' (H=' + getNum('tpl-H', 0) + ', B=' + getNum('tpl-B', 0) + ', D=' + getNum('tpl-D', 0) + ', t=' + getNum('tpl-t', 0) + ' ' + uL + ')</td></tr>';
+        h += '<tr><td>재료</td><td>Fy = ' + getNum('input-fy', 0) + ' ' + unitLabel('stress') + ', Fu = ' + getNum('input-fu', 0) + ' ' + unitLabel('stress') + '</td></tr>';
+        h += '<tr><td>하중 케이스</td><td>' + lcName + '</td></tr>';
+        h += '<tr><td>경계조건</td><td>' + bc + '</td></tr>';
+        h += '<tr><td>반파장 범위</td><td>' + getNum('input-len-min', 0) + ' ~ ' + getNum('input-len-max', 0) + ' ' + uL + ' (' + getNum('input-len-n', 0) + '점)</td></tr>';
+        h += '<tr><td>모델</td><td>' + (model && model.node ? model.node.length : 0) + ' 절점 / ' + (model && model.elem ? model.elem.length : 0) + ' 요소</td></tr>';
+        h += '</table>';
+
+        const dsmEl = document.getElementById('dsm-table-container');
+        if (dsmEl && lastDsmResult) {
+            h += '<h2>DSM 설계값</h2>' + dsmEl.innerHTML;
+        }
+        const charts = [
+            ['buckling-curve-canvas', '좌굴 곡선 (Signature Curve)'],
+            ['classify-curve-canvas', '모드 분류 (G/D/L/O)'],
+            ['mode-shape-canvas', '모드 형상 (2D)'],
+            ['mode-shape-3d-canvas', '모드 형상 (3D)'],
+            ['plastic-surface-canvas', '소성 상호작용 곡면'],
+        ];
+        charts.forEach(pair => {
+            const png = _canvasPng(pair[0]);
+            if (png) { h += '<h2>' + pair[1] + '</h2><div class="chart"><img src="' + png + '"></div>'; }
+        });
+        h += '<p style="font-size:10px;opacity:0.6;margin-top:16px">StCFSD — CUFSM 기반 유한스트립 좌굴해석. 차트는 해석 시점의 화면 렌더링을 캡처한 것입니다.</p>';
+        return h;
+    }
+
+    const btnViewBucklingReport = document.getElementById('btn-view-buckling-report');
+    if (btnViewBucklingReport) {
+        btnViewBucklingReport.addEventListener('click', () => {
+            if (!analysisResult) {
+                setStatus('해석 결과가 없습니다. 먼저 해석을 실행하세요.', 'error');
+                return;
+            }
+            vscode.postMessage({ command: 'showBucklingReport', data: { html: _buildBucklingReportHtml() } });
+        });
+    }
+
     function renderClassifyCurve(clasData) {
         const canvas = document.getElementById('classify-curve-canvas');
         if (!canvas || !clasData || !analysisResult) { return; }
@@ -3188,7 +3259,7 @@
             el.textContent = t;
             el.style.borderColor = '#4caf50';
         } else {
-            el.textContent = 'FSM 좌굴값 없음 — 아래 "A. 좌굴해석" 섹션에서 해석을 실행하거나, "설계용 FSM 해석 준비"를 사용하세요.';
+            el.textContent = 'FSM 좌굴값 없음 — 아래 "A. 좌굴해석" 섹션에서 해석을 실행하세요 (설계용 좌굴값 자동 준비).';
             el.style.borderColor = 'var(--vscode-panel-border)';
         }
     }
@@ -3375,6 +3446,12 @@
             // ②하중계산 탭: 직접 입력 모드 안내
             const loadsHint = document.getElementById('loads-tab-hint');
             if (loadsHint) loadsHint.style.display = isCalc ? 'none' : 'block';
+            // ③설계 탭: 현재 부재 유형 에코 (선택은 ②탭에서)
+            const echo = document.getElementById('design-membertype-echo');
+            if (echo) {
+                const selTxt = selMemberType.options[selMemberType.selectedIndex]?.text || t;
+                echo.textContent = '부재 유형: ' + selTxt + ' (②하중계산 탭에서 선택)';
+            }
 
             // 부재 유형별 하중 행 표시 (Floor→L, Roof→Lr/S)
             const lrRow = document.getElementById('load-Lr-row');
@@ -3420,8 +3497,8 @@
             const modeBadge = document.getElementById('member-mode-badge');
             if (modeBadge) {
                 modeBadge.textContent = isCalc
-                    ? '자동 계산 모드: ②하중계산 탭에서 하중 분석 실행 → 본 탭에서 설계 검토 실행 (소요강도·Lb·Cb 자동 입력)'
-                    : '직접 입력 모드: 소요강도와 좌굴 길이를 직접 입력한 후 설계 검토를 실행합니다';
+                    ? '자동 계산 모드: 아래에서 하중 분석 실행 → 소요강도 자동 입력 → ③탭에서 설계 검토 실행'
+                    : '직접 입력 모드: 아래 소요강도(Pu·Vu·Mu)를 직접 입력 → ③탭에서 좌굴 길이 입력 후 설계 검토 실행';
             }
 
             // Step indicator: hide step 2 (Loads) for direct input modes
@@ -3437,7 +3514,6 @@
 
     // Design 실행
     const btnDesign = document.getElementById('btn-run-design');
-    const btnPrepareDesignDsm = document.getElementById('btn-prepare-design-dsm');
     function collectDesignRunPayload() {
         const rawMemberType = /** @type {HTMLSelectElement} */ (document.getElementById('select-member-type'))?.value || 'compression';
         if (!model && !isCalcMode(rawMemberType)) { return null; }
@@ -3510,22 +3586,7 @@
             vscode.postMessage({ command: 'runDesign', data });
         });
     }
-    if (btnPrepareDesignDsm) {
-        btnPrepareDesignDsm.addEventListener('click', () => {
-            const data = collectDesignRunPayload();
-            if (!data) { return; }
-            btnPrepareDesignDsm.textContent = 'FSM 준비 중...';
-            btnPrepareDesignDsm.disabled = true;
-            setStatus('설계용 FSM 해석을 준비하는 중...', 'running');
-            vscode.postMessage({
-                command: 'prepareDesignDsm',
-                data: {
-                    member_type: data.member_type,
-                    Fy: data.Fy,
-                }
-            });
-        });
-    }
+    // (구 "설계용 FSM 해석 준비" 버튼 제거 — 해석 실행 시 _autoPrepareDesignDsm()로 자동 수행)
 
     // §A3.3.2 Cold Work 상태 알림 (전처리 탭 체크박스 → 설계탭 알림)
     const chkIR = /** @type {HTMLInputElement} */ (document.getElementById('chk-inelastic-reserve'));

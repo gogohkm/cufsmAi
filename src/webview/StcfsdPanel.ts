@@ -39,6 +39,8 @@ export class StcfsdPanel implements McpPanelInterface {
     private _lastPreviewPath: string = '';
     private _previewResolve: ((value: any) => void) | null = null;
     private _testPostedMessages: Array<{ command: string; data: any }> = [];
+    private _bucklingReportPanel?: vscode.WebviewPanel;
+    private _bucklingReportHtml = '';
 
     public static createOrShow(
         extensionUri: vscode.Uri,
@@ -260,6 +262,10 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'openProject':
                 await this._openProject();
+                break;
+
+            case 'showBucklingReport':
+                this._showBucklingReport(message.data?.html || '');
                 break;
 
             case 'saveReportPdf':
@@ -1029,7 +1035,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         Lcrd: prepared.Mxx?.Lcrd ?? 0,
                     };
                 } else if (!this._isAnalysisCurrent()) {
-                    dsmWarning = 'No analysis results. Run FSM analysis first or use "설계용 FSM 해석 준비" to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
+                    dsmWarning = 'No analysis results. Run FSM analysis first ("해석 실행" auto-prepares design DSM values) to get Mcrl/Mcrd values. Without buckling analysis, DSM cannot reduce capacity below My.';
                 } else {
                     const aFy = this._getAnalysisFy();
                     try {
@@ -1062,7 +1068,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         if (!this._analysisSupportsDsmLoadType('P')) { missingFamilies.push('compression'); }
                         if (!this._analysisSupportsDsmLoadType('Mxx')) { missingFamilies.push('strong-axis bending'); }
                         if (missingFamilies.length > 0) {
-                            dsmWarning = `Current analysis load case does not match ${missingFamilies.join(' / ')} DSM extraction. Run a matching FSM analysis before design, or use "설계용 FSM 해석 준비".`;
+                            dsmWarning = `Current analysis load case does not match ${missingFamilies.join(' / ')} DSM extraction. Run a matching FSM analysis before design ("해석 실행" auto-prepares design DSM values).`;
                         }
                         if (dsmValues.Mcrl === 0 && dsmValues.Mcrd === 0) {
                             dsmWarning = dsmWarning
@@ -1810,6 +1816,58 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /** 보고서 PDF 저장 (Edge/Chrome headless --print-to-pdf) */
+    /** 좌굴해석 결과를 별도 웹뷰 패널에 표시 (PDF 저장 버튼 포함) */
+    private _showBucklingReport(html: string): void {
+        this._bucklingReportHtml = html;
+        if (this._bucklingReportPanel) {
+            this._bucklingReportPanel.webview.html = this._wrapBucklingReport(html);
+            this._bucklingReportPanel.reveal(vscode.ViewColumn.Beside);
+            return;
+        }
+        const panel = vscode.window.createWebviewPanel(
+            'stcfsd.bucklingReport',
+            '좌굴해석 결과 보고서',
+            vscode.ViewColumn.Beside,
+            { enableScripts: true }
+        );
+        this._bucklingReportPanel = panel;
+        panel.onDidDispose(() => { this._bucklingReportPanel = undefined; });
+        panel.webview.onDidReceiveMessage(async (msg) => {
+            if (msg?.command === 'savePdf') {
+                await this._saveReportPdf({ html: this._buildPrintableBucklingHtml() });
+            }
+        });
+        panel.webview.html = this._wrapBucklingReport(html);
+    }
+
+    /** 인쇄용 완결 HTML (흰 배경, 이미지 배경 유지) */
+    private _buildPrintableBucklingHtml(): string {
+        return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>좌굴해석 결과 보고서</title>
+<style>body{font-family:'Segoe UI',sans-serif;color:#111;background:#fff;max-width:800px;margin:0 auto;padding:24px;font-size:13px}
+h1{font-size:18px;border-bottom:2px solid #333;padding-bottom:6px}h2{font-size:14px;margin-top:20px;color:#0b5394}
+table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0}td,th{border:1px solid #999;padding:4px 8px;text-align:left}
+img{max-width:100%}.chart{background:#1e1e1e;padding:8px;border-radius:4px;margin:6px 0}</style></head>
+<body>${this._bucklingReportHtml}</body></html>`;
+    }
+
+    /** 웹뷰 패널용 래핑 (툴바 + CSP) */
+    private _wrapBucklingReport(inner: string): string {
+        const nonce = getNonce();
+        return `<!DOCTYPE html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>body{font-family:var(--vscode-font-family,sans-serif);color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);padding:16px;font-size:13px;max-width:860px;margin:0 auto}
+h1{font-size:16px;border-bottom:2px solid var(--vscode-foreground);padding-bottom:6px}h2{font-size:13px;margin-top:18px;color:#4fc3f7}
+table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0}td,th{border:1px solid var(--vscode-panel-border,#555);padding:4px 8px;text-align:left}
+img{max-width:100%}.chart{background:#1e1e1e;padding:8px;border-radius:4px;margin:6px 0}
+.toolbar{position:sticky;top:0;background:var(--vscode-editor-background);padding:8px 0;border-bottom:1px solid var(--vscode-panel-border,#555);margin-bottom:10px;z-index:10}
+.toolbar button{background:var(--vscode-button-background,#0e639c);color:var(--vscode-button-foreground,#fff);border:none;border-radius:3px;padding:6px 16px;cursor:pointer;font-weight:600}</style>
+</head><body>
+<div class="toolbar"><button id="btn-pdf">PDF / HTML 저장</button> <span style="opacity:0.6;font-size:11px">저장 대화상자에서 .pdf 또는 .html 선택</span></div>
+${inner}
+<script nonce="${nonce}">const v=acquireVsCodeApi();document.getElementById('btn-pdf').addEventListener('click',()=>v.postMessage({command:'savePdf'}));</script>
+</body></html>`;
+    }
+
     private async _saveReportPdf(data: { html: string }): Promise<void> {
         try {
             const uri = await vscode.window.showSaveDialog({
@@ -2137,10 +2195,29 @@ export class StcfsdPanel implements McpPanelInterface {
 
         <!-- ② 하중계산 탭 -->
         <div id="tab-loads" class="tab-panel">
-            <p class="hint">부재 구성(스팬·지점·랩)과 사용하중(미계수 면압)을 입력하고 "하중 분석 실행"을 누르면, 하중조합(LRFD/ASD)을 적용한 소요강도(Mu·Vu)와 비지지길이·Cb가 ③좌굴해석·부재설계 탭에, 랩 길이·지점 Mu/Vu가 ④접합부 탭에 자동 입력됩니다.</p>
-            <p id="loads-tab-hint" class="hint" style="display:none;color:var(--vscode-editorWarning-foreground,#f90)">현재 부재 유형(③탭)이 "직접 입력" 모드입니다 — 하중계산은 자동 계산 모드(지붕 퍼린/바닥 장선/벽체 거트/벽 스터드)에서 사용됩니다. 직접 입력 모드에서는 ③탭에서 소요강도를 직접 입력하세요.</p>
+            <p class="hint">부재 유형을 선택하고 부재 구성(스팬·지점·랩)·사용하중(미계수 면압)을 입력한 뒤 "하중 분석 실행"을 누르면, 하중조합(LRFD/ASD)을 적용한 소요강도(Mu·Vu)가 아래에, 비지지길이·Cb가 ③좌굴해석·부재설계 탭에, 랩 길이·지점 Mu/Vu가 ④접합부 탭에 자동 입력됩니다.</p>
+            <p id="loads-tab-hint" class="hint" style="display:none;color:var(--vscode-editorWarning-foreground,#f90)">"직접 입력" 모드입니다 — 자동 하중계산(스팬/사용하중) 대신 아래 소요강도(Pu·Vu·Mu)를 직접 입력한 후 ③탭에서 설계 검토를 실행하세요.</p>
             <div class="panel-row">
                 <div class="panel-left" style="max-width:360px">
+                <h3>부재 유형</h3>
+                <div class="input-row">
+                    <select id="select-member-type">
+                        <optgroup label="적용 (자동 계산)">
+                            <option value="roof-purlin">지붕 퍼린 (Roof Purlin)</option>
+                            <option value="floor-joist">바닥 장선 (Floor Joist)</option>
+                            <option value="wall-girt">벽체 거트 (Wall Girt)</option>
+                            <option value="wall-stud">벽 스터드 (Wall Stud)</option>
+                        </optgroup>
+                        <optgroup label="일반 (직접 입력)">
+                            <option value="flexure">일반 보 (휨)</option>
+                            <option value="compression">일반 기둥 (압축)</option>
+                            <option value="combined">보-기둥 (조합)</option>
+                            <option value="tension">인장 부재</option>
+                        </optgroup>
+                    </select>
+                </div>
+                <p id="member-mode-badge" class="hint" style="margin:2px 0 8px"></p>
+
                 <div id="calc-mode-section" style="display:none">
                 <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 부재 구성</h3>
                 <div>
@@ -2179,9 +2256,31 @@ export class StcfsdPanel implements McpPanelInterface {
                     </div>
                 </div>
 
+                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 데크 & 가새</h3>
+                <div>
+                    <div class="input-row">
+                        <label>데크</label>
+                        <select id="select-deck-type" style="width:140px">
+                            <option value="through-fastened">관통 체결</option>
+                            <option value="standing-seam">스탠딩 심</option>
+                            <option value="none" selected>없음</option>
+                        </select>
+                    </div>
+                    <div class="input-row" id="deck-detail-row">
+                        <label>t<span class="hint-inline" data-unit="thickness">mm</span></label>
+                        <input type="number" id="deck-t-panel" value="0.5" step="0.1" style="width:68px">
+                        <label>@<span class="hint-inline" data-unit="length">mm</span></label>
+                        <input type="number" id="deck-fastener-spacing" value="300" step="10" style="width:55px">
+                    </div>
+                    <div class="input-row" id="deck-kphi-row">
+                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">kN-m/rad/m</span></label>
+                        <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
+                    </div>
+                </div>
+
                 <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 사용하중 입력 <span class="hint-inline" style="font-weight:normal">(미계수 면압, Service Loads)</span></h3>
                 <div>
-                    <p class="hint" style="margin-bottom:4px">지붕/벽 면압(D·Lr·S·W)을 입력하면 "하중 분석 실행"이 하중조합을 적용해 ③좌굴해석·부재설계 탭의 <b>소요강도</b>(Mu·Vu)와 비지지길이·Cb를 자동 계산·입력합니다.</p>
+                    <p class="hint" style="margin-bottom:4px">지붕/벽 면압(D·Lr·S·W)을 입력하면 "하중 분석 실행"이 하중조합을 적용해 아래 <b>소요강도</b>(Mu·Vu)와 ③탭의 비지지길이·Cb를 자동 계산·입력합니다.</p>
                     <div class="input-row">
                         <label>D<span class="hint-inline" data-unit="pressure">kPa</span></label>
                         <input type="number" id="load-D-psf" value="0.3" step="0.05" style="width:50px">
@@ -2214,35 +2313,37 @@ export class StcfsdPanel implements McpPanelInterface {
                     </div>
                 </div>
 
-                <h3 class="collapsible" data-expanded="true"><span class="collapse-icon">▾</span> 데크 & 가새</h3>
-                <div>
-                    <div class="input-row">
-                        <label>데크</label>
-                        <select id="select-deck-type" style="width:140px">
-                            <option value="through-fastened">관통 체결</option>
-                            <option value="standing-seam">스탠딩 심</option>
-                            <option value="none" selected>없음</option>
-                        </select>
-                    </div>
-                    <div class="input-row" id="deck-detail-row">
-                        <label>t<span class="hint-inline" data-unit="thickness">mm</span></label>
-                        <input type="number" id="deck-t-panel" value="0.5" step="0.1" style="width:68px">
-                        <label>@<span class="hint-inline" data-unit="length">mm</span></label>
-                        <input type="number" id="deck-fastener-spacing" value="300" step="10" style="width:55px">
-                    </div>
-                    <div class="input-row" id="deck-kphi-row">
-                        <label>kφ override<span class="hint-inline" data-unit="rotStiff">kN-m/rad/m</span></label>
-                        <input type="number" id="deck-kphi-override" value="" step="0.001" style="width:70px" placeholder="auto">
-                    </div>
+                <button id="btn-analyze-loads" class="btn-action-green" style="margin-top:8px;width:100%">하중 분석 실행</button>
                 </div>
 
-                <button id="btn-analyze-loads" class="btn-action-green" style="margin-top:8px;width:100%">하중 분석 실행</button>
+                <h3>소요강도 <span class="hint-inline" style="font-weight:normal">(계수하중 조합값, Required Strength)</span></h3>
+                <p class="hint" style="margin-bottom:4px">자동 계산 모드: 위 "하중 분석 실행" 시 지배 조합의 Mu·Vu가 자동 입력됩니다. 직접 입력 모드: 하중조합(LRFD/ASD)으로 산정한 값을 직접 입력한 후 ③탭에서 설계 검토를 실행하세요.</p>
+                <div class="input-row">
+                    <label>Pu<span class="hint-inline" data-unit="force">kN</span></label>
+                    <input type="number" id="design-P" value="0" step="1" style="width:65px" title="소요 압축강도 (계수 축력)">
+                    <label>Vu<span class="hint-inline" data-unit="force">kN</span></label>
+                    <input type="number" id="design-V" value="0" step="1" style="width:65px" title="소요 전단강도 (계수 전단력)">
+                </div>
+                <div class="input-row">
+                    <label>Mu(+)<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-Mx-pos" value="0" step="0.1" style="width:65px" title="정모멘트 소요강도">
+                    <label>Mu(-)<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px" title="부모멘트 소요강도">
+                </div>
+                <div class="input-row">
+                    <label>Muy<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-My" value="0" step="0.1" style="width:65px" title="약축 모멘트 소요강도">
+                </div>
+                <div class="input-row">
+                    <label>May<span class="hint-inline" data-unit="moment">kN-m</span></label>
+                    <input type="number" id="design-May-strength" value="0" step="0.1" style="width:65px">
+                    <span class="hint-inline">약축 가용강도 직접 입력 (Muy 검토용)</span>
                 </div>
                 </div>
                 <div class="panel-right">
                 <div id="load-analysis-section" style="display:none">
                 <h3>하중 분석 결과</h3>
-                <div id="load-analysis-result" class="result-box" style="max-height:300px;overflow-y:auto;font-size:12px">
+                <div id="load-analysis-result" class="result-box" style="font-size:12px">
                 </div>
                 </div>
                 </div>
@@ -2261,7 +2362,7 @@ export class StcfsdPanel implements McpPanelInterface {
         </div>
         <!-- 좌굴해석(①~③) 연동 상태: 설계는 FSM/DSM 좌굴값을 소비한다 -->
         <div id="design-dsm-status" class="hint" style="margin:0 0 10px;padding:5px 8px;border:1px solid var(--vscode-panel-border);border-radius:3px">
-            FSM 좌굴값 없음 — 아래 "A. 좌굴해석" 섹션에서 해석을 실행하거나, "설계용 FSM 해석 준비"를 사용하세요.
+            FSM 좌굴값 없음 — 아래 "A. 좌굴해석" 섹션에서 해석을 실행하세요 (설계용 좌굴값 자동 준비).
         </div>
 
         <!-- ── A. 좌굴해석 (구 해석 탭 통합) ── -->
@@ -2335,6 +2436,7 @@ export class StcfsdPanel implements McpPanelInterface {
             </div>
             <div class="button-row">
                 <button id="btn-run-analysis" class="btn-primary">해석 실행</button>
+                <button id="btn-view-buckling-report" class="btn-secondary" style="margin-left:8px">좌굴해석 결과 보고서</button>
             </div>
             </div>
             <!-- 우측: 응력 분포 프리뷰 -->
@@ -2425,48 +2527,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 </div>
                 </div>
 
-                <h3>부재 유형</h3>
-                <div class="input-row">
-                    <select id="select-member-type">
-                        <optgroup label="적용 (자동 계산)">
-                            <option value="roof-purlin">지붕 퍼린 (Roof Purlin)</option>
-                            <option value="floor-joist">바닥 장선 (Floor Joist)</option>
-                            <option value="wall-girt">벽체 거트 (Wall Girt)</option>
-                            <option value="wall-stud">벽 스터드 (Wall Stud)</option>
-                        </optgroup>
-                        <optgroup label="일반 (직접 입력)">
-                            <option value="flexure">일반 보 (휨)</option>
-                            <option value="compression">일반 기둥 (압축)</option>
-                            <option value="combined">보-기둥 (조합)</option>
-                            <option value="tension">인장 부재</option>
-                        </optgroup>
-                    </select>
-                </div>
-                <p id="member-mode-badge" class="hint" style="margin:2px 0 8px"></p>
-
-                <h3>소요강도 <span class="hint-inline" style="font-weight:normal">(계수하중 조합값, Required Strength)</span></h3>
-                <p class="hint" style="margin-bottom:4px">자동 계산 모드: 위 사용하중으로 "하중 분석 실행" 시 지배 조합의 Mu·Vu가 자동 입력됩니다. 직접 입력 모드: 하중조합(LRFD/ASD)으로 산정한 값을 직접 입력하세요.</p>
-                <div class="input-row">
-                    <label>Pu<span class="hint-inline" data-unit="force">kN</span></label>
-                    <input type="number" id="design-P" value="0" step="1" style="width:65px" title="소요 압축강도 (계수 축력)">
-                    <label>Vu<span class="hint-inline" data-unit="force">kN</span></label>
-                    <input type="number" id="design-V" value="0" step="1" style="width:65px" title="소요 전단강도 (계수 전단력)">
-                </div>
-                <div class="input-row">
-                    <label>Mu(+)<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-Mx-pos" value="0" step="0.1" style="width:65px" title="정모멘트 소요강도">
-                    <label>Mu(-)<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px" title="부모멘트 소요강도">
-                </div>
-                <div class="input-row">
-                    <label>Muy<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-My" value="0" step="0.1" style="width:65px" title="약축 모멘트 소요강도">
-                </div>
-                <div class="input-row">
-                    <label>May<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-May-strength" value="0" step="0.1" style="width:65px">
-                    <span class="hint-inline">약축 가용강도 직접 입력 (Muy 검토용)</span>
-                </div>
+                <p id="design-membertype-echo" class="hint" style="margin:2px 0 8px"></p>
 
                 <h3 id="design-lengths-title">좌굴 길이 (유효좌굴 K·L / 비지지 Lb)</h3>
                 <div class="input-row" id="design-KxLx-row">
@@ -2609,10 +2670,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 </div>
 
                 <div style="display:flex;gap:8px;margin-top:12px">
-                    <button id="btn-prepare-design-dsm" class="btn-secondary" style="flex:1">설계용 FSM 해석 준비</button>
                     <button id="btn-run-design" class="btn-primary" style="flex:1">▶ 설계 검토 실행</button>
                 </div>
-                <p class="hint" style="margin-top:6px">DSM 설계용 좌굴값이 없거나 하중 케이스가 맞지 않으면 먼저 "설계용 FSM 해석 준비"를 실행하세요.</p>
+                <p class="hint" style="margin-top:6px">"A. 좌굴해석"의 해석 실행 시 부재 유형에 맞는 설계용 좌굴값(P/Mxx)이 자동으로 준비됩니다.</p>
             </div>
 
             <div class="panel-right">
