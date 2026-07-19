@@ -52,14 +52,14 @@ export async function activate(context: vscode.ExtensionContext) {
     // Step 3: 커맨드 등록
     context.subscriptions.push(
         vscode.commands.registerCommand('stcfsd.openDesigner', async () => {
-            try { await ensurePythonRunning(); } catch (e) {
+            try { await ensurePythonRunning(); } catch {
                 console.warn('[StCFSD] Python not available — panel opens without engine');
             }
             StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 
         vscode.commands.registerCommand('stcfsd.newProject', async () => {
-            try { await ensurePythonRunning(); } catch (e) {
+            try { await ensurePythonRunning(); } catch {
                 console.warn('[StCFSD] Python not available — panel opens without engine');
             }
             StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
@@ -107,7 +107,7 @@ export async function activate(context: vscode.ExtensionContext) {
                         StcfsdPanel.currentPanel.showSection(sectionId);
                     }
                 }, 800);
-            } catch (err) {
+            } catch {
                 console.error(`[StCFSD] Tree navigation blocked while starting Python for section ${sectionId}`);
             }
         } else {
@@ -258,7 +258,7 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
         const extMcpPath = path.join(context.extensionPath, '.mcp.json');
         fs.writeFileSync(extMcpPath, mcpJson);
         console.log(`[StCFSD] MCP config (extension dir): ${extMcpPath}`);
-    } catch (err) {
+    } catch {
         // 무시
     }
 

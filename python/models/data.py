@@ -151,6 +151,7 @@ class CufsmResult:
     """
     curve: list = field(default_factory=list)    # list[np.ndarray]
     shapes: list = field(default_factory=list)   # list[np.ndarray]
+    diagnostics: list = field(default_factory=list)  # 길이별 해석 실패/경고
 
     def to_dict(self) -> dict:
         """JSON 직렬화 — curve + shapes 포함"""
@@ -170,6 +171,8 @@ class CufsmResult:
             'curve': curve_list,
             'shapes': shapes_list,
             'n_lengths': len(self.curve),
+            'diagnostics': self.diagnostics,
+            'success': not any(d.get('severity') == 'error' for d in self.diagnostics),
         }
 
     def to_full_dict(self) -> dict:
@@ -188,7 +191,8 @@ class CufsmResult:
     def from_dict(cls, d: dict) -> CufsmResult:
         curve = [np.array(c) for c in d.get('curve', [])]
         shapes = [np.array(s) for s in d.get('shapes', [])]
-        return cls(curve=curve, shapes=shapes)
+        return cls(curve=curve, shapes=shapes,
+                   diagnostics=list(d.get('diagnostics', [])))
 
 
 def _json_serializer(obj: Any) -> Any:

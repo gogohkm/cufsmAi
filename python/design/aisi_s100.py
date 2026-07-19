@@ -19,7 +19,7 @@ from design.interaction import (
 )
 from design.shear import shear_strength, web_crippling
 from design.connections import design_connection
-from design.steel_grades import E, G, STEEL_GRADES
+from design.steel_grades import E, STEEL_GRADES
 
 # 안전/저항 계수
 PHI = {
@@ -44,6 +44,88 @@ def _effective_section_type(params: dict) -> str:
     """우선순위: 명시 section_type → section.type → 기본 C"""
     section = params.get('section', {}) or {}
     return str(params.get('section_type') or section.get('type') or 'C')
+
+
+def _normalized_section_type(params: dict) -> str:
+    """AISI 분기용 단면명 정규화."""
+    return _effective_section_type(params).strip().upper().replace('-', '').replace('_', '')
+
+
+def _supports_cz_plate_fallback(params: dict) -> bool:
+    """현재 구현된 Appendix 1/2 폐형식 fallback의 단면 범위."""
+    return _normalized_section_type(params) in (
+        'C', 'LIPPEDC', 'CHANNEL', 'TRACK', 'Z', 'LIPPEDZ',
+    )
+
+
+def _supports_cz_distortional_fallback(params: dict) -> bool:
+    """Appendix 2 C/Z 플랜지-립 모델을 적용할 수 있는 단면인지 확인한다."""
+    return _normalized_section_type(params) in ('C', 'LIPPEDC', 'Z', 'LIPPEDZ')
+
+
+def _section_geometry(params: dict) -> dict:
+    """UI ``section`` 또는 계산 ``props``에서 설계용 평탄폭 기하를 일관되게 복원한다.
+
+    grosprop 결과에는 t/h/b/d가 없으므로 기존 UI 경로에서는 Table B4.1-1, G2,
+    G5 검사가 건너뛰어졌다. props의 명시적 평탄폭을 우선하고, 없을 때만
+    out-to-out 템플릿 치수에서 코너를 차감한다.
+    """
+    props = params.get('props', {}) or {}
+    section = params.get('section', {}) or {}
+    t = float(props.get('t', 0) or section.get('thickness', 0) or params.get('t', 0) or 0)
+    R = float(
+        props.get('R', 0) or props.get('r', 0)
+        or section.get('R_corner', 0) or section.get('r', 0)
+        or params.get('R', 0) or params.get('r', 0) or 0
+    )
+    depth = float(section.get('depth', 0) or params.get('H', 0) or 0)
+    flange_o = float(section.get('flange_width', 0) or params.get('B', 0) or 0)
+    lip_o = float(section.get('lip_depth', 0) or params.get('D', 0) or 0)
+    corner = R + t if t > 0 else 0.0
+    sec = _normalized_section_type(params)
+    has_lip = lip_o > 0 or float(props.get('d_lip', 0) or 0) > 0
+    is_angle = 'ANGLE' in sec
+
+    h_web = float(props.get('h_web', 0) or section.get('h_web', 0) or 0)
+    if h_web <= 0 and depth > 0:
+        h_web = max(depth - 2.0 * corner, 0.0)
+
+    b_flange = float(props.get('b_flange', 0) or section.get('b_flange', 0) or 0)
+    if b_flange <= 0 and flange_o > 0:
+        n_corners = 1 if is_angle or not has_lip else 2
+        b_flange = max(flange_o - n_corners * corner, 0.0)
+
+    d_lip = float(props.get('d_lip', 0) or section.get('d_lip', 0) or 0)
+    if d_lip <= 0 and lip_o > 0:
+        d_lip = max(lip_o - corner, 0.0)
+
+    return {
+        't': t, 'R': R,
+        'h_web': h_web, 'b_flange': b_flange, 'd_lip': d_lip,
+        'depth': depth, 'flange_o': flange_o, 'lip_o': lip_o,
+        'lip_angle': float(section.get('lip_angle', 0) or section.get('qlip', 0)
+                           or params.get('qlip', 0) or 90.0),
+        'n_f': int(section.get('n_f', params.get('n_f', 0)) or 0),
+        'n_le': int(section.get('n_le', params.get('n_le', 0)) or 0),
+        'n_w': int(section.get('n_w', params.get('n_w', 0)) or 0),
+    }
+
+
+def _merge_governing_check(result: dict, check: dict, name: str,
+                            normalized_ratio: float | None = None) -> None:
+    """한계상태 결과를 최상위 pass/utilization에 병합한다."""
+    if normalized_ratio is None:
+        normalized_ratio = check.get('total')
+    if normalized_ratio is not None and math.isfinite(float(normalized_ratio)):
+        current = result.get('utilization')
+        if current is None or float(normalized_ratio) > float(current):
+            result['utilization'] = round(float(normalized_ratio), 4)
+            result['governing_check'] = name
+    passed = check.get('pass')
+    if passed is False:
+        result['pass'] = False
+    elif passed is True and result.get('pass') is None:
+        result['pass'] = True
 
 
 def _infer_web_crippling_family(params: dict, section_type: str) -> str:
@@ -228,9 +310,9 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
 
     Returns: list of warnings (빈 리스트면 모두 통과)
     """
-    props = params.get('props', {})
     Fy = params.get('Fy', 35.53)
-    t = props.get('t', 0)
+    geom = _section_geometry(params)
+    t = geom['t']
     if member_type is None:
         member_type = params.get('member_type', 'compression')
     warnings = []
@@ -242,7 +324,7 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
     #  - 압축(균일 응력): w/t ≤ 500 'stiffened element in compression'
     #  - 휨/조합(응력 구배): h/t ≤ 300 'stiffened element in bending'
     #    (조합 부재 웹은 축력+휨을 동시에 받으므로 더 엄격한 300이 지배)
-    h_web = props.get('h_web', 0)
+    h_web = geom['h_web']
     if h_web > 0:
         wt_web = h_web / t
         if member_type in ('flexure', 'combined'):
@@ -259,29 +341,48 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
                 )
 
     # 연단보강 요소 (플랜지): b/t ≤ 160
-    b_flange = props.get('b_flange', 0)
+    b_flange = geom['b_flange']
     if b_flange > 0:
         bt_fl = b_flange / t
         if bt_fl > 160:
             warnings.append(f'Flange b/t = {bt_fl:.1f} > 160 (Table B4.1-1 edge-stiffened limit)')
 
     # 비보강 요소 (립): d/t ≤ 60
-    d_lip = props.get('d_lip', 0)
+    d_lip = geom['d_lip']
     if d_lip > 0:
         dt_lip = d_lip / t
         if dt_lip > 60:
             warnings.append(f'Lip d/t = {dt_lip:.1f} > 60 (Table B4.1-1 unstiffened limit)')
 
     # 코너 반경: R/t ≤ 20
-    R = props.get('R', 0) or props.get('r', 0)
+    R = geom['R']
     if R > 0:
         Rt = R / t
         if Rt > 20:
             warnings.append(f'Corner R/t = {Rt:.1f} > 20 (Table B4.1-1 corner limit)')
 
-    # 항복강도: Fy ≤ 95 ksi
-    if Fy > 95:
-        warnings.append(f'Fy = {Fy} ksi > 95 ksi (Table B4.1-1 Fy limit)')
+    # 단순 연단보강재 길이/플랜지폭: do/bo ≤ 0.7
+    lip_o = geom['lip_o'] or d_lip
+    flange_o = geom['flange_o'] or b_flange
+    if lip_o > 0 and flange_o > 0:
+        do_bo = lip_o / flange_o
+        if do_bo > 0.7:
+            warnings.append(
+                f'Simple edge stiffener d_o/b_o = {do_bo:.3f} > 0.7 '
+                '(Table B4.1-1 simple edge stiffener limit)'
+            )
+
+    # 중간/연단 보강재 개수
+    if geom['n_f'] > 4:
+        warnings.append(f'n_f = {geom["n_f"]} > 4 (Table B4.1-1 flange intermediate stiffener limit)')
+    if geom['n_le'] > 2:
+        warnings.append(f'n_le = {geom["n_le"]} > 2 (Table B4.1-1 edge stiffener count limit)')
+    if geom['n_w'] > 4:
+        warnings.append(f'n_w = {geom["n_w"]} > 4 (Table B4.1-1 web intermediate stiffener limit)')
+
+    # 항복강도: Fy < 95 ksi (표의 부등호는 strict)
+    if Fy >= 95:
+        warnings.append(f'Fy = {Fy} ksi is not < 95 ksi (Table B4.1-1 Fy limit)')
 
     return warnings
 
@@ -293,7 +394,6 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
 def _design_compression(params: dict) -> dict:
     """DSM 압축 부재 설계 (§E2, §E3.2, §E4)"""
     Fy = params.get('Fy', 35.53)
-    Fu = params.get('Fu', 58.02)
     design_method = params.get('design_method', 'LRFD')
     Pu = params.get('Pu', 0)
 
@@ -314,6 +414,11 @@ def _design_compression(params: dict) -> dict:
     Pcrl = dsm.get('Pcrl', 0)
     Pcrd = dsm.get('Pcrd', 0)
     Py_dsm = dsm.get('Py', 0)
+    _modal_method = str(dsm.get('P_classification_method', dsm.get('classification_method', '')))
+    _local_detected = dsm.get('P_local_detected', dsm.get('local_detected'))
+    _dist_detected = dsm.get('P_dist_detected', dsm.get('dist_detected'))
+    local_absence_verified = _modal_method.startswith('cfsm_modal') and _local_detected is False
+    dist_absence_verified = _modal_method.startswith('cfsm_modal') and _dist_detected is False
 
     # 유효좌굴길이
     KxLx = params.get('KxLx', 120)
@@ -349,7 +454,15 @@ def _design_compression(params: dict) -> dict:
     })
 
     # Step 2: 전체좌굴 (E2)
-    Fcre_result = compute_column_Fcre(props, Fy, KxLx, KyLy, KtLt)
+    Fcre_override = float(params.get('Fcre', 0) or 0)
+    if Fcre_override > 0:
+        Fcre_result = {
+            'Fcre': Fcre_override,
+            'buckling_type': 'user/rational analysis',
+            'equation': 'User-supplied elastic buckling stress',
+        }
+    else:
+        Fcre_result = compute_column_Fcre(props, Fy, KxLx, KyLy, KtLt)
     Fcre = Fcre_result['Fcre']
     global_result = column_global_strength(Fy, Fcre, Ag_eff)
     Pne = global_result['Pne']
@@ -360,11 +473,14 @@ def _design_compression(params: dict) -> dict:
     # 않도록 명시적 경고를 남긴다. 근본 원인은 보통 cutwp 실패로 J/Cw가 0이 된 경우다.
     if Fcre <= 0 or Pne <= 0:
         _cutwp_note = ' (cutwp 해석 실패로 J/Cw=0이 되었습니다)' if props.get('cutwp_failed') else ''
-        warnings.append(
-            '§E2: 전체 탄성좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). '
-            f'비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{_cutwp_note}. '
-            '0 강도를 유효한 설계로 해석하지 마십시오.'
-        )
+        if Fcre_result.get('unsupported'):
+            warnings.append(f'§E2.4: {Fcre_result.get("error", "rational analysis is required")}.')
+        else:
+            warnings.append(
+                '§E2: 전체 탄성좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). '
+                f'비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{_cutwp_note}. '
+                '0 강도를 유효한 설계로 해석하지 마십시오.'
+            )
 
     steps.append({
         'step': 2, 'name': 'Global Buckling (Pne)',
@@ -379,14 +495,12 @@ def _design_compression(params: dict) -> dict:
     # Pcrl=0 fallback: signature curve에서 국부좌굴 극소 미검출 시
     # Appendix 1 §1.1 Eq. 1.1-4 판좌굴 공식으로 Fcrl 산정 (Pcrl_local = Fcrl × Ag_eff)
     Pcrl_source = 'FSM'
-    if Pcrl == 0 and Ag_eff > 0:
-        section = params.get('section', {})
-        ho = props.get('h_web', 0) or section.get('depth', 0)
-        bo = props.get('b_flange', 0) or section.get('flange_width', 0)
-        do = section.get('lip_depth', 0) or props.get('d_lip', 0)
-        t = props.get('t', 0) or section.get('thickness', 0)
-        R_loc = props.get('R', 0) or props.get('r', 0) or section.get('r', 0)
-        sec_type = section.get('type', 'C')
+    if (Pcrl == 0 and Ag_eff > 0 and not local_absence_verified
+            and _supports_cz_plate_fallback(params)):
+        geom = _section_geometry(params)
+        ho, bo, do = geom['h_web'], geom['b_flange'], geom['d_lip']
+        t, R_loc = geom['t'], geom['R']
+        sec_type = _effective_section_type(params)
         if ho > 0 and bo > 0 and t > 0:
             try:
                 from design.loads.local_params import calc_Fcrl
@@ -428,13 +542,12 @@ def _design_compression(params: dict) -> dict:
     # AISI Appendix 2, §2.3.1.3 해석적 공식으로 Fcrd 계산
     Pcrd_source = 'FSM'
     distortional_not_evaluated = False
-    if Pcrd == 0 and Ag > 0:
-        section = params.get('section', {})
-        ho = props.get('h_web', 0) or section.get('depth', 0)
-        bo = props.get('b_flange', 0) or section.get('flange_width', 0)
-        do = section.get('lip_depth', 0) or props.get('d_lip', 0)
-        t = props.get('t', 0) or section.get('thickness', 0)
-        sec_type = section.get('type', 'C')
+    if (Pcrd == 0 and Ag > 0 and not dist_absence_verified
+            and _supports_cz_distortional_fallback(params)):
+        geom = _section_geometry(params)
+        ho, bo, do = geom['h_web'], geom['b_flange'], geom['d_lip']
+        t, lip_angle = geom['t'], geom['lip_angle']
+        sec_type = 'Z' if _normalized_section_type(params) in ('Z', 'LIPPEDZ') else 'C'
         if ho > 0 and bo > 0 and t > 0 and do > 0:
             try:
                 from design.loads.distortional_params import (
@@ -442,7 +555,7 @@ def _design_compression(params: dict) -> dict:
                 )
                 b_cl = bo - t
                 d_cl = do - t / 2.0
-                fp = calc_flange_properties(b_cl, d_cl, t, 90.0, sec_type)
+                fp = calc_flange_properties(b_cl, d_cl, t, lip_angle, sec_type)
                 fcrd_result = calc_Fcrd(fp, ho, t, xi_web=0)  # compression
                 Fcrd_calc = fcrd_result['Fcrd']
                 Lcrd_val = fcrd_result.get('Lcrd', '')
@@ -463,6 +576,13 @@ def _design_compression(params: dict) -> dict:
                     '왜곡좌굴(E4)이 평가되지 않았습니다. Pn에 왜곡좌굴 한계상태가 누락되었으므로 '
                     '유효한 공칭강도로 단정하지 마십시오.'
                 )
+    elif (Pcrd == 0 and Ag > 0 and not dist_absence_verified
+          and not _supports_cz_distortional_fallback(params)):
+        distortional_not_evaluated = True
+        warnings.append(
+            f"Pcrd=0이며 단면 '{_effective_section_type(params)}'은 구현된 Appendix 2 C/Z "
+            '폐형식 fallback 범위 밖입니다. cFSM/유한요소 또는 합리적 해석으로 E4를 평가하세요.'
+        )
 
     if Pcrd > 0:
         dist_result = compression_distortional(Py, Pcrd)
@@ -541,7 +661,7 @@ def _design_compression(params: dict) -> dict:
     else:
         pass_flag = None
 
-    return {
+    result = {
         'member_type': 'compression',
         'method': 'DSM',
         'design_method': design_method,
@@ -561,6 +681,10 @@ def _design_compression(params: dict) -> dict:
         'spec_sections': list(set(spec_sections)),
         'warnings': warnings,
     }
+    if distortional_not_evaluated:
+        result['pass'] = None
+        result['utilization_valid'] = False
+    return result
 
 
 # ============================================================
@@ -577,7 +701,6 @@ def _design_flexure(params: dict) -> dict:
     Cb = params.get('Cb', 1.0)
 
     props = params.get('props', {})
-    Ag = props.get('A', 0)
     Sf = props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
     if Sf <= 0:
         return {'error': 'Section modulus not available (Sf=0)'}
@@ -587,12 +710,27 @@ def _design_flexure(params: dict) -> dict:
     Mcrl = dsm.get('Mcrl', 0)
     Mcrd = dsm.get('Mcrd', 0)
     My_dsm = dsm.get('My', 0)
+    _modal_method = str(dsm.get('M_classification_method', dsm.get('classification_method', '')))
+    _local_detected = dsm.get('M_local_detected', dsm.get('local_detected'))
+    _dist_detected = dsm.get('M_dist_detected', dsm.get('dist_detected'))
+    local_absence_verified = _modal_method.startswith('cfsm_modal') and _local_detected is False
+    dist_excluded = bool(params.get('distortional_not_applicable', False))
+    dist_absence_verified = (
+        dist_excluded
+        or (_modal_method.startswith('cfsm_modal') and _dist_detected is False)
+    )
     warnings = []
+    if dist_excluded:
+        warnings.append(
+            'F4 distortional buckling was explicitly excluded by the supplied assembly/member '
+            'assumption; Mnd=My is used.'
+        )
     steps = []
     spec_sections = []
     section_type = _effective_section_type(params)
     Zf = props.get('Zx', 0) or props.get('Zf', 0)
     use_ir = params.get('use_inelastic_reserve', False)
+    Fcre_override = float(params.get('Fcre', 0) or 0)
 
     # §F2.3 round-HSS 분기용 D/t 산정 (원형관 'chs'일 때만; 그 외 None).
     # 외경 D는 section.diameter 또는 params['D'](템플릿 CHS의 외경)이며 두께 t로 나눈다.
@@ -631,7 +769,16 @@ def _design_flexure(params: dict) -> dict:
         My = (My_dsm * scale) if My_dsm > 0 else (Sf * Fy_eval)
         Sf_eff = My / Fy_eval if Fy_eval > 0 else Sf
         # §F2.1.4 closed-box는 Lb<=Lu 판정에 Fy가 필요하므로 Fy_eval을 전달한다.
-        Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type, Fy=Fy_eval)
+        if Fcre_override > 0:
+            Fcre = Fcre_override
+            fcre_detail_state = {
+                'Fcre': Fcre,
+                'equation': 'User-supplied elastic buckling stress',
+                'user_supplied': True,
+            }
+        else:
+            Fcre = compute_beam_Fcre(props, Cb, Lb, section_type=section_type, Fy=Fy_eval)
+            fcre_detail_state = dict(getattr(compute_beam_Fcre, '_last_detail', {}) or {})
         # §F2.3 round-HSS는 section_type/D_over_t/E를 받아 직접 Mne 곡선을 산정한다.
         global_result = beam_global_strength(
             Fy_eval, Fcre, Sf_eff, Zf=Zf, use_inelastic_reserve=allow_ir,
@@ -648,14 +795,12 @@ def _design_flexure(params: dict) -> dict:
 
         # Mcrl=0 fallback: signature curve에서 국부좌굴 극소 미검출 시
         # Appendix 1 §1.1 Eq. 1.1-4 판좌굴 공식으로 Fcrl 산정 (Mcrl_local = Fcrl × Sf)
-        if Mcrl_eff == 0 and Sf_eff > 0:
-            section = params.get('section', {})
-            ho = props.get('h_web', 0) or section.get('depth', 0)
-            bo = props.get('b_flange', 0) or section.get('flange_width', 0)
-            do = section.get('lip_depth', 0) or props.get('d_lip', 0)
-            t = props.get('t', 0) or section.get('thickness', 0)
-            R_loc = props.get('R', 0) or props.get('r', 0) or section.get('r', 0)
-            sec_type = section.get('type', 'C')
+        if (Mcrl_eff == 0 and Sf_eff > 0 and not local_absence_verified
+                and _supports_cz_plate_fallback(params)):
+            geom = _section_geometry(params)
+            ho, bo, do = geom['h_web'], geom['b_flange'], geom['d_lip']
+            t, R_loc = geom['t'], geom['R']
+            sec_type = _effective_section_type(params)
             if ho > 0 and bo > 0 and t > 0:
                 try:
                     from design.loads.local_params import calc_Fcrl
@@ -711,20 +856,20 @@ def _design_flexure(params: dict) -> dict:
         # §2.3.3.3 해석적 Fcrd fallback
         # round HSS(폐합 원형관)는 왜곡좌굴(§F4) 한계상태가 없으므로 해석적 fallback을
         # 건너뛴다 — 그렇지 않으면 CHS에 기본 H/B로 산정된 허위 Mcrd가 §F2.3 Mne를 깎는다.
-        if Mcrd_eff == 0 and Sf > 0 and not _skip_round_local:
-            section = params.get('section', {})
-            ho = props.get('h_web', 0) or section.get('depth', 0)
-            bo = props.get('b_flange', 0) or section.get('flange_width', 0)
-            do = section.get('lip_depth', 0) or props.get('d_lip', 0)
-            t = props.get('t', 0) or section.get('thickness', 0)
-            sec_type = section.get('type', 'C')
+        if (Mcrd_eff == 0 and Sf > 0 and not _skip_round_local
+                and not dist_absence_verified
+                and _supports_cz_distortional_fallback(params)):
+            geom = _section_geometry(params)
+            ho, bo, do = geom['h_web'], geom['b_flange'], geom['d_lip']
+            t, lip_angle = geom['t'], geom['lip_angle']
+            sec_type = 'Z' if _normalized_section_type(params) in ('Z', 'LIPPEDZ') else 'C'
             kphi_ext = params.get('kphi', 0)
             if ho > 0 and bo > 0 and t > 0 and do > 0:
                 try:
                     from design.loads.distortional_params import calc_flange_properties, calc_Fcrd
                     b_cl = bo - t
                     d_cl = do - t / 2.0
-                    fp = calc_flange_properties(b_cl, d_cl, t, 90.0, sec_type)
+                    fp = calc_flange_properties(b_cl, d_cl, t, lip_angle, sec_type)
                     fcrd_result = calc_Fcrd(
                         fp, ho, t,
                         kphi_external=kphi_ext,
@@ -744,6 +889,14 @@ def _design_flexure(params: dict) -> dict:
                         '왜곡좌굴(F4)이 평가되지 않았습니다. Mn에 왜곡좌굴 한계상태가 누락되었으므로 '
                         '유효한 공칭강도로 단정하지 마십시오.'
                     )
+        elif (Mcrd_eff == 0 and Sf > 0 and not _skip_round_local
+              and not dist_absence_verified
+              and not _supports_cz_distortional_fallback(params)):
+            mcrd_fallback_failed = True
+            warnings.append(
+                f"Mcrd=0이며 단면 '{section_type}'은 구현된 Appendix 2 C/Z 폐형식 "
+                'fallback 범위 밖입니다. cFSM/유한요소 또는 합리적 해석으로 F4를 평가하세요.'
+            )
 
         # 정모멘트 구간 등 다른 곡률을 위한 β 미적용 기준 Mcrd 보존 (positive-region용)
         Mcrd_base = Mcrd_eff
@@ -810,6 +963,7 @@ def _design_flexure(params: dict) -> dict:
             'My': My,
             'Sf_eff': Sf_eff,
             'Fcre': Fcre,
+            'Fcre_detail': fcre_detail_state,
             'global_result': global_result,
             'Mne': Mne,
             'Mcrl': Mcrl_eff,
@@ -951,8 +1105,11 @@ def _design_flexure(params: dict) -> dict:
             )
 
     # [문제5] Cb + Fcre 상세 계산과정
-    fcre_detail = getattr(compute_beam_Fcre, '_last_detail', {})
-    if fcre_detail and Lb > 0:
+    fcre_detail = state.get('Fcre_detail', {})
+    if fcre_detail.get('unsupported'):
+        _required_f = fcre_detail.get('required_section', 'F2.1.5')
+        warnings.append(f'§{_required_f}: {fcre_detail.get("error", "rational analysis is required")}.')
+    if fcre_detail and Lb > 0 and not fcre_detail.get('user_supplied') and not fcre_detail.get('unsupported'):
         _sey = fcre_detail.get('sigma_ey', 0)
         _st = fcre_detail.get('sigma_t', 0)
         _ro = fcre_detail.get('ro', 0)
@@ -1148,6 +1305,40 @@ def _design_flexure(params: dict) -> dict:
         'spec_sections': list(set(spec_sections)),
         'warnings': warnings,
     }
+    if state.get('mcrd_fallback_failed', False):
+        result['pass'] = None
+        result['utilization_valid'] = False
+
+    # §G2 + §H2 전단 및 휨-전단 상호작용. UI는 flexure에도 Vu를 전달하므로
+    # member_type='combined'에만 두면 순수 휨 설계 경로에서 전단 한계상태가 누락된다.
+    Vu = abs(params.get('Vu', 0) or 0)
+    if Vu > 0:
+        geom = _section_geometry(params)
+        h_shear = geom['h_web']
+        t_shear = geom['t']
+        if h_shear > 0 and t_shear > 0:
+            shear_res = shear_strength(h_shear, t_shear, Fy)
+            Vn = shear_res['Vn']
+            phi_v = PHI['shear']
+            omega_v = OMEGA['shear']
+            Va = phi_v * Vn if design_method == 'LRFD' else Vn / omega_v
+            shear_int = combined_bending_shear(Mu, design_strength, Vu, Va)
+            result['shear'] = {
+                **shear_res,
+                'Vn': round(Vn, 2),
+                'design_strength': round(Va, 2),
+                'Vu': round(Vu, 2),
+            }
+            result['shear_interaction'] = shear_int
+            result['spec_sections'].extend(['G2', 'H2'])
+            _merge_governing_check(result, shear_int, 'H2 bending + shear')
+        else:
+            result['pass'] = None
+            result['utilization_valid'] = False
+            result['warnings'].append(
+                'Vu가 입력되었으나 web flat depth h 또는 thickness t가 없어 '
+                '§G2/§H2 전단 검토를 수행할 수 없습니다.'
+            )
 
     # ── 정모멘트 구간 별도 검토 ──
     Lb_pos = params.get('Lb_pos', 0)
@@ -1232,9 +1423,10 @@ def _design_flexure(params: dict) -> dict:
     wc_N = params.get('wc_N', 0)
     wc_R = params.get('wc_R', 0)
     wc_support = params.get('wc_support', 'EOF')
-    if wc_N > 0 and wc_R > 0:
-        h = props.get('h_web', 0)
-        t = props.get('t', 0)
+    if wc_N > 0 and wc_R >= 0:
+        geom = _section_geometry(params)
+        h = geom['h_web']
+        t = geom['t']
         if h > 0 and t > 0:
             wc_sec_type = params.get('wc_section_type') or _effective_section_type(params)
             wc_section_family = _infer_web_crippling_family(params, wc_sec_type)
@@ -1258,6 +1450,8 @@ def _design_flexure(params: dict) -> dict:
             if 'error' in wc:
                 warnings.append(f'§G5 web crippling could not be evaluated: {wc["error"]}')
                 result['web_crippling'] = wc
+                result['pass'] = None
+                result['utilization_valid'] = False
                 return result
             Pn_wc = wc['Pn']
             from design.interaction import combined_bending_web_crippling
@@ -1274,6 +1468,8 @@ def _design_flexure(params: dict) -> dict:
                     Vu, Pn_wc, Mu, Mnfo,
                     web_config=wc_web_config, design_method=design_method)
                 result['h3_interaction'] = h3
+                h3_ratio = h3['total'] / h3['limit'] if h3.get('limit', 0) > 0 else float('inf')
+                _merge_governing_check(result, h3, 'H3 bending + web crippling', h3_ratio)
             elif wc.get('h3_not_applicable_reason'):
                 result['warnings'].append(wc['h3_not_applicable_reason'])
             result['Mnfo'] = round(Mnfo, 2)
@@ -1294,7 +1490,6 @@ def _design_combined(params: dict) -> dict:
     부호 규약: params['Pu'] 양수 = 압축(§H1.2), 음수 = 인장(§H1.1).
     """
     design_method = params.get('design_method', 'LRFD')
-    Fy = params.get('Fy', 35.53)
 
     # §H1.1 vs §H1.2 분기: abs() 적용 전 원래 부호로 인장/압축을 판정한다.
     Pu_raw = params.get('Pu', 0)
@@ -1305,7 +1500,6 @@ def _design_combined(params: dict) -> dict:
     Pu = abs(Pu_raw)
     Mux = abs(params.get('Mux', 0))
     Muy = abs(params.get('Muy', 0))
-    Vu = abs(params.get('Vu', 0))
 
     # Cm 등가모멘트 계수 (§C1.2.1.1 Eq. C1.2.1.1-4)
     #  (a) 지간 사이 횡하중 없음: Cm = 0.6 - 0.4(M1/M2), M1/M2는 역곡률 양수/단일곡률 음수
@@ -1430,8 +1624,12 @@ def _design_combined(params: dict) -> dict:
             'controlling_mode': flex_x['controlling_mode'],
         },
         'interaction': interaction,
+        'utilization': interaction['total'],
+        'pass': interaction['pass'],
+        'governing_check': 'H1.2 axial + bending',
         'steps': comp['steps'] + flex_x['steps'],
         'spec_sections': list(set(comp['spec_sections'] + flex_x['spec_sections'] + ['H1.2'])),
+        'warnings': list(dict.fromkeys(comp.get('warnings', []) + flex_x.get('warnings', []))),
     }
     if angle_l1000_note:
         result.setdefault('warnings', []).append(angle_l1000_note)
@@ -1459,21 +1657,23 @@ def _design_combined(params: dict) -> dict:
         }
         result['spec_sections'].append('C1')
 
-    # 전단 검토
-    if Vu > 0:
-        h = props.get('h_web', 0)
-        t_web = props.get('t', 0)
-        if h > 0 and t_web > 0:
-            shear_res = shear_strength(h, t_web, Fy)
-            Vn = shear_res['Vn']
-            phi_v = PHI['shear']
-            omega_v = OMEGA['shear']
-            Va = phi_v * Vn if design_method == 'LRFD' else Vn / omega_v
-            shear_int = combined_bending_shear(Mux, Max, Vu, Va)
-            result['shear'] = {'Vn': round(Vn, 2), 'design_strength': round(Va, 2)}
-            result['shear_interaction'] = shear_int
-            result['spec_sections'].append('G2')
-            result['spec_sections'].append('H2')
+    # _design_flexure가 동일 Mux/Vu 위치에 대해 수행한 G2/H2 및 G5/H3 결과를
+    # 조합부재 최상위 판정에도 병합한다. 내부 결과만 저장하고 pass를 누락하지 않는다.
+    if flex_x.get('shear'):
+        result['shear'] = flex_x['shear']
+    if flex_x.get('shear_interaction'):
+        result['shear_interaction'] = flex_x['shear_interaction']
+        _merge_governing_check(result, flex_x['shear_interaction'], 'H2 bending + shear')
+    if flex_x.get('web_crippling'):
+        result['web_crippling'] = flex_x['web_crippling']
+    if flex_x.get('h3_interaction'):
+        result['h3_interaction'] = flex_x['h3_interaction']
+        h3 = flex_x['h3_interaction']
+        h3_ratio = h3['total'] / h3['limit'] if h3.get('limit', 0) > 0 else float('inf')
+        _merge_governing_check(result, h3, 'H3 bending + web crippling', h3_ratio)
+    if comp.get('utilization_valid') is False or flex_x.get('utilization_valid') is False:
+        result['utilization_valid'] = False
+        result['pass'] = None if result.get('pass') is not False else False
 
     return result
 
@@ -1529,7 +1729,10 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
         Mayt = May
 
     def _ratio(num, den):
-        return abs(num) / den if den and den > 0 else 0.0
+        demand = abs(num)
+        if demand <= 0:
+            return 0.0
+        return demand / den if den and den > 0 else float('inf')
 
     # Eq. H1.1-1
     r11 = _ratio(Mux, Maxt) + _ratio(Muy, Mayt) + _ratio(T_abs, Ta)
@@ -1551,7 +1754,7 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
         'My_ratio': round(_ratio(Muy, Mayt if governing == 'H1.1-1' else May), 4),
     }
 
-    return {
+    result = {
         'member_type': 'combined',
         'load_type': 'tension+bending',
         'design_method': design_method,
@@ -1570,13 +1773,17 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
         'interaction': interaction,
         'steps': tens.get('steps', []) + flex_x.get('steps', []),
         'spec_sections': list(set(tens.get('spec_sections', []) + flex_x['spec_sections'] + ['H1.1'])),
-        'warnings': [
+        'warnings': list(dict.fromkeys(flex_x.get('warnings', []) + [
             '§H1.1: 순 인장축력 + 휨으로 평가했습니다(P-δ 모멘트 증폭 미적용). '
             'Maxt=φb·Sft·Fy(인장항복), Max=Chapter F(압축좌굴). Pu 부호 규약: 음수=인장.'
-        ],
+        ])),
         'pass': interaction['pass'],
         'utilization': round(total, 4),
     }
+    if flex_x.get('utilization_valid') is False:
+        result['utilization_valid'] = False
+        result['pass'] = None if result['pass'] else False
+    return result
 
 
 # ============================================================
@@ -1922,7 +2129,8 @@ def generate_report(result: dict, params: dict = None) -> str:
 
 def _auto_generate_props(params: dict) -> dict:
     """단면 템플릿에서 node/elem → grosprop → props 자동 생성"""
-    import sys, os
+    import sys
+    import os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
     from engine.template import generate_section
     from engine.properties import grosprop
@@ -1986,7 +2194,6 @@ def _auto_generate_props(params: dict) -> dict:
         Rf = R if R > 0 else 0.0
         corner = Rf + t  # 한 내측 코너의 평탄폭 환산량 (out-to-out → flat)
         has_lip = ('lipped' in st_norm) or (st_norm in ('c', 'z', 'lippedc', 'lippedz', 'lipped_angle'))
-        is_track = st_norm.startswith('track')
         is_angle = 'angle' in st_norm
         # 웹: 양 끝 2개 내측 코너
         h_web_flat = max(H - 2 * corner, 0.0)
@@ -2026,6 +2233,7 @@ def _auto_generate_props(params: dict) -> dict:
                 from engine.fsm_solver import stripmain
                 from engine.dsm import extract_dsm_values
                 from engine.stress import stresgen, yieldMP
+                from cfsm.classify import classify
                 from models.data import GBTConfig
                 import numpy as np
 
@@ -2063,15 +2271,25 @@ def _auto_generate_props(params: dict) -> dict:
 
                 lengths = np.logspace(0, 3, 60)
                 m_all = [np.array([1.0]) for _ in lengths]
+                gbt_config = GBTConfig()
                 result_p = stripmain(prop_mat, node_p, elem, lengths,
                                      np.array([]), np.array([]),
-                                     GBTConfig(), 'S-S', m_all, neigs=10)
+                                     gbt_config, 'S-S', m_all, neigs=10)
                 result_m = stripmain(prop_mat, node_m, elem, lengths,
                                      np.array([]), np.array([]),
-                                     GBTConfig(), 'S-S', m_all, neigs=10)
+                                     gbt_config, 'S-S', m_all, neigs=10)
 
-                dsmP = extract_dsm_values(result_p.curve, node_p, elem, Fy, 'P')
-                dsmM = extract_dsm_values(result_m.curve, node_m, elem, Fy, 'Mxx')
+                class_p = classify(prop_mat, node_p, elem, lengths, result_p.shapes,
+                                   gbt_config, 'S-S', m_all)
+                class_m = classify(prop_mat, node_m, elem, lengths, result_m.shapes,
+                                   gbt_config, 'S-S', m_all)
+
+                dsmP = extract_dsm_values(
+                    result_p.curve, node_p, elem, Fy, 'P',
+                    mode_classifications=class_p)
+                dsmM = extract_dsm_values(
+                    result_m.curve, node_m, elem, Fy, 'Mxx',
+                    mode_classifications=class_m)
 
                 params['dsm'] = {
                     'Pcrl': dsmP.get('crl', 0),
@@ -2080,6 +2298,12 @@ def _auto_generate_props(params: dict) -> dict:
                     'Mcrl': dsmM.get('crl', 0),
                     'Mcrd': dsmM.get('crd', 0),
                     'My': dsmM.get('P_y', 0),
+                    'P_classification_method': dsmP.get('classification_method', 'none'),
+                    'P_local_detected': dsmP.get('local_detected', False),
+                    'P_dist_detected': dsmP.get('dist_detected', False),
+                    'M_classification_method': dsmM.get('classification_method', 'none'),
+                    'M_local_detected': dsmM.get('local_detected', False),
+                    'M_dist_detected': dsmM.get('dist_detected', False),
                 }
             except Exception as e:
                 print(f'[StCFSD] Auto DSM failed: {e}')

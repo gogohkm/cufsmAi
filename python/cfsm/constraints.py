@@ -500,8 +500,6 @@ def constr_user(node, cnstr, m_a):
     totalm = len(m_a)
 
     Ruser = np.zeros((ndof_m * totalm, 0))
-    offset_row = 0
-    offset_col = 0
 
     for ml in range(totalm):
         DOFreg = np.ones(ndof_m, dtype=int)
@@ -599,7 +597,6 @@ def mode_constr(node, elem, prop, node_prop, m_node, m_elem, DOFperm, m, a, BC):
         Rys: sub-node y DOF constraint matrix
         Rud: undefinite node constraint matrix
     """
-    from .node_utils import node_class
 
     # Rx, Rz
     Rx, Rz = constr_xz_y(m_node, m_elem)

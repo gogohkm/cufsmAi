@@ -18,6 +18,10 @@ TEST_FUNCTIONS = (
         "test_stresgen",
         "test_yieldMP",
         "test_template_all_types",
+        "test_solver_failure_diagnostics",
+        "test_energy_recovery_multi_term_contract",
+        "test_fcfsm_geometric_stress_resultant_matches_fsm",
+        "test_vibration_density_parameter_is_applied",
     )),
     (test_element, (
         "test_bc_i1_5_ss",
@@ -59,7 +63,7 @@ TEST_FUNCTIONS = (
         "test_uplift_combo_reaction_based",
         "test_auto_generate_passes_corner_radius",
         "test_h3_web_configs",
-        "test_kx_responds_to_pss",
+        "test_kx_matches_reference_example",
         "test_multi_bolt_c_factor",
         "test_beam_fe_solve_flag",
         "test_screw_connection_interpolation_and_pullover",
@@ -76,6 +80,11 @@ TEST_FUNCTIONS = (
         "test_webview_design_prepare_contract",
         "test_flexure_design_auto_infers_hat_family_and_webs",
         "test_flexure_design_auto_infers_multiweb_family_from_section_hint",
+        "test_flexure_shear_and_h3_update_governing_pass",
+        "test_b4_limits_use_section_geometry_and_complete_simple_lip_checks",
+        "test_dsm_uses_modal_classification_before_wavelength_heuristic",
+        "test_purlin_uplift_r_and_governing_wiring_contract",
+        "test_unsupported_sections_require_rational_global_buckling_input",
     )),
 )
 

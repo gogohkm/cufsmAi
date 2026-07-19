@@ -3,6 +3,14 @@
 import math
 
 
+def _demand_ratio(demand: float, capacity: float) -> float:
+    """0 강도를 0 이용률로 오인하지 않는 공통 요구/강도 비."""
+    demand = abs(demand)
+    if demand <= 0:
+        return 0.0
+    return demand / capacity if capacity > 0 else float('inf')
+
+
 def combined_axial_bending(P: float, Pa: float,
                            Mx: float, Max: float,
                            My: float = 0, May: float = 1e10) -> dict:
@@ -15,9 +23,9 @@ def combined_axial_bending(P: float, Pa: float,
         Mx, Max: 소요/허용 x축 모멘트 (kip-in)
         My, May: 소요/허용 y축 모멘트 (kip-in)
     """
-    P_ratio = abs(P) / Pa if Pa > 0 else 0
-    Mx_ratio = abs(Mx) / Max if Max > 0 else 0
-    My_ratio = abs(My) / May if May > 0 else 0
+    P_ratio = _demand_ratio(P, Pa)
+    Mx_ratio = _demand_ratio(Mx, Max)
+    My_ratio = _demand_ratio(My, May)
     total = P_ratio + Mx_ratio + My_ratio
 
     return {
@@ -36,13 +44,15 @@ def combined_bending_shear(M: float, Mao: float,
 
     (M/Mao)² + (V/Va)² ≤ 1.0
     """
-    m2 = (M / Mao) ** 2 if Mao > 0 else 0
-    v2 = (V / Va) ** 2 if Va > 0 else 0
+    m_ratio = _demand_ratio(M, Mao)
+    v_ratio = _demand_ratio(V, Va)
+    m2 = m_ratio ** 2
+    v2 = v_ratio ** 2
     total = math.sqrt(m2 + v2)
 
     return {
-        'M_ratio': round(math.sqrt(m2), 4),
-        'V_ratio': round(math.sqrt(v2), 4),
+        'M_ratio': round(m_ratio, 4),
+        'V_ratio': round(v_ratio, 4),
         'total': round(total, 4),
         'pass': total <= 1.0,
         'equation': 'H2-1',
@@ -76,8 +86,8 @@ def combined_bending_web_crippling(P: float, Pn: float,
         design_method: 'LRFD' | 'LSD' | 'ASD'
         omega:   ASD 안전계수 (§H3 Eq. H3-1a/H3-2a/H3-3a 모두 Ω=1.70)
     """
-    p_ratio = (P / Pn) if Pn > 0 else 0
-    m_term = (M / Mnfo) if Mnfo > 0 else 0
+    p_ratio = _demand_ratio(P, Pn)
+    m_term = _demand_ratio(M, Mnfo)
 
     # §H3 force-coefficient / limit-coefficient / equation label per web config.
     if web_config == 'nested_z':

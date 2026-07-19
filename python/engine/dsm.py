@@ -26,6 +26,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                         fy: float = 35.53, load_type: str = 'P',
                         mode_shapes: list = None,
                         classify_fn=None,
+                        mode_classifications: list = None,
                         KxLx: float = None, KyLy: float = None,
                         KtLt: float = None, Lb: float = None,
                         Cb: float = 1.0, section_type: str = 'C') -> dict:
@@ -42,8 +43,11 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                      국부/뒤틀림으로 확정한다 (반파장 순서 휴리스틱 대체).
                      하위호환: 미제공(None) 시 개선된 휴리스틱으로 폴백한다.
         classify_fn: (선택) callable(length, mode_vector) -> [%G, %D, %L, %O]
-                     (예: cfsm.classify.mode_class 래퍼). mode_shapes 와 함께
-                     제공될 때만 사용된다. 미제공 시 휴리스틱 폴백.
+                      (예: cfsm.classify.mode_class 래퍼). mode_shapes 와 함께
+                      제공될 때만 사용된다. 미제공 시 휴리스틱 폴백.
+        mode_classifications: (선택) curve와 정렬된 cFSM 분류 배열.
+                      mode_classifications[i][mode] = [%G, %D, %L, %O].
+                      서버/UI가 이미 전체 모드를 분류한 경우 재계산 없이 사용한다.
         KxLx, KyLy, KtLt: (선택) 압축(load_type='P') 부재의 강축/약축 유효좌굴
                      길이 K·L (in) 및 비틀림 유효길이 Kt·Lt (in). 제공되면 전체
                      좌굴값을 signature-curve 점근값이 아니라 AISI S100-16
@@ -166,8 +170,14 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
 
     # 각 극소에 대해 cFSM modal 라벨을 시도한다.
     # 라벨: 'L' (국부 %L 우세), 'D' (뒤틀림 %D 우세), None (분류 불가/미제공)
-    modal_available = mode_shapes is not None and callable(classify_fn)
-    if modal_available:
+    classifications_available = mode_classifications is not None
+    shape_classifier_available = mode_shapes is not None and callable(classify_fn)
+    modal_available = classifications_available or shape_classifier_available
+    if classifications_available:
+        for mn in minima:
+            mn['mode_class'] = _classify_minimum_from_classifications(
+                mn, mode_classifications)
+    elif shape_classifier_available:
         for mn in minima:
             mn['mode_class'] = _classify_minimum(mn, mode_shapes, classify_fn)
 
@@ -184,10 +194,33 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
             elif lbl == 'D':
                 if not dist_detected or val < Pcrd:
                     Pcrd, Lcrd, dist_detected = val, mn['length'], True
-        # modal 라벨이 하나도 확정되지 않은 경우(예: 모두 G/O 우세 또는 동률)
-        # 휴리스틱으로 폴백한다.
+        # 두 개 이상의 명확한 극소가 모두 같은 L/D 가족으로 분류되면 cFSM 기저가
+        # 서로 다른 signature-curve 가지를 분리하지 못한 것이다. 이 경우에 한해
+        # 가장 짧은 극소를 L, 그보다 긴 극소 중 임계값을 D로 두는 DSM 파장 순서를
+        # 동률 해소 규칙으로 사용한다. 단일 D 극소는 그대로 D로 유지하며, G/O 우세
+        # 극소에는 이 규칙을 적용하지 않는다.
+        if classifications_available and len(minima) >= 2:
+            ld_minima = [mn for mn in minima if mn.get('mode_class') in ('L', 'D')]
+            labels = {mn.get('mode_class') for mn in ld_minima}
+            if len(ld_minima) >= 2 and len(labels) == 1:
+                by_length = sorted(ld_minima, key=lambda mn: mn['length'])
+                local_min = by_length[0]
+                dist_min = min(by_length[1:], key=lambda mn: mn['load_factor'])
+                Pcrl = local_min['load_factor'] * P_ref
+                Lcrl = local_min['length']
+                local_detected = True
+                Pcrd = dist_min['load_factor'] * P_ref
+                Lcrd = dist_min['length']
+                dist_detected = True
+                classification = 'cfsm_modal_ordering_tiebreak'
+        # 호출자가 cFSM 분류 배열을 명시한 경우 G/O 우세 최소점을 파장 휴리스틱으로
+        # 다시 L/D로 바꾸지 않는다. 이는 모드 분류를 무효화하기 때문이다.
+        # 레거시 callable 경로에서 분류 호출 자체가 실패한 경우에만 휴리스틱 폴백.
         if not local_detected and not dist_detected:
-            modal_available = False
+            if classifications_available:
+                classification = 'cfsm_modal_no_ld'
+            else:
+                modal_available = False
 
     if not modal_available:
         # (b) 휴리스틱 폴백: 반파장 순서. 임의 인치 임계(구 10.0) 미사용.
@@ -227,7 +260,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
             local_detected = True
             classification = 'monotone'
 
-    classification_method = 'cfsm_modal' if classification == 'cfsm_modal' else 'heuristic'
+    classification_method = 'cfsm_modal' if classification.startswith('cfsm_modal') else 'heuristic'
 
     # ── 전체좌굴(GLOBAL) 폐형식 산정 (선택, 유효길이 제공 시) ─────────────────
     # 기본값: signature-curve 장파장 점근값(Pcre_sig/Lcre_sig)을 전체좌굴값으로
@@ -374,6 +407,42 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     return result
 
 
+def _gdlo_label(gdlo) -> str:
+    """Return L/D only when that family is the dominant cFSM contribution."""
+    if gdlo is None:
+        return None
+    try:
+        values = np.asarray(gdlo, dtype=float).ravel()
+    except (ValueError, TypeError):
+        return None
+    if values.size < 4 or not np.all(np.isfinite(values[:4])):
+        return None
+    pct_g, pct_d, pct_l, pct_o = values[:4]
+    ld_max = max(pct_d, pct_l)
+    if ld_max <= 0 or ld_max < max(pct_g, pct_o):
+        return None
+    return 'L' if pct_l >= pct_d else 'D'
+
+
+def _classify_minimum_from_classifications(minimum: dict,
+                                            mode_classifications: list) -> str:
+    """Read the first-mode GDLO percentages aligned with a curve minimum."""
+    ci = minimum.get('curve_index')
+    if ci is None or ci < 0 or ci >= len(mode_classifications):
+        return None
+    class_mat = mode_classifications[ci]
+    if class_mat is None:
+        return None
+    try:
+        arr = np.asarray(class_mat, dtype=float)
+    except (ValueError, TypeError):
+        return None
+    if arr.size == 0:
+        return None
+    gdlo = arr if arr.ndim == 1 else arr[0]
+    return _gdlo_label(gdlo)
+
+
 def _classify_minimum(minimum: dict, mode_shapes: list, classify_fn) -> str:
     """단일 극소를 cFSM modal 참여율로 'L'/'D'/None 라벨링.
 
@@ -407,19 +476,7 @@ def _classify_minimum(minimum: dict, mode_shapes: list, classify_fn) -> str:
         gdlo = classify_fn(minimum['length'], mode_vec)
     except Exception:
         return None
-    if gdlo is None:
-        return None
-    gdlo = np.asarray(gdlo, dtype=float).ravel()
-    if gdlo.size < 4:
-        return None
-    pct_d = gdlo[1]
-    pct_l = gdlo[2]
-    # 국부/뒤틀림 중 우세한 쪽으로 라벨. 둘 다 미미하면(G/O 우세) None.
-    if pct_l <= 0 and pct_d <= 0:
-        return None
-    if pct_l >= pct_d:
-        return 'L'
-    return 'D'
+    return _gdlo_label(gdlo)
 
 
 def _empty_result(Py, My_xx, My_zz, label, P_ref):

@@ -105,8 +105,10 @@ def add_corner(node: np.ndarray, elem: np.ndarray,
 
     # 두 방향 사이 각도
     d_ang = a2 - a1
-    while d_ang > math.pi: d_ang -= 2 * math.pi
-    while d_ang < -math.pi: d_ang += 2 * math.pi
+    while d_ang > math.pi:
+        d_ang -= 2 * math.pi
+    while d_ang < -math.pi:
+        d_ang += 2 * math.pi
 
     theta = abs(d_ang)
     if theta < 0.01:
@@ -148,8 +150,10 @@ def add_corner(node: np.ndarray, elem: np.ndarray,
     end_ang = math.atan2(bz - cz, bx - cx)
     # 짧은 호 선택
     arc_span = end_ang - start_ang
-    while arc_span > math.pi: arc_span -= 2 * math.pi
-    while arc_span < -math.pi: arc_span += 2 * math.pi
+    while arc_span > math.pi:
+        arc_span -= 2 * math.pi
+    while arc_span < -math.pi:
+        arc_span += 2 * math.pi
 
     t = e1[3]  # 두께
     mat = e1[4]
@@ -319,6 +323,17 @@ def energy_recovery(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
     se = np.zeros((nelems, 2))
     if m_a is None:
         m_a = np.array([1.0])
+    m_a = np.asarray(m_a, dtype=float).reshape(-1)
+    totalm = len(m_a)
+    expected_dofs = 4 * nnodes * totalm
+    mode = np.asarray(mode, dtype=float).reshape(-1)
+    if totalm == 0:
+        raise ValueError('energy_recovery requires at least one longitudinal term in m_a')
+    if len(mode) != expected_dofs:
+        raise ValueError(
+            f'energy_recovery mode length {len(mode)} does not match '
+            f'4*nnodes*len(m_a)={expected_dofs}'
+        )
 
     for e in range(nelems):
         ni = int(elem[e, 1]) - 1
@@ -327,7 +342,11 @@ def energy_recovery(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         matnum = int(elem[e, 4])
 
         mat_idx = np.where(prop[:, 0] == matnum)[0]
-        mat_idx = mat_idx[0] if len(mat_idx) > 0 else 0
+        if len(mat_idx) == 0:
+            raise ValueError(
+                f'Element {int(elem[e, 0])} references undefined material {matnum}'
+            )
+        mat_idx = mat_idx[0]
         Ex, Ey = prop[mat_idx, 1], prop[mat_idx, 2]
         vx, vy = prop[mat_idx, 3], prop[mat_idx, 4]
         G = prop[mat_idx, 5]
@@ -335,36 +354,42 @@ def energy_recovery(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         b = ep[e, 1]
         alpha = ep[e, 2]
 
-        # 전체 벡터에서 요소 DOF 추출
-        d_global = np.zeros(8)
-        d_global[0] = mode[2 * ni]            # u1
-        d_global[1] = mode[2 * ni + 1]        # v1
-        d_global[2] = mode[2 * nj]            # u2
-        d_global[3] = mode[2 * nj + 1]        # v2
-        d_global[4] = mode[skip + 2 * ni]     # w1
-        d_global[5] = mode[skip + 2 * ni + 1] # theta1
-        d_global[6] = mode[skip + 2 * nj]     # w2
-        d_global[7] = mode[skip + 2 * nj + 1] # theta2
+        # 전체 벡터에서 모든 종방향 항의 요소 DOF를 추출한다.
+        d_global = np.zeros(8 * totalm)
+        global_term_dofs = 4 * nnodes
+        for m_idx in range(totalm):
+            gb = m_idx * global_term_dofs
+            lb = m_idx * 8
+            d_global[lb + 0] = mode[gb + 2 * ni]              # u1
+            d_global[lb + 1] = mode[gb + 2 * ni + 1]          # v1
+            d_global[lb + 2] = mode[gb + 2 * nj]              # u2
+            d_global[lb + 3] = mode[gb + 2 * nj + 1]          # v2
+            d_global[lb + 4] = mode[gb + skip + 2 * ni]       # w1
+            d_global[lb + 5] = mode[gb + skip + 2 * ni + 1]   # theta1
+            d_global[lb + 6] = mode[gb + skip + 2 * nj]       # w2
+            d_global[lb + 7] = mode[gb + skip + 2 * nj + 1]   # theta2
 
-        # 로컬 변환
+        # 로컬 변환 (d_local = gamma.T @ d_global)
         c = math.cos(alpha)
         s = math.sin(alpha)
         d_local = d_global.copy()
-        d_local[0] = c * d_global[0] + s * d_global[4]
-        d_local[4] = -s * d_global[0] + c * d_global[4]
-        d_local[2] = c * d_global[2] + s * d_global[6]
-        d_local[6] = -s * d_global[2] + c * d_global[6]
+        for m_idx in range(totalm):
+            r = 8 * m_idx
+            d_local[r + 0] = c * d_global[r + 0] + s * d_global[r + 4]
+            d_local[r + 4] = -s * d_global[r + 0] + c * d_global[r + 4]
+            d_local[r + 2] = c * d_global[r + 2] + s * d_global[r + 6]
+            d_local[r + 6] = -s * d_global[r + 2] + c * d_global[r + 6]
 
         # 로컬 강성
         k = klocal(Ex, Ey, vx, vy, G, t, L, b, BC, m_a)
 
-        # 멤브레인 에너지
-        dm = d_local[:4]
-        se[e, 0] = 0.5 * dm @ k[:4, :4] @ dm
-
-        # 휨 에너지
-        df = d_local[4:]
-        se[e, 1] = 0.5 * df @ k[4:8, 4:8] @ df
+        # 모든 m-p 결합항을 포함한 멤브레인/휨 에너지
+        mem_idx = np.array([8 * m + i for m in range(totalm) for i in range(4)])
+        bend_idx = np.array([8 * m + i for m in range(totalm) for i in range(4, 8)])
+        dm = d_local[mem_idx]
+        df = d_local[bend_idx]
+        se[e, 0] = 0.5 * dm @ k[np.ix_(mem_idx, mem_idx)] @ dm
+        se[e, 1] = 0.5 * df @ k[np.ix_(bend_idx, bend_idx)] @ df
 
     return se
 

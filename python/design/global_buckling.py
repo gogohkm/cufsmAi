@@ -91,9 +91,7 @@ def compute_column_Fcre(props: dict, Fy: float,
     # §E2.2-4 주: rx, ry는 도심 PRINCIPAL 축 기준 회전반경이다. Ixz≠0 (thetap≠0)인
     # Z 단면에서는 geometric Ixx/Izz가 주축이 아니므로 주관성모멘트 I11/I22로부터
     # 주축 회전반경을 산출한다 (있을 때만; C 단면은 Ixz=0이라 영향 없음).
-    I11 = props.get('I11', 0)
     I22 = props.get('I22', 0)
-    r_major = math.sqrt(I11 / Ag) if (I11 > 0 and Ag > 0) else 0.0   # 강축 주축
     r_minor = math.sqrt(I22 / Ag) if (I22 > 0 and Ag > 0) else 0.0   # 약축(MINOR) 주축
 
     # xo — 전단중심 편심 (도심~전단중심 거리, §E2.2-4의 x_o)
@@ -130,6 +128,26 @@ def compute_column_Fcre(props: dict, Fy: float,
             and not sec:
         is_point_symmetric = True
     is_closed = sec in ('RHS', 'CHS', 'HSS', 'BOX', 'PIPE', 'TUBE')
+    supported_open = sec in (
+        '', 'C', 'LIPPEDC', 'CHANNEL', 'TRACK',
+        'Z', 'LIPPEDZ', 'I', 'ISECT', 'ISECTION',
+    )
+    if not supported_open and not is_closed and not is_point_symmetric:
+        return {
+            'Fcre': 0.0,
+            'sigma_ex': sigma_ex,
+            'sigma_ey': sigma_ey,
+            'sigma_t': sigma_t,
+            'buckling_type': 'unsupported-nonsymmetric',
+            'ro': ro,
+            'unsupported': True,
+            'error': (
+                f"Section type '{props.get('section_type', '')}' is not mapped to the implemented "
+                'symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping '
+                'when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section '
+                'axis assumptions were not applied.'
+            ),
+        }
 
     # 단축대칭 휨-비틀림 분기 게이트: 수치적으로 의미 있는 xo가 있고,
     # 점대칭/폐합/이중대칭으로 분류되지 않은 경우에만 E2.2를 적용한다.
@@ -342,6 +360,28 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
         }
         return Fcre
 
+    # 완전 횡구속이면 단면 종류와 무관하게 LTB가 지배하지 않는다. 그 외 단면은
+    # 본 구현이 보유한 F2.1.1(C/I), F2.1.3(Z), F2.1.4(box) 범위를 명시적으로 제한한다.
+    if Lb <= 0:
+        return 1e6
+    supported_open = sec in ('C', 'LIPPEDC', 'CHANNEL', 'TRACK', 'I', 'ISECT', 'ISECTION')
+    is_z = sec in ('Z', 'LIPPEDZ') or sec.startswith('LIPPEDZ')
+    if not supported_open and not is_z:
+        is_f212 = sec in ('ANGLE', 'LIPPEDANGLE', 'HAT', 'TEE', 'T')
+        required_section = 'F2.1.2' if is_f212 else 'F2.1.5'
+        compute_beam_Fcre._last_detail = {
+            'Fcre': 0.0,
+            'equation': f'{required_section} (not implemented for this orientation)',
+            'required_section': required_section,
+            'unsupported': True,
+            'error': (
+                f"Section type '{section_type}' is outside implemented F2.1.1/F2.1.3/F2.1.4 "
+                f'closed-form cases; use §{required_section} with the required axis/orientation inputs '
+                'or provide a rational elastic buckling stress.'
+            ),
+        }
+        return 0.0
+
     # ---- 개단면 (§F2.1.1 C / §F2.1.3 Z) ----------------------------------
     # ry — 약축 회전반경 (냉간성형강: z축이 약축)
     ry = props.get('ry', 0) or props.get('rz', 0)
@@ -366,9 +406,6 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     if Ag <= 0 or Sf <= 0 or ry <= 0 or ro <= 0:
         return 0.0
 
-    # Lb가 0이면 완전 구속 → Fcre = 매우 큰 값
-    if Lb <= 0:
-        return 1e6
     if Ky * Ly <= 0 or Kt * Lt <= 0:
         return 0.0
 
@@ -384,7 +421,7 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
 
     # Z-section (§F2.1.3): 분모에 2 — 점대칭 단면
     z_factor = 1.0
-    if sec.startswith('Z') or sec == 'LIPPEDZ':
+    if is_z:
         Fcre /= 2.0
         z_factor = 2.0
 

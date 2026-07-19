@@ -1,5 +1,6 @@
 """FSM 솔버 + 통합 테스트"""
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 import numpy as np
@@ -9,7 +10,7 @@ from engine.transform import trans
 from engine.assembly import assemble
 from engine.stress import stresgen, yieldMP
 from engine.template import generate_section
-from models.data import CufsmModel, GBTConfig
+from models.data import GBTConfig
 from scipy import sparse
 
 
@@ -156,11 +157,80 @@ def test_template_all_types():
         print(f"  {t}: {result['node'].shape[0]} nodes, {result['elem'].shape[0]} elems")
 
 
+def test_solver_failure_diagnostics():
+    """구속/고유치 실패가 0 곡선으로만 위장되지 않아야 한다."""
+    prop, node, elem = _default_model()
+    node[:, 3:7] = 0
+    result = stripmain(
+        prop, node, elem, np.array([10.0]), np.array([]), np.array([]),
+        GBTConfig(), 'S-S', [np.array([1.0])], neigs=3,
+    )
+    payload = result.to_dict()
+    assert payload['success'] is False
+    assert payload['diagnostics'][0]['code'] == 'NO_FREE_DOF'
+    assert payload['curve'][0][0][1] == 0.0
+
+
+def test_energy_recovery_multi_term_contract():
+    """에너지 복원이 모든 종방향 m항과 결합항을 처리해야 한다."""
+    from engine.helpers import energy_recovery
+
+    prop, node, elem = _default_model()
+    m_a = np.array([1.0, 2.0])
+    mode = np.linspace(0.001, 0.08, 4 * len(node) * len(m_a))
+    energy = energy_recovery(prop, node, elem, mode, 50.0, m_a=m_a)
+    assert energy.shape == (len(elem), 2)
+    assert np.all(np.isfinite(energy))
+    try:
+        energy_recovery(prop, node, elem, mode[:-1], 50.0, m_a=m_a)
+    except ValueError as exc:
+        assert 'mode length' in str(exc)
+    else:
+        raise AssertionError('energy_recovery must reject a mismatched mode/m_a shape')
+
+
+def test_fcfsm_geometric_stress_resultant_matches_fsm():
+    """fcFSM과 FSM이 같은 응력×두께 기하강성을 사용해야 한다."""
+    from fcfsm.solver import stripmain_fcfsm
+
+    prop, node, elem = _default_model()
+    lengths = np.array([50.0])
+    m_all = [np.array([1.0])]
+    conventional = stripmain(
+        prop, node, elem, lengths, np.array([]), np.array([]),
+        GBTConfig(), 'S-S', m_all, neigs=3,
+    )
+    force_based = stripmain_fcfsm(prop, node, elem, lengths, 'S-S', m_all, neigs=3)
+    assert np.isclose(
+        conventional.curve[0][0, 1], force_based['curve'][0][0, 1], rtol=1e-8
+    )
+
+
+def test_vibration_density_parameter_is_applied():
+    """서버 rho 입력이 질량행렬로 전달되어 f∝1/sqrt(rho)를 만족해야 한다."""
+    from server import handle_request
+
+    prop, node, elem = _default_model()
+    base = {
+        'prop': prop.tolist(), 'node': node.tolist(), 'elem': elem.tolist(),
+        'lengths': [50.0], 'springs': [], 'constraints': [], 'BC': 'S-S',
+        'm_all': [[1.0]], 'neigs': 3,
+    }
+    f1 = handle_request({'id': 1, 'method': 'vibration', 'params': {**base, 'rho': 1.0}})
+    f4 = handle_request({'id': 2, 'method': 'vibration', 'params': {**base, 'rho': 4.0}})
+    hz1 = f1['result']['frequencies'][0][0]
+    hz4 = f4['result']['frequencies'][0][0]
+    assert np.isclose(hz1 / hz4, 2.0, rtol=1e-6)
+
+
 if __name__ == '__main__':
     tests = [
         test_grosprop, test_elemprop, test_trans, test_assembly,
         test_stripmain_basic, test_stripmain_all_bc,
         test_stresgen, test_yieldMP, test_template_all_types,
+        test_solver_failure_diagnostics, test_energy_recovery_multi_term_contract,
+        test_fcfsm_geometric_stress_resultant_matches_fsm,
+        test_vibration_density_parameter_is_applied,
     ]
     passed = 0
     failed = 0

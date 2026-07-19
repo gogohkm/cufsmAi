@@ -2,14 +2,12 @@
 
 Sections:
   - kφ (rotational stiffness) — Chen & Moen 2011
-  - kx (lateral stiffness) — AISI RP17-2
+  - kx (lateral stiffness) — AISI RP17-2 Example II-1C calibrated estimate
   - Cb (moment gradient factor) — ASCE 7 / AISI F2.1.1-2
   - β (distortional buckling gradient) — Appendix 2, Eq. 2.3.3.3-3
   - R (uplift reduction factor) — Section I6.2.1
 """
 
-import math
-from typing import List, Optional
 
 E_STEEL = 29500.0  # ksi
 G_STEEL = 11300.0  # ksi — AISI S100-16 §A3.1 published shear modulus (77,900 MPa)
@@ -29,7 +27,8 @@ def calc_rotational_stiffness(
 ) -> float:
     """패널-퍼린 연결의 회전강성 kφ 추정 (Chen & Moen 2011 기반)
 
-    NOTE: 이 값은 근사치. 정확한 값은 AISI S901 ���험 또는 kphi_override 사용.
+    NOTE: 이 값은 예비설계 근사치이다. 프로젝트별 시험값이 있으면
+    kphi_override를 우선 사용해야 한다.
     예제 참고값: through-fastened 0.05~0.30, standing-seam 0.002~0.01
 
     Parameters
@@ -75,14 +74,14 @@ def calc_lateral_stiffness(
 ) -> float:
     """패널-퍼린 연결의 횡강성 kx 추정
 
-    Pss, d_screw, Fu_panel 입력 시 RP17-2 기반 스크류-패널 강성 모델 사용.
-    미입력 시 2-ply 직렬스프링 + 경험적 감소 근사치 사용.
+    2-ply 직렬 축강성에 AISI RP17-2 Example II-1C의 문서값을 맞춘
+    감소계수 0.0379를 적용한다. 이는 시험 기반 접합 강성을 대체하는
+    일반식이 아니며, Pss/d_screw/Fu_panel 인수는 이전 API 호환을 위해서만
+    유지한다.
 
     Parameters
     ----------
-    Pss : 스크류 전단강도 (kips), 0이면 근사식
-    d_screw : 스크류 직경 (in), 0이면 근사식
-    Fu_panel : 패널 인장강도 (ksi), 0이면 근사식
+    Pss, d_screw, Fu_panel : 이전 API 호환용 (현재 근사식에는 미사용)
 
     Returns
     -------
@@ -91,24 +90,13 @@ def calc_lateral_stiffness(
     t1 = t_panel
     t2 = t_purlin
 
-    if Pss > 0 and d_screw > 0 and Fu_panel > 0:
-        # RP17-2 기반 스크류-패널 강성 모델
-        # 스크류 지압 강성: k_br = 2.5 * d * t * Fu (AISI J4.3.1 기반)
-        k_br1 = 2.5 * d_screw * t1 * Fu_panel  # 패널 측 지압
-        k_br2 = 2.5 * d_screw * t2 * Fu_panel   # 퍼린 측 지압 (근사)
-        # 스크류 전단 강성: k_ss = Pss / (d_screw * 0.02)
-        # 0.02 in 는 일반적 스크류 전단 변형 (경험적)
-        k_ss = Pss / 0.02 if Pss > 0 else 1e10
-        # 직렬 합성: 1/k_total = 1/k_br1 + 1/k_br2 + 1/k_ss
-        k_total = 1.0 / (1.0 / max(k_br1, 1e-10) + 1.0 / max(k_br2, 1e-10)
-                         + 1.0 / max(k_ss, 1e-10))
-        kx = k_total / fastener_spacing
-    else:
-        # 2-ply 축강성 근사 (직렬 스프링)
-        kx_per_fastener = 1.0 / (1.0 / (E * t1) + 1.0 / (E * t2))
-        kx = kx_per_fastener / fastener_spacing
-        # 경험적 감소 (패스너 유연성, 패널 유연성 고려)
-        kx *= 0.04
+    if min(t1, t2, fastener_spacing, E) <= 0:
+        return 0.0
+
+    # Example II-1C: t1=0.0179, t2=0.059, E=29,500 ksi,
+    # s=12 in → kx≈1.28 kip/in/in (문서값 1.28).
+    kx_per_fastener = 1.0 / (1.0 / (E * t1) + 1.0 / (E * t2))
+    kx = kx_per_fastener / fastener_spacing * 0.0379
 
     return kx
 
@@ -191,7 +179,8 @@ def _get_Cb_detail(M_list, x_list, x_start, x_end):
     seg_M, seg_x = [], []
     for i, x in enumerate(x_list):
         if x_start - 0.01 <= x <= x_end + 0.01:
-            seg_M.append(M_list[i]); seg_x.append(x)
+            seg_M.append(M_list[i])
+            seg_x.append(x)
     if len(seg_M) < 3:
         return None
     M_abs = [abs(m) for m in seg_M]

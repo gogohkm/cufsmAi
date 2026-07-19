@@ -14,7 +14,7 @@ from engine.properties import grosprop
 from engine.template import generate_section
 from engine.stress import stresgen, yieldMP
 from engine.dsm import extract_dsm_values
-from engine.helpers import doubler, add_corner, signature_ss, firstyield, msort
+from engine.helpers import doubler, signature_ss, firstyield
 from engine.cutwp import cutwp_prop
 from cfsm.classify import classify
 from vibration.solver import stripmain_vib
@@ -22,7 +22,7 @@ from fcfsm.solver import stripmain_fcfsm
 from plastic.pmm_plastic import pmm_plastic
 from fileio.mat_loader import load_mat_file
 from fileio.project_io import save_project, load_project
-from models.data import CufsmModel, CufsmResult, GBTConfig, _json_serializer, SafeJsonEncoder
+from models.data import CufsmModel, SafeJsonEncoder
 
 
 def handle_request(request: dict) -> dict:
@@ -110,16 +110,30 @@ def handle_request(request: dict) -> dict:
                 'curve': [c.tolist() for c in result['curve']],
                 'classification': [c.tolist() for c in result['classification']],
                 'n_lengths': len(result['curve']),
+                'diagnostics': result.get('diagnostics', []),
+                'success': result.get('success', True),
             }}
 
         elif method == 'vibration':
             model = CufsmModel.from_dict(params)
+            vib_prop = model.prop.copy()
+            rho = params.get('rho')
+            if rho is not None:
+                rho = float(rho)
+                if rho <= 0:
+                    raise ValueError('vibration rho must be positive')
+                if vib_prop.shape[1] <= 6:
+                    vib_prop = np.column_stack([vib_prop, np.full(vib_prop.shape[0], rho)])
+                else:
+                    vib_prop[:, 6] = rho
             result = stripmain_vib(
-                model.prop, model.node, model.elem,
+                vib_prop, model.node, model.elem,
                 model.lengths, model.BC, model.m_all
             )
             return {'id': req_id, 'result': {
                 'frequencies': [f.tolist() for f in result['frequencies']],
+                'diagnostics': result.get('diagnostics', []),
+                'success': result.get('success', True),
             }}
 
         elif method == 'plastic':
@@ -189,6 +203,7 @@ def handle_request(request: dict) -> dict:
             # 산정한다. 미제공(None)이면 종전대로 signature-curve 점근값을 사용한다.
             result = extract_dsm_values(
                 curve, node, elem, fy, load_type,
+                mode_classifications=params.get('classifications'),
                 KxLx=params.get('KxLx'), KyLy=params.get('KyLy'),
                 KtLt=params.get('KtLt'), Lb=params.get('Lb'),
                 Cb=params.get('Cb', 1.0),
@@ -210,7 +225,8 @@ def handle_request(request: dict) -> dict:
             mode = np.array(params['mode'], dtype=float)
             length = float(params['length'])
             BC = params.get('BC', 'S-S')
-            se = energy_recovery(prop, node, elem, mode, length, BC=BC)
+            m_a = np.array(params.get('m_a', [1.0]), dtype=float)
+            se = energy_recovery(prop, node, elem, mode, length, m_a=m_a, BC=BC)
             return {'id': req_id, 'result': {
                 'energy': se.tolist(),
                 'columns': ['membrane', 'bending'],
@@ -275,18 +291,30 @@ def handle_request(request: dict) -> dict:
 
         elif method == 'calc_deck_stiffness':
             from design.loads.bracing import calc_rotational_stiffness, calc_lateral_stiffness
-            kphi = calc_rotational_stiffness(
+            kphi_override = params.get('kphi_override')
+            kx_override = params.get('kx_override')
+            kphi = kphi_override if kphi_override and kphi_override > 0 else calc_rotational_stiffness(
                 t_panel=params.get('t_panel', 0.018),
                 t_purlin=params.get('t_purlin', 0.059),
                 fastener_spacing=params.get('fastener_spacing', 12),
                 flange_width=params.get('flange_width', 2.5),
             )
-            kx = calc_lateral_stiffness(
+            kx = kx_override if kx_override and kx_override > 0 else calc_lateral_stiffness(
                 t_panel=params.get('t_panel', 0.018),
                 t_purlin=params.get('t_purlin', 0.059),
                 fastener_spacing=params.get('fastener_spacing', 12),
             )
-            return {'id': req_id, 'result': {'kphi': round(kphi, 4), 'kx': round(kx, 3)}}
+            result = {
+                'kphi': round(kphi, 4),
+                'kx': round(kx, 3),
+                'kphi_method': 'test_override' if kphi_override else 'chen_moen_preliminary_approximation',
+                'kx_method': 'test_override' if kx_override else 'rp17_2_example_calibrated_approximation',
+                'warning': (
+                    'Use project-specific connection/panel test stiffness overrides when available.'
+                    if not (kphi_override and kx_override) else None
+                ),
+            }
+            return {'id': req_id, 'result': result}
 
         elif method == 'lap_connection':
             from design.lap_connection import design_lap_connection

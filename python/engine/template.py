@@ -166,28 +166,30 @@ def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
     # --- 노드/요소 생성 (snakey march) ---
     nodes = []
     elems = []
-    x, y = 0.0, 0.0
+    # 마지막 생성 절점. 첫 유효 세그먼트 전에도 초기화하여 빈/건너뛴
+    # 세그먼트가 선행하는 경우의 제어흐름을 명확히 한다.
+    x2, y2 = 0.0, 0.0
     started = False
     node_idx = 1
 
     for j in range(len(seg_l)):
         n = seg_n[j]
-        l = seg_l[j]
+        segment_length = seg_l[j]
         q1 = seg_q1[j]
         q2 = seg_q2[j]
         t = seg_t[j]
         mid = seg_id[j]
 
-        if n == 0 or l == 0:
+        if n == 0 or segment_length == 0:
             continue
 
         dq = (q2 - q1) / max(n, 1)
 
         if q1 == q2:
-            le = l / n
+            le = segment_length / n
         else:
             dtheta = _wrap_pi(q2 - q1)
-            r = l / abs(dtheta)
+            r = segment_length / abs(dtheta)
             le = 2 * r * math.sin(abs(dtheta) / (2 * n))
 
         for k in range(n):
@@ -539,7 +541,6 @@ def _gen_isect(params: dict) -> dict:
     bot_mid = nf // 2  # 하부 플랜지 중앙 노드 인덱스
 
     # 웹: (0, 0) → (0, h), 중간 노드만 추가 (양끝은 플랜지와 공유)
-    web_start = bot_mid  # 하부 접합점
     web_node_start = len(nodes)
     for i in range(1, nw):  # 1 ~ nw-1 (양끝 제외)
         z = i * h / nw
@@ -772,7 +773,7 @@ def _gen_custom(params: dict) -> dict:
 
     # 자동 검증
     expected_A = params.get('expected_A', None)
-    validation = validate_section(outer_corners, t, expected_A)
+    validate_section(outer_corners, t, expected_A)
     crossings = check_path_crossing(outer_corners)
     if crossings:
         import sys

@@ -90,7 +90,7 @@ export interface JsonRpcResponse {
 /** 기본 모델 생성 */
 export function createDefaultModel(): StcfsdModel {
     return {
-        prop: [[100, 29500, 29500, 0.3, 0.3, 11346.15]],
+        prop: [[100, 29500, 29500, 0.3, 0.3, 11300]],
         node: [],
         elem: [],
         lengths: [],

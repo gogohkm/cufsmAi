@@ -101,6 +101,7 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
 
     freq_list = []
     shapes_list = []
+    diagnostics = []
 
     for l_idx in range(len(lengths)):
         a = lengths[l_idx]
@@ -132,7 +133,12 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             vx = prop[mat_idx, 3]
             vy = prop[mat_idx, 4]
             G = prop[mat_idx, 5]
-            rho = prop[mat_idx, 6] if prop.shape[1] > 6 else 1.0  # density defaults to 1.0 if not provided in prop
+            if prop.shape[1] <= 6 or prop[mat_idx, 6] <= 0:
+                raise ValueError(
+                    f'Material {matnum} requires a positive density rho in prop column 7 '
+                    'for vibration analysis'
+                )
+            rho = prop[mat_idx, 6]
 
             b = elprop_arr[e, 1]
             alpha = elprop_arr[e, 2]
@@ -158,6 +164,16 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         Kff = K.tocsr()[free_dofs, :][:, free_dofs].toarray()
         Mff = M.tocsr()[free_dofs, :][:, free_dofs].toarray()
 
+        if len(free_dofs) == 0:
+            diagnostics.append({
+                'severity': 'error', 'code': 'NO_FREE_DOF',
+                'length_index': l_idx, 'length': float(a),
+                'message': 'No free degrees of freedom remain after constraints.',
+            })
+            freq_list.append(np.array([0.0]))
+            shapes_list.append(np.zeros((0, 1)))
+            continue
+
         try:
             eigenvalues, eigenvectors = eig(Kff, Mff)
             # tolerance-based real-positive-finite filter (cf. engine.fsm_solver / stripmain.m:364):
@@ -167,13 +183,30 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
                 & (np.real(eigenvalues) > 0)
                 & np.isfinite(np.real(eigenvalues)))[0]
             lam = np.real(eigenvalues[valid])
+            if len(lam) == 0:
+                diagnostics.append({
+                    'severity': 'error', 'code': 'NO_POSITIVE_EIGENVALUE',
+                    'length_index': l_idx, 'length': float(a),
+                    'message': 'The eigensolver returned no finite positive real eigenvalue.',
+                })
+                freq_list.append(np.array([0.0]))
+                shapes_list.append(np.zeros((len(free_dofs), 1)))
+                continue
             sort_idx = np.argsort(lam)
             lam = lam[sort_idx[:neigs]]
             freqs = np.sqrt(lam) / (2 * PI)  # Hz
             freq_list.append(freqs)
             shapes_list.append(np.real(eigenvectors[:, valid][:, sort_idx[:neigs]]))
-        except Exception:
+        except Exception as exc:
+            diagnostics.append({
+                'severity': 'error', 'code': 'EIGENSOLVE_FAILED',
+                'length_index': l_idx, 'length': float(a),
+                'message': f'{type(exc).__name__}: {exc}',
+            })
             freq_list.append(np.array([0.0]))
             shapes_list.append(np.zeros((len(free_dofs), 1)))
 
-    return {'frequencies': freq_list, 'shapes': shapes_list}
+    return {
+        'frequencies': freq_list, 'shapes': shapes_list,
+        'diagnostics': diagnostics, 'success': not diagnostics,
+    }

@@ -1,10 +1,10 @@
 /**
- * Babylon.js 3D 소성곡면 렌더러 (P-Mxx-Mzz)
+ * Babylon.js 3D 소성곡면 렌더러 (P-M11-M22)
  *
  * 참조: 프로젝트개요.md §5.4 소성 해석
  * 참조: 컨버전전략.md §7 시각화 — PMMplotter.m → Babylon.js
  *
- * P-Mxx-Mzz 3D 상호작용 곡면을 인터랙티브하게 표시한다.
+ * Python plastic 해석이 반환하는 주축 P-M11-M22 상호작용 곡면을 표시한다.
  */
 
 import { Engine } from "@babylonjs/core/Engines/engine";
@@ -12,18 +12,15 @@ import { Scene } from "@babylonjs/core/scene";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
-
-import "@babylonjs/core/Meshes/Builders/linesBuilder";
+import { CreateLines } from "@babylonjs/core/Meshes/Builders/linesBuilder";
+import { createVertexColorMaterial } from "./vertexColorMaterial";
 
 export interface PlasticSurfaceData {
     P: number[];
-    Mxx: number[];
-    Mzz: number[];
+    M11: number[];
+    M22: number[];
 }
 
 export class PlasticSurfaceRenderer {
@@ -39,6 +36,8 @@ export class PlasticSurfaceRenderer {
     private _rotX = -0.7;
     private _rotY = 0.5;
     private _distance = 3;
+    private _resizeObserver: ResizeObserver | null = null;
+    private _inputAbort: AbortController | null = null;
 
     constructor(canvas: HTMLCanvasElement) {
         this._canvas = canvas;
@@ -57,9 +56,6 @@ export class PlasticSurfaceRenderer {
         this._camera.maxZ = 100;
         this._camera.detachControl();
 
-        const light = new HemisphericLight("light", new Vector3(0.5, 1, 0.3), this._scene);
-        light.intensity = 0.9;
-
         this._setupMouseControls();
 
         this._engine.runRenderLoop(() => {
@@ -67,31 +63,31 @@ export class PlasticSurfaceRenderer {
             this._scene!.render();
         });
 
-        const resizeObs = new ResizeObserver(() => this._engine?.resize());
-        resizeObs.observe(this._canvas);
+        this._resizeObserver = new ResizeObserver(() => this._engine?.resize());
+        this._resizeObserver.observe(this._canvas);
     }
 
     render(data: PlasticSurfaceData): void {
         if (!this._scene) { this.init(); }
         this._clearMeshes();
 
-        const { P, Mxx, Mzz } = data;
+        const { P, M11, M22 } = data;
         const n = P.length;
         if (n < 3) { return; }
 
         // 정규화
         const pMax = Math.max(...P.map(Math.abs)) || 1;
-        const mxxMax = Math.max(...Mxx.map(Math.abs)) || 1;
-        const mzzMax = Math.max(...Mzz.map(Math.abs)) || 1;
+        const m11Max = Math.max(...M11.map(Math.abs)) || 1;
+        const m22Max = Math.max(...M22.map(Math.abs)) || 1;
 
         // 점들을 3D 좌표로 변환
         const positions: number[] = [];
         const colors: number[] = [];
 
         for (let i = 0; i < n; i++) {
-            const x = Mzz[i] / mzzMax;
+            const x = M22[i] / m22Max;
             const y = P[i] / pMax;
-            const z = Mxx[i] / mxxMax;
+            const z = M11[i] / m11Max;
             positions.push(x, y, z);
 
             // 색상: P 양이면 빨강, 음이면 파랑
@@ -114,11 +110,7 @@ export class PlasticSurfaceRenderer {
             vertexData.colors = colors;
             vertexData.applyToMesh(mesh);
 
-            const mat = new StandardMaterial("surfMat", this._scene!);
-            mat.backFaceCulling = false;
-            mat.alpha = 0.7;
-            mat.emissiveColor = new Color3(0.3, 0.3, 0.3);
-            mesh.material = mat;
+            mesh.material = createVertexColorMaterial("plasticSurfaceMaterial", this._scene!, 0.7);
             mesh.hasVertexAlpha = true;
             this._meshes.push(mesh);
         }
@@ -132,9 +124,9 @@ export class PlasticSurfaceRenderer {
     private _addAxisLines(): void {
         const axisLen = 1.3;
         const axisColors = [
-            { dir: [axisLen, 0, 0], color: new Color3(1, 0.3, 0.3) },  // Mzz (X)
+            { dir: [axisLen, 0, 0], color: new Color3(1, 0.3, 0.3) },  // M22 (X)
             { dir: [0, axisLen, 0], color: new Color3(0.3, 1, 0.3) },  // P (Y)
-            { dir: [0, 0, axisLen], color: new Color3(0.3, 0.3, 1) },  // Mxx (Z)
+            { dir: [0, 0, axisLen], color: new Color3(0.3, 0.3, 1) },  // M11 (Z)
         ];
 
         for (const axis of axisColors) {
@@ -143,14 +135,14 @@ export class PlasticSurfaceRenderer {
                 new Vector3(-dx, -dy, -dz),
                 new Vector3(dx, dy, dz),
             ];
-            const line = MeshBuilder.CreateLines(`axis`, { points }, this._scene!);
+            const line = CreateLines(`axis`, { points }, this._scene!);
             line.color = axis.color;
             this._meshes.push(line);
         }
     }
 
     private _clearMeshes(): void {
-        for (const m of this._meshes) { m.dispose(); }
+        for (const m of this._meshes) { m.dispose(false, true); }
         this._meshes = [];
     }
 
@@ -164,11 +156,15 @@ export class PlasticSurfaceRenderer {
     }
 
     private _setupMouseControls(): void {
+        this._inputAbort?.abort();
+        this._inputAbort = new AbortController();
+        const signal = this._inputAbort.signal;
+
         this._canvas.addEventListener('pointerdown', (e: PointerEvent) => {
             this._isDragging = true;
             this._lastMouseX = e.clientX;
             this._lastMouseY = e.clientY;
-        });
+        }, { signal });
         this._canvas.addEventListener('pointermove', (e: PointerEvent) => {
             if (!this._isDragging) { return; }
             this._rotX += (e.clientX - this._lastMouseX) * 0.01;
@@ -176,20 +172,27 @@ export class PlasticSurfaceRenderer {
                 this._rotY + (e.clientY - this._lastMouseY) * 0.01));
             this._lastMouseX = e.clientX;
             this._lastMouseY = e.clientY;
-        });
-        this._canvas.addEventListener('pointerup', () => { this._isDragging = false; });
-        this._canvas.addEventListener('pointerleave', () => { this._isDragging = false; });
+        }, { signal });
+        this._canvas.addEventListener('pointerup', () => { this._isDragging = false; }, { signal });
+        this._canvas.addEventListener('pointerleave', () => { this._isDragging = false; }, { signal });
         this._canvas.addEventListener('wheel', (e: WheelEvent) => {
             this._distance *= e.deltaY > 0 ? 1.1 : 0.9;
             this._distance = Math.max(0.5, Math.min(50, this._distance));
             e.preventDefault();
-        });
+        }, { signal });
     }
 
     dispose(): void {
+        this._inputAbort?.abort();
+        this._inputAbort = null;
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
         this._clearMeshes();
         this._scene?.dispose();
         this._engine?.dispose();
+        this._camera = null;
+        this._scene = null;
+        this._engine = null;
     }
 }
 

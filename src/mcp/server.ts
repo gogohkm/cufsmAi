@@ -469,7 +469,8 @@ server.tool("set_load_case", "Set load case and automatically apply stress distr
     },
     async ({ load_case, fy, P, Mxx, Mzz }) => {
         const r = await callBridgePost('/action', {
-            action: 'set_load_case', load_case, fy: fy || 35.53, P: P || 0, Mxx: Mxx || 0, Mzz: Mzz || 0
+            action: 'set_load_case', load_case, fy: fy ?? 35.53,
+            P: P ?? 0, Mxx: Mxx ?? 0, Mzz: Mzz ?? 0
         });
         return textResult(JSON.stringify(r, null, 2));
     }
@@ -497,22 +498,22 @@ server.tool("set_boundary_condition", "Set end boundary condition",
             .describe("S-S=simply-simply, C-C=clamped-clamped, S-C=simply-clamped, C-F=clamped-free, C-G=clamped-guided"),
     },
     async ({ BC }) => {
-        const r = await callBridgePost('/action', { action: 'set_bc', BC });
+        await callBridgePost('/action', { action: 'set_bc', BC });
         return textResult(`Boundary condition set to ${BC}`);
     }
 );
 
 server.tool("set_lengths", "Set analysis half-wavelength range",
     {
-        min: z.number().describe("Minimum half-wavelength in inches"),
-        max: z.number().describe("Maximum half-wavelength in inches"),
-        n: z.number().optional().describe("Number of points (default 50)"),
+        min: z.number().positive().describe("Minimum half-wavelength in inches"),
+        max: z.number().positive().describe("Maximum half-wavelength in inches; must exceed min"),
+        n: z.number().int().min(2).max(10000).optional().describe("Number of points (default 60)"),
     },
     async ({ min, max, n }) => {
-        const r = await callBridgePost('/action', {
-            action: 'set_lengths', min, max, n: n || 60
+        await callBridgePost('/action', {
+            action: 'set_lengths', min, max, n: n ?? 60
         });
-        return textResult(`Lengths set: ${n || 60} points from ${min} to ${max}`);
+        return textResult(`Lengths set: ${n ?? 60} points from ${min} to ${max}`);
     }
 );
 
@@ -520,10 +521,10 @@ server.tool("set_lengths", "Set analysis half-wavelength range",
 // 3. ANALYSIS (3 tools)
 // ============================================================
 server.tool("run_analysis", "Run FSM buckling analysis with current settings",
-    { neigs: z.number().optional().describe("Number of eigenvalues (default 10)") },
+    { neigs: z.number().int().min(1).max(50).optional().describe("Number of eigenvalues (default 10)") },
     async ({ neigs }) => {
         const r = await callBridgePost('/action', {
-            action: 'run_analysis', neigs: neigs || 10
+            action: 'run_analysis', neigs: neigs ?? 10
         });
         return textResult(JSON.stringify(r, null, 2));
     }
@@ -701,7 +702,7 @@ server.tool("run_plastic_surface", "Generate P-Mxx-Mzz plastic interaction surfa
 server.tool("run_vibration", "Run free vibration analysis",
     { rho: z.number().optional().describe("Material density (default 1.0)") },
     async ({ rho }) => {
-        const r = await callBridgePost('/action', { action: 'vibration', rho: rho || 1.0 });
+        const r = await callBridgePost('/action', { action: 'vibration', rho: rho ?? 1.0 });
         return textResult(JSON.stringify(r, null, 2));
     }
 );
@@ -709,7 +710,7 @@ server.tool("run_vibration", "Run free vibration analysis",
 server.tool("save_project", "Save current model to .stcfsd JSON file",
     { filepath: z.string().describe("File path to save") },
     async ({ filepath }) => {
-        const r = await callBridgePost('/action', { action: 'save_project', filepath });
+        await callBridgePost('/action', { action: 'save_project', filepath });
         return textResult(`Project saved to ${filepath}`);
     }
 );
@@ -863,8 +864,8 @@ server.tool("aisi_design_combined", "Run combined axial+bending design on the cu
         KtLt: z.number().optional().describe("Effective torsional length (in)"),
         Lb: z.number().describe("Unbraced length for LTB (in)"),
         Cb: z.number().optional().describe("Moment gradient factor (default 1.0)"),
-        Cmx: z.number().optional().describe("Equivalent moment factor x-axis §C1 (default 0.85)"),
-        Cmy: z.number().optional().describe("Equivalent moment factor y-axis §C1 (default 0.85)"),
+        Cmx: z.number().optional().describe("Equivalent moment factor x-axis §C1 (safe default 1.0)"),
+        Cmy: z.number().optional().describe("Equivalent moment factor y-axis §C1 (safe default 1.0)"),
         Pu: z.number().describe("Required axial strength (kips)"),
         Mux: z.number().describe("Required moment about x-axis (kip-in)"),
         Muy: z.number().optional().describe("Required moment about y-axis (kip-in)"),
@@ -879,7 +880,7 @@ server.tool("aisi_design_combined", "Run combined axial+bending design on the cu
             Fy: Fy || 35.53, Fu: Fu || 58.02,
             KxLx, KyLy, KtLt: KtLt ?? KyLy,
             Lb, Cb: Cb || 1.0,
-            Cmx: Cmx || 0.85, Cmy: Cmy || 0.85,
+            Cmx: Cmx ?? 1.0, Cmy: Cmy ?? 1.0,
             Pu, Mux, Muy: Muy || 0, May_strength,
             Vu: Vu || 0,
         });
@@ -1074,6 +1075,7 @@ server.tool("analyze_loads", "Analyze service loads → structural analysis → 
             t_panel: z.number().optional().describe("Panel thickness in."),
             fastener_spacing: z.number().optional().describe("Fastener spacing in. (default 12)"),
             kphi_override: z.number().optional().describe("Override rotational stiffness kip-in/rad/in"),
+            kx_override: z.number().optional().describe("Override lateral stiffness kip/in/in from project-specific testing"),
         }).optional().describe("Deck/panel properties"),
     },
     async ({ member_app, span_type, span_ft, spans_ft, supports, loads, design_method, spacing_ft, laps, laps_per_support, deck }) => {
@@ -1095,13 +1097,16 @@ server.tool("calc_deck_stiffness", "Calculate deck/panel rotational (kφ) and la
         t_purlin: z.number().describe("Purlin thickness (in)"),
         fastener_spacing: z.number().optional().describe("Fastener spacing in. (default 12)"),
         flange_width: z.number().optional().describe("Flange width in. (default 2.5)"),
+        kphi_override: z.number().optional().describe("Optional tested rotational stiffness kip-in/rad/in"),
+        kx_override: z.number().optional().describe("Optional tested lateral stiffness kip/in/in"),
     },
-    async ({ t_panel, t_purlin, fastener_spacing, flange_width }) => {
+    async ({ t_panel, t_purlin, fastener_spacing, flange_width, kphi_override, kx_override }) => {
         const r = await callBridgePost('/action', {
             action: 'calc_deck_stiffness',
             t_panel, t_purlin,
-            fastener_spacing: fastener_spacing || 12,
-            flange_width: flange_width || 2.5,
+            fastener_spacing: fastener_spacing ?? 12,
+            flange_width: flange_width ?? 2.5,
+            kphi_override, kx_override,
         });
         return textResult(JSON.stringify(r, null, 2));
     }
@@ -1131,6 +1136,7 @@ server.tool("design_purlin", "Complete purlin design: analyze loads → dual StC
             t_panel: z.number().optional(),
             fastener_spacing: z.number().optional(),
             kphi_override: z.number().optional(),
+            kx_override: z.number().optional(),
         }).optional(),
     },
     async (params) => {

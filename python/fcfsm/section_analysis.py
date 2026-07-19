@@ -9,9 +9,8 @@ import math
 
 import numpy as np
 
-from cfsm.node_utils import meta_elems, base_properties
+from cfsm.node_utils import base_properties
 from cfsm.base_vectors import base_column
-from engine.properties import elemprop
 
 
 def section_analysis_fcfsm(node: np.ndarray, elem: np.ndarray,
@@ -30,7 +29,6 @@ def section_analysis_fcfsm(node: np.ndarray, elem: np.ndarray,
             'flat_elems': list, 'curved_elems': list
         }
     """
-    nnodes = node.shape[0]
     nelems = elem.shape[0]
 
     # 절점 분류 — base_properties로 모든 데이터 한번에 획득

@@ -5,7 +5,10 @@
 검증 허용 오차: 2% (프리즈매틱 해석 등 근사에 의한 허용)
 """
 
-import sys, os, math, subprocess
+import sys
+import os
+import math
+import subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 TOLERANCE = 0.02  # 2%
@@ -131,7 +134,7 @@ def test_web_crippling_example_ii1a():
 
     # IOF, Fastened, interior support (t=0.059)
     h2 = 9.0 - 2*0.059 - 2*0.1875  # = 8.507
-    r_iof2 = web_crippling(h=8.507, t=0.059, R=0.1875, N=5.0, Fy=55, support='IOF')
+    r_iof2 = web_crippling(h=h2, t=0.059, R=0.1875, N=5.0, Fy=55, support='IOF')
     all_pass &= approx(r_iof2['Pn'], 2.96, tol=0.03, label='IOF Pn (t=0.059)')
 
     return all_pass
@@ -197,7 +200,6 @@ def test_dsm_flexure_example_ii1b():
 def test_dsm_compression():
     """DSM 압축강도 — column global + local + distortional"""
     print('\n=== TEST: DSM Compression ===')
-    from design.dsm_strength import compression_local, compression_distortional
     from design.global_buckling import column_global_strength
 
     Fy = 55
@@ -349,6 +351,7 @@ def test_deck_stiffness():
     """데크 강성 — kphi 및 kx"""
     print('\n=== TEST: Deck Stiffness ===')
     from design.loads.bracing import calc_rotational_stiffness, calc_lateral_stiffness
+    from design.loads.required_strength import _calc_deck_info
 
     all_pass = True
 
@@ -360,6 +363,30 @@ def test_deck_stiffness():
     # kx: should be order of 1 kip/in./in.
     kx = calc_lateral_stiffness(t_panel=0.0179, t_purlin=0.059, fastener_spacing=12)
     all_pass &= approx(1 if 0.1 < kx < 10 else 0, 1, label=f'kx={kx:.3f} in range')
+
+    deck_auto = _calc_deck_info(
+        {'type': 'through-fastened', 't_panel': 0.0179, 'fastener_spacing': 12},
+        {'thickness': 0.059, 'flange_width': 2.5},
+    )
+    all_pass &= approx(deck_auto['kx'], 1.28, tol=0.015,
+                        label='Auto deck kx matches Example II-1C')
+    all_pass &= approx(
+        1 if deck_auto['kx_method'] == 'rp17_2_example_calibrated_approximation' else 0,
+        1, label='Auto deck kx method is disclosed',
+    )
+    deck_override = _calc_deck_info(
+        {
+            'type': 'through-fastened', 't_panel': 0.0179,
+            'fastener_spacing': 12, 'kphi_override': 0.113, 'kx_override': 1.28,
+        },
+        {'thickness': 0.059, 'flange_width': 2.5},
+    )
+    all_pass &= approx(deck_override['kphi'], 0.113, tol=1e-12,
+                        label='Test kphi override preserved')
+    all_pass &= approx(deck_override['kx'], 1.28, tol=1e-12,
+                        label='Test kx override preserved')
+    all_pass &= approx(1 if deck_override['warning'] is None else 0, 1,
+                        label='Both test overrides remove approximation warning')
 
     return all_pass
 
@@ -386,6 +413,13 @@ def test_interaction_checks():
     # H3: 0.91(P/Pn) + (M/Mn) ≤ 1.33*phi
     h3 = combined_bending_web_crippling(4.74, 4.24+2.96, 12.0, 11.3+8.66, phi=0.90)
     all_pass &= approx(h3['total'], 1.20, tol=0.02, label='H3 total (II-1A)')
+    all_pass &= approx(1 if combined_axial_bending(1, 0, 0, 1)['pass'] is False else 0, 1,
+                        label='H1 zero capacity fails')
+    all_pass &= approx(1 if combined_bending_shear(1, 0, 0, 1)['pass'] is False else 0, 1,
+                        label='H2 zero capacity fails')
+    all_pass &= approx(
+        1 if combined_bending_web_crippling(1, 0, 0, 1)['pass'] is False else 0,
+        1, label='H3 zero capacity fails')
 
     return all_pass
 
@@ -781,7 +815,6 @@ def test_dsm_boundary_minima():
     import numpy as np
     from engine.dsm import extract_dsm_values
     from engine.template import generate_section
-    from engine.properties import grosprop
 
     all_pass = True
 
@@ -889,25 +922,24 @@ def test_h3_web_configs():
     return all_pass
 
 
-def test_kx_responds_to_pss():
-    """kx 횡강성 — Pss 입력 시 결과 변화 (F-008)"""
-    print('\n=== TEST: kx Responds to Pss Input (F-008) ===')
+def test_kx_matches_reference_example():
+    """kx 횡강성 — AISI RP17-2 Example II-1C 문서값 검증"""
+    print('\n=== TEST: kx Reference Example II-1C ===')
     from design.loads.bracing import calc_lateral_stiffness
 
     all_pass = True
 
-    # Pss=0 → 근사식
-    kx_approx = calc_lateral_stiffness(t_panel=0.018, t_purlin=0.059, fastener_spacing=12)
+    kx = calc_lateral_stiffness(t_panel=0.0179, t_purlin=0.059, fastener_spacing=12)
+    all_pass &= approx(kx, 1.28, tol=0.015,
+                        label=f'Example II-1C kx={kx:.4f} ~ 1.28 kip/in/in')
 
-    # Pss 입력 → RP17-2 기반
-    kx_rp17 = calc_lateral_stiffness(t_panel=0.018, t_purlin=0.059, fastener_spacing=12,
-                                      Pss=1.8, d_screw=0.17, Fu_panel=70)
-
-    all_pass &= approx(1 if kx_approx > 0 else 0, 1, label=f'kx_approx={kx_approx:.4f} > 0')
-    all_pass &= approx(1 if kx_rp17 > 0 else 0, 1, label=f'kx_rp17={kx_rp17:.4f} > 0')
-    # 두 값이 달라야 함
-    all_pass &= approx(1 if abs(kx_approx - kx_rp17) > 0.001 else 0, 1,
-                        label=f'kx_approx={kx_approx:.4f} ≠ kx_rp17={kx_rp17:.4f}')
+    # 이전 API의 Pss 계열 인수는 검증되지 않은 별도 모델을 활성화하지 않아야 한다.
+    kx_compat = calc_lateral_stiffness(
+        t_panel=0.0179, t_purlin=0.059, fastener_spacing=12,
+        Pss=1.8, d_screw=0.17, Fu_panel=70,
+    )
+    all_pass &= approx(kx_compat, kx, tol=1e-12,
+                        label='Legacy fastener arguments preserve calibrated estimate')
 
     return all_pass
 
@@ -929,7 +961,11 @@ def test_multi_bolt_c_factor():
     Rn1 = [ls for ls in r1['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
     Rn3 = [ls for ls in r3['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
     # 3볼트 강도는 1볼트 × 3이 아님 (e/d ≠ s/d이면)
-    all_pass &= approx(1 if Rn3 > 0 else 0, 1, label=f'3-bolt Rn={Rn3:.3f} > 0')
+    all_pass &= approx(
+        1 if Rn1 > 0 and Rn3 > 0 else 0,
+        1,
+        label=f'bearing strengths: 1-bolt Rn={Rn1:.3f}, 3-bolt Rn={Rn3:.3f}',
+    )
     # e=1.5, d=0.5 → C_end=3.0; s=2.0, d=0.5 → C_int=3.0 (이 경우 동일)
     # 다른 e/s로 확인
     r3b = bolt_connection(t1=0.059, t2=0.059, d=0.5, Fy=50, Fu=65, Fub=120,
@@ -1115,7 +1151,6 @@ def test_auto_generate_uses_bending_curve_for_flexure_dsm():
     import numpy as np
     from design.aisi_s100 import _auto_generate_props
     from engine.template import generate_section
-    from engine.properties import grosprop
     from engine.fsm_solver import stripmain
     from engine.dsm import extract_dsm_values
     from models.data import GBTConfig
@@ -1127,7 +1162,6 @@ def test_auto_generate_uses_bending_curve_for_flexure_dsm():
     sec = generate_section('lippedc', {'H': 8, 'B': 2.5, 'D': 0.625, 't': 0.059, 'r': 0.157})
     node = sec['node']
     elem = sec['elem']
-    props = grosprop(node, elem)
     node_p = node.copy()
     for n in node_p:
         n[7] = 50
@@ -1438,6 +1472,160 @@ def test_flexure_design_auto_infers_multiweb_family_from_section_hint():
     return all_pass
 
 
+def test_flexure_shear_and_h3_update_governing_pass():
+    """Flexure must include G2/H2 and must not leave an H3 failure as pass=True."""
+    print('\n=== TEST: Flexure Governing Pass Includes H2 and H3 ===')
+    from design.aisi_s100 import design_member
+
+    base = {
+        'member_type': 'flexure', 'design_method': 'LRFD',
+        'section_type': 'lippedc',
+        'H': 8.0, 'B': 2.5, 'D': 0.625, 't': 0.06, 'R': 0.09,
+        'Fy': 50.0, 'Mu': 1.0, 'Lb': 0.0,
+        'dsm': {'Mcrl': 100.0, 'Mcrd': 100.0, 'My': 100.0},
+    }
+    shear_fail = design_member({**base, 'Vu': 100.0})
+    h3_fail = design_member({
+        **base, 'Vu': 100.0,
+        'wc_N': 1.0, 'wc_R': 0.1, 'wc_support': 'EOF',
+    })
+
+    all_pass = True
+    all_pass &= approx(1 if 'shear' in shear_fail else 0, 1, label='flexure returns G2 shear result')
+    all_pass &= approx(1 if shear_fail.get('shear_interaction', {}).get('pass') is False else 0, 1,
+                        label='H2 detects failure')
+    all_pass &= approx(1 if shear_fail.get('pass') is False else 0, 1,
+                        label='H2 failure updates top-level pass')
+    all_pass &= approx(1 if h3_fail.get('h3_interaction', {}).get('pass') is False else 0, 1,
+                        label='H3 detects failure')
+    all_pass &= approx(1 if h3_fail.get('pass') is False else 0, 1,
+                        label='H3 failure updates top-level pass')
+    return all_pass
+
+
+def test_b4_limits_use_section_geometry_and_complete_simple_lip_checks():
+    """UI-style section geometry must not bypass Table B4.1-1 checks."""
+    print('\n=== TEST: B4 Limits Use UI Section Geometry ===')
+    from design.aisi_s100 import check_dsm_limits
+
+    params = {
+        'member_type': 'flexure', 'Fy': 95.0,
+        'props': {'A': 1.0},
+        'section': {
+            'type': 'C', 'depth': 12.0, 'flange_width': 4.0,
+            'lip_depth': 3.0, 'thickness': 0.02, 'R_corner': 0.04,
+            'n_f': 5, 'n_le': 3, 'n_w': 5,
+        },
+    }
+    warnings = check_dsm_limits(params, 'flexure')
+    joined = '\n'.join(warnings)
+    all_pass = True
+    for token, label in (
+        ('Web h/t', 'web slenderness detected from section'),
+        ('Flange b/t', 'flange slenderness detected from section'),
+        ('d_o/b_o', 'simple-lip ratio checked'),
+        ('n_f', 'flange intermediate stiffener count checked'),
+        ('n_le', 'edge stiffener count checked'),
+        ('n_w', 'web stiffener count checked'),
+        ('Fy = 95.0', 'strict Fy < 95 ksi limit checked'),
+    ):
+        all_pass &= approx(1 if token in joined else 0, 1, label=label)
+    return all_pass
+
+
+def test_dsm_uses_modal_classification_before_wavelength_heuristic():
+    """A D-dominant cFSM label must route a single minimum to distortional buckling."""
+    print('\n=== TEST: DSM Uses cFSM Modal Classification ===')
+    from engine.dsm import extract_dsm_values
+    from engine.template import generate_section
+
+    sec = generate_section('lippedc', {'H': 8.0, 'B': 2.5, 'D': 0.625, 't': 0.06})
+    node, elem = sec['node'], sec['elem']
+    node[:, 7] = 50.0
+    curve = [
+        [[1.0, 2.0]],
+        [[5.0, 1.0]],
+        [[10.0, 2.0]],
+    ]
+    classifications = [
+        [[0.0, 10.0, 90.0, 0.0]],
+        [[0.0, 98.0, 2.0, 0.0]],
+        [[0.0, 20.0, 80.0, 0.0]],
+    ]
+    result = extract_dsm_values(
+        curve, node, elem, 50.0, 'P',
+        mode_classifications=classifications,
+    )
+    all_pass = True
+    all_pass &= approx(1 if result.get('classification_method') == 'cfsm_modal' else 0, 1,
+                        label='classification method is cfsm_modal')
+    all_pass &= approx(1 if result.get('dist_detected') else 0, 1,
+                        label='distortional minimum detected')
+    all_pass &= approx(1 if not result.get('local_detected') else 0, 1,
+                        label='D-dominant minimum not mislabeled local')
+    return all_pass
+
+
+def test_purlin_uplift_r_and_governing_wiring_contract():
+    """The integrated purlin path must apply uplift R/Vu and include uplift as a candidate."""
+    print('\n=== TEST: Purlin Uplift/R Governing Wiring ===')
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    with open(os.path.join(root, 'src', 'webview', 'StcfsdPanel.ts'), encoding='utf-8') as f:
+        panel = f.read()
+    with open(os.path.join(root, 'webview', 'js', 'app.js'), encoding='utf-8') as f:
+        app = f.read()
+    all_pass = True
+    all_pass &= approx(1 if 'R_uplift: upliftR' in panel else 0, 1, label='uplift design receives R')
+    all_pass &= approx(1 if 'Vu: upliftVu' in panel else 0, 1, label='uplift design receives Vu')
+    all_pass &= approx(1 if "['양력', data.design_uplift]" in app else 0, 1,
+                        label='uplift included in governing candidates')
+    return all_pass
+
+
+def test_unsupported_sections_require_rational_global_buckling_input():
+    """L/hat 등 비대칭 단면에 C/Z 전역좌굴 폐형식을 자동 적용하면 안 된다."""
+    print('\n=== TEST: Unsupported Shapes Require Rational Global Buckling ===')
+    from design.aisi_s100 import design_member
+    from design.global_buckling import compute_beam_Fcre, compute_column_Fcre
+
+    props = {
+        'A': 1.0, 'Sf': 2.0, 'Sxx': 2.0, 'Ixx': 8.0, 'Izz': 1.0,
+        'rx': 2.8, 'ry': 1.0, 'J': 0.02, 'Cw': 2.0, 'xo': 0.5,
+        'section_type': 'angle', 't': 0.08, 'h_web': 6.0,
+        'b_flange': 2.0, 'd_lip': 0.5,
+    }
+    column = compute_column_Fcre(props, 50.0, 120.0, 120.0, 120.0)
+    beam = compute_beam_Fcre(props, 1.0, 120.0, section_type='angle')
+    base = {
+        'member_type': 'flexure', 'section_type': 'angle', 'Fy': 50.0,
+        'Mu': 1.0, 'Lb': 120.0, 'props': props,
+        'dsm': {'Mcrl': 100.0, 'Mcrd': 100.0, 'My': 100.0},
+    }
+    blocked = design_member(base)
+    supplied = design_member({**base, 'Fcre': 100.0})
+    verified_no_dist = design_member({
+        **base, 'section_type': 'hat', 'Fcre': 100.0,
+        'dsm': {
+            'Mcrl': 100.0, 'Mcrd': 0.0, 'My': 100.0,
+            'classification_method': 'cfsm_modal',
+            'local_detected': True, 'dist_detected': False,
+        },
+    })
+
+    all_pass = True
+    all_pass &= approx(1 if column.get('unsupported') else 0, 1,
+                        label='unmapped symmetry-axis section rejected')
+    all_pass &= approx(beam, 0.0, label='unimplemented F2.1.2 orientation rejected')
+    all_pass &= approx(blocked.get('Mn', -1), 0.0, label='unsupported formula gives no false strength')
+    all_pass &= approx(1 if any('F2.1.2' in w for w in blocked.get('warnings', [])) else 0, 1,
+                        label='rational-analysis warning surfaced')
+    all_pass &= approx(1 if supplied.get('Mn', 0) > 0 else 0, 1,
+                        label='explicit rational Fcre is accepted')
+    all_pass &= approx(1 if not verified_no_dist.get('distortional_not_evaluated') else 0, 1,
+                        label='verified absence of distortional mode is accepted')
+    return all_pass
+
+
 # ============================================================
 # 실행
 # ============================================================
@@ -1475,7 +1663,7 @@ if __name__ == '__main__':
         test_uplift_combo_reaction_based,
         test_auto_generate_passes_corner_radius,
         test_h3_web_configs,
-        test_kx_responds_to_pss,
+        test_kx_matches_reference_example,
         test_multi_bolt_c_factor,
         test_beam_fe_solve_flag,
         test_screw_connection_interpolation_and_pullover,
@@ -1491,6 +1679,11 @@ if __name__ == '__main__':
         test_webview_design_prepare_contract,
         test_flexure_design_auto_infers_hat_family_and_webs,
         test_flexure_design_auto_infers_multiweb_family_from_section_hint,
+        test_flexure_shear_and_h3_update_governing_pass,
+        test_b4_limits_use_section_geometry_and_complete_simple_lip_checks,
+        test_dsm_uses_modal_classification_before_wavelength_heuristic,
+        test_purlin_uplift_r_and_governing_wiring_contract,
+        test_unsupported_sections_require_rational_global_buckling_input,
     ]
 
     results = {}

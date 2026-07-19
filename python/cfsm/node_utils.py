@@ -388,9 +388,6 @@ def base_properties(node, elem):
         ndm, nlm: mode counts
         DOFperm: DOF permutation matrix
     """
-    nnodes = node.shape[0]
-    nelems = elem.shape[0]
-
     elprop_arr = elemprop(node, elem)
     m_node, m_elem, node_prop = meta_elems(node, elem)
     nmno, ncno, nsno = node_class(node_prop)

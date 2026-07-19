@@ -4,7 +4,6 @@
 비등단면(랩 구간 Ix 합산)도 지원한다.
 """
 
-import math
 from typing import List, Tuple, Optional
 
 # ---------------------------------------------------------------------------
@@ -246,7 +245,6 @@ def analyze_continuous_beam_general(
 
     # 비등단면 계수 (Ix_list가 있으면 L/I 비율 사용)
     if Ix_list and len(Ix_list) == n_spans:
-        I_ref = Ix_list[0]  # 기준 Ix
         LI_ratio = [spans[i] / Ix_list[i] if Ix_list[i] > 0 else spans[i]
                      for i in range(n_spans)]
         wLI_ratio = [w_list[i] * spans[i] ** 3 / (4.0 * Ix_list[i])
@@ -699,7 +697,6 @@ def compute_deflection_variable_I(
     E = E_ksi
     x_in = [x * 12.0 for x in result.x]
     M_kipin = [m * 12.0 for m in result.M]
-    total_L_ft = sum(spans)
 
     # --- 지점 x좌표 (ft → in) ---
     sup_x_in = [0.0]
@@ -1143,7 +1140,6 @@ def _solve_tridiagonal(A: list, b: list) -> list:
         b_i = A[i][i]
         c_i = A[i][i + 1] if i < n - 1 else 0
 
-        m = a_i / (b_i - a_i * c[i - 1]) if (b_i - a_i * c[i - 1]) != 0 else 0
         # Recalculate
         denom = b_i - a_i * c[i - 1]
         if abs(denom) < 1e-15:

@@ -42,7 +42,6 @@ def _cutwp_prop2(coord, ends):
         node_list.append(int(ends[i, 1]))
 
     unique_nodes = set(node_list)
-    nnode = len(unique_nodes)
     j_count = 0  # number of 2-element joints
     for n in unique_nodes:
         cnt = node_list.count(n)
@@ -131,8 +130,11 @@ def _cutwp_prop2(coord, ends):
             p[i] = ((coord[sn, 0] - xc) * (coord[fn, 1] - yc) -
                      (coord[fn, 0] - xc) * (coord[sn, 1] - yc)) / L[i]
         J = 4 * np.sum(p * L / 2)**2 / np.sum(L / t)
-        xs = np.nan; ys = np.nan; Cw = np.nan
-        B1_val = np.nan; B2_val = np.nan
+        xs = np.nan
+        ys = np.nan
+        Cw = np.nan
+        B1_val = np.nan
+        B2_val = np.nan
         wn = np.full(nnode_total, np.nan)
         return A, xc, yc, Ix, Iy, Ixy, theta, I1, I2, J, xs, ys, Cw, B1_val, B2_val, wn
 
@@ -270,16 +272,16 @@ def _cutwp_prop2(coord, ends):
 
     # Shear center in principal coordinates
     s12 = rot @ np.array([xs - xc, ys - yc])
-    ro = math.sqrt((I1 + I2) / A + s12[0]**2 + s12[1]**2)
-
     # B1 and B2
     B1_val = 0.0
     B2_val = 0.0
     for i in range(nele):
         sn = int(ends[i, 0]) - 1
         fn = int(ends[i, 1]) - 1
-        x1 = coord12[sn, 0]; y1 = coord12[sn, 1]
-        x2 = coord12[fn, 0]; y2 = coord12[fn, 1]
+        x1 = coord12[sn, 0]
+        y1 = coord12[sn, 1]
+        x2 = coord12[fn, 0]
+        y2 = coord12[fn, 1]
         B1_val += ((y1 + y2) * (y1**2 + y2**2) / 4 +
                    (y1 * (2 * x1**2 + (x1 + x2)**2) + y2 * (2 * x2**2 + (x1 + x2)**2)) / 12) * L[i] * t[i]
         B2_val += ((x1 + x2) * (x1**2 + x2**2) / 4 +
@@ -563,7 +565,6 @@ def base_vectors(dy, elem, elprop_arr, a, m, node_prop, nmno, ncno, nsno,
     # ---------------------------------------------------------------
     # OTHER MODES
     # ---------------------------------------------------------------
-    nom = ndof - ngdm - nlm
     b_v_m[:ndof, ngdm + nlm:ngdm + nlm + 2 * nel] = 0.0
 
     for i in range(nel):
@@ -720,7 +721,6 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
             K = None
             Kg = None
             if normal in (2, 3) or ospace in (2, 3) or orth in (2, 3):
-                nelems = elem.shape[0]
                 elprop_arr = elemprop(node, elem)
                 node_work = node.copy()
                 if orth in (1, 2):
@@ -778,7 +778,7 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
                                     eigvals, V = la.eig(Ksub, Kgsub)
                                     eigvals = np.real(eigvals)
                                     V = np.real(V)
-                                except:
+                                except Exception:
                                     continue
 
                             idx_sort = np.argsort(np.real(eigvals))
@@ -820,7 +820,6 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
         K = None
         Kg = None
         if normal in (2, 3) or ospace in (2, 3) or orth in (2, 3):
-            nelems = elem.shape[0]
             elprop_arr = elemprop(node, elem)
             node_work = node.copy()
             if orth in (1, 2):
@@ -871,7 +870,7 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
                 A_null = la.null_space(b_v_GDL.T)
                 try:
                     b_v_O = np.linalg.solve(K, A_null)
-                except:
+                except Exception:
                     b_v_O = A_null
                 for ml in range(totalm):
                     b_v[ml * ndof_m + dofindex[3, 0]:ml * ndof_m + dofindex[3, 1] + 1,
@@ -880,7 +879,7 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
                 A_null = la.null_space(b_v_GDL.T)
                 try:
                     b_v_O = np.linalg.solve(Kg, A_null)
-                except:
+                except Exception:
                     b_v_O = A_null
             elif ospace == 5:
                 A_null = la.null_space(b_v_GDL.T)
@@ -905,7 +904,7 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
                                 eigvals, V = la.eig(Ksub, Kgsub)
                                 eigvals = np.real(eigvals)
                                 V = np.real(V)
-                            except:
+                            except Exception:
                                 V = np.eye(Bsub.shape[1])
                                 eigvals = np.ones(Bsub.shape[1])
 

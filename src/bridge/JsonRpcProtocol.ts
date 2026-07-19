@@ -81,10 +81,10 @@ export class JsonRpcProtocol {
     }
 
     /** 모든 보류 요청 취소 */
-    dispose(): void {
-        for (const [id, pending] of this._pending) {
+    dispose(reason: string = 'Protocol disposed'): void {
+        for (const pending of this._pending.values()) {
             clearTimeout(pending.timer);
-            pending.reject(new Error('Protocol disposed'));
+            pending.reject(new Error(reason));
         }
         this._pending.clear();
     }

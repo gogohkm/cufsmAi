@@ -7,23 +7,18 @@
  * - Engine + Scene 초기화
  * - useRightHandedSystem (구조공학 좌표계)
  * - FreeCamera (직교/원근 전환)
- * - StandardMaterial + backFaceCulling: false
+ * - 정점색 전용 경량 셰이더 + 양면 렌더링
  */
 
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
-import { Camera } from "@babylonjs/core/Cameras/camera";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
-import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
-import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
-
-// side-effect imports for mesh builders
-import "@babylonjs/core/Meshes/Builders/linesBuilder";
+import { CreateLines } from "@babylonjs/core/Meshes/Builders/linesBuilder";
+import { createVertexColorMaterial } from "./vertexColorMaterial";
 
 export interface ModeShape3DData {
     nodes: number[][];    // [[node#, x, z, ...], ...]
@@ -53,6 +48,8 @@ export class ModeShape3DRenderer {
     private _targetX = 0;
     private _targetY = 0;
     private _targetZ = 0;
+    private _resizeObserver: ResizeObserver | null = null;
+    private _inputAbort: AbortController | null = null;
 
     constructor(canvas: HTMLCanvasElement) {
         this._canvas = canvas;
@@ -76,16 +73,6 @@ export class ModeShape3DRenderer {
         this._camera.maxZ = 10000;
         this._camera.detachControl();
 
-        // 조명 — 금속 질감을 위한 2광원
-        const light1 = new HemisphericLight("light1", new Vector3(0.3, 1, 0.5), this._scene);
-        light1.intensity = 0.85;
-        light1.diffuse = new Color3(1, 0.98, 0.95);
-        light1.groundColor = new Color3(0.3, 0.35, 0.4); // 바닥 반사 (그림자 효과)
-
-        const light2 = new HemisphericLight("light2", new Vector3(-0.5, -0.3, -1), this._scene);
-        light2.intensity = 0.3;
-        light2.diffuse = new Color3(0.7, 0.8, 1.0); // 파란 보조광
-
         // 마우스 인터랙션
         this._setupMouseControls();
 
@@ -96,8 +83,8 @@ export class ModeShape3DRenderer {
         });
 
         // 리사이즈
-        const resizeObs = new ResizeObserver(() => this._engine?.resize());
-        resizeObs.observe(this._canvas);
+        this._resizeObserver = new ResizeObserver(() => this._engine?.resize());
+        this._resizeObserver.observe(this._canvas);
     }
 
     render(data: ModeShape3DData): void {
@@ -230,13 +217,7 @@ export class ModeShape3DRenderer {
         vertexData.colors = colors;
         vertexData.applyToMesh(mesh);
 
-        const mat = new StandardMaterial("mat", this._scene!);
-        mat.backFaceCulling = false;
-        mat.diffuseColor = new Color3(0.8, 0.8, 0.82);  // 밝은 금속
-        mat.specularColor = new Color3(0.5, 0.5, 0.5);   // 광택 반사
-        mat.specularPower = 32;
-        mat.emissiveColor = new Color3(0.15, 0.15, 0.15);
-        mesh.material = mat;
+        mesh.material = createVertexColorMaterial("modeShapeMaterial", this._scene!);
         mesh.hasVertexAlpha = false;
         this._mesh = mesh;
 
@@ -268,7 +249,7 @@ export class ModeShape3DRenderer {
                 ));
             }
             if (points.length > 1) {
-                const lines = MeshBuilder.CreateLines(
+                const lines = CreateLines(
                     `outline_${yPos}`,
                     { points },
                     this._scene!
@@ -280,9 +261,9 @@ export class ModeShape3DRenderer {
     }
 
     private _clearMeshes(): void {
-        this._mesh?.dispose();
+        this._mesh?.dispose(false, true);
         this._mesh = null;
-        for (const w of this._wireframes) { w.dispose(); }
+        for (const w of this._wireframes) { w.dispose(false, true); }
         this._wireframes = [];
     }
 
@@ -296,6 +277,10 @@ export class ModeShape3DRenderer {
     }
 
     private _setupMouseControls(): void {
+        this._inputAbort?.abort();
+        this._inputAbort = new AbortController();
+        const signal = this._inputAbort.signal;
+
         this._canvas.addEventListener('pointerdown', (e: PointerEvent) => {
             // 우클릭 또는 Shift+좌클릭 → 팬, 좌클릭 → 회전
             if (e.button === 2 || (e.button === 0 && e.shiftKey)) {
@@ -308,7 +293,7 @@ export class ModeShape3DRenderer {
             this._lastMouseX = e.clientX;
             this._lastMouseY = e.clientY;
             e.preventDefault();
-        });
+        }, { signal });
 
         this._canvas.addEventListener('pointermove', (e: PointerEvent) => {
             const dx = e.clientX - this._lastMouseX;
@@ -329,25 +314,25 @@ export class ModeShape3DRenderer {
                 this._targetZ += (dx * sinR) * panSpeed;
                 this._targetY += dy * panSpeed;
             }
-        });
+        }, { signal });
 
         this._canvas.addEventListener('pointerup', () => {
             this._isDragging = false;
             this._isPanning = false;
-        });
+        }, { signal });
         this._canvas.addEventListener('pointerleave', () => {
             this._isDragging = false;
             this._isPanning = false;
-        });
+        }, { signal });
 
         // 우클릭 컨텍스트 메뉴 방지
-        this._canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+        this._canvas.addEventListener('contextmenu', (e) => e.preventDefault(), { signal });
 
         this._canvas.addEventListener('wheel', (e: WheelEvent) => {
             this._distance *= e.deltaY > 0 ? 1.1 : 0.9;
             this._distance = Math.max(0.5, Math.min(50000, this._distance));
             e.preventDefault();
-        });
+        }, { signal });
 
         // 더블클릭 → 뷰 초기화
         this._canvas.addEventListener('dblclick', () => {
@@ -356,10 +341,14 @@ export class ModeShape3DRenderer {
             this._targetZ = 0;
             this._rotX = -0.5;
             this._rotY = 0.4;
-        });
+        }, { signal });
     }
 
     dispose(): void {
+        this._inputAbort?.abort();
+        this._inputAbort = null;
+        this._resizeObserver?.disconnect();
+        this._resizeObserver = null;
         this._clearMeshes();
         this._scene?.dispose();
         this._engine?.dispose();

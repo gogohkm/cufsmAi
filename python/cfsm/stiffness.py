@@ -8,7 +8,6 @@ Authors (original MATLAB): S. Adany, B. Schafer, Z. Li
 """
 
 import numpy as np
-from scipy import sparse
 import math
 import sys
 import os
@@ -478,15 +477,39 @@ def assemble_m(K, Kg, k, kg, nodei, nodej, nnodes):
         (K, Kg): updated matrices
     """
     # Extract 2x2 submatrices
-    k11 = k[0:2, 0:2];  k12 = k[0:2, 2:4];  k13 = k[0:2, 4:6];  k14 = k[0:2, 6:8]
-    k21 = k[2:4, 0:2];  k22 = k[2:4, 2:4];  k23 = k[2:4, 4:6];  k24 = k[2:4, 6:8]
-    k31 = k[4:6, 0:2];  k32 = k[4:6, 2:4];  k33 = k[4:6, 4:6];  k34 = k[4:6, 6:8]
-    k41 = k[6:8, 0:2];  k42 = k[6:8, 2:4];  k43 = k[6:8, 4:6];  k44 = k[6:8, 6:8]
+    k11 = k[0:2, 0:2]
+    k12 = k[0:2, 2:4]
+    k13 = k[0:2, 4:6]
+    k14 = k[0:2, 6:8]
+    k21 = k[2:4, 0:2]
+    k22 = k[2:4, 2:4]
+    k23 = k[2:4, 4:6]
+    k24 = k[2:4, 6:8]
+    k31 = k[4:6, 0:2]
+    k32 = k[4:6, 2:4]
+    k33 = k[4:6, 4:6]
+    k34 = k[4:6, 6:8]
+    k41 = k[6:8, 0:2]
+    k42 = k[6:8, 2:4]
+    k43 = k[6:8, 4:6]
+    k44 = k[6:8, 6:8]
 
-    kg11 = kg[0:2, 0:2]; kg12 = kg[0:2, 2:4]; kg13 = kg[0:2, 4:6]; kg14 = kg[0:2, 6:8]
-    kg21 = kg[2:4, 0:2]; kg22 = kg[2:4, 2:4]; kg23 = kg[2:4, 4:6]; kg24 = kg[2:4, 6:8]
-    kg31 = kg[4:6, 0:2]; kg32 = kg[4:6, 2:4]; kg33 = kg[4:6, 4:6]; kg34 = kg[4:6, 6:8]
-    kg41 = kg[6:8, 0:2]; kg42 = kg[6:8, 2:4]; kg43 = kg[6:8, 4:6]; kg44 = kg[6:8, 6:8]
+    kg11 = kg[0:2, 0:2]
+    kg12 = kg[0:2, 2:4]
+    kg13 = kg[0:2, 4:6]
+    kg14 = kg[0:2, 6:8]
+    kg21 = kg[2:4, 0:2]
+    kg22 = kg[2:4, 2:4]
+    kg23 = kg[2:4, 4:6]
+    kg24 = kg[2:4, 6:8]
+    kg31 = kg[4:6, 0:2]
+    kg32 = kg[4:6, 2:4]
+    kg33 = kg[4:6, 4:6]
+    kg34 = kg[4:6, 6:8]
+    kg41 = kg[6:8, 0:2]
+    kg42 = kg[6:8, 2:4]
+    kg43 = kg[6:8, 4:6]
+    kg44 = kg[6:8, 6:8]
 
     skip = 2 * nnodes
     ni = nodei  # 1-based
@@ -498,16 +521,40 @@ def assemble_m(K, Kg, k, kg, nodei, nodej, nnodes):
     sj = slice(skip + 2 * (nj - 1), skip + 2 * nj)
 
     # K assembly
-    K[ri, ri] += k11;  K[ri, rj] += k12;  K[rj, ri] += k21;  K[rj, rj] += k22
-    K[si, si] += k33;  K[si, sj] += k34;  K[sj, si] += k43;  K[sj, sj] += k44
-    K[ri, si] += k13;  K[ri, sj] += k14;  K[rj, si] += k23;  K[rj, sj] += k24
-    K[si, ri] += k31;  K[si, rj] += k32;  K[sj, ri] += k41;  K[sj, rj] += k42
+    K[ri, ri] += k11
+    K[ri, rj] += k12
+    K[rj, ri] += k21
+    K[rj, rj] += k22
+    K[si, si] += k33
+    K[si, sj] += k34
+    K[sj, si] += k43
+    K[sj, sj] += k44
+    K[ri, si] += k13
+    K[ri, sj] += k14
+    K[rj, si] += k23
+    K[rj, sj] += k24
+    K[si, ri] += k31
+    K[si, rj] += k32
+    K[sj, ri] += k41
+    K[sj, rj] += k42
 
     # Kg assembly
-    Kg[ri, ri] += kg11; Kg[ri, rj] += kg12; Kg[rj, ri] += kg21; Kg[rj, rj] += kg22
-    Kg[si, si] += kg33; Kg[si, sj] += kg34; Kg[sj, si] += kg43; Kg[sj, sj] += kg44
-    Kg[ri, si] += kg13; Kg[ri, sj] += kg14; Kg[rj, si] += kg23; Kg[rj, sj] += kg24
-    Kg[si, ri] += kg31; Kg[si, rj] += kg32; Kg[sj, ri] += kg41; Kg[sj, rj] += kg42
+    Kg[ri, ri] += kg11
+    Kg[ri, rj] += kg12
+    Kg[rj, ri] += kg21
+    Kg[rj, rj] += kg22
+    Kg[si, si] += kg33
+    Kg[si, sj] += kg34
+    Kg[sj, si] += kg43
+    Kg[sj, sj] += kg44
+    Kg[ri, si] += kg13
+    Kg[ri, sj] += kg14
+    Kg[rj, si] += kg23
+    Kg[rj, sj] += kg24
+    Kg[si, ri] += kg31
+    Kg[si, rj] += kg32
+    Kg[sj, ri] += kg41
+    Kg[sj, rj] += kg42
 
     return K, Kg
 

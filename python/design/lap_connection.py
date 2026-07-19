@@ -51,7 +51,6 @@ def design_lap_connection(params: dict) -> dict:
 
     # Step 1: Lap 길이 검증 (§I6.2.1(g))
     min_lap = 1.5 * d
-    lap_total = lap_left + lap_right
     lap_each = min(lap_left, lap_right) if lap_left > 0 and lap_right > 0 else max(lap_left, lap_right)
 
     lap_ok = lap_each >= min_lap
@@ -299,7 +298,6 @@ def design_lap_connection(params: dict) -> dict:
     # (b) 지점부 휨-전단 상호작용(§H2)이며, 아래에서 별도로 처리한다.
     # Mn_lap = Se × Fy × 2 (동일 단면 2겹, AISI Example II-2A 방식)
     Se = params.get('Se', 0) or params.get('Sf', 0)  # 유효 단면계수
-    Sf = params.get('Sf', Se)  # 총 단면계수
 
     # §H2 검토용 전단강도 Vn: 미입력이면 §G2.1(비보강 웹)로 직접 산정한다 —
     # 본 도구는 d, t, Fy를 이미 보유하므로 외부 입력에 의존할 이유가 없다.

@@ -19,7 +19,6 @@ import math
 
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import eigsh
 
 from .element import klocal, kglocal, spring_klocal
 from .transform import trans, spring_trans
@@ -57,6 +56,7 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
 
     curve_list = []
     shapes_list = []
+    diagnostics = []
 
     for length_idx in range(len(lengths)):
         a = lengths[length_idx]
@@ -218,6 +218,11 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         n_free = Kff.shape[0]
         n_eigs = max(min(2 * neigs, n_free), 1)
         if n_free <= 0:
+            diagnostics.append({
+                'severity': 'error', 'code': 'NO_FREE_DOF',
+                'length_index': length_idx, 'length': float(a),
+                'message': 'No free degrees of freedom remain after constraints.',
+            })
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
             continue
@@ -229,7 +234,12 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             # 일반화 고유치 문제: K*x = lambda*Kg*x
             eigenvalues, eigenvectors = _solve_eigenproblem(
                 Kff, Kgff_sym, n_eigs)
-        except Exception:
+        except Exception as exc:
+            diagnostics.append({
+                'severity': 'error', 'code': 'EIGENSOLVE_FAILED',
+                'length_index': length_idx, 'length': float(a),
+                'message': f'{type(exc).__name__}: {exc}',
+            })
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
             continue
@@ -243,6 +253,11 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             & np.isfinite(np.real(eigenvalues))
         )[0]
         if len(valid) == 0:
+            diagnostics.append({
+                'severity': 'error', 'code': 'NO_POSITIVE_EIGENVALUE',
+                'length_index': length_idx, 'length': float(a),
+                'message': 'The eigensolver returned no finite positive real eigenvalue.',
+            })
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
             continue
@@ -281,7 +296,8 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
 
         shapes_list.append(full_modes)
 
-    return CufsmResult(curve=curve_list, shapes=shapes_list)
+    return CufsmResult(curve=curve_list, shapes=shapes_list,
+                       diagnostics=diagnostics)
 
 
 def _get_free_dofs(node: np.ndarray, nnodes: int, totalm: int) -> np.ndarray:

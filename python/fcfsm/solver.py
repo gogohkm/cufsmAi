@@ -15,7 +15,6 @@ from engine.transform import trans
 from engine.assembly import assemble
 from engine.properties import elemprop
 from engine.fsm_solver import _get_free_dofs
-from models.data import CufsmResult
 from fcfsm.section_analysis import section_analysis_fcfsm
 
 from scipy import sparse
@@ -40,6 +39,7 @@ def stripmain_fcfsm(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
     curve_list = []
     shapes_list = []
     clas_list = []
+    diagnostics = []
 
     # fcFSM 단면 해석 — 구속행렬 생성
     sec_data = section_analysis_fcfsm(node, elem, prop)
@@ -72,8 +72,10 @@ def stripmain_fcfsm(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
 
             b = elprop[e, 1]
             alpha = elprop[e, 2]
-            Ty1 = node[ni - 1, 7]
-            Ty2 = node[nj - 1, 7]
+            # kglocal expects longitudinal stress resultant (stress × thickness),
+            # identical to the conventional FSM solver.
+            Ty1 = node[ni - 1, 7] * t
+            Ty2 = node[nj - 1, 7] * t
 
             k_loc = klocal(Ex, Ey, vx, vy, G, t, a, b, BC, m_a)
             kg_loc = kglocal(a, b, Ty1, Ty2, BC, m_a)
@@ -86,22 +88,44 @@ def stripmain_fcfsm(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         Kgff = Kg.tocsr()[free_dofs, :][:, free_dofs].toarray()
         Kgff_sym = (Kgff + Kgff.T) / 2.0
 
-        try:
-            eigenvalues, eigenvectors = eig(Kff, Kgff_sym)
-            # tolerance-based real-positive-finite filter (cf. engine.fsm_solver / stripmain.m:364):
-            # keep modes with sub-1e-5 imaginary roundoff, reject inf from singular Kg
-            valid = np.where(
-                (np.abs(np.imag(eigenvalues)) < 1e-5)
-                & (np.real(eigenvalues) > 0)
-                & np.isfinite(np.real(eigenvalues)))[0]
-            lf = np.real(eigenvalues[valid])
-            modes = np.real(eigenvectors[:, valid])
-            sort_idx = np.argsort(lf)
-            lf = lf[sort_idx[:neigs]]
-            modes = modes[:, sort_idx[:neigs]]
-        except Exception:
+        if len(free_dofs) == 0:
+            diagnostics.append({
+                'severity': 'error', 'code': 'NO_FREE_DOF',
+                'length_index': l_idx, 'length': float(a),
+                'message': 'No free degrees of freedom remain after constraints.',
+            })
             lf = np.array([0.0])
-            modes = np.zeros((len(free_dofs), 1))
+            modes = np.zeros((0, 1))
+        else:
+            try:
+                eigenvalues, eigenvectors = eig(Kff, Kgff_sym)
+                # tolerance-based real-positive-finite filter (cf. engine.fsm_solver / stripmain.m:364):
+                # keep modes with sub-1e-5 imaginary roundoff, reject inf from singular Kg
+                valid = np.where(
+                    (np.abs(np.imag(eigenvalues)) < 1e-5)
+                    & (np.real(eigenvalues) > 0)
+                    & np.isfinite(np.real(eigenvalues)))[0]
+                lf = np.real(eigenvalues[valid])
+                modes = np.real(eigenvectors[:, valid])
+                sort_idx = np.argsort(lf)
+                lf = lf[sort_idx[:neigs]]
+                modes = modes[:, sort_idx[:neigs]]
+                if len(lf) == 0:
+                    diagnostics.append({
+                        'severity': 'error', 'code': 'NO_POSITIVE_EIGENVALUE',
+                        'length_index': l_idx, 'length': float(a),
+                        'message': 'The eigensolver returned no finite positive real eigenvalue.',
+                    })
+                    lf = np.array([0.0])
+                    modes = np.zeros((len(free_dofs), 1))
+            except Exception as exc:
+                diagnostics.append({
+                    'severity': 'error', 'code': 'EIGENSOLVE_FAILED',
+                    'length_index': l_idx, 'length': float(a),
+                    'message': f'{type(exc).__name__}: {exc}',
+                })
+                lf = np.array([0.0])
+                modes = np.zeros((len(free_dofs), 1))
 
         # 곡선
         n_modes = len(lf)
@@ -128,6 +152,8 @@ def stripmain_fcfsm(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
         'curve': curve_list,
         'shapes': shapes_list,
         'classification': clas_list,
+        'diagnostics': diagnostics,
+        'success': not diagnostics,
     }
 
 
@@ -171,7 +197,7 @@ def _classify_fcfsm(modes: np.ndarray, sec_data: dict,
                 cl_d += np.sum(np.abs(coeffs[ngm:ngm+ndm])**2)
                 cl_l += np.sum(np.abs(coeffs[ngm+ndm:ngm+ndm+nlm])**2)
                 cl_o += np.sum(np.abs(coeffs[ngm+ndm+nlm:])**2)
-            except Exception as e:
+            except Exception:
                 pass  # classification coefficient solve failed
 
         total = cl_g + cl_d + cl_l + cl_o
