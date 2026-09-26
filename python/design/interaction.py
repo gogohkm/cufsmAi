@@ -51,7 +51,7 @@ def combined_bending_shear(M: float, Mao: float,
 
 def combined_bending_web_crippling(P: float, Pn: float,
                                     M: float, Mnfo: float,
-                                    phi: float = 0.90,
+                                    phi: float = None,
                                     web_config: str = 'single',
                                     design_method: str = 'LRFD',
                                     omega: float = 1.70) -> dict:
@@ -71,7 +71,8 @@ def combined_bending_web_crippling(P: float, Pn: float,
     Args:
         P, Pn:   소요/공칭 집중하중(웹 크리플링) (kips)
         M, Mnfo: 소요/공칭 휨강도 (kip-in)
-        phi:     LRFD/LSD 저항계수 (LRFD=0.90; LSD H3-1/H3-2=0.75, H3-3=0.80)
+        phi:     LRFD/LSD 저항계수. None이면 LRFD 기본 0.90. LSD는 식별 φ 필수
+                 (H3-1/H3-2=0.75, H3-3=0.80) — 미제공 시 ValueError.
         web_config: 'single' | 'multi_web' | 'nested_z'
         design_method: 'LRFD' | 'LSD' | 'ASD'
         omega:   ASD 안전계수 (§H3 Eq. H3-1a/H3-2a/H3-3a 모두 Ω=1.70)
@@ -104,9 +105,17 @@ def combined_bending_web_crippling(P: float, Pn: float,
     if method == 'ASD':
         # Conservative, spec-correct: Ω = 1.70 for Eq. H3-1a/H3-2a/H3-3a.
         limit = limit_coef / omega
-    else:
-        # LRFD/LSD: limit_coef · φ (φ supplied by caller; LRFD=0.90).
+    elif method == 'LSD':
+        # LSD φ differs by equation (H3-1/H3-2: 0.75, H3-3: 0.80) — no silent
+        # LRFD default allowed; caller must supply φ explicitly.
+        if phi is None:
+            raise ValueError(
+                'H3 LSD requires explicit phi (0.75 for H3-1/H3-2, 0.80 for H3-3); '
+                'refusing to fall back to the LRFD default 0.90.')
         limit = limit_coef * phi
+    else:
+        # LRFD: limit_coef · φ (default 0.90 when caller omits φ).
+        limit = limit_coef * (phi if phi is not None else 0.90)
 
     total = p_term + m_term
 

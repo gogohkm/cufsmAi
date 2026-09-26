@@ -19,8 +19,6 @@
     let lastDsmResult = null;
     /** 설계 결과 (Report용) */
     let _lastDesignResult = null;
-    /** 퍼린 전체 설계 결과 */
-    let _lastPurlinDesignResult = null;
     /** 단면 성질 (Report용) */
     let lastProps = null;
     /** 하중 분석 결과 */
@@ -266,7 +264,6 @@
                 analysisResult = null;
                 lastDsmResult = null;
                 _lastDesignResult = null;
-                _lastPurlinDesignResult = null;
                 setStatus('Analysis invalidated: ' + ((msg.data && msg.data.reason) || 'model changed'), 'warn');
                 updateDesignDsmStatus();
                 sendTreeUpdate();
@@ -350,19 +347,16 @@
                 break;
             case 'designResult':
                 if (msg.data && msg.data.design_positive) {
-                    _lastPurlinDesignResult = msg.data;
                     _lastLoadAnalysis = msg.data.load_analysis || _lastLoadAnalysis;
                     _lastDesignResult = _pickGoverningPurlinDesign(msg.data);
                     renderDesignResult(_lastDesignResult);
                 } else {
-                    _lastPurlinDesignResult = null;
                     _lastDesignResult = msg.data;
                     renderDesignResult(msg.data);
                 }
                 sendTreeUpdate();
                 break;
             case 'designPurlinResult':
-                _lastPurlinDesignResult = msg.data;
                 _lastLoadAnalysis = msg.data?.load_analysis || _lastLoadAnalysis;
                 _lastDesignResult = _pickGoverningPurlinDesign(msg.data);
                 renderDesignResult(_lastDesignResult);
@@ -1174,7 +1168,7 @@
         // 부재 픽셀 치수
         var pxD = dMem * scV;        // 부재 높이 px
         var pxT = Math.max(tMem * scV, 1.5);  // 두께 px (최소 1.5)
-        var pxB = bFlange * scV;     // 플랜지폭 px
+        // (플랜지폭 px: 측면도에서 미사용 — 단면도에만 csPxB 사용)
         var pxC = cLip * scV;        // 립 높이 px
         var gap = Math.max(pxT * 0.6, 2);  // 부재 간 간격 px
 
@@ -1261,7 +1255,7 @@
         var nLeftF = Math.ceil(nPerRow / 2);
         var nRightF = nPerRow - nLeftF;
         for (var i = 0; i < nLeftF; i++) fXarr.push(lapLx + (edgeDist + i * spacing) * scH);
-        for (var i = 0; i < nRightF; i++) fXarr.push(lapRx - (edgeDist + i * spacing) * scH);
+        for (i = 0; i < nRightF; i++) fXarr.push(lapRx - (edgeDist + i * spacing) * scH);
         for (var k = 0; k < fXarr.length; k++) {
             var fx = fXarr[k];
             for (var j = 0; j < fYarr.length; j++) {
@@ -1365,7 +1359,7 @@
         s += '<text x="'+(m2cx+csPxT+4)+'" y="'+(csCenterY+3)+'" fill="'+green+'" font-size="7">M2</text>';
 
         // 단면도 패스너 위치 (웹 사이)
-        for (var j = 0; j < fYarr.length; j++) {
+        for (j = 0; j < fYarr.length; j++) {
             var csfy = csTopY + (fYarr[j] - topY) / pxD * csPxD;
             s += '<circle cx="'+csCenterX+'" cy="'+csfy.toFixed(1)+'" r="'+(pxFastR*0.9).toFixed(1)+'" fill="'+fastColor+'" opacity="0.85" stroke="#fff" stroke-width="0.5"/>';
             if (isScrew) {
@@ -1480,7 +1474,7 @@
             // 판재 2 (오른쪽, 아래에 겹침)
             var p2x = x0 + plateW - overlapW/2, p2y = y0 + t1H, p2w = plateW + overlapW/2;
             s += '<rect x="'+p2x+'" y="'+p2y+'" width="'+p2w+'" height="'+t2H+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="1"/>';
-            for (var hi = 0; hi < p2w; hi += 6) {
+            for (hi = 0; hi < p2w; hi += 6) {
                 s += '<line x1="'+(p2x+hi)+'" y1="'+p2y+'" x2="'+(p2x+hi+t2H*0.6)+'" y2="'+(p2y+t2H)+'" stroke="'+green+'" stroke-width="0.3" opacity="0.3"/>';
             }
 
@@ -1537,13 +1531,13 @@
             var wy0 = y0 + 10;
             // 판재 1 (수평)
             s += '<rect x="'+x0+'" y="'+wy0+'" width="'+plateW+'" height="'+t1H+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="1"/>';
-            for (var hi = 0; hi < plateW; hi += 6) {
+            for (hi = 0; hi < plateW; hi += 6) {
                 s += '<line x1="'+(x0+hi)+'" y1="'+wy0+'" x2="'+(x0+hi+t1H*0.5)+'" y2="'+(wy0+t1H)+'" stroke="'+blue+'" stroke-width="0.3" opacity="0.25"/>';
             }
             // 판재 2 (겹침)
-            var p2x = x0 + plateW * 0.35;
+            p2x = x0 + plateW * 0.35;
             s += '<rect x="'+p2x+'" y="'+(wy0+t1H)+'" width="'+(plateW*0.65)+'" height="'+t2H+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="1"/>';
-            for (var hi = 0; hi < plateW*0.65; hi += 6) {
+            for (hi = 0; hi < plateW*0.65; hi += 6) {
                 s += '<line x1="'+(p2x+hi)+'" y1="'+(wy0+t1H)+'" x2="'+(p2x+hi+t2H*0.5)+'" y2="'+(wy0+t1H+t2H)+'" stroke="'+green+'" stroke-width="0.3" opacity="0.25"/>';
             }
 
@@ -1587,17 +1581,17 @@
             // ── 그루브 용접: 맞대기 ──
             var gy0 = y0 + 15;
             var gapW = 8;
-            var p1w = plateW - gapW/2;
+            p1w = plateW - gapW/2;
 
             // 판재 1 (좌)
             s += '<rect x="'+x0+'" y="'+gy0+'" width="'+p1w+'" height="'+t1H+'" fill="'+blue+'" opacity="0.2" stroke="'+blue+'" stroke-width="1"/>';
-            for (var hi = 0; hi < p1w; hi += 6) {
+            for (hi = 0; hi < p1w; hi += 6) {
                 s += '<line x1="'+(x0+hi)+'" y1="'+gy0+'" x2="'+(x0+hi+t1H*0.5)+'" y2="'+(gy0+t1H)+'" stroke="'+blue+'" stroke-width="0.3" opacity="0.25"/>';
             }
             // 판재 2 (우)
             var g2x = x0 + plateW + gapW/2;
             s += '<rect x="'+g2x+'" y="'+gy0+'" width="'+p1w+'" height="'+t2H+'" fill="'+green+'" opacity="0.2" stroke="'+green+'" stroke-width="1"/>';
-            for (var hi = 0; hi < p1w; hi += 6) {
+            for (hi = 0; hi < p1w; hi += 6) {
                 s += '<line x1="'+(g2x+hi)+'" y1="'+gy0+'" x2="'+(g2x+hi+t2H*0.5)+'" y2="'+(gy0+t2H)+'" stroke="'+green+'" stroke-width="0.3" opacity="0.25"/>';
             }
             // 루트 갭 + V형 용접부
@@ -2024,7 +2018,7 @@
             ctx.arc(px, py, 4, 0, 2 * Math.PI);
             ctx.fillStyle = color;
             ctx.fill();
-            ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+            ctx.strokeStyle = gridColor;
             ctx.lineWidth = 1;
             ctx.stroke();
             // 라벨
@@ -2449,6 +2443,8 @@
             const style = getComputedStyle(document.body);
             const fg = style.getPropertyValue('--vscode-editor-foreground').trim() || '#ccc';
             const gridColor = style.getPropertyValue('--vscode-panel-border').trim() || '#333';
+            // 0926 Phase 3: 범례/라벨/툴팁 배경을 에디터 배경 토큰으로 — 다크·라이트 모두 대응
+            const editorBg = style.getPropertyValue('--vscode-editor-background').trim() || '#1e1e1e';
 
             // 그리드
             ctx.strokeStyle = gridColor;
@@ -2497,7 +2493,7 @@
             const visibleModes = Math.min(maxModes, 5);
             ctx.font = '10px sans-serif';
             const legendH = visibleModes * 14 + 6;
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillStyle = editorBg;
             ctx.fillRect(legendX, legendY, 110, legendH);
             ctx.strokeStyle = gridColor;
             ctx.lineWidth = 0.5;
@@ -2551,7 +2547,7 @@
                 ctx.arc(px, py, 6, 0, 2 * Math.PI);
                 ctx.fillStyle = ext.color;
                 ctx.fill();
-                ctx.strokeStyle = '#fff';
+                ctx.strokeStyle = editorBg;
                 ctx.lineWidth = 1.5;
                 ctx.stroke();
                 // 라벨 배경
@@ -2560,7 +2556,7 @@
                 const tw = ctx.measureText(labelText).width;
                 const lx = Math.min(px + 12, plotRight - tw - 8);
                 const ly = Math.max(py - 12, plotTop + 14);
-                ctx.fillStyle = 'rgba(30,30,30,0.85)';
+                ctx.fillStyle = editorBg;
                 ctx.fillRect(lx - 4, ly - 12, tw + 8, 16);
                 ctx.fillStyle = ext.color;
                 ctx.textAlign = 'left';
@@ -2613,20 +2609,22 @@
                 const snapX = snapPt ? toX(snapPt[0]) : mouseX;
                 const snapY = snapPt ? toY(snapPt[1]) : mouseY;
 
-                // 십자선 — 곡선점 기준, 플롯 전체 영역
-                ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+                // 십자선 — 곡선점 기준, 플롯 전체 영역 (전경색+투명도로 테마 대응)
+                ctx.strokeStyle = fg;
+                ctx.globalAlpha = 0.6;
                 ctx.lineWidth = 1;
                 ctx.setLineDash([]);
                 ctx.beginPath(); ctx.moveTo(snapX, plotTop); ctx.lineTo(snapX, plotBottom); ctx.stroke();
                 ctx.beginPath(); ctx.moveTo(plotLeft, snapY); ctx.lineTo(plotRight, snapY); ctx.stroke();
+                ctx.globalAlpha = 1.0;
 
                 // 곡선점 마커
                 if (snapPt) {
                     ctx.beginPath();
                     ctx.arc(snapX, snapY, 4, 0, 2 * Math.PI);
-                    ctx.fillStyle = '#fff';
+                    ctx.fillStyle = editorBg;
                     ctx.fill();
-                    ctx.strokeStyle = '#333';
+                    ctx.strokeStyle = fg;
                     ctx.lineWidth = 2;
                     ctx.stroke();
                 }
@@ -2637,9 +2635,9 @@
                 const coordText = 'L = ' + fmtVal(dispL, 'length') + ' ' + unitLabel('length') + ',  LF = ' + dispLF.toFixed(4);
                 ctx.font = '11px monospace';
                 const ctw = ctx.measureText(coordText).width;
-                ctx.fillStyle = 'rgba(30,30,30,0.85)';
+                ctx.fillStyle = editorBg;
                 ctx.fillRect(plotRight - ctw - 14, plotTop + 2, ctw + 10, 18);
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = fg;
                 ctx.textAlign = 'right';
                 ctx.fillText(coordText, plotRight - 8, plotTop + 15);
             }
@@ -3044,14 +3042,25 @@
                 });
                 return;
             } catch (e) {
-                console.warn('Babylon.js 3D failed, falling back to Canvas:', e);
+                console.warn('[StCFSD] Babylon.js 3D failed, falling back to Canvas:', e);
+                setStatus('3D 렌더러 초기화 실패 — 2D 등각투영으로 표시합니다', 'running');
             }
+        } else if (!window.CufsmViewer3D) {
+            console.info('[StCFSD] CufsmViewer3D not loaded — using Canvas fallback');
         }
 
         // Canvas 2D 등각투영 폴백
         const canvas = document.getElementById('mode-shape-3d-canvas');
         if (canvas && typeof window.renderModeShape3D === 'function') {
-            window.renderModeShape3D(canvas, model.node, model.elem, modeVec, length, model.BC || 'S-S');
+            try {
+                window.renderModeShape3D(canvas, model.node, model.elem, modeVec, length, model.BC || 'S-S');
+            } catch (e2) {
+                console.error('[StCFSD] Canvas 3D fallback also failed:', e2);
+                setStatus('모드형상 3D 표시 실패 — 2D 형상을 확인하세요', 'error');
+            }
+        } else if (canvas) {
+            console.error('[StCFSD] No 3D renderer available (CufsmViewer3D/renderModeShape3D missing)');
+            setStatus('3D 렌더러 없음 — 2D 형상을 확인하세요', 'error');
         }
     }
 
@@ -3379,7 +3388,9 @@
                 const isEnd = (i === 0 || i === n);
                 const isCantilever = (st === 'cantilever');
                 const defaultSup = isCantilever ? (i === 0 ? 'F' : 'N') : (isEnd ? 'P' : 'P');
-                const supOptions = '<option value="P">P (Pin)</option><option value="R">R (Roller)</option><option value="F">F (Fixed)</option><option value="N">N (Free)</option>';
+                const _supLabels = { P: 'P (Pin)', R: 'R (Roller)', F: 'F (Fixed)', N: 'N (Free)' };
+                const supOptions = Object.keys(_supLabels).map(v =>
+                    '<option value="' + v + '"' + (v === defaultSup ? ' selected' : '') + '>' + _supLabels[v] + '</option>').join('');
 
                 html += '<tr>';
                 // 지점 번호
@@ -3432,7 +3443,7 @@
     // 부재 유형에 따라 입력 필드 표시/숨김
     const selMemberType = document.getElementById('select-member-type');
     if (selMemberType) {
-        function updateDesignFieldVisibility() {
+        const updateDesignFieldVisibility = () => {
             const t = selMemberType.value;
             const isCalc = isCalcMode(t);
 
@@ -3507,7 +3518,7 @@
             if (step2) step2.style.display = isCalc ? 'flex' : 'none';
             if (line12) line12.style.display = isCalc ? 'block' : 'none';
             setDesignStep(1, false);
-        }
+        };
         selMemberType.addEventListener('change', updateDesignFieldVisibility);
         updateDesignFieldVisibility();
     }
@@ -3570,10 +3581,35 @@
                 : undefined,
         };
     }
+    function showDesignValidation(msg, focusId) {
+        const box = document.getElementById('design-validation');
+        if (box) {
+            box.textContent = msg;
+            box.style.display = 'block';
+        }
+        if (focusId) {
+            const el = document.getElementById(focusId);
+            if (el) el.focus();
+        }
+    }
+    function clearDesignValidation() {
+        const box = document.getElementById('design-validation');
+        if (box) { box.style.display = 'none'; box.textContent = ''; }
+    }
     if (btnDesign) {
         btnDesign.addEventListener('click', () => {
             const data = collectDesignRunPayload();
             if (!data) { return; }
+            clearDesignValidation();
+
+            // P2: §H1.2 약축 — Muy>0인데 May_strength 미입력 시 Python 에러 전에 차단
+            if (data.member_type === 'combined' && data.Muy > 0 && !(data.May_strength > 0)) {
+                showDesignValidation(
+                    '약축 휨(Muy)이 입력되어 있으나 약축 설계강도(May-strength)가 0입니다. ' +
+                    '약축 DSM 자동 산정은 미구현이므로 May 값을 직접 입력하세요 (§H1.2).',
+                    'design-May-strength');
+                return;
+            }
 
             // Show loading
             const loadingEl = document.getElementById('design-loading');
@@ -4206,7 +4242,6 @@
 
         // ── 하중조합 상세 결과 ──
         if (data.all_combos_detail && data.all_combos_detail.length > 0) {
-            const mU = _rul('moment_ft'), fU = _rul('force');
             const plf = data.input_loads_plf || {};
             const dm = data.design_method || 'LRFD';
 
@@ -4474,24 +4509,24 @@
             if (elR) elR.value = toDisplay(maxLapR, 'length').toFixed(1);
         }
         // 지점 Mu, Vu: 지점 부모멘트(Mu<0)에서 최대 절대값 — Lap 접합부에 전달
-        // Lap end 제외, 정모멘트(Mu>0) 제외 → 지점 부모멘트만 선택
+        // 선택 로직은 StcfsdDesignState.selectLapGoverningMoment 공용 순수함수
+        // (§4 이슈2A 회귀 고정 — node 테스트로 잠금).
         var gov = data.governing || data.gravity;
         if (gov && gov.locations) {
-            var maxNegMu = 0, maxVu = 0;
-            gov.locations.forEach(function(loc) {
-                if ((loc.name || '').indexOf('Lap end') === 0) return;
-                // 부모멘트(Mu < 0)인 지점 위치만 필터링
-                if (loc.Mu != null && loc.Mu < 0 && Math.abs(loc.Mu) > Math.abs(maxNegMu)) maxNegMu = loc.Mu;
-                if (loc.Vu != null && Math.abs(loc.Vu) > maxVu) maxVu = Math.abs(loc.Vu);
-            });
-            if (maxNegMu !== 0) {
+            var helper = globalThis.StcfsdDesignState;
+            var sel = helper && helper.selectLapGoverningMoment
+                ? helper.selectLapGoverningMoment(gov.locations)
+                : { negMuFt: null, maxVu: 0, negMuName: null };
+            if (sel.negMuFt != null) {
                 var elMu = document.getElementById('conn-Mu');
                 // locations.Mu는 kip-ft, conn-Mu는 moment(kip-in) 단위 → ×12 변환 필요
-                if (elMu) elMu.value = toDisplay(Math.abs(maxNegMu) * 12, 'moment').toFixed(2);
+                if (elMu) elMu.value = toDisplay(Math.abs(sel.negMuFt) * 12, 'moment').toFixed(2);
+                // 선택 근거를 타이틀로 노출 (결과 분석성)
+                if (elMu && sel.negMuName) elMu.title = '자동입력: ' + sel.negMuName + ' 부모멘트 ' + sel.negMuFt.toFixed(2) + ' kip-ft';
             }
-            if (maxVu > 0) {
+            if (sel.maxVu > 0) {
                 var elVu = document.getElementById('conn-Vu');
-                if (elVu) elVu.value = toDisplay(maxVu, 'force').toFixed(2);
+                if (elVu) elVu.value = toDisplay(sel.maxVu, 'force').toFixed(2);
             }
         }
         return maxLapL > 0 || maxLapR > 0;
@@ -4671,6 +4706,18 @@
                 summaryHtml += '<span class="utilization-label">' + posPct + '% ' + (pr.pass !== false ? '✓ OK' : '✗ NG') + '</span>';
                 summaryHtml += '</div>';
             }
+        }
+
+        // 0926 P1-2: 미평가 한계상태 배지 (무감소 폴백 가시화)
+        const _neBadges = [];
+        if (data.local_not_evaluated) _neBadges.push('국부좌굴 미평가');
+        if (data.distortional_not_evaluated) _neBadges.push('뒤틀림좌굴 미평가');
+        if (data.ft_not_evaluated) _neBadges.push('휨-비틀림(E2.2) 미평가');
+        if (data.b4_limits_exceeded) _neBadges.push('B4 적용한계 초과');
+        if (_neBadges.length > 0) {
+            summaryHtml += '<div style="margin:6px 0" role="status" aria-label="설계 경고">';
+            _neBadges.forEach(b => { summaryHtml += '<span class="warn-badge">⚠ ' + b + '</span>'; });
+            summaryHtml += '</div>';
         }
 
         // DSM / 설계 경고 표시
@@ -5195,7 +5242,7 @@
     // ═══════════════════════════════════════════════════════
     // 3. Design Input — 하중, 재료, 부재 구성
     // ═══════════════════════════════════════════════════════
-    function _rptDesignInput(la, d) {
+    function _rptDesignInput(la, _d) {
         let h = '';
 
         // 재료 (입력 필드값은 이미 표시 단위 → 직접 사용, US 상수는 _ruv로 변환)
@@ -5701,7 +5748,7 @@
         return h;
     }
 
-    function _rptCombined(d, dm) {
+    function _rptCombined(d, _dm) {
         let h = '';
         const c=d.compression||{},f=d.flexure_x||{};
         h += '<h3>압축 강도</h3>';
@@ -5719,7 +5766,7 @@
         return h;
     }
 
-    function _rptTension(d, dm) {
+    function _rptTension(d, _dm) {
         let h = '';
         h += '<h3>§D2 — 총단면 인장항복</h3>';
         h += '<span class="eq">T<sub>n</sub> = A<sub>g</sub> &times; F<sub>y</sub> = '+_ruv(d.Tn_yield,'force')+' '+_rul('force')+', &phi;<sub>t</sub>=0.90, &Omega;<sub>t</sub>=1.67</span>';
@@ -6153,6 +6200,14 @@
             value: [loadLr>0?'Lr='+loadLr:'',loadS>0?'S='+loadS:'',loadL>0?'L='+loadL:''].filter(Boolean).join(', ')+' '+_rul('pressure') || '없음',
             criterion: '최소 하나의 중력 활하중 예상',
             note: !hasGravity ? '활하중/적설하중 없음 — 맞습니까?' : '',
+        });
+
+        checks.push({
+            category: catE, item: '풍하중 (W, 양력)',
+            status: 'pass',
+            value: loadW > 0 ? loadW + ' ' + _rul('pressure') + ' ↑' : '없음',
+            criterion: '양력 검토 시 Wu 입력 (uplift 조합)',
+            note: loadW > 0 ? '양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요.' : '',
         });
 
         // ════════════════════════════════════════

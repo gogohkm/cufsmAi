@@ -409,6 +409,45 @@ tr:hover {
     background: rgba(0,180,0,0.1);
 }
 
+/* === 입력 검증 메시지 (0926 P2 — VS Code 테마 토큰 사용) === */
+.validation-box {
+    margin-top: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    border-radius: 2px;
+    border: 1px solid var(--vscode-inputValidation-errorBorder, #f44);
+    background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.1));
+    color: var(--vscode-inputValidation-errorForeground, #f44);
+}
+
+/* === 결과 경고 배지 (0926 P1-2 — 미평가/기본값 경고) === */
+.warn-badge {
+    display: inline-block;
+    margin: 2px 4px 2px 0;
+    padding: 2px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 10px;
+    border: 1px solid var(--vscode-inputValidation-warningBorder, #d7a100);
+    background: var(--vscode-inputValidation-warningBackground, rgba(215,161,0,0.12));
+    color: var(--vscode-inputValidation-warningForeground, #9d7400);
+}
+
+@media print {
+    /* 인쇄: 다크 배경을 밝게, 검증 박스·버튼 숨김 */
+    body {
+        background: #fff !important;
+        color: #000 !important;
+    }
+    .validation-box, #btn-copy-report, .loading-overlay {
+        display: none !important;
+    }
+    .tab-panel {
+        display: block !important;
+    }
+}
+
 /* === 설명 힌트 === */
 .hint {
     margin: 2px 0 6px 0;

@@ -11,6 +11,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as net from 'net';
+import { execSync, exec } from 'child_process';
 import { PythonBridge } from './bridge/PythonBridge';
 import { StcfsdPanel } from './webview/StcfsdPanel';
 import { ProjectExplorerProvider, StcfsdTreeItem } from './webview/ProjectExplorerProvider';
@@ -52,14 +53,14 @@ export async function activate(context: vscode.ExtensionContext) {
     // Step 3: 커맨드 등록
     context.subscriptions.push(
         vscode.commands.registerCommand('stcfsd.openDesigner', async () => {
-            try { await ensurePythonRunning(); } catch (e) {
+            try { await ensurePythonRunning(); } catch {
                 console.warn('[StCFSD] Python not available — panel opens without engine');
             }
             StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
         }),
 
         vscode.commands.registerCommand('stcfsd.newProject', async () => {
-            try { await ensurePythonRunning(); } catch (e) {
+            try { await ensurePythonRunning(); } catch {
                 console.warn('[StCFSD] Python not available — panel opens without engine');
             }
             StcfsdPanel.createOrShow(context.extensionUri, pythonBridge!, projectExplorer);
@@ -107,7 +108,7 @@ export async function activate(context: vscode.ExtensionContext) {
                         StcfsdPanel.currentPanel.showSection(sectionId);
                     }
                 }, 800);
-            } catch (err) {
+            } catch {
                 console.error(`[StCFSD] Tree navigation blocked while starting Python for section ${sectionId}`);
             }
         } else {
@@ -130,8 +131,6 @@ export function deactivate() {
 async function checkAndInstallDependencies(
     context: vscode.ExtensionContext, pythonPath: string
 ): Promise<void> {
-    const { execSync, exec } = require('child_process');
-
     // 1) Python 존재 여부 확인
     let hasPython = false;
     try {
@@ -155,7 +154,7 @@ async function checkAndInstallDependencies(
     }
 
     // 2) numpy / scipy 설치 여부 확인
-    let missingPackages: string[] = [];
+    const missingPackages: string[] = [];
     for (const pkg of ['numpy', 'scipy']) {
         try {
             execSync(`"${pythonPath}" -c "import ${pkg}"`, { stdio: 'pipe', timeout: 10000 });
@@ -258,7 +257,7 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
         const extMcpPath = path.join(context.extensionPath, '.mcp.json');
         fs.writeFileSync(extMcpPath, mcpJson);
         console.log(`[StCFSD] MCP config (extension dir): ${extMcpPath}`);
-    } catch (err) {
+    } catch {
         // 무시
     }
 
@@ -273,7 +272,7 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
             // 기존 설정 병합
             let existing: any = {};
             if (fs.existsSync(claudeMcpPath)) {
-                try { existing = JSON.parse(fs.readFileSync(claudeMcpPath, 'utf-8')); } catch {}
+                try { existing = JSON.parse(fs.readFileSync(claudeMcpPath, 'utf-8')); } catch { /* keep empty config */ }
             }
             if (!existing.mcpServers) { existing.mcpServers = {}; }
             existing.mcpServers['stcfsd-section-designer'] = mcpServerConfig;
@@ -332,9 +331,6 @@ function _writeMcpToWorkspace(mcpJson: string): void {
 }
 
 function getPythonPath(extensionPath: string): string {
-    const fs = require('fs');
-    const path = require('path');
-
     // 1) Extension 디렉토리 내 .venv 확인 (최우선)
     const venvCandidates = [
         path.join(extensionPath, '.venv', 'Scripts', 'python.exe'),  // Windows

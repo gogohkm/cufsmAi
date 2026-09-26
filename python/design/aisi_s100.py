@@ -19,7 +19,7 @@ from design.interaction import (
 )
 from design.shear import shear_strength, web_crippling
 from design.connections import design_connection
-from design.steel_grades import E, G, STEEL_GRADES
+from design.steel_grades import E, STEEL_GRADES
 
 # 안전/저항 계수
 PHI = {
@@ -71,7 +71,9 @@ def _infer_web_crippling_family(params: dict, section_type: str) -> str:
     try:
         if web_count is not None and int(float(web_count)) >= 3:
             return 'multi_web'
-    except Exception:
+    except (ValueError, TypeError):
+        # 비숫자 web_count는 무시하고 아래 기본 'C'로 분류 (호출자 입력 오류는
+        # _validate_section_keys가 별도 경고 — 조용한 오분류 방지).
         pass
     return 'C'
 
@@ -82,7 +84,7 @@ def _infer_web_crippling_n_webs(params: dict, section_family: str) -> int | None
     if explicit not in (None, ''):
         try:
             return int(float(explicit))
-        except Exception:
+        except (ValueError, TypeError):
             return None
 
     section = params.get('section', {}) or {}
@@ -90,14 +92,42 @@ def _infer_web_crippling_n_webs(params: dict, section_family: str) -> int | None
     if section_family == 'hat':
         try:
             return max(2, int(float(web_count))) if web_count is not None else 2
-        except Exception:
+        except (ValueError, TypeError):
             return 2
     if section_family == 'multi_web':
         try:
             return max(2, int(float(web_count))) if web_count is not None else None
-        except Exception:
+        except (ValueError, TypeError):
             return None
     return None
+
+
+def _validate_section_keys(params: dict) -> list:
+    """형상 추론 키(web_count/wc_n_webs/wc_section_family) 명시적 검증 (P2).
+
+    _infer_* 폴백이 조용히 기본값을 선택하기 전에, 비숫자·음수 등
+    호출자 입력 오류를 경고로 표면화한다.
+    """
+    warnings = []
+    section = params.get('section', {}) or {}
+    wc = section.get('web_count')
+    if wc is not None:
+        try:
+            if int(float(wc)) < 1:
+                warnings.append(
+                    f'section.web_count={wc!r} 유효하지 않음 — 1 이상 정수를 입력하세요 '
+                    '(무시하고 family 추론 계속)')
+        except (ValueError, TypeError):
+            warnings.append(
+                f'section.web_count={wc!r} 숫자가 아님 — 무시하고 family 추론 계속')
+    nw = params.get('wc_n_webs')
+    if nw not in (None, ''):
+        try:
+            if int(float(nw)) < 1:
+                warnings.append(f'wc_n_webs={nw!r} 유효하지 않음 — 1 이상 정수를 입력하세요 (무시됨)')
+        except (ValueError, TypeError):
+            warnings.append(f'wc_n_webs={nw!r} 숫자가 아님 — 무시됨')
+    return warnings
 
 
 def _estimate_cold_work_areas(section: dict, props: dict, R: float, t: float) -> dict:
@@ -293,7 +323,7 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
 def _design_compression(params: dict) -> dict:
     """DSM 압축 부재 설계 (§E2, §E3.2, §E4)"""
     Fy = params.get('Fy', 35.53)
-    Fu = params.get('Fu', 58.02)
+    _Fu = params.get('Fu', 58.02)  # 압축 DSM은 Fu 미사용 (API 일관성용 수신)
     design_method = params.get('design_method', 'LRFD')
     Pu = params.get('Pu', 0)
 
@@ -355,6 +385,16 @@ def _design_compression(params: dict) -> dict:
     Pne = global_result['Pne']
     spec_sections.append('E2')
 
+    # P1-1: 단축대칭 개단면에서 xo 복원 실패 시 E2.2 미평가 경고.
+    # 휨-비틀림좌굴이 누락되면 Pne가 과대평가될 수 있으므로 명시한다.
+    ft_not_evaluated = bool(Fcre_result.get('ft_not_evaluated', False))
+    if ft_not_evaluated:
+        warnings.append(
+            '§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) '
+            '휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 '
+            'Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.'
+        )
+
     # §E2: Fcre를 계산할 수 없으면(rx/ry/ro/J/Cw 누락 시 compute_column_Fcre가 0 반환)
     # Pne=0 → Pn=0이 되어 강도가 0으로 잠긴다. 이를 유효한 설계(0강도 통과)로 오인하지
     # 않도록 명시적 경고를 남긴다. 근본 원인은 보통 cutwp 실패로 J/Cw가 0이 된 경우다.
@@ -400,8 +440,14 @@ def _design_compression(params: dict) -> dict:
                         f'Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 '
                         f'(Fcrl={Fcrl_calc:.2f} ksi, 지배요소={fcrl_result["governing"]})'
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                # 해석적 fallback 시도 후 실패 — 삼키지 않고 표면화한다.
+                # 국부좌굴(E3)이 실제 지배하면 Pn이 과대평가될 수 있다.
+                warnings.append(
+                    f'Pcrl 해석적 fallback(Appendix 1 §1.1 Eq.1.1-4) 실패: {e} — '
+                    '국부좌굴(E3)이 평가되지 않았습니다. Pn에 국부좌굴 한계상태가 누락되었으므로 '
+                    '유효한 공칭강도로 단정하지 마십시오.'
+                )
 
     if Pcrl > 0:
         local_result = compression_local(Pne, Pcrl)
@@ -556,7 +602,10 @@ def _design_compression(params: dict) -> dict:
         'design_strength': round(design_strength, 2),
         'utilization': round(utilization, 4) if Pu > 0 else None,
         'pass': pass_flag,
-        'distortional_not_evaluated': distortional_not_evaluated,
+        'distortional_not_evaluated': bool(distortional_not_evaluated or Pcrd <= 0),
+        'local_not_evaluated': bool(Pcrl <= 0),
+        'ft_not_evaluated': ft_not_evaluated,
+        'dsm_source': {'Pcrl': Pcrl_source, 'Pcrd': Pcrd_source},
         'steps': steps,
         'spec_sections': list(set(spec_sections)),
         'warnings': warnings,
@@ -577,7 +626,7 @@ def _design_flexure(params: dict) -> dict:
     Cb = params.get('Cb', 1.0)
 
     props = params.get('props', {})
-    Ag = props.get('A', 0)
+    _Ag = props.get('A', 0)  # 휨 DSM은 Sf 기반 (Ag 미사용)
     Sf = props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0)
     if Sf <= 0:
         return {'error': 'Section modulus not available (Sf=0)'}
@@ -664,8 +713,14 @@ def _design_flexure(params: dict) -> dict:
                     if Fcrl_calc > 0:
                         Mcrl_eff = Fcrl_calc * Sf_eff
                         Mcrl_source = '§App.1 Eq.1.1-4'
-                except Exception:
-                    pass
+                except Exception as e:
+                    # 해석적 fallback 시도 후 실패 — 삼키지 않고 표면화한다.
+                    # 국부좌굴(F3)이 실제 지배하면 Mn이 과대평가될 수 있다.
+                    warnings.append(
+                        f'Mcrl 해석적 fallback(Appendix 1 §1.1 Eq.1.1-4) 실패: {e} — '
+                        '국부좌굴(F3)이 평가되지 않았습니다. Mn에 국부좌굴 한계상태가 누락되었으므로 '
+                        '유효한 공칭강도로 단정하지 마십시오.'
+                    )
 
         # §F2.4.2-3: 부재 소성모멘트 Mp = Zf×Fy (탄성 임계값과 달리 Fy/Fya에 비례)
         Mp = Zf * Fy_eval if Zf > 0 else 0.0
@@ -1134,7 +1189,14 @@ def _design_flexure(params: dict) -> dict:
         'use_cold_work': params.get('use_cold_work', False),
         'use_inelastic_reserve': use_ir,
         'beta_dist': state.get('beta_dist', 1.0),
-        'distortional_not_evaluated': state.get('mcrd_fallback_failed', False),
+        # P1-2: Mcrl/Mcrd=0이면 해당 한계상태가 무감소 폴백(Mnl=Mne/Mnd=My)되므로
+        # '미평가'로 표면화한다. 단 round-HSS의 §F4 미적용/§F3.1.1 스킵은 정상 스킵.
+        'local_not_evaluated': bool(
+            Mcrl <= 0 and 'round HSS' not in str(local_result.get('equation', ''))),
+        'distortional_not_evaluated': bool(
+            state.get('mcrd_fallback_failed', False)
+            or (Mcrd <= 0 and 'round HSS' not in str(dist_result.get('equation', '')))),
+        'dsm_source': {'Mcrl': Mcrl_source, 'Mcrd': Mcrd_source},
         'Fcre_detail': fcre_detail if fcre_detail else None,
         'Fy_used': round(Fy, 2),
         'Fy_original': round(Fy_original, 2),
@@ -1236,6 +1298,7 @@ def _design_flexure(params: dict) -> dict:
         h = props.get('h_web', 0)
         t = props.get('t', 0)
         if h > 0 and t > 0:
+            warnings.extend(_validate_section_keys(params))
             wc_sec_type = params.get('wc_section_type') or _effective_section_type(params)
             wc_section_family = _infer_web_crippling_family(params, wc_sec_type)
             wc_fastened = params.get('wc_fastened', 'fastened')
@@ -1436,6 +1499,32 @@ def _design_combined(params: dict) -> dict:
     if angle_l1000_note:
         result.setdefault('warnings', []).append(angle_l1000_note)
         result['angle_l1000'] = angle_l1000_note
+
+    # 하위 설계(압축/휨x)의 경고·미평가 플래그·DSM 출처 전파.
+    # (없으면 KL/Lb/E2.2/DSM 미평가 경고가 조합 결과에서 소실된다.)
+    _sub_w = ([f'[압축] {w}' for w in comp.get('warnings', [])]
+              + [f'[휨x] {w}' for w in flex_x.get('warnings', [])])
+    if _sub_w:
+        result.setdefault('warnings', []).extend(_sub_w)
+    result['dsm_source'] = {'compression': comp.get('dsm_source'),
+                            'flexure_x': flex_x.get('dsm_source')}
+    if comp.get('local_not_evaluated') or flex_x.get('local_not_evaluated'):
+        result['local_not_evaluated'] = True
+    if comp.get('distortional_not_evaluated') or flex_x.get('distortional_not_evaluated'):
+        result['distortional_not_evaluated'] = True
+    if comp.get('ft_not_evaluated'):
+        result['ft_not_evaluated'] = True
+
+    # P1-5: Cm 근거 없이 보수적 1.0으로 defaulted된 경우 명시.
+    # (지간 횡하중 있음 → (b)항 Cm=1.0이므로 정상, 경고 불필요)
+    if params.get('Cmx') is None and M1_M2 is None and not params.get('transverse_load', False):
+        result.setdefault('warnings', []).append(
+            '§C1: Cmx 미지정 + 단부모멘트비(M1/M2) 미지정 → 보수적 Cm=1.0 사용. '
+            '모멘트 구배를 알면 Cmx 또는 dist_M1_M2를 입력하세요.')
+    if params.get('Cmy') is None and M1_M2 is None and not params.get('transverse_load', False):
+        result.setdefault('warnings', []).append(
+            '§C1: Cmy 미지정 + 단부모멘트비(M1/M2) 미지정 → 보수적 Cm=1.0 사용. '
+            '모멘트 구배를 알면 Cmy 또는 dist_M1_M2를 입력하세요.')
 
     # y축 휨 결과
     if flex_y:
@@ -1922,7 +2011,8 @@ def generate_report(result: dict, params: dict = None) -> str:
 
 def _auto_generate_props(params: dict) -> dict:
     """단면 템플릿에서 node/elem → grosprop → props 자동 생성"""
-    import sys, os
+    import os
+    import sys
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
     from engine.template import generate_section
     from engine.properties import grosprop
@@ -1986,7 +2076,7 @@ def _auto_generate_props(params: dict) -> dict:
         Rf = R if R > 0 else 0.0
         corner = Rf + t  # 한 내측 코너의 평탄폭 환산량 (out-to-out → flat)
         has_lip = ('lipped' in st_norm) or (st_norm in ('c', 'z', 'lippedc', 'lippedz', 'lipped_angle'))
-        is_track = st_norm.startswith('track')
+        # track은 has_lip=False 경로로 처리 (별도 분기 없음)
         is_angle = 'angle' in st_norm
         # 웹: 양 끝 2개 내측 코너
         h_web_flat = max(H - 2 * corner, 0.0)

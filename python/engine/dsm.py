@@ -282,6 +282,10 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                 col = compute_column_Fcre(gprops, fy, _KxLx, _KyLy, _KtLt)
                 Fcre = col.get('Fcre', 0.0)
                 A_g = gprops.get('A', 0)
+                if Fcre <= 0 or A_g <= 0:
+                    # 폐형식 산정 실패(J/Cw/rx/ry/ro 누락 등) — 점근값 폴백임을 명시.
+                    global_source = ('signature_asymptote (closed_form E2 Fcre<=0 — '
+                                     'check J/Cw/rx/ry/ro/xo)')
                 if Fcre > 0 and A_g > 0:
                     Pcre = A_g * Fcre
                     # 지배 유효길이 = controlling 좌굴모드의 길이
@@ -299,6 +303,9 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                 # 휨: §F2.1 Fcre, Mcre = Sf·Fcre
                 Fcre = compute_beam_Fcre(gprops, Cb, Lb, section_type=section_type)
                 Sf = gprops.get('Sf', 0) or gprops.get('Sxx', 0) or gprops.get('Sx', 0)
+                if Fcre <= 0 or Sf <= 0:
+                    global_source = ('signature_asymptote (closed_form F2 Fcre<=0 — '
+                                     'check J/Cw/Sf/ry/ro)')
                 if Fcre > 0 and Sf > 0:
                     Pcre = Sf * Fcre
                     Lcre = Lb

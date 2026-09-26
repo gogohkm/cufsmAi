@@ -105,7 +105,7 @@ export class PythonBridge {
                     console.log(`[StCFSD] Python engine ready: ${result}`);
                     this._started = true;
                     finishResolve();
-                } catch (err: any) {
+                } catch {
                     const msg = `Ping failed. stderr: ${stderrBuffer.substring(0, 500)}`;
                     console.error(`[StCFSD] ${msg}`);
                     finishReject(new Error(msg));

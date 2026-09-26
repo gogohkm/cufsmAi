@@ -12,8 +12,8 @@ import * as cp from 'child_process';
 import * as fs from 'fs';
 import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
-import { McpBridgeServer, McpPanelInterface } from '../mcp/bridge';
-import { StcfsdModel, StcfsdResult, WebviewToExtMessage, createDefaultModel } from '../models/types';
+import { McpPanelInterface } from '../mcp/bridge';
+import { StcfsdModel, WebviewToExtMessage, createDefaultModel } from '../models/types';
 
 function isTestMode(): boolean {
     return process.env.STCFSD_TEST_MODE === '1';
@@ -346,13 +346,10 @@ export class StcfsdPanel implements McpPanelInterface {
                     try {
                         const base64 = message.data.png_base64.replace(/^data:image\/png;base64,/, '');
                         const buf = Buffer.from(base64, 'base64');
-                        const fs = require('fs');
-                        const os = require('os');
-                        const path = require('path');
                         const filePath = path.join(os.tmpdir(), 'cufsm_section_preview.png');
                         fs.writeFileSync(filePath, buf);
                         this._lastPreviewPath = filePath;
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                 }
                 // resolve pending promise
                 if (this._previewResolve) {
@@ -1200,12 +1197,12 @@ export class StcfsdPanel implements McpPanelInterface {
                         reportData.section_props = await this._pythonBridge.call('get_properties', {
                             node: this._model.node, elem: this._model.elem
                         });
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                     try {
                         reportData.cutwp_props = await this._pythonBridge.call('cutwp', {
                             node: this._model.node, elem: this._model.elem
                         });
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                 }
 
                 // 2. DSM 값
@@ -1220,7 +1217,7 @@ export class StcfsdPanel implements McpPanelInterface {
                             node: this._model.node, elem: this._model.elem,
                             curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
                         });
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                     reportData.curve_length = this._lastAnalysisResult.curve.length;
                     reportData.analysis_meta = this._lastAnalysisResult._meta || null;
                 }
@@ -1231,7 +1228,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 } else if (options.loads) {
                     try {
                         reportData.load_analysis = await this._pythonBridge.call('analyze_loads', options);
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                 }
 
                 // 4. 설계 결과
@@ -1241,7 +1238,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     try {
                         const designResult = await this.handleMcpAction({ action: 'aisi_design', ...options });
                         reportData.design_result = designResult;
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                 }
 
                 this._postMessage('reportGenerated', reportData);
@@ -1287,10 +1284,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (node.length > 0) {
                     try {
                         valData.props = await this._pythonBridge.call('get_properties', { node, elem });
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                     try {
                         valData.cutwp = await this._pythonBridge.call('cutwp', { node, elem });
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                 }
 
                 // Analysis/DSM
@@ -1304,7 +1301,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         valData.dsm_Mxx = await this._pythonBridge.call('dsm', {
                             node, elem, curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
                         });
-                    } catch {}
+                    } catch { /* optional step - skip on failure */ }
                 }
 
                 valData.status = this.getStatus();
@@ -1353,7 +1350,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 const aFy = this._getAnalysisFy();
                 const savedSprings = (this._model as any).springs || [];
                 const savedNode = this._model.node.map((n: number[]) => [...n]);
-                const savedElem = this._model.elem.map((e: number[]) => [...e]);
+                // (elem은 이 구간에서 변경되지 않으므로 스냅샷 불필요 — springs/node만 원복)
 
                 // Step 3: 정모멘트 CUFSM (데크 스프링 ON, 단일 t)
                 await this.handleMcpAction({
@@ -1387,7 +1384,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     cutwp = await this._pythonBridge.call('cutwp', {
                         node: this._model.node, elem: this._model.elem
                     });
-                } catch { }
+                } catch { /* optional step - skip on failure */ }
 
                 // Step 6: 정/부모멘트/Lap 별도 AISI 설계
                 const fy = options.Fy || options.loads?.Fy || aFy;
@@ -1551,7 +1548,6 @@ export class StcfsdPanel implements McpPanelInterface {
 
             // --- #21: save_project ---
             case 'save_project': {
-                const fs = require('fs');
                 const data = JSON.stringify(this._model, null, 2);
                 fs.writeFileSync(options.filepath, data, 'utf8');
                 return { success: true, filepath: options.filepath };
@@ -1925,7 +1921,7 @@ ${inner}
                     reject(err);
                 });
 
-                proc.on('close', (code) => {
+                proc.on('close', () => {
                     // Edge가 종료 후에도 PDF가 디스크에 flush되는 데 시간이 걸림
                     const checkPdf = (retries: number) => {
                         try {
@@ -2470,17 +2466,17 @@ ${inner}
                 <div class="panel-left">
                     <h3>좌굴 곡선 (Signature Curve)</h3>
                     <p class="hint">반파장(x축) 대비 하중계수(y축) 곡선. 극소점이 좌굴 임계값을 나타냅니다. 마우스를 올리면 십자 커서와 좌표가 표시됩니다.</p>
-                    <canvas id="buckling-curve-canvas" width="700" height="400"></canvas>
+                    <canvas id="buckling-curve-canvas" width="700" height="400" role="img" aria-label="좌굴 곡선: 반파장 대비 하중계수. 극소점이 Mcrl/Mcrd 임계값"></canvas>
                     <h3>모드 분류 (G/D/L/O) <button id="btn-run-classify" class="btn-small" style="margin-left:8px">모드 분류 실행</button></h3>
                     <p class="hint">cFSM 기반 모드 분류. 각 반파장에서 1차 좌굴 모드의 전체(G)/뒤틀림(D)/국부(L)/기타(O) 구성비를 누적 영역으로 표시합니다. 해석 실행 후 버튼을 눌러 분류를 실행하세요.</p>
-                    <canvas id="classify-curve-canvas" width="700" height="200"></canvas>
+                    <canvas id="classify-curve-canvas" width="700" height="200" role="img" aria-label="모드 분류: 반파장별 전체/뒤틀림/국부/기타 구성비"></canvas>
                     <h3>소성 상호작용 곡면 (P-M Surface)</h3>
                     <p class="hint">주축(principal axis) 좌표계 기준 P-M 소성 상호작용 다이어그램. 항복값으로 정규화된 축력-모멘트 조합을 표시합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
                         <label>fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="plastic-fy" value="245" step="5" style="width:60px">
                         <button id="btn-run-plastic" class="btn-small">곡면 생성</button>
                     </div>
-                    <canvas id="plastic-surface-canvas" width="700" height="420"></canvas>
+                    <canvas id="plastic-surface-canvas" width="700" height="420" role="img" aria-label="소성 상호작용 곡면: 축력-모멘트 조합"></canvas>
                 </div>
                 <div class="panel-right">
                     <h3>모드 형상 (2D)</h3>
@@ -2492,11 +2488,11 @@ ${inner}
                             <label>Mode</label>
                             <select id="select-mode"></select>
                         </div>
-                        <canvas id="mode-shape-canvas" width="600" height="340"></canvas>
+                        <canvas id="mode-shape-canvas" width="600" height="340" role="img" aria-label="모드 형상 2D: 단면 변형 형상"></canvas>
                     </div>
                     <h3>모드 형상 (3D)</h3>
                     <p class="hint">좌굴 변형의 3D 시각화. Length 값이 바뀌면 해당 반파장에서의 좌굴 모드가 달라집니다 — 짧은 Length(~1~10in)는 국부좌굴(웹/플랜지 파형), 중간 Length(~15~40in)는 뒤틀림좌굴(립-플랜지 회전), 긴 Length(~100in+)는 전체좌굴(횡비틀림)을 보여줍니다. 마우스 드래그=회전, 스크롤=확대/축소.</p>
-                    <canvas id="mode-shape-3d-canvas" width="600" height="400"></canvas>
+                    <canvas id="mode-shape-3d-canvas" width="600" height="400" role="img" aria-label="모드 형상 3D: 좌굴 변형 시각화"></canvas>
                 </div>
             </div>
         </div>
@@ -2669,6 +2665,7 @@ ${inner}
                     <p class="hint" style="margin:2px 0 0 20px">Through-fastened panel + 양력 시: Mn = R × Mnfo</p>
                 </div>
 
+                <div id="design-validation" class="validation-box" style="display:none" role="alert"></div>
                 <div style="display:flex;gap:8px;margin-top:12px">
                     <button id="btn-run-design" class="btn-primary" style="flex:1">▶ 설계 검토 실행</button>
                 </div>
@@ -2842,7 +2839,7 @@ ${inner}
                     curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
                 });
                 projectData.dsm = { P: dsmP, Mxx: dsmM };
-            } catch {}
+            } catch { /* optional step - skip on failure */ }
         }
 
         // 단면 성질
@@ -2851,10 +2848,9 @@ ${inner}
                 projectData.properties = await this._pythonBridge.call('get_properties', {
                     node: this._model.node, elem: this._model.elem,
                 });
-            } catch {}
+            } catch { /* optional step - skip on failure */ }
         }
 
-        const fs = require('fs');
         const json = JSON.stringify(projectData, null, 2);
         fs.writeFileSync(uri.fsPath, json, 'utf-8');
         vscode.window.showInformationMessage(`Project saved: ${uri.fsPath}`);
@@ -2869,12 +2865,11 @@ ${inner}
         });
         if (!uris || uris.length === 0) return;
 
-        const fs = require('fs');
         const raw = fs.readFileSync(uris[0].fsPath, 'utf-8');
         let projectData: any;
         try {
             projectData = JSON.parse(raw);
-        } catch (e) {
+        } catch {
             vscode.window.showErrorMessage('Invalid .csd file format');
             return;
         }

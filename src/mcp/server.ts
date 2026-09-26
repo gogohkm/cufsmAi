@@ -11,6 +11,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import * as http from "http";
+import {
+    SI_TO_US, convertInputSI, convertOutputSI,
+    SI_OUTPUT_COMPRESSION, SI_OUTPUT_FLEXURE,
+    SI_OUTPUT_CONNECTION, SI_INPUT_CONNECTION,
+} from "./siUnits";
 
 const DEFAULT_PORT = 52790;
 const BRIDGE_PORT = parseInt(process.env.STCFSD_MCP_PORT || String(DEFAULT_PORT));
@@ -56,52 +61,8 @@ function textResult(text: string) {
     return { content: [{ type: "text" as const, text }] };
 }
 
-// ============================================================
-// SI → US 단위 변환 헬퍼 (F-006)
-// ============================================================
-const SI_TO_US = {
-    length:   1 / 25.4,        // mm → in
-    area:     1 / (25.4 * 25.4), // mm² → in²
-    stress:   1 / 6.89476,     // MPa → ksi
-    force:    1 / 4.44822,     // kN → kips
-    moment:   1 / 0.11298,     // kN-m → kip-in
-    pressure: 1 / 0.04788,     // kPa → psf
-    linload:  1 / 0.01459,     // kN/m → plf
-    length_ft: 1 / 0.3048,     // m → ft
-};
-const US_TO_SI = {
-    length:   25.4,
-    area:     25.4 * 25.4,
-    stress:   6.89476,
-    force:    4.44822,
-    moment:   0.11298,
-    pressure: 0.04788,
-    linload:  0.01459,
-    length_ft: 0.3048,
-};
-type UnitKey = keyof typeof SI_TO_US;
-
-/** 지정된 키의 값을 SI→US로 변환 */
-function convertInputSI(params: Record<string, any>, mapping: Record<string, UnitKey>): Record<string, any> {
-    const out = { ...params };
-    for (const [key, unitType] of Object.entries(mapping)) {
-        if (out[key] != null && typeof out[key] === 'number') {
-            out[key] = out[key] * SI_TO_US[unitType];
-        }
-    }
-    return out;
-}
-
-/** 결과 dict의 지정 키를 US→SI로 변환 */
-function convertOutputSI(result: Record<string, any>, mapping: Record<string, UnitKey>): Record<string, any> {
-    const out = { ...result };
-    for (const [key, unitType] of Object.entries(mapping)) {
-        if (out[key] != null && typeof out[key] === 'number') {
-            out[key] = Math.round(out[key] * US_TO_SI[unitType] * 1e4) / 1e4;
-        }
-    }
-    return out;
-}
+// SI↔US 단위 변환은 ./siUnits 단일 모듈에서 import (0926 P1-7).
+// 도구별 출력 맵(SI_OUTPUT_*)도 siUnits 소유 — 이 파일에 인라인 맵 추가 금지.
 
 // ============================================================
 // MCP Server 생성
@@ -206,7 +167,8 @@ server.tool("set_section_template",
         units: z.enum(['US', 'SI']).optional().describe("Unit system: 'US' (default, inches/ksi) or 'SI' (mm/MPa)"),
     },
     async (params) => {
-        let { H, B, D, t, r, qlip } = params;
+        let { H, B, D, t, r } = params;
+        const { qlip } = params;
         if (params.units === 'SI') {
             const c = SI_TO_US.length;
             H *= c; B *= c; t *= c;
@@ -497,7 +459,7 @@ server.tool("set_boundary_condition", "Set end boundary condition",
             .describe("S-S=simply-simply, C-C=clamped-clamped, S-C=simply-clamped, C-F=clamped-free, C-G=clamped-guided"),
     },
     async ({ BC }) => {
-        const r = await callBridgePost('/action', { action: 'set_bc', BC });
+        await callBridgePost('/action', { action: 'set_bc', BC });
         return textResult(`Boundary condition set to ${BC}`);
     }
 );
@@ -509,7 +471,7 @@ server.tool("set_lengths", "Set analysis half-wavelength range",
         n: z.number().optional().describe("Number of points (default 50)"),
     },
     async ({ min, max, n }) => {
-        const r = await callBridgePost('/action', {
+        await callBridgePost('/action', {
             action: 'set_lengths', min, max, n: n || 60
         });
         return textResult(`Lengths set: ${n || 60} points from ${min} to ${max}`);
@@ -709,7 +671,7 @@ server.tool("run_vibration", "Run free vibration analysis",
 server.tool("save_project", "Save current model to .stcfsd JSON file",
     { filepath: z.string().describe("File path to save") },
     async ({ filepath }) => {
-        const r = await callBridgePost('/action', { action: 'save_project', filepath });
+        await callBridgePost('/action', { action: 'save_project', filepath });
         return textResult(`Project saved to ${filepath}`);
     }
 );
@@ -803,11 +765,7 @@ server.tool("aisi_design_compression", "Run compression design on the current se
         // 무차원(utilization/pass)·중첩 dict(steps)는 그대로 둔다.
         let out = r;
         if (units === 'SI') {
-            out = convertOutputSI(r, {
-                Pne: 'force', Pnl: 'force', Pnd: 'force', Py: 'force',
-                Pn: 'force', phi_Pn: 'force', Pn_omega: 'force',
-                design_strength: 'force',
-            });
+            out = convertOutputSI(r, SI_OUTPUT_COMPRESSION);
         }
         return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }
@@ -843,11 +801,7 @@ server.tool("aisi_design_flexure", "Run flexural design on the current section m
         // 무차원(utilization/pass)·중첩 dict(positive_region 등)는 그대로 둔다.
         let out = r;
         if (units === 'SI') {
-            out = convertOutputSI(r, {
-                Mne: 'moment', Mnl: 'moment', Mnd: 'moment', My: 'moment',
-                Mn: 'moment', Mn_dsm: 'moment', phi_Mn: 'moment', Mn_omega: 'moment',
-                design_strength: 'moment',
-            });
+            out = convertOutputSI(r, SI_OUTPUT_FLEXURE);
         }
         return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }
@@ -959,13 +913,7 @@ server.tool("aisi_design_connection", "Chapter J connection design. Set units='S
             Ag, width, g, s_pitch, Vu, Tu, bolt_grade, threads_excluded, hole_type,
         };
         if (units === 'SI') {
-            body = convertInputSI(body, {
-                Fy: 'stress', Fu: 'stress', Fub: 'stress', Fxx: 'stress', Fuf: 'stress',
-                t1: 'length', t2: 'length', d: 'length', e: 'length', s: 'length',
-                weld_length: 'length', weld_size: 'length', da: 'length',
-                width: 'length', g: 'length', s_pitch: 'length', Ag: 'area',
-                Pu: 'force', Vu: 'force', Tu: 'force',
-            });
+            body = convertInputSI(body, SI_INPUT_CONNECTION);
         }
         const r = await callBridgePost('/action', body);
         // SI 출력 변환: Python 엔진은 US 단위(kips)로 접합부 강도를 반환하므로
@@ -973,9 +921,7 @@ server.tool("aisi_design_connection", "Chapter J connection design. Set units='S
         // 중첩 dict(limit_states[]·각 Rn/design_strength)와 무차원 값은 그대로 둔다.
         let out = r;
         if (units === 'SI') {
-            out = convertOutputSI(r, {
-                Rn: 'force', design_strength: 'force',
-            });
+            out = convertOutputSI(r, SI_OUTPUT_CONNECTION);
         }
         return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }

@@ -105,8 +105,10 @@ def add_corner(node: np.ndarray, elem: np.ndarray,
 
     # 두 방향 사이 각도
     d_ang = a2 - a1
-    while d_ang > math.pi: d_ang -= 2 * math.pi
-    while d_ang < -math.pi: d_ang += 2 * math.pi
+    while d_ang > math.pi:
+        d_ang -= 2 * math.pi
+    while d_ang < -math.pi:
+        d_ang += 2 * math.pi
 
     theta = abs(d_ang)
     if theta < 0.01:
@@ -148,8 +150,10 @@ def add_corner(node: np.ndarray, elem: np.ndarray,
     end_ang = math.atan2(bz - cz, bx - cx)
     # 짧은 호 선택
     arc_span = end_ang - start_ang
-    while arc_span > math.pi: arc_span -= 2 * math.pi
-    while arc_span < -math.pi: arc_span += 2 * math.pi
+    while arc_span > math.pi:
+        arc_span -= 2 * math.pi
+    while arc_span < -math.pi:
+        arc_span += 2 * math.pi
 
     t = e1[3]  # 두께
     mat = e1[4]
@@ -418,12 +422,17 @@ def stress_to_action(node: np.ndarray, xcg: float, zcg: float,
 def msort(m_all: list) -> list:
     """종방향 항 정렬/정리
 
-    중복 제거, 0 제거, 오름차순 정렬
+    중복 제거, 0 제거, 오름차순 정렬.
+    P2 가드: None/빈 입력은 빈 리스트로, NaN/inf 항은 제거한다
+    (하류 조립에서 비정상 항이 행렬을 오염시키는 것을 방지).
     """
+    if m_all is None:
+        return []
     cleaned = []
     for m in m_all:
         arr = np.array(m, dtype=float)
         arr = arr[arr != 0]          # 0 제거
+        arr = arr[np.isfinite(arr)]  # NaN/inf 제거
         arr = np.unique(arr)         # 중복 제거 + 정렬
         cleaned.append(arr)
     return cleaned

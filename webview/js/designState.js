@@ -346,8 +346,35 @@
         if (data.connN != null) setValue('conn-n', data.connN);
     }
 
+    // Lap 접합부 지배값 선택 (순수함수 — app.js _autoFillLapInputs와 node 테스트 공용).
+    // locations[].Mu는 kip-ft. 'Lap end' 위치와 정모멘트(Mu>0)를 제외하고
+    // 지점 부모멘트(Mu<0) 중 최대 |Mu|를 선택한다(§4 이슈2A 회귀 고정).
+    // Vu는 위치 무관 최대 |Vu|.
+    // 반환: { negMuFt: number|null(부모멘트 원값, kip-ft), maxVu: number,
+    //         negMuName: string|null }
+    function selectLapGoverningMoment(locations) {
+        let maxNegMu = 0;
+        let maxVu = 0;
+        let negMuName = null;
+        (locations || []).forEach(function (loc) {
+            if (!loc) return;
+            if ((loc.name || '').indexOf('Lap end') === 0) return;
+            if (loc.Mu != null && loc.Mu < 0 && Math.abs(loc.Mu) > Math.abs(maxNegMu)) {
+                maxNegMu = loc.Mu;
+                negMuName = loc.name || null;
+            }
+            if (loc.Vu != null && Math.abs(loc.Vu) > maxVu) maxVu = Math.abs(loc.Vu);
+        });
+        return {
+            negMuFt: maxNegMu !== 0 ? maxNegMu : null,
+            maxVu: maxVu,
+            negMuName: negMuName,
+        };
+    }
+
     return {
         collectDesignInputs,
         restoreDesignInputs,
+        selectLapGoverningMoment,
     };
 });

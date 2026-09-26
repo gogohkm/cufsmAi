@@ -34,7 +34,15 @@ def stresgen(node: np.ndarray, P: float, Mxx: float, Mzz: float,
 
     Returns:
         node: stress 열이 업데이트된 절점 배열
+
+    Raises:
+        ValueError: node가 (nnodes, 8) 형식이 아닐 때 (P2 입력 가드 —
+            기존에는 하류에서 난해한 IndexError가 발생했음).
     """
+    node = np.asarray(node, dtype=float)
+    if node.ndim != 2 or node.shape[1] < 8 or node.shape[0] == 0:
+        raise ValueError(
+            f'stresgen expects node shaped (nnodes>=1, 8), got {node.shape}')
     node = node.copy()
     nnodes = node.shape[0]
 

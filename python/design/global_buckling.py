@@ -9,6 +9,49 @@ from design.steel_grades import E as E_STEEL, G as G_STEEL
 
 
 # ============================================================
+# xo / ro 해석 — Contract #2 (압축·휨 공용)
+# ============================================================
+
+def resolve_xo_ro(props: dict, rx: float = 0.0, ry: float = 0.0) -> dict:
+    """전단중심 편심 xo와 극관성반경 ro 해석 (Contract #2).
+
+    §E2.2-4의 xo는 도심~전단중심 거리이며, ro = √(rx² + ry² + xo²) (전단중심 기준).
+    props['xo']가 비어 있으면 Xs(전단중심 x) - xcg(도심 x)로 복원한다.
+    복원마저 실패하면 xo=0 ('zero') — 호출자는 단축대칭 개단면에서 이를
+    E2.2 미평가로 취급해야 한다(P1-1).
+
+    Args:
+        props: 단면 성질 dict (xo/Xs/xcg/ro 키 사용)
+        rx, ry: 도심 주축 기준 회전반경 (ro 유도용)
+
+    Returns:
+        {'xo', 'ro', 'xo_source', 'ro_source'}.
+        xo_source: 'direct' | 'Xs-xcg' | 'zero'.
+        ro_source: 'direct' | 'derived'.
+    """
+    xo = abs(props.get('xo', 0))
+    if xo != 0:
+        xo_source = 'direct'
+    else:
+        Xs = props.get('Xs', 0)
+        xcg = props.get('xcg', 0)
+        if Xs != 0 or xcg != 0:
+            xo = abs(Xs - xcg)
+            xo_source = 'Xs-xcg'
+        else:
+            xo_source = 'zero'
+
+    ro = props.get('ro', 0)
+    if ro is not None and ro > 0:
+        ro_source = 'direct'
+    else:
+        ro = math.sqrt(rx ** 2 + ry ** 2 + xo ** 2)
+        ro_source = 'derived'
+
+    return {'xo': xo, 'ro': ro, 'xo_source': xo_source, 'ro_source': ro_source}
+
+
+# ============================================================
 # 압축 — Chapter E2
 # ============================================================
 
@@ -91,27 +134,18 @@ def compute_column_Fcre(props: dict, Fy: float,
     # §E2.2-4 주: rx, ry는 도심 PRINCIPAL 축 기준 회전반경이다. Ixz≠0 (thetap≠0)인
     # Z 단면에서는 geometric Ixx/Izz가 주축이 아니므로 주관성모멘트 I11/I22로부터
     # 주축 회전반경을 산출한다 (있을 때만; C 단면은 Ixz=0이라 영향 없음).
-    I11 = props.get('I11', 0)
     I22 = props.get('I22', 0)
-    r_major = math.sqrt(I11 / Ag) if (I11 > 0 and Ag > 0) else 0.0   # 강축 주축
     r_minor = math.sqrt(I22 / Ag) if (I22 > 0 and Ag > 0) else 0.0   # 약축(MINOR) 주축
 
-    # xo — 전단중심 편심 (도심~전단중심 거리, §E2.2-4의 x_o)
-    # props['xo']가 비어 있으면 compute_beam_Fcre와 동일하게 Xs - xcg로 복원한다
-    # (Contract #2). 이 fallback이 없으면 xo가 항상 0이 되어 단축대칭 단면(C, hat)에서
-    # 휨-비틀림좌굴 분기(E2.2)가 실행되지 않아 Pne가 과대평가된다.
-    xo = abs(props.get('xo', 0))
-    if xo == 0:
-        Xs = props.get('Xs', 0)
-        xcg = props.get('xcg', 0)
-        if Xs != 0 or xcg != 0:
-            xo = abs(Xs - xcg)
-
-    # ro — 극관성반경 (전단중심 기준). §E2.2-4: ro = √(rx² + ry² + xo²)
-    # ro fallback은 위에서 복원된 xo를 사용한다.
+    # xo/ro — Contract #2 공용 해석 (resolve_xo_ro).
+    # 복원마저 실패(xo_source='zero')하면 단축대칭 개단면에서 E2.2 분기가
+    # 실행되지 않아 Pne가 과대평가될 수 있으므로 ft_not_evaluated로 표면화한다.
+    _xor = resolve_xo_ro(props, rx, ry)
+    xo = _xor['xo']
+    xo_source = _xor['xo_source']
     ro = props.get('ro', 0)
-    if ro <= 0 and Ag > 0:
-        ro = math.sqrt(rx ** 2 + ry ** 2 + xo ** 2)
+    if (ro is None or ro <= 0) and Ag > 0:
+        ro = _xor['ro']
 
     # 유연좌굴 응력
     sigma_ex = flexural_buckling_stress(E, 1.0, KxLx, rx) if rx > 0 else 1e10
@@ -134,6 +168,20 @@ def compute_column_Fcre(props: dict, Fy: float,
     # 단축대칭 휨-비틀림 분기 게이트: 수치적으로 의미 있는 xo가 있고,
     # 점대칭/폐합/이중대칭으로 분류되지 않은 경우에만 E2.2를 적용한다.
     use_ft = (abs(xo) >= 1e-6) and not is_point_symmetric and not is_closed
+
+    # P1-1: 단축대칭 개단면(C/hat/track/angle)인데 xo 복원마저 실패하면
+    # E2.2가 조용히 건너뛰어 Pne 과대평가 — 호출자 경고용 플래그.
+    # (이중대칭/점대칭/폐합 단면의 xo=0은 정상이므로 제외)
+    _sec_open_singly = (
+        (sec.startswith('C') and not sec.startswith('CHS'))
+        or sec.startswith('HAT') or sec.startswith('TRACK')
+        or sec.startswith('ANGLE') or sec.startswith('LIPPEDC')
+        or sec == 'U' or sec.startswith('U_') or sec == 'CHANNEL'
+    )
+    ft_not_evaluated = bool(
+        xo_source == 'zero' and _sec_open_singly
+        and not is_point_symmetric and not is_closed
+    )
 
     if is_point_symmetric:
         # §E2.3 점대칭 단면(Z): Fcre = min(σt, 약축(MINOR PRINCIPAL)에 대한 유연좌굴응력).
@@ -160,6 +208,9 @@ def compute_column_Fcre(props: dict, Fy: float,
         'sigma_t': sigma_t,
         'buckling_type': buckling_type,
         'ro': ro,
+        'xo': xo,
+        'xo_source': xo_source,
+        'ft_not_evaluated': ft_not_evaluated,
     }
 
 
@@ -346,22 +397,15 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     # ry — 약축 회전반경 (냉간성형강: z축이 약축)
     ry = props.get('ry', 0) or props.get('rz', 0)
 
-    # xo — 전단중심 편심 (도심~전단중심 거리)
-    xo = abs(props.get('xo', 0))
-    if xo == 0:
-        # Xs(전단중심 x좌표)와 xcg(도심 x좌표)에서 계산
-        Xs = props.get('Xs', 0)
-        xcg = props.get('xcg', 0)
-        if Xs != 0 or xcg != 0:
-            xo = abs(Xs - xcg)
-
-    # ro — 극관성반경 (전단중심 기준)
-    # ro² = rx² + ry² + xo²  (단축대칭 단면)
+    # xo/ro — Contract #2 공용 해석 (resolve_xo_ro).
+    # ro 유도는 기존 가드(rx>0, ry>0)를 유지하여 수치 동작을 보존한다.
+    rx = props.get('rx', 0)
+    _xor = resolve_xo_ro(props, rx, ry)
+    xo = _xor['xo']
+    xo_source = _xor['xo_source']
     ro = props.get('ro', 0)
-    if ro <= 0:
-        rx = props.get('rx', 0)
-        if rx > 0 and ry > 0:
-            ro = math.sqrt(rx ** 2 + ry ** 2 + xo ** 2)
+    if (ro is None or ro <= 0) and rx > 0 and ry > 0:
+        ro = _xor['ro']
 
     if Ag <= 0 or Sf <= 0 or ry <= 0 or ro <= 0:
         return 0.0
@@ -393,7 +437,7 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
         'Cb': Cb, 'Lb': Lb, 'Ly': Ly, 'Lt': Lt, 'Ky': Ky, 'Kt': Kt,
         'ro': round(ro, 4), 'Ag': round(Ag, 4),
         'Sf': round(Sf, 4), 'ry': round(ry, 4),
-        'J': J, 'Cw': Cw, 'xo': round(xo, 4),
+        'J': J, 'Cw': Cw, 'xo': round(xo, 4), 'xo_source': xo_source,
         'sigma_ey': round(sigma_ey, 2), 'sigma_t': round(sigma_t, 2),
         'z_factor': z_factor, 'Fcre': round(Fcre, 2),
         'equation': 'F2.1.1' if z_factor == 1.0 else 'F2.1.3',

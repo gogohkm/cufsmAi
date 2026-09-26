@@ -352,10 +352,12 @@ def flange_curling(bf: float, t: float, h: float,
         E: 탄성계수 (ksi)
 
     Returns:
-        dict: {cf, allowable_cf, ok}
+        dict: {cf, allowable_cf, ok, ...}. ok=None이면 판정 불가(참고값만 제공) —
+        사용성(serviceability) 참고식이므로 강도 판정과 혼동 금지.
     """
     if t <= 0 or E <= 0:
-        return {'cf': 0, 'limit': 0, 'ok': True, 'note': 'Invalid input'}
+        return {'cf': 0, 'limit': 0, 'ok': None, 'note': 'Invalid input',
+                'criterion_type': 'serviceability', 'serviceability_only': True}
 
     # AISI S100-16 Eq. L3-1 (Chapter L): wf = sqrt(0.061·t·d·E/f_av)·(100·cf/d)^(1/4)
     # where wf = width of flange projecting beyond the web (or half the clear
@@ -369,9 +371,13 @@ def flange_curling(bf: float, t: float, h: float,
     cf = (wf ** 4 * abs(f_avg) ** 2) / (100.0 * h * (0.061 ** 2) * t ** 2 * E ** 2) \
         if (h > 0 and abs(f_avg) > 0) else 0
 
-    # AISI는 고정 허용치를 제시하지 않으므로 기본값은 commentary-style reference만 둔다.
-    limit = allowable_cf if allowable_cf is not None else 0.05 * h
-    ok = cf <= limit
+    # AISI는 고정 허용치를 제시하지 않으므로 허용값 미제공 시 판정(ok) 대신 참고값만 둔다.
+    if allowable_cf is not None:
+        limit = allowable_cf
+        ok = cf <= limit
+    else:
+        limit = 0.05 * h
+        ok = None
 
     return {
         'cf': round(cf, 6),
@@ -379,9 +385,10 @@ def flange_curling(bf: float, t: float, h: float,
         'ok': ok,
         'bf_over_t': round(bf / t, 1) if t > 0 else 0,
         'criterion_type': 'serviceability',
+        'serviceability_only': True,
         'steps': [
             {'name': 'Curling', 'formula': f'cf = wf⁴ × f_av² / (100 × d × 0.061² × t² × E²) = {wf:.4f}⁴ × {abs(f_avg):.1f}² / (100 × {h} × 0.061² × {t}² × {E}²) = {cf:.6f} in'},
-            {'name': 'Allowable Curling', 'formula': f'cf_allow = {limit:.6f} in → {"OK" if ok else "NG"}'},
+            {'name': 'Allowable Curling', 'formula': f'cf_allow = {limit:.6f} in → {"참고값(판정 없음)" if ok is None else ("OK" if ok else "NG")}'},
         ],
         'warnings': [] if allowable_cf is not None else [
             'AISI L3 does not prescribe a universal allowable curling limit. '
