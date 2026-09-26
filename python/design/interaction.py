@@ -54,7 +54,11 @@ def combined_bending_web_crippling(P: float, Pn: float,
                                     phi: float = None,
                                     web_config: str = 'single',
                                     design_method: str = 'LRFD',
-                                    omega: float = 1.70) -> dict:
+                                    omega: float = 1.70,
+                                    h_over_t: float = None,
+                                    N_over_t: float = None,
+                                    Fy_ksi: float = None,
+                                    R_over_t: float = None) -> dict:
     """휨 + 웹 크리플링 상호작용 검토 (§H3)
 
     web_config (force-coefficient / limit-coefficient / equation):
@@ -76,6 +80,9 @@ def combined_bending_web_crippling(P: float, Pn: float,
         web_config: 'single' | 'multi_web' | 'nested_z'
         design_method: 'LRFD' | 'LSD' | 'ASD'
         omega:   ASD 안전계수 (§H3 Eq. H3-1a/H3-2a/H3-3a 모두 Ω=1.70)
+        h_over_t, N_over_t, Fy_ksi, R_over_t:
+                H3-3 적용한계(h/t≤150, N/t≤140, Fy≤70ksi, R/t≤5.5) 검증용.
+                제공되면 위반 시 warnings에 기록. 미제공 시 검증 생략.
     """
     p_ratio = (P / Pn) if Pn > 0 else 0
     m_term = (M / Mnfo) if Mnfo > 0 else 0
@@ -119,7 +126,20 @@ def combined_bending_web_crippling(P: float, Pn: float,
 
     total = p_term + m_term
 
-    return {
+    # H3-3 적용한계 §H3(c)(1)–(4): 제공된 값에 한해 검증 (원문 대조 0926 후속).
+    h3_warnings = []
+    if web_config == 'nested_z':
+        _h3_limits = [
+            ('h/t', h_over_t, 150), ('N/t', N_over_t, 140),
+            ('Fy', Fy_ksi, 70), ('R/t', R_over_t, 5.5),
+        ]
+        for _name, _val, _lim in _h3_limits:
+            if _val is not None and _val > _lim:
+                h3_warnings.append(
+                    f'§H3(c): H3-3 적용한계 위반 — {_name}={_val} > {_lim}. '
+                    'Eq. H3-3은 h/t≤150, N/t≤140, Fy≤70ksi, R/t≤5.5에서만 유효합니다.')
+
+    result = {
         'P_term': round(p_term, 4),
         'P_term_label': p_label,
         'M_term': round(m_term, 4),
@@ -130,3 +150,6 @@ def combined_bending_web_crippling(P: float, Pn: float,
         'web_config': web_config,
         'design_method': method,
     }
+    if h3_warnings:
+        result['warnings'] = h3_warnings
+    return result

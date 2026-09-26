@@ -25,9 +25,11 @@ function readUtf8(relPath) {
 
 function main() {
   const si = loadSiUnits();
-  const { SI_TO_US, US_TO_SI, convertInputSI, convertOutputSI,
+  const { SI_TO_US, US_TO_SI, convertInputSI, convertOutputSI, convertOutputSINested,
     SI_OUTPUT_COMPRESSION, SI_OUTPUT_FLEXURE,
-    SI_OUTPUT_CONNECTION, SI_INPUT_CONNECTION } = si;
+    SI_OUTPUT_CONNECTION, SI_INPUT_CONNECTION,
+    SI_INPUT_TENSION, SI_OUTPUT_TENSION,
+    SI_INPUT_COMBINED, SI_OUTPUT_COMBINED, SI_OUTPUT_COMBINED_NESTED } = si;
 
   // 1) 정·역변환 상수가 역원 관계
   for (const k of Object.keys(SI_TO_US)) {
@@ -66,12 +68,47 @@ function main() {
   assert.deepStrictEqual(
     Object.keys(SI_OUTPUT_CONNECTION).sort(), ['Rn', 'design_strength'].sort(),
     'connection output keys');
+  assert.deepStrictEqual(
+    Object.keys(SI_OUTPUT_TENSION).sort(),
+    ['Tn', 'Tn_yield', 'Tn_rupture', 'design_strength'].sort(),
+    'tension output keys');
+  assert.deepStrictEqual(
+    Object.keys(SI_OUTPUT_COMBINED).sort(),
+    ['Pa', 'Pc', 'Ma_x', 'Mc_x', 'Ma_y', 'Mc_y'].sort(),
+    'combined output keys');
+  assert.deepStrictEqual(
+    SI_OUTPUT_COMBINED_NESTED,
+    { compression: { Pn: 'force' }, flexure_x: { Mn: 'moment' } },
+    'combined nested maps');
   // 무차원 키가 맵에 들어가면 안 됨
-  for (const m of [SI_OUTPUT_COMPRESSION, SI_OUTPUT_FLEXURE, SI_OUTPUT_CONNECTION]) {
+  for (const m of [SI_OUTPUT_COMPRESSION, SI_OUTPUT_FLEXURE, SI_OUTPUT_CONNECTION,
+    SI_OUTPUT_TENSION, SI_OUTPUT_COMBINED]) {
     for (const bad of ['utilization', 'pass', 'ratio', 'equation']) {
       assert(!(bad in m), `dimensionless key ${bad} must not be in output map`);
     }
   }
+
+  // 4b) 중첩 변환: compression.Pn(kips→kN), flexure_x.Mn(kip-in→kN-m)
+  const nested = convertOutputSINested(
+    { Pa: 10, compression: { Pn: 10, utilization: 0.5, pass: true }, flexure_x: { Mn: 20 } },
+    SI_OUTPUT_COMBINED_NESTED);
+  assert(Math.abs(nested.compression.Pn - 10 * 4.44822) < 1e-3, 'nested Pn kips->kN');
+  assert(Math.abs(nested.flexure_x.Mn - 20 * 0.11298) < 1e-3, 'nested Mn kip-in->kN-m');
+  assert.strictEqual(nested.compression.utilization, 0.5, 'nested dimensionless untouched');
+  assert.strictEqual(nested.Pa, 10, 'top-level untouched by nested converter');
+  // 결측/배열 중첩은 그대로
+  const nested2 = convertOutputSINested({ compression: null, flexure_x: [1] },
+    SI_OUTPUT_COMBINED_NESTED);
+  assert.strictEqual(nested2.compression, null, 'null nested passes through');
+
+  // 4c) combined/tension 입력 맵: 단위 종류 고정
+  assert.strictEqual(SI_INPUT_TENSION.Tu, 'force', 'tension Tu force');
+  assert.strictEqual(SI_INPUT_TENSION.An, 'area', 'tension An area');
+  assert.strictEqual(SI_INPUT_COMBINED.Pu, 'force', 'combined Pu force');
+  assert.strictEqual(SI_INPUT_COMBINED.Mux, 'moment', 'combined Mux moment');
+  assert.strictEqual(SI_INPUT_COMBINED.May_strength, 'moment', 'combined May moment');
+  assert(!('Cb' in SI_INPUT_COMBINED) && !('Cmx' in SI_INPUT_COMBINED),
+    'dimensionless Cb/Cm excluded from input map');
 
   // 5) server.ts에 인라인 SI 맵 잔재 tripwire
   const serverTs = readUtf8(path.join('src', 'mcp', 'server.ts'));
@@ -82,6 +119,10 @@ function main() {
   assert(serverTs.includes('SI_OUTPUT_FLEXURE'), 'flexure uses shared map');
   assert(serverTs.includes('SI_OUTPUT_CONNECTION'), 'connection uses shared map');
   assert(serverTs.includes('SI_INPUT_CONNECTION'), 'connection input uses shared map');
+  assert(serverTs.includes('SI_OUTPUT_TENSION'), 'tension uses shared map');
+  assert(serverTs.includes('SI_INPUT_TENSION'), 'tension input uses shared map');
+  assert(serverTs.includes('SI_OUTPUT_COMBINED'), 'combined uses shared map');
+  assert(serverTs.includes('SI_INPUT_COMBINED'), 'combined input uses shared map');
 
   console.log('si_units_roundtrip: PASS');
 }

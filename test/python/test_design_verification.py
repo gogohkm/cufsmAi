@@ -5,7 +5,10 @@
 검증 허용 오차: 2% (프리즈매틱 해석 등 근사에 의한 허용)
 """
 
-import sys, os, math, subprocess
+import sys
+import os
+import math
+import subprocess
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 TOLERANCE = 0.02  # 2%
@@ -130,7 +133,7 @@ def test_web_crippling_example_ii1a():
     all_pass &= approx(r_iof['Pn'], 4.24, tol=0.03, label='IOF Pn (t=0.070)')
 
     # IOF, Fastened, interior support (t=0.059)
-    h2 = 9.0 - 2*0.059 - 2*0.1875  # = 8.507
+    _h2 = 9.0 - 2*0.059 - 2*0.1875  # = 8.507 (참고용)
     r_iof2 = web_crippling(h=8.507, t=0.059, R=0.1875, N=5.0, Fy=55, support='IOF')
     all_pass &= approx(r_iof2['Pn'], 2.96, tol=0.03, label='IOF Pn (t=0.059)')
 
@@ -926,7 +929,7 @@ def test_multi_bolt_c_factor():
     r3 = bolt_connection(t1=0.059, t2=0.059, d=0.5, Fy=50, Fu=65, Fub=120,
                           e=1.5, s=2.0, n=3)
 
-    Rn1 = [ls for ls in r1['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
+    _Rn1 = [ls for ls in r1['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
     Rn3 = [ls for ls in r3['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
     # 3볼트 강도는 1볼트 × 3이 아님 (e/d ≠ s/d이면)
     all_pass &= approx(1 if Rn3 > 0 else 0, 1, label=f'3-bolt Rn={Rn3:.3f} > 0')
@@ -1127,7 +1130,7 @@ def test_auto_generate_uses_bending_curve_for_flexure_dsm():
     sec = generate_section('lippedc', {'H': 8, 'B': 2.5, 'D': 0.625, 't': 0.059, 'r': 0.157})
     node = sec['node']
     elem = sec['elem']
-    props = grosprop(node, elem)
+    _props = grosprop(node, elem)
     node_p = node.copy()
     for n in node_p:
         n[7] = 50

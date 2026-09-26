@@ -69,7 +69,7 @@ def run_benchmark():
 
     # 단면 성질 확인
     props = grosprop(node, elem)
-    print(f"\nSection Properties:")
+    print("\nSection Properties:")
     print(f"  A   = {props['A']:.4f}")
     print(f"  xcg = {props['xcg']:.4f}")
     print(f"  zcg = {props['zcg']:.4f}")
@@ -85,13 +85,13 @@ def run_benchmark():
     constraints = np.array([])
     GBTcon = GBTConfig()
 
-    print(f"\nAnalysis Settings:")
+    print("\nAnalysis Settings:")
     print(f"  BC = {BC}")
     print(f"  Lengths: {len(lengths)} points ({lengths[0]:.1f} ~ {lengths[-1]:.1f})")
     print(f"  Nodes: {node.shape[0]}, Elements: {elem.shape[0]}")
 
     # 해석 실행
-    print(f"\nRunning analysis...")
+    print("\nRunning analysis...")
     t0 = time.time()
     result = stripmain(prop, node, elem, lengths, springs, constraints,
                        GBTcon, BC, m_all, neigs=10)
@@ -99,7 +99,7 @@ def run_benchmark():
     print(f"  Completed in {elapsed:.3f} seconds")
 
     # 결과 출력
-    print(f"\nBuckling Curve (1st mode):")
+    print("\nBuckling Curve (1st mode):")
     print(f"  {'Length':>10s}  {'Load Factor':>12s}")
     print(f"  {'-'*10}  {'-'*12}")
     for i, c in enumerate(result.curve):

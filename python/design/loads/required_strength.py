@@ -3,23 +3,20 @@
 사용자 입력(부재구성, 하중, 데크) → 구조해석 → 하중조합 → 소요강도 추출
 """
 
-E_STEEL = 29500.0  # ksi — CFS 표준 탄성계수 (기본값)
-
 from design.loads.load_combinations import (
-    get_applicable_combos, apply_combination, find_controlling_combo,
+    find_controlling_combo,
 )
 from design.loads.beam_analysis import (
-    analyze_simple_beam, analyze_continuous_beam,
-    analyze_continuous_beam_general, analyze_cantilever_beam,
-    analyze_beam_fe,
-    extract_critical_locations, compute_deflection,
-    compute_deflection_variable_I, extract_max_deflection_per_span,
+    analyze_simple_beam, analyze_continuous_beam_general, analyze_beam_fe,
+    extract_critical_locations, compute_deflection_variable_I, extract_max_deflection_per_span,
     BeamResult,
 )
 from design.loads.bracing import (
     calc_rotational_stiffness, calc_lateral_stiffness,
     determine_unbraced_lengths, check_i621_conditions,
 )
+
+E_STEEL = 29500.0  # ksi — CFS 표준 탄성계수 (기본값)
 
 
 def analyze_loads(

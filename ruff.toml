@@ -4,3 +4,7 @@
 [lint]
 select = ["E", "F"]
 ignore = ["E501"]
+
+[lint.per-file-ignores]
+# FSM 이식 코어 경계: bare-except·세미콜론 한줄복문(MATLAB 관용구)은 원형 유지 (0926 제외 영역)
+"python/cfsm/*.py" = ["E722", "E702"]

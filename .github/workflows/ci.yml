@@ -19,7 +19,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run test:webview
-      - run: node --check webview/js/app.js && node --check webview/js/designState.js
+      - run: node --check webview/js/app.js && node --check webview/js/designState.js && node --check webview/js/utils.js
 
   python:
     runs-on: ubuntu-latest
@@ -29,6 +29,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r python/requirements.txt
-      - run: pip install ruff
-      - run: ruff check python/design/interaction.py python/design/global_buckling.py python/design/aisi_s100.py python/design/special_topics.py python/engine/dsm.py python/engine/helpers.py python/engine/stress.py test/python/test_regression_0926.py test/python/run_all.py
-      - run: python test/python/run_all.py
+      - run: pip install ruff pytest
+      - run: ruff check python test/python
+      - run: python -m pytest -q

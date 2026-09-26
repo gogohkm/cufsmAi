@@ -8,8 +8,6 @@ Sections:
   - R (uplift reduction factor) — Section I6.2.1
 """
 
-import math
-from typing import List, Optional
 
 E_STEEL = 29500.0  # ksi
 G_STEEL = 11300.0  # ksi — AISI S100-16 §A3.1 published shear modulus (77,900 MPa)
@@ -191,7 +189,8 @@ def _get_Cb_detail(M_list, x_list, x_start, x_end):
     seg_M, seg_x = [], []
     for i, x in enumerate(x_list):
         if x_start - 0.01 <= x <= x_end + 0.01:
-            seg_M.append(M_list[i]); seg_x.append(x)
+            seg_M.append(M_list[i])
+            seg_x.append(x)
     if len(seg_M) < 3:
         return None
     M_abs = [abs(m) for m in seg_M]

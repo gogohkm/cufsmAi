@@ -1335,8 +1335,11 @@ def _design_flexure(params: dict) -> dict:
                 # instead of hardcoding φ=0.90 so the ASD (Ω) form is used for ASD runs.
                 h3 = combined_bending_web_crippling(
                     Vu, Pn_wc, Mu, Mnfo,
-                    web_config=wc_web_config, design_method=design_method)
+                    web_config=wc_web_config, design_method=design_method,
+                    h_over_t=(h / t), N_over_t=(wc_N / t),
+                    Fy_ksi=Fy, R_over_t=(wc_R / t))
                 result['h3_interaction'] = h3
+                result['warnings'].extend(h3.get('warnings', []))
             elif wc.get('h3_not_applicable_reason'):
                 result['warnings'].append(wc['h3_not_applicable_reason'])
             result['Mnfo'] = round(Mnfo, 2)

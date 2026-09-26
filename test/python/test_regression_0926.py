@@ -457,6 +457,28 @@ def test_dsm_monotone_and_boundary():
     return ok
 
 
+def test_h3_3_applicability_limits():
+    """H3-3 적용한계 §H3(c): 위반 시 경고, 준수/미제공 시 조용 (원문 대조)"""
+    print('\n=== TEST: H3-3 applicability limits ===')
+    from design.interaction import combined_bending_web_crippling as h3
+    ok = True
+    r = h3(5.0, 10.0, 5.0, 100.0, web_config='nested_z',
+           h_over_t=200.0, N_over_t=100.0, Fy_ksi=50.0, R_over_t=3.0)
+    ok &= check('warnings' in r and any('h/t' in w for w in r['warnings']),
+                'h/t>150 warns')
+    r = h3(5.0, 10.0, 5.0, 100.0, web_config='nested_z',
+           h_over_t=100.0, N_over_t=150.0, Fy_ksi=80.0, R_over_t=6.0)
+    ok &= check(len(r.get('warnings', [])) == 3, 'N/t+Fy+R/t 3 violations')
+    r = h3(5.0, 10.0, 5.0, 100.0, web_config='nested_z',
+           h_over_t=100.0, N_over_t=100.0, Fy_ksi=50.0, R_over_t=3.0)
+    ok &= check('warnings' not in r, 'within limits silent')
+    r = h3(5.0, 10.0, 5.0, 100.0, web_config='nested_z')
+    ok &= check('warnings' not in r, 'unprovided silent')
+    r = h3(5.0, 10.0, 5.0, 100.0, web_config='single', h_over_t=999.0)
+    ok &= check('warnings' not in r, 'limits apply to H3-3 only')
+    return ok
+
+
 def test_section_keys_validation():
     """형상 추론 키 검증: 비숫자/음수 경고 (P2)"""
     print('\n=== TEST: section keys validation ===')

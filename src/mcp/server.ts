@@ -12,9 +12,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import * as http from "http";
 import {
-    SI_TO_US, convertInputSI, convertOutputSI,
+    SI_TO_US, convertInputSI, convertOutputSI, convertOutputSINested,
     SI_OUTPUT_COMPRESSION, SI_OUTPUT_FLEXURE,
     SI_OUTPUT_CONNECTION, SI_INPUT_CONNECTION,
+    SI_INPUT_TENSION, SI_OUTPUT_TENSION,
+    SI_INPUT_COMBINED, SI_OUTPUT_COMBINED, SI_OUTPUT_COMBINED_NESTED,
 } from "./siUnits";
 
 const DEFAULT_PORT = 52790;
@@ -807,57 +809,79 @@ server.tool("aisi_design_flexure", "Run flexural design on the current section m
     }
 );
 
-server.tool("aisi_design_combined", "Run combined axial+bending design on the current section model. Requires an active section; weak-axis bending requires explicit available strength input.",
+server.tool("aisi_design_combined", "Run combined axial+bending design on the current section model. Requires an active section; weak-axis bending requires explicit available strength input. Set units='SI' to input in MPa/mm/kN/kN-m.",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
-        Fu: z.number().optional().describe("Tensile stress ksi (default 58.02 = 400 MPa, SGC400)"),
-        KxLx: z.number().describe("Effective length x-axis (in)"),
-        KyLy: z.number().describe("Effective length y-axis (in)"),
-        KtLt: z.number().optional().describe("Effective torsional length (in)"),
-        Lb: z.number().describe("Unbraced length for LTB (in)"),
+        Fy: z.number().optional().describe("Yield stress — ksi or MPa if units='SI' (default 35.53 ksi)"),
+        Fu: z.number().optional().describe("Tensile stress — ksi or MPa if units='SI' (default 58.02 ksi)"),
+        KxLx: z.number().describe("Effective length x-axis — in or mm if units='SI'"),
+        KyLy: z.number().describe("Effective length y-axis — in or mm if units='SI'"),
+        KtLt: z.number().optional().describe("Effective torsional length — in or mm if units='SI'"),
+        Lb: z.number().describe("Unbraced length for LTB — in or mm if units='SI'"),
         Cb: z.number().optional().describe("Moment gradient factor (default 1.0)"),
         Cmx: z.number().optional().describe("Equivalent moment factor x-axis §C1 (default 0.85)"),
         Cmy: z.number().optional().describe("Equivalent moment factor y-axis §C1 (default 0.85)"),
-        Pu: z.number().describe("Required axial strength (kips)"),
-        Mux: z.number().describe("Required moment about x-axis (kip-in)"),
-        Muy: z.number().optional().describe("Required moment about y-axis (kip-in)"),
-        May_strength: z.number().optional().describe("Explicit available weak-axis flexural strength kip-in; required when Muy > 0 because weak-axis DSM reduction is not auto-derived"),
-        Vu: z.number().optional().describe("Required shear (kips)"),
+        Pu: z.number().describe("Required axial strength — kips or kN if units='SI'"),
+        Mux: z.number().describe("Required moment about x-axis — kip-in or kN-m if units='SI'"),
+        Muy: z.number().optional().describe("Required moment about y-axis — kip-in or kN-m if units='SI'"),
+        May_strength: z.number().optional().describe("Explicit available weak-axis flexural strength — kip-in or kN-m if units='SI'; required when Muy > 0 because weak-axis DSM reduction is not auto-derived"),
+        Vu: z.number().optional().describe("Required shear — kips or kN if units='SI'"),
+        units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI'"),
     },
-    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Lb, Cb, Cmx, Cmy, Pu, Mux, Muy, May_strength, Vu }) => {
-        const r = await callBridgePost('/action', {
+    async ({ design_method, Fy, Fu, KxLx, KyLy, KtLt, Lb, Cb, Cmx, Cmy, Pu, Mux, Muy, May_strength, Vu, units }) => {
+        let body: Record<string, any> = {
             action: 'aisi_design',
             member_type: 'combined',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 35.53, Fu: Fu || 58.02,
+            Fy: Fy || (units === 'SI' ? 245 : 35.53),
+            Fu: Fu || (units === 'SI' ? 400 : 58.02),
             KxLx, KyLy, KtLt: KtLt ?? KyLy,
             Lb, Cb: Cb || 1.0,
             Cmx: Cmx || 0.85, Cmy: Cmy || 0.85,
             Pu, Mux, Muy: Muy || 0, May_strength,
             Vu: Vu || 0,
-        });
-        return textResult(JSON.stringify(r, null, 2));
+        };
+        if (units === 'SI') {
+            body = convertInputSI(body, SI_INPUT_COMBINED);
+        }
+        const r = await callBridgePost('/action', body);
+        let out = r;
+        if (units === 'SI') {
+            out = convertOutputSINested(
+                convertOutputSI(r, SI_OUTPUT_COMBINED),
+                SI_OUTPUT_COMBINED_NESTED);
+        }
+        return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }
 );
 
-server.tool("aisi_design_tension", "Run tension design on the current section model using current section properties (requires an active section in the extension session).",
+server.tool("aisi_design_tension", "Run tension design on the current section model using current section properties (requires an active section in the extension session). Set units='SI' to input in MPa/mm²/kN.",
     {
         design_method: z.enum(["ASD", "LRFD"]).optional().describe("ASD or LRFD (default LRFD)"),
-        Fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
-        Fu: z.number().optional().describe("Ultimate stress ksi (default 58.02 = 400 MPa, SGC400)"),
-        Tu: z.number().optional().describe("Required tensile force kips"),
-        An: z.number().optional().describe("Net section area in² (default = gross area)"),
+        Fy: z.number().optional().describe("Yield stress — ksi or MPa if units='SI' (default 35.53 ksi)"),
+        Fu: z.number().optional().describe("Ultimate stress — ksi or MPa if units='SI' (default 58.02 ksi)"),
+        Tu: z.number().optional().describe("Required tensile force — kips or kN if units='SI'"),
+        An: z.number().optional().describe("Net section area — in² or mm² if units='SI' (default = gross area)"),
+        units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI'"),
     },
-    async ({ design_method, Fy, Fu, Tu, An }) => {
-        const r = await callBridgePost('/action', {
+    async ({ design_method, Fy, Fu, Tu, An, units }) => {
+        let body: Record<string, any> = {
             action: 'aisi_design',
             member_type: 'tension',
             design_method: design_method || 'LRFD',
-            Fy: Fy || 35.53, Fu: Fu || 58.02,
+            Fy: Fy || (units === 'SI' ? 245 : 35.53),
+            Fu: Fu || (units === 'SI' ? 400 : 58.02),
             Tu: Tu || 0, An,
-        });
-        return textResult(JSON.stringify(r, null, 2));
+        };
+        if (units === 'SI') {
+            body = convertInputSI(body, SI_INPUT_TENSION);
+        }
+        const r = await callBridgePost('/action', body);
+        let out = r;
+        if (units === 'SI') {
+            out = convertOutputSI(r, SI_OUTPUT_TENSION);
+        }
+        return textResult(JSON.stringify({ ...out, units: units || 'US' }, null, 2));
     }
 );
 

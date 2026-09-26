@@ -65,8 +65,8 @@ def klocal_vec(Ex: float, Ey: float, vx: float, vy: float, G: float,
     c2 = um / a          # (totalm,) — 열 인덱스 p용
 
     # 브로드캐스팅을 위한 reshape
-    c1_col = c1[:, np.newaxis]  # (totalm, 1)
-    c2_row = c2[np.newaxis, :]  # (1, totalm)
+    _c1_col = c1[:, np.newaxis]  # (totalm, 1)
+    _c2_row = c2[np.newaxis, :]  # (1, totalm)
 
     k = np.zeros((8 * totalm, 8 * totalm))
     b2, b3, b4, b5, b6 = b**2, b**3, b**4, b**5, b**6
@@ -136,7 +136,7 @@ def kglocal_vec(a: float, b: float, Ty1: float, Ty2: float,
 
     for m in range(totalm):
         for p in range(totalm):
-            i1, i4, i5 = I1[m, p], I4[m, p], I5[m, p]
+            _i1, i4, i5 = I1[m, p], I4[m, p], I5[m, p]
             _um, _up = um[m], um[p]
 
             gm = np.zeros((4, 4))

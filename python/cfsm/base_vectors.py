@@ -42,7 +42,7 @@ def _cutwp_prop2(coord, ends):
         node_list.append(int(ends[i, 1]))
 
     unique_nodes = set(node_list)
-    nnode = len(unique_nodes)
+    _nnode = len(unique_nodes)
     j_count = 0  # number of 2-element joints
     for n in unique_nodes:
         cnt = node_list.count(n)
@@ -270,7 +270,7 @@ def _cutwp_prop2(coord, ends):
 
     # Shear center in principal coordinates
     s12 = rot @ np.array([xs - xc, ys - yc])
-    ro = math.sqrt((I1 + I2) / A + s12[0]**2 + s12[1]**2)
+    _ro = math.sqrt((I1 + I2) / A + s12[0]**2 + s12[1]**2)
 
     # B1 and B2
     B1_val = 0.0
@@ -563,7 +563,7 @@ def base_vectors(dy, elem, elprop_arr, a, m, node_prop, nmno, ncno, nsno,
     # ---------------------------------------------------------------
     # OTHER MODES
     # ---------------------------------------------------------------
-    nom = ndof - ngdm - nlm
+    _nom = ndof - ngdm - nlm
     b_v_m[:ndof, ngdm + nlm:ngdm + nlm + 2 * nel] = 0.0
 
     for i in range(nel):
@@ -720,7 +720,7 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
             K = None
             Kg = None
             if normal in (2, 3) or ospace in (2, 3) or orth in (2, 3):
-                nelems = elem.shape[0]
+                _nelems = elem.shape[0]
                 elprop_arr = elemprop(node, elem)
                 node_work = node.copy()
                 if orth in (1, 2):
@@ -820,7 +820,7 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
         K = None
         Kg = None
         if normal in (2, 3) or ospace in (2, 3) or orth in (2, 3):
-            nelems = elem.shape[0]
+            _nelems = elem.shape[0]
             elprop_arr = elemprop(node, elem)
             node_work = node.copy()
             if orth in (1, 2):

@@ -82,6 +82,52 @@ export const SI_OUTPUT_CONNECTION: Record<string, UnitKey> = {
     Rn: 'force', design_strength: 'force',
 };
 
+/** aisi_design_tension SI 입력 맵 */
+export const SI_INPUT_TENSION: Record<string, UnitKey> = {
+    Fy: 'stress', Fu: 'stress', Tu: 'force', An: 'area',
+};
+
+/** aisi_design_tension 출력 (US kips → SI kN) */
+export const SI_OUTPUT_TENSION: Record<string, UnitKey> = {
+    Tn: 'force', Tn_yield: 'force', Tn_rupture: 'force',
+    design_strength: 'force',
+};
+
+/** aisi_design_combined SI 입력 맵 (무차원 Cb/Cmx/Cmy 제외) */
+export const SI_INPUT_COMBINED: Record<string, UnitKey> = {
+    Fy: 'stress', Fu: 'stress',
+    KxLx: 'length', KyLy: 'length', KtLt: 'length', Lb: 'length',
+    Pu: 'force', Vu: 'force',
+    Mux: 'moment', Muy: 'moment', May_strength: 'moment',
+};
+
+/** aisi_design_combined 출력 최상위 키 (Pa·Pc=force, Ma·Mc=moment) */
+export const SI_OUTPUT_COMBINED: Record<string, UnitKey> = {
+    Pa: 'force', Pc: 'force',
+    Ma_x: 'moment', Mc_x: 'moment', Ma_y: 'moment', Mc_y: 'moment',
+};
+
+/** aisi_design_combined 중첩 요약(compression/flexure_x) 출력 맵 */
+export const SI_OUTPUT_COMBINED_NESTED: Record<string, Record<string, UnitKey>> = {
+    compression: { Pn: 'force' },
+    flexure_x: { Mn: 'moment' },
+};
+
+/** 중첩 dict의 지정 키를 US→SI로 변환 (출력용, 소수 4자리) */
+export function convertOutputSINested(
+    result: Record<string, any>,
+    nestedMaps: Record<string, Record<string, UnitKey>>
+): Record<string, any> {
+    const out = { ...result };
+    for (const [nestedKey, mapping] of Object.entries(nestedMaps)) {
+        const sub = out[nestedKey];
+        if (sub != null && typeof sub === 'object' && !Array.isArray(sub)) {
+            out[nestedKey] = convertOutputSI({ ...sub }, mapping);
+        }
+    }
+    return out;
+}
+
 /** aisi_design_connection SI 입력 맵 */
 export const SI_INPUT_CONNECTION: Record<string, UnitKey> = {
     Fy: 'stress', Fu: 'stress', Fub: 'stress', Fxx: 'stress', Fuf: 'stress',

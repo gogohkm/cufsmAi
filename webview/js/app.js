@@ -11,6 +11,9 @@
     // @ts-ignore
     const vscode = acquireVsCodeApi();
 
+    // 순수 유틸 (webview/js/utils.js — app.js보다 먼저 로드되어야 함)
+    const { fmt, logspace, convexHull: _convexHull } = globalThis.StcfsdUtils;
+
     /** 현재 모델 */
     let model = null;
     /** 해석 결과 */
@@ -2080,24 +2083,7 @@
     // (_niceStep 제거 — 미사용 죽은 코드)
 
     // Convex Hull (Graham Scan)
-    function _convexHull(points) {
-        if (points.length < 3) { return points.slice(); }
-        const pts = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-        const cross = (O, A, B) => (A[0] - O[0]) * (B[1] - O[1]) - (A[1] - O[1]) * (B[0] - O[0]);
-        const lower = [];
-        for (const p of pts) {
-            while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) { lower.pop(); }
-            lower.push(p);
-        }
-        const upper = [];
-        for (let i = pts.length - 1; i >= 0; i--) {
-            const p = pts[i];
-            while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) { upper.pop(); }
-            upper.push(p);
-        }
-        upper.pop(); lower.pop();
-        return lower.concat(upper);
-    }
+    // (순수 유틸 _convexHull/fmt/logspace는 webview/js/utils.js로 분리됨)
 
     // ============================================================
     // 템플릿 생성
@@ -3102,18 +3088,7 @@
         return fallback;
     }
 
-    function fmt(v) {
-        if (typeof v !== 'number') { return '-'; }
-        return Math.abs(v) < 0.01 ? v.toExponential(3) : v.toFixed(4);
-    }
-
-    function logspace(a, b, n) {
-        const arr = [];
-        for (let i = 0; i < n; i++) {
-            arr.push(Math.pow(10, a + (b - a) * i / (n - 1)));
-        }
-        return arr;
-    }
+    // (fmt/logspace는 webview/js/utils.js로 분리됨 — 상단 StcfsdUtils 참조)
 
     // ============================================================
     // Design 탭 — AISI S100-16 설계

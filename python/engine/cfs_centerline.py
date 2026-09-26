@@ -703,7 +703,7 @@ def sigma_outer_corners(
     x_lip = B + D_lip
     x_web = B
     x_fl = 0        # 플랜지 좌측 끝 (= 웹 반대쪽)
-    x_stiff = B + Ds  # 스티프너 우측 끝
+    _x_stiff = B + Ds  # 스티프너 우측 끝 (참고용)
 
     return [
         (x_lip, H - D),                    # P0: 상부 립 끝 (자유단)
@@ -1101,7 +1101,7 @@ class ColdFormedSection:
         ys = [c[1] for c in self._coords]
         p = self._props
         lines = [
-            f"=== Cold-Formed Section Summary ===",
+            "=== Cold-Formed Section Summary ===",
             f"  판 두께 t = {self.t}",
             f"  내측 R = {self.R_inner}",
             f"  중심선 r_c = {self.r_c:.4f}",
@@ -1252,7 +1252,7 @@ def make_hat_section(
     
     하부 플랜지 각 측 폭 = (B_bot - B_top) / 2
     """
-    f = (B_bot - B_top) / 2  # 각 측 플랜지 돌출
+    _f = (B_bot - B_top) / 2  # 각 측 플랜지 돌출 (참고용)
 
     corners = [
         (-B_bot / 2, 0),           # 좌측 플랜지 끝
@@ -1301,7 +1301,7 @@ def make_sigma_section(
                          │  web(하)
         lip(하) ─── flange(하)
     """
-    h_web = (H - 2 * sigma_transition) / 3  # 상/하 웹과 시그마 중심 각각
+    _h_web = (H - 2 * sigma_transition) / 3  # 상/하 웹과 시그마 중심 각각 (참고용)
 
     # 실제로는 이미지에서 직접 읽은 치수 사용
     # 여기서는 총 높이에서 역산
@@ -1313,7 +1313,7 @@ def make_sigma_section(
 
     # 범용 공식: 시그마 중심 높이 = H - 2*h_web - 2*sigma_transition
     # 여기서는 h_web를 매개변수로 받지 않으므로 대칭 분할
-    sigma_center_h = H - 2 * sigma_transition  # 이건 틀림... 
+    _sigma_center_h = H - 2 * sigma_transition  # 참고용 (외측 꼭짓점 직접 정의가 정확)
 
     # 실제로는 외측 꼭짓점을 직접 정의하는 것이 가장 정확
     # 하지만 팩토리 함수에서는 표준 시그마 구조를 가정

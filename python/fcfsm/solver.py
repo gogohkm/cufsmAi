@@ -15,7 +15,6 @@ from engine.transform import trans
 from engine.assembly import assemble
 from engine.properties import elemprop
 from engine.fsm_solver import _get_free_dofs
-from models.data import CufsmResult
 from fcfsm.section_analysis import section_analysis_fcfsm
 
 from scipy import sparse
@@ -171,7 +170,7 @@ def _classify_fcfsm(modes: np.ndarray, sec_data: dict,
                 cl_d += np.sum(np.abs(coeffs[ngm:ngm+ndm])**2)
                 cl_l += np.sum(np.abs(coeffs[ngm+ndm:ngm+ndm+nlm])**2)
                 cl_o += np.sum(np.abs(coeffs[ngm+ndm+nlm:])**2)
-            except Exception as e:
+            except Exception:
                 pass  # classification coefficient solve failed
 
         total = cl_g + cl_d + cl_l + cl_o

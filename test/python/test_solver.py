@@ -1,5 +1,6 @@
 """FSM 솔버 + 통합 테스트"""
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'python'))
 
 import numpy as np
@@ -9,7 +10,7 @@ from engine.transform import trans
 from engine.assembly import assemble
 from engine.stress import stresgen, yieldMP
 from engine.template import generate_section
-from models.data import CufsmModel, GBTConfig
+from models.data import GBTConfig
 from scipy import sparse
 
 

@@ -2049,6 +2049,9 @@ ${inner}
         const designStateUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'designState.js')
         );
+        const utilsUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'utils.js')
+        );
         const scriptUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'app.js')
         );
@@ -2795,6 +2798,7 @@ ${inner}
     </div>
 
     <script nonce="${nonce}" src="${designStateUri}"></script>
+    <script nonce="${nonce}" src="${utilsUri}"></script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'charts', 'modeShape3D.js')

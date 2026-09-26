@@ -8,7 +8,6 @@ Authors (original MATLAB): S. Adany, B. Schafer, Z. Li
 """
 
 import numpy as np
-from scipy import sparse
 import math
 import sys
 import os

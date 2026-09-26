@@ -14,7 +14,7 @@ from engine.properties import grosprop
 from engine.template import generate_section
 from engine.stress import stresgen, yieldMP
 from engine.dsm import extract_dsm_values
-from engine.helpers import doubler, add_corner, signature_ss, firstyield, msort
+from engine.helpers import doubler, signature_ss, firstyield
 from engine.cutwp import cutwp_prop
 from cfsm.classify import classify
 from vibration.solver import stripmain_vib
@@ -22,7 +22,7 @@ from fcfsm.solver import stripmain_fcfsm
 from plastic.pmm_plastic import pmm_plastic
 from fileio.mat_loader import load_mat_file
 from fileio.project_io import save_project, load_project
-from models.data import CufsmModel, CufsmResult, GBTConfig, _json_serializer, SafeJsonEncoder
+from models.data import CufsmModel, SafeJsonEncoder
 
 
 def handle_request(request: dict) -> dict:
