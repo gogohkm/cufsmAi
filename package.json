@@ -117,7 +117,7 @@
         "lint": "eslint src --ext ts && eslint webview/js test/webview",
         "typecheck": "tsc -p ./ --noEmit",
         "test:webview-contract": "node ./test/webview/design_prepare_contract.js",
-        "test:webview": "node ./test/webview/design_prepare_contract.js && node ./test/webview/design_state_roundtrip.js && node ./test/webview/lap_governing_contract.js && node ./test/webview/si_units_roundtrip.js && node ./test/webview/gui_contract_0926.js && node ./test/webview/utils_contract.js",
+        "test:webview": "node ./test/webview/design_prepare_contract.js && node ./test/webview/design_state_roundtrip.js && node ./test/webview/lap_governing_contract.js && node ./test/webview/si_units_roundtrip.js && node ./test/webview/gui_contract_0926.js && node ./test/webview/utils_contract.js && node ./test/webview/parity_contract.js",
         "test:python": "python3 ./test/python/run_all.py",
         "test:vscode": "npm run compile && node ./test/vscode/runTest.js"
     },

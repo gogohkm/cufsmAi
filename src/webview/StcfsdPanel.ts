@@ -288,6 +288,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 await this._runPlastic(message.data);
                 break;
 
+            case 'runVibration':
+                await this._runVibration();
+                break;
+
             case 'runLapConnection':
                 try {
                     const lapResult = await this._pythonBridge.call('lap_connection', message.data);
@@ -1553,6 +1557,20 @@ export class StcfsdPanel implements McpPanelInterface {
                 return { success: true, filepath: options.filepath };
             }
 
+            case 'load_project': {
+                const raw = fs.readFileSync(options.filepath, 'utf-8');
+                const data = JSON.parse(raw);
+                // save_project 출력(this._model 직접)과 .csd 래퍼({model}) 모두 허용
+                const model = (data && data.model) ? data.model : data;
+                if (!model || !model.node || !model.elem) {
+                    throw new Error('Invalid project file: missing node/elem model data');
+                }
+                this._model = { ...this._model, ...model };
+                this._postMessage('modelLoaded', this._model);
+                this._updateTreeView();
+                return { success: true, filepath: options.filepath };
+            }
+
             // --- #22: run_signature_curve ---
             case 'signature_ss': {
                 // S-S 경계조건, 자동 길이 범위 (100점)
@@ -1808,6 +1826,15 @@ export class StcfsdPanel implements McpPanelInterface {
             this._postMessage('plasticResult', result);
         } catch (err: any) {
             this._postMessage('plasticError', { error: err.message });
+        }
+    }
+
+    private async _runVibration(): Promise<void> {
+        try {
+            const result = await this.handleMcpAction({ action: 'vibration', rho: 1.0 });
+            this._postMessage('vibrationResult', result);
+        } catch (err: any) {
+            this._postMessage('vibrationError', { error: err.message });
         }
     }
 
@@ -2480,6 +2507,9 @@ ${inner}
                         <button id="btn-run-plastic" class="btn-small">곡면 생성</button>
                     </div>
                     <canvas id="plastic-surface-canvas" width="700" height="420" role="img" aria-label="소성 상호작용 곡면: 축력-모멘트 조합"></canvas>
+                    <h3>자유 진동 해석 <button id="btn-run-vibration" class="btn-small" style="margin-left:8px">진동 해석 실행</button></h3>
+                    <p class="hint">자유 진동 고유진동수. 단면 모델 기준으로 산정됩니다.</p>
+                    <div id="vibration-result" class="props-display" style="font-size:12px;"><em>진동 해석을 실행하면 결과가 표시됩니다</em></div>
                 </div>
                 <div class="panel-right">
                     <h3>모드 형상 (2D)</h3>

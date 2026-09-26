@@ -678,6 +678,14 @@ server.tool("save_project", "Save current model to .stcfsd JSON file",
     }
 );
 
+server.tool("load_project", "Load a model from a .stcfsd JSON file saved by save_project (also accepts .csd {model} wrapper)",
+    { filepath: z.string().describe("File path to load") },
+    async ({ filepath }) => {
+        await callBridgePost('/action', { action: 'load_project', filepath });
+        return textResult(`Project loaded from ${filepath}`);
+    }
+);
+
 // ============================================================
 // 6. CONSTRAINTS & SPRINGS (3 tools)
 // ============================================================
@@ -1251,6 +1259,44 @@ server.tool("check_block_shear",
     },
     async (params) => {
         const r = await callBridgePost('/action', { action: 'block_shear', ...params });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+// ============================================================
+// 9. SPECIAL TOPICS (2 tools)
+// ============================================================
+server.tool("cold_work",
+    "Cold-worked yield strength increase per AISI S100-16 §A3.3.2 (Fya). Applicable to Chapters D/E/F (except F2.4), H1, I4, I6.2 — only when buckling does not govern.",
+    {
+        Fyv: z.number().describe("Virgin yield strength ksi"),
+        Fuv: z.number().describe("Virgin tensile strength ksi"),
+        R: z.number().describe("Inside corner radius in"),
+        t: z.number().describe("Sheet thickness in"),
+        n_corners: z.number().optional().describe("Number of corners (default 4)"),
+        corner_angle: z.number().optional().describe("Corner angle degrees (default 90)"),
+        A_corners: z.number().optional().describe("Corner area in² (default 0)"),
+        A_flange: z.number().optional().describe("Flange area in² (default 0)"),
+        corners_per_flange: z.number().optional().describe("Corners per flange (default 2)"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', { action: 'cold_work', ...params });
+        return textResult(JSON.stringify(r, null, 2));
+    }
+);
+
+server.tool("flange_curling",
+    "Flange curling serviceability reference (AISI L3). Returns reference curling value; ok=None without allowable (serviceability only, not a strength check).",
+    {
+        bf: z.number().describe("Flange width in"),
+        t: z.number().describe("Sheet thickness in"),
+        h: z.number().describe("Section depth in"),
+        f_avg: z.number().describe("Average compressive stress ksi"),
+        E: z.number().optional().describe("Young's modulus ksi (default 29500)"),
+        allowable_cf: z.number().optional().describe("Allowable curling in (default: reference only)"),
+    },
+    async (params) => {
+        const r = await callBridgePost('/action', { action: 'flange_curling', ...params });
         return textResult(JSON.stringify(r, null, 2));
     }
 );

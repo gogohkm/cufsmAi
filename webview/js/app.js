@@ -327,6 +327,12 @@
             case 'plasticResult':
                 renderPlasticSurface(msg.data);
                 break;
+            case 'vibrationResult':
+                renderVibrationResult(msg.data);
+                break;
+            case 'vibrationError':
+                setStatus('진동 해석 실패: ' + ((msg.data && msg.data.error) || 'unknown'), 'error');
+                break;
             case 'dsmResult':
                 lastDsmResult = msg.data;
                 renderDsmResults(msg.data);
@@ -1837,6 +1843,40 @@
                 data: { node: model.node, elem: model.elem, fy }
             });
         });
+    }
+
+    // 자유 진동 해석
+    const btnVibration = document.getElementById('btn-run-vibration');
+    if (btnVibration) {
+        btnVibration.addEventListener('click', () => {
+            if (!model || !model.node || model.node.length === 0) { return; }
+            setStatus('진동 해석 실행 중...', 'running');
+            vscode.postMessage({ command: 'runVibration' });
+        });
+    }
+
+    function renderVibrationResult(data) {
+        const el = document.getElementById('vibration-result');
+        if (!el) { return; }
+        if (!data || data.error) {
+            el.innerHTML = '<em>진동 해석 실패: ' + ((data && data.error) || 'unknown') + '</em>';
+            setStatus('진동 해석 실패', 'error');
+            return;
+        }
+        const freqs = data.frequencies || [];
+        if (freqs.length === 0) {
+            el.innerHTML = '<em>결과 없음</em>';
+            return;
+        }
+        let html = '<table class="props-table"><tr><th>반파장 #</th><th>고유진동수 (rad/s)</th></tr>';
+        freqs.slice(0, 20).forEach((f, i) => {
+            const row = Array.isArray(f) ? f.slice(0, 6).map(v => fmt(v)).join(', ') : fmt(f);
+            html += '<tr><td>' + (i + 1) + '</td><td>' + row + '</td></tr>';
+        });
+        html += '</table>';
+        if (freqs.length > 20) { html += '<p class="hint">상위 20개만 표시 (전체 ' + freqs.length + '개)</p>'; }
+        el.innerHTML = html;
+        setStatus('진동 해석 완료', 'success');
     }
 
     function renderPlasticSurface(data) {
