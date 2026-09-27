@@ -769,6 +769,7 @@
 
         const dsmP = data.P;   // 축력 기준 DSM
         const dsmM = data.Mxx; // Mxx 휨 기준 DSM
+        const dsmZ = data.Mzz; // Mzz 휨 기준 DSM
         const fU = unitLabel('force'), mU = unitLabel('moment'), lU = unitLabel('length');
 
         let html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">';
@@ -795,10 +796,24 @@
             html += _dsmRow('Mcre (global)', dsmM.cre, 'moment', dsmM.Lcre, 'length', dsmM.LF_global);
         }
 
+        if (dsmZ) {
+            html += _dsmHeader('Weak-axis bending (' + mU + ')');
+            html += _dsmRow('My', dsmZ.P_y, 'moment', '', '', '');
+            html += _dsmRow('Mcrl (local)', dsmZ.crl, 'moment', dsmZ.Lcrl, 'length', dsmZ.LF_local);
+            html += _dsmRow('Mcrd (distortional)', dsmZ.crd, 'moment', dsmZ.Lcrd, 'length', dsmZ.LF_dist);
+            html += _dsmRow('Mcre (global)', dsmZ.cre, 'moment', dsmZ.Lcre, 'length', dsmZ.LF_global);
+        }
+
+        // R2-05: 해석 family와 일치하는 항목만 표시됨을 명시
+        if (data.load_family) {
+            html += '<tr><td colspan="4" style="padding:6px 8px 2px; font-size:11px; color:var(--vscode-descriptionForeground);">'
+                + 'Basis: ' + data.load_family + ' analysis (other families not applicable to this curve)</td></tr>';
+        }
+
         html += '</table>';
 
         // 극소점 정보
-        const dsm = dsmP || dsmM;
+        const dsm = dsmP || dsmM || dsmZ;
         if (dsm && dsm.n_minima !== undefined) {
             html += '<div style="margin-top:6px; font-size:11px; color:var(--vscode-descriptionForeground);">';
             html += 'Detected ' + dsm.n_minima + ' minima';
@@ -1074,6 +1089,19 @@
         el.innerHTML = html;
     }
 
+    // R2-04: 3상태 판정 공통 formatter. true=PASS, false=FAIL,
+    // null·미완료=NOT_CHECKED. 게이지 수치와 검토 완료 상태를 분리한다.
+    // (renderDesignResult/_rptSummary에는 VM 추출 실행 대비 동일 규칙 내장)
+    function _verdictOf(dd) {
+        if (dd && dd.pass === true && dd.verification_complete !== false) {
+            return { state: 'PASS', label: '✓ OK', cls: 'pass', short: 'OK' };
+        }
+        if (dd && dd.pass === false) {
+            return { state: 'FAIL', label: '✗ NG', cls: 'fail', short: 'NG' };
+        }
+        return { state: 'NOT_CHECKED', label: '⚠ 미검토 (NOT_CHECKED)', cls: 'warn', short: 'NOT_CHECKED' };
+    }
+
     function renderConnectionResult(result) {
         const el = document.getElementById('connection-result');
         if (!el || !result) return;
@@ -1099,7 +1127,10 @@
         if (result.Rn != null) html += '<tr><td>공칭강도 Rn</td><td><b>' + fmtVal(result.Rn, 'force') + ' ' + unitLabel('force') + '</b></td></tr>';
         if (result.design_strength != null) html += '<tr><td>설계강도 (' + rnLbl + ')</td><td><b>' + fmtVal(result.design_strength, 'force') + ' ' + unitLabel('force') + '</b></td></tr>';
         if (result.governing_mode) html += '<tr><td>지배 모드</td><td>' + result.governing_mode + '</td></tr>';
-        if (result.pass != null) html += '<tr><td>판정</td><td>' + (result.pass ? '✅ OK' : '❌ NG') + '</td></tr>';
+        { const _v = _verdictOf(result);
+          const _note = _v.state === 'NOT_CHECKED'
+              ? (result.utilization == null ? ' — 소요 없음(강도 조회)' : ' — 미평가 한계상태 입력 필요') : '';
+          html += '<tr><td>판정</td><td>' + _v.label + _note + '</td></tr>'; }
         if (result.utilization != null) html += '<tr><td>이용률</td><td>' + (result.utilization * 100).toFixed(1) + '%</td></tr>';
         html += '</table>';
 
@@ -2545,7 +2576,7 @@
             // 극점 데이터 수집
             const extrema = [];
             if (dsm) {
-                const d = dsm.Mxx || dsm.P;
+                const d = dsm.Mxx || dsm.P || dsm.Mzz;
                 if (d) {
                     const isM = d.load_type && d.load_type !== 'P';
                     if (d.LF_local > 0 && d.Lcrl > 0) {
@@ -4589,8 +4620,18 @@
         const mt = data.member_type || '';
         const mode = data.controlling_mode || '';
         const dm = data.design_method || 'LRFD';
-        const pass = data.pass;
         const util = data.utilization;
+        // R2-04: 3상태 판정 내장 규칙 (공통 _verdictOf와 동일; VM 추출 실행 대비 함수 내 정의).
+        // true=PASS, false=FAIL, null·미완료=NOT_CHECKED. 게이지 수치와 완료 상태를 분리한다.
+        const verdictOf = (dd) => {
+            if (dd && dd.pass === true && dd.verification_complete !== false) {
+                return { state: 'PASS', label: '✓ OK', cls: 'pass', short: 'OK' };
+            }
+            if (dd && dd.pass === false) {
+                return { state: 'FAIL', label: '✗ NG', cls: 'fail', short: 'NG' };
+            }
+            return { state: 'NOT_CHECKED', label: '⚠ 미검토 (NOT_CHECKED)', cls: 'warn', short: 'NOT_CHECKED' };
+        };
 
         let summaryHtml = '';
 
@@ -4678,7 +4719,7 @@
             const cls = util <= 0.75 ? 'ok' : (util <= 1.0 ? 'warn' : 'fail');
             summaryHtml += '<div class="utilization-bar">';
             summaryHtml += '<div class="utilization-fill ' + cls + '" style="width:' + Math.min(pct, 100) + '%"></div>';
-            summaryHtml += '<span class="utilization-label">' + pct + '% ' + (pass !== false ? '✓ OK' : '✗ NG') + '</span>';
+            summaryHtml += '<span class="utilization-label">' + pct + '% ' + verdictOf(data).label + '</span>';
             summaryHtml += '</div>';
         }
 
@@ -4718,7 +4759,7 @@
                 var posCls = pr.utilization <= 0.75 ? 'ok' : (pr.utilization <= 1.0 ? 'warn' : 'fail');
                 summaryHtml += '<div class="utilization-bar">';
                 summaryHtml += '<div class="utilization-fill ' + posCls + '" style="width:' + Math.min(posPct, 100) + '%"></div>';
-                summaryHtml += '<span class="utilization-label">' + posPct + '% ' + (pr.pass !== false ? '✓ OK' : '✗ NG') + '</span>';
+                summaryHtml += '<span class="utilization-label">' + posPct + '% ' + verdictOf(pr).label + '</span>';
                 summaryHtml += '</div>';
             }
         }
@@ -5025,7 +5066,7 @@
                 th{background:#f0f0f0;font-weight:600}
                 .eq{font-family:'Cambria Math','Times New Roman',serif;font-style:italic;font-size:12px;padding:6px 10px;background:#f8f8ff;border-left:3px solid #1565c0;margin:8px 0;display:block;line-height:1.8}
                 .result{font-weight:700;color:#1565c0}
-                .pass{color:#2e7d32;font-weight:700} .fail{color:#c62828;font-weight:700}
+                .pass{color:#2e7d32;font-weight:700} .fail{color:#c62828;font-weight:700} .warn{color:#e65100;font-weight:700}
                 .section-fig{text-align:center;margin:12px 0}
                 svg text{font-family:'Segoe UI',sans-serif}
                 hr{margin:16px 0;border:none;border-top:1px solid #ddd}
@@ -5796,10 +5837,25 @@
     // ═══════════════════════════════════════════════════════
     function _rptSummary(d, la) {
         const mt = d.member_type||'', dm = d.design_method||'LRFD';
-        const mtNames = {flexure:'휨 부재 (보/퍼린)',compression:'압축 부재 (기둥/스터드)',combined:'축력+휨 조합 부재',tension:'인장 부재'};
+        const mtNames = {flexure:'휨 부재 (보/퍼린)',compression:'압축 부재 (기둥/스터드)',combined:'축력+휨 조합 부재',tension:'인장 부재',connection:'접합부 (Chapter J)'};
+        // R2-04: 3상태 판정 내장 규칙 (공통 _verdictOf와 동일; VM 추출 실행 대비 함수 내 정의).
+        const verdictOf = (dd) => {
+            if (dd && dd.pass === true && dd.verification_complete !== false) {
+                return { state: 'PASS', label: '✓ OK', cls: 'pass', short: 'OK' };
+            }
+            if (dd && dd.pass === false) {
+                return { state: 'FAIL', label: '✗ NG', cls: 'fail', short: 'NG' };
+            }
+            return { state: 'NOT_CHECKED', label: '⚠ 미검토 (NOT_CHECKED)', cls: 'warn', short: 'NOT_CHECKED' };
+        };
         let h = '';
 
-        h += '<p>본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 <b>'+(mtNames[mt]||mt)+'</b>의 설계 검토 결과입니다. ';
+        // R2-04: 접합 검토에는 DSM 부재 문구를 쓰지 않는다.
+        if (mt === 'connection') {
+            h += '<p>본 보고서는 AISI S100-16 Chapter J에 의한 <b>접합부</b>의 설계 검토 결과입니다. ';
+        } else {
+            h += '<p>본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 <b>'+(mtNames[mt]||mt)+'</b>의 설계 검토 결과입니다. ';
+        }
         h += '설계 방법은 <b>'+dm+'</b>입니다. ';
         if (la) h += '부재는 <b>'+la.n_spans+'</b>경간이며, 지배 하중조합은 <b>'+((la.governing||la.gravity||{}).combo||'N/A')+'</b>입니다. ';
         h += '지배 파괴 모드는 <b>'+(d.controlling_mode||'N/A')+'</b>입니다.</p>';
@@ -5807,7 +5863,11 @@
         h += '<table>';
         h += '<tr><th style="width:50%">항목</th><th>값</th></tr>';
         h += '<tr><td>설계 기준</td><td>AISI S100-16</td></tr>';
-        h += '<tr><td>해석 방법</td><td>직접강도법 (DSM) — 유한스트립법</td></tr>';
+        if (mt === 'connection') {
+            h += '<tr><td>검토 방법</td><td>Chapter J 한계상태 검토</td></tr>';
+        } else {
+            h += '<tr><td>해석 방법</td><td>직접강도법 (DSM) — 유한스트립법</td></tr>';
+        }
         h += '<tr><td>부재 유형</td><td>'+(mtNames[mt]||mt)+'</td></tr>';
         h += '<tr><td>설계 방법</td><td>'+dm+'</td></tr>';
         h += '<tr><td>지배 파괴 모드</td><td><b>'+(d.controlling_mode||'')+'</b></td></tr>';
@@ -5849,21 +5909,31 @@
             h += '<tr><td>종합 결과</td><td class="'+(_allOK?'pass':'fail')+'" style="font-size:14px"><b>'+(_allOK?'OK':'NG')+'</b></td></tr>';
         } else if (d.utilization != null) {
             var pct = (d.utilization*100).toFixed(1);
-            h += '<tr><td>소요/저항 비율 (DCR)</td><td class="'+(d.pass?'pass':'fail')+'" style="font-size:14px"><b>'+pct+'% — '+(d.pass?'OK':'NG')+'</b></td></tr>';
+            var v = verdictOf(d);
+            h += '<tr><td>소요/저항 비율 (DCR)</td><td class="'+v.cls+'" style="font-size:14px"><b>'+pct+'% — '+v.short+'</b></td></tr>';
         }
         if (d.interaction) {
-            h += '<tr><td>조합 검토 (§H1.2)</td><td class="'+(d.interaction.pass?'pass':'fail')+'"><b>'+_rv(d.interaction.total,4)+'</b> &le; 1.0 — '+(d.interaction.pass?'OK':'NG')+'</td></tr>';
+            var iv = verdictOf(d.interaction);
+            h += '<tr><td>조합 검토 (§H1.2)</td><td class="'+iv.cls+'"><b>'+_rv(d.interaction.total,4)+'</b> &le; 1.0 — '+iv.short+'</td></tr>';
         }
         h += '<tr><td>참조 규준 조항</td><td>'+(d.spec_sections||[]).join(', ')+'</td></tr>';
         h += '</table>';
 
-        // DSM 경고
-        const warnings = d.dsm_warnings || [];
+        // 설계 경고 (R2-04: 접합 J6 경고가 d.warnings에 오므로 함께 표시)
+        const warnings = (d.warnings || []).concat(d.dsm_warnings || []);
         if (warnings.length > 0) {
             h += '<div style="margin-top:8px;padding:6px;background:#fff3e0;border:1px solid #ff9800;border-radius:4px">';
-            h += '<b style="color:#e65100">DSM 적용성 경고:</b><ul style="margin:4px 0;padding-left:20px">';
+            h += '<b style="color:#e65100">설계 경고:</b><ul style="margin:4px 0;padding-left:20px">';
             warnings.forEach(w => { h += '<li>'+w+'</li>'; });
             h += '</ul></div>';
+        }
+        // R2-04: 미검토 항목은 확정 판정 대신 필요 입력을 안내한다.
+        if (verdictOf(d).state === 'NOT_CHECKED') {
+            var ncNote = d.utilization == null
+                ? '소요값이 없어 판정하지 않았습니다(강도 조회).'
+                : '미평가 한계상태가 있어 전체 적합을 확정할 수 없습니다. 위 경고를 해소할 입력을 추가한 뒤 다시 검토하십시오.';
+            h += '<div style="margin-top:8px;padding:6px;background:#fff3e0;border:1px solid #ff9800;border-radius:4px">';
+            h += '<b style="color:#e65100">미검토 (NOT_CHECKED):</b> ' + ncNote + '</div>';
         }
         return h;
     }

@@ -137,7 +137,8 @@
         "test:webview-contract": "node ./test/webview/design_prepare_contract.js",
         "test:webview": "node ./test/webview/design_prepare_contract.js && node ./test/webview/design_state_roundtrip.js && node ./test/webview/lap_governing_contract.js && node ./test/webview/si_units_roundtrip.js && node ./test/webview/gui_contract_0926.js && node ./test/webview/utils_contract.js && node ./test/webview/parity_contract.js && node ./test/webview/mcp_registration_contract.js",
         "test:python": "python3 ./test/python/run_all.py",
-        "test:vscode": "npm run compile && node ./test/vscode/runTest.js"
+        "test:vscode": "npm run compile && node ./test/vscode/runTest.js",
+        "check:mcp-parity": "node scripts/check-mcp-parity.cjs"
     },
     "devDependencies": {
         "@types/node": "^20.0.0",

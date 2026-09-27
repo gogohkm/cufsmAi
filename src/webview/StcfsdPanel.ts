@@ -34,6 +34,7 @@ export class StcfsdPanel implements McpPanelInterface {
     private _lastAnalysisResult: any = null;
     private _lastLoadAnalysis: any = null;
     private _lastDesignResult: any = null;
+    private _lastDesignRequest: any = null;
     private _preparedDesignDsm: any = null;
     private _preparedDesignDsmSig = '';
     private _lastPreviewPath: string = '';
@@ -225,7 +226,16 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (message.data.lengths) this._model.lengths = message.data.lengths;
                     if (message.data.m_all) this._model.m_all = message.data.m_all;
                     if (message.data.BC) this._model.BC = message.data.BC;
-                    if (message.data.neigs) this._model.neigs = message.data.neigs;
+                    // R2-01: GUI도 MCP와 같은 neigs 계약(양의 정수)을 적용한다.
+                    if (message.data.neigs !== undefined && message.data.neigs !== null) {
+                        if (!Number.isInteger(message.data.neigs) || message.data.neigs <= 0) {
+                            this._postMessage('analysisError', {
+                                error: `Invalid neigs: ${message.data.neigs} (positive integer required)`,
+                            });
+                            break;
+                        }
+                        this._model.neigs = message.data.neigs;
+                    }
                     if (message.data.loadCase) (this._model as any).loadCase = message.data.loadCase;
                     // 응력 설정을 해석 직전에 동기적으로 처리 (레이스 컨디션 방지)
                     if (message.data.stressOpts) {
@@ -373,18 +383,23 @@ export class StcfsdPanel implements McpPanelInterface {
             this._setAnalysisResult(result, (this._model as any).loadCase || 'unknown');
             this._postMessage('analysisComplete', this._lastAnalysisResult);
 
-            // DSM 설계값 자동 추출 — P(축력)와 Mxx(휨) 모두
+            // DSM 설계값 자동 추출 — R2-05: 해석 family와 일치하는 항목만
             const aFy = this._getAnalysisFy();
             try {
-                const dsmP = await this._pythonBridge.call('dsm', {
+                const family = this._lastAnalysisResult?._meta?.load_family;
+                const dsmP = family === 'P' ? await this._pythonBridge.call('dsm', {
                     node: model.node, elem: model.elem,
                     curve: result.curve, fy: aFy, load_type: 'P',
-                });
-                const dsmM = await this._pythonBridge.call('dsm', {
+                }) : null;
+                const dsmM = family === 'Mxx' ? await this._pythonBridge.call('dsm', {
                     node: model.node, elem: model.elem,
                     curve: result.curve, fy: aFy, load_type: 'Mxx',
-                });
-                this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM });
+                }) : null;
+                const dsmZ = family === 'Mzz' ? await this._pythonBridge.call('dsm', {
+                    node: model.node, elem: model.elem,
+                    curve: result.curve, fy: aFy, load_type: 'Mzz',
+                }) : null;
+                this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM, Mzz: dsmZ, load_family: family });
             } catch (dsmErr: any) {
                 console.error('[StCFSD] DSM extraction failed:', dsmErr.message);
             }
@@ -460,7 +475,8 @@ export class StcfsdPanel implements McpPanelInterface {
             BC: this._model.BC || 'S-S',
             nlengths: lengths.length,
             hasModel: node.length > 0,
-            hasAnalysis: !!this._lastAnalysisResult,
+            hasAnalysis: this._isAnalysisCurrent(),
+            analysisStale: !!this._lastAnalysisResult && !this._isAnalysisCurrent(),
             // 단면 치수
             section: {
                 width: +(xMax - xMin).toFixed(4),
@@ -491,36 +507,65 @@ export class StcfsdPanel implements McpPanelInterface {
             || 35.53;
     }
 
+    /** F03: 해석에 영향을 주는 계산 입력 전체의 canonical 서명. */
     private _currentModelSignature(): string {
+        const num = (v: any) => Number(v || 0).toFixed(6);
         const nodeSig = (this._model.node || []).map((n: number[]) =>
-            [n[1], n[2], n[7]].map(v => Number(v || 0).toFixed(6)).join(':')
+            [n[1], n[2], n[3], n[4], n[5], n[6], n[7]].map(num).join(':')
         ).join('|');
         const elemSig = (this._model.elem || []).map((e: number[]) =>
-            [e[1], e[2], e[3]].map(v => Number(v || 0).toFixed(6)).join(':')
+            [e[1], e[2], e[3], e[4]].map(num).join(':')
+        ).join('|');
+        const matSig = (this._model.prop || []).map((p: number[]) =>
+            p.map(num).join(':')
+        ).join('|');
+        const springSig = ((this._model as any).springs || []).map((s: number[]) =>
+            s.map(num).join(':')
+        ).join('|');
+        const constrSig = ((this._model as any).constraints || []).map((c: number[]) =>
+            c.map(num).join(':')
         ).join('|');
         return [
             nodeSig,
             elemSig,
+            matSig,
             this._model.BC || 'S-S',
             (this._model.lengths || []).join(','),
+            this._model.neigs ?? 10,
             (this._model as any).loadCase || 'unknown',
             this._getAnalysisFy().toFixed(4),
+            springSig,
+            constrSig,
+            JSON.stringify((this._model as any).GBTcon || null),
         ].join('::');
     }
 
     private _currentDesignDsmSignature(fy?: number): string {
+        const num = (v: any) => Number(v || 0).toFixed(6);
         const nodeSig = (this._model.node || []).map((n: number[]) =>
-            [n[1], n[2]].map(v => Number(v || 0).toFixed(6)).join(':')
+            [n[1], n[2], n[3], n[4], n[5], n[6]].map(num).join(':')
         ).join('|');
         const elemSig = (this._model.elem || []).map((e: number[]) =>
-            [e[1], e[2], e[3]].map(v => Number(v || 0).toFixed(6)).join(':')
+            [e[1], e[2], e[3], e[4]].map(num).join(':')
+        ).join('|');
+        const matSig = (this._model.prop || []).map((p: number[]) =>
+            p.map(num).join(':')
+        ).join('|');
+        const springSig = ((this._model as any).springs || []).map((s: number[]) =>
+            s.map(num).join(':')
+        ).join('|');
+        const constrSig = ((this._model as any).constraints || []).map((c: number[]) =>
+            c.map(num).join(':')
         ).join('|');
         return [
             nodeSig,
             elemSig,
+            matSig,
             this._model.BC || 'S-S',
             (this._model.lengths || []).join(','),
             Number(fy ?? this._getAnalysisFy()).toFixed(4),
+            springSig,
+            constrSig,
         ].join('::');
     }
 
@@ -577,7 +622,13 @@ export class StcfsdPanel implements McpPanelInterface {
         return { success: true };
     }
 
-    private async _setLoadCaseOnModel(model: any, loadCase: string, fy: number): Promise<void> {
+    /**
+     * F14: custom 하중을 응력 생성에 전달한다.
+     * 계약: 생략된 힘은 0으로 간주한다. custom loadCase는 해석 _meta의
+     * load_type에 그대로 기록되어 P/Mxx 해석 family와 구분된다.
+     */
+    private async _setLoadCaseOnModel(model: any, loadCase: string, fy: number,
+        loads?: { P?: number; Mxx?: number; Mzz?: number }): Promise<void> {
         let stressOpts: any;
         if (loadCase === 'compression') {
             stressOpts = { type: 'uniform_compression', fy };
@@ -590,7 +641,10 @@ export class StcfsdPanel implements McpPanelInterface {
         } else if (loadCase === 'bending_zz_neg') {
             stressOpts = { type: 'custom', P: 0, Mxx: 0, Mzz: -1, fy };
         } else {
-            stressOpts = { type: 'custom', P: 0, Mxx: 0, Mzz: 0, fy };
+            stressOpts = {
+                type: 'custom',
+                P: loads?.P ?? 0, Mxx: loads?.Mxx ?? 0, Mzz: loads?.Mzz ?? 0, fy,
+            };
         }
         await this._applyStressToModel(model, stressOpts);
         model.loadCase = loadCase;
@@ -601,6 +655,7 @@ export class StcfsdPanel implements McpPanelInterface {
             ...result,
             _meta: {
                 load_type: loadType,
+                load_family: this._loadFamily(loadType),
                 fy: this._getAnalysisFy(),
                 signature: this._currentModelSignature(),
                 timestamp: new Date().toISOString(),
@@ -608,12 +663,44 @@ export class StcfsdPanel implements McpPanelInterface {
         };
     }
 
+    /**
+     * R2-05: 현재 해석 family와 일치하는 DSM 항목만 계산한다.
+     * 불일치 항목은 null(미검토)로 두고 basis에 근거를 기록한다.
+     */
+    private async _familyDsm(kind: 'P' | 'Mxx' | 'Mzz', fy: number): Promise<any> {
+        const family = this._lastAnalysisResult?._meta?.load_family;
+        if (family !== kind) { return null; }
+        return await this._pythonBridge.call('dsm', {
+            node: this._model.node, elem: this._model.elem,
+            curve: this._lastAnalysisResult.curve, fy, load_type: kind,
+        });
+    }
+
     private _invalidateAnalysisState(reason: string): void {
         this._lastAnalysisResult = null;
         this._preparedDesignDsm = null;
         this._preparedDesignDsmSig = '';
+        // F02: 설계 결과는 단면·재료·해석에 종속되므로 함께 폐기한다.
+        this._lastDesignResult = null;
+        this._lastDesignRequest = null;
         this._postMessage('analysisInvalidated', { reason });
         this._updateTreeView();
+    }
+
+    /** F02: 보고서 요청이 캐시된 설계 입력과 일치하는지 확인한다. */
+    private _designCacheMatches(request: any): boolean {
+        const cached = this._lastDesignRequest;
+        if (!this._lastDesignResult || !cached) { return false; }
+        if (request.member_type == null || cached.member_type == null) { return false; }
+        if (request.member_type !== cached.member_type) { return false; }
+        const skip = new Set(['action', 'loads', 'member_app', 'span_type', 'span_ft', 'spacing_ft']);
+        for (const key of Object.keys(request)) {
+            if (skip.has(key)) { continue; }
+            const a = (request as any)[key];
+            if (a === undefined) { continue; }
+            if (JSON.stringify(a) !== JSON.stringify((cached as any)[key])) { return false; }
+        }
+        return true;
     }
 
     private _isAnalysisCurrent(loadType?: string): boolean {
@@ -622,6 +709,175 @@ export class StcfsdPanel implements McpPanelInterface {
         if (meta.signature !== this._currentModelSignature()) { return false; }
         if (loadType && meta.load_type && meta.load_type !== loadType) { return false; }
         return Array.isArray(this._lastAnalysisResult.curve) && this._lastAnalysisResult.curve.length > 0;
+    }
+
+    /**
+     * F06: 데크 스프링 생성 — solver 10열 계약 단일 생성점.
+     * 행: [spring#, nodei, nodej, ku, kv, kw, kq, orient, discrete, ys].
+     * kx(횡)→ku, kφ(회전)→kq, 접지(nodej=0)·분포(discrete=0).
+     * 플랜지 절점 전체에 전체 강성을 균등 분배한다.
+     */
+    private _deckSpringsForFlange(model: any, kphi: number, kx: number,
+        flange: 'top' | 'bottom'): number[][] {
+        if (!(kphi > 0) && !(kx > 0)) { return []; }
+        const nodes: number[][] = model?.node || [];
+        if (nodes.length === 0) { return []; }
+        const zs = nodes.map((n: number[]) => n[2]);
+        const target = flange === 'top' ? Math.max(...zs) : Math.min(...zs);
+        const tol = Math.max(1e-9, (Math.max(...zs) - Math.min(...zs)) * 1e-9);
+        const flangeNodes = nodes.filter((n: number[]) => Math.abs(n[2] - target) <= tol);
+        if (flangeNodes.length === 0) { return []; }
+        const ku = (kx > 0 ? kx : 0) / flangeNodes.length;
+        const kq = (kphi > 0 ? kphi : 0) / flangeNodes.length;
+        return flangeNodes.map((n: number[], i: number) =>
+            [i + 1, n[0], 0, ku, 0, 0, kq, 0, 0, 0]);
+    }
+
+    /**
+     * F13: 공통 모델 validator. 모든 검증을 적용 전에 수행해 실패 시
+     * node/elem snapshot을 그대로 보존한다 (원자적 적용).
+     * 규약: node행 [id,x,z,dofx,dofz,dofy,dofrot,stress], elem행 [id,nodei,nodej,t,mat].
+     */
+    private _requireNodeId(nid: any): number {
+        const n = this._model.node?.length || 0;
+        if (!Number.isInteger(nid) || nid < 1 || nid > n) {
+            throw new Error(`Invalid node_id: ${nid} (integer 1..${n} required)`);
+        }
+        return nid;
+    }
+
+    private _requireElemId(eid: any): number {
+        const n = this._model.elem?.length || 0;
+        if (!Number.isInteger(eid) || eid < 1 || eid > n) {
+            throw new Error(`Invalid elem_id: ${eid} (integer 1..${n} required)`);
+        }
+        return eid;
+    }
+
+    private _requireFinite(value: any, name: string): number {
+        if (typeof value !== 'number' || !Number.isFinite(value)) {
+            throw new Error(`Invalid ${name}: ${value} (finite number required)`);
+        }
+        return value;
+    }
+
+    /**
+     * R2-02/R2-03: 요소 길이 허용오차. 모델 범위(bbox 대각선)에 비례하며
+     * 최소 1e-9 (단위계 무관). 이하는 solver 특이이므로 0길이로 취급한다.
+     */
+    private _zeroLengthTol(nodes?: number[][]): number {
+        const ns = nodes || this._model.node || [];
+        if (ns.length < 2) { return 1e-9; }
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (const n of ns) {
+            if (n[1] < minX) { minX = n[1]; }
+            if (n[1] > maxX) { maxX = n[1]; }
+            if (n[2] < minZ) { minZ = n[2]; }
+            if (n[2] > maxZ) { maxZ = n[2]; }
+        }
+        const extent = Math.hypot(maxX - minX, maxZ - minZ);
+        return 1e-9 * Math.max(1, extent);
+    }
+
+    private _requirePositiveLength(ax: number, az: number, bx: number, bz: number,
+        what: string, tol: number): void {
+        if (Math.hypot(bx - ax, bz - az) <= tol) {
+            throw new Error(`Invalid ${what}: zero length (tolerance ${tol.toExponential(1)})`);
+        }
+    }
+
+    private _requireElementEnds(nodei: any, nodej: any, nodes?: number[][]): void {
+        const ns = nodes || this._model.node || [];
+        const n = ns.length;
+        if (!Number.isInteger(nodei) || nodei < 1 || nodei > n
+            || !Number.isInteger(nodej) || nodej < 1 || nodej > n) {
+            throw new Error(`Invalid element ends: nodei=${nodei}, nodej=${nodej} (integers 1..${n} required)`);
+        }
+        if (nodei === nodej) {
+            throw new Error(`Invalid element ends: nodei == nodej == ${nodei} (self-connection rejected)`);
+        }
+        const a = ns[nodei - 1], b = ns[nodej - 1];
+        this._requirePositiveLength(a[1], a[2], b[1], b[2],
+            `element ends ${nodei}-${nodej}`, this._zeroLengthTol(ns));
+    }
+
+    private _requireThickness(t: any): number {
+        const v = this._requireFinite(t, 'thickness');
+        if (!(v > 0)) {
+            throw new Error(`Invalid thickness: ${t} (must be > 0)`);
+        }
+        return v;
+    }
+
+    /** R2-02: 절점 행 배열 검증 (ID·열·유한·DOF 계약). */
+    private _validateNodeRows(nodes: number[][]): void {
+        if (!Array.isArray(nodes)) {
+            throw new Error('Invalid nodes: array required');
+        }
+        nodes.forEach((row: number[], i: number) => {
+            if (!Array.isArray(row) || row.length !== 8) {
+                throw new Error(`Invalid node row ${i + 1}: 8 columns required`);
+            }
+            if (row[0] !== i + 1) {
+                throw new Error(`Invalid node row ${i + 1}: id must equal position (${row[0]})`);
+            }
+            this._requireFinite(row[1], `node[${i + 1}].x`);
+            this._requireFinite(row[2], `node[${i + 1}].z`);
+            for (let k = 3; k <= 6; k++) {
+                if (row[k] !== 0 && row[k] !== 1) {
+                    throw new Error(`Invalid node[${i + 1}] dof[${k}]: ${row[k]} (0 or 1 required)`);
+                }
+            }
+            this._requireFinite(row[7], `node[${i + 1}].stress`);
+        });
+    }
+
+    /** R2-02: 요소 행 배열 검증 — 주어진 절점 집합 기준 참조·두께·길이 교차 검증. */
+    private _validateElemRows(elements: number[][], nodes: number[][]): void {
+        if (!Array.isArray(elements)) {
+            throw new Error('Invalid elements: array required');
+        }
+        elements.forEach((row: number[], i: number) => {
+            if (!Array.isArray(row) || row.length !== 5) {
+                throw new Error(`Invalid element row ${i + 1}: 5 columns required`);
+            }
+            if (row[0] !== i + 1) {
+                throw new Error(`Invalid element row ${i + 1}: id must equal position (${row[0]})`);
+            }
+            this._requireElementEnds(row[1], row[2], nodes);
+            this._requireThickness(row[3]);
+            this._requireFinite(row[4], `element[${i + 1}].matnum`);
+        });
+    }
+
+    /**
+     * R2-05: 해석 하중 family. DSM은 이 family와 일치하는 항목만 제공한다.
+     * custom(혼합·영분포)은 순수 P/Mxx/Mzz로 변환하지 않는다 → null.
+     */
+    private _loadFamily(loadCase: string): 'P' | 'Mxx' | 'Mzz' | null {
+        if (loadCase === 'compression') { return 'P'; }
+        if (loadCase === 'bending_xx' || loadCase === 'bending_xx_pos'
+            || loadCase === 'bending_xx_neg') { return 'Mxx'; }
+        if (loadCase === 'bending_zz' || loadCase === 'bending_zz_pos'
+            || loadCase === 'bending_zz_neg') { return 'Mzz'; }
+        return null;
+    }
+
+    /** R2-05: custom 힘 triple에서 순수성분 loadCase를 추론한다 (set_stress와 동일 규칙). */
+    private _inferCustomLoadCase(P: any, Mxx: any, Mzz: any): string {
+        if (P && !Mxx && !Mzz) { return 'compression'; }
+        if (Mxx && !P && !Mzz) { return Mxx > 0 ? 'bending_xx_pos' : 'bending_xx_neg'; }
+        if (Mzz && !P && !Mxx) { return Mzz > 0 ? 'bending_zz_pos' : 'bending_zz_neg'; }
+        return 'custom';
+    }
+
+    /** F03: 모든 결과 조회가 공유하는 current 검사 오류. */
+    private _staleAnalysisError(): any {
+        return {
+            error: this._lastAnalysisResult
+                ? 'Analysis result is stale for the current model. Run analysis again.'
+                : 'No analysis result. Run analysis first.',
+        };
     }
 
     private _analysisFamily(loadType?: string): 'P' | 'Mxx' | 'Mzz' | 'custom' | 'unknown' {
@@ -704,9 +960,23 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'set_material': {
-                const E = options.E || 29500;
-                const v = options.v || 0.3;
-                const G = options.G || E / (2 * (1 + v));
+                // F11: ?? 기본값 + 명시 검증. 실패 시 모델을 변경하지 않는다.
+                // 등방성 계약: E > 0, -1 < v < 0.5, G > 0. G 미지정 시 E/2(1+v).
+                const E = options.E ?? 29500;
+                const v = options.v ?? 0.3;
+                if (typeof E !== 'number' || !Number.isFinite(E) || !(E > 0)) {
+                    return { error: `Invalid E: ${E} (positive finite number required)` };
+                }
+                if (typeof v !== 'number' || !Number.isFinite(v) || !(v > -1) || !(v < 0.5)) {
+                    return { error: `Invalid v: ${v} (must satisfy -1 < v < 0.5)` };
+                }
+                let G = options.G;
+                if (G === undefined || G === null) {
+                    G = E / (2 * (1 + v));
+                }
+                if (typeof G !== 'number' || !Number.isFinite(G) || !(G > 0)) {
+                    return { error: `Invalid G: ${options.G} (positive finite number required)` };
+                }
                 this._model.prop = [[100, E, E, v, v, G]];
                 this._invalidateAnalysisState('Material changed');
                 this._postMessage('modelLoaded', this._model);
@@ -722,12 +992,27 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'set_lengths': {
-                const min = options.min || 1;
-                const max = options.max || 1000;
-                const n = options.n || 50;
+                // F12: min > 0, max ≥ min, 양의 정수 n 검증. n=1이면 단일점 [min].
+                // 실패 시 기존 길이 목록을 보존한다.
+                const min = options.min ?? 1;
+                const max = options.max ?? 1000;
+                const n = options.n ?? 50;
+                if (typeof min !== 'number' || !Number.isFinite(min) || !(min > 0)) {
+                    return { error: `Invalid min: ${min} (positive finite number required)` };
+                }
+                if (typeof max !== 'number' || !Number.isFinite(max) || !(max >= min)) {
+                    return { error: `Invalid max: ${max} (must satisfy max >= min)` };
+                }
+                if (!Number.isInteger(n) || n < 1 || n > 10000) {
+                    return { error: `Invalid n: ${n} (integer 1..10000 required)` };
+                }
                 const lengths: number[] = [];
-                for (let i = 0; i < n; i++) {
-                    lengths.push(Math.pow(10, Math.log10(min) + (Math.log10(max) - Math.log10(min)) * i / (n - 1)));
+                if (n === 1) {
+                    lengths.push(min);
+                } else {
+                    for (let i = 0; i < n; i++) {
+                        lengths.push(Math.pow(10, Math.log10(min) + (Math.log10(max) - Math.log10(min)) * i / (n - 1)));
+                    }
                 }
                 this._model.lengths = lengths;
                 this._model.m_all = lengths.map(() => [1]);
@@ -738,10 +1023,16 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'set_load_case': {
-                const lc = options.load_case || 'compression';
+                let lc = options.load_case || 'compression';
                 const fy = options.fy || 35.53;
+                // R2-05: 순수성분 custom은 set_stress와 같은 규칙으로 추론한다.
+                // (동일 fy 정규화이므로 응력 분포는 변하지 않는다)
+                if (lc === 'custom') {
+                    lc = this._inferCustomLoadCase(options.P, options.Mxx, options.Mzz);
+                }
                 this._invalidateAnalysisState(`Load case changed: ${lc}`);
-                await this._setLoadCaseOnModel(this._model as any, lc, fy);
+                await this._setLoadCaseOnModel(this._model as any, lc, fy,
+                    { P: options.P, Mxx: options.Mxx, Mzz: options.Mzz });
                 const lcResult = { success: true };
                 (this._model as any).loadCase = lc;
                 (this._model as any).loadFy = fy;
@@ -773,50 +1064,97 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'run_analysis': {
+                // F10: MCP neigs를 검증 후 모델에 반영한다 (GUI 경로와 동일).
+                if (options.neigs !== undefined && options.neigs !== null) {
+                    const neigs = options.neigs;
+                    if (!Number.isInteger(neigs) || neigs <= 0) {
+                        return { error: `Invalid neigs: ${neigs} (positive integer required)` };
+                    }
+                    const mTerms = this._model.m_all?.[0]?.length || 1;
+                    let freeDofs = 0;
+                    for (const nd of this._model.node || []) {
+                        for (let k = 3; k <= 6; k++) { if (nd[k]) { freeDofs++; } }
+                    }
+                    const maxEigs = Math.max(freeDofs * mTerms, 1);
+                    if (neigs > maxEigs) {
+                        return { error: `Invalid neigs: ${neigs} exceeds available DOFs (${maxEigs})` };
+                    }
+                    this._model.neigs = neigs;
+                    this._invalidateAnalysisState('Eigenvalue count changed');
+                }
                 const result = await this._pythonBridge.analyze(this._model as any);
                 this._setAnalysisResult(result, (this._model as any).loadCase || 'unknown');
                 this._postMessage('analysisComplete', this._lastAnalysisResult);
 
                 // DSM 자동 추출
+                // F10: 요청/실제 neigs를 응답에 기록한다.
+                const neigsActual = Array.isArray(result?.curve?.[0])
+                    ? result.curve[0].length - 1 : 0;
+                const neigsMeta = {
+                    neigs_requested: this._model.neigs ?? 10,
+                    neigs_actual: neigsActual,
+                };
                 try {
+                    // R2-05: 해석 family와 일치하는 DSM 항목만 계산한다.
+                    const family = this._lastAnalysisResult?._meta?.load_family;
                     const aFy = this._getAnalysisFy();
-                    const dsmP = await this._pythonBridge.call('dsm', {
+                    const dsmP = family === 'P' ? await this._pythonBridge.call('dsm', {
                         node: this._model.node, elem: this._model.elem,
                         curve: result.curve, fy: aFy, load_type: 'P',
-                    });
-                    const dsmM = await this._pythonBridge.call('dsm', {
+                    }) : null;
+                    const dsmM = family === 'Mxx' ? await this._pythonBridge.call('dsm', {
                         node: this._model.node, elem: this._model.elem,
                         curve: result.curve, fy: aFy, load_type: 'Mxx',
-                    });
-                    this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM });
-                    return { success: true, n_lengths: result.n_lengths, dsm_P: dsmP, dsm_Mxx: dsmM };
+                    }) : null;
+                    const dsmZ = family === 'Mzz' ? await this._pythonBridge.call('dsm', {
+                        node: this._model.node, elem: this._model.elem,
+                        curve: result.curve, fy: aFy, load_type: 'Mzz',
+                    }) : null;
+                    this._postMessage('dsmResult', { P: dsmP, Mxx: dsmM, Mzz: dsmZ, load_family: family });
+                    return {
+                        success: true, n_lengths: result.n_lengths,
+                        dsm_P: dsmP, dsm_Mxx: dsmM, dsm_Mzz: dsmZ,
+                        load_family: family, ...neigsMeta,
+                    };
                 } catch {
-                    return { success: true, n_lengths: result.n_lengths };
+                    return { success: true, n_lengths: result.n_lengths, ...neigsMeta };
                 }
             }
 
             case 'get_dsm': {
                 const curve = this._isAnalysisCurrent() ? this._lastAnalysisResult?.curve : null;
                 if (!curve || curve.length === 0) {
-                    return { error: 'No analysis result. Run analysis first.' };
+                    return this._staleAnalysisError();
                 }
 
+                // R2-05: 요청 family가 해석 family와 일치해야 한다.
+                const requested = options.load_type || 'P';
+                if (requested !== 'P' && requested !== 'Mxx' && requested !== 'Mzz') {
+                    return { error: `Invalid load_type: ${requested} (P, Mxx, or Mzz required)` };
+                }
+                const family = this._lastAnalysisResult?._meta?.load_family;
+                const loadCase = this._lastAnalysisResult?._meta?.load_type;
+                if (family !== requested) {
+                    return {
+                        error: `DSM load_type '${requested}' does not match analysis family ` +
+                            `'${family ?? 'none'}' (load_case ${loadCase}). ` +
+                            `Re-run analysis with a matching load case.`,
+                    };
+                }
                 const aFy = options.fy || this._getAnalysisFy();
                 // 선택: 유효좌굴길이 제공 시 전체좌굴값을 AISI 폐형식(Eq.E2-4 / §F2.1)으로 산정.
-                // 컬럼 유효길이(KxLx/KyLy/KtLt)는 압축(P) 호출로, 휨 비지지길이(Lb)는 Mxx 호출로 전달.
-                // section_type/Cb 는 양쪽 분기에서 공통으로 사용.
-                const dsmP = await this._pythonBridge.call('dsm', {
+                const base: any = {
                     node: this._model.node, elem: this._model.elem,
-                    curve, fy: aFy, load_type: 'P',
-                    KxLx: options.KxLx, KyLy: options.KyLy, KtLt: options.KtLt,
+                    curve, fy: aFy, load_type: requested,
                     Cb: options.Cb, section_type: options.section_type,
-                });
-                const dsmM = await this._pythonBridge.call('dsm', {
-                    node: this._model.node, elem: this._model.elem,
-                    curve, fy: aFy, load_type: 'Mxx',
-                    Lb: options.Lb, Cb: options.Cb, section_type: options.section_type,
-                });
-                return { P: dsmP, Mxx: dsmM, fy_used: aFy };
+                };
+                if (requested === 'P') {
+                    base.KxLx = options.KxLx; base.KyLy = options.KyLy; base.KtLt = options.KtLt;
+                } else {
+                    base.Lb = options.Lb;
+                }
+                const dsm = await this._pythonBridge.call('dsm', base);
+                return { [requested]: dsm, fy_used: aFy, load_family: family };
             }
 
             case 'prepare_design_dsm': {
@@ -889,6 +1227,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (result?.node) {
                     this._model.node = result.node;
                     this._model.elem = result.elem;
+                    this._invalidateAnalysisState('Mesh doubled');
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                 }
@@ -921,12 +1260,30 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'block_shear':
             case 'cold_work':
             case 'flange_curling': {
-                return await this._pythonBridge.call(action, options);
+                // F08: 함수별 allowlist로 업무 인자만 전달한다.
+                const allowlists: Record<string, string[]> = {
+                    shear_lag: ['Ag', 'An_net', 'x_bar', 'L_conn', 'Fu', 'Fy',
+                        'design_method', 'Usl', 'connection_case', 'd', 's'],
+                    block_shear: ['Agv', 'Anv', 'Ant', 'Fy', 'Fu', 'design_method',
+                        'Ubs', 'phi_factor', 'omega_factor', 'connection_type'],
+                    cold_work: ['Fyv', 'Fuv', 'R', 't', 'n_corners', 'corner_angle',
+                        'A_corners', 'A_flange', 'corners_per_flange'],
+                    flange_curling: ['bf', 't', 'h', 'f_avg', 'E', 'allowable_cf'],
+                };
+                const params: any = {};
+                for (const key of Object.keys(options || {})) {
+                    if (key === 'action') { continue; }
+                    if (!allowlists[action].includes(key)) {
+                        return { error: `Unsupported parameter '${key}' for ${action}` };
+                    }
+                    params[key] = options[key];
+                }
+                return await this._pythonBridge.call(action, params);
             }
 
             case 'classify': {
-                if (!this._lastAnalysisResult) {
-                    return { error: 'No analysis result. Run analysis first.' };
+                if (!this._isAnalysisCurrent()) {
+                    return this._staleAnalysisError();
                 }
                 const classResult = await this._pythonBridge.call('classify', {
                     model: this._model,
@@ -1161,7 +1518,13 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (dsmWarning) {
                     result.dsm_warning = dsmWarning;
                 }
-                this._lastDesignResult = result;
+                // F02: 오류 결과는 캐시하지 않고, 입력 서명과 함께 저장한다.
+                if (!result?.error) {
+                    const { action: _action, ...businessParams } = options;
+                    void _action;
+                    this._lastDesignRequest = JSON.parse(JSON.stringify(businessParams));
+                    this._lastDesignResult = result;
+                }
                 this._postMessage('designResult', result);
                 return result;
             }
@@ -1209,18 +1572,18 @@ export class StcfsdPanel implements McpPanelInterface {
                     } catch { /* optional step - skip on failure */ }
                 }
 
-                // 2. DSM 값
+                // 2. DSM 값 (R2-05: 해석 family와 일치하는 항목만)
                 if (this._isAnalysisCurrent()) {
                     const aFy = this._getAnalysisFy();
+                    const family = this._lastAnalysisResult?._meta?.load_family;
+                    reportData.dsm_basis = {
+                        load_family: family,
+                        load_case: this._lastAnalysisResult?._meta?.load_type,
+                    };
                     try {
-                        reportData.dsm_P = await this._pythonBridge.call('dsm', {
-                            node: this._model.node, elem: this._model.elem,
-                            curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'P',
-                        });
-                        reportData.dsm_Mxx = await this._pythonBridge.call('dsm', {
-                            node: this._model.node, elem: this._model.elem,
-                            curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
-                        });
+                        reportData.dsm_P = await this._familyDsm('P', aFy);
+                        reportData.dsm_Mxx = await this._familyDsm('Mxx', aFy);
+                        reportData.dsm_Mzz = await this._familyDsm('Mzz', aFy);
                     } catch { /* optional step - skip on failure */ }
                     reportData.curve_length = this._lastAnalysisResult.curve.length;
                     reportData.analysis_meta = this._lastAnalysisResult._meta || null;
@@ -1236,13 +1599,24 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
 
                 // 4. 설계 결과
-                if (this._lastDesignResult) {
+                // F01: action을 제외한 업무 입력으로 명시적 dispatch (재귀 방지).
+                // F02: 요청과 일치하는 캐시만 재사용하고, 다르면 새로 계산한다.
+                if (options.member_type) {
+                    if (this._designCacheMatches(options)) {
+                        reportData.design_result = this._lastDesignResult;
+                        reportData.design_cache_hit = true;
+                    } else {
+                        try {
+                            const { action: _action, ...designOptions } = options;
+                            void _action;
+                            const designResult = await this.handleMcpAction({ ...designOptions, action: 'aisi_design' });
+                            reportData.design_result = designResult;
+                            reportData.design_cache_hit = false;
+                        } catch { /* optional step - skip on failure */ }
+                    }
+                } else if (this._lastDesignResult) {
                     reportData.design_result = this._lastDesignResult;
-                } else if (options.member_type) {
-                    try {
-                        const designResult = await this.handleMcpAction({ action: 'aisi_design', ...options });
-                        reportData.design_result = designResult;
-                    } catch { /* optional step - skip on failure */ }
+                    reportData.design_cache_hit = true;
                 }
 
                 this._postMessage('reportGenerated', reportData);
@@ -1294,17 +1668,18 @@ export class StcfsdPanel implements McpPanelInterface {
                     } catch { /* optional step - skip on failure */ }
                 }
 
-                // Analysis/DSM
+                // Analysis/DSM (R2-05: 해석 family와 일치하는 항목만)
                 valData.analysis_run = this._isAnalysisCurrent();
                 if (this._isAnalysisCurrent()) {
                     const aFy = this._getAnalysisFy();
+                    valData.dsm_basis = {
+                        load_family: this._lastAnalysisResult?._meta?.load_family,
+                        load_case: this._lastAnalysisResult?._meta?.load_type,
+                    };
                     try {
-                        valData.dsm_P = await this._pythonBridge.call('dsm', {
-                            node, elem, curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'P',
-                        });
-                        valData.dsm_Mxx = await this._pythonBridge.call('dsm', {
-                            node, elem, curve: this._lastAnalysisResult.curve, fy: aFy, load_type: 'Mxx',
-                        });
+                        valData.dsm_P = await this._familyDsm('P', aFy);
+                        valData.dsm_Mxx = await this._familyDsm('Mxx', aFy);
+                        valData.dsm_Mzz = await this._familyDsm('Mzz', aFy);
                     } catch { /* optional step - skip on failure */ }
                 }
 
@@ -1314,30 +1689,14 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'apply_deck_springs': {
-                // 데크 강성(kφ, kx)을 CUFSM 모델의 압축 플랜지에 스프링으로 적용
+                // 데크 강성(kφ, kx)을 압축 플랜지에 스프링으로 적용 (F06: 10열 계약)
                 const kphi = options.kphi || 0;
                 const kx = options.kx || 0;
-                const flange_node = options.flange_node; // 압축 플랜지 중앙 노드 번호
-
-                if (!flange_node && this._model.node && this._model.node.length > 0) {
-                    // 자동: 최상단 노드(정모멘트) 또는 최하단 노드(부모멘트)
-                    const nodes = this._model.node;
-                    const topIdx = nodes.reduce((best: number, n: any, i: number) =>
-                        n[2] > (nodes[best]?.[2] ?? -Infinity) ? i : best, 0);
-                    const topNodeNum = nodes[topIdx][0];
-
-                    const springs: number[][] = [];
-                    if (kx > 0) {
-                        // [node, kx, kz, kq, x_off, z_off, 'foundation'=0]
-                        springs.push([topNodeNum, kx, 0, 0, 0, 0, 0]);
-                    }
-                    if (kphi > 0) {
-                        springs.push([topNodeNum, 0, 0, kphi, 0, 0, 0]);
-                    }
-                    (this._model as any).springs = springs;
-                    return { success: true, nsprings: springs.length, node: topNodeNum };
-                }
-                return { success: true, nsprings: 0 };
+                const flange = options.flange === 'bottom' ? 'bottom' : 'top';
+                const springs = this._deckSpringsForFlange(this._model, kphi, kx, flange);
+                (this._model as any).springs = springs;
+                this._invalidateAnalysisState('Deck springs applied');
+                return { success: true, nsprings: springs.length, flange };
             }
 
             case 'design_purlin': {
@@ -1352,32 +1711,31 @@ export class StcfsdPanel implements McpPanelInterface {
                 // Step 2: 데크 강성
                 const deckInfo = loadResult?.auto_params?.deck || { kphi: 0, kx: 0 };
                 const aFy = this._getAnalysisFy();
-                const savedSprings = (this._model as any).springs || [];
-                const savedNode = this._model.node.map((n: number[]) => [...n]);
-                // (elem은 이 구간에서 변경되지 않으므로 스냅샷 불필요 — springs/node만 원복)
+
+                // F05/F07: 세션 모델을 건드리지 않고 독립 사본에 응력·스프링을
+                // 적용한다. 정모멘트=상부압축+데크구속, 부모멘트=하부압축+구속없음.
+                const posModel = this._cloneModel(this._model as any);
+                await this._setLoadCaseOnModel(posModel, 'bending_xx_pos', aFy);
+                posModel.springs = this._deckSpringsForFlange(
+                    posModel, deckInfo.kphi || 0, deckInfo.kx || 0, 'top');
 
                 // Step 3: 정모멘트 CUFSM (데크 스프링 ON, 단일 t)
-                await this.handleMcpAction({
-                    action: 'apply_deck_springs',
-                    kphi: deckInfo.kphi, kx: deckInfo.kx,
-                });
-                const analysisPos = await this._pythonBridge.analyze(this._model);
+                const analysisPos = await this._pythonBridge.analyze(posModel);
                 const dsmPos = await this._pythonBridge.call('dsm', {
-                    node: this._model.node, elem: this._model.elem,
+                    node: posModel.node, elem: posModel.elem,
                     curve: analysisPos?.curve || [], fy: aFy, load_type: 'Mxx',
                 });
 
+                const negModel = this._cloneModel(this._model as any);
+                await this._setLoadCaseOnModel(negModel, 'bending_xx_neg', aFy);
+                negModel.springs = [];
+
                 // Step 4: 부모멘트 CUFSM (스프링 OFF, 단일 t)
-                (this._model as any).springs = [];
-                const analysisNeg = await this._pythonBridge.analyze(this._model);
+                const analysisNeg = await this._pythonBridge.analyze(negModel);
                 const dsmNeg = await this._pythonBridge.call('dsm', {
-                    node: this._model.node, elem: this._model.elem,
+                    node: negModel.node, elem: negModel.elem,
                     curve: analysisNeg?.curve || [], fy: aFy, load_type: 'Mxx',
                 });
-
-                // 스프링/단면 원복
-                (this._model as any).springs = savedSprings;
-                this._model.node = savedNode.map((n: number[]) => [...n]);
 
                 // Step 5: 단면 성질
                 const propsRaw = await this._pythonBridge.call('get_properties', {
@@ -1546,6 +1904,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 };
                 this._lastLoadAnalysis = loadResult;
                 this._lastDesignResult = result;
+                // F02: 퍼린 패킷은 member 설계가 아니므로 입력 서명을 비운다.
+                this._lastDesignRequest = null;
                 this._postMessage('designPurlinResult', result);
                 return result;
             }
@@ -1566,6 +1926,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     throw new Error('Invalid project file: missing node/elem model data');
                 }
                 this._model = { ...this._model, ...model };
+                this._invalidateAnalysisState('Project loaded');
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, filepath: options.filepath };
@@ -1595,19 +1956,28 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'set_node_stress': {
                 const nodeIds: number[] = options.node_ids || [];
                 const stress: number = options.stress || 0;
+                // F16: 실제 수정된 절점만 집계하고 invalid_ids를 보고한다.
+                let updated = 0;
+                const invalidIds: number[] = [];
                 for (const id of nodeIds) {
-                    if (id >= 1 && id <= this._model.node.length) {
+                    if (Number.isInteger(id) && id >= 1 && id <= this._model.node.length) {
                         this._model.node[id - 1][7] = stress;
+                        updated++;
+                    } else {
+                        invalidIds.push(id);
                     }
                 }
+                if (updated > 0) {
+                    this._invalidateAnalysisState('Nodal stresses changed');
+                }
                 this._postMessage('modelLoaded', this._model);
-                return { success: true, updated: nodeIds.length };
+                return { success: true, updated, invalid_ids: invalidIds };
             }
 
             // --- #24: get_buckling_curve ---
             case 'get_curve': {
-                if (!this._lastAnalysisResult || !this._lastAnalysisResult.curve) {
-                    return { error: 'No analysis result. Run analysis first.' };
+                if (!this._isAnalysisCurrent()) {
+                    return this._staleAnalysisError();
                 }
                 return { curve: this._lastAnalysisResult.curve };
             }
@@ -1616,6 +1986,7 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'set_springs': {
                 const springs: number[][] = options.springs || [];
                 (this._model as any).springs = springs;
+                this._invalidateAnalysisState('Springs changed');
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, nsprings: springs.length };
             }
@@ -1624,70 +1995,134 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'set_constraints': {
                 const constraints: number[][] = options.constraints || [];
                 (this._model as any).constraints = constraints;
+                this._invalidateAnalysisState('Constraints changed');
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, nconstraints: constraints.length };
             }
 
             // --- set_nodes: 전체 절점 배열 교체 ---
             case 'set_nodes': {
-                const nodes: number[][] = options.nodes || [];
-                this._model.node = nodes;
-                this._postMessage('modelLoaded', this._model);
-                this._updateTreeView();
-                return { success: true, nnodes: nodes.length };
+                try {
+                    const nodes: number[][] = options.nodes || [];
+                    this._validateNodeRows(nodes);
+                    // R2-02: 후보 절점과 함께 commit될 요소 집합을 교차 검증한다.
+                    // elements를 함께 주면 동시 교체, 아니면 현재 요소를 유지한다.
+                    const jointElems: number[][] | undefined = options.elements;
+                    const elems = jointElems !== undefined ? jointElems : (this._model.elem || []);
+                    try {
+                        this._validateElemRows(elems, nodes);
+                    } catch (e: any) {
+                        throw new Error(`${e.message} — set_nodes would orphan existing elements ` +
+                            `(pass 'elements' together for joint replacement)`);
+                    }
+                    this._model.node = nodes;
+                    if (jointElems !== undefined) {
+                        this._model.elem = jointElems;
+                    }
+                    this._invalidateAnalysisState('Nodes replaced');
+                    this._postMessage('modelLoaded', this._model);
+                    this._updateTreeView();
+                    return { success: true, nnodes: nodes.length, nelems: this._model.elem.length };
+                } catch (e: any) {
+                    return { error: e.message };
+                }
             }
 
             // --- set_elements: 전체 요소 배열 교체 ---
             case 'set_elements': {
-                const elements: number[][] = options.elements || [];
-                this._model.elem = elements;
-                this._postMessage('modelLoaded', this._model);
-                this._updateTreeView();
-                return { success: true, nelems: elements.length };
+                try {
+                    const elements: number[][] = options.elements || [];
+                    this._validateElemRows(elements, this._model.node || []);
+                    this._model.elem = elements;
+                    this._invalidateAnalysisState('Elements replaced');
+                    this._postMessage('modelLoaded', this._model);
+                    this._updateTreeView();
+                    return { success: true, nelems: elements.length };
+                } catch (e: any) {
+                    return { error: e.message };
+                }
             }
 
             // --- add_node: 절점 1개 추가 ---
             case 'add_node': {
-                const nodeArr = this._model.node || [];
-                const newId = nodeArr.length + 1;
-                nodeArr.push([newId, options.x || 0, options.z || 0, 1, 1, 1, 1, options.stress || 0]);
-                this._model.node = nodeArr;
-                this._postMessage('modelLoaded', this._model);
-                this._updateTreeView();
-                return { success: true, node_id: newId, nnodes: nodeArr.length };
+                try {
+                    const x = options.x ?? 0, z = options.z ?? 0, stress = options.stress ?? 0;
+                    this._requireFinite(x, 'x');
+                    this._requireFinite(z, 'z');
+                    this._requireFinite(stress, 'stress');
+                    const nodeArr = this._model.node || [];
+                    const newId = nodeArr.length + 1;
+                    nodeArr.push([newId, x, z, 1, 1, 1, 1, stress]);
+                    this._model.node = nodeArr;
+                    this._invalidateAnalysisState('Node added');
+                    this._postMessage('modelLoaded', this._model);
+                    this._updateTreeView();
+                    return { success: true, node_id: newId, nnodes: nodeArr.length };
+                } catch (e: any) {
+                    return { error: e.message };
+                }
             }
 
             // --- add_element: 요소 1개 추가 ---
             case 'add_element': {
-                const elemArr = this._model.elem || [];
-                const newElemId = elemArr.length + 1;
-                const matnum = (this._model.prop && this._model.prop[0]) ? this._model.prop[0][0] : 100;
-                elemArr.push([newElemId, options.nodei, options.nodej, options.thickness, matnum]);
-                this._model.elem = elemArr;
-                this._postMessage('modelLoaded', this._model);
-                this._updateTreeView();
-                return { success: true, elem_id: newElemId, nelems: elemArr.length };
+                try {
+                    this._requireElementEnds(options.nodei, options.nodej);
+                    const t = this._requireThickness(options.thickness);
+                    const elemArr = this._model.elem || [];
+                    const newElemId = elemArr.length + 1;
+                    const matnum = (this._model.prop && this._model.prop[0]) ? this._model.prop[0][0] : 100;
+                    elemArr.push([newElemId, options.nodei, options.nodej, t, matnum]);
+                    this._model.elem = elemArr;
+                    this._invalidateAnalysisState('Element added');
+                    this._postMessage('modelLoaded', this._model);
+                    this._updateTreeView();
+                    return { success: true, elem_id: newElemId, nelems: elemArr.length };
+                } catch (e: any) {
+                    return { error: e.message };
+                }
             }
 
             // --- modify_node: 절점 좌표/응력 수정 ---
             case 'modify_node': {
-                const nid = options.node_id;
-                if (!this._model.node || nid < 1 || nid > this._model.node.length) {
-                    return { error: `Invalid node_id: ${nid}` };
+                try {
+                    const nid = this._requireNodeId(options.node_id);
+                    if (options.x !== undefined) { this._requireFinite(options.x, 'x'); }
+                    if (options.z !== undefined) { this._requireFinite(options.z, 'z'); }
+                    if (options.stress !== undefined) { this._requireFinite(options.stress, 'stress'); }
+                    // R2-03: 후보 좌표를 임시 적용한 상태에서 연결 요소 길이를 검사한다.
+                    if (options.x !== undefined || options.z !== undefined) {
+                        const nd = this._model.node[nid - 1];
+                        const cx = options.x !== undefined ? options.x : nd[1];
+                        const cz = options.z !== undefined ? options.z : nd[2];
+                        const tol = this._zeroLengthTol();
+                        for (const el of this._model.elem || []) {
+                            const other = el[1] === nid ? el[2] : (el[2] === nid ? el[1] : 0);
+                            if (other >= 1) {
+                                const on = this._model.node[other - 1];
+                                this._requirePositiveLength(cx, cz, on[1], on[2],
+                                    `element ${el[0]} after moving node ${nid}`, tol);
+                            }
+                        }
+                    }
+                    const nd = this._model.node[nid - 1];
+                    if (options.x !== undefined) { nd[1] = options.x; }
+                    if (options.z !== undefined) { nd[2] = options.z; }
+                    if (options.stress !== undefined) { nd[7] = options.stress; }
+                    this._invalidateAnalysisState('Node modified');
+                    this._postMessage('modelLoaded', this._model);
+                    return { success: true, node: nd };
+                } catch (e: any) {
+                    return { error: e.message };
                 }
-                const nd = this._model.node[nid - 1];
-                if (options.x !== undefined) { nd[1] = options.x; }
-                if (options.z !== undefined) { nd[2] = options.z; }
-                if (options.stress !== undefined) { nd[7] = options.stress; }
-                this._postMessage('modelLoaded', this._model);
-                return { success: true, node: nd };
             }
 
             // --- delete_node: 절점 삭제 + 연결 요소 제거 ---
             case 'delete_node': {
-                const dnid = options.node_id;
-                if (!this._model.node || dnid < 1 || dnid > this._model.node.length) {
-                    return { error: `Invalid node_id: ${dnid}` };
+                let dnid: number;
+                try {
+                    dnid = this._requireNodeId(options.node_id);
+                } catch (e: any) {
+                    return { error: e.message };
                 }
                 // 연결 요소 제거
                 this._model.elem = (this._model.elem || []).filter(
@@ -1704,6 +2139,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 });
                 // 요소 번호 재부여
                 this._model.elem.forEach((e: number[], i: number) => { e[0] = i + 1; });
+                this._invalidateAnalysisState('Node deleted');
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, nnodes: this._model.node.length, nelems: this._model.elem.length };
@@ -1711,26 +2147,37 @@ export class StcfsdPanel implements McpPanelInterface {
 
             // --- modify_element: 요소 두께/연결 수정 ---
             case 'modify_element': {
-                const eid = options.elem_id;
-                if (!this._model.elem || eid < 1 || eid > this._model.elem.length) {
-                    return { error: `Invalid elem_id: ${eid}` };
+                try {
+                    const eid = this._requireElemId(options.elem_id);
+                    if (options.thickness !== undefined) { this._requireThickness(options.thickness); }
+                    const el = this._model.elem[eid - 1];
+                    const newI = options.nodei !== undefined ? options.nodei : el[1];
+                    const newJ = options.nodej !== undefined ? options.nodej : el[2];
+                    if (options.nodei !== undefined || options.nodej !== undefined) {
+                        this._requireElementEnds(newI, newJ);
+                    }
+                    if (options.thickness !== undefined) { el[3] = options.thickness; }
+                    if (options.nodei !== undefined) { el[1] = options.nodei; }
+                    if (options.nodej !== undefined) { el[2] = options.nodej; }
+                    this._invalidateAnalysisState('Element modified');
+                    this._postMessage('modelLoaded', this._model);
+                    return { success: true, element: el };
+                } catch (e: any) {
+                    return { error: e.message };
                 }
-                const el = this._model.elem[eid - 1];
-                if (options.thickness !== undefined) { el[3] = options.thickness; }
-                if (options.nodei !== undefined) { el[1] = options.nodei; }
-                if (options.nodej !== undefined) { el[2] = options.nodej; }
-                this._postMessage('modelLoaded', this._model);
-                return { success: true, element: el };
             }
 
             // --- delete_element: 요소 삭제 ---
             case 'delete_element': {
-                const deid = options.elem_id;
-                if (!this._model.elem || deid < 1 || deid > this._model.elem.length) {
-                    return { error: `Invalid elem_id: ${deid}` };
+                let deid: number;
+                try {
+                    deid = this._requireElemId(options.elem_id);
+                } catch (e: any) {
+                    return { error: e.message };
                 }
                 this._model.elem.splice(deid - 1, 1);
                 this._model.elem.forEach((e: number[], i: number) => { e[0] = i + 1; });
+                this._invalidateAnalysisState('Element deleted');
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, nelems: this._model.elem.length };
@@ -1738,23 +2185,32 @@ export class StcfsdPanel implements McpPanelInterface {
 
             // --- #28: energy_recovery ---
             case 'energy_recovery': {
-                if (!this._lastAnalysisResult) {
-                    return { error: 'No analysis result. Run analysis first.' };
+                if (!this._isAnalysisCurrent()) {
+                    return this._staleAnalysisError();
                 }
                 const li = options.length_index ?? 0;
                 const mi = options.mode_index ?? 0;
-                const shapes = this._lastAnalysisResult.shapes;
-                if (!shapes || !shapes[li]) {
-                    return { error: `No shape data at length index ${li}` };
+                const shapes = this._lastAnalysisResult.shapes || [];
+                const curve = this._lastAnalysisResult.curve || [];
+                // F09: 인덱스를 실제 shape 열 수·곡선 길이 수로 검증한다.
+                if (!Number.isInteger(li) || li < 0 || li >= shapes.length || li >= curve.length) {
+                    return { error: `length_index ${li} out of range (0..${Math.min(shapes.length, curve.length) - 1})` };
                 }
                 const shapeMatrix = shapes[li];
+                const curveRow = curve[li];
+                const nModes = Array.isArray(curveRow) ? curveRow.length - 1 : 0;
+                const shapeCols = Array.isArray(shapeMatrix) && Array.isArray(shapeMatrix[0])
+                    ? shapeMatrix[0].length : nModes;
+                const maxMode = Math.min(nModes, shapeCols);
+                if (!Number.isInteger(mi) || mi < 0 || mi >= maxMode) {
+                    return { error: `mode_index ${mi} out of range (0..${maxMode - 1})` };
+                }
                 let modeVec: number[];
                 if (Array.isArray(shapeMatrix[0])) {
                     modeVec = shapeMatrix.map((row: number[]) => row[mi] || 0);
                 } else {
                     modeVec = shapeMatrix;
                 }
-                const curveRow = this._lastAnalysisResult.curve[li];
                 const length = curveRow ? curveRow[0] : 100;
 
                 const result = await this._pythonBridge.call('energy_recovery', {
@@ -1773,8 +2229,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 const status = this.getStatus();
                 const result: any = { ...status };
 
-                // 해석 결과 요약
-                if (this._lastAnalysisResult && this._lastAnalysisResult.curve) {
+                // 해석 결과 요약 (F03: current 결과만 요약한다)
+                if (this._isAnalysisCurrent() && this._lastAnalysisResult.curve) {
                     const curve = this._lastAnalysisResult.curve;
                     const summary = [];
                     for (let i = 0; i < curve.length; i++) {
@@ -1811,6 +2267,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     local: options.local || [],
                     other: options.other || [],
                 };
+                this._invalidateAnalysisState('GBT options changed');
                 return { success: true, GBTcon: (this._model as any).GBTcon };
             }
 

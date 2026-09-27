@@ -60,7 +60,15 @@ function callBridgePost(endpoint: string, body: any): Promise<any> {
 }
 
 function textResult(text: string) {
-    return { content: [{ type: "text" as const, text }] };
+    // F15: error payload는 MCP 실패로 표시한다. 성공 payload에는
+    // 최상위 error 키가 없으므로 단일 지점에서 판별한다.
+    let isError = false;
+    try {
+        const parsed: any = JSON.parse(text);
+        isError = !!parsed && typeof parsed === 'object' && 'error' in parsed;
+    } catch { /* non-JSON text stays a success payload */ }
+    const base = { content: [{ type: "text" as const, text }] };
+    return isError ? { ...base, isError: true as const } : base;
 }
 
 // SI↔US 단위 변환은 ./siUnits 단일 모듈에서 import (0926 P1-7).
@@ -69,9 +77,21 @@ function textResult(text: string) {
 // ============================================================
 // MCP Server 생성
 // ============================================================
+declare const __STCFSD_BUILD__: { version: string; gitHash: string } | undefined;
+
+// F04: initialize serverInfo에 실제 버전·빌드 해시를 노출한다.
+// (webpack DefinePlugin 주입, 없으면 dev fallback)
+function buildInfo(): { version: string; gitHash: string } {
+    if (typeof __STCFSD_BUILD__ !== 'undefined' && __STCFSD_BUILD__) {
+        return __STCFSD_BUILD__;
+    }
+    return { version: '0.0.0-dev', gitHash: 'nogit' };
+}
+const BUILD = buildInfo();
+
 const server = new McpServer({
     name: "stcfsd-section-designer",
-    version: "1.0.0",
+    version: `${BUILD.version}+${BUILD.gitHash}`,
 }, {
     instructions: `StCFSD - Cold-Formed Steel Section Buckling Analysis Tool.
 
@@ -118,8 +138,9 @@ server.tool("get_section_properties", "Get cross-section properties (A, Ixx, Izz
 );
 
 server.tool("get_dsm_values",
-    "Get DSM design values: Pcrl, Pcrd, Mcrl, Mcrd, Py, My. Optionally supply effective lengths (KxLx/KyLy/KtLt for columns, Lb for beams) to get the TRUE global elastic buckling Pcre/Mcre (AISI S100-16 Eq.E2-4 / §F2.1) instead of the finite-strip signature-curve longest-half-wavelength asymptote. When effective lengths are omitted, the global value is the signature-curve asymptote (global_is_signature_asymptote=true).",
+    "Get DSM design values for the CURRENT analysis load family only (R2-05: a compression curve is never relabeled as Mxx and vice versa). Optionally supply effective lengths (KxLx/KyLy/KtLt for columns, Lb for beams) to get the TRUE global elastic buckling Pcre/Mcre (AISI S100-16 Eq.E2-4 / §F2.1) instead of the finite-strip signature-curve longest-half-wavelength asymptote. When effective lengths are omitted, the global value is the signature-curve asymptote (global_is_signature_asymptote=true).",
     {
+        load_type: z.enum(['P', 'Mxx', 'Mzz']).optional().describe("Requested DSM family (default 'P'). Must match the current analysis family or the call is rejected."),
         fy: z.number().optional().describe("Yield stress ksi (default 35.53 = 245 MPa, SGC400)"),
         KxLx: z.number().optional().describe("Column effective length about x (strong) axis K·L — inches or mm if units='SI'"),
         KyLy: z.number().optional().describe("Column effective length about y (weak) axis K·L — inches or mm if units='SI'"),
@@ -129,7 +150,7 @@ server.tool("get_dsm_values",
         section_type: z.string().optional().describe("Section type for closed-form global branch ('C', 'Z', 'RHS', ...; default 'C')"),
         units: z.enum(['US', 'SI']).optional().describe("Unit system: 'US' (default, inches/ksi) or 'SI' (mm). Converts the effective lengths."),
     },
-    async ({ fy, KxLx, KyLy, KtLt, Lb, Cb, section_type, units }) => {
+    async ({ load_type, fy, KxLx, KyLy, KtLt, Lb, Cb, section_type, units }) => {
         if (units === 'SI') {
             const c = SI_TO_US.length;
             if (KxLx != null) KxLx *= c;
@@ -138,7 +159,7 @@ server.tool("get_dsm_values",
             if (Lb != null) Lb *= c;
         }
         const r = await callBridgePost('/action', {
-            action: 'get_dsm', fy: fy || 35.53,
+            action: 'get_dsm', load_type: load_type || 'P', fy: fy || 35.53,
             KxLx, KyLy, KtLt, Lb, Cb, section_type,
         });
         return textResult(JSON.stringify(r, null, 2));
@@ -461,7 +482,8 @@ server.tool("set_boundary_condition", "Set end boundary condition",
             .describe("S-S=simply-simply, C-C=clamped-clamped, S-C=simply-clamped, C-F=clamped-free, C-G=clamped-guided"),
     },
     async ({ BC }) => {
-        await callBridgePost('/action', { action: 'set_bc', BC });
+        const r = await callBridgePost('/action', { action: 'set_bc', BC });
+        if (r && (r as any).error) { return textResult(JSON.stringify(r)); }
         return textResult(`Boundary condition set to ${BC}`);
     }
 );
@@ -473,9 +495,11 @@ server.tool("set_lengths", "Set analysis half-wavelength range",
         n: z.number().optional().describe("Number of points (default 50)"),
     },
     async ({ min, max, n }) => {
-        await callBridgePost('/action', {
+        // F12: setter 오류를 성공 문구로 바꾸지 않고 그대로 전달한다.
+        const r = await callBridgePost('/action', {
             action: 'set_lengths', min, max, n: n || 60
         });
+        if (r && (r as any).error) { return textResult(JSON.stringify(r)); }
         return textResult(`Lengths set: ${n || 60} points from ${min} to ${max}`);
     }
 );
@@ -484,10 +508,11 @@ server.tool("set_lengths", "Set analysis half-wavelength range",
 // 3. ANALYSIS (3 tools)
 // ============================================================
 server.tool("run_analysis", "Run FSM buckling analysis with current settings",
-    { neigs: z.number().optional().describe("Number of eigenvalues (default 10)") },
+    { neigs: z.number().int().positive().optional().describe("Number of eigenvalues, positive integer (default 10)") },
     async ({ neigs }) => {
+        // R2-01: 기본값은 undefined에만 적용한다 (0/음수/소수는 거절).
         const r = await callBridgePost('/action', {
-            action: 'run_analysis', neigs: neigs || 10
+            action: 'run_analysis', neigs: neigs ?? 10
         });
         return textResult(JSON.stringify(r, null, 2));
     }
@@ -539,12 +564,13 @@ server.tool("set_node_stress", "Set stress value for specific nodes",
     }
 );
 
-server.tool("set_nodes", "Replace entire node array. Each row: [node#, x, z, dofx, dofz, dofy, dofrot, stress]",
+server.tool("set_nodes", "Replace entire node array. Each row: [node#, x, z, dofx, dofz, dofy, dofrot, stress]. The surviving element set is cross-validated against the new nodes; pass 'elements' together for atomic joint replacement.",
     {
         nodes: z.array(z.array(z.number())).describe("Full node array (1-based node#, 8 columns)"),
+        elements: z.array(z.array(z.number())).optional().describe("Optional full element array for joint replacement (1-based, 5 columns). Validated together with nodes and committed atomically."),
     },
-    async ({ nodes }) => {
-        const r = await callBridgePost('/action', { action: 'set_nodes', nodes });
+    async ({ nodes, elements }) => {
+        const r = await callBridgePost('/action', { action: 'set_nodes', nodes, elements });
         return textResult(JSON.stringify(r, null, 2));
     }
 );

@@ -135,6 +135,12 @@ export class PythonBridge {
     }
 
     async call(method: string, params: any): Promise<any> {
+        // F08: transport 메타데이터(action)는 Python 업무 함수에 전달하지 않는다.
+        if (params && typeof params === 'object' && !Array.isArray(params) && 'action' in params) {
+            const { action: _action, ...rest } = params;
+            void _action;
+            params = rest;
+        }
         return this._call(method, params);
     }
 

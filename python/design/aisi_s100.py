@@ -195,11 +195,18 @@ def design_member(params: dict) -> dict:
         return {'error': f"Unrecognized design_method '{dm}'. Use 'LRFD' or 'ASD'."}
     params = {**params, 'design_method': dm_norm}
 
-    # props가 없으면 단면 템플릿에서 자동 생성
+    member_type = params.get('member_type', 'compression')
+
+    # F17: 접합부는 단면성질/DSM이 필요 없으므로 자동 생성보다 먼저 분기한다.
+    # (generate_section/stripmain/DSM 호출 없음 — 접합 업무 계산 비용만 발생)
+    if member_type == 'connection':
+        return design_connection(params)
+
+    # props가 없으면 단면 템플릿에서 자동 생성.
+    # 정책(F17): 일반 부재의 누락된 필수 단면 입력은 기본 C 단면으로 대체한다.
+    # 명시 단면을 쓰려면 TS aisi_design 경로처럼 props/dsm을 함께 전달한다.
     if not params.get('props') or not params['props'].get('A'):
         params = _auto_generate_props(params)
-
-    member_type = params.get('member_type', 'compression')
 
     if member_type == 'compression':
         result = _design_compression(params)
@@ -209,8 +216,6 @@ def design_member(params: dict) -> dict:
         result = _design_combined(params)
     elif member_type == 'tension':
         result = _design_tension(params)
-    elif member_type == 'connection':
-        return design_connection(params)
     else:
         return {'error': f'Unknown member_type: {member_type}'}
 

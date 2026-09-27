@@ -22,7 +22,7 @@ from fcfsm.solver import stripmain_fcfsm
 from plastic.pmm_plastic import pmm_plastic
 from fileio.mat_loader import load_mat_file
 from fileio.project_io import save_project, load_project
-from models.data import CufsmModel, SafeJsonEncoder
+from models.data import CufsmModel, SafeJsonEncoder, curve_rows_to_lists
 
 
 def handle_request(request: dict) -> dict:
@@ -107,7 +107,7 @@ def handle_request(request: dict) -> dict:
                 model.lengths, model.BC, model.m_all, model.neigs
             )
             return {'id': req_id, 'result': {
-                'curve': [c.tolist() for c in result['curve']],
+                'curve': curve_rows_to_lists(result['curve']),
                 'classification': [c.tolist() for c in result['classification']],
                 'n_lengths': len(result['curve']),
             }}
@@ -168,7 +168,7 @@ def handle_request(request: dict) -> dict:
             model = CufsmModel.from_dict(params)
             result = signature_ss(model.prop, model.node, model.elem)
             return {'id': req_id, 'result': {
-                'curve': [c.tolist() for c in result['curve']],
+                'curve': curve_rows_to_lists(result['curve']),
                 'lengths': result['lengths'].tolist(),
             }}
 

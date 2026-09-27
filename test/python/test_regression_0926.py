@@ -516,6 +516,67 @@ def test_msort_stresgen_guards():
     return ok
 
 
+def test_curve_wire_shape_2d():
+    """F09: 좌굴 곡선 wire 계약 — 2차원 numeric row [L, lf1, ...]."""
+    print('\n=== TEST: curve wire 2-D rows ===')
+    import numpy as np
+    from models.data import curve_rows_to_lists
+    ok = True
+    rows = curve_rows_to_lists([np.array([[10.0, 0.5, 0.7]]),
+                                [20.0, 0.4],
+                                [[30.0, 0.3]]])
+    ok &= check(rows == [[10.0, 0.5, 0.7], [20.0, 0.4], [30.0, 0.3]],
+                'mixed shapes normalize to flat rows')
+    ok &= check(all(isinstance(v, float)
+                    for r in rows for v in r), 'all values numeric')
+    return ok
+
+
+def test_connection_dispatch_skips_auto_props():
+    """F17: connection 분기는 props/DSM 자동 생성 없이 직접 디스패치."""
+    print('\n=== TEST: connection skips auto props ===')
+    import design.aisi_s100 as s100
+    ok = True
+    orig = s100._auto_generate_props
+
+    def _boom(params):
+        raise AssertionError('auto props must not run for connection')
+    s100._auto_generate_props = _boom
+    try:
+        r = s100.design_member({'member_type': 'connection',
+                                'connection_type': 'bolt',
+                                't1': 0.06, 't2': 0.06, 'd': 0.25, 'n': 2,
+                                'Fy': 50, 'Fu': 65, 'Pu': 1,
+                                'design_method': 'LRFD'})
+    finally:
+        s100._auto_generate_props = orig
+    ok &= check('error' not in r, 'connection design succeeds')
+    ok &= check(r.get('member_type') == 'connection', 'member_type echoed')
+    return ok
+
+
+def test_connection_not_checked_verdict():
+    """F18: J6 미검토 접합은 전체 pass 확정 금지 (NOT_CHECKED)."""
+    print('\n=== TEST: connection NOT_CHECKED verdict ===')
+    from design.connections import design_connection
+    ok = True
+    r = design_connection({'connection_type': 'bolt', 't1': 0.06, 't2': 0.06,
+                           'd': 0.25, 'n': 2, 'Fy': 50, 'Fu': 65,
+                           'Fub': 120, 'Pu': 1})
+    ok &= check(r.get('j6_verified') is False, 'R26 j6_verified=false')
+    ok &= check(r.get('pass') is None, 'R26 overall pass not decided')
+    ok &= check(r.get('verdict') == 'NOT_CHECKED', 'verdict NOT_CHECKED')
+    ok &= check(r.get('evaluated_pass') is True, 'provided states pass')
+    full = design_connection({'connection_type': 'bolt', 't1': 0.06,
+                              't2': 0.06, 'd': 0.25, 'n': 2, 'Fy': 50,
+                              'Fu': 65, 'Fub': 120, 'Pu': 1, 'e': 0.75,
+                              's': 1.0, 'Ag': 1.0, 'width': 4.0, 'g': 2.0})
+    ok &= check(full.get('j6_verified') is True, 'full inputs verified')
+    ok &= check(full.get('pass') is True, 'full inputs overall pass')
+    ok &= check(full.get('verdict') == 'PASS', 'verdict PASS')
+    return ok
+
+
 if __name__ == '__main__':
     fns = sorted(n for n, f in globals().items()
                  if n.startswith('test_') and callable(f))

@@ -140,13 +140,31 @@ class CufsmModel:
         return cls.from_dict(json.loads(s))
 
 
+def curve_rows_to_lists(curve: list) -> list:
+    """F09: 좌굴 곡선을 선언 계약인 2차원 numeric row로 정규화.
+
+    curve[i] → [length, lf1, lf2, ...] (1차원). solver 내부의 (1, n) 행,
+    이미 1차원인 행, 중첩 list 를 모두 같은 형태로 만든다.
+    """
+    rows = []
+    for c in curve:
+        if isinstance(c, np.ndarray):
+            rows.append(c.reshape(-1).tolist())
+        elif (isinstance(c, list) and len(c) == 1
+                and isinstance(c[0], list)):
+            rows.append(list(c[0]))
+        else:
+            rows.append(c)
+    return rows
+
+
 @dataclass
 class CufsmResult:
     """CUFSM 해석 결과
 
     참조: 프로젝트개요.md §4 해석 워크플로우 [5]~[6]
 
-    curve[i]: 길이 i에서의 (nummodes, 2) 배열 — [length, load_factor]
+    curve[i]: 길이 i에서의 좌굴 곡선 행 — wire 계약 [length, lf1, lf2, ...]
     shapes[i]: 길이 i에서의 (ndof, nummodes) 배열 — 모드형상 벡터
     """
     curve: list = field(default_factory=list)    # list[np.ndarray]
@@ -154,12 +172,7 @@ class CufsmResult:
 
     def to_dict(self) -> dict:
         """JSON 직렬화 — curve + shapes 포함"""
-        curve_list = []
-        for c in self.curve:
-            if isinstance(c, np.ndarray):
-                curve_list.append(c.tolist())
-            else:
-                curve_list.append(c)
+        curve_list = curve_rows_to_lists(self.curve)
         shapes_list = []
         for s in self.shapes:
             if isinstance(s, np.ndarray):

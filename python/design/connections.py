@@ -1328,14 +1328,29 @@ def design_connection(params: dict) -> dict:
     else:
         return {'error': f'Unknown connection_type: {conn_type}'}
 
-    # 활용비
+    # 활용비 (F18: 제공된 한계상태만의 통과와 전체 판정을 구분한다)
+    evaluated_pass = None
     if Pu > 0 and result.get('design_strength', 0) > 0:
         util = Pu / result['design_strength']
         result['utilization'] = round(util, 4)
-        result['pass'] = util <= 1.0
+        evaluated_pass = bool(util <= 1.0)
     else:
         result['utilization'] = None
+    result['evaluated_pass'] = evaluated_pass
+    # j6_verified 플래그가 있는 유형(bolt/screw/paf)은 J6 파단 검토 완결
+    # 여부를 전체 판정에 반영한다. 플래그 없는 유형은 자체 완결로 본다.
+    verified = result.get('j6_verified', True)
+    result['verification_complete'] = bool(verified)
+    if evaluated_pass is None:
         result['pass'] = None
+    elif not verified:
+        # 필수 한계상태 미검토 — 전체 적합으로 확정하지 않는다.
+        result['pass'] = None
+    else:
+        result['pass'] = evaluated_pass
+    result['verdict'] = ('PASS' if result['pass'] is True
+                         else ('FAIL' if result['pass'] is False
+                               else 'NOT_CHECKED'))
 
     result['member_type'] = 'connection'
     result['design_method'] = design_method

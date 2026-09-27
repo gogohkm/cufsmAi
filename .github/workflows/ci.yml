@@ -32,3 +32,18 @@ jobs:
       - run: pip install ruff pytest
       - run: ruff check python test/python
       - run: python -m pytest -q
+
+  # F04: 배포 MCP 번들이 소스 정의와 어긋나지 않는지 검사.
+  # 소스 수정 후 번들을 재빌드·커밋하지 않으면 실패한다.
+  mcp-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:mcp
+      - run: git diff --exit-code -- media/mcp-server.js media/mcp-server.js.map
+      - run: npm run check:mcp-parity
