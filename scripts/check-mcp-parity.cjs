@@ -3,7 +3,7 @@
 //
 // - src/mcp/*.ts를 임시 디렉토리에 transpile해 소스 서버를 기동하고,
 //   media/mcp-server.js 번들 서버와 initialize/listTools를 대조한다.
-// - 번들 serverInfo.version이 package.json 버전 + 현재 git 해시와
+// - 번들 serverInfo.version이 package.json 버전 + 현재 소스 내용 해시와
 //   일치하는지 확인한다 (배포본-소스 어긋남 방지).
 // - 불일치 시 exit 1. listTools는 브리지가 필요 없어 격리 실행된다.
 
@@ -12,18 +12,11 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('@modelcontextprotocol/sdk/client/index.js');
 const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+const { mcpSourceHash } = require('./mcp-source-hash.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const TMP = path.join(ROOT, '.parity-tmp');
 const BUNDLE = path.join(ROOT, 'media', 'mcp-server.js');
-
-function gitShort() {
-    try {
-        return execSync('git rev-parse --short HEAD', { cwd: ROOT, encoding: 'utf-8' }).trim();
-    } catch {
-        return null;
-    }
-}
 
 async function probe(label, script) {
     const transport = new StdioClientTransport({
@@ -69,16 +62,13 @@ async function main() {
         ]);
         const failures = [];
 
-        // 1. 번들 버전 = package 버전 + 현재 git 해시
+        // 1. 번들 버전 = package 버전 + 현재 소스 내용 해시 (R3-03).
+        // git이 없어도 판정되며, 커밋 순서와 무관하다.
         const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-        const hash = gitShort();
-        if (hash) {
-            const expected = `${pkg.version}+${hash}`;
-            if (bundle.version?.version !== expected) {
-                failures.push(`bundle version ${bundle.version?.version} != expected ${expected}`);
-            }
-        } else {
-            console.warn('git unavailable: skipping bundle version check');
+        const expected = `${pkg.version}+src.${mcpSourceHash(ROOT)}`;
+        if (bundle.version?.version !== expected) {
+            failures.push(`bundle version ${bundle.version?.version} != expected ${expected} ` +
+                `(rebuild with 'npm run build:mcp' from these sources)`);
         }
         if (bundle.version?.name !== 'stcfsd-section-designer') {
             failures.push(`bundle name ${bundle.version?.name} unexpected`);

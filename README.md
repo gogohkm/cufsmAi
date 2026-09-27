@@ -114,6 +114,31 @@ pip install numpy scipy
 
 ---
 
+## MCP Bundle Release Policy
+
+`media/mcp-server.js` is a committed build artifact. Its `initialize`
+`serverInfo.version` carries `package.json` version + source-content hash
+(e.g. `0.1.1+src.a3f9c21e7b44`), so any client can tell which sources a
+running server was built from. The hash covers `src/mcp/server.ts`,
+`src/mcp/siUnits.ts`, `package.json`, `tsconfig.mcp.json`, and
+`webpack.mcp.config.js` — see `scripts/mcp-source-hash.cjs`.
+
+Release steps after touching MCP sources:
+
+```bash
+npm run build:mcp        # deterministic bundle (no timestamps)
+npm run check:mcp-parity # bundle version + 59 tool schemas vs source
+git add media/mcp-server.js media/mcp-server.js.map <sources...>
+git commit               # single release commit: sources + rebuilt bundle
+```
+
+CI (`mcp-parity` job) rebuilds from a clean tree, fails when the committed
+bundle bytes differ, and re-runs the parity check. After updating the bundle,
+restart/reconnect the MCP client (and reload the VS Code window for the
+extension host) so the new server process is used.
+
+---
+
 ## Analysis Engine
 
 The Python backend implements the complete FSM analysis pipeline:

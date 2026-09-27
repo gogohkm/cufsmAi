@@ -77,21 +77,21 @@ function textResult(text: string) {
 // ============================================================
 // MCP Server 생성
 // ============================================================
-declare const __STCFSD_BUILD__: { version: string; gitHash: string } | undefined;
+declare const __STCFSD_BUILD__: { version: string; srcHash: string } | undefined;
 
-// F04: initialize serverInfo에 실제 버전·빌드 해시를 노출한다.
+// F04/R3-03: initialize serverInfo에 실제 버전·소스 내용 해시를 노출한다.
 // (webpack DefinePlugin 주입, 없으면 dev fallback)
-function buildInfo(): { version: string; gitHash: string } {
+function buildInfo(): { version: string; srcHash: string } {
     if (typeof __STCFSD_BUILD__ !== 'undefined' && __STCFSD_BUILD__) {
         return __STCFSD_BUILD__;
     }
-    return { version: '0.0.0-dev', gitHash: 'nogit' };
+    return { version: '0.0.0-dev', srcHash: 'nogit' };
 }
 const BUILD = buildInfo();
 
 const server = new McpServer({
     name: "stcfsd-section-designer",
-    version: `${BUILD.version}+${BUILD.gitHash}`,
+    version: `${BUILD.version}+src.${BUILD.srcHash}`,
 }, {
     instructions: `StCFSD - Cold-Formed Steel Section Buckling Analysis Tool.
 

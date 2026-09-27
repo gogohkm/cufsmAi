@@ -1025,14 +1025,22 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'set_load_case': {
                 let lc = options.load_case || 'compression';
                 const fy = options.fy || 35.53;
-                // R2-05: 순수성분 custom은 set_stress와 같은 규칙으로 추론한다.
-                // (동일 fy 정규화이므로 응력 분포는 변하지 않는다)
-                if (lc === 'custom') {
-                    lc = this._inferCustomLoadCase(options.P, options.Mxx, options.Mzz);
-                }
                 this._invalidateAnalysisState(`Load case changed: ${lc}`);
-                await this._setLoadCaseOnModel(this._model as any, lc, fy,
-                    { P: options.P, Mxx: options.Mxx, Mzz: options.Mzz });
+                if (lc === 'custom') {
+                    // R3-01/R3-02: 원래 하중으로 먼저 응력을 생성한 뒤 family를
+                    // 판별한다. 순수성분 판별이 응력 부호·분포를 바꾸지 않는다.
+                    // 계약: family는 활성 성분 패턴으로만 정한다 (부호 무관).
+                    // P!=0 단일 성분은 음수여도 compression/P이며 응력 부호는 보존된다.
+                    await this._applyStressToModel(this._model as any, {
+                        type: 'custom',
+                        P: options.P ?? 0, Mxx: options.Mxx ?? 0, Mzz: options.Mzz ?? 0,
+                        fy,
+                    });
+                    lc = this._inferCustomLoadCase(options.P, options.Mxx, options.Mzz);
+                } else {
+                    await this._setLoadCaseOnModel(this._model as any, lc, fy,
+                        { P: options.P, Mxx: options.Mxx, Mzz: options.Mzz });
+                }
                 const lcResult = { success: true };
                 (this._model as any).loadCase = lc;
                 (this._model as any).loadFy = fy;
@@ -1048,15 +1056,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 } else if (options.type === 'pure_bending') {
                     (this._model as any).loadCase = 'bending_xx_pos';
                 } else if (options.type === 'custom') {
-                    if (options.P && !options.Mxx && !options.Mzz) {
-                        (this._model as any).loadCase = 'compression';
-                    } else if (options.Mxx && !options.P) {
-                        (this._model as any).loadCase = options.Mxx > 0 ? 'bending_xx_pos' : 'bending_xx_neg';
-                    } else if (options.Mzz && !options.P) {
-                        (this._model as any).loadCase = options.Mzz > 0 ? 'bending_zz_pos' : 'bending_zz_neg';
-                    } else {
-                        (this._model as any).loadCase = 'custom';
-                    }
+                    // R3-01: set_load_case와 동일한 공통 판별 (활성 3성분 검사).
+                    (this._model as any).loadCase = this._inferCustomLoadCase(
+                        options.P, options.Mxx, options.Mzz);
                 }
                 this._invalidateAnalysisState('Stress distribution changed');
                 this._postMessage('modelLoaded', this._model);
