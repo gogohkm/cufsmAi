@@ -11,14 +11,22 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as net from 'net';
-import { execSync, exec } from 'child_process';
+import * as http from 'http';
+import { execSync, exec, execFile } from 'child_process';
 import { PythonBridge } from './bridge/PythonBridge';
 import { StcfsdPanel } from './webview/StcfsdPanel';
 import { ProjectExplorerProvider, StcfsdTreeItem } from './webview/ProjectExplorerProvider';
 import { McpBridgeServer } from './mcp/bridge';
+import {
+    MCP_SERVER_KEY, buildServerConfig, mergeServerConfig,
+    removeServerConfig, inspectRegistration, configPathsForScope,
+    type RegisterScope,
+} from './mcp/registration';
 
 let pythonBridge: PythonBridge | undefined;
 let mcpBridge: McpBridgeServer | undefined;
+let mcpPortValue = 0;
+let mcpServerPathValue = '';
 
 export async function activate(context: vscode.ExtensionContext) {
     console.log('StCFSD extension activating...');
@@ -36,8 +44,11 @@ export async function activate(context: vscode.ExtensionContext) {
     const mcpPort = await findAvailablePort(52790);
     mcpBridge = new McpBridgeServer(() => StcfsdPanel.currentPanel || undefined, mcpPort);
     await mcpBridge.start();
+    mcpPortValue = mcpPort;
+    mcpServerPathValue = path.join(context.extensionPath, 'media', 'mcp-server.js')
+        .replace(/\\/g, '/');
 
-    // .mcp.json 자동 생성
+    // .mcp.json 자동 생성 (병합 기반, 기존 설정 보존)
     setupMcpConfig(context, mcpPort);
 
     // Step 1: 트리 프로바이더 생성
@@ -81,6 +92,18 @@ export async function activate(context: vscode.ExtensionContext) {
                 StcfsdPanel.currentPanel.showSection('run-analysis');
             }
         }),
+
+        vscode.commands.registerCommand('stcfsd.registerMcpServer', async () => {
+            await runMcpRegister(context);
+        }),
+
+        vscode.commands.registerCommand('stcfsd.unregisterMcpServer', async () => {
+            await runMcpUnregister();
+        }),
+
+        vscode.commands.registerCommand('stcfsd.showMcpStatus', async () => {
+            await runMcpStatus();
+        }),
     );
 
     // Step 4: 트리 아이템 클릭 → WebView 네비게이션
@@ -89,6 +112,9 @@ export async function activate(context: vscode.ExtensionContext) {
         const item = e.selection[0] as StcfsdTreeItem;
         const sectionId = item.sectionId;
         if (!sectionId) { return; }
+
+        // 'mcp-server' → 자식 명령 실행용 컨테이너, 패널 네비게이션 없음
+        if (sectionId === 'mcp-server') { return; }
 
         // 'open-designer' → 패널 열기
         if (sectionId === 'open-designer') {
@@ -232,51 +258,58 @@ async function ensurePythonRunning(): Promise<void> {
     }
 }
 
+function _mergeIntoFile(filePath: string, key: string, config: { command: string; args: string[]; env: Record<string, string> }): string {
+    let existing: string | undefined;
+    if (fs.existsSync(filePath)) {
+        existing = fs.readFileSync(filePath, 'utf-8');
+    }
+    const merged = mergeServerConfig(existing, key, config);
+    if (!merged.ok) {
+        throw new Error(`${filePath}: ${merged.error}`);
+    }
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
+    fs.writeFileSync(filePath, merged.text);
+    return merged.changed ? 'updated' : 'unchanged';
+}
+
+function _workspaceRoot(): string | undefined {
+    const folders = vscode.workspace.workspaceFolders;
+    return (folders && folders.length > 0) ? folders[0].uri.fsPath : undefined;
+}
+
+function _homeDir(): string {
+    return process.env.USERPROFILE || process.env.HOME || '';
+}
+
 function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
-    const serverPath = path.join(context.extensionPath, 'media', 'mcp-server.js')
-        .replace(/\\/g, '/');
+    const serverPath = mcpServerPathValue
+        || path.join(context.extensionPath, 'media', 'mcp-server.js').replace(/\\/g, '/');
+    const config = buildServerConfig(serverPath, port);
 
-    const mcpServerConfig = {
-        command: "node",
-        args: [serverPath],
-        env: { STCFSD_MCP_PORT: String(port) }
-    };
-
-    const mcpJson = JSON.stringify({ mcpServers: { "stcfsd-section-designer": mcpServerConfig } }, null, 2);
-
-    // 1) 워크스페이스 폴더에 .mcp.json 쓰기
-    _writeMcpToWorkspace(mcpJson);
+    // 1) 워크스페이스 폴더에 병합 쓰기 (기존 서버 보존 — 덮어쓰기 금지)
+    _writeMcpToWorkspace(config);
 
     // 2) 워크스페이스 변경 시 다시 쓰기
     context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        _writeMcpToWorkspace(mcpJson);
+        _writeMcpToWorkspace(config);
     }));
 
     // 3) Extension 설치 디렉토리 자체에도 쓰기 (폴백)
     try {
         const extMcpPath = path.join(context.extensionPath, '.mcp.json');
-        fs.writeFileSync(extMcpPath, mcpJson);
+        _mergeIntoFile(extMcpPath, MCP_SERVER_KEY, config);
         console.log(`[StCFSD] MCP config (extension dir): ${extMcpPath}`);
     } catch {
         // 무시
     }
 
-    // 4) 사용자 홈 디렉토리 — Claude Code 글로벌 설정
+    // 4) 사용자 홈 디렉토리 — Claude Code 글로벌 설정 (병합)
     try {
-        const homeDir = process.env.USERPROFILE || process.env.HOME || '';
+        const homeDir = _homeDir();
         if (homeDir) {
-            // ~/.claude/mcp.json (Claude Code 글로벌)
-            const claudeDir = path.join(homeDir, '.claude');
-            if (!fs.existsSync(claudeDir)) { fs.mkdirSync(claudeDir, { recursive: true }); }
-            const claudeMcpPath = path.join(claudeDir, 'mcp.json');
-            // 기존 설정 병합
-            let existing: any = {};
-            if (fs.existsSync(claudeMcpPath)) {
-                try { existing = JSON.parse(fs.readFileSync(claudeMcpPath, 'utf-8')); } catch { /* keep empty config */ }
-            }
-            if (!existing.mcpServers) { existing.mcpServers = {}; }
-            existing.mcpServers['stcfsd-section-designer'] = mcpServerConfig;
-            fs.writeFileSync(claudeMcpPath, JSON.stringify(existing, null, 2));
+            const claudeMcpPath = path.join(homeDir, '.claude', 'mcp.json');
+            _mergeIntoFile(claudeMcpPath, MCP_SERVER_KEY, config);
             console.log(`[StCFSD] Claude global MCP: ${claudeMcpPath}`);
         }
     } catch (err) {
@@ -285,6 +318,154 @@ function setupMcpConfig(context: vscode.ExtensionContext, port: number): void {
 
     console.log(`[StCFSD] MCP server path: ${serverPath}`);
     console.log(`[StCFSD] MCP bridge port: ${port}`);
+}
+
+// ============================================================
+// 로컬 MCP 서버 등록/해제/상태 명령
+// ============================================================
+
+function _checkBridgeStatus(port: number, timeoutMs = 3000): Promise<{ ok: boolean; detail: string }> {
+    return new Promise((resolve) => {
+        const req = http.get(
+            { host: '127.0.0.1', port, path: '/status', timeout: timeoutMs },
+            (res) => {
+                let body = '';
+                res.on('data', (chunk) => { body += chunk; });
+                res.on('end', () => {
+                    resolve({ ok: res.statusCode === 200, detail: `HTTP ${res.statusCode} ${body.slice(0, 200)}` });
+                });
+            }
+        );
+        req.on('timeout', () => { req.destroy(); resolve({ ok: false, detail: 'timeout' }); });
+        req.on('error', (e: any) => { resolve({ ok: false, detail: e.message }); });
+    });
+}
+
+function _checkNode(): Promise<{ ok: boolean; detail: string }> {
+    return new Promise((resolve) => {
+        execFile('node', ['--version'], { timeout: 5000 }, (err, stdout) => {
+            if (err) { resolve({ ok: false, detail: 'PATH에 node 없음' }); return; }
+            resolve({ ok: true, detail: String(stdout).trim() });
+        });
+    });
+}
+
+async function runMcpRegister(context: vscode.ExtensionContext): Promise<void> {
+    const scopePick = await vscode.window.showQuickPick(
+        [
+            { label: '워크스페이스 + 글로벌', description: '권장', scope: 'both' as RegisterScope },
+            { label: '워크스페이스만', description: '.mcp.json + .claude/mcp.json', scope: 'workspace' as RegisterScope },
+            { label: '글로벌만', description: '~/.claude/mcp.json (Claude Code)', scope: 'global' as RegisterScope },
+        ],
+        { placeHolder: 'MCP 서버 등록 범위 선택' }
+    );
+    if (!scopePick) { return; }
+
+    const serverPath = mcpServerPathValue
+        || path.join(context.extensionPath, 'media', 'mcp-server.js').replace(/\\/g, '/');
+    const port = mcpPortValue;
+    if (!port) {
+        vscode.window.showErrorMessage('StCFSD: MCP 브릿지가 시작되지 않았습니다. 확장을 다시 로드하세요.');
+        return;
+    }
+    const config = buildServerConfig(serverPath, port);
+    const targets = configPathsForScope(scopePick.scope, {
+        workspaceRoot: _workspaceRoot(), homeDir: _homeDir(),
+    });
+    if (targets.length === 0) {
+        vscode.window.showWarningMessage('StCFSD: 열린 워크스페이스가 없어 워크스페이스 등록을 건너뜁니다. 글로벌을 선택하세요.');
+        return;
+    }
+
+    const results: string[] = [];
+    for (const target of targets) {
+        try {
+            const state = _mergeIntoFile(target, MCP_SERVER_KEY, config);
+            results.push(`✓ ${target} (${state === 'updated' ? '등록됨' : '이미 등록됨'})`);
+        } catch (err: any) {
+            results.push(`✗ ${target} (${err.message})`);
+        }
+    }
+
+    // 검증: 번들·node·브릿지
+    const bundleOk = fs.existsSync(path.join(context.extensionPath, 'media', 'mcp-server.js'));
+    results.push(bundleOk ? '✓ MCP 서버 번들 존재' : '✗ MCP 서버 번들 없음 (media/mcp-server.js) — npm run build:mcp 필요');
+    const nodeCheck = await _checkNode();
+    results.push(`${nodeCheck.ok ? '✓' : '✗'} node: ${nodeCheck.detail}`);
+    const bridgeCheck = await _checkBridgeStatus(port);
+    results.push(`${bridgeCheck.ok ? '✓' : '✗'} 브릿지(127.0.0.1:${port}): ${bridgeCheck.detail}`);
+    results.push('다음: MCP 클라이언트(Claude Code 등)를 재시작하면 stcfsd-section-designer가 나타납니다.');
+
+    vscode.window.showInformationMessage(
+        `StCFSD MCP 등록 완료 (포트 ${port})`, { modal: true, detail: results.join('\n') }, '상태 보기'
+    ).then((action) => {
+        if (action === '상태 보기') { runMcpStatus(); }
+    });
+}
+
+async function runMcpUnregister(): Promise<void> {
+    const confirm = await vscode.window.showQuickPick(['해제한다', '취소'], {
+        placeHolder: '워크스페이스·글로벌 설정에서 stcfsd-section-designer를 제거합니다 (다른 서버는 유지)',
+    });
+    if (!confirm || confirm === '취소') { return; }
+
+    const targets = configPathsForScope('both', {
+        workspaceRoot: _workspaceRoot(), homeDir: _homeDir(),
+    });
+    const results: string[] = [];
+    for (const target of targets) {
+        try {
+            if (!fs.existsSync(target)) {
+                results.push(`- ${target} (파일 없음)`);
+                continue;
+            }
+            const removed = removeServerConfig(fs.readFileSync(target, 'utf-8'), MCP_SERVER_KEY);
+            if (!removed.ok) {
+                results.push(`✗ ${target} (${removed.error})`);
+                continue;
+            }
+            if (removed.removed) {
+                fs.writeFileSync(target, removed.text);
+                results.push(`✓ ${target} (제거됨)`);
+            } else {
+                results.push(`- ${target} (등록 안 됨)`);
+            }
+        } catch (err: any) {
+            results.push(`✗ ${target} (${err.message})`);
+        }
+    }
+    vscode.window.showInformationMessage('StCFSD MCP 등록 해제', { modal: true, detail: results.join('\n') });
+}
+
+async function runMcpStatus(): Promise<void> {
+    const lines: string[] = [
+        `브릿지 포트: ${mcpPortValue || '(미시작)'}`,
+        `서버 번들: ${mcpServerPathValue || '(미확인)'} ${mcpServerPathValue && fs.existsSync(mcpServerPathValue) ? '✓' : '✗'}`,
+    ];
+    const targets = configPathsForScope('both', {
+        workspaceRoot: _workspaceRoot(), homeDir: _homeDir(),
+    });
+    if (targets.length === 0) {
+        lines.push('열린 워크스페이스 없음 — 글로벌만 표시');
+        configPathsForScope('global', { homeDir: _homeDir() })
+            .forEach((t) => targets.push(t));
+    }
+    for (const target of targets) {
+        const text = fs.existsSync(target) ? fs.readFileSync(target, 'utf-8') : undefined;
+        const st = inspectRegistration(target, text, MCP_SERVER_KEY);
+        if (!st.exists) { lines.push(`- ${target}: 파일 없음`); }
+        else if (st.error) { lines.push(`✗ ${target}: ${st.error}`); }
+        else if (!st.registered) { lines.push(`- ${target}: 미등록`); }
+        else {
+            const portOk = st.port === String(mcpPortValue);
+            lines.push(`${portOk ? '✓' : '!'} ${target}: 등록됨 (포트 ${st.port || '?'})${portOk ? '' : ' — 현재 포트와 다름, 재등록 권장'}`);
+        }
+    }
+    if (mcpPortValue) {
+        const bridgeCheck = await _checkBridgeStatus(mcpPortValue);
+        lines.push(`${bridgeCheck.ok ? '✓' : '✗'} 브릿지: ${bridgeCheck.detail}`);
+    }
+    vscode.window.showInformationMessage('StCFSD MCP 상태', { modal: true, detail: lines.join('\n') });
 }
 
 async function findAvailablePort(preferredPort: number, maxAttempts: number = 20): Promise<number> {
@@ -310,24 +491,21 @@ async function findAvailablePort(preferredPort: number, maxAttempts: number = 20
     throw new Error(`StCFSD: failed to reserve an MCP bridge port near ${preferredPort}`);
 }
 
-function _writeMcpToWorkspace(mcpJson: string): void {
-    const folders = vscode.workspace.workspaceFolders;
-    if (!folders || folders.length === 0) {
+function _writeMcpToWorkspace(config: { command: string; args: string[]; env: Record<string, string> }): void {
+    const wsRoot = _workspaceRoot();
+    if (!wsRoot) {
         console.log('[StCFSD] No workspace folder — .mcp.json not written to workspace');
         return;
     }
-    const wsRoot = folders[0].uri.fsPath;
-    try {
-        // .mcp.json
-        fs.writeFileSync(path.join(wsRoot, '.mcp.json'), mcpJson);
-        // .claude/mcp.json
-        const claudeDir = path.join(wsRoot, '.claude');
-        if (!fs.existsSync(claudeDir)) { fs.mkdirSync(claudeDir, { recursive: true }); }
-        fs.writeFileSync(path.join(claudeDir, 'mcp.json'), mcpJson);
-        console.log(`[StCFSD] MCP config written to workspace: ${wsRoot}`);
-    } catch (err) {
-        console.warn(`[StCFSD] Failed to write MCP to workspace ${wsRoot}:`, err);
+    for (const target of [path.join(wsRoot, '.mcp.json'), path.join(wsRoot, '.claude', 'mcp.json')]) {
+        try {
+            // 병합 쓰기 — 기존 파일의 다른 서버 설정을 보존한다
+            _mergeIntoFile(target, MCP_SERVER_KEY, config);
+        } catch (err) {
+            console.warn(`[StCFSD] Failed to write MCP to ${target}:`, err);
+        }
     }
+    console.log(`[StCFSD] MCP config merged into workspace: ${wsRoot}`);
 }
 
 function getPythonPath(extensionPath: string): string {

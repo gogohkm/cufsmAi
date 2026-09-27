@@ -19,6 +19,7 @@ export class StcfsdTreeItem extends vscode.TreeItem {
             tooltip?: string;
             iconPath?: vscode.ThemeIcon;
             contextValue?: string;
+            commandId?: string;
         }
     ) {
         super(label, collapsibleState);
@@ -28,6 +29,10 @@ export class StcfsdTreeItem extends vscode.TreeItem {
             this.tooltip = options.tooltip;
             this.iconPath = options.iconPath;
             this.contextValue = options.contextValue;
+            // commandId가 있으면 클릭 시 해당 VS Code 명령 실행 (sectionId 네비게이션 대신)
+            if (options.commandId) {
+                this.command = { command: options.commandId, title: label };
+            }
         }
     }
 }
@@ -126,14 +131,26 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTr
         return this._getChildItems(element);
     }
 
-    // ─── 루트 (6개 탭) ───
+    private _mcpRootItem(): StcfsdTreeItem {
+        return new StcfsdTreeItem('MCP 서버', vscode.TreeItemCollapsibleState.Collapsed, {
+            sectionId: 'mcp-server',
+            iconPath: new vscode.ThemeIcon('plug'),
+            description: '로컬 등록',
+            tooltip: 'Claude Code 등 MCP 클라이언트에 StCFSD 서버 등록/해제',
+        });
+    }
+
+    // ─── 루트 (6개 탭 + MCP) ───
     private _getRootItems(): StcfsdTreeItem[] {
         if (!this._summary) {
-            return [new StcfsdTreeItem('단면 미로드', vscode.TreeItemCollapsibleState.None, {
-                description: '클릭하여 디자이너 열기',
-                iconPath: new vscode.ThemeIcon('info'),
-                sectionId: 'open-designer',
-            })];
+            return [
+                new StcfsdTreeItem('단면 미로드', vscode.TreeItemCollapsibleState.None, {
+                    description: '클릭하여 디자이너 열기',
+                    iconPath: new vscode.ThemeIcon('info'),
+                    sectionId: 'open-designer',
+                }),
+                this._mcpRootItem(),
+            ];
         }
         const s = this._summary;
         return [
@@ -173,6 +190,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTr
                     ? `${s.validationPass}통과 ${s.validationWarn}주의 ${s.validationFail}실패`
                     : '',
             }),
+            this._mcpRootItem(),
         ];
     }
 
@@ -182,6 +200,23 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTr
         const s = this._summary || EMPTY;
 
         switch (parent.sectionId) {
+
+        // ━━━ MCP 서버 (로컬 등록) ━━━
+        case 'mcp-server':
+            items.push(new StcfsdTreeItem('등록', vscode.TreeItemCollapsibleState.None, {
+                iconPath: new vscode.ThemeIcon('plug'),
+                tooltip: '워크스페이스/글로벌 MCP 설정에 등록',
+                commandId: 'stcfsd.registerMcpServer',
+            }));
+            items.push(new StcfsdTreeItem('상태 보기', vscode.TreeItemCollapsibleState.None, {
+                iconPath: new vscode.ThemeIcon('info'),
+                commandId: 'stcfsd.showMcpStatus',
+            }));
+            items.push(new StcfsdTreeItem('등록 해제', vscode.TreeItemCollapsibleState.None, {
+                iconPath: new vscode.ThemeIcon('circle-slash'),
+                commandId: 'stcfsd.unregisterMcpServer',
+            }));
+            break;
 
         // ━━━ 전처리 ━━━
         case 'preprocessor':
