@@ -137,7 +137,6 @@ def mode_class(b_v, displ, ngm, ndm, nlm, hwn, ndof_m, couple):
             for i in range(4):
                 di0 = dofindex[i, 0]
                 di1 = dofindex[i, 1] + 1
-                _NModes = di1 - di0
                 cl_gdlo[i].extend(clas_coeffs[di0:di1].tolist())
 
         # L2 norm
@@ -162,7 +161,6 @@ def mode_class(b_v, displ, ngm, ndm, nlm, hwn, ndof_m, couple):
             for j in range(totalm):
                 di0 = dofindex[i, 0]
                 di1 = dofindex[i, 1] + 1
-                _NModes = di1 - di0
                 v_gdlo[i].extend(
                     clas_coeffs[j * ndof_m + di0:j * ndof_m + di1].tolist()
                 )

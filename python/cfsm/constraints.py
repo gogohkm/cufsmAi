@@ -500,8 +500,6 @@ def constr_user(node, cnstr, m_a):
     totalm = len(m_a)
 
     Ruser = np.zeros((ndof_m * totalm, 0))
-    _offset_row = 0
-    _offset_col = 0
 
     for ml in range(totalm):
         DOFreg = np.ones(ndof_m, dtype=int)

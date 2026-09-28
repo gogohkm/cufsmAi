@@ -64,6 +64,7 @@ export class PythonBridge {
             // 프로세스 즉시 종료 감지
             this._process.on('error', (err) => {
                 console.error('[StCFSD] Python process error:', err.message);
+                this._protocol.dispose(`Python process error: ${err.message}`);
                 finishReject(err instanceof Error ? err : new Error(String(err)));
             });
 
@@ -71,6 +72,9 @@ export class PythonBridge {
                 console.log(`[StCFSD] Python process exited: code=${code}, signal=${signal}`);
                 this._process = null;
                 this._started = false;
+                this._protocol.dispose(
+                    `Python process exited before completing pending requests (code=${code}, signal=${signal ?? 'none'})`
+                );
                 if (!settled) {
                     finishReject(new Error(`Python exited during startup (code=${code}, signal=${signal ?? 'none'})`));
                 }

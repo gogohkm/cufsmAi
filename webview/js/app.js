@@ -61,12 +61,12 @@
         'tpl-B': [50, 'length'],
         'tpl-D': [20, 'length'],
         'tpl-t': [2.3, 'thickness'],
-        'tpl-r': [2.3, 'radius'],
+        'tpl-r': [4, 'radius'],
         // 재료 물성 (MPa)
         'input-fy': [245, 'stress'],
         'input-fu': [400, 'stress'],
-        'input-E': [205000, 'stress'],
-        'input-G': [78846, 'stress'],
+        'input-E': [203395, 'stress'],
+        'input-G': [77911, 'stress'],
         // 해석 길이 (mm)
         'input-len-min': [10, 'length'],
         'input-len-max': [10000, 'length'],
@@ -157,7 +157,8 @@
             ['design-Mx','moment'],['design-Mx-pos','moment'],['design-My','moment'],
             ['design-wc-N','length'],['design-wc-R','radius'],
             ['config-spacing','length_ft'],
-            ['deck-t-panel','thickness'],['deck-fastener-spacing','length'],['deck-kphi-override','rotStiff'],
+            ['deck-t-panel','thickness'],['deck-fastener-spacing','length'],
+            ['deck-kphi-override','rotStiff'],['deck-kx-override','latStiff'],
             ['load-D-psf','pressure'],['load-Lr-psf','pressure'],
             ['load-S-psf','pressure'],['load-Wu-psf','pressure'],['load-Wp-psf','pressure'],
             ['load-L-psf','pressure'],
@@ -266,6 +267,7 @@
             case 'analysisInvalidated':
                 analysisResult = null;
                 lastDsmResult = null;
+                if (msg.data?.invalidateLoads) _lastLoadAnalysis = null;
                 _lastDesignResult = null;
                 setStatus('Analysis invalidated: ' + ((msg.data && msg.data.reason) || 'model changed'), 'warn');
                 updateDesignDsmStatus();
@@ -274,6 +276,10 @@
             case 'propertiesResult':
                 renderProperties(msg.data);
                 sendTreeUpdate();
+                break;
+            case 'propertiesError':
+                setStatus('Section properties error: ' + (msg.data?.error || 'Unknown'), 'error');
+                console.error('[StCFSD] propertiesError:', msg.data);
                 break;
             case 'templateGenerated':
                 if (model && msg.data) {
@@ -1208,7 +1214,6 @@
         // 부재 픽셀 치수
         var pxD = dMem * scV;        // 부재 높이 px
         var pxT = Math.max(tMem * scV, 1.5);  // 두께 px (최소 1.5)
-        // (플랜지폭 px: 측면도에서 미사용 — 단면도에만 csPxB 사용)
         var pxC = cLip * scV;        // 립 높이 px
         var gap = Math.max(pxT * 0.6, 2);  // 부재 간 간격 px
 
@@ -1843,6 +1848,7 @@
             ['정모멘트', data.design_positive],
             ['부모멘트', data.design_negative],
             ['랩 구간', data.design_lap],
+            ['양력', data.design_uplift],
         ].filter(([, d]) => d && !d.error);
         if (candidates.length === 0) return data;
         candidates.sort((a, b) => (b[1].utilization || 0) - (a[1].utilization || 0));
@@ -1855,6 +1861,7 @@
             design_positive: data.design_positive || null,
             design_negative: data.design_negative || null,
             design_lap: data.design_lap || null,
+            design_uplift: data.design_uplift || null,
             uplift_R: data.uplift_R,
             deck: data.deck || null,
             span_type: data.span_type || '',
@@ -2385,7 +2392,7 @@
 
     // E 또는 v 변경 시 G = E / (2*(1+v)) 자동 계산
     function updateG() {
-        const E = getNum('input-E', 29733);
+        const E = getNum('input-E', 29500);
         const v = getNum('input-v', 0.3);
         if (E > 0 && v >= 0 && v < 0.5) {
             const G = E / (2 * (1 + v));
@@ -2415,9 +2422,9 @@
             const lengths = logspace(Math.log10(lenMin), Math.log10(lenMax), lenN);
             const m_all = lengths.map(() => [1]);
 
-            const E = fromDisplay(getNum('input-E', 29733), 'stress');
+            const E = fromDisplay(getNum('input-E', 29500), 'stress');
             const v = getNum('input-v', 0.3);
-            const G = fromDisplay(getNum('input-G', 11436), 'stress');
+            const G = fromDisplay(getNum('input-G', 11300), 'stress');
 
             // 모델 업데이트
             model.prop = [[100, E, E, v, v, G]];
@@ -2921,7 +2928,7 @@
             const u = c.toDataURL('image/png');
             // 빈 캔버스(수백 바이트)나 실패는 제외
             return (u && u.length > 3000) ? u : '';
-        } catch (e) { return ''; }
+        } catch { return ''; }
     }
 
     function _buildBucklingReportHtml() {
@@ -3063,7 +3070,7 @@
     // ============================================================
     // 3D 모드형상 래퍼
     // ============================================================
-    function renderModeShape3DWrapper() {
+    async function renderModeShape3DWrapper() {
         if (!analysisResult || !analysisResult.shapes || !model) { return; }
 
         const selLen = document.getElementById('select-length');
@@ -3089,7 +3096,7 @@
         // Babylon.js 3D 렌더러 우선 시도
         if (window.CufsmViewer3D) {
             try {
-                window.CufsmViewer3D.render({
+                await window.CufsmViewer3D.render({
                     nodes: model.node,
                     elems: model.elem,
                     modeVec: modeVec,
@@ -3366,6 +3373,8 @@
             if (v) {
                 setValue('input-fy', toDisplay(v[0], 'stress'));
                 setValue('input-fu', toDisplay(v[1], 'stress'));
+                setValue('input-E', toDisplay(29500, 'stress'));
+                setValue('input-G', toDisplay(11300, 'stress'));
                 propagateFyFuFromPreprocessor();
             }
         });
@@ -3589,8 +3598,8 @@
             Cb: getNum('design-Cb', 1.0),
             Lb_pos: fromDisplay(getNum('design-Lb-pos', 0), 'length'),
             Cb_pos: getNum('design-Cb-pos', 1.0),
-            Cmx: getNum('design-Cmx', 0.85),
-            Cmy: getNum('design-Cmy', 0.85),
+            Cmx: getNum('design-Cmx', 1.0),
+            Cmy: getNum('design-Cmy', 1.0),
             Pu: fromDisplay(getNum('design-P', 0), 'force'),
             Mu: fromDisplay(getNum('design-Mx', 0), 'moment'),
             Mu_pos: fromDisplay(getNum('design-Mx-pos', 0), 'moment'),
@@ -3876,6 +3885,11 @@
                         const raw = /** @type {HTMLInputElement} */ (document.getElementById('deck-kphi-override'))?.value;
                         if (raw == null || raw.trim() === '') { return null; }
                         return fromDisplay(parseFloat(raw), 'rotStiff');
+                    })(),
+                    kx_override: (() => {
+                        const raw = /** @type {HTMLInputElement} */ (document.getElementById('deck-kx-override'))?.value;
+                        if (raw == null || raw.trim() === '') { return null; }
+                        return fromDisplay(parseFloat(raw), 'latStiff');
                     })(),
                 },
                 section: (sectionInfo.depth > 0 && sectionInfo.thickness > 0) ? sectionInfo : null,
@@ -4376,6 +4390,9 @@
             if (ap.deck) {
                 html += 'Deck: k&phi;=' + _ruv(ap.deck.kphi, 'rotStiff') + ' ' + _rul('rotStiff') +
                     ', kx=' + _ruv(ap.deck.kx, 'latStiff') + ' ' + _rul('latStiff') + '<br>';
+                if (ap.deck.warning) {
+                    html += '<span style="color:var(--vscode-editorWarning-foreground)">' + ap.deck.warning + '</span><br>';
+                }
             }
             if (ap.positive_region) html += 'Positive: braced=' + ap.positive_region.braced + '<br>';
             if (negRegion) html += 'Negative: Ly=' + fmtVal(negRegion.Ly_in, 'length') + ' ' + unitLabel('length') + ', Cb=' + negRegion.Cb + '<br>';
@@ -4388,6 +4405,11 @@
                 const govData = data.governing || data.gravity;
                 let maxMu = 0, maxVu = 0;
                 const govCombo = govData ? govData.combo : '';
+                const upliftGoverns = !!(
+                    data.uplift && govData
+                    && data.uplift.combo === govData.combo
+                    && (govData.locations || []).some(loc => (loc.Mu || 0) < 0)
+                );
                 const _hasLaps = data.laps_per_support && data.laps_per_support.some(
                     lp => lp && ((lp.left_ft || 0) > 0 || (lp.right_ft || 0) > 0)
                 );
@@ -4433,8 +4455,11 @@
                 }
 
                 // Unbraced lengths + Cb/β 자동 설정
-                if (ap && ap.negative_region) {
-                    const nr = ap.negative_region;
+                const governingBracing = upliftGoverns
+                    ? ap?.uplift_bracing?.negative_region
+                    : (ap?.negative_region_gov || ap?.negative_region);
+                if (governingBracing) {
+                    const nr = governingBracing;
                     setValueAndNotify('design-Lb', toDisplay(nr.Ly_in || 0, 'length').toFixed(unitDec('length')));
                     setValueAndNotify('design-Cb', nr.Cb || 1.0);
 
@@ -4470,6 +4495,14 @@
                         // β 미리보기 트리거
                         if (typeof updateBetaPreview === 'function') updateBetaPreview();
                     }
+                }
+
+                // §I6.2.1: 양력이 지배하면 자동 산정된 R을 실제 설계 입력에 적용한다.
+                const chkR = /** @type {HTMLInputElement} */ (document.getElementById('chk-r-factor'));
+                const selR = /** @type {HTMLSelectElement} */ (document.getElementById('select-r-value'));
+                if (chkR) chkR.checked = upliftGoverns && ap?.uplift_R > 0;
+                if (selR && upliftGoverns && ap?.uplift_R > 0) {
+                    selR.value = String(ap.uplift_R);
                 }
 
                 // 정모멘트 구간 Lb/Cb 자동 설정
@@ -5466,9 +5499,10 @@
             h += '<table><tr><th>매개변수</th><th>값</th><th>계산 방법</th></tr>';
             if (ap.deck && ap.deck.type !== 'none') {
                 h += '<tr><td>k<sub>&phi;</sub> (회전강성)</td><td>'+_ruv(ap.deck.kphi,'rotStiff')+' '+_rul('rotStiff')+'</td>';
-                h += '<td>Chen & Moen (2011): k<sub>&phi;</sub> = 1/(1/(k&middot;c&sup2;) + c&sup3;/(3EIc&sup2;)), k=체결구강성/간격, c=플랜지/2</td></tr>';
+                h += '<td>'+(ap.deck.kphi_method === 'test_override' ? '프로젝트 시험 입력값' : 'Chen & Moen 기반 예비설계 근사치')+'</td></tr>';
                 h += '<tr><td>k<sub>x</sub> (횡강성)</td><td>'+_ruv(ap.deck.kx,'latStiff')+' '+_rul('latStiff')+'</td>';
-                h += '<td>2겹 직렬 스프링: k<sub>x</sub> = (1/(1/(Et<sub>1</sub>)+1/(Et<sub>2</sub>)))/s &times; 0.04 감소계수</td></tr>';
+                h += '<td>'+(ap.deck.kx_method === 'test_override' ? '프로젝트 시험 입력값' : 'AISI RP17-2 Example II-1C 보정 예비설계 근사치 (감소계수 0.0379)')+'</td></tr>';
+                if (ap.deck.warning) h += '<tr><td colspan="3" style="color:#b36b00">주의: '+ap.deck.warning+'</td></tr>';
             }
             if (ap.positive_region) {
                 if (ap.positive_region.braced) {
@@ -6253,7 +6287,6 @@
         const loadS = getNum('load-S-psf', 0);
         const loadL = getNum('load-L-psf', 0);
         const loadW = getNum('load-Wu-psf', 0);
-
         checks.push({
             category: catE, item: '스팬 길이',
             status: spanFt > 0 ? (spanFt <= toDisplay(40,'length_ft') ? 'pass' : 'warn') : 'fail',
@@ -6964,6 +6997,43 @@
             vscode.postMessage({ command: 'saveProject' });
         });
     }
+
+    // 입력 변경 후 이전 하중/설계 결과를 최신 결과처럼 재사용하지 않는다.
+    function invalidateDerivedResults(scope) {
+        if (scope === 'load') {
+            _lastLoadAnalysis = null;
+            const loadBox = document.getElementById('load-analysis-result');
+            if (loadBox) loadBox.innerHTML = '<span style="color:var(--vscode-editorWarning-foreground)">입력이 변경되었습니다. 하중 분석을 다시 실행하세요.</span>';
+        }
+        _lastDesignResult = null;
+        ['design-summary', 'design-steps'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '<span style="color:var(--vscode-editorWarning-foreground)">입력이 변경되었습니다. 설계 검토를 다시 실행하세요.</span>';
+        });
+        const interaction = document.getElementById('design-interaction');
+        if (interaction) interaction.style.display = 'none';
+        vscode.postMessage({ command: 'invalidateDerivedResults', data: { scope } });
+        sendTreeUpdate();
+    }
+
+    const loadsPanel = document.getElementById('tab-loads');
+    if (loadsPanel) {
+        loadsPanel.addEventListener('change', event => {
+            if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+                invalidateDerivedResults('load');
+            }
+        });
+    }
+    ['tab-design', 'tab-preprocessor'].forEach(panelId => {
+        const panel = document.getElementById(panelId);
+        if (panel) {
+            panel.addEventListener('change', event => {
+                if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) {
+                    invalidateDerivedResults('design');
+                }
+            });
+        }
+    });
 
     // ============================================================
     // 초기화

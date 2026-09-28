@@ -29,7 +29,6 @@ def section_analysis_fcfsm(node: np.ndarray, elem: np.ndarray,
             'flat_elems': list, 'curved_elems': list
         }
     """
-    _nnodes = node.shape[0]
     nelems = elem.shape[0]
 
     # 절점 분류 — base_properties로 모든 데이터 한번에 획득

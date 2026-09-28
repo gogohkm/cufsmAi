@@ -23,8 +23,8 @@ async function run() {
 
   const panel = await waitFor('designer panel', () => StcfsdPanel.currentPanel, 15000);
   assert(panel, 'expected StcfsdPanel.currentPanel to be populated');
-  assert(panel.__testGetHtml().includes('btn-prepare-design-dsm'),
-    'design tab HTML should contain the FSM prepare button');
+  assert(!panel.__testGetHtml().includes('btn-prepare-design-dsm'),
+    'design tab HTML should use automatic DSM preparation without a stale manual button');
 
   panel.__testClearPostedMessages();
   try {
@@ -35,6 +35,8 @@ async function run() {
   }
   await sleep(1500);
 
+  // 계약 검증에는 조밀한 생산 곡선이 필요하지 않으므로 실행 시간을 제한한다.
+  await panel.handleMcpAction({ action: 'set_lengths', min: 1, max: 1000, n: 12 });
   await panel.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: 35.53 });
   const analysis = await panel.handleMcpAction({ action: 'run_analysis' });
   assert.strictEqual(analysis.success, true, 'expected baseline compression analysis to succeed');

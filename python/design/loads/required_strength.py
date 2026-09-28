@@ -560,13 +560,17 @@ def _calc_deck_info(deck: dict, section: dict = None,
                     E: float = None) -> dict:
     """데크 강성 정보 계산"""
     if not deck or deck.get('type') == 'none':
-        return {'kphi': 0, 'kx': 0, 'type': 'none'}
+        return {
+            'kphi': 0, 'kx': 0, 'type': 'none',
+            'kphi_method': 'not_applicable', 'kx_method': 'not_applicable',
+        }
 
     E_val = E or E_STEEL
 
     kphi_override = deck.get('kphi_override')
     if kphi_override is not None and kphi_override > 0:
         kphi = kphi_override
+        kphi_method = 'test_override'
     else:
         t_purlin = section.get('thickness', 0.059) if section else 0.059
         flange_w = section.get('flange_width', 2.5) if section else 2.5
@@ -577,22 +581,32 @@ def _calc_deck_info(deck: dict, section: dict = None,
             flange_width=flange_w,
             E=E_val,
         )
+        kphi_method = 'chen_moen_preliminary_approximation'
 
     t_purlin = section.get('thickness', 0.059) if section else 0.059
-    kx = calc_lateral_stiffness(
-        t_panel=deck.get('t_panel', 0.018),
-        t_purlin=t_purlin,
-        Pss=deck.get('Pss', 1800),
-        d_screw=deck.get('d_screw', 0.17),
-        Fu_panel=deck.get('Fu_panel', 70),
-        fastener_spacing=deck.get('fastener_spacing', 12),
-        E=E_val,
-    )
+    kx_override = deck.get('kx_override')
+    if kx_override is not None and kx_override > 0:
+        kx = kx_override
+        kx_method = 'test_override'
+    else:
+        kx = calc_lateral_stiffness(
+            t_panel=deck.get('t_panel', 0.018),
+            t_purlin=t_purlin,
+            fastener_spacing=deck.get('fastener_spacing', 12),
+            E=E_val,
+        )
+        kx_method = 'rp17_2_example_calibrated_approximation'
 
     return {
         'kphi': round(kphi, 4),
         'kx': round(kx, 3),
         'type': deck.get('type', 'through-fastened'),
+        'kphi_method': kphi_method,
+        'kx_method': kx_method,
+        'warning': (
+            'Deck restraint estimates are preliminary. Use project-specific '
+            'connection/panel test stiffness overrides when available.'
+        ) if 'override' not in kphi_method or 'override' not in kx_method else None,
     }
 
 

@@ -61,14 +61,18 @@
         data.deckKphiOverride = deckKphiOverrideEl && deckKphiOverrideEl.value.trim() !== ''
             ? fromDisplay(parseFloat(deckKphiOverrideEl.value), 'rotStiff')
             : null;
+        const deckKxOverrideEl = document.getElementById('deck-kx-override');
+        data.deckKxOverride = deckKxOverrideEl && deckKxOverrideEl.value.trim() !== ''
+            ? fromDisplay(parseFloat(deckKxOverrideEl.value), 'latStiff')
+            : null;
 
         data.KxLx = fromDisplay(getNum('design-KxLx', 118.11), 'length');
         data.KyLy = fromDisplay(getNum('design-KyLy', 118.11), 'length');
         data.KtLt = fromDisplay(getNum('design-KtLt', 118.11), 'length');
         data.Lb = fromDisplay(getNum('design-Lb', 118.11), 'length');
         data.Cb = getNum('design-Cb', 1.0);
-        data.Cmx = getNum('design-Cmx', 0.85);
-        data.Cmy = getNum('design-Cmy', 0.85);
+        data.Cmx = getNum('design-Cmx', 1.0);
+        data.Cmy = getNum('design-Cmy', 1.0);
 
         data.Pu = fromDisplay(getNum('design-P', 0), 'force');
         data.Vu = fromDisplay(getNum('design-V', 0), 'force');
@@ -234,6 +238,8 @@
         if (data.deckFastenerSpacing != null) setValue('deck-fastener-spacing', toDisplay(data.deckFastenerSpacing, 'length'));
         if (data.deckKphiOverride != null) setValue('deck-kphi-override', toDisplay(data.deckKphiOverride, 'rotStiff'));
         else setValue('deck-kphi-override', '');
+        if (data.deckKxOverride != null) setValue('deck-kx-override', toDisplay(data.deckKxOverride, 'latStiff'));
+        else setValue('deck-kx-override', '');
 
         if (data.KxLx != null) setValue('design-KxLx', toDisplay(data.KxLx, 'length'));
         if (data.KyLy != null) setValue('design-KyLy', toDisplay(data.KyLy, 'length'));
