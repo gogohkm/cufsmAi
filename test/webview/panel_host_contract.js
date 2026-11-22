@@ -350,7 +350,9 @@ async function scenarioPreviewAndProjectFiles(ctx) {
 
     // V5b-01: 모르는 최상위 키는 들이지도 쓰지도 않는다 — 조작된 .csd 의 mcpServers 가 다른 파일로 나가지 않는다.
     const MODEL_KEYS = ['prop', 'node', 'elem', 'lengths', 'springs', 'constraints', 'BC', 'm_all', 'GBTcon', 'neigs',
-      'loadCase', 'loadFy', 'loadValues', 'sectionType', 'sectionTemplate', 'sectionParams', 'cornerRadius'];
+      'loadCase', 'loadFy', 'loadValues', 'sectionType', 'sectionTemplate', 'sectionParams', 'cornerRadius',
+      // K4a: 요소 자리 · 손 편집 표지(호스트가 열 때 요소 수와 맞는지 검사한다)
+      'elementRoles', 'sectionEdited'];
     const base = JSON.parse(fs.readFileSync(fresh, 'utf8'));
     for (const wrap of [true, false]) {
       const crafted = boxFile(wrap ? 'crafted.csd' : 'crafted.json');
@@ -504,6 +506,254 @@ async function scenarioAllowlistsAndVibration(ctx) {
   }
 }
 
+// ------------------------------------------------------------------ K4a: 상태 · 요소 자리 · 하중 분석 알림 · 무효 장부 · 보기
+const posted = (p, cmd) => p.__testGetPostedMessages().filter((m) => m.command === cmd);
+const ledgerOf = (p) => p.getStatus().invalidated;
+
+// K4a 5 · 4: 상태가 템플릿 · 치수 · 하중 경우 · 고유치 수 · 해석 계열을 준다. 요소 자리는 템플릿 단면에만, 손 편집 뒤에는 없다.
+async function scenarioK4aStatusAndRoles(ctx) {
+  const p = ctx.panel;
+  p.__testClearPostedMessages();
+  const params = { H: 8, B: 2.5, D: 0.625, t: 0.059, r: 0.1875, qlip: 90 };
+  const r = await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc', params });
+  assert(Array.isArray(r.element_roles) && r.element_roles.length === r.nelems, 'template reply carries element_roles (one per element)');
+  for (const role of ['web', 'top_flange', 'bottom_flange', 'top_lip', 'bottom_lip', 'corner']) {
+    assert(r.element_roles.includes(role), `lipped C roles include ${role}`);
+  }
+  const ml = posted(p, 'modelLoaded').pop();
+  assert.deepStrictEqual(ml.data.elementRoles, r.element_roles, 'the page receives element_roles with the model (modelLoaded)');
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: 50 });
+  await p.handleMcpAction({ action: 'set_lengths', min: 1, max: 1000, n: 12 });
+  await p.handleMcpAction({ action: 'run_analysis', neigs: 4 });
+  let st = p.getStatus();
+  assert.strictEqual(st.section_template, 'lippedc', 'status: section template');
+  assert.deepStrictEqual(st.section_params, params, 'status: the dimensions the section was generated from (US, as stored)');
+  assert.strictEqual(st.section_edited, false);
+  assert.deepStrictEqual(st.element_roles, r.element_roles, 'status: element roles');
+  assert.strictEqual(st.load_case, 'bending_xx_pos', 'status: load case');
+  assert.strictEqual(st.load_fy, 50, 'status: reference stress');
+  assert.strictEqual(st.neigs, 4, 'status: eigenvalues per length');
+  assert.strictEqual(st.analysis_load_family, 'Mxx', 'status: load family of the current analysis');
+  assert.strictEqual(st.results.buckling_analysis.current, true);
+  assert.strictEqual(st.units, 'US');
+  const full = await p.handleMcpAction({ action: 'get_full_state' });
+  assert.strictEqual(full.section_template, 'lippedc', 'get_full_state carries the same status fields');
+  assert.strictEqual(full.analysis_load_family, 'Mxx');
+  // 엔진 요청에는 호스트 꼬리표가 실리지 않는다(요청이 바뀌지 않게).
+  assert(!('elementRoles' in p._analysisParams(p._model)), 'element roles are not sent to the analysis engine');
+  // 응력만 고치면 요소 자리는 그대로, 좌표를 옮기면 버리고 「고쳤다」.
+  await p.handleMcpAction({ action: 'modify_node', node_id: 1, stress: 10 });
+  assert(Array.isArray(p.getStatus().element_roles), 'a stress-only node edit keeps the roles');
+  await p.handleMcpAction({ action: 'modify_node', node_id: 1, x: p._model.node[0][1] + 0.01 });
+  st = p.getStatus();
+  assert.strictEqual(st.element_roles, null, 'moving a node by hand drops element_roles');
+  assert.strictEqual(st.section_edited, true, 'status says the template section was edited by hand');
+  assert(!('elementRoles' in posted(p, 'modelLoaded').pop().data), 'the page model no longer has roles');
+  // 화면의 표 편집(updateModel)도 같다
+  await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc', params });
+  assert(Array.isArray(p.getStatus().element_roles) && p.getStatus().section_edited === false, 'a new template restores roles');
+  const node = JSON.parse(JSON.stringify(p._model.node)); node[2][2] += 0.01;
+  await p.__testDispatchMessage({ command: 'updateModel', data: { node } });
+  assert.strictEqual(p.getStatus().element_roles, null, 'GUI table edit of a coordinate drops roles');
+  for (const action of ['set_elements', 'delete_element']) {
+    await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc', params });
+    if (action === 'set_elements') {
+      await p.handleMcpAction({ action, elements: JSON.parse(JSON.stringify(p._model.elem)) });
+    } else {
+      await p.handleMcpAction({ action, elem_id: p._model.elem.length });
+    }
+    assert.strictEqual(p.getStatus().element_roles, null, `${action} drops element_roles`);
+  }
+  // 손으로 만든 단면에는 짐작하지 않는다
+  const c = await p.handleMcpAction({ action: 'generate_template', section_type: 'custom',
+    params: { outer_corners: [[2.5, 0], [0, 0], [0, 8], [2.5, 8]], t: 0.059 } });
+  assert(!('element_roles' in c) && p.getStatus().element_roles === null, 'custom section: no element_roles');
+  // 저장 · 열기: 요소 자리가 함께 가고, 요소 수와 맞지 않으면 버린다
+  await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc', params });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd-k4a-'));
+  try {
+    const f = path.join(dir, 'roles.stcfsd');
+    assert((await p.handleMcpAction({ action: 'save_project', filepath: f })).success);
+    const saved = JSON.parse(fs.readFileSync(f, 'utf8'));
+    assert.strictEqual(saved.elementRoles.length, saved.elem.length, 'save_project writes element roles');
+    await p.handleMcpAction({ action: 'generate_template', section_type: 'custom',
+      params: { outer_corners: [[2.5, 0], [0, 0], [0, 8], [2.5, 8]], t: 0.059 } });
+    assert((await p.handleMcpAction({ action: 'load_project', filepath: f })).success);
+    assert.deepStrictEqual(p.getStatus().element_roles, saved.elementRoles, 'load_project restores the roles');
+    const bad = { ...saved, elementRoles: saved.elementRoles.slice(1) };
+    const f2 = path.join(dir, 'bad.stcfsd');
+    fs.writeFileSync(f2, JSON.stringify(bad));
+    const lr = await p.handleMcpAction({ action: 'load_project', filepath: f2 });
+    assert(lr.success && p.getStatus().element_roles === null && lr.warnings.some((w) => /element_roles/.test(w)),
+      'roles that do not match the elements are dropped (with a note)');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// K4a 6 · 7: MCP 하중 분석이 화면에 가고(GUI 와 같은 메시지), 입력이 바뀌면 그것에 기댄 결과를 지우며 장부에 남는다.
+async function scenarioK4aLoadsAndLedger(ctx) {
+  const p = ctx.panel;
+  await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc',
+    params: { H: 8, B: 2.5, D: 0.625, t: 0.059, r: 0.1875 } });
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: 50 });
+  await p.handleMcpAction({ action: 'set_lengths', min: 1, max: 1000, n: 12 });
+  await p.handleMcpAction({ action: 'run_analysis' });
+  assert.deepStrictEqual(ledgerOf(p).filter((e) => e.kind === 'buckling_analysis'), [], 'a new analysis clears its ledger line');
+  const flex = { action: 'aisi_design', member_type: 'flexure', Fy: 50, Fu: 65, Lb: 60, Mu: 40 };
+  const d = await p.handleMcpAction(flex);
+  assert(!d.error && p.getStatus().results.member_design.result_type === 'flexure', 'member design is remembered');
+  const loads = { action: 'analyze_loads', member_app: 'roof-purlin', span_type: 'simple', span_ft: 20, loads: { D: 20, Lr: 80 } };
+  p.__testClearPostedMessages();
+  const la = await p.handleMcpAction(loads);
+  assert(!la.error, la.error);
+  const lac = posted(p, 'loadAnalysisComplete');
+  assert.strictEqual(lac.length, 1, 'K4a: an MCP load analysis posts loadAnalysisComplete once');
+  assert.deepStrictEqual(lac[0].data, JSON.parse(JSON.stringify(la)), 'the page gets the same result the AI got');
+  let st = p.getStatus();
+  assert(st.results.load_analysis && st.results.load_analysis.at, 'status: load analysis is current');
+  assert.strictEqual(st.results.member_design, null, 'a load analysis with new inputs drops the member design (as the GUI does)');
+  const md = st.invalidated.find((e) => e.kind === 'member_design');
+  assert(md && md.reason === 'Load analysis inputs changed' && md.cause.action === 'analyze_loads'
+    && md.result_type === 'flexure' && md.result_at && md.invalidated_at, `ledger line for the dropped design: ${JSON.stringify(md)}`);
+  assert(posted(p, 'resultsLedger').length >= 1, 'the ledger is posted to the page');
+  // 같은 입력으로 다시: 지우지 않는다(장부 그대로, 다시 보낸다)
+  await p.handleMcpAction(flex);
+  p.__testClearPostedMessages();
+  await p.handleMcpAction(loads);
+  assert.strictEqual(p.getStatus().results.member_design.result_type, 'flexure', 'the same load inputs again keep the design');
+  assert.strictEqual(posted(p, 'loadAnalysisComplete').length, 1);
+  assert(!p.getStatus().invalidated.some((e) => e.kind === 'member_design'), 'a new design cleared its ledger line');
+  // 바뀐 입력: 바뀐 키를 장부에
+  await p.handleMcpAction({ ...loads, span_ft: 22 });
+  const md2 = p.getStatus().invalidated.find((e) => e.kind === 'member_design');
+  assert.deepStrictEqual(md2.cause.inputs, ['span_ft'], 'the ledger names the load input that changed');
+  // GUI 경로: 메시지 한 번(전과 같다), 비교로 지우지 않는다 — 입력 변화는 화면이 알린다
+  await p.handleMcpAction(flex);
+  p.__testClearPostedMessages();
+  const { action: _a, ...guiLoads } = { ...loads, span_ft: 30 }; void _a;
+  await p.__testDispatchMessage({ command: 'analyzeLoads', data: guiLoads });
+  assert.strictEqual(posted(p, 'loadAnalysisComplete').length, 1, 'GUI route posts loadAnalysisComplete exactly once');
+  assert.strictEqual(p.getStatus().results.member_design.result_type, 'flexure', 'GUI route keeps the design (the page invalidates on input change)');
+  // 화면이 하중 칸이 바뀌었다고 알리면: 하중 분석 · 설계를 지우고 장부에(원인 = 그 메시지)
+  await p.__testDispatchMessage({ command: 'invalidateDerivedResults', data: { scope: 'load' } });
+  st = p.getStatus();
+  assert(st.results.load_analysis === null && st.results.member_design === null);
+  const ll = st.invalidated.find((e) => e.kind === 'load_analysis');
+  assert(ll && ll.cause.message === 'invalidateDerivedResults' && ll.cause.scope === 'load', 'ledger: load analysis invalidated by the page');
+  // 모델 변화(재료): 해석 · 설계 · 하중이 장부에, 원인 액션과 함께
+  await p.handleMcpAction({ action: 'run_analysis' });
+  await p.handleMcpAction(loads);
+  await p.handleMcpAction(flex);
+  await p.handleMcpAction({ action: 'set_material', E: 29000, v: 0.3 });
+  st = p.getStatus();
+  for (const kind of ['buckling_analysis', 'load_analysis', 'member_design']) {
+    const e = st.invalidated.find((x) => x.kind === kind);
+    assert(e && e.reason === 'Material changed' && e.cause.action === 'set_material', `ledger: ${kind} invalidated by set_material`);
+  }
+  assert.strictEqual(st.results.buckling_analysis, null, 'the invalidated analysis is not served');
+  await p.handleMcpAction({ action: 'run_analysis' });
+  assert(!p.getStatus().invalidated.some((e) => e.kind === 'buckling_analysis'), 'a new analysis clears the analysis line');
+  assert(p.getStatus().invalidated.some((e) => e.kind === 'member_design'), 'other lines stay until their result comes back');
+}
+
+// K4a 7: 단일 접합 결과는 그 입력만 바뀔 때 혼자 무효가 된다. 랩은 설계 결과와 함께.
+async function scenarioK4aConnectionLedger(ctx) {
+  const p = ctx.panel;
+  const conn = { action: 'design_connection', connection_type: 'screw', Fy: 33, Fu: 45, t1: 0.036, t2: 0.06, d: 0.19, n: 2,
+    e: 1.0, s: 1.0, Pnvs: 1.0, Vu: 0.3, member_case: 'flat_sheet', Ag: 0.2, width: 4 };
+  const c1 = await p.handleMcpAction(conn);
+  assert(!c1.error, c1.error);
+  const id1 = p.getStatus().results.connection.id;
+  assert(/^connection-\d+$/.test(id1) && p.getStatus().results.connection.connection_type === 'screw');
+  await p.handleMcpAction({ action: 'aisi_design', member_type: 'flexure', Fy: 50, Lb: 60, Mu: 40 });
+  const rev = p._derivedInputRevision;
+  await p.__testDispatchMessage({ command: 'invalidateDerivedResults', data: { scope: 'connection' } });
+  const st = p.getStatus();
+  assert.strictEqual(st.results.connection, null, 'connection result invalidated on its own');
+  assert(st.results.member_design, 'the member design is untouched by a connection input change');
+  assert.strictEqual(p._derivedInputRevision, rev, 'no other result is cut off');
+  const e = st.invalidated.find((x) => x.kind === 'connection');
+  assert(e && e.id === id1 && e.reason === 'Connection inputs changed', 'ledger line names that connection result');
+  // 모델 변화는 단일 접합(모델을 쓰지 않는다)을 지우지 않는다
+  await p.handleMcpAction(conn);
+  await p.handleMcpAction({ action: 'set_bc', BC: 'C-C' });
+  assert(p.getStatus().results.connection, 'a model change does not invalidate the single connection result');
+  assert(!p.getStatus().invalidated.some((x) => x.kind === 'connection'), 'a new connection result cleared its ledger line');
+  await p.handleMcpAction({ action: 'set_bc', BC: 'S-S' });
+  // 랩: 설계 결과와 함께 지운다(화면의 clearStaleResults 와 같다)
+  const lap = await p.handleMcpAction({ action: 'lap_connection', d: 8, t: 0.059, Fy: 55, Fu: 70, lap_left_in: 12, lap_right_in: 12,
+    Mu_support: 120, Vu_support: 4.0, fastener_type: 'bolt', fastener_dia: 0.5, n_rows: 2 });
+  assert(!lap.error && p.getStatus().results.lap, 'lap result remembered');
+  await p.__testDispatchMessage({ command: 'invalidateDerivedResults', data: { scope: 'design' } });
+  assert(p.getStatus().results.lap === null && p.getStatus().invalidated.some((x) => x.kind === 'lap' && x.reason === 'Design inputs changed'),
+    'design input change drops the lap result too (ledger)');
+  // 다른 파일(.csd 열기)은 낡음이 아니라 새로 — 장부를 비운다
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd-k4a-'));
+  try {
+    const f = path.join(dir, 'x.csd');
+    await p.__testWriteProjectFile(f, { __stcfsd_collect: 2, designInputs: {}, lapResult: null });
+    assert(p.getStatus().invalidated.length > 0, 'precondition: ledger has lines');
+    const out = p.__testLoadProjectFile(f);
+    assert(!out.error, out.error);
+    assert.deepStrictEqual(p.getStatus().invalidated, [], 'opening a project starts a fresh ledger');
+    assert.strictEqual(p.getStatus().results.connection, null, 'the other project connection result is gone');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// K4a 8: get_view · focus · 화면의 보기 보고(docs/implementation/20261123-view-contract.md)
+async function scenarioK4aView(ctx) {
+  const p = ctx.panel;
+  const sig = p._currentModelSignature();
+  const modelBefore = JSON.stringify(p._model);
+  let v = await p.handleMcpAction({ action: 'get_view' });
+  assert.strictEqual(v.current, null, 'no screen has reported yet');
+  assert(/No StCFSD screen has reported/.test(v.note));
+  // 화면이 없어도 실패하지 않는다 — 보냈지만 아무도 알리지 않았다고 말한다
+  p.__testClearPostedMessages();
+  let f = await p.handleMcpAction({ action: 'focus', item: { kind: 'model', id: 'section.element.3' }, reason: 'web element' });
+  assert(!f.error && f.forwarded === true && f.screen_moved === null && f.screens.length === 0 && /no screen has reported/.test(f.note),
+    `focus with no reporting screen: ${JSON.stringify(f)}`);
+  const fr = posted(p, 'focusRequest');
+  assert(fr.length === 1 && fr[0].data.item.id === 'section.element.3' && fr[0].data.reason === 'web element', 'focusRequest posted to the page');
+  // 지금 결과에 없는 검토는 보내지 않는다
+  p.__testClearPostedMessages();
+  f = await p.handleMcpAction({ action: 'focus', item: { kind: 'check', scope: 'member', id: 'member.flexure.distortional' } });
+  if (f.target_found === false) {
+    assert(f.forwarded === false && posted(p, 'focusRequest').length === 0, 'a check not in the current results is not sent');
+  }
+  await p.handleMcpAction({ action: 'aisi_design', member_type: 'flexure', Fy: 50, Lb: 60, Mu: 40 });
+  p.__testClearPostedMessages();
+  f = await p.handleMcpAction({ action: 'focus', item: { kind: 'check', scope: 'member', id: 'member.flexure.distortional' } });
+  assert(f.target_found === true && f.forwarded === true, 'a check of the current member design is sent');
+  const bad = await p.handleMcpAction({ action: 'focus', item: { kind: 'check', id: 'x' } });
+  assert(/scope must be one of/.test(bad.error), 'a check needs its scope');
+  // 설계 웹뷰(탭 6개)의 보고 · 검토 화면의 보고(호스트 액션) · focus 응답
+  await p.__testDispatchMessage({ command: 'viewReport', data: { screen: 'designer', view: 'tab:design', selection: null,
+    follows_focus: false, by: 'person' } });
+  v = await p.handleMcpAction({ action: 'get_view' });
+  assert(v.current.screen === 'designer' && v.current.view === 'tab:design' && v.current.by === 'person' && v.current.reported_at,
+    'get_view returns what the page reported');
+  const rv = await p.handleMcpAction({ action: 'report_view', screen: 'review', view: 'checks',
+    selection: { kind: 'check', scope: 'member', id: 'member.flexure.local', location: null }, follows_focus: false,
+    by: 'person', focus_response: { request_id: f.request_id, followed: false, note: 'AI 따라가기 off' } });
+  assert(rv.recorded === true, 'report_view action records the review screen');
+  v = await p.handleMcpAction({ action: 'get_view' });
+  assert.strictEqual(v.current.screen, 'review', 'current = the most recent report');
+  assert.strictEqual(v.screens.length, 2);
+  assert.deepStrictEqual(v.current.selection, { kind: 'check', scope: 'member', id: 'member.flexure.local' }, 'selection by stable id');
+  assert(v.last_focus.request_id === f.request_id && v.last_focus.response.followed === false && v.last_focus.response.screen === 'review',
+    'get_view tells the truth: the screen did not follow');
+  f = await p.handleMcpAction({ action: 'focus', item: { kind: 'result', id: 'member_design' } });
+  assert(/does not mean the screen moved/.test(f.note) && f.screens.some((s) => s.screen === 'review' && s.follows_focus === false),
+    'with reporting screens the reply still does not claim the screen moved');
+  assert.strictEqual((await p.handleMcpAction({ action: 'report_view', screen: 'Bad Name' })).recorded, false, 'screen name checked');
+  assert.strictEqual(p._currentModelSignature(), sig, 'get_view / focus / view reports never change the model');
+  assert.strictEqual(JSON.stringify(p._model), modelBefore);
+}
+
 async function main() {
   const t0 = Date.now();
   const ctx = await createPanel();
@@ -519,7 +769,8 @@ async function main() {
   const scenarios = [scenarioDefaultSteelAgrees, scenarioTemplateLoadCaseAndDsm, scenarioZSectionType, scenarioSignatureAndBc,
     scenarioNonSSAutoTerms, scenarioCustomLoadNotRescaled, scenarioTemplateWithoutReferenceStress,
     scenarioMemberDesignFyConsistency,
-    scenarioPurlinRegions, scenarioPreviewAndProjectFiles, scenarioAllowlistsAndVibration];
+    scenarioPurlinRegions, scenarioPreviewAndProjectFiles, scenarioAllowlistsAndVibration,
+    scenarioK4aStatusAndRoles, scenarioK4aLoadsAndLedger, scenarioK4aConnectionLedger, scenarioK4aView];
   try {
     for (const s of scenarios) {
       const t = Date.now();

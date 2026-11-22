@@ -36,6 +36,7 @@ export const US_TO_SI = {
     lat_stiff: KIP_KN / (IN_M * IN_M),          // kip/in/in → kN/m/m (= kN/m²)
     spring_disc: KIP_KN / IN_M,                 // 이산 스프링 kip/in → kN/m
     rot_spring_disc: KIP_KN * IN_M,             // 이산 회전 스프링 kip·in/rad → kN·m/rad
+    force_per_length: KIP_KN / IN_M,            // 단위 길이당 힘 kip/in → kN/m (검토 항목 계약의 quantity)
 };
 
 export type UnitKey = keyof typeof US_TO_SI;
@@ -63,7 +64,37 @@ export const UNIT_LABEL: Record<UnitKey, { SI: string; US: string }> = {
     lat_stiff: { SI: 'kN/m/m', US: 'kip/in/in' },
     spring_disc: { SI: 'kN/m', US: 'kip/in' },
     rot_spring_disc: { SI: 'kN-m/rad', US: 'kip-in/rad' },
+    force_per_length: { SI: 'kN/m', US: 'kip/in' },
 };
+
+/**
+ * 검토 항목 계약(2026-11-23, docs/implementation/20261123-check-contract.md §3.2)의 `quantity` 어휘 → 단위 종류.
+ * `{symbol, value, quantity}` 꼴의 값은 키 이름이 아니라 이 표로 바꾼다(design_checks 의 소요 · 강도 · 단계 입력 · 결과 ·
+ * 반파장 · 위치 …). 엔진의 design.checks.QUANTITIES 와 같은 어휘여야 한다 — 시험(mcp_si_chain)이 엔진 표와 맞댄다.
+ * 표에 없는 quantity 는 바꾸지 않고 `si_unconverted` 로 돌려준다(조용히 섞이지 않게).
+ */
+export const QUANTITY_UNITS: Record<string, UnitKey | 'none'> = {
+    force: 'force',
+    moment: 'moment',
+    stress: 'stress',
+    length: 'length',
+    area: 'area',
+    section_modulus: 'modulus',
+    moment_of_inertia: 'inertia',
+    torsion_constant: 'inertia',
+    warping_constant: 'warping',
+    force_per_length: 'force_per_length',
+    rotational_stiffness: 'rot_stiff',
+    dimensionless: 'none',
+    angle: 'none',
+    count: 'none',
+};
+
+/** quantity 이름 → 단위 종류. 어휘에 없으면 undefined. */
+export function quantityUnit(quantity: unknown): UnitKey | 'none' | undefined {
+    return typeof quantity === 'string' && Object.prototype.hasOwnProperty.call(QUANTITY_UNITS, quantity)
+        ? QUANTITY_UNITS[quantity] : undefined;
+}
 
 /** 엔진 steps[].unit 문자열 → 단위 종류. '' · 'ea' 등 무차원은 null. */
 const STEP_UNIT: Record<string, UnitKey | null> = {
@@ -175,6 +206,39 @@ function convertStep(obj: any, ctx: Ctx): any {
     return out;
 }
 
+/**
+ * 검토 항목 계약의 물리량 `{symbol, value, quantity, …}` — `value` 를 `quantity` 로 바꾼다(키 이름과 무관).
+ * 안의 다른 키(source · rounded_to …)는 같은 규칙으로 걷되, `rounded_to`(엔진이 반올림한 자리)는 이 값의 단위로 —
+ * 예: 설계강도 0.001 kip 자리 → 0.0044482 kN. 어휘에 없는 quantity 는 값을 두고 경로를 알린다.
+ */
+function convertQuantity(obj: any, chain: Table[], path: string, ctx: Ctx): any {
+    const unit = quantityUnit(obj.quantity);
+    const inner: Table = { rounded_to: unit ?? 'none' };
+    const out: any = {};
+    for (const [k, v] of Object.entries(obj)) {
+        const p = path ? `${path}.${k}` : k;
+        if (k === 'value') {
+            if (typeof v === 'number' && unit !== undefined) {
+                out[k] = convNum(v, unit, ctx.dir);
+            } else {
+                if (typeof v === 'number' && ctx.dir === 'toSI') { ctx.unconverted.push(`${p} (unknown quantity '${String(obj.quantity)}')`); }
+                out[k] = v;
+            }
+            continue;
+        }
+        if (k === 'quantity' || k === 'symbol') { out[k] = v; continue; }
+        const here = [inner, ...chain];
+        const spec = lookup(here, k);
+        out[k] = spec !== undefined ? applySpec(v, spec, obj, here, p, ctx) : walk(v, here, p, ctx);
+    }
+    return out;
+}
+
+function isQuantity(value: any): boolean {
+    return typeof value.quantity === 'string' && Object.prototype.hasOwnProperty.call(value, 'value')
+        && typeof value.unit !== 'string';
+}
+
 function walk(value: any, chain: Table[], path: string, ctx: Ctx): any {
     if (Array.isArray(value)) {
         return value.map((x, i) => walk(x, chain, `${path}[${i}]`, ctx));
@@ -183,6 +247,7 @@ function walk(value: any, chain: Table[], path: string, ctx: Ctx): any {
         if (typeof value === 'number' && ctx.dir === 'toSI') { ctx.unconverted.push(path || '(root)'); }
         return value;
     }
+    if (isQuantity(value)) { return convertQuantity(value, chain, path, ctx); }
     let src = value;
     if (ctx.dir === 'toSI' && typeof value.unit === 'string' && 'value' in value) {
         src = convertStep(value, ctx);
@@ -224,7 +289,12 @@ export const TEXT_UNITS_NOTE =
     'units=SI: every numeric field above is SI (mm, mm^2, mm^3, mm^4, mm^6, MPa, kN, kN-m, m, kN/m, kg/m^3). ' +
     'Free text written by the engine (report, steps[].formula, warnings, assumptions, scope_notes, notes, labels, ' +
     'error messages) is in US customary units (in, kips, kip-in, kip-ft, ksi, ft, plf) and was NOT converted; ' +
-    'objects marked units:"US" were also left in US units. Quote engine text with its US units.';
+    'objects marked units:"US" were also left in US units. Quote engine text with its US units. ' +
+    'Values tagged with a `quantity` (design_checks: demand, nominal, capacity, steps[].inputs / result, locations) ' +
+    'were converted by that quantity: force kN, moment kN-m, stress MPa, length mm, area mm^2, section_modulus mm^3, ' +
+    'moment_of_inertia and torsion_constant mm^4, warping_constant mm^6, force_per_length kN/m, ' +
+    'rotational_stiffness kN-m/rad/m; dimensionless, angle (deg) and count are unchanged. ' +
+    'steps[].expr and steps[].condition are unit-free symbolic text.';
 
 // ============================================================
 // 출력 표 — 엔진 결과 키 → 단위 (test/webview/mcp_si_chain.js 가 실제 엔진 출력의 모든 수치 키를 대조)
@@ -246,8 +316,24 @@ const NONE_KEYS = [
     'curve_length', 'lengths_analyzed', 'm_terms_max', 'n_minima_found',
 ];
 
+/**
+ * 검토 항목 계약의 항목 하나(design_checks[*]). 물리량은 `{symbol, value, quantity}` 꼴이라 walk 가 quantity 로 바꾸고
+ * (convertQuantity), 여기에는 quantity 가 붙지 않은 수만 둔다: 비(ratio) · 계수(factor.value, φ 또는 Ω) ·
+ * 옛 결과와 맞대는 자릿수(mirrors.*.digits) · 단계의 반올림 자리(steps[].rounded_to — 그 단계 결과의 단위).
+ */
+const DESIGN_CHECK: Table = {
+    ratio: 'none',
+    factor: { value: 'none' },
+    reference: { ratio: 'none' },
+    mirrors: { '*': { digits: 'none' } },
+    steps: {
+        rounded_to: (_v: any, step: any) => quantityUnit(step?.result?.quantity) ?? 'none',
+    },
+};
+
 /** 부재 설계(design_member) · 단면 성질 · cutwp · DSM 의 공통 키. */
 const MEMBER_KEYS: Table = {
+    design_checks: DESIGN_CHECK,
     ...Object.fromEntries(NONE_KEYS.map((k) => [k, 'none' as const])),
     // 힘 kips
     ...Object.fromEntries(['Pn', 'Pne', 'Pnl', 'Pnd', 'Py', 'Pn_omega', 'phi_Pn', 'Pu', 'Pa', 'Pc',
@@ -297,6 +383,8 @@ const MEMBER_KEYS: Table = {
     h3_interaction: { P_term: 'none', M_term: 'none', limit: 'none' },
     // 엔진이 US 라벨과 함께 내는 조건표 — 값은 라벨의 US 단위 그대로 둔다
     conditions: 'keepUS',
+    // 엔진이 표시용으로 반올림한 키와 그 소수 자리(2026-11-23) — US 값의 자리라 SI 에서는 그대로 두고 US 라고 밝힌다
+    display_rounding: 'keepUS',
     units: 'none',
 };
 

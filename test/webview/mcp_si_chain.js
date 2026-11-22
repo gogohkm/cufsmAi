@@ -12,7 +12,7 @@
 //   - VS Code 안의 웹뷰 렌더 · 확장 활성화(extension.ts) · 등록 파일 쓰기 · 미리보기 PNG 왕복.
 //
 // 검사
-//   1. 도구 59 개의 이름이 공개 계약과 같다.
+//   1. 도구 61 개의 이름이 공개 계약과 같다(K4a: get_view · focus 를 더했다).
 //   2. units 를 받는 도구의 수치 인자는 모두 SI 입력 표나 무차원 목록에 있다(중첩 포함).
 //   3. 인자 이름 = 파이썬 이름(엔진 서명 · _KNOWN_KEYS · design_member 의 params.get 키).
 //   3b. 호스트 ↔ 스키마(V4-05): StcfsdPanel.handleMcpAction 의 각 action 이 받는 인자를 소스에서 뽑아,
@@ -25,6 +25,11 @@
 //      또는 무차원 그대로, 모르는 수치 키 없음, 판정 같음, 핵심 키는 기대 단위로 확인.
 //   8. design_purlin: MCP 결과 = 같은 인자로 패널 함수를 직접 부른 결과(GUI 와 같은 길), 웹 크리플링 평가됨(V4-05),
 //      SI 묶음 응답 전체 변환(V4-16). generate_report · validate_design 도 같은 비교.
+//   9. K4a 검토 항목 계약(design_checks): 7 · 8 의 모든 비교에서 design_checks 안의 물리량 {value, quantity} 마다
+//      SI = US × 그 quantity 의 정의 계수(무차원 · 각도 · 개수는 그대로), rounded_to 는 그 값의 단위로, ratio · factor ·
+//      digits 는 그대로. quantity 어휘는 엔진 표(python/design/checks.py QUANTITIES)와 siUnits 의 표가 같고, 어휘의 모든
+//      종류가 한 번 이상 지난다(실제 엔진 출력에 없는 종류는 같은 변환기에 합성 항목으로). 모르는 quantity 는 si_unconverted
+//      로 드러난다(조용히 지나가지 않는다). 퍼린 구간: 검토 지점마다의 design_checks · 위치(x) · 조합.
 // Python 환경이 없으면(.venv 없음 — CI 의 ts 작업) 3 · 6 · 7 · 8 을 건너뛰고 그렇게 출력한다.
 // STCFSD_REQUIRE_PY=1 이면 건너뛰지 않고 실패한다.
 const assert = require('assert');
@@ -51,7 +56,7 @@ const F = {
 };
 const FACTORS = Object.values(F);
 
-const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_design_compression',
+const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_design_compression', 'focus', 'get_view',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
   'check_shear_lag', 'classify_modes', 'cold_work', 'custom_section_guide', 'delete_element', 'delete_node',
@@ -83,6 +88,7 @@ const ACTION_TOOLS = {
   check_lap_length: ['check_lap_length'], shear_lag: ['check_shear_lag'], block_shear: ['check_block_shear'],
   cold_work: ['cold_work'], flange_curling: ['flange_curling'], steel_grades: ['steel_grades'],
   lap_connection: ['design_lap_connection'], design_connection: ['design_connection', 'aisi_design_connection'],
+  get_view: ['get_view'], focus: ['focus'],
 };
 
 // 호스트는 받지만 MCP 도구가 일부러 내놓지 않는 인자 — 까닭과 함께(검사 3b-a 의 예외)
@@ -106,6 +112,7 @@ const HOST_ONLY = {
     distortional_not_applicable: '호스트 퍼린 랩 구간 전용 내부 플래그', _auto_error: '엔진 내부',
   },
   design_connection: { member_type: '도구가 정한다', props: '접합에 쓰지 않음', dsm: '같음', section: '같음' },
+  report_view: { '*': '화면이 자기 보기를 알리는 길(K4a view contract) — AI 도구가 아니다(AI 는 get_view 로 읽는다)' },
 };
 
 function transpile(outDir) {
@@ -242,6 +249,89 @@ function comparePhysical(tool, us, siR, spot) {
   }
   assert.deepStrictEqual(siR.pass, us.pass, `${tool}: verdict changed with units`);
   return converted;
+}
+
+// ------------------------------------------------------------------ K4a: design_checks 의 물리량
+// 엔진의 quantity 어휘(python/design/checks.py QUANTITIES 의 US 단위 글) → 이 시험의 정의 계수(F) 이름. 'none' = 그대로.
+const ENGINE_UNIT_F = {
+  'kip': 'force', 'kip-in': 'moment', 'ksi': 'stress', 'in': 'length', 'in^2': 'area', 'in^3': 'modulus',
+  'in^4': 'inertia', 'in^6': 'warping', 'kip/in': 'spring_disc', 'kip-in/rad/in': 'rot_stiff', '-': 'none', 'deg': 'none',
+};
+/** 엔진 소스에서 읽은 quantity → F 이름 (main 에서 채운다) */
+const QUNIT = {};
+function engineQuantities() {
+  const src = fs.readFileSync(path.join(ROOT, 'python', 'design', 'checks.py'), 'utf8');
+  const m = src.match(/^QUANTITIES = \{([\s\S]*?)\n\}/m);
+  assert(m, 'design.checks.QUANTITIES not found');
+  const out = {};
+  for (const x of m[1].matchAll(/'([a-z_]+)':\s*'([^']*)'/g)) { out[x[1]] = x[2]; }
+  assert(Object.keys(out).length >= 10, 'QUANTITIES parsed');
+  return out;
+}
+const qFactor = (q) => {
+  assert(Object.prototype.hasOwnProperty.call(QUNIT, q), `quantity '${q}' is not in the engine vocabulary`);
+  return QUNIT[q] === 'none' ? 1 : F[QUNIT[q]];
+};
+const sameScaled = (us, si, f) => (us === 0 ? si === 0 : Math.abs(si / (us * f) - 1) < 1e-12);
+// quantity 가 붙지 않은 design_checks 안의 수: 키 → 계수 이름('none' = 그대로). 그 밖의 수가 나오면 실패한다.
+const DC_PLAIN = { ratio: 'none', digits: 'none', step: 'none', Cb: 'none', span: 'none', support: 'none', Lb: 'length' };
+
+/**
+ * US · SI 결과의 모든 design_checks 를 맞댄다: {value, quantity} 의 value = US × qFactor(quantity),
+ * rounded_to 는 그 값(quantity 객체 안) 또는 그 단계 결과의 단위로, factor.value · ratio · digits 는 그대로.
+ * seen 에 지난 quantity 를 센다. 돌려주는 값: 맞댄 수의 개수.
+ */
+function checkDesignChecks(tool, us, si, seen) {
+  let n = 0;
+  let lists = 0;
+  const leaf = (p, u, s, f) => {
+    assert(typeof s === 'number', `${tool}: ${p} lost in SI`);
+    assert(sameScaled(u, s, f), `${tool}: ${p} US ${u} → SI ${s} (expected × ${f})`);
+    n++;
+  };
+  const dc = (u, s, p, ctxQ, inFactor) => {
+    if (Array.isArray(u)) { u.forEach((x, i) => dc(x, s[i], `${p}[${i}]`, ctxQ, inFactor)); return; }
+    if (!u || typeof u !== 'object') { return; }
+    const isQ = typeof u.quantity === 'string' && 'value' in u;
+    const q = isQ ? u.quantity : ctxQ;
+    if (isQ && typeof u.value === 'number') {
+      leaf(`${p}.value`, u.value, s.value, qFactor(u.quantity));
+      seen.set(u.quantity, (seen.get(u.quantity) || 0) + 1);
+    }
+    for (const [k, v] of Object.entries(u)) {
+      const kp = `${p}.${k}`;
+      if (isQ && k === 'value') { continue; }
+      if (typeof v === 'number') {
+        if (k === 'rounded_to') {
+          const rq = isQ || ctxQ ? q : (u.result && u.result.quantity);
+          assert(typeof rq === 'string', `${tool}: ${kp} has no quantity to scale with`);
+          leaf(kp, v, s[k], qFactor(rq));
+        } else if (k === 'value' && inFactor) {
+          leaf(kp, v, s[k], 1);
+        } else {
+          assert(Object.prototype.hasOwnProperty.call(DC_PLAIN, k), `${tool}: ${kp} = ${v} is a number in design_checks with no quantity and no rule`);
+          leaf(kp, v, s[k], DC_PLAIN[k] === 'none' ? 1 : F[DC_PLAIN[k]]);
+        }
+      } else if (v && typeof v === 'object') {
+        assert(s && s[k] !== undefined, `${tool}: ${kp} lost in SI`);
+        dc(v, s[k], kp, isQ ? u.quantity : ctxQ, k === 'factor');
+      }
+    }
+  };
+  const find = (u, s, p) => {
+    if (Array.isArray(u)) { u.forEach((x, i) => find(x, s && s[i], `${p}[${i}]`)); return; }
+    if (!u || typeof u !== 'object') { return; }
+    for (const [k, v] of Object.entries(u)) {
+      const kp = p ? `${p}.${k}` : k;
+      if (k === 'design_checks' && Array.isArray(v)) {
+        assert(s && Array.isArray(s[k]) && s[k].length === v.length, `${tool}: ${kp} differs in SI`);
+        lists++;
+        dc(v, s[k], kp, null, false);
+      } else if (v && typeof v === 'object') { find(v, s && s[k], kp); }
+    }
+  };
+  find(us, si, '');
+  return { n, lists };
 }
 
 function toSIArgs(args, spec) {
@@ -382,6 +472,14 @@ async function main() {
     engineKeys.lap_connection = [...new Set([...lapSrc.matchAll(/params\.get\('([A-Za-z_0-9]+)'/g)].map((m) => m[1])
       .concat(['Pnvs', 'Fub', 'bolt_grade', 'threads_excluded', 'mf', 'hole_type']))];
     engineKeys.aisi_guide = ['query_type'];
+    // K4a: 엔진이 모든 설계 dict 에서 받는 꼬리표(design.checks.CONTEXT_KEYS — 접합은 _KNOWN_KEYS 밖에서 따로 받는다)
+    const checksSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'checks.py'), 'utf8');
+    const ctxMatch = checksSrc.match(/^CONTEXT_KEYS = \(([^)]*)\)/m);
+    assert(ctxMatch, 'design.checks.CONTEXT_KEYS not found');
+    const contextKeys = [...ctxMatch[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    assert.deepStrictEqual(contextKeys.sort(), ['check_combination', 'check_location'], 'engine context keys');
+    engineKeys.aisi_design.push(...contextKeys);
+    engineKeys.lap_connection.push(...contextKeys);
     let sigs = null;
     if (py) {
       sigs = JSON.parse(cp.execFileSync(py, ['-c', [
@@ -396,7 +494,7 @@ async function main() {
         'out = {k: list(inspect.signature(v).parameters) for k, v in f.items()}',
         'out["_connection"] = sorted(c._KNOWN_KEYS)',
         'print(json.dumps(out))'].join('\n')], { encoding: 'utf8' }));
-      engineKeys.design_connection = sigs._connection;
+      engineKeys.design_connection = [...sigs._connection, ...contextKeys];
       for (const [tool, names] of Object.entries(sigs)) {
         if (tool.startsWith('_')) { continue; }
         // analyze_loads 의 Fy · Fu 는 호스트가 모델에서 section 을 만들 때만 쓰는 호스트 인자(엔진에 직접 가지 않음)
@@ -404,7 +502,7 @@ async function main() {
         for (const k of props(tool)) { assert(names.includes(k) || hostArgs.includes(k), `${tool}.${k} is not a parameter of the engine function`); }
       }
       for (const tool of ['aisi_design_connection', 'design_connection']) {
-        for (const k of props(tool)) { assert(sigs._connection.includes(k), `${tool}.${k} is not a design_connection key`); }
+        for (const k of props(tool)) { assert(engineKeys.design_connection.includes(k), `${tool}.${k} is not a design_connection key`); }
       }
     }
     for (const tool of ['aisi_design_compression', 'aisi_design_flexure', 'aisi_design_combined', 'aisi_design_tension']) {
@@ -507,8 +605,60 @@ async function main() {
     await exact('validate_design', {}, { action: 'validate_design' });
     await exact('set_material', { E: 29500, v: 0.3 }, { action: 'set_material', E: 29500, v: 0.3 });
     await exact('run_analysis', {}, { action: 'run_analysis' });
+    // K4a: 보기 도구 — 본문은 준 것뿐(단위 변환 없음)
+    await exact('get_view', {}, { action: 'get_view' });
+    await exact('focus', { item: { kind: 'check', scope: 'purlin', id: 'member.flexure.distortional',
+      location: { region: 'negative-2', check_point: 'support 2' } }, reason: 'governs' },
+    { action: 'focus', item: { kind: 'check', scope: 'purlin', id: 'member.flexure.distortional',
+      location: { region: 'negative-2', check_point: 'support 2' } }, reason: 'governs' });
+    const badFocus = await call('focus', { item: { kind: 'nonsense', id: 'x' } });
+    assert(badFocus.isError && badFocus.body === undefined, 'focus item kind is checked by the schema');
     const missingFy = await call('aisi_design_compression', { KxLx: 120, KyLy: 60 });
     assert(missingFy.isError && missingFy.body === undefined, 'Fy is required by the schema (no 35.53)');
+
+    // 9a. K4a quantity 어휘: 엔진 표 = siUnits 표, 계수 = 정의값(이 시험의 F) — 파이썬 없이 소스에서 ---------------
+    const engineQ = engineQuantities();
+    assert.deepStrictEqual(Object.keys(si.QUANTITY_UNITS).sort(), Object.keys(engineQ).sort(),
+      'siUnits QUANTITY_UNITS covers exactly the engine quantity vocabulary (design.checks.QUANTITIES)');
+    for (const [q, unitText] of Object.entries(engineQ)) {
+      assert(Object.prototype.hasOwnProperty.call(ENGINE_UNIT_F, unitText), `engine unit '${unitText}' of quantity ${q} has no defined factor in this test`);
+      QUNIT[q] = ENGINE_UNIT_F[unitText];
+      const tsUnit = si.QUANTITY_UNITS[q];
+      const tsFactor = tsUnit === 'none' ? 1 : si.US_TO_SI[tsUnit];
+      assert(Math.abs(tsFactor / qFactor(q) - 1) < 1e-12, `quantity ${q} (${unitText}): siUnits factor ${tsFactor} ≠ defined ${qFactor(q)}`);
+    }
+    // 같은 변환기(SI_OUT_MEMBER)에 어휘의 모든 종류를 지나게 한다 — 실제 엔진 출력에 아직 없는 종류도(아래 9c 에 보고).
+    const synth = { design_checks: Object.keys(engineQ).map((q, i) => ({
+      id: `synthetic.${q}`, ratio: 0.5, factor: { symbol: 'φ', value: 0.9, kind: 'phi', source: { kind: 'specification' } },
+      demand: { symbol: 'Q', value: 1.25 + i, quantity: q, source: { kind: 'user_input', key: 'Q' } },
+      capacity: { symbol: 'Qc', value: 2.5 + i, quantity: q },
+      reference: { capacity: { symbol: 'Qr', value: 3.5 + i, quantity: q }, ratio: 0.4 },
+      location: { region: 'r', x: { symbol: 'x', value: 12.5, quantity: 'length' } },
+      mirrors: { capacity: { path: 'Qc', digits: 3 } },
+      steps: [{ kind: 'design_strength', expr: 'Qc = φ Q', equation: null, rounded_to: 0.001,
+        inputs: [{ symbol: 'Q', value: 1.25 + i, quantity: q, source: { kind: 'step', step: 0, rounded_to: 0.01,
+          half_wavelength: { symbol: 'L', value: 25, quantity: 'length' } } }],
+        result: { symbol: 'Qc', value: 2.5 + i, quantity: q } }],
+    })) };
+    const synthOut = si.convertOutputSIDeep(JSON.parse(JSON.stringify(synth)), si.SI_OUT_MEMBER);
+    assert.deepStrictEqual(synthOut.unconverted, [], `synthetic design_checks: ${JSON.stringify(synthOut.unconverted)}`);
+    const SYNTH_SEEN = new Map();
+    const synthCount = checkDesignChecks('synthetic design_checks', synth, synthOut.value, SYNTH_SEEN);
+    assert.deepStrictEqual([...SYNTH_SEEN.keys()].sort(), Object.keys(engineQ).sort(), 'every quantity kind passes the converter');
+    // 모르는 quantity: 값은 그대로 두고 si_unconverted 로 드러난다(조용히 지나가지 않는다).
+    const bogus = si.convertOutputSIDeep({ design_checks: [{ id: 'x', ratio: 0.1,
+      demand: { symbol: 'Q', value: 3, quantity: 'bogus_kind' } }] }, si.SI_OUT_MEMBER);
+    assert.strictEqual(bogus.value.design_checks[0].demand.value, 3, 'unknown quantity: value left as the engine gave it');
+    assert(bogus.unconverted.some((u) => /design_checks\[0\]\.demand\.value/.test(u) && /bogus_kind/.test(u)),
+      `unknown quantity is reported: ${JSON.stringify(bogus.unconverted)}`);
+    assert.throws(() => checkDesignChecks('bogus', { design_checks: [{ demand: { value: 3, quantity: 'bogus_kind' } }] },
+      bogus.value, new Map()), /not in the engine vocabulary/, 'the comparison itself rejects an unknown quantity');
+    // 입력(check_location)도 같은 규칙: SI 의 {value, quantity} → US (12.7 mm → 정확히 0.5 in), 나머지는 그대로.
+    const inLoc = si.convertInputSI({ check_location: { member: 'P1', n: 3, x: { symbol: 'x', value: 12.7, quantity: 'length' } } },
+      si.SI_INPUT_TABLES.aisi_design_flexure);
+    assert.deepStrictEqual(inLoc.check_location, { member: 'P1', n: 3, x: { symbol: 'x', value: 0.5, quantity: 'length' } },
+      'check_location {value, quantity} converted to US exactly, plain values untouched');
+    results.push(`quantity vocabulary: ${Object.keys(engineQ).length} kinds = engine; synthetic pass ${synthCount.n} values; unknown quantity reported`);
 
     // ------------------------------------------------------------------ 실제 패널이 필요한 부분
     if (!py) {
@@ -538,6 +688,15 @@ async function main() {
     await ok('set_lengths', { min: 1, max: 1000, n: 25 });
     await ok('set_load_case', { load_case: 'compression', fy: 50 });
     await ok('run_analysis', { neigs: 6 });
+    // K4a: 상태 · 보기 도구가 실제 패널에 닿는다(화면이 알린 것이 없으면 그렇게 말하고, 실패하지 않는다)
+    const gs = await ok('get_status', {});
+    assert(gs.section_template === 'lippedc' && gs.section_params.H === 8 && gs.neigs === 6 && gs.analysis_load_family === 'P'
+      && Array.isArray(gs.element_roles) && gs.element_roles.length === gs.nelems && Array.isArray(gs.invalidated),
+    `get_status K4a fields: ${JSON.stringify(gs).slice(0, 300)}`);
+    const gv = await ok('get_view', {});
+    assert(gv.current === null && Array.isArray(gv.screens), 'get_view with no screen report');
+    const fo = await ok('focus', { item: { kind: 'model', id: 'section' }, reason: 'look' });
+    assert(fo.screen_moved === null && typeof fo.note === 'string' && !/moved to/.test(fo.note), 'focus reply never claims the screen moved');
 
     // 7. US / SI (실제 패널) ----------------------------------------------------------
     const usVsSi = async (tool, usArgs, siSpec, spot, extra = {}) => {
@@ -547,11 +706,14 @@ async function main() {
       assert(!b.isError, `${tool} SI: ${JSON.stringify(b.data).slice(0, 400)}`);
       assert.deepStrictEqual(b.body, a.body, `${tool}: SI input must reach the panel as the identical US values`);
       const n = comparePhysical(tool, a.data, b.data, spot);
+      const dcs = checkDesignChecks(tool, a.data, b.data, QTY_SEEN);
       if (extra.check) { extra.check(a.data, b.data); }
-      results.push(`${tool}: ${n} numeric fields converted, verdict ${JSON.stringify(a.data.pass)} = ${JSON.stringify(b.data.pass)}`);
+      results.push(`${tool}: ${n} numeric fields converted, verdict ${JSON.stringify(a.data.pass)} = ${JSON.stringify(b.data.pass)}`
+        + (dcs.lists ? `; design_checks ${dcs.lists} lists, ${dcs.n} values by quantity` : ''));
       return [a.data, b.data];
     };
     const L = 'length'; const S = 'stress'; const Fo = 'force'; const M = 'moment'; const A = 'area';
+    const QTY_SEEN = new Map();
     await usVsSi('aisi_design_compression', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Pu: 5 },
       { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Pu: Fo },
       { Pn: Fo, design_strength: Fo, Py: Fo, 'steps[0].value': Fo, utilization: 'none' },
@@ -626,11 +788,26 @@ async function main() {
     await ok('set_load_case', { load_case: 'bending_xx_pos', fy: 50 });
     await ok('run_analysis', { neigs: 6 });
     await usVsSi('aisi_design_flexure', { Fy: 50, Fu: 65, Lb: 60, Cb: 1.0, Mu: 50, Vu: 2, wc_N: 3.5, wc_R: 0.1875,
-      wc_support: 'EOF', Lb_pos: 30, Mu_pos: 20, Cb_pos: 1.1, dist_Lm: 24 },
-    { Fy: S, Fu: S, Lb: L, Mu: M, Vu: Fo, wc_N: L, wc_R: L, Lb_pos: L, Mu_pos: M, dist_Lm: L },
+      wc_support: 'EOF', Lb_pos: 30, Mu_pos: 20, Cb_pos: 1.1, dist_Lm: 24,
+      check_location: { member: 'P1', x: { symbol: 'x', value: 60, quantity: 'length' } }, check_combination: '6a' },
+    { Fy: S, Fu: S, Lb: L, Mu: M, Vu: Fo, wc_N: L, wc_R: L, Lb_pos: L, Mu_pos: M, dist_Lm: L,
+      check_location: { x: { value: L } } },
     { Mn: M, phi_Mn: M, My: M, design_strength: M, 'positive_region.Mn': M, 'positive_region.Lb': L, 'shear.Vn': Fo,
       'Fcre_detail.Lb': L, 'Fcre_detail.Sf': 'modulus', 'Fcre_detail.J': 'inertia', 'Fcre_detail.Cw': 'warping',
-      'Fcre_detail.sigma_ey': S, Fy_used: S, 'shear_interaction.total': 'none', 'web_crippling.Pn': Fo });
+      'Fcre_detail.sigma_ey': S, Fy_used: S, 'shear_interaction.total': 'none', 'web_crippling.Pn': Fo },
+    { check: (u, s) => {
+      // K4a: check_location · check_combination — 값을 바꾸지 않고 모든 항목에 붙는다(엔진이 자기 위치를 준 정모멘트 구간 항목은 그 위치)
+      assert(Array.isArray(u.design_checks) && u.design_checks.length >= 5, 'flexure result lists design_checks');
+      for (const [i, c] of s.design_checks.entries()) {
+        assert.strictEqual(c.combination, '6a', `design_checks[${i}].combination`);
+        if (c.location && c.location.segment) { continue; }
+        assert.strictEqual(c.location.member, 'P1', `design_checks[${i}].location carried`);
+        assert(Math.abs(c.location.x.value - 1524) < 1e-9, 'location.x back in mm (60 in)');
+        assert.strictEqual(u.design_checks[i].location.x.value, 60, 'location.x in US (in)');
+      }
+      assert(u.design_checks.some((c) => c.demand && c.demand.source && c.demand.source.kind === 'load_analysis'),
+        'check_combination marks the demands as coming from the load analysis');
+    } });
     await usVsSi('aisi_design_combined', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Lb: 60, Pu: 3, Mux: 30,
       Muy: 2, May_strength: 20, Vu: 1, Cmx: 0.85, Cmy: 1.0 },
     { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Lb: L, Pu: Fo, Mux: M, Muy: M, May_strength: M, Vu: Fo },
@@ -664,6 +841,36 @@ async function main() {
     // 같은 구간의 M 은 하중 해석의 kip-ft × 12 (설계 입력 kip-in) — 단위 뜻을 엔진 값으로 확인
     assert(rg.Mu > 0 && Math.abs(rg.result.checks[0].Mu - (rg.kind === 'lap' ? 0.5 : 1) * rg.Mu) < 1e-9 * rg.Mu,
       'purlin M_max check uses the region Mu (kip-in)');
+    // K4a: 구간마다 검토 지점(M_max · V_max · 지점)의 design_checks · 위치 · 조합 — 지배 지점은 그대로
+    let multiPoint = 0; let lapNotes = 0;
+    for (const [i, g] of pUS.regions.entries()) {
+      const cks = g.result.checks;
+      assert(Array.isArray(cks) && cks.length >= 1, `region ${g.id}: checks`);
+      if (cks.length > 1) { multiPoint++; }
+      for (const [j, c] of cks.entries()) {
+        const at = `regions[${i}].result.checks[${j}]`;
+        assert(Array.isArray(c.design_checks) && (c.error || c.design_checks.length > 0), `${at}.design_checks`);
+        assert.strictEqual(c.location.region, g.id, `${at}.location.region`);
+        assert.strictEqual(c.location.check_point, c.check_point, `${at}.location.check_point`);
+        assert.strictEqual(c.combination, g.combo ?? null, `${at}.combination = the region combination`);
+        assert(c.location.x && c.location.x.quantity === 'length', `${at}.location.x`);
+        const xin = c.location.x.value;
+        assert(xin >= g.start_ft * 12 - 1e-6 && xin <= g.end_ft * 12 + 1e-6, `${at}: x ${xin} in lies in the region ${g.start_ft}–${g.end_ft} ft`);
+        assert(sameScaled(xin, pSI.regions[i].result.checks[j].location.x.value, F.length), `${at}.location.x in mm`);
+        for (const item of c.design_checks) {
+          assert.strictEqual(item.combination, c.combination, `${at}: item ${item.id} combination`);
+          if (!(item.location && item.location.segment)) { assert.deepStrictEqual(item.location, c.location, `${at}: item ${item.id} location`); }
+        }
+        if (g.members === 2) { assert(/half of the region Mu and Vu/.test(c.host_assumption), `${at}: lap host assumption`); lapNotes++; }
+        else { assert.strictEqual(c.host_assumption, undefined, `${at}: no lap note outside laps`); }
+      }
+      const governing = cks.find((c) => c.check_point === g.result.check_point);
+      assert(governing, `region ${g.id}: governing check point is one of its checks`);
+      assert.deepStrictEqual(g.result.design_checks, governing.design_checks, `region ${g.id}: region design_checks = its governing point's`);
+    }
+    assert(multiPoint > 0, 'some purlin region has more than one check point (V_max or a support)');
+    assert(lapNotes > 0, 'a lap region carries the host lap assumption on its check points');
+    results.push(`design_purlin: ${pUS.regions.length} regions, ${multiPoint} with several check points — design_checks · x · combination per point`);
     const direct = JSON.parse(JSON.stringify(await real.panel.handleMcpAction({ action: 'design_purlin', ...purlinArgs })));
     const { units: _u, ...pUSnoUnits } = pUS;
     void _u;
@@ -753,6 +960,11 @@ async function main() {
       { 'rho_used.100': 'density', 'lengths[1]': 'length', 'size.n_lengths': 'none' },
       { check: (u, s) => assert.deepStrictEqual(s.frequencies, u.frequencies, 'Hz unchanged') });
 
+    // 9c. 실제 엔진 출력이 지난 quantity 종류(나머지는 9a 의 합성 항목으로만 — 엔진이 아직 내지 않는다)
+    const realKinds = [...QTY_SEEN.keys()].sort();
+    const synthOnly = Object.keys(engineQ).filter((q) => !QTY_SEEN.has(q)).sort();
+    assert(realKinds.length >= 8, `real engine output exercised ${realKinds.length} quantity kinds`);
+    results.push(`design_checks quantities from the real engine: ${realKinds.join(', ')}; synthetic only: ${synthOnly.join(', ') || '-'}`);
     for (const line of results) { console.log(`  ${line}`); }
     console.log(`mcp_si_chain: PASS (${results.length} US/SI comparisons through MCP → bridge → real StcfsdPanel → Python)`);
   } finally {

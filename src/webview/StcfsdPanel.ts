@@ -13,7 +13,10 @@ import * as fs from 'fs';
 import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
 import { McpPanelInterface } from '../mcp/bridge';
-import { StcfsdModel, WebviewToExtMessage, createDefaultModel } from '../models/types';
+import {
+    StcfsdModel, WebviewToExtMessage, createDefaultModel,
+    LedgerEntry, LedgerKind, ViewItem, ViewReport, FocusRecord,
+} from '../models/types';
 import { defaultSteel, mpaField, steelGradeOptionsHtml } from './steelGrades';
 
 function isTestMode(): boolean {
@@ -48,6 +51,21 @@ export class StcfsdPanel implements McpPanelInterface {
     private _testPostedMessages: Array<{ command: string; data: any }> = [];
     private _bucklingReportPanel?: vscode.WebviewPanel;
     private _bucklingReportHtml = '';
+    // K4a: 결과가 만들어진 시각(상태 · 장부), 마지막 하중 분석의 입력(바뀌었는지 보려고), 접합 · 랩 결과(호스트가 기억한다).
+    private _lastLoadAnalysisAt: string | null = null;
+    private _lastLoadRequest: string | null = null;
+    private _lastDesignAt: string | null = null;
+    private _preparedDesignDsmAt: string | null = null;
+    private _lastConnection: { id: string; at: string; request: any; result: any } | null = null;
+    private _connectionSeq = 0;
+    private _lastLap: { at: string | null; request: any; result: any } | null = null;
+    // K4a: 무효가 된 결과의 장부 — 결과 종류(접합은 결과마다)별 한 줄. 그 종류의 새 결과가 오면 지운다.
+    private _ledger = new Map<string, LedgerEntry>();
+    // K4a: 화면이 알린 보기(화면마다 마지막 하나)와 AI 의 마지막 「여기를 보세요」(docs/implementation/20261123-view-contract.md).
+    private _views = new Map<string, ViewReport>();
+    private _lastFocus: FocusRecord | null = null;
+    private _focusSeq = 0;
+    private _pageLoadAnalysis = false;
 
     public static createOrShow(
         extensionUri: vscode.Uri,
@@ -274,18 +292,22 @@ export class StcfsdPanel implements McpPanelInterface {
                 await this._getProperties(message.data);
                 break;
 
-            case 'updateModel':
+            case 'updateModel': {
+                const geometryEdited = this._geometryDiffers(message.data);
                 this._model = { ...this._model, ...message.data };
-                this._invalidateAnalysisState('Model updated', true);
+                if (geometryEdited) { this._markGeometryEdited(); }
+                this._invalidateAnalysisState('Model updated', true, { message: 'updateModel' });
                 this._updateTreeView();
                 break;
+            }
 
             case 'invalidateDerivedResults':
-                this._derivedInputRevision++;
-                if (message.data?.scope === 'load') {
-                    this._lastLoadAnalysis = null;
-                }
-                this._lastDesignResult = null;
+                this._invalidateDerived(message.data?.scope);
+                break;
+
+            case 'viewReport':
+                // K4a: 화면이 지금 보는 것을 알린다(docs/implementation/20261123-view-contract.md). 모델을 바꾸지 않는다.
+                this._recordView(message.data);
                 break;
 
             case 'saveProject':
@@ -380,8 +402,11 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'analyzeLoads':
                 try {
+                    // K4a: 화면에서 돌린 하중 분석 — 입력이 바뀌었다는 것은 화면이 이미 알렸다(invalidateDerivedResults).
+                    this._pageLoadAnalysis = true;
                     const loadResult = await this.handleMcpAction({ action: 'analyze_loads', ...message.data });
-                    this._postMessage('loadAnalysisComplete', loadResult);
+                    // K4a: 성공한 결과는 handleMcpAction 이 보낸다(MCP 와 같은 한 번). 엔진 오류 결과는 전처럼 여기서.
+                    if (!loadResult || loadResult.error) { this._postMessage('loadAnalysisComplete', loadResult); }
                 } catch (e: any) {
                     this._postMessage('loadAnalysisComplete', { error: e.message || String(e) });
                 }
@@ -436,7 +461,7 @@ export class StcfsdPanel implements McpPanelInterface {
      */
     private async _performAnalysis(): Promise<{ result: any; dsm: any; dsmError?: string; warnings: string[] }> {
         this._postMessage('analysisStarted', null);
-        this._invalidateAnalysisState('New analysis started');
+        this._invalidateAnalysisState('New analysis started', false, { action: 'run_analysis' });
         const snapshot = this._cloneModel(this._model);
         const signature = this._modelSignature(snapshot);
         const loadType = (snapshot as any).loadCase || 'unknown';
@@ -515,6 +540,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
         // 재료
         const mat = prop.length > 0 ? prop[0] : [100, 29500, 29500, 0.3, 0.3, 11300];
+        const m = this._model as any;
 
         return {
             nnodes: node.length,
@@ -544,6 +570,21 @@ export class StcfsdPanel implements McpPanelInterface {
             // 스프링/구속
             nsprings: ((this._model as any).springs || []).length,
             nconstraints: ((this._model as any).constraints || []).length,
+            // K4a: 단면을 만든 템플릿과 그 치수(모델에 둔 US 값 — in, 각도 deg), 요소 자리, 하중 경우 · 기준응력,
+            // 고유치 수, 지금 해석의 하중 계열, 남은 결과와 무효 장부. 화면이 웹뷰 메시지에서 골라 읽지 않게.
+            units: 'US',
+            section_template: m.sectionTemplate ?? null,
+            section_type: m.sectionType ?? null,
+            section_params: m.sectionParams && typeof m.sectionParams === 'object'
+                ? JSON.parse(JSON.stringify(m.sectionParams)) : null,
+            section_edited: m.sectionEdited === true,
+            element_roles: Array.isArray(m.elementRoles) ? [...m.elementRoles] : null,
+            load_case: m.loadCase ?? null,
+            load_fy: typeof m.loadFy === 'number' && Number.isFinite(m.loadFy) ? m.loadFy : null,
+            neigs: typeof this._model.neigs === 'number' ? this._model.neigs : null,
+            analysis_load_family: this._isAnalysisCurrent() ? (this._lastAnalysisResult?._meta?.load_family ?? null) : null,
+            results: this._resultsStatus(),
+            invalidated: this._ledgerList(),
         };
     }
 
@@ -672,6 +713,12 @@ export class StcfsdPanel implements McpPanelInterface {
         const prevMaxStress = Math.max(0, ...(this._model.node || []).map((n: number[]) => Math.abs(Number(n?.[7]) || 0)));
         this._model.node = result.node;
         this._model.elem = result.elem;
+        // K4a: 템플릿 단면의 요소 자리(엔진 element_roles, 요소 순서). 손으로 만든 단면(custom · custom_builder)은 엔진이
+        // 주지 않는다 — 짐작하지 않고 비운다. 요소 수와 맞지 않으면 쓰지 않는다.
+        const roles = Array.isArray(result.element_roles) && result.element_roles.length === result.elem?.length
+            && result.element_roles.every((r: any) => typeof r === 'string') ? [...result.element_roles] : undefined;
+        if (roles) { (this._model as any).elementRoles = roles; } else { delete (this._model as any).elementRoles; }
+        delete (this._model as any).sectionEdited;
         (this._model as any).sectionTemplate = sectionType;
         (this._model as any).sectionType = this._normalizeSectionType(sectionType);
         (this._model as any).sectionParams = { ...(params || {}) };
@@ -690,7 +737,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 + 'call set_load_case with fy before run_analysis; no steel grade is assumed.');
         }
         (this._model as any).loadCase = 'compression';
-        this._invalidateAnalysisState('Section template changed', true);
+        this._invalidateAnalysisState('Section template changed', true, { action: 'generate_template' });
         return {
             success: true,
             nnodes: result.node.length,
@@ -699,6 +746,7 @@ export class StcfsdPanel implements McpPanelInterface {
             load_case: 'compression',
             fy_reference: fy > 0 ? fy : null,
             ...(result.validation !== undefined ? { validation: result.validation } : {}),
+            ...(roles ? { element_roles: roles } : {}),
             warnings,
         };
     }
@@ -746,6 +794,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 timestamp: new Date().toISOString(),
             },
         };
+        this._ledgerClear('buckling_analysis');
     }
 
     /**
@@ -759,7 +808,33 @@ export class StcfsdPanel implements McpPanelInterface {
             && m.m_all.every((t: any) => Array.isArray(t) && t.length > 0);
         m.m_all = explicit ? m.m_all : 'auto';
         delete m.stressOpts;
+        // K4a: 호스트만 쓰는 단면 꼬리표 — 엔진 요청을 바꾸지 않는다.
+        delete m.elementRoles; delete m.sectionEdited;
         return m;
+    }
+
+    /**
+     * K4a: 손으로 절점 · 요소를 고쳤다 — 요소 자리(element_roles)는 더는 맞지 않으므로 버리고, 템플릿으로 만든 단면이었으면
+     * 「고쳐졌다」고 둔다(템플릿 치수는 남긴다 — 설계 치수의 출처는 그대로, 상태가 그 사실을 밝힌다).
+     */
+    /** 화면의 표 편집(updateModel)이 절점 좌표나 요소를 바꾸는가(응력 열만 바뀌면 false). */
+    private _geometryDiffers(data: any): boolean {
+        if (!data || typeof data !== 'object') { return false; }
+        if (Array.isArray(data.node)) {
+            const cur = this._model.node || [];
+            if (data.node.length !== cur.length) { return true; }
+            if (data.node.some((n: any, i: number) => !Array.isArray(n) || n[1] !== cur[i]?.[1] || n[2] !== cur[i]?.[2])) { return true; }
+        }
+        if (Array.isArray(data.elem) && JSON.stringify(data.elem) !== JSON.stringify(this._model.elem || [])) { return true; }
+        return false;
+    }
+
+    private _markGeometryEdited(): void {
+        const m = this._model as any;
+        delete m.elementRoles;
+        if (m.sectionTemplate && m.sectionTemplate !== 'custom' && m.sectionTemplate !== 'custom_builder') {
+            m.sectionEdited = true;
+        }
     }
 
     /** FSM 해석 한 번(analyze). 실패하면 엔진 진단 문장으로 예외. */
@@ -794,6 +869,7 @@ export class StcfsdPanel implements McpPanelInterface {
         const mAll = Array.isArray(analysis?.m_all) ? analysis.m_all : lengths.map(() => [1]);
         const classModel = { ...this._cloneModel(model), lengths, m_all: mAll };
         delete classModel.stressOpts;
+        delete classModel.elementRoles; delete classModel.sectionEdited;
         try {
             return await this._pythonBridge.call('classify_detailed', {
                 model: classModel,
@@ -961,17 +1037,306 @@ export class StcfsdPanel implements McpPanelInterface {
         return { dsm, analysis, classification_status: this._classificationStatus(cls), warnings, classificationNote };
     }
 
-    private _invalidateAnalysisState(reason: string, invalidateLoads: boolean = false): void {
+    /**
+     * 해석에 기댄 결과를 지운다(낡은 수를 최신으로 내지 않는다). K4a: 지운 결과마다 장부에 한 줄(까닭 · 시각 · 원인 액션).
+     * 랩 결과도 함께 — 화면의 clearStaleResults 가 모든 범위에서 Lap 결과를 지우는 것과 같다(설계 결과 · 단면에 기댄다).
+     * 단일 접합 결과는 모델을 쓰지 않으므로 여기서 지우지 않는다(파일 열기 · 그 입력의 변화에서만).
+     */
+    private _invalidateAnalysisState(reason: string, invalidateLoads: boolean = false,
+        cause: LedgerEntry['cause'] = {}): void {
+        let changed = false;
+        if (this._lastAnalysisResult) {
+            changed = this._ledgerAdd('buckling_analysis', reason, cause, this._lastAnalysisResult?._meta?.timestamp ?? null) || changed;
+        }
+        if (this._preparedDesignDsm) {
+            changed = this._ledgerAdd('design_dsm', reason, cause, this._preparedDesignDsmAt) || changed;
+        }
+        if (invalidateLoads && this._lastLoadAnalysis) {
+            changed = this._ledgerAdd('load_analysis', reason, cause, this._lastLoadAnalysisAt) || changed;
+        }
+        changed = this._dropDesignResults(reason, cause) || changed;
         this._lastAnalysisResult = null;
         this._preparedDesignDsm = null;
         this._preparedDesignDsmSig = '';
+        this._preparedDesignDsmAt = null;
         if (invalidateLoads) {
             this._lastLoadAnalysis = null;
+            this._lastLoadAnalysisAt = null;
+            this._lastLoadRequest = null;
+        }
+        this._postMessage('analysisInvalidated', { reason, invalidateLoads });
+        if (changed) { this._postLedger(); }
+        this._updateTreeView();
+    }
+
+    /** 부재 설계(퍼린 묶음 포함) · 랩 결과를 지우고 장부에 남긴다. 무엇이라도 지웠으면 true. */
+    private _dropDesignResults(reason: string, cause: LedgerEntry['cause']): boolean {
+        let changed = false;
+        if (this._lastDesignResult) {
+            changed = this._ledgerAdd('member_design', reason, cause, this._lastDesignAt, {
+                result_type: this._designResultType(this._lastDesignResult),
+            }) || changed;
+        }
+        if (this._lastLap) {
+            changed = this._ledgerAdd('lap', reason, cause, this._lastLap.at) || changed;
         }
         this._lastDesignResult = null;
         this._lastDesignRequest = null;
-        this._postMessage('analysisInvalidated', { reason, invalidateLoads });
-        this._updateTreeView();
+        this._lastDesignAt = null;
+        this._lastLap = null;
+        return changed;
+    }
+
+    private _designResultType(r: any): string {
+        if (r && (Array.isArray(r.regions) || r.design_positive !== undefined)) { return 'purlin'; }
+        return typeof r?.member_type === 'string' ? r.member_type : 'unknown';
+    }
+
+    // ---------------------------------------------------------------- K4a: 무효 장부
+    private _ledgerKey(kind: LedgerKind, id?: string): string { return id ? `${kind}:${id}` : kind; }
+
+    /** 장부에 한 줄. 이미 그 종류의 줄이 있으면(결과가 이미 지워짐) 처음 원인을 둔다. 새로 적었으면 true. */
+    private _ledgerAdd(kind: LedgerKind, reason: string, cause: LedgerEntry['cause'], resultAt: string | null,
+        extra: { id?: string; result_type?: string } = {}): boolean {
+        const key = this._ledgerKey(kind, extra.id);
+        if (this._ledger.has(key)) { return false; }
+        this._ledger.set(key, {
+            kind, ...(extra.id ? { id: extra.id } : {}), ...(extra.result_type ? { result_type: extra.result_type } : {}),
+            reason, cause: { ...cause }, invalidated_at: new Date().toISOString(), result_at: resultAt ?? null,
+        });
+        return true;
+    }
+
+    /** 그 종류의 새 결과가 왔다 — 장부의 그 종류 줄(접합은 모든 접합 줄)을 지운다. */
+    private _ledgerClear(kind: LedgerKind): void {
+        let changed = false;
+        for (const [key, e] of this._ledger) {
+            if (e.kind === kind) { this._ledger.delete(key); changed = true; }
+        }
+        if (changed) { this._postLedger(); }
+    }
+
+    private _ledgerList(): LedgerEntry[] {
+        return [...this._ledger.values()].sort((a, b) => a.invalidated_at.localeCompare(b.invalidated_at))
+            .map((e) => JSON.parse(JSON.stringify(e)));
+    }
+
+    /** 호스트 → 화면: 장부와 지금 결과(상태의 results 와 같은 것). */
+    private _postLedger(): void {
+        this._postMessage('resultsLedger', { invalidated: this._ledgerList(), results: this._resultsStatus() });
+    }
+
+    /** 지금 남아 있는 결과(최신인 것만 — 호스트는 낡은 결과를 지운다). 값은 담지 않는다(무엇이 있는지 · 언제). */
+    private _resultsStatus(): any {
+        const a = this._lastAnalysisResult;
+        const meta = a?._meta;
+        const pass = (r: any) => (r && typeof r === 'object' && 'pass' in r ? r.pass : null);
+        return {
+            buckling_analysis: a ? {
+                current: this._isAnalysisCurrent(), at: meta?.timestamp ?? null, kind: meta?.kind ?? null,
+                load_case: meta?.load_type ?? null, load_family: meta?.load_family ?? null, BC: meta?.BC ?? null,
+                fy_reference: meta?.fy ?? null,
+            } : null,
+            design_dsm: this._preparedDesignDsm ? { at: this._preparedDesignDsmAt } : null,
+            load_analysis: this._lastLoadAnalysis ? { at: this._lastLoadAnalysisAt } : null,
+            member_design: this._lastDesignResult ? {
+                at: this._lastDesignAt, result_type: this._designResultType(this._lastDesignResult),
+                pass: pass(this._lastDesignResult),
+            } : null,
+            connection: this._lastConnection ? {
+                id: this._lastConnection.id, at: this._lastConnection.at,
+                connection_type: this._lastConnection.request?.connection_type ?? null, pass: pass(this._lastConnection.result),
+            } : null,
+            lap: this._lastLap ? { at: this._lastLap.at, pass: pass(this._lastLap.result) } : null,
+        };
+    }
+
+    /** 새 부재 설계 결과(퍼린 묶음 포함)를 기억한다. */
+    private _storeDesignResult(result: any, request: any): void {
+        this._lastDesignResult = result;
+        this._lastDesignRequest = request;
+        this._lastDesignAt = new Date().toISOString();
+        this._ledgerClear('member_design');
+    }
+
+    /** 새 하중 분석 결과를 기억한다. `requestKey` = 그 하중 분석의 입력(바뀌었는지 보려고). */
+    private _storeLoadAnalysis(result: any, requestKey: string): void {
+        this._lastLoadAnalysis = result;
+        this._lastLoadAnalysisAt = new Date().toISOString();
+        this._lastLoadRequest = requestKey;
+        this._ledgerClear('load_analysis');
+    }
+
+    /** 하중 분석의 입력 열쇠(엔진 인자 + 모델에서 section 을 만들 때 쓰는 Fy · Fu). 바뀐 키 비교에 쓴다. */
+    private _loadRequestKey(options: any): string {
+        const o: any = {};
+        for (const k of [...StcfsdPanel.ANALYZE_LOADS_ARGS, 'Fy', 'Fu']) {
+            if (options?.[k] !== undefined) { o[k] = options[k]; }
+        }
+        return JSON.stringify(o);
+    }
+
+    /** 두 입력 열쇠의 다른 최상위 키 */
+    private static _changedKeys(a: string | null, b: string): string[] {
+        let pa: any = {};
+        let pb: any = {};
+        try { pa = a ? JSON.parse(a) : {}; } catch { pa = {}; }
+        try { pb = JSON.parse(b); } catch { pb = {}; }
+        const keys = new Set([...Object.keys(pa), ...Object.keys(pb)]);
+        return [...keys].filter((k) => JSON.stringify(pa[k]) !== JSON.stringify(pb[k])).sort();
+    }
+
+    /**
+     * 화면이 입력 변화를 알렸다(invalidateDerivedResults). 'load' = 하중 분석 + 부재 설계 + 랩, 'design'(기본) = 부재 설계 + 랩,
+     * K4a: 'connection' = 단일 접합 결과 하나만, 'lap' = 랩 결과 하나만(다른 결과와 리비전은 건드리지 않는다).
+     */
+    private _invalidateDerived(scopeIn: any): void {
+        const scope = typeof scopeIn === 'string' ? scopeIn : 'design';
+        const cause = { message: 'invalidateDerivedResults', scope };
+        let changed = false;
+        if (scope === 'connection') {
+            changed = this._dropConnection('Connection inputs changed', cause);
+        } else if (scope === 'lap') {
+            if (this._lastLap) { changed = this._ledgerAdd('lap', 'Lap inputs changed', cause, this._lastLap.at); }
+            this._lastLap = null;
+        } else {
+            this._derivedInputRevision++;
+            if (scope === 'load') {
+                if (this._lastLoadAnalysis) {
+                    changed = this._ledgerAdd('load_analysis', 'Load inputs changed', cause, this._lastLoadAnalysisAt);
+                }
+                this._lastLoadAnalysis = null;
+                this._lastLoadAnalysisAt = null;
+                this._lastLoadRequest = null;
+            }
+            changed = this._dropDesignResults(scope === 'load' ? 'Load inputs changed' : 'Design inputs changed', cause) || changed;
+        }
+        if (changed) { this._postLedger(); }
+    }
+
+    /** 새 단일 접합 결과(design_connection · aisi_design connection). 오류 결과는 기억하지 않는다. */
+    private _storeConnection(request: any, result: any): void {
+        if (!result || typeof result !== 'object' || result.error) { return; }
+        this._connectionSeq += 1;
+        this._lastConnection = {
+            id: `connection-${this._connectionSeq}`, at: new Date().toISOString(),
+            request: JSON.parse(JSON.stringify(request || {})), result,
+        };
+        this._ledgerClear('connection');
+    }
+
+    /** 단일 접합 결과를 지운다(그 입력이 바뀌었을 때 · 다른 프로젝트). 지웠으면 true. */
+    private _dropConnection(reason: string, cause: LedgerEntry['cause']): boolean {
+        if (!this._lastConnection) { return false; }
+        const c = this._lastConnection;
+        this._lastConnection = null;
+        return this._ledgerAdd('connection', reason, cause, c.at, { id: c.id });
+    }
+
+    // ---------------------------------------------------------------- K4a: 보기 상태 · focus (view contract)
+    private static readonly VIEW_ITEM_KINDS = ['check', 'model', 'result'];
+    private static readonly CHECK_SCOPES = ['member', 'purlin', 'connection', 'lap'];
+
+    /** 짧은 글 하나(제어 문자 없이, 길이 제한). 아니면 null. */
+    private static _text(v: any, max: number): string | null {
+        if (typeof v !== 'string') { return null; }
+        // eslint-disable-next-line no-control-regex
+        const t = v.replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+        return t ? t.slice(0, max) : null;
+    }
+
+    /** 보기 항목 하나를 검사해 옮긴다(호스트는 뜻을 풀지 않는다 — 모양과 크기만). 틀리면 오류 글. */
+    private static _viewItem(v: any): { item?: ViewItem; error?: string } {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) { return { error: 'item must be an object {kind, id, scope?, location?}' }; }
+        if (!StcfsdPanel.VIEW_ITEM_KINDS.includes(v.kind)) {
+            return { error: `item.kind must be one of ${StcfsdPanel.VIEW_ITEM_KINDS.join(', ')}` };
+        }
+        const id = StcfsdPanel._text(v.id, 200);
+        if (!id || !/^[A-Za-z0-9_.:\-[\] ]+$/.test(id)) { return { error: 'item.id must be a non-empty id (letters, digits, . _ - : [ ])' }; }
+        const item: ViewItem = { kind: v.kind, id };
+        if (v.kind === 'check') {
+            if (!StcfsdPanel.CHECK_SCOPES.includes(v.scope)) {
+                return { error: `item.scope must be one of ${StcfsdPanel.CHECK_SCOPES.join(', ')} for a check` };
+            }
+            item.scope = v.scope;
+        }
+        if (v.location !== undefined && v.location !== null) {
+            const s = JSON.stringify(v.location);
+            if (s.length > 2000) { return { error: 'item.location is too large (2000 characters of JSON at most)' }; }
+            item.location = JSON.parse(s);
+        }
+        return { item };
+    }
+
+    /** 화면의 보기 보고(viewReport 메시지 · report_view 액션) — 화면마다 마지막 하나를 둔다. 모델은 바꾸지 않는다. */
+    private _recordView(data: any): { recorded: boolean; error?: string } {
+        if (!data || typeof data !== 'object' || Array.isArray(data)) { return { recorded: false, error: 'view report must be an object' }; }
+        const screen = StcfsdPanel._text(data.screen, 32);
+        if (!screen || !/^[a-z][a-z0-9_-]*$/.test(screen)) {
+            return { recorded: false, error: "screen must be a short lower-case name (e.g. 'designer', 'review')" };
+        }
+        let selection: ViewItem | null = null;
+        if (data.selection !== undefined && data.selection !== null) {
+            const s = StcfsdPanel._viewItem(data.selection);
+            if (s.error) { return { recorded: false, error: `selection: ${s.error}` }; }
+            selection = s.item!;
+        }
+        const at = new Date().toISOString();
+        const by = StcfsdPanel._text(data.by, 16);
+        // 넣은 차례 = 알린 차례(같은 밀리초에도) — 지우고 다시 넣어 맨 뒤로.
+        this._views.delete(screen);
+        this._views.set(screen, {
+            screen, view: StcfsdPanel._text(data.view, 120), selection,
+            follows_focus: typeof data.follows_focus === 'boolean' ? data.follows_focus : null,
+            by: by && ['person', 'program', 'focus'].includes(by) ? by : null,
+            reported_at: at,
+        });
+        if (this._views.size > 8) {
+            const oldest = this._views.keys().next().value;
+            if (oldest !== undefined) { this._views.delete(oldest); }
+        }
+        // 화면이 AI 의 focus 요청에 답했다(따라갔다 · 따라가지 않았다).
+        const fr = data.focus_response;
+        if (fr && typeof fr === 'object' && this._lastFocus && fr.request_id === this._lastFocus.request_id
+            && typeof fr.followed === 'boolean') {
+            this._lastFocus.response = { screen, followed: fr.followed, note: StcfsdPanel._text(fr.note, 200), at };
+        }
+        return { recorded: true };
+    }
+
+    /** get_view: 화면이 알린 마지막 보기들 · 마지막 focus 요청과 그 답. */
+    private _viewState(): any {
+        const views = [...this._views.values()].reverse().map((v) => JSON.parse(JSON.stringify(v)));
+        const current = views[0] ?? null;
+        return {
+            current,
+            screens: views,
+            last_focus: this._lastFocus ? JSON.parse(JSON.stringify(this._lastFocus)) : null,
+            note: current
+                ? 'current = the most recent view report of any screen (reported_at is when the screen sent it). '
+                    + 'A screen that has not reported since a focus request may still show the earlier view.'
+                : 'No StCFSD screen has reported what it shows yet — the person may not have the program or panel in view.',
+        };
+    }
+
+    /** focus 의 대상이 지금 결과에 있는가(check 만 본다 — 그 밖은 null). 값을 풀지 않고 id 만 찾는다. */
+    private _focusTargetFound(item: ViewItem): boolean | null {
+        if (item.kind !== 'check') { return null; }
+        const has = (r: any) => Array.isArray(r?.design_checks) && r.design_checks.some((c: any) => c?.id === item.id);
+        const d = this._lastDesignResult;
+        if (item.scope === 'member') { return !!d && !Array.isArray(d.regions) && has(d); }
+        if (item.scope === 'purlin') {
+            const regions: any[] = Array.isArray(d?.regions) ? d.regions : [];
+            const rid = item.location && typeof item.location === 'object' ? item.location.region : undefined;
+            return regions.some((g) => (rid === undefined || g?.id === rid)
+                && (has(g?.result) || (Array.isArray(g?.result?.checks) && g.result.checks.some((c: any) => has(c)))));
+        }
+        if (item.scope === 'connection') { return has(this._lastConnection?.result); }
+        if (item.scope === 'lap') {
+            const r = this._lastLap?.result;
+            return has(r) || has(r?.fastener_design);
+        }
+        return null;
     }
 
     /** Compare report inputs with the design result currently cached. */
@@ -1387,7 +1752,9 @@ export class StcfsdPanel implements McpPanelInterface {
         void _action;
         // 접합부는 단면성질/DSM 불필요 → 바로 호출
         if (input.member_type === 'connection') {
-            return await this._pythonBridge.call('aisi_design', input);
+            const conn = await this._pythonBridge.call('aisi_design', input);
+            this._storeConnection(input, conn);
+            return conn;
         }
         if (!this._model.node || this._model.node.length === 0) {
             return {
@@ -1471,8 +1838,7 @@ export class StcfsdPanel implements McpPanelInterface {
             }
         }
         if (!result?.error) {
-            this._lastDesignRequest = JSON.parse(JSON.stringify(input));
-            this._lastDesignResult = result;
+            this._storeDesignResult(result, JSON.parse(JSON.stringify(input)));
         }
         return result;
     }
@@ -1541,6 +1907,8 @@ export class StcfsdPanel implements McpPanelInterface {
     private static readonly MODEL_FILE_KEYS = [
         'prop', 'node', 'elem', 'lengths', 'springs', 'constraints', 'BC', 'm_all', 'GBTcon', 'neigs',
         'loadCase', 'loadFy', 'loadValues', 'sectionType', 'sectionTemplate', 'sectionParams', 'cornerRadius',
+        // K4a: 요소 자리 · 손 편집 표지(열 때 요소 수와 맞는지 _checkLoadedModel 이 본다)
+        'elementRoles', 'sectionEdited',
     ];
 
     private _pickModelKeys(model: any): any {
@@ -1666,6 +2034,13 @@ export class StcfsdPanel implements McpPanelInterface {
         }
         // V5b-01: 알려진 키만 들인다(format · version 과 모르는 키는 버린다).
         const out = this._pickModelKeys(model);
+        // K4a: 요소 자리는 요소 수와 맞는 글자 목록일 때만(아니면 버린다 — 짐작하지 않는다).
+        if (out.elementRoles !== undefined && !(Array.isArray(out.elementRoles)
+            && out.elementRoles.length === out.elem.length && out.elementRoles.every((r: any) => typeof r === 'string'))) {
+            delete out.elementRoles;
+            warnings.push('element_roles in the file do not match the elements — dropped.');
+        }
+        if (out.sectionEdited !== undefined && out.sectionEdited !== true) { delete out.sectionEdited; }
         if (!out.loadCase) {
             out.loadCase = 'custom';
             delete out.loadFy;
@@ -2009,11 +2384,15 @@ export class StcfsdPanel implements McpPanelInterface {
                 // F4 V2-03: R 을 Table I6.2.1-1 과 맞춰 보려면 경간 조건이 필요하다.
                 if (i621Span) { params.span_type = i621Span; }
             }
-            const calls: Array<{ tag: string; p: any }> = [];
+            // K4a: x_ft = 그 검토 지점의 위치(하중 분석 좌표, 왼쪽 끝부터 ft). 검토 항목의 location 에 실린다.
+            const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any }> = [];
             const vA = atMmax ? atMmax.V : (pV ? pV.V : undefined);
-            calls.push({ tag: 'M_max', p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
+            const xMmax = Number.isFinite(Number(r.x_M_max_ft)) && r.x_M_max_ft != null ? Number(r.x_M_max_ft)
+                : (atMmax ? atMmax.x : null);
+            calls.push({ tag: 'M_max', x_ft: xMmax,
+                p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
             if (pV && atMmax && Math.abs(pV.x - atMmax.x) > 1e-6 && pV.V > (vA ?? 0) + 1e-9) {
-                calls.push({ tag: 'V_max', p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
+                calls.push({ tag: 'V_max', x_ft: pV.x, p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
             }
             const sups = supportsAt.get(rg.id) || [];
             for (const s of sups) {
@@ -2022,7 +2401,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     notEvaluated.push(`§G5 · H3 — 지점 ${s.support} (${s.name}): 지점 모멘트를 하중 분석에서 얻지 못함`);
                     continue;
                 }
-                calls.push({ tag: `support ${s.support}`, p: {
+                calls.push({ tag: `support ${s.support}`, x_ft: Number.isFinite(Number(s.x_ft)) ? Number(s.x_ft) : null,
+                    support: s.support ?? null, p: {
                     ...params, ...wcOpts,
                     Mu: s.M_kipin * share,
                     ...(s.V_kips !== undefined ? { Vu: s.V_kips * share } : {}),
@@ -2031,14 +2411,25 @@ export class StcfsdPanel implements McpPanelInterface {
                 } });
             }
             const results: any[] = [];
+            // K4a: 검토 지점마다 위치 · 조합 꼬리표(엔진 check_location · check_combination — 값을 바꾸지 않고 그 지점의
+            // design_checks 모든 항목에 붙는다). x 는 검토 항목 계약의 quantity 꼴(in) — SI 변환이 quantity 로 바꾼다.
+            const combo = typeof rg.env?.combo === 'string' ? rg.env.combo : undefined;
             for (const c of calls) {
+                const loc: any = {
+                    region: rg.id, region_kind: rg.kind, check_point: c.tag,
+                    span: r.span ?? null, support: c.support !== undefined ? c.support : (r.support ?? null),
+                    x: c.x_ft !== null && Number.isFinite(c.x_ft) ? { symbol: 'x', value: c.x_ft * 12, quantity: 'length' } : null,
+                };
                 let res: any;
                 try {
-                    res = await this._pythonBridge.call('aisi_design', c.p);
+                    res = await this._pythonBridge.call('aisi_design', {
+                        ...c.p, check_location: loc, ...(combo !== undefined ? { check_combination: combo } : {}),
+                    });
                 } catch (e: any) {
                     res = { error: e?.message || String(e), pass: null };
                 }
-                results.push({ ...res, check_point: c.tag, Mu_checked: c.p.Mu, Vu_checked: c.p.Vu ?? null });
+                results.push({ ...res, check_point: c.tag, Mu_checked: c.p.Mu, Vu_checked: c.p.Vu ?? null,
+                    __location: loc, __combination: combo ?? null });
             }
             // 구간 대표 결과: 불합격 중 최대 이용률 → 최대 이용률
             const pick = [...results].sort((a, b) => {
@@ -2049,10 +2440,21 @@ export class StcfsdPanel implements McpPanelInterface {
             const regionPass = StcfsdPanel._combinePass(results.map((x) => (x?.error ? null : x?.pass)));
             const notEvalRegion = Array.from(new Set(results.flatMap((x) => Array.isArray(x?.not_evaluated) ? x.not_evaluated : [])
                 .map((it: any) => (typeof it === 'string' ? it : JSON.stringify(it)))));
-            const result = { ...pick, pass: regionPass, not_evaluated: notEvalRegion,
+            // K4a: 구간 결과는 그대로(대표 지점의 결과 — 그 design_checks 도 대표 지점의 것). 검토 지점마다의 요약(checks[j])에
+            // 그 지점의 위치 · 조합 · design_checks 를 덧붙인다 — 화면이 구간 안 어디서 어느 검토가 지배하는지 보이게.
+            // 지배 지점 · 판정 · 이용률은 바꾸지 않는다(위의 pick · regionPass 그대로).
+            const lapNote = rg.lap
+                ? 'lap: each of the two members carries half of the region Mu and Vu (host assumption, AISI Manual II-2A (a)-(c)); the demands in design_checks are those halves'
+                : undefined;
+            const { __location: _pl, __combination: _pc, ...pickClean } = pick || {};
+            void _pl; void _pc;
+            const result = { ...pickClean, pass: regionPass, not_evaluated: notEvalRegion,
                 checks: results.map((x) => ({ check_point: x.check_point, Mu: x.Mu_checked, Vu: x.Vu_checked,
                     utilization: x.utilization ?? null, pass: x.error ? null : x.pass, governing_check: x.governing_check,
-                    error: x.error })) };
+                    error: x.error,
+                    location: x.__location, combination: x.__combination,
+                    design_checks: Array.isArray(x.design_checks) ? x.design_checks : [],
+                    ...(lapNote ? { host_assumption: lapNote } : {}) })) };
             if (sups.length > 0) {
                 result.supports_checked = sups.map((s) => ({ support: s.support, name: s.name, case: s.case, Pu: s.Pu }));
             }
@@ -2131,10 +2533,9 @@ export class StcfsdPanel implements McpPanelInterface {
         };
         this._requireCurrentSignature(baseSignature, 'Purlin design');
         this._requireDerivedRevision(purlinInputRevision, 'Purlin design');
-        this._lastLoadAnalysis = loadResult;
-        this._lastDesignResult = result;
+        this._storeLoadAnalysis(loadResult, this._loadRequestKey({ ...options, Fy: fy, Fu: fu }));
         // F02: 퍼린 패킷은 member 설계가 아니므로 입력 서명을 비운다.
-        this._lastDesignRequest = null;
+        this._storeDesignResult(result, null);
         return result;
     }
 
@@ -2175,7 +2576,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     return { error: `Invalid G: ${options.G} (positive finite number required)` };
                 }
                 this._model.prop = [[100, E, E, v, v, G]];
-                this._invalidateAnalysisState('Material changed', true);
+                this._invalidateAnalysisState('Material changed', true, { action: 'set_material' });
                 this._postMessage('modelLoaded', this._model);
                 if (options.G === undefined) { matAssumptions.push(`G not given — G = E/(2(1+v)) = ${G} ksi`); }
                 return { success: true, E, v, G, assumptions: matAssumptions };
@@ -2190,7 +2591,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._model.BC = options.BC;
                 // 종방향 항은 BC 에 따라 서버가 다시 고른다(S-S → [1], 그 밖 → m_recommend).
                 this._model.m_all = 'auto';
-                this._invalidateAnalysisState('Boundary condition changed');
+                this._invalidateAnalysisState('Boundary condition changed', false, { action: 'set_bc' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, BC: this._model.BC, m_all: 'auto' };
@@ -2222,7 +2623,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._model.lengths = lengths;
                 // F1 후속 1: 길이가 바뀌면 항도 다시 — BC 에 맞게 서버가 고른다.
                 this._model.m_all = 'auto';
-                this._invalidateAnalysisState('Length range changed');
+                this._invalidateAnalysisState('Length range changed', false, { action: 'set_lengths' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 const lenAssumptions = (['min', 'max', 'n'] as const).filter((k) => options[k] === undefined)
@@ -2235,7 +2636,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (lc === 'custom') {
                     // R8-16: custom 은 실제 하중의 응력 그대로(재척도 없음) — LF 는 적용 하중의 배수다.
                     // 순수 성분이어도 family 를 추론하지 않는다(DSM 추출은 순수 하중 case 로 한다).
-                    this._invalidateAnalysisState(`Load case changed: ${lc}`);
+                    this._invalidateAnalysisState(`Load case changed: ${lc}`, false, { action: 'set_load_case' });
                     await this._applyStressToModel(this._model as any, {
                         type: 'custom',
                         P: options.P ?? 0, Mxx: options.Mxx ?? 0, Mzz: options.Mzz ?? 0,
@@ -2251,7 +2652,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (!(Number(fy) > 0)) {
                     return { error: `set_load_case '${lc}' needs fy (reference stress, ksi) — the model has none yet.` };
                 }
-                this._invalidateAnalysisState(`Load case changed: ${lc}`);
+                this._invalidateAnalysisState(`Load case changed: ${lc}`, false, { action: 'set_load_case' });
                 await this._setLoadCaseOnModel(this._model as any, lc, fy,
                     { P: options.P, Mxx: options.Mxx, Mzz: options.Mzz });
                 (this._model as any).loadCase = lc;
@@ -2277,7 +2678,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         ? this._inferCustomLoadCase(options.P, options.Mxx, options.Mzz)
                         : 'custom';
                 }
-                this._invalidateAnalysisState('Stress distribution changed');
+                this._invalidateAnalysisState('Stress distribution changed', false, { action: 'set_stress' });
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, load_case: (this._model as any).loadCase };
             }
@@ -2430,6 +2831,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 this._preparedDesignDsm = prepared;
                 this._preparedDesignDsmSig = preparedSignature;
+                this._preparedDesignDsmAt = new Date().toISOString();
+                this._ledgerClear('design_dsm');
                 return {
                     success: true,
                     member_type: memberType,
@@ -2459,7 +2862,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (result?.node) {
                     this._model.node = result.node;
                     this._model.elem = result.elem;
-                    this._invalidateAnalysisState('Doubled section geometry changed', true);
+                    this._markGeometryEdited();
+                    this._invalidateAnalysisState('Doubled section geometry changed', true, { action: 'doubler' });
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                 }
@@ -2474,7 +2878,12 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'lap_connection': {
                 // 엔진 dict 그대로(전송 키 action · units 만 뺀다) — 모르는 키는 엔진이 경고로 돌려준다.
-                const result = await this._pythonBridge.call('lap_connection', this._dictParams(options));
+                const request = this._dictParams(options);
+                const result = await this._pythonBridge.call('lap_connection', request);
+                if (result && typeof result === 'object' && !result.error) {
+                    this._lastLap = { at: new Date().toISOString(), request, result };
+                    this._ledgerClear('lap');
+                }
                 this._postMessage('lapConnectionResult', result);
                 return result;
             }
@@ -2487,6 +2896,7 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'design_connection': {
                 const request = this._dictParams(options);
                 const connResult = await this._pythonBridge.call('design_connection', request);
+                this._storeConnection(request, connResult);
                 // 요청 입력(t1/t2/d/n/weld_size/groove_type 등)을 결과에 함께 — 도면이 실제 입력을 그리도록.
                 // 결과 필드가 우선한다.
                 this._postMessage('connectionResult', { request, ...request, ...connResult });
@@ -2625,10 +3035,29 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'analyze_loads': {
+                // 첫 await 전에 읽는다(화면 경로의 표지 — 다른 호출과 섞이지 않게).
+                const fromPage = this._pageLoadAnalysis;
+                this._pageLoadAnalysis = false;
                 const loadInputRevision = this._derivedInputRevision;
                 const result = await this._analyzeLoads(options);
                 this._requireDerivedRevision(loadInputRevision, 'Load analysis');
-                if (!result?.error) { this._lastLoadAnalysis = result; }
+                if (result && typeof result === 'object' && !result.error) {
+                    // K4a: MCP 의 하중 분석이 입력을 바꿨으면 그것에 기댄 결과를 지운다 — 화면에서 하중 칸을 바꿀 때
+                    // (invalidateDerivedResults 'load': 부재 설계 · 랩)와 같은 범위. 같은 입력을 다시 돌리면 지우지 않는다.
+                    // 화면 경로는 칸이 바뀔 때 화면이 이미 알렸으므로 여기서 다시 판단하지 않는다(확장의 동작 그대로).
+                    const key = this._loadRequestKey(options);
+                    if (!fromPage && key !== this._lastLoadRequest) {
+                        const changed = this._lastLoadRequest === null ? ['(no previous load analysis)']
+                            : StcfsdPanel._changedKeys(this._lastLoadRequest, key);
+                        this._derivedInputRevision++;
+                        if (this._dropDesignResults('Load analysis inputs changed', { action: 'analyze_loads', inputs: changed })) {
+                            this._postLedger();
+                        }
+                    }
+                    this._storeLoadAnalysis(result, key);
+                    // K4a: GUI 와 같은 메시지 — MCP 로 돌린 하중 분석도 화면(설계 웹뷰 · 새 검토 화면)에 보인다.
+                    this._postMessage('loadAnalysisComplete', result);
+                }
                 return result;
             }
 
@@ -2802,7 +3231,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 const flange = options.flange === 'bottom' ? 'bottom' : 'top';
                 const springs = this._deckSpringsForFlange(this._model, kphi, kx, flange);
                 (this._model as any).springs = springs;
-                this._invalidateAnalysisState('Deck springs applied');
+                this._invalidateAnalysisState('Deck springs applied', false, { action: 'apply_deck_springs' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, nsprings: springs.length, flange };
@@ -2884,7 +3313,12 @@ export class StcfsdPanel implements McpPanelInterface {
                 const check = this._checkLoadedModel(model);
                 if (check.error) { return { error: `Invalid project file: ${check.error}` }; }
                 this._model = { ...this._model, ...check.model };
-                this._invalidateAnalysisState('Project loaded', true);
+                for (const k of ['elementRoles', 'sectionEdited']) {
+                    if (!(k in (check.model as any))) { delete (this._model as any)[k]; }
+                }
+                // K4a: 다른 모델의 단일 접합 결과는 이 모델의 것이 아니다 — 함께 지우고 장부에 남긴다.
+                if (this._dropConnection('Project loaded', { action: 'load_project' })) { this._postLedger(); }
+                this._invalidateAnalysisState('Project loaded', true, { action: 'load_project' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, filepath: options.filepath, warnings: check.warnings };
@@ -2894,7 +3328,7 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'signature_ss': {
                 // R8-23: 사용자 BC · 길이 · 항을 바꾸지 않는다. 엔진 signature_ss(요소폭 기반 길이, S-S, m = 1)를
                 // 임시로 풀고, 결과 _meta 에 BC 'S-S' 와 실제 응력의 family 를 적는다.
-                this._invalidateAnalysisState('Signature-curve analysis started');
+                this._invalidateAnalysisState('Signature-curve analysis started', false, { action: 'signature_ss' });
                 const snapshot = this._cloneModel(this._model);
                 const signature = this._modelSignature(snapshot);
                 const loadType = (snapshot as any).loadCase || 'unknown';
@@ -2935,7 +3369,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 if (updated > 0) {
                     this._markCustomStress();
-                    this._invalidateAnalysisState('Nodal stresses changed');
+                    this._invalidateAnalysisState('Nodal stresses changed', false, { action: 'set_node_stress' });
                 }
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, updated, invalid_ids: invalidIds,
@@ -2965,7 +3399,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     }
                 }
                 (this._model as any).springs = springs;
-                this._invalidateAnalysisState('Springs changed');
+                this._invalidateAnalysisState('Springs changed', false, { action: 'set_springs' });
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, nsprings: springs.length };
             }
@@ -2974,7 +3408,7 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'set_constraints': {
                 const constraints: number[][] = options.constraints || [];
                 (this._model as any).constraints = constraints;
-                this._invalidateAnalysisState('Constraints changed');
+                this._invalidateAnalysisState('Constraints changed', false, { action: 'set_constraints' });
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, nconstraints: constraints.length };
             }
@@ -2999,7 +3433,8 @@ export class StcfsdPanel implements McpPanelInterface {
                         this._model.elem = jointElems;
                     }
                     this._markCustomStress();
-                    this._invalidateAnalysisState('Nodes replaced');
+                    this._markGeometryEdited();
+                    this._invalidateAnalysisState('Nodes replaced', false, { action: 'set_nodes' });
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                     return { success: true, nnodes: nodes.length, nelems: this._model.elem.length };
@@ -3014,7 +3449,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     const elements: number[][] = options.elements || [];
                     this._validateElemRows(elements, this._model.node || []);
                     this._model.elem = elements;
-                    this._invalidateAnalysisState('Elements replaced');
+                    this._markGeometryEdited();
+                    this._invalidateAnalysisState('Elements replaced', false, { action: 'set_elements' });
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                     return { success: true, nelems: elements.length };
@@ -3035,7 +3471,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     nodeArr.push([newId, x, z, 1, 1, 1, 1, stress]);
                     this._markCustomStress();
                     this._model.node = nodeArr;
-                    this._invalidateAnalysisState('Node added');
+                    this._markGeometryEdited();
+                    this._invalidateAnalysisState('Node added', false, { action: 'add_node' });
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                     return { success: true, node_id: newId, nnodes: nodeArr.length };
@@ -3054,7 +3491,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     const matnum = (this._model.prop && this._model.prop[0]) ? this._model.prop[0][0] : 100;
                     elemArr.push([newElemId, options.nodei, options.nodej, t, matnum]);
                     this._model.elem = elemArr;
-                    this._invalidateAnalysisState('Element added');
+                    this._markGeometryEdited();
+                    this._invalidateAnalysisState('Element added', false, { action: 'add_element' });
                     this._postMessage('modelLoaded', this._model);
                     this._updateTreeView();
                     return { success: true, elem_id: newElemId, nelems: elemArr.length };
@@ -3089,7 +3527,9 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (options.x !== undefined) { nd[1] = options.x; }
                     if (options.z !== undefined) { nd[2] = options.z; }
                     if (options.stress !== undefined) { nd[7] = options.stress; this._markCustomStress(); }
-                    this._invalidateAnalysisState('Node modified');
+                    // 응력만 고치면 단면 기하는 그대로 — 좌표를 옮겼을 때만 요소 자리를 버린다.
+                    if (options.x !== undefined || options.z !== undefined) { this._markGeometryEdited(); }
+                    this._invalidateAnalysisState('Node modified', false, { action: 'modify_node' });
                     this._postMessage('modelLoaded', this._model);
                     return { success: true, node: nd };
                 } catch (e: any) {
@@ -3120,7 +3560,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 });
                 // 요소 번호 재부여
                 this._model.elem.forEach((e: number[], i: number) => { e[0] = i + 1; });
-                this._invalidateAnalysisState('Node deleted', true);
+                this._markGeometryEdited();
+                this._invalidateAnalysisState('Node deleted', true, { action: 'delete_node' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, nnodes: this._model.node.length, nelems: this._model.elem.length };
@@ -3140,7 +3581,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (options.thickness !== undefined) { el[3] = options.thickness; }
                     if (options.nodei !== undefined) { el[1] = options.nodei; }
                     if (options.nodej !== undefined) { el[2] = options.nodej; }
-                    this._invalidateAnalysisState('Element modified');
+                    this._markGeometryEdited();
+                    this._invalidateAnalysisState('Element modified', false, { action: 'modify_element' });
                     this._postMessage('modelLoaded', this._model);
                     return { success: true, element: el };
                 } catch (e: any) {
@@ -3158,7 +3600,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 this._model.elem.splice(deid - 1, 1);
                 this._model.elem.forEach((e: number[], i: number) => { e[0] = i + 1; });
-                this._invalidateAnalysisState('Element deleted', true);
+                this._markGeometryEdited();
+                this._invalidateAnalysisState('Element deleted', true, { action: 'delete_element' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 return { success: true, nelems: this._model.elem.length };
@@ -3258,9 +3701,52 @@ export class StcfsdPanel implements McpPanelInterface {
                     local: options.local || [],
                     other: options.other || [],
                 };
-                this._invalidateAnalysisState('cFSM constraints changed');
+                this._invalidateAnalysisState('cFSM constraints changed', false, { action: 'set_gbtcon' });
                 this._postMessage('modelLoaded', this._model);
                 return { success: true, GBTcon: (this._model as any).GBTcon };
+            }
+
+            // --- K4a: 보기 상태(docs/implementation/20261123-view-contract.md) — 모델을 바꾸지 않고 창의 포커스를 가져가지 않는다 ---
+            case 'get_view': {
+                return this._viewState();
+            }
+
+            case 'report_view': {
+                // 메시지 통로가 없는 화면(독립 프로그램의 검토 화면 — 호스트 액션으로만 닿는다)의 보기 보고. AI 도구가 아니다.
+                return this._recordView(options);
+            }
+
+            case 'focus': {
+                const parsed = StcfsdPanel._viewItem(options.item);
+                if (parsed.error) { return { error: `focus: ${parsed.error}` }; }
+                const item = parsed.item!;
+                const reason = StcfsdPanel._text(options.reason, 200);
+                const found = this._focusTargetFound(item);
+                this._focusSeq += 1;
+                const rec: FocusRecord = {
+                    request_id: `focus-${this._focusSeq}`, item, reason, requested_at: new Date().toISOString(),
+                    forwarded: false, target_found: found, response: null,
+                };
+                const screens = [...this._views.values()].map((v) => ({
+                    screen: v.screen, follows_focus: v.follows_focus, reported_at: v.reported_at,
+                }));
+                const base = { request_id: rec.request_id, item, reason, target_found: found, screens };
+                if (found === false) {
+                    this._lastFocus = rec;
+                    return { ...base, forwarded: false, screen_moved: false,
+                        note: `The ${item.scope} result has no check '${item.id}' (it may have been invalidated — see get_status.invalidated). Nothing was sent to the screen.` };
+                }
+                rec.forwarded = !this._disposed;
+                if (rec.forwarded) {
+                    this._postMessage('focusRequest', { request_id: rec.request_id, item, reason, requested_at: rec.requested_at });
+                }
+                this._lastFocus = rec;
+                const note = !rec.forwarded
+                    ? 'No StCFSD page is attached — nothing was shown. The request is kept as last_focus (get_view).'
+                    : screens.length === 0
+                        ? 'Sent to the StCFSD page, but no screen has reported its view yet — it is not known whether anything shows it. This reply does not mean the screen moved; call get_view later.'
+                        : 'Sent to the StCFSD screen. A screen follows only when the person has "AI 따라가기" (follow AI) on and is not busy, so this reply does not mean the screen moved — call get_view later to see what is shown (last_focus.response says whether a screen followed).';
+                return { ...base, forwarded: rec.forwarded, screen_moved: null, note };
             }
 
             default:
@@ -3543,7 +4029,7 @@ ${inner}
     private async _applyStress(data: any): Promise<void> {
         try {
             const result = await this._pythonBridge.call('stresgen', data);
-            this._invalidateAnalysisState('Stress distribution regenerated');
+            this._invalidateAnalysisState('Stress distribution regenerated', false, { message: 'applyStress' });
             this._postMessage('stressApplied', result);
         } catch (err: any) {
             this._postMessage('stressError', { error: err.message });
@@ -4530,6 +5016,14 @@ ${inner}
         this._lastDesignRequest = null;
         this._preparedDesignDsm = null;
         this._preparedDesignDsmSig = '';
+        // K4a: 다른 검토 대상 — 이전 것의 결과는 「낡음」 이 아니라 없음(장부도 비운다). 접합 · 랩도 이 대상의 것이 아니다.
+        this._lastConnection = null;
+        this._lastLap = null;
+        this._lastLoadAnalysisAt = null;
+        this._lastLoadRequest = null;
+        this._lastDesignAt = null;
+        this._preparedDesignDsmAt = null;
+        this._ledger.clear();
         this._postMessage('resultsCleared', { reason: 'project opened' });
 
         // V4-11: 결과는 그것을 만든 엔진 판의 것이다. 이 판(결과 형식 RESULTS_FORMAT, 서버 protocol_version)과
@@ -4543,6 +5037,17 @@ ${inner}
             || projectData.preparedDesignDsm || projectData.lapResult);
         if (!resultsCurrent && hadResults) {
             warnings.push(`Results stored in this file were computed by an older engine/file version (${projectData.version ?? 'unknown'}${savedEngine ? `, protocol ${savedEngine.protocol_version}` : ''}) and were not restored — inputs were kept; run the analysis and checks again.`);
+            // K4a: 버린 결과를 장부에 — 화면이 「결과 없음」 이 아니라 「낡음(까닭)」 으로 보이게.
+            const old: Array<[LedgerKind, any]> = [['buckling_analysis', projectData.analysisResult],
+                ['load_analysis', projectData.loadAnalysis], ['member_design', projectData.designResult],
+                ['design_dsm', projectData.preparedDesignDsm], ['lap', projectData.lapResult]];
+            for (const [kind, r] of old) {
+                if (r) {
+                    this._ledgerAdd(kind, 'Results stored in this file were computed by an older engine/file version',
+                        { action: 'open_project' }, projectData.timestamp ?? null,
+                        kind === 'member_design' ? { result_type: this._designResultType(r) } : {});
+                }
+            }
             projectData = { ...projectData, analysisResult: null, loadAnalysis: null, designResult: null,
                 preparedDesignDsm: null, lapResult: null, dsm: null };
         }
@@ -4550,7 +5055,8 @@ ${inner}
         // 모델 복원. 호스트 메타데이터(템플릿 · 하중 경우 · 기준응력)는 파일의 것만 — 파일에 없으면 이전 프로젝트의
         // 값을 지니지 않는다(V4-10 재검증: v1.0 파일을 연 뒤 화면이 이전 템플릿 lippedc 를 보였다).
         const merged: any = { ...this._model, ...check.model };
-        for (const k of ['sectionTemplate', 'sectionParams', 'sectionType', 'cornerRadius', 'loadCase', 'loadFy', 'loadValues']) {
+        for (const k of ['sectionTemplate', 'sectionParams', 'sectionType', 'cornerRadius', 'loadCase', 'loadFy', 'loadValues',
+            'elementRoles', 'sectionEdited']) {
             if (!(k in (check.model as any))) { delete merged[k]; }
         }
         this._model = merged;
@@ -4563,6 +5069,8 @@ ${inner}
             if (savedSignature && savedSignature === this._currentModelSignature()) {
                 this._lastAnalysisResult = projectData.analysisResult;
             } else {
+                this._ledgerAdd('buckling_analysis', 'Saved analysis is from an older or different model state. Run analysis again.',
+                    { action: 'open_project' }, projectData.analysisResult?._meta?.timestamp ?? null);
                 this._postMessage('analysisInvalidated', {
                     reason: 'Saved analysis is from an older or different model state. Run analysis again.',
                     invalidateLoads: false,
@@ -4571,13 +5079,21 @@ ${inner}
             }
         }
         this._lastLoadAnalysis = projectData.loadAnalysis || null;
+        this._lastLoadAnalysisAt = this._lastLoadAnalysis ? (projectData.timestamp ?? null) : null;
         const derivedStateCurrent = projectData.derivedStateSignature === this._currentModelSignature();
         this._lastDesignResult = derivedStateCurrent ? (projectData.designResult || null) : null;
+        this._lastDesignAt = this._lastDesignResult ? (projectData.timestamp ?? null) : null;
+        if (!derivedStateCurrent && projectData.designResult) {
+            this._ledgerAdd('member_design', 'Saved design is from a different model state', { action: 'open_project' },
+                projectData.timestamp ?? null, { result_type: this._designResultType(projectData.designResult) });
+        }
+        this._lastLap = projectData.lapResult ? { at: projectData.timestamp ?? null, request: null, result: projectData.lapResult } : null;
         const prepared = derivedStateCurrent ? (projectData.preparedDesignDsm || null) : null;
         // 옛 파일(설계 Fy 기록 fy_analysis 없음)의 준비 DSM 은 어떤 Fy 로 만든 것인지 몰라 쓰지 않는다.
         if (prepared && Number(prepared.fy_analysis) > 0) {
             this._preparedDesignDsm = prepared;
             this._preparedDesignDsmSig = this._currentDesignDsmSignature(Number(prepared.fy_analysis));
+            this._preparedDesignDsmAt = projectData.timestamp ?? null;
         } else {
             this._preparedDesignDsm = null;
             this._preparedDesignDsmSig = '';
@@ -4613,6 +5129,7 @@ ${inner}
         if (projectData.properties) {
             this._postMessage('propertiesResult', projectData.properties);
         }
+        this._postLedger();
         return { warnings };
     }
 

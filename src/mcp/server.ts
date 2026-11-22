@@ -243,6 +243,14 @@ const UNITS_LOADS = z.enum(['US', 'SI']).optional().describe("Units of inputs an
 const UNITS_GEOM = z.enum(['US', 'SI']).optional().describe("Units of the dimensional inputs: 'US' (default) in / ksi / kips / kip-in, or 'SI' mm / MPa / kN / kN-m (converted to the engine's US units). The panel model itself is stored in US units.");
 const DM = z.enum(["ASD", "LRFD"]).optional().describe("Design basis. Omit → the engine's default LRFD (echoed as result.design_method). LSD is not implemented.");
 const FY_DESIGN = z.number().positive().describe("Design (virgin) yield stress Fy — ksi, or MPa if units='SI'. Required: the tool never assumes a steel grade.");
+// K4a: 검토 항목 계약(docs/implementation/20261123-check-contract.md) — 결과의 design_checks 를 한 문장으로 알린다.
+const QUANTITY_VOCAB = "force (kip | kN), moment (kip-in | kN-m), stress (ksi | MPa), length (in | mm), area (in² | mm²), section_modulus (in³ | mm³), moment_of_inertia and torsion_constant (in⁴ | mm⁴), warping_constant (in⁶ | mm⁶), force_per_length (kip/in | kN/m), rotational_stiffness (kip-in/rad/in | kN-m/rad/m), dimensionless, angle (deg), count";
+const DESIGN_CHECKS = ` The result also lists \`design_checks\`: one item per limit state with a stable \`id\` (e.g. member.flexure.distortional, conn.bolt.bearing — use it to refer to a check), \`clause\` / \`equations\` (AISI S100-16), \`name\` / \`name_ko\`, \`demand\` / \`nominal\` / \`capacity\` as {symbol, value, quantity}, \`factor\` {symbol, value, kind phi|omega}, \`ratio\`, \`verdict\` (pass | fail | not_evaluated | not_applicable — not_evaluated carries no capacity; values under \`reference\` are for information only), \`governs\`, \`location\`, \`combination\` and the calculation trace \`steps\` [{kind, expr, equation, inputs, result}] — every \`quantity\` is one of ${QUANTITY_VOCAB}, in the reply's units; the overall verdict is still \`pass\`.`;
+// K4a: 호출자가 주는 위치 · 조합 꼬리표(엔진 design.checks.CONTEXT_KEYS) — 값을 바꾸지 않고 모든 항목에 붙는다.
+const CHECK_CONTEXT = {
+    check_location: z.union([z.string(), z.record(z.string(), z.any())]).optional().describe("Optional label attached unchanged to every design_checks item as `location` (e.g. {member: 'P1', x: {symbol: 'x', value: 1500, quantity: 'length'}}). A number is converted with units='SI' only when it is given as {value, quantity}; plain numbers are passed as they are. Does not change any value."),
+    check_combination: z.string().optional().describe("Optional load-combination name attached to every design_checks item as `combination` (the demands are then marked as coming from that load analysis combination). Does not change any value."),
+};
 
 // ============================================================
 // MCP Server 생성
@@ -277,7 +285,9 @@ WORKFLOW.
 
 INPUTS. The tools never invent engineering input: give the design Fy, Fu, lengths, loads, thicknesses and connection geometry explicitly. If something required is missing the engine answers with an error that names it — ask the user, do not guess. Argument names are the engine's names.
 
-VERDICTS. pass=true: all applicable limit states evaluated and satisfied. pass=false: an evaluated limit state fails (wins over unevaluated items). pass=null: NO VERDICT — something applicable could not be evaluated (not_evaluated / not_checked list why). Never present null as OK.
+VERDICTS. pass=true: all applicable limit states evaluated and satisfied. pass=false: an evaluated limit state fails (wins over unevaluated items). pass=null: NO VERDICT — something applicable could not be evaluated (not_evaluated / not_checked list why). Never present null as OK. Design results also list design_checks (one item per limit state: stable id, clause, demand / capacity, ratio, verdict, calculation steps) — refer to a check by its id.
+
+VIEW. get_view says what the person is looking at in StCFSD (use it for "this"); focus asks the screen to show an item by the same ids. Neither changes the model; the screen may decline to follow. get_status lists results the program deleted because their inputs changed (invalidated) — re-run those, never quote their old numbers.
 
 NOTICES. Always report warnings, assumptions and scope_notes to the user with the verdict. In-house assumptions that are not specification provisions — e.g. the lap-splice fastener force model (force_model), default fastener values in kx, I6.2.1 conditions confirmed by the user — must be stated to the user as assumptions.
 
@@ -287,11 +297,14 @@ UNITS. Engine units are US: in, in², ksi, kips, kip-in (load analysis: ft, plf,
 // ============================================================
 // 1. STATUS & INFO
 // ============================================================
-server.tool("get_status", "Get the current panel status (section, analysis state). Fails with a clear error when VS Code or the Section Designer panel is not open.", {},
+// K4a: 상태 응답에 더한 것 — 단면 템플릿 · 치수, 요소 자리, 하중 경우, 고유치 수, 해석 계열, 남은 결과, 무효 장부.
+const STATUS_FIELDS = " Also: section_template (lippedc, lippedz, …, custom, custom_builder) and section_params (the dimensions the section was generated from, as stored — in, angles deg), section_edited (nodes / elements were edited by hand after the template), element_roles (template sections only, else null), load_case and load_fy (reference stress, ksi), neigs (eigenvalues per length), analysis_load_family (P | Mxx | Mzz | custom of the current analysis, null when there is none), results (which results are current: buckling_analysis, design_dsm, load_analysis, member_design, connection, lap — with when they were made) and invalidated — the ledger of results the program deleted because their inputs changed [{kind, id?, reason, cause {action | message, inputs?}, invalidated_at, result_at}]; an entry is removed when a new result of that kind arrives. A deleted result is never served: re-run it.";
+
+server.tool("get_status", "Get the current panel status (section, analysis state). Fails with a clear error when VS Code or the Section Designer panel is not open. US units." + STATUS_FIELDS, {},
     async () => json(await callBridgeGet('/status'))
 );
 
-server.tool("get_full_state", "Get the complete panel model state: section dimensions, material, stresses, BC, lengths, analysis summary and minima. All values in the engine's US units (in, ksi).",
+server.tool("get_full_state", "Get the complete panel model state: section dimensions, material, stresses, BC, lengths, analysis summary and minima. All values in the engine's US units (in, ksi)." + STATUS_FIELDS,
     {},
     async () => json(await callBridgePost('/action', { action: 'get_full_state' }))
 );
@@ -328,6 +341,32 @@ server.tool("get_buckling_curve", "Buckling curve of the current analysis: rows 
 );
 
 // ============================================================
+// 1b. VIEW — 사람이 보는 것 (K4a, docs/implementation/20261123-view-contract.md)
+//     모델을 바꾸지 않고 창의 포커스를 가져가지 않는다. 화면이 없거나 따라가지 않아도 실패하지 않는다.
+// ============================================================
+const VIEW_ITEM = z.object({
+    kind: z.enum(['check', 'model', 'result']).describe("'check' = one design_checks item of a result; 'model' = a part of the model; 'result' = a whole result or a part of it"),
+    id: z.string().min(1).max(200).describe("check: the design_checks `id` (e.g. member.flexure.distortional). model: section | section.node.<n> | section.element.<n> | material | boundary_condition | lengths | springs | constraints | load_case. result: buckling_analysis | buckling_analysis.local | buckling_analysis.distortional | buckling_analysis.global | load_analysis | load_analysis.support.<n> | member_design | purlin.region.<region id> | connection | lap. Letters, digits and . _ - : [ ] only."),
+    scope: z.enum(['member', 'purlin', 'connection', 'lap']).optional().describe("check only (required): which result holds it — member (aisi_design_*), purlin (design_purlin), connection (design_connection / aisi_design_connection), lap (design_lap_connection)"),
+    location: z.record(z.string(), z.any()).optional().describe("check: its `location` as given in design_checks (for design_purlin {region, check_point}, e.g. {region: 'negative-2', check_point: 'support 2'}); otherwise optional context. Kept as given (US units)."),
+});
+
+server.tool("get_view",
+    "What the person is looking at in StCFSD right now: `current` = the most recent view report of any screen ({screen, view, selection {kind, id, scope?, location?} by the same id scheme as focus, follows_focus, by person|program|focus, reported_at}), `screens` = the last report of every screen, `last_focus` = your last focus request and whether a screen followed it (response.followed). Use it when the user says \"this\" or \"what I am looking at\". Reading it changes nothing. If no screen has reported, current is null — say so instead of guessing.",
+    {},
+    async () => json(await callBridgePost('/action', { action: 'get_view' }))
+);
+
+server.tool("focus",
+    "Ask the StCFSD screen to show one item (\"look here\"), with an optional short reason shown to the person. It never changes the model and never takes window focus. The screen follows only if the person has \"AI 따라가기\" (follow AI) switched on and is not busy, so the reply never says the screen moved (screen_moved null = unknown); call get_view afterwards to see what is shown. A check that is not in the current results is not sent (target_found false). With no screen attached the request is kept and the reply says so — it is not an error.",
+    {
+        item: VIEW_ITEM.describe("The item to show"),
+        reason: z.string().max(200).optional().describe("Short reason shown to the person next to the item (e.g. 'governs: distortional buckling at support 2')"),
+    },
+    async (args) => json(await callBridgePost('/action', { action: 'focus', ...args }))
+);
+
+// ============================================================
 // 2. SECTION DEFINITION
 // ============================================================
 server.tool("set_section_template",
@@ -340,7 +379,8 @@ server.tool("set_section_template",
     + "angle: H = vertical leg, B = horizontal leg. lipped_angle: H, B = legs, D = lip. "
     + "isect / tee: H = total depth, B = flange width; tf / tw = flange / web thickness (default t). "
     + "qlip = lip bend angle from the flange line in degrees (90 = lip perpendicular to the flange; < 90 opens the lip outward beyond the flange tip, AISI θ; 0 < qlip < 180). "
-    + "Missing required dimensions are reported by the engine (no defaults are filled). Response includes the section type stored by the panel.",
+    + "Missing required dimensions are reported by the engine (no defaults are filled). Response includes the section type stored by the panel "
+    + "and `element_roles` — one role per element in element order (bottom_lip, bottom_flange, web, top_flange, top_lip, corner, brim, wall, leg, lip; top = +z, the side in compression under positive moment). Hand-built sections (set_custom_section, build_section) and any later node / element edit have no element_roles (the roles are never guessed).",
     {
         type: z.enum(['lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee', 'lipped_angle'])
             .describe("Section type"),
@@ -821,7 +861,7 @@ const WC_FIELDS = {
 
 server.tool("aisi_design_compression",
     "AISI S100-16 Chapter E compression design (DSM) of the current section. " + MEMBER_NOTE
-    + "Missing effective lengths are reported (E2 not evaluated), never assumed. " + VERDICT,
+    + "Missing effective lengths are reported (E2 not evaluated), never assumed. " + VERDICT + DESIGN_CHECKS,
     {
         design_method: DM,
         Fy: FY_DESIGN,
@@ -831,6 +871,7 @@ server.tool("aisi_design_compression",
         KtLt: z.number().positive().optional().describe("Torsional effective length Kt·Lt — in, or mm. Omit → E2 flexural-torsional check reported as not evaluated (it is NOT set equal to KyLy)."),
         Pu: z.number().optional().describe("Required axial strength (compression) — kips, or kN. Omit → capacity only."),
         Fcre: z.number().positive().optional().describe("Elastic global buckling stress from a rational analysis (sections without closed-form E2) — ksi, or MPa"),
+        ...CHECK_CONTEXT,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_compression', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'compression' })
@@ -838,7 +879,7 @@ server.tool("aisi_design_compression",
 
 server.tool("aisi_design_flexure",
     "AISI S100-16 Chapter F flexure design (DSM) of the current section, with optional §G2 shear + §H2 (give Vu), §G5 web crippling + §H3 (give wc_N, wc_R …), a separate positive-moment region (Lb_pos, Cb_pos, Mu_pos), §I6.2.1 uplift R (C/Z only) and inelastic reserve / cold work. " + MEMBER_NOTE
-    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked only when wc_N and wc_R are given and is otherwise simply absent (the GUI always sends a bearing length) — give them for any member with bearing at supports or concentrated loads. " + VERDICT,
+    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked only when wc_N and wc_R are given and is otherwise simply absent (the GUI always sends a bearing length) — give them for any member with bearing at supports or concentrated loads. " + VERDICT + DESIGN_CHECKS,
     {
         design_method: DM,
         Fy: FY_DESIGN,
@@ -863,13 +904,14 @@ server.tool("aisi_design_flexure",
         dist_Lm: z.number().nonnegative().optional().describe("Distance between distortional restraints Lm — in, or mm"),
         kphi: z.number().nonnegative().optional().describe("Rotational restraint kφ used by the analytical distortional fallback — kip-in/rad/in, or kN-m/rad/m"),
         Fcre: z.number().positive().optional().describe("Elastic LTB stress from a rational analysis (sections without closed-form F2) — ksi, or MPa"),
+        ...CHECK_CONTEXT,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_flexure', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'flexure' })
 );
 
 server.tool("aisi_design_combined",
-    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. " + MEMBER_NOTE + VERDICT,
+    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS,
     {
         design_method: DM,
         Fy: FY_DESIGN,
@@ -893,19 +935,21 @@ server.tool("aisi_design_combined",
         moment_sign: z.enum(['+', '-']).optional().describe("Sign of Mux (+ = top flange in compression) for sections not symmetric about x; omit → sign of Mux"),
         shear_n_webs: z.number().int().min(1).optional().describe("Number of webs resisting shear (omit → inferred)"),
         transverse_stiffeners: z.boolean().optional().describe("Web has transverse stiffeners (§G2.2 not implemented → §G2.1, conservative, with a warning)"),
+        ...CHECK_CONTEXT,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_combined', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'combined' })
 );
 
 server.tool("aisi_design_tension",
-    "AISI S100-16 Chapter D tension design of the current section: D2 yielding (Ag·Fy) and D3 rupture (An·Fu). Without Fu the rupture check is not evaluated (Tn_rupture null, pass null). Without An the engine uses An = Ag and warns. " + VERDICT,
+    "AISI S100-16 Chapter D tension design of the current section: D2 yielding (Ag·Fy) and D3 rupture (An·Fu). Without Fu the rupture check is not evaluated (Tn_rupture null, pass null). Without An the engine uses An = Ag and warns. " + VERDICT + DESIGN_CHECKS,
     {
         design_method: DM,
         Fy: FY_DESIGN,
         Fu: z.number().positive().optional().describe("Tensile strength Fu — ksi, or MPa (required for D3 rupture)"),
         Tu: z.number().optional().describe("Required tensile strength — kips, or kN. Omit → capacity only."),
         An: z.number().positive().optional().describe("Net area An — in², or mm² if units='SI' (omit → Ag with a warning)"),
+        ...CHECK_CONTEXT,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_tension', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'tension' })
@@ -1026,6 +1070,7 @@ const CONNECTION_FIELDS = {
     alpha_w: z.number().positive().optional().describe("PAF J5.2.3 pull-over factor (1.5 / 1.25 / 2.0)"),
     alpha_b: z.number().positive().optional().describe("PAF J5.3.2 bearing factor (3.2; 3.7 for Fig. J5-1(c)(d))"),
     E: z.number().positive().optional().describe("Modulus of elasticity — ksi, or MPa (arc spot, PAF; omit → 29500 ksi)"),
+    ...CHECK_CONTEXT,
     units: UNITS_MEMBER,
 };
 
@@ -1034,7 +1079,7 @@ const CONNECTION_DESC = "AISI S100-16 Chapter J connection check (bolts J3, scre
     + "Thickness meaning: screws/PAF t1 = sheet under the head/washer, t2 = far sheet; fillet welds: any order (t = min); arc spot/seam: thinner = sheet, thicker = support. "
     + "Give the demand as Vu (shear) and/or Tu (tension). The verdict uses only properly evaluated limit states (shear_/tension_verified_* keys). Where an input the specification needs is missing (member_case, e, s, screw Pnvs/Pnts, PAF F_uh, Fy2, dw, PJP te …) the engine may still show a value computed from an assumed input, flagged assumed / governing_assumed=true: that value is a REFERENCE ONLY, gives neither PASS nor FAIL, and the missing input must be obtained from the user. "
     + "Conservative alternatives the engine used (A307 for an unknown bolt grade, minimum mf, Commentary linear J4.5 equation, tc = t2 …) are listed in assumptions — report them. "
-    + "Results: limit_states (direction shear/tension, Rn, design_strength, assumed, basis), checks, interaction_checks, detailing_checks, not_evaluated, utilization_reference. " + VERDICT;
+    + "Results: limit_states (direction shear/tension, Rn, design_strength, assumed, basis), checks, interaction_checks, detailing_checks, not_evaluated, utilization_reference. " + VERDICT + DESIGN_CHECKS;
 
 /** 형식에 따라 필수인 t2 · n (엔진의 필수 입력과 같은 규칙 — 평평한 스키마로는 형식별 필수를 적을 수 없다). */
 function missingConnectionInputs(args: Record<string, any>): string | null {
@@ -1203,7 +1248,8 @@ server.tool("design_purlin",
     "Complete purlin design on the current section: analyze_loads (same arguments) → finite-strip DSM values for the positive and negative moment regions → flexural design of the regions, laps and uplift. Fy is the design yield stress (required). "
     + "Each region carries its own Ly, Cb, distortional moment-gradient β (from the region's end moments, beta_dist) and members (2 inside laps: per-member Mu and strength). "
     + "Web crippling (§G5 with §H3) is checked at each support from the analysed reactions, with EOF/IOF from the support position, ONLY when the bearing length wc_N and web bend radius wc_R are given; without them it is not evaluated. "
-    + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. " + VERDICT,
+    + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. " + VERDICT
+    + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions).",
     {
         ...LOAD_FIELDS,
         Fy: FY_DESIGN,
@@ -1225,7 +1271,7 @@ server.tool("design_purlin",
 // ============================================================
 // Report / validation
 // ============================================================
-server.tool("generate_report", "Collect the current session's section, buckling, load analysis and design into a JSON report packet (not the HTML report). Recommended: run the design with the aisi_design_* / design_purlin tools (which take the full input set) and the loads with analyze_loads first, then call generate_report WITHOUT member_type — it reports that last design and last load analysis. If member_type is given the member design is re-run with only the inputs given here (same rules as aisi_design_*: Fy required). " + VERDICT,
+server.tool("generate_report", "Collect the current session's section, buckling, load analysis and design into a JSON report packet (not the HTML report). Recommended: run the design with the aisi_design_* / design_purlin tools (which take the full input set) and the loads with analyze_loads first, then call generate_report WITHOUT member_type — it reports that last design and last load analysis. If member_type is given the member design is re-run with only the inputs given here (same rules as aisi_design_*: Fy required). " + VERDICT + " design_result carries the design_checks of that design (see aisi_design_flexure); model_summary is the get_status reply (US).",
     {
         member_type: z.enum(["compression", "flexure", "combined", "tension"]).optional().describe("Member type to (re)compute"),
         design_method: DM,
@@ -1251,7 +1297,7 @@ server.tool("generate_report", "Collect the current session's section, buckling,
     async (args) => postTool('generate_report', 'generate_report', args, SI_OUT_REPORT)
 );
 
-server.tool("validate_design", "Collect the current design state for validation: section properties, cutwp, current DSM values, last load analysis and last design result. This is session data, not an evaluated pass/warn/fail checklist; verdicts inside follow the pass true/false/null rule.",
+server.tool("validate_design", "Collect the current design state for validation: section properties, cutwp, current DSM values, last load analysis and last design result. This is session data, not an evaluated pass/warn/fail checklist; verdicts inside follow the pass true/false/null rule. last_design_result carries its design_checks (see aisi_design_flexure); status is the get_status reply (US).",
     {
         Fy: z.number().positive().optional().describe("Design yield stress — ksi, or MPa (passed to the panel; see its reply for what it used)"),
         units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI' for the numeric results"),
@@ -1265,7 +1311,7 @@ server.tool("validate_design", "Collect the current design state for validation:
 server.tool("design_lap_connection",
     "Lap splice of continuous C/Z purlins at a support: §I6.2.1(g) lap length, fastener demand and count, fastener strength (Chapter J engine, end distance incl. J6.1), lap flexure (§F, two members), distortional (§F4) and §H2. "
     + "IN-HOUSE ASSUMPTION (not a specification provision, §A1.2(c) rational analysis): the fastener demand is V_transfer = max(Mu/(d − t), Vu) shared equally by all fasteners — the result's `force_model` describes it; report it to the user as an assumption. "
-    + "Without Se (effective section modulus for Mnl) the lap flexure is not checked → pass null / verdict NOT_CHECKED — but do NOT send Sf without Se: the engine currently substitutes Sf for a missing Se (gross section, unconservative; F6 follow-up). Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. " + VERDICT,
+    + "Without Se (effective section modulus for Mnl) the lap flexure is not checked → pass null / verdict NOT_CHECKED — but do NOT send Sf without Se: the engine currently substitutes Sf for a missing Se (gross section, unconservative; F6 follow-up). Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. " + VERDICT + DESIGN_CHECKS + " The nested fastener_design has its own design_checks (conn.*).",
     {
         d: z.number().positive().describe("Member depth — in, or mm if units='SI'"),
         t: z.number().positive().describe("Member thickness — in, or mm"),
@@ -1292,6 +1338,7 @@ server.tool("design_lap_connection",
         threads_excluded: z.boolean().optional().describe("Bolts: threads excluded from the shear plane"),
         hole_type: z.enum(["standard", "oversized", "short_slotted"]).optional().describe("Bolts: hole type"),
         mf: z.number().positive().optional().describe("Bolts: bearing modification factor mf (Table J3.3.1-2; omit → the minimum for the hole type, stated in assumptions)"),
+        ...CHECK_CONTEXT,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('design_lap_connection', 'lap_connection', args, SI_OUT_MEMBER)

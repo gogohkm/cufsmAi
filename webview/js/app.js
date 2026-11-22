@@ -387,7 +387,7 @@
     // ============================================================
     document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
         btn.addEventListener('click', () => {
-            switchTab(btn.getAttribute('data-tab'));
+            switchTab(btn.getAttribute('data-tab'), 'person');
         });
     });
 
@@ -442,13 +442,18 @@
         return lines.length;
     }
 
-    function switchTab(tabId) {
+    function switchTab(tabId, by) {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
         const panel = document.getElementById(`tab-${tabId}`);
         if (btn) { btn.classList.add('active'); }
         if (panel) { panel.classList.add('active'); }
+        // K4a: 보는 탭을 호스트에 알린다(docs/implementation/20261123-view-contract.md — MCP get_view). 이 화면은 AI 의 focus 를 따라가지 않는다.
+        if (btn) {
+            vscode.postMessage({ command: 'viewReport', data: { screen: 'designer', view: 'tab:' + tabId, selection: null,
+                follows_focus: false, by: by === 'person' ? 'person' : 'program' } });
+        }
     }
 
     /** 해석 완료 후 부재 유형에 맞는 설계용 DSM 좌굴값을 자동 준비
@@ -8127,5 +8132,13 @@
     try { _initialInputs = collectAllDesignInputs(); } catch (e) { console.error('[StCFSD] initial inputs', e); }
 
     vscode.postMessage({ command: 'webviewReady' });
+    // K4a: 처음 보이는 탭도 알린다(그 뒤로는 switchTab 이 알린다).
+    {
+        const t0 = document.querySelector('.tab-btn.active[data-tab]');
+        if (t0) {
+            vscode.postMessage({ command: 'viewReport', data: { screen: 'designer', view: 'tab:' + t0.getAttribute('data-tab'),
+                selection: null, follows_focus: false, by: 'program' } });
+        }
+    }
 
 })();
