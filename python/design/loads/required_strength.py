@@ -8,6 +8,8 @@
 V, 지점 반력)이고, 위치마다 지배 조합과 재하 패턴을 함께 낸다.
 """
 
+import json
+
 import numpy as np
 
 from design.loads.load_combinations import (
@@ -633,6 +635,7 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
         return None
     env = {}
     arg = {}
+    # np.argmax / argmin 은 같은 값이면 첫 번째를 고른다 → 동률이면 combos 목록에서 먼저 나온 조합(계약 §6.1).
     for q in ('M', 'V', 'R', 'VL', 'VR'):
         HI = np.vstack([v['env'][q][0] for v in vars_])
         LO = np.vstack([v['env'][q][1] for v in vars_])
@@ -658,11 +661,49 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
         _, desc = _pattern_at(var, units, q, idx, sense, pattern_on, snow_cases)
         return var['name'], desc
 
+    # 포락선의 값마다 그 값을 만든 조합 · 패턴(V6-08) — 런 길이 [start, count, combo_index, pattern_index].
+    # combo_index 는 이 결과의 'combos', pattern_index 는 'patterns' 표의 자리.
+    patterns, pat_ix = [], {}
+
+    def _pid(desc):
+        key = json.dumps(desc, sort_keys=True, ensure_ascii=False)
+        if key not in pat_ix:
+            pat_ix[key] = len(patterns)
+            patterns.append(desc)
+        return pat_ix[key]
+
+    def _runs(q, sense):
+        rows = arg[q][0 if sense > 0 else 1]
+        out = []
+        for idx in range(len(rows)):
+            vi = int(rows[idx])
+            _, desc = _pattern_at(vars_[vi], units, q, idx, sense, pattern_on, snow_cases)
+            pi = _pid(desc)
+            if out and out[-1][2] == vi and out[-1][3] == pi and out[-1][0] + out[-1][1] == idx:
+                out[-1][1] += 1
+            else:
+                out.append([idx, 1, vi, pi])
+        return out
+
+    env_source = {}
+    for q, name in (('M', 'M'), ('V', 'V'), ('R', 'R')):
+        env_source[name + '_max'] = _runs(q, +1)
+        env_source[name + '_min'] = _runs(q, -1)
+    env_source['patterns'] = patterns
+
     for loc in locs:
         idx, qk = loc.pop('_idx', None), loc.pop('_q', None)
         j = loc.pop('_sup', None)
-        if qk in ('Mmax', 'Mmin'):
+        if qk in ('Mmax', 'Mmin') and loc['name'].startswith('Lap end'):
+            # 랩 끝은 격자 사이의 선형 보간값이다 — 두 이웃 격자점(그 출처는 envelope_source)을 밝힌다.
+            xe = loc['x_ft']
+            k0 = max(i for i in range(len(x)) if x[i] <= xe + 1e-9) if xe >= x[0] else 0
+            loc['source_stations'] = [k0, min(k0 + 1, len(x) - 1)]
             loc['combo'], loc['pattern'] = gov('M', idx, +1 if qk == 'Mmax' else -1)
+        elif qk in ('Mmax', 'Mmin'):
+            loc['combo'], loc['pattern'] = gov('M', idx, +1 if qk == 'Mmax' else -1)
+            vs = +1 if abs(env['V'][0][idx]) >= abs(env['V'][1][idx]) else -1
+            loc['combo_V'], loc['pattern_V'] = gov('V', idx, vs)
         elif qk == 'support':
             if loc['Mu'] is None:
                 loc['combo'], loc['pattern'] = None, None
@@ -670,6 +711,13 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
                 loc['combo'], loc['pattern'] = gov('M', idx, -1 if loc['Mu'] < 0 else +1)
             r_sense = -1 if direction == 'uplift' else +1
             loc['combo_R'], loc['pattern_R'] = gov('R', j, r_sense)
+            # Vu = 지점 왼쪽 · 오른쪽 전단 포락의 큰 크기 — 그 쪽(V_side)과 조합 · 패턴
+            vl = max(abs(env['VL'][0][j]), abs(env['VL'][1][j]))
+            vr = max(abs(env['VR'][0][j]), abs(env['VR'][1][j]))
+            side = 'VL' if vl >= vr else 'VR'
+            vs = +1 if abs(env[side][0][j]) >= abs(env[side][1][j]) else -1
+            loc['V_side'] = 'left' if side == 'VL' else 'right'
+            loc['combo_V'], loc['pattern_V'] = gov(side, j, vs)
             if loc.get('R_uplift') is not None and loc['R_uplift'] < -1e-9:
                 loc['combo_R_uplift'], loc['pattern_R_uplift'] = gov('R', j, -1)
             else:
@@ -700,6 +748,7 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
         'R_envelope_max': env['R'][0].tolist(),
         'R_envelope_min': env['R'][1].tolist(),
         'combos': [v['name'] for v in vars_],
+        'envelope_source': env_source,
     }
 
 
@@ -808,6 +857,42 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
         d = np.where(np.abs(hi) >= np.abs(lo), hi, lo)
         return extract_max_deflection_per_span(x.tolist(), d.tolist(), spans, sup), d
 
+    def d_source(keys):
+        """부분재하 처짐 포락의 출처(V6-08): 격자점마다 하중별 재하 경간 — [start, count, pattern_index].
+        조합이 아니라 비계수 하중(또는 D + 활하중)이므로 combo 칸이 없다. 부분재하가 없으면 None."""
+        if all(_load_mode(k, pattern_on) == 'fixed' for k, _ in keys):
+            return None
+        pats, ix = [], {}
+        out = {}
+        for sense, name in ((+1, 'D_max'), (-1, 'D_min')):
+            runs = []
+            for idx in range(U.shape[1]):
+                desc = {}
+                for k, w in keys:
+                    mode = _load_mode(k, pattern_on)
+                    if mode == 'fixed':
+                        desc[k] = 'all spans'
+                    elif mode == 'subset':
+                        c = (w / 1000.0) * U[:, idx]
+                        loaded = [i for i in range(U.shape[0]) if sense * c[i] > 0]
+                        desc[k] = ('spans ' + ','.join(str(i + 1) for i in loaded) + ' loaded') if loaded \
+                            else 'not acting'
+                    else:
+                        vals = (w / 1000.0) * (P @ U[:, idx])
+                        desc[k] = snow_cases[int(np.argmax(vals)) if sense > 0 else int(np.argmin(vals))][0]
+                key = json.dumps(desc, sort_keys=True, ensure_ascii=False)
+                if key not in ix:
+                    ix[key] = len(pats)
+                    pats.append({'loads': desc})
+                pi = ix[key]
+                if runs and runs[-1][2] == pi and runs[-1][0] + runs[-1][1] == idx:
+                    runs[-1][1] += 1
+                else:
+                    runs.append([idx, 1, pi])
+            out[name] = runs
+        out['patterns'] = pats
+        return out
+
     cases = []
     for key in ('D', 'L', 'Lr', 'S', 'R', 'W'):
         if not present.get(key):
@@ -817,6 +902,9 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
         cases.append({'case': key, 'basis': 'unfactored, alone' + (' (pattern envelope)'
                       if _load_mode(key, pattern_on) != 'fixed' else ''),
                       'per_span': ps, 'D_envelope_max': hi.tolist(), 'D_envelope_min': lo.tolist()})
+        dsrc = d_source([(key, present[key])])
+        if dsrc:
+            cases[-1]['D_envelope_source'] = dsrc
     if Wp_plf > 0:
         hi, lo = single('W', Wp_plf)
         ps, d = per_span(hi, lo)
@@ -834,15 +922,19 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
         if not present.get(key):
             continue
         hi, lo = single(key, present[key])
-        totals.append((f'D+{key}', hiD + hi, loD + lo))
+        totals.append((f'D+{key}', hiD + hi, loD + lo, key))
     if not totals and present.get('D'):
-        totals.append(('D', hiD, loD))
+        totals.append(('D', hiD, loD, None))
     deflection = None
     best = None
-    for name, hi, lo in totals:
+    for name, hi, lo, lkey in totals:
         ps, d = per_span(hi, lo)
         cases.append({'case': name, 'basis': 'unfactored service total', 'per_span': ps,
                       'D_envelope_max': hi.tolist(), 'D_envelope_min': lo.tolist()})
+        if lkey:
+            dsrc = d_source(([('D', present['D'])] if present.get('D') else []) + [(lkey, present[lkey])])
+            if dsrc:
+                cases[-1]['D_envelope_source'] = dsrc
         mag = max(p['abs_delta_in'] for p in ps)
         if best is None or mag > best[0]:
             best = (mag, name, d, ps)

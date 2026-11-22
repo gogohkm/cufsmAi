@@ -43,6 +43,63 @@ from models.data import CufsmModel, GBTConfig, curve_rows_to_lists
 
 PROTOCOL_VERSION = 2
 
+# --------------------------------------------------------------------------- 엔진 식별(engine_id)
+# 저장한 결과(.csd)가 어느 엔진의 것인지 — 손으로 올리는 번호는 잊힌다. 결과에 영향을 줄 수 있는 엔진 소스
+# 전부의 sha256. 같은 소스면 실행 · 기계 · 줄끝(CRLF/LF)과 무관하게 같고, 한 바이트라도 바뀌면 다르다.
+# 한 파일이라도 읽지 못하거나 폴더가 없으면 'unknown' — 일부만으로 만든 해시를 내지 않는다.
+ENGINE_ID_DIRS = ('engine', 'design', 'cfsm', 'fcfsm', 'vibration', 'plastic', 'fileio', 'models')
+ENGINE_ID_FILES = ('server.py',)
+ENGINE_ID_SCHEME = 'engine-id/1'
+
+
+def _engine_sources(root: str) -> list:
+    """[(상대 경로 'design/checks.py', 바이트)] — 정렬. __pycache__ · 시험 파일은 뺀다. 못 읽으면 OSError."""
+    items = []
+    for d in ENGINE_ID_DIRS:
+        base = os.path.join(root, d)
+        if not os.path.isdir(base):
+            raise OSError(f'engine source folder missing: {d}/')
+        found = 0
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = sorted(x for x in dirnames if x != '__pycache__' and x not in ('test', 'tests'))
+            for f in filenames:
+                if not f.endswith('.py') or f.startswith('test_'):
+                    continue
+                full = os.path.join(dirpath, f)
+                rel = os.path.relpath(full, root).replace(os.sep, '/')
+                with open(full, 'rb') as fh:
+                    items.append((rel, fh.read()))
+                found += 1
+        if not found:
+            raise OSError(f'no .py source in {d}/ (compiled-only layout?)')
+    for f in ENGINE_ID_FILES:
+        with open(os.path.join(root, f), 'rb') as fh:
+            items.append((f, fh.read()))
+    return sorted(items)
+
+
+def engine_id_of(items) -> str:
+    """'sha256:<64 hex>' — 경로와 (줄끝을 LF 로 맞춘) 내용을 길이와 함께 차례로 넣는다."""
+    import hashlib
+    h = hashlib.sha256(ENGINE_ID_SCHEME.encode('ascii') + b'\n')
+    for rel, data in sorted(items):
+        body = data.replace(b'\r\n', b'\n')
+        path = rel.encode('utf-8')
+        h.update(len(path).to_bytes(4, 'big') + path + len(body).to_bytes(8, 'big') + body)
+    return 'sha256:' + h.hexdigest()
+
+
+def compute_engine_id(root: str | None = None) -> tuple:
+    """(engine_id, error) — 읽지 못하면 ('unknown', 까닭)."""
+    root = root or os.path.dirname(os.path.abspath(__file__))
+    try:
+        return engine_id_of(_engine_sources(root)), None
+    except Exception as e:  # noqa: BLE001 — 어떤 실패든 'unknown'
+        return 'unknown', f'{type(e).__name__}: {e}'
+
+
+ENGINE_ID, ENGINE_ID_ERROR = compute_engine_id()
+
 # 결과에서 순서가 뜻이 없는 목록(엔진이 set 으로 모은 것). 해시 시드와 무관한 출력을 위해 정렬한다.
 _UNORDERED_LIST_KEYS = frozenset({'spec_sections'})
 
@@ -320,7 +377,9 @@ def _m_selftest(params):
     py_ok = sys.version_info >= (3, 10)
     return {'ok': py_ok and not errors, 'python': sys.version.split()[0],
             'python_ok': py_ok, 'import_errors': errors,
-            'protocol_version': PROTOCOL_VERSION, 'methods': sorted(METHODS)}
+            'protocol_version': PROTOCOL_VERSION, 'engine_id': ENGINE_ID,
+            **({'engine_id_error': ENGINE_ID_ERROR} if ENGINE_ID_ERROR else {}),
+            'methods': sorted(METHODS)}
 
 
 def _m_analyze(params):

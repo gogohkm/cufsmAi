@@ -139,6 +139,45 @@
 - 엔진이 아는 위치만 채운다: 정모멘트 구간 검토 → `location: {segment: 'positive_moment_region', Lb, Cb}`.
 - **새 선택 입력**(값을 바꾸지 않는다): `check_location`(아무 JSON 값), `check_combination`(문자열)을 `aisi_design` · `design_connection` · `lap_connection` 에 주면 모든 항목에 그대로 붙는다. `check_combination` 이 있으면 소요의 `source.kind` 는 `load_analysis`. 퍼린 구간 설계(호스트 `StcfsdPanel`)가 구간 · 검토 지점(`M_max` · `V_max` · `support B`) · 대표 조합을 여기에 넣으면 된다(9절). 이 두 키는 `design.checks.CONTEXT_KEYS` 에 있고 접합부의 `_KNOWN_KEYS` 에는 **아직 넣지 않았다** — MCP 스키마가 열기 전에 넣으면 V4-05 호스트 ↔ 스키마 대조(`test/webview/mcp_si_chain.js`)가 '호스트만 받는 인자'로 잡는다. 스키마를 열 때 함께 옮긴다.
 
+### 6.1 하중 해석 포락선의 출처 (`analyze_loads`, 2026-11-24 V6-08)
+
+포락선의 값마다 그 값을 만든 **조합과 활하중 패턴**을 덧붙였다(옛 키 · 값은 그대로 — 기준선 8 사례, 값 46,576 개 비교, 차이 0).
+
+**`governing` · `gravity` · `uplift` 결과마다 `envelope_source`:**
+
+```
+envelope_source = {
+  "M_max": [[start, count, combo_index, pattern_index], …],   # M_envelope_max 의 격자점
+  "M_min": […], "V_max": […], "V_min": […],                     # M_envelope_min · V_envelope_max/min (x_diagram 격자)
+  "R_max": […], "R_min": […],                                   # R_envelope_max/min (지점 번호, 0 부터)
+  "patterns": [ {}, {"Lr": "spans 1,3 loaded"}, {"S": "<snow case>"}, … ]
+}
+```
+
+- 런 길이: 격자점 `start … start+count−1` 의 값이 `combos[combo_index]`(같은 결과의 `combos` 목록)와 `patterns[pattern_index]` 에서 왔다. 런은 빈틈없이 이어져 배열 전체를 덮는다.
+- 패턴은 하중 키 → 재하. 부분재하하지 않는 하중(D, W, …)은 싣지 않는다(= 모든 경간). `'spans i,j loaded'`(1 부터) · `'not acting'` · 눈 하중은 `pattern_loading.snow_cases` 의 이름. 위치 항목의 `pattern` 과 같은 말이다.
+- **그 조합 · 패턴의 도표(계수 × 하중을 그 경간에만 실은 보)를 풀면 그 점의 값이 포락값과 같다** — 시험 `test_review_1124_envelope_source.py` 가 보 해석기로 다시 풀어 확인한다(중력 · 양력 · Lr · L · S 부분재하 · 랩 · 내다지).
+- **동률 규칙:** 여러 조합이 같은 값을 내면 `combos` 에서 먼저 나온 조합. 경간의 기여가 정확히 0 이면 그 경간은 싣지 않는다(예: 끝 지점의 M — `{}` 또는 `'not acting'`). 눈 하중 경우가 같으면 먼저 나온 경우.
+- 랩 · 6경간(격자 301점)에서 `envelope_source` 셋을 합쳐 약 4.7 KB, 위치 항목의 덧붙임을 합쳐 결과 전체가 약 9 KB(4 %) 늘었다.
+
+**이름 붙은 위치(`locations[]`)에 덧붙인 키:**
+
+| 키 | 뜻 |
+|---|---|
+| `combo_V` · `pattern_V` | 그 위치의 `Vu` 를 만든 조합 · 패턴. 경간 ±M 위치는 그 격자점의 \|V\| 최대, 지점은 왼쪽 · 오른쪽 전단 가운데 큰 쪽 |
+| `V_side` | 지점의 `Vu` 가 지점 왼쪽(`'left'`)인지 오른쪽(`'right'`)인지 |
+| `source_stations` | 랩 끝: 값이 격자점 `[k, k+1]` 사이의 선형 보간이라는 뜻. 두 점의 출처는 `envelope_source` 에서 읽는다 — 두 점의 조합 · 패턴이 같을 때만 그 조합의 값이다(다르면 포락값). 이 위치의 옛 `combo` · `pattern` 은 가까운 격자점의 것 |
+
+(옛 키 `combo` · `pattern` 은 `Mu` 의, `combo_R` · `pattern_R` · `combo_R_uplift` 는 반력의 출처 — 그대로.)
+
+**처짐 포락(`deflection_cases[]`)** 가운데 부분재하가 든 것(L · Lr(감소) · S 와 D + 그것)에 `D_envelope_source = {"D_max": [[start, count, pattern_index], …], "D_min": […], "patterns": [{"loads": {"D": "all spans", "L": "spans 1,3 loaded"}}, …]}`. 처짐은 비계수 하중이라 조합 칸이 없다.
+
+**호스트가 쓸 것:** 검토 지점의 소요가 포락선 격자점 i 에서 왔으면 `'envelope'` 대신 `combos[ci]` + `patterns[pi]`(`_comboLabel` 과 같은 꼴). 같은 검토 지점의 M 과 V 의 출처가 다르면(아래 6.2) 그 지점은 하나의 하중 상태가 아니다.
+
+### 6.2 한 검토 지점의 M · V 는 같은 하중 상태가 아닐 수 있다
+
+포락선은 값마다 따로 최대를 고른다. 같은 격자점의 M 최대와 |V| 최대는 다른 조합 · 패턴에서 올 수 있다 — 따로 하는 검토(휨 단독, 전단 단독)에는 맞는 방법이지만, §H2 · §H3 의 상호작용은 **동시에 작용하는 값**(같은 하중 조합의 M 과 V)을 요구한다. `combo` 와 `combo_V`(또는 격자점의 두 출처)가 다르면 그 짝은 동시 값이 아니다(작업 보고 2026-11-24 에 예가 있다).
+
 ## 7. 단면 요소의 자리 `element_roles`
 
 템플릿 생성 결과에 요소 순서대로 붙는다(`len == len(elem)`). 손으로 만든 단면(`custom` · `custom_builder`)에는 **붙이지 않는다**(짐작하지 않는다).
@@ -846,3 +885,12 @@ V6-20 — 3 칸
 | I6.2.1 R exceeds table | `member.flexure.global` | verdict | "not_applicable" | "not_evaluated" |
 
 새 항목(S-1): lap bolt Se Mnd → `lap.block_shear` (not_evaluated), lap bolt Se e=2 → `lap.block_shear` (not_evaluated), lap bolt Sf only → `lap.block_shear` (not_evaluated), lap bolt no Se → `lap.block_shear` (not_evaluated), lap bolt short e → `lap.block_shear` (not_evaluated), lap bolt short lap → `lap.block_shear` (not_evaluated), lap overload fails → `lap.block_shear` (not_evaluated), lap screw Pnvs ASD → `lap.block_shear` (not_evaluated), lap screw no Pnvs → `lap.block_shear` (not_evaluated)
+
+## 15. 엔진 식별 `engine_id` (2026-11-24)
+
+`selftest` 응답의 `engine_id` — 결과를 낸 엔진의 소스 전부의 해시. 저장한 결과(.csd)가 지금 엔진의 것인지 가르는 데 쓴다(손으로 올리는 번호는 잊힌다).
+
+- 형식: `"sha256:" + 64자리 소문자 16진수`. 읽지 못하면 **`"unknown"`**(그때만 `engine_id_error` 에 까닭) — 일부 파일만으로 만든 해시는 내지 않는다. `"unknown"` 은 어떤 id 와도 같지 않은 것으로 다룬다.
+- 대상: `python/` 아래 `engine/ design/ cfsm/ fcfsm/ vibration/ plastic/ fileio/ models/` 의 모든 `.py`(하위 폴더 포함, `__pycache__` · `test_*.py` · `test`/`tests` 폴더 제외)와 `server.py`. 폴더가 없거나 그 안에 `.py` 가 하나도 없으면(컴파일만 한 배치) `"unknown"`.
+- 계산: 상대 경로('/' 구분)로 정렬, `"engine-id/1\n"` 다음에 파일마다 (경로 길이 4바이트 · 경로 UTF-8 · 내용 길이 8바이트 · 내용)을 넣는다. 내용은 CRLF → LF 로 맞춘다 — CRLF 로 꺼낸 저장소와 LF 로 꺼낸 저장소가 같은 id 다.
+- 서버를 띄울 때 한 번 계산한다(54 파일, 약 12 ms). 같은 소스면 실행 · 기계와 무관하게 같고, 한 바이트라도(또는 파일 이름이) 바뀌면 다르다. 시험: `test_review_1124_engine_id.py`.
