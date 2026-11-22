@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StCFSD</title>
+<link rel="stylesheet" href="/frame/frame.css">
+</head>
+<body>
+<!-- 첫 배포판의 틀 — 제목 표시줄(파일 이름 · Claude 연결 상태)과 지금의 설계 화면. 새 검토 화면은 뒤에 desktop/ui/ 에 짓는다. -->
+<header id="titlebar">
+  <span id="app-name">StCFSD</span>
+  <span id="file-name" title="">새 단면</span>
+  <span id="progress" hidden></span>
+  <span class="spacer"></span>
+  <span id="claude-status" title="Claude Desktop 연결 상태">Claude 연결 확인 중…</span>
+</header>
+<main id="stage">
+  <iframe id="designer" title="StCFSD Section Designer"></iframe>
+  <aside id="side" hidden>
+    <div id="side-head"><span id="side-title"></span><button id="side-close" type="button" title="닫기">✕</button></div>
+    <iframe id="side-frame" title="보고서"></iframe>
+  </aside>
+</main>
+<div id="toasts" aria-live="polite"></div>
+<div id="dialog-host"></div>
+<script src="/frame/frame.js"></script>
+</body>
+</html>

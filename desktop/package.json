@@ -11,7 +11,9 @@
     "build": "node host/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "headless": "node host/dist/headless.js",
-    "test": "npm run typecheck && npm run build && node host/test/smoke.mjs"
+    "test": "npm run typecheck && npm run build && node host/test/smoke.mjs && node host/test/bridge.mjs",
+    "serve": "node host/dist/serve.js",
+    "test:bridge": "npm run build && node host/test/bridge.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

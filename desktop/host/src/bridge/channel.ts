@@ -1,0 +1,128 @@
+/**
+ * 호스트 ↔ 웹뷰 통로 하나(웹뷰 하나에 하나)와 다시 보내기 기록.
+ *
+ * 왜 다시 보내기가 필요한가 — VS Code 의 웹뷰는 `retainContextWhenHidden` 이라 다시 뜨지 않는다. 호스트
+ * (`StcfsdPanel`)는 모델과 결과를 **메시지로 밀어 줄 뿐** 다시 보내는 길이 없다. 그리고 `webviewReady` 를 다시 받으면
+ * 모델을 기본 단면으로 덮어쓴다(G2 §2.1). 그래서 다리가 웹뷰의 생애를 맡는다:
+ *
+ *  - 설계 패널의 `webviewReady` 는 **다리가 한 번** 호스트에 보낸다(다리가 뜰 때 — VS Code 에서 패널이 처음 뜬 때와
+ *    같은 자리). 페이지가 보내는 `webviewReady` 는 호스트에 넘기지 않고 "이 페이지가 받을 준비가 됐다" 로만 쓴다.
+ *  - 호스트 → 웹뷰 메시지는 순서 번호와 함께 기록에 남는다. 페이지가 준비되면(처음이든 새로 고침이든) 기록을 **줄여서**
+ *    차례대로 보내고(다시 보내기), 그 뒤로는 오는 대로 보낸다.
+ *
+ * 줄이는 규칙(기록이 끝없이 크지 않게, 그러면서 보낸 차례는 지킨다):
+ *  1. 같은 명령은 마지막 것만 남긴다 — 웹뷰의 받는 쪽(app.js)은 명령마다 그 상태를 통째로 바꾼다.
+ *     남은 것들의 서로 간 차례는 원래 차례 그대로다.
+ *  2. 결과를 지우는 메시지가 오면 그 앞의 지워질 결과를 뺀다 — `resultsCleared`(다른 파일을 열기 직전 — 모든 결과),
+ *     `analysisInvalidated`(해석에서 나온 결과 · 설계 · Lap, `invalidateLoads` 면 하중 해석도). 지우는 메시지 자신은 남는다
+ *     (상태 글이 그대로 보이게). 빼지 않아도 끝 상태는 같지만, 다시 보낸 옛 `analysisComplete` 가 웹뷰의 자동 설계 DSM 준비를
+ *     부르는 것(호스트 계산)을 막는다.
+ *  3. 한 번만 뜻이 있는 것은 남기지 않는다 — `collectDesignData`(다시 보내면 저장이 돈다), `captureSection`(MCP 의 캡처 요청),
+ *     `showSection`(트리 클릭의 탭 이동).
+ *  4. 웹뷰가 스스로 다시 묻는 것은 남기지 않는다 — `propertiesResult` · `propertiesError`. 웹뷰는 `modelLoaded` ·
+ *     `templateGenerated` 를 그릴 때마다 단면 성질을 호스트에 다시 묻는다(app.js renderPreprocessor). 다시 보내면 그 답과 함께
+ *     두 번 그려 도심 축이 겹친다(시험에서 본 것).
+ *
+ * 새로 고침이 되살리지 못하는 것: 화면 칸에만 있고 아직 호스트에 보내지 않은 설계 탭 입력(K2 전까지 웹뷰에만 있다).
+ * 파일에서 연 입력은 `restoreDesignInputs` 로 되살아난다.
+ */
+import * as crypto from 'node:crypto';
+import type { SseStream } from './sse';
+
+const TRANSIENT = new Set(['collectDesignData', 'captureSection', 'showSection', 'propertiesResult', 'propertiesError']);
+/** `resultsCleared` 가 지우는 것 */
+const CLEARED_BY_RESULTS = new Set([
+  'analysisStarted', 'analysisComplete', 'analysisError', 'dsmResult', 'classifyResult', 'classifyError', 'designDsmPrepared',
+  'designResult', 'designPurlinResult', 'loadAnalysisComplete', 'lapConnectionResult', 'connectionResult',
+  'plasticResult', 'plasticError', 'vibrationResult', 'vibrationError', 'analysisInvalidated', 'propertiesResult',
+]);
+/** `analysisInvalidated` 가 지우는 것(웹뷰 clearStaleResults: 해석 · 설계 · Lap) */
+const CLEARED_BY_INVALIDATION = new Set([
+  'analysisStarted', 'analysisComplete', 'dsmResult', 'classifyResult', 'designDsmPrepared',
+  'designResult', 'designPurlinResult', 'lapConnectionResult',
+]);
+
+export interface ChannelClient {
+  conn: string;
+  sse: SseStream;
+  /** 다시 보내기를 마치고 오는 대로 받는다 */
+  ready: boolean;
+}
+
+interface Entry { seq: number; command: string; text: string }
+
+export class Channel {
+  client?: ChannelClient;
+  private seq = 0;
+  /** 명령 → 마지막 메시지(규칙 1 · 2 를 지킨 것) */
+  private readonly state = new Map<string, Entry>();
+  /** 받은 메시지 수 · 다시 보낸 수(진단용) */
+  posted = 0;
+  replays = 0;
+
+  constructor(
+    readonly id: string,
+    readonly viewType: string,
+    /** 이 명령을 페이지가 보내면 준비된 것. 없으면 붙자마자 준비(좌굴 보고서 패널) */
+    readonly readyCommand: string | undefined,
+  ) {}
+
+  /** 호스트 → 웹뷰 한 건. 준비된 페이지가 있으면 곧바로 보낸다. */
+  push(message: unknown): void {
+    this.posted += 1;
+    this.seq += 1;
+    const m = (message ?? {}) as { command?: unknown; data?: { invalidateLoads?: unknown } };
+    const command = typeof m.command === 'string' ? m.command : '(command 없음)';
+    let text: string;
+    try { text = JSON.stringify(message); } catch { return; }
+    if (!TRANSIENT.has(command)) {
+      if (command === 'resultsCleared') {
+        for (const c of CLEARED_BY_RESULTS) { this.state.delete(c); }
+      } else if (command === 'analysisInvalidated') {
+        for (const c of CLEARED_BY_INVALIDATION) { this.state.delete(c); }
+        if (m.data?.invalidateLoads) { this.state.delete('loadAnalysisComplete'); }
+      }
+      this.state.delete(command);
+      this.state.set(command, { seq: this.seq, command, text });
+    }
+    if (this.client?.ready) { this.client.sse.send(text, undefined, this.seq); }
+  }
+
+  /** 새 페이지가 붙었다. 앞의 연결은 멈추게 한다(웹뷰 하나에 페이지 하나 — 새로 붙는 쪽이 이긴다). */
+  attach(sse: SseStream): ChannelClient {
+    if (this.client) {
+      this.client.sse.send(JSON.stringify({ reason: '다른 페이지가 이 웹뷰를 가져갔다' }), 'superseded');
+      this.client.sse.close();
+    }
+    const client: ChannelClient = { conn: crypto.randomBytes(9).toString('base64url'), sse, ready: false };
+    this.client = client;
+    sse.onClose.push(() => { if (this.client === client) { this.client = undefined; } });
+    sse.send(JSON.stringify({ conn: client.conn, webview: this.id, viewType: this.viewType }), 'hello');
+    if (!this.readyCommand) { this.replayTo(client); }
+    return client;
+  }
+
+  /** 기록을 차례대로 보내고 준비 상태로 둔다 */
+  replayTo(client: ChannelClient): number {
+    if (client.ready) { return 0; }
+    const entries = [...this.state.values()].sort((a, b) => a.seq - b.seq);
+    for (const e of entries) { client.sse.send(e.text, undefined, e.seq); }
+    client.sse.send(JSON.stringify({ count: entries.length, commands: entries.map(e => e.command) }), 'replayed');
+    client.ready = true;
+    this.replays += 1;
+    return entries.length;
+  }
+
+  /** 다시 보낼 명령(차례대로) — 시험 · 진단용 */
+  replayCommands(): string[] {
+    return [...this.state.values()].sort((a, b) => a.seq - b.seq).map(e => e.command);
+  }
+
+  close(reason: string): void {
+    if (this.client) {
+      this.client.sse.send(JSON.stringify({ reason }), 'superseded');
+      this.client.sse.close();
+      this.client = undefined;
+    }
+  }
+}

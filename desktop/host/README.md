@@ -1,6 +1,6 @@
-# desktop/host — VS Code 없이 확장 호스트를 돌리는 호스트 (S1)
+# desktop/host — VS Code 없이 확장 호스트를 돌리는 호스트 (S1 · S2)
 
-2026-11-22 · 상태: **S1 끝(연기 시험 53 / 53)** — 화면 다리(S2) · 창(S3) · Claude 연결(S4)은 아직이다.
+2026-11-22 · 상태: **S1 끝(연기 시험 53 / 53)** · **S2 끝(다리 시험 59 / 59)** — 창(S3) · Claude 연결(S4)은 아직이다. 화면 다리의 API 는 [`BRIDGE.md`](BRIDGE.md).
 
 지금의 확장 호스트(`out/extension.js`, 루트 `tsc -p ./` 출력)를 **한 글자도 고치지 않고** Node 에서 `activate()` 한다.
 `require('vscode')` 자리에 대체 모듈을 넣고, 설계 패널을 만들어 프로그램이 끝날 때까지 쥐고 있는다.
@@ -14,10 +14,14 @@
 | `src/platform.ts` | `HostPlatform` — 호스트가 사용자 · OS 에 묻는 **유일한** 길(알림 · 고르기 · 입력 · 열기/저장 대화상자 · 진행 · 외부 주소 · 보이기). headless 구현, `withScriptedAnswers`(다음 대화상자의 답을 미리 넣는 감싸개) |
 | `src/loader.ts` | `startHost()` — 갈고리 · 포트 파일 방식 · 활성화 · 설계 패널 고정 · 웹뷰 대역 · `openProject`/`saveProject` · 정리 |
 | `src/standin.ts` | 화면이 없을 때 설계 패널의 웹뷰 대역(`webviewReady` · `collectDesignData` 에만 답한다) |
-| `src/headless.ts` | CLI |
+| `src/headless.ts` | 화면 없는 CLI |
+| `src/bridge/` | **화면 다리(S2)** — 127.0.0.1 + 토큰의 HTTP: 웹뷰 HTML 고쳐 쓰기(`inject.ts`) · 테마(`theme.ts`) · 호스트 ↔ 웹뷰 통로와 새로 고침 다시 보내기(`channel.ts`) · 호스트의 물음을 화면으로(`platform.ts`) · MCP 중계 · Claude 상태(`claude.ts`) · SSE(`sse.ts`) · 인증(`http.ts`). [`BRIDGE.md`](BRIDGE.md) |
+| `src/serve.ts` | 호스트 + 다리 CLI(브라우저로 열 주소를 출력) |
+| `frame/` | 틀(`/`): 제목 표시줄(파일 이름 · Claude 연결 상태) + 설계 패널 iframe + 좌굴 보고서 칸 + 호스트의 물음 · 알림. 빌드 없이 다리가 그대로 내준다 |
 | `src/index.ts` | 공개 API(시험 · 뒤의 다리 · 껍데기가 이것만 쓴다) |
-| `build.mjs` | esbuild — `dist/index.js` · `dist/headless.js`(Node 20 CJS 한 파일씩). `out/` 은 묶지 않고 실행 때 require |
-| `test/smoke.mjs` | 연기 시험(아래) |
+| `build.mjs` | esbuild — `dist/index.js` · `dist/headless.js` · `dist/serve.js`(Node 20 CJS 한 파일씩). `out/` 은 묶지 않고 실행 때 require. 빌드 뒤 웹뷰가 쓰는 `--vscode-*` 변수가 다리 테마에 모두 있는지 보고, 빠지면 멈춘다 |
+| `test/smoke.mjs` | 연기 시험 — 화면 없이(아래) |
+| `test/bridge.mjs` | 다리 시험 — 진짜 화면을 headless Edge/Chrome 으로(아래). 그림 · PDF 는 `test/out/`(git 에 넣지 않음) |
 
 ## 돌리기
 
@@ -25,7 +29,8 @@
 npx tsc -p ./                       # 저장소 루트 — out/ 이 src/ 보다 오래됐으면(적재기가 경고한다)
 cd desktop
 npm install
-npm test                            # 형 검사 → 빌드 → 연기 시험
+npm test                            # 형 검사 → 빌드 → 연기 시험 → 다리 시험
+npm run serve -- --open <파일.csd>  # 호스트 + 화면 다리. 출력된 「화면:」 주소(?t=토큰)를 브라우저로 연다
 npm run headless -- --open <파일.csd> [--open <또 하나>] [--port-file <경로>] [--port <n>] [--python <python.exe>] [--user-data <폴더>]
 ```
 
@@ -125,9 +130,27 @@ CLI 를 자식 프로세스로(`--port-file <임시> --open <Example/test.csd �
 
 `test/rendered/out/r_blank.csd`(화면 시험이 남기는 v1.3)가 없으면 그 단계는 건너뛴다.
 
+## 다리 시험(`test/bridge.mjs`)
+
+`serve` CLI 를 자식 프로세스로 띄우고(진짜 호스트 · Python), HTTP 로 인증 · 격리를 본 뒤, 이 PC 의 Edge/Chrome 을 headless 로 띄워
+DevTools 프로토콜로 진짜 화면을 DOM 으로 조작한다(`test/rendered/` 와 같은 방식). 브라우저가 없으면 화면 단계는 건너뛴다고 적고 HTTP 단계만 돈다.
+단계마다 화면을 찍고, 페이지 예외 · 콘솔 오류(CSP 위반 포함) · 화면 글자의 `undefined` / `NaN` / `[object Object]` 가 0 인지 본다. 마지막 실행 59 / 59, 약 50 초.
+
+0. 웹뷰가 쓰는 `--vscode-*` 38종이 두 테마에 모두 정의됐다
+1 – 2. serve 준비 줄 · 토큰 없음 401(11 경로 + POST) · `?t=` → HttpOnly · SameSite=Strict 쿠키 + 303 · 경로 넘나들기 8가지 거절 · 다른 Host / Origin / Sec-Fetch-Site 403 · MCP 중계는 되고 MCP 토큰은 화면 어디에도 없다 · Claude 상태(가짜 설정, 읽기만) · CSP 고쳐 쓰기와 nonce(요청마다 새것)
+3. 틀과 설계 웹뷰가 기본 단면을 그린다 · `--vscode-*` 가 웹뷰 안에서 모두 값이 있다
+4. DOM 으로: 립 Z 템플릿(재료 Fy 55 · Fu 70 을 분명히) → 좌굴 해석(곡선 캔버스에 그림) → 6경간 퍼린 하중 해석 → 설계 검토 → Lap 접합부 → 보고서 → 검증
+5. Save 단추 → 틀의 저장 물음(기본값 문서\StCFSD, 확인 전에는 폴더를 만들지 않음) → 임시 경로(설계 입력 124칸 · 해석 · 하중 · 설계 · Lap) → 다른 단면으로 바꾼 뒤 Open → 입력 · 결과가 돌아온다
+6. 좌굴 보고서가 오른쪽 칸(두 번째 웹뷰)으로 열리고 그 PDF 단추가 PDF 를 쓴다 · 보고서 탭의 PDF 저장
+7. MCP 중계로 `generate_template` → 화면의 단면이 바뀌고 낡은 결과가 지워진다 · `capture_section_preview` → 웹뷰가 그린 PNG
+8. 중계로 해석한 뒤 새로 고침 → 같은 단면(그림의 도형까지 같다) · 곡선 · DSM, 호스트 모델은 기본 단면으로 돌아가지 않는다
+9. 밝은 · 어두운 테마 — 본 화면 열세 곳의 글자 대비 ≥ 3
+10 – 11. 미구현 0 · IPC shutdown 코드 0 · 자식 프로세스 0 · 두 포트 풀림 · 포트 파일 지워짐 · desktop/ 밖 그대로 · 사용자 MCP · Claude Desktop 설정 · 앱 데이터 포트 파일 그대로
+
 ## 아는 빈 곳
 
-- **화면 캡처 없음** — `get_section_preview` 는 호스트의 5 초 시간 제한 오류로 끝난다(웹뷰 대역은 그리지 않는다). S2 에서 진짜 웹뷰가 붙으면 된다.
+- **화면 없이는 화면 캡처 없음** — headless 에서 `get_section_preview` 는 호스트의 5 초 시간 제한 오류로 끝난다(웹뷰 대역은 그리지 않는다). 화면 다리로 진짜 웹뷰가 붙어 있으면 된다(다리 시험 7).
+- 화면 다리로 안 되는 것 · S3 가 바꿀 것은 [`BRIDGE.md`](BRIDGE.md) 8절.
 - **설계 입력은 웹뷰에 있다** — 화면 없는 저장의 `designInputs` 는 마지막으로 연 파일의 것이다(위 「화면 없이 저장한 .csd 에 들어가는 것」, 저장마다 주의를 남긴다). K2(상태를 호스트로)의 일이다.
 - **Example/test.csd 의 단면은 템플릿 기록이 없는 비대칭 단면**이라 엔진이 압축 전체좌굴을 평가하지 않고(Pne = 0) 퍼린 설계도 판정 없음(pass = null)으로 끝난다. 엔진의 정직한 결과이고, 시험은 "돌고 FSM 값을 쓴다" 까지만 본다. 판정이 나는 설계는 2단계의 립 C 로 본다.
 - **Python 이 없을 때** — 확장의 `checkAndInstallDependencies` 가 묻는 「다운로드 페이지 열기」 · 「설치」 에 headless 는 답하지 않는다(취소). 묶음 Python(S5) 전에는 개발판만 된다.

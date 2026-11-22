@@ -1,0 +1,45 @@
+/* 틀의 색은 VS Code 기본 테마(Dark Modern / Light Modern)와 같게 둔다 — 안의 웹뷰와 어긋나지 않게. */
+:root{--bg:#1f1f1f;--bar:#181818;--fg:#cccccc;--muted:#9d9d9d;--border:#2b2b2b;--accent:#0078d4;--accent-fg:#ffffff;
+  --panel:#202020;--input:#313131;--input-border:#3c3c3c;--err:#f85149;--warn:#cca700;--ok:#89d185;color-scheme:dark}
+:root.light{--bg:#ffffff;--bar:#f8f8f8;--fg:#3b3b3b;--muted:#6b6b6b;--border:#e5e5e5;--accent:#005fb8;--accent-fg:#ffffff;
+  --panel:#f8f8f8;--input:#ffffff;--input-border:#cecece;--err:#d1242f;--warn:#9a6700;--ok:#1a7f37;color-scheme:light}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+  font:13px "Segoe UI","Malgun Gothic",system-ui,sans-serif;overflow:hidden}
+#titlebar{height:30px;display:flex;align-items:center;gap:12px;padding:0 12px;background:var(--bar);
+  border-bottom:1px solid var(--border);white-space:nowrap}
+#app-name{font-weight:600}
+#file-name{color:var(--muted);overflow:hidden;text-overflow:ellipsis;max-width:50vw}
+#progress{color:var(--warn)}
+.spacer{flex:1}
+#claude-status{color:var(--muted)}
+#claude-status.connected{color:var(--ok)}
+#stage{position:absolute;top:31px;left:0;right:0;bottom:0;display:flex}
+#designer{flex:1 1 auto;border:0;width:100%;height:100%;min-width:0}
+#side{flex:0 0 46%;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--panel)}
+#side[hidden]{display:none}
+#side-head{display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid var(--border)}
+#side-title{flex:1;font-weight:600}
+#side-close{background:transparent;border:0;color:var(--fg);cursor:pointer;font-size:14px}
+#side-frame{flex:1;border:0;width:100%}
+#toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:20;max-width:46vw}
+.toast{background:var(--panel);border:1px solid var(--border);border-left:4px solid var(--accent);padding:8px 12px;
+  border-radius:4px;box-shadow:0 2px 8px #0006;white-space:pre-wrap;word-break:break-word}
+.toast.warning{border-left-color:var(--warn)}
+.toast.error{border-left-color:var(--err)}
+#dialog-host{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:#0008;z-index:30}
+#dialog-host.open{display:flex}
+.dialog{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:16px 18px;min-width:420px;
+  max-width:70vw;max-height:80vh;overflow:auto;box-shadow:0 6px 24px #0009}
+.dialog h2{font-size:14px;margin:0 0 10px}
+.dialog .msg{white-space:pre-wrap;word-break:break-word;margin:0 0 8px}
+.dialog .detail{white-space:pre-wrap;color:var(--muted);font-size:12px;margin:0 0 10px}
+.dialog .hint{color:var(--muted);font-size:12px;margin:6px 0 0}
+.dialog input[type=text]{width:100%;box-sizing:border-box;background:var(--input);color:var(--fg);
+  border:1px solid var(--input-border);border-radius:3px;padding:6px 8px;font:inherit}
+.dialog .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap}
+.dialog button{background:var(--input);color:var(--fg);border:1px solid var(--input-border);border-radius:3px;padding:5px 14px;cursor:pointer;font:inherit}
+.dialog button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.dialog .items{display:flex;flex-direction:column;gap:4px}
+.dialog .items button{text-align:left}
+.dialog .items .desc{color:var(--muted);margin-left:8px}
+.dialog .error{color:var(--err);font-size:12px;margin-top:6px}

@@ -7,3 +7,11 @@ export type {
   FileDialogRequest, ProgressState, PlatformQuestion, ScriptedPlatform, ScriptedDialog,
 } from './platform';
 export type { WebviewInfo, WebviewResourceMapper } from './vscode';
+export {
+  startBridge, createBridgePlatform, defaultDocumentsDir, themeVariables, usedThemeVariables, missingThemeVariables,
+  themeCss, injectWebviewHtml, rewriteCsp, rewriteResourceUrls,
+} from './bridge';
+export type {
+  StartBridgeOptions, BridgeHandle, BridgePlatform, BridgePlatformOptions, PendingQuestion, BridgeClaudeOptions,
+  ClaudeStatus, BridgeEvent, ThemeName,
+} from './bridge';

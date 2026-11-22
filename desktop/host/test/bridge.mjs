@@ -1,0 +1,672 @@
+// S2 시험 — 화면 다리 + 지금의 웹뷰. CLI(`host/dist/serve.js`)를 자식 프로세스로 띄우고(진짜 호스트 · 진짜 Python),
+// HTTP 로 인증 · 격리를 보고, 이 PC 의 Edge/Chrome 을 headless 로 띄워 DevTools 프로토콜(CDP, Node 의 WebSocket)로
+// 진짜 화면(탭 6개)을 DOM 으로 조작한다(`test/rendered/lib.js` 와 같은 방식 — 그 파일은 읽기만 했다).
+//
+//   cd desktop && npm test          (형 검사 · 빌드 · smoke 뒤에 이 파일)
+//   node desktop/host/test/bridge.mjs
+//
+// 브라우저가 없으면 화면 단계는 건너뛴다고 분명히 적고 HTTP 단계만 돈다. 브라우저는 STCFSD_BROWSER 로 지정할 수 있다.
+// 그림은 host/test/out/(git 에 넣지 않음). 모델 파일은 임시 폴더 사본만 쓴다. Claude 설정은 임시 폴더의 가짜 경로만 준다.
+import { spawn, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as net from 'node:net';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const here = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(here, '..', '..', '..');
+const SERVE = path.join(here, '..', 'dist', 'serve.js');
+const OUT = path.join(here, 'out');
+const VERBOSE = process.env.SMOKE_VERBOSE === '1';
+const W = 1400, H = 1000;
+
+const results = [];
+const started = Date.now();
+function check(name, ok, detail = '') {
+  results.push({ name, ok: !!ok, detail });
+  process.stdout.write(`${ok ? '  통과' : '  실패'}  ${name}${detail ? ` — ${detail}` : ''}\n`);
+  return !!ok;
+}
+const skip = (name, why) => { results.push({ name, ok: true, skipped: true }); process.stdout.write(`  건너뜀 ${name} — ${why}\n`); };
+const section = title => process.stdout.write(`\n▶ ${title}  (+${((Date.now() - started) / 1000).toFixed(1)} s)\n`);
+const short = (v, n = 200) => { const s = typeof v === 'string' ? v : JSON.stringify(v); return s && s.length > n ? `${s.slice(0, n)}…` : s; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ── 저장소 · 설정 파일 (smoke 와 같은 방식) ─────────────────────────────
+function repoSnapshot() {
+  const r = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: repoRoot, encoding: 'utf8' });
+  const map = new Map();
+  const parts = r.stdout.split('\0').filter(Boolean);
+  for (let i = 0; i < parts.length; i++) {
+    const status = parts[i].slice(0, 2);
+    const file = parts[i].slice(3);
+    if (status[0] === 'R' || status[0] === 'C') { i++; }
+    if (file.startsWith('desktop/')) { continue; }
+    let st = 'none';
+    try { const s = fs.statSync(path.join(repoRoot, file)); st = `${s.size}:${s.mtimeMs}`; } catch { /* 지워짐 */ }
+    map.set(file, `${status}|${st}`);
+  }
+  return map;
+}
+const diffSnapshots = (a, b) => {
+  const out = [];
+  for (const [k, v] of b) { if (a.get(k) !== v) { out.push(k); } }
+  for (const k of a.keys()) { if (!b.has(k)) { out.push(`${k}(사라짐)`); } }
+  return out;
+};
+const HOME = process.env.USERPROFILE || process.env.HOME || os.homedir();
+const APPDATA = process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
+const USER_CONFIG_FILES = [
+  path.join(repoRoot, '.mcp.json'), path.join(repoRoot, '.claude', 'mcp.json'),
+  path.join(repoRoot, 'Example', '.mcp.json'), path.join(repoRoot, 'Example', '.claude', 'mcp.json'),
+  path.join(HOME, '.claude', 'mcp.json'), path.join(APPDATA, 'Claude', 'claude_desktop_config.json'),
+  path.join(APPDATA, 'StCFSD', 'mcp', 'stcfsd-mcp-port'),
+];
+const statOf = f => { try { const s = fs.statSync(f); return `${s.size}:${s.mtimeMs}`; } catch { return '없음'; } };
+
+function descendants(rootPid) {
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command',
+    'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress'], { encoding: 'utf8' });
+  let rows = [];
+  try { rows = JSON.parse(r.stdout).map(p => ({ pid: p.ProcessId, ppid: p.ParentProcessId, name: p.Name })); } catch { rows = []; }
+  const found = [];
+  const queue = [rootPid];
+  while (queue.length) {
+    const p = queue.shift();
+    for (const row of rows) { if (row.ppid === p && !found.some(f => f.pid === row.pid)) { found.push(row); queue.push(row.pid); } }
+  }
+  return found;
+}
+const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const portIsFree = port => new Promise(resolve => {
+  const s = net.createServer();
+  s.once('error', () => resolve(false));
+  s.listen(port, '127.0.0.1', () => s.close(() => resolve(true)));
+});
+const freePort = () => new Promise((resolve, reject) => {
+  const s = net.createServer();
+  s.once('error', reject);
+  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
+});
+
+function findBrowser() {
+  const pf = process.env.PROGRAMFILES || 'C:\\Program Files';
+  const pf86 = process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)';
+  const local = process.env.LOCALAPPDATA || '';
+  const c = [process.env.STCFSD_BROWSER,
+    path.join(pf86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'), path.join(pf, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+    path.join(pf, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(pf86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+    local && path.join(local, 'Google', 'Chrome', 'Application', 'chrome.exe')];
+  return c.find(p => p && fs.existsSync(p));
+}
+
+/** 웹뷰가 쓰는 --vscode-* 이름(빌드의 확인과 같은 출처) */
+function usedVariables() {
+  const { usedThemeVariables } = require('../dist/index.js');
+  const texts = [fs.readFileSync(path.join(repoRoot, 'src', 'webview', 'StcfsdPanel.ts'), 'utf8')];
+  const walk = dir => { for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isDirectory()) { walk(p); } else if (/\.(js|css|html)$/.test(e.name)) { texts.push(fs.readFileSync(p, 'utf8')); }
+  } };
+  walk(path.join(repoRoot, 'webview'));
+  return usedThemeVariables(texts);
+}
+
+// ── CLI ─────────────────────────────────────────────────────────────────
+function startServe(args) {
+  const child = spawn(process.execPath, [SERVE, ...args], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  const lines = [];
+  let err = '';
+  let buf = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', c => { buf += c; let nl; while ((nl = buf.indexOf('\n')) >= 0) { lines.push(buf.slice(0, nl).replace(/\r$/, '')); buf = buf.slice(nl + 1); } });
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', c => { err = (err + c).slice(-30_000); if (VERBOSE) { process.stderr.write(c); } });
+  let seq = 0;
+  const pending = new Map();
+  child.on('message', m => { const p = pending.get(m?.id); if (p) { pending.delete(m.id); p(m); } });
+  const exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })));
+  const ipc = (type, extra = {}, timeoutMs = 60_000) => new Promise((resolve, reject) => {
+    seq += 1;
+    const id = seq;
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`IPC ${type} 답 없음`)); }, timeoutMs);
+    pending.set(id, m => { clearTimeout(timer); m.ok ? resolve(m.result) : reject(new Error(m.error)); });
+    child.send({ id, type, ...extra });
+  });
+  const waitLine = async (re, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const hit = lines.find(l => re.test(l));
+      if (hit) { return hit; }
+      if (child.exitCode !== null) { throw new Error(`serve 가 끝났다(코드 ${child.exitCode}): ${err.slice(-1500)}`); }
+      if (Date.now() > deadline) { throw new Error(`${re} 줄이 없다: ${lines.join(' | ').slice(-800)}`); }
+      await sleep(50);
+    }
+  };
+  return { child, lines, stderr: () => err, ipc, waitLine, exited };
+}
+
+// ── CDP ─────────────────────────────────────────────────────────────────
+class Cdp {
+  constructor(ws) {
+    this.ws = ws; this.id = 0; this.pending = new Map(); this.handlers = [];
+    ws.addEventListener('message', ev => {
+      const m = JSON.parse(typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString());
+      if (m.id && this.pending.has(m.id)) { const p = this.pending.get(m.id); this.pending.delete(m.id); if (m.error) { p.rej(new Error(m.error.message)); } else { p.res(m.result); } }
+      else if (m.method) { for (const h of this.handlers) { h(m.method, m.params); } }
+    });
+  }
+  send(method, params = {}) { const id = ++this.id; this.ws.send(JSON.stringify({ id, method, params })); return new Promise((res, rej) => this.pending.set(id, { res, rej })); }
+  on(h) { this.handlers.push(h); }
+}
+
+async function startBrowser(exe, profile) {
+  const port = await freePort();
+  const browser = spawn(exe, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--no-first-run',
+    '--no-default-browser-check', '--disable-extensions', '--disable-gpu', `--window-size=${W},${H}`, 'about:blank'], { stdio: 'ignore' });
+  let target;
+  for (let i = 0; i < 150 && !target; i++) {
+    await sleep(200);
+    try { const l = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); target = l.find(t => t.type === 'page'); } catch { /* 다시 */ }
+  }
+  if (!target) { throw new Error('브라우저가 뜨지 않았다'); }
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((r, j) => { ws.addEventListener('open', r); ws.addEventListener('error', j); });
+  const cdp = new Cdp(ws);
+  const log = { console: [], exceptions: [] };
+  cdp.on((method, p) => {
+    if (method === 'Runtime.consoleAPICalled') {
+      const text = (p.args || []).map(a => (a.value !== undefined ? (typeof a.value === 'object' ? JSON.stringify(a.value) : String(a.value)) : (a.description || a.type))).join(' ');
+      log.console.push({ type: p.type, text });
+    } else if (method === 'Runtime.exceptionThrown') {
+      const d = p.exceptionDetails;
+      log.exceptions.push({ text: (d.exception && d.exception.description) || d.text, url: d.url, line: d.lineNumber });
+    } else if (method === 'Log.entryAdded') {
+      log.console.push({ type: `log-${p.entry.level}`, text: `${p.entry.text} ${p.entry.url || ''}` });
+    }
+  });
+  await cdp.send('Runtime.enable');
+  await cdp.send('Page.enable');
+  await cdp.send('Log.enable');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+  return {
+    cdp, log, pid: browser.pid,
+    async close() {
+      try { ws.close(); } catch { /* */ }
+      try { spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* */ }
+      try { browser.kill(); } catch { /* */ }
+    },
+  };
+}
+
+async function main() {
+  fs.mkdirSync(OUT, { recursive: true });
+  for (const f of fs.readdirSync(OUT)) { if (f.endsWith('.png') || f.endsWith('.pdf')) { fs.rmSync(path.join(OUT, f), { force: true }); } }
+  const repoBefore = repoSnapshot();
+  const configBefore = new Map(USER_CONFIG_FILES.map(f => [f, statOf(f)]));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd-s2-bridge-'));
+  const portFile = path.join(tmp, 'mcp', 'stcfsd-mcp-port');
+  const docs = path.join(tmp, 'Documents');
+  const claudeConfig = path.join(tmp, 'Claude', 'claude_desktop_config.json');
+
+  section('0. 빌드 확인 — 테마 변수');
+  const used = usedVariables();
+  const { missingThemeVariables, themeVariables } = require('../dist/index.js');
+  const missing = missingThemeVariables(used);
+  check(`웹뷰가 쓰는 --vscode-* ${used.length}종이 dark · light 에 모두 정의됐다`, missing.length === 0 && used.length >= 30,
+    missing.map(m => `${m.theme}:${m.name}`).join(', ') || `${Object.keys(themeVariables('dark')).length}개 정의`);
+
+  section('1. serve CLI 시작');
+  let t = Date.now();
+  const serve = startServe(['--repo', repoRoot, '--user-data', path.join(tmp, 'userData'), '--port-file', portFile,
+    '--documents', docs, '--claude-config', claudeConfig]);
+  let ready;
+  try { ready = JSON.parse((await serve.waitLine(/^STCFSD_BRIDGE_READY /, 150_000)).slice('STCFSD_BRIDGE_READY '.length)); }
+  catch (err) { check('serve 가 준비 줄을 낸다', false, String(err.message)); serve.child.kill(); return finish(); }
+  check('serve 가 준비 줄을 낸다', true, `${Date.now() - t} ms · ${ready.origin} · MCP ${ready.mcpPort}`);
+  const origin = ready.origin;
+  const token = new URL(ready.url).searchParams.get('t');
+  const mcpToken = JSON.parse(fs.readFileSync(portFile, 'utf8')).token;
+  const api = async (method, route, body, headers = {}) => {
+    const res = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close', ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body) });
+    const text = await res.text();
+    let json; try { json = JSON.parse(text); } catch { json = undefined; }
+    return { status: res.status, text, json };
+  };
+  const status0 = (await api('GET', '/api/state')).json?.data;
+  const designerId = status0?.designer;
+  const wvPath = `/wv/${encodeURIComponent(designerId)}/`;
+
+  section('2. 인증 · 격리 (HTTP)');
+  const noTokenRoutes = ['/', '/frame/frame.js', wvPath, '/res/webview/js/app.js', '/res/media/viewer3d.js', '/api/state', '/api/events',
+    `/api/wv/${encodeURIComponent(designerId)}/out`, '/api/mcp/status', '/api/claude/status', '/nowhere'];
+  const noTok = [];
+  for (const r of noTokenRoutes) { const res = await fetch(`${origin}${r}`, { headers: { Connection: 'close' } }); noTok.push(`${r} ${res.status}`); await res.arrayBuffer(); }
+  check('토큰 없는 요청은 모든 경로에서 401', noTok.every(x => / 401$/.test(x)), noTok.filter(x => !/ 401$/.test(x)).join(', ') || `${noTok.length}개 경로`);
+  const post401 = await fetch(`${origin}/api/platform/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  check('토큰 없는 POST 도 401', post401.status === 401, `HTTP ${post401.status}`);
+  const boot = await fetch(ready.url, { redirect: 'manual' });
+  const cookie = boot.headers.get('set-cookie') ?? '';
+  check('?t= 로 들어오면 HttpOnly · SameSite=Strict 쿠키 + 토큰 없는 주소로 303', boot.status === 303 && /HttpOnly/.test(cookie)
+    && /SameSite=Strict/.test(cookie) && !(boot.headers.get('location') ?? '').includes(token), `${boot.status} → ${boot.headers.get('location')} · ${cookie.split(';').slice(1).join(';')}`);
+  const trav = ['/res/webview/..%2F..%2Fpackage.json', '/res/webview/%2e%2e/%2e%2e/package.json', '/res/webview/js/..%5C..%5C..%5Cpackage.json',
+    '/res/media/..%2Fsrc%2Fextension.ts', '/res/src/extension.ts', '/res/webview/C:%5CWindows%5Cwin.ini', '/frame/..%2Fsrc%2Fserve.ts', '/res/denied'];
+  const travRes = [];
+  for (const r of trav) { const x = await api('GET', r); travRes.push(`${r} ${x.status}`); }
+  check('리소스 경로로 뿌리 밖을 읽을 수 없다(경로 넘나들기 거절)', travRes.every(x => !/ 200$/.test(x)), travRes.filter(x => / 200$/.test(x)).join(', ') || `${trav.length}건 모두 404/403`);
+  const okRes = await api('GET', '/res/webview/js/app.js');
+  check('허용 뿌리 안의 리소스는 읽힌다', okRes.status === 200 && okRes.text.includes('acquireVsCodeApi'), `app.js ${okRes.text.length}자`);
+  const badHost = await new Promise(resolve => {
+    const s = net.connect(ready.port, '127.0.0.1', () => { s.write(`GET /api/state HTTP/1.1\r\nHost: evil.example:${ready.port}\r\nAuthorization: Bearer ${token}\r\nConnection: close\r\n\r\n`); });
+    let d = ''; s.on('data', c => { d += c; }); s.on('end', () => resolve(d.split('\r\n')[0])); s.on('error', e => resolve(String(e)));
+  });
+  check('다른 Host 머리는 403(DNS rebinding)', /403/.test(badHost), badHost);
+  const badOrigin = await api('GET', '/api/state', undefined, { Origin: 'http://evil.example' });
+  const crossSite = await api('GET', '/api/state', undefined, { 'Sec-Fetch-Site': 'cross-site' });
+  check('다른 Origin · 다른 사이트 요청은 403', badOrigin.status === 403 && crossSite.status === 403, `Origin ${badOrigin.status} · Sec-Fetch-Site ${crossSite.status}`);
+  const relayed = await api('GET', '/api/mcp/status');
+  check('MCP 중계 — 다리 토큰으로 호스트 MCP 를 읽는다', relayed.status === 200 && relayed.json && 'nnodes' in relayed.json, short(relayed.text, 90));
+  const leak = [relayed.text, (await api('GET', '/api/state')).text, (await api('GET', '/api/claude/status')).text, (await api('GET', wvPath)).text,
+    (await api('GET', '/')).text, (await api('GET', '/frame/frame.js')).text];
+  check('MCP 토큰이 화면에 가는 어디에도 없다(중계 · 상태 · 웹뷰 HTML · 틀)', leak.every(x => !x.includes(mcpToken)), `${leak.length}곳`);
+  const claude = (await api('GET', '/api/claude/status')).json?.data;
+  check('/api/claude/status — 가짜 설정 경로 · 읽기만', claude?.configPath === claudeConfig && claude.state === 'not-installed' && !fs.existsSync(path.dirname(claudeConfig)),
+    `${claude?.state} · ${claude?.text}`);
+  const html = (await api('GET', wvPath)).text;
+  const cspMeta = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(html)?.[1] ?? '';
+  const nonce = /'nonce-([^']+)'/.exec(cspMeta)?.[1];
+  const scriptNonces = [...html.matchAll(/<script[^>]*\snonce="([^"]*)"/g)].map(m => m[1]);
+  check('웹뷰 HTML — CSP 는 다리 출처 · 새 nonce · connect-src, 리소스는 /res/ 로', !!nonce && cspMeta.includes("connect-src 'self'")
+    && !html.includes('vscode-cdn.net') && !html.includes('vscode-resource') && scriptNonces.length >= 6 && scriptNonces.every(n => n === nonce)
+    && /src="\/res\/webview\/js\/app\.js"/.test(html), short(cspMeta, 160));
+  const html2 = (await api('GET', wvPath)).text;
+  check('nonce 는 요청마다 새것', /'nonce-([^']+)'/.exec(html2)?.[1] !== nonce);
+
+  // ── 화면 ────────────────────────────────────────────────────────────
+  const exe = findBrowser();
+  let br;
+  if (!exe) {
+    skip('화면 단계(3 – 9)', '이 PC 에 Edge/Chrome 이 없다 — STCFSD_BROWSER 로 실행 파일을 줄 수 있다');
+  } else {
+    br = await startBrowser(exe, path.join(tmp, 'browser-profile'));
+    try { await screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId }); }
+    catch (err) { check('화면 단계가 예외 없이 끝난다', false, String(err?.stack ?? err).slice(0, 1500)); }
+    finally { await br.close(); }
+  }
+
+  section('10. 끝내기 — 프로세스 · 포트가 남지 않는다');
+  const st = await serve.ipc('status');
+  check('미구현 vscode API 에 닿은 곳이 없다', st.unimplemented.length === 0, st.unimplemented.map(u => u.name).join(', ') || '0종');
+  check('활성화 중 MCP 설정 파일 쓰기 0', st.mcpConfigWrites.length === 0, st.mcpConfigWrites.join(', ') || '0건');
+  const kids = descendants(serve.child.pid);
+  t = Date.now();
+  await serve.ipc('shutdown', {}, 10_000).catch(() => undefined);
+  const exit = await Promise.race([serve.exited, sleep(30_000).then(() => undefined)]);
+  check('IPC shutdown 뒤 스스로 끝난다(코드 0)', exit?.code === 0, exit ? `${Date.now() - t} ms · 코드 ${exit.code}` : '30 초 안에 끝나지 않음');
+  if (!exit) { serve.child.kill(); }
+  for (let i = 0; i < 100 && kids.some(k => alive(k.pid)); i++) { await sleep(50); }
+  const left = kids.filter(k => alive(k.pid));
+  check('남은 자식 프로세스(Python · PDF 용 브라우저)가 없다', left.length === 0, left.map(k => `${k.name}#${k.pid}`).join(', ') || `${kids.length}개 모두 끝남`);
+  check('다리 · MCP 포트가 풀렸다', await portIsFree(ready.port) && await portIsFree(ready.mcpPort), `${ready.port} · ${ready.mcpPort}`);
+  check('MCP 포트 파일이 지워졌다', !fs.existsSync(portFile));
+
+  section('11. 저장소 · 사용자 설정 파일');
+  const changed = diffSnapshots(repoBefore, repoSnapshot());
+  check('desktop/ 밖에서 저장소가 바뀌지 않았다', changed.length === 0, changed.slice(0, 8).join('; ') || '그대로');
+  const cfgChanged = USER_CONFIG_FILES.filter(f => statOf(f) !== configBefore.get(f));
+  check('사용자 MCP · Claude Desktop 설정 · 앱 데이터 포트 파일이 그대로다', cfgChanged.length === 0, cfgChanged.join(', ') || `${USER_CONFIG_FILES.length}개 경로 그대로`);
+  const stray = fs.readdirSync(path.join(here, '..', 'src'), { recursive: true }).filter(f => String(f).endsWith('.js'));
+  check('host/src 에 tsc 출력이 섞이지 않았다', stray.length === 0, stray.join(', ') || '0개');
+  fs.rmSync(tmp, { recursive: true, force: true });
+  return finish(serve);
+}
+
+function finish(serve) {
+  const failed = results.filter(r => !r.ok);
+  process.stdout.write(`\n결과: ${results.length - failed.length}/${results.length} 통과 · ${((Date.now() - started) / 1000).toFixed(1)} s · 그림 ${OUT}\n`);
+  if (failed.length) {
+    process.stdout.write(`실패: ${failed.map(f => f.name).join(' / ')}\n`);
+    if (serve) { process.stdout.write(`serve stderr 끝:\n${serve.stderr().split('\n').filter(l => !l.startsWith('[StCFSD Python stderr]')).slice(-30).join('\n')}\n`); }
+    process.exitCode = 1;
+  }
+}
+
+// ── 화면 단계 ───────────────────────────────────────────────────────────
+async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used }) {
+  const { cdp, log } = br;
+  const evalTop = async expr => {
+    const r = await cdp.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) { throw new Error(`eval: ${(r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text}`); }
+    return r.result.value;
+  };
+  /** 설계 웹뷰(iframe) 안에서 — D = document, W = window */
+  const wv = body => evalTop(`(()=>{const W=document.getElementById('designer').contentWindow;const D=W.document;${body}})()`);
+  const setVal = (id, v) => wv(`const e=D.getElementById(${JSON.stringify(id)}); if(!e) return 'MISSING';
+    if(e.type==='checkbox'){e.checked=!!${JSON.stringify(v)};} else {e.value=${JSON.stringify(String(v))};}
+    e.dispatchEvent(new W.Event('input',{bubbles:true})); e.dispatchEvent(new W.Event('change',{bubbles:true})); return 'ok';`);
+  const click = sel => wv(`const e=D.querySelector(${JSON.stringify(sel)}); if(!e) return 'MISSING'; e.click(); return 'ok';`);
+  const tab = name => click(`.tab-btn[data-tab="${name}"]`);
+  const text = sel => wv(`const e=D.querySelector(${JSON.stringify(sel)}); return e? e.innerText : null;`);
+  const reveal = id => wv(`const e=D.getElementById(${JSON.stringify(id)}); if(e){e.scrollIntoView({block:'start'});} return !!e;`);
+  const counts = async () => (await serve.ipc('status')).messageCounts;
+  const waitMsg = async (command, since, timeout = 300_000) => {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      const c = (await counts())[command] ?? 0;
+      if (c > since) { await sleep(400); return c; }
+      if (Date.now() > deadline) { throw new Error(`${command} 가 ${timeout} ms 안에 오지 않았다`); }
+      await sleep(150);
+    }
+  };
+  const cnt = async command => (await counts())[command] ?? 0;
+  const mark = () => ({ con: log.console.length, exc: log.exceptions.length });
+  const problems = m => ({
+    exceptions: log.exceptions.slice(m.exc).map(e => short(e.text, 160)),
+    errors: log.console.slice(m.con).filter(c => c.type === 'error' || c.type === 'log-error' || c.type === 'assert').map(c => short(c.text, 160)),
+  });
+  const badTokens = () => wv(`const t=D.body.innerText; const out=[]; const re=/(undefined|NaN|\\[object Object\\])/g; let m;
+    while((m=re.exec(t))){out.push(t.slice(Math.max(0,m.index-50), m.index+30).replace(/\\n/g,' | '));} return out;`);
+  const shots = [];
+  const shot = async name => {
+    await sleep(300);
+    const r = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    const f = path.join(OUT, `${name}.png`);
+    fs.writeFileSync(f, Buffer.from(r.data, 'base64'));
+    shots.push(f);
+    return f;
+  };
+  /** 한 단계: 실행 → 보이는 것 확인 → 그림 → 예외 · 콘솔 오류 · 깨진 글자 0 */
+  const step = async (name, fn) => {
+    const m = mark();
+    let detail = '';
+    let ok = false;
+    const t0 = Date.now();
+    try { const r = await fn(); ok = r?.ok !== false; detail = r?.detail ?? ''; }
+    catch (err) { ok = false; detail = String(err?.message ?? err).slice(0, 400); }
+    const f = await shot(name.replace(/[^0-9a-zA-Z가-힣_-]+/g, '_').slice(0, 60));
+    const p = problems(m);
+    const bad = await badTokens().catch(() => []);
+    check(name, ok, `${((Date.now() - t0) / 1000).toFixed(1)} s · ${detail}`);
+    check(`  └ 페이지 예외 · 콘솔 오류 · undefined/NaN/[object Object] 0`, p.exceptions.length === 0 && p.errors.length === 0 && bad.length === 0,
+      [...p.exceptions, ...p.errors, ...bad.map(b => `글자: ${b}`)].join(' / ') || path.basename(f));
+  };
+  const dialogAnswer = async (kind, value, shotName, timeout = 30_000) => {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      const got = await evalTop(`(()=>{const d=document.querySelector('#dialog-host .dialog[data-kind="fileDialog"]'); if(!d) return null;
+        return {title:d.querySelector('h2').textContent, value:d.querySelector('input').value};})()`);
+      if (got) {
+        if (shotName) { await shot(shotName); }
+        await evalTop(`(()=>{const d=document.querySelector('#dialog-host .dialog'); const i=d.querySelector('input'); i.value=${JSON.stringify(value)};
+          d.querySelector('[data-role="ok"]').click(); return true;})()`);
+        return got;
+      }
+      if (Date.now() > deadline) { throw new Error(`${kind} 물음이 틀에 뜨지 않았다`); }
+      await sleep(100);
+    }
+  };
+  const waitFor = async (expr, timeout = 30_000, what = expr) => {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      const v = await evalTop(expr).catch(() => undefined);
+      if (v) { return v; }
+      if (Date.now() > deadline) { throw new Error(`기다림 시간 초과: ${what}`); }
+      await sleep(150);
+    }
+  };
+  const designerReady = () => waitFor(`(()=>{const f=document.getElementById('designer'); const h=f&&f.contentDocument&&f.contentDocument.documentElement;
+    return !!h && h.getAttribute('data-stcfsd-bridge')==='connected' && h.hasAttribute('data-stcfsd-replayed') && !!f.contentDocument.getElementById('section-svg');})()`,
+  60_000, '설계 웹뷰 연결 · 다시 보내기');
+  const svgShapes = () => wv(`const s=D.querySelector('#section-svg svg')||D.querySelector('#section-svg'); return s? s.querySelectorAll('line,polyline,path,circle,polygon').length : 0;`);
+  const svgHist = () => wv(`const s=D.querySelector('#section-svg'); const h={}; if(s){s.querySelectorAll('*').forEach(e=>{const k=e.tagName+(e.getAttribute('class')?'.'+e.getAttribute('class'):'')+(e.getAttribute('stroke')?'['+e.getAttribute('stroke')+']':'');h[k]=(h[k]||0)+1;});} return h;`);
+  const canvasInk = id => wv(`const c=D.getElementById(${JSON.stringify(id)}); if(!c||!c.width) return 0; const g=c.getContext('2d');
+    const d=g.getImageData(0,0,c.width,c.height).data; const r0=d[0],g0=d[1],b0=d[2]; let n=0;
+    for(let i=0;i<d.length;i+=16){ if(Math.abs(d[i]-r0)+Math.abs(d[i+1]-g0)+Math.abs(d[i+2]-b0)>60) n++; } return n;`);
+
+  section('3. 틀 · 설계 웹뷰 · 기본 단면');
+  await step('s01 틀이 뜨고 설계 웹뷰가 기본 단면을 그린다', async () => {
+    await cdp.send('Page.navigate', { url: ready.url });
+    await designerReady();
+    await sleep(800);
+    const shapes = await svgShapes();
+    const title = await evalTop(`document.getElementById('file-name').textContent + ' | ' + document.getElementById('claude-status').textContent`);
+    return { ok: shapes > 3, detail: `단면 도형 ${shapes}개 · 제목 표시줄 "${title}"` };
+  });
+  await step('s02 --vscode-* 변수가 웹뷰 안에서 모두 값이 있다', async () => {
+    const empty = await wv(`const cs=W.getComputedStyle(D.documentElement); return ${JSON.stringify(used)}.filter(n=>!cs.getPropertyValue('--vscode-'+n).trim());`);
+    // 표본 요소의 계산된 색이 투명이 아니다(정의가 빠지면 배경이 투명해진다)
+    const sample = await wv(`const out={}; for(const s of ['body','.tab-bar','.tab-btn','input','select','button']){const e=D.querySelector(s); if(e){const c=W.getComputedStyle(e); out[s]=c.color+' / '+c.backgroundColor;}} return out;`);
+    const transparentText = Object.values(sample).filter(v => /^rgba\(0, 0, 0, 0\) \//.test(v));
+    return { ok: empty.length === 0 && transparentText.length === 0, detail: empty.length ? `빈 변수: ${empty.join(', ')}` : `${used.length}종 · ${short(sample, 150)}` };
+  });
+
+  section('4. 화면을 DOM 으로 — 단면 → 좌굴 → 하중 → 설계 → Lap → 보고서 → 검증');
+  await step('s03 단면 템플릿(립 Z 8ZS2.25×059) 생성', async () => {
+    await click('#btn-unit-US');
+    await tab('preprocessor');
+    await setVal('select-template', 'lippedz');
+    for (const [k, v] of Object.entries({ 'tpl-H': 8, 'tpl-B': 2.25, 'tpl-D': 0.91, 'tpl-t': 0.059, 'tpl-r': 0.1875, 'tpl-qlip': 50 })) { await setVal(k, v); }
+    // 재료는 기본 강종에 기대지 않고 분명히 준다.
+    await setVal('input-fy', 55); await setVal('input-fu', 70);
+    const before = await cnt('templateGenerated');
+    await click('#btn-generate-template');
+    await waitMsg('templateGenerated', before, 60_000);
+    const shapes = await svgShapes();
+    return { ok: shapes > 3, detail: `단면 도형 ${shapes}개 · ${short(await text('#status-message') ?? '', 80)}` };
+  });
+  await step('s04 좌굴 해석 — 곡선이 그려진다', async () => {
+    await tab('design');
+    const before = await cnt('analysisComplete');
+    await click('#btn-run-analysis');
+    await waitMsg('analysisComplete', before, 300_000);
+    await sleep(1500);
+    const ink = await canvasInk('buckling-curve-canvas');
+    const dsm = await text('#dsm-table-container');
+    await reveal('buckling-curve-canvas');
+    return { ok: ink > 50 && /\d/.test(dsm ?? ''), detail: `곡선 캔버스 잉크 ${ink}점 · DSM 표 ${short(dsm ?? '', 60)}` };
+  });
+  await step('s05 하중 해석(6경간 연속 퍼린, ASD)', async () => {
+    await tab('loads');
+    for (const [k, v] of Object.entries({ 'select-member-type': 'roof-purlin', 'select-design-method': 'ASD', 'select-span-type': 'cont-n',
+      'config-n-spans': 6, 'config-spacing': 5 })) { await setVal(k, v); }
+    await wv(`const L=[1,25,25,25,25,1]; const sup=['N','P','P','P','P','P','N']; const lap=[[0,0],[0,0],[2.5,3.5],[1,1],[3.5,2.5],[0,0],[0,0]];
+      D.querySelectorAll('.span-tbl-len').forEach((e,i)=>{e.value=L[i];e.dispatchEvent(new W.Event('change',{bubbles:true}));});
+      D.querySelectorAll('.span-tbl-sup').forEach((e,i)=>{e.value=sup[i];e.dispatchEvent(new W.Event('change',{bubbles:true}));});
+      D.querySelectorAll('.span-tbl-lapl').forEach(e=>{const i=+e.dataset.idx;e.value=lap[i][0];e.dispatchEvent(new W.Event('change',{bubbles:true}));});
+      D.querySelectorAll('.span-tbl-lapr').forEach(e=>{const i=+e.dataset.idx;e.value=lap[i][1];e.dispatchEvent(new W.Event('change',{bubbles:true}));}); return 1;`);
+    for (const [k, v] of Object.entries({ 'select-deck-type': 'through-fastened', 'deck-kphi-override': 0.3, 'load-D-psf': 3, 'load-Lr-psf': 20,
+      'load-S-psf': 0, 'load-Wu-psf': 34, 'load-Wp-psf': 0, 'load-L-psf': 0, 'chk-pattern-loading': false, 'chk-lr-reduced': false,
+      'chk-i621-confirmed': true, 'span-Ix-list': '9.18, 9.18, 7.76, 7.76, 9.18, 9.18' })) { await setVal(k, v); }
+    const before = await cnt('loadAnalysisComplete');
+    await click('#btn-analyze-loads');
+    await waitMsg('loadAnalysisComplete', before, 300_000);
+    const r = await text('#load-analysis-result');
+    await reveal('load-analysis-result');
+    return { ok: (r ?? '').length > 100 && !/오류|error/i.test((r ?? '').slice(0, 80)), detail: short(r ?? '', 90) };
+  });
+  await step('s06 설계 검토(퍼린 구간별)', async () => {
+    await tab('design');
+    const before = await cnt('designPurlinResult');
+    await click('#btn-run-design');
+    await waitMsg('designPurlinResult', before, 600_000);
+    await sleep(800);
+    const card = await text('#design-summary');
+    await reveal('design-summary');
+    return { ok: /OK|NG|판정 없음/.test(card ?? ''), detail: short(card ?? '', 100) };
+  });
+  await step('s07 Lap 접합부 결과', async () => {
+    await tab('connection');
+    const before = await cnt('lapConnectionResult');
+    await click('#btn-run-lap-design');
+    await waitMsg('lapConnectionResult', before, 120_000);
+    await sleep(600);
+    const r = await text('#connection-result');
+    await reveal('connection-result');
+    return { ok: (r ?? '').length > 40 && !/error|오류/i.test((r ?? '').slice(0, 60)), detail: short(r ?? '', 100) };
+  });
+  await step('s08 보고서 생성', async () => {
+    await tab('report');
+    await click('#btn-generate-report');
+    await sleep(1500);
+    const r = await text('#report-container');
+    return { ok: (r ?? '').length > 500, detail: `${(r ?? '').length}자 · ${short((r ?? '').split('\n')[0], 60)}` };
+  });
+  await step('s09 검증 실행', async () => {
+    await tab('validation');
+    await click('#btn-run-validation');
+    await sleep(2500);
+    const badge = await text('#validation-summary-badge');
+    const body = await text('#validation-container');
+    return { ok: (body ?? '').length > 100 && !!badge, detail: `${badge} · ${(body ?? '').length}자` };
+  });
+
+  section('5. 저장 · 열기 (GUI 단추 → 틀의 경로 물음 → 임시 경로)');
+  const saved = path.join(tmp, 'saved', 'gui-save.csd');
+  let savedJson;
+  await step('s10 Save 단추 → 저장 물음(문서\\StCFSD 기본값) → 임시 경로', async () => {
+    await tab('design');
+    await click('#btn-file-save');
+    const q = await dialogAnswer('저장', saved, 's10a_저장_물음');
+    for (let i = 0; i < 100 && !fs.existsSync(saved); i++) { await sleep(100); }
+    savedJson = fs.existsSync(saved) ? JSON.parse(fs.readFileSync(saved, 'utf8')) : undefined;
+    const n = Object.keys(savedJson?.designInputs ?? {}).length;
+    const defaultOk = q.value.startsWith(path.join(docs, 'StCFSD')) && q.value.endsWith('.csd');
+    await sleep(500);
+    const fileName = await evalTop(`document.getElementById('file-name').textContent`);
+    return { ok: !!savedJson && n > 50 && !!savedJson.analysisResult && !!savedJson.loadAnalysis && !!savedJson.designResult && defaultOk
+      && fileName === 'gui-save.csd' && !fs.existsSync(path.join(docs, 'StCFSD')),
+      detail: `기본 경로 ${q.value} · 설계 입력 ${n}칸 · 결과(해석 ${!!savedJson?.analysisResult} · 하중 ${!!savedJson?.loadAnalysis} · 설계 ${!!savedJson?.designResult} · Lap ${!!savedJson?.lapResult}) · 제목 "${fileName}" · 문서 폴더 만들지 않음 ${!fs.existsSync(path.join(docs, 'StCFSD'))}` };
+  });
+  await step('s11 다른 단면으로 바꾼 뒤 Open 단추 → 저장본 → 입력 · 결과가 돌아온다', async () => {
+    await tab('preprocessor');
+    await setVal('select-template', 'lippedc');
+    for (const [k, v] of Object.entries({ 'tpl-H': 6, 'tpl-B': 2, 'tpl-D': 0.5, 'tpl-t': 0.06, 'tpl-r': 0.1 })) { await setVal(k, v); }
+    const before = await cnt('templateGenerated');
+    await click('#btn-generate-template');
+    await waitMsg('templateGenerated', before, 60_000);
+    await setVal('config-spacing', 7);
+    const restoreBefore = await cnt('restoreDesignInputs');
+    await click('#btn-file-open');
+    await dialogAnswer('열기', saved);
+    await waitMsg('restoreDesignInputs', restoreBefore, 60_000);
+    await sleep(1500);
+    const spacing = await wv(`return D.getElementById('config-spacing').value;`);
+    const tpl = await wv(`return D.getElementById('select-template').value + ' ' + D.getElementById('tpl-H').value;`);
+    await tab('design');
+    const card = await text('#design-summary');
+    const ink = await canvasInk('buckling-curve-canvas');
+    return { ok: Number(spacing) === Number(savedJson.designInputs?.['config-spacing'] ?? 5) && /OK|NG|판정 없음/.test(card ?? '') && ink > 50,
+      detail: `간격 ${spacing} · 템플릿 ${tpl} · 설계 카드 ${short(card ?? '', 60)} · 곡선 잉크 ${ink}` };
+  });
+
+  section('6. 좌굴 보고서 패널(두 번째 웹뷰) · PDF');
+  await step('s12 좌굴 보고서가 두 번째 웹뷰로 열리고 PDF 단추가 PDF 를 쓴다', async () => {
+    await tab('design');
+    await click('#btn-view-buckling-report');
+    await waitFor(`(()=>{const f=document.getElementById('side-frame'); const d=f&&f.contentDocument; return !document.getElementById('side').hidden && d && !!d.getElementById('btn-pdf') && d.documentElement.getAttribute('data-stcfsd-bridge')==='connected';})()`, 30_000, '보고서 패널');
+    const head = await evalTop(`document.getElementById('side-title').textContent + ' | ' + document.getElementById('side-frame').contentDocument.body.innerText.slice(0,60)`);
+    const pdf = path.join(tmp, 'saved', 'buckling.pdf');
+    await evalTop(`document.getElementById('side-frame').contentDocument.getElementById('btn-pdf').click()`);
+    await dialogAnswer('PDF', pdf);
+    for (let i = 0; i < 200 && !(fs.existsSync(pdf) && fs.statSync(pdf).size > 0); i++) { await sleep(150); }
+    const ok = fs.existsSync(pdf) && fs.readFileSync(pdf).subarray(0, 4).toString() === '%PDF';
+    if (ok) { fs.copyFileSync(pdf, path.join(OUT, 'buckling-report.pdf')); }
+    return { ok, detail: `${head} · PDF ${ok ? fs.statSync(pdf).size + ' bytes' : '없음'}` };
+  });
+  await step('s13 보고서 탭의 PDF 저장(호스트가 Edge headless 로 인쇄)', async () => {
+    await evalTop(`document.getElementById('side-close').click()`);
+    await waitFor(`document.getElementById('side').hidden`, 10_000, '보고서 패널 닫힘');
+    await tab('report');
+    await click('#btn-generate-report');
+    await sleep(1200);
+    const pdf = path.join(tmp, 'saved', 'report.pdf');
+    await click('#btn-print-report');
+    await dialogAnswer('PDF', pdf);
+    for (let i = 0; i < 200 && !(fs.existsSync(pdf) && fs.statSync(pdf).size > 0); i++) { await sleep(150); }
+    const ok = fs.existsSync(pdf) && fs.readFileSync(pdf).subarray(0, 4).toString() === '%PDF';
+    if (ok) { fs.copyFileSync(pdf, path.join(OUT, 'design-report.pdf')); }
+    const st = (await api('GET', '/api/state')).json.data;
+    return { ok: ok && st.webviews.length === 1, detail: `PDF ${ok ? fs.statSync(pdf).size + ' bytes' : '없음'} · 웹뷰 ${st.webviews.length}개(보고서 닫힘)` };
+  });
+
+  section('7. MCP 중계로 바꾼 것이 화면에 보인다');
+  await step('s14 set_section_template(중계) → 단면이 바뀌고 낡은 결과가 지워진다', async () => {
+    await tab('design');
+    const before = await svgShapes();
+    const tmplBefore = await wv(`return D.getElementById('tpl-H').value;`);
+    const r = await api('POST', '/api/mcp/action', { action: 'generate_template', section_type: 'lippedc', params: { H: 4, B: 1.5, D: 0.5, t: 0.03, r: 0.1 } });
+    await sleep(1500);
+    const card = await text('#design-summary');
+    const dsm = await text('#dsm-table-container');
+    await reveal('design-summary');
+    const tmplAfter = await wv(`return D.getElementById('tpl-H').value;`);
+    return { ok: r.json?.success === true && /결과 없음/.test(card ?? '') && /결과 없음/.test(dsm ?? '') && !/✓ OK|✗ NG/.test(card ?? ''),
+      detail: `도형 ${before} → ${await svgShapes()} · tpl-H ${tmplBefore} → ${tmplAfter} · 카드 ${short(card ?? '', 50)} · DSM ${short(dsm ?? '', 40)}` };
+  });
+
+  await step('s14b get_section_preview(중계) — 화면이 붙어 있으면 웹뷰가 그린 PNG 가 온다', async () => {
+    const r = await api('POST', '/api/mcp/action', { action: 'capture_section_preview' });
+    const file = r.json?.file_path;
+    const ok = r.json?.success === true && !!file && fs.existsSync(file) && fs.readFileSync(file).subarray(1, 4).toString() === 'PNG';
+    if (ok) { fs.copyFileSync(file, path.join(OUT, 's14b_section_preview_from_mcp.png')); fs.rmSync(file, { force: true }); }
+    return { ok, detail: ok ? `${r.json.width}×${r.json.height} PNG` : short(r.text, 160) };
+  });
+
+  section('8. 새로 고침 — 지금 모델과 결과로 돌아온다');
+  await step('s15 해석(중계)한 뒤 새로 고침 → 같은 단면 · 곡선 · DSM 이 다시 그려진다', async () => {
+    await api('POST', '/api/mcp/action', { action: 'set_load_case', load_case: 'bending_xx_pos', fy: 50 });
+    const run = await api('POST', '/api/mcp/action', { action: 'run_analysis' });
+    await sleep(1500);
+    const nodesHost = (await api('GET', '/api/mcp/status')).json.nnodes;
+    const histBefore = await svgHist();
+    const before = { shapes: await svgShapes(), ink: await canvasInk('buckling-curve-canvas'), dsm: await text('#dsm-table-container') };
+    await cdp.send('Page.reload', { ignoreCache: true });
+    await sleep(500);
+    await designerReady();
+    await sleep(2500);
+    const replay = await wv(`return D.documentElement.getAttribute('data-stcfsd-replayed');`);
+    await tab('design');
+    await sleep(800);
+    const histAfter = await svgHist();
+    const after = { shapes: await svgShapes(), ink: await canvasInk('buckling-curve-canvas'), dsm: await text('#dsm-table-container') };
+    const nodesPage = await wv(`return D.querySelectorAll('#node-table tbody tr').length || null;`);
+    const nodesAfterHost = (await api('GET', '/api/mcp/status')).json.nnodes;
+    return { ok: run.json?.success === true && after.shapes === before.shapes && after.ink > 50 && /\d/.test(after.dsm ?? '') && !/결과 없음/.test(after.dsm ?? '')
+      && nodesAfterHost === nodesHost && nodesPage === nodesHost && JSON.stringify(histBefore) === JSON.stringify(histAfter),
+      detail: `다시 보냄 ${short(JSON.parse(replay || '{}').commands, 110)} · 도형 ${before.shapes}/${after.shapes} · 곡선 잉크 ${before.ink}/${after.ink} · 호스트 절점 ${nodesHost}/${nodesAfterHost}(기본 단면으로 돌아가지 않음) · 표 ${nodesPage ?? '-'}` };
+  });
+
+  section('9. 밝은 · 어두운 테마');
+  const contrast = () => wv(`
+    const lum=c=>{const m=c.match(/[\\d.]+/g).map(Number); const a=m.length>3?m[3]:1; const f=v=>{v/=255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4);};
+      return {l:0.2126*f(m[0])+0.7152*f(m[1])+0.0722*f(m[2]), a};};
+    const bgOf=e=>{for(let x=e;x;x=x.parentElement){const b=W.getComputedStyle(x).backgroundColor; const L=lum(b); if(L.a>0.5) return b;}
+      return W.getComputedStyle(D.documentElement).backgroundColor;};
+    const out=[]; const sel=['body','.tab-btn','.tab-btn.active','label','h3','.section-group','input[type=number]','select','button.btn-primary','#design-summary','#status-message','.hint','table td'];
+    for(const s of sel){const e=D.querySelector(s); if(!e||!e.offsetParent&&s!=='body') continue; const fg=W.getComputedStyle(e).color, bg=bgOf(e);
+      const a=lum(fg).l, b=lum(bg).l; const r=(Math.max(a,b)+0.05)/(Math.min(a,b)+0.05); out.push({s, r:+r.toFixed(2), fg, bg});}
+    return out;`);
+  for (const th of ['light', 'dark']) {
+    await step(`s16 ${th === 'light' ? '밝은' : '어두운'} 테마 — 본 화면의 글자 대비`, async () => {
+      await cdp.send('Page.navigate', { url: `${origin}/?theme=${th}` });
+      await designerReady();
+      await sleep(1500);
+      await tab('preprocessor');
+      await sleep(500);
+      const c = await contrast();
+      const kind = await wv(`return D.body.getAttribute('data-vscode-theme-kind') + ' ' + W.getComputedStyle(D.documentElement).getPropertyValue('--vscode-editor-background');`);
+      const low = c.filter(x => x.r < 3);
+      return { ok: c.length >= 6 && low.length === 0, detail: `${kind} · 최저 대비 ${Math.min(...c.map(x => x.r))} (${c.length}곳)${low.length ? ` · 낮음: ${short(low, 200)}` : ''}` };
+    });
+  }
+  process.stdout.write(`  그림 ${shots.length}장: ${OUT}\n`);
+}
+
+main().catch(err => {
+  process.stdout.write(`\n실패  예외: ${err?.stack ?? err}\n`);
+  process.exit(1);
+});

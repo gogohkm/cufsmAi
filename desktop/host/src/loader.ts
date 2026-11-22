@@ -116,6 +116,8 @@ export interface HostHandle {
   /** 화면 다리의 접점 — 웹뷰 목록·HTML·메시지 넣기/듣기 */
   webviews: ShimRuntime['hub'];
   designer: DesignerPanel;
+  /** 화면 없이 띄웠다(웹뷰 대역이 붙어 있다) — 화면 다리는 false 인 호스트에만 붙는다 */
+  screenless: boolean;
   mcp: McpEndpoint;
   /** 확장이 쓸 Python(확장의 `getPythonPath` 와 같은 순서로 판단한 것) */
   python: { path: string; source: '.venv' | 'python.defaultInterpreterPath' | 'PATH' };
@@ -447,6 +449,7 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
       },
       webviews: runtime.hub,
       designer,
+      screenless: opts.screenless !== false,
       mcp: {
         port,
         token: portInfo.token,

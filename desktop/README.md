@@ -1,6 +1,6 @@
 # desktop/ — StCFSD 독립 프로그램
 
-2026-11-22 · 상태: **S1 끝** — 화면 템플릿(`design/`)과 화면 없는 호스트(`host/`)가 있다. 구성안은 승인됐다. 다음은 `host/` 의 화면 다리(S2) · `shell/`(S3) · Claude 연결(S4) · `installer/`(S5) · `ui/` 다.
+2026-11-22 · 상태: **S2 끝** — 화면 템플릿(`design/`), 화면 없는 호스트(S1), 화면 다리(S2 — 지금의 화면 탭 6개가 보통 브라우저에서 진짜 호스트 · Python 과 돈다)가 있다. 다음은 `shell/`(S3) · Claude 연결(S4) · `installer/`(S5) · `ui/` 다.
 
 Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하나에 StCFSD, 다른 모니터에 Claude Desktop 을 띄우고, 대화는 Claude Desktop 에서만 한다. 둘은 로컬 MCP 서버로 잇는다.
 
@@ -16,10 +16,12 @@ Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하�
 |---|---|---|
 | `design/` | 화면 템플릿(정적 HTML). `design/index.html` 을 브라우저로 연다. 설명은 `design/README.md` | T1 |
 | `host/` | 지금의 확장 호스트(`out/extension.js`)를 고치지 않고 VS Code 없이 Node 에서 돌린다. `vscode` 대체 모듈(`host/src/vscode/`), 적재기(`loader.ts` — 포트 파일 방식의 MCP, 설계 패널을 끝까지 쥔다), 사용자 · OS 에 묻는 접점(`platform.ts`), 화면 없는 CLI(`headless.ts`), 연기 시험. [`host/README.md`](host/README.md) | S1 |
+| `host/src/bridge/` · `host/frame/` | 화면 다리: 127.0.0.1 + 토큰의 HTTP 로 지금의 웹뷰를 고치지 않고 브라우저에 내준다(리소스 주소 · CSP · `acquireVsCodeApi` 대체 · 테마 변수), 호스트 ↔ 웹뷰 메시지와 새로 고침 다시 보내기, 호스트의 물음(알림 · 고르기 · 열기/저장), MCP 중계, Claude 상태(읽기만). 틀(`/`)은 제목 표시줄 + 설계 화면. CLI `serve.ts`, 시험 `test/bridge.mjs`(headless Edge). [`host/BRIDGE.md`](host/BRIDGE.md) | S2 |
 
 ```
 npx tsc -p ./                                  # 저장소 루트 — out/ 을 만든다
-cd desktop && npm install && npm test          # 형 검사 → 빌드 → 연기 시험(진짜 Python)
+cd desktop && npm install && npm test          # 형 검사 → 빌드 → 연기 시험 → 다리 시험(진짜 Python, headless Edge)
+npm run serve -- --open <파일.csd>              # 화면 다리. 출력된 「화면:」 주소를 브라우저로 연다
 npm run headless -- --open <파일.csd>           # 화면 없이. MCP 다리 주소와 클라이언트가 쓸 환경을 출력하고 떠 있다
 ```
 
@@ -29,7 +31,7 @@ npm run headless -- --open <파일.csd>           # 화면 없이. MCP 다리 �
 
 | 경로 | 내용 |
 |---|---|
-| `host/` (이어서) | 화면 다리(127.0.0.1 + 토큰의 HTTP, S2), Claude Desktop 연결(S4) |
+| `host/` (이어서) | Claude Desktop 연결(S4 — 「연결」 · 「끊기」) |
 | `ui/` | 새 화면: 트리 탭 4개(업무 · 모델 · 결과 · 문서), 보기(단면 · 좌굴 곡선 · 부재 · 접합 도면), 정보 창, 표 서랍. 지금의 웹뷰는 편집 상태(F2)에서 `<iframe>` 으로 끼운다 |
 | `shell/` | Electron 창. 자체 `package.json` |
 | `installer/` | Windows 설치 파일(NSIS), Python 묶음 |
