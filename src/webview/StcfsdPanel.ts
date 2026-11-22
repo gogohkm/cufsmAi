@@ -1534,6 +1534,96 @@ export class StcfsdPanel implements McpPanelInterface {
      * m_all 이 길이와 맞지 않으면 'auto'. 실패하면 모델을 바꾸지 않는다.
      */
     /**
+     * 모델 파일에 들어가는 키(StcfsdModel). 파일에서 들일 때도, 파일로 쓸 때도 이것만 지난다(V5b-01) —
+     * 모르는 최상위 키를 그대로 옮기면 조작된 .csd 의 `mcpServers` 같은 키가 save_project 로
+     * 다른 프로그램의 설정 자리에 쓰인다.
+     */
+    private static readonly MODEL_FILE_KEYS = [
+        'prop', 'node', 'elem', 'lengths', 'springs', 'constraints', 'BC', 'm_all', 'GBTcon', 'neigs',
+        'loadCase', 'loadFy', 'loadValues', 'sectionType', 'sectionTemplate', 'sectionParams', 'cornerRadius',
+    ];
+
+    private _pickModelKeys(model: any): any {
+        const out: any = {};
+        for (const k of StcfsdPanel.MODEL_FILE_KEYS) {
+            if (model && Object.prototype.hasOwnProperty.call(model, k) && model[k] !== undefined) { out[k] = model[k]; }
+        }
+        return out;
+    }
+
+    /**
+     * save_project · load_project 의 경로 검사(V5-01 · V5b-01 · 03 · 08). 경로는 AI 가 준다 — 사람이 대화상자에서
+     * 고른 것이 아니다. 문제 없으면 null, 아니면 거절 문구(파일 내용은 싣지 않는다).
+     *  - 절대 경로. Windows 에서는 드라이브 문자 경로만 — UNC(호스트 · 공유) · 장치 경로는 AI 가 고른 호스트로
+     *    SMB 연결(자격 증명)을 만든다. 사용자가 이미 이어 둔 네트워크 드라이브(Z:)는 된다.
+     *  - `:`(대체 데이터 스트림), 점 · 공백으로 끝나는 이름(Windows 가 떼어 내 다른 파일이 된다) 거절.
+     *  - 점으로 시작하는 이름(`.mcp.json`, `.claude/`, `.vscode/` …) 거절.
+     *  - 링크 · junction 을 푼 진짜 폴더가 시스템 · 프로그램 · 앱 설정 자리(AppData, Program Files, 이 프로그램의
+     *    설치 폴더 …)면 거절 — 있기만 해도 뜻이 생기는 파일(설정, 표식)을 AI 가 만들지 못하게. 임시 폴더는 된다.
+     */
+    private _projectPathError(action: string, fp: string): string | null {
+        if (!fp || !path.isAbsolute(fp)) {
+            return `${action} failed: an absolute filepath is required (got '${fp}')`;
+        }
+        const win = process.platform === 'win32';
+        if (win) {
+            if (!/^[A-Za-z]:[\\/]/.test(fp)) {
+                return `${action} failed: a local drive path is required (drive letter first) — network shares and device paths are not accepted`;
+            }
+            if (fp.indexOf(':', 2) !== -1) {
+                return `${action} failed: ':' is not accepted in the path`;
+            }
+        } else if (fp.startsWith('//')) {
+            return `${action} failed: network paths are not accepted`;
+        }
+        const full = path.resolve(fp);
+        const badName = (target: string): string | null => {
+            for (const seg of target.split(/[\\/]+/).filter(Boolean)) {
+                if (/^[A-Za-z]:$/.test(seg)) { continue; }
+                if (seg.startsWith('.')) {
+                    return `${action} failed: hidden files and folders (a name starting with '.') are not accepted`;
+                }
+                if (win && /[. ]$/.test(seg)) {
+                    return `${action} failed: a name ending in '.' or a space is not accepted`;
+                }
+            }
+            return null;
+        };
+        const named = badName(full);
+        if (named) { return named; }
+        let dir: string;
+        try {
+            dir = fs.realpathSync.native(path.dirname(full));
+        } catch {
+            return `${action} failed: the folder '${path.dirname(full)}' does not exist or cannot be opened`;
+        }
+        const real = badName(path.join(dir, path.basename(full)));
+        if (real) { return real; }
+        const realOf = (d: string | undefined): string | null => {
+            if (!d) { return null; }
+            try { return fs.realpathSync.native(d); } catch { return path.resolve(d); }
+        };
+        const inside = (child: string, root: string | null): boolean => {
+            if (!root) { return false; }
+            const rel = path.relative(root, child);
+            return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+        };
+        if (inside(dir, realOf(os.tmpdir()))) { return null; }
+        const home = os.homedir();
+        const protectedRoots = [
+            process.env.APPDATA, process.env.LOCALAPPDATA, process.env.ProgramData, process.env.ProgramFiles,
+            process.env['ProgramFiles(x86)'], process.env.ProgramW6432, process.env.SystemRoot || process.env.windir,
+            win && home ? path.join(home, 'AppData') : undefined,
+            process.platform === 'darwin' && home ? path.join(home, 'Library') : undefined,
+            path.dirname(process.execPath),
+        ].map((d) => realOf(d || undefined));
+        if (protectedRoots.some((root) => inside(dir, root))) {
+            return `${action} failed: '${dir}' belongs to the system or to an application — use a documents or project folder`;
+        }
+        return null;
+    }
+
+    /**
      * save_project 가 `fp` 에 써도 되는가(V5-01). 없는 파일은 새로 만든다. 이미 있으면 save_project 가 쓴
      * 원시 모델(`format: 'stcfsd-model'`)일 때만 덮어쓴다 — 링크 · 폴더 · 다른 프로그램의 JSON 은 거절한다.
      * 거절 문구에는 파일 내용을 싣지 않는다. 돌려주는 값: 거절 문구, 써도 되면 null.
@@ -1574,8 +1664,8 @@ export class StcfsdPanel implements McpPanelInterface {
             || model.lengths.some((L: any) => !(typeof L === 'number' && L > 0)))) {
             return { error: 'lengths must be positive numbers', warnings };
         }
-        const out = { ...model };
-        delete out.format; delete out.version;
+        // V5b-01: 알려진 키만 들인다(format · version 과 모르는 키는 버린다).
+        const out = this._pickModelKeys(model);
         if (!out.loadCase) {
             out.loadCase = 'custom';
             delete out.loadFy;
@@ -2741,15 +2831,22 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 // V5-01: 경로는 AI 가 준다. 이미 있는 파일은 save_project 가 쓴 원시 모델일 때만 덮어쓴다 —
                 // 다른 프로그램의 .json(Claude Desktop 설정, 편집기 설정 …)을 모델로 바꿔 버리면 안 된다.
+                // V5b-01 · 03 · 08: 자리 검사(네트워크 · 숨김 · 시스템과 앱의 폴더 · ADS).
+                const badPath = this._projectPathError('save_project', fp);
+                if (badPath) { return { error: badPath }; }
                 const refused = this._refuseModelOverwrite(fp);
                 if (refused) { return { error: refused }; }
+                const tmp = `${fp}.tmp-${process.pid}`;
                 try {
-                    const data = JSON.stringify({ format: 'stcfsd-model', version: '1.0', ...this._cloneModel(this._model) }, null, 2);
-                    const tmp = `${fp}.tmp-${process.pid}`;
-                    fs.writeFileSync(tmp, data, 'utf8');
+                    // V5b-01: 알려진 모델 키만 쓴다 — 모델에 실려 온 다른 키가 파일로 나가지 않는다.
+                    const data = JSON.stringify({ format: 'stcfsd-model', version: '1.0',
+                        ...this._pickModelKeys(this._cloneModel(this._model)) }, null, 2);
+                    fs.writeFileSync(tmp, data, { encoding: 'utf8', flag: 'wx' });
                     fs.renameSync(tmp, fp);
                 } catch (e: any) {
-                    return { error: `save_project failed: ${e?.message || e}` };
+                    // V5b-08: 실패하면 임시 파일을 남기지 않는다. 'wx' 로 열었으니 EEXIST 면 우리가 만든 것이 아니다.
+                    if (e?.code !== 'EEXIST') { try { fs.unlinkSync(tmp); } catch { /* 없으면 그만 */ } }
+                    return { error: `save_project failed: cannot write '${fp}' (${e?.code || 'error'})` };
                 }
                 return { success: true, filepath: fp };
             }
@@ -2765,20 +2862,25 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (ext !== '.stcfsd' && ext !== '.json' && ext !== '.csd') {
                     return { error: `load_project failed: a StCFSD model file is required — extension .stcfsd, .json or .csd (got '${ext || 'none'}')` };
                 }
-                let text: string;
-                try {
-                    text = fs.readFileSync(fp, 'utf-8');
-                } catch (e: any) {
-                    return { error: `load_project failed: cannot read '${fp}' (${e?.code || 'error'})` };
-                }
+                // V5b-01 · 03: save_project 와 같은 자리 검사(네트워크 · 숨김 · 시스템과 앱의 폴더).
+                const badPath = this._projectPathError('load_project', fp);
+                if (badPath) { return { error: badPath }; }
+                // V5b-11: 답은 둘뿐 — 「그 자리에 파일이 없다」 와 「StCFSD 모델 파일이 아니다」. 폴더인지, JSON 인지,
+                // 다른 프로그램의 JSON 인지는 가르지 않는다. 크기 상한을 둔다.
+                const notModel = `load_project failed: '${fp}' is not a StCFSD model file`;
                 let data: any;
                 try {
-                    data = JSON.parse(text);
-                } catch {
-                    return { error: `load_project failed: '${fp}' is not valid JSON` };
+                    const st = fs.statSync(fp);
+                    if (!st.isFile() || st.size > 64 * 1024 * 1024) { return { error: notModel }; }
+                    data = JSON.parse(fs.readFileSync(fp, 'utf-8'));
+                } catch (e: any) {
+                    return { error: e?.code === 'ENOENT' ? `load_project failed: no file at '${fp}'` : notModel };
                 }
                 // save_project 출력(원시 모델)과 .csd 래퍼({model}) 모두 허용
                 const model = (data && data.model) ? data.model : data;
+                if (!model || typeof model !== 'object' || !Array.isArray(model.node) || !Array.isArray(model.elem)) {
+                    return { error: notModel };
+                }
                 const check = this._checkLoadedModel(model);
                 if (check.error) { return { error: `Invalid project file: ${check.error}` }; }
                 this._model = { ...this._model, ...check.model };

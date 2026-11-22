@@ -732,13 +732,13 @@ server.tool("run_vibration", "Free-vibration analysis of the current model (spri
     async (args) => postTool('run_vibration', 'vibration', args, SI_OUT_VIBRATION)
 );
 
-server.tool("save_project", "Save the current panel model to a raw model JSON file. Writes a new file, or overwrites a file that save_project itself wrote earlier; any other existing file is refused (choose a new name). Reports the panel's reply; a failed write (or a relative path / other extension) is an error.",
+server.tool("save_project", "Save the current panel model to a raw model JSON file. Writes a new file, or overwrites a file that save_project itself wrote earlier; any other existing file is refused (choose a new name). Use a documents or project folder on a local or mapped drive: network share paths, hidden (dot) names, and system or application folders are refused. Reports the panel's reply; a failed write (or a relative path / other extension) is an error.",
     { filepath: z.string().describe("Absolute file path ending in .stcfsd or .json") },
     async (args) => postState('save_project', 'save_project', args)
 );
 
 server.tool("load_project", "Load a model saved by save_project (also accepts the GUI .csd wrapper {model}). Reports the panel's reply (file info, warnings); a missing or invalid file is an error and the current model is kept.",
-    { filepath: z.string().describe("Absolute file path to read, ending in .stcfsd, .json or .csd") },
+    { filepath: z.string().describe("Absolute file path to read, ending in .stcfsd, .json or .csd (a drive path in a documents or project folder; network share paths, hidden names and system or application folders are refused)") },
     async (args) => postState('load_project', 'load_project', args)
 );
 

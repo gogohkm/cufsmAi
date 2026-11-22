@@ -5,6 +5,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { createPanel } = require('./panel_harness');
 
 const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1e-12);
@@ -301,47 +302,137 @@ async function scenarioPreviewAndProjectFiles(ctx) {
   assert.strictEqual(r.success, true);
   r = await p.handleMcpAction({ action: 'load_project', filepath: ctx.tmpFile('missing.stcfsd') });
   assert(r.error, 'R8-07 host side: missing file returns error');
-  // V5-01: 경로는 AI 가 준다 — 이미 있는 남의 파일은 덮어쓰지 않는다. 자기가 쓴 원시 모델과 새 파일만.
-  const leftovers = (file) => fs.readdirSync(path.dirname(file)).filter((n) => n.startsWith(path.basename(file) + '.tmp-'));
-  const victim = ctx.tmpFile('claude_desktop_config.json');
-  const victimText = '﻿{\r\n\t"mcpServers": { "other": { "command": "x", "env": { "API_KEY": "secret-123" } } }\r\n}\r\n';
-  fs.writeFileSync(victim, victimText, 'utf8');
-  r = await p.handleMcpAction({ action: 'save_project', filepath: victim });
-  assert(r.error && !r.success, 'V5-01: an existing file that is not a StCFSD model is not overwritten');
-  assert(!/secret-123|API_KEY|mcpServers/.test(r.error), 'V5-01: the refusal does not quote the file');
-  assert.strictEqual(fs.readFileSync(victim, 'utf8'), victimText, 'V5-01: the other program\'s file is byte-for-byte unchanged');
-  assert.deepStrictEqual(leftovers(victim), [], 'V5-01: no temp file left beside it');
-  const notJson = ctx.tmpFile('notes.json');
-  fs.writeFileSync(notJson, 'password=hunter2 not json', 'utf8');
-  r = await p.handleMcpAction({ action: 'save_project', filepath: notJson });
-  assert(r.error && fs.readFileSync(notJson, 'utf8') === 'password=hunter2 not json', 'V5-01: a non-JSON file is not overwritten');
-  const lookalike = ctx.tmpFile('lookalike.json');
-  fs.writeFileSync(lookalike, JSON.stringify([{ format: 'stcfsd-model' }]), 'utf8');
-  r = await p.handleMcpAction({ action: 'save_project', filepath: lookalike });
-  assert(r.error, 'V5-01: an array that merely contains the marker is not a model file');
-  const folder = ctx.tmpFile('folder.json');
-  fs.mkdirSync(folder);
-  r = await p.handleMcpAction({ action: 'save_project', filepath: folder });
-  assert(r.error && fs.statSync(folder).isDirectory(), 'V5-01: a directory is refused');
-  r = await p.handleMcpAction({ action: 'save_project', filepath: raw });
-  assert.strictEqual(r.success, true, 'V5-01: save_project overwrites a model file it wrote itself');
-  const fresh = ctx.tmpFile('fresh-model.json');
-  r = await p.handleMcpAction({ action: 'save_project', filepath: fresh });
-  assert.strictEqual(r.success, true, 'V5-01: a new .json file is written');
-  assert.strictEqual(JSON.parse(fs.readFileSync(fresh, 'utf8')).format, 'stcfsd-model');
-  // V5-02: load_project 의 실패 문구는 파일 내용을 싣지 않고, 모델 파일 확장자 · 절대 경로만 읽는다.
-  r = await p.handleMcpAction({ action: 'load_project', filepath: notJson });
-  assert(r.error && !/password|hunter2/.test(r.error), 'V5-02: a parse failure does not quote the file: ' + r.error);
-  const txt = ctx.tmpFile('notes.txt');
-  fs.writeFileSync(txt, 'password=hunter2', 'utf8');
-  r = await p.handleMcpAction({ action: 'load_project', filepath: txt });
-  assert(r.error && /extension/.test(r.error) && !/password|hunter2/.test(r.error), 'V5-02: other extensions are not read');
-  r = await p.handleMcpAction({ action: 'load_project', filepath: 'relative.stcfsd' });
-  assert(r.error && /absolute/.test(r.error), 'V5-02: a relative path is refused');
-  r = await p.handleMcpAction({ action: 'load_project', filepath: victim });
-  assert(r.error && !/secret-123|API_KEY/.test(r.error), 'V5-02: a valid JSON that is not a model is refused without quoting it');
-  r = await p.handleMcpAction({ action: 'load_project', filepath: fresh });
-  assert.strictEqual(r.success, true, 'load_project still reads what save_project wrote');
+  // V5 · V5b 의 파일은 따로 만든 임시 폴더 하나에 두고 끝나면 지운다.
+  const box = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd-v5-'));
+  const boxFile = (name) => path.join(box, name);
+  try {
+    // V5-01: 경로는 AI 가 준다 — 이미 있는 남의 파일은 덮어쓰지 않는다. 자기가 쓴 원시 모델과 새 파일만.
+    const leftovers = (file) => fs.readdirSync(path.dirname(file)).filter((n) => n.startsWith(path.basename(file) + '.tmp-'));
+    const victim = boxFile('claude_desktop_config.json');
+    const victimText = '﻿{\r\n\t"mcpServers": { "other": { "command": "x", "env": { "API_KEY": "secret-123" } } }\r\n}\r\n';
+    fs.writeFileSync(victim, victimText, 'utf8');
+    r = await p.handleMcpAction({ action: 'save_project', filepath: victim });
+    assert(r.error && !r.success, 'V5-01: an existing file that is not a StCFSD model is not overwritten');
+    assert(!/secret-123|API_KEY|mcpServers/.test(r.error), 'V5-01: the refusal does not quote the file');
+    assert.strictEqual(fs.readFileSync(victim, 'utf8'), victimText, 'V5-01: the other program\'s file is byte-for-byte unchanged');
+    assert.deepStrictEqual(leftovers(victim), [], 'V5-01: no temp file left beside it');
+    const notJson = boxFile('notes.json');
+    fs.writeFileSync(notJson, 'password=hunter2 not json', 'utf8');
+    r = await p.handleMcpAction({ action: 'save_project', filepath: notJson });
+    assert(r.error && fs.readFileSync(notJson, 'utf8') === 'password=hunter2 not json', 'V5-01: a non-JSON file is not overwritten');
+    const lookalike = boxFile('lookalike.json');
+    fs.writeFileSync(lookalike, JSON.stringify([{ format: 'stcfsd-model' }]), 'utf8');
+    r = await p.handleMcpAction({ action: 'save_project', filepath: lookalike });
+    assert(r.error, 'V5-01: an array that merely contains the marker is not a model file');
+    const folder = boxFile('folder.json');
+    fs.mkdirSync(folder);
+    r = await p.handleMcpAction({ action: 'save_project', filepath: folder });
+    assert(r.error && fs.statSync(folder).isDirectory(), 'V5-01: a directory is refused');
+    r = await p.handleMcpAction({ action: 'save_project', filepath: raw });
+    assert.strictEqual(r.success, true, 'V5-01: save_project overwrites a model file it wrote itself');
+    const fresh = boxFile('fresh-model.json');
+    r = await p.handleMcpAction({ action: 'save_project', filepath: fresh });
+    assert.strictEqual(r.success, true, 'V5-01: a new .json file is written');
+    assert.strictEqual(JSON.parse(fs.readFileSync(fresh, 'utf8')).format, 'stcfsd-model');
+    // V5-02: load_project 의 실패 문구는 파일 내용을 싣지 않고, 모델 파일 확장자 · 절대 경로만 읽는다.
+    r = await p.handleMcpAction({ action: 'load_project', filepath: notJson });
+    assert(r.error && !/password|hunter2/.test(r.error), 'V5-02: a parse failure does not quote the file: ' + r.error);
+    const txt = boxFile('notes.txt');
+    fs.writeFileSync(txt, 'password=hunter2', 'utf8');
+    r = await p.handleMcpAction({ action: 'load_project', filepath: txt });
+    assert(r.error && /extension/.test(r.error) && !/password|hunter2/.test(r.error), 'V5-02: other extensions are not read');
+    r = await p.handleMcpAction({ action: 'load_project', filepath: 'relative.stcfsd' });
+    assert(r.error && /absolute/.test(r.error), 'V5-02: a relative path is refused');
+    r = await p.handleMcpAction({ action: 'load_project', filepath: victim });
+    assert(r.error && !/secret-123|API_KEY/.test(r.error), 'V5-02: a valid JSON that is not a model is refused without quoting it');
+    r = await p.handleMcpAction({ action: 'load_project', filepath: fresh });
+    assert.strictEqual(r.success, true, 'load_project still reads what save_project wrote');
+
+    // V5b-01: 모르는 최상위 키는 들이지도 쓰지도 않는다 — 조작된 .csd 의 mcpServers 가 다른 파일로 나가지 않는다.
+    const MODEL_KEYS = ['prop', 'node', 'elem', 'lengths', 'springs', 'constraints', 'BC', 'm_all', 'GBTcon', 'neigs',
+      'loadCase', 'loadFy', 'loadValues', 'sectionType', 'sectionTemplate', 'sectionParams', 'cornerRadius'];
+    const base = JSON.parse(fs.readFileSync(fresh, 'utf8'));
+    for (const wrap of [true, false]) {
+      const crafted = boxFile(wrap ? 'crafted.csd' : 'crafted.json');
+      const evil = { ...base, mcpServers: { evil: { command: 'calc.exe' } }, hooks: { x: 1 } };
+      fs.writeFileSync(crafted, JSON.stringify(wrap ? { format: 'cufsm-section-design', version: '1.3', model: evil } : evil), 'utf8');
+      r = await p.handleMcpAction({ action: 'load_project', filepath: crafted });
+      assert.strictEqual(r.success, true, 'a model file with extra keys still loads: ' + r.error);
+      const planted = boxFile(wrap ? 'planted-a.json' : 'planted-b.json');
+      r = await p.handleMcpAction({ action: 'save_project', filepath: planted });
+      assert.strictEqual(r.success, true, r.error);
+      const keys = Object.keys(JSON.parse(fs.readFileSync(planted, 'utf8')));
+      assert(!keys.includes('mcpServers') && !keys.includes('hooks'), 'V5b-01: foreign keys do not pass through: ' + keys);
+      assert(keys.every((k) => k === 'format' || k === 'version' || MODEL_KEYS.includes(k)), 'V5b-01: only model keys are written: ' + keys);
+      assert(['prop', 'node', 'elem', 'lengths', 'BC', 'neigs'].every((k) => keys.includes(k)), 'the model itself is still written');
+    }
+
+    // V5b-03 · 08: 네트워크 · 장치 경로, ADS, 숨김 이름, 끝 공백 — 읽기도 쓰기도 거절.
+    const refusedBoth = async (target, why, re) => {
+      for (const action of ['save_project', 'load_project']) {
+        const rr = await p.handleMcpAction({ action, filepath: target });
+        assert(rr.error && !rr.success && re.test(rr.error), `${why} (${action}): ${JSON.stringify(rr)}`);
+      }
+    };
+    if (process.platform === 'win32') {
+      for (const unc of ['\\\\127.0.0.1\\C$\\stcfsd-x.json', '//127.0.0.1/C$/stcfsd-x.json', '\\\\?\\C:\\stcfsd-x.json', '\\\\.\\C:\\stcfsd-x.json']) {
+        await refusedBoth(unc, 'V5b-03: network / device path', /local drive path/);
+      }
+      await refusedBoth(victim + ':evil.json', 'V5b-08: alternate data stream', /':' is not accepted/);
+      assert(!fs.existsSync(`${victim}:evil.json.tmp-${process.pid}`), 'V5b-08: no stream left on the other file');
+      const spaced = boxFile('folder ');
+      await refusedBoth(path.join(spaced, 'x.json'), 'name ending in a space', /ending in/);
+    }
+    await refusedBoth(boxFile('.mcp.json'), 'V5b-01: hidden file name', /hidden/);
+    const dotDir = boxFile('.claude');
+    fs.mkdirSync(dotDir);
+    await refusedBoth(path.join(dotDir, 'settings.json'), 'V5b-01: hidden folder', /hidden/);
+    assert.deepStrictEqual(fs.readdirSync(dotDir), [], 'nothing was created in the hidden folder');
+
+    // V5b-01: 시스템 · 앱의 폴더(있기만 해도 뜻이 생기는 파일의 자리). 진짜 AppData 를 건드리지 않게, 임시 폴더 밖의
+    // 시험용 폴더를 ProgramData 로 가리켜 놓고 본다. junction 너머도 진짜 자리로 판단한다.
+    const guarded = path.join(__dirname, `tmp_protected_root_${process.pid}`);
+    const savedEnv = process.env.ProgramData;
+    fs.mkdirSync(path.join(guarded, 'App'), { recursive: true });
+    try {
+      process.env.ProgramData = guarded;
+      await refusedBoth(path.join(guarded, 'App', 'stcfsd-verification.json'), 'V5b-01: application folder', /belongs to the system or to an application/);
+      const link = boxFile('jx');
+      fs.symlinkSync(path.join(guarded, 'App'), link, 'junction');
+      await refusedBoth(path.join(link, 'via-junction.json'), 'V5b-01: through a junction', /belongs to the system or to an application/);
+      fs.unlinkSync(link);
+      assert.deepStrictEqual(fs.readdirSync(path.join(guarded, 'App')), [], 'nothing was created in the protected folder');
+      process.env.ProgramData = savedEnv;
+      r = await p.handleMcpAction({ action: 'save_project', filepath: path.join(guarded, 'App', 'ok-when-not-protected.json') });
+      assert.strictEqual(r.success, true, 'the same folder is writable when it is not a protected root: ' + r.error);
+    } finally {
+      if (savedEnv === undefined) { delete process.env.ProgramData; } else { process.env.ProgramData = savedEnv; }
+      fs.rmSync(guarded, { recursive: true, force: true });
+    }
+
+    // V5b-08: 쓰기에 실패하면 임시 파일이 남지 않는다(읽기 전용인 자기 모델 파일).
+    const ro = boxFile('readonly-model.json');
+    r = await p.handleMcpAction({ action: 'save_project', filepath: ro });
+    assert.strictEqual(r.success, true);
+    fs.chmodSync(ro, 0o444);
+    r = await p.handleMcpAction({ action: 'save_project', filepath: ro });
+    fs.chmodSync(ro, 0o666);
+    if (r.error) { assert.deepStrictEqual(leftovers(ro), [], 'V5b-08: a failed write leaves no temp file: ' + leftovers(ro)); }
+
+    // V5b-11: load_project 의 답은 「파일이 없다」 와 「모델 파일이 아니다」 둘뿐.
+    const notModelRe = /is not a StCFSD model file$/;
+    for (const target of [folder, notJson, victim, lookalike]) {
+      r = await p.handleMcpAction({ action: 'load_project', filepath: target });
+      assert(r.error && notModelRe.test(r.error), 'V5b-11: one wording for folder / not JSON / other JSON: ' + r.error);
+    }
+    r = await p.handleMcpAction({ action: 'load_project', filepath: boxFile('missing.stcfsd') });
+    assert(r.error && /no file at/.test(r.error), 'a missing file is said to be missing');
+    // 뒤의 시나리오가 쓰는 모델로 되돌린다.
+    r = await p.handleMcpAction({ action: 'load_project', filepath: fresh });
+    assert.strictEqual(r.success, true);
+  } finally {
+    fs.rmSync(box, { recursive: true, force: true });
+  }
   // R8-28: MCP 원시 모델을 화면의 .csd 열기로도 연다.
   const lr = p.__testLoadProjectFile(raw);
   assert(!lr.error, lr.error);
