@@ -62,6 +62,12 @@ export function tnum(v: number | null | undefined, o: NumOpt): string {
   return `<tspan class="num" data-v="${v}" data-src="${esc(o.src)}" data-u="${o.kind}" data-x="0">${sigText(v, o.sig ?? 4)}</tspan>`;
 }
 
+/** SVG 글 안의 수 — 보이는 수 = 값 / 10^e(mm 값을 m 로 적을 때 e = 3). data-v 는 값 그대로, data-x = e */
+export function tnumX(v: number | null | undefined, e: number, o: NumOpt): string {
+  if (typeof v !== 'number' || !Number.isFinite(v)) { return '<tspan class="none">—</tspan>'; }
+  return `<tspan class="num" data-v="${v}" data-src="${esc(o.src)}" data-u="${o.kind}" data-x="${e}">${sigText(v / 10 ** e, o.sig ?? 4)}</tspan>`;
+}
+
 /** 단위 글자만(표의 단위 칸) */
 export function unitOf(v: number | null | undefined, kind: Kind): string {
   if (typeof v !== 'number' || !Number.isFinite(v)) { return ''; }

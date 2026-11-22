@@ -5,7 +5,7 @@
 import { esc, tip } from './dom';
 import { num, ratio } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
-import { isDefault, state, type CheckRow, type Run } from './store';
+import { isDefault, memberRuns, state, type CheckRow, type Run } from './store';
 import { si } from './units';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
@@ -31,25 +31,32 @@ function stageNode(k: string, t: string, st: keyof typeof state.stages, extra: P
   return n(k, t, { v, vCls: cls, dot: dot || undefined, tip: s.note, ...extra });
 }
 
+/** 「이 위치만 보기」 — 한 실행 · 검토 지점의 항목만 트리에 둔다(우클릭 메뉴 · I). null = 모두 */
+export let treeFilter: { run: string; point: number | null; label: string } | null = null;
+export function setTreeFilter(f: typeof treeFilter): void { treeFilter = f; }
+const passFilter = (r: CheckRow) => !treeFilter || (r.run === treeFilter.run && r.point === treeFilter.point);
+
 function rowNode(r: CheckRow): TNode {
   const ng = r.pass === false;
   const dot = r.pass === true ? 'ok' : r.pass === false ? 'ng' : 'un';
+  const ratioCell = r.kind === 'ls' && typeof r.ratio === 'number' ? ratio(r.ratio, ng, `${r.src}ratio`)
+    : r.kind === 'na' ? '<span class="vl faint">해당 없음</span>' : r.kind === 'ls' ? '<span class="vl faint">비 없음</span>' : '<span class="vl un">미검토</span>';
   return n(r.key, `${r.where} · ${r.name}`, {
-    dot, vHtml: r.kind === 'ls' ? ratio(r.ratio, ng, r.src) : '<span class="vl un">미검토</span>',
-    tip: r.kind === 'ne' ? `엔진이 평가하지 못한 항목 — 합격이 아니다: ${r.name}` : undefined,
+    dot: r.kind === 'na' ? undefined : dot, vHtml: ratioCell, faint: r.kind === 'na' || !r.counts,
+    tip: r.kind === 'ne' ? `엔진이 평가하지 못한 항목 — 합격이 아니다: ${String(r.us?.reason ?? r.name)}`
+      : r.kind === 'na' ? `해당 없음: ${String(r.us?.reason ?? '')}` : !r.counts ? '적용 조건 — 판정에 들지 않는다(counts: false)' : `${r.id} · §${r.clause}`,
   });
 }
 
 export function buildTree(tab: Tab): TNode[] {
   const f = state.full;
-  const m = state.model;
   if (tab === 'model') {
     const def = isDefault('section');
     const nlen = f?.lengths;
     return [
       n('sec', '단면', { v: sectionLabel(), tip: def ? '프로그램이 시작할 때 채운 기본 단면. 아무도 정하지 않았다' : undefined, open: true, kids: [
-        n('sdim', '치수', { tag: def ? '기본값' : undefined, v: def ? '' : m?.sectionParams && m?.sectionTemplate && !String(m.sectionTemplate).startsWith('custom') ? '템플릿 치수' : '템플릿 치수 없음',
-          vCls: m?.sectionParams && m?.sectionTemplate ? '' : 'un' }),
+        n('sdim', '치수', { tag: def ? '기본값' : undefined, v: def ? '' : f?.section_params && f?.section_template && !String(f.section_template).startsWith('custom') ? '템플릿 치수' : '템플릿 치수 없음',
+          vCls: f?.section_params && f?.section_template ? '' : 'un' }),
         n('snode', '절점', { vHtml: num(f?.nnodes, { src: 'full:nnodes', kind: 'none' }) }),
         n('selem', '요소', { vHtml: num(f?.nelems, { src: 'full:nelems', kind: 'none' }) }),
         n('sspr', '스프링', { vHtml: num(f?.nsprings, { src: 'full:nsprings', kind: 'none' }) }),
@@ -63,8 +70,8 @@ export function buildTree(tab: Tab): TNode[] {
       ] }),
       n('cond', '해석 조건', { v: f ? (BC_KO[f.BC] ?? f.BC) : '', kids: [
         n('cBC', '경계조건', { v: f ? `${f.BC} · ${BC_KO[f.BC] ?? ''}` : '' }),
-        n('cLc', '하중 경우', { v: m?.loadCase ? (LOADCASE_KO[m.loadCase] ?? m.loadCase) : '정하지 않음', vCls: m?.loadCase ? '' : 'un',
-          tip: 'MCP get_status 는 이 값을 돌려주지 않는다 — 호스트가 화면에 보낸 모델에서 읽었다(K4)' }),
+        n('cLc', '하중 경우', { v: f?.load_case ? (LOADCASE_KO[f.load_case] ?? f.load_case) : '정하지 않음', vCls: f?.load_case ? '' : 'un',
+          tip: 'MCP get_status 의 load_case · load_fy(K4a)' }),
         n('cLen', '반파장', { vHtml: nlen ? `${num(nlen.n, { src: 'full:lengths.n', kind: 'none' })}점` : '<span class="vl un">없음</span>' }),
         n('cStr', '절점 응력', { vHtml: f ? `${num(si(f.stress?.min, 'stress'), { src: 'full:stress.min', kind: 'stress', unit: false })} ~ ${num(si(f.stress?.max, 'stress'), { src: 'full:stress.max', kind: 'stress' })}` : '' }),
       ] }),
@@ -76,9 +83,10 @@ export function buildTree(tab: Tab): TNode[] {
     ];
   }
   if (tab === 'result') {
-    const runs = state.runs;
-    const rows = runs.flatMap(r => r.rows);
-    const ng = rows.filter(r => r.pass === false), ok = rows.filter(r => r.pass === true), un = rows.filter(r => r.pass === null);
+    const runs = memberRuns();
+    const rows = runs.flatMap(r => r.rows).filter(passFilter);
+    const ng = rows.filter(r => r.kind === 'ls' && r.pass === false), ok = rows.filter(r => r.kind === 'ls' && r.pass === true), un = rows.filter(r => r.kind === 'ne');
+    const naRows = rows.filter(r => r.kind === 'na');
     const out = runs.flatMap(r => r.notChecked.map(t => ({ run: r, t })));
     const na = runs.flatMap(r => r.notApplicable.map(t => ({ run: r, t })));
     const chkStage = state.stages.chk;
@@ -107,18 +115,21 @@ export function buildTree(tab: Tab): TNode[] {
         dot: chkStage.state === 'stale' ? 'warn' : undefined, tip: chkStage.state === 'ok' ? '판정 차례: NG > 미검토 > OK. 미검토는 합격이 아니다' : chkStage.note,
         open: true,
         kids: chkStage.state === 'ok' ? [
+          ...(treeFilter ? [n('chk:filter', `이 위치만 — ${treeFilter.label}`, { v: '풀기', vCls: 'acc', tip: '「이 위치만 보기」를 풀고 모든 항목으로(Esc)' })] : []),
           n('chk:NG', 'NG', { v: String(ng.length), vCls: ng.length ? 'ng' : '', open: true, kids: ng.map(rowNode) }),
           n('chk:UN', '미검토', { v: String(un.length), vCls: un.length ? 'un' : '', open: true, tip: '합격이 아니다', kids: un.map(rowNode) }),
-          n('chk:OK', 'OK', { v: String(ok.length), vCls: '', open: true, kids: ok.map(rowNode) }),
-          ...(na.length ? [n('chk:NA', '해당 없음', { v: String(na.length), faint: true, tip: '이 단면 · 하중에 적용되지 않는 한계상태. 미검토와 다르다' })] : []),
+          n('chk:OK', 'OK', { v: String(ok.length), vCls: '', open: ok.length <= 40, kids: ok.map(rowNode) }),
+          ...(naRows.length || na.length ? [n('chk:NA', '해당 없음', { v: String(naRows.length + na.length), faint: true, tip: '이 단면 · 하중에 적용되지 않는 한계상태. 미검토와 다르다', kids: naRows.map(rowNode) })] : []),
           ...(out.length ? [n('chk:OUT', '범위 밖', { v: String(out.length), faint: true, tip: '엔진이 이 검토의 범위 밖으로 둔 것(구현 안 됨 · 입력 없음) — 판정에 들어가지 않는다' })] : []),
         ] : undefined,
       }),
       stageNode('conn', '접합부 검토', 'conn', state.lap || state.conn ? { kids: [
         ...(state.lap ? [n('conn:lap', `랩 · ${String(state.lap.us.fastener_label ?? '패스너')}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tag: state.lap.us.force_model?.specification_provision === false ? '자체 가정' : undefined,
-          vHtml: typeof state.lap.us.utilization === 'number' ? ratio(state.lap.us.utilization, state.lap.us.pass === false, 'lap:utilization') : undefined })] : []),
-        ...(state.conn ? [n('conn:one', `단일 접합 · ${String(state.conn.us.connection_type ?? '')}`, { dot: state.conn.us.pass === true ? 'ok' : state.conn.us.pass === false ? 'ng' : 'un',
-          vHtml: typeof state.conn.us.utilization === 'number' ? ratio(state.conn.us.utilization, state.conn.us.pass === false, 'conn:utilization') : undefined })] : []),
+          vHtml: typeof state.lap.us.utilization === 'number' ? ratio(state.lap.us.utilization, state.lap.us.pass === false, 'lap:utilization') : undefined,
+          kids: (state.runs.find(r => r.key === 'lap')?.rows ?? []).filter(passFilter).map(rowNode) })] : []),
+        ...(state.conn ? [n('conn:one', `단일 접합 · ${String(state.runs.find(r => r.key === 'conn')?.where.replace(/^접합 · /, '') ?? state.conn.us.connection_type ?? '')}`, { dot: state.conn.us.pass === true ? 'ok' : state.conn.us.pass === false ? 'ng' : 'un',
+          vHtml: typeof state.conn.us.utilization === 'number' ? ratio(state.conn.us.utilization, state.conn.us.pass === false, 'conn:utilization') : undefined,
+          kids: (state.runs.find(r => r.key === 'conn')?.rows ?? []).filter(passFilter).map(rowNode) })] : []),
       ] } : {}),
       n('alt', '대안', { v: '기록 없음', vCls: 'un', tip: '단면 대안 비교는 기록(R4)부터 생긴다' }),
     ];
@@ -140,7 +151,7 @@ export function buildTree(tab: Tab): TNode[] {
   ];
 }
 
-function lastRun(): Run | undefined { return state.runs.find(r => r.rows.length || r.overall !== null); }
+function lastRun(): Run | undefined { return memberRuns().find(r => r.rows.length || r.overall !== null); }
 
 function designCondNode(): Partial<TNode> {
   const r = lastRun();
@@ -164,11 +175,11 @@ function assumptionsNode(): Partial<TNode> {
 }
 
 // ── 그리기 ────────────────────────────────────────────────────────
-export function treeHtml(nodes: TNode[], sel: string, closed: Set<string>): string {
+export function treeHtml(nodes: TNode[], sel: string, closed: Set<string>, opened: Set<string> = new Set()): string {
   const has = (x: TNode): boolean => x.k === sel || (x.kids ?? []).some(has);
   const row = (x: TNode, d: number): string => {
     const kids = x.kids ?? [];
-    const open = kids.length > 0 && !closed.has(x.k) && (x.open || has(x));
+    const open = kids.length > 0 && !closed.has(x.k) && (x.open || opened.has(x.k) || has(x));
     const v = x.vHtml !== undefined ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${x.vHtml}</span>`
       : x.v ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${esc(x.v)}</span>` : '';
     const tag = x.tag ? `<span class="tag def"${tip(x.tag === '자체 가정' ? '기준 조항이 아닌 자체 해석(§A1.2(c)) — 힘 분배 모델' : '아무도 정하지 않아 프로그램이 채웠다')}>${esc(x.tag)}</span>` : '';
@@ -189,4 +200,21 @@ export function findNode(nodes: TNode[], key: string): TNode | undefined {
     if (f) { return f; }
   }
   return undefined;
+}
+
+/** 그 줄 아래의 모든 키(자신 포함) — 「모두 펼치기 · 접기」 */
+export function keysUnder(nodes: TNode[], key: string): string[] {
+  const n = findNode(nodes, key);
+  const out: string[] = [];
+  const walk = (x: TNode) => { out.push(x.k); (x.kids ?? []).forEach(walk); };
+  if (n) { walk(n); }
+  return out;
+}
+
+/** 트리에 보이는 차례의 검토 항목 키(NG → 미검토 → OK → 해당 없음, 그다음 접합) — 다음 · 앞 줄로 */
+export function visibleKeys(nodes: TNode[]): string[] {
+  const out: string[] = [];
+  const walk = (x: TNode) => { out.push(x.k); (x.kids ?? []).forEach(walk); };
+  nodes.forEach(walk);
+  return out;
 }

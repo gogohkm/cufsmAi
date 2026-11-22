@@ -179,3 +179,72 @@ table.t.vt .ratio .num { min-width: 44px; text-align: right; font-family: var(--
 :root[data-theme="light"] { --mcol: #1f6fc4; --vcol: #0f8f86; --dcol: #5c6270; --clsD: #0f8f86; }
 
 .split .hud.br { display: none; }
+
+/* ── U3 — 계산 시트(템플릿 05) · 레일 · 우클릭 메뉴 · 찾기 · AI 따라가기 · 3D ─────────────────── */
+#rail, #sheet { display: none; }
+#review.sheetl #left, #review.sheetl #right { display: none; }
+#review.sheetl #rail { display: flex; }
+#review.sheetl #sheet { display: block; }
+#review.sheetl .pane-edit-embed { left: 0; }
+.rail i { cursor: default; }
+.rail i:hover { background: var(--bg-hover); color: var(--text); }
+.pane-sheet .sheet .cols > div > table.t th { position: static; }
+.pane-sheet .sheet table.t td, .pane-sheet .sheet table.t th { padding: 4px 6px; }
+.pane-sheet .sheet .card.on { box-shadow: 0 0 0 2px var(--accent); }
+.pane-sheet .sheet .card > header { cursor: default; }
+.pane-sheet .sheet .card > header:hover { background: var(--bg-hover); }
+.pane-sheet .sheet .card > header .tag { font-family: var(--font); }
+.pane-sheet .sheet .calc .row { grid-template-columns: 62px 1fr; }
+.pane-sheet .sheet .calc .row b .num, .pane-sheet .sheet .calc .row b { color: var(--text); }
+.pane-sheet .sheet .calc .row .sv .num { color: var(--accent); }
+.pane-sheet .sheet .why2 { color: var(--text-faint); font-size: 11px; margin-left: 4px; }
+.pane-sheet .sheet .ref .tag { margin-left: 4px; }
+.pane-sheet .sheet .sheet-cards { display: grid; gap: 8px; }
+.pane-sheet .sheet .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.pane-sheet .sheet .dvbox.ph { display: grid; place-items: center; }
+.pane-sheet .sheet .dvbox svg { width: 100%; height: 100%; }
+.pane-sheet .sheet [data-reason] { color: var(--text); }
+.lnk { color: var(--accent); cursor: default; }
+.lnk:hover { text-decoration: underline; }
+.verdict[data-verdict="not_applicable"] { color: var(--text-faint); }
+td.dc { white-space: nowrap; font-family: var(--mono); font-size: 11.5px; }
+@media (max-width: 1100px) { #review.sheetl #center { overflow: hidden; } }
+
+/* 우클릭 메뉴의 키보드 고르기 · 꺼진 항목 */
+.ctx .ci.sel { background: var(--bg-select); }
+.ctx .ci.off kbd { opacity: .6; }
+
+/* 찾기 — 제목 표시줄 아래 */
+.find { position: absolute; top: 2px; right: 260px; z-index: 30; width: 460px; }
+.find .find-box { background: var(--bg-raise); border: 1px solid var(--accent); border-radius: 5px; box-shadow: 0 6px 22px rgba(0, 0, 0, .35); padding: 6px; }
+.find input { width: 100%; box-sizing: border-box; background: var(--bg-view); color: var(--text); border: 1px solid var(--line); border-radius: 3px; padding: 5px 7px; font: inherit; }
+.find .find-list { max-height: 340px; overflow: auto; margin-top: 4px; }
+.find .fi { display: flex; gap: 10px; justify-content: space-between; padding: 4px 6px; border-radius: 3px; cursor: default; white-space: nowrap; }
+.find .fi span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.find .fi.sel, .find .fi:hover { background: var(--bg-select); }
+.find .fi.none { color: var(--text-faint); }
+
+/* AI 따라가기 — 단추(켬) · 가리킴 점 · 알림 띠(창을 앞으로 가져오지 않는다 — 화면 안에서만) */
+.tbar .tb.follow.on { border-color: var(--accent); color: var(--accent); }
+.tbar .tb .ptd { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 4px; vertical-align: middle; }
+.aipoint { position: absolute; left: calc(var(--left-w, 280px) + 12px); bottom: 46px; z-index: 8; display: flex; align-items: center; gap: 8px; max-width: 60%;
+  padding: 5px 10px; border: 1px solid var(--accent); border-radius: 5px; background: var(--bg-raise); font-size: 12px; white-space: nowrap; overflow: hidden; }
+.aipoint[hidden] { display: none; }
+.aipoint.followed { border-color: var(--line); opacity: .92; }
+.aipoint.miss { border-color: var(--warn); }
+.aipoint .btn { padding: 1px 8px; }
+#review.sheetl ~ .aipoint, .sheetl .aipoint { left: 56px; }
+@media (max-width: 1100px) { .aipoint { left: 12px; } }
+
+/* 보기에서 찾기 · 표에서 보기 — 잠깐 깜빡인다 */
+@keyframes flash { 0%, 100% { outline-color: transparent; } 30% { outline-color: var(--accent); } }
+.flash { outline: 2px solid transparent; animation: flash 1.6s ease 1; }
+svg .flash { stroke: var(--accent) !important; }
+
+/* 3D 모드 형상 */
+.v3d { position: absolute; inset: 0; display: grid; place-items: center; }
+.v3d .v3d-canvas { width: 100%; height: 100%; display: block; outline: none; }
+.v3d .ph-box { position: absolute; }
+
+/* 띠의 검토 지점 막대 · 위치 표지 */
+svg rect.cpb { cursor: default; }

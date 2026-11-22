@@ -151,6 +151,18 @@ async function main() {
     check('창의 콘솔 오류 0', errs.length === 0, errs.slice(0, 3).join(' / ') || '0');
     const shot = await A.capture('u1_window_ui');
     check('보이지 않는 창의 화면을 찍는다', fs.statSync(shot).size > 20_000, `${path.basename(shot)} ${fs.statSync(shot).size} bytes`);
+    // U3 — AI 따라가기: 켜 두고 AI 의 focus 를 따라가도 창은 보이지 않고 포커스를 받지 않는다(구성안 3.9 · 보기 계약 5절)
+    await A.page(`(()=>{document.querySelector('[data-act="follow"]').click(); return 1;})()`);
+    await until(() => A.page(`window.__stcfsdUi.ui.idleMs > 5300 || null`), 20_000);
+    const hostAction = body => A.ev(`const r = await fetch('http://127.0.0.1:' + ctx.host.mcp.port + '/action', { method: 'POST', headers: { Authorization: 'Bearer ' + ctx.host.mcp.token, 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(body))} }); return await r.json();`);
+    const fr = await hostAction({ action: 'focus', item: { kind: 'model', id: 'material' }, reason: '창 시험' });
+    const moved = await until(() => A.page(`window.__stcfsdUi.ui.sel === 'mat' ? window.__stcfsdUi.ui.tab : null`), 15_000);
+    const gv = await until(async () => { const v = await hostAction({ action: 'get_view' }); return v?.last_focus?.response ? v : null; }, 15_000);
+    const sf = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
+    check('AI 따라가기 켬 → MCP focus 를 따라간다 · get_view 가 그렇다고 말한다 · 창은 보이지 않고 포커스를 받지 않는다',
+      fr?.forwarded === true && moved === 'model' && gv?.last_focus?.response?.followed === true && gv?.current?.by === 'focus' && !sf.visible && !sf.focused && sf.show === 0 && sf.focus === 0,
+      `forwarded ${fr?.forwarded} · 화면 ${moved}/mat · followed ${gv?.last_focus?.response?.followed} · by ${gv?.current?.by} · ${JSON.stringify(sf)}`);
+    await A.page(`(()=>{document.querySelector('[data-act="follow"]').click(); return 1;})()`);
     const s = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
     check('창은 보이지 않고 포커스를 받은 적이 없다', !s.visible && !s.focused && s.show === 0 && s.focus === 0, JSON.stringify(s));
 

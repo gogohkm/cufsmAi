@@ -1,0 +1,186 @@
+/**
+ * 「Claude 가 보는 선택」과 「AI 따라가기」(구성안 3.9 · 보기 계약 docs/implementation/20261123-view-contract.md).
+ *
+ *  - 보기 보고: 고른 것 · 보기가 바뀔 때마다(0.4 초 모아서) 호스트 액션 `report_view` 를 부른다
+ *    `{screen:'review', view, selection: item | null, follows_focus, by, focus_response?}` — 다리의 MCP 중계(AI 호출로 세지 않는다).
+ *    정보 창 아래 칩은 마지막으로 **호스트가 받아 적은**(recorded) 보고 그대로다 — `get_view` 가 돌려줄 것.
+ *  - focus 요청(`focusRequest` — 다리가 이벤트에 본문을 실어 한 번만 보낸다): 「AI 따라가기」가 켜져 있고, 사람이 5 초 넘게 가만히 있고,
+ *    편집 상태가 아니면 그 항목을 고르고 보인다(by: 'focus'). 아니면 움직이지 않고 「AI 가 가리킴」 알림(한 번 누르면 그리로)을 남긴다.
+ *    이 화면의 지금 결과에 없는 항목이면 따르지 않고 그렇다고 보인다. 어느 쪽이든 다음 보고에 focus_response 를 싣는다.
+ *  - 하지 않는 것: 창의 포커스를 가져가지 않는다(window.focus 를 부르지 않는다), 모델을 바꾸지 않는다, 편집 상태를 스스로 열지 않는다.
+ */
+import { mcp } from './bridge';
+import { allRows, state, type CheckRow, type Scope } from './store';
+
+export interface Item { kind: 'check' | 'model' | 'result'; id: string; scope?: Scope; location?: any }
+export interface FocusReq { request_id: string; item: Item; reason: string | null; requested_at?: string }
+export type Tab = 'work' | 'model' | 'result' | 'doc';
+
+const IDLE_MS = 5000;
+let lastInput = 0;
+const KEY = 'stcfsd.ui.follow.v1';
+let followOn = false;
+try { followOn = localStorage.getItem(KEY) === '1'; } catch { /* 없음 */ }
+
+/** 사람의 입력(마우스 · 키 · 휠) — 5 초 규칙 */
+export function installIdle(): void {
+  const mark = () => { lastInput = Date.now(); };
+  for (const t of ['mousedown', 'keydown', 'wheel', 'pointermove', 'touchstart']) { document.addEventListener(t, mark, { capture: true, passive: true }); }
+}
+export const idleFor = (): number => Date.now() - lastInput;
+export const following = (): boolean => followOn;
+export function setFollowing(on: boolean): void {
+  followOn = on;
+  try { localStorage.setItem(KEY, on ? '1' : '0'); } catch { /* 저장 못 해도 화면은 돈다 */ }
+}
+
+// ── 키 ↔ 항목 id ────────────────────────────────────────────────────
+const MODEL_ID: Record<string, string> = {
+  sec: 'section', sdim: 'section', snode: 'section', selem: 'section', sspr: 'springs', scon: 'constraints',
+  mat: 'material', mE: 'material', mNu: 'material', mG: 'material', cond: 'boundary_condition', cBC: 'boundary_condition',
+  cLc: 'load_case', cLen: 'lengths', cStr: 'load_case',
+};
+const RESULT_ID: Record<string, string> = {
+  fsm: 'buckling_analysis', 'fsm:fam': 'buckling_analysis', 'fsm:l': 'buckling_analysis.local', 'fsm:d': 'buckling_analysis.distortional', 'fsm:g': 'buckling_analysis.global',
+  load: 'load_analysis', 'load:gov': 'load_analysis', 'load:loc': 'load_analysis', 'load:def': 'load_analysis',
+  chk: 'member_design', 'chk:NG': 'member_design', 'chk:UN': 'member_design', 'chk:OK': 'member_design', 'chk:NA': 'member_design',
+  conn: 'connection', 'conn:one': 'connection', 'conn:lap': 'lap', props: 'section',
+};
+
+/** 검토 항목 → item(scope · 엔진의 location 그대로 — US). 퍼린은 계약대로 {region, check_point} 가 들어 있다 */
+export function itemOfRow(r: CheckRow): Item {
+  const loc = r.locUS && typeof r.locUS === 'object' ? r.locUS : undefined;
+  return { kind: 'check', id: r.id, scope: r.scope, ...(loc ? { location: loc } : {}) };
+}
+
+/** 화면의 고른 것 → item(없으면 null) */
+export function itemOfKey(tab: Tab, key: string): Item | null {
+  if (key.includes('#')) {
+    const r = allRows().find(x => x.key === key);
+    if (r && r.us) { return itemOfRow(r); }
+    if (key.startsWith('purlin:')) {
+      const i = Number(key.split(':')[1].split('#')[0]);
+      const rg = state.regions[i];
+      if (rg?.us?.id) { return { kind: 'result', id: `purlin.region.${String(rg.us.id)}` }; }
+    }
+    return { kind: 'result', id: 'member_design' };
+  }
+  if (tab === 'model' && MODEL_ID[key]) { return { kind: 'model', id: MODEL_ID[key] }; }
+  if (RESULT_ID[key]) { return { kind: key === 'props' ? 'model' : 'result', id: RESULT_ID[key] }; }
+  return null;
+}
+
+/** item → 화면의 탭 · 키. 이 화면의 지금 결과에 없으면 null */
+export function keyOfItem(item: Item): { tab: Tab; key: string } | null {
+  if (!item || typeof item !== 'object') { return null; }
+  if (item.kind === 'check') {
+    const loc = item.location ?? {};
+    const cands = allRows().filter(r => r.id === item.id && (!item.scope || r.scope === item.scope) && r.us);
+    if (!cands.length) { return null; }
+    let hit = cands[0];
+    if (item.scope === 'purlin' && (loc.region || loc.check_point)) {
+      const m = cands.find(r => (!loc.region || String(r.locUS?.region ?? '') === String(loc.region))
+        && (!loc.check_point || String(r.locUS?.check_point ?? r.pointName ?? '') === String(loc.check_point)));
+      if (!m) { return null; }
+      hit = m;
+    }
+    return { tab: 'result', key: hit.key };
+  }
+  if (item.kind === 'model') {
+    const id = String(item.id);
+    if (id === 'section') { return { tab: 'model', key: 'sec' }; }
+    if (/^section\.node\.\d+$/.test(id)) { return { tab: 'model', key: 'snode' }; }
+    if (/^section\.element\.\d+$/.test(id)) { return { tab: 'model', key: 'selem' }; }
+    const m: Record<string, string> = { material: 'mat', boundary_condition: 'cBC', lengths: 'cLen', springs: 'sspr', constraints: 'scon', load_case: 'cLc' };
+    return m[id] ? { tab: 'model', key: m[id] } : null;
+  }
+  const id = String(item.id);
+  const r: Record<string, string> = {
+    buckling_analysis: 'fsm', 'buckling_analysis.local': 'fsm:l', 'buckling_analysis.distortional': 'fsm:d', 'buckling_analysis.global': 'fsm:g',
+    load_analysis: 'load', member_design: 'chk', connection: 'conn:one', lap: 'conn:lap',
+  };
+  if (r[id]) {
+    if ((id === 'connection' && !state.conn) || (id === 'lap' && !state.lap) || (id === 'load_analysis' && !state.loads)) { return null; }
+    return { tab: 'result', key: r[id] };
+  }
+  if (/^load_analysis\.support\.\d+$/.test(id)) { return state.loads ? { tab: 'result', key: 'load' } : null; }
+  const pm = /^purlin\.region\.(.+)$/.exec(id);
+  if (pm) {
+    const i = state.regions.findIndex(x => String(x.us?.id) === pm[1]);
+    if (i < 0) { return null; }
+    const run = state.runs.find(x => x.key === `purlin:${i}`);
+    const k = (run?.rows.find(x => x.pass === false) ?? run?.rows[0])?.key;
+    return k ? { tab: 'result', key: k } : null;
+  }
+  return null;
+}
+
+// ── 보기 보고 ───────────────────────────────────────────────────────
+export interface Reported { view: string; selection: Item | null; by: string; recorded: boolean; error?: string; at: number }
+let reported: Reported | null = null;
+let pendingResp: { request_id: string; followed: boolean; note?: string } | null = null;
+let timer: number | null = null;
+let lastSent = '';
+let onReported: (() => void) | null = null;
+
+export function lastReported(): Reported | null { return reported; }
+export function onReport(cb: () => void): void { onReported = cb; }
+
+/** 보고 — 같은 것이면 보내지 않는다(focus_response 가 있으면 보낸다). now = 모으지 않고 곧바로 */
+export function report(view: string, selection: Item | null, by: 'person' | 'program' | 'focus', now = false): void {
+  const body = { screen: 'review', view, selection, follows_focus: followOn, by };
+  const sig = JSON.stringify(body);
+  if (sig === lastSent && !pendingResp) { return; }
+  if (timer !== null) { clearTimeout(timer); timer = null; }
+  const send = () => {
+    timer = null;
+    const resp = pendingResp;
+    pendingResp = null;
+    lastSent = sig;
+    void mcp<{ recorded?: boolean; error?: string }>('report_view', { ...body, ...(resp ? { focus_response: resp } : {}) }).then(r => {
+      reported = { view, selection, by, recorded: r?.recorded !== false && !r?.error, error: r?.error, at: Date.now() };
+      onReported?.();
+    });
+  };
+  if (now) { send(); } else { timer = window.setTimeout(send, 400); }
+}
+
+// ── focus 요청 ──────────────────────────────────────────────────────
+export interface Pointed { req: FocusReq; target: { tab: Tab; key: string } | null; why: string; at: number }
+let pointed: Pointed | null = null;
+let followedNote: { reason: string | null; at: number; label: string } | null = null;
+const seen = new Set<string>();
+
+export const pointedAt = (): Pointed | null => pointed;
+export const lastFollowed = (): typeof followedNote => followedNote;
+export function clearPointed(): void { pointed = null; }
+
+/**
+ * 한 번만 — 같은 request_id 는 다시 따르지 않는다. go = 화면을 그 탭 · 키로(고르기만, 모델은 그대로).
+ * 돌려주는 것: 따라갔는가
+ */
+export function handleFocus(req: FocusReq, ctx: { editing: boolean; go: (tab: Tab, key: string, label: string) => void; label: (key: string) => string }): boolean {
+  if (!req || typeof req.request_id !== 'string' || seen.has(req.request_id)) { return false; }
+  seen.add(req.request_id);
+  const target = keyOfItem(req.item);
+  if (!target) {
+    pointed = { req, target: null, why: '이 화면의 지금 결과에 그 항목이 없다', at: Date.now() };
+    pendingResp = { request_id: req.request_id, followed: false, note: 'not in the current results of this screen' };
+    return false;
+  }
+  const label = ctx.label(target.key);
+  const why = !followOn ? 'AI 따라가기가 꺼져 있다' : ctx.editing ? '편집 상태다' : idleFor() < IDLE_MS ? '사람이 작업 중이다(5 초 안에 입력)' : '';
+  if (why) {
+    pointed = { req, target, why, at: Date.now() };
+    pendingResp = { request_id: req.request_id, followed: false, note: !followOn ? 'follow AI is off' : ctx.editing ? 'edit state is open' : 'the person was busy (input within 5 s)' };
+    return false;
+  }
+  pointed = null;
+  followedNote = { reason: req.reason, at: Date.now(), label };
+  pendingResp = { request_id: req.request_id, followed: true };
+  ctx.go(target.tab, target.key, label);
+  return true;
+}
+
+/** 「AI 가 가리킴」 알림을 눌렀다 — 사람이 그리로 간다(그 요청에 대한 답은 이미 보냈다) */
+export function takePointed(): Pointed | null { const p = pointed; pointed = null; return p; }

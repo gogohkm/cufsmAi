@@ -14,6 +14,8 @@ let collapsed = false;
 
 export function setActiveTable(id: string): void { activeId = id; }
 export function toggleDrawer(): void { collapsed = !collapsed; }
+/** 서랍을 펼친다(그 가지의 기본이 접힘이면 collapsedDefault = true) — 「표에서 보기」 */
+export function openDrawer(collapsedDefault: boolean): void { collapsed = collapsedDefault; }
 
 function sorted(t: DTable): DRow[] {
   const s = sortState.get(t.id);

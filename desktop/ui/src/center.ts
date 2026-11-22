@@ -16,17 +16,19 @@
 import { curveSvg, type CurveMark } from './curve';
 import { esc, tip } from './dom';
 import { drawerHtml, type DTable } from './drawer';
-import { bandVar, none, num, ratio, sigText, tnum, verdictOf } from './format';
+import { bandVar, none, num, ratio, sigText, tnum, tnumX, verdictOf } from './format';
 import { connSvg, lapFasteners, lapSvg } from './lap';
-import { memberSvg, type Region, type Row } from './member';
+import { memberSvg, type PointBar, type Region, type Row } from './member';
 import { FAMILY_KO } from './names';
 import { sectionSvg } from './section';
-import { regionLabel, state, type CheckRow, type Run } from './store';
+import { memberRuns, regionLabel, rowOfKey, state, type CheckRow, type Run } from './store';
+import { demandCapacity } from './sheet';
+import { ROLE_KO } from './names';
 import { si } from './units';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
-export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean }
-export const opts: CenterOpts = { labels: true, elems: true, dims: true, axes: true, stress: false, higher: true, M: true, V: true, D: true, force: true, modeNodes: false };
+export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean; mode3d: boolean }
+export const opts: CenterOpts = { labels: true, elems: true, dims: true, axes: true, stress: false, higher: true, M: true, V: true, D: true, force: true, modeNodes: false, mode3d: false };
 
 /** 모드 형상의 반파장 · 모드(곡선을 누르거나 극소 썸네일 · 트리에서 고른다) */
 export const modeSel: { len: number | null; mode: number; fromKey: string } = { len: null, mode: 1, fromKey: '' };
@@ -34,6 +36,7 @@ let override: { group: string; views: V[] } | null = null;
 
 export type Group = 'model' | 'fsm' | 'load' | 'chk' | 'conn' | 'doc' | 'other';
 export function groupOf(key: string): Group {
+  if (key.startsWith('lap#') || key.startsWith('conn#')) { return 'conn'; }
   if (key === 'chk' || key.startsWith('chk:') || key.includes('#') || key === 'dc' || key.startsWith('dc:')) { return 'chk'; }
   if (key === 'fsm' || key.startsWith('fsm:')) { return 'fsm'; }
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
@@ -74,10 +77,11 @@ function honest(title: string, why: string, zoom = ''): string {
 
 // ── 단면 ──────────────────────────────────────────────────────────
 function tplOf(): { name: string; params: Record<string, number> } | null {
-  const m = state.model;
-  const t = String(m?.sectionTemplate ?? '');
-  if (!m?.sectionParams || !t || t.startsWith('custom')) { return null; }
-  return { name: t, params: m.sectionParams };
+  // 호스트 상태(get_full_state — K4a)의 템플릿 · 치수
+  const f = state.full;
+  const t = String(f?.section_template ?? '');
+  if (!f?.section_params || !t || t.startsWith('custom')) { return null; }
+  return { name: t, params: f.section_params };
 }
 
 function sectionView(w: number, h: number, first: boolean, views: V[]): string {
@@ -176,11 +180,13 @@ function modeView(w: number, h: number, first: boolean, views: V[]): string {
     const row = x ? rowOfLength(x.L) : null;
     return row === null ? `<span class="chip off"${tip('엔진이 이 극소를 내지 않았다')}>${name}</span>` : `<span class="chip${row === i && m === 1 ? ' on' : ''}" data-pick="len:${row}">${name}</span>`;
   };
-  return `<div class="dv" data-draw="mode" data-zoom="mode" data-len="${i}" data-mode="${m}">${svg}`
+  // 3D(칩) — 제품의 렌더러를 이 자리에 붙인다(v3d.ts). 2D 가 기본
+  const body = opts.mode3d ? `<div class="v3d" data-v3d data-len="${i}" data-mode="${m}"></div>` : svg;
+  return `<div class="dv" data-draw="mode"${opts.mode3d ? '' : ' data-zoom="mode"'} data-len="${i}" data-mode="${m}">${body}`
     + `<div class="hud tl">${first ? vsel(views) : ''}<span class="chip mode on"${tip('고른 반파장의 모드 형상 — 곡선을 누르면 그 반파장으로')}>${sel ? (sel.k === 'local' ? '국부' : sel.k === 'dist' ? '뒤틀림' : sel.k === 'global' ? '전체' : '극소') : `모드 ${m}`} · ${esc(sigText(L ?? 0, 4))} mm</span>`
-    + `${narrow ? kchip('dist', '뒤틀림') + kchip('local', '국부') + kchip('global', '전체') : ''}${chip('stress', '응력', '기준 응력 분포(절점 응력)')}${chip('modeNodes', '절점')}</div>`
-    + `<div class="hud tr"><span class="chip off"${tip('3D 모드 형상은 이 화면에 아직 없다 — 제품의 3D 그리기(media/viewer3d.js)는 다리의 웹뷰 서버에만 있고 새 화면의 CSP 가 그것을 싣지 못한다. 편집 상태(F2)의 좌굴해석 탭에서 본다')}>3D</span>${fitBtn('mode')}</div>`
-    + (narrow ? '' : `<div class="hud bl"><div class="thumbs3">${thumb('local', '국부')}${thumb('dist', '뒤틀림')}${thumb('global', '전체')}</div></div>`)
+    + `${narrow && w >= 440 ? kchip('dist', '뒤틀림') + kchip('local', '국부') + kchip('global', '전체') : ''}${narrow ? '' : chip('stress', '응력', '기준 응력 분포(절점 응력)') + chip('modeNodes', '절점')}</div>`
+    + `<div class="hud tr">${chip('mode3d', '3D', '3D 모드 형상(제품의 렌더러 — 끌어 돌리기 · 휠 확대). 끄면 2D')}${opts.mode3d || narrow ? '' : fitBtn('mode')}</div>`
+    + (narrow || opts.mode3d ? '' : `<div class="hud bl"><div class="thumbs3">${thumb('local', '국부')}${thumb('dist', '뒤틀림')}${thumb('global', '전체')}</div></div>`)
     + `<div class="hud br"><span class="cap">변형 배율 임의 · 회색 = 변형 전 · LF ${num(an.curve[i][m], { src: `curve:${i}.${m}`, kind: 'none', unit: false, sig: 4 })}</span></div></div>`;
 }
 
@@ -211,6 +217,22 @@ function regionsList(): Region[] {
     .filter(r => Number.isFinite(r.a) && Number.isFinite(r.b));
 }
 
+/** 퍼린 구간의 검토 지점 막대 — 엔진의 location.x 와 그 지점의 utilization · pass */
+function pointBars(): PointBar[] {
+  const out: PointBar[] = [];
+  for (const r of state.regions) {
+    const run = state.runs.find(x => x.key === r.runKey);
+    if (!run) { continue; }
+    const lane = (String(r.us?.kind ?? '').startsWith('uplift') ? 1 : 0) as 0 | 1;
+    for (const p of run.points) {
+      if (p.xm === null) { continue; }
+      const first = run.rows.find(x => x.point === p.index && x.pass === false) ?? run.rows.find(x => x.point === p.index);
+      out.push({ x: p.xm, ratio: p.ratio, pass: p.pass, lane, run: run.key, p: p.index, key: first?.key ?? run.key, src: p.src });
+    }
+  }
+  return out;
+}
+
 function selRegion(key: string): { a: number; b: number; label: string } | null {
   const run = key.includes('#') ? key.split('#')[0] : null;
   const rg = state.regions.find(r => r.runKey === run);
@@ -221,8 +243,8 @@ function selRegion(key: string): { a: number; b: number; label: string } | null 
 function memberView(w: number, h: number, key: string, first: boolean, views: V[], withBand: boolean): string {
   const st = state.stages.load;
   if (!state.loads) {
-    const k4 = 'AI 의 analyze_loads 결과는 화면에 오지 않는다(K4). design_purlin 이나 편집 상태의 「하중 분석 실행」 결과는 온다';
-    const why = st.state === 'stale' ? `${st.note} — ${k4}` : `하중 해석이 화면에 없다 — ${k4}`;
+    const how = 'Claude 에게 말로(analyze_loads · design_purlin), 또는 편집 상태의 「하중 분석 실행」';
+    const why = st.state === 'stale' ? `${st.note} — ${how}` : `하중 해석이 화면에 없다 — ${how}`;
     return honest(st.state === 'stale' ? '낡음 — 결과를 지웠다' : '하중 해석 결과 없음', why);
   }
   const rows: Row[] = ['beam'];
@@ -230,7 +252,11 @@ function memberView(w: number, h: number, key: string, first: boolean, views: V[
   if (opts.M) { rows.push('M'); }
   if (opts.V && !withBand) { rows.push('V'); }
   if (opts.D && !withBand) { rows.push('D'); }
-  const m = memberSvg({ w, la: state.loads.si, rows, regions: withBand ? regionsList() : [], sel: selRegion(key) });
+  const { row } = rowOfKey(key);
+  const loc = row && row.xm !== null ? { x: row.xm, label: `검토 위치 x = ${tnumX(row.si?.location?.x?.value, 3, { src: `${row.src}location.x.value`, kind: 'length', sig: 3 })} m` } : null;
+  const sr = selRegion(key);
+  // 검토 위치가 있으면 구간 이름표 대신 위치 표지(둘이 겹치지 않게) — 구간 강조는 그대로
+  const m = memberSvg({ w, la: state.loads.si, rows, regions: withBand ? regionsList() : [], sel: sr && loc ? { ...sr, label: '' } : sr, points: withBand ? pointBars() : [], loc });
   return `<div class="dv" data-draw="member" data-zoom="member">${m.svg}`
     + `<div class="hud tl">${first ? vsel(views) : ''}${chip('M', 'M')}${withBand ? '' : chip('V', 'V') + chip('D', '처짐')}</div>`
     + `<div class="hud tr"><span class="chip on"${tip('엔진의 지배 조합')}>${esc(String(state.loads.us.governing?.combo ?? '조합'))}</span>${fitBtn('member')}</div>`
@@ -243,27 +269,29 @@ function checkRow(r: CheckRow, sel: string): string {
   const v = verdictOf(r.pass);
   const ng = r.pass === false;
   const bar = r.kind === 'ls' && typeof r.ratio === 'number'
-    ? `<div class="ratio"><div class="track"><div class="fill" style="width:${Math.min(100, r.ratio * 100).toFixed(1)}%;background:${bandVar(r.ratio, ng)}"></div></div>${ratio(r.ratio, ng, r.src)}</div>`
-    : '<div class="ratio"><div class="track un"></div><span class="faint">평가 못 함</span></div>';
-  return `<tr class="ck${r.key === sel ? ' on' : ''}" data-k="${esc(r.key)}" data-verdict="${r.kind === 'ne' ? 'ne' : v.cls}"><td><span class="dot ${v.cls}"></span></td><td>${esc(r.where)}</td><td>${esc(r.name)}</td><td>${bar}</td>`
-    + `<td class="r verdict ${v.cls}">${r.kind === 'ne' ? '미검토' : v.text}</td></tr>`;
+    ? `<div class="ratio"><div class="track"><div class="fill" style="width:${Math.min(100, r.ratio * 100).toFixed(1)}%;background:${bandVar(r.ratio, ng)}"></div></div>${ratio(r.ratio, ng, `${r.src}ratio`)}</div>`
+    : `<div class="ratio"><div class="track un"></div><span class="faint">${r.kind === 'na' ? '해당 없음' : r.kind === 'ls' ? '비 없음' : '평가 못 함'}</span></div>`;
+  const vt = r.kind === 'ne' ? '미검토' : r.kind === 'na' ? '해당 없음' : v.text;
+  return `<tr class="ck${r.key === sel ? ' on' : ''}${r.kind === 'na' ? ' na' : ''}" data-k="${esc(r.key)}" data-id="${esc(r.id)}" data-verdict="${r.kind === 'ne' ? 'ne' : r.kind === 'na' ? 'na' : v.cls}"><td><span class="dot ${r.kind === 'na' ? '' : v.cls}"></span></td><td>${esc(r.where)}</td>`
+    + `<td>${esc(r.name)}${r.clause ? ` <span class="faint">§${esc(r.clause)}</span>` : ''}</td><td class="r dc">${demandCapacity(r)}</td><td>${bar}</td>`
+    + `<td class="r verdict ${r.kind === 'na' ? 'un' : v.cls}">${vt}</td></tr>`;
 }
 
 function verdictView(sel: string, first: boolean, views: V[]): string {
   const s = state.stages.chk;
   if (s.state !== 'ok') { return honest(s.state === 'stale' ? '낡음 — 결과를 지웠다' : '아직 평가 안 함', s.note); }
   const rows: string[] = [];
-  for (const run of state.runs) {
+  for (const run of memberRuns()) {
     if (!run.rows.length && !run.notChecked.length) { continue; }
     const ov = verdictOf(run.overall, '판정 없음');
-    rows.push(`<tr class="grp"><td colspan="5">${esc(run.label)} · 전체 <span class="verdict ${ov.cls}">${ov.text}</span>${run.governing ? ` · 지배 ${esc(run.governing)}` : ''}</td></tr>`);
+    rows.push(`<tr class="grp"><td colspan="6">${esc(run.label)} · 전체 <span class="verdict ${ov.cls}">${ov.text}</span>${run.governing ? ` · 지배 ${esc(run.governing)}` : ''}</td></tr>`);
     for (const r of run.rows) { rows.push(checkRow(r, sel)); }
-    for (const t of run.notApplicable) { rows.push(`<tr class="na"><td><span class="dot"></span></td><td>${esc(run.where)}</td><td>${esc(t)}</td><td></td><td class="r faint">해당 없음</td></tr>`); }
-    for (const t of run.notChecked) { rows.push(`<tr class="out"><td><span class="dot"></span></td><td>${esc(run.where)}</td><td class="faint">${esc(t)}</td><td></td><td class="r faint"${tip('엔진이 이 검토의 범위 밖으로 둔 것 — 판정에 들어가지 않는다')}>범위 밖</td></tr>`); }
+    for (const t of run.notApplicable) { rows.push(`<tr class="na"><td><span class="dot"></span></td><td>${esc(run.where)}</td><td>${esc(t)}</td><td></td><td></td><td class="r faint">해당 없음</td></tr>`); }
+    for (const t of run.notChecked) { rows.push(`<tr class="out"><td><span class="dot"></span></td><td>${esc(run.where)}</td><td class="faint">${esc(t)}</td><td></td><td></td><td class="r faint"${tip('엔진이 이 검토의 범위 밖으로 둔 것 — 판정에 들어가지 않는다')}>범위 밖</td></tr>`); }
   }
-  return `<div class="dv vt-wrap"><div class="vt-head">${first ? vsel(views) : ''}<b>판정비</b><span class="faint"${tip('엔진의 limit_state_checks · not_evaluated · not_checked 를 그 차례대로. 판정 차례: NG > 미검토 > OK')}>위치 · 한계상태 · 엔진 판정</span><span class="sp"></span>`
+  return `<div class="dv vt-wrap"><div class="vt-head">${first ? vsel(views) : ''}<b>판정비</b><span class="faint"${tip('엔진의 design_checks(검토 항목) · not_checked 를 그 차례대로. 판정 차례: NG > 미검토 > OK. 해당 없음은 판정을 끌어내리지 않는다')}>위치 · 한계상태 · 소요 / 설계강도 · 엔진 판정</span><span class="sp"></span>`
     + `<div class="legend"${tip('판정비 구간색. 미검토는 합격이 아니다')}><i style="background:var(--r1)"></i><span>&lt;0.50</span><i style="background:var(--r2)"></i><span>0.75</span><i style="background:var(--r3)"></i><span>0.90</span><i style="background:var(--r4)"></i><span>1.00</span><i style="background:var(--r5)"></i><span>1.25</span><i style="background:var(--r6)"></i><span>NG</span><i class="un"></i><span>미검토</span></div></div>`
-    + `<table class="t vt" data-table="checks"><thead><tr><th></th><th>위치</th><th>한계상태</th><th>판정비</th><th class="r">판정</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+    + `<table class="t vt" data-table="checks"><thead><tr><th></th><th>위치</th><th>한계상태</th><th class="r">소요 / 설계강도</th><th>판정비</th><th class="r">판정</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 
 // ── 접합 ───────────────────────────────────────────────────────────
@@ -283,15 +311,18 @@ const sv = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : ''
 function modelDrawer(): string {
   const nodes = state.nodes.map((n, i) => `<tr><td>${esc(n[0])}</td><td class="r">${num(si(n[1], 'length'), { src: `nodes:${i}.1`, kind: 'length', unit: false })}</td>`
     + `<td class="r">${num(si(n[2], 'length'), { src: `nodes:${i}.2`, kind: 'length', unit: false })}</td><td class="r">${num(si(n[7], 'stress'), { src: `nodes:${i}.7`, kind: 'stress', unit: false })}</td></tr>`).join('');
+  // 요소의 자리 — get_full_state 의 element_roles(템플릿 단면만, 요소 차례대로). 손으로 만든 단면은 짐작하지 않는다
+  const roles: unknown[] | null = Array.isArray(state.full?.element_roles) && state.full.element_roles.length === state.elems.length ? state.full.element_roles : null;
   const elems = state.elems.map((e, i) => `<tr><td>${esc(e[0])}</td><td class="r">${esc(e[1])}</td><td class="r">${esc(e[2])}</td>`
-    + `<td class="r">${num(si(e[3], 'length'), { src: `elems:${i}.3`, kind: 'length', unit: false })}</td><td class="r">${esc(e[4])}</td></tr>`).join('');
+    + `<td class="r">${num(si(e[3], 'length'), { src: `elems:${i}.3`, kind: 'length', unit: false })}</td><td class="r">${esc(e[4])}</td>`
+    + `<td data-role="${roles ? esc(String(roles[i])) : ''}">${roles ? esc(ROLE_KO[String(roles[i])] ?? String(roles[i])) : '<span class="faint">—</span>'}</td></tr>`).join('');
   return '<div class="drawer">'
     + `<header><b>절점 · 요소</b><span class="chip on">절점 ${state.nodes.length}</span><span class="chip on">요소 ${state.elems.length}</span>`
     + `<span class="chip">스프링 ${esc(state.full?.nsprings ?? '—')}</span><span class="chip">구속 ${esc(state.full?.nconstraints ?? '—')}</span><span class="sp"></span>`
     + `<span class="faint"${tip('MCP get_nodes · get_elements 와 같은 값을 mm · MPa 로')}>mm · MPa · 절점 좌표계</span></header>`
     + '<div class="dtabs">'
     + `<div><table class="t" data-table="nodes"><thead><tr><th>절점</th><th class="r">x</th><th class="r">z</th><th class="r"${tip('기준 응력 분포(절점 응력)')}>σ MPa</th></tr></thead><tbody>${nodes}</tbody></table></div>`
-    + `<div><table class="t" data-table="elems"><thead><tr><th>요소</th><th class="r">i</th><th class="r">j</th><th class="r">t mm</th><th class="r">재료</th></tr></thead><tbody>${elems}</tbody></table></div>`
+    + `<div><table class="t" data-table="elems"><thead><tr><th>요소</th><th class="r">i</th><th class="r">j</th><th class="r">t mm</th><th class="r">재료</th><th${tip(roles ? '요소의 자리(엔진의 element_roles)' : '템플릿 단면이 아니라 자리가 없다 — 짐작하지 않는다')}>자리</th></tr></thead><tbody>${elems}</tbody></table></div>`
     + '</div></div>';
 }
 
@@ -299,16 +330,19 @@ export function tablesFor(group: Group): DTable[] {
   if (group === 'fsm' || group === 'chk') {
     const t: DTable[] = [];
     if (group === 'chk') {
-      const rows = state.runs.flatMap((run: Run) => run.rows.map(r => {
+      const rows = memberRuns().flatMap((run: Run) => run.rows.map(r => {
         const v = verdictOf(r.pass);
-        return { key: r.key, cells: [esc(run.where), esc(r.name), r.kind === 'ls' ? ratio(r.ratio, r.pass === false, r.src) : '<span class="faint">평가 못 함</span>', `<span class="verdict ${v.cls}">${r.kind === 'ne' ? '미검토' : v.text}</span>`],
-          sort: [run.where, r.name, r.ratio ?? -1, v.text], tsv: [run.where, r.name, String(r.ratio ?? ''), r.kind === 'ne' ? '미검토' : v.text] };
+        const vt = r.kind === 'ne' ? '미검토' : r.kind === 'na' ? '해당 없음' : v.text;
+        return { key: r.key, cells: [esc(r.where), esc(r.name), esc(r.clause), demandCapacity(r), typeof r.ratio === 'number' ? ratio(r.ratio, r.pass === false, `${r.src}ratio`) : '<span class="faint">—</span>', `<span class="verdict ${r.kind === 'na' ? 'un' : v.cls}">${vt}</span>`, `<span class="faint">${esc(r.id)}</span>`],
+          sort: [r.where, r.name, r.clause, typeof r.si?.capacity?.value === 'number' ? r.si.capacity.value : -1, r.ratio ?? -1, vt, r.id], tsv: [r.where, r.name, r.clause, String(r.si?.demand?.value ?? ''), String(r.si?.capacity?.value ?? ''), String(r.ratio ?? ''), vt, r.id] };
       }));
-      t.push({ id: 'checks', title: '판정비', cols: [{ t: '위치' }, { t: '한계상태' }, { t: '판정비', num: true }, { t: '판정' }], rows, empty: '부재 검토 결과 없음' });
+      t.push({ id: 'checks', title: '판정비', cols: [{ t: '위치' }, { t: '한계상태' }, { t: '조항' }, { t: '소요 / 설계강도', num: true }, { t: '판정비', num: true }, { t: '판정' }, { t: 'id' }], rows, empty: '부재 검토 결과 없음' });
       const rg = state.regions.map((r, i) => {
         const res = r.si?.result ?? {};
         const v = verdictOf(r.us?.result?.pass, '판정 없음');
-        return { key: `${r.runKey}#ls0`, cells: [esc(String(r.us?.label ?? '')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
+        const run = state.runs.find(x => x.key === r.runKey);
+        const k0 = (run?.rows.find(x => x.pass === false) ?? run?.rows[0])?.key ?? r.runKey;
+        return { key: k0, cells: [esc(String(r.us?.label ?? '')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
           n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), typeof res.utilization === 'number' ? ratio(res.utilization, r.us?.result?.pass === false, `purlin:regions.${i}.result.utilization`) : none(), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(r.us?.result?.governing_check ?? ''))],
           sort: [String(r.us?.label ?? ''), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
           tsv: [String(r.us?.label ?? ''), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };

@@ -21,7 +21,8 @@
  *  - `/api/claude/status`   Claude Desktop 연결 상태(읽기만) · `POST /api/claude/connect|disconnect` 등록 · 지우기(S4, 화면의 세션만 — claude.ts)
  *  - `/ui/`                 새 검토 화면(U1, `desktop/ui/` — `uiDir` 를 줄 때만). 기본 화면은 여전히 `/` 의 틀이다
  *  - `/api/wv/<id>/last` · `…/first`  다시 보내기 기록에 남은 호스트 → 웹뷰 메시지(새 화면이 읽는다, U1)
- *  이벤트 `host:message {id, viewType, command, seq}` — 호스트가 설계 패널에 메시지를 보낼 때마다(본문 없음, U1)
+ *  이벤트 `host:message {id, viewType, command, seq}` — 호스트가 설계 패널에 메시지를 보낼 때마다(본문 없음, U1).
+ *    `focusRequest` 만 본문을 `focus` 로 싣는다(한 번만 뜻이 있어 기록에 남기지 않는다 — U3, 보기 계약 3절)
  */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
@@ -169,7 +170,9 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     // 새 화면(U1)이 따라가도록 — 설계 패널에 간 메시지의 이름과 순서 번호만 알린다(본문은 `/api/wv/<id>/last` 로 읽는다).
     if (id === designerId && ch) {
       const command = (message as { command?: unknown })?.command;
-      bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq });
+      // focusRequest(보기 계약 3절)는 다시 보내기 기록에 남지 않으므로(channel.ts TRANSIENT) 본문을 이 이벤트에 한 번만 싣는다
+      const focus = command === 'focusRequest' ? (message as { data?: unknown }).data ?? null : undefined;
+      bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq, ...(focus !== undefined ? { focus } : {}) });
     }
   }));
   subs.push(hub.onDidRefuseDispose.event(info => { bus.emit('webview:refused', 'host', { id: info.id, viewType: info.viewType }); }));

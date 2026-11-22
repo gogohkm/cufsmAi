@@ -14,11 +14,12 @@
  *  1. 같은 명령은 마지막 것만 남긴다 — 웹뷰의 받는 쪽(app.js)은 명령마다 그 상태를 통째로 바꾼다.
  *     남은 것들의 서로 간 차례는 원래 차례 그대로다.
  *  2. 결과를 지우는 메시지가 오면 그 앞의 지워질 결과를 뺀다 — `resultsCleared`(다른 파일을 열기 직전 — 모든 결과),
- *     `analysisInvalidated`(해석에서 나온 결과 · 설계 · Lap, `invalidateLoads` 면 하중 해석도). 지우는 메시지 자신은 남는다
+ *     `analysisInvalidated`(해석에서 나온 결과 · 설계 · Lap, `invalidateLoads` 면 하중 해석도), `derivedResultsInvalidated`(U3 —
+ *     MCP analyze_loads 의 바뀐 입력: 부재 설계 · 퍼린 · Lap). 지우는 메시지 자신은 남는다
  *     (상태 글이 그대로 보이게). 빼지 않아도 끝 상태는 같지만, 다시 보낸 옛 `analysisComplete` 가 웹뷰의 자동 설계 DSM 준비를
  *     부르는 것(호스트 계산)을 막는다.
  *  3. 한 번만 뜻이 있는 것은 남기지 않는다 — `collectDesignData`(다시 보내면 저장이 돈다), `captureSection`(MCP 의 캡처 요청),
- *     `showSection`(트리 클릭의 탭 이동).
+ *     `showSection`(트리 클릭의 탭 이동), `focusRequest`(AI 의 「여기를 보세요」 — 새로 고침 때 다시 따라가지 않게).
  *  4. 웹뷰가 스스로 다시 묻는 것은 남기지 않는다 — `propertiesResult` · `propertiesError`. 웹뷰는 `modelLoaded` ·
  *     `templateGenerated` 를 그릴 때마다 단면 성질을 호스트에 다시 묻는다(app.js renderPreprocessor). 다시 보내면 그 답과 함께
  *     두 번 그려 도심 축이 겹친다(시험에서 본 것).
@@ -29,13 +30,22 @@
 import * as crypto from 'node:crypto';
 import type { SseStream } from './sse';
 
-const TRANSIENT = new Set(['collectDesignData', 'captureSection', 'showSection', 'propertiesResult', 'propertiesError']);
+/**
+ * 한 번만 뜻이 있는 것(규칙 3) + `focusRequest`(AI 의 「여기를 보세요」 — 보기 계약 3절): 다시 보내기 기록에 남기면 새로 고침할 때마다
+ * 화면이 다시 따라간다. 새 화면은 `host:message` 이벤트에 실린 본문으로 한 번만 받는다(index.ts).
+ */
+const TRANSIENT = new Set(['collectDesignData', 'captureSection', 'showSection', 'propertiesResult', 'propertiesError', 'focusRequest']);
 /** `resultsCleared` 가 지우는 것 */
 const CLEARED_BY_RESULTS = new Set([
   'analysisStarted', 'analysisComplete', 'analysisError', 'dsmResult', 'classifyResult', 'classifyError', 'designDsmPrepared',
   'designResult', 'designPurlinResult', 'loadAnalysisComplete', 'lapConnectionResult', 'connectionResult',
   'plasticResult', 'plasticError', 'vibrationResult', 'vibrationError', 'analysisInvalidated', 'propertiesResult',
 ]);
+/**
+ * `derivedResultsInvalidated`(U3 — 호스트가 MCP analyze_loads 의 바뀐 입력으로 부재 설계 · 랩 결과를 지웠다)가 지우는 것.
+ * 새로 고침이 낡은 판정 카드를 되살리지 않게. 새 하중 결과(`loadAnalysisComplete`)는 이 뒤에 오므로 남는다.
+ */
+const CLEARED_BY_DERIVED = new Set(['designResult', 'designPurlinResult', 'lapConnectionResult']);
 /** `analysisInvalidated` 가 지우는 것(웹뷰 clearStaleResults: 해석 · 설계 · Lap) */
 const CLEARED_BY_INVALIDATION = new Set([
   'analysisStarted', 'analysisComplete', 'dsmResult', 'classifyResult', 'designDsmPrepared',
@@ -87,6 +97,8 @@ export class Channel {
     if (!TRANSIENT.has(command)) {
       if (command === 'resultsCleared') {
         for (const c of CLEARED_BY_RESULTS) { this.state.delete(c); }
+      } else if (command === 'derivedResultsInvalidated') {
+        for (const c of CLEARED_BY_DERIVED) { this.state.delete(c); }
       } else if (command === 'analysisInvalidated') {
         for (const c of CLEARED_BY_INVALIDATION) { this.state.delete(c); }
         if (m.data?.invalidateLoads) { this.state.delete('loadAnalysisComplete'); }

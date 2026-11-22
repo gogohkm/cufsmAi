@@ -836,6 +836,57 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     return { ok, detail: ok ? `${r.json.width}×${r.json.height} PNG` : short(r.text, 160) };
   });
 
+  await step('s14c focus(중계) — 한 번만: 다시 보내기 기록에 없고, 이벤트 host:message 에 본문(focus)이 한 번 실린다(U3)', async () => {
+    const evs = [];
+    const ac = new AbortController();
+    const res = await fetch(`${origin}/api/events`, { headers: { Authorization: `Bearer ${token}` }, signal: ac.signal });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) { break; }
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+            const data = chunk.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('\n');
+            try { evs.push(JSON.parse(data)); } catch { /* hello 등 */ }
+          }
+        }
+      } catch { /* 끊음 */ }
+    })();
+    await sleep(300);
+    const f = await api('POST', '/api/mcp/action', { action: 'focus', item: { kind: 'result', id: 'buckling_analysis' }, reason: '시험' });
+    await sleep(900);
+    ac.abort();
+    await pump;
+    const hits = evs.filter(e => e.type === 'host:message' && e.data?.command === 'focusRequest');
+    const kept = (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=focusRequest`)).json?.data?.focusRequest ?? null;
+    const others = evs.filter(e => e.type === 'host:message' && e.data?.command !== 'focusRequest' && 'focus' in (e.data ?? {}));
+    return { ok: f.json?.forwarded === true && hits.length === 1 && hits[0].data.focus?.request_id === f.json.request_id && hits[0].data.focus?.reason === '시험' && kept === null && others.length === 0,
+      detail: `${f.json?.request_id} · 이벤트 ${hits.length}번(본문 ${short(hits[0]?.data?.focus?.item, 60)}) · 다시 보내기 기록 ${kept === null ? '없음' : '있음'} · 다른 이벤트에 본문 ${others.length}` };
+  });
+
+  await step('s14d derivedResultsInvalidated — MCP analyze_loads 의 바뀐 입력이 지운 부재 설계 · 랩 결과는 다시 보내기 기록에서도 빠진다(U3)', async () => {
+    const loads = { member_app: 'roof-purlin', span_type: 'simple', span_ft: 20, loads: { D: 10, Lr: 20 }, design_method: 'LRFD', spacing_ft: 5, Fy: 55, Fu: 70 };
+    const last = async cmds => (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?${cmds.map(c => `command=${c}`).join('&')}`)).json?.data ?? {};
+    const a1 = await api('POST', '/api/mcp/action', { action: 'analyze_loads', ...loads });
+    const lap = await api('POST', '/api/mcp/action', { action: 'lap_connection', d: 8, t: 0.06, Fy: 55, Fu: 70, lap_left_in: 24, lap_right_in: 24, Mu_support: 40, Vu_support: 2,
+      fastener_type: 'bolt', fastener_dia: 0.5, n_rows: 2, end_distance: 1.4, design_method: 'LRFD', Se: 1.5, Mnd: 60, Vn: 8 });
+    await sleep(400);
+    const before = await last(['lapConnectionResult', 'loadAnalysisComplete', 'derivedResultsInvalidated']);
+    const a2 = await api('POST', '/api/mcp/action', { action: 'analyze_loads', ...loads, loads: { D: 12, Lr: 20 } });
+    await sleep(600);
+    const after = await last(['lapConnectionResult', 'designResult', 'designPurlinResult', 'loadAnalysisComplete', 'derivedResultsInvalidated']);
+    return { ok: !a1.json?.error && !lap.json?.error && !a2.json?.error && !!before.lapConnectionResult && !after.lapConnectionResult && !after.designResult && !after.designPurlinResult
+      && !!after.loadAnalysisComplete && after.derivedResultsInvalidated?.message?.data?.reason === 'Load analysis inputs changed' && after.loadAnalysisComplete.seq > after.derivedResultsInvalidated.seq,
+      detail: `앞: 랩 ${!!before.lapConnectionResult} · 뒤: 랩 ${!!after.lapConnectionResult} · 설계 ${!!after.designResult} · 퍼린 ${!!after.designPurlinResult} · 하중 ${!!after.loadAnalysisComplete}`
+        + ` · 「${after.derivedResultsInvalidated?.message?.data?.reason}」(${short(after.derivedResultsInvalidated?.message?.data?.cause, 80)})` };
+  });
+
   section('8. 새로 고침 — 지금 모델과 결과로 돌아온다');
   await step('s15 해석(중계)한 뒤 새로 고침 → 같은 단면 · 곡선 · DSM 이 다시 그려진다', async () => {
     await api('POST', '/api/mcp/action', { action: 'set_load_case', load_case: 'bending_xx_pos', fy: 50 });

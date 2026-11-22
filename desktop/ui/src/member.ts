@@ -19,12 +19,21 @@ export type Row = 'beam' | 'band' | 'M' | 'V' | 'D';
 /** lane 0 = 중력(정 · 부모멘트 · 랩), 1 = 양압(uplift) — 엔진의 구간 kind 로 나눈다(겹치는 구간이라 줄을 따로) */
 export interface Region { a: number; b: number; ratio: number | null; pass: boolean | null; run: string; label: string; lane: 0 | 1 }
 
+/** 퍼린 구간의 검토 지점 하나(띠 위의 막대) — x m, 그 지점의 엔진 판정비 · 판정 */
+export interface PointBar { x: number; ratio: number | null; pass: boolean | null; lane: 0 | 1; run: string; p: number; key: string; src: string }
+
 export interface MemberOpt {
   w: number;
   la: any | null;        // SI
   rows: Row[];
   regions: Region[];
   sel?: { a: number; b: number; label: string } | null;
+  /** 검토 지점마다의 막대(엔진의 location.x · 그 지점의 utilization · pass) */
+  points?: PointBar[];
+  /** 고른 검토 항목의 위치 x(m, 엔진의 location.x) — 세로선과 「x = …」 */
+  loc?: { x: number; label: string; src?: string } | null;
+  /** 계산 시트의 작은 그림 — 위 여백 없이 */
+  mini?: boolean;
 }
 
 const f1 = (v: number) => v.toFixed(1);
@@ -41,7 +50,8 @@ export function memberSvg(o: MemberOpt): { svg: string; h: number } {
   const lanes = o.regions.some(r => r.lane === 1) ? 2 : 1;
   const hgt: Record<Row, number> = { beam: 150, band: 22 + 28 * lanes, M: 170, V: 130, D: 110 };
   const rows = o.rows.filter(r => r !== 'band' || o.regions.length);
-  const H = 44 + rows.reduce((a, r) => a + hgt[r], 0) + 10;
+  const T0 = o.mini ? 8 : 44;
+  const H = T0 + rows.reduce((a, r) => a + hgt[r], 0) + 10;
   if (!(L > 0)) {
     return { svg: `<svg viewBox="0 0 ${W} 200" data-base="0 0 ${W} 200"><text x="${W / 2}" y="100" text-anchor="middle" fill="var(--text-faint)" font-size="13">하중 해석 결과 없음</text></svg>`, h: 200 };
   }
@@ -51,7 +61,7 @@ export function memberSvg(o: MemberOpt): { svg: string; h: number } {
   out.push('<defs><pattern id="hatchU" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" fill="var(--bg-view)"/><line x1="0" y1="0" x2="0" y2="7" stroke="var(--unchk)" stroke-width="2.4"/></pattern></defs>');
   if (o.sel) { out.push(`<rect class="selr" data-a="${o.sel.a}" data-b="${o.sel.b}" x="${f1(X(o.sel.a))}" y="4" width="${f1(Math.max(2, X(o.sel.b) - X(o.sel.a)))}" height="${H - 8}" fill="var(--accent)" opacity=".09"/>`); }
   const lapEnds = arr(ub.lap_ends_ft), ips = arr(ub.inflection_points_ft);
-  let top = 44;
+  let top = T0;
   const vlines = (yA: number, yB: number) => {
     for (const x of lapEnds) { out.push(`<line x1="${f1(X(x))}" y1="${yA}" x2="${f1(X(x))}" y2="${yB}" stroke="var(--lapc)" stroke-dasharray="3 4"/>`); }
     for (const x of sup) { out.push(`<line x1="${f1(X(x))}" y1="${yA}" x2="${f1(X(x))}" y2="${yB}" stroke="var(--line)"/>`); }
@@ -113,6 +123,13 @@ export function memberSvg(o: MemberOpt): { svg: string; h: number } {
           out.push(`<text x="${f1((X(rg.a) + X(rg.b)) / 2)}" y="${yb + 15}" font-size="10" text-anchor="middle" fill="${un ? 'var(--text)' : '#111'}" font-family="var(--mono)" pointer-events="none">${ratioText(rg.ratio, ng)}</text>`);
         }
       }
+      // 검토 지점마다 막대(엔진의 location.x) — 그 지점의 판정비 색, 테두리로 구간과 가른다
+      for (const pb of o.points ?? []) {
+        const yb = top + 12 + pb.lane * 28;
+        const un = pb.pass === null;
+        out.push(`<rect class="cpb" data-pick="pt:${esc(pb.key)}" data-run="${esc(pb.run)}" data-p="${pb.p}" data-x="${pb.x}" data-r="${pb.ratio ?? ''}" data-pass="${pb.pass === true ? 'ok' : pb.pass === false ? 'ng' : 'un'}" data-usrc="${esc(pb.src)}"`
+          + ` x="${f1(X(pb.x) - 2.5)}" y="${yb - 3}" width="5" height="${bh + 6}" rx="1" fill="${un ? 'url(#hatchU)' : bandVar(pb.ratio, pb.pass === false)}" stroke="var(--text)" stroke-width=".8"><title>검토 지점 x ${sigText(pb.x, 4)} m${typeof pb.ratio === 'number' ? ` · ${ratioText(pb.ratio, pb.pass === false)}` : ''}</title></rect>`);
+      }
     } else {
       const key = r === 'M' ? 'M_diagram' : r === 'V' ? 'V_diagram' : 'D_diagram';
       const ys = r === 'D' ? arr(la?.deflection?.D_diagram) : arr(g?.[key]);
@@ -132,6 +149,11 @@ export function memberSvg(o: MemberOpt): { svg: string; h: number } {
         const pts = Array.from({ length: n }, (_, i) => `${f1(X(xs[i]))},${f1(Y(ys[i]))}`);
         out.push(`<g class="dg" data-k="${r}" data-xs="${xs.slice(0, n).join(',')}" data-ys="${ys.slice(0, n).join(',')}"><polygon points="${f1(X(xs[0]))},${f1(yc)} ${pts.join(' ')} ${f1(X(xs[n - 1]))},${f1(yc)}" fill="${col}" fill-opacity=".16"/>`
           + `<polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="1.8"/></g>`);
+        if (r === 'M' && o.loc) {
+          // 검토 위치에 도표 점이 있으면 그 점에 표지(값은 그 점의 엔진 값 — 끼워 넣지 않는다)
+          const at = xs.slice(0, n).findIndex(x => Math.abs(x - o.loc!.x) < 1e-6);
+          if (at >= 0) { out.push(`<circle class="locpt" data-i="${at}" cx="${f1(X(xs[at]))}" cy="${f1(Y(ys[at]))}" r="4.5" fill="var(--accent)" stroke="var(--bg-view)" stroke-width="1.5"/>`); }
+        }
         if (r === 'M') {
           for (const x of ips) { out.push(`<circle cx="${f1(X(x))}" cy="${f1(yc)}" r="3.2" fill="var(--bg-view)" stroke="var(--mcol)" stroke-width="1.4"/>`); }
           const locs = Array.isArray(g?.locations) ? g.locations : [];
@@ -164,7 +186,13 @@ export function memberSvg(o: MemberOpt): { svg: string; h: number } {
     }
     top += h;
   }
-  if (o.sel) {
+  if (o.loc && Number.isFinite(o.loc.x)) {
+    const lxp = X(o.loc.x);
+    out.push(`<g class="loc-mark" data-x="${o.loc.x}"><line x1="${f1(lxp)}" y1="${T0 + (o.mini ? 0 : 24)}" x2="${f1(lxp)}" y2="${H - 6}" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="5 3"/>`
+      + (o.loc.label ? `<rect x="${f1(Math.min(lxp + 4, x1 - 150))}" y="${T0 + 24}" width="146" height="18" rx="3" fill="var(--bg-panel)" stroke="var(--accent)"/><text x="${f1(Math.min(lxp + 4, x1 - 150) + 6)}" y="${T0 + 37}" font-size="11" fill="var(--accent)">${o.loc.label}</text>` : '')
+      + '</g>');
+  }
+  if (o.sel && o.sel.label) {
     const lw = Math.max(150, o.sel.label.length * 7.5), lx = Math.min(X(o.sel.a), x1 - lw);
     out.push(`<rect x="${f1(lx)}" y="${f1(44 + 2)}" width="${f1(lw)}" height="20" rx="3" fill="var(--bg-panel)" stroke="var(--accent)"/>`
       + `<text x="${f1(lx + 8)}" y="${f1(44 + 16)}" font-size="11.5" fill="var(--accent)">${esc(o.sel.label)}</text>`);

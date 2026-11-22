@@ -1,7 +1,7 @@
 /**
  * 제목 표시줄 — StCFSD · 검토 대상 ▾(파일 · 열기 · 저장) · 진행 띠 | 편집 F2 · Claude 연결 상태 · 「연결」/「끊기」.
  * 단추는 사람만 하는 일뿐이다(열기 · 저장 · 편집 상태 · Claude 연결). 해석 실행 · 값 수정 단추는 없다.
- * 찾기 · AI 따라가기는 U3 의 일이라 템플릿의 자리에 꺼진 단추로 둔다.
+ * 찾기(Ctrl+F) · AI 따라가기(켜고 끄기 — 켜 두면 AI 의 focus 요청을 따른다, 구성안 3.9)도 보는 일이다.
  */
 import { tip } from './dom';
 import { openMenu } from './menu';
@@ -18,6 +18,8 @@ export interface TitleHandlers {
   edit(): void;
   claude(op: 'connect' | 'disconnect'): void;
   stage(st: Stage): void;
+  find(): void;
+  follow(): void;
 }
 
 /** 진행 띠의 단계 — [키, 이름, 짧은 이름] (템플릿 · 구성안 3.3 과 같은 차례) */
@@ -50,8 +52,8 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
     + '<span class="ebadge" hidden data-tip="입력 화면이 열려 있다. 트리와 제목 줄은 그대로다">편집</span>'
     + '<span class="pipe-slot"></span>'
     + '<span class="sp"></span>'
-    + `<button class="tb off" disabled${tip('절점 · 한계상태 · 조합 찾기  Ctrl+F — 다음 단계(U3)에서 열린다')}>찾기</button>`
-    + `<button class="tb off" disabled${tip('AI 가 일하는 자리로 화면이 따라간다 — 다음 단계(U3)에서 열린다. 지금도 AI 가 바꾼 값 · 결과는 곧바로 보인다(보는 자리는 그대로)')}>AI 따라가기</button>`
+    + `<button class="tb" data-act="find"${tip('검토 항목 · 구간 · 절점 · 요소 · 값을 이름이나 id 로 찾기  Ctrl+F')}>찾기</button>`
+    + `<button class="tb follow" data-act="follow" aria-pressed="false"${tip('켜 두면 AI 가 「여기를 보세요」(focus) 할 때 화면이 그리로 간다 — 5 초 넘게 가만히 있고 편집 상태가 아닐 때만. 꺼져 있으면 움직이지 않고 「AI 가 가리킴」 알림만 남긴다. 창을 앞으로 가져오지 않는다')}>AI 따라가기</button>`
     + `<button class="tb" data-act="edit"${tip('지금의 입력 화면(6탭)을 연다. 다시 누르면 닫힌다  F2')}>편집 F2</button>`
     + '<span class="conn"><span class="dot un"></span><span class="ct">Claude 연결 확인 중</span></span>'
     + '<button class="cbtn claude-act" data-act="claude" hidden></button>';
@@ -68,6 +70,8 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
           r.left, r.bottom + 2, '검토 대상');
         break;
       case 'edit': h.edit(); break;
+      case 'find': h.find(); break;
+      case 'follow': h.follow(); break;
       case 'claude': {
         const op = b.getAttribute('data-op') as 'connect' | 'disconnect' | null;
         if (op && !claudeBusy) { claudeBusy = true; renderClaude(claude); h.claude(op); }
@@ -79,6 +83,15 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
 }
 
 export function claudeDone(s: ClaudeStatus | null): void { claudeBusy = false; renderClaude(s); }
+
+/** AI 따라가기 단추 — 켬 · 끔과 「AI 가 가리킴」(따르지 않은 요청이 있으면 점) */
+export function renderFollow(on: boolean, pointed: boolean): void {
+  const b = root?.querySelector('[data-act="follow"]') as HTMLElement | null;
+  if (!b) { return; }
+  b.classList.toggle('on', on);
+  b.setAttribute('aria-pressed', String(on));
+  b.innerHTML = `AI 따라가기${pointed ? ' <i class="ptd" data-tip="AI 가 가리킨 곳이 있다 — 아래 알림을 누르면 그리로"></i>' : ''}`;
+}
 
 export function renderTitle(editing: boolean, pending: boolean): void {
   if (!root) { return; }

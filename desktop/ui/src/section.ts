@@ -5,7 +5,7 @@
  *  - 형상: 절점 좌표(in → mm, units.ts) · 요소 두께(선 굵기)
  *  - 도심 · 주축 1 · 2 · θp: MCP 단면 성질의 xcg · zcg · thetap(도, x 축에서 반시계). 전단 중심: MCP get_cutwp 의 Xs · Zs
  *  - 응력: 모델의 절점 응력(n[7], ksi → MPa) — 요소의 법선 쪽으로 그 크기만큼 띠(압축 + 빨강 · 인장 − 파랑)
- *  - 치수: 템플릿 단면이면 템플릿의 치수(H · B · D · t · r — 호스트 모델의 sectionParams, 바깥-바깥). 템플릿이 아니면 중심선
+ *  - 치수: 템플릿 단면이면 템플릿의 치수(H · B · D · t · r — get_full_state 의 section_params(K4a), 바깥-바깥). 템플릿이 아니면 중심선
  *    폭 · 높이(MCP get_full_state 의 section).
  *  - 모드 형상: 해석의 모드 벡터(u · w — 전역 x · z 변위)를 절점에 더한다. 배율은 임의(가장 큰 변위 = 단면 크기의 15 %).
  *
@@ -40,7 +40,7 @@ export interface SectionDrawOpt {
   shear?: { Xs: number; Zs: number } | null;
   /** 중심선 폭 · 높이(US in) — 템플릿이 아닐 때의 치수 */
   extent?: { width: number; height: number } | null;
-  /** 템플릿 이름과 치수(in) — 호스트 모델의 sectionTemplate · sectionParams */
+  /** 템플릿 이름과 치수(in) — get_full_state 의 section_template · section_params */
   template?: { name: string; params: Record<string, number> } | null;
   labels?: boolean; elemLabels?: boolean; dims?: boolean; axes?: boolean; stress?: boolean;
   hiNode?: number | null; hiElem?: number | null;
@@ -252,7 +252,7 @@ function extentLeaders(e: { width: number; height: number }, b: { xmin: number; 
 function templateLeaders(tpl: { name: string; params: Record<string, number> }, all: P[], t: number, tf: Tf, padL = 0): string {
   const p = tpl.params;
   const mm = (k: string) => si(p[k], 'length');
-  const lab = (k: string, name = k) => `${name} ${numT(mm(k), `model:sectionParams.${k}`, 'length')}`;
+  const lab = (k: string, name = k) => `${name} ${numT(mm(k), `full:section_params.${k}`, 'length')}`;
   const h = t / 2;
   const xs = all.map(q => q.x), zs = all.map(q => q.z);
   const xmin = Math.min(...xs), xmax = Math.max(...xs), zmin = Math.min(...zs), zmax = Math.max(...zs);

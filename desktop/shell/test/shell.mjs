@@ -178,6 +178,12 @@ function startMcpClient(entry) {
   return { child, request, tool, notify: (method, params) => child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`), close };
 }
 
+/** 실린 MCP 서버 묶음이 내놓는 도구 수 — 묶음 안의 `<서버>.tool("이름",` 를 센다(숫자를 박아 두지 않는다) */
+function declaredTools(bundle) {
+  const src = fs.readFileSync(bundle, 'utf8');
+  return new Set([...src.matchAll(/\.tool\("([a-z0-9_]+)",/g)].map(m => m[1])).size;
+}
+
 async function main() {
   const real = watchRealConfig(repoRoot, [path.join(process.env.APPDATA || '', 'stcfsd-shell'), path.join(process.env.APPDATA || '', 'Electron')]);
   const repoBefore = repoSnapshot();
@@ -418,8 +424,8 @@ async function main() {
     const tools = await mcp.request('tools/list', {});
     const gs = await mcp.tool('get_status');
     check('그 항목 그대로 Electron 실행 파일(ELECTRON_RUN_AS_NODE=1)로 MCP 서버 → initialize · tools/list · get_status',
-      !!init.result && (tools.result?.tools?.length ?? 0) === 59 && !gs.isError && /"nnodes"/.test(gs.text),
-      `${Date.now() - t} ms · ${init.result?.serverInfo?.name} · 도구 ${tools.result?.tools?.length} · ${short(gs.text.replace(/\s+/g, ' '), 60)}`);
+      !!init.result && (tools.result?.tools?.length ?? 0) === declaredTools(entry.args[0]) && declaredTools(entry.args[0]) >= 60 && !gs.isError && /"nnodes"/.test(gs.text),
+      `${Date.now() - t} ms · ${init.result?.serverInfo?.name} · 도구 ${tools.result?.tools?.length} / 묶음이 내놓는 ${declaredTools(entry.args[0])} · ${short(gs.text.replace(/\s+/g, ' '), 60)}`);
     const st2 = await until(() => B.page(`(()=>{const s=document.getElementById('claude-status').textContent; return /연결됨/.test(s) ? s : null;})()`), 20_000, 500);
     check('AI 호출 뒤 제목 표시줄: 「Claude 연결됨 · 마지막 호출 <시각> · <클라이언트>」', /연결됨 · 마지막 호출 \d\d:\d\d · claude-desktop-sim/.test(st2 ?? ''), st2 ?? '바뀌지 않음');
     await B.capture('s3_05_last_call');

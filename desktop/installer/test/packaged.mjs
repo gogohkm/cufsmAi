@@ -196,6 +196,12 @@ function runDisconnect(exe, res, config, userData, env) {
   return { code: r.status, out: line ? JSON.parse(line.slice('STCFSD_UNINSTALL_DISCONNECT '.length)) : null, raw: (r.stdout || '') + (r.stderr || '') };
 }
 
+/** 실린 MCP 서버 묶음이 내놓는 도구 수 — 묶음 안의 `<서버>.tool("이름",` 를 센다(숫자를 박아 두지 않는다) */
+function declaredTools(bundle) {
+  const src = fs.readFileSync(bundle, 'utf8');
+  return new Set([...src.matchAll(/\.tool\("([a-z0-9_]+)",/g)].map(m => m[1])).size;
+}
+
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   for (const f of fs.readdirSync(OUT)) { fs.rmSync(path.join(OUT, f), { force: true }); }
@@ -357,8 +363,8 @@ async function main() {
     mcp.notify('notifications/initialized', {});
     const tools = await mcp.request('tools/list', {});
     const gs = await mcp.tool('get_status');
-    check('StCFSD.exe(ELECTRON_RUN_AS_NODE=1, 퓨즈 적용) 로 띄운 MCP 서버 — 도구 59개 · get_status(열린 파일의 21 절점)', !!init.result && tools.result?.tools?.length === 59 && !gs.isError && gs.json?.nnodes === 21,
-      `${Date.now() - t} ms · ${init.result?.serverInfo?.name} · 도구 ${tools.result?.tools?.length} · nnodes ${gs.json?.nnodes}`);
+    check('StCFSD.exe(ELECTRON_RUN_AS_NODE=1, 퓨즈 적용) 로 띄운 MCP 서버 — 도구 = 묶음이 내놓는 수 · get_status(열린 파일의 21 절점)', !!init.result && tools.result?.tools?.length === declaredTools(entry.args[0]) && declaredTools(entry.args[0]) >= 60 && !gs.isError && gs.json?.nnodes === 21,
+      `${Date.now() - t} ms · ${init.result?.serverInfo?.name} · 도구 ${tools.result?.tools?.length} / 묶음 ${declaredTools(entry.args[0])} · nnodes ${gs.json?.nnodes}`);
     const steps = [];
     const T = async (name, args) => { const s = Date.now(); const r = await mcp.tool(name, args); steps.push(`${name} ${Date.now() - s} ms`); return r; };
     const tpl = await T('set_section_template', { type: 'lippedz', H: 8, B: 2.25, D: 0.91, t: 0.059, r: 0.1875, qlip: 50 });

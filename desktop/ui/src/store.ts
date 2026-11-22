@@ -3,20 +3,24 @@
  *
  * | 무엇 | 어디서 |
  * |---|---|
- * | 모델 요약(절점 · 요소 수, BC, 길이, 재료 E · ν · G, 응력 범위, 해석이 최신인가) | MCP `get_full_state`(= get_status + 곡선 요약) |
- * | 모델 전체(단면 템플릿 · 치수 · 하중 경우 · 고유치 수 …) | 호스트가 설계 패널에 보낸 마지막 `modelLoaded`(`/api/wv/<id>/last`) — MCP 도구는 이것을 돌려주지 않는다(K4) |
- * | 프로그램의 기본 모델 | 첫 `modelLoaded`(`/api/wv/<id>/first`) — 다리가 보낸 webviewReady 에 호스트가 채운 것 |
+ * | 모델 요약(절점 · 요소 수, BC, 길이, 재료 E · ν · G, 응력 범위), 단면 템플릿 · 치수 · 요소 자리, 하중 경우 · 기준 응력,
+ * |   고유치 수, 해석의 하중 계열, 남은 결과(`results`)와 무효 장부(`invalidated`) | MCP `get_full_state`(= get_status — K4a 경계) |
+ * | 프로그램의 기본 모델(「기본값」 꼬리표만) | 마지막 · 첫 `modelLoaded`(`/api/wv/<id>/last|first`) — 지금 모델이 시작 때 채운 것과 같은가 |
  * | 단면 성질 · cutwp | MCP `get_section_properties` · `get_cutwp` 와 같은 호스트 액션(`get_properties` · `cutwp`) |
  * | 절점 · 요소 | MCP `get_nodes` · `get_elements`(`get_nodes` · `get_elements`) |
  * | 좌굴 해석 DSM 값 | MCP `get_dsm_values`(`get_dsm`, 해석의 하중 계열 — `dsmResult.load_family`) |
  * | 부재 검토 · 퍼린 검토 · 접합부 · 하중 해석 | 호스트가 보낸 마지막 `designResult` · `designPurlinResult` · `lapConnectionResult` · `connectionResult` · `loadAnalysisComplete` |
  * | 파일 · 테마 · 웹뷰 | `/api/state` · `file:current` |
  *
- * 낡음: 호스트는 결과가 무효가 되면 지운다(`analysisInvalidated` — 다리의 다시 보내기 기록에서도 빠진다). 이 화면은 이번 세션에서
- * 본 결과가 그렇게 지워지면 그 단계를 「낡음」으로 둔다(까닭 = 호스트가 보낸 reason). 다른 파일을 열면(`resultsCleared`) 「아직 안 함」.
+ * 낡음: 호스트의 무효 장부(`get_full_state.invalidated` — kind · reason · cause · invalidated_at)가 말한다. 결과가 있으면 「일치」,
+ * 그 종류가 장부에 있으면 「낡음」(까닭 = 장부의 reason), 둘 다 없으면 「아직 안 함」. 화면은 무엇을 봤는지 기억하지 않는다.
+ *
+ * 검토 항목(U3): 결과마다 엔진의 `design_checks`(검토 항목 계약 — docs/implementation/20261123-check-contract.md)를 한 줄씩.
+ * 퍼린은 구간의 검토 지점(`result.checks[p]` — 지점마다 location · combination · design_checks)마다. 값은 그 결과 묶음을
+ * 제품 표로 통째로 SI 로 바꾼 것(quantity 로) — 줄은 그 자리를 가리키기만 한다.
  */
 import { last, mcp, type LastEntry } from './bridge';
-import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, propsSI, purlinSI } from './units';
+import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
 import { itemText } from './format';
 
 export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
@@ -43,19 +47,39 @@ export interface Analysis {
   elems: number[][];
 }
 
+export type Scope = 'member' | 'purlin' | 'connection' | 'lap';
+export type Verdict = 'pass' | 'fail' | 'not_evaluated' | 'not_applicable';
+
+/** 검토 항목 하나(design_checks 의 한 항목, 퍼린은 그 검토 지점의 것) */
 export interface CheckRow {
-  key: string;          // 트리 · 표의 키
+  key: string;          // 트리 · 표 · 시트의 키 — `design#<id>` · `purlin:<i>#<p>:<id>` · `lap#<id>` · `conn#<id>`
   run: string;          // Run.key
-  where: string;        // 위치(부재 · 정모멘트 0.00–6.10 m …)
-  name: string;         // 엔진의 한계상태 이름
+  scope: Scope;
+  id: string;           // 엔진의 고정 id(등록표)
+  point: number | null; // 퍼린 검토 지점의 차례(result.checks[p])
+  pointName: string | null; // 엔진의 check_point(M_max · V_max · support 2)
+  where: string;        // 위치 글(부재 · 정모멘트 0.00–4.68 m · M 최대 …)
+  name: string;         // name_ko(정해 둔 한글 이름 — 화면이 옮기지 않는다)
+  clause: string;
+  verdict: Verdict;
   ratio: number | null;
-  pass: boolean | null;
-  kind: 'ls' | 'ne';    // ls = 엔진이 평가한 한계상태(limit_state_checks) · ne = 평가하지 못함(not_evaluated)
-  src: string;          // data-src 의 앞부분(ratio 의 경로)
+  pass: boolean | null; // 색 · 무리용: pass true · fail false · 그 밖 null
+  kind: 'ls' | 'ne' | 'na'; // ls = 평가함(pass · fail) · ne = 미검토 · na = 해당 없음
+  governs: boolean;
+  counts: boolean;
+  us: any; si: any;     // 그 항목(US · SI)
+  src: string;          // data-src 앞부분 — 그 항목의 경로(`design:design_checks.3.`)
+  location: any; locUS: any; combination: string | null;
+  xm: number | null;    // 검토 위치 x(m) — location.x 가 있을 때
 }
+
+/** 퍼린 구간의 검토 지점(띠의 막대 하나) */
+export interface CheckPoint { index: number; name: string; xm: number | null; ratio: number | null; pass: boolean | null; src: string }
 
 export interface Run {
   key: string;
+  /** 결과의 갈래(get_view 의 scope) */
+  area: Scope;
   label: string;
   where: string;
   result: any;          // SI
@@ -65,6 +89,10 @@ export interface Run {
   utilization: number | null;
   governing: string | null;
   rows: CheckRow[];
+  /** 퍼린 구간의 검토 지점 */
+  points: CheckPoint[];
+  /** design_checks 가 있는 결과의 옛 not_evaluated 글(정보 창에 그대로) */
+  neTexts: string[];
   notChecked: string[];
   notApplicable: string[];
   warnings: string[];
@@ -92,7 +120,6 @@ export interface State {
   msgSeq: number;
   runs: Run[];
   stages: Record<Stage, { state: StageState; note: string }>;
-  stale: Partial<Record<Stage, { reason: string; at: number }>>;
   running: { fsm: boolean };
   lastChange: { at: number; text: string } | null;
   analysis: Analysis | null;
@@ -116,73 +143,123 @@ export const state: State = {
     sec: { state: 'none', note: '' }, fsm: { state: 'none', note: '' }, load: { state: 'none', note: '' },
     chk: { state: 'none', note: '' }, conn: { state: 'none', note: '' }, val: { state: 'none', note: '' },
   },
-  stale: {}, running: { fsm: false }, lastChange: null,
+  running: { fsm: false }, lastChange: null,
   analysis: null, loads: null, regions: [], lap: null, conn: null, renderMs: 0,
 };
 
-// ── 이번 세션에서 본 결과(낡음 판정용). 새로 고침해도 남게 sessionStorage 에(없어도 화면은 돈다) ──
-const SEEN_KEY = 'stcfsd.ui.seen.v1';
-type Seen = Partial<Record<Stage, number>>;
-function readSeen(): { seen: Seen; stale: State['stale'] } {
-  try { const j = JSON.parse(sessionStorage.getItem(SEEN_KEY) ?? 'null'); if (j && typeof j === 'object') { return { seen: j.seen ?? {}, stale: j.stale ?? {} }; } } catch { /* 없음 */ }
-  return { seen: {}, stale: {} };
-}
-function writeSeen(seen: Seen, stale: State['stale']): void {
-  try { sessionStorage.setItem(SEEN_KEY, JSON.stringify({ seen, stale })); } catch { /* 저장 못 해도 화면은 돈다 */ }
-}
-let seenBox = readSeen();
-state.stale = seenBox.stale;
-
 const MEMBER_KO: Record<string, string> = { flexure: '휨 부재', compression: '압축 부재', combined: '조합 부재', tension: '인장 부재', connection: '접합' };
+const CONN_KO: Record<string, string> = { bolt: '볼트', screw: '나사', fillet_weld: '필릿 용접', arc_spot: '아크 스폿 용접', arc_seam: '아크 심 용접', groove: '그루브 용접', paf: 'PAF' };
 
 function list(v: unknown): string[] { return Array.isArray(v) ? v.map(itemText).filter(Boolean) : []; }
 
-/** 엔진 결과 하나 → 판정 줄. 엔진의 pass · ratio · not_evaluated 를 그대로 옮긴다 */
-function runOf(key: string, label: string, where: string, us: any, si: any, src: string, extraNe: unknown[] = []): Run {
-  const rows: CheckRow[] = [];
-  const lsc = Array.isArray(si?.limit_state_checks) ? si.limit_state_checks : [];
-  lsc.forEach((x: any, i: number) => {
-    rows.push({ key: `${key}#ls${i}`, run: key, where, name: String(x?.name ?? `한계상태 ${i + 1}`),
-      ratio: typeof x?.ratio === 'number' ? x.ratio : null, pass: x?.pass === true ? true : x?.pass === false ? false : null,
-      kind: 'ls', src: `${src}limit_state_checks.${i}.ratio` });
+const POINT_KO = (p: string): string => (p === 'M_max' ? 'M 최대' : p === 'V_max' ? 'V 최대' : /^support\s+/.test(p) ? `지점 ${p.replace(/^support\s+/, '')}` : p);
+export { POINT_KO };
+
+function verdictOfCheck(c: any): Verdict {
+  const v = String(c?.verdict ?? '');
+  return v === 'pass' || v === 'fail' || v === 'not_applicable' ? v : 'not_evaluated';
+}
+
+/** location.x(SI 로 바꾼 {value, quantity:'length'} — mm) → 부재 축의 m */
+function xmOf(loc: any): number | null {
+  const x = loc?.x;
+  const v = x && typeof x === 'object' ? x.value : null;
+  return typeof v === 'number' && Number.isFinite(v) && x.quantity === 'length' ? mmToM(v) : null;
+}
+
+/** design_checks 한 목록 → 줄 */
+function checkRows(run: string, scope: Scope, where: string, us: any[], si: any[], src: string, point: number | null, pointName: string | null): CheckRow[] {
+  return us.map((c: any, j: number) => {
+    const s = si?.[j] ?? c;
+    const verdict = verdictOfCheck(c);
+    const id = String(c?.id ?? `item${j}`);
+    return {
+      key: `${run}#${point === null ? '' : `${point}:`}${id}`, run, scope, id, point, pointName,
+      where: pointName ? `${where} · ${POINT_KO(pointName)}` : where,
+      name: String(c?.name_ko ?? c?.name ?? id), clause: String(c?.clause ?? ''),
+      verdict, ratio: typeof s?.ratio === 'number' ? s.ratio : null,
+      pass: verdict === 'pass' ? true : verdict === 'fail' ? false : null,
+      kind: verdict === 'pass' || verdict === 'fail' ? 'ls' : verdict === 'not_applicable' ? 'na' : 'ne',
+      governs: c?.governs === true, counts: c?.counts !== false,
+      us: c, si: s, src: `${src}design_checks.${j}.`,
+      location: s?.location ?? null, locUS: c?.location ?? null, combination: typeof c?.combination === 'string' ? c.combination : null,
+      xm: xmOf(s?.location),
+    } as CheckRow;
   });
-  [...list(si?.not_evaluated), ...list(extraNe)].forEach((t, i) => {
-    rows.push({ key: `${key}#ne${i}`, run: key, where, name: t, ratio: null, pass: null, kind: 'ne', src: '' });
-  });
+}
+
+/** 엔진 결과 하나 → 판정 줄. 엔진의 design_checks(없으면 옛 limit_state_checks · not_evaluated)를 그 차례대로 옮긴다 */
+function runOf(key: string, scope: Scope, label: string, where: string, us: any, si: any, src: string, extraNe: unknown[] = []): Run {
+  let rows: CheckRow[] = [];
+  const points: CheckPoint[] = [];
+  const neTexts: string[] = [];
+  const pts = Array.isArray(us?.checks) && us.checks.some((c: any) => Array.isArray(c?.design_checks)) ? us.checks : null;
+  if (pts) {
+    pts.forEach((pt: any, p: number) => {
+      const sp = si?.checks?.[p] ?? pt;
+      const name = String(pt?.check_point ?? `지점 ${p + 1}`);
+      rows.push(...checkRows(key, scope, where, Array.isArray(pt.design_checks) ? pt.design_checks : [], sp?.design_checks ?? [], `${src}checks.${p}.`, p, name));
+      points.push({ index: p, name, xm: xmOf(sp?.location), ratio: typeof sp?.utilization === 'number' ? sp.utilization : null,
+        pass: pt?.pass === true ? true : pt?.pass === false ? false : null, src: `${src}checks.${p}.utilization` });
+    });
+  } else if (Array.isArray(us?.design_checks)) {
+    rows = checkRows(key, scope, where, us.design_checks, si?.design_checks ?? [], src, null, null);
+  } else {
+    // 계약 전의 결과(옛 파일) — limit_state_checks · not_evaluated 를 그대로
+    const lsc = Array.isArray(si?.limit_state_checks) ? si.limit_state_checks : [];
+    lsc.forEach((x: any, i: number) => {
+      const pass = x?.pass === true ? true : x?.pass === false ? false : null;
+      rows.push({ key: `${key}#ls${i}`, run: key, scope, id: `ls${i}`, point: null, pointName: null, where, name: String(x?.name ?? `한계상태 ${i + 1}`), clause: '',
+        verdict: pass === true ? 'pass' : pass === false ? 'fail' : 'not_evaluated', ratio: typeof x?.ratio === 'number' ? x.ratio : null, pass,
+        kind: pass === null ? 'ne' : 'ls', governs: false, counts: true, us: x, si: x, src: `${src}limit_state_checks.${i}.`, location: null, locUS: null, combination: null, xm: null });
+    });
+  }
+  const neList = [...list(us?.not_evaluated), ...list(extraNe)];
+  if (rows.length && !rows[0].id.startsWith('ls')) { neTexts.push(...neList); } else {
+    neList.forEach((t, i) => {
+      rows.push({ key: `${key}#ne${i}`, run: key, scope, id: `ne${i}`, point: null, pointName: null, where, name: t, clause: '', verdict: 'not_evaluated', ratio: null, pass: null,
+        kind: 'ne', governs: false, counts: true, us: null, si: null, src: '', location: null, locUS: null, combination: null, xm: null });
+    });
+  }
   const warnings: string[] = [];
   const assumptions: string[] = [];
-  const scope: string[] = [];
+  const scopeNotes: string[] = [];
   const collect = (o: any, prefix: string) => {
     if (!o || typeof o !== 'object') { return; }
     warnings.push(...list(o.warnings).map(t => prefix + t));
     assumptions.push(...list(o.assumptions).map(t => prefix + t));
-    scope.push(...list(o.scope_notes).map(t => prefix + t));
+    scopeNotes.push(...list(o.scope_notes).map(t => prefix + t));
   };
   collect(us, '');
   if (typeof us?.dsm_warning === 'string' && us.dsm_warning) { warnings.push(`[DSM] ${us.dsm_warning}`); }
   for (const [k, v] of Object.entries(us ?? {})) {
-    if (v && typeof v === 'object' && !Array.isArray(v) && k !== 'region' && k !== 'force_model') { collect(v, `[${k}] `); }
+    if (v && typeof v === 'object' && !Array.isArray(v) && !['region', 'force_model', 'request'].includes(k)) { collect(v, `[${k}] `); }
   }
   const notApplicable: string[] = [];
-  if (us?.distortional_applicable === false) { notApplicable.push('뒤틀림 좌굴(§F4 · §E4)'); }
+  if (!rows.some(r => r.kind === 'na') && us?.distortional_applicable === false) { notApplicable.push('뒤틀림 좌굴(§F4 · §E4)'); }
   return {
-    key, label, where, result: si, us, src,
+    key, area: scope, label, where, result: si, us, src,
     overall: us?.pass === true ? true : us?.pass === false ? false : null,
     utilization: typeof si?.utilization === 'number' ? si.utilization : null,
     governing: typeof us?.governing_check === 'string' ? us.governing_check : null,
-    rows, notChecked: list(us?.not_checked), notApplicable, warnings, assumptions, scope,
+    rows, points, neTexts, notChecked: list(us?.not_checked), notApplicable, warnings, assumptions, scope: scopeNotes,
   };
 }
 
 function buildRuns(): Run[] {
   const runs: Run[] = [];
-  const d = state.msgs.designResult?.message?.data;
+  // 호스트의 부재 검토는 하나(get_full_state.results.member_design — 퍼린이거나 부재). 다리의 기록에 앞의 다른 쪽 메시지가 남아 있어도
+  // 호스트가 지금 것으로 아는 쪽만 보인다. 결과가 없으면(지워졌으면) 어느 쪽도 보이지 않는다 — 진행 띠가 낡음 · 없음을 말한다.
+  const rt: string | null = state.full ? (state.full.results?.member_design?.result_type ?? null) : 'unknown';
+  const showPurlin = rt === 'purlin' || rt === 'unknown';
+  const showDesign = rt !== null && rt !== 'purlin';
+  const d = showDesign ? state.msgs.designResult?.message?.data : null;
   if (d && typeof d === 'object' && !d.error) {
     const si = memberSI(d);
     const mt = String(d.member_type ?? '');
-    runs.push(runOf('design', `부재 검토 · ${MEMBER_KO[mt] ?? mt}`, MEMBER_KO[mt] ?? '부재', d, si, 'design:'));
+    runs.push(runOf('design', 'member', `부재 검토 · ${MEMBER_KO[mt] ?? mt}`, MEMBER_KO[mt] ?? '부재', d, si, 'design:'));
   }
-  const p = state.msgs.designPurlinResult?.message?.data;
+  const p = showPurlin ? state.msgs.designPurlinResult?.message?.data : null;
   if (p && typeof p === 'object' && !p.error) {
     const si = purlinSI(p);
     const regions = Array.isArray(p.regions) ? p.regions : [];
@@ -190,64 +267,66 @@ function buildRuns(): Run[] {
       if (!rg?.result) { return; }
       // 엔진의 구간 이름은 ft 로 적혀 있다 — 화면은 m 이므로 그 숫자 자리만 SI 값으로 바꿔 적는다(값은 엔진의 start_ft · end_ft)
       const lab = regionLabel(rg, si.regions?.[i], i);
-      runs.push(runOf(`purlin:${i}`, `퍼린 구간 · ${lab}`, lab,
-        rg.result, si.regions?.[i]?.result, `purlin:regions.${i}.result.`));
+      runs.push(runOf(`purlin:${i}`, 'purlin', `퍼린 구간 · ${lab}`, lab, rg.result, si.regions?.[i]?.result, `purlin:regions.${i}.result.`));
     });
     // 퍼린 묶음 전체의 미검토 · 경고 · 가정(구간에 붙지 않은 것)
-    const top = runOf('purlin', '퍼린 설계 · 전체', '퍼린 전체', { ...p, limit_state_checks: [], regions: undefined, design_positive: undefined,
-      design_negative: undefined, design_lap: undefined, design_uplift: undefined, load_analysis: undefined, props: undefined, cutwp: undefined },
+    const top = runOf('purlin', 'purlin', '퍼린 설계 · 전체', '퍼린 전체', { ...p, limit_state_checks: [], regions: undefined, design_positive: undefined,
+      design_negative: undefined, design_lap: undefined, design_uplift: undefined, load_analysis: undefined, props: undefined, cutwp: undefined, design_checks: undefined, checks: undefined },
     { ...si, limit_state_checks: [] }, 'purlin:', list(p.load_not_evaluated));
     runs.push(top);
+  }
+  if (state.lap) { runs.push(runOf('lap', 'lap', '랩 접합', '랩 접합', state.lap.us, state.lap.si, 'lap:')); }
+  if (state.conn) {
+    const ct = String(state.conn.us.connection_type ?? '');
+    runs.push(runOf('conn', 'connection', `단일 접합 · ${CONN_KO[ct] ?? ct}`, `접합 · ${CONN_KO[ct] ?? ct}`, state.conn.us, state.conn.si, 'conn:'));
   }
   return runs;
 }
 
-/** 진행 띠 — 결과가 지금 입력과 맞는가. 계산하지 않는다: 호스트가 지운 것 · 남긴 것 · 알린 것만 본다 */
-function buildStages(): void {
-  const m = state.msgs;
-  const f = state.full;
-  const has = {
-    fsm: !!f?.hasAnalysis,
-    load: !!m.loadAnalysisComplete?.message?.data && !m.loadAnalysisComplete.message.data.error,
-    chk: state.runs.length > 0,
-    lap: !!m.lapConnectionResult?.message?.data,
-    conn: !!m.connectionResult?.message?.data,
-  };
-  const cleared = m.resultsCleared?.seq ?? -1;
-  const inval = m.analysisInvalidated;
-  const now = Date.now();
-  const seen = seenBox.seen;
-  const mark = (st: Stage, present: boolean, seq: number) => {
-    if (present) { seen[st] = seq; delete state.stale[st]; return; }
-    const s = seen[st];
-    if (s === undefined) { return; }
-    if (cleared > s) { delete seen[st]; delete state.stale[st]; return; }      // 다른 파일을 열었다 — 낡음이 아니라 없음
-    if (inval && inval.seq > s && !state.stale[st]) {
-      state.stale[st] = { reason: String(inval.message?.data?.reason ?? '입력이 바뀜'), at: now };
-    }
-  };
-  const at = state.msgSeq;
-  mark('fsm', has.fsm, at);
-  mark('load', has.load, at);
-  mark('chk', has.chk, at);
-  mark('conn', has.lap || has.conn, at);
-  writeSeen(seen, state.stale);
+/** 부재 검토(부재 · 퍼린)의 실행만 — 접합은 접합부 가지에 */
+export const memberRuns = (): Run[] => state.runs.filter(r => r.area === 'member' || r.area === 'purlin');
 
-  const st = (k: Stage, present: boolean, okNote: string, noneNote: string) => {
-    if (present) { return { state: 'ok' as StageState, note: okNote }; }
-    const s = state.stale[k];
-    if (s) { return { state: 'stale' as StageState, note: `입력이 바뀌어 호스트가 결과를 지웠다 — ${s.reason}` }; }
-    return { state: 'none' as StageState, note: noneNote };
+/** 모든 검토 항목(엔진 순서 — 실행 차례대로) */
+export const allRows = (): CheckRow[] => state.runs.flatMap(r => r.rows);
+
+/** 키 → 줄 · 실행 */
+export function rowOfKey(key: string): { run?: Run; row?: CheckRow } {
+  for (const r of state.runs) {
+    const rw = r.rows.find(x => x.key === key);
+    if (rw) { return { run: r, row: rw }; }
+  }
+  return {};
+}
+
+/** 무효 장부(호스트) — 그 종류의 가장 늦은 항목 */
+export function ledgerOf(kinds: string[]): any | null {
+  const inv: any[] = Array.isArray(state.full?.invalidated) ? state.full.invalidated : [];
+  const hit = inv.filter(e => kinds.includes(String(e?.kind)));
+  return hit.length ? hit[hit.length - 1] : null;
+}
+
+function staleNote(e: any): string {
+  const act = e?.cause?.action ? ` · ${String(e.cause.action)}` : '';
+  return `입력이 바뀌어 호스트가 결과를 지웠다 — ${String(e?.reason ?? '')}${act}`;
+}
+
+/** 진행 띠 — 결과가 지금 입력과 맞는가. 계산하지 않는다: 호스트의 `results`(남은 결과)와 무효 장부만 본다 */
+function buildStages(): void {
+  const f = state.full;
+  const res = f?.results ?? {};
+  const st = (present: boolean, kinds: string[], okNote: string, noneNote: string): { state: StageState; note: string } => {
+    if (present) { return { state: 'ok', note: okNote }; }
+    const e = ledgerOf(kinds);
+    if (e) { return { state: 'stale', note: staleNote(e) }; }
+    return { state: 'none', note: noneNote };
   };
   state.stages.sec = f?.hasModel ? { state: 'ok', note: `절점 ${f.nnodes} · 요소 ${f.nelems}` } : { state: 'none', note: '단면 없음' };
   state.stages.fsm = state.running.fsm ? { state: 'run', note: '해석 중' }
-    : st('fsm', has.fsm, `${state.dsm ? `${state.dsm.family} · ` : ''}길이 ${f?.lengths?.n ?? '—'}점`, '실행 안 함');
-  state.stages.load = st('load', has.load, '결과 있음', '실행 안 함 · AI 의 analyze_loads 결과는 화면에 오지 않는다(K4)');
-  const nChk = state.runs.reduce((a, r) => a + r.rows.length, 0);
-  state.stages.chk = st('chk', has.chk, `${nChk} 항목`, '실행 안 함');
-  if (has.lap) { state.stages.conn = { state: 'ok', note: '랩 접합 결과 있음' }; } else if (has.conn) {
-    state.stages.conn = { state: 'unk', note: '단일 접합 결과 있음 · 호스트가 최신 여부를 판정하지 않는다' };
-  } else { state.stages.conn = st('conn', false, '', '실행 안 함'); }
+    : st(!!res.buckling_analysis?.current, ['buckling_analysis'], `${state.dsm ? `${state.dsm.family} · ` : ''}길이 ${f?.lengths?.n ?? '—'}점`, '실행 안 함');
+  state.stages.load = st(!!res.load_analysis && !!state.loads, ['load_analysis'], '결과 있음', '실행 안 함');
+  const nChk = memberRuns().reduce((a, r) => a + r.rows.length, 0);
+  state.stages.chk = st(!!res.member_design && memberRuns().length > 0, ['member_design'], `${nChk} 항목`, '실행 안 함');
+  state.stages.conn = st(!!(res.lap || res.connection) && !!(state.lap || state.conn), ['lap', 'connection'], state.lap ? '랩 접합 결과 있음' : '단일 접합 결과 있음', '실행 안 함');
   state.stages.val = { state: 'none', note: '점검(검증 70항목)은 편집 상태의 검증 탭에서만 돈다 — 호스트로 옮기는 것은 K3' };
 }
 
@@ -287,8 +366,8 @@ async function load(): Promise<void> {
     state.nodes = Array.isArray(nodes?.nodes) ? nodes.nodes : [];
     state.elems = Array.isArray(elems?.elements) ? elems.elements : [];
   }
-  // 좌굴 해석 DSM — 해석이 최신일 때만, 그 해석의 하중 계열로
-  const fam = state.msgs.dsmResult?.message?.data?.load_family;
+  // 좌굴 해석 DSM — 해석이 최신일 때만, 그 해석의 하중 계열로(get_full_state.analysis_load_family — K4a)
+  const fam = state.full?.analysis_load_family ?? state.msgs.dsmResult?.message?.data?.load_family;
   const dsmSeq = state.msgs.dsmResult?.seq ?? -1;
   if (state.full?.hasAnalysis && typeof fam === 'string' && ['P', 'Mxx', 'Mzz'].includes(fam)) {
     if (!state.dsm || state.dsm.seq !== dsmSeq || state.dsm.family !== fam) {
@@ -297,7 +376,7 @@ async function load(): Promise<void> {
     }
   } else {
     state.dsm = null;
-    state.dsmErr = state.full?.hasAnalysis ? '해석의 하중 계열을 호스트가 알리지 않았다' : undefined;
+    state.dsmErr = state.full?.hasAnalysis ? '해석의 하중 계열을 호스트가 알리지 않았다(get_full_state.analysis_load_family 없음)' : undefined;
   }
   // 곡선 · 모드 형상 · 분류 — 해석이 최신이고 바뀌었을 때만(analysisComplete 는 크다)
   if (state.full?.hasAnalysis) {
@@ -321,9 +400,11 @@ async function load(): Promise<void> {
       state.analysis.classStatus = { status: cr.message.data.status, supported: cr.message.data.supported, code: cr.message.data.code, message: cr.message.data.message };
     }
   } else { state.analysis = null; state.analysisErr = undefined; }
-  // 하중 해석 · 퍼린 구간 · 접합
-  const la = state.msgs.loadAnalysisComplete?.message?.data;
-  const pr = state.msgs.designPurlinResult?.message?.data;
+  // 하중 해석 · 퍼린 구간 · 접합 — 호스트가 지금 결과로 아는 것만(get_full_state.results). 다리의 기록에 남은 옛 메시지는 쓰지 않는다
+  const res = state.full?.results;
+  const known = (k: string) => !state.full || !!res?.[k];
+  const la = known('load_analysis') ? state.msgs.loadAnalysisComplete?.message?.data : null;
+  const pr = res && res.member_design?.result_type !== 'purlin' ? null : state.msgs.designPurlinResult?.message?.data;
   if (la && typeof la === 'object' && !la.error) { state.loads = { us: la, si: loadsSI(la), from: 'loads' }; }
   else if (pr && typeof pr === 'object' && !pr.error && pr.load_analysis) { state.loads = { us: pr.load_analysis, si: loadsSI(pr.load_analysis), from: 'purlin' }; }
   else { state.loads = null; }
@@ -331,9 +412,9 @@ async function load(): Promise<void> {
     const prSI = purlinSI(pr);
     state.regions = pr.regions.map((r: any, i: number) => ({ us: r, si: prSI.regions?.[i], runKey: `purlin:${i}` }));
   } else { state.regions = []; }
-  const lap = state.msgs.lapConnectionResult?.message?.data;
+  const lap = known('lap') ? state.msgs.lapConnectionResult?.message?.data : null;
   state.lap = lap && typeof lap === 'object' && !lap.error ? { us: lap, si: connSI(lap) } : null;
-  const cn = state.msgs.connectionResult?.message?.data;
+  const cn = known('connection') ? state.msgs.connectionResult?.message?.data : null;
   state.conn = cn && typeof cn === 'object' && !cn.error ? { us: cn, si: connSI(cn) } : null;
   state.runs = buildRuns();
   buildStages();
