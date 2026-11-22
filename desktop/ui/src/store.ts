@@ -16,14 +16,32 @@
  * 본 결과가 그렇게 지워지면 그 단계를 「낡음」으로 둔다(까닭 = 호스트가 보낸 reason). 다른 파일을 열면(`resultsCleared`) 「아직 안 함」.
  */
 import { last, mcp, type LastEntry } from './bridge';
-import { cutwpSI, dsmSI, memberSI, propsSI, purlinSI } from './units';
+import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, propsSI, purlinSI } from './units';
 import { itemText } from './format';
 
 export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
 export type StageState = 'ok' | 'stale' | 'none' | 'run' | 'unk';
 
 export const CMDS = ['modelLoaded', 'dsmResult', 'designResult', 'designPurlinResult', 'loadAnalysisComplete',
-  'lapConnectionResult', 'connectionResult', 'analysisInvalidated', 'resultsCleared', 'restoreDesignInputs', 'analysisError'];
+  'lapConnectionResult', 'connectionResult', 'analysisInvalidated', 'resultsCleared', 'restoreDesignInputs', 'analysisError', 'classifyResult'];
+
+/**
+ * 좌굴 해석의 곡선 · 모드 형상 · 모드 분류(U2). 곡선은 MCP get_buckling_curve(`get_curve`), 모드 형상 · 분류는 호스트가 설계 패널에
+ * 보낸 마지막 `analysisComplete`(크다 — 해석이 바뀔 때만 읽는다)와 `classifyResult`. 길이는 in(엔진), 하중계수는 무차원.
+ */
+export interface Analysis {
+  seq: number;
+  /** get_curve 의 행 그대로: [반파장 in, 모드 1 LF, 모드 2 LF, …] */
+  curve: number[][];
+  /** shapes[길이][자유도][모드] — 자유도 차례 [u1 v1 … un vn | w1 θ1 … wn θn](전역 x · 축 · 전역 z · 회전) */
+  shapes: number[][][] | null;
+  /** 모드 분류 [길이][모드][G, D, L, O](%) — 엔진이 낼 때만. 아니면 null 과 status */
+  classes: Array<Array<Array<number | null>>> | null;
+  classStatus: { status?: string; supported?: boolean; code?: string; message?: string } | null;
+  /** 해석에 쓴 절점(모드 형상의 기준) — 해석 뒤 모델이 바뀌면 낡음이라 쓰지 않는다 */
+  nodes: number[][];
+  elems: number[][];
+}
 
 export interface CheckRow {
   key: string;          // 트리 · 표의 키
@@ -77,6 +95,16 @@ export interface State {
   stale: Partial<Record<Stage, { reason: string; at: number }>>;
   running: { fsm: boolean };
   lastChange: { at: number; text: string } | null;
+  analysis: Analysis | null;
+  analysisErr?: string;
+  /** 하중 해석(analyze_loads 의 결과 모양) — 마지막 loadAnalysisComplete, 없으면 마지막 퍼린 설계의 load_analysis */
+  loads: { us: any; si: any; from: 'loads' | 'purlin' } | null;
+  /** 퍼린 설계의 구간(엔진 순서) — us · si */
+  regions: Array<{ us: any; si: any; runKey: string }>;
+  lap: { us: any; si: any } | null;
+  conn: { us: any; si: any } | null;
+  /** 시험 · 진단 — 마지막 다시 그리기의 시간(ms) */
+  renderMs: number;
 }
 
 export const state: State = {
@@ -89,6 +117,7 @@ export const state: State = {
     chk: { state: 'none', note: '' }, conn: { state: 'none', note: '' }, val: { state: 'none', note: '' },
   },
   stale: {}, running: { fsm: false }, lastChange: null,
+  analysis: null, loads: null, regions: [], lap: null, conn: null, renderMs: 0,
 };
 
 // ── 이번 세션에서 본 결과(낡음 판정용). 새로 고침해도 남게 sessionStorage 에(없어도 화면은 돈다) ──
@@ -159,7 +188,9 @@ function buildRuns(): Run[] {
     const regions = Array.isArray(p.regions) ? p.regions : [];
     regions.forEach((rg: any, i: number) => {
       if (!rg?.result) { return; }
-      runs.push(runOf(`purlin:${i}`, `퍼린 구간 · ${rg.label ?? rg.id ?? i + 1}`, String(rg.label ?? rg.id ?? `구간 ${i + 1}`),
+      // 엔진의 구간 이름은 ft 로 적혀 있다 — 화면은 m 이므로 그 숫자 자리만 SI 값으로 바꿔 적는다(값은 엔진의 start_ft · end_ft)
+      const lab = regionLabel(rg, si.regions?.[i], i);
+      runs.push(runOf(`purlin:${i}`, `퍼린 구간 · ${lab}`, lab,
         rg.result, si.regions?.[i]?.result, `purlin:regions.${i}.result.`));
     });
     // 퍼린 묶음 전체의 미검토 · 경고 · 가정(구간에 붙지 않은 것)
@@ -268,6 +299,42 @@ async function load(): Promise<void> {
     state.dsm = null;
     state.dsmErr = state.full?.hasAnalysis ? '해석의 하중 계열을 호스트가 알리지 않았다' : undefined;
   }
+  // 곡선 · 모드 형상 · 분류 — 해석이 최신이고 바뀌었을 때만(analysisComplete 는 크다)
+  if (state.full?.hasAnalysis) {
+    if (!state.analysis || state.analysis.seq !== dsmSeq) {
+      const [curve, ac] = await Promise.all([mcp('get_curve'), last(id, ['analysisComplete'])]);
+      const a = ac?.data.analysisComplete?.message?.data;
+      if (curve && !curve.error && Array.isArray(curve.curve)) {
+        state.analysis = {
+          seq: dsmSeq, curve: curve.curve,
+          shapes: Array.isArray(a?.shapes) ? a.shapes : null,
+          classes: Array.isArray(a?.classifications) ? a.classifications : null,
+          classStatus: a?.classification_status ?? null,
+          nodes: state.nodes, elems: state.elems,
+        };
+        state.analysisErr = undefined;
+      } else { state.analysis = null; state.analysisErr = curve?.error ?? '곡선 없음'; }
+    }
+    const cr = state.msgs.classifyResult;
+    if (state.analysis && cr && cr.seq > state.analysis.seq && Array.isArray(cr.message?.data?.classification)) {
+      state.analysis.classes = cr.message.data.classification;
+      state.analysis.classStatus = { status: cr.message.data.status, supported: cr.message.data.supported, code: cr.message.data.code, message: cr.message.data.message };
+    }
+  } else { state.analysis = null; state.analysisErr = undefined; }
+  // 하중 해석 · 퍼린 구간 · 접합
+  const la = state.msgs.loadAnalysisComplete?.message?.data;
+  const pr = state.msgs.designPurlinResult?.message?.data;
+  if (la && typeof la === 'object' && !la.error) { state.loads = { us: la, si: loadsSI(la), from: 'loads' }; }
+  else if (pr && typeof pr === 'object' && !pr.error && pr.load_analysis) { state.loads = { us: pr.load_analysis, si: loadsSI(pr.load_analysis), from: 'purlin' }; }
+  else { state.loads = null; }
+  if (pr && typeof pr === 'object' && !pr.error && Array.isArray(pr.regions)) {
+    const prSI = purlinSI(pr);
+    state.regions = pr.regions.map((r: any, i: number) => ({ us: r, si: prSI.regions?.[i], runKey: `purlin:${i}` }));
+  } else { state.regions = []; }
+  const lap = state.msgs.lapConnectionResult?.message?.data;
+  state.lap = lap && typeof lap === 'object' && !lap.error ? { us: lap, si: connSI(lap) } : null;
+  const cn = state.msgs.connectionResult?.message?.data;
+  state.conn = cn && typeof cn === 'object' && !cn.error ? { us: cn, si: connSI(cn) } : null;
   state.runs = buildRuns();
   buildStages();
   state.ready = true;
@@ -294,3 +361,9 @@ export function isDefault(group: 'section' | 'material' | 'conditions'): boolean
 }
 
 export function setTheme(t: 'dark' | 'light'): void { state.theme = t; }
+
+/** 퍼린 구간 이름 — 엔진의 이름에서 「a–b ft」 만 SI 응답의 구간 끝(m)으로 바꾼다(값은 SI 응답 그대로) */
+export function regionLabel(us: any, si: any, i: number): string {
+  const a = si?.start_ft, b = si?.end_ft;
+  return String(us?.label ?? us?.id ?? `구간 ${i + 1}`).replace(/[\d.]+\s*[–-]\s*[\d.]+\s*ft/, typeof a === 'number' && typeof b === 'number' ? `${a.toFixed(2)}–${b.toFixed(2)} m` : '$&');
+}

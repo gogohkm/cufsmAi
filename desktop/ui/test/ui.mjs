@@ -281,6 +281,13 @@ function expectedOf(src, u, ctx) {
     case 'nodes': { const [r, c] = p.split('.').map(Number); const v = ctx.nodes?.[r]?.[c]; return typeof v === 'number' ? v * f : undefined; }
     case 'elems': { const [r, c] = p.split('.').map(Number); const v = ctx.elems?.[r]?.[c]; return typeof v === 'number' ? v * f : undefined; }
     case 'model': return p.startsWith('sectionParams.') ? ctx.params?.[p.slice('sectionParams.'.length)] : undefined;
+    // U2 — 곡선(MCP get_buckling_curve, US: 0 열 = 반파장 in) · 분류(호스트의 analysisComplete) · 하중 해석 · 퍼린 · 랩 · 접합(MCP 의 SI 응답)
+    case 'curve': { const [r, c] = p.split('.').map(Number); const v = ctx.curve?.[r]?.[c]; return typeof v === 'number' ? v * f : undefined; }
+    case 'cls': { const [r, m, k] = p.split('.').map(Number); const v = ctx.classes?.[r]?.[m]?.[k]; return typeof v === 'number' ? v : undefined; }
+    case 'loads': return ctx.loadsSI ? at(ctx.loadsSI, p) : undefined;
+    case 'purlin': return ctx.purlinSI ? at(ctx.purlinSI, p) : undefined;
+    case 'lap': return ctx.lapSI ? at(ctx.lapSI, p) : undefined;
+    case 'conn': return ctx.connSI ? at(ctx.connSI, p) : undefined;
     default: return undefined;
   }
 }
@@ -525,6 +532,10 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   const mcpNow = async () => ({
     full: await mcp.tool('get_full_state'), propsSI: await mcp.tool('get_section_properties', { units: 'SI' }), cutwpSI: await mcp.tool('get_cutwp', { units: 'SI' }),
     nodes: (await mcp.tool('get_nodes')).nodes, elems: (await mcp.tool('get_elements')).elements,
+    curve: (await mcp.tool('get_buckling_curve')).curve,
+    // 화면이 지금 보여 주는 해석 계열의 DSM 값(보기의 극소 표지 · 정보 창이 이것을 쓴다)
+    dsmSI: await (async () => { const fam = await ev(`${S}.state.dsm && ${S}.state.dsm.family`).catch(() => null); return fam ? mcp.tool('get_dsm_values', { load_type: fam, units: 'SI' }) : undefined; })(),
+    classes: (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=analysisComplete`)).json?.data?.analysisComplete?.message?.data?.classifications,
   });
   const marker = () => ev('window.__noReload');
 
@@ -730,6 +741,279 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   });
   W = 1920; H = 1080;
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+  // ── U2 — 보기 ─────────────────────────────────────────────────────────
+  section('7c. U2 보기 — 단면 · 좌굴 · 부재 · 판정비 띠 · 접합 도면 · 표 서랍(그림의 수 = 엔진)');
+  const hostMsg = async cmd => (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=${cmd}`)).json?.data?.[cmd]?.message?.data;
+  const dsmFam = async () => ev(`${S}.state.dsm && ${S}.state.dsm.family`);
+  await step('u10c 하중 해석이 아직 없을 때 — 하중 · 접합 보기는 그리지 않고 밝힌다(K4: analyze_loads 는 화면에 오지 않는다)', 'u10c_no_loads', async () => {
+    await select('result', 'load');
+    const g = await ev(`({t:document.getElementById('center').innerText, dg:document.querySelectorAll('#center g.dg').length, loads:!!${S}.state.loads})`);
+    await select('result', 'conn');
+    const c = await ev(`document.getElementById('center').innerText`);
+    return { ok: !g.loads && g.dg === 0 && /하중 해석 결과 없음/.test(g.t) && /analyze_loads/.test(g.t) && /접합부 검토 결과 없음/.test(c),
+      detail: `「${short(g.t.replace(/\s+/g, ' '), 80)}」 · 「${short(c.replace(/\s+/g, ' '), 40)}」` };
+  });
+  // 01 단면 — 치수선 · 주축 · 전단 중심 · 응력 · 맞춤
+  await step('u11 단면 보기(템플릿 01) — 치수 H · B · D · t · r · 주축 θp · 도심 · 전단 중심 = 엔진, 응력 띠 = 절점 응력, 확대 · 맞춤', 'u11_section', async () => {
+    await select('model', 'sec');
+    const ctx = { ...(await mcpNow()), params: params2 };
+    const g = await ev(`(()=>{const q=s=>document.querySelector(s); const L=[...document.querySelectorAll('#center .lead')].map(e=>({k:e.dataset.k,a:e.dataset.a.split(',').map(Number),b:e.dataset.b.split(',').map(Number)}));
+      return {L, th:+q('#center .paxes')?.dataset.theta, sc:q('#center .sc')?[+q('#center .sc').dataset.x,+q('#center .sc').dataset.z]:null, cg:q('#center .cg')?[+q('#center .cg').dataset.x,+q('#center .cg').dataset.z]:null};})()`);
+    const t = ctx.elems[0][3] * US_TO_SI.length;
+    const zs = ctx.nodes.map(n => n[2] * US_TO_SI.length), xs = ctx.nodes.map(n => n[1] * US_TO_SI.length);
+    const H = g.L.find(l => l.k === 'H'), B = g.L.find(l => l.k === 'B');
+    // 치수선의 길이 = 템플릿 치수(바깥-바깥, 둥근 모서리 r 4) — 그림의 자리 규칙이 맞으면 같아야 한다
+    const okH = H && relClose(Math.abs(H.a[1] - H.b[1]), params2.H, 1e-6) && relClose(Math.abs(H.a[1] - H.b[1]), Math.max(...zs) - Math.min(...zs) + t, 1e-9);
+    const okB = B && relClose(Math.abs(B.a[0] - B.b[0]), params2.B, 1e-6);
+    const keys = g.L.map(l => l.k).sort().join(',');
+    // D = 윗 플랜지 바깥면부터 윗 립 끝 절점까지(템플릿의 D 는 바깥-바깥이라 이 길이와 같다)
+    const Dl = g.L.find(l => l.k === 'D'), Dlen = Dl ? Math.abs(Dl.a[1] - Dl.b[1]) : NaN;
+    const okD = relClose(Dlen, params2.D, 1e-6);
+    const okAx = relClose(g.th, ctx.propsSI.thetap) && g.sc && relClose(g.sc[0], ctx.cutwpSI.Xs) && relClose(g.sc[1], ctx.cutwpSI.Zs) && g.cg && relClose(g.cg[0], ctx.propsSI.xcg) && relClose(g.cg[1], ctx.propsSI.zcg);
+    await ev(`document.querySelector('#center [data-opt="stress"]').click()`);
+    await sleep(250);
+    const st = await ev(`[...document.querySelectorAll('#center polygon.st')].map(p=>({e:+p.dataset.e,si:+p.dataset.si,sj:+p.dataset.sj}))`);
+    const byId = new Map(ctx.nodes.map(n => [n[0], n[7] * US_TO_SI.stress]));
+    const okSt = st.length === ctx.elems.length && st.every(p => { const e = ctx.elems.find(x => x[0] === p.e); return e && relClose(p.si, byId.get(e[1])) && relClose(p.sj, byId.get(e[2])); });
+    const r = compareNumbers(await numbers('#center'), ctx);
+    await ev(`document.querySelector('#center [data-opt="stress"]').click()`);
+    await sleep(200);
+    // 확대(휠) → viewBox 바뀜 → 「전체 맞춤」 → 처음
+    const z = await ev(`(async()=>{const svg=document.querySelector('#center .dv[data-zoom="section"] svg'); const b0=svg.getAttribute('viewBox'); const r=svg.getBoundingClientRect();
+      svg.dispatchEvent(new WheelEvent('wheel',{deltaY:-300,clientX:r.left+r.width/2,clientY:r.top+r.height/2,bubbles:true,cancelable:true})); await new Promise(x=>setTimeout(x,50));
+      const b1=svg.getAttribute('viewBox'); document.querySelector('#center [data-fit="section"]').click(); await new Promise(x=>setTimeout(x,50)); return {b0,b1,b2:document.querySelector('#center .dv[data-zoom="section"] svg').getAttribute('viewBox')};})()`);
+    return { ok: okH && okB && okD && keys === 'B,D,H,r,t' && okAx && okSt && r.bad.length === 0 && z.b1 !== z.b0 && z.b2 === z.b0,
+      detail: `치수 ${keys} · H ${H ? Math.abs(H.a[1] - H.b[1]).toFixed(3) : '-'} = ${params2.H} ${okH} · B ${B ? Math.abs(B.a[0] - B.b[0]).toFixed(3) : '-'} = ${params2.B} ${okB} · D 윗 립 ${Dlen.toFixed(3)} = ${params2.D} ${okD} · θp ${g.th} = props ${ctx.propsSI.thetap} · 전단 중심 · 도심 ${okAx} · 응력 띠 ${st.length}/${ctx.elems.length} ${okSt}`
+        + ` · 수 ${r.compared}개 = MCP${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''} · 확대 ${z.b0} → ${z.b1} → 맞춤 ${z.b2 === z.b0}` };
+  });
+  // 02 좌굴 — 둥근 모서리(분류 없음)
+  const lcB = await mcp.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
+  const runB = await mcp.tool('run_analysis');
+  check('AI: set_load_case(정휨) → run_analysis(둥근 모서리 r 4)', lcB.success && runB.success, short(runB.error ?? runB.classification_status?.code));
+  await step('u12 좌굴(템플릿 02) — 곡선 점 = get_buckling_curve, 극소 = get_dsm_values, 모드 형상 = 호스트의 모드 벡터, 분류 없음(둥근 모서리)', 'u12_buckling', async () => {
+    await settle(`s.stages.fsm.state==='ok' && s.analysis && s.dsm && s.dsm.family==='Mxx'`, '해석 결과');
+    await select('result', 'fsm');
+    const curve = (await mcp.tool('get_buckling_curve')).curve;
+    const dsmSI = await mcp.tool('get_dsm_values', { load_type: 'Mxx', units: 'SI' });
+    const ac = await hostMsg('analysisComplete');
+    const g = await ev(`(()=>{const pts=[...document.querySelectorAll('#center circle.cp')].map(c=>[+c.dataset.i,+c.dataset.len,+c.dataset.lf]);
+      const mn=[...document.querySelectorAll('#center g.mn')].map(m=>({k:m.dataset.k,L:+m.dataset.len,lf:+m.dataset.lf}));
+      const dv=document.querySelector('#center .dv[data-draw="mode"]'); const md=[...document.querySelectorAll('#center circle.md')].map(c=>[+c.dataset.n,+c.dataset.u,+c.dataset.w]);
+      return {pts, mn, hm:document.querySelectorAll('#center polyline.hm').length, len:+dv.dataset.len, mode:+dv.dataset.mode, md, cls:document.querySelector('#center g.cls')?.dataset.state,
+        clsHud:document.querySelector('#center [data-cls]')?.textContent, info:document.getElementById('info').innerText};})()`);
+    const okPts = g.pts.length === curve.length && g.pts.every(([i, L, lf]) => relClose(L, curve[i][0] * US_TO_SI.length) && relClose(lf, curve[i][1]));
+    const M = dsmSI.Mxx;
+    const mnOk = (k, L, lf) => { const m = g.mn.find(x => x.k === k); return m && relClose(m.L, L) && relClose(m.lf, lf); };
+    const okMn = mnOk('local', M.Lcrl, M.LF_local) && mnOk('dist', M.Lcrd, M.LF_dist) && mnOk('global', M.Lcre, M.LF_global);
+    const nn = ac.shapes[g.len][0].length ? ac.shapes[g.len].length / 4 : 0;
+    const okMd = g.md.length === nn && g.md.every(([, u, w], k) => relClose(u, ac.shapes[g.len][2 * k][g.mode - 1]) && relClose(w, ac.shapes[g.len][2 * nn + 2 * k][g.mode - 1]));
+    const nModes = curve[0].length - 1;
+    const r = compareNumbers(await numbers('#review'), { ...(await mcpNow()), params: params2, dsmSI, curve });
+    return { ok: okPts && okMn && okMd && g.hm === nModes - 1 && g.cls === 'none' && /분류 없음/.test(g.clsHud ?? '') && /둥근 모서리/.test(g.info) && r.bad.length === 0,
+      detail: `${okPts ? '' : `[첫 어긋남 ${JSON.stringify(g.pts.find(([i, L, lf]) => !(relClose(L, curve[i][0] * US_TO_SI.length) && relClose(lf, curve[i][1]))))} vs ${JSON.stringify(curve[g.pts.find(([i, L, lf]) => !(relClose(L, curve[i][0] * US_TO_SI.length) && relClose(lf, curve[i][1])))?.[0]])}] `}${okMn ? '' : `[극소 ${JSON.stringify(g.mn)} vs ${JSON.stringify(M)}] `}곡선 점 ${g.pts.length}/${curve.length} ${okPts} · 고차 모드 ${g.hm} · 극소 국부 · 뒤틀림 · 전체 = get_dsm_values ${okMn} · 모드 형상 길이 #${g.len} 모드 ${g.mode} 절점 ${g.md.length} = 호스트 모드 벡터 ${okMd}`
+        + ` · 분류 ${g.cls} 「${short(g.clsHud, 40)}」 · 수 ${r.compared}개 = MCP${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('u12b 곡선의 반파장을 누르면 모드 형상 · 정보 창이 그 길이로(보기 → 정보 창)', null, async () => {
+    const k = 30;
+    await ev(`document.querySelector('#center rect[data-pick="len:${k}"]').dispatchEvent(new MouseEvent('click',{bubbles:true}))`);
+    await sleep(300);
+    const s = await ev(`({len:+document.querySelector('#center .dv[data-draw="mode"]').dataset.len, sel:+document.querySelector('#center g.sel')?.dataset.i, info:document.getElementById('info').innerText})`);
+    const curve = (await mcp.tool('get_buckling_curve')).curve;
+    const Lmm = curve[k][0] * US_TO_SI.length;
+    return { ok: s.len === k && s.sel === k && s.info.includes('고른 반파장'), detail: `모드 형상 #${s.len} · 곡선 표지 #${s.sel} · 정보 창 「고른 반파장」 ${Lmm.toFixed(1)} mm` };
+  });
+  // 02 — 각진 모서리(분류 있음) + 100 길이 × 10 모드 성능
+  const tplS = await mcp.tool('set_section_template', { type: 'lippedc', H: 200, B: 75, D: 20, t: 2.3, units: 'SI' });
+  const lcS = await mcp.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
+  const lenS = await mcp.tool('set_lengths', { min: 10, max: 10000, n: 100, units: 'SI' });
+  const runS = await mcp.tool('run_analysis');
+  check('AI: 각진 모서리 립 C · 반파장 100 개 · run_analysis', tplS.success && lcS.success && !lenS.error && runS.success, short(lenS.error ?? runS.error ?? `길이 ${runS.lengths_analyzed} · 분류 ${runS.classification_status?.status ?? '—'}`));
+  const paramsS = { H: 200, B: 75, D: 20, t: 2.3 };
+  await step('u13 분류 띠(cFSM, 엔진이 낼 때) · 100 길이 × 10 모드 다시 그리기 시간', 'u13_buckling_classes', async () => {
+    await settle(`s.stages.fsm.state==='ok' && s.analysis && s.analysis.curve.length===${runS.lengths_analyzed ?? 100}`, '100 길이 해석', 120_000);
+    const times = [];
+    for (let i = 0; i < 5; i++) { times.push(await ev(`(()=>{const t0=performance.now(); ${S}.select('result','fsm'); return performance.now()-t0;})()`)); }
+    await sleep(200);
+    const ac = await hostMsg('analysisComplete');
+    const g = await ev(`({cls:document.querySelector('#center g.cls')?.dataset.state, bands:document.querySelectorAll('#center g.cls rect').length, pts:document.querySelectorAll('#center circle.cp').length, hm:document.querySelectorAll('#center polyline.hm').length, info:[...document.querySelectorAll('#info .clsk span')].map(e=>e.textContent).join(' ')})`);
+    const classes = ac.classifications;
+    const r = compareNumbers(await numbers('#review'), { ...(await mcpNow()), params: paramsS, classes });
+    const mean = times.reduce((a, b) => a + b, 0) / times.length;
+    return { ok: g.cls === 'bands' && g.bands > 0 && g.pts === (runS.lengths_analyzed ?? 100) && g.hm >= 9 && /G [\d.]+%/.test(g.info) && r.bad.length === 0 && mean < 500,
+      detail: `분류 ${g.cls} · 정보 창 「${g.info}」 · 띠 조각 ${g.bands} · 곡선 점 ${g.pts} · 고차 모드 ${g.hm} · 다시 그리기 평균 ${mean.toFixed(0)} ms(최대 ${Math.max(...times).toFixed(0)}) · 수 ${r.compared}개 = 엔진(분류 % 포함)${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  // 03 · 04 — 퍼린(3 연속, 랩, 양압 — NG 구간이 생긴다)
+  const purlinArgs = { member_app: 'roof-purlin', span_type: 'cont-3', span_ft: 6, laps: { left_ft: 0.6, right_ft: 0.6 }, loads: { D: 0.44, Lr: 1.17, W: -2.9 },
+    design_method: 'LRFD', spacing_ft: 1.2, Fy: 295, Fu: 400, deck: { type: 'through-fastened' }, units: 'SI' };
+  const pur = await mcp.tool('design_purlin', purlinArgs);
+  const failing = (pur.regions ?? []).findIndex(x => x.result?.pass === false);
+  check('AI: design_purlin(SI · 3 연속 · 랩 · 양압) — 엔진: 구간마다 판정, NG 구간 있음', !pur.error && (pur.regions ?? []).length > 5 && failing >= 0,
+    short(pur.error ?? `구간 ${pur.regions.length} · NG ${pur.regions.filter(x => x.result?.pass === false).length} · 판정 없음 ${pur.regions.filter(x => x.result?.pass == null).length}`));
+  await step('u14 하중 해석(템플릿 03) — M · V · 처짐 점 · 지점 반력 · 이름 붙은 위치 = 엔진(design_purlin 의 load_analysis, SI)', 'u14_loads', async () => {
+    await settle(`s.loads && s.regions.length===${pur.regions.length}`, '퍼린 결과');
+    await select('result', 'load');
+    const la = pur.load_analysis;
+    const g = await ev(`(()=>{const d=k=>{const e=document.querySelector('#center g.dg[data-k="'+k+'"]'); return e?{xs:e.dataset.xs.split(',').map(Number), ys:e.dataset.ys.split(',').map(Number)}:null;};
+      return {M:d('M'), V:d('V'), D:d('D'), rx:[...document.querySelectorAll('#center g.rx')].map(e=>[+e.dataset.i,+e.dataset.r]), loc:[...document.querySelectorAll('#center g.loc')].map(e=>[+e.dataset.i,+e.dataset.x,+e.dataset.m])};})()`);
+    const same = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => relClose(v, b[i]));
+    const okM = g.M && same(g.M.xs, la.governing.x_diagram) && same(g.M.ys, la.governing.M_diagram);
+    const okV = g.V && same(g.V.ys, la.governing.V_diagram);
+    const okD = g.D && same(g.D.ys, la.deflection.D_diagram);
+    const okR = g.rx.length === la.governing.R_envelope_max.length && g.rx.every(([i, r]) => relClose(r, la.governing.R_envelope_max[i]));
+    const okL = g.loc.length > 0 && g.loc.every(([i, x, m]) => relClose(x, la.governing.locations[i].x_ft) && relClose(m, la.governing.locations[i].Mu));
+    const ext = [Math.max(...la.governing.M_diagram), Math.min(...la.governing.M_diagram)];
+    const r = compareNumbers(await numbers('#review'), { ...(await mcpNow()), params: paramsS, loadsSI: la, purlinSI: pur });
+    return { ok: okM && okV && okD && okR && okL && r.bad.length === 0,
+      detail: `M ${g.M?.ys.length}점 ${okM} (극값 ${ext.map(v => v.toFixed(3)).join(' / ')} 이 그 점에 있다) · V ${okV} · 처짐 ${okD} · 반력 ${g.rx.length} ${okR} · 위치 ${g.loc.length} ${okL} · 수 ${r.compared}개 = MCP${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('u15 부재 검토 + 판정비 띠(템플릿 04) — 구간 판정비 = 엔진, NG 구간, 띠를 누르면 그 검토로(보기 → 트리 · 정보 창), 트리 → 보기 강조', 'u15_checks_band', async () => {
+    const run = `purlin:${failing}`;
+    await select('result', `${run}#ls0`);
+    const bd = await ev(`[...document.querySelectorAll('#center rect.bd')].map(e=>({run:e.dataset.run,r:e.dataset.r===''?null:+e.dataset.r,pass:e.dataset.pass,fill:e.getAttribute('fill')}))`);
+    const okBd = bd.length === pur.regions.length && bd.every((b, i) => b.run === `purlin:${i}` && (pur.regions[i].result?.utilization == null ? b.r === null : relClose(b.r, pur.regions[i].result.utilization))
+      && b.pass === (pur.regions[i].result?.pass === true ? 'ok' : pur.regions[i].result?.pass === false ? 'ng' : 'un'));
+    const ngFill = bd.filter(b => b.pass === 'ng').every(b => b.fill === 'var(--r6)');
+    const sel1 = await ev(`(()=>{const r=document.querySelector('#center rect.selr'); return r?[+r.dataset.a,+r.dataset.b]:null;})()`);
+    const okSel = sel1 && relClose(sel1[0], pur.regions[failing].start_ft) && relClose(sel1[1], pur.regions[failing].end_ft);
+    // 띠의 다른 구간을 누른다 → 트리 · 정보 창 · 강조가 그 구간으로
+    const other = pur.regions.findIndex((x, i) => i !== failing && x.result?.pass === true);
+    await ev(`document.querySelector('#center rect.bd[data-run="purlin:${other}"]').dispatchEvent(new MouseEvent('click',{bubbles:true}))`);
+    await sleep(350);
+    const after = await ev(`({tree:document.querySelector('#tree .row.on')?.dataset.k, info:document.querySelector('#info .ttl')?.textContent, selr:(()=>{const r=document.querySelector('#center rect.selr'); return r?[+r.dataset.a,+r.dataset.b]:null;})()})`);
+    const okClick = (after.tree ?? '').startsWith(`purlin:${other}#`) && after.selr && relClose(after.selr[0], pur.regions[other].start_ft);
+    await select('result', `${run}#ls0`);
+    const r = compareNumbers(await numbers('#review'), { ...(await mcpNow()), params: paramsS, loadsSI: pur.load_analysis, purlinSI: pur });
+    return { ok: okBd && ngFill && okSel && okClick && r.bad.length === 0,
+      detail: `띠 ${bd.length} 구간 = 엔진 ${okBd} · NG ${bd.filter(b => b.pass === 'ng').length} 개 빨강 ${ngFill} · 고른 구간 강조 ${okSel} · 띠 누름 → 트리 ${after.tree} · 정보 「${short(after.info, 40)}」 ${okClick}`
+        + ` · 판정 없음 구간 ${bd.filter(b => b.pass === 'un').length}(엔진이 이 입력에서 내지 않음 — 빗금은 u20 에서) · 수 ${r.compared}개${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('u15b 표 서랍 — 도표 점 표를 M 으로 정렬 · 복사(TSV)', null, async () => {
+    await select('result', 'load');
+    // 서랍은 템플릿처럼 03 만 펼쳐져 있다 — 접혀 있으면 펼친다
+    const wasClosed = await ev(`(()=>{const d=document.querySelector('#center .drawer.closed [data-drawer="toggle"]'); if(d){d.click(); return true;} return false;})()`);
+    await sleep(150);
+    await ev(`document.querySelector('#center [data-dtab="stations"]').click()`);
+    await sleep(150);
+    await ev(`document.querySelector('#center .drawer th[data-sort="2"]').click()`);
+    await sleep(150);
+    const vals = await ev(`[...document.querySelectorAll('#center .drawer tbody tr')].map(r=>+r.children[2].querySelector('[data-v]').dataset.v)`);
+    const sortedOk = vals.length === pur.load_analysis.governing.M_diagram.length && vals.every((v, i) => i === 0 || v >= vals[i - 1]);
+    await ev(`document.querySelector('#center [data-copy]').click()`);
+    await sleep(200);
+    const tsv = await ev('window.__uiLastCopy || ""');
+    if (wasClosed) { await ev(`document.querySelector('#center [data-drawer="toggle"]').click()`); }  // 다시 접는다(뒤의 그림은 기본 모습)
+    await ev(`document.querySelector('#center [data-dtab="locations"]')?.click()`);
+    await sleep(150);
+    const lines = tsv.split('\n');
+    return { ok: sortedOk && lines.length === vals.length + 1 && /^#\tx m\tM kN·m/.test(lines[0]), detail: `${vals.length} 줄 오름차순 ${sortedOk} · 복사 ${lines.length} 줄 「${short(lines[0], 40)}」` };
+  });
+  // 06 접합 — 랩
+  const lapArgs = { d: 200, t: 2.3, Fy: 295, Fu: 400, lap_left_in: 600, lap_right_in: 600, Mu_support: 12, Vu_support: 11, fastener_type: 'bolt', fastener_dia: 12,
+    n_rows: 2, end_distance: 36, design_method: 'LRFD', Se: 49000, Mnd: 9, Vn: 45, units: 'SI' };
+  const lap = await mcp.tool('design_lap_connection', lapArgs);
+  check('AI: design_lap_connection(SI)', !lap.error && typeof lap.n_total === 'number', short(lap.error ?? `n ${lap.n_total} · ${lap.n_rows}열 × ${lap.n_per_row} · DCR ${lap.utilization}`));
+  await step('u16 접합 도면(템플릿 06) — 랩 길이 · d · 패스너 수 · 자리 = 엔진(배치 규칙은 웹뷰와 같다), 「자체 가정」, Cut A-A 「개략」', 'u16_connection', async () => {
+    await settle(`!!s.lap`, '랩 결과');
+    await select('result', 'conn:lap');
+    const g = await ev(`(()=>{const l=document.querySelector('#center g.lap'); return {l:l?[+l.dataset.l,+l.dataset.r,+l.dataset.d,+l.dataset.n]:null, fs:[...document.querySelectorAll('#center circle.fs')].map(c=>[+c.dataset.x,+c.dataset.row]),
+      txt:document.getElementById('center').innerText + document.querySelector('#center svg').textContent, info:document.getElementById('info').innerText};})()`);
+    const exp = [];
+    const nLeft = Math.ceil(lap.n_per_row / 2), nRight = lap.n_per_row - nLeft;
+    for (let i = 0; i < nLeft; i++) { for (let rr = 0; rr < lap.n_rows; rr++) { exp.push([-lap.lap_left_in + lap.edge_distance + i * lap.spacing, rr]); } }
+    for (let i = 0; i < nRight; i++) { for (let rr = 0; rr < lap.n_rows; rr++) { exp.push([lap.lap_right_in - lap.edge_distance - i * lap.spacing, rr]); } }
+    const okFs = g.fs.length === lap.n_total && g.fs.length === exp.length && g.fs.every(([x, rr], i) => relClose(x, exp[i][0]) && rr === exp[i][1]);
+    const okL = g.l && relClose(g.l[0], lap.lap_left_in) && relClose(g.l[1], lap.lap_right_in) && relClose(g.l[2], lap.d);
+    const r = compareNumbers(await numbers('#review'), { ...(await mcpNow()), params: paramsS, lapSI: lap, purlinSI: pur, loadsSI: pur.load_analysis });
+    return { ok: okFs && okL && /개략/.test(g.txt) && /자체 가정/.test(g.txt) && /자체 가정/.test(g.info) && r.bad.length === 0,
+      detail: `패스너 ${g.fs.length}/${lap.n_total} 자리 ${okFs} · 랩 ${g.l?.join(' | ')} ${okL} · 「개략」 · 「자체 가정」 · 수 ${r.compared}개 = MCP${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  // AI 를 따라간다 — 경계조건을 바꾸면 해석 · 퍼린 · 랩 결과가 지워지고 보기도 낡음, 새 해석이면 곡선이 돌아온다
+  const bc = await mcp.tool('set_boundary_condition', { BC: 'C-C' });
+  check('AI: set_boundary_condition(C-C)', !bc.error, short(bc.error ?? JSON.stringify(bc).slice(0, 60)));
+  await step('u17 AI 가 경계조건을 바꾸면 — 좌굴 · 접합 보기는 낡음, 띠는 사라진다(새로 고침 없이)', 'u17_views_stale', async () => {
+    await settle(`s.stages.fsm.state==='stale' && !s.lap && s.regions.length===0`, '무효');
+    await select('result', 'fsm');
+    const f = await ev(`({t:document.getElementById('center').innerText, pts:document.querySelectorAll('#center circle.cp').length})`);
+    await select('result', 'conn');
+    const c = await ev(`({t:document.getElementById('center').innerText, fs:document.querySelectorAll('#center circle.fs').length})`);
+    await select('result', 'chk');
+    const b = await ev(`document.querySelectorAll('#center rect.bd').length`);
+    return { ok: /낡음/.test(f.t) && f.pts === 0 && /낡음/.test(c.t) && c.fs === 0 && b === 0, detail: `좌굴 「${short(f.t.split('\n')[0], 30)}」 점 ${f.pts} · 접합 패스너 ${c.fs} · 띠 ${b}` };
+  });
+  // 하중 해석을 AI 가 analyze_loads 로만 돌리면 화면에 오지 않는다 — 보기는 그것을 밝힌다(그리지 않는다)
+  const al = await mcp.tool('analyze_loads', { member_app: 'roof-purlin', span_type: 'cont-3', span_ft: 6, loads: { D: 0.44, Lr: 1.17 }, design_method: 'LRFD', spacing_ft: 1.2, units: 'SI' });
+  await step('u17c AI 의 analyze_loads — 결과는 화면에 오지 않는다: 하중도는 그 전 design_purlin 의 것 그대로(경계조건은 하중 해석과 무관 — 호스트도 지우지 않는다)', 'u17c_loads_not_on_screen', async () => {
+    await sleep(800);
+    await select('result', 'load');
+    const g = await ev(`(()=>{const e=document.querySelector('#center g.dg[data-k="M"]'); return {ys:e?e.dataset.ys.split(',').map(Number):[], st:${S}.state.stages.load.state};})()`);
+    const same = (a, b) => Array.isArray(b) && a.length === b.length && a.every((v, k) => relClose(v, b[k]));
+    const isPur = same(g.ys, pur.load_analysis.governing.M_diagram), isAl = same(g.ys, al.governing?.M_diagram);
+    return { ok: !al.error && isPur && !isAl, detail: `analyze_loads ${al.error ? `오류 ${short(al.error)}` : `성공(Mmax ${Math.max(...(al.governing?.M_diagram ?? [0])).toFixed(3)} kN·m)`} · 화면 M = design_purlin ${isPur} · = analyze_loads ${isAl} · 단계 ${g.st}` };
+  });
+  await mcp.tool('set_boundary_condition', { BC: 'S-S' });
+  const runC = await mcp.tool('run_analysis');
+  await step('u17b 새 해석(S-S 로 되돌려) — 곡선이 새로 고침 없이 돌아온다', null, async () => {
+    await settle(`s.stages.fsm.state==='ok' && s.analysis`, '새 해석', 120_000);
+    await select('result', 'fsm');
+    const pts = await ev(`document.querySelectorAll('#center circle.cp').length`);
+    return { ok: runC.success && pts === runC.lengths_analyzed, detail: `곡선 점 ${pts} · BC ${runC.m_all_selection?.BC ?? ''}` };
+  });
+  // 템플릿마다 그림 — 1920 · 960, 어두운 · 밝은 테마(퍼린 · 랩 결과를 다시 만든다)
+  const pur2 = await mcp.tool('design_purlin', purlinArgs);
+  const lap2 = await mcp.tool('design_lap_connection', lapArgs);
+  check('AI: 다시 해석 · 퍼린 · 랩(그림용)', !pur2.error && !lap2.error);
+  await settle(`s.stages.fsm.state==='ok' && s.regions.length>0 && !!s.lap`, '그림용 결과', 120_000);
+  const views = [['01', 'model', 'sec'], ['02', 'result', 'fsm'], ['03', 'result', 'load'], ['04', 'result', `purlin:${(pur2.regions ?? []).findIndex(x => x.result?.pass === false)}#ls0`], ['06', 'result', 'conn:lap']];
+  for (const [w, h] of [[1920, 1080], [960, 900]]) {
+    W = w; H = h;
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    for (const th of ['dark', 'light']) {
+      await ev(`${S}.setTheme(${JSON.stringify(th)})`);
+      for (const [tpl, tab, key] of views) {
+        await step(`u18 템플릿 ${tpl} · ${w}px · ${th === 'dark' ? '어두운' : '밝은'}`, `u18_${tpl}_${w}_${th}`, async () => {
+          await select(tab, key);
+          await sleep(200);
+          const s = await ev(`({sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth, svgs:document.querySelectorAll('#center svg').length})`);
+          return { ok: s.sw <= s.cw && s.svgs >= 1, detail: `scrollWidth ${s.sw}/${s.cw} · 그림 ${s.svgs}` };
+        });
+      }
+    }
+  }
+  await ev(`${S}.setTheme('dark')`);
+  W = 1920; H = 1080;
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+  await step('u20 판정 없음 구간은 빗금 · NG 구간은 빨강 — 엔진이 구간 판정을 null 로 낼 때(시험이 화면 상태의 한 구간을 null 로 바꿔 그린다)', 'u20_band_hatched', async () => {
+    const k = (pur2.regions ?? []).findIndex(x => x.result?.pass === true);
+    await ev(`(()=>{const r=${S}.state.regions[${k}]; r.us={...r.us, result:{...r.us.result, pass:null, utilization:null}}; r.si={...r.si, result:{...r.si.result, pass:null, utilization:null}}; return 1;})()`);
+    await select('result', 'chk');
+    const b = await ev(`[...document.querySelectorAll('#center rect.bd')].map(e=>({run:e.dataset.run, pass:e.dataset.pass, fill:e.getAttribute('fill')}))`);
+    const un = b.find(x => x.run === `purlin:${k}`), ng = b.filter(x => x.pass === 'ng');
+    return { ok: un && un.pass === 'un' && /hatch/.test(un.fill ?? '') && ng.length > 0 && ng.every(x => x.fill === 'var(--r6)'), detail: `구간 ${k} → ${un?.pass} ${un?.fill} · NG ${ng.length} 개 ${ng[0]?.fill}` };
+  });
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+  // 지금의 웹뷰와 나란히 — 편집 상태에서 같은 상태의 곡선 · 하중도 · 랩 도면
+  await step('u19 지금의 웹뷰(편집 상태)의 곡선 · 하중도 · 랩 도면 — 같은 상태', null, async () => {
+    await waitWv(`const h=D.documentElement; return h.getAttribute('data-stcfsd-bridge')==='connected' && D.querySelectorAll('.tab-btn').length>=6;`, 60_000, '끼운 웹뷰 연결');
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(400);
+    await wv(`D.querySelector('.tab-btn[data-tab="design"]').click(); return 1;`);
+    await sleep(600);
+    await wv(`const e=D.getElementById('buckling-curve-canvas'); if(e){e.scrollIntoView({block:'start'});} return !!e;`);
+    await shot('u19_webview_curve');
+    await wv(`D.querySelector('.tab-btn[data-tab="loads"]').click(); return 1;`);
+    await sleep(600);
+    await wv(`const e=D.getElementById('load-analysis-result'); if(e){e.scrollIntoView({block:'start'});} return !!e;`);
+    await shot('u19_webview_loads');
+    await wv(`D.querySelector('.tab-btn[data-tab="connection"]').click(); return 1;`);
+    await sleep(600);
+    await wv(`const e=D.getElementById('connection-result'); if(e){e.scrollIntoView({block:'start'});} return !!e;`);
+    await shot('u19_webview_lap');
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(300);
+    return { ok: true, detail: 'u19_webview_curve · u19_webview_loads · u19_webview_lap' };
+  });
+  await select('result', 'fsm');
+
   section('7b. 편집 상태(F2) — 끼운 지금의 화면이 그대로 돈다');
   await step('u07 끼운 웹뷰가 붙어 있다(숨김) · F2 로 보이고 · 그 「해석 실행」 결과를 새 화면이 받는다', 'u07_edit', async () => {
     await waitWv(`const h=D.documentElement; return h.getAttribute('data-stcfsd-bridge')==='connected' && h.hasAttribute('data-stcfsd-replayed') && D.querySelectorAll('.tab-btn').length>=6;`, 60_000, '끼운 웹뷰 연결');

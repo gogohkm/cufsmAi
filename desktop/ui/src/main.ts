@@ -6,7 +6,9 @@
  * AI 따라가기 · 찾기 · 우클릭 메뉴 · 계산 시트는 U3, 그림 보기는 U2 의 일이다.
  */
 import { api, connectEvents } from './bridge';
-import { centerHtml, opts, type CenterOpts } from './center';
+import { centerHtml, groupOf, modeSel, opts, setViews, tablesFor, viewsFor, type CenterOpts, type V } from './center';
+import { copyText, setActiveTable, sortBy, toggleDrawer, tsvOf } from './drawer';
+import { fitZoom, installZoom, restoreZoom } from './zoom';
 import { answered, enqueue, initDialogs, questionOpen, setProgress, toast } from './dialogs';
 import { debounce, esc, tip } from './dom';
 import { editing, hideSide, initEdit, mountDesigner, reloadSide, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
@@ -58,12 +60,15 @@ function renderReview(): void {
   tree.innerHTML = treeHtml(nodes, sel, ui.closed);
   tree.scrollTop = scroll;
   const center = $('center');
+  const t0 = performance.now();
   const c = centerHtml(sel, { w: center.clientWidth || 1240, h: center.clientHeight || 900 });
   center.className = `pane-view ${c.cls}`;
   const drawerScroll = center.querySelector('.drawer')?.scrollTop ?? 0;
   center.innerHTML = c.html;
+  restoreZoom(center);
   const dr = center.querySelector('.drawer');
   if (dr) { dr.scrollTop = drawerScroll; }
+  state.renderMs = performance.now() - t0;
   const info = $('info');
   const infoScroll = info.scrollTop;
   info.innerHTML = infoHtml(sel);
@@ -223,10 +228,48 @@ function boot(): void {
     }
     select(ui.tab, k);
   });
+  installZoom($('center'));
   $('center').addEventListener('click', e => {
     const t = e.target as HTMLElement;
+    const sel = ui.sel[ui.tab];
     const chip = t.closest('[data-opt]');
     if (chip) { const k = chip.getAttribute('data-opt') as keyof CenterOpts; opts[k] = !opts[k]; render(); return; }
+    const vw = t.closest('[data-view]');
+    if (vw) {
+      const v = vw.getAttribute('data-view') as V;
+      const cur = viewsFor(sel);
+      const next = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v].slice(-3);
+      setViews(sel, next.length ? next : [v]);
+      render();
+      return;
+    }
+    const fit = t.closest('[data-fit]');
+    if (fit) { fitZoom(fit.getAttribute('data-fit')!, $('center')); return; }
+    const pick = t.closest('[data-pick]');
+    if (pick) {
+      const p = pick.getAttribute('data-pick')!;
+      if (p.startsWith('len:')) { const i = Number(p.slice(4)); if (Number.isFinite(i)) { modeSel.len = i; modeSel.mode = 1; render(); } return; }
+      if (p.startsWith('run:')) {
+        const run = p.slice(4);
+        const r = state.runs.find(x => x.key === run);
+        const row = r?.rows.find(x => x.pass === false) ?? r?.rows[0];
+        if (row) { select('result', row.key); }
+        return;
+      }
+    }
+    const dt = t.closest('[data-dtab]');
+    if (dt) { setActiveTable(dt.getAttribute('data-dtab')!); render(); return; }
+    if (t.closest('[data-drawer="toggle"]')) { toggleDrawer(); render(); return; }
+    const cp = t.closest('[data-copy]');
+    if (cp) {
+      const tb = tablesFor(groupOf(sel)).find(x => x.id === cp.getAttribute('data-copy'));
+      if (tb) { void copyText(tsvOf(tb)).then(ok => toast(ok ? `「${tb.title}」 표를 복사했다` : '클립보드에 쓰지 못했다', ok ? 'info' : 'warning')); }
+      return;
+    }
+    const th = t.closest('.drawer th[data-sort]');
+    if (th) { const id = th.closest('.drawer')!.getAttribute('data-table-id')!; sortBy(id, Number(th.getAttribute('data-sort'))); render(); return; }
+    const lenRow = t.closest('tr[data-k^="len:"]');
+    if (lenRow) { modeSel.len = Number(lenRow.getAttribute('data-k')!.slice(4)); modeSel.mode = 1; render(); return; }
     const tr = t.closest('tr[data-k]');
     if (tr) { select('result', tr.getAttribute('data-k') ?? 'chk'); }
   });
@@ -255,6 +298,9 @@ function boot(): void {
   get state() { return state; }, get ui() { return { screen: ui.screen, tab: ui.tab, sel: ui.sel[ui.tab], editing: editing() }; },
   select: (tab: Tab, key: string) => { ui.screen = 'review'; select(tab, key); },
   review: toReview,
+  get modeSel() { return { ...modeSel }; },
+  setLen: (i: number, m = 1) => { modeSel.len = i; modeSel.mode = m; render(); },
+  views: (v: V[]) => { setViews(ui.sel[ui.tab], v); render(); },
   setTheme,
 };
 

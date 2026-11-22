@@ -145,3 +145,37 @@ table.t.vt .ratio .num { min-width: 44px; text-align: right; font-family: var(--
   .vt-head .legend i { width: 16px; }
   .tbar .conn .ct { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 }
+
+/* ── U2: 보기 배치 — 그림 하나(v1) · 둘(v2) · 셋(v2 s64: 위 하나 + 아래 둘)과 표 서랍 ── */
+.pane-view.v1 { grid-template-rows: minmax(0, 1fr) auto; }
+.pane-view.v2 { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr) auto; }
+.pane-view.v2.s64 { grid-template-rows: minmax(0, 1.2fr) minmax(0, 1fr) auto; }
+.pane-view > .dv + .dv, .pane-view > .dv + .split { border-top: 1px solid var(--line); }
+.dv[data-zoom] svg { cursor: grab; touch-action: none; }
+.dv[data-zoom] svg:active { cursor: grabbing; }
+.dv [data-pick] { cursor: pointer; }
+.drawer.closed { max-height: none; }
+.drawer.closed > header { border-bottom: 0; }
+.drawer .dw-tg { cursor: default; color: var(--text-dim); width: 12px; }
+.drawer th[data-sort] { cursor: default; user-select: none; }
+.drawer th[data-sort]:hover { color: var(--text); }
+.drawer tr[data-k] { cursor: default; }
+.drawer tr[data-k]:hover td { background: var(--bg-hover); }
+.drawer .chip[data-dtab] { cursor: default; }
+.drawer header .btn { height: 22px; padding: 0 8px; }
+.vsel span[data-view] { cursor: default; }
+.vsel span.off { color: var(--text-faint); opacity: .6; }
+.chip.off { opacity: .45; }
+.mth { cursor: pointer; }
+.mth.off { opacity: .45; cursor: default; }
+.mth .dv { height: 92px; }
+.mth .dv svg { width: 100%; height: 100%; }
+.legend2 { display: flex; gap: 12px; font-size: 10.5px; color: var(--text-dim); background: color-mix(in srgb, var(--bg-panel) 88%, transparent); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; }
+.legend2 span { display: inline-flex; align-items: center; gap: 5px; }
+.legend2 i { width: 16px; height: 0; border-top: 1.5px dashed var(--lapc); }
+.legend2 i.ip { width: 8px; height: 8px; border: 1.4px solid var(--mcol); border-radius: 50%; }
+.split > .dv { min-height: 0; }
+.dv.ph { min-height: 0; }
+:root[data-theme="light"] { --mcol: #1f6fc4; --vcol: #0f8f86; --dcol: #5c6270; --clsD: #0f8f86; }
+
+.split .hud.br { display: none; }

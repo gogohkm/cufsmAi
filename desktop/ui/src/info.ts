@@ -8,6 +8,7 @@ import { esc, tip } from './dom';
 import { bandVar, itemText, none, num, ratio, ratioText, unitOf, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO } from './names';
 import { isDefault, state, type CheckRow, type Run } from './store';
+import { modeSel } from './center';
 import { si, UNITS_NOTE, type Kind } from './units';
 
 const K2 = '설계 · 하중 · 접합 입력은 K2 전까지 편집 상태(F2)의 입력 칸에만 있다 — 호스트도 MCP 도구도 이 값을 알지 못한다';
@@ -141,7 +142,7 @@ function bucklingInfo(): string {
   const dsm = state.dsm;
   if (s.state !== 'ok' || !dsm) {
     const v = s.state === 'stale' ? `<span class="verdict warn">낡음</span> <span class="dim">${esc(s.note)}</span>` : s.state === 'run' ? '<span class="verdict acc">해석 중</span>' : none(state.dsmErr ? `결과 없음 — ${state.dsmErr}` : '결과 없음');
-    return hd('결과 · 좌굴 해석', '좌굴 해석', v, '') + sec('보기', placeholderNote('좌굴 곡선 · 모드 형상'));
+    return hd('결과 · 좌굴 해석', '좌굴 해석', v, '');
   }
   const fam = dsm.family;
   const d = dsm.si?.[fam] ?? {};
@@ -161,23 +162,51 @@ function bucklingInfo(): string {
     + row('모드 식별', esc(String(us.classification_method ?? '—')), '')
     + row('극소 수', num(us.n_minima, { src: `dsm:${fam}.n_minima`, kind: 'none' }), ''));
   return hd('결과 · 좌굴 해석', `좌굴 해석 · ${FAMILY_KO[fam] ?? fam}`, `<span class="verdict ok">일치</span> <span class="dim">MCP get_dsm_values 와 같은 값</span>`, '')
-    + sec('탄성 좌굴', tbl, tagFsm) + sec('해석', meta)
+    + sec('탄성 좌굴', tbl, tagFsm) + selectedLength() + sec('해석', meta)
     + lists(arr(us.warnings), arr(us.assumptions), arr(us.scope_notes));
 }
 
 const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(itemText) : []);
 
-function placeholderNote(what: string): string {
-  return `<div class="ph-note"${tip('그림 보기는 다음 단계(U2)에서 그린다. 수치는 위의 표와 MCP 가 같다')}>${esc(what)} — U2</div>`;
+const CLSC = ['var(--clsG)', 'var(--clsD)', 'var(--clsL)', 'var(--unchk)'];
+
+/** 고른 반파장(곡선 · 썸네일에서) — 그 길이 · 모드의 LF 와 엔진의 모드 분류 */
+function selectedLength(): string {
+  const an = state.analysis;
+  const i = modeSel.len;
+  if (!an || i === null || !an.curve[i]) { return ''; }
+  const m = Math.min(modeSel.mode, an.curve[i].length - 1);
+  const c = an.classes?.[i]?.[m - 1];
+  const unsupported = an.classStatus?.supported === false;
+  const has = Array.isArray(c) && c.some(v => typeof v === 'number');
+  const why = unsupported ? (an.classStatus?.code === 'ROUNDED_CORNER' ? '둥근 모서리 단면은 cFSM 분류를 하지 않는다(엔진)' : (an.classStatus?.message ?? '엔진이 분류를 내지 않았다')) : '분류를 돌리지 않았다';
+  const clsHtml = has
+    ? `<div class="cls">${(c as Array<number | null>).map((v, k) => `<i style="width:${Math.max(0, Number(v) || 0)}%;background:${CLSC[k]}"></i>`).join('')}</div>`
+      + `<div class="clsk">${(c as Array<number | null>).map((v, k) => `<span style="--c:${CLSC[k]}">${'GDLO'[k]} ${num(typeof v === 'number' ? v : null, { src: `cls:${i}.${m - 1}.${k}`, kind: 'none', unit: false, sig: 3 })}%</span>`).join('')}</div>`
+    : `<div class="dim" data-cls="none"${tip(an.classStatus?.message ?? '')}>분류 없음 — ${esc(why)}</div>`;
+  return sec('고른 반파장', table(row('반파장', num(si(an.curve[i][0], 'length'), { src: `curve:${i}.0`, kind: 'length' }), tagFsm)
+    + row(`모드 ${m} LF`, num(an.curve[i][m], { src: `curve:${i}.${m}`, kind: 'none', sig: 4 }), tagFsm)) + clsHtml, '',
+  '좌굴 곡선을 누르거나 썸네일을 고르면 바뀐다. 값은 MCP get_buckling_curve, 분류는 호스트가 보낸 해석 결과');
 }
 
 function loadInfo(): string {
   const s = state.stages.load;
-  const la = state.msgs.loadAnalysisComplete?.message?.data;
-  const v = s.state === 'ok' ? '<span class="verdict ok">결과 있음</span>' : s.state === 'stale' ? `<span class="verdict warn">낡음</span> <span class="dim">${esc(s.note)}</span>` : none('결과 없음', s.note);
-  const gov = la?.governing?.combo ? table(row('지배 조합', esc(String(la.governing.combo)), '')) : '';
-  return hd('결과 · 하중 해석', '하중 해석', v, '') + (gov ? sec('지배', gov) : '') + sec('보기', placeholderNote('부재 보기 · M · V · 처짐도'))
-    + (la ? lists(arr(la.warnings), arr(la.assumptions), arr(la.scope_notes)) : '');
+  const L = state.loads;
+  const v = L ? '<span class="verdict ok">결과 있음</span>' : s.state === 'stale' ? `<span class="verdict warn">낡음</span> <span class="dim">${esc(s.note)}</span>` : none('결과 없음', s.note);
+  if (!L) { return hd('결과 · 하중 해석', '하중 해석', v, ''); }
+  const la = L.si, us = L.us, g = la.governing ?? {};
+  const tagLa = '<span class="tag drv" data-tip="하중 해석(엔진)에서 나온 값">하중 해석</span>';
+  const wl: number[] = Array.isArray(g.governing_span_loads_plf) ? g.governing_span_loads_plf : [];
+  const defl: any[] = Array.isArray(la.deflection?.per_span) ? la.deflection.per_span : [];
+  const R: number[] = Array.isArray(g.R_envelope_max) ? g.R_envelope_max : [];
+  return hd(`결과 · 하중 해석${L.from === 'purlin' ? ' · 퍼린 설계의 하중 해석' : ''}`, `지배 조합 — ${String(us.governing?.combo ?? '')}`, v, '')
+    + sec('조합', table(row('설계법', esc(String(us.design_method ?? '—')), tagLa)
+      + row('해석', esc(String(us.analysis_method ?? '—')), tagLa)
+      + wl.map((w, i) => row(`wu 경간 ${i + 1}`, num(w, { src: `loads:governing.governing_span_loads_plf.${i}`, kind: 'linload' }), tagLa)).join('')), '', '엔진의 지배 조합과 그 경간 하중(kN/m)')
+    + sec('지점 반력(포락 최대)', table(R.map((r, i) => row(`지점 ${String.fromCharCode(65 + i)}`, num(r, { src: `loads:governing.R_envelope_max.${i}`, kind: 'force' }), tagLa)).join('')))
+    + sec('처짐', table(defl.map((d, i) => row(`경간 ${d.span ?? i + 1}`, `${num(d.delta_in, { src: `loads:deflection.per_span.${i}.delta_in`, kind: 'length' })} · L/${num(d.L_over_delta, { src: `loads:deflection.per_span.${i}.L_over_delta`, kind: 'none' })}`, tagLa)).join('')), '', String(us.deflection?.basis ?? ''))
+    + lists(arr(us.warnings), arr(us.assumptions), arr(us.scope_notes))
+    + (arr(us.not_evaluated).length ? sec('미검토', `<ul class="notes">${arr(us.not_evaluated).map(x => `<li>${esc(x)}</li>`).join('')}</ul>`) : '');
 }
 
 function runOfKey(key: string): { run?: Run; row?: CheckRow } {
@@ -212,7 +241,14 @@ function checksInfo(key: string): string {
   const kHead = `부재 검토 · ${esc(run.where)} · 검토 전체 <span class="verdict ${ov.cls}" style="font-weight:400"${tip('엔진의 전체 판정(pass): NG 가 하나라도 있으면 NG, 평가 못 한 것이 있으면 판정 없음, 모두 만족이면 OK')}>${ov.text}</span>`;
   // 엔진이 쓴 값
   const fd = r.Fcre_detail ?? {};
+  const rg = state.regions.find(x => x.runKey === run.key);
+  const tagLa = '<span class="tag drv" data-tip="하중 해석에서 자동으로 정한 값(엔진)">하중 해석</span>';
+  const ri = rg ? state.regions.indexOf(rg) : -1;
   const used = table([
+    rg ? row('검토 구간', `${num(rg.si?.start_ft, { src: `purlin:regions.${ri}.start_ft`, kind: 'length_ft', unit: false })} – ${num(rg.si?.end_ft, { src: `purlin:regions.${ri}.end_ft`, kind: 'length_ft' })}`, `${tagLa}<span class="why">${esc(String(rg.us?.label ?? ''))}</span>`) : '',
+    rg && typeof rg.si?.Mu === 'number' ? row('Mu', num(rg.si.Mu, { src: `purlin:regions.${ri}.Mu`, kind: 'moment' }), `${tagLa}<span class="why">${esc(String(rg.us?.combo ?? ''))}</span>`) : '',
+    rg && typeof rg.si?.Vu === 'number' ? row('Vu', num(rg.si.Vu, { src: `purlin:regions.${ri}.Vu`, kind: 'force' }), tagLa) : '',
+    rg && typeof rg.si?.Ly_in === 'number' ? row('Ly · Cb', `${num(rg.si.Ly_in, { src: `purlin:regions.${ri}.Ly_in`, kind: 'length', unit: false })} mm · ${num(rg.si?.Cb, { src: `purlin:regions.${ri}.Cb`, kind: 'none', unit: false, sig: 3 })}`, tagLa) : '',
     row('설계법', esc(String(us.design_method ?? '—')), tagEng),
     typeof r.Fy_used === 'number' ? row('설계 Fy', num(r.Fy_used, { src: `${run.src}Fy_used`, kind: 'stress' }), tagEng) : '',
     typeof fd.Lb === 'number' ? row('비지지 길이 Lb', num(fd.Lb, { src: `${run.src}Fcre_detail.Lb`, kind: 'length' }), tagEng) : '',
@@ -257,8 +293,14 @@ function connInfo(): string {
     + notice
     + sec('판정비', table((typeof x.utilization === 'number' ? row('패스너', ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`), '') : '')
       + (typeof x.flexure_dcr === 'number' ? row('랩 구간 휨', ratio(x.flexure_dcr, x.flexure_dcr > 1, 'lap:flexure_dcr'), '') : '')))
-    + sec('보기', placeholderNote('랩 측면도 · Cut A-A · 패스너 배치'))
+    + (lap ? sec('입력과 출처', table(
+      row('랩 길이', `${num(state.lap?.si.lap_left_in, { src: 'lap:lap_left_in', kind: 'length', unit: false })} | ${num(state.lap?.si.lap_right_in, { src: 'lap:lap_right_in', kind: 'length' })}`, '<span class="tag">지정</span>')
+      + row('패스너', `${esc(String(lap.fastener_label ?? ''))} · ${num(state.lap?.si.n_total, { src: 'lap:n_total', kind: 'none', unit: false })}개`, '<span class="tag drv">엔진</span>')
+      + row('단부 거리 e · 간격 s', `${num(state.lap?.si.edge_distance, { src: 'lap:edge_distance', kind: 'length', unit: false })} · ${num(state.lap?.si.spacing, { src: 'lap:spacing', kind: 'length' })}`, '<span class="tag drv">엔진</span>')
+      + row('전달 전단 V', num(state.lap?.si.V_transfer, { src: 'lap:V_transfer', kind: 'force' }), '<span class="tag def" data-tip="기준 조항이 아닌 자체 해석(force_model)">자체 가정</span>')
+      + row('패스너 용량', num(state.lap?.si.capacity, { src: 'lap:capacity', kind: 'force' }), '<span class="tag drv">엔진</span>')), '', '엔진 결과 그대로 — 표 서랍의 「계산 단계」에 식이 있다(US 글)') : '')
     + lists(arr(x.warnings), arr(x.assumptions), arr(x.scope_notes));
+
 }
 
 export function infoHtml(key: string): string {
@@ -272,9 +314,9 @@ export function infoHtml(key: string): string {
   if (key === 'dc' || key.startsWith('dc:')) { return state.runs.length ? checksInfo('') : pendingInfo('설계 조건', K2); }
   if (key === 'asm' || key.startsWith('asm:')) { return assumptionsInfo(); }
   if (key === 'fsm' || key.startsWith('fsm:')) { return bucklingInfo(); }
-  if (key === 'load') { return loadInfo(); }
+  if (key === 'load' || key.startsWith('load:')) { return loadInfo(); }
   if (key === 'chk' || key.startsWith('chk:') || key.startsWith('design') || key.startsWith('purlin')) { return checksInfo(key); }
-  if (key === 'conn') { return connInfo(); }
+  if (key === 'conn' || key.startsWith('conn:')) { return connInfo(); }
   if (key === 'alt') { return recordInfo('대안', '단면 대안 비교는 기록(R4)부터 생긴다'); }
   if (key === 'ask') { return recordInfo('판단 요청', 'AI 의 판단 요청은 기록(R3)부터 남는다'); }
   if (key === 'rep') { return recordInfo('보고', 'AI 의 보고는 기록(R3)부터 남는다'); }

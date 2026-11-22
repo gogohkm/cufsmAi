@@ -96,7 +96,11 @@ export function buildTree(tab: Tab): TNode[] {
         n('fsm:fam', '하중 계열', { v: FAMILY_KO[fam!] ?? fam }),
         crit('fsm:l', '국부', 'crl', 'Lcrl'), crit('fsm:d', '뒤틀림', 'crd', 'Lcrd'), crit('fsm:g', '전체', 'cre', 'Lcre'),
       ] : undefined }),
-      stageNode('load', '하중 해석', 'load'),
+      stageNode('load', '하중 해석', 'load', state.loads ? { v: '결과 있음', vCls: 'ok', dot: 'ok', kids: [
+        n('load:gov', '지배 조합', { v: String(state.loads.us.governing?.combo ?? '') }),
+        n('load:loc', '위치', { v: String((state.loads.us.governing?.locations ?? []).length) }),
+        n('load:def', '처짐', { vHtml: (state.loads.si.deflection?.per_span ?? []).map((d: any, i: number) => `L/${num(d.L_over_delta, { src: `loads:deflection.per_span.${i}.L_over_delta`, kind: 'none' })}`).join(' · ') || '<span class="vl un">없음</span>' }),
+      ], tip: state.loads.from === 'purlin' ? '퍼린 설계가 함께 돌린 하중 해석' : '마지막 하중 해석' } : {}),
       n('chk', '부재 검토', {
         v: chkStage.state === 'ok' ? `NG ${ng.length} · 미검토 ${un.length} · OK ${ok.length}` : STATE_V[chkStage.state][0],
         vCls: chkStage.state === 'ok' ? (ng.length ? 'ng' : un.length ? 'un' : 'ok') : STATE_V[chkStage.state][1],
@@ -110,7 +114,12 @@ export function buildTree(tab: Tab): TNode[] {
           ...(out.length ? [n('chk:OUT', '범위 밖', { v: String(out.length), faint: true, tip: '엔진이 이 검토의 범위 밖으로 둔 것(구현 안 됨 · 입력 없음) — 판정에 들어가지 않는다' })] : []),
         ] : undefined,
       }),
-      stageNode('conn', '접합부 검토', 'conn'),
+      stageNode('conn', '접합부 검토', 'conn', state.lap || state.conn ? { kids: [
+        ...(state.lap ? [n('conn:lap', `랩 · ${String(state.lap.us.fastener_label ?? '패스너')}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tag: state.lap.us.force_model?.specification_provision === false ? '자체 가정' : undefined,
+          vHtml: typeof state.lap.us.utilization === 'number' ? ratio(state.lap.us.utilization, state.lap.us.pass === false, 'lap:utilization') : undefined })] : []),
+        ...(state.conn ? [n('conn:one', `단일 접합 · ${String(state.conn.us.connection_type ?? '')}`, { dot: state.conn.us.pass === true ? 'ok' : state.conn.us.pass === false ? 'ng' : 'un',
+          vHtml: typeof state.conn.us.utilization === 'number' ? ratio(state.conn.us.utilization, state.conn.us.pass === false, 'conn:utilization') : undefined })] : []),
+      ] } : {}),
       n('alt', '대안', { v: '기록 없음', vCls: 'un', tip: '단면 대안 비교는 기록(R4)부터 생긴다' }),
     ];
   }
@@ -162,7 +171,7 @@ export function treeHtml(nodes: TNode[], sel: string, closed: Set<string>): stri
     const open = kids.length > 0 && !closed.has(x.k) && (x.open || has(x));
     const v = x.vHtml !== undefined ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${x.vHtml}</span>`
       : x.v ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${esc(x.v)}</span>` : '';
-    const tag = x.tag ? `<span class="tag def"${tip('아무도 정하지 않아 프로그램이 채웠다')}>${esc(x.tag)}</span>` : '';
+    const tag = x.tag ? `<span class="tag def"${tip(x.tag === '자체 가정' ? '기준 조항이 아닌 자체 해석(§A1.2(c)) — 힘 분배 모델' : '아무도 정하지 않아 프로그램이 채웠다')}>${esc(x.tag)}</span>` : '';
     let h = `<div class="row${d === 0 ? ' top' : ''}${x.k === sel ? ' on' : ''}${x.faint ? ' faint' : ''}" role="treeitem" data-k="${esc(x.k)}" style="padding-left:${8 + d * 14}px"${tip(x.tip)}>`
       + `<span class="tw">${kids.length ? (open ? '▾' : '▸') : ''}</span>${x.dot ? `<span class="dot ${x.dot}"></span>` : ''}`
       + `<span class="nm">${esc(x.t)}</span>${tag}${v}</div>`;

@@ -10,7 +10,7 @@
  *  - 바꾼 값은 화면에만 있다. 모델로 되돌려 보내는 길은 없다(이 화면은 모델을 쓰지 않는다).
  */
 import {
-  convertOutputSIDeep, toSI, US_TO_SI, SI_OUT_PROPS, SI_OUT_GET_DSM, SI_OUT_MEMBER, SI_OUT_PURLIN,
+  convertOutputSIDeep, toSI, US_TO_SI, SI_OUT_PROPS, SI_OUT_GET_DSM, SI_OUT_MEMBER, SI_OUT_PURLIN, SI_OUT_LOADS,
   type UnitKey, type Table,
 } from '../../../src/mcp/siUnits';
 
@@ -43,6 +43,10 @@ export const cutwpSI = <T>(v: T): T => deep(v, SI_OUT_PROPS);
 export const dsmSI = <T>(v: T): T => deep(v, SI_OUT_GET_DSM);
 /** MCP aisi_design_*(units SI)와 같은 변환 */
 export const memberSI = <T>(v: T): T => deep(v, SI_OUT_MEMBER);
+/** MCP analyze_loads(units SI)와 같은 변환 — 위치 ft → m, 모멘트 kip-ft → kN·m, 힘 kips → kN, 처짐 in → mm, 선하중 plf → kN/m */
+export const loadsSI = <T>(v: T): T => deep(v, SI_OUT_LOADS);
+/** MCP design_lap_connection · design_connection(units SI)와 같은 변환 */
+export const connSI = <T>(v: T): T => deep(v, SI_OUT_MEMBER);
 /** MCP design_purlin(units SI)와 같은 변환 */
 export const purlinSI = <T>(v: T): T => deep(v, SI_OUT_PURLIN);
 

@@ -54,6 +54,14 @@ export function num(v: number | null | undefined, o: NumOpt): string {
   return `<span class="num" data-v="${v}" data-src="${esc(o.src)}" data-u="${o.kind}" data-x="${e}"${tip(o.tip)}>${shown}</span>${unit}`;
 }
 
+/**
+ * SVG 의 글 안에 넣는 수 — `<tspan>`(HTML 의 `<span>` 을 SVG 안에 넣으면 HTML 파서가 SVG 를 닫아 버린다). 단위 글자는 붙이지 않는다.
+ */
+export function tnum(v: number | null | undefined, o: NumOpt): string {
+  if (typeof v !== 'number' || !Number.isFinite(v)) { return '<tspan class="none">—</tspan>'; }
+  return `<tspan class="num" data-v="${v}" data-src="${esc(o.src)}" data-u="${o.kind}" data-x="0">${sigText(v, o.sig ?? 4)}</tspan>`;
+}
+
 /** 단위 글자만(표의 단위 칸) */
 export function unitOf(v: number | null | undefined, kind: Kind): string {
   if (typeof v !== 'number' || !Number.isFinite(v)) { return ''; }
