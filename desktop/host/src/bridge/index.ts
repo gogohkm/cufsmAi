@@ -3,11 +3,16 @@
  *
  *   startBridge(host, { platform, port?, theme?, claude? }) → { url, origin, port, token, events, dispose() }
  *
- * 경로(자세한 것은 desktop/host/BRIDGE.md):
+ * 두 곳에서 듣는다(V5-04 · V5-18 — 인증과 열쇠는 http.ts 머리말). 포트가 다르니 출처가 다르다:
+ *  틀 서버(`origin`):
  *  - `/`                    틀: 제목 표시줄 + 설계 패널 iframe(+ 좌굴 보고서 패널) + 호스트의 물음(`frame/`)
+ *  - `/?t=<토큰>`           브라우저의 첫 진입 — 쿠키 + 쓰기 열쇠(그 탭의 sessionStorage)를 주는 작은 페이지 뒤 `/` · `/ui/` 로
+ *  - `/api/wv-key`          웹뷰 열쇠(쓰기 열쇠가 있어야 — 틀이 받아 자기 iframe 에 postMessage 로 건넨다)
+ *  웹뷰 서버(`webviewOrigin` — 쓰기 경로가 없다):
  *  - `/wv/<id>/`            웹뷰 HTML(리소스 주소 · CSP · nonce 고쳐 쓰기, `acquireVsCodeApi` 대체, 테마 — inject.ts)
  *  - `/res/webview/…` · `/res/media/…`   웹뷰 리소스(두 뿌리만)
- *  - `/api/wv/<id>/out`     호스트 → 웹뷰(SSE, 차례대로, 새로 고침이면 다시 보내기 — channel.ts) · `…/in` 웹뷰 → 호스트(POST)
+ *  - `/api/wv/<id>/out?k=`  호스트 → 웹뷰(SSE, 차례대로, 새로 고침이면 다시 보내기 — channel.ts) · `…/in` 웹뷰 → 호스트(POST, 웹뷰 열쇠)
+ *  틀 서버(이어서):
  *  - `/api/events`          틀이 받는 이벤트(SSE): 호스트의 물음 · 알림 · 진행, 웹뷰가 생김 · 없어짐, 지금 파일
  *  - `/api/state`           지금 상태(틀이 처음 그릴 때)
  *  - `/api/platform/answer` 호스트의 물음에 대한 답
@@ -27,12 +32,16 @@ import type { HostHandle } from '../loader';
 import { Channel } from './channel';
 import { createClaudeRoutes, type BridgeClaudeOptions } from './claude';
 import {
-  baseHeaders, checkRequest, readJson, safeFile, sendFile, sendJson, sendText, sessionCookie, type Guard,
+  baseHeaders, bootstrapTarget, checkRequest, hasKey, readJson, safeFile, sameToken, sendFile, sendJson, sendText, sessionCookie,
+  WEBVIEW_KEY_HEADER, WRITE_HEADER, type Guard,
 } from './http';
 import { injectWebviewHtml, type ResourceRoot } from './inject';
 import type { BridgePlatform } from './platform';
 import { EventBus, SseStream, type BridgeEvent } from './sse';
 import type { ThemeName } from './theme';
+
+/** 브라우저의 쓰기 열쇠 자리(틀 출처의 sessionStorage) — 이름에 포트를 넣는다. 틀 · 새 화면이 같은 이름을 읽는다 */
+export const WRITE_KEY_STORAGE = 'stcfsd.bridge.key.';
 
 export { createBridgePlatform, defaultDocumentsDir } from './platform';
 export type { BridgePlatform, BridgePlatformOptions, PendingQuestion } from './platform';
@@ -47,6 +56,8 @@ export interface StartBridgeOptions {
   platform: BridgePlatform;
   /** 0 이면 빈 포트 */
   port?: number;
+  /** 웹뷰 서버의 포트(0 이면 빈 포트) */
+  webviewPort?: number;
   theme?: ThemeName;
   log?: (line: string) => void;
   /** Claude Desktop 연결 상태. 시험은 임시 폴더의 가짜 설정을 준다 */
@@ -67,7 +78,13 @@ export interface BridgeHandle {
   uiUrl?: string;
   origin: string;
   port: number;
+  /** 읽기 인증(Bearer). 브라우저 쿠키의 값은 이것이 아니다 */
   token: string;
+  /** 쓰기 열쇠(`X-StCFSD-Key`) — 틀 서버의 GET 아닌 요청 · `/api/wv-key` 에 필요하다. Electron 은 맨 위 프레임 요청에만 붙인다 */
+  writeKey: string;
+  /** 웹뷰 서버 — 끼운 웹뷰(iframe)는 이 출처에서 돈다 */
+  webviewOrigin: string;
+  webviewPort: number;
   readonly events: EventBus;
   /** 같은 프로세스에서 이벤트를 듣는다(`/api/events` 와 같은 것). 돌려받은 함수 = 그만 듣기 */
   on(listener: (ev: BridgeEvent) => void): () => void;
@@ -95,6 +112,9 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     { name: 'media', dir: path.join(repoRoot, 'media') },
   ];
   const token = crypto.randomBytes(24).toString('base64url');
+  const cookieValue = crypto.randomBytes(24).toString('base64url');
+  const writeKey = crypto.randomBytes(24).toString('base64url');
+  const webviewKey = crypto.randomBytes(24).toString('base64url');
   const hub = host.webviews;
   const bus = new EventBus();
   const channels = new Map<string, Channel>();
@@ -113,17 +133,20 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     }
     return ch;
   };
+  // 웹뷰 서버의 출처 — HTTP 를 열기 전에 쓰는 곳(이벤트의 주소)이 있어 미리 자리만 둔다(listen 뒤 채운다)
+  let wvOrigin = '';
+  const wvUrl = (id: string) => `${wvOrigin}/wv/${encodeURIComponent(id)}/`;
   const webviewList = () => hub.list().map(w => {
     const ch = channels.get(w.id);
     return { id: w.id, viewType: w.viewType, title: w.title, pinned: w.pinned, visible: w.visible,
-      connected: !!ch?.client, ready: !!ch?.client?.ready, url: `/wv/${encodeURIComponent(w.id)}/` };
+      connected: !!ch?.client, ready: !!ch?.client?.ready, url: wvUrl(w.id) };
   });
 
   // ── 웹뷰 생김 · 없어짐 · 호스트 → 웹뷰 ─────────────────────────────
   for (const w of hub.list()) { channelFor(w.id); }
   subs.push(hub.onDidCreate.event(info => {
     channelFor(info.id);
-    bus.emit('webview:created', 'host', { id: info.id, viewType: info.viewType, title: info.title, url: `/wv/${encodeURIComponent(info.id)}/` });
+    bus.emit('webview:created', 'host', { id: info.id, viewType: info.viewType, title: info.title, url: wvUrl(info.id) });
   }));
   subs.push(hub.onDidDispose.event(info => {
     channels.get(info.id)?.close('webview disposed');
@@ -189,18 +212,46 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   const claude = createClaudeRoutes(host, options.claude);
 
   // ── HTTP ──────────────────────────────────────────────────────────
-  const server = http.createServer();
   const sockets = new Set<net.Socket>();
-  server.on('connection', s => { sockets.add(s); s.on('close', () => sockets.delete(s)); });
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(options.port ?? 0, '127.0.0.1', () => { server.off('error', reject); resolve(); });
-  });
-  const port = (server.address() as net.AddressInfo).port;
-  const guard: Guard = { token, port, cookieName: `stcfsd_bridge_${port}` };
+  const listen = async (p: number | undefined) => {
+    const s = http.createServer();
+    s.on('connection', c => { sockets.add(c); c.on('close', () => sockets.delete(c)); });
+    await new Promise<void>((resolve, reject) => {
+      s.once('error', reject);
+      s.listen(p ?? 0, '127.0.0.1', () => { s.off('error', reject); resolve(); });
+    });
+    return { server: s, port: (s.address() as net.AddressInfo).port };
+  };
+  const main = await listen(options.port);
+  const wv = await listen(options.webviewPort).catch(async err => { await new Promise(r => main.server.close(r)); throw err; });
+  const server = main.server;
+  const wvServer = wv.server;
+  const port = main.port;
+  const webviewPort = wv.port;
+  // 쿠키 이름은 틀 서버의 포트로 — 쿠키는 포트를 가리지 않아 웹뷰 서버에도 같은 쿠키가 간다(그래서 웹뷰 서버도 이 이름을 본다)
+  const cookieName = `stcfsd_bridge_${port}`;
+  const guard: Guard = { token, cookie: cookieValue, port, cookieName, bootstrap: true };
+  const wvGuard: Guard = { token, cookie: cookieValue, port: webviewPort, cookieName };
   const origin = `http://127.0.0.1:${port}`;
+  wvOrigin = `http://127.0.0.1:${webviewPort}`;
   const frameCsp = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-    + "connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
+    + `connect-src 'self'; frame-src 'self' ${wvOrigin}; frame-ancestors 'self'; base-uri 'none'; form-action 'none'`;
+  const forbidden = (res: http.ServerResponse, what: string) => sendJson(res, 403, { success: false, error: `${what} — 화면의 쓰기 열쇠가 없다` });
+
+  /**
+   * `?t=` 교환 — 쿠키(읽기)를 주고, 쓰기 열쇠를 이 탭의 sessionStorage(틀 출처)에 넣은 뒤 정해진 화면으로 간다.
+   * 열쇠는 이 응답의 본문(스크립트)에만 있다 — 주소 · 쿠키 · 웹뷰에는 없다. 쿠키만 가진 곳은 이 교환을 할 수 없다(쿠키 ≠ 토큰).
+   */
+  const bootstrapPage = (res: http.ServerResponse, target: string) => {
+    const nonce = crypto.randomBytes(18).toString('base64');
+    const js = `try{sessionStorage.setItem(${JSON.stringify(WRITE_KEY_STORAGE + port)},${JSON.stringify(writeKey)});}catch(e){}`
+      + `location.replace(${JSON.stringify(target)});`;
+    const body = `<!doctype html><meta charset="utf-8"><title>StCFSD</title><script nonce="${nonce}">${js}</script>`;
+    sendText(res, 200, body, 'text/html; charset=utf-8', {
+      'Set-Cookie': sessionCookie(guard),
+      'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    });
+  };
 
   const relayMcp = (req: http.IncomingMessage, res: http.ServerResponse, rest: string, search: string) => {
     const mcp = host.mcp;
@@ -218,7 +269,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   };
 
   const state = () => ({
-    designer: designerId, webviews: webviewList(), theme, ui: !!uiDir,
+    designer: designerId, webviews: webviewList(), theme, ui: !!uiDir, webviewOrigin: wvOrigin,
     currentFile: currentFile ?? null, currentName: currentFile ? path.basename(currentFile) : null,
     platform: platform.snapshot(), lastSeq: bus.lastSeq,
   });
@@ -231,14 +282,19 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     if (!verdict.ok) { sendJson(res, verdict.status, { success: false, error: verdict.error }); return; }
     const p = url.pathname;
     if (verdict.viaQuery) {
-      // 토큰을 쿠키로 바꾸고 주소에서 뗀다.
-      url.searchParams.delete('t');
-      res.writeHead(303, { 'Set-Cookie': sessionCookie(guard), Location: `${p}${url.search}` });
-      res.end();
+      // 토큰을 쿠키(따로 만든 값) + 쓰기 열쇠로 바꾼다. 돌아갈 곳은 요청 경로가 아니라 정해진 화면(V5-10).
+      bootstrapPage(res, bootstrapTarget(p, url.searchParams, !!uiDir));
       return;
     }
     const method = req.method ?? 'GET';
     if (method !== 'GET' && method !== 'POST') { sendJson(res, 405, { success: false, error: 'GET · POST 만' }); return; }
+    // 쓰기(V5-04): GET 이 아닌 모든 요청은 쓰기 열쇠가 있어야 한다 — 쿠키(브라우저가 다른 포트로도 보내는 것)만으로는 받지 않는다.
+    if (method !== 'GET' && !hasKey(req, WRITE_HEADER, writeKey)) { forbidden(res, `${method} ${p}`); return; }
+    if (p === '/api/wv-key' && method === 'GET') {
+      if (!hasKey(req, WRITE_HEADER, writeKey)) { forbidden(res, 'GET /api/wv-key'); return; }
+      sendJson(res, 200, { success: true, data: { key: webviewKey, origin: wvOrigin } });
+      return;
+    }
 
     // 틀
     if (p === '/' || p === '/index.html') {
@@ -264,68 +320,6 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       const file = safeFile(frameDir, frameMatch[1]);
       if (!file) { sendJson(res, 404, { success: false, error: '없다' }); return; }
       sendFile(res, file);
-      return;
-    }
-
-    // 웹뷰 리소스
-    const resMatch = /^\/res\/([^/]+)\/(.+)$/.exec(p);
-    if (resMatch) {
-      const root = roots.find(r => r.name === resMatch[1]);
-      const file = root ? safeFile(root.dir, resMatch[2]) : undefined;
-      if (!file) { sendJson(res, 404, { success: false, error: '없다' }); return; }
-      sendFile(res, file);
-      return;
-    }
-
-    // 웹뷰 HTML
-    const wvMatch = /^\/wv\/([^/]+)\/?$/.exec(p);
-    if (wvMatch && method === 'GET') {
-      const id = decodeURIComponent(wvMatch[1]);
-      const html = hub.html(id);
-      const info = hub.list().find(w => w.id === id);
-      if (html === undefined || !info) { sendJson(res, 404, { success: false, error: `웹뷰가 없다: ${id}` }); return; }
-      if (!html) { sendJson(res, 503, { success: false, error: '웹뷰 HTML 이 아직 없다' }); return; }
-      const t = url.searchParams.get('theme');
-      const out = injectWebviewHtml(html, { webviewId: id, viewType: info.viewType, theme: t === 'light' || t === 'dark' ? t : theme, roots });
-      // meta 의 CSP 가 본 정책이다. 머리에는 meta 로 줄 수 없는 frame-ancestors 만.
-      sendText(res, 200, out.html, 'text/html; charset=utf-8', { 'Content-Security-Policy': "frame-ancestors 'self'" });
-      return;
-    }
-
-    // 웹뷰 메시지 통로
-    const chMatch = /^\/api\/wv\/([^/]+)\/(out|in)$/.exec(p);
-    if (chMatch) {
-      const id = decodeURIComponent(chMatch[1]);
-      const ch = channelFor(id);
-      if (!ch) { sendJson(res, 404, { success: false, error: `웹뷰가 없다: ${id}` }); return; }
-      if (chMatch[2] === 'out') {
-        if (method !== 'GET') { sendJson(res, 405, { success: false, error: 'GET' }); return; }
-        const client = ch.attach(new SseStream(req, res));
-        client.sse.onClose.push(() => bus.emit('webview:client', 'bridge', { id, connected: false }));
-        bus.emit('webview:client', 'bridge', { id, connected: true });
-        return;
-      }
-      if (method !== 'POST') { sendJson(res, 405, { success: false, error: 'POST' }); return; }
-      const body = await readJson(req);
-      const client = ch.client;
-      if (!client || url.searchParams.get('conn') !== client.conn) {
-        sendJson(res, 409, { success: false, error: '이 연결은 끝났다(다른 페이지가 가져갔거나 끊겼다)' });
-        return;
-      }
-      const list = Array.isArray(body) ? body : [body];
-      for (const msg of list) {
-        const command = (msg as { command?: unknown })?.command;
-        try {
-          if (ch.readyCommand && command === ch.readyCommand) {
-            // 페이지의 webviewReady 는 호스트에 넘기지 않는다(넘기면 모델이 기본 단면으로 돌아간다). 다시 보내기로 답한다.
-            const n = ch.replayTo(client);
-            bus.emit('webview:ready', 'bridge', { id, replayed: n });
-          } else {
-            hub.deliver(id, msg);
-          }
-        } catch (err) { log(`[bridge] 웹뷰 메시지 처리 예외(${String(command)}): ${String(err)}`); }
-      }
-      sendJson(res, 200, { success: true, count: list.length });
       return;
     }
 
@@ -380,16 +374,98 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     sendJson(res, 404, { success: false, error: `없는 경로: ${p}` });
   };
 
-  server.on('request', (req, res) => {
-    handle(req, res).catch(err => {
-      const status = (err as { status?: number }).status ?? 500;
-      if (status === 500) { log(`[bridge] 요청 처리 예외 ${req.method} ${req.url}: ${(err as Error)?.stack ?? err}`); }
-      sendJson(res, status, { success: false, error: (err as Error).message });
-    });
-  });
+  /**
+   * 웹뷰 서버 — 웹뷰 문서 · 리소스 · 호스트 ↔ 웹뷰 통로만. 틀의 쓰기 경로(Claude 설정 · MCP 중계 · 물음 답 · 닫기)는 여기 없다.
+   * 통로는 웹뷰 열쇠가 있어야 한다(`out` 은 `?k=`, `in` 은 머리) — 쿠키만 가진 곳은 화면을 빼앗거나(superseded) 메시지를 넣지 못한다.
+   */
+  const handleWebview = async (req: http.IncomingMessage, res: http.ServerResponse): Promise<void> => {
+    baseHeaders(res);
+    let url: URL;
+    try { url = new URL(req.url ?? '/', wvOrigin); } catch { sendText(res, 400, 'bad url'); return; }
+    const p = url.pathname;
+    const wvMatch = /^\/wv\/([^/]+)\/?$/.exec(p);
+    const verdict = checkRequest(req, url, wvGuard, { frameNavigation: !!wvMatch });
+    if (!verdict.ok) { sendJson(res, verdict.status, { success: false, error: verdict.error }); return; }
+    const method = req.method ?? 'GET';
+
+    // 웹뷰 HTML
+    if (wvMatch && method === 'GET') {
+      const id = decodeURIComponent(wvMatch[1]);
+      const html = hub.html(id);
+      const info = hub.list().find(w => w.id === id);
+      if (html === undefined || !info) { sendJson(res, 404, { success: false, error: `웹뷰가 없다: ${id}` }); return; }
+      if (!html) { sendJson(res, 503, { success: false, error: '웹뷰 HTML 이 아직 없다' }); return; }
+      const t = url.searchParams.get('theme');
+      const out = injectWebviewHtml(html, { webviewId: id, viewType: info.viewType, theme: t === 'light' || t === 'dark' ? t : theme, roots, frameOrigin: origin });
+      // meta 의 CSP 가 본 정책이다. 머리에는 meta 로 줄 수 없는 frame-ancestors 만 — 틀 서버만 이 문서를 끼울 수 있다.
+      // X-Frame-Options(SAMEORIGIN)는 다른 출처인 틀이 끼우는 것을 막으므로 뗀다(frame-ancestors 가 그 일을 한다).
+      res.removeHeader('X-Frame-Options');
+      sendText(res, 200, out.html, 'text/html; charset=utf-8', { 'Content-Security-Policy': `frame-ancestors ${origin}` });
+      return;
+    }
+
+    // 웹뷰 리소스
+    const resMatch = /^\/res\/([^/]+)\/(.+)$/.exec(p);
+    if (resMatch && method === 'GET') {
+      const root = roots.find(r => r.name === resMatch[1]);
+      const file = root ? safeFile(root.dir, resMatch[2]) : undefined;
+      if (!file) { sendJson(res, 404, { success: false, error: '없다' }); return; }
+      sendFile(res, file);
+      return;
+    }
+
+    // 웹뷰 메시지 통로
+    const chMatch = /^\/api\/wv\/([^/]+)\/(out|in)$/.exec(p);
+    if (chMatch) {
+      const id = decodeURIComponent(chMatch[1]);
+      const ch = channelFor(id);
+      if (!ch) { sendJson(res, 404, { success: false, error: `웹뷰가 없다: ${id}` }); return; }
+      if (chMatch[2] === 'out') {
+        if (method !== 'GET') { sendJson(res, 405, { success: false, error: 'GET' }); return; }
+        const k = url.searchParams.get('k');
+        if (!k || !sameToken(k, webviewKey)) { sendJson(res, 403, { success: false, error: '웹뷰 열쇠가 없다' }); return; }
+        const client = ch.attach(new SseStream(req, res));
+        client.sse.onClose.push(() => bus.emit('webview:client', 'bridge', { id, connected: false }));
+        bus.emit('webview:client', 'bridge', { id, connected: true });
+        return;
+      }
+      if (method !== 'POST') { sendJson(res, 405, { success: false, error: 'POST' }); return; }
+      if (!hasKey(req, WEBVIEW_KEY_HEADER, webviewKey)) { sendJson(res, 403, { success: false, error: '웹뷰 열쇠가 없다' }); return; }
+      const body = await readJson(req);
+      const client = ch.client;
+      if (!client || url.searchParams.get('conn') !== client.conn) {
+        sendJson(res, 409, { success: false, error: '이 연결은 끝났다(다른 페이지가 가져갔거나 끊겼다)' });
+        return;
+      }
+      const list = Array.isArray(body) ? body : [body];
+      for (const msg of list) {
+        const command = (msg as { command?: unknown })?.command;
+        try {
+          if (ch.readyCommand && command === ch.readyCommand) {
+            // 페이지의 webviewReady 는 호스트에 넘기지 않는다(넘기면 모델이 기본 단면으로 돌아간다). 다시 보내기로 답한다.
+            const n = ch.replayTo(client);
+            bus.emit('webview:ready', 'bridge', { id, replayed: n });
+          } else {
+            hub.deliver(id, msg);
+          }
+        } catch (err) { log(`[bridge] 웹뷰 메시지 처리 예외(${String(command)}): ${String(err)}`); }
+      }
+      sendJson(res, 200, { success: true, count: list.length });
+      return;
+    }
+    sendJson(res, 404, { success: false, error: `없는 경로: ${p}` });
+  };
+
+  const onError = (req: http.IncomingMessage, res: http.ServerResponse) => (err: unknown) => {
+    const status = (err as { status?: number }).status ?? 500;
+    if (status === 500) { log(`[bridge] 요청 처리 예외 ${req.method} ${req.url}: ${(err as Error)?.stack ?? err}`); }
+    sendJson(res, status, { success: false, error: (err as Error).message });
+  };
+  server.on('request', (req, res) => { handle(req, res).catch(onError(req, res)); });
+  wvServer.on('request', (req, res) => { handleWebview(req, res).catch(onError(req, res)); });
 
   return {
-    url: `${origin}/?t=${token}`, origin, port, token,
+    url: `${origin}/?t=${token}`, origin, port, token, writeKey, webviewOrigin: wvOrigin, webviewPort,
     uiUrl: uiDir ? `${origin}/ui/?t=${token}` : undefined,
     events: bus,
     on: listener => bus.on(listener),
@@ -405,10 +481,9 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       detachPlatform();
       for (const ch of channels.values()) { ch.close('bridge closed'); }
       bus.closeAll();
-      await new Promise<void>(resolve => {
-        server.close(() => resolve());
-        for (const s of sockets) { s.destroy(); }
-      });
+      await Promise.all([server, wvServer].map(s => new Promise<void>(resolve => { s.close(() => resolve()); })).concat([
+        Promise.resolve().then(() => { for (const s of sockets) { s.destroy(); } }),
+      ]));
     },
   };
 }

@@ -81,6 +81,8 @@ function claudeSteps(s: ClaudeStatus | null): string {
     : `<button class="btn${s?.canConnect ? ' primary' : ' off'}" data-claude="connect"${s?.canConnect ? '' : ' disabled'}>연결</button>`;
   const step = (done: boolean, n: number, label: string, t: string, right: string) =>
     `<div class="step${done ? ' done' : ''}"><span class="n">${n}</span><b${tip(t)}>${esc(label)}</b>${right}</div>`;
+  // 설정을 손댈 수 없는 까닭(같은 이름 두 번 · JSON 아님 …)은 다리가 상태의 풍선 도움말에 사람 말로 준다
+  if (s?.ui === 'invalid-config') { return step(false, 1, regText, s.tooltip || regText, btn); }
   return step(reg, 1, regText, `「연결」을 누르면 Claude 설정을 보고, 없으면 추가하고, 있으면 지금 설치본을 가리키는지 확인한다. 다른 항목은 건드리지 않는다${s?.configPath ? ` · ${s.configPath}` : ''}`, btn)
     + step(reg && !s?.restartNeeded, 2, 'Claude Desktop 다시 시작', '등록한 뒤 한 번 다시 시작해야 Claude 가 StCFSD 도구를 본다',
       `<span class="faint">${reg ? (s?.restartNeeded ? '필요' : '—') : '—'}</span>`)

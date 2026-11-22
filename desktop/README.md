@@ -1,6 +1,6 @@
 # desktop/ — StCFSD 독립 프로그램
 
-2026-11-22 · 상태: **S5 끝(첫 배포판 준비) · U1 끝(새 검토 화면의 틀)** — 화면 템플릿(`design/`), 화면 없는 호스트(S1), 화면 다리(S2), 독립 창(S3 — Electron), Claude Desktop 연결(S4), Windows 설치 파일 + 함께 묶은 Python(S5), 새 검토 화면의 틀(U1 — `ui/`, `--ui` 로만 연다)이 있다. 기본 화면은 아직 틀(`/`)이다 — U4 에서 바꾼다. 다음은 U2(보기).
+2026-11-23 · 상태: **S5 끝(첫 배포판 준비) · U1 끝(새 검토 화면의 틀) · 독립 검증 V5 의 desktop 몫 고침** — 화면 템플릿(`design/`), 화면 없는 호스트(S1), 화면 다리(S2), 독립 창(S3 — Electron), Claude Desktop 연결(S4), Windows 설치 파일 + 함께 묶은 Python(S5), 새 검토 화면의 틀(U1 — `ui/`, `--ui` 로만 연다)이 있다. 기본 화면은 아직 틀(`/`)이다 — U4 에서 바꾼다. 다음은 U2(보기).
 
 Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하나에 StCFSD, 다른 모니터에 Claude Desktop 을 띄우고, 대화는 Claude Desktop 에서만 한다. 둘은 로컬 MCP 서버로 잇는다.
 
@@ -19,7 +19,7 @@ Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하�
 | `host/src/bridge/` · `host/frame/` | 화면 다리(+ S4 의 「연결」 · 「끊기」 — `POST /api/claude/*`, 화면의 세션만): 127.0.0.1 + 토큰의 HTTP 로 지금의 웹뷰를 고치지 않고 브라우저에 내준다(리소스 주소 · CSP · `acquireVsCodeApi` 대체 · 테마 변수), 호스트 ↔ 웹뷰 메시지와 새로 고침 다시 보내기, 호스트의 물음(알림 · 고르기 · 열기/저장), MCP 중계, Claude 상태(읽기만). 틀(`/`)은 제목 표시줄 + 설계 화면. CLI `serve.ts`, 시험 `test/bridge.mjs`(headless Edge). [`host/BRIDGE.md`](host/BRIDGE.md) | S2 |
 | `shell/` | 독립 창(Electron 45, 자체 `package.json`): 한 프로세스에 호스트 · 다리 · 창, 메모리 세션 + Bearer, 단일 인스턴스(두 번째 실행은 파일을 넘김), 창 자리 기억, 포커스를 가져가지 않기(물음은 제목 · 작업 표시줄로), OS 열기 · 저장 대화상자, 메뉴, 파일 연결 진입점, 자식 콘솔 숨김, 제목 표시줄의 Claude 연결. [`shell/README.md`](shell/README.md) | S3 · S4 |
 | `ui/` | **새 검토 화면(U1)** — 템플릿 00 · 01 · 04 를 실제 데이터로: 제목 표시줄(진행 띠 · Claude 연결), 트리 탭 4개, 축척대로 그린 단면 + 절점 · 요소 표, 판정비 표, 정보 창(값 · 단위 · 출처 꼬리표 · 경고 / 가정 / 범위), 시작 화면, 풍선 도움말. 값은 다리의 MCP 중계(AI 와 같은 도구)와 호스트 → 웹뷰 메시지에서 읽고, AI 가 바꾸면 새로 고침 없이 따라간다. 지금의 설계 화면은 늘 끼워 두고 F2 로 연다. 그림 보기는 U2 의 자리. `serve --ui` · 창 `--ui` 로만 연다. [`ui/README.md`](ui/README.md) | U1 |
-| `installer/` | Windows 설치 파일(NSIS · 사용자 단위 · 서명 없음, appId `local.stcfsd.desktop`)과 함께 묶은 Python 3.13.14 + numpy 2.4.4 + scipy 1.17.1(python.org · PyPI, 서명 · sha256 확인). 묶음 준비(`stage.mjs` — 빌드를 다시 돌린다), Python(`python.mjs`), 묶기(`build.mjs`), 설치하지 않고 확인(`test/packaged.mjs`). 출력은 `installer/build/`(git 무시). [`installer/README.md`](installer/README.md) | S5 |
+| `installer/` | Windows 설치 파일(NSIS · 사용자 단위 · 서명 없음, appId `local.stcfsd.desktop`)과 함께 묶은 Python 3.13.14 + numpy 2.4.4 + scipy 1.17.1(python.org · PyPI — 주소 · sha256 을 저장소에 고정, 받은 것 · 캐시 모두 맞춰 봄, zip 안의 실행 파일 · DLL 30개 서명 확인 — V5-14). 묶음 준비(`stage.mjs` — 빌드를 다시 돌린다), Python(`python.mjs`), 묶기(`build.mjs`), 설치하지 않고 확인(`test/packaged.mjs`). 출력은 `installer/build/`(git 무시). [`installer/README.md`](installer/README.md) | S5 |
 
 ```
 npx tsc -p ./                                  # 저장소 루트 — out/ 을 만든다

@@ -9,8 +9,11 @@
  * Claude 가 설치돼 있지 않으면(설정 폴더 없음) 만들지 않는다, 깨진 JSON 은 손대지 않는다, 쓰기 전에
  * `<파일>.stcfsd-backup-<시각>` 백업, 임시 파일 + 이름 바꾸기, 다시 읽어 우리 항목 = 기대값 · 다른 항목 = 전과 같음을 확인.
  *
- * 쓰는 길은 화면 다리의 이 두 POST 뿐이다 — 화면의 세션(쿠키 · 다리 토큰)이 있어야 하고, MCP 쪽(AI)에서는 닿지 않는다
- * (AI 는 호스트의 MCP 다리에 붙는다. 그 다리에 이 경로가 없고, 화면 다리의 `/api/mcp/*` 중계는 MCP 다리로만 간다).
+ * 이 등록 · 지우기를 하는 길은 화면 다리의 이 두 POST 뿐이다 — 읽기 인증에 더해 화면의 쓰기 열쇠(`X-StCFSD-Key`)가 있어야 한다
+ * (쿠키만으로는 안 된다 — V5-04, 끼운 웹뷰는 다른 출처라 닿지 않는다 — V5-18). AI 는 호스트의 MCP 다리에 붙고, 그 다리에는 이 경로가 없다.
+ * 다만 AI 의 도구가 파일을 쓰는 길은 따로 있다: `save_project` 는 모델 파일을 쓴다. V5-01(51e617f, 공용 코드)부터 그것은 이미 있는 파일을
+ * 덮어쓰지 않는다 — 자기가 쓴 StCFSD 모델 파일이 아니면 거절한다. 그래서 「AI 가 Claude 설정 파일을 바꿀 수 없다」 는 지금 이렇게 참이다:
+ * 등록 경로는 MCP 쪽에 없고, `save_project` 로 Claude 설정 파일을 겨누면 거절되어 파일이 바이트까지 그대로다(`test/connect.mjs` 가 중계로 시험한다).
  * 시험은 `configPath`(임시 폴더의 가짜 설정)를 준다 — 진짜 Claude 설정에 닿지 않는다.
  *
  * 넣는 항목(`entry`): 껍데기(S3)가 `standaloneMcpEntry({ command: <이 프로그램의 실행 파일>, serverScript: <이 설치본의
@@ -93,6 +96,20 @@ function getJson(port: number, token: string, route: string): Promise<any> {
   });
 }
 
+/**
+ * `invalid-config` 의 까닭을 사람 말로(K1 의 `error` · `configError` 영어 문구에서). 같은 키가 두 번 있는 설정도 이 이유다 —
+ * 「올바른 JSON 이 아니다」 로 적으면 틀리므로 까닭마다 따로.
+ */
+export function invalidConfigText(error: string | undefined): string {
+  const e = String(error ?? '');
+  const dup = /the key "([^"]*)" appears more than once/.exec(e);
+  if (dup) { return `Claude Desktop 설정 파일에 같은 이름("${dup[1]}")이 두 번 있어, 다시 쓰면 하나가 사라지므로`; }
+  if (/mcpServers is not a JSON object/.test(e)) { return 'Claude Desktop 설정 파일의 mcpServers 가 객체가 아니어서'; }
+  if (/root is not a JSON object/.test(e)) { return 'Claude Desktop 설정 파일의 맨 위가 객체가 아니어서'; }
+  if (/not valid JSON/.test(e)) { return 'Claude Desktop 설정 파일이 올바른 JSON 이 아니어서'; }
+  return 'Claude Desktop 설정 파일을 읽을 수 없어서';
+}
+
 const hhmm = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -157,7 +174,7 @@ export function createClaudeRoutes(host: HostHandle, o: BridgeClaudeOptions = {}
       'not-registered': '「연결」을 누르면 Claude Desktop 설정에 이 프로그램을 등록합니다(다른 항목은 그대로)',
       'registered-elsewhere': 'Claude Desktop 설정의 StCFSD 항목이 다른 위치의 프로그램을 가리킵니다. 「연결」을 누르면 이 프로그램으로 고칩니다',
       'not-installed': '이 사용자 계정에서 Claude Desktop 을 찾지 못했습니다. Claude Desktop 을 설치하고 한 번 실행한 뒤 다시 보세요',
-      'invalid-config': 'Claude Desktop 설정 파일이 올바른 JSON 이 아니어서 손대지 않습니다',
+      'invalid-config': `${invalidConfigText(reg.configError)} 손대지 않습니다`,
       'unknown': '연결 상태를 확인하지 못했습니다',
     };
     const where = reg.configPath ? `\n설정: ${reg.configPath}` : '';
@@ -175,7 +192,8 @@ export function createClaudeRoutes(host: HostHandle, o: BridgeClaudeOptions = {}
     const action = r.action as string | undefined;
     const reasonText: Record<string, string> = {
       'claude-not-installed': 'Claude Desktop 을 찾지 못해 등록하지 않았습니다.',
-      'invalid-config': 'Claude Desktop 설정 파일이 올바른 JSON 이 아니어서 손대지 않았습니다.',
+      'invalid-config': `${invalidConfigText(r.error as string | undefined)} 손대지 않았습니다.`,
+      'config-busy': 'Claude Desktop(또는 다른 프로그램)이 설정 파일을 계속 바꾸고 있어 쓰지 않았습니다. 잠시 뒤 다시 누르세요 — 설정은 그대로입니다.',
       'write-failed': `설정 파일을 쓰지 못했습니다(${String(r.error ?? '')}).${r.backupPath ? ` 백업: ${String(r.backupPath)}` : ''}`,
     };
     const okText: Record<string, string> = op === 'connect'

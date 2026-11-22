@@ -82,7 +82,9 @@ async function main(): Promise<void> {
     if (r.ok) { bridge.setCurrentFile(r.file); }
     out(`열기 ${file}: ${r.ok ? '성공' : '실패'} — ${r.message ?? ''}`);
   }
+  // 쓰기 열쇠는 이 기계용 줄에만(주소 · 쿠키에는 없다). 브라우저는 「화면:」 주소의 ?t= 교환으로 받는다.
   out(`STCFSD_BRIDGE_READY ${JSON.stringify({ pid: process.pid, url: bridge.url, uiUrl: bridge.uiUrl ?? null, screen: wantUi && bridge.uiUrl ? 'ui' : 'frame', origin: bridge.origin, port: bridge.port,
+    webviewOrigin: bridge.webviewOrigin, writeKey: bridge.writeKey,
     mcpPort: host.mcp.port, portFile: host.mcp.portFile, designer: host.designer.id })}`);
 
   let stopping = false;

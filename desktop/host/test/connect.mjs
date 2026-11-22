@@ -40,6 +40,7 @@ function realConfigPaths() {
   } catch { /* MSIX 없음 */ }
   return list;
 }
+const short = (v, n = 160) => { const s = typeof v === 'string' ? v : JSON.stringify(v); return s && s.length > n ? `${s.slice(0, n)}…` : s; };
 const statOf = f => { try { const s = fs.statSync(f); return `${s.size}:${s.mtimeMs}`; } catch { return '없음'; } };
 /** Claude 폴더의 백업 · 임시 파일(우리 흔적) */
 const traces = dir => { try { return fs.readdirSync(dir).filter(n => /stcfsd-(backup|tmp)/.test(n)); } catch { return []; } };
@@ -71,7 +72,9 @@ async function main() {
   if (!ready) { check('serve 준비', false, err.slice(-800)); return finish(); }
   const token = new URL(ready.url).searchParams.get('t');
   const api = async (method, route, body) => {
-    const r = await fetch(`${ready.origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close' },
+    // 쓰기(POST)에는 화면의 쓰기 열쇠도(V5-04 — 화면이 하는 그대로)
+    const r = await fetch(`${ready.origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close',
+      ...(method === 'GET' ? {} : { 'X-StCFSD-Key': ready.writeKey }) },
       body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await r.text();
     let json; try { json = JSON.parse(text); } catch { json = undefined; }
@@ -153,11 +156,32 @@ async function main() {
   check('「연결」 거절 · 파일 그대로 · 백업 없음', r.result.ok === false && r.result.reason === 'invalid-config' && statOf(config) === brokenStat
     && fs.readFileSync(config, 'utf8') === broken && traces(claudeDir).length === 0, r.result.message);
 
+  // 같은 키가 두 번 있는 설정(K1 V5-15a) — 「JSON 이 아니다」 가 아니라 그 까닭을 사람 말로
+  const dup = '{ "mcpServers": { "a": { "command": "first" }, "a": { "command": "second" } } }';
+  fs.writeFileSync(config, dup);
+  for (const n of traces(claudeDir)) { fs.rmSync(path.join(claudeDir, n)); }
+  st = await status();
+  r = await connect();
+  check('같은 이름이 두 번 있는 설정 — 손대지 않고, 까닭을 「같은 이름("a")이 두 번」으로 알린다(「JSON 이 아니다」 아님)',
+    st.ui === 'invalid-config' && /같은 이름\("(mcpServers\.)?a"\)이 두 번/.test(st.tooltip) && r.result.reason === 'invalid-config' && /같은 이름\("(mcpServers\.)?a"\)이 두 번/.test(r.result.message)
+    && !/올바른 JSON/.test(r.result.message) && fs.readFileSync(config, 'utf8') === dup && traces(claudeDir).length === 0, r.result.message);
+
   section('7. 쓰는 길은 화면의 세션뿐');
+  // AI 의 도구로 Claude 설정 파일을 덮어쓸 수 있는가(V5-01 · 공용 코드 51e617f 가 고침) — 화면의 MCP 중계로 AI 와 같은 동작을 보낸다
+  const victim = `${JSON.stringify({ mcpServers: { other: { command: 'other.exe', env: { API_KEY: 'secret-keep' } } }, preferences: { a: 1 } }, null, 2)}\n`;
+  fs.writeFileSync(config, victim);
+  const victimBytes = fs.readFileSync(config);
+  const savedOver = await api('POST', '/api/mcp/action', { action: 'save_project', filepath: config });
+  const savedOverJson = await api('POST', '/api/mcp/action', { action: 'save_project', filepath: config.replace(/\.json$/, '.JSON') });
+  check('MCP save_project 로 Claude 설정 파일을 겨누면 거절 — 파일이 바이트까지 그대로(중계 = AI 와 같은 호스트 동작)',
+    savedOver.json?.success !== true && !!(savedOver.json?.error) && victimBytes.equals(fs.readFileSync(config)) && savedOverJson.json?.success !== true
+    && victimBytes.equals(fs.readFileSync(config)) && traces(claudeDir).length === 0, short(savedOver.json?.error ?? savedOver.text, 140));
+  const noKey = await fetch(`${ready.origin}/api/claude/connect`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: '{}' });
+  check('쓰기 열쇠 없는 「연결」 은 403(Bearer 만으로는 안 된다)', noKey.status === 403 && victimBytes.equals(fs.readFileSync(config)), `HTTP ${noKey.status}`);
   fs.writeFileSync(config, '{}');
   const noTok = await fetch(`${ready.origin}/api/claude/connect`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   const viaGet = await api('GET', '/api/claude/connect');
-  const viaForm = await fetch(`${ready.origin}/api/claude/connect`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'a=1' });
+  const viaForm = await fetch(`${ready.origin}/api/claude/connect`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'X-StCFSD-Key': ready.writeKey, 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'a=1' });
   const viaOrigin = await fetch(`${ready.origin}/api/claude/connect`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Origin: 'http://evil.example' }, body: '{}' });
   const viaRelay = await api('POST', '/api/mcp/claude/connect', {});
   const mcpPort = JSON.parse(fs.readFileSync(portFile, 'utf8'));

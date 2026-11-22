@@ -12,6 +12,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { watchRealConfig } from '../../host/test/lib/realConfig.mjs';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -112,8 +113,7 @@ async function launch(args, label) {
 }
 
 async function main() {
-  const real = realConfigPaths();
-  const realBefore = new Map(real.map(f => [f, statOf(f)]));
+  const real = watchRealConfig(repoRoot);
   const repoBefore = repoSnapshot();
   let A;
   try {
@@ -121,16 +121,19 @@ async function main() {
     let t = Date.now();
     A = await launch(['--ui', FILE], 'U');
     check('앱이 뜨고 창은 새 검토 화면(/ui/)을 싣는다', A.stage.stage === 'running' && A.stage.screen === '/ui/', `${Date.now() - t} ms · ${A.stage.origin}${A.stage.screen}`);
-    const url = await A.ev('return ctx.win.webContents.getURL();');
+    // 창의 첫 이동이 확정되기 전에 물으면 빈 주소다 — 확정을 기다린다
+    const url = await until(() => A.ev('return ctx.win.webContents.getURL() || null;'), 15_000);
     check('창의 주소는 토큰 없는 /ui/', url === `${A.stage.origin}/ui/`, url);
     const ready = await until(() => A.page(`(()=>{const u=window.__stcfsdUi; if(!u||!u.state.ready) return null; const s=u.state;
       return s.file.path && u.ui.screen==='review' && s.full && s.nodes.length>0 ? {file:s.file.name, nodes:s.nodes.length, fname:document.querySelector('#tbar .fname').textContent,
         tree:document.querySelectorAll('#tree .row').length, info:document.getElementById('info').innerText.length} : null;})()`), 90_000);
     check('명령줄의 .csd 를 열어 검토 화면으로 — 트리 · 정보 창 · 제목 표시줄', ready?.file === path.basename(FILE) && ready.fname === path.basename(FILE) && ready.tree > 5 && ready.info > 50,
       short(ready));
-    const wv = await until(() => A.page(`(()=>{const f=document.getElementById('designer'); const d=f&&f.contentDocument;
-      return d && d.documentElement.getAttribute('data-stcfsd-bridge')==='connected' && d.documentElement.hasAttribute('data-stcfsd-replayed') && d.querySelectorAll('.tab-btn').length>=6
-        ? getComputedStyle(document.getElementById('edit')).visibility : null;})()`), 60_000);
+    // 끼운 웹뷰는 다른 출처(다리의 웹뷰 서버) — 주 프로세스가 그 프레임(WebFrameMain)에서 직접 본다
+    const wv = await until(async () => (await A.ev(`const mf = ctx.win.webContents.mainFrame;
+      const f = mf.framesInSubtree.find(x => x !== mf && x.url.includes('/wv/' + encodeURIComponent(ctx.host.designer.id) + '/'));
+      return f ? await f.executeJavaScript("document.documentElement.getAttribute('data-stcfsd-bridge')==='connected' && document.documentElement.hasAttribute('data-stcfsd-replayed') && document.querySelectorAll('.tab-btn').length>=6", true) : false;`))
+      ? A.page(`getComputedStyle(document.getElementById('edit')).visibility`) : null, 60_000);
     check('지금의 설계 화면(탭 6개)이 끼워져 붙어 있고 숨겨져 있다', wv === 'hidden', `편집 칸 ${wv}`);
     const cookies = await A.ev('return (await ctx.win.webContents.session.cookies.get({})).length;');
     check('인증은 Bearer — 쿠키 0', cookies === 0, `쿠키 ${cookies}`);
@@ -166,8 +169,8 @@ async function main() {
     if (A) { spawnSync('taskkill', ['/PID', String(A.pid), '/T', '/F'], { windowsHide: true }); }
   }
   section('3. 진짜 설정 · 저장소');
-  const changed = real.filter(f => statOf(f) !== realBefore.get(f));
-  check('진짜 Claude Desktop 설정 · ~/.claude · %APPDATA%\\StCFSD 가 그대로(열지 않음)', changed.length === 0, changed.join(', ') || `${real.length}곳`);
+  const changed = real.changed();
+  check('진짜 Claude Desktop 설정 · ~/.claude · %APPDATA%\\StCFSD 가 그대로(크기 · 시각, ~/.claude.json 은 MCP 등록만)', changed.length === 0, changed.join(', ') || `${real.list.length}곳`);
   const after = repoSnapshot();
   const diff = [...after].filter(([k, v]) => repoBefore.get(k) !== v).map(([k]) => k).concat([...repoBefore.keys()].filter(k => !after.has(k)));
   check('desktop/ 밖 저장소 그대로', diff.length === 0, diff.slice(0, 5).join(', ') || '그대로');

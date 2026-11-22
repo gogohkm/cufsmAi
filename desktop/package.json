@@ -11,7 +11,7 @@
     "build": "node host/build.mjs && node ui/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p ui/tsconfig.json",
     "headless": "node host/dist/headless.js",
-    "test": "npm run typecheck && npm run build && node host/test/smoke.mjs && node host/test/bridge.mjs && node host/test/connect.mjs && node ui/test/ui.mjs",
+    "test": "npm run typecheck && npm run build && node host/test/smoke.mjs && node host/test/bridge.mjs && node host/test/connect.mjs && node ui/test/ui.mjs && node installer/test/unit.mjs",
     "serve": "node host/dist/serve.js",
     "serve:ui": "node host/dist/serve.js --ui",
     "test:bridge": "npm run build && node host/test/bridge.mjs",

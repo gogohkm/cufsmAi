@@ -15,6 +15,7 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { watchRealConfig } from '../../host/test/lib/realConfig.mjs';
 
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -77,18 +78,6 @@ function descendants(rootPid, table = processTable()) {
   return out;
 }
 
-/** 진짜 설정 자리 — 열지 않고 크기 · 수정 시각만(test/webview/real_config_guard.js 와 같은 생각) */
-function realConfigPaths() {
-  const home = process.env.USERPROFILE || os.homedir();
-  const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
-  const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-  const list = [path.join(appData, 'Claude', 'claude_desktop_config.json'), path.join(home, '.claude', 'mcp.json'), path.join(home, '.claude.json'),
-    path.join(repoRoot, '.mcp.json'), path.join(repoRoot, '.claude', 'mcp.json'), path.join(repoRoot, 'Example', '.mcp.json'),
-    path.join(repoRoot, 'Example', '.claude', 'mcp.json'), path.join(appData, 'StCFSD'), path.join(appData, 'StCFSD', 'mcp', 'stcfsd-mcp-port'),
-    path.join(appData, 'stcfsd-shell'), path.join(appData, 'Electron')];
-  try { for (const d of fs.readdirSync(path.join(local, 'Packages'))) { if (/claude/i.test(d)) { list.push(path.join(local, 'Packages', d, 'LocalCache', 'Roaming', 'Claude', 'claude_desktop_config.json')); } } } catch { /* 없음 */ }
-  return list;
-}
 function repoSnapshot() {
   const r = spawnSync('git', ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { cwd: repoRoot, encoding: 'utf8', windowsHide: true });
   const m = new Map();
@@ -129,7 +118,11 @@ async function launch(args, label) {
   });
   const ev = (code, timeoutMs) => call({ type: 'eval', code }, timeoutMs);
   const page = (js, timeoutMs) => ev(`return await ctx.win.webContents.executeJavaScript(${JSON.stringify(js)}, true);`, timeoutMs);
-  const designer = body => page(`(()=>{const W=document.getElementById('designer').contentWindow;const D=W.document;${body}})()`);
+  // 끼운 설계 웹뷰는 다른 출처(다리의 웹뷰 서버)라 틀 문서에서 닿지 않는다 — 주 프로세스가 그 프레임(WebFrameMain)에서 직접 돌린다
+  const designer = body => ev(`const mf = ctx.win.webContents.mainFrame;
+    const f = mf.framesInSubtree.find(x => x !== mf && x.url.includes('/wv/' + encodeURIComponent(ctx.host.designer.id) + '/'));
+    if (!f) { throw new Error('설계 웹뷰 프레임 없음'); }
+    return await f.executeJavaScript(${JSON.stringify('(async()=>{const W=window;const D=document;BODY})()')}.replace('BODY', ${JSON.stringify(body)}), true);`);
   const capture = name => call({ type: 'capture', file: path.join(OUT, `${name}.png`) }).then(() => path.join(OUT, `${name}.png`));
   const ok = await until(() => stage, 120_000, 200);
   if (!ok || stage.type === 'fatal') { throw new Error(`앱이 뜨지 않았다(${label}): ${short(stage ?? out.slice(-1500), 1500)}`); }
@@ -186,11 +179,33 @@ function startMcpClient(entry) {
 }
 
 async function main() {
-  const real = realConfigPaths();
-  const realBefore = new Map(real.map(f => [f, statOf(f)]));
+  const real = watchRealConfig(repoRoot, [path.join(process.env.APPDATA || '', 'stcfsd-shell'), path.join(process.env.APPDATA || '', 'Electron')]);
   const repoBefore = repoSnapshot();
   let A; let B; let C; let mcp;
   try {
+    section('0. 쓸 수 없는 사용자 폴더 — 말없이 끝나지 않고 오류 상자 길로(V5-11, 시험은 보이지 않는다)');
+    {
+      const asFile = path.join(tmp, '사용자 폴더 자리에 파일');
+      fs.writeFileSync(asFile, 'x');
+      const denied = path.join(tmp, '쓰기 거부 폴더');
+      fs.mkdirSync(denied);
+      const acl = spawnSync('icacls', [denied, '/deny', `${process.env.USERNAME}:(OI)(CI)(W,AD,WD)`], { windowsHide: true, encoding: 'utf8' });
+      const runBad = ud => new Promise(resolve => {
+        const c = spawn(electronPath, [shellDir, '--user-data', ud], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: shellEnv(), windowsHide: true });
+        launched.push(c);
+        const msgs = []; let err = '';
+        c.on('message', m => msgs.push(m)); c.stderr.on('data', d => { err += d; }); c.stdout.on('data', () => {});
+        const timer = setTimeout(() => c.kill(), 30_000);
+        c.on('exit', code => { clearTimeout(timer); resolve({ code, fatal: msgs.find(m => m.type === 'fatal'), stage: msgs.find(m => m.type === 'stage'), err }); });
+      });
+      for (const [label, ud] of [['자리에 파일', asFile], ['쓰기 거부 ACL', denied]]) {
+        const r = await runBad(ud);
+        check(`V5-11 · 사용자 폴더 ${label} → 오류 상자 길(폴더 · 까닭을 알림), 창 없이 끝남`, r.code === 4 && r.fatal?.kind === 'userdata' && r.fatal.detail.includes(ud) && /까닭:/.test(r.fatal.detail) && !r.stage,
+          `코드 ${r.code} · ${short(r.fatal?.detail?.split('\n').slice(2, 4).join(' / '), 160)}${label.includes('ACL') && acl.status !== 0 ? ` · icacls 실패 ${acl.stderr}` : ''}`);
+      }
+      spawnSync('icacls', [denied, '/remove:d', process.env.USERNAME], { windowsHide: true });
+    }
+
     section('1. 띄우기 — 파일 연결 꼴(StCFSD.exe 파일.csd), 보이지 않게');
     let t = Date.now();
     A = await launch([FILE_A], 'A');
@@ -198,9 +213,8 @@ async function main() {
     check('MCP 포트 파일이 시험의 사용자 폴더 안에', A.stage.portFile === portFile && fs.existsSync(portFile), portFile);
     const opened = await until(() => A.ev('return ctx.diag.opened.length ? ctx.diag.opened : null;'), 30_000);
     check('명령줄의 .csd 를 연다', opened?.[0]?.ok && opened[0].file === FILE_A, short(opened?.[0]?.message ?? '', 100));
-    const loaded = await until(() => A.page(`(()=>{const f=document.getElementById('designer'); const d=f&&f.contentDocument;
-      return d && d.documentElement.getAttribute('data-stcfsd-bridge')==='connected' && d.documentElement.hasAttribute('data-stcfsd-replayed')
-        && d.querySelectorAll('#section-svg circle').length > 3 ? document.getElementById('file-name').textContent : null;})()`), 60_000);
+    const loaded = await until(async () => (await A.designer(`return D.documentElement.getAttribute('data-stcfsd-bridge')==='connected' && D.documentElement.hasAttribute('data-stcfsd-replayed')
+        && D.querySelectorAll('#section-svg circle').length > 3;`)) ? A.page(`document.getElementById('file-name').textContent`) : null, 60_000);
     check('창 안에서 틀과 설계 화면이 뜨고 단면이 그려진다(Bearer 머리 · 쿠키 없음)', loaded === path.basename(FILE_A), `제목 표시줄 파일 이름 "${loaded}"`);
     const cookies = await A.ev('return (await ctx.win.webContents.session.cookies.get({})).length;');
     const sec = await A.ev(`const p = ctx.win.webContents.getLastWebPreferences(); return { contextIsolation: p.contextIsolation, sandbox: p.sandbox, nodeIntegration: p.nodeIntegration, webviewTag: p.webviewTag, persist: ctx.win.webContents.session.isPersistent() };`);
@@ -214,6 +228,25 @@ async function main() {
     check('바깥 주소는 막는다 — 새 창 · 이동(OS 브라우저로 넘김, 시험은 열지 않음) · 세션의 바깥 요청', nav.blocked.some(b => /window https:\/\/example\.com\/x/.test(b))
       && nav.blocked.some(b => /navigate https:\/\/example\.com\/nav/.test(b)) && /BLOCKED|blocked/i.test(nav.fetchErr) && nav.url.startsWith(A.stage.origin),
     `${short(nav.blocked, 140)} · 세션 요청 "${short(nav.fetchErr, 60)}" · 창 주소 ${nav.url}`);
+    // V5-18b (Electron) — 끼운 웹뷰 안의 스크립트는 쓰기 경로 · 틀 문서에 닿지 않는다. 쓰기 열쇠는 주 프로세스가 맨 위 프레임 요청에만 붙인다.
+    {
+      const cfgSnap = () => (fs.existsSync(fakeClaude) ? fs.readFileSync(fakeClaude).toString('base64') : '없음');
+      const cfgBefore = cfgSnap();
+      const r = await A.designer(`const out={}; const o=${JSON.stringify(A.stage.origin)};
+        const t=async(k,f)=>{try{const x=await f(); out[k]=x&&typeof x==='object'&&'status' in x?'HTTP '+x.status+(x.type==='opaque'?' opaque':''):String(x);}catch(e){out[k]='거절: '+e.name;}};
+        await t('상대 경로', ()=>fetch('/api/claude/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}));
+        await t('틀 출처', ()=>fetch(o+'/api/claude/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}));
+        await t('틀 출처 no-cors', ()=>fetch(o+'/api/claude/connect',{method:'POST',mode:'no-cors',body:'{}'}));
+        await t('열쇠', ()=>fetch(o+'/api/wv-key'));
+        await t('부모 문서', ()=>W.parent.document.title);
+        out.origin=location.origin; return out;`);
+      await sleep(400);
+      const keyed = await A.ev('return ctx.diag.keyedRequests;');
+      const fine = v => /^거절/.test(v) || /HTTP 40[34]/.test(v) || / opaque$/.test(v);
+      check('V5-18b(창) · 끼운 웹뷰는 다른 출처 — 어떤 길로도 「연결」 · 열쇠 · 틀 문서에 닿지 않는다(설정 그대로) · 쓰기 열쇠는 맨 위 프레임 요청에만',
+        r.origin !== A.stage.origin && Object.entries(r).filter(([k]) => k !== 'origin').every(([, v]) => fine(v)) && cfgBefore === cfgSnap() && keyed > 0,
+        `${short(r, 260)} · 열쇠 붙인 요청 ${keyed}`);
+    }
     const shot1 = await A.capture('s3_01_window_loaded');
     check('보이지 않는 창의 화면을 찍는다(invalidate → DevTools 프로토콜)', fs.statSync(shot1).size > 20_000, `${path.basename(shot1)} ${fs.statSync(shot1).size} bytes`);
     await quiet(A, '띄운 뒤');
@@ -267,6 +300,22 @@ async function main() {
     const title2 = await until(async () => { const v = await A.page(`document.getElementById('file-name').textContent`); return v === path.basename(FILE_B) ? v : undefined; }, 30_000);
     check('메뉴 열기 → OS 열기 대화상자 → 파일이 열리고 제목 표시줄이 따라간다', title2 === path.basename(FILE_B), title2 ?? '바뀌지 않음');
 
+    section('3b. 아직 호스트에 가지 않은 설계 탭 입력 — 메뉴의 테마 · 새로 고침 뒤에도 그대로(V5-03)');
+    await S('design-Lb', 77.7);
+    const lb0 = await A.designer(`return D.getElementById('design-Lb').value;`);
+    await A.ev(`return ctx.menuClick('theme-light');`);
+    const themed = await until(() => A.designer(`return D.documentElement.getAttribute('data-stcfsd-theme')==='light' ? {lb: D.getElementById('design-Lb').value, kind: D.body.getAttribute('data-vscode-theme-kind')} : null;`), 10_000);
+    const frameLight = await A.page(`document.documentElement.classList.contains('light')`);
+    await A.ev(`return ctx.menuClick('reload');`);
+    await sleep(800);
+    const restored = await until(() => A.designer(`return D.documentElement.getAttribute('data-stcfsd-preserved')==='restored' ? D.getElementById('design-Lb').value : null;`), 30_000);
+    const pendingQ = await A.ev('return ctx.platform.snapshot().pending.length;');
+    check('V5-03 · 설계 탭 Lb 77.7 → 메뉴 「밝은 테마」(다시 싣지 않음) → 그대로 → 메뉴 「새로 고침」 → 그대로(저장 물음 없음)',
+      lb0 === '77.7' && themed?.lb === '77.7' && themed.kind === 'vscode-light' && frameLight === true && restored === '77.7' && pendingQ === 0,
+      `입력 ${lb0} → 테마 뒤 ${themed?.lb}(${themed?.kind}, 틀 밝음 ${frameLight}) → 새로 고침 뒤 ${restored} · 뜬 물음 ${pendingQ}`);
+    await A.ev(`return ctx.menuClick('theme-dark');`);
+    await quiet(A, '테마 · 새로 고침 뒤');
+
     section('4. 호스트의 물음 — 창을 앞으로 꺼내지 않고 제목 · 작업 표시줄로만');
     const before = await A.ev('return { q: ctx.diag.questionSignals, f: ctx.diag.flashCalls };');
     await A.ev(`ctx.__q = ctx.platform.notify({ severity: 'warning', message: '시험 물음 — 계속할까요?', items: ['예', '아니오'], modal: false }); globalThis.__shellQ = ctx.__q; return true;`);
@@ -292,6 +341,15 @@ async function main() {
     check('두 번째 실행은 곧 끝나고(코드 0) 첫 프로세스가 그 파일을 연다', secondExit === 0 && handed?.ok && si.second.some(s => s.open === FILE_C),
       `${Date.now() - t} ms · 코드 ${secondExit} · 받은 것 ${short(si.second, 120)}`);
     await quiet(A, '두 번째 실행 뒤(시험은 앞으로 꺼내지 않는다)');
+    // V5-12b · 여러 파일을 한 번에 넘기면 첫 것만 열고 나머지는 열지 않았다고 알린다
+    const openedBefore = await A.ev('return ctx.diag.opened.length;');
+    const multi = spawn(electronPath, [shellDir, '--user-data', userData, FILE_B, FILE_A], { stdio: 'ignore', env: shellEnv(), windowsHide: true });
+    launched.push(multi);
+    await Promise.race([new Promise(r => multi.once('exit', r)), sleep(30_000)]);
+    const mOpened = await until(() => A.ev(`return ctx.diag.opened.some((o, i) => i >= ${openedBefore} && o.file === ${JSON.stringify(FILE_B)} && o.ok) && ctx.diag.notOpened.length ? ctx.diag : null;`), 30_000);
+    const mToast = await until(() => A.page(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).find(t=>/한 번에 하나만/.test(t)) || null`), 10_000);
+    check('V5-12b · 여러 파일 → 첫 파일만 열고 「열지 않았다」 알림(파일 이름 포함)', !!mOpened && mOpened.notOpened.includes(FILE_A) && /검토 사본 A\.csd/.test(mToast ?? ''),
+      `열지 않음 ${short(mOpened?.notOpened, 120)} · 알림 "${short(mToast, 120)}"`);
 
     section('6. 창 위치 · 크기 기억');
     await A.ev('ctx.win.setBounds({ x: 137, y: 91, width: 1213, height: 777 }); return true;');
@@ -302,7 +360,17 @@ async function main() {
     check('끝낼 때 window.json 에 위치 · 크기(배율 반올림 ±8 px)', near(ws.bounds.x, 137) && near(ws.bounds.y, 91) && near(ws.bounds.width, 1213) && near(ws.bounds.height, 777), JSON.stringify(ws.bounds));
     check('끝낸 뒤 포트 파일이 지워졌다', !fs.existsSync(portFile));
 
-    B = await launch([], 'B');
+    // V5-12a · 시작 중(호스트 · Python 이 뜨는 동안)에 다른 파일로 다시 실행 → 버리지 않고 차례로 연다
+    const bLaunch = launch([FILE_A], 'B');
+    await sleep(1500);
+    const early = spawn(electronPath, [shellDir, '--user-data', userData, FILE_B], { stdio: 'ignore', env: shellEnv(), windowsHide: true });
+    launched.push(early);
+    const earlyExit = await Promise.race([new Promise(r => early.once('exit', c => r(c))), sleep(30_000).then(() => 'timeout')]);
+    B = await bLaunch;
+    const bOpened = await until(() => B.ev(`return ctx.diag.opened.length >= 2 ? { opened: ctx.diag.opened.map(o => o.file), ok: ctx.diag.opened.every(o => o.ok), queued: ctx.diag.queuedWhileStarting } : null;`), 30_000);
+    check('V5-12a · 시작 중의 두 번째 파일을 버리지 않는다 — 명령줄 파일 다음에 차례로 연다', earlyExit === 0 && !!bOpened && bOpened.ok
+      && bOpened.opened[0] === FILE_A && bOpened.opened[1] === FILE_B && bOpened.queued.includes(FILE_B),
+      `두 번째 프로세스 코드 ${earlyExit} · 연 차례 ${short(bOpened?.opened.map(f => path.basename(f)), 120)} · 시작 중 받은 것 ${short(bOpened?.queued.map(f => path.basename(f)), 80)}`);
     const pb = await B.ev('return { placement: ctx.placement, bounds: ctx.win.getBounds() };');
     check('다시 띄우면 저장한 자리 · 크기', pb.placement.where === 'saved' && near(pb.bounds.x, ws.bounds.x) && near(pb.bounds.y, ws.bounds.y) && near(pb.bounds.width, ws.bounds.width) && near(pb.bounds.height, ws.bounds.height), `저장 ${JSON.stringify(ws.bounds)} → ${JSON.stringify(pb.bounds)}`);
 
@@ -378,8 +446,8 @@ async function main() {
   const table = processTable();
   const leftovers = launched.flatMap(p => [p.pid, ...descendants(p.pid, table).map(d => d.pid)]).filter(pid => pid && alive(pid));
   check('띄운 Electron · Python 이 하나도 남지 않았다', leftovers.length === 0, leftovers.join(', ') || `${launched.length}번 띄움`);
-  const changed = real.filter(f => statOf(f) !== realBefore.get(f));
-  check('진짜 Claude Desktop · MCP 설정 · %APPDATA%\\StCFSD 그대로(열지 않고 봄)', changed.length === 0, changed.join(', ') || `${real.length}곳`);
+  const changed = real.changed();
+  check('진짜 Claude Desktop · MCP 설정 · %APPDATA%\\StCFSD 그대로(크기 · 시각, ~/.claude.json 은 MCP 등록만)', changed.length === 0, changed.join(', ') || `${real.list.length}곳`);
   const repoChanged = [...repoSnapshot()].filter(([k, v]) => repoBefore.get(k) !== v).map(([k]) => k);
   check('desktop/ 밖에서 저장소가 바뀌지 않았다', repoChanged.length === 0, repoChanged.join(', ') || '그대로');
   fs.rmSync(tmp, { recursive: true, force: true });

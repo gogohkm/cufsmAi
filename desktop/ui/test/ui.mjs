@@ -212,6 +212,13 @@ async function startBrowser(exe, profile) {
   await new Promise((r, j) => { ws.addEventListener('open', r); ws.addEventListener('error', j); });
   const cdp = new Cdp(ws);
   const log = { console: [], exceptions: [] };
+  // 끼운 웹뷰는 다른 출처(다리의 웹뷰 서버)라 contentDocument 로 닿지 않는다 — 그 프레임의 실행 문맥에서 직접 돌린다
+  const contexts = new Map();
+  cdp.on((method, p) => {
+    if (method === 'Runtime.executionContextCreated' && p.context.auxData?.isDefault) { contexts.set(p.context.auxData.frameId, p.context.id); }
+    else if (method === 'Runtime.executionContextDestroyed') { for (const [k, v] of contexts) { if (v === p.executionContextId) { contexts.delete(k); } } }
+    else if (method === 'Runtime.executionContextsCleared') { contexts.clear(); }
+  });
   cdp.on((method, p) => {
     if (method === 'Runtime.consoleAPICalled') {
       const text = (p.args || []).map(a => (a.value !== undefined ? (typeof a.value === 'object' ? JSON.stringify(a.value) : String(a.value)) : (a.description || a.type))).join(' ');
@@ -227,8 +234,19 @@ async function startBrowser(exe, profile) {
   await cdp.send('Page.enable');
   await cdp.send('Log.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+  const frameEval = async (part, expr) => {
+    const tree = (await cdp.send('Page.getFrameTree')).frameTree;
+    const all = []; const walk = n => { all.push(n.frame); for (const c of n.childFrames ?? []) { walk(c); } }; walk(tree);
+    const fr = all.find(x => x.parentId && x.url.includes(part));
+    if (!fr) { throw new Error(`프레임 없음: ${part}`); }
+    const contextId = contexts.get(fr.id);
+    if (!contextId) { throw new Error(`프레임 문맥 없음: ${part}`); }
+    const r = await cdp.send('Runtime.evaluate', { expression: expr, contextId, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) { throw new Error(`frame eval: ${(r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text}`); }
+    return r.result.value;
+  };
   return {
-    cdp, log, pid: browser.pid,
+    cdp, log, pid: browser.pid, frameEval,
     async close() {
       try { ws.close(); } catch { /* */ }
       try { spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch { /* */ }
@@ -325,7 +343,9 @@ async function main() {
   const token = new URL(ready.url).searchParams.get('t');
   const mcpToken = JSON.parse(fs.readFileSync(portFile, 'utf8')).token;
   const api = async (method, route, body, headers = {}) => {
-    const res = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close', ...headers },
+    // 쓰기(GET 아닌 것)에는 화면의 쓰기 열쇠도(V5-04 — 화면이 하는 그대로)
+    const res = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close',
+      ...(method === 'GET' ? {} : { 'X-StCFSD-Key': ready.writeKey }), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await res.text();
     let json; try { json = JSON.parse(text); } catch { json = undefined; }
@@ -443,6 +463,17 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     if (r.exceptionDetails) { throw new Error(`eval: ${(r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text}`); }
     return r.result.value;
   };
+  /** 끼운 설계 웹뷰(다른 출처)의 문맥에서 — D = document */
+  const wv = body => br.frameEval(`/wv/${encodeURIComponent(designerId)}/`, `(()=>{const D=document;${body}})()`);
+  const waitWv = async (body, timeout, what) => {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      const v = await wv(body).catch(() => undefined);
+      if (v) { return v; }
+      if (Date.now() > deadline) { throw new Error(`기다림 시간 초과: ${what}`); }
+      await sleep(150);
+    }
+  };
   const waitFor = async (expr, timeout = 30_000, what = expr) => {
     const deadline = Date.now() + timeout;
     for (;;) {
@@ -457,9 +488,10 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     exceptions: log.exceptions.slice(m.exc).map(e => short(e.text, 160)),
     errors: log.console.slice(m.con).filter(c => c.type === 'error' || c.type === 'log-error' || c.type === 'assert').map(c => short(c.text, 160)),
   });
-  // 새 화면과 끼운 웹뷰(같은 출처) 모두의 글자에서 깨진 값
-  const badTokens = () => ev(`(()=>{const out=[]; const scan=(t,w)=>{const re=/(undefined|NaN|\\[object Object\\])/g; let m; while((m=re.exec(t))){out.push(w+': '+t.slice(Math.max(0,m.index-50), m.index+30).replace(/\\n/g,' | '));}};
-    scan(document.body.innerText,'화면'); const f=document.getElementById('designer'); if(f&&f.contentDocument&&f.contentDocument.body){scan(f.contentDocument.body.innerText,'웹뷰');} return out;})()`);
+  // 새 화면과 끼운 웹뷰(다른 출처 — 그 프레임의 문맥에서) 모두의 글자에서 깨진 값
+  const SCAN = `const out=[]; const scan=(t,w)=>{const re=/(undefined|NaN|\\[object Object\\])/g; let m; while((m=re.exec(t))){out.push(w+': '+t.slice(Math.max(0,m.index-50), m.index+30).replace(/\\n/g,' | '));}};`;
+  const badTokens = async () => [...await ev(`(()=>{${SCAN} scan(document.body.innerText,'화면'); return out;})()`),
+    ...await wv(`${SCAN} if(D.body){scan(D.body.innerText,'웹뷰');} return out;`).catch(() => [])];
   const shot = async name => {
     await sleep(400);
     const r = await cdp.send('Page.captureScreenshot', { format: 'png' });
@@ -509,8 +541,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   });
   await ev('window.__noReload = 1');
   await step('u02 「파일만 열기 (.csd)」 → 열기 물음 → 경로 → 검토 화면으로', 'u02_opened', async () => {
-    await waitFor(`(()=>{const f=document.getElementById('designer'); const h=f&&f.contentDocument&&f.contentDocument.documentElement;
-      return !!h && h.getAttribute('data-stcfsd-bridge')==='connected' && !!f.contentDocument.getElementById('btn-file-open');})()`, 60_000, '끼운 웹뷰 연결');
+    await waitWv(`return D.documentElement.getAttribute('data-stcfsd-bridge')==='connected' && !!D.getElementById('btn-file-open');`, 60_000, '끼운 웹뷰 연결');
     await click('#start .foot a[data-act="open"]');
     await waitFor(`!!document.querySelector('#dialog-host .dialog[data-kind="fileDialog"]')`, 30_000, '열기 물음');
     const title = await ev(`document.querySelector('#dialog-host .dialog h2').textContent`);
@@ -701,17 +732,16 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
   section('7b. 편집 상태(F2) — 끼운 지금의 화면이 그대로 돈다');
   await step('u07 끼운 웹뷰가 붙어 있다(숨김) · F2 로 보이고 · 그 「해석 실행」 결과를 새 화면이 받는다', 'u07_edit', async () => {
-    await waitFor(`(()=>{const f=document.getElementById('designer'); const h=f&&f.contentDocument&&f.contentDocument.documentElement;
-      return !!h && h.getAttribute('data-stcfsd-bridge')==='connected' && h.hasAttribute('data-stcfsd-replayed') && f.contentDocument.querySelectorAll('.tab-btn').length>=6;})()`, 60_000, '끼운 웹뷰 연결');
+    await waitWv(`const h=D.documentElement; return h.getAttribute('data-stcfsd-bridge')==='connected' && h.hasAttribute('data-stcfsd-replayed') && D.querySelectorAll('.tab-btn').length>=6;`, 60_000, '끼운 웹뷰 연결');
     const hiddenBefore = await ev(`getComputedStyle(document.getElementById('edit')).visibility`);
     await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
     await sleep(300);
     const shown = await ev(`({vis:getComputedStyle(document.getElementById('edit')).visibility, editing:${S}.ui.editing, btn:document.querySelector('#tbar [data-act="edit"]').textContent,
       badge:!document.querySelector('#tbar .ebadge').hidden, w:document.getElementById('designer').getBoundingClientRect().width})`);
     const before = await seq();
-    await ev(`(()=>{const D=document.getElementById('designer').contentDocument; D.querySelector('.tab-btn[data-tab="design"]').click(); return 1;})()`);
+    await wv(`D.querySelector('.tab-btn[data-tab="design"]').click(); return 1;`);
     await sleep(300);
-    await ev(`(()=>{const D=document.getElementById('designer').contentDocument; D.getElementById('btn-run-analysis').click(); return 1;})()`);
+    await wv(`D.getElementById('btn-run-analysis').click(); return 1;`);
     await settle(`s.msgSeq>${before} && s.stages.fsm.state==='ok' && s.dsm`, '웹뷰의 해석 결과', 300_000);
     const fam = await ev(`${S}.state.dsm.family`);
     const chk = await ev(`${S}.state.stages.chk`);
@@ -729,8 +759,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     return { ok: vis === 'hidden' && r.bad.length === 0 && (r.bySrc.dsm ?? 0) >= 12, detail: `${vis} · dsm ${r.bySrc.dsm} 개 = MCP${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
   });
 
-  const inDom = await ev(`(()=>{const f=document.getElementById('designer'); return document.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)})
-    || !!(f && f.contentDocument && f.contentDocument.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)}));})()`);
+  const inDom = await ev(`document.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)})`)
+    || await wv(`return D.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)});`);
   check('MCP 토큰이 화면 DOM(새 화면 · 끼운 웹뷰)에 없다', inDom === false);
   const allErr = log.console.filter(c => c.type === 'error' || c.type === 'log-error' || c.type === 'assert');
   check('시험 내내 페이지 예외 · 콘솔 오류(CSP 위반 포함) 0', log.exceptions.length === 0 && allErr.length === 0,

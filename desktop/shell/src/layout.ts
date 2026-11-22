@@ -4,9 +4,9 @@
  * 개발:   `appRoot` = 저장소 루트(`STCFSD_REPO_ROOT` 로 덮어쓴다. 기본은 `desktop/shell` 의 두 단계 위).
  *         확장 호스트 `out/extension.js`, 엔진 `python/` + `.venv`, MCP 서버 `media/mcp-server.js`,
  *         호스트 공개 API `desktop/host/dist/index.js`, 틀 `desktop/host/frame/`, 새 검토 화면 `desktop/ui/`(U1 — `--ui` 일 때만 연다).
- * 설치본(S5 에서 정한다 — StAnal 의 배치를 따른 자리, 아직 시험하지 않음):
- *         <resources>/app.asar     package.json · dist/main.js · dist/preload.js · host/index.js · host/frame/
- *         <resources>/app-root/    확장 배포물(out · python · media · webview · package.json)이 저장소와 같은 모양 — asar 밖
+ * 설치본(S5 — desktop/installer/electron-builder.config.cjs 와 같은 배치. asar 를 쓰지 않는다):
+ *         <resources>/app/         package.json · dist/main.js · dist/preload.js · host/index.js · host/frame/ · ui/(새 검토 화면) · uninstall/
+ *         <resources>/app-root/    확장 배포물(out · python · media · webview · package.json)이 저장소와 같은 모양
  *         <resources>/python/      묶어 넣은 Python(numpy · scipy)
  */
 import * as fs from 'node:fs';
@@ -22,7 +22,7 @@ export interface Layout {
   hostEntry: string;
   /** 틀 폴더(다리의 frameDir) */
   frameDir: string;
-  /** 새 검토 화면 폴더(다리의 uiDir — index.html · dist/ · style/). 설치본은 아직 묶지 않는다(S5 의 배치에 없다 — 있으면 쓴다) */
+  /** 새 검토 화면 폴더(다리의 uiDir — index.html · dist/ · style/). 설치본은 resources/app/ui */
   uiDir: string;
   /** Claude Desktop 이 띄울 MCP 서버(stdio) */
   mcpServer: string;
@@ -32,7 +32,7 @@ export interface Layout {
 
 export interface LayoutInput {
   packaged: boolean;
-  /** app.getAppPath() — 개발이면 desktop/shell, 설치본이면 …/resources/app.asar */
+  /** app.getAppPath() — 개발이면 desktop/shell, 설치본이면 …/resources/app */
   appPath: string;
   resourcesPath: string;
   env: NodeJS.ProcessEnv;

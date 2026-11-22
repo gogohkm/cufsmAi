@@ -1,53 +1,70 @@
-# 화면 다리(S2 · S4 · U1) — API
+# 화면 다리(S2 · S4 · U1 · V5) — API
 
 2026-11-22 · `desktop/host/src/bridge/` · CLI `src/serve.ts` · 시험 `test/bridge.mjs` · 새 검토 화면(U1)의 시험 `../ui/test/ui.mjs`
 
-호스트가 127.0.0.1 의 빈 포트에 여는 HTTP 서버다. 지금의 웹뷰(탭 6개)를 **고치지 않고** 보통 브라우저에서 돌린다 — 바꾸는 것은 모두 다리가 HTML 을 내줄 때다. S3 의 Electron 창은 같은 다리를 연다.
+호스트가 127.0.0.1 의 빈 포트 **둘**에 여는 HTTP 서버다. 지금의 웹뷰(탭 6개)를 **고치지 않고** 보통 브라우저에서 돌린다 — 바꾸는 것은 모두 다리가 HTML 을 내줄 때다. S3 의 Electron 창은 같은 다리를 연다.
 
 ```
 브라우저 / (S3) Electron 창
-  ├ GET /                 틀: 제목 표시줄 + 설계 패널 iframe(/wv/<id>/) + 오른쪽 칸(좌굴 보고서) + 호스트의 물음
-  ├ GET /ui/              새 검토 화면(U1, desktop/ui — uiDir 를 줄 때만). 설계 패널 iframe 을 안에 늘 끼워 둔다
-  ├ GET /api/events       틀 · 새 화면이 받는 이벤트(SSE)
-  └ iframe /wv/<id>/      웹뷰 HTML  ── GET /api/wv/<id>/out (SSE) · POST /api/wv/<id>/in
-                                      └ /res/webview/… · /res/media/…
+  ├ 틀 서버  http://127.0.0.1:<포트>          (origin)
+  │   ├ GET /                 틀: 제목 표시줄 + 설계 패널 iframe + 오른쪽 칸(좌굴 보고서) + 호스트의 물음
+  │   ├ GET /ui/              새 검토 화면(U1, desktop/ui — uiDir 를 줄 때만). 설계 패널 iframe 을 안에 늘 끼워 둔다
+  │   ├ GET /api/events       틀 · 새 화면이 받는 이벤트(SSE)
+  │   └ POST /api/…           쓰기 — 읽기 인증 + 쓰기 열쇠(1절)
+  └ 웹뷰 서버 http://127.0.0.1:<다른 포트>    (webviewOrigin — 쓰기 경로가 없다)
+      └ iframe /wv/<id>/      웹뷰 HTML  ── GET /api/wv/<id>/out?k= (SSE) · POST /api/wv/<id>/in(웹뷰 열쇠)
+                                          └ /res/webview/… · /res/media/…
 다리 ── hub(대체 모듈의 WebviewHub) ── StcfsdPanel(확장 호스트, 고치지 않음)
      └ /api/mcp/* ── 호스트의 MCP 다리(포트 파일 방식, 토큰은 다리가 붙인다)
 ```
 
-## 1. 인증 · 출처
+**브라우저 모드(`npm run serve`)는 개발 · 시험 길이다.** 사용자가 쓰는 것은 Electron 창(`desktop/shell`)이다 — 쿠키를 쓰지 않고(Bearer), 쓰기 열쇠는 주 프로세스만 안다. 브라우저 모드의 남은 한계는 1절 끝.
+
+## 1. 인증 · 출처 · 쓰기 열쇠 (V5-04 · V5-18)
 
 | 무엇 | 규칙 |
 |---|---|
-| 토큰 | 다리마다 무작위 24 바이트(base64url). MCP 다리의 토큰과 **따로**다 |
-| 브라우저 | 첫 주소 `http://127.0.0.1:<포트>/?t=<토큰>` → `Set-Cookie: stcfsd_bridge_<포트>=<토큰>; HttpOnly; SameSite=Strict; Path=/` + 303 으로 `t` 를 뗀 주소. 그 뒤 iframe · 리소스 · EventSource · fetch 는 같은 출처라 쿠키가 따라간다 |
-| 시험 · Electron | `Authorization: Bearer <토큰>` |
-| 거절 | 토큰 없음 401(모든 경로) · Host 가 `127.0.0.1:<포트>` / `localhost:<포트>` 가 아님 403(DNS rebinding) · Origin 이 다리 출처가 아님 403 · `Sec-Fetch-Site` 가 `same-origin` · `none` 이 아님 403. CORS 머리는 내지 않는다 |
-| 공통 머리 | `X-Content-Type-Options: nosniff` · `Cache-Control: no-store` · `Referrer-Policy: no-referrer` · `Cross-Origin-Resource-Policy: same-origin` · `X-Frame-Options: SAMEORIGIN` |
+| 토큰(읽기) | 다리마다 무작위 24 바이트(base64url). MCP 다리의 토큰과 **따로**다. `Authorization: Bearer <토큰>`(Electron · 시험 · CLI). 두 서버가 같은 토큰을 받는다 |
+| 브라우저 쿠키(읽기) | 첫 주소 `http://127.0.0.1:<포트>/?t=<토큰>` → 작은 페이지(200) + `Set-Cookie: stcfsd_bridge_<포트>=<쿠키 값>; HttpOnly; SameSite=Strict; Path=/`. **쿠키 값은 토큰이 아니다**(따로 만든 무작위 값) — 쿠키는 포트를 가리지 않아 127.0.0.1 의 다른 포트로도 가므로, 그것을 받은 곳이 `?t=` 를 다시 할 수 없게. 쿠키로는 읽기만 된다 |
+| 쓰기 열쇠 | 다리마다 무작위 24 바이트. 틀 서버의 **GET 이 아닌 모든 요청**(`/api/claude/*` · `/api/mcp/*` · `/api/platform/answer` · `/api/webviews/<id>/close`)과 `GET /api/wv-key` 는 읽기 인증에 더해 `X-StCFSD-Key: <쓰기 열쇠>` 가 있어야 한다. 없으면 403. 열쇠가 가는 곳: **브라우저** — `?t=` 교환 응답의 본문 스크립트가 그 탭의 sessionStorage(틀 출처, 이름 `stcfsd.bridge.key.<포트>`)에 넣고 `/`(또는 `/ui/`)로 간다. 주소 · 쿠키 · 기록 · 웹뷰에는 없다. **Electron** — 주 프로세스가 `webRequest` 로 틀 서버로 가는 요청 가운데 **맨 위 프레임**(`details.frame.parent === null`)이 낸 것에만 머리로 붙인다. 페이지는 열쇠를 모른다 |
+| 웹뷰 열쇠 | 웹뷰 서버의 통로용 — `out` 은 `?k=`, `in` 은 `X-StCFSD-Webview-Key`. 틀(또는 새 화면)이 쓰기 열쇠로 `GET /api/wv-key` 에서 받아, **자기 iframe**(설계 · 보고서, 웹뷰 서버 출처)이 postMessage 로 `need-key` 를 물을 때만 그 창에 건넨다. 쿠키만 가진 곳은 화면을 빼앗거나(`superseded`) 호스트로 메시지를 넣지 못한다 |
+| 두 출처 | 웹뷰(iframe)는 틀과 **다른 출처**(웹뷰 서버)에서 돈다 — VS Code 의 웹뷰도 다른 출처다. 그래서 웹뷰 안의 스크립트는 틀의 문서 · sessionStorage(쓰기 열쇠) · 스크립트에 닿지 못하고, 틀 서버로 보내는 요청은 Origin 이 웹뷰 서버라 거절된다(브라우저는 CORS 로도 막는다). 웹뷰 서버에는 쓰기 경로가 없다(404). 웹뷰 문서의 `frame-ancestors` 는 틀 출처뿐이다 |
+| 거절 | 토큰 없음 401(두 서버의 모든 경로) · Host 가 그 서버의 `127.0.0.1:<포트>` / `localhost:<포트>` 가 아님 403(DNS rebinding) · Origin 이 그 서버의 출처가 아님 403 · `Sec-Fetch-Site` 가 `same-origin` · `none` 이 아님 403 — 예외 하나: 웹뷰 서버의 `GET /wv/<id>/` 를 틀이 iframe 으로 싣는 것(`same-site` + `Sec-Fetch-Dest: iframe`, Origin 없음). 쓰기 열쇠 없는 쓰기 403. CORS 머리는 내지 않는다 |
+| `?t=` 교환 뒤 | 늘 이 출처의 정해진 화면(`/` 또는 `/ui/`, `?theme=` 만 넘긴다)으로 간다 — 요청 경로를 그대로 쓰지 않는다(V5-10: `/.//evil.example/x` 는 정리하면 `//evil.example/x`) |
+| 공통 머리 | `X-Content-Type-Options: nosniff` · `Cache-Control: no-store` · `Referrer-Policy: no-referrer` · `Cross-Origin-Resource-Policy: same-origin` · `X-Frame-Options: SAMEORIGIN`(웹뷰 문서만 빼고 — 그것은 `frame-ancestors <틀 출처>`) |
 
-**쿠키를 고른 까닭(StAnal 과 같은 결정)**: 보통 브라우저는 iframe · `<script src>` · `EventSource` 에 머리를 붙일 수 없다. 주소에 토큰을 계속 달면 기록 · Referer · 화면 캡처에 남는다. 그래서 첫 주소의 토큰을 HttpOnly(페이지 스크립트가 못 읽음) · SameSite=Strict(다른 사이트에서 온 요청에 안 붙음) 쿠키로 바꾸고 주소에서 뗀다. 쿠키 이름에 포트를 넣어 여러 다리가 섞이지 않게 한다. Electron(S3)은 메모리 세션에 같은 쿠키를 넣거나 `webRequest` 로 Bearer 를 붙이면 된다 — StAnal 의 껍데기는 Bearer 를 붙였다.
+**쿠키를 쓰는 까닭과 한계**: 보통 브라우저는 iframe · `<script src>` · `EventSource` 에 머리를 붙일 수 없어 읽기에는 쿠키가 필요하다. 쿠키는 포트를 가리지 않는다 — 같은 브라우저로 127.0.0.1 의 다른 포트(개발 서버 · 다른 로컬 도구)를 열면 그 서버가 쿠키를 받는다. 그래서 쿠키 값은 토큰이 아니고, 쿠키로는 읽기만 된다(그 서버는 모델 · 결과를 읽을 수 있다 — 브라우저 모드가 개발 길인 까닭). **방문 기록(V5-S4)**: 처음 여는 `?t=<토큰>` 주소는 브라우저의 방문 기록에 남는다(헤드리스 Edge 프로필의 History 파일에서 확인 — `test/bridge.mjs` 가 매번 알린다). 그 serve 가 떠 있는 동안 그 토큰으로 다시 교환할 수 있다. 브라우저 프로필을 읽을 수 있는 같은 사용자의 프로그램은 MCP 포트 파일도 읽을 수 있으므로 더 넓어지지는 않지만, 공용 PC 에서는 serve 를 쓰지 않는다. 쓰기 열쇠 · 쿠키 값은 기록에 없다(시험이 본다).
 
 ## 2. 경로
 
+틀 서버:
+
 | 경로 | 하는 일 |
 |---|---|
-| `GET /` | 틀(`host/frame/index.html`). CSP `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'`. `?theme=dark|light` |
+| `GET /` | 틀(`host/frame/index.html`). CSP `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' <웹뷰 출처>; frame-ancestors 'self'; base-uri 'none'; form-action 'none'`. `?theme=dark|light` |
+| `GET /?t=<토큰>` · `/ui/?t=` | 브라우저의 첫 진입 — 1절 |
 | `GET /frame/<파일>` | 틀의 스크립트 · 스타일 |
-| `GET /wv/<id>/?theme=` | 웹뷰 HTML(3절). `<id>` 는 hub 의 id(`panel:stcfsd.designer:1` 꼴, URL 인코딩). 머리 CSP 는 `frame-ancestors 'self'` 만(본 정책은 meta) |
-| `GET /res/webview/<경로>` · `/res/media/<경로>` | 웹뷰 리소스. 뿌리는 이 둘뿐(패널의 localResourceRoots). `..` · 빈 마디 · `\` · NUL · `:` · 심볼릭 링크로 뿌리 밖을 가리키면 404 |
-| `GET /api/wv/<id>/out` | 호스트 → 웹뷰(SSE). 첫 사건 `hello {conn, webview, viewType}`, 다시 보내기를 마치면 `replayed {count, commands}`, 그 뒤 `data:` = 호스트가 보낸 `{command, data}` 그대로. 다른 페이지가 같은 웹뷰를 열면 앞의 것에 `superseded` |
-| `POST /api/wv/<id>/in?conn=<conn>` | 웹뷰 → 호스트. 본문은 메시지 배열. `conn` 이 지금 연결이 아니면 409 |
+| `GET /api/wv-key` | **V5** — 웹뷰 열쇠 `{key, origin}`. 쓰기 열쇠가 있어야 한다 |
 | `GET /api/events` | 틀의 이벤트(SSE). 첫 사건 `hello {lastSeq, state}`, 그 뒤 `{seq, at, type, source, data}`. `Last-Event-ID` 로 최근 500건 다시 받기 |
-| `GET /api/state` | `{designer, webviews[{id, viewType, title, pinned, visible, connected, ready, url}], theme, ui, currentFile, currentName, platform{progress, pending}, lastSeq}` — `ui` = `/ui/` 를 내주는가(U1) |
-| `POST /api/platform/answer` | `{qid, answer}` — 4절. 형식이 틀리면 400 과 까닭 |
-| `POST /api/webviews/<id>/close` | 웹뷰 닫기(좌굴 보고서 칸의 ✕). 설계 패널은 고정이라 숨김이 될 뿐 없어지지 않는다(S1) |
-| `GET·POST /api/mcp/<경로>` | 호스트 MCP 다리로 중계(`/status` · `/action` · `/last-call`). 다리가 MCP 토큰을 붙인다 — 화면에는 그 토큰이 가지 않는다. 화면의 머리(쿠키 · Origin)는 넘기지 않고, AI 호출 표시 `X-StCFSD-Request-Id` 도 붙이지 않는다(이 조회는 「마지막 호출」로 세지 않는다) |
-| `GET /ui/` · `/ui/index.html` · `/ui/dist/<파일>` · `/ui/style/<파일>` | **U1** — 새 검토 화면(`startBridge({ uiDir })`, serve 는 `<저장소>/desktop/ui`). HTML 의 CSP 는 틀과 같다. 소스(`src/`) · 시험 · `build.mjs` 는 내주지 않는다(404). `uiDir` 를 주지 않으면(설치본 · `--ui` 없는 창) 이 경로는 없다(404). 기본 화면 `/` 는 이것과 상관없이 틀이다 |
-| `GET /api/wv/<id>/last?command=a&command=b` | **U1** — 다시 보내기 기록(5절)에 남은 그 명령의 마지막 메시지 `{success, data: {a: {seq, message: {command, data}} \| null, …}, seq}`. 페이지가 새로 고침하면 받을 것과 같다: 결과를 지우는 메시지가 지운 결과는 `null`, 한 번만 뜻이 있는 명령(`collectDesignData` · `propertiesResult` …)은 늘 `null`. `seq` = 그 통로의 마지막 순서 번호. 40 개까지 |
-| (U1 은 상태를 바꾸는 경로를 더하지 않았다) | 새 화면의 「열기」 · 「저장」은 끼운 설계 화면의 Open · Save 단추를 누른다(그 화면의 늘 쓰던 길). 새 화면이 쓰는 쓰기 경로는 지금 있는 셋뿐 — `/api/platform/answer` · `/api/claude/*` · `/api/webviews/<id>/close` |
-| `GET /api/wv/<id>/first?command=modelLoaded` | **U1** — 그 명령의 첫 메시지(지금은 `modelLoaded` 만 남긴다 — 다리가 처음 보낸 webviewReady 에 호스트가 채운 기본 모델). 새 화면이 「기본값」 꼬리표에 쓴다 |
-| `GET /api/claude/status` | `{state, ui, configPath, configKind, configExists, configError?, otherServers, lastAiCall, aiCalls, canConnect, canDisconnect, restartNeeded, text, tooltip}` — K1 `checkClaudeDesktop`(설정을 읽기만) + MCP `GET /last-call`. `ui` = `connected · registered · restart-needed · not-registered · registered-elsewhere · not-installed · invalid-config · unknown`, `text` = 제목 표시줄의 한 줄 |
-| `POST /api/claude/connect` · `POST /api/claude/disconnect` | **S4** — 본문 `{}`(JSON 이어야 한다). `{result: {ok, action, reason?, error?, wrote, backupPath?, restartRequired, message}, status}`. K1 `connectClaudeDesktop` · `disconnectClaudeDesktop` 이 쓴다(9절). 화면의 세션(쿠키 · 다리 토큰)으로만 — AI 는 호스트의 MCP 다리에 붙고 거기에는 이 경로가 없다. `/api/mcp/*` 중계도 MCP 다리로만 간다(시험: 중계 · MCP 다리 직접 모두 `Unknown endpoint`) |
+| `GET /api/state` | `{designer, webviews[{id, viewType, title, pinned, visible, connected, ready, url}], theme, ui, webviewOrigin, currentFile, currentName, platform{progress, pending}, lastSeq}` — `url` 은 웹뷰 서버의 절대 주소, `ui` = `/ui/` 를 내주는가(U1) |
+| `POST /api/platform/answer` | `{qid, answer}` — 4절. 형식이 틀리면 400 과 까닭. 쓰기 열쇠 |
+| `POST /api/webviews/<id>/close` | 웹뷰 닫기(좌굴 보고서 칸의 ✕). 설계 패널은 고정이라 숨김이 될 뿐 없어지지 않는다(S1). 쓰기 열쇠 |
+| `GET·POST /api/mcp/<경로>` | 호스트 MCP 다리로 중계(`/status` · `/action` · `/last-call`). 다리가 MCP 토큰을 붙인다 — 화면에는 그 토큰이 가지 않는다. 화면의 머리(쿠키 · Origin)는 넘기지 않고, AI 호출 표시 `X-StCFSD-Request-Id` 도 붙이지 않는다(이 조회는 「마지막 호출」로 세지 않는다). POST 는 쓰기 열쇠. MCP 다리의 `GET /hello` · `X-StCFSD-Proof`(K1 V5-09)는 MCP 서버가 쓰는 것이라 중계는 쓰지 않는다 |
+| `GET /ui/` · `/ui/index.html` · `/ui/dist/<파일>` · `/ui/style/<파일>` | **U1** — 새 검토 화면(`startBridge({ uiDir })`, serve 는 `<저장소>/desktop/ui`, 설치본은 `resources/app/ui` — 껍데기의 `--ui` 일 때). HTML 의 CSP 는 틀과 같다. 소스(`src/`) · 시험 · `build.mjs` 는 내주지 않는다(404). `uiDir` 를 주지 않으면 이 경로는 없다(404). 기본 화면 `/` 는 이것과 상관없이 틀이다 |
+| `GET /api/wv/<id>/last?command=a&command=b` | **U1** — 다시 보내기 기록(5절)에 남은 그 명령의 마지막 메시지 `{success, data: {a: {seq, message: {command, data}} \| null, …}, seq}`. 페이지가 새로 고침하면 받을 것과 같다: 결과를 지우는 메시지가 지운 결과는 `null`, 한 번만 뜻이 있는 명령(`collectDesignData` · `propertiesResult` …)은 늘 `null`. 40 개까지 |
+| `GET /api/wv/<id>/first?command=modelLoaded` | **U1** — 그 명령의 첫 메시지(다리가 처음 보낸 webviewReady 에 호스트가 채운 기본 모델) |
+| (새 화면의 「열기」 · 「저장」) | 끼운 설계 화면의 Open · Save 단추를 누른다 — 다른 출처라 문서에 닿지 않으므로 postMessage `{type:'click', id}` 로 다리의 수신부에 부탁한다(정해 둔 둘: `btn-file-open` · `btn-file-save`) |
+| `GET /api/claude/status` | `{state, ui, configPath, configKind, configExists, configError?, otherServers, lastAiCall, aiCalls, canConnect, canDisconnect, restartNeeded, text, tooltip}` — K1 `checkClaudeDesktop`(설정을 읽기만) + MCP `GET /last-call`. 9절 |
+| `POST /api/claude/connect` · `POST /api/claude/disconnect` | **S4** — 본문 `{}`(JSON 이어야 한다). 읽기 인증 + 쓰기 열쇠. `{result: {ok, action, reason?, error?, wrote, backupPath?, restartRequired, message}, status}`. 9절 |
+
+웹뷰 서버:
+
+| 경로 | 하는 일 |
+|---|---|
+| `GET /wv/<id>/?theme=` | 웹뷰 HTML(3절). `<id>` 는 hub 의 id(`panel:stcfsd.designer:1` 꼴, URL 인코딩). 머리 CSP 는 `frame-ancestors <틀 출처>` 만(본 정책은 meta) |
+| `GET /res/webview/<경로>` · `/res/media/<경로>` | 웹뷰 리소스. 뿌리는 이 둘뿐(패널의 localResourceRoots). `..` · 빈 마디 · `\` · NUL · `:` · 심볼릭 링크로 뿌리 밖을 가리키면 404(시험은 경로를 날것으로 보낸다 — `fetch` 는 `%2e%2e` 를 먼저 정리한다) |
+| `GET /api/wv/<id>/out?k=<웹뷰 열쇠>` | 호스트 → 웹뷰(SSE). 첫 사건 `hello {conn, webview, viewType}`, 다시 보내기를 마치면 `replayed {count, commands}`, 그 뒤 `data:` = 호스트가 보낸 `{command, data}` 그대로. 다른 페이지가 같은 웹뷰를 열면 앞의 것에 `superseded` |
+| `POST /api/wv/<id>/in?conn=<conn>` | 웹뷰 → 호스트(`X-StCFSD-Webview-Key`). 본문은 메시지 배열. `conn` 이 지금 연결이 아니면 409 |
 
 ### 틀의 이벤트(`/api/events` 의 `type`)
 
@@ -62,18 +79,30 @@
 | `webview:client` · `webview:ready` · `webview:refused` | 페이지가 붙음 · 다시 보내기 끝 `{replayed}` · 고정 패널 닫기를 숨김으로 바꿈 |
 | `file:current` | `{file, name}` — 열기 · 저장이 성공한 `.csd` |
 | `claude:status` | `GET /api/claude/status` 와 같은 것 — 「연결」 · 「끊기」 뒤 |
-| `host:message` | **U1** — 호스트가 설계 패널에 메시지를 보낼 때마다 `{id, viewType, command, seq}`(본문 없음 — `/api/wv/<id>/last` 로 읽는다). AI 의 MCP 호출이든 편집 상태의 단추든 같은 길이라 새 화면이 이것 하나로 따라간다. 틀(`frame.js`)은 이 이벤트를 쓰지 않는다 |
+| `host:message` | **U1** — 호스트가 설계 패널에 메시지를 보낼 때마다 `{id, viewType, command, seq}`(본문 없음 — `/api/wv/<id>/last` 로 읽는다) |
+
+### 틀 ↔ 끼운 웹뷰 (postMessage, `{stcfsdBridge: 1, type, …}`)
+
+| 쪽 | type | 뜻 |
+|---|---|---|
+| 웹뷰 → 틀 | `need-key` | 웹뷰 열쇠를 달라. 틀은 그 창이 자기 iframe 이고 웹뷰 서버 출처일 때만 답한다 |
+| 웹뷰 → 틀 | `keydown {key: 'F2'}` | 웹뷰 안에서 누른 F2(새 화면의 편집 상태) |
+| 틀 → 웹뷰 | `key {key}` | 웹뷰 열쇠 — 받으면 통로를 연다 |
+| 틀 → 웹뷰 | `theme {theme}` | 테마를 새로 고침 없이 바꾼다(V5-03): 테마 `<style>` · `<body>` 클래스 · `data-vscode-theme-kind` |
+| 틀 → 웹뷰 | `click {id}` | 정해 둔 단추를 누른다(`btn-file-open` · `btn-file-save`) |
+
+웹뷰의 수신부는 틀 출처 · 부모 창에서 온 것만 받고, 이 메시지들은 페이지(app.js)에 넘기지 않는다.
 
 ## 3. 웹뷰 HTML 고쳐 쓰기(`inject.ts`)
 
 확장 소스 `src/webview/StcfsdPanel.ts`(`_getHtmlForWebview` · `_wrapBucklingReport`)와 `webview/` 는 한 글자도 바꾸지 않는다. 내줄 때만:
 
 1. **리소스 주소** `https://file+.vscode-resource.vscode-cdn.net/<절대경로>`(`%2B` 꼴 포함) → `/res/<뿌리>/<상대>`. 밖이면 `/res/denied`(404).
-2. **CSP** — 패널이 쓴 정책을 그대로 두고 셋만 바꾼다: `cspSource`(`https://*.vscode-cdn.net`) → `'self'`, `'nonce-…'` → 요청마다 새 nonce, `connect-src 'self'` 더하기. 설계 패널의 `'unsafe-eval'`(3D 뷰어)은 그대로. 원래 nonce 를 단 태그(스크립트 6개 · 보고서의 인라인 스크립트)도 새 nonce.
-3. **CSP meta 바로 뒤**(웹뷰 스타일 · 스크립트보다 앞): 테마 `<style>`(`--vscode-*` 변수 + VS Code 기본 웹뷰 스타일) · 수신부 `<script>`(`acquireVsCodeApi()` 대체: `postMessage` → `/in`, `getState`/`setState` → sessionStorage, 받는 것은 표준 `message` 사건).
+2. **CSP** — 패널이 쓴 정책을 그대로 두고 셋만 바꾼다: `cspSource`(`https://*.vscode-cdn.net`) → `'self'`(= 웹뷰 서버), `'nonce-…'` → 요청마다 새 nonce, `connect-src 'self'` 더하기. 설계 패널의 `'unsafe-eval'`(3D 뷰어)은 그대로. **원래 nonce 와 같은 값**을 단 태그만 새 nonce 로 바꾼다(V5-18a) — 좌굴 보고서 HTML 처럼 페이지가 보낸 문자열에 다른 nonce 를 단 `<script>` 가 섞여도 새 정책에 맞지 않아 돌지 않는다(VS Code 와 같다).
+3. **CSP meta 바로 뒤**(웹뷰 스타일 · 스크립트보다 앞): 테마 `<style>`(`--vscode-*` 변수 + VS Code 기본 웹뷰 스타일) · 수신부 `<script>`(`acquireVsCodeApi()` 대체: `postMessage` → `/in`, `getState`/`setState` → sessionStorage, 받는 것은 표준 `message` 사건, 웹뷰 열쇠 · 테마 · 단추(2절 끝), 새로 고침 앞의 입력 보존(5절)).
 4. **`<body>`** `vscode-dark` / `vscode-light` 클래스 + `data-vscode-theme-kind`.
 
-테마(`theme.ts`): 웹뷰가 쓰는 변수 38종(theme.css · webview/js · 패널 HTML 을 훑은 목록)을 Dark Modern / Light Modern 값으로 모두 정의한다. 빠진 것이 있으면 `host/build.mjs` 가 빌드를 멈추고 `test/bridge.mjs` 가 실패한다. 웹뷰 안의 하드코딩 색(대부분 어두운 테마 전제, 약 200곳)은 그대로다 — 밝은 테마는 본 화면의 글자 대비를 시험으로 본다(최저 10.6, 어두운 테마 6.1).
+테마(`theme.ts`): 웹뷰가 쓰는 변수 38종(theme.css · webview/js · 패널 HTML 을 훑은 목록)을 Dark Modern / Light Modern 값으로 모두 정의한다. 빠진 것이 있으면 `host/build.mjs` 가 빌드를 멈추고 `test/bridge.mjs` 가 실패한다. 웹뷰 안의 하드코딩 색(대부분 어두운 테마 전제, 약 200곳)은 그대로다 — 밝은 테마는 본 화면의 글자 대비를 시험으로 본다(최저 10.6, 어두운 테마 6.1). 테마 바꾸기는 페이지를 다시 싣지 않는다 — 두 테마의 CSS 를 수신부가 들고 있다가 갈아 끼운다. 이미 그린 캔버스 · 그래프는 다음에 그릴 때 새 색이 된다.
 
 ## 4. 호스트의 물음(`platform.ts` — HostPlatform 의 다리 구현)
 
@@ -89,7 +118,7 @@
 - 틀의 물음 그림은 경로 칸 하나다(폴더를 훑지 않는다). **S3** 는 `createBridgePlatform({ fileDialog, openExternal, notifyWithoutScreen })` 로 OS 대화상자 · OS 브라우저 · 시작 중(틀이 붙기 전) 알림 상자를 끼운다 — 같은 인터페이스, 틀의 칸은 뜨지 않는다(`desktop/shell/src/main.ts`).
 - 물음이 떠 있는 동안 틀은 페이지 제목 앞에 「● 응답 필요 — 」 를 붙인다. 껍데기는 그것(창 제목)과 작업 표시줄 깜빡임으로만 알리고 창을 앞으로 꺼내지 않는다.
 
-## 5. 메시지와 새로 고침 — 다시 보내기(`channel.ts`)
+## 5. 메시지와 새로 고침 — 다시 보내기(`channel.ts`) · 입력 보존(`inject.ts`)
 
 VS Code 웹뷰는 `retainContextWhenHidden` 이라 다시 뜨지 않는다. 호스트는 모델 · 결과를 **밀어 줄 뿐** 다시 보내는 길이 없고, `webviewReady` 를 다시 받으면 모델을 기본 단면으로 덮어쓴다. 그래서:
 
@@ -98,7 +127,7 @@ VS Code 웹뷰는 `retainContextWhenHidden` 이라 다시 뜨지 않는다. 호�
 - 줄이는 규칙: ① 같은 명령은 마지막 것만(남은 것끼리는 원래 차례) ② `resultsCleared` · `analysisInvalidated` 가 오면 그것이 지우는 앞의 결과를 뺀다 ③ 한 번만 뜻이 있는 `collectDesignData`(다시 보내면 저장이 돈다) · `captureSection` · `showSection` 은 남기지 않는다 ④ 웹뷰가 그릴 때마다 스스로 다시 묻는 `propertiesResult` · `propertiesError` 는 남기지 않는다(남기면 도심 축이 두 번 그려졌다 — 시험에서 봄).
 - 좌굴 보고서 패널은 `webviewReady` 를 보내지 않으므로 붙자마자 준비된 것으로 본다.
 - SSE 가 끊겼다 다시 붙으면 페이지가 스스로 다시 읽는다(두 번째 `hello`) — 위의 다시 보내기로 돌아온다.
-- **되살리지 못하는 것**: 화면 칸에만 있고 호스트에 보낸 적 없는 설계 탭 입력(K2 전까지 웹뷰에만 있다). 파일에서 연 입력은 `restoreDesignInputs` 로 돌아온다.
+- **아직 호스트에 가지 않은 설계 탭 입력(V5-03)**: 새로 고침 · 다시 싣기 앞(`pagehide`)에 수신부가 페이지 자신의 저장 길로 입력을 모은다 — 페이지에 `collectDesignData` 를 호스트가 보낸 것처럼 넣고, 페이지가 돌려주는 `designDataCollected`(파일에 저장하는 것과 같은 꼴, 단위계 포함)를 **호스트로 보내지 않고** 이 탭의 sessionStorage(웹뷰 출처)에 둔다. 다시 뜬 페이지는 다시 보내기를 마친 뒤 그것을 `restoreDesignInputs`(파일을 열 때와 같은 길)로 되돌린다(`<html data-stcfsd-preserved="restored">`). 테마 바꾸기는 다시 싣지 않으므로 이 길도 필요 없다. 남는 것: 탭 · 창을 닫거나 프로그램이 끝나면 sessionStorage 도 사라진다(저장하지 않은 입력은 파일에만 남는다).
 
 ## 6. PDF · 보고서
 
@@ -112,14 +141,13 @@ node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [-
                                 [--python <python.exe>] [--user-data <폴더>] [--documents <폴더>] [--claude-config <파일>] [--repo <루트>] [--ui]
 ```
 
-출력: `화면: http://127.0.0.1:<포트>/?t=<토큰>` — 브라우저로 연다. `--ui` 면 `화면: http://127.0.0.1:<포트>/ui/?t=<토큰>`(새 검토 화면 — U1). serve 는 두 경우 모두 `/ui/` 를 내준다(`desktop/ui/index.html` 이 있으면). 마지막 시작 줄 `STCFSD_BRIDGE_READY {pid, url, uiUrl, screen, origin, port, mcpPort, portFile, designer}` — `url` 은 언제나 틀(`/`)의 주소, `uiUrl` 은 새 화면의 주소(없으면 null), `screen` = `frame` · `ui`(「화면:」 줄이 가리키는 것). 끝내기: Ctrl+C · Ctrl+Break · IPC `shutdown`(IPC `status` 는 미구현 · 메시지 수 · 통로 · 물음 기록). 다리 → 호스트 순서로 정리한다.
+출력: `화면: http://127.0.0.1:<포트>/?t=<토큰>` — 브라우저로 연다(개발 길 — 1절). `--ui` 면 `화면: http://127.0.0.1:<포트>/ui/?t=<토큰>`(새 검토 화면 — U1). serve 는 두 경우 모두 `/ui/` 를 내준다(`desktop/ui/index.html` 이 있으면). 마지막 시작 줄 `STCFSD_BRIDGE_READY {pid, url, uiUrl, screen, origin, port, webviewOrigin, writeKey, mcpPort, portFile, designer}` — 기계(시험)가 읽는 줄이라 쓰기 열쇠가 들어 있다(주소 · 쿠키에는 없다). `url` 은 언제나 틀(`/`)의 주소, `uiUrl` 은 새 화면의 주소(없으면 null), `screen` = `frame` · `ui`. 끝내기: Ctrl+C · Ctrl+Break · IPC `shutdown`(IPC `status` 는 미구현 · 메시지 수 · 통로 · 물음 기록). 다리 → 호스트 순서로 정리한다.
 
 ## 8. 아직 다리로 안 되는 것
 
-- **설계 탭 입력의 새로 고침** — 5절. K2 가 입력을 호스트로 옮기면 풀린다.
 - **클립보드**(`보고서 클립보드 복사` — `navigator.clipboard`): 127.0.0.1 은 보안 컨텍스트라 보통 브라우저에서는 된다. 시험(headless)에서는 확인하지 않았다.
 - **사이드바 트리**(`stcfsd.projectExplorer`)는 객체만 있다 — 틀에 그리지 않는다. 새 화면(U1)은 이 트리를 쓰지 않고 자기 트리(탭 4개)를 MCP · 메시지에서 짓는다.
-- **두 탭**: 같은 웹뷰를 두 탭에서 열면 뒤의 것이 이기고 앞의 것은 멈춘다(`superseded`). 물음은 붙은 틀 모두에 가고 먼저 답한 것이 쓰인다.
+- **두 탭**: 같은 웹뷰를 두 탭에서 열면 뒤의 것이 이기고 앞의 것은 멈춘다(`superseded`). 물음은 붙은 틀 모두에 가고 먼저 답한 것이 쓰인다. 브라우저의 새 탭에는 쓰기 열쇠가 없다(sessionStorage 는 탭마다) — 「화면:」 주소를 그 탭에서 다시 연다.
 - **보통 브라우저로 띄웠을 때(serve)의 것**: OS 파일 대화상자 · 문서 폴더(OneDrive 로 옮긴 경우)는 S3 의 창에서만. PDF 는 두 경우 모두 호스트가 Edge headless 로 인쇄(6절).
 
 ## 9. Claude Desktop 연결(S4)
@@ -129,11 +157,17 @@ node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [-
 | ui | 글 |
 |---|---|
 | `not-installed` | Claude Desktop 없음 |
-| `invalid-config` | Claude 설정 파일을 읽을 수 없음 |
+| `invalid-config` | Claude 설정 파일을 읽을 수 없음 — 풍선 도움말 · 「연결」 결과는 까닭마다: JSON 이 아님 · 맨 위가 객체가 아님 · mcpServers 가 객체가 아님 · **같은 이름이 두 번**(다시 쓰면 하나가 사라지므로 손대지 않는다, K1 V5-15a) |
 | `not-registered` | Claude 등록 안 됨 |
-| `registered-elsewhere` | Claude 다른 설치를 가리킴 |
+| `registered-elsewhere` | Claude 다른 설치를 가리킴(경로의 대소문자 · `/`·`\` 차이는 같은 것으로 본다 — K1 V5-15d) |
 | `restart-needed` | Claude 등록됨 · Claude Desktop 다시 시작 필요(이 실행에서 「연결」했고 그 뒤 AI 호출이 없다) |
 | `registered` | Claude 등록됨 · 아직 호출 없음 |
 | `connected` | Claude 연결됨 · 마지막 호출 HH:MM · <클라이언트>(등록돼 있고 AI 가 이 호스트를 불렀다) |
 
-넣는 항목(`startBridge({ claude: { entry } })`): 껍데기는 `standaloneMcpEntry({ command: process.execPath, serverScript: <배치의 media/mcp-server.js>, portFile: <사용자 폴더>/mcp/stcfsd-mcp-port, electron: true })` 를 준다 — `ELECTRON_RUN_AS_NODE=1` 이 붙는다. 주지 않으면(`serve`) 호스트의 항목(이 node 로 띄움). 쓰기의 규칙(백업 · 원자적 쓰기 · 다시 읽어 확인 · 다른 항목 그대로 · 깨진 JSON 은 손대지 않음 · 미설치면 폴더를 만들지 않음 · 끊기는 같은 항목만)은 K1 의 도우미가 지킨다(`docs/reviews/20261122-engine-review/fixes/K1-mcp-connection.md`). 시험은 `claude: { configPath }` 로 임시 폴더의 가짜 파일만 준다(`host/test/connect.mjs`, `shell/test/shell.mjs`).
+「연결」 · 「끊기」 결과 `reason`: `claude-not-installed` · `invalid-config`(위의 까닭) · `write-failed` · **`config-busy`**(K1 V5-06 — 쓰는 동안 Claude Desktop 등이 설정을 거듭 바꿔 4번 다 시도하고도 쓰지 않음, 파일 그대로 — 「잠시 뒤 다시 누르세요」).
+
+넣는 항목(`startBridge({ claude: { entry } })`): 껍데기는 `standaloneMcpEntry({ command: process.execPath, serverScript: <배치의 media/mcp-server.js>, portFile: <사용자 폴더>/mcp/stcfsd-mcp-port, electron: true })` 를 준다 — `ELECTRON_RUN_AS_NODE=1` 이 붙는다. 주지 않으면(`serve`) 호스트의 항목(이 node 로 띄움). 쓰기의 규칙(백업 — 우리 것 최근 5개만 · 원자적 쓰기 · 심볼릭 링크는 대상에 · 하드 링크는 그 자리에 · 다시 읽어 확인 · 다른 항목 그대로 · 깨진 JSON 은 손대지 않음 · 미설치면 폴더를 만들지 않음 · 끊기는 같은 항목만)은 K1 의 도우미가 지킨다(`docs/reviews/20261122-engine-review/fixes/K1-mcp-connection.md`). 시험은 `claude: { configPath }` 로 임시 폴더의 가짜 파일만 준다(`host/test/connect.mjs`, `shell/test/shell.mjs`). 설치본을 제거하면 제거 프로그램이 같은 도우미로 이 설치본의 항목을 지운다(`desktop/installer/README.md`).
+
+**AI(MCP 쪽)는 Claude 설정에 닿는가 — 지금 참인 것**: 등록 · 지우기 경로는 화면 다리의 두 POST 뿐이고(읽기 인증 + 쓰기 열쇠), AI 가 붙는 호스트의 MCP 다리에는 그런 경로가 없다(시험: 중계 · MCP 다리 직접 모두 `Unknown endpoint`). AI 의 도구가 파일을 쓰는 길은 `save_project` 하나다 — V5-01(공용 코드 `4497b34`)부터 그것은 이미 있는 파일을 덮어쓰지 않는다(자기가 쓴 StCFSD 모델 파일이 아니면 거절). 그래서 MCP `save_project` 로 Claude 설정 파일을 겨누면 거절되고 파일은 바이트까지 그대로다 — `test/connect.mjs` 가 화면의 중계(AI 와 같은 호스트 동작)로 시험한다. 「AI 는 Claude 설정에 닿지 않는다」 는 이 둘을 합친 말이다.
+
+MCP 다리(호스트 쪽, 포트 파일 방식)는 K1 V5 부터: MCP 서버가 처음 붙을 때 `GET /hello` 하나를 보내고, 호스트는 토큰을 통과한 응답에 `X-StCFSD-Proof`(토큰과 포트 파일의 instanceId · 요청의 nonce 로 만든 HMAC)를 붙인다 — 포트 파일의 pid 가 재사용돼 남의 서버가 그 포트에 있어도 MCP 서버가 그쪽으로 요청을 보내지 않게. MCP 서버는 확인한 프로그램을 포트 파일 옆 `stcfsd-mcp-port.client-<이름>-<해시 8자>` 에 적어 두고(토큰 없음), 새로 뜬 MCP 서버(Claude Desktop 재시작)가 다른 프로그램 인스턴스를 만나면 `get_status` 한 번 전에는 다른 도구를 받지 않는다(재시작 알림). 화면 다리의 중계는 이것들을 쓰지 않는다.

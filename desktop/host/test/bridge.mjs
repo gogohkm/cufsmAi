@@ -9,6 +9,7 @@
 // 그림은 host/test/out/(git 에 넣지 않음). 모델 파일은 임시 폴더 사본만 쓴다. Claude 설정은 임시 폴더의 가짜 경로만 준다.
 import { spawn, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as http from 'node:http';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -91,6 +92,31 @@ const freePort = () => new Promise((resolve, reject) => {
   s.once('error', reject);
   s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
 });
+
+/**
+ * 날것 HTTP(V5-16a) — fetch 는 `%2e%2e` · `/./` 를 보내기 전에 정리한다. 경로를 손대지 않고 소켓에 그대로 쓴다.
+ * → { status, headers(소문자 이름), body }
+ */
+function rawHttp(port, method, rawPath, headers = {}, body = '') {
+  return new Promise(resolve => {
+    const s = net.connect(port, '127.0.0.1', () => {
+      const h = { Host: `127.0.0.1:${port}`, Connection: 'close', ...headers };
+      if (body) { h['Content-Length'] = Buffer.byteLength(body); }
+      s.write(`${method} ${rawPath} HTTP/1.1\r\n${Object.entries(h).map(([k, v]) => `${k}: ${v}`).join('\r\n')}\r\n\r\n${body}`);
+    });
+    let d = Buffer.alloc(0);
+    s.on('data', c => { d = Buffer.concat([d, c]); });
+    s.on('end', () => {
+      const text = d.toString('utf8');
+      const [head, ...rest] = text.split('\r\n\r\n');
+      const lines = head.split('\r\n');
+      const headersOut = {};
+      for (const l of lines.slice(1)) { const i = l.indexOf(':'); if (i > 0) { headersOut[l.slice(0, i).trim().toLowerCase()] = l.slice(i + 1).trim(); } }
+      resolve({ status: Number(lines[0].split(' ')[1]) || 0, headers: headersOut, body: rest.join('\r\n\r\n') });
+    });
+    s.on('error', e => resolve({ status: 0, headers: {}, body: String(e) }));
+  });
+}
 
 function findBrowser() {
   const pf = process.env.PROGRAMFILES || 'C:\\Program Files';
@@ -177,6 +203,14 @@ async function startBrowser(exe, profile) {
   await new Promise((r, j) => { ws.addEventListener('open', r); ws.addEventListener('error', j); });
   const cdp = new Cdp(ws);
   const log = { console: [], exceptions: [] };
+  // 프레임마다의 기본 실행 문맥 — 끼운 웹뷰는 다른 출처(다리의 웹뷰 서버)라 맨 위 문서에서 contentDocument 로 닿지 않는다.
+  // DevTools 프로토콜로 그 프레임의 문맥에서 직접 돌린다(사람이 그 화면에서 하는 것과 같은 자리).
+  const contexts = new Map();
+  cdp.on((method, p) => {
+    if (method === 'Runtime.executionContextCreated' && p.context.auxData?.isDefault) { contexts.set(p.context.auxData.frameId, p.context.id); }
+    else if (method === 'Runtime.executionContextDestroyed') { for (const [k, v] of contexts) { if (v === p.executionContextId) { contexts.delete(k); } } }
+    else if (method === 'Runtime.executionContextsCleared') { contexts.clear(); }
+  });
   cdp.on((method, p) => {
     if (method === 'Runtime.consoleAPICalled') {
       const text = (p.args || []).map(a => (a.value !== undefined ? (typeof a.value === 'object' ? JSON.stringify(a.value) : String(a.value)) : (a.description || a.type))).join(' ');
@@ -192,8 +226,26 @@ async function startBrowser(exe, profile) {
   await cdp.send('Page.enable');
   await cdp.send('Log.enable');
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+  /** url 에 `part` 가 든 iframe 의 문맥에서 식을 돌린다 */
+  const frameEval = async (part, expr, notPart) => {
+    const tree = (await cdp.send('Page.getFrameTree')).frameTree;
+    const all = []; const walk = n => { all.push(n.frame); for (const c of n.childFrames ?? []) { walk(c); } }; walk(tree);
+    const f = all.find(x => x.parentId && x.url.includes(part) && (!notPart || !x.url.includes(notPart)));
+    if (!f) { throw new Error(`프레임 없음: ${part}`); }
+    const contextId = contexts.get(f.id);
+    if (!contextId) { throw new Error(`프레임 문맥 없음: ${part}`); }
+    const r = await cdp.send('Runtime.evaluate', { expression: expr, contextId, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) { throw new Error(`frame eval: ${(r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text}`); }
+    return r.result.value;
+  };
   return {
-    cdp, log, pid: browser.pid,
+    cdp, log, pid: browser.pid, frameEval, profile,
+    /** 브라우저를 정상으로 닫는다(방문 기록 등을 디스크에 쓰게) */
+    async closeGracefully() {
+      try { await Promise.race([cdp.send('Browser.close'), sleep(5000)]); } catch { /* */ }
+      for (let i = 0; i < 50 && alive(browser.pid); i++) { await sleep(100); }
+      try { ws.close(); } catch { /* */ }
+    },
     async close() {
       try { ws.close(); } catch { /* */ }
       try { spawnSync('taskkill', ['/PID', String(browser.pid), '/T', '/F'], { stdio: 'ignore' }); } catch { /* */ }
@@ -228,38 +280,112 @@ async function main() {
   catch (err) { check('serve 가 준비 줄을 낸다', false, String(err.message)); serve.child.kill(); return finish(); }
   check('serve 가 준비 줄을 낸다', true, `${Date.now() - t} ms · ${ready.origin} · MCP ${ready.mcpPort}`);
   const origin = ready.origin;
+  const wvOrigin = ready.webviewOrigin;
+  const wvPort = Number(new URL(wvOrigin).port);
   const token = new URL(ready.url).searchParams.get('t');
+  const writeKey = ready.writeKey;
   const mcpToken = JSON.parse(fs.readFileSync(portFile, 'utf8')).token;
-  const api = async (method, route, body, headers = {}) => {
-    const res = await fetch(`${origin}${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close', ...headers },
-      body: body === undefined ? undefined : JSON.stringify(body) });
+  /** 틀 서버 — 읽기는 Bearer, 쓰기(GET 아닌 것)는 쓰기 열쇠도(화면이 하는 그대로). key:false 면 열쇠를 빼고 */
+  const api = async (method, route, body, headers = {}, { key = method !== 'GET', base = origin } = {}) => {
+    const res = await fetch(`${base}${route}`, { method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Connection: 'close',
+      ...(key ? { 'X-StCFSD-Key': writeKey } : {}), ...headers },
+    body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await res.text();
     let json; try { json = JSON.parse(text); } catch { json = undefined; }
     return { status: res.status, text, json };
   };
+  const wvApi = (method, route, body, headers = {}) => api(method, route, body, headers, { key: false, base: wvOrigin });
   const status0 = (await api('GET', '/api/state')).json?.data;
   const designerId = status0?.designer;
   const wvPath = `/wv/${encodeURIComponent(designerId)}/`;
+  check('웹뷰는 다른 출처(다리의 웹뷰 서버)에서 — 상태의 웹뷰 주소 · 출처', wvOrigin !== origin && status0?.webviewOrigin === wvOrigin
+    && status0.webviews.every(w => w.url.startsWith(`${wvOrigin}/wv/`)), `틀 ${origin} · 웹뷰 ${wvOrigin}`);
 
   section('2. 인증 · 격리 (HTTP)');
-  const noTokenRoutes = ['/', '/frame/frame.js', wvPath, '/res/webview/js/app.js', '/res/media/viewer3d.js', '/api/state', '/api/events',
-    `/api/wv/${encodeURIComponent(designerId)}/out`, '/api/mcp/status', '/api/claude/status', '/nowhere'];
+  const noTokenRoutes = [[origin, '/'], [origin, '/frame/frame.js'], [origin, '/api/state'], [origin, '/api/events'], [origin, '/api/mcp/status'],
+    [origin, '/api/claude/status'], [origin, '/api/wv-key'], [origin, '/nowhere'], [wvOrigin, wvPath], [wvOrigin, '/res/webview/js/app.js'],
+    [wvOrigin, '/res/media/viewer3d.js'], [wvOrigin, `/api/wv/${encodeURIComponent(designerId)}/out`]];
   const noTok = [];
-  for (const r of noTokenRoutes) { const res = await fetch(`${origin}${r}`, { headers: { Connection: 'close' } }); noTok.push(`${r} ${res.status}`); await res.arrayBuffer(); }
-  check('토큰 없는 요청은 모든 경로에서 401', noTok.every(x => / 401$/.test(x)), noTok.filter(x => !/ 401$/.test(x)).join(', ') || `${noTok.length}개 경로`);
+  for (const [b, r] of noTokenRoutes) { const res = await fetch(`${b}${r}`, { headers: { Connection: 'close' } }); noTok.push(`${b === wvOrigin ? '웹뷰' : '틀'}${r} ${res.status}`); await res.arrayBuffer(); }
+  check('토큰 없는 요청은 두 서버의 모든 경로에서 401', noTok.every(x => / 401$/.test(x)), noTok.filter(x => !/ 401$/.test(x)).join(', ') || `${noTok.length}개 경로`);
   const post401 = await fetch(`${origin}/api/platform/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   check('토큰 없는 POST 도 401', post401.status === 401, `HTTP ${post401.status}`);
   const boot = await fetch(ready.url, { redirect: 'manual' });
-  const cookie = boot.headers.get('set-cookie') ?? '';
-  check('?t= 로 들어오면 HttpOnly · SameSite=Strict 쿠키 + 토큰 없는 주소로 303', boot.status === 303 && /HttpOnly/.test(cookie)
-    && /SameSite=Strict/.test(cookie) && !(boot.headers.get('location') ?? '').includes(token), `${boot.status} → ${boot.headers.get('location')} · ${cookie.split(';').slice(1).join(';')}`);
-  const trav = ['/res/webview/..%2F..%2Fpackage.json', '/res/webview/%2e%2e/%2e%2e/package.json', '/res/webview/js/..%5C..%5C..%5Cpackage.json',
-    '/res/media/..%2Fsrc%2Fextension.ts', '/res/src/extension.ts', '/res/webview/C:%5CWindows%5Cwin.ini', '/frame/..%2Fsrc%2Fserve.ts', '/res/denied'];
+  const setCookie = boot.headers.get('set-cookie') ?? '';
+  const cookiePair = setCookie.split(';')[0];
+  const cookieVal = cookiePair.split('=').slice(1).join('=');
+  const bootBody = await boot.text();
+  check('?t= 교환 — HttpOnly · SameSite=Strict 쿠키(값은 토큰이 아니다) + 쓰기 열쇠는 본문 스크립트가 sessionStorage 에, 주소 · 쿠키에는 없다',
+    boot.status === 200 && /HttpOnly/.test(setCookie) && /SameSite=Strict/.test(setCookie) && !!cookieVal && cookieVal !== token && cookieVal !== writeKey
+    && !boot.headers.get('location') && bootBody.includes(writeKey) && bootBody.includes('sessionStorage') && !bootBody.includes(token),
+    `${boot.status} · ${setCookie.split(';').slice(1).join(';')} · 본문 ${bootBody.length}자`);
+  // V5-10: 정리하면 `//evil.example/x` 가 되는 경로 — 돌아갈 곳은 늘 이 출처 안의 정해진 화면이다(날것으로 보낸다)
+  const evil = await rawHttp(ready.port, 'GET', `/.//evil.example/x?t=${encodeURIComponent(token)}`);
+  const evilTarget = /location\.replace\(("[^"]*")\)/.exec(evil.body)?.[1];
+  check('V5-10 · `/.//evil.example/x?t=` 교환 뒤 돌아갈 곳이 이 출처의 `/` 다(다른 곳으로 튕기지 않는다)', evil.status === 200 && !evil.headers.location
+    && evilTarget === '"/"', `${evil.status} · Location ${evil.headers.location ?? '없음'} · 돌아갈 곳 ${evilTarget}`);
+  const evil2 = await rawHttp(ready.port, 'GET', `//evil.example/x?t=${encodeURIComponent(token)}`);
+  const evil2Target = /location\.replace\(("[^"]*")\)/.exec(evil2.body)?.[1];
+  check('V5-10 · `//evil.example/x?t=`(날것) 도 `/` 로', !evil2.headers.location && (evil2Target === '"/"' || evil2.status >= 400), `${evil2.status} · ${evil2Target}`);
+  // V5-16a: 경로 넘나들기 — fetch 를 거치지 않고 날것으로(서버가 받은 그대로 막는지)
+  const trav = [[wvPort, '/res/webview/..%2F..%2Fpackage.json'], [wvPort, '/res/webview/%2e%2e/%2e%2e/package.json'], [wvPort, '/res/webview/../../package.json'],
+    [wvPort, '/res/webview/js/..%5C..%5C..%5Cpackage.json'], [wvPort, '/res/media/..%2Fsrc%2Fextension.ts'], [wvPort, '/res/src/extension.ts'],
+    [wvPort, '/res/webview/C:%5CWindows%5Cwin.ini'], [wvPort, '/res/webview/%252e%252e/%252e%252e/package.json'], [ready.port, '/frame/..%2Fsrc%2Fserve.ts'],
+    [ready.port, '/frame/../src/serve.ts'], [ready.port, '/ui/../src/main.ts'], [wvPort, '/res/denied']];
   const travRes = [];
-  for (const r of trav) { const x = await api('GET', r); travRes.push(`${r} ${x.status}`); }
-  check('리소스 경로로 뿌리 밖을 읽을 수 없다(경로 넘나들기 거절)', travRes.every(x => !/ 200$/.test(x)), travRes.filter(x => / 200$/.test(x)).join(', ') || `${trav.length}건 모두 404/403`);
-  const okRes = await api('GET', '/res/webview/js/app.js');
-  check('허용 뿌리 안의 리소스는 읽힌다', okRes.status === 200 && okRes.text.includes('acquireVsCodeApi'), `app.js ${okRes.text.length}자`);
+  for (const [p, r] of trav) { const x = await rawHttp(p, 'GET', r, { Authorization: `Bearer ${token}` }); travRes.push(`${r} ${x.status}`); }
+  check('리소스 경로로 뿌리 밖을 읽을 수 없다(날것으로 보낸 경로 넘나들기 거절)', travRes.every(x => !/ 200$/.test(x)), travRes.filter(x => / 200$/.test(x)).join(', ') || `${trav.length}건 모두 404/400`);
+  const okRes = await wvApi('GET', '/res/webview/js/app.js');
+  check('허용 뿌리 안의 리소스는 웹뷰 서버에서 읽힌다', okRes.status === 200 && okRes.text.includes('acquireVsCodeApi'), `app.js ${okRes.text.length}자`);
+  const resOnFrame = await api('GET', '/res/webview/js/app.js');
+  const wvOnFrame = await api('GET', wvPath);
+  check('틀 서버에는 웹뷰 문서 · 리소스가 없다(웹뷰가 틀과 같은 출처에서 돌 길이 없다)', resOnFrame.status === 404 && wvOnFrame.status === 404, `${resOnFrame.status} · ${wvOnFrame.status}`);
+
+  const claude = (await api('GET', '/api/claude/status')).json?.data;
+  check('/api/claude/status — 가짜 설정 경로 · 읽기만', claude?.configPath === claudeConfig && claude.state === 'not-installed' && !fs.existsSync(path.dirname(claudeConfig)),
+    `${claude?.state} · ${claude?.text}`);
+  // V5-04 · 쓰기에는 쓰기 열쇠가 있어야 한다 — Bearer · 쿠키만으로는 거절. 가짜 Claude 설정을 만들어 정말 쓰일 수 있는 조건에서 본다.
+  fs.mkdirSync(path.dirname(claudeConfig), { recursive: true });
+  fs.writeFileSync(claudeConfig, `${JSON.stringify({ mcpServers: { other: { command: 'other.exe', env: { API_KEY: 'keep-me' } } } }, null, 2)}\n`);
+  const cfgBytes = () => fs.readFileSync(claudeConfig);
+  const before04 = cfgBytes();
+  const writes = [['POST', '/api/claude/connect'], ['POST', '/api/claude/disconnect'], ['POST', '/api/mcp/action'], ['POST', '/api/platform/answer'],
+    ['POST', `/api/webviews/${encodeURIComponent(designerId)}/close`], ['GET', '/api/wv-key']];
+  const bearerOnly = [];
+  for (const [m, r] of writes) { const x = await api(m, r, m === 'POST' ? { action: 'save_project', filepath: claudeConfig } : undefined, {}, { key: false }); bearerOnly.push(`${m} ${r} ${x.status}`); }
+  check('V5-04 · 쓰기 열쇠 없는 쓰기는 모두 403(Bearer 만으로는 안 된다)', bearerOnly.every(x => / 403$/.test(x)) && before04.equals(cfgBytes()),
+    bearerOnly.filter(x => !/ 403$/.test(x)).join(', ') || `${writes.length}개 경로 · 설정 그대로`);
+  const cookieRead = await fetch(`${origin}/api/state`, { headers: { Cookie: cookiePair, Connection: 'close' } });
+  const cookieWrites = [];
+  for (const [m, r] of writes) {
+    const x = await fetch(`${origin}${r}`, { method: m, headers: { Cookie: cookiePair, 'Content-Type': 'application/json', Connection: 'close' }, body: m === 'POST' ? '{}' : undefined });
+    cookieWrites.push(`${m} ${r} ${x.status}`); await x.arrayBuffer();
+  }
+  const wvIn = await fetch(`${wvOrigin}/api/wv/${encodeURIComponent(designerId)}/in?conn=x`, { method: 'POST', headers: { Cookie: cookiePair, 'Content-Type': 'application/json' }, body: '[{"command":"saveProject"}]' });
+  const wvOut = await fetch(`${wvOrigin}/api/wv/${encodeURIComponent(designerId)}/out`, { headers: { Cookie: cookiePair } });
+  check('V5-04 · 쿠키만으로는 읽기만 — 틀의 모든 쓰기 · 웹뷰 통로(in · out)는 403', cookieRead.status === 200 && cookieWrites.every(x => / 403$/.test(x))
+    && wvIn.status === 403 && wvOut.status === 403 && before04.equals(cfgBytes()),
+  `읽기 ${cookieRead.status} · ${cookieWrites.filter(x => !/ 403$/.test(x)).join(', ') || '쓰기 모두 403'} · 웹뷰 in ${wvIn.status} · out ${wvOut.status}`);
+  await cookieRead.arrayBuffer(); await wvIn.arrayBuffer(); try { await wvOut.body?.cancel(); } catch { /* */ }
+  const wvWrite = await wvApi('POST', '/api/claude/connect', {});
+  check('웹뷰 서버에는 쓰기 경로가 없다(Claude 연결 · MCP 중계 · 물음 답)', wvWrite.status === 404 && (await wvApi('POST', '/api/mcp/action', {})).status === 404
+    && (await wvApi('POST', '/api/platform/answer', {})).status === 404 && before04.equals(cfgBytes()), `connect ${wvWrite.status}`);
+  const keyed = await api('GET', '/api/wv-key', undefined, {}, { key: true });
+  check('쓰기 열쇠가 있으면 웹뷰 열쇠를 받는다', keyed.status === 200 && typeof keyed.json?.data?.key === 'string' && keyed.json.data.key !== writeKey && keyed.json.data.origin === wvOrigin);
+  const connected = await api('POST', '/api/claude/connect', {});
+  const afterConnect = JSON.parse(fs.readFileSync(claudeConfig, 'utf8'));
+  await api('POST', '/api/claude/disconnect', {});
+  const afterDisconnect = JSON.parse(fs.readFileSync(claudeConfig, 'utf8'));
+  check('대조 — 쓰기 열쇠가 있으면 「연결」 · 「끊기」가 된다(다른 항목 그대로)', connected.json?.data?.result?.ok === true && !!afterConnect.mcpServers.stcfsd
+    && !afterDisconnect.mcpServers.stcfsd && afterDisconnect.mcpServers.other?.env?.API_KEY === 'keep-me', short(connected.json?.data?.result?.message, 80));
+  // V5-18a · 페이지가 보낸 문자열에 섞인 다른 nonce 는 새 nonce 로 바뀌지 않는다
+  {
+    const { injectWebviewHtml } = require('../dist/index.js');
+    const src = `<html><head><meta http-equiv="Content-Security-Policy" content="script-src 'nonce-ORIG'"></head><body><script nonce="ORIG">ok()</script><div><script nonce="FOREIGN">evil()</script><script nonce='ORIG'>ok2()</script></div></body></html>`;
+    const o = injectWebviewHtml(src, { webviewId: 'x', viewType: 'v', theme: 'dark', roots: [], frameOrigin: origin });
+    check('V5-18a · 원래 nonce 를 단 태그만 새 nonce — 다른 값(FOREIGN)은 그대로라 돌지 않는다', o.html.includes(`nonce="${o.nonce}">ok()`) && o.html.includes(`nonce="${o.nonce}">ok2()`)
+      && o.html.includes('nonce="FOREIGN">evil()') && !o.html.includes('ORIG'), short(o.csp, 80));
+  }
   const badHost = await new Promise(resolve => {
     const s = net.connect(ready.port, '127.0.0.1', () => { s.write(`GET /api/state HTTP/1.1\r\nHost: evil.example:${ready.port}\r\nAuthorization: Bearer ${token}\r\nConnection: close\r\n\r\n`); });
     let d = ''; s.on('data', c => { d += c; }); s.on('end', () => resolve(d.split('\r\n')[0])); s.on('error', e => resolve(String(e)));
@@ -270,21 +396,25 @@ async function main() {
   check('다른 Origin · 다른 사이트 요청은 403', badOrigin.status === 403 && crossSite.status === 403, `Origin ${badOrigin.status} · Sec-Fetch-Site ${crossSite.status}`);
   const relayed = await api('GET', '/api/mcp/status');
   check('MCP 중계 — 다리 토큰으로 호스트 MCP 를 읽는다', relayed.status === 200 && relayed.json && 'nnodes' in relayed.json, short(relayed.text, 90));
-  const leak = [relayed.text, (await api('GET', '/api/state')).text, (await api('GET', '/api/claude/status')).text, (await api('GET', wvPath)).text,
-    (await api('GET', '/')).text, (await api('GET', '/frame/frame.js')).text];
+  const leak = [relayed.text, (await api('GET', '/api/state')).text, (await api('GET', '/api/claude/status')).text, (await wvApi('GET', wvPath)).text,
+    (await api('GET', '/')).text, (await api('GET', '/frame/frame.js')).text, bootBody];
   check('MCP 토큰이 화면에 가는 어디에도 없다(중계 · 상태 · 웹뷰 HTML · 틀)', leak.every(x => !x.includes(mcpToken)), `${leak.length}곳`);
-  const claude = (await api('GET', '/api/claude/status')).json?.data;
-  check('/api/claude/status — 가짜 설정 경로 · 읽기만', claude?.configPath === claudeConfig && claude.state === 'not-installed' && !fs.existsSync(path.dirname(claudeConfig)),
-    `${claude?.state} · ${claude?.text}`);
-  const html = (await api('GET', wvPath)).text;
+  const html = (await wvApi('GET', wvPath)).text;
   const cspMeta = /<meta http-equiv="Content-Security-Policy" content="([^"]*)">/.exec(html)?.[1] ?? '';
   const nonce = /'nonce-([^']+)'/.exec(cspMeta)?.[1];
   const scriptNonces = [...html.matchAll(/<script[^>]*\snonce="([^"]*)"/g)].map(m => m[1]);
   check('웹뷰 HTML — CSP 는 다리 출처 · 새 nonce · connect-src, 리소스는 /res/ 로', !!nonce && cspMeta.includes("connect-src 'self'")
     && !html.includes('vscode-cdn.net') && !html.includes('vscode-resource') && scriptNonces.length >= 6 && scriptNonces.every(n => n === nonce)
     && /src="\/res\/webview\/js\/app\.js"/.test(html), short(cspMeta, 160));
-  const html2 = (await api('GET', wvPath)).text;
+  const html2 = (await wvApi('GET', wvPath)).text;
   check('nonce 는 요청마다 새것', /'nonce-([^']+)'/.exec(html2)?.[1] !== nonce);
+  const pages = [(await api('GET', '/')).text, (await api('GET', '/frame/frame.js')).text, (await api('GET', '/api/state')).text, html,
+    (await api('GET', '/ui/')).text, (await wvApi('GET', '/res/webview/js/app.js')).text];
+  check('쓰기 열쇠는 틀 · 새 화면 · 상태 · 웹뷰 HTML 어디에도 없다(교환 응답의 본문에만)', pages.every(x => !x.includes(writeKey) && !x.includes(token)), `${pages.length}곳`);
+  const wvHead = await fetch(`${wvOrigin}${wvPath}`, { headers: { Authorization: `Bearer ${token}` } });
+  check('웹뷰 문서는 틀 서버만 끼울 수 있다(frame-ancestors = 틀 출처)', wvHead.headers.get('content-security-policy') === `frame-ancestors ${origin}`
+    && !wvHead.headers.get('x-frame-options'), wvHead.headers.get('content-security-policy'));
+  await wvHead.arrayBuffer();
 
   // ── 화면 ────────────────────────────────────────────────────────────
   const exe = findBrowser();
@@ -293,9 +423,19 @@ async function main() {
     skip('화면 단계(3 – 9)', '이 PC 에 Edge/Chrome 이 없다 — STCFSD_BROWSER 로 실행 파일을 줄 수 있다');
   } else {
     br = await startBrowser(exe, path.join(tmp, 'browser-profile'));
-    try { await screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId }); }
+    try { await screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId, wvOrigin, writeKey, token, claudeConfig }); }
     catch (err) { check('화면 단계가 예외 없이 끝난다', false, String(err?.stack ?? err).slice(0, 1500)); }
-    finally { await br.close(); }
+    finally {
+      // V5-S4 · 정상으로 닫아 방문 기록을 디스크에 쓰게 한 뒤, ?t= 주소(토큰)가 기록에 남았는지 본다
+      await br.closeGracefully();
+      await br.close();
+      await sleep(500);
+      const histFile = path.join(br.profile, 'Default', 'History');
+      const hist = fs.existsSync(histFile) ? fs.readFileSync(histFile) : undefined;
+      const inHistory = !!hist && hist.includes(Buffer.from(token));
+      process.stdout.write(`  정보   V5-S4 · 브라우저 방문 기록(${hist ? `${hist.length} B` : '없음'})에 ?t= 토큰이 ${inHistory ? '남는다 — 개발 길의 한계로 BRIDGE.md 에 적었다' : '남지 않았다'}\n`);
+      check('V5-S4 · 방문 기록에 쓰기 열쇠 · 쿠키 값은 없다', !hist || (!hist.includes(Buffer.from(writeKey)) && !hist.includes(Buffer.from(cookieVal))), inHistory ? '토큰은 있음(알려진 한계)' : '');
+    }
   }
 
   section('10. 끝내기 — 프로세스 · 포트가 남지 않는다');
@@ -336,15 +476,18 @@ function finish(serve) {
 }
 
 // ── 화면 단계 ───────────────────────────────────────────────────────────
-async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used }) {
+async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId, wvOrigin, writeKey, token, claudeConfig }) {
   const { cdp, log } = br;
   const evalTop = async expr => {
     const r = await cdp.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
     if (r.exceptionDetails) { throw new Error(`eval: ${(r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text}`); }
     return r.result.value;
   };
-  /** 설계 웹뷰(iframe) 안에서 — D = document, W = window */
-  const wv = body => evalTop(`(()=>{const W=document.getElementById('designer').contentWindow;const D=W.document;${body}})()`);
+  const designerPart = `/wv/${encodeURIComponent(designerId)}/`;
+  /** 설계 웹뷰(iframe, 다른 출처) 안에서 — D = document, W = window. 그 프레임의 문맥에서 돈다 */
+  const wv = body => br.frameEval(designerPart, `(async()=>{const W=window;const D=document;${body}})()`);
+  /** 보고서 웹뷰(두 번째 iframe) 안에서 */
+  const side = body => br.frameEval('/wv/', `(async()=>{const W=window;const D=document;${body}})()`, designerPart);
   const setVal = (id, v) => wv(`const e=D.getElementById(${JSON.stringify(id)}); if(!e) return 'MISSING';
     if(e.type==='checkbox'){e.checked=!!${JSON.stringify(v)};} else {e.value=${JSON.stringify(String(v))};}
     e.dispatchEvent(new W.Event('input',{bubbles:true})); e.dispatchEvent(new W.Event('change',{bubbles:true})); return 'ok';`);
@@ -418,9 +561,17 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used }) {
       await sleep(150);
     }
   };
-  const designerReady = () => waitFor(`(()=>{const f=document.getElementById('designer'); const h=f&&f.contentDocument&&f.contentDocument.documentElement;
-    return !!h && h.getAttribute('data-stcfsd-bridge')==='connected' && h.hasAttribute('data-stcfsd-replayed') && !!f.contentDocument.getElementById('section-svg');})()`,
-  60_000, '설계 웹뷰 연결 · 다시 보내기');
+  const waitWv = async (body, timeout, what) => {
+    const deadline = Date.now() + timeout;
+    for (;;) {
+      const v = await wv(body).catch(() => undefined);
+      if (v) { return v; }
+      if (Date.now() > deadline) { throw new Error(`기다림 시간 초과: ${what}`); }
+      await sleep(150);
+    }
+  };
+  const designerReady = () => waitWv(`const h=D.documentElement; return h.getAttribute('data-stcfsd-bridge')==='connected' && h.hasAttribute('data-stcfsd-replayed') && !!D.getElementById('section-svg');`,
+    60_000, '설계 웹뷰 연결 · 다시 보내기');
   const svgShapes = () => wv(`const s=D.querySelector('#section-svg svg')||D.querySelector('#section-svg'); return s? s.querySelectorAll('line,polyline,path,circle,polygon').length : 0;`);
   const svgHist = () => wv(`const s=D.querySelector('#section-svg'); const h={}; if(s){s.querySelectorAll('*').forEach(e=>{const k=e.tagName+(e.getAttribute('class')?'.'+e.getAttribute('class'):'')+(e.getAttribute('stroke')?'['+e.getAttribute('stroke')+']':'');h[k]=(h[k]||0)+1;});} return h;`);
   const canvasInk = id => wv(`const c=D.getElementById(${JSON.stringify(id)}); if(!c||!c.width) return 0; const g=c.getContext('2d');
@@ -443,6 +594,61 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used }) {
     const transparentText = Object.values(sample).filter(v => /^rgba\(0, 0, 0, 0\) \//.test(v));
     return { ok: empty.length === 0 && transparentText.length === 0, detail: empty.length ? `빈 변수: ${empty.join(', ')}` : `${used.length}종 · ${short(sample, 150)}` };
   });
+
+  section('3b. 끼운 웹뷰 · 다른 로컬 포트 — 쓰기 경로에 닿지 않는다(V5-18b · V5-04)');
+  const cfgBefore = fs.readFileSync(claudeConfig);
+  {
+    // 웹뷰(iframe) 안의 스크립트가 할 수 있는 모든 길로 「연결」을 시도한다
+    const r = await wv(`const out={};
+      const tryIt=async(k,f)=>{try{const x=await f(); out[k]=typeof x==='object'&&x&&'status' in x?('HTTP '+x.status+(x.type==='opaque'?' opaque':'')):String(x);}catch(e){out[k]='거절: '+e.name;}};
+      await tryIt('같은 출처 상대 경로', ()=>fetch('/api/claude/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}));
+      await tryIt('틀 출처로 fetch', ()=>fetch(${JSON.stringify(origin)}+'/api/claude/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',credentials:'include'}));
+      await tryIt('틀 출처로 no-cors', ()=>fetch(${JSON.stringify(origin)}+'/api/claude/connect',{method:'POST',mode:'no-cors',body:'{}',credentials:'include'}));
+      await tryIt('MCP 중계', ()=>fetch(${JSON.stringify(origin)}+'/api/mcp/action',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"action":"save_project"}',credentials:'include'}));
+      await tryIt('웹뷰 열쇠 받기', ()=>fetch(${JSON.stringify(origin)}+'/api/wv-key',{credentials:'include'}));
+      await tryIt('부모 문서', ()=>W.parent.document.title);
+      await tryIt('부모 fetch', ()=>W.parent.fetch('/api/claude/connect',{method:'POST'}));
+      await tryIt('부모 저장소', ()=>W.parent.sessionStorage.length);
+      out.ownStorageHasWriteKey=JSON.stringify(Object.keys(sessionStorage).map(k=>sessionStorage.getItem(k))).includes(${JSON.stringify(writeKey)});
+      out.origin=location.origin;
+      return out;`);
+    await sleep(500);
+    const fine = v => /^거절/.test(v) || /HTTP 40[34]/.test(v) || / opaque$/.test(v);
+    const st = (await api('GET', '/api/claude/status')).json?.data;
+    check('V5-18b · 끼운 웹뷰 안에서는 어떤 길로도 「연결」 · MCP 중계 · 열쇠 · 부모 문서에 닿지 않는다(설정 바이트 그대로)',
+      r.origin === wvOrigin && Object.entries(r).filter(([k]) => !['origin', 'ownStorageHasWriteKey'].includes(k)).every(([, v]) => fine(v)) && r.ownStorageHasWriteKey === false
+      && cfgBefore.equals(fs.readFileSync(claudeConfig)) && st?.state === 'not-registered', short(r, 400));
+  }
+  {
+    // 같은 브라우저로 127.0.0.1 의 다른 포트를 열면 그 서버가 다리 쿠키를 받는다(쿠키는 포트를 가리지 않는다) — 그것으로 무엇을 할 수 있나
+    let got = '';
+    const other = http.createServer((q, s) => { got = q.headers.cookie ?? ''; s.end('<!doctype html><title>other</title>other'); });
+    await new Promise(r => other.listen(0, '127.0.0.1', r));
+    const top = await evalTop(`(()=>{try{return sessionStorage.getItem('stcfsd.bridge.key.'+location.port)===${JSON.stringify(writeKey)};}catch(e){return 'err';}})()`);
+    await cdp.send('Page.navigate', { url: `http://127.0.0.1:${other.address().port}/` });
+    await sleep(1200);
+    other.close();
+    const pair = got.split(';').map(x => x.trim()).find(x => x.startsWith(`stcfsd_bridge_${ready.port}=`)) ?? '';
+    const val = pair.split('=').slice(1).join('=');
+    const H = { Cookie: pair, 'Content-Type': 'application/json', Connection: 'close' };
+    const read = await fetch(`${origin}/api/state`, { headers: H });
+    const results04 = {};
+    for (const r of ['/api/claude/connect', '/api/mcp/action', '/api/platform/answer', `/api/webviews/${encodeURIComponent(designerId)}/close`]) {
+      const x = await fetch(`${origin}${r}`, { method: 'POST', headers: H, body: JSON.stringify({ action: 'save_project', filepath: claudeConfig }) });
+      results04[r] = x.status; await x.arrayBuffer();
+    }
+    const k = await fetch(`${origin}/api/wv-key`, { headers: H }); results04['/api/wv-key'] = k.status; await k.arrayBuffer();
+    const bootAgain = await fetch(`${origin}/?t=${encodeURIComponent(val)}`, { redirect: 'manual' }); results04['?t=<쿠키 값>'] = bootAgain.status; await bootAgain.arrayBuffer();
+    const pagesWithKey = [];
+    for (const r of ['/', '/ui/', '/frame/frame.js', '/api/state']) { const t = await (await fetch(`${origin}${r}`, { headers: H })).text(); if (t.includes(writeKey)) { pagesWithKey.push(r); } }
+    check('V5-04 · 다른 포트가 받은 쿠키로는 읽기만 — 모든 쓰기 · 열쇠 · ?t= 교환은 거절, 그 쿠키로 받은 페이지에 쓰기 열쇠 없음',
+      top === true && !!val && val !== token && val !== writeKey && read.status === 200 && Object.values(results04).every(s => s === 403 || s === 401)
+      && pagesWithKey.length === 0 && cfgBefore.equals(fs.readFileSync(claudeConfig)),
+      `틀 탭 sessionStorage 에 열쇠 ${top} · 받은 쿠키 ${pair ? '있음(값 ≠ 토큰)' : '없음'} · 읽기 ${read.status} · ${JSON.stringify(results04)}`);
+    await read.arrayBuffer();
+    await cdp.send('Page.navigate', { url: `${origin}/` });
+    await designerReady();
+  }
 
   section('4. 화면을 DOM 으로 — 단면 → 좌굴 → 하중 → 설계 → Lap → 보고서 → 검증');
   await step('s03 단면 템플릿(립 Z 8ZS2.25×059) 생성', async () => {
@@ -567,10 +773,14 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used }) {
   await step('s12 좌굴 보고서가 두 번째 웹뷰로 열리고 PDF 단추가 PDF 를 쓴다', async () => {
     await tab('design');
     await click('#btn-view-buckling-report');
-    await waitFor(`(()=>{const f=document.getElementById('side-frame'); const d=f&&f.contentDocument; return !document.getElementById('side').hidden && d && !!d.getElementById('btn-pdf') && d.documentElement.getAttribute('data-stcfsd-bridge')==='connected';})()`, 30_000, '보고서 패널');
-    const head = await evalTop(`document.getElementById('side-title').textContent + ' | ' + document.getElementById('side-frame').contentDocument.body.innerText.slice(0,60)`);
+    await waitFor(`!document.getElementById('side').hidden`, 30_000, '보고서 칸');
+    for (let i = 0; i < 200; i++) {
+      if (await side(`return !!D.getElementById('btn-pdf') && D.documentElement.getAttribute('data-stcfsd-bridge')==='connected';`).catch(() => false)) { break; }
+      await sleep(150);
+    }
+    const head = `${await evalTop(`document.getElementById('side-title').textContent`)} | ${await side('return D.body.innerText.slice(0,60);')}`;
     const pdf = path.join(tmp, 'saved', 'buckling.pdf');
-    await evalTop(`document.getElementById('side-frame').contentDocument.getElementById('btn-pdf').click()`);
+    await side(`D.getElementById('btn-pdf').click(); return 1;`);
     await dialogAnswer('PDF', pdf);
     for (let i = 0; i < 200 && !(fs.existsSync(pdf) && fs.statSync(pdf).size > 0); i++) { await sleep(150); }
     const ok = fs.existsSync(pdf) && fs.readFileSync(pdf).subarray(0, 4).toString() === '%PDF';
@@ -638,6 +848,28 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used }) {
     return { ok: run.json?.success === true && after.shapes === before.shapes && after.ink > 50 && /\d/.test(after.dsm ?? '') && !/결과 없음/.test(after.dsm ?? '')
       && nodesAfterHost === nodesHost && nodesPage === nodesHost && JSON.stringify(histBefore) === JSON.stringify(histAfter),
       detail: `다시 보냄 ${short(JSON.parse(replay || '{}').commands, 110)} · 도형 ${before.shapes}/${after.shapes} · 곡선 잉크 ${before.ink}/${after.ink} · 호스트 절점 ${nodesHost}/${nodesAfterHost}(기본 단면으로 돌아가지 않음) · 표 ${nodesPage ?? '-'}` };
+  });
+
+  section('8b. 아직 호스트에 가지 않은 설계 탭 입력 — 테마 · 새로 고침 뒤에도 그대로(V5-03)');
+  await step('s15b 설계 탭에 Fy 77.7 → 밝은 테마 → 그대로 → 새로 고침 → 그대로', async () => {
+    await tab('design');
+    const typed = await setVal('design-fy', '77.7');
+    const v0 = await wv(`return D.getElementById('design-fy').value;`);
+    await evalTop(`window.__stcfsdFrame.setTheme('light'); 1`);
+    await waitWv(`return D.documentElement.getAttribute('data-stcfsd-theme')==='light';`, 10_000, '웹뷰 테마');
+    const afterTheme = await wv(`return {fy: D.getElementById('design-fy').value, kind: D.body.getAttribute('data-vscode-theme-kind'), bg: W.getComputedStyle(D.documentElement).getPropertyValue('--vscode-editor-background').trim(), nav: performance.getEntriesByType('navigation').length};`);
+    const frameLight = await evalTop(`document.documentElement.classList.contains('light')`);
+    await cdp.send('Page.reload', { ignoreCache: true });
+    await sleep(500);
+    await designerReady();
+    await waitWv(`return D.documentElement.getAttribute('data-stcfsd-preserved')==='restored';`, 15_000, '입력 되살림');
+    await sleep(800);
+    const afterReload = await wv(`return D.getElementById('design-fy').value;`);
+    // 새로 고침 앞의 모음(collectDesignData)은 호스트로 가지 않는다 — 갔다면 저장이 돌아 저장 물음이 떴을 것이다
+    const pending = (await api('GET', '/api/state')).json?.data?.platform?.pending ?? [];
+    await evalTop(`window.__stcfsdFrame.setTheme('dark'); 1`);
+    return { ok: typed === 'ok' && v0 === '77.7' && afterTheme.fy === '77.7' && afterTheme.kind === 'vscode-light' && frameLight === true && afterReload === '77.7' && pending.length === 0,
+      detail: `입력 ${v0} → 테마 뒤 ${afterTheme.fy}(${afterTheme.kind}, 배경 ${afterTheme.bg}, 틀 밝음 ${frameLight}) → 새로 고침 뒤 ${afterReload} · 뜬 물음 ${pending.length}개` };
   });
 
   section('9. 밝은 · 어두운 테마');

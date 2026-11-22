@@ -4,14 +4,55 @@
  * 숨겨져 있어도 떼지 않는다 — 첫 배포판이 하던 일은 모두 여기서 그대로 된다. 다듬는 것은 U4 의 일이다.
  *
  * 두 번째 웹뷰(좌굴 보고서)는 틀과 같이 오른쪽 칸에 띄우고 ✕ 로 호스트에 닫기를 보낸다.
+ *
+ * 끼운 웹뷰는 다리의 웹뷰 서버(다른 출처)에서 돈다 — 그 문서에 직접 닿지 않고 postMessage 로만 말한다(V5-04 · V5-18):
+ * 웹뷰가 `need-key` 를 물으면 이 화면의 iframe 일 때만 웹뷰 열쇠(`/api/wv-key`)를 건네고, 테마 · 「열기」 · 「저장」 단추는
+ * 메시지로 보낸다. 웹뷰 안에서 누른 F2 는 웹뷰가 메시지로 알려 준다.
  */
-import { api } from './bridge';
+import { api, keyHeaders } from './bridge';
 
 let on = false;
 let designerSrc = '';
 let sideId: string | null = null;
 let theme: 'dark' | 'light' = 'dark';
 let changed: () => void = () => undefined;
+let wvOrigin: string | null = null;
+let wvKey: string | null = null;
+let keyWaiters: Array<(k: string) => void> = [];
+let keyAsked = false;
+let onF2: () => void = () => undefined;
+
+function frames(): HTMLIFrameElement[] {
+  return ['designer', 'side-frame'].map(id => document.getElementById(id) as HTMLIFrameElement | null).filter((f): f is HTMLIFrameElement => !!f);
+}
+function withKey(cb: (k: string) => void): void {
+  if (wvKey) { cb(wvKey); return; }
+  keyWaiters.push(cb);
+  if (keyAsked) { return; }
+  keyAsked = true;
+  void fetch('/api/wv-key', { headers: keyHeaders(), credentials: 'same-origin' }).then(r => r.json()).then((r: any) => {
+    keyAsked = false;
+    if (!r?.success) { return; }
+    const k = String(r.data.key);
+    wvKey = k;
+    const w = keyWaiters; keyWaiters = [];
+    for (const f of w) { f(k); }
+  }).catch(() => { keyAsked = false; });
+}
+/** 다리의 웹뷰 서버 출처(상태의 webviewOrigin) */
+export function setWebviewOrigin(o: string | null | undefined): void { wvOrigin = o || null; }
+/** 끼운 웹뷰 안에서 누른 F2 */
+export function onWebviewF2(cb: () => void): void { onF2 = cb; }
+/** 끼운 웹뷰(설계 · 보고서)에 메시지 — 다리의 수신부가 받는다 */
+export function postToWebviews(msg: Record<string, unknown>, only?: 'designer'): boolean {
+  if (!wvOrigin) { return false; }
+  let sent = false;
+  for (const f of frames()) {
+    if (only && f.id !== only) { continue; }
+    try { if (f.contentWindow && f.src && f.src !== 'about:blank') { f.contentWindow.postMessage({ stcfsdBridge: 1, ...msg }, wvOrigin); sent = true; } } catch { /* 아직 */ }
+  }
+  return sent;
+}
 
 let wired = false;
 export function initEdit(t: 'dark' | 'light', onChange: () => void): void {
@@ -19,6 +60,19 @@ export function initEdit(t: 'dark' | 'light', onChange: () => void): void {
   changed = onChange;
   if (wired) { return; }
   wired = true;
+  window.addEventListener('message', e => {
+    const d = e.data as { stcfsdBridge?: number; type?: string; key?: string } | null;
+    if (!d || d.stcfsdBridge !== 1 || !wvOrigin || e.origin !== wvOrigin) { return; }
+    const from = frames().find(f => f.contentWindow === e.source);
+    if (!from) { return; }
+    if (d.type === 'need-key') {
+      const src = e.source as Window;
+      const target = wvOrigin;
+      withKey(k => { try { src.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, target); } catch { /* 닫힘 */ } });
+    } else if (d.type === 'keydown' && d.key === 'F2' && from.id === 'designer') {
+      onF2();
+    }
+  });
   document.getElementById('side-close')?.addEventListener('click', () => {
     if (!sideId) { return; }
     const id = sideId;
@@ -27,6 +81,9 @@ export function initEdit(t: 'dark' | 'light', onChange: () => void): void {
 }
 
 export function editing(): boolean { return on; }
+
+/** 다음에 싣는 웹뷰(보고서)의 테마 */
+export function setEditTheme(t: 'dark' | 'light'): void { theme = t; }
 
 /** 설계 웹뷰를 붙인다(한 번). 다리의 /wv/<id>/ — 그 페이지가 호스트 ↔ 웹뷰 통로를 쥔다 */
 export function mountDesigner(url: string): void {

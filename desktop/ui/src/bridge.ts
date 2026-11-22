@@ -1,5 +1,7 @@
 /**
  * 화면 다리 클라이언트 — desktop/host/BRIDGE.md 의 경로만 쓴다. 같은 출처 쿠키(브라우저) · Bearer(Electron 세션)로 인증된다.
+ * 쓰기(POST)와 `/api/wv-key` 에는 `X-StCFSD-Key` 를 붙인다 — 브라우저는 `?t=` 교환이 이 탭의 sessionStorage 에 둔 열쇠,
+ * Electron 은 주 프로세스가 맨 위 프레임 요청에 붙인다(페이지에는 없다). V5-04.
  *
  *  - `mcp(action, params)`  = `POST /api/mcp/action` — AI 가 부르는 도구와 같은 호스트 경로(엔진 · US 단위). 화면의 조회는
  *    AI 호출로 세지 않는다(다리가 요청 id 머리를 붙이지 않는다).
@@ -8,6 +10,14 @@
  *  - `connectEvents()`      = `EventSource('/api/events')` — 호스트의 물음 · 알림 · `host:message` · `file:current` …
  */
 
+/** 쓰기 열쇠 머리(있으면) */
+export function keyHeaders(h: Record<string, string> = {}): Record<string, string> {
+  let k: string | null = null;
+  try { k = sessionStorage.getItem(`stcfsd.bridge.key.${location.port}`); } catch { k = null; }
+  if (k) { h['X-StCFSD-Key'] = k; }
+  return h;
+}
+
 export interface ApiResult<T = any> { success: boolean; data?: T; error?: string; status: number; seq?: number }
 
 export async function api<T = any>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<ApiResult<T>> {
@@ -15,7 +25,7 @@ export async function api<T = any>(method: 'GET' | 'POST', path: string, body?: 
   try {
     res = await fetch(path, {
       method, credentials: 'same-origin',
-      headers: method === 'POST' ? { 'Content-Type': 'application/json' } : {},
+      headers: keyHeaders(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
       body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
     });
   } catch (err) {
@@ -35,7 +45,7 @@ export async function mcp<T = any>(action: string, params: Record<string, unknow
   let res: Response;
   try {
     res = await fetch('/api/mcp/action', {
-      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', credentials: 'same-origin', headers: keyHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ action, ...params }),
     });
   } catch (err) {

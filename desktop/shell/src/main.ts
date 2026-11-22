@@ -16,6 +16,7 @@
  *
  * 시험 모드(`STCFSD_SHELL_TEST=1`): 창을 보이지 않고(show:false, 한 번도 show · focus 하지 않는다), 대화상자는 기본으로
  * "취소"를 돌려주는 가짜로 바꾼다. 부모가 IPC 로 띄웠으면 주 프로세스 안에서 코드를 돌리는 제어 통로를 연다(시험만).
+ * 설치본은 시험 모드 · 개발 덮어쓰기 변수를 따르지 않는다 — `<resources>/stcfsd-verification.json` 이 있는 확인용 복사본만(mode.ts, V5-13).
  */
 import { app, BrowserWindow, dialog, Menu, screen, session, shell, type MenuItemConstructorOptions } from 'electron';
 import * as fs from 'node:fs';
@@ -24,10 +25,17 @@ import type * as HostApi from '../../host/src/index';
 import { parseArgs } from './args';
 import { createLogger, type ShellLogger } from './log';
 import { findPython, missingFiles, resolveLayout, type Layout } from './layout';
+import { effectiveEnv, questionSignal, runMode, userDataProblem, VERIFICATION_MARKER } from './mode';
 import { hideChildConsoles } from './winConsole';
 import { placeWindow, readWindowState, writeWindowState, type Placement } from './windowState';
 
-const TEST = process.env.STCFSD_SHELL_TEST === '1';
+// 설치본은 시험 · 개발 길을 따르지 않는다 — 확인용 복사본(표시 파일)만 예외(mode.ts, V5-13)
+const MODE = runMode({
+  packaged: app.isPackaged, env: process.env,
+  verificationMarker: app.isPackaged && fs.existsSync(path.join(process.resourcesPath, VERIFICATION_MARKER)),
+});
+const ENV = effectiveEnv(process.env, MODE);
+const TEST = MODE.test;
 const DEV = !app.isPackaged;
 const IS_WIN = process.platform === 'win32';
 const VERSION = (() => {
@@ -51,10 +59,27 @@ const portFile = path.join(userData, 'mcp', 'stcfsd-mcp-port');
 const windowFile = path.join(userData, 'window.json');
 const prefsFile = path.join(userData, 'shell.json');
 
+// ─── 사용자 폴더 점검(V5-11) ───────────────────────────────────────
+// 쓸 수 없으면 아래의 단일 인스턴스 잠금이 실패해 「이미 떠 있다」로 보고 말없이 끝났다. 잠금 전에 보고, 안 되면 까닭을 보인다.
+// 이것은 사용자가 반드시 봐야 하는 시작 실패다 — 이 프로그램에서 창이 포커스를 가져가도 되는 단 한 곳(오류 상자).
+const udProblem = userDataProblem(userData);
+if (udProblem) {
+  const detail = `사용자 폴더에 쓸 수 없어 StCFSD 를 시작할 수 없습니다.\n\n폴더: ${userData}\n까닭: ${udProblem}\n\n`
+    + '폴더의 권한을 확인하거나(다른 프로그램 · 보안 프로그램이 막는지), 관리자에게 문의해 주십시오.';
+  if (TEST) {
+    // 시험은 아무것도 보이지 않는다 — 오류 상자로 갈 길을 탔다는 것만 알린다
+    if (process.send) { process.send({ type: 'fatal', kind: 'userdata', title: '사용자 폴더에 쓸 수 없습니다', detail }); }
+    process.stderr.write(`STCFSD_SHELL_FATAL ${JSON.stringify({ kind: 'userdata', detail })}\n`);
+  } else {
+    dialog.showErrorBox('StCFSD — 시작할 수 없습니다', detail);
+  }
+  app.exit(4);
+}
+
 // ─── 한 번만 실행 ──────────────────────────────────────────────────
 // 잠금은 사용자 폴더마다다(Chromium 의 ProcessSingleton) — 시험의 임시 폴더는 사용자의 실행과 섞이지 않는다.
-const gotLock = app.requestSingleInstanceLock({ open: args.open ?? null });
-if (!gotLock) {
+const gotLock = !udProblem && app.requestSingleInstanceLock({ open: args.open ?? null, extra: args.extra ?? [] });
+if (!gotLock && !udProblem) {
   // 첫 프로세스가 'second-instance' 로 넘겨준 파일을 연다. 이 프로세스는 곧 끝난다.
   app.exit(0);
 }
@@ -71,7 +96,8 @@ let win: BrowserWindow | undefined;
 let placement: Placement | undefined;
 let entry: unknown;
 let started = false;
-let pendingOpen: string | undefined;
+/** 시작이 끝나기 전에 온 열 파일(명령줄 · 시작 중의 다시 실행) — 차례대로 연다(V5-12a) */
+const pendingOpens: string[] = [];
 let shutDown = false;
 let offBridge: (() => void) | undefined;
 let theme: 'dark' | 'light' = args.theme ?? readPrefs().theme ?? 'dark';
@@ -87,11 +113,17 @@ const diag = {
   titles: [] as string[],
   secondInstances: [] as Array<{ open: string | null; at: number }>,
   opened: [] as Array<{ file: string; ok: boolean; message?: string }>,
+  /** 한 번에 여러 파일이 넘어와 열지 않은 것(V5-12b) — 사용자에게 알린다 */
+  notOpened: [] as string[],
+  queuedWhileStarting: [] as string[],
+  /** 물음 신호의 규칙(questionSignal)이 낸 결과 — 시험 · 실제 길이 같은 함수다 */
+  questionPolicy: [] as Array<{ flash: boolean; show: boolean; focus: boolean }>,
   osDialogs: [] as Array<{ kind: string; summary: string; answer: unknown }>,
   blockedNavigations: [] as string[],
   externalOpened: [] as string[],
   rendererConsole: [] as Array<{ level: string; message: string; source?: string }>,
   childConsolesHidden: [] as string[],
+  keyedRequests: 0,
 };
 
 function readPrefs(): { theme?: 'dark' | 'light' } {
@@ -107,8 +139,9 @@ const log = (line: string, level: 'info' | 'warn' | 'error' = 'info') => {
 const send = (msg: unknown) => { if (TEST && process.send && process.connected) { process.send(msg); } };
 
 // ─── 시작 실패 ─────────────────────────────────────────────────────
-type FailKind = 'files' | 'python' | 'host' | 'bridge' | 'window';
+type FailKind = 'userdata' | 'files' | 'python' | 'host' | 'bridge' | 'window';
 const FAIL_TITLE: Record<FailKind, string> = {
+  userdata: '사용자 폴더(로그)에 쓸 수 없습니다',
   files: '프로그램 파일이 빠져 있습니다',
   python: 'Python 을 찾을 수 없습니다',
   host: '해석 엔진(호스트)을 시작하지 못했습니다',
@@ -199,12 +232,32 @@ async function notifyWithoutScreen(req: HostApi.NotifyRequest): Promise<string |
 // ─── 파일 열기 · 메뉴의 파일 일 ──────────────────────────────────────
 /** 명령줄 · 다시 실행 · 파일 연결로 넘어온 파일 — 확장의 「열기」 길(정해 둔 답으로 대화상자 없이) */
 async function openFile(file: string): Promise<void> {
-  if (!host || !bridge) { pendingOpen = file; return; }
+  if (!host || !bridge || !started) { pendingOpens.push(file); diag.queuedWhileStarting.push(file); return; }
   const r = await host.openProject(file);
   diag.opened.push({ file, ok: r.ok, message: r.message });
   if (r.ok) { bridge.setCurrentFile(r.file); }
   log(`열기 ${file}: ${r.ok ? '성공' : '실패'} — ${r.message ?? ''}`, r.ok ? 'info' : 'warn');
 }
+
+/**
+ * 한 번에 넘어온 파일들(명령줄 · 다시 실행) — 첫 것만 열고 나머지는 열지 않았다고 알린다(V5-12b). 모델은 하나뿐이라
+ * 차례로 열면 앞의 것이 말없이 바뀐다. 알림은 화면의 풍선(화면이 붙기 전이면 시작이 끝난 뒤).
+ */
+async function openFiles(files: string[]): Promise<void> {
+  if (!files.length) { return; }
+  const [first, ...rest] = files;
+  await openFile(first);
+  if (!rest.length) { return; }
+  diag.notOpened.push(...rest);
+  log(`여러 파일 — 첫 파일만 연다. 열지 않음: ${rest.join(', ')}`, 'warn');
+  const tell = () => platform?.notify({
+    severity: 'warning', items: [], modal: false,
+    message: `파일은 한 번에 하나만 엽니다. ${path.basename(first)} 을(를) 열고, 다음 ${rest.length}개는 열지 않았습니다.`,
+    detail: rest.map(f => path.basename(f)).join('\n'),
+  });
+  if (started) { void tell(); } else { notices.push(tell); }
+}
+const notices: Array<() => unknown> = [];
 
 /** 메뉴 「열기」 · 「저장」 — 화면의 Open · Save 단추와 같은 길(웹뷰 메시지 → 호스트 → OS 대화상자) */
 function fileAction(action: 'open' | 'save'): void {
@@ -229,7 +282,11 @@ function bringToFront(): void {
   win.focus();
 }
 
+/** 다리의 두 출처(틀 서버 · 웹뷰 서버) 가운데 하나인가 */
 function sameOrigin(url: string): boolean {
+  try { const o = new URL(url).origin; return !!bridge && (o === bridge.origin || o === bridge.webviewOrigin); } catch { return false; }
+}
+function isFrameOrigin(url: string): boolean {
   try { return !!bridge && new URL(url).origin === bridge.origin; } catch { return false; }
 }
 
@@ -260,14 +317,19 @@ function createSession(b: HostApi.BridgeHandle): Electron.Session {
     let cancel = false;
     try {
       const u = new URL(details.url);
-      if (/^(https?|wss?|ftp):$/.test(u.protocol) && u.origin !== b.origin) { cancel = true; }
+      if (/^(https?|wss?|ftp):$/.test(u.protocol) && u.origin !== b.origin && u.origin !== b.webviewOrigin) { cancel = true; }
     } catch { cancel = false; }
     if (cancel) { diag.blockedNavigations.push(`request ${details.url}`); }
     cb({ cancel });
   });
   ses.webRequest.onBeforeSendHeaders((details, cb) => {
     const headers = details.requestHeaders;
+    delete headers['X-StCFSD-Key'];
     if (sameOrigin(details.url)) { headers.Authorization = `Bearer ${b.token}`; } else { delete headers.Authorization; }
+    // 쓰기 열쇠(V5-04 · V5-18): 틀 서버로 가는 요청 가운데 **맨 위 프레임**(틀 · 새 화면)이 낸 것에만. 페이지는 열쇠를 모른다.
+    // 끼운 웹뷰(다른 출처의 iframe)가 낸 요청에는 붙이지 않는다 — 그 요청은 Origin 이 웹뷰 서버라 다리도 거절한다.
+    const frame = (details as { frame?: Electron.WebFrameMain | null }).frame;
+    if (isFrameOrigin(details.url) && frame && !frame.parent) { headers['X-StCFSD-Key'] = b.writeKey; diag.keyedRequests += 1; }
     cb({ requestHeaders: headers });
   });
   // 권한: 보고서의 「클립보드 복사」만.
@@ -289,12 +351,13 @@ function setTheme(t: 'dark' | 'light'): void {
     if (item) { item.checked = id === `theme-${t}`; }
   }
   if (win && !win.isDestroyed() && bridge) {
-    if (screenPath(bridge) === '/ui/') {
-      // 새 검토 화면(U1)은 페이지를 다시 싣지 않고 바꾼다 — 끼운 설계 화면의 아직 보내지 않은 입력을 잃지 않게
-      void win.webContents.executeJavaScript(`window.__stcfsdUi && window.__stcfsdUi.setTheme(${JSON.stringify(t)})`, true).catch(() => undefined);
-    } else {
-      void win.loadURL(`${bridge.origin}/?theme=${t}`);
-    }
+    // 페이지를 다시 싣지 않는다(V5-03) — 틀 · 새 화면 모두 그 자리에서 바꾸고, 끼운 웹뷰에는 postMessage 로 알린다.
+    // 다시 실으면 아직 호스트에 가지 않은 설계 탭 입력이 사라졌다.
+    const call = screenPath(bridge) === '/ui/'
+      ? `window.__stcfsdUi && window.__stcfsdUi.setTheme(${JSON.stringify(t)})`
+      : `window.__stcfsdFrame && window.__stcfsdFrame.setTheme(${JSON.stringify(t)})`;
+    void win.webContents.executeJavaScript(call, true).catch(() => undefined);
+    win.setBackgroundColor(t === 'light' ? '#ffffff' : '#1f1f1f');
   }
 }
 
@@ -400,8 +463,11 @@ function onBridgeEvent(ev: HostApi.BridgeEvent): void {
   if (!win || win.isDestroyed()) { return; }
   if (ev.type === 'platform:question') {
     diag.questionSignals += 1;
-    // 작업 표시줄 단추만 깜빡인다(창을 앞으로 꺼내지 않는다). 사용자가 창으로 오면(focus) 멈춘다.
-    if (!win.isFocused()) { diag.flashCalls += 1; if (!TEST) { win.flashFrame(true); } }
+    // 작업 표시줄 단추만 깜빡인다(창을 앞으로 꺼내지 않는다). 사용자가 창으로 오면(focus) 멈춘다. 규칙은 questionSignal 하나.
+    const sig = questionSignal({ focused: win.isFocused(), test: TEST });
+    diag.questionPolicy.push(sig);
+    if (sig.count) { diag.flashCalls += 1; }
+    if (sig.flash) { win.flashFrame(true); }
   } else if (ev.type === 'platform:answered') {
     if (!TEST) { win.flashFrame(false); }
   }
@@ -432,7 +498,12 @@ async function shutdown(): Promise<void> {
 // ─── 시작 ────────────────────────────────────────────────────────
 async function start(): Promise<void> {
   await app.whenReady();
-  logger = createLogger({ dir: path.join(userData, 'logs'), echo: DEV || TEST });
+  try {
+    logger = createLogger({ dir: path.join(userData, 'logs'), echo: DEV || TEST });
+  } catch (err) {
+    // 로그 폴더를 만들 수 없다(V5-11) — 보이는 오류 상자 길로
+    return failStartup('userdata', `로그 폴더를 만들 수 없습니다.\n폴더: ${path.join(userData, 'logs')}\n까닭: ${String((err as Error)?.message ?? err)}`);
+  }
   restoreConsole = logger.captureConsole();
   process.on('uncaughtException', err => log(`잡히지 않은 예외: ${err?.stack ?? err}`, 'error'));
   process.on('unhandledRejection', err => log(`처리되지 않은 거부: ${(err as Error)?.stack ?? err}`, 'error'));
@@ -442,7 +513,7 @@ async function start(): Promise<void> {
   if (TEST) { installTestDialogs(); }
 
   diag.stage = 'files';
-  layout = resolveLayout({ packaged: app.isPackaged, appPath: app.getAppPath(), resourcesPath: process.resourcesPath, env: process.env });
+  layout = resolveLayout({ packaged: app.isPackaged, appPath: app.getAppPath(), resourcesPath: process.resourcesPath, env: ENV });
   log(`배치: ${layout.kind} · appRoot=${layout.appRoot}`);
   const missing = missingFiles(layout);
   if (missing.length) {
@@ -450,7 +521,7 @@ async function start(): Promise<void> {
       ? '\n\n저장소 루트에서 npx tsc -p ./, desktop 에서 npm run build 를 먼저 돌리십시오.' : '\n\n프로그램을 다시 설치해 주십시오.'}`);
   }
   diag.stage = 'python';
-  const py = findPython(layout, process.env);
+  const py = findPython(layout, ENV);
   if (!py.ok) {
     await failStartup('python', `해석에 쓰는 Python 이 없습니다.\n찾아본 곳:\n${py.tried.map(t => `  ${t}`).join('\n')}\n\n${layout.kind === 'dev'
       ? '저장소 루트에 .venv(numpy · scipy)가 있어야 합니다. 다른 Python 을 쓰려면 STCFSD_PYTHON 에 그 경로를 넣으십시오.'
@@ -468,7 +539,7 @@ async function start(): Promise<void> {
   api = require(layout.hostEntry) as typeof HostApi;
 
   diag.stage = 'host';
-  documentsDir = process.env.STCFSD_DOCUMENTS ? path.resolve(process.env.STCFSD_DOCUMENTS) : app.getPath('documents');
+  documentsDir = ENV.STCFSD_DOCUMENTS ? path.resolve(ENV.STCFSD_DOCUMENTS) : app.getPath('documents');
   platform = api.createBridgePlatform({
     log: line => logger?.host(line),
     documentsDir,
@@ -516,15 +587,17 @@ async function start(): Promise<void> {
   }
   started = true;
   diag.stage = 'running';
-  const first = args.open ?? pendingOpen;
-  pendingOpen = undefined;
-  if (first) { await openFile(first); }
+  // 명령줄의 파일(여럿이면 첫 것 + 알림), 그다음 시작 중에 온 것을 온 차례대로(V5-12a — 앞의 것을 버리지 않는다)
+  const queued = pendingOpens.splice(0);
+  if (args.open) { await openFiles([args.open, ...(args.extra ?? [])]); }
+  for (const f of queued) { await openFile(f); }
+  for (const n of notices.splice(0)) { void n(); }
   send({ type: 'stage', stage: 'running', pid: process.pid, origin: bridge.origin, portFile, userData, screen: screenPath(bridge) });
 }
 
 /** 시험 · 개발에서 Claude 설정 파일을 바꿔 끼운다. 시험인데 주지 않았으면 사용자 폴더 안의 없는 경로(= 설치 안 됨) */
 function claudeConfigPath(): string | undefined {
-  if (process.env.STCFSD_CLAUDE_CONFIG) { return path.resolve(process.env.STCFSD_CLAUDE_CONFIG); }
+  if (ENV.STCFSD_CLAUDE_CONFIG) { return path.resolve(ENV.STCFSD_CLAUDE_CONFIG); }
   if (TEST) { return path.join(userData, 'no-claude', 'Claude', 'claude_desktop_config.json'); }
   return undefined;
 }
@@ -590,12 +663,14 @@ function installTestControl(): void {
 if (gotLock) {
   installTestControl();
   app.on('second-instance', (_e, argv, cwd, data) => {
-    const fromData = (data as { open?: string | null } | undefined)?.open ?? undefined;
-    const file = fromData ?? parseArgs(argv, cwd, Boolean(process.defaultApp)).open;
-    diag.secondInstances.push({ open: file ?? null, at: Date.now() });
-    log(`다시 실행됨${file ? ` — 열 파일 ${file}` : ''}`);
+    const d = data as { open?: string | null; extra?: string[] } | undefined;
+    const parsed = d && 'open' in d ? { open: d.open ?? undefined, extra: Array.isArray(d.extra) ? d.extra : [] } : parseArgs(argv, cwd, Boolean(process.defaultApp));
+    const files = parsed.open ? [parsed.open, ...(parsed.extra ?? [])] : [];
+    diag.secondInstances.push({ open: files[0] ?? null, at: Date.now() });
+    log(`다시 실행됨${files.length ? ` — 열 파일 ${files.join(', ')}` : ''}${started ? '' : ' (아직 시작 중 — 차례에 둔다)'}`);
     bringToFront();
-    if (file) { if (started) { void openFile(file); } else { pendingOpen = file; } }
+    // 시작 중이면 openFile 이 차례에 둔다(V5-12a). 떠 있으면 바로 연다 — 지금 모델은 묻지 않고 바뀐다(K2 전, README 「잃는 것」)
+    void openFiles(files);
   });
   app.on('web-contents-created', (_e, wc) => { if (wc.getType() === 'window') { guardContents(wc); } });
   app.on('window-all-closed', () => { app.quit(); });

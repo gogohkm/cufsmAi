@@ -4,11 +4,16 @@
 //   node desktop/installer/python.mjs            받기(캐시) → 풀기 → 휠 넣기 → ._pth → 덜어 내기 → 실행 확인 → 알림 파일
 //   --no-trim                                    덜어 내지 않는다(크기 비교용)
 //
-// 받는 곳은 둘뿐이다: python.org(CPython embeddable 배포판)와 PyPI(numpy · scipy 휠). uv 는 이 PC 에 없어서 쓰지 않았다 —
-// 맡은 일(정해진 판의 Python + 휠)은 이 두 곳에서 받아 확인하는 것으로 충분하다. 받은 파일은 build/downloads/ 에 캐시.
-//  1. Python: python-<판>-embed-amd64.zip(python.org). python.exe 의 Authenticode 서명(Python Software Foundation)을 확인한다.
-//  2. 휠: PyPI JSON API 에서 cp313-win_amd64 휠의 주소와 sha256 을 받아, 받은 파일의 sha256 을 맞춰 본다. 의존성은 numpy 하나
-//     (scipy → numpy) — 둘 다 고정한다. 휠은 zip 이라 그대로 site-packages 에 푼다(*.data 의 purelib · platlib 만).
+// 받는 곳은 둘뿐이다: python.org(CPython embeddable 배포판)와 PyPI(files.pythonhosted.org 의 numpy · scipy 휠). uv 는 이 PC 에 없어서
+// 쓰지 않았다. 받은 파일은 build/downloads/ 에 캐시. **주소와 sha256 은 이 파일의 PINS 에 고정돼 있다**(V5-14):
+//  - 받은 파일 · 캐시의 파일 모두 PINS 의 sha256 과 맞춰 본다. 다르면 멈춘다(캐시를 고쳐 쓰지 않는다 — 지우고 다시 돌리라고 알린다).
+//    받는 중에는 임시 이름(`.part`)에 쓰고, 맞으면 이름을 바꾼다. HTTP 상태가 200 이 아니면 멈춘다.
+//  - 고정값의 출처: 휠 둘은 PyPI 가 공개한 sha256(파일 페이지 · JSON API 의 digests)과 같다. embeddable zip 은 python.org 에서 처음
+//    받은 것의 sha256 이다 — 그때(2026-11-22) 그 안의 실행 파일 · DLL · .pyd 30 개가 모두 유효한 Authenticode 서명(PSF, vcruntime 은
+//    Microsoft)이었다. 지금도 빌드마다 그 30 개 전부의 서명을 다시 확인한다.
+//  1. Python: python-<판>-embed-amd64.zip(python.org) — sha256 고정 + 안의 모든 .exe · .dll · .pyd 의 서명.
+//  2. 휠: 의존성은 numpy 하나(scipy → numpy) — 둘 다 주소 · sha256 고정. 휠은 zip 이라 그대로 site-packages 에 푼다(*.data 의 purelib · platlib 만).
+//     휠 안의 DLL(OpenBLAS 등)은 서명이 없다 — 그쪽은 sha256 고정이 확인의 전부다.
 //  3. `python313._pth` — 이 Python 의 sys.path 를 이 파일이 정한다(옮겨도 되는 상대 경로): 표준 라이브러리 zip, 자기 폴더,
 //     `Lib\site-packages`, 그리고 엔진 `..\app-root\python`(._pth 가 있으면 스크립트 폴더를 sys.path 에 넣지 않는다 — server.py 가
 //     `engine` · `design` … 을 불러올 수 있게). ._pth 가 있으면 PYTHONPATH · PYTHONHOME · 사용자 site-packages 를 보지 않는다 —
@@ -31,12 +36,19 @@ export const pythonDir = path.join(buildDir, 'python-win-x64');
 /** 고정한 판 — 저장소의 .venv 와 같다(2026-11-22: Python 3.13.14 · numpy 2.4.4 · scipy 1.17.1). 바꾸면 여기만 바꾼다 */
 export const PINS = {
   python: '3.13.14',
+  embed: {
+    url: 'https://www.python.org/ftp/python/3.13.14/python-3.13.14-embed-amd64.zip',
+    sha256: '90b4e5b9898b72d744650524bff92377c367f44bd5fbd09e3148656c080ad907',
+  },
   packages: [
-    { name: 'numpy', version: '2.4.4', license: 'BSD-3-Clause (+ 함께 묶인 OpenBLAS 등 — licenses/numpy 참고)' },
-    { name: 'scipy', version: '1.17.1', license: 'BSD-3-Clause (+ 함께 묶인 OpenBLAS · libgfortran 등 — licenses/scipy 참고)' },
+    { name: 'numpy', version: '2.4.4', license: 'BSD-3-Clause (+ 함께 묶인 OpenBLAS 등 — licenses/numpy 참고)',
+      url: 'https://files.pythonhosted.org/packages/57/fb/48649b4971cde70d817cf97a2a2fdc0b4d8308569f1dd2f2611959d2e0cf/numpy-2.4.4-cp313-cp313-win_amd64.whl',
+      sha256: '5c70f1cc1c4efbe316a572e2d8b9b9cc44e89b95f79ca3331553fbb63716e2bf' },
+    { name: 'scipy', version: '1.17.1', license: 'BSD-3-Clause (+ 함께 묶인 OpenBLAS · libgfortran 등 — licenses/scipy 참고)',
+      url: 'https://files.pythonhosted.org/packages/35/e5/d6d0e51fc888f692a35134336866341c08655d92614f492c6860dc45bb2c/scipy-1.17.1-cp313-cp313-win_amd64.whl',
+      sha256: '37425bc9175607b0268f493d79a292c39f9d001a357bebb6b88fdfaff13f6448' },
   ],
 };
-const PY_TAG = 'cp313';
 const PTH = 'python313._pth';
 
 /** 덜어 낼 것(site-packages 기준 glob) */
@@ -74,15 +86,24 @@ export function compileGlob(glob) {
   return rel => m(rel.split('/'), 0, 0);
 }
 
-async function download(url, file, expectSha) {
-  if (fs.existsSync(file) && (!expectSha || sha256(fs.readFileSync(file)) === expectSha)) { return fs.readFileSync(file); }
+/** 고정한 sha256 이 있어야만 받는다. 캐시 · 새로 받은 것 모두 맞춰 보고, 다르면 멈춘다(V5-14) */
+export async function download(url, file, expectSha) {
+  if (!/^[0-9a-f]{64}$/.test(String(expectSha))) { throw new Error(`고정한 sha256 이 없다: ${url}`); }
+  if (fs.existsSync(file)) {
+    const got = sha256(fs.readFileSync(file));
+    if (got !== expectSha) { throw new Error(`캐시 파일의 sha256 이 고정값과 다르다 — 쓰지 않는다. 지우고 다시 돌려라: ${file}\n  ${got} ≠ ${expectSha}`); }
+    return fs.readFileSync(file);
+  }
   say(`  받기 ${url}`);
   const r = await fetch(url, { headers: { 'User-Agent': 'stcfsd-installer-build' } });
-  if (!r.ok) { throw new Error(`받지 못함 ${url}: HTTP ${r.status}`); }
+  if (r.status !== 200) { throw new Error(`받지 못함 ${url}: HTTP ${r.status}`); }
   const buf = Buffer.from(await r.arrayBuffer());
-  if (expectSha && sha256(buf) !== expectSha) { throw new Error(`sha256 이 다르다 ${url}: ${sha256(buf)} ≠ ${expectSha}`); }
+  const got = sha256(buf);
+  if (got !== expectSha) { throw new Error(`받은 파일의 sha256 이 고정값과 다르다 — 버린다 ${url}\n  ${got} ≠ ${expectSha}`); }
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, buf);
+  const part = `${file}.part`;
+  fs.writeFileSync(part, buf);
+  fs.renameSync(part, file);
   return buf;
 }
 
@@ -94,17 +115,20 @@ function unzip(zip, dest) {
   if (r.status !== 0) { throw new Error(`풀지 못함 ${zip}: ${r.stderr}`); }
 }
 
-function authenticode(file) {
-  const ps = `$s = Get-AuthenticodeSignature -LiteralPath '${file.replace(/'/g, "''")}'; [pscustomobject]@{status="$($s.Status)"; subject="$($s.SignerCertificate.Subject)"} | ConvertTo-Json -Compress`;
+/** 폴더 맨 위의 .exe · .dll · .pyd 모두의 Authenticode 서명 → [{name, status, subject}] */
+function authenticodeAll(dir) {
+  const ps = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-ChildItem -LiteralPath '${dir.replace(/'/g, "''")}' -File | Where-Object { $_.Extension -in '.exe','.dll','.pyd' } | `
+    + `ForEach-Object { $s = Get-AuthenticodeSignature -LiteralPath $_.FullName; [pscustomobject]@{name=$_.Name; status="$($s.Status)"; subject="$($s.SignerCertificate.Subject)"} } | ConvertTo-Json -Compress`;
   // PowerShell 7(pwsh)을 먼저 쓴다. Windows PowerShell 5 를 pwsh 아래에서 띄우면 PSModulePath 가 섞여 서명 모듈을 못 읽는다 — 그 변수를 뺀다.
   const env = { ...process.env };
   delete env.PSModulePath;
   for (const shell of ['pwsh', 'powershell']) {
-    const r = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', windowsHide: true, env });
-    try { const j = JSON.parse(r.stdout); if (j.status) { return j; } } catch { /* 다음 */ }
+    const r = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', ps], { encoding: 'utf8', windowsHide: true, env, maxBuffer: 16 * 1024 * 1024 });
+    try { const j = JSON.parse(r.stdout); const list = Array.isArray(j) ? j : [j]; if (list.length && list[0].status) { return list; } } catch { /* 다음 */ }
   }
-  return { status: 'unknown', subject: '' };
+  return [];
 }
+const TRUSTED_SIGNERS = /CN=(Python Software Foundation|Microsoft Windows Software Compatibility Publisher|Microsoft Corporation),/;
 
 function trimTree(root, rules) {
   const compiled = rules.map(([g, why]) => ({ g, why, fn: compileGlob(g) }));
@@ -128,16 +152,21 @@ export async function buildPython({ trim = true } = {}) {
   const t0 = Date.now();
   say(`▶ Python ${PINS.python} embeddable + ${PINS.packages.map(p => `${p.name} ${p.version}`).join(' · ')}`);
   // 1. Python
-  const embedName = `python-${PINS.python}-embed-amd64.zip`;
-  const embedUrl = `https://www.python.org/ftp/python/${PINS.python}/${embedName}`;
-  const embedBuf = await download(embedUrl, path.join(downloads, embedName));
+  const embedUrl = PINS.embed.url;
+  const embedName = path.basename(new URL(embedUrl).pathname);
+  const embedBuf = await download(embedUrl, path.join(downloads, embedName), PINS.embed.sha256);
+  say(`  ${embedName} · sha256 고정값과 같음`);
   fs.rmSync(pythonDir, { recursive: true, force: true });
   unzip(path.join(downloads, embedName), pythonDir);
   const exe = path.join(pythonDir, 'python.exe');
   if (!fs.existsSync(exe) || !fs.existsSync(path.join(pythonDir, PTH))) { throw new Error(`${embedName} 의 모양이 다르다(python.exe · ${PTH} 없음)`); }
-  const sig = authenticode(exe);
-  if (sig.status !== 'Valid' || !/Python Software Foundation/.test(sig.subject)) { throw new Error(`python.exe 서명 확인 실패: ${JSON.stringify(sig)}`); }
-  say(`  python.exe 서명: ${sig.status} · ${sig.subject.split(',')[0]}`);
+  const sigs = authenticodeAll(pythonDir);
+  const badSig = sigs.filter(s => s.status !== 'Valid' || !TRUSTED_SIGNERS.test(`${s.subject},`));
+  if (sigs.length < 10 || badSig.length || !sigs.some(s => s.name === 'python.exe') || !sigs.some(s => s.name === 'python313.dll')) {
+    throw new Error(`Python 실행 파일 · DLL 서명 확인 실패(${sigs.length}개 중 ${badSig.length}개): ${JSON.stringify(badSig.slice(0, 5))}`);
+  }
+  const sig = sigs.find(s => s.name === 'python.exe');
+  say(`  서명: .exe · .dll · .pyd ${sigs.length}개 모두 Valid (${[...new Set(sigs.map(s => s.subject.split(',')[0]))].join(' · ')})`);
   const pythonBytes = duBytes(pythonDir);
 
   // 2. 휠
@@ -145,11 +174,9 @@ export async function buildPython({ trim = true } = {}) {
   fs.mkdirSync(sp, { recursive: true });
   const wheels = [];
   for (const p of PINS.packages) {
-    const meta = await (await fetch(`https://pypi.org/pypi/${p.name}/${p.version}/json`, { headers: { Accept: 'application/json' } })).json();
-    const f = (meta.urls ?? []).find(u => u.packagetype === 'bdist_wheel' && u.filename.includes(`-${PY_TAG}-${PY_TAG}-win_amd64.whl`));
-    if (!f) { throw new Error(`PyPI 에 ${p.name} ${p.version} 의 ${PY_TAG}-win_amd64 휠이 없다`); }
+    const f = { filename: path.basename(new URL(p.url).pathname), url: p.url, digests: { sha256: p.sha256 } };
     const file = path.join(downloads, f.filename);
-    await download(f.url, file, f.digests.sha256);
+    f.size = (await download(f.url, file, f.digests.sha256)).length;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd-wheel-'));
     unzip(file, tmp);
     for (const name of fs.readdirSync(tmp)) {
@@ -165,8 +192,10 @@ export async function buildPython({ trim = true } = {}) {
     }
     fs.rmSync(tmp, { recursive: true, force: true });
     wheels.push({ name: p.name, version: p.version, file: f.filename, url: f.url, sha256: f.digests.sha256, size: f.size, license: p.license });
-    say(`  휠 ${f.filename} · sha256 ${f.digests.sha256.slice(0, 16)}… 맞음`);
+    say(`  휠 ${f.filename} · sha256 고정값과 같음`);
   }
+  // 휠 안의 빈 항목이 풀려 생긴 0 바이트 *.whl(V5 덤) — 쓸모없다
+  for (const n of fs.readdirSync(sp)) { if (n.endsWith('.whl')) { fs.rmSync(path.join(sp, n), { force: true }); } }
   const packagesBytes = duBytes(sp);
 
   // 3. ._pth — 상대 경로라 폴더째 옮겨도 된다
@@ -230,7 +259,7 @@ export async function buildPython({ trim = true } = {}) {
 
   const info = {
     schema: 'stcfsd-python-bundle/1', createdAt: new Date().toISOString(),
-    python: { version: PINS.python, url: embedUrl, sha256: sha256(embedBuf), signature: sig },
+    python: { version: PINS.python, url: embedUrl, sha256: sha256(embedBuf), signature: sig, signedFiles: sigs.length, pinned: PINS.embed.sha256 },
     packages: wheels, pth: fs.readFileSync(path.join(pythonDir, PTH), 'utf8').split(/\r?\n/).filter(Boolean),
     sizes: { pythonBytes, packagesBytes, removedBytes, totalBytes: duBytes(pythonDir), files: countFiles(pythonDir) },
     removed, check,

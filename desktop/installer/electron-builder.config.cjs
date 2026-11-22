@@ -5,6 +5,8 @@
 //   resources/app-root/   stage/app-root 확장 호스트(out) · 엔진(python) · webview · media(mcp-server.js) · package.json
 //   resources/python/     build/python-win-x64  CPython 3.13 embeddable + numpy · scipy(python.mjs)
 //
+//   (resources/app 에는 이 밖에 ui/ — 새 검토 화면, uninstall/disconnect.js — 제거 때 Claude 등록 지우기)
+//
 // asar 를 쓰지 않는다(asar: false). Python 자식 프로세스(python.exe · server.py)와 Claude Desktop 이 띄우는 stdio MCP 서버
 // (StCFSD.exe <resources>\app-root\media\mcp-server.js)는 디스크의 진짜 파일이어야 한다 — 그것들은 어차피 asar 밖(extraResources)이고,
 // asar 에 넣을 수 있는 것은 껍데기 · 호스트 묶음 세 파일 + 틀(약 170 KiB)뿐이라 asar 로 얻는 것(파일 수 · 읽기 속도)이 없다.
@@ -48,8 +50,17 @@ module.exports = {
   nodeGypRebuild: false,
   buildDependenciesFromSource: false,
   publish: null,
-  // Electron 퓨즈는 건드리지 않는다(electronFuses 를 두지 않는다). 특히 RunAsNode 를 끄면 Claude Desktop 이
-  // `StCFSD.exe <resources>\app-root\media\mcp-server.js` + ELECTRON_RUN_AS_NODE=1 로 MCP 서버를 띄우지 못한다.
+  // Electron 퓨즈(V5-13). RunAsNode 는 켜 둔다 — Claude Desktop 이 `StCFSD.exe <resources>\app-root\media\mcp-server.js`
+  // + ELECTRON_RUN_AS_NODE=1 로 MCP 서버를 띄우고, 제거 도우미(uninstall/disconnect.js)도 그 길로 돈다.
+  // 쓰지 않는 것은 끈다: NODE_OPTIONS 환경 변수(사용자 환경에 --require 를 넣어 주 프로세스 · MCP 서버에 코드 넣기),
+  // --inspect 류 명령줄 인자(디버거 붙이기), file:// 의 추가 특권(이 프로그램은 file:// 을 싣지 않는다 — 다리의 http 만).
+  // 나머지는 Electron 기본값 그대로(asar 를 쓰지 않으니 asar 무결성 · asar 에서만 싣기는 켤 수 없다 — README).
+  electronFuses: {
+    runAsNode: true,
+    enableNodeOptionsEnvironmentVariable: false,
+    enableNodeCliInspectArguments: false,
+    grantFileProtocolExtraPrivileges: false,
+  },
   fileAssociations: [
     { ext: 'csd', name: 'StCFSD.Project', description: 'StCFSD 단면 설계 프로젝트', role: 'Editor', ...(winIcon ? { icon: winIcon } : {}) },
   ],
@@ -76,6 +87,8 @@ module.exports = {
     // 제거할 때 %APPDATA%\StCFSD(설정 · 창 위치 · 로그 · MCP 포트 파일)는 남긴다. Claude Desktop 설정의 등록은 「끊기」로 지운다.
     deleteAppDataOnUninstall: false,
     runAfterFinish: true,
+    // 제거할 때 Claude Desktop 등록을 지우는 단계(customUnInstall) — installer.nsh
+    include: path.join(here, 'installer.nsh'),
     artifactName: 'StCFSD-Setup-${version}-x64.${ext}',
     ...(winIcon ? { installerIcon: winIcon, uninstallerIcon: winIcon } : {}),
   },

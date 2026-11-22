@@ -11,8 +11,10 @@
 import * as path from 'node:path';
 
 export interface ShellArgs {
-  /** 열 파일(절대 경로) */
+  /** 열 파일(절대 경로) — 여럿이면 첫 것 */
   open?: string;
+  /** 함께 넘어온 다른 프로젝트 파일(열지 않고 알린다 — V5-12b) */
+  extra?: string[];
   /** 사용자 폴더(로그 · 창 위치 · 호스트 설정 · MCP 포트 파일). 시험은 모두 이것을 준다 */
   userData?: string;
   theme?: 'dark' | 'light';
@@ -25,6 +27,7 @@ export const PROJECT_EXT = /\.(csd|stcfsd)$/i;
 export function parseArgs(argv: string[], cwd: string, defaultApp: boolean): ShellArgs {
   const out: ShellArgs = {};
   const rest = argv.slice(defaultApp ? 2 : 1);
+  const add = (f: string) => { if (!out.open) { out.open = f; } else if (f !== out.open && !(out.extra ?? []).includes(f)) { (out.extra ??= []).push(f); } };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
     if (a === '--ui') { out.ui = true; continue; }
@@ -34,12 +37,12 @@ export function parseArgs(argv: string[], cwd: string, defaultApp: boolean): She
       return undefined;
     };
     const open = take('open');
-    if (open !== undefined) { out.open = path.resolve(cwd, open); continue; }
+    if (open !== undefined) { add(path.resolve(cwd, open)); continue; }
     const ud = take('user-data');
     if (ud !== undefined) { out.userData = path.resolve(cwd, ud); continue; }
     const theme = take('theme');
     if (theme !== undefined) { if (theme === 'dark' || theme === 'light') { out.theme = theme; } continue; }
-    if (!a.startsWith('-') && PROJECT_EXT.test(a) && !out.open) { out.open = path.resolve(cwd, a); }
+    if (!a.startsWith('-') && PROJECT_EXT.test(a)) { add(path.resolve(cwd, a)); }
   }
   return out;
 }

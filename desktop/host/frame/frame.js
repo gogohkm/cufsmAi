@@ -8,6 +8,10 @@
  *  - 단순 알림(platform:notify)은 오른쪽 아래 풍선. 진행(platform:progress)은 제목 표시줄.
  *  - 좌굴 보고서 같은 두 번째 웹뷰(webview:created)는 오른쪽 칸에 띄우고, ✕ 를 누르면 호스트에 닫기를 보낸다.
  *  - 제목 표시줄: 지금 파일 이름(file:current), Claude 연결 상태(`/api/claude/status`, 10 초마다).
+ *  - 쓰기(POST · `/api/wv-key`)에는 `X-StCFSD-Key` 를 붙인다 — 브라우저는 `?t=` 교환이 이 탭의 sessionStorage 에 둔 열쇠,
+ *    Electron 은 주 프로세스가 붙이므로 페이지에는 없다(V5-04). 끼운 웹뷰는 다른 출처(웹뷰 서버)라 이 열쇠에 닿지 않는다.
+ *  - 웹뷰 열쇠: 끼운 웹뷰가 postMessage 로 `need-key` 를 물으면, 그것이 이 틀의 iframe(설계 · 보고서)이고 웹뷰 서버 출처일 때만
+ *    `/api/wv-key` 로 받은 열쇠를 그 창에 건넨다. 테마는 새로 고침 없이 iframe 에 postMessage 로(V5-03).
  * 평범한 ES2017 로 쓴다(빌드 없이 다리가 그대로 내준다).
  */
 (function () {
@@ -21,10 +25,52 @@
   var sideId = null;
   var progress = {};
   var stateObj = null;
+  var wvOrigin = null;
+  var KEY = null;
+  try { KEY = sessionStorage.getItem('stcfsd.bridge.key.' + location.port); } catch (e) { KEY = null; }
 
+  function keyHeaders(h) { if (KEY) { h['X-StCFSD-Key'] = KEY; } return h; }
   function post(url, body) {
-    return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' })
+    return fetch(url, { method: 'POST', headers: keyHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body), credentials: 'same-origin' })
       .then(function (r) { return r.json(); });
+  }
+  // ── 웹뷰 열쇠 — 이 틀의 iframe 에만 ─────────────────────────────
+  var wvKey = null;
+  var wvKeyWaiters = [];
+  var wvKeyAsked = false;
+  function withWebviewKey(cb) {
+    if (wvKey) { cb(wvKey); return; }
+    wvKeyWaiters.push(cb);
+    if (wvKeyAsked) { return; }
+    wvKeyAsked = true;
+    fetch('/api/wv-key', { headers: keyHeaders({}), credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (r) {
+      wvKeyAsked = false;
+      if (!r || !r.success) { toast({ severity: 'error', message: '화면 연결 열쇠를 받지 못했다 — 주소를 다시 열어 주십시오(' + ((r && r.error) || '') + ')' }); return; }
+      wvKey = r.data.key;
+      var w = wvKeyWaiters; wvKeyWaiters = [];
+      w.forEach(function (f) { f(wvKey); });
+    }).catch(function () { wvKeyAsked = false; });
+  }
+  function ownFrames() { return [$('designer'), $('side-frame')].filter(Boolean); }
+  window.addEventListener('message', function (e) {
+    var d = e.data;
+    if (!d || d.stcfsdBridge !== 1 || !wvOrigin || e.origin !== wvOrigin) { return; }
+    var from = ownFrames().filter(function (f) { return f.contentWindow === e.source; })[0];
+    if (!from) { return; }
+    if (d.type === 'need-key') {
+      withWebviewKey(function (k) { try { e.source.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, wvOrigin); } catch (err) { /* 닫힘 */ } });
+    }
+  });
+  function toWebviews(msg) {
+    if (!wvOrigin) { return; }
+    ownFrames().forEach(function (f) { try { if (f.contentWindow) { f.contentWindow.postMessage(msg, wvOrigin); } } catch (err) { /* 아직 */ } });
+  }
+  /** 테마 — 틀은 클래스만, 끼운 웹뷰는 postMessage 로(다시 싣지 않는다: 아직 호스트에 가지 않은 설계 탭 입력이 그대로) */
+  function setTheme(t) {
+    if (t !== 'light' && t !== 'dark') { return; }
+    theme = t;
+    document.documentElement.classList.toggle('light', theme === 'light');
+    toWebviews({ stcfsdBridge: 1, type: 'theme', theme: t });
   }
   function wvUrl(w) { return w.url + (theme ? '?theme=' + theme : ''); }
   function el(tag, attrs, text) {
@@ -37,6 +83,7 @@
   // ── 상태 ──────────────────────────────────────────────────────────
   function applyState(s) {
     stateObj = s;
+    wvOrigin = s.webviewOrigin || null;
     if (!theme) { theme = s.theme === 'light' ? 'light' : 'dark'; }
     document.documentElement.classList.toggle('light', theme === 'light');
     setFile(s.currentFile, s.currentName);
@@ -270,5 +317,7 @@
     get sideId() { return sideId; },
     get dialog() { return current; },
     get queued() { return queue.length; },
+    get theme() { return theme; },
+    setTheme: setTheme,
   };
 })();

@@ -260,7 +260,7 @@ async function main() {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const j = await res.json();
-    if (/No active CUFSM panel/i.test(JSON.stringify(j?.error ?? ''))) { noPanel.push(`${route} ${body?.action ?? ''}`); }
+    if (/No active CUFSM panel|is still starting \(its design panel is not ready yet\)/i.test(JSON.stringify(j?.error ?? ''))) { noPanel.push(`${route} ${body?.action ?? ''}`); }
     return j;
   };
   const action = (name, params = {}) => bridge('POST', '/action', { action: name, ...params });
@@ -381,7 +381,7 @@ async function main() {
 
   section('4. 설계 패널은 끝까지 살아 있다');
   const st = await panelAlive('열기 · 저장을 여러 번 한 뒤');
-  check('어느 MCP 응답에도 "No active CUFSM panel" 이 없다', noPanel.length === 0, noPanel.join(', ') || '0건');
+  check('어느 MCP 응답에도 「패널 없음」(No active CUFSM panel · 독립 모드의 HOST_STARTING 「still starting」)이 없다', noPanel.length === 0, noPanel.join(', ') || '0건');
   const designerViews = st.webviews.filter(w => w.viewType === 'stcfsd.designer');
   check('설계 패널은 하나이고 고정돼 있다', designerViews.length === 1 && designerViews[0].pinned, JSON.stringify(designerViews));
 

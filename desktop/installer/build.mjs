@@ -41,6 +41,9 @@ if (absent.length) {
   process.exit(1);
 }
 
+// electron-builder 는 디버그 기록을 켜야 만든 NSIS 스크립트를 builder-debug.yml 에 남긴다 — 제거 단계(customUnInstall)가
+// 정말 들어갔는지 보려고 켠다(V5-05). 그 기록에서 스크립트를 꺼내 build/dist/nsis-script.nsi 로 둔다.
+if (!/electron-builder/.test(process.env.DEBUG ?? '')) { process.env.DEBUG = 'electron-builder'; }
 const builder = require('electron-builder');
 const config = require(path.join(here, 'electron-builder.config.cjs'));
 const { Platform, Arch } = builder;
@@ -52,6 +55,26 @@ const out = await builder.build({ projectDir: shellDir, targets: Platform.WINDOW
 });
 say(`\n▶ ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 for (const f of out ?? []) { if (fs.existsSync(f) && fs.statSync(f).isFile()) { say(`  ${path.relative(here, f)}  ${human(fs.statSync(f).size)}`); } }
+const debugYml = path.join(buildDir, 'dist', 'builder-debug.yml');
+if (!dirOnly && fs.existsSync(debugYml)) {
+  // nsis:\n  script: |-\n    <스크립트 줄들(4칸 들여쓰기)>
+  const lines = fs.readFileSync(debugYml, 'utf8').split(/\r?\n/);
+  const at = lines.findIndex(l => /^\s+script: \|/.test(l));
+  if (at >= 0) {
+    const indent = /^(\s*)/.exec(lines[at + 1])[1].length;
+    const body = [];
+    for (let i = at + 1; i < lines.length && (lines[i].startsWith(' '.repeat(indent)) || lines[i] === ''); i++) { body.push(lines[i].slice(indent)); }
+    const scriptFile = path.join(buildDir, 'dist', 'nsis-script.nsi');
+    fs.writeFileSync(scriptFile, body.join('\n'));
+    // 만든 스크립트는 우리 installer.nsh 를 싣고(그 안에 customUnInstall 매크로), 제거 구역은 템플릿 uninstaller.nsh 가
+    // `!ifmacrodef customUnInstall` → `!insertmacro customUnInstall` 로 부른다(파일 지우기 RMDir 앞)
+    const tpl = fs.readFileSync(path.join(require.resolve('app-builder-lib/package.json'), '..', 'templates', 'nsis', 'uninstaller.nsh'), 'utf8');
+    const hook = body.some(l => /!include ".*installer\.nsh"/.test(l)) && body.some(l => /!include "uninstaller\.nsh"/.test(l))
+      && /!ifmacrodef customUnInstall\s+!insertmacro customUnInstall/.test(tpl) && tpl.indexOf('!insertmacro customUnInstall') < tpl.indexOf('RMDir /r $INSTDIR');
+    say(`  NSIS 스크립트 → ${path.relative(here, scriptFile)} · 제거 단계(installer.nsh 의 customUnInstall ← uninstaller.nsh, 파일 지우기 앞) ${hook ? '들어감' : '없음!'}`);
+    if (!hook) { process.exitCode = 1; }
+  } else { say('  builder-debug.yml 에 NSIS 스크립트가 없다'); }
+}
 const unpacked = path.join(buildDir, 'dist', 'win-unpacked');
 if (fs.existsSync(unpacked)) {
   const res = path.join(unpacked, 'resources');

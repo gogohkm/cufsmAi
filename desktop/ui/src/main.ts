@@ -9,7 +9,7 @@ import { api, connectEvents } from './bridge';
 import { centerHtml, opts, type CenterOpts } from './center';
 import { answered, enqueue, initDialogs, questionOpen, setProgress, toast } from './dialogs';
 import { debounce, esc, tip } from './dom';
-import { editing, hideSide, initEdit, mountDesigner, reloadSide, showSide, toggleEditing } from './edit';
+import { editing, hideSide, initEdit, mountDesigner, reloadSide, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
 import { hhmm } from './format';
 import { infoHtml, shareLabel } from './info';
 import { installMenuClosers } from './menu';
@@ -105,6 +105,7 @@ function applyState(s: any): void {
     themeFixed = true;
     document.documentElement.setAttribute('data-theme', theme);
   }
+  setWebviewOrigin(s.webviewOrigin);
   initEdit(theme, render);
   setFile(s.currentFile, s.currentName);
   const designer = (s.webviews ?? []).find((w: any) => w.id === s.designer);
@@ -177,19 +178,18 @@ async function claudeOp(op: 'connect' | 'disconnect'): Promise<void> {
  * 다리에 상태를 바꾸는 새 경로를 두지 않는다(맨 위 창만 부를 수 있게 막는 일은 다리의 몫 — 그 전에 늘리지 않는다).
  */
 function fileOp(action: 'open' | 'save'): void {
-  try {
-    const d = ($('designer') as HTMLIFrameElement).contentDocument;
-    const b = d?.getElementById(action === 'open' ? 'btn-file-open' : 'btn-file-save') as HTMLButtonElement | null;
-    if (b) { b.click(); return; }
-  } catch { /* 아직 안 붙음 */ }
+  // 끼운 화면은 다른 출처(다리의 웹뷰 서버)라 문서에 닿지 않는다 — 다리의 수신부에 단추를 눌러 달라고 메시지로(정해 둔 둘만).
+  if (postToWebviews({ type: 'click', id: action === 'open' ? 'btn-file-open' : 'btn-file-save' }, 'designer')) { return; }
   toast('입력 화면이 아직 붙지 않았다 — 잠시 뒤 다시', 'warning');
 }
 
-/** 테마 — 페이지를 다시 싣지 않는다(보는 자리 · 끼운 화면의 입력이 그대로). 끼운 설계 화면은 다음에 실을 때부터 새 테마 */
+/** 테마 — 페이지를 다시 싣지 않는다(보는 자리 · 끼운 화면의 입력이 그대로). 끼운 웹뷰에는 메시지로(그 페이지도 다시 싣지 않는다) */
 function setTheme(t: 'dark' | 'light'): void {
   theme = t;
   themeFixed = true;
   document.documentElement.setAttribute('data-theme', t);
+  setEditTheme(t);
+  postToWebviews({ type: 'theme', theme: t });
   render();
 }
 
@@ -240,14 +240,8 @@ function boot(): void {
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) { e.preventDefault(); fileOp('open'); }
     if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); fileOp('save'); }
   });
-  // 끼운 웹뷰 안에서 누른 F2 도 편집 상태를 끈다(같은 출처라 문서에 듣는 것을 단다)
-  ($('designer') as HTMLIFrameElement).addEventListener('load', () => {
-    try {
-      ($('designer') as HTMLIFrameElement).contentWindow?.document.addEventListener('keydown', e => {
-        if (e.key === 'F2') { e.preventDefault(); toggleEditing(); }
-      });
-    } catch { /* 다른 출처면 듣지 않는다 */ }
-  });
+  // 끼운 웹뷰 안에서 누른 F2 도 편집 상태를 끈다(웹뷰는 다른 출처 — 다리의 수신부가 메시지로 알려 준다)
+  onWebviewF2(toggleEditing);
 
   window.addEventListener('resize', debounce(render, 150));
   connectEvents(h => applyState(h.state), onEvent);
