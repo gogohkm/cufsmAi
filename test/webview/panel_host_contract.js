@@ -443,7 +443,10 @@ async function scenarioPreviewAndProjectFiles(ctx) {
   const inputs = { unitSystem: 'US', vibRho: 7.345e-7, chkI621Confirmed: true, connMemberCase: 'not_tension_member' };
   await p.__testWriteProjectFile(csd, { __stcfsd_collect: 2, designInputs: inputs, lapResult: { pass: null, verdict: 'NOT_CHECKED' } });
   const saved = JSON.parse(fs.readFileSync(csd, 'utf8'));
-  assert.strictEqual(saved.version, '1.3');
+  // K2-3: 1.4 — 검토 상태(case)와 옛 빌드가 읽는 1.3 모양 designInputs 를 함께(결정 5)
+  assert.strictEqual(saved.version, '1.4');
+  assert(saved.case && saved.case.schema === 'stcfsd-case/1' && saved.case.inputs.vibRho === 7.345e-7 && saved.case.inputs.connMemberCase === 'not_tension_member', 'case record written');
+  assert.strictEqual(saved.designInputs.vibRho, 7.345e-7, '1.3-shaped inputs kept');
   assert.deepStrictEqual(saved.lapResult, { pass: null, verdict: 'NOT_CHECKED' }, 'lap result saved');
   p.__testClearPostedMessages();
   const back = p.__testLoadProjectFile(csd);

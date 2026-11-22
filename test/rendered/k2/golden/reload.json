@@ -14,14 +14,24 @@
   {
    "id": "after",
    "expect": "k2-change",
-   "reason": "K2: a page reload loses every input not yet saved (Lb 77.7 in, flexure) and the second webviewReady re-initialises the host model to the default section (lippedz 8 in → lippedc 100 mm) — the host state must survive and be pushed back",
+   "reason": "K2-2 · K2-3 에서 일부 바뀜: 새로 고침 뒤 입력이 남는다(Lb 77.7 in · 휨 · US — 두 번째 caseHello 에 호스트가 상태를 다시 보낸다). 남은 것(K2-6): 두 번째 webviewReady 가 모델을 기본 단면으로 덮는다(tpl lippedc)",
    "value": {
-    "lb": "3000",
-    "mt": "roof-purlin",
-    "unit": "SI",
+    "lb": "77.7",
+    "mt": "flexure",
+    "unit": "US",
     "tpl": "lippedc",
     "H_in": 3.937007874015748
-   }
+   },
+   "flipped": [
+    {
+     "step": "K2-3",
+     "from": {
+      "expect": "k2-change",
+      "reason": "K2: a page reload loses every input not yet saved (Lb 77.7 in, flexure) and the second webviewReady re-initialises the host model to the default section (lippedz 8 in → lippedc 100 mm) — the host state must survive and be pushed back"
+     },
+     "date": "2026-11-22"
+    }
+   ]
   },
   {
    "id": "reload.engine",

@@ -960,47 +960,79 @@
    "id": "coupled.dom",
    "expect": "pin",
    "value": {
-    "input-steel-grade": "",
+    "input-steel-grade": "A653-50",
     "input-fy": "50",
-    "input-fu": "60",
+    "input-fu": "65",
     "design-fy": "50",
     "design-fu": "65",
     "plastic-fy": "50",
     "conn-Fy": "50",
     "conn-Fu": "65"
-   }
+   },
+   "flipped": [
+    {
+     "step": "K2-3",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "D-3 고침(K2-3): 파일의 Fu 가 탭마다 달라도(fu 65 · fuPre 60) 상태에는 Fu 하나(65) — ① Fu 도 65, 그래서 강종 표시가 A653-50(50/65) 로 남는다. 전: ① 60 · ③ 65 로 같은 재료가 탭마다 달랐다"
   },
   {
    "id": "coupled.saved",
    "expect": "pin",
    "value": {
-    "presteelGrade": "",
+    "presteelGrade": "A653-50",
     "fy": 50,
     "fu": 65,
     "fyLoad": 50,
-    "fuPre": 60,
+    "fuPre": 65,
     "plasticFy": 50,
     "connFy": 50,
     "connFu": 65
-   }
+   },
+   "flipped": [
+    {
+     "step": "K2-3",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "D-3 고침(K2-3): 다시 저장한 파일의 fuPre = fu = 65(거울은 하나), 강종 A653-50"
   },
   {
    "id": "rContinuous",
-   "expect": "defect",
-   "reason": "D-1: the file keeps only the option value \"0.70\"; two options share it (simple / continuous), so the span condition sent to the engine (span_type) can change on reopen",
+   "expect": "pin",
+   "reason": "D-1 고침(K2-2): 연속 0.70 의 선택지 값이 '0.70:continuous' — 저장 · 열기 뒤에도 연속(선택지 6)이다. 전: 단순 0.70 과 같은 '0.70' 이라 다시 열면 단순(span_type simple)이 됐다",
    "value": {
     "before": {
-     "value": "0.70",
+     "value": "0.70:continuous",
      "selectedIndex": 6,
      "span": "continuous"
     },
     "after": {
-     "value": "0.70",
-     "selectedIndex": 1,
-     "span": "simple"
+     "value": "0.70:continuous",
+     "selectedIndex": 6,
+     "span": "continuous"
     },
-    "saved": "0.70"
-   }
+    "saved": "0.70:continuous"
+   },
+   "flipped": [
+    {
+     "step": "K2-2",
+     "from": {
+      "expect": "defect",
+      "reason": "D-1: the file keeps only the option value \"0.70\"; two options share it (simple / continuous), so the span condition sent to the engine (span_type) can change on reopen"
+     },
+     "date": "2026-11-22"
+    }
+   ]
   }
  ]
 }

@@ -384,7 +384,23 @@
             case 'restoreDesignInputs':
                 restoreAllDesignInputs(msg.data);
                 break;
+            case 'caseAck':
+                // K2: 호스트가 받아들인 판. 받지 않은 키(충돌 · 검사)는 호스트가 caseState 로 다시 보낸다.
+                if (msg.data && Number.isInteger(msg.data.rev)) { _caseRev = msg.data.rev; }
+                break;
+            case 'caseState':
+                _caseApplyState(msg.data);
+                break;
         }
+    });
+    // K2: 호스트 메시지를 처리한 뒤 — 처리기가 칸을 고쳤으면(복원 · 하중 해석 채우기 · 거울) 바뀐 것을 호스트에 알린다.
+    window.addEventListener('message', event => {
+        const c = event.data && event.data.command;
+        if (!c || c === 'caseAck' || c === 'caseState') { return; }
+        // 복원 뒤에는 칸 전부를 — 화면은 복원한 값을 지금 단위로 적고(12 자리) 다시 읽는다. 호스트의 상태가 화면이 보낼 값과 바이트까지 같게.
+        if (c === 'restoreDesignInputs' && _caseLast) { _caseLast = {}; }
+        _caseReport(c === 'restoreDesignInputs' ? 'file'
+            : (c === 'loadAnalysisComplete' || c === 'designPurlinResult') ? 'load-analysis' : 'mirror');
     });
 
     // ============================================================
@@ -497,6 +513,7 @@
         document.getElementById('btn-unit-US')?.classList.add('active');
         document.getElementById('btn-unit-SI')?.classList.remove('active');
         refreshUnits(oldSys);
+        _caseReport('unit-toggle');
     }
     function switchToSI() {
         if (_unitSystem === 'SI') return;
@@ -505,6 +522,7 @@
         document.getElementById('btn-unit-SI')?.classList.add('active');
         document.getElementById('btn-unit-US')?.classList.remove('active');
         refreshUnits(oldSys);
+        _caseReport('unit-toggle');
     }
     document.getElementById('btn-unit-US')?.addEventListener('click', switchToUS);
     document.getElementById('btn-unit-SI')?.addEventListener('click', switchToSI);
@@ -2166,64 +2184,9 @@
             fmtVal(Number(a), 'length_ft') + '–' + fmtVal(Number(b), 'length_ft') + ' ' + unitLabel('length_ft'));
     }
 
+    /** 퍼린 지배 구간 — webview/js/utils.js 의 공용 함수(K2 결정 6: 호스트도 같은 함수로 Lap 본문을 만든다). */
     function _pickGoverningPurlinDesign(data) {
-        if (!data) return null;
-        // 새 형식: host 가 구간(region)마다 aisi_design 한 결과 목록과 3상태 종합 판정(pass)을 준다.
-        // 옛 형식(저장된 .csd): design_positive/negative/lap/uplift 네 키만 있다.
-        /** @type {Array<{label: string, kind: string, result: any, region: any}>} */
-        let candidates;
-        if (Array.isArray(data.regions) && data.regions.length > 0) {
-            candidates = data.regions
-                .filter(rg => rg && rg.result && !rg.result.error)
-                .map(rg => ({ label: _regionLabel(rg.label || rg.kind || '구간'), kind: rg.kind || '', result: rg.result, region: rg }));
-        } else {
-            candidates = [
-                ['정모멘트', 'positive', data.design_positive],
-                ['부모멘트', 'negative', data.design_negative],
-                ['랩 구간', 'lap', data.design_lap],
-                ['양력', 'uplift', data.design_uplift],
-            ].filter(([, , d]) => d && !d.error)
-                .map(([label, kind, d]) => ({ label: String(label), kind: String(kind), result: d, region: d.region || null }));
-        }
-        if (candidates.length === 0) return data;
-        const util = (c) => (typeof c.result.utilization === 'number' && isFinite(c.result.utilization)) ? c.result.utilization : -1;
-        // 불합격 구간이 있으면 그 중 이용률이 가장 큰 것, 없으면 이용률이 가장 큰 것이 지배.
-        const failing = candidates.filter(c => _v3(c.result).state === 'FAIL');
-        const pool = failing.length > 0 ? failing : candidates;
-        pool.sort((a, b) => util(b) - util(a));
-        const gov = pool[0];
-        const design = gov.result;
-        // 종합 판정은 host 의 3상태 결합값(data.pass). 옛 형식이면 여기서 결합한다.
-        const combinedPass = ('pass' in data)
-            ? data.pass
-            : (() => {
-                const v = _v3all(candidates.map(c => c.result)).state;
-                return v === 'PASS' ? true : (v === 'FAIL' ? false : null);
-            })();
-        return {
-            ...design,
-            member_type: 'flexure',
-            controlling_mode: `${gov.label}: ${design.controlling_mode || ''}`.trim(),
-            purlin_mode: true,
-            pass: combinedPass,
-            verification_complete: combinedPass === true ? design.verification_complete : false,
-            utilization: (typeof data.utilization === 'number' && isFinite(data.utilization))
-                ? data.utilization : design.utilization,
-            purlin_governing: data.governing || { kind: gov.kind, label: gov.label },
-            purlin_regions: Array.isArray(data.regions) ? data.regions : null,
-            purlin_not_evaluated: Array.isArray(data.not_evaluated) ? data.not_evaluated : [],
-            purlin_warnings: Array.isArray(data.warnings) ? data.warnings : [],
-            // V4-12: 퍼린 단위의 가정(랩 = 두 부재 반씩, Vu 짝짓기, 하중 가정, 분류)과 하중 분석의 미평가(I6.4.1 등)
-            purlin_assumptions: Array.isArray(data.assumptions) ? data.assumptions : [],
-            purlin_load_not_evaluated: Array.isArray(data.load_not_evaluated) ? data.load_not_evaluated : [],
-            design_positive: data.design_positive || null,
-            design_negative: data.design_negative || null,
-            design_lap: data.design_lap || null,
-            design_uplift: data.design_uplift || null,
-            uplift_R: data.uplift_R,
-            deck: data.deck || null,
-            span_type: data.span_type || '',
-        };
+        return globalThis.StcfsdUtils.pickGoverningPurlinDesign(data, _regionLabel);
     }
 
     // ============================================================
@@ -4255,8 +4218,10 @@
     if (chkBeta && betaInputs) {
         const toggleBeta = () => {
             betaInputs.style.display = chkBeta.checked ? 'block' : 'none';
-            // 체크 시 자동입력: 하중분석 결과 또는 Lb에서 값 채움
-            if (chkBeta.checked) {
+            // 체크 시 자동입력: 하중분석 결과 또는 Lb에서 값 채움.
+            // D-9(K2-3): 파일을 열 때의 연동(_fireRestoredInputUpdates 의 change)에서는 채우지 않는다 — 사람이 체크를 켤 때만.
+            // (전: β 켬 · Lm 0 인 파일을 열면 Lm 칸에 Lb 가 들어가 저장 · 설계에 사람이 넣지 않은 Lm 이 갔다)
+            if (chkBeta.checked && !_restoringInputs) {
                 const curLm = getNum('design-dist-Lm', 0);
                 if (curLm <= 0) {
                     // 하중분석 결과에서 가져오기
@@ -5157,7 +5122,12 @@
                 const selR = /** @type {HTMLSelectElement} */ (document.getElementById('select-r-value'));
                 if (chkR) chkR.checked = upliftGoverns && ap?.uplift_R > 0;
                 if (selR && upliftGoverns && ap?.uplift_R > 0) {
-                    selR.value = String(ap.uplift_R);
+                    // D-2(K2-2): 선택지 값은 '0.70' · '0.70:continuous' 같은 글이다 — 수로 같고, 지금 경간 유형의 조건(단순 · 연속)과 맞는 것을 고른다.
+                    const spanSel = /** @type {HTMLSelectElement|null} */ (document.getElementById('select-span-type'));
+                    const want = spanSel && (spanSel.value === 'simple' || spanSel.value === 'cantilever') ? 'simple' : 'continuous';
+                    const opts = Array.from(selR.options).filter(o => parseFloat(o.value) === Number(ap.uplift_R));
+                    const hit = opts.find(o => o.getAttribute('data-span') === want) || opts[0];
+                    selR.value = hit ? hit.value : String(ap.uplift_R);
                 }
 
                 // 정모멘트 구간 Lb/Cb 자동 설정
@@ -7843,6 +7813,10 @@
         if (!helper?.restoreDesignInputs) {
             throw new Error('Design-state helper is not available');
         }
+        _caseSuppress++;
+        try { _restoreAllDesignInputs(helper, data); } finally { _caseSuppress--; }
+    }
+    function _restoreAllDesignInputs(helper, data) {
         helper.restoreDesignInputs({
             document,
             toDisplay,
@@ -7902,6 +7876,79 @@
         setStatus('열린 파일의 Fy/Fu (' + (isNaN(fy) ? '—' : stressField(fy)) + '/' + (isNaN(fu) ? '—' : stressField(fu)) + ' ' + u
             + ')가 강종 ' + grade + ' 표 값(' + stressField(v.fy) + '/' + stressField(v.fu) + ' ' + u
             + ')과 다릅니다 — 파일 값을 그대로 쓰고 강종 표시는 Manual 로 둡니다.', 'warn');
+    }
+
+    // ============================================================
+    // K2 — 화면은 호스트의 검토 상태(CaseState)를 고치는 편집기다(설계 docs/implementation/20261123-k2-design.md §4.2).
+    // 칸이 바뀌면(사람 · 거울 · 하중 해석 채우기 · 단위 전환 · 복원) 표(designState.FIELDS) 전체를 읽어 바뀐 키만 caseEdit 로 보낸다.
+    // 모델 칸(템플릿 · 치수 · 해석 조건 — 모델이 주인)은 상태가 아니라 초안(drafts)으로 함께 보낸다.
+    // ============================================================
+    /** @type {any} */
+    var _caseLast = null;
+    var _caseRev = 0;
+    var _caseSuppress = 0;
+    /** @type {any} */
+    var _caseTimer = null;
+    function _caseDs() { return globalThis.StcfsdDesignState; }
+    function _caseSplit(diff) {
+        const ds = _caseDs();
+        const model = new Set(ds.KEYS.model);
+        const changes = {};
+        let draftsChanged = false;
+        Object.keys(diff).forEach(k => { if (model.has(k)) { draftsChanged = true; } else { changes[k] = diff[k]; } });
+        return { changes, draftsChanged };
+    }
+    function _caseDrafts(snap) {
+        const out = {};
+        _caseDs().KEYS.model.forEach(k => { out[k] = snap[k] === undefined ? null : snap[k]; });
+        return out;
+    }
+    /** 칸의 지금 값과 마지막으로 호스트와 맞춘 값을 비교해 바뀐 것을 보낸다. origin: user · file · load-analysis · mirror · unit-toggle */
+    function _caseReport(origin) {
+        if (_caseTimer) { clearTimeout(_caseTimer); _caseTimer = null; }
+        if (_caseSuppress > 0 || !_caseLast) { return; }
+        let snap;
+        try { snap = collectAllDesignInputs(); } catch (e) { console.error('[StCFSD] case snapshot', e); return; }
+        const diff = _caseDs().diff(_caseLast, snap);
+        if (Object.keys(diff).length === 0) { return; }
+        _caseLast = snap;
+        const { changes, draftsChanged } = _caseSplit(diff);
+        const data = { origin, changes };
+        if (origin === 'user') { data.baseRev = _caseRev; }
+        if (draftsChanged) { data.drafts = _caseDrafts(snap); }
+        vscode.postMessage({ command: 'caseEdit', data });
+    }
+    function _caseInit() {
+        if (!_initialInputs) { return; }
+        _caseLast = JSON.parse(JSON.stringify(_initialInputs));
+        // 처음 값 — 호스트의 표 처음 값과 같아야 한다(시험 모드의 호스트가 대조한다). 초안도 함께.
+        vscode.postMessage({ command: 'caseHello', data: { inputs: _caseLast, drafts: _caseDrafts(_caseLast) } });
+        document.addEventListener('change', () => { _caseReport('user'); });
+        document.addEventListener('input', () => {
+            if (_caseTimer) { clearTimeout(_caseTimer); }
+            _caseTimer = setTimeout(() => { _caseTimer = null; _caseReport('user'); }, 300);
+        });
+        // 단추를 누르기 전에 밀린 변경을 먼저(실행 · 저장이 그 값으로 돌게)
+        document.addEventListener('click', (ev) => {
+            const t = /** @type {HTMLElement|null} */ (ev.target);
+            if (t && t.closest && t.closest('button')) { _caseReport('user'); }
+        }, true);
+    }
+    /** 호스트가 보낸 상태를 칸에 얹는다(복원과 같은 길). 얹은 뒤 화면의 연동이 칸을 더 고쳤으면 그것을 알린다. */
+    function _caseApplyState(data) {
+        if (!data || !data.designInputs) { return; }
+        restoreAllDesignInputs(data.designInputs);
+        if (Number.isInteger(data.rev)) { _caseRev = data.rev; }
+        let snap;
+        try { snap = collectAllDesignInputs(); } catch (e) { console.error('[StCFSD] case snapshot', e); return; }
+        const diff = _caseDs().diff(data.designInputs, snap);
+        _caseLast = snap;
+        const { changes, draftsChanged } = _caseSplit(diff);
+        if (Object.keys(changes).length > 0 || draftsChanged) {
+            const out = { origin: 'mirror', changes };
+            if (draftsChanged) { out.drafts = _caseDrafts(snap); }
+            vscode.postMessage({ command: 'caseEdit', data: out });
+        }
     }
 
     // 파일 저장/열기 버튼
@@ -8136,6 +8183,7 @@
     /** @type {any} */
     var _initialInputs = null;
     try { _initialInputs = collectAllDesignInputs(); } catch (e) { console.error('[StCFSD] initial inputs', e); }
+    _caseInit();
 
     vscode.postMessage({ command: 'webviewReady' });
     // K4a: 처음 보이는 탭도 알린다(그 뒤로는 switchTab 이 알린다).

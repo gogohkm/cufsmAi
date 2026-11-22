@@ -92,9 +92,10 @@
         ['distM1M2', 'design-dist-M1M2', null, 'num', _C('options', 0, 'design')],
         ['distLm', 'design-dist-Lm', 'length', 'num', _C('options', 0, 'design')],
         ['chkRFactor', 'chk-r-factor', null, 'chk', _C('options', false, 'design')],
-        // §I6.2.1 R: 선택지 둘이 같은 값 0.70(단순 · 연속)이다 — 값만으로는 경간 조건을 모른다(결함 D-1). optSpan 이 그 정체.
+        // §I6.2.1 R: 선택지의 정체는 optSpan. 연속 0.70 은 값이 '0.70:continuous'(K2-2, D-1 — 전에는 단순과 같은 '0.70' 이라 다시 열면 단순이 됐다).
+        // 화면 본문은 parseFloat 로 0.7 을 보낸다. 옛 파일의 '0.70' 은 단순으로 읽힌다(지금까지와 같다).
         ['rValue', 'select-r-value', null, 'sel', _C('options', '0', 'design', {
-            opts: ['0', '0.70', '0.65', '0.50', '0.40', '0.60', '0.70'],
+            opts: ['0', '0.70', '0.65', '0.50', '0.40', '0.60', '0.70:continuous'],
             optSpan: [null, 'simple', 'simple', 'simple', 'simple', 'continuous', 'continuous'] })],
         ['chkColdWork', 'chk-cold-work', null, 'chk', _C('options', true, 'design')],
         ['chkInelasticReserve', 'chk-inelastic-reserve', null, 'chk', _C('options', false, 'design')],

@@ -1592,6 +1592,9 @@ def test_purlin_uplift_r_and_governing_wiring_contract():
         panel = f.read()
     with open(os.path.join(root, 'webview', 'js', 'app.js'), encoding='utf-8') as f:
         app = f.read()
+    # K2-2: 퍼린의 지배 구간 고르기는 화면과 호스트가 같이 쓰는 순수 함수로 옮겨졌다(utils.js).
+    with open(os.path.join(root, 'webview', 'js', 'utils.js'), encoding='utf-8') as f:
+        app += f.read()
     all_pass = True
     # W3: 구간별 설계 — R 은 엔진이 §I6.2.1 적격이라 한 양력 구간에만(V3 T5–T6), Vu 는 구간 포락선에서.
     all_pass &= approx(1 if 'r.i621_region_eligible === true && upliftR != null' in panel else 0, 1,

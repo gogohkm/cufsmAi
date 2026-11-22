@@ -191,9 +191,74 @@
         return pct + ' ' + v.short;
     }
 
+    /**
+     * 퍼린 설계 결과에서 지배 구간 하나를 고른다(화면의 설계 카드와 Lap 본문의 Se · Mnd · Vn 이 쓴다).
+     * K2(결정 6): 화면(app.js)에 있던 것을 그대로 옮겨 화면과 호스트가 같이 쓴다 — 바이트까지 같은 결과(고정값 gui-purlin).
+     * labelFn: 구간 라벨을 화면 단위로 바꾸는 함수(화면은 SI 면 ft → m, 호스트는 그대로 — 라벨은 Lap 본문에 쓰이지 않는다).
+     * 나중에(K2 밖): 엔진의 design_checks[].governs(docs/implementation/20261123-check-contract.md)와 이 고르기를 여기서 대조한다 —
+     * 지금은 바꾸지 않는다(불합격 구간이 있으면 그 중 이용률 최대, 없으면 이용률 최대).
+     */
+    function pickGoverningPurlinDesign(data, labelFn) {
+        if (!data) return null;
+        const lbl = typeof labelFn === 'function' ? labelFn : (x) => String(x || '');
+        // 새 형식: host 가 구간(region)마다 aisi_design 한 결과 목록과 3상태 종합 판정(pass)을 준다.
+        // 옛 형식(저장된 .csd): design_positive/negative/lap/uplift 네 키만 있다.
+        let candidates;
+        if (Array.isArray(data.regions) && data.regions.length > 0) {
+            candidates = data.regions
+                .filter(rg => rg && rg.result && !rg.result.error)
+                .map(rg => ({ label: lbl(rg.label || rg.kind || '구간'), kind: rg.kind || '', result: rg.result, region: rg }));
+        } else {
+            candidates = [
+                ['정모멘트', 'positive', data.design_positive],
+                ['부모멘트', 'negative', data.design_negative],
+                ['랩 구간', 'lap', data.design_lap],
+                ['양력', 'uplift', data.design_uplift],
+            ].filter(([, , d]) => d && !d.error)
+                .map(([label, kind, d]) => ({ label: String(label), kind: String(kind), result: d, region: d.region || null }));
+        }
+        if (candidates.length === 0) return data;
+        const util = (c) => (typeof c.result.utilization === 'number' && isFinite(c.result.utilization)) ? c.result.utilization : -1;
+        const failing = candidates.filter(c => verdictOf(c.result).state === 'FAIL');
+        const pool = failing.length > 0 ? failing : candidates;
+        pool.sort((a, b) => util(b) - util(a));
+        const gov = pool[0];
+        const design = gov.result;
+        const combinedPass = ('pass' in data)
+            ? data.pass
+            : (() => {
+                const v = combineVerdicts(candidates.map(c => c.result)).state;
+                return v === 'PASS' ? true : (v === 'FAIL' ? false : null);
+            })();
+        return {
+            ...design,
+            member_type: 'flexure',
+            controlling_mode: `${gov.label}: ${design.controlling_mode || ''}`.trim(),
+            purlin_mode: true,
+            pass: combinedPass,
+            verification_complete: combinedPass === true ? design.verification_complete : false,
+            utilization: (typeof data.utilization === 'number' && isFinite(data.utilization))
+                ? data.utilization : design.utilization,
+            purlin_governing: data.governing || { kind: gov.kind, label: gov.label },
+            purlin_regions: Array.isArray(data.regions) ? data.regions : null,
+            purlin_not_evaluated: Array.isArray(data.not_evaluated) ? data.not_evaluated : [],
+            purlin_warnings: Array.isArray(data.warnings) ? data.warnings : [],
+            purlin_assumptions: Array.isArray(data.assumptions) ? data.assumptions : [],
+            purlin_load_not_evaluated: Array.isArray(data.load_not_evaluated) ? data.load_not_evaluated : [],
+            design_positive: data.design_positive || null,
+            design_negative: data.design_negative || null,
+            design_lap: data.design_lap || null,
+            design_uplift: data.design_uplift || null,
+            uplift_R: data.uplift_R,
+            deck: data.deck || null,
+            span_type: data.span_type || '',
+        };
+    }
+
     return {
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
         assumptionsList, scopeNotesList, userText, USER_TERMS,
+        pickGoverningPurlinDesign,
     };
 });

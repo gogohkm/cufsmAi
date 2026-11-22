@@ -18,6 +18,11 @@ import {
     LedgerEntry, LedgerKind, ViewItem, ViewReport, FocusRecord,
 } from '../models/types';
 import { defaultSteel, mpaField, steelGradeOptionsHtml } from './steelGrades';
+import { CaseKeeper } from '../case/caseKeeper';
+import { toDesignInputs13, toCaseRecord, migrateProject, readDesignInputs, MigrateResult } from '../case/caseState';
+import {
+    buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts,
+} from '../case/requests';
 
 function isTestMode(): boolean {
     return process.env.STCFSD_TEST_MODE === '1';
@@ -51,6 +56,8 @@ export class StcfsdPanel implements McpPanelInterface {
     private _testPostedMessages: Array<{ command: string; data: any }> = [];
     private _bucklingReportPanel?: vscode.WebviewPanel;
     private _bucklingReportHtml = '';
+    /** K2: 검토 대상의 상태(설계 · 하중 · 접합 입력)와 화면 쪽 거울 — src/case/caseKeeper.ts */
+    private _caseKeeper = new CaseKeeper();
     // K4a: 결과가 만들어진 시각(상태 · 장부), 마지막 하중 분석의 입력(바뀌었는지 보려고), 접합 · 랩 결과(호스트가 기억한다).
     private _lastLoadAnalysisAt: string | null = null;
     private _lastLoadRequest: string | null = null;
@@ -186,6 +193,16 @@ export class StcfsdPanel implements McpPanelInterface {
         }));
     }
 
+    /** K2: 시험용 — 상태 · 초안 · 그림자 대조(화면 본문 ↔ 호스트 본문) */
+    public __testGetCase(): any {
+        if (!isTestMode()) {
+            throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
+        }
+        const k = this._caseKeeper;
+        return JSON.parse(JSON.stringify({ state: k.state, drafts: k.drafts, shadow: k.shadow, helloMismatch: k.helloMismatch,
+            designInputs: toDesignInputs13(k.state, k.drafts || {}) }));
+    }
+
     public __testGetHtml(): string {
         if (!isTestMode()) {
             throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
@@ -302,7 +319,23 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'invalidateDerivedResults':
+                this._caseKeeper.onPageInvalidated();
                 this._invalidateDerived(message.data?.scope);
+                break;
+
+            case 'caseEdit': {
+                // K2: 화면의 칸이 바뀌었다 — 상태에 합친다(설계 §3.2 의 충돌 규칙). 동기 처리(뒤에 오는 실행 메시지보다 먼저 끝난다).
+                const r = this._caseKeeper.edit(message.data);
+                this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: r.rejected, conflicts: r.conflicts });
+                if (r.conflicts.length > 0) { this._postCaseState('conflict'); }
+                this._postCaseDirty(false);
+                break;
+            }
+
+            case 'caseHello':
+                // K2: 화면이 처음 떴다 — 처음 값과 초안(시험 모드에서는 처음 값이 표와 같은지 대조).
+                // 두 번째부터(새로 고침 · 웹뷰 다시 싣기)는 화면의 처음 값이 아니라 호스트의 상태가 맞다 — 그것을 다시 얹는다.
+                if (this._caseKeeper.hello(message.data, isTestMode())) { this._postCaseState('page reloaded'); }
                 break;
 
             case 'viewReport':
@@ -311,9 +344,13 @@ export class StcfsdPanel implements McpPanelInterface {
                 break;
 
             case 'saveProject':
-                // WebView에서 Design 탭 데이터를 수집하도록 요청
-                this._postMessage('collectDesignData', null);
-                // 응답은 'designDataCollected' 메시지로 옴
+                // K2-3: 입력은 호스트의 검토 상태에 있다 — 화면에 묻지 않는다(전: collectDesignData → designDataCollected).
+                // 화면은 단추를 누를 때 밀린 칸 변경을 먼저 보낸다(caseEdit). 'designDataCollected' 는 옛 길로 남는다.
+                try {
+                    await this._saveProject();
+                } catch (error: any) {
+                    vscode.window.showErrorMessage(`Project save failed: ${error.message || error}`);
+                }
                 break;
 
             case 'designDataCollected':
@@ -359,7 +396,10 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'runLapConnection':
                 // MCP design_lap_connection 과 같은 handleMcpAction 경로(결과 push 포함).
                 try {
-                    await this.handleMcpAction({ action: 'lap_connection', ...message.data });
+                    // K2-4: 본문은 호스트가 검토 상태로 만든다(화면 본문은 시험 모드에서 대조만 — 바이트까지 같아야 한다).
+                    const req = this._caseRun('lap', message.data, buildLapRequest);
+                    if (req.error) { this._postMessage('lapConnectionResult', { error: req.error }); break; }
+                    await this.handleMcpAction({ action: 'lap_connection', ...req.data });
                 } catch (e: any) {
                     this._postMessage('lapConnectionResult', { error: e.message });
                 }
@@ -368,7 +408,9 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'runConnection':
                 // MCP design_connection 과 같은 경로. 요청 입력은 도면용으로 결과에 함께 싣는다.
                 try {
-                    await this.handleMcpAction({ action: 'design_connection', ...message.data });
+                    const req = this._caseRun('connection', message.data, buildConnectionRequest);
+                    if (req.error) { this._postMessage('connectionResult', { error: req.error }); break; }
+                    await this.handleMcpAction({ action: 'design_connection', ...req.data });
                 } catch (e: any) {
                     this._postMessage('connectionResult', { error: e.message });
                 }
@@ -377,7 +419,9 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'runPurlinDesign':
                 // 자동 계산 모드의 설계 검토 — MCP design_purlin 과 같은 _designPurlin.
                 try {
-                    await this.handleMcpAction({ action: 'design_purlin', ...message.data });
+                    const req = this._caseRun('purlin', message.data, buildPurlinRequest);
+                    if (req.error) { this._postMessage('designPurlinResult', { error: req.error }); break; }
+                    await this.handleMcpAction({ action: 'design_purlin', ...req.data });
                 } catch (e: any) {
                     this._postMessage('designPurlinResult', { error: e.message || String(e) });
                 }
@@ -385,7 +429,9 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'runDesign':
                 try {
-                    await this.handleMcpAction({ action: 'aisi_design', ...message.data });
+                    const req = this._caseRun('design', message.data, buildDesignRequest);
+                    if (req.error) { this._postMessage('designResult', { error: req.error }); break; }
+                    await this.handleMcpAction({ action: 'aisi_design', ...req.data });
                 } catch (e: any) {
                     this._postMessage('designResult', { error: e.message || String(e) });
                 }
@@ -402,9 +448,11 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'analyzeLoads':
                 try {
+                    const req = this._caseRun('loads', message.data, buildLoadRequest);
+                    if (req.error) { this._postMessage('loadAnalysisComplete', { error: req.error }); break; }
                     // K4a: 화면에서 돌린 하중 분석 — 입력이 바뀌었다는 것은 화면이 이미 알렸다(invalidateDerivedResults).
                     this._pageLoadAnalysis = true;
-                    const loadResult = await this.handleMcpAction({ action: 'analyze_loads', ...message.data });
+                    const loadResult = await this.handleMcpAction({ action: 'analyze_loads', ...req.data });
                     // K4a: 성공한 결과는 handleMcpAction 이 보낸다(MCP 와 같은 한 번). 엔진 오류 결과는 전처럼 여기서.
                     if (!loadResult || loadResult.error) { this._postMessage('loadAnalysisComplete', loadResult); }
                 } catch (e: any) {
@@ -1066,6 +1114,7 @@ export class StcfsdPanel implements McpPanelInterface {
         }
         this._postMessage('analysisInvalidated', { reason, invalidateLoads });
         if (changed) { this._postLedger(); }
+        this._postCaseDirty(false);   // K2: 모델이 바뀌면 저장 안 한 변경일 수 있다
         this._updateTreeView();
     }
 
@@ -4107,6 +4156,7 @@ ${inner}
 
     /** WebView로 메시지 전송 */
     private _postMessage(command: string, data: any): void {
+        this._caseKeeper.onPosted(command, data);
         if (isTestMode()) {
             this._testPostedMessages.push(JSON.parse(JSON.stringify({ command, data })));
             if (this._testPostedMessages.length > 100) {
@@ -4115,6 +4165,45 @@ ${inner}
         }
         if (!this._disposed) {
             this._panel.webview.postMessage({ command, data });
+        }
+    }
+
+    /** K2: 상태 전체를 화면에(칸에 얹는다 — 복원과 같은 길). */
+    private _postCaseState(reason: string): void {
+        const k = this._caseKeeper;
+        this._postMessage('caseState', { rev: k.state.rev, reason, designInputs: toDesignInputs13(k.state, k.drafts || {}) });
+    }
+
+    /** K2: 상태로 만든 엔진 본문(문맥 = 화면이 쥔 초안 · 단면 성질 · 화면의 마지막 설계 결과) */
+    private _caseRequest(build: (st: any, ctx: any) => BuiltRequest): BuiltRequest {
+        const ctx = this._caseKeeper.context(this._model, this._lastDesignResult, null);
+        return build(this._caseKeeper.state, ctx);
+    }
+
+    /**
+     * K2-4: 화면 단추의 엔진 본문 = 호스트가 검토 상태로 만든 것. 시험 모드에서는 화면이 함께 보낸 본문과 맞대 적는다(바이트까지 같아야 —
+     * 고정값 gui-*). 비어 막힌 칸이 있으면 오류(화면은 보내기 전에 막으므로, 여기 오면 화면과 상태가 어긋난 것).
+     */
+    private _caseRun(what: string, pageData: any, build: (st: any, ctx: any) => BuiltRequest): { data?: any; error?: string } {
+        // 옛 화면(caseHello 를 보낸 적 없는 화면 · 화면 없이 메시지를 보내는 시험)은 칸 변경을 알리지 않는다 — 그 본문을 그대로(지금까지의 길)
+        if (this._caseKeeper.drafts === null && pageData && typeof pageData === 'object') { return { data: pageData }; }
+        const h = this._caseRequest(build);
+        if (isTestMode() && pageData !== undefined) { this._caseKeeper.compare(what, pageData, h.data); }
+        if (h.error) { return { error: h.error }; }
+        if (h.missing.length > 0 || !h.data) {
+            return { error: `입력이 비어 있습니다 — ${h.missing.join(', ') || '(본문을 만들 수 없음)'}` };
+        }
+        return { data: h.data };
+    }
+
+    /** K2-2 그림자: 시험 모드에서 화면 본문과 호스트 본문을 맞대 적는다(쓰지는 않는다) */
+    private _caseShadow(what: string, pageData: any, build: (st: any, ctx: any) => BuiltRequest): void {
+        if (!isTestMode()) { return; }
+        try {
+            const h = this._caseRequest(build);
+            this._caseKeeper.compare(what, pageData, h.data);
+        } catch (e: any) {
+            this._caseKeeper.compare(what, pageData, { __error: String(e?.message || e) });
         }
     }
 
@@ -4785,7 +4874,7 @@ ${inner}
                             <option value="0.50" data-span="simple">0.50 — Z 8.5~12in simple</option>
                             <option value="0.40" data-span="simple">0.40 — C 8.5~12in simple</option>
                             <option value="0.60" data-span="continuous">0.60 — C continuous</option>
-                            <option value="0.70" data-span="continuous">0.70 — Z continuous</option>
+                            <option value="0.70:continuous" data-span="continuous">0.70 — Z continuous</option>
                         </select>
                     </div>
                     <p class="hint" style="margin:2px 0 0 20px">Through-fastened panel + 양력 시: Mn = R × Mnfo</p>
@@ -4974,8 +5063,20 @@ ${inner}
         const designInputs = wrapped ? (designData.designInputs ?? null) : (designData || null);
         const lapResult = wrapped ? (designData.lapResult ?? null) : null;
 
+        // K2-3: 입력은 호스트의 상태에서(designData 를 받으면 — 옛 화면 · 시험 — 그것을 상태로 읽어 같은 모양으로).
+        let caseRecord: any;
+        let designInputsOut: any = designInputs;
+        let lapOut: any = lapResult;
+        if (designData === undefined) {
+            const k = this._caseKeeper;
+            designInputsOut = toDesignInputs13(k.state, k.drafts || modelDrafts(this._model));
+            caseRecord = toCaseRecord(k.state);
+            lapOut = k.drafts !== null ? (k.pageLap ?? null) : (this._lastLap?.result ?? null);
+        } else {
+            caseRecord = toCaseRecord(readDesignInputs(designInputs).state);
+        }
         const projectData: any = {
-            version: '1.3',
+            version: '1.4',
             format: 'cufsm-section-design',
             timestamp: new Date().toISOString(),
             // V4-11: 결과를 만든 엔진 판 — 열 때 이 판과 다르면 결과를 버린다.
@@ -4989,9 +5090,10 @@ ${inner}
             analysisResult: this._isAnalysisCurrent() ? this._cloneModel(this._lastAnalysisResult) : null,
             loadAnalysis: this._lastLoadAnalysis ? this._cloneModel(this._lastLoadAnalysis) : null,
             designResult: this._lastDesignResult ? this._cloneModel(this._lastDesignResult) : null,
-            // Design 탭 입력값 (WebView에서 수집됨)
-            designInputs,
-            lapResult,
+            // K2-3: 1.4 의 검토 상태(case)와, 옛 빌드(1.3)가 읽는 같은 입력의 1.3 모양(designInputs) — 결정 5
+            case: caseRecord,
+            designInputs: designInputsOut,
+            lapResult: lapOut,
         };
 
         // DSM 값 추출 (있으면)
@@ -5028,6 +5130,7 @@ ${inner}
         const tmp = `${fsPath}.tmp-${process.pid}`;
         fs.writeFileSync(tmp, json, 'utf-8');
         fs.renameSync(tmp, fsPath);
+        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._postCaseDirty(); }
         return projectData;
     }
 
@@ -5168,10 +5271,19 @@ ${inner}
             this._preparedDesignDsmSig = '';
         }
 
+        // K2-3: 파일의 입력 → 호스트의 검토 상태(표의 키만 — 모르는 키는 버리고 알린다, V5b-01 과 같은 태도).
+        const mig = migrateProject(projectData);
+        warnings.push(...mig.warnings);
+        const fileUnitSystem = projectData.case?.view?.unitSystem ?? projectData.designInputs?.unitSystem;
+        this._caseKeeper.loadFromFile(mig.state, fileUnitSystem !== 'US' && fileUnitSystem !== 'SI');
+        this._caseKeeper.markSaved(this._currentModelSignature());
+        const restorePayload = this._caseRestorePayload(mig, projectData);
+        // 화면의 판을 먼저(뒤에 오는 사람의 칸 변경이 이 판 위에서 — 설계 §3.2)
+        this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: [], conflicts: [] });
         // 입력을 먼저 복원하고(결과 라벨이 복원된 입력을 읽는다 — G2 §3.2), 그 다음 결과를 보낸다.
         // V4-10: 입력 기록이 없는 파일(v1.0 · MCP 원시 모델)도 빈 기록을 보낸다 — 화면은 모든 칸을 처음 값으로
         // 되돌린 뒤 모델의 해석 조건을 칸에 얹는다(이전 프로젝트 값이 남지 않게).
-        this._postMessage('restoreDesignInputs', projectData.designInputs || {});
+        this._postMessage('restoreDesignInputs', restorePayload);
         if (this._lastAnalysisResult) {
             this._postMessage('analysisComplete', this._lastAnalysisResult);
             if (projectData.dsm && !projectData.dsm.error) {
@@ -5181,8 +5293,8 @@ ${inner}
         if (projectData.loadAnalysis) {
             this._postMessage('loadAnalysisComplete', projectData.loadAnalysis);
             // 하중 결과 표시는 설계 칸을 자동으로 채운다 — 저장된 사용자 값을 다시 얹는다.
-            if (projectData.designInputs) {
-                this._postMessage('restoreDesignInputs', projectData.designInputs);
+            if (projectData.designInputs || projectData.case) {
+                this._postMessage('restoreDesignInputs', restorePayload);
             }
         }
         if (this._lastDesignResult) {
@@ -5199,8 +5311,33 @@ ${inner}
             this._postMessage('propertiesResult', projectData.properties);
         }
         this._postLedger();
+        this._postCaseDirty();
         return { warnings };
     }
+
+    /**
+     * K2-3: 열린 파일의 입력을 화면에 얹을 본문 — 상태의 1.3 모양(거울 칸은 주인 값 하나: D-3). 입력 기록이 없는 파일은 빈 기록
+     * (화면이 처음 값으로 — V4-10, 상태도 처음 값). 모델 칸은 파일에 있던 것만(화면이 그 뒤 모델로 덮는다), 단위는 파일에 있을 때만.
+     */
+    private _caseRestorePayload(mig: MigrateResult, projectData: any): any {
+        const hadInputs = !!((projectData.designInputs && typeof projectData.designInputs === 'object') || projectData.case);
+        if (!hadInputs) { return {}; }
+        const out: any = toDesignInputs13(mig.state, mig.modelDrafts);
+        const DSm = require('../../webview/js/designState');
+        for (const k of DSm.KEYS.model) { if (!(k in mig.modelDrafts)) { delete out[k]; } }
+        const fileUnit = projectData.case?.view?.unitSystem ?? projectData.designInputs?.unitSystem;
+        if (fileUnit !== 'US' && fileUnit !== 'SI') { delete out.unitSystem; }
+        return out;
+    }
+
+    /** K2: 저장 안 한 변경이 있는가(입력 판 · 모델 서명) — 화면 · 독립 창이 듣는다(K2-6 에서 닫기 물음) */
+    private _postCaseDirty(force = true): void {
+        const dirty = this._caseKeeper.isDirty(this._currentModelSignature());
+        if (!force && dirty === this._caseDirtySent) { return; }
+        this._caseDirtySent = dirty;
+        this._postMessage('caseDirty', { dirty, rev: this._caseKeeper.state.rev });
+    }
+    private _caseDirtySent: boolean | null = null;
 
     private _dispose(): void {
         StcfsdPanel.currentPanel = undefined;

@@ -236,7 +236,8 @@ t('pinned purlin save (II-2A after load analysis + lap) round-trips', () => {
 // 화면은 파일을 연 뒤 β 체크에 change 를 보낸다(_fireRestoredInputUpdates) — β 가 켜져 있고 Lm 이 0 이면 toggleBeta 가 Lm 칸에
 // Lb 를 넣는다(하중 해석이 없을 때). 그래서 처음 값으로 열린 파일의 저장본은 distLm = Lb 다. 상태의 이전은 그것을 흉내 내지 않는다 —
 // K2-2 부터 그 쓰기는 화면의 snapshot · diff 로 상태에 들어온다. 새로 찾은 것: 설계 문서 부록 D-9.
-const OPEN_SIDE_EFFECT = ['distLm'];
+// D-9 는 K2-3 에서 고쳤다 — 지금 저장본은 처음 값 그대로(distLm 0). 남는 차이 없음.
+const OPEN_SIDE_EFFECT = [];
 t('Example/test.csd (1.0, no inputs) → defaults; = the page\'s SI save of it except the β-on-open fill (D-9); US save differs only by display rounding', () => {
   const file = JSON.parse(fs.readFileSync(path.join(ROOT, 'Example', 'test.csd'), 'utf8'));
   const r = CS.migrateProject(file);
@@ -245,8 +246,8 @@ t('Example/test.csd (1.0, no inputs) → defaults; = the page\'s SI save of it e
   for (const k of DS.KEYS.case) { assert.strictEqual(r.state.sources[k], 'default', k); }
   const si = gval('examples', 'Example/test.csd.SI.saved');
   const mine = CS.toDesignInputs13(r.state, modelPart(si));
-  assert.deepStrictEqual(Object.keys(DS.diff(si, mine)), OPEN_SIDE_EFFECT, 'SI save = defaults + model, except the β-on-open fill');
-  assert.strictEqual(si.distLm, si.Lb, 'the page filled Lm from Lb on open');
+  assert.deepStrictEqual(Object.keys(DS.diff(si, mine)), OPEN_SIDE_EFFECT, 'SI save = defaults + model (D-9 fixed: no β-on-open fill)');
+  assert.strictEqual(si.distLm, 0, 'D-9: the page no longer fills Lm from Lb on open');
   assert.strictEqual(JSON.stringify(Object.keys(mine)), JSON.stringify(Object.keys(si)), 'same key order');
   const us = gval('examples', 'Example/test.csd.US.saved');
   // US 화면은 처음 경간을 16.40 ft 로 적는다(toFixed(2) — 5 m 가 아니다) — 표의 defaultSpanTable(…, 'US') 가 같은 값
@@ -274,14 +275,14 @@ t('old 1.2 file (few keys): file keys + defaults for the rest (V4-10), fy covers
   const r2 = CS.migrateProject({ version: '1.2', designInputs: { fyLoad: 45 } });
   assert.strictEqual(r2.state.inputs.fy, 45, 'fy ?? fyLoad');
 });
-t('coupled material fields that disagree (pinned): state keeps one Fy 50 / Fu 65 and warns (D-3 — the page today keeps ① Fu 60)', () => {
+t('coupled material fields that disagree (pinned): state keeps one Fy 50 / Fu 65 and warns; the page re-saves that one Fu (D-3 fixed in K2-3)', () => {
   const written = { ...V.designInputs('US'), fy: 50, fyLoad: 45, plasticFy: 40, fu: 65, fuPre: 60, presteelGrade: 'A653-50' };
   const r = CS.migrateProject({ version: '1.3', designInputs: written });
   assert.strictEqual(r.state.inputs.fy, 50);
   assert.strictEqual(r.state.inputs.fu, 65);
   assert(r.warnings.some((w) => /Fy 가 탭마다/.test(w)) && r.warnings.some((w) => /Fu 가 탭마다/.test(w)));
   const today = gval('csd-roundtrip', 'coupled.saved');
-  assert.strictEqual(today.fuPre, 60, 'today\'s page re-saves ① Fu 60 (D-3)');
+  assert.strictEqual(today.fuPre, 65, 'the page re-saves one Fu 65 (D-3 fixed in K2-3 — before, it kept ① Fu 60)');
   assert.strictEqual(CS.toDesignInputs13(r.state).fuPre, 65, 'the state writes one Fu');
 });
 t('R 0.70 in a file: read as the first (simple) option, with a warning (D-1 — the page fix comes with K2-2)', () => {

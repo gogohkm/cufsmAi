@@ -100,9 +100,13 @@ function testAppTripwires() {
     'tree summary passOrFail must be three-state');
 
   // 퍼린 지배 선택: 종합 판정은 host 결합값(data.pass), 불합격 구간 우선
-  const pickStart = appJs.indexOf('function _pickGoverningPurlinDesign(');
+  // K2(결정 6): 고르기는 utils.js 의 pickGoverningPurlinDesign 하나(화면 · 호스트가 같이 쓴다) — app.js 는 그것을 부른다.
+  assert(appJs.includes('globalThis.StcfsdUtils.pickGoverningPurlinDesign(data, _regionLabel)'), 'page picker delegates to the shared function');
+  const utilsJs = readUtf8(path.join('webview', 'js', 'utils.js'));
+  const pickStart = utilsJs.indexOf('function pickGoverningPurlinDesign(');
   assert(pickStart > 0, 'purlin picker must exist');
-  const pick = appJs.slice(pickStart, appJs.indexOf('\n    }\n', pickStart));
+  const pick = utilsJs.slice(pickStart, utilsJs.indexOf('\n    }\n', pickStart));
+  assert(pick.includes('verdictOf(c.result).state'), 'purlin picker uses the three-state verdict');
   assert(pick.includes('pass: combinedPass'), 'purlin picker must carry the combined three-state pass');
   assert(pick.includes("? data.pass"), 'purlin picker must take the host combined pass');
   assert(pick.includes("state === 'FAIL'"), 'purlin picker must prefer failing regions');

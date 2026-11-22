@@ -42,12 +42,37 @@ async function withSession(name, fn) {
   let m = null;
   try {
     await fn(ctx, async () => { m = m || await K.mcp(ctx); return m; });
+    await caseInvariant(ctx, name);
   } finally {
     if (m) { await m.close(); }
     exceptions.push(...ctx.log.exceptions.map((x) => ({ session: name, ...x })));
     await ctx.close();
   }
 }
+
+/**
+ * K2 불변식(구현 단계마다): ① 호스트의 검토 상태(+ 초안) = 화면의 칸(collectDesignInputs) ② 그림자 대조 — 화면이 보낸 엔진 본문 =
+ * 호스트가 상태로 만든 본문(바이트까지) ③ 화면의 처음 값 = 표의 처음 값. 어긋나면 caseProblems 에 — 실행이 실패한다.
+ */
+const caseProblems = [];
+async function caseInvariant(ctx, name) {
+  if (typeof ctx.panel.__testGetCase !== 'function') { return; }
+  await K.sleep(450);            // 화면의 글자 칸 모으기(300 ms)가 끝나게
+  await ctx.settle(200);
+  const c = ctx.panel.__testGetCase();
+  const page = await ctx.eval(`(()=>{const ds=globalThis.StcfsdDesignState; const si=document.getElementById('btn-unit-SI').classList.contains('active');
+    return ds.collectDesignInputs({document, fromDisplay:(v,u)=> si ? ds.siToUs(v,u) : v, getUnitSystem:()=> si?'SI':'US'});})()`);
+  const host = c.designInputs;
+  const diff = Object.keys(page).filter((k) => JSON.stringify(page[k]) !== JSON.stringify(host[k]));
+  if (diff.length) { caseProblems.push(`${name}: host state ≠ page fields: ${diff.map((k) => `${k} host ${JSON.stringify(host[k])} page ${JSON.stringify(page[k])}`).join('; ').slice(0, 900)}`); }
+  for (const x of c.shadow.filter((y) => !y.same)) {
+    caseProblems.push(`${name}: shadow ${x.what}: page ${String(x.page).slice(0, 300)}
+      host ${String(x.host).slice(0, 300)}`);
+  }
+  if (c.helloMismatch && c.helloMismatch.length) { caseProblems.push(`${name}: initial values ≠ table: ${c.helloMismatch.join('; ')}`); }
+  caseChecked.push({ name, shadow: c.shadow.length, rev: c.state.rev });
+}
+const caseChecked = [];
 
 function golden(name) { const g = new K.Golden(name); goldens.push(g); return g; }
 
@@ -56,10 +81,17 @@ const LOAD_BOXES = ['load-analysis-result'];
 const CONN_BOXES = ['connection-result'];
 
 /** 화면 조작 하나 → 그동안의 엔진 요청과(있으면) 보이는 결과를 고정값으로. */
+/** 엔진 요청이 멈출 때까지 기다린다 — 화면이 모델을 받고 다시 묻는 단면 성질(get_properties)이 잡는 창 밖으로 새지 않게. */
+async function engineQuiet(ctx) {
+  let n = -1;
+  for (let i = 0; i < 12 && n !== ctx.engine.length; i++) { n = ctx.engine.length; await K.sleep(400); await ctx.settle(200); }
+}
+
 async function pinStep(ctx, g, id, fn, opts = {}) {
   const e0 = ctx.engineMark();
   await fn();
   await ctx.settle(300);
+  await engineQuiet(ctx);
   const reqs = ctx.engineSince(e0);
   g.check(`${id}.engine`, reqs, { expect: opts.expect, reason: opts.reason });
   if (opts.texts) { g.check(`${id}.shown`, await K.shownText(ctx, opts.texts), { expect: opts.textExpect || 'pin', reason: opts.textReason }); }
@@ -72,6 +104,7 @@ async function pinMcp(ctx, client, g, id, tool, args, opts = {}) {
   const e0 = ctx.engineMark();
   const r = await client.call(tool, args);
   await ctx.settle(400);
+  await engineQuiet(ctx);
   const reqs = ctx.engineSince(e0);
   const after = await K.snapshotInputs(ctx);
   assert(!r.isError, `${tool} failed: ${String(r.text).slice(0, 300)}`);
@@ -505,7 +538,7 @@ async function phaseCsd() {
     await step('csd: §I6.2.1 R picked as 「0.70 continuous」 — which option comes back after save → open', async () => {
       await ctx.tab('design');
       await ctx.setVal('chk-r-factor', true);
-      await ctx.eval(`(()=>{const s=document.getElementById('select-r-value'); const i=[...s.options].findIndex(o=>o.value==='0.70'&&o.getAttribute('data-span')==='continuous');
+      await ctx.eval(`(()=>{const s=document.getElementById('select-r-value'); const i=[...s.options].findIndex(o=>parseFloat(o.value)===0.7&&o.getAttribute('data-span')==='continuous');
         s.selectedIndex=i; s.dispatchEvent(new Event('change',{bubbles:true})); return i;})()`);
       const pickR = () => ctx.eval(`(()=>{const s=document.getElementById('select-r-value'); const o=s.options[s.selectedIndex];
         return {value: s.value, selectedIndex: s.selectedIndex, span: o && o.getAttribute('data-span')};})()`);
@@ -594,8 +627,10 @@ async function main() {
   const failed = results.filter((r) => !r.ok);
   fs.writeFileSync(path.join(K.OUT, 'results.json'), JSON.stringify({ results, exceptions, mismatches: goldens.flatMap((g) => g.mismatch.map((m) => ({ golden: g.name, ...m }))) }, null, 1));
   console.log(`page exceptions: ${exceptions.length}`);
-  console.log(`test:k2: ${failed.length === 0 && mism === 0 && exceptions.length === 0 ? 'PASS' : 'FAIL'} (${results.length - failed.length}/${results.length} steps, ${mism} golden mismatches, ${((Date.now() - t0) / 1000).toFixed(0)} s)`);
-  if (failed.length > 0 || mism > 0 || exceptions.length > 0) { process.exitCode = 1; }
+  console.log(`K2 invariants: ${caseChecked.length} sessions, ${caseChecked.reduce((a, x) => a + x.shadow, 0)} shadow comparisons, ${caseProblems.length} problems`);
+  for (const p of caseProblems) { console.log('  CASE ' + p); }
+  console.log(`test:k2: ${failed.length === 0 && mism === 0 && exceptions.length === 0 && caseProblems.length === 0 ? 'PASS' : 'FAIL'} (${results.length - failed.length}/${results.length} steps, ${mism} golden mismatches, ${((Date.now() - t0) / 1000).toFixed(0)} s)`);
+  if (failed.length > 0 || mism > 0 || exceptions.length > 0 || caseProblems.length > 0) { process.exitCode = 1; }
 }
 
 main().then(() => process.exit(process.exitCode || 0)).catch((e) => { console.error(e); process.exit(1); });

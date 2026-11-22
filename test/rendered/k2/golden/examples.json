@@ -57,7 +57,7 @@
     "MayStrength": 0,
     "chkBetaDist": true,
     "distM1M2": 0,
-    "distLm": 118.11023622047244,
+    "distLm": 0,
     "chkRFactor": false,
     "rValue": "0",
     "chkColdWork": true,
@@ -156,7 +156,18 @@
       "right": null
      }
     ]
-   }
+   },
+   "flipped": [
+    {
+     "step": "K2-3",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "D-9 고침(K2-3): 파일을 열 때의 연동이 β 의 Lm 칸에 Lb 를 넣지 않는다 — distLm 0(파일 · 처음 값 그대로). 전: 118.11 in(Lb)"
   },
   {
    "id": "Example/test.csd.SI.resaveDiff",
@@ -218,7 +229,7 @@
     "MayStrength": 0,
     "chkBetaDist": true,
     "distM1M2": 0,
-    "distLm": 118.11023622,
+    "distLm": 0,
     "chkRFactor": false,
     "rValue": "0",
     "chkColdWork": true,
@@ -317,7 +328,18 @@
       "right": null
      }
     ]
-   }
+   },
+   "flipped": [
+    {
+     "step": "K2-3",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "D-9 고침(K2-3): 위와 같음 — US 화면에서도 distLm 0. 그 밖의 값(US 화면의 12 자리 표시값)은 전과 바이트까지 같다"
   },
   {
    "id": "Example/test.csd.US.resaveDiff",

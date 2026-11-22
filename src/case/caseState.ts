@@ -288,7 +288,8 @@ export interface ApplyResult {
  *  - Fy · Fu 가 바뀌면 접합 Fy · Fu 가 따라 바뀐다(지금 화면의 syncFyValue · syncFuValue — 출처 mirror).
  *  - 경간 표(spans · supports · lapsPerSupport)는 바뀐 spanType · nSpans 로 검사한다.
  */
-export function applyChanges(state0: CaseState, changes: Record<string, unknown>, writer: Source, opts: { baseRev?: number } = {}): ApplyResult {
+export function applyChanges(state0: CaseState, changes: Record<string, unknown>, writer: Source,
+    opts: { baseRev?: number; keepSource?: boolean } = {}): ApplyResult {
     const state = clone(state0);
     const accepted: string[] = [];
     const rejected: { key: string; reason: string }[] = [];
@@ -304,7 +305,8 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
     const write = (k: string, v: unknown, src: Source): void => {
         if (JSON.stringify(state.inputs[k]) === JSON.stringify(v)) { return; }
         state.inputs[k] = clone(v as InputValue);
-        state.sources[k] = src;
+        // 단위 전환의 다시 쓰기(keepSource)는 값의 출처를 바꾸지 않는다 — 사람이 정한 값은 사람의 것으로 남는다
+        if (!opts.keepSource) { state.sources[k] = src; }
         state.revs[k] = nextRev;
         if (!accepted.includes(k)) { accepted.push(k); }
     };
@@ -324,7 +326,9 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
         if (conflicted(k)) { conflicts.push(k); rejected.push({ key: k, reason: `'${k}' 은(는) 판 ${opts.baseRev} 뒤에 ${state.sources[k]} 가 바꿨다 — 덮지 않는다` }); continue; }
         write(k, v, writer);
         const follower = k === 'fy' ? 'connFy' : (k === 'fu' ? 'connFu' : null);
-        if (follower && accepted.includes(k) && !(follower in mapped)) { write(follower, v, 'mirror'); }
+        // 접합 Fy · Fu 의 따름: 지금 화면은 사람이 ① Fy · Fu(또는 소성 fy · 강종)를 고칠 때만 접합 칸에 복사한다(syncFyValue) —
+        // 파일을 열 때는 복사하지 않는다. 그래서 사람 · AI 의 쓰기에만 따른다(화면의 caseEdit 는 접합 칸을 함께 보내므로 같은 값).
+        if (follower && (writer === 'user' || writer === 'ai') && accepted.includes(k) && !(follower in mapped)) { write(follower, v, 'mirror'); }
     }
     const spanChanges = (SPAN_KEYS as readonly string[]).filter((k) => k in mapped);
     const tableShapeChanged = accepted.includes('spanType') || accepted.includes('nSpans');

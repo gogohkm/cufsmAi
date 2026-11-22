@@ -136,7 +136,7 @@
         "typecheck": "tsc -p ./ --noEmit",
         "test:webview-contract": "node ./test/webview/design_prepare_contract.js",
         "test:rendered": "node ./test/rendered/run.js",
-        "test:k2": "node ./test/webview/k2_inventory_contract.js && node ./test/webview/k2_case_state.js && node ./test/rendered/k2/run.js",
+        "test:k2": "node ./test/webview/k2_inventory_contract.js && node ./test/webview/k2_case_state.js && node ./test/webview/k2_panel_case.js && node ./test/rendered/k2/run.js",
         "test:k2-state": "node ./test/webview/k2_case_state.js",
         "k2:inventory": "node ./test/rendered/k2/inventory.js",
         "test:webview": "node ./test/webview/design_prepare_contract.js && node ./test/webview/design_state_roundtrip.js && node ./test/webview/lap_governing_contract.js && node ./test/webview/si_units_roundtrip.js && node ./test/webview/gui_contract_0926.js && node ./test/webview/utils_contract.js && node ./test/webview/parity_contract.js && node ./test/webview/mcp_registration_contract.js && node ./test/webview/mcp_si_chain.js && node ./test/webview/verdict_display_contract.js && node ./test/webview/panel_host_contract.js && node ./test/webview/design_state_v13_contract.js && node ./test/webview/mcp_port_file_contract.js && node ./test/webview/claude_desktop_contract.js",
