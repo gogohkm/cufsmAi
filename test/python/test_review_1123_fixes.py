@@ -46,8 +46,10 @@ def test_fix2_angle_PL1000_is_evaluated_in_combined_and_not_in_compression():
     assert r['pass'] is True and not r.get('not_evaluated'), r.get('not_evaluated')
     h = _check(r, 'member.axial_bending')
     assert h['verdict'] == 'pass'
-    my = [i for s in h['steps'] for i in s['inputs'] if i['symbol'] == 'My'][0]
-    assert 'L/1000' in my['source'].get('note', '')            # (P)L/1000 이 들어간 My 로 평가했다
+    # (P)L/1000 이 들어간 My 로 평가했다 — PL/1000 · My,ecc 단계와 그것을 고른 갈래(V6-01)
+    pl = [s for s in h['steps'] if (s['result'] or {}).get('symbol') == 'PL/1000'][0]
+    assert abs(pl['result']['value'] - 3.0 * 18.0 / 1000.0) <= 1e-12
+    assert [s for s in h['steps'] if s['kind'] == 'branch'][0]['holds'] is True
     # 독립 계산: P/Pa + B1y·(Muy + P·L/1000)/May (ASD α = 1.6), Pa = 압축 설계강도
     Pa = _check(r, 'member.compression.global')['capacity']['value']
     Pe1y = math.pi ** 2 * E * 0.4 / (18.0 / 0.5) ** 2

@@ -53,6 +53,8 @@ def design_lap_connection(params: dict) -> dict:
             Pnvs: 나사 전단 공칭강도(제조사 값, kips/개) — 나사일 때
             Fub, bolt_grade: 볼트 강도 — 볼트일 때 (없으면 A307 가정)
             Se, Mnd, Vn, h_web: Lap 구간 휨·뒤틀림·H2 검토용
+            distortion_restrained: True 면 Lap 구간의 뒤틀림이 겹친 부재로 구속됨(사용자가 밝힘) — Mnd 가
+                없을 때 §F4 를 해당 없음으로. 없으면 Mnd 없이 §F4 는 미평가(판정 None)
         }
 
     Returns:
@@ -147,6 +149,7 @@ def design_lap_connection(params: dict) -> dict:
     conn_result = design_connection(cparams)
     if conn_result.get('error'):
         return conn_result
+    _rekey_fastener_sources(conn_result.get('design_checks') or [])
 
     # 부재 단면 검토(J6.2 순단면·J6.3 블록·Chapter D)와 인장 방향(풀아웃·풀오버·패스너 인장)은
     # 패스너 1개의 전단 전달 강도가 아니므로 Pns 에서 뺀다(J6.1 끝단 파단은 포함).
@@ -390,10 +393,21 @@ def design_lap_connection(params: dict) -> dict:
                 warnings.append(
                     f'Lap 구간 뒤틀림 휨강도 부족(§F4): DCR = {dist_dcr:.2f}.'
                 )
-        else:
+        elif params.get('distortion_restrained') is True:
+            # 사용자가 랩 구간의 뒤틀림 구속을 밝혔다(Manual II-2A 가정 (f)) — 그 입력을 근거로 해당 없음.
+            _flex['dist_restrained'] = True
             warnings.append(
-                '뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간은 Manual II-1A 처럼 '
-                '겹친 부재로 뒤틀림이 구속된다고 가정했습니다. 구속이 없으면 Mnd 를 입력하세요.'
+                '뒤틀림좌굴(§F4): distortion_restrained = true — 사용자가 Lap 구간이 겹친 부재로 뒤틀림이 '
+                '구속된다고 밝혔으므로(Manual II-2A 가정 (f)) §F4 검토를 하지 않았습니다.'
+            )
+        else:
+            # 구속을 엔진이 가정하지 않는다(V6-07): 해당하는데 평가하지 못한 한계상태 → 판정 없음(FIXES §3.1).
+            flexure_ok = None if flexure_ok else flexure_ok
+            _flex['dist_missing'] = True
+            warnings.append(
+                '뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정하지 '
+                '않습니다. Mnd 를 입력하거나, 겹친 부재로 뒤틀림이 구속되면(Manual II-2A 가정 (f)) '
+                'distortion_restrained = true 를 주세요.'
             )
 
         # 지점부 휨-전단 상호작용(§H2) 검토: Vn은 입력값 또는 §G2.1 자동산정값.
@@ -485,7 +499,7 @@ def design_lap_connection(params: dict) -> dict:
     verdict = 'PASS' if overall_pass is True else ('FAIL' if overall_pass is False else 'NOT_CHECKED')
 
     # 검토 항목(design_checks) — 위에서 쓴 값 그대로(lap_checks.py)
-    from design.lap_checks import build as _build_lap_checks
+    from design.lap_checks import build as _build_lap_checks, LAP_BLOCK_SHEAR_NOTE
     _ck = dict(dm=design_method, params=params, d=d, t=t, Fy=Fy, lap_chk=lap_chk, lap_ok=lap_ok, Mu=Mu, Vu=Vu,
                d_lever=d_lever, V_transfer=V_transfer, Pns=Pns, pns_mode=pns_mode, pns_assumed=pns_assumed,
                fastener_unverified=fastener_unverified, conn_result=conn_result, n_required=n_required,
@@ -517,7 +531,9 @@ def design_lap_connection(params: dict) -> dict:
         # 국부(§F3)·뒤틀림(§F4)·휨-전단(§H2) 중 최대 — 헤드라인 DCR이 pass 플래그와
         # 모순되지 않도록 렌더러는 이 값을 우선 사용한다.
         'flexure_dcr_governing': round(flexure_dcr_governing, 4) if flexure_dcr_governing is not None else None,
-        'flexure_checked': flexure_ok is not None and Se > 0,
+        # Se 기준 휨(국부 · H2)을 평가했는가 — 뒤틀림 미평가(Mnd 없음)는 이 키가 아니라 pass · design_checks 에 난다.
+        'flexure_checked': (flexure_ok is not None or (bool(_flex.get('dist_missing'))
+                                                       and not _flex.get('h2_missing'))) and Se > 0,
         'flexure_basis': 'Se' if Se > 0 else ('Sf_reference' if Sf_only > 0 else None),
         'flexure_assumed': Se <= 0 and Sf_only > 0,
         'flexure_reference_dcr': (round(flexure_reference_dcr, 4)
@@ -542,8 +558,29 @@ def design_lap_connection(params: dict) -> dict:
         'lap_left_in': lap_left,
         'lap_right_in': lap_right,
         'design_checks': lap_design_checks,
+        'scope_notes': ['J6.3: ' + LAP_BLOCK_SHEAR_NOTE],
         'display_rounding': _display_rounding('lap'),
     }
+
+
+# 랩이 접합 엔진에 넘긴 입력 이름 → 랩 입력 이름. 접합 엔진의 'd'(패스너 지름)가 랩의 'd'(부재 깊이)와
+# 겹치지 않게 출처 key 를 랩의 이름으로 바꾼다(V6-18). 값은 그대로.
+_LAP_SOURCE_KEYS = {'d': 'fastener_dia', 't1': 't', 't2': 't', 'e': 'end_distance', 'n': 'n (one fastener)',
+                    'Fy': 'Fy', 'Fu': 'Fu'}
+
+
+def _rekey_fastener_sources(checks: list) -> None:
+    def fix(qv):
+        if isinstance(qv, dict):
+            so = qv.get('source')
+            if isinstance(so, dict) and so.get('kind') in ('user_input', 'material') and so.get('key') in _LAP_SOURCE_KEYS:
+                qv['source'] = dict(so, key=_LAP_SOURCE_KEYS[so['key']], via='lap_connection')
+    for c in checks:
+        for k in ('demand', 'nominal', 'capacity'):
+            fix(c.get(k))
+        for st in c.get('steps') or []:
+            for i in st.get('inputs') or []:
+                fix(i)
 
 
 def check_lap_length(d: float, lap_left: float, lap_right: float) -> dict:

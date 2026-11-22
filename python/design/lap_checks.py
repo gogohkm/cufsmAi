@@ -11,6 +11,14 @@ from design.checks import (
 )
 
 
+LAP_BLOCK_SHEAR_NOTE = (
+    'J6.3 block shear rupture of the lap fastener group (shear planes along the lap from the member end, tension '
+    'plane between the fastener rows) is not evaluated by this lap model and is not part of the lap verdict — '
+    'the fastener design strength Pns includes J6.1 end shear rupture per fastener only. Inputs needed to evaluate '
+    'it: the gauge between fastener rows in the web and the distance from the outer row to the web edge '
+    '(flange), with the hole size; the end distance e and the spacing s are known.')
+
+
 def build(ck: dict) -> list:
     dm, p = ck['dm'], ck['params']
     checks = []
@@ -118,6 +126,10 @@ def build(ck: dict) -> list:
         checks.append(make_check('lap.fastener_spacing', design_method=dm, verdict='not_applicable',
                                  reason='one fastener per row (or no lap length) — spacing does not apply'))
 
+    # --- 패스너 무리의 블록 전단(J6.3) — 이 랩 모델은 검토하지 않는다(V6 S-1). 조용히 두지 않고 밝힌다.
+    checks.append(make_check('lap.block_shear', design_method=dm, verdict='not_evaluated', counts=False,
+                             reason=LAP_BLOCK_SHEAR_NOTE))
+
     # --- 패스너 상세(J3.2/J4.2 끝단 거리 등) — 접합 엔진의 항목 그대로
     for c in cr.get('design_checks') or []:
         if c['group'] == 'conn.detailing' and c['verdict'] in ('pass', 'fail'):
@@ -148,7 +160,8 @@ def build(ck: dict) -> list:
                                        'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', 'moment',
                                        phi_symbol='φb', omega_symbol='Ωb')
             v = 'pass' if lo['ok'] else 'fail'
-            tr.add('verdict', 'Mu / φbMn,lap ≤ 1', inputs=[mu, tr.ref(i_d)], result=q('ratio', lo['dcr'], 'dimensionless'),
+            tr.add('verdict', f"Mu / {tr.steps[i_d]['result']['symbol']} ≤ 1", inputs=[mu, tr.ref(i_d)],
+                   result=q('ratio', lo['dcr'], 'dimensionless'),
                    verdict=v)
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict=v, demand=mu,
                                      capacity=q('φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', lo['phi_Mn_lap'], 'moment'),
@@ -175,17 +188,23 @@ def build(ck: dict) -> list:
                                        'φbMnd,lap' if dm == 'LRFD' else 'Mnd,lap/Ωb', 'moment',
                                        phi_symbol='φb', omega_symbol='Ωb')
             v = 'pass' if ds['ok'] else 'fail'
-            tr.add('verdict', 'Mu / φbMnd,lap ≤ 1', inputs=[mu, tr.ref(i_d)],
+            tr.add('verdict', f"Mu / {tr.steps[i_d]['result']['symbol']} ≤ 1", inputs=[mu, tr.ref(i_d)],
                    result=q('ratio', ds['dcr'], 'dimensionless'), verdict=v)
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict=v, demand=mu,
                                      capacity=q('φbMnd,lap' if dm == 'LRFD' else 'Mnd,lap/Ωb', ds['phi_Mnd_lap'],
                                                 'moment'),
                                      nominal=q('Mnd,lap', ds['Mnd_lap'], 'moment'),
                                      factor_=factor(dm, phi_b, om_b, 'φb', 'Ωb'), ratio=ds['dcr'], steps=tr.steps))
-        elif fx.get('local'):
+        elif fx.get('local') and fx.get('dist_restrained'):
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_applicable',
-                                     reason='Mnd not given — distortion assumed restrained by the lapped member '
-                                            '(Manual II-1A); see warnings'))
+                                     reason='distortion_restrained = true (user input): the lapped portion is '
+                                            'restrained against distortional buckling (Manual II-2A assumption (f))',
+                                     restraint_source=src('user_input', key='distortion_restrained')))
+        elif fx.get('local'):
+            checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
+                                     reason='Mnd not given and the restraint against distortion is not stated — '
+                                            'give Mnd, or distortion_restrained = true when the lapped member '
+                                            'restrains distortion (Manual II-2A assumption (f))'))
         else:
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
                                      reason='lap flexure not evaluated (no Se)'))
@@ -194,12 +213,16 @@ def build(ck: dict) -> list:
             tr = Trace()
             vn = q('Vn', h['Vn'], 'force', src('specification', note='§G2.1 for one web (computed)')
                    if h['vn_auto'] else src('user_input', key='Vn'))
-            i_v = design_strength_step(tr, dm, vn, 0.95, 1.60, h['phi_Vn_lap'],
-                                       'φvVn,lap' if dm == 'LRFD' else 'Vn,lap/Ωv', 'force',
-                                       phi_symbol='φv (×2 members)', omega_symbol='Ωv (×2 members)')
+            # 두 겹 부재의 전단강도 합 — ×2 를 기호에 숨기지 않고 단계로(V6-05)
+            i_vl = tr.add('equation', 'Vn,lap = 2 Vn  (two lapped members)',
+                          inputs=[vn, q('members', 2, 'count', spec())], result=q('Vn,lap', 2 * h['Vn'], 'force'))
+            v_sym = 'φvVn,lap' if dm == 'LRFD' else 'Vn,lap/Ωv'
+            m_sym = 'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb'
+            i_v = design_strength_step(tr, dm, tr.ref(i_vl), 0.95, 1.60, h['phi_Vn_lap'], v_sym, 'force',
+                                       phi_symbol='φv', omega_symbol='Ωv')
             lo = fx['local']
-            i_x = tr.add('equation', '[(Mu / φbMn,lap)² + (Vu / φvVn,lap)²]^0.5', equation='H2-1',
-                         inputs=[mu, q('φbMn,lap', lo['phi_Mn_lap'], 'moment', src('check', id='lap.flexure.local')),
+            i_x = tr.add('equation', f'[(Mu / {m_sym})² + (Vu / {v_sym})²]^0.5', equation='H2-1',
+                         inputs=[mu, q(m_sym, lo['phi_Mn_lap'], 'moment', src('check', id='lap.flexure.local')),
                                  vu, tr.ref(i_v)], result=q('H2', h['mv'], 'dimensionless'))
             v = 'pass' if h['ok'] else 'fail'
             tr.add('verdict', 'H2 ≤ 1.0', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],

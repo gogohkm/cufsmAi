@@ -272,6 +272,8 @@ REGISTRY = {
                                    '랩 구간 뒤틀림 좌굴 (2겹)', 'lap.flexure'),
     'lap.bending_shear': _r('H2', ('H2-1',), 'Lap combined bending and shear', '랩 구간 휨 + 전단',
                             'lap.flexure'),
+    'lap.block_shear': _r('J6.3', ('J6.3-1', 'J6.3-2'), 'Lap fasteners — block shear rupture of the fastener group',
+                          '랩 패스너 무리 — 블록 전단 파단', 'lap.fasteners'),
 }
 
 # 접합부 limit_states / not_evaluated / interaction / detailing 의 엔진 이름 → id.
@@ -435,8 +437,11 @@ class Trace:
     def ref(self, i: int, symbol: str | None = None) -> dict:
         """앞 단계 i 의 결과를 입력으로(같은 값 · 같은 물리량, 출처 = 그 단계)."""
         r = self.steps[i]['result']
-        return {'symbol': symbol or r['symbol'], 'value': r['value'], 'quantity': r['quantity'],
-                'source': {'kind': 'step', 'step': i}}
+        out = {'symbol': symbol or r['symbol'], 'value': r['value'], 'quantity': r['quantity'],
+               'source': {'kind': 'step', 'step': i}}
+        if r.get('unbounded'):
+            out['unbounded'] = True
+        return out
 
     def branch(self, condition: str, holds: bool, equation: str | None, inputs=(), **extra) -> int:
         return self.add('branch', None, equation=equation, inputs=inputs, result=None,
@@ -547,33 +552,66 @@ def verdict_step(tr: Trace, demand_ref: dict, cap_ref: dict, ratio, verdict: str
 
 
 def set_governing(checks: list, preferred: dict | None = None) -> None:
-    """무리(group)마다 지배 항목 하나에 governs=True.
+    """무리(group)마다 지배 항목 하나에 governs=True 와 그 까닭 governs_basis (계약 §4, 2026-11-24 V6-03).
 
-    평가한 항목(pass/fail) 가운데 비가 가장 큰 것. 비가 같으면 preferred[group] 의 id(엔진이
-    고른 지배 모드), 그다음 목록 순서. 소요가 없어 비가 없는 무리는 설계강도가 가장 작은 것.
+    무리의 상태가 지배를 정한다 — fail > not_evaluated > pass 와 같은 순서:
+    - 'fail'          판정에 드는 불합격이 있으면: 그 가운데 비가 가장 큰 것.
+    - 'not_evaluated' 불합격은 없고 판정에 드는 미평가가 있으면: 그 미평가 항목(참고 비가 가장 큰 것,
+                      참고 비가 없으면 참고 설계강도가 가장 작은 것, 그것도 없으면 엔진 순서). 이때
+                      평가한 항목 가운데 비가 가장 큰 것은 highest_evaluated {id, ratio, verdict} 로 따로 싣는다
+                      — 미평가가 무리의 상태인데 평가한 낮은 비가 '지배'로 읽히지 않게.
+    - 'ratio'         모두 평가했으면: 비가 가장 큰 것(같으면 preferred[group] = 엔진이 고른 지배 모드).
+    - 'capacity'      평가한 항목에 비가 없으면(소요 0 등): 설계강도가 가장 작은 것.
     """
     preferred = preferred or {}
     groups = {}
     for c in checks:
         groups.setdefault(c['group'], []).append(c)
+
+    def _pick(cands, key, g):
+        top = max(key(c) for c in cands)
+        tied = [c for c in cands if key(c) == top]
+        return next((c for c in tied if c['id'] == preferred.get(g)), tied[0])
+
     for g, items in groups.items():
         for c in items:
             c['governs'] = False
+            c.pop('governs_basis', None)
+            c.pop('highest_evaluated', None)
         ev = [c for c in items if c['verdict'] in ('pass', 'fail') and c['ratio'] is not None]
-        pick = None
-        if ev:
-            top = max(c['ratio'] for c in ev)
-            tied = [c for c in ev if c['ratio'] == top]
-            pick = next((c for c in tied if c['id'] == preferred.get(g)), tied[0])
+        fails = [c for c in ev if c['verdict'] == 'fail' and c.get('counts', True)]
+        ne = [c for c in items if c['verdict'] == 'not_evaluated' and c.get('counts', True)]
+        pick, basis = None, None
+        if fails:
+            pick, basis = _pick(fails, lambda c: c['ratio'], g), 'fail'
+        elif ne:
+            def _ref(c, k):
+                v = (c.get('reference') or {}).get(k)
+                return v.get('value') if isinstance(v, dict) else v
+            with_ratio = [c for c in ne if _ref(c, 'ratio') is not None]
+            with_cap = [c for c in ne if _ref(c, 'capacity') is not None]
+            if with_ratio:
+                pick = _pick(with_ratio, lambda c: _ref(c, 'ratio'), g)
+            elif with_cap:
+                pick = _pick(with_cap, lambda c: -_ref(c, 'capacity'), g)
+            else:
+                pick = next((c for c in ne if c['id'] == preferred.get(g)), ne[0])
+            basis = 'not_evaluated'
+            if ev:
+                top = _pick(ev, lambda c: c['ratio'], g)
+                pick['highest_evaluated'] = {'id': top['id'], 'ratio': top['ratio'], 'verdict': top['verdict']}
+            else:
+                pick['highest_evaluated'] = None
+        elif ev:
+            pick, basis = _pick(ev, lambda c: c['ratio'], g), 'ratio'
         else:
             caps = [c for c in items if c.get('capacity') and c['capacity'].get('value') is not None
                     and c['verdict'] != 'not_applicable']
             if caps:
-                low = min(c['capacity']['value'] for c in caps)
-                tied = [c for c in caps if c['capacity']['value'] == low]
-                pick = next((c for c in tied if c['id'] == preferred.get(g)), tied[0])
+                pick, basis = _pick(caps, lambda c: -c['capacity']['value'], g), 'capacity'
         if pick is not None:
             pick['governs'] = True
+            pick['governs_basis'] = basis
 
 
 def overall_verdict(checks: list) -> str:

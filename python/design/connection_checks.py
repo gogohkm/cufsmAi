@@ -24,6 +24,55 @@ def _nominal_symbol(item):
     return head if head and len(head) <= 8 and ' ' not in head else 'Rn'
 
 
+# 적용범위 항목 이름 '적용범위 (<조항>)' → 그 범위 밖이면 쓸 수 없는 조항들(계약 §4, V6-04).
+# 두께(> 3/16 in) 범위는 J6 머리글도 같은 한계를 둔다(J6: 'thinnest connected part is 3/16 in. or less').
+_SCOPE_CLAUSES = {
+    'J3/J6': ('J3', 'J6'),
+    'J2': ('J2', 'J6'),
+    'J2.2': ('J2.2',),
+    'J4': ('J4',),
+    'J5': ('J5',),
+}
+
+
+def _in_clause(clause: str, prefixes) -> bool:
+    c = str(clause or '')
+    return any(c == p or c.startswith(p + '.') for p in prefixes)
+
+
+def _scope_demote(checks: list, items: list, relevant) -> None:
+    """적용범위 밖에서 계산한 한계상태 · 상호작용 · 상세가 'pass' 로 읽히지 않게 한다.
+
+    범위 밖의 식으로 낸 합격은 기준이 적용하지 말라는 식의 합격이다 → not_evaluated(이유에 범위),
+    계산한 수는 reference 로만(판정에 쓰지 않음). 불합격은 그대로 둔다(불합격이 이긴다 — §4 '믿을 수 없는 값').
+    """
+    rel = relevant if relevant is not None else items
+    for x in rel:
+        name = str(x.get('name') or '')
+        if x.get('category') != 'scope' or not name.startswith('적용범위 ('):
+            continue
+        key = name[len('적용범위 ('):].rstrip(')')
+        prefixes = _SCOPE_CLAUSES.get(key)
+        if not prefixes:
+            continue
+        why = f'outside the scope of §{key}: {x.get("reason")} — computed value is a reference only, not used '               'for the verdict'
+        for c in checks:
+            if c['verdict'] != 'pass' or not _in_clause(c['clause'], prefixes):
+                continue
+            ref = dict(c.get('reference') or {})
+            if c.get('capacity') is not None:
+                ref['capacity'] = c['capacity']
+            if c.get('ratio') is not None:
+                ref['ratio'] = c['ratio']
+            c.update(verdict='not_evaluated', capacity=None, ratio=None, nominal=None, factor=None,
+                     reason='; '.join(r for r in (c.get('reason'), why) if r), out_of_scope=key)
+            c['reference'] = ref
+            c.pop('mirrors', None)
+            for st in c['steps']:
+                if st['kind'] == 'verdict':
+                    st['verdict'] = 'not_evaluated'
+
+
 def build(result: dict, data: dict, V: float, T: float, params: dict | None = None) -> list:
     """result: _finish 가 만든 접합부 결과, data: _finish 가 떼어 둔 계산서 재료."""
     params = params or {}
@@ -110,14 +159,26 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
         qty = raw.get('quantity', 'dimensionless')
         tr = Trace()
         if 'Fnt_red' in raw:
-            i_fv = tr.add('equation', 'fv = V / (n Ab)', inputs=[q('V', V, 'force', demand_source(params, 'Vu'))],
-                          result=q('fv', raw['fv'], 'stress'), equation='J3.4-2/-3')
-            i_fn = tr.add('equation', "F'nt = 1.3 Fnt − (Fnt / (φ Fnv)) fv ≤ Fnt" if dm == 'LRFD'
-                          else "F'nt = 1.3 Fnt − (Ω Fnt / Fnv) fv ≤ Fnt", equation=ic['equation'].split(' ')[0],
-                          inputs=[tr.ref(i_fv)], result=q("F'nt", raw['Fnt_red'], 'stress'))
-            i_p = tr.add('equation', "Pnt' = n Ab F'nt", inputs=[tr.ref(i_fn)],
+            # App. A J3.4: fv → F'nt → Pnt' → 설계강도. 곱해지는 값(n, Ab, Fnt, Fnv, φ/Ω)은 모두 입력으로(V6-05).
+            n_q = q('n', raw['n'], 'count', src('user_input', key='n'))
+            i_ab = tr.add('equation', 'Ab = π d² / 4', inputs=[q('d', raw['d'], 'length', src('user_input', key='d'))],
+                          result=q('Ab', raw['Ab'], 'area'))
+            fnt = q('Fnt', raw['Fnt'], 'stress', src('specification', note='Table J3.4-1 (bolt grade) or Fub input'))
+            fnv = q('Fnv', raw['Fnv'], 'stress', src('specification', note='Table J3.4-1 (bolt grade) or Fub input'))
+            i_fv = tr.add('equation', 'fv = V / (n Ab)', inputs=[q('V', raw['V'], 'force', demand_source(params, 'Vu')),
+                                                                 n_q, tr.ref(i_ab)],
+                          result=q('fv', raw['fv'], 'stress'), equation='J3.4')
+            if dm == 'LRFD':
+                i_fn = tr.add('equation', "F'nt = 1.3 Fnt − (Fnt / (φv Fnv)) fv, 0 ≤ F'nt ≤ Fnt", equation='J3.4-3',
+                              inputs=[fnt, q('φv', raw['phi_v'], 'dimensionless', spec()), fnv, tr.ref(i_fv)],
+                              result=q("F'nt", raw['Fnt_red'], 'stress'))
+            else:
+                i_fn = tr.add('equation', "F'nt = 1.3 Fnt − (Ωv Fnt / Fnv) fv, 0 ≤ F'nt ≤ Fnt", equation='J3.4-2',
+                              inputs=[fnt, q('Ωv', raw['omega_v'], 'dimensionless', spec()), fnv, tr.ref(i_fv)],
+                              result=q("F'nt", raw['Fnt_red'], 'stress'))
+            i_p = tr.add('equation', "Pnt' = n Ab F'nt", equation='J3.4-1', inputs=[n_q, tr.ref(i_ab), tr.ref(i_fn)],
                          result=q("Pnt'", raw['Pnt_prime'], 'force'))
-            i_x = design_strength_step(tr, dm, tr.ref(i_p), 0.75, 2.00, raw['limit'],
+            i_x = design_strength_step(tr, dm, tr.ref(i_p), raw['phi_t'], raw['omega_t'], raw['limit'],
                                        "φPnt'" if dm == 'LRFD' else "Pnt'/Ω", 'force')
             dem = q('T', raw['value'], 'force', demand_source(params, 'Tu'))
             cap = q("φPnt'" if dm == 'LRFD' else "Pnt'/Ω", raw['limit'], 'force')
@@ -140,12 +201,20 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
             cap = q('limit', raw['limit'], 'dimensionless', spec())
             ref_cap = cap
         v = 'pass' if ic['pass'] else 'fail'
-        tr.add('verdict', 'value / limit ≤ 1', inputs=[dem, ref_cap], result=q('ratio', raw['ratio'], 'dimensionless'),
-               verdict=v)
+        ex = raw.get('exponent') or 1
+        if ex != 1:
+            # 원문의 좌변(value)은 그대로 두고, 비는 하중 배율로 견줄 수 있는 꼴(value/limit)^(1/지수)로(V6-06)
+            tr.add('verdict', f'ratio = (value / limit)^(1/{ex:g}) ≤ 1  (comparable load-multiplier form)',
+                   inputs=[dem, ref_cap, q('exponent', ex, 'dimensionless', spec())],
+                   result=q('ratio', raw['ratio'], 'dimensionless'), verdict=v)
+        else:
+            tr.add('verdict', 'value / limit ≤ 1', inputs=[dem, ref_cap],
+                   result=q('ratio', raw['ratio'], 'dimensionless'), verdict=v)
         c = make_check(cid, design_method=dm, verdict=v, demand=dem if qty == 'force' else q('value', raw['value'],
                                                                                               'dimensionless'),
                        capacity=cap, ratio=raw['ratio'], steps=tr.steps, basis=ic.get('basis'),
                        equation_used=ic.get('equation'),
+                       ratio_form=(f'(value/limit)^(1/{ex:g})' if ex != 1 else None),
                        mirrors={'demand': {'path': f'interaction_checks[{i}].value', 'digits': 4},
                                 'capacity': {'path': f'interaction_checks[{i}].limit', 'digits': 4},
                                 'ratio': {'path': f'interaction_checks[{i}].ratio', 'digits': 4}})
@@ -205,6 +274,8 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
                            reason=reason + ' — not relevant to the given demand direction(s)')
         by_id[cid] = c
         checks.append(c)
+
+    _scope_demote(checks, items, relevant)
 
     pref = {}
     for g, key in (('conn.shear', 'shear_verified_governing_mode'), ('conn.tension', 'tension_verified_governing_mode')):

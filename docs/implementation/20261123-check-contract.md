@@ -32,26 +32,27 @@
 | `nominal` | 공칭강도 `{symbol, value, quantity}` (상호작용 · 상세 항목은 `null`) |
 | `factor` | `{symbol, value, kind: 'phi'|'omega', source}` — 설계 방법에 맞는 하나 |
 | `capacity` | 설계강도(LRFD φRn, ASD Rn/Ω) 또는 상호작용의 한계값(1.0, 1.33φ …) `{symbol, value, quantity}` |
-| `ratio` | `demand / capacity` (엔진과 같은 연산). 소요가 없거나 강도 0 이면 `null` |
+| `ratio` | `demand / capacity` (엔진과 같은 연산). 소요가 없거나 강도 0 이면 `null`. **비는 하중 배율로 견줄 수 있는 꼴이다** — 원문의 좌변이 소요의 n 제곱이면(J2.2.4 의 1.5, C-J5.4-1 의 2) `ratio = (value/limit)^(1/n)` 이고 `ratio_form` 에 그 꼴을 적는다(`demand` 는 원문의 좌변 그대로, 4절) |
 | `verdict` | `pass` · `fail` · `not_evaluated` · `not_applicable` |
 | `reason` | `not_evaluated` · `not_applicable` 이면 늘 있다. 믿을 수 없는 값으로 `fail` 이면 그 까닭 |
-| `governs` | 그 무리의 지배 항목이면 `true` (4절) |
+| `governs` · `governs_basis` · `highest_evaluated` | 그 무리의 지배 항목이면 `governs: true` 와 그 까닭 `governs_basis`(`fail` · `not_evaluated` · `ratio` · `capacity`). 까닭이 `not_evaluated` 면 `highest_evaluated: {id, ratio, verdict}`(평가한 항목 중 비 최대, 없으면 `null`) — 4절 |
 | `counts` | 판정에 드는가(기본 `true`). 적용 조건(랩 길이)만 `false` |
 | `location` · `combination` | 위치 · 하중 조합(6절). 모르면 `null` |
 | `steps` | 계산 과정(3절). 없으면 `[]` 이고 `steps_unavailable` 에 까닭 |
 | `mirrors` | 이 항목의 값이 옛 결과의 어느 필드와 같은지 — `{field: {path, digits}}`. 시험이 이것으로 옛 값과 맞댄다 |
 | `reference` | `not_evaluated`(또는 `not_applicable`) 인데 엔진이 계산은 한 값 — `{capacity, nominal, ratio}` 참고용 |
 | `trusted` | `false` 면 값은 있으나 엔진이 판정에 믿지 않는 값(가정한 입력 · §4.1 의 의심 좌굴값)으로 낸 것 |
-| 그 밖 | 접합부: `direction`('shear'·'tension'), `basis`, `assumed`, `steps_note`; 상호작용: `equation_used`; 조합 결과로 옮긴 하위 항목: `part_of`('compression'·'flexure_x'·'tension'·'fastener_design') |
+| 그 밖 | 접합부: `direction`('shear'·'tension'), `basis`, `assumed`, `steps_note`, `out_of_scope`(적용범위 밖에서 계산한 항목 — 그 범위의 조항, 4절); 상호작용: `equation_used`, `ratio_form`; 랩 뒤틀림: `restraint_source`(구속을 밝힌 입력); 조합 결과로 옮긴 하위 항목: `part_of`('compression'·'flexure_x'·'tension'·'fastener_design') |
 
 ## 3. 계산 과정 `steps`
 
 단계 하나: `{kind, expr, equation, inputs: [...], result, …}`
 
-- `expr` — 단위 없는 기호식(예: `Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My`). 숫자를 넣은 문자열을 만들지 않는다 — 대입은 화면이 `inputs` 로 한다.
+- `expr` — 기호식(예: `Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My`). 숫자를 넣은 문자열을 만들지 않는다 — 대입은 화면이 `inputs` 로 한다. 식 안의 수는 원문의 무차원 계수뿐이다(0.6, 2.7, 0.815 …). **단위가 있는 상수**(260 ksi, d'w ≤ 0.75 in, t > 0.10 in, Fy < 95 ksi …)는 식에 쓰지 않고 `quantity` 가 있는 입력으로 둔다(`F_uh,alt`, `d'w,max`, `t,lim`, `Fy,limit`). 원문 식 자체가 US 단위로 쓰인 단계에는 `expr_units: 'US'` 와 `units_note` 가 붙는다 — 지금은 Eq. J3.3.2-1 `Pnb = n (4.64 α t + 1.53) d t Fu` 하나(α = 1 for t in in.; SI 는 α = 0.0394, t in mm). SI 화면은 이 표시가 있는 식을 'US 단위로 쓴 식'이라고 밝혀야 한다.
+- **단계마다 입력만으로 결과가 나온다.** 곱해지는 값(두 겹 부재의 2, Ab · Fnt · Fnv · φ, λ …)은 모두 입력이거나 그 기호를 만든 단계가 있다. 시험 `test_review_1124_trace_recompute.py` 가 계약 사례의 단계 전부를 엔진 코드 없이 원문 식으로 다시 계산한다(10절).
 - `equation` — 그 단계가 쓴 식 번호(없으면 `null`).
 - `inputs` — `{symbol, value, quantity, source}`. **값은 계산이 실제로 쓴 바로 그 변수**다(같은 자리에서 만든다. 다시 계산한 값이 아니다).
-- `result` — `{symbol, value, quantity}` 또는 `null`(갈래 단계).
+- `result` — `{symbol, value, quantity}` 또는 `null`(갈래 단계). **끝없는 값**(횡좌굴 없음 → Fcre = ∞, 그로부터 Mcre)은 숫자로 싣지 않는다: `{value: null, unbounded: true, reason}`. 그 결과를 쓰는 뒤 단계의 입력에도 `unbounded: true` 가 붙는다(엔진 안의 1e6 ksi 는 '없음'의 표지일 뿐 — SI 로 바꾸지 않는다).
 - 갈래(`branch`): `condition`(예: `λd ≤ 0.673`), `holds`(참 · 거짓), `equation`(그 결과로 쓴 식).
 - 그 밖: `verdict`(판정 단계), `rounded_to`(엔진이 반올림한 값을 썼다 — 5절), `untraced`(공칭강도의 입력을 단계로 풀지 못함 — 8절), `note`, `detail_unavailable`, `buckling_type`, `path`(블록 전단 경로) 등.
 
@@ -88,7 +89,7 @@
 | kind | 뜻 | 덧붙는 것 |
 |---|---|---|
 | `step` | 같은 항목의 앞 단계 결과 | `step`(번호) |
-| `check` | 다른 항목의 결과(예: F3 의 Mne ← F2) | `id`, `rounded_to` |
+| `check` | 다른 항목의 결과(예: F3 의 Mne ← F2, §H1.2 의 Pa ← 압축 무리에서 설계강도가 가장 작은 항목) | `id`(등록 id — 모르면 없음), `group`, `note` |
 | `section_property` | 단면 성질 | `key`, `generated: true`(템플릿 자동 생성), `basis`(out-to-out 등) |
 | `material` | 재료 강도 Fy · Fu | `key`, `note` |
 | `buckling_analysis` | 좌굴 해석 또는 그 대체 | `method`, `label`, `half_wavelength`(`{symbol:'L', value, quantity:'length'}`, 엔진이 받은 경우), `isolated`, `classification` |
@@ -104,7 +105,14 @@
 - **판정 규칙(FIXES §3.1):** 무리와 결과 전체에서 `fail > not_evaluated > pass`. `not_applicable` 은 판정을 끌어내리지 않는다. `counts: false` 는 빼고 접는다. 결과 전체를 접은 값은 옛 `pass`(True→pass, False→fail, None→not_evaluated)와 같다 — 시험이 모든 사례에서 확인한다.
 - **믿을 수 없는 값.** 엔진이 값은 냈지만 판정에 믿지 않는 경우(기본 길이 120 in, 격자 하한 극소, 기준 응력 불일치, 다른 부호의 DSM 값, E2.2 미평가 …): 비가 1 을 넘으면 `fail`(엔진도 불합격이 이긴다), 아니면 `not_evaluated` 이고 값은 `reference` 로만. `trusted: false` 로 표시한다.
 - **`not_evaluated` 는 `capacity` · `ratio` 를 싣지 않는다.** 엔진의 자리 표시 값(예: Pcrl 이 없을 때의 Pnl = Pne)은 어디에도 싣지 않는다.
-- **지배(`governs`):** 무리마다 하나. 평가한(pass/fail) 항목 중 `ratio` 가 가장 큰 것, 같으면 엔진이 고른 지배 모드(`controlling_mode`). 소요가 없어 비가 없는 무리는 (참고) 설계강도가 가장 작은 것.
+- **지배(`governs`, 2026-11-24 V6-03):** 무리마다 하나. 무리의 상태가 정한다 — 판정과 같은 순서 `fail > not_evaluated > pass`:
+  1. 판정에 드는 `fail` 이 있으면 → 그 가운데 비가 가장 큰 것. `governs_basis: 'fail'`.
+  2. 없고, 판정에 드는 `not_evaluated` 가 있으면 → **그 미평가 항목**(참고 비가 가장 큰 것; 참고 비가 없으면 참고 설계강도가 가장 작은 것; 둘 다 없으면 엔진 순서). `governs_basis: 'not_evaluated'`, 그리고 평가한 항목 가운데 비가 가장 큰 것을 `highest_evaluated: {id, ratio, verdict}` 로 따로 싣는다(없으면 `null`). 평가한 낮은 비가 '지배'로 읽혀 무리의 실제 상태(미평가)를 가리지 않게 하려는 것이다(예: 볼트 지압 0.66 합격, J6.1 은 e = 1.5d 가정이라 미평가 · 참고 비 1.22 → 지배는 J6.1).
+  3. 모두 평가했으면 → 비가 가장 큰 것, 같으면 엔진이 고른 지배 모드(`controlling_mode`). `governs_basis: 'ratio'`.
+  4. 평가했으나 비가 없으면(소요 0) → 설계강도가 가장 작은 것. `governs_basis: 'capacity'`.
+  `counts: false` 항목은 1 · 2 에 들지 않는다. 부재 · 접합부 · 랩의 모든 무리에 같은 규칙(`checks.set_governing`). 옛 키 `governing_check` · `utilization` · `governing_mode` 는 그대로(엔진의 옛 뜻).
+- **적용범위 밖(2026-11-24 V6-04):** 접합부의 적용범위 항목(`conn.scope`, '적용범위 (J4)' 등)이 미평가이면, 그 범위의 조항으로 계산한 항목 가운데 `pass` 인 것을 `not_evaluated` 로 내리고(`reason` 에 범위, `out_of_scope: '<조항>'`), 계산한 강도 · 비는 `reference` 로만 둔다(판정에 쓰지 않음). 범위 → 조항: J3/J6 → J3 · J6, J2 → J2 · J6 (J6 머리글의 3/16 in 한계가 같다), J2.2 → J2.2, J4 → J4, J5 → J5. Chapter D(부재 인장)는 범위에 걸리지 않는다. 불합격은 그대로 둔다(불합격이 이긴다).
+- **비의 꼴(2026-11-24 V6-06):** 다른 비와 견주거나 max 하는 `ratio` 는 모두 하중 배율로 선형이다. 원문 좌변이 비선형인 상호작용 — J2.2.4 (지수 1.5), Commentary C-J5.4-1 (지수 2 일 때), 랩 · 부재 H2-1 (√ 꼴, 이미 선형) — 은 `ratio = (value/limit)^(1/n)` 이고 판정(≤ 1)은 같다. 엔진 전체를 찾아본 결과는 작업 보고에 있다(H1.2 의 B1, App. A J3.4 의 F'nt 처럼 강도 · 증폭이 소요에 따라 바뀌는 식은 원문의 꼴 그대로 둔다 — 그 순간의 소요에 대한 선형 비다).
 - **모드별 검토.** 엔진은 F2 · F3 · F4 의 최소 Mn 으로 하나의 비를 냈다. 계산서는 Manual 예제(II-1B: φMne 113, φMnℓ 84.2, φMnd 89.9)처럼 모드마다 설계강도와 비를 낸다. 지배 모드 항목의 비는 옛 이용률과 같은 연산이다(`mirrors.ratio`).
 - **소요가 없으면**(Pu = 0 등) 해당 항목은 `not_evaluated`(reason: 소요 없음), 설계강도는 `reference`. 접합부에서 한 방향만 소요가 있으면 다른 방향의 한계상태는 `not_applicable`.
 
@@ -160,6 +168,7 @@
 | 표 B4.1-1 의 보강재 개수 한계(n_f · n_le · n_w) | 단계 없음(경고 문구만) | 개수는 템플릿 입력에서 오고 지금 사례에서 늘 0 |
 | `member.applicability.b4` 에 두께가 없을 때 | `not_evaluated`, `counts: false` | 대조할 치수가 없다 — 엔진은 이것으로 판정을 내리지 않는다 |
 | 미평가 항목(`not_evaluated` · `not_applicable`) | `steps: []` 가 많다 | 계산한 것이 없다. 까닭은 `reason` · `steps_unavailable` |
+| `lap.block_shear` (J6.3, 랩 패스너 무리의 블록 전단) | `not_evaluated`, `counts: false`, 랩 결과의 `scope_notes` | 이 랩 모델은 검토하지 않는다(Pns 에는 패스너마다의 J6.1 끝단 파단만). 평가하려면 웹 안의 행 간격(gauge)과 바깥 행에서 웹 끝(플랜지)까지의 거리, 구멍 크기가 필요하다(e · s 는 이미 있다). 판정에 넣을지는 결정할 일 — 넣으면 지금 입력으로는 모든 랩이 판정 없음이 된다 |
 
 `member.applicability.b4` 는 이제 E–H 장 부재마다 나온다: 한계를 넘으면 `not_evaluated`(판정에 든다), 넘지 않으면 `pass` 이고 `counts: false`(엔진은 한계를 넘을 때만 판정을 바꾼다). 대조하지 못한 요소가 있으면 `reason` 에 적는다.
 
@@ -170,18 +179,27 @@
 2. **MCP 스키마:** `aisi_design` · `design_connection` · `lap_connection` 출력에 `design_checks`, `generate_section` 출력에 `element_roles` 를 덧붙이고, 입력에 `check_location` · `check_combination` 을 연다.
 3. **호스트(`StcfsdPanel`):** 퍼린 구간 결과가 `{...pick, checks: …}` 로 대표 검토 지점의 결과만 남긴다 — 구간마다 검토 지점별 `design_checks` 를 함께 넘기고, 각 호출에 `check_location`(구간 · 지점) · `check_combination`(구간의 `combo`)을 준다. 랩 구간의 Mu · Vu 절반 가정은 호스트가 만든 것이므로 그 사실은 호스트가 덧붙인다.
 4. 이름은 `name_ko` 를 쓰고, 경고 문구(`warnings`)는 이번 계약 밖이다(여전히 영 · 한 혼용).
+5. **지배 표시(V6-03):** 요약의 '지배 검토'는 `governs: true` 항목을 그대로 쓴다. `governs_basis == 'not_evaluated'` 이면 '지배: <이름> — 미평가(<reason>), 참고 비 <reference.ratio>' 로 쓰고, `highest_evaluated` 가 있으면 '평가한 최대: <id> <ratio>' 를 따로 한 줄. 그 무리의 비를 머리 이용률로 쓰지 않는다. `fail` · `ratio` 는 지금처럼.
+6. **적용범위 밖(V6-04):** `out_of_scope` 가 있는 항목은 미평가로 보이고, `reference` 의 값은 '참고(범위 밖)'으로만.
+7. **비의 꼴(V6-06):** `ratio_form` 이 있으면 '원문 좌변 <demand.value> ≤ <capacity.value>, 견줄 비 <ratio>' 로. 이 비를 다른 비와 max 해도 된다.
+8. **끝없는 값(V6-16):** `unbounded: true` 인 값은 SI 로 바꾸지 말고 '∞' 로. 옛 키 `positive_region.Fcre` · `Fcre_detail.Fcre` 는 웹뷰(`app.js`)가 숫자로 비교하므로 1e6 그대로 두고 `Fcre_unbounded: true` 를 옆에 붙였다 — 화면이 이 표시를 읽게 되면 옛 키도 `null` 로 바꿀 수 있다. SI 변환은 `Fcre_unbounded` 가 참이면 `Fcre` 를 바꾸지 않아야 한다.
+9. **US 단위 식(V6-11):** `expr_units: 'US'` 단계는 SI 응답에서 `units_note` 를 함께 보이고, `units_note`(SI 응답의 '식 문자열은 단위 없음' 문장)를 '식의 수는 무차원 계수뿐 — expr_units 가 US 인 단계는 예외'로 고친다.
+10. **새 입력:** 랩 `distortion_restrained`(bool, 사용자가 랩 구간의 뒤틀림 구속을 밝힘 — V6-07). MCP `design_lap_connection` 스키마에 열어야 쓸 수 있다. 랩 결과에 `scope_notes`(J6.3 미검토) 키가 새로 생겼다 — 요약이 알림으로 올려야 한다.
 
 ## 10. 소비자가 가정해도 되는 것 / 안 되는 것
 
 가정해도 된다:
 - `id` 는 바뀌지 않고, 한 결과 안에서 유일하며, 모두 `REGISTRY` 에 있다.
 - `verdict` 를 접은 값 = 옛 `pass`. 지배 항목의 비 = 옛 이용률(반올림 자리까지 — `mirrors`).
-- `pass`/`fail` 항목에서 `ratio == demand.value / capacity.value`, 마지막 `design_strength` 단계의 결과 = `capacity`(물리량 강도일 때).
+- `pass`/`fail` 항목에서 `ratio == demand.value / capacity.value` — `ratio_form` 이 있으면 `(demand.value / capacity.value)^(1/n)`. 마지막 `design_strength` 단계의 결과 = `capacity`(물리량 강도일 때).
+- 단계의 결과는 그 단계의 입력과 `expr`(원문 식)로 다시 계산된다(`rounded_to` 가 있으면 그 자리까지). 시험이 계약 사례 전부에서 엔진 없이 확인한다.
+- 무리마다 `governs` 는 하나이고 `governs_basis` 가 그 까닭이다. `governs_basis: 'not_evaluated'` 면 그 무리는 미평가다.
 - 단계의 모든 입력에 `source` 가 있고, `source.kind == 'step'` 이면 그 단계 결과와 값 · 물리량이 같다. 단계의 결과는 뒤 단계의 입력이거나 항목의 소요 · 강도 · 비 · 참고값이다(떠도는 숫자가 없다).
 - 엄격 JSON(NaN · Infinity 없음).
 
 가정하면 안 된다:
-- `steps` 의 `expr` 를 계산해 같은 값이 나온다고 — 입력 가운데 반올림해 넘어온 값(냉간가공 Fya 등, `rounded_to`)이 있다. 화면은 `result` 를 보여야 한다.
+- `steps` 의 `expr` 를 SI 로 바꾼 입력으로 계산해 같은 값이 나온다고 — `expr_units: 'US'` 단계(Eq. J3.3.2-1)는 US 단위로 쓴 식이다. 반올림해 넘어온 값(냉간가공 Fya, `rounded_to`)도 있다. 화면은 `result` 를 보여야 한다.
+- `unbounded: true` 인 값이 숫자라고(`value` 는 `null`).
 - 항목의 순서가 화면 순서라고 — 순서는 엔진 순서다.
 - `not_evaluated` 항목에 강도가 있다고(`reference` 만 참고).
 - 무리 이름이 화면 분류와 같다고 — `group` 은 지배를 가르는 엔진 무리다.
@@ -285,6 +303,7 @@
 | `lap.flexure.local` | F3.1 | F3.1-1 | Lap flexure — two members, Se·Fy | 랩 구간 휨 (2겹, Se·Fy) | `lap.flexure` |
 | `lap.flexure.distortional` | F4.1 | F4.1-2 | Lap flexure — distortional, two members | 랩 구간 뒤틀림 좌굴 (2겹) | `lap.flexure` |
 | `lap.bending_shear` | H2 | H2-1 | Lap combined bending and shear | 랩 구간 휨 + 전단 | `lap.flexure` |
+| `lap.block_shear` | J6.3 | J6.3-1, J6.3-2 | Lap fasteners — block shear rupture of the fastener group (not evaluated, `counts: false` — 8절) | 랩 패스너 무리 — 블록 전단 파단 | `lap.fasteners` |
 
 비탄성 예비강도(F2.4.2 · F3.2.3 · F4.3)와 냉간가공(A3.3.2)은 따로 된 검토가 아니라 각 모드 강도의 다른 식이다 — 해당 항목의 `branch` · `modifier` 단계로 나온다(한 한계상태를 두 번 세지 않는다).
 
@@ -591,3 +610,239 @@
 | `lap screw no Pnvs.result.steps[9].formula` | "(Mu/φMn)² + (Vu/φVn)² = (40.00/178.20)² + (2.000/7.049)² = 0.131 ≤ 1.0" | "√((Mu/φMn)² + (Vu/φVn)²) = √((40.00/178.20)² + (2.000/7.049)²) = 0.362 ≤ 1.0" |
 | `lap screw no Pnvs.result.steps[9].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
 | `lap screw no Pnvs.result.steps[9].value` | 0.131 | 0.362 |
+
+#### §14.1 덧붙임 — 둘째 묶음에서 더한 다섯 사례의 값(V6-19)
+
+`3590808` → `790492e` 에서 바뀐 값 가운데 위 표에 없던 15 개(§8.3.1-4, 접합부 판정을 반올림 전 설계강도로 — 비의 넷째 자리):
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `arc seam sheet-to-sheet.result.checks[0].ratio` | 0.8865 | 0.8868 |
+| `arc seam sheet-to-sheet.result.utilization` | 0.8865 | 0.8868 |
+| `arc seam sheet-to-sheet.result.utilization_reference` | 0.8865 | 0.8868 |
+| `arc spot small de.result.checks[0].ratio` | 0.5336 | 0.5337 |
+| `arc spot small de.result.utilization` | 0.5336 | 0.5337 |
+| `arc spot small de.result.utilization_reference` | 0.5336 | 0.5337 |
+| `bolt oversized holes.result.checks[0].ratio` | 0.3946 | 0.3947 |
+| `bolt oversized holes.result.utilization` | 0.3946 | 0.3947 |
+| `bolt oversized holes.result.utilization_reference` | 0.3946 | 0.3947 |
+| `bolt part 2 J6.2 J6.3.result.checks[0].ratio` | 0.4766 | 0.4767 |
+| `bolt part 2 J6.2 J6.3.result.utilization` | 0.4766 | 0.4767 |
+| `bolt part 2 J6.2 J6.3.result.utilization_reference` | 0.4766 | 0.4767 |
+| `screw two in a row.result.checks[0].ratio` | 0.463 | 0.4628 |
+| `screw two in a row.result.utilization` | 0.463 | 0.4628 |
+| `screw two in a row.result.utilization_reference` | 0.463 | 0.4628 |
+
+#### §14.2 V6 수정(2026-11-24)으로 바뀐 값
+
+비교: `da93885`(수정 전) 와 수정 뒤, 계약 사례 150개. 강도(Rn · φRn · Rn/Ω · Mn · Pn …)는 하나도 바뀌지 않았다.
+
+전체 판정이 바뀐 것은 둘뿐이다 — `lap bolt Se e=2` · `lap bolt short lap`: PASS → NOT_CHECKED (V6-07). 둘 다 Mnd 없이 랩 뒤틀림(§F4)을 '구속됐다고 가정'해 합격으로 접던 것이다 — 해당하는데 평가하지 못한 한계상태이므로 판정 없음이 옳다(FIXES §3.1). 구속을 밝히면(`distortion_restrained: true`) 전과 같이 PASS. V6-14(지배 이름)와 V6-15(아크 심 0.55d 상한 — 상한은 그대로, 단계 · 가정으로만 밝힘)는 계약 사례에서 바뀐 값이 없다. 계산 과정(`steps`)이 바뀐 항목은 189개다(V6-01 · 05 · 11 · 15 · 16 · 18 — 단계를 나누거나 입력을 더했을 뿐 결과 값은 같다; 같은 시험이 모든 단계를 다시 계산한다).
+
+**(가) 결과의 옛 키 — 18 값** (`design_checks` · `report` 제외)
+
+| 수정 | 사례 · 키 | 전 | 후 |
+|---|---|---|---|
+| V6-06 | `IV-2 arc spot V+T ASD.result.checks[2].ratio` | 0.737 | 0.8159 |
+| V6-06 | `IV-2 arc spot V+T ASD.result.interaction_checks[0].ratio` | 0.737 | 0.8159 |
+| V6-06 | `IV-2 arc spot V+T ASD.result.utilization` | 0.737 | 0.8159 |
+| V6-06 | `IV-2 arc spot V+T LRFD.result.checks[2].ratio` | 0.9376 | 0.9579 |
+| V6-06 | `IV-2 arc spot V+T LRFD.result.interaction_checks[0].ratio` | 0.9376 | 0.9579 |
+| V6-06 | `IV-2 arc spot V+T LRFD.result.utilization` | 0.9376 | 0.9579 |
+| V6-06 | `arc spot multi sheet.result.checks[2].ratio` | 0.6716 | 0.7669 |
+| V6-06 | `arc spot multi sheet.result.interaction_checks[0].ratio` | 0.6716 | 0.7669 |
+| V6-06 | `arc spot multi sheet.result.utilization` | 0.6859 | 0.7669 |
+| V6-07 | `lap bolt Se e=2.result.pass` | true | null |
+| V6-07 | `lap bolt Se e=2.result.verdict` | "PASS" | "NOT_CHECKED" |
+| V6-07 | `lap bolt Se e=2.result.warnings[1]` | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간은 Manual II-1A 처럼 … | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정… |
+| V6-07 | `lap bolt short e.result.warnings[4]` | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간은 Manual II-1A 처럼 … | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정… |
+| V6-07 | `lap bolt short lap.result.pass` | true | null |
+| V6-07 | `lap bolt short lap.result.verdict` | "PASS" | "NOT_CHECKED" |
+| V6-07 | `lap bolt short lap.result.warnings[2]` | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간은 Manual II-1A 처럼 … | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정… |
+| V6-07 | `lap overload fails.result.warnings[2]` | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간은 Manual II-1A 처럼 … | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정… |
+| V6-07 | `lap screw no Pnvs.result.warnings[3]` | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간은 Manual II-1A 처럼 … | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정… |
+
+**(나) `design_checks` 항목의 판정 · 지배 · 비 · 강도 · 참고값 — 155 칸**, 새 항목 9개
+
+
+V6-03 — 94 칸
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| G5 no bearing load | `member.web_crippling` | governs | false | true |
+| G5 no bearing load | `member.bending_web_crippling` | governs | false | true |
+| I6.2.1 R exceeds table | `member.flexure.uplift_r` | governs | false | true |
+| IV-10 missing member_case | `conn.bolt.bearing` | governs | true | false |
+| IV-10 missing member_case | `conn.j6.tension_rupture` | governs | false | true |
+| IV-4 flare bevel ASD | `conn.j6.tension_rupture` | governs | false | true |
+| IV-4 flare bevel ASD | `conn.flare_groove.shear` | governs | true | false |
+| IV-4 flare bevel LRFD | `conn.j6.tension_rupture` | governs | false | true |
+| IV-4 flare bevel LRFD | `conn.flare_groove.shear` | governs | true | false |
+| PAF thin t2 not evaluated | `conn.paf.bearing_tilting` | governs | false | true |
+| PAF thin t2 not evaluated | `conn.j6.shear_rupture` | governs | true | false |
+| arc spot sheet-to-sheet | `conn.detail.weld_end_distance` | governs | false | true |
+| arc spot sheet-to-sheet | `conn.j6.shear_rupture` | governs | false | true |
+| arc spot sheet-to-sheet | `conn.arc_spot.sheet_to_sheet` | governs | true | false |
+| arc spot small de | `conn.detail.weld_end_distance` | governs | true | false |
+| arc spot small de | `conn.weld.min_effective_diameter` | governs | false | true |
+| bolt assumed e (not decided) | `conn.detail.bolt_end_distance` | governs | false | true |
+| bolt assumed e (not decided) | `conn.bolt.bearing` | governs | true | false |
+| bolt assumed e (not decided) | `conn.j6.shear_rupture` | governs | false | true |
+| bolt thick (AISC scope) | `conn.scope` | governs | false | true |
+| combined angle (P)L/1000 | `member.flexure.global` | governs | false | true |
+| combined angle (P)L/1000 fails | `member.flexure.global` | governs | false | true |
+| compression Pcrl missing (E3 not evaluated) | `member.compression.local` | governs | false | true |
+| compression Pcrl missing (E3 not evaluated) | `member.compression.global` | governs | true | false |
+| compression angle H1.2 required | `member.axial_bending` | governs | false | true |
+| compression boundary minimum | `member.compression.local` | governs | false | true |
+| compression boundary minimum | `member.compression.global` | governs | true | false |
+| compression hat unsupported E2 | `member.compression.distortional` | governs | true | false |
+| compression hat unsupported E2 | `member.compression.global` | governs | false | true |
+| compression length missing | `member.compression.distortional` | governs | true | false |
+| compression length missing | `member.compression.global` | governs | false | true |
+| compression no demand | `member.compression.global` | governs | false | true |
+| connection no demand | `conn.bolt.tension` | governs | false | true |
+| connection no demand | `conn.j6.shear_rupture` | governs | false | true |
+| fillet V and T | `conn.out_of_plane_tension` | governs | false | true |
+| fillet V and T | `conn.shear_tension` | governs | false | true |
+| fillet angle welded | `conn.j6.block_shear` | governs | false | true |
+| fillet angle welded | `conn.fillet.sheet` | governs | true | false |
+| fillet member tension no Ag | `conn.member.tension` | governs | false | true |
+| fillet member tension no Ag | `conn.fillet.sheet` | governs | true | false |
+| fillet thick t_joint | `conn.j6.block_shear` | governs | false | true |
+| fillet thick t_joint | `conn.fillet.sheet` | governs | true | false |
+| flare V transverse n/e | `conn.shear_strength` | governs | false | true |
+| flare V transverse n/e | `conn.flare_groove.transverse_v` | governs | false | true |
+| flexure B4 exceeded and fails | `member.applicability.b4` | governs | false | true |
+| flexure Lb missing | `member.flexure.distortional` | governs | true | false |
+| flexure Lb missing | `member.flexure.local` | governs | false | true |
+| flexure Mcrd missing (F4 not evaluated) | `member.flexure.distortional` | governs | false | true |
+| flexure Mcrd missing (F4 not evaluated) | `member.flexure.local` | governs | true | false |
+| flexure Mcrl missing | `member.flexure.global` | governs | true | false |
+| flexure Mcrl missing | `member.flexure.local` | governs | false | true |
+| flexure hat negative sign | `member.flexure.global` | governs | true | false |
+| flexure hat negative sign | `member.flexure.local` | governs | false | true |
+| flexure unrestrained reference | `member.flexure.global` | governs | true | false |
+| flexure unrestrained reference | `member.flexure.distortional` | governs | false | true |
+| groove PJP no te | `conn.shear_strength` | governs | false | true |
+| groove PJP no te | `conn.groove.tension_compression` | governs | false | true |
+| lap bolt Se Mnd | `fastener_design/conn.bolt.tension` | governs | false | true |
+| lap bolt Se Mnd | `fastener_design/conn.bolt.bearing` | governs | false | true |
+| lap bolt Se e=2 | `lap.flexure.distortional` | governs | false | true |
+| lap bolt Se e=2 | `lap.bending_shear` | governs | true | false |
+| lap bolt Se e=2 | `fastener_design/conn.bolt.tension` | governs | false | true |
+| lap bolt Se e=2 | `fastener_design/conn.bolt.bearing` | governs | false | true |
+| lap bolt Sf only | `lap.flexure.local` | governs | false | true |
+| lap bolt Sf only | `fastener_design/conn.bolt.tension` | governs | false | true |
+| lap bolt Sf only | `fastener_design/conn.bolt.bearing` | governs | false | true |
+| lap bolt no Se | `lap.flexure.local` | governs | false | true |
+| lap bolt no Se | `fastener_design/conn.j6.shear_rupture` | governs | false | true |
+| lap bolt no Se | `fastener_design/conn.bolt.tension` | governs | false | true |
+| lap bolt short e | `fastener_design/conn.j6.shear_rupture` | governs | false | true |
+| lap bolt short e | `lap.flexure.distortional` | governs | false | true |
+| lap bolt short e | `lap.bending_shear` | governs | true | false |
+| lap bolt short e | `fastener_design/conn.bolt.tension` | governs | false | true |
+| lap bolt short lap | `lap.flexure.distortional` | governs | false | true |
+| lap bolt short lap | `lap.bending_shear` | governs | true | false |
+| lap bolt short lap | `fastener_design/conn.bolt.tension` | governs | false | true |
+| lap bolt short lap | `fastener_design/conn.bolt.bearing` | governs | false | true |
+| lap overload fails | `fastener_design/conn.bolt.tension` | governs | false | true |
+| lap overload fails | `fastener_design/conn.bolt.bearing` | governs | false | true |
+| lap screw Pnvs ASD | `fastener_design/conn.screw.bearing_tilting` | governs | false | true |
+| lap screw Pnvs ASD | `fastener_design/conn.screw.pullout` | governs | false | true |
+| lap screw no Pnvs | `lap.fastener_group` | governs | false | true |
+| lap screw no Pnvs | `fastener_design/conn.j6.shear_rupture` | governs | false | true |
+| lap screw no Pnvs | `lap.fastener_count` | governs | true | false |
+| lap screw no Pnvs | `lap.flexure.distortional` | governs | false | true |
+| lap screw no Pnvs | `fastener_design/conn.screw.pullout` | governs | false | true |
+| lap screw no Pnvs | `lap.bending_shear` | governs | true | false |
+| positive region Lb_pos missing | `member.flexure.positive_region` | governs | false | true |
+| screw no Pnvs (assumed) | `conn.screw.bearing_tilting` | governs | true | false |
+| screw no Pnvs (assumed) | `conn.screw.shear` | governs | false | true |
+| screw out of scope d | `conn.scope` | governs | false | true |
+| tension no Fu | `member.tension.rupture` | governs | false | true |
+| tension no Fu | `member.tension.yielding` | governs | true | false |
+| tension no demand | `member.tension.rupture` | governs | false | true |
+
+V6-04 — 50 칸
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| bolt thick (AISC scope) | `conn.detail.bolt_end_distance` | verdict | "pass" | "not_evaluated" |
+| bolt thick (AISC scope) | `conn.detail.bolt_end_distance` | ratio | 0.75 | null |
+| bolt thick (AISC scope) | `conn.detail.bolt_end_distance` | capacity | 1.0 | null |
+| bolt thick (AISC scope) | `conn.detail.bolt_end_distance` | reference.ratio | null | 0.75 |
+| bolt thick (AISC scope) | `conn.detail.bolt_end_distance` | reference.capacity | null | 1.0 |
+| bolt thick (AISC scope) | `conn.j6.block_shear` | verdict | "pass" | "not_evaluated" |
+| bolt thick (AISC scope) | `conn.j6.block_shear` | ratio | 0.08579710144927537 | null |
+| bolt thick (AISC scope) | `conn.j6.block_shear` | capacity | 11.655405405405405 | null |
+| bolt thick (AISC scope) | `conn.j6.block_shear` | reference.ratio | null | 0.08579710144927537 |
+| bolt thick (AISC scope) | `conn.j6.block_shear` | reference.capacity | null | 11.655405405405405 |
+| bolt thick (AISC scope) | `conn.j6.tension_rupture` | verdict | "pass" | "not_evaluated" |
+| bolt thick (AISC scope) | `conn.j6.tension_rupture` | ratio | 0.38438438438438444 | null |
+| bolt thick (AISC scope) | `conn.j6.tension_rupture` | capacity | 2.6015624999999996 | null |
+| bolt thick (AISC scope) | `conn.j6.tension_rupture` | reference.ratio | null | 0.38438438438438444 |
+| bolt thick (AISC scope) | `conn.j6.tension_rupture` | reference.capacity | null | 2.6015624999999996 |
+| bolt thick (AISC scope) | `conn.j6.shear_rupture` | verdict | "pass" | "not_evaluated" |
+| bolt thick (AISC scope) | `conn.j6.shear_rupture` | ratio | 0.1143961352657005 | null |
+| bolt thick (AISC scope) | `conn.j6.shear_rupture` | capacity | 8.741554054054053 | null |
+| bolt thick (AISC scope) | `conn.j6.shear_rupture` | reference.ratio | null | 0.1143961352657005 |
+| bolt thick (AISC scope) | `conn.j6.shear_rupture` | reference.capacity | null | 8.741554054054053 |
+| bolt thick (AISC scope) | `conn.bolt.shear` | verdict | "pass" | "not_evaluated" |
+| bolt thick (AISC scope) | `conn.bolt.shear` | ratio | 0.1886280807015056 | null |
+| bolt thick (AISC scope) | `conn.bolt.shear` | capacity | 5.301437602932776 | null |
+| bolt thick (AISC scope) | `conn.bolt.shear` | reference.ratio | null | 0.1886280807015056 |
+| bolt thick (AISC scope) | `conn.bolt.shear` | reference.capacity | null | 5.301437602932776 |
+| bolt thick (AISC scope) | `conn.detail.bolt_spacing` | verdict | "pass" | "not_evaluated" |
+| bolt thick (AISC scope) | `conn.detail.bolt_spacing` | ratio | 0.75 | null |
+| bolt thick (AISC scope) | `conn.detail.bolt_spacing` | capacity | 2.0 | null |
+| bolt thick (AISC scope) | `conn.detail.bolt_spacing` | reference.ratio | null | 0.75 |
+| bolt thick (AISC scope) | `conn.detail.bolt_spacing` | reference.capacity | null | 2.0 |
+| bolt thick (AISC scope) | `conn.detail.bolt_edge_distance` | verdict | "pass" | "not_evaluated" |
+| bolt thick (AISC scope) | `conn.detail.bolt_edge_distance` | ratio | 0.75 | null |
+| bolt thick (AISC scope) | `conn.detail.bolt_edge_distance` | capacity | 1.0 | null |
+| bolt thick (AISC scope) | `conn.detail.bolt_edge_distance` | reference.ratio | null | 0.75 |
+| bolt thick (AISC scope) | `conn.detail.bolt_edge_distance` | reference.capacity | null | 1.0 |
+| screw out of scope d | `conn.screw.bearing_tilting` | verdict | "pass" | "not_evaluated" |
+| screw out of scope d | `conn.screw.bearing_tilting` | ratio | 0.09352104037109665 | null |
+| screw out of scope d | `conn.screw.bearing_tilting` | capacity | 1.0692780961716688 | null |
+| screw out of scope d | `conn.screw.bearing_tilting` | reference.ratio | null | 0.09352104037109665 |
+| screw out of scope d | `conn.screw.bearing_tilting` | reference.capacity | null | 1.0692780961716688 |
+| screw out of scope d | `conn.screw.shear` | verdict | "pass" | "not_evaluated" |
+| screw out of scope d | `conn.screw.shear` | ratio | 0.04 | null |
+| screw out of scope d | `conn.screw.shear` | capacity | 2.5 | null |
+| screw out of scope d | `conn.screw.shear` | reference.ratio | null | 0.04 |
+| screw out of scope d | `conn.screw.shear` | reference.capacity | null | 2.5 |
+| screw out of scope d | `conn.detail.screw_end_distance` | verdict | "pass" | "not_evaluated" |
+| screw out of scope d | `conn.detail.screw_end_distance` | ratio | 0.5625 | null |
+| screw out of scope d | `conn.detail.screw_end_distance` | capacity | 1.0 | null |
+| screw out of scope d | `conn.detail.screw_end_distance` | reference.ratio | null | 0.5625 |
+| screw out of scope d | `conn.detail.screw_end_distance` | reference.capacity | null | 1.0 |
+
+V6-06 — 3 칸
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| IV-2 arc spot V+T ASD | `conn.arc_spot.shear_tension` | ratio | 0.7369623024687388 | 0.81588731706661 |
+| IV-2 arc spot V+T LRFD | `conn.arc_spot.shear_tension` | ratio | 0.9375652155637353 | 0.9579312124672654 |
+| arc spot multi sheet | `conn.arc_spot.shear_tension` | ratio | 0.6715612549328899 | 0.7668735425007214 |
+
+V6-07 — 5 칸
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| lap bolt Se e=2 | `lap.flexure.distortional` | verdict | "not_applicable" | "not_evaluated" |
+| lap bolt short e | `lap.flexure.distortional` | verdict | "not_applicable" | "not_evaluated" |
+| lap bolt short lap | `lap.flexure.distortional` | verdict | "not_applicable" | "not_evaluated" |
+| lap overload fails | `lap.flexure.distortional` | verdict | "not_applicable" | "not_evaluated" |
+| lap screw no Pnvs | `lap.flexure.distortional` | verdict | "not_applicable" | "not_evaluated" |
+
+V6-20 — 3 칸
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| I6.2.1 R exceeds table | `member.flexure.distortional` | verdict | "not_applicable" | "not_evaluated" |
+| I6.2.1 R exceeds table | `member.flexure.local` | verdict | "not_applicable" | "not_evaluated" |
+| I6.2.1 R exceeds table | `member.flexure.global` | verdict | "not_applicable" | "not_evaluated" |
+
+새 항목(S-1): lap bolt Se Mnd → `lap.block_shear` (not_evaluated), lap bolt Se e=2 → `lap.block_shear` (not_evaluated), lap bolt Sf only → `lap.block_shear` (not_evaluated), lap bolt no Se → `lap.block_shear` (not_evaluated), lap bolt short e → `lap.block_shear` (not_evaluated), lap bolt short lap → `lap.block_shear` (not_evaluated), lap overload fails → `lap.block_shear` (not_evaluated), lap screw Pnvs ASD → `lap.block_shear` (not_evaluated), lap screw no Pnvs → `lap.block_shear` (not_evaluated)

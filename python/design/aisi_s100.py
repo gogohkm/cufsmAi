@@ -29,6 +29,10 @@ from design.checks import set_governing as _set_governing, apply_context as _app
 _PROPS_GENERATED = '_props_generated'
 # 하위 설계(압축 · 휨 · 인장)가 조합 검토에 넘기는 반올림하지 않은 설계강도(결과에는 남기지 않는다).
 _RAW_DS = '_raw_design_strength'
+# 반올림하지 않은 이용률(지배 이름 고르기용) — design_member 가 내보내기 전에 뺀다.
+_UTIL_RAW = '_utilization_raw'
+# global_buckling 이 '횡좌굴 없음'에 쓰는 표지값(1e6 ksi) — 이 값이면 끝없는 값(∞)이다.
+_FCRE_INF = 1e6
 
 # 안전/저항 계수
 PHI = {
@@ -197,15 +201,28 @@ def _hat_geometry(params: dict, props: dict, section: dict, t: float, R: float) 
     }
 
 
+def _governing_check_id(checks: list, group: str, value) -> str | None:
+    """하위 설계의 설계강도(Pa · Max · Ta)는 그 무리에서 설계강도가 가장 작은 모드의 값이다 — 그 항목의 id."""
+    if value is None:
+        return None
+    cands = [c for c in checks if c.get('group') == group and (c.get('capacity') or {}).get('value') is not None]
+    best = min(cands, key=lambda c: abs(c['capacity']['value'] - value), default=None)
+    if best is not None and abs(best['capacity']['value'] - value) <= 1e-9 * max(abs(value), 1.0):
+        return best['id']
+    return None
+
+
 def _merge_governing_check(result: dict, check: dict, name: str,
                             normalized_ratio: float | None = None) -> None:
     """한계상태 결과를 최상위 pass/utilization에 병합한다."""
     if normalized_ratio is None:
         normalized_ratio = check.get('total')
     if normalized_ratio is not None and math.isfinite(float(normalized_ratio)):
-        current = result.get('utilization')
+        # 지배 이름은 반올림하지 않은 이용률로 고른다(utilization 키는 표시용 4자리, V6-14).
+        current = result.get(_UTIL_RAW, result.get('utilization'))
         if current is None or float(normalized_ratio) > float(current):
             result['utilization'] = round(float(normalized_ratio), 4)
+            result[_UTIL_RAW] = float(normalized_ratio)
             result['governing_check'] = name
     passed = check.get('pass')
     if passed is False:
@@ -579,11 +596,14 @@ def design_member(params: dict) -> dict:
 
     checks = result.setdefault('design_checks', [])
     if member_type != 'tension':
-        checks.append(_mc.b4_check(params['design_method'], b4_items, result.get('dsm_warnings') or [],
-                                   bool(result.get('b4_limits_exceeded')), params.get(_PROPS_GENERATED)))
+        b4 = _mc.b4_check(params['design_method'], b4_items, result.get('dsm_warnings') or [],
+                          bool(result.get('b4_limits_exceeded')), params.get(_PROPS_GENERATED))
+        checks.append(b4)
+        _set_governing([b4])
     _apply_context(checks, params)
 
     result.pop(_RAW_DS, None)
+    result.pop(_UTIL_RAW, None)
     result['display_rounding'] = _display_rounding('member')
     result['report'] = generate_report(result, params)
     return result
@@ -800,7 +820,7 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
 
     # 항복강도: Fy < 95 ksi (표의 부등호는 strict)
     if Fy is not None:
-        _rec('Fy', ('Fy', Fy, 'stress'), None, Fy, 95, 'yield stress Fy < 95 ksi', Fy < 95, strict=True)
+        _rec('Fy', ('Fy', Fy, 'stress'), None, Fy, 95, 'yield stress limit (§B4.1)', Fy < 95, strict=True)
     if Fy is not None and Fy >= 95:
         warnings.append(f'Fy = {Fy} ksi is not < 95 ksi (Table B4.1-1 Fy limit)')
 
@@ -1152,6 +1172,7 @@ def _design_compression(params: dict) -> dict:
         'design_strength': round(design_strength, 2),
         _RAW_DS: design_strength,
         'utilization': round(utilization, 4) if Pu > 0 else None,
+        _UTIL_RAW: utilization if Pu > 0 else None,
         'pass': pass_flag,
         'distortional_not_evaluated': bool(distortional_not_evaluated),
         'distortional_applicable': bool(dist_applicable),
@@ -2005,7 +2026,8 @@ def _design_flexure(params: dict) -> dict:
         'distortional_not_evaluated': distortional_not_evaluated,
         'distortional_applicable': bool(dist_applicable),
         'dsm_source': {'Mcrl': Mcrl_source, 'Mcrd': Mcrd_source},
-        'Fcre_detail': fcre_detail if fcre_detail else None,
+        'Fcre_detail': (dict(fcre_detail, Fcre_unbounded=True) if fcre_detail and
+                        (fcre_detail.get('Fcre') or 0) == _FCRE_INF else (fcre_detail if fcre_detail else None)),
         'Fy_used': round(Fy, 2),
         'Fy_original': round(Fy_original, 2),
         'controlling_mode': mode,
@@ -2014,6 +2036,7 @@ def _design_flexure(params: dict) -> dict:
         'design_strength': round(design_strength, 2),
         _RAW_DS: design_strength,
         'utilization': round(utilization, 4) if Mu > 0 else None,
+        _UTIL_RAW: utilization if Mu > 0 else None,
         'pass': pass_flag,
         'steps': steps,
         'spec_sections': sorted(set(spec_sections)),
@@ -2177,6 +2200,8 @@ def _design_flexure(params: dict) -> dict:
             'Lb': round(Lb_pos, 1),
             'Cb': round(Cb_pos, 2),
             'Fcre': round(Fcre_pos, 2),
+            # 1e6 ksi 는 '횡좌굴 없음(∞)'의 표지다 — 숫자로 읽지 말라는 표시(V6-16). Fcre 키는 화면이 쓰므로 그대로.
+            'Fcre_unbounded': True if Fcre_pos == _FCRE_INF else None,
             'Mne': round(Mne_pos, 2),
             'Mnl': round(Mnl_pos, 2),
             'Mnd': round(Mnd_pos, 2),
@@ -2579,6 +2604,7 @@ def _design_combined(params: dict) -> dict:
 
     Mux_amp = Mux * alpha_x
     Muy_amp = Muy * alpha_y
+    Muy_amp_no_ecc = Muy_amp
 
     # 설계강도
     # 상호작용은 반올림하지 않은 설계강도로 판정한다(design_strength 키는 표시용으로 반올림된 값).
@@ -2587,6 +2613,7 @@ def _design_combined(params: dict) -> dict:
     May = May_strength if flex_y else 1e10
 
     angle_l1000_note = None
+    angle_trace = None
     if not angle_exempt:
         L_angle = params.get('L', 0) or KyLy
         Padd = Pu * L_angle / 1000.0
@@ -2595,6 +2622,9 @@ def _design_combined(params: dict) -> dict:
         # 두 경우를 모두 평가하여 P 허용값이 낮은(이용률이 큰) 쪽을 지배 케이스로 채택
         inter_no_ecc = combined_axial_bending(Pu, Pa, Mux_amp, Max, Muy_amp, May)
         inter_ecc = combined_axial_bending(Pu, Pa, Mux_amp, Max, Muy_with_ecc, May)
+        angle_trace = dict(L=L_angle, L_given=bool(params.get('L')), Padd=Padd, My_ecc=Muy_with_ecc,
+                           My_no_ecc=Muy_amp_no_ecc, total_ecc=inter_ecc['total'],
+                           total_no_ecc=inter_no_ecc['total'], ecc_governs=inter_ecc['total'] >= inter_no_ecc['total'])
         if inter_ecc['total'] >= inter_no_ecc['total']:
             Muy_amp = Muy_with_ecc
             angle_l1000_note = (
@@ -2712,17 +2742,22 @@ def _design_combined(params: dict) -> dict:
     _finalize_verdict(result)
     # 검토 항목: 성분(압축 · 휨x 와 그 G2/H2/G5/H3/정모멘트) + §H1.2 상호작용
     comp_checks = [c for c in comp.get('design_checks', []) if c['id'] != 'member.axial_bending']
-    if params.get('Cmx') is not None:
-        cm_src = {'kind': 'user_input', 'key': 'Cmx'}
-    elif M1_M2 is not None and not params.get('transverse_load', False):
-        cm_src = {'kind': 'user_input', 'key': 'dist_M1_M2', 'equation': 'C1.2.1.1-4'}
-    else:
-        cm_src = {'kind': 'engine_default', 'key': 'Cmx', 'note': 'Cm = 1.0 (conservative)'}
+    def _cm_basis(key):
+        if params.get(key) is not None:
+            return 'user'
+        if M1_M2 is not None and not params.get('transverse_load', False):
+            return 'M1_M2'
+        return 'transverse' if params.get('transverse_load', False) else 'default'
+
     h12 = _mc.axial_bending_check(dict(
         dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), raw=h12_raw,
         interaction=interaction, Pu=Pu, Pa=Pa, Max=Max, Mux=Mux, Mux_amp=Mux_amp, alpha_x=alpha_x, PEx=PEx,
-        E=E, Ag=Ag, KxLx=KxLx, rx=rx, Cmx=Cmx, Cm_src=cm_src, c1_alpha=c1_alpha,
-        May=(May if flex_y else None), Muy_amp=Muy_amp, angle_note=angle_l1000_note,
+        E=E, Ag=Ag, KxLx=KxLx, rx=rx, Cmx=Cmx, c1_alpha=c1_alpha, M1_M2=M1_M2,
+        Cmx_basis=_cm_basis('Cmx'), Cmy_basis=_cm_basis('Cmy'),
+        May=(May if flex_y else None), Muy=Muy, Muy_amp=Muy_amp, alpha_y=alpha_y, PEy=PEy, KyLy=KyLy, ry=ry,
+        Cmy=Cmy, angle=angle_trace,
+        Pa_id=_governing_check_id(comp.get('design_checks') or [], 'member.compression', Pa),
+        Max_id=_governing_check_id(flex_x.get('design_checks') or [], 'member.flexure', Max),
         component_unavailable=_component_unavailable))
     result['design_checks'] = (_mc.remap_mirrors(comp_checks, 'compression')
                                + _mc.remap_mirrors(flex_x.get('design_checks', []), 'flexure_x') + [h12])
@@ -2844,7 +2879,9 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
     h11 = _mc.tension_bending_checks(dict(
         dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), T=T_abs, Ta=Ta, Mux=Mux,
         Muy=Muy, Max=Max, May=May, Maxt=Maxt, Mayt=Mayt, Sft=Sft, Fy=Fy, phi_b=phi_b, omega_b=omega_b,
-        r11=r11, r12=r12))
+        r11=r11, r12=r12,
+        Ta_id=_governing_check_id(tens.get('design_checks') or [], 'member.tension', Ta),
+        Max_id=_governing_check_id(flex_x.get('design_checks') or [], 'member.flexure', Max)))
     _set_governing(h11)
     result['design_checks'] = (_mc.remap_mirrors(tens.get('design_checks', []), 'tension')
                                + _mc.remap_mirrors(flex_x.get('design_checks', []), 'flexure_x') + h11)
@@ -2935,6 +2972,7 @@ def _design_tension(params: dict) -> dict:
         _RAW_DS: design_strength,
         'controlling_mode': mode,
         'utilization': round(utilization, 4) if utilization else None,
+        _UTIL_RAW: utilization if utilization else None,
         'pass': utilization <= 1.0 if utilization else None,
         'steps': steps,
         'spec_sections': ['D2', 'D3'] if Tn_rupture is not None else ['D2'],

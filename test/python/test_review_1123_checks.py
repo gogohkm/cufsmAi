@@ -143,6 +143,10 @@ def test_capacity_mirrors_existing_fields_and_ratio_is_demand_over_capacity():
                     n_mirror += 1
                 if c['verdict'] in ('pass', 'fail') and c['ratio'] is not None and c['demand'] and c['capacity']:
                     r = c['demand']['value'] / c['capacity']['value']
+                    if c.get('ratio_form'):
+                        # 지수 n 의 상호작용: 비 = (value/limit)^(1/n) — 하중 배율로 견줄 수 있는 꼴(계약 §4)
+                        n_exp = float(c['ratio_form'].split('^(1/')[1].rstrip(')'))
+                        r = r ** (1.0 / n_exp)
                     assert abs(r - c['ratio']) <= 1e-12 * max(1.0, abs(r)), (name, c['id'], r, c['ratio'])
     assert n_mirror > 300, n_mirror
 
@@ -212,19 +216,31 @@ def test_not_evaluated_checks_carry_no_demand_capacity_figures():
 
 
 def test_governing_is_highest_ratio_and_group_and_overall_verdicts_match_engine():
-    """무리마다 지배 = 평가한 항목 중 비 최대. 전체 판정(fail > not_evaluated > pass) = 엔진의 pass."""
+    """무리마다 지배 하나(계약 §4, V6-03): 판정에 드는 불합격 → 그 중 비 최대('fail'), 없고 미평가가 있으면
+    그 미평가 항목('not_evaluated', 평가한 최대는 highest_evaluated), 모두 평가했으면 비 최대('ratio').
+    전체 판정(fail > not_evaluated > pass) = 엔진의 pass."""
     for name, _, via in _results():
         for owner, checks in _all_check_lists(via):
             groups = {}
             for c in checks:
                 groups.setdefault(c['group'], []).append(c)
             for g, items in groups.items():
-                assert sum(1 for c in items if c['governs']) <= 1, (name, g)
+                gov = [c for c in items if c['governs']]
+                assert len(gov) <= 1, (name, g)
                 ev = [c for c in items if c['verdict'] in ('pass', 'fail') and c['ratio'] is not None]
-                if ev:
-                    top = max(c['ratio'] for c in ev)
-                    gov = [c for c in items if c['governs']]
-                    assert gov and gov[0]['ratio'] == top, (name, g, [(c['id'], c['ratio']) for c in items])
+                fails = [c for c in ev if c['verdict'] == 'fail' and c['counts']]
+                ne = [c for c in items if c['verdict'] == 'not_evaluated' and c['counts']]
+                if fails:
+                    assert gov and gov[0]['governs_basis'] == 'fail' and                         gov[0]['ratio'] == max(c['ratio'] for c in fails), (name, g)
+                elif ne:
+                    assert gov and gov[0]['verdict'] == 'not_evaluated' and gov[0]['governs_basis'] == 'not_evaluated'
+                    he = gov[0]['highest_evaluated']
+                    if ev:
+                        assert he['ratio'] == max(c['ratio'] for c in ev), (name, g)
+                    else:
+                        assert he is None, (name, g)
+                elif ev:
+                    assert gov and gov[0]['governs_basis'] == 'ratio' and                         gov[0]['ratio'] == max(c['ratio'] for c in ev), (name, g)
             if owner is via or 'pass' in owner:
                 if owner.get('pass') is None and owner is not via:
                     continue
@@ -370,7 +386,7 @@ def test_manual_H_III_11_B1_and_H1_2():
     """Chapter H / C1 — Manual III-11 (RHS, ASD P 45, M 15): Pe1 = 337 kips, B1 = 1.27; H1.2 ≤ 1 (pass)."""
     r = design_member(dict([p for n, _, p in cases._member() if n == 'III-11 RHS combined ASD'][0]))
     h = _by_id(r, 'member.axial_bending')
-    _close(_step_value(h, 'Pe1'), 337, 0.007, 'III-11 Pe1')
+    _close(_step_value(h, 'Pe1x'), 337, 0.007, 'III-11 Pe1')
     _close(_step_value(h, 'B1x'), 1.27, 0.007, 'III-11 B1')
     assert h['verdict'] == 'pass' and h['ratio'] == r['interaction']['total'] or \
         round(h['ratio'], 4) == r['interaction']['total']

@@ -309,7 +309,9 @@ def _analytic_crit_steps(tr, an, ctx, sym, base_sym, area_sym, area_val, area_q,
         dims.append(q('t', an['t'], 'length', src('section_property', key='t')))
         i_f = tr.add('elastic_buckling', f'{base_sym} = analytic elastic buckling stress ({eq_label})',
                      equation=eq_label, inputs=dims, result=q(base_sym, an['F'], 'stress'))
-    i_p = tr.add('equation', f'{sym} = {base_sym} {area_sym}', inputs=[tr.ref(i_f), area_q],
+    pcr_eq = {('local', 'A'): '2.3.1.2-1', ('local', 'Sf'): '2.3.3.2-1', ('distortional', 'A'): '2.3.1.3-1',
+              ('distortional', 'Sf'): '2.3.3.3-1'}.get((an.get('kind'), area_sym))
+    i_p = tr.add('equation', f'{sym} = {base_sym} {area_sym}', equation=pcr_eq, inputs=[tr.ref(i_f), area_q],
                  result=q(sym, an['raw_product'], 'force' if area_sym == 'A' else 'moment'))
     if an.get('raised'):
         i_p = tr.add('modifier', f'{sym} = max({sym}, single-minimum floor)  (§4.1: the lone minimum is a floor)',
@@ -451,6 +453,12 @@ def compression_checks(ctx):
 
 # ---------------------------------------------------------------- 휨 (F)
 
+def _unbounded(symbol, quantity='stress'):
+    """끝없는 값(횡좌굴 없음 → Fcre = ∞). 숫자로 싣지 않는다(엔진 안의 1e6 ksi 는 '없음'의 표지일 뿐 — V6-16)."""
+    return q(symbol, None, quantity, unbounded=True,
+             reason='no lateral-torsional buckling: the value is unbounded (∞); the engine uses 1e6 ksi internally')
+
+
 def _beam_fcre_steps(tr, ctx, st, Lb, Cb, Lb_src, Cb_src, sym_suffix=''):
     """§F2 Fcre 단계 — st['Fcre_raw'] 은 compute_beam_Fcre_detail(_raw=…) 가 채운 값."""
     raw = st.get('Fcre_raw') or {}
@@ -463,8 +471,7 @@ def _beam_fcre_steps(tr, ctx, st, Lb, Cb, Lb_src, Cb_src, sym_suffix=''):
     br = raw.get('branch')
     if br == 'fully_braced':
         return tr.add('elastic_buckling', f'{Fsym} → ∞ (Lb = 0: compression flange fully braced, no LTB)',
-                      inputs=[q('Lb', Lb, 'length', Lb_src)], result=q(Fsym, raw['Fcre'], 'stress'),
-                      note='engine uses 1e6 ksi as "no lateral-torsional buckling"')
+                      inputs=[q('Lb', Lb, 'length', Lb_src)], result=_unbounded(Fsym))
     E = q('E', raw.get('E'), 'stress', spec())
     G = q('G', raw.get('G'), 'stress', spec())
     J = q('J', raw.get('J'), 'torsion_constant', _sec('J', ctx))
@@ -480,8 +487,7 @@ def _beam_fcre_steps(tr, ctx, st, Lb, Cb, Lb_src, Cb_src, sym_suffix=''):
                   inputs=[lb, tr.ref(i_lu)])
         if raw['lb_le_lu']:
             return tr.add('elastic_buckling', f'{Fsym} → ∞ (Lb ≤ Lu: lateral-torsional buckling not considered)',
-                          inputs=[lb, tr.ref(i_lu)], result=q(Fsym, raw['Fcre'], 'stress'),
-                          note='engine uses 1e6 ksi as "no lateral-torsional buckling"')
+                          inputs=[lb, tr.ref(i_lu)], result=_unbounded(Fsym))
         return tr.add('elastic_buckling', f'{Fsym} = Cb {PI} / (Ky Ly Sf) (E G J Iy)^0.5', equation='F2.1.4-2',
                       inputs=[cb, q('Ky', raw['Ky'], 'dimensionless', spec()),
                               q('Ly', raw['Ly'], 'length', Lb_src), Sf, E, G, J, Iy],
@@ -557,8 +563,10 @@ def _mne_steps(tr, ctx, st, Lb, Cb, Lb_src, Cb_src, sym='Mne'):
         i_my = tr.add('yield', 'My = Sf Fy', equation='F2.1-2', inputs=[Sf, fy], result=q('My', st['My'], 'moment'))
         zf = q('Zf', ctx['Zf'], 'section_modulus', _sec('Zx', ctx))
         i_mp = tr.add('yield', 'Mp = Zf Fy', equation='F2.4.2-3', inputs=[zf, fy], result=q('Mp', st['Mp'], 'moment'))
-        i_mcre = tr.add('elastic_buckling', 'Mcre = Sf Fcre', equation='F2.4.2-2', inputs=[Sf, tr.ref(i_f)],
-                        result=q('Mcre', st['Sf_eff'] * gr['Fcre'], 'moment'))
+        fref = tr.ref(i_f)
+        i_mcre = tr.add('elastic_buckling', 'Mcre = Sf Fcre', equation='F2.4.2-2', inputs=[Sf, fref],
+                        result=(_unbounded('Mcre', 'moment') if fref.get('unbounded')
+                                else q('Mcre', st['Sf_eff'] * gr['Fcre'], 'moment')))
         tr.branch('Mcre > 2.78 My (inelastic reserve)', True, 'F2.4.2-1', inputs=[tr.ref(i_mcre), tr.ref(i_my)])
         return tr.add('equation', 'Mne = Mp − (Mp − My) [(My/Mcre)^0.5 − 0.23] / 0.37 ≤ Mp',
                       equation='F2.4.2-1', inputs=[tr.ref(i_mp), tr.ref(i_my), tr.ref(i_mcre)],
@@ -603,10 +611,19 @@ def flexure_checks(ctx):
 
     if i621:
         # §I6.2.1 이 F2 · F4 (와 F3 의 Mne 경로)를 대신한다 — 엔진이 미평가로 올린 것만 미평가로.
+        # I6.2.1 자체를 쓸 수 없으면(표 밖 등) 대신할 것이 없다: 그때는 F2–F4 가 휨강도이고, 이 실행은 그것을
+        # 계산하지 않았다 → not_evaluated (V6-20). '대체됨 — 해당 없음'이라고 적지 않는다.
+        i621_items = ne_items(ctx['not_evaluated_all'], 'I6.2.1')
+        stands = ('§I6.2.1 cannot be applied (' + '; '.join(i621_items) + ') — Chapter F then gives the flexural '
+                  'strength, and this run did not compute it (run without R_uplift, or within the §I6.2.1 limits)')
         for cid, items in (('member.flexure.global', g_items), ('member.flexure.local', l_items),
                            ('member.flexure.distortional', d_items)):
-            checks.append(not_evaluated(cid, ctx, '; '.join(items)) if items else
-                          not_applicable(cid, ctx, replaced))
+            if items:
+                checks.append(not_evaluated(cid, ctx, '; '.join(items)))
+            elif i621_items:
+                checks.append(not_evaluated(cid, ctx, stands))
+            else:
+                checks.append(not_applicable(cid, ctx, replaced))
         checks.append(_i621_check(ctx, st, Sf, demand))
         return checks
 
@@ -1086,39 +1103,98 @@ def tension_checks(ctx):
 
 # ---------------------------------------------------------------- 조합 (H1)
 
+def _cm_step(tr, ctx, axis):
+    """Cm (§C1.2.1.1) — 입력 · Eq. C1.2.1.1-4 · 횡하중 1.0 · 기본 1.0 가운데 엔진이 쓴 것."""
+    basis, val = ctx[f'Cm{axis}_basis'], ctx[f'Cm{axis}']
+    sym = f'Cm{axis}'
+    if basis == 'M1_M2':
+        i = tr.add('modifier', f'{sym} = 0.6 − 0.4 (M1/M2)', equation='C1.2.1.1-4',
+                   inputs=[q('M1/M2', ctx['M1_M2'], 'dimensionless', src('user_input', key='dist_M1_M2'))],
+                   result=q(sym, val, 'dimensionless'))
+        return tr.ref(i)
+    if basis == 'user':
+        return q(sym, val, 'dimensionless', src('user_input', key=sym))
+    if basis == 'transverse':
+        return q(sym, val, 'dimensionless', src('specification', key='transverse_load',
+                                                 note='transverse load between supports → Cm = 1.0'))
+    return q(sym, val, 'dimensionless', src('engine_default', key=sym,
+                                            note='Cm = 1.0 (conservative; neither Cm nor M1/M2 given)'))
+
+
+def _b1_steps(tr, ctx, axis, P):
+    """Pe1 (§C1.2.1.1) · B1 (Eq. C1.2.1.1-3) — x 축은 KxLx/rx, y 축은 KyLy/ry. 돌려주는 값: B1 단계 번호."""
+    p = ctx['params']
+    L_key, r_key = ('KxLx', 'rx') if axis == 'x' else ('KyLy', 'ry')
+    Lq = q(L_key, ctx[L_key], 'length', src('user_input', key=L_key) if p.get(L_key) is not None
+           else src('engine_default', key=L_key, note='120 in'))
+    i_pe = tr.add('elastic_buckling', f'Pe1{axis} = {PI}² E A / ({L_key} / {r_key})²', equation='C1.2.1.1-5',
+                  inputs=[q('E', ctx['E'], 'stress', spec()), q('A', ctx['Ag'], 'area', _sec('A', ctx)), Lq,
+                          q(r_key, ctx[r_key], 'length', _sec(r_key, ctx))],
+                  result=q(f'Pe1{axis}', ctx['PEx' if axis == 'x' else 'PEy'], 'force'))
+    cm = _cm_step(tr, ctx, axis)
+    return tr.add('modifier', f'B1{axis} = Cm{axis} / (1 − α P / Pe1{axis}) ≥ 1.0', equation='C1.2.1.1-3',
+                  inputs=[cm, q('α', ctx['c1_alpha'], 'dimensionless', spec()), P, tr.ref(i_pe)],
+                  result=q(f'B1{axis}', ctx['alpha_x' if axis == 'x' else 'alpha_y'], 'dimensionless'))
+
+
 def axial_bending_check(ctx):
-    """§H1.2 P/Pa + Mx/Max + My/May ≤ 1 — 엔진이 쓴 Pa · Max 는 하위 결과의 (반올림된) design_strength."""
+    """§H1.2 P/Pa + Mx/Max + My/May ≤ 1 — Pa · Max 는 하위 설계의 반올림하지 않은 설계강도.
+
+    모멘트는 사용자가 준 Mux · Muy 를 입력으로 두고, §C1.2.1.1 의 Pe1 · Cm · B1 과 증폭한 모멘트(Mx,amp ·
+    My,amp)를 단계로 둔다. 앵글(§H1.2 둘째 단락)은 (P)L/1000 을 더한 My,ecc 와 더하지 않은 My,amp 가운데
+    허용 P 를 더 작게 만드는 쪽(큰 쪽)을 갈래로 고른다.
+    """
     dm, p = ctx['dm'], ctx['params']
     tr = Trace()
     raw = ctx['raw']
     P = q('P', ctx['Pu'], 'force', demand_source(p, 'Pu'))
-    Pa = q('Pa', ctx['Pa'], 'force', src('check', id='member.compression',
-                                         note='governing compression design strength (Chapter E)'))
-    Max = q('Max', ctx['Max'], 'moment', src('check', id='member.flexure',
-                                             note='governing flexural design strength (Chapter F)'))
+    Pa = q('Pa', ctx['Pa'], 'force', src('check', id=ctx.get('Pa_id'), group='member.compression',
+                                         note='least compression design strength (Chapter E)'))
+    Max = q('Max', ctx['Max'], 'moment', src('check', id=ctx.get('Max_id'), group='member.flexure',
+                                             note='least flexural design strength (Chapter F)'))
     mx = q('Mx', ctx['Mux'], 'moment', demand_source(p, 'Mux'))
     ins = [P, Pa]
-    if ctx['alpha_x'] > 1.0 or ctx['PEx'] < 1e9:
-        i_pe = tr.add('elastic_buckling', f'Pe1 = {PI}² E A / (KxLx / rx)²',
-                      inputs=[q('E', ctx['E'], 'stress', spec()), q('A', ctx['Ag'], 'area', _sec('A', ctx)),
-                              q('KxLx', ctx['KxLx'], 'length', src('user_input', key='KxLx') if p.get('KxLx') is not None
-                                else src('engine_default', key='KxLx', note='120 in')),
-                              q('rx', ctx['rx'], 'length', _sec('rx', ctx))],
-                      result=q('Pe1', ctx['PEx'], 'force'))
-        i_b1 = tr.add('modifier', 'B1 = Cm / (1 − α P / Pe1) ≥ 1.0', equation='C1.2.1.1-3',
-                      inputs=[q('Cm', ctx['Cmx'], 'dimensionless', ctx['Cm_src']), q('α', ctx['c1_alpha'], 'dimensionless',
-                                                                                    spec()), P, tr.ref(i_pe)],
-                      result=q('B1x', ctx['alpha_x'], 'dimensionless'))
-        i_m = tr.add('demand', 'Mx = B1 Mx', inputs=[tr.ref(i_b1), mx], result=q('Mx', ctx['Mux_amp'], 'moment'))
+    mx_sym = 'Mx'
+    if ctx['PEx'] < 1e9:
+        i_b1 = _b1_steps(tr, ctx, 'x', P)
+        i_m = tr.add('demand', 'Mx,amp = B1x Mx', equation='C1.2.1.1-1', inputs=[tr.ref(i_b1), mx],
+                     result=q('Mx,amp', ctx['Mux_amp'], 'moment'))
         ins += [tr.ref(i_m), Max]
+        mx_sym = 'Mx,amp'
     else:
         ins += [mx, Max]
+    expr = f'P/Pa + {mx_sym}/Max'
     if ctx.get('May') is not None:
-        ins += [q('My', ctx['Muy_amp'], 'moment', demand_source(p, 'Muy') if not ctx.get('angle_note') else
-                  src('user_input', key='Muy', note=ctx['angle_note'])),
-                q('May', ctx['May'], 'moment', src('user_input', key='May_strength'))]
-    i_x = tr.add('equation', 'P/Pa + Mx/Max + My/May', equation='H1.2-1', inputs=ins,
-                 result=q('H1.2', raw['total'], 'dimensionless'))
+        my = q('My', ctx['Muy'], 'moment', demand_source(p, 'Muy'))
+        i_b1y = _b1_steps(tr, ctx, 'y', P) if ctx['PEy'] < 1e9 else None
+        b1y = (tr.ref(i_b1y) if i_b1y is not None else
+               q('B1y', ctx['alpha_y'], 'dimensionless',
+                 src('engine_default', key='B1y', note='no amplification: P = 0 or ry not given')))
+        ang = ctx.get('angle')
+        if ang:
+            Lq = q('L', ang['L'], 'length', src('user_input', key='L') if ang['L_given'] else
+                   src('engine_default', key='L', note='member length not given — KyLy used'))
+            i_pl = tr.add('demand', 'PL/1000 = P L / 1000  (angle: additional eccentricity moment, §H1.2)',
+                          inputs=[P, Lq], result=q('PL/1000', ang['Padd'], 'moment'))
+            i_e = tr.add('demand', 'My,ecc = B1y (My + PL/1000)', inputs=[b1y, my, tr.ref(i_pl)],
+                         result=q('My,ecc', ang['My_ecc'], 'moment'))
+            i_n = tr.add('demand', 'My,amp = B1y My', equation='C1.2.1.1-1', inputs=[b1y, my],
+                         result=q('My,amp', ang['My_no_ecc'], 'moment'))
+            tr.branch('My,ecc ≥ My,amp  (the larger moment gives the smaller allowable P — §H1.2 angle)',
+                      ang['ecc_governs'], 'H1.2', inputs=[tr.ref(i_e), tr.ref(i_n)])
+            ins += [tr.ref(i_e if ang['ecc_governs'] else i_n, 'My,used')]
+            my_sym = 'My,used'
+        elif i_b1y is not None:
+            i_my = tr.add('demand', 'My,amp = B1y My', equation='C1.2.1.1-1', inputs=[b1y, my],
+                          result=q('My,amp', ctx['Muy_amp'], 'moment'))
+            ins += [tr.ref(i_my)]
+            my_sym = 'My,amp'
+        else:
+            ins += [my]
+            my_sym = 'My'
+        ins += [q('May', ctx['May'], 'moment', src('user_input', key='May_strength'))]
+        expr += f' + {my_sym}/May'
+    i_x = tr.add('equation', expr, equation='H1.2-1', inputs=ins, result=q('H1.2', raw['total'], 'dimensionless'))
     tr.add('verdict', 'H1.2 ≤ 1.0', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
            result=q('ratio', raw['total'], 'dimensionless'),
            verdict='pass' if ctx['interaction']['pass'] else 'fail')
@@ -1136,7 +1212,8 @@ def tension_bending_checks(ctx):
     dm, p = ctx['dm'], ctx['params']
     out = []
     T = q('T', ctx['T'], 'force', demand_source(p, 'Pu'))
-    Ta = q('Ta', ctx['Ta'], 'force', src('check', id='member.tension'))
+    Ta = q('Ta', ctx['Ta'], 'force', src('check', id=ctx.get('Ta_id'), group='member.tension',
+                                         note='least tension design strength (Chapter D)'))
     mx = q('Mx', ctx['Mux'], 'moment', demand_source(p, 'Mux'))
     my = q('My', ctx['Muy'], 'moment', demand_source(p, 'Muy'))
     for cid, val, eq in (('member.tension_bending.flange_yield', ctx['r11'], 'H1.1-1'),
@@ -1145,20 +1222,26 @@ def tension_bending_checks(ctx):
         if eq == 'H1.1-1':
             fy = q('Fy', ctx['Fy'], 'stress', src('material', key='Fy'))
             sft = q('Sft', ctx['Sft'], 'section_modulus', _sec('Sft', ctx))
-            i_mt = tr.add('design_strength', 'Maxt = φb Sft Fy' if dm == 'LRFD' else 'Maxt = Sft Fy / Ωb',
-                          equation='H1.1-3b' if dm == 'LRFD' else 'H1.1-3a',
-                          inputs=[sft, fy, q('φb' if dm == 'LRFD' else 'Ωb', ctx['phi_b'] if dm == 'LRFD'
-                                             else ctx['omega_b'], 'dimensionless', spec())],
-                          result=q('Maxt', ctx['Maxt'], 'moment'))
-            ins = [mx, tr.ref(i_mt), my, q('Mayt', ctx['Mayt'], 'moment', src('user_input', key='May_strength')
-                                           if ctx['Mayt'] < 1e9 else src('engine_default', note='no weak-axis moment')),
-                   T, Ta]
-            expr = 'Mx/Maxt + My/Mayt + T/Ta'
+            i_my = tr.add('yield', 'Mnxt = Sft Fy', equation='H1.1-3', inputs=[sft, fy],
+                          result=q('Mnxt', ctx['Sft'] * ctx['Fy'], 'moment'))
+            i_mt = design_strength_step(tr, dm, tr.ref(i_my), ctx['phi_b'], ctx['omega_b'], ctx['Maxt'], 'Maxt',
+                                        'moment', phi_symbol='φb', omega_symbol='Ωb')
+            tr.steps[i_mt]['equation'] = 'H1.1-3b' if dm == 'LRFD' else 'H1.1-3a'
+            # 약축 강도가 없으면(엔진은 1e10 을 '약축 항 없음'으로 쓴다) My 항을 싣지 않는다 — 그 항은 0 이다.
+            if ctx['Mayt'] < 1e9:
+                ins = [mx, tr.ref(i_mt), my, q('Mayt', ctx['Mayt'], 'moment', src('user_input', key='May_strength')),
+                       T, Ta]
+                expr = 'Mx/Maxt + My/Mayt + T/Ta'
+            else:
+                ins, expr = [mx, tr.ref(i_mt), T, Ta], 'Mx/Maxt + T/Ta  (no weak-axis moment)'
         else:
-            ins = [mx, q('Max', ctx['Max'], 'moment', src('check', id='member.flexure')), my,
-                   q('May', ctx['May'], 'moment', src('user_input', key='May_strength') if ctx['May'] < 1e9
-                     else src('engine_default', note='no weak-axis moment')), T, Ta]
-            expr = 'Mx/Max + My/May − T/Ta'
+            mxa = q('Max', ctx['Max'], 'moment', src('check', id=ctx.get('Max_id'), group='member.flexure',
+                                                     note='least flexural design strength (Chapter F)'))
+            if ctx['May'] < 1e9:
+                ins = [mx, mxa, my, q('May', ctx['May'], 'moment', src('user_input', key='May_strength')), T, Ta]
+                expr = 'Mx/Max + My/May − T/Ta'
+            else:
+                ins, expr = [mx, mxa, T, Ta], 'Mx/Max − T/Ta  (no weak-axis moment)'
         i_x = tr.add('equation', expr, equation=eq, inputs=ins, result=q(eq, val, 'dimensionless'))
         v = 'fail' if val > 1.0 else 'pass'
         tr.add('verdict', f'{eq} ≤ 1.0', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
@@ -1240,8 +1323,13 @@ def b4_check(dm, items, dsm_warnings, exceeded, generated=None):
             ref = tr.ref(i_r)
             lim = q('limit', it['limit'], 'dimensionless', src('specification', table='B4.1-1', row=it['row']))
         else:
+            # 응력 한계는 단위가 있는 값이다 — 식 문자열에 숫자를 넣지 않고 입력(quantity)으로(V6-11)
             ref = ins[0]
-            lim = q('limit', it['limit'], 'stress', src('specification', table='B4.1-1', row=it['row']))
+            lim = q(f"{ref['symbol']},limit", it['limit'], 'stress', src('specification', table='B4.1-1',
+                                                                        row=it['row']))
+            tr.branch(f"{ref['symbol']} {'<' if it['strict'] else '≤'} {ref['symbol']},limit  ({it['row']})",
+                      it['ok'], 'Table B4.1-1', inputs=[ref, lim])
+            continue
         tr.branch(f"{ref['symbol']} {'<' if it['strict'] else '≤'} {it['limit']:g}  ({it['row']})", it['ok'],
                   'Table B4.1-1', inputs=[ref, lim])
     labels = {it['label'].split()[-1] for it in items}
