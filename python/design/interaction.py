@@ -13,7 +13,7 @@ def _demand_ratio(demand: float, capacity: float) -> float:
 
 def combined_axial_bending(P: float, Pa: float,
                            Mx: float, Max: float,
-                           My: float = 0, May: float = 1e10) -> dict:
+                           My: float = 0, May: float = 1e10, _raw: dict | None = None) -> dict:
     """축력 + 휨 상호작용 검토 (§H1.2, Eq. H1.2-1)
 
     P/Pa + Mx/Max + My/May ≤ 1.0
@@ -27,6 +27,8 @@ def combined_axial_bending(P: float, Pa: float,
     Mx_ratio = _demand_ratio(Mx, Max)
     My_ratio = _demand_ratio(My, May)
     total = P_ratio + Mx_ratio + My_ratio
+    if _raw is not None:   # 계산서(design_checks)용 반올림 전 값
+        _raw.update(P_ratio=P_ratio, Mx_ratio=Mx_ratio, My_ratio=My_ratio, total=total)
 
     return {
         'P_ratio': round(P_ratio, 4),
@@ -39,7 +41,7 @@ def combined_axial_bending(P: float, Pa: float,
 
 
 def combined_bending_shear(M: float, Mao: float,
-                           V: float, Va: float) -> dict:
+                           V: float, Va: float, _raw: dict | None = None) -> dict:
     """휨 + 전단 상호작용 검토 (§H2, Eq. H2-1) — 전단보강재 없는 보
 
     √((M/Malo)² + (V/Va)²) ≤ 1.0. Mao 자리에는 §H2 의 Malo(§F3 국부좌굴 강도,
@@ -50,6 +52,8 @@ def combined_bending_shear(M: float, Mao: float,
     m2 = m_ratio ** 2
     v2 = v_ratio ** 2
     total = math.sqrt(m2 + v2)
+    if _raw is not None:
+        _raw.update(M_ratio=m_ratio, V_ratio=v_ratio, total=total, applies=True)
 
     return {
         'M_ratio': round(m_ratio, 4),
@@ -61,7 +65,7 @@ def combined_bending_shear(M: float, Mao: float,
 
 
 def combined_bending_shear_stiffened(M: float, Malo: float,
-                                    V: float, Va: float) -> dict:
+                                    V: float, Va: float, _raw: dict | None = None) -> dict:
     """휨 + 전단 상호작용 — 전단보강재(§G4)가 있는 보 (§H2, Eq. H2-2)
 
     M/Malo > 0.5 이고 V/Va > 0.7 일 때만: 0.6(M/Malo) + V/Va ≤ 1.3.
@@ -73,6 +77,8 @@ def combined_bending_shear_stiffened(M: float, Malo: float,
     lhs = 0.6 * m_ratio + v_ratio
     # 판정용 정규화 비: 식이 적용되면 lhs/1.3, 아니면 개별 비 중 큰 값(V ≤ Va).
     total = lhs / 1.3 if applies else v_ratio
+    if _raw is not None:
+        _raw.update(M_ratio=m_ratio, V_ratio=v_ratio, lhs=lhs, total=total, applies=applies)
     return {
         'M_ratio': round(m_ratio, 4),
         'V_ratio': round(v_ratio, 4),
@@ -94,7 +100,7 @@ def combined_bending_web_crippling(P: float, Pn: float,
                                     h_over_t: float = None,
                                     N_over_t: float = None,
                                     Fy_ksi: float = None,
-                                    R_over_t: float = None) -> dict:
+                                    R_over_t: float = None, _raw: dict | None = None) -> dict:
     """휨 + 웹 크리플링 상호작용 검토 (§H3)
 
     web_config (force-coefficient / limit-coefficient / equation):
@@ -161,6 +167,8 @@ def combined_bending_web_crippling(P: float, Pn: float,
         limit = limit_coef * (phi if phi is not None else 0.90)
 
     total = p_term + m_term
+    if _raw is not None:
+        _raw.update(P_ratio=p_ratio, P_term=p_term, M_term=m_term, total=total, limit=limit)
 
     # H3-3 적용한계 §H3(c)(1)–(4): 제공된 값에 한해 검증 (원문 대조 0926 후속).
     h3_warnings = []

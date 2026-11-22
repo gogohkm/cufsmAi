@@ -12,15 +12,21 @@ from design.dsm_strength import (
 )
 from design.global_buckling import (
     column_global_strength, beam_global_strength,
-    compute_column_Fcre, compute_beam_Fcre, compute_beam_Fcre_detail,
+    compute_column_Fcre, compute_beam_Fcre, compute_beam_Fcre_detail,  # noqa: F401 (옛 이름 유지)
     CANONICAL_SECTION_NAMES, canonical_section_name,
 )
 from design.interaction import (
     combined_axial_bending, combined_bending_shear, combined_bending_shear_stiffened,
 )
-from design.shear import shear_strength, web_crippling
+from design.shear import shear_strength, web_crippling, _web_crippling_detail  # noqa: F401
 from design.connections import design_connection
 from design.steel_grades import E, STEEL_GRADES
+from design import member_checks as _mc
+from design.checks import set_governing as _set_governing, apply_context as _apply_context, \
+    make_check as _make_check
+
+# 템플릿으로 단면 성질을 만든 실행의 내부 표지(입력이 아님) — 계산서 출처 'generated' 에만 쓴다.
+_PROPS_GENERATED = '_props_generated'
 
 # 안전/저항 계수
 PHI = {
@@ -509,6 +515,7 @@ def design_member(params: dict) -> dict:
                 'member_type': member_type,
             }
         params = _auto_generate_props(params)
+        params[_PROPS_GENERATED] = True   # 계산서: 단면 성질의 출처를 '템플릿 자동 생성'으로
         auto_section = params.pop('_auto_section', None)
         auto_warnings = params.pop('_auto_warnings', [])
         if params.get('_auto_error') or not (params.get('props') or {}).get('A'):
@@ -566,6 +573,14 @@ def design_member(params: dict) -> dict:
         result[key] = list(dict.fromkeys(result.get(key) or []))
     result['spec_sections'] = sorted(set(result.get('spec_sections') or []))
     _finalize_verdict(result)
+
+    checks = result.setdefault('design_checks', [])
+    if result.get('b4_limits_exceeded'):
+        checks.append(_make_check(
+            'member.applicability.b4', design_method=params['design_method'], verdict='not_evaluated',
+            reason='; '.join(result.get('dsm_warnings') or []),
+            steps_unavailable='Table B4.1-1 limits are listed in dsm_warnings (not traced step by step)'))
+    _apply_context(checks, params)
 
     result['report'] = generate_report(result, params)
     return result
@@ -899,6 +914,7 @@ def _design_compression(params: dict) -> dict:
     # Pcrl 이 없으면 Appendix 1 §1.1 Eq. 1.1-4 판좌굴 해석식(외-외 치수 계약)으로 대체하고
     # 출처를 표시한다. 그것도 못 하면 E3 를 "평가하지 못함"으로 둔다.
     Pcrl_source = 'FSM' if Pcrl > 0 else 'none'
+    pcrl_an = None   # 해석식 대체의 값(계산서 design_checks 용)
     if Pcrl <= 0 and _supports_cz_plate_fallback(params):
         ho, bo, do = _out_to_out_dims(geom)
         t, R_loc = geom['t'], geom['R']
@@ -911,11 +927,15 @@ def _design_compression(params: dict) -> dict:
                 if Fcrl_calc > 0:
                     Pcrl = Fcrl_calc * Ag
                     Pcrl_source = '§App.1 Eq.1.1-4'
+                    pcrl_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrl_calc, 'raw_product': Pcrl,
+                               'governing': fcrl_result.get('governing'),
+                               'detail_note': 'element plate buckling computed in loads.local_params.calc_Fcrl'}
                     # 단일 극소 곡선: 서명곡선은 모든 모드의 아래 포락선이므로 분리되지 않은 모드의
                     # 임계값은 그 극소 값 이상이다 — 해석식 값이 그보다 낮을 때만 극소 값으로 올린다.
                     if diag['single_minimum'] and diag['bound'] > Pcrl:
                         Pcrl = diag['bound']
                         Pcrl_source += ' (raised to single-minimum floor)'
+                        pcrl_an.update(raised=True, final=Pcrl)
                     assumptions.append(
                         f'Pcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 '
                         f'(Fcrl={Fcrl_calc:.2f} ksi, 지배요소={fcrl_result["governing"]}, '
@@ -952,6 +972,7 @@ def _design_compression(params: dict) -> dict:
     # Step 4: 왜곡좌굴 (E4) — 연단 보강 플랜지가 있는 개단면만 해당한다.
     dist_applicable, dist_reason = _distortional_applicability(geom)
     Pcrd_source = 'FSM' if Pcrd > 0 else 'none'
+    pcrd_an = None
     distortional_not_evaluated = False
     if Pcrd <= 0 and dist_applicable and _supports_cz_distortional_fallback(params):
         ho, bo, do = _out_to_out_dims(geom)
@@ -973,9 +994,13 @@ def _design_compression(params: dict) -> dict:
                 if Fcrd_calc > 0:
                     Pcrd = Fcrd_calc * Ag
                     Pcrd_source = '§2.3.1.3'
+                    pcrd_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrd_calc, 'raw_product': Pcrd,
+                               'detail_note': ('Appendix 2 §2.3.1.3 stiffness terms computed in '
+                                               'loads.distortional_params.calc_Fcrd')}
                     if diag['single_minimum'] and diag['bound'] > Pcrd:
                         Pcrd = diag['bound']
                         Pcrd_source += ' (raised to single-minimum floor)'
+                        pcrd_an.update(raised=True, final=Pcrd)
                     assumptions.append(
                         f'Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 '
                         f'(Fcrd={Fcrd_calc:.2f} ksi, Lcrd={Lcrd_val} in)'
@@ -1117,7 +1142,27 @@ def _design_compression(params: dict) -> dict:
     for item in not_evaluated:
         _mark_not_evaluated(result, item)
     _finalize_verdict(result)
+    # 검토 항목(design_checks) — 위에서 계산한 바로 그 값들로 엮는다(덧붙이기, 값 불변).
+    result['design_checks'] = _checks_or_trace_error(lambda: _mc.compression_checks(dict(
+        dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), props=props,
+        Fy=Fy, Pu=Pu, Ag=Ag, dsm=dsm, diag=diag, missing_len=missing_len,
+        Fcre_override=Fcre_override, Fcre_result=Fcre_result, Fcre=Fcre, global_result=global_result,
+        Pne=Pne, e2_unavailable=e2_unavailable, Pcrl=Pcrl, Pcrl_source=Pcrl_source, pcrl_an=pcrl_an,
+        local_result=local_result, Pnl=Pnl, local_not_evaluated=local_not_evaluated, Py=Py, Pcrd=Pcrd,
+        Pcrd_source=Pcrd_source, pcrd_an=pcrd_an, dist_applicable=dist_applicable, dist_reason=dist_reason,
+        dist_result=dist_result, Pnd=Pnd, Pn=Pn, mode=mode, phi=phi, omega=omega,
+        not_evaluated=result.get('not_evaluated') or [])), {
+            'Local Buckling': 'member.compression.local',
+            'Distortional Buckling': 'member.compression.distortional'}.get(mode, 'member.compression.global'))
     return result
+
+
+def _checks_or_trace_error(build, preferred_id=None) -> list:
+    """검토 항목을 만들고 무리마다 지배 항목을 표시한다. 비가 같으면 엔진이 고른 지배 모드(preferred_id)."""
+    checks = build()
+    groups = {c['group'] for c in checks}
+    _set_governing(checks, {g: preferred_id for g in groups} if preferred_id else None)
+    return checks
 
 
 def _angle_l1000_exempt(params: dict, geom: dict, Pnl: float, Pne: float) -> bool:
@@ -1259,6 +1304,8 @@ def _design_flexure(params: dict) -> dict:
 
     def _calc_flexure_state(Fy_eval: float, allow_ir: bool) -> dict:
         state_warnings = []
+        fcre_raw = {}      # 계산서(design_checks)용 — 계산에 쓴 반올림 전 값
+        Mcrl_an = Mcrd_an = beta_inputs = None
         My = Sf * Fy_eval
         Sf_eff = Sf
         # §F2.1.4 closed-box는 Lb<=Lu 판정에 Fy가 필요하므로 Fy_eval을 전달한다.
@@ -1275,7 +1322,7 @@ def _design_flexure(params: dict) -> dict:
             fcre_detail_state = {'equation': 'F2.3', 'round_hss': True}
         else:
             Fcre, fcre_detail_state = compute_beam_Fcre_detail(
-                props, Cb, Lb, section_type=section_type, Fy=Fy_eval)
+                props, Cb, Lb, section_type=section_type, Fy=Fy_eval, _raw=fcre_raw)
         # §F2.3 round-HSS는 section_type/D_over_t/E를 받아 직접 Mne 곡선을 산정한다.
         global_result = beam_global_strength(
             Fy_eval, Fcre, Sf_eff, Zf=Zf, use_inelastic_reserve=allow_ir,
@@ -1303,9 +1350,13 @@ def _design_flexure(params: dict) -> dict:
                     if Fcrl_calc > 0:
                         Mcrl_eff = Fcrl_calc * Sf_eff
                         Mcrl_source = '§App.1 Eq.1.1-4'
+                        Mcrl_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrl_calc, 'raw_product': Mcrl_eff,
+                                   'governing': fcrl_result.get('governing'),
+                                   'detail_note': 'element plate buckling computed in loads.local_params.calc_Fcrl'}
                         if diag['single_minimum'] and diag['bound'] > Mcrl_eff:
                             Mcrl_eff = diag['bound']
                             Mcrl_source += ' (raised to single-minimum floor)'
+                            Mcrl_an.update(raised=True, final=Mcrl_eff)
                 except Exception as e:
                     state_warnings.append(f'Mcrl 해석적 fallback(Appendix 1 §1.1 Eq.1.1-4) 실패: {e}')
 
@@ -1376,9 +1427,14 @@ def _design_flexure(params: dict) -> dict:
                     if Fcrd_calc > 0:
                         Mcrd_eff = Fcrd_calc * Sf_eff
                         Mcrd_source = '§2.3.3.3'
+                        Mcrd_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrd_calc, 'raw_product': Mcrd_eff,
+                                   'detail_note': ('Appendix 2 §2.3.3.3 stiffness terms computed in '
+                                                   'loads.distortional_params.calc_Fcrd'
+                                                   + (f' (external kφ = {kphi_ext})' if kphi_ext else ''))}
                         if diag['single_minimum'] and diag['bound'] > Mcrd_eff:
                             Mcrd_eff = diag['bound']
                             Mcrd_source += ' (raised to single-minimum floor)'
+                            Mcrd_an.update(raised=True, final=Mcrd_eff)
                 except Exception as e:
                     state_warnings.append(f'Mcrd 해석적 fallback(Appendix 2 §2.3.3.3) 실패: {e}')
 
@@ -1398,6 +1454,8 @@ def _design_flexure(params: dict) -> dict:
             else:
                 beta_raw = 1.0
             beta_dist = max(1.0, min(beta_raw, 1.3))
+            beta_inputs = {'L': L_beta, 'L_basis': 'min(Lcrd, Lm)' if dist_Lcrd > 0 else 'Lm (Lcrd not given)',
+                           'Lm': dist_Lm, 'M1_M2': dist_M1_M2}
             if beta_dist > 1.0:
                 Mcrd_eff *= beta_dist
                 beta_note = f' [β={beta_dist:.3f}, §2.3.3.3 Eq.3]'
@@ -1435,8 +1493,10 @@ def _design_flexure(params: dict) -> dict:
 
         # Mnfo: Mne=My 가정의 국부좌굴 강도(§I6.2.1, Fn=Fy → Mne=My).
         # IR 활성 시 §F3.2.3 소성값(λl=√(My/Mcrl)≤0.776)으로 끌어올리되 소성 상한을 초과하지 않게 한다.
+        Mnfo_detail = None
         if Mcrl_eff > 0:
-            Mnfo = flexure_local(My, Mcrl_eff)['Mnl']
+            Mnfo_detail = flexure_local(My, Mcrl_eff)
+            Mnfo = Mnfo_detail['Mnl']
             if allow_ir and Mp > My and My > 0:
                 lam_l_fo = math.sqrt(My / Mcrl_eff)
                 if lam_l_fo <= 0.776:
@@ -1469,6 +1529,9 @@ def _design_flexure(params: dict) -> dict:
             'dist_missing': dist_missing,
             'skip_round_local': _skip_round_local,
             'warnings': state_warnings,
+            # 계산서(design_checks) 용 — 위 계산이 쓴 값 그대로
+            'Fcre_raw': fcre_raw, 'Mcrl_an': Mcrl_an, 'Mcrd_an': Mcrd_an, 'beta_inputs': beta_inputs,
+            'Mnfo_detail': Mnfo_detail,
         }
 
     state = _calc_flexure_state(Fy_original, use_ir)
@@ -1936,6 +1999,16 @@ def _design_flexure(params: dict) -> dict:
     for item in not_evaluated:
         _mark_not_evaluated(result, item)
 
+    # 검토 항목(design_checks) 재료 — 아래 계산이 쓴 값을 그 자리에서 모은다.
+    ck = dict(dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), props=props,
+              dsm=dsm, diag=diag, state=state, state_i621=state_virgin, Fy_original=Fy_original,
+              cold_work_info=cold_work_info, Mu=Mu, Lb=Lb, Cb=Cb, Fcre_override=Fcre_override, Zf=Zf,
+              D_over_t=D_over_t, E=E, is_round=_is_round, dist_applicable=dist_applicable,
+              dist_reason=dist_reason, f2_unavailable=f2_unavailable, R_uplift=R_uplift, Mn=Mn, mode=mode,
+              phi=phi, omega=omega,
+              i621_row=(_i621_row_text(section_type, _out_to_out_dims(geom)[0], params.get('span_type'))
+                        if R_uplift is not None and R_uplift > 0 else None))
+
     # §G2/§G5/§H2/§H3 는 virgin Fy·virgin 상태를 쓴다(§A3.3.2 적용 장 제한).
     Fy_v = Fy_original
     Mnfo_v = state_virgin['Mnfo']
@@ -1962,10 +2035,15 @@ def _design_flexure(params: dict) -> dict:
             if stiffened:
                 Mnlo_h2 = min(Mnfo_v, state_virgin['Mnd'])
             Malo = phi * Mnlo_h2 if design_method == 'LRFD' else Mnlo_h2 / omega
+            h2_raw = {}
             if stiffened:
-                shear_int = combined_bending_shear_stiffened(Mu, Malo, Vu, Va)
+                shear_int = combined_bending_shear_stiffened(Mu, Malo, Vu, Va, _raw=h2_raw)
             else:
-                shear_int = combined_bending_shear(Mu, Malo, Vu, Va)
+                shear_int = combined_bending_shear(Mu, Malo, Vu, Va, _raw=h2_raw)
+            ck['shear'] = dict(shear_res=shear_res, h=h_shear, t=t_shear, Fy=Fy_v, E=E, kv=5.34,
+                               n_webs=n_webs_v, Vn=Vn, phi_v=phi_v, omega_v=omega_v, Va=Va, Vu=Vu,
+                               Mnlo=Mnlo_h2, Malo=Malo, Mu=Mu, stiffened=stiffened,
+                               shear_int=shear_int, h2_raw=h2_raw)
             shear_int['Malo'] = round(Malo, 2)
             shear_int['Mnlo'] = round(Mnlo_h2, 2)
             _fac = f'{phi}×' if design_method == 'LRFD' else ''
@@ -2008,10 +2086,13 @@ def _design_flexure(params: dict) -> dict:
     if Lb_pos > 0 or Mu_pos > 0 or (Lb_pos == 0 and params.get('Lb', 0) > 0):
         # 정모멘트 구간: Lb_pos, Cb_pos로 별도 Fcre/Mne 계산.
         # §F2.1.4 box(Fy)/§F2.3 round HSS(section_type/D_over_t/E) 분기를 주 구간과 일관되게 전달.
+        pos_raw = {}
+        local_pos = dist_pos = None
         if _is_round:
             Fcre_pos = 0.0
         else:
-            Fcre_pos = compute_beam_Fcre(props, Cb_pos, Lb_pos, section_type=section_type, Fy=Fy)
+            Fcre_pos = compute_beam_Fcre_detail(props, Cb_pos, Lb_pos, section_type=section_type, Fy=Fy,
+                                                _raw=pos_raw)[0]
         global_pos = beam_global_strength(
             Fy, Fcre_pos, Sf, section_type=section_type, D_over_t=D_over_t, E=E)
         Mne_pos = global_pos['Mne']
@@ -2077,6 +2158,10 @@ def _design_flexure(params: dict) -> dict:
 
         # 정모멘트 구간 검토도 하나의 한계상태로 판정·이용률·지배 검토에 합친다.
         if Mu_pos > 0:
+            ck['positive'] = dict(raw=pos_raw, Fcre=Fcre_pos, global_=global_pos, Sf=Sf, Fy=Fy, Mne=Mne_pos,
+                                  Lb=Lb_pos, Cb=Cb_pos, local=local_pos, Mcrl=Mcrl, Mnl=Mnl_pos, dist=dist_pos,
+                                  Mcrd=Mcrd_pos, Mnd=Mnd_pos, Mn=Mn_pos, phi_Mn=phi_Mn_pos, Mu_pos=Mu_pos,
+                                  pass_pos=pass_pos, skip_local=_skip_round_local_pos)
             result['steps'].append({
                 'step': 9, 'name': f'Positive-moment region (Lb_pos = {Lb_pos:.1f} in, Cb = {Cb_pos:.2f})',
                 'value': round(phi_Mn_pos, 2), 'unit': 'kip-in',
@@ -2120,21 +2205,22 @@ def _design_flexure(params: dict) -> dict:
             wc_edge_distance = params.get('wc_edge_distance')
             wc_n_webs = _infer_web_crippling_n_webs(params, wc_section_family)
             wc_spacing = params.get('wc_support_fastener_spacing')
-            wc = web_crippling(h, t, wc_R, wc_N, Fy_v, support=wc_support,
-                               fastened=wc_fastened,
-                               section_type=wc_sec_type,
-                               section_family=wc_section_family,
-                               flange_condition=wc_flange_condition,
-                               Lo=wc_overhang,
-                               edge_distance=wc_edge_distance,
-                               n_webs=wc_n_webs,
-                               web_config=wc_web_config,
-                               support_fastener_spacing=wc_spacing)
+            wc, wc_detail = _web_crippling_detail(
+                h, t, wc_R, wc_N, Fy_v, support=wc_support,
+                fastened=wc_fastened,
+                section_type=wc_sec_type,
+                section_family=wc_section_family,
+                flange_condition=wc_flange_condition,
+                Lo=wc_overhang,
+                edge_distance=wc_edge_distance,
+                n_webs=wc_n_webs,
+                web_config=wc_web_config,
+                support_fastener_spacing=wc_spacing)
             if 'error' in wc:
                 result['web_crippling'] = wc
                 _mark_not_evaluated(result, 'G5 web crippling',
                                     f'§G5 web crippling could not be evaluated: {wc["error"]}')
-                return result
+                return _attach_flexure_checks(result, ck)
             Pn_wc = wc['Pn']
             from design.interaction import combined_bending_web_crippling
             # 집중하중(반력) P̄: 명시 wc_P, 없으면 지점 반력으로 Vu 를 쓴다(가정으로 밝힌다).
@@ -2175,6 +2261,8 @@ def _design_flexure(params: dict) -> dict:
                     wc_result['ratio'] = round(wc_ratio, 4)
                     _merge_governing_check(result, {'total': wc_ratio, 'pass': wc_ratio <= 1.0},
                                            'G5 web crippling')
+                    ck['wc'] = dict(wc=wc, detail=wc_detail, h=h, t=t, Fy=Fy_v, Pn=Pn_wc, Pa=Pa_wc,
+                                    P=P_wc, P_source=P_wc_source)
                     result['steps'].append({
                         'step': 10, 'name': f"Web crippling (§G5, Table {wc.get('table')}, {wc.get('equation')})",
                         'value': round(wc_ratio, 4), 'unit': '',
@@ -2210,11 +2298,14 @@ def _design_flexure(params: dict) -> dict:
                 # §H3 Eq. H3-1/2/3: limit is method-dependent (LRFD/LSD → coeff·φ;
                 # ASD → coeff/Ω with Ω=1.70 per spec). Pass design_method (in scope)
                 # instead of hardcoding φ=0.90 so the ASD (Ω) form is used for ASD runs.
+                h3_raw = {}
                 h3 = combined_bending_web_crippling(
                     P_wc, Pn_wc, M_wc, Mnfo_v,
                     web_config=h3_cfg, design_method=design_method,
                     h_over_t=(h / t), N_over_t=(wc_N / t),
-                    Fy_ksi=Fy_v, R_over_t=(wc_R / t))
+                    Fy_ksi=Fy_v, R_over_t=(wc_R / t), _raw=h3_raw)
+                ck['h3'] = dict(h3=h3, raw=h3_raw, P=P_wc, P_source=P_wc_source, Pn=Pn_wc, M=M_wc,
+                                M_given=params.get('wc_M') is not None, Mnlo=Mnfo_v)
                 result['h3_interaction'] = h3
                 result['warnings'].extend(h3.get('warnings', []))
                 result['steps'].append({
@@ -2241,6 +2332,13 @@ def _design_flexure(params: dict) -> dict:
                 result['spec_sections'].append('H3')
 
     _finalize_verdict(result)
+    return _attach_flexure_checks(result, ck)
+
+
+def _attach_flexure_checks(result: dict, ck: dict) -> dict:
+    """_design_flexure 가 모은 값(ck)으로 검토 항목을 붙인다(옛 키 · 값은 그대로)."""
+    ck['not_evaluated_all'] = list(result.get('not_evaluated') or [])
+    result['design_checks'] = _mc.flexure_checks_all(ck)
     return result
 
 
@@ -2475,7 +2573,8 @@ def _design_combined(params: dict) -> dict:
             )
 
     # 상호작용 검토 (증폭된 모멘트 사용)
-    interaction = combined_axial_bending(Pu, Pa, Mux_amp, Max, Muy_amp, May)
+    h12_raw = {}
+    interaction = combined_axial_bending(Pu, Pa, Mux_amp, Max, Muy_amp, May, _raw=h12_raw)
 
     result = {
         'member_type': 'combined',
@@ -2571,6 +2670,28 @@ def _design_combined(params: dict) -> dict:
     _merge_sub_verdicts(result, [('[압축]', comp), ('[휨x]', flex_x)],
                         ('E axial compression', 'F flexure'))
     _finalize_verdict(result)
+    # 검토 항목: 성분(압축 · 휨x 와 그 G2/H2/G5/H3/정모멘트) + §H1.2 상호작용
+    comp_checks = [c for c in comp.get('design_checks', []) if c['id'] != 'member.axial_bending']
+    angle_note_sub = any(c['id'] == 'member.axial_bending' for c in comp.get('design_checks', []))
+    if params.get('Cmx') is not None:
+        cm_src = {'kind': 'user_input', 'key': 'Cmx'}
+    elif M1_M2 is not None and not params.get('transverse_load', False):
+        cm_src = {'kind': 'user_input', 'key': 'dist_M1_M2', 'equation': 'C1.2.1.1-4'}
+    else:
+        cm_src = {'kind': 'engine_default', 'key': 'Cmx', 'note': 'Cm = 1.0 (conservative)'}
+    h12 = _mc.axial_bending_check(dict(
+        dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), raw=h12_raw,
+        interaction=interaction, Pu=Pu, Pa=Pa, Max=Max, Mux=Mux, Mux_amp=Mux_amp, alpha_x=alpha_x, PEx=PEx,
+        E=E, Ag=Ag, KxLx=KxLx, rx=rx, Cmx=Cmx, Cm_src=cm_src, c1_alpha=c1_alpha,
+        May=(May if flex_y else None), Muy_amp=Muy_amp, angle_note=angle_l1000_note,
+        component_unavailable=_component_unavailable))
+    if angle_note_sub and h12['verdict'] == 'pass':
+        # 엔진은 압축 단독의 '§H1.2 앵글 미평가' 알림을 조합 판정에도 싣는다 — 판정은 그것을 따른다.
+        h12 = _mc.demote_to_not_evaluated(
+            h12, '[압축] H1.2 angle (P)L/1000 is carried from the compression sub-check into this verdict')
+    result['design_checks'] = (_mc.remap_mirrors(comp_checks, 'compression')
+                               + _mc.remap_mirrors(flex_x.get('design_checks', []), 'flexure_x') + [h12])
+    _set_governing([h12])
     return result
 
 
@@ -2685,6 +2806,13 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
     _merge_sub_verdicts(result, [('[인장]', tens), ('[휨x]', flex_x)],
                         ('D tension', 'F flexure'))
     _finalize_verdict(result)
+    h11 = _mc.tension_bending_checks(dict(
+        dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), T=T_abs, Ta=Ta, Mux=Mux,
+        Muy=Muy, Max=Max, May=May, Maxt=Maxt, Mayt=Mayt, Sft=Sft, Fy=Fy, phi_b=phi_b, omega_b=omega_b,
+        r11=r11, r12=r12))
+    _set_governing(h11)
+    result['design_checks'] = (_mc.remap_mirrors(tens.get('design_checks', []), 'tension')
+                               + _mc.remap_mirrors(flex_x.get('design_checks', []), 'flexure_x') + h11)
     return result
 
 
@@ -2785,6 +2913,12 @@ def _design_tension(params: dict) -> dict:
     for item in not_evaluated:
         _mark_not_evaluated(result, item)
     _finalize_verdict(result)
+    An_given = params.get('An') is not None and params.get('An') > 0
+    result['design_checks'] = _checks_or_trace_error(lambda: _mc.tension_checks(dict(
+        dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), Tu=Tu, Ag=Ag, Fy=Fy,
+        Fu=Fu, An=An, An_given=An_given, Tn_yield=Tn_yield, Tn_rupture=Tn_rupture, phi_y=phi_y,
+        omega_y=omega_y, phi_r=phi_r, omega_r=omega_r, mode=mode, utilization=utilization)),
+        'member.tension.yielding' if mode == 'Yielding' else 'member.tension.rupture')
     return result
 
 

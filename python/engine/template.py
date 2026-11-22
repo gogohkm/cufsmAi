@@ -133,7 +133,7 @@ def _wrap_pi(d: float) -> float:
 
 def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
             radii=None, rn=None, rt=None, rid=None,
-            closed=False) -> dict:
+            closed=False, roles=None) -> dict:
     """MATLAB snakey 함수의 Python 포팅
 
     직선 세그먼트와 코너 반경으로부터 node/elem 배열 생성.
@@ -149,9 +149,11 @@ def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
         rt: 코너 요소 두께
         rid: 코너 요소 재료 번호
         closed: True면 폐합 단면
+        roles: 직선 세그먼트마다의 단면 자리(웹 · 플랜지 · 립 …). 주면 요소마다의 자리를
+            'element_roles' 로 돌려준다(원호 요소는 'corner'). 절점 · 요소는 그대로.
 
     Returns:
-        dict with 'node' (nnodes,8) and 'elem' (nelems,5)
+        dict with 'node' (nnodes,8) and 'elem' (nelems,5)[, 'element_roles']
     """
     nl = len(lengths)
     nr = 0 if radii is None or len(radii) == 0 else len(radii)
@@ -163,6 +165,7 @@ def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
     seg_n = []
     seg_t = []
     seg_id = []
+    seg_role = []
 
     for j in range(nl):
         L_flat = lengths[j]
@@ -212,6 +215,7 @@ def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
         seg_n.append(n_flat)
         seg_t.append(t_flat)
         seg_id.append(id_flat)
+        seg_role.append(roles[j] if roles else None)
 
         # 코너 원호 (세그먼트 j와 j+1 사이)
         corner_idx = -1
@@ -244,10 +248,12 @@ def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
                 seg_n.append(n_corner)
                 seg_t.append(t_corner)
                 seg_id.append(id_corner)
+                seg_role.append('corner')
 
     # --- 노드/요소 생성 (snakey march) ---
     nodes = []
     elems = []
+    elem_roles = []
     # 마지막 생성 절점. 첫 유효 세그먼트 전에도 초기화하여 빈/건너뛴
     # 세그먼트가 선행하는 경우의 제어흐름을 명확히 한다.
     x2, y2 = 0.0, 0.0
@@ -288,6 +294,7 @@ def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
             y2 = y1 + le * math.sin(angle_mid)
             nodes.append([node_idx, x2, y2, 1, 1, 1, 1, 1.0])
             elems.append([node_idx - 1, node_idx - 1, node_idx, t, mid])
+            elem_roles.append(seg_role[j])
             node_idx += 1
 
     node = np.array(nodes)
@@ -316,7 +323,10 @@ def _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
         node[:, 1] -= xo
         node[:, 2] -= zo
 
-    return {'node': node, 'elem': elem}
+    out = {'node': node, 'elem': elem}
+    if roles:
+        out['element_roles'] = elem_roles
+    return out
 
 
 # ============================================================
@@ -405,7 +415,12 @@ def _gen_track(params: dict) -> dict:
     rid = [100, 100] if r > 0 else []
 
     return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
-                   radii=radii, rn=rn, rt=rt, rid=rid)
+                   radii=radii, rn=rn, rt=rt, rid=rid,
+                   roles=['bottom_flange', 'web', 'top_flange'])
+
+
+# 립 C · 립 Z 의 직선 세그먼트 자리 — 첫 립이 아래 플랜지 끝에서 시작한다(모델 z 위가 +).
+_LIPPED_ROLES = ['bottom_lip', 'bottom_flange', 'web', 'top_flange', 'top_lip']
 
 
 def _gen_lipped_c(params: dict) -> dict:
@@ -451,7 +466,7 @@ def _gen_lipped_c(params: dict) -> dict:
     rid = [100, 100, 100, 100] if r > 0 else []
 
     return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
-                   radii=radii, rn=rn, rt=rt, rid=rid)
+                   radii=radii, rn=rn, rt=rt, rid=rid, roles=_LIPPED_ROLES)
 
 
 def _gen_lipped_z(params: dict) -> dict:
@@ -481,7 +496,8 @@ def _gen_lipped_z(params: dict) -> dict:
         angles = [a * PI / 180 for a in (0, 90, 0)]
         rr = [r, r] if r > 0 else []
         return _snakey(lengths, angles, [4 * nseg, 8 * nseg, 4 * nseg], [t] * 3, [100] * 3,
-                       radii=rr, rn=[4] * len(rr), rt=[t] * len(rr), rid=[100] * len(rr))
+                       radii=rr, rn=[4] * len(rr), rt=[t] * len(rr), rid=[100] * len(rr),
+                       roles=['bottom_flange', 'web', 'top_flange'])
 
     sb = _lip_setback(t, qlip)
     b = B - t / 2.0 - sb
@@ -500,7 +516,7 @@ def _gen_lipped_z(params: dict) -> dict:
     rid = [100, 100, 100, 100] if r > 0 else []
 
     return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
-                   radii=radii, rn=rn, rt=rt, rid=rid)
+                   radii=radii, rn=rn, rt=rt, rid=rid, roles=_LIPPED_ROLES)
 
 
 def _gen_hat(params: dict) -> dict:
@@ -540,7 +556,8 @@ def _gen_hat(params: dict) -> dict:
         rr = [r, r] if r > 0 else []
         return _snakey([b0, h, b0], [a * PI / 180 for a in (90, 0, -90)],
                        [4 * nseg, 8 * nseg, 4 * nseg], [t] * 3, [100] * 3,
-                       radii=rr, rn=[4] * len(rr), rt=[t] * len(rr), rid=[100] * len(rr))
+                       radii=rr, rn=[4] * len(rr), rt=[t] * len(rr), rid=[100] * len(rr),
+                       roles=['web', 'top_flange', 'web'])
     b = B_top - t
     d = D - t / 2.0
 
@@ -557,7 +574,8 @@ def _gen_hat(params: dict) -> dict:
     rid = [100, 100, 100, 100] if r > 0 else []
 
     return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
-                   radii=radii, rn=rn, rt=rt, rid=rid)
+                   radii=radii, rn=rn, rt=rt, rid=rid,
+                   roles=['brim', 'web', 'top_flange', 'web', 'brim'])
 
 
 def _gen_rhs(params: dict) -> dict:
@@ -590,7 +608,8 @@ def _gen_rhs(params: dict) -> dict:
     rid = [100, 100, 100, 100] if r > 0 else []
 
     return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
-                   radii=radii, rn=rn, rt=rt, rid=rid, closed=True)
+                   radii=radii, rn=rn, rt=rt, rid=rid, closed=True,
+                   roles=['bottom_flange', 'web', 'top_flange', 'web'])
 
 
 def _gen_chs(params: dict) -> dict:
@@ -626,7 +645,9 @@ def _gen_chs(params: dict) -> dict:
         angle = 2 * PI * i / n_elem
         coords.append((r * math.cos(angle), r * math.sin(angle)))
 
-    return _build_from_coords(coords, t, closed=True)
+    sec = _build_from_coords(coords, t, closed=True)
+    sec['element_roles'] = ['wall'] * len(sec['elem'])
+    return sec
 
 
 def _gen_angle(params: dict) -> dict:
@@ -659,7 +680,7 @@ def _gen_angle(params: dict) -> dict:
     rid = [100] if r > 0 else []
 
     return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
-                   radii=radii, rn=rn, rt=rt, rid=rid)
+                   radii=radii, rn=rn, rt=rt, rid=rid, roles=['leg', 'leg'])
 
 
 def _gen_isect(params: dict) -> dict:
@@ -734,7 +755,9 @@ def _gen_isect(params: dict) -> dict:
         te = tf if i < 2 * nf else tw
         elem[i] = [i + 1, ni + 1, nj + 1, te, 100]
 
-    return {'node': node, 'elem': elem}
+    # 요소 순서: 하부 플랜지 nf 개 → 상부 플랜지 nf 개 → 웹
+    roles = ['bottom_flange'] * nf + ['top_flange'] * nf + ['web'] * (ne - 2 * nf)
+    return {'node': node, 'elem': elem, 'element_roles': roles}
 
 
 def _gen_tee(params: dict) -> dict:
@@ -792,7 +815,8 @@ def _gen_tee(params: dict) -> dict:
         te = tf if i < nf else tw  # 앞의 nf 개는 플랜지
         elem[i] = [i + 1, ni + 1, nj + 1, te, 100]
 
-    return {'node': node, 'elem': elem}
+    roles = ['top_flange'] * nf + ['web'] * (ne - nf)   # 플랜지는 위(z = h)
+    return {'node': node, 'elem': elem, 'element_roles': roles}
 
 
 def _gen_sigma(params: dict) -> dict:
@@ -897,7 +921,7 @@ def _gen_lipped_angle(params: dict) -> dict:
         rid = []
 
     return _snakey(lengths, angles, n_strips, thicknesses, mat_ids,
-                   radii=radii, rn=rn_list, rt=rt, rid=rid)
+                   radii=radii, rn=rn_list, rt=rt, rid=rid, roles=['lip', 'leg', 'leg', 'lip'])
 
 
 def _gen_custom(params: dict) -> dict:

@@ -552,6 +552,9 @@ def _solve_g51(case: dict, h: float, t: float, R: float, N: float,
             f'×(1-{row["Cr"]}√(R/t))×(1+{row["CN"]}√(N/t))×(1-{row["Ch"]}√(h/t))'
         ),
         'multiplier': multiplier,
+        # 계산서(design_checks)용 — 위 식에 쓴 값
+        'terms': {'theta': theta, 'R': R, 'N': N, 'Pn_per_web': Pn_per_web, 'multiplier': multiplier,
+                  'Pn_total': Pn_total},
     }
 
 
@@ -625,6 +628,8 @@ def web_crippling(h: float, t: float, R: float, N: float,
                   web_holes: bool = False) -> dict:
     """웹 크리플링 강도 (§G5, Eq. G5-1 / Eq. G5-2)
 
+    (공개 서명은 그대로 — 계산서용 상세가 필요한 호출자는 _web_crippling_detail 을 쓴다.)
+
     Pn = C × t² × Fy × sin(θ) × (1 - Cr√(R/t)) × (1 + CN√(N/t)) × (1 - Ch√(h/t))
 
     Args:
@@ -655,6 +660,18 @@ def web_crippling(h: float, t: float, R: float, N: float,
         표가 다루지 않는 경우와 적용 한계 밖이면 'error' 키가 있다. 적용 한계 밖이면
         계산값은 참고로 남기되 'within_limits'=False 이고 설계강도로 쓰지 않는다.
     """
+    return _web_crippling_detail(
+        h, t, R, N, Fy, theta=theta, support=support, fastened=fastened, section_type=section_type,
+        section_family=section_family, flange_condition=flange_condition, Lo=Lo,
+        edge_distance=edge_distance, n_webs=n_webs, web_config=web_config, bearing_case=bearing_case,
+        support_fastener_spacing=support_fastener_spacing, d=d, web_holes=web_holes)[0]
+
+
+def _web_crippling_detail(h, t, R, N, Fy, theta=90, support='EOF', fastened='fastened',
+                          section_type='C', section_family=None, flange_condition=None, Lo=None,
+                          edge_distance=None, n_webs=None, web_config='single', bearing_case=None,
+                          support_fastener_spacing=None, d=None, web_holes=False) -> tuple:
+    """web_crippling 의 본체 — (결과, 계산서용 상세). 상세: 표 행 계수 · 식의 항 · α · 상한."""
     if web_holes:
         return {
             'error': '§G6 web crippling of webs with holes is not implemented; the Rc reduction '
@@ -662,7 +679,7 @@ def web_crippling(h: float, t: float, R: float, N: float,
             'not_covered': True,
             'Pn': None,
             'warnings': ['§G6 (webs with holes) not evaluated.'],
-        }
+        }, None
     case = classify_web_crippling_case(
         h=h, t=t, R=R, N=N,
         theta=theta,
@@ -680,7 +697,7 @@ def web_crippling(h: float, t: float, R: float, N: float,
         d=d,
     )
     if 'error' in case:
-        return case
+        return case, None
 
     if case['equation'] == 'G5-2':
         solved = _solve_g52_overhang(case, h, t, R, N, Fy, theta, Lo)
@@ -735,4 +752,6 @@ def web_crippling(h: float, t: float, R: float, N: float,
         result['error'] = (f'Outside the Table {case["table"]} applicability limits: '
                            + ' '.join(violations)
                            + ' The computed Pn is for reference only and is not a design strength.')
-    return result
+    detail = {'row': case.get('row'), 'terms': solved.get('terms'), 'alpha': solved.get('alpha'),
+              'Pn_interior_cap': solved.get('Pn_interior_cap'), 'Pn_final': solved['Pn']}
+    return result, detail

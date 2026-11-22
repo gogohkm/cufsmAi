@@ -307,6 +307,7 @@ def design_lap_connection(params: dict) -> dict:
                 ),
             })
 
+    _flex = {}   # 계산서(design_checks) 재료 — 아래 휨 검토가 쓴 값
     flexure_ok = True
     flexure_dcr = None
     flexure_reference_dcr = None
@@ -330,6 +331,8 @@ def design_lap_connection(params: dict) -> dict:
 
         flexure_ok = flexure_dcr <= 1.0
         flexure_dcr_governing = flexure_dcr
+        _flex['local'] = dict(Mnl_single=Mnl_single, Mn_lap=Mn_lap, phi_Mn_lap=phi_Mn_lap, dcr=flexure_dcr,
+                              ok=flexure_ok, n_members=n_members)
 
         steps.append({
             'step': 8, 'name': 'Lap Flexural Strength (§F, 2-member sum; local incl., distortional excl.)',
@@ -360,6 +363,8 @@ def design_lap_connection(params: dict) -> dict:
                 phi_Mnd_lap = Mnd_lap / 1.67
             dist_dcr = Mu / phi_Mnd_lap if phi_Mnd_lap > 0 else float('inf')
             dist_ok = dist_dcr <= 1.0
+            _flex['dist'] = dict(Mnd_single=Mnd_single, Mnd_lap=Mnd_lap, phi_Mnd_lap=phi_Mnd_lap, dcr=dist_dcr,
+                                 ok=dist_ok)
             flexure_ok = flexure_ok and dist_ok
             flexure_dcr_governing = max(flexure_dcr_governing or 0, dist_dcr)
             steps.append({
@@ -392,6 +397,7 @@ def design_lap_connection(params: dict) -> dict:
                 phi_Vn_lap = (Vn * n_members_v) / 1.60
             mv_term = (Mu / phi_Mn_lap) ** 2 + (Vu / phi_Vn_lap) ** 2 if phi_Vn_lap > 0 else float('inf')
             mv_ok = mv_term <= 1.0
+            _flex['h2'] = dict(Vn=Vn, vn_auto=vn_auto, phi_Vn_lap=phi_Vn_lap, mv=mv_term, ok=mv_ok)
             flexure_ok = flexure_ok and mv_ok
             flexure_dcr_governing = max(flexure_dcr_governing or 0, mv_term)
             steps.append({
@@ -409,6 +415,7 @@ def design_lap_connection(params: dict) -> dict:
                     f'Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term:.2f} > 1.0.'
                 )
         elif Vu > 0:
+            _flex['h2_missing'] = True
             flexure_ok = None if flexure_ok else flexure_ok
             warnings.append(
                 '단면 전단강도 Vn 을 산정할 수 없습니다(퇴화 기하) — Lap 지점부 '
@@ -424,6 +431,7 @@ def design_lap_connection(params: dict) -> dict:
             Mn_ref = 2 * Sf_only * Fy
             phi_ref = 0.90 * Mn_ref if design_method == 'LRFD' else Mn_ref / 1.67
             flexure_reference_dcr = Mu / phi_ref if phi_ref > 0 else None
+            _flex['reference'] = dict(Mn_ref=Mn_ref, phi_ref=phi_ref, dcr=flexure_reference_dcr)
             steps.append({
                 'step': '8r', 'name': 'Lap Flexure — reference only (gross Sf, local buckling not included)',
                 'value': round(flexure_reference_dcr, 3) if flexure_reference_dcr is not None else None,
@@ -458,6 +466,17 @@ def design_lap_connection(params: dict) -> dict:
     else:
         overall_pass = True
     verdict = 'PASS' if overall_pass is True else ('FAIL' if overall_pass is False else 'NOT_CHECKED')
+
+    # 검토 항목(design_checks) — 위에서 쓴 값 그대로(lap_checks.py)
+    from design.lap_checks import build as _build_lap_checks
+    _ck = dict(dm=design_method, params=params, d=d, t=t, Fy=Fy, lap_chk=lap_chk, lap_ok=lap_ok, Mu=Mu, Vu=Vu,
+               d_lever=d_lever, V_transfer=V_transfer, Pns=Pns, pns_mode=pns_mode, pns_assumed=pns_assumed,
+               fastener_unverified=fastener_unverified, conn_result=conn_result, n_required=n_required,
+               n_per_row=n_per_row, n_total=n_total, n_rows=n_rows, n_max_per_row=n_max_per_row,
+               n_max_total=n_max_total, n_total_actual=n_total_actual, spacing=spacing, min_spacing=min_spacing,
+               spacing_ok=spacing_ok, edge_dist=edge_dist, capacity=capacity, utilization=utilization,
+               capacity_ok=capacity_ok, Se=Se, Sf_only=Sf_only, flex=_flex)
+    lap_design_checks = _build_lap_checks(_ck)
 
     return {
         'fastener_type': fastener_type,
@@ -505,6 +524,7 @@ def design_lap_connection(params: dict) -> dict:
         't': t,
         'lap_left_in': lap_left,
         'lap_right_in': lap_right,
+        'design_checks': lap_design_checks,
     }
 
 

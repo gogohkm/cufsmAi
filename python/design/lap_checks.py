@@ -1,0 +1,224 @@
+"""랩 접합(lap_connection.design_lap_connection)의 검토 항목(design_checks) 만들기.
+
+엔진의 판정(parts = [랩 길이 미입력 → None] + [용량, 간격, 배치 개수] + [휨, 패스너])을 그대로 옮긴다.
+랩 길이 1.5d 는 §I6.2.1(g) · §J3 의 적용 조건이라 판정에 들지 않는다(counts=False) — 미입력이면
+엔진이 판정을 None 으로 두므로 그때만 not_evaluated 로 판정에 든다.
+"""
+
+from design.checks import (
+    Trace, q, src, spec, make_check, design_strength_step, factor, connection_check_id, set_governing,
+    apply_context, demand_source,
+)
+
+
+def build(ck: dict) -> list:
+    dm, p = ck['dm'], ck['params']
+    checks = []
+    lap = ck['lap_chk']
+
+    # --- 랩 길이 (적용 조건)
+    tr = Trace()
+    if ck['lap_ok'] is None:
+        checks.append(make_check('lap.length_condition', design_method=dm, verdict='not_evaluated',
+                                 reason=lap['message']))
+    else:
+        dem = q('1.5d', lap['min_lap_in'], 'length', spec())
+        cap = q('L_lap', lap['actual_in'], 'length', src('user_input', key='min(lap_left_in, lap_right_in)'))
+        r = lap['min_lap_in'] / lap['actual_in'] if lap['actual_in'] > 0 else None
+        v = 'pass' if ck['lap_ok'] else 'fail'
+        tr.add('verdict', 'min(L_left, L_right) ≥ 1.5 d', inputs=[dem, cap], result=q('ratio', r, 'dimensionless'),
+               verdict=v)
+        checks.append(make_check('lap.length_condition', design_method=dm, verdict=v, demand=dem, capacity=cap,
+                                 ratio=r, steps=tr.steps, counts=False,
+                                 reason=(lap['message'] or None),
+                                 note='applicability condition of the §I6.2.1 R-factor method and the §J3 '
+                                      'lapped-Z hole exception — not part of the lap verdict'))
+
+    # --- 패스너 무리: V_transfer ≤ n·Pns (사내 합리적 해석 §A1.2(c))
+    tr = Trace()
+    mu = q('Mu', ck['Mu'], 'moment', demand_source(p, 'Mu_support'))
+    vu = q('Vu', ck['Vu'], 'force', demand_source(p, 'Vu_support'))
+    if ck['Mu'] > 0 and ck['d_lever'] > 0:
+        i_arm = tr.add('equation', 'arm = d − t', inputs=[q('d', ck['d'], 'length', src('user_input', key='d')),
+                                                         q('t', ck['t'], 'length', src('user_input', key='t'))],
+                       result=q('arm', ck['d_lever'], 'length'))
+        i_vf = tr.add('demand', 'V_flange = Mu / arm  (in-house rational model, §A1.2(c))', inputs=[mu, tr.ref(i_arm)],
+                      result=q('V_flange', ck['Mu'] / ck['d_lever'], 'force'))
+        i_v = tr.add('demand', 'V_transfer = max(V_flange, Vu)', inputs=[tr.ref(i_vf), vu],
+                     result=q('V_transfer', ck['V_transfer'], 'force'))
+    else:
+        i_v = tr.add('demand', 'V_transfer = Vu', inputs=[vu], result=q('V_transfer', ck['V_transfer'], 'force'))
+    cr = ck['conn_result']
+    pns_id = connection_check_id(ck['pns_mode']) if ck['pns_mode'] else None
+    pns = q('Pns', ck['Pns'], 'force', src('check', id=pns_id, note='one fastener: governing in-plane design '
+                                                                    'strength of the connection engine (rounded '
+                                                                    'to 0.001)'))
+    if ck['Pns'] > 0:
+        i_n = tr.add('equation', 'n = ceil(ceil(V_transfer/Pns) / rows) · rows', inputs=[tr.ref(i_v), pns,
+                     q('rows', ck['n_rows'], 'count', src('user_input', key='n_rows'))],
+                     result=q('n', ck['n_total'], 'count'))
+        i_na = tr.add('equation', 'n_used = min(n/rows, n_fit/row) · rows',
+                      inputs=[tr.ref(i_n), q('n_fit/row', ck['n_max_per_row'], 'count',
+                                             src('specification', note='fit within the lap: (L_lap − 2e)/3d + 1')),
+                              q('rows', ck['n_rows'], 'count', src('user_input', key='n_rows'))],
+                      result=q('n_used', ck['n_total_actual'], 'count'))
+        i_c = tr.add('design_strength', 'capacity = n_used Pns', inputs=[tr.ref(i_na), pns],
+                     result=q('capacity', ck['capacity'], 'force'))
+        r = ck['utilization']
+        if ck['pns_assumed']:
+            v, why = 'not_evaluated', f"Pns is from an assumed limit state ({ck['pns_mode']}) — reference only"
+        elif not ck['capacity_ok']:
+            v, why = 'fail', None
+        elif ck['fastener_unverified']:
+            v = 'not_evaluated'
+            why = 'fastener strength not verified: ' + '; '.join(
+                f"{x['name']} — {x['reason']}" for x in ck['fastener_unverified'])
+        else:
+            v, why = 'pass', None
+        tr.add('verdict', 'V_transfer / capacity ≤ 1', inputs=[tr.ref(i_v), tr.ref(i_c)],
+               result=q('ratio', r, 'dimensionless'), verdict=v)
+        checks.append(make_check('lap.fastener_group', design_method=dm, verdict=v,
+                                 demand=q('V_transfer', ck['V_transfer'], 'force'),
+                                 capacity=q('capacity', ck['capacity'], 'force'), ratio=r, reason=why, steps=tr.steps,
+                                 reference={'capacity': q('capacity', ck['capacity'], 'force'), 'ratio': r}
+                                 if v == 'not_evaluated' else None,
+                                 mirrors={'capacity': {'path': 'capacity', 'digits': None},
+                                          'ratio': {'path': 'utilization', 'digits': 4}},
+                                 basis='in_house_rational_analysis_A1.2c'))
+    else:
+        checks.append(make_check('lap.fastener_group', design_method=dm, verdict='fail' if not ck['pns_assumed']
+                                 else 'not_evaluated', demand=q('V_transfer', ck['V_transfer'], 'force'),
+                                 capacity=q('capacity', 0.0, 'force'), ratio=None,
+                                 reason='fastener design strength is 0', steps=tr.steps))
+
+    # --- 배치 개수
+    tr = Trace()
+    fits = ck['n_total'] <= ck['n_max_total']
+    dem = q('n', ck['n_total'], 'count', src('check', id='lap.fastener_group'))
+    cap = q('n_fit', ck['n_max_total'], 'count', spec())
+    r = ck['n_total'] / ck['n_max_total'] if ck['n_max_total'] > 0 and ck['n_total'] > 0 else None
+    v = 'pass' if fits else ('not_evaluated' if ck['pns_assumed'] else 'fail')
+    tr.add('verdict', 'n ≤ n_fit', inputs=[dem, cap], result=q('ratio', r, 'dimensionless'), verdict=v)
+    checks.append(make_check('lap.fastener_count', design_method=dm, verdict=v, demand=dem, capacity=cap, ratio=r,
+                             steps=tr.steps, reason='from an assumed Pns' if v == 'not_evaluated' else None,
+                             reference={'ratio': r} if v == 'not_evaluated' else None))
+
+    # --- 간격
+    if ck['spacing'] > 0:
+        tr = Trace()
+        dem = q('3d', ck['min_spacing'], 'length', spec())
+        cap = q('s', ck['spacing'], 'length', src('specification', note='(L_lap − 2e)/(n/row − 1)'))
+        r = ck['min_spacing'] / ck['spacing']
+        v = 'pass' if ck['spacing_ok'] else ('not_evaluated' if ck['pns_assumed'] else 'fail')
+        tr.add('verdict', 's ≥ 3d', inputs=[dem, cap], result=q('ratio', r, 'dimensionless'), verdict=v)
+        checks.append(make_check('lap.fastener_spacing', design_method=dm, verdict=v, demand=dem, capacity=cap,
+                                 ratio=r, steps=tr.steps, mirrors={'capacity': {'path': 'spacing', 'digits': None}},
+                                 reference={'ratio': r} if v == 'not_evaluated' else None))
+    else:
+        checks.append(make_check('lap.fastener_spacing', design_method=dm, verdict='not_applicable',
+                                 reason='one fastener per row (or no lap length) — spacing does not apply'))
+
+    # --- 패스너 상세(J3.2/J4.2 끝단 거리 등) — 접합 엔진의 항목 그대로
+    for c in cr.get('design_checks') or []:
+        if c['group'] == 'conn.detailing' and c['verdict'] in ('pass', 'fail'):
+            c = dict(c)
+            c.pop('mirrors', None)
+            c['part_of'] = 'fastener_design'
+            checks.append(c)
+
+    # --- 랩 구간 휨
+    fx = ck['flex']
+    no_m = 'no support moment (Mu_support = 0)'
+    phi_b, om_b = 0.90, 1.67
+    if ck['Mu'] <= 0:
+        for cid in ('lap.flexure.local', 'lap.flexure.distortional', 'lap.bending_shear'):
+            checks.append(make_check(cid, design_method=dm, verdict='not_applicable', reason=no_m))
+    else:
+        if fx.get('local'):
+            lo = fx['local']
+            tr = Trace()
+            i_m = tr.add('equation', 'Mnℓ = Se Fy  (one member; laterally braced in the lap)', equation='F3.1-1',
+                         inputs=[q('Se', ck['Se'], 'section_modulus', src('user_input', key='Se')),
+                                 q('Fy', ck['Fy'], 'stress', src('material', key='Fy'))],
+                         result=q('Mnℓ', lo['Mnl_single'], 'moment'))
+            i_l = tr.add('equation', 'Mn,lap = 2 Mnℓ  (two lapped members, Manual II-2A assumption)',
+                         inputs=[tr.ref(i_m), q('members', lo['n_members'], 'count', spec())],
+                         result=q('Mn,lap', lo['Mn_lap'], 'moment'))
+            i_d = design_strength_step(tr, dm, tr.ref(i_l), phi_b, om_b, lo['phi_Mn_lap'],
+                                       'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', 'moment',
+                                       phi_symbol='φb', omega_symbol='Ωb')
+            v = 'pass' if lo['ok'] else 'fail'
+            tr.add('verdict', 'Mu / φbMn,lap ≤ 1', inputs=[mu, tr.ref(i_d)], result=q('ratio', lo['dcr'], 'dimensionless'),
+                   verdict=v)
+            checks.append(make_check('lap.flexure.local', design_method=dm, verdict=v, demand=mu,
+                                     capacity=q('φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', lo['phi_Mn_lap'], 'moment'),
+                                     nominal=q('Mn,lap', lo['Mn_lap'], 'moment'),
+                                     factor_=factor(dm, phi_b, om_b, 'φb', 'Ωb'), ratio=lo['dcr'], steps=tr.steps,
+                                     mirrors={'nominal': {'path': 'Mn_lap', 'digits': 2},
+                                              'capacity': {'path': 'phi_Mn_lap', 'digits': 2},
+                                              'ratio': {'path': 'flexure_dcr', 'digits': 4}}))
+        else:
+            ref = None
+            if fx.get('reference'):
+                rf = fx['reference']
+                ref = {'capacity': q('φbMn,ref', rf['phi_ref'], 'moment'), 'ratio': rf['dcr'],
+                       'basis': 'gross Sf — local buckling not included'}
+            checks.append(make_check('lap.flexure.local', design_method=dm, verdict='not_evaluated',
+                                     reason='Se (effective section modulus) not given', reference=ref))
+        if fx.get('dist'):
+            ds = fx['dist']
+            tr = Trace()
+            i_l = tr.add('equation', 'Mnd,lap = 2 Mnd', inputs=[q('Mnd', ds['Mnd_single'], 'moment',
+                                                                  src('user_input', key='Mnd'))],
+                         result=q('Mnd,lap', ds['Mnd_lap'], 'moment'))
+            i_d = design_strength_step(tr, dm, tr.ref(i_l), phi_b, om_b, ds['phi_Mnd_lap'],
+                                       'φbMnd,lap' if dm == 'LRFD' else 'Mnd,lap/Ωb', 'moment',
+                                       phi_symbol='φb', omega_symbol='Ωb')
+            v = 'pass' if ds['ok'] else 'fail'
+            tr.add('verdict', 'Mu / φbMnd,lap ≤ 1', inputs=[mu, tr.ref(i_d)],
+                   result=q('ratio', ds['dcr'], 'dimensionless'), verdict=v)
+            checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict=v, demand=mu,
+                                     capacity=q('φbMnd,lap' if dm == 'LRFD' else 'Mnd,lap/Ωb', ds['phi_Mnd_lap'],
+                                                'moment'),
+                                     nominal=q('Mnd,lap', ds['Mnd_lap'], 'moment'),
+                                     factor_=factor(dm, phi_b, om_b, 'φb', 'Ωb'), ratio=ds['dcr'], steps=tr.steps))
+        elif fx.get('local'):
+            checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_applicable',
+                                     reason='Mnd not given — distortion assumed restrained by the lapped member '
+                                            '(Manual II-1A); see warnings'))
+        else:
+            checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
+                                     reason='lap flexure not evaluated (no Se)'))
+        if fx.get('h2'):
+            h = fx['h2']
+            tr = Trace()
+            vn = q('Vn', h['Vn'], 'force', src('specification', note='§G2.1 for one web (computed)')
+                   if h['vn_auto'] else src('user_input', key='Vn'))
+            i_v = design_strength_step(tr, dm, vn, 0.95, 1.60, h['phi_Vn_lap'],
+                                       'φvVn,lap' if dm == 'LRFD' else 'Vn,lap/Ωv', 'force',
+                                       phi_symbol='φv (×2 members)', omega_symbol='Ωv (×2 members)')
+            lo = fx['local']
+            i_x = tr.add('equation', '(Mu / φbMn,lap)² + (Vu / φvVn,lap)²  (squared form of Eq. H2-1)',
+                         equation='H2-1',
+                         inputs=[mu, q('φbMn,lap', lo['phi_Mn_lap'], 'moment', src('check', id='lap.flexure.local')),
+                                 vu, tr.ref(i_v)], result=q('H2²', h['mv'], 'dimensionless'))
+            v = 'pass' if h['ok'] else 'fail'
+            tr.add('verdict', 'H2² ≤ 1', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
+                   result=q('ratio', h['mv'], 'dimensionless'), verdict=v)
+            checks.append(make_check('lap.bending_shear', design_method=dm, verdict=v,
+                                     demand=q('H2²', h['mv'], 'dimensionless'), capacity=q('limit', 1.0, 'dimensionless'),
+                                     ratio=h['mv'], steps=tr.steps,
+                                     note='the engine reports the sum of squares (pass-equivalent to Eq. H2-1)'))
+        elif fx.get('h2_missing'):
+            checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
+                                     reason='section shear strength Vn could not be computed'))
+        elif ck['Vu'] <= 0:
+            checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_applicable',
+                                     reason='no support shear (Vu_support = 0)'))
+        else:
+            checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
+                                     reason='lap flexure not evaluated (no Se)'))
+
+    set_governing(checks)
+    apply_context(checks, p)
+    return checks

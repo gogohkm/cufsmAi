@@ -159,16 +159,21 @@ def torsional_buckling_stress(E: float, G: float, Ag: float,
 def flexural_torsional_stress(sigma_ex: float, sigma_t: float,
                                xo: float, ro: float) -> float:
     """휨-비틀림좌굴 임계응력 (§E2.2, 단축대칭 단면)"""
+    return _flexural_torsional_core(sigma_ex, sigma_t, xo, ro)[0]
+
+
+def _flexural_torsional_core(sigma_ex: float, sigma_t: float, xo: float, ro: float) -> tuple:
+    """(Fcre, β) — 계산서(design_checks)가 같은 β 를 쓰도록 값과 함께 돌려준다."""
     if ro <= 0:
-        return 0.0
+        return 0.0, None
     beta = 1 - (xo / ro) ** 2
     if beta <= 0:
-        return min(sigma_ex, sigma_t)
+        return min(sigma_ex, sigma_t), beta
 
     disc = (sigma_ex + sigma_t) ** 2 - 4 * beta * sigma_ex * sigma_t
     if disc < 0:
         disc = 0
-    return (1 / (2 * beta)) * ((sigma_ex + sigma_t) - math.sqrt(disc))
+    return (1 / (2 * beta)) * ((sigma_ex + sigma_t) - math.sqrt(disc)), beta
 
 
 def compute_column_Fcre(props: dict, Fy: float,
@@ -310,24 +315,31 @@ def compute_column_Fcre(props: dict, Fy: float,
         and not is_point_symmetric and not is_closed
     )
 
+    # 계산서용 — 아래 식이 쓴 바로 그 값들(design.checks 가 다시 계산하지 않게).
+    trace = {'E': E, 'G': G, 'Ag': Ag, 'rx': rx, 'ry': ry, 'J': J, 'Cw': Cw,
+             'KxLx': KxLx, 'KyLy': KyLy, 'KtLt': KtLt, 'swapped_axes': symmetry_axis == 'z'}
     if is_point_symmetric:
         # §E2.3 점대칭 단면(Z): Fcre = min(σt, 약축(MINOR PRINCIPAL)에 대한 유연좌굴응력).
         # 약축 유연좌굴은 주관성모멘트 I22 기반 r_minor를 사용한다 (geometric Izz 아님).
         sigma_e_minor = flexural_buckling_stress(E, 1.0, KyLy, r_minor)
         Fcre = min(sigma_t, sigma_e_minor)
         buckling_type = 'torsional' if Fcre == sigma_t else 'flexural'
+        trace.update(branch='point_symmetric', I22=I22, r_minor=r_minor, sigma_e_minor=sigma_e_minor)
     elif not use_ft:
         # 이중대칭/폐합: §E2.1 + §E2.2(이중대칭 비틀림) → min(σex, σey, σt)
         Fcre = min(sigma_ex, sigma_ey, sigma_t)
         buckling_type = 'flexural' if Fcre in (sigma_ex, sigma_ey) else 'torsional'
+        trace.update(branch='doubly_symmetric_or_closed')
     else:
         # 단축대칭: 휨-비틀림좌굴 (§E2.2-1). 대칭축을 x축으로 보고 σex와 σt를 결합.
         # Fcre = min(E2.1 flexural about y, E2.2-1 flexural-torsional)
-        Fcre_ft = flexural_torsional_stress(sigma_ex, sigma_t, xo, ro)
+        Fcre_ft, beta_ft = _flexural_torsional_core(sigma_ex, sigma_t, xo, ro)
         Fcre = min(sigma_ey, Fcre_ft)
         buckling_type = 'flexural' if Fcre == sigma_ey else 'flexural-torsional'
+        trace.update(branch='singly_symmetric', Fcre_ft=Fcre_ft, beta=beta_ft)
 
     return {
+        'trace': trace,
         'Fcre': Fcre,
         'sigma_ex': sigma_ex,
         'sigma_ey': sigma_ey,
@@ -459,8 +471,10 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
                               section_type: str = 'C',
                               Ly: float = None, Lt: float = None,
                               Ky: float = 1.0, Kt: float = 1.0,
-                              Fy: float = 0.0) -> tuple:
+                              Fy: float = 0.0, _raw: dict | None = None) -> tuple:
     """횡-비틀림좌굴 임계응력 Fcre (§F2.1) 와 계산 상세 — (Fcre, detail).
+
+    _raw: 주면 계산에 쓴 반올림하지 않은 중간값을 채운다(계산서 design_checks 용, 값은 그대로).
 
     C-section (§F2.1.1): Fcre = Cb × ro × A / Sf × √(σey × σt)
     Z-section (§F2.1.3): Fcre = Cb × ro × A / (2×Sf) × √(σey × σt)
@@ -512,6 +526,8 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
     is_closed_box = sec in ('RHS', 'BOX', 'HSS', 'TUBE', 'SHS') or sec.startswith('RHS') or sec.startswith('BOX')
     if is_closed_box:
         if Lb <= 0:
+            if _raw is not None:
+                _raw.update(branch='fully_braced', Lb=Lb, Fcre=1e6)
             return 1e6, {'Fcre': 1e6, 'Lb': Lb, 'equation': 'F2.1.4 (Lb=0, fully braced)'}
         # Iy — 웹에 평행한 도심축에 대한 관성모멘트 (냉간성형강: 약축 = z축)
         Iy = props.get('Iy', 0) or props.get('Izz', 0) or props.get('Iz', 0)
@@ -534,6 +550,9 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
             # Eq. F2.1.4-2
             Fcre = (Cb * math.pi) / (Ky * Ly * Sf) * math.sqrt(root)
             eq = 'F2.1.4-2 (closed-box)'
+        if _raw is not None:
+            _raw.update(branch='closed_box', E=E, G=G, J=J, Iy=Iy, Sf=Sf, Cb=Cb, Lb=Lb, Ly=Ly, Ky=Ky,
+                        Fy=Fy, Lu=Lu, Fcre=Fcre, lb_le_lu=bool(Fy > 0 and Lb <= Lu))
         return Fcre, {
             'Cb': Cb, 'Lb': Lb, 'Ly': Ly, 'Ky': Ky, 'Ag': round(Ag, 4),
             'Sf': round(Sf, 4), 'Iy': round(Iy, 4), 'J': J, 'E': E, 'G': G,
@@ -544,6 +563,8 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
     # 완전 횡구속이면 단면 종류와 무관하게 LTB가 지배하지 않는다. 그 외 단면은
     # 본 구현이 보유한 F2.1.1(C/I), F2.1.3(Z), F2.1.4(box) 범위를 명시적으로 제한한다.
     if Lb <= 0:
+        if _raw is not None:
+            _raw.update(branch='fully_braced', Lb=Lb, Fcre=1e6)
         return 1e6, {}
     supported_open = sec in ('C', 'LIPPEDC', 'CHANNEL', 'TRACK', 'I', 'ISECT', 'ISECTION', 'SIGMA')
     is_z = sec in ('Z', 'LIPPEDZ') or sec.startswith('LIPPEDZ')
@@ -604,6 +625,10 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
     if is_z:
         Fcre /= 2.0
         z_factor = 2.0
+    if _raw is not None:
+        _raw.update(branch='open', E=E, G=G, Ag=Ag, Sf=Sf, ry=ry, rx=rx, ro=ro, xo=xo, J=J, Cw=Cw,
+                    Cb=Cb, Lb=Lb, Ly=Ly, Lt=Lt, Ky=Ky, Kt=Kt, sigma_ey=sigma_ey, sigma_t=sigma_t,
+                    z_factor=z_factor, Fcre=Fcre)
 
     return Fcre, {
         'Cb': Cb, 'Lb': Lb, 'Ly': Ly, 'Lt': Lt, 'Ky': Ky, 'Kt': Kt,
