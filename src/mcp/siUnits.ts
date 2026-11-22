@@ -237,7 +237,8 @@ function convertStep(obj: any, ctx: Ctx): any {
  * 예: 설계강도 0.001 kip 자리 → 0.0044482 kN. 어휘에 없는 quantity 는 값을 두고 경로를 알린다.
  */
 function convertQuantity(obj: any, chain: Table[], path: string, ctx: Ctx): any {
-    const unit = quantityUnit(obj.quantity);
+    // V6-16: 끝없는 값(unbounded: true — Fcre = ∞)은 수가 아니다 — 바꾸지 않는다(엔진은 value null 로 싣는다).
+    const unit = obj.unbounded === true ? 'none' : quantityUnit(obj.quantity);
     const inner: Table = { rounded_to: unit ?? 'none' };
     const out: any = {};
     for (const [k, v] of Object.entries(obj)) {
@@ -311,15 +312,14 @@ export function convertOutputSIDeep(result: any, table: Table): { value: any; un
 }
 
 export const TEXT_UNITS_NOTE =
-    'units=SI: every numeric field above is SI (mm, mm^2, mm^3, mm^4, mm^6, MPa, kN, kN-m, m, kN/m, kg/m^3). ' +
-    'Free text written by the engine (report, steps[].formula, warnings, assumptions, scope_notes, notes, labels, ' +
-    'error messages) is in US customary units (in, kips, kip-in, kip-ft, ksi, ft, plf) and was NOT converted; ' +
-    'objects marked units:"US" were also left in US units. Quote engine text with its US units. ' +
-    'Values tagged with a `quantity` (design_checks: demand, nominal, capacity, steps[].inputs / result, locations) ' +
-    'were converted by that quantity: force kN, moment kN-m, stress MPa, length mm, area mm^2, section_modulus mm^3, ' +
-    'moment_of_inertia and torsion_constant mm^4, warping_constant mm^6, force_per_length kN/m, ' +
-    'rotational_stiffness kN-m/rad/m; dimensionless, angle (deg) and count are unchanged. ' +
-    'steps[].expr and steps[].condition are unit-free symbolic text.';
+    'units=SI: numeric fields are SI (mm, mm^2, mm^3, mm^4, mm^6, MPa, kN, kN-m, m, kN/m, kg/m^3). Engine text (report, warnings, '
+    + 'assumptions, scope_notes, notes, labels, errors) is in US units (in, kips, kip-in, kip-ft, ksi, ft, plf) and was NOT converted; '
+    + 'objects marked units:"US" were left in US units too — quote engine text with its US units. Values tagged with a quantity '
+    + '(design_checks, locations) were converted by it: force kN, moment kN-m, stress MPa, length mm, area mm^2, section_modulus mm^3, '
+    + 'moment_of_inertia / torsion_constant mm^4, warping_constant mm^6, force_per_length kN/m, rotational_stiffness kN-m/rad/m; '
+    + 'dimensionless, angle (deg) and count unchanged. Numbers inside steps[].expr / condition are dimensionless coefficients — except '
+    + 'steps with expr_units:"US" (an equation written for US units; see their units_note). unbounded:true values (Fcre = infinity) '
+    + 'are not numbers and Fcre beside Fcre_unbounded:true is the 1e6 ksi placeholder — neither was converted.';
 
 // ============================================================
 // 출력 표 — 엔진 결과 키 → 단위 (test/webview/mcp_si_chain.js 가 실제 엔진 출력의 모든 수치 키를 대조)
@@ -336,7 +336,7 @@ const NONE_KEYS = [
     'curve_index', 'index', 'load_factor', 'load_factor_interp', 'flexure_dcr', 'flexure_dcr_governing',
     'n_max_total', 'n_per_row', 'n_required', 'n_rows', 'n_total', 'n_members', 'n_spans', 'span',
     'support', 'L_over_delta', 'psi', 'n_lengths', 'n_elements', 'n_theta', 'n_na', 'n_thick',
-    'neigs_requested', 'neigs_actual', 'nnodes', 'nelems', 'Ct', 'Cv', 'kv', 'mf', 'interaction_value',
+    'neigs_requested', 'neigs_actual', 'nnodes', 'nelems', 'region_support', 'Ct', 'Cv', 'kv', 'mf', 'interaction_value',
     'LF_dist', 'LF_dist_interp', 'LF_global', 'LF_local', 'LF_local_interp', 'LF_single_minimum',
     'curve_length', 'lengths_analyzed', 'm_terms_max', 'n_minima_found',
 ];
@@ -359,6 +359,13 @@ const DESIGN_CHECK: Table = {
 /** 부재 설계(design_member) · 단면 성질 · cutwp · DSM 의 공통 키. */
 const MEMBER_KEYS: Table = {
     design_checks: DESIGN_CHECK,
+    // V6-16: Fcre_unbounded 가 참이면 Fcre 는 '∞' 의 표지(1e6 ksi)일 뿐 — 바꾸지 않는다.
+    Fcre: (_v: any, parent: any) => (parent && parent.Fcre_unbounded === true ? 'none' : 'stress'),
+    // V6-17: 단위 표에 없던 것 — Lu(F2.1.4 의 길이), H2-2 의 좌변 · 한계(무차원), 랩의 참고 비, 엔진이 만든 템플릿 치수
+    Lu: 'length', flexure_reference_dcr: 'none',
+    shear_interaction: { lhs: 'none', limit: 'none' },
+    auto_generated_section: { H: 'length', B: 'length', D: 'length', t: 'length', r: 'length', OD: 'length',
+        top_width: 'length', depth: 'length', brim: 'length', tf: 'length', tw: 'length', qlip: 'none', nseg: 'none', n_elem: 'none' },
     // K2-5: 검토 상태의 판(수) — 단위 없음
     case_rev: 'none', case_check: { rev: 'none' },
     ...Object.fromEntries(NONE_KEYS.map((k) => [k, 'none' as const])),
@@ -378,7 +385,7 @@ const MEMBER_KEYS: Table = {
         'Mzzcrl', 'Mzzcrd', 'Mzzcre', 'My_xx', 'My_zz', 'M11_y', 'M22_y', 'Mxx_y', 'Mzz_y',
         'M11_raw', 'M22_raw', 'Mn_lap', 'phi_Mn_lap', 'May_strength', 'Mnd_single', 'wc_M', 'Malo', 'Mao'].map((k) => [k, 'moment' as const])),
     // 응력 ksi
-    ...Object.fromEntries(['Fy', 'Fu', 'Fcre', 'Fcrl', 'Fcrd', 'Fn', 'Fy_original', 'Fy_used', 'Fya',
+    ...Object.fromEntries(['Fy', 'Fu', 'Fcrl', 'Fcrd', 'Fn', 'Fy_original', 'Fy_used', 'Fya',
         'Fyc', 'Fyv', 'Fuv', 'sigma_ey', 'sigma_ex', 'sigma_t', 'sigma_ez', 'E', 'G', 'E_ksi', 'Fnt',
         'Fnt_reduced', 'Fnv', 'fv', 'f_avg', 'max_node_stress', 'fy', 'Fub', 'Fxx', 'Fuf', 'fy_used',
         'fy_analysis'].map((k) => [k, 'stress' as const])),

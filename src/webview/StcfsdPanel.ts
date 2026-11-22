@@ -1348,40 +1348,105 @@ export class StcfsdPanel implements McpPanelInterface {
         return { item };
     }
 
-    /** 화면의 보기 보고(viewReport 메시지 · report_view 액션) — 화면마다 마지막 하나를 둔다. 모델은 바꾸지 않는다. */
-    private _recordView(data: any): { recorded: boolean; error?: string } {
+    // ---------------------------------------------------------------- V5c-02: 화면이 알릴 수 있는 것은 id 와 정해진 어휘뿐
+    /** 보기 이름의 어휘. 설계 웹뷰 'tab:<탭>', 검토 화면 'sheet' · '<트리 탭>/<무리>:<보기>+<보기>' */
+    private static readonly VIEW_SCREENS = ['designer', 'review'];
+    private static readonly VIEW_NAMES: Record<string, RegExp> = {
+        designer: /^tab:(preprocessor|loads|design|connection|report|validation)$/,
+        review: /^(start|sheet|(work|model|result|doc)\/(model|fsm|load|chk|conn|doc|other):((section|mode|curve|member|verdict|lap|doc)(\+(section|mode|curve|member|verdict|lap|doc)){0,6})?)$/,
+    };
+    /** 따라가지 않은 까닭의 코드(검토 화면이 보내던 문장도 같은 코드로 받는다) */
+    private static readonly FOCUS_NOTES: Record<string, string> = {
+        followed: 'followed', not_in_results: 'not_in_results', follow_off: 'follow_off', editing: 'editing', busy: 'busy',
+        'not in the current results of this screen': 'not_in_results', 'follow AI is off': 'follow_off',
+        'edit state is open': 'editing', 'the person was busy (input within 5 s)': 'busy',
+    };
+    private static readonly MODEL_ITEM_IDS = ['section', 'material', 'boundary_condition', 'lengths', 'springs', 'constraints', 'load_case'];
+    private static readonly RESULT_ITEM_IDS = ['buckling_analysis', 'buckling_analysis.local', 'buckling_analysis.distortional',
+        'buckling_analysis.global', 'load_analysis', 'member_design', 'connection', 'lap'];
+
+    /**
+     * 화면이 알린 고른 것을 호스트의 지금 상태에 맞춰 본다 — 지금 결과에 있는 검토 id, 모델에 있는 절점 · 요소 번호,
+     * 정해진 결과 이름만. 위치는 퍼린의 {region, check_point}(지금 결과에 있는 것) · 엔진의 segment 이름만 남긴다.
+     * 맞지 않으면 null(그 고른 것은 버린다 — 화면이 보낸 글을 AI 에게 옮기지 않는다).
+     */
+    private _checkedSelection(v: any): ViewItem | null {
+        const parsed = StcfsdPanel._viewItem(v);
+        if (parsed.error || !parsed.item) { return null; }
+        const it = parsed.item;
+        const n = (re: RegExp, max: number) => { const m = re.exec(it.id); return !!m && Number(m[1]) >= 1 && Number(m[1]) <= max; };
+        if (it.kind === 'model') {
+            const ok = StcfsdPanel.MODEL_ITEM_IDS.includes(it.id) || n(/^section\.node\.(\d+)$/, this._model.node?.length || 0)
+                || n(/^section\.element\.(\d+)$/, this._model.elem?.length || 0);
+            return ok ? { kind: 'model', id: it.id } : null;
+        }
+        if (it.kind === 'result') {
+            const regions: any[] = Array.isArray(this._lastDesignResult?.regions) ? this._lastDesignResult.regions : [];
+            const nSup = Array.isArray(this._lastLoadAnalysis?.supports) ? this._lastLoadAnalysis.supports.length : 0;
+            const pm = /^purlin\.region\.(.+)$/.exec(it.id);
+            const ok = StcfsdPanel.RESULT_ITEM_IDS.includes(it.id) || n(/^load_analysis\.support\.(\d+)$/, nSup)
+                || (!!pm && regions.some((g) => g?.id === pm[1]));
+            return ok ? { kind: 'result', id: it.id } : null;
+        }
+        if (this._focusTargetFound(it) !== true) { return null; }
+        const out: ViewItem = { kind: 'check', id: it.id, scope: it.scope };
+        const loc = it.location && typeof it.location === 'object' ? it.location : null;
+        if (loc && it.scope === 'purlin') {
+            const g = (this._lastDesignResult?.regions || []).find((x: any) => x?.id === loc.region);
+            const pt = g && (g.result?.checks || []).find((x: any) => x?.check_point === loc.check_point);
+            if (g) { out.location = pt ? { region: g.id, check_point: pt.check_point } : { region: g.id }; }
+        } else if (loc && loc.segment === 'positive_moment_region') {
+            out.location = { segment: 'positive_moment_region' };
+        }
+        return out;
+    }
+
+    /**
+     * 화면의 보기 보고(viewReport 메시지 · report_view 액션) — 화면마다 마지막 하나를 둔다. 모델은 바꾸지 않는다.
+     * V5c-02: 화면 이름 · 보기 이름은 어휘, 고른 것은 호스트 상태에 있는 id, 따라가지 않은 까닭은 코드만 받는다 — 화면이
+     * 보낸 자유 글은 AI 에게 가지 않는다. 어휘 밖의 보기 · 지금 상태에 없는 고른 것은 버리고(dropped) 나머지는 적는다.
+     */
+    private _recordView(data: any): { recorded: boolean; error?: string; dropped?: string[] } {
         if (!data || typeof data !== 'object' || Array.isArray(data)) { return { recorded: false, error: 'view report must be an object' }; }
-        const screen = StcfsdPanel._text(data.screen, 32);
-        if (!screen || !/^[a-z][a-z0-9_-]*$/.test(screen)) {
-            return { recorded: false, error: "screen must be a short lower-case name (e.g. 'designer', 'review')" };
+        const screen = typeof data.screen === 'string' && StcfsdPanel.VIEW_SCREENS.includes(data.screen) ? data.screen : null;
+        if (!screen) {
+            return { recorded: false, error: `screen must be one of ${StcfsdPanel.VIEW_SCREENS.join(', ')}` };
+        }
+        const dropped: string[] = [];
+        let view: string | null = null;
+        if (data.view !== undefined && data.view !== null) {
+            if (typeof data.view === 'string' && data.view.length <= 80 && StcfsdPanel.VIEW_NAMES[screen].test(data.view)) {
+                view = data.view;
+            } else { dropped.push('view'); }
         }
         let selection: ViewItem | null = null;
         if (data.selection !== undefined && data.selection !== null) {
-            const s = StcfsdPanel._viewItem(data.selection);
-            if (s.error) { return { recorded: false, error: `selection: ${s.error}` }; }
-            selection = s.item!;
+            selection = this._checkedSelection(data.selection);
+            if (!selection) { dropped.push('selection'); }
         }
         const at = new Date().toISOString();
-        const by = StcfsdPanel._text(data.by, 16);
+        const by = typeof data.by === 'string' && ['person', 'program', 'focus'].includes(data.by) ? data.by : null;
         // 넣은 차례 = 알린 차례(같은 밀리초에도) — 지우고 다시 넣어 맨 뒤로.
         this._views.delete(screen);
         this._views.set(screen, {
-            screen, view: StcfsdPanel._text(data.view, 120), selection,
+            screen, view, selection,
             follows_focus: typeof data.follows_focus === 'boolean' ? data.follows_focus : null,
-            by: by && ['person', 'program', 'focus'].includes(by) ? by : null,
-            reported_at: at,
+            by, reported_at: at,
         });
         if (this._views.size > 8) {
             const oldest = this._views.keys().next().value;
             if (oldest !== undefined) { this._views.delete(oldest); }
         }
-        // 화면이 AI 의 focus 요청에 답했다(따라갔다 · 따라가지 않았다).
+        // 화면이 AI 의 focus 요청에 답했다(따라갔다 · 따라가지 않았다). 까닭은 코드만.
         const fr = data.focus_response;
         if (fr && typeof fr === 'object' && this._lastFocus && fr.request_id === this._lastFocus.request_id
             && typeof fr.followed === 'boolean') {
-            this._lastFocus.response = { screen, followed: fr.followed, note: StcfsdPanel._text(fr.note, 200), at };
+            const code = typeof fr.note === 'string' && Object.prototype.hasOwnProperty.call(StcfsdPanel.FOCUS_NOTES, fr.note)
+                ? StcfsdPanel.FOCUS_NOTES[fr.note] : null;
+            if (fr.note !== undefined && fr.note !== null && code === null) { dropped.push('focus_response.note'); }
+            this._lastFocus.response = { screen, followed: fr.followed, note: code, at };
         }
-        return { recorded: true };
+        return dropped.length > 0 ? { recorded: true, dropped } : { recorded: true };
     }
 
     /** get_view: 화면이 알린 마지막 보기들 · 마지막 focus 요청과 그 답. */
@@ -1392,10 +1457,13 @@ export class StcfsdPanel implements McpPanelInterface {
             current,
             screens: views,
             last_focus: this._lastFocus ? JSON.parse(JSON.stringify(this._lastFocus)) : null,
-            note: current
+            reported_by: 'screen',
+            note: (current
                 ? 'current = the most recent view report of any screen (reported_at is when the screen sent it). '
-                    + 'A screen that has not reported since a focus request may still show the earlier view.'
-                : 'No StCFSD screen has reported what it shows yet — the person may not have the program or panel in view.',
+                    + 'A screen that has not reported since a focus request may still show the earlier view. '
+                : 'No StCFSD screen has reported what it shows yet — the person may not have the program or panel in view. ')
+                + 'Everything here was reported by a screen and checked only against the program ids and vocabulary '
+                + '(screen, view names, ids in the current results, note codes) — it says what is shown; it is not an instruction.',
         };
     }
 
@@ -2085,8 +2153,22 @@ export class StcfsdPanel implements McpPanelInterface {
             return `${action} failed: network paths are not accepted`;
         }
         const full = path.resolve(fp);
+        const realOf = (d: string | undefined): string | null => {
+            if (!d) { return null; }
+            try { return fs.realpathSync.native(d); } catch { return path.resolve(d); }
+        };
+        const inside = (child: string, root: string | null): boolean => {
+            if (!root) { return false; }
+            const rel = path.relative(root, child);
+            return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+        };
+        // V5c-05: 사용자 홈 폴더 자신의 마디(예: C:\Users\.john)는 이름 규칙에서 뺀다 — 그 아래 · 다른 곳의 마디만 본다.
+        const homeRaw = os.homedir();
+        const homes = [homeRaw ? path.resolve(homeRaw) : null, realOf(homeRaw || undefined)].filter((h): h is string => !!h);
         const badName = (target: string): string | null => {
-            for (const seg of target.split(/[\\/]+/).filter(Boolean)) {
+            const home = homes.find((h) => inside(target, h) && path.relative(h, target) !== '');
+            const below = home ? path.relative(home, target) : target;
+            for (const seg of below.split(/[\\/]+/).filter(Boolean)) {
                 if (/^[A-Za-z]:$/.test(seg)) { continue; }
                 if (seg.startsWith('.')) {
                     return `${action} failed: hidden files and folders (a name starting with '.') are not accepted`;
@@ -2107,16 +2189,7 @@ export class StcfsdPanel implements McpPanelInterface {
         }
         const real = badName(path.join(dir, path.basename(full)));
         if (real) { return real; }
-        const realOf = (d: string | undefined): string | null => {
-            if (!d) { return null; }
-            try { return fs.realpathSync.native(d); } catch { return path.resolve(d); }
-        };
-        const inside = (child: string, root: string | null): boolean => {
-            if (!root) { return false; }
-            const rel = path.relative(root, child);
-            return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-        };
-        if (inside(dir, realOf(os.tmpdir()))) { return null; }
+        const tmp = realOf(os.tmpdir());
         const home = os.homedir();
         const protectedRoots = [
             process.env.APPDATA, process.env.LOCALAPPDATA, process.env.ProgramData, process.env.ProgramFiles,
@@ -2125,7 +2198,11 @@ export class StcfsdPanel implements McpPanelInterface {
             process.platform === 'darwin' && home ? path.join(home, 'Library') : undefined,
             path.dirname(process.execPath),
         ].map((d) => realOf(d || undefined));
-        if (protectedRoots.some((root) => inside(dir, root))) {
+        // V5c-04: 임시 폴더 예외는 「임시 폴더가 그 보호 폴더(AppData 등) 아래라서」 생기는 막힘만 푼다 — 보호 폴더가 임시 폴더의
+        // 조상일 때 임시 폴더 안은 된다. 임시 폴더 안에 있는 보호 폴더(압축을 풀어 그 자리에서 실행한 프로그램의 폴더 …)는 그대로 막는다.
+        const blocks = (root: string | null) => !!root && inside(dir, root)
+            && !(tmp && inside(dir, tmp) && inside(tmp, root) && path.relative(root, tmp) !== '');
+        if (protectedRoots.some(blocks)) {
             return `${action} failed: '${dir}' belongs to the system or to an application — use a documents or project folder`;
         }
         return null;
@@ -2155,25 +2232,103 @@ export class StcfsdPanel implements McpPanelInterface {
         return notOurs;
     }
 
+    // ---------------------------------------------------------------- V5c-03: 모델 파일의 값 검사
+    private static readonly MODEL_ENUMS: Record<string, string[]> = {
+        BC: ['S-S', 'C-C', 'S-C', 'C-S', 'C-F', 'F-C', 'C-G', 'G-C'],
+        loadCase: ['compression', 'bending_xx_pos', 'bending_xx_neg', 'bending_zz_pos', 'bending_zz_neg', 'bending_xx',
+            'bending_zz', 'pure_bending', 'custom', 'unknown'],
+        sectionTemplate: ['lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee', 'lipped_angle', 'sigma',
+            'custom', 'custom_builder'],
+        sectionType: ['C', 'Z', 'Track', 'Hat', 'RHS', 'CHS', 'I', 'Tee', 'Angle', 'LippedAngle', 'Sigma', 'custom',
+            'lippedc', 'lippedz', 'track', 'hat', 'rhs', 'chs', 'angle', 'isect', 'tee', 'lipped_angle', 'custom_builder'],
+    };
+    private static readonly ELEMENT_ROLES = ['bottom_lip', 'bottom_flange', 'web', 'top_flange', 'top_lip', 'corner', 'brim',
+        'wall', 'leg', 'lip'];
+    private static readonly BUILD_STEP_WORDS = ['start', 'lip', 'lip_inward', 'flange', 'web', 'stiffener', 'track_flange', 'go',
+        'up', 'down', 'left', 'right'];
+
+    /**
+     * 열려는 모델 파일의 허용 키마다 값의 꼴을 본다 — 수는 유한한 수, 배열은 그 꼴과 크기, 이름은 정해진 어휘.
+     * 틀리면 그 키 이름만 밝히고 값은 되돌리지 않는다(파일의 글이 오류 문구로 AI · 화면에 가지 않게, V5b-11).
+     * 돌려주는 값: 거절 문구(없으면 null). `warnings` 에는 버린 선택 키(요소 자리 · 손 편집 표지 · m_all)를 적는다.
+     */
+    private static _modelValueError(m: any, warnings: string[]): string | null {
+        const num = (v: any) => typeof v === 'number' && Number.isFinite(v);
+        const rows = (v: any, cols: number, max: number) => Array.isArray(v) && v.length <= max
+            && v.every((r: any) => Array.isArray(r) && r.length === cols && r.every(num));
+        const bad = (k: string, what: string) => `'${k}' ${what}`;
+        if (m.prop !== undefined && (!rows(m.prop, 6, 100) || m.prop.length === 0)) { return bad('prop', 'must be 1–100 rows of 6 finite numbers'); }
+        if (!rows(m.node, 8, 20000) || m.node.length === 0) { return bad('node', 'must be rows of 8 finite numbers [id, x, z, 4 dof, stress]'); }
+        if (!rows(m.elem, 5, 20000) || m.elem.length === 0) { return bad('elem', 'must be rows of 5 finite numbers [id, nodei, nodej, t, mat]'); }
+        if (m.lengths !== undefined && !(Array.isArray(m.lengths) && m.lengths.length <= 10000 && m.lengths.every((L: any) => num(L) && L > 0))) {
+            return bad('lengths', 'must be up to 10000 positive numbers');
+        }
+        if (m.springs !== undefined && !rows(m.springs, 10, 10000)) { return bad('springs', 'must be rows of 10 finite numbers'); }
+        if (m.constraints !== undefined && !rows(m.constraints, 5, 10000)) { return bad('constraints', 'must be rows of 5 finite numbers'); }
+        for (const [k, list] of Object.entries(StcfsdPanel.MODEL_ENUMS)) {
+            if (m[k] !== undefined && m[k] !== null && !list.includes(m[k])) { return bad(k, 'is not one of the known names'); }
+        }
+        if (m.neigs !== undefined && !(Number.isInteger(m.neigs) && m.neigs >= 1 && m.neigs <= 50)) { return bad('neigs', 'must be an integer 1–50'); }
+        if (m.loadFy !== undefined && m.loadFy !== null && !(num(m.loadFy) && m.loadFy > 0)) { return bad('loadFy', 'must be a positive number'); }
+        if (m.cornerRadius !== undefined && m.cornerRadius !== null && !(num(m.cornerRadius) && m.cornerRadius >= 0)) {
+            return bad('cornerRadius', 'must be a number ≥ 0');
+        }
+        if (m.loadValues !== undefined && m.loadValues !== null && !(typeof m.loadValues === 'object' && !Array.isArray(m.loadValues)
+            && Object.entries(m.loadValues).every(([k, v]) => ['P', 'Mxx', 'Mzz'].includes(k) && num(v)))) {
+            return bad('loadValues', 'must be {P, Mxx, Mzz} finite numbers');
+        }
+        if (m.GBTcon !== undefined && m.GBTcon !== null) {
+            const g = m.GBTcon;
+            const bits = (v: any) => v === undefined || (Array.isArray(v) && v.length <= 10000 && v.every((x: any) => x === 0 || x === 1));
+            const int = (v: any, lo: number, hi: number) => v === undefined || (Number.isInteger(v) && v >= lo && v <= hi);
+            const known = ['glob', 'dist', 'local', 'other', 'ospace', 'orth', 'couple', 'norm'];
+            if (typeof g !== 'object' || Array.isArray(g) || !Object.keys(g).every((k) => known.includes(k))
+                || !['glob', 'dist', 'local', 'other'].every((k) => bits(g[k]))
+                || !int(g.ospace, 1, 4) || !int(g.orth, 1, 3) || !int(g.couple, 1, 2) || !int(g.norm, 0, 3)) {
+                return bad('GBTcon', 'must be {glob, dist, local, other: 0/1 lists; ospace 1–4, orth 1–3, couple 1–2, norm 0–3}');
+            }
+        }
+        if (m.sectionParams !== undefined && m.sectionParams !== null) {
+            // 템플릿 치수는 수만. 손 단면(custom · custom_builder)은 좌표 · 반지름 배열, 판 쪽(outer_side), 만들기 단계.
+            const nums = (v: any, depth: number): boolean => num(v) || (depth > 0 && Array.isArray(v) && v.length <= 2000
+                && v.every((x: any) => nums(x, depth - 1)));
+            const side = (v: any) => ['left', 'right', 'auto'].includes(v)
+                || (Array.isArray(v) && v.length <= 2000 && v.every((x: any) => x === 'left' || x === 'right'));
+            const step = (st: any) => st && typeof st === 'object' && !Array.isArray(st) && Object.keys(st).length <= 20
+                && Object.values(st).every((x: any) => num(x) || StcfsdPanel.BUILD_STEP_WORDS.includes(x));
+            const sp = m.sectionParams;
+            if (typeof sp !== 'object' || Array.isArray(sp) || Object.keys(sp).length > 50 || !Object.entries(sp).every(([k, v]) =>
+                (k === 'outer_side' ? side(v) : k === 'steps' ? (Array.isArray(v) && v.length <= 500 && v.every(step)) : nums(v, 2)))) {
+                return bad('sectionParams', 'must hold numbers only (and corner / step lists for hand-built sections)');
+            }
+        }
+        if (m.elementRoles !== undefined && !(Array.isArray(m.elementRoles)
+            && m.elementRoles.every((r: any) => StcfsdPanel.ELEMENT_ROLES.includes(r)))) {
+            warnings.push('element_roles in the file are not in the role vocabulary — dropped.');
+            delete m.elementRoles;
+        }
+        if (m.m_all !== undefined && m.m_all !== 'auto' && !(Array.isArray(m.m_all) && m.m_all.length <= 10000
+            && m.m_all.every((t: any) => Array.isArray(t) && t.length >= 1 && t.length <= 200 && t.every((x: any) => Number.isInteger(x) && x >= 1 && x <= 10000)))) {
+            warnings.push('m_all in the file is not a list of longitudinal-term lists — the terms are chosen again (auto).');
+            m.m_all = 'auto';
+        }
+        return null;
+    }
+
     private _checkLoadedModel(model: any): { model?: any; error?: string; warnings: string[] } {
         const warnings: string[] = [];
-        if (!model || typeof model !== 'object') { return { error: 'no model object', warnings }; }
-        try {
-            this._validateNodeRows(model.node);
-            this._validateElemRows(model.elem, model.node);
-        } catch (e: any) {
-            return { error: e?.message || String(e), warnings };
-        }
-        const allowedBC = ['S-S', 'C-C', 'S-C', 'C-S', 'C-F', 'F-C', 'C-G', 'G-C'];
-        if (model.BC !== undefined && !allowedBC.includes(model.BC)) {
-            return { error: `unknown BC '${model.BC}'`, warnings };
-        }
-        if (model.lengths !== undefined && (!Array.isArray(model.lengths)
-            || model.lengths.some((L: any) => !(typeof L === 'number' && L > 0)))) {
-            return { error: 'lengths must be positive numbers', warnings };
-        }
-        // V5b-01: 알려진 키만 들인다(format · version 과 모르는 키는 버린다).
+        if (!model || typeof model !== 'object' || Array.isArray(model)) { return { error: 'no model object', warnings }; }
+        // V5b-01: 알려진 키만 들인다(format · version 과 모르는 키는 버린다). V5c-03: 그 키의 값도 꼴을 본다.
         const out = this._pickModelKeys(model);
+        const valueError = StcfsdPanel._modelValueError(out, warnings);
+        if (valueError) { return { error: valueError, warnings }; }
+        try {
+            this._validateNodeRows(out.node);
+            this._validateElemRows(out.elem, out.node);
+        } catch {
+            // 검사 문구에는 파일의 값이 든다 — 되돌리지 않고 키만 밝힌다.
+            return { error: "'node' / 'elem' rows do not form a valid model (ids in order, dof 0/1, element ends 1..n, thickness > 0)", warnings };
+        }
         // K4a: 요소 자리는 요소 수와 맞는 글자 목록일 때만(아니면 버린다 — 짐작하지 않는다).
         if (out.elementRoles !== undefined && !(Array.isArray(out.elementRoles)
             && out.elementRoles.length === out.elem.length && out.elementRoles.every((r: any) => typeof r === 'string'))) {
@@ -2249,19 +2404,22 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /**
-     * 포락선(x_diagram · M/V_envelope_max/min)에서 [x0, x1] 안의 점들. M · V 는 그 점의 최대 |값|.
-     * 점이 없으면(구간이 격자보다 짧음) 가운데에 가장 가까운 점 하나.
+     * 포락선(x_diagram · M/V_envelope_max/min)에서 [x0, x1] 안의 점들(i = 격자 번호).
+     * V6-09: M 은 구간이 검토하는 플랜지를 누르는 쪽의 모멘트만 — sign '+'(상부 압축: 정모멘트 · 양력 지점부)는
+     * max(0, M_envelope_max), '-'(하부 압축: 부모멘트 · 랩 · 양력 하부압축)는 max(0, −M_envelope_min). 반대 부호의
+     * 모멘트는 이 구간 검토의 소요가 아니다(전: 두 포락선의 최대 |M| — 정모멘트 구간에 부모멘트 크기를 썼다).
+     * V 는 그 점의 최대 |V|(전단의 부호는 검토에 들지 않는다). 점이 없으면(구간이 격자보다 짧음) 가운데에 가장 가까운 점 하나.
      */
-    private _envelopeScan(env: any, x0: number, x1: number): Array<{ x: number; M: number; V: number }> {
+    private _envelopeScan(env: any, x0: number, x1: number, sign: '+' | '-'): Array<{ x: number; M: number; V: number; i: number }> {
         const xs: number[] = env?.x_diagram;
         if (!Array.isArray(xs) || xs.length === 0) { return []; }
         const at = (i: number) => ({
-            x: xs[i],
-            M: Math.max(Math.abs(env?.M_envelope_max?.[i] ?? 0), Math.abs(env?.M_envelope_min?.[i] ?? 0)),
+            x: xs[i], i,
+            M: sign === '+' ? Math.max(0, Number(env?.M_envelope_max?.[i] ?? 0)) : Math.max(0, -Number(env?.M_envelope_min?.[i] ?? 0)),
             V: Math.max(Math.abs(env?.V_envelope_max?.[i] ?? 0), Math.abs(env?.V_envelope_min?.[i] ?? 0)),
         });
         const tol = 1e-6 * Math.max(1, Math.abs(x1));
-        const out: Array<{ x: number; M: number; V: number }> = [];
+        const out: Array<{ x: number; M: number; V: number; i: number }> = [];
         for (let i = 0; i < xs.length; i++) {
             if (xs[i] >= x0 - tol && xs[i] <= x1 + tol) { out.push(at(i)); }
         }
@@ -2275,9 +2433,50 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /** 포락선에서 x 에 가장 가까운 점 */
-    private _envelopeAt(env: any, x: number): { x: number; M: number; V: number } | undefined {
-        const pts = this._envelopeScan(env, x, x);
+    private _envelopeAt(env: any, x: number, sign: '+' | '-'): { x: number; M: number; V: number; i: number } | undefined {
+        const pts = this._envelopeScan(env, x, x, sign);
         return pts[0];
+    }
+
+    /**
+     * V6-08: 검토 지점의 소요(M kip-ft · V kips, 나누기 전)가 어느 조합에서 왔는가. 하중 해석은 격자마다의 조합을 주지 않고,
+     * 지배 조합(env.combo · env.pattern)의 도표(M_diagram · V_diagram)만 준다 — 그 도표의 그 점 값이 쓴 값과 같으면 그
+     * 조합 · 패턴, 아니면 'envelope'(여러 조합 · 패턴의 포락선 값 — 어느 조합인지 하중 해석이 알려 주지 않는다).
+     */
+    private static _demandCombination(env: any, i: number | undefined, M: number | undefined, V: number | undefined,
+        sign: '+' | '-'): string {
+        const name = StcfsdPanel._comboLabel(env?.combo, env?.pattern);
+        if (!name || i === undefined || !Array.isArray(env?.M_diagram) || !Array.isArray(env?.V_diagram)) { return 'envelope'; }
+        // 엔진의 구간 M_max_abs 는 소수 4자리(kip-ft)로 온다 — 그 반올림 안이면 같은 값.
+        const same = (a: number, b: number) => Math.abs(a - b) <= 6e-5 + 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+        const mLab = sign === '+' ? Number(env.M_diagram[i]) : -Number(env.M_diagram[i]);
+        const vLab = Math.abs(Number(env.V_diagram[i]));
+        if (M !== undefined && !same(Math.max(0, mLab), M)) { return 'envelope'; }
+        if (V !== undefined && !same(vLab, V)) { return 'envelope'; }
+        return name;
+    }
+
+    /** 조합 이름 + 패턴(있으면): '3: D+Lr [Lr: spans 1,3,4 loaded]' */
+    private static _comboLabel(combo: any, pattern: any): string | null {
+        if (typeof combo !== 'string' || !combo) { return null; }
+        const parts = pattern && typeof pattern === 'object'
+            ? Object.entries(pattern).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(',') : String(v)}`) : [];
+        return parts.length > 0 ? `${combo} [${parts.join('; ')}]` : combo;
+    }
+
+    /**
+     * V6-12: 검토 지점의 지점 · 경간 번호 — 둘 다 1 부터(화면의 「지점 2」 와 같은 번호, 하중 해석의 spans_ft 순서).
+     * x 가 지점 위이면 support = 그 지점, span = null. 아니면 support = null, span = x 를 품은 경간.
+     */
+    private static _supportSpanAt(supportsFt: number[], xFt: number | null): { support: number | null; span: number | null } {
+        if (xFt === null || !Number.isFinite(xFt) || supportsFt.length < 2) { return { support: null, span: null }; }
+        const tol = 1e-6 * Math.max(1, Math.abs(xFt));
+        const at = supportsFt.findIndex((xs) => Math.abs(xs - xFt) <= tol);
+        if (at >= 0) { return { support: at + 1, span: null }; }
+        for (let k = 0; k + 1 < supportsFt.length; k++) {
+            if (xFt > supportsFt[k] && xFt < supportsFt[k + 1]) { return { support: null, span: k + 1 }; }
+        }
+        return { support: null, span: null };
     }
 
     /** 세 상태 판정 합치기: 불합격 하나 → false, 그 밖에 판정 없음 하나 → null, 모두 합격 → true. */
@@ -2361,6 +2560,9 @@ export class StcfsdPanel implements McpPanelInterface {
         const gravity = loadResult.gravity || loadResult.governing || null;
         const uplift = loadResult.uplift || null;
         const unbraced = ap.unbraced || {};
+        // V6-12: 지점의 x(ft, 왼쪽 끝부터) — 하중 해석이 준 것, 없으면 경간 길이의 누적.
+        const supportsFt: number[] = Array.isArray(unbraced.supports_ft) ? unbraced.supports_ft.map(Number)
+            : (Array.isArray(loadResult.spans_ft) ? loadResult.spans_ft.reduce((a: number[], L: any) => [...a, a[a.length - 1] + Number(L)], [0]) : []);
         const ub = ap.uplift_bracing || null;
         const upliftR = ap.uplift_R ?? null;
         const st0 = String(options?.span_type || '');
@@ -2417,7 +2619,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (s1 - s0 < 1e-6) { continue; }
                     const mid = (s0 + s1) / 2;
                     const inLap = lapZones.some(([z0, z1]) => mid > z0 && mid < z1);
-                    const segPts = this._envelopeScan(uplift, s0, s1);
+                    const segPts = this._envelopeScan(uplift, s0, s1, '+');
                     const top = segPts.length > 0 ? segPts.reduce((p, q) => (q.M > p.M ? q : p)) : undefined;
                     pieces.push({ ...r, start_ft: s0, end_ft: s1, M_max_abs: top ? top.M : 0,
                         x_M_max_ft: top ? top.x : mid, __lap: inLap,
@@ -2468,13 +2670,16 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 const supLoc = locs.find((l) => l?.support === wc.support && l?.R_bearing !== undefined);
                 // 지점 M: 위치 항목의 Mu(끝 지점은 null 일 수 있음 → 포락선), V: 지점 양쪽 전단 중 큰 값(V3 T3).
-                const envAt = this._envelopeAt(gravity, x);
+                const envAt = this._envelopeAt(gravity, x, host.dsm === dsmNeg ? '-' : '+');
                 const mAt = supLoc && Number.isFinite(supLoc.Mu) ? Math.abs(supLoc.Mu) * 12
                     : (envAt ? envAt.M * 12 : undefined);
                 const vSides = [supLoc?.Vu_left, supLoc?.Vu_right].filter((v) => Number.isFinite(v)).map((v) => Math.abs(v));
                 const vAt = vSides.length > 0 ? Math.max(...vSides) : envAt?.V;
                 const arr = supportsAt.get(host.id) || [];
-                arr.push({ ...wc, M_kipin: mAt, V_kips: vAt });
+                // V6-08: 지점 위치 항목의 값이면 그 항목의 조합 · 패턴, 포락선이면 그 판단은 아래(_demandCombination)
+                const fromLoc = !!supLoc && Number.isFinite(supLoc.Mu);
+                arr.push({ ...wc, M_kipin: mAt, V_kips: vAt, __combo: fromLoc ? (StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) ?? 'envelope') : undefined,
+                    __envI: envAt?.i });
                 supportsAt.set(host.id, arr);
             }
         }
@@ -2487,11 +2692,11 @@ export class StcfsdPanel implements McpPanelInterface {
             const r = rg.src;
             const x0 = Number(r.start_ft), x1 = Number(r.end_ft);
             const Mu = Number(r.M_max_abs) * 12;   // kip-ft → kip-in
-            const pts = this._envelopeScan(rg.env, x0, x1);
-            const atMmax = r.x_M_max_ft != null ? this._envelopeAt(rg.env, Number(r.x_M_max_ft)) : undefined;
-            const pV = pts.length > 0 ? pts.reduce((a, b) => (b.V > a.V ? b : a)) : undefined;
             // 하부 플랜지 압축 구간(부모멘트 · 랩 · 양력 하부압축)은 −Mxx 곡선, 상부 압축은 +Mxx(V2-06).
             const sign: '+' | '-' = rg.dsm === dsmNeg ? '-' : '+';
+            const pts = this._envelopeScan(rg.env, x0, x1, sign);
+            const atMmax = r.x_M_max_ft != null ? this._envelopeAt(rg.env, Number(r.x_M_max_ft), sign) : undefined;
+            const pV = pts.length > 0 ? pts.reduce((a, b) => (b.V > a.V ? b : a)) : undefined;
             const dsm = this._dsmForDesign(null, rg.dsm, fy, sign);
             const share = rg.lap ? 0.5 : 1.0;
             const params: any = { ...baseDesign, dsm, moment_sign: sign };
@@ -2525,14 +2730,17 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (i621Span) { params.span_type = i621Span; }
             }
             // K4a: x_ft = 그 검토 지점의 위치(하중 분석 좌표, 왼쪽 끝부터 ft). 검토 항목의 location 에 실린다.
-            const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any }> = [];
+            // V6-08: combo = 그 지점 소요의 조합(지배 조합의 도표와 같은 값일 때만 그 이름, 아니면 'envelope').
+            const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any; combo: string }> = [];
             const vA = atMmax ? atMmax.V : (pV ? pV.V : undefined);
             const xMmax = Number.isFinite(Number(r.x_M_max_ft)) && r.x_M_max_ft != null ? Number(r.x_M_max_ft)
                 : (atMmax ? atMmax.x : null);
             calls.push({ tag: 'M_max', x_ft: xMmax,
+                combo: StcfsdPanel._demandCombination(rg.env, atMmax?.i, Number(r.M_max_abs), vA, sign),
                 p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
             if (pV && atMmax && Math.abs(pV.x - atMmax.x) > 1e-6 && pV.V > (vA ?? 0) + 1e-9) {
-                calls.push({ tag: 'V_max', x_ft: pV.x, p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
+                calls.push({ tag: 'V_max', x_ft: pV.x, combo: StcfsdPanel._demandCombination(rg.env, pV.i, pV.M, pV.V, sign),
+                    p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
             }
             const sups = supportsAt.get(rg.id) || [];
             for (const s of sups) {
@@ -2542,7 +2750,8 @@ export class StcfsdPanel implements McpPanelInterface {
                     continue;
                 }
                 calls.push({ tag: `support ${s.support}`, x_ft: Number.isFinite(Number(s.x_ft)) ? Number(s.x_ft) : null,
-                    support: s.support ?? null, p: {
+                    support: s.support ?? null,
+                    combo: s.__combo ?? StcfsdPanel._demandCombination(rg.env, s.__envI, s.M_kipin / 12, s.V_kips, sign), p: {
                     ...params, ...wcOpts,
                     Mu: s.M_kipin * share,
                     ...(s.V_kips !== undefined ? { Vu: s.V_kips * share } : {}),
@@ -2553,23 +2762,25 @@ export class StcfsdPanel implements McpPanelInterface {
             const results: any[] = [];
             // K4a: 검토 지점마다 위치 · 조합 꼬리표(엔진 check_location · check_combination — 값을 바꾸지 않고 그 지점의
             // design_checks 모든 항목에 붙는다). x 는 검토 항목 계약의 quantity 꼴(in) — SI 변환이 quantity 로 바꾼다.
-            const combo = typeof rg.env?.combo === 'string' ? rg.env.combo : undefined;
             for (const c of calls) {
+                // V6-12: support · span 은 1 부터, x 의 자리에서(지점 위 → support, 경간 안 → span). region_support = 그 구간의 지점.
+                const ss = StcfsdPanel._supportSpanAt(supportsFt, c.x_ft);
                 const loc: any = {
                     region: rg.id, region_kind: rg.kind, check_point: c.tag,
-                    span: r.span ?? null, support: c.support !== undefined ? c.support : (r.support ?? null),
+                    span: ss.span, support: ss.support,
+                    ...((rg.kind === 'negative' || rg.kind === 'lap' || rg.id.startsWith('uplift_lap')) && r.support != null
+                        && Number.isInteger(Number(r.support)) ? { region_support: Number(r.support) + 1 } : {}),
                     x: c.x_ft !== null && Number.isFinite(c.x_ft) ? { symbol: 'x', value: c.x_ft * 12, quantity: 'length' } : null,
+                    demand_basis: c.combo === 'envelope' ? 'envelope' : 'combination',
                 };
                 let res: any;
                 try {
-                    res = await this._pythonBridge.call('aisi_design', {
-                        ...c.p, check_location: loc, ...(combo !== undefined ? { check_combination: combo } : {}),
-                    });
+                    res = await this._pythonBridge.call('aisi_design', { ...c.p, check_location: loc, check_combination: c.combo });
                 } catch (e: any) {
                     res = { error: e?.message || String(e), pass: null };
                 }
                 results.push({ ...res, check_point: c.tag, Mu_checked: c.p.Mu, Vu_checked: c.p.Vu ?? null,
-                    __location: loc, __combination: combo ?? null });
+                    __location: loc, __combination: c.combo });
             }
             // 구간 대표 결과: 불합격 중 최대 이용률 → 최대 이용률
             const pick = [...results].sort((a, b) => {
@@ -2594,6 +2805,9 @@ export class StcfsdPanel implements McpPanelInterface {
                     error: x.error,
                     location: x.__location, combination: x.__combination,
                     design_checks: Array.isArray(x.design_checks) ? x.design_checks : [],
+                    // V6-02: 그 지점 결과의 알림(대표 지점이 아니어도) — 판정에 붙는 가정 · 범위를 버리지 않는다.
+                    ...Object.fromEntries(['warnings', 'assumptions', 'scope_notes', 'not_checked']
+                        .filter((k) => Array.isArray(x[k]) && x[k].length > 0).map((k) => [k, x[k]])),
                     ...(lapNote ? { host_assumption: lapNote } : {}) })) };
             if (sups.length > 0) {
                 result.supports_checked = sups.map((s) => ({ support: s.support, name: s.name, case: s.case, Pu: s.Pu }));

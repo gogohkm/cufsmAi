@@ -282,7 +282,7 @@ const qFactor = (q) => {
 };
 const sameScaled = (us, si, f) => (us === 0 ? si === 0 : Math.abs(si / (us * f) - 1) < 1e-12);
 // quantity 가 붙지 않은 design_checks 안의 수: 키 → 계수 이름('none' = 그대로). 그 밖의 수가 나오면 실패한다.
-const DC_PLAIN = { ratio: 'none', digits: 'none', step: 'none', Cb: 'none', span: 'none', support: 'none', Lb: 'length' };
+const DC_PLAIN = { ratio: 'none', digits: 'none', step: 'none', Cb: 'none', span: 'none', support: 'none', region_support: 'none', Lb: 'length' };
 
 /**
  * US · SI 결과의 모든 design_checks 를 맞댄다: {value, quantity} 의 value = US × qFactor(quantity),
@@ -350,11 +350,44 @@ const KB = 1024;
 const NOTICES = ['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'force_model', 'dsm_warning', 'host_warnings'];
 const stepless = (c) => { const { steps: _s, ...x } = c; void _s; return x; };
 
+// V6-02 · V5c-01 · V6-10 · V6-13: 요약 ⊇ 전체 — 이 시험이 따로 모은다(서버의 모으는 함수를 쓰지 않는다).
+const NOTICE_KEYS_T = new Set(['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'not_evaluated_relevant',
+  'host_warnings', 'dsm_warnings', 'dsm_warning', 'load_not_evaluated']);
+/** 전체 결과 어디에 있든 알림 글(검토 항목 · 계산 과정 · 보고서 글 안은 빼고 — 항목은 아래 id 로 본다). */
+function noticeTexts(o, out = new Set()) {
+  if (Array.isArray(o)) { o.forEach((x) => noticeTexts(x, out)); return out; }
+  if (!o || typeof o !== 'object') { return out; }
+  for (const [k, v] of Object.entries(o)) {
+    if (k === 'design_checks' || k === 'steps' || k === 'report') { continue; }
+    if (NOTICE_KEYS_T.has(k) && (Array.isArray(v) || typeof v === 'string')) {
+      for (const t of (Array.isArray(v) ? v : [v])) { if (t !== null && t !== undefined && t !== '') { out.add(JSON.stringify(t)); } }
+    } else { noticeTexts(v, out); }
+  }
+  return out;
+}
+/** 판정에 드는 불합격 · 미평가, 그리고 지배인 검토 id — 결과 어디의 design_checks 에서든. */
+function namedCheckIds(o, out = new Set()) {
+  if (Array.isArray(o)) { o.forEach((x) => namedCheckIds(x, out)); return out; }
+  if (!o || typeof o !== 'object') { return out; }
+  if (typeof o.id === 'string' && typeof o.verdict === 'string'
+    && (o.verdict === 'fail' || (o.verdict === 'not_evaluated' && o.counts !== false) || o.governs === true)) { out.add(o.id); }
+  Object.values(o).forEach((v) => namedCheckIds(v, out));
+  return out;
+}
+function checkComplete(tag, s, full) {
+  const text = JSON.stringify(s);
+  const missN = [...noticeTexts(full)].filter((t) => !text.includes(t));
+  assert.deepStrictEqual(missN.map((t) => t.slice(0, 140)), [], `${tag}: every notice text of the full result is in the reply`);
+  const missI = [...namedCheckIds(full)].filter((id) => !text.includes(JSON.stringify(id)));
+  assert.deepStrictEqual(missI, [], `${tag}: every failing / not-evaluated / governing check id is named`);
+}
+
 /** 요약 · 검토 목록 수준이 판정의 뜻을 바꾸지 않는다: 판정 · 지배 · 검토 줄 · 알림 · 반올림 안내가 전체 결과와 같다. */
 function checkDesignSummary(tag, level, s, full) {
   if (Array.isArray(full.regions)) { return checkPurlinSummary(tag, level, s, full); }
   assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
   assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
+  checkComplete(tag, s, full);
   for (const k of NOTICES) { if (k in full) { assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k} in full`); } }
   if (full.display_rounding) { assert.strictEqual(s.display_rounding.note, full.display_rounding.note, `${tag}: display rounding note`); }
   assert(/get_design_check/.test(s.more) && /detail:'full'/.test(s.more), `${tag}: more says where the rest is`);
@@ -362,7 +395,17 @@ function checkDesignSummary(tag, level, s, full) {
   assert.deepStrictEqual(s.governing_checks.map((c) => c.id), dc.filter((c) => c.governs).map((c) => c.id), `${tag}: governing checks`);
   for (const g of s.governing_checks) {
     const f = dc.find((c) => c.id === g.id);
-    for (const k of ['clause', 'name', 'name_ko', 'ratio', 'verdict', 'location', 'combination']) { assert.deepStrictEqual(g[k], f[k] ?? null, `${tag}: governing ${g.id}.${k}`); }
+    for (const k of ['clause', 'name', 'name_ko', 'ratio', 'verdict', 'location', 'combination', 'governs_basis']) {
+      assert.deepStrictEqual(g[k] ?? null, f[k] ?? null, `${tag}: governing ${g.id}.${k}`);
+    }
+    // 계약 §9.5: 미평가가 지배하면 참고 비 · 평가한 최대를 따로, 머리 판정비 주의를 단다
+    if (f.governs_basis === 'not_evaluated') {
+      assert.deepStrictEqual([g.reference_ratio, g.highest_evaluated], [f.reference && f.reference.ratio !== undefined ? f.reference.ratio : null,
+        f.highest_evaluated ?? null], `${tag}: governing ${g.id} not evaluated — reference ratio and highest evaluated given apart`);
+      assert(new RegExp(g.id.replace(/\./g, '\\.')).test(s.utilization_caveat || ''), `${tag}: utilization caveat names ${g.id}`);
+    }
+    if (f.out_of_scope) { assert.strictEqual(g.out_of_scope, f.out_of_scope, `${tag}: out_of_scope`); }
+    if (f.ratio_form) { assert.strictEqual(g.ratio_form, f.ratio_form, `${tag}: ratio_form`); }
     for (const k of ['demand', 'capacity']) { assert.deepStrictEqual(g[k] && g[k].value, f[k] ? f[k].value : null, `${tag}: governing ${g.id}.${k}`); }
   }
   if (level === 'summary') {
@@ -376,17 +419,19 @@ function checkDesignSummary(tag, level, s, full) {
     const fd = s.fastener_design;
     assert.deepStrictEqual(fd.pass, full.fastener_design.pass, `${tag}: fastener verdict`);
     for (const k of NOTICES) { if (k in full.fastener_design) { assert.deepStrictEqual(fd[k], full.fastener_design[k], `${tag}.fastener_design keeps ${k}`); } }
-    if (dc.some((c) => c.part_of === 'fastener_design')) {
-      assert(!('check_lines' in fd) && /part_of/.test(fd.checks_listed_above), `${tag}: fastener checks listed once (in the lap lines)`);
-    } else {
-      checkDesignSummary(`${tag}.fastener_design`, level, { ...fd, detail: level, more: s.more }, full.fastener_design);
-    }
+    // V6-10: 패스너 줄은 모두 남는다 — 위 목록으로 옮겨 실린 id(part_of fastener_design)만 거기서 한 번
+    const moved = new Set(dc.filter((c) => c.part_of === 'fastener_design').map((c) => c.id));
+    const fdIds = (level === 'summary' ? fd.check_lines : fd.design_checks).map((c) => c.id);
+    assert.deepStrictEqual([...fdIds, ...moved].sort(), [...new Set([...full.fastener_design.design_checks.map((c) => c.id), ...moved])].sort(),
+      `${tag}: every fastener check is listed once (moved ones in the lap lines)`);
+    assert.deepStrictEqual([...(fd.moved_to_top || [])].sort(), [...moved].sort(), `${tag}: moved_to_top names exactly the moved ids`);
   }
 }
 
 function checkPurlinSummary(tag, level, s, full) {
   assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
   assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
+  checkComplete(tag, s, full);
   assert.deepStrictEqual(s.governing, full.governing, `${tag}: governing region`);
   for (const k of ['warnings', 'assumptions', 'not_evaluated', 'load_not_evaluated', 'wc_reactions', 'uplift_reactions', 'i621_check']) {
     assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k}`);
@@ -398,11 +443,89 @@ function checkPurlinSummary(tag, level, s, full) {
       [g.id, g.kind, g.start_ft, g.end_ft, g.result.utilization ?? null, g.result.pass ?? null, g.result.check_point ?? null], `${tag}: region ${g.id}`);
     const fails = new Set(g.result.checks.flatMap((pt) => pt.design_checks.filter((c) => c.verdict === 'fail').map((c) => c.id)));
     assert.deepStrictEqual(new Set(line.failing), fails, `${tag}: region ${g.id} failing ids`);
+    const govs = new Set(g.result.checks.flatMap((pt) => pt.design_checks.filter((c) => c.governs === true).map((c) => c.id)));
+    assert.deepStrictEqual(new Set(line.governs), govs, `${tag}: region ${g.id} governing ids (all check points)`);
     if (level === 'checks') { assert.strictEqual(line.checks.length, g.result.checks.length, `${tag}: region ${g.id} check points`); }
   });
   const gov = full.regions.find((g) => g.id === (full.governing || {}).id);
   if (gov) { assert.deepStrictEqual(s.governing_checks.map((c) => c.id), gov.result.design_checks.filter((c) => c.governs).map((c) => c.id), `${tag}: governing checks of the governing region`); }
   assert(/get_design_check/.test(s.more) && /detail:'full'/.test(s.more), `${tag}: more`);
+}
+
+/**
+ * V6-08 · V6-09 · V6-12 · V6-13: 퍼린 검토 지점의 소요 · 조합 · 지점/경간 번호를 하중 해석의 격자에서 따로 맞댄다.
+ * 구간이 검토하는 플랜지의 부호(정모멘트 · 양력 지점부 = +, 부모멘트 · 랩 · 양력 하부압축 = −)의 포락선 값과 같아야 하고,
+ * 조합 이름은 그 지배 조합 도표의 그 점 값이 쓴 값과 같을 때만(또는 그 자리의 이름 붙은 위치의 조합), 아니면 'envelope'.
+ * 돌려주는 값: {points, envelope, labelled}
+ */
+function checkPurlinStations(tag, full) {
+  const la = full.load_analysis;
+  const supportsFt = la.spans_ft.reduce((a, L) => [...a, a[a.length - 1] + L], [0]);
+  const lab = (combo, pattern) => {
+    const parts = pattern && typeof pattern === 'object' ? Object.entries(pattern).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(',') : v}`) : [];
+    return parts.length ? `${combo} [${parts.join('; ')}]` : combo;
+  };
+  const near = (a, b) => Math.abs(a - b) <= 6e-5 + 1e-9 * Math.max(Math.abs(a), Math.abs(b));
+  const tally = { points: 0, envelope: 0, labelled: 0 };
+  for (const g of full.regions) {
+    const env = /^uplift/.test(g.kind) ? la.uplift : la.gravity;
+    const sign = g.kind === 'positive' || g.kind === 'uplift_support' ? 1 : -1;
+    const share = g.members === 2 ? 0.5 : 1;
+    for (const c of g.result.checks) {
+      const at = `${tag} ${g.id} ${c.check_point}`;
+      const x = c.location.x.value / 12;
+      let i = 0;
+      env.x_diagram.forEach((xx, k) => { if (Math.abs(xx - x) < Math.abs(env.x_diagram[i] - x)) { i = k; } });
+      const M = c.Mu / 12 / share;
+      const V = c.Vu === null ? null : c.Vu / share;
+      const envM = sign > 0 ? Math.max(0, env.M_envelope_max[i]) : Math.max(0, -env.M_envelope_min[i]);
+      const envV = Math.max(Math.abs(env.V_envelope_max[i]), Math.abs(env.V_envelope_min[i]));
+      if (c.check_point === 'M_max' || c.check_point === 'V_max') {
+        assert(near(M, envM), `${at}: M ${M} kip-ft is the ${sign > 0 ? '+' : '−'}M envelope at x = ${env.x_diagram[i]} ft (${envM}) — V6-09`);
+        if (c.check_point === 'V_max') { assert(near(V, envV), `${at}: V ${V} = |V| envelope ${envV}`); }
+      }
+      // 조합: 'envelope' 이 아니면 그 이름의 도표(또는 그 자리 위치 항목)가 쓴 값을 낸다 — V6-08
+      tally.points++;
+      if (c.combination === 'envelope') { tally.envelope++; assert.strictEqual(c.location.demand_basis, 'envelope', `${at}: demand_basis`); }
+      else {
+        tally.labelled++;
+        const mLab = Math.max(0, sign * env.M_diagram[i]);
+        const viaDiagram = c.combination === lab(env.combo, env.pattern) && near(mLab, M) && (V === null || near(Math.abs(env.V_diagram[i]), V));
+        const viaLocation = /^support /.test(c.check_point) && env.locations.some((l) => Math.abs(l.x_ft - x) < 1e-6
+          && Number.isFinite(l.Mu) && near(Math.abs(l.Mu), M) && c.combination === lab(l.combo, l.pattern));
+        assert(viaDiagram || viaLocation, `${at}: combination '${c.combination}' did not produce M ${M} / V ${V} here — V6-08`);
+      }
+      // 지점 · 경간 번호(1 부터) — V6-12
+      const k = supportsFt.findIndex((xs) => Math.abs(xs - x) <= 1e-6);
+      if (k >= 0) { assert.deepStrictEqual([c.location.support, c.location.span], [k + 1, null], `${at}: at support ${k + 1}`); }
+      else {
+        const sp = supportsFt.findIndex((xs, q) => q + 1 < supportsFt.length && x > xs && x < supportsFt[q + 1]) + 1;
+        assert.deepStrictEqual([c.location.support, c.location.span], [null, sp], `${at}: in span ${sp}`);
+      }
+      const m = /^support (\d+)$/.exec(c.check_point);
+      if (m) { assert.strictEqual(c.location.support, Number(m[1]), `${at}: support check point numbering`); }
+    }
+  }
+  return tally;
+}
+
+/**
+ * 서버의 응답 모양 함수(SHAPERS · unitReply)만 꺼내 쓴다 — server.ts 는 불러오면 stdio 서버가 뜨므로 그 토막을 옮겨 돌린다.
+ * 엔진만으로 만든 계약 사례 전부(MCP 로는 현재 단면 하나뿐이라 넓게 돌릴 수 없다)를 같은 함수로 줄여 본다.
+ */
+function loadShapers(si) {
+  const ts = require(path.join(ROOT, 'node_modules', 'typescript'));
+  const src = fs.readFileSync(path.join(ROOT, 'src', 'mcp', 'server.ts'), 'utf8');
+  const a = src.indexOf('type Detail = ');
+  const b = src.indexOf('// 도구 인자: 응답의 모양');
+  const ua = src.indexOf('function unitReply(');
+  const ub = src.indexOf('async function postTool(');
+  assert(a > 0 && b > a && ua > 0 && ub > ua, 'server.ts reply-shaping section markers');
+  const js = ts.transpileModule(src.slice(a, b) + '\n' + src.slice(ua, ub),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const json = (r) => ({ content: [{ type: 'text', text: JSON.stringify(r) }] });
+  return new Function('convertOutputSIDeep', 'TEXT_UNITS_NOTE', 'json', `${js}\nreturn { SHAPERS, unitReply };`)(
+    si.convertOutputSIDeep, si.TEXT_UNITS_NOTE, json);
 }
 
 function toSIArgs(args, spec) {
@@ -963,7 +1086,6 @@ async function main() {
         assert(Array.isArray(c.design_checks) && (c.error || c.design_checks.length > 0), `${at}.design_checks`);
         assert.strictEqual(c.location.region, g.id, `${at}.location.region`);
         assert.strictEqual(c.location.check_point, c.check_point, `${at}.location.check_point`);
-        assert.strictEqual(c.combination, g.combo ?? null, `${at}.combination = the region combination`);
         assert(c.location.x && c.location.x.quantity === 'length', `${at}.location.x`);
         const xin = c.location.x.value;
         assert(xin >= g.start_ft * 12 - 1e-6 && xin <= g.end_ft * 12 + 1e-6, `${at}: x ${xin} in lies in the region ${g.start_ft}–${g.end_ft} ft`);
@@ -980,6 +1102,8 @@ async function main() {
       assert.deepStrictEqual(g.result.design_checks, governing.design_checks, `region ${g.id}: region design_checks = its governing point's`);
     }
     assert(multiPoint > 0, 'some purlin region has more than one check point (V_max or a support)');
+    const st2 = checkPurlinStations('design_purlin cont-2', pUS);
+    results.push(`design_purlin cont-2 stations: ${st2.points} check points = load-analysis envelope (sign of the checked flange), ${st2.labelled} labelled with the combination that produced them, ${st2.envelope} 'envelope'`);
     assert(lapNotes > 0, 'a lap region carries the host lap assumption on its check points');
     results.push(`design_purlin: ${pUS.regions.length} regions, ${multiPoint} with several check points — design_checks · x · combination per point`);
     for (const g of [pUS.regions[0], pUS.regions.find((x) => x.members === 2)].filter(Boolean)) {
@@ -1006,6 +1130,18 @@ async function main() {
       { ...LOAD_SI, spans_ft: 'length_ft', laps_per_support: { left_ft: 'length_ft', right_ft: 'length_ft' } }, {}, { levels: ['full'] });
     assert(findPath(ohUS, (k, v) => k === 'overhang_ft' && typeof v === 'number' && v > 0),
       'the overhang case really produces overhang_ft values (so the SI check covers them)');
+
+    // 8d. V6-08 · V6-09: 패턴 하중(Lr 감소 → 경간마다 Lr) — 검토 지점의 소요는 검토하는 플랜지 부호의 포락선 값이고,
+    //     조합 이름은 그것을 낸 조합 · 패턴일 때만(아니면 'envelope'). 고치기 전: 정모멘트 구간 V_max 에 부모멘트 크기 112.4 kip-in.
+    const PAT = { member_app: 'roof-purlin', span_type: 'cont-4', span_ft: 25, loads: { D: 15, Lr: 100, W: -170 }, lr_reduced: true,
+      laps: { left_ft: 1.0, right_ft: 2.5 }, deck: { type: 'through-fastened', t_panel: 0.018, fastener_spacing: 12 },
+      i621_conditions_confirmed: true, design_method: 'ASD', Fy: 55, Fu: 70, wc_N: 3.5, wc_R: 0.1875, wc_fastened: 'fastened' };
+    const [patUS] = await usVsSi('design_purlin', PAT, { ...LOAD_SI, laps: { left_ft: 'length_ft', right_ft: 'length_ft' },
+      deck: { t_panel: L, fastener_spacing: L } }, {}, { levels: ['full', 'summary'], label: 'design_purlin pattern' });
+    assert(patUS.load_analysis.gravity.pattern && Object.keys(patUS.load_analysis.gravity.pattern).length > 0, 'the pattern case really patterns Lr');
+    const stP = checkPurlinStations('design_purlin pattern', patUS);
+    assert(stP.envelope > 0, 'with pattern loading some check points come from the envelope and say so');
+    results.push(`design_purlin pattern stations: ${stP.points} check points, ${stP.labelled} labelled, ${stP.envelope} 'envelope'`);
 
     // 8c. V4-31: 「0 = 없음」 을 엔진이 받는 선택 인자를 스키마가 거절하지 않는다(design_purlin · analyze_loads)
     //     엔진에 0 을 준 결과가 인자를 뺀 결과와 같으면 0 은 「주지 않음」 의 뜻이므로 스키마가 0 을 받아야 한다.
@@ -1087,8 +1223,10 @@ async function main() {
     const [p38] = await usVsSi('design_purlin', P38, { ...LOAD_SI, spans_ft: 'length_ft', spacing_ft: 'length_ft', deck: { kphi_override: 'rot_stiff' },
       laps_per_support: { left_ft: 'length_ft', right_ft: 'length_ft' } }, {}, { levels: ['full', 'summary'], label: 'design_purlin 38 regions' });
     assert(p38.regions.length >= 30, `the budget case has many regions (${p38.regions.length})`);
+    checkPurlinStations('design_purlin 38 regions', p38);
     const budget = { aisi_design_compression: 12, aisi_design_flexure: 12, aisi_design_combined: 12, aisi_design_tension: 12,
-      aisi_design_connection: 12, design_connection: 12, design_lap_connection: 12, 'design_purlin 38 regions': 40, design_purlin: 40 };
+      aisi_design_connection: 12, design_connection: 12, design_lap_connection: 16, 'design_purlin 38 regions': 40, design_purlin: 40,
+      'design_purlin pattern': 40 };
     for (const z of SIZES.filter((x) => x.level === 'summary' && budget[x.tool])) {
       assert(Math.max(z.us, z.si) <= budget[z.tool] * KB, `budget: ${z.tool} summary ${Math.max(z.us, z.si)} B > ${budget[z.tool]} KB`);
     }
@@ -1139,6 +1277,55 @@ async function main() {
     const gone = await call('get_design_check', { scope: 'purlin', id: p38.regions[0].result.design_checks[0].id, location: { region: p38.regions[0].id } });
     assert(gone.isError && /no longer current/.test(gone.data.error) && gone.data.invalidated && gone.data.invalidated.reason === 'Material changed',
       `a deleted result is not served — the ledger says why: ${JSON.stringify(gone.data).slice(0, 300)}`);
+
+    // 11. V6-02 · V6-10 · V5c-01 · V6-16 · V6-17: 계약 사례 전부(엔진만) — 요약 · 검토 목록 ⊇ 전체(알림 글 · 불합격 · 미평가 ·
+    //     지배 id), SI 전체에 단위 표 없는 수가 없고, 끝없는 값(Fcre_unbounded · unbounded)은 바꾸지 않으며, 크기 안
+    const dump = cp.execFileSync(py, ['-c', [
+      'import sys, json',
+      `sys.path.insert(0, ${JSON.stringify(path.join(ROOT, 'python'))})`,
+      `sys.path.insert(0, ${JSON.stringify(path.join(ROOT, 'test', 'python'))})`,
+      'import contract_cases_1123 as cc',
+      'out = {name: {"method": m, "result": cc.run_case(m, p)} for name, m, p in cc.design_cases()}',
+      'sys.stdout.write(json.dumps(out))'].join('\n')], { encoding: 'utf8', maxBuffer: 1 << 28 });
+    const cases = JSON.parse(dump);
+    const SH = loadShapers(si);
+    const toolOf = { aisi_design: 'aisi_design_flexure', design_connection: 'design_connection', lap_connection: 'design_lap_connection' };
+    const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 16 };
+    const largest = {};
+    let nCases = 0; let nUnb = 0;
+    const reply = (r, units, detail, t) => JSON.parse(SH.unitReply(r, units, units === 'SI' ? si.SI_OUT_MEMBER : null, SH.SHAPERS[t], detail).content[0].text);
+    for (const [name, c] of Object.entries(cases)) {
+      if (!c.result || c.result.error) { continue; }
+      const t = toolOf[c.method];
+      nCases++;
+      const fSI = reply(c.result, 'SI', 'full', t);
+      assert(!fSI.si_unconverted, `${name}: SI numbers with no unit in the table: ${JSON.stringify(fSI.si_unconverted || []).slice(0, 300)} — V6-17`);
+      // 끝없는 값: Fcre_unbounded 옆의 Fcre(1e6 표지)와 unbounded:true 의 value 는 바꾸지 않는다 — V6-16
+      const unb = (u, v, p) => {
+        if (Array.isArray(u)) { u.forEach((x, i) => unb(x, v[i], `${p}[${i}]`)); return; }
+        if (!u || typeof u !== 'object') { return; }
+        if (u.Fcre_unbounded === true) { assert.strictEqual(v.Fcre, u.Fcre, `${name} ${p}.Fcre stays the placeholder in SI`); nUnb++; }
+        if (u.unbounded === true) { assert.strictEqual(v.value, u.value, `${name} ${p}.value (unbounded) not converted`); nUnb++; }
+        for (const [k, x] of Object.entries(u)) { if (x && typeof x === 'object') { unb(x, v[k], `${p}.${k}`); } }
+      };
+      unb(c.result, fSI, name);
+      assert(/expr_units:"US"/.test(fSI.units_note) && !/unit-free/.test(fSI.units_note), 'SI units_note: expressions carry US numbers only in expr_units US steps — V6-11');
+      for (const units of ['US', 'SI']) {
+        for (const detail of ['summary', 'checks']) {
+          const sh = reply(c.result, units, detail, t);
+          const bytes = require('buffer').Buffer.byteLength(JSON.stringify(sh));
+          checkComplete(`${name} [${units} ${detail}]`, sh, c.result);
+          if (detail === 'summary') {
+            assert(bytes <= limitOf[c.method] * KB, `${name} ${units} summary ${bytes} B > ${limitOf[c.method]} KB`);
+            const key = `${c.method} ${units}`;
+            if (!largest[key] || largest[key].b < bytes) { largest[key] = { b: bytes, name }; }
+          }
+        }
+      }
+    }
+    assert(nCases >= 120 && nUnb > 0, `broad set: ${nCases} cases, ${nUnb} unbounded values`);
+    results.push(`contract cases through the reply shapers: ${nCases} × US/SI × summary/checks complete (notices, failing / not-evaluated / governing ids); `
+      + `largest summaries ${Object.entries(largest).map(([k, v]) => `${k} ${v.b} B (${v.name})`).join(', ')}; ${nUnb} unbounded values left as they are`);
 
     // 9c. 실제 엔진 출력이 지난 quantity 종류(나머지는 9a 의 합성 항목으로만 — 엔진이 아직 내지 않는다)
     const realKinds = [...QTY_SEEN.keys()].sort();

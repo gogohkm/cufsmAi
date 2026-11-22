@@ -126,11 +126,15 @@ async function start(opts = {}) {
     }
     res.writeHead(404); res.end();
   });
-  const httpPort = opts.httpPort || 47831;
-  await new Promise((r) => server.listen(httpPort, '127.0.0.1', r));
+  // V5c-06: 고정 포트가 아니라 빈 포트 — 다른 프로세스가 쥔 포트로 시험 전체가 죽지 않게(opts 로 주면 그 포트).
+  await new Promise((r) => server.listen(opts.httpPort || 0, '127.0.0.1', r));
+  const httpPort = server.address().port;
 
   // --- browser
-  const cdpPort = opts.cdpPort || 9353;
+  const cdpPort = opts.cdpPort || await new Promise((resolve) => {
+    const probe = require('net').createServer();
+    probe.listen(0, '127.0.0.1', () => { const p = probe.address().port; probe.close(() => resolve(p)); });
+  });
   const prof = path.join(out, 'edge-profile');
   const width = opts.width || 1400, height = opts.height || 1000;
   const browserExe = findBrowser();
