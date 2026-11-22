@@ -55,6 +55,8 @@
 | `get_view` | `{current, screens, last_focus, note}` — `current` = 가장 늦게 알린 화면의 보고(없으면 null, `note` 가 그렇다고), `screens` = 화면마다 마지막 보고(늦은 것부터), `last_focus` = 마지막 focus 요청 `{request_id, item, reason, requested_at, forwarded, target_found, response}` — `response.followed` 가 화면이 따라갔는지 |
 | `focus` `{item, reason?}` | `{request_id, item, reason, target_found, screens, forwarded, screen_moved, note}`. `screen_moved` 는 늘 null(모름) — 지금 결과에 없는 check 이면 false 이고 보내지 않는다. 아무 화면도 보고하지 않았으면 「보냈지만 보이는지 모른다」, 패널이 닫혔으면 「붙은 화면이 없다 — 보이지 않았다, last_focus 에 둔다」. **답은 화면이 움직였다고 말하지 않는다** — 나중에 `get_view` 가 사실을 말한다 |
 
+`get_design_check {scope, id, location?, combination?, units?}`(K4a 3a)도 같은 id 로 항목 하나를 계산 과정과 함께 호스트의 지금 결과에서 돌려준다 — 그 결과가 지워졌으면 장부의 까닭과 함께 오류다(낡은 계산 과정을 내지 않는다).
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).

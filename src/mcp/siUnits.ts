@@ -406,6 +406,9 @@ export const SI_OUT_DSM_M: Table = dsmTable('M');
 /** 부재 설계 결과 (compression / flexure / combined / tension / connection) — 중첩 · 한계상태 포함. */
 export const SI_OUT_MEMBER: Table = { ...MEMBER_KEYS };
 
+/** get_design_check (K4a 3a): 검토 항목 하나(`check`)와 그 위치. */
+export const SI_OUT_DESIGN_CHECK: Table = { ...MEMBER_KEYS, check: DESIGN_CHECK };
+
 /** 단면 성질 · cutwp · 소성 곡면. */
 export const SI_OUT_PROPS: Table = { ...MEMBER_KEYS, P: 'none', M11: 'none', M22: 'none' };
 
@@ -625,6 +628,8 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
     check_block_shear: { Agv: AR, Anv: AR, Ant: AR, Fy: S, Fu: S },
     cold_work: { Fyv: S, Fuv: S, R: L, t: L, A_corners: AR, A_flange: AR, A_total: AR },
     flange_curling: { bf: L, t: L, h: L, d: L, f_avg: S, E: S, allowable_cf: L },
+    // K4a 3a: 검토 항목 하나 — 수치 인자 없음(units 는 응답의 단위)
+    get_design_check: {},
 };
 
 /** SI 에서도 바꾸지 않는 수치 인자(무차원 · 개수 · 색인 · 각도). */
@@ -659,4 +664,5 @@ export const SI_INPUT_DIMENSIONLESS: Record<string, string[]> = {
     check_block_shear: ['Ubs', 'phi_factor', 'omega_factor'],
     cold_work: ['n_corners', 'corner_angle', 'corners_per_flange'],
     flange_curling: [],
+    get_design_check: [],
 };

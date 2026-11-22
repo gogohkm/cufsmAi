@@ -617,6 +617,11 @@ async function scenarioK4aLoadsAndLedger(ctx) {
   assert(md && md.reason === 'Load analysis inputs changed' && md.cause.action === 'analyze_loads'
     && md.result_type === 'flexure' && md.result_at && md.invalidated_at, `ledger line for the dropped design: ${JSON.stringify(md)}`);
   assert(posted(p, 'resultsLedger').length >= 1, 'the ledger is posted to the page');
+  // K4a 3b: 화면도 같은 것을 지우라는 메시지(설계 범위) — 새 하중 결과보다 먼저
+  const dri = p.__testGetPostedMessages().findIndex((x) => x.command === 'derivedResultsInvalidated');
+  const lci = p.__testGetPostedMessages().findIndex((x) => x.command === 'loadAnalysisComplete');
+  assert(dri >= 0 && dri < lci && posted(p, 'derivedResultsInvalidated')[0].data.scope === 'design',
+    'the page is told to clear the design results before the new load analysis arrives');
   // 같은 입력으로 다시: 지우지 않는다(장부 그대로, 다시 보낸다)
   await p.handleMcpAction(flex);
   p.__testClearPostedMessages();
@@ -634,6 +639,7 @@ async function scenarioK4aLoadsAndLedger(ctx) {
   const { action: _a, ...guiLoads } = { ...loads, span_ft: 30 }; void _a;
   await p.__testDispatchMessage({ command: 'analyzeLoads', data: guiLoads });
   assert.strictEqual(posted(p, 'loadAnalysisComplete').length, 1, 'GUI route posts loadAnalysisComplete exactly once');
+  assert.strictEqual(posted(p, 'derivedResultsInvalidated').length, 0, 'GUI route: the page cleared its own results on input change');
   assert.strictEqual(p.getStatus().results.member_design.result_type, 'flexure', 'GUI route keeps the design (the page invalidates on input change)');
   // 화면이 하중 칸이 바뀌었다고 알리면: 하중 분석 · 설계를 지우고 장부에(원인 = 그 메시지)
   await p.__testDispatchMessage({ command: 'invalidateDerivedResults', data: { scope: 'load' } });

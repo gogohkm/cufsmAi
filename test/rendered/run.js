@@ -421,7 +421,7 @@ async function main() {
       }
       const mcp = await startMcp(ctx.panel);
       try {
-        const viaMcp = await mcp.call('design_purlin', sent);
+        const viaMcp = await mcp.call('design_purlin', { ...sent, detail: 'full' });
         assert(!viaMcp.isError, `GUI body rejected by the MCP schema: ${String(viaMcp.text).slice(0, 300)}`);
         assert.deepStrictEqual(viaMcp.data.regions.map((g) => [g.id, g.result.utilization, g.result.pass]),
           r.regions.map((g) => [g.id, g.result.utilization, g.result.pass]), 'GUI = MCP region by region');
@@ -471,6 +471,50 @@ async function main() {
       assert(has(card, /두 부재/), 'V4-12: lap sharing assumption shown on the design screen');
       assert(!has(card, /\b120% /) || true, 'gauge label');
       await ctx.shot('r03_purlin_regions', { maxHeight: 12000 });
+    });
+
+    // ── K4a 3b: MCP 하중 해석이 입력을 바꾸면 호스트가 지운 설계 · Lap 결과가 화면에서도 사라진다(낡은 판정 없음) ──
+    await step('K4a stale design and lap cards after an MCP load analysis with other loads', async () => {
+      // 앞 단계의 상태: II-2A 하중 분석 → 퍼린 설계 카드. 랩 결과도 화면에 올린다(하중 분석이 랩 칸을 채웠다).
+      await ctx.tab('connection');
+      for (const [k, v] of Object.entries({ 'conn-fastener-type': 'screw', 'conn-fastener-dia': 0.19, 'conn-n-rows': 2,
+        'conn-edge-dist': 1.0, 'conn-lap-Pnvs': 1.2 })) {
+        await ctx.setVal(k, v);
+      }
+      let m = ctx.mark();
+      await ctx.click('#btn-run-lap-design');
+      await ctx.waitMsg('lapConnectionResult', m.h2w, 120000);
+      await ctx.settle(300);
+      assert(has(await ctx.text('#connection-result'), /종합 판정/), 'a lap verdict is on screen before');
+      await ctx.tab('design');
+      assert(has(await ctx.text('#design-summary'), /✓ OK|✗ NG|판정 없음/), 'a design verdict is on screen before');
+      const gui = [...ctx.log.w2h].reverse().find((x) => x.command === 'analyzeLoads');
+      assert(gui && gui.data && gui.data.loads, 'the page load analysis body');
+      const mcp = await startMcp(ctx.panel);
+      try {
+        m = ctx.mark();
+        const la = await mcp.call('analyze_loads', { ...gui.data, loads: { ...gui.data.loads, D: (gui.data.loads.D || 0) * 1.5 + 5 } });
+        assert(!la.isError, `MCP analyze_loads: ${String(la.text).slice(0, 300)}`);
+        await ctx.settle(600);
+        const inv = ctx.log.h2w.slice(m.h2w).filter((x) => x.command === 'derivedResultsInvalidated');
+        assert(inv.length === 1 && inv[0].data.scope === 'design', 'host tells the page what it dropped');
+        const card = await ctx.text('#design-summary');
+        const lap = await ctx.text('#connection-result');
+        await ctx.shotEl('r_k4a_stale_after_mcp_loads', '#design-summary');
+        assert(!has(card, /✓ OK|✗ NG/) && has(card, /결과 없음/), `old design verdict still on screen: ${card.split('\n')[0]}`);
+        assert(has(card, /하중 해석의 입력이 바뀌었습니다/), 'the design card says why');
+        assert(!has(lap, /종합 판정/) && has(lap, /결과 없음/), `old lap verdict still on screen: ${lap.split('\n')[0]}`);
+        assert(!has(await ctx.text('#load-analysis-result'), /결과 없음/), 'the new load analysis is shown');
+        const st = await mcp.call('get_status', {});
+        for (const kind of ['member_design', 'lap']) {
+          const e = st.data.invalidated.find((x) => x.kind === kind);
+          assert(e && e.reason === 'Load analysis inputs changed' && e.cause.action === 'analyze_loads'
+            && e.cause.inputs.includes('loads'), `ledger says why ${kind} went: ${JSON.stringify(e)}`);
+        }
+        assert(st.data.results.member_design === null && st.data.results.lap === null, 'host serves neither');
+      } finally {
+        await mcp.close();
+      }
     });
 
     // ── V4-06: 빈 칸을 숨은 기본값으로 채우지 않는다 ──────────────────────────────────────

@@ -226,6 +226,11 @@
                 updateDesignDsmStatus();
                 sendTreeUpdate();
                 break;
+            case 'derivedResultsInvalidated':
+                // K4a: 호스트가 지운 설계 · Lap 결과(MCP 하중 해석의 입력이 바뀜)를 화면에서도 — 같은 clearStaleResults.
+                clearStaleResults(msg.data && msg.data.scope === 'load' ? 'load' : 'design', (msg.data && msg.data.reason) || 'inputs changed');
+                sendTreeUpdate();
+                break;
             case 'resultsCleared':
                 // 호스트: 다른 프로젝트를 열기 직전 — 이전 프로젝트의 결과를 모두 지운다(V4-01).
                 clearStaleResults('all', (msg.data && msg.data.reason) || 'project opened');
@@ -8095,6 +8100,7 @@
             'Node deleted': '절점을 지웠습니다', 'Element modified': '요소를 고쳤습니다', 'Element deleted': '요소를 지웠습니다',
             'cFSM constraints changed': 'cFSM 구속이 바뀌었습니다', 'Stress distribution regenerated': '응력 분포를 다시 만들었습니다',
             'Saved analysis is from an older or different model state. Run analysis again.': '저장된 해석이 지금 모델과 다릅니다',
+            'Load analysis inputs changed': '하중 해석의 입력이 바뀌었습니다',
         };
         if (table[s]) { return table[s]; }
         const m = /^Load case changed: (.+)$/.exec(s);

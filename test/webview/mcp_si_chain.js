@@ -12,7 +12,7 @@
 //   - VS Code 안의 웹뷰 렌더 · 확장 활성화(extension.ts) · 등록 파일 쓰기 · 미리보기 PNG 왕복.
 //
 // 검사
-//   1. 도구 61 개의 이름이 공개 계약과 같다(K4a: get_view · focus 를 더했다).
+//   1. 도구 62 개의 이름이 공개 계약과 같다(K4a: get_view · focus · get_design_check 를 더했다).
 //   2. units 를 받는 도구의 수치 인자는 모두 SI 입력 표나 무차원 목록에 있다(중첩 포함).
 //   3. 인자 이름 = 파이썬 이름(엔진 서명 · _KNOWN_KEYS · design_member 의 params.get 키).
 //   3b. 호스트 ↔ 스키마(V4-05): StcfsdPanel.handleMcpAction 의 각 action 이 받는 인자를 소스에서 뽑아,
@@ -30,6 +30,10 @@
 //      digits 는 그대로. quantity 어휘는 엔진 표(python/design/checks.py QUANTITIES)와 siUnits 의 표가 같고, 어휘의 모든
 //      종류가 한 번 이상 지난다(실제 엔진 출력에 없는 종류는 같은 변환기에 합성 항목으로). 모르는 quantity 는 si_unconverted
 //      로 드러난다(조용히 지나가지 않는다). 퍼린 구간: 검토 지점마다의 design_checks · 위치(x) · 조합.
+//  10. K4a 3a 응답 크기: 설계 도구의 기본 응답은 요약(detail summary) — 판정 · 지배 검토 · 검토마다 한 줄 · 경고 · 가정 ·
+//      범위 · 미평가가 전체 결과와 같고, US/SI 비교는 full · checks · summary 세 수준에서. 예산: 단일 부재 · 접합 · 랩
+//      요약 ≤ 12 KB, 38 구간 퍼린 요약 ≤ 40 KB, get_design_check ≤ 20 KB(그 항목 = 전체 결과의 항목, 계산 과정 포함),
+//      지워진 결과에는 get_design_check 가 오류(장부의 까닭)로 답한다.
 // Python 환경이 없으면(.venv 없음 — CI 의 ts 작업) 3 · 6 · 7 · 8 을 건너뛰고 그렇게 출력한다.
 // STCFSD_REQUIRE_PY=1 이면 건너뛰지 않고 실패한다.
 const assert = require('assert');
@@ -57,6 +61,7 @@ const F = {
 const FACTORS = Object.values(F);
 
 const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_design_compression', 'focus', 'get_view',
+  'get_design_check',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
   'check_shear_lag', 'classify_modes', 'cold_work', 'custom_section_guide', 'delete_element', 'delete_node',
@@ -88,7 +93,7 @@ const ACTION_TOOLS = {
   check_lap_length: ['check_lap_length'], shear_lag: ['check_shear_lag'], block_shear: ['check_block_shear'],
   cold_work: ['cold_work'], flange_curling: ['flange_curling'], steel_grades: ['steel_grades'],
   lap_connection: ['design_lap_connection'], design_connection: ['design_connection', 'aisi_design_connection'],
-  get_view: ['get_view'], focus: ['focus'],
+  get_view: ['get_view'], focus: ['focus'], get_design_check: ['get_design_check'],
 };
 
 // 호스트는 받지만 MCP 도구가 일부러 내놓지 않는 인자 — 까닭과 함께(검사 3b-a 의 예외)
@@ -334,6 +339,69 @@ function checkDesignChecks(tool, us, si, seen) {
   return { n, lists };
 }
 
+// ------------------------------------------------------------------ K4a 3a: 응답의 모양
+const DESIGN_SHAPED = new Set(['aisi_design_compression', 'aisi_design_flexure', 'aisi_design_combined', 'aisi_design_tension',
+  'aisi_design_connection', 'design_connection', 'design_lap_connection', 'design_purlin']);
+const DATA_SHAPED = new Set(['generate_report', 'validate_design', 'analyze_loads', 'run_plastic_surface', 'run_vibration']);
+const KB = 1024;
+const NOTICES = ['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'force_model', 'dsm_warning', 'host_warnings'];
+const stepless = (c) => { const { steps: _s, ...x } = c; void _s; return x; };
+
+/** 요약 · 검토 목록 수준이 판정의 뜻을 바꾸지 않는다: 판정 · 지배 · 검토 줄 · 알림 · 반올림 안내가 전체 결과와 같다. */
+function checkDesignSummary(tag, level, s, full) {
+  if (Array.isArray(full.regions)) { return checkPurlinSummary(tag, level, s, full); }
+  assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
+  assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
+  for (const k of NOTICES) { if (k in full) { assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k} in full`); } }
+  if (full.display_rounding) { assert.strictEqual(s.display_rounding.note, full.display_rounding.note, `${tag}: display rounding note`); }
+  assert(/get_design_check/.test(s.more) && /detail:'full'/.test(s.more), `${tag}: more says where the rest is`);
+  const dc = Array.isArray(full.design_checks) ? full.design_checks : [];
+  assert.deepStrictEqual(s.governing_checks.map((c) => c.id), dc.filter((c) => c.governs).map((c) => c.id), `${tag}: governing checks`);
+  for (const g of s.governing_checks) {
+    const f = dc.find((c) => c.id === g.id);
+    for (const k of ['clause', 'name', 'name_ko', 'ratio', 'verdict', 'location', 'combination']) { assert.deepStrictEqual(g[k], f[k] ?? null, `${tag}: governing ${g.id}.${k}`); }
+    for (const k of ['demand', 'capacity']) { assert.deepStrictEqual(g[k] && g[k].value, f[k] ? f[k].value : null, `${tag}: governing ${g.id}.${k}`); }
+  }
+  if (level === 'summary') {
+    assert.deepStrictEqual(s.check_lines.map((c) => [c.id, c.ratio, c.verdict, c.governs === true, c.reason ?? null]),
+      dc.map((c) => [c.id, c.ratio ?? null, c.verdict, c.governs === true, c.reason || null]), `${tag}: one line per check`);
+    assert(!('design_checks' in s), `${tag}: no full items in the summary`);
+  } else {
+    assert.deepStrictEqual(s.design_checks, dc.map(stepless), `${tag}: every item without steps`);
+  }
+  if (full.fastener_design) {
+    const fd = s.fastener_design;
+    assert.deepStrictEqual(fd.pass, full.fastener_design.pass, `${tag}: fastener verdict`);
+    for (const k of NOTICES) { if (k in full.fastener_design) { assert.deepStrictEqual(fd[k], full.fastener_design[k], `${tag}.fastener_design keeps ${k}`); } }
+    if (dc.some((c) => c.part_of === 'fastener_design')) {
+      assert(!('check_lines' in fd) && /part_of/.test(fd.checks_listed_above), `${tag}: fastener checks listed once (in the lap lines)`);
+    } else {
+      checkDesignSummary(`${tag}.fastener_design`, level, { ...fd, detail: level, more: s.more }, full.fastener_design);
+    }
+  }
+}
+
+function checkPurlinSummary(tag, level, s, full) {
+  assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
+  assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
+  assert.deepStrictEqual(s.governing, full.governing, `${tag}: governing region`);
+  for (const k of ['warnings', 'assumptions', 'not_evaluated', 'load_not_evaluated', 'wc_reactions', 'uplift_reactions', 'i621_check']) {
+    assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k}`);
+  }
+  assert.strictEqual(s.regions.length, full.regions.length, `${tag}: one line per region`);
+  s.regions.forEach((line, i) => {
+    const g = full.regions[i];
+    assert.deepStrictEqual([line.id, line.kind, line.start_ft, line.end_ft, line.ratio, line.pass, line.check_point],
+      [g.id, g.kind, g.start_ft, g.end_ft, g.result.utilization ?? null, g.result.pass ?? null, g.result.check_point ?? null], `${tag}: region ${g.id}`);
+    const fails = new Set(g.result.checks.flatMap((pt) => pt.design_checks.filter((c) => c.verdict === 'fail').map((c) => c.id)));
+    assert.deepStrictEqual(new Set(line.failing), fails, `${tag}: region ${g.id} failing ids`);
+    if (level === 'checks') { assert.strictEqual(line.checks.length, g.result.checks.length, `${tag}: region ${g.id} check points`); }
+  });
+  const gov = full.regions.find((g) => g.id === (full.governing || {}).id);
+  if (gov) { assert.deepStrictEqual(s.governing_checks.map((c) => c.id), gov.result.design_checks.filter((c) => c.governs).map((c) => c.id), `${tag}: governing checks of the governing region`); }
+  assert(/get_design_check/.test(s.more) && /detail:'full'/.test(s.more), `${tag}: more`);
+}
+
 function toSIArgs(args, spec) {
   const out = {};
   for (const [k, v] of Object.entries(args)) {
@@ -426,14 +494,15 @@ async function main() {
       const r = await client.callTool({ name, arguments: args });
       const text = r.content[0].text;
       let data; try { data = JSON.parse(text); } catch { data = text; }
-      return { isError: !!r.isError, data, body: recorded[0] };
+      return { isError: !!r.isError, data, body: recorded[0], bytes: require('buffer').Buffer.byteLength(text) };
     };
 
     // 1. 도구 이름 --------------------------------------------------------------
     const tools = (await client.listTools()).tools;
     assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...PUBLIC_TOOLS].sort(), 'tool names are the public contract');
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
-    const props = (name) => Object.keys(byName[name].inputSchema.properties || {}).filter((k) => k !== 'units');
+    // units · detail 은 MCP 쪽 인자(단위 변환 · 응답 모양) — 호스트 · 엔진에 가지 않는다
+    const props = (name) => Object.keys(byName[name].inputSchema.properties || {}).filter((k) => k !== 'units' && k !== 'detail');
 
     // 2. SI 입력 표 커버리지 ------------------------------------------------------
     const isNumeric = (s) => s && (s.type === 'number' || s.type === 'integer'
@@ -699,26 +768,60 @@ async function main() {
     assert(fo.screen_moved === null && typeof fo.note === 'string' && !/moved to/.test(fo.note), 'focus reply never claims the screen moved');
 
     // 7. US / SI (실제 패널) ----------------------------------------------------------
+    // K4a 3a: 모양을 줄이는 도구는 full(전과 같은 내용) · checks · summary 세 수준을 모두 US/SI 로 맞댄다.
     const usVsSi = async (tool, usArgs, siSpec, spot, extra = {}) => {
-      const a = await call(tool, usArgs);
-      const b = await call(tool, { ...toSIArgs(usArgs, siSpec), units: 'SI' });
-      assert(!a.isError, `${tool} US: ${JSON.stringify(a.data).slice(0, 400)}`);
-      assert(!b.isError, `${tool} SI: ${JSON.stringify(b.data).slice(0, 400)}`);
-      assert.deepStrictEqual(b.body, a.body, `${tool}: SI input must reach the panel as the identical US values`);
-      const n = comparePhysical(tool, a.data, b.data, spot);
-      const dcs = checkDesignChecks(tool, a.data, b.data, QTY_SEEN);
-      if (extra.check) { extra.check(a.data, b.data); }
-      results.push(`${tool}: ${n} numeric fields converted, verdict ${JSON.stringify(a.data.pass)} = ${JSON.stringify(b.data.pass)}`
-        + (dcs.lists ? `; design_checks ${dcs.lists} lists, ${dcs.n} values by quantity` : ''));
-      return [a.data, b.data];
+      const levels = extra.levels || (DESIGN_SHAPED.has(tool) ? ['full', 'checks', 'summary'] : DATA_SHAPED.has(tool) ? ['full', 'summary'] : [undefined]);
+      let full = null;
+      for (const level of levels) {
+        const lv = level ? { detail: level } : {};
+        const tag = level ? `${tool}[${level}]` : tool;
+        const a = await call(tool, { ...usArgs, ...lv });
+        const b = await call(tool, { ...toSIArgs(usArgs, siSpec), units: 'SI', ...lv });
+        assert(!a.isError, `${tag} US: ${JSON.stringify(a.data).slice(0, 400)}`);
+        assert(!b.isError, `${tag} SI: ${JSON.stringify(b.data).slice(0, 400)}`);
+        assert.deepStrictEqual(b.body, a.body, `${tag}: SI input must reach the panel as the identical US values (detail is not sent)`);
+        const n = comparePhysical(tag, a.data, b.data, level === undefined || level === 'full' ? spot : {});
+        const dcs = checkDesignChecks(tag, a.data, b.data, QTY_SEEN);
+        if (level === undefined || level === 'full') {
+          if (extra.check) { extra.check(a.data, b.data); }
+          full = [a.data, b.data];
+        } else {
+          SIZES.push({ tool: extra.label || tool, level, us: a.bytes, si: b.bytes });
+          (extra.checkShaped || (DESIGN_SHAPED.has(tool) ? checkDesignSummary : () => {}))(tag, level, a.data, full[0]);
+        }
+        results.push(`${tag}: ${n} numeric fields converted, verdict ${JSON.stringify(a.data.pass)} = ${JSON.stringify(b.data.pass)}`
+          + (dcs.lists ? `; design_checks ${dcs.lists} lists, ${dcs.n} values by quantity` : '') + (level && level !== 'full' ? `; ${a.bytes} B` : ''));
+      }
+      return full;
     };
     const L = 'length'; const S = 'stress'; const Fo = 'force'; const M = 'moment'; const A = 'area';
     const QTY_SEEN = new Map();
+    const SIZES = [];
+    const DC_SWEEP = { n: 0, max: 0 };
+    /** 결과의 항목을 하나씩 get_design_check 로 — 그 항목(계산 과정 포함) 그대로, 20 KB 안, 하나는 SI 로 맞댄다. */
+    const sweepChecks = async (scope, fullUS, location) => {
+      // 랩: 위쪽 목록에 같은 id 로 옮겨 실은 접합 항목(part_of fastener_design)이 있으면 그것이 답이다 — 안쪽 것은 그 id 가 없을 때만.
+      const top = fullUS.design_checks || [];
+      const items = [...top, ...((fullUS.fastener_design || {}).design_checks || []).filter((c) => !top.some((t) => t.id === c.id))];
+      assert(items.length > 0, `${scope}: items to fetch`);
+      for (const item of items) {
+        const args = { scope, id: item.id, ...(location ? { location } : {}) };
+        const a = await call('get_design_check', args);
+        assert(!a.isError, `get_design_check ${scope} ${item.id}: ${JSON.stringify(a.data).slice(0, 300)}`);
+        assert.deepStrictEqual(a.data.check, item, `get_design_check ${scope} ${item.id}: the item of the current result, with its steps`);
+        assert(a.data.current === true && a.bytes <= 20 * KB, `get_design_check ${scope} ${item.id}: ${a.bytes} B (budget 20 KB)`);
+        DC_SWEEP.n++; DC_SWEEP.max = Math.max(DC_SWEEP.max, a.bytes);
+      }
+      const it = items.find((c) => Array.isArray(c.steps) && c.steps.length > 0) || items[0];
+      const b = await call('get_design_check', { scope, id: it.id, ...(location ? { location } : {}), units: 'SI' });
+      assert(!b.isError && b.data.units === 'SI', `get_design_check SI ${scope} ${it.id}`);
+      checkDesignChecks(`get_design_check ${scope}`, { design_checks: [it] }, { design_checks: [b.data.check] }, QTY_SEEN);
+    };
     await usVsSi('aisi_design_compression', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Pu: 5 },
       { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Pu: Fo },
       { Pn: Fo, design_strength: Fo, Py: Fo, 'steps[0].value': Fo, utilization: 'none' },
       { check: (u, s) => { assert(s.report.startsWith('[UNITS'), 'report labelled US'); assert.strictEqual(s.steps[0].unit, 'kN'); } });
-    await usVsSi('aisi_design_tension', { Fy: 50, Fu: 65, Tu: 10, An: 0.5 }, { Fy: S, Fu: S, Tu: Fo, An: A },
+    const [tenUS] = await usVsSi('aisi_design_tension', { Fy: 50, Fu: 65, Tu: 10, An: 0.5 }, { Fy: S, Fu: S, Tu: Fo, An: A },
       { Tn: Fo, Tn_rupture: Fo, An_used: A, design_strength: Fo });
     const [dUS] = await usVsSi('get_dsm_values', { load_type: 'P', KxLx: 120, KyLy: 60, KtLt: 60 },
       { KxLx: L, KyLy: L, KtLt: L }, { 'P.crl': Fo, 'P.cre': Fo, 'P.Lcrl': L, fy_used: S });
@@ -741,16 +844,20 @@ async function main() {
     await usVsSi('design_connection', { connection_type: 'fillet_weld', Fy: 50, Fu: 65, t1: 0.105, t2: 0.06, n: 1,
       weld_length: 3, weld_size: 0.125, Vu: 2, load_direction: 'longitudinal', member_case: 'not_tension_member',
       j6_3_not_applicable: true }, CONN, { design_strength: Fo });
-    await usVsSi('aisi_design_connection', { connection_type: 'paf', Fy: 33, Fu: 45, t1: 0.036, t2: 0.25, d: 0.145,
+    const [pafUS] = await usVsSi('aisi_design_connection', { connection_type: 'paf', Fy: 33, Fu: 45, t1: 0.036, t2: 0.25, d: 0.145,
       n: 2, e: 1.0, s: 1.0, Vu: 0.3, Fuf: 260, dw: 0.5, member_case: 'flat_sheet', Ag: 0.2, width: 4 },
     CONN, { 'limit_states[0].Rn': Fo });
-    await usVsSi('design_lap_connection', { d: 8, t: 0.059, Fy: 50, Fu: 65, lap_left_in: 24, lap_right_in: 24,
+    const [lapUS] = await usVsSi('design_lap_connection', { d: 8, t: 0.059, Fy: 50, Fu: 65, lap_left_in: 24, lap_right_in: 24,
       Mu_support: 200, Vu_support: 2, fastener_type: 'bolt', fastener_dia: 0.5, n_rows: 2, Se: 1.0, Sf: 1.1,
       Mnd: 60, Vn: 8, end_distance: 1.5, Fub: 60 },
     { d: L, t: L, Fy: S, Fu: S, lap_left_in: L, lap_right_in: L, Mu_support: M, Vu_support: Fo, fastener_dia: L,
       Se: 'modulus', Sf: 'modulus', Mnd: M, Vn: Fo, end_distance: L, Fub: S },
     { Pns: Fo, V_transfer: Fo, Mn_lap: M, spacing: L, flexure_dcr: 'none' },
     { check: (u) => { assert(u.force_model, 'lap result carries force_model (in-house assumption)'); } });
+    // K4a 3a: get_design_check — 지금 결과의 모든 항목을 하나씩(계산 과정 포함, 예산 20 KB), 하나는 SI 로도
+    await sweepChecks('member', tenUS);
+    await sweepChecks('connection', pafUS);
+    await sweepChecks('lap', lapUS);
     await usVsSi('check_lap_length', { d: 8, lap_left: 12, lap_right: 13 }, { d: L, lap_left: L, lap_right: L },
       { min_lap_in: L });
     await usVsSi('check_shear_lag', { Ag: 1.0, An_net: 0.9, x_bar: 0.5, L_conn: 4, Fu: 65, Fy: 50,
@@ -808,11 +915,12 @@ async function main() {
       assert(u.design_checks.some((c) => c.demand && c.demand.source && c.demand.source.kind === 'load_analysis'),
         'check_combination marks the demands as coming from the load analysis');
     } });
-    await usVsSi('aisi_design_combined', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Lb: 60, Pu: 3, Mux: 30,
+    const [combUS] = await usVsSi('aisi_design_combined', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Lb: 60, Pu: 3, Mux: 30,
       Muy: 2, May_strength: 20, Vu: 1, Cmx: 0.85, Cmy: 1.0 },
     { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Lb: L, Pu: Fo, Mux: M, Muy: M, May_strength: M, Vu: Fo },
     { 'flexure_x.design_strength': M, 'compression.design_strength': Fo, 'amplification.PEx': Fo,
       'amplification.Mux_amp': M, 'interaction.total': 'none', 'shear.design_strength': Fo });
+    await sweepChecks('member', combUS);
     await usVsSi('get_dsm_values', { load_type: 'Mxx', Lb: 60 }, { Lb: L },
       { 'Mxx.crl': M, 'Mxx.cre': M, 'Mxx.P_y': M, 'Mxx.Lcrl': L });
 
@@ -871,6 +979,9 @@ async function main() {
     assert(multiPoint > 0, 'some purlin region has more than one check point (V_max or a support)');
     assert(lapNotes > 0, 'a lap region carries the host lap assumption on its check points');
     results.push(`design_purlin: ${pUS.regions.length} regions, ${multiPoint} with several check points — design_checks · x · combination per point`);
+    for (const g of [pUS.regions[0], pUS.regions.find((x) => x.members === 2)].filter(Boolean)) {
+      for (const pt of g.result.checks) { await sweepChecks('purlin', { design_checks: pt.design_checks }, { region: g.id, check_point: pt.check_point }); }
+    }
     const direct = JSON.parse(JSON.stringify(await real.panel.handleMcpAction({ action: 'design_purlin', ...purlinArgs })));
     const { units: _u, ...pUSnoUnits } = pUS;
     void _u;
@@ -887,7 +998,7 @@ async function main() {
       deck: { type: 'through-fastened', t_panel: 0.018 }, i621_conditions_confirmed: true, design_method: 'LRFD',
       Fy: 50, Fu: 65, wc_N: 3.5, wc_R: 0.1875 };
     const [ohUS] = await usVsSi('design_purlin', purlinOH,
-      { ...LOAD_SI, spans_ft: 'length_ft', laps_per_support: { left_ft: 'length_ft', right_ft: 'length_ft' } }, {});
+      { ...LOAD_SI, spans_ft: 'length_ft', laps_per_support: { left_ft: 'length_ft', right_ft: 'length_ft' } }, {}, { levels: ['full'] });
     assert(findPath(ohUS, (k, v) => k === 'overhang_ft' && typeof v === 'number' && v > 0),
       'the overhang case really produces overhang_ft values (so the SI check covers them)');
 
@@ -959,6 +1070,29 @@ async function main() {
     await usVsSi('run_vibration', { rho: 7.345e-7, lengths: [10, 50, 100] }, { rho: 'density', lengths: 'length' },
       { 'rho_used.100': 'density', 'lengths[1]': 'length', 'size.n_lengths': 'none' },
       { check: (u, s) => assert.deepStrictEqual(s.frequencies, u.frequencies, 'Hz unchanged') });
+
+    // 10. K4a 3a 예산 — 38 구간 퍼린(매뉴얼 II-2A 의 6 경간) 요약, 그리고 지워진 결과의 get_design_check
+    await ok('set_section_template', { type: 'lippedz', H: 8, B: 2.25, D: 0.91, t: 0.059, r: 0.1875, qlip: 50 });
+    await ok('set_lengths', { min: 1, max: 1000, n: 30 });
+    const P38 = { member_app: 'roof-purlin', span_type: 'cont-n', span_ft: 25, spans_ft: [1, 25, 25, 25, 25, 1],
+      supports: ['N', 'P', 'P', 'P', 'P', 'P', 'N'], laps_per_support: [null, { left_ft: 0, right_ft: 0 }, { left_ft: 2.5, right_ft: 3.5 },
+        { left_ft: 1, right_ft: 1 }, { left_ft: 3.5, right_ft: 2.5 }, { left_ft: 0, right_ft: 0 }, null],
+      loads: { D: 15, Lr: 100, W: -170 }, design_method: 'ASD', spacing_ft: 5, deck: { type: 'through-fastened', kphi_override: 0.3 },
+      i621_conditions_confirmed: true, Fy: 55, Fu: 70, wc_N: 3.5, wc_R: 0.1875 };
+    const [p38] = await usVsSi('design_purlin', P38, { ...LOAD_SI, spans_ft: 'length_ft', spacing_ft: 'length_ft', deck: { kphi_override: 'rot_stiff' },
+      laps_per_support: { left_ft: 'length_ft', right_ft: 'length_ft' } }, {}, { levels: ['full', 'summary'], label: 'design_purlin 38 regions' });
+    assert(p38.regions.length >= 30, `the budget case has many regions (${p38.regions.length})`);
+    const budget = { aisi_design_compression: 12, aisi_design_flexure: 12, aisi_design_combined: 12, aisi_design_tension: 12,
+      aisi_design_connection: 12, design_connection: 12, design_lap_connection: 12, 'design_purlin 38 regions': 40, design_purlin: 40 };
+    for (const z of SIZES.filter((x) => x.level === 'summary' && budget[x.tool])) {
+      assert(Math.max(z.us, z.si) <= budget[z.tool] * KB, `budget: ${z.tool} summary ${Math.max(z.us, z.si)} B > ${budget[z.tool]} KB`);
+    }
+    results.push(`reply budgets (summary, bytes US/SI): ${SIZES.filter((x) => x.level === 'summary').map((x) => `${x.tool} ${x.us}/${x.si}`).join(', ')}`);
+    results.push(`get_design_check: ${DC_SWEEP.n} items fetched one by one, largest ${DC_SWEEP.max} B (budget 20 KB)`);
+    await ok('set_material', { E: 29500, v: 0.3 });
+    const gone = await call('get_design_check', { scope: 'purlin', id: p38.regions[0].result.design_checks[0].id, location: { region: p38.regions[0].id } });
+    assert(gone.isError && /no longer current/.test(gone.data.error) && gone.data.invalidated && gone.data.invalidated.reason === 'Material changed',
+      `a deleted result is not served — the ledger says why: ${JSON.stringify(gone.data).slice(0, 300)}`);
 
     // 9c. 실제 엔진 출력이 지난 quantity 종류(나머지는 9a 의 합성 항목으로만 — 엔진이 아직 내지 않는다)
     const realKinds = [...QTY_SEEN.keys()].sort();

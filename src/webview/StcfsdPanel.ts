@@ -1319,6 +1319,66 @@ export class StcfsdPanel implements McpPanelInterface {
         };
     }
 
+    /**
+     * get_design_check: scope 의 지금 결과에서 id 로 항목 하나. 결과가 없으면 장부(무효가 된 까닭 · 시각)와 함께 오류 —
+     * 지워진 결과의 계산 과정을 내지 않는다. 퍼린은 location.region(필수) · check_point(없으면 그 구간의 지배 지점).
+     */
+    private _designCheck(scope: any, id: any, location: any, combination: any): any {
+        if (!StcfsdPanel.CHECK_SCOPES.includes(scope)) {
+            return { error: `get_design_check: scope must be one of ${StcfsdPanel.CHECK_SCOPES.join(', ')}` };
+        }
+        if (typeof id !== 'string' || !id) { return { error: 'get_design_check: id (a design_checks id) is required' }; }
+        const kind: LedgerKind = scope === 'connection' ? 'connection' : scope === 'lap' ? 'lap' : 'member_design';
+        const d = this._lastDesignResult;
+        const isPurlin = !!d && Array.isArray(d.regions);
+        let result: any = null;
+        let at: string | null = null;
+        if (scope === 'member' && d && !isPurlin) { result = d; at = this._lastDesignAt; }
+        if (scope === 'purlin' && isPurlin) { result = d; at = this._lastDesignAt; }
+        if (scope === 'connection' && this._lastConnection) { result = this._lastConnection.result; at = this._lastConnection.at; }
+        if (scope === 'lap' && this._lastLap) { result = this._lastLap.result; at = this._lastLap.at; }
+        if (!result) {
+            const inv = this._ledgerList().filter((e) => e.kind === kind).pop() ?? null;
+            const other = scope === 'member' && isPurlin ? " The current member design is a design_purlin bundle — use scope 'purlin'."
+                : scope === 'purlin' && d && !isPurlin ? " The current member design is not a purlin design — use scope 'member'." : '';
+            return {
+                error: inv
+                    ? `The ${scope} result is no longer current: it was deleted at ${inv.invalidated_at} because ${inv.reason}`
+                        + `${inv.cause?.action ? ` (${inv.cause.action})` : inv.cause?.message ? ` (${inv.cause.message})` : ''}. `
+                        + 'No calculation trace is served from it — run the design again.' + other
+                    : `There is no current ${scope} result — run the design first.${other}`,
+                invalidated: inv,
+            };
+        }
+        const lists: Array<{ where: any; checks: any[] }> = [];
+        if (scope === 'purlin') {
+            const rid = location && typeof location === 'object' ? location.region : undefined;
+            const regions: any[] = result.regions;
+            if (typeof rid !== 'string') {
+                return { error: `get_design_check: purlin needs location.region — one of ${regions.map((g) => g.id).join(', ')}` };
+            }
+            const g = regions.find((x) => x.id === rid);
+            if (!g) { return { error: `get_design_check: no region '${rid}' — regions: ${regions.map((x) => x.id).join(', ')}` }; }
+            const pts: any[] = Array.isArray(g.result?.checks) ? g.result.checks : [];
+            const cp = typeof location.check_point === 'string' ? location.check_point : g.result?.check_point;
+            const pt = pts.find((x) => x.check_point === cp);
+            if (!pt) { return { error: `get_design_check: region '${rid}' has no check point '${cp}' — ${pts.map((x) => x.check_point).join(', ')}` }; }
+            lists.push({ where: { region: rid, check_point: cp, governing_point: cp === g.result?.check_point }, checks: pt.design_checks || [] });
+        } else {
+            lists.push({ where: null, checks: result.design_checks || [] });
+            if (scope === 'lap' && result.fastener_design) { lists.push({ where: 'fastener_design', checks: result.fastener_design.design_checks || [] }); }
+        }
+        for (const l of lists) {
+            const item = (Array.isArray(l.checks) ? l.checks : []).find((c: any) => c?.id === id
+                && (combination === undefined || combination === null || c.combination === combination));
+            if (item) {
+                return { scope, id, current: true, result_at: at, ...(l.where ? { in: l.where } : {}), check: item };
+            }
+        }
+        const known = lists.flatMap((l) => (Array.isArray(l.checks) ? l.checks : []).map((c: any) => c?.id));
+        return { error: `get_design_check: no check '${id}'${combination ? ` with combination '${combination}'` : ''} in the current ${scope} result — ids: ${known.join(', ')}` };
+    }
+
     /** focus 의 대상이 지금 결과에 있는가(check 만 본다 — 그 밖은 null). 값을 풀지 않고 id 만 찾는다. */
     private _focusTargetFound(item: ViewItem): boolean | null {
         if (item.kind !== 'check') { return null; }
@@ -3053,6 +3113,10 @@ export class StcfsdPanel implements McpPanelInterface {
                         if (this._dropDesignResults('Load analysis inputs changed', { action: 'analyze_loads', inputs: changed })) {
                             this._postLedger();
                         }
+                        // K4a 3b: 화면도 같은 것(부재 설계 · Lap)을 지운다 — 화면에 낡은 판정이 남지 않게. 새 하중 결과는 이 뒤에 간다.
+                        this._postMessage('derivedResultsInvalidated', {
+                            scope: 'design', reason: 'Load analysis inputs changed', cause: { action: 'analyze_loads', inputs: changed },
+                        });
                     }
                     this._storeLoadAnalysis(result, key);
                     // K4a: GUI 와 같은 메시지 — MCP 로 돌린 하중 분석도 화면(설계 웹뷰 · 새 검토 화면)에 보인다.
@@ -3709,6 +3773,11 @@ export class StcfsdPanel implements McpPanelInterface {
             // --- K4a: 보기 상태(docs/implementation/20261123-view-contract.md) — 모델을 바꾸지 않고 창의 포커스를 가져가지 않는다 ---
             case 'get_view': {
                 return this._viewState();
+            }
+
+            case 'get_design_check': {
+                // K4a 3a: 검토 항목 하나(계산 과정 포함)를 지금 결과에서 — 다시 계산하지 않고, 지워진 결과는 내지 않는다.
+                return this._designCheck(options.scope, options.id, options.location, options.combination);
             }
 
             case 'report_view': {

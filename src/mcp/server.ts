@@ -14,7 +14,7 @@ import * as http from "http";
 import {
     convertInputSI, convertOutputSIDeep, TEXT_UNITS_NOTE, SI_INPUT_TABLES,
     SI_OUT_MEMBER, SI_OUT_PROPS, SI_OUT_LOADS, SI_OUT_DECK, SI_OUT_VIBRATION, SI_OUT_GET_DSM,
-    SI_OUT_PURLIN, SI_OUT_REPORT, SI_OUT_VALIDATE,
+    SI_OUT_PURLIN, SI_OUT_REPORT, SI_OUT_VALIDATE, SI_OUT_DESIGN_CHECK,
     type Table,
 } from "./siUnits";
 import { connectionModeFromEnv, createHostConnection, type HostTarget } from "./hostConnection";
@@ -186,7 +186,8 @@ function textResult(text: string) {
     return isError ? { ...base, isError: true as const } : base;
 }
 
-const json = (r: any) => textResult(JSON.stringify(r, null, 2));
+// K4a 3a: 응답은 AI 의 문맥에 들어간다 — 들여쓰기 없는 JSON(같은 내용이 절반 크기).
+const json = (r: any) => textResult(JSON.stringify(r));
 
 // SI↔US 단위 변환은 ./siUnits 단일 모듈에서 import (0926 P1-7, R8-04).
 // 도구별 입력 표(SI_INPUT_TABLES)·출력 표(SI_OUT_*)도 siUnits 소유 — 이 파일에 인라인 맵 추가 금지.
@@ -194,7 +195,9 @@ type Units = 'US' | 'SI' | undefined;
 
 /** 도구 인자 → 브리지 본문. `units` 는 보내지 않고, SI 이면 표대로 US 로 바꾼다. 빠진 인자는 보내지 않는다. */
 function engineArgs(tool: string, args: Record<string, any>): Record<string, any> {
-    const { units, ...rest } = args;
+    // `detail` 은 MCP 응답의 모양(K4a 3a)이라 호스트 · 엔진에 보내지 않는다.
+    const { units, detail: _detail, ...rest } = args;
+    void _detail;
     for (const k of Object.keys(rest)) {
         if (rest[k] === undefined) { delete rest[k]; }
     }
@@ -204,12 +207,16 @@ function engineArgs(tool: string, args: Record<string, any>): Record<string, any
     return convertInputSI(rest, table);
 }
 
-/** 엔진 결과 → 도구 응답. SI 이면 표대로 SI 로 바꾸고 글의 단위를 밝힌다. */
-function unitReply(r: any, units: Units, table: Table | null) {
+/**
+ * 엔진 결과 → 도구 응답. SI 이면 표대로 SI 로 바꾸고 글의 단위를 밝힌다.
+ * K4a 3a: `shape` 가 있으면 바꾼 결과를 그 모양(요약 · 검토 목록 · 전체)으로 줄인다 — 변환은 언제나 결과 전체에 한다.
+ */
+function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, detail?: string) {
     if (!r || typeof r !== 'object' || Array.isArray(r)) { return json(r); }
-    if (units !== 'SI' || !table) { return json({ ...r, units: 'US' }); }
+    const sh = (v: any) => (shape && !v.error ? shape(v, (detail as Detail) || 'summary') : v);
+    if (units !== 'SI' || !table) { return json({ ...sh(r), units: 'US' }); }
     const { value, unconverted } = convertOutputSIDeep(r, table);
-    const out: any = { ...value, units: 'SI', text_units: 'US', units_note: TEXT_UNITS_NOTE };
+    const out: any = { ...sh(value), units: 'SI', text_units: 'US', units_note: TEXT_UNITS_NOTE };
     if (typeof out.report === 'string') {
         out.report = '[UNITS: this report text is in US customary units (in, kips, kip-in, ksi); '
             + 'the numeric fields of this response are SI]\n' + out.report;
@@ -225,8 +232,282 @@ function unitReply(r: any, units: Units, table: Table | null) {
 async function postTool(tool: string, action: string, args: Record<string, any>,
     outTable: Table | null, extra: Record<string, any> = {}) {
     const r = await callBridgePost('/action', { action, ...extra, ...engineArgs(tool, args) });
-    return unitReply(r, args.units, outTable);
+    return unitReply(r, args.units, outTable, SHAPERS[tool], args.detail);
 }
+
+// ============================================================
+// K4a 3a: 응답의 모양 — 기본은 요약. 호스트의 결과와 화면에 가는 것은 그대로(전체)이고, 줄이는 것은 MCP 글뿐이다.
+//   summary(기본) 판정 · 지배 검토 · 검토마다 한 줄 · 경고/가정/범위 전부 · 무엇을 뺐고 어디서 얻는지(more)
+//   checks        + design_checks 항목 전부(소요 · 공칭 · 설계강도, 계산 과정 steps 없이)
+//   full          엔진 · 호스트가 낸 그대로(전과 같은 내용)
+// 판정의 뜻을 바꾸는 것(미평가 까닭, 자체 가정 force_model, 표시 반올림 안내)은 요약에서도 빼지 않는다.
+// ============================================================
+type Detail = 'summary' | 'checks' | 'full';
+type Shaper = (v: any, detail: Detail) => any;
+
+/** 요약에도 늘 그대로 싣는 키 — 판정과 함께 보고해야 하는 글 · 판정의 뜻 · 단위 안내 · 반력. */
+const KEEP_ALWAYS = new Set(['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'host_warnings',
+    'dsm_warning', 'dsm_warnings', 'dsm_error', 'load_not_evaluated', 'notes', 'error', 'force_model', 'spec_sections',
+    'restart_notice', 'units', 'text_units', 'units_note', 'si_unconverted', 'si_unconverted_note', 'governing',
+    'i621_check', 'deck', 'wc_reactions', 'uplift_reactions']);
+/**
+ * 값이 이만큼(스칼라 잎의 수) 이하인 묶음은 요약에도 그대로 둔다 — 이름 붙은 작은 값(shear · positive_region …).
+ * 글자 수가 아니라 잎의 수로 정한다: US 와 SI 응답이 같은 모양이어야 한다(SI 의 수는 자리가 길다).
+ */
+const SMALL_BLOCK = 16;
+const leafCount = (v: any): number => (v === null || typeof v !== 'object' ? 1
+    : (Object.values(v) as any[]).reduce((n: number, x: any) => n + leafCount(x), 0));
+
+/**
+ * 지배 검토의 머리: id · 조항 · 이름 · 소요 · 공칭 · 계수 · 설계강도 · 비 · 판정 · 위치 · 조합(+ 까닭 · 믿지 않는 값 · 소속).
+ * 계산 과정 · 식 목록 · 출처의 세부 · 옛 값 대조는 get_design_check 에.
+ */
+function checkHead(c: any): any {
+    if (!c || typeof c !== 'object') { return c; }
+    const q = (x: any) => (x && typeof x === 'object'
+        ? { symbol: x.symbol, value: x.value, quantity: x.quantity, ...(x.source?.kind ? { source: x.source.kind } : {}) } : x ?? null);
+    const head: any = {
+        id: c.id, clause: c.clause ?? null, name: c.name ?? null, name_ko: c.name_ko ?? null,
+        demand: q(c.demand), nominal: q(c.nominal),
+        factor: c.factor && typeof c.factor === 'object' ? { symbol: c.factor.symbol, value: c.factor.value, kind: c.factor.kind } : c.factor ?? null,
+        capacity: q(c.capacity), ratio: c.ratio ?? null, verdict: c.verdict, location: c.location ?? null, combination: c.combination ?? null,
+    };
+    if (c.reason) { head.reason = c.reason; }
+    if (c.trusted === false) { head.trusted = false; }
+    if (c.part_of) { head.part_of = c.part_of; }
+    if (c.equation_used) { head.equation_used = c.equation_used; }
+    return head;
+}
+
+/** 검토 한 줄: id · 비 · 판정 · 지배(그럴 때만 governs: true), 미평가 · 해당 없음 · 믿지 않는 값이면 그 까닭. withValues = 소요 · 설계강도도. */
+function checkLine(c: any, withValues = false): any {
+    if (!c || typeof c !== 'object') { return c; }
+    const line: any = { id: c.id, ratio: c.ratio ?? null, verdict: c.verdict };
+    if (c.governs === true) { line.governs = true; }
+    if (withValues) {
+        if (c.demand) { line.demand = { symbol: c.demand.symbol, value: c.demand.value, quantity: c.demand.quantity }; }
+        if (c.capacity) { line.capacity = { symbol: c.capacity.symbol, value: c.capacity.value, quantity: c.capacity.quantity }; }
+    }
+    if (c.reason) { line.reason = c.reason; }
+    if (c.trusted === false) { line.trusted = false; }
+    if (c.counts === false) { line.counts = false; }
+    if (c.part_of) { line.part_of = c.part_of; }
+    return line;
+}
+
+/** 한 결과의 위쪽 값: 스칼라 · 늘 싣는 키 · 작은 묶음. 그 밖은 omitted 로. */
+function topLevel(r: any, skip: Set<string>, omitted: string[], prefix = ''): any {
+    const out: any = {};
+    for (const [k, v] of Object.entries(r)) {
+        if (skip.has(k)) { continue; }
+        if (k === 'report') { omitted.push(prefix + k); continue; }
+        if (k === 'display_rounding' && v && typeof v === 'object') {
+            // 판정 · 비 · design_checks 는 반올림하지 않은 값이라는 안내는 남기고, 키별 자리 표만 뺀다.
+            out[k] = { note: (v as any).note };
+            omitted.push(prefix + 'display_rounding.decimals');
+            continue;
+        }
+        if (v === null || typeof v !== 'object' || KEEP_ALWAYS.has(k) || leafCount(v) <= SMALL_BLOCK) { out[k] = v; continue; }
+        omitted.push(prefix + k);
+    }
+    return out;
+}
+
+function moreNote(scope: string, omitted: string[], detail: Detail): string {
+    const items = [...omitted, detail === 'summary' ? 'design_checks items in full' : 'design_checks[].steps'];
+    return `Left out: ${items.join(', ')}. Call the same tool again with detail:'checks' (every check with demand / nominal / capacity, no steps) `
+        + `or detail:'full' (the whole result as before), or get_design_check {scope:'${scope}', id} for one check with its calculation steps.`;
+}
+
+/** 부재 · 접합 · 랩 결과의 요약. 랩의 fastener_design(접합 결과)도 같은 규칙으로. */
+function shapeDesign(scope: string): Shaper {
+    const shape = (r: any, detail: Detail): any => {
+        if (detail === 'full' || !r || typeof r !== 'object') { return r; }
+        const omitted: string[] = [];
+        const out = topLevel(r, new Set(['design_checks', 'fastener_design']), omitted);
+        const dc: any[] = Array.isArray(r.design_checks) ? r.design_checks : [];
+        if (r.fastener_design && typeof r.fastener_design === 'object') {
+            const { more: _m, detail: _d, ...fd } = shape(r.fastener_design, detail);
+            void _m; void _d;
+            // 랩: 접합 항목이 위 목록에 part_of 'fastener_design' 으로 옮겨 실려 있으면 두 번 싣지 않는다.
+            if (dc.some((c) => c && c.part_of === 'fastener_design')) {
+                delete fd.check_lines; delete fd.governing_checks; delete fd.design_checks;
+                fd.checks_listed_above = "its checks are in this reply's lines with part_of: 'fastener_design'";
+            }
+            out.fastener_design = fd;
+        }
+        out.governing_checks = dc.filter((c) => c && c.governs === true).map(checkHead);
+        if (detail === 'checks') {
+            out.design_checks = dc.map((c) => { const { steps: _s, ...x } = c || {}; void _s; return x; });
+        } else {
+            out.check_lines = dc.map((c) => checkLine(c));
+        }
+        out.detail = detail;
+        out.more = moreNote(scope, omitted, detail);
+        return out;
+    };
+    return shape;
+}
+
+/** design_purlin 묶음의 요약: 구간마다 한 줄, 지배 구간의 지배 검토, 하중 해석은 조합 이름만. */
+function shapePurlin(r: any, detail: Detail): any {
+    if (detail === 'full' || !r || typeof r !== 'object' || !Array.isArray(r.regions)) { return r; }
+    const omitted: string[] = [];
+    const skip = new Set(['regions', 'design_positive', 'design_negative', 'design_lap', 'design_uplift', 'load_analysis',
+        'dsm_positive', 'dsm_negative', 'props', 'cutwp']);
+    const out = topLevel(r, skip, omitted);
+    for (const k of ['props', 'cutwp']) { if (k in r) { omitted.push(k); } }
+    const ids = (pts: any[], pred: (c: any) => boolean) => Array.from(new Set(pts.flatMap((pt) =>
+        (Array.isArray(pt?.design_checks) ? pt.design_checks : []).filter((c: any) => c && pred(c)).map((c: any) => c.id))));
+    out.regions = r.regions.map((g: any) => {
+        const res = g?.result || {};
+        const pts: any[] = Array.isArray(res.checks) ? res.checks : [];
+        const line: any = {
+            id: g.id, kind: g.kind, label: g.label, start_ft: g.start_ft, end_ft: g.end_ft, members: g.members,
+            combo: g.combo ?? null, Mu: g.Mu, Vu: g.Vu, Ly_in: g.Ly_in, Cb: g.Cb, R_uplift: g.R_uplift ?? null,
+            check_point: res.check_point ?? null, governing_check: res.governing_check ?? null,
+            ratio: res.utilization ?? null, pass: res.pass ?? null,
+            points: pts.map((pt) => pt.check_point),
+            failing: ids(pts, (c) => c.verdict === 'fail'),
+            not_evaluated: ids(pts, (c) => c.verdict === 'not_evaluated' && c.counts !== false),
+        };
+        if (res.error) { line.error = res.error; }
+        if (detail === 'checks') {
+            line.checks = pts.map((pt) => ({
+                check_point: pt.check_point, location: pt.location, combination: pt.combination, Mu: pt.Mu, Vu: pt.Vu,
+                utilization: pt.utilization, pass: pt.pass, ...(pt.error ? { error: pt.error } : {}),
+                ...(pt.host_assumption ? { host_assumption: pt.host_assumption } : {}),
+                design_checks: (Array.isArray(pt.design_checks) ? pt.design_checks : []).map((c: any) => checkLine(c, true)),
+            }));
+        }
+        return line;
+    });
+    const gov = r.governing && r.regions.find((g: any) => g.id === r.governing.id);
+    out.governing_checks = gov && Array.isArray(gov.result?.design_checks)
+        ? gov.result.design_checks.filter((c: any) => c && c.governs === true).map(checkHead) : [];
+    out.governing_by_kind = Object.fromEntries(['positive', 'negative', 'lap', 'uplift'].map((k) =>
+        [k, r[`design_${k}`]?.region?.id ?? null]));
+    for (const k of ['dsm_positive', 'dsm_negative']) {
+        if (r[k] && typeof r[k] === 'object') { out[k] = topLevel(r[k], new Set(), omitted, `${k}.`); }
+    }
+    if (r.load_analysis && typeof r.load_analysis === 'object') {
+        const la = r.load_analysis;
+        out.load_analysis = {
+            governing_combo: la.governing?.combo ?? null, gravity_combo: la.gravity?.combo ?? null,
+            uplift_combo: la.uplift?.combo ?? null, all_combos: la.all_combos ?? null, input_loads_plf: la.input_loads_plf ?? null,
+        };
+        omitted.push("load_analysis (diagrams, locations, auto_params, deflections — analyze_loads with the same inputs, or detail:'full')");
+    }
+    omitted.push("regions[].result (each region's full design result)",
+        'design_positive / design_negative / design_lap / design_uplift (the governing region of each kind, in full — ids in governing_by_kind)');
+    out.detail = detail;
+    out.more = `Left out: ${omitted.join('; ')}. detail:'checks' adds every check point of every region with its checks (id, demand, capacity, ratio, verdict); `
+        + "detail:'full' returns the whole bundle as before (several MB for many regions); "
+        + "get_design_check {scope:'purlin', id, location:{region, check_point}} returns one check with its calculation steps.";
+    return out;
+}
+
+/** 큰 수 배열(도표 · 포락선 · 모드 형상 · 곡면 점)을 뺀다. keep 의 키는 그대로. 뺀 경로는 omitted 로. */
+function trimNumericArrays(v: any, keep: Set<string>, omitted: Set<string>, path = '', limit = 64): any {
+    const leaves = (x: any): number => (Array.isArray(x) ? x.reduce((n: number, y: any) => n + leaves(y), 0)
+        : (typeof x === 'number' || x === null ? 1 : Number.NaN));
+    if (Array.isArray(v)) {
+        const n = leaves(v);
+        if (Number.isFinite(n)) {
+            if (n > limit) { omitted.add(path.replace(/\[\d+\]/g, '[]')); return undefined; }
+            return v;
+        }
+        return v.map((x, i) => trimNumericArrays(x, keep, omitted, `${path}[${i}]`, limit));
+    }
+    if (!v || typeof v !== 'object') { return v; }
+    const out: any = {};
+    for (const [k, x] of Object.entries(v)) {
+        const p = path ? `${path}.${k}` : k;
+        if (keep.has(k)) { out[k] = x; continue; }
+        const t = trimNumericArrays(x, keep, omitted, p, limit);
+        if (t !== undefined) { out[k] = t; }
+    }
+    return out;
+}
+
+/** 큰 데이터 응답(하중 해석 · 소성 곡면 · 진동)의 요약 — 긴 수 배열만 빼고 나머지는 그대로. */
+function shapeData(keep: string[], note: string): Shaper {
+    const k = new Set(keep);
+    return (r: any, detail: Detail): any => {
+        if (detail === 'full' || !r || typeof r !== 'object') { return r; }
+        const omitted = new Set<string>();
+        const out = trimNumericArrays(r, k, omitted);
+        if (omitted.size > 0) {
+            out.detail = 'summary';
+            out.more = `Left out (long number arrays): ${[...omitted].join(', ')}. ${note} Call again with detail:'full' for everything as before.`;
+        }
+        return out;
+    };
+}
+
+const shapeLoadsArrays = shapeData([], 'Every named location (supports, lap ends, maxima, inflection points) with its Mu / Vu / reactions, the reaction envelopes per support, the unbraced regions (auto_params) and the deflections per span are kept.');
+
+/** 하중 해석의 요약: 긴 수 배열을 빼고, 지배 조합(governing)이 중력 · 양력 결과와 같으면 그 이름만. */
+function shapeLoads(r: any, detail: Detail): any {
+    const out = shapeLoadsArrays(r, detail);
+    if (detail === 'full' || !out || typeof out !== 'object' || !out.governing) { return out; }
+    for (const k of ['gravity', 'uplift']) {
+        if (out[k] && JSON.stringify(out[k]) === JSON.stringify(out.governing)) {
+            out.governing = { same_as: k, combo: out.governing.combo ?? null };
+            break;
+        }
+    }
+    return out;
+}
+
+/** 묶음 안의 하중 해석: 조합 이름과 입력만(전체는 analyze_loads 또는 detail:'full'). */
+function loadMini(la: any): any {
+    return {
+        governing_combo: la.governing?.combo ?? null, gravity_combo: la.gravity?.combo ?? null, uplift_combo: la.uplift?.combo ?? null,
+        all_combos: la.all_combos ?? null, input_loads_plf: la.input_loads_plf ?? null, member_app: la.member_app ?? null,
+        span_type: la.span_type ?? null, spans_ft: la.spans_ft ?? null, wc_reactions: la.wc_reactions ?? null,
+        uplift_reactions: la.uplift_reactions ?? null, warnings: la.warnings ?? [], assumptions: la.assumptions ?? [],
+        scope_notes: la.scope_notes ?? [], not_evaluated: la.not_evaluated ?? [],
+    };
+}
+
+/** generate_report · validate_design: 안의 설계 결과 · 하중 해석을 같은 규칙으로. */
+function shapePacket(designKey: string, loadKey: string): Shaper {
+    return (r: any, detail: Detail): any => {
+        if (detail === 'full' || !r || typeof r !== 'object') { return r; }
+        const out: any = { ...r };
+        const d = r[designKey];
+        if (d && typeof d === 'object' && !d.error) {
+            out[designKey] = Array.isArray(d.regions) ? shapePurlin(d, detail) : shapeDesign('member')(d, detail);
+        }
+        if (r[loadKey] && typeof r[loadKey] === 'object' && !r[loadKey].error) { out[loadKey] = loadMini(r[loadKey]); }
+        out.detail = detail;
+        out.more = `${designKey} is a summary (see its own 'more') and ${loadKey} keeps only its combinations, reactions and notices `
+            + "(analyze_loads gives the load analysis, with diagrams on detail:'full'); call again with detail:'full' for the whole packet as before.";
+        return out;
+    };
+}
+
+/** 도구 → 응답 모양. 없는 도구는 결과 그대로. */
+const SHAPERS: Record<string, Shaper> = {
+    aisi_design_compression: shapeDesign('member'), aisi_design_flexure: shapeDesign('member'),
+    aisi_design_combined: shapeDesign('member'), aisi_design_tension: shapeDesign('member'),
+    aisi_design_connection: shapeDesign('connection'), design_connection: shapeDesign('connection'),
+    design_lap_connection: shapeDesign('lap'),
+    design_purlin: shapePurlin,
+    generate_report: shapePacket('design_result', 'load_analysis'),
+    validate_design: shapePacket('last_design_result', 'last_load_analysis'),
+    analyze_loads: shapeLoads,
+    run_plastic_surface: shapeData([], 'Py, M11_y, M22_y (the surface extremes), normalized and the grid sizes are kept.'),
+    run_vibration: shapeData(['frequencies', 'lengths'], 'frequencies (Hz) per length and mode are kept; only the mode shapes are left out.'),
+};
+
+// 도구 인자: 응답의 모양(호스트에 보내지 않는다)
+const DETAIL_DESIGN = z.enum(['summary', 'checks', 'full']).optional().describe("Reply size. Omit / 'summary': verdict, governing checks (id, clause, name, demand, capacity, ratio, location, combination), one line per check (id, ratio, verdict, governs, reason), warnings / assumptions / scope_notes in full and a `more` note naming what was left out. 'checks': every design_checks item with demand / nominal / capacity but no steps. 'full': the whole result as before (large). One check with its calculation steps: get_design_check.");
+const DETAIL_DATA = z.enum(['summary', 'full']).optional().describe("Reply size. Omit / 'summary': everything except long number arrays (diagrams, envelopes, mode shapes, surface points) — `more` names what was left out. 'full': everything as before (large).");
+const SUMMARY_NOTE = " The default reply is a summary (verdict, governing checks, one line per check, all warnings / assumptions / scope_notes); detail:'checks' or detail:'full' returns more, get_design_check one check with its steps.";
+const DATA_NOTE = " The default reply leaves out long number arrays (named in `more`); detail:'full' returns everything.";
+
 
 /** 패널 상태를 바꾸는 도구: 패널의 응답을 그대로 돌려준다(R8-07 — 성공 문구를 지어내지 않는다). */
 async function postState(tool: string, action: string, args: Record<string, any>) {
@@ -286,6 +567,8 @@ WORKFLOW.
 INPUTS. The tools never invent engineering input: give the design Fy, Fu, lengths, loads, thicknesses and connection geometry explicitly. If something required is missing the engine answers with an error that names it — ask the user, do not guess. Argument names are the engine's names.
 
 VERDICTS. pass=true: all applicable limit states evaluated and satisfied. pass=false: an evaluated limit state fails (wins over unevaluated items). pass=null: NO VERDICT — something applicable could not be evaluated (not_evaluated / not_checked list why). Never present null as OK. Design results also list design_checks (one item per limit state: stable id, clause, demand / capacity, ratio, verdict, calculation steps) — refer to a check by its id.
+
+REPLIES. Design tools (aisi_design_*, design_connection, design_lap_connection, design_purlin, generate_report, validate_design) answer with a summary by default: the verdict, the governing checks (id, clause, name, demand, capacity, ratio, location, combination), one line per check, and all warnings / assumptions / scope_notes / not_evaluated — report those. Ask for more only when needed: detail='checks' (every check with demand / nominal / capacity), detail='full' (everything, large), or get_design_check for one check with its calculation steps (quote the steps from there, never reconstruct them). analyze_loads, run_plastic_surface and run_vibration leave out long number arrays unless detail='full'. Each reply's "more" field says what was left out.
 
 VIEW. get_view says what the person is looking at in StCFSD (use it for "this"); focus asks the screen to show an item by the same ids. Neither changes the model; the screen may decline to follow. get_status lists results the program deleted because their inputs changed (invalidated) — re-run those, never quote their old numbers.
 
@@ -364,6 +647,23 @@ server.tool("focus",
         reason: z.string().max(200).optional().describe("Short reason shown to the person next to the item (e.g. 'governs: distortional buckling at support 2')"),
     },
     async (args) => json(await callBridgePost('/action', { action: 'focus', ...args }))
+);
+
+// K4a 3a: 검토 항목 하나를 계산 과정(steps)과 함께 — 호스트의 지금 결과에서(다시 계산하지 않는다).
+server.tool("get_design_check",
+    "One design_checks item with its full calculation trace (steps: kind, expr, equation, inputs with their sources, result) from the program's CURRENT result — nothing is recomputed. Address it like focus: scope (member | purlin | connection | lap) + the check id; for purlin give location {region, check_point} (check_point omitted → the region's governing point); for lap the nested fastener checks (conn.*) are found too. If that result was deleted because its inputs changed, the reply is an error naming why and when (from the invalidated ledger) — no stale trace is served; re-run the design.",
+    {
+        scope: z.enum(['member', 'purlin', 'connection', 'lap']).describe("Which current result: member (aisi_design_*), purlin (design_purlin), connection (design_connection / aisi_design_connection), lap (design_lap_connection)"),
+        id: z.string().min(1).max(200).describe("The design_checks id, e.g. member.flexure.distortional"),
+        location: z.record(z.string(), z.any()).optional().describe("purlin: {region: '<region id>', check_point: 'M_max' | 'V_max' | 'support <n>'} (region required)"),
+        combination: z.string().optional().describe("Only an item with this combination (when the same id appears under several combinations)"),
+        units: UNITS_MEMBER,
+    },
+    async (args) => {
+        const { units, ...rest } = args;
+        const r = await callBridgePost('/action', { action: 'get_design_check', ...rest });
+        return unitReply(r, units, SI_OUT_DESIGN_CHECK);
+    }
 );
 
 // ============================================================
@@ -745,13 +1045,14 @@ server.tool("get_cutwp", "Torsion and warping properties of the current section:
     }
 );
 
-server.tool("run_plastic_surface", "Fully plastic P–M11–M22 interaction surface of the current section. Returns normalised P, M11, M22 (null where a normalisation is undefined), raw values P_raw (kips), M11_raw/M22_raw (kip-in), Py, M11_y, M22_y, `normalized` and `warnings`.",
+server.tool("run_plastic_surface", "Fully plastic P–M11–M22 interaction surface of the current section. Returns normalised P, M11, M22 (null where a normalisation is undefined), raw values P_raw (kips), M11_raw/M22_raw (kip-in), Py, M11_y, M22_y, `normalized` and `warnings`." + DATA_NOTE,
     {
         fy: FY_DESIGN,
         n_theta: z.number().int().min(4).optional().describe("Number of neutral-axis angles (omit → engine 36)"),
         n_na: z.number().int().min(3).optional().describe("Number of neutral-axis positions (omit → engine 21)"),
         n_fibers_per_elem: z.number().int().min(1).optional().describe("Fibres per element along its length (omit → engine automatic)"),
         n_thick: z.number().int().min(1).optional().describe("Fibres through the thickness (omit → engine 10)"),
+        detail: DETAIL_DATA,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('run_plastic_surface', 'plastic', args, SI_OUT_PROPS)
@@ -761,11 +1062,12 @@ server.tool("run_vibration", "Free-vibration analysis of the current model (spri
     + "By default it uses the lengths and longitudinal terms of the buckling analysis; give `lengths` to analyse only those member lengths (non-S-S: terms chosen by m_recommend). "
     + "The panel estimates the run size first (`size`: n_lengths, terms_max, dof_max, estimate_s seconds). If the estimate exceeds about 60 s it does NOT run and returns needs_confirmation=true with that size and a message: tell the user the size and time, and only if they agree call again with confirm_large=true (or reduce the lengths). "
     + "If the estimate exceeds the host's time limit (`size.limit_s`) the run is refused even with confirmation: the reply has exceeds_limit=true and `size.lengths_that_fit` — reduce `lengths` to about that many and call again. "
-    + "Report `diagnostics` / `warnings` / `assumptions`, the density actually used (`rho_used`) and m_all_source.",
+    + "Report `diagnostics` / `warnings` / `assumptions`, the density actually used (`rho_used`) and m_all_source." + DATA_NOTE,
     {
         rho: z.number().positive().optional().describe("MASS density — kip·s²/in⁴ (steel 7.345e-7), or kg/m³ if units='SI' (steel 7850). Not weight density. Omit → the engine uses steel 7.345e-7 kip·s²/in⁴ and says so in `assumptions`."),
         lengths: z.array(z.number().positive()).optional().describe("Member lengths to analyse — in, or mm if units='SI'. Omit → the buckling analysis's lengths and terms."),
         confirm_large: z.boolean().optional().describe("Confirms a run the panel reported as large (needs_confirmation). Set it ONLY after telling the user the estimated size and time that the tool reported and the user agreed — never pre-emptively."),
+        detail: DETAIL_DATA,
         units: z.enum(['US', 'SI']).optional().describe("'US' (default: kip·s²/in⁴, in) or 'SI' (kg/m³, mm) for rho, lengths and the results."),
     },
     async (args) => postTool('run_vibration', 'vibration', args, SI_OUT_VIBRATION)
@@ -861,7 +1163,7 @@ const WC_FIELDS = {
 
 server.tool("aisi_design_compression",
     "AISI S100-16 Chapter E compression design (DSM) of the current section. " + MEMBER_NOTE
-    + "Missing effective lengths are reported (E2 not evaluated), never assumed. " + VERDICT + DESIGN_CHECKS,
+    + "Missing effective lengths are reported (E2 not evaluated), never assumed. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         design_method: DM,
         Fy: FY_DESIGN,
@@ -872,6 +1174,7 @@ server.tool("aisi_design_compression",
         Pu: z.number().optional().describe("Required axial strength (compression) — kips, or kN. Omit → capacity only."),
         Fcre: z.number().positive().optional().describe("Elastic global buckling stress from a rational analysis (sections without closed-form E2) — ksi, or MPa"),
         ...CHECK_CONTEXT,
+        detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_compression', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'compression' })
@@ -879,7 +1182,7 @@ server.tool("aisi_design_compression",
 
 server.tool("aisi_design_flexure",
     "AISI S100-16 Chapter F flexure design (DSM) of the current section, with optional §G2 shear + §H2 (give Vu), §G5 web crippling + §H3 (give wc_N, wc_R …), a separate positive-moment region (Lb_pos, Cb_pos, Mu_pos), §I6.2.1 uplift R (C/Z only) and inelastic reserve / cold work. " + MEMBER_NOTE
-    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked only when wc_N and wc_R are given and is otherwise simply absent (the GUI always sends a bearing length) — give them for any member with bearing at supports or concentrated loads. " + VERDICT + DESIGN_CHECKS,
+    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked only when wc_N and wc_R are given and is otherwise simply absent (the GUI always sends a bearing length) — give them for any member with bearing at supports or concentrated loads. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         design_method: DM,
         Fy: FY_DESIGN,
@@ -905,13 +1208,14 @@ server.tool("aisi_design_flexure",
         kphi: z.number().nonnegative().optional().describe("Rotational restraint kφ used by the analytical distortional fallback — kip-in/rad/in, or kN-m/rad/m"),
         Fcre: z.number().positive().optional().describe("Elastic LTB stress from a rational analysis (sections without closed-form F2) — ksi, or MPa"),
         ...CHECK_CONTEXT,
+        detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_flexure', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'flexure' })
 );
 
 server.tool("aisi_design_combined",
-    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS,
+    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         design_method: DM,
         Fy: FY_DESIGN,
@@ -936,13 +1240,14 @@ server.tool("aisi_design_combined",
         shear_n_webs: z.number().int().min(1).optional().describe("Number of webs resisting shear (omit → inferred)"),
         transverse_stiffeners: z.boolean().optional().describe("Web has transverse stiffeners (§G2.2 not implemented → §G2.1, conservative, with a warning)"),
         ...CHECK_CONTEXT,
+        detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_combined', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'combined' })
 );
 
 server.tool("aisi_design_tension",
-    "AISI S100-16 Chapter D tension design of the current section: D2 yielding (Ag·Fy) and D3 rupture (An·Fu). Without Fu the rupture check is not evaluated (Tn_rupture null, pass null). Without An the engine uses An = Ag and warns. " + VERDICT + DESIGN_CHECKS,
+    "AISI S100-16 Chapter D tension design of the current section: D2 yielding (Ag·Fy) and D3 rupture (An·Fu). Without Fu the rupture check is not evaluated (Tn_rupture null, pass null). Without An the engine uses An = Ag and warns. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         design_method: DM,
         Fy: FY_DESIGN,
@@ -950,6 +1255,7 @@ server.tool("aisi_design_tension",
         Tu: z.number().optional().describe("Required tensile strength — kips, or kN. Omit → capacity only."),
         An: z.number().positive().optional().describe("Net area An — in², or mm² if units='SI' (omit → Ag with a warning)"),
         ...CHECK_CONTEXT,
+        detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('aisi_design_tension', 'aisi_design', args, SI_OUT_MEMBER, { member_type: 'tension' })
@@ -1071,6 +1377,7 @@ const CONNECTION_FIELDS = {
     alpha_b: z.number().positive().optional().describe("PAF J5.3.2 bearing factor (3.2; 3.7 for Fig. J5-1(c)(d))"),
     E: z.number().positive().optional().describe("Modulus of elasticity — ksi, or MPa (arc spot, PAF; omit → 29500 ksi)"),
     ...CHECK_CONTEXT,
+    detail: DETAIL_DESIGN,
     units: UNITS_MEMBER,
 };
 
@@ -1079,7 +1386,7 @@ const CONNECTION_DESC = "AISI S100-16 Chapter J connection check (bolts J3, scre
     + "Thickness meaning: screws/PAF t1 = sheet under the head/washer, t2 = far sheet; fillet welds: any order (t = min); arc spot/seam: thinner = sheet, thicker = support. "
     + "Give the demand as Vu (shear) and/or Tu (tension). The verdict uses only properly evaluated limit states (shear_/tension_verified_* keys). Where an input the specification needs is missing (member_case, e, s, screw Pnvs/Pnts, PAF F_uh, Fy2, dw, PJP te …) the engine may still show a value computed from an assumed input, flagged assumed / governing_assumed=true: that value is a REFERENCE ONLY, gives neither PASS nor FAIL, and the missing input must be obtained from the user. "
     + "Conservative alternatives the engine used (A307 for an unknown bolt grade, minimum mf, Commentary linear J4.5 equation, tc = t2 …) are listed in assumptions — report them. "
-    + "Results: limit_states (direction shear/tension, Rn, design_strength, assumed, basis), checks, interaction_checks, detailing_checks, not_evaluated, utilization_reference. " + VERDICT + DESIGN_CHECKS;
+    + "Results: limit_states (direction shear/tension, Rn, design_strength, assumed, basis), checks, interaction_checks, detailing_checks, not_evaluated, utilization_reference. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE;
 
 /** 형식에 따라 필수인 t2 · n (엔진의 필수 입력과 같은 규칙 — 평평한 스키마로는 형식별 필수를 적을 수 없다). */
 function missingConnectionInputs(args: Record<string, any>): string | null {
@@ -1217,8 +1524,8 @@ const LOADS_SECTION_STRENGTH = {
 
 server.tool("analyze_loads",
     "Service loads → ASCE/SEI 7-10 load combinations → continuous/simple beam analysis (envelopes incl. pattern loading) → required strengths for CFS members, unbraced regions (Ly, Cb, M_max_abs per region), lap regions, reactions (R_bearing, R_uplift), web-crippling reactions, §I6.2.1 uplift R and deflections. "
-    + "Moments are kip-ft (US) — multiply by 12 for kip-in design inputs. Combinations: ASCE/SEI 7-10 §2.3.2 / §2.4.1, named by their ASCE numbers (e.g. '6a:'); a combination counts as uplift when its net factored load is upward. Read gravity / uplift / governing, auto_params (positive_regions, negative_regions with i621_region_eligible, uplift_R), uplift_reactions (combo_R_uplift), pattern_loading (patterned_loads, why), warnings, assumptions, not_evaluated (e.g. I6.4.1 anchorage). Invalid geometry (span/support count mismatch, unstable supports, cont-n without spans_ft) is an error.",
-    { ...LOAD_FIELDS, ...LOADS_SECTION_STRENGTH, units: UNITS_LOADS },
+    + "Moments are kip-ft (US) — multiply by 12 for kip-in design inputs. Combinations: ASCE/SEI 7-10 §2.3.2 / §2.4.1, named by their ASCE numbers (e.g. '6a:'); a combination counts as uplift when its net factored load is upward. Read gravity / uplift / governing, auto_params (positive_regions, negative_regions with i621_region_eligible, uplift_R), uplift_reactions (combo_R_uplift), pattern_loading (patterned_loads, why), warnings, assumptions, not_evaluated (e.g. I6.4.1 anchorage). Invalid geometry (span/support count mismatch, unstable supports, cont-n without spans_ft) is an error." + DATA_NOTE,
+    { ...LOAD_FIELDS, ...LOADS_SECTION_STRENGTH, detail: DETAIL_DATA, units: UNITS_LOADS },
     async (args) => postTool('analyze_loads', 'analyze_loads', args, SI_OUT_LOADS)
 );
 
@@ -1249,7 +1556,8 @@ server.tool("design_purlin",
     + "Each region carries its own Ly, Cb, distortional moment-gradient β (from the region's end moments, beta_dist) and members (2 inside laps: per-member Mu and strength). "
     + "Web crippling (§G5 with §H3) is checked at each support from the analysed reactions, with EOF/IOF from the support position, ONLY when the bearing length wc_N and web bend radius wc_R are given; without them it is not evaluated. "
     + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. " + VERDICT
-    + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions).",
+    + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions)."
+    + " The default reply is a summary: overall verdict, one line per region (range, kind, governing check point and check, ratio, verdict, failing / not-evaluated check ids), the governing region's governing checks, reactions, deck and §I6.2.1 data, all warnings / assumptions / not_evaluated; detail:'checks' adds every check point of every region with its checks, detail:'full' returns the whole bundle as before (several MB for many regions), get_design_check one check with its steps.",
     {
         ...LOAD_FIELDS,
         Fy: FY_DESIGN,
@@ -1263,6 +1571,7 @@ server.tool("design_purlin",
         wc_web_config: PURLIN_WC.wc_web_config, wc_support_fastener_spacing: PURLIN_WC.wc_support_fastener_spacing,
         use_inelastic_reserve: z.boolean().optional().describe("Allow §F2.4.2/§F3.2.3 inelastic reserve in the region designs where permitted (omit → false)"),
         use_cold_work: z.boolean().optional().describe("Allow §A3.3.2 cold-work increase in the region designs where permitted (omit → false)"),
+        detail: DETAIL_DESIGN,
         units: UNITS_LOADS,
     },
     async (args) => postTool('design_purlin', 'design_purlin', args, SI_OUT_PURLIN)
@@ -1271,7 +1580,7 @@ server.tool("design_purlin",
 // ============================================================
 // Report / validation
 // ============================================================
-server.tool("generate_report", "Collect the current session's section, buckling, load analysis and design into a JSON report packet (not the HTML report). Recommended: run the design with the aisi_design_* / design_purlin tools (which take the full input set) and the loads with analyze_loads first, then call generate_report WITHOUT member_type — it reports that last design and last load analysis. If member_type is given the member design is re-run with only the inputs given here (same rules as aisi_design_*: Fy required). " + VERDICT + " design_result carries the design_checks of that design (see aisi_design_flexure); model_summary is the get_status reply (US).",
+server.tool("generate_report", "Collect the current session's section, buckling, load analysis and design into a JSON report packet (not the HTML report). Recommended: run the design with the aisi_design_* / design_purlin tools (which take the full input set) and the loads with analyze_loads first, then call generate_report WITHOUT member_type — it reports that last design and last load analysis. If member_type is given the member design is re-run with only the inputs given here (same rules as aisi_design_*: Fy required). " + VERDICT + " design_result carries the design_checks of that design (see aisi_design_flexure); model_summary is the get_status reply (US)." + SUMMARY_NOTE,
     {
         member_type: z.enum(["compression", "flexure", "combined", "tension"]).optional().describe("Member type to (re)compute"),
         design_method: DM,
@@ -1292,14 +1601,16 @@ server.tool("generate_report", "Collect the current session's section, buckling,
             D: z.number().optional(), L: z.number().optional(), Lr: z.number().optional(),
             S: z.number().optional(), R: z.number().optional(), W: z.number().optional(), Wp: z.number().optional(),
         }).optional().describe("Load analysis: service line loads — plf, or kN/m (W uplift negative, Wp pressure positive)"),
+        detail: DETAIL_DESIGN,
         units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI' for inputs and numeric results (member values in, ksi, kips, kip-in ↔ mm, MPa, kN, kN-m; load values ft, plf, kip-ft ↔ m, kN/m, kN-m)."),
     },
     async (args) => postTool('generate_report', 'generate_report', args, SI_OUT_REPORT)
 );
 
-server.tool("validate_design", "Collect the current design state for validation: section properties, cutwp, current DSM values, last load analysis and last design result. This is session data, not an evaluated pass/warn/fail checklist; verdicts inside follow the pass true/false/null rule. last_design_result carries its design_checks (see aisi_design_flexure); status is the get_status reply (US).",
+server.tool("validate_design", "Collect the current design state for validation: section properties, cutwp, current DSM values, last load analysis and last design result. This is session data, not an evaluated pass/warn/fail checklist; verdicts inside follow the pass true/false/null rule. last_design_result carries its design_checks (see aisi_design_flexure); status is the get_status reply (US)." + SUMMARY_NOTE,
     {
         Fy: z.number().positive().optional().describe("Design yield stress — ksi, or MPa (passed to the panel; see its reply for what it used)"),
+        detail: DETAIL_DESIGN,
         units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI' for the numeric results"),
     },
     async (args) => postTool('validate_design', 'validate_design', args, SI_OUT_VALIDATE)
@@ -1311,7 +1622,7 @@ server.tool("validate_design", "Collect the current design state for validation:
 server.tool("design_lap_connection",
     "Lap splice of continuous C/Z purlins at a support: §I6.2.1(g) lap length, fastener demand and count, fastener strength (Chapter J engine, end distance incl. J6.1), lap flexure (§F, two members), distortional (§F4) and §H2. "
     + "IN-HOUSE ASSUMPTION (not a specification provision, §A1.2(c) rational analysis): the fastener demand is V_transfer = max(Mu/(d − t), Vu) shared equally by all fasteners — the result's `force_model` describes it; report it to the user as an assumption. "
-    + "Without Se (effective section modulus for Mnl) the lap flexure is not checked → pass null / verdict NOT_CHECKED — but do NOT send Sf without Se: the engine currently substitutes Sf for a missing Se (gross section, unconservative; F6 follow-up). Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. " + VERDICT + DESIGN_CHECKS + " The nested fastener_design has its own design_checks (conn.*).",
+    + "Without Se (effective section modulus for Mnl) the lap flexure is not checked → pass null / verdict NOT_CHECKED — but do NOT send Sf without Se: the engine currently substitutes Sf for a missing Se (gross section, unconservative; F6 follow-up). Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. " + VERDICT + DESIGN_CHECKS + " The nested fastener_design has its own design_checks (conn.*)." + SUMMARY_NOTE,
     {
         d: z.number().positive().describe("Member depth — in, or mm if units='SI'"),
         t: z.number().positive().describe("Member thickness — in, or mm"),
@@ -1339,6 +1650,7 @@ server.tool("design_lap_connection",
         hole_type: z.enum(["standard", "oversized", "short_slotted"]).optional().describe("Bolts: hole type"),
         mf: z.number().positive().optional().describe("Bolts: bearing modification factor mf (Table J3.3.1-2; omit → the minimum for the hole type, stated in assumptions)"),
         ...CHECK_CONTEXT,
+        detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
     },
     async (args) => postTool('design_lap_connection', 'lap_connection', args, SI_OUT_MEMBER)
