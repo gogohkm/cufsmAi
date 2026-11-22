@@ -6,141 +6,171 @@
     root.StcfsdDesignState = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     // ─────────────────────────────────────────────────────────────────────────
-    // 입력 칸 한 표(W3 · V4-09): .csd 저장 키, DOM id, 단위 종류, 종류.
+    // 입력 칸 한 표(W3 · V4-09 · K2-1): .csd 저장 키, DOM id, 단위 종류, 종류, 그리고 K2 의 상태 열(meta).
     // 단위 전환(app.js refreshUnits)과 저장 · 복원이 이 표 하나를 쓴다 — 단위가 있는 <input> 은
     // 반드시 여기 있어야 한다(test/webview/design_state_v13_contract.js 가 HTML 을 읽어 확인).
     // 값은 언제나 US 내부값으로 저장한다. 빈 칸은 null(= 입력 없음 — 지어낸 값이 아님, V4-06/07).
     // kind: num(수) · sel(선택) · chk(체크) · list(쉼표 목록) · raw(단위 없는 수를 표시값 그대로)
+    //
+    // meta(다섯째 열, K2-1 — 아직 아무도 쓰지 않는다. 설계: docs/implementation/20261123-k2-design.md §2):
+    //   owner  'case'   호스트의 검토 상태(CaseState)가 주인
+    //          'mirror' 다른 키의 거울(mirrorOf) — 상태에는 하나만, 1.3 모양에는 같은 값으로 쓴다
+    //          'model'  호스트 모델이 주인(해석 조건 · 템플릿 · E/ν/G) — 상태에 두 벌로 두지 않는다
+    //          'view'   보기 설정(결과에 쓰이지 않음)
+    //   group  묶음(재료 · 부재 · 하중 · 데크 · 설계 · 웹 크리플링 · 옵션 · 소성 · 진동 · 랩 · 접합 · 템플릿 · 해석)
+    //   def    처음 값 — **지금 화면의 처음 값 그대로**(손으로 정한 공학 기본값 44 개 포함, 값을 바꾸지 않는다).
+    //          단위 있는 수는 SI 화면에 적힌 수(화면이 SI 로 시작하므로) — US 값은 defaultValue() 가 화면과 같은 식
+    //          (표시값 / 계수)으로 만든다. null = 빈 칸. model 키는 null(모델에서 온다)
+    //   src    처음 값의 출처: 'page'(HTML · JS 에 적힌 값) · 'steel'(src/webview/steelGrades.ts 의 SGC400) ·
+    //          'blank' · 'model'
+    //   inv    바뀌면 무엇이 낡나(K2 의 규칙): 'load'(② 탭 — 하중 해석부터) · 'design'(① · ③ 탭) ·
+    //          'analysis-at-run'(해석 조건 — 「해석 실행」 때 호스트가) · 'connection'(④ 탭 — 결정 7, 지금 화면은 안 함: D-4) ·
+    //          'none'(보기 · 진동)
+    //   opts   선택지(sel) — 화면의 <option value> 차례 그대로(시험이 화면과 대조)
     // ─────────────────────────────────────────────────────────────────────────
+    const _C = (group, def, inv, extra) => Object.assign({ owner: 'case', group, def, src: def == null ? 'blank' : 'page', inv }, extra || {});
+    const _M = (group, inv) => ({ owner: 'model', group, def: null, src: 'model', inv });
+    const _MIR = (group, mirrorOf, inv) => ({ owner: 'mirror', group, mirrorOf, def: null, src: 'mirror', inv });
+    const _V = (def, inv) => ({ owner: 'view', group: 'view', def, src: 'page', inv: inv || 'none' });
+    const _STEEL = { src: 'steel' };
+    const STEEL_GRADE_OPTS = ['', 'SGC340', 'SGC400', 'SGC440', 'SGC490', 'SGC570', 'A653-33', 'A653-50', 'A653-80'];
     const FIELDS = [
         // 재료 · 설계 방법
-        ['fy', 'design-fy', 'stress', 'num'],
-        ['fu', 'design-fu', 'stress', 'num'],
-        ['designMethod', 'select-design-method', null, 'sel'],
-        ['memberType', 'select-member-type', null, 'sel'],
-        ['presteelGrade', 'input-steel-grade', null, 'sel'],
-        ['fyLoad', 'input-fy', 'stress', 'num'],
-        ['fuPre', 'input-fu', 'stress', 'num'],
-        ['inputE', 'input-E', 'stress', 'num'],
-        ['inputG', 'input-G', 'stress', 'num'],
-        ['inputV', 'input-v', null, 'num'],
-        ['plasticFy', 'plastic-fy', 'stress', 'num'],
+        ['fy', 'design-fy', 'stress', 'num', _C('material', 295, 'design', _STEEL)],
+        ['fu', 'design-fu', 'stress', 'num', _C('material', 400, 'design', _STEEL)],
+        ['designMethod', 'select-design-method', null, 'sel', _C('method', 'LRFD', 'design', { opts: ['LRFD', 'ASD'] })],
+        ['memberType', 'select-member-type', null, 'sel', _C('member', 'roof-purlin', 'load',
+            { opts: ['roof-purlin', 'floor-joist', 'wall-girt', 'wall-stud', 'flexure', 'compression', 'combined', 'tension'] })],
+        ['presteelGrade', 'input-steel-grade', null, 'sel', _C('material', 'SGC400', 'design', { src: 'steel', opts: STEEL_GRADE_OPTS })],
+        ['fyLoad', 'input-fy', 'stress', 'num', _MIR('material', 'fy', 'design')],
+        ['fuPre', 'input-fu', 'stress', 'num', _MIR('material', 'fu', 'design')],
+        ['inputE', 'input-E', 'stress', 'num', _M('material', 'design')],
+        ['inputG', 'input-G', 'stress', 'num', _M('material', 'design')],
+        ['inputV', 'input-v', null, 'num', _M('material', 'design')],
+        ['plasticFy', 'plastic-fy', 'stress', 'num', _MIR('plastic', 'fy', 'design')],
         // 부재 구성 (경간 표는 따로)
-        ['spanType', 'select-span-type', null, 'sel'],
-        ['nSpans', 'config-n-spans', null, 'num'],
-        ['spacing', 'config-spacing', 'length_ft', 'num'],
+        ['spanType', 'select-span-type', null, 'sel', _C('member', 'cont-3', 'load', { opts: ['simple', 'cantilever', 'cont-2', 'cont-3', 'cont-4', 'cont-n'] })],
+        ['nSpans', 'config-n-spans', null, 'num', _C('member', 5, 'load')],
+        ['spacing', 'config-spacing', 'length_ft', 'num', _C('member', 1.0, 'load')],
         // 하중
-        ['loadD', 'load-D-psf', 'pressure', 'num'],
-        ['loadLr', 'load-Lr-psf', 'pressure', 'num'],
-        ['loadS', 'load-S-psf', 'pressure', 'num'],
-        ['loadWu', 'load-Wu-psf', 'pressure', 'num'],
-        ['loadWp', 'load-Wp-psf', 'pressure', 'num'],
-        ['loadL', 'load-L-psf', 'pressure', 'num'],
-        ['chkPatternLoading', 'chk-pattern-loading', null, 'chk'],
-        ['chkLrReduced', 'chk-lr-reduced', null, 'chk'],
-        ['spanIxIn4', 'span-Ix-list', 'inertia', 'list'],
+        ['loadD', 'load-D-psf', 'pressure', 'num', _C('loads', 0.3, 'load')],
+        ['loadLr', 'load-Lr-psf', 'pressure', 'num', _C('loads', 1.0, 'load')],
+        ['loadS', 'load-S-psf', 'pressure', 'num', _C('loads', 0.5, 'load')],
+        ['loadWu', 'load-Wu-psf', 'pressure', 'num', _C('loads', 1.0, 'load')],
+        ['loadWp', 'load-Wp-psf', 'pressure', 'num', _C('loads', 0, 'load')],
+        ['loadL', 'load-L-psf', 'pressure', 'num', _C('loads', 0, 'load')],
+        ['chkPatternLoading', 'chk-pattern-loading', null, 'chk', _C('loads', true, 'load')],
+        ['chkLrReduced', 'chk-lr-reduced', null, 'chk', _C('loads', false, 'load')],
+        ['spanIxIn4', 'span-Ix-list', 'inertia', 'list', _C('loads', null, 'load')],
         // 데크 · 가새 · §I6.2.1
-        ['deckType', 'select-deck-type', null, 'sel'],
-        ['deckTPanel', 'deck-t-panel', 'thickness', 'num'],
-        ['deckFastenerSpacing', 'deck-fastener-spacing', 'length', 'num'],
-        ['deckKphiOverride', 'deck-kphi-override', 'rotStiff', 'num'],
-        ['deckKxOverride', 'deck-kx-override', 'latStiff', 'num'],
-        ['bracePointsFt', 'brace-points', 'length_ft', 'list'],
-        ['chkI621Confirmed', 'chk-i621-confirmed', null, 'chk'],
-        ['deckInsulationIn', 'deck-insulation', 'length', 'num'],
-        ['deckRTested', 'deck-R-tested', null, 'num'],
-        // 설계 길이 · 계수 · 소요강도
-        ['KxLx', 'design-KxLx', 'length', 'num'],
-        ['KyLy', 'design-KyLy', 'length', 'num'],
-        ['KtLt', 'design-KtLt', 'length', 'num'],
-        ['Lb', 'design-Lb', 'length', 'num'],
-        ['Cb', 'design-Cb', null, 'num'],
-        ['designLbPos', 'design-Lb-pos', 'length', 'num'],
-        ['designCbPos', 'design-Cb-pos', null, 'num'],
-        ['Cmx', 'design-Cmx', null, 'num'],
-        ['Cmy', 'design-Cmy', null, 'num'],
-        ['Pu', 'design-P', 'force', 'num'],
-        ['Vu', 'design-V', 'force', 'num'],
-        ['Mux', 'design-Mx', 'moment', 'num'],
-        ['designMxPos', 'design-Mx-pos', 'moment', 'num'],
-        ['Muy', 'design-My', 'moment', 'num'],
-        ['MayStrength', 'design-May-strength', 'moment', 'num'],
-        ['chkBetaDist', 'chk-beta-dist', null, 'chk'],
-        ['distM1M2', 'design-dist-M1M2', null, 'num'],
-        ['distLm', 'design-dist-Lm', 'length', 'num'],
-        ['chkRFactor', 'chk-r-factor', null, 'chk'],
-        ['rValue', 'select-r-value', null, 'sel'],
-        ['chkColdWork', 'chk-cold-work', null, 'chk'],
-        ['chkInelasticReserve', 'chk-inelastic-reserve', null, 'chk'],
+        ['deckType', 'select-deck-type', null, 'sel', _C('deck', 'none', 'load', { opts: ['through-fastened', 'standing-seam', 'none'] })],
+        ['deckTPanel', 'deck-t-panel', 'thickness', 'num', _C('deck', 0.5, 'load')],
+        ['deckFastenerSpacing', 'deck-fastener-spacing', 'length', 'num', _C('deck', 300, 'load')],
+        ['deckKphiOverride', 'deck-kphi-override', 'rotStiff', 'num', _C('deck', null, 'load')],
+        ['deckKxOverride', 'deck-kx-override', 'latStiff', 'num', _C('deck', null, 'load')],
+        ['bracePointsFt', 'brace-points', 'length_ft', 'list', _C('deck', null, 'load')],
+        ['chkI621Confirmed', 'chk-i621-confirmed', null, 'chk', _C('deck', false, 'load')],
+        ['deckInsulationIn', 'deck-insulation', 'length', 'num', _C('deck', null, 'load')],
+        ['deckRTested', 'deck-R-tested', null, 'num', _C('deck', null, 'load')],
+        // 설계 길이 · 계수 · 소요강도 (소요강도 칸은 ② 탭에 있다 — 바꾸면 하중 해석부터 낡는다: 지금 규칙)
+        ['KxLx', 'design-KxLx', 'length', 'num', _C('design', 3000, 'design')],
+        ['KyLy', 'design-KyLy', 'length', 'num', _C('design', 3000, 'design')],
+        ['KtLt', 'design-KtLt', 'length', 'num', _C('design', 3000, 'design')],
+        ['Lb', 'design-Lb', 'length', 'num', _C('design', 3000, 'design')],
+        ['Cb', 'design-Cb', null, 'num', _C('design', 1.0, 'design')],
+        ['designLbPos', 'design-Lb-pos', 'length', 'num', _C('design', 0, 'design')],
+        ['designCbPos', 'design-Cb-pos', null, 'num', _C('design', 1.0, 'design')],
+        ['Cmx', 'design-Cmx', null, 'num', _C('design', 1.00, 'design')],
+        ['Cmy', 'design-Cmy', null, 'num', _C('design', 1.00, 'design')],
+        ['Pu', 'design-P', 'force', 'num', _C('required', 0, 'load')],
+        ['Vu', 'design-V', 'force', 'num', _C('required', 0, 'load')],
+        ['Mux', 'design-Mx', 'moment', 'num', _C('required', 0, 'load')],
+        ['designMxPos', 'design-Mx-pos', 'moment', 'num', _C('required', 0, 'load')],
+        ['Muy', 'design-My', 'moment', 'num', _C('required', 0, 'load')],
+        ['MayStrength', 'design-May-strength', 'moment', 'num', _C('required', 0, 'load')],
+        ['chkBetaDist', 'chk-beta-dist', null, 'chk', _C('options', true, 'design')],
+        ['distM1M2', 'design-dist-M1M2', null, 'num', _C('options', 0, 'design')],
+        ['distLm', 'design-dist-Lm', 'length', 'num', _C('options', 0, 'design')],
+        ['chkRFactor', 'chk-r-factor', null, 'chk', _C('options', false, 'design')],
+        // §I6.2.1 R: 선택지 둘이 같은 값 0.70(단순 · 연속)이다 — 값만으로는 경간 조건을 모른다(결함 D-1). optSpan 이 그 정체.
+        ['rValue', 'select-r-value', null, 'sel', _C('options', '0', 'design', {
+            opts: ['0', '0.70', '0.65', '0.50', '0.40', '0.60', '0.70'],
+            optSpan: [null, 'simple', 'simple', 'simple', 'simple', 'continuous', 'continuous'] })],
+        ['chkColdWork', 'chk-cold-work', null, 'chk', _C('options', true, 'design')],
+        ['chkInelasticReserve', 'chk-inelastic-reserve', null, 'chk', _C('options', false, 'design')],
         // 웹 크리플링
-        ['wcN', 'design-wc-N', 'length', 'num'],
-        ['wcR', 'design-wc-R', 'length', 'num'],
-        ['wcP', 'design-wc-P', 'force', 'num'],
-        ['wcSupport', 'design-wc-support', null, 'sel'],
-        ['wcFastened', 'design-wc-fastened', null, 'sel'],
-        ['wcWebConfig', 'design-wc-web-config', null, 'sel'],
-        ['wcFamily', 'design-wc-family', null, 'sel'],
-        ['wcFlangeCondition', 'design-wc-flange-condition', null, 'sel'],
-        ['wcLo', 'design-wc-Lo', 'length', 'num'],
-        ['wcEdgeDistance', 'design-wc-edge-distance', 'length', 'num'],
-        ['wcNWebs', 'design-wc-nwebs', null, 'num'],
-        ['wcFastenerSpacing', 'design-wc-fastener-spacing', 'length', 'num'],
-        // 템플릿
-        ['templateType', 'select-template', null, 'sel'],
-        ['tplH', 'tpl-H', 'length', 'num'],
-        ['tplB', 'tpl-B', 'length', 'num'],
-        ['tplD', 'tpl-D', 'length', 'num'],
-        ['tplT', 'tpl-t', 'thickness', 'num'],
-        ['tplR', 'tpl-r', 'radius', 'num'],
-        ['tplQlip', 'tpl-qlip', null, 'num'],
-        // 해석 탭
-        ['analysisBC', 'select-bc', null, 'sel'],
-        ['analysisLoadCase', 'select-load-case', null, 'sel'],
-        ['analysisNeigs', 'input-neigs', null, 'num'],
-        ['analysisLenMin', 'input-len-min', 'length', 'num'],
-        ['analysisLenMax', 'input-len-max', 'length', 'num'],
-        ['analysisLenN', 'input-len-n', null, 'num'],
-        ['analysisLoadPUs', 'input-load-P', 'force', 'num'],
-        ['analysisLoadMxxUs', 'input-load-Mxx', 'moment', 'num'],
-        ['analysisLoadMzzUs', 'input-load-Mzz', 'moment', 'num'],
-        ['chkCfsmEnable', 'chk-cfsm-enable', null, 'chk'],
-        ['chkCfsmG', 'chk-cfsm-G', null, 'chk'],
-        ['chkCfsmD', 'chk-cfsm-D', null, 'chk'],
-        ['chkCfsmL', 'chk-cfsm-L', null, 'chk'],
-        ['chkCfsmO', 'chk-cfsm-O', null, 'chk'],
-        ['vibRho', 'vib-rho', 'density', 'num'],
-        ['vibLengths', 'vib-lengths', 'length', 'list'],
+        ['wcN', 'design-wc-N', 'length', 'num', _C('webCrippling', 89, 'design')],
+        ['wcR', 'design-wc-R', 'length', 'num', _C('webCrippling', 4.8, 'design')],
+        ['wcP', 'design-wc-P', 'force', 'num', _C('webCrippling', null, 'design')],
+        ['wcSupport', 'design-wc-support', null, 'sel', _C('webCrippling', 'EOF', 'design', { opts: ['EOF', 'IOF', 'ETF', 'ITF'] })],
+        ['wcFastened', 'design-wc-fastened', null, 'sel', _C('webCrippling', 'fastened', 'design', { opts: ['fastened', 'unfastened'] })],
+        ['wcWebConfig', 'design-wc-web-config', null, 'sel', _C('webCrippling', 'single', 'design', { opts: ['single', 'nested_z', 'multi_web'] })],
+        ['wcFamily', 'design-wc-family', null, 'sel', _C('webCrippling', 'auto', 'design', { opts: ['auto', 'built_up_i', 'C', 'Z', 'hat', 'multi_web'] })],
+        ['wcFlangeCondition', 'design-wc-flange-condition', null, 'sel', _C('webCrippling', 'stiffened', 'design', { opts: ['stiffened', 'unstiffened'] })],
+        ['wcLo', 'design-wc-Lo', 'length', 'num', _C('webCrippling', 0, 'design')],
+        ['wcEdgeDistance', 'design-wc-edge-distance', 'length', 'num', _C('webCrippling', 0, 'design')],
+        ['wcNWebs', 'design-wc-nwebs', null, 'num', _C('webCrippling', 1, 'design')],
+        ['wcFastenerSpacing', 'design-wc-fastener-spacing', 'length', 'num', _C('webCrippling', 0, 'design')],
+        // 템플릿 (모델 — 「생성」 때 모델로, 모델이 오면 칸이 따라온다)
+        ['templateType', 'select-template', null, 'sel', _M('template', 'design')],
+        ['tplH', 'tpl-H', 'length', 'num', _M('template', 'design')],
+        ['tplB', 'tpl-B', 'length', 'num', _M('template', 'design')],
+        ['tplD', 'tpl-D', 'length', 'num', _M('template', 'design')],
+        ['tplT', 'tpl-t', 'thickness', 'num', _M('template', 'design')],
+        ['tplR', 'tpl-r', 'radius', 'num', _M('template', 'design')],
+        ['tplQlip', 'tpl-qlip', null, 'num', _M('template', 'design')],
+        // 해석 탭 (모델 — 「해석 실행」 때 모델로)
+        ['analysisBC', 'select-bc', null, 'sel', _M('analysis', 'analysis-at-run')],
+        ['analysisLoadCase', 'select-load-case', null, 'sel', _M('analysis', 'analysis-at-run')],
+        ['analysisNeigs', 'input-neigs', null, 'num', _M('analysis', 'analysis-at-run')],
+        ['analysisLenMin', 'input-len-min', 'length', 'num', _M('analysis', 'analysis-at-run')],
+        ['analysisLenMax', 'input-len-max', 'length', 'num', _M('analysis', 'analysis-at-run')],
+        ['analysisLenN', 'input-len-n', null, 'num', _M('analysis', 'analysis-at-run')],
+        ['analysisLoadPUs', 'input-load-P', 'force', 'num', _M('analysis', 'analysis-at-run')],
+        ['analysisLoadMxxUs', 'input-load-Mxx', 'moment', 'num', _M('analysis', 'analysis-at-run')],
+        ['analysisLoadMzzUs', 'input-load-Mzz', 'moment', 'num', _M('analysis', 'analysis-at-run')],
+        ['chkCfsmEnable', 'chk-cfsm-enable', null, 'chk', _V(true)],
+        ['chkCfsmG', 'chk-cfsm-G', null, 'chk', _V(true)],
+        ['chkCfsmD', 'chk-cfsm-D', null, 'chk', _V(true)],
+        ['chkCfsmL', 'chk-cfsm-L', null, 'chk', _V(true)],
+        ['chkCfsmO', 'chk-cfsm-O', null, 'chk', _V(true)],
+        ['vibRho', 'vib-rho', 'density', 'num', _C('vibration', null, 'none')],
+        ['vibLengths', 'vib-lengths', 'length', 'list', _C('vibration', null, 'none')],
         // 접합부 탭
-        ['connFastenerType', 'conn-fastener-type', null, 'sel'],
-        ['connSingleType', 'conn-single-type', null, 'sel'],
-        ['connGrooveType', 'conn-groove-type', null, 'sel'],
-        ['connLapLeft', 'conn-lap-left', 'length', 'num'],
-        ['connLapRight', 'conn-lap-right', 'length', 'num'],
-        ['connMu', 'conn-Mu', 'moment', 'num'],
-        ['connVu', 'conn-Vu', 'force', 'num'],
-        ['connFastenerDia', 'conn-fastener-dia', 'length', 'num'],
-        ['connNRows', 'conn-n-rows', null, 'num'],
-        ['connEdgeDist', 'conn-edge-dist', 'length', 'num'],
-        ['connLapPnvs', 'conn-lap-Pnvs', 'force', 'num'],
-        ['connT1', 'conn-t1', 'thickness', 'num'],
-        ['connT2', 'conn-t2', 'thickness', 'num'],
-        ['connD', 'conn-d', 'length', 'num'],
-        ['connN', 'conn-n', null, 'num'],
-        ['connFy', 'conn-Fy', 'stress', 'num'],
-        ['connFu', 'conn-Fu', 'stress', 'num'],
-        ['connWeldL', 'conn-weld-L', 'length', 'num'],
-        ['connWeldSize', 'conn-weld-size', 'length', 'num'],
-        ['connFub', 'conn-Fub', 'stress', 'num'],
-        ['connFuf', 'conn-Fuf', 'stress', 'num'],
-        ['connPnvs', 'conn-Pnvs', 'force', 'num'],
-        ['connDw', 'conn-dw', 'length', 'num'],
-        ['connPu', 'conn-Pu', 'force', 'num'],
-        ['connTu', 'conn-Tu', 'force', 'num'],
-        ['connE', 'conn-e', 'length', 'num'],
-        ['connS', 'conn-s', 'length', 'num'],
-        ['connMemberCase', 'conn-member-case', null, 'sel'],
-        ['connWidth', 'conn-width', 'length', 'num'],
-        ['connJ63NotApplicable', 'conn-j63-na', null, 'chk'],
+        ['connFastenerType', 'conn-fastener-type', null, 'sel', _C('lap', 'screw', 'connection', { opts: ['screw', 'bolt'] })],
+        ['connSingleType', 'conn-single-type', null, 'sel', _C('connection', 'screw', 'connection',
+            { opts: ['screw', 'bolt', 'paf', 'fillet_weld', 'arc_spot', 'arc_seam', 'groove'] })],
+        ['connGrooveType', 'conn-groove-type', null, 'sel', _C('connection', 'complete', 'connection', { opts: ['complete', 'partial'] })],
+        ['connLapLeft', 'conn-lap-left', 'length', 'num', _C('lap', 305, 'connection')],
+        ['connLapRight', 'conn-lap-right', 'length', 'num', _C('lap', 305, 'connection')],
+        ['connMu', 'conn-Mu', 'moment', 'num', _C('lap', 0, 'connection')],
+        ['connVu', 'conn-Vu', 'force', 'num', _C('lap', 0, 'connection')],
+        ['connFastenerDia', 'conn-fastener-dia', 'length', 'num', _C('lap', 4.8, 'connection')],
+        ['connNRows', 'conn-n-rows', null, 'num', _C('lap', 2, 'connection')],
+        ['connEdgeDist', 'conn-edge-dist', 'length', 'num', _C('lap', null, 'connection')],
+        ['connLapPnvs', 'conn-lap-Pnvs', 'force', 'num', _C('lap', null, 'connection')],
+        ['connT1', 'conn-t1', 'thickness', 'num', _C('connection', 1.5, 'connection')],
+        ['connT2', 'conn-t2', 'thickness', 'num', _C('connection', 1.5, 'connection')],
+        ['connD', 'conn-d', 'length', 'num', _C('connection', 4.8, 'connection')],
+        ['connN', 'conn-n', null, 'num', _C('connection', 4, 'connection')],
+        // 접합 Fy · Fu: ① 재료가 바뀔 때 복사되고 그 뒤로는 따로(사람이 고칠 수 있다) — 상태에서는 따로 둔다(followsWhileMirror)
+        ['connFy', 'conn-Fy', 'stress', 'num', _C('connection', 295, 'connection', { src: 'steel', follows: 'fy' })],
+        ['connFu', 'conn-Fu', 'stress', 'num', _C('connection', 400, 'connection', { src: 'steel', follows: 'fu' })],
+        ['connWeldL', 'conn-weld-L', 'length', 'num', _C('connection', 50, 'connection')],
+        ['connWeldSize', 'conn-weld-size', 'length', 'num', _C('connection', 3, 'connection')],
+        ['connFub', 'conn-Fub', 'stress', 'num', _C('connection', null, 'connection')],
+        ['connFuf', 'conn-Fuf', 'stress', 'num', _C('connection', null, 'connection')],
+        ['connPnvs', 'conn-Pnvs', 'force', 'num', _C('connection', null, 'connection')],
+        ['connDw', 'conn-dw', 'length', 'num', _C('connection', null, 'connection')],
+        ['connPu', 'conn-Pu', 'force', 'num', _C('connection', 0, 'connection')],
+        ['connTu', 'conn-Tu', 'force', 'num', _C('connection', null, 'connection')],
+        ['connE', 'conn-e', 'length', 'num', _C('connection', null, 'connection')],
+        ['connS', 'conn-s', 'length', 'num', _C('connection', null, 'connection')],
+        ['connMemberCase', 'conn-member-case', null, 'sel', _C('connection', '', 'connection', {
+            src: 'page', opts: ['', 'not_tension_member', 'flat_sheet', 'flat_sheet_staggered', 'angle_bolted', 'angle_welded',
+                'channel_bolted', 'channel_welded', 'all_elements', 'transverse_weld'] })],
+        ['connWidth', 'conn-width', 'length', 'num', _C('connection', null, 'connection')],
+        ['connJ63NotApplicable', 'conn-j63-na', null, 'chk', _C('connection', false, 'connection')],
     ];
 
     /**
@@ -179,6 +209,168 @@
         FIELDS.forEach(([, id, unit]) => { if (unit) { out[id] = unit; } });
         return out;
     })();
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // K2-1 — 상태 표의 순수 함수(아직 화면 · 호스트 어디서도 부르지 않는다). 설계 §2 · §4.2.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * 화면의 단위 계수(US × 계수 = SI) — webview/js/app.js 의 UNIT 표와 **같은 식**이다(test/webview/k2_case_state.js 가
+     * app.js 의 그 줄을 읽어 바이트까지 대조한다). 처음 값의 US 값을 화면과 같은 double 로 만들려고 둔다.
+     */
+    const _KIP_KN = 4.4482216152605, _IN_MM = 25.4, _IN_M = 0.0254, _FT_M = 0.3048;
+    const UNIT_FACTORS = {
+        length: 25.4, length_ft: 0.3048, area: _IN_MM * _IN_MM, inertia: Math.pow(_IN_MM, 4), modulus: Math.pow(_IN_MM, 3),
+        stress: _KIP_KN * 1000 / (_IN_MM * _IN_MM), force: _KIP_KN, moment: _KIP_KN * _IN_M, moment_ft: _KIP_KN * _FT_M,
+        pressure: _KIP_KN / 1000 / (_FT_M * _FT_M), linload: _KIP_KN / 1000 / _FT_M, thickness: 25.4, radius: 25.4,
+        rotStiff: _KIP_KN, latStiff: _KIP_KN / (_IN_M * _IN_M), density: _KIP_KN * 1000 / Math.pow(_IN_M, 4),
+    };
+    /** 화면의 fromDisplay 와 같은 식: SI 표시값 → US */
+    function siToUs(v, unit) { return unit && UNIT_FACTORS[unit] ? v / UNIT_FACTORS[unit] : v; }
+
+    const _BY_KEY = new Map(FIELDS.map((r) => [r[0], r]));
+    const _OWNERS = ['case', 'mirror', 'model', 'view'];
+    /** 소유별 키 */
+    const KEYS = {};
+    _OWNERS.forEach((o) => { KEYS[o] = FIELDS.filter((r) => r[4].owner === o).map((r) => r[0]); });
+
+    /** 키의 표 한 줄 { key, id, unit, kind, ...meta } (없으면 null) */
+    function fieldMeta(key) {
+        const r = _BY_KEY.get(key);
+        return r ? Object.assign({ key: r[0], id: r[1], unit: r[2], kind: r[3] }, r[4]) : null;
+    }
+
+    /**
+     * 키의 처음 값(US 내부값) — 지금 화면이 처음 열렸을 때 collectDesignInputs 가 읽는 값과 같다(SI 화면의 칸 글을
+     * 화면과 같은 식으로 바꾼 것). model 키는 null(모델에서 온다), mirror 키는 그 주인의 값.
+     */
+    function defaultValue(key) {
+        const m = fieldMeta(key);
+        if (!m) { return undefined; }
+        if (m.owner === 'mirror') { return defaultValue(m.mirrorOf); }
+        if (m.def == null) { return null; }
+        if (m.kind === 'num') { return siToUs(m.def, m.unit); }
+        if (m.kind === 'list') { return m.def.map((v) => siToUs(v, m.unit)); }
+        return m.def;
+    }
+
+    /** 경간 수 — 화면 getSpanCount 와 같은 규칙 */
+    function spanCount(spanType, nSpans) {
+        if (spanType === 'simple' || spanType === 'cantilever') { return 1; }
+        if (spanType === 'cont-n') { return Number(nSpans); }
+        const m = /cont-(\d+)/.exec(String(spanType || ''));
+        return m ? parseInt(m[1], 10) : 1;
+    }
+
+    /**
+     * 경간 표의 처음 값 — 화면 buildSpanTable 과 같은 규칙(경간 5 m, 지점 P(캔틸레버 F · N), 랩 0, 단순 · 캔틸레버는 랩 칸 없음).
+     * 값은 collectDesignInputs 의 모양(ft, 없는 칸은 null). 화면은 경간 칸을 그때의 단위로 소수 둘째 자리까지 적으므로
+     * (toFixed(2)) 처음 경간은 SI 화면에서 5.00 m, US 화면에서 16.40 ft 다 — unitSystem 이 그 차이를 그대로 만든다.
+     */
+    function defaultSpanTable(spanType, nSpans, unitSystem) {
+        const n = spanCount(spanType, nSpans);
+        const isSimple = spanType === 'simple' || spanType === 'cantilever';
+        // 화면: toDisplay(5.0 / 0.3048, 'length_ft').toFixed(2) — SI '5.00' → 5 / 0.3048 ft, US '16.40' → 16.4 ft
+        const span = unitSystem === 'US' ? Number((5.0 / UNIT_FACTORS.length_ft).toFixed(2)) : siToUs(Number((5.0).toFixed(2)), 'length_ft');
+        const spans = [], supports = [], lapsPerSupport = [];
+        for (let i = 0; i <= n; i++) {
+            if (i < n) { spans.push(span); }
+            supports.push(spanType === 'cantilever' ? (i === 0 ? 'F' : 'N') : 'P');
+            lapsPerSupport.push({ left: (i > 0 && !isSimple) ? 0 : null, right: (i < n && !isSimple) ? 0 : null });
+        }
+        return { spans, supports, lapsPerSupport };
+    }
+
+    /**
+     * 처음 입력 한 벌(1.3 의 designInputs 모양, US) — case · mirror · view 키는 표의 처음 값, model 키는 null.
+     * 화면의 `_initialInputs`(처음 열었을 때 collectDesignInputs) 와 model 키 · unitSystem 을 빼고 같다.
+     */
+    function defaultInputs() {
+        const out = { unitSystem: 'SI', analysisMethod: 'DSM' };
+        for (const [key] of FIELDS) { out[key] = defaultValue(key); }
+        Object.assign(out, defaultSpanTable(out.spanType, out.nSpans));
+        return out;
+    }
+
+    /** 화면의 지금 입력(= collectDesignInputs — K2 의 이름). */
+    function snapshot(deps) { return collectDesignInputs(deps); }
+
+    const _SPAN_KEYS = ['spans', 'supports', 'lapsPerSupport'];
+    /**
+     * 두 입력 묶음의 다른 키 → { key: 새 값 }. 표의 키 · 경간 표 셋 · unitSystem 을 본다(analysisMethod 는 늘 'DSM').
+     * 값은 JSON 으로 비교한다(배열 · 랩 객체 포함, NaN 은 null 로 본다 — 화면의 목록 칸 규칙).
+     */
+    function diff(last, now) {
+        const a = last || {}, b = now || {};
+        const out = {};
+        const keys = FIELDS.map((r) => r[0]).concat(_SPAN_KEYS, ['unitSystem']);
+        for (const k of keys) {
+            if (!(k in b)) { continue; }
+            if (JSON.stringify(a[k] === undefined ? null : a[k]) !== JSON.stringify(b[k] === undefined ? null : b[k])) { out[k] = b[k]; }
+        }
+        return out;
+    }
+
+    /**
+     * 선택 칸에 들어온 글 → 선택지 값. 정확히 같으면 그것, 아니면 수로 같은 첫 선택지(결함 D-2: 화면이 '0.7' 을 넣어
+     * '0.70' 이 골리지 않는다). 없으면 null.
+     */
+    function matchOption(key, value) {
+        const m = fieldMeta(key);
+        if (!m || !m.opts) { return null; }
+        const s = String(value);
+        if (m.opts.includes(s)) { return s; }
+        const n = Number(s);
+        if (s.trim() !== '' && isFinite(n)) { const hit = m.opts.find((o) => o.trim() !== '' && Number(o) === n); if (hit !== undefined) { return hit; } }
+        return null;
+    }
+
+    /**
+     * 값 하나의 검사(키 · 종류 · 선택지). 반환 null = 괜찮음, 아니면 까닭(사람이 읽는 글 — 화면 · MCP 가 그대로 쓴다).
+     * opts.owners: 받을 소유(기본 ['case'] — model · view 키는 이 길로 쓰지 않는다).
+     */
+    function validateValue(key, value, opts) {
+        const owners = (opts && opts.owners) || ['case'];
+        const m = fieldMeta(key);
+        if (!m) { return `모르는 입력 키 '${key}'`; }
+        if (!owners.includes(m.owner)) { return `'${key}' 은(는) ${m.owner} 소유라 이 길로 쓸 수 없다`; }
+        if (value === null) { return (m.kind === 'chk' || m.kind === 'sel') ? `'${key}' 는 비울 수 없다(${m.kind === 'chk' ? 'true/false' : '선택지'})` : null; }
+        if (m.kind === 'num') { return (typeof value === 'number' && isFinite(value)) ? null : `'${key}' 는 수여야 한다`; }
+        if (m.kind === 'chk') { return typeof value === 'boolean' ? null : `'${key}' 는 true/false 여야 한다`; }
+        if (m.kind === 'sel' && !m.opts) { return typeof value === 'string' ? null : `'${key}' 는 글이어야 한다`; }
+        if (m.kind === 'sel') { return (typeof value === 'string' && m.opts.includes(value)) ? null : `'${key}' 의 선택지가 아니다: ${JSON.stringify(value)} (가능: ${m.opts.map((o) => JSON.stringify(o)).join(', ')})`; }
+        if (m.kind === 'list') { return (Array.isArray(value) && value.every((v) => typeof v === 'number' && isFinite(v))) ? null : `'${key}' 는 수의 목록이어야 한다`; }
+        return `'${key}' 의 종류 ${m.kind} 를 검사할 수 없다`;
+    }
+
+    /** 경간 표 검사(경간 수 = spanType · nSpans 로 정해지는 수, 지점 P · R · F · N, 랩 { left, right }). 반환: 까닭 목록 */
+    function validateSpanTable(t, spanType, nSpans) {
+        const errs = [];
+        const n = spanCount(spanType, nSpans);
+        if (!t || !Array.isArray(t.spans) || t.spans.length !== n) { errs.push(`경간 길이는 ${n} 개여야 한다`); }
+        else if (!t.spans.every((v) => v === null || (typeof v === 'number' && isFinite(v)))) { errs.push('경간 길이는 수(ft) 또는 빈 칸'); }
+        if (!t || !Array.isArray(t.supports) || t.supports.length !== n + 1) { errs.push(`지점은 ${n + 1} 개여야 한다`); }
+        else if (!t.supports.every((s) => ['P', 'R', 'F', 'N'].includes(s))) { errs.push('지점은 P · R · F · N'); }
+        if (!t || !Array.isArray(t.lapsPerSupport) || t.lapsPerSupport.length !== n + 1) { errs.push(`지점별 랩은 ${n + 1} 개여야 한다`); }
+        else if (!t.lapsPerSupport.every((l) => l && ['left', 'right'].every((s) => l[s] === null || (typeof l[s] === 'number' && isFinite(l[s]))))) {
+            errs.push('지점별 랩은 { left, right } (ft 또는 null)');
+        }
+        return errs;
+    }
+
+    /** 바뀐 키들이 낡게 하는 결과의 가장 넓은 범위 — 'none' < 'connection' < 'design' < 'load' (+ 'analysis-at-run' 은 따로) */
+    function invalidationScope(keys) {
+        const rank = { none: 0, 'analysis-at-run': 0, connection: 1, design: 2, load: 3 };
+        let best = 'none';
+        let atRun = false;
+        for (const k of keys || []) {
+            const m = fieldMeta(k);
+            let inv = m ? m.inv : (_SPAN_KEYS.includes(k) ? 'load' : 'none');
+            if (inv === 'analysis-at-run') { atRun = true; inv = 'none'; }
+            if (rank[inv] > rank[best]) { best = inv; }
+        }
+        return { scope: best, analysisAtRun: atRun };
+    }
 
     function _readRaw(document, id) {
         const el = document.getElementById(id);
@@ -375,5 +567,20 @@
         collectDesignInputs,
         restoreDesignInputs,
         selectLapGoverningMoment,
+        // K2-1 (아직 쓰는 곳 없음)
+        UNIT_FACTORS,
+        KEYS,
+        fieldMeta,
+        defaultValue,
+        defaultInputs,
+        spanCount,
+        defaultSpanTable,
+        snapshot,
+        diff,
+        matchOption,
+        validateValue,
+        validateSpanTable,
+        invalidationScope,
+        siToUs,
     };
 });
