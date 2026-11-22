@@ -1533,6 +1533,30 @@ export class StcfsdPanel implements McpPanelInterface {
      * 불러온 모델 검증(R8-28): 절점 · 요소 행, BC, 길이. 하중 표지가 없으면 'custom'(R8-03),
      * m_all 이 길이와 맞지 않으면 'auto'. 실패하면 모델을 바꾸지 않는다.
      */
+    /**
+     * save_project 가 `fp` 에 써도 되는가(V5-01). 없는 파일은 새로 만든다. 이미 있으면 save_project 가 쓴
+     * 원시 모델(`format: 'stcfsd-model'`)일 때만 덮어쓴다 — 링크 · 폴더 · 다른 프로그램의 JSON 은 거절한다.
+     * 거절 문구에는 파일 내용을 싣지 않는다. 돌려주는 값: 거절 문구, 써도 되면 null.
+     */
+    private _refuseModelOverwrite(fp: string): string | null {
+        let st: fs.Stats;
+        try {
+            st = fs.lstatSync(fp);
+        } catch (e: any) {
+            if (e?.code === 'ENOENT') { return null; }
+            return `save_project failed: cannot check '${fp}' (${e?.code || 'error'})`;
+        }
+        const notOurs = `save_project will not overwrite '${fp}': the file exists and is not a StCFSD model file written by save_project. Choose a new file name.`;
+        if (!st.isFile() || st.size > 64 * 1024 * 1024) { return notOurs; }
+        try {
+            const existing = JSON.parse(fs.readFileSync(fp, 'utf8'));
+            if (existing && typeof existing === 'object' && !Array.isArray(existing) && existing.format === 'stcfsd-model') {
+                return null;
+            }
+        } catch { /* 읽을 수 없거나 JSON 이 아니다 — 우리가 쓴 파일이 아니다 */ }
+        return notOurs;
+    }
+
     private _checkLoadedModel(model: any): { model?: any; error?: string; warnings: string[] } {
         const warnings: string[] = [];
         if (!model || typeof model !== 'object') { return { error: 'no model object', warnings }; }
@@ -2715,6 +2739,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (ext !== '.stcfsd' && ext !== '.json') {
                     return { error: `save_project writes a raw model file: extension .stcfsd or .json required (got '${ext || 'none'}')` };
                 }
+                // V5-01: 경로는 AI 가 준다. 이미 있는 파일은 save_project 가 쓴 원시 모델일 때만 덮어쓴다 —
+                // 다른 프로그램의 .json(Claude Desktop 설정, 편집기 설정 …)을 모델로 바꿔 버리면 안 된다.
+                const refused = this._refuseModelOverwrite(fp);
+                if (refused) { return { error: refused }; }
                 try {
                     const data = JSON.stringify({ format: 'stcfsd-model', version: '1.0', ...this._cloneModel(this._model) }, null, 2);
                     const tmp = `${fp}.tmp-${process.pid}`;
@@ -2727,11 +2755,27 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'load_project': {
+                // V5-02: 경로는 AI 가 준다. 모델 파일(절대 경로 · 확장자)만 읽고, 실패 문구에 파일 내용을 싣지 않는다 —
+                // JSON.parse 의 오류 문구에는 파일 앞부분이 들어 있다.
+                const fp = String(options.filepath || '');
+                const ext = path.extname(fp).toLowerCase();
+                if (!fp || !path.isAbsolute(fp)) {
+                    return { error: `load_project failed: an absolute filepath is required (got '${fp}')` };
+                }
+                if (ext !== '.stcfsd' && ext !== '.json' && ext !== '.csd') {
+                    return { error: `load_project failed: a StCFSD model file is required — extension .stcfsd, .json or .csd (got '${ext || 'none'}')` };
+                }
+                let text: string;
+                try {
+                    text = fs.readFileSync(fp, 'utf-8');
+                } catch (e: any) {
+                    return { error: `load_project failed: cannot read '${fp}' (${e?.code || 'error'})` };
+                }
                 let data: any;
                 try {
-                    data = JSON.parse(fs.readFileSync(String(options.filepath), 'utf-8'));
-                } catch (e: any) {
-                    return { error: `load_project failed: ${e?.message || e}` };
+                    data = JSON.parse(text);
+                } catch {
+                    return { error: `load_project failed: '${fp}' is not valid JSON` };
                 }
                 // save_project 출력(원시 모델)과 .csd 래퍼({model}) 모두 허용
                 const model = (data && data.model) ? data.model : data;
