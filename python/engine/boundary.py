@@ -14,6 +14,16 @@ import math
 
 PI = math.pi
 
+# BC_I1_5.m 의 strcmp 분기와 같은 철자만 받는다. 모르는 BC 에서 0 을 돌려주면
+# K = Kg = 0 이 되어 원인을 알 수 없는 실패가 난다.
+VALID_BCS = ('S-S', 'C-C', 'S-C', 'C-S', 'C-F', 'F-C', 'C-G', 'G-C')
+
+
+def _check_bc(BC: str) -> None:
+    if BC not in VALID_BCS:
+        raise ValueError(
+            f"Unknown boundary condition {BC!r}; expected one of {list(VALID_BCS)}")
+
 
 def BC_I1_5(BC: str, kk: float, nn: float, a: float) -> tuple:
     """경계조건에 따른 5개 적분값 계산 (닫힌 형태)
@@ -28,6 +38,7 @@ def BC_I1_5(BC: str, kk: float, nn: float, a: float) -> tuple:
         (I1, I2, I3, I4, I5) 튜플
     """
     I1 = I2 = I3 = I4 = I5 = 0.0
+    _check_bc(BC)
 
     if BC == 'S-S':
         # Simply-Simply supported: Ym = sin(m*pi*x/a)
@@ -139,6 +150,7 @@ def BC_I1_5_atpoint(BC: str, kk: float, nn: float, a: float, ys: float) -> tuple
     Returns:
         (I1, I5) 튜플
     """
+    _check_bc(BC)
     y = ys * a
 
     if BC == 'S-S':

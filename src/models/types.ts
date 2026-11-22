@@ -20,12 +20,21 @@ export interface StcfsdModel {
     constraints: number[][];
     /** 경계조건 */
     BC: string;
-    /** 종방향 항 (길이별) */
-    m_all: number[][];
+    /** 종방향 항 (길이별). 'auto' = 서버가 BC 에 따라 고름(S-S → [1], 그 밖 → m_recommend). */
+    m_all: number[][] | 'auto';
     /** cFSM 설정 */
     GBTcon: GBTConfig;
     /** 고유치 수 */
     neigs: number;
+    /** 호스트 메타데이터 (서버는 읽지 않음) */
+    loadCase?: string;
+    loadFy?: number;
+    /** custom 하중 경우의 P · Mxx · Mzz (US) — 화면 칸 동기화용 */
+    loadValues?: { P: number; Mxx: number; Mzz: number };
+    sectionType?: string;
+    sectionTemplate?: string;
+    sectionParams?: Record<string, any>;
+    cornerRadius?: number;
 }
 
 export interface GBTConfig {
@@ -46,6 +55,17 @@ export interface StcfsdResult {
     shapes?: any[][];
     /** 길이 수 */
     n_lengths: number;
+    /** protocol_version 2: 곡선·shapes·m_all 이 실제로 담고 있는 길이(폐기 길이 제외) */
+    lengths?: number[];
+    length_indices?: number[];
+    lengths_requested?: number[];
+    discarded_lengths?: number[];
+    /** 실제로 쓴 종방향 항 */
+    m_all?: number[][];
+    m_all_selection?: any;
+    diagnostics?: any[];
+    warnings?: string[];
+    success?: boolean;
 }
 
 export interface SectionProperties {
@@ -85,6 +105,8 @@ export interface JsonRpcResponse {
     id: number;
     result?: any;
     error?: string;
+    /** protocol_version 2: PARSE_ERROR · INVALID_REQUEST · INVALID_PARAMS · METHOD_NOT_FOUND · ENGINE_ERROR · ... */
+    error_code?: string;
 }
 
 /** 기본 모델 생성 */
@@ -97,10 +119,11 @@ export function createDefaultModel(): StcfsdModel {
         springs: [],
         constraints: [],
         BC: 'S-S',
-        m_all: [],
+        m_all: 'auto',
+        // CUFSM 기본 기저(orth 2 · norm 1) — 엔진 GBTConfig 기본과 같게(F2/F3 후속).
         GBTcon: {
             glob: [], dist: [], local: [], other: [],
-            ospace: 1, orth: 1, couple: 1, norm: 0,
+            ospace: 1, orth: 2, couple: 1, norm: 1,
         },
         neigs: 10,
     };

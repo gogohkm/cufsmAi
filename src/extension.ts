@@ -13,10 +13,10 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as http from 'http';
 import { execSync, exec, execFile } from 'child_process';
-import { PythonBridge } from './bridge/PythonBridge';
+import { PythonBridge, PythonStartupError } from './bridge/PythonBridge';
 import { StcfsdPanel } from './webview/StcfsdPanel';
 import { ProjectExplorerProvider, StcfsdTreeItem } from './webview/ProjectExplorerProvider';
-import { McpBridgeServer } from './mcp/bridge';
+import { McpBridgeServer, bridgeOptionsFromEnv } from './mcp/bridge';
 import {
     MCP_SERVER_KEY, buildServerConfig, mergeServerConfig,
     removeServerConfig, inspectRegistration, configPathsForScope,
@@ -39,17 +39,35 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
+    // R8-17: 엔진 프로세스가 죽거나 다시 시작되면 알린다(다음 호출에서 한 번 다시 띄움).
+    pythonBridge.onStatus((kind, message) => {
+        if (kind === 'restarted') {
+            vscode.window.showInformationMessage(message);
+        } else {
+            vscode.window.showWarningMessage(message);
+        }
+    });
 
     // MCP Bridge 시작
-    const mcpPort = await findAvailablePort(52790);
-    mcpBridge = new McpBridgeServer(() => StcfsdPanel.currentPanel || undefined, mcpPort);
+    // K1: STCFSD_MCP_PORT_FILE 이 있으면(독립 프로그램) 빈 포트 + 토큰 + 포트 파일. 없으면 지금 그대로(52790…, 토큰 없음).
+    const portFileOptions = bridgeOptionsFromEnv(process.env);
+    const mcpPort = portFileOptions ? 0 : await findAvailablePort(52790);
+    mcpBridge = new McpBridgeServer(() => StcfsdPanel.currentPanel || undefined, mcpPort, portFileOptions);
     await mcpBridge.start();
-    mcpPortValue = mcpPort;
+    mcpPortValue = mcpBridge.port;
     mcpServerPathValue = path.join(context.extensionPath, 'media', 'mcp-server.js')
         .replace(/\\/g, '/');
 
     // .mcp.json 자동 생성 (병합 기반, 기존 설정 보존)
-    setupMcpConfig(context, mcpPort);
+    // V4-19: 시험(STCFSD_TEST_MODE · VS Code 시험 실행)에서는 사용자 설정 파일(.mcp.json · ~/.claude/mcp.json …)을 쓰지 않는다.
+    // K1: 포트 파일 방식에서도 쓰지 않는다 — 그 파일들의 고정 포트 · 토큰 없는 항목으로는 이 호스트에 붙을 수 없다.
+    if (portFileOptions) {
+        console.log(`[StCFSD] port-file mode (${portFileOptions.portFile}) — MCP config files are not written`);
+    } else if (!isTestMode && context.extensionMode !== vscode.ExtensionMode.Test) {
+        setupMcpConfig(context, mcpPort);
+    } else {
+        console.log('[StCFSD] test mode — MCP config files are not written');
+    }
 
     // Step 1: 트리 프로바이더 생성
     const projectExplorer = new ProjectExplorerProvider();
@@ -249,10 +267,12 @@ async function ensurePythonRunning(): Promise<void> {
         try {
             await pythonBridge.start();
         } catch (err: any) {
-            vscode.window.showErrorMessage(
-                `StCFSD: Failed to start Python engine. ` +
-                `Ensure Python is installed with numpy and scipy.\n${err.message}`
-            );
+            // R8-21: selftest 가 파이썬 버전·엔진 import 를 확인한다. 그 문장을 그대로 보인다.
+            const detail = err instanceof PythonStartupError
+                ? err.message
+                : `StCFSD: Failed to start Python engine (${pythonBridge.pythonPath}). ` +
+                  `Ensure Python 3.10+ is installed with numpy and scipy.\n${err.message}`;
+            vscode.window.showErrorMessage(detail);
             throw err;
         }
     }
@@ -267,6 +287,8 @@ function _mergeIntoFile(filePath: string, key: string, config: { command: string
     if (!merged.ok) {
         throw new Error(`${filePath}: ${merged.error}`);
     }
+    // R8-22 (W2 후속 2): 내용이 같으면 쓰지 않는다 — 활성화마다 사용자 설정 파일의 mtime 을 바꾸지 않게.
+    if (!merged.changed && existing !== undefined) { return 'unchanged'; }
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
     fs.writeFileSync(filePath, merged.text);

@@ -38,12 +38,13 @@ function main() {
   assert(panelTs.includes("this._requireCurrentSignature(baseSignature, 'Purlin design')"),
     'purlin design must reject results when the model changes during analysis');
 
-  // 양력은 하부 플랜지 압축/무스프링 곡선(dsmNeg)을 사용한다.
-  const upliftBlock = panelTs.slice(panelTs.indexOf('// 6d. 양력 설계'), panelTs.indexOf('const result = {', panelTs.indexOf('// 6d. 양력 설계')));
-  assert(upliftBlock.includes('Mcrl: dsmNeg?.crl'),
-    'uplift design must use the reverse-bending unbraced DSM curve');
-  assert(!upliftBlock.includes('Mcrl: dsmPos?.crl'),
-    'uplift design must not reuse the deck-braced positive-moment DSM curve');
+  // 양력은 하부 플랜지 압축/무스프링 곡선(dsmNeg)을 사용하고, R 은 §I6.2.1 적격 구간에만 준다(W3 · V3 T5–T7).
+  assert(panelTs.includes("addRegions(ub.negative_regions, 'uplift', uplift, dsmNeg,"),
+    'uplift regions must use the reverse-bending unbraced DSM curve (dsmNeg)');
+  assert(panelTs.includes('r.i621_region_eligible === true && upliftR != null'),
+    'R_uplift only where the engine marks the region I6.2.1-eligible');
+  assert(!/addRegions\(ub\.negative_regions[^\n]*dsmPos/.test(panelTs),
+    'uplift bottom-flange regions must not reuse the deck-braced positive-moment DSM curve');
 
   // 데크 시험 강성 override와 입력 변경 무효화가 UI/저장 계약에 모두 포함된다.
   assert(panelTs.includes('id="deck-kx-override"'), 'HTML must expose a tested kx override');
@@ -57,8 +58,9 @@ function main() {
     'custom load-case forces must be applied by the extension');
   assert(panelTs.includes('this._model.neigs = neigs'),
     'run_analysis neigs must be applied to the model');
-  assert(mcpTs.includes('Cmx: Cmx ?? 1.0, Cmy: Cmy ?? 1.0'),
-    'MCP combined-design defaults must match the safe UI/Python value 1.0');
+  // W2/W3: Cm 은 MCP 가 채우지 않는다(엔진이 1.0 을 쓰고 assumptions 에 밝힌다). 1.0 이 아닌 기본값만 막는다.
+  assert(!/Cm[xy]\s*\?\?\s*(?!1\.0\b)[0-9.]+/.test(mcpTs),
+    'MCP must not invent a Cm default other than the engine value 1.0');
 
   console.log('design_prepare_contract: PASS');
 }

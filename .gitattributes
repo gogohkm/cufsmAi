@@ -1,2 +1,10 @@
 # Auto detect text files and perform LF normalization:
 * text=auto
+
+# R8-20: the MCP bundle is diffed byte for byte against a Linux rebuild in CI
+# (.github/workflows/ci.yml, job mcp-parity). Keep the bundle exactly as webpack wrote it
+# and keep the TypeScript sources embedded in its source map (sourcesContent) in LF on
+# every checkout, so a Windows build and a Linux build produce the same bytes.
+media/mcp-server.js -text
+media/mcp-server.js.map -text
+src/mcp/*.ts text eol=lf

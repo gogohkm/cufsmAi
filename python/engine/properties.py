@@ -106,7 +106,12 @@ def grosprop(node: np.ndarray, elem: np.ndarray) -> dict:
         elem: (nelems, 5) — nodei, nodej는 MATLAB 1-based
 
     Returns:
-        dict with keys: A, xcg, zcg, Ixx, Izz, Ixz, thetap, I11, I22
+        dict with keys: A, xcg, zcg, Ixx, Izz, Ixz, thetap, I11, I22,
+        Sx, Sz (최외단 섬유 = 판 바깥면 기준, AISI Sf), Sx_cl, Sz_cl (중심선 극한
+        절점 기준), rx, rz, Zx, Zz
+
+    Raises:
+        ValueError — 단면적이 0 (요소 없음 또는 t = 0)
     """
     nelems = elem.shape[0]
 
@@ -155,8 +160,10 @@ def grosprop(node: np.ndarray, elem: np.ndarray) -> dict:
         Izz_o += t * L**3 * dx**2 / L**2 / 12.0
         Ixz_o += t * L**3 * dx * dz / L**2 / 12.0
 
-    if A_total == 0:
-        return dict(A=0, xcg=0, zcg=0, Ixx=0, Izz=0, Ixz=0, thetap=0, I11=0, I22=0)
+    if not (A_total > 0):
+        # 면적 0(요소 없음, t=0)이면 모든 성질이 뜻을 잃는다 — 0 dict 로 위장하지 않는다
+        raise ValueError(
+            f"grosprop: section area is {A_total!r} (no elements or zero thickness)")
 
     xcg = Ax / A_total
     zcg = Az / A_total
@@ -183,17 +190,43 @@ def grosprop(node: np.ndarray, elem: np.ndarray) -> dict:
     I11 = Ixx * c**2 + Izz * s**2 - 2 * Ixz * s * c
     I22 = Ixx * s**2 + Izz * c**2 + 2 * Ixz * s * c
 
-    # 단면계수 Sx, Sz (극한 섬유까지 거리)
+    # 단면계수 Sx, Sz — AISI Sf 는 최외단 섬유(판의 바깥면) 기준이다. 요소를 폭 L,
+    # 두께 t 인 직사각형으로 보고, 그 모서리의 극한 좌표 = 절점 좌표 ± (t/2)·|법선 성분|
+    # 으로 잰다(수평 플랜지는 중심선 + t/2, 수직 판의 자유단은 절점 그대로).
+    # 중심선 극한 절점 기준 값은 Sx_cl, Sz_cl 로 남긴다(CUFSM yieldMP 와 같은 기준).
     xs = node[:, 1]
     zs = node[:, 2]
-    cx_pos = max(xs) - xcg  # xcg에서 오른쪽 극한 섬유
-    cx_neg = xcg - min(xs)  # xcg에서 왼쪽 극한 섬유
+    cx_pos = max(xs) - xcg  # xcg에서 오른쪽 극한 섬유 (중심선)
+    cx_neg = xcg - min(xs)  # xcg에서 왼쪽 극한 섬유 (중심선)
     cz_pos = max(zs) - zcg
     cz_neg = zcg - min(zs)
-    cx = max(cx_pos, cx_neg) if max(cx_pos, cx_neg) > 0 else 1.0
-    cz = max(cz_pos, cz_neg) if max(cz_pos, cz_neg) > 0 else 1.0
-    Sx = Ixx / cz  # 강축 단면계수
-    Sz = Izz / cx  # 약축 단면계수
+    cx_cl = max(cx_pos, cx_neg) if max(cx_pos, cx_neg) > 0 else 1.0
+    cz_cl = max(cz_pos, cz_neg) if max(cz_pos, cz_neg) > 0 else 1.0
+    x_hi = z_hi = -math.inf
+    x_lo = z_lo = math.inf
+    for i in range(nelems):
+        ni = int(elem[i, 1]) - 1
+        nj = int(elem[i, 2]) - 1
+        t = elem[i, 3]
+        xi, zi = node[ni, 1], node[ni, 2]
+        xj, zj = node[nj, 1], node[nj, 2]
+        L = math.hypot(xj - xi, zj - zi)
+        if L <= 0:
+            continue
+        hz = 0.5 * t * abs(xj - xi) / L   # 법선의 z 성분 × t/2
+        hx = 0.5 * t * abs(zj - zi) / L   # 법선의 x 성분 × t/2
+        z_hi = max(z_hi, zi + hz, zj + hz)
+        z_lo = min(z_lo, zi - hz, zj - hz)
+        x_hi = max(x_hi, xi + hx, xj + hx)
+        x_lo = min(x_lo, xi - hx, xj - hx)
+    cz = max(z_hi - zcg, zcg - z_lo)
+    cx = max(x_hi - xcg, xcg - x_lo)
+    cz = cz if cz > 0 else cz_cl
+    cx = cx if cx > 0 else cx_cl
+    Sx = Ixx / cz  # 강축 단면계수 (최외단 섬유)
+    Sz = Izz / cx  # 약축 단면계수 (최외단 섬유)
+    Sx_cl = Ixx / cz_cl
+    Sz_cl = Izz / cx_cl
 
     # 회전반경
     rx = math.sqrt(Ixx / A_total) if A_total > 0 else 0.0
@@ -208,4 +241,5 @@ def grosprop(node: np.ndarray, elem: np.ndarray) -> dict:
         Ixx=Ixx, Izz=Izz, Ixz=Ixz,
         thetap=thetap, I11=I11, I22=I22,
         Sx=Sx, Sz=Sz, rx=rx, rz=rz, Zx=Zx, Zz=Zz,
+        Sx_cl=Sx_cl, Sz_cl=Sz_cl,
     )

@@ -13,13 +13,34 @@
                     계산한다. 결과 dict 'global_is_signature_asymptote'=True.
 
 관계식:
-  Pcrl = LF_local_min × Py
-  Mcrl = LF_local_min × My
+  Pcrl = LF_local_min × (σmax/fy) × P_ref
+  (σmax = 해석에 넣은 절점 응력의 최대 |σ|, P_ref = 같은 응력분포의 첫 항복 하중)
+
+모드 식별 규칙 (AISI S100-16 App. 2 §2.2, Commentary E3/E4):
+  서명곡선의 극소는 "그 모드가 이 곡선에서 분리되었다"는 뜻일 뿐이다. 극소가
+  하나뿐이거나 없다고 해서 다른 모드가 "없다"는 것은 아니다. 따라서 이 함수는
+  모드의 부재(absence)를 확정하지 않는다 — 'local_absence_verified' 와
+  'dist_absence_verified' 는 언제나 False 다.
 """
+
+import math
 
 import numpy as np
 from .properties import grosprop
-from .stress import yieldMP
+from .stress import stresgen, yieldMP
+
+
+_LOAD_TYPES = ('P', 'Mxx', 'Mzz')
+# 절점 응력 형상 비교 허용오차(최대 |σ| 로 정규화한 절점별 차이의 최댓값)
+_SHAPE_TOL = 1e-2
+# 최대 |σ| 와 fy 의 상대 차이가 이보다 크면 환산 사실을 경고한다
+_SCALE_TOL = 1e-3
+# 표본 극소와 포물선 보간 극소의 차이가 이보다 크면 격자가 성기다고 경고한다
+_GRID_TOL = 0.01
+_SCOPE_NOTE = ('A signature curve can show that a mode was isolated, never that a mode is absent; '
+               'local_absence_verified and dist_absence_verified are always False.')
+_FLOOR_NOTE = ('lower bound of the critical load of the mode that was not isolated; '
+               'use as a floor, never as the value')
 
 
 def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
@@ -29,51 +50,72 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                         mode_classifications: list = None,
                         KxLx: float = None, KyLy: float = None,
                         KtLt: float = None, Lb: float = None,
-                        Cb: float = 1.0, section_type: str = 'C') -> dict:
+                        Cb: float = 1.0, section_type: str = 'C',
+                        BC: str = None, unsymm: int = None) -> dict:
     """좌굴 곡선에서 DSM 설계값 추출
 
     Args:
         curve: list of np.ndarray — curve[i] = [length, lf1, lf2, ...] (1st mode 사용)
-        node: (nnodes, 8)
+        node: (nnodes, 8) — 8번째 열은 해석에 넣은 절점 응력
         elem: (nelems, 5)
         fy: 항복 응력
-        load_type: 'P' (축력), 'Mxx' (강축 휨), 'Mzz' (약축 휨)
+        load_type: 'P' (축력), 'Mxx' (강축 휨), 'Mzz' (약축 휨). 그 밖은 ValueError.
         mode_shapes: (선택) curve 와 정렬된 list — mode_shapes[i] = (ndof, nmodes)
-                     좌굴 모드형상. 제공되면 cFSM modal 참여율(%D/%L)로 각 극소를
-                     국부/뒤틀림으로 확정한다 (반파장 순서 휴리스틱 대체).
-                     하위호환: 미제공(None) 시 개선된 휴리스틱으로 폴백한다.
+                     좌굴 모드형상. classify_fn 과 함께 주면 극소마다 cFSM
+                     참여율(%D/%L)로 라벨을 붙인다.
         classify_fn: (선택) callable(length, mode_vector) -> [%G, %D, %L, %O]
-                      (예: cfsm.classify.mode_class 래퍼). mode_shapes 와 함께
-                      제공될 때만 사용된다. 미제공 시 휴리스틱 폴백.
         mode_classifications: (선택) curve와 정렬된 cFSM 분류 배열.
                       mode_classifications[i][mode] = [%G, %D, %L, %O].
-                      서버/UI가 이미 전체 모드를 분류한 경우 재계산 없이 사용한다.
-        KxLx, KyLy, KtLt: (선택) 압축(load_type='P') 부재의 강축/약축 유효좌굴
-                     길이 K·L (in) 및 비틀림 유효길이 Kt·Lt (in). 제공되면 전체
-                     좌굴값을 signature-curve 점근값이 아니라 AISI S100-16
-                     Eq.E2-4 의 폐형식 Fcre 로 산정한다 (compute_column_Fcre).
-        Lb: (선택) 휨(load_type='Mxx'/'Mzz') 부재의 횡방향 비지지길이 (in).
-                     제공되면 §F2.1 폐형식 Fcre 로 Mcre 를 산정한다
-                     (compute_beam_Fcre).
+                      NaN/None 행은 "미분류"로 다룬다(그 극소는 반파장 순서로 정함).
+        KxLx, KyLy, KtLt: (선택) 압축 부재 유효좌굴길이 (in). 주면 전체좌굴값을
+                     Eq.E2-4 폐형식 Fcre 로 산정한다 (compute_column_Fcre).
+        Lb: (선택) 휨 부재 횡방향 비지지길이 (in). §F2.1 폐형식 Fcre 로 Mcre 산정.
         Cb: 휨 모멘트 구배계수 (기본 1.0). Lb 와 함께 사용.
-        section_type: 단면형식 ('C', 'Z', 'RHS', ... 기본 'C'). 폐형식 전체좌굴
-                     분기(점대칭 Z / 폐합 박스 등) 판정에 사용. 길이 미제공 시 무시.
-
-        하위호환: KxLx/KyLy/KtLt/Lb 가 모두 None(미제공)이면 동작은 종전과 정확히
-        동일하다 — 전체좌굴값은 signature-curve 장파장 점근값이고
-        결과 dict 'global_is_signature_asymptote'=True 로 유지된다. 기존 위치인자
-        호출자(예: aisi_s100._auto_generate_props)는 이 인자들을 넘기지 않으므로
-        영향받지 않는다.
+        section_type: 단면형식 ('C', 'Z', 'RHS', ... 기본 'C'). 폐형식 분기용.
+        BC: (선택) 곡선을 만든 단부 조건. 'S-S' 가 아니면 서명곡선이 아니므로
+                     Pcrl/Pcrd 를 극소에서 뽑지 않는다(경고). None 이면 S-S 로 가정하고
+                     그 가정을 결과 'signature_curve'=None 으로 남긴다.
+        unsymm: (선택) 휨 응력분포의 가정(0=구속 휨, 1=비구속 휨). None 이면 절점
+                     응력의 형상에 맞는 쪽을 고른다. P_ref 는 고른 분포의 첫 항복값이다.
 
     Returns:
-        dict with DSM design values. 결과 dict 에는 모드 검출 플래그가 추가된다:
-          'local_detected' (bool), 'dist_detected' (bool),
-          'classification_method' (str: 'cfsm_modal' | 'heuristic' | ...).
-        모드가 분리(isolate)되지 않으면 해당 Pcrl/Pcrd 는 0.0 으로 유지된다
-        (하위호환). 다운스트림은 *_detected 플래그로 '미검출'을 '비세장(정당한
-        무감소)'과 구분할 수 있다.
+        dict. 지금까지의 키(Py, My_xx, Pcrl/crl, LF_local, Lcrl, ... ,
+        local_detected, dist_detected, classification, classification_method)에
+        다음이 덧붙는다.
+          local_detected / dist_detected: 해당 Pcr 값을 이 곡선에서 정했는가.
+              False 는 "이 곡선에서 분리되지 않았다"는 뜻일 뿐이다(Pcr=0).
+          local_absence_verified / dist_absence_verified: 언제나 False.
+          local_isolated / dist_isolated: 서로 다른 극소로 분리되어 정해졌는가.
+          local_basis / dist_basis: 'cfsm_label' | 'wavelength_order' |
+              'wavelength_bound'(어느 모드인지 모르는 극소들의 최저 — 하한) |
+              'single_minimum_assumed_local' | 'not_isolated'
+          single_minimum, LF_single_minimum
+          single_minimum_bound / crl_floor / crd_floor: 분리되지 않은 모드 임계값의
+              **하한(floor)** — 그 모드의 값이 아니다. 해석식 등으로 구한 값의 아래
+              한계로만 쓴다(값으로 쓰면 과소, V2-04).
+          boundary_minimum: 국부 값이 격자의 첫 길이에서 정해졌다(실제 최소가 더 짧을 수 있음)
+          LF_local_interp / LF_dist_interp: log L 포물선 보간 극소(표본 극소 이하)
+          stress_scale, reference_distribution, reference_unsymm,
+          reference_stress_consistent, reference_is_restrained, P_ref_restrained:
+              P_ref 가 구속 휨 첫 항복(Sf·Fy 와 같은 기준)이 아니면 reference_is_restrained
+              =False — 이때 Pcr 을 Sf·Fy 로 만든 My 와 섞지 말 것.
+          signature_curve, BC, classification_note
+          warnings / assumptions / scope_notes (FIXES §3.1.1)
+        classification_method 은 국부·뒤틀림 둘 다 cFSM 라벨로 서로 다른 극소에서
+        정해졌을 때만 'cfsm_modal' 이다. 하나라도 라벨이 아니면 'cfsm_partial'
+        (라벨이 한쪽에만 쓰임) 또는 'heuristic' 이다.
     """
-    # 1) 항복 하중 계산
+    if load_type not in _LOAD_TYPES:
+        raise ValueError(f"load_type must be one of {_LOAD_TYPES}, got {load_type!r}")
+    label = load_type
+    # FIXES §3.1.1: warnings = 이 실행에서 값/판정을 바꾼 것·손봐야 할 것,
+    # assumptions = 이 실행이 가정한 것, scope_notes = 늘 참인 범위 안내.
+    warnings: list[str] = []
+    assumptions: list[str] = []
+    scope_notes: list[str] = [_SCOPE_NOTE]
+
+    # 1) 항복 하중 계산 (지금까지와 같은 구속 휨 기준값 — 'Py','My_xx','My_zz')
+    node = np.asarray(node, dtype=float)
     props = grosprop(node, elem)
     yield_vals = yieldMP(node, fy,
                          props['A'], props['xcg'], props['zcg'],
@@ -84,21 +126,16 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     My_xx = yield_vals['Mxx_y']
     My_zz = yield_vals['Mzz_y']
 
-    # 기준 하중 선택
-    if load_type == 'P':
-        P_ref = Py
-        label = 'P'
-    elif load_type == 'Mxx':
-        P_ref = My_xx
-        label = 'Mxx'
-    else:
-        P_ref = My_zz
-        label = 'Mzz'
+    # 1b) 기준 응력의 일관성 (App. 2 §2.2: Pcr/Mcr 와 Py/My 는 같은 응력분포 기준)
+    ref = _check_reference_stress(node, fy, load_type, props, unsymm)
+    warnings.extend(ref['warnings'])
+    assumptions.extend(ref['assumptions'])
+    P_ref = ref['P_ref']
+    scale = ref['stress_scale']
 
-    # 2) 좌굴 곡선에서 1st 모드 추출 → (length, load_factor, curve_index) 배열
-    # curve_index 는 mode_shapes 와 정렬을 맞추기 위한 원본 curve 위치.
+    # 2) 좌굴 곡선에서 1st 모드 추출 → (length, load_factor, curve_index)
     points = []
-    for ci, c in enumerate(curve):
+    for ci, c in enumerate(curve or []):
         if c is None:
             continue
         row = c
@@ -106,168 +143,152 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
             row = c.flatten().tolist() if c.ndim > 1 else c.tolist()
         elif isinstance(c, list) and len(c) > 0 and isinstance(c[0], list):
             row = c[0]
-
-        if len(row) >= 2 and row[1] > 0:
-            points.append((row[0], row[1], ci))
-
-    if len(points) < 3:
-        return _empty_result(Py, My_xx, My_zz, label, P_ref)
+        if len(row) >= 2 and row[1] is not None and np.isfinite(row[1]) and row[1] > 0:
+            points.append((float(row[0]), float(row[1]), ci))
 
     points.sort(key=lambda p: p[0])
     lengths = [p[0] for p in points]
     lf_vals = [p[1] for p in points]
     curve_idx = [p[2] for p in points]
 
-    # 3) 극소점 찾기 (3-point comparison)
-    minima = []
-    for i in range(1, len(lf_vals) - 1):
-        if lf_vals[i] < lf_vals[i - 1] and lf_vals[i] < lf_vals[i + 1]:
-            minima.append({
-                'length': lengths[i],
-                'load_factor': lf_vals[i],
-                'index': i,
-                'curve_index': curve_idx[i],
-            })
+    signature_curve = None
+    if BC is not None:
+        signature_curve = str(BC).strip().upper() == 'S-S'
+        if not signature_curve:
+            warnings.append(
+                f"BC='{BC}': 단부 조건이 S-S 가 아닌 곡선은 서명곡선이 아니므로 극소에서 "
+                'Pcrl/Pcrd 를 뽑지 않았습니다. S-S 서명곡선으로 다시 해석하거나 '
+                '부재 길이의 일반 경계조건 해석에서 모드를 따로 식별하십시오 (App. 2 §2.2).')
 
-    # 3b) 경계 극소 검출 (첫 점이 인접 점보다 작은 경우)
-    # 짧은 끝(index 0)만 국부 후보로 삽입한다. 긴 끝(index -1)은 전체좌굴
-    # 장파장 꼬리(global tail)로, S-S 곡선이 단조 감소하는 인공물일 뿐
-    # 물리적 국부/뒤틀림 극소가 아니다. 이를 minima 에 넣으면 뒤틀림으로
-    # 오분류되어 Pcrd 를 오염시키므로 삽입하지 않는다. 장파장 꼬리값은
-    # 아래 Pcre/Lcre 로 이미 포착된다.
-    # (AISI S100-16 Appendix 2 §2.2: 모드 메커니즘이 적절해야 함 —
-    #  격자 경계 인공물을 물리 모드로 취급 금지)
-    if len(lf_vals) >= 2:
-        if lf_vals[0] < lf_vals[1]:
-            minima.insert(0, {'length': lengths[0], 'load_factor': lf_vals[0],
-                              'index': 0, 'curve_index': curve_idx[0]})
+    # 3) 극소점 찾기 — 평탄 구간(같은 값 연속)도 극소로 본다. 짧은 끝(index 0)은
+    # 경계 극소로 넣는다. 긴 끝은 전체좌굴 장파장 꼬리이므로 넣지 않는다.
+    minima = _find_minima(lengths, lf_vals, curve_idx) if len(points) >= 3 else []
 
-    # 4) 극소점을 국부/뒤틀림으로 분류
-    # 우선순위:
-    #   (a) mode_shapes + classify_fn 제공 → cFSM modal 참여율(%D/%L)로 확정
-    #       (AISI S100-16 App 2 / E3,E4: 모드 성격으로 Pcrl/Pcrd 식별이 정석)
-    #   (b) 미제공 → 개선된 휴리스틱(반파장 순서). 하드코딩 10.0 in 임계 제거.
-    Pcrl = Pcrd = Pcre = 0.0
-    Lcrl = Lcrd = Lcre = 0.0
-    classification = 'auto'
-    local_detected = False
-    dist_detected = False
-
-    # 전체 좌굴(SIGNATURE-CURVE 점근값 — 주의: AISI 설계용 글로벌 Pcre 아님):
-    #   여기서 Pcre 는 단순지지(S-S) signature curve 의 가장 긴 샘플 반파장
-    #   에서의 하중비일 뿐, 부재 실제 비지지길이(KxLx/KyLy/KtLt)에서의 탄성
-    #   전체좌굴값이 아니다. AISI S100-16 Eq. E2-4 의 Fcre 와 lambda_c
-    #   =sqrt(Fy/Fcre) 는 (KL/r)^2, (KtLt)^2 의 함수이므로 부재 길이/유효길이
-    #   계수 없이는 구할 수 없다(Appendix 2 §2.3.1.1 Eq.2.3.1.1-3..5).
-    #   따라서 설계 경로(design/aisi_s100.py)는 이 값을 사용하지 않고
-    #   compute_column_Fcre / compute_beam_Fcre 로 폐형식 Fcre 를 재계산한다.
-    #   본 키(cre/Lcre/LF_global)는 signature-curve 점근 정보로만 제공되며,
-    #   결과 dict 의 'global_is_signature_asymptote'=True 로 명시한다.
-    #   부재 설계용 전체좌굴값이 필요하면 KL 과 K 계수를 별도 폐형식 경로에
-    #   공급해야 한다.
-    Pcre = lf_vals[-1] * P_ref
-    Lcre = lengths[-1]
-
-    # 각 극소에 대해 cFSM modal 라벨을 시도한다.
-    # 라벨: 'L' (국부 %L 우세), 'D' (뒤틀림 %D 우세), None (분류 불가/미제공)
+    # 각 극소에 cFSM 라벨 ('L', 'D', None=미분류/G·O 우세/NaN)
     classifications_available = mode_classifications is not None
     shape_classifier_available = mode_shapes is not None and callable(classify_fn)
     modal_available = classifications_available or shape_classifier_available
-    if classifications_available:
-        for mn in minima:
-            mn['mode_class'] = _classify_minimum_from_classifications(
-                mn, mode_classifications)
-    elif shape_classifier_available:
-        for mn in minima:
+    for mn in minima:
+        if classifications_available:
+            mn['mode_class'] = _classify_minimum_from_classifications(mn, mode_classifications)
+            if mn['mode_class'] is None and _classification_row_is_nan(mn, mode_classifications):
+                mn['label_status'] = 'nan'
+        elif shape_classifier_available:
             mn['mode_class'] = _classify_minimum(mn, mode_shapes, classify_fn)
-
-    if modal_available and len(minima) >= 1:
-        # (a) cFSM modal 확정: %D/%L 우세도로 라벨링 → 길이 순서에 의존하지 않음
-        classification = 'cfsm_modal'
-        for mn in minima:
-            lbl = mn.get('mode_class')
-            val = mn['load_factor'] * P_ref
-            if lbl == 'L':
-                # 가장 작은(임계) 국부 극소 채택
-                if not local_detected or val < Pcrl:
-                    Pcrl, Lcrl, local_detected = val, mn['length'], True
-            elif lbl == 'D':
-                if not dist_detected or val < Pcrd:
-                    Pcrd, Lcrd, dist_detected = val, mn['length'], True
-        # 두 개 이상의 명확한 극소가 모두 같은 L/D 가족으로 분류되면 cFSM 기저가
-        # 서로 다른 signature-curve 가지를 분리하지 못한 것이다. 이 경우에 한해
-        # 가장 짧은 극소를 L, 그보다 긴 극소 중 임계값을 D로 두는 DSM 파장 순서를
-        # 동률 해소 규칙으로 사용한다. 단일 D 극소는 그대로 D로 유지하며, G/O 우세
-        # 극소에는 이 규칙을 적용하지 않는다.
-        if classifications_available and len(minima) >= 2:
-            ld_minima = [mn for mn in minima if mn.get('mode_class') in ('L', 'D')]
-            labels = {mn.get('mode_class') for mn in ld_minima}
-            if len(ld_minima) >= 2 and len(labels) == 1:
-                by_length = sorted(ld_minima, key=lambda mn: mn['length'])
-                local_min = by_length[0]
-                dist_min = min(by_length[1:], key=lambda mn: mn['load_factor'])
-                Pcrl = local_min['load_factor'] * P_ref
-                Lcrl = local_min['length']
-                local_detected = True
-                Pcrd = dist_min['load_factor'] * P_ref
-                Lcrd = dist_min['length']
-                dist_detected = True
-                classification = 'cfsm_modal_ordering_tiebreak'
-        # 호출자가 cFSM 분류 배열을 명시한 경우 G/O 우세 최소점을 파장 휴리스틱으로
-        # 다시 L/D로 바꾸지 않는다. 이는 모드 분류를 무효화하기 때문이다.
-        # 레거시 callable 경로에서 분류 호출 자체가 실패한 경우에만 휴리스틱 폴백.
-        if not local_detected and not dist_detected:
-            if classifications_available:
-                classification = 'cfsm_modal_no_ld'
-            else:
-                modal_available = False
-
-    if not modal_available:
-        # (b) 휴리스틱 폴백: 반파장 순서. 임의 인치 임계(구 10.0) 미사용.
-        if len(minima) >= 2:
-            # 2개 이상: 가장 짧은 파장 극소 = 국부, 그 외(더 긴 파장) 극소 중
-            # 임계(최저 하중비) 극소 = 뒤틀림.
-            # minima[0]/minima[1] 을 고정 인덱싱하지 않는다: 3개 이상 극소나
-            # index 1 의 스퍼리어스/2차 국부 극소가 진짜 뒤틀림 극소(index 2)를
-            # 가리지 않도록, 국부 이후 구간 전체에서 최저 하중비를 선택한다.
-            # (AISI S100-16 Appendix 2 §2.3.1.3: 뒤틀림 임계 하중)
-            minima_sorted = sorted(minima, key=lambda m: m['length'])
-            local_min = minima_sorted[0]
-            Pcrl = local_min['load_factor'] * P_ref
-            Lcrl = local_min['length']
-            local_detected = True
-            # 국부보다 긴 파장의 극소들 중 최저 하중비를 뒤틀림으로 채택
-            longer = [m for m in minima_sorted[1:]]
-            dist_min = min(longer, key=lambda m: m['load_factor'])
-            Pcrd = dist_min['load_factor'] * P_ref
-            Lcrd = dist_min['length']
-            dist_detected = True
-            classification = 'two_minima'
-        elif len(minima) == 1:
-            # 단일 극소: 모드형상 없이는 국부/뒤틀림을 신뢰성 있게 구분할 수
-            # 없다. 보수적으로 국부로 채택(짧은 파장 가정)하되, 뒤틀림은
-            # '미분리(not isolated)'로 두어(Pcrd=0) 다운스트림이 dist_detected
-            # =False 로 폴백/경고하도록 한다. (구 하드코딩 L>10 in 재분류 제거)
-            Pcrl = minima[0]['load_factor'] * P_ref
-            Lcrl = minima[0]['length']
-            local_detected = True
-            classification = 'single_minimum'
         else:
-            # 극소 0개: 단조 감소 곡선 → 곡선 최소값을 국부로
-            min_idx = int(np.argmin(lf_vals))
-            Pcrl = lf_vals[min_idx] * P_ref
-            Lcrl = lengths[min_idx]
-            local_detected = True
-            classification = 'monotone'
+            mn['mode_class'] = None
 
-    classification_method = 'cfsm_modal' if classification.startswith('cfsm_modal') else 'heuristic'
+    # 4) 모드 배정
+    local_min = dist_min = None
+    local_basis = dist_basis = 'not_isolated'
+    single_minimum = False
+    classification = 'no_minimum'
+    classification_note = None
+    if modal_available and minima and all(m['mode_class'] is None and m.get('label_status') == 'nan'
+                                          for m in minima):
+        # cFSM 이 이 모델을 분류하지 않았다(F3: 둥근 모서리 등은 NaN) — 예정된 동작이므로 알림이 아니라 기록만.
+        classification_note = 'cFSM classification rows are NaN for this model; wavelength order is used.'
+
+    if len(points) < 3:
+        classification = 'insufficient_points'
+        warnings.append('곡선의 유효 점이 3개 미만이라 극소를 찾을 수 없습니다.')
+    elif signature_curve is False:
+        classification = 'not_signature_curve'
+    elif len(minima) == 0:
+        classification = 'no_minimum'
+        warnings.append(
+            '서명곡선에 국부/뒤틀림 극소가 없습니다(단조 곡선). Pcrl·Pcrd 를 이 곡선에서 '
+            '분리하지 못했습니다 — 해석식(App. 2 §2.3) 또는 순수모드 cFSM 으로 정하십시오. '
+            '모드가 없다는 뜻이 아닙니다.')
+    elif len(minima) == 1:
+        single_minimum = True
+        classification = 'single_minimum'
+        mn = minima[0]
+        # 극소 하나는 한 모드만 분리한다. 그 모드에 값을 주고(라벨 D 면 뒤틀림, 아니면
+        # 짧은 반파장 가정으로 국부), 다른 모드는 분리되지 않음(0)으로 둔다. 서명곡선은
+        # 순수모드 곡선의 아래 포락선이므로 이 값은 다른 모드 임계값의 하한일 뿐이다 —
+        # 다른 모드의 값으로 쓰면 과소(V2: 9CS2.5x059 압축 Pa −34 %)가 된다.
+        if mn['mode_class'] == 'D':
+            dist_min, dist_basis = mn, 'cfsm_label'
+            other = 'Pcrl'
+        else:
+            local_min = mn
+            local_basis = 'cfsm_label' if mn['mode_class'] == 'L' else 'single_minimum_assumed_local'
+            other = 'Pcrd'
+        assumptions.append(
+            f"서명곡선의 극소가 하나뿐입니다(L={mn['length']:.3g} in). "
+            f"{'뒤틀림(cFSM D 라벨)' if other == 'Pcrl' else '국부'}로 썼고 {other} 는 이 곡선에서 "
+            f"분리되지 않았습니다({other}=0). {other} 는 해석식(App. 2) 등으로 정하고, 이 극소 값"
+            f"(LF={mn['load_factor'] * scale:.4g})은 그 하한(floor)으로만 쓰십시오.")
+    else:
+        local_min, local_basis, dist_min, dist_basis, notes = _assign_two_or_more(minima)
+        for kind, text in notes:
+            (warnings if kind == 'warning' else assumptions).append(text)
+        if local_basis == 'cfsm_label' and dist_basis == 'cfsm_label':
+            classification = 'cfsm_modal'
+        elif local_basis == 'cfsm_label' or dist_basis == 'cfsm_label':
+            classification = 'cfsm_partial'
+        elif modal_available:
+            classification = 'cfsm_ordering_tiebreak'
+        else:
+            classification = 'two_minima'
+        if (modal_available and classification_note is None
+                and (local_basis != 'cfsm_label' or dist_basis != 'cfsm_label')):
+            assumptions.append(
+                'cFSM 라벨이 국부·뒤틀림 극소를 하나씩 가르지 못했습니다(같은 라벨 중복, '
+                '미분류/G·O 우세, 또는 반파장 순서와 어긋남). 라벨이 없는 쪽은 반파장 순서로 정했습니다.')
+
+    boundary_minimum = bool(local_min is not None and local_min['index'] == 0)
+    if boundary_minimum:
+        warnings.append(
+            f"국부 극소가 격자의 첫 길이(L={lengths[0]:.3g} in)에서 정해졌습니다. 실제 "
+            '최소가 더 짧은 반파장에 있을 수 있어 Pcrl 이 과대(비보수)일 수 있습니다 — '
+            '격자 하한을 낮춰 다시 해석하십시오.')
+
+    Pcrl = local_min['load_factor'] * scale * P_ref if local_min else 0.0
+    Lcrl = local_min['length'] if local_min else 0.0
+    Pcrd = dist_min['load_factor'] * scale * P_ref if dist_min else 0.0
+    Lcrd = dist_min['length'] if dist_min else 0.0
+    local_detected = local_min is not None
+    dist_detected = dist_min is not None
+    local_isolated = (local_basis in ('cfsm_label', 'wavelength_order')
+                      and not boundary_minimum and not single_minimum)
+    dist_isolated = dist_basis in ('cfsm_label', 'wavelength_order') and not single_minimum
+    # 분리되지 않은 모드의 하한(floor): 같은 곡선의 극소 값. 값으로 쓰지 않는다.
+    lf_lowest = min(m['load_factor'] for m in minima) * scale * P_ref if minima else None
+    crl_floor = lf_lowest if (local_min is None and signature_curve is not False) else None
+    crd_floor = lf_lowest if (dist_min is None and signature_curve is not False) else None
+
+    if local_basis == 'cfsm_label' and dist_basis == 'cfsm_label' and not single_minimum:
+        classification_method = 'cfsm_modal'
+    elif local_basis == 'cfsm_label' or dist_basis == 'cfsm_label':
+        classification_method = 'cfsm_partial'
+    elif len(points) < 3:
+        classification_method = 'none'
+    else:
+        classification_method = 'heuristic'
+
+    # 표본 극소 대 보간 극소 — 보간 값은 표본 값을 넘지 않는다(_parabolic_min).
+    LF_local_interp = (local_min['load_factor_interp'] * scale) if local_min else None
+    LF_dist_interp = (dist_min['load_factor_interp'] * scale) if dist_min else None
+    for tag, mn in (('국부', local_min), ('뒤틀림', dist_min)):
+        if mn is None or mn['index'] == 0:
+            continue
+        lf_s, lf_i = mn['load_factor'], mn['load_factor_interp']
+        if lf_s > 0 and (lf_s - lf_i) / lf_s > _GRID_TOL:
+            warnings.append(
+                f"{tag} 극소 근처 격자가 성깁니다: 표본 LF={lf_s * scale:.4g}, 보간 LF="
+                f"{lf_i * scale:.4g} (차이 {100 * (lf_s - lf_i) / lf_s:.1f}%). "
+                'L 격자를 촘촘히 하십시오.')
+
+    # 전체 좌굴(SIGNATURE-CURVE 점근값 — 주의: AISI 설계용 글로벌 Pcre 아님)
+    if points:
+        Pcre = lf_vals[-1] * scale * P_ref
+        Lcre = lengths[-1]
+    else:
+        Pcre = Lcre = 0.0
 
     # ── 전체좌굴(GLOBAL) 폐형식 산정 (선택, 유효길이 제공 시) ─────────────────
-    # 기본값: signature-curve 장파장 점근값(Pcre_sig/Lcre_sig)을 전체좌굴값으로
-    #         사용 (하위호환). global_is_signature_asymptote=True.
-    # 유효길이가 제공되면: AISI S100-16 Eq.E2-4(압축) / §F2.1(휨)의 폐형식 Fcre로
-    #         전체좌굴값(Pcre=A·Fcre / Mcre=Sf·Fcre)을 재산정하고, 종전 점근값은
-    #         참조용으로 'cre_signature'/'Lcre_signature' 에 보존한다.
     # 지연 import: engine↔design 순환 import 위험 회피.
     Pcre_sig = Pcre          # signature-curve 점근값 (참조 보존)
     Lcre_sig = Lcre
@@ -279,14 +300,12 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     else:
         length_provided = (Lb is not None)
 
-    if length_provided:
+    if length_provided and len(points) >= 3:
         try:
             from .cutwp import cutwp_prop
             from design.global_buckling import (compute_column_Fcre,
                                                 compute_beam_Fcre)
 
-            # 전체 단면성질: grosprop + cutwp 비틀림성질 병합 후 compute_*가 기대하는
-            # 키로 매핑 (aisi_s100._auto_generate_props 와 동일 규약).
             gprops = dict(props)
             try:
                 cw = cutwp_prop(node, elem)
@@ -296,17 +315,14 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
             gprops['Cw'] = cw.get('Cw', gprops.get('Cw', 0))
             gprops['Xs'] = cw.get('Xs', gprops.get('Xs', 0))
             gprops['Zs'] = cw.get('Zs', gprops.get('Zs', 0))
-            # 회전반경/단면계수 키 별칭 매핑
             gprops.setdefault('ry', gprops.get('rz', 0))
             gprops.setdefault('Sf', gprops.get('Sx', 0))
             gprops.setdefault('Iy', gprops.get('Izz', 0))
-            # xo = |Xs - xcg| (도심~전단중심 x거리) — compute_*에서 fallback도 있으나 명시.
             if 'xo' not in gprops:
                 gprops['xo'] = abs(gprops.get('Xs', 0) - gprops.get('xcg', 0))
             gprops['section_type'] = section_type
 
             if load_type == 'P':
-                # 미지정 유효길이는 제공된 길이로 채워 보수적으로 처리(전부 동일 가정).
                 provided = [v for v in (KxLx, KyLy, KtLt) if v is not None]
                 fill = max(provided) if provided else 0.0
                 _KxLx = KxLx if KxLx is not None else fill
@@ -316,24 +332,20 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                 Fcre = col.get('Fcre', 0.0)
                 A_g = gprops.get('A', 0)
                 if Fcre <= 0 or A_g <= 0:
-                    # 폐형식 산정 실패(J/Cw/rx/ry/ro 누락 등) — 점근값 폴백임을 명시.
                     global_source = ('signature_asymptote (closed_form E2 Fcre<=0 — '
                                      'check J/Cw/rx/ry/ro/xo)')
                 if Fcre > 0 and A_g > 0:
                     Pcre = A_g * Fcre
-                    # 지배 유효길이 = controlling 좌굴모드의 길이
                     btype = col.get('buckling_type', '')
                     if btype == 'torsional':
                         Lcre = _KtLt
                     elif btype == 'flexural-torsional':
                         Lcre = max(_KxLx, _KtLt)
                     else:  # flexural
-                        # σex(=KxLx) 와 σey(=KyLy) 중 작은 응력(긴 유효길이)이 지배
                         Lcre = _KyLy if col.get('sigma_ey', 1e30) <= col.get('sigma_ex', 1e30) else _KxLx
                     global_is_signature_asymptote = False
                     global_source = 'closed_form_E2'
             else:
-                # 휨: §F2.1 Fcre, Mcre = Sf·Fcre
                 Fcre = compute_beam_Fcre(gprops, Cb, Lb, section_type=section_type)
                 Sf = gprops.get('Sf', 0) or gprops.get('Sxx', 0) or gprops.get('Sx', 0)
                 if Fcre <= 0 or Sf <= 0:
@@ -345,14 +357,15 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
                     global_is_signature_asymptote = False
                     global_source = 'closed_form_F2'
         except Exception as e:
-            # 폐형식 산정 실패 시 signature 점근값으로 폴백 (하위호환 안전).
             Pcre = Pcre_sig
             Lcre = Lcre_sig
             global_is_signature_asymptote = True
             global_source = f'signature_asymptote (closed_form failed: {e})'
 
+    lf_single = (minima[0]['load_factor'] * scale) if single_minimum else None
+
     result = {
-        # 항복 하중
+        # 항복 하중 (구속 휨 기준 — 지금까지와 같은 뜻)
         'Py': Py,
         'My_xx': My_xx,
         'My_zz': My_zz,
@@ -362,7 +375,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         'Ixx': props['Ixx'],
         'Izz': props['Izz'],
 
-        # 기준 하중 종류
+        # 기준 하중 종류 — P_ref 는 해석에 넣은 응력분포의 첫 항복값
         'load_type': label,
         'P_ref': P_ref,
 
@@ -378,18 +391,13 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         'Lcrd': Lcrd,
         'LF_dist': Pcrd / P_ref if P_ref > 0 else 0,
 
-        # 전체 좌굴 — 주의: 아래 값은 signature-curve(S-S) 장파장 점근값이며
-        # AISI S100-16 Eq.E2-4 의 설계용 글로벌 Fcre/Pcre 가 아니다.
-        # 부재 설계값은 KL/K 계수를 사용하는 폐형식(compute_column/beam_Fcre)
-        # 으로 별도 계산해야 한다. 'global_is_signature_asymptote' 플래그로 명시.
+        # 전체 좌굴 — signature-curve(S-S) 장파장 점근값(또는 유효길이를 주면 폐형식)
         f'{label}cre': Pcre,
         'cre': Pcre,
         'Lcre': Lcre,
         'LF_global': Pcre / P_ref if P_ref > 0 else 0,
         'global_is_signature_asymptote': global_is_signature_asymptote,
         'global_source': global_source,
-        # signature-curve(S-S) 장파장 점근값 (참조 보존). 유효길이가 제공되어
-        # 위 cre/Lcre 가 폐형식으로 대체된 경우에도 종전 점근값을 여기서 확인 가능.
         'cre_signature': Pcre_sig,
         'Lcre_signature': Lcre_sig,
 
@@ -401,17 +409,273 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         'n_minima': len(minima),
         'classification': classification,
 
-        # 모드 검출 플래그 (Contract #3, 추가 키 — 하위호환)
-        # local_detected/dist_detected=False 이면 해당 Pcrl/Pcrd 는 0.0 으로,
-        # 다운스트림(aisi_s100.py)이 '미검출(폴백 필요)'을 '비세장(정당한
-        # 무감소)'과 구분하도록 한다.
+        # 모드 검출 플래그 — *_detected=False 는 "이 곡선에서 분리되지 않았다"일 뿐
         'local_detected': local_detected,
         'dist_detected': dist_detected,
         'classification_method': classification_method,
+        'local_absence_verified': False,
+        'dist_absence_verified': False,
+        'local_isolated': bool(local_isolated),
+        'dist_isolated': bool(dist_isolated),
+        'local_basis': local_basis,
+        'dist_basis': dist_basis,
+        'single_minimum': single_minimum,
+        'LF_single_minimum': lf_single,
+        # 분리되지 않은 모드 임계값의 하한(floor) — 그 모드의 값이 아니다.
+        'single_minimum_bound': (lf_single * P_ref) if lf_single is not None else None,
+        'single_minimum_bound_meaning': _FLOOR_NOTE if lf_single is not None else None,
+        f'{label}crl_floor': crl_floor,
+        f'{label}crd_floor': crd_floor,
+        'crl_floor': crl_floor,
+        'crd_floor': crd_floor,
+        'boundary_minimum': boundary_minimum,
+        'LF_local_interp': LF_local_interp,
+        'LF_dist_interp': LF_dist_interp,
 
+        # 기준 응력 일관성
+        'stress_scale': scale,
+        'max_node_stress': ref['max_stress'],
+        'reference_distribution': ref['distribution'],
+        'reference_unsymm': ref['unsymm'],
+        'reference_stress_consistent': ref['consistent'],
+        # P_ref 가 구속 휨(geometric x 축, AISI Sf·Fy 와 같은 기준)의 첫 항복인가.
+        # False 이면 Pcr/P_ref 를 Sf·Fy 로 만든 My 와 섞으면 안 된다.
+        'reference_is_restrained': ref['unsymm'] == 0 and ref['consistent'] is not False,
+        'P_ref_restrained': ref['P_ref_restrained'],
+        'classification_note': classification_note,
+
+        # 곡선 종류
+        'signature_curve': signature_curve,
+        'BC': BC,
+        'warnings': warnings,
+        'assumptions': assumptions,
+        'scope_notes': scope_notes,
     }
 
     return result
+
+
+def _check_reference_stress(node: np.ndarray, fy: float, load_type: str,
+                            props: dict, unsymm) -> dict:
+    """해석에 넣은 절점 응력과 기준 하중(P_ref)의 일관성 확인.
+
+    FSM 하중계수 LF 는 "넣은 응력 × LF" 에서 좌굴한다는 뜻이다. Pcr = LF × P_ref 가
+    맞으려면 넣은 응력이 P_ref 를 받는 분포(최대 |σ| = fy)여야 한다. 최대 |σ| 가
+    fy 와 다르면 LF 를 σmax/fy 로 환산하고, 형상은 load_type 의 순수 분포와 비교해
+    맞는 분포(구속/비구속 휨)의 첫 항복값을 P_ref 로 쓴다.
+    """
+    key = {'P': 'Py', 'Mxx': 'Mxx_y', 'Mzz': 'Mzz_y'}[load_type]
+    out = {'warnings': [], 'assumptions': [], 'stress_scale': 1.0, 'max_stress': None,
+           'distribution': 'unverified', 'unsymm': 0, 'consistent': None}
+    args = (props['A'], props['xcg'], props['zcg'], props['Ixx'], props['Izz'],
+            props['Ixz'], props['thetap'], props['I11'], props['I22'])
+
+    def _p_ref(u):
+        return yieldMP(node, fy, *args, unsymm=u)[key]
+
+    stress = node[:, 7] if node.ndim == 2 and node.shape[1] >= 8 else None
+    s_max = float(np.max(np.abs(stress))) if stress is not None and stress.size else 0.0
+    if not np.isfinite(s_max) or s_max <= 0 or fy <= 0:
+        u0 = 0 if unsymm is None else int(unsymm)
+        out['P_ref'] = _p_ref(u0)
+        out['P_ref_restrained'] = _p_ref(0)
+        out['unsymm'] = u0
+        out['assumptions'].append(
+            '절점 응력이 없어(0) 기준 하중과의 일관성을 확인하지 못했습니다. '
+            'Pcr = LF × P_ref 는 해석 응력의 최대 |σ| = fy 를 가정합니다.')
+        return out
+
+    out['max_stress'] = s_max
+    candidates = [0, 1] if unsymm is None else [int(unsymm)]
+    if load_type == 'P' or abs(props.get('Ixz', 0.0)) < 1e-9:
+        candidates = candidates[:1]
+    loads = {'P': (1.0, 0.0, 0.0), 'Mxx': (0.0, 1.0, 0.0), 'Mzz': (0.0, 0.0, 1.0)}[load_type]
+    shape = stress / s_max
+    matched = None
+    best = math.inf
+    for u in candidates:
+        ref_s = stresgen(node, loads[0], loads[1], loads[2], 0.0, 0.0, *args, unsymm=u)[:, 7]
+        r_max = float(np.max(np.abs(ref_s)))
+        if r_max <= 0:
+            continue
+        r = ref_s / r_max
+        diff = min(float(np.max(np.abs(shape - r))), float(np.max(np.abs(shape + r))))
+        best = min(best, diff)
+        if diff <= _SHAPE_TOL:
+            matched = u
+            break
+
+    scale = s_max / fy
+    out['stress_scale'] = scale
+    out['P_ref_restrained'] = _p_ref(0)
+    if matched is not None:
+        out['P_ref'] = _p_ref(matched)
+        out['unsymm'] = matched
+        out['consistent'] = True
+        if load_type == 'P':
+            out['distribution'] = 'P'
+        else:
+            out['distribution'] = f"{load_type}_{'unrestrained' if matched == 1 else 'restrained'}"
+        if matched == 1:
+            out['warnings'].append(
+                f'절점 응력이 비구속 휨(unsymm=1) {load_type} 분포입니다. P_ref 는 그 분포의 '
+                f'첫 항복 모멘트({out["P_ref"]:.4g})로 잡았습니다 — 구속 휨 My({_p_ref(0):.4g})와 '
+                '섞지 마십시오.')
+    else:
+        u0 = 0 if unsymm is None else int(unsymm)
+        out['P_ref'] = _p_ref(u0)
+        out['unsymm'] = u0
+        out['consistent'] = False
+        out['distribution'] = 'unmatched'
+        out['warnings'].append(
+            f"절점 응력 분포가 load_type='{load_type}' 의 순수 분포와 다릅니다(정규화 차이 "
+            f'{best:.3g}). Pcr/P_ref 는 해석 응력의 첫 항복 기준 비율이며, P_ref 와 같은 '
+            '응력상태의 값이 아닙니다 — 순수 압축/순수 휨 응력으로 다시 해석하십시오.')
+    if abs(scale - 1.0) > _SCALE_TOL:
+        out['assumptions'].append(
+            f'절점 응력의 최대 |σ|={s_max:.4g} 가 fy={fy:.4g} 와 다릅니다. 하중계수를 '
+            f'σmax/fy={scale:.4g} 로 환산해 Pcr 을 냈습니다.')
+    return out
+
+
+def _plateau_end(lf_vals: list, i: int) -> int:
+    j = i
+    while j + 1 < len(lf_vals) and lf_vals[j + 1] == lf_vals[i]:
+        j += 1
+    return j
+
+
+def _find_minima(lengths: list, lf_vals: list, curve_idx: list) -> list:
+    """극소 찾기. 평탄 구간은 첫 점을 극소로, 짧은 끝은 경계 극소로 넣는다."""
+    n = len(lf_vals)
+    minima = []
+    i = 0
+    while i < n - 1:
+        j = _plateau_end(lf_vals, i)
+        rises_after = j + 1 < n and lf_vals[j + 1] > lf_vals[i]
+        falls_before = i == 0 or lf_vals[i - 1] > lf_vals[i]
+        if rises_after and falls_before:
+            if i == 0:
+                lf_i, len_i = lf_vals[0], lengths[0]
+            else:
+                lf_i, len_i = _parabolic_min(lengths, lf_vals, i, j)
+            minima.append({
+                'length': lengths[i],
+                'load_factor': lf_vals[i],
+                'index': i,
+                'curve_index': curve_idx[i],
+                'load_factor_interp': lf_i,
+                'length_interp': len_i,
+            })
+        i = j + 1
+    return minima
+
+
+def _parabolic_min(lengths: list, lf_vals: list, i: int, j: int):
+    """log L 에 대한 3점 포물선의 꼭짓점. i-1, i(…j), j+1 을 쓴다.
+
+    가운데 점이 양옆보다 작거나 같으므로 포물선은 아래로 볼록하고 꼭짓점 값은
+    가운데 표본값 이하다. 수치 오차에 대비해 min(…, 표본값) 으로 한 번 더 묶는다.
+    """
+    y1 = lf_vals[i]
+    try:
+        x0, x1, x2 = (math.log(lengths[i - 1]), math.log(lengths[i]), math.log(lengths[j + 1]))
+        if j > i:
+            x1 = 0.5 * (math.log(lengths[i]) + math.log(lengths[j]))
+        y0, y2 = lf_vals[i - 1], lf_vals[j + 1]
+        d0, d2 = x0 - x1, x2 - x1
+        a = ((y0 - y1) / d0 - (y2 - y1) / d2) / (d0 - d2)
+        b = (y0 - y1) / d0 - a * d0
+        if not (a > 0):
+            return y1, lengths[i]
+        xv = -b / (2 * a)
+        xv = min(max(xv, d0), d2)
+        yv = y1 + a * xv * xv + b * xv
+        if not np.isfinite(yv):
+            return y1, lengths[i]
+        return min(yv, y1), math.exp(x1 + xv)
+    except (ValueError, ZeroDivisionError):
+        return y1, lengths[i]
+
+
+def _assign_two_or_more(minima: list):
+    """극소가 둘 이상일 때 국부·뒤틀림 배정 → (local, basis, dist, basis, notes).
+
+    서명곡선은 순수모드 곡선의 아래 포락선이므로, 어느 극소가 어느 모드인지 모를 때는
+    그 모드일 수 있는 극소 가운데 가장 낮은 값을 쓰면 보수 측이다. 규칙:
+
+    1. D 라벨이 하나이고 가장 짧은 극소가 아니면 그것이 뒤틀림, 국부는 그보다 짧은
+       극소(L 라벨·미분류) 가운데 최저.
+    2. 그렇지 않고 L 라벨이 있으면 국부 = L 라벨 극소와 가장 긴 L 보다 짧은 미분류 극소
+       가운데 최저, 뒤틀림 = 국부보다 긴 극소 가운데 최저(없으면 분리 안 됨).
+    3. 쓸 라벨이 없으면 극소 둘: 짧은 쪽 국부·긴 쪽 뒤틀림. 셋 이상: 국부 = 가장 긴 극소를
+       뺀 최저, 뒤틀림 = 가장 짧은 극소를 뺀 최저(둘 다 하한 — 'wavelength_bound').
+    D 라벨이 L 라벨보다 짧으면(반파장 순서와 어긋남) 라벨을 버린다.
+    """
+    notes = []
+
+    def lf(m):
+        return m['load_factor']
+
+    by_len = sorted(minima, key=lambda m: m['length'])
+    shortest, longest = by_len[0], by_len[-1]
+    Ls = [m for m in by_len if m['mode_class'] == 'L']
+    Ds = [m for m in by_len if m['mode_class'] == 'D']
+    if Ls and Ds and Ds[0]['length'] < Ls[-1]['length']:
+        Ls, Ds = [], []
+        notes.append(('assumption', 'cFSM 라벨이 반파장 순서와 어긋나(D 라벨 극소가 L 라벨 극소보다 짧음) '
+                                    '라벨을 쓰지 않았습니다.'))
+
+    if len(Ds) == 1 and Ds[0] is not shortest:
+        dist = Ds[0]
+        pool = [m for m in by_len if m['length'] < dist['length']]
+        local = min(pool, key=lf)
+        basis = 'cfsm_label' if local['mode_class'] == 'L' else 'wavelength_order'
+        if local['mode_class'] != 'L' and any(m['mode_class'] == 'L' for m in pool):
+            notes.append(('warning', f"L 라벨 극소보다 낮은 미분류 극소(L={local['length']:.3g} in)를 "
+                                     '국부로 썼습니다(보수 측). 모드형상을 확인하십시오.'))
+        elif local is not pool[0] and basis != 'cfsm_label':
+            notes.append(('warning', f"가장 짧은 극소가 아니라 그보다 낮은 극소(L={local['length']:.3g} in)를 "
+                                     '국부로 썼습니다(보수 측).'))
+        return local, basis, dist, 'cfsm_label', notes
+
+    if Ls:
+        pool = Ls + [m for m in by_len if m['mode_class'] is None and m['length'] < Ls[-1]['length']]
+        local = min(pool, key=lf)
+        if local['mode_class'] == 'L' and len(Ls) == 1:
+            basis = 'cfsm_label'
+        else:
+            basis = 'wavelength_bound'
+            notes.append(('warning', f"국부를 L 라벨·미분류 극소 가운데 최저(L={local['length']:.3g} in)로 "
+                                     '썼습니다(하한, 보수 측). 모드형상을 확인하십시오.'))
+        longer = [m for m in by_len if m['length'] > local['length']]
+        if not longer:
+            return local, basis, None, 'not_isolated', notes
+        return local, basis, min(longer, key=lf), 'wavelength_order', notes
+
+    if len(by_len) == 2:
+        return shortest, 'wavelength_order', longest, 'wavelength_order', notes
+    local = min(by_len[:-1], key=lf)
+    dist = min(by_len[1:], key=lf)
+    notes.append(('warning', f'극소가 {len(by_len)}개라 어느 것이 국부·뒤틀림인지 반파장 순서만으로 '
+                             '정할 수 없습니다. 국부 = 가장 긴 극소를 뺀 최저, 뒤틀림 = 가장 짧은 극소를 '
+                             '뺀 최저(둘 다 하한, 보수 측)를 썼습니다 — 모드형상으로 확인하십시오.'))
+    return local, 'wavelength_bound', dist, 'wavelength_bound', notes
+
+
+def _classification_row_is_nan(minimum: dict, mode_classifications: list) -> bool:
+    ci = minimum.get('curve_index')
+    if ci is None or ci < 0 or ci >= len(mode_classifications):
+        return False
+    row = mode_classifications[ci]
+    if row is None:
+        return True
+    try:
+        arr = np.asarray(row, dtype=float)
+    except (ValueError, TypeError):
+        return False
+    gdlo = arr if arr.ndim == 1 else (arr[0] if arr.size else arr)
+    return bool(gdlo.size == 0 or np.all(~np.isfinite(gdlo)))
 
 
 def _gdlo_label(gdlo) -> str:
@@ -457,10 +721,6 @@ def _classify_minimum(minimum: dict, mode_shapes: list, classify_fn) -> str:
     꺼내 classify_fn(length, mode_vector) -> [%G, %D, %L, %O] 를 호출한 뒤,
     %L 우세이면 'L'(국부), %D 우세이면 'D'(뒤틀림), 그 외(G/O 우세 또는
     분류 불가)이면 None 을 반환한다.
-
-    AISI S100-16 App 2 / Comm. E3, E4: Pcrl/Pcrd 는 좌굴 모드 성격(국부 vs
-    뒤틀림)으로 식별하는 것이 정석이며, 본 함수는 cFSM modal 참여율을 그
-    확정 근거로 사용한다.
     """
     ci = minimum.get('curve_index')
     if ci is None or ci < 0 or ci >= len(mode_shapes):
@@ -484,21 +744,3 @@ def _classify_minimum(minimum: dict, mode_shapes: list, classify_fn) -> str:
     except Exception:
         return None
     return _gdlo_label(gdlo)
-
-
-def _empty_result(Py, My_xx, My_zz, label, P_ref):
-    return {
-        'Py': Py, 'My_xx': My_xx, 'My_zz': My_zz,
-        'A': 0, 'Ixx': 0, 'Izz': 0,
-        'load_type': label, 'P_ref': P_ref,
-        f'{label}crl': 0, 'crl': 0, 'Lcrl': 0, 'LF_local': 0,
-        f'{label}crd': 0, 'crd': 0, 'Lcrd': 0, 'LF_dist': 0,
-        f'{label}cre': 0, 'cre': 0, 'Lcre': 0, 'LF_global': 0,
-        'global_is_signature_asymptote': True,
-        'P_y': P_ref,
-        'minima': [], 'n_minima': 0,
-        # 모드 검출 플래그 (Contract #3, 추가 키 — 하위호환)
-        'local_detected': False,
-        'dist_detected': False,
-        'classification_method': 'none',
-    }

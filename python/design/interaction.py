@@ -40,9 +40,10 @@ def combined_axial_bending(P: float, Pa: float,
 
 def combined_bending_shear(M: float, Mao: float,
                            V: float, Va: float) -> dict:
-    """휨 + 전단 상호작용 검토 (§H2, Eq. H2-1)
+    """휨 + 전단 상호작용 검토 (§H2, Eq. H2-1) — 전단보강재 없는 보
 
-    (M/Mao)² + (V/Va)² ≤ 1.0
+    √((M/Malo)² + (V/Va)²) ≤ 1.0. Mao 자리에는 §H2 의 Malo(§F3 국부좌굴 강도,
+    Fn = Fy 또는 Mne = My 의 가용강도)를 넘긴다 — Chapter F 의 지배 강도 Ma 가 아니다.
     """
     m_ratio = _demand_ratio(M, Mao)
     v_ratio = _demand_ratio(V, Va)
@@ -56,6 +57,31 @@ def combined_bending_shear(M: float, Mao: float,
         'total': round(total, 4),
         'pass': total <= 1.0,
         'equation': 'H2-1',
+    }
+
+
+def combined_bending_shear_stiffened(M: float, Malo: float,
+                                    V: float, Va: float) -> dict:
+    """휨 + 전단 상호작용 — 전단보강재(§G4)가 있는 보 (§H2, Eq. H2-2)
+
+    M/Malo > 0.5 이고 V/Va > 0.7 일 때만: 0.6(M/Malo) + V/Va ≤ 1.3.
+    그 밖에는 M ≤ Ma, V ≤ Va 만 검토한다(호출자의 주 휨·전단 검토).
+    """
+    m_ratio = _demand_ratio(M, Malo)
+    v_ratio = _demand_ratio(V, Va)
+    applies = m_ratio > 0.5 and v_ratio > 0.7
+    lhs = 0.6 * m_ratio + v_ratio
+    # 판정용 정규화 비: 식이 적용되면 lhs/1.3, 아니면 개별 비 중 큰 값(V ≤ Va).
+    total = lhs / 1.3 if applies else v_ratio
+    return {
+        'M_ratio': round(m_ratio, 4),
+        'V_ratio': round(v_ratio, 4),
+        'lhs': round(lhs, 4),
+        'limit': 1.3,
+        'applies': applies,
+        'total': round(total, 4),
+        'pass': total <= 1.0,
+        'equation': 'H2-2' if applies else 'H2 (Eq. H2-2 not triggered: V ≤ Va only)',
     }
 
 

@@ -106,14 +106,19 @@ def test_stripmain_basic():
 
 def test_stripmain_all_bc():
     """5종 BC 모두 해석 가능"""
+    # R1-10: S-S 가 아닌 BC 에 m=[1] 만 주면 국부 · 뒤틀림을 놓치므로(R1-01) 권장 항으로 푼다
+    from engine.helpers import m_recommend
     prop, node, elem = _default_model()
     lengths = np.array([50.0])
-    m_all = [np.array([1.0])]
+    m_rec = m_recommend(prop, node, elem, lengths)
     for bc in ['S-S', 'C-C', 'S-C', 'C-F', 'C-G']:
+        m_all = [np.array([1.0])] if bc == 'S-S' else m_rec
         result = stripmain(prop, node, elem, lengths, np.array([]), np.array([]),
                            GBTConfig(), bc, m_all, neigs=3)
         lf = result.curve[0][0, 1]
         assert lf > 0, f"BC={bc}: LF={lf} should be > 0"
+        codes = [d['code'] for d in result.diagnostics]
+        assert 'INSUFFICIENT_LONGITUDINAL_TERMS' not in codes, (bc, codes)
         print(f"  BC={bc}: LF={lf:.4f}")
 
 

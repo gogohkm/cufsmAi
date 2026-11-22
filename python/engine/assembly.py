@@ -13,7 +13,6 @@
 """
 
 import numpy as np
-from scipy import sparse
 
 
 def _extract_blocks(mat: np.ndarray, i: int, j: int) -> dict:
@@ -36,14 +35,58 @@ def _extract_blocks(mat: np.ndarray, i: int, j: int) -> dict:
     return blocks
 
 
-def assemble(K: sparse.lil_matrix, Kg: sparse.lil_matrix,
-             k: np.ndarray, kg: np.ndarray,
+def element_dofs(nodei: int, nodej: int, nnodes: int, totalm: int) -> np.ndarray:
+    """요소 DOF [u1 v1 u2 v2 w1 θ1 w2 θ2] (m항마다) → 전체 DOF 인덱스 (0-based)
+
+    MATLAB stripmain.m 의 assembleLoc 과 같은 순서. nodej=0(접지 스프링)이면
+    nodej 자리는 -1 로 채운다(호출자가 걸러낸다).
+    """
+    skip = 2 * nnodes
+    nd = 4 * nnodes
+    mi = 2 * nodei - 2
+    if nodej == 0:
+        mj = fj = None
+    else:
+        mj = 2 * nodej - 2
+        fj = skip + 2 * nodej - 2
+    fi = skip + 2 * nodei - 2
+    local = [mi, mi + 1,
+             -1 if mj is None else mj, -1 if mj is None else mj + 1,
+             fi, fi + 1,
+             -1 if fj is None else fj, -1 if fj is None else fj + 1]
+    local = np.array(local, dtype=int)
+    idx = (local[None, :] + nd * np.arange(totalm)[:, None]).reshape(-1)
+    idx[np.tile(local < 0, totalm)] = -1
+    return idx
+
+
+def _add_dense(K: np.ndarray, k: np.ndarray, idx: np.ndarray,
+               distinct: bool = False) -> None:
+    """K[idx, idx] += k (dense). 중복 인덱스(nodei == nodej)도 누적되도록 add.at 사용.
+
+    distinct=True 는 호출자가 색인이 모두 0 이상이고 서로 다름을 보장한 경우다.
+    """
+    if distinct:
+        K[np.ix_(idx, idx)] += k
+        return
+    keep = np.nonzero(idx >= 0)[0]
+    gi = idx[keep]
+    sub = k[np.ix_(keep, keep)]
+    if len(np.unique(gi)) == len(gi):
+        K[np.ix_(gi, gi)] += sub
+    else:
+        np.add.at(K, (gi[:, None], gi[None, :]), sub)
+
+
+def assemble(K, Kg, k: np.ndarray, kg: np.ndarray,
              nodei: int, nodej: int, nnodes: int,
              m_a: np.ndarray) -> tuple:
     """요소 행렬을 전체 행렬에 조립
 
     Args:
-        K, Kg: 전체 행렬 (scipy.sparse.lil_matrix, 4*nnodes*totalm × 4*nnodes*totalm)
+        K, Kg: 전체 행렬 (4*nnodes*totalm × 4*nnodes*totalm).
+            np.ndarray 이면 색인 한 번으로 더한다(빠름).
+            scipy.sparse.lil_matrix 이면 원래의 2x2 블록 방식으로 더한다.
         k, kg: 요소 행렬 (8*totalm × 8*totalm) — 글로벌 좌표계
         nodei, nodej: 절점 번호 (MATLAB 1-based)
         nnodes: 전체 절점 수
@@ -53,6 +96,13 @@ def assemble(K: sparse.lil_matrix, Kg: sparse.lil_matrix,
         (K, Kg) 업데이트된 전체 행렬
     """
     totalm = len(m_a)
+    if isinstance(K, np.ndarray) and isinstance(Kg, np.ndarray):
+        idx = element_dofs(nodei, nodej, nnodes, totalm)
+        distinct = nodei != nodej and nodei >= 1 and nodej >= 1
+        _add_dense(K, k, idx, distinct)
+        _add_dense(Kg, kg, idx, distinct)
+        return K, Kg
+
     skip = 2 * nnodes
     nd = 4 * nnodes
 
@@ -132,15 +182,15 @@ def assemble(K: sparse.lil_matrix, Kg: sparse.lil_matrix,
     return K, Kg
 
 
-def spring_assemble(K: sparse.lil_matrix, k_spring: np.ndarray,
+def spring_assemble(K, k_spring: np.ndarray,
                     nodei: int, nodej: int, nnodes: int,
-                    m_a: np.ndarray) -> sparse.lil_matrix:
+                    m_a: np.ndarray):
     """스프링 강성을 전체 행렬에 추가
 
     nodej=0 (접지 스프링): nodei에만 기여, nodej 블록 건너뜀
 
     Args:
-        K: 전체 강성행렬
+        K: 전체 강성행렬 (np.ndarray 또는 scipy.sparse.lil_matrix)
         k_spring: 스프링 요소 행렬 (8*totalm × 8*totalm)
         nodei, nodej: 절점 번호 (MATLAB 1-based, nodej=0이면 접지)
         nnodes: 전체 절점 수
@@ -150,6 +200,11 @@ def spring_assemble(K: sparse.lil_matrix, k_spring: np.ndarray,
         K: 업데이트된 전체 행렬
     """
     totalm = len(m_a)
+    if isinstance(K, np.ndarray):
+        idx = element_dofs(nodei, nodej, nnodes, totalm)
+        _add_dense(K, k_spring, idx)
+        return K
+
     skip = 2 * nnodes
     nd = 4 * nnodes
 

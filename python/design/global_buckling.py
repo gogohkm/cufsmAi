@@ -8,6 +8,41 @@ import math
 from design.steel_grades import E as E_STEEL, G as G_STEEL
 
 
+# 단면 표기 → 정규 이름 — 설계(aisi_s100) 와 engine.dsm 이 같은 표를 쓴다.
+CANONICAL_SECTION_NAMES = {
+    'C': ('C', 'LIPPEDC', 'CSECTION', 'CEE', 'CS', 'STUD', 'LIPPEDCHANNEL', 'CHANNEL'),
+    'Z': ('Z', 'LIPPEDZ', 'ZSECTION', 'ZEE', 'ZS', 'LIPPEDZEE', 'ZPURLIN'),
+    'TRACK': ('TRACK', 'U', 'UNLIPPEDC', 'PLAINCHANNEL'),
+    'HAT': ('HAT', 'HATSECTION'),
+    'I': ('I', 'ISECT', 'ISECTION', 'IBEAM', 'BUILTUPI', 'BUILDUPI', 'BUILTUP', 'BUILTUPISECTION'),
+    'RHS': ('RHS', 'SHS', 'BOX', 'HSS', 'TUBE', 'RECTANGULARHSS'),
+    'CHS': ('CHS', 'ROUND', 'PIPE', 'CYLINDRICAL', 'CIRCULAR', 'ROUNDHSS'),
+    'ANGLE': ('ANGLE', 'L'),
+    'LIPPEDANGLE': ('LIPPEDANGLE',),
+    'TEE': ('TEE', 'T'),
+    'SIGMA': ('SIGMA',),
+}
+
+
+def canonical_section_name(section_type) -> str:
+    """단면 표기를 정규 이름으로. 모르는 이름은 대문자·구분자 제거한 원문."""
+    raw = str(section_type or '').strip().upper().replace('-', '').replace('_', '').replace(' ', '')
+    for canon, names in CANONICAL_SECTION_NAMES.items():
+        if raw in names:
+            return canon
+    if raw.startswith('CHS'):
+        return 'CHS'
+    if raw.startswith('RHS') or raw.startswith('BOX'):
+        return 'RHS'
+    if raw.startswith('HAT'):
+        return 'HAT'
+    return raw
+
+
+def _norm_sec(section_type) -> str:
+    return canonical_section_name(section_type)
+
+
 # ============================================================
 # xo / ro 해석 — Contract #2 (압축·휨 공용)
 # ============================================================
@@ -25,30 +60,53 @@ def resolve_xo_ro(props: dict, rx: float = 0.0, ry: float = 0.0) -> dict:
         rx, ry: 도심 주축 기준 회전반경 (ro 유도용)
 
     Returns:
-        {'xo', 'ro', 'xo_source', 'ro_source'}.
-        xo_source: 'direct' | 'Xs-xcg' | 'zero'.
+        {'xo', 'ro', 'xo_source', 'ro_source', 'symmetry_axis'}.
+        xo_source: 'direct' | 'Xs-xcg' | 'Zs-zcg' | 'zero'.
         ro_source: 'direct' | 'derived'.
+        symmetry_axis: 'x' (전단중심 편심이 x 방향 또는 없음) | 'z' (편심이 z 방향 —
+            §E2.2 의 대칭축 x 는 모델의 z 축) | 'none' (두 방향 모두 편심 — 비대칭, §E2.4).
     """
-    xo = abs(props.get('xo', 0))
+    # 전단중심 z 편심은 Zs·zcg 가 둘 다 주어졌을 때만 본다.
+    tol = 0.005 * math.sqrt(rx ** 2 + ry ** 2) if (rx > 0 or ry > 0) else 1e-6
+    dz = None
+    if props.get('Zs') is not None and props.get('zcg') is not None:
+        dz = abs(float(props['Zs']) - float(props['zcg']))
+    symmetry_axis = 'x'
+
+    xo = abs(props.get('xo', 0) or 0)
+    # 수치 잡음 수준의 xo(Xs−xcg ≈ 1e-9)는 편심이 없는 것으로 본다.
+    if xo != 0 and dz is not None and dz > tol and xo <= tol:
+        xo = 0.0
     if xo != 0:
         xo_source = 'direct'
+        if dz is not None and dz > tol:
+            symmetry_axis = 'none'
     else:
-        Xs = props.get('Xs', 0)
-        xcg = props.get('xcg', 0)
-        if Xs != 0 or xcg != 0:
-            xo = abs(Xs - xcg)
+        Xs = props.get('Xs', 0) or 0
+        xcg = props.get('xcg', 0) or 0
+        dx = abs(Xs - xcg) if (Xs != 0 or xcg != 0) else None
+        if dz is not None and dz > tol and (dx is None or dx <= tol):
+            xo = dz
+            xo_source = 'Zs-zcg'
+            symmetry_axis = 'z'
+        elif dx is not None:
+            xo = dx
             xo_source = 'Xs-xcg'
+            if dz is not None and dz > tol and dx > tol:
+                symmetry_axis = 'none'
         else:
             xo_source = 'zero'
 
     ro = props.get('ro', 0)
-    if ro is not None and ro > 0:
+    if ro is not None and ro > 0 and symmetry_axis != 'z':
         ro_source = 'direct'
     else:
+        # 대칭축이 z 이면 화면이 x 편심만으로 만든 ro 는 틀리므로 다시 유도한다.
         ro = math.sqrt(rx ** 2 + ry ** 2 + xo ** 2)
         ro_source = 'derived'
 
-    return {'xo': xo, 'ro': ro, 'xo_source': xo_source, 'ro_source': ro_source}
+    return {'xo': xo, 'ro': ro, 'xo_source': xo_source, 'ro_source': ro_source,
+            'symmetry_axis': symmetry_axis, 'axis_verified': dz is not None}
 
 
 # ============================================================
@@ -126,16 +184,47 @@ def compute_column_Fcre(props: dict, Fy: float,
               약축(MINOR PRINCIPAL) 회전반경 r=√(I22/Ag) 산정에 사용한다.
     """
     Ag = props.get('A', 0)
-    rx = props.get('rx', 0) or (math.sqrt(props.get('Ixx', 0) / Ag) if Ag > 0 else 0)
-    ry = props.get('ry', 0) or (math.sqrt(props.get('Izz', 0) / Ag) if Ag > 0 else 0)
+    Ixx_g = props.get('Ixx', 0) or 0
+    Izz_g = props.get('Izz', 0) or 0
+    rx = props.get('rx', 0) or (math.sqrt(Ixx_g / Ag) if Ag > 0 and Ixx_g > 0 else 0)
+    ry = props.get('ry', 0) or (math.sqrt(Izz_g / Ag) if Ag > 0 and Izz_g > 0 else 0)
     J = props.get('J', 0)
     Cw = props.get('Cw', 0)
 
-    # §E2.2-4 주: rx, ry는 도심 PRINCIPAL 축 기준 회전반경이다. Ixz≠0 (thetap≠0)인
-    # Z 단면에서는 geometric Ixx/Izz가 주축이 아니므로 주관성모멘트 I11/I22로부터
-    # 주축 회전반경을 산출한다 (있을 때만; C 단면은 Ixz=0이라 영향 없음).
-    I22 = props.get('I22', 0)
+    sec = _norm_sec(props.get('section_type', ''))
+    is_point_symmetric = sec.startswith('Z') or sec.startswith('LIPPEDZ')
+    is_closed = sec in ('RHS', 'CHS', 'HSS', 'BOX', 'PIPE', 'TUBE')
+
+    # 빠진 성질을 큰 값(1e10)이나 기하 ry 로 메우지 않는다 — 비보수측이 된다.
+    missing = []
+    if rx <= 0:
+        missing.append('rx (or Ixx)')
+    if ry <= 0:
+        missing.append('ry (or Izz)')
+    if 'J' not in props:
+        missing.append('J')
+    if 'Cw' not in props and not is_closed:
+        missing.append('Cw')
+
+    # §E2.3 점대칭(Z): 약축(MINOR PRINCIPAL) 회전반경 √(I22/Ag). I22 가 없으면 Ixx·Izz·Ixz 로 구한다.
+    I22 = props.get('I22', 0) or 0
+    if is_point_symmetric and I22 <= 0:
+        if Ixx_g > 0 and Izz_g > 0 and props.get('Ixz') is not None:
+            Ixz_g = float(props.get('Ixz'))
+            I22 = (Ixx_g + Izz_g) / 2.0 - math.sqrt(((Ixx_g - Izz_g) / 2.0) ** 2 + Ixz_g ** 2)
+        else:
+            missing.append('I22 (or Ixx, Izz, Ixz)')
     r_minor = math.sqrt(I22 / Ag) if (I22 > 0 and Ag > 0) else 0.0   # 약축(MINOR) 주축
+
+    if missing:
+        return {
+            'Fcre': 0.0,
+            'buckling_type': 'not evaluated',
+            'missing': missing,
+            'error': ('section properties required for the closed-form elastic buckling stress are '
+                      'missing: ' + ', '.join(missing)
+                      + ' (or supply a rational elastic buckling stress as Fcre)'),
+        }
 
     # xo/ro — Contract #2 공용 해석 (resolve_xo_ro).
     # 복원마저 실패(xo_source='zero')하면 단축대칭 개단면에서 E2.2 분기가
@@ -143,13 +232,14 @@ def compute_column_Fcre(props: dict, Fy: float,
     _xor = resolve_xo_ro(props, rx, ry)
     xo = _xor['xo']
     xo_source = _xor['xo_source']
+    symmetry_axis = _xor['symmetry_axis']
     ro = props.get('ro', 0)
-    if (ro is None or ro <= 0) and Ag > 0:
+    if ((ro is None or ro <= 0) and Ag > 0) or symmetry_axis == 'z':
         ro = _xor['ro']
 
-    # 유연좌굴 응력
-    sigma_ex = flexural_buckling_stress(E, 1.0, KxLx, rx) if rx > 0 else 1e10
-    sigma_ey = flexural_buckling_stress(E, 1.0, KyLy, ry) if ry > 0 else 1e10
+    # 유연좌굴 응력 (모델 x·z 축 기준)
+    sigma_ex = flexural_buckling_stress(E, 1.0, KxLx, rx)
+    sigma_ey = flexural_buckling_stress(E, 1.0, KyLy, ry)
 
     # 비틀림좌굴 응력
     sigma_t = torsional_buckling_stress(E, G, Ag, J, Cw, ro, 1.0, KtLt)
@@ -157,17 +247,34 @@ def compute_column_Fcre(props: dict, Fy: float,
     # 대칭 분류로 분기 결정 (§E2.1/E2.2/E2.3).
     # 점대칭 단면(Z)은 §E2.3을 별도 분기로 처리한다 (아래). xo≈0만으로는
     # 이중대칭/점대칭이 구분되지 않으므로 점대칭 분기가 우선한다.
-    sec = str(props.get('section_type', '') or '').strip().upper().replace('-', '').replace('_', '')
-    is_point_symmetric = sec.startswith('Z') or sec.startswith('LIPPEDZ')
     # 형식이 미지정이어도 전단중심≈도심(xo≈0)이면서 Ixz≠0(주축이 회전)이면 점대칭으로 본다.
     if not is_point_symmetric and abs(xo) < 1e-6 and abs(props.get('Ixz', 0)) > 1e-12 \
             and not sec:
         is_point_symmetric = True
-    is_closed = sec in ('RHS', 'CHS', 'HSS', 'BOX', 'PIPE', 'TUBE')
     supported_open = sec in (
-        '', 'C', 'LIPPEDC', 'CHANNEL', 'TRACK',
+        '', 'C', 'LIPPEDC', 'CHANNEL', 'TRACK', 'SIGMA',
         'Z', 'LIPPEDZ', 'I', 'ISECT', 'ISECTION',
     )
+    # hat 은 대칭축이 모델 z 축인 단축대칭 단면 — 전단중심 위치(Xs/Zs)로 대칭축을 확인한
+    # 경우에만 §E2.2 를 적용한다(직접 준 xo 만으로는 대칭축 방향을 알 수 없다).
+    if sec.startswith('HAT') and symmetry_axis != 'none' and (
+            xo_source in ('Xs-xcg', 'Zs-zcg') or _xor.get('axis_verified')):
+        supported_open = True
+    # 두 방향 모두 전단중심 편심 → 비대칭 단면(§E2.4): 대칭축 식을 쓰지 않는다.
+    if symmetry_axis == 'none' and not is_point_symmetric and not is_closed:
+        return {
+            'Fcre': 0.0,
+            'sigma_ex': sigma_ex, 'sigma_ey': sigma_ey, 'sigma_t': sigma_t,
+            'buckling_type': 'unsupported-nonsymmetric',
+            'ro': ro, 'xo': xo, 'xo_source': xo_source, 'symmetry_axis': symmetry_axis,
+            'unsupported': True,
+            'error': ('shear-centre offset in both x and z (non-symmetric section) — §E2.4 or a '
+                      'rational elastic buckling stress (Fcre) is required'),
+        }
+    if symmetry_axis == 'z' and not is_point_symmetric and not is_closed:
+        # §E2.2: "the x-axis shall be the axis of symmetry" — 모델 z 축이 대칭축이므로
+        # 대칭축 휨(σex)과 직교축 휨(σey)을 바꿔 쓴다.
+        sigma_ex, sigma_ey = sigma_ey, sigma_ex
     if not supported_open and not is_closed and not is_point_symmetric:
         return {
             'Fcre': 0.0,
@@ -206,8 +313,7 @@ def compute_column_Fcre(props: dict, Fy: float,
     if is_point_symmetric:
         # §E2.3 점대칭 단면(Z): Fcre = min(σt, 약축(MINOR PRINCIPAL)에 대한 유연좌굴응력).
         # 약축 유연좌굴은 주관성모멘트 I22 기반 r_minor를 사용한다 (geometric Izz 아님).
-        r_use = r_minor if r_minor > 0 else ry
-        sigma_e_minor = flexural_buckling_stress(E, 1.0, KyLy, r_use) if r_use > 0 else 1e10
+        sigma_e_minor = flexural_buckling_stress(E, 1.0, KyLy, r_minor)
         Fcre = min(sigma_t, sigma_e_minor)
         buckling_type = 'torsional' if Fcre == sigma_t else 'flexural'
     elif not use_ft:
@@ -230,6 +336,7 @@ def compute_column_Fcre(props: dict, Fy: float,
         'ro': ro,
         'xo': xo,
         'xo_source': xo_source,
+        'symmetry_axis': symmetry_axis,
         'ft_not_evaluated': ft_not_evaluated,
     }
 
@@ -342,7 +449,18 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
                        Ly: float = None, Lt: float = None,
                        Ky: float = 1.0, Kt: float = 1.0,
                        Fy: float = 0.0) -> float:
-    """횡-비틀림좌굴 임계응력 Fcre (§F2.1)
+    """횡-비틀림좌굴 임계응력 Fcre (§F2.1). 상세가 필요하면 compute_beam_Fcre_detail 을 쓴다."""
+    return compute_beam_Fcre_detail(props, Cb, Lb, E=E, G=G, section_type=section_type,
+                                    Ly=Ly, Lt=Lt, Ky=Ky, Kt=Kt, Fy=Fy)[0]
+
+
+def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
+                              E: float = E_STEEL, G: float = G_STEEL,
+                              section_type: str = 'C',
+                              Ly: float = None, Lt: float = None,
+                              Ky: float = 1.0, Kt: float = 1.0,
+                              Fy: float = 0.0) -> tuple:
+    """횡-비틀림좌굴 임계응력 Fcre (§F2.1) 와 계산 상세 — (Fcre, detail).
 
     C-section (§F2.1.1): Fcre = Cb × ro × A / Sf × √(σey × σt)
     Z-section (§F2.1.3): Fcre = Cb × ro × A / (2×Sf) × √(σey × σt)
@@ -351,6 +469,9 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
                           Fcre = Cb×π/(Ky×Ly×Sf)×√(E×G×J×Iy)  (Eq. F2.1.4-2)
                           → 개단면 σey·σt 공식을 사용하지 않음.
 
+    detail 에 'missing' 이 있으면 필요한 단면 성질이 없어 Fcre 를 계산하지 못한 것이다
+    (Fcre=0 은 이 경우 "평가하지 못함"이지 강도 0 이 아니다).
+
     Args:
         section_type: 'C', 'Z', 또는 폐합단면('RHS'/'BOX' 등). Z는 /2, 폐합은 F2.1.4.
         Ly, Lt: 약축휨/비틀림 비지지길이 (in). 기본 None이면 둘 다 Lb로 설정
@@ -358,10 +479,6 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
         Ky, Kt: 유효길이계수 (기본 1.0).
         Fy: 항복강도 (ksi) — 폐합단면 §F2.1.4-1의 Lu 판정에만 사용 (선택).
     """
-    # 조기 반환(물성 부족/Ky·Ly≤0 등) 시 이전 호출의 상세가 하류 계산서에
-    # 그대로 남지 않도록 매 호출마다 초기화한다.
-    compute_beam_Fcre._last_detail = {}
-
     # §F2.1.1-4/-5: 약축휨(Ky·Ly)과 비틀림(Kt·Lt)에 별도 길이 허용.
     # 하위호환: Ly/Lt 미지정 시 둘 다 Lb로 둔다 (Ky=Kt=1.0이면 기존 동작과 동일).
     if Ly is None:
@@ -378,21 +495,33 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     J = props.get('J', 0)
     Cw = props.get('Cw', 0)
 
-    sec = (section_type or 'C').upper().replace('-', '').replace('_', '')
+    sec = _norm_sec(section_type or 'C')
+
+    def _missing(names):
+        return 0.0, {
+            'Fcre': 0.0,
+            'equation': 'F2 (not evaluated — section properties missing)',
+            'missing': names,
+            'error': ('section properties required for the closed-form lateral-torsional buckling '
+                      'stress are missing: ' + ', '.join(names)
+                      + ' (or supply a rational elastic buckling stress as Fcre)'),
+        }
 
     # ---- 폐합-박스 단면 (§F2.1.4) ----------------------------------------
     # 개단면 LTB 공식(σey·σt 곱)은 폐합단면에 유효하지 않으므로 별도 분기.
-    is_closed_box = sec in ('RHS', 'BOX', 'HSS', 'TUBE') or sec.startswith('RHS') or sec.startswith('BOX')
+    is_closed_box = sec in ('RHS', 'BOX', 'HSS', 'TUBE', 'SHS') or sec.startswith('RHS') or sec.startswith('BOX')
     if is_closed_box:
+        if Lb <= 0:
+            return 1e6, {'Fcre': 1e6, 'Lb': Lb, 'equation': 'F2.1.4 (Lb=0, fully braced)'}
         # Iy — 웹에 평행한 도심축에 대한 관성모멘트 (냉간성형강: 약축 = z축)
         Iy = props.get('Iy', 0) or props.get('Izz', 0) or props.get('Iz', 0)
-        if Ag <= 0 or Sf <= 0 or Iy <= 0 or Ky <= 0:
-            return 0.0
-        if Lb <= 0:
-            return 1e6
+        miss = [n for n, ok in (('A', Ag > 0), ('Sf', Sf > 0), ('Iy (or Izz)', Iy > 0),
+                                ('J', J > 0)) if not ok]
+        if miss:
+            return _missing(miss)
+        if Ky <= 0:
+            return 0.0, {}
         root = E * G * J * Iy
-        if root <= 0:
-            return 0.0
         # Eq. F2.1.4-1: Lu (Fy>0 알려진 경우에만 판정; 모르면 F2.1.4-2로 진행)
         Lu = 0.0
         if Fy > 0:
@@ -405,24 +534,23 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
             # Eq. F2.1.4-2
             Fcre = (Cb * math.pi) / (Ky * Ly * Sf) * math.sqrt(root)
             eq = 'F2.1.4-2 (closed-box)'
-        compute_beam_Fcre._last_detail = {
+        return Fcre, {
             'Cb': Cb, 'Lb': Lb, 'Ly': Ly, 'Ky': Ky, 'Ag': round(Ag, 4),
-            'Sf': round(Sf, 4), 'Iy': round(Iy, 4), 'J': J,
+            'Sf': round(Sf, 4), 'Iy': round(Iy, 4), 'J': J, 'E': E, 'G': G,
             'Lu': round(Lu, 4) if Lu else 0.0, 'Fcre': round(Fcre, 2),
             'equation': eq,
         }
-        return Fcre
 
     # 완전 횡구속이면 단면 종류와 무관하게 LTB가 지배하지 않는다. 그 외 단면은
     # 본 구현이 보유한 F2.1.1(C/I), F2.1.3(Z), F2.1.4(box) 범위를 명시적으로 제한한다.
     if Lb <= 0:
-        return 1e6
-    supported_open = sec in ('C', 'LIPPEDC', 'CHANNEL', 'TRACK', 'I', 'ISECT', 'ISECTION')
+        return 1e6, {}
+    supported_open = sec in ('C', 'LIPPEDC', 'CHANNEL', 'TRACK', 'I', 'ISECT', 'ISECTION', 'SIGMA')
     is_z = sec in ('Z', 'LIPPEDZ') or sec.startswith('LIPPEDZ')
     if not supported_open and not is_z:
         is_f212 = sec in ('ANGLE', 'LIPPEDANGLE', 'HAT', 'TEE', 'T')
         required_section = 'F2.1.2' if is_f212 else 'F2.1.5'
-        compute_beam_Fcre._last_detail = {
+        return 0.0, {
             'Fcre': 0.0,
             'equation': f'{required_section} (not implemented for this orientation)',
             'required_section': required_section,
@@ -430,18 +558,21 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
             'error': (
                 f"Section type '{section_type}' is outside implemented F2.1.1/F2.1.3/F2.1.4 "
                 f'closed-form cases; use §{required_section} with the required axis/orientation inputs '
-                'or provide a rational elastic buckling stress.'
+                "or provide a rational elastic buckling stress as 'Fcre' (e.g. FSM Mcre/Sf)."
             ),
         }
-        return 0.0
 
     # ---- 개단면 (§F2.1.1 C / §F2.1.3 Z) ----------------------------------
     # ry — 약축 회전반경 (냉간성형강: z축이 약축)
-    ry = props.get('ry', 0) or props.get('rz', 0)
+    # 회전반경이 없으면 압축(compute_column_Fcre)과 같이 Izz·Ixx 로 구한다.
+    Izz_g = props.get('Izz', 0) or 0
+    Ixx_g = props.get('Ixx', 0) or 0
+    ry = props.get('ry', 0) or props.get('rz', 0) or (
+        math.sqrt(Izz_g / Ag) if Ag > 0 and Izz_g > 0 else 0)
 
     # xo/ro — Contract #2 공용 해석 (resolve_xo_ro).
     # ro 유도는 기존 가드(rx>0, ry>0)를 유지하여 수치 동작을 보존한다.
-    rx = props.get('rx', 0)
+    rx = props.get('rx', 0) or (math.sqrt(Ixx_g / Ag) if Ag > 0 and Ixx_g > 0 else 0)
     _xor = resolve_xo_ro(props, rx, ry)
     xo = _xor['xo']
     xo_source = _xor['xo_source']
@@ -449,11 +580,14 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     if (ro is None or ro <= 0) and rx > 0 and ry > 0:
         ro = _xor['ro']
 
-    if Ag <= 0 or Sf <= 0 or ry <= 0 or ro <= 0:
-        return 0.0
+    miss = [n for n, ok in (('A', Ag > 0), ('Sf', Sf > 0), ('ry', ry > 0),
+                            ('ro (or rx, ry, xo)', ro is not None and ro > 0),
+                            ('J', 'J' in props), ('Cw', 'Cw' in props)) if not ok]
+    if miss:
+        return _missing(miss)
 
     if Ky * Ly <= 0 or Kt * Lt <= 0:
-        return 0.0
+        return 0.0, {}
 
     # §F2.1.1-4: σey = π²E/(Ky·Ly/ry)²   (약축휨)
     sigma_ey = math.pi ** 2 * E / ((Ky * Ly) / ry) ** 2
@@ -461,7 +595,7 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
     sigma_t = (1 / (Ag * ro ** 2)) * (G * J + math.pi ** 2 * E * Cw / (Kt * Lt) ** 2)
 
     if sigma_ey <= 0 or sigma_t <= 0:
-        return 0.0
+        return 0.0, {}
 
     Fcre = Cb * ro * Ag / Sf * math.sqrt(sigma_ey * sigma_t)
 
@@ -471,15 +605,12 @@ def compute_beam_Fcre(props: dict, Cb: float, Lb: float,
         Fcre /= 2.0
         z_factor = 2.0
 
-    # 상세 계산과정을 함수 속성에 저장 (선택적 참조용)
-    compute_beam_Fcre._last_detail = {
+    return Fcre, {
         'Cb': Cb, 'Lb': Lb, 'Ly': Ly, 'Lt': Lt, 'Ky': Ky, 'Kt': Kt,
         'ro': round(ro, 4), 'Ag': round(Ag, 4),
         'Sf': round(Sf, 4), 'ry': round(ry, 4),
-        'J': J, 'Cw': Cw, 'xo': round(xo, 4), 'xo_source': xo_source,
+        'J': J, 'Cw': Cw, 'xo': round(xo, 4), 'xo_source': xo_source, 'E': E, 'G': G,
         'sigma_ey': round(sigma_ey, 2), 'sigma_t': round(sigma_t, 2),
         'z_factor': z_factor, 'Fcre': round(Fcre, 2),
         'equation': 'F2.1.1' if z_factor == 1.0 else 'F2.1.3',
     }
-
-    return Fcre

@@ -50,10 +50,10 @@ function main() {
   assert(appJs.includes("Math.abs(sel.negMuFt) * 12"),
     'app.js must convert kip-ft -> kip-in (x12) for conn-Mu');
 
-  // StcfsdPanel lap 이용률 12x 변환 tripwire (§4 이슈2B)
+  // StcfsdPanel 구간 설계의 12x 변환 tripwire (§4 이슈2B). W3: 퍼린은 구간별 M_max_abs(kip-ft) → kip-in.
   const panelTs = readUtf8(path.join('src', 'webview', 'StcfsdPanel.ts'));
-  assert(panelTs.includes('negMuSupport * 12'),
-    'StcfsdPanel must convert negMuSupport kip-ft -> kip-in (x12)');
+  assert(panelTs.includes('const Mu = Number(r.M_max_abs) * 12;'),
+    'StcfsdPanel must convert region M_max_abs kip-ft -> kip-in (x12)');
 
   console.log('lap_governing_contract: PASS');
 }

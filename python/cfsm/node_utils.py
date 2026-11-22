@@ -15,6 +15,165 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from engine.properties import elemprop
 
+# Two elements meeting at a node are treated as one straight plate when the sine
+# of the angle between their directions is below this value. MATLAB meta_elems.m
+# compares atan2 angles (|a1-a2|<1e-7), which breaks at the +-pi branch cut: an
+# element running in -x with 1e-13 noise in z gives a1=+pi, a2=-pi. Comparing unit
+# vectors has no branch cut; 1e-6 rad also absorbs coordinate round-off.
+COLLINEAR_SIN_TOL = 1e-6
+
+# A rounded corner meshed as an arc shows up as consecutive bend nodes turning
+# the same way by less than this angle each (90 deg arc in n chords: 45/n at the
+# tangent points, 90/n inside).
+_ARC_TURN_MAX = math.radians(60.0)
+
+
+def _unit(dx, dz):
+    n = math.hypot(dx, dz)
+    if n == 0.0:
+        return None
+    return dx / n, dz / n
+
+
+def is_collinear_through(node, n_prev, n_mid, n_next):
+    """True if n_prev -> n_mid -> n_next continues in the same direction.
+
+    Node arguments are 0-based row indices into ``node``.
+    """
+    d1 = _unit(node[n_mid, 1] - node[n_prev, 1], node[n_mid, 2] - node[n_prev, 2])
+    d2 = _unit(node[n_next, 1] - node[n_mid, 1], node[n_next, 2] - node[n_mid, 2])
+    if d1 is None or d2 is None:
+        return False
+    cross = d1[0] * d2[1] - d1[1] * d2[0]
+    dot = d1[0] * d2[0] + d1[1] * d2[1]
+    return abs(cross) < COLLINEAR_SIN_TOL and dot > 0.0
+
+
+def check_cfsm_model(node, elem):
+    """Check whether classical (GBT-based) cFSM applies to this model.
+
+    Classical cFSM (Adany & Schafer) assumes an open, unbranched cross-section made
+    of flat plates meeting at sharp corners. Outside that, the G/D/L/O spaces are
+    not the physical modes (a rounded-corner local mode is reported as ~96 % D).
+
+    Returns:
+        dict with keys
+            'supported': bool
+            'code': None or one of 'BAD_TOPOLOGY', 'ZERO_LENGTH_ELEMENT',
+                    'ORPHAN_NODE', 'DISCONNECTED', 'CLOSED_SECTION',
+                    'BRANCHED_SECTION', 'ROUNDED_CORNER'
+            'message': human readable reason (empty when supported)
+            'details': dict with counts used for the decision
+    """
+    node = np.asarray(node, dtype=float)
+    elem = np.asarray(elem, dtype=float)
+    nnode = node.shape[0]
+    nelem = elem.shape[0] if elem.ndim == 2 else 0
+
+    def fail(code, message, **details):
+        return {'supported': False, 'code': code, 'message': message, 'details': details}
+
+    if nnode == 0 or nelem == 0:
+        return fail('BAD_TOPOLOGY', 'cFSM classification needs at least one element.')
+
+    adj = [[] for _ in range(nnode)]
+    for e in range(nelem):
+        ni = int(elem[e, 1]) - 1
+        nj = int(elem[e, 2]) - 1
+        if not (0 <= ni < nnode and 0 <= nj < nnode) or ni == nj:
+            return fail('BAD_TOPOLOGY',
+                        f'Element {int(elem[e, 0])} references invalid nodes '
+                        f'({int(elem[e, 1])}, {int(elem[e, 2])}).')
+        if math.hypot(node[nj, 1] - node[ni, 1], node[nj, 2] - node[ni, 2]) <= 0.0:
+            return fail('ZERO_LENGTH_ELEMENT',
+                        f'Element {int(elem[e, 0])} has zero length.')
+        adj[ni].append((nj, e))
+        adj[nj].append((ni, e))
+
+    deg = [len(a) for a in adj]
+    orphans = [i + 1 for i in range(nnode) if deg[i] == 0]
+    if orphans:
+        return fail('ORPHAN_NODE',
+                    f'Node(s) {orphans[:5]} are not connected to any element; '
+                    'cFSM node classification requires every node to belong to an element.',
+                    orphan_nodes=orphans)
+
+    # Connected components
+    comp = [-1] * nnode
+    ncomp = 0
+    for s in range(nnode):
+        if comp[s] >= 0:
+            continue
+        stack = [s]
+        comp[s] = ncomp
+        while stack:
+            u = stack.pop()
+            for v, _ in adj[u]:
+                if comp[v] < 0:
+                    comp[v] = ncomp
+                    stack.append(v)
+        ncomp += 1
+    if ncomp > 1:
+        return fail('DISCONNECTED',
+                    f'The model consists of {ncomp} disconnected parts; cFSM needs one '
+                    'connected cross-section.', n_parts=ncomp)
+
+    ncycles = nelem - nnode + ncomp
+    if ncycles > 0:
+        return fail('CLOSED_SECTION',
+                    'The cross-section contains a closed cell; classical cFSM applies to '
+                    'open sections only.', n_cells=ncycles)
+
+    branch_nodes = [i + 1 for i in range(nnode) if deg[i] >= 3]
+    if branch_nodes:
+        return fail('BRANCHED_SECTION',
+                    f'Node(s) {branch_nodes[:5]} join three or more elements; this cFSM '
+                    'classification is limited to unbranched open sections.',
+                    branch_nodes=branch_nodes)
+
+    # Bend nodes: degree-2 nodes that are not straight-through sub-nodes
+    bend = [deg[i] == 2 and not is_collinear_through(node, adj[i][0][0], i, adj[i][1][0])
+            for i in range(nnode)]
+
+    arc_pairs = []
+    for e in range(nelem):
+        ni = int(elem[e, 1]) - 1
+        nj = int(elem[e, 2]) - 1
+        if not (bend[ni] and bend[nj]):
+            continue
+        # measure both turns walking along ni -> nj so their signs are comparable
+        s_i = _turn_along(node, adj, ni, toward=nj)
+        s_j = _turn_along(node, adj, nj, came_from=ni)
+        if s_i * s_j > 0 and min(abs(s_i), abs(s_j)) < _ARC_TURN_MAX:
+            arc_pairs.append((ni + 1, nj + 1))
+    if arc_pairs:
+        return fail('ROUNDED_CORNER',
+                    'The model has rounded corners meshed as arcs (consecutive bend nodes '
+                    f'{arc_pairs[0]}); classical cFSM treats every arc node as a plate '
+                    'corner, so local buckling is reported as distortional. Use a '
+                    'sharp-corner model (r = 0) for modal classification.',
+                    arc_pairs=arc_pairs[:10])
+
+    return {'supported': True, 'code': None, 'message': '',
+            'details': {'n_nodes': nnode, 'n_elems': nelem}}
+
+
+def _turn_along(node, adj, i, toward=None, came_from=None):
+    """Signed turning angle at degree-2 node i, walking so that the path
+    leaves i toward ``toward`` or arrives at i from ``came_from``."""
+    nbrs = [v for v, _ in adj[i]]
+    if toward is not None:
+        nxt = toward
+        prv = nbrs[0] if nbrs[1] == toward else nbrs[1]
+    else:
+        prv = came_from
+        nxt = nbrs[0] if nbrs[1] == came_from else nbrs[1]
+    d1 = _unit(node[i, 1] - node[prv, 1], node[i, 2] - node[prv, 2])
+    d2 = _unit(node[nxt, 1] - node[i, 1], node[nxt, 2] - node[i, 2])
+    cross = d1[0] * d2[1] - d1[1] * d2[0]
+    dot = d1[0] * d2[0] + d1[1] * d2[1]
+    return math.atan2(cross, dot)
+
 
 def meta_elems(node, elem):
     """Re-organise cross-section data to form meta-elements.
@@ -77,10 +236,9 @@ def meta_elems(node, elem):
                 n3_1b = int(elem[els[1], 2])
             n3 = n3_1b - 1  # 0-based
 
-            a1 = math.atan2(node[n2, 2] - node[n1, 2], node[n2, 1] - node[n1, 1])
-            a2 = math.atan2(node[n1, 2] - node[n3, 2], node[n1, 1] - node[n3, 1])
-
-            if abs(a1 - a2) < 1e-7:
+            # MATLAB meta_elems.m:57-62 compares atan2 angles of n1->n2 and n3->n1;
+            # the same test on unit vectors (no +-pi wrap): n3 -> n1 -> n2 straight.
+            if is_collinear_through(node, n3, n1, n2):
                 node_prop[i, 2] = 0  # mark for elimination
                 node_prop[i, 3] = 3  # sub-node
 

@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(ROOT, 'python'))
 
 import test_unittest_collection as existing  # noqa: E402
 import test_regression_0926 as reg0926  # noqa: E402
+from review_suites import iter_review_tests  # noqa: E402
 
 
 def _wrap(func):
@@ -43,6 +44,12 @@ def build_suite():
                 _wrap(getattr(reg0926, name)),
                 description=f'test_regression_0926.{name}',
             ))
+    # 리뷰 회귀 스위트 (test_review_*.py 자동 수집 — review_suites.py 참조)
+    for module, name in iter_review_tests():
+        suite.addTest(unittest.FunctionTestCase(
+            _wrap(getattr(module, name)),
+            description=f'{module.__name__}.{name}',
+        ))
     return suite
 
 

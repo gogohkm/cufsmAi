@@ -1,11 +1,12 @@
 """데크/패널 강성 계산, 비지지길이 결정, 모멘트구배계수, 양력 R 검증
 
 Sections:
-  - kφ (rotational stiffness) — Chen & Moen 2011
-  - kx (lateral stiffness) — AISI RP17-2 Example II-1C calibrated estimate
-  - Cb (moment gradient factor) — ASCE 7 / AISI F2.1.1-2
+  - kφ (rotational stiffness) — Gao & Moen (2011), Design Manual Example II-1C 3b
+  - kx (lateral stiffness) — AISI RP17-2 curve fit, Design Manual Example II-1C 3a
+  - Cb (moment gradient factor) — AISI S100-16 Eq. F2.1.1-2
   - β (distortional buckling gradient) — Appendix 2, Eq. 2.3.3.3-3
-  - R (uplift reduction factor) — Section I6.2.1
+  - 비지지 영역 — determine_unbraced_lengths 의 규칙
+  - R (uplift reduction factor) — Section I6.2.1 (through-fastened)
 """
 
 
@@ -14,7 +15,7 @@ G_STEEL = 11300.0  # ksi — AISI S100-16 §A3.1 published shear modulus (77,900
 
 
 # ---------------------------------------------------------------------------
-# 패널 회전강성 kφ (Chen & Moen 2011, Example II-1C)
+# 패널 회전강성 kφ (Gao & Moen 2011, Example II-1C 3b)
 # ---------------------------------------------------------------------------
 
 def calc_rotational_stiffness(
@@ -22,45 +23,108 @@ def calc_rotational_stiffness(
     t_purlin: float,
     fastener_spacing: float = 12.0,
     flange_width: float = 2.5,
-    k_per_fastener: float = 1.77,
+    k_per_fastener: float = None,
     E: float = E_STEEL,
+    b_fastener: float = None,
+    c_fastener: float = None,
 ) -> float:
-    """패널-퍼린 연결의 회전강성 kφ 추정 (Chen & Moen 2011 기반)
+    """through-fastened 패널-퍼린 연결의 회전강성 kφ (Gao & Moen 2011)
 
-    NOTE: 이 값은 예비설계 근사치이다. 프로젝트별 시험값이 있으면
-    kphi_override를 우선 사용해야 한다.
-    예제 참고값: through-fastened 0.05~0.30, standing-seam 0.002~0.01
+    Design Manual Example II-1C 3b 의 식:
+        kφ = 1 / [ 1/(k c²) + (b²c/2 + b c² + c³/3) / (E I c²) ]
+        k  = 1.934 c^-0.4 / s   (패널 인발강성, kip/in./fastener → 간격 s 로 나눔)
+        I  = t_purlin³ / 12     (퍼린 판의 단위폭 I)
+    b = 웹-플랜지 모서리 ~ 패스너, c = 플랜지-립 모서리 ~ 패스너 (기본 각각 B/2).
+
+    k 의 추세식은 0.018 in. 패널의 유한요소 결과에서 나왔다. 패널이 이보다 얇거나
+    패스너가 패널 리브에서 1 in. 넘게 떨어지면 과대평가할 수 있다(예제 본문).
+    식에는 패널 두께가 들어가지 않는다 — t_panel 은 적용 범위 확인에만 쓴다.
+    예비설계용 해석식이다. S918 시험값이 있으면 kphi_override 로 넣는다.
 
     Parameters
     ----------
-    t_panel : 패널 두께 (in.)
+    t_panel : 패널 두께 (in.) — 식에는 쓰지 않음
     t_purlin : 퍼린 두께 (in.)
-    fastener_spacing : 패스너 간격 (in.), 기본 12
-    flange_width : 플랜지 폭 (in.)
-    k_per_fastener : 패스너당 비틀림 강성 (kip/in./fastener), 기본 1.77
+    fastener_spacing : 패스너 간격 s (in.)
+    flange_width : 플랜지 외-외 폭 B (in.)
+    k_per_fastener : 패스너당 인발강성을 직접 줄 때 (kip/in./fastener). None 이면 1.934 c^-0.4
     E : 탄성계수 (ksi)
+    b_fastener, c_fastener : b, c (in.). None 이면 B/2
 
     Returns
     -------
-    kφ in kip-in./rad/in.
+    kφ in kip-in./rad/in. (Example II-1C: 0.113)
     """
-    c = flange_width / 2.0
-    k = k_per_fastener / fastener_spacing
-    # Example II-1C: I = t_purlin^3/12 (purlin thickness for conservative I)
-    I_panel = t_purlin ** 3 / 12.0
-
-    denom1 = k * c ** 2
-    denom2 = 3.0 * E * I_panel * c ** 2
-    if denom1 < 1e-15 or denom2 < 1e-15:
+    if min(t_purlin, fastener_spacing, flange_width, E) <= 0:
         return 0.0
+    b = b_fastener if b_fastener is not None else flange_width / 2.0
+    c = c_fastener if c_fastener is not None else flange_width / 2.0
+    if b <= 0 or c <= 0:
+        return 0.0
+    k_fast = k_per_fastener if k_per_fastener is not None else 1.934 * c ** -0.4
+    k = k_fast / fastener_spacing
+    I_sheet = t_purlin ** 3 / 12.0
 
-    kphi = 1.0 / (1.0 / denom1 + c ** 3 / denom2)
-    return kphi
+    flex = (b ** 2 * c / 2.0 + b * c ** 2 + c ** 3 / 3.0) / (E * I_sheet * c ** 2)
+    pull = 1.0 / (k * c ** 2)
+    return 1.0 / (pull + flex)
 
 
 # ---------------------------------------------------------------------------
-# 패널 횡강성 kx (AISI RP17-2, Example II-1C)
+# 패널 횡강성 kx (AISI RP17-2, Example II-1C 3a)
 # ---------------------------------------------------------------------------
+
+# Example II-1C 3a 의 패스너 값 (Fss 1800 lb, D 0.190 in., Fu1 = Fu2 = 70 ksi)
+RP17_2_EXAMPLE_FASTENER = {'Fss_kip': 1.8, 'D_screw_in': 0.190, 'Fu1_ksi': 70.0, 'Fu2_ksi': 70.0}
+
+
+def lateral_stiffness_detail(
+    t_panel: float,
+    t_purlin: float,
+    fastener_spacing: float = 12.0,
+    E: float = E_STEEL,
+    Fss_kip: float = None,
+    D_screw_in: float = None,
+    Fu1_ksi: float = None,
+    Fu2_ksi: float = None,
+) -> dict:
+    """RP17-2 곡선맞춤 (Example II-1C 3a):
+
+        Ka = [1/(E t1) + 1/(E t2)]^-1
+        ψ  = (Fss / (t1 D Fu1)) (Fss / (t2 D Fu2))
+        Ke = 0.27 ψ^-0.69 Ka            (패스너 1개, kip/in.)
+        kx = Ke / s
+
+    Fss·D·Fu 가 없으면 예제 값을 쓰고 'defaulted' 에 밝힌다. 시험 자료는 강판
+    두께 18 – 97 mil, #8 – #12 자기천공 나사이고, 곡선의 변동계수가 0.86 으로 크다.
+
+    알림 (FIXES §3.1.1): 'warnings' = 이 입력에서 값을 바꾼 것(범위 밖, 0 처리),
+    'scope_notes' = 늘 참인 방법의 한계(COV). 'notes' 는 둘을 합친 이전 키.
+    """
+    t1, t2 = t_panel, t_purlin
+    out = {'kx': 0.0, 'Ka': None, 'psi': None, 'Ke': None, 'defaulted': [], 'notes': [],
+           'warnings': [], 'scope_notes': []}
+    if min(t1, t2, fastener_spacing, E) <= 0:
+        out['warnings'].append('Non-positive thickness, spacing or E: kx taken as 0.')
+        out['notes'] = out['warnings'] + out['scope_notes']
+        return out
+    vals = {'Fss_kip': Fss_kip, 'D_screw_in': D_screw_in, 'Fu1_ksi': Fu1_ksi, 'Fu2_ksi': Fu2_ksi}
+    for key, v in vals.items():
+        if v is None or v <= 0:
+            vals[key] = RP17_2_EXAMPLE_FASTENER[key]
+            out['defaulted'].append(key)
+    Ka = 1.0 / (1.0 / (E * t1) + 1.0 / (E * t2))
+    psi = (vals['Fss_kip'] / (t1 * vals['D_screw_in'] * vals['Fu1_ksi'])) * \
+          (vals['Fss_kip'] / (t2 * vals['D_screw_in'] * vals['Fu2_ksi']))
+    Ke = 0.27 * psi ** -0.69 * Ka
+    out.update({'kx': Ke / fastener_spacing, 'Ka': Ka, 'psi': psi, 'Ke': Ke, 'inputs': vals})
+    if min(t1, t2) < 0.0179 or max(t1, t2) > 0.097:
+        out['warnings'].append('Ply thickness outside the RP17-2 test range (18 - 97 mil).')
+    out['scope_notes'].append('RP17-2 curve fit has a coefficient of variation of 0.86; '
+                              'use S917 test stiffness (kx_override) where available.')
+    out['notes'] = out['warnings'] + out['scope_notes']
+    return out
+
 
 def calc_lateral_stiffness(
     t_panel: float,
@@ -70,35 +134,22 @@ def calc_lateral_stiffness(
     Pss: float = 0,
     d_screw: float = 0,
     Fu_panel: float = 0,
+    Fss_kip: float = None,
+    D_screw_in: float = None,
+    Fu1_ksi: float = None,
+    Fu2_ksi: float = None,
     **_kwargs,
 ) -> float:
-    """패널-퍼린 연결의 횡강성 kx 추정
+    """패널-퍼린 연결의 횡강성 kx (kip/in./in.) — lateral_stiffness_detail 의 kx.
 
-    2-ply 직렬 축강성에 AISI RP17-2 Example II-1C의 문서값을 맞춘
-    감소계수 0.0379를 적용한다. 이는 시험 기반 접합 강성을 대체하는
-    일반식이 아니며, Pss/d_screw/Fu_panel 인수는 이전 API 호환을 위해서만
-    유지한다.
-
-    Parameters
-    ----------
-    Pss, d_screw, Fu_panel : 이전 API 호환용 (현재 근사식에는 미사용)
-
-    Returns
-    -------
-    kx in kip/in./in.
+    Fss_kip·D_screw_in·Fu1_ksi·Fu2_ksi 가 없으면 Example II-1C 의 패스너 값을 쓴다
+    (예제 점에서 1.28). Pss/d_screw/Fu_panel 은 이전 API 호환용으로 받기만 하고 쓰지
+    않는다(검증되지 않은 별도 모델이었다).
     """
-    t1 = t_panel
-    t2 = t_purlin
-
-    if min(t1, t2, fastener_spacing, E) <= 0:
-        return 0.0
-
-    # Example II-1C: t1=0.0179, t2=0.059, E=29,500 ksi,
-    # s=12 in → kx≈1.28 kip/in/in (문서값 1.28).
-    kx_per_fastener = 1.0 / (1.0 / (E * t1) + 1.0 / (E * t2))
-    kx = kx_per_fastener / fastener_spacing * 0.0379
-
-    return kx
+    return lateral_stiffness_detail(
+        t_panel, t_purlin, fastener_spacing, E,
+        Fss_kip=Fss_kip, D_screw_in=D_screw_in, Fu1_ksi=Fu1_ksi, Fu2_ksi=Fu2_ksi,
+    )['kx']
 
 
 # ---------------------------------------------------------------------------
@@ -215,20 +266,20 @@ def _interp_moment(M_list, x_list, target_x):
 # ---------------------------------------------------------------------------
 
 def calc_beta_distortional(Lcrd: float, Lm: float,
-                           M1: float, M2: float) -> float:
-    """왜곡좌굴 모멘트 구배 보정계수
+                           M1: float, M2: float,
+                           diagram_signs: bool = False) -> float:
+    """왜곡좌굴 모멘트 구배 보정계수 (Eq. 2.3.3.3-3)
 
     Parameters
     ----------
     Lcrd : 왜곡좌굴 반파장 (in.)
     Lm : 비지지길이 (in.) — 랩 끝~변곡점
-    M1 : 비지지구간 단부 모멘트 (부호 포함)
-    M2 : 비지지구간 단부 모멘트 (부호 포함)
-
-    M1, M2는 부호가 있는 단부 모멘트로 입력한다. 본 함수가 크기로 정렬해
-    |M1| ≤ |M2|를 보장하므로 입력 순서는 무관하다. AISI S100-16 App. 2
-    Eq. 2.3.3.3-3 규약상 M1/M2는 역곡률(reverse curvature)일 때 양(+),
-    단곡률(single curvature)일 때 음(-)이다 (부호가 다른 단부 모멘트→음의 비).
+    M1, M2 : 비지지구간 양 끝 모멘트. 크기로 정렬해 |M1| ≤ |M2| 로 쓰므로 순서는 무관.
+    diagram_signs : 부호의 뜻.
+        False (기본) — Eq. 2.3.3.3-3 규약의 부호: 비 M1/M2 가 역곡률이면 +, 단곡률이면 −
+                       가 되도록 넣은 값.
+        True — 모멘트 다이어그램 부호(새깅 +) 그대로. 두 끝이 같은 부호 = 단곡률이므로
+               비를 −|M1|/|M2| 로, 다른 부호 = 역곡률이므로 +|M1|/|M2| 로 바꾼다.
 
     Returns
     -------
@@ -245,9 +296,11 @@ def calc_beta_distortional(Lcrd: float, Lm: float,
     if abs(M2) < 1e-10:
         return 1.0
 
-    # 부호 있는 비율 (abs() 제거): 단곡률이면 음(-)→β 감소, 역곡률이면 양(+).
-    # r ≥ -1로 제한하여 (1+r) ≥ 0 보장 (Eq. 2.3.3.3-3).
-    r = max(M1 / M2, -1.0)
+    # 단곡률이면 음(-)→β 감소, 역곡률이면 양(+). r ≥ -1 (Eq. 2.3.3.3-3).
+    r = M1 / M2
+    if diagram_signs:
+        r = -r
+    r = max(r, -1.0)
     beta = 1.0 + 0.4 * (L / Lm) ** 0.7 * (1.0 + r) ** 0.7
     return max(1.0, min(beta, 1.3))
 
@@ -256,6 +309,76 @@ def calc_beta_distortional(Lcrd: float, Lm: float,
 # 비지지길이 자동 결정
 # ---------------------------------------------------------------------------
 
+UNBRACED_RULE = (
+    "Compression flange from the sign of M (sagging +): M > 0 -> top flange, M < 0 -> bottom "
+    "flange, for gravity and uplift alike. Brace points: supports (P/R/F) and the given discrete "
+    "brace points; a free end (N) is unbraced. A through-fastened deck braces the top flange "
+    "continuously, and inflection points are then taken as brace points of the bottom flange "
+    "(Design Manual Examples II-1A/II-2A); the single-member segment near a lapped support ends at "
+    "the lap end. Standing-seam roofs and members without deck are braced only at discrete points "
+    "(S100-16 App. A I6.2.2): the unbraced length is the brace-to-brace distance and inflection "
+    "points are not brace points. Cb from Eq. F2.1.1-2 with |M|; Cb = 1.0 for an overhang or "
+    "cantilever with an unbraced free end (F2.1.1)."
+)
+
+
+def _sign_zones(x, M, sign: int, members=None) -> list:
+    """sign*M > 0 인 연속 구간 [(a, b), ...] (경계는 선형보간한 영점).
+
+    M 이 여러 다이어그램의 포락선이면 members 에 그 다이어그램들을 준다. 포락선은
+    격자 사이에서 꺾이므로, 경계를 포락선이 아니라 각 다이어그램의 영점으로 정한다.
+    """
+    n = len(x)
+    if n == 0:
+        return []
+    scale = max(abs(m) for m in M) if M else 0.0
+    if scale <= 0:
+        return []
+    tol = 1e-7 * scale
+    s = [sign * m > tol for m in M]
+
+    def lin(y, i0, i1):
+        v0, v1 = sign * y[i0], sign * y[i1]
+        if abs(v1 - v0) < 1e-30:
+            return x[i0]
+        xc = x[i0] + (0.0 - v0) * (x[i1] - x[i0]) / (v1 - v0)
+        lo_x, hi_x = min(x[i0], x[i1]), max(x[i0], x[i1])
+        return min(max(xc, lo_x), hi_x)
+
+    def cross(i0, i1):
+        # i0: 구간 밖, i1: 구간 안
+        if not members:
+            return lin(M, i0, i1)
+        cands = [lin(m, i0, i1) for m in members if sign * m[i1] > tol]
+        if not cands:
+            return lin(M, i0, i1)
+        return min(cands, key=lambda c: abs(c - x[i0]))
+
+    zones = []
+    i = 0
+    while i < n:
+        if not s[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and s[j + 1]:
+            j += 1
+        a = x[0] if i == 0 else cross(i - 1, i)
+        b = x[-1] if j == n - 1 else cross(j + 1, j)
+        zones.append((a, b))
+        i = j + 1
+    return zones
+
+
+def _segment_cb(M_abs, x, a, b, cantilever: bool):
+    if cantilever:
+        return 1.0, None
+    detail = _get_Cb_detail(M_abs, x, a, b)
+    if detail is None:
+        return 1.0, None
+    return detail['Cb'], detail
+
+
 def determine_unbraced_lengths(
     M_diagram: list,
     x_diagram: list,
@@ -263,166 +386,246 @@ def determine_unbraced_lengths(
     laps: dict = None,
     laps_per_support: list = None,
     deck_type: str = 'through-fastened',
+    M_min_diagram: list = None,
+    supports: list = None,
+    brace_points_ft: list = None,
+    envelope_members: tuple = None,
 ) -> dict:
-    """모멘트 다이어그램과 지지조건으로부터 정/부모멘트 영역별 비지지길이를 결정
+    """모멘트 다이어그램(또는 포락선)과 지지조건으로 압축 플랜지별 비지지 영역을 정한다.
+
+    규칙은 UNBRACED_RULE 하나다 (중력·양력 구분 없이 M 의 부호로 압축 플랜지를 정함).
+
+    Parameters
+    ----------
+    M_diagram : M (kip-ft, 새깅 +). M_min_diagram 을 주면 이것은 정(최대) 포락선.
+    M_min_diagram : 부(최소) 포락선. 없으면 M_diagram 과 같다.
+    laps : {'left_ft','right_ft'} — laps_per_support 가 없을 때 모든 내부 지점에 적용
+    laps_per_support : 지점별 [{left_ft, right_ft} | None, ...] (left = 지점 중심에서 왼쪽 랩 끝까지)
+    deck_type : 'through-fastened' | 'standing-seam' | 'none'
+    supports : 지점 조건 (P/R/F/N)
+    brace_points_ft : 이산 브레이스 위치 (ft, 양 플랜지 횡구속)
+    envelope_members : (정 포락선을 이루는 다이어그램 목록, 부 포락선을 이루는 목록) — 영점 정밀화용
 
     Returns
     -------
     dict with:
-        'positive_regions': [{start, end, Ly, Lt, Cb, braced}]
-        'negative_regions': [{start, end, Ly, Lt, Cb, Lm}]
+        'positive_regions': 상부 플랜지 압축 영역 [{start_ft, end_ft, Ly, Lt, Ly_in, Lt_in, Cb, braced, ...}]
+        'negative_regions': 하부 플랜지 압축 영역 (랩 안 구간 제외)
+                            [{support, side, start_ft, end_ft, Ly_in, Lt_in, Cb, Cb_detail, M1, M2, ...}]
+        'lap_regions': 랩 안의 하부 플랜지 압축 구간 (2겹 단면, 따로 검토)
+        'inflection_points_ft', 'supports_ft', 'lap_ends_ft', 'brace_points_ft', 'rule', 'assumptions'
     """
-    # 변곡점 찾기
-    inflections = []
-    for i in range(len(M_diagram) - 1):
-        if M_diagram[i] * M_diagram[i + 1] < 0:
-            x_zero = x_diagram[i] - M_diagram[i] * (x_diagram[i + 1] - x_diagram[i]) / (M_diagram[i + 1] - M_diagram[i])
-            inflections.append(x_zero)
-
-    # 지점 위치
-    supports = [0.0]
-    offset = 0.0
+    x = [float(v) for v in x_diagram]
+    M_hi = [float(v) for v in M_diagram]
+    M_lo = [float(v) for v in M_min_diagram] if M_min_diagram is not None else M_hi
+    n = len(spans)
+    sup = [s[0].upper() if s else 'P' for s in supports] if supports else ['P'] * (n + 1)
+    xs = [0.0]
     for s in spans:
-        offset += s
-        supports.append(offset)
+        xs.append(xs[-1] + s)
+    total = xs[-1]
+    eps = 1e-6
 
-    # 랩 끝 위치
+    # 랩 (지점별, 양 끝 지점은 제외)
+    lap_pairs = [(0.0, 0.0)] * (n + 1)
+    if laps_per_support:
+        lap_pairs = []
+        for j in range(n + 1):
+            lp = laps_per_support[j] if j < len(laps_per_support) else None
+            if not lp or j == 0 or j == n:
+                lap_pairs.append((0.0, 0.0))
+            else:
+                lap_pairs.append((float(lp.get('left_ft', 0) or 0), float(lp.get('right_ft', 0) or 0)))
+    elif laps and n > 1:
+        lL = float(laps.get('left_ft', 0) or 0)
+        lR = float(laps.get('right_ft', 0) or 0)
+        lap_pairs = [(lL, lR) if (0 < j < n and sup[j] != 'N') else (0.0, 0.0) for j in range(n + 1)]
     lap_ends = []
-    if laps and len(spans) > 1:
-        for j in range(1, len(supports) - 1):
-            sup = supports[j]
-            if laps_per_support and j < len(laps_per_support):
-                lap_data = laps_per_support[j] or {}
-                lap_left = lap_data.get('left_ft', 0)
-                lap_right = lap_data.get('right_ft', 0)
-            else:
-                lap_left = laps.get('left_ft', 0) if laps else 0
-                lap_right = laps.get('right_ft', 0) if laps else 0
-            if lap_right > 0:
-                lap_ends.append(sup - lap_right)
-            if lap_left > 0:
-                lap_ends.append(sup + lap_left)
+    lap_spans = []  # (start, end) of lapped portion
+    for j, (lL, lR) in enumerate(lap_pairs):
+        if lL > 0:
+            lap_ends.append(xs[j] - lL)
+        if lR > 0:
+            lap_ends.append(xs[j] + lR)
+        if lL > 0 or lR > 0:
+            lap_spans.append((xs[j] - lL, xs[j] + lR))
 
-    positive_regions = []
-    negative_regions = []
+    braces = sorted(float(b) for b in (brace_points_ft or []) if eps < float(b) < total - eps)
+    real_sup_x = [xs[j] for j in range(n + 1) if sup[j] != 'N']
+    interior_real_x = [xs[j] for j in range(1, n) if sup[j] != 'N']
+    brace_x = sorted(set(real_sup_x + braces))
+    free_ends = []
+    if sup[0] == 'N':
+        free_ends.append(xs[0])
+    if sup[-1] == 'N':
+        free_ends.append(xs[-1])
 
-    # 정모멘트 영역: 변곡점 사이 또는 지점~변곡점 (M > 0)
-    # 부모멘트 영역: 변곡점~랩끝 또는 변곡점~지점 (M < 0)
+    mem_hi, mem_lo = (envelope_members or (None, None))
+    M_abs_env = [max(abs(a), abs(b)) for a, b in zip(M_hi, M_lo)]
+    M_abs_lo = [abs(v) for v in M_lo]
+    M_abs_hi = [abs(v) for v in M_hi]
 
-    if deck_type in ('through-fastened', 'standing-seam'):
-        # 정모멘트: 상부 플랜지 압축 → 데크가 연속 횡지지
-        for i, x in enumerate(x_diagram):
-            if M_diagram[i] > 0:
-                positive_regions.append({
-                    'x': x, 'Ly': 0, 'Lt': 0, 'braced': True,
-                })
-                break  # 대표 하나만
+    def nearest_support(a, b):
+        mid = 0.5 * (a + b)
+        cands = [j for j in range(n + 1) if sup[j] != 'N']
+        j = min(cands, key=lambda k: abs(xs[k] - mid))
+        return j, ('left' if mid < xs[j] else 'right')
 
-    # 부모멘트: 하부 플랜지 압축 → 비지지 (데크 유무와 무관하게 항상 계산)
-    # 비지지길이 = 랩끝 ~ 변곡점
-    if len(supports) > 2:
-        for j in range(1, len(supports) - 1):
-            sup = supports[j]
-            # 좌측: sup - lap_right ~ 가장 가까운 좌측 변곡점
-            if laps_per_support and j < len(laps_per_support):
-                lap_data = laps_per_support[j] or {}
-                lap_left = lap_data.get('left_ft', 0)
-                lap_right = lap_data.get('right_ft', 0)
-            else:
-                lap_right = laps.get('right_ft', 0) if laps else 0
-                lap_left = laps.get('left_ft', 0) if laps else 0
+    def touches(xv, pts):
+        return any(abs(xv - p) < eps for p in pts)
 
-            brace_start_left = sup - lap_right if lap_right > 0 else sup
-            closest_infl_left = None
-            for ip in inflections:
-                if ip < brace_start_left:
-                    closest_infl_left = ip
+    def region_info(a, b, flange, M_signed, M_abs, cantilever, braced=False):
+        Ly = 0.0 if braced else (b - a) * 12.0
+        cb, detail = (1.0, None) if braced else _segment_cb(M_abs, x, a, b, cantilever)
+        m_a = _interp_moment(M_signed, x, a)
+        m_b = _interp_moment(M_signed, x, b)
+        M1, M2 = (m_a, m_b) if abs(m_a) <= abs(m_b) else (m_b, m_a)
+        # 이 플랜지를 압축하는 부호의 모멘트만 (상부: M > 0, 하부: M < 0). 브레이스 간 영역은
+        # 반대 부호 모멘트를 함께 담으므로 |M| 로 고르면 다른 플랜지의 모멘트가 섞인다.
+        sgn = 1.0 if flange == 'top' else -1.0
+        pts = [k for k, xv in enumerate(x) if a - eps <= xv <= b + eps]
+        if pts:
+            kmax = max(pts, key=lambda k: sgn * M_signed[k])
+            m_max, x_max = max(sgn * M_signed[kmax], 0.0), x[kmax]
+        else:
+            m_max, x_max = max(sgn * m_a, sgn * m_b, 0.0), a
+        j, side = nearest_support(a, b)
+        kind = 'cantilever' if cantilever else (
+            'support' if (touches(a, real_sup_x + lap_ends) or touches(b, real_sup_x + lap_ends))
+            and any(a - eps <= xr <= b + eps for xr in interior_real_x + lap_ends) else 'span')
+        return {
+            'support': j, 'side': side,
+            'start_ft': round(a, 4), 'end_ft': round(b, 4),
+            'Ly_in': round(Ly, 1), 'Lt_in': round(Ly, 1),
+            'Ly': round(Ly, 1), 'Lt': round(Ly, 1),
+            'Cb': round(cb, 2), 'Cb_detail': detail,
+            'M1': round(M1, 4), 'M2': round(M2, 4),
+            'M_max_abs': round(m_max, 4), 'x_M_max_ft': round(x_max, 3),
+            'flange': flange, 'braced': braced, 'cantilever': cantilever, 'kind': kind,
+        }
 
-            if closest_infl_left is not None:
-                Ly = (brace_start_left - closest_infl_left) * 12.0  # ft→in.
-                Cb_val = calc_Cb_from_diagram(M_diagram, x_diagram,
-                                              closest_infl_left, brace_start_left)
-                # Cb 상세 계산 (MA, MB, MC)
-                Cb_detail = _get_Cb_detail(M_diagram, x_diagram,
-                                            closest_infl_left, brace_start_left)
-                # 단부 모멘트 (M1=변곡점≈0, M2=지점)
-                M1_at_infl = _interp_moment(M_diagram, x_diagram, closest_infl_left)
-                M2_at_sup = _interp_moment(M_diagram, x_diagram, brace_start_left)
-                negative_regions.append({
-                    'support': j, 'side': 'left',
-                    'start_ft': closest_infl_left,
-                    'end_ft': brace_start_left,
-                    'Ly_in': round(Ly, 1),
-                    'Lt_in': round(Ly, 1),
-                    'Cb': round(Cb_val, 2),
-                    'Cb_detail': Cb_detail,
-                    'M1': round(M1_at_infl, 4),
-                    'M2': round(M2_at_sup, 4),
-                })
+    positive_regions, negative_regions, lap_regions = [], [], []
+    assumptions = []
+    deck_braced_top = (deck_type == 'through-fastened')
 
-            # 우측
-            brace_start_right = sup + lap_left if lap_left > 0 else sup
-            closest_infl_right = None
-            for ip in inflections:
-                if ip > brace_start_right:
-                    closest_infl_right = ip
-                    break
+    if deck_braced_top:
+        for (a, b) in _sign_zones(x, M_hi, +1, mem_hi):
+            r = region_info(a, b, 'top', M_hi, M_abs_hi, False, braced=True)
+            r['kind'] = 'deck_braced'
+            positive_regions.append(r)
+        for (a, b) in _sign_zones(x, M_lo, -1, mem_lo):
+            zone_has_int_support = any(a + eps < xr < b - eps for xr in interior_real_x)
+            cuts = sorted(set([a, b] + [p for p in brace_x + lap_ends if a + eps < p < b - eps]))
+            for p, q in zip(cuts[:-1], cuts[1:]):
+                if q - p < eps:
+                    continue
+                mid = 0.5 * (p + q)
+                cant = touches(p, free_ends) or touches(q, free_ends)
+                r = region_info(p, q, 'bottom', M_lo, M_abs_lo, cant)
+                r['zone_contains_interior_support'] = zone_has_int_support
+                r['inflection_brace_assumed'] = not (touches(p, brace_x) and touches(q, brace_x))
+                if any(s0 - eps <= p and q <= s1 + eps for (s0, s1) in lap_spans) and \
+                        any(s0 < mid < s1 for (s0, s1) in lap_spans):
+                    r['kind'] = 'lap'
+                    lap_regions.append(r)
+                else:
+                    negative_regions.append(r)
+        if negative_regions:
+            assumptions.append('Inflection points taken as brace points of the bottom flange '
+                               '(top flange continuously attached to a through-fastened deck; '
+                               'Design Manual Examples II-1A/II-2A).')
+        if lap_regions:
+            assumptions.append('Bottom-flange segments inside laps are reported in lap_regions '
+                               '(two members; Design Manual assumptions c-d) and are not part of '
+                               'negative_regions.')
+    else:
+        pts = brace_x[:]
+        intervals = []
+        if sup[0] == 'N' and pts and pts[0] > xs[0] + eps:
+            intervals.append((xs[0], pts[0], True))
+        for p, q in zip(pts[:-1], pts[1:]):
+            intervals.append((p, q, False))
+        if sup[-1] == 'N' and pts and pts[-1] < xs[-1] - eps:
+            intervals.append((pts[-1], xs[-1], True))
+        tol_hi = 1e-7 * max([abs(v) for v in M_hi] + [1e-30])
+        tol_lo = 1e-7 * max([abs(v) for v in M_lo] + [1e-30])
+        for (p, q, cant) in intervals:
+            idx = [k for k, xv in enumerate(x) if p - eps <= xv <= q + eps]
+            if any(M_hi[k] > tol_hi for k in idx):
+                r = region_info(p, q, 'top', M_hi, M_abs_env, cant)
+                positive_regions.append(r)
+            if any(M_lo[k] < -tol_lo for k in idx):
+                r = region_info(p, q, 'bottom', M_lo, M_abs_env, cant)
+                r['zone_contains_interior_support'] = any(p + eps < xr < q - eps for xr in interior_real_x)
+                r['inflection_brace_assumed'] = False
+                negative_regions.append(r)
+        assumptions.append(
+            ('Standing-seam roof: ' if deck_type == 'standing-seam' else 'No deck bracing: ')
+            + 'flanges braced only at supports and discrete brace points; unbraced length = '
+              'brace-to-brace distance (inflection points are not brace points).')
 
-            if closest_infl_right is not None:
-                Ly = (closest_infl_right - brace_start_right) * 12.0
-                Cb_val = calc_Cb_from_diagram(M_diagram, x_diagram,
-                                              brace_start_right, closest_infl_right)
-                Cb_detail = _get_Cb_detail(M_diagram, x_diagram,
-                                            brace_start_right, closest_infl_right)
-                M1_at_infl = _interp_moment(M_diagram, x_diagram, closest_infl_right)
-                M2_at_sup = _interp_moment(M_diagram, x_diagram, brace_start_right)
-                negative_regions.append({
-                    'support': j, 'side': 'right',
-                    'start_ft': brace_start_right,
-                    'end_ft': closest_infl_right,
-                    'Ly_in': round(Ly, 1),
-                    'Lt_in': round(Ly, 1),
-                    'Cb': round(Cb_val, 2),
-                    'Cb_detail': Cb_detail,
-                    'M1': round(M1_at_infl, 4),
-                    'M2': round(M2_at_sup, 4),
-                })
-
-    # 데크 없음: 정모멘트 구간도 비지지로 처리
-    if deck_type not in ('through-fastened', 'standing-seam'):
-        # 정모멘트 구간 = 인접 변곡점 사이 (또는 지점~변곡점)
-        # 변곡점 + 지점을 포함한 경계점 목록
-        boundaries = sorted(set([0.0] + inflections + [supports[-1]]))
-        for k in range(len(boundaries) - 1):
-            seg_start = boundaries[k]
-            seg_end = boundaries[k + 1]
-            seg_mid = (seg_start + seg_end) / 2.0
-            # 구간 중앙의 모멘트 부호 확인
-            M_mid = _interp_moment(M_diagram, x_diagram, seg_mid)
-            if M_mid > 0:
-                Ly = (seg_end - seg_start) * 12.0  # ft → in
-                Cb_val = calc_Cb_from_diagram(M_diagram, x_diagram, seg_start, seg_end)
-                positive_regions.append({
-                    'start_ft': seg_start,
-                    'end_ft': seg_end,
-                    'Ly': round(Ly, 1),
-                    'Lt': round(Ly, 1),
-                    'Cb': round(Cb_val, 2),
-                    'braced': False,
-                })
+    # 단일 다이어그램 변곡점 (legacy 키)
+    inflections = []
+    for i in range(len(M_hi) - 1):
+        if M_hi[i] * M_hi[i + 1] < 0:
+            inflections.append(x[i] - M_hi[i] * (x[i + 1] - x[i]) / (M_hi[i + 1] - M_hi[i]))
+    infl_lo = []
+    for i in range(len(M_lo) - 1):
+        if M_lo[i] * M_lo[i + 1] < 0:
+            infl_lo.append(x[i] - M_lo[i] * (x[i + 1] - x[i]) / (M_lo[i + 1] - M_lo[i]))
 
     return {
         'positive_regions': positive_regions,
         'negative_regions': negative_regions,
+        'lap_regions': lap_regions,
         'inflection_points_ft': [round(ip, 2) for ip in inflections],
-        'supports_ft': supports,
-        'lap_ends_ft': [round(le, 2) for le in lap_ends],
+        'inflection_points_min_envelope_ft': [round(ip, 2) for ip in infl_lo],
+        'supports_ft': xs,
+        'lap_ends_ft': [round(le, 2) for le in sorted(lap_ends)],
+        'brace_points_ft': braces,
+        'deck_type': deck_type,
+        'rule': UNBRACED_RULE,
+        'assumptions': assumptions,
     }
 
 
 # ---------------------------------------------------------------------------
 # 양력 감소계수 R (Section I6.2.1)
 # ---------------------------------------------------------------------------
+
+# 시스템 조건 (i) – (n) 중 입력으로 확인할 수 없는 부분 — 사용자가 확인해야 한다.
+I621_SYSTEM_CONDITIONS = (
+    '(i) both flanges prevented from moving laterally at the supports',
+    '(j) panels: steel sheets, Fy >= 50 ksi, t >= 0.018 in., rib depth >= 1-1/8 in., ribs <= 12 in. '
+    'o.c., attached to inhibit relative movement between panel and flange',
+    '(k) insulation is glass fiber blanket 0 to 6 in. thick, compressed between member and panel',
+    '(l) fasteners at least No. 12 self-drilling/self-tapping screws or 3/16 in. rivets with '
+    '1/2 in. washers',
+    '(m) fasteners are not standoff type screws',
+    '(n) fasteners <= 12 in. o.c., near the center of the flange and adjacent to the panel high rib',
+)
+
+
+def _i621_profile(sec_type) -> str:
+    """I6.2.1 표의 단면 구분: 'Z', 'C', 또는 None (표에 없는 단면)."""
+    t = str(sec_type or '').strip().upper()
+    if 'Z' in t:
+        return 'Z'
+    if t in ('C', 'CS', 'CEE', 'LIPPEDC', 'LIPPED_C', 'LIPPED-C', 'C-SECTION') or t.startswith('C') \
+            or 'LIPPEDC' in t.replace('_', '').replace('-', ''):
+        return 'C'
+    return None
+
+
+def _i621_table(profile: str, d: float, continuous: bool):
+    if continuous:
+        return 0.60 if profile == 'C' else 0.70
+    if d <= 6.5:
+        return 0.70
+    if d <= 8.5:
+        return 0.65
+    return 0.40 if profile == 'C' else 0.50
+
 
 def check_i621_conditions(
     section: dict,
@@ -431,59 +634,183 @@ def check_i621_conditions(
     span_ft: float,
     span_type: str = 'continuous',
     lap_length_in: float = None,
+    lap_lengths_in: list = None,
+    spans_ft: list = None,
+    supports: list = None,
+    deck: dict = None,
+    system_confirmed: bool = None,
+    insulation_in: float = None,
 ) -> dict:
-    """Section I6.2.1 양력 감소계수 R 적용조건 검증
+    """Section I6.2.1 양력 감소계수 R 적용조건 검증 (through-fastened 전용)
+
+    R 은 모든 조건 (a) – (o) 를 만족할 때만 준다. (i) – (n) 은 대부분 입력으로 확인할
+    수 없으므로 system_confirmed=True (사용자 확인)가 있어야 만족으로 본다. 입력으로
+    확인할 수 있는 부분(패널 두께, 패스너 간격, 단열재 두께)은 따로 검사한다.
 
     Parameters
     ----------
-    section : dict with keys:
-        depth, flange_width, thickness, lip_depth, R_corner, type ('C'/'Z')
-    Fy, Fu : ksi
-    span_ft : 스팬 길이 (ft)
-    span_type : 'simple' or 'continuous'
-    lap_length_in : 연속스팬 시 랩 길이 (in.)
+    section : depth, flange_width, thickness, lip_depth, R_corner, type ('C'/'Z'/'lippedc'...)
+    Fy, Fu : ksi (None 이면 (o) 미확인)
+    span_ft : 최대 경간 (spans_ft 가 없을 때)
+    span_type : 'simple' | 'continuous' (spans_ft 가 있으면 그것으로 정함)
+    lap_length_in : 랩 길이 하나 (이전 API) — 최솟값으로 본다
+    lap_lengths_in : 내부 지점마다 양방향 랩 길이 목록 (in.) — (g) 는 그 최솟값
+    spans_ft, supports : 경간별 R (20 % 규정, 캔틸레버 배제)
+    deck : {'type', 't_panel', 'fastener_spacing', 'insulation_in'}
+    system_confirmed : (i) – (n) 사용자 확인
+    insulation_in : 단열재 두께 t_i (in.) — 단순보 r = 1 − 0.01 t_i (Eq. I6.2.1-2)
 
     Returns
     -------
-    dict with 'all_pass', 'R', 'checks'
+    dict with 'all_pass', 'R' (None unless all conditions are met), 'checks' [(label, bool)],
+    'conditions' [{id, label, status: pass|fail|unverified}], 'R_if_confirmed',
+    'R_per_span', 'reasons', 'span_type', 'section_type'
     """
-    d = section.get('depth', 0)
-    b = section.get('flange_width', 0)
-    t = section.get('thickness', 0)
-    lip = section.get('lip_depth', 0)
+    d = section.get('depth', 0) or 0
+    b = section.get('flange_width', 0) or 0
+    t = section.get('thickness', 0) or 0
+    lip = section.get('lip_depth', 0) or 0
     R_corner = section.get('R_corner', 0.1875)
-    sec_type = section.get('type', 'C').upper()
+    if R_corner is None:
+        R_corner = 0.1875
+    profile = _i621_profile(section.get('type', 'C'))
+    sec_type = profile or str(section.get('type', ''))
     flat_b = b - 2.0 * (t + R_corner) if t > 0 else 0
 
-    checks = []
-    checks.append(('(a) d ≤ 12 in.', d <= 12.0))
-    checks.append(('(b) has lip stiffener', lip > 0))
-    checks.append(('(c) 60 ≤ d/t ≤ 170', 60 <= d / t <= 170 if t > 0 else False))
-    checks.append(('(d) 2.8 ≤ d/b ≤ 5.5', 2.8 <= d / b <= 5.5 if b > 0 else False))
-    checks.append(('(e) b ≥ 2.125 in.', b >= 2.125))
-    checks.append(('(f) 16 ≤ flat_b/t ≤ 43', 16 <= flat_b / t <= 43 if t > 0 else False))
+    deck = deck or {}
+    if insulation_in is None:
+        insulation_in = deck.get('insulation_in')
 
-    if span_type == 'continuous' and lap_length_in is not None:
-        checks.append(('(g) lap ≥ 1.5d', lap_length_in >= 1.5 * d))
+    # 경간 구성
+    if spans_ft:
+        spans = [float(s) for s in spans_ft]
+        sup = [s[0].upper() if s else 'P' for s in supports] if supports else ['P'] * (len(spans) + 1)
     else:
-        checks.append(('(g) lap length (N/A for simple)', True))
+        spans = [float(span_ft)]
+        sup = ['P', 'P']
+    real_span = [not (sup[i] == 'N' or sup[i + 1] == 'N') for i in range(len(spans))]
+    n_real = sum(real_span)
+    if spans_ft:
+        continuous = n_real > 1
+    else:
+        continuous = (span_type == 'continuous')
 
-    checks.append(('(h) span ≤ 33 ft', span_ft <= 33))
-    checks.append(('(o) Fu/Fy ≥ 1.08', Fu / Fy >= 1.08 if Fy > 0 else False))
+    conds = []
 
-    all_pass = all(c[1] for c in checks)
+    def add(cid, label, status, value=None):
+        conds.append({'id': cid, 'label': label, 'status': status, 'value': value})
 
-    R = None
-    if all_pass:
-        if span_type == 'continuous':
-            R = 0.60 if sec_type == 'C' else 0.70
+    def pf(ok):
+        return 'pass' if ok else 'fail'
+
+    add('profile', 'C- or Z-section (Table I6.2.1-1)', pf(profile is not None), sec_type)
+    deck_type = deck.get('type')
+    if deck_type is not None:
+        add('deck', 'tension flange through-fastened to deck or sheathing',
+            pf(deck_type == 'through-fastened'), deck_type)
+    add('(a)', '(a) d <= 12 in.', pf(0 < d <= 12.0), d)
+    add('(b)', '(b) flanges with edge stiffeners', pf(lip > 0), lip)
+    add('(c)', '(c) 60 <= d/t <= 170', pf(t > 0 and 60 <= d / t <= 170), round(d / t, 1) if t > 0 else None)
+    add('(d)', '(d) 2.8 <= d/b <= 5.5', pf(b > 0 and 2.8 <= d / b <= 5.5), round(d / b, 2) if b > 0 else None)
+    add('(e)', '(e) b >= 2.125 in.', pf(b >= 2.125), b)
+    add('(f)', '(f) 16 <= flat b/t <= 43', pf(t > 0 and 16 <= flat_b / t <= 43),
+        round(flat_b / t, 1) if t > 0 else None)
+
+    laps = [float(v) for v in (lap_lengths_in or []) if v is not None]
+    if lap_length_in is not None and not laps:
+        laps = [float(lap_length_in)]
+    if continuous:
+        if laps:
+            add('(g)', '(g) lap length at each interior support in each direction >= 1.5d',
+                pf(min(laps) >= 1.5 * d), round(min(laps), 2))
         else:
-            if d <= 6.5:
-                R = 0.70
-            elif d <= 8.5:
-                R = 0.65
-            else:
-                R = 0.40 if sec_type == 'C' else 0.50
+            add('(g)', '(g) lap length at each interior support in each direction >= 1.5d',
+                'unverified', 'lap lengths not given')
+    else:
+        add('(g)', '(g) lap length (not applicable to simple span)', 'pass')
 
-    return {'all_pass': all_pass, 'R': R, 'checks': checks,
-            'span_type': span_type, 'section_type': sec_type}
+    add('(h)', '(h) span <= 33 ft', pf(max(sp for sp, rs in zip(spans, real_span) if rs) <= 33.0)
+        if n_real else 'fail', max(spans))
+
+    # (i) – (n): 입력으로 확인 가능한 부분은 검사, 나머지는 사용자 확인
+    t_panel = deck.get('t_panel')
+    if t_panel is not None:
+        add('(j)-t', '(j) panel base metal thickness >= 0.018 in. (0.0179 in. accepted as 18 mil)',
+            pf(t_panel >= 0.0179), t_panel)
+    if insulation_in is not None:
+        add('(k)-t', '(k) insulation thickness <= 6 in.', pf(0 <= insulation_in <= 6.0), insulation_in)
+    s_fast = deck.get('fastener_spacing')
+    if s_fast is not None:
+        add('(n)-s', '(n) fastener spacing <= 12 in.', pf(s_fast <= 12.0 + 1e-9), s_fast)
+    add('(i)-(n)', 'system conditions (i)-(n) confirmed by the user: ' + '; '.join(I621_SYSTEM_CONDITIONS),
+        'pass' if system_confirmed else 'unverified', bool(system_confirmed))
+
+    if Fy and Fu:
+        add('(o)', '(o) Fu/Fy >= 1.08', pf(Fu / Fy >= 1.08), round(Fu / Fy, 3))
+    else:
+        add('(o)', '(o) Fu/Fy >= 1.08', 'unverified', 'Fy/Fu not given')
+
+    geometric_ok = all(c['status'] == 'pass' for c in conds if c['id'] != '(i)-(n)')
+    all_pass = all(c['status'] == 'pass' for c in conds)
+
+    # 경간별 R
+    reasons = []
+    r_ins = None
+    if not continuous:
+        ti = insulation_in if insulation_in is not None else 0.0
+        r_ins = 1.00 - 0.01 * ti
+        if insulation_in is None:
+            reasons.append('Insulation thickness not given: r = 1.00 (t_i = 0) assumed for the '
+                           'simple-span R (Eq. I6.2.1-2).')
+    R_per_span = []
+    real_idx = [i for i in range(len(spans)) if real_span[i]]
+    for i in range(len(spans)):
+        if not real_span[i]:
+            R_per_span.append(None)
+            continue
+        if spans[i] > 33.0 or profile is None:
+            R_per_span.append(None)
+            continue
+        use_simple = not continuous
+        if continuous:
+            k = real_idx.index(i)
+            for nb in (k - 1, k + 1):
+                if 0 <= nb < len(real_idx):
+                    a_, b_ = spans[real_idx[nb]], spans[i]
+                    if max(a_, b_) / min(a_, b_) > 1.20 + 1e-12:
+                        use_simple = True
+        Rv = _i621_table(profile, d, continuous and not use_simple)
+        if not continuous:
+            Rv = Rv * r_ins
+        R_per_span.append(round(Rv, 4))
+        if continuous and use_simple:
+            reasons.append(f'Span {i + 1}: adjacent bay span lengths vary by more than 20 % - '
+                           'simple-span R value used.')
+    # I6.2.1: "shall not apply to a continuous beam for the region between inflection points
+    # adjacent to a support or to a cantilever beam" — 빠지는 것은 내민(캔틸레버) 구간이지 보 전체가
+    # 아니다. 내민 구간은 R_per_span None, 영역은 i621_region_eligible=False 로 뺀다.
+    if any(not rs for rs in real_span):
+        reasons.append('I6.2.1 does not apply to a cantilever: R is not given for the overhang '
+                       'span(s); the other spans keep their R.')
+
+    eligible = [r for r, rs in zip(R_per_span, real_span) if rs]
+    R_if_confirmed = None
+    if geometric_ok and eligible and all(r is not None for r in eligible):
+        R_if_confirmed = min(eligible)
+    R = R_if_confirmed if all_pass else None
+    if R is None:
+        failed = [c['label'] for c in conds if c['status'] == 'fail']
+        unver = [c['id'] for c in conds if c['status'] == 'unverified']
+        if failed:
+            reasons.append('I6.2.1 limits not met: ' + '; '.join(failed))
+        if unver:
+            reasons.append('I6.2.1 conditions not verified: ' + ', '.join(unver))
+
+    checks = [(c['label'], c['status'] == 'pass') for c in conds]
+    return {
+        'all_pass': all_pass, 'R': R, 'checks': checks, 'conditions': conds,
+        'R_if_confirmed': R_if_confirmed, 'R_per_span': R_per_span,
+        'insulation_r': r_ins, 'reasons': reasons,
+        'span_type': 'continuous' if continuous else 'simple',
+        'section_type': sec_type,
+    }

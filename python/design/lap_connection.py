@@ -1,15 +1,34 @@
 """Lap Splice Connection Design (AISI S100 Chapter J)
 
-§I6.2.1(g): Lap 길이 ≥ 1.5d
-§J3.3: 볼트 접합 Lapped Z-members
-§J4: Screw 접합
-§J2.4.1: Arc Seam Welds on Lap Joint
-
-Lap 구간은 접합부(connection)로 설계 — 전단 전달용 볼트/스크류 개수 산정
+패스너 강도: Chapter J (볼트 J3·App. A J3.4, 나사 J4, 파단 J6.1) — design.connections 공유 엔진.
+패스너 힘 분배: 기준 조항이 아니라 사내 합리적 해석(§A1.2(c))이다 — 결과의 force_model 참고.
+랩 길이 1.5d: §I6.2.1(g)(R 계수법 적용 조건)·§J3(겹친 Z 부재의 과대·슬롯 구멍 예외 조건).
 """
 
 import math
-from design.connections import design_connection
+from design.connections import design_connection, normalize_design_method
+
+# 패스너 수요 모델 설명(결과·steps 에 그대로 싣는다). 모델을 바꾸는 것은 사용자 결정 사항이다.
+FORCE_MODEL = {
+    'basis': 'in_house_rational_analysis',
+    'clause': 'AISI S100-16 §A1.2(c) (rational engineering analysis) — not a specification provision',
+    'specification_provision': False,
+    'description': (
+        'V_transfer = max(Mu/(d − t), Vu); 모든 패스너(n_rows × n_per_row)가 V_transfer 를 '
+        '균등 분담한다고 보고 n = ceil(V_transfer / Pns). Mu 는 지점 모멘트 전체, d − t 는 플랜지 '
+        '우력의 팔. 패스너 1개 강도 Pns 는 공유 엔진의 전단 방향 한계상태 최솟값.'),
+    'user_decision_pending': True,
+    'known_limitations': [
+        '(a) 우력 F=Mu/(d−t) 는 위·아래 행에 +F/−F 로 걸리므로 각 행이 F 전체를 받는다 — '
+        '균등 분담은 행 수만큼 패스너당 수요를 과소평가할 수 있다.',
+        '(b) 팔 길이는 실제 패스너 행 간격(보통 d−t 보다 작다)이어야 한다.',
+        '(c) 연직 전단 Vu 와 수평 우력 성분을 같은 패스너가 받으므로 max 가 아니라 벡터합이 맞다.',
+        '(d) 지점 모멘트 전체를 넘기는 것은 과대할 수 있다 — 랩 끝에서 끝나는 부재가 넘기는 것은 '
+        '그 단면에서 자기가 지던 몫뿐이다(Manual II-1A 가정 a–c).',
+        '(e) Commentary J3: 랩 구간 저항의 일부는 겹친 부재의 끼움으로 생기며, 기준에는 랩 패스너 '
+        '수 산정식이 없다.',
+    ],
+}
 
 
 def design_lap_connection(params: dict) -> dict:
@@ -28,101 +47,131 @@ def design_lap_connection(params: dict) -> dict:
             fastener_type: 'screw' | 'bolt'
             fastener_dia: 패스너 직경 (in)
             n_rows: 패스너 행 수 (기본 2)
+            end_distance: 패스너 끝단 거리 (in, ≥ 1.5d)
+            design_method: 'LRFD' | 'ASD' (대소문자 무관, LSD·기타는 오류)
+            Pnvs: 나사 전단 공칭강도(제조사 값, kips/개) — 나사일 때
+            Fub, bolt_grade: 볼트 강도 — 볼트일 때 (없으면 A307 가정)
+            Se, Mnd, Vn, h_web: Lap 구간 휨·뒤틀림·H2 검토용
         }
 
     Returns:
-        dict: 설계 결과
+        dict: 설계 결과. pass 는 True/False/None(검토 미완), verdict 는 PASS/FAIL/NOT_CHECKED.
     """
+    try:
+        design_method = normalize_design_method(params.get('design_method', 'LRFD'))
+    except ValueError as exc:
+        return {'error': str(exc)}
     d = params.get('d', 8.0)
     t = params.get('t', 0.059)
     Fy = params.get('Fy', 35.53)
     Fu = params.get('Fu', 58.02)
-    lap_left = params.get('lap_left_in', 0)
-    lap_right = params.get('lap_right_in', 0)
-    Mu = abs(params.get('Mu_support', 0))
-    Vu = abs(params.get('Vu_support', 0))
+    lap_left = params.get('lap_left_in', 0) or 0
+    lap_right = params.get('lap_right_in', 0) or 0
+    Mu = abs(params.get('Mu_support', 0) or 0)
+    Vu = abs(params.get('Vu_support', 0) or 0)
     fastener_type = params.get('fastener_type', 'screw')
     fastener_dia = params.get('fastener_dia', 0.19)  # #10 screw = 0.190 in
     n_rows = params.get('n_rows', 2)
-    design_method = params.get('design_method', 'LRFD')
 
     steps = []
     warnings = []
 
-    # Step 1: Lap 길이 검증 (§I6.2.1(g))
-    min_lap = 1.5 * d
-    lap_each = min(lap_left, lap_right) if lap_left > 0 and lap_right > 0 else max(lap_left, lap_right)
-
-    lap_ok = lap_each >= min_lap
+    # Step 1: Lap 길이 (§I6.2.1(g) "in each direction")
+    lap_chk = check_lap_length(d, lap_left, lap_right)
+    min_lap = lap_chk['min_lap_in']
+    lap_each = lap_chk['actual_in']
+    lap_ok = lap_chk['ok']
     steps.append({
-        'step': 1, 'name': 'Lap Length Check (§I6.2.1(g))',
+        'step': 1, 'name': 'Lap Length Check (§I6.2.1(g), §J3 lapped-Z exception)',
         'value': round(lap_each, 2), 'unit': 'in',
-        'formula': f'Lap = {lap_each:.2f} in {"≥" if lap_ok else "<"} 1.5d = {min_lap:.2f} in',
+        'formula': (f'Lap = min(좌,우) = {lap_each:.2f} in {"≥" if lap_ok else "<"} 1.5d = {min_lap:.2f} in'
+                    if lap_ok is not None else lap_chk['message']),
         'pass': lap_ok,
     })
-    if not lap_ok:
-        warnings.append(
-            f'Lap 길이 {lap_each:.2f} in < 1.5d = {min_lap:.2f} in — '
-            f'§I6.2.1(g) 미충족. Lap 길이를 {min_lap:.1f} in 이상으로 늘리세요.'
-        )
+    if lap_chk['message']:
+        warnings.append(lap_chk['message'])
 
-    # Step 2: 전달 전단력 산정 (합리적 해석 모델 — §B / §K2.1)
-    # AISI Chapter J/I 에는 Lap 패스너群 전달력에 대한 폐형식 식이 없으므로
-    # 합리적 해석(rational analysis)으로 산정한다.
-    # 지점 모멘트는 단면 상·하 플랜지의 우력(couple)으로 전달되므로
-    # 플랜지 전달력 ≈ Mu / (d - t)  (플랜지 중심간 거리 = 단면깊이 - 두께)
-    # 이를 지점 전단력 Vu 와 비교해 큰 값을 패스너群 전달 수요로 사용한다.
-    # (이전의 Mu/(Lap/2) 식은 Lap > d 일 때 수요를 과소평가하므로 사용하지 않음)
-    d_lever = (d - t) if (d - t) > 0 else d  # 플랜지 우력의 모멘트 팔
+    # Step 2: 전달 전단력 — 사내 합리적 해석(§A1.2(c)), 기준 조항 아님. 모델 변경은 사용자 결정.
+    d_lever = (d - t) if (d - t) > 0 else d
     if Mu > 0 and d_lever > 0:
-        V_flange = Mu / d_lever  # 플랜지 우력 전달력
+        V_flange = Mu / d_lever
         V_transfer = max(V_flange, Vu)
         v2_formula = (
             f'V_transfer = max(Mu/(d-t), Vu) = '
             f'max({Mu:.2f}/{d_lever:.3f}, {Vu:.3f}) = '
-            f'max({V_flange:.3f}, {Vu:.3f}) = {V_transfer:.3f} kips'
+            f'max({V_flange:.3f}, {Vu:.3f}) = {V_transfer:.3f} kips '
+            f'[사내 합리적 해석 §A1.2(c) — 기준 조항 아님]'
         )
     else:
-        V_transfer = Vu  # fallback (모멘트 미입력 시 지점 전단력 사용)
-        v2_formula = f'V_transfer = Vu = {Vu:.3f} kips'
-
+        V_transfer = Vu
+        v2_formula = f'V_transfer = Vu = {Vu:.3f} kips [사내 합리적 해석 §A1.2(c) — 기준 조항 아님]'
     steps.append({
-        'step': 2, 'name': 'Transfer Shear Force (rational analysis, §B/§K2.1)',
+        'step': 2, 'name': 'Transfer Shear Force (in-house rational analysis, §A1.2(c) — not a spec provision)',
         'value': round(V_transfer, 3), 'unit': 'kips',
         'formula': v2_formula,
     })
+    warnings.append('Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — '
+                    'force_model 의 한계 (a)–(e) 를 확인하세요.')
 
-    # Step 3: 개별 패스너 설계강도 — 전단 전달 한계상태만 사용
+    # 끝단 거리 (§J3.2 볼트 / §J4.2 나사: ≥ 1.5d). 사용자 값은 그대로 엔진에 넘긴다 —
+    # 1.5d 보다 짧으면 엔진의 J3.2/J4.2 검사가 불합격을 낸다(조용히 올리지 않는다).
+    edge_min = 1.5 * fastener_dia
+    edge_user = params.get('end_distance') or 0
+    edge_dist = edge_user if edge_user > 0 else edge_min
+    if 0 < edge_user < edge_min:
+        warnings.append(
+            f'입력 단부거리 {edge_user:.3f} in < 최소 1.5d = {edge_min:.3f} in — '
+            f'§J3.2/§J4.2 불합격 (값은 그대로 사용).'
+        )
+    elif edge_user <= 0:
+        warnings.append(f'end_distance 미입력 — 최소 1.5d = {edge_min:.3f} in 로 배치를 제안하고 §J6.1 을 그 값으로 '
+                        '평가 (시공 상세가 이 끝단 거리를 지켜야 함)')
+
+    # Step 3: 패스너 1개 설계강도 — 전단 방향 한계상태(지압·틸팅·패스너 전단·J6.1 끝단 파단)
     conn_type = 'screw' if fastener_type == 'screw' else 'bolt'
-    conn_result = design_connection({
+    cparams = {
         'connection_type': conn_type,
-        'design_method': params.get('design_method', 'LRFD'),
-        'Fy': Fy,
-        'Fu': Fu,
-        't1': t,
-        't2': t,
-        'd': fastener_dia,
-        'n': 1,
-        'Pu': 0,
-    })
+        'design_method': design_method,
+        'Fy': Fy, 'Fu': Fu, 't1': t, 't2': t,
+        'd': fastener_dia, 'n': 1, 'Pu': 0,
+        'e': edge_dist,
+    }
+    for k in ('Pnvs', 'Fub', 'bolt_grade', 'threads_excluded', 'mf', 'hole_type'):
+        if params.get(k) is not None:
+            cparams[k] = params[k]
+    conn_result = design_connection(cparams)
     if conn_result.get('error'):
         return conn_result
 
-    # Lap 패스너群의 수요는 전단(V_transfer)이므로 전단 전달 한계상태
-    # (§J4.3 틸팅/지압/나사전단, §J3.3 지압, §J3.4 볼트전단 등)만으로 Pns를
-    # 산정한다. 인장계 한계상태(풀아웃 J4.4.1, 풀오버 J4.4.2)와 부재 단면검토
-    # (J6.2/J6.3/D2/D3)는 전단 수요에 적용되지 않는데도 과거에는 전체 최소값을
-    # 사용해 스크류 개수가 크게 과대 산정되었다. (양력 인장 검토는 별도 수행)
-    _TENSION_MODE_KEYS = ('Pull-out (J4.4', 'Pull-over (J4.4', 'Tension', 'Block Shear', 'Member')
+    # 부재 단면 검토(J6.2 순단면·J6.3 블록·Chapter D)와 인장 방향(풀아웃·풀오버·패스너 인장)은
+    # 패스너 1개의 전단 전달 강도가 아니므로 Pns 에서 뺀다(J6.1 끝단 파단은 포함).
+    _EXCLUDED = ('Tension Rupture', 'Block Shear', 'Member')
     shear_ls = [ls for ls in conn_result.get('limit_states', [])
-                if not any(k in ls.get('name', '') for k in _TENSION_MODE_KEYS)]
+                if ls.get('direction', 'shear') == 'shear'
+                and not any(k in ls.get('name', '') for k in _EXCLUDED)]
     if shear_ls:
         gov_shear = min(shear_ls, key=lambda x: x.get('design_strength', float('inf')))
         Pns = gov_shear.get('design_strength', 0)
         pns_mode = gov_shear.get('name', '')
+        pns_assumed = bool(gov_shear.get('assumed'))
     else:
-        Pns = conn_result.get('design_strength', 0)
-        pns_mode = conn_result.get('governing_mode', '')
+        Pns = 0
+        pns_mode = ''
+        pns_assumed = False
+    fastener_unverified = [x for x in conn_result.get('not_evaluated', [])
+                           if x.get('category') in ('fastener', 'scope')
+                           and x.get('direction') in ('shear', 'any')]
+    fastener_ok = None if fastener_unverified else True
+    for x in fastener_unverified:
+        warnings.append(f"패스너 강도 미확정: {x['name']} — {x['reason']}")
+    detail_fail = [x for x in conn_result.get('detailing_checks', []) if not x['pass']]
+    if detail_fail:
+        fastener_ok = False
+        for x in detail_fail:
+            warnings.append(f"상세 불합격: {x['name']} (입력 {x['provided']} < 요구 {x['required']})")
+    if pns_assumed:
+        warnings.append(f'Pns 가 가정값 한계상태({pns_mode})로 정해졌다 — 패스너 수·용량·배치 판정은 '
+                        '참고값이며 불합격도 합격도 내지 않는다.')
     if fastener_type == 'screw':
         fastener_label = f'Screw #{_screw_gauge(fastener_dia)}'
     else:
@@ -133,11 +182,13 @@ def design_lap_connection(params: dict) -> dict:
         'value': round(Pns, 3), 'unit': 'kips',
         'formula': (
             f'Pdesign = {Pns:.3f} kips/ea — 지배: {pns_mode} '
-            f'(전단 한계상태만; 인장계 J4.4·부재 J6/D 제외)'
+            f'(전단 방향: 지압·틸팅·패스너 전단·J6.1 끝단 파단(e={edge_dist:.3f} in); '
+            f'인장 방향 J4.4·부재 J6.2/J6.3/D 제외)'
         ),
+        'pass': fastener_ok,
     })
 
-    # Step 4: 필요 패스너 수
+    # Step 4: 필요 패스너 수 (사내 모델: 균등 분담)
     if Pns > 0:
         n_required = math.ceil(V_transfer / Pns)
         n_per_row = math.ceil(n_required / n_rows)
@@ -149,36 +200,28 @@ def design_lap_connection(params: dict) -> dict:
         warnings.append('패스너 강도 = 0 — 패스너 사양을 확인하세요.')
 
     steps.append({
-        'step': 4, 'name': 'Required Fasteners',
+        'step': 4, 'name': 'Required Fasteners (in-house uniform-share model)',
         'value': n_total, 'unit': 'ea',
         'formula': f'n = V/Pdesign = {V_transfer:.3f}/{Pns:.3f} = {n_required} → {n_rows} rows × {n_per_row}/row = {n_total} ea'
             if Pns > 0 else 'N/A',
     })
 
-    # Step 5: 배치 가능 최대 패스너 수 (Lap 길이 제약)
-    # 최소 연단/단부 거리 = 1.5d (§J3.2 볼트, §J4.2 스크류).
-    # 사용자가 end_distance를 지정하면 그 값(≥1.5d)을 사용 — 볼트의 §J6.1
-    # 인열(tearout)은 e에 비례하므로, 최소 e 가정은 볼트 개수를 크게 부풀린다.
-    edge_min = 1.5 * fastener_dia  # §J3.2 (볼트) / §J4.2 (스크류): 1.5d
-    edge_user = params.get('end_distance') or 0
-    edge_dist = max(edge_min, edge_user)
-    if edge_user > 0 and edge_user < edge_min:
-        warnings.append(
-            f'입력 단부거리 {edge_user:.3f} in < 최소 1.5d = {edge_min:.3f} in — '
-            f'최소값으로 상향 적용했습니다.'
-        )
+    # Step 5: 배치 가능 최대 패스너 수 — 양 끝 끝단거리 2e 가 들어가야 1개라도 배치된다.
     min_spacing = 3 * fastener_dia
     if lap_each > 0 and min_spacing > 0:
-        n_max_per_row = max(1, int((lap_each - 2 * edge_dist) / min_spacing) + 1)
+        if lap_each < 2 * edge_dist:
+            n_max_per_row = 0
+            warnings.append(f'Lap {lap_each:.2f} in < 2e = {2 * edge_dist:.2f} in — 패스너를 배치할 수 없음')
+        else:
+            n_max_per_row = int((lap_each - 2 * edge_dist) / min_spacing) + 1
     else:
         n_max_per_row = n_per_row
     n_max_total = n_max_per_row * n_rows
 
-    # 패스너 배치 간격
     n_per_row_actual = min(n_per_row, n_max_per_row)
     n_total_actual = n_per_row_actual * n_rows
     if n_per_row_actual > 1 and lap_each > 0:
-        spacing = (lap_each - 2 * edge_dist) / (n_per_row_actual - 1) if n_per_row_actual > 1 else 0
+        spacing = (lap_each - 2 * edge_dist) / (n_per_row_actual - 1)
     else:
         spacing = 0
     spacing_ok = spacing >= min_spacing if spacing > 0 else True
@@ -202,7 +245,7 @@ def design_lap_connection(params: dict) -> dict:
     if not spacing_ok:
         warnings.append(f'패스너 간격 {spacing:.2f} in < 최소 3d = {min_spacing:.2f} in')
 
-    # Step 6: Edge/End distance + (볼트 한정) 단부거리 지배 전단파단 강도 (§J6.1)
+    # Step 6: 끝단 거리 (J6.1 끝단 파단은 Step 3 에 이미 포함)
     steps.append({
         'step': 6, 'name': 'Edge/End Distance (§J3.2 / §J4.2)',
         'value': round(edge_dist, 3), 'unit': 'in',
@@ -210,70 +253,8 @@ def design_lap_connection(params: dict) -> dict:
             f'e = {edge_dist:.3f} in (사용자 지정, 최소 1.5d = {edge_min:.3f} in 충족)'
             if edge_user > edge_min else
             f'e = 1.5d = 1.5 × {fastener_dia:.3f} = {edge_dist:.3f} in (최소값 가정)'
-        ),
+        ) + ' — §J6.1 끝단 파단은 이 e 로 Step 3 에서 평가',
     })
-
-    # 볼트 경로: 단부거리(end distance) 지배 전단파단(tearout) 한계상태를 추가한다.
-    # §J6.1 Eq.J6.1-1: Pnv = 0.6·Fu·Anv, Anv = 2·t·e_net (패스너 1개당 양측 전단면).
-    # e_net = 단부 순거리 = edge_dist - d_h/2 (보수적으로 표준홀 d_h ≈ d+1/16").
-    # 볼트 파단 계수: φ=0.65 / Ω=2.22 (Table J6-1).
-    # 스크류는 §J4 에 단부거리 강도식이 없으므로 적용하지 않는다(기하 최소거리만).
-    if fastener_type != 'screw' and Pns > 0:
-        d_hole = fastener_dia + 1.0 / 16.0  # 표준홀 직경 (보수적 가정)
-        e_net = max(edge_dist - d_hole / 2.0, 0.0)
-        Pnv_tearout = 0.6 * Fu * (2.0 * t * e_net)  # 공칭 전단파단강도 (kips)
-        if design_method == 'LRFD':
-            P_tearout = 0.65 * Pnv_tearout
-        else:  # ASD
-            P_tearout = Pnv_tearout / 2.22
-        if P_tearout > 0 and P_tearout < Pns:
-            # 단부거리 지배 전단파단이 베어링/전단강도보다 작으면 이를 채택
-            Pns = P_tearout
-            # 채택된 강도 변화에 따라 Step 4 의 필요 패스너 수를 재산정
-            n_required = math.ceil(V_transfer / Pns)
-            n_per_row = math.ceil(n_required / n_rows)
-            n_total = n_per_row * n_rows
-            n_per_row_actual = min(n_per_row, n_max_per_row)
-            n_total_actual = n_per_row_actual * n_rows
-            # 재산정된 배치에 맞춰 간격/판정도 갱신 — Step 5가 이미 기록돼 있으므로
-            # 함께 갱신하지 않으면 반환 spacing/도면이 재산정 전 배치를 표시하게 된다.
-            if n_per_row_actual > 1 and lap_each > 0:
-                spacing = (lap_each - 2 * edge_dist) / (n_per_row_actual - 1)
-            else:
-                spacing = 0
-            spacing_ok = spacing >= min_spacing if spacing > 0 else True
-            for _st in steps:
-                if _st.get('step') == 5:
-                    _st['value'] = round(spacing, 2)
-                    _st['formula'] = (
-                        f'(§J6.1 재산정) Required: {n_total} ea, Max fit: {n_max_total} ea '
-                        f'(Lap={lap_each:.2f} in, edge={edge_dist:.3f} in, min s=3d={min_spacing:.2f} in), '
-                        f's = {spacing:.2f} in {"≥" if spacing_ok else "<"} {min_spacing:.2f} in'
-                    )
-                    _st['pass'] = spacing_ok and n_total <= n_max_total
-            if n_total > n_max_total:
-                warnings.append(
-                    f'(§J6.1 재산정) 필요 패스너 {n_total} ea > Lap 내 최대 배치 {n_max_total} ea — '
-                    f'Lap 길이를 늘리거나 패스너 사양을 변경하세요.'
-                )
-            if not spacing_ok:
-                warnings.append(f'(§J6.1 재산정) 패스너 간격 {spacing:.2f} in < 최소 3d = {min_spacing:.2f} in')
-            warnings.append(
-                f'단부거리 지배 전단파단(§J6.1)이 패스너 강도를 지배: '
-                f'{"φ" if design_method == "LRFD" else "1/Ω"}Pnv = {Pns:.3f} kips '
-                f'(e = {edge_dist:.3f} in, e_net = {e_net:.3f} in). 필요 패스너 수가 '
-                f'재산정되었습니다. 단부거리 e를 늘리면 인열 강도가 비례 증가하여 '
-                f'볼트 수를 줄일 수 있습니다.'
-            )
-        steps.append({
-            'step': '6a', 'name': 'Bolt End-Distance Shear Rupture (§J6.1)',
-            'value': round(P_tearout, 3), 'unit': 'kips',
-            'formula': (
-                f'e_net = e - d_h/2 = {edge_dist:.3f} - {d_hole/2:.3f} = {e_net:.3f} in, '
-                f'Pnv = 0.6·Fu·(2·t·e_net) = 0.6×{Fu:.2f}×(2×{t:.4f}×{e_net:.3f}) = {Pnv_tearout:.3f} kips, '
-                f'{"φ" if design_method == "LRFD" else "1/Ω"}Pnv = {P_tearout:.3f} kips'
-            ),
-        })
 
     # Step 7: 용량 검증 (Demand vs Capacity)
     capacity = n_total_actual * Pns if Pns > 0 else 0
@@ -297,11 +278,13 @@ def design_lap_connection(params: dict) -> dict:
     # 따라서 본 식에서 누락된 모드는 (a) 뒤틀림좌굴(distortional, §F4)과
     # (b) 지점부 휨-전단 상호작용(§H2)이며, 아래에서 별도로 처리한다.
     # Mn_lap = Se × Fy × 2 (동일 단면 2겹, AISI Example II-2A 방식)
-    Se = params.get('Se', 0) or params.get('Sf', 0)  # 유효 단면계수
+    # Se(유효 단면계수)만 판정 근거다. 총단면 Sf 는 국부좌굴을 반영하지 않아 Mnl 을 과대평가하므로
+    # Se 대신 쓰지 않는다 — Sf 만 있으면 참고값(assumed)으로만 보이고 휨은 미평가(FIXES §3.1).
+    Se = params.get('Se') or 0
+    Sf_only = params.get('Sf') or 0
 
     # §H2 검토용 전단강도 Vn: 미입력이면 §G2.1(비보강 웹)로 직접 산정한다 —
     # 본 도구는 d, t, Fy를 이미 보유하므로 외부 입력에 의존할 이유가 없다.
-    # (과거에는 미입력 시 H2 검토를 통째로 건너뛰고 경고만 남겼음)
     Vn_in = params.get('Vn')
     vn_auto = False
     if not (Vn_in and Vn_in > 0):
@@ -322,14 +305,13 @@ def design_lap_connection(params: dict) -> dict:
 
     flexure_ok = True
     flexure_dcr = None
+    flexure_reference_dcr = None
     flexure_dcr_governing = None  # 국부/뒤틀림/H2 중 최대 DCR (헤드라인 표시용)
     Mn_lap = 0
     phi_Mn_lap = 0
 
     if Se > 0 and Fy > 0 and Mu > 0:
-        # 단일 부재 국부좌굴 강도: Mnl = Se × Fy (§F3.1, Fn=Fy — Se 가 국부좌굴 반영)
         Mnl_single = Se * Fy  # kip-in
-        # 2겹 합산 (AISI Example II-2A 방식)
         n_members = 2
         Mn_lap = Mnl_single * n_members  # kip-in
 
@@ -392,19 +374,18 @@ def design_lap_connection(params: dict) -> dict:
                 )
         else:
             warnings.append(
-                '뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간 휨강도에서 '
-                '뒤틀림좌굴이 평가되지 않았습니다. 보수적으로 단면의 Mnd 를 확인하세요.'
+                '뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간은 Manual II-1A 처럼 '
+                '겹친 부재로 뒤틀림이 구속된다고 가정했습니다. 구속이 없으면 Mnd 를 입력하세요.'
             )
 
         # 지점부 휨-전단 상호작용(§H2) 검토: Vn은 입력값 또는 §G2.1 자동산정값.
-        # §H2.1 Eq.H2-1(원형 상호작용): (Mu/φMn)^2 + (Vu/φVn)^2 ≤ 1.0
-        Vn = Vn_in  # 단일 단면 공칭 전단강도 (kips)
+        Vn = Vn_in
         if Vn and Vn > 0 and Vu > 0 and phi_Mn_lap > 0:
-            n_members_v = 2  # 2겹 단면의 전단강도 합산
+            n_members_v = 2
             if design_method == 'LRFD':
-                phi_Vn_lap = 0.95 * (Vn * n_members_v)  # §G φv=0.95 (LRFD)
+                phi_Vn_lap = 0.95 * (Vn * n_members_v)
             else:
-                phi_Vn_lap = (Vn * n_members_v) / 1.60   # §G Ωv=1.60 (ASD)
+                phi_Vn_lap = (Vn * n_members_v) / 1.60
             mv_term = (Mu / phi_Mn_lap) ** 2 + (Vu / phi_Vn_lap) ** 2 if phi_Vn_lap > 0 else float('inf')
             mv_ok = mv_term <= 1.0
             flexure_ok = flexure_ok and mv_ok
@@ -424,22 +405,55 @@ def design_lap_connection(params: dict) -> dict:
                     f'Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term:.2f} > 1.0.'
                 )
         elif Vu > 0:
+            flexure_ok = None if flexure_ok else flexure_ok
             warnings.append(
                 '단면 전단강도 Vn 을 산정할 수 없습니다(퇴화 기하) — Lap 지점부 '
                 '휨-전단 상호작용(§H2) 검토를 수행하지 못했습니다.'
             )
     elif Mu > 0 and Se <= 0:
+        flexure_ok = None
         warnings.append(
-            'Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행할 수 없습니다. '
+            'Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). '
             '설계 탭에서 단면 정보를 확인하세요.'
         )
+        if Sf_only > 0 and Fy > 0:
+            Mn_ref = 2 * Sf_only * Fy
+            phi_ref = 0.90 * Mn_ref if design_method == 'LRFD' else Mn_ref / 1.67
+            flexure_reference_dcr = Mu / phi_ref if phi_ref > 0 else None
+            steps.append({
+                'step': '8r', 'name': 'Lap Flexure — reference only (gross Sf, local buckling not included)',
+                'value': round(flexure_reference_dcr, 3) if flexure_reference_dcr is not None else None,
+                'unit': '', 'assumed': True, 'pass': None,
+                'formula': (f'참고값: Sf = {Sf_only:.4f} in³ (총단면) → 2×Sf×Fy = {Mn_ref:.2f} kip-in, '
+                            f'{"φ" if design_method == "LRFD" else "1/Ω"}Mn = {phi_ref:.2f} kip-in, '
+                            f'DCR = {flexure_reference_dcr:.3f} — Se 가 아니므로 판정에 쓰지 않음'),
+            })
+            warnings.append('Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 '
+                            '휨 판정은 하지 않음. Se 를 입력하세요.')
 
-    overall_pass = lap_ok and capacity_ok and spacing_ok and (n_total <= n_max_total) and flexure_ok
     if not capacity_ok:
         warnings.append(
             f'용량 부족: V_transfer = {V_transfer:.3f} kips > Capacity = {capacity:.3f} kips '
             f'(DCR = {utilization:.2f}). 패스너 수 또는 사양을 변경하세요.'
         )
+    # 랩 길이 1.5d 는 강도 규정이 아니라 R 계수법(I6.2.1(g))·J3 겹친 Z 슬롯 예외의 적용 조건이다 —
+    # 못 미치면 그 두 방법을 쓸 수 없다는 경고만 남기고 판정에는 넣지 않는다(미입력이면 배치를 못 하므로 None).
+    if lap_ok is False:
+        warnings.append(f'Lap {lap_each:.2f} in < 1.5d = {min_lap:.2f} in — §I6.2.1 R 계수법과 §J3 겹친 Z 부재의 '
+                        '과대·슬롯 구멍 예외를 쓸 수 없음 (접합 강도 판정에는 넣지 않음)')
+    layout = [capacity_ok, spacing_ok, n_total <= n_max_total]
+    if pns_assumed:
+        # 가정값 강도로 정한 수·용량·배치는 FAIL/PASS 를 내지 않는다 (FIXES §3.1)
+        layout = [None if p is False else p for p in layout]
+        fastener_ok = False if fastener_ok is False else None
+    parts = [None if lap_ok is None else True] + layout + [flexure_ok, fastener_ok]
+    if any(p is False for p in parts):
+        overall_pass = False
+    elif any(p is None for p in parts):
+        overall_pass = None
+    else:
+        overall_pass = True
+    verdict = 'PASS' if overall_pass is True else ('FAIL' if overall_pass is False else 'NOT_CHECKED')
 
     return {
         'fastener_type': fastener_type,
@@ -463,11 +477,22 @@ def design_lap_connection(params: dict) -> dict:
         # 국부(§F3)·뒤틀림(§F4)·휨-전단(§H2) 중 최대 — 헤드라인 DCR이 pass 플래그와
         # 모순되지 않도록 렌더러는 이 값을 우선 사용한다.
         'flexure_dcr_governing': round(flexure_dcr_governing, 4) if flexure_dcr_governing is not None else None,
+        'flexure_checked': flexure_ok is not None and Se > 0,
+        'flexure_basis': 'Se' if Se > 0 else ('Sf_reference' if Sf_only > 0 else None),
+        'flexure_assumed': Se <= 0 and Sf_only > 0,
+        'flexure_reference_dcr': (round(flexure_reference_dcr, 4)
+                                  if flexure_reference_dcr is not None else None),
         'Mn_lap': round(Mn_lap, 2),
         'phi_Mn_lap': round(phi_Mn_lap, 2),
         'pass': overall_pass,
+        'verdict': verdict,
+        'design_method': design_method,
+        'force_model': FORCE_MODEL,
         'fastener_design': conn_result,
         'lap_ok': lap_ok,
+        'lap_length_role': 'applicability condition for §I6.2.1 R-factor method and §J3 lapped-Z hole exception '
+                           '(not a strength check; not part of pass)',
+        'Pns_assumed': pns_assumed,
         'min_lap': min_lap,
         'steps': steps,
         'warnings': warnings,
@@ -480,41 +505,36 @@ def design_lap_connection(params: dict) -> dict:
 
 
 def check_lap_length(d: float, lap_left: float, lap_right: float) -> dict:
-    """Lap 길이 검증 (§I6.2.1(g))
+    """Lap 길이 검증 (§I6.2.1(g): 지지점 중심에서 각 방향으로 1.5d 이상)
 
-    Args:
-        d: 부재 높이 (in)
-        lap_left, lap_right: 각 방향 Lap 길이 (in)
+    1.5d 는 §I6.2.1 R 계수법의 적용 조건이자 §J3 의 겹친 Z 부재 과대·슬롯 구멍 예외 조건이다
+    (접합 강도 규정이 아님). 한쪽이라도 0(미입력)이면 판정하지 않는다(ok=None).
 
     Returns:
-        dict: {ok, min_lap, actual, message}
+        dict: {ok, min_lap_in, actual_in, message}
     """
     min_lap = 1.5 * d
-    actual = min(lap_left, lap_right) if lap_left > 0 and lap_right > 0 else max(lap_left, lap_right)
+    lap_left = lap_left or 0
+    lap_right = lap_right or 0
+    if lap_left <= 0 or lap_right <= 0:
+        actual = min(lap_left, lap_right)
+        return {
+            'ok': None,
+            'min_lap_in': min_lap,
+            'actual_in': actual,
+            'message': (f'Lap 길이: 좌({lap_left})·우({lap_right}) 가운데 미입력(0)이 있어 판정하지 않음 — '
+                        '§I6.2.1(g) 은 각 방향 모두 1.5d 이상을 요구 '
+                        '(R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건)'),
+        }
+    actual = min(lap_left, lap_right)
     ok = actual >= min_lap
-
     return {
         'ok': ok,
         'min_lap_in': min_lap,
         'actual_in': actual,
-        'message': '' if ok else f'Lap {actual:.2f} in < 1.5d = {min_lap:.2f} in (§I6.2.1(g))',
+        'message': '' if ok else (f'Lap {actual:.2f} in < 1.5d = {min_lap:.2f} in (§I6.2.1(g)) — '
+                                  'R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족'),
     }
-
-
-def _screw_shear_strength(t1: float, t2: float, d_screw: float, Fu: float) -> float:
-    """Screw 접합 전단 강도 (§J4.3.1)
-
-    Pns = min(tilting, bearing, screw shear)
-    """
-    # Tilting (t2/t1 ≤ 1.0, single shear)
-    Pns_tilt = 4.2 * (t2 ** 3 * d_screw) ** 0.5 * Fu
-    # Bearing
-    Pns_bear = 2.7 * t1 * d_screw * Fu
-    # Screw shear (conservative estimate)
-    Pns_screw = 0.5 * math.pi * (d_screw / 2) ** 2 * 62  # 62 ksi screw shear strength
-
-    Pns = min(Pns_tilt, Pns_bear, Pns_screw)
-    return Pns
 
 
 def _screw_gauge(d: float) -> str:
