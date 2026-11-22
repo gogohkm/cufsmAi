@@ -102,12 +102,34 @@ function getJson(port: number, token: string, route: string): Promise<any> {
  */
 export function invalidConfigText(error: string | undefined): string {
   const e = String(error ?? '');
+  // f8fe4ab · 제자리 쓰기(하드 링크 설정)가 중간에 끊겨 설정이 비었거나 깨졌다 — 되돌릴 백업을 이름으로 알린다
+  const cut = /an in-place write by StCFSD was cut short[^(]*\(backup: ([^)]*)\)/.exec(e) ?? /in-place write by StCFSD was cut short; the previous content is in (.+?)\)?$/.exec(e);
+  if (cut) {
+    const marker = /delete (\S+\.stcfsd-tmp-inplace)/.exec(e)?.[1];
+    return `Claude Desktop 설정 파일이 ${/is empty/.test(e) ? '비어 있습니다' : '깨져 있습니다'} — StCFSD 가 그 자리에 쓰다가 중간에 끊겼습니다. `
+      + `백업 ${cut[1]} 을(를) 설정 파일 위에 복사하고${marker ? ` 표시 파일 ${marker} 를 지운 뒤` : ''} 다시 누르세요. 그때까지`;
+  }
+  const deep = /nested (\d+) levels deep/.exec(e);
+  if (deep) { return `Claude Desktop 설정 파일이 너무 깊게 겹쳐 있어(${deep[1]} 단계), 다시 쓰다 멈출 수 있으므로`; }
+  if (/cannot rewrite this config/.test(e)) { return 'Claude Desktop 설정 파일을 다시 쓸 수 없는 모양이어서'; }
   const dup = /the key "([^"]*)" appears more than once/.exec(e);
   if (dup) { return `Claude Desktop 설정 파일에 같은 이름("${dup[1]}")이 두 번 있어, 다시 쓰면 하나가 사라지므로`; }
   if (/mcpServers is not a JSON object/.test(e)) { return 'Claude Desktop 설정 파일의 mcpServers 가 객체가 아니어서'; }
   if (/root is not a JSON object/.test(e)) { return 'Claude Desktop 설정 파일의 맨 위가 객체가 아니어서'; }
   if (/not valid JSON/.test(e)) { return 'Claude Desktop 설정 파일이 올바른 JSON 이 아니어서'; }
   return 'Claude Desktop 설정 파일을 읽을 수 없어서';
+}
+
+/**
+ * 쓰기 실패의 사람 말(f8fe4ab). 제자리 쓰기가 실패하고 원래대로 되돌리지 **못했으면** 사용자가 백업을 복사해야 한다 — 그 경로를 앞에 둔다.
+ */
+export function writeFailedText(error: string, backupPath?: string): string {
+  const notBack = /could NOT be put back; copy the backup (\S*) over it/.exec(error);
+  if (notBack) {
+    return `설정 파일을 쓰지 못했고 원래대로 되돌리지도 못했습니다. 백업 ${notBack[1] || backupPath || ''} 을(를) 설정 파일 위에 복사해 주세요(Claude Desktop 을 끈 채).`;
+  }
+  if (/was put back as it was/.test(error)) { return `설정 파일을 쓰지 못했습니다 — 원래대로 되돌렸습니다(바뀐 것 없음). ${error.replace(/ — the config was put back as it was/, '')}`; }
+  return `설정 파일을 쓰지 못했습니다(${error}).${backupPath ? ` 백업: ${backupPath}` : ''}`;
 }
 
 const hhmm = (iso: string) => {
@@ -194,7 +216,7 @@ export function createClaudeRoutes(host: HostHandle, o: BridgeClaudeOptions = {}
       'claude-not-installed': 'Claude Desktop 을 찾지 못해 등록하지 않았습니다.',
       'invalid-config': `${invalidConfigText(r.error as string | undefined)} 손대지 않았습니다.`,
       'config-busy': 'Claude Desktop(또는 다른 프로그램)이 설정 파일을 계속 바꾸고 있어 쓰지 않았습니다. 잠시 뒤 다시 누르세요 — 설정은 그대로입니다.',
-      'write-failed': `설정 파일을 쓰지 못했습니다(${String(r.error ?? '')}).${r.backupPath ? ` 백업: ${String(r.backupPath)}` : ''}`,
+      'write-failed': writeFailedText(String(r.error ?? ''), r.backupPath as string | undefined),
     };
     const okText: Record<string, string> = op === 'connect'
       ? { unchanged: '이미 등록돼 있습니다.', created: '등록했습니다. Claude Desktop 을 한 번 다시 시작하세요.',

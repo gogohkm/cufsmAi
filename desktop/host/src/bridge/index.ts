@@ -7,7 +7,7 @@
  *  틀 서버(`origin`):
  *  - `/`                    틀: 제목 표시줄 + 설계 패널 iframe(+ 좌굴 보고서 패널) + 호스트의 물음(`frame/`)
  *  - `/?t=<토큰>`           브라우저의 첫 진입 — 쿠키 + 쓰기 열쇠(그 탭의 sessionStorage)를 주는 작은 페이지 뒤 `/` · `/ui/` 로
- *  - `/api/wv-key`          웹뷰 열쇠(쓰기 열쇠가 있어야 — 틀이 받아 자기 iframe 에 postMessage 로 건넨다)
+ *  - `/api/wv-key?id=`      그 웹뷰의 열쇠(쓰기 열쇠가 있어야 — 틀이 받아 그 id 를 실은 자기 iframe 에만 postMessage 로 건넨다)
  *  웹뷰 서버(`webviewOrigin` — 쓰기 경로가 없다):
  *  - `/wv/<id>/`            웹뷰 HTML(리소스 주소 · CSP · nonce 고쳐 쓰기, `acquireVsCodeApi` 대체, 테마 — inject.ts)
  *  - `/res/webview/…` · `/res/media/…`   웹뷰 리소스(두 뿌리만)
@@ -46,6 +46,7 @@ export const WRITE_KEY_STORAGE = 'stcfsd.bridge.key.';
 export { createBridgePlatform, defaultDocumentsDir } from './platform';
 export type { BridgePlatform, BridgePlatformOptions, PendingQuestion } from './platform';
 export type { BridgeClaudeOptions, ClaudeStatus, ClaudeActionResult, ClaudeUiState } from './claude';
+export { invalidConfigText, writeFailedText } from './claude';
 export type { BridgeEvent } from './sse';
 export { themeVariables, usedThemeVariables, missingThemeVariables, themeCss } from './theme';
 export type { ThemeName } from './theme';
@@ -96,6 +97,8 @@ export interface BridgeHandle {
 }
 
 const DESIGNER_VIEW_TYPE = 'stcfsd.designer';
+/** 새 검토 화면이 같은 출처로 받는 3D 렌더러 번들(media/ 의 이 두 파일만 — 진입점 + Babylon 지연 조각) */
+const VIEWER3D_FILES = new Set(['viewer3d.js', 'viewer3d.mode-shape-renderer.js']);
 
 export async function startBridge(host: HostHandle, options: StartBridgeOptions): Promise<BridgeHandle> {
   const log = options.log ?? ((line: string) => process.stderr.write(`${line}\n`));
@@ -114,7 +117,9 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   const token = crypto.randomBytes(24).toString('base64url');
   const cookieValue = crypto.randomBytes(24).toString('base64url');
   const writeKey = crypto.randomBytes(24).toString('base64url');
-  const webviewKey = crypto.randomBytes(24).toString('base64url');
+  // 웹뷰 열쇠는 웹뷰마다(V5b-06) — 하나의 비밀에서 웹뷰 id 로 만든다. 그 웹뷰의 /api/wv/<id>/ 통로에서만 맞는다
+  const webviewSecret = crypto.randomBytes(32);
+  const webviewKey = (id: string) => crypto.createHmac('sha256', webviewSecret).update(`stcfsd-webview\n${id}`).digest('base64url');
   const hub = host.webviews;
   const bus = new EventBus();
   const channels = new Map<string, Channel>();
@@ -292,7 +297,10 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     if (method !== 'GET' && !hasKey(req, WRITE_HEADER, writeKey)) { forbidden(res, `${method} ${p}`); return; }
     if (p === '/api/wv-key' && method === 'GET') {
       if (!hasKey(req, WRITE_HEADER, writeKey)) { forbidden(res, 'GET /api/wv-key'); return; }
-      sendJson(res, 200, { success: true, data: { key: webviewKey, origin: wvOrigin } });
+      const id = url.searchParams.get('id') ?? '';
+      if (!id) { sendJson(res, 400, { success: false, error: '웹뷰 id(?id=) 가 필요하다 — 열쇠는 웹뷰마다다' }); return; }
+      if (!hub.has(id)) { sendJson(res, 404, { success: false, error: `웹뷰가 없다: ${id}` }); return; }
+      sendJson(res, 200, { success: true, data: { id, key: webviewKey(id), origin: wvOrigin } });
       return;
     }
 
@@ -305,6 +313,18 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     }
     if (p === '/favicon.ico') { res.writeHead(204); res.end(); return; }
 
+    // 새 검토 화면의 3D 모드 형상(U2 다음 단계가 쓴다): 제품의 렌더러 번들 두 파일만 그 화면과 같은 출처로 내준다.
+    // 번들은 eval · WebAssembly 를 쓰지 않는다(webpack 런타임의 `new Function` 은 globalThis 가 없을 때만의 대비 — 브라우저에선 안 돈다)
+    // 그래서 화면의 CSP(script-src 'self')를 넓히지 않는다. 지연 조각은 번들이 자기 주소(publicPath auto)에서 찾는다 — 같은 자리.
+    const v3 = /^\/ui\/viewer3d\/([^/]+)$/.exec(p);
+    if (uiDir && v3 && method === 'GET') {
+      const name = v3[1];
+      const media = roots.find(r => r.name === 'media');
+      const file = VIEWER3D_FILES.has(name) && media ? safeFile(media.dir, name) : undefined;
+      if (!file) { sendJson(res, 404, { success: false, error: '없다' }); return; }
+      sendFile(res, file);
+      return;
+    }
     // 새 검토 화면(U1). 정적 파일은 index.html · dist/ · style/ 만 — 소스 · 시험은 내주지 않는다.
     if (uiDir && (p === '/ui' || p.startsWith('/ui/'))) {
       if (p === '/ui') { res.writeHead(303, { Location: `/ui/${url.search}` }); res.end(); return; }
@@ -423,14 +443,14 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       if (chMatch[2] === 'out') {
         if (method !== 'GET') { sendJson(res, 405, { success: false, error: 'GET' }); return; }
         const k = url.searchParams.get('k');
-        if (!k || !sameToken(k, webviewKey)) { sendJson(res, 403, { success: false, error: '웹뷰 열쇠가 없다' }); return; }
+        if (!k || !sameToken(k, webviewKey(id))) { sendJson(res, 403, { success: false, error: '웹뷰 열쇠가 없다' }); return; }
         const client = ch.attach(new SseStream(req, res));
         client.sse.onClose.push(() => bus.emit('webview:client', 'bridge', { id, connected: false }));
         bus.emit('webview:client', 'bridge', { id, connected: true });
         return;
       }
       if (method !== 'POST') { sendJson(res, 405, { success: false, error: 'POST' }); return; }
-      if (!hasKey(req, WEBVIEW_KEY_HEADER, webviewKey)) { sendJson(res, 403, { success: false, error: '웹뷰 열쇠가 없다' }); return; }
+      if (!hasKey(req, WEBVIEW_KEY_HEADER, webviewKey(id))) { sendJson(res, 403, { success: false, error: '웹뷰 열쇠가 없다' }); return; }
       const body = await readJson(req);
       const client = ch.client;
       if (!client || url.searchParams.get('conn') !== client.conn) {

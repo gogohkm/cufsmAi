@@ -26,14 +26,14 @@
 |---|---|
 | 토큰(읽기) | 다리마다 무작위 24 바이트(base64url). MCP 다리의 토큰과 **따로**다. `Authorization: Bearer <토큰>`(Electron · 시험 · CLI). 두 서버가 같은 토큰을 받는다 |
 | 브라우저 쿠키(읽기) | 첫 주소 `http://127.0.0.1:<포트>/?t=<토큰>` → 작은 페이지(200) + `Set-Cookie: stcfsd_bridge_<포트>=<쿠키 값>; HttpOnly; SameSite=Strict; Path=/`. **쿠키 값은 토큰이 아니다**(따로 만든 무작위 값) — 쿠키는 포트를 가리지 않아 127.0.0.1 의 다른 포트로도 가므로, 그것을 받은 곳이 `?t=` 를 다시 할 수 없게. 쿠키로는 읽기만 된다 |
-| 쓰기 열쇠 | 다리마다 무작위 24 바이트. 틀 서버의 **GET 이 아닌 모든 요청**(`/api/claude/*` · `/api/mcp/*` · `/api/platform/answer` · `/api/webviews/<id>/close`)과 `GET /api/wv-key` 는 읽기 인증에 더해 `X-StCFSD-Key: <쓰기 열쇠>` 가 있어야 한다. 없으면 403. 열쇠가 가는 곳: **브라우저** — `?t=` 교환 응답의 본문 스크립트가 그 탭의 sessionStorage(틀 출처, 이름 `stcfsd.bridge.key.<포트>`)에 넣고 `/`(또는 `/ui/`)로 간다. 주소 · 쿠키 · 기록 · 웹뷰에는 없다. **Electron** — 주 프로세스가 `webRequest` 로 틀 서버로 가는 요청 가운데 **맨 위 프레임**(`details.frame.parent === null`)이 낸 것에만 머리로 붙인다. 페이지는 열쇠를 모른다 |
-| 웹뷰 열쇠 | 웹뷰 서버의 통로용 — `out` 은 `?k=`, `in` 은 `X-StCFSD-Webview-Key`. 틀(또는 새 화면)이 쓰기 열쇠로 `GET /api/wv-key` 에서 받아, **자기 iframe**(설계 · 보고서, 웹뷰 서버 출처)이 postMessage 로 `need-key` 를 물을 때만 그 창에 건넨다. 쿠키만 가진 곳은 화면을 빼앗거나(`superseded`) 호스트로 메시지를 넣지 못한다 |
+| 쓰기 열쇠 | 다리마다 무작위 24 바이트. 틀 서버의 **GET 이 아닌 모든 요청**(`/api/claude/*` · `/api/mcp/*` · `/api/platform/answer` · `/api/webviews/<id>/close`)과 `GET /api/wv-key` 는 읽기 인증에 더해 `X-StCFSD-Key: <쓰기 열쇠>` 가 있어야 한다. 없으면 403. 열쇠가 가는 곳: **브라우저** — `?t=` 교환 응답의 본문 스크립트가 그 탭의 sessionStorage(틀 출처, 이름 `stcfsd.bridge.key.<포트>`)에 넣고 `/`(또는 `/ui/`)로 간다. 주소 · 쿠키 · 기록 · 웹뷰에는 없다. **Electron** — 주 프로세스가 `webRequest` 로 틀 서버로 가는 요청 가운데 **맨 위 프레임 문서의 스크립트가 낸 fetch/XHR**(`resourceType === 'xhr'`, `details.frame.parent === null`, 그 프레임의 문서가 틀 출처)에만 머리로 붙인다. 이동(맨 위 · 하위 프레임 — 끼운 웹뷰가 `top.location` · `target=_top` 으로 일으킬 수 있는 것)에는 붙이지 않는다(V5b-04). 페이지는 열쇠를 모른다. 그리고 창은 **페이지가 시작한 맨 위 이동 · 리디렉트를 모두 막는다**(다리 주소여도) — 앱이 스스로 하는 `loadURL` · 메뉴의 새로 고침만 맨 위 창을 옮긴다. 끼운 웹뷰(하위 프레임)는 웹뷰 서버 안에서만 움직인다(`desktop/shell/src/main.ts` `guardContents`) |
+| 웹뷰 열쇠 | **웹뷰마다 다르다**(V5b-06 — 다리의 비밀과 웹뷰 id 로 만든 HMAC). 그 웹뷰의 `/api/wv/<id>/` 통로에서만 맞는다 — `out` 은 `?k=`, `in` 은 `X-StCFSD-Webview-Key`. 틀(또는 새 화면)이 쓰기 열쇠로 `GET /api/wv-key?id=<id>` 에서 받아, **자기 iframe**(설계 · 보고서, 웹뷰 서버 출처)이 postMessage 로 `need-key` 를 물을 때 그 iframe 에 **틀이 실은** 웹뷰 id(iframe 의 `src` 에서 — iframe 이 대는 id 는 믿지 않는다)의 열쇠만 건넨다. 그래서 보고서 웹뷰는 설계 웹뷰를 빼앗거나 그 대신 메시지를 넣지 못하고, 쿠키만 가진 곳은 어느 것도 못 한다 |
 | 두 출처 | 웹뷰(iframe)는 틀과 **다른 출처**(웹뷰 서버)에서 돈다 — VS Code 의 웹뷰도 다른 출처다. 그래서 웹뷰 안의 스크립트는 틀의 문서 · sessionStorage(쓰기 열쇠) · 스크립트에 닿지 못하고, 틀 서버로 보내는 요청은 Origin 이 웹뷰 서버라 거절된다(브라우저는 CORS 로도 막는다). 웹뷰 서버에는 쓰기 경로가 없다(404). 웹뷰 문서의 `frame-ancestors` 는 틀 출처뿐이다 |
 | 거절 | 토큰 없음 401(두 서버의 모든 경로) · Host 가 그 서버의 `127.0.0.1:<포트>` / `localhost:<포트>` 가 아님 403(DNS rebinding) · Origin 이 그 서버의 출처가 아님 403 · `Sec-Fetch-Site` 가 `same-origin` · `none` 이 아님 403 — 예외 하나: 웹뷰 서버의 `GET /wv/<id>/` 를 틀이 iframe 으로 싣는 것(`same-site` + `Sec-Fetch-Dest: iframe`, Origin 없음). 쓰기 열쇠 없는 쓰기 403. CORS 머리는 내지 않는다 |
 | `?t=` 교환 뒤 | 늘 이 출처의 정해진 화면(`/` 또는 `/ui/`, `?theme=` 만 넘긴다)으로 간다 — 요청 경로를 그대로 쓰지 않는다(V5-10: `/.//evil.example/x` 는 정리하면 `//evil.example/x`) |
 | 공통 머리 | `X-Content-Type-Options: nosniff` · `Cache-Control: no-store` · `Referrer-Policy: no-referrer` · `Cross-Origin-Resource-Policy: same-origin` · `X-Frame-Options: SAMEORIGIN`(웹뷰 문서만 빼고 — 그것은 `frame-ancestors <틀 출처>`) |
 
-**쿠키를 쓰는 까닭과 한계**: 보통 브라우저는 iframe · `<script src>` · `EventSource` 에 머리를 붙일 수 없어 읽기에는 쿠키가 필요하다. 쿠키는 포트를 가리지 않는다 — 같은 브라우저로 127.0.0.1 의 다른 포트(개발 서버 · 다른 로컬 도구)를 열면 그 서버가 쿠키를 받는다. 그래서 쿠키 값은 토큰이 아니고, 쿠키로는 읽기만 된다(그 서버는 모델 · 결과를 읽을 수 있다 — 브라우저 모드가 개발 길인 까닭). **방문 기록(V5-S4)**: 처음 여는 `?t=<토큰>` 주소는 브라우저의 방문 기록에 남는다(헤드리스 Edge 프로필의 History 파일에서 확인 — `test/bridge.mjs` 가 매번 알린다). 그 serve 가 떠 있는 동안 그 토큰으로 다시 교환할 수 있다. 브라우저 프로필을 읽을 수 있는 같은 사용자의 프로그램은 MCP 포트 파일도 읽을 수 있으므로 더 넓어지지는 않지만, 공용 PC 에서는 serve 를 쓰지 않는다. 쓰기 열쇠 · 쿠키 값은 기록에 없다(시험이 본다).
+**쿠키를 쓰는 까닭과 한계 — 정한 것(V5-04 남은 몫)**: 보통 브라우저는 iframe · `<script src>` · `EventSource` 에 머리를 붙일 수 없어 읽기에는 쿠키가 필요하다. 쿠키는 포트를 가리지 않는다 — 같은 브라우저로 127.0.0.1 의 다른 포트(개발 서버 · 다른 로컬 도구)를 열면 그 서버가 쿠키를 받는다. 그래서 쿠키 값은 토큰이 아니고, 쿠키로는 **읽기만** 된다. 그 읽기는 그대로 둔다: 쿠키를 받은 다른 포트는 `/api/state` · `/api/wv/<id>/last`(모델 전체) · `/api/mcp/status` · `/api/claude/status` · `/api/events` 를 **읽을 수 있다**. 읽기까지 막으려면 틀 · 새 화면의 정적 파일 · SSE 에도 쿠키 아닌 무엇이 필요한데, 그것은 브라우저 모드 전체를 다시 짜는 일이고 이 길은 개발 · 시험용이다 — **이것은 브라우저 모드(`serve`)만의 알려진 한계다. 사용자가 쓰는 Electron 창은 쿠키를 쓰지 않아(Bearer) 해당하지 않는다.** serve 는 시작할 때 이 한 줄을 알린다(「알림: 브라우저로 여는 이 화면은 개발 · 시험 길입니다 …」). 쓰기 · 열쇠 · 웹뷰 통로는 쿠키로 되지 않는다(시험). **방문 기록(V5-S4)**: 처음 여는 `?t=<토큰>` 주소는 브라우저의 방문 기록에 남는다(헤드리스 Edge 프로필의 History 파일에서 확인 — `test/bridge.mjs` 가 매번 알린다). 그 serve 가 떠 있는 동안 그 토큰으로 다시 교환할 수 있다. 브라우저 프로필을 읽을 수 있는 같은 사용자의 프로그램은 MCP 포트 파일도 읽을 수 있으므로 더 넓어지지는 않지만, 공용 PC 에서는 serve 를 쓰지 않는다. 쓰기 열쇠 · 쿠키 값은 기록에 없다(시험이 본다).
 
 ## 2. 경로
 
@@ -44,12 +44,13 @@
 | `GET /` | 틀(`host/frame/index.html`). CSP `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-src 'self' <웹뷰 출처>; frame-ancestors 'self'; base-uri 'none'; form-action 'none'`. `?theme=dark|light` |
 | `GET /?t=<토큰>` · `/ui/?t=` | 브라우저의 첫 진입 — 1절 |
 | `GET /frame/<파일>` | 틀의 스크립트 · 스타일 |
-| `GET /api/wv-key` | **V5** — 웹뷰 열쇠 `{key, origin}`. 쓰기 열쇠가 있어야 한다 |
+| `GET /api/wv-key?id=<웹뷰 id>` | **V5 · V5b-06** — 그 웹뷰의 열쇠 `{id, key, origin}`. 쓰기 열쇠가 있어야 한다. `id` 가 없으면 400, 없는 웹뷰면 404 |
 | `GET /api/events` | 틀의 이벤트(SSE). 첫 사건 `hello {lastSeq, state}`, 그 뒤 `{seq, at, type, source, data}`. `Last-Event-ID` 로 최근 500건 다시 받기 |
 | `GET /api/state` | `{designer, webviews[{id, viewType, title, pinned, visible, connected, ready, url}], theme, ui, webviewOrigin, currentFile, currentName, platform{progress, pending}, lastSeq}` — `url` 은 웹뷰 서버의 절대 주소, `ui` = `/ui/` 를 내주는가(U1) |
 | `POST /api/platform/answer` | `{qid, answer}` — 4절. 형식이 틀리면 400 과 까닭. 쓰기 열쇠 |
 | `POST /api/webviews/<id>/close` | 웹뷰 닫기(좌굴 보고서 칸의 ✕). 설계 패널은 고정이라 숨김이 될 뿐 없어지지 않는다(S1). 쓰기 열쇠 |
 | `GET·POST /api/mcp/<경로>` | 호스트 MCP 다리로 중계(`/status` · `/action` · `/last-call`). 다리가 MCP 토큰을 붙인다 — 화면에는 그 토큰이 가지 않는다. 화면의 머리(쿠키 · Origin)는 넘기지 않고, AI 호출 표시 `X-StCFSD-Request-Id` 도 붙이지 않는다(이 조회는 「마지막 호출」로 세지 않는다). POST 는 쓰기 열쇠. MCP 다리의 `GET /hello` · `X-StCFSD-Proof`(K1 V5-09)는 MCP 서버가 쓰는 것이라 중계는 쓰지 않는다 |
+| `GET /ui/viewer3d/viewer3d.js` · `/ui/viewer3d/viewer3d.mode-shape-renderer.js` | 새 검토 화면의 3D 모드 형상(아래 「3D 렌더러를 새 화면에서」) — 제품의 렌더러 번들(`media/` 의 이 두 파일만, 다른 이름 · `.map` 은 404)을 화면과 같은 출처로. `uiDir` 를 줄 때만 |
 | `GET /ui/` · `/ui/index.html` · `/ui/dist/<파일>` · `/ui/style/<파일>` | **U1** — 새 검토 화면(`startBridge({ uiDir })`, serve 는 `<저장소>/desktop/ui`, 설치본은 `resources/app/ui` — 껍데기의 `--ui` 일 때). HTML 의 CSP 는 틀과 같다. 소스(`src/`) · 시험 · `build.mjs` 는 내주지 않는다(404). `uiDir` 를 주지 않으면 이 경로는 없다(404). 기본 화면 `/` 는 이것과 상관없이 틀이다 |
 | `GET /api/wv/<id>/last?command=a&command=b` | **U1** — 다시 보내기 기록(5절)에 남은 그 명령의 마지막 메시지 `{success, data: {a: {seq, message: {command, data}} \| null, …}, seq}`. 페이지가 새로 고침하면 받을 것과 같다: 결과를 지우는 메시지가 지운 결과는 `null`, 한 번만 뜻이 있는 명령(`collectDesignData` · `propertiesResult` …)은 늘 `null`. 40 개까지 |
 | `GET /api/wv/<id>/first?command=modelLoaded` | **U1** — 그 명령의 첫 메시지(다리가 처음 보낸 webviewReady 에 호스트가 채운 기본 모델) |
@@ -127,7 +128,7 @@ VS Code 웹뷰는 `retainContextWhenHidden` 이라 다시 뜨지 않는다. 호�
 - 줄이는 규칙: ① 같은 명령은 마지막 것만(남은 것끼리는 원래 차례) ② `resultsCleared` · `analysisInvalidated` 가 오면 그것이 지우는 앞의 결과를 뺀다 ③ 한 번만 뜻이 있는 `collectDesignData`(다시 보내면 저장이 돈다) · `captureSection` · `showSection` 은 남기지 않는다 ④ 웹뷰가 그릴 때마다 스스로 다시 묻는 `propertiesResult` · `propertiesError` 는 남기지 않는다(남기면 도심 축이 두 번 그려졌다 — 시험에서 봄).
 - 좌굴 보고서 패널은 `webviewReady` 를 보내지 않으므로 붙자마자 준비된 것으로 본다.
 - SSE 가 끊겼다 다시 붙으면 페이지가 스스로 다시 읽는다(두 번째 `hello`) — 위의 다시 보내기로 돌아온다.
-- **아직 호스트에 가지 않은 설계 탭 입력(V5-03)**: 새로 고침 · 다시 싣기 앞(`pagehide`)에 수신부가 페이지 자신의 저장 길로 입력을 모은다 — 페이지에 `collectDesignData` 를 호스트가 보낸 것처럼 넣고, 페이지가 돌려주는 `designDataCollected`(파일에 저장하는 것과 같은 꼴, 단위계 포함)를 **호스트로 보내지 않고** 이 탭의 sessionStorage(웹뷰 출처)에 둔다. 다시 뜬 페이지는 다시 보내기를 마친 뒤 그것을 `restoreDesignInputs`(파일을 열 때와 같은 길)로 되돌린다(`<html data-stcfsd-preserved="restored">`). 테마 바꾸기는 다시 싣지 않으므로 이 길도 필요 없다. 남는 것: 탭 · 창을 닫거나 프로그램이 끝나면 sessionStorage 도 사라진다(저장하지 않은 입력은 파일에만 남는다).
+- **아직 호스트에 가지 않은 설계 탭 입력(V5-03)**: 새로 고침 · 다시 싣기 앞(`pagehide`)에 수신부가 페이지 자신의 저장 길로 입력을 모은다 — 페이지에 `collectDesignData` 를 호스트가 보낸 것처럼 넣고, 페이지가 돌려주는 `designDataCollected`(파일에 저장하는 것과 같은 꼴, 단위계 포함)를 **호스트로 보내지 않고** 이 탭의 sessionStorage(웹뷰 출처)에 둔다. 다시 뜬 페이지는 다시 보내기를 마친 뒤 그것을 `restoreDesignInputs`(파일을 열 때와 같은 길)로 되돌린다(`<html data-stcfsd-preserved="restored">`). **같은 파일일 때만(V5b-02)**: 모을 때 그 페이지가 마지막으로 받은 `resultsCleared` · `restoreDesignInputs` 의 순서 번호(SSE `id` — 호스트가 다른 파일을 열 때마다 이 둘을 새로 보낸다)를 함께 두고, 다시 보내기의 것과 다르면(그사이 호스트가 다른 파일을 열었으면) 버리고 페이지의 상태 줄에 「새로 고침하는 동안 다른 파일이 열려 … 되살리지 않았습니다 — 지금 파일의 값입니다」 를 쓴다(`data-stcfsd-preserved="dropped-other-file"`). 10 분 넘은 것도 버린다(`dropped-stale`). AI 의 `load_project`(모델만 바꾸고 설계 탭 입력은 건드리지 않는다)는 파일 바뀜으로 치지 않는다 — 페이지가 떠 있을 때와 같다. 테마 바꾸기는 다시 싣지 않으므로 이 길도 필요 없다. 남는 것: 탭 · 창을 닫거나 프로그램이 끝나면 sessionStorage 도 사라진다(저장하지 않은 입력은 파일에만 남는다).
 
 ## 6. PDF · 보고서
 
@@ -170,4 +171,24 @@ node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [-
 
 **AI(MCP 쪽)는 Claude 설정에 닿는가 — 지금 참인 것**: 등록 · 지우기 경로는 화면 다리의 두 POST 뿐이고(읽기 인증 + 쓰기 열쇠), AI 가 붙는 호스트의 MCP 다리에는 그런 경로가 없다(시험: 중계 · MCP 다리 직접 모두 `Unknown endpoint`). AI 의 도구가 파일을 쓰는 길은 `save_project` 하나다 — V5-01(공용 코드 `4497b34`)부터 그것은 이미 있는 파일을 덮어쓰지 않는다(자기가 쓴 StCFSD 모델 파일이 아니면 거절). 그래서 MCP `save_project` 로 Claude 설정 파일을 겨누면 거절되고 파일은 바이트까지 그대로다 — `test/connect.mjs` 가 화면의 중계(AI 와 같은 호스트 동작)로 시험한다. 「AI 는 Claude 설정에 닿지 않는다」 는 이 둘을 합친 말이다.
 
-MCP 다리(호스트 쪽, 포트 파일 방식)는 K1 V5 부터: MCP 서버가 처음 붙을 때 `GET /hello` 하나를 보내고, 호스트는 토큰을 통과한 응답에 `X-StCFSD-Proof`(토큰과 포트 파일의 instanceId · 요청의 nonce 로 만든 HMAC)를 붙인다 — 포트 파일의 pid 가 재사용돼 남의 서버가 그 포트에 있어도 MCP 서버가 그쪽으로 요청을 보내지 않게. MCP 서버는 확인한 프로그램을 포트 파일 옆 `stcfsd-mcp-port.client-<이름>-<해시 8자>` 에 적어 두고(토큰 없음), 새로 뜬 MCP 서버(Claude Desktop 재시작)가 다른 프로그램 인스턴스를 만나면 `get_status` 한 번 전에는 다른 도구를 받지 않는다(재시작 알림). 화면 다리의 중계는 이것들을 쓰지 않는다.
+MCP 다리(호스트 쪽, 포트 파일 방식)는 K1 V5 · V5b 부터: MCP 서버가 처음 붙을 때 `GET /hello` 하나를 보낸다 — **토큰을 싣지 않는다**(V5b-05: 포트만 차지한 다른 프로그램이 토큰을 받지 못하게). 호스트는 그 응답에 `X-StCFSD-Proof`(토큰과 포트 파일의 instanceId · 요청의 nonce 로 만든 HMAC)를 붙이고, MCP 서버는 그것을 확인한 뒤에만 토큰을 싣는다 — 포트 파일의 pid 가 재사용돼 남의 서버가 그 포트에 있어도 그쪽으로 요청 · 토큰을 보내지 않게. MCP 서버는 확인한 프로그램을 포트 파일 옆에 **MCP 프로세스마다** 적는다(토큰 없음): `stcfsd-mcp-port.client-<이름>-<해시 8자>.p-<pid>-<시작 ms 36진>`, 끝난 프로세스의 기록은 `….client-<이름>-<해시>.stale` 하나로 접힌다(V5b-10). 새로 뜬 MCP 서버(Claude Desktop 재시작)는 같은 이름의 모든 기록이 지금의 프로그램을 가리킬 때만 알림 없이 쓰고, 아니면 `get_status` 한 번 전에는 다른 도구를 받지 않는다 — 그때 AI 가 받는 글은 「The StCFSD program has been restarted since an earlier session of this AI app last used it (or that cannot be ruled out) … This request was not sent. Call get_status to check the current state, then continue.」, 그 `get_status` 에는 같은 뜻의 알림이 붙는다(같은 MCP 서버 안의 재시작은 「The StCFSD program was restarted since your last call. …」). 이 기록 · `.stale` 은 `%APPDATA%\StCFSD\mcp\` 에 남고 제거해도 지우지 않는다. 화면 다리의 중계는 `/hello` · 증명 · 기록을 쓰지 않는다(다리가 토큰을 붙이는 같은 프로세스 안의 호출이다).
+
+### 3D 렌더러를 새 화면에서(새 검토 화면의 다음 단계가 쓸 길)
+
+제품의 모드 형상 렌더러(`src/webview/viewer3d` → webpack → `media/viewer3d.js` + 지연 조각 `viewer3d.mode-shape-renderer.js`, Babylon.js)를 `/ui/` 가 **같은 출처**에서 싣는다 — 다리가 `/ui/viewer3d/<그 두 이름>` 만 내준다. **CSP 는 넓히지 않았다**: 번들은 `eval` · `new Function`(webpack 런타임의 `globalThis` 대비 한 줄은 브라우저에선 돌지 않는다) · WebAssembly 를 쓰지 않으므로 `'unsafe-eval'` · `'wasm-unsafe-eval'` 이 필요 없고, 지연 조각은 webpack 이 `<script src>` 로 같은 자리에서 싣는다(`script-src 'self'` 로 된다). 그래서 따로 가둔 iframe 도 두지 않는다. 시험 `ui/test/ui.mjs` 의 u3d: 화면의 CSP 그대로 번들을 싣고 `analysisComplete.shapes` 의 첫 모양을 그린다(메시 · 꼭짓점 > 0, CSP 위반 · 예외 0, 다른 이름 404).
+
+새 화면이 쓰는 법(정확히):
+
+```js
+// 1) 한 번만 — 화면의 스크립트가 <script> 를 더한다(인라인 아님)
+const s = document.createElement('script'); s.src = '/ui/viewer3d/viewer3d.js'; document.head.appendChild(s);
+await new Promise((ok, no) => { s.onload = ok; s.onerror = no; });
+// 2) 캔버스 — render() 는 id 'mode-shape-3d-canvas' 를 찾는다(또는 먼저 CufsmViewer3D.init(<다른 id>))
+// 3) 자료 — 웹뷰가 받은 것 그대로: GET /api/wv/<설계 id>/last?command=analysisComplete&command=modelLoaded
+const a = last.analysisComplete.message.data, m = last.modelLoaded.message.data;
+const shape = a.shapes[lengthIdx];                                    // 반파장 하나의 모드 행렬
+const modeVec = Array.isArray(shape[0]) ? shape.map(r => r[modeIdx] || 0) : shape;
+await window.CufsmViewer3D.render({ nodes: m.node, elems: m.elem, modeVec, length: a.curve[lengthIdx][0], BC: m.BC || 'S-S', scale: 0.3 });
+```
+
+(이것은 웹뷰의 `renderModeShape3DWrapper`(webview/js/app.js)가 하는 것과 같다. WebGL 이 없는 PC 에서는 `render` 가 던진다 — 웹뷰처럼 2D 로 물러설지는 화면이 정한다.)

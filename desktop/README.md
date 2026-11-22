@@ -36,6 +36,8 @@ npm run test:packaged                          # 설치본 확인(설치하지 �
 
 `desktop/` 은 자체 `package.json`(typescript · esbuild · @types/node)을 둔다. 루트의 의존성에 섞이지 않는다. 루트 `tsconfig.json` 은 `desktop` 을 `exclude` 한다 — 루트의 `tsc` 는 여기 소스를 보지 않고, 여기 소스는 `desktop/tsconfig.json` 으로 따로 형 검사한다.
 
+**브라우저 모드(`npm run serve`)는 개발 · 시험 길이다.** 같은 브라우저로 127.0.0.1 의 다른 포트를 열면 그 서버도 읽기 쿠키를 받아 모델 · 상태 · 이벤트를 **읽을 수 있다**(쓰기 · 열쇠 · 웹뷰 통로는 못 한다) — 알려진 한계로 두었다(`host/BRIDGE.md` 1절). 사용자가 쓰는 StCFSD 창(Electron)은 쿠키를 쓰지 않아 해당하지 않는다. serve 는 시작할 때 이것을 한 줄로 알린다.
+
 ## 만들 것
 
 | 경로 | 내용 |

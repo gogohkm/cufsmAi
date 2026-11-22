@@ -28,7 +28,7 @@ npm test                                        # 형 검사 → 빌드 → 단�
 | `src/main.ts` | 주 프로세스: 인자 · 사용자 폴더 → 단일 인스턴스 → 로그 → 파일 · Python 확인 → 자식 콘솔 숨김 → `createBridgePlatform`(OS 대화상자 · 외부 열기 · 시작 중 알림 갈고리) → `startHost` → `startBridge` → 창 · 메뉴. 시작 실패는 무엇이 · 로그가 어디인지 적은 오류 창 |
 | `src/args.ts` | 명령줄(파일 연결 꼴 `StCFSD.exe a.csd` 포함) |
 | `src/layout.ts` | 개발 · 설치본의 파일 자리(설치본 = `resources/app` · `app-root` · `python`, asar 없음 — S5) |
-| `src/mode.ts` | 실행 모드(V5-13): 설치본은 시험 · 개발 변수를 따르지 않는다 — `<resources>/stcfsd-verification.json` 이 있는 확인용 복사본만 예외. 사용자 폴더 점검(V5-11), 물음 신호의 규칙 하나(V5-16c) |
+| `src/mode.ts` | 실행 모드(V5-13): 설치본은 시험 · 개발 변수를 따르지 않는다 — `<resources>/stcfsd-verification.json` 이 **이 빌드의 표시**(주 번들 sha256 을 담은 정해진 꼴 — 모델 모양 JSON 은 아니다)인 확인용 복사본만 예외. 사용자 폴더 점검(V5-11), 물음 신호의 규칙 하나(V5-16c) |
 | `src/windowState.ts` | 창 위치 · 크기 · 최대화 · 모니터 기억, 모니터 구성이 바뀌면 주 모니터 안으로(StAnal 그대로) |
 | `src/winConsole.ts` | Windows: 자식 프로세스(Python 엔진 · 시작 점검의 `execSync`)에 콘솔 창이 뜨지 않게 `child_process` 를 감싼다(StAnal 그대로) |
 | `src/log.ts` | `사용자 폴더\logs\main-<날짜>.log`(8 MiB 넘기면 다음 파일, 14일 · 64 MiB 넘는 것은 지움) |
@@ -42,7 +42,7 @@ npm test                                        # 형 검사 → 빌드 → 단�
 | 무엇 | 어떻게 |
 |---|---|
 | 보안 | `contextIsolation: true` · `sandbox: true`(`app.enableSandbox()`) · `nodeIntegration: false` · `webviewTag: false` · `webSecurity: true` · 개발자 도구는 개발판만. 다리 출처가 아닌 곳으로의 이동 · 리디렉트 · 새 창 · iframe 이동은 막고, http/https 는 OS 브라우저로(`shell.openExternal`). 세션의 바깥 네트워크 요청(http · ws · ftp)은 `webRequest` 에서 끊는다 — 원격 내용 없음. 권한은 「클립보드 쓰기」만 |
-| 인증 | 쿠키를 쓰지 않는다. 메모리 세션(`session.fromPartition('stcfsd-bridge')` — `persist:` 없음, 캐시 없음)이 다리의 두 출처(틀 서버 · 웹뷰 서버)로 보내는 모든 요청에 `Authorization: Bearer <다리 토큰>` 을 붙인다. **쓰기 열쇠**(`X-StCFSD-Key`)는 틀 서버로 가는 요청 가운데 맨 위 프레임(틀 · 새 화면)이 낸 것에만 붙인다 — 페이지는 열쇠를 모르고, 끼운 웹뷰(다른 출처)의 요청에는 붙지 않는다(V5-04 · V5-18, `host/BRIDGE.md` 1절). 창에는 토큰 없는 주소를 싣는다 |
+| 인증 | 쿠키를 쓰지 않는다. 메모리 세션(`session.fromPartition('stcfsd-bridge')` — `persist:` 없음, 캐시 없음)이 다리의 두 출처(틀 서버 · 웹뷰 서버)로 보내는 모든 요청에 `Authorization: Bearer <다리 토큰>` 을 붙인다. **쓰기 열쇠**(`X-StCFSD-Key`)는 틀 서버로 가는 요청 가운데 맨 위 프레임(틀 · 새 화면) 문서의 스크립트가 낸 fetch/XHR 에만 붙인다 — 이동(끼운 웹뷰가 `top.location` · `target=_top` 으로 일으킬 수 있는 것)에는 붙지 않고, 페이지는 열쇠를 모르며, 끼운 웹뷰(다른 출처)의 요청에도 붙지 않는다(V5-04 · V5-18 · V5b-04, `host/BRIDGE.md` 1절). 맨 위 창은 페이지가 시작한 이동 · 리디렉트를 모두 막는다(다리 주소여도) — 앱의 `loadURL` · 메뉴의 새로 고침만 맨 위 창을 옮긴다. 끼운 웹뷰는 웹뷰 서버 안에서만 움직인다. 웹뷰 열쇠는 웹뷰마다다(V5b-06). 창에는 토큰 없는 주소를 싣는다 |
 | 포커스 | 창을 보이는 것은 사용자가 실행했을 때 한 번과 다시 실행했을 때(second-instance)뿐. 호스트 · AI 의 변화로는 앞으로 꺼내지 않는다. **호스트의 물음**(단추 있는 알림 · 고르기 · 입력)은 틀 안의 상자로 뜨고, 창 제목이 「● 응답 필요 — …」 로 바뀌며, 창에 포커스가 없으면 작업 표시줄 단추만 깜빡인다(`flashFrame`) — 다른 프로그램에서 타이핑하는 사용자를 끌어오지 않는다. 그 규칙은 시험 · 실제 길이 같은 함수 하나(`questionSignal`)이고 단위 시험이 본다. 앞으로 나오는 예외는 셋: 처음 뜰 때, 다시 실행했을 때, **시작 실패 오류 상자**(사용자 폴더에 쓸 수 없음 · 파일 · Python · 호스트 실패) |
 | 한 번만 실행 | `requestSingleInstanceLock` — 두 번째 실행은 넘겨받은 `.csd` 경로를 첫 프로세스에 주고 곧 끝난다. 첫 프로세스가 그 파일을 열고 창을 앞으로(사용자가 한 일이다). 첫 프로세스가 **아직 시작 중**이면 그 파일을 버리지 않고 차례에 두었다가 시작이 끝나면 차례로 연다(V5-12a). 한 번에 여러 파일이면 첫 것만 열고 나머지는 「한 번에 하나만 엽니다 … 열지 않았습니다」 풍선(V5-12b). 잠금은 사용자 폴더마다다 |
 | 사용자 폴더에 쓸 수 없을 때 | 잠금 **전에** 폴더를 만들고 써 본다. 안 되면 폴더와 까닭(권한 없음 · 같은 이름의 파일 …)을 적은 OS 오류 상자를 띄우고 끝낸다(코드 4) — 전에는 「이미 떠 있다」 로 보고 말없이 끝났다(V5-11). 로그 폴더를 만들지 못하는 것도 같은 오류 상자 길이다 |

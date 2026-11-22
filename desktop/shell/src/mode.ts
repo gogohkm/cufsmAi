@@ -3,15 +3,40 @@
  *
  * 설치본(app.isPackaged)은 시험 · 개발 길을 따르지 않는다: `STCFSD_SHELL_TEST`(창을 숨기고 주 프로세스 eval 통로를 여는 것),
  * `STCFSD_PYTHON` · `STCFSD_CLAUDE_CONFIG` · `STCFSD_DOCUMENTS`(덮어쓰기). 예외는 **확인용 복사본** 하나다 —
- * `<resources>/stcfsd-verification.json` 이 있을 때. 그 파일은 배포물(설치 파일 · win-unpacked)에 없다: 포장본 시험
+ * `<resources>/stcfsd-verification.json` 이 있고 그것이 **이 빌드의 표시**일 때(`verificationMarkerValid` — 주 번들의 sha256 을 담은 정해진 꼴). 그 파일은 배포물(설치 파일 · win-unpacked)에 없다: 포장본 시험
  * (`desktop/installer/test/packaged.mjs`)이 풀린 폴더를 임시 자리로 복사한 뒤 그 파일 하나만 더하고, 나머지 모든 파일이 설치 파일
  * 안의 것과 바이트까지 같은지(sha256) 맞춰 본 다음 띄운다. 시험하는 것 = 배포하는 것 + 그 표시 파일.
  * 같은 사용자 권한의 프로그램은 그 파일을 만들 수 있지만, 그러면 설치 폴더의 main.js 도 바꿀 수 있다 — 더 약해지지 않는다(V5-13).
  */
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 export const VERIFICATION_MARKER = 'stcfsd-verification.json';
+export const VERIFICATION_SCHEMA = 'stcfsd-verification/1';
+/** 표시 파일에 둘 수 있는 키 — 이 밖의 키가 하나라도 있으면(모델 파일 · 다른 JSON) 표시가 아니다 */
+const MARKER_KEYS = new Set(['schema', 'mainBundleSha256', 'note', 'createdAt']);
+
+/**
+ * 확인용 표시 파일이 **이 빌드의** 표시인가(V5-13 후속). 표시는 스스로를 지킨다:
+ *  - 정확히 `{schema: "stcfsd-verification/1", mainBundleSha256: <이 프로그램이 지금 돌리는 main.js 의 sha256>}`(+ `note` · `createdAt`)이어야 한다.
+ *  - 다른 키가 하나라도 있으면 아니다 — StCFSD 모델 파일(`save_project` 가 쓰는 것은 모델 키뿐 — `node` · `elem` …)은 `schema` 도
+ *    `mainBundleSha256` 도 가질 수 없고, 가져도 다른 키 때문에 거절된다. 64 KiB 보다 크면 읽지 않는다.
+ *  - sha256 이 지금 실행 중인 주 번들과 다르면 아니다 — 다른 빌드에서 가져온 표시 · 옛 표시는 효과가 없다.
+ * 무엇이 틀려도 조용히 「아니다」(설치본은 보통 실행으로 돈다).
+ */
+export function verificationMarkerValid(markerFile: string, mainBundleFile: string): boolean {
+  try {
+    const st = fs.statSync(markerFile);
+    if (!st.isFile() || st.size > 64 * 1024) { return false; }
+    const j = JSON.parse(fs.readFileSync(markerFile, 'utf8'));
+    if (!j || typeof j !== 'object' || Array.isArray(j)) { return false; }
+    if (Object.keys(j).some(k => !MARKER_KEYS.has(k))) { return false; }
+    if (j.schema !== VERIFICATION_SCHEMA || typeof j.mainBundleSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(j.mainBundleSha256)) { return false; }
+    const actual = crypto.createHash('sha256').update(fs.readFileSync(mainBundleFile)).digest('hex');
+    return actual === j.mainBundleSha256;
+  } catch { return false; }
+}
 
 export interface RunModeInput {
   packaged: boolean;

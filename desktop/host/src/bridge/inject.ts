@@ -97,6 +97,8 @@ export function cspNonces(policy: string): string[] {
  *  - 새로 고침 · 다시 싣기 앞(`pagehide`): 페이지 자신의 저장 길로 설계 탭 입력을 모은다 — 페이지에 `collectDesignData` 를
  *    호스트가 보낸 것처럼 넣고, 페이지가 돌려주는 `designDataCollected` 를 호스트로 보내지 않고 이 탭의 sessionStorage 에 둔다.
  *    다시 뜬 페이지는 다시 보내기를 마친 뒤 그것을 `restoreDesignInputs`(파일을 열 때와 같은 길)로 되돌린다(V5-03).
+ *    다만 모은 때와 같은 파일일 때만 — 마지막 `resultsCleared` · `restoreDesignInputs` 의 순서 번호(SSE 의 id, 호스트가 다른 파일을 열 때마다
+ *    새로 생긴다)를 함께 두고 다시 보내기의 것과 비교한다. 다르면 버리고 상태 줄에 알린다(V5b-02). 10 분 넘은 것도 버린다.
  *  - 연결이 끊겼다 다시 붙으면(두 번째 hello) 페이지를 다시 읽는다 — 다리가 지금 상태를 다시 보낸다(다시 보내기).
  *  - 다른 연결이 이 웹뷰를 가져가면(`superseded`) 멈추고 `<html data-stcfsd-bridge="superseded">` 로 표시한다.
  */
@@ -106,6 +108,7 @@ function clientScript(cfg: Record<string, unknown>): string {
 var cfg=${JSON.stringify(cfg).replace(/</g, '\\u003c')};
 var base='/api/wv/'+encodeURIComponent(cfg.id);
 var conn=null,open=false,ever=false,dead=false,sending=false,outQ=[],key=null,es=null,capturing=false,replayDone=false;
+var fileSeq=null,PRESERVE_MS=600000;
 var html=document.documentElement;
 var preserveKey='stcfsd.wv.preserve.'+cfg.viewType;
 function toParent(m){try{if(window.parent&&window.parent!==window){window.parent.postMessage(m,cfg.frameOrigin);}}catch(e){}}
@@ -125,7 +128,7 @@ window.acquireVsCodeApi=function(){
   acquired=true;
   return Object.freeze({
     postMessage:function(m){
-      if(capturing&&m&&m.command==='designDataCollected'){try{sessionStorage.setItem(preserveKey,JSON.stringify({at:Date.now(),data:m.data}));}catch(e){}return;}
+      if(capturing&&m&&m.command==='designDataCollected'){try{sessionStorage.setItem(preserveKey,JSON.stringify({at:Date.now(),fileSeq:fileSeq,data:m.data}));}catch(e){}return;}
       outQ.push(JSON.stringify(m===undefined?null:m));send();
     },
     getState:function(){try{var s=sessionStorage.getItem(stateKey);return s==null?memState:JSON.parse(s);}catch(e){return memState;}},
@@ -164,7 +167,24 @@ function connect(){
     replayDone=true;
     var saved=null;try{saved=JSON.parse(sessionStorage.getItem(preserveKey)||'null');sessionStorage.removeItem(preserveKey);}catch(err){saved=null;}
     if(saved&&saved.data){
+      // V5b-02 · 모은 입력은 모은 때의 파일에만 되돌린다 — 그사이 호스트가 다른 파일을 열었으면(다시 보내기의 마지막
+      // resultsCleared · restoreDesignInputs 의 순서 번호가 다르면) 버리고 상태 줄에 알린다. 오래된 것(10 분)도 버린다.
+      var why=saved.fileSeq!==fileSeq?'dropped-other-file':(!(Date.now()-Number(saved.at)<PRESERVE_MS)?'dropped-stale':null);
       setTimeout(function(){
+        if(why){
+          html.setAttribute('data-stcfsd-preserved',why);
+          var text=why==='dropped-other-file'
+            ?'새로 고침하는 동안 다른 파일이 열려, 이 화면에만 있던 설계 탭 입력을 되살리지 않았습니다 — 지금 파일의 값입니다.'
+            :'새로 고침 전의 설계 탭 입력이 오래되어 되살리지 않았습니다.';
+          // 페이지의 상태 줄은 페이지가 곧 다시 쓰므로, 다리의 알림 줄을 따로 맨 위에 둔다(누르면 닫힘)
+          var n=document.createElement('div');n.id='stcfsd-bridge-notice';n.setAttribute('role','status');n.textContent=text+'  ✕';
+          n.style.cssText='position:sticky;top:0;z-index:2147483646;padding:6px 10px;font-size:12px;cursor:pointer;'
+            +'background:var(--vscode-inputValidation-warningBackground,#5a4a1a);color:var(--vscode-foreground,#eee);border-bottom:1px solid var(--vscode-inputValidation-warningBorder,#b89500)';
+          n.addEventListener('click',function(){n.remove();});
+          if(document.body){document.body.insertBefore(n,document.body.firstChild);}
+          var st=document.getElementById('status-message');if(st){st.textContent=text;}
+          return;
+        }
         var inputs=saved.data.__stcfsd_collect===2?saved.data.designInputs:saved.data;
         if(inputs){toPage({command:'restoreDesignInputs',data:inputs});html.setAttribute('data-stcfsd-preserved','restored');}
       },50);
@@ -173,6 +193,7 @@ function connect(){
   es.onmessage=function(e){
     var msg;try{msg=JSON.parse(e.data);}catch(err){return;}
     received++;
+    if(msg&&(msg.command==='resultsCleared'||msg.command==='restoreDesignInputs')){fileSeq=e.lastEventId||null;}
     toPage(msg);
   };
   es.onerror=function(){if(!dead){open=false;}};

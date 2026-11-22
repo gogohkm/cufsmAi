@@ -34,22 +34,28 @@
     return fetch(url, { method: 'POST', headers: keyHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body), credentials: 'same-origin' })
       .then(function (r) { return r.json(); });
   }
-  // ── 웹뷰 열쇠 — 이 틀의 iframe 에만 ─────────────────────────────
-  var wvKey = null;
-  var wvKeyWaiters = [];
-  var wvKeyAsked = false;
-  function withWebviewKey(cb) {
-    if (wvKey) { cb(wvKey); return; }
-    wvKeyWaiters.push(cb);
-    if (wvKeyAsked) { return; }
-    wvKeyAsked = true;
-    fetch('/api/wv-key', { headers: keyHeaders({}), credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (r) {
-      wvKeyAsked = false;
+  // ── 웹뷰 열쇠 — 웹뷰마다(V5b-06), 그 웹뷰를 실은 이 틀의 iframe 에만 ─────────────
+  var wvKeys = {};
+  var wvKeyWaiters = {};
+  function withWebviewKey(id, cb) {
+    if (wvKeys[id]) { cb(wvKeys[id]); return; }
+    if (wvKeyWaiters[id]) { wvKeyWaiters[id].push(cb); return; }
+    wvKeyWaiters[id] = [cb];
+    fetch('/api/wv-key?id=' + encodeURIComponent(id), { headers: keyHeaders({}), credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (r) {
+      var w = wvKeyWaiters[id] || []; delete wvKeyWaiters[id];
       if (!r || !r.success) { toast({ severity: 'error', message: '화면 연결 열쇠를 받지 못했다 — 주소를 다시 열어 주십시오(' + ((r && r.error) || '') + ')' }); return; }
-      wvKey = r.data.key;
-      var w = wvKeyWaiters; wvKeyWaiters = [];
-      w.forEach(function (f) { f(wvKey); });
-    }).catch(function () { wvKeyAsked = false; });
+      wvKeys[id] = r.data.key;
+      w.forEach(function (f) { f(wvKeys[id]); });
+    }).catch(function () { delete wvKeyWaiters[id]; });
+  }
+  /** 이 iframe 에 이 틀이 실은 웹뷰의 id — iframe 이 스스로 대는 id 는 믿지 않는다 */
+  function loadedWebviewId(f) {
+    try {
+      var u = new URL(f.src);
+      if (u.origin !== wvOrigin) { return null; }
+      var m = /^\/wv\/([^/]+)\/$/.exec(u.pathname);
+      return m ? decodeURIComponent(m[1]) : null;
+    } catch (err) { return null; }
   }
   function ownFrames() { return [$('designer'), $('side-frame')].filter(Boolean); }
   window.addEventListener('message', function (e) {
@@ -58,7 +64,9 @@
     var from = ownFrames().filter(function (f) { return f.contentWindow === e.source; })[0];
     if (!from) { return; }
     if (d.type === 'need-key') {
-      withWebviewKey(function (k) { try { e.source.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, wvOrigin); } catch (err) { /* 닫힘 */ } });
+      var id = loadedWebviewId(from);
+      if (!id) { return; }
+      withWebviewKey(id, function (k) { try { e.source.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, wvOrigin); } catch (err) { /* 닫힘 */ } });
     }
   });
   function toWebviews(msg) {

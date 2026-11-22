@@ -74,6 +74,7 @@ async function main(): Promise<void> {
   out(`StCFSD 호스트 + 화면 다리 — 활성화 ${host.activationMs} ms, 설계 패널 ${host.panelMs} ms`);
   const wantUi = flags.ui === true;
   if (wantUi && !bridge.uiUrl) { out('새 화면(desktop/ui/index.html)이 없다 — 틀을 연다'); }
+  out('알림: 브라우저로 여는 이 화면은 개발 · 시험 길입니다 — 같은 브라우저로 연 127.0.0.1 의 다른 포트도 읽기 쿠키를 받아 모델 · 상태를 읽을 수 있습니다(쓰기는 못 함). 사용자는 StCFSD 창을 씁니다.');
   out(`화면: ${wantUi && bridge.uiUrl ? bridge.uiUrl : bridge.url}`);
   out(`MCP 다리: ${host.mcp.url}  포트 파일: ${host.mcp.portFile}`);
   out(`MCP 클라이언트: ${Object.entries(host.mcp.env).map(([k, v]) => `${k}=${v}`).join(' ')} node ${host.mcp.serverScript}`);
@@ -110,6 +111,13 @@ async function main(): Promise<void> {
       const m = (raw ?? {}) as { id?: unknown; type?: string };
       const reply = (msg: unknown) => { if (process.connected) { process.send!(msg); } };
       if (m.type === 'shutdown') { reply({ id: m.id, ok: true, result: { stopping: true } }); setImmediate(() => { void stop('IPC shutdown'); }); return; }
+      if (m.type === 'open') {
+        // 확장의 「열기」 길로 파일을 연다(headless 의 IPC open 과 같다) — 화면이 없을 때 호스트가 파일을 여는 경우를 시험한다
+        const file = String((raw as { file?: unknown }).file ?? '');
+        host.openProject(file).then(r => { if (r.ok) { bridge.setCurrentFile(r.file); } reply({ id: m.id, ok: true, result: r }); },
+          err => reply({ id: m.id, ok: false, error: String((err as Error)?.message ?? err) }));
+        return;
+      }
       if (m.type === 'status') {
         reply({ id: m.id, ok: true, result: { unimplemented: host.unimplemented(), messageCounts: host.messageCounts(),
           designerAlive: host.designer.alive(), channels: bridge.channels(), mcpConfigWrites: host.mcpConfigWrites(),

@@ -64,7 +64,16 @@ export function memberSvg(o: MemberOpt): { svg: string; h: number } {
       const spans = arr(la?.spans_ft);
       out.push(`<line x1="${X(0)}" y1="${ya}" x2="${f1(X(L))}" y2="${ya}" stroke="var(--loadc)" stroke-width="1.2"/>`);
       const nArr = Math.max(8, Math.round((x1 - x0) / 30));
-      for (let i = 0; i <= nArr; i++) { const x = X(L * i / nArr); out.push(`<path d="M${f1(x)} ${ya} V${yb - 5} m-3.5 -6 l3.5 6 l3.5 -6" fill="none" stroke="var(--loadc)" stroke-width="1.1"/>`); }
+      // 화살표는 그 경간의 지배 하중 부호를 따른다 — 음(양압, 예: 0.9D+1.0W)이면 위로, 양(중력)이면 아래로. 경간마다 다를 수 있다
+      const spanAt = (xf: number) => { let k = 0; for (let j = 0; j < sup.length - 1; j++) { if (xf >= sup[j]) { k = j; } } return Math.min(k, Math.max(0, wl.length - 1)); };
+      for (let i = 0; i <= nArr; i++) {
+        const xf = L * i / nArr, x = X(xf);
+        const w = Number(wl[spanAt(xf)] ?? wl[0]);
+        const up = Number.isFinite(w) && w < 0;
+        out.push(up
+          ? `<path data-dir="up" d="M${f1(x)} ${yb - 5} V${ya} m-3.5 6 l3.5 -6 l3.5 6" fill="none" stroke="var(--loadc)" stroke-width="1.1"/>`
+          : `<path data-dir="down" d="M${f1(x)} ${ya} V${yb - 5} m-3.5 -6 l3.5 6 l3.5 -6" fill="none" stroke="var(--loadc)" stroke-width="1.1"/>`);
+      }
       out.push(`<text x="${X(0)}" y="${ya - 10}" font-size="12" fill="var(--loadc)">wu ${wl.map((v, i) => tnum(v, { src: `loads:governing.governing_span_loads_plf.${i}`, kind: 'linload', sig: 3 })).join(' · ')} kN/m · ${esc(String(g?.combo ?? ''))}</text>`);
       out.push(`<line x1="${X(0)}" y1="${yb}" x2="${f1(X(L))}" y2="${yb}" stroke="var(--steel)" stroke-width="3.2"/>`);
       const laps = Array.isArray(la?.laps_per_support) ? la.laps_per_support : [];

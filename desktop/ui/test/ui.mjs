@@ -336,6 +336,26 @@ async function main() {
   const sameCss = ['review.css', 'app.css', 'cfsd.css'].every(f => fs.readFileSync(path.join(uiDist, f), 'utf8') === fs.readFileSync(path.join(repoRoot, 'desktop', 'design', 'assets', f), 'utf8'));
   check('템플릿 CSS 셋은 design/assets 와 한 글자도 다르지 않다', sameCss);
 
+  {
+    // 부재 보기의 분포 하중 화살표는 경간마다 엔진이 준 지배 하중의 부호를 따른다 — 양압(음, 예: 6: 0.9D+1.0W)이면 위로
+    const esbuild = require('esbuild');
+    const out = esbuild.buildSync({ entryPoints: [path.join(here, '..', 'src', 'member.ts')], bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent' });
+    const mod = { exports: {} };
+    new Function('module', 'exports', 'require', out.outputFiles[0].text)(mod, mod.exports, require);
+    const la = w => ({ spans_ft: [6, 6], supports: ['P', 'P', 'P'], auto_params: { unbraced: { supports_ft: [0, 6, 12], lap_ends_ft: [], inflection_points_ft: [] } },
+      governing: { combo: '6: 0.9D+1.0W', governing_span_loads_plf: w, x_diagram: [0, 6, 12], M_diagram: [0, 1, 0], V_diagram: [1, 0, -1], R_envelope_max: [1, 2, 1], locations: [] } });
+    const dirs = w => {
+      const svg = mod.exports.memberSvg({ w: 900, la: la(w), rows: ['beam'], regions: [] }).svg;
+      return [...svg.matchAll(/<path data-dir="(up|down)" d="M([\d.]+) /g)].map(m => ({ dir: m[1], x: Number(m[2]) }));
+    };
+    const allUp = dirs([-1.2, -1.2]), allDown = dirs([0.8, 0.8]), mixed = dirs([-1.2, 0.8]);
+    const mid = (mixed[0].x + mixed[mixed.length - 1].x) / 2;
+    check('부재 보기 — 양압 조합(wu 음)의 분포 하중 화살표는 위로, 중력(양)은 아래로, 경간마다 그 경간의 부호',
+      allUp.length > 5 && allUp.every(a => a.dir === 'up') && allDown.every(a => a.dir === 'down')
+      && mixed.filter(a => a.x < mid - 1).every(a => a.dir === 'up') && mixed.filter(a => a.x > mid + 1).every(a => a.dir === 'down'),
+      `모두 음 → 위 ${allUp.filter(a => a.dir === 'up').length}/${allUp.length} · 모두 양 → 아래 ${allDown.filter(a => a.dir === 'down').length}/${allDown.length} · 첫 경간 음 · 둘째 양 → ${mixed.map(a => a.dir[0]).join('')}`);
+  }
+
   section('1. serve --ui 시작');
   let t = Date.now();
   const serve = startServe(['--ui', '--repo', repoRoot, '--user-data', path.join(tmp, 'userData'), '--port-file', portFile,
@@ -1041,6 +1061,36 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const dsmSI = await mcp.tool('get_dsm_values', { load_type: fam, units: 'SI' });
     const r = compareNumbers(await numbers(), { ...(await mcpNow()), params: params2, dsmSI });
     return { ok: vis === 'hidden' && r.bad.length === 0 && (r.bySrc.dsm ?? 0) >= 12, detail: `${vis} · dsm ${r.bySrc.dsm} 개 = MCP${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+
+  // 3D 모드 형상 — 제품의 렌더러 번들을 새 화면의 출처(/ui/viewer3d/)에서, 화면의 CSP(script-src 'self') 그대로 싣고
+  // analysisComplete.shapes 의 첫 모양을 그린다(최소 증명 — 화면에 붙이는 것은 다음 단계). CSP 위반 · 예외 0
+  await step('u3d 3D 렌더러 번들이 /ui/ 의 CSP 아래 같은 출처에서 실리고 analysisComplete.shapes 로 모양을 그린다', 'u3d_viewer3d', async () => {
+    const m0 = log.console.length;
+    const r = await ev(`(async()=>{
+      const s=document.createElement('script'); s.src='/ui/viewer3d/viewer3d.js'; document.head.appendChild(s);
+      await new Promise((ok,no)=>{s.onload=ok; s.onerror=()=>no(new Error('번들을 싣지 못함'));});
+      const c=document.createElement('canvas'); c.id='mode-shape-3d-canvas'; c.width=480; c.height=320;
+      c.style.cssText='position:fixed;right:8px;bottom:8px;width:480px;height:320px;z-index:2147483647;background:#000';
+      document.body.appendChild(c);
+      const q=await (await fetch('/api/wv/'+encodeURIComponent(${JSON.stringify(designerId)})+'/last?command=analysisComplete&command=modelLoaded',{credentials:'same-origin'})).json();
+      const a=q.data.analysisComplete.message.data, m=q.data.modelLoaded.message.data;
+      const shape=a.shapes[0]; const modeVec=Array.isArray(shape[0])?shape.map(row=>row[0]||0):shape;
+      await window.CufsmViewer3D.render({nodes:m.node, elems:m.elem, modeVec, length:a.curve[0][0], BC:m.BC||'S-S', scale:0.3});
+      const inst=window.CufsmViewer3D._modeInstance;
+      const scene=inst&&inst._scene; const meshes=scene?scene.meshes.filter(x=>x.getTotalVertices&&x.getTotalVertices()>0):[];
+      const chunk=[...document.scripts].map(x=>x.src).filter(u=>/viewer3d/.test(u));
+      return {meshes: meshes.length, vertices: meshes.reduce((n,x)=>n+x.getTotalVertices(),0), nodes:m.node.length, chunk};
+    })()`);
+    await sleep(600);
+    const shotFile = await shot('u3d_viewer3d_canvas');
+    const csp = log.console.slice(m0).filter(c => /Content Security Policy|Refused to/i.test(c.text));
+    await ev(`(()=>{const c=document.getElementById('mode-shape-3d-canvas'); if(c){c.remove();} return 1;})()`);
+    const v404 = await api('GET', '/ui/viewer3d/mcp-server.js');
+    const v404b = await api('GET', '/ui/viewer3d/viewer3d.js.map');
+    return { ok: r.meshes > 0 && r.vertices > 100 && r.chunk.some(u => /\/ui\/viewer3d\/viewer3d\.mode-shape-renderer\.js$/.test(u)) && csp.length === 0
+      && v404.status === 404 && v404b.status === 404,
+    detail: `메시 ${r.meshes} · 꼭짓점 ${r.vertices} · 절점 ${r.nodes} · 실린 조각 ${r.chunk.map(u => u.replace(/^.*\/ui\//, '/ui/')).join(', ')} · CSP 위반 ${csp.length} · 다른 파일 ${v404.status}/${v404b.status} · ${path.basename(shotFile)}` };
   });
 
   const inDom = await ev(`document.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)})`)

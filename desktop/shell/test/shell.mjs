@@ -247,6 +247,30 @@ async function main() {
         r.origin !== A.stage.origin && Object.entries(r).filter(([k]) => k !== 'origin').every(([, v]) => fine(v)) && cfgBefore === cfgSnap() && keyed > 0,
         `${short(r, 260)} · 열쇠 붙인 요청 ${keyed}`);
     }
+    // V5b-04 (창) — 끼운 웹뷰가 맨 위 창을 옮기려 해도(top.location · target=_top 폼 · window.open(_top) · target=_top 링크)
+    // 창은 앱 화면에 머물고, 쓰기 열쇠를 단 요청은 하나도 나가지 않는다(열쇠는 맨 위 문서의 fetch/XHR 에만)
+    {
+      const cfgSnap = () => (fs.existsSync(fakeClaude) ? fs.readFileSync(fakeClaude).toString('base64') : '없음');
+      const cfg0 = cfgSnap();
+      const url0 = await A.ev('return ctx.win.webContents.getURL();');
+      const k0 = await A.ev('return (ctx.diag.keyedLog ?? []).length;');
+      const b0 = await A.ev('return ctx.diag.blockedNavigations.length;');
+      const o = A.stage.origin;
+      const tries = [
+        `W.top.location = ${JSON.stringify(`${o}/api/wv-key?id=x`)};`,
+        `const f=D.createElement('form'); f.method='POST'; f.action=${JSON.stringify(`${o}/api/claude/connect`)}; f.target='_top'; D.body.appendChild(f); f.submit();`,
+        `W.open(${JSON.stringify(`${o}/api/claude/connect`)}, '_top');`,
+        `const a=D.createElement('a'); a.href=${JSON.stringify(`${o}/api/wv-key?id=y`)}; a.target='_top'; D.body.appendChild(a); a.click();`,
+      ];
+      for (const t of tries) { await A.designer(`try{${t}}catch(e){} await new Promise(r=>setTimeout(r,700)); return 1;`).catch(() => undefined); }
+      await sleep(800);
+      const after = await A.ev(`return { url: ctx.win.webContents.getURL(), keyed: (ctx.diag.keyedLog ?? []).slice(${k0}), blocked: ctx.diag.blockedNavigations.slice(${b0}) };`);
+      const keyedNav = after.keyed.filter(k => k.type !== 'xhr' || /\/api\/(claude\/connect|wv-key)/.test(k.path));
+      const stillApp = after.url === url0 && await A.page(`!!document.getElementById('designer')`).catch(() => false);
+      check('V5b-04 · 끼운 웹뷰가 맨 위 창을 옮기려는 네 길 — 창은 앱 화면 그대로 · 막은 이동 4 · 쓰기 열쇠를 단 이동 · 열쇠 요청 0 · 설정 그대로',
+        stillApp && after.blocked.filter(b => /^navigate /.test(b)).length >= 4 && keyedNav.length === 0 && cfg0 === cfgSnap(),
+        `창 ${after.url === url0 ? '그대로' : after.url} · 막음 ${short(after.blocked, 200)} · 열쇠 단 것 ${short(after.keyed, 160)}`);
+    }
     const shot1 = await A.capture('s3_01_window_loaded');
     check('보이지 않는 창의 화면을 찍는다(invalidate → DevTools 프로토콜)', fs.statSync(shot1).size > 20_000, `${path.basename(shot1)} ${fs.statSync(shot1).size} bytes`);
     await quiet(A, '띄운 뒤');

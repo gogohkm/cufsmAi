@@ -370,7 +370,7 @@ async function main() {
   const wvWrite = await wvApi('POST', '/api/claude/connect', {});
   check('웹뷰 서버에는 쓰기 경로가 없다(Claude 연결 · MCP 중계 · 물음 답)', wvWrite.status === 404 && (await wvApi('POST', '/api/mcp/action', {})).status === 404
     && (await wvApi('POST', '/api/platform/answer', {})).status === 404 && before04.equals(cfgBytes()), `connect ${wvWrite.status}`);
-  const keyed = await api('GET', '/api/wv-key', undefined, {}, { key: true });
+  const keyed = await api('GET', `/api/wv-key?id=${encodeURIComponent(designerId)}`, undefined, {}, { key: true });
   check('쓰기 열쇠가 있으면 웹뷰 열쇠를 받는다', keyed.status === 200 && typeof keyed.json?.data?.key === 'string' && keyed.json.data.key !== writeKey && keyed.json.data.origin === wvOrigin);
   const connected = await api('POST', '/api/claude/connect', {});
   const afterConnect = JSON.parse(fs.readFileSync(claudeConfig, 'utf8'));
@@ -785,7 +785,17 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     for (let i = 0; i < 200 && !(fs.existsSync(pdf) && fs.statSync(pdf).size > 0); i++) { await sleep(150); }
     const ok = fs.existsSync(pdf) && fs.readFileSync(pdf).subarray(0, 4).toString() === '%PDF';
     if (ok) { fs.copyFileSync(pdf, path.join(OUT, 'buckling-report.pdf')); }
-    return { ok, detail: `${head} · PDF ${ok ? fs.statSync(pdf).size + ' bytes' : '없음'}` };
+    // V5b-06 · 웹뷰마다 자기 열쇠 — 보고서 웹뷰의 열쇠로는 설계 웹뷰의 통로에 붙지도 · 넣지도 못한다
+    const sideId = (await api('GET', '/api/state')).json.data.webviews.find(w => w.id !== designerId)?.id;
+    const kSide = (await api('GET', `/api/wv-key?id=${encodeURIComponent(sideId)}`, undefined, {}, { key: true })).json?.data?.key;
+    const kDes = (await api('GET', `/api/wv-key?id=${encodeURIComponent(designerId)}`, undefined, {}, { key: true })).json?.data?.key;
+    const dOut = await fetch(`${wvOrigin}/api/wv/${encodeURIComponent(designerId)}/out?k=${encodeURIComponent(kSide)}`, { headers: { Authorization: `Bearer ${token}` } });
+    const dIn = await fetch(`${wvOrigin}/api/wv/${encodeURIComponent(designerId)}/in?conn=x`, { method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-StCFSD-Webview-Key': kSide }, body: '[{"command":"saveProject"}]' });
+    const noId = await api('GET', '/api/wv-key', undefined, {}, { key: true });
+    const keysOk = !!sideId && !!kSide && !!kDes && kSide !== kDes && dOut.status === 403 && dIn.status === 403 && noId.status === 400;
+    try { await dOut.body?.cancel(); } catch { /* */ } await dIn.arrayBuffer();
+    return { ok: ok && keysOk, detail: `${head} · PDF ${ok ? fs.statSync(pdf).size + ' bytes' : '없음'} · V5b-06 보고서 열쇠로 설계 out ${dOut.status} · in ${dIn.status} · 열쇠 다름 ${kSide !== kDes} · id 없는 열쇠 요청 ${noId.status}` };
   });
   await step('s13 보고서 탭의 PDF 저장(호스트가 Edge headless 로 인쇄)', async () => {
     await evalTop(`document.getElementById('side-close').click()`);
@@ -870,6 +880,32 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     await evalTop(`window.__stcfsdFrame.setTheme('dark'); 1`);
     return { ok: typed === 'ok' && v0 === '77.7' && afterTheme.fy === '77.7' && afterTheme.kind === 'vscode-light' && frameLight === true && afterReload === '77.7' && pending.length === 0,
       detail: `입력 ${v0} → 테마 뒤 ${afterTheme.fy}(${afterTheme.kind}, 배경 ${afterTheme.bg}, 틀 밝음 ${frameLight}) → 새로 고침 뒤 ${afterReload} · 뜬 물음 ${pending.length}개` };
+  });
+
+  await step('s15c 설계 웹뷰가 사라진 사이 호스트가 다른 파일 Y 를 열면 — 옛 입력을 Y 위에 되살리지 않고 알린다(V5b-02)', async () => {
+    // Y = 저장본 사본, 설계 Fy 만 50 MPa(엔진 단위 ksi)
+    const yFile = path.join(tmp, 'saved', 'Y 파일.csd');
+    const y = JSON.parse(fs.readFileSync(saved, 'utf8'));
+    y.designInputs = { ...(y.designInputs ?? {}), fy: 50 / 6.894757 };
+    fs.writeFileSync(yFile, JSON.stringify(y));
+    await tab('design');
+    await setVal('design-fy', '77.7');
+    const typed = await wv(`return D.getElementById('design-fy').value;`);
+    // 설계 웹뷰만 내린다(pagehide → 입력을 모은다) — 그사이 호스트가 Y 를 연다(확장의 「열기」 길)
+    await evalTop(`document.getElementById('designer').src='about:blank'; 1`);
+    await sleep(600);
+    const opened = await serve.ipc('open', { file: yFile }, 120_000);
+    await sleep(800);
+    await cdp.send('Page.reload', { ignoreCache: true });
+    await sleep(500);
+    await designerReady();
+    const decided = await waitWv(`return D.documentElement.getAttribute('data-stcfsd-preserved');`, 15_000, '보존한 입력의 판단');
+    await sleep(800);
+    const s = await wv(`return {fy: D.getElementById('design-fy').value, unit: D.querySelector('#btn-unit-SI.active') ? 'SI' : 'US', status: (D.getElementById('stcfsd-bridge-notice')||{}).textContent || ''};`);
+    const fy = Number(s.fy);
+    const isY = s.unit === 'SI' ? Math.abs(fy - 50) < 0.05 : Math.abs(fy - 7.2519) < 0.005;
+    return { ok: typed === '77.7' && opened?.ok === true && isY && decided === 'dropped-other-file' && /다른 파일/.test(s.status),
+      detail: `입력 ${typed} → (웹뷰 내림) 호스트가 Y 를 엶(${opened?.ok}) → 다시 뜬 화면 design-fy=${s.fy} ${s.unit}(Y 의 값 ${isY}) · 판단 ${decided} · 상태 줄 「${short(s.status, 90)}」` };
   });
 
   section('9. 밝은 · 어두운 테마');

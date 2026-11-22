@@ -17,27 +17,36 @@ let sideId: string | null = null;
 let theme: 'dark' | 'light' = 'dark';
 let changed: () => void = () => undefined;
 let wvOrigin: string | null = null;
-let wvKey: string | null = null;
-let keyWaiters: Array<(k: string) => void> = [];
-let keyAsked = false;
+/** 웹뷰 열쇠는 웹뷰마다(V5b-06) — 웹뷰 id → 열쇠 · 기다리는 것 */
+const wvKeys = new Map<string, string>();
+const keyWaiters = new Map<string, Array<(k: string) => void>>();
 let onF2: () => void = () => undefined;
 
 function frames(): HTMLIFrameElement[] {
   return ['designer', 'side-frame'].map(id => document.getElementById(id) as HTMLIFrameElement | null).filter((f): f is HTMLIFrameElement => !!f);
 }
-function withKey(cb: (k: string) => void): void {
-  if (wvKey) { cb(wvKey); return; }
-  keyWaiters.push(cb);
-  if (keyAsked) { return; }
-  keyAsked = true;
-  void fetch('/api/wv-key', { headers: keyHeaders(), credentials: 'same-origin' }).then(r => r.json()).then((r: any) => {
-    keyAsked = false;
+function withKey(id: string, cb: (k: string) => void): void {
+  const have = wvKeys.get(id);
+  if (have) { cb(have); return; }
+  const waiting = keyWaiters.get(id);
+  if (waiting) { waiting.push(cb); return; }
+  keyWaiters.set(id, [cb]);
+  void fetch(`/api/wv-key?id=${encodeURIComponent(id)}`, { headers: keyHeaders(), credentials: 'same-origin' }).then(r => r.json()).then((r: any) => {
+    const w = keyWaiters.get(id) ?? []; keyWaiters.delete(id);
     if (!r?.success) { return; }
     const k = String(r.data.key);
-    wvKey = k;
-    const w = keyWaiters; keyWaiters = [];
+    wvKeys.set(id, k);
     for (const f of w) { f(k); }
-  }).catch(() => { keyAsked = false; });
+  }).catch(() => { keyWaiters.delete(id); });
+}
+/** 이 iframe 에 이 화면이 실은 웹뷰의 id — iframe 이 스스로 대는 id 는 믿지 않는다 */
+function loadedWebviewId(f: HTMLIFrameElement): string | null {
+  try {
+    const u = new URL(f.src);
+    if (u.origin !== wvOrigin) { return null; }
+    const m = /^\/wv\/([^/]+)\/$/.exec(u.pathname);
+    return m ? decodeURIComponent(m[1]) : null;
+  } catch { return null; }
 }
 /** 다리의 웹뷰 서버 출처(상태의 webviewOrigin) */
 export function setWebviewOrigin(o: string | null | undefined): void { wvOrigin = o || null; }
@@ -68,7 +77,9 @@ export function initEdit(t: 'dark' | 'light', onChange: () => void): void {
     if (d.type === 'need-key') {
       const src = e.source as Window;
       const target = wvOrigin;
-      withKey(k => { try { src.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, target); } catch { /* 닫힘 */ } });
+      const id = loadedWebviewId(from);
+      if (!id) { return; }
+      withKey(id, k => { try { src.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, target); } catch { /* 닫힘 */ } });
     } else if (d.type === 'keydown' && d.key === 'F2' && from.id === 'designer') {
       onF2();
     }

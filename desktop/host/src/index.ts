@@ -9,7 +9,7 @@ export type {
 export type { WebviewInfo, WebviewResourceMapper } from './vscode';
 export {
   startBridge, createBridgePlatform, defaultDocumentsDir, themeVariables, usedThemeVariables, missingThemeVariables,
-  themeCss, injectWebviewHtml, rewriteCsp, rewriteResourceUrls,
+  themeCss, injectWebviewHtml, rewriteCsp, rewriteResourceUrls, invalidConfigText, writeFailedText,
 } from './bridge';
 export type {
   StartBridgeOptions, BridgeHandle, BridgePlatform, BridgePlatformOptions, PendingQuestion, BridgeClaudeOptions,

@@ -131,7 +131,7 @@ Claude Desktop 이 떠 있으면 MCP 서버로 쓰는 `StCFSD.exe`(ELECTRON_RUN_
 
 설치본은 시험 모드(창을 보이지 않음 · 주 프로세스의 IPC 제어 통로 · 가짜 대화상자)와 개발 덮어쓰기(`STCFSD_SHELL_TEST` · `STCFSD_PYTHON` ·
 `STCFSD_CLAUDE_CONFIG` · `STCFSD_DOCUMENTS`)를 **따르지 않는다** — `desktop/shell/src/mode.ts` 의 `runMode`: 설치본(`app.isPackaged`)이면
-`<resources>/stcfsd-verification.json` 이 있을 때만 연다. 그 파일은 설치 파일 · `win-unpacked` 에 없다(포장본 시험이 본다). 포장본 시험은 설치
+`<resources>/stcfsd-verification.json` 이 **이 빌드의 표시**일 때만 연다 — 표시는 스스로를 지킨다(`verificationMarkerValid`): 정확히 `{"schema": "stcfsd-verification/1", "mainBundleSha256": <지금 돌고 있는 resources/app/dist/main.js 의 sha256>}`(+ `note` · `createdAt`)이어야 하고, 다른 키가 하나라도 있으면 아니다. StCFSD 모델 파일은 `schema` · `mainBundleSha256` 을 가질 수 없고(`save_project` 는 모델 키만 쓴다 — `de7036b`, 그리고 설치 폴더 · AppData 에는 쓰지 않는다), 다른 키가 섞이면 거절되며, sha256 이 다른 빌드의 표시 · 옛 꼴의 표시는 효과가 없다(단위 시험 `installer/test/unit.mjs` · 포장본 시험이 설치본의 main.js 로 본다). 그 파일은 설치 파일 · `win-unpacked` 에 없다(포장본 시험이 본다). 포장본 시험은 설치
 파일에서 꺼낸 파일 그대로 + 그 파일 하나로 띄우고, 띄우기 전과 끝난 뒤에 나머지 모든 파일의 sha256 이 설치 파일의 것과 같은지 본다 — 시험한
 실행 파일 · main.js · 호스트 · Python 은 바이트까지 배포하는 것이다. 표시 파일이 없을 때 시험 변수를 무시하는 것은 `runMode` 단위 시험과(설치본 +
 표시 없음 → 시험 · 덮어쓰기 꺼짐), 설치본의 main.js 에 그 갈림이 들어 있는지로 본다 — 표시 파일 없는 설치본을 띄우면 창이 보이므로

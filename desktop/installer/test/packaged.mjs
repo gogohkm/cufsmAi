@@ -296,8 +296,25 @@ async function main() {
     const sig = spawnSync('pwsh', ['-NoProfile', '-Command', `(Get-AuthenticodeSignature -LiteralPath '${path.join(res, 'python', 'python.exe').replace(/'/g, "''")}').Status`], { encoding: 'utf8', windowsHide: true }).stdout.trim();
     check('묶은 python.exe 의 PSF 서명이 그대로', sig === 'Valid', sig);
 
-    // 확인용 표시 파일 하나만 더한다
-    fs.writeFileSync(path.join(res, MARKER), `${JSON.stringify({ note: 'desktop/installer/test/packaged.mjs 의 확인용 복사본 — 배포물에는 없다', at: new Date().toISOString() })}\n`);
+    // 확인용 표시 파일 하나만 더한다 — 이 빌드의 주 번들 sha256 을 담은 정해진 꼴(V5-13 후속, shell/src/mode.ts)
+    const mainSha = sha(path.join(res, 'app', 'dist', 'main.js'));
+    {
+      // 설치본의 판정 함수 그대로(mode.ts 를 묶어 읽는다)로: 모델 모양 JSON 은 표시가 아니다 — 창을 띄우지 않고 보인다
+      const esbuild = require('esbuild');
+      const out = esbuild.buildSync({ entryPoints: [path.join(repoRoot, 'desktop', 'shell', 'src', 'mode.ts')], bundle: true, platform: 'node', format: 'cjs', write: false, logLevel: 'silent' });
+      const mod = { exports: {} };
+      new Function('module', 'exports', 'require', out.outputFiles[0].text)(mod, mod.exports, require);
+      const probe = path.join(tmp, 'marker-probe.json');
+      fs.writeFileSync(probe, fs.readFileSync(path.join(repoRoot, 'Example', 'test.csd')));
+      const modelVerdict = mod.exports.verificationMarkerValid(probe, path.join(res, 'app', 'dist', 'main.js'));
+      fs.writeFileSync(probe, JSON.stringify({ schema: mod.exports.VERIFICATION_SCHEMA, mainBundleSha256: mainSha, node: [[1, 0, 0]], elem: [] }));
+      const mixedVerdict = mod.exports.verificationMarkerValid(probe, path.join(res, 'app', 'dist', 'main.js'));
+      fs.writeFileSync(path.join(res, MARKER), `${JSON.stringify({ schema: mod.exports.VERIFICATION_SCHEMA, mainBundleSha256: mainSha,
+        note: 'desktop/installer/test/packaged.mjs 의 확인용 복사본 — 배포물에는 없다', createdAt: new Date().toISOString() })}\n`);
+      const goodVerdict = mod.exports.verificationMarkerValid(path.join(res, MARKER), path.join(res, 'app', 'dist', 'main.js'));
+      check('V5-13 후속 · 표시 자리에 둔 모델 파일 · 모델 키를 섞은 표시는 설치본의 main.js 에 대해 「표시 아님」 — 주 번들 sha256 을 담은 표시만 맞다',
+        modelVerdict === false && mixedVerdict === false && goodVerdict === true, `모델 ${modelVerdict} · 섞음 ${mixedVerdict} · 이 빌드의 표시 ${goodVerdict} · main.js ${mainSha.slice(0, 12)}…`);
+    }
     const env = hostileEnv(h, { STCFSD_SHELL_TEST: '1', STCFSD_DOCUMENTS: docs, STCFSD_CLAUDE_CONFIG: fakeClaude });
     const where = spawnSync('where', ['python'], { env, encoding: 'utf8', windowsHide: true });
     check('V5-16d · 적대적 환경: PATH 로 찾은 python 은 가짜다 · PYTHONPATH · PYTHONHOME · PYTHONSTARTUP · PYTHONUSERBASE 가 설정됨',

@@ -25,14 +25,15 @@ import type * as HostApi from '../../host/src/index';
 import { parseArgs } from './args';
 import { createLogger, type ShellLogger } from './log';
 import { findPython, missingFiles, resolveLayout, type Layout } from './layout';
-import { effectiveEnv, questionSignal, runMode, userDataProblem, VERIFICATION_MARKER } from './mode';
+import { effectiveEnv, questionSignal, runMode, userDataProblem, VERIFICATION_MARKER, verificationMarkerValid } from './mode';
 import { hideChildConsoles } from './winConsole';
 import { placeWindow, readWindowState, writeWindowState, type Placement } from './windowState';
 
 // 설치본은 시험 · 개발 길을 따르지 않는다 — 확인용 복사본(표시 파일)만 예외(mode.ts, V5-13)
 const MODE = runMode({
   packaged: app.isPackaged, env: process.env,
-  verificationMarker: app.isPackaged && fs.existsSync(path.join(process.resourcesPath, VERIFICATION_MARKER)),
+  // 표시 파일은 이 빌드의 주 번들(지금 돌고 있는 이 main.js)의 sha256 을 담은 정해진 꼴일 때만 — 모델 파일 · 다른 JSON 은 무시
+  verificationMarker: app.isPackaged && verificationMarkerValid(path.join(process.resourcesPath, VERIFICATION_MARKER), __filename),
 });
 const ENV = effectiveEnv(process.env, MODE);
 const TEST = MODE.test;
@@ -124,6 +125,8 @@ const diag = {
   rendererConsole: [] as Array<{ level: string; message: string; source?: string }>,
   childConsolesHidden: [] as string[],
   keyedRequests: 0,
+  /** 쓰기 열쇠를 붙인 요청(방법 · 경로 · 종류) — 시험이 이동에 붙지 않았는지 본다 */
+  keyedLog: [] as Array<{ method: string; path: string; type: string }>,
 };
 
 function readPrefs(): { theme?: 'dark' | 'light' } {
@@ -290,17 +293,33 @@ function isFrameOrigin(url: string): boolean {
   try { return !!bridge && new URL(url).origin === bridge.origin; } catch { return false; }
 }
 
+/**
+ * 이동 막기(V5b-04). 맨 위 창은 앱이 스스로(`loadURL` · 메뉴의 `reload`) 하는 것 말고는 **어떤 이동 · 리디렉트도** 받지 않는다 —
+ * 페이지(또는 끼운 웹뷰의 `top.location` · `target=_top` 폼 · 링크 · `window.open(…, '_top')`)가 시작한 이동은 다리 주소여도 막는다.
+ * (프로그램이 시작한 이동은 이 사건을 내지 않는다 — Electron.) 끼운 웹뷰(하위 프레임)는 웹뷰 서버 안에서만 움직인다.
+ */
+const guarded = new WeakSet<Electron.WebContents>();
 function guardContents(wc: Electron.WebContents): void {
-  const block = (what: string, url: string, prevent: () => void) => {
-    if (sameOrigin(url) || url === 'about:blank') { return; }
+  if (guarded.has(wc)) { return; }   // 창을 만들 때와 web-contents-created 에서 두 번 온다
+  guarded.add(wc);
+  const refuse =(what: string, url: string, prevent: () => void) => {
     prevent();
     diag.blockedNavigations.push(`${what} ${url}`);
     log(`막음(${what}): ${url}`, 'warn');
-    if (what === 'navigate' && isWebUrl(url)) { void openExternal(url); }
   };
-  wc.on('will-navigate', (e, url) => block('navigate', url, () => e.preventDefault()));
-  wc.on('will-frame-navigate', e => { if (!e.isMainFrame) { block('frame', e.url, () => e.preventDefault()); } });
-  wc.on('will-redirect', (e, url) => block('redirect', url, () => e.preventDefault()));
+  const inWebview = (url: string) => { try { return !!bridge && new URL(url).origin === bridge.webviewOrigin; } catch { return false; } };
+  // will-frame-navigate 가 먼저 온다(여기서 막으면 will-navigate 는 오지 않는다) — 맨 위 창도 여기서 막고 적는다
+  wc.on('will-navigate', e => e.preventDefault());
+  wc.on('will-frame-navigate', e => {
+    if (e.isMainFrame) { refuse('navigate', e.url, () => e.preventDefault()); return; }
+    if (inWebview(e.url) || e.url === 'about:blank') { return; }
+    refuse('frame', e.url, () => e.preventDefault());
+  });
+  wc.on('will-redirect', (e, url) => {
+    const main = (e as unknown as { isMainFrame?: boolean }).isMainFrame !== false;
+    if (!main && (inWebview(url) || url === 'about:blank')) { return; }
+    refuse(main ? 'redirect-top' : 'redirect', url, () => e.preventDefault());
+  });
   wc.on('will-attach-webview', e => e.preventDefault());
   wc.setWindowOpenHandler(({ url }) => {
     diag.blockedNavigations.push(`window ${url}`);
@@ -326,10 +345,17 @@ function createSession(b: HostApi.BridgeHandle): Electron.Session {
     const headers = details.requestHeaders;
     delete headers['X-StCFSD-Key'];
     if (sameOrigin(details.url)) { headers.Authorization = `Bearer ${b.token}`; } else { delete headers.Authorization; }
-    // 쓰기 열쇠(V5-04 · V5-18): 틀 서버로 가는 요청 가운데 **맨 위 프레임**(틀 · 새 화면)이 낸 것에만. 페이지는 열쇠를 모른다.
-    // 끼운 웹뷰(다른 출처의 iframe)가 낸 요청에는 붙이지 않는다 — 그 요청은 Origin 이 웹뷰 서버라 다리도 거절한다.
+    // 쓰기 열쇠(V5-04 · V5-18 · V5b-04): 틀 서버로 가는 요청 가운데 **맨 위 프레임 문서의 스크립트가 낸 fetch/XHR** 에만.
+    // 이동(mainFrame · subFrame — 끼운 웹뷰가 `top.location` · `target=_top` 으로 일으킬 수 있다)에는 붙이지 않는다. 그 프레임의
+    // 문서가 틀 출처일 때만(다른 곳으로 옮겨진 맨 위 문서는 없다 — 이동을 막는다). 페이지는 열쇠를 모른다.
     const frame = (details as { frame?: Electron.WebFrameMain | null }).frame;
-    if (isFrameOrigin(details.url) && frame && !frame.parent) { headers['X-StCFSD-Key'] = b.writeKey; diag.keyedRequests += 1; }
+    const ownScript = details.resourceType === 'xhr' && !!frame && !frame.parent && isFrameOrigin(frame.url);
+    if (isFrameOrigin(details.url) && ownScript) {
+      headers['X-StCFSD-Key'] = b.writeKey;
+      diag.keyedRequests += 1;
+      diag.keyedLog.push({ method: details.method, path: new URL(details.url).pathname, type: details.resourceType });
+      if (diag.keyedLog.length > 200) { diag.keyedLog.shift(); }
+    }
     cb({ requestHeaders: headers });
   });
   // 권한: 보고서의 「클립보드 복사」만.

@@ -10,6 +10,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
@@ -165,6 +168,29 @@ async function main() {
   check('같은 이름이 두 번 있는 설정 — 손대지 않고, 까닭을 「같은 이름("a")이 두 번」으로 알린다(「JSON 이 아니다」 아님)',
     st.ui === 'invalid-config' && /같은 이름\("(mcpServers\.)?a"\)이 두 번/.test(st.tooltip) && r.result.reason === 'invalid-config' && /같은 이름\("(mcpServers\.)?a"\)이 두 번/.test(r.result.message)
     && !/올바른 JSON/.test(r.result.message) && fs.readFileSync(config, 'utf8') === dup && traces(claudeDir).length === 0, r.result.message);
+
+  // f8fe4ab 의 새 까닭 — 제자리 쓰기가 끊긴 흔적(빈 설정 + 표시 파일), 너무 깊은 설정, 되돌리지 못한 쓰기 실패
+  const fakeBackup = `${config}.stcfsd-backup-20261123T010203Z`;
+  fs.writeFileSync(fakeBackup, '{"mcpServers":{"keep":{"command":"k"}}}');
+  fs.writeFileSync(config, '');
+  fs.writeFileSync(`${config}.stcfsd-tmp-inplace`, JSON.stringify({ backup: fakeBackup }));
+  st = await status();
+  r = await connect();
+  check('끊긴 제자리 쓰기(빈 설정 + 표시 파일) — 손대지 않고, 되돌릴 백업 · 지울 표시 파일을 이름으로 알린다',
+    st.ui === 'invalid-config' && st.tooltip.includes(fakeBackup) && /중간에 끊겼습니다/.test(st.tooltip) && r.result.reason === 'invalid-config'
+    && r.result.message.includes(fakeBackup) && r.result.message.includes('.stcfsd-tmp-inplace') && fs.readFileSync(config, 'utf8') === '', short(r.result.message, 160));
+  fs.rmSync(`${config}.stcfsd-tmp-inplace`, { force: true }); fs.rmSync(fakeBackup, { force: true });
+  const deep = `{"mcpServers":{},"x":${'['.repeat(80)}${']'.repeat(80)}}`;
+  fs.writeFileSync(config, deep);
+  st = await status();
+  r = await connect();
+  check('너무 깊게 겹친 설정 — 손대지 않고 「너무 깊게 겹쳐」 로 알린다', st.ui === 'invalid-config' && /너무 깊게 겹쳐/.test(r.result.message) && fs.readFileSync(config, 'utf8') === deep, short(r.result.message, 120));
+  {
+    const { writeFailedText } = require('../dist/index.js');
+    const t1 = writeFailedText('ENOSPC: no space left — the config could NOT be put back; copy the backup C:\\b\\c.stcfsd-backup-1 over it');
+    const t2 = writeFailedText('ENOSPC: no space left — the config was put back as it was');
+    check('쓰기 실패 문구 — 되돌리지 못했으면 복사할 백업을 앞에, 되돌렸으면 「바뀐 것 없음」', /되돌리지도 못했습니다/.test(t1) && t1.includes('C:\\b\\c.stcfsd-backup-1') && /바뀐 것 없음/.test(t2), `${short(t1, 80)} / ${short(t2, 60)}`);
+  }
 
   section('7. 쓰는 길은 화면의 세션뿐');
   // AI 의 도구로 Claude 설정 파일을 덮어쓸 수 있는가(V5-01 · 공용 코드 51e617f 가 고침) — 화면의 MCP 중계로 AI 와 같은 동작을 보낸다

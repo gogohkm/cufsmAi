@@ -51,6 +51,28 @@ const sigs = [{ focused: false, test: false }, { focused: true, test: false }, {
 check('V5-16c · 물음 신호(시험 · 실제 길이 같은 함수): 창을 보이거나 포커스를 가져가지 않는다 — 실제 길은 작업 표시줄만 깜빡인다',
   sigs.every(s => s.show === false && s.focus === false) && sigs[0].flash === true && sigs[1].flash === false && sigs[2].flash === false && sigs[2].count === true,
   JSON.stringify(sigs));
+// V5-13 후속 · 표시 파일은 이 빌드의 주 번들 sha256 을 담은 정해진 꼴일 때만 — 모델 모양 JSON 은 시험 모드를 열지 못한다
+{
+  const main = path.join(tmp, 'main.js'); fs.writeFileSync(main, '// 주 번들 대역\n');
+  const mainSha = (await import('node:crypto')).createHash('sha256').update(fs.readFileSync(main)).digest('hex');
+  const at = (name, obj) => { const f = path.join(tmp, name); fs.writeFileSync(f, typeof obj === 'string' ? obj : JSON.stringify(obj)); return f; };
+  const csd = fs.readFileSync(path.join(desktop, '..', 'Example', 'test.csd'), 'utf8');
+  const cases = {
+    '진짜 .csd(모델 파일)': at('m1.json', csd),
+    'save_project 꼴 모델(모델 키만)': at('m2.json', { format: 'stcfsd-model', version: 1, node: [[1, 0, 0]], elem: [[1, 1, 2, 0.1, 100]] }),
+    '모델 키 + 표시 키를 섞은 것': at('m3.json', { schema: mode.VERIFICATION_SCHEMA, mainBundleSha256: mainSha, node: [[1, 0, 0]] }),
+    '다른 빌드의 표시(sha 다름)': at('m4.json', { schema: mode.VERIFICATION_SCHEMA, mainBundleSha256: '0'.repeat(64) }),
+    '옛 표시(꼴이 다름)': at('m5.json', { note: '확인용', at: '2026' }),
+    '빈 파일': at('m6.json', ''),
+  };
+  const verdicts = Object.fromEntries(Object.entries(cases).map(([k, f]) => [k, mode.runMode({ packaged: true, env: { STCFSD_SHELL_TEST: '1' },
+    verificationMarker: mode.verificationMarkerValid(f, main) }).test]));
+  const good = at('ok.json', { schema: mode.VERIFICATION_SCHEMA, mainBundleSha256: mainSha, note: '확인용 복사본', createdAt: '2026-11-23' });
+  check('V5-13 후속 · 모델 모양 JSON · 다른 빌드 · 옛 꼴의 표시는 설치본의 시험 모드를 열지 못한다 — 이 빌드의 주 번들 sha256 을 담은 표시만',
+    Object.values(verdicts).every(v => v === false) && mode.verificationMarkerValid(good, main) === true
+    && mode.runMode({ packaged: true, env: { STCFSD_SHELL_TEST: '1' }, verificationMarker: mode.verificationMarkerValid(good, main) }).test === true,
+  JSON.stringify(verdicts));
+}
 const asFile = path.join(tmp, 'ud-file'); fs.writeFileSync(asFile, 'x');
 check('V5-11 · 사용자 폴더 자리가 파일이면 까닭을 돌려준다(쓸 수 있으면 없음)', !!mode.userDataProblem(asFile) && mode.userDataProblem(path.join(tmp, 'ud-ok')) === undefined,
   mode.userDataProblem(asFile));
