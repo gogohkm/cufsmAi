@@ -8,6 +8,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const process = require('process');
+const { Buffer } = require('buffer');
 const { snapshotRealConfigs } = require('./real_config_guard.js');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -286,6 +287,73 @@ function main() {
     r = reg.disconnectClaudeDesktop(vopts);
     assert(r.ok && r.action === 'removed' && fs.statSync(vcfg).nlink === 2);
     assert.deepStrictEqual(temps(vcfg), []);
+
+    // V5b-07(a): 제자리 쓰기가 비운 뒤 실패(디스크 가득) → 읽었던 바이트로 되돌린다
+    const beforeFail = fs.readFileSync(vcfg);
+    const realWriteSync = fs.writeSync;
+    let writeCalls = 0;
+    fs.writeSync = function (...a) {
+      // 새 글(우리 항목이 든 것)을 쓰는 첫 호출만 실패시킨다 — 백업 · 진행 표시 · 되돌리기 쓰기는 그대로
+      const ours = Buffer.isBuffer(a[1]) && a[1].includes('"stcfsd"');
+      if (ours) { writeCalls += 1; }
+      if (ours && writeCalls === 1) { const e = new Error('ENOSPC: no space left on device, write'); e.code = 'ENOSPC'; throw e; }
+      return realWriteSync.apply(this, a);
+    };
+    try { r = reg.connectClaudeDesktop(vopts); } finally { fs.writeSync = realWriteSync; }
+    assert.strictEqual(writeCalls, 1, 'the in-place write of the new text failed once');
+    assert.deepStrictEqual([r.ok, r.reason], [false, 'write-failed'], JSON.stringify(r));
+    assert(/put back as it was/.test(r.error), r.error);
+    assert(fs.readFileSync(vcfg).equals(beforeFail), 'V5b-07: config restored byte for byte after a failed in-place write');
+    assert.strictEqual(fs.statSync(vcfg).nlink, 2, 'still a hard link');
+    assert.deepStrictEqual(temps(vcfg), [], 'no in-place marker left after a restored failure');
+    // V5b-07(b): 비운 직후 프로세스가 죽음(전원 · 강제 종료) → 빈 설정 + 진행 표시. 다음 읽기 · 연결은 손대지 않고 까닭을 밝힌다.
+    const crashScript = `
+      const fs = require('fs');
+      const reg = require(${JSON.stringify(path.join(tmp, 'js', 'claudeDesktop.js'))});
+      const w = fs.writeSync;
+      fs.writeSync = function (...a) {           // 비운 뒤 새 글을 쓰는 순간 죽는다(백업 · 표시는 그 전에 다 썼다)
+        if (Buffer.isBuffer(a[1]) && a[1].includes('"stcfsd"')) { process.exit(9); }
+        return w.apply(this, a);
+      };
+      reg.connectClaudeDesktop({ entry: JSON.parse(process.argv[1]), configPath: ${JSON.stringify(vcfg)} });
+      process.exit(0);`;
+    const crash = require('child_process').spawnSync(process.execPath, ['-e', crashScript, JSON.stringify(entry)], { encoding: 'utf8', windowsHide: true });
+    assert.strictEqual(crash.status, 9, `the child died mid-write: ${crash.stderr}`);
+    assert.strictEqual(fs.statSync(vcfg).size, 0, 'a crash after truncating leaves a 0-byte config (the risk being fixed)');
+    assert(fs.readFileSync(realTarget).length === 0, 'both link names see it');
+    const nbCut = backups(vcfg).length;
+    st = reg.checkClaudeDesktop(vopts);
+    assert.strictEqual(st.state, 'invalid-config', 'V5b-07: an empty config after a cut in-place write is not read as {}');
+    assert(/in-place write by StCFSD was cut short/.test(st.configError) && st.configError.includes('.stcfsd-backup-'), st.configError);
+    r = reg.connectClaudeDesktop(vopts);
+    assert.deepStrictEqual([r.ok, r.reason], [false, 'invalid-config'], 'the next connect does not write over it');
+    assert.strictEqual(fs.statSync(vcfg).size, 0, 'left alone');
+    assert.strictEqual(backups(vcfg).length, nbCut, 'no backup of the empty file');
+    const cutBackup = st.configError.match(/backup: ([^)]+)\)/)[1];
+    assert(fs.readFileSync(cutBackup).equals(beforeFail), 'the backup named in the message holds the previous content');
+    // 잘린 JSON 도 같은 안내(깨진 JSON 은 원래도 손대지 않는다)
+    fs.writeFileSync(vcfg, beforeFail.subarray(0, 20));
+    st = reg.checkClaudeDesktop(vopts);
+    assert(st.state === 'invalid-config' && /cut short/.test(st.configError), st.configError);
+    // 사용자가 백업을 되돌리고 표시를 지우면 다시 된다
+    fs.writeFileSync(vcfg, beforeFail);
+    fs.rmSync(`${vcfg}.stcfsd-tmp-inplace`);
+    assert.strictEqual(reg.checkClaudeDesktop(vopts).state, 'not-registered');
+    // V5b-07(c): 아주 깊은 중첩 → 예외가 아니라 invalid-config, 손대지 않음
+    const deep = `{"mcpServers":{},"x":${'['.repeat(5000)}${']'.repeat(5000)}}`;
+    fs.writeFileSync(vcfg, deep);
+    st = reg.checkClaudeDesktop(vopts);
+    assert(st.state === 'invalid-config' && /nested 5001 levels deep/.test(st.configError), st.configError);
+    r = reg.connectClaudeDesktop(vopts);
+    assert.deepStrictEqual([r.ok, r.reason], [false, 'invalid-config'], 'deep config: refused, not thrown');
+    r = reg.disconnectClaudeDesktop(vopts);
+    assert.deepStrictEqual([r.ok, r.reason], [false, 'invalid-config']);
+    assert.strictEqual(fs.readFileSync(vcfg, 'utf8'), deep, 'deep config untouched');
+    const nested60 = `{"mcpServers":{},"x":${'['.repeat(60)}"a[{\\"}"${']'.repeat(60)}}`;   // 문자열 안의 괄호는 세지 않는다
+    fs.writeFileSync(vcfg, nested60);
+    r = reg.connectClaudeDesktop(vopts);
+    assert(r.ok && r.action === 'added', `60 levels is fine: ${JSON.stringify(r)}`);
+    fs.writeFileSync(vcfg, beforeFail);
     fs.rmSync(vcfg);
     let symlinks = true;
     try { fs.symlinkSync(realTarget, vcfg, 'file'); } catch (e) { symlinks = false; console.log(`  (V5-15b symbolic-link case skipped: ${e.code} — needs developer mode or admin)`); }
@@ -321,9 +389,12 @@ function main() {
       r = reg.disconnectClaudeDesktop(vopts); assert(r.ok && r.wrote); lastBackup = r.backupPath;
     }
     const ours = backups(vcfg).filter((n) => /\.stcfsd-backup-\d{8}-\d{6}(-\d+)?$/.test(n) && fs.lstatSync(path.join(vdir, n)).isFile());
-    assert.strictEqual(ours.length, reg.CLAUDE_BACKUPS_KEPT, `V5-15c: 12 writes leave ${reg.CLAUDE_BACKUPS_KEPT} backups, got ${ours.length}`);
+    // V5b-09: 가장 오래된 우리 백업(StCFSD 가 처음 손대기 전의 원본)은 늘 남고, 그다음 오래된 것부터 지운다.
+    assert.strictEqual(ours.length, reg.CLAUDE_BACKUPS_KEPT + 1,
+      `V5-15c/V5b-09: 12 writes leave the original + ${reg.CLAUDE_BACKUPS_KEPT} newest, got ${ours.length}`);
     assert(fs.existsSync(lastBackup), 'the newest backup is kept');
-    assert(!fs.existsSync(path.join(vdir, oldOurs)), 'the oldest of ours went first');
+    assert.strictEqual(fs.readFileSync(path.join(vdir, oldOurs), 'utf8'), '{}', 'V5b-09: the original (oldest of ours) is never pruned');
+    assert.strictEqual(ours.filter((n) => n.includes('-20261122-')).length, reg.CLAUDE_BACKUPS_KEPT, 'the middle ones went');
     for (const n of foreign) { assert.strictEqual(fs.readFileSync(path.join(vdir, n), 'utf8'), 'not ours', `foreign file kept: ${n}`); }
     assert(fs.statSync(path.join(vdir, 'claude_desktop_config.json.stcfsd-backup-20200101-000001')).isDirectory(), 'a directory is never removed');
     // 같은 초의 -2 · -10 은 수로 가른다
@@ -331,7 +402,8 @@ function main() {
     fs.mkdirSync(path.dirname(sameSec), { recursive: true });
     for (const s of ['', '-2', '-3', '-9', '-10', '-11']) { realWrite(`${sameSec}.stcfsd-backup-20260101-000000${s}`, 'x'); }
     reg.pruneClaudeBackups(sameSec, 2);
-    assert.deepStrictEqual(backups(sameSec).sort(), ['c.json.stcfsd-backup-20260101-000000-10', 'c.json.stcfsd-backup-20260101-000000-11']);
+    assert.deepStrictEqual(backups(sameSec).sort(), ['c.json.stcfsd-backup-20260101-000000', 'c.json.stcfsd-backup-20260101-000000-10',
+      'c.json.stcfsd-backup-20260101-000000-11'], 'newest two by number (-11, -10) plus the first (no suffix = the original)');
 
     // V5-15(d) · V5-S5: Windows 에서는 경로의 대소문자 · 구분자만 다른 항목은 같은 항목이다
     const caseOnly = {

@@ -34,10 +34,11 @@
  * vscode 비의존. MCP 번들(media/mcp-server.js)에 들어간다.
  */
 
+import * as fs from 'fs';
 import {
     PORT_FILE_ENV, STANDALONE_ENV, LEGACY_PORT_ENV,
     readPortFile, pidAlive, sameHost, type PortFileInfo,
-    clientRecordFile, readClientRecord, writeClientRecord, type ClientRecordRead,
+    clientRecordFile, writeClientRecord, processRecordFile, listClientRecords, markStaleRecords,
 } from './portFile';
 
 /** 독립 프로그램 문구 — 사용자에게 그대로 전할 수 있게 쉬운 말로. */
@@ -53,6 +54,17 @@ export const STANDALONE_RESTARTED = 'The StCFSD program was restarted since your
 export const STANDALONE_RESTARTED_NOTICE = 'The StCFSD program was restarted since your last call. This status '
     + 'is from the restarted program; the section, model and analysis results may differ from before. '
     + 'Re-check them (get_full_state) before changing the model or reporting results.';
+/**
+ * V5b-10 · 새 MCP 서버가 첫 접촉에서 이어짐을 증명하지 못했다(같은 앱의 앞선 세션이 다른 프로그램 실행을 봤거나, 그 기록을
+ * 읽을 수 없다). 「your last call」 은 이 프로세스에 없으므로 문구를 따로 둔다.
+ */
+export const STANDALONE_RESTARTED_EARLIER = 'The StCFSD program has been restarted since an earlier session of this AI '
+    + 'app last used it (or that cannot be ruled out), so the open section, model and analysis results may differ from '
+    + 'what earlier conversations saw. This request was not sent. Call get_status to check the current state, then continue.';
+export const STANDALONE_RESTARTED_EARLIER_NOTICE = 'The StCFSD program has been restarted since an earlier session of '
+    + 'this AI app last used it (or that cannot be ruled out). This status is from the program running now; the section, '
+    + 'model and analysis results may differ from what earlier conversations saw. Re-check them (get_full_state) before '
+    + 'changing the model or reporting results.';
 export const STANDALONE_DROPPED = (code: string) => `The connection to the StCFSD program broke before it answered `
     + `(${code}); it may have been closed. The request may or may not have run there and was not re-sent. `
     + 'If StCFSD is not running, ask the user to start it; then call get_status before retrying.';
@@ -73,6 +85,10 @@ const hostUnauthorized = (file: string) => `The StCFSD host rejected the token f
 const hostRestarted = 'The StCFSD host named by the port file was restarted since your last call. The model and '
     + 'analysis results may differ from before, so this request was not sent. Call get_status to check the '
     + 'current state, then continue.';
+const hostRestartedEarlier = 'The StCFSD host may have been restarted since an earlier session of this MCP client '
+    + 'used it, so this request was not sent. Call get_status to check the current state, then continue.';
+const hostRestartedEarlierNotice = 'The StCFSD host may have been restarted since an earlier session of this MCP client '
+    + 'used it. Re-check the model before changing it.';
 const hostRestartedNotice = 'The StCFSD host was restarted since your last call. This status is from the '
     + 'restarted host; the model and analysis results may differ from before. Re-check them before changing the model.';
 const hostDropped = (code: string) => `The connection to the StCFSD host broke before it answered (${code}). `
@@ -104,6 +120,8 @@ export interface HostTarget {
     host?: PortFileInfo;
     /** 재시작 뒤 아직 확인 전이고 이 요청이 상태 조회다 — 결과에 알림을 붙이고, 성공하면 confirmStatus */
     restarted?: true;
+    /** V5b-10 · 그 막기가 이 프로세스 안의 재시작이 아니라 앞선 세션의 기록 때문이다(알림 문구가 다르다) */
+    earlier?: true;
     /** V5-09 · 이 호스트가 포트 파일의 그 인스턴스인지 아직 모른다 — 요청 전에 `/hello` 로 증명을 받는다 */
     verify?: true;
 }
@@ -133,7 +151,8 @@ export interface HostConnection {
     /** 연결이 된 뒤 답을 받기 전에 끊김(ECONNRESET 등) — 실행됐는지 모른다 */
     droppedMessage(code: string): string;
     timeoutMessage(minutes: number): string;
-    restartedNotice(): string;
+    /** 재시작 알림. `target.earlier` 면 앞선 세션 기준의 문구(V5b-10) */
+    restartedNotice(target?: HostTarget): string;
 }
 
 export interface HostConnectionOptions {
@@ -143,6 +162,9 @@ export interface HostConnectionOptions {
     clientName?: () => string;
     /** V5-08 · 포트 파일 옆의 기록을 읽고 쓴다(기본 true) */
     persist?: boolean;
+    /** V5b-10 · 이 MCP 서버 프로세스(기록 파일 이름). 기본 process.pid · 프로세스 시작 시각 — 시험용 */
+    processId?: number;
+    processStartMs?: number;
 }
 
 export function createHostConnection(mode: ConnectionMode, opts: HostConnectionOptions = {}): HostConnection {
@@ -153,32 +175,51 @@ export function createHostConnection(mode: ConnectionMode, opts: HostConnectionO
     let confirmed: PortFileInfo | undefined;
     // confirmed 가 첫 접촉으로 받아들인 것이고 아직 그 호스트를 확인(/hello)하지 못했다 — 확인이 틀리면 되돌린다.
     let adopted = false;
-    // V5-08 · 이 클라이언트의 기록(첫 접촉 때 한 번 읽는다). 쓸 때 고친다.
-    let baseline: ClientRecordRead | undefined;
+    // V5b-10 · 이 프로세스가 마지막으로 남긴 instanceId(같으면 다시 쓰지 않는다), 막기의 까닭
+    let written: string | undefined;
+    let gateEarlier = false;
+    const processId = opts.processId ?? process.pid;
+    const processStartMs = opts.processStartMs ?? Math.round(Date.now() - process.uptime() * 1000);
     // V5-09 · 증명을 받은 호스트 · 증명이 틀린 호스트
     let verified: PortFileInfo | undefined;
     let rejected: PortFileInfo | undefined;
     const file = mode.kind === 'port-file' ? mode.file : '';
     const standalone = mode.kind === 'port-file' && mode.standalone;
     const notRunning = (why: string) => standalone ? STANDALONE_NOT_RUNNING : hostNotRunning(file, why);
-    const recordFile = () => clientRecordFile(file, clientName());
+    const prefix = () => clientRecordFile(file, clientName());
+    const ownFile = () => processRecordFile(prefix(), processId, processStartMs);
 
-    const loadBaseline = (): ClientRecordRead => {
-        if (!baseline) { baseline = persist ? readClientRecord(recordFile()) : { kind: 'absent' }; }
-        return baseline;
+    /**
+     * V5-08 · V5b-10 · 첫 접촉에서 이 호스트를 알림 없이 받아들여도 되는가. 같은 이름의 기록이 하나도 없으면(처음) 예,
+     * 모든 기록(살아 있든 끝났든, 자기 것은 빼고)이 읽히고 이 instanceId 면 예, 그 밖(다름 · 읽을 수 없음 · 접힌 표시)은 아니오.
+     */
+    const continuous = (info: PortFileInfo): boolean => {
+        if (!persist) { return true; }
+        const own = ownFile();
+        return listClientRecords(prefix()).filter((r) => r.file !== own).every((r) =>
+            r.kind !== 'stale' && r.read.kind === 'present' && r.read.record.instanceId === info.instanceId);
     };
-    /** 이 호스트를 「이 클라이언트가 마지막으로 확인한 프로그램」 으로 남긴다(이미 같으면 쓰지 않는다). */
+    /**
+     * 이 호스트를 「이 프로세스가 마지막으로 확인한 프로그램」 으로 남기고(자기 파일만), 끝난 프로세스의 기록을 접는다:
+     * 지금 프로그램이 아닌 것 · 읽을 수 없는 것 → `.stale` 표시를 둔 뒤 지운다(표시를 못 두면 지우지 않는다),
+     * 지금 프로그램인 것 → 하나만 남긴다. 살아 있는 다른 프로세스의 기록 · 접힌 표시는 건드리지 않는다.
+     */
     const remember = (host: PortFileInfo) => {
-        if (!persist) { return; }
-        const b = loadBaseline();
-        if (b.kind === 'present' && b.record.instanceId === host.instanceId) { return; }
-        const client = clientName();
-        if (writeClientRecord(recordFile(), client, host)) {
-            baseline = {
-                kind: 'present',
-                record: { app: 'stcfsd-mcp-client', version: 1, client, instanceId: host.instanceId, pid: host.pid,
-                    startedAt: host.startedAt, at: new Date().toISOString() },
-            };
+        if (!persist || written === host.instanceId) { return; }
+        if (!writeClientRecord(ownFile(), clientName(), host, new Date(), { pid: processId, startMs: processStartMs })) { return; }
+        written = host.instanceId;
+        const own = ownFile();
+        let keptCurrent = false;
+        for (const r of listClientRecords(prefix())) {
+            if (r.file === own || r.kind === 'stale') { continue; }
+            const ended = r.kind === 'legacy' || (r.pid !== undefined && r.pid !== processId && !alive(r.pid));
+            if (!ended) { continue; }
+            if (r.read.kind === 'present' && r.read.record.instanceId === host.instanceId) {
+                if (!keptCurrent) { keptCurrent = true; continue; }
+                try { fs.unlinkSync(r.file); } catch { /* 다음 번에 */ }
+            } else if (markStaleRecords(prefix())) {
+                try { fs.unlinkSync(r.file); } catch { /* 폴더 등 — 그대로 둔다 */ }
+            }
         }
     };
 
@@ -199,19 +240,24 @@ export function createHostConnection(mode: ConnectionMode, opts: HostConnectionO
             return { ok: false, error: notRunning(`the program at 127.0.0.1:${info.port} did not prove it is the StCFSD instance named in the port file`) };
         }
         if (!confirmed) {
-            // 첫 접촉. V5-08 · 이 클라이언트의 기록이 없거나 지금 호스트와 같을 때만 그대로 받아들인다.
-            const b = loadBaseline();
-            if (b.kind === 'absent' || (b.kind === 'present' && b.record.instanceId === info.instanceId)) {
+            // 첫 접촉. V5-08 · V5b-10 · 이어짐을 기록으로 증명할 때만 그대로 받아들인다. 아니면 get_status 만(앞선 세션 기준 문구).
+            if (continuous(info)) {
                 confirmed = info;
                 adopted = true;
+                gateEarlier = false;
+            } else {
+                gateEarlier = true;
             }
+        } else if (!sameHost(confirmed, info)) {
+            gateEarlier = false;
         }
         const target: HostTarget = {
             port: info.port, token: info.token, host: info,
             ...(verified && sameHost(verified, info) ? {} : { verify: true as const }),
         };
         if (confirmed && sameHost(confirmed, info)) { return { ok: true, target }; }
-        if (statusRead) { return { ok: true, target: { ...target, restarted: true } }; }
+        if (statusRead) { return { ok: true, target: { ...target, restarted: true, ...(gateEarlier ? { earlier: true as const } : {}) } }; }
+        if (gateEarlier) { return { ok: false, error: standalone ? STANDALONE_RESTARTED_EARLIER : hostRestartedEarlier }; }
         return { ok: false, error: standalone ? STANDALONE_RESTARTED : hostRestarted };
     };
 
@@ -257,7 +303,8 @@ export function createHostConnection(mode: ConnectionMode, opts: HostConnectionO
         timeoutMessage(minutes: number): string {
             return standalone ? STANDALONE_TIMEOUT(minutes) : hostTimeout(minutes);
         },
-        restartedNotice(): string {
+        restartedNotice(target?: HostTarget): string {
+            if (target?.earlier) { return standalone ? STANDALONE_RESTARTED_EARLIER_NOTICE : hostRestartedEarlierNotice; }
             return standalone ? STANDALONE_RESTARTED_NOTICE : hostRestartedNotice;
         },
     };

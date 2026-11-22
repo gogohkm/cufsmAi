@@ -12,7 +12,7 @@
  *  - 끊기는 지금 쓸 항목과 **같은** 항목만 지운다.
  *  - V5(2026-11-22): rename 바로 앞에서 다시 보고 그사이 바뀌었으면 다시 읽어 우리 한 가지만 다시 얹는다(몇 번 —
  *    계속 바뀌면 `config-busy`, 덮어쓰지 않음). 같은 키가 두 번 있는 설정은 `invalid-config`. 심볼릭 링크는 대상에,
- *    하드 링크는 제자리에 쓴다. 우리 백업은 최근 `CLAUDE_BACKUPS_KEPT` 개만. Windows 에서는 경로를 대소문자 ·
+ *    하드 링크는 제자리에 쓴다. 우리 백업은 가장 오래된 하나(원본) + 최근 `CLAUDE_BACKUPS_KEPT` 개만. Windows 에서는 경로를 대소문자 ·
  *    구분자 없이 비교한다.
  * 모든 경로는 주입할 수 있다(`configPath` · `pathOptions`) — 시험은 진짜 설정에 닿지 않는다.
  */
@@ -300,6 +300,47 @@ export function findDuplicateKey(text: string): string | null {
     return value('');
 }
 
+/** V5b-07 · 다시 쓰지 않는 중첩 깊이. Claude 설정은 4–5 단계다. */
+export const MAX_CONFIG_DEPTH = 64;
+
+/** 문자열 밖의 { [ 깊이(되부름 없이 — 깊은 글에서 스택이 넘치지 않게). */
+function nestingDepth(text: string): number {
+    let depth = 0;
+    let max = 0;
+    let inString = false;
+    for (let i = 0; i < text.length; i++) {
+        const c = text.charCodeAt(i);
+        if (inString) {
+            if (c === 0x5c) { i++; } else if (c === 0x22) { inString = false; }
+        } else if (c === 0x22) {
+            inString = true;
+        } else if (c === 0x7b || c === 0x5b) {
+            depth++;
+            if (depth > max) { max = depth; }
+        } else if (c === 0x7d || c === 0x5d) {
+            depth--;
+        }
+    }
+    return max;
+}
+
+/**
+ * V5b-07 · 제자리 쓰기(하드 링크)가 진행 중이라는 표시. 비우기 직전에 만들고(쓰기 직전의 백업 이름을 담는다) 끝나면 지운다.
+ * rename 길은 원자적이라 필요 없다. 프로세스가 그 사이 죽으면 남아, 다음 읽기가 빈 · 깨진 설정을 「끊긴 우리 쓰기」 로 알아본다.
+ * 이름은 `.stcfsd-tmp-` 꼴(real_config_guard 가 우리 흔적으로 센다).
+ */
+function inPlaceMarker(file: string): string { return `${file}.stcfsd-tmp-inplace`; }
+
+/** 끊긴 제자리 쓰기의 백업 경로(표시가 있으면). 없으면 undefined. */
+function cutInPlaceWrite(file: string): string | undefined {
+    try {
+        const j = JSON.parse(fs.readFileSync(inPlaceMarker(file), 'utf8'));
+        return typeof j.backup === 'string' ? j.backup : '(unknown)';
+    } catch (err) {
+        return (err as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : '(unknown)';
+    }
+}
+
 function readConfig(file: string): ReadConfig {
     let snap: ReturnType<typeof readSnapshot>;
     try { snap = readSnapshot(file); } catch (err) {
@@ -312,10 +353,22 @@ function readConfig(file: string): ReadConfig {
     const body = bom ? text.slice(1) : text;
     const format = detectFormat(body);
     const base = { exists: true, text, bom, format, raw, fingerprint };
-    if (!body.trim()) { return { ...base, cfg: {} }; }
+    if (!body.trim()) {
+        // V5b-07 · 비었는데 우리 제자리 쓰기가 끊긴 흔적이 있다 — 빈 설정으로 보고 그 위에 쓰면 다른 서버는 백업에만 남는다.
+        // 손대지 않고 알린다.
+        const cut = cutInPlaceWrite(file);
+        if (cut) { return { ...base, error: `the config is empty, and an in-place write by StCFSD was cut short (backup: ${cut}). StCFSD leaves it alone: copy that backup over the config, delete ${path.basename(inPlaceMarker(file))}, then try again` }; }
+        return { ...base, cfg: {} };
+    }
+    // V5b-07 · 아주 깊은 중첩은 다시 쓸 때 스택이 넘친다(JSON.stringify) — 읽을 때 거절한다.
+    const depth = nestingDepth(body);
+    if (depth > MAX_CONFIG_DEPTH) {
+        return { ...base, error: `the config is nested ${depth} levels deep (more than ${MAX_CONFIG_DEPTH}); StCFSD leaves it alone` };
+    }
     let parsed: unknown;
     try { parsed = JSON.parse(body); } catch (err) {
-        return { ...base, error: `not valid JSON: ${(err as Error).message}` };
+        const cut = cutInPlaceWrite(file);
+        return { ...base, error: `not valid JSON: ${(err as Error).message}` + (cut ? ` (an in-place write by StCFSD was cut short; the previous content is in ${cut})` : '') };
     }
     if (!isObject(parsed)) { return { ...base, error: 'the config root is not a JSON object' }; }
     if (parsed.mcpServers !== undefined && !isObject(parsed.mcpServers)) {
@@ -432,7 +485,8 @@ function backupPath(file: string, d: Date): string {
 
 /**
  * V5-15(c) · 남겨 둘 우리 백업 수. 백업은 다른 서버의 비밀 env 까지 든 전체 사본이라 끝없이 쌓이면 안 된다.
- * 다섯 = 연결 · 끊기를 몇 번 되풀이해도 「연결 전」 사본이 남을 만큼, 그러면서 비밀 사본은 적게.
+ * 다섯 = 최근 몇 번의 연결 · 끊기를 되돌릴 만큼, 그러면서 비밀 사본은 적게. 이와 따로 **가장 오래된 우리 백업**
+ * (StCFSD 가 처음 손대기 전의 원본)은 늘 남긴다(V5b-09) — 많아야 여섯.
  */
 export const CLAUDE_BACKUPS_KEPT = 5;
 
@@ -452,8 +506,9 @@ export function pruneClaudeBackups(file: string, keep = CLAUDE_BACKUPS_KEPT): st
         try { return fs.lstatSync(path.join(dir, x.n)).isFile(); } catch { return false; }
     }).map((x) => ({ n: x.n, key: `${x.m![1]}${x.m![2]}`, seq: x.m![3] ? Number(x.m![3]) : 1 }));
     ours.sort((a, b) => a.key === b.key ? b.seq - a.seq : (a.key < b.key ? 1 : -1));   // 새것부터
+    // V5b-09 · 가장 오래된 우리 백업 = StCFSD 가 처음 손대기 전의 원본 — 늘 남긴다(새것 keep 개와 함께).
     const removed: string[] = [];
-    for (const old of ours.slice(Math.max(0, keep))) {
+    for (const old of ours.slice(Math.max(0, keep), Math.max(keep, ours.length - 1))) {
         try { fs.unlinkSync(path.join(dir, old.n)); removed.push(old.n); } catch { /* 다음 번에 */ }
     }
     return removed;
@@ -534,7 +589,17 @@ function writeTarget(file: string): { path: string; inPlace: boolean } | { error
 }
 
 /** 하드 링크 · 제자리 쓰기. Windows 잠금(EPERM/EBUSY/EACCES)은 atomicWriteFile 과 같이 다시 해 본다. */
-function writeInPlace(file: string, text: string, beforeWrite: () => void): void {
+/** 버퍼를 끝까지 쓴다(writeSync 는 덜 쓸 수 있다). */
+function writeAll(fd: number, buf: Buffer): void {
+    for (let off = 0; off < buf.length;) { off += fs.writeSync(fd, buf, off, buf.length - off, off); }
+}
+
+/**
+ * 하드 링크 · 제자리 쓰기. Windows 잠금(EPERM/EBUSY/EACCES)은 atomicWriteFile 과 같이 다시 해 본다.
+ * V5b-07 · 비운 뒤 쓰다 실패하면(디스크 가득 등) 읽었던 바이트 그대로 되돌리고 던진다(`restored` 표시). 프로세스가 그 사이
+ * 죽으면 되돌리지 못한다 — 그때 남는 빈 · 잘린 설정은 다음 읽기가 진행 표시를 보고 거절한다(`cutInPlaceWrite`).
+ */
+function writeInPlace(file: string, text: string, beforeWrite: () => void, original: Buffer): void {
     for (let attempt = 0; ; attempt++) {
         beforeWrite();
         let fd: number;
@@ -546,8 +611,15 @@ function writeInPlace(file: string, text: string, beforeWrite: () => void): void
         }
         try {
             fs.ftruncateSync(fd, 0);
-            fs.writeSync(fd, text, 0, 'utf8');
-            fs.fsyncSync(fd);
+            try {
+                writeAll(fd, Buffer.from(text, 'utf8'));
+                fs.fsyncSync(fd);
+            } catch (err) {
+                let restored = false;
+                try { fs.ftruncateSync(fd, 0); writeAll(fd, original); fs.fsyncSync(fd); restored = true; } catch { /* 아래에서 알린다 */ }
+                (err as Error & { restored?: boolean }).restored = restored;
+                throw err;
+            }
         } finally { fs.closeSync(fd); }
         return;
     }
@@ -575,7 +647,11 @@ type Step<T> =
 function changeConfig<T>(file: string, now: Date, step: (read: ReadConfig) => Step<T>): T | ClaudeFail {
     for (let attempt = 0; attempt < CLAUDE_WRITE_ATTEMPTS; attempt++) {
         const read = readConfig(file);
-        const s = step(read);
+        let s: Step<T>;
+        // V5b-07 · 다시 쓸 글을 만들다 던지면(예: 너무 깊은 값) 밖으로 내보내지 않고 손대지 않음으로.
+        try { s = step(read); } catch (err) {
+            return { ok: false, reason: 'invalid-config', configPath: file, error: `cannot rewrite this config (${(err as Error).message}); StCFSD leaves it alone` };
+        }
         if ('done' in s) { return s.done; }
         const target = writeTarget(file);
         if ('error' in target) { return { ok: false, reason: 'write-failed', configPath: file, error: target.error }; }
@@ -592,7 +668,9 @@ function changeConfig<T>(file: string, now: Date, step: (read: ReadConfig) => St
                 if (!sameFingerprint(read.fingerprint, nowSnap ? nowSnap.fingerprint : null)) { throw new ConfigChangedError(); }
             };
             if (target.inPlace) {
-                writeInPlace(target.path, s.text, guard);
+                fs.writeFileSync(inPlaceMarker(file), JSON.stringify({ backup: backup ?? null, at: now.toISOString() }) + '\n', { mode: 0o600 });
+                writeInPlace(target.path, s.text, guard, read.raw ?? Buffer.alloc(0));
+                try { fs.unlinkSync(inPlaceMarker(file)); } catch { /* 다음 쓰기가 지운다 */ }
             } else {
                 atomicWriteFile(target.path, s.text, read.exists ? fileMode(target.path) : undefined, 'stcfsd-tmp', guard);
             }
@@ -600,10 +678,16 @@ function changeConfig<T>(file: string, now: Date, step: (read: ReadConfig) => St
             if (err instanceof ConfigChangedError) {
                 // 원본은 바뀌지 않았다 — 이번 시도의 백업은 필요 없다(우리가 방금 만든 그 파일만 지운다).
                 if (backup) { try { fs.unlinkSync(backup); } catch { /* 남아도 해롭지 않다 */ } }
+                if (target.inPlace) { try { fs.unlinkSync(inPlaceMarker(file)); } catch { /* 없음 */ } }
                 sleepSync(20 * (attempt + 1));
                 continue;
             }
-            return { ok: false, reason: 'write-failed', configPath: file, error: (err as Error).message, backupPath: backup };
+            const restored = (err as Error & { restored?: boolean }).restored;
+            // 되돌렸으면(또는 비우기 전에 실패했으면) 표시를 지운다. 되돌리지 못했으면 남겨 다음 읽기가 거절하게.
+            if (restored !== false) { try { fs.unlinkSync(inPlaceMarker(file)); } catch { /* 없음 */ } }
+            const note = restored === true ? ' — the config was put back as it was'
+                : restored === false ? ` — the config could NOT be put back; copy the backup ${backup ?? ''} over it` : '';
+            return { ok: false, reason: 'write-failed', configPath: file, error: (err as Error).message + note, backupPath: backup };
         }
         const check = readConfig(file);
         const problem = check.error ?? (check.cfg ? s.verify(check.cfg) : 'empty after write');

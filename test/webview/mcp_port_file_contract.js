@@ -453,16 +453,19 @@ async function main() {
     assert.strictEqual(bridgeMod.NO_PANEL, 'No active CUFSM panel. Open Section Designer first.');
     ok('V5-S2: starting words before the panel, gate released by a retried get_status, legacy text unchanged');
 
-    // 14. V5-08 — 재시작 기준을 MCP 서버 프로세스 너머로(클라이언트별 기록) -------------------------------
+    // 14. V5-08 · V5b-10 — 재시작 기준을 MCP 서버 프로세스 너머로(프로세스별 기록) ---------------------------------
+    const recsOf = (name) => pf.listClientRecords(pf.clientRecordFile(pf2, name));
     const desk1 = await v5client('claude-ai');
     r = await desk1.call('get_nodes');
     assert(!r.isError && r.data.action === 'get_nodes', `first connection ever (no record) → no false alarm: ${r.text}`);
-    const recDesk = pf.clientRecordFile(pf2, 'claude-ai');
-    assert.strictEqual(path.dirname(recDesk), path.dirname(pf2), 'the record lives beside the port file');
     const fileQ = portInfo(pf2);
-    let recText = fs.readFileSync(recDesk, 'utf8');
-    assert.strictEqual(JSON.parse(recText).instanceId, fileQ.instanceId, 'record = the program this client talked to');
-    assert(!recText.includes(fileQ.token), 'no token in the record');
+    let recs = recsOf('claude-ai');
+    assert.strictEqual(recs.length, 1, 'one record, for this MCP server process');
+    assert.strictEqual(recs[0].kind, 'process');
+    assert.strictEqual(path.dirname(recs[0].file), path.dirname(pf2), 'the record lives beside the port file');
+    assert.strictEqual(recs[0].read.record.instanceId, fileQ.instanceId, 'record = the program this process talked to');
+    assert(!fs.readFileSync(recs[0].file, 'utf8').includes(fileQ.token), 'no token in the record');
+    const desk1Rec = recs[0].file;
     await desk1.close();
     // 밤사이 프로그램이 다시 켜지고, 아침에 Claude Desktop 이 새 MCP 서버를 띄운다
     Q.child.kill('SIGKILL');
@@ -472,28 +475,29 @@ async function main() {
     await R.ready;
     const desk2 = await v5client('claude-ai');
     r = await desk2.call('set_material', MAT);
-    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED, 'a new MCP server knows the program it last saw is gone');
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED_EARLIER, 'a new MCP server knows an earlier session saw another program run');
     assert.deepStrictEqual(R.actions(), [], 'the write was not sent');
     r = await desk2.call('get_status');
-    assert(!r.isError && r.data.restart_notice === conn.STANDALONE_RESTARTED_NOTICE, `notice on the first get_status: ${r.text}`);
+    assert(!r.isError && r.data.restart_notice === conn.STANDALONE_RESTARTED_EARLIER_NOTICE, `notice on the first get_status: ${r.text}`);
     assert.strictEqual(R.statuses(), 1, 'the notice costs exactly one get_status');
     r = await desk2.call('set_material', MAT);
     assert(!r.isError && r.data.action === 'set_material', 'released after that one get_status');
-    assert.strictEqual(JSON.parse(fs.readFileSync(recDesk, 'utf8')).instanceId, portInfo(pf2).instanceId, 'record follows the confirmed program');
+    recs = recsOf('claude-ai');
+    assert(!fs.existsSync(desk1Rec), "the ended process's record (another program) was folded …");
+    assert(recs.some((x) => x.kind === 'stale'), '… into the stale marker');
+    assert(recs.some((x) => x.kind === 'process' && x.read.record.instanceId === portInfo(pf2).instanceId), 'own record = confirmed program');
     // 다른 클라이언트(Claude Code)는 기록이 따로 — 처음이면 알림 없음
     const code1 = await v5client('claude-code');
-    assert.notStrictEqual(pf.clientRecordFile(pf2, 'claude-code'), recDesk);
     r = await code1.call('get_nodes');
-    assert(!r.isError, 'another client, first time → no alarm');
+    assert(!r.isError, 'another client name, first time → no alarm');
     // 또 다시 켜짐: 두 클라이언트 모두 막히고, 한쪽의 get_status 가 다른 쪽을 풀지 않는다
     R.child.kill('SIGKILL');
     await R.exited;
     const S = startHost(tmp, pf2);
     hosts.push(S);
     await S.ready;
-    const fileS = portInfo(pf2);
     r = await code1.call('get_status');
-    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE, 'in-process restart keeps the K1 wording');
     r = await code1.call('get_nodes');
     assert(!r.isError);
     r = await desk2.call('set_material', MAT);
@@ -501,38 +505,92 @@ async function main() {
     r = await desk2.call('get_status');
     assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
     await desk2.close();
+    // V5b-10 의 안전한 쪽: 이 이름의 끝난 세션이 한 번이라도 다른 프로그램을 봤으면(접힌 표시) 새 프로세스는 늘 알림 한 번
     const desk3 = await v5client('claude-ai');
     r = await desk3.call('set_material', MAT);
-    assert(!r.isError, 'program not restarted since this client last confirmed it → no alarm for a new MCP server');
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED_EARLIER, 'cannot tell which earlier session was this one → an extra get_status, never a missed notice');
+    r = await desk3.call('get_status');
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_EARLIER_NOTICE);
     await desk3.close();
-    // 읽을 수 없는 기록 → 이어짐을 증명하지 못하니 재시작으로 본다(get_status 한 번) → 기록을 고친다
-    fs.writeFileSync(recDesk, '{not json');
-    const desk4 = await v5client('claude-ai');
-    r = await desk4.call('set_material', MAT);
-    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED, 'unreadable record → treated as restarted');
-    r = await desk4.call('get_status');
+    // 이어짐을 증명할 수 있으면 알림 없음: 이 이름의 모든 기록이 지금 프로그램이다
+    const cont1 = await v5client('v5-continuous');
+    r = await cont1.call('get_nodes');
+    assert(!r.isError);
+    await cont1.close();
+    const cont2 = await v5client('v5-continuous');
+    r = await cont2.call('set_material', MAT);
+    assert(!r.isError, 'program not restarted since every earlier session of this name last saw it → no alarm');
+    // V5b-10 (d): 같은 이름의 두 MCP 서버. 프로그램이 다시 켜지고 B 만 확인 → 그 뒤 뜬 같은 이름의 새 서버는 A 의 기록 때문에 알림
+    const twinA = await v5client('v5b10-twin');
+    const twinB = await v5client('v5b10-twin');
+    assert(!(await twinA.call('get_nodes')).isError && !(await twinB.call('get_nodes')).isError);
+    S.child.kill('SIGKILL');
+    await S.exited;
+    const T = startHost(tmp, pf2);
+    hosts.push(T);
+    await T.ready;
+    r = await twinB.call('get_status');
     assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
-    assert.strictEqual(JSON.parse(fs.readFileSync(recDesk, 'utf8')).instanceId, fileS.instanceId, 'record repaired');
-    // 기록을 쓸 수 없어도(그 이름이 폴더) 막기는 get_status 로 풀린다 — 교착 없음
+    const twinC = await v5client('v5b10-twin');
+    r = await twinC.call('set_material', MAT);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED_EARLIER,
+      'V5b-10: a same-name server that confirmed the new program does not clear the notice for a later one');
+    assert.deepStrictEqual(T.actions(), [], 'nothing reached the program');
+    assert(recsOf('v5b10-twin').filter((x) => x.kind === 'process').length >= 2, "the live twin's record is left alone");
+    // 읽을 수 없는 기록(끝난 프로세스) → 이어짐을 증명하지 못하니 알림 → 확인 뒤 접는다
+    const brokenRec = pf.processRecordFile(pf.clientRecordFile(pf2, 'v5-broken'), 2147483646, 1);
+    fs.writeFileSync(brokenRec, '{not json');
+    const broken = await v5client('v5-broken');
+    r = await broken.call('set_material', MAT);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED_EARLIER, 'unreadable record → treated as restarted');
+    r = await broken.call('get_status');
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_EARLIER_NOTICE);
+    assert(!fs.existsSync(brokenRec) && recsOf('v5-broken').some((x) => x.kind === 'stale'), 'folded after the confirmation');
+    // V5 판의 이름 하나 기록(옮겨 온 설치본): 지금 프로그램이면 헛 알림 없음
+    const fileT = portInfo(pf2);
+    fs.writeFileSync(pf.clientRecordFile(pf2, 'v5-legacy'), JSON.stringify({ app: 'stcfsd-mcp-client', version: 1, client: 'v5-legacy',
+      instanceId: fileT.instanceId, pid: fileT.pid, startedAt: fileT.startedAt, at: new Date().toISOString() }));
+    const legacyRec = await v5client('v5-legacy');
+    r = await legacyRec.call('set_material', MAT);
+    assert(!r.isError, 'a V5 single record naming the current program still counts');
+    // 기록 자리가 폴더(읽기 · 쓰기 · 지우기 모두 안 됨)여도 막기는 get_status 로 풀린다 — 교착 없음
     const roRec = pf.clientRecordFile(pf2, 'ro-client');
     fs.mkdirSync(roRec);
     const ro = await v5client('ro-client');
     r = await ro.call('set_material', MAT);
-    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED_EARLIER);
     r = await ro.call('get_status');
-    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_EARLIER_NOTICE);
     r = await ro.call('set_material', MAT);
-    assert(!r.isError, 'released even though the record cannot be written');
-    assert(fs.statSync(roRec).isDirectory(), 'the unwritable record was left alone');
+    assert(!r.isError, 'released even though a record cannot be read or removed');
+    assert(fs.statSync(roRec).isDirectory(), 'the odd record was left alone');
     assert.deepStrictEqual(fs.readdirSync(path.dirname(pf2)).filter((n) => n.includes('.stcfsd-tmp-')), [], 'no temp files beside the port file');
-    ok('V5-08: per-client record beside the port file — no false alarm first time, new MCP server gated after a restart, clients independent, unreadable record → one get_status, no deadlock');
+    // 단위: 자기 기록을 쓸 수 없어도(그 자리가 폴더) 확인으로 풀린다
+    {
+      const uf = path.join(tmp, 'v5b10-unit', 'port');
+      fs.mkdirSync(path.dirname(uf), { recursive: true });
+      fs.writeFileSync(uf, JSON.stringify({ app: 'stcfsd', version: 1, port: 40001, token: 'b'.repeat(64), pid: 4242, instanceId: 'now', startedAt: 'x' }));
+      const pre = pf.clientRecordFile(uf, 'unit');
+      fs.writeFileSync(pf.processRecordFile(pre, 77, 5), JSON.stringify({ app: 'stcfsd-mcp-client', version: 1, instanceId: 'before' }));
+      fs.mkdirSync(pf.processRecordFile(pre, 88, 9));
+      const hu = conn.createHostConnection({ kind: 'port-file', file: uf, standalone: true },
+        { isAlive: () => true, clientName: () => 'unit', processId: 88, processStartMs: 9 });
+      assert.strictEqual(hu.resolve(false).error, conn.STANDALONE_RESTARTED_EARLIER, 'a live same-name process saw another program');
+      const tu = hu.resolve(true);
+      assert(tu.ok && tu.target.restarted && tu.target.earlier);
+      assert.strictEqual(hu.restartedNotice(tu.target), conn.STANDALONE_RESTARTED_EARLIER_NOTICE);
+      hu.confirmStatus(tu.target);
+      assert(hu.resolve(false).ok, 'released although the own record could not be written');
+      assert(fs.existsSync(pf.processRecordFile(pre, 77, 5)), "a live process's record is never removed");
+    }
+    ok('V5-08/V5b-10: per-process records — no alarm first time or when every earlier session saw this program; otherwise one get_status (same-name servers, ended sessions, unreadable records), no deadlock');
 
-    // 15. V5-09 — 포트 파일의 pid 는 살아 있지만 그 포트에서 듣는 것은 남의 프로그램 -------------------------------
+    // 15. V5-09 · V5b-05 — 포트 파일의 pid 는 살아 있지만 그 포트에서 듣는 것은 남의 프로그램 ----------------------------
     const pf3 = path.join(tmp, 'v5-09', 'mcp', 'stcfsd-mcp-port');
     fs.mkdirSync(path.dirname(pf3), { recursive: true });
     const seen = [];
     const fake = http.createServer((req, res) => {
-      seen.push(`${req.method} ${req.url}`);
+      seen.push(`${req.method} ${req.url} auth=${req.headers.authorization === undefined ? 'none' : 'SENT'} nonce=${req.headers['x-stcfsd-nonce'] ? 'yes' : 'no'}`);
       res.setHeader('Content-Type', 'application/json');
       res.setHeader('X-StCFSD-Proof', 'ab'.repeat(32));        // 그럴듯한 꼴이지만 증명이 아니다
       res.end('{"hasModel":true,"fake":true}');
@@ -549,26 +607,30 @@ async function main() {
       assert.strictEqual(r.data.error, conn.STANDALONE_NOT_RUNNING);
       r = await v9.call('get_nodes');
       assert.strictEqual(r.data.error, conn.STANDALONE_NOT_RUNNING);
-      assert.deepStrictEqual(seen, ['GET /hello'], 'only the connection check reached it; nothing further was sent');
+      assert.deepStrictEqual(seen, ['GET /hello auth=none nonce=yes'],
+        'V5b-05: only the connection check reached it, without the token; nothing further was sent');
     } finally { fake.close(); }
-    // 진짜 호스트의 증명: 토큰을 지난 요청에만, nonce · instanceId 에 묶여
+    // 진짜 호스트의 증명: `/hello` 는 토큰 없이도(V5b-05), nonce · instanceId 에 묶여
     const nonce = pf.newNonce();
-    const statusesBeforeHello = S.statuses();
-    h = await raw(fileS.port, { method: 'GET', path: '/hello', headers: { Authorization: `Bearer ${fileS.token}`, 'X-StCFSD-Nonce': nonce } });
-    assert.deepStrictEqual([h.status, h.json], [200, { app: 'stcfsd' }]);
-    assert.strictEqual(h.headers['x-stcfsd-proof'], pf.instanceProof(fileS.token, fileS.instanceId, nonce), 'real host proves its instance');
-    assert(pf.proofMatches(h.headers['x-stcfsd-proof'], fileS.token, fileS.instanceId, nonce));
-    assert(!pf.proofMatches(h.headers['x-stcfsd-proof'], fileS.token, 'other-instance', nonce), 'bound to the instanceId');
-    assert(!pf.proofMatches(h.headers['x-stcfsd-proof'], fileS.token, fileS.instanceId, pf.newNonce()), 'bound to the nonce');
-    h = await raw(fileS.port, { method: 'GET', path: '/hello', headers: { 'X-StCFSD-Nonce': nonce } });
-    assert.strictEqual(h.status, 401, '/hello needs the token');
-    assert.strictEqual(h.headers['x-stcfsd-proof'], undefined, 'no proof without the token');
+    const statusesBeforeHello = T.statuses();
+    h = await raw(fileT.port, { method: 'GET', path: '/hello', headers: { 'X-StCFSD-Nonce': nonce } });
+    assert.deepStrictEqual([h.status, h.json], [200, { app: 'stcfsd' }], '/hello needs no token');
+    assert.strictEqual(h.headers['x-stcfsd-proof'], pf.instanceProof(fileT.token, fileT.instanceId, nonce), 'real host proves its instance');
+    assert(pf.proofMatches(h.headers['x-stcfsd-proof'], fileT.token, fileT.instanceId, nonce));
+    assert(!pf.proofMatches(h.headers['x-stcfsd-proof'], fileT.token, 'other-instance', nonce), 'bound to the instanceId');
+    assert(!pf.proofMatches(h.headers['x-stcfsd-proof'], fileT.token, fileT.instanceId, pf.newNonce()), 'bound to the nonce');
+    assert(!pf.proofMatches(h.headers['x-stcfsd-proof'], 'e'.repeat(64), fileT.instanceId, nonce), 'keyed with the token');
+    h = await raw(fileT.port, { method: 'GET', path: '/hello', headers: { 'X-StCFSD-Nonce': nonce, Origin: 'http://evil.example' } });
+    assert.strictEqual(h.status, 403, '/hello still refuses browser requests');
+    h = await raw(fileT.port, { method: 'GET', path: '/status', headers: { 'X-StCFSD-Nonce': nonce } });
+    assert.strictEqual(h.status, 401, 'everything else still needs the token');
+    assert.strictEqual(h.headers['x-stcfsd-proof'], undefined, 'no proof on a refused request');
     await delay(50);
-    assert.strictEqual(S.statuses(), statusesBeforeHello, '/hello never touches the panel');
+    assert.strictEqual(T.statuses(), statusesBeforeHello, '/hello never touches the panel');
     h = await raw(legacyPort, { method: 'GET', path: '/hello', headers: { 'X-StCFSD-Nonce': nonce } });
     assert.deepStrictEqual(h.json, { error: 'Unknown endpoint: GET /hello' }, 'legacy bridge: no /hello');
     assert.strictEqual(h.headers['x-stcfsd-proof'], undefined, 'legacy bridge: no proof header');
-    ok('V5-09: a port held by another program is refused as "not running" after one /hello; real host proves its instance');
+    ok('V5-09/V5b-05: a port held by another program gets one token-less /hello and is refused as "not running"; real host proves its instance');
 
     // 16. V5-S3 — 독립 프로그램에서 묶은 Python 이 망가졌을 때의 안내(확장의 길은 그대로) ----------------------------
     {

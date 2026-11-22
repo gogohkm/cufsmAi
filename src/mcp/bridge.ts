@@ -156,7 +156,10 @@ export class McpBridgeServer {
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Cache-Control', 'no-store');
 
-            const rejected = checkBridgeRequest(req.method, req.headers, this._port, this._token);
+            // V5b-05 · `/hello` 는 토큰 없이 받는다 — 확인 전의 상대에게 MCP 서버가 토큰을 보내지 않게(증명 먼저, 인증은 그다음).
+            // Origin · Host 검사는 그대로. 답은 증명(토큰을 열쇠로 한 HMAC)뿐이라 토큰도 instanceId 도 새지 않는다.
+            const hello = !!this._options && req.method === 'GET' && req.url === HELLO_ENDPOINT;
+            const rejected = checkBridgeRequest(req.method, req.headers, this._port, hello ? undefined : this._token);
             if (rejected) {
                 req.resume();
                 if (rejected[0] === 401) { res.setHeader('WWW-Authenticate', 'Bearer'); }
@@ -164,7 +167,7 @@ export class McpBridgeServer {
                 res.end(JSON.stringify({ error: rejected[1] }));
                 return;
             }
-            // V5-09 · 토큰을 지난 요청에만 증명을 붙인다(토큰 없는 쪽에 HMAC 을 내주지 않는다).
+            // V5-09 · 증명은 토큰을 지난 요청과 `/hello` 에만 붙인다.
             const nonce = req.headers[NONCE_HEADER];
             if (this._options && validNonce(nonce)) {
                 res.setHeader(PROOF_HEADER, instanceProof(this._token!, this._instanceId!, nonce));
@@ -185,8 +188,8 @@ export class McpBridgeServer {
                         lastAiCall: this._lastAiCall ?? null, aiCalls: this._aiCalls,
                         pid: process.pid, startedAt: this._startedAt,
                     };
-                } else if (this._options && req.method === 'GET' && req.url === HELLO_ENDPOINT) {
-                    // V5-09 · 증명은 머리에. 패널에 닿지 않고 AI 호출로 세지 않는다.
+                } else if (hello) {
+                    // V5-09 · 증명은 머리에. 패널에 닿지 않고 AI 호출로 세지 않는다. 토큰이 필요 없다(V5b-05).
                     result = { app: PORT_FILE_APP };
                 } else if (req.method === 'GET' && req.url === '/status') {
                     if (aiCall) { this._recordAiCall(aiCall); }

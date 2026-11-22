@@ -62,9 +62,12 @@ type HttpOutcome =
     | { kind: 'timeout' }
     | { kind: 'error'; err: NodeJS.ErrnoException };
 
-/** 요청 하나. `aiCall` = 요청 id · 클라이언트 머리를 붙인다(호스트가 AI 호출로 센다). `nonce` = V5-09 증명을 청한다. */
+/**
+ * 요청 하나. `aiCall` = 요청 id · 클라이언트 머리를 붙인다(호스트가 AI 호출로 센다). `nonce` = V5-09 증명을 청한다.
+ * `withToken` = Bearer 토큰을 붙인다 — V5b-05: 아직 증명하지 않은 상대(`/hello`)에는 붙이지 않는다.
+ */
 function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, payload: string | undefined,
-    timeoutMs: number, nonce: string | undefined, aiCall: boolean): Promise<HttpOutcome> {
+    timeoutMs: number, nonce: string | undefined, aiCall: boolean, withToken = true): Promise<HttpOutcome> {
     return new Promise((resolve) => {
         const headers: Record<string, string | number> = { 'Accept': 'application/json' };
         if (payload !== undefined) {
@@ -77,7 +80,7 @@ function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, 
             headers[CLIENT_HEADER] = clientLabel();
         }
         if (nonce !== undefined) { headers[NONCE_HEADER] = nonce; }
-        if (target.token !== undefined) { headers['Authorization'] = `Bearer ${target.token}`; }
+        if (withToken && target.token !== undefined) { headers['Authorization'] = `Bearer ${target.token}`; }
         const req = http.request({
             hostname: BRIDGE_HOST, port: target.port, path: endpoint, method, headers,
             timeout: timeoutMs,
@@ -100,7 +103,7 @@ function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, 
  */
 async function verifyHost(target: HostTarget): Promise<string | null> {
     const nonce = newNonce();
-    const out = await httpCall(target, 'GET', HELLO_ENDPOINT, undefined, HELLO_TIMEOUT_MS, nonce, false);
+    const out = await httpCall(target, 'GET', HELLO_ENDPOINT, undefined, HELLO_TIMEOUT_MS, nonce, false, false);
     if (out.kind === 'timeout') {
         CONNECTION.verificationFailed(target, false);
         return CONNECTION.noAnswerMessage(target, 'no reply');
@@ -109,10 +112,6 @@ async function verifyHost(target: HostTarget): Promise<string | null> {
         CONNECTION.verificationFailed(target, false);
         return out.err.code === 'ECONNREFUSED' ? CONNECTION.refusedMessage(target)
             : CONNECTION.noAnswerMessage(target, String(out.err.code || out.err.message));
-    }
-    if (out.status === 401) {
-        CONNECTION.verificationFailed(target, false);
-        return CONNECTION.unauthorizedMessage();
     }
     if (!target.host || !target.token || !proofMatches(out.headers[PROOF_HEADER], target.token, target.host.instanceId, nonce)) {
         CONNECTION.verificationFailed(target, true);
@@ -166,7 +165,7 @@ async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: an
             && !Array.isArray(parsed) && !('error' in parsed);
         if (ok) {
             CONNECTION.confirmStatus(target);
-            parsed = { restart_notice: CONNECTION.restartedNotice(), ...parsed };
+            parsed = { restart_notice: CONNECTION.restartedNotice(target), ...parsed };
         }
     }
     return parsed;
@@ -266,7 +265,7 @@ const server = new McpServer({
 }, {
     instructions: `StCFSD — cold-formed steel sections: finite-strip buckling analysis (CUFSM method) and AISI S100-16 design.
 
-TRANSPORT. The tools drive a running StCFSD through a local bridge: either the standalone StCFSD program or the Section Designer panel of the StCFSD VS Code extension (VS Code running with "StCFSD: Open Section Designer"). The program or panel must be running; otherwise every tool returns an error. If a tool says the StCFSD program is not running, tell the user exactly that and ask them to start StCFSD — do not retry in a loop. If a tool says the program was restarted, call get_status first (only get_status goes through until it succeeds) and re-check the model before changing it: the restarted program does not hold the model you worked on before. The model (section, material, stresses, boundary condition, lengths, results) lives in StCFSD: change it only through these tools, never by editing project files.
+TRANSPORT. The tools drive a running StCFSD through a local bridge: either the standalone StCFSD program or the Section Designer panel of the StCFSD VS Code extension (VS Code running with "StCFSD: Open Section Designer"). The program or panel must be running; otherwise every tool returns an error. If a tool says the StCFSD program is not running, tell the user exactly that and ask them to start StCFSD — do not retry in a loop. If a tool says the program was restarted, call get_status first (only get_status goes through until it succeeds) and re-check the model before changing it: the restarted program does not hold the model you worked on before. That notice is given once per connection, not per conversation: when you resume earlier work in a conversation, call get_status and re-check the model before relying on what the conversation remembers. The model (section, material, stresses, boundary condition, lengths, results) lives in StCFSD: change it only through these tools, never by editing project files.
 
 WORKFLOW.
 1 Section: set_section_template (or build_section / set_custom_section, then get_section_preview to check the shape) → get_section_properties.

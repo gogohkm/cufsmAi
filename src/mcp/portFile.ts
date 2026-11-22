@@ -248,14 +248,78 @@ export function readClientRecord(file: string): ClientRecordRead {
     };
 }
 
-/** 기록을 쓴다. 실패는 던지지 않고 false(막기는 메모리로 돈다). 폴더는 만들지 않는다(호스트가 만든 mcp 폴더). */
-export function writeClientRecord(file: string, client: string, host: PortFileInfo, now = new Date()): boolean {
-    const rec: ClientRecord = {
+/**
+ * 기록을 쓴다. 실패는 던지지 않고 false(막기는 메모리로 돈다). 폴더는 만들지 않는다(호스트가 만든 mcp 폴더).
+ * `mcp` = 쓰는 MCP 서버 프로세스(V5b-10 — 프로세스별 기록).
+ */
+export function writeClientRecord(file: string, client: string, host: PortFileInfo, now = new Date(),
+    mcp?: { pid: number; startMs: number }): boolean {
+    const rec: ClientRecord & { mcpPid?: number; mcpStartedAt?: string } = {
         app: CLIENT_RECORD_APP, version: 1, client: client.slice(0, 120), instanceId: host.instanceId,
         pid: host.pid, startedAt: host.startedAt, at: now.toISOString(),
+        ...(mcp ? { mcpPid: mcp.pid, mcpStartedAt: new Date(mcp.startMs).toISOString() } : {}),
     };
     try {
         atomicWriteFile(file, JSON.stringify(rec, null, 2) + '\n', 0o600);
+        return true;
+    } catch { return false; }
+}
+
+// ─── V5b-10 · 기록을 MCP 서버 프로세스마다 ───────────────────────────────────────────
+//
+// 이름 하나에 기록 하나면, 같은 이름의 다른 MCP 서버(Claude Code 의 다른 세션, 다시 뜬 서버)가 다시 켠 프로그램을 확인하는
+// 순간 기록이 바뀌어, 그 뒤 뜬 같은 이름의 새 서버(옛 대화를 이어 가는 세션)는 알림을 받지 못한다.
+// 프로세스를 가를 것 가운데 「Claude Desktop 을 다시 켜도 그대로이고, 동시에 뜬 두 프로세스는 서로 다른」 것은 없다:
+// pid · 시작 시각 · 부모 pid 는 다시 켜면 바뀌고, clientInfo · 명령줄 · 환경 · 작업 폴더는 같은 앱의 두 프로세스가 같다.
+// 그래서 새 프로세스는 「내 대화를 앞서 맡았던 프로세스」 를 알 수 없다 — 안전한 쪽(알림 한 번 더)을 고른다:
+//  - 프로세스마다 자기 기록만 쓴다: `<접두>.p-<pid>-<시작 ms 36진>`(접두 = `clientRecordFile`).
+//  - 새 프로세스는 같은 이름의 기록이 **하나도 없을 때**(처음) 또는 **모든** 기록(살아 있든 끝났든)이 지금 프로그램일 때만
+//    알림 없이 받아들인다. 하나라도 다르거나 읽을 수 없으면 알림.
+//  - 끝난 프로세스의 기록이 다른 프로그램을 가리키면 그것은 다시 같아질 수 없다(instanceId 는 되풀이되지 않는다) —
+//    `<접두>.stale` 하나로 접는다(그 뒤로 같은 이름의 새 프로세스는 늘 알림 한 번). 지금 프로그램을 가리키는 끝난 기록은
+//    하나만 남긴다. 살아 있는 다른 프로세스의 기록은 건드리지 않는다. V5 판의 이름 하나 기록(`<접두>` 그대로)은 끝난 기록으로 본다.
+
+export const STALE_RECORD_SUFFIX = '.stale';
+
+/** 이 MCP 서버 프로세스의 기록 파일 */
+export function processRecordFile(prefix: string, pid: number, startMs: number): string {
+    return `${prefix}.p-${pid}-${Math.max(0, Math.round(startMs)).toString(36)}`;
+}
+
+export interface ClientRecordEntry {
+    file: string;
+    /** process = 프로세스별 기록 · legacy = V5 판의 이름 하나 기록 · stale = 접힌 「끝난 프로세스가 옛 프로그램을 봤다」 */
+    kind: 'process' | 'legacy' | 'stale';
+    /** process 일 때 그 MCP 서버의 pid(파일 이름에서) */
+    pid?: number;
+    read: ClientRecordRead;
+}
+
+/** 이 접두(클라이언트 이름)의 기록 전부. 우리 이름 꼴이 아닌 파일(임시 파일 포함)은 보지 않는다. */
+export function listClientRecords(prefix: string): ClientRecordEntry[] {
+    const dir = path.dirname(prefix);
+    const base = path.basename(prefix);
+    let names: string[];
+    try { names = fs.readdirSync(dir); } catch { return []; }
+    const out: ClientRecordEntry[] = [];
+    for (const n of names.sort()) {
+        const file = path.join(dir, n);
+        if (n === base) { out.push({ file, kind: 'legacy', read: readClientRecord(file) }); continue; }
+        if (n === base + STALE_RECORD_SUFFIX) { out.push({ file, kind: 'stale', read: { kind: 'invalid', detail: 'stale marker' } }); continue; }
+        if (n.startsWith(base + '.p-')) {
+            const m = /^\.p-(\d+)-([0-9a-z]+)$/.exec(n.slice(base.length));
+            if (m) { out.push({ file, kind: 'process', pid: Number(m[1]), read: readClientRecord(file) }); }
+        }
+    }
+    return out;
+}
+
+/** 접힌 표시를 둔다(이미 있으면 그대로). 실패는 false. */
+export function markStaleRecords(prefix: string, now = new Date()): boolean {
+    const file = prefix + STALE_RECORD_SUFFIX;
+    try {
+        if (fs.existsSync(file)) { return true; }
+        atomicWriteFile(file, JSON.stringify({ app: CLIENT_RECORD_APP, version: 1, stale: true, at: now.toISOString() }) + '\n', 0o600);
         return true;
     } catch { return false; }
 }

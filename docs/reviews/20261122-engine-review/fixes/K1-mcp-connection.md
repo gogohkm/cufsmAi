@@ -202,3 +202,34 @@
 - **진짜 Claude Desktop · Electron 으로는 돌리지 않았다**(가짜 설정 · node 대역). 기록은 MCP 의 `clientInfo.name` 으로 가른다 — Claude Desktop 이 내는 실제 이름은 확인하지 못했다(무엇이든 클라이언트마다 다르면 된다).
 - 같은 이름의 클라이언트 프로세스 여럿(Claude Code 창 둘, `--resume` 으로 옛 대화를 이은 새 프로세스)은 기록 하나를 나누므로, 다른 창이 이미 확인한 프로그램이면 새 프로세스는 알림을 받지 않는다 — MCP 에 대화 식별자가 없어 더 나눌 수 없다.
 - 독립 프로그램 쪽(`desktop/`)이 따라올 것은 보고서의 「desktop 변경 필요」 목록(오케스트레이터에게).
+
+
+## V5b — 재검증 V5b 의 연결 몫 (2026-11-23)
+
+근거: [V5b-desktop-reverify.md](../verify/V5b-desktop-reverify.md) 의 V5b-05 · V5b-07 · V5b-09 · V5b-10(모두 P3)과 옛 표의 V5-08 · V5-09 「일부」. 고친 곳은 `src/mcp/{bridge,server,hostConnection,portFile,claudeDesktop}.ts`, 시험 두 파일, 번들.
+
+| 번호 | 무엇을 바꿨나 | 시험 · 변이 |
+|---|---|---|
+| V5b-05 | **증명 먼저, 인증은 그다음.** MCP 서버의 `/hello` 는 토큰 없이 nonce 만 보낸다(`httpCall(…, withToken = false)`). 호스트는 `GET /hello` 를 토큰 검사 전에 받는다(Origin · Host 검사는 그대로) — 답은 `{app}` 과 증명뿐, 증명의 열쇠는 여전히 토큰. 다른 모든 길은 토큰이 필요하고, 거절된 요청에는 증명을 붙이지 않는다 | 가짜 서버가 받은 것 = `GET /hello auth=none nonce=yes` 하나 · `/hello` 토큰 없이 200 + 맞는 증명 · Origin 이면 403 · `/status` 는 401 · 증명은 토큰 · instanceId · nonce 에 묶임. 변이(토큰 다시 실음) → `V5b-05: only the connection check reached it, without the token` 에서 실패 |
+| V5b-07 | (a) 하드 링크의 제자리 쓰기: 비운 뒤 쓰기 · fsync 가 실패하면 읽었던 바이트 그대로 되돌리고 `write-failed` 문구에 「put back as it was」(되돌리지도 못하면 「could NOT be put back; copy the backup …」). (b) 비우기 직전에 진행 표시 `<설정>.stcfsd-tmp-inplace`(백업 경로를 담음)를 두고 끝나면 지운다 — 프로세스가 그 사이 죽어 남은 **빈 · 잘린 설정 + 표시**는 `invalid-config`(「an in-place write by StCFSD was cut short (backup: …)」), 연결 · 끊기는 손대지 않는다. (c) 문자열 밖 `{`/`[` 깊이가 64 를 넘으면 `invalid-config`(되부름 없는 셈), 다시 쓸 글을 만들다 던지는 것도 `invalid-config` 로 — 밖으로 던지지 않는다 | (a) 새 글을 쓰는 첫 `writeSync` 에 ENOSPC → 설정 바이트 그대로 · nlink 2 · 표시 없음. (b) **자식 프로세스가 비운 직후 실제로 죽는다**(`process.exit(9)`) → 0 바이트 + 표시 → `invalid-config`, 다음 연결도 손대지 않음, 문구의 백업 = 원래 내용, 잘린 JSON 도 같은 안내, 사용자가 되돌리고 표시를 지우면 다시 됨. (c) 5000 겹 → 거절(던지지 않음, 그대로), 문자열 속 괄호가 섞인 60 겹은 됨. 변이(되돌리지 않음) → `could NOT be put back` 에서 실패 |
+| V5b-09 | 가지치기는 **가장 오래된 우리 백업**(StCFSD 가 처음 손대기 전의 원본)을 늘 남기고, 새것 `CLAUDE_BACKUPS_KEPT = 5` 개 밖의 중간 것만 지운다(많아야 여섯). 우리 이름 꼴의 일반 파일만 본다(그대로) | 2020 년 원본 + 12 번 쓰기 → 원본 그대로 + 새것 5 · 같은 초 `-n` 에서도 꼬리 없는 첫 것이 남음. 변이(원본도 지움) → `12 writes leave the original + 5 newest, got 5` 에서 실패 |
+| V5b-10 | 아래 「프로세스별 기록」 | 아래. 변이(가장 최근 기록 하나만 봄 = 이름 하나 기록과 같은 판정) → `cannot tell which earlier session was this one …` 에서 실패 |
+
+### V5b-05 — 본문을 증명에 묶지 않은 까닭 (여기서 멈춘다)
+
+`/hello` 가 토큰을 싣지 않으므로, 포트 파일이 가리키는 포트를 차지한 남(강제 종료 뒤 pid · 포트를 물려받은 프로그램, 다른 Windows 사용자)은 이제 **아무 비밀도 받지 못하고**(nonce 뿐) 증명을 만들 수 없으며(토큰도 instanceId 도 모른다), MCP 서버는 그다음 요청을 보내지 않는다. 남는 것은 그 포트에서 `/hello` 를 **진짜 호스트로 넘겨 주는 중계자**다. 그러려면 진짜 인스턴스(포트 파일에 적힌 바로 그 instanceId)가 **다른 포트**에서 떠 있어야 하는데, 인스턴스는 자기 포트를 자기가 포트 파일에 적으므로 그런 상태는 **포트 파일을 고쳐 쓸 수 있는 자**(같은 사용자의 프로그램)만 만든다. 그는 토큰과 instanceId 를 파일에서 바로 읽으므로 무엇이든 스스로 만들 수 있다 — 응답 본문을 증명에 묶어도 막는 것이 없다. 그래서 본문은 묶지 않았다. 중계자가 그래도 있다면: 할 수 있는 것 = 확인 뒤의 요청(토큰 포함)을 보고 바꾸고 본문을 바꾸는 것, 할 수 없는 것 = 그런 자리를 포트 파일 없이 만드는 것. 같은 사용자 권한의 악성 코드는 K1 「잔여 위험」 그대로 범위 밖이다.
+
+### V5b-10 — 프로세스별 기록과 그 까닭
+
+- **가를 것이 있나**: 「Claude Desktop 을 다시 켜도 그대로이고, 동시에 뜬 두 MCP 서버는 서로 다른」 것을 찾았지만 없다. pid · 프로세스 시작 시각 · 부모 pid 는 다시 켜면 바뀐다. `clientInfo`(이름 · 판) · 명령줄 · 환경 · 작업 폴더는 같은 앱의 두 프로세스(Claude Code 의 같은 폴더 세션 둘, 다시 뜬 서버, `--resume`)가 같다. 대화 · 세션 식별자는 MCP 서버에 오지 않는다. 그래서 새 MCP 서버는 「내 대화를 앞서 맡았던 프로세스」 를 알 수 없다.
+- **고른 쪽 = 알림 한 번 더, 놓치지 않기.** 프로세스마다 자기 기록만 쓴다(`<포트 파일>.client-<이름>-<해시>.p-<pid>-<시작 ms 36진>`, 내용 = 확인한 instanceId · 그 MCP 서버의 pid · 시작 시각, 토큰 없음). 새 프로세스는 같은 이름의 기록이 **하나도 없을 때**(처음 — 헛 알림 없음) 또는 **모든 기록**(살아 있든 끝났든)이 지금 프로그램일 때만 알림 없이 받아들인다. 하나라도 다르거나 읽을 수 없으면 get_status 만 통과, 문구는 새 `STANDALONE_RESTARTED_EARLIER(_NOTICE)`(「restarted since an earlier session of this AI app last used it (or that cannot be ruled out)」 — 이 프로세스에는 「your last call」 이 없으므로). 같은 프로세스 안의 재시작은 K1 문구 그대로.
+- **정리(커지지 않게)**: 확인한 프로세스가 끝난 프로세스의 기록을 접는다. 다른 프로그램을 가리키거나 읽을 수 없는 것 → `<접두>.stale` 표시를 둔 **뒤** 지운다(그 기록은 다시 같아질 수 없다 — instanceId 는 되풀이되지 않는다). 지금 프로그램을 가리키는 것 → 하나만 남긴다. 살아 있는 다른 프로세스의 기록은 건드리지 않는다. V5 판의 이름 하나 기록은 끝난 기록으로 읽는다(지금 프로그램이면 헛 알림 없음).
+- **값**: 표시(`.stale`)가 생기면 — 이 이름의 어느 끝난 세션이 다른 프로그램 실행을 봤다는 뜻 — 그 뒤로 이 이름의 **새 MCP 서버마다 알림이 한 번**(get_status 한 번) 붙는다. 프로그램을 다시 켜지 않았어도 붙는다(문구는 「earlier session」 이라 거짓이 아니다). 안내문의 흐름이 get_status 로 시작하므로 보통은 더 드는 것이 없다. 이 값을 줄이려면 「앞 세션 = 나」 를 가정해야 하고, 그 가정이 틀리면 알림을 놓친다 — 고르지 않았다.
+- **교착 없음**: get_status 는 늘 보낸다. 자기 기록을 쓸 수 없어도(단위 시험: 그 자리가 폴더) 메모리로 풀린다. 이상한 기록(폴더)은 지우지 못하고 그대로 둔다.
+- **남는 한계(문서 · 안내문)**: MCP 서버 하나를 여러 대화가 함께 쓰면 알림은 get_status 를 부른 대화에만 간다. 안내문 TRANSPORT 에 「That notice is given once per connection, not per conversation: when you resume earlier work in a conversation, call get_status and re-check the model …」 를 더했다. 기록 폴더에 쓸 수 없으면 처음 쓰는 이름은 늘 「처음」 으로 보인다(쓸 수 없으니 남길 수도 없다). 클라이언트 이름이 바뀌는 판 올림은 새 이름 = 처음이다.
+
+시험(`mcp_port_file_contract.js` 14 묶음 새로 씀): 처음 → 알림 없음 · 기록은 프로세스별 · 프로그램 재시작 뒤 새 서버는 `EARLIER` 문구로 거절, get_status 한 번에 알림, 끝난 기록은 `.stale` 로 접힘 · Claude Code 독립 · 한쪽 확인이 다른 쪽을 안 풂 · 접힌 뒤 새 서버는 늘 알림(안전한 쪽) · 모든 기록이 지금 프로그램이면 새 서버도 알림 없음 · **같은 이름 둘(A · B) 중 B 만 새 프로그램을 확인 → 그 뒤 뜬 같은 이름의 C 는 알림**(V5b-10 의 (d)) · 살아 있는 쌍둥이 기록은 그대로 · 깨진 끝난 기록 → 알림 → 접힘 · V5 판 기록 이어받기 · 폴더 기록에도 풀림 · 단위: 자기 기록 자리가 폴더여도 풀림, 살아 있는 남의 기록은 안 지움.
+
+### 게이트 · 남은 것
+
+`npx tsc -p ./ --noEmit` · `npx eslint src webview/js test/webview` · `npm run test:webview` · `npm run check:mcp-parity` (Python 은 이번 변경과 무관해 돌리지 않음). 결과 줄은 보고서에. 진짜 Claude Desktop · Electron 으로는 돌리지 않았다(가짜 설정 · node 대역). 심볼릭 링크 설정은 이 PC 에서 여전히 `EPERM` 으로 건너뛴다.
