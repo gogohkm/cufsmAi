@@ -1,0 +1,146 @@
+/* StAnal 독립 프로그램 — 창 틀 스타일
+   review.css(부품) 뒤에 불러온다. VS Code 틀(활동 줄 · 사이드바 · 편집기 탭)을 걷어 내고
+   프로그램 자신의 창을 그린다. 기준 창은 모니터 하나 전체(1920×1080)다. */
+
+.win {
+  height: calc(100vh - 32px); min-height: 640px; min-width: 940px;
+  display: flex; flex-direction: column; grid-template-columns: none; grid-template-rows: none;
+}
+
+/* 제목 표시줄 — 프로그램이 직접 그린다 */
+.tbar { flex: none; height: 36px; display: flex; align-items: center; gap: 14px; padding: 0 0 0 12px; background: var(--bg-chrome); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.tbar .logo { font-weight: 700; letter-spacing: .02em; color: var(--accent); }
+.tbar .proj { font-weight: 600; }
+.tbar .pick { padding: 2px 9px; border: 1px solid var(--line); border-radius: 4px; color: var(--text-dim); }
+.tbar .pick b { color: var(--text); font-weight: 600; }
+.tbar .sp { flex: 1; }
+.tbar .conn { display: inline-flex; align-items: center; gap: 6px; color: var(--text-dim); }
+.tbar .wc { display: inline-flex; align-self: stretch; margin-left: 4px; }
+.tbar .wc i { width: 44px; display: grid; place-items: center; font-style: normal; color: var(--text-dim); font-size: 12px; }
+.tbar.edit { box-shadow: inset 0 -2px 0 var(--edit); }
+.tbar .tb { padding: 2px 9px; border: 1px solid var(--line); border-radius: 4px; color: var(--text-dim); font-size: 11.5px; }
+.tbar .tb.on { border-color: var(--accent); color: var(--accent); }
+.tbar .tb.on.edit { background: var(--edit); border-color: var(--edit); color: #1d1205; font-weight: 600; }
+.tbar { gap: 10px; }
+
+.win > .strip { flex: none; height: 32px; }
+.win > .status { flex: none; height: 24px; }
+
+/* AI 가 작업 중일 때만 보이는 띠 */
+.aibar { flex: none; height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: color-mix(in srgb, var(--accent) 16%, var(--bg-panel)); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.aibar .sp { flex: 1; }
+.aibar .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* 본문 — 왼쪽 트리 | 3D | 정보 창 */
+.win > .body { flex: 1; min-height: 0; grid-template-columns: var(--left-w, 280px) minmax(0, 1fr) var(--detail-w, 380px); }
+.win > .body.sheetl { grid-template-columns: 44px minmax(420px, 34%) minmax(0, 1fr); }
+.win > .body.startl { display: block; overflow: auto; background: var(--bg-view); }
+
+/* 왼쪽 — 탭 4개와 트리. 한 줄에 이름과 개수(또는 상태)만 둔다 */
+.left { display: flex; flex-direction: column; min-height: 0; background: var(--bg-panel); border-right: 1px solid var(--line); }
+.ttabs { flex: none; display: flex; background: var(--bg-chrome); border-bottom: 1px solid var(--line); }
+.ttabs a { flex: 1; display: flex; justify-content: center; align-items: center; gap: 5px; height: 34px; color: var(--text-dim); border-bottom: 2px solid transparent; font-size: 12.5px; }
+.ttabs a:hover { text-decoration: none; background: var(--bg-hover); }
+.ttabs a.on { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); background: var(--bg-panel); }
+.tree { flex: 1; min-height: 0; overflow: auto; padding: 6px 0 12px; }
+.tree .row { display: flex; align-items: center; gap: 6px; height: 25px; padding-right: 12px; color: var(--text); white-space: nowrap; cursor: default; }
+.tree .row:hover { text-decoration: none; background: var(--bg-hover); }
+.tree .row.on { background: var(--bg-select); }
+.tree .row.top { margin-top: 5px; }
+.tree .row.top:first-child { margin-top: 0; }
+.tree .row.top .nm { font-weight: 600; }
+.tree .row.faint .nm { color: var(--text-faint); }
+.tree .tw { flex: none; width: 12px; text-align: center; color: var(--text-dim); font-size: 12px; line-height: 1; }
+.tree .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tree .vl { flex: none; color: var(--text-dim); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.tree .vl.ok { color: var(--ok); } .tree .vl.warn { color: var(--warn); } .tree .vl.ng { color: var(--ng); } .tree .vl.un { color: var(--unchk); }
+.tree .dot.acc { background: var(--accent); }
+.tree .rv { gap: 0; }
+
+/* 오른쪽 — 정보 창. 양식이 아니라 읽는 곳이다. 아래 한 줄은 Claude 가 읽을 수 있는 선택 */
+.right { display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line); background: var(--bg-panel); }
+.right .pane-detail { flex: 1; min-height: 0; border-left: 0; }
+.share { flex: none; display: flex; align-items: center; gap: 7px; padding: 0 12px; height: 30px; border-top: 1px solid var(--line); background: var(--bg-chrome); color: var(--text-dim); font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+.share b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.hd { padding: 12px 12px 10px; }
+.hd .k { display: flex; align-items: center; gap: 6px; color: var(--text-dim); font-size: 11.5px; }
+.hd .k .sp { flex: 1; }
+.hd .ttl { font-size: 15px; font-weight: 600; margin: 5px 0 4px; }
+.hd .big { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+.say { margin: 6px 0 0; padding: 7px 10px; border-left: 2px solid var(--accent); background: var(--bg-raise); border-radius: 0 4px 4px 0; }
+.say.usr { border-left-color: var(--ok); }
+.pane-detail table.t td, .pane-detail table.t th { padding-left: 0; }
+.pane-detail table.t .r { text-align: right; }
+.pane-detail .kv { gap: 5px 14px; }
+
+/* 우클릭 메뉴 */
+.ctx { position: fixed; z-index: 60; min-width: 196px; padding: 4px 0; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-raise); box-shadow: 0 6px 20px rgba(0,0,0,.45); font-size: 12px; }
+.ctx .ct { padding: 4px 12px 5px; color: var(--text-faint); font-size: 11px; border-bottom: 1px solid var(--line-soft); margin-bottom: 3px; }
+.ctx .ci { display: flex; align-items: center; gap: 18px; height: 25px; padding: 0 12px; white-space: nowrap; cursor: default; }
+.ctx .ci:hover { background: var(--bg-select); }
+.ctx .ci span { flex: 1; }
+.ctx .ci kbd { font: inherit; font-size: 11px; color: var(--text-faint); }
+.ctx .ci.off { color: var(--text-faint); }
+.ctx hr { border: 0; border-top: 1px solid var(--line-soft); margin: 3px 0; }
+.ctx.pinned { border-color: var(--accent); }
+.v3 .ctx.pinned { position: absolute; }
+.ctx-at { display: none; }
+
+/* 풍선 도움말 */
+[data-tip] { cursor: default; }
+.tipbox { position: fixed; z-index: 50; max-width: 300px; padding: 6px 9px; border-radius: 4px; background: #000; color: #e8e8e8; border: 1px solid var(--line); font-size: 11.5px; line-height: 1.5; white-space: normal; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.tipbox.pinned { border-color: var(--accent); }
+
+/* 부재 계산 시트를 3D 옆에 열었을 때 — 왼쪽 칸은 띠로 접힌다 */
+.rail { background: var(--bg-chrome); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 6px; padding-top: 8px; }
+.rail i { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px; font-style: normal; font-size: 11px; color: var(--text-faint); }
+.rail i.on { background: var(--bg-select); color: var(--text); }
+.pane-sheet { min-height: 0; overflow: auto; background: var(--bg-view); border-left: 1px solid var(--line); }
+.pane-sheet .sheet { margin: 14px 18px 40px; max-width: none; }
+
+/* 예시 수치 표시 — 실제 화면에서 가져온 값이 아님 */
+.eg { display: inline-block; padding: 0 5px; border-radius: 3px; border: 1px dotted var(--text-faint); color: var(--text-faint); font-size: 10.5px; line-height: 15px; white-space: nowrap; }
+
+/* 판단 요청의 선택지 */
+.opt { border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; margin-bottom: 6px; display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; }
+.opt b { font-weight: 600; }
+.opt .cons { grid-column: 1; color: var(--text-dim); font-size: 11.5px; }
+.opt .btn { grid-row: 1 / 3; grid-column: 2; }
+.wait { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--accent); border-radius: 5px; color: var(--accent); font-size: 11.5px; }
+
+/* 값 수정 — 상세 창의 값 옆 */
+.edit-row { display: grid; grid-template-columns: max-content 1fr auto; gap: 4px 10px; align-items: center; }
+.lnk { color: var(--accent); font-size: 11px; white-space: nowrap; }
+.field { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border: 1px solid var(--accent); border-radius: 4px; background: var(--bg-raise); font-family: var(--mono); font-size: 11.5px; }
+
+/* 시작 화면 */
+.start { max-width: 1040px; margin: 0 auto; padding: 40px 24px 60px; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 22px; }
+.start h2 { font-size: 20px; grid-column: 1 / 3; }
+.start .box { border: 1px solid var(--line); border-radius: 6px; background: var(--bg-panel); }
+.start .box > h4 { padding: 10px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
+.start .box > h4 .sp { flex: 1; }
+.start .box .in { padding: 12px 14px; }
+.step { display: grid; grid-template-columns: 22px 1fr auto; gap: 4px 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line-soft); }
+.step:first-child { border-top: 0; }
+.step .n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; background: var(--bg-raise); color: var(--text-dim); }
+.step.done .n { background: var(--ok); color: #fff; }
+.step .d { grid-column: 2 / 4; color: var(--text-dim); font-size: 11.5px; }
+
+/* 안내 페이지의 틀 그림 */
+.wire2 { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; display: grid; grid-template-rows: 24px 24px 200px 20px; font-size: 11px; color: var(--text-dim); max-width: 860px; }
+.wire2 > div { border: 1px solid var(--line-soft); display: grid; place-items: center; text-align: center; padding: 2px 6px; background: var(--bg-panel); }
+.wire2 .w-body { display: grid; grid-template-columns: 190px 1fr 210px; padding: 0; place-items: stretch; }
+.wire2 .w-body > div { border: 1px solid var(--line-soft); display: grid; place-items: center; text-align: center; padding: 4px; }
+.wire2 .w-3d { background: var(--bg-view); color: var(--text); }
+.duo { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; max-width: 860px; align-items: stretch; }
+.duo > div { border: 2px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--bg-panel); }
+.duo > div b { display: block; margin-bottom: 4px; }
+.guide .grid a img { aspect-ratio: 16 / 9; }
+
+/* 좁은 창 — 모니터가 하나인 자리. 트리가 접히고 3D 와 정보 창만 남는다 */
+@media (max-width: 1100px) {
+  .win > .body { grid-template-columns: minmax(0, 1fr) var(--detail-w, 340px); }
+  .win > .body .left { display: none; }
+  .tbar .tb { display: none; }
+  .win > .body.sheetl { grid-template-columns: 44px 0 minmax(0, 1fr); }
+}

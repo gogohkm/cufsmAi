@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 단면 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .drawer { max-height: 300px; }
+  .dtabs { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; }
+  .dtabs > div + div { border-left: 1px solid var(--line); }
+  .drawer table.t th { top: 31px; }
+</style>
+</head>
+<body>
+
+<!-- 모델 탭에서 단면을 골랐다. 가운데는 치수 · 절점 · 요소가 겹친 단면 보기, 아래는 절점 · 요소 표 -->
+<div id="page" data-tab="model" data-sel="sec" data-open="sec" data-share="단면 「립 Z 200×75×20×2.3」 · 절점 23"
+     data-status="단면 · 립 Z 200×75×20×2.3 · r 4 · SGC400 · 절점 37 · 요소 36 · 고른 절점 23">
+
+  <section class="pane-view drawer-open">
+    <div class="dv" data-draw="section" data-opt='{"w":1240,"h":600,"s":2.45,"cx":600,"cy":300,"dims":true,"nodes":"label","elems":true,"axes":true,"hiNode":23}'>
+      <div class="hud tl">
+        <span class="vsel" data-tip="보기 구성. 단면 · 모드 형상 · 좌굴 곡선 · 부재 · 판정비"><span class="on">단면</span><span>모드 형상</span><span>좌굴 곡선</span><span>부재</span><span>판정비</span></span>
+        <span class="chip on">치수</span><span class="chip on">절점</span><span class="chip on" data-tip="회색 기울임 숫자">요소</span><span class="chip on" data-tip="도심 · 주축 1-2">축</span><span class="chip" data-tip="기준 응력 분포 (정휨 M+)">응력</span>
+      </div>
+      <div class="hud tr"><span class="chip" data-tip="모드 형상을 3D 로 본다">3D</span><span class="btn ghost">전체 맞춤</span></div>
+      <div class="hud bl"><span class="cap">축척 1 : 1.5 · mm · 중심선 형상</span></div>
+    </div>
+    <div class="drawer">
+      <header><b>절점 · 요소</b><span class="chip on">절점 37</span><span class="chip on">요소 36</span><span class="chip">스프링 0</span><span class="chip">구속 0</span><span class="sp"></span><span class="faint">mm · 원점 아래 립 바깥</span></header>
+      <div class="dtabs">
+        <div><table class="t" data-table="nodes" data-sel="23"></table></div>
+        <div><table class="t" data-table="elems" data-sel="23"></table></div>
+      </div>
+    </div>
+  </section>
+
+  <i class="ctx-at" data-menu="val" data-row="sdim" data-dx="170" data-dy="16"></i>
+
+  <aside class="pane pane-detail">
+    <div class="hd">
+      <div class="k">단면 · 템플릿 립 Z<span class="sp"></span><span class="rv" data-tip="내가 확인했다는 표시. 사람만 켠다. 이의는 Claude 에게 말한다">확인</span></div>
+      <div class="ttl">립 Z 200×75×20×2.3</div>
+      <div class="dim">r 4 · 립 각도 90° · SGC400 · 냉간성형</div>
+    </div>
+
+    <div class="sec">
+      <h4>종류 · 치수<span class="sp"></span><span class="eg">예시</span></h4>
+      <table class="t">
+        <tbody>
+          <tr><td>템플릿</td><td class="r">립 Z</td><td class="src"><span class="tag ai">AI</span></td></tr>
+          <tr><td>H · B · D</td><td class="r num">200 · 75 · 20</td><td class="src"><span class="tag ai">AI</span><span class="why">지붕 평면도.pdf</span></td></tr>
+          <tr><td>두께 t</td><td class="r num">2.3</td><td class="src"><span class="tag ai" data-tip="10:12 2.0 → 2.3. 변경 기록에 있다">AI</span><span class="why">2.0 → 2.3 · 10:12</span></td></tr>
+          <tr><td>안쪽 반지름 r</td><td class="r num">4</td><td class="src"><span class="tag def" data-tip="입력 기본값. 아무도 정하지 않았다">기본값</span></td></tr>
+          <tr><td>립 각도</td><td class="r num">90°</td><td class="src"><span class="tag def">기본값</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4 data-tip="전단면 · 중심선 기준">단면 성질<span class="sp"></span><span class="tag sec">단면</span></h4>
+      <table class="t">
+        <tbody>
+          <tr><td>A</td><td class="r num">872</td><td class="dim">mm²</td></tr>
+          <tr><td>Ix · Iy</td><td class="r num">5.18 · 1.16</td><td class="dim">×10⁶ mm⁴</td></tr>
+          <tr><td>Ixy</td><td class="r num">1.75</td><td class="dim">×10⁶ mm⁴</td></tr>
+          <tr><td>Sx</td><td class="r num">51.8</td><td class="dim">×10³ mm³</td></tr>
+          <tr><td>J</td><td class="r num">1 540</td><td class="dim">mm⁴</td></tr>
+          <tr><td>Cw</td><td class="r num">5.6</td><td class="dim">×10⁹ mm⁶</td></tr>
+          <tr><td>xo</td><td class="r num">0</td><td class="dim" data-tip="Z 는 점대칭이라 전단 중심이 도심과 같다">점대칭</td></tr>
+          <tr><td>θp · I1 · I2</td><td class="r num">20.6° · 5.84 · 0.50</td><td class="dim">×10⁶</td></tr>
+          <tr><td>My = Sx·Fy</td><td class="r num">12.69</td><td class="dim">kN·m</td></tr>
+          <tr><td>Py = A·Fy</td><td class="r num">213.6</td><td class="dim">kN</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>요소 분할</h4>
+      <table class="t">
+        <tbody>
+          <tr><td>절점 · 요소</td><td class="r num">37 · 36</td><td class="src"><span class="tag def" data-tip="템플릿의 기본 분할">기본값</span></td></tr>
+          <tr><td>웨브 · 플랜지 · 립</td><td class="r num">8 · 4 · 2</td><td class="dim r">모서리 4 × 4</td></tr>
+          <tr><td>스프링 · 구속</td><td class="r num">0 · 0</td><td class="src"><span class="tag def" data-tip="데크의 회전 구속을 해석에 넣지 않았다. 정휨 결과는 안전측">기본값</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

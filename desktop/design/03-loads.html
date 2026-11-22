@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03 하중 해석 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .drawer { max-height: 318px; }
+  .drawer table.t td.num, .drawer table.t th.num { text-align: right; }
+  .legend2 { display: flex; gap: 12px; align-items: center; font-size: 11px; color: var(--text-dim); background: color-mix(in srgb, var(--bg-panel) 88%, transparent); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; }
+  .legend2 i { display: inline-block; width: 16px; height: 0; border-top: 2px dashed var(--lapc); vertical-align: middle; margin-right: 4px; }
+  .legend2 i.ip { width: 9px; height: 9px; border: 1.5px solid var(--mcol); border-radius: 50%; }
+  .legend2 i.lb { border-top: 1px solid var(--warn); }
+</style>
+</head>
+<body>
+
+<!-- 결과 탭에서 하중 해석 · 지배 조합을 골랐다. 가운데는 보 개략도와 M · V · 처짐, 아래는 위치별 표 -->
+<div id="page" data-tab="result" data-sel="lgov" data-close="fsm,chk" data-share="하중 해석 · 지배 조합 2 (1.2D + 1.6Lr + 0.5W↓)"
+     data-status="하중 해석 · 조합 7 · 지배 조합 2 · wu 3.04 kN/m · 지점 B Mu −12.20 kN·m · 10:33 실행 · 입력과 일치">
+
+  <section class="pane-view drawer-open">
+    <div class="dv" data-draw="member" data-opt='{"w":1230,"rows":["beam","M","V","D"]}'>
+      <div class="hud tl">
+        <span class="vsel"><span>단면</span><span>모드 형상</span><span>좌굴 곡선</span><span class="on">부재</span><span>판정비</span></span>
+        <span class="chip on">M</span><span class="chip on">V</span><span class="chip on">처짐</span><span class="chip on" data-tip="변곡점–지점 구간 Ly 와 Cb">비지지 길이</span>
+      </div>
+      <div class="hud tr"><span class="chip on" data-tip="조합 7 개 중 고른 것">조합 2 · 1.2D + 1.6Lr + 0.5W↓ ▾</span><span class="btn ghost">전체 맞춤</span></div>
+      <div class="hud bl"><span class="legend2"><span><i></i>랩 끝</span><span><i class="ip"></i>변곡점</span><span><i class="lb"></i>비지지 길이</span></span></div>
+      <i class="ctx-at" data-menu="view" style="left:990px;top:452px"></i>
+    </div>
+    <div class="drawer">
+      <header><b>위치별 소요강도 — 조합 2</b><span class="chip on">위치 9</span><span class="chip">조합별</span><span class="chip">처짐</span><span class="sp"></span><span class="eg">예시</span><span class="faint">kN · kN·m · 부호 = 위 인장이 −</span></header>
+      <table class="t">
+        <thead><tr><th>위치</th><th class="num">x m</th><th class="num">Mu</th><th class="num">Vu</th><th class="num">Ru</th><th>쓰는 검토</th></tr></thead>
+        <tbody>
+          <tr><td>지점 A</td><td class="num">0.00</td><td class="num">0</td><td class="num">7.09</td><td class="num">7.09</td><td class="dim">웹 크리플링 · 전단</td></tr>
+          <tr><td>스팬 1 정모멘트 최대</td><td class="num">2.33</td><td class="num">+8.26</td><td class="num">0.00</td><td class="num faint">—</td><td class="dim">정모멘트 뒤틀림 · 국부</td></tr>
+          <tr><td>변곡점 · 스팬 1</td><td class="num">4.66</td><td class="num">0</td><td class="num">−7.08</td><td class="num faint">—</td><td class="dim">Ly 1.34 m</td></tr>
+          <tr><td>B 좌측 랩 끝</td><td class="num">5.40</td><td class="num">−6.05</td><td class="num">−9.33</td><td class="num faint">—</td><td class="dim">부모멘트 (스팬 1 쪽)</td></tr>
+          <tr><td>지점 B</td><td class="num">6.00</td><td class="num">−12.20</td><td class="num">−11.15 / +9.12</td><td class="num">20.27</td><td class="dim">휨+웹 크리플링 · 전단 · 랩 접합</td></tr>
+          <tr class="on"><td>B 우측 랩 끝</td><td class="num">6.60</td><td class="num">−7.28</td><td class="num">+7.30</td><td class="num faint">—</td><td>부모멘트 뒤틀림 · 국부 · 휨+전단</td></tr>
+          <tr><td>변곡점 · 스팬 2</td><td class="num">8.01</td><td class="num">0</td><td class="num">+3.00</td><td class="num faint">—</td><td class="dim">Ly 2.01 m</td></tr>
+          <tr><td>스팬 2 중앙</td><td class="num">9.00</td><td class="num">+1.48</td><td class="num">0.00</td><td class="num faint">—</td><td class="dim"></td></tr>
+          <tr><td>C 좌측 랩 끝</td><td class="num">11.40</td><td class="num">−7.28</td><td class="num">−7.30</td><td class="num faint">—</td><td class="dim">B 우측과 대칭</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="pane pane-detail">
+    <div class="hd">
+      <div class="k"><span class="tag ai">AI</span>하중 해석 · 10:33<span class="sp"></span><span class="rv" data-tip="내가 확인했다는 표시. 사람만 켠다. 다시 해석하면 꺼진다">확인</span></div>
+      <div class="ttl">지배 조합 — 조합 2</div>
+      <div class="num" style="font-size:16px;font-weight:600">1.2D + 1.6Lr + 0.5W↓</div>
+      <div class="dim">wu 3.04 kN/m · 휨 · 전단 · 반력 모두 이 조합</div>
+    </div>
+
+    <div class="sec">
+      <h4>조합식<span class="sp"></span><span class="eg">예시</span></h4>
+      <div class="calc">
+        <div class="row"><span>D</span><span>0.30 kPa × 1.2 m + 자중 0.07 = 0.43 kN/m</span></div>
+        <div class="row"><span>Lr</span><span>1.00 × 1.2 = 1.20 kN/m</span></div>
+        <div class="row"><span>W↓</span><span>1.00 × 1.2 = 1.20 kN/m</span></div>
+        <div class="row"><span>wu</span><span>1.2×0.43 + 1.6×1.20 + 0.5×1.20 = <b>3.04</b></span></div>
+      </div>
+      <table class="t" style="margin-top:6px">
+        <tbody>
+          <tr><td>조합</td><td class="r">ASCE 7 LRFD · 7개</td><td class="src"><span class="tag ai" data-tip="AI 가 만들었다. 사람이 고르지 않았다">AI</span></td></tr>
+          <tr><td>패턴 재하</td><td class="r">안 함</td><td class="src"><span class="tag def" data-tip="모든 스팬에 같은 하중. 엇갈림 재하를 하면 Lr 정모멘트가 커질 수 있다">기본값</span></td></tr>
+          <tr><td>랩 구간 강성</td><td class="r">EI × 2</td><td class="src"><span class="tag def">기본값</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>자동으로 정한 값</h4>
+      <table class="t">
+        <tbody>
+          <tr><td>Lb 부모멘트</td><td class="r num">2.01 m</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">변곡점–지점 구간 · 스팬 2</span></td></tr>
+          <tr><td>Cb 부모멘트</td><td class="r num">1.94</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">구간 모멘트 분포</span></td></tr>
+          <tr><td>Lb 정모멘트</td><td class="r num">0</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">데크가 윗 플랜지 구속</span></td></tr>
+          <tr><td>R</td><td class="r num">0.70</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">양압 · 연속 Z · 표 I6.2.1-1</span></td></tr>
+          <tr><td>kφ</td><td class="r num">1.10</td><td class="src"><span class="tag drv">하중 해석</span><span class="why" data-tip="데크 두께와 체결 간격은 입력 기본값 그대로다">데크 t 0.5 · 체결 300 <span style="color:var(--warn)">기본값</span></span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>처짐<span class="sp"></span><span class="verdict ok" style="font-weight:400">L/475</span></h4>
+      <table class="t">
+        <tbody>
+          <tr><td>D + Lr · 스팬 1</td><td class="r num">12.6 mm</td><td class="r num">L/475</td></tr>
+          <tr><td>Lr · 스팬 1</td><td class="r num">9.3 mm</td><td class="r num">L/645</td></tr>
+          <tr><td>한계</td><td class="r num">L/240</td><td class="src"><span class="tag usr">사용자</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

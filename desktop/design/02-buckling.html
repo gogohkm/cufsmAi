@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 좌굴 해석 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+</head>
+<body>
+
+<!-- 결과 탭에서 좌굴 해석 · 정휨 M+ · 뒤틀림을 골랐다. 위는 단면과 그 모드 형상, 아래는 좌굴 곡선 -->
+<div id="page" data-tab="result" data-sel="fMpd" data-close="chk,load" data-share="좌굴 해석 · 정휨 M+ · 뒤틀림 (620 mm)"
+     data-status="좌굴 해석 · 정휨 M+ · 뒤틀림 극소 · 반파장 620 mm · Mcrd/My 0.85 · 10:14 실행 · 입력과 일치">
+
+  <section class="pane-view stack">
+    <div class="dv" data-draw="section" data-opt='{"w":1240,"h":470,"s":1.95,"cx":640,"cy":238,"mode":"dist","stress":true}'>
+      <div class="hud tl">
+        <span class="vsel"><span>단면</span><span class="on">모드 형상</span><span class="on">좌굴 곡선</span><span>부재</span><span>판정비</span></span>
+        <span class="chip mode on">뒤틀림 · 620 mm</span><span class="chip on" data-tip="기준 응력 분포 · 정휨 M+">응력</span><span class="chip">절점</span>
+      </div>
+      <div class="hud tr"><span class="chip" data-tip="반파장 방향으로 펼친 3D 모드 형상">3D</span><span class="btn ghost">전체 맞춤</span></div>
+      <div class="hud bl">
+        <div class="thumbs3">
+          <div class="mth"><div class="dv" data-draw="section" data-opt='{"w":200,"h":170,"s":0.68,"mode":"local","mini":true}'></div>국부<b>1.62 · 130</b></div>
+          <div class="mth on"><div class="dv" data-draw="section" data-opt='{"w":200,"h":170,"s":0.68,"mode":"dist","mini":true}'></div>뒤틀림<b>0.85 · 620</b></div>
+          <div class="mth"><div class="dv" data-draw="section" data-opt='{"w":200,"h":170,"s":0.68,"mode":"global","mini":true}'></div>전체<b>0.25 · 6000</b></div>
+        </div>
+      </div>
+      <div class="hud br"><span class="cap">변형 배율 임의 · 회색 = 변형 전</span></div>
+    </div>
+    <div class="dv" data-draw="curve" data-opt='{"w":1240,"h":470,"sel":"dist"}'>
+      <div class="hud tr">
+        <span class="vsel" data-tip="하중 종류. Z 는 점대칭이라 M+ 와 M− 의 곡선이 같다"><span>P</span><span class="on">M+</span><span>M−</span></span>
+        <span class="btn ghost">전체 맞춤</span>
+      </div>
+    </div>
+  </section>
+
+  <aside class="pane pane-detail">
+    <div class="hd">
+      <div class="k"><span class="tag ai">AI</span>좌굴 해석 · 정휨 M+ · 10:14<span class="sp"></span><span class="rv" data-tip="내가 확인했다는 표시. 사람만 켠다. 다시 해석하면 꺼진다">확인</span></div>
+      <div class="ttl">뒤틀림 좌굴</div>
+      <div><span class="big">0.85</span> <span class="dim">Mcrd / My · 반파장 620 mm</span></div>
+    </div>
+
+    <div class="sec">
+      <h4>값<span class="sp"></span><span class="eg">예시</span></h4>
+      <table class="t">
+        <tbody>
+          <tr><td>Mcrd</td><td class="r num">10.79 kN·m</td><td class="src"><span class="tag drv">좌굴 해석</span></td></tr>
+          <tr><td>반파장 Lcrd</td><td class="r num">620 mm</td><td class="src"><span class="tag drv">좌굴 해석</span></td></tr>
+          <tr><td>My = Sx·Fy</td><td class="r num">12.69 kN·m</td><td class="src"><span class="tag sec">단면</span></td></tr>
+          <tr><td>국부 Mcrl/My</td><td class="r num">1.62 @ 130</td><td class="src"><span class="tag drv">좌굴 해석</span></td></tr>
+          <tr><td>전체 Mcre/My</td><td class="r num">0.25 @ 6000</td><td class="src"><span class="why">스팬 길이 · 데크 구속 전</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>모드 분류<span class="sp"></span><span class="faint" style="font-weight:400">620 mm</span></h4>
+      <div class="cls"><i style="width:3%;background:var(--clsG)"></i><i style="width:86%;background:var(--clsD)"></i><i style="width:9%;background:var(--clsL)"></i><i style="width:2%;background:var(--unchk)"></i></div>
+      <div class="clsk"><span style="--c:var(--clsG)">G 3%</span><span style="--c:var(--clsD)">D 86%</span><span style="--c:var(--clsL)">L 9%</span><span style="--c:var(--unchk)">O 2%</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px"><span class="dim">식별 방법</span><span class="sp" style="flex:1"></span><span class="tag cls" data-tip-show data-tip="cFSM 으로 모드를 G · D · L · O 로 나눠 뒤틀림 참여가 가장 큰 극소를 골랐다. 분류를 돌리지 않았으면 「반파장 순서로 추정」이 붙는다">cFSM 분류</span></div>
+    </div>
+
+    <div class="sec" style="margin-top:58px">
+      <h4>해석 조건</h4>
+      <table class="t">
+        <tbody>
+          <tr><td>경계조건</td><td class="r">S-S</td><td class="src"><span class="tag def">기본값</span></td></tr>
+          <tr><td>반파장</td><td class="r num">10–10000 · 60점</td><td class="src"><span class="tag def">기본값</span></td></tr>
+          <tr><td>기준 응력</td><td class="r">위 압축 Fy</td><td class="src"><span class="tag ai">AI</span></td></tr>
+          <tr><td>스프링</td><td class="r num">0</td><td class="src"><span class="tag def">기본값</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>경고 1</h4>
+      <div data-tip="관통 체결 데크의 kφ 는 하중 해석에서 정해져 설계 단계에서만 쓰인다"><span class="dot warn"></span> 데크 회전 구속을 해석에 넣지 않음</div>
+      <div class="dim">정휨 Mcrd 는 안전측 · 부휨과 같은 값</div>
+    </div>
+
+    <div class="sec">
+      <h4>쓰이는 곳</h4>
+      <dl class="kv">
+        <dt>부재 검토</dt><dd><a href="04-checks.html">부모멘트 구간 · 뒤틀림 0.87</a><br>정모멘트 구간 · 뒤틀림 0.79 <span class="why">kφ 더함</span></dd>
+        <dt>접합부</dt><dd>랩 P1-B 의 Mnd</dd>
+      </dl>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

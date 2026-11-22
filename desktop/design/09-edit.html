@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>09 편집 상태 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .modebadge { display: inline-block; padding: 0 7px; border-radius: 3px; font-size: 10.5px; line-height: 17px; background: color-mix(in srgb, var(--ok) 22%, transparent); color: var(--ok); }
+  .apbox { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; background: var(--bg-raise); }
+  .apbox .kv { gap: 3px 14px; font-size: 12px; }
+  .runrow { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+  .prev { height: 300px; border: 1px solid var(--line-soft); border-radius: 4px; background: var(--bg-view); }
+  .ecol table.t th { position: static; background: transparent; }
+</style>
+</head>
+<body>
+
+<!-- 모델 탭에서 데크를 고르고 F2 로 편집 상태를 열었다. 틀(제목 줄 · 트리)은 그대로, 가운데와 오른쪽 자리에 지금의 6탭 입력 화면이 열린다 -->
+<div id="page" data-tab="model" data-sel="mdeck" data-open="mem,ld" data-layout="edit" data-pipe="ok ok stale stale stale stale"
+     data-share="부재 · 데크 · 편집 중"
+     data-status="편집 상태 · ② 하중계산 · 이번 편집 3 · 하중 해석 · 부재 검토 · 접합부 · 점검 낡음 · AI 따라가기 멈춤">
+
+  <div class="strip editstrip">
+    <b>이번 편집 — 바뀐 것 3</b>
+    <span class="chip">데크 두께 <s>0.5</s> → 0.6 mm</span>
+    <span class="chip">체결 간격 <s>300</s> → 250 mm</span>
+    <span class="chip">W↓ <s>1.00</s> → 0.80 kPa</span>
+    <span class="sp"></span>
+    <span class="faint" data-tip="편집 중에는 AI 의 변경 요청이 알림으로만 쌓인다. 마치면 AI 가 모델을 다시 읽는다">AI 대기 · 알림 0</span>
+    <span class="btn editp" data-tip="이번 편집 3건이 「사용자 변경」 묶음 하나로 남는다">편집 마치기 F2</span><span class="btn ghost">버리기</span>
+  </div>
+
+  <section class="pane-edit">
+    <div class="etabs">
+      <a>① 단면·재료</a><a class="on">② 하중계산</a><a>③ 좌굴해석·부재설계</a><a>④ 접합부</a><i></i><a>보고서</a><a>검증</a>
+      <span class="sp"></span><span class="seg2" style="align-self:center"><span>US</span><span class="on">SI</span></span>
+    </div>
+    <div class="ecols">
+      <div class="ecol">
+        <h3>부재 유형<span class="sp"></span><span class="modebadge">자동계산</span></h3>
+        <div class="form">
+          <label>부재 유형</label><span class="inp">지붕 퍼린 · roof-purlin<span class="caret">▾</span></span><span></span>
+          <label>설계법</label><span class="seg2"><span class="on">LRFD</span><span>ASD</span></span><span></span>
+        </div>
+
+        <h3>부재 구성</h3>
+        <div class="form">
+          <label>스팬 형식</label><span class="inp">3연속 · cont-3<span class="caret">▾</span></span><span></span>
+          <label>간격</label><span class="inp">1.20</span><span class="u">m</span>
+        </div>
+        <table class="t etab" style="margin-top:8px">
+          <thead><tr><th>지점</th><th>조건</th><th>스팬 m</th><th>랩 좌 m</th><th>랩 우 m</th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td><span class="inp">P<span class="caret">▾</span></span></td><td><span class="inp">6.00</span></td><td><span class="inp ro">0</span></td><td><span class="inp ro">0</span></td></tr>
+            <tr><td>B</td><td><span class="inp">R<span class="caret">▾</span></span></td><td><span class="inp">6.00</span></td><td><span class="inp">0.60</span></td><td><span class="inp">0.60</span></td></tr>
+            <tr><td>C</td><td><span class="inp">R<span class="caret">▾</span></span></td><td><span class="inp">6.00</span></td><td><span class="inp">0.60</span></td><td><span class="inp">0.60</span></td></tr>
+            <tr><td>D</td><td><span class="inp">R<span class="caret">▾</span></span></td><td class="faint">—</td><td><span class="inp ro">0</span></td><td><span class="inp ro">0</span></td></tr>
+          </tbody>
+        </table>
+
+        <h3>데크 · 가새</h3>
+        <div class="form">
+          <label>데크 형식</label><span class="inp">관통 체결 · through-fastened<span class="caret">▾</span></span><span></span>
+          <label>데크 두께</label><span class="inp chg"><span><span class="was">0.5</span>0.6</span></span><span class="u">mm</span>
+          <label>체결 간격</label><span class="inp chg"><span><span class="was">300</span>250</span></span><span class="u">mm</span>
+          <label>kφ 직접 입력</label><span class="inp ro">자동</span><span class="u">kN·m/rad/m</span>
+          <label>kx 직접 입력</label><span class="inp ro">자동</span><span class="u">kN/m/m</span>
+        </div>
+
+        <h3>사용하중 · 면압</h3>
+        <div class="form">
+          <label>D 고정</label><span class="inp">0.30<span class="caret">0.36 kN/m</span></span><span class="u">kPa</span>
+          <label>Lr 지붕 활</label><span class="inp">1.00<span class="caret">1.20 kN/m</span></span><span class="u">kPa</span>
+          <label>S 적설</label><span class="inp">0.50<span class="caret">0.60 kN/m</span></span><span class="u">kPa</span>
+          <label>W↑ 양압</label><span class="inp">1.00<span class="caret">1.20 kN/m</span></span><span class="u">kPa</span>
+          <label>W↓ 정압</label><span class="inp chg"><span><span class="was">1.00</span>0.80</span><span class="caret">0.96 kN/m</span></span><span class="u">kPa</span>
+        </div>
+
+        <h3>소요강도 · 하중 분석이 채움</h3>
+        <div class="form">
+          <label>Mx 부 · 랩 끝</label><span class="inp ro">7.28</span><span class="u">kN·m</span>
+          <label>Mx 정</label><span class="inp ro">8.26</span><span class="u">kN·m</span>
+          <label>V</label><span class="inp ro">11.15</span><span class="u">kN</span>
+        </div>
+        <div class="runrow"><span class="btn primary">하중 분석 실행</span><span class="btn ghost">→ ③ 부재설계</span><span class="btn ghost">→ ④ 랩 접합</span></div>
+      </div>
+
+      <div class="ecol">
+        <h3>하중 분석 결과<span class="sp"></span><span class="verdict warn" style="font-weight:400;font-size:11.5px">편집 전 · 낡음</span></h3>
+        <div class="prev dv stalebox" data-stale="편집 전 결과" data-draw="member" data-opt='{"w":760,"rows":["beam","M","V"],"dims":false}'></div>
+
+        <h3>자동 결정 매개변수</h3>
+        <div class="apbox">
+          <dl class="kv">
+            <dt>kφ</dt><dd><span class="num">1.10</span> kN·m/rad/m <span class="verdict warn" style="font-weight:400">데크 값이 바뀜 — 다시 계산</span></dd>
+            <dt>kx</dt><dd><span class="num">0.18</span> kN/m/m</dd>
+            <dt>Ly 부모멘트</dt><dd><span class="num">2.01</span> m · 변곡점–지점</dd>
+            <dt>Cb 부모멘트</dt><dd><span class="num">1.94</span></dd>
+            <dt>R</dt><dd><span class="num">0.70</span> · 연속 Z</dd>
+          </dl>
+        </div>
+
+        <h3>지배 조합</h3>
+        <table class="t">
+          <thead><tr><th>위치</th><th class="r">Mu kN·m</th><th class="r">Vu kN</th><th class="r">Ru kN</th><th>조합</th></tr></thead>
+          <tbody>
+            <tr><td>지점 B</td><td class="r num">−12.20</td><td class="r num">11.15</td><td class="r num">20.27</td><td>1.2D+1.6Lr+0.5W↓</td></tr>
+            <tr><td>B 우측 랩 끝</td><td class="r num">−7.28</td><td class="r num">7.30</td><td class="r faint">—</td><td>1.2D+1.6Lr+0.5W↓</td></tr>
+            <tr><td>스팬 1 최대</td><td class="r num">+8.26</td><td class="r num">0.00</td><td class="r faint">—</td><td>1.2D+1.6Lr+0.5W↓</td></tr>
+            <tr><td>양압 스팬 1</td><td class="r num">−2.21</td><td class="r num">1.90</td><td class="r num">−1.90</td><td>0.9D+1.0W↑</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>07 변경 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .key { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .drawer { max-height: 300px; }
+</style>
+</head>
+<body>
+
+<!-- 10:12 의 모습. AI 가 두께를 바꾸고 좌굴 해석을 다시 돌리는 중이다. 업무 탭에서 그 변경을 골랐다. 되돌리기 · 고치기는 Claude Desktop 대화창에 말로 한다 -->
+<div id="page" data-tab="work" data-sel="c4" data-moment="1012" data-pipe="ok run stale stale stale stale"
+     data-ai="working" data-ai-text="좌굴 해석 다시 실행 중 · t 2.3 · 반파장 60점 중 23"
+     data-share="변경 「두께 t 2.0 → 2.3」"
+     data-status="변경 「두께 t 2.0 → 2.3」 · AI · 10:12 · 좌굴 해석 다시 실행 중 · 하중 해석 · 부재 검토 · 접합부 낡음">
+
+  <section class="pane-view drawer-open">
+    <div class="dv" data-draw="section" data-opt='{"w":1240,"h":560,"s":2.2,"cx":560,"cy":284,"dims":true,"hiT":true,"nodes":"dot","inset":[930,300]}'>
+      <div class="hud tl">
+        <span class="vsel"><span class="on">단면</span><span>모드 형상</span><span>좌굴 곡선</span><span>부재</span><span>판정비</span></span>
+        <span class="chip"><i class="key" style="background:var(--mod)"></i>바뀜 1</span>
+        <span class="chip"><i class="key" style="background:var(--add)"></i>추가 0</span>
+        <span class="chip"><i class="key" style="background:var(--del)"></i>삭제 0</span>
+      </div>
+      <div class="hud tr"><span class="chip" data-tip="이 변경이 건드린 것만 색으로 그린다">비교 기준 · 10:08 ▾</span><span class="btn ghost">전체 맞춤</span></div>
+    </div>
+    <div class="drawer">
+      <header><b>바뀐 값</b><span class="chip">10:08 → 지금</span><span class="sp"></span><span class="eg">예시</span></header>
+      <table class="t">
+        <thead><tr><th>대상</th><th>항목</th><th class="r">이전</th><th class="r">이후</th></tr></thead>
+        <tbody>
+          <tr class="on"><td>단면 · 요소 36</td><td>두께 t</td><td class="r num dim">2.0 mm</td><td class="r num" style="color:var(--mod)">2.3 mm</td></tr>
+          <tr><td>단면 성질</td><td>A · Ix · Sx</td><td class="r num dim">758 · 4.50 · 45.1</td><td class="r num">872 · 5.18 · 51.8</td></tr>
+          <tr class="grp"><td colspan="4" data-tip="프로그램이 계산한 것">따라 바뀐 것</td></tr>
+          <tr><td class="dim">좌굴 해석</td><td class="dim">상태</td><td class="r dim">일치</td><td class="r" style="color:var(--accent)">다시 실행 중</td></tr>
+          <tr><td class="dim">하중 해석 · 부재 검토 12 · 접합부</td><td class="dim">상태</td><td class="r dim">일치</td><td class="r verdict warn">낡음</td></tr>
+          <tr><td class="dim">확인 표시 3</td><td class="dim">상태</td><td class="r dim">확인</td><td class="r">다시 확인</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="pane pane-detail">
+    <div class="hd">
+      <div class="k"><span class="tag ai">AI</span>변경 · 10:12<span class="sp"></span><span class="rv" data-tip="내가 확인했다는 표시. 사람만 켠다. 이의는 Claude 에게 말한다">확인</span></div>
+      <div class="ttl" data-tip="되돌리려면 Claude 에게 말한다. 되돌리기도 새 변경으로 이 목록에 남는다">두께 t 2.0 → 2.3</div>
+      <div class="say usr" data-tip="Claude Desktop 대화에서 한 말. 원문 그대로 남는다"><span class="faint">나 · 10:10</span> 뒤틀림이 넘으면 두께부터 올려 봐. 랩은 600 까지만.</div>
+    </div>
+
+    <div class="sec">
+      <h4>AI 가 밝힌 이유<span class="sp"></span><span class="eg">예시</span></h4>
+      <dl class="kv">
+        <dt>이유</dt><dd>t 2.0 에서 부모멘트 구간 · 뒤틀림 <span class="verdict ng" style="font-weight:400">1.05 NG</span></dd>
+        <dt>비교</dt><dd>대안 3 · t 2.0 · 2.3 · 2.6 중 가장 얇은 OK</dd>
+        <dt>먼저 한 것</dt><dd>랩 450 → 600 · 10:08 · 1.15 → 1.05</dd>
+      </dl>
+    </div>
+
+    <div class="sec">
+      <h4>바뀐 것</h4>
+      <table class="t">
+        <tbody>
+          <tr><td>두께 t</td><td class="r num dim">2.0</td><td class="r">→</td><td class="r num" style="color:var(--mod)">2.3 mm</td></tr>
+          <tr><td>A</td><td class="r num dim">758</td><td class="r">→</td><td class="r num">872 mm²</td></tr>
+          <tr><td>Ix</td><td class="r num dim">4.50</td><td class="r">→</td><td class="r num">5.18 ×10⁶</td></tr>
+          <tr><td>My</td><td class="r num dim">11.05</td><td class="r">→</td><td class="r num">12.69 kN·m</td></tr>
+          <tr><td>자중</td><td class="r num dim">0.06</td><td class="r">→</td><td class="r num">0.07 kN/m</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>영향</h4>
+      <dl class="kv">
+        <dt>좌굴 해석</dt><dd style="color:var(--accent)">다시 실행 중 · 23/60</dd>
+        <dt>하중 해석</dt><dd><span class="verdict warn" style="font-weight:400">낡음</span> <span class="why">자중 · 처짐 EI</span></dd>
+        <dt>부재 검토</dt><dd><span class="verdict warn" style="font-weight:400">낡음</span> <span class="why">12 항목</span></dd>
+        <dt>접합부</dt><dd><span class="verdict warn" style="font-weight:400">낡음</span> <span class="why">지압 t</span></dd>
+        <dt>다시 확인</dt><dd><span data-tip="다시 돌린 뒤 입력과 판정이 같으면 확인이 되살아난다">3 · 지점 A · B 전단 · A 웹 크리플링</span></dd>
+      </dl>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

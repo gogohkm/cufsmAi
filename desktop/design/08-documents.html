@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>08 계산서 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .pv { min-height: 0; overflow: auto; padding: 10px 16px 16px; }
+  .pv-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .pv-bar .sp { flex: 1; }
+  .thumbs { display: flex; gap: 10px; justify-content: center; margin-bottom: 12px; }
+  .thumb { width: 84px; text-align: center; font-size: 10.5px; color: var(--text-dim); }
+  .thumb .pg-s { height: 100px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg-panel); padding: 8px 7px; margin-bottom: 4px; }
+  .thumb.on .pg-s { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+  .thumb.on { color: var(--text); }
+  .thumb.warn .pg-s { border-color: var(--warn); }
+  .pg-s i { display: block; height: 3px; border-radius: 1px; background: var(--line); margin-bottom: 5px; }
+  .pg-s i.h { height: 5px; width: 60%; background: var(--text-faint); }
+  .pg-s i.s { width: 70%; }
+  .pg-s i.f { height: 22px; background: var(--bg-raise); }
+  .pages { display: flex; gap: 22px; justify-content: center; align-items: flex-start; }
+  .page { position: relative; width: 560px; min-height: 770px; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--line); border-radius: 3px; padding: 18px 20px 14px; box-shadow: 0 4px 18px rgba(0,0,0,.25); }
+  .page h2 { font-size: 13.5px; margin-bottom: 2px; }
+  .page h4 { font-size: 12px; margin: 12px 0 4px; }
+  .page .pmeta { color: var(--text-faint); font-size: 10.5px; margin-bottom: 8px; }
+  .page table.t { font-size: 11px; }
+  .page table.t th, .page table.t td { padding: 3px 6px; }
+  .page table.t th { position: static; }
+  .page .foot { display: flex; justify-content: space-between; margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line-soft); color: var(--text-faint); font-size: 10px; }
+  .page .figs { display: grid; grid-template-columns: 1fr 1.5fr; gap: 10px; }
+  .page .figs .dv { height: 190px; border: 1px solid var(--line-soft); border-radius: 3px; background: var(--bg-view); }
+  .page .cap2 { font-size: 10px; color: var(--text-faint); text-align: center; margin-top: 2px; }
+  .stamp { position: absolute; top: 14px; right: 16px; border: 1.5px dashed var(--warn); color: var(--warn); border-radius: 3px; padding: 1px 7px; font-size: 10.5px; font-weight: 600; }
+  .miss { margin-top: 8px; padding: 3px 8px; border: 1px dashed var(--warn); border-radius: 3px; color: var(--warn); font-size: 11px; }
+  .pane-detail table.t td:first-child .dot { margin-right: 6px; }
+  .publish { display: flex; align-items: center; gap: 12px; }
+</style>
+</head>
+<body>
+
+<!-- 문서 탭에서 계산서를 골랐다. 가운데는 쪽 미리보기, 오른쪽은 발행을 막는 것 -->
+<div id="page" data-tab="doc" data-sel="rpt" data-share="계산서 초안 · 퍼린 P1"
+     data-status="계산서 · 초안 · 퍼린 P1 · 12쪽 · 발행 불가 · 막는 것 5">
+
+  <section class="pane-view">
+    <div class="pv">
+      <div class="pv-bar">
+        <span class="chip on">계산서</span><span class="chip">좌굴 해석 보고서</span><span class="chip">검증표</span><span class="sp"></span>
+        <span class="faint">쪽 3–4 / 12</span><span class="btn ghost">전체 맞춤</span>
+      </div>
+      <div class="thumbs">
+        <div class="thumb"><div class="pg-s"><i class="h"></i><i class="s"></i><i class="s"></i></div>1 표지 · 가정</div>
+        <div class="thumb"><div class="pg-s"><i class="h"></i><i class="f"></i><i></i><i class="s"></i></div>2 단면 · 재료</div>
+        <div class="thumb on"><div class="pg-s"><i class="h"></i><i class="f"></i><i></i><i></i></div>3 좌굴 해석</div>
+        <div class="thumb on"><div class="pg-s"><i class="h"></i><i></i><i></i><i></i><i></i><i></i></div>4 부재 검토표</div>
+        <div class="thumb"><div class="pg-s"><i class="h"></i><i class="f"></i><i></i><i class="s"></i></div>5 하중 해석</div>
+        <div class="thumb"><div class="pg-s"><i class="h"></i><i class="s"></i><i></i><i class="s"></i><i></i></div>6– 계산 단계</div>
+        <div class="thumb warn"><div class="pg-s"><i class="h"></i><i class="f"></i><i class="s"></i></div>11 접합부</div>
+        <div class="thumb"><div class="pg-s"><i class="h"></i><i></i><i class="s"></i></div>12 검토 기록</div>
+      </div>
+
+      <div class="pages">
+        <div class="page">
+          <span class="stamp">초안 — 미검토 1 포함</span>
+          <h2>3. 탄성 좌굴 해석</h2>
+          <div class="pmeta">유한대판법 · S-S · 반파장 10–10000 mm 60점 · cFSM 분류 · 10:14</div>
+          <div class="figs">
+            <div><div class="dv" data-draw="section" data-opt='{"w":240,"h":230,"s":0.95,"mode":"dist","mini":true}'></div><div class="cap2">뒤틀림 모드 · 620 mm</div></div>
+            <div><div class="dv" data-draw="curve" data-opt='{"w":360,"h":230,"sel":"dist","mini":true}'></div><div class="cap2">좌굴 곡선 · 정휨 M+</div></div>
+          </div>
+          <h4>DSM 값 <span class="eg" style="font-weight:400">예시</span></h4>
+          <table class="t">
+            <thead><tr><th>하중</th><th>모드</th><th class="r">탄성 / 항복</th><th class="r">반파장 mm</th><th>식별</th></tr></thead>
+            <tbody>
+              <tr><td>압축 P</td><td>국부 · 뒤틀림 · 전체</td><td class="r num">0.38 · 0.62 · 0.09</td><td class="r num">110 · 540 · 6000</td><td>cFSM</td></tr>
+              <tr><td>정휨 M+</td><td>국부 · 뒤틀림 · 전체</td><td class="r num">1.62 · 0.85 · 0.25</td><td class="r num">130 · 620 · 6000</td><td>cFSM</td></tr>
+              <tr><td>부휨 M−</td><td colspan="4" class="dim">정휨과 같음 · Z 점대칭 · 스프링 없음</td></tr>
+            </tbody>
+          </table>
+          <h4>해석 조건</h4>
+          <table class="t">
+            <tbody>
+              <tr><td>경계조건</td><td>S-S (단순지지)</td><td>고유치 수</td><td class="num">10</td></tr>
+              <tr><td>반파장</td><td class="num">10–10000 mm · 60점</td><td>스프링 · 구속</td><td class="num">0 · 0</td></tr>
+              <tr><td>기준 응력</td><td>정휨 M+ 위 압축 Fy 245</td><td>요소</td><td class="num">36</td></tr>
+            </tbody>
+          </table>
+          <h4>모드 분류 · 정휨 극소</h4>
+          <table class="t">
+            <thead><tr><th>극소</th><th class="r">반파장</th><th class="r">G</th><th class="r">D</th><th class="r">L</th><th class="r">O</th></tr></thead>
+            <tbody>
+              <tr><td>국부</td><td class="r num">130</td><td class="r num">1</td><td class="r num">6</td><td class="r num">91</td><td class="r num">2</td></tr>
+              <tr><td>뒤틀림</td><td class="r num">620</td><td class="r num">3</td><td class="r num">86</td><td class="r num">9</td><td class="r num">2</td></tr>
+            </tbody>
+          </table>          <div class="miss" data-tip="좌굴 해석에 데크 kφ 를 넣지 않았다는 것이 본문에 없다">스프링 0 의 뜻이 본문에 없음</div>
+          <div class="foot"><span>검토자 ‹이름› · 발행일 ‹날짜›</span><span>퍼린 P1 · 발행 차수 없음 · 3</span></div>
+        </div>
+
+        <div class="page">
+          <span class="stamp">초안 — 미검토 1 포함</span>
+          <h2>4. 부재 검토표</h2>
+          <div class="pmeta">AISI S100-16 LRFD · DSM · 조합 7 · 하중 해석 10:33</div>
+          <table class="t">
+            <thead><tr><th>위치 · 한계상태</th><th>판정</th><th class="r">판정비</th><th>조항</th><th>검토</th></tr></thead>
+            <tbody>
+              <tr><td>부모멘트 구간 · 뒤틀림</td><td class="verdict ok">OK</td><td class="r num">0.87</td><td>§F4.1</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>정모멘트 구간 · 뒤틀림</td><td class="verdict ok">OK</td><td class="r num">0.79</td><td>§F4.1</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>지점 B · 휨+웹 크리플링</td><td class="verdict ok">OK</td><td class="r num">0.74</td><td>§H3</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>정모멘트 구간 · 국부</td><td class="verdict ok">OK</td><td class="r num">0.73</td><td>§F3.2</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>지점 A · 웹 크리플링</td><td class="verdict ok">OK</td><td class="r num">0.73</td><td>§G5</td><td><span class="rv done">확인</span></td></tr>
+              <tr><td>부모멘트 구간 · 휨+전단</td><td class="verdict ok">OK</td><td class="r num">0.66</td><td>§H2</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>부모멘트 구간 · 국부</td><td class="verdict ok">OK</td><td class="r num">0.64</td><td>§F3.2</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>부모멘트 구간 · 횡좌굴</td><td class="verdict ok">OK</td><td class="r num">0.64</td><td>§F2.1</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>양압 · 횡좌굴 (R 0.70)</td><td class="verdict ok">OK</td><td class="r num">0.28</td><td>§I6.2.1</td><td><span class="rv">미확인</span></td></tr>
+              <tr><td>지점 B · 전단</td><td class="verdict ok">OK</td><td class="r num">0.23</td><td>§G2</td><td><span class="rv done">확인</span></td></tr>
+              <tr><td>지점 A · 전단</td><td class="verdict ok">OK</td><td class="r num">0.15</td><td>§G2</td><td><span class="rv done">확인</span></td></tr>
+              <tr><td>랩 구간 휨 (2겹)</td><td class="verdict un">미검토</td><td class="r faint">—</td><td class="dim">—</td><td><span class="rv">미확인</span></td></tr>
+            </tbody>
+          </table>
+          <h4>위치별 판정비</h4>
+          <div class="dv" style="height:132px;border:1px solid var(--line-soft);border-radius:3px;background:var(--bg-view)" data-draw="member" data-opt='{"w":520,"rows":["beam","band"],"mini":true}'></div>          <p class="dim" style="margin:8px 0 0;font-size:11px">미검토 사유: 2겹 단면의 유효단면계수 Se 를 엔진이 계산하지 않는다. 11장 접합부의 랩 구간 휨 0.54 는 전단면 Sx 로 대체한 값이다.</p>
+          <div class="foot"><span>검토자 ‹이름› · 발행일 ‹날짜›</span><span>퍼린 P1 · 발행 차수 없음 · 4</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="pane pane-detail">
+    <div class="hd">
+      <div class="k">계산서 · 발행 차수 없음<span class="sp"></span><span class="verdict warn">발행 불가</span></div>
+      <div class="ttl">계산서 — 퍼린 P1</div>
+    </div>
+
+    <div class="sec">
+      <dl class="kv">
+        <dt>상태</dt><dd><span class="tag def">초안</span> <span class="why">10:34 만듦</span></dd>
+        <dt>대상</dt><dd>물류창고 지붕 · 퍼린 P1.csd</dd>
+        <dt>근거</dt><dd>좌굴 10:14 · 하중 10:33 · 검토 10:33 · 접합부 10:15</dd>
+        <dt>기준</dt><dd>AISI S100-16 · LRFD · DSM · SI</dd>
+      </dl>
+    </div>
+
+    <div class="sec">
+      <h4>발행을 막는 것 5<span class="sp"></span><span class="faint" style="font-weight:400" data-tip="NG 없음 · 단면 · 좌굴 · 하중 · 검토 결과가 입력과 일치">통과 4</span></h4>
+      <table class="t">
+        <tbody>
+          <tr data-tip="랩 구간 휨 (2겹) — 유효단면계수 없음"><td><span class="dot un"></span>미검토</td><td class="r num">1</td></tr>
+          <tr data-tip="10:31 적설 S 변경 뒤 다시 돌리지 않았다"><td><span class="dot warn"></span>낡은 결과 · 접합부</td><td class="r">10:15</td></tr>
+          <tr data-tip="랩 패스너의 힘 분배 모델. 답이 없으면 11장이 정해지지 않는다"><td><span class="dot warn"></span>열린 판단 요청</td><td class="r num">1</td></tr>
+          <tr data-tip="확인 표시를 한 검토 수 / 전체"><td><span class="dot warn"></span>검토 기록</td><td class="r">3/12</td></tr>
+          <tr data-tip="A-01 데크 t 0.5 · 체결 300, A-02 랩 힘 분배"><td><span class="dot warn"></span>임시 가정</td><td class="r">A-01 · A-02</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>경고 2</h4>
+      <div data-tip="좌굴 해석에 데크 kφ 를 넣지 않았다는 것이 3장 본문에 없다"><span class="dot warn"></span> 3장 · 스프링 0 의 뜻이 본문에 없음</div>
+      <div data-tip="설계 입력 표의 E 가 입력값이 아닌 고정값으로 찍힌다"><span class="dot warn"></span> 2장 · E 가 고정값 29 500 ksi 로 찍힘</div>
+    </div>
+
+    <div class="sec">
+      <h4>발행본에 묶이는 것<span class="sp"></span><span class="num" style="font-weight:400">→ 발행/R0/</span></h4>
+      <div>계산서 PDF · .csd 사본 · 좌굴 해석 보고서 · 검증표 · 가정 목록 · 검토 기록 요약</div>
+    </div>
+
+    <div class="sec publish">
+      <span class="btn primary off" data-tip="막는 것 5 가 없어지면 켜진다. 발행은 사람만 한다">R0 발행</span>
+      <span class="faint">막는 것 5</span>
+      <span class="sp" style="flex:1"></span>
+      <a data-tip="발행 차수 없이 내보낸다. 모든 쪽에 「초안 — 미검토 1 포함」이 찍힌다">초안으로 내보내기</a>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

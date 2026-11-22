@@ -1,0 +1,21 @@
+{
+  "name": "stcfsd-desktop",
+  "private": true,
+  "version": "0.0.1",
+  "description": "StCFSD 독립 프로그램 — VS Code 없이 확장 호스트(out/extension.js)를 돌리는 호스트",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "node host/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "headless": "node host/dist/headless.js",
+    "test": "npm run typecheck && npm run build && node host/test/smoke.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.3.3"
+  }
+}

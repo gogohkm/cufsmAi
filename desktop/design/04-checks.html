@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>04 부재 검토 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .chkrow { display: flex; align-items: center; gap: 10px; }
+  .chkrow .sp { flex: 1; }
+  .split { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr); min-height: 0; border-top: 1px solid var(--line); }
+  .split > .dv + .dv { border-left: 1px solid var(--line-soft); }
+  @media (max-width: 1100px) { .split { grid-template-columns: minmax(0, 1fr); } .split > .dv + .dv { display: none; } }
+</style>
+</head>
+<body>
+
+<!-- 결과 탭에서 부재 검토 「부모멘트 구간 · 뒤틀림 좌굴」을 골랐다. 위는 위치별 판정비 띠와 M, 아래는 단면과 그 모드. 트리 줄의 우클릭 메뉴를 펼쳐 두었다 -->
+<div id="page" data-tab="result" data-sel="k01" data-close="fsm,load" data-share="부재 검토 「부모멘트 구간 · 뒤틀림 좌굴」 · x = 6.60 m"
+     data-status="부재 검토 · 부모멘트 구간 · 뒤틀림 좌굴 · B 우측 랩 끝 x = 6.60 m · Mu 7.28 / φMnd 8.40 kN·m · 판정비 0.87">
+
+  <section class="pane-view stack s64">
+    <div class="dv" data-draw="member" data-opt='{"w":1230,"rows":["beam","band","M"],"sel":[6.6,8.01],"selLabel":"검토 위치 x = 6.60 m · B 우측 랩 끝"}'>
+      <div class="hud tl">
+        <span class="vsel"><span>단면</span><span class="on">모드 형상</span><span class="on">좌굴 곡선</span><span class="on">부재</span><span class="on">판정비</span></span>
+        <span class="chip on">M</span><span class="chip">V</span><span class="chip">처짐</span>
+      </div>
+      <div class="hud tr"><span class="btn ghost">선택에 맞춤</span><span class="btn ghost">전체 맞춤</span></div>
+      <div class="hud bl">
+        <div class="legend" data-tip="위치마다 가장 큰 판정비. 빗금은 미검토이고 합격이 아니다">
+          <i style="background:var(--r1)"></i><span>&lt;0.50</span><i style="background:var(--r2)"></i><span>0.75</span><i style="background:var(--r3)"></i><span>0.90</span>
+          <i style="background:var(--r4)"></i><span>1.00</span><i style="background:var(--r5)"></i><span>1.25</span><i style="background:var(--r6)"></i><span>NG</span><i class="un"></i><span>미검토</span>
+        </div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="dv" data-draw="section" data-opt='{"w":520,"h":420,"s":1.45,"cx":250,"cy":214,"mode":"dist","rot180":true}'>
+        <div class="hud tl"><span class="cap">부휨 M− · 아래 플랜지 압축</span><span class="chip mode on">뒤틀림</span><span class="chip">국부</span><span class="chip">전체</span></div>
+        <div class="hud tr"><span class="chip">3D</span></div>
+        <div class="hud bl"><span class="cap" data-tip="Z 는 점대칭이라 부휨 모드는 정휨 모드를 180° 돌린 것">회색 = 변형 전 · 배율 임의</span></div>
+      </div>
+      <div class="dv" data-draw="curve" data-opt='{"w":700,"h":420,"sel":"dist"}'>
+        <div class="hud tr"><span class="vsel"><span>P</span><span>M+</span><span class="on">M−</span></span></div>
+      </div>
+    </div>
+  </section>
+
+  <i class="ctx-at" data-menu="ls" data-row="k01" data-dx="196" data-dy="18"></i>
+
+  <aside class="pane pane-detail">
+    <div class="hd">
+      <div class="k">부재 검토 · B 우측 랩 끝 · 조합 2<span class="sp"></span><span class="eg">예시</span></div>
+      <div class="ttl">부모멘트 구간 · 뒤틀림 좌굴</div>
+      <div><span class="verdict ok">OK</span> <span class="big">0.87</span> <span class="dim">Mu 7.28 / φMnd 8.40 kN·m · §F4.1</span></div>
+      <div class="gauge"><i style="width:87%;background:var(--r3)"></i></div>
+      <div class="gauge-k"><span>0</span><span>0.75</span><span>1.0</span></div>
+    </div>
+
+    <div class="sec">
+      <h4 data-tip="이 판정에 쓴 값과 그 값이 어디서 왔는지">설계 가정</h4>
+      <table class="t">
+        <tbody>
+          <tr><td>검토 위치</td><td class="r num">x 6.60 m</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">랩 끝 · 2겹이 끝나는 곳</span></td></tr>
+          <tr><td>Mu</td><td class="r num">7.28 kN·m</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">조합 2</span></td></tr>
+          <tr><td>Mcrd / My</td><td class="r num">0.85</td><td class="src"><span class="tag drv">좌굴 해석</span><span class="why">620 mm · cFSM 분류</span></td></tr>
+          <tr><td>My</td><td class="r num">12.69 kN·m</td><td class="src"><span class="tag sec">단면</span></td></tr>
+          <tr><td>압축 플랜지 kφ</td><td class="r num">0</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">아래 플랜지 · 데크 없음</span></td></tr>
+          <tr><td>β 모멘트 구배</td><td class="r num">1.00</td><td class="src"><span class="tag def" data-tip="Lm · M1/M2 가 비어 있어 보정하지 않았다. 안전측">기본값</span><span class="why">Lm · M1/M2 빈칸</span></td></tr>
+          <tr><td>Lb · Cb</td><td class="r num">2.01 m · 1.94</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">변곡점–지점 구간</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>한계상태 · 이 위치<span class="sp"></span><a href="05-sheet.html" data-tip="Enter">계산 시트 →</a></h4>
+      <table class="t">
+        <thead><tr><th></th><th class="r">소요 / 설계강도</th><th class="r">판정비</th></tr></thead>
+        <tbody>
+          <tr class="on"><td><span class="dot ok"></span> 뒤틀림 <span class="faint">§F4.1</span></td><td class="r num">7.28 / 8.40</td><td class="r num">0.87</td></tr>
+          <tr><td><span class="dot ok"></span> 휨+전단 <span class="faint">§H2</span></td><td class="r num faint">M 0.64 · V 0.15</td><td class="r num">0.66</td></tr>
+          <tr><td><span class="dot ok"></span> 국부 <span class="faint">§F3.2</span></td><td class="r num">7.28 / 11.33</td><td class="r num">0.64</td></tr>
+          <tr><td><span class="dot ok"></span> 횡좌굴 <span class="faint">§F2.1</span></td><td class="r num">7.28 / 11.42</td><td class="r num">0.64</td></tr>
+          <tr><td><span class="dot un"></span> 랩 구간 휨 <span class="faint">2겹</span></td><td class="r faint" data-tip="2겹 단면의 유효단면계수가 없다">유효단면계수 없음</td><td class="r verdict un" style="font-weight:400">미검토</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>같이 볼 것</h4>
+      <dl class="kv">
+        <dt>대칭</dt><dd>C 좌측 랩 끝 x 11.40 m · 0.87</dd>
+        <dt>대안</dt><dd>t 2.0 이면 <span class="verdict ng" style="font-weight:400">1.05 NG</span> · t 2.6 이면 0.73</dd>
+        <dt>접합부</dt><dd><a href="06-connection.html">랩 P1-B</a> <span class="verdict warn" style="font-weight:400">낡음</span></dd>
+      </dl>
+    </div>
+
+    <div class="sec chkrow">
+      <span class="chk" data-tip="내가 확인했다는 표시. 사람만 켠다. 입력이나 결과가 바뀌면 다시 꺼진다. 이의는 Claude 에게 말한다">확인 표시</span><span class="faint">Space</span>
+      <span class="sp"></span><span class="faint">확인 3/12</span>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

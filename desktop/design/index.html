@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StCFSD 독립 프로그램 — 화면 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .wire2 { grid-template-rows: 24px 22px 200px 20px; }
+  .wire2 .w-body { grid-template-columns: 190px 1fr 210px; }
+</style>
+</head>
+<body>
+<main class="guide">
+
+  <h1>StCFSD 독립 프로그램</h1>
+  <p class="dim">화면 템플릿 10장 · 2026-11-22 · 정적 화면이고 동작은 없다 · 수치는 모두 예시 · 틀은 StAnal 템플릿을 따랐다</p>
+
+  <h2>세 가지 약속</h2>
+  <table class="t">
+    <tr><td style="width:26%"><b>왼쪽은 트리</b></td><td>탭 4개(업무 · 모델 · 결과 · 문서). 한 줄에 이름과, 오른쪽 끝에 개수 · 값 · 상태. 고르면 가운데와 오른쪽이 따라온다.</td></tr>
+    <tr><td><b>오른쪽은 읽는 곳</b></td><td>고른 것의 값 · 출처 · 근거 · 영향만 보인다. 답 · 수정 · 요청은 Claude Desktop 대화창에 말로 한다. 아래 한 줄 「Claude 가 보는 선택」.</td></tr>
+    <tr><td><b>설명은 풍선 도움말</b></td><td>화면에 안내 문장을 쓰지 않는다. 마우스를 올리면 뜬다.</td></tr>
+  </table>
+  <p class="dim">단추는 사람만 하는 일뿐이다: 확인 표시, 발행, 편집 상태(F2), Claude 「연결」.</p>
+
+  <h2>화면</h2>
+  <div class="grid">
+    <a href="00-start.html"><img src="shots/00-start.png" alt="" loading="lazy"><b>00 시작</b><span>최근 검토 · 새 검토 · Claude 「연결」 세 단계</span></a>
+    <a href="01-section.html"><img src="shots/01-section.png" alt="" loading="lazy"><b>01 모델 — 단면</b><span>치수 · 절점 · 요소가 겹친 단면 보기, 절점 · 요소 표</span></a>
+    <a href="02-buckling.html"><img src="shots/02-buckling.png" alt="" loading="lazy"><b>02 결과 — 좌굴 해석</b><span>뒤틀림 모드 형상 위, 좌굴 곡선 아래</span></a>
+    <a href="03-loads.html"><img src="shots/03-loads.png" alt="" loading="lazy"><b>03 결과 — 하중 해석</b><span>3연속 보 · M · V · 처짐 · 랩 끝 · 비지지 길이, 위치별 표</span></a>
+    <a href="04-checks.html"><img src="shots/04-checks.png" alt="" loading="lazy"><b>04 결과 — 부재 검토</b><span>판정비 띠 · 단면 모드 · 좌굴 곡선, 설계 가정과 출처, 트리 우클릭 메뉴</span></a>
+    <a href="05-sheet.html"><img src="shots/05-sheet.png" alt="" loading="lazy"><b>05 계산 시트</b><span>식 번호 · 대입 · 결과 · 「미검토 — 까닭」</span></a>
+    <a href="06-connection.html"><img src="shots/06-connection.png" alt="" loading="lazy"><b>06 결과 — 접합부</b><span>랩 측면도 · Cut A-A · 패스너 배치, 자체 가정 알림</span></a>
+    <a href="07-work.html"><img src="shots/07-work.png" alt="" loading="lazy"><b>07 업무 — 변경</b><span>AI 작업 중. t 2.0 → 2.3 과 그 영향</span></a>
+    <a href="08-documents.html"><img src="shots/08-documents.png" alt="" loading="lazy"><b>08 문서 — 계산서</b><span>쪽 미리보기와 발행을 막는 것</span></a>
+    <a href="09-edit.html"><img src="shots/09-edit.png" alt="" loading="lazy"><b>09 편집 상태</b><span>지금의 6탭 입력 화면을 그 자리에, 「이번 편집 — 바뀐 것 3」</span></a>
+    <a href="04-checks.html"><img src="shots/04-checks-960.png" alt="" loading="lazy" style="object-fit:contain;background:var(--bg-view)"><b>04 좁은 창 (960 px)</b><span>트리가 접히고 보기와 정보만 남는다</span></a>
+  </div>
+
+  <h2>창의 틀</h2>
+  <div class="wire2">
+    <div>제목 표시줄 — StCFSD · 프로젝트 ▾ · 검토 대상 ▾ · 단면 ● → 좌굴 ● → 하중 ● → 검토 ● → 접합부 ◐ → 점검 ● &nbsp;|&nbsp; 찾기 · AI 따라가기 · 편집 F2 · Claude 연결</div>
+    <div>(AI 작업 중일 때만) AI 띠 · (편집 상태일 때만) 이번 편집 띠</div>
+    <div class="w-body">
+      <div>업무 | 모델 | 결과 | 문서<br><span class="faint">트리</span></div>
+      <div class="w-3d">보기<br><span class="faint">단면 · 모드 형상 · 좌굴 곡선 · 부재 · 판정비 · 접합 도면 중 둘을 위아래로<br>아래: 표</span></div>
+      <div>정보<br><span class="faint">아래 한 줄: Claude 가 보는 선택</span></div>
+    </div>
+    <div>상태 표시줄 — 고른 것 · AISI S100-16 · LRFD · SI · AI 대기</div>
+  </div>
+
+  <h2>진행 띠</h2>
+  <table class="t">
+    <tr><td style="width:26%"><span class="pipe"><span class="ps ok"><i></i><em>일치</em></span></span></td><td>결과가 지금 입력과 맞는다.</td></tr>
+    <tr><td><span class="pipe"><span class="ps stale"><i></i><em>낡음</em></span></span></td><td>입력이 바뀐 뒤 다시 돌리지 않았다. 값은 같을 수 있다.</td></tr>
+    <tr><td><span class="pipe"><span class="ps none"><i></i><em>실행 안 함</em></span></span></td><td>결과가 없다.</td></tr>
+    <tr><td><span class="pipe"><span class="ps run"><i></i><em>실행 중</em></span></span></td><td>AI 가 다시 돌리는 중.</td></tr>
+  </table>
+  <p class="dim">길잡이가 아니라 상태 표시다. 순서를 막지 않는다. 누르면 트리의 그 가지를 고른다.</p>
+
+  <h2>우클릭 메뉴</h2>
+  <table class="t">
+    <thead><tr><th style="width:26%">어디서</th><th>메뉴에 있는 것</th></tr></thead>
+    <tbody>
+      <tr><td>트리 · 한계상태</td><td>보기에서 찾기, 이 위치만 보기, 계산 시트 열기 (Enter), 표에서 보기, 확인 표시 (Space), 이름 복사</td></tr>
+      <tr><td>트리 · 모델 값</td><td>출처 보기, 표에서 보기, 복사</td></tr>
+      <tr><td>보기의 빈 곳</td><td>전체 맞춤, 표시 항목, 그림 복사</td></tr>
+      <tr><td>표의 줄</td><td>보기에서 찾기, 행 복사, CSV</td></tr>
+    </tbody>
+  </table>
+  <p class="dim">보는 일과 확인 표시만 있다. 값 바꾸기 · 다시 실행 · 대안 만들기는 Claude 에게 말로 한다. 펼친 모습: <a href="01-section.html">01</a> · <a href="03-loads.html">03</a> · <a href="04-checks.html">04</a></p>
+
+  <h2>표시</h2>
+  <table class="t">
+    <tr><td style="width:26%"><span class="eg">예시</span></td><td>지어낸 수치. 이 템플릿의 수치는 모두 예시다.</td></tr>
+    <tr><td><span class="tag def">기본값</span></td><td>입력 기본값이 그대로 쓰였다. 아무도 정하지 않았다.</td></tr>
+    <tr><td><span class="tag ai">AI</span> <span class="tag usr">사용자</span></td><td>AI 가 정했다 · 사람이 정했다.</td></tr>
+    <tr><td><span class="tag drv">하중 해석</span> <span class="tag drv">좌굴 해석</span></td><td>다른 결과에서 자동으로 나왔다. 옆에 까닭 (예: 변곡점–지점 구간).</td></tr>
+    <tr><td><span class="tag sec">단면</span></td><td>단면 성질에서 나왔다.</td></tr>
+    <tr><td><span class="tag def">자체 가정</span></td><td>기준 조항이 아닌 자체 해석. 판단 요청에 걸려 있다.</td></tr>
+    <tr><td><span class="rv">미확인</span> &nbsp; <span class="rv done">확인</span></td><td>사람의 검토 표시.</td></tr>
+  </table>
+
+  <p style="margin-top:22px" class="dim">설명은 <code>README.md</code>. 지금 GUI 의 전수 조사는 <code>docs/reviews/20261122-desktop-survey/G2-stcfsd-gui-inventory.md</code>.</p>
+
+</main>
+<script src="assets/shell.js"></script>
+</body>
+</html>

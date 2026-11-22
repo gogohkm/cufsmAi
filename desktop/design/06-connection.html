@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>06 접합부 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+</head>
+<body>
+
+<!-- 결과 탭에서 접합부 검토 · 랩 P1-B 를 골랐다. 가운데는 랩 도면(측면도 · Cut A-A · 패스너 배치), 오른쪽은 판정과 그 근거 -->
+<div id="page" data-tab="result" data-sel="cn1" data-close="fsm,load,chk" data-share="접합부 검토 「랩 P1-B」 · 패스너"
+     data-status="접합부 검토 · 랩 P1-B · 지점 B · M12 × 2 · 패스너 0.83 (자체 가정) · 랩 구간 휨 0.54 (Sx 대체) · 10:15 실행 · 입력보다 오래됨">
+
+  <section class="pane-view">
+    <div class="dv" data-draw="lap" data-opt='{"w":1200,"h":880}'>
+      <div class="hud tl">
+        <span class="vsel"><span>단면</span><span>부재</span><span class="on">접합 도면</span><span>판정비</span></span>
+        <span class="chip on">치수</span><span class="chip on" data-tip="랩 끝 볼트에 거는 힘. 자체 가정의 힘 분배">힘</span><span class="chip">데크</span>
+      </div>
+      <div class="hud tr"><span class="chip on">랩 P1-B ▾</span><span class="btn ghost">전체 맞춤</span></div>
+    </div>
+  </section>
+
+  <aside class="pane pane-detail">
+    <div class="hd">
+      <div class="k"><span class="tag ai">AI</span>접합부 검토 · 10:15<span class="sp"></span><span class="verdict warn" data-tip="10:31 적설 S 0.7 → 0.5 뒤에 다시 돌리지 않았다. 지배 조합은 그대로라 값은 같을 수 있다">● 낡음</span></div>
+      <div class="ttl">랩 P1-B <span class="faint" style="font-weight:400">지점 B · 600 | 600</span></div>
+      <div><span class="verdict ok">OK</span> <span class="big">0.83</span> <span class="dim">패스너 지압 · 웨브 t 2.3 · M12</span></div>
+    </div>
+
+    <a class="notice" href="06-connection.html" style="display:block;color:var(--text)" data-tip="판단 요청 「랩 패스너의 힘 분배 모델」로 간다. 답은 Claude Desktop 에서 말로 한다">
+      <b>힘 분배는 기준 조항이 아닌 자체 해석 (A1.2(c))</b>
+      <span class="dim">판단 요청 「랩 패스너의 힘 분배 모델」 · 답 기다림 →</span>
+    </a>
+
+    <div class="sec">
+      <h4>판정<span class="sp"></span><span class="eg">예시</span></h4>
+      <table class="t">
+        <tbody>
+          <tr><td>패스너 DCR</td><td class="r num">0.83</td><td class="src"><span class="tag def">자체 가정</span><span class="why">랩 끝 짝힘</span></td></tr>
+          <tr><td>랩 구간 휨 DCR</td><td class="r num">0.54</td><td class="src"><span class="tag def" data-tip="2겹 단면의 Se 가 없어 전단면 Sx 로 바꿔 계산했다. 부재 검토에서는 같은 항목이 미검토다">기본값</span><span class="why">Se 없음 → Sx 대체</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>한계상태 · 패스너</h4>
+      <table class="t">
+        <thead><tr><th></th><th class="r">소요 / 설계강도 kN</th><th class="r">판정비</th></tr></thead>
+        <tbody>
+          <tr class="on"><td><span class="dot ok"></span> 지압 · 웨브 <span class="faint">§J3.3.1</span></td><td class="r num">16.5 / 19.9</td><td class="r num">0.83</td></tr>
+          <tr><td><span class="dot ok"></span> 단부 전단 e 36 <span class="faint">§J3.2</span></td><td class="r num">16.5 / 23.2</td><td class="r num">0.71</td></tr>
+          <tr><td><span class="dot ok"></span> 볼트 전단 <span class="faint">§J3.4</span></td><td class="r num">16.5 / 26.9</td><td class="r num">0.61</td></tr>
+          <tr><td><span class="dot ok"></span> 랩 길이 ≥ 1.5d</td><td class="r num">600 ≥ 300 mm</td><td class="r verdict ok" style="font-weight:400">OK</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="sec">
+      <h4>입력과 출처</h4>
+      <table class="t">
+        <tbody>
+          <tr><td>랩 길이</td><td class="r num">600 | 600</td><td class="src"><span class="tag ai">AI</span><span class="why">450 → 600 · 10:08</span></td></tr>
+          <tr><td>지점 Mu · Vu</td><td class="r num">12.20 · 11.15</td><td class="src"><span class="tag drv">하중 해석</span><span class="why">지점 B · 조합 2</span></td></tr>
+          <tr><td>볼트 · 열</td><td class="r num">M12 · 2</td><td class="src"><span class="tag ai">AI</span></td></tr>
+          <tr><td>단부 거리 e</td><td class="r num">36</td><td class="src"><span class="tag ai">AI</span></td></tr>
+          <tr><td>Mnd · Vn</td><td class="r num">9.33 · 50.0</td><td class="src"><span class="tag drv">부재 검토</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </aside>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>
