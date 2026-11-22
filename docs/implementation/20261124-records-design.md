@@ -705,3 +705,42 @@
 - Electron 의 `before-input-event` 로 「사람 입력 직후에만 열쇠」를 걸 때 키보드 단축키(Space) · 메뉴 · 접근성 도구의 입력이 모두 잡히는가 — R1-3 의 창 시험에서 본다.
 - OneDrive 온디맨드 파일의 수정 시각 · 해시 동작, SMB 에서 `wx` 가 지켜지는가 — 이 PC 에서는 볼 수 없다.
 - 사무소의 계산서 관행(차수 R0 / R1, 검토자 · 승인자 두 칸인가) — D3 · D14.
+
+---
+
+## 10. 구현 기록
+
+### 10.1 2026-11-24 — R1-1 · R2-1 · R3-1(순수 모듈만, 아무 데서도 부르지 않는다)
+
+결정: 7절의 14가지 모두 권장대로(오케스트레이터, 커밋 `67268c2`). F3 은 다른 담당이 고친다 — 파이썬 서버가 `selftest.engine_id`(엔진 소스의 sha256)를 내고 호스트가 `.csd` 의 `resultsEngine` 에 적는다. **기록은 그 값을 받아 쓴다**(TypeScript 에서 두 번째 해시를 만들지 않는다).
+
+파일: `src/records/` — `canonical.ts` · `fp.ts` · `names.ts` · `fsx.ts` · `writer.ts` · `log.ts` · `project.ts`(R1-1), `differ.ts` · `changeText.ts` · `changes.ts`(R2-1), `refs.ts` · `work.ts` · `assumptions.ts` · `sources.ts`(R3-1), `index.ts`. 시험 `test/records/`(`npm run test:records` — `package.json` 에 한 줄).
+
+쓰면서 설계에서 바꾼 것:
+
+- **`engineId` 는 입력이다** — `fp.normalizeEngineId(selftest.engine_id)` 가 꼴(`sha256:<hex>`)만 맞춘다. 2.3 절 표의 「`python/**/*.py` 의 목록」은 파이썬 쪽의 일이 됐다.
+- **`seen.json` 하나 → 줄 파일마다 하나**(`<열쇠 자리>/seen/<projectId>.<종류>.<줄 파일>.json`). 두 프로세스가 같은 작성자로 쓰는 시험에서 한 파일을 둘이 바꿔 쓰다 Windows 의 rename 이 `EPERM` 으로 실패했다(실제로 봄). 줄 파일은 한 프로세스만 쥐므로 그 표지도 한 프로세스만 쓴다. 덧붙여 바꿔 쓰기(`writeAtomic`)는 rename 의 `EPERM · EBUSY · EACCES` 에 몇 번 기다렸다 다시 한다(읽는 쪽이 잠깐 열고 있는 경우).
+- **열쇠를 읽을 수 없으면 새로 만들지 않는다**(`KeyUnavailableError` — 깨짐 · Ed25519 가 아님 · 폴더 · 링크 · 16 KB 넘음). 다른 올바른 열쇠로 바뀌었으면 새 작성자가 되고, 옛 작성자의 줄은 `trust.json` 에 남은 옛 공개 열쇠로 계속 검증된다. `setTrust` 는 `self` 를 지우지 않는다.
+- 다른 PC 의 `.owner` 는 지우지 않는다(다음 이름의 줄 파일로). 「같은 PC · 죽은 pid」 일 때만 넘겨받는다.
+- 업무 · 가정 · 원자료 줄의 겉모양 `id` = 항목 id(`Q-3` · `A-01` · `S-1`), 몸의 `item` 도 같은 값(읽을 때 맞춘다).
+- 두 작성자가 같은 항목 id 를 만들면 뒤의 것은 `Q-3~<작성자 앞 4자>` 로 접힌다(업무 · 가정) — 그 작성자의 뒤 사건은 자기 것에 붙는다.
+- 모르는 사건 · 높은 주 판의 줄도 **사슬에는 든다**(겉모양이 맞으면). 그래야 판이 섞인 파일에서 거짓 「사슬 끊김」이 나지 않는다.
+- 자동 가정의 열쇠: 기본값 `default:<표의 group>`, 엔진 `engine:<결과 종류>:<부호 또는 h+글 해시 12자>`(K4b 의 부호가 오면 그것).
+- 이름 규칙에 더한 것: 앞의 공백, 글 방향 제어 문자, UTF-8 180 바이트, 프로그램의 이름(선언 · 폴더 넷 — 대소문자 · NFD 무시). 선언 파일 앞의 BOM 은 받아들인다.
+- 제목의 수: 유효숫자 6 자리에서 끝의 0 을 지운다 — 템플릿의 「2.0 → 2.3」은 「2 → 2.3 mm」로 나온다(값은 기록에 그대로).
+- 묶음 끊기(`ChangeBatcher`): 다른 행위자의 행동이 끼면 지금 묶음을 닫고, 편집 상태가 이어지면 그 뒤에 새 묶음을 연다(템플릿 09 의 「이번 편집」 하나가 AI 의 끼어듦으로 둘로 나뉠 수 있다 — AI 의 몫이 사람 묶음에 섞이지 않게).
+
+호스트가 함께 쓸 수 있는 규칙(지금은 기록만 쓴다): `names.segmentError` 는 `StcfsdPanel._projectPathError` 의 이름 규칙(점으로 시작 · 점 / 공백으로 끝 · `:`)과 같은 뜻에 **장치 이름(CON · NUL · COM1 …, 확장자가 붙어도)** 을 더했다 — 지금 `save_project` 의 경로 검사는 장치 이름을 보지 않는다(`C:\임시\NUL.json` 같은 경로). 호스트가 그 이름 검사를 이것으로 바꿀지는 오케스트레이터가 정한다.
+
+R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 — 지금 줄 번호는 움직인다):
+
+| 자리 | 하는 일 |
+|---|---|
+| `src/mcp/bridge.ts` 의 `POST /action` 에서 `panel.handleMcpAction(body)` 를 부르는 곳 | `AsyncLocalStorage.run({kind: 'ai'|'screen', client, requestId, reason, work, source}, …)` — `screen` 은 다리의 중계가 싣는 프로세스 안 비밀 머리가 맞을 때만. 머리 `X-StCFSD-Reason` · `-Work` · `-Source` 는 `names.cleanHeaderText` 로 |
+| `StcfsdPanel.handleMcpAction(options)` 의 처음과 끝 | `ChangeBatcher.run(ctx, …)`(요청 하나 = 묶음 하나), 모르는 동작을 `records.ai` 로 |
+| `_handleMessage(message)` 의 `caseEdit` 와 편집 상태의 시작 · 끝 신호(U4) | `touch` · `sessionStart` · `sessionEnd` · `sessionDiscard` |
+| 결과를 받는 자리 — `_setAnalysisResult`(해석 · 서명곡선), `_ledgerClear('member_design' | 'load_analysis' | 'connection' | 'design_dsm' | 'lap')` 가 있는 다섯 곳, `handleMcpAction` 의 `vibration` · `plastic` | `records.onRun(kind, requestText, result)` — 요청 바이트 · 결과 지문 · `selftest.engine_id` |
+| `_writeProjectFile` 의 쓰기 앞 · 뒤 | 앞: 프로젝트에서만 지금 파일의 sha256 을 열 때 · 마지막 저장과 대조(다르면 쓰지 않는다). 뒤: `saved` 줄 · 스냅숏 · 색인 |
+| `_loadProjectFile` 의 성공 뒤 | `findProjectFor` → `opened` · `discovered` · `external` 줄, 잠금, 발행본이면 읽기 전용 |
+| `getStatus()` · `get_full_state` | `project` 요약(덧붙이기만) |
+| `PythonBridge.selftest` | `engine_id` 를 `normalizeEngineId` 로 |
