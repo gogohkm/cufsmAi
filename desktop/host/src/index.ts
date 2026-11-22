@@ -13,5 +13,5 @@ export {
 } from './bridge';
 export type {
   StartBridgeOptions, BridgeHandle, BridgePlatform, BridgePlatformOptions, PendingQuestion, BridgeClaudeOptions,
-  ClaudeStatus, BridgeEvent, ThemeName,
+  ClaudeStatus, ClaudeActionResult, ClaudeUiState, BridgeEvent, ThemeName,
 } from './bridge';

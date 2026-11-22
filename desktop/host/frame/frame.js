@@ -50,10 +50,16 @@
     ((s.platform && s.platform.progress) || []).forEach(function (p) { progress[p.id] = p; });
     renderProgress();
   }
+  var baseTitle = 'StCFSD';
   function setFile(file, name) {
     $('file-name').textContent = name || '새 단면';
     $('file-name').title = file || '';
-    document.title = (name ? name + ' — ' : '') + 'StCFSD';
+    baseTitle = (name ? name + ' — ' : '') + 'StCFSD';
+    renderTitle();
+  }
+  /** 물음이 떠 있으면 제목 앞에 표시 — 껍데기(S3)는 창을 앞으로 꺼내지 않고 이것과 작업 표시줄 깜빡임으로만 알린다 */
+  function renderTitle() {
+    document.title = (current ? '● 응답 필요 — ' : '') + baseTitle;
   }
   function renderProgress() {
     var list = Object.keys(progress).map(function (k) { return progress[k]; });
@@ -99,11 +105,13 @@
   function close(qid) {
     queue = queue.filter(function (x) { return x.qid !== qid; });
     if (current && current.qid === qid) { current = null; $('dialog-host').innerHTML = ''; $('dialog-host').classList.remove('open'); next(); }
+    renderTitle();
   }
   function next() {
     if (current || !queue.length) { return; }
     current = queue.shift();
     render(current);
+    renderTitle();
   }
   function answer(q, value, errBox) {
     post('/api/platform/answer', { qid: q.qid, answer: value }).then(function (r) {
@@ -191,17 +199,44 @@
     host.classList.add('open');
   }
 
-  // ── Claude 연결 상태 ──────────────────────────────────────────────
-  function refreshClaude() {
-    fetch('/api/claude/status', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (r) {
-      var s = r && r.data;
-      if (!s) { return; }
-      var e = $('claude-status');
-      e.textContent = s.text;
-      e.classList.toggle('connected', !!s.lastAiCall);
-      e.title = (s.configPath ? '설정: ' + s.configPath + '\n' : '') + 'AI 호출 ' + s.aiCalls + '번';
-    }).catch(function () { /* 다음에 */ });
+  // ── Claude 연결 상태 · 「연결」 · 「끊기」(S4) ─────────────────────────
+  // 쓰기는 사용자가 단추를 누를 때만. 안내 문장 대신 풍선 도움말(title)로 알린다.
+  var claudeBusy = false;
+  function renderClaude(s) {
+    if (!s) { return; }
+    var e = $('claude-status');
+    e.textContent = s.text;
+    e.title = s.tooltip || '';
+    e.classList.toggle('connected', s.ui === 'connected');
+    e.classList.toggle('warn', s.ui === 'restart-needed' || s.ui === 'registered-elsewhere' || s.ui === 'invalid-config');
+    var b = $('claude-action');
+    if (s.canDisconnect) {
+      b.hidden = false; b.disabled = claudeBusy; b.textContent = '끊기'; b.dataset.op = 'disconnect';
+      b.title = 'Claude Desktop 설정에서 이 프로그램의 항목만 지웁니다';
+    } else if (s.canConnect || s.ui === 'not-installed' || s.ui === 'invalid-config') {
+      b.hidden = false; b.disabled = claudeBusy || !s.canConnect; b.textContent = '연결'; b.dataset.op = 'connect';
+      b.title = s.canConnect ? 'Claude Desktop 설정에 이 프로그램을 등록합니다(다른 항목은 그대로, 쓰기 전에 백업)' : (s.tooltip || '');
+    } else {
+      b.hidden = true;
+    }
   }
+  function refreshClaude() {
+    fetch('/api/claude/status', { credentials: 'same-origin' }).then(function (r) { return r.json(); })
+      .then(function (r) { renderClaude(r && r.data); }).catch(function () { /* 다음에 */ });
+  }
+  $('claude-action').addEventListener('click', function () {
+    var op = this.dataset.op;
+    if (!op || claudeBusy) { return; }
+    claudeBusy = true;
+    this.disabled = true;
+    post('/api/claude/' + op, {}).then(function (r) {
+      claudeBusy = false;
+      var d = r && r.data;
+      if (!d) { toast({ severity: 'error', message: (r && r.error) || 'Claude 연결을 바꾸지 못했다' }); refreshClaude(); return; }
+      toast({ severity: d.result.ok ? 'info' : 'error', message: d.result.message });
+      renderClaude(d.status);
+    }).catch(function (err) { claudeBusy = false; toast({ severity: 'error', message: String(err) }); refreshClaude(); });
+  });
   refreshClaude();
   setInterval(refreshClaude, 10000);
 
@@ -226,6 +261,7 @@
         break;
       case 'webview:disposed': hideSide(d.id); break;
       case 'file:current': setFile(d.file, d.name); break;
+      case 'claude:status': renderClaude(d); break;
       default: break;
     }
   };

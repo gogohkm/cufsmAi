@@ -1,4 +1,4 @@
-# 화면 다리(S2) — API
+# 화면 다리(S2 · S4) — API
 
 2026-11-22 · `desktop/host/src/bridge/` · CLI `src/serve.ts` · 시험 `test/bridge.mjs`
 
@@ -41,7 +41,8 @@
 | `POST /api/platform/answer` | `{qid, answer}` — 4절. 형식이 틀리면 400 과 까닭 |
 | `POST /api/webviews/<id>/close` | 웹뷰 닫기(좌굴 보고서 칸의 ✕). 설계 패널은 고정이라 숨김이 될 뿐 없어지지 않는다(S1) |
 | `GET·POST /api/mcp/<경로>` | 호스트 MCP 다리로 중계(`/status` · `/action` · `/last-call`). 다리가 MCP 토큰을 붙인다 — 화면에는 그 토큰이 가지 않는다. 화면의 머리(쿠키 · Origin)는 넘기지 않고, AI 호출 표시 `X-StCFSD-Request-Id` 도 붙이지 않는다(이 조회는 「마지막 호출」로 세지 않는다) |
-| `GET /api/claude/status` | `{state, configPath, configKind, configExists, configError?, otherServers, lastAiCall, aiCalls, text}` — K1 `checkClaudeDesktop`(설정을 **읽기만**) + MCP `GET /last-call`. `text` = 제목 표시줄의 한 줄. 「연결」 · 「끊기」는 S4 |
+| `GET /api/claude/status` | `{state, ui, configPath, configKind, configExists, configError?, otherServers, lastAiCall, aiCalls, canConnect, canDisconnect, restartNeeded, text, tooltip}` — K1 `checkClaudeDesktop`(설정을 읽기만) + MCP `GET /last-call`. `ui` = `connected · registered · restart-needed · not-registered · registered-elsewhere · not-installed · invalid-config · unknown`, `text` = 제목 표시줄의 한 줄 |
+| `POST /api/claude/connect` · `POST /api/claude/disconnect` | **S4** — 본문 `{}`(JSON 이어야 한다). `{result: {ok, action, reason?, error?, wrote, backupPath?, restartRequired, message}, status}`. K1 `connectClaudeDesktop` · `disconnectClaudeDesktop` 이 쓴다(9절). 화면의 세션(쿠키 · 다리 토큰)으로만 — AI 는 호스트의 MCP 다리에 붙고 거기에는 이 경로가 없다. `/api/mcp/*` 중계도 MCP 다리로만 간다(시험: 중계 · MCP 다리 직접 모두 `Unknown endpoint`) |
 
 ### 틀의 이벤트(`/api/events` 의 `type`)
 
@@ -55,6 +56,7 @@
 | `webview:created` · `webview:disposed` · `webview:html` | `{id, viewType, title?, url?}` — 좌굴 보고서 칸을 열고 닫고 다시 읽는다 |
 | `webview:client` · `webview:ready` · `webview:refused` | 페이지가 붙음 · 다시 보내기 끝 `{replayed}` · 고정 패널 닫기를 숨김으로 바꿈 |
 | `file:current` | `{file, name}` — 열기 · 저장이 성공한 `.csd` |
+| `claude:status` | `GET /api/claude/status` 와 같은 것 — 「연결」 · 「끊기」 뒤 |
 
 ## 3. 웹뷰 HTML 고쳐 쓰기(`inject.ts`)
 
@@ -78,7 +80,8 @@
 
 - 시간 제한 없음(VS Code 와 같다). 틀이 하나도 안 붙어 있으면 headless 처럼 곧바로 취소. 물음 뒤 틀이 모두 떨어지면 취소.
 - **열기/저장의 기본 폴더**: `suggestedPath` = `<문서>/StCFSD/`(+ 저장이면 `defaultPath` 의 이름 또는 `project.<첫 확장자>`). 다리는 그 폴더를 읽지도 만들지도 않는다. 사용자가 경로를 확인해 답하면 그때 호스트가 그 파일을 읽거나 쓰고, 저장이면 다리가 **그 경로의** 부모 폴더만 만든다. `<문서>` 는 `createBridgePlatform({ documentsDir })`(serve 의 `--documents`, 기본 `~/Documents`).
-- 틀의 물음 그림은 경로 칸 하나다(폴더를 훑지 않는다). **S3** 는 `createBridgePlatform({ fileDialog })` 로 OS 대화상자를 끼운다 — 같은 인터페이스, 틀의 칸은 뜨지 않는다.
+- 틀의 물음 그림은 경로 칸 하나다(폴더를 훑지 않는다). **S3** 는 `createBridgePlatform({ fileDialog, openExternal, notifyWithoutScreen })` 로 OS 대화상자 · OS 브라우저 · 시작 중(틀이 붙기 전) 알림 상자를 끼운다 — 같은 인터페이스, 틀의 칸은 뜨지 않는다(`desktop/shell/src/main.ts`).
+- 물음이 떠 있는 동안 틀은 페이지 제목 앞에 「● 응답 필요 — 」 를 붙인다. 껍데기는 그것(창 제목)과 작업 표시줄 깜빡임으로만 알리고 창을 앞으로 꺼내지 않는다.
 
 ## 5. 메시지와 새로 고침 — 다시 보내기(`channel.ts`)
 
@@ -111,4 +114,20 @@ node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [-
 - **클립보드**(`보고서 클립보드 복사` — `navigator.clipboard`): 127.0.0.1 은 보안 컨텍스트라 보통 브라우저에서는 된다. 시험(headless)에서는 확인하지 않았다.
 - **사이드바 트리**(`stcfsd.projectExplorer`)는 객체만 있다 — 틀에 그리지 않는다(새 화면 U1 의 일).
 - **두 탭**: 같은 웹뷰를 두 탭에서 열면 뒤의 것이 이기고 앞의 것은 멈춘다(`superseded`). 물음은 붙은 틀 모두에 가고 먼저 답한 것이 쓰인다.
-- **Electron 의 것**: OS 파일 대화상자 · 문서 폴더(OneDrive 로 옮긴 경우 `app.getPath('documents')`) · PDF 인쇄 · 창 닫기 전 저장 확인은 S3.
+- **보통 브라우저로 띄웠을 때(serve)의 것**: OS 파일 대화상자 · 문서 폴더(OneDrive 로 옮긴 경우)는 S3 의 창에서만. PDF 는 두 경우 모두 호스트가 Edge headless 로 인쇄(6절).
+
+## 9. Claude Desktop 연결(S4)
+
+틀의 제목 표시줄: 상태 글(`text`, 풍선 도움말 `tooltip`) + 단추 하나 — `canDisconnect` 면 「끊기」, `canConnect` 면 「연결」, Claude 가 없거나 설정이 깨졌으면 누를 수 없는 「연결」. 10 초마다 `/api/claude/status` 를 다시 읽는다(AI 가 처음 부르면 「연결됨」으로).
+
+| ui | 글 |
+|---|---|
+| `not-installed` | Claude Desktop 없음 |
+| `invalid-config` | Claude 설정 파일을 읽을 수 없음 |
+| `not-registered` | Claude 등록 안 됨 |
+| `registered-elsewhere` | Claude 다른 설치를 가리킴 |
+| `restart-needed` | Claude 등록됨 · Claude Desktop 다시 시작 필요(이 실행에서 「연결」했고 그 뒤 AI 호출이 없다) |
+| `registered` | Claude 등록됨 · 아직 호출 없음 |
+| `connected` | Claude 연결됨 · 마지막 호출 HH:MM · <클라이언트>(등록돼 있고 AI 가 이 호스트를 불렀다) |
+
+넣는 항목(`startBridge({ claude: { entry } })`): 껍데기는 `standaloneMcpEntry({ command: process.execPath, serverScript: <배치의 media/mcp-server.js>, portFile: <사용자 폴더>/mcp/stcfsd-mcp-port, electron: true })` 를 준다 — `ELECTRON_RUN_AS_NODE=1` 이 붙는다. 주지 않으면(`serve`) 호스트의 항목(이 node 로 띄움). 쓰기의 규칙(백업 · 원자적 쓰기 · 다시 읽어 확인 · 다른 항목 그대로 · 깨진 JSON 은 손대지 않음 · 미설치면 폴더를 만들지 않음 · 끊기는 같은 항목만)은 K1 의 도우미가 지킨다(`docs/reviews/20261122-engine-review/fixes/K1-mcp-connection.md`). 시험은 `claude: { configPath }` 로 임시 폴더의 가짜 파일만 준다(`host/test/connect.mjs`, `shell/test/shell.mjs`).

@@ -1,6 +1,6 @@
-# desktop/host — VS Code 없이 확장 호스트를 돌리는 호스트 (S1 · S2)
+# desktop/host — VS Code 없이 확장 호스트를 돌리는 호스트 (S1 · S2 · S4)
 
-2026-11-22 · 상태: **S1 끝(연기 시험 53 / 53)** · **S2 끝(다리 시험 59 / 59)** — 창(S3) · Claude 연결(S4)은 아직이다. 화면 다리의 API 는 [`BRIDGE.md`](BRIDGE.md).
+2026-11-22 · 상태: **S1 끝(연기 시험 53 / 53)** · **S2 끝(다리 시험 59 / 59)** · **S4 끝(연결 시험 22 / 22)** — 창은 [`../shell/`](../shell/README.md)(S3). 화면 다리의 API 는 [`BRIDGE.md`](BRIDGE.md).
 
 지금의 확장 호스트(`out/extension.js`, 루트 `tsc -p ./` 출력)를 **한 글자도 고치지 않고** Node 에서 `activate()` 한다.
 `require('vscode')` 자리에 대체 모듈을 넣고, 설계 패널을 만들어 프로그램이 끝날 때까지 쥐고 있는다.
@@ -22,6 +22,7 @@
 | `build.mjs` | esbuild — `dist/index.js` · `dist/headless.js` · `dist/serve.js`(Node 20 CJS 한 파일씩). `out/` 은 묶지 않고 실행 때 require. 빌드 뒤 웹뷰가 쓰는 `--vscode-*` 변수가 다리 테마에 모두 있는지 보고, 빠지면 멈춘다 |
 | `test/smoke.mjs` | 연기 시험 — 화면 없이(아래) |
 | `test/bridge.mjs` | 다리 시험 — 진짜 화면을 headless Edge/Chrome 으로(아래). 그림 · PDF 는 `test/out/`(git 에 넣지 않음) |
+| `test/connect.mjs` | Claude 연결 시험(S4) — `/api/claude/*` 를 가짜 Claude 설정으로: 미설치 · 새 파일 · 다른 서버 보존(BOM · CRLF · 백업 = 원본 바이트) · 다른 설치를 가리킴 → 고침 · 끊기는 우리 것만 · 깨진 JSON 은 손대지 않음 · 쓰는 길은 화면의 세션뿐(MCP 쪽에서 닿지 않음) · 진짜 설정 자리 그대로 |
 
 ## 돌리기
 
@@ -29,7 +30,7 @@
 npx tsc -p ./                       # 저장소 루트 — out/ 이 src/ 보다 오래됐으면(적재기가 경고한다)
 cd desktop
 npm install
-npm test                            # 형 검사 → 빌드 → 연기 시험 → 다리 시험
+npm test                            # 형 검사 → 빌드 → 연기 시험 → 다리 시험 → 연결 시험
 npm run serve -- --open <파일.csd>  # 호스트 + 화면 다리. 출력된 「화면:」 주소(?t=토큰)를 브라우저로 연다
 npm run headless -- --open <파일.csd> [--open <또 하나>] [--port-file <경로>] [--port <n>] [--python <python.exe>] [--user-data <폴더>]
 ```

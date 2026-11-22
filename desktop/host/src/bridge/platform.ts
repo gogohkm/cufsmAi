@@ -59,6 +59,13 @@ export interface BridgePlatformOptions {
   documentsDir?: string;
   /** S3: OS 대화상자. 주면 열기/저장은 화면에 묻지 않고 이것을 쓴다 */
   fileDialog?: (req: FileDialogRequest & { suggestedPath: string }) => Promise<string[] | undefined>;
+  /** S3: 외부 주소를 OS 브라우저로 연다(http/https 만 — 껍데기가 거른다). 없으면 기록만 */
+  openExternal?: (target: string) => Promise<boolean>;
+  /**
+   * S3: 화면이 아직 안 붙었을 때(시작 중)의 단추 있는 알림 · modal 알림을 OS 대화상자로 묻는다.
+   * 없으면 headless 처럼 곧바로 닫음(답 없음)이다.
+   */
+  notifyWithoutScreen?: (req: NotifyRequest) => Promise<string | undefined>;
 }
 
 /** 사용자 문서 폴더(Windows 의 OneDrive 로 옮긴 문서 폴더는 S3 가 Electron `app.getPath('documents')` 로 준다) */
@@ -147,7 +154,11 @@ export function createBridgePlatform(options: BridgePlatformOptions = {}): Bridg
       headless.notifications.push(req);
       const r = await ask<string | undefined>('notify', req,
         v => (isStr(v) && req.items.includes(v as string) ? undefined : `단추 제목 중 하나여야 한다: ${req.items.join(' | ')}`),
-        () => { headless.notifications.pop(); return headless.notify(req); });
+        () => {
+          if (options.notifyWithoutScreen) { return options.notifyWithoutScreen(req); }
+          headless.notifications.pop();
+          return headless.notify(req);
+        });
       platform.onNotify?.(req);
       return r;
     },
@@ -180,7 +191,10 @@ export function createBridgePlatform(options: BridgePlatformOptions = {}): Bridg
         return undefined;
       }, () => headless.fileDialog(req));
     },
-    openExternal(target) { sink?.emit('platform:openExternal', { target }); return headless.openExternal(target); },
+    openExternal(target) {
+      sink?.emit('platform:openExternal', { target });
+      return options.openExternal ? options.openExternal(target) : headless.openExternal(target);
+    },
     progress(state) {
       if (state.done) { progress.delete(state.id); } else { progress.set(state.id, state); }
       sink?.emit('platform:progress', state);

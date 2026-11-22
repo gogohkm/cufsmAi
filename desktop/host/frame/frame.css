@@ -13,6 +13,10 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
 .spacer{flex:1}
 #claude-status{color:var(--muted)}
 #claude-status.connected{color:var(--ok)}
+#claude-status.warn{color:var(--warn)}
+#claude-action{background:transparent;color:var(--fg);border:1px solid var(--input-border);border-radius:3px;padding:1px 10px;font:inherit;cursor:pointer}
+#claude-action:disabled{opacity:.45;cursor:default}
+#claude-action:not(:disabled):hover{border-color:var(--accent)}
 #stage{position:absolute;top:31px;left:0;right:0;bottom:0;display:flex}
 #designer{flex:1 1 auto;border:0;width:100%;height:100%;min-width:0}
 #side{flex:0 0 46%;display:flex;flex-direction:column;border-left:1px solid var(--border);background:var(--panel)}

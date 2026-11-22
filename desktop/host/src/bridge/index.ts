@@ -13,7 +13,7 @@
  *  - `/api/platform/answer` 호스트의 물음에 대한 답
  *  - `/api/webviews/<id>/close`  웹뷰 닫기(좌굴 보고서). 설계 패널은 고정이라 숨김만 된다
  *  - `/api/mcp/<경로>`      호스트의 MCP 다리로 중계(그 토큰을 다리가 붙인다 — 화면에는 주지 않는다. AI 요청 id 머리 없음)
- *  - `/api/claude/status`   Claude Desktop 연결 상태(읽기만 — claude.ts)
+ *  - `/api/claude/status`   Claude Desktop 연결 상태(읽기만) · `POST /api/claude/connect|disconnect` 등록 · 지우기(S4, 화면의 세션만 — claude.ts)
  */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
@@ -22,7 +22,7 @@ import type * as net from 'node:net';
 import * as path from 'node:path';
 import type { HostHandle } from '../loader';
 import { Channel } from './channel';
-import { createClaudeStatus, type BridgeClaudeOptions } from './claude';
+import { createClaudeRoutes, type BridgeClaudeOptions } from './claude';
 import {
   baseHeaders, checkRequest, readJson, safeFile, sendFile, sendJson, sendText, sessionCookie, type Guard,
 } from './http';
@@ -33,7 +33,7 @@ import type { ThemeName } from './theme';
 
 export { createBridgePlatform, defaultDocumentsDir } from './platform';
 export type { BridgePlatform, BridgePlatformOptions, PendingQuestion } from './platform';
-export type { BridgeClaudeOptions, ClaudeStatus } from './claude';
+export type { BridgeClaudeOptions, ClaudeStatus, ClaudeActionResult, ClaudeUiState } from './claude';
 export type { BridgeEvent } from './sse';
 export { themeVariables, usedThemeVariables, missingThemeVariables, themeCss } from './theme';
 export type { ThemeName } from './theme';
@@ -166,7 +166,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     if (!loaded) { log('[bridge] 경고: 설계 패널이 60 초 안에 기본 단면(modelLoaded)을 보내지 않았다'); }
   }
 
-  const claudeStatus = createClaudeStatus(host, options.claude);
+  const claude = createClaudeRoutes(host, options.claude);
 
   // ── HTTP ──────────────────────────────────────────────────────────
   const server = http.createServer();
@@ -319,7 +319,18 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       sendJson(res, 200, { success: true, data: { closed: !hub.has(id) } });
       return;
     }
-    if (p === '/api/claude/status' && method === 'GET') { sendJson(res, 200, { success: true, data: await claudeStatus() }); return; }
+    if (p === '/api/claude/status' && method === 'GET') { sendJson(res, 200, { success: true, data: await claude.status() }); return; }
+    const claudeOp = /^\/api\/claude\/(connect|disconnect)$/.exec(p);
+    if (claudeOp) {
+      // 쓰기 — 화면의 세션(위의 인증)으로만. 본문은 비어 있어도 JSON 이어야 한다(단순 요청 · 폼 전송을 막는다).
+      if (method !== 'POST') { sendJson(res, 405, { success: false, error: 'POST' }); return; }
+      await readJson(req);
+      const out = claudeOp[1] === 'connect' ? await claude.connect() : await claude.disconnect();
+      log(`[bridge] Claude ${claudeOp[1]}: ${out.result.ok ? out.result.action : out.result.reason} — ${out.result.message}`);
+      bus.emit('claude:status', 'bridge', out.status);
+      sendJson(res, 200, { success: true, data: out });
+      return;
+    }
     const mcpMatch = /^\/api\/mcp\/(.+)$/.exec(p);
     if (mcpMatch) { relayMcp(req, res, mcpMatch[1], url.search); return; }
 
