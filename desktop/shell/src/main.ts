@@ -7,7 +7,7 @@
  *
  * 지키는 것:
  *  - 인증은 쿠키에 기대지 않는다. 창의 세션(저장하지 않는 partition)이 다리 출처로 보내는 모든 요청에
- *    `Authorization: Bearer <다리 토큰>` 을 붙인다. 창에는 토큰 없는 주소(`/`)를 싣는다.
+ *    `Authorization: Bearer <다리 토큰>` 을 붙인다. 창에는 토큰 없는 주소(`/`, `--ui` 면 새 검토 화면 `/ui/`)를 싣는다.
  *  - 포커스를 가져가지 않는다. 창을 보이는 것은 처음 뜰 때와 사용자가 프로그램을 다시 실행했을 때(second-instance)뿐이다.
  *    호스트의 물음은 창을 앞으로 꺼내지 않는다 — 제목(「● 응답 필요」, 틀이 쓴다)과 작업 표시줄 깜빡임(`flashFrame`)으로만 알린다.
  *  - 다리 출처가 아닌 곳으로 이동 · 새 창 · 네트워크 요청은 막는다. http/https 링크는 OS 브라우저로.
@@ -276,6 +276,11 @@ function createSession(b: HostApi.BridgeHandle): Electron.Session {
   return ses;
 }
 
+/** 창에 싣는 화면의 경로 — 기본은 틀(`/`). `--ui` 이고 다리가 새 검토 화면을 내줄 때만 `/ui/`(U1) */
+function screenPath(b: HostApi.BridgeHandle): string {
+  return args.ui && b.uiUrl ? '/ui/' : '/';
+}
+
 function setTheme(t: 'dark' | 'light'): void {
   theme = t;
   writePrefs({ theme: t });
@@ -283,7 +288,14 @@ function setTheme(t: 'dark' | 'light'): void {
     const item = Menu.getApplicationMenu()?.getMenuItemById(id);
     if (item) { item.checked = id === `theme-${t}`; }
   }
-  if (win && !win.isDestroyed() && bridge) { void win.loadURL(`${bridge.origin}/?theme=${t}`); }
+  if (win && !win.isDestroyed() && bridge) {
+    if (screenPath(bridge) === '/ui/') {
+      // 새 검토 화면(U1)은 페이지를 다시 싣지 않고 바꾼다 — 끼운 설계 화면의 아직 보내지 않은 입력을 잃지 않게
+      void win.webContents.executeJavaScript(`window.__stcfsdUi && window.__stcfsdUi.setTheme(${JSON.stringify(t)})`, true).catch(() => undefined);
+    } else {
+      void win.loadURL(`${bridge.origin}/?theme=${t}`);
+    }
+  }
 }
 
 function about(): void {
@@ -379,7 +391,7 @@ function createWindow(b: HostApi.BridgeHandle): BrowserWindow {
     if (placement?.maximized) { w.maximize(); }
     w.show();                 // 사용자가 프로그램을 실행했을 때 한 번
   });
-  void w.loadURL(`${b.origin}/${theme === 'light' ? '?theme=light' : ''}`);
+  void w.loadURL(`${b.origin}${screenPath(b)}${theme === 'light' ? '?theme=light' : ''}`);
   return w;
 }
 
@@ -485,7 +497,10 @@ async function start(): Promise<void> {
     bridge = await api.startBridge(host, {
       platform, theme, frameDir: layout.frameDir, log: line => logger?.host(line),
       claude: { configPath: claudeConfigPath(), entry },
+      // 새 검토 화면(U1)은 `--ui` 일 때만 연다. 폴더가 없으면(설치본은 아직 묶지 않는다) 다리가 /ui/ 를 내주지 않고 틀을 연다.
+      uiDir: args.ui && fs.existsSync(path.join(layout.uiDir, 'index.html')) ? layout.uiDir : undefined,
     });
+    if (args.ui && !bridge.uiUrl) { log(`새 검토 화면이 없다(${layout.uiDir}) — 틀을 연다`, 'warn'); }
   } catch (err) {
     return failStartup('bridge', String((err as Error)?.stack ?? err));
   }
@@ -504,7 +519,7 @@ async function start(): Promise<void> {
   const first = args.open ?? pendingOpen;
   pendingOpen = undefined;
   if (first) { await openFile(first); }
-  send({ type: 'stage', stage: 'running', pid: process.pid, origin: bridge.origin, portFile, userData });
+  send({ type: 'stage', stage: 'running', pid: process.pid, origin: bridge.origin, portFile, userData, screen: screenPath(bridge) });
 }
 
 /** 시험 · 개발에서 Claude 설정 파일을 바꿔 끼운다. 시험인데 주지 않았으면 사용자 폴더 안의 없는 경로(= 설치 안 됨) */

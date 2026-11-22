@@ -3,7 +3,10 @@
  *
  *   node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [--port <다리 포트>]
  *                                   [--port-file <MCP 포트 파일>] [--python <python.exe>] [--user-data <폴더>]
- *                                   [--documents <폴더>] [--claude-config <Claude 설정 파일>] [--repo <저장소 루트>]
+ *                                   [--documents <폴더>] [--claude-config <Claude 설정 파일>] [--repo <저장소 루트>] [--ui]
+ *
+ * `--ui` — 새 검토 화면(U1, `desktop/ui/`)의 주소(`/ui/`)를 「화면:」 줄에 낸다. 없으면 지금처럼 틀(`/`)의 주소다. 다리는 두 경우 모두
+ * `/ui/` 를 내준다(`desktop/ui/index.html` 이 있을 때) — 기본으로 여는 화면만 바뀐다.
  *
  * 확장 호스트를 화면이 있는 모드(screenless: false)로 띄우고 다리를 연 뒤, 토큰이 붙은 주소를 출력한다. 보통 브라우저로
  * 연다(뒤에 S3 의 Electron 창). `--open` 은 확장의 「열기」 길로 연다. Ctrl+C(SIGINT) · Ctrl+Break · IPC `shutdown` 으로 끝낸다.
@@ -41,7 +44,7 @@ async function main(): Promise<void> {
   const { flags, open } = parseArgs(process.argv.slice(2));
   if (flags.help || flags.h) {
     out('사용법: node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [--port <n>] [--port-file <경로>] '
-      + '[--python <python.exe>] [--user-data <폴더>] [--documents <폴더>] [--claude-config <파일>] [--repo <루트>]');
+      + '[--python <python.exe>] [--user-data <폴더>] [--documents <폴더>] [--claude-config <파일>] [--repo <루트>] [--ui]');
     return;
   }
   // 확장 · Python 의 console 은 stderr 로 — stdout 은 이 CLI 의 줄만.
@@ -62,13 +65,16 @@ async function main(): Promise<void> {
       port: str(flags.port) ? Number(flags.port) : 0,
       theme: flags.theme === 'light' ? 'light' : 'dark',
       claude: { configPath: str(flags['claude-config']) ? path.resolve(str(flags['claude-config'])!) : undefined },
+      uiDir: path.join(repoRoot, 'desktop', 'ui'),
     });
   } catch (err) {
     await host.dispose();
     throw err;
   }
   out(`StCFSD 호스트 + 화면 다리 — 활성화 ${host.activationMs} ms, 설계 패널 ${host.panelMs} ms`);
-  out(`화면: ${bridge.url}`);
+  const wantUi = flags.ui === true;
+  if (wantUi && !bridge.uiUrl) { out('새 화면(desktop/ui/index.html)이 없다 — 틀을 연다'); }
+  out(`화면: ${wantUi && bridge.uiUrl ? bridge.uiUrl : bridge.url}`);
   out(`MCP 다리: ${host.mcp.url}  포트 파일: ${host.mcp.portFile}`);
   out(`MCP 클라이언트: ${Object.entries(host.mcp.env).map(([k, v]) => `${k}=${v}`).join(' ')} node ${host.mcp.serverScript}`);
   for (const file of open) {
@@ -76,7 +82,7 @@ async function main(): Promise<void> {
     if (r.ok) { bridge.setCurrentFile(r.file); }
     out(`열기 ${file}: ${r.ok ? '성공' : '실패'} — ${r.message ?? ''}`);
   }
-  out(`STCFSD_BRIDGE_READY ${JSON.stringify({ pid: process.pid, url: bridge.url, origin: bridge.origin, port: bridge.port,
+  out(`STCFSD_BRIDGE_READY ${JSON.stringify({ pid: process.pid, url: bridge.url, uiUrl: bridge.uiUrl ?? null, screen: wantUi && bridge.uiUrl ? 'ui' : 'frame', origin: bridge.origin, port: bridge.port,
     mcpPort: host.mcp.port, portFile: host.mcp.portFile, designer: host.designer.id })}`);
 
   let stopping = false;

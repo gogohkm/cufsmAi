@@ -14,6 +14,9 @@
  *  - `/api/webviews/<id>/close`  웹뷰 닫기(좌굴 보고서). 설계 패널은 고정이라 숨김만 된다
  *  - `/api/mcp/<경로>`      호스트의 MCP 다리로 중계(그 토큰을 다리가 붙인다 — 화면에는 주지 않는다. AI 요청 id 머리 없음)
  *  - `/api/claude/status`   Claude Desktop 연결 상태(읽기만) · `POST /api/claude/connect|disconnect` 등록 · 지우기(S4, 화면의 세션만 — claude.ts)
+ *  - `/ui/`                 새 검토 화면(U1, `desktop/ui/` — `uiDir` 를 줄 때만). 기본 화면은 여전히 `/` 의 틀이다
+ *  - `/api/wv/<id>/last` · `…/first`  다시 보내기 기록에 남은 호스트 → 웹뷰 메시지(새 화면이 읽는다, U1)
+ *  이벤트 `host:message {id, viewType, command, seq}` — 호스트가 설계 패널에 메시지를 보낼 때마다(본문 없음, U1)
  */
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
@@ -50,11 +53,18 @@ export interface StartBridgeOptions {
   claude?: BridgeClaudeOptions;
   /** 틀의 파일 폴더(기본: desktop/host/frame) */
   frameDir?: string;
+  /**
+   * 새 검토 화면의 폴더(U1 — `desktop/ui`: `index.html` · `dist/` · `style/`). 주면 `/ui/` 로 내준다. 주지 않으면 `/ui/` 는 없다.
+   * 기본 화면(`/`)은 이것과 상관없이 틀이다 — 무엇을 여는지는 serve 의 `--ui` · 껍데기의 `--ui` 가 고른다.
+   */
+  uiDir?: string;
 }
 
 export interface BridgeHandle {
   /** 토큰이 붙은 첫 진입 주소 — 브라우저로 연다 */
   url: string;
+  /** 새 검토 화면의 토큰 붙은 주소(`uiDir` 를 주었을 때만) */
+  uiUrl?: string;
   origin: string;
   port: number;
   token: string;
@@ -77,6 +87,8 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   }
   const repoRoot = host.context.extensionPath as string;
   const frameDir = path.resolve(options.frameDir ?? path.join(__dirname, '..', 'frame'));
+  const uiDir = options.uiDir && fs.existsSync(path.join(options.uiDir, 'index.html')) ? path.resolve(options.uiDir) : undefined;
+  if (options.uiDir && !uiDir) { log(`[bridge] 새 화면 폴더에 index.html 이 없다 — /ui/ 를 내주지 않는다: ${options.uiDir}`); }
   const theme: ThemeName = options.theme ?? 'dark';
   const roots: ResourceRoot[] = [
     { name: 'webview', dir: path.join(repoRoot, 'webview') },
@@ -122,7 +134,16 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     // 좌굴 보고서는 같은 패널에 HTML 을 다시 넣는다(보고서를 다시 열면) — 틀이 iframe 을 다시 읽게 한다.
     bus.emit('webview:html', 'host', { id });
   }));
-  subs.push(hub.onDidPostMessage.event(({ id, message }) => { channelFor(id)?.push(message); }));
+  const designerId = host.designer.id;
+  subs.push(hub.onDidPostMessage.event(({ id, message }) => {
+    const ch = channelFor(id);
+    ch?.push(message);
+    // 새 화면(U1)이 따라가도록 — 설계 패널에 간 메시지의 이름과 순서 번호만 알린다(본문은 `/api/wv/<id>/last` 로 읽는다).
+    if (id === designerId && ch) {
+      const command = (message as { command?: unknown })?.command;
+      bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq });
+    }
+  }));
   subs.push(hub.onDidRefuseDispose.event(info => { bus.emit('webview:refused', 'host', { id: info.id, viewType: info.viewType }); }));
 
   // ── 지금 파일(제목 표시줄) ──────────────────────────────────────────
@@ -153,7 +174,6 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   bus.onClientsChanged = count => { if (count === 0) { platform.cancelAll('화면이 모두 떨어졌다'); } };
 
   // ── 설계 패널의 처음 webviewReady — 다리가 한 번(channel.ts 머리말) ────────
-  const designerId = host.designer.id;
   {
     let loaded = false;
     const sub = hub.onDidPostMessage.event(({ id, message }) => {
@@ -198,7 +218,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   };
 
   const state = () => ({
-    designer: designerId, webviews: webviewList(), theme,
+    designer: designerId, webviews: webviewList(), theme, ui: !!uiDir,
     currentFile: currentFile ?? null, currentName: currentFile ? path.basename(currentFile) : null,
     platform: platform.snapshot(), lastSeq: bus.lastSeq,
   });
@@ -228,6 +248,17 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       return;
     }
     if (p === '/favicon.ico') { res.writeHead(204); res.end(); return; }
+
+    // 새 검토 화면(U1). 정적 파일은 index.html · dist/ · style/ 만 — 소스 · 시험은 내주지 않는다.
+    if (uiDir && (p === '/ui' || p.startsWith('/ui/'))) {
+      if (p === '/ui') { res.writeHead(303, { Location: `/ui/${url.search}` }); res.end(); return; }
+      const rest = p.slice('/ui/'.length);
+      const allowed = rest === '' || rest === 'index.html' || /^(dist|style)\//.test(rest);
+      const file = allowed ? safeFile(uiDir, rest === '' ? 'index.html' : rest) : undefined;
+      if (!file) { sendJson(res, 404, { success: false, error: '없다' }); return; }
+      sendFile(res, file, file.endsWith('.html') ? { 'Content-Security-Policy': frameCsp } : {});
+      return;
+    }
     const frameMatch = /^\/frame\/(.+)$/.exec(p);
     if (frameMatch) {
       const file = safeFile(frameDir, frameMatch[1]);
@@ -298,6 +329,18 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       return;
     }
 
+    // 다시 보내기 기록 읽기(U1 — 새 화면). ?command=a&command=b → {a: {seq, message}|null, …}
+    const lastMatch = /^\/api\/wv\/([^/]+)\/(last|first)$/.exec(p);
+    if (lastMatch && method === 'GET') {
+      const id = decodeURIComponent(lastMatch[1]);
+      const ch = channelFor(id);
+      if (!ch) { sendJson(res, 404, { success: false, error: `웹뷰가 없다: ${id}` }); return; }
+      const names = url.searchParams.getAll('command').flatMap(c => c.split(',')).map(c => c.trim()).filter(Boolean).slice(0, 40);
+      const data: Record<string, unknown> = {};
+      for (const c of names) { data[c] = lastMatch[2] === 'last' ? ch.last(c) : ch.firstOf(c); }
+      sendJson(res, 200, { success: true, data, seq: ch.lastSeq });
+      return;
+    }
     if (p === '/api/events' && method === 'GET') {
       const last = req.headers['last-event-id'] ?? url.searchParams.get('since') ?? undefined;
       bus.attach(req, res, last === undefined ? undefined : Number(last), { state: state() });
@@ -347,6 +390,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
 
   return {
     url: `${origin}/?t=${token}`, origin, port, token,
+    uiUrl: uiDir ? `${origin}/ui/?t=${token}` : undefined,
     events: bus,
     on: listener => bus.on(listener),
     setCurrentFile,

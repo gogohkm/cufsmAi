@@ -44,6 +44,8 @@ check('개발판: electron . a.csd --user-data d --theme light', eq(U.parseArgs(
   { open: path.join(cwd, 'a.csd'), userData: path.join(cwd, 'd'), theme: 'light' }));
 check('--open=x.csd · Chromium 스위치는 무시', eq(U.parseArgs(['StCFSD.exe', '--enable-logging', '--open=x.csd'], cwd, false), { open: path.join(cwd, 'x.csd') }));
 check('.csd 가 아닌 맨 인자는 열지 않는다', eq(U.parseArgs(['StCFSD.exe', 'readme.txt'], cwd, false), {}));
+check('--ui: 새 검토 화면(U1) — 없으면 틀(기본)', eq(U.parseArgs(['electron.exe', '.', '--ui', 'a.csd'], cwd, true), { ui: true, open: path.join(cwd, 'a.csd') })
+  && U.parseArgs(['StCFSD.exe', 'a.csd'], cwd, false).ui === undefined);
 
 // ── placeWindow ──
 const primary = { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 0, width: 1920, height: 1040 } };

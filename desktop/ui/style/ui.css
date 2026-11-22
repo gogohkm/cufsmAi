@@ -1,0 +1,147 @@
+/* StCFSD 새 검토 화면(U1) — 템플릿 CSS(review.css · app.css · cfsd.css, 고치지 않고 복사) 위에 얹는 것.
+   템플릿은 안내 띠(32px)가 있는 정지 화면이라 창 높이 · 단추 · 빈 값 · 편집 상태의 끼운 화면 · 물음 상자 · 밝은 테마의 그림 색이 없다. */
+
+/* 창 — 안내 띠가 없다. 960px 창에서도 가로 스크롤이 생기지 않게 */
+.win { height: 100vh; min-height: 560px; min-width: 900px; position: relative; }
+.win > .body { position: relative; }
+#start { position: absolute; top: 37px; bottom: 24px; left: 0; right: 0; z-index: 6; }
+#review.behind { visibility: hidden; }
+#start[hidden] { display: none !important; }
+/* 시작 화면에서는 템플릿 00 과 같이 제목 줄에 이름과 Claude 연결만 */
+.tbar.onstart .pick, .tbar.onstart .pipe-slot, .tbar.onstart [data-act="edit"], .tbar.onstart .ebadge { display: none; }
+.status .prog, .status .toasts, .status .std, .status .ai { display: inline-flex; align-items: center; gap: 6px; }
+.status .toast { padding: 0 8px; border-radius: 3px; background: var(--bg-raise); color: var(--text); max-width: 46vw; overflow: hidden; text-overflow: ellipsis; }
+.status .toast.warning { color: var(--warn); }
+.status .toast.error { color: var(--ng); }
+.status .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+
+/* 제목 표시줄 — 템플릿의 span 자리를 단추로 */
+.tbar button { font: inherit; color: inherit; background: transparent; cursor: default; }
+.tbar .pick { background: transparent; }
+.tbar .tb { background: transparent; }
+.tbar .cbtn { padding: 2px 9px; border: 1px solid var(--line); border-radius: 4px; color: var(--text); font-size: 11.5px; margin-right: 10px; }
+.tbar .cbtn:hover:not(:disabled), .tbar .tb:hover, .tbar .pick:hover { border-color: var(--accent); }
+.tbar .cbtn.off, .btn.off, .tbar .tb.off { opacity: .45; }
+.tbar .tb.off:hover { border-color: var(--line); }
+.tbar .conn { gap: 6px; }
+.tbar .dot.acc { background: var(--accent); }
+.pipe .ps { cursor: default; }
+.pipe .ps.unk i { background: var(--unchk); }
+.pipe.sm .ps i { width: 8px; height: 8px; }
+.pipe.sm { margin: 0; padding: 1px 7px; font-size: 10.5px; gap: 3px; }
+button.btn { cursor: default; }
+button.btn:disabled { opacity: .45; }
+
+/* 빈 값 — 「결과 없음」 · 「아직 평가 안 함」. 빈칸 · 0 을 쓰지 않는다 */
+.none { color: var(--text-faint); font-family: var(--font); font-variant-numeric: normal; white-space: nowrap; }
+.num { white-space: nowrap; }
+.u { color: var(--text-dim); font-size: 11px; }
+.tree .vl .u { color: var(--text-faint); }
+.tree .vl .none { color: inherit; }
+.verdict.acc { color: var(--accent); }
+.badge { margin-left: 2px; }
+
+/* 정보 창 */
+.pane-detail .hd .big .num { font-family: var(--mono); }
+.pane-detail ul.notes { margin: 0; padding-left: 16px; display: grid; gap: 3px; font-size: 11.5px; color: var(--text); }
+.pane-detail ul.notes.faint, .pane-detail ul.notes.faint li { color: var(--text-dim); }
+.pane-detail table.t tr[data-k] { cursor: default; }
+.pane-detail table.t tr.na td { color: var(--text-faint); }
+.rv.off, .chk.off { opacity: .55; }
+.ph-note { padding: 8px 10px; border: 1px dashed var(--line); border-radius: 4px; color: var(--text-dim); font-size: 11.5px; }
+.right .share .dot.un { background: transparent; border: 1.5px dashed var(--unchk); }
+
+/* 시작 화면 — 템플릿 00 의 인라인 스타일 */
+.start { max-width: 1180px; align-items: start; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); }
+.start .box .in.foot { border-top: 1px solid var(--line-soft); padding: 8px 14px; display: flex; gap: 18px; }
+.start .box .in.foot a { cursor: default; }
+.step { grid-template-columns: 22px 1fr auto; padding: 10px 0; }
+.mini-sec { width: 46px; height: 46px; border: 1px solid var(--line-soft); border-radius: 3px; background: var(--bg-view); }
+.start table.t td { vertical-align: middle; }
+.start table.t tr[data-act] { cursor: default; }
+.newc { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.newc > div { border: 1px solid var(--line); border-radius: 5px; padding: 8px 10px; background: var(--bg-raise); }
+.newc > div.off { opacity: .5; }
+.newc > div[data-act]:hover { border-color: var(--accent); }
+.newc b { display: block; font-weight: 600; }
+.newc span { color: var(--text-dim); font-size: 11.5px; }
+
+/* 가운데 — 템플릿 01 의 서랍 */
+.pane-view .drawer { max-height: 300px; }
+.dtabs { display: grid; grid-template-columns: 1fr 1.25fr; gap: 0; }
+.dtabs > div + div { border-left: 1px solid var(--line); }
+.drawer table.t th { top: 31px; }
+.vsel span.off { color: var(--text-faint); opacity: .6; }
+.dv .hud .chip[data-opt] { cursor: default; }
+
+/* 판정비 표(템플릿 04 의 한계상태 표를 가운데로 넓힌 것) */
+.vt-wrap { overflow: auto; background: var(--bg-panel); }
+.vt-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: var(--bg-panel); border-bottom: 1px solid var(--line); }
+.vt-head .sp { flex: 1; }
+table.t.vt th { top: 39px; }
+table.t.vt td { vertical-align: middle; }
+table.t.vt tr.ck { cursor: default; }
+table.t.vt tr.ck:hover td { background: var(--bg-hover); }
+table.t.vt tr.ck.on td { background: var(--bg-select); }
+table.t.vt tr.out td, table.t.vt tr.na td { color: var(--text-faint); }
+table.t.vt .ratio { min-width: 200px; }
+table.t.vt .ratio .num { min-width: 44px; text-align: right; font-family: var(--mono); }
+.ratio .track.un { background: repeating-linear-gradient(45deg, var(--unchk) 0 2px, transparent 2px 5px); opacity: .6; }
+.split { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr); min-height: 0; border-top: 1px solid var(--line); }
+.split > .dv + .dv { border-left: 1px solid var(--line-soft); }
+
+/* U2 자리 — 그림이 들어갈 곳에 이름을 붙여 둔다 */
+.dv.ph { display: grid; place-items: center; background: var(--bg-view); }
+.ph-box { display: grid; gap: 4px; justify-items: center; padding: 14px 22px; border: 1px dashed var(--line); border-radius: 6px; color: var(--text-dim); }
+.ph-box b { font-weight: 600; color: var(--text); }
+.ph-box span { font-size: 11.5px; color: var(--text-faint); }
+.dv.ph.short .ph-box { padding: 8px 14px; }
+
+/* 편집 상태(F2) — 지금의 설계 화면을 가운데 + 오른쪽 자리에. 숨겨도 붙어 있다(크기를 유지해 그림이 0 이 되지 않게) */
+.pane-edit-embed { position: absolute; top: 0; bottom: 0; left: var(--left-w, 280px); right: 0; z-index: 4; display: flex;
+  visibility: hidden; pointer-events: none; background: var(--bg-view); border-left: 1px solid var(--line); box-shadow: inset 0 2px 0 var(--edit); }
+#review.editing .pane-edit-embed { visibility: visible; pointer-events: auto; }
+#designer { flex: 1 1 auto; border: 0; width: 100%; height: 100%; min-width: 0; }
+#side { flex: 0 0 46%; display: flex; flex-direction: column; border-left: 1px solid var(--line); background: var(--bg-panel); }
+#side[hidden] { display: none; }
+#side-head { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+#side-title { flex: 1; font-weight: 600; }
+#side-frame { flex: 1; border: 0; width: 100%; }
+
+/* 호스트의 물음(틀과 같은 상자) */
+#dialog-host { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); z-index: 70; }
+#dialog-host.open { display: flex; }
+.dialog { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; min-width: 420px; max-width: 70vw; max-height: 80vh; overflow: auto; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+.dialog h2 { font-size: 14px; margin: 0 0 10px; }
+.dialog .msg { white-space: pre-wrap; word-break: break-word; margin: 0 0 8px; }
+.dialog .detail { white-space: pre-wrap; color: var(--text-dim); font-size: 12px; margin: 0 0 10px; }
+.dialog input[type=text], .dialog input[type=password] { width: 100%; box-sizing: border-box; background: var(--bg-raise); color: var(--text); border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; font: inherit; }
+.dialog .buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+.dialog .items { display: flex; flex-direction: column; gap: 4px; }
+.dialog .items .btn { justify-content: flex-start; }
+.dialog .items .desc { color: var(--text-dim); margin-left: 8px; }
+.dialog .error { color: var(--ng); font-size: 12px; margin-top: 6px; }
+
+/* 밝은 테마 — 템플릿은 어두운 테마로만 그렸다. 그림 색(단면 · 치수 · 축)을 밝은 바탕에서 읽히게 */
+:root[data-theme="light"] {
+  --steel: #39404c; --steel2: #2f6db0; --ghost: #9aa0aa; --dimc: #3c6489; --axis: #6a4fc0; --curve: #2b2f36;
+  --modec: #0f8f86; --lapc: #a8732e; --loadc: #b84848; --drv: #6b4fd0;
+}
+:root[data-theme="light"] { --warn: #a86a00; --ok: #2b8a3e; --ng: #c92a2a; }
+:root[data-theme="light"] .tipbox { background: #1f2023; color: #f3f3f3; }
+:root[data-theme="light"] .status .toast { background: var(--bg-hover); }
+
+/* 좁은 창 — 트리가 접히면 편집 화면은 왼쪽 끝부터 */
+@media (max-width: 1100px) {
+  .pane-edit-embed { left: 0; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .split > .dv + .dv { display: none; }
+  .start { grid-template-columns: minmax(0, 1fr); padding: 24px 16px 40px; }
+  .start h2, .start .box { grid-column: 1 / -1 !important; }
+  .newc { grid-template-columns: repeat(2, 1fr); }
+  table.t.vt .ratio { min-width: 120px; }
+  .vt-head > .faint { display: none; }
+  .vt-head .legend span { margin: 0 4px 0 2px; }
+  .vt-head .legend i { width: 16px; }
+  .tbar .conn .ct { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+}

@@ -1,13 +1,14 @@
-# 화면 다리(S2 · S4) — API
+# 화면 다리(S2 · S4 · U1) — API
 
-2026-11-22 · `desktop/host/src/bridge/` · CLI `src/serve.ts` · 시험 `test/bridge.mjs`
+2026-11-22 · `desktop/host/src/bridge/` · CLI `src/serve.ts` · 시험 `test/bridge.mjs` · 새 검토 화면(U1)의 시험 `../ui/test/ui.mjs`
 
 호스트가 127.0.0.1 의 빈 포트에 여는 HTTP 서버다. 지금의 웹뷰(탭 6개)를 **고치지 않고** 보통 브라우저에서 돌린다 — 바꾸는 것은 모두 다리가 HTML 을 내줄 때다. S3 의 Electron 창은 같은 다리를 연다.
 
 ```
 브라우저 / (S3) Electron 창
   ├ GET /                 틀: 제목 표시줄 + 설계 패널 iframe(/wv/<id>/) + 오른쪽 칸(좌굴 보고서) + 호스트의 물음
-  ├ GET /api/events       틀이 받는 이벤트(SSE)
+  ├ GET /ui/              새 검토 화면(U1, desktop/ui — uiDir 를 줄 때만). 설계 패널 iframe 을 안에 늘 끼워 둔다
+  ├ GET /api/events       틀 · 새 화면이 받는 이벤트(SSE)
   └ iframe /wv/<id>/      웹뷰 HTML  ── GET /api/wv/<id>/out (SSE) · POST /api/wv/<id>/in
                                       └ /res/webview/… · /res/media/…
 다리 ── hub(대체 모듈의 WebviewHub) ── StcfsdPanel(확장 호스트, 고치지 않음)
@@ -37,10 +38,14 @@
 | `GET /api/wv/<id>/out` | 호스트 → 웹뷰(SSE). 첫 사건 `hello {conn, webview, viewType}`, 다시 보내기를 마치면 `replayed {count, commands}`, 그 뒤 `data:` = 호스트가 보낸 `{command, data}` 그대로. 다른 페이지가 같은 웹뷰를 열면 앞의 것에 `superseded` |
 | `POST /api/wv/<id>/in?conn=<conn>` | 웹뷰 → 호스트. 본문은 메시지 배열. `conn` 이 지금 연결이 아니면 409 |
 | `GET /api/events` | 틀의 이벤트(SSE). 첫 사건 `hello {lastSeq, state}`, 그 뒤 `{seq, at, type, source, data}`. `Last-Event-ID` 로 최근 500건 다시 받기 |
-| `GET /api/state` | `{designer, webviews[{id, viewType, title, pinned, visible, connected, ready, url}], theme, currentFile, currentName, platform{progress, pending}, lastSeq}` |
+| `GET /api/state` | `{designer, webviews[{id, viewType, title, pinned, visible, connected, ready, url}], theme, ui, currentFile, currentName, platform{progress, pending}, lastSeq}` — `ui` = `/ui/` 를 내주는가(U1) |
 | `POST /api/platform/answer` | `{qid, answer}` — 4절. 형식이 틀리면 400 과 까닭 |
 | `POST /api/webviews/<id>/close` | 웹뷰 닫기(좌굴 보고서 칸의 ✕). 설계 패널은 고정이라 숨김이 될 뿐 없어지지 않는다(S1) |
 | `GET·POST /api/mcp/<경로>` | 호스트 MCP 다리로 중계(`/status` · `/action` · `/last-call`). 다리가 MCP 토큰을 붙인다 — 화면에는 그 토큰이 가지 않는다. 화면의 머리(쿠키 · Origin)는 넘기지 않고, AI 호출 표시 `X-StCFSD-Request-Id` 도 붙이지 않는다(이 조회는 「마지막 호출」로 세지 않는다) |
+| `GET /ui/` · `/ui/index.html` · `/ui/dist/<파일>` · `/ui/style/<파일>` | **U1** — 새 검토 화면(`startBridge({ uiDir })`, serve 는 `<저장소>/desktop/ui`). HTML 의 CSP 는 틀과 같다. 소스(`src/`) · 시험 · `build.mjs` 는 내주지 않는다(404). `uiDir` 를 주지 않으면(설치본 · `--ui` 없는 창) 이 경로는 없다(404). 기본 화면 `/` 는 이것과 상관없이 틀이다 |
+| `GET /api/wv/<id>/last?command=a&command=b` | **U1** — 다시 보내기 기록(5절)에 남은 그 명령의 마지막 메시지 `{success, data: {a: {seq, message: {command, data}} \| null, …}, seq}`. 페이지가 새로 고침하면 받을 것과 같다: 결과를 지우는 메시지가 지운 결과는 `null`, 한 번만 뜻이 있는 명령(`collectDesignData` · `propertiesResult` …)은 늘 `null`. `seq` = 그 통로의 마지막 순서 번호. 40 개까지 |
+| (U1 은 상태를 바꾸는 경로를 더하지 않았다) | 새 화면의 「열기」 · 「저장」은 끼운 설계 화면의 Open · Save 단추를 누른다(그 화면의 늘 쓰던 길). 새 화면이 쓰는 쓰기 경로는 지금 있는 셋뿐 — `/api/platform/answer` · `/api/claude/*` · `/api/webviews/<id>/close` |
+| `GET /api/wv/<id>/first?command=modelLoaded` | **U1** — 그 명령의 첫 메시지(지금은 `modelLoaded` 만 남긴다 — 다리가 처음 보낸 webviewReady 에 호스트가 채운 기본 모델). 새 화면이 「기본값」 꼬리표에 쓴다 |
 | `GET /api/claude/status` | `{state, ui, configPath, configKind, configExists, configError?, otherServers, lastAiCall, aiCalls, canConnect, canDisconnect, restartNeeded, text, tooltip}` — K1 `checkClaudeDesktop`(설정을 읽기만) + MCP `GET /last-call`. `ui` = `connected · registered · restart-needed · not-registered · registered-elsewhere · not-installed · invalid-config · unknown`, `text` = 제목 표시줄의 한 줄 |
 | `POST /api/claude/connect` · `POST /api/claude/disconnect` | **S4** — 본문 `{}`(JSON 이어야 한다). `{result: {ok, action, reason?, error?, wrote, backupPath?, restartRequired, message}, status}`. K1 `connectClaudeDesktop` · `disconnectClaudeDesktop` 이 쓴다(9절). 화면의 세션(쿠키 · 다리 토큰)으로만 — AI 는 호스트의 MCP 다리에 붙고 거기에는 이 경로가 없다. `/api/mcp/*` 중계도 MCP 다리로만 간다(시험: 중계 · MCP 다리 직접 모두 `Unknown endpoint`) |
 
@@ -57,6 +62,7 @@
 | `webview:client` · `webview:ready` · `webview:refused` | 페이지가 붙음 · 다시 보내기 끝 `{replayed}` · 고정 패널 닫기를 숨김으로 바꿈 |
 | `file:current` | `{file, name}` — 열기 · 저장이 성공한 `.csd` |
 | `claude:status` | `GET /api/claude/status` 와 같은 것 — 「연결」 · 「끊기」 뒤 |
+| `host:message` | **U1** — 호스트가 설계 패널에 메시지를 보낼 때마다 `{id, viewType, command, seq}`(본문 없음 — `/api/wv/<id>/last` 로 읽는다). AI 의 MCP 호출이든 편집 상태의 단추든 같은 길이라 새 화면이 이것 하나로 따라간다. 틀(`frame.js`)은 이 이벤트를 쓰지 않는다 |
 
 ## 3. 웹뷰 HTML 고쳐 쓰기(`inject.ts`)
 
@@ -103,16 +109,16 @@ VS Code 웹뷰는 `retainContextWhenHidden` 이라 다시 뜨지 않는다. 호�
 
 ```
 node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [--port <다리 포트>] [--port-file <MCP 포트 파일>]
-                                [--python <python.exe>] [--user-data <폴더>] [--documents <폴더>] [--claude-config <파일>] [--repo <루트>]
+                                [--python <python.exe>] [--user-data <폴더>] [--documents <폴더>] [--claude-config <파일>] [--repo <루트>] [--ui]
 ```
 
-출력: `화면: http://127.0.0.1:<포트>/?t=<토큰>` — 브라우저로 연다. 마지막 시작 줄 `STCFSD_BRIDGE_READY {pid, url, origin, port, mcpPort, portFile, designer}`. 끝내기: Ctrl+C · Ctrl+Break · IPC `shutdown`(IPC `status` 는 미구현 · 메시지 수 · 통로 · 물음 기록). 다리 → 호스트 순서로 정리한다.
+출력: `화면: http://127.0.0.1:<포트>/?t=<토큰>` — 브라우저로 연다. `--ui` 면 `화면: http://127.0.0.1:<포트>/ui/?t=<토큰>`(새 검토 화면 — U1). serve 는 두 경우 모두 `/ui/` 를 내준다(`desktop/ui/index.html` 이 있으면). 마지막 시작 줄 `STCFSD_BRIDGE_READY {pid, url, uiUrl, screen, origin, port, mcpPort, portFile, designer}` — `url` 은 언제나 틀(`/`)의 주소, `uiUrl` 은 새 화면의 주소(없으면 null), `screen` = `frame` · `ui`(「화면:」 줄이 가리키는 것). 끝내기: Ctrl+C · Ctrl+Break · IPC `shutdown`(IPC `status` 는 미구현 · 메시지 수 · 통로 · 물음 기록). 다리 → 호스트 순서로 정리한다.
 
 ## 8. 아직 다리로 안 되는 것
 
 - **설계 탭 입력의 새로 고침** — 5절. K2 가 입력을 호스트로 옮기면 풀린다.
 - **클립보드**(`보고서 클립보드 복사` — `navigator.clipboard`): 127.0.0.1 은 보안 컨텍스트라 보통 브라우저에서는 된다. 시험(headless)에서는 확인하지 않았다.
-- **사이드바 트리**(`stcfsd.projectExplorer`)는 객체만 있다 — 틀에 그리지 않는다(새 화면 U1 의 일).
+- **사이드바 트리**(`stcfsd.projectExplorer`)는 객체만 있다 — 틀에 그리지 않는다. 새 화면(U1)은 이 트리를 쓰지 않고 자기 트리(탭 4개)를 MCP · 메시지에서 짓는다.
 - **두 탭**: 같은 웹뷰를 두 탭에서 열면 뒤의 것이 이기고 앞의 것은 멈춘다(`superseded`). 물음은 붙은 틀 모두에 가고 먼저 답한 것이 쓰인다.
 - **보통 브라우저로 띄웠을 때(serve)의 것**: OS 파일 대화상자 · 문서 폴더(OneDrive 로 옮긴 경우)는 S3 의 창에서만. PDF 는 두 경우 모두 호스트가 Edge headless 로 인쇄(6절).
 

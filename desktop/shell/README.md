@@ -1,6 +1,6 @@
-# desktop/shell — StCFSD 독립 창 (S3) · Claude 연결 (S4)
+# desktop/shell — StCFSD 독립 창 (S3) · Claude 연결 (S4) · 새 검토 화면 스위치 (U1)
 
-2026-11-22 · 상태: **S3 · S4 끝(시험: 단위 18 / 18, 창 44 / 44 — 보이지 않는 창으로)** · 설치 파일(S5)은 아직이다.
+2026-11-22 · 상태: **S3 · S4 끝(시험: 단위 19 / 19, 창 44 / 44 — 보이지 않는 창으로)** · **U1: `--ui` 로 새 검토 화면(창 시험 12 / 12)** — 기본은 여전히 틀이다(U4 에서 바꾼다).
 
 Electron 주 프로세스 하나가 **같은 프로세스에서** 호스트(`../host` — 확장 호스트 `out/extension.js` 를 고치지 않고 돌린다)와
 화면 다리를 띄우고, 창 하나에 다리의 틀(`/` — 제목 표시줄 + 지금의 설계 화면 탭 6개)을 싣는다. 자체 `package.json` 이라
@@ -13,12 +13,13 @@ npx tsc -p ./                                   # 저장소 루트 — out/
 cd desktop && npm install && npm run build      # 호스트 · 다리(host/dist)
 cd shell && npm install                         # Electron 45.2.3 (+ esbuild · typescript)
 npm start -- --open <파일.csd>                  # 창. 맨 인자로 줘도 된다: npm start -- a.csd
-npm test                                        # 형 검사 → 빌드 → 단위 시험 → 창 시험(보이지 않는 창)
+npm start -- --ui <파일.csd>                    # 새 검토 화면(U1, desktop/ui — cd desktop && npm run build 가 먼저). npm run start:ui 도 같다
+npm test                                        # 형 검사 → 빌드 → 단위 시험 → 창 시험 → 새 화면 창 시험(모두 보이지 않는 창)
 ```
 
 `npm install` 뒤 `node_modules/electron/dist/` 가 없으면(설치 스크립트가 돌지 않았으면) `node node_modules/electron/install.js` 를 한 번 돌린다(이 PC 는 Electron 내려받기 캐시 `%LOCALAPPDATA%\electron\Cache` 에 45.2.3 이 있어 거기서 풀었다).
 
-인자: `[파일.csd]` · `--open <파일>` · `--user-data <폴더>` · `--theme dark|light`. 환경 변수: `STCFSD_PYTHON`(다른 Python), `STCFSD_REPO_ROOT`(개발판의 저장소), `STCFSD_CLAUDE_CONFIG`(Claude 설정 파일을 바꿔 끼움 — 시험), `STCFSD_DOCUMENTS`(열기 · 저장의 기본 폴더의 부모 — 시험).
+인자: `[파일.csd]` · `--open <파일>` · `--user-data <폴더>` · `--theme dark|light` · `--ui`(새 검토 화면 — 창에 `/ui/` 를 싣는다. 다리에 `desktop/ui` 를 줄 때도 이때뿐이다. 설치본은 아직 `ui/` 를 묶지 않으므로 그 폴더가 없으면 로그에 남기고 틀을 연다). 환경 변수: `STCFSD_PYTHON`(다른 Python), `STCFSD_REPO_ROOT`(개발판의 저장소), `STCFSD_CLAUDE_CONFIG`(Claude 설정 파일을 바꿔 끼움 — 시험), `STCFSD_DOCUMENTS`(열기 · 저장의 기본 폴더의 부모 — 시험).
 
 ## 있는 것
 
@@ -33,6 +34,7 @@ npm test                                        # 형 검사 → 빌드 → 단�
 | `src/preload.ts` | 화면에 `window.stcfsdShell = {isElectron, platform, version}` 만 |
 | `test/winConsole.mjs` | 단위: 콘솔 숨김 · 인자 · 창 자리 |
 | `test/shell.mjs` | 진짜 앱을 보이지 않게 띄우는 시험(아래) |
+| `test/ui.mjs` | U1 — `--ui` 로 띄워 새 검토 화면을 보는 시험(아래 「새 검토 화면(U1)」) |
 
 ## 지키는 것
 
@@ -92,6 +94,12 @@ npm test                                        # 형 검사 → 빌드 → 단�
 10. 남은 Electron · Python 0 · 진짜 Claude Desktop 설정 · `~/.claude` · `%APPDATA%\StCFSD` 의 크기 · 수정 시각 그대로(열지 않음) · 저장소 그대로
 
 모든 단계에서 창은 보이지 않고 포커스를 받은 적이 없다(`isVisible` · `isFocused` · show · focus 사건 0 을 다섯 번 확인).
+
+## 새 검토 화면(U1)
+
+`--ui` 를 주면 창이 다리의 `/ui/`(`desktop/ui/`)를 싣는다 — 트리 · 보기 · 정보 창의 검토 화면이고, 지금의 설계 화면(탭 6개)은 그 안에 늘 끼워 두었다가 F2 로 연다. 메뉴의 「열기」 · 「저장」 · 새로 고침은 같은 길로 돈다. 테마는 `--ui` 면 페이지를 다시 싣지 않고 화면 안에서 바꾼다(`__stcfsdUi.setTheme` — 끼운 설계 화면의 보내지 않은 입력을 잃지 않게). 틀(`/`)은 지금처럼 다시 싣는다. 스위치가 없으면 지금처럼 틀(`/`)이다 — 기본 화면을 바꾸는 것은 U4 다. 설명은 [`../ui/README.md`](../ui/README.md).
+
+시험(`test/ui.mjs`, 약 20 초): `--ui` + 파일 연결 꼴로 띄움 → 창의 주소가 토큰 없는 `/ui/` → 새 화면이 명령줄의 .csd 를 검토 화면(트리 · 정보 창 · 제목 표시줄)으로 → 끼운 설계 웹뷰가 연결 · 다시 보내기를 마치고 숨겨져 있다 → F2 로 열고 닫힌다 → 메뉴의 테마가 페이지를 다시 싣지 않고 바뀐다 → 쿠키 0 · 창의 콘솔 오류 0 → 그림(`test/out/u1_window_ui.png`) → 창은 보이지 않고 포커스 0 → 끝내기(코드 0 · 자식 0 · 포트 파일) → 진짜 설정 · 저장소 그대로.
 
 ## PDF
 

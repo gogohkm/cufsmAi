@@ -10,7 +10,8 @@
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node build.mjs && electron .",
-    "test": "npm run typecheck && node build.mjs && node test/winConsole.mjs && node test/shell.mjs",
+    "start:ui": "node build.mjs && electron . --ui",
+    "test": "npm run typecheck && node build.mjs && node test/winConsole.mjs && node test/shell.mjs && node test/ui.mjs",
     "test:unit": "node test/winConsole.mjs"
   },
   "devDependencies": {

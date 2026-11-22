@@ -3,7 +3,7 @@
  *
  * 개발:   `appRoot` = 저장소 루트(`STCFSD_REPO_ROOT` 로 덮어쓴다. 기본은 `desktop/shell` 의 두 단계 위).
  *         확장 호스트 `out/extension.js`, 엔진 `python/` + `.venv`, MCP 서버 `media/mcp-server.js`,
- *         호스트 공개 API `desktop/host/dist/index.js`, 틀 `desktop/host/frame/`.
+ *         호스트 공개 API `desktop/host/dist/index.js`, 틀 `desktop/host/frame/`, 새 검토 화면 `desktop/ui/`(U1 — `--ui` 일 때만 연다).
  * 설치본(S5 에서 정한다 — StAnal 의 배치를 따른 자리, 아직 시험하지 않음):
  *         <resources>/app.asar     package.json · dist/main.js · dist/preload.js · host/index.js · host/frame/
  *         <resources>/app-root/    확장 배포물(out · python · media · webview · package.json)이 저장소와 같은 모양 — asar 밖
@@ -22,6 +22,8 @@ export interface Layout {
   hostEntry: string;
   /** 틀 폴더(다리의 frameDir) */
   frameDir: string;
+  /** 새 검토 화면 폴더(다리의 uiDir — index.html · dist/ · style/). 설치본은 아직 묶지 않는다(S5 의 배치에 없다 — 있으면 쓴다) */
+  uiDir: string;
   /** Claude Desktop 이 띄울 MCP 서버(stdio) */
   mcpServer: string;
   /** 설치본의 묶은 Python(개발에는 없다 — 저장소의 .venv 를 확장이 스스로 찾는다) */
@@ -44,6 +46,7 @@ export function resolveLayout(i: LayoutInput): Layout {
       appRoot: repoRoot,
       hostEntry: path.join(repoRoot, 'desktop', 'host', 'dist', 'index.js'),
       frameDir: path.join(repoRoot, 'desktop', 'host', 'frame'),
+      uiDir: path.join(repoRoot, 'desktop', 'ui'),
       mcpServer: path.join(repoRoot, 'media', 'mcp-server.js'),
     };
   }
@@ -54,6 +57,7 @@ export function resolveLayout(i: LayoutInput): Layout {
     appRoot,
     hostEntry: path.join(i.appPath, 'host', 'index.js'),
     frameDir: path.join(i.appPath, 'host', 'frame'),
+    uiDir: path.join(i.appPath, 'ui'),
     mcpServer: path.join(appRoot, 'media', 'mcp-server.js'),
     python: path.join(res, 'python', process.platform === 'win32' ? 'python.exe' : path.join('bin', 'python3')),
   };

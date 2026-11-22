@@ -42,6 +42,12 @@ const CLEARED_BY_INVALIDATION = new Set([
   'designResult', 'designPurlinResult', 'lapConnectionResult',
 ]);
 
+/**
+ * 처음 받은 것을 따로 남기는 명령(U1 — 새 화면이 읽는다). 설계 패널의 첫 `modelLoaded` 는 다리가 보낸 `webviewReady` 에
+ * 호스트가 답한 것, 곧 프로그램이 시작할 때 채운 기본 단면이다. 새 화면은 지금 모델이 그것과 같은지로 「기본값」 꼬리표를 단다.
+ */
+const FIRST_KEPT = new Set(['modelLoaded']);
+
 export interface ChannelClient {
   conn: string;
   sse: SseStream;
@@ -56,6 +62,8 @@ export class Channel {
   private seq = 0;
   /** 명령 → 마지막 메시지(규칙 1 · 2 를 지킨 것) */
   private readonly state = new Map<string, Entry>();
+  /** FIRST_KEPT 명령의 첫 메시지 */
+  private readonly first = new Map<string, Entry>();
   /** 받은 메시지 수 · 다시 보낸 수(진단용) */
   posted = 0;
   replays = 0;
@@ -75,6 +83,7 @@ export class Channel {
     const command = typeof m.command === 'string' ? m.command : '(command 없음)';
     let text: string;
     try { text = JSON.stringify(message); } catch { return; }
+    if (FIRST_KEPT.has(command) && !this.first.has(command)) { this.first.set(command, { seq: this.seq, command, text }); }
     if (!TRANSIENT.has(command)) {
       if (command === 'resultsCleared') {
         for (const c of CLEARED_BY_RESULTS) { this.state.delete(c); }
@@ -111,6 +120,24 @@ export class Channel {
     client.ready = true;
     this.replays += 1;
     return entries.length;
+  }
+
+  /** 마지막 순서 번호(받은 메시지 수와 같다) */
+  get lastSeq(): number { return this.seq; }
+
+  /**
+   * 다시 보내기 기록에 남은 그 명령의 마지막 메시지 — 새 화면(U1)이 읽는다. 페이지가 새로 고침하면 받을 것과 같다:
+   * 결과를 지우는 메시지가 지운 결과는 없다(null). 한 번만 뜻이 있는 명령은 남지 않으므로 늘 null 이다.
+   */
+  last(command: string): { seq: number; message: unknown } | null {
+    const e = this.state.get(command);
+    return e ? { seq: e.seq, message: JSON.parse(e.text) } : null;
+  }
+
+  /** FIRST_KEPT 명령의 첫 메시지 */
+  firstOf(command: string): { seq: number; message: unknown } | null {
+    const e = this.first.get(command);
+    return e ? { seq: e.seq, message: JSON.parse(e.text) } : null;
   }
 
   /** 다시 보낼 명령(차례대로) — 시험 · 진단용 */

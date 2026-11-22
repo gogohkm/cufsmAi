@@ -15,8 +15,8 @@
 | `src/loader.ts` | `startHost()` — 갈고리 · 포트 파일 방식 · 활성화 · 설계 패널 고정 · 웹뷰 대역 · `openProject`/`saveProject` · 정리 |
 | `src/standin.ts` | 화면이 없을 때 설계 패널의 웹뷰 대역(`webviewReady` · `collectDesignData` 에만 답한다) |
 | `src/headless.ts` | 화면 없는 CLI |
-| `src/bridge/` | **화면 다리(S2)** — 127.0.0.1 + 토큰의 HTTP: 웹뷰 HTML 고쳐 쓰기(`inject.ts`) · 테마(`theme.ts`) · 호스트 ↔ 웹뷰 통로와 새로 고침 다시 보내기(`channel.ts`) · 호스트의 물음을 화면으로(`platform.ts`) · MCP 중계 · Claude 상태(`claude.ts`) · SSE(`sse.ts`) · 인증(`http.ts`). [`BRIDGE.md`](BRIDGE.md) |
-| `src/serve.ts` | 호스트 + 다리 CLI(브라우저로 열 주소를 출력) |
+| `src/bridge/` | **화면 다리(S2)** — 127.0.0.1 + 토큰의 HTTP: 웹뷰 HTML 고쳐 쓰기(`inject.ts`) · 테마(`theme.ts`) · 호스트 ↔ 웹뷰 통로와 새로 고침 다시 보내기(`channel.ts`) · 호스트의 물음을 화면으로(`platform.ts`) · MCP 중계 · Claude 상태(`claude.ts`) · SSE(`sse.ts`) · 인증(`http.ts`). U1 에서 새 검토 화면(`../ui/`)을 위한 `/ui/` · `/api/wv/<id>/last|first`(읽기만) · 이벤트 `host:message` 를 더했다. [`BRIDGE.md`](BRIDGE.md) |
+| `src/serve.ts` | 호스트 + 다리 CLI(브라우저로 열 주소를 출력). `--ui` 면 새 검토 화면(`/ui/`)의 주소 |
 | `frame/` | 틀(`/`): 제목 표시줄(파일 이름 · Claude 연결 상태) + 설계 패널 iframe + 좌굴 보고서 칸 + 호스트의 물음 · 알림. 빌드 없이 다리가 그대로 내준다 |
 | `src/index.ts` | 공개 API(시험 · 뒤의 다리 · 껍데기가 이것만 쓴다) |
 | `build.mjs` | esbuild — `dist/index.js` · `dist/headless.js` · `dist/serve.js`(Node 20 CJS 한 파일씩). `out/` 은 묶지 않고 실행 때 require. 빌드 뒤 웹뷰가 쓰는 `--vscode-*` 변수가 다리 테마에 모두 있는지 보고, 빠지면 멈춘다 |
