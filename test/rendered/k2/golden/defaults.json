@@ -1,0 +1,983 @@
+{
+ "about": "K2 phase 0 golden — defaults. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
+ "recorded": "2026-11-22",
+ "entries": [
+  {
+   "id": "controls.values",
+   "expect": "pin",
+   "value": [
+    [
+     "select-template",
+     "tab-preprocessor",
+     "lippedc",
+     "lippedc"
+    ],
+    [
+     "tpl-H",
+     "tab-preprocessor",
+     "100",
+     "3.93700787402"
+    ],
+    [
+     "tpl-B",
+     "tab-preprocessor",
+     "50",
+     "1.96850393701"
+    ],
+    [
+     "tpl-D",
+     "tab-preprocessor",
+     "20",
+     "0.787401574803"
+    ],
+    [
+     "tpl-t",
+     "tab-preprocessor",
+     "2.3",
+     "0.0905511811024"
+    ],
+    [
+     "tpl-r",
+     "tab-preprocessor",
+     "4",
+     "0.157480314961"
+    ],
+    [
+     "tpl-qlip",
+     "tab-preprocessor",
+     "90",
+     "90"
+    ],
+    [
+     "input-steel-grade",
+     "tab-preprocessor",
+     "SGC400",
+     "SGC400"
+    ],
+    [
+     "input-fy",
+     "tab-preprocessor",
+     "295",
+     "42.7861326304"
+    ],
+    [
+     "input-fu",
+     "tab-preprocessor",
+     "400",
+     "58.0150950921"
+    ],
+    [
+     "input-E",
+     "tab-preprocessor",
+     "203395.34014846664",
+     "29500"
+    ],
+    [
+     "input-v",
+     "tab-preprocessor",
+     "0.3",
+     "0.3"
+    ],
+    [
+     "input-G",
+     "tab-preprocessor",
+     "77910.75741280247",
+     "11300"
+    ],
+    [
+     "chk-cold-work",
+     "tab-preprocessor",
+     true,
+     true
+    ],
+    [
+     "select-member-type",
+     "tab-loads",
+     "roof-purlin",
+     "roof-purlin"
+    ],
+    [
+     "select-span-type",
+     "tab-loads",
+     "cont-3",
+     "cont-3"
+    ],
+    [
+     "config-n-spans",
+     "tab-loads",
+     "5",
+     "5"
+    ],
+    [
+     "config-spacing",
+     "tab-loads",
+     "1.0",
+     "3.28083989501"
+    ],
+    [
+     "span-tbl-sup[0]",
+     "tab-loads",
+     "P",
+     "P"
+    ],
+    [
+     "span-tbl-len[0]",
+     "tab-loads",
+     "5.00",
+     "16.4041994751"
+    ],
+    [
+     "span-tbl-lapr[0]",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "span-tbl-sup[1]",
+     "tab-loads",
+     "P",
+     "P"
+    ],
+    [
+     "span-tbl-len[1]",
+     "tab-loads",
+     "5.00",
+     "16.4041994751"
+    ],
+    [
+     "span-tbl-lapl[1]",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "span-tbl-lapr[1]",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "span-tbl-sup[2]",
+     "tab-loads",
+     "P",
+     "P"
+    ],
+    [
+     "span-tbl-len[2]",
+     "tab-loads",
+     "5.00",
+     "16.4041994751"
+    ],
+    [
+     "span-tbl-lapl[2]",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "span-tbl-lapr[2]",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "span-tbl-sup[3]",
+     "tab-loads",
+     "P",
+     "P"
+    ],
+    [
+     "span-tbl-lapl[3]",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "select-deck-type",
+     "tab-loads",
+     "none",
+     "none"
+    ],
+    [
+     "deck-t-panel",
+     "tab-loads",
+     "0.5",
+     "0.0196850393701"
+    ],
+    [
+     "deck-fastener-spacing",
+     "tab-loads",
+     "300",
+     "11.811023622"
+    ],
+    [
+     "deck-kphi-override",
+     "tab-loads",
+     "",
+     ""
+    ],
+    [
+     "deck-kx-override",
+     "tab-loads",
+     "",
+     ""
+    ],
+    [
+     "brace-points",
+     "tab-loads",
+     "",
+     ""
+    ],
+    [
+     "chk-i621-confirmed",
+     "tab-loads",
+     false,
+     false
+    ],
+    [
+     "deck-insulation",
+     "tab-loads",
+     "",
+     ""
+    ],
+    [
+     "deck-R-tested",
+     "tab-loads",
+     "",
+     ""
+    ],
+    [
+     "load-D-psf",
+     "tab-loads",
+     "0.3",
+     "6.26563026995"
+    ],
+    [
+     "load-Lr-psf",
+     "tab-loads",
+     "1.0",
+     "20.8854342332"
+    ],
+    [
+     "load-S-psf",
+     "tab-loads",
+     "0.5",
+     "10.4427171166"
+    ],
+    [
+     "load-Wu-psf",
+     "tab-loads",
+     "1.0",
+     "20.8854342332"
+    ],
+    [
+     "load-Wp-psf",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "load-L-psf",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "chk-pattern-loading",
+     "tab-loads",
+     true,
+     true
+    ],
+    [
+     "chk-lr-reduced",
+     "tab-loads",
+     false,
+     false
+    ],
+    [
+     "span-Ix-list",
+     "tab-loads",
+     "",
+     ""
+    ],
+    [
+     "design-P",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "design-V",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "design-Mx-pos",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "design-Mx",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "design-My",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "design-May-strength",
+     "tab-loads",
+     "0",
+     "0"
+    ],
+    [
+     "select-load-case",
+     "tab-design",
+     "compression",
+     "compression"
+    ],
+    [
+     "input-load-P",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "input-load-Mxx",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "input-load-Mzz",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "select-bc",
+     "tab-design",
+     "S-S",
+     "S-S"
+    ],
+    [
+     "input-len-min",
+     "tab-design",
+     "25.4",
+     "1"
+    ],
+    [
+     "input-len-max",
+     "tab-design",
+     "25400",
+     "1000"
+    ],
+    [
+     "input-len-n",
+     "tab-design",
+     "50",
+     "50"
+    ],
+    [
+     "input-neigs",
+     "tab-design",
+     "10",
+     "10"
+    ],
+    [
+     "chk-cfsm-enable",
+     "tab-design",
+     true,
+     true
+    ],
+    [
+     "chk-cfsm-G",
+     "tab-design",
+     true,
+     true
+    ],
+    [
+     "chk-cfsm-D",
+     "tab-design",
+     true,
+     true
+    ],
+    [
+     "chk-cfsm-L",
+     "tab-design",
+     true,
+     true
+    ],
+    [
+     "chk-cfsm-O",
+     "tab-design",
+     true,
+     true
+    ],
+    [
+     "plastic-fy",
+     "tab-design",
+     "295",
+     "42.7861326304"
+    ],
+    [
+     "vib-rho",
+     "tab-design",
+     "",
+     ""
+    ],
+    [
+     "vib-lengths",
+     "tab-design",
+     "",
+     ""
+    ],
+    [
+     "select-length",
+     "tab-design",
+     "",
+     ""
+    ],
+    [
+     "select-mode",
+     "tab-design",
+     "",
+     ""
+    ],
+    [
+     "design-fy",
+     "tab-design",
+     "295",
+     "42.7861326304"
+    ],
+    [
+     "design-fu",
+     "tab-design",
+     "400",
+     "58.0150950921"
+    ],
+    [
+     "select-design-method",
+     "tab-design",
+     "LRFD",
+     "LRFD"
+    ],
+    [
+     "design-KxLx",
+     "tab-design",
+     "3000",
+     "118.11023622"
+    ],
+    [
+     "design-KyLy",
+     "tab-design",
+     "3000",
+     "118.11023622"
+    ],
+    [
+     "design-KtLt",
+     "tab-design",
+     "3000",
+     "118.11023622"
+    ],
+    [
+     "design-Cb-pos",
+     "tab-design",
+     "1.0",
+     "1.0"
+    ],
+    [
+     "design-Lb-pos",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "design-Cb",
+     "tab-design",
+     "1.0",
+     "1.0"
+    ],
+    [
+     "design-Lb",
+     "tab-design",
+     "3000",
+     "118.11023622"
+    ],
+    [
+     "chk-beta-dist",
+     "tab-design",
+     true,
+     true
+    ],
+    [
+     "design-dist-M1M2",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "design-dist-Lm",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "design-Cmx",
+     "tab-design",
+     "1.00",
+     "1.00"
+    ],
+    [
+     "design-Cmy",
+     "tab-design",
+     "1.00",
+     "1.00"
+    ],
+    [
+     "design-wc-N",
+     "tab-design",
+     "89",
+     "3.50393700787"
+    ],
+    [
+     "design-wc-R",
+     "tab-design",
+     "4.8",
+     "0.188976377953"
+    ],
+    [
+     "design-wc-P",
+     "tab-design",
+     "",
+     ""
+    ],
+    [
+     "design-wc-support",
+     "tab-design",
+     "EOF",
+     "EOF"
+    ],
+    [
+     "design-wc-fastened",
+     "tab-design",
+     "fastened",
+     "fastened"
+    ],
+    [
+     "design-wc-web-config",
+     "tab-design",
+     "single",
+     "single"
+    ],
+    [
+     "design-wc-family",
+     "tab-design",
+     "auto",
+     "auto"
+    ],
+    [
+     "design-wc-flange-condition",
+     "tab-design",
+     "stiffened",
+     "stiffened"
+    ],
+    [
+     "design-wc-Lo",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "design-wc-edge-distance",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "design-wc-nwebs",
+     "tab-design",
+     "1",
+     "1"
+    ],
+    [
+     "design-wc-fastener-spacing",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "chk-inelastic-reserve",
+     "tab-design",
+     false,
+     false
+    ],
+    [
+     "chk-r-factor",
+     "tab-design",
+     false,
+     false
+    ],
+    [
+     "select-r-value",
+     "tab-design",
+     "0",
+     "0"
+    ],
+    [
+     "conn-lap-left",
+     "tab-connection",
+     "305",
+     "12.0078740157"
+    ],
+    [
+     "conn-lap-right",
+     "tab-connection",
+     "305",
+     "12.0078740157"
+    ],
+    [
+     "conn-Mu",
+     "tab-connection",
+     "0",
+     "0"
+    ],
+    [
+     "conn-Vu",
+     "tab-connection",
+     "0",
+     "0"
+    ],
+    [
+     "conn-fastener-type",
+     "tab-connection",
+     "screw",
+     "screw"
+    ],
+    [
+     "conn-fastener-dia",
+     "tab-connection",
+     "4.8",
+     "0.188976377953"
+    ],
+    [
+     "conn-n-rows",
+     "tab-connection",
+     "2",
+     "2"
+    ],
+    [
+     "conn-edge-dist",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-lap-Pnvs",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-single-type",
+     "tab-connection",
+     "screw",
+     "screw"
+    ],
+    [
+     "conn-t1",
+     "tab-connection",
+     "1.5",
+     "0.0590551181102"
+    ],
+    [
+     "conn-t2",
+     "tab-connection",
+     "1.5",
+     "0.0590551181102"
+    ],
+    [
+     "conn-d",
+     "tab-connection",
+     "4.8",
+     "0.188976377953"
+    ],
+    [
+     "conn-n",
+     "tab-connection",
+     "4",
+     "4"
+    ],
+    [
+     "conn-Fy",
+     "tab-connection",
+     "295",
+     "42.7861326304"
+    ],
+    [
+     "conn-Fu",
+     "tab-connection",
+     "400",
+     "58.0150950921"
+    ],
+    [
+     "conn-weld-L",
+     "tab-connection",
+     "50",
+     "1.96850393701"
+    ],
+    [
+     "conn-weld-size",
+     "tab-connection",
+     "3",
+     "0.11811023622"
+    ],
+    [
+     "conn-groove-type",
+     "tab-connection",
+     "complete",
+     "complete"
+    ],
+    [
+     "conn-Fub",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-Pnvs",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-dw",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-Fuf",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-Pu",
+     "tab-connection",
+     "0",
+     "0"
+    ],
+    [
+     "conn-Tu",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-e",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-s",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-member-case",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-width",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
+     "conn-j63-na",
+     "tab-connection",
+     false,
+     false
+    ]
+   ]
+  },
+  {
+   "id": "initialInputs.US",
+   "expect": "pin",
+   "value": {
+    "unitSystem": "US",
+    "analysisMethod": "DSM",
+    "fy": 42.7861326304,
+    "fu": 58.0150950921,
+    "designMethod": "LRFD",
+    "memberType": "roof-purlin",
+    "presteelGrade": "SGC400",
+    "fyLoad": 42.7861326304,
+    "fuPre": 58.0150950921,
+    "inputE": 29500,
+    "inputG": 11300,
+    "inputV": 0.3,
+    "plasticFy": 42.7861326304,
+    "spanType": "cont-3",
+    "nSpans": 5,
+    "spacing": 3.28083989501,
+    "loadD": 6.26563026995,
+    "loadLr": 20.8854342332,
+    "loadS": 10.4427171166,
+    "loadWu": 20.8854342332,
+    "loadWp": 0,
+    "loadL": 0,
+    "chkPatternLoading": true,
+    "chkLrReduced": false,
+    "spanIxIn4": null,
+    "deckType": "none",
+    "deckTPanel": 0.0196850393701,
+    "deckFastenerSpacing": 11.811023622,
+    "deckKphiOverride": null,
+    "deckKxOverride": null,
+    "bracePointsFt": null,
+    "chkI621Confirmed": false,
+    "deckInsulationIn": null,
+    "deckRTested": null,
+    "KxLx": 118.11023622,
+    "KyLy": 118.11023622,
+    "KtLt": 118.11023622,
+    "Lb": 118.11023622,
+    "Cb": 1,
+    "designLbPos": 0,
+    "designCbPos": 1,
+    "Cmx": 1,
+    "Cmy": 1,
+    "Pu": 0,
+    "Vu": 0,
+    "Mux": 0,
+    "designMxPos": 0,
+    "Muy": 0,
+    "MayStrength": 0,
+    "chkBetaDist": true,
+    "distM1M2": 0,
+    "distLm": 0,
+    "chkRFactor": false,
+    "rValue": "0",
+    "chkColdWork": true,
+    "chkInelasticReserve": false,
+    "wcN": 3.50393700787,
+    "wcR": 0.188976377953,
+    "wcP": null,
+    "wcSupport": "EOF",
+    "wcFastened": "fastened",
+    "wcWebConfig": "single",
+    "wcFamily": "auto",
+    "wcFlangeCondition": "stiffened",
+    "wcLo": 0,
+    "wcEdgeDistance": 0,
+    "wcNWebs": 1,
+    "wcFastenerSpacing": 0,
+    "templateType": "lippedc",
+    "tplH": 3.93700787402,
+    "tplB": 1.96850393701,
+    "tplD": 0.787401574803,
+    "tplT": 0.0905511811024,
+    "tplR": 0.157480314961,
+    "tplQlip": 90,
+    "analysisBC": "S-S",
+    "analysisLoadCase": "compression",
+    "analysisNeigs": 10,
+    "analysisLenMin": 1,
+    "analysisLenMax": 1000,
+    "analysisLenN": 50,
+    "analysisLoadPUs": 0,
+    "analysisLoadMxxUs": 0,
+    "analysisLoadMzzUs": 0,
+    "chkCfsmEnable": true,
+    "chkCfsmG": true,
+    "chkCfsmD": true,
+    "chkCfsmL": true,
+    "chkCfsmO": true,
+    "vibRho": null,
+    "vibLengths": null,
+    "connFastenerType": "screw",
+    "connSingleType": "screw",
+    "connGrooveType": "complete",
+    "connLapLeft": 12.0078740157,
+    "connLapRight": 12.0078740157,
+    "connMu": 0,
+    "connVu": 0,
+    "connFastenerDia": 0.188976377953,
+    "connNRows": 2,
+    "connEdgeDist": null,
+    "connLapPnvs": null,
+    "connT1": 0.0590551181102,
+    "connT2": 0.0590551181102,
+    "connD": 0.188976377953,
+    "connN": 4,
+    "connFy": 42.7861326304,
+    "connFu": 58.0150950921,
+    "connWeldL": 1.96850393701,
+    "connWeldSize": 0.11811023622,
+    "connFub": null,
+    "connFuf": null,
+    "connPnvs": null,
+    "connDw": null,
+    "connPu": 0,
+    "connTu": null,
+    "connE": null,
+    "connS": null,
+    "connMemberCase": "",
+    "connWidth": null,
+    "connJ63NotApplicable": false,
+    "spans": [
+     16.4041994751,
+     16.4041994751,
+     16.4041994751
+    ],
+    "supports": [
+     "P",
+     "P",
+     "P",
+     "P"
+    ],
+    "lapsPerSupport": [
+     {
+      "left": null,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "hostModel.initial",
+   "expect": "pin",
+   "value": {
+    "BC": "S-S",
+    "nlengths": 50,
+    "loadCase": "compression",
+    "loadFy_ksi": 42.78613263041172,
+    "sectionType": "C"
+   }
+  }
+ ]
+}

@@ -1,0 +1,96 @@
+{
+ "about": "K2 phase 0 golden — csd-model-differs. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
+ "recorded": "2026-11-22",
+ "entries": [
+  {
+   "id": "modelDiffers.US.diff",
+   "expect": "pin",
+   "value": {
+    "exactCount": 108,
+    "changed": {
+     "analysisBC": {
+      "kind": "changed",
+      "written": "C-C",
+      "saved": "S-S"
+     },
+     "analysisLenMax": {
+      "kind": "changed",
+      "written": 500,
+      "saved": 1000
+     },
+     "analysisLenMin": {
+      "kind": "changed",
+      "written": 0.5,
+      "saved": 1
+     },
+     "analysisLenN": {
+      "kind": "changed",
+      "written": 40,
+      "saved": 50
+     },
+     "analysisLoadCase": {
+      "kind": "changed",
+      "written": "bending_xx_pos",
+      "saved": "compression"
+     },
+     "analysisNeigs": {
+      "kind": "changed",
+      "written": 12,
+      "saved": 10
+     },
+     "inputE": {
+      "kind": "changed",
+      "written": 29000,
+      "saved": 29500
+     },
+     "inputG": {
+      "kind": "changed",
+      "written": 11200,
+      "saved": 11300
+     },
+     "inputV": {
+      "kind": "changed",
+      "written": 0.29,
+      "saved": 0.3
+     },
+     "templateType": {
+      "kind": "changed",
+      "written": "lippedz",
+      "saved": "lippedc"
+     },
+     "tplB": {
+      "kind": "changed",
+      "written": 2.25,
+      "saved": 1.968503937
+     },
+     "tplD": {
+      "kind": "changed",
+      "written": 0.91,
+      "saved": 0.7874015748
+     },
+     "tplH": {
+      "kind": "changed",
+      "written": 8,
+      "saved": 3.937007874
+     },
+     "tplQlip": {
+      "kind": "changed",
+      "written": 50,
+      "saved": 90
+     },
+     "tplR": {
+      "kind": "changed",
+      "written": 0.1875,
+      "saved": 0.157480315
+     },
+     "tplT": {
+      "kind": "changed",
+      "written": 0.059,
+      "saved": 0.0905511811
+     }
+    },
+    "maxRelFloat": 0
+   }
+  }
+ ]
+}

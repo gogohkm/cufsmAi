@@ -1,0 +1,36 @@
+{
+ "about": "K2 phase 0 golden — reload. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
+ "recorded": "2026-11-22",
+ "entries": [
+  {
+   "id": "before",
+   "expect": "pin",
+   "value": {
+    "lb": "77.7",
+    "mt": "flexure",
+    "tpl": "lippedz"
+   }
+  },
+  {
+   "id": "after",
+   "expect": "k2-change",
+   "reason": "K2: a page reload loses every input not yet saved (Lb 77.7 in, flexure) and the second webviewReady re-initialises the host model to the default section (lippedz 8 in → lippedc 100 mm) — the host state must survive and be pushed back",
+   "value": {
+    "lb": "3000",
+    "mt": "roof-purlin",
+    "unit": "SI",
+    "tpl": "lippedc",
+    "H_in": 3.937007874015748
+   }
+  },
+  {
+   "id": "reload.engine",
+   "expect": "k2-change",
+   "reason": "K2: the reload regenerates the default section in the engine",
+   "value": [
+    "generate_section",
+    "get_properties"
+   ]
+  }
+ ]
+}

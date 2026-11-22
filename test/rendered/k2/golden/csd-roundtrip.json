@@ -1,0 +1,1006 @@
+{
+ "about": "K2 phase 0 golden — csd-roundtrip. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
+ "recorded": "2026-11-22",
+ "entries": [
+  {
+   "id": "consistent.US.diff",
+   "expect": "pin",
+   "value": {
+    "exactCount": 124,
+    "changed": {},
+    "maxRelFloat": 0
+   }
+  },
+  {
+   "id": "consistent.US.dom",
+   "expect": "pin",
+   "value": {
+    "design-fy": "50",
+    "design-fu": "65",
+    "select-design-method": "ASD",
+    "select-member-type": "combined",
+    "input-steel-grade": "A653-50",
+    "input-fy": "50",
+    "input-fu": "65",
+    "input-E": "29000",
+    "input-G": "11200",
+    "input-v": "0.29",
+    "plastic-fy": "50",
+    "select-span-type": "cont-n",
+    "config-n-spans": "4",
+    "config-spacing": "5",
+    "load-D-psf": "3",
+    "load-Lr-psf": "20",
+    "load-S-psf": "25",
+    "load-Wu-psf": "34",
+    "load-Wp-psf": "10",
+    "load-L-psf": "40",
+    "chk-pattern-loading": false,
+    "chk-lr-reduced": true,
+    "span-Ix-list": "9.18, 7.76, 7.76, 9.18",
+    "select-deck-type": "through-fastened",
+    "deck-t-panel": "0.019",
+    "deck-fastener-spacing": "12",
+    "deck-kphi-override": "0.3",
+    "deck-kx-override": "1.27",
+    "brace-points": "6.25, 12.5",
+    "chk-i621-confirmed": true,
+    "deck-insulation": "3",
+    "deck-R-tested": "0.6",
+    "design-KxLx": "120",
+    "design-KyLy": "60",
+    "design-KtLt": "60",
+    "design-Lb": "72",
+    "design-Cb": "1.14",
+    "design-Lb-pos": "48",
+    "design-Cb-pos": "1.3",
+    "design-Cmx": "0.85",
+    "design-Cmy": "0.85",
+    "design-P": "5",
+    "design-V": "1.5",
+    "design-Mx": "40",
+    "design-Mx-pos": "30",
+    "design-My": "2",
+    "design-May-strength": "10",
+    "chk-beta-dist": false,
+    "design-dist-M1M2": "-0.5",
+    "design-dist-Lm": "60",
+    "chk-r-factor": true,
+    "select-r-value": "0.60",
+    "chk-cold-work": false,
+    "chk-inelastic-reserve": true,
+    "design-wc-N": "3.5",
+    "design-wc-R": "0.1875",
+    "design-wc-P": "2",
+    "design-wc-support": "IOF",
+    "design-wc-fastened": "unfastened",
+    "design-wc-web-config": "nested_z",
+    "design-wc-family": "Z",
+    "design-wc-flange-condition": "unstiffened",
+    "design-wc-Lo": "2",
+    "design-wc-edge-distance": "1.5",
+    "design-wc-nwebs": "2",
+    "design-wc-fastener-spacing": "12",
+    "select-template": "lippedz",
+    "tpl-H": "8",
+    "tpl-B": "2.25",
+    "tpl-D": "0.91",
+    "tpl-t": "0.059",
+    "tpl-r": "0.1875",
+    "tpl-qlip": "50",
+    "select-bc": "C-C",
+    "select-load-case": "bending_xx_pos",
+    "input-neigs": "12",
+    "input-len-min": "0.5",
+    "input-len-max": "500",
+    "input-len-n": "40",
+    "input-load-P": "5",
+    "input-load-Mxx": "12",
+    "input-load-Mzz": "1",
+    "chk-cfsm-enable": false,
+    "chk-cfsm-G": false,
+    "chk-cfsm-D": false,
+    "chk-cfsm-L": false,
+    "chk-cfsm-O": false,
+    "vib-rho": "7.4e-7",
+    "vib-lengths": "50, 100",
+    "conn-fastener-type": "bolt",
+    "conn-single-type": "bolt",
+    "conn-groove-type": "partial",
+    "conn-lap-left": "30",
+    "conn-lap-right": "42",
+    "conn-Mu": "52.5",
+    "conn-Vu": "0.9",
+    "conn-fastener-dia": "0.5",
+    "conn-n-rows": "3",
+    "conn-edge-dist": "1",
+    "conn-lap-Pnvs": "1.2",
+    "conn-t1": "0.059",
+    "conn-t2": "0.075",
+    "conn-d": "0.5",
+    "conn-n": "2",
+    "conn-Fy": "50",
+    "conn-Fu": "65",
+    "conn-weld-L": "2",
+    "conn-weld-size": "0.125",
+    "conn-Fub": "60",
+    "conn-Fuf": "125",
+    "conn-Pnvs": "1.5",
+    "conn-dw": "0.5",
+    "conn-Pu": "2",
+    "conn-Tu": "0.5",
+    "conn-e": "1",
+    "conn-s": "1.5",
+    "conn-member-case": "flat_sheet",
+    "conn-width": "4",
+    "conn-j63-na": true,
+    ".span-tbl-len": [
+     "20",
+     "25",
+     "25",
+     "20"
+    ],
+    ".span-tbl-sup": [
+     "P",
+     "R",
+     "P",
+     "R",
+     "P"
+    ],
+    ".span-tbl-lapl": [
+     "2.5",
+     "1",
+     "3.5",
+     "0"
+    ],
+    ".span-tbl-lapr": [
+     "0",
+     "3.5",
+     "1",
+     "2.5"
+    ],
+    "__unitSystem": "US"
+   }
+  },
+  {
+   "id": "consistent.US.saved",
+   "expect": "pin",
+   "value": {
+    "unitSystem": "US",
+    "analysisMethod": "DSM",
+    "fy": 50,
+    "fu": 65,
+    "designMethod": "ASD",
+    "memberType": "combined",
+    "presteelGrade": "A653-50",
+    "fyLoad": 50,
+    "fuPre": 65,
+    "inputE": 29000,
+    "inputG": 11200,
+    "inputV": 0.29,
+    "plasticFy": 50,
+    "spanType": "cont-n",
+    "nSpans": 4,
+    "spacing": 5,
+    "loadD": 3,
+    "loadLr": 20,
+    "loadS": 25,
+    "loadWu": 34,
+    "loadWp": 10,
+    "loadL": 40,
+    "chkPatternLoading": false,
+    "chkLrReduced": true,
+    "spanIxIn4": [
+     9.18,
+     7.76,
+     7.76,
+     9.18
+    ],
+    "deckType": "through-fastened",
+    "deckTPanel": 0.019,
+    "deckFastenerSpacing": 12,
+    "deckKphiOverride": 0.3,
+    "deckKxOverride": 1.27,
+    "bracePointsFt": [
+     6.25,
+     12.5
+    ],
+    "chkI621Confirmed": true,
+    "deckInsulationIn": 3,
+    "deckRTested": 0.6,
+    "KxLx": 120,
+    "KyLy": 60,
+    "KtLt": 60,
+    "Lb": 72,
+    "Cb": 1.14,
+    "designLbPos": 48,
+    "designCbPos": 1.3,
+    "Cmx": 0.85,
+    "Cmy": 0.85,
+    "Pu": 5,
+    "Vu": 1.5,
+    "Mux": 40,
+    "designMxPos": 30,
+    "Muy": 2,
+    "MayStrength": 10,
+    "chkBetaDist": false,
+    "distM1M2": -0.5,
+    "distLm": 60,
+    "chkRFactor": true,
+    "rValue": "0.60",
+    "chkColdWork": false,
+    "chkInelasticReserve": true,
+    "wcN": 3.5,
+    "wcR": 0.1875,
+    "wcP": 2,
+    "wcSupport": "IOF",
+    "wcFastened": "unfastened",
+    "wcWebConfig": "nested_z",
+    "wcFamily": "Z",
+    "wcFlangeCondition": "unstiffened",
+    "wcLo": 2,
+    "wcEdgeDistance": 1.5,
+    "wcNWebs": 2,
+    "wcFastenerSpacing": 12,
+    "templateType": "lippedz",
+    "tplH": 8,
+    "tplB": 2.25,
+    "tplD": 0.91,
+    "tplT": 0.059,
+    "tplR": 0.1875,
+    "tplQlip": 50,
+    "analysisBC": "C-C",
+    "analysisLoadCase": "bending_xx_pos",
+    "analysisNeigs": 12,
+    "analysisLenMin": 0.5,
+    "analysisLenMax": 500,
+    "analysisLenN": 40,
+    "analysisLoadPUs": 5,
+    "analysisLoadMxxUs": 12,
+    "analysisLoadMzzUs": 1,
+    "chkCfsmEnable": false,
+    "chkCfsmG": false,
+    "chkCfsmD": false,
+    "chkCfsmL": false,
+    "chkCfsmO": false,
+    "vibRho": 7.4e-7,
+    "vibLengths": [
+     50,
+     100
+    ],
+    "connFastenerType": "bolt",
+    "connSingleType": "bolt",
+    "connGrooveType": "partial",
+    "connLapLeft": 30,
+    "connLapRight": 42,
+    "connMu": 52.5,
+    "connVu": 0.9,
+    "connFastenerDia": 0.5,
+    "connNRows": 3,
+    "connEdgeDist": 1,
+    "connLapPnvs": 1.2,
+    "connT1": 0.059,
+    "connT2": 0.075,
+    "connD": 0.5,
+    "connN": 2,
+    "connFy": 50,
+    "connFu": 65,
+    "connWeldL": 2,
+    "connWeldSize": 0.125,
+    "connFub": 60,
+    "connFuf": 125,
+    "connPnvs": 1.5,
+    "connDw": 0.5,
+    "connPu": 2,
+    "connTu": 0.5,
+    "connE": 1,
+    "connS": 1.5,
+    "connMemberCase": "flat_sheet",
+    "connWidth": 4,
+    "connJ63NotApplicable": true,
+    "spans": [
+     20,
+     25,
+     25,
+     20
+    ],
+    "supports": [
+     "P",
+     "R",
+     "P",
+     "R",
+     "P"
+    ],
+    "lapsPerSupport": [
+     {
+      "left": null,
+      "right": 0
+     },
+     {
+      "left": 2.5,
+      "right": 3.5
+     },
+     {
+      "left": 1,
+      "right": 1
+     },
+     {
+      "left": 3.5,
+      "right": 2.5
+     },
+     {
+      "left": 0,
+      "right": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "consistent.SI.diff",
+   "expect": "pin",
+   "value": {
+    "exactCount": 77,
+    "changed": {
+     "MayStrength": {
+      "kind": "float-noise",
+      "written": 10,
+      "saved": 10.000000000033927
+     },
+     "Mux": {
+      "kind": "float-noise",
+      "written": 40,
+      "saved": 39.99999999995869
+     },
+     "Muy": {
+      "kind": "float-noise",
+      "written": 2,
+      "saved": 1.9999999999979345
+     },
+     "Pu": {
+      "kind": "float-noise",
+      "written": 5,
+      "saved": 4.999999999999439
+     },
+     "Vu": {
+      "kind": "float-noise",
+      "written": 1.5,
+      "saved": 1.4999999999998315
+     },
+     "analysisLoadMxxUs": {
+      "kind": "float-noise",
+      "written": 12,
+      "saved": 11.999999999987606
+     },
+     "analysisLoadMzzUs": {
+      "kind": "float-noise",
+      "written": 1,
+      "saved": 1.0000000000033926
+     },
+     "analysisLoadPUs": {
+      "kind": "float-noise",
+      "written": 5,
+      "saved": 4.999999999999439
+     },
+     "connFu": {
+      "kind": "float-noise",
+      "written": 65,
+      "saved": 65.0000000000082
+     },
+     "connFub": {
+      "kind": "float-noise",
+      "written": 60,
+      "saved": 59.999999999985256
+     },
+     "connFuf": {
+      "kind": "float-noise",
+      "written": 125,
+      "saved": 124.99999999999345
+     },
+     "connFy": {
+      "kind": "float-noise",
+      "written": 50,
+      "saved": 49.99999999993936
+     },
+     "connLapPnvs": {
+      "kind": "float-noise",
+      "written": 1.2,
+      "saved": 1.1999999999994155
+     },
+     "connMu": {
+      "kind": "float-noise",
+      "written": 52.5,
+      "saved": 52.500000000001094
+     },
+     "connPnvs": {
+      "kind": "float-noise",
+      "written": 1.5,
+      "saved": 1.4999999999998315
+     },
+     "connPu": {
+      "kind": "float-noise",
+      "written": 2,
+      "saved": 1.999999999999775
+     },
+     "connS": {
+      "kind": "float-noise",
+      "written": 1.5,
+      "saved": 1.5000000000000002
+     },
+     "connT1": {
+      "kind": "float-noise",
+      "written": 0.059,
+      "saved": 0.059000000000000004
+     },
+     "connT2": {
+      "kind": "float-noise",
+      "written": 0.075,
+      "saved": 0.07500000000000001
+     },
+     "connTu": {
+      "kind": "float-noise",
+      "written": 0.5,
+      "saved": 0.49999999999994377
+     },
+     "connVu": {
+      "kind": "float-noise",
+      "written": 0.9,
+      "saved": 0.8999999999989997
+     },
+     "deckFastenerSpacing": {
+      "kind": "float-noise",
+      "written": 12,
+      "saved": 12.000000000000002
+     },
+     "deckInsulationIn": {
+      "kind": "float-noise",
+      "written": 3,
+      "saved": 3.0000000000000004
+     },
+     "deckKphiOverride": {
+      "kind": "float-noise",
+      "written": 0.3,
+      "saved": 0.30000000000041593
+     },
+     "deckKxOverride": {
+      "kind": "float-noise",
+      "written": 1.27,
+      "saved": 1.2699999999994462
+     },
+     "designLbPos": {
+      "kind": "float-noise",
+      "written": 48,
+      "saved": 48.00000000000001
+     },
+     "designMxPos": {
+      "kind": "float-noise",
+      "written": 30,
+      "saved": 30.000000000013273
+     },
+     "fu": {
+      "kind": "float-noise",
+      "written": 65,
+      "saved": 65.0000000000082
+     },
+     "fuPre": {
+      "kind": "float-noise",
+      "written": 65,
+      "saved": 65.0000000000082
+     },
+     "inputE": {
+      "kind": "float-noise",
+      "written": 29000,
+      "saved": 28999.999999726973
+     },
+     "inputG": {
+      "kind": "float-noise",
+      "written": 11200,
+      "saved": 11199.99999949445
+     },
+     "lapsPerSupport": {
+      "kind": "float-noise",
+      "written": [
+       {
+        "left": null,
+        "right": 0
+       },
+       {
+        "left": 2.5,
+        "right": 3.5
+       },
+       {
+        "left": 1,
+        "right": 1
+       },
+       {
+        "left": 3.5,
+        "right": 2.5
+       },
+       {
+        "left": 0,
+        "right": null
+       }
+      ],
+      "saved": [
+       {
+        "left": null,
+        "right": 0
+       },
+       {
+        "left": 2.5,
+        "right": 3.4999999999999996
+       },
+       {
+        "left": 1,
+        "right": 1
+       },
+       {
+        "left": 3.4999999999999996,
+        "right": 2.5
+       },
+       {
+        "left": 0,
+        "right": null
+       }
+      ]
+     },
+     "loadD": {
+      "kind": "float-noise",
+      "written": 3,
+      "saved": 2.9999999999998437
+     },
+     "loadL": {
+      "kind": "float-noise",
+      "written": 40,
+      "saved": 39.9999999999283
+     },
+     "loadLr": {
+      "kind": "float-noise",
+      "written": 20,
+      "saved": 20.00000000000592
+     },
+     "loadS": {
+      "kind": "float-noise",
+      "written": 25,
+      "saved": 25.000000000033506
+     },
+     "loadWp": {
+      "kind": "float-noise",
+      "written": 10,
+      "saved": 9.999999999992518
+     },
+     "loadWu": {
+      "kind": "float-noise",
+      "written": 34,
+      "saved": 33.999999999970385
+     },
+     "spanIxIn4": {
+      "kind": "float-noise",
+      "written": [
+       9.18,
+       7.76,
+       7.76,
+       9.18
+      ],
+      "saved": [
+       9.179989219920161,
+       7.760009940008722,
+       7.760009940008722,
+       9.179989219920161
+      ]
+     },
+     "tplR": {
+      "kind": "float-noise",
+      "written": 0.1875,
+      "saved": 0.18750000000000003
+     },
+     "tplT": {
+      "kind": "float-noise",
+      "written": 0.059,
+      "saved": 0.059000000000000004
+     },
+     "vibRho": {
+      "kind": "float-noise",
+      "written": 7.4e-7,
+      "saved": 7.400000000000958e-7
+     },
+     "wcEdgeDistance": {
+      "kind": "float-noise",
+      "written": 1.5,
+      "saved": 1.5000000000000002
+     },
+     "wcFastenerSpacing": {
+      "kind": "float-noise",
+      "written": 12,
+      "saved": 12.000000000000002
+     },
+     "wcN": {
+      "kind": "float-noise",
+      "written": 3.5,
+      "saved": 3.5000000000000004
+     },
+     "wcP": {
+      "kind": "float-noise",
+      "written": 2,
+      "saved": 1.999999999999775
+     },
+     "wcR": {
+      "kind": "float-noise",
+      "written": 0.1875,
+      "saved": 0.18750000000000003
+     }
+    },
+    "maxRelFloat": 4.5138384458758603e-11
+   }
+  },
+  {
+   "id": "consistent.SI.dom",
+   "expect": "pin",
+   "value": {
+    "design-fy": "344.73786465841806",
+    "design-fu": "448.159224056",
+    "select-design-method": "ASD",
+    "select-member-type": "combined",
+    "input-steel-grade": "A653-50",
+    "input-fy": "344.73786465841806",
+    "input-fu": "448.159224056",
+    "input-E": "199947.9615",
+    "input-G": "77221.28168",
+    "input-v": "0.29",
+    "plastic-fy": "344.73786465841806",
+    "select-span-type": "cont-n",
+    "config-n-spans": "4",
+    "config-spacing": "1.524",
+    "load-D-psf": "0.143640776941",
+    "load-Lr-psf": "0.957605179607",
+    "load-S-psf": "1.19700647451",
+    "load-Wu-psf": "1.62792880533",
+    "load-Wp-psf": "0.478802589803",
+    "load-L-psf": "1.91521035921",
+    "chk-pattern-loading": false,
+    "chk-lr-reduced": true,
+    "span-Ix-list": "3821000, 3229960, 3229960, 3821000",
+    "select-deck-type": "through-fastened",
+    "deck-t-panel": "0.4826",
+    "deck-fastener-spacing": "304.8",
+    "deck-kphi-override": "1.33446648458",
+    "deck-kx-override": "8756.34176232",
+    "brace-points": "1.905, 3.81",
+    "chk-i621-confirmed": true,
+    "deck-insulation": "76.2",
+    "deck-R-tested": "0.6",
+    "design-KxLx": "3048",
+    "design-KyLy": "1524",
+    "design-KtLt": "1524",
+    "design-Lb": "1828.8",
+    "design-Cb": "1.14",
+    "design-Lb-pos": "1219.2",
+    "design-Cb-pos": "1.3",
+    "design-Cmx": "0.85",
+    "design-Cmy": "0.85",
+    "design-P": "22.2411080763",
+    "design-V": "6.67233242289",
+    "design-Mx": "4.5193931611",
+    "design-Mx-pos": "3.38954487083",
+    "design-My": "0.225969658055",
+    "design-May-strength": "1.12984829028",
+    "chk-beta-dist": false,
+    "design-dist-M1M2": "-0.5",
+    "design-dist-Lm": "1524",
+    "chk-r-factor": true,
+    "select-r-value": "0.60",
+    "chk-cold-work": false,
+    "chk-inelastic-reserve": true,
+    "design-wc-N": "88.9",
+    "design-wc-R": "4.7625",
+    "design-wc-P": "8.89644323052",
+    "design-wc-support": "IOF",
+    "design-wc-fastened": "unfastened",
+    "design-wc-web-config": "nested_z",
+    "design-wc-family": "Z",
+    "design-wc-flange-condition": "unstiffened",
+    "design-wc-Lo": "50.8",
+    "design-wc-edge-distance": "38.1",
+    "design-wc-nwebs": "2",
+    "design-wc-fastener-spacing": "304.8",
+    "select-template": "lippedz",
+    "tpl-H": "203.2",
+    "tpl-B": "57.15",
+    "tpl-D": "23.114",
+    "tpl-t": "1.4986",
+    "tpl-r": "4.7625",
+    "tpl-qlip": "50",
+    "select-bc": "C-C",
+    "select-load-case": "bending_xx_pos",
+    "input-neigs": "12",
+    "input-len-min": "12.7",
+    "input-len-max": "12700",
+    "input-len-n": "40",
+    "input-load-P": "22.2411080763",
+    "input-load-Mxx": "1.35581794833",
+    "input-load-Mzz": "0.112984829028",
+    "chk-cfsm-enable": false,
+    "chk-cfsm-G": false,
+    "chk-cfsm-D": false,
+    "chk-cfsm-L": false,
+    "chk-cfsm-O": false,
+    "vib-rho": "7908.30243187",
+    "vib-lengths": "1270, 2540",
+    "conn-fastener-type": "bolt",
+    "conn-single-type": "bolt",
+    "conn-groove-type": "partial",
+    "conn-lap-left": "762",
+    "conn-lap-right": "1066.8",
+    "conn-Mu": "5.93170352395",
+    "conn-Vu": "4.00339945373",
+    "conn-fastener-dia": "12.7",
+    "conn-n-rows": "3",
+    "conn-edge-dist": "25.4",
+    "conn-lap-Pnvs": "5.33786593831",
+    "conn-t1": "1.4986",
+    "conn-t2": "1.905",
+    "conn-d": "12.7",
+    "conn-n": "2",
+    "conn-Fy": "344.737864658",
+    "conn-Fu": "448.159224056",
+    "conn-weld-L": "50.8",
+    "conn-weld-size": "3.175",
+    "conn-Fub": "413.68543759",
+    "conn-Fuf": "861.844661646",
+    "conn-Pnvs": "6.67233242289",
+    "conn-dw": "12.7",
+    "conn-Pu": "8.89644323052",
+    "conn-Tu": "2.22411080763",
+    "conn-e": "25.4",
+    "conn-s": "38.1",
+    "conn-member-case": "flat_sheet",
+    "conn-width": "101.6",
+    "conn-j63-na": true,
+    ".span-tbl-len": [
+     "6.096",
+     "7.62",
+     "7.62",
+     "6.096"
+    ],
+    ".span-tbl-sup": [
+     "P",
+     "R",
+     "P",
+     "R",
+     "P"
+    ],
+    ".span-tbl-lapl": [
+     "0.762",
+     "0.3048",
+     "1.0668",
+     "0"
+    ],
+    ".span-tbl-lapr": [
+     "0",
+     "1.0668",
+     "0.3048",
+     "0.762"
+    ],
+    "__unitSystem": "SI"
+   }
+  },
+  {
+   "id": "consistent.SI.saved",
+   "expect": "pin",
+   "value": {
+    "unitSystem": "SI",
+    "analysisMethod": "DSM",
+    "fy": 50,
+    "fu": 65.0000000000082,
+    "designMethod": "ASD",
+    "memberType": "combined",
+    "presteelGrade": "A653-50",
+    "fyLoad": 50,
+    "fuPre": 65.0000000000082,
+    "inputE": 28999.999999726973,
+    "inputG": 11199.99999949445,
+    "inputV": 0.29,
+    "plasticFy": 50,
+    "spanType": "cont-n",
+    "nSpans": 4,
+    "spacing": 5,
+    "loadD": 2.9999999999998437,
+    "loadLr": 20.00000000000592,
+    "loadS": 25.000000000033506,
+    "loadWu": 33.999999999970385,
+    "loadWp": 9.999999999992518,
+    "loadL": 39.9999999999283,
+    "chkPatternLoading": false,
+    "chkLrReduced": true,
+    "spanIxIn4": [
+     9.179989219920161,
+     7.760009940008722,
+     7.760009940008722,
+     9.179989219920161
+    ],
+    "deckType": "through-fastened",
+    "deckTPanel": 0.019,
+    "deckFastenerSpacing": 12.000000000000002,
+    "deckKphiOverride": 0.30000000000041593,
+    "deckKxOverride": 1.2699999999994462,
+    "bracePointsFt": [
+     6.25,
+     12.5
+    ],
+    "chkI621Confirmed": true,
+    "deckInsulationIn": 3.0000000000000004,
+    "deckRTested": 0.6,
+    "KxLx": 120,
+    "KyLy": 60,
+    "KtLt": 60,
+    "Lb": 72,
+    "Cb": 1.14,
+    "designLbPos": 48.00000000000001,
+    "designCbPos": 1.3,
+    "Cmx": 0.85,
+    "Cmy": 0.85,
+    "Pu": 4.999999999999439,
+    "Vu": 1.4999999999998315,
+    "Mux": 39.99999999995869,
+    "designMxPos": 30.000000000013273,
+    "Muy": 1.9999999999979345,
+    "MayStrength": 10.000000000033927,
+    "chkBetaDist": false,
+    "distM1M2": -0.5,
+    "distLm": 60,
+    "chkRFactor": true,
+    "rValue": "0.60",
+    "chkColdWork": false,
+    "chkInelasticReserve": true,
+    "wcN": 3.5000000000000004,
+    "wcR": 0.18750000000000003,
+    "wcP": 1.999999999999775,
+    "wcSupport": "IOF",
+    "wcFastened": "unfastened",
+    "wcWebConfig": "nested_z",
+    "wcFamily": "Z",
+    "wcFlangeCondition": "unstiffened",
+    "wcLo": 2,
+    "wcEdgeDistance": 1.5000000000000002,
+    "wcNWebs": 2,
+    "wcFastenerSpacing": 12.000000000000002,
+    "templateType": "lippedz",
+    "tplH": 8,
+    "tplB": 2.25,
+    "tplD": 0.91,
+    "tplT": 0.059000000000000004,
+    "tplR": 0.18750000000000003,
+    "tplQlip": 50,
+    "analysisBC": "C-C",
+    "analysisLoadCase": "bending_xx_pos",
+    "analysisNeigs": 12,
+    "analysisLenMin": 0.5,
+    "analysisLenMax": 500,
+    "analysisLenN": 40,
+    "analysisLoadPUs": 4.999999999999439,
+    "analysisLoadMxxUs": 11.999999999987606,
+    "analysisLoadMzzUs": 1.0000000000033926,
+    "chkCfsmEnable": false,
+    "chkCfsmG": false,
+    "chkCfsmD": false,
+    "chkCfsmL": false,
+    "chkCfsmO": false,
+    "vibRho": 7.400000000000958e-7,
+    "vibLengths": [
+     50,
+     100
+    ],
+    "connFastenerType": "bolt",
+    "connSingleType": "bolt",
+    "connGrooveType": "partial",
+    "connLapLeft": 30,
+    "connLapRight": 42,
+    "connMu": 52.500000000001094,
+    "connVu": 0.8999999999989997,
+    "connFastenerDia": 0.5,
+    "connNRows": 3,
+    "connEdgeDist": 1,
+    "connLapPnvs": 1.1999999999994155,
+    "connT1": 0.059000000000000004,
+    "connT2": 0.07500000000000001,
+    "connD": 0.5,
+    "connN": 2,
+    "connFy": 49.99999999993936,
+    "connFu": 65.0000000000082,
+    "connWeldL": 2,
+    "connWeldSize": 0.125,
+    "connFub": 59.999999999985256,
+    "connFuf": 124.99999999999345,
+    "connPnvs": 1.4999999999998315,
+    "connDw": 0.5,
+    "connPu": 1.999999999999775,
+    "connTu": 0.49999999999994377,
+    "connE": 1,
+    "connS": 1.5000000000000002,
+    "connMemberCase": "flat_sheet",
+    "connWidth": 4,
+    "connJ63NotApplicable": true,
+    "spans": [
+     20,
+     25,
+     25,
+     20
+    ],
+    "supports": [
+     "P",
+     "R",
+     "P",
+     "R",
+     "P"
+    ],
+    "lapsPerSupport": [
+     {
+      "left": null,
+      "right": 0
+     },
+     {
+      "left": 2.5,
+      "right": 3.4999999999999996
+     },
+     {
+      "left": 1,
+      "right": 1
+     },
+     {
+      "left": 3.4999999999999996,
+      "right": 2.5
+     },
+     {
+      "left": 0,
+      "right": null
+     }
+    ]
+   }
+  },
+  {
+   "id": "coupled.dom",
+   "expect": "pin",
+   "value": {
+    "input-steel-grade": "",
+    "input-fy": "50",
+    "input-fu": "60",
+    "design-fy": "50",
+    "design-fu": "65",
+    "plastic-fy": "50",
+    "conn-Fy": "50",
+    "conn-Fu": "65"
+   }
+  },
+  {
+   "id": "coupled.saved",
+   "expect": "pin",
+   "value": {
+    "presteelGrade": "",
+    "fy": 50,
+    "fu": 65,
+    "fyLoad": 50,
+    "fuPre": 60,
+    "plasticFy": 50,
+    "connFy": 50,
+    "connFu": 65
+   }
+  },
+  {
+   "id": "rContinuous",
+   "expect": "defect",
+   "reason": "D-1: the file keeps only the option value \"0.70\"; two options share it (simple / continuous), so the span condition sent to the engine (span_type) can change on reopen",
+   "value": {
+    "before": {
+     "value": "0.70",
+     "selectedIndex": 6,
+     "span": "continuous"
+    },
+    "after": {
+     "value": "0.70",
+     "selectedIndex": 1,
+     "span": "simple"
+    },
+    "saved": "0.70"
+   }
+  }
+ ]
+}
