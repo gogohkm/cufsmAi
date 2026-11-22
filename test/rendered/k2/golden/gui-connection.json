@@ -38,12 +38,22 @@
   },
   {
    "id": "editAfterResult",
-   "expect": "defect",
-   "reason": "D-4: tab-connection has no change listener — after t1 / n change the old connection (and lap) verdict stays on screen as if current",
+   "expect": "pin",
+   "reason": "D-4 고침: ④ 접합부 탭의 칸을 고치면 connection 범위(단일 접합 · 랩 결과)를 지운다",
    "value": {
-    "invalidateSent": false,
-    "cardUnchanged": true
-   }
+    "invalidateSent": true,
+    "cardUnchanged": false
+   },
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "defect",
+      "reason": "D-4: tab-connection has no change listener — after t1 / n change the old connection (and lap) verdict stays on screen as if current"
+     },
+     "date": "2026-11-22"
+    }
+   ]
   }
  ]
 }

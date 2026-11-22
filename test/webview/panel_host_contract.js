@@ -612,7 +612,10 @@ async function scenarioK4aLoadsAndLedger(ctx) {
   assert(!la.error, la.error);
   const lac = posted(p, 'loadAnalysisComplete');
   assert.strictEqual(lac.length, 1, 'K4a: an MCP load analysis posts loadAnalysisComplete once');
-  assert.deepStrictEqual(lac[0].data, JSON.parse(JSON.stringify(la)), 'the page gets the same result the AI got');
+  // K2-5: MCP 의 응답에는 검토 상태에 쓴 것(case_*)이 더 붙는다 — 결과 자체는 화면과 같다
+  const laResult = Object.fromEntries(Object.entries(JSON.parse(JSON.stringify(la))).filter(([k]) => !k.startsWith('case_')));
+  assert.deepStrictEqual(lac[0].data, laResult, 'the page gets the same result the AI got');
+  assert(Number.isInteger(la.case_rev), 'K2-5: the MCP reply carries the case revision');
   let st = p.getStatus();
   assert(st.results.load_analysis && st.results.load_analysis.at, 'status: load analysis is current');
   assert.strictEqual(st.results.member_design, null, 'a load analysis with new inputs drops the member design (as the GUI does)');

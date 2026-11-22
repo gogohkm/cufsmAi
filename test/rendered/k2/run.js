@@ -66,8 +66,14 @@ async function caseInvariant(ctx, name) {
   const diff = Object.keys(page).filter((k) => JSON.stringify(page[k]) !== JSON.stringify(host[k]));
   if (diff.length) { caseProblems.push(`${name}: host state ≠ page fields: ${diff.map((k) => `${k} host ${JSON.stringify(host[k])} page ${JSON.stringify(page[k])}`).join('; ').slice(0, 900)}`); }
   for (const x of c.shadow.filter((y) => !y.same)) {
-    caseProblems.push(`${name}: shadow ${x.what}: page ${String(x.page).slice(0, 300)}
-      host ${String(x.host).slice(0, 300)}`);
+    // 다른 키만 보인다(요청이 길다)
+    let keys = '';
+    try {
+      const pg = JSON.parse(x.page); const ho = JSON.parse(x.host);
+      keys = [...new Set([...Object.keys(pg), ...Object.keys(ho)])].filter((k) => JSON.stringify(pg[k]) !== JSON.stringify(ho[k]))
+        .map((k) => `${k}: page ${JSON.stringify(pg[k])} host ${JSON.stringify(ho[k])}`).join('; ');
+    } catch (e) { keys = String(e); }
+    caseProblems.push(`${name}: shadow ${x.what}: ${keys.slice(0, 900)}`);
   }
   if (c.helloMismatch && c.helloMismatch.length) { caseProblems.push(`${name}: initial values ≠ table: ${c.helloMismatch.join('; ')}`); }
   caseChecked.push({ name, shadow: c.shadow.length, rev: c.state.rev });
@@ -323,7 +329,8 @@ async function phaseMcp() {
       g.check('gui.runAnalysis.hostLoadFy_ksi', ctx.panel.__testGetState().model.loadFy, { expect: 'k2-change', reason: 'K2: host reference stress after the GUI run (was 50 from MCP)' });
       // 「설계 검토 실행」: 화면의 부재 유형(처음 값 roof-purlin — 자동 계산)으로 화면의 하중 · 경간 처음 값 퍼린 설계가 돈다
       await ctx.tab('design');
-      await pinStep(ctx, g, 'gui.runDesign', () => K.clickAndWait(ctx, '#btn-run-design', 'designPurlinResult', 900000), {
+      // K2-5: 결과 메시지는 그때의 부재 유형에 따라(전: 퍼린 — designPurlinResult, K2 뒤: MCP 가 정한 압축 — designResult)
+      await pinStep(ctx, g, 'gui.runDesign', () => K.clickAndWait(ctx, '#btn-run-design', ['designPurlinResult', 'designResult'], 900000), {
         expect: 'k2-change', reason: K2_GUI + ' — the page runs a roof-purlin load-analysis design with the page defaults instead of the compression check MCP set',
         texts: ['design-summary'], textExpect: 'k2-change', textReason: 'K2: the card then shows a purlin result for conditions nobody set' });
     });
@@ -344,7 +351,7 @@ async function phaseMcp() {
         { design_method: 'LRFD', Fy: 50, Fu: 65, Lb: 96, Cb: 1.14, Mu: 40, Vu: 1, wc_N: 3.5, wc_R: 0.1875 },
         { inputsExpect: 'k2-change', inputsReason: K2_INPUTS + ' — Lb 96, Cb 1.14, Mu 40, Vu 1, wc_N 3.5, wc_R 0.1875 do not reach the page', texts: ['design-summary'] });
       await ctx.tab('design');
-      await pinStep(ctx, g, 'gui.runDesign', () => K.clickAndWait(ctx, '#btn-run-design', 'designResult'), {
+      await pinStep(ctx, g, 'gui.runDesign', () => K.clickAndWait(ctx, '#btn-run-design', ['designResult', 'designPurlinResult']), {
         expect: 'k2-change', reason: K2_GUI + ' — the GUI design sends the page Lb 118.11 in · Cb 1 · Mu 0 · Fy 42.79, not what MCP set',
         texts: ['design-summary'], textExpect: 'k2-change', textReason: 'K2: the card then shows the page-field result' });
       const f = path.join(K.OUT, 'csd', 'mcp-beam.csd');

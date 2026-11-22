@@ -14,7 +14,7 @@ import * as http from "http";
 import {
     convertInputSI, convertOutputSIDeep, TEXT_UNITS_NOTE, SI_INPUT_TABLES,
     SI_OUT_MEMBER, SI_OUT_PROPS, SI_OUT_LOADS, SI_OUT_DECK, SI_OUT_VIBRATION, SI_OUT_GET_DSM,
-    SI_OUT_PURLIN, SI_OUT_REPORT, SI_OUT_VALIDATE, SI_OUT_DESIGN_CHECK,
+    SI_OUT_PURLIN, SI_OUT_REPORT, SI_OUT_VALIDATE, SI_OUT_DESIGN_CHECK, caseValueToSI,
     type Table,
 } from "./siUnits";
 import { connectionModeFromEnv, createHostConnection, type HostTarget } from "./hostConnection";
@@ -213,10 +213,27 @@ function engineArgs(tool: string, args: Record<string, any>): Record<string, any
  */
 function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, detail?: string) {
     if (!r || typeof r !== 'object' || Array.isArray(r)) { return json(r); }
+    // K2-5: 설계 도구가 검토 상태에서 바꾼 사람의 값 — 키마다 단위 종류가 있다(SI 면 그것으로 바꾸고, 표 변환에서는 뺀다)
+    if (Array.isArray(r.case_inputs_replaced)) {
+        const replaced = r.case_inputs_replaced.map((x: any) => (units === 'SI' && x && x.unit_kind
+            ? { ...x, previous: caseValueToSI(x.previous, x.unit_kind), units: 'SI' } : { ...x, units: 'US' }));
+        const { case_inputs_replaced: _cr, ...restR } = r;
+        void _cr;
+        r = { ...restR, __case_replaced: replaced };
+    }
+    const done = (o: any) => {
+        if (!o || typeof o !== 'object' || !('__case_replaced' in o)) { return o; }
+        const { __case_replaced, ...restO } = o;
+        return { ...restO, case_inputs_replaced: __case_replaced };
+    };
     const sh = (v: any) => (shape && !v.error ? shape(v, (detail as Detail) || 'summary') : v);
-    if (units !== 'SI' || !table) { return json({ ...sh(r), units: 'US' }); }
-    const { value, unconverted } = convertOutputSIDeep(r, table);
+    if (units !== 'SI' || !table) { return json(done({ ...sh(r), units: 'US' })); }
+    const held = r.__case_replaced;
+    const { __case_replaced: _h, ...forTable } = r;
+    void _h;
+    const { value, unconverted } = convertOutputSIDeep(forTable, table);
     const out: any = { ...sh(value), units: 'SI', text_units: 'US', units_note: TEXT_UNITS_NOTE };
+    if (held !== undefined) { out.case_inputs_replaced = held; }
     if (typeof out.report === 'string') {
         out.report = '[UNITS: this report text is in US customary units (in, kips, kip-in, ksi); '
             + 'the numeric fields of this response are SI]\n' + out.report;
@@ -246,7 +263,8 @@ type Detail = 'summary' | 'checks' | 'full';
 type Shaper = (v: any, detail: Detail) => any;
 
 /** 요약에도 늘 그대로 싣는 키 — 판정과 함께 보고해야 하는 글 · 판정의 뜻 · 단위 안내 · 반력. */
-const KEEP_ALWAYS = new Set(['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'host_warnings',
+const KEEP_ALWAYS = new Set(['case_rev', 'case_inputs_written', 'case_inputs_replaced', '__case_replaced', 'case_inputs_not_written', 'case_note',
+    'case_check', 'warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'host_warnings',
     'dsm_warning', 'dsm_warnings', 'dsm_error', 'load_not_evaluated', 'notes', 'error', 'force_model', 'spec_sections',
     'restart_notice', 'units', 'text_units', 'units_note', 'si_unconverted', 'si_unconverted_note', 'governing',
     'i621_check', 'deck', 'wc_reactions', 'uplift_reactions']);
@@ -570,6 +588,12 @@ VERDICTS. pass=true: all applicable limit states evaluated and satisfied. pass=f
 
 REPLIES. Design tools (aisi_design_*, design_connection, design_lap_connection, design_purlin, generate_report, validate_design) answer with a summary by default: the verdict, the governing checks (id, clause, name, demand, capacity, ratio, location, combination), one line per check, and all warnings / assumptions / scope_notes / not_evaluated — report those. Ask for more only when needed: detail='checks' (every check with demand / nominal / capacity), detail='full' (everything, large), or get_design_check for one check with its calculation steps (quote the steps from there, never reconstruct them). analyze_loads, run_plastic_surface and run_vibration leave out long number arrays unless detail='full'. Each reply's "more" field says what was left out.
 
+CASE INPUTS. The design, load and connection inputs on the StCFSD screen are the case state of the open review (.csd). Read them with get_case_inputs (value, unit, and who set each — sources: default, user, ai, file, load-analysis, mirror). Three ways to work, choose deliberately:
+(1) A design tool with arguments (aisi_design_*, design_purlin, analyze_loads, design_connection, design_lap_connection) computes with exactly the arguments you pass and then REPLACES that tool's input group on the screen with them — inputs of that group you leave out become blank ("AI: 주지 않음"). Material Fy/Fu, design method and member type change only when you pass them. The reply lists case_inputs_replaced: values the person (or the opened file, or the load analysis) had set that you replaced, with the previous value — tell the person, and restore one with set_case_inputs if that was not intended.
+(2) set_case_inputs changes individual fields only, without computing; results that depended on them are invalidated (re-run them).
+(3) run_case_check computes what is on the screen — the same request as the screen's button — without changing any input. To check the person's current setup use run_case_check, never a design tool with guessed arguments.
+The section, material E/ν/G and the analysis conditions belong to the model (set_section_template, set_material, set_boundary_condition, set_lengths, set_load_case, run_analysis). A reference stress set with set_load_case fy is shown next to the analysis and used by the screen's analysis run until the person changes Fy. get_status reports case.dirty (unsaved changes) and case.rev.
+
 VIEW. get_view says what the person is looking at in StCFSD (use it for "this"); focus asks the screen to show an item by the same ids. Neither changes the model; the screen may decline to follow. get_status lists results the program deleted because their inputs changed (invalidated) — re-run those, never quote their old numbers.
 
 NOTICES. Always report warnings, assumptions and scope_notes to the user with the verdict. In-house assumptions that are not specification provisions — e.g. the lap-splice fastener force model (force_model), default fastener values in kx, I6.2.1 conditions confirmed by the user — must be stated to the user as assumptions.
@@ -633,6 +657,53 @@ const VIEW_ITEM = z.object({
     scope: z.enum(['member', 'purlin', 'connection', 'lap']).optional().describe("check only (required): which result holds it — member (aisi_design_*), purlin (design_purlin), connection (design_connection / aisi_design_connection), lap (design_lap_connection)"),
     location: z.record(z.string(), z.any()).optional().describe("check: its `location` as given in design_checks (for design_purlin {region, check_point}, e.g. {region: 'negative-2', check_point: 'support 2'}); otherwise optional context. Kept as given (US units)."),
 });
+
+// ============================================================
+// 1c. CASE — 검토 대상의 입력(K2, docs/implementation/20261123-k2-design.md §5)
+//     값은 US 내부값(units='SI' 면 mm · MPa · kN · kN-m · kPa · m …). 응답은 작다(값 약 130개) — 요약 규칙(12 KB) 안.
+// ============================================================
+const CASE_UNITS = z.enum(['US', 'SI']).optional().describe("'US' (default): in, ft (spans, spacing, brace points, laps), ksi, kips, kip-in, psf, in⁴. 'SI': mm, m, MPa, kN, kN-m, kPa, mm⁴.");
+
+server.tool("get_case_inputs",
+    "The design / load / connection inputs of the open review as shown on the StCFSD screen (the case state): inputs {key: value} (null = blank / not given), spans {spans, supports, lapsPerSupport}, unit_of {key: unit}, sources {key: default | user | ai | file | load-analysis | mirror}, model_inputs (section template / dimensions, E · ν · G, analysis conditions — read only here, they belong to the model), mcp_only (design-tool arguments that have no screen field, by tool), rev (case revision) and dirty (unsaved changes, dirty_since). Keys are the .csd keys (e.g. Lb, Cb, Mux, wcN, spacing, loadD, connT1). Reading changes nothing.",
+    {
+        keys: z.array(z.string().min(1).max(64)).max(200).optional().describe("Only these keys (omit = all)"),
+        units: CASE_UNITS,
+    },
+    async (args) => json(await callBridgePost('/action', { action: 'get_case_inputs', ...args }))
+);
+
+server.tool("set_case_inputs",
+    "Change individual case inputs on the StCFSD screen without computing anything (the person sees them at once). Only the keys you pass change (merge); the reply lists accepted and rejected keys (unknown key, not a valid option or number, a model key — section / material E,ν,G / analysis conditions use their own tools) and which results were invalidated because of the change (re-run them, e.g. with run_case_check). Keys and units as get_case_inputs. Material Fy/Fu change the connection Fy/Fu with them (as on the screen). Use it to restore a value a design tool replaced (case_inputs_replaced).",
+    {
+        inputs: z.record(z.string().min(1).max(64), z.union([z.number(), z.string().max(64), z.boolean(), z.array(z.number()).max(200), z.null()]))
+            .describe("{key: value} — e.g. {Lb: 96, Cb: 1.14, wcSupport: 'IOF', chkColdWork: false}. null = blank. Lists (spanIxIn4, bracePointsFt, vibLengths) as number arrays."),
+        spans: z.object({
+            spans: z.array(z.number().nullable()).max(50).optional().describe("Span lengths — ft, or m if units='SI'; one per span of spanType / nSpans"),
+            supports: z.array(z.enum(['P', 'R', 'F', 'N'])).max(51).optional().describe("Support types, one per support (spans + 1)"),
+            lapsPerSupport: z.array(z.object({ left: z.number().nullable(), right: z.number().nullable() })).max(51).optional()
+                .describe("Lap length each side of each support — ft, or m if units='SI'; null where the table has no cell (first support's left, last support's right, simple spans)"),
+        }).optional().describe("The span table (checked against spanType / nSpans)"),
+        units: CASE_UNITS,
+        reason: z.string().max(300).optional().describe("Short reason (recorded with the invalidated results)"),
+    },
+    async (args) => json(await callBridgePost('/action', { action: 'set_case_inputs', ...args }))
+);
+
+server.tool("run_case_check",
+    "Compute the check the screen's button would run, from the case inputs on the screen (no input changes): what='member' runs the member design (a load-analysis member type — roof-purlin, floor-joist, wall-girt, wall-stud — runs the purlin chain like design_purlin, otherwise aisi_design_<member type>), 'loads' the load analysis, 'connection' the single connection, 'lap' the lap splice. Blank required inputs are named in the error — set them with set_case_inputs or ask the person. The reply has the same shape as the corresponding design tool (summary by default, detail as there) plus case_check {what, tool, rev}." + SUMMARY_NOTE,
+    {
+        what: z.enum(['member', 'loads', 'connection', 'lap']).describe("Which check: member | loads | connection | lap"),
+        detail: DETAIL_DESIGN,
+        units: z.enum(['US', 'SI']).optional().describe("Units of the numeric results: 'US' (default) or 'SI' (as the corresponding design tool)."),
+    },
+    async (args) => {
+        const r = await callBridgePost('/action', { action: 'run_case_check', what: args.what });
+        const tool: string = r && r.case_check && typeof r.case_check.tool === 'string' ? r.case_check.tool : '';
+        const table = tool === 'design_purlin' ? SI_OUT_PURLIN : tool === 'analyze_loads' ? SI_OUT_LOADS : SI_OUT_MEMBER;
+        return unitReply(r, args.units, table, SHAPERS[tool], args.detail);
+    }
+);
 
 server.tool("get_view",
     "What the person is looking at in StCFSD right now: `current` = the most recent view report of any screen ({screen, view, selection {kind, id, scope?, location?} by the same id scheme as focus, follows_focus, by person|program|focus, reported_at}), `screens` = the last report of every screen, `last_focus` = your last focus request and whether a screen followed it (response.followed). Use it when the user says \"this\" or \"what I am looking at\". Reading it changes nothing. If no screen has reported, current is null — say so instead of guessing.",
@@ -1649,6 +1720,7 @@ server.tool("design_lap_connection",
         threads_excluded: z.boolean().optional().describe("Bolts: threads excluded from the shear plane"),
         hole_type: z.enum(["standard", "oversized", "short_slotted"]).optional().describe("Bolts: hole type"),
         mf: z.number().positive().optional().describe("Bolts: bearing modification factor mf (Table J3.3.1-2; omit → the minimum for the hole type, stated in assumptions)"),
+        distortion_restrained: z.boolean().optional().describe("true only if the person states that distortional buckling of the lapped portion is restrained by the overlapping member — the distortional check is then not applicable (source: user input). Without Mnd and without this, the distortional check is not evaluated and the lap is NOT_CHECKED. Kept with the review (the screen has no field for it yet); the screen's lap button and run_case_check use it until a design_lap_connection call without it."),
         ...CHECK_CONTEXT,
         detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,

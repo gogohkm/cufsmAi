@@ -61,6 +61,7 @@ const F = {
 const FACTORS = Object.values(F);
 
 const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_design_compression', 'focus', 'get_view',
+  'get_case_inputs', 'set_case_inputs', 'run_case_check',
   'get_design_check',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
@@ -224,8 +225,10 @@ function comparePhysical(tool, us, siR, spot) {
   assert.strictEqual(siR.units, 'SI', `${tool} SI result labelled`);
   assert.strictEqual(siR.text_units, 'US', `${tool} SI text labelled US`);
   assert(!siR.si_unconverted, `${tool}: ${siR.si_unconverted && siR.si_unconverted.length} numeric keys with no unit in the table: ${JSON.stringify((siR.si_unconverted || []).slice(0, 40))}`);
-  const lu = leaves(us);
-  const ls = leaves(siR);
+  // K2-5: case_* 는 검토 상태의 기록(판 · 쓴 키 · 바꾼 사람 값)이라 호출 차례에 따라 다르다 — 물리량 비교에서 뺀다
+  const noCase = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('case_'))) : o);
+  const lu = leaves(noCase(us));
+  const ls = leaves(noCase(siR));
   let converted = 0;
   for (const [p, v] of lu) {
     const top = p.split(/[.[]/)[0];
@@ -985,7 +988,9 @@ async function main() {
     const direct = JSON.parse(JSON.stringify(await real.panel.handleMcpAction({ action: 'design_purlin', ...purlinArgs })));
     const { units: _u, ...pUSnoUnits } = pUS;
     void _u;
-    assert.deepStrictEqual(pUSnoUnits, direct, 'V4-05: MCP design_purlin = the host purlin function with the same inputs');
+    // K2-5: case_* (검토 상태의 기록)는 호출 차례에 따라 다르다 — 계산 결과만 맞댄다
+    const dropCase = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => !k.startsWith('case_')));
+    assert.deepStrictEqual(dropCase(pUSnoUnits), dropCase(direct), 'V4-05: MCP design_purlin = the host purlin function with the same inputs');
     const g5 = findPath(pUS, (k, v) => typeof v === 'string' && /G5|web crippling/i.test(v));
     assert(g5, 'V4-05: with wc_N/wc_R the MCP purlin design evaluates web crippling');
     const noWc = await call('design_purlin', { ...purlinArgs, wc_N: undefined, wc_R: undefined, wc_fastened: undefined });
@@ -1089,6 +1094,47 @@ async function main() {
     }
     results.push(`reply budgets (summary, bytes US/SI): ${SIZES.filter((x) => x.level === 'summary').map((x) => `${x.tool} ${x.us}/${x.si}`).join(', ')}`);
     results.push(`get_design_check: ${DC_SWEEP.n} items fetched one by one, largest ${DC_SWEEP.max} B (budget 20 KB)`);
+
+    // 9b'. K2-5: 검토 상태 도구 — 응답 크기(12 KB), SI 왕복, 받지 않는 키, 설계 도구가 바꾼 사람의 값(case_inputs_replaced)
+    {
+      const gi = await call('get_case_inputs', {});
+      const giSI = await call('get_case_inputs', { units: 'SI' });
+      assert(!gi.isError && !giSI.isError, `get_case_inputs: ${gi.data && gi.data.error}`);
+      assert(Math.max(gi.bytes, giSI.bytes) <= 12 * KB, `budget: get_case_inputs ${Math.max(gi.bytes, giSI.bytes)} B > 12 KB`);
+      assert(Object.keys(gi.data.inputs).length > 80 && gi.data.unit_of.Lb === 'in' && giSI.data.unit_of.Lb === 'mm', 'get_case_inputs: values with units');
+      assert(Math.abs(giSI.data.inputs.KxLx - gi.data.inputs.KxLx * 25.4) < 1e-9 * gi.data.inputs.KxLx * 25.4, 'get_case_inputs SI converts lengths');
+      const s1 = await call('set_case_inputs', { inputs: { Lb: 96, wcSupport: 'IOF', bogus: 1, tplH: 5, wcFastened: 'nailed' }, reason: 'k2 test' });
+      assert(!s1.isError || s1.data.rejected, JSON.stringify(s1.data).slice(0, 300));
+      assert.deepStrictEqual(s1.data.accepted.sort(), ['Lb', 'wcSupport'], 'set_case_inputs accepts known keys with valid values');
+      assert.deepStrictEqual(s1.data.rejected.map((r) => r.key).sort(), ['bogus', 'tplH', 'wcFastened'], 'unknown / model / invalid keys refused');
+      const s2 = await call('set_case_inputs', { units: 'SI', inputs: { Lb: 2438.4 } });
+      assert(s2.data.accepted.length === 0 || (await call('get_case_inputs', { keys: ['Lb'] })).data.inputs.Lb === 96, 'SI 2438.4 mm = 96 in exactly');
+      assert(Math.max(s1.bytes, s2.bytes) <= 4 * KB, `set_case_inputs replies are small (${s1.bytes} B)`);
+      // 사람이 정한 값(화면의 caseEdit)을 MCP 설계 도구가 바꾸면 응답이 그 전 값을 알린다
+      await real.panel.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', changes: { Cb: 1.3, Lb: 80 } } });
+      const fl = await call('aisi_design_flexure', { design_method: 'LRFD', Fy: 50, Lb: 60, Mu: 30 });
+      assert(!fl.isError, JSON.stringify(fl.data).slice(0, 300));
+      const rp = (fl.data.case_inputs_replaced || []).map((x) => [x.key, x.previous, x.previous_source]).sort();
+      assert.deepStrictEqual(rp.filter(([k]) => k === 'Cb' || k === 'Lb'), [['Cb', 1.3, 'user'], ['Lb', 80, 'user']], 'replaced person values listed with the previous value');
+      assert(/tell the person/.test(fl.data.case_note || ''), 'the reply tells the AI to report it');
+      const after = (await call('get_case_inputs', { keys: ['Cb', 'Lb', 'Mux', 'memberType'] })).data;
+      assert.deepStrictEqual([after.inputs.Cb, after.inputs.Lb, after.inputs.Mux, after.inputs.memberType, after.sources.Lb], [null, 60, 30, 'flexure', 'ai'],
+        'decision 1: the tool group is what the tool got (Cb not given → blank)');
+      await real.panel.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', changes: { Lb: 80 } } });
+      const flSI = await call('aisi_design_flexure', { units: 'SI', design_method: 'LRFD', Fy: 345, Lb: 1524, Mu: 3.39 });
+      const lbRep = (flSI.data.case_inputs_replaced || []).find((x) => x.key === 'Lb');
+      assert(lbRep && Math.abs(lbRep.previous - 80 * 25.4) < 1e-9 && lbRep.units === 'SI', `SI reply gives the replaced value in mm (${JSON.stringify(lbRep)})`);
+      // run_case_check: 화면에 있는 것으로(같은 모양의 요약)
+      const rc = await call('run_case_check', { what: 'connection' });
+      assert(!rc.isError, JSON.stringify(rc.data).slice(0, 300));
+      assert(rc.data.case_check && rc.data.case_check.tool === 'design_connection' && rc.data.detail === 'summary', 'run_case_check: summary of the connection check');
+      const rcm = await call('run_case_check', { what: 'member', units: 'SI' });
+      assert(!rcm.isError && rcm.data.case_check.tool === 'aisi_design_flexure' && rcm.data.units === 'SI', JSON.stringify(rcm.data).slice(0, 300));
+      for (const [t, z] of [['run_case_check connection', rc], ['run_case_check member', rcm]]) {
+        assert(z.bytes <= 12 * KB, `budget: ${t} ${z.bytes} B > 12 KB`);
+      }
+      results.push(`case tools: get_case_inputs ${gi.bytes}/${giSI.bytes} B, set_case_inputs ${s1.bytes} B, run_case_check ${rc.bytes}/${rcm.bytes} B, aisi_design_flexure with replaced values ${fl.bytes} B`);
+    }
     await ok('set_material', { E: 29500, v: 0.3 });
     const gone = await call('get_design_check', { scope: 'purlin', id: p38.regions[0].result.design_checks[0].id, location: { region: p38.regions[0].id } });
     assert(gone.isError && /no longer current/.test(gone.data.error) && gone.data.invalidated && gone.data.invalidated.reason === 'Material changed',

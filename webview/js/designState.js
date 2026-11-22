@@ -373,6 +373,56 @@
         return { scope: best, analysisAtRun: atRun };
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // D-5(K2-7): 칸에 적힌 글은 표시값(12 자리)일 뿐이다. 프로그램이 정확한 US 값으로 칸을 채울 때 그 값을 칸에 함께 둔다
+    // (data-case-exact · data-case-shown). 칸의 글이 그때 적은 글 그대로면 읽을 때 그 정확한 값을 쓴다 — 표시의 반올림이 값으로 새지 않는다.
+    // 사람이 고치면 글이 달라지므로 그때부터는 글을 읽는다.
+    // ─────────────────────────────────────────────────────────────────────────
+    /** 칸에 글을 적고(그 글이 나타내는 정확한 US 값과 함께) */
+    function setShown(el, text, usValue) {
+        if (!el) { return; }
+        el.value = text;
+        if (!el.dataset) { return; }
+        if (typeof usValue === 'number' && isFinite(usValue) && String(text) !== '') {
+            el.dataset.caseExact = String(usValue);
+            el.dataset.caseShown = String(el.value);
+        } else {
+            delete el.dataset.caseExact;
+            delete el.dataset.caseShown;
+        }
+    }
+    /** 칸의 정확한 US 값(프로그램이 적은 글 그대로일 때만) — 아니면 undefined */
+    function exactOf(el) {
+        if (!el || !el.dataset || el.dataset.caseShown === undefined) { return undefined; }
+        if (String(el.value) !== el.dataset.caseShown) { return undefined; }
+        const v = Number(el.dataset.caseExact);
+        return isFinite(v) ? v : undefined;
+    }
+    /** 칸의 US 값: 정확한 값이 있으면 그것, 아니면 글을 표시 단위에서 바꾼 것(빈 칸 · 수 아님 → null) */
+    function readUs(el, unit, fromDisplay) {
+        const ex = unit ? exactOf(el) : undefined;
+        if (ex !== undefined) { return ex; }
+        const raw = String(el && el.value != null ? el.value : '').trim();
+        if (raw === '') { return null; }
+        const v = parseFloat(raw);
+        return !isFinite(v) ? null : (unit ? fromDisplay(v, unit) : v);
+    }
+    /** 결정 1: AI 가 주지 않은 선택 · 체크(상태 null) — 칸에 표지를 달고, 읽으면 null */
+    function _markUnset(el, on) {
+        if (!el || !el.dataset) { return; }
+        if (on) {
+            el.dataset.caseUnset = '1';
+            if (!el.dataset.caseTitle) { el.dataset.caseTitle = el.title || ''; }
+            el.title = 'AI: 주지 않음 — 엔진이 정한다(설계 도구가 받지 않은 값). 고르면 그 값으로';
+            if (el.classList) { el.classList.add('case-unset'); }
+        } else if (el.dataset.caseUnset) {
+            delete el.dataset.caseUnset;
+            el.title = el.dataset.caseTitle || '';
+            delete el.dataset.caseTitle;
+            if (el.classList) { el.classList.remove('case-unset'); }
+        }
+    }
+
     function _readRaw(document, id) {
         const el = document.getElementById(id);
         if (!el) { return undefined; }
@@ -389,8 +439,10 @@
         for (const [key, id, unit, kind] of FIELDS) {
             const el = _readRaw(document, id);
             if (el === undefined) { continue; }
+            if ((kind === 'chk' || kind === 'sel') && el.dataset && el.dataset.caseUnset === '1') { data[key] = null; continue; }
             if (kind === 'chk') { data[key] = !!el.checked; continue; }
             if (kind === 'sel') { data[key] = el.value; continue; }
+            if (kind === 'num') { data[key] = readUs(el, unit, fromDisplay); continue; }
             const raw = String(el.value == null ? '' : el.value).trim();
             if (kind === 'list') {
                 data[key] = raw === '' ? null
@@ -407,12 +459,7 @@
         const spanLens = [];
         const sups = [];
         const laps = [];
-        const num = (el, unit) => {
-            const raw = String(el && el.value != null ? el.value : '').trim();
-            if (raw === '') { return null; }
-            const v = parseFloat(raw);
-            return isFinite(v) ? fromDisplay(v, unit) : null;
-        };
+        const num = (el, unit) => readUs(el, unit, fromDisplay);
         document.querySelectorAll('.span-tbl-len').forEach(el => { spanLens.push(num(el, 'length_ft')); });
         document.querySelectorAll('.span-tbl-sup').forEach(el => { sups.push(el.value); });
         for (let i = 0; i < sups.length; i++) {
@@ -434,6 +481,7 @@
             const el = document.getElementById(id);
             if (!el) { continue; }
             const v = data[key];
+            if (kind === 'chk' || kind === 'sel') { _markUnset(el, v === null); }
             if (kind === 'chk') { if (v != null) { el.checked = !!v; } continue; }
             if (kind === 'sel') { if (v != null && v !== '') { el.value = v; } continue; }
             if (kind === 'list') {
@@ -442,9 +490,9 @@
                     : '';
                 continue;
             }
-            if (v == null || !isFinite(v)) { el.value = ''; continue; }
-            // 단위 전환(refreshUnits)과 같은 12 자리 — 부동소수 꼬리(118.11023622047244)를 보이지 않게
-            el.value = unit ? String(Number(Number(toDisplay(v, unit)).toPrecision(12))) : v;
+            if (v == null || !isFinite(v)) { setShown(el, '', null); continue; }
+            // 단위 전환(refreshUnits)과 같은 12 자리 — 부동소수 꼬리(118.11023622047244)를 보이지 않게. 정확한 값은 칸에 함께(D-5).
+            if (unit) { setShown(el, String(Number(Number(toDisplay(v, unit)).toPrecision(12))), v); } else { setShown(el, v, null); }
         }
         // 옛 파일(v1.0–1.2): custom 하중은 표시값으로만 있었다
         if (!('analysisLoadPUs' in data) && data.analysisLoadP != null) setValue('input-load-P', data.analysisLoadP);
@@ -454,7 +502,11 @@
 
     function _fillSpans(deps, data) {
         const { document, toDisplay } = deps;
-        const show = (el, v) => { if (el) { el.value = (v == null || !isFinite(v)) ? '' : toDisplay(v, 'length_ft'); } };
+        const show = (el, v) => {
+            if (!el) { return; }
+            if (v == null || !isFinite(v)) { setShown(el, '', null); return; }
+            setShown(el, toDisplay(v, 'length_ft'), v);   // 글은 전과 같다(반올림 없이) — 정확한 값만 더한다
+        };
         if (data.spans) {
             document.querySelectorAll('.span-tbl-len').forEach((el, i) => {
                 if (i < data.spans.length) show(el, data.spans[i]);
@@ -498,19 +550,18 @@
         _applyValues(deps, data);
 
         // 강종 Fy · Fu 단일 소스: 설계 Fy 가 있으면 전처리 · 소성 칸도 같은 값(옛 파일 호환)
-        const setValue = (id, val) => { const el = document.getElementById(id); if (el) { el.value = val; } };
+        // D-5: 12 자리 글 + 정확한 값(_applyValues 와 같은 규칙) — 전: 반올림 없는 글을 덮어 정확한 값을 지웠다
+        const shown = (us) => String(Number(Number(toDisplay(us, 'stress')).toPrecision(12)));
+        const setStress = (id, us) => { const el = document.getElementById(id); if (el) { setShown(el, shown(us), us); } };
         if (data.fu != null && !('fuPre' in data)) {
-            setValue('input-fu', toDisplay(data.fu, 'stress'));
+            setStress('input-fu', data.fu);
         }
-        const restoredFy = data.fy != null
-            ? toDisplay(data.fy, 'stress')
-            : data.fyLoad != null
-                ? toDisplay(data.fyLoad, 'stress')
-                : null;
+        const fyUs = data.fy != null ? data.fy : data.fyLoad != null ? data.fyLoad : null;
+        const restoredFy = fyUs != null ? shown(fyUs) : null;
         if (restoredFy != null) {
-            setValue('input-fy', restoredFy);
-            setValue('plastic-fy', restoredFy);
-            setValue('design-fy', restoredFy);
+            setStress('input-fy', fyUs);
+            setStress('plastic-fy', fyUs);
+            setStress('design-fy', fyUs);
             if (typeof updateAnalysisFyDisplay === 'function') {
                 updateAnalysisFyDisplay(restoredFy);
             }
@@ -568,7 +619,12 @@
         collectDesignInputs,
         restoreDesignInputs,
         selectLapGoverningMoment,
-        // K2-1 (아직 쓰는 곳 없음)
+        // K2-7(D-5): 정확한 값 · 결정 1: 주지 않음
+        setShown,
+        exactOf,
+        readUs,
+        markUnset: _markUnset,
+        // K2-1
         UNIT_FACTORS,
         KEYS,
         fieldMeta,

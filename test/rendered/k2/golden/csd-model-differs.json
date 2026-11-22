@@ -61,17 +61,17 @@
      "tplB": {
       "kind": "changed",
       "written": 2.25,
-      "saved": 1.968503937
+      "saved": 1.968503937007874
      },
      "tplD": {
       "kind": "changed",
       "written": 0.91,
-      "saved": 0.7874015748
+      "saved": 0.7874015748031497
      },
      "tplH": {
       "kind": "changed",
       "written": 8,
-      "saved": 3.937007874
+      "saved": 3.937007874015748
      },
      "tplQlip": {
       "kind": "changed",
@@ -81,16 +81,27 @@
      "tplR": {
       "kind": "changed",
       "written": 0.1875,
-      "saved": 0.157480315
+      "saved": 0.15748031496062992
      },
      "tplT": {
       "kind": "changed",
       "written": 0.059,
-      "saved": 0.0905511811
+      "saved": 0.0905511811023622
      }
     },
     "maxRelFloat": 0
-   }
+   },
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 모델 칸 tplB 가 정확한 값(1.968503937007874)"
   }
  ]
 }

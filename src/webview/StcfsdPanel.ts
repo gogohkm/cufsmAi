@@ -19,9 +19,11 @@ import {
 } from '../models/types';
 import { defaultSteel, mpaField, steelGradeOptionsHtml } from './steelGrades';
 import { CaseKeeper } from '../case/caseKeeper';
-import { toDesignInputs13, toCaseRecord, migrateProject, readDesignInputs, MigrateResult } from '../case/caseState';
+import { toDesignInputs13, toCaseRecord, migrateProject, readDesignInputs, MigrateResult, applyChanges, invalidationScope } from '../case/caseState';
+import { mcpWrite } from '../case/mcpGroups';
+import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, UNIT_LABEL } from '../mcp/siUnits';
 import {
-    buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts,
+    buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts, isCalcMode,
 } from '../case/requests';
 
 function isTestMode(): boolean {
@@ -57,7 +59,15 @@ export class StcfsdPanel implements McpPanelInterface {
     private _bucklingReportPanel?: vscode.WebviewPanel;
     private _bucklingReportHtml = '';
     /** K2: 검토 대상의 상태(설계 · 하중 · 접합 입력)와 화면 쪽 거울 — src/case/caseKeeper.ts */
+    /** 결정 3(K2-5): 모델의 기준응력(loadFy)을 MCP set_load_case fy 가 정했고 사람이 ① Fy 를 아직 고치지 않았다 */
+    private _loadFyAi = false;
     private _caseKeeper = new CaseKeeper();
+    /** K2-5: 화면 단추 · 호스트 안에서 부른 action(상태에 쓰지 않는다). MCP 다리가 부르는 것만 결정 1 의 쓰기를 한다 */
+    private _pageActions = new WeakSet<object>();
+    /** K2-6: 화면이 처음 떴는가(두 번째 webviewReady 는 새로 고침 — 모델을 기본 단면으로 덮지 않는다, D-6) */
+    private _pageReadyOnce = false;
+    /** K2-6: 마지막으로 열거나 저장한 .csd */
+    private _casePath: string | null = null;
     // K4a: 결과가 만들어진 시각(상태 · 장부), 마지막 하중 분석의 입력(바뀌었는지 보려고), 접합 · 랩 결과(호스트가 기억한다).
     private _lastLoadAnalysisAt: string | null = null;
     private _lastLoadRequest: string | null = null;
@@ -258,8 +268,14 @@ export class StcfsdPanel implements McpPanelInterface {
     private async _handleMessage(message: WebviewToExtMessage): Promise<void> {
         switch (message.command) {
             case 'webviewReady':
+                // D-6(K2-6): 처음 한 번만 기본 단면. 두 번째부터는 새로 고침(웹뷰 다시 싣기) — 모델 · 결과 · 상태를 다시 보낸다.
+                if (this._pageReadyOnce) { this._repostToPage(); break; }
+                this._pageReadyOnce = true;
                 // WebView 초기화 완료 → 기본 템플릿으로 초기 단면 생성
                 await this._initializeWithDefaultSection();
+                // 처음 상태는 저장할 것이 없다 — 여기서부터 저장 안 한 변경을 센다
+                this._caseKeeper.markSaved(this._currentModelSignature());
+                this._postCaseDirty();
                 break;
 
             case 'runAnalysis':
@@ -287,6 +303,11 @@ export class StcfsdPanel implements McpPanelInterface {
                         const so = message.data.stressOpts;
                         (this._model as any).loadValues = { P: so.P ?? 0, Mxx: so.Mxx ?? 0, Mzz: so.Mzz ?? 0 };
                     }
+                    // 결정 3(K2-5): AI 가 set_load_case 로 기준응력을 정했으면(사람이 ① Fy 를 고치기 전까지) 화면의 ① Fy 대신 그 값으로
+                    if (message.data.stressOpts && this._loadFyAi && Number((this._model as any).loadFy) > 0
+                        && message.data.stressOpts.fy !== undefined) {
+                        message.data.stressOpts = { ...message.data.stressOpts, fy: (this._model as any).loadFy };
+                    }
                     // 응력 설정을 해석 직전에 동기적으로 처리 (레이스 컨디션 방지)
                     if (message.data.stressOpts) {
                         try {
@@ -302,7 +323,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 break;
 
             case 'setStress':
-                await this.handleMcpAction({ action: 'set_stress', ...message.data });
+                await this._pageAction({ action: 'set_stress', ...message.data });
                 break;
 
             case 'getProperties':
@@ -319,15 +340,22 @@ export class StcfsdPanel implements McpPanelInterface {
             }
 
             case 'invalidateDerivedResults':
-                this._caseKeeper.onPageInvalidated();
+                this._caseKeeper.onPageInvalidated(message.data?.scope);
                 this._invalidateDerived(message.data?.scope);
                 break;
 
             case 'caseEdit': {
                 // K2: 화면의 칸이 바뀌었다 — 상태에 합친다(설계 §3.2 의 충돌 규칙). 동기 처리(뒤에 오는 실행 메시지보다 먼저 끝난다).
+                const revBefore = this._caseKeeper.state.rev;
                 const r = this._caseKeeper.edit(message.data);
+                if (message.data?.origin === 'user' && r.accepted.includes('fy') && this._loadFyAi) {
+                    this._loadFyAi = false;
+                    this._postMessage('caseReference', { loadFy: (this._model as any).loadFy, loadFySource: null });
+                }
                 this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: r.rejected, conflicts: r.conflicts });
                 if (r.conflicts.length > 0) { this._postCaseState('conflict'); }
+                // 화면이 이 변경을 만든 뒤 AI 가 쓴 것을 담은 caseState 가 그 칸을 덮었을 수 있다 — 합친 상태를 다시 보낸다
+                else if (r.accepted.length > 0 && this._caseKeeper.staleView(message.data?.seenRev, revBefore)) { this._postCaseState('merged'); }
                 this._postCaseDirty(false);
                 break;
             }
@@ -399,7 +427,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     // K2-4: 본문은 호스트가 검토 상태로 만든다(화면 본문은 시험 모드에서 대조만 — 바이트까지 같아야 한다).
                     const req = this._caseRun('lap', message.data, buildLapRequest);
                     if (req.error) { this._postMessage('lapConnectionResult', { error: req.error }); break; }
-                    await this.handleMcpAction({ action: 'lap_connection', ...req.data });
+                    await this._pageAction({ action: 'lap_connection', ...req.data });
                 } catch (e: any) {
                     this._postMessage('lapConnectionResult', { error: e.message });
                 }
@@ -410,7 +438,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 try {
                     const req = this._caseRun('connection', message.data, buildConnectionRequest);
                     if (req.error) { this._postMessage('connectionResult', { error: req.error }); break; }
-                    await this.handleMcpAction({ action: 'design_connection', ...req.data });
+                    await this._pageAction({ action: 'design_connection', ...req.data });
                 } catch (e: any) {
                     this._postMessage('connectionResult', { error: e.message });
                 }
@@ -421,7 +449,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 try {
                     const req = this._caseRun('purlin', message.data, buildPurlinRequest);
                     if (req.error) { this._postMessage('designPurlinResult', { error: req.error }); break; }
-                    await this.handleMcpAction({ action: 'design_purlin', ...req.data });
+                    await this._pageAction({ action: 'design_purlin', ...req.data });
                 } catch (e: any) {
                     this._postMessage('designPurlinResult', { error: e.message || String(e) });
                 }
@@ -431,7 +459,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 try {
                     const req = this._caseRun('design', message.data, buildDesignRequest);
                     if (req.error) { this._postMessage('designResult', { error: req.error }); break; }
-                    await this.handleMcpAction({ action: 'aisi_design', ...req.data });
+                    await this._pageAction({ action: 'aisi_design', ...req.data });
                 } catch (e: any) {
                     this._postMessage('designResult', { error: e.message || String(e) });
                 }
@@ -439,7 +467,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'prepareDesignDsm':
                 try {
-                    const prepResult = await this.handleMcpAction({ action: 'prepare_design_dsm', ...message.data });
+                    const prepResult = await this._pageAction({ action: 'prepare_design_dsm', ...message.data });
                     this._postMessage('designDsmPrepared', prepResult);
                 } catch (e: any) {
                     this._postMessage('designDsmPrepared', { error: e.message || String(e) });
@@ -452,7 +480,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (req.error) { this._postMessage('loadAnalysisComplete', { error: req.error }); break; }
                     // K4a: 화면에서 돌린 하중 분석 — 입력이 바뀌었다는 것은 화면이 이미 알렸다(invalidateDerivedResults).
                     this._pageLoadAnalysis = true;
-                    const loadResult = await this.handleMcpAction({ action: 'analyze_loads', ...req.data });
+                    const loadResult = await this._pageAction({ action: 'analyze_loads', ...req.data });
                     // K4a: 성공한 결과는 handleMcpAction 이 보낸다(MCP 와 같은 한 번). 엔진 오류 결과는 전처럼 여기서.
                     if (!loadResult || loadResult.error) { this._postMessage('loadAnalysisComplete', loadResult); }
                 } catch (e: any) {
@@ -621,6 +649,9 @@ export class StcfsdPanel implements McpPanelInterface {
             // K4a: 단면을 만든 템플릿과 그 치수(모델에 둔 US 값 — in, 각도 deg), 요소 자리, 하중 경우 · 기준응력,
             // 고유치 수, 지금 해석의 하중 계열, 남은 결과와 무효 장부. 화면이 웹뷰 메시지에서 골라 읽지 않게.
             units: 'US',
+            // K2-6: 검토 상태의 판과 저장 안 한 변경(언제부터) — get_case_inputs 가 값 · 출처
+            case: { rev: this._caseKeeper.state.rev, dirty: this._caseKeeper.isDirty(this._currentModelSignature()),
+                dirty_since: this._caseKeeper.dirtySince, file: this._casePath },
             section_template: m.sectionTemplate ?? null,
             section_type: m.sectionType ?? null,
             section_params: m.sectionParams && typeof m.sectionParams === 'object'
@@ -1239,26 +1270,26 @@ export class StcfsdPanel implements McpPanelInterface {
      * 화면이 입력 변화를 알렸다(invalidateDerivedResults). 'load' = 하중 분석 + 부재 설계 + 랩, 'design'(기본) = 부재 설계 + 랩,
      * K4a: 'connection' = 단일 접합 결과 하나만, 'lap' = 랩 결과 하나만(다른 결과와 리비전은 건드리지 않는다).
      */
-    private _invalidateDerived(scopeIn: any): void {
+    private _invalidateDerived(scopeIn: any, causeIn?: LedgerEntry['cause'], reasonIn?: string): void {
         const scope = typeof scopeIn === 'string' ? scopeIn : 'design';
-        const cause = { message: 'invalidateDerivedResults', scope };
+        const cause = causeIn ?? { message: 'invalidateDerivedResults', scope };
         let changed = false;
         if (scope === 'connection') {
-            changed = this._dropConnection('Connection inputs changed', cause);
+            changed = this._dropConnection(reasonIn ?? 'Connection inputs changed', cause);
         } else if (scope === 'lap') {
-            if (this._lastLap) { changed = this._ledgerAdd('lap', 'Lap inputs changed', cause, this._lastLap.at); }
+            if (this._lastLap) { changed = this._ledgerAdd('lap', reasonIn ?? 'Lap inputs changed', cause, this._lastLap.at); }
             this._lastLap = null;
         } else {
             this._derivedInputRevision++;
             if (scope === 'load') {
                 if (this._lastLoadAnalysis) {
-                    changed = this._ledgerAdd('load_analysis', 'Load inputs changed', cause, this._lastLoadAnalysisAt);
+                    changed = this._ledgerAdd('load_analysis', reasonIn ?? 'Load inputs changed', cause, this._lastLoadAnalysisAt);
                 }
                 this._lastLoadAnalysis = null;
                 this._lastLoadAnalysisAt = null;
                 this._lastLoadRequest = null;
             }
-            changed = this._dropDesignResults(scope === 'load' ? 'Load inputs changed' : 'Design inputs changed', cause) || changed;
+            changed = this._dropDesignResults(reasonIn ?? (scope === 'load' ? 'Load inputs changed' : 'Design inputs changed'), cause) || changed;
         }
         if (changed) { this._postLedger(); }
     }
@@ -2649,10 +2680,48 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /** MCP: 액션 처리 — Bridge에서 직접 호출 */
+    /** K2-5: 화면 · 호스트 안의 호출 — 상태에 쓰지 않는다(그 값은 이미 상태에서 왔다) */
+    private _pageAction(options: any): Promise<any> {
+        if (options && typeof options === 'object') { this._pageActions.add(options); }
+        return this.handleMcpAction(options);
+    }
+
+    /**
+     * MCP: 액션 처리 — Bridge에서 직접 호출. K2-5(결정 1): MCP 설계 도구의 계산은 받은 인자 그대로(엔진 요청이 바뀌지 않는다),
+     * 성공하면 그 도구의 인자 묶음을 검토 상태에 통째로 쓴다 — 응답에 case_rev 와, 사람이 정했던 값 가운데 바꾼 것(case_inputs_replaced).
+     */
     public async handleMcpAction(options: any): Promise<any> {
+        const fromPage = !!options && typeof options === 'object' && this._pageActions.has(options);
+        const r = await this._handleAction(options);
+        if (fromPage || !r || typeof r !== 'object' || Array.isArray(r) || r.error) { return r; }
+        const w = mcpWrite(options?.action, options);
+        if (!w) { return r; }
+        const out = this._caseKeeper.applyMcp(w);
+        const DSm = require('../../webview/js/designState');
+        const extra: any = { case_rev: out.rev, case_inputs_written: out.written };
+        if (out.replaced.length) {
+            extra.case_inputs_replaced = out.replaced.map((x) => {
+                const m = DSm.fieldMeta(x.key);
+                const kind = m ? m.unit : (x.key === 'spans' || x.key === 'lapsPerSupport' ? 'length_ft' : null);
+                return { key: x.key, previous: x.previous, previous_source: x.previous_source, unit_kind: kind };
+            });
+            extra.case_note = 'These inputs were set by the person (or read from a file / the load analysis) and this call replaced them — tell the person; set_case_inputs restores a value.';
+        }
+        if (out.skipped.length) { extra.case_inputs_not_written = out.skipped; }
+        this._postCaseState('ai');
+        this._postCaseDirty(false);
+        return { ...r, ...extra };
+    }
+
+    private async _handleAction(options: any): Promise<any> {
         const action = options?.action;
 
         switch (action) {
+            case 'get_case_inputs': return this._caseGetInputs(options);
+            case 'set_case_inputs': return this._caseSetInputs(options);
+            case 'run_case_check': return this._caseRunCheck(options);
+            case 'get_unsaved_changes': return this._caseUnsaved();
+
             case 'generate_template': {
                 const out = await this._applyTemplate(options.section_type, options.params);
                 if (out.error) { return out; }
@@ -2766,8 +2835,11 @@ export class StcfsdPanel implements McpPanelInterface {
                     { P: options.P, Mxx: options.Mxx, Mzz: options.Mzz });
                 (this._model as any).loadCase = lc;
                 (this._model as any).loadFy = fy;
+                // 결정 3(K2-5): AI 가 정한 기준응력 — 화면의 해석 칸 옆에 보이고 「해석 실행」 이 그것으로 돈다(사람이 ① Fy 를 고치면 풀린다)
+                if (options.fy !== undefined && !this._pageActions.has(options)) { this._loadFyAi = true; }
                 this._postMessage('modelLoaded', this._model);
-                return { success: true, load_case: lc, fy, reference: 'fy-scaled distribution' };
+                return { success: true, load_case: lc, fy, reference: 'fy-scaled distribution',
+                    ...(options.fy !== undefined ? { reference_note: 'This reference stress is shown next to the analysis on the screen and used by the screen\'s analysis run until the person changes Fy.' } : {}) };
             }
 
             case 'set_stress': {
@@ -2808,7 +2880,11 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (neigs > maxEigs) {
                         throw new Error(`neigs ${neigs} exceeds available DOFs (${maxEigs}).`);
                     }
+                    const neigsChanged = this._model.neigs !== neigs;
                     this._model.neigs = neigs;
+                    // D-7(K2-5): 칸이 따라오게(전: 모델에만 — 다음 「해석 실행」 이 칸의 10 으로 되돌렸다). 같은 값이면 보내지 않는다
+                    // (modelLoaded 를 받은 화면은 단면 성질을 다시 묻는다 — 엔진 호출 한 번).
+                    if (neigsChanged) { this._postMessage('modelLoaded', this._model); }
                 }
                 const { result, dsm, dsmError, warnings } = await this._performAnalysis();
                 const curve = Array.isArray(result?.curve) ? result.curve : [];
@@ -3237,7 +3313,7 @@ export class StcfsdPanel implements McpPanelInterface {
                         try {
                             const { action: _action, ...designOptions } = options;
                             void _action;
-                            const designResult = await this.handleMcpAction({ ...designOptions, action: 'aisi_design' });
+                            const designResult = await this._pageAction({ ...designOptions, action: 'aisi_design' });
                             reportData.design_result = designResult;
                             reportData.design_cache_hit = false;
                         } catch (e: any) { (reportData.errors ||= []).push(`design_result: ${e?.message || e}`); }
@@ -3425,7 +3501,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 const check = this._checkLoadedModel(model);
                 if (check.error) { return { error: `Invalid project file: ${check.error}` }; }
+                // K2-6: 저장하지 않은 변경을 말없이 버리지 않는다 — 응답에 싣고 화면에 알린다
+                const discarded = this._caseDiscardNotice('load_project');
                 this._model = { ...this._model, ...check.model };
+                this._loadFyAi = false;
                 for (const k of ['elementRoles', 'sectionEdited']) {
                     if (!(k in (check.model as any))) { delete (this._model as any)[k]; }
                 }
@@ -3434,7 +3513,21 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._invalidateAnalysisState('Project loaded', true, { action: 'load_project' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
-                return { success: true, filepath: options.filepath, warnings: check.warnings };
+                // K2-6: .csd 면 검토 상태도(표의 키만 — 조작된 파일의 남의 키는 버린다). 원시 모델이면 입력은 그대로.
+                const caseWarnings: string[] = [];
+                if (data && data.model && (data.case || data.designInputs)) {
+                    const mig = migrateProject(data);
+                    caseWarnings.push(...mig.warnings);
+                    const fu = data.case?.view?.unitSystem ?? data.designInputs?.unitSystem;
+                    this._caseKeeper.loadFromFile(mig.state, fu !== 'US' && fu !== 'SI');
+                    this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: [], conflicts: [] });
+                    this._postMessage('restoreDesignInputs', this._caseRestorePayload(mig, data));
+                }
+                this._caseKeeper.markSaved(this._currentModelSignature());
+                this._casePath = options.filepath;
+                this._postCaseDirty();
+                return { success: true, filepath: options.filepath, warnings: [...check.warnings, ...caseWarnings],
+                    ...(discarded ? { discarded_unsaved_changes: discarded } : {}) };
             }
 
             // --- #22: run_signature_curve ---
@@ -3886,7 +3979,7 @@ export class StcfsdPanel implements McpPanelInterface {
         try {
             // 밀도는 화면 입력(kip·s²/in⁴, 단위 변환 뒤)을 그대로 — 비우면 엔진의 강재 값 + 경고.
             const rho = data && data.rho !== undefined && data.rho !== null ? data.rho : undefined;
-            const result = await this.handleMcpAction({ action: 'vibration', ...(rho !== undefined ? { rho } : {}),
+            const result = await this._pageAction({ action: 'vibration', ...(rho !== undefined ? { rho } : {}),
                 ...(Array.isArray(data?.lengths) && data.lengths.length > 0 ? { lengths: data.lengths } : {}),
                 ...(data?.confirm_large ? { confirm_large: true } : {}) });
             this._postMessage('vibrationResult', result);
@@ -4156,6 +4249,8 @@ ${inner}
 
     /** WebView로 메시지 전송 */
     private _postMessage(command: string, data: any): void {
+        // 결정 3(K2-5): 기준응력을 AI 가 정했는지는 모델 밖(엔진 요청 · 서명 · 파일에 들지 않게)에 두고 화면에만 붙여 보낸다
+        if (command === 'modelLoaded' && data && typeof data === 'object' && this._loadFyAi) { data = { ...data, loadFySource: 'ai' }; }
         this._caseKeeper.onPosted(command, data);
         if (isTestMode()) {
             this._testPostedMessages.push(JSON.parse(JSON.stringify({ command, data })));
@@ -4166,6 +4261,170 @@ ${inner}
         if (!this._disposed) {
             this._panel.webview.postMessage({ command, data });
         }
+    }
+
+    /** K2-6: 새로 고침한 화면에 모델 · 결과 · 상태를 다시(두 번째 webviewReady — D-6). 결과를 다시 보낸 뒤 상태를 맨 끝에(하중 결과의 칸 채움을 덮게). */
+    private _repostToPage(): void {
+        this._postMessage('modelLoaded', this._model);
+        if (this._lastAnalysisResult && this._isAnalysisCurrent()) { this._postMessage('analysisComplete', this._lastAnalysisResult); }
+        if (this._lastLoadAnalysis) { this._postMessage('loadAnalysisComplete', this._lastLoadAnalysis); }
+        if (this._lastDesignResult) {
+            this._postMessage(Array.isArray(this._lastDesignResult.regions) || this._lastDesignResult.design_positive !== undefined
+                ? 'designPurlinResult' : 'designResult', this._lastDesignResult);
+        }
+        if (this._lastLap?.result) { this._postMessage('lapConnectionResult', this._lastLap.result); }
+        if (this._lastConnection) {
+            const c = this._lastConnection;
+            this._postMessage('connectionResult', { request: c.request, ...c.request, ...c.result });
+        }
+        this._postLedger();
+        this._postCaseState('page reloaded');
+        this._postCaseDirty();
+    }
+
+    /** K2-6: 저장 안 한 변경 — 독립 창이 닫거나 다른 파일을 열기 전에 묻는다(host action get_unsaved_changes) */
+    private _caseUnsaved(): any {
+        const sig = this._currentModelSignature();
+        const dirty = this._caseKeeper.touch(sig);
+        return { dirty, since: this._caseKeeper.dirtySince, rev: this._caseKeeper.state.rev,
+            inputs_changed: dirty ? this._caseKeeper.changedSinceSaved() : [], model_changed: this._caseKeeper.modelChangedSinceSaved(sig),
+            file: this._casePath };
+    }
+
+    /** K2-6: 열기 직전 — 저장 안 한 변경이 있으면 그것을 적고 화면에 알린다(묻지 않는다 — 묻는 것은 화면이 정한다) */
+    private _caseDiscardNotice(by: string): any | null {
+        const u = this._caseUnsaved();
+        if (!u.dirty) { return null; }
+        const notice = { since: u.since, inputs_changed: u.inputs_changed, model_changed: u.model_changed, file: u.file, by };
+        this._postMessage('caseDiscarded', notice);
+        return notice;
+    }
+
+    /** K2-5: get_case_inputs {units?, keys?} — 검토 상태(값 · 출처 · 단위), 모델 칸(읽기), MCP 전용 인자, 판 · 저장 안 한 변경 */
+    private _caseGetInputs(options: any): any {
+        const DSm = require('../../webview/js/designState');
+        const k = this._caseKeeper;
+        const si = options?.units === 'SI';
+        const want = Array.isArray(options?.keys) && options.keys.length ? new Set(options.keys.map(String)) : null;
+        const label = (kind: string | null): string | null => {
+            const u = kind ? CASE_UNIT_KIND[kind] : undefined;
+            return u ? UNIT_LABEL[u][si ? 'SI' : 'US'] : null;
+        };
+        const out = (key: string, v: any, kind: string | null) => (si && kind ? caseValueToSI(v, kind) : v);
+        const inputs: any = {};
+        const units: any = {};
+        for (const key of DSm.KEYS.case) {
+            if (want && !want.has(key)) { continue; }
+            const m = DSm.fieldMeta(key);
+            inputs[key] = out(key, k.state.inputs[key], m.unit);
+            if (m.unit) { units[key] = label(m.unit); }
+        }
+        const spans = (!want || want.has('spans')) ? {
+            spans: out('spans', k.state.spans.spans, 'length_ft'), supports: k.state.spans.supports,
+            lapsPerSupport: k.state.spans.lapsPerSupport.map((l) => ({ left: out('lap', l.left, 'length_ft'), right: out('lap', l.right, 'length_ft') })),
+            unit: label('length_ft'),
+        } : undefined;
+        const drafts = k.drafts || modelDrafts(this._model);
+        const model: any = {};
+        for (const key of DSm.KEYS.model) {
+            if (want && !want.has(key)) { continue; }
+            const m = DSm.fieldMeta(key);
+            if (key in drafts) { model[key] = out(key, drafts[key], m.unit); }
+        }
+        const sources: any = {};
+        for (const [key, src] of Object.entries(k.state.sources)) { if (!want || want.has(key)) { sources[key] = src; } }
+        return {
+            rev: k.state.rev, dirty: k.isDirty(this._currentModelSignature()), dirty_since: k.dirtySince, units: si ? 'SI' : 'US',
+            inputs, spans, unit_of: units, sources,
+            model_inputs: model,
+            model_note: 'model_inputs (section template / dimensions, E · ν · G, analysis conditions) are owned by the model — change them with set_section_template, set_material, set_boundary_condition, set_lengths, set_load_case, run_analysis.',
+            mcp_only: k.state.mcpOnly,
+            view: k.state.view,
+            sources_note: "default = the program's initial value (nobody set it), user = the person on the screen, ai = an MCP call, file = read from the opened .csd, load-analysis = filled from the load analysis, mirror = copied from another field (Fy → connection Fy). null = not given (blank / AI did not give it).",
+        };
+    }
+
+    /** K2-5: set_case_inputs {inputs, spans?, units?, reason?} — 받은 키만 합쳐 쓴다(계산 없음). 무효가 된 결과는 장부에. */
+    private _caseSetInputs(options: any): any {
+        const DSm = require('../../webview/js/designState');
+        const si = options?.units === 'SI';
+        const given = options?.inputs && typeof options.inputs === 'object' ? options.inputs : {};
+        const changes: any = {};
+        const rejected: { key: string; reason: string }[] = [];
+        for (const [key, v] of Object.entries(given)) {
+            const m = DSm.fieldMeta(key);
+            if (m && m.owner === 'model') {
+                rejected.push({ key, reason: `'${key}' belongs to the model — use set_section_template / set_material / set_boundary_condition / set_lengths / set_load_case / run_analysis` });
+                continue;
+            }
+            const kind = m ? (m.owner === 'mirror' ? DSm.fieldMeta(m.mirrorOf).unit : m.unit) : null;
+            changes[key] = si && kind ? caseValueToUS(v, kind) : v;
+        }
+        if (options?.spans && typeof options.spans === 'object') {
+            const sp = options.spans;
+            if (sp.spans !== undefined) { changes.spans = si ? caseValueToUS(sp.spans, 'length_ft') : sp.spans; }
+            if (sp.supports !== undefined) { changes.supports = sp.supports; }
+            if (sp.lapsPerSupport !== undefined) {
+                changes.lapsPerSupport = Array.isArray(sp.lapsPerSupport) ? sp.lapsPerSupport.map((l: any) => ({
+                    left: si ? caseValueToUS(l?.left ?? null, 'length_ft') : (l?.left ?? null),
+                    right: si ? caseValueToUS(l?.right ?? null, 'length_ft') : (l?.right ?? null) })) : sp.lapsPerSupport;
+            }
+        }
+        const r = applyChanges(this._caseKeeper.state, changes, 'ai');
+        this._caseKeeper.state = r.state;
+        rejected.push(...r.rejected);
+        // 무효화(설계 §8 의 표 — 무효 장부로)
+        const invalidated: string[] = [];
+        if (r.accepted.length) {
+            const cause = { action: 'set_case_inputs', inputs: r.accepted };
+            const { scope } = invalidationScope(r.accepted);
+            const reason = 'Inputs changed (set_case_inputs)' + (options?.reason ? `: ${String(options.reason).slice(0, 200)}` : '');
+            if (scope === 'load' || scope === 'design') {
+                this._invalidateDerived(scope, cause, reason);
+                this._postMessage('derivedResultsInvalidated', { scope, reason, cause });
+                invalidated.push(scope);
+            } else if (scope === 'connection') {
+                const lapKeys = r.accepted.filter((key) => DSm.fieldMeta(key)?.group === 'lap');
+                const connKeys = r.accepted.filter((key) => DSm.fieldMeta(key)?.group === 'connection');
+                for (const [sc, keys] of [['lap', lapKeys], ['connection', connKeys]] as const) {
+                    if (!keys.length) { continue; }
+                    this._invalidateDerived(sc, { action: 'set_case_inputs', inputs: keys }, reason);
+                    this._postMessage('derivedResultsInvalidated', { scope: sc, reason, cause });
+                    invalidated.push(sc);
+                }
+            }
+            this._postCaseState('ai');
+        }
+        this._postCaseDirty(false);
+        return { success: rejected.length === 0, rev: this._caseKeeper.state.rev, accepted: r.accepted, rejected,
+            invalidated, dirty: this._caseKeeper.isDirty(this._currentModelSignature()) };
+    }
+
+    /** K2-5: run_case_check {what} — 화면 단추와 같은 길(상태로 만든 본문). 상태에 쓰지 않는다. */
+    private async _caseRunCheck(options: any): Promise<any> {
+        const what = String(options?.what || '');
+        const mt = this._caseKeeper.state.inputs.memberType;
+        let build: (st: any, ctx: any) => BuiltRequest;
+        let action: string;
+        let tool: string;
+        if (what === 'member') {
+            if (isCalcMode(mt)) { build = buildPurlinRequest; action = 'design_purlin'; tool = 'design_purlin'; }
+            else { build = buildDesignRequest; action = 'aisi_design'; tool = `aisi_design_${mt}`; }
+        } else if (what === 'loads') {
+            if (!isCalcMode(mt)) { return { error: `run_case_check 'loads' needs a load-analysis member type (roof-purlin, floor-joist, wall-girt, wall-stud); the case has '${mt}'` }; }
+            build = buildLoadRequest; action = 'analyze_loads'; tool = 'analyze_loads';
+        } else if (what === 'connection') { build = buildConnectionRequest; action = 'design_connection'; tool = 'design_connection'; }
+        else if (what === 'lap') { build = buildLapRequest; action = 'lap_connection'; tool = 'design_lap_connection'; }
+        else { return { error: `run_case_check: what must be member | loads | connection | lap (got '${what}')` }; }
+        const h = this._caseRequest(build);
+        if (h.error) { return { error: h.error }; }
+        if (h.missing.length || !h.data) { return { error: `run_case_check ${what}: inputs are blank — ${h.missing.join(', ')}. Set them with set_case_inputs (or ask the person).` }; }
+        const result = await this._pageAction({ action, ...h.data });
+        if (result && typeof result === 'object' && !Array.isArray(result)) {
+            return { ...result, case_check: { what, tool, rev: this._caseKeeper.state.rev,
+                note: 'Computed from the inputs shown on the screen (the same request as the screen button).' } };
+        }
+        return result;
     }
 
     /** K2: 상태 전체를 화면에(칸에 얹는다 — 복원과 같은 길). */
@@ -4308,7 +4567,7 @@ ${inner}
                         <p class="hint">강종 선택 시 Fy, Fu, E, G가 자동 설정됩니다. 여기서 설정한 Fy/Fu가 해석·설계·접합부 탭 전체에 적용됩니다 (단일 소스).</p>
                         <div class="input-row">
                             <label>Steel</label>
-                            <select id="input-steel-grade" style="width:110px">
+                            <select id="input-steel-grade" style="width:110px" title="강종을 고르면 Fy · Fu 만 그 강종의 값으로 바뀝니다 — E · G 는 그대로(모델의 값)">
                                 <option value="">-- Manual --</option>
                                 ${steelGradeOptionsHtml()}
                             </select>
@@ -5130,7 +5389,7 @@ ${inner}
         const tmp = `${fsPath}.tmp-${process.pid}`;
         fs.writeFileSync(tmp, json, 'utf-8');
         fs.renameSync(tmp, fsPath);
-        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._postCaseDirty(); }
+        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._casePath = fsPath; this._postCaseDirty(); }
         return projectData;
     }
 
@@ -5181,6 +5440,11 @@ ${inner}
         warnings.push(...check.warnings);
         if (!isWrapper) { projectData = { model: projectData }; }
 
+        // K2-6: 저장하지 않은 변경을 말없이 버리지 않는다 — 경고에 싣고 화면에 알린다(묻는 것은 화면이 정한다)
+        const discarded = this._caseDiscardNotice('open_project');
+        if (discarded) {
+            warnings.push(`Unsaved changes were discarded by opening this file (since ${discarded.since}; ${discarded.inputs_changed.length} input(s)${discarded.model_changed ? ', model' : ''} changed)`);
+        }
         // V4-01: 이전 프로젝트의 화면 결과를 먼저 모두 지운다(파일에 없는 결과가 남지 않게).
         this._lastAnalysisResult = null;
         this._lastLoadAnalysis = null;
@@ -5231,6 +5495,7 @@ ${inner}
             'elementRoles', 'sectionEdited']) {
             if (!(k in (check.model as any))) { delete merged[k]; }
         }
+        this._loadFyAi = false;
         this._model = merged;
         this._postMessage('modelLoaded', this._model);
         this._updateTreeView();
@@ -5273,6 +5538,7 @@ ${inner}
 
         // K2-3: 파일의 입력 → 호스트의 검토 상태(표의 키만 — 모르는 키는 버리고 알린다, V5b-01 과 같은 태도).
         const mig = migrateProject(projectData);
+        this._casePath = fsPath;
         warnings.push(...mig.warnings);
         const fileUnitSystem = projectData.case?.view?.unitSystem ?? projectData.designInputs?.unitSystem;
         this._caseKeeper.loadFromFile(mig.state, fileUnitSystem !== 'US' && fileUnitSystem !== 'SI');
@@ -5332,10 +5598,10 @@ ${inner}
 
     /** K2: 저장 안 한 변경이 있는가(입력 판 · 모델 서명) — 화면 · 독립 창이 듣는다(K2-6 에서 닫기 물음) */
     private _postCaseDirty(force = true): void {
-        const dirty = this._caseKeeper.isDirty(this._currentModelSignature());
+        const dirty = this._caseKeeper.touch(this._currentModelSignature());
         if (!force && dirty === this._caseDirtySent) { return; }
         this._caseDirtySent = dirty;
-        this._postMessage('caseDirty', { dirty, rev: this._caseKeeper.state.rev });
+        this._postMessage('caseDirty', { dirty, rev: this._caseKeeper.state.rev, since: this._caseKeeper.dirtySince });
     }
     private _caseDirtySent: boolean | null = null;
 

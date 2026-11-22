@@ -108,6 +108,63 @@ async function main() {
     p.__testClearPostedMessages();
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'unit-toggle', changes: { unitSystem: 'SI' } } });
     assert(!posted('caseDirty').some((m) => m.data.dirty), 'a unit toggle alone is not a change');
+    // ── K2-6: 저장 안 한 변경의 물음(독립 창이 닫기 · 다른 파일 열기 전에) ──────────────────────
+    p.__testClearPostedMessages();
+    assert(!p.__testLoadProjectFile(f1).error);
+    let u = await p.handleMcpAction({ action: 'get_unsaved_changes' });
+    assert.deepStrictEqual([u.dirty, u.since, u.inputs_changed, u.model_changed, u.file], [false, null, [], false, f1], 'clean after open');
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: p.__testGetCase().state.rev, changes: { Cb: 1.25 } } });
+    u = await p.handleMcpAction({ action: 'get_unsaved_changes' });
+    assert(u.dirty && typeof u.since === 'string' && u.inputs_changed.includes('Cb'), `dirty with since and keys (${JSON.stringify(u)})`);
+    const st0 = p.getStatus();
+    assert(st0.case && st0.case.dirty === true && Number.isInteger(st0.case.rev) && st0.case.dirty_since === u.since, 'status carries case.rev / dirty / since');
+    // 열기 전에 저장하지 않았으면 — 버린 것을 경고 · 화면 메시지로(묻지 않는다)
+    p.__testClearPostedMessages();
+    const lw = p.__testLoadProjectFile(f1);
+    assert(lw.warnings.some((w) => /Unsaved changes were discarded/.test(w)), 'GUI open: the discarded changes are in the warnings');
+    const disc = posted('caseDiscarded')[0];
+    assert(disc && disc.data.inputs_changed.includes('Cb') && disc.data.by === 'open_project', 'caseDiscarded posted to the page');
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: p.__testGetCase().state.rev, changes: { Cb: 1.15 } } });   // 파일의 Cb(1.2)와 다른 값
+    const mr = await p.handleMcpAction({ action: 'load_project', filepath: f1 });
+    assert(mr.success && mr.discarded_unsaved_changes && mr.discarded_unsaved_changes.inputs_changed.includes('Cb'), 'MCP load_project: discarded changes in the reply ' + JSON.stringify(mr).slice(0, 400));
+    assert.strictEqual(p.__testGetCase().state.inputs.Cb, j1.case.inputs.Cb, 'load_project of a .csd reads its case record');
+
+    // ── 결정 3: MCP 가 정한 기준응력 — 사람이 ① Fy 를 고치면 풀린다 ─────────────────────────────
+    p.__testClearPostedMessages();
+    await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: 50 });
+    assert(p._loadFyAi === true && !('loadFySource' in p._model), 'AI reference stress recorded — outside the model (not sent to the engine, not saved)');
+    assert.strictEqual(posted('modelLoaded').pop().data.loadFySource, 'ai', 'the page is told the reference stress came from the AI');
+    p.__testClearPostedMessages();
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: p.__testGetCase().state.rev, changes: { fy: 45, fyLoad: 45 } } });
+    assert(p._loadFyAi === false && posted('caseReference').length === 1, 'released when the person changes Fy');
+
+    // ── D-7: run_analysis 의 neigs 가 화면 칸에(modelLoaded) ─────────────────────────────────
+    p.__testClearPostedMessages();
+    await p.handleMcpAction({ action: 'run_analysis', neigs: 7 });
+    const ml = posted('modelLoaded');
+    assert(ml.length >= 1 && ml[0].data.neigs === 7, 'D-7: neigs reaches the page');
+
+    // ── D-6: 두 번째 webviewReady 는 모델을 덮지 않고 다시 보낸다 ───────────────────────────────
+    await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedz', params: { H: 8, B: 2.25, D: 0.91, t: 0.059, r: 0.1875, qlip: 50 } });
+    p.__testClearPostedMessages();
+    await p.__testDispatchMessage({ command: 'webviewReady' });
+    assert.strictEqual(p._model.sectionTemplate, 'lippedz', 'D-6: the model survives a page reload');
+    const cmds = p.__testGetPostedMessages().map((m) => m.command);
+    assert(cmds.includes('modelLoaded') && cmds.includes('caseState') && cmds.indexOf('modelLoaded') < cmds.lastIndexOf('caseState'), `re-posted model then state (${cmds.join(',')})`);
+    // ── 엔진 b288448 의 Lap 입력 distortion_restrained — 화면 칸이 없어 검토 상태의 mcpOnly 에. 호스트 본문이 그것을 싣는다 ─────
+    {
+      const { loadTs, makeFakeVscode } = require('./panel_harness');
+      const G = loadTs('src/case/mcpGroups.ts', makeFakeVscode());
+      const R = loadTs('src/case/requests.ts', makeFakeVscode());
+      const { CaseKeeper } = loadTs('src/case/caseKeeper.ts', makeFakeVscode());
+      const k = new CaseKeeper();
+      const lapArgs = { action: 'lap_connection', d: 8, t: 0.059, Fy: 50, Fu: 65, lap_left_in: 30, lap_right_in: 30, fastener_dia: 0.19, n_rows: 2, Pnvs: 1.1 };
+      k.applyMcp(G.mcpWrite('lap_connection', { ...lapArgs, distortion_restrained: true }));
+      const ctxR = { drafts: { tplH: 8, tplT: 0.059 }, lastDesign: null, props: null };
+      assert.strictEqual(R.buildLapRequest(k.state, ctxR).data.distortion_restrained, true, 'distortion_restrained kept in the case and sent with the lap request');
+      k.applyMcp(G.mcpWrite('lap_connection', lapArgs));
+      assert(!('distortion_restrained' in R.buildLapRequest(k.state, ctxR).data), 'a later design_lap_connection without it clears it (decision 1)');
+    }
   } finally {
     ctx.close();
     fs.rmSync(dir, { recursive: true, force: true });

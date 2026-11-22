@@ -120,10 +120,13 @@
                 if (isNaN(oldVal) || oldVal === 0) return;
                 const oldFactor = oldSys === 'SI' ? UNIT[ut].factor : 1.0;
                 const newFactor = _unitSystem === 'SI' ? UNIT[ut].factor : 1.0;
-                const usVal = oldVal / oldFactor;
+                // D-5(K2-7): 프로그램이 적은 칸이면 그 정확한 값에서(칸 글의 12 자리를 다시 읽지 않는다)
+                const ex = globalThis.StcfsdDesignState.exactOf(el);
+                const usVal = ex !== undefined ? ex : oldVal / oldFactor;
                 const newVal = usVal * newFactor;
                 // V4-21: 12 자리로 — 왕복(SI ↔ US)에서 값이 바뀌지 않게(전 6 자리 · 끝 0 지우기, 1e-6 드리프트).
-                el.value = String(Number(newVal.toPrecision(12)));
+                // 사람이 친 칸(정확한 값이 없다)은 전처럼 글이 값이다 — 12700 mm 를 499.99999999999994 in 로 쥐지 않는다.
+                globalThis.StcfsdDesignState.setShown(el, String(Number(newVal.toPrecision(12))), ex !== undefined ? usVal : undefined);
             });
             // 쉼표 목록 입력(브레이스 위치 · 경간별 Ix)도 같은 규칙으로 바꾼다.
             [['brace-points', 'length_ft'], ['span-Ix-list', 'inertia'], ['vib-lengths', 'length']].forEach(([id, ut]) => {
@@ -228,7 +231,11 @@
                 break;
             case 'derivedResultsInvalidated':
                 // K4a: 호스트가 지운 설계 · Lap 결과(MCP 하중 해석의 입력이 바뀜)를 화면에서도 — 같은 clearStaleResults.
-                clearStaleResults(msg.data && msg.data.scope === 'load' ? 'load' : 'design', (msg.data && msg.data.reason) || 'inputs changed');
+                {
+                    // K2-5: MCP set_case_inputs 가 접합 칸만 바꿨으면 그 결과만(D-4 와 같은 범위)
+                    const sc = msg.data && msg.data.scope;
+                    clearStaleResults(sc === 'load' ? 'load' : (sc === 'lap' || sc === 'connection') ? sc : 'design', (msg.data && msg.data.reason) || 'inputs changed');
+                }
                 sendTreeUpdate();
                 break;
             case 'resultsCleared':
@@ -391,6 +398,10 @@
             case 'caseState':
                 _caseApplyState(msg.data);
                 break;
+            case 'caseReference':
+                // 결정 3: 사람이 ① Fy 를 고쳐 AI 의 기준응력 지정이 풀렸다(또는 다시 정해졌다)
+                _showReferenceStress(msg.data || null);
+                break;
         }
     });
     // K2: 호스트 메시지를 처리한 뒤 — 처리기가 칸을 고쳤으면(복원 · 하중 해석 채우기 · 거울) 바뀐 것을 호스트에 알린다.
@@ -544,9 +555,11 @@
         // 재료 입력 초기값 (US 내부값 → 표시값 변환)
         if (model.prop && model.prop.length > 0) {
             const p = model.prop[0];
-            setValue('input-E', toDisplay(p[1], 'stress'));
+            // D-5(K2-7): 12 자리로 보이고(전: 203395.34014846664) 값은 모델의 것 그대로 — 다시 읽어도 29500 ksi
+            const dsE = globalThis.StcfsdDesignState;
+            dsE.setShown(document.getElementById('input-E'), stressField(Number(p[1])), Number(p[1]));
             setValue('input-v', p[3]);
-            setValue('input-G', toDisplay(p[5], 'stress'));
+            dsE.setShown(document.getElementById('input-G'), stressField(Number(p[5])), Number(p[5]));
         }
 
         // 단면 속성 자동 계산
@@ -959,6 +972,8 @@
     function _optNum(id, unitType) {
         const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
         if (!el) { return undefined; }
+        const ex = unitType ? globalThis.StcfsdDesignState.exactOf(el) : undefined;
+        if (ex !== undefined) { return ex; }
         const raw = String(el.value || '').trim();
         if (raw === '') { return undefined; }
         const v = parseFloat(raw);
@@ -999,6 +1014,8 @@
     }
     function reqNum(id, unitType, label) {
         const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+        const ex = unitType && el ? globalThis.StcfsdDesignState.exactOf(el) : undefined;
+        if (ex !== undefined) { return ex; }
         const raw = el ? String(el.value || '').trim() : '';
         const v = raw === '' ? NaN : parseFloat(raw);
         if (!isFinite(v)) { _missingInputs.push(_missEntry(id, label)); return NaN; }
@@ -1007,6 +1024,8 @@
     /** 하중 · 소요강도 성분: 빈 칸은 0(= 그 성분 없음). 수가 아닌 글은 필수 입력처럼 막는다. */
     function zeroNum(id, unitType, label) {
         const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+        const ex = unitType && el ? globalThis.StcfsdDesignState.exactOf(el) : undefined;
+        if (ex !== undefined) { return ex; }
         const raw = el ? String(el.value || '').trim() : '';
         if (raw === '') { return 0; }
         const v = parseFloat(raw);
@@ -3744,18 +3763,25 @@
         return String(Number(toDisplay(ksi, 'stress').toPrecision(12)));
     }
 
-    function syncFyValue(fyVal) {
-        setValue('input-fy', fyVal);
-        setValue('design-fy', fyVal);
-        setValue('plastic-fy', fyVal);
+    /** D-5(K2-7): 거울 칸에 글과 함께 원래 칸의 정확한 값도 베낀다(원래 칸의 글이 프로그램이 적은 그대로일 때) */
+    function _mirrorTo(ids, srcId, text) {
+        const ds = globalThis.StcfsdDesignState;
+        const src = document.getElementById(srcId);
+        const ex = src && String(src.value) === String(text) ? ds.exactOf(src) : undefined;
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) { return; }
+            if (id === srcId) { if (ex === undefined) { setValue(id, text); } return; }
+            ds.setShown(el, String(text), ex === undefined ? null : ex);
+        });
+    }
+    function syncFyValue(fyVal, srcId) {
         // 접합부 탭 모재 Fy도 동기화 (별도 강종이면 접합부 탭에서 재수정 가능)
-        setValue('conn-Fy', fyVal);
+        _mirrorTo(['input-fy', 'design-fy', 'plastic-fy', 'conn-Fy'], srcId || 'input-fy', fyVal);
     }
 
     function syncFuValue(fuVal) {
-        setValue('input-fu', fuVal);
-        setValue('design-fu', fuVal);
-        setValue('conn-Fu', fuVal);
+        _mirrorTo(['input-fu', 'design-fu', 'conn-Fu'], 'input-fu', fuVal);
     }
 
     /** 설계 탭 상단 FSM/DSM 연동 상태 스트립 갱신 */
@@ -3782,9 +3808,28 @@
         }
     }
 
+    /**
+     * 결정 3(K2-5): 해석의 기준응력과 재료 Fy 는 따로다. AI 가 set_load_case 로 기준응력을 정했으면(모델 loadFySource 'ai')
+     * 해석 칸 옆에 그 값을 보이고, 「해석 실행」 은 그 값으로 돈다(호스트). 사람이 ① Fy 를 고치면 다시 ① Fy 를 따른다.
+     */
+    /** @type {any} */
+    var _aiReference = null;
+    function _showReferenceStress(m) {
+        _aiReference = m && m.loadFySource === 'ai' && Number(m.loadFy) > 0 ? Number(m.loadFy) : null;
+        const fyDisp = document.getElementById('analysis-fy-display');
+        if (!fyDisp) { return; }
+        if (_aiReference !== null) {
+            fyDisp.textContent = '기준응력 ' + stressField(_aiReference) + ' ' + unitLabel('stress') + ' (AI 지정 — 「해석 실행」 이 이 값으로)';
+            fyDisp.title = '해석의 기준응력을 AI 가 set_load_case 로 정했습니다. ① 단면·재료 탭의 Fy 를 고치면 다시 그 값을 따릅니다.';
+        } else if (fyDisp.title) {
+            fyDisp.title = '';
+            const fyEl = /** @type {HTMLInputElement|null} */ (document.getElementById('input-fy'));
+            fyDisp.textContent = 'Fy: ' + (fyEl ? fyEl.value : '') + ' ' + unitLabel('stress');
+        }
+    }
     function updateAnalysisFyDisplay(fyVal) {
         const fyDisp = document.getElementById('analysis-fy-display');
-        if (fyDisp) {
+        if (fyDisp && _aiReference === null) {
             const unit = unitLabel('stress');
             fyDisp.textContent = 'Fy: ' + fyVal + ' ' + unit;
         }
@@ -3814,7 +3859,7 @@
     function propagateFyFromPlastic() {
         // 빈 칸을 기본 강종 값으로 채우지 않는다(V4-06) — 비우면 설계 Fy 도 비고, 실행 때 막힌다.
         const fyVal = document.getElementById('plastic-fy')?.value ?? '';
-        syncFyValue(fyVal);
+        syncFyValue(fyVal, 'plastic-fy');
         updateAnalysisFyDisplay(fyVal);
     }
 
@@ -3824,10 +3869,11 @@
         selGradePre.addEventListener('change', () => {
             const v = gradeValues(selGradePre);
             if (v) {
-                setValue('input-fy', stressField(v.fy));
-                setValue('input-fu', stressField(v.fu));
-                setValue('input-E', toDisplay(29500, 'stress'));
-                setValue('input-G', toDisplay(11300, 'stress'));
+                // D-8(K2-5): 강종은 Fy · Fu 만 바꾼다 — E · G 는 모델의 것 그대로(전: 29500 · 11300 ksi 로 덮어 MCP · 파일의 E 가 사라졌다).
+                // 강종 표의 값을 정확한 값으로 함께(D-5).
+                const dsG = globalThis.StcfsdDesignState;
+                dsG.setShown(document.getElementById('input-fy'), stressField(v.fy), v.fy);
+                dsG.setShown(document.getElementById('input-fu'), stressField(v.fu), v.fu);
                 propagateFyFuFromPreprocessor();
                 if (v.restricted) {
                     setStatus('§A3.1.3 저연성 강종: 감소값 Fy ' + toDisplay(v.fy, 'stress').toFixed(0) + ' / Fu '
@@ -4356,7 +4402,7 @@
             document.querySelectorAll('.span-tbl-len').forEach((el, i) => {
                 const raw = parseFloat(/** @type {HTMLInputElement} */ (el).value);
                 if (!isFinite(raw)) { _missingInputs.push(_missEntry(/** @type {HTMLElement} */ (el), '경간 ' + (i + 1) + ' 길이')); spanLens.push(NaN); return; }
-                spanLens.push(fromDisplay(raw, 'length_ft'));
+                spanLens.push(globalThis.StcfsdDesignState.readUs(el, 'length_ft', fromDisplay));
             });
             document.querySelectorAll('.span-tbl-sup').forEach(el => {
                 supports.push(/** @type {HTMLSelectElement} */ (el).value);
@@ -4366,11 +4412,10 @@
             for (let si = 0; si < nSup; si++) {
                 const lEl = document.querySelector('.span-tbl-lapl[data-idx="' + si + '"]');
                 const rEl = document.querySelector('.span-tbl-lapr[data-idx="' + si + '"]');
-                const lRaw = lEl ? parseFloat(/** @type {HTMLInputElement} */ (lEl).value) || 0 : 0;
-                const rRaw = rEl ? parseFloat(/** @type {HTMLInputElement} */ (rEl).value) || 0 : 0;
+                const lapUs = (el) => { const v = el ? globalThis.StcfsdDesignState.readUs(el, 'length_ft', fromDisplay) : null; return v || 0; };
                 lapsPerSupport.push({
-                    left_ft: fromDisplay(lRaw, 'length_ft'),
-                    right_ft: fromDisplay(rRaw, 'length_ft'),
+                    left_ft: lapUs(lEl),
+                    right_ft: lapUs(rEl),
                 });
             }
             // 등스팬 여부 판별
@@ -4417,16 +4462,9 @@
                     type: /** @type {HTMLSelectElement} */ (document.getElementById('select-deck-type'))?.value || 'none',
                     t_panel: _optNum('deck-t-panel', 'thickness'),
                     fastener_spacing: _optNum('deck-fastener-spacing', 'length'),
-                    kphi_override: (() => {
-                        const raw = /** @type {HTMLInputElement} */ (document.getElementById('deck-kphi-override'))?.value;
-                        if (raw == null || raw.trim() === '') { return undefined; }
-                        return fromDisplay(parseFloat(raw), 'rotStiff');
-                    })(),
-                    kx_override: (() => {
-                        const raw = /** @type {HTMLInputElement} */ (document.getElementById('deck-kx-override'))?.value;
-                        if (raw == null || raw.trim() === '') { return undefined; }
-                        return fromDisplay(parseFloat(raw), 'latStiff');
-                    })(),
+                    // D-5: 표시값을 되읽지 않고 칸이 쥔 정확한 값(SI 화면의 반올림이 되먹지 않게)
+                    kphi_override: _optNum('deck-kphi-override', 'rotStiff'),
+                    kx_override: _optNum('deck-kx-override', 'latStiff'),
                 },
                 // 빈 선택 칸은 null 이 아니라 보내지 않음(undefined) — MCP 스키마와 같은 본문(V4-31).
                 section: (sectionInfo.depth > 0 && sectionInfo.thickness > 0) ? sectionInfo : undefined,
@@ -4436,8 +4474,8 @@
             };
             const i621El = /** @type {HTMLInputElement|null} */ (document.getElementById('chk-i621-confirmed'));
             if (i621El && i621El.checked) { data.i621_conditions_confirmed = true; }
-            const insEl = /** @type {HTMLInputElement|null} */ (document.getElementById('deck-insulation'));
-            if (insEl && insEl.value.trim() !== '') { data.insulation_in = fromDisplay(parseFloat(insEl.value), 'length'); }
+            const insIn = _optNum('deck-insulation', 'length');   // D-5: 칸이 쥔 정확한 값
+            if (insIn !== undefined) { data.insulation_in = insIn; }
             const rtEl = /** @type {HTMLInputElement|null} */ (document.getElementById('deck-R-tested'));
             if (rtEl && rtEl.value.trim() !== '') { data.deck.R_tested_uplift = parseFloat(rtEl.value); }
             const braces = _parseNumberList('brace-points', 'length_ft');
@@ -7915,6 +7953,7 @@
         const { changes, draftsChanged } = _caseSplit(diff);
         const data = { origin, changes };
         if (origin === 'user') { data.baseRev = _caseRev; }
+        data.seenRev = _caseRev;   // 이 변경을 만들 때 본 판(호스트가 그 사이 AI 가 쓴 것을 다시 보낼지 정한다)
         if (draftsChanged) { data.drafts = _caseDrafts(snap); }
         vscode.postMessage({ command: 'caseEdit', data });
     }
@@ -7923,6 +7962,11 @@
         _caseLast = JSON.parse(JSON.stringify(_initialInputs));
         // 처음 값 — 호스트의 표 처음 값과 같아야 한다(시험 모드의 호스트가 대조한다). 초안도 함께.
         vscode.postMessage({ command: 'caseHello', data: { inputs: _caseLast, drafts: _caseDrafts(_caseLast) } });
+        // 결정 1(K2-5): AI 가 주지 않은 선택 · 체크(상태 null)를 사람이 고르면 그 표지를 걷고 그 값으로
+        document.addEventListener('change', (ev) => {
+            const t = /** @type {HTMLElement|null} */ (ev.target);
+            if (t && t.dataset && t.dataset.caseUnset) { globalThis.StcfsdDesignState.markUnset(t, false); }
+        }, true);
         document.addEventListener('change', () => { _caseReport('user'); });
         document.addEventListener('input', () => {
             if (_caseTimer) { clearTimeout(_caseTimer); }
@@ -7969,7 +8013,7 @@
     // 입력 변경 후 이전 하중/설계 결과를 최신 결과처럼 재사용하지 않는다.
     function invalidateDerivedResults(scope) {
         if (_restoringInputs) { return; }
-        clearStaleResults(scope === 'load' ? 'load' : 'design', '입력이 변경되었습니다');
+        clearStaleResults(scope === 'load' ? 'load' : (scope === 'lap' || scope === 'connection') ? scope : 'design', '입력이 변경되었습니다');
         vscode.postMessage({ command: 'invalidateDerivedResults', data: { scope } });
         sendTreeUpdate();
     }
@@ -7992,6 +8036,12 @@
             const ctx2 = c && c.getContext ? c.getContext('2d') : null;
             if (c && ctx2) { ctx2.clearRect(0, 0, c.width, c.height); }
         };
+        // D-4(K2-7): 접합부 탭의 칸 — 그 결과(Lap 또는 단일 접합) 카드만. 둘은 같은 칸(#connection-result)에 그려진다.
+        if (scope === 'lap' || scope === 'connection') {
+            if (scope === 'lap') { _lastLapResult = null; }
+            setHtml('connection-result', note('접합부 계산을 다시 실행하세요.'));
+            return;
+        }
         const order = ['design', 'load', 'analysis', 'model', 'all'];
         const lvl = order.indexOf(scope) < 0 ? 0 : order.indexOf(scope);
         const has = (s) => lvl >= order.indexOf(s);
@@ -8051,8 +8101,10 @@
             const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
             if (!el || typeof v !== 'number' || !isFinite(v)) { return; }
             const d = unit ? toDisplay(v, unit) : v;
-            el.value = String(Number(Number(d).toPrecision(10)));
+            // D-5(K2-7): 글은 10 자리, 값은 모델의 것 그대로
+            globalThis.StcfsdDesignState.setShown(el, String(Number(Number(d).toPrecision(10))), unit ? v : null);
         };
+        _showReferenceStress(m);
         if (typeof m.BC === 'string') { setSel('select-bc', m.BC); }
         if (Number.isInteger(m.neigs) && m.neigs > 0) { setNum('input-neigs', m.neigs, null); }
         const L = Array.isArray(m.lengths) ? m.lengths.map(Number).filter(v => isFinite(v) && v > 0) : [];
@@ -8152,6 +8204,18 @@
         if (table[s]) { return table[s]; }
         const m = /^Load case changed: (.+)$/.exec(s);
         return m ? '하중 경우가 바뀌었습니다(' + m[1] + ')' : userText(s);
+    }
+
+    // D-4(K2-7): ④ 접합부 탭 — Lap 칸이면 'lap', 단일 접합 칸이면 'connection'(호스트의 무효 장부가 그 결과 하나만 지운다)
+    const connPanel = document.getElementById('tab-connection');
+    if (connPanel) {
+        connPanel.addEventListener('change', event => {
+            const t = event.target;
+            if (!(t instanceof HTMLInputElement || t instanceof HTMLSelectElement) || !t.id) { return; }
+            const row = (globalThis.StcfsdDesignState.FIELDS || []).find(r => r[1] === t.id);
+            if (!row) { return; }
+            invalidateDerivedResults(row[4] && row[4].group === 'lap' ? 'lap' : 'connection');
+        });
     }
 
     const loadsPanel = document.getElementById('tab-loads');

@@ -48,7 +48,10 @@ function main() {
 
   // 데크 시험 강성 override와 입력 변경 무효화가 UI/저장 계약에 모두 포함된다.
   assert(panelTs.includes('id="deck-kx-override"'), 'HTML must expose a tested kx override');
-  assert(appJs.includes("document.getElementById('deck-kx-override')"), 'load payload must include kx override');
+  // K2: 화면 본문은 칸이 쥔 정확한 값으로(_optNum — D-5), 실행 단추의 본문은 호스트가 상태로 만든다(requests.ts)
+  assert(appJs.includes("kx_override: _optNum('deck-kx-override', 'latStiff')"), 'load payload must include kx override');
+  const requestsTs = readUtf8(path.join('src', 'case', 'requests.ts'));
+  assert(requestsTs.includes("kx_override: opt('deckKxOverride')"), 'host-built load payload must include kx override');
   assert(designStateJs.includes('deckKxOverride'), 'project state must persist kx override');
   assert(appJs.includes("command: 'invalidateDerivedResults'"),
     'UI input changes must invalidate derived load/design results');

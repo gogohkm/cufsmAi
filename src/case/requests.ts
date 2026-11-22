@@ -265,6 +265,9 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
         Mnd: lpMnd,
         Vn: lpVn,
     };
+    // 엔진 b288448: 화면 칸이 아직 없는 Lap 입력 — AI 가 design_lap_connection 으로 준 것(검토 상태의 mcpOnly)만. 없으면 키를 넣지 않는다(화면 본문과 같게).
+    const lapOnly = (st.mcpOnly && st.mcpOnly.design_lap_connection) || {};
+    if (lapOnly.distortion_restrained === true) { data.distortion_restrained = true; }
     return { data, missing: r.missing };
 }
 

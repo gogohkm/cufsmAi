@@ -86,10 +86,17 @@ async function runAnalysisGui(ctx) {
   await ctx.settle(300);
 }
 
+/** 단추를 누르고 그 결과 메시지를 기다린다 — command 는 하나 또는 여럿(어느 것이든 먼저 온 것) */
 async function clickAndWait(ctx, sel, command, timeout = 300000) {
   const m = ctx.mark();
   await ctx.click(sel);
-  await ctx.waitMsg(command, m.h2w, timeout);
+  const cmds = Array.isArray(command) ? command : [command];
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeout) {
+    if (ctx.log.h2w.slice(m.h2w).some((x) => cmds.includes(x.command))) { break; }
+    await sleep(100);
+  }
+  if (!ctx.log.h2w.slice(m.h2w).some((x) => cmds.includes(x.command))) { throw new Error('timeout waiting for ' + cmds.join(' | ')); }
   await ctx.settle(400);
 }
 

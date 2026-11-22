@@ -116,6 +116,31 @@ export function toSI(value: number, unit: UnitKey): number {
     return value * US_TO_SI[unit];
 }
 
+/**
+ * K2: 검토 상태 키의 단위 종류(webview/js/designState.js FIELDS 의 셋째 열) → 이 파일의 단위.
+ * get_case_inputs · set_case_inputs 와 설계 도구 응답의 case_inputs_replaced 가 쓴다.
+ */
+export const CASE_UNIT_KIND: Record<string, UnitKey> = {
+    length: 'length', length_ft: 'length_ft', thickness: 'length', radius: 'length', stress: 'stress', force: 'force',
+    moment: 'moment', pressure: 'pressure', inertia: 'inertia', rotStiff: 'rot_stiff', latStiff: 'lat_stiff', density: 'density',
+};
+/** 검토 상태의 값(수 · 수의 목록 · null) US → SI. 단위 종류를 모르면 그대로 */
+export function caseValueToSI(v: any, kind: string | null): any {
+    const u = kind ? CASE_UNIT_KIND[kind] : undefined;
+    if (!u) { return v; }
+    if (typeof v === 'number' && isFinite(v)) { return toSI(v, u); }
+    if (Array.isArray(v)) { return v.map((x) => (typeof x === 'number' && isFinite(x) ? toSI(x, u) : x)); }
+    return v;
+}
+/** 검토 상태의 값 SI → US(입력) */
+export function caseValueToUS(v: any, kind: string | null): any {
+    const u = kind ? CASE_UNIT_KIND[kind] : undefined;
+    if (!u) { return v; }
+    if (typeof v === 'number' && isFinite(v)) { return toUS(v, u); }
+    if (Array.isArray(v)) { return v.map((x) => (typeof x === 'number' && isFinite(x) ? toUS(x, u) : x)); }
+    return v;
+}
+
 // ============================================================
 // 변환 표의 모양
 // ============================================================
@@ -334,6 +359,8 @@ const DESIGN_CHECK: Table = {
 /** 부재 설계(design_member) · 단면 성질 · cutwp · DSM 의 공통 키. */
 const MEMBER_KEYS: Table = {
     design_checks: DESIGN_CHECK,
+    // K2-5: 검토 상태의 판(수) — 단위 없음
+    case_rev: 'none', case_check: { rev: 'none' },
     ...Object.fromEntries(NONE_KEYS.map((k) => [k, 'none' as const])),
     // 힘 kips
     ...Object.fromEntries(['Pn', 'Pne', 'Pnl', 'Pnd', 'Py', 'Pn_omega', 'phi_Pn', 'Pu', 'Pa', 'Pc',
@@ -481,6 +508,7 @@ const PURLIN_GOVERNING: Table = { ...PURLIN_REGION_RESULT, region: PURLIN_REGION
 /** design_purlin 묶음 (V4-16: 구간 · 검토점 · 지배 구간까지). */
 export const SI_OUT_PURLIN: Table = {
     load_analysis: SI_OUT_LOADS,
+    case_rev: 'none', case_check: { rev: 'none' },
     dsm_positive: SI_OUT_DSM_M, dsm_negative: SI_OUT_DSM_M,
     regions: PURLIN_REGION,
     design_positive: PURLIN_GOVERNING, design_negative: PURLIN_GOVERNING, design_lap: PURLIN_GOVERNING,
@@ -561,6 +589,8 @@ const SPRING_COLUMNS: ColumnSpec = {
 };
 
 export const SI_INPUT_TABLES: Record<string, Table> = {
+    // K2-5: 검토 상태 도구 — 값의 단위는 키마다 다르고(designState FIELDS) 호스트가 CASE_UNIT_KIND 로 바꾼다. 이 표로는 바꾸지 않는다.
+    get_case_inputs: {}, set_case_inputs: {}, run_case_check: {},
     get_dsm_values: { fy: S, KxLx: L, KyLy: L, KtLt: L, Lb: L },
     set_section_template: { H: L, B: L, D: L, t: L, r: L, OD: L, top_width: L, depth: L, brim: L, tf: L, tw: L },
     set_custom_section: { outer_corners: L, t: L, R_inner: L, corner_radii: L, max_elem_len: L, expected_A: AR },
@@ -634,6 +664,8 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
 
 /** SI 에서도 바꾸지 않는 수치 인자(무차원 · 개수 · 색인 · 각도). */
 export const SI_INPUT_DIMENSIONLESS: Record<string, string[]> = {
+    // K2-5: 단위는 호스트가 키마다(CASE_UNIT_KIND) — 표 변환을 하지 않는다는 뜻으로 여기 둔다
+    set_case_inputs: ['inputs', 'spans.spans', 'spans.lapsPerSupport.left', 'spans.lapsPerSupport.right'],
     set_section_template: ['qlip', 'nseg', 'n_elem'],
     set_custom_section: ['n_arc', 'n_flat'],
     build_section: ['n_arc', 'n_flat'],
