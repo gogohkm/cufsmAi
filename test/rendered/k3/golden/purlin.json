@@ -1,0 +1,2110 @@
+{
+ "about": "K3 phase 0 golden — purlin. Recorded from the current code; 'k3-change' entries are the behaviour K3 is meant to change, 'defect' entries are findings.",
+ "recorded": "2026-11-22",
+ "entries": [
+  {
+   "id": "US.validation",
+   "expect": "pin",
+   "value": [
+    {
+     "category": "A. 단면 입력",
+     "item": "단면 정의",
+     "status": "pass",
+     "value": "37 절점",
+     "criterion": "최소 1개 절점 정의 필요",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "두께 (t)",
+     "status": "pass",
+     "value": "0.059 in",
+     "criterion": "0.0180 ≤ t ≤ 0.5000 in (CFS 일반 범위)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "웹 w/t 비",
+     "status": "pass",
+     "value": "127.2",
+     "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "플랜지 b/t 비",
+     "status": "pass",
+     "value": "29.8",
+     "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "립 d/t 비",
+     "status": "pass",
+     "value": "15.4",
+     "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "코너 R/t 비",
+     "status": "pass",
+     "value": "3.2",
+     "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "항복강도 (Fy)",
+     "status": "pass",
+     "value": "55 ksi",
+     "criterion": "Fy ≤ 95.0 ksi (Table B4.1-1 Fy 한계)",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "Fu/Fy 비",
+     "status": "pass",
+     "value": "1.273",
+     "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "인장강도 (Fu)",
+     "status": "pass",
+     "value": "70 ksi",
+     "criterion": "Fu > Fy",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 최솟값",
+     "status": "pass",
+     "value": "1.0000 in",
+     "criterion": "국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈8.0000 in) 필요",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 최댓값",
+     "status": "pass",
+     "value": "1000.0000 in",
+     "criterion": "전체좌굴 포착을 위해 최댓값 ≥ 비지지 길이(≈300.0000 in) 필요. 1.5~3배 권장",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 개수",
+     "status": "pass",
+     "value": "50점",
+     "criterion": "곡선 해상도 ≥ 30점 권장 (일반 50점, 복잡단면 80~100점)",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "경계조건 (BC)",
+     "status": "pass",
+     "value": "S-S",
+     "criterion": "퍼린/장선/거트는 일반적으로 S-S (단순-단순) 사용",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "Load Case 적합성",
+     "status": "warn",
+     "value": "compression",
+     "criterion": "설계 부재유형과 해석 Load Case가 일치해야 함",
+     "note": "휨 부재인데 압축 Load Case가 선택됨 — 강축 휨 (+Mxx 또는 -Mxx)으로 변경하세요."
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "해석 실행 여부",
+     "status": "fail",
+     "value": "미실행",
+     "criterion": "설계 전 FSM 좌굴해석 완료 필요",
+     "note": "③좌굴해석·부재설계 탭의 \"A. 좌굴해석\"에서 해석을 실행하세요."
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "DSM 값 추출",
+     "status": "fail",
+     "value": "미추출",
+     "criterion": "Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함",
+     "note": "해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다."
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "성질 계산 여부",
+     "status": "pass",
+     "value": "A=0.8218 in²",
+     "criterion": "설계에 단면 성질이 필요합니다",
+     "note": ""
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "단면계수 Sx",
+     "status": "pass",
+     "value": "1.9390 in³",
+     "criterion": "휨 설계에 Sx > 0 필요 (Sf)",
+     "note": ""
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "회전반경 rx, rz",
+     "status": "pass",
+     "value": "rx=3.0720, rz=1.1442 in",
+     "criterion": "기둥/LTB 설계에 rx, rz > 0 필요",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "스팬 길이",
+     "status": "pass",
+     "value": "25 ft",
+     "criterion": "스팬 > 0 필요; CFS 일반 ≤ 33.00 ft (§I6.2.1)",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "분담폭 (간격)",
+     "status": "pass",
+     "value": "5 ft",
+     "criterion": "간격 > 0; 일반 4.00-6.00 ft",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "고정하중 (D)",
+     "status": "pass",
+     "value": "3 psf",
+     "criterion": "D > 0 예상 (자중 + 지붕재)",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "중력 활하중/적설하중",
+     "status": "pass",
+     "value": "Lr=20 psf",
+     "criterion": "최소 하나의 중력 활하중 예상",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "풍하중 (W, 양력)",
+     "status": "pass",
+     "value": "34 psf ↑",
+     "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
+     "note": "양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "하중 분석 실행 여부",
+     "status": "pass",
+     "value": "지배 조합: 3: D+Lr",
+     "criterion": "설계 전 하중 분석 필요",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "최대 Mu",
+     "status": "pass",
+     "value": "8.75 kip-ft",
+     "criterion": "지배 조합 기준 Mu > 0 이어야 함",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "전단력 (Vu)",
+     "status": "pass",
+     "value": "확인됨",
+     "criterion": "지점 및 임계 단면에서 Vu가 존재해야 함",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "비지지 길이 Ly (부모멘트)",
+     "status": "pass",
+     "value": "49.1000 in",
+     "criterion": "부모멘트 구간에서 Ly > 0 (비지지 하부 플랜지)",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "모멘트 구배 Cb",
+     "status": "pass",
+     "value": "1.79",
+     "criterion": "Cb ≥ 1.0 (AISI Eq. F2.1.1-2), 일반 1.0-2.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "양력 R 계수 (§I6.2.1)",
+     "status": "pass",
+     "value": "0.7",
+     "criterion": "조건 충족 시 R = 0.40-0.70 (§I6.2.1)",
+     "note": "S100-16 Table I6.2.1-1"
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "정모멘트 구간 구속",
+     "status": "pass",
+     "value": "데크 연속 지지 (Ly=0)",
+     "criterion": "Through-fastened/Standing-seam 데크 시 LTB 불필요",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "Lap 끝단 Mu 추출",
+     "status": "pass",
+     "value": "Lap end Mu=4.65 kip-ft",
+     "criterion": "Lap이 있으면 단일 단면 검토용 Mu는 Lap 끝단 부모멘트 사용 (AISI Ex. II-2A)",
+     "note": "지점 최대 Mu=8.75 kip-ft (Lap 2겹 검토용)"
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 1 (L/δ)",
+     "status": "fail",
+     "value": "L/98 (δ=0.2441 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 2 (L/δ)",
+     "status": "fail",
+     "value": "L/186 (δ=1.6144 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 3 (L/δ)",
+     "status": "pass",
+     "value": "L/644 (δ=0.4657 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 4 (L/δ)",
+     "status": "pass",
+     "value": "L/644 (δ=0.4657 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 5 (L/δ)",
+     "status": "fail",
+     "value": "L/186 (δ=1.6144 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 6 (L/δ)",
+     "status": "fail",
+     "value": "L/98 (δ=0.2441 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "설계 검토 실행 여부",
+     "status": "pass",
+     "value": "flexure / ASD",
+     "criterion": "설계 검토가 완료되어야 함",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "종합 판정 (엔진)",
+     "status": "fail",
+     "value": "✗ NG — 지배: F flexure",
+     "criterion": "해당하는 한계상태를 모두 평가하고 모두 만족",
+     "note": "불합격 — 지배 검토를 확인하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mne vs My",
+     "status": "pass",
+     "value": "Mne=12.75, My=106.64",
+     "criterion": "Mne ≤ My 예상 (LTB가 항복 이하로 감소)",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§F2.4.2 Inelastic Reserve",
+     "status": "warn",
+     "value": "미적용",
+     "criterion": "조건: Mcre > 2.78My, 횡좌굴 억제 (deck braced), Zf > 0",
+     "note": "Zf(소성단면계수) 존재 — use_inelastic_reserve 옵션 활성화 시 Mne 최대 25% 증가 가능. Mcre > 2.78My 조건을 확인하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§I6.2.1 R-factor (양력)",
+     "status": "pass",
+     "value": "R=0.7",
+     "criterion": "Through-fastened 패널 + 양력 시 R=0.40~0.70 적용 (§I6.2.1)",
+     "note": "R 감소계수 적용됨 — Mn=R×Mnfo로 양력 강도 결정."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§A3.3.2 Cold Work (냉간가공)",
+     "status": "fail",
+     "value": "적용 실패 — R/t 조건 미충족 또는 R=0",
+     "criterion": "§A3.3.2: Fu/Fy≥1.2, R/t≤7, 각도≤120°. §F2.4(Inelastic Reserve) 제외.",
+     "note": "코너 반경(R)과 두께(t)를 전처리에서 확인하세요. 조건: Fu/Fy≥1.2, R/t≤7, 각도≤120°."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mnl vs Mne (국부좌굴 감소)",
+     "status": "pass",
+     "value": "Mnl=12.75, Mne=12.75",
+     "criterion": "Mnl ≤ Mne; Mnl < Mne → 국부좌굴이 강도를 감소시킴",
+     "note": "국부좌굴 감소 없음 (λl ≤ 0.776)."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mnd vs My (뒤틀림좌굴 감소)",
+     "status": "warn",
+     "value": "Mnd=76.83, My=106.64",
+     "criterion": "Mnd ≤ My; Mnd < My → 뒤틀림좌굴이 강도를 감소시킴",
+     "note": "뒤틀림좌굴로 강도 28.0% 감소."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "모든 Mn 동일 (잠재적 문제)",
+     "status": "pass",
+     "value": "값이 상이함 (정상)",
+     "criterion": "네 값 모두 같으면 DSM이 좌굴 감소를 적용하지 않을 수 있음",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "정모멘트 φMn(+)",
+     "status": "pass",
+     "value": "45.29 kip-in (Lb=0.0000, Cb=1)",
+     "criterion": "정모멘트 구간 설계강도 > 0",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "이용률 — 부모멘트 (-M)",
+     "status": "fail",
+     "value": "137.5%",
+     "criterion": "Mu(-) / φMn(-) ≤ 1.0",
+     "note": "부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Lb(-) / Cb(-) (부모멘트)",
+     "status": "pass",
+     "value": "Lb(-)=49.1000 in, Cb(-)=1.79",
+     "criterion": "부모멘트 구간: 변곡점~Lap끝 또는 지점까지 비지지 길이",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "이용률 — 정모멘트 (+M)",
+     "status": "warn",
+     "value": "Mu(+) 미입력",
+     "criterion": "Mu(+) / φMn(+) ≤ 1.0",
+     "note": "설계탭에서 Mu(+) 값을 입력하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Lb(+) / Cb(+) (정모멘트)",
+     "status": "pass",
+     "value": "Lb(+)=0.0000 in, Cb(+)=1, Fcre(+)=1000000 ksi",
+     "criterion": "정모멘트 구간: 데크 구속 시 Lb=0, 미구속 시 변곡점 간 거리",
+     "note": "데크에 의한 연속 구속 — LTB 없음."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "설계 경고 #1",
+     "status": "warn",
+     "value": "§A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.",
+     "criterion": "설계 엔진 경고",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 구간 휨강도 (§F3, 2겹)",
+     "status": "fail",
+     "value": "51.47 kip-in — NG",
+     "criterion": "2겹 합산 φMn ≥ 지점 Mu (AISI Ex. II-2A)",
+     "note": "DCR=1.084"
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 3) §I6.2.1(g)",
+     "status": "pass",
+     "value": "30.0000 in ≥ 1.5d=12.0000",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 4) §I6.2.1(g)",
+     "status": "pass",
+     "value": "12.0000 in ≥ 1.5d=12.0000",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 5) §I6.2.1(g)",
+     "status": "pass",
+     "value": "30.0000 in ≥ 1.5d=12.0000",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 패스너 전단 (DCR)",
+     "status": "warn",
+     "value": "DCR=0.972 (V=13.22 / Cap=13.60 kips)",
+     "criterion": "패스너 전단 DCR ≤ 1.0",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 휨강도 DCR (2겹 §F3/F4/H2)",
+     "status": "fail",
+     "value": "DCR=6.887 (φMn=15.27 kip-in)",
+     "criterion": "2겹 합산 휨강도 DCR ≤ 1.0",
+     "note": "Lap 구간 휨강도 부족 — 단면을 키우거나 Fy를 높이세요."
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 접합부 종합 판정",
+     "status": "fail",
+     "value": "✗ NG",
+     "criterion": "Lap 길이 + 패스너 전단 + 휨강도 모두 OK",
+     "note": "④접합부 탭에서 상세 결과를 확인하세요."
+    },
+    {
+     "category": "H. 일관성",
+     "item": "Fy 일관성 (해석 vs 설계)",
+     "status": "pass",
+     "value": "해석 fy=55, 설계 Fy=55 ksi",
+     "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
+     "note": ""
+    }
+   ]
+  },
+  {
+   "id": "US.validation.counts",
+   "expect": "pin",
+   "value": {
+    "total": 61,
+    "pass": 43,
+    "warn": 6,
+    "fail": 12,
+    "badge": "통과 43 / 주의 6 / 실패 12",
+    "tree": {
+     "validationPass": 43,
+     "validationWarn": 6,
+     "validationFail": 12
+    }
+   }
+  },
+  {
+   "id": "US.report.text",
+   "expect": "pin",
+   "value": "CUFSM — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM)\n1. 단면\n단면 제원\n항목 값 단위\n단면 유형 립 Z형강\nH (높이) 8 in\nB (플랜지 폭) 2.25 in\nD (립 깊이) 0.91 in\nt (두께) 0.059 in\nr (코너 반경) 0.1875 in\n절점 / 요소 37 / 36\n계산된 단면 성질\n성질 기호 값 단위\n총단면적 A 0.8218 in²\n강축 단면2차모멘트 Ixx 7.7558 in⁴\n약축 단면2차모멘트 Izz 1.0759 in⁴\n단면상승모멘트 Ixz 2.0815 in⁴\n강축 단면계수 Sx 1.9390 in³\n약축 단면계수 Sz 0.3835 in³\n강축 소성단면계수 Zx 2.2961 in³\n약축 소성단면계수 Zz 0.5480 in³\n강축 회전반경 rx 3.0720 in\n약축 회전반경 rz 1.1442 in\n도심 x xcg 2.7828 in\n도심 z zcg 3.9705 in\n주축 각도 θp -16.0 °\n주축 단면2차모멘트 1 I11 8.3514 in⁴\n주축 단면2차모멘트 2 I22 0.4803 in⁴\n2. 탄성 좌굴 해석\n(좌굴 곡선을 생성하려면 FSM 해석을 먼저 실행하세요)\nDSM 설계값 (좌굴 곡선에서 추출)\n(DSM 결과 없음 — FSM 해석을 먼저 실행하세요)\n3. 설계 입력\n재료\n항목 값 단위\n강종 SGC400 (295/400 MPa)\n항복강도, Fy 55 ksi\n인장강도, Fu 70 ksi\n탄성계수, E 29500.0 ksi\n포아송비, ν 0.30\n부재 구성\n항목 값\n부재 적용 지붕 퍼린 (Roof Purlin)\n스팬 유형 N경간 연속보 (6경간)\n스팬 길이 1, 25, 25, 25, 25, 1 ft\n분담폭 (간격) 5 ft\n설계 방법 ASD\n랩 길이 (좌 / 우) S1: 2.5 / 0 ft\nS2: 1 / 3.5 ft\nS3: 3.5 / 1 ft\nS4: 0 / 2.5 ft\n설계 하중\n하중 유형 psf plf (×5 ft) 설명\nD 3 psf 15 plf 고정하중 (자중 + 부가하중)\nLr 20 psf 100 plf 지붕 활하중\nWu (양력) 34 psf 170 plf 풍양력 하중(부압)\n데크 정보\n항목 값\n데크 유형 관통 체결\n패널 두께, tpanel 0.0196850393701 in\n체결구 간격 11.811023622 in\n4. 하중 분석 결과\n6.00 ft lap\n2.00 ft lap\n6.00 ft lap\nN\nP\nP\nP\nP\nP\nN\n1.00 ft\n25.00 ft\n25.00 ft\n25.00 ft\n25.00 ft\n1.00 ft\n지배 조합 모멘트: 3: D+Lr (kip-ft)\n-8.8\n5.1\n-4.6\nLap end\n-3.9\nLap end\n-3.7\nLap end\n-3.7\nLap end\n-3.9\nLap end\n-4.6\nLap end\nmax=5.1 min=-8.8\n지배 조합 전단력: 3: D+Lr (kips)\n1.8\n-1.7\n-1.5\nLap end\n1.2\nLap end\n-1.2\nLap end\n1.2\nLap end\n-1.2\nLap end\n1.5\nLap end\nmax=1.8 min=-1.7\n소요강도 포락 (대표 조합: 3: D+Lr)\n위치 x (ft) Mu (kip-ft) Vu (kips) R 지압 / 인발 (kips) 구간 지배 조합 · 패턴\nOverhang (left) +M 1.00 0.05 1.09 — positive 7: 0.6D+0.6W\nOverhang (left) -M 1.00 -0.06 1.09 — negative 3: D+Lr\nEnd span +M 26.00 7.08 1.59 — positive 7: 0.6D+0.6W\nEnd span -M 26.00 -8.75 1.59 — negative 3: D+Lr\nInt span 3 +M 26.00 7.08 1.59 — positive 7: 0.6D+0.6W\nInt span 3 -M 26.00 -8.75 1.59 — negative 3: D+Lr\nInt span 4 +M 76.00 7.08 1.78 — positive 7: 0.6D+0.6W\nInt span 4 -M 76.00 -8.75 1.78 — negative 3: D+Lr\nEnd span +M 76.00 7.08 1.78 — positive 7: 0.6D+0.6W\nEnd span -M 76.00 -8.75 1.78 — negative 3: D+Lr\nOverhang (right) +M 101.00 0.05 0.12 — positive 7: 0.6D+0.6W\nOverhang (right) -M 101.00 -0.06 0.12 — negative 3: D+Lr\nEnd support (left) 1.00 -0.06 1.09 1.20 / -0.97 support_end 3: D+Lr\n1st interior 26.00 -8.75 1.78 3.37 / -2.73 negative 3: D+Lr\nCenter 51.00 -4.95 1.28 2.57 / -2.08 negative 3: D+Lr\nSupport 5 76.00 -8.75 1.78 3.37 / -2.73 negative 3: D+Lr\nEnd support (right) 101.00 -0.06 1.09 1.20 / -0.97 support_end 3: D+Lr\nLap end (left of sup 3) 23.50 -4.65 1.50 — negative 3: D+Lr\nLap end (right of sup 3) 29.50 -3.89 1.19 — negative 3: D+Lr\nLap end (left of sup 4) 50.00 -3.72 1.17 — negative 3: D+Lr\nLap end (right of sup 4) 52.00 -3.72 1.17 — negative 3: D+Lr\nLap end (left of sup 5) 72.50 -3.89 1.19 — negative 3: D+Lr\nLap end (right of sup 5) 78.50 -4.65 1.50 — negative 3: D+Lr\n양력 지배 하중조합: 7: 0.6D+0.6W\n위치 Mu (kip-ft)\nOverhang (left) +M 0.05\nEnd span +M 7.08\nEnd span -M -4.13\nInt span 3 +M 7.08\nInt span 3 -M -1.81\nInt span 4 +M 7.08\nInt span 4 -M -1.81\nEnd span +M 7.08\nEnd span -M -4.13\nOverhang (right) +M 0.05\nEnd support (left) 0.05\n1st interior 7.08\nCenter 4.00\nSupport 5 7.08\nEnd support (right) 0.05\nLap end (left of sup 3) 3.76\nLap end (right of sup 3) 3.15\nLap end (left of sup 4) 3.01\nLap end (right of sup 4) 3.01\nLap end (left of sup 5) 3.15\nLap end (right of sup 5) 3.76\n하중조합 상세 (ASD, ASCE 7)\n하중 plf\n고정(D) 15\n지붕활(Lr) 100\n풍(W) 170\n조합 조합 수식 |M|max (kip-ft) |V|max (kips) 지배\n1: D 고정(D)(15) 1.14 0.23\n3: D+Lr 고정(D)(15) + 지붕활(Lr)(100) 8.75 1.78 ★지배 중력 지배\n4: D+0.75Lr 고정(D)(15) + 0.75×지붕활(Lr)(100) 6.85 1.40\n5: D+0.6W 고정(D)(15) + 0.6×풍(W)(170) 6.62 1.35\n6a: D+0.75(0.6W)+0.75Lr 고정(D)(15) + 0.45×풍(W)(170) + 0.75×지붕활(Lr)(100) 1.03 0.21\n6a: D+0.75(0.6W) 고정(D)(15) + 0.45×풍(W)(170) 4.68 0.95\n7: 0.6D+0.6W 0.6×고정(D)(15) + 0.6×풍(W)(170) 7.08 1.44 양력 지배\n8: 0.6D 0.6×고정(D)(15) 0.69 0.14\n자동 결정 설계 매개변수\n다음 매개변수는 하중 분석 결과, 데크 구성 및 모멘트 다이어그램 형태에서 자동 계산됩니다:\n매개변수 값 계산 방법\nkφ (회전강성) 0.3000 kip-in/rad/in 프로젝트 시험 입력값\nkx (횡강성) 1.484 kip/in/in AISI RP17-2 곡선 맞춤식 (Example II-1C 패스너 값 기준 예비설계값)\n가정: kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used (Fss_kip, D_screw_in, Fu1_ksi).\n범위: Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available.\n범위: RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness (「kx override」(② 하중계산 탭)) where available.\n정모멘트 Ly(+) 0 (완전 지지) 상부 플랜지 압축, 데크 패널로 연속 지지 — LTB 검토 불필요\n부모멘트 Ly 49.1000 in 변곡점(M=0)에서 랩 끝단 또는 지점까지 거리. 하부 플랜지 압축 — 비지지.\n부모멘트 Cb 1.79 AISI Eq. F2.1.1-2: Cb = 12.5Mmax / (2.5Mmax+3MA+4MB+3MC), 비지지 구간 모멘트 다이어그램에서 계산\n양력 R (§I6.2.1) 0.7 AISI S100 Table I6.2.1-1 — 조건 (a)–(o) 확인 시에만 (S100-16 Table I6.2.1-1)\n변곡점 1.00, 19.99, 33.51, 46.30, 55.70, 68.49, 82.01, 101.00 ft 모멘트 = 0인 위치, 모멘트 다이어그램의 선형보간으로 산출\n처짐 검토 (사용하중: D+Lr)\n처짐 다이어그램 (in)\n-0.2\n1.6\nmax=1.6 min=-0.2\n스팬 위치 최대 처짐 L/δ\n1 0.00 ft 0.2441 in L/98\n2 11.50 ft 1.6144 in L/186\n3 40.00 ft 0.4657 in L/644\n4 62.00 ft 0.4657 in L/644\n5 90.50 ft 1.6144 in L/186\n6 102.00 ft 0.2441 in L/98\nE=29500.0 ksi, Ixx=7.7558 in⁴\n5. 설계 계산 — 휨 (Chapter F)\n1) 부모멘트 구간 (-M)\nLb(-) = 49.1000 in, Cb(-) = 1.79\n단계 1: 항복 모멘트, My\nMy = Sf × Fy = 106.64 kip-in\n단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n전체좌굴 응력 Fcre는 비지지 길이 Lb, 모멘트 구배 Cb, 단면 성질(ry, J, Cw)로 산정합니다.\nFcre = Cb · ro · A / Sf · √(σey · σt)\nFcre와 Fy의 관계에 따라:\n조건 수식 영역\nFcre ≥ 2.78 Fy Fn = Fy 항복 (조밀)\n2.78 Fy > Fcre > 0.56 Fy Fn = (10/9)Fy(1 - 10Fy/(36Fcre)) 비탄성 LTB\nFcre ≤ 0.56 Fy Fn = Fcre 탄성 LTB\nMne = Sf × Fn = 12.75 kip-in\n단계 3: 국부좌굴 — §F3.2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n국부 세장비 λl이 0.776을 초과하면 국부좌굴이 전체강도 Mne를 감소시킵니다:\nλl = √(Mne / Mcrl)\n조건 수식\nλl ≤ 0.776 Mnl = Mne (감소 없음)\nλl > 0.776 Mnl = [1 - 0.15(Mcrl/Mne)0.4] · (Mcrl/Mne)0.4 · Mne\nMnl = 12.75 kip-in (감소 없음)\n단계 4: 뒤틀림좌굴 — §F4 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n뒤틀림좌굴은 My에 대해 독립적으로 검토합니다:\nλd = √(My / Mcrd)\n조건 수식\nλd ≤ 0.673 Mnd = My (감소 없음)\nλd > 0.673 Mnd = [1 - 0.22(Mcrd/My)0.5] · (Mcrd/My)0.5 · My\nMnd = 76.83 kip-in\n단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도\nMn(-) = R · Mnℓo = 0.7 × 85.95 = 60.16 kip-in (§I6.2.1, Eq. I6.2.1-1)\n참고(강도에 쓰지 않음): Mne 12.75, Mnl 12.75, Mnd 76.83\n지배 파괴 모드: 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\nΩb = 1.67 (ASD)\nMn(-)/Ω = 60.16 / 1.67 = 36.03 kip-in\nMu(-) / Mn(-)/Ω = 49.55 / 36.03 = 137.5% NG\n2) 정모멘트 구간 (+M)\nLb(+) = 0.0000 in, Cb(+) = 1\n단계 1: 항복 모멘트, My\nMy = Sf × Fy = 106.64 kip-in (부모멘트 구간과 동일)\n단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)\n정모멘트 구간의 Lb(+)=0.0000 in, Cb(+)=1로 Fcre를 재산정합니다.\nFcre(+) = 1000000 ksi → F2.1-3 (yielding)\nFcre(+) = 1000000 ksi ≥ 2.78Fy = 152.9 ksi → Fn = Fy (항복)\nMne(+) = 106.64 kip-in\n단계 3: 국부좌굴 — §F3.2 (정모멘트)\nMnl(+) = 85.95 kip-in (국부좌굴로 19.4% 감소)\n단계 4: 뒤틀림좌굴 — §F4 (정모멘트)\nMnd(+) = 75.63 kip-in\n단계 5: 공칭강도 & 설계강도 (정모멘트)\nMn(+) = min(Mne, Mnl, Mnd) = min(106.64, 85.95, 75.63) = 75.63 kip-in\nΩb = 1.67 (ASD)\nMn(+)/Ω = 75.63 / 1.67 = 45.29 kip-in\n종합 판정\n구간 Mu Mn/Ω DCR 판정\n부모멘트 (-M) 49.55 36.03 137.5% NG\n종합: ✗ NG\nLap Splice 접합부 검토 (§I6.2.1, §J3/§J4)\n연속 경간 지점의 Lap 구간에서 패스너 전단 전달과 2겹 부재 휨강도를 검토합니다.\n항목 값 판정\nLap 길이 (§I6.2.1(g)) 42.0000 in OK (≥ 1.5d = 12.0000)\n패스너 Screw #10 × 34 ea (2 rows × 17/row) 간격 s=2.5000 in\n전달 전단력 13.22 kips\n패스너 용량 13.60 kips DCR = 0.972 판정 없음\nLap 휨강도 (2겹 §F3/F4/H2) 15.27 kip-in DCR = 6.887 NG\nLap 접합부 종합 ✗ NG\n경고 (값 또는 판정에 영향)\n• Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요.\n• Lap 구간 휨강도 부족: Mu = 105.01 kip-in > Mn = 15.27 kip-in (DCR = 6.88)\n• Lap 구간 뒤틀림 휨강도 부족(§F4): DCR = 1.14.\n• Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = 6.89 > 1.0.\n적용 범위 (1)\n휨 + 전단 조합 검토 — §H2 (Eq. H2-1)\n(Mu/Malo)² + (Vu/Va)² ≤ 1.0\n항 비율\nMalo (Mnlo 85.95) 51.47 kip-in\nM/Malo 0.9628\nV/Va 0.0009\n합계 (SRSS) 0.9628 ≤ 1.0 OK\n계산 단계 요약\n# 단계 수식 결과 단위\n1 Yield Moment (My) My = Sf × Fy = 1.9390 in³ × 55.00 ksi = 106.64 kip-in 106.64 kip-in\n2a [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Fcre — Lateral-Torsional Buckling (§F2.1.3) σey = π²E/(Lb/ry)² = π²×29500 ksi/(226.1 in/1.1442 in)² = 7.46 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 9.24 ksi, Fcre = Cb×ro×Ag/(2×Sf)×√(σey×σt) = 1.14×3.2781 in×0.8218 in²/(2×1.9390 in³)×√(7.46 ksi×9.24 ksi) = 6.57 ksi 6.6 ksi\n2 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Global/LTB (Mne) Fcre=6.57 ksi ≤ 0.56×55.00 ksi → Fn = Fcre = 6.57 ksi, Mne = Sf×Fn = 1.9390 in³×6.57 ksi = 12.75 kip-in 12.75 kip-in\n3 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Local Buckling (Mnl) Mcrl = 90.85 kip-in (FSM), λl = √(Mne/Mcrl) = √(12.75 kip-in/90.85 kip-in) = 0.375 → Mnl = 12.75 kip-in 12.75 kip-in\n4 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Distortional Buckling (Mnd) Mcrd = 85.95 kip-in (FSM [β=1.042, §2.3.3.3 Eq.3]), λd = √(My/Mcrd) = √(106.64 kip-in/85.95 kip-in) = 1.114 → Mnd = 76.83 kip-in 76.83 kip-in\n5 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Nominal Strength — DSM (Mn) Mn = min(Mne=12.75 kip-in, Mnl=12.75 kip-in, Mnd=76.83 kip-in) = 12.75 kip-in 12.75 kip-in\n5a Mnℓo — local buckling at Fn = Fy (§F3, for §I6.2.1) Mne = My = Sf×Fy = 106.64 kip-in (Fn = Fy), Mcrl = 90.85 kip-in (FSM), λl = √(My/Mcrl) = 1.083 → Mnℓo = 85.95 kip-in (Eq. F3.2.1) 85.95 kip-in\n5b Uplift R-factor (§I6.2.1, Eq. I6.2.1-1) [지배] R = 0.7 (Table I6.2.1-1: continuous span, Z → 0.70); Mn = R × Mnℓo = 0.7 × 85.95 = 60.16 kip-in — F2(LTB)·F4 대신 적용; 조건 (a)~(f)·(o) 확인, (g)~(n) 사용자 확인 60.16 kip-in\n6 Final Nominal Strength (Mn) [지배] Mn = 60.16 kip-in — §I6.2.1 R-factor (R=0.7) 60.16 kip-in\n7 Allowable Strength (ASD) Mn/Ω = 60.16 kip-in/1.67 = 36.03 kip-in 36.03 kip-in\n8 Bending + Shear (§H2, Eq. H2-1) Malo = Mnℓo/1.67 = 85.95/1.67 = 51.47 kip-in (§F3, Fn = Fy), Va = 2.43 kips → √((49.55/51.47)² + (0.00/2.43)²) = 0.963 0.9628\n6. 설계 요약\n본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 휨 부재 (보/퍼린)의 설계 검토 결과입니다. 설계 방법은 ASD입니다. 부재는 6경간이며, 지배 구간(양력 하부압축 1.05–19.90 ft)의 하중조합은 7: 0.6D+0.6W입니다. 지배 파괴 모드는 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)입니다.\n항목 값\n설계 기준 AISI S100-16\n해석 방법 직접강도법 (DSM) — 유한스트립법\n부재 유형 휨 부재 (보/퍼린)\n설계 방법 ASD\n지배 파괴 모드 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\n부모멘트 구간 (-M)\nMn(-) 60.16 kip-in 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\nMn/Ω(-) 36.03 kip-in\nDCR(-) 137.5% — NG\n정모멘트 구간 (+M)\nMn(+) 75.63 kip-in\nMn/Ω(+) 45.29 kip-in\n종합 판정\n종합 결과 ✗ NG\n지배 검토 F flexure\nF flexure 1.375 — NG\nH2 bending + shear 0.963 — OK\n퍼린 구간별 판정\n정모멘트 1.05–19.90 ft 118.7% — NG\n정모멘트 33.59–46.05 ft 51.9% — OK\n정모멘트 55.95–68.41 ft 51.9% — OK\n정모멘트 82.10–100.95 ft 118.7% — NG\n내민 부모멘트 0.00–1.00 ft (지점 2 왼쪽) 128.3% — NG\n부모멘트 1.00–1.05 ft (지점 2 오른쪽) 44.8% — OK\n부모멘트 19.90–23.50 ft (지점 3 왼쪽) 124.6% — NG\n부모멘트 29.50–33.59 ft (지점 3 오른쪽) 103.0% — NG\n부모멘트 46.05–50.00 ft (지점 4 왼쪽) 99.2% — OK\n부모멘트 52.00–55.95 ft (지점 4 오른쪽) 99.2% — OK\n부모멘트 68.41–72.50 ft (지점 5 왼쪽) 103.0% — NG\n부모멘트 78.50–82.10 ft (지점 5 오른쪽) 124.6% — NG\n부모멘트 100.95–101.00 ft (지점 6 왼쪽) 128.3% — NG\n내민 부모멘트 101.00–102.00 ft (지점 6 오른쪽) 4.9% — OK\n랩 구간 23.50–26.00 ft (지점 3 왼쪽) 107.1% — NG\n랩 구간 26.00–29.50 ft (지점 3 오른쪽) 107.1% — NG\n랩 구간 50.00–51.00 ft (지점 4 왼쪽) 63.5% — OK\n랩 구간 51.00–52.00 ft (지점 4 오른쪽) 63.5% — OK\n랩 구간 72.50–76.00 ft (지점 5 왼쪽) 108.4% — NG\n랩 구간 76.00–78.50 ft (지점 5 오른쪽) 108.4% — NG\n양력 하부압축 1.05–19.90 ft 137.5% — NG\n양력 하부압축 33.59–46.05 ft 60.2% — OK\n양력 하부압축 55.95–68.41 ft 60.2% — OK\n양력 하부압축 82.10–100.95 ft 137.5% — NG\n양력 지점부 상부압축 0.00–1.05 ft 36.2% — OK\n양력 지점부 상부압축 19.90–23.50 ft 100.5% — NG\n양력 지점부 상부압축 29.50–33.59 ft 83.1% — OK\n양력 지점부 상부압축 46.05–50.00 ft 80.0% — OK\n양력 지점부 상부압축 52.00–55.95 ft 80.0% — OK\n양력 지점부 상부압축 68.41–72.50 ft 83.1% — OK\n양력 지점부 상부압축 78.50–82.10 ft 100.5% — NG\n양력 지점부 상부압축 100.95–102.00 ft 4.0% — OK\n양력 랩 구간 상부압축 23.50–26.00 ft 86.4% — OK\n양력 랩 구간 상부압축 26.00–29.50 ft 86.4% — OK\n양력 랩 구간 상부압축 50.00–51.00 ft 51.2% — OK\n양력 랩 구간 상부압축 51.00–52.00 ft 51.2% — OK\n양력 랩 구간 상부압축 72.50–76.00 ft 87.4% — OK\n양력 랩 구간 상부압축 76.00–78.50 ft 87.4% — OK\n참조 규준 조항 F3.2, G2, H2, I6.2.1\n평가하지 못한 항목 (판정 없음의 원인)\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n• H2-2 (shear stiffened webs)\n• weak-axis DSM flexure\n• G5/H3 web crippling (no bearing length wc_N given)\n경고 (값 또는 판정에 영향)\n• §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.\n가정\n• §I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.\n적용 범위 (1)\nCUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+  },
+  {
+   "id": "US.report.shape",
+   "expect": "pin",
+   "value": {
+    "heads": [
+     "H1 CUFSM — 냉간성형강 설계 보고서",
+     "H2 1. 단면",
+     "H3 단면 제원",
+     "H3 계산된 단면 성질",
+     "H2 2. 탄성 좌굴 해석",
+     "H3 DSM 설계값 (좌굴 곡선에서 추출)",
+     "H2 3. 설계 입력",
+     "H3 재료",
+     "H3 부재 구성",
+     "H3 설계 하중",
+     "H3 데크 정보",
+     "H2 4. 하중 분석 결과",
+     "H3 소요강도 포락 (대표 조합: 3: D+Lr)",
+     "H3 양력 지배 하중조합: 7: 0.6D+0.6W",
+     "H3 하중조합 상세 (ASD, ASCE 7)",
+     "H3 자동 결정 설계 매개변수",
+     "H3 처짐 검토 (사용하중: D+Lr)",
+     "H2 5. 설계 계산 — 휨 (Chapter F)",
+     "H2 1) 부모멘트 구간 (-M)",
+     "H3 단계 1: 항복 모멘트, My",
+     "H3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 3: 국부좌굴 — §F3.2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 4: 뒤틀림좌굴 — §F4 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도",
+     "H2 2) 정모멘트 구간 (+M)",
+     "H3 단계 1: 항복 모멘트, My",
+     "H3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)",
+     "H3 단계 3: 국부좌굴 — §F3.2 (정모멘트)",
+     "H3 단계 4: 뒤틀림좌굴 — §F4 (정모멘트)",
+     "H3 단계 5: 공칭강도 & 설계강도 (정모멘트)",
+     "H2 종합 판정",
+     "H3 Lap Splice 접합부 검토 (§I6.2.1, §J3/§J4)",
+     "H3 휨 + 전단 조합 검토 — §H2 (Eq. H2-1)",
+     "H3 계산 단계 요약",
+     "H2 6. 설계 요약"
+    ],
+    "svgs": 5,
+    "tables": 21,
+    "htmlSha": "43547a62e1afa3b5",
+    "htmlLength": 73943,
+    "printShown": true
+   }
+  },
+  {
+   "id": "US.pdf",
+   "expect": "pin",
+   "value": {
+    "pages": 11,
+    "bytesKB": 1115,
+    "text": [
+     "CUFSM — 냉간성형강 설계 보고서 날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) 1. 단면 단면 제원 항목 값 단위 단면 유형 립 Z 형강 H ( 높이 ) 8 in B ( 플랜지 폭 ) 2.25 in D ( 립 깊이 ) 0.91 in t ( 두께 ) 0.059 in r ( 코너 반경 ) 0.1875 in 절점 / 요소 37 / 36 계산된 단면 성질 성질 기호 값 단위 총단면적 A 0.8218 in² 강축 단면 2 차모멘트 I xx 7.7558 in⁴ 약축 단면 2 차모멘트 I zz 1.0759 in⁴ 단면상승모멘트 I xz 2.0815 in⁴ 강축 단면계수 S x 1.9390 in³ 약축 단면계수 S z 0.3835 in³ 강축 소성단면계수 Z x 2.2961 in³ 약축 소성단면계수 Z z 0.5480 in³ 강축 회전반경 r x 3.0720 in 약축 회전반경 r z 1.1442 in 도심 x x cg 2.7828 in 도심 z z cg 3.9705 in 주축 각도 θ p -16.0 ° 주축 단면 2 차모멘트 1 I 11 8.3514 in⁴ 주축 단면 2 차모멘트 2 I 22 0.4803 in⁴",
+     "2. 탄성 좌굴 해석 ( 좌굴 곡선을 생성하려면 FSM 해석을 먼저 실행하세요 ) DSM 설계값 ( 좌굴 곡선에서 추출 ) (DSM 결과 없음 — FSM 해석을 먼저 실행하세요 ) 3. 설계 입력 재료 항목 값 단위 강종 SGC400 (295/400 MPa) 항복강도 , F y 55 ksi 인장강도 , F u 70 ksi 탄성계수 , E 29500.0 ksi 포아송비 , ν 0.30 부재 구성 항목 값 부재 적용 지붕 퍼린 (Roof Purlin) 스팬 유형 N 경간 연속보 (6 경간 ) 스팬 길이 1, 25, 25, 25, 25, 1 ft 분담폭 ( 간격 ) 5 ft 설계 방법 ASD 랩 길이 ( 좌 / 우 ) S1: 2.5 / 0 ft S2: 1 / 3.5 ft S3: 3.5 / 1 ft S4: 0 / 2.5 ft 설계 하중 하중 유형 psf plf (×5 ft) 설명 D 3 psf 15 plf 고정하중 ( 자중 + 부가하중 ) Lr 20 psf 100 plf 지붕 활하중 Wu ( 양력 ) 34 psf 170 plf 풍양력 하중 ( 부압 ) 데크 정보 항목 값 데크 유형 관통 체결 패널 두께 , t panel 0.0196850393701 in 체결구 간격 11.811023622 in",
+     "4. 하중 분석 결과 6.00 ft lap 2.00 ft lap 6.00 ft lap N P P P P P N 1.00 ft 25.00 ft 25.00 ft 25.00 ft 25.00 ft 1.00 ft 지배 조합 모멘트 : 3: D+Lr (kip-ft) -8.8 5.1 -4.6 Lap end -3.9 Lap end -3.7 Lap end -3.7 Lap end -3.9 Lap end -4.6 Lap end max=5.1 min=-8.8 지배 조합 전단력 : 3: D+Lr (kips) 1.8 -1.7 -1.5 Lap end 1.2 Lap end -1.2 Lap end 1.2 Lap end -1.2 Lap end 1.5 Lap end max=1.8 min=-1.7 소요강도 포락 ( 대표 조합 : 3: D+Lr) 위치 x (ft) M u (kip-ft) V u (kips) R 지압 / 인발 (kips) 구간 지배 조합 · 패턴 Overhang (left) +M 1.00 0.05 1.09 — positive 7: 0.6D+0.6W Overhang (left) -M 1.00 -0.06 1.09 — negative 3: D+Lr End span +M 26.00 7.08 1.59 — positive 7: 0.6D+0.6W End span -M 26.00 -8.75 1.59 — negative 3: D+Lr Int span 3 +M 26.00 7.08 1.59 — positive 7: 0.6D+0.6W Int span 3 -M 26.00 -8.75 1.59 — negative 3: D+Lr Int span 4 +M 76.00 7.08 1.78 — positive 7: 0.6D+0.6W Int span 4 -M 76.00 -8.75 1.78 — negative 3: D+Lr End span +M 76.00 7.08 1.78 — positive 7: 0.6D+0.6W End span -M 76.00 -8.75 1.78 — negative 3: D+Lr Overhang (right) +M 101.00 0.05 0.12 — positive 7: 0.6D+0.6W Overhang (right) -M 101.00 -0.06 0.12 — negative 3: D+Lr End support (left) 1.00 -0.06 1.09 1.20 / -0.97 support_end 3: D+Lr 1st interior 26.00 -8.75 1.78 3.37 / -2.73 negative 3: D+Lr Center 51.00 -4.95 1.28 2.57 / -2.08 negative 3: D+Lr Support 5 76.00 -8.75 1.78 3.37 / -2.73 negative 3: D+Lr End support (right) 101.00 -0.06 1.09 1.20 / -0.97 support_end 3: D+Lr Lap end (left of sup 3) 23.50 -4.65 1.50 — negative 3: D+Lr",
+     "Lap end (right of sup 3) 29.50 -3.89 1.19 — negative 3: D+Lr Lap end (left of sup 4) 50.00 -3.72 1.17 — negative 3: D+Lr Lap end (right of sup 4) 52.00 -3.72 1.17 — negative 3: D+Lr Lap end (left of sup 5) 72.50 -3.89 1.19 — negative 3: D+Lr Lap end (right of sup 5) 78.50 -4.65 1.50 — negative 3: D+Lr 양력 지배 하중조합 : 7: 0.6D+0.6W 위치 M u (kip-ft) Overhang (left) +M 0.05 End span +M 7.08 End span -M -4.13 Int span 3 +M 7.08 Int span 3 -M -1.81 Int span 4 +M 7.08 Int span 4 -M -1.81 End span +M 7.08 End span -M -4.13 Overhang (right) +M 0.05 End support (left) 0.05 1st interior 7.08 Center 4.00 Support 5 7.08 End support (right) 0.05 Lap end (left of sup 3) 3.76 Lap end (right of sup 3) 3.15 Lap end (left of sup 4) 3.01 Lap end (right of sup 4) 3.01 Lap end (left of sup 5) 3.15 Lap end (right of sup 5) 3.76 하중조합 상세 (ASD, ASCE 7) 하중 plf 고정 (D) 15 지붕활 (Lr) 100 풍 (W) 170 조합 조합 수식 |M| max (kip-ft) |V| max (kips) 지배 1: D 고정 (D)(15) 1.14 0.23 3: D+Lr 고정 (D)(15) + 지붕활 (Lr)(100) 8.75 1.78 ★지배 중력 지배",
+     "4: D+0.75Lr 고정 (D)(15) + 0.75× 지붕활 (Lr)(100) 6.85 1.40 5: D+0.6W 고정 (D)(15) + 0.6× 풍 (W)(170) 6.62 1.35 6a: D+0.75(0.6W)+0.75Lr 고정 (D)(15) + 0.45× 풍 (W)(170) + 0.75× 지붕활 (Lr)(100) 1.03 0.21 6a: D+0.75(0.6W) 고정 (D)(15) + 0.45× 풍 (W)(170) 4.68 0.95 7: 0.6D+0.6W 0.6× 고정 (D)(15) + 0.6× 풍 (W)(170) 7.08 1.44 양력 지배 8: 0.6D 0.6× 고정 (D)(15) 0.69 0.14 자동 결정 설계 매개변수 다음 매개변수는 하중 분석 결과 , 데크 구성 및 모멘트 다이어그램 형태에서 자동 계산됩니다 : 매개변수 값 계산 방법 k φ ( 회전강 성 ) 0.3000 kip-in/rad/in 프로젝트 시험 입력값 k x ( 횡강성 ) 1.484 kip/in/in AISI RP17-2 곡선 맞춤식 (Example II-1C 패스너 값 기준 예비설계값 ) 가정 : kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used (Fss_kip, D_screw_in, Fu1_ksi). 범위 : Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available. 범위 : RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness ( 「 kx override 」 ( ② 하중계산 탭 )) where available. 정모멘트 L y (+) 0 ( 완전 지지 ) 상부 플랜지 압축 , 데크 패널로 연속 지지 — LTB 검토 불필요 부모멘트 L y 49.1000 in 변곡점 (M=0) 에서 랩 끝단 또는 지점까지 거리 . 하부 플랜지 압축 — 비지지 . 부모멘트 C b 1.79 AISI Eq. F2.1.1-2: C b = 12.5M max / (2.5M max +3M A +4M B +3M C ), 비지지 구간 모멘 트 다이어그램에서 계산 양력 R (§I6.2.1) 0.7 AISI S100 Table I6.2.1-1 — 조건 (a)–(o) 확인 시에만 (S100-16 Table I6.2.1-1) 변곡점 1.00, 19.99, 33.51, 46.30, 55.70, 68.49, 82.01, 101.00 ft 모멘트 = 0 인 위치 , 모멘트 다이어그램의 선형보간으로 산출 처짐 검토 ( 사용하중 : D+Lr) 처짐 다이어그램 (in) -0.2 1.6 max=1.6 min=-0.2 스팬 위치 최대 처짐 L/δ 1 0.00 ft 0.2441 in L/98 2 11.50 ft 1.6144 in L/186 3 40.00 ft 0.4657 in L/644 4 62.00 ft 0.4657 in L/644 5 90.50 ft 1.6144 in L/186 6 102.00 ft 0.2441 in L/98",
+     "E=29500.0 ksi, Ixx=7.7558 in⁴ 5. 설계 계산 — 휨 (Chapter F) 1) 부모멘트 구간 (-M) Lb(-) = 49.1000 in, Cb(-) = 1.79 단계 1: 항복 모멘트 , M y M y = S f × F y = 106.64 kip-in 단계 2: 전체좌굴 / 횡 - 비틀림좌굴 — §F2 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 전체좌굴 응력 F cre 는 비지지 길이 L b , 모멘트 구배 C b , 단면 성질 (r y , J, C w ) 로 산정합니다 . F cre = C b · r o · A / S f · √(σ ey · σ t ) F cre 와 F y 의 관계에 따라 : 조건 수식 영역 F cre ≥ 2.78 F y F n = F y 항복 ( 조밀 ) 2.78 F y > F cre > 0.56 F y F n = (10/9)F y (1 - 10F y /(36F cre )) 비탄성 LTB F cre ≤ 0.56 F y F n = F cre 탄성 LTB M ne = S f × F n = 12.75 kip-in 단계 3: 국부좌굴 — §F3.2 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 국부 세장비 λ l 이 0.776 을 초과하면 국부좌굴이 전체강도 M ne 를 감소시킵니다 : λ l = √(M ne / M crl ) 조건 수식 λ l ≤ 0.776 M nl = M ne ( 감소 없음 ) λ l > 0.776 M nl = [1 - 0.15(M crl /M ne ) 0.4 ] · (M crl /M ne ) 0.4 · M ne M nl = 12.75 kip-in ( 감소 없음 ) 단계 4: 뒤틀림좌굴 — §F4 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 뒤틀림좌굴은 M y 에 대해 독립적으로 검토합니다 : λ d = √(M y / M crd ) 조건 수식 λ d ≤ 0.673 M nd = M y ( 감소 없음 )",
+     "λ d > 0.673 M nd = [1 - 0.22(M crd /M y ) 0.5 ] · (M crd /M y ) 0.5 · M y M nd = 76.83 kip-in 단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도 M n (-) = R · M nℓo = 0.7 × 85.95 = 60.16 kip-in (§I6.2.1, Eq. I6.2.1-1) 지배 파괴 모드 : 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) Ω b = 1.67 (ASD) M n (-)/Ω = 60.16 / 1.67 = 36.03 kip-in M u (-) / M n (-)/Ω = 49.55 / 36.03 = 137.5% NG 2) 정모멘트 구간 (+M) Lb(+) = 0.0000 in, Cb(+) = 1 단계 1: 항복 모멘트 , M y M y = S f × F y = 106.64 kip-in ( 부모멘트 구간과 동일 ) 단계 2: 전체좌굴 / 횡 - 비틀림좌굴 — §F2 ( 정모멘트 ) 정모멘트 구간의 Lb(+)=0.0000 in, Cb(+)=1 로 Fcre 를 재산정합니다 . F cre (+) = 1000000 ksi → F2.1-3 (yielding) F cre (+) = 1000000 ksi ≥ 2.78F y = 152.9 ksi → F n = F y ( 항복 ) M ne (+) = 106.64 kip-in 단계 3: 국부좌굴 — §F3.2 ( 정모멘트 ) M nl (+) = 85.95 kip-in ( 국부좌굴로 19.4% 감소 ) 단계 4: 뒤틀림좌굴 — §F4 ( 정모멘트 ) M nd (+) = 75.63 kip-in 단계 5: 공칭강도 & 설계강도 ( 정모멘트 ) M n (+) = min(M ne , M nl , M nd ) = min(106.64, 85.95, 75.63) = 75.63 kip-in",
+     "Ω b = 1.67 (ASD) M n (+)/Ω = 75.63 / 1.67 = 45.29 kip-in 종합 판정 구간 M u M n /Ω DCR 판정 부모멘트 (-M) 49.55 36.03 137.5% NG 종합 : ✗ NG Lap Splice 접합부 검토 (§I6.2.1, §J3/§J4) 연속 경간 지점의 Lap 구간에서 패스너 전단 전달과 2 겹 부재 휨강도를 검토합니다 . 항목 값 판정 Lap 길이 (§I6.2.1(g)) 42.0000 in OK (≥ 1.5d = 12.0000) 패스너 Screw #10 × 34 ea (2 rows × 17/row) 간격 s=2.5000 in 전달 전단력 13.22 kips 패스너 용량 13.60 kips DCR = 0.972 판정 없음 Lap 휨강도 (2 겹 §F3/F4/H2) 15.27 kip-in DCR = 6.887 NG Lap 접합부 종합 ✗ NG 경고 ( 값 또는 판정에 영향 ) • Lap 패스너 힘 분배 (Step 2·4) 는 기준 조항이 아닌 사내 합리적 해석 (§A1.2(c)) 입니다 — force_model 의 한계 (a)–(e) 를 확인하세요 . • Lap 구간 휨강도 부족 : Mu = 105.01 kip-in > Mn = 15.27 kip-in (DCR = 6.88) • Lap 구간 뒤틀림 휨강도 부족 (§F4): DCR = 1.14. • Lap 지점부 휨 - 전단 상호작용 (§H2) 초과 : 상호작용값 = 6.89 > 1.0. 적용 범위 (1) 휨 + 전단 조합 검토 — §H2 (Eq. H2-1) (M u /M alo )² + (V u /V a )² ≤ 1.0 항 비율 M alo (M nlo 85.95) 51.47 kip-in M/Malo 0.9628 V/Va 0.0009 합계 (SRSS) 0.9628 ≤ 1.0 OK 계산 단계 요약 # 단계 수식 결과 단위 1 Yield Moment (My) My = Sf × Fy = 1.9390 in³ × 55.00 ksi = 106.64 kip-in 106.64 kip- in",
+     "2a [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Fcre — Lateral- Torsional Buckling (§F2.1.3) σey = π²E/(Lb/ry)² = π²×29500 ksi/(226.1 in/1.1442 in)² = 7.46 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 9.24 ksi, Fcre = Cb×ro×Ag/(2×Sf)×√(σey×σt) = 1.14×3.2781 in×0.8218 in²/(2×1.9390 in³)×√(7.46 ksi×9.24 ksi) = 6.57 ksi 6.6 ksi 2 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Global/LTB (Mne) Fcre=6.57 ksi ≤ 0.56×55.00 ksi → Fn = Fcre = 6.57 ksi, Mne = Sf×Fn = 1.9390 in³×6.57 ksi = 12.75 kip-in 12.75 kip- in 3 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Local Buckling (Mnl) Mcrl = 90.85 kip-in (FSM), λl = √(Mne/Mcrl) = √(12.75 kip-in/90.85 kip-in) = 0.375 → Mnl = 12.75 kip-in 12.75 kip- in 4 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Distortional Buckling (Mnd) Mcrd = 85.95 kip-in (FSM [β=1.042, §2.3.3.3 Eq.3]), λd = √(My/Mcrd) = √(106.64 kip- in/85.95 kip-in) = 1.114 → Mnd = 76.83 kip-in 76.83 kip- in 5 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Nominal Strength — DSM (Mn) Mn = min(Mne=12.75 kip-in, Mnl=12.75 kip-in, Mnd=76.83 kip-in) = 12.75 kip-in 12.75 kip- in 5a Mnℓo — local buckling at Fn = Fy (§F3, for §I6.2.1) Mne = My = Sf×Fy = 106.64 kip-in (Fn = Fy), Mcrl = 90.85 kip-in (FSM), λl = √(My/Mcrl) = 1.083 → Mnℓo = 85.95 kip-in (Eq. F3.2.1) 85.95 kip- in 5b Uplift R-factor (§I6.2.1, Eq. I6.2.1- 1) [ 지배 ] R = 0.7 (Table I6.2.1-1: continuous span, Z → 0.70); Mn = R × Mnℓo = 0.7 × 85.95 = 60.16 kip-in — F2(LTB)·F4 대신 적용 ; 조건 (a)~(f)·(o) 확인 , (g)~(n) 사용자 확인 60.16 kip- in 6 Final Nominal Strength (Mn) [ 지 배 ] Mn = 60.16 kip-in — §I6.2.1 R-factor (R=0.7) 60.16 kip- in 7 Allowable Strength (ASD) Mn/Ω = 60.16 kip-in/1.67 = 36.03 kip-in 36.03 kip- in 8 Bending + Shear (§H2, Eq. H2-1) Malo = Mnℓo/1.67 = 85.95/1.67 = 51.47 kip-in (§F3, Fn = Fy), Va = 2.43 kips → √((49.55/51.47)² + (0.00/2.43)²) = 0.963 0.9628 6. 설계 요약 본 보고서는 AISI S100-16 직접강도법 (DSM) 에 의한 휨 부재 ( 보 / 퍼린 ) 의 설계 검토 결과입니다 . 설계 방법은 ASD 입니다 . 부재는 6 경간이며 , 지배 구간 ( 양력 하부압축 1.05–19.90 ft) 의 하중조합은 7: 0.6D+0.6W 입니다 . 지배 파괴 모드는 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) 입니다 . 항목 값 설계 기준 AISI S100-16 해석 방법 직접강도법 (DSM) — 유한스트립법 부재 유형 휨 부재 ( 보 / 퍼린 ) 설계 방법 ASD 지배 파괴 모드 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) 부모멘트 구간 (-M) M n (-) 60.16 kip-in 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) M n /Ω(-) 36.03 kip-in DCR(-) 137.5% — NG 정모멘트 구간 (+M) M n (+) 75.63 kip-in M n /Ω(+) 45.29 kip-in 종합 판정 종합 결과 ✗ NG",
+     "지배 검토 F flexure F flexure 1.375 — NG H2 bending + shear 0.963 — OK 퍼린 구간별 판정 정모멘트 1.05–19.90 ft 118.7% — NG 정모멘트 33.59–46.05 ft 51.9% — OK 정모멘트 55.95–68.41 ft 51.9% — OK 정모멘트 82.10–100.95 ft 118.7% — NG 내민 부모멘트 0.00–1.00 ft ( 지점 2 왼쪽 ) 128.3% — NG 부모멘트 1.00–1.05 ft ( 지점 2 오른쪽 ) 44.8% — OK 부모멘트 19.90–23.50 ft ( 지점 3 왼쪽 ) 124.6% — NG 부모멘트 29.50–33.59 ft ( 지점 3 오른쪽 ) 103.0% — NG 부모멘트 46.05–50.00 ft ( 지점 4 왼쪽 ) 99.2% — OK 부모멘트 52.00–55.95 ft ( 지점 4 오른쪽 ) 99.2% — OK 부모멘트 68.41–72.50 ft ( 지점 5 왼쪽 ) 103.0% — NG 부모멘트 78.50–82.10 ft ( 지점 5 오른쪽 ) 124.6% — NG 부모멘트 100.95–101.00 ft ( 지점 6 왼쪽 ) 128.3% — NG 내민 부모멘트 101.00–102.00 ft ( 지점 6 오른쪽 ) 4.9% — OK 랩 구간 23.50–26.00 ft ( 지점 3 왼쪽 ) 107.1% — NG 랩 구간 26.00–29.50 ft ( 지점 3 오른쪽 ) 107.1% — NG 랩 구간 50.00–51.00 ft ( 지점 4 왼쪽 ) 63.5% — OK 랩 구간 51.00–52.00 ft ( 지점 4 오른쪽 ) 63.5% — OK 랩 구간 72.50–76.00 ft ( 지점 5 왼쪽 ) 108.4% — NG 랩 구간 76.00–78.50 ft ( 지점 5 오른쪽 ) 108.4% — NG 양력 하부압축 1.05–19.90 ft 137.5% — NG 양력 하부압축 33.59–46.05 ft 60.2% — OK 양력 하부압축 55.95–68.41 ft 60.2% — OK 양력 하부압축 82.10–100.95 ft 137.5% — NG 양력 지점부 상부압축 0.00–1.05 ft 36.2% — OK 양력 지점부 상부압축 19.90–23.50 ft 100.5% — NG 양력 지점부 상부압축 29.50–33.59 ft 83.1% — OK 양력 지점부 상부압축 46.05–50.00 ft 80.0% — OK 양력 지점부 상부압축 52.00–55.95 ft 80.0% — OK 양력 지점부 상부압축 68.41–72.50 ft 83.1% — OK 양력 지점부 상부압축 78.50–82.10 ft 100.5% — NG 양력 지점부 상부압축 100.95–102.00 ft 4.0% — OK 양력 랩 구간 상부압축 23.50–26.00 ft 86.4% — OK 양력 랩 구간 상부압축 26.00–29.50 ft 86.4% — OK",
+     "양력 랩 구간 상부압축 50.00–51.00 ft 51.2% — OK 양력 랩 구간 상부압축 51.00–52.00 ft 51.2% — OK 양력 랩 구간 상부압축 72.50–76.00 ft 87.4% — OK 양력 랩 구간 상부압축 76.00–78.50 ft 87.4% — OK 참조 규준 조항 F3.2, G2, H2, I6.2.1 평가하지 못한 항목 ( 판정 없음의 원인 ) • §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) • H2-2 (shear stiffened webs) • weak-axis DSM flexure • G5/H3 web crippling (no bearing length wc_N given) 경고 ( 값 또는 판정에 영향 ) • §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습 니다 . Virgin Fy 를 사용합니다 . 가정 • §I6.2.1: 조건 (g)~(n)( 랩 길이 , 스팬 ≤ 33 ft, 지점 횡구속 , 패널 · 단열재 · 체결재 상세 ) 과 연속보 변곡점 사이 지점부 · 캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오 . 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+    ],
+    "compact": "88cc31bb6b3c42b0",
+    "printedHtmlSha": "e1580fb06f375627"
+   }
+  },
+  {
+   "id": "US.findings",
+   "expect": "defect",
+   "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report",
+   "value": {
+    "coldWork": [
+     "fail: §A3.3.2 Cold Work (냉간가공) = 적용 실패 — R/t 조건 미충족 또는 R=0"
+    ],
+    "analysisItems": [
+     "warn: Load Case 적합성 = compression",
+     "fail: 해석 실행 여부 = 미실행",
+     "fail: DSM 값 추출 = 미추출"
+    ],
+    "unboundedAsNumber": [
+     "pass: Lb(+) / Cb(+) (정모멘트) = Lb(+)=0.0000 in, Cb(+)=1, Fcre(+)=1000000 ksi",
+     "Fcre(+) = 1000000 ksi → F2.1-3 (yielding)",
+     "Fcre(+) = 1000000 ksi ≥ 2.78Fy = 152.9 ksi → Fn = Fy (항복)"
+    ],
+    "alwaysSame": [
+     "pass: 경계조건 (BC) = S-S",
+     "pass: 풍하중 (W, 양력) = 34 psf ↑",
+     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=55, 설계 Fy=55 ksi"
+    ],
+    "lapFastener": [
+     "warn: Lap 패스너 전단 (DCR) = DCR=0.972 (V=13.22 / Cap=13.60 kips)"
+    ],
+    "reportPageValues": [
+     "탄성계수, E 29500.0 ksi",
+     "포아송비, ν 0.30",
+     "분담폭 (간격) 5 ft",
+     "패널 두께, tpanel 0.0196850393701 in",
+     "체결구 간격 11.811023622 in"
+    ]
+   }
+  },
+  {
+   "id": "US.crossCheck",
+   "expect": "pin",
+   "value": {
+    "overall": "fail",
+    "rows": [
+     {
+      "item": "Mne vs My",
+      "page": "pass",
+      "engine": "not_applicable,pass"
+     },
+     {
+      "item": "§I6.2.1 R-factor (양력)",
+      "page": "pass",
+      "engine": "fail*,pass*"
+     },
+     {
+      "item": "Mnl vs Mne (국부좌굴 감소)",
+      "page": "pass",
+      "engine": "fail,fail*,not_applicable,pass,pass*"
+     },
+     {
+      "item": "Mnd vs My (뒤틀림좌굴 감소)",
+      "page": "warn",
+      "engine": "fail,fail*,not_applicable,pass,pass*"
+     },
+     {
+      "item": "이용률 — 정모멘트 (+M)",
+      "page": "warn",
+      "engine": "(none)"
+     },
+     {
+      "item": "Lap 길이 (지점 3) §I6.2.1(g)",
+      "page": "pass",
+      "engine": "pass*"
+     },
+     {
+      "item": "Lap 길이 (지점 4) §I6.2.1(g)",
+      "page": "pass",
+      "engine": "pass*"
+     },
+     {
+      "item": "Lap 길이 (지점 5) §I6.2.1(g)",
+      "page": "pass",
+      "engine": "pass*"
+     },
+     {
+      "item": "Lap 패스너 전단 (DCR)",
+      "page": "warn",
+      "engine": "pass*"
+     },
+     {
+      "item": "Lap 휨강도 DCR (2겹 §F3/F4/H2)",
+      "page": "fail",
+      "engine": "fail"
+     }
+    ],
+    "passOnNotEvaluated": []
+   }
+  },
+  {
+   "id": "SI.validation",
+   "expect": "pin",
+   "value": [
+    {
+     "category": "A. 단면 입력",
+     "item": "단면 정의",
+     "status": "pass",
+     "value": "37 절점",
+     "criterion": "최소 1개 절점 정의 필요",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "두께 (t)",
+     "status": "pass",
+     "value": "1.4986 mm",
+     "criterion": "0.46 ≤ t ≤ 12.70 mm (CFS 일반 범위)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "웹 w/t 비",
+     "status": "pass",
+     "value": "127.2",
+     "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "플랜지 b/t 비",
+     "status": "pass",
+     "value": "29.8",
+     "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "립 d/t 비",
+     "status": "pass",
+     "value": "15.4",
+     "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "코너 R/t 비",
+     "status": "pass",
+     "value": "3.2",
+     "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "항복강도 (Fy)",
+     "status": "pass",
+     "value": "379.211651124 MPa",
+     "criterion": "Fy ≤ 655.0 MPa (Table B4.1-1 Fy 한계)",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "Fu/Fy 비",
+     "status": "pass",
+     "value": "1.273",
+     "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "인장강도 (Fu)",
+     "status": "pass",
+     "value": "482.633010522 MPa",
+     "criterion": "Fu > Fy",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 최솟값",
+     "status": "pass",
+     "value": "25.4 mm",
+     "criterion": "국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈203.2 mm) 필요",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 최댓값",
+     "status": "pass",
+     "value": "25400.0 mm",
+     "criterion": "전체좌굴 포착을 위해 최댓값 ≥ 비지지 길이(≈7620.0 mm) 필요. 1.5~3배 권장",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 개수",
+     "status": "pass",
+     "value": "50점",
+     "criterion": "곡선 해상도 ≥ 30점 권장 (일반 50점, 복잡단면 80~100점)",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "경계조건 (BC)",
+     "status": "pass",
+     "value": "S-S",
+     "criterion": "퍼린/장선/거트는 일반적으로 S-S (단순-단순) 사용",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "Load Case 적합성",
+     "status": "warn",
+     "value": "compression",
+     "criterion": "설계 부재유형과 해석 Load Case가 일치해야 함",
+     "note": "휨 부재인데 압축 Load Case가 선택됨 — 강축 휨 (+Mxx 또는 -Mxx)으로 변경하세요."
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "해석 실행 여부",
+     "status": "fail",
+     "value": "미실행",
+     "criterion": "설계 전 FSM 좌굴해석 완료 필요",
+     "note": "③좌굴해석·부재설계 탭의 \"A. 좌굴해석\"에서 해석을 실행하세요."
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "DSM 값 추출",
+     "status": "fail",
+     "value": "미추출",
+     "criterion": "Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함",
+     "note": "해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다."
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "성질 계산 여부",
+     "status": "pass",
+     "value": "A=530 mm²",
+     "criterion": "설계에 단면 성질이 필요합니다",
+     "note": ""
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "단면계수 Sx",
+     "status": "pass",
+     "value": "31774 mm³",
+     "criterion": "휨 설계에 Sx > 0 필요 (Sf)",
+     "note": ""
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "회전반경 rx, rz",
+     "status": "pass",
+     "value": "rx=78.0, rz=29.1 mm",
+     "criterion": "기둥/LTB 설계에 rx, rz > 0 필요",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "스팬 길이",
+     "status": "pass",
+     "value": "7.62 m",
+     "criterion": "스팬 > 0 필요; CFS 일반 ≤ 10.06 m (§I6.2.1)",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "분담폭 (간격)",
+     "status": "pass",
+     "value": "1.524 m",
+     "criterion": "간격 > 0; 일반 1.22-1.83 m",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "고정하중 (D)",
+     "status": "pass",
+     "value": "0.143640776941 kPa",
+     "criterion": "D > 0 예상 (자중 + 지붕재)",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "중력 활하중/적설하중",
+     "status": "pass",
+     "value": "Lr=0.957605179607 kPa",
+     "criterion": "최소 하나의 중력 활하중 예상",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "풍하중 (W, 양력)",
+     "status": "pass",
+     "value": "1.62792880533 kPa ↑",
+     "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
+     "note": "양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "하중 분석 실행 여부",
+     "status": "pass",
+     "value": "지배 조합: 3: D+Lr",
+     "criterion": "설계 전 하중 분석 필요",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "최대 Mu",
+     "status": "pass",
+     "value": "11.86 kN-m",
+     "criterion": "지배 조합 기준 Mu > 0 이어야 함",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "전단력 (Vu)",
+     "status": "pass",
+     "value": "확인됨",
+     "criterion": "지점 및 임계 단면에서 Vu가 존재해야 함",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "비지지 길이 Ly (부모멘트)",
+     "status": "pass",
+     "value": "1247.1 mm",
+     "criterion": "부모멘트 구간에서 Ly > 0 (비지지 하부 플랜지)",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "모멘트 구배 Cb",
+     "status": "pass",
+     "value": "1.79",
+     "criterion": "Cb ≥ 1.0 (AISI Eq. F2.1.1-2), 일반 1.0-2.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "양력 R 계수 (§I6.2.1)",
+     "status": "pass",
+     "value": "0.7",
+     "criterion": "조건 충족 시 R = 0.40-0.70 (§I6.2.1)",
+     "note": "S100-16 Table I6.2.1-1"
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "정모멘트 구간 구속",
+     "status": "pass",
+     "value": "데크 연속 지지 (Ly=0)",
+     "criterion": "Through-fastened/Standing-seam 데크 시 LTB 불필요",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "Lap 끝단 Mu 추출",
+     "status": "pass",
+     "value": "Lap end Mu=6.30 kN-m",
+     "criterion": "Lap이 있으면 단일 단면 검토용 Mu는 Lap 끝단 부모멘트 사용 (AISI Ex. II-2A)",
+     "note": "지점 최대 Mu=11.86 kN-m (Lap 2겹 검토용)"
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 1 (L/δ)",
+     "status": "fail",
+     "value": "L/98 (δ=6.2 mm)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 2 (L/δ)",
+     "status": "fail",
+     "value": "L/186 (δ=41.0 mm)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 3 (L/δ)",
+     "status": "pass",
+     "value": "L/644 (δ=11.8 mm)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 4 (L/δ)",
+     "status": "pass",
+     "value": "L/644 (δ=11.8 mm)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 5 (L/δ)",
+     "status": "fail",
+     "value": "L/186 (δ=41.0 mm)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 6 (L/δ)",
+     "status": "fail",
+     "value": "L/98 (δ=6.2 mm)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": "처짐 한계 초과 (L/240) — 단면을 키우거나 스팬을 줄이세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "설계 검토 실행 여부",
+     "status": "pass",
+     "value": "flexure / ASD",
+     "criterion": "설계 검토가 완료되어야 함",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "종합 판정 (엔진)",
+     "status": "fail",
+     "value": "✗ NG — 지배: F flexure",
+     "criterion": "해당하는 한계상태를 모두 평가하고 모두 만족",
+     "note": "불합격 — 지배 검토를 확인하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mne vs My",
+     "status": "pass",
+     "value": "Mne=12.75, My=106.64",
+     "criterion": "Mne ≤ My 예상 (LTB가 항복 이하로 감소)",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§F2.4.2 Inelastic Reserve",
+     "status": "warn",
+     "value": "미적용",
+     "criterion": "조건: Mcre > 2.78My, 횡좌굴 억제 (deck braced), Zf > 0",
+     "note": "Zf(소성단면계수) 존재 — use_inelastic_reserve 옵션 활성화 시 Mne 최대 25% 증가 가능. Mcre > 2.78My 조건을 확인하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§I6.2.1 R-factor (양력)",
+     "status": "pass",
+     "value": "R=0.7",
+     "criterion": "Through-fastened 패널 + 양력 시 R=0.40~0.70 적용 (§I6.2.1)",
+     "note": "R 감소계수 적용됨 — Mn=R×Mnfo로 양력 강도 결정."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§A3.3.2 Cold Work (냉간가공)",
+     "status": "fail",
+     "value": "적용 실패 — R/t 조건 미충족 또는 R=0",
+     "criterion": "§A3.3.2: Fu/Fy≥1.2, R/t≤7, 각도≤120°. §F2.4(Inelastic Reserve) 제외.",
+     "note": "코너 반경(R)과 두께(t)를 전처리에서 확인하세요. 조건: Fu/Fy≥1.2, R/t≤7, 각도≤120°."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mnl vs Mne (국부좌굴 감소)",
+     "status": "pass",
+     "value": "Mnl=12.75, Mne=12.75",
+     "criterion": "Mnl ≤ Mne; Mnl < Mne → 국부좌굴이 강도를 감소시킴",
+     "note": "국부좌굴 감소 없음 (λl ≤ 0.776)."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mnd vs My (뒤틀림좌굴 감소)",
+     "status": "warn",
+     "value": "Mnd=76.83, My=106.64",
+     "criterion": "Mnd ≤ My; Mnd < My → 뒤틀림좌굴이 강도를 감소시킴",
+     "note": "뒤틀림좌굴로 강도 28.0% 감소."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "모든 Mn 동일 (잠재적 문제)",
+     "status": "pass",
+     "value": "값이 상이함 (정상)",
+     "criterion": "네 값 모두 같으면 DSM이 좌굴 감소를 적용하지 않을 수 있음",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "정모멘트 φMn(+)",
+     "status": "pass",
+     "value": "5.12 kN-m (Lb=0.0, Cb=1)",
+     "criterion": "정모멘트 구간 설계강도 > 0",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "이용률 — 부모멘트 (-M)",
+     "status": "fail",
+     "value": "137.5%",
+     "criterion": "Mu(-) / φMn(-) ≤ 1.0",
+     "note": "부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Lb(-) / Cb(-) (부모멘트)",
+     "status": "pass",
+     "value": "Lb(-)=1247.1 mm, Cb(-)=1.79",
+     "criterion": "부모멘트 구간: 변곡점~Lap끝 또는 지점까지 비지지 길이",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "이용률 — 정모멘트 (+M)",
+     "status": "warn",
+     "value": "Mu(+) 미입력",
+     "criterion": "Mu(+) / φMn(+) ≤ 1.0",
+     "note": "설계탭에서 Mu(+) 값을 입력하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Lb(+) / Cb(+) (정모멘트)",
+     "status": "pass",
+     "value": "Lb(+)=0.0 mm, Cb(+)=1, Fcre(+)=1000000 ksi",
+     "criterion": "정모멘트 구간: 데크 구속 시 Lb=0, 미구속 시 변곡점 간 거리",
+     "note": "데크에 의한 연속 구속 — LTB 없음."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "설계 경고 #1",
+     "status": "warn",
+     "value": "§A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.",
+     "criterion": "설계 엔진 경고",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 구간 휨강도 (§F3, 2겹)",
+     "status": "fail",
+     "value": "5.82 kN-m — NG",
+     "criterion": "2겹 합산 φMn ≥ 지점 Mu (AISI Ex. II-2A)",
+     "note": "DCR=1.084"
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 3) §I6.2.1(g)",
+     "status": "pass",
+     "value": "762.0 mm ≥ 1.5d=304.8",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 4) §I6.2.1(g)",
+     "status": "pass",
+     "value": "304.8 mm ≥ 1.5d=304.8",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 5) §I6.2.1(g)",
+     "status": "pass",
+     "value": "762.0 mm ≥ 1.5d=304.8",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 패스너 전단 (DCR)",
+     "status": "warn",
+     "value": "DCR=0.972 (V=58.82 / Cap=60.50 kN)",
+     "criterion": "패스너 전단 DCR ≤ 1.0",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 휨강도 DCR (2겹 §F3/F4/H2)",
+     "status": "fail",
+     "value": "DCR=6.887 (φMn=1.73 kN-m)",
+     "criterion": "2겹 합산 휨강도 DCR ≤ 1.0",
+     "note": "Lap 구간 휨강도 부족 — 단면을 키우거나 Fy를 높이세요."
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 접합부 종합 판정",
+     "status": "fail",
+     "value": "✗ NG",
+     "criterion": "Lap 길이 + 패스너 전단 + 휨강도 모두 OK",
+     "note": "④접합부 탭에서 상세 결과를 확인하세요."
+    },
+    {
+     "category": "H. 일관성",
+     "item": "Fy 일관성 (해석 vs 설계)",
+     "status": "pass",
+     "value": "해석 fy=379.211651124, 설계 Fy=379.211651124 MPa",
+     "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
+     "note": ""
+    }
+   ]
+  },
+  {
+   "id": "SI.validation.counts",
+   "expect": "pin",
+   "value": {
+    "total": 61,
+    "pass": 43,
+    "warn": 6,
+    "fail": 12,
+    "badge": "통과 43 / 주의 6 / 실패 12",
+    "tree": {
+     "validationPass": 43,
+     "validationWarn": 6,
+     "validationFail": 12
+    }
+   }
+  },
+  {
+   "id": "SI.report.text",
+   "expect": "pin",
+   "value": "CUFSM — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM)\n1. 단면\n단면 제원\n항목 값 단위\n단면 유형 립 Z형강\nH (높이) 203.2 mm\nB (플랜지 폭) 57.15 mm\nD (립 깊이) 23.114 mm\nt (두께) 1.4986 mm\nr (코너 반경) 4.7625 mm\n절점 / 요소 37 / 36\n계산된 단면 성질\n성질 기호 값 단위\n총단면적 A 530 mm²\n강축 단면2차모멘트 Ixx 3228228 mm⁴\n약축 단면2차모멘트 Izz 447814 mm⁴\n단면상승모멘트 Ixz 866402 mm⁴\n강축 단면계수 Sx 31774 mm³\n약축 단면계수 Sz 6284 mm³\n강축 소성단면계수 Zx 37627 mm³\n약축 소성단면계수 Zz 8981 mm³\n강축 회전반경 rx 78.0 mm\n약축 회전반경 rz 29.1 mm\n도심 x xcg 70.7 mm\n도심 z zcg 100.9 mm\n주축 각도 θp -16.0 °\n주축 단면2차모멘트 1 I11 3476108 mm⁴\n주축 단면2차모멘트 2 I22 199934 mm⁴\n2. 탄성 좌굴 해석\n(좌굴 곡선을 생성하려면 FSM 해석을 먼저 실행하세요)\nDSM 설계값 (좌굴 곡선에서 추출)\n(DSM 결과 없음 — FSM 해석을 먼저 실행하세요)\n3. 설계 입력\n재료\n항목 값 단위\n강종 SGC400 (295/400 MPa)\n항복강도, Fy 379.211651124 MPa\n인장강도, Fu 482.633010522 MPa\n탄성계수, E 203395.3 MPa\n포아송비, ν 0.30\n부재 구성\n항목 값\n부재 적용 지붕 퍼린 (Roof Purlin)\n스팬 유형 N경간 연속보 (6경간)\n스팬 길이 0.3048, 7.62, 7.62, 7.62, 7.62, 0.3048 m\n분담폭 (간격) 1.524 m\n설계 방법 ASD\n랩 길이 (좌 / 우) S1: 0.762 / 0 m\nS2: 0.3048 / 1.0668 m\nS3: 1.0668 / 0.3048 m\nS4: 0 / 0.762 m\n설계 하중\n하중 유형 kPa kN/m (×1.524 m) 설명\nD 0.143640776941 kPa 0.219 kN/m 고정하중 (자중 + 부가하중)\nLr 0.957605179607 kPa 1.459 kN/m 지붕 활하중\nWu (양력) 1.62792880533 kPa 2.481 kN/m 풍양력 하중(부압)\n데크 정보\n항목 값\n데크 유형 관통 체결\n패널 두께, tpanel 0.500000000001 mm\n체결구 간격 299.999999999 mm\n4. 하중 분석 결과\n1.83 m lap\n0.61 m lap\n1.83 m lap\nN\nP\nP\nP\nP\nP\nN\n0.30 m\n7.62 m\n7.62 m\n7.62 m\n7.62 m\n0.30 m\n지배 조합 모멘트: 3: D+Lr (kN-m)\n-11.9\n6.9\n-6.3\nLap end\n-5.3\nLap end\n-5.0\nLap end\n-5.0\nLap end\n-5.3\nLap end\n-6.3\nLap end\nmax=6.9 min=-11.9\n지배 조합 전단력: 3: D+Lr (kN)\n7.9\n-7.7\n-6.7\nLap end\n5.3\nLap end\n-5.2\nLap end\n5.2\nLap end\n-5.3\nLap end\n6.7\nLap end\nmax=7.9 min=-7.7\n소요강도 포락 (대표 조합: 3: D+Lr)\n위치 x (m) Mu (kN-m) Vu (kN) R 지압 / 인발 (kN) 구간 지배 조합 · 패턴\nOverhang (left) +M 0.30 0.06 4.85 — positive 7: 0.6D+0.6W\nOverhang (left) -M 0.30 -0.08 4.85 — negative 3: D+Lr\nEnd span +M 7.92 9.60 7.07 — positive 7: 0.6D+0.6W\nEnd span -M 7.92 -11.86 7.07 — negative 3: D+Lr\nInt span 3 +M 7.92 9.60 7.07 — positive 7: 0.6D+0.6W\nInt span 3 -M 7.92 -11.86 7.07 — negative 3: D+Lr\nInt span 4 +M 23.16 9.60 7.94 — positive 7: 0.6D+0.6W\nInt span 4 -M 23.16 -11.86 7.94 — negative 3: D+Lr\nEnd span +M 23.16 9.60 7.94 — positive 7: 0.6D+0.6W\nEnd span -M 23.16 -11.86 7.94 — negative 3: D+Lr\nOverhang (right) +M 30.78 0.06 0.51 — positive 7: 0.6D+0.6W\nOverhang (right) -M 30.78 -0.08 0.51 — negative 3: D+Lr\nEnd support (left) 0.30 -0.08 4.85 5.36 / -4.33 support_end 3: D+Lr\n1st interior 7.92 -11.86 7.94 15.01 / -12.14 negative 3: D+Lr\nCenter 15.54 -6.71 5.72 11.44 / -9.25 negative 3: D+Lr\nSupport 5 23.16 -11.86 7.94 15.01 / -12.14 negative 3: D+Lr\nEnd support (right) 30.78 -0.08 4.85 5.36 / -4.33 support_end 3: D+Lr\nLap end (left of sup 3) 7.16 -6.30 6.66 — negative 3: D+Lr\nLap end (right of sup 3) 8.99 -5.28 5.28 — negative 3: D+Lr\nLap end (left of sup 4) 15.24 -5.05 5.20 — negative 3: D+Lr\nLap end (right of sup 4) 15.85 -5.05 5.20 — negative 3: D+Lr\nLap end (left of sup 5) 22.10 -5.28 5.28 — negative 3: D+Lr\nLap end (right of sup 5) 23.93 -6.30 6.66 — negative 3: D+Lr\n양력 지배 하중조합: 7: 0.6D+0.6W\n위치 Mu (kN-m)\nOverhang (left) +M 0.06\nEnd span +M 9.60\nEnd span -M -5.60\nInt span 3 +M 9.60\nInt span 3 -M -2.45\nInt span 4 +M 9.60\nInt span 4 -M -2.45\nEnd span +M 9.60\nEnd span -M -5.60\nOverhang (right) +M 0.06\nEnd support (left) 0.06\n1st interior 9.60\nCenter 5.43\nSupport 5 9.60\nEnd support (right) 0.06\nLap end (left of sup 3) 5.10\nLap end (right of sup 3) 4.27\nLap end (left of sup 4) 4.08\nLap end (right of sup 4) 4.08\nLap end (left of sup 5) 4.27\nLap end (right of sup 5) 5.10\n하중조합 상세 (ASD, ASCE 7)\n하중 kN/m\n고정(D) 0.219\n지붕활(Lr) 1.459\n풍(W) 2.481\n조합 조합 수식 |M|max (kN-m) |V|max (kN) 지배\n1: D 고정(D)(0.219) 1.55 1.04\n3: D+Lr 고정(D)(0.219) + 지붕활(Lr)(1.459) 11.86 7.94 ★지배 중력 지배\n4: D+0.75Lr 고정(D)(0.219) + 0.75×지붕활(Lr)(1.459) 9.28 6.21\n5: D+0.6W 고정(D)(0.219) + 0.6×풍(W)(2.481) 8.98 6.01\n6a: D+0.75(0.6W)+0.75Lr 고정(D)(0.219) + 0.45×풍(W)(2.481) + 0.75×지붕활(Lr)(1.459) 1.39 0.93\n6a: D+0.75(0.6W) 고정(D)(0.219) + 0.45×풍(W)(2.481) 6.35 4.25\n7: 0.6D+0.6W 0.6×고정(D)(0.219) + 0.6×풍(W)(2.481) 9.60 6.42 양력 지배\n8: 0.6D 0.6×고정(D)(0.219) 0.93 0.62\n자동 결정 설계 매개변수\n다음 매개변수는 하중 분석 결과, 데크 구성 및 모멘트 다이어그램 형태에서 자동 계산됩니다:\n매개변수 값 계산 방법\nkφ (회전강성) 1.3345 kN-m/rad/m 프로젝트 시험 입력값\nkx (횡강성) 10231.8 kN/m/m AISI RP17-2 곡선 맞춤식 (Example II-1C 패스너 값 기준 예비설계값)\n가정: kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used (Fss_kip, D_screw_in, Fu1_ksi).\n범위: Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available.\n범위: RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness (「kx override」(② 하중계산 탭)) where available.\n정모멘트 Ly(+) 0 (완전 지지) 상부 플랜지 압축, 데크 패널로 연속 지지 — LTB 검토 불필요\n부모멘트 Ly 1247.1 mm 변곡점(M=0)에서 랩 끝단 또는 지점까지 거리. 하부 플랜지 압축 — 비지지.\n부모멘트 Cb 1.79 AISI Eq. F2.1.1-2: Cb = 12.5Mmax / (2.5Mmax+3MA+4MB+3MC), 비지지 구간 모멘트 다이어그램에서 계산\n양력 R (§I6.2.1) 0.7 AISI S100 Table I6.2.1-1 — 조건 (a)–(o) 확인 시에만 (S100-16 Table I6.2.1-1)\n변곡점 0.30, 6.09, 10.21, 14.11, 16.98, 20.88, 25.00, 30.78 m 모멘트 = 0인 위치, 모멘트 다이어그램의 선형보간으로 산출\n처짐 검토 (사용하중: D+Lr)\n처짐 다이어그램 (mm)\n-6.2\n41.0\nmax=41.0 min=-6.2\n스팬 위치 최대 처짐 L/δ\n1 0.00 m 6.2 mm L/98\n2 3.51 m 41.0 mm L/186\n3 12.19 m 11.8 mm L/644\n4 18.90 m 11.8 mm L/644\n5 27.58 m 41.0 mm L/186\n6 31.09 m 6.2 mm L/98\nE=203395.3 MPa, Ixx=3228228 mm⁴\n5. 설계 계산 — 휨 (Chapter F)\n1) 부모멘트 구간 (-M)\nLb(-) = 1247.1 mm, Cb(-) = 1.79\n단계 1: 항복 모멘트, My\nMy = Sf × Fy = 12.05 kN-m\n단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n전체좌굴 응력 Fcre는 비지지 길이 Lb, 모멘트 구배 Cb, 단면 성질(ry, J, Cw)로 산정합니다.\nFcre = Cb · ro · A / Sf · √(σey · σt)\nFcre와 Fy의 관계에 따라:\n조건 수식 영역\nFcre ≥ 2.78 Fy Fn = Fy 항복 (조밀)\n2.78 Fy > Fcre > 0.56 Fy Fn = (10/9)Fy(1 - 10Fy/(36Fcre)) 비탄성 LTB\nFcre ≤ 0.56 Fy Fn = Fcre 탄성 LTB\nMne = Sf × Fn = 1.44 kN-m\n단계 3: 국부좌굴 — §F3.2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n국부 세장비 λl이 0.776을 초과하면 국부좌굴이 전체강도 Mne를 감소시킵니다:\nλl = √(Mne / Mcrl)\n조건 수식\nλl ≤ 0.776 Mnl = Mne (감소 없음)\nλl > 0.776 Mnl = [1 - 0.15(Mcrl/Mne)0.4] · (Mcrl/Mne)0.4 · Mne\nMnl = 1.44 kN-m (감소 없음)\n단계 4: 뒤틀림좌굴 — §F4 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n뒤틀림좌굴은 My에 대해 독립적으로 검토합니다:\nλd = √(My / Mcrd)\n조건 수식\nλd ≤ 0.673 Mnd = My (감소 없음)\nλd > 0.673 Mnd = [1 - 0.22(Mcrd/My)0.5] · (Mcrd/My)0.5 · My\nMnd = 8.68 kN-m\n단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도\nMn(-) = R · Mnℓo = 0.7 × 9.71 = 6.80 kN-m (§I6.2.1, Eq. I6.2.1-1)\n참고(강도에 쓰지 않음): Mne 1.44, Mnl 1.44, Mnd 8.68\n지배 파괴 모드: 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\nΩb = 1.67 (ASD)\nMn(-)/Ω = 6.80 / 1.67 = 4.07 kN-m\nMu(-) / Mn(-)/Ω = 5.60 / 4.07 = 137.5% NG\n2) 정모멘트 구간 (+M)\nLb(+) = 0.0 mm, Cb(+) = 1\n단계 1: 항복 모멘트, My\nMy = Sf × Fy = 12.05 kN-m (부모멘트 구간과 동일)\n단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)\n정모멘트 구간의 Lb(+)=0.0 mm, Cb(+)=1로 Fcre를 재산정합니다.\nFcre(+) = 1000000 ksi → F2.1-3 (yielding)\nFcre(+) = 1000000 ksi ≥ 2.78Fy = 152.9 ksi → Fn = Fy (항복)\nMne(+) = 12.05 kN-m\n단계 3: 국부좌굴 — §F3.2 (정모멘트)\nMnl(+) = 9.71 kN-m (국부좌굴로 19.4% 감소)\n단계 4: 뒤틀림좌굴 — §F4 (정모멘트)\nMnd(+) = 8.55 kN-m\n단계 5: 공칭강도 & 설계강도 (정모멘트)\nMn(+) = min(Mne, Mnl, Mnd) = min(12.05, 9.71, 8.55) = 8.55 kN-m\nΩb = 1.67 (ASD)\nMn(+)/Ω = 8.55 / 1.67 = 5.12 kN-m\n종합 판정\n구간 Mu Mn/Ω DCR 판정\n부모멘트 (-M) 5.60 4.07 137.5% NG\n종합: ✗ NG\nLap Splice 접합부 검토 (§I6.2.1, §J3/§J4)\n연속 경간 지점의 Lap 구간에서 패스너 전단 전달과 2겹 부재 휨강도를 검토합니다.\n항목 값 판정\nLap 길이 (§I6.2.1(g)) 1066.8 mm OK (≥ 1.5d = 304.8)\n패스너 Screw #10 × 34 ea (2 rows × 17/row) 간격 s=63.5 mm\n전달 전단력 58.82 kN\n패스너 용량 60.50 kN DCR = 0.972 판정 없음\nLap 휨강도 (2겹 §F3/F4/H2) 1.73 kN-m DCR = 6.887 NG\nLap 접합부 종합 ✗ NG\n경고 (값 또는 판정에 영향)\n• Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요.\n• Lap 구간 휨강도 부족: Mu = 105.01 kip-in > Mn = 15.27 kip-in (DCR = 6.88)\n• Lap 구간 뒤틀림 휨강도 부족(§F4): DCR = 1.14.\n• Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = 6.89 > 1.0.\n적용 범위 (1)\n휨 + 전단 조합 검토 — §H2 (Eq. H2-1)\n(Mu/Malo)² + (Vu/Va)² ≤ 1.0\n항 비율\nMalo (Mnlo 9.71) 5.82 kN-m\nM/Malo 0.9628\nV/Va 0.0009\n합계 (SRSS) 0.9628 ≤ 1.0 OK\n계산 단계 요약\n# 단계 수식 결과 단위\n1 Yield Moment (My) My = Sf × Fy = 1.9390 in³ × 55.00 ksi = 106.64 kip-in 12.05 kN-m\n2a [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Fcre — Lateral-Torsional Buckling (§F2.1.3) σey = π²E/(Lb/ry)² = π²×29500 ksi/(226.1 in/1.1442 in)² = 7.46 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 9.24 ksi, Fcre = Cb×ro×Ag/(2×Sf)×√(σey×σt) = 1.14×3.2781 in×0.8218 in²/(2×1.9390 in³)×√(7.46 ksi×9.24 ksi) = 6.57 ksi 45.3 MPa\n2 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Global/LTB (Mne) Fcre=6.57 ksi ≤ 0.56×55.00 ksi → Fn = Fcre = 6.57 ksi, Mne = Sf×Fn = 1.9390 in³×6.57 ksi = 12.75 kip-in 1.44 kN-m\n3 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Local Buckling (Mnl) Mcrl = 90.85 kip-in (FSM), λl = √(Mne/Mcrl) = √(12.75 kip-in/90.85 kip-in) = 0.375 → Mnl = 12.75 kip-in 1.44 kN-m\n4 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Distortional Buckling (Mnd) Mcrd = 85.95 kip-in (FSM [β=1.042, §2.3.3.3 Eq.3]), λd = √(My/Mcrd) = √(106.64 kip-in/85.95 kip-in) = 1.114 → Mnd = 76.83 kip-in 8.68 kN-m\n5 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Nominal Strength — DSM (Mn) Mn = min(Mne=12.75 kip-in, Mnl=12.75 kip-in, Mnd=76.83 kip-in) = 12.75 kip-in 1.44 kN-m\n5a Mnℓo — local buckling at Fn = Fy (§F3, for §I6.2.1) Mne = My = Sf×Fy = 106.64 kip-in (Fn = Fy), Mcrl = 90.85 kip-in (FSM), λl = √(My/Mcrl) = 1.083 → Mnℓo = 85.95 kip-in (Eq. F3.2.1) 9.71 kN-m\n5b Uplift R-factor (§I6.2.1, Eq. I6.2.1-1) [지배] R = 0.7 (Table I6.2.1-1: continuous span, Z → 0.70); Mn = R × Mnℓo = 0.7 × 85.95 = 60.16 kip-in — F2(LTB)·F4 대신 적용; 조건 (a)~(f)·(o) 확인, (g)~(n) 사용자 확인 6.80 kN-m\n6 Final Nominal Strength (Mn) [지배] Mn = 60.16 kip-in — §I6.2.1 R-factor (R=0.7) 6.80 kN-m\n7 Allowable Strength (ASD) Mn/Ω = 60.16 kip-in/1.67 = 36.03 kip-in 4.07 kN-m\n8 Bending + Shear (§H2, Eq. H2-1) Malo = Mnℓo/1.67 = 85.95/1.67 = 51.47 kip-in (§F3, Fn = Fy), Va = 2.43 kips → √((49.55/51.47)² + (0.00/2.43)²) = 0.963 0.9628\n6. 설계 요약\n본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 휨 부재 (보/퍼린)의 설계 검토 결과입니다. 설계 방법은 ASD입니다. 부재는 6경간이며, 지배 구간(양력 하부압축 0.32–6.07 m)의 하중조합은 7: 0.6D+0.6W입니다. 지배 파괴 모드는 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)입니다.\n항목 값\n설계 기준 AISI S100-16\n해석 방법 직접강도법 (DSM) — 유한스트립법\n부재 유형 휨 부재 (보/퍼린)\n설계 방법 ASD\n지배 파괴 모드 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\n부모멘트 구간 (-M)\nMn(-) 6.80 kN-m 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\nMn/Ω(-) 4.07 kN-m\nDCR(-) 137.5% — NG\n정모멘트 구간 (+M)\nMn(+) 8.55 kN-m\nMn/Ω(+) 5.12 kN-m\n종합 판정\n종합 결과 ✗ NG\n지배 검토 F flexure\nF flexure 1.375 — NG\nH2 bending + shear 0.963 — OK\n퍼린 구간별 판정\n정모멘트 0.32–6.07 m 118.7% — NG\n정모멘트 10.24–14.04 m 51.9% — OK\n정모멘트 17.05–20.85 m 51.9% — OK\n정모멘트 25.02–30.77 m 118.7% — NG\n내민 부모멘트 0.00–0.30 m (지점 2 왼쪽) 128.3% — NG\n부모멘트 0.30–0.32 m (지점 2 오른쪽) 44.8% — OK\n부모멘트 6.07–7.16 m (지점 3 왼쪽) 124.6% — NG\n부모멘트 8.99–10.24 m (지점 3 오른쪽) 103.0% — NG\n부모멘트 14.04–15.24 m (지점 4 왼쪽) 99.2% — OK\n부모멘트 15.85–17.05 m (지점 4 오른쪽) 99.2% — OK\n부모멘트 20.85–22.10 m (지점 5 왼쪽) 103.0% — NG\n부모멘트 23.93–25.02 m (지점 5 오른쪽) 124.6% — NG\n부모멘트 30.77–30.78 m (지점 6 왼쪽) 128.3% — NG\n내민 부모멘트 30.78–31.09 m (지점 6 오른쪽) 4.9% — OK\n랩 구간 7.16–7.92 m (지점 3 왼쪽) 107.1% — NG\n랩 구간 7.92–8.99 m (지점 3 오른쪽) 107.1% — NG\n랩 구간 15.24–15.54 m (지점 4 왼쪽) 63.5% — OK\n랩 구간 15.54–15.85 m (지점 4 오른쪽) 63.5% — OK\n랩 구간 22.10–23.16 m (지점 5 왼쪽) 108.4% — NG\n랩 구간 23.16–23.93 m (지점 5 오른쪽) 108.4% — NG\n양력 하부압축 0.32–6.07 m 137.5% — NG\n양력 하부압축 10.24–14.04 m 60.2% — OK\n양력 하부압축 17.05–20.85 m 60.2% — OK\n양력 하부압축 25.02–30.77 m 137.5% — NG\n양력 지점부 상부압축 0.00–0.32 m 36.2% — OK\n양력 지점부 상부압축 6.07–7.16 m 100.5% — NG\n양력 지점부 상부압축 8.99–10.24 m 83.1% — OK\n양력 지점부 상부압축 14.04–15.24 m 80.0% — OK\n양력 지점부 상부압축 15.85–17.05 m 80.0% — OK\n양력 지점부 상부압축 20.85–22.10 m 83.1% — OK\n양력 지점부 상부압축 23.93–25.02 m 100.5% — NG\n양력 지점부 상부압축 30.77–31.09 m 4.0% — OK\n양력 랩 구간 상부압축 7.16–7.92 m 86.4% — OK\n양력 랩 구간 상부압축 7.92–8.99 m 86.4% — OK\n양력 랩 구간 상부압축 15.24–15.54 m 51.2% — OK\n양력 랩 구간 상부압축 15.54–15.85 m 51.2% — OK\n양력 랩 구간 상부압축 22.10–23.16 m 87.4% — OK\n양력 랩 구간 상부압축 23.16–23.93 m 87.4% — OK\n참조 규준 조항 F3.2, G2, H2, I6.2.1\n평가하지 못한 항목 (판정 없음의 원인)\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n• H2-2 (shear stiffened webs)\n• weak-axis DSM flexure\n• G5/H3 web crippling (no bearing length wc_N given)\n경고 (값 또는 판정에 영향)\n• §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.\n가정\n• §I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.\n적용 범위 (1)\nCUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+  },
+  {
+   "id": "SI.report.shape",
+   "expect": "pin",
+   "value": {
+    "heads": [
+     "H1 CUFSM — 냉간성형강 설계 보고서",
+     "H2 1. 단면",
+     "H3 단면 제원",
+     "H3 계산된 단면 성질",
+     "H2 2. 탄성 좌굴 해석",
+     "H3 DSM 설계값 (좌굴 곡선에서 추출)",
+     "H2 3. 설계 입력",
+     "H3 재료",
+     "H3 부재 구성",
+     "H3 설계 하중",
+     "H3 데크 정보",
+     "H2 4. 하중 분석 결과",
+     "H3 소요강도 포락 (대표 조합: 3: D+Lr)",
+     "H3 양력 지배 하중조합: 7: 0.6D+0.6W",
+     "H3 하중조합 상세 (ASD, ASCE 7)",
+     "H3 자동 결정 설계 매개변수",
+     "H3 처짐 검토 (사용하중: D+Lr)",
+     "H2 5. 설계 계산 — 휨 (Chapter F)",
+     "H2 1) 부모멘트 구간 (-M)",
+     "H3 단계 1: 항복 모멘트, My",
+     "H3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 3: 국부좌굴 — §F3.2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 4: 뒤틀림좌굴 — §F4 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도",
+     "H2 2) 정모멘트 구간 (+M)",
+     "H3 단계 1: 항복 모멘트, My",
+     "H3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)",
+     "H3 단계 3: 국부좌굴 — §F3.2 (정모멘트)",
+     "H3 단계 4: 뒤틀림좌굴 — §F4 (정모멘트)",
+     "H3 단계 5: 공칭강도 & 설계강도 (정모멘트)",
+     "H2 종합 판정",
+     "H3 Lap Splice 접합부 검토 (§I6.2.1, §J3/§J4)",
+     "H3 휨 + 전단 조합 검토 — §H2 (Eq. H2-1)",
+     "H3 계산 단계 요약",
+     "H2 6. 설계 요약"
+    ],
+    "svgs": 5,
+    "tables": 21,
+    "htmlSha": "2eed005e85b32348",
+    "htmlLength": 73866,
+    "printShown": true
+   }
+  },
+  {
+   "id": "SI.pdf",
+   "expect": "pin",
+   "value": {
+    "pages": 11,
+    "bytesKB": 1116,
+    "text": [
+     "CUFSM — 냉간성형강 설계 보고서 날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) 1. 단면 단면 제원 항목 값 단위 단면 유형 립 Z 형강 H ( 높이 ) 203.2 mm B ( 플랜지 폭 ) 57.15 mm D ( 립 깊이 ) 23.114 mm t ( 두께 ) 1.4986 mm r ( 코너 반경 ) 4.7625 mm 절점 / 요소 37 / 36 계산된 단면 성질 성질 기호 값 단위 총단면적 A 530 mm² 강축 단면 2 차모멘트 I xx 3228228 mm⁴ 약축 단면 2 차모멘트 I zz 447814 mm⁴ 단면상승모멘트 I xz 866402 mm⁴ 강축 단면계수 S x 31774 mm³ 약축 단면계수 S z 6284 mm³ 강축 소성단면계수 Z x 37627 mm³ 약축 소성단면계수 Z z 8981 mm³ 강축 회전반경 r x 78.0 mm 약축 회전반경 r z 29.1 mm 도심 x x cg 70.7 mm 도심 z z cg 100.9 mm 주축 각도 θ p -16.0 ° 주축 단면 2 차모멘트 1 I 11 3476108 mm⁴ 주축 단면 2 차모멘트 2 I 22 199934 mm⁴",
+     "2. 탄성 좌굴 해석 ( 좌굴 곡선을 생성하려면 FSM 해석을 먼저 실행하세요 ) DSM 설계값 ( 좌굴 곡선에서 추출 ) (DSM 결과 없음 — FSM 해석을 먼저 실행하세요 ) 3. 설계 입력 재료 항목 값 단위 강종 SGC400 (295/400 MPa) 항복강도 , F y 379.211651124 MPa 인장강도 , F u 482.633010522 MPa 탄성계수 , E 203395.3 MPa 포아송비 , ν 0.30 부재 구성 항목 값 부재 적용 지붕 퍼린 (Roof Purlin) 스팬 유형 N 경간 연속보 (6 경간 ) 스팬 길이 0.3048, 7.62, 7.62, 7.62, 7.62, 0.3048 m 분담폭 ( 간격 ) 1.524 m 설계 방법 ASD 랩 길이 ( 좌 / 우 ) S1: 0.762 / 0 m S2: 0.3048 / 1.0668 m S3: 1.0668 / 0.3048 m S4: 0 / 0.762 m 설계 하중 하중 유형 kPa kN/m (×1.524 m) 설명 D 0.143640776941 kPa 0.219 kN/m 고정하중 ( 자중 + 부가하중 ) Lr 0.957605179607 kPa 1.459 kN/m 지붕 활하중 Wu ( 양력 ) 1.62792880533 kPa 2.481 kN/m 풍양력 하중 ( 부압 ) 데크 정보 항목 값 데크 유형 관통 체결 패널 두께 , t panel 0.500000000001 mm 체결구 간격 299.999999999 mm",
+     "4. 하중 분석 결과 1.83 m lap 0.61 m lap 1.83 m lap N P P P P P N 0.30 m 7.62 m 7.62 m 7.62 m 7.62 m 0.30 m 지배 조합 모멘트 : 3: D+Lr (kN-m) -11.9 6.9 -6.3 Lap end -5.3 Lap end -5.0 Lap end -5.0 Lap end -5.3 Lap end -6.3 Lap end max=6.9 min=-11.9 지배 조합 전단력 : 3: D+Lr (kN) 7.9 -7.7 -6.7 Lap end 5.3 Lap end -5.2 Lap end 5.2 Lap end -5.3 Lap end 6.7 Lap end max=7.9 min=-7.7 소요강도 포락 ( 대표 조합 : 3: D+Lr) 위치 x (m) M u (kN-m) V u (kN) R 지압 / 인발 (kN) 구간 지배 조합 · 패턴 Overhang (left) +M 0.30 0.06 4.85 — positive 7: 0.6D+0.6W Overhang (left) -M 0.30 -0.08 4.85 — negative 3: D+Lr End span +M 7.92 9.60 7.07 — positive 7: 0.6D+0.6W End span -M 7.92 -11.86 7.07 — negative 3: D+Lr Int span 3 +M 7.92 9.60 7.07 — positive 7: 0.6D+0.6W Int span 3 -M 7.92 -11.86 7.07 — negative 3: D+Lr Int span 4 +M 23.16 9.60 7.94 — positive 7: 0.6D+0.6W Int span 4 -M 23.16 -11.86 7.94 — negative 3: D+Lr End span +M 23.16 9.60 7.94 — positive 7: 0.6D+0.6W End span -M 23.16 -11.86 7.94 — negative 3: D+Lr Overhang (right) +M 30.78 0.06 0.51 — positive 7: 0.6D+0.6W Overhang (right) -M 30.78 -0.08 0.51 — negative 3: D+Lr End support (left) 0.30 -0.08 4.85 5.36 / -4.33 support_end 3: D+Lr 1st interior 7.92 -11.86 7.94 15.01 / -12.14 negative 3: D+Lr Center 15.54 -6.71 5.72 11.44 / -9.25 negative 3: D+Lr Support 5 23.16 -11.86 7.94 15.01 / -12.14 negative 3: D+Lr End support (right) 30.78 -0.08 4.85 5.36 / -4.33 support_end 3: D+Lr Lap end (left of sup 3) 7.16 -6.30 6.66 — negative 3: D+Lr",
+     "Lap end (right of sup 3) 8.99 -5.28 5.28 — negative 3: D+Lr Lap end (left of sup 4) 15.24 -5.05 5.20 — negative 3: D+Lr Lap end (right of sup 4) 15.85 -5.05 5.20 — negative 3: D+Lr Lap end (left of sup 5) 22.10 -5.28 5.28 — negative 3: D+Lr Lap end (right of sup 5) 23.93 -6.30 6.66 — negative 3: D+Lr 양력 지배 하중조합 : 7: 0.6D+0.6W 위치 M u (kN-m) Overhang (left) +M 0.06 End span +M 9.60 End span -M -5.60 Int span 3 +M 9.60 Int span 3 -M -2.45 Int span 4 +M 9.60 Int span 4 -M -2.45 End span +M 9.60 End span -M -5.60 Overhang (right) +M 0.06 End support (left) 0.06 1st interior 9.60 Center 5.43 Support 5 9.60 End support (right) 0.06 Lap end (left of sup 3) 5.10 Lap end (right of sup 3) 4.27 Lap end (left of sup 4) 4.08 Lap end (right of sup 4) 4.08 Lap end (left of sup 5) 4.27 Lap end (right of sup 5) 5.10 하중조합 상세 (ASD, ASCE 7) 하중 kN/m 고정 (D) 0.219 지붕활 (Lr) 1.459 풍 (W) 2.481 조합 조합 수식 |M| max (kN- m) |V| max (kN) 지배 1: D 고정 (D)(0.219) 1.55 1.04",
+     "3: D+Lr 고정 (D)(0.219) + 지붕활 (Lr)(1.459) 11.86 7.94 ★지배 중력 지 배 4: D+0.75Lr 고정 (D)(0.219) + 0.75× 지붕활 (Lr)(1.459) 9.28 6.21 5: D+0.6W 고정 (D)(0.219) + 0.6× 풍 (W)(2.481) 8.98 6.01 6a: D+0.75(0.6W)+0.75Lr 고정 (D)(0.219) + 0.45× 풍 (W)(2.481) + 0.75× 지붕활 (Lr) (1.459) 1.39 0.93 6a: D+0.75(0.6W) 고정 (D)(0.219) + 0.45× 풍 (W)(2.481) 6.35 4.25 7: 0.6D+0.6W 0.6× 고정 (D)(0.219) + 0.6× 풍 (W)(2.481) 9.60 6.42 양력 지배 8: 0.6D 0.6× 고정 (D)(0.219) 0.93 0.62 자동 결정 설계 매개변수 다음 매개변수는 하중 분석 결과 , 데크 구성 및 모멘트 다이어그램 형태에서 자동 계산됩니다 : 매개변수 값 계산 방법 k φ ( 회전강 성 ) 1.3345 kN-m/rad/m 프로젝트 시험 입력값 k x ( 횡강성 ) 10231.8 kN/m/m AISI RP17-2 곡선 맞춤식 (Example II-1C 패스너 값 기준 예비설계값 ) 가정 : kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used (Fss_kip, D_screw_in, Fu1_ksi). 범위 : Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available. 범위 : RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness ( 「 kx override 」 ( ② 하중계산 탭 )) where available. 정모멘트 L y (+) 0 ( 완전 지지 ) 상부 플랜지 압축 , 데크 패널로 연속 지지 — LTB 검토 불필요 부모멘트 L y 1247.1 mm 변곡점 (M=0) 에서 랩 끝단 또는 지점까지 거리 . 하부 플랜지 압축 — 비지지 . 부모멘트 C b 1.79 AISI Eq. F2.1.1-2: C b = 12.5M max / (2.5M max +3M A +4M B +3M C ), 비지지 구간 모멘트 다이어그램에서 계산 양력 R (§I6.2.1) 0.7 AISI S100 Table I6.2.1-1 — 조건 (a)–(o) 확인 시에만 (S100-16 Table I6.2.1-1) 변곡점 0.30, 6.09, 10.21, 14.11, 16.98, 20.88, 25.00, 30.78 m 모멘트 = 0 인 위치 , 모멘트 다이어그램의 선형보간으로 산출 처짐 검토 ( 사용하중 : D+Lr) 처짐 다이어그램 (mm) -6.2 41.0 max=41.0 min=-6.2 스팬 위치 최대 처짐 L/δ 1 0.00 m 6.2 mm L/98 2 3.51 m 41.0 mm L/186 3 12.19 m 11.8 mm L/644 4 18.90 m 11.8 mm L/644",
+     "5 27.58 m 41.0 mm L/186 6 31.09 m 6.2 mm L/98 E=203395.3 MPa, Ixx=3228228 mm⁴ 5. 설계 계산 — 휨 (Chapter F) 1) 부모멘트 구간 (-M) Lb(-) = 1247.1 mm, Cb(-) = 1.79 단계 1: 항복 모멘트 , M y M y = S f × F y = 12.05 kN-m 단계 2: 전체좌굴 / 횡 - 비틀림좌굴 — §F2 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 전체좌굴 응력 F cre 는 비지지 길이 L b , 모멘트 구배 C b , 단면 성질 (r y , J, C w ) 로 산정합니다 . F cre = C b · r o · A / S f · √(σ ey · σ t ) F cre 와 F y 의 관계에 따라 : 조건 수식 영역 F cre ≥ 2.78 F y F n = F y 항복 ( 조밀 ) 2.78 F y > F cre > 0.56 F y F n = (10/9)F y (1 - 10F y /(36F cre )) 비탄성 LTB F cre ≤ 0.56 F y F n = F cre 탄성 LTB M ne = S f × F n = 1.44 kN-m 단계 3: 국부좌굴 — §F3.2 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 국부 세장비 λ l 이 0.776 을 초과하면 국부좌굴이 전체강도 M ne 를 감소시킵니다 : λ l = √(M ne / M crl ) 조건 수식 λ l ≤ 0.776 M nl = M ne ( 감소 없음 ) λ l > 0.776 M nl = [1 - 0.15(M crl /M ne ) 0.4 ] · (M crl /M ne ) 0.4 · M ne M nl = 1.44 kN-m ( 감소 없음 ) 단계 4: 뒤틀림좌굴 — §F4 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 뒤틀림좌굴은 M y 에 대해 독립적으로 검토합니다 : λ d = √(M y / M crd )",
+     "조건 수식 λ d ≤ 0.673 M nd = M y ( 감소 없음 ) λ d > 0.673 M nd = [1 - 0.22(M crd /M y ) 0.5 ] · (M crd /M y ) 0.5 · M y M nd = 8.68 kN-m 단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도 M n (-) = R · M nℓo = 0.7 × 9.71 = 6.80 kN-m (§I6.2.1, Eq. I6.2.1-1) 지배 파괴 모드 : 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) Ω b = 1.67 (ASD) M n (-)/Ω = 6.80 / 1.67 = 4.07 kN-m M u (-) / M n (-)/Ω = 5.60 / 4.07 = 137.5% NG 2) 정모멘트 구간 (+M) Lb(+) = 0.0 mm, Cb(+) = 1 단계 1: 항복 모멘트 , M y M y = S f × F y = 12.05 kN-m ( 부모멘트 구간과 동일 ) 단계 2: 전체좌굴 / 횡 - 비틀림좌굴 — §F2 ( 정모멘트 ) 정모멘트 구간의 Lb(+)=0.0 mm, Cb(+)=1 로 Fcre 를 재산정합니다 . F cre (+) = 1000000 ksi → F2.1-3 (yielding) F cre (+) = 1000000 ksi ≥ 2.78F y = 152.9 ksi → F n = F y ( 항복 ) M ne (+) = 12.05 kN-m 단계 3: 국부좌굴 — §F3.2 ( 정모멘트 ) M nl (+) = 9.71 kN-m ( 국부좌굴로 19.4% 감소 ) 단계 4: 뒤틀림좌굴 — §F4 ( 정모멘트 ) M nd (+) = 8.55 kN-m",
+     "단계 5: 공칭강도 & 설계강도 ( 정모멘트 ) M n (+) = min(M ne , M nl , M nd ) = min(12.05, 9.71, 8.55) = 8.55 kN-m Ω b = 1.67 (ASD) M n (+)/Ω = 8.55 / 1.67 = 5.12 kN-m 종합 판정 구간 M u M n /Ω DCR 판정 부모멘트 (-M) 5.60 4.07 137.5% NG 종합 : ✗ NG Lap Splice 접합부 검토 (§I6.2.1, §J3/§J4) 연속 경간 지점의 Lap 구간에서 패스너 전단 전달과 2 겹 부재 휨강도를 검토합니다 . 항목 값 판정 Lap 길이 (§I6.2.1(g)) 1066.8 mm OK (≥ 1.5d = 304.8) 패스너 Screw #10 × 34 ea (2 rows × 17/row) 간격 s=63.5 mm 전달 전단력 58.82 kN 패스너 용량 60.50 kN DCR = 0.972 판정 없음 Lap 휨강도 (2 겹 §F3/F4/H2) 1.73 kN-m DCR = 6.887 NG Lap 접합부 종합 ✗ NG 경고 ( 값 또는 판정에 영향 ) • Lap 패스너 힘 분배 (Step 2·4) 는 기준 조항이 아닌 사내 합리적 해석 (§A1.2(c)) 입니다 — force_model 의 한계 (a)–(e) 를 확인하세요 . • Lap 구간 휨강도 부족 : Mu = 105.01 kip-in > Mn = 15.27 kip-in (DCR = 6.88) • Lap 구간 뒤틀림 휨강도 부족 (§F4): DCR = 1.14. • Lap 지점부 휨 - 전단 상호작용 (§H2) 초과 : 상호작용값 = 6.89 > 1.0. 적용 범위 (1) 휨 + 전단 조합 검토 — §H2 (Eq. H2-1) (M u /M alo )² + (V u /V a )² ≤ 1.0 항 비율 M alo (M nlo 9.71) 5.82 kN-m M/Malo 0.9628 V/Va 0.0009 합계 (SRSS) 0.9628 ≤ 1.0 OK 계산 단계 요약",
+     "# 단계 수식 결과 단위 1 Yield Moment (My) My = Sf × Fy = 1.9390 in³ × 55.00 ksi = 106.64 kip-in 12.05 kN- m 2a [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Fcre — Lateral- Torsional Buckling (§F2.1.3) σey = π²E/(Lb/ry)² = π²×29500 ksi/(226.1 in/1.1442 in)² = 7.46 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 9.24 ksi, Fcre = Cb×ro×Ag/(2×Sf)×√(σey×σt) = 1.14×3.2781 in×0.8218 in²/(2×1.9390 in³)×√(7.46 ksi×9.24 ksi) = 6.57 ksi 45.3 MPa 2 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Global/LTB (Mne) Fcre=6.57 ksi ≤ 0.56×55.00 ksi → Fn = Fcre = 6.57 ksi, Mne = Sf×Fn = 1.9390 in³×6.57 ksi = 12.75 kip-in 1.44 kN- m 3 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Local Buckling (Mnl) Mcrl = 90.85 kip-in (FSM), λl = √(Mne/Mcrl) = √(12.75 kip-in/90.85 kip-in) = 0.375 → Mnl = 12.75 kip-in 1.44 kN- m 4 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Distortional Buckling (Mnd) Mcrd = 85.95 kip-in (FSM [β=1.042, §2.3.3.3 Eq.3]), λd = √(My/Mcrd) = √(106.64 kip- in/85.95 kip-in) = 1.114 → Mnd = 76.83 kip-in 8.68 kN- m 5 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Nominal Strength — DSM (Mn) Mn = min(Mne=12.75 kip-in, Mnl=12.75 kip-in, Mnd=76.83 kip-in) = 12.75 kip-in 1.44 kN- m 5a Mnℓo — local buckling at Fn = Fy (§F3, for §I6.2.1) Mne = My = Sf×Fy = 106.64 kip-in (Fn = Fy), Mcrl = 90.85 kip-in (FSM), λl = √(My/Mcrl) = 1.083 → Mnℓo = 85.95 kip-in (Eq. F3.2.1) 9.71 kN- m 5b Uplift R-factor (§I6.2.1, Eq. I6.2.1- 1) [ 지배 ] R = 0.7 (Table I6.2.1-1: continuous span, Z → 0.70); Mn = R × Mnℓo = 0.7 × 85.95 = 60.16 kip-in — F2(LTB)·F4 대신 적용 ; 조건 (a)~(f)·(o) 확인 , (g)~(n) 사용자 확인 6.80 kN- m 6 Final Nominal Strength (Mn) [ 지 배 ] Mn = 60.16 kip-in — §I6.2.1 R-factor (R=0.7) 6.80 kN- m 7 Allowable Strength (ASD) Mn/Ω = 60.16 kip-in/1.67 = 36.03 kip-in 4.07 kN- m 8 Bending + Shear (§H2, Eq. H2-1) Malo = Mnℓo/1.67 = 85.95/1.67 = 51.47 kip-in (§F3, Fn = Fy), Va = 2.43 kips → √((49.55/51.47)² + (0.00/2.43)²) = 0.963 0.9628 6. 설계 요약 본 보고서는 AISI S100-16 직접강도법 (DSM) 에 의한 휨 부재 ( 보 / 퍼린 ) 의 설계 검토 결과입니다 . 설계 방법은 ASD 입니다 . 부재는 6 경간이며 , 지배 구간 ( 양력 하부압축 0.32–6.07 m) 의 하중조합은 7: 0.6D+0.6W 입니다 . 지배 파괴 모드는 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) 입니다 . 항목 값 설계 기준 AISI S100-16 해석 방법 직접강도법 (DSM) — 유한스트립법 부재 유형 휨 부재 ( 보 / 퍼린 ) 설계 방법 ASD 지배 파괴 모드 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) 부모멘트 구간 (-M) M n (-) 6.80 kN-m 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) M n /Ω(-) 4.07 kN-m DCR(-) 137.5% — NG 정모멘트 구간 (+M) M n (+) 8.55 kN-m",
+     "M n /Ω(+) 5.12 kN-m 종합 판정 종합 결과 ✗ NG 지배 검토 F flexure F flexure 1.375 — NG H2 bending + shear 0.963 — OK 퍼린 구간별 판정 정모멘트 0.32–6.07 m 118.7% — NG 정모멘트 10.24–14.04 m 51.9% — OK 정모멘트 17.05–20.85 m 51.9% — OK 정모멘트 25.02–30.77 m 118.7% — NG 내민 부모멘트 0.00–0.30 m ( 지점 2 왼쪽 ) 128.3% — NG 부모멘트 0.30–0.32 m ( 지점 2 오른쪽 ) 44.8% — OK 부모멘트 6.07–7.16 m ( 지점 3 왼쪽 ) 124.6% — NG 부모멘트 8.99–10.24 m ( 지점 3 오른쪽 ) 103.0% — NG 부모멘트 14.04–15.24 m ( 지점 4 왼쪽 ) 99.2% — OK 부모멘트 15.85–17.05 m ( 지점 4 오른쪽 ) 99.2% — OK 부모멘트 20.85–22.10 m ( 지점 5 왼쪽 ) 103.0% — NG 부모멘트 23.93–25.02 m ( 지점 5 오른쪽 ) 124.6% — NG 부모멘트 30.77–30.78 m ( 지점 6 왼쪽 ) 128.3% — NG 내민 부모멘트 30.78–31.09 m ( 지점 6 오른쪽 ) 4.9% — OK 랩 구간 7.16–7.92 m ( 지점 3 왼쪽 ) 107.1% — NG 랩 구간 7.92–8.99 m ( 지점 3 오른쪽 ) 107.1% — NG 랩 구간 15.24–15.54 m ( 지점 4 왼쪽 ) 63.5% — OK 랩 구간 15.54–15.85 m ( 지점 4 오른쪽 ) 63.5% — OK 랩 구간 22.10–23.16 m ( 지점 5 왼쪽 ) 108.4% — NG 랩 구간 23.16–23.93 m ( 지점 5 오른쪽 ) 108.4% — NG 양력 하부압축 0.32–6.07 m 137.5% — NG 양력 하부압축 10.24–14.04 m 60.2% — OK 양력 하부압축 17.05–20.85 m 60.2% — OK 양력 하부압축 25.02–30.77 m 137.5% — NG 양력 지점부 상부압축 0.00–0.32 m 36.2% — OK 양력 지점부 상부압축 6.07–7.16 m 100.5% — NG 양력 지점부 상부압축 8.99–10.24 m 83.1% — OK 양력 지점부 상부압축 14.04–15.24 m 80.0% — OK 양력 지점부 상부압축 15.85–17.05 m 80.0% — OK 양력 지점부 상부압축 20.85–22.10 m 83.1% — OK 양력 지점부 상부압축 23.93–25.02 m 100.5% — NG",
+     "양력 지점부 상부압축 30.77–31.09 m 4.0% — OK 양력 랩 구간 상부압축 7.16–7.92 m 86.4% — OK 양력 랩 구간 상부압축 7.92–8.99 m 86.4% — OK 양력 랩 구간 상부압축 15.24–15.54 m 51.2% — OK 양력 랩 구간 상부압축 15.54–15.85 m 51.2% — OK 양력 랩 구간 상부압축 22.10–23.16 m 87.4% — OK 양력 랩 구간 상부압축 23.16–23.93 m 87.4% — OK 참조 규준 조항 F3.2, G2, H2, I6.2.1 평가하지 못한 항목 ( 판정 없음의 원인 ) • §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) • H2-2 (shear stiffened webs) • weak-axis DSM flexure • G5/H3 web crippling (no bearing length wc_N given) 경고 ( 값 또는 판정에 영향 ) • §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습 니다 . Virgin Fy 를 사용합니다 . 가정 • §I6.2.1: 조건 (g)~(n)( 랩 길이 , 스팬 ≤ 33 ft, 지점 횡구속 , 패널 · 단열재 · 체결재 상세 ) 과 연속보 변곡점 사이 지점부 · 캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오 . 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+    ],
+    "compact": "5a6145a1afc7690f",
+    "printedHtmlSha": "7f5973deeb614710"
+   }
+  },
+  {
+   "id": "SI.findings",
+   "expect": "defect",
+   "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report",
+   "value": {
+    "coldWork": [
+     "fail: §A3.3.2 Cold Work (냉간가공) = 적용 실패 — R/t 조건 미충족 또는 R=0"
+    ],
+    "analysisItems": [
+     "warn: Load Case 적합성 = compression",
+     "fail: 해석 실행 여부 = 미실행",
+     "fail: DSM 값 추출 = 미추출"
+    ],
+    "unboundedAsNumber": [
+     "pass: Lb(+) / Cb(+) (정모멘트) = Lb(+)=0.0 mm, Cb(+)=1, Fcre(+)=1000000 ksi",
+     "Fcre(+) = 1000000 ksi → F2.1-3 (yielding)",
+     "Fcre(+) = 1000000 ksi ≥ 2.78Fy = 152.9 ksi → Fn = Fy (항복)"
+    ],
+    "alwaysSame": [
+     "pass: 경계조건 (BC) = S-S",
+     "pass: 풍하중 (W, 양력) = 1.62792880533 kPa ↑",
+     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=379.211651124, 설계 Fy=379.211651124 MPa"
+    ],
+    "lapFastener": [
+     "warn: Lap 패스너 전단 (DCR) = DCR=0.972 (V=58.82 / Cap=60.50 kN)"
+    ],
+    "reportPageValues": [
+     "탄성계수, E 203395.3 MPa",
+     "포아송비, ν 0.30",
+     "분담폭 (간격) 1.524 m",
+     "패널 두께, tpanel 0.500000000001 mm",
+     "체결구 간격 299.999999999 mm"
+    ],
+    "usUnitsInSiReport": 14,
+    "usUnitsSample": [
+     "Fcre(+) = 1000000 ksi → F2.1-3 (yielding)",
+     "Fcre(+) = 1000000 ksi ≥ 2.78Fy = 152.9 ksi → Fn = Fy (항복)",
+     "• Lap 구간 휨강도 부족: Mu = 105.01 kip-in > Mn = 15.27 kip-in (DCR = 6.88)",
+     "1 Yield Moment (My) My = Sf × Fy = 1.9390 in³ × 55.00 ksi = 106.64 kip-in 12.05 kN-m"
+    ]
+   }
+  },
+  {
+   "id": "purlin.mcp",
+   "expect": "k3-change",
+   "reason": "K3: validate_design returns checks: [] (raw session data, not the 70 items); generate_report returns a JSON packet, no HTML/PDF — acceptance criterion: the same 70 items without a webview and a report PDF",
+   "value": {
+    "validate.summary": {
+     "isError": false,
+     "bytes": 42280,
+     "keys": [
+      "Fy",
+      "analysis_current",
+      "analysis_run",
+      "checks",
+      "cutwp",
+      "detail",
+      "last_design_result",
+      "last_load_analysis",
+      "more",
+      "nelems",
+      "nnodes",
+      "prepared_design_dsm",
+      "props",
+      "section_defined",
+      "status",
+      "units"
+     ],
+     "detail": "summary",
+     "checks": 0,
+     "errors": null,
+     "error": null
+    },
+    "validate.si": {
+     "isError": false,
+     "bytes": 44749,
+     "keys": [
+      "Fy",
+      "analysis_current",
+      "analysis_run",
+      "checks",
+      "cutwp",
+      "detail",
+      "last_design_result",
+      "last_load_analysis",
+      "more",
+      "nelems",
+      "nnodes",
+      "prepared_design_dsm",
+      "props",
+      "section_defined",
+      "status",
+      "text_units",
+      "units",
+      "units_note"
+     ],
+     "detail": "summary",
+     "checks": 0,
+     "errors": null,
+     "error": null
+    },
+    "validate.full": {
+     "isError": false,
+     "bytes": 2906417,
+     "keys": [
+      "Fy",
+      "analysis_current",
+      "analysis_run",
+      "checks",
+      "cutwp",
+      "last_design_result",
+      "last_load_analysis",
+      "nelems",
+      "nnodes",
+      "prepared_design_dsm",
+      "props",
+      "section_defined",
+      "status",
+      "units"
+     ],
+     "detail": null,
+     "checks": 0,
+     "errors": null,
+     "error": null
+    },
+    "report.summary": {
+     "isError": false,
+     "bytes": 42183,
+     "keys": [
+      "cutwp_props",
+      "design_cache_hit",
+      "design_result",
+      "detail",
+      "load_analysis",
+      "model_summary",
+      "more",
+      "section_props",
+      "timestamp",
+      "units"
+     ],
+     "detail": "summary",
+     "checks": null,
+     "errors": null,
+     "error": null
+    },
+    "report.si": {
+     "isError": false,
+     "bytes": 44652,
+     "keys": [
+      "cutwp_props",
+      "design_cache_hit",
+      "design_result",
+      "detail",
+      "load_analysis",
+      "model_summary",
+      "more",
+      "section_props",
+      "text_units",
+      "timestamp",
+      "units",
+      "units_note"
+     ],
+     "detail": "summary",
+     "checks": null,
+     "errors": null,
+     "error": null
+    },
+    "report.full": {
+     "isError": false,
+     "bytes": 2906330,
+     "keys": [
+      "cutwp_props",
+      "design_cache_hit",
+      "design_result",
+      "load_analysis",
+      "model_summary",
+      "section_props",
+      "timestamp",
+      "units"
+     ],
+     "detail": null,
+     "checks": null,
+     "errors": null,
+     "error": null
+    }
+   }
+  },
+  {
+   "id": "uplift.US.validation",
+   "expect": "pin",
+   "value": [
+    {
+     "category": "A. 단면 입력",
+     "item": "단면 정의",
+     "status": "pass",
+     "value": "37 절점",
+     "criterion": "최소 1개 절점 정의 필요",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "두께 (t)",
+     "status": "pass",
+     "value": "0.059 in",
+     "criterion": "0.0180 ≤ t ≤ 0.5000 in (CFS 일반 범위)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "웹 w/t 비",
+     "status": "pass",
+     "value": "127.2",
+     "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "플랜지 b/t 비",
+     "status": "pass",
+     "value": "29.8",
+     "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "립 d/t 비",
+     "status": "pass",
+     "value": "15.4",
+     "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
+     "note": ""
+    },
+    {
+     "category": "A. 단면 입력",
+     "item": "코너 R/t 비",
+     "status": "pass",
+     "value": "3.2",
+     "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "항복강도 (Fy)",
+     "status": "pass",
+     "value": "55 ksi",
+     "criterion": "Fy ≤ 95.0 ksi (Table B4.1-1 Fy 한계)",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "Fu/Fy 비",
+     "status": "pass",
+     "value": "1.273",
+     "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
+     "note": ""
+    },
+    {
+     "category": "B. 재료",
+     "item": "인장강도 (Fu)",
+     "status": "pass",
+     "value": "70 ksi",
+     "criterion": "Fu > Fy",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 최솟값",
+     "status": "pass",
+     "value": "1.0000 in",
+     "criterion": "국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈8.0000 in) 필요",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 최댓값",
+     "status": "pass",
+     "value": "1000.0000 in",
+     "criterion": "전체좌굴 포착을 위해 최댓값 ≥ 비지지 길이(≈300.0000 in) 필요. 1.5~3배 권장",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "반파장 개수",
+     "status": "pass",
+     "value": "50점",
+     "criterion": "곡선 해상도 ≥ 30점 권장 (일반 50점, 복잡단면 80~100점)",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "경계조건 (BC)",
+     "status": "pass",
+     "value": "S-S",
+     "criterion": "퍼린/장선/거트는 일반적으로 S-S (단순-단순) 사용",
+     "note": ""
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "Load Case 적합성",
+     "status": "warn",
+     "value": "compression",
+     "criterion": "설계 부재유형과 해석 Load Case가 일치해야 함",
+     "note": "휨 부재인데 압축 Load Case가 선택됨 — 강축 휨 (+Mxx 또는 -Mxx)으로 변경하세요."
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "해석 실행 여부",
+     "status": "fail",
+     "value": "미실행",
+     "criterion": "설계 전 FSM 좌굴해석 완료 필요",
+     "note": "③좌굴해석·부재설계 탭의 \"A. 좌굴해석\"에서 해석을 실행하세요."
+    },
+    {
+     "category": "C. 좌굴 해석",
+     "item": "DSM 값 추출",
+     "status": "fail",
+     "value": "미추출",
+     "criterion": "Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함",
+     "note": "해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다."
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "성질 계산 여부",
+     "status": "pass",
+     "value": "A=0.8218 in²",
+     "criterion": "설계에 단면 성질이 필요합니다",
+     "note": ""
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "단면계수 Sx",
+     "status": "pass",
+     "value": "1.9390 in³",
+     "criterion": "휨 설계에 Sx > 0 필요 (Sf)",
+     "note": ""
+    },
+    {
+     "category": "D. 단면 성질",
+     "item": "회전반경 rx, rz",
+     "status": "pass",
+     "value": "rx=3.0720, rz=1.1442 in",
+     "criterion": "기둥/LTB 설계에 rx, rz > 0 필요",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "스팬 길이",
+     "status": "pass",
+     "value": "25 ft",
+     "criterion": "스팬 > 0 필요; CFS 일반 ≤ 33.00 ft (§I6.2.1)",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "분담폭 (간격)",
+     "status": "pass",
+     "value": "5 ft",
+     "criterion": "간격 > 0; 일반 4.00-6.00 ft",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "고정하중 (D)",
+     "status": "pass",
+     "value": "3 psf",
+     "criterion": "D > 0 예상 (자중 + 지붕재)",
+     "note": ""
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "중력 활하중/적설하중",
+     "status": "warn",
+     "value": "psf",
+     "criterion": "최소 하나의 중력 활하중 예상",
+     "note": "활하중/적설하중 없음 — 맞습니까?"
+    },
+    {
+     "category": "E. 하중 입력",
+     "item": "풍하중 (W, 양력)",
+     "status": "pass",
+     "value": "34 psf ↑",
+     "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
+     "note": "양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요."
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "하중 분석 실행 여부",
+     "status": "pass",
+     "value": "지배 조합: 7: 0.6D+0.6W",
+     "criterion": "설계 전 하중 분석 필요",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "최대 Mu",
+     "status": "pass",
+     "value": "7.08 kip-ft",
+     "criterion": "지배 조합 기준 Mu > 0 이어야 함",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "전단력 (Vu)",
+     "status": "pass",
+     "value": "확인됨",
+     "criterion": "지점 및 임계 단면에서 Vu가 존재해야 함",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "비지지 길이 Ly (부모멘트)",
+     "status": "pass",
+     "value": "49.1000 in",
+     "criterion": "부모멘트 구간에서 Ly > 0 (비지지 하부 플랜지)",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "모멘트 구배 Cb",
+     "status": "pass",
+     "value": "1.79",
+     "criterion": "Cb ≥ 1.0 (AISI Eq. F2.1.1-2), 일반 1.0-2.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "양력 R 계수 (§I6.2.1)",
+     "status": "pass",
+     "value": "0.7",
+     "criterion": "조건 충족 시 R = 0.40-0.70 (§I6.2.1)",
+     "note": "S100-16 Table I6.2.1-1"
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "정모멘트 구간 구속",
+     "status": "pass",
+     "value": "데크 연속 지지 (Ly=0)",
+     "criterion": "Through-fastened/Standing-seam 데크 시 LTB 불필요",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "Lap 끝단 Mu 추출",
+     "status": "pass",
+     "value": "Lap end Mu=3.76 kip-ft",
+     "criterion": "Lap이 있으면 단일 단면 검토용 Mu는 Lap 끝단 부모멘트 사용 (AISI Ex. II-2A)",
+     "note": "지점 최대 Mu=4.13 kip-ft (Lap 2겹 검토용)"
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 1 (L/δ)",
+     "status": "pass",
+     "value": "L/754 (δ=0.0318 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 2 (L/δ)",
+     "status": "pass",
+     "value": "L/1425 (δ=0.2106 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 3 (L/δ)",
+     "status": "pass",
+     "value": "L/4939 (δ=0.0607 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 4 (L/δ)",
+     "status": "pass",
+     "value": "L/4939 (δ=0.0607 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 5 (L/δ)",
+     "status": "pass",
+     "value": "L/1425 (δ=0.2106 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "F. 하중 분석",
+     "item": "처짐 — 스팬 6 (L/δ)",
+     "status": "pass",
+     "value": "L/754 (δ=0.0318 in)",
+     "criterion": "지붕 퍼린: L/δ ≥ 240 (활하중), ≥ 180 (전체하중) — IBC Table 1604.3",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "설계 검토 실행 여부",
+     "status": "pass",
+     "value": "flexure / ASD",
+     "criterion": "설계 검토가 완료되어야 함",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "종합 판정 (엔진)",
+     "status": "fail",
+     "value": "✗ NG — 지배: F flexure",
+     "criterion": "해당하는 한계상태를 모두 평가하고 모두 만족",
+     "note": "불합격 — 지배 검토를 확인하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mne vs My",
+     "status": "pass",
+     "value": "Mne=12.75, My=106.64",
+     "criterion": "Mne ≤ My 예상 (LTB가 항복 이하로 감소)",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§F2.4.2 Inelastic Reserve",
+     "status": "warn",
+     "value": "미적용",
+     "criterion": "조건: Mcre > 2.78My, 횡좌굴 억제 (deck braced), Zf > 0",
+     "note": "Zf(소성단면계수) 존재 — use_inelastic_reserve 옵션 활성화 시 Mne 최대 25% 증가 가능. Mcre > 2.78My 조건을 확인하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§I6.2.1 R-factor (양력)",
+     "status": "pass",
+     "value": "R=0.7",
+     "criterion": "Through-fastened 패널 + 양력 시 R=0.40~0.70 적용 (§I6.2.1)",
+     "note": "R 감소계수 적용됨 — Mn=R×Mnfo로 양력 강도 결정."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "§A3.3.2 Cold Work (냉간가공)",
+     "status": "fail",
+     "value": "적용 실패 — R/t 조건 미충족 또는 R=0",
+     "criterion": "§A3.3.2: Fu/Fy≥1.2, R/t≤7, 각도≤120°. §F2.4(Inelastic Reserve) 제외.",
+     "note": "코너 반경(R)과 두께(t)를 전처리에서 확인하세요. 조건: Fu/Fy≥1.2, R/t≤7, 각도≤120°."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mnl vs Mne (국부좌굴 감소)",
+     "status": "pass",
+     "value": "Mnl=12.75, Mne=12.75",
+     "criterion": "Mnl ≤ Mne; Mnl < Mne → 국부좌굴이 강도를 감소시킴",
+     "note": "국부좌굴 감소 없음 (λl ≤ 0.776)."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Mnd vs My (뒤틀림좌굴 감소)",
+     "status": "warn",
+     "value": "Mnd=76.83, My=106.64",
+     "criterion": "Mnd ≤ My; Mnd < My → 뒤틀림좌굴이 강도를 감소시킴",
+     "note": "뒤틀림좌굴로 강도 28.0% 감소."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "모든 Mn 동일 (잠재적 문제)",
+     "status": "pass",
+     "value": "값이 상이함 (정상)",
+     "criterion": "네 값 모두 같으면 DSM이 좌굴 감소를 적용하지 않을 수 있음",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "정모멘트 φMn(+)",
+     "status": "pass",
+     "value": "45.29 kip-in (Lb=0.0000, Cb=1)",
+     "criterion": "정모멘트 구간 설계강도 > 0",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "이용률 — 부모멘트 (-M)",
+     "status": "fail",
+     "value": "137.5%",
+     "criterion": "Mu(-) / φMn(-) ≤ 1.0",
+     "note": "부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Lb(-) / Cb(-) (부모멘트)",
+     "status": "pass",
+     "value": "Lb(-)=226.1000 in, Cb(-)=1.14",
+     "criterion": "부모멘트 구간: 변곡점~Lap끝 또는 지점까지 비지지 길이",
+     "note": ""
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "이용률 — 정모멘트 (+M)",
+     "status": "warn",
+     "value": "Mu(+) 미입력",
+     "criterion": "Mu(+) / φMn(+) ≤ 1.0",
+     "note": "설계탭에서 Mu(+) 값을 입력하세요."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "Lb(+) / Cb(+) (정모멘트)",
+     "status": "pass",
+     "value": "Lb(+)=0.0000 in, Cb(+)=1, Fcre(+)=1000000 ksi",
+     "criterion": "정모멘트 구간: 데크 구속 시 Lb=0, 미구속 시 변곡점 간 거리",
+     "note": "데크에 의한 연속 구속 — LTB 없음."
+    },
+    {
+     "category": "G. 설계 결과",
+     "item": "설계 경고 #1",
+     "status": "warn",
+     "value": "§A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.",
+     "criterion": "설계 엔진 경고",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 구간 휨강도 (§F3, 2겹)",
+     "status": "pass",
+     "value": "51.47 kip-in — OK",
+     "criterion": "2겹 합산 φMn ≥ 지점 Mu (AISI Ex. II-2A)",
+     "note": "DCR=0.141"
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 3) §I6.2.1(g)",
+     "status": "pass",
+     "value": "30.0000 in ≥ 1.5d=12.0000",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 4) §I6.2.1(g)",
+     "status": "pass",
+     "value": "12.0000 in ≥ 1.5d=12.0000",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 길이 (지점 5) §I6.2.1(g)",
+     "status": "pass",
+     "value": "30.0000 in ≥ 1.5d=12.0000",
+     "criterion": "양쪽 Lap ≥ 1.5d (§I6.2.1(g)) — 부족하면 R 계수법 · J3 슬롯 예외를 쓸 수 없음",
+     "note": ""
+    },
+    {
+     "category": "G2. Lap 접합부",
+     "item": "Lap 접합부 설계 실행 여부",
+     "status": "fail",
+     "value": "미실행",
+     "criterion": "Lap이 있으면 접합부 설계를 실행하여 패스너/휨강도를 검증해야 함",
+     "note": "④접합부 탭 → \"Lap 접합부 설계\" 버튼을 클릭하세요. 하중분석 후 Mu/Vu가 자동 입력됩니다."
+    },
+    {
+     "category": "H. 일관성",
+     "item": "Fy 일관성 (해석 vs 설계)",
+     "status": "pass",
+     "value": "해석 fy=55, 설계 Fy=55 ksi",
+     "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
+     "note": ""
+    }
+   ]
+  },
+  {
+   "id": "uplift.US.validation.counts",
+   "expect": "pin",
+   "value": {
+    "total": 59,
+    "pass": 47,
+    "warn": 6,
+    "fail": 6,
+    "badge": "통과 47 / 주의 6 / 실패 6",
+    "tree": {
+     "validationPass": 47,
+     "validationWarn": 6,
+     "validationFail": 6
+    }
+   }
+  },
+  {
+   "id": "uplift.US.report.text",
+   "expect": "pin",
+   "value": "CUFSM — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM)\n1. 단면\n단면 제원\n항목 값 단위\n단면 유형 립 Z형강\nH (높이) 8 in\nB (플랜지 폭) 2.25 in\nD (립 깊이) 0.91 in\nt (두께) 0.059 in\nr (코너 반경) 0.1875 in\n절점 / 요소 37 / 36\n계산된 단면 성질\n성질 기호 값 단위\n총단면적 A 0.8218 in²\n강축 단면2차모멘트 Ixx 7.7558 in⁴\n약축 단면2차모멘트 Izz 1.0759 in⁴\n단면상승모멘트 Ixz 2.0815 in⁴\n강축 단면계수 Sx 1.9390 in³\n약축 단면계수 Sz 0.3835 in³\n강축 소성단면계수 Zx 2.2961 in³\n약축 소성단면계수 Zz 0.5480 in³\n강축 회전반경 rx 3.0720 in\n약축 회전반경 rz 1.1442 in\n도심 x xcg 2.7828 in\n도심 z zcg 3.9705 in\n주축 각도 θp -16.0 °\n주축 단면2차모멘트 1 I11 8.3514 in⁴\n주축 단면2차모멘트 2 I22 0.4803 in⁴\n2. 탄성 좌굴 해석\n(좌굴 곡선을 생성하려면 FSM 해석을 먼저 실행하세요)\nDSM 설계값 (좌굴 곡선에서 추출)\n(DSM 결과 없음 — FSM 해석을 먼저 실행하세요)\n3. 설계 입력\n재료\n항목 값 단위\n강종 SGC400 (295/400 MPa)\n항복강도, Fy 55 ksi\n인장강도, Fu 70 ksi\n탄성계수, E 29500.0 ksi\n포아송비, ν 0.30\n부재 구성\n항목 값\n부재 적용 지붕 퍼린 (Roof Purlin)\n스팬 유형 N경간 연속보 (6경간)\n스팬 길이 1, 25, 25, 25, 25, 1 ft\n분담폭 (간격) 5 ft\n설계 방법 ASD\n랩 길이 (좌 / 우) S1: 2.5 / 0 ft\nS2: 1 / 3.5 ft\nS3: 3.5 / 1 ft\nS4: 0 / 2.5 ft\n설계 하중\n하중 유형 psf plf (×5 ft) 설명\nD 3 psf 15 plf 고정하중 (자중 + 부가하중)\nWu (양력) 34 psf 170 plf 풍양력 하중(부압)\n데크 정보\n항목 값\n데크 유형 관통 체결\n패널 두께, tpanel 0.0196850393701 in\n체결구 간격 11.811023622 in\n4. 하중 분석 결과\n6.00 ft lap\n2.00 ft lap\n6.00 ft lap\nN\nP\nP\nP\nP\nP\nN\n1.00 ft\n25.00 ft\n25.00 ft\n25.00 ft\n25.00 ft\n1.00 ft\n지배 조합 모멘트: 7: 0.6D+0.6W (kip-ft)\n-4.1\n7.1\n3.8\nLap end\n3.1\nLap end\n3.0\nLap end\n3.0\nLap end\n3.1\nLap end\n3.8\nLap end\nmax=7.1 min=-4.1\n지배 조합 전단력: 7: 0.6D+0.6W (kips)\n1.4\n-1.4\n1.2\nLap end\n-1.0\nLap end\n0.9\nLap end\n-0.9\nLap end\n1.0\nLap end\n-1.2\nLap end\nmax=1.4 min=-1.4\n소요강도 포락 (대표 조합: 7: 0.6D+0.6W)\n위치 x (ft) Mu (kip-ft) Vu (kips) R 지압 / 인발 (kips) 구간 지배 조합 · 패턴\nOverhang (left) +M 1.00 0.05 0.88 — positive 7: 0.6D+0.6W\nOverhang (left) -M 1.00 -0.01 0.88 — negative 1: D\nEnd span +M 26.00 7.08 1.28 — positive 7: 0.6D+0.6W\nEnd span -M 10.50 -4.13 0.00 — negative 7: 0.6D+0.6W\nInt span 3 +M 26.00 7.08 1.28 — positive 7: 0.6D+0.6W\nInt span 3 -M 40.00 -1.81 0.02 — negative 7: 0.6D+0.6W\nInt span 4 +M 76.00 7.08 1.44 — positive 7: 0.6D+0.6W\nInt span 4 -M 62.00 -1.81 0.02 — negative 7: 0.6D+0.6W\nEnd span +M 76.00 7.08 1.44 — positive 7: 0.6D+0.6W\nEnd span -M 91.50 -4.13 0.00 — negative 7: 0.6D+0.6W\nOverhang (right) +M 101.00 0.05 0.09 — positive 7: 0.6D+0.6W\nOverhang (right) -M 101.00 -0.01 0.09 — negative 1: D\nEnd support (left) 1.00 0.05 0.88 0.16 / -0.97 support_end 7: 0.6D+0.6W\n1st interior 26.00 7.08 1.44 0.44 / -2.73 negative 7: 0.6D+0.6W\nCenter 51.00 4.00 1.04 0.34 / -2.08 negative 7: 0.6D+0.6W\nSupport 5 76.00 7.08 1.44 0.44 / -2.73 negative 7: 0.6D+0.6W\nEnd support (right) 101.00 0.05 0.88 0.16 / -0.97 support_end 7: 0.6D+0.6W\nLap end (left of sup 3) 23.50 3.76 1.21 — negative 7: 0.6D+0.6W\nLap end (right of sup 3) 29.50 3.15 0.96 — negative 7: 0.6D+0.6W\nLap end (left of sup 4) 50.00 3.01 0.95 — negative 7: 0.6D+0.6W\nLap end (right of sup 4) 52.00 3.01 0.95 — negative 7: 0.6D+0.6W\nLap end (left of sup 5) 72.50 3.15 0.96 — negative 7: 0.6D+0.6W\nLap end (right of sup 5) 78.50 3.76 1.21 — negative 7: 0.6D+0.6W\n양력 지배 하중조합: 7: 0.6D+0.6W\n위치 Mu (kip-ft)\nOverhang (left) +M 0.05\nEnd span +M 7.08\nEnd span -M -4.13\nInt span 3 +M 7.08\nInt span 3 -M -1.81\nInt span 4 +M 7.08\nInt span 4 -M -1.81\nEnd span +M 7.08\nEnd span -M -4.13\nOverhang (right) +M 0.05\nEnd support (left) 0.05\n1st interior 7.08\nCenter 4.00\nSupport 5 7.08\nEnd support (right) 0.05\nLap end (left of sup 3) 3.76\nLap end (right of sup 3) 3.15\nLap end (left of sup 4) 3.01\nLap end (right of sup 4) 3.01\nLap end (left of sup 5) 3.15\nLap end (right of sup 5) 3.76\n하중조합 상세 (ASD, ASCE 7)\n하중 plf\n고정(D) 15\n풍(W) 170\n조합 조합 수식 |M|max (kip-ft) |V|max (kips) 지배\n1: D 고정(D)(15) 1.14 0.23 중력 지배\n5: D+0.6W 고정(D)(15) + 0.6×풍(W)(170) 6.62 1.35\n6a: D+0.75(0.6W) 고정(D)(15) + 0.45×풍(W)(170) 4.68 0.95\n7: 0.6D+0.6W 0.6×고정(D)(15) + 0.6×풍(W)(170) 7.08 1.44 ★지배 양력 지배\n8: 0.6D 0.6×고정(D)(15) 0.69 0.14\n자동 결정 설계 매개변수\n다음 매개변수는 하중 분석 결과, 데크 구성 및 모멘트 다이어그램 형태에서 자동 계산됩니다:\n매개변수 값 계산 방법\nkφ (회전강성) 0.3000 kip-in/rad/in 프로젝트 시험 입력값\nkx (횡강성) 1.484 kip/in/in AISI RP17-2 곡선 맞춤식 (Example II-1C 패스너 값 기준 예비설계값)\n가정: kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used (Fss_kip, D_screw_in, Fu1_ksi).\n범위: Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available.\n범위: RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness (「kx override」(② 하중계산 탭)) where available.\n정모멘트 Ly(+) 0 (완전 지지) 상부 플랜지 압축, 데크 패널로 연속 지지 — LTB 검토 불필요\n부모멘트 Ly 49.1000 in 변곡점(M=0)에서 랩 끝단 또는 지점까지 거리. 하부 플랜지 압축 — 비지지.\n부모멘트 Cb 1.79 AISI Eq. F2.1.1-2: Cb = 12.5Mmax / (2.5Mmax+3MA+4MB+3MC), 비지지 구간 모멘트 다이어그램에서 계산\n양력 R (§I6.2.1) 0.7 AISI S100 Table I6.2.1-1 — 조건 (a)–(o) 확인 시에만 (S100-16 Table I6.2.1-1)\n변곡점 1.03, 19.93, 33.56, 46.08, 55.92, 68.44, 82.07, 100.97, 102.00 ft 모멘트 = 0인 위치, 모멘트 다이어그램의 선형보간으로 산출\n처짐 검토 (사용하중: D)\n처짐 다이어그램 (in)\n-0.0\n0.2\nmax=0.2 min=-0.0\n스팬 위치 최대 처짐 L/δ\n1 0.00 ft 0.0318 in L/754\n2 11.50 ft 0.2106 in L/1425\n3 40.00 ft 0.0607 in L/4939\n4 62.00 ft 0.0607 in L/4939\n5 90.50 ft 0.2106 in L/1425\n6 102.00 ft 0.0318 in L/754\nE=29500.0 ksi, Ixx=7.7558 in⁴\n5. 설계 계산 — 휨 (Chapter F)\n1) 부모멘트 구간 (-M)\nLb(-) = 226.1000 in, Cb(-) = 1.14\n단계 1: 항복 모멘트, My\nMy = Sf × Fy = 106.64 kip-in\n단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n전체좌굴 응력 Fcre는 비지지 길이 Lb, 모멘트 구배 Cb, 단면 성질(ry, J, Cw)로 산정합니다.\nFcre = Cb · ro · A / Sf · √(σey · σt)\nFcre와 Fy의 관계에 따라:\n조건 수식 영역\nFcre ≥ 2.78 Fy Fn = Fy 항복 (조밀)\n2.78 Fy > Fcre > 0.56 Fy Fn = (10/9)Fy(1 - 10Fy/(36Fcre)) 비탄성 LTB\nFcre ≤ 0.56 Fy Fn = Fcre 탄성 LTB\nMne = Sf × Fn = 12.75 kip-in\n단계 3: 국부좌굴 — §F3.2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n국부 세장비 λl이 0.776을 초과하면 국부좌굴이 전체강도 Mne를 감소시킵니다:\nλl = √(Mne / Mcrl)\n조건 수식\nλl ≤ 0.776 Mnl = Mne (감소 없음)\nλl > 0.776 Mnl = [1 - 0.15(Mcrl/Mne)0.4] · (Mcrl/Mne)0.4 · Mne\nMnl = 12.75 kip-in (감소 없음)\n단계 4: 뒤틀림좌굴 — §F4 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]\n뒤틀림좌굴은 My에 대해 독립적으로 검토합니다:\nλd = √(My / Mcrd)\n조건 수식\nλd ≤ 0.673 Mnd = My (감소 없음)\nλd > 0.673 Mnd = [1 - 0.22(Mcrd/My)0.5] · (Mcrd/My)0.5 · My\nMnd = 76.83 kip-in\n단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도\nMn(-) = R · Mnℓo = 0.7 × 85.95 = 60.16 kip-in (§I6.2.1, Eq. I6.2.1-1)\n참고(강도에 쓰지 않음): Mne 12.75, Mnl 12.75, Mnd 76.83\n지배 파괴 모드: 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\nΩb = 1.67 (ASD)\nMn(-)/Ω = 60.16 / 1.67 = 36.03 kip-in\nMu(-) / Mn(-)/Ω = 49.55 / 36.03 = 137.5% NG\n2) 정모멘트 구간 (+M)\nLb(+) = 0.0000 in, Cb(+) = 1\n단계 1: 항복 모멘트, My\nMy = Sf × Fy = 106.64 kip-in (부모멘트 구간과 동일)\n단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)\n정모멘트 구간의 Lb(+)=0.0000 in, Cb(+)=1로 Fcre를 재산정합니다.\nFcre(+) = 1000000 ksi → F2.1-3 (yielding)\nFcre(+) = 1000000 ksi ≥ 2.78Fy = 152.9 ksi → Fn = Fy (항복)\nMne(+) = 106.64 kip-in\n단계 3: 국부좌굴 — §F3.2 (정모멘트)\nMnl(+) = 85.95 kip-in (국부좌굴로 19.4% 감소)\n단계 4: 뒤틀림좌굴 — §F4 (정모멘트)\nMnd(+) = 75.63 kip-in\n단계 5: 공칭강도 & 설계강도 (정모멘트)\nMn(+) = min(Mne, Mnl, Mnd) = min(106.64, 85.95, 75.63) = 75.63 kip-in\nΩb = 1.67 (ASD)\nMn(+)/Ω = 75.63 / 1.67 = 45.29 kip-in\n종합 판정\n구간 Mu Mn/Ω DCR 판정\n부모멘트 (-M) 49.55 36.03 137.5% NG\n종합: ✗ NG\n휨 + 전단 조합 검토 — §H2 (Eq. H2-1)\n(Mu/Malo)² + (Vu/Va)² ≤ 1.0\n항 비율\nMalo (Mnlo 85.95) 51.47 kip-in\nM/Malo 0.9628\nV/Va 0.0009\n합계 (SRSS) 0.9628 ≤ 1.0 OK\n계산 단계 요약\n# 단계 수식 결과 단위\n1 Yield Moment (My) My = Sf × Fy = 1.9390 in³ × 55.00 ksi = 106.64 kip-in 106.64 kip-in\n2a [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Fcre — Lateral-Torsional Buckling (§F2.1.3) σey = π²E/(Lb/ry)² = π²×29500 ksi/(226.1 in/1.1442 in)² = 7.46 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 9.24 ksi, Fcre = Cb×ro×Ag/(2×Sf)×√(σey×σt) = 1.14×3.2781 in×0.8218 in²/(2×1.9390 in³)×√(7.46 ksi×9.24 ksi) = 6.57 ksi 6.6 ksi\n2 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Global/LTB (Mne) Fcre=6.57 ksi ≤ 0.56×55.00 ksi → Fn = Fcre = 6.57 ksi, Mne = Sf×Fn = 1.9390 in³×6.57 ksi = 12.75 kip-in 12.75 kip-in\n3 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Local Buckling (Mnl) Mcrl = 90.85 kip-in (FSM), λl = √(Mne/Mcrl) = √(12.75 kip-in/90.85 kip-in) = 0.375 → Mnl = 12.75 kip-in 12.75 kip-in\n4 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Distortional Buckling (Mnd) Mcrd = 85.95 kip-in (FSM [β=1.042, §2.3.3.3 Eq.3]), λd = √(My/Mcrd) = √(106.64 kip-in/85.95 kip-in) = 1.114 → Mnd = 76.83 kip-in 76.83 kip-in\n5 [참고 — §I6.2.1 이 대신함, 강도에 쓰지 않음] Nominal Strength — DSM (Mn) Mn = min(Mne=12.75 kip-in, Mnl=12.75 kip-in, Mnd=76.83 kip-in) = 12.75 kip-in 12.75 kip-in\n5a Mnℓo — local buckling at Fn = Fy (§F3, for §I6.2.1) Mne = My = Sf×Fy = 106.64 kip-in (Fn = Fy), Mcrl = 90.85 kip-in (FSM), λl = √(My/Mcrl) = 1.083 → Mnℓo = 85.95 kip-in (Eq. F3.2.1) 85.95 kip-in\n5b Uplift R-factor (§I6.2.1, Eq. I6.2.1-1) [지배] R = 0.7 (Table I6.2.1-1: continuous span, Z → 0.70); Mn = R × Mnℓo = 0.7 × 85.95 = 60.16 kip-in — F2(LTB)·F4 대신 적용; 조건 (a)~(f)·(o) 확인, (g)~(n) 사용자 확인 60.16 kip-in\n6 Final Nominal Strength (Mn) [지배] Mn = 60.16 kip-in — §I6.2.1 R-factor (R=0.7) 60.16 kip-in\n7 Allowable Strength (ASD) Mn/Ω = 60.16 kip-in/1.67 = 36.03 kip-in 36.03 kip-in\n8 Bending + Shear (§H2, Eq. H2-1) Malo = Mnℓo/1.67 = 85.95/1.67 = 51.47 kip-in (§F3, Fn = Fy), Va = 2.43 kips → √((49.55/51.47)² + (0.00/2.43)²) = 0.963 0.9628\n6. 설계 요약\n본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 휨 부재 (보/퍼린)의 설계 검토 결과입니다. 설계 방법은 ASD입니다. 부재는 6경간이며, 지배 구간(양력 하부압축 1.05–19.90 ft)의 하중조합은 7: 0.6D+0.6W입니다. 지배 파괴 모드는 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)입니다.\n항목 값\n설계 기준 AISI S100-16\n해석 방법 직접강도법 (DSM) — 유한스트립법\n부재 유형 휨 부재 (보/퍼린)\n설계 방법 ASD\n지배 파괴 모드 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\n부모멘트 구간 (-M)\nMn(-) 60.16 kip-in 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7)\nMn/Ω(-) 36.03 kip-in\nDCR(-) 137.5% — NG\n정모멘트 구간 (+M)\nMn(+) 75.63 kip-in\nMn/Ω(+) 45.29 kip-in\n종합 판정\n종합 결과 ✗ NG\n지배 검토 F flexure\nF flexure 1.375 — NG\nH2 bending + shear 0.963 — OK\n퍼린 구간별 판정\n정모멘트 1.05–19.90 ft 15.5% — OK\n정모멘트 33.59–46.05 ft 6.8% — OK\n정모멘트 55.95–68.41 ft 6.8% — OK\n정모멘트 82.10–100.95 ft 15.5% — OK\n내민 부모멘트 0.00–1.00 ft (지점 2 왼쪽) 16.7% — OK\n부모멘트 1.00–1.05 ft (지점 2 오른쪽) 5.8% — OK\n부모멘트 19.90–23.50 ft (지점 3 왼쪽) 16.3% — OK\n부모멘트 29.50–33.59 ft (지점 3 오른쪽) 13.4% — OK\n부모멘트 46.05–50.00 ft (지점 4 왼쪽) 12.9% — OK\n부모멘트 52.00–55.95 ft (지점 4 오른쪽) 12.9% — OK\n부모멘트 68.41–72.50 ft (지점 5 왼쪽) 13.4% — OK\n부모멘트 78.50–82.10 ft (지점 5 오른쪽) 16.3% — OK\n부모멘트 100.95–101.00 ft (지점 6 왼쪽) 16.7% — OK\n내민 부모멘트 101.00–102.00 ft (지점 6 오른쪽) 0.6% — OK\n랩 구간 23.50–26.00 ft (지점 3 왼쪽) 14.0% — OK\n랩 구간 26.00–29.50 ft (지점 3 오른쪽) 14.0% — OK\n랩 구간 50.00–51.00 ft (지점 4 왼쪽) 8.3% — OK\n랩 구간 51.00–52.00 ft (지점 4 오른쪽) 8.3% — OK\n랩 구간 72.50–76.00 ft (지점 5 왼쪽) 14.1% — OK\n랩 구간 76.00–78.50 ft (지점 5 오른쪽) 14.1% — OK\n양력 하부압축 1.05–19.90 ft 137.5% — NG\n양력 하부압축 33.59–46.05 ft 60.2% — OK\n양력 하부압축 55.95–68.41 ft 60.2% — OK\n양력 하부압축 82.10–100.95 ft 137.5% — NG\n양력 지점부 상부압축 0.00–1.05 ft 36.2% — OK\n양력 지점부 상부압축 19.90–23.50 ft 100.5% — NG\n양력 지점부 상부압축 29.50–33.59 ft 83.1% — OK\n양력 지점부 상부압축 46.05–50.00 ft 80.0% — OK\n양력 지점부 상부압축 52.00–55.95 ft 80.0% — OK\n양력 지점부 상부압축 68.41–72.50 ft 83.1% — OK\n양력 지점부 상부압축 78.50–82.10 ft 100.5% — NG\n양력 지점부 상부압축 100.95–102.00 ft 4.0% — OK\n양력 랩 구간 상부압축 23.50–26.00 ft 86.4% — OK\n양력 랩 구간 상부압축 26.00–29.50 ft 86.4% — OK\n양력 랩 구간 상부압축 50.00–51.00 ft 51.2% — OK\n양력 랩 구간 상부압축 51.00–52.00 ft 51.2% — OK\n양력 랩 구간 상부압축 72.50–76.00 ft 87.4% — OK\n양력 랩 구간 상부압축 76.00–78.50 ft 87.4% — OK\n참조 규준 조항 F3.2, G2, H2, I6.2.1\n평가하지 못한 항목 (판정 없음의 원인)\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n• §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n• H2-2 (shear stiffened webs)\n• weak-axis DSM flexure\n• G5/H3 web crippling (no bearing length wc_N given)\n경고 (값 또는 판정에 영향)\n• §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.\n가정\n• §I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.\n적용 범위 (1)\nCUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+  },
+  {
+   "id": "uplift.US.report.shape",
+   "expect": "pin",
+   "value": {
+    "heads": [
+     "H1 CUFSM — 냉간성형강 설계 보고서",
+     "H2 1. 단면",
+     "H3 단면 제원",
+     "H3 계산된 단면 성질",
+     "H2 2. 탄성 좌굴 해석",
+     "H3 DSM 설계값 (좌굴 곡선에서 추출)",
+     "H2 3. 설계 입력",
+     "H3 재료",
+     "H3 부재 구성",
+     "H3 설계 하중",
+     "H3 데크 정보",
+     "H2 4. 하중 분석 결과",
+     "H3 소요강도 포락 (대표 조합: 7: 0.6D+0.6W)",
+     "H3 양력 지배 하중조합: 7: 0.6D+0.6W",
+     "H3 하중조합 상세 (ASD, ASCE 7)",
+     "H3 자동 결정 설계 매개변수",
+     "H3 처짐 검토 (사용하중: D)",
+     "H2 5. 설계 계산 — 휨 (Chapter F)",
+     "H2 1) 부모멘트 구간 (-M)",
+     "H3 단계 1: 항복 모멘트, My",
+     "H3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 3: 국부좌굴 — §F3.2 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 4: 뒤틀림좌굴 — §F4 [참고 — §I6.2.1 R 계수법이 대신함, 강도에 쓰지 않음]",
+     "H3 단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도",
+     "H2 2) 정모멘트 구간 (+M)",
+     "H3 단계 1: 항복 모멘트, My",
+     "H3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)",
+     "H3 단계 3: 국부좌굴 — §F3.2 (정모멘트)",
+     "H3 단계 4: 뒤틀림좌굴 — §F4 (정모멘트)",
+     "H3 단계 5: 공칭강도 & 설계강도 (정모멘트)",
+     "H2 종합 판정",
+     "H3 휨 + 전단 조합 검토 — §H2 (Eq. H2-1)",
+     "H3 계산 단계 요약",
+     "H2 6. 설계 요약"
+    ],
+    "svgs": 5,
+    "tables": 20,
+    "htmlSha": "4564126feaebf1fb",
+    "htmlLength": 71683,
+    "printShown": true
+   }
+  },
+  {
+   "id": "uplift.US.pdf",
+   "expect": "pin",
+   "value": {
+    "pages": 10,
+    "bytesKB": 1080,
+    "text": [
+     "CUFSM — 냉간성형강 설계 보고서 날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) 1. 단면 단면 제원 항목 값 단위 단면 유형 립 Z 형강 H ( 높이 ) 8 in B ( 플랜지 폭 ) 2.25 in D ( 립 깊이 ) 0.91 in t ( 두께 ) 0.059 in r ( 코너 반경 ) 0.1875 in 절점 / 요소 37 / 36 계산된 단면 성질 성질 기호 값 단위 총단면적 A 0.8218 in² 강축 단면 2 차모멘트 I xx 7.7558 in⁴ 약축 단면 2 차모멘트 I zz 1.0759 in⁴ 단면상승모멘트 I xz 2.0815 in⁴ 강축 단면계수 S x 1.9390 in³ 약축 단면계수 S z 0.3835 in³ 강축 소성단면계수 Z x 2.2961 in³ 약축 소성단면계수 Z z 0.5480 in³ 강축 회전반경 r x 3.0720 in 약축 회전반경 r z 1.1442 in 도심 x x cg 2.7828 in 도심 z z cg 3.9705 in 주축 각도 θ p -16.0 ° 주축 단면 2 차모멘트 1 I 11 8.3514 in⁴ 주축 단면 2 차모멘트 2 I 22 0.4803 in⁴",
+     "2. 탄성 좌굴 해석 ( 좌굴 곡선을 생성하려면 FSM 해석을 먼저 실행하세요 ) DSM 설계값 ( 좌굴 곡선에서 추출 ) (DSM 결과 없음 — FSM 해석을 먼저 실행하세요 ) 3. 설계 입력 재료 항목 값 단위 강종 SGC400 (295/400 MPa) 항복강도 , F y 55 ksi 인장강도 , F u 70 ksi 탄성계수 , E 29500.0 ksi 포아송비 , ν 0.30 부재 구성 항목 값 부재 적용 지붕 퍼린 (Roof Purlin) 스팬 유형 N 경간 연속보 (6 경간 ) 스팬 길이 1, 25, 25, 25, 25, 1 ft 분담폭 ( 간격 ) 5 ft 설계 방법 ASD 랩 길이 ( 좌 / 우 ) S1: 2.5 / 0 ft S2: 1 / 3.5 ft S3: 3.5 / 1 ft S4: 0 / 2.5 ft 설계 하중 하중 유형 psf plf (×5 ft) 설명 D 3 psf 15 plf 고정하중 ( 자중 + 부가하중 ) Wu ( 양력 ) 34 psf 170 plf 풍양력 하중 ( 부압 ) 데크 정보 항목 값 데크 유형 관통 체결 패널 두께 , t panel 0.0196850393701 in 체결구 간격 11.811023622 in 4. 하중 분석 결과",
+     "6.00 ft lap 2.00 ft lap 6.00 ft lap N P P P P P N 1.00 ft 25.00 ft 25.00 ft 25.00 ft 25.00 ft 1.00 ft 지배 조합 모멘트 : 7: 0.6D+0.6W (kip-ft) -4.1 7.1 3.8 Lap end 3.1 Lap end 3.0 Lap end 3.0 Lap end 3.1 Lap end 3.8 Lap end max=7.1 min=-4.1 지배 조합 전단력 : 7: 0.6D+0.6W (kips) 1.4 -1.4 1.2 Lap end -1.0 Lap end 0.9 Lap end -0.9 Lap end 1.0 Lap end -1.2 Lap end max=1.4 min=-1.4 소요강도 포락 ( 대표 조합 : 7: 0.6D+0.6W) 위치 x (ft) M u (kip-ft) V u (kips) R 지압 / 인발 (kips) 구간 지배 조합 · 패턴 Overhang (left) +M 1.00 0.05 0.88 — positive 7: 0.6D+0.6W Overhang (left) -M 1.00 -0.01 0.88 — negative 1: D End span +M 26.00 7.08 1.28 — positive 7: 0.6D+0.6W End span -M 10.50 -4.13 0.00 — negative 7: 0.6D+0.6W Int span 3 +M 26.00 7.08 1.28 — positive 7: 0.6D+0.6W Int span 3 -M 40.00 -1.81 0.02 — negative 7: 0.6D+0.6W Int span 4 +M 76.00 7.08 1.44 — positive 7: 0.6D+0.6W Int span 4 -M 62.00 -1.81 0.02 — negative 7: 0.6D+0.6W End span +M 76.00 7.08 1.44 — positive 7: 0.6D+0.6W End span -M 91.50 -4.13 0.00 — negative 7: 0.6D+0.6W Overhang (right) +M 101.00 0.05 0.09 — positive 7: 0.6D+0.6W Overhang (right) -M 101.00 -0.01 0.09 — negative 1: D End support (left) 1.00 0.05 0.88 0.16 / -0.97 support_end 7: 0.6D+0.6W 1st interior 26.00 7.08 1.44 0.44 / -2.73 negative 7: 0.6D+0.6W Center 51.00 4.00 1.04 0.34 / -2.08 negative 7: 0.6D+0.6W Support 5 76.00 7.08 1.44 0.44 / -2.73 negative 7: 0.6D+0.6W End support (right) 101.00 0.05 0.88 0.16 / -0.97 support_end 7: 0.6D+0.6W Lap end (left of sup 3) 23.50 3.76 1.21 — negative 7: 0.6D+0.6W Lap end (right of sup 3) 29.50 3.15 0.96 — negative 7: 0.6D+0.6W",
+     "Lap end (left of sup 4) 50.00 3.01 0.95 — negative 7: 0.6D+0.6W Lap end (right of sup 4) 52.00 3.01 0.95 — negative 7: 0.6D+0.6W Lap end (left of sup 5) 72.50 3.15 0.96 — negative 7: 0.6D+0.6W Lap end (right of sup 5) 78.50 3.76 1.21 — negative 7: 0.6D+0.6W 양력 지배 하중조합 : 7: 0.6D+0.6W 위치 M u (kip-ft) Overhang (left) +M 0.05 End span +M 7.08 End span -M -4.13 Int span 3 +M 7.08 Int span 3 -M -1.81 Int span 4 +M 7.08 Int span 4 -M -1.81 End span +M 7.08 End span -M -4.13 Overhang (right) +M 0.05 End support (left) 0.05 1st interior 7.08 Center 4.00 Support 5 7.08 End support (right) 0.05 Lap end (left of sup 3) 3.76 Lap end (right of sup 3) 3.15 Lap end (left of sup 4) 3.01 Lap end (right of sup 4) 3.01 Lap end (left of sup 5) 3.15 Lap end (right of sup 5) 3.76 하중조합 상세 (ASD, ASCE 7) 하중 plf 고정 (D) 15 풍 (W) 170 조합 조합 수식 |M| max (kip-ft) |V| max (kips) 지배 1: D 고정 (D)(15) 1.14 0.23 중력 지배 5: D+0.6W 고정 (D)(15) + 0.6× 풍 (W)(170) 6.62 1.35 6a: D+0.75(0.6W) 고정 (D)(15) + 0.45× 풍 (W)(170) 4.68 0.95 7: 0.6D+0.6W 0.6× 고정 (D)(15) + 0.6× 풍 (W)(170) 7.08 1.44 ★지배 양력 지배",
+     "8: 0.6D 0.6× 고정 (D)(15) 0.69 0.14 자동 결정 설계 매개변수 다음 매개변수는 하중 분석 결과 , 데크 구성 및 모멘트 다이어그램 형태에서 자동 계산됩니다 : 매개변수 값 계산 방법 k φ ( 회전강 성 ) 0.3000 kip-in/rad/in 프로젝트 시험 입력값 k x ( 횡강성 ) 1.484 kip/in/in AISI RP17-2 곡선 맞춤식 (Example II-1C 패스너 값 기준 예비설계값 ) 가정 : kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used (Fss_kip, D_screw_in, Fu1_ksi). 범위 : Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available. 범위 : RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness ( 「 kx override 」 ( ② 하중계산 탭 )) where available. 정모멘트 L y (+) 0 ( 완전 지지 ) 상부 플랜지 압축 , 데크 패널로 연속 지지 — LTB 검토 불필요 부모멘트 L y 49.1000 in 변곡점 (M=0) 에서 랩 끝단 또는 지점까지 거리 . 하부 플랜지 압축 — 비지지 . 부모멘트 C b 1.79 AISI Eq. F2.1.1-2: C b = 12.5M max / (2.5M max +3M A +4M B +3M C ), 비지지 구간 모 멘트 다이어그램에서 계산 양력 R (§I6.2.1) 0.7 AISI S100 Table I6.2.1-1 — 조건 (a)–(o) 확인 시에만 (S100-16 Table I6.2.1-1) 변곡점 1.03, 19.93, 33.56, 46.08, 55.92, 68.44, 82.07, 100.97, 102.00 ft 모멘트 = 0 인 위치 , 모멘트 다이어그램의 선형보간으로 산출 처짐 검토 ( 사용하중 : D) 처짐 다이어그램 (in) -0.0 0.2 max=0.2 min=-0.0 스팬 위치 최대 처짐 L/δ 1 0.00 ft 0.0318 in L/754 2 11.50 ft 0.2106 in L/1425 3 40.00 ft 0.0607 in L/4939 4 62.00 ft 0.0607 in L/4939 5 90.50 ft 0.2106 in L/1425 6 102.00 ft 0.0318 in L/754 E=29500.0 ksi, Ixx=7.7558 in⁴ 5. 설계 계산 — 휨 (Chapter F) 1) 부모멘트 구간 (-M)",
+     "Lb(-) = 226.1000 in, Cb(-) = 1.14 단계 1: 항복 모멘트 , M y M y = S f × F y = 106.64 kip-in 단계 2: 전체좌굴 / 횡 - 비틀림좌굴 — §F2 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 전체좌굴 응력 F cre 는 비지지 길이 L b , 모멘트 구배 C b , 단면 성질 (r y , J, C w ) 로 산정합니다 . F cre = C b · r o · A / S f · √(σ ey · σ t ) F cre 와 F y 의 관계에 따라 : 조건 수식 영역 F cre ≥ 2.78 F y F n = F y 항복 ( 조밀 ) 2.78 F y > F cre > 0.56 F y F n = (10/9)F y (1 - 10F y /(36F cre )) 비탄성 LTB F cre ≤ 0.56 F y F n = F cre 탄성 LTB M ne = S f × F n = 12.75 kip-in 단계 3: 국부좌굴 — §F3.2 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 국부 세장비 λ l 이 0.776 을 초과하면 국부좌굴이 전체강도 M ne 를 감소시킵니다 : λ l = √(M ne / M crl ) 조건 수식 λ l ≤ 0.776 M nl = M ne ( 감소 없음 ) λ l > 0.776 M nl = [1 - 0.15(M crl /M ne ) 0.4 ] · (M crl /M ne ) 0.4 · M ne M nl = 12.75 kip-in ( 감소 없음 ) 단계 4: 뒤틀림좌굴 — §F4 [ 참고 — §I6.2.1 R 계수법이 대신함 , 강도에 쓰지 않음 ] 뒤틀림좌굴은 M y 에 대해 독립적으로 검토합니다 : λ d = √(M y / M crd ) 조건 수식 λ d ≤ 0.673 M nd = M y ( 감소 없음 ) λ d > 0.673 M nd = [1 - 0.22(M crd /M y ) 0.5 ] · (M crd /M y ) 0.5 · M y M nd = 76.83 kip-in 단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도 M n (-) = R · M nℓo = 0.7 × 85.95 = 60.16 kip-in (§I6.2.1, Eq. I6.2.1-1)",
+     "지배 파괴 모드 : 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) Ω b = 1.67 (ASD) M n (-)/Ω = 60.16 / 1.67 = 36.03 kip-in M u (-) / M n (-)/Ω = 49.55 / 36.03 = 137.5% NG 2) 정모멘트 구간 (+M) Lb(+) = 0.0000 in, Cb(+) = 1 단계 1: 항복 모멘트 , M y M y = S f × F y = 106.64 kip-in ( 부모멘트 구간과 동일 ) 단계 2: 전체좌굴 / 횡 - 비틀림좌굴 — §F2 ( 정모멘트 ) 정모멘트 구간의 Lb(+)=0.0000 in, Cb(+)=1 로 Fcre 를 재산정합니다 . F cre (+) = 1000000 ksi → F2.1-3 (yielding) F cre (+) = 1000000 ksi ≥ 2.78F y = 152.9 ksi → F n = F y ( 항복 ) M ne (+) = 106.64 kip-in 단계 3: 국부좌굴 — §F3.2 ( 정모멘트 ) M nl (+) = 85.95 kip-in ( 국부좌굴로 19.4% 감소 ) 단계 4: 뒤틀림좌굴 — §F4 ( 정모멘트 ) M nd (+) = 75.63 kip-in 단계 5: 공칭강도 & 설계강도 ( 정모멘트 ) M n (+) = min(M ne , M nl , M nd ) = min(106.64, 85.95, 75.63) = 75.63 kip-in Ω b = 1.67 (ASD) M n (+)/Ω = 75.63 / 1.67 = 45.29 kip-in 종합 판정",
+     "구간 M u M n /Ω DCR 판정 부모멘트 (-M) 49.55 36.03 137.5% NG 종합 : ✗ NG 휨 + 전단 조합 검토 — §H2 (Eq. H2-1) (M u /M alo )² + (V u /V a )² ≤ 1.0 항 비율 M alo (M nlo 85.95) 51.47 kip-in M/Malo 0.9628 V/Va 0.0009 합계 (SRSS) 0.9628 ≤ 1.0 OK 계산 단계 요약 # 단계 수식 결과 단위 1 Yield Moment (My) My = Sf × Fy = 1.9390 in³ × 55.00 ksi = 106.64 kip-in 106.64 kip- in 2a [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Fcre — Lateral- Torsional Buckling (§F2.1.3) σey = π²E/(Lb/ry)² = π²×29500 ksi/(226.1 in/1.1442 in)² = 7.46 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 9.24 ksi, Fcre = Cb×ro×Ag/(2×Sf)×√(σey×σt) = 1.14×3.2781 in×0.8218 in²/(2×1.9390 in³)×√(7.46 ksi×9.24 ksi) = 6.57 ksi 6.6 ksi 2 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Global/LTB (Mne) Fcre=6.57 ksi ≤ 0.56×55.00 ksi → Fn = Fcre = 6.57 ksi, Mne = Sf×Fn = 1.9390 in³×6.57 ksi = 12.75 kip-in 12.75 kip- in 3 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Local Buckling (Mnl) Mcrl = 90.85 kip-in (FSM), λl = √(Mne/Mcrl) = √(12.75 kip-in/90.85 kip-in) = 0.375 → Mnl = 12.75 kip-in 12.75 kip- in 4 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Distortional Buckling (Mnd) Mcrd = 85.95 kip-in (FSM [β=1.042, §2.3.3.3 Eq.3]), λd = √(My/Mcrd) = √(106.64 kip- in/85.95 kip-in) = 1.114 → Mnd = 76.83 kip-in 76.83 kip- in 5 [ 참고 — §I6.2.1 이 대신함 , 강도에 쓰지 않음 ] Nominal Strength — DSM (Mn) Mn = min(Mne=12.75 kip-in, Mnl=12.75 kip-in, Mnd=76.83 kip-in) = 12.75 kip-in 12.75 kip- in 5a Mnℓo — local buckling at Fn = Fy (§F3, for §I6.2.1) Mne = My = Sf×Fy = 106.64 kip-in (Fn = Fy), Mcrl = 90.85 kip-in (FSM), λl = √(My/Mcrl) = 1.083 → Mnℓo = 85.95 kip-in (Eq. F3.2.1) 85.95 kip- in 5b Uplift R-factor (§I6.2.1, Eq. I6.2.1- 1) [ 지배 ] R = 0.7 (Table I6.2.1-1: continuous span, Z → 0.70); Mn = R × Mnℓo = 0.7 × 85.95 = 60.16 kip-in — F2(LTB)·F4 대신 적용 ; 조건 (a)~(f)·(o) 확인 , (g)~(n) 사용자 확인 60.16 kip- in 6 Final Nominal Strength (Mn) [ 지 배 ] Mn = 60.16 kip-in — §I6.2.1 R-factor (R=0.7) 60.16 kip- in 7 Allowable Strength (ASD) Mn/Ω = 60.16 kip-in/1.67 = 36.03 kip-in 36.03 kip- in 8 Bending + Shear (§H2, Eq. H2-1) Malo = Mnℓo/1.67 = 85.95/1.67 = 51.47 kip-in (§F3, Fn = Fy), Va = 2.43 kips → √((49.55/51.47)² + (0.00/2.43)²) = 0.963 0.9628 6. 설계 요약",
+     "본 보고서는 AISI S100-16 직접강도법 (DSM) 에 의한 휨 부재 ( 보 / 퍼린 ) 의 설계 검토 결과입니다 . 설계 방법은 ASD 입니다 . 부재는 6 경간이며 , 지배 구간 ( 양력 하부압축 1.05–19.90 ft) 의 하중조합은 7: 0.6D+0.6W 입니다 . 지배 파괴 모드는 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) 입니다 . 항목 값 설계 기준 AISI S100-16 해석 방법 직접강도법 (DSM) — 유한스트립법 부재 유형 휨 부재 ( 보 / 퍼린 ) 설계 방법 ASD 지배 파괴 모드 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) 부모멘트 구간 (-M) M n (-) 60.16 kip-in 양력 하부압축 1.05–19.90 ft: §I6.2.1 R-factor (R=0.7) M n /Ω(-) 36.03 kip-in DCR(-) 137.5% — NG 정모멘트 구간 (+M) M n (+) 75.63 kip-in M n /Ω(+) 45.29 kip-in 종합 판정 종합 결과 ✗ NG 지배 검토 F flexure F flexure 1.375 — NG H2 bending + shear 0.963 — OK 퍼린 구간별 판정 정모멘트 1.05–19.90 ft 15.5% — OK 정모멘트 33.59–46.05 ft 6.8% — OK 정모멘트 55.95–68.41 ft 6.8% — OK 정모멘트 82.10–100.95 ft 15.5% — OK 내민 부모멘트 0.00–1.00 ft ( 지점 2 왼쪽 ) 16.7% — OK 부모멘트 1.00–1.05 ft ( 지점 2 오른쪽 ) 5.8% — OK 부모멘트 19.90–23.50 ft ( 지점 3 왼쪽 ) 16.3% — OK 부모멘트 29.50–33.59 ft ( 지점 3 오른쪽 ) 13.4% — OK 부모멘트 46.05–50.00 ft ( 지점 4 왼쪽 ) 12.9% — OK 부모멘트 52.00–55.95 ft ( 지점 4 오른쪽 ) 12.9% — OK 부모멘트 68.41–72.50 ft ( 지점 5 왼쪽 ) 13.4% — OK 부모멘트 78.50–82.10 ft ( 지점 5 오른쪽 ) 16.3% — OK 부모멘트 100.95–101.00 ft ( 지점 6 왼쪽 ) 16.7% — OK 내민 부모멘트 101.00–102.00 ft ( 지점 6 오른쪽 ) 0.6% — OK 랩 구간 23.50–26.00 ft ( 지점 3 왼쪽 ) 14.0% — OK 랩 구간 26.00–29.50 ft ( 지점 3 오른쪽 ) 14.0% — OK 랩 구간 50.00–51.00 ft ( 지점 4 왼쪽 ) 8.3% — OK",
+     "랩 구간 51.00–52.00 ft ( 지점 4 오른쪽 ) 8.3% — OK 랩 구간 72.50–76.00 ft ( 지점 5 왼쪽 ) 14.1% — OK 랩 구간 76.00–78.50 ft ( 지점 5 오른쪽 ) 14.1% — OK 양력 하부압축 1.05–19.90 ft 137.5% — NG 양력 하부압축 33.59–46.05 ft 60.2% — OK 양력 하부압축 55.95–68.41 ft 60.2% — OK 양력 하부압축 82.10–100.95 ft 137.5% — NG 양력 지점부 상부압축 0.00–1.05 ft 36.2% — OK 양력 지점부 상부압축 19.90–23.50 ft 100.5% — NG 양력 지점부 상부압축 29.50–33.59 ft 83.1% — OK 양력 지점부 상부압축 46.05–50.00 ft 80.0% — OK 양력 지점부 상부압축 52.00–55.95 ft 80.0% — OK 양력 지점부 상부압축 68.41–72.50 ft 83.1% — OK 양력 지점부 상부압축 78.50–82.10 ft 100.5% — NG 양력 지점부 상부압축 100.95–102.00 ft 4.0% — OK 양력 랩 구간 상부압축 23.50–26.00 ft 86.4% — OK 양력 랩 구간 상부압축 26.00–29.50 ft 86.4% — OK 양력 랩 구간 상부압축 50.00–51.00 ft 51.2% — OK 양력 랩 구간 상부압축 51.00–52.00 ft 51.2% — OK 양력 랩 구간 상부압축 72.50–76.00 ft 87.4% — OK 양력 랩 구간 상부압축 76.00–78.50 ft 87.4% — OK 참조 규준 조항 F3.2, G2, H2, I6.2.1 평가하지 못한 항목 ( 판정 없음의 원인 ) • §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) • H2-2 (shear stiffened webs) • weak-axis DSM flexure • G5/H3 web crippling (no bearing length wc_N given) 경고 ( 값 또는 판정에 영향 ) • §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습 니다 . Virgin Fy 를 사용합니다 . 가정 • §I6.2.1: 조건 (g)~(n)( 랩 길이 , 스팬 ≤ 33 ft, 지점 횡구속 , 패널 · 단열재 · 체결재 상세 ) 과 연속보 변곡점 사이 지점부 · 캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오 . 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+    ],
+    "compact": "20d009c2b7793832",
+    "printedHtmlSha": "2f7ed569c0143b43"
+   }
+  },
+  {
+   "id": "uplift.US.findings",
+   "expect": "defect",
+   "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report",
+   "value": {
+    "coldWork": [
+     "fail: §A3.3.2 Cold Work (냉간가공) = 적용 실패 — R/t 조건 미충족 또는 R=0"
+    ],
+    "analysisItems": [
+     "warn: Load Case 적합성 = compression",
+     "fail: 해석 실행 여부 = 미실행",
+     "fail: DSM 값 추출 = 미추출"
+    ],
+    "unboundedAsNumber": [
+     "pass: Lb(+) / Cb(+) (정모멘트) = Lb(+)=0.0000 in, Cb(+)=1, Fcre(+)=1000000 ksi",
+     "Fcre(+) = 1000000 ksi → F2.1-3 (yielding)",
+     "Fcre(+) = 1000000 ksi ≥ 2.78Fy = 152.9 ksi → Fn = Fy (항복)"
+    ],
+    "alwaysSame": [
+     "pass: 경계조건 (BC) = S-S",
+     "pass: 풍하중 (W, 양력) = 34 psf ↑",
+     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=55, 설계 Fy=55 ksi"
+    ],
+    "reportPageValues": [
+     "탄성계수, E 29500.0 ksi",
+     "포아송비, ν 0.30",
+     "분담폭 (간격) 5 ft",
+     "패널 두께, tpanel 0.0196850393701 in",
+     "체결구 간격 11.811023622 in"
+    ]
+   }
+  },
+  {
+   "id": "uplift.crossCheck",
+   "expect": "pin",
+   "value": {
+    "overall": "fail",
+    "rows": [
+     {
+      "item": "Mne vs My",
+      "page": "pass",
+      "engine": "not_applicable,pass"
+     },
+     {
+      "item": "§I6.2.1 R-factor (양력)",
+      "page": "pass",
+      "engine": "fail*,pass*"
+     },
+     {
+      "item": "Mnl vs Mne (국부좌굴 감소)",
+      "page": "pass",
+      "engine": "not_applicable,pass,pass*"
+     },
+     {
+      "item": "Mnd vs My (뒤틀림좌굴 감소)",
+      "page": "warn",
+      "engine": "not_applicable,pass,pass*"
+     },
+     {
+      "item": "이용률 — 정모멘트 (+M)",
+      "page": "warn",
+      "engine": "(none)"
+     },
+     {
+      "item": "Lap 길이 (지점 3) §I6.2.1(g)",
+      "page": "pass",
+      "engine": "(none)"
+     },
+     {
+      "item": "Lap 길이 (지점 4) §I6.2.1(g)",
+      "page": "pass",
+      "engine": "(none)"
+     },
+     {
+      "item": "Lap 길이 (지점 5) §I6.2.1(g)",
+      "page": "pass",
+      "engine": "(none)"
+     }
+    ],
+    "passOnNotEvaluated": []
+   }
+  }
+ ]
+}
