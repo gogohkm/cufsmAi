@@ -14,7 +14,9 @@
     "test": "npm run typecheck && npm run build && node host/test/smoke.mjs && node host/test/bridge.mjs && node host/test/connect.mjs",
     "serve": "node host/dist/serve.js",
     "test:bridge": "npm run build && node host/test/bridge.mjs",
-    "test:connect": "npm run build && node host/test/connect.mjs"
+    "test:connect": "npm run build && node host/test/connect.mjs",
+    "installer": "node installer/build.mjs --all --win",
+    "test:packaged": "node installer/test/packaged.mjs"
   },
   "devDependencies": {
     "@types/node": "^20.19.43",

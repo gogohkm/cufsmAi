@@ -310,7 +310,7 @@ async function main() {
     const st0 = await until(() => B.page(`(()=>{const b=document.getElementById('claude-action'); return b && !b.hidden ? {status:document.getElementById('claude-status').textContent, button:b.textContent, disabled:b.disabled, tip:b.title} : null;})()`), 20_000);
     check('제목 표시줄: 「Claude 등록 안 됨」 + 「연결」(풍선 도움말)', /등록 안 됨/.test(st0?.status ?? '') && st0.button === '연결' && !st0.disabled && /등록/.test(st0.tip), JSON.stringify(st0));
     await B.page(`document.getElementById('claude-action').click(); 1`);
-    const st1 = await until(() => B.page(`(()=>{const s=document.getElementById('claude-status').textContent; return /다시 시작/.test(s) ? {status:s, button:document.getElementById('claude-action').textContent, toast:[...document.querySelectorAll('.toast')].map(t=>t.textContent).join(' | ')} : null;})()`), 15_000);
+    const st1 = await until(() => B.page(`(()=>{const s=document.getElementById('claude-status').textContent; const toast=[...document.querySelectorAll('.toast')].map(t=>t.textContent).join(' | '); return /다시 시작/.test(s) && /다시 시작/.test(toast) ? {status:s, button:document.getElementById('claude-action').textContent, toast:[...document.querySelectorAll('.toast')].map(t=>t.textContent).join(' | ')} : null;})()`), 15_000);
     const cfg = JSON.parse(fs.readFileSync(fakeClaude, 'utf8'));
     const entry = cfg.mcpServers?.stcfsd;
     check('「연결」 → 가짜 설정에 mcpServers.stcfsd = 이 Electron 실행 파일 + ELECTRON_RUN_AS_NODE + MCP 서버 + 포트 파일',

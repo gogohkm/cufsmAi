@@ -1,6 +1,6 @@
 # desktop/ — StCFSD 독립 프로그램
 
-2026-11-22 · 상태: **S4 끝** — 화면 템플릿(`design/`), 화면 없는 호스트(S1), 화면 다리(S2), 독립 창(S3 — Electron), Claude Desktop 연결(S4)이 있다. 다음은 `installer/`(S5) — 그 뒤 첫 배포판, 그리고 `ui/`.
+2026-11-22 · 상태: **S5 끝(첫 배포판 준비)** — 화면 템플릿(`design/`), 화면 없는 호스트(S1), 화면 다리(S2), 독립 창(S3 — Electron), Claude Desktop 연결(S4), Windows 설치 파일 + 함께 묶은 Python(S5)이 있다. 다음은 소유자의 손 확인(`installer/README.md`) 뒤 첫 배포, 그리고 `ui/`.
 
 Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하나에 StCFSD, 다른 모니터에 Claude Desktop 을 띄우고, 대화는 Claude Desktop 에서만 한다. 둘은 로컬 MCP 서버로 잇는다.
 
@@ -18,6 +18,7 @@ Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하�
 | `host/` | 지금의 확장 호스트(`out/extension.js`)를 고치지 않고 VS Code 없이 Node 에서 돌린다. `vscode` 대체 모듈(`host/src/vscode/`), 적재기(`loader.ts` — 포트 파일 방식의 MCP, 설계 패널을 끝까지 쥔다), 사용자 · OS 에 묻는 접점(`platform.ts`), 화면 없는 CLI(`headless.ts`), 연기 시험. [`host/README.md`](host/README.md) | S1 |
 | `host/src/bridge/` · `host/frame/` | 화면 다리(+ S4 의 「연결」 · 「끊기」 — `POST /api/claude/*`, 화면의 세션만): 127.0.0.1 + 토큰의 HTTP 로 지금의 웹뷰를 고치지 않고 브라우저에 내준다(리소스 주소 · CSP · `acquireVsCodeApi` 대체 · 테마 변수), 호스트 ↔ 웹뷰 메시지와 새로 고침 다시 보내기, 호스트의 물음(알림 · 고르기 · 열기/저장), MCP 중계, Claude 상태(읽기만). 틀(`/`)은 제목 표시줄 + 설계 화면. CLI `serve.ts`, 시험 `test/bridge.mjs`(headless Edge). [`host/BRIDGE.md`](host/BRIDGE.md) | S2 |
 | `shell/` | 독립 창(Electron 45, 자체 `package.json`): 한 프로세스에 호스트 · 다리 · 창, 메모리 세션 + Bearer, 단일 인스턴스(두 번째 실행은 파일을 넘김), 창 자리 기억, 포커스를 가져가지 않기(물음은 제목 · 작업 표시줄로), OS 열기 · 저장 대화상자, 메뉴, 파일 연결 진입점, 자식 콘솔 숨김, 제목 표시줄의 Claude 연결. [`shell/README.md`](shell/README.md) | S3 · S4 |
+| `installer/` | Windows 설치 파일(NSIS · 사용자 단위 · 서명 없음, appId `local.stcfsd.desktop`)과 함께 묶은 Python 3.13.14 + numpy 2.4.4 + scipy 1.17.1(python.org · PyPI, 서명 · sha256 확인). 묶음 준비(`stage.mjs` — 빌드를 다시 돌린다), Python(`python.mjs`), 묶기(`build.mjs`), 설치하지 않고 확인(`test/packaged.mjs`). 출력은 `installer/build/`(git 무시). [`installer/README.md`](installer/README.md) | S5 |
 
 ```
 npx tsc -p ./                                  # 저장소 루트 — out/ 을 만든다
@@ -26,6 +27,8 @@ npm run serve -- --open <파일.csd>              # 화면 다리. 출력된 「
 npm run headless -- --open <파일.csd>           # 화면 없이. MCP 다리 주소와 클라이언트가 쓸 환경을 출력하고 떠 있다
 cd shell && npm install && npm start -- <파일.csd>   # 창(Electron)
 npm test                                       # 창 시험 — 창을 보이지 않고 돈다
+cd .. && npm run installer                     # 설치 파일 → installer/build/dist/ (처음엔 Python · 휠을 받는다)
+npm run test:packaged                          # 설치본 확인(설치하지 않는다)
 ```
 
 `desktop/` 은 자체 `package.json`(typescript · esbuild · @types/node)을 둔다. 루트의 의존성에 섞이지 않는다. 루트 `tsconfig.json` 은 `desktop` 을 `exclude` 한다 — 루트의 `tsc` 는 여기 소스를 보지 않고, 여기 소스는 `desktop/tsconfig.json` 으로 따로 형 검사한다.
@@ -35,7 +38,6 @@ npm test                                       # 창 시험 — 창을 보이지
 | 경로 | 내용 |
 |---|---|
 | `ui/` | 새 화면: 트리 탭 4개(업무 · 모델 · 결과 · 문서), 보기(단면 · 좌굴 곡선 · 부재 · 접합 도면), 정보 창, 표 서랍. 지금의 웹뷰는 편집 상태(F2)에서 `<iframe>` 으로 끼운다 |
-| `installer/` | Windows 설치 파일(NSIS), Python 묶음 |
 
 ## 규칙 — 디렉토리는 나누되 계산은 한 벌
 
