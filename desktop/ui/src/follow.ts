@@ -47,9 +47,14 @@ const RESULT_ID: Record<string, string> = {
   conn: 'connection', 'conn:one': 'connection', 'conn:lap': 'lap', props: 'section',
 };
 
-/** 검토 항목 → item(scope · 엔진의 location 그대로 — US). 퍼린은 계약대로 {region, check_point} 가 들어 있다 */
+/**
+ * 검토 항목 → item. 위치는 호스트가 받는 것만 — 퍼린의 `{region, check_point}`, 엔진의 `{segment}`(보기 계약 2절, V5c-02).
+ * 수 · 글(x · 지점 번호 · 근거)은 보내지 않는다 — 호스트가 버릴 것이고 AI 의 문맥에 들어가지 않아야 한다
+ */
 export function itemOfRow(r: CheckRow): Item {
-  const loc = r.locUS && typeof r.locUS === 'object' ? r.locUS : undefined;
+  const l = r.locUS && typeof r.locUS === 'object' ? r.locUS : null;
+  const loc = l && (l.region || l.check_point) ? { ...(l.region ? { region: String(l.region) } : {}), ...(l.check_point ? { check_point: String(l.check_point) } : {}) }
+    : l && typeof l.segment === 'string' ? { segment: l.segment } : null;
   return { kind: 'check', id: r.id, scope: r.scope, ...(loc ? { location: loc } : {}) };
 }
 
@@ -116,9 +121,12 @@ export function keyOfItem(item: Item): { tab: Tab; key: string } | null {
 }
 
 // ── 보기 보고 ───────────────────────────────────────────────────────
-export interface Reported { view: string; selection: Item | null; by: string; recorded: boolean; error?: string; at: number }
+/** 호스트가 받아 적은 것 — 버린 칸(dropped)은 빼고(selection · view 를 버렸으면 null) */
+export interface Reported { view: string | null; selection: Item | null; by: string; recorded: boolean; error?: string; at: number; dropped: string[]; sent: { view: string; selection: Item | null } }
 let reported: Reported | null = null;
-let pendingResp: { request_id: string; followed: boolean; note?: string } | null = null;
+/** focus_response.note 는 코드만(보기 계약 2절): followed · not_in_results · follow_off · editing · busy */
+export type FocusNote = 'followed' | 'not_in_results' | 'follow_off' | 'editing' | 'busy';
+let pendingResp: { request_id: string; followed: boolean; note?: FocusNote } | null = null;
 let timer: number | null = null;
 let lastSent = '';
 let onReported: (() => void) | null = null;
@@ -137,8 +145,11 @@ export function report(view: string, selection: Item | null, by: 'person' | 'pro
     const resp = pendingResp;
     pendingResp = null;
     lastSent = sig;
-    void mcp<{ recorded?: boolean; error?: string }>('report_view', { ...body, ...(resp ? { focus_response: resp } : {}) }).then(r => {
-      reported = { view, selection, by, recorded: r?.recorded !== false && !r?.error, error: r?.error, at: Date.now() };
+    void mcp<{ recorded?: boolean; error?: string; dropped?: unknown }>('report_view', { ...body, ...(resp ? { focus_response: resp } : {}) }).then(r => {
+      const dropped = Array.isArray(r?.dropped) ? r.dropped.map(String) : [];
+      const sel = dropped.includes('selection') ? null
+        : selection && dropped.includes('selection.location') ? (({ location: _l, ...rest }) => rest)(selection) as Item : selection;
+      reported = { view: dropped.includes('view') ? null : view, selection: sel, by, recorded: r?.recorded !== false && !r?.error, error: r?.error, at: Date.now(), dropped, sent: { view, selection } };
       onReported?.();
     });
   };
@@ -165,19 +176,19 @@ export function handleFocus(req: FocusReq, ctx: { editing: boolean; go: (tab: Ta
   const target = keyOfItem(req.item);
   if (!target) {
     pointed = { req, target: null, why: '이 화면의 지금 결과에 그 항목이 없다', at: Date.now() };
-    pendingResp = { request_id: req.request_id, followed: false, note: 'not in the current results of this screen' };
+    pendingResp = { request_id: req.request_id, followed: false, note: 'not_in_results' };
     return false;
   }
   const label = ctx.label(target.key);
   const why = !followOn ? 'AI 따라가기가 꺼져 있다' : ctx.editing ? '편집 상태다' : idleFor() < IDLE_MS ? '사람이 작업 중이다(5 초 안에 입력)' : '';
   if (why) {
     pointed = { req, target, why, at: Date.now() };
-    pendingResp = { request_id: req.request_id, followed: false, note: !followOn ? 'follow AI is off' : ctx.editing ? 'edit state is open' : 'the person was busy (input within 5 s)' };
+    pendingResp = { request_id: req.request_id, followed: false, note: !followOn ? 'follow_off' : ctx.editing ? 'editing' : 'busy' };
     return false;
   }
   pointed = null;
   followedNote = { reason: req.reason, at: Date.now(), label };
-  pendingResp = { request_id: req.request_id, followed: true };
+  pendingResp = { request_id: req.request_id, followed: true, note: 'followed' };
   ctx.go(target.tab, target.key, label);
   return true;
 }

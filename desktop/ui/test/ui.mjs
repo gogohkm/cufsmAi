@@ -22,7 +22,9 @@ const SERVE = path.join(repoRoot, 'desktop', 'host', 'dist', 'serve.js');
 const MCP_SERVER = path.join(repoRoot, 'media', 'mcp-server.js');
 const OUT = path.join(here, 'out');
 const VERBOSE = process.env.UI_VERBOSE === '1';
-const { US_TO_SI } = require(path.join(repoRoot, 'out', 'mcp', 'siUnits.js'));
+const { US_TO_SI, caseValueToSI } = require(path.join(repoRoot, 'out', 'mcp', 'siUnits.js'));
+/** 검토 상태(K2)의 칸 표 — 제품의 하나뿐인 표(webview/js/designState.js FIELDS)의 단위 종류 */
+const CASE_KIND = new Map(require(path.join(repoRoot, 'webview', 'js', 'designState.js')).FIELDS.map(f => [f[0], f[2]]));
 let W = 1920, H = 1080;
 
 const results = [];
@@ -288,6 +290,17 @@ function expectedOf(src, u, ctx) {
     case 'purlin': return ctx.purlinSI ? at(ctx.purlinSI, p) : undefined;
     case 'lap': return ctx.lapSI ? at(ctx.lapSI, p) : undefined;
     case 'conn': return ctx.connSI ? at(ctx.connSI, p) : undefined;
+    // U4 — 검토 상태(호스트의 get_case_inputs, US) → 제품의 caseValueToSI(표의 단위 종류) · 경간 표는 ft → m
+    case 'case': {
+      const parts = p.split('.');
+      if (parts[0] === 'inputs') {
+        let v = ctx.caseUS?.inputs?.[parts[1]];
+        if (parts.length > 2) { v = Array.isArray(v) ? v[Number(parts[2])] : undefined; }
+        return typeof v === 'number' ? caseValueToSI(v, CASE_KIND.get(parts[1]) ?? null) : undefined;
+      }
+      if (parts[0] === 'spans') { const v = at(ctx.caseUS?.spans, parts.slice(1).join('.')); return typeof v === 'number' ? v * US_TO_SI.length_ft : undefined; }
+      return undefined;
+    }
     default: return undefined;
   }
 }
@@ -356,16 +369,16 @@ async function main() {
       `모두 음 → 위 ${allUp.filter(a => a.dir === 'up').length}/${allUp.length} · 모두 양 → 아래 ${allDown.filter(a => a.dir === 'down').length}/${allDown.length} · 첫 경간 음 · 둘째 양 → ${mixed.map(a => a.dir[0]).join('')}`);
   }
 
-  section('1. serve --ui 시작');
+  section('1. serve 시작 — 스위치 없이(U4: 기본 화면이 새 검토 화면)');
   let t = Date.now();
-  const serve = startServe(['--ui', '--repo', repoRoot, '--user-data', path.join(tmp, 'userData'), '--port-file', portFile,
+  const serve = startServe(['--repo', repoRoot, '--user-data', path.join(tmp, 'userData'), '--port-file', portFile,
     '--documents', path.join(tmp, 'Documents'), '--claude-config', claudeConfig]);
   let ready;
   try { ready = JSON.parse((await serve.waitLine(/^STCFSD_BRIDGE_READY /, 150_000)).slice('STCFSD_BRIDGE_READY '.length)); }
   catch (err) { check('serve 가 준비 줄을 낸다', false, String(err.message)); serve.child.kill(); return finish(); }
   const screenLine = serve.lines.find(l => l.startsWith('화면: ')) ?? '';
-  check('serve --ui 가 준비 줄을 내고 「화면:」 은 /ui/ 주소다', ready.screen === 'ui' && /\/ui\/\?t=/.test(screenLine) && /\/\?t=/.test(ready.url) && !/\/ui\//.test(ready.url),
-    `${Date.now() - t} ms · screen=${ready.screen} · 기본 url 은 틀 그대로`);
+  check('스위치 없는 serve 가 준비 줄을 내고 「화면:」 은 /ui/ 주소다(기본 화면 = 새 검토 화면)', ready.screen === 'ui' && /\/ui\/\?t=/.test(screenLine) && /\/\?t=/.test(ready.url) && !/\/ui\//.test(ready.url),
+    `${Date.now() - t} ms · screen=${ready.screen}`);
   const origin = ready.origin;
   const token = new URL(ready.url).searchParams.get('t');
   const mcpToken = JSON.parse(fs.readFileSync(portFile, 'utf8')).token;
@@ -406,9 +419,10 @@ async function main() {
     && lastMl.json.data.designResult === null && Number.isInteger(lastMl.json.seq), `seq ${lastMl.json?.seq} · 절점 ${lastMl.json?.data?.modelLoaded?.message?.data?.node?.length}`);
   const leak = [uiHtml.text, cors.text, (await api('GET', '/api/state')).text, lastMl.text, (await api('GET', '/ui/style/ui.css')).text];
   check('MCP 토큰이 새 화면에 가는 어디에도 없다', leak.every(x => !x.includes(mcpToken)), `${leak.length}곳`);
-  const frame = await api('GET', '/');
-  check('기본 화면(/)은 그대로 틀이다', frame.status === 200 && frame.text === fs.readFileSync(path.join(repoRoot, 'desktop', 'host', 'frame', 'index.html'), 'utf8'),
-    '/frame/frame.js · 설계 패널 iframe');
+  const rootRes = await fetch(`${origin}/?theme=light`, { headers: { Authorization: `Bearer ${token}`, Connection: 'close' }, redirect: 'manual' });
+  await rootRes.text();
+  check('기본 화면(/)은 새 검토 화면이다(U4) — / 는 /ui/ 로 보낸다(303, 질의 그대로)', rootRes.status === 303 && rootRes.headers.get('location') === '/ui/?theme=light',
+    `${rootRes.status} → ${rootRes.headers.get('location')}`);
 
   const mcp = startMcpClient(portFile);
   const init = await mcp.request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'stcfsd-u1-ui', version: '0' } });
@@ -441,17 +455,17 @@ async function main() {
   check('다리 · MCP 포트가 풀렸다', await portIsFree(ready.port) && await portIsFree(ready.mcpPort), `${ready.port} · ${ready.mcpPort}`);
   check('MCP 포트 파일이 지워졌다', !fs.existsSync(portFile));
 
-  section('9. 스위치 없이 띄우면 기본 화면은 그대로');
+  section('9. --ui classic 으로 띄우면 예전의 틀(한 판 동안 남긴다)');
   const plainPortFile = path.join(tmp, 'mcp2', 'port');
   const plain = startServe(['--repo', repoRoot, '--user-data', path.join(tmp, 'userData2'), '--port-file', plainPortFile, '--documents', path.join(tmp, 'Documents'),
-    '--claude-config', claudeConfig]);
+    '--claude-config', claudeConfig, '--ui', 'classic']);
   try {
     const r2 = JSON.parse((await plain.waitLine(/^STCFSD_BRIDGE_READY /, 150_000)).slice('STCFSD_BRIDGE_READY '.length));
     const line2 = plain.lines.find(l => l.startsWith('화면: ')) ?? '';
     const tok2 = new URL(r2.url).searchParams.get('t');
     const root2 = await fetch(`${r2.origin}/`, { headers: { Authorization: `Bearer ${tok2}`, Connection: 'close' } });
     const html2 = await root2.text();
-    check('--ui 없이: 「화면:」 은 틀(/) 주소 · / 는 틀 HTML', r2.screen === 'frame' && line2 === `화면: ${r2.url}` && /\/\?t=/.test(line2) && html2.includes('/frame/frame.js'),
+    check('--ui classic: 「화면:」 은 틀(/) 주소 · / 는 틀 HTML', r2.screen === 'frame' && line2 === `화면: ${r2.url}` && /\/\?t=/.test(line2) && html2.includes('/frame/frame.js'),
       `screen=${r2.screen} · ${line2.replace(/t=.*/, 't=…')}`);
     const kids2 = descendants(plain.child.pid);
     await plain.ipc('shutdown', {}, 10_000).catch(() => undefined);
@@ -460,7 +474,7 @@ async function main() {
     for (let i = 0; i < 100 && kids2.some(k => alive(k.pid)); i++) { await sleep(50); }
     check('그 serve 도 남기는 것 없이 끝난다', e2?.code === 0 && kids2.every(k => !alive(k.pid)) && await portIsFree(r2.port) && await portIsFree(r2.mcpPort) && !fs.existsSync(plainPortFile),
       `코드 ${e2?.code}`);
-  } catch (err) { check('--ui 없는 serve', false, String(err.message)); plain.child.kill(); }
+  } catch (err) { check('--ui classic serve', false, String(err.message)); plain.child.kill(); }
 
   section('10. 저장소 · 사용자 설정 파일');
   const changed = diffSnapshots(repoBefore, repoSnapshot());
@@ -632,8 +646,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await click('#tree .row[data-k="snode"] .nm');
     await sleep(200);
     const sel = await ev(`document.querySelector('#tree .row.on')?.dataset.k`);
-    return { ok: /탄성 상수/.test(mat) && /설계 강도/.test(mat) && /편집 상태의 입력 칸에만 있다/.test(mat) && /경계조건/.test(cond) && /반파장 범위/.test(cond) && sel === 'snode',
-      detail: `재료: E · ν · G + 「Fy · Fu 편집 상태의 입력 칸에만」 · 해석 조건: 경계조건 · 반파장 · 응력 · 고른 줄 ${sel}` };
+    return { ok: /탄성 상수/.test(mat) && /재료/.test(mat) && /설계 Fy/.test(mat) && /해석 기준 응력/.test(mat) && !/편집 상태의 입력 칸에만/.test(mat) && /경계조건/.test(cond) && /반파장 범위/.test(cond) && sel === 'snode',
+      detail: `재료: E · ν · G + 설계 Fy · Fu(검토 상태 — K2) + 해석 기준 응력 · 해석 조건: 경계조건 · 반파장 · 응력 · 고른 줄 ${sel}` };
   });
 
   section('5. AI 를 따라간다 — 해석 · 검토 뒤 단면을 바꾸면 결과는 낡음');
@@ -971,6 +985,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   const al = await mcp.tool('analyze_loads', { detail: 'full', member_app: 'roof-purlin', span_type: 'cont-3', span_ft: 6, loads: { D: 0.44, Lr: 1.17 }, design_method: 'LRFD', spacing_ft: 1.2, units: 'SI' });
   await step('u17c AI 의 analyze_loads — 이제 화면에 온다(loadAnalysisComplete, K4a): 하중도 = analyze_loads 의 것(SI), 진행 띠 「하중 해석」 일치', 'u17c_loads_on_screen', async () => {
     await settle(`!!s.loads && s.loads.from==='loads' && s.stages.load.state==='ok'`, 'analyze_loads 결과');
+    // 퍼린 설계도 같은 메시지(loadAnalysisComplete)를 보냈다 — 화면이 analyze_loads 의 것을 다시 읽을 때까지
+    await settle(`!!s.loads && JSON.stringify(s.loads.si.governing.M_diagram)===${JSON.stringify(JSON.stringify(al.governing?.M_diagram ?? []))}`, 'analyze_loads 의 하중도', 20_000).catch(() => undefined);
     await select('result', 'load');
     const g = await ev(`(()=>{const e=document.querySelector('#center g.dg[data-k="M"]'); return {ys:e?e.dataset.ys.split(',').map(Number):[], st:${S}.state.stages.load.state};})()`);
     const same = (a, b) => Array.isArray(b) && a.length === b.length && a.every((v, k) => relClose(v, b[k]));
@@ -1175,7 +1191,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await sleep(800);
     const sel = await ev(`${S}.ui.sel`);
     const v = await viewNow();
-    const ok1 = foc1.target_found === true && sel === localKey && v.current?.selection?.id === 'member.flexure.local' && v.last_focus?.response?.followed === false;
+    const ok1 = foc1.target_found === true && sel === localKey && v.current?.selection?.id === 'member.flexure.local' && v.last_focus?.response?.followed === false && v.last_focus?.response?.note === 'follow_off';
     const box = await ev(`document.getElementById('aipoint').innerText`);
     await shot('u26_ai_pointed_1920_dark');
     await ev(`document.querySelector('#aipoint [data-ai="go"]').click()`);
@@ -1199,7 +1215,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const after = await mcp.tool('get_full_state');
     const same = before.nnodes === after.nnodes && JSON.stringify(before.results?.member_design) === JSON.stringify(after.results?.member_design);
     return { ok: f.target_found === true && s.sheet === distKey && s.card === 'member.flexure.distortional' && v.current?.by === 'focus' && v.current?.selection?.id === 'member.flexure.distortional'
-      && v.current?.follows_focus === true && v.last_focus?.response?.followed === true && /뒤틀림 좌굴이 지배/.test(s.note) && !s.editing && same,
+      && v.current?.follows_focus === true && v.last_focus?.response?.followed === true && v.last_focus?.response?.note === 'followed' && /뒤틀림 좌굴이 지배/.test(s.note) && !s.editing && same,
       detail: `시트 ${short(s.sheet, 40)} · 덩어리 ${s.card} · get_view by ${v.current?.by} · followed ${v.last_focus?.response?.followed} · 까닭 「${short(s.note.replace(/\s+/g, ' '), 60)}」 · 편집 ${s.editing} · 모델 · 결과 그대로 ${same}` };
   });
   await step('u28 지금 결과에 없는 검토 항목을 가리키면 — 호스트가 거절(target_found false), 화면은 움직이지 않는다', null, async () => {
@@ -1217,7 +1233,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const box = await ev(`document.getElementById('aipoint').innerText`);
     await ev(`document.querySelector('#aipoint [data-ai="dismiss"]').click()`);
     await ev(`document.querySelector('[data-act="follow"]').click()`);
-    return { ok: f.forwarded === true && v.last_focus?.response?.followed === false && /없다/.test(box), detail: `forwarded ${f.forwarded} · followed ${v.last_focus?.response?.followed} (${short(v.last_focus?.response?.note, 50)}) · 「${short(box.replace(/\s+/g, ' '), 70)}」` };
+    return { ok: f.forwarded === true && v.last_focus?.response?.followed === false && v.last_focus?.response?.note === 'not_in_results' && /없다/.test(box), detail: `forwarded ${f.forwarded} · followed ${v.last_focus?.response?.followed} (${short(v.last_focus?.response?.note, 50)}) · 「${short(box.replace(/\s+/g, ' '), 70)}」` };
   });
   await ev(`${S}.closeSheet()`);
 
@@ -1343,6 +1359,247 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   W = 1920; H = 1080;
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
 
+  // ── U4 — 검토 상태(K2) · 출처 · 편집 상태 · 저장 안 함 · 엔진 계약의 표시 ─────────────────
+  section('7e. U4 — 모델 탭의 부재 · 하중 · 설계 조건 · 접합부 = 호스트의 검토 상태(출처 포함) · 편집 상태 · 저장 안 함 · 엔진 계약');
+  const caseHost = async () => (await api('POST', '/api/mcp/action', { action: 'get_case_inputs' })).json;
+  /** 정보 창 · 트리의 출처 꼬리표 = get_case_inputs.sources, AI 가 주지 않은 칸 = 「AI: 주지 않음」 */
+  const verifyCase = async (key, label) => {
+    await select('model', key);
+    await sleep(300);
+    const host = await caseHost();
+    const r = compareNumbers(await numbers('#info'), { ...(await mcpNow()), params: paramsS, caseUS: host });
+    const tags = await ev(`[...document.querySelectorAll('#info tr[data-k^="case:"]')].map(tr=>({k:tr.dataset.k.slice(5), src:tr.querySelector('.tag[data-source]')?.dataset.source, blank:!!tr.querySelector('[data-blank="ai"]'), txt:tr.children[1].textContent.trim()}))`);
+    const badTag = tags.filter(t => !['spans', 'supports', 'laps'].includes(t.k) && (t.src !== host.sources[t.k] || t.blank !== (host.inputs[t.k] === null && host.sources[t.k] === 'ai')));
+    const tree = await ev(`[...document.querySelectorAll('#tree .row[data-k^="case:"]')].map(r=>({k:r.dataset.k.slice(5), src:r.querySelector('.tag[data-source]')?.dataset.source}))`);
+    const badTree = tree.filter(t => !['spans', 'supports', 'laps'].includes(t.k) && t.src !== undefined && t.src !== host.sources[t.k]);
+    // 수가 아닌 값(선택지 · 체크) = 호스트의 값 그대로
+    const texts = await ev(`[...document.querySelectorAll('#info [data-ckey]')].map(e=>({k:e.dataset.ckey, t:e.dataset.text, b:e.dataset.bool}))`);
+    const badText = texts.filter(x => x.t !== undefined ? String(host.inputs[x.k]) !== x.t : (host.inputs[x.k] ? '1' : '0') !== x.b);
+    return { ok: r.bad.length === 0 && (r.bySrc.case ?? 0) >= 1 && tags.length >= 3 && badTag.length === 0 && badTree.length === 0 && badText.length === 0, tags, host,
+      detail: `${label}: 수 ${r.bySrc.case ?? 0}개 = get_case_inputs(SI) · 선택지 · 체크 ${texts.length}개${badText.length ? ` 어긋남 ${JSON.stringify(badText.slice(0, 2))}` : ' = 호스트'} · 출처 꼬리표 ${tags.length}칸(트리 ${tree.length}) = sources${badTag.length ? ` · 어긋남 ${JSON.stringify(badTag.slice(0, 3))}` : ''}${badTree.length ? ` · 트리 어긋남 ${JSON.stringify(badTree.slice(0, 3))}` : ''}`
+        + ` · AI 빈칸 ${tags.filter(t => t.blank).length}${r.bad.length ? ` · ${r.bad.slice(0, 3).join(' / ')}` : ''}` };
+  };
+  const setCase = await mcp.tool('set_case_inputs', { inputs: { Lb: 1500, Cb: 1.2 }, units: 'SI', reason: '시험 — 설계 길이' });
+  const purU4 = await mcp.tool('design_purlin', purlinArgs);
+  check('AI: set_case_inputs(SI) · design_purlin(묶음을 상태에 쓴다)', setCase.success === true && !purU4.error && typeof purU4.case_rev === 'number',
+    short(`set rev ${setCase.rev} · purlin case_rev ${purU4.case_rev} · 쓴 ${purU4.case_inputs_written?.length} · 못 쓴 ${JSON.stringify(purU4.case_inputs_not_written ?? []).slice(0, 80)}`));
+  await settle(`s.caseIn && s.caseIn.rev>=${purU4.case_rev}`, '검토 상태의 새 판');
+  for (const [key, label, shotName] of [['mem', '부재', 'u40_model_member'], ['ld', '하중', 'u40_model_loads'], ['dc', '설계 조건', 'u40_model_design'], ['cj', '접합부', null], ['mat', '재료 · 설계 강도', null]]) {
+    await step(`u40 모델 탭 · ${label} — 값 · 단위 · 출처 꼬리표(기본값 · 지정 · AI · 파일 · 하중 해석 · 재료) = 호스트의 get_case_inputs`, shotName, async () => {
+      const r = await verifyCase(key, label);
+      return { ok: r.ok, detail: r.detail };
+    });
+  }
+  // 보기 계약 2절(b60e62d) — 화면은 id · 어휘만 알린다. 칩은 호스트가 받아 적은 것(버린 것이 있으면 그렇다고)
+  await step('u43a 퍼린 검토 항목을 고르면 — 보고의 위치는 {region, check_point} 뿐 · 호스트가 버린 것 없음 · 어휘 밖 보기 · 없는 항목은 호스트가 버리고 칩이 그렇다고', 'u43a_view_report', async () => {
+    const k = await keyOf(`x=>x.scope==='purlin' && x.locUS && x.locUS.region && x.us`);
+    await select('result', k);
+    await sleep(1200);
+    const v1 = await viewNow();
+    const r1 = await ev(`${S}.reported`);
+    const locKeys = Object.keys(v1.current?.selection?.location ?? {});
+    await ev(`${S}.reportNow('result/no-such-group:nothing', {kind:'check', id:'member.no.such.check', scope:'member'})`);
+    await waitFor(`(${S}.reported?.dropped||[]).length>0`, 10_000, '버린 것');
+    const r2 = await ev(`${S}.reported`);
+    const chip = await ev(`({text:document.querySelector('#share b').textContent, dropped:document.getElementById('share').dataset.dropped, item:document.getElementById('share').dataset.item})`);
+    const v2 = await viewNow();
+    await shot('u43a_dropped_chip_1920_dark');
+    await select('result', k);
+    await sleep(1200);
+    return { ok: v1.current?.selection?.id && locKeys.length >= 1 && locKeys.every(x => ['region', 'check_point'].includes(x)) && r1.dropped.length === 0
+      && r2.dropped.includes('view') && r2.dropped.includes('selection') && r2.view === null && r2.selection === null && /호스트가 버림/.test(chip.text) && chip.item === 'null'
+      && v2.current?.view === null && v2.current?.selection === null,
+      detail: `고른 것 ${v1.current?.selection?.id} · 위치 ${JSON.stringify(v1.current?.selection?.location)} · 버린 것 ${JSON.stringify(r1.dropped)} → 어휘 밖 보고: 버린 것 ${JSON.stringify(r2.dropped)} · 칩 「${short(chip.text, 70)}」 · get_view view ${v2.current?.view} selection ${v2.current?.selection}` };
+  });
+  await step('u43b 퍼린 검토 지점 — 지점 · 경간(1 부터) · 구간의 지점 · 소요 근거 = 호스트, 조합 envelope 은 「포락선」, 시트의 가정 칸 = 그 지점 자신의 알림', 'u43b_point', async () => {
+    const pts = [];
+    (purU4.regions ?? []).forEach((rg, i) => (rg.result?.checks ?? []).forEach((c, p) => pts.push({ i, p, c })));
+    const env = pts.find(x => x.c.design_checks?.some(d => d.combination === 'envelope')) ?? pts[0];
+    const d = env.c.design_checks.find(x => x.combination === 'envelope') ?? env.c.design_checks[0];
+    const k = await keyOf(`x=>x.run==='purlin:${env.i}' && x.point===${env.p} && x.id===${JSON.stringify(d.id)}`);
+    await ev(`${S}.openSheet(${JSON.stringify(k)})`);
+    await sleep(500);
+    const sh = await ev(`({loc:document.querySelector('#sheet tr[data-loc]')?.dataset.loc, locTxt:document.querySelector('#sheet tr[data-loc]')?.textContent, combo:document.querySelector('#sheet tr[data-combination]')?.dataset.combination,
+      comboTxt:document.querySelector('#sheet tr[data-combination] td.r')?.textContent, notes:[...document.querySelectorAll('#sheet tr[data-point-note]')].map(t=>t.dataset.pointNote)})`);
+    await ev(`${S}.closeSheet()`);
+    const L = d.location ?? {};
+    const loc = JSON.parse(sh.loc ?? '{}');
+    const want = { support: L.support ?? null, span: L.span ?? null, region_support: L.region_support ?? null, demand_basis: L.demand_basis ?? null };
+    const nNotes = ['warnings', 'assumptions', 'scope_notes', 'not_checked'].reduce((a, x) => a + (Array.isArray(env.c[x]) ? env.c[x].length : 0), 0);
+    const notesOk = nNotes === 0 ? sh.notes.length === 1 && sh.notes[0] === '' : sh.notes.length === nNotes;
+    const oneBased = (L.support === null || L.support >= 1) && (L.span === null || L.span >= 1) && (L.support === null) !== (L.span === null);
+    return { ok: JSON.stringify(loc) === JSON.stringify(want) && oneBased && sh.combo === d.combination && (d.combination === 'envelope' ? sh.comboTxt === '포락선' : sh.comboTxt === d.combination) && notesOk,
+      detail: `${k} · 위치 ${sh.loc} = 호스트 ${JSON.stringify(want)} · 「${short((sh.locTxt ?? '').replace(/\s+/g, ' '), 70)}」 · 조합 ${d.combination} → 「${sh.comboTxt}」 · 지점 알림 ${sh.notes.length}줄(호스트 ${nNotes})` };
+  });
+  await step('u40b AI 가 정한 해석 기준 응력이 재료 자리에(출처 AI) · 계산 시트의 「설계 가정과 출처」에 검토 상태의 출처', null, async () => {
+    await mcp.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
+    await settle(`s.model && s.model.loadFySource==='ai'`, '기준 응력 출처');
+    await select('model', 'mat');
+    const ref = await ev(`(()=>{const tr=[...document.querySelectorAll('#info tr')].find(t=>/기준 응력/.test(t.textContent)); return tr?{v:tr.querySelector('[data-v]')?.dataset.v, tag:tr.querySelector('.tag[data-source]')?.dataset.source}:null;})()`);
+    await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 13.56, Vu: 13.3, Lb: 1524, design_method: 'LRFD', units: 'SI' });
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '휨 결과');
+    const k = await keyOf(`x=>x.scope==='member' && x.id==='member.flexure.global'`);
+    await ev(`${S}.openSheet(${JSON.stringify(k)})`);
+    await sleep(400);
+    const srcs = await ev(`[...document.querySelectorAll('#sheet .cols table.t tr')].map(t=>({sym:t.children[0]?.textContent.trim(), tag:[...t.querySelectorAll('.tag[data-source]')].map(x=>x.dataset.source).join(',')})).filter(x=>x.tag)`);
+    await ev(`${S}.closeSheet()`);
+    const host = await caseHost();
+    const fyRow = srcs.find(x => /^Fy/.test(x.sym)), lbRow = srcs.find(x => /^Lb|^KyLy/.test(x.sym));
+    return { ok: !!ref && Math.abs(Number(ref.v) - 295) < 1e-6 && ref.tag === 'ai' && srcs.length >= 1 && (!fyRow || fyRow.tag === host.sources.fy),
+      detail: `기준 응력 ${ref?.v} MPa · 출처 ${ref?.tag} · 시트의 출처 ${srcs.map(x => `${x.sym}:${x.tag}`).join(' · ')}${lbRow ? '' : ''}` };
+  });
+  // 사람이 편집 상태에서 정한 값을 AI 의 설계 도구가 바꾸면 — 「AI 가 바꾼 사람의 값」, 주지 않은 칸은 「AI: 주지 않음」
+  await step('u41 편집 상태의 사람 값(Cb, 출처 지정) → AI 의 aisi_design_flexure(Cb 를 주지 않음) → Cb 「AI: 주지 않음」 · 「AI 가 바꾼 사람의 값」 · 새로 고침 없이', 'u41_ai_replaced', async () => {
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(500);
+    await wv(`D.querySelector('.tab-btn[data-tab="design"]').click(); return 1;`);
+    await sleep(400);
+    await wv(`const e=D.getElementById('design-Cb'); e.value='1.1'; e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+    let h = null;
+    for (let i = 0; i < 40 && h?.sources?.Cb !== 'user'; i++) { h = await caseHost(); await sleep(150); }
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    const flexB = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 13.56, Vu: 13.3, Lb: 1524, design_method: 'LRFD', units: 'SI' });
+    await settle(`s.caseIn && s.caseIn.rev>=${flexB.case_rev}`, '검토 상태의 새 판');
+    await select('model', 'case:Cb');
+    await sleep(300);
+    const s = await ev(`({cb:[...document.querySelectorAll('#info tr[data-k="case:Cb"]')].map(t=>t.children[1].textContent.trim()+'|'+(t.querySelector('.tag[data-source]')||{}).dataset?.source)[0], rep:[...document.querySelectorAll('#info [data-replaced] li')].map(l=>l.dataset.key+':'+l.textContent)})`);
+    const replaced = (flexB.case_inputs_replaced ?? []).map(x => x.key);
+    return { ok: h?.sources?.Cb === 'user' && replaced.includes('Cb') && /AI: 주지 않음\|ai/.test(s.cb ?? '') && s.rep.some(x => /^Cb:/.test(x)),
+      detail: `편집 상태 Cb → 호스트 ${h?.inputs?.Cb}(${h?.sources?.Cb}) · AI 응답 case_inputs_replaced ${JSON.stringify(replaced)} · 화면 「${s.cb}」 · 「AI 가 바꾼 사람의 값」 ${short(s.rep, 120)}` };
+  });
+  await step('u42 편집 상태(템플릿 09) — 띠 「이번 편집 — 바뀐 것 N」 · 설계 Fy 를 고치면 뒤의 트리 · 정보 창이 곧바로 · 제목 줄 ● · 저장하면 ● 가 사라진다', 'u42_edit_state', async () => {
+    await select('model', 'mat');
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(500);
+    await wv(`D.querySelector('.tab-btn[data-tab="preprocessor"]').click(); return 1;`);
+    await sleep(300);
+    await wv(`const e=D.getElementById('design-fy')||D.getElementById('input-fy'); const t=D.getElementById('design-fy'); t.value='305'; t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); return !!e;`);
+    await waitFor(`!!${S}.state.caseIn && ${S}.state.caseIn.sources.fy==='user'`, 15_000, '호스트의 fy');
+    await sleep(500);
+    const st = await ev(`({strip:document.getElementById('editstrip').innerText, chips:[...document.querySelectorAll('#editstrip [data-change]')].map(c=>c.dataset.change), hidden:document.getElementById('editstrip').hidden,
+      tree:[...document.querySelectorAll('#tree .row[data-k="case:fy"]')].map(r=>r.querySelector('[data-v]')?.dataset.v+'|'+r.querySelector('.tag[data-source]')?.dataset.source)[0], fname:document.querySelector('#tbar .fname').textContent})`);
+    await shot('u42_edit_state_1920_dark');
+    const host = await caseHost();
+    const fySI = host.inputs.fy * US_TO_SI.stress;
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+    await sleep(300);
+    const after = await ev(`({editing:${S}.ui.editing, sel:${S}.ui.sel, tab:${S}.ui.tab})`);
+    const file = path.join(tmp, 'u4-saved.csd');
+    const sv = await serve.ipc('save', { file }, 60_000);
+    await waitFor(`document.querySelector('#tbar .fname').dataset.dirty==='0'`, 15_000, '저장 뒤 ● 사라짐');
+    const fname2 = await ev(`document.querySelector('#tbar .fname').textContent`);
+    return { ok: !st.hidden && st.chips.includes('fy') && /바뀐 것 [1-9]/.test(st.strip) && Math.abs(Number(st.tree?.split('|')[0]) - fySI) < 1e-6 && /\|user$/.test(st.tree ?? '') && /●$/.test(st.fname)
+      && after.editing === false && after.sel === 'mat' && after.tab === 'model' && sv?.ok && !/●/.test(fname2),
+      detail: `띠 「${short(st.strip.replace(/\s+/g, ' '), 80)}」 · 칩 ${st.chips.join(',')} · 트리 설계 Fy ${st.tree} (호스트 ${fySI.toFixed(3)} MPa) · 제목 「${st.fname}」 · Esc → 편집 ${after.editing} · 고른 것 ${after.tab}/${after.sel} 그대로 · 저장 ${sv?.ok} → 「${fname2}」` };
+  });
+  // 엔진 계약(b288448)의 표시 — 각 경우를 호스트 값과
+  const cs = async (label, args) => { const r = await mcp.tool(args.tool, { detail: 'full', ...args.p, units: 'SI' }); check(`AI: ${label}`, !r.error, short(r.error ?? `판정 ${r.pass}`)); return r; };
+  await cs('design_connection 볼트(e 가정 — J6.1 미평가가 지배)', { tool: 'design_connection', p: { connection_type: 'bolt', t1: 2.286, t2: 2.286, Fu: 400, Fy: 295, d: 12.7, n: 2, s: 38.1, Pu: 13.34, design_method: 'LRFD' } });
+  await settle(`s.runs.some(r=>r.key==='conn' && r.rows.some(x=>x.id==='conn.j6.shear_rupture'))`, '볼트 결과');
+  await step('u44a 무리의 지배가 미검토 — 「지배 — 미검토」 · 「미검토 (참고 판정비 r)」 · 「평가한 최대」 줄(머리 비로 쓰지 않는다)', 'u44a_governs_not_evaluated', async () => {
+    const hc = await hostRes();
+    const eng = hc.us.conn.design_checks.find(c => c.governs && c.governs_basis === 'not_evaluated' && c.highest_evaluated);
+    const k = await keyOf(`x=>x.scope==='connection' && x.id===${JSON.stringify(eng?.id)}`);
+    await ev(`${S}.openSheet(${JSON.stringify(k)})`);
+    await sleep(400);
+    const c = await ev(`(()=>{const c=document.querySelector('#sheet [data-card].on'); return {basis:c?.querySelector('[data-governs-basis]')?.dataset.governsBasis, gov:c?.querySelector('[data-governs-basis]')?.textContent, head:c?.querySelector('header')?.textContent, high:c?.querySelector('[data-highest]')?.dataset.highest};})()`);
+    await ev(`${S}.closeSheet()`);
+    await select('result', k);
+    const inf = await ev(`({un:document.querySelector('#info [data-un-head]')?.textContent, big:!!document.querySelector('#info .hd .big [data-ratio]'), high:document.querySelector('#info [data-highest]')?.textContent})`);
+    const rr = hc.connSI.design_checks.find(x => x.id === eng.id)?.reference?.ratio;
+    const refTxt = typeof rr === 'number' ? /참고 판정비/.test(c.head ?? '') : true;
+    return { ok: !!eng && c.basis === 'not_evaluated' && /지배 — 미검토/.test(c.gov ?? '') && c.high === eng.highest_evaluated.id && refTxt && /미검토/.test(inf.un ?? '') && !inf.big && /평가한 최대/.test(inf.high ?? ''),
+      detail: `${eng?.id} · 「${c.gov}」 · 머리 「${short((c.head ?? '').replace(/\s+/g, ' '), 70)}」 · 평가한 최대 ${c.high}(엔진 ${eng?.highest_evaluated?.id}) · 정보 창 「${inf.un}」 머리 비 없음 ${!inf.big} · 「${short(inf.high, 60)}」` };
+  });
+  await cs('design_connection 두꺼운 볼트(적용범위 밖)', { tool: 'design_connection', p: { connection_type: 'bolt', t1: 6.35, t2: 6.35, Fu: 400, Fy: 295, d: 12.7, n: 2, s: 38.1, e: 25.4, Pu: 13.34, design_method: 'LRFD' } });
+  await settle(`s.conn && s.runs.some(r=>r.key==='conn' && r.rows.some(x=>x.us && x.us.out_of_scope))`, '범위 밖 결과');
+  await step('u44b 적용 범위 밖 항목 — 미검토, 그 수는 「참고 — 적용 범위 밖」으로만', 'u44b_out_of_scope', async () => {
+    const hc = await hostRes();
+    const eng = hc.us.conn.design_checks.find(c => c.out_of_scope && c.reference);
+    const k = await keyOf(`x=>x.scope==='connection' && x.id===${JSON.stringify(eng?.id)}`);
+    await ev(`${S}.openSheet(${JSON.stringify(k)})`);
+    await sleep(400);
+    const c = await ev(`(()=>{const c=document.querySelector('#sheet [data-card].on'); return {v:c?.dataset.verdict, head:c?.querySelector('header')?.textContent, ref:c?.querySelector('[data-reference]')?.textContent};})()`);
+    const r = compareNumbers(await numbers('#sheet'), { ...(await mcpNow()), params: paramsS, ...hc });
+    await ev(`${S}.closeSheet()`);
+    return { ok: !!eng && c.v === 'not_evaluated' && /적용 범위 밖/.test(c.head ?? '') && /참고 — 적용 범위 밖/.test(c.ref ?? '') && r.bad.length === 0,
+      detail: `${eng?.id}(out_of_scope ${eng?.out_of_scope}) · 「${short((c.head ?? '').replace(/\s+/g, ' '), 70)}」 · 「${short(c.ref, 70)}」 · 수 ${r.compared}개 = 호스트` };
+  });
+  await cs('design_connection 아크 스폿(비의 꼴)', { tool: 'design_connection', p: { connection_type: 'arc_spot', t1: 1.524, t2: 6.35, Fu: 400, Fy: 295, d: 19.05, n: 2, Pu: 13.34, Tu: 4.45, Fxx: 482.6, design_method: 'LRFD' } });
+  await settle(`s.runs.some(r=>r.key==='conn' && r.rows.some(x=>x.us && x.us.ratio_form))`, '아크 스폿 결과');
+  await step('u44c 비의 꼴(ratio_form) — 원문 좌변 · 견줄 비 · 꼴을 함께', 'u44c_ratio_form', async () => {
+    const hc = await hostRes();
+    const eng = hc.us.conn.design_checks.find(c => c.ratio_form);
+    const k = await keyOf(`x=>x.scope==='connection' && x.id===${JSON.stringify(eng?.id)}`);
+    await ev(`${S}.openSheet(${JSON.stringify(k)})`);
+    await sleep(400);
+    const c = await ev(`(()=>{const c=document.querySelector('#sheet [data-card].on'); return {rf:c?.querySelector('[data-ratio-form]')?.dataset.ratioForm, fin:c?.querySelector('[data-final]')?.textContent ?? c?.textContent};})()`);
+    await ev(`${S}.closeSheet()`);
+    return { ok: !!eng && c.rf === eng.ratio_form && /원문 좌변|견줄 비|비의 꼴/.test(c.fin ?? ''), detail: `${eng?.id} · 꼴 ${c.rf} = 엔진 ${eng?.ratio_form} · 「${short((c.fin ?? '').replace(/\s+/g, ' '), 90)}」` };
+  });
+  await cs('aisi_design_flexure Lb 0(횡좌굴 없음 — 끝없는 값)', { tool: 'aisi_design_flexure', p: { Fy: 295, Fu: 400, Mu: 6.78, Vu: 8.9, Lb: 0, design_method: 'LRFD' } });
+  await settle(`s.runs.some(r=>r.key==='design' && r.rows.some(x=>JSON.stringify(x.us).includes('"unbounded":true')))`, '끝없는 값');
+  await step('u44d 끝없는 값(unbounded) — 「∞」, SI 로 바꾸지 않는다', 'u44d_unbounded', async () => {
+    const k = await keyOf(`x=>x.scope==='member' && JSON.stringify(x.us).includes('"unbounded":true')`);
+    await ev(`${S}.openSheet(${JSON.stringify(k)})`);
+    await sleep(400);
+    const n = await ev(`[...document.querySelectorAll('#sheet [data-card].on [data-unbounded]')].map(x=>x.textContent)`);
+    const bad = await ev(`/1000000|1e\\+6|6894757/.test(document.getElementById('sheet').textContent)`);
+    await ev(`${S}.closeSheet()`);
+    return { ok: n.length >= 1 && n.every(x => x === '∞') && !bad, detail: `${k} · ∞ ${n.length}곳 · 1e6 · 그 SI 값이 글에 없음 ${!bad}` };
+  });
+  await cs('design_lap_connection Mnd 없이', { tool: 'design_lap_connection', p: { d: 200, t: 2.3, Fy: 295, Fu: 400, lap_left_in: 600, lap_right_in: 600, Mu_support: 11.98, Vu_support: 11.12,
+    fastener_type: 'bolt', fastener_dia: 12.7, n_rows: 2, end_distance: 35.56, design_method: 'LRFD', Se: 49160, Vn: 44.48 } });
+  await settle(`s.lap && s.runs.some(r=>r.key==='lap' && r.rows.some(x=>x.id==='lap.block_shear'))`, '랩 결과');
+  await step('u44e 랩 — 블록 전단 항목(미검토 · 판정에 안 듦)과 범위 글 · Mnd 없이 뒤틀림은 미검토(까닭 = 엔진)', 'u44e_lap', async () => {
+    const hc = await hostRes();
+    const bs = hc.us.lap.design_checks.find(c => c.id === 'lap.block_shear');
+    const ld = hc.us.lap.design_checks.find(c => c.id === 'lap.flexure.distortional');
+    const k = await keyOf(`x=>x.scope==='lap' && x.id==='lap.block_shear'`);
+    await select('result', k);
+    const inf = await ev(`({scope:[...document.querySelectorAll('#info .sec')].filter(s=>/범위/.test(s.querySelector('h4')?.textContent??'')).map(s=>s.textContent).join(' '), rows:[...document.querySelectorAll('#info tr[data-id]')].map(t=>t.dataset.id+':'+t.lastElementChild.textContent.trim())})`);
+    await ev(`${S}.openSheet(${JSON.stringify(await keyOf(`x=>x.scope==='lap' && x.id==='lap.flexure.distortional'`))})`);
+    await sleep(300);
+    const reason = await ev(`document.querySelector('#sheet [data-card].on [data-reason]')?.textContent`);
+    await ev(`${S}.closeSheet()`);
+    return { ok: bs?.verdict === 'not_evaluated' && bs.counts === false && /J6\.3/.test(inf.scope) && inf.rows.some(x => /^lap\.block_shear:미검토/.test(x)) && ld?.verdict === 'not_evaluated' && reason === String(ld.reason),
+      detail: `블록 전단 ${bs?.verdict}(counts ${bs?.counts}) · 범위 글에 J6.3 ${/J6\.3/.test(inf.scope)} · 뒤틀림 ${ld?.verdict} 「${short(reason, 70)}」` };
+  });
+  // AI 의 load_project 가 저장하지 않은 변경을 버리면 — 막지 않고 알린다
+  await step('u45 저장하지 않은 변경이 있는데 AI 가 load_project — 막지 않고 화면에 알린다(caseDiscarded)', 'u45_discarded', async () => {
+    await mcp.tool('set_case_inputs', { inputs: { Lb: 1600 }, units: 'SI', reason: '시험' });
+    await waitFor(`document.querySelector('#tbar .fname').dataset.dirty==='1'`, 10_000, '더러움');
+    const lp = await mcp.tool('load_project', { filepath: csd });
+    const seen = await waitFor(`(()=>{const t=[...document.querySelectorAll('#status .toast')].map(t=>t.textContent).find(t=>/저장하지 않은 변경을 버리고/.test(t)); const c=${S}.state.lastChange; return t || (c && /버리고 열었다/.test(c.text) ? '(상태 줄) '+c.text : null);})()`, 15_000, '알림').catch(() => null);
+    return { ok: !lp.error && !!lp.discarded_unsaved_changes && !!seen, detail: `load_project ${lp.error ? lp.error : '성공'} · discarded ${short(lp.discarded_unsaved_changes, 80)} · 알림 「${short(seen, 70)}」` };
+  });
+  // 그림 — 편집 상태 · 모델 탭 · 제목 줄 ● — 1920 · 960, 어두운 · 밝은
+  await mcp.tool('set_case_inputs', { inputs: { Lb: 1500 }, units: 'SI', reason: '그림' });
+  for (const [w, h] of [[1920, 1080], [960, 900]]) {
+    W = w; H = h;
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    for (const th of ['dark', 'light']) {
+      await ev(`${S}.setTheme(${JSON.stringify(th)})`);
+      await step(`u46 그림 ${w}px · ${th === 'dark' ? '어두운' : '밝은'} — 모델 탭(부재 · 출처) · 편집 상태 · 제목 줄 ●`, null, async () => {
+        await select('model', 'mem');
+        await sleep(300);
+        await shot(`u46_model_${w}_${th}`);
+        await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+        await sleep(600);
+        await wv(`D.querySelector('.tab-btn[data-tab="loads"]').click(); return 1;`);
+        await sleep(500);
+        await shot(`u46_edit_${w}_${th}`);
+        await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+        await sleep(300);
+        const s = await ev(`({sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth})`);
+        return { ok: s.sw <= s.cw, detail: `scrollWidth ${s.sw}/${s.cw}` };
+      });
+    }
+  }
+  await ev(`${S}.setTheme('dark')`);
+  W = 1920; H = 1080;
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+
   section('7b. 편집 상태(F2) — 끼운 지금의 화면이 그대로 돈다');
   await step('u07 끼운 웹뷰가 붙어 있다(숨김) · F2 로 보이고 · 그 「해석 실행」 결과를 새 화면이 받는다', 'u07_edit', async () => {
     await waitWv(`const h=D.documentElement; return h.getAttribute('data-stcfsd-bridge')==='connected' && h.hasAttribute('data-stcfsd-replayed') && D.querySelectorAll('.tab-btn').length>=6;`, 60_000, '끼운 웹뷰 연결');
@@ -1354,8 +1611,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const before = await seq();
     await wv(`D.querySelector('.tab-btn[data-tab="design"]').click(); return 1;`);
     await sleep(300);
+    // 사람이 하중 케이스를 고르고 실행한다 — 앞 단계(u45 가 연 파일)의 케이스가 조합이면 웹뷰의 해석은 설계용 무리가 없는 사용자 분포가 된다
+    await wv(`const e=D.getElementById('select-load-case'); e.value='bending_xx_pos'; e.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+    await sleep(300);
     await wv(`D.getElementById('btn-run-analysis').click(); return 1;`);
-    await settle(`s.msgSeq>${before} && s.stages.fsm.state==='ok' && s.dsm`, '웹뷰의 해석 결과', 300_000);
+    await settle(`s.msgSeq>${before} && s.stages.fsm.state==='ok' && s.dsm`, '웹뷰의 해석 결과', 120_000);
     const fam = await ev(`${S}.state.dsm.family`);
     const chk = await ev(`${S}.state.stages.chk`);
     return { ok: chk.state === 'stale' && hiddenBefore === 'hidden' && shown.vis === 'visible' && shown.editing && shown.badge && /편집 마치기/.test(shown.btn) && shown.w > 800,
@@ -1407,15 +1667,20 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   const bc2 = await mcp.tool('set_boundary_condition', { BC: 'C-C' });
   await step('u33 낡음 = 호스트의 무효 장부 — 까닭 · 원인, 페이지를 새로 고쳐도 그대로(화면의 기억이 아니다)', 'u33_ledger', async () => {
     await settle(`s.stages.fsm.state==='stale' && s.stages.chk.state==='stale'`, '장부의 낡음');
-    const a = await ev(`({fsm:${S}.state.stages.fsm.note, chk:${S}.state.stages.chk.note, inv:(${S}.state.full.invalidated||[]).map(e=>e.kind+':'+e.reason)})`);
+    const a = await ev(`({fsm:${S}.state.stages.fsm.note, chk:${S}.state.stages.chk.note, inv:(${S}.state.full.invalidated||[]).map(e=>e.kind+':'+e.reason), ci:JSON.stringify([${S}.state.caseIn.inputs]), wvFy:null})`);
+    a.wvFy = await wv(`return D.getElementById('design-fy').value;`).catch(() => null);
     await cdp.send('Page.reload', { ignoreCache: false });
     await waitFor(`!!window.__stcfsdUi && window.__stcfsdUi.state.ready && window.__stcfsdUi.state.full`, 60_000, '다시 실림');
     await ev(`${S}.review()`);
     await settle(`s.stages.fsm.state==='stale'`, '새로 고친 뒤 낡음', 30_000);
-    const b = await ev(`({fsm:${S}.state.stages.fsm.note, chk:${S}.state.stages.chk.state, seen:(()=>{try{return sessionStorage.getItem('stcfsd.ui.seen.v1');}catch{return 'x';}})(), tree:document.getElementById('tree').innerText})`);
+    await settle(`!!s.caseIn`, '검토 상태');
+    const b = await ev(`({fsm:${S}.state.stages.fsm.note, chk:${S}.state.stages.chk.state, seen:(()=>{try{return sessionStorage.getItem('stcfsd.ui.seen.v1');}catch{return 'x';}})(), tree:document.getElementById('tree').innerText, ci:JSON.stringify([${S}.state.caseIn.inputs])})`);
+    // 끼운 설계 화면도 다시 실렸다 — 호스트가 두 번째 caseHello 에 다시 보낸 상태로 칸이 그대로(옛 되살림 기법 없이)
+    const wvFy2 = await waitWv(`const v=D.getElementById('design-fy'); return v && v.value===${JSON.stringify(a.wvFy)} ? v.value : null;`, 30_000, '설계 화면의 칸').catch(() => null);
     await select('result', 'fsm');
-    return { ok: !bc2.error && a.inv.length >= 2 && /호스트가 결과를 지웠다/.test(a.fsm) && b.fsm === a.fsm && b.chk === 'stale' && b.seen === null,
-      detail: `장부 ${a.inv.slice(0, 3).join(' · ')} · 「${short(a.fsm, 70)}」 · 새로 고침 뒤 같은 까닭 ${b.fsm === a.fsm} · 부재 검토 ${b.chk} · 화면 기억(sessionStorage) ${b.seen}` };
+    return { ok: !bc2.error && a.inv.length >= 2 && /호스트가 결과를 지웠다/.test(a.fsm) && b.fsm === a.fsm && b.chk === 'stale' && b.seen === null && a.ci === b.ci && wvFy2 === a.wvFy,
+      detail: `장부 ${a.inv.slice(0, 3).join(' · ')} · 「${short(a.fsm, 70)}」 · 새로 고침 뒤 같은 까닭 ${b.fsm === a.fsm} · 부재 검토 ${b.chk} · 화면 기억(sessionStorage) ${b.seen}`
+        + ` · 검토 상태의 입력 같음 ${a.ci === b.ci} · 설계 화면 설계 Fy ${a.wvFy} → ${wvFy2}` };
   });
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });
   await mcp.tool('run_analysis');

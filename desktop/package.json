@@ -14,6 +14,7 @@
     "test": "npm run typecheck && npm run build && node host/test/smoke.mjs && node host/test/bridge.mjs && node host/test/connect.mjs && node ui/test/ui.mjs && node installer/test/unit.mjs",
     "serve": "node host/dist/serve.js",
     "serve:ui": "node host/dist/serve.js --ui",
+    "serve:classic": "node host/dist/serve.js --ui classic",
     "test:bridge": "npm run build && node host/test/bridge.mjs",
     "test:connect": "npm run build && node host/test/connect.mjs",
     "test:ui": "npm run build && node ui/test/ui.mjs",

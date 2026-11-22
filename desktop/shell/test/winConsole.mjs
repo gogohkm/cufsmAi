@@ -39,13 +39,15 @@ check('Windows 가 아니면 감싸지 않는다', U.hideChildConsoles({ spawn: 
 
 // ── parseArgs ──
 const cwd = path.resolve(tmp);
-check('파일 연결 꼴: StCFSD.exe "a.csd"', eq(U.parseArgs(['StCFSD.exe', 'a.csd'], cwd, false), { open: path.join(cwd, 'a.csd') }));
+check('파일 연결 꼴: StCFSD.exe "a.csd" — 기본 화면은 새 검토 화면(U4)', eq(U.parseArgs(['StCFSD.exe', 'a.csd'], cwd, false), { screen: 'ui', open: path.join(cwd, 'a.csd') }));
 check('개발판: electron . a.csd --user-data d --theme light', eq(U.parseArgs(['electron.exe', '.', 'a.csd', '--user-data', 'd', '--theme', 'light'], cwd, true),
-  { open: path.join(cwd, 'a.csd'), userData: path.join(cwd, 'd'), theme: 'light' }));
-check('--open=x.csd · Chromium 스위치는 무시', eq(U.parseArgs(['StCFSD.exe', '--enable-logging', '--open=x.csd'], cwd, false), { open: path.join(cwd, 'x.csd') }));
-check('.csd 가 아닌 맨 인자는 열지 않는다', eq(U.parseArgs(['StCFSD.exe', 'readme.txt'], cwd, false), {}));
-check('--ui: 새 검토 화면(U1) — 없으면 틀(기본)', eq(U.parseArgs(['electron.exe', '.', '--ui', 'a.csd'], cwd, true), { ui: true, open: path.join(cwd, 'a.csd') })
-  && U.parseArgs(['StCFSD.exe', 'a.csd'], cwd, false).ui === undefined);
+  { screen: 'ui', open: path.join(cwd, 'a.csd'), userData: path.join(cwd, 'd'), theme: 'light' }));
+check('--open=x.csd · Chromium 스위치는 무시', eq(U.parseArgs(['StCFSD.exe', '--enable-logging', '--open=x.csd'], cwd, false), { screen: 'ui', open: path.join(cwd, 'x.csd') }));
+check('.csd 가 아닌 맨 인자는 열지 않는다', eq(U.parseArgs(['StCFSD.exe', 'readme.txt'], cwd, false), { screen: 'ui' }));
+check('--ui classic · --ui=classic · --classic → 예전의 틀(한 판 동안), --ui 만 → 새 화면(예전 스위치를 그대로 받는다)',
+  eq(U.parseArgs(['electron.exe', '.', '--ui', 'classic', 'a.csd'], cwd, true), { screen: 'classic', open: path.join(cwd, 'a.csd') })
+  && U.parseArgs(['StCFSD.exe', '--ui=classic'], cwd, false).screen === 'classic' && U.parseArgs(['StCFSD.exe', '--classic'], cwd, false).screen === 'classic'
+  && eq(U.parseArgs(['electron.exe', '.', '--ui', 'a.csd'], cwd, true), { screen: 'ui', open: path.join(cwd, 'a.csd') }));
 
 // ── placeWindow ──
 const primary = { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 0, width: 1920, height: 1040 } };

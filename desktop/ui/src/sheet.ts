@@ -17,8 +17,9 @@ import { esc, tip } from './dom';
 import { bandVar, none, num, ratio, sigText } from './format';
 import { memberSvg } from './member';
 import { BUCKLING_METHOD_KO, SOURCE_KO, STEP_KO, VERDICT_KO, sectionLabel } from './names';
-import { allRows, POINT_KO, rowOfKey, state, type CheckRow, type Run } from './store';
+import { allRows, POINT_KO, rowOfKey, state, type CheckRow, type Run, COMBO_KO, locWords } from './store';
 import { kindOfQuantity, LABEL } from './units';
+import { caseTag, ENGINE_TO_CASE } from './caseFields';
 
 /** 펼친 덩어리(고른 것 말고 사람이 연 것) */
 const expanded = new Set<string>();
@@ -26,6 +27,10 @@ export function toggleCard(key: string): void { if (expanded.has(key)) { expande
 
 /** `{symbol, value, quantity}`(SI) 하나 → 수 + 단위. base = 그 객체의 경로(끝에 `.`), quantity 가 어휘에 없으면 US 그대로라고 밝힌다 */
 export function qnum(q: any, base: string, o: { unit?: boolean; sig?: number } = {}): string {
+  // 끝없는 값(계약 3절 · 9.8 — 횡좌굴 없음 → Fcre = ∞): 숫자로 싣지 않고 SI 로 바꾸지도 않는다 — ∞
+  if (q && typeof q === 'object' && q.unbounded === true) {
+    return `<span class="num" data-unbounded="1" data-usrc="${esc(base)}value"${tip(String(q.reason ?? '끝이 없다(엔진)'))}>∞</span>`;
+  }
   if (!q || typeof q !== 'object' || typeof q.value !== 'number' || !Number.isFinite(q.value)) { return none('값 없음'); }
   const kind = kindOfQuantity(q.quantity);
   if (kind === null) {
@@ -123,6 +128,8 @@ function stepRow(st: any, si: any, base: string, k: number): string {
   ins.forEach((q: any) => { const t = sourceTag(q?.source); if (t && !refs.includes(t)) { refs.push(t); } });
   if (ins.some((q: any) => q?.source?.rounded_to !== undefined || q?.rounded_to !== undefined) || st?.rounded_to !== undefined) { refs.push(`<span class="why2"${tip('엔진이 반올림한 값을 이 단계에 썼다(계약 5절) — 결과는 엔진의 값 그대로')}>반올림한 입력</span>`); }
   if (st?.note) { refs.push(`<span class="why2">${esc(String(st.note))}</span>`); }
+  // 원문 식 자체가 US 단위로 쓰인 단계(계약 3절 · 9.9 — 예 Eq. J3.3.2-1): SI 화면은 그렇다고 밝힌다
+  if (st?.expr_units === 'US') { refs.push(`<span class="tag def" data-expr-units="US"${tip(String(st.units_note ?? ''))}>US 단위로 쓴 식</span><span class="why2">${esc(String(st.units_note ?? ''))}</span>`); }
   const ref = refs.length ? `<span class="ref">${refs.join(' ')}</span>` : '';
   let body: string;
   if (kind === 'branch') {
@@ -170,26 +177,26 @@ function card(r: CheckRow, n: string, sel: string): string {
   const steps: any[] = Array.isArray(r.us?.steps) ? r.us.steps : [];
   const stepsSI: any[] = Array.isArray(r.si?.steps) ? r.si.steps : steps;
   const cls = `card${r.governs ? ' gov' : ''}${r.key === sel ? ' on' : ''}${un ? ' un' : ''}`;
-  const right = un ? `<span class="verdict un">${VERDICT_KO[v].text}${r.us?.reason ? ' — 까닭' : ''}</span>`
-    : `${dcShort(r)}${typeof r.ratio === 'number' ? ratio(r.ratio, v === 'fail', `${r.src}ratio`) : '<span class="faint">비 없음</span>'}`;
+  const right = un ? `<span class="verdict un">${unText(r)}</span>`
+    : `${dcShort(r)}${typeof r.ratio === 'number' ? ratio(r.ratio, v === 'fail', `${r.src}ratio`) : '<span class="faint">비 없음</span>'}${ratioFormTag(r)}`;
   const head = `<header data-card-head="${esc(r.key)}"${tip(`${r.id}${r.governs ? ' · 무리의 지배 항목(governs)' : ''}${r.counts ? '' : ' · 판정에 들지 않는다(counts: false)'}`)}>`
-    + `<span class="dot ${dot}"></span><h5>${esc(n)} ${esc(r.name)}</h5>${clauseChip(r)}${r.governs ? '<span class="tag drv"' + tip('엔진이 고른 그 무리의 지배 항목') + '>지배</span>' : ''}`
+    + `<span class="dot ${dot}"></span><h5>${esc(n)} ${esc(r.name)}</h5>${clauseChip(r)}${r.governs ? `<span class="tag drv" data-governs-basis="${esc(String(r.us?.governs_basis ?? ''))}"${tip(governsTip(r))}>${r.us?.governs_basis === 'not_evaluated' ? '지배 — 미검토' : '지배'}</span>` : ''}`
     + `${r.counts ? '' : '<span class="tag"' + tip('적용 조건 — 판정에 들지 않는다') + '>조건</span>'}<span class="sp"></span>${right}<span class="faint">${open ? '▾' : '▸'}</span></header>`;
   let body = '';
   if (open) {
     if (un) {
       const ref = r.si?.reference;
-      body = `<div class="cbody dim"><div data-reason>${esc(String(r.us?.reason ?? '엔진이 까닭을 적지 않았다'))}</div>`
+      body = `<div class="cbody dim"><div data-reason>${esc(String(r.us?.reason ?? '엔진이 까닭을 적지 않았다'))}</div>${highestLine(r)}`
         + (r.us?.steps_unavailable ? `<div class="why2">계산 과정 없음 — ${esc(String(r.us.steps_unavailable))}</div>` : '')
-        + (ref && typeof ref === 'object' ? `<div class="why2">참고(판정에 쓰지 않음): ${ref.capacity ? `설계강도 ${qnum(ref.capacity, `${r.src}reference.capacity.`)}` : ''}${typeof ref.ratio === 'number' ? ` · 비 ${sigText(ref.ratio, 3)}` : ''}</div>` : '')
+        + (ref && typeof ref === 'object' ? `<div class="why2" data-reference>${r.us?.out_of_scope ? `참고 — 적용 범위 밖(${esc(String(r.us.out_of_scope))})` : '참고(판정에 쓰지 않음)'}: ${ref.capacity ? `설계강도 ${qnum(ref.capacity, `${r.src}reference.capacity.`)}` : ''}${typeof ref.ratio === 'number' ? ` · 비 ${sigText(ref.ratio, 3)}` : ''}</div>` : '')
         + (steps.length ? `<div class="calc">${steps.map((st, k) => stepRow(st, stepsSI[k], `${r.src}steps.${k}.`, k)).join('')}</div>` : '')
         + '</div>';
     } else if (!steps.length) {
       body = `<div class="cbody dim">계산 과정이 없다 — ${esc(String(r.us?.steps_unavailable ?? '엔진이 이 항목의 단계를 내지 않았다'))}. 엔진이 준 것: `
         + `${r.si?.demand ? `소요 ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}${r.si?.capacity ? ` · 설계강도 ${qnum(r.si.capacity, `${r.src}capacity.`)}` : ''}${typeof r.ratio === 'number' ? ` · 비 ${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}` : ''}</div>`;
     } else {
-      const fin = `<div class="row" data-final><span>판정</span><span>${r.si?.demand ? `${esc(String(r.si.demand.symbol ?? ''))} ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}`
-        + `${r.si?.capacity ? ` / ${esc(String(r.si.capacity.symbol ?? ''))} ${qnum(r.si.capacity, `${r.src}capacity.`)}` : ''}${typeof r.ratio === 'number' ? ` = <b>${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}</b>` : ''} → ${verdictSpan(v)}`
+      const fin = `<div class="row" data-final><span>판정</span><span>${r.us?.ratio_form ? '원문 좌변 ' : ''}${r.si?.demand ? `${esc(String(r.si.demand.symbol ?? ''))} ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}`
+        + `${r.si?.capacity ? `${r.us?.ratio_form ? ' ≤ ' : ' / '}${esc(String(r.si.capacity.symbol ?? ''))} ${qnum(r.si.capacity, `${r.src}capacity.`)}` : ''}${typeof r.ratio === 'number' ? `${r.us?.ratio_form ? ', 견줄 비 ' : ' = '}<b>${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}</b>${ratioFormTag(r)}` : ''} → ${verdictSpan(v)}`
         + `${r.us?.reason ? ` <span class="why2">${esc(String(r.us.reason))}</span>` : ''}${r.us?.trusted === false ? ' <span class="tag def"' + tip('엔진이 이 값을 판정에 믿지 않는다(trusted: false)') + '>믿지 않는 값</span>' : ''}</span></div>`;
       // 판정 단계가 있으면 그것이 판정 줄이다 — 없을 때만 항목의 소요 / 설계강도 · 판정으로 맺는다
       const hasVerdictStep = steps.some(st => st?.kind === 'verdict');
@@ -199,8 +206,48 @@ function card(r: CheckRow, n: string, sel: string): string {
   return `<div class="${cls}" data-card="${esc(r.key)}" data-id="${esc(r.id)}" data-governs="${r.governs}" data-verdict="${esc(v)}" data-nsteps="${steps.length}">${head}${body}</div>`;
 }
 
+/** 미검토 · 해당 없음의 머리 글 — 참고 비가 있으면 「미검토 (참고 판정비 r)」, 적용 범위 밖이면 「참고 — 적용 범위 밖」(계약 4절 · 9.5 · 9.6) */
+export function unText(r: CheckRow): string {
+  const base = VERDICT_KO[r.verdict]?.text ?? '미검토';
+  const rr = r.si?.reference?.ratio;
+  if (r.us?.out_of_scope) { return `${base} — 참고 — 적용 범위 밖${typeof rr === 'number' ? ` (참고 판정비 ${sigText(rr, 3)})` : ''}`; }
+  if (typeof rr === 'number') { return `${base} (참고 판정비 ${sigText(rr, 3)})`; }
+  return `${base}${r.us?.reason ? ' — 까닭' : ''}`;
+}
+
+/** 비의 꼴(계약 2절 · 9.7 — 원문 좌변이 소요의 n 제곱이면 견줄 수 있는 비로 바꾼 것) */
+export function ratioFormTag(r: CheckRow): string {
+  return r.us?.ratio_form ? ` <span class="tag" data-ratio-form="${esc(String(r.us.ratio_form))}"${tip('원문의 좌변은 소요 / 강도의 거듭제곱이다 — 다른 비와 견줄 수 있게 바꾼 비(ratio_form)')}>비의 꼴 ${esc(String(r.us.ratio_form))}</span>` : '';
+}
+
+function governsTip(r: CheckRow): string {
+  const b = String(r.us?.governs_basis ?? '');
+  return b === 'not_evaluated' ? '이 무리에 평가하지 못한 항목이 있어 그것이 지배다 — 무리는 미검토(계약 4절)' : b === 'fail' ? '불합격 가운데 비가 가장 큰 것' : b === 'capacity' ? '소요가 없어 설계강도가 가장 작은 것' : '평가한 것 가운데 비가 가장 큰 것';
+}
+
+/** 「평가한 최대」(계약 9.5 — 지배가 미검토일 때 따로 한 줄. 머리 비로 쓰지 않는다) */
+export function highestLine(r: CheckRow): string {
+  const h = r.us?.highest_evaluated;
+  if (!r.governs || r.us?.governs_basis !== 'not_evaluated') { return ''; }
+  if (!h || typeof h !== 'object') { return '<div class="why2" data-highest="none">평가한 항목 없음</div>'; }
+  const name = state.runs.find(x => x.key === r.run)?.rows.find(x => x.id === h.id && x.point === r.point)?.name ?? String(h.id);
+  return `<div class="why2" data-highest="${esc(String(h.id))}">평가한 최대: ${esc(name)} ${typeof h.ratio === 'number' ? sigText(h.ratio, 3) : '—'} · ${esc(VERDICT_KO[String(h.verdict)]?.text ?? String(h.verdict ?? ''))}</div>`;
+}
+
 /** 같은 실행 · 같은 검토 지점의 항목(엔진 순서) */
 function siblings(r: CheckRow): CheckRow[] { return state.runs.find(x => x.key === r.run)?.rows.filter(x => x.point === r.point) ?? [r]; }
+
+/**
+ * 입력 · 기본값 · 재료에서 온 값이면 그 칸의 검토 상태 출처(K2 — get_case_inputs.sources: 기본값 · 지정 · AI · 파일 · 하중 해석).
+ * 엔진 인자 이름 → 검토 상태 키(caseFields.ENGINE_TO_CASE, 같은 이름이면 그대로). 퍼린 구간의 소요는 하중 해석이 정한다 — 그것은 엔진의 출처 그대로.
+ */
+function caseSourceOf(src: any): string {
+  const k = String(src?.kind ?? '');
+  if (!['user_input', 'engine_default', 'material'].includes(k) || !src?.key || !state.caseIn?.sources) { return ''; }
+  const ck = ENGINE_TO_CASE[String(src.key)] ?? String(src.key);
+  const cs = state.caseIn.sources[ck];
+  return cs ? ` <span class="why2">검토 상태</span>${caseTag(cs, state.caseIn.inputs?.[ck] === null && cs === 'ai')}` : '';
+}
 
 /** 시트 1절의 표 — 이 항목 단계 입력의 출처별 */
 function inputsTables(r: CheckRow): string {
@@ -213,17 +260,28 @@ function inputsTables(r: CheckRow): string {
     const id = `${q.symbol}|${sk}|${q?.source?.key ?? ''}|${q.value}`;
     if (seen.has(id)) { return; }
     seen.add(id);
-    const tr = `<tr><td>${esc(String(q.symbol ?? ''))}${q?.source?.key && q.source.key !== q.symbol ? ` <span class="faint">${esc(String(q.source.key))}</span>` : ''}</td><td class="r">${qnum(q, `${r.src}steps.${k}.inputs.${m}.`)}</td><td>${sourceTag(q.source)}</td></tr>`;
+    const tr = `<tr><td>${esc(String(q.symbol ?? ''))}${q?.source?.key && q.source.key !== q.symbol ? ` <span class="faint">${esc(String(q.source.key))}</span>` : ''}</td><td class="r">${qnum(q, `${r.src}steps.${k}.inputs.${m}.`)}</td><td>${sourceTag(q.source)}${caseSourceOf(q.source)}</td></tr>`;
     if (['section_property', 'material', 'buckling_analysis', 'check'].includes(sk)) { left.push(tr); } else { right.push(tr); }
   }));
   const loc = r.si?.location;
   if (loc && typeof loc === 'object') {
     const parts: string[] = [];
     if (loc.x && typeof loc.x.value === 'number') { parts.push(`x ${qnum(loc.x, `${r.src}location.x.`)}`); }
-    const words = [loc.region ? `구간 ${loc.region}` : '', loc.check_point ? POINT_KO(String(loc.check_point)) : '', loc.segment ? String(loc.segment) : '', loc.support !== undefined && loc.support !== null && !loc.check_point ? `지점 ${loc.support}` : ''].filter(Boolean);
-    right.unshift(`<tr><td>검토 위치</td><td class="r">${parts.join(' ') || '—'}</td><td><span class="tag drv"${tip('엔진 · 호스트가 붙인 이 항목의 위치(location)')}>위치</span><span class="why2">${esc(words.join(' · '))}</span></td></tr>`);
+    const words = locWords(loc);
+    right.unshift(`<tr data-loc="${esc(JSON.stringify({ support: loc.support ?? null, span: loc.span ?? null, region_support: loc.region_support ?? null, demand_basis: loc.demand_basis ?? null }))}"><td>검토 위치</td><td class="r">${parts.join(' ') || '—'}</td><td><span class="tag drv"${tip('엔진 · 호스트가 붙인 이 항목의 위치(location)')}>위치</span><span class="why2">${esc(words.join(' · '))}</span></td></tr>`);
   }
-  if (r.combination) { right.unshift(`<tr><td>하중 조합</td><td class="r">${esc(r.combination)}</td><td><span class="tag drv">하중 해석</span></td></tr>`); }
+  if (r.combination) {
+    const env = r.combination === 'envelope';
+    right.unshift(`<tr data-combination="${esc(r.combination)}"><td>하중 조합</td><td class="r">${esc(COMBO_KO(r.combination))}</td><td><span class="tag drv">하중 해석</span>${env ? `<span class="why2"${tip('여러 조합 · 패턴의 포락선 값 — 하중 해석이 격자마다의 조합을 주지 않아 어느 조합인지 말할 수 없다')}>어느 조합인지 모름</span>` : ''}</td></tr>`);
+  }
+  // 퍼린: 고른 검토 지점 자신의 알림 글(그 지점 결과의 warnings · assumptions · scope_notes · not_checked — 보기 계약 4a)
+  const pn = r.pointNotes;
+  if (pn) {
+    const lines: string[] = [
+      ...pn.warnings.map(t => ['경고', t]), ...pn.assumptions.map(t => ['가정', t]), ...pn.scope.map(t => ['범위', t]), ...pn.notChecked.map(t => ['검토 안 함', t]),
+    ].map(([k, t]) => `<tr data-point-note="${esc(k)}"><td>${esc(k)}</td><td colspan="2" class="pnote">${esc(t)}</td></tr>`);
+    right.push(lines.length ? lines.join('') : `<tr data-point-note=""><td>이 지점의 알림</td><td colspan="2">${none('없음', '엔진이 이 검토 지점에 경고 · 가정 · 범위 글을 내지 않았다')}</td></tr>`);
+  }
   const tbl = (title: string, rows: string[], empty: string) => `<table class="t"><tr><th colspan="3">${title}</th></tr>${rows.length ? rows.join('') : `<tr><td colspan="3">${none(empty)}</td></tr>`}</table>`;
   return `<div class="cols"><div>${tbl('단면과 좌굴', left, '이 항목은 단면 · 재료 · 좌굴 값을 쓰지 않았다')}</div><div>${tbl('설계 가정과 출처', right, '입력 · 기본값 · 하중 해석에서 온 값 없음')}</div></div>`;
 }
@@ -239,7 +297,7 @@ function demandsTable(r: CheckRow): string {
     if (seen.has(id)) { continue; }
     seen.add(id);
     const loc = x.si?.location?.x;
-    rows.push(`<tr><td>${esc(String(d.symbol ?? ''))} <span class="faint">${esc(x.name)}</span></td><td class="r">${qnum(d, `${x.src}demand.`)}</td><td>${esc(x.combination ?? '—')}</td>`
+    rows.push(`<tr><td>${esc(String(d.symbol ?? ''))} <span class="faint">${esc(x.name)}</span></td><td class="r">${qnum(d, `${x.src}demand.`)}</td><td>${esc(x.combination ? COMBO_KO(x.combination) : '—')}</td>`
       + `<td class="r">${loc && typeof loc.value === 'number' ? qnum(loc, `${x.src}location.x.`) : '—'}</td><td>${sourceTag(d.source)}</td></tr>`);
   }
   return `<table class="t"><thead><tr><th>항목</th><th class="r">소요</th><th>조합</th><th class="r">위치</th><th>출처</th></tr></thead><tbody>${rows.join('') || `<tr><td colspan="5">${none('소요 없음', '엔진이 소요를 받지 않았다 — 강도만 냈다')}</td></tr>`}</tbody></table>`;
@@ -286,7 +344,7 @@ export function sheetHtml(key: string, w = 900): string {
     + `${next ? `<span class="btn ghost" data-sheet-go="${esc(next.key)}"${tip('다음 항목 (Alt+→)')}>${esc(next.where)} · ${esc(next.name)} →</span>` : ''}<span style="flex:1"></span>`
     + `<span class="btn ghost" data-sheet-close${tip('Esc')}>시트 닫기 ✕</span></div>`
     + `<h3>1. 부재와 가정</h3>${inputsTables(r)}`
-    + `<h3>2. 소요강도</h3><div class="cols"><div>${demandsTable(r)}${r.combination ? `<div class="note">${esc(r.combination)}${r.pointName ? ` · ${esc(POINT_KO(r.pointName))}` : ''}</div>` : ''}</div>${miniM(r, Math.max(360, Math.round(w * 0.45)))}</div>`
+    + `<h3>2. 소요강도</h3><div class="cols"><div>${demandsTable(r)}${r.combination ? `<div class="note">${esc(COMBO_KO(r.combination))}${r.pointName ? ` · ${esc(POINT_KO(r.pointName))}` : ''}</div>` : ''}</div>${miniM(r, Math.max(360, Math.round(w * 0.45)))}</div>`
     + `<h3>3. 한계상태별 계산</h3><div class="sheet-cards">${cards}</div>`
     + (run.neTexts.length ? `<h3>엔진의 미검토 글</h3><ul class="notes">${run.neTexts.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : '')
     + '</article>';

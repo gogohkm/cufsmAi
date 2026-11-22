@@ -5,7 +5,9 @@
 import { esc, tip } from './dom';
 import { num, ratio } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
-import { isDefault, memberRuns, state, type CheckRow, type Run } from './store';
+import { isDefault, memberRuns, state, type CheckRow } from './store';
+import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
+import { caseTag } from './caseFields';
 import { si } from './units';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
@@ -14,12 +16,13 @@ export const TABS: Array<[Tab, string]> = [['work', '업무'], ['model', '모델
 export interface TNode {
   k: string; t: string;
   v?: string; vCls?: string; vHtml?: string;
+  /** 출처 꼬리표(검토 상태의 sources — caseFields.caseTag) */
+  tagHtml?: string;
   dot?: string; tip?: string; faint?: boolean; tag?: string;
   kids?: TNode[]; open?: boolean;
 }
 
 const n = (k: string, t: string, o: Partial<TNode> = {}): TNode => ({ k, t, ...o });
-const K2 = '설계 · 하중 · 접합 입력은 K2 전까지 편집 상태(F2)의 입력 칸에만 있다 — 호스트도 MCP 도구도 이 값을 알지 못한다';
 
 const STATE_V: Record<string, [string, string, string]> = {
   ok: ['일치', 'ok', 'ok'], stale: ['낡음', 'warn', 'warn'], none: ['결과 없음', 'un', ''], run: ['해석 중', 'acc', 'acc'], unk: ['결과 있음', '', ''],
@@ -66,7 +69,9 @@ export function buildTree(tab: Tab): TNode[] {
         n('mE', '탄성계수 E', { vHtml: num(si(f?.material?.E, 'stress'), { src: 'full:material.E', kind: 'stress', sig: 6 }) }),
         n('mNu', '푸아송비 ν', { vHtml: num(f?.material?.v, { src: 'full:material.v', kind: 'none', sig: 3 }) }),
         n('mG', '전단탄성계수 G', { vHtml: num(si(f?.material?.G, 'stress'), { src: 'full:material.G', kind: 'stress', sig: 6 }) }),
-        n('mFy', '설계 Fy · Fu', { v: '편집 상태에서', vCls: 'un', tip: K2 }),
+        ...caseKidNodes('mat'),
+        n('mFyRef', '해석 기준 응력', { vHtml: typeof f?.load_fy === 'number' ? num(si(f.load_fy, 'stress'), { src: 'full:load_fy', kind: 'stress' }) : '<span class="vl un">없음</span>',
+          tagHtml: refStressTag(), tip: '좌굴 해석의 기준 응력(get_full_state.load_fy) — 설계 Fy 와 다르다' }),
       ] }),
       n('cond', '해석 조건', { v: f ? (BC_KO[f.BC] ?? f.BC) : '', kids: [
         n('cBC', '경계조건', { v: f ? `${f.BC} · ${BC_KO[f.BC] ?? ''}` : '' }),
@@ -75,10 +80,10 @@ export function buildTree(tab: Tab): TNode[] {
         n('cLen', '반파장', { vHtml: nlen ? `${num(nlen.n, { src: 'full:lengths.n', kind: 'none' })}점` : '<span class="vl un">없음</span>' }),
         n('cStr', '절점 응력', { vHtml: f ? `${num(si(f.stress?.min, 'stress'), { src: 'full:stress.min', kind: 'stress', unit: false })} ~ ${num(si(f.stress?.max, 'stress'), { src: 'full:stress.max', kind: 'stress' })}` : '' }),
       ] }),
-      n('mem', '부재', { v: '편집 상태에서', vCls: 'un', tip: `스팬 · 지점 · 랩 · 간격 · 데크 — ${K2}` }),
-      n('ld', '하중', { v: '편집 상태에서', vCls: 'un', tip: `하중 케이스 · 조합 — ${K2}` }),
-      n('dc', '설계 조건', designCondNode()),
-      n('cj', '접합부', { v: '편집 상태에서', vCls: 'un', tip: `접합 입력 — ${K2}` }),
+      caseBranch('mem', '부재'),
+      caseBranch('ld', '하중'),
+      caseBranch('dc', '설계 조건'),
+      caseBranch('cj', '접합부'),
       n('asm', '가정', assumptionsNode()),
     ];
   }
@@ -151,19 +156,20 @@ export function buildTree(tab: Tab): TNode[] {
   ];
 }
 
-function lastRun(): Run | undefined { return memberRuns().find(r => r.rows.length || r.overall !== null); }
-
-function designCondNode(): Partial<TNode> {
-  const r = lastRun();
-  if (!r) { return { v: '검토 결과 없음', vCls: 'un', tip: '설계 조건 입력은 편집 상태의 칸에만 있다(K2). 검토 결과가 있으면 그 검토에 쓴 값을 보인다' }; }
-  const us = r.us, s = r.result;
-  return { v: String(us.design_method ?? ''), tip: '마지막 검토에 엔진이 쓴 값', kids: [
-    n('dc:m', '설계법', { v: String(us.design_method ?? '—') }),
-    n('dc:fy', '설계 Fy', { vHtml: num(s?.Fy_used, { src: `${r.src}Fy_used`, kind: 'stress' }) }),
-    ...(s?.Fcre_detail ? [n('dc:lb', '비지지 길이 Lb', { vHtml: num(s.Fcre_detail.Lb, { src: `${r.src}Fcre_detail.Lb`, kind: 'length' }) }),
-      n('dc:cb', 'Cb', { vHtml: num(s.Fcre_detail.Cb, { src: `${r.src}Fcre_detail.Cb`, kind: 'none', sig: 3 }) })] : []),
-  ] };
+/** 검토 상태(K2 — get_case_inputs)의 가지 하나: 값 · 출처 꼬리표 */
+function caseKidNodes(b: Branch): TNode[] {
+  return branchKids(b).map(k => n(k.k, k.t, { vHtml: k.vHtml, tagHtml: k.src ? caseTag(k.src, blankByAi(k.k.slice(5))) : undefined }));
 }
+function caseBranch(b: Branch, t: string): TNode {
+  if (!caseReady()) { return n(b, t, { v: '읽는 중', vCls: 'un', tip: state.caseErr ? `검토 상태를 읽지 못함 — ${state.caseErr}` : '호스트의 검토 상태(get_case_inputs)를 읽는 중' }); }
+  return n(b, t, { v: branchSummary(b), tip: '호스트의 검토 상태(MCP get_case_inputs 와 같은 값). 고치는 곳은 편집 상태(F2)의 설계 화면', kids: caseKidNodes(b) });
+}
+/** 해석 기준 응력의 출처 — AI 가 set_load_case 로 정했으면 AI(모델 메시지의 loadFySource — K2 결정 3) */
+function refStressTag(): string | undefined {
+  const src = state.model?.loadFySource;
+  return src === 'ai' ? caseTag('ai') : undefined;
+}
+
 
 function assumptionsNode(): Partial<TNode> {
   const kids: TNode[] = [];
@@ -182,7 +188,7 @@ export function treeHtml(nodes: TNode[], sel: string, closed: Set<string>, opene
     const open = kids.length > 0 && !closed.has(x.k) && (x.open || opened.has(x.k) || has(x));
     const v = x.vHtml !== undefined ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${x.vHtml}</span>`
       : x.v ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${esc(x.v)}</span>` : '';
-    const tag = x.tag ? `<span class="tag def"${tip(x.tag === '자체 가정' ? '기준 조항이 아닌 자체 해석(§A1.2(c)) — 힘 분배 모델' : '아무도 정하지 않아 프로그램이 채웠다')}>${esc(x.tag)}</span>` : '';
+    const tag = x.tagHtml ?? (x.tag ? `<span class="tag def"${tip(x.tag === '자체 가정' ? '기준 조항이 아닌 자체 해석(§A1.2(c)) — 힘 분배 모델' : '아무도 정하지 않아 프로그램이 채웠다')}>${esc(x.tag)}</span>` : '');
     let h = `<div class="row${d === 0 ? ' top' : ''}${x.k === sel ? ' on' : ''}${x.faint ? ' faint' : ''}" role="treeitem" data-k="${esc(x.k)}" style="padding-left:${8 + d * 14}px"${tip(x.tip)}>`
       + `<span class="tw">${kids.length ? (open ? '▾' : '▸') : ''}</span>${x.dot ? `<span class="dot ${x.dot}"></span>` : ''}`
       + `<span class="nm">${esc(x.t)}</span>${tag}${v}</div>`;

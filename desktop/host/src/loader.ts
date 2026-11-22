@@ -97,11 +97,6 @@ export interface FileResult {
   /** 호스트가 끝에 낸 알림 */
   severity?: NotifyRequest['severity'];
   message?: string;
-  /**
-   * 화면 없이 저장했을 때: 설계 탭 입력을 새로 모으지 못했다는 주의(무엇을 그대로 썼는지, 그 뒤 무엇이 바뀌었는지).
-   * 설계 입력은 K2 전까지 웹뷰에만 있다(`standin.ts`). 화면이 붙어 있으면 없다.
-   */
-  inputsNotice?: string;
 }
 
 export interface HostHandle {
@@ -130,7 +125,7 @@ export interface HostHandle {
   mcpConfigWrites(): string[];
   /** `.csd` 를 연다 — 확장의 「열기」 길(openProject → 열기 대화상자 → `_loadProjectFile`)을 그대로 탄다 */
   openProject(file: string): Promise<FileResult>;
-  /** `.csd` 로 저장한다 — 「저장」 길(saveProject → collectDesignData → 저장 대화상자 → `_writeProjectFile`) */
+  /** `.csd` 로 저장한다 — 「저장」 길(saveProject → 저장 대화상자 → `_writeProjectFile` — K2: 입력은 호스트의 검토 상태에서) */
   saveProject(file: string): Promise<FileResult>;
   unimplemented(): Array<{ name: string; count: number }>;
   dispose(): Promise<void>;
@@ -399,15 +394,10 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
         if (!designer.alive()) { return { ok: false, file: abs, message: '설계 패널이 없다' }; }
         let dialogDone = false;
         let notice: NotifyRequest | undefined;
-        let inputsNotice: string | undefined;
         scripted.clearDialogs();
         scripted.queueDialog({ kind, paths: [abs] });
         scripted.onDialog = req => { if (req.kind === kind) { dialogDone = true; } };
         scripted.onNotify = req => { if (dialogDone && !notice) { notice = req; } };
-        if (standIn) {
-          if (kind === 'open') { standIn.expectRestore(abs); }
-          standIn.onSaveNotice = text => { inputsNotice = text; };
-        }
         try {
           designer.deliver(message);
           await waitFor(() => notice, timeoutMs, `${kind === 'open' ? '열기' : '저장'}(${abs})의 끝 알림`);
@@ -415,13 +405,8 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
           scripted.onDialog = undefined;
           scripted.onNotify = undefined;
           scripted.clearDialogs();
-          if (standIn) {
-            if (kind === 'open') { standIn.restoreDone(); }
-            standIn.onSaveNotice = undefined;
-          }
         }
-        return { ok: notice!.severity !== 'error', file: abs, severity: notice!.severity, message: notice!.message,
-          ...(inputsNotice ? { inputsNotice } : {}) };
+        return { ok: notice!.severity !== 'error', file: abs, severity: notice!.severity, message: notice!.message };
       };
       // 파일 길은 한 번에 하나 — 대화상자 답과 끝 알림이 섞이지 않게.
       fileOp = fileOp.then(run, run);

@@ -1,7 +1,8 @@
 /**
- * 편집 상태(F2) — 지금의 설계 화면(탭 6개)을 `<iframe>` 으로 끼워 둔다. 페이지가 뜰 때부터 끝까지 붙어 있고(숨김),
- * 편집 상태에서만 가운데 + 오른쪽 자리에 보인다. 설계 탭 입력 · 검증 · 보고서는 K2 · K3 전까지 이 화면에만 있으므로,
- * 숨겨져 있어도 떼지 않는다 — 첫 배포판이 하던 일은 모두 여기서 그대로 된다. 다듬는 것은 U4 의 일이다.
+ * 편집 상태(F2 · 「편집 F2」 — 템플릿 09) — 지금의 설계 화면(탭 6개)을 `<iframe>` 으로 끼워 둔다. 페이지가 뜰 때부터 끝까지 붙어 있고(숨김),
+ * 편집 상태에서만 가운데 + 오른쪽 자리에 보인다(트리 · 제목 줄은 그대로, 그 아래 「이번 편집」 띠). 칸을 고치면 호스트의 검토 상태가 바뀌고(K2)
+ * 이 화면의 트리 · 정보 창 · 시트 · 진행 띠가 곧바로 따라온다 — 둘 다 호스트를 읽는다. 검증 · 보고서는 K3 전까지 이 화면에만 있다.
+ * 마치기: F2 · 「편집 마치기 F2」 · Esc(설계 화면 안에서도 — 칸 밖일 때). 돌아오면 고른 것 · 보기는 그대로다.
  *
  * 두 번째 웹뷰(좌굴 보고서)는 틀과 같이 오른쪽 칸에 띄우고 ✕ 로 호스트에 닫기를 보낸다.
  *
@@ -82,6 +83,8 @@ export function initEdit(t: 'dark' | 'light', onChange: () => void): void {
       withKey(id, k => { try { src.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, target); } catch { /* 닫힘 */ } });
     } else if (d.type === 'keydown' && d.key === 'F2' && from.id === 'designer') {
       onF2();
+    } else if (d.type === 'keydown' && d.key === 'Escape' && from.id === 'designer' && on) {
+      setEditing(false);
     }
   });
   document.getElementById('side-close')?.addEventListener('click', () => {

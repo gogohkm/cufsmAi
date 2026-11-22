@@ -71,7 +71,10 @@ export interface CheckRow {
   src: string;          // data-src 앞부분 — 그 항목의 경로(`design:design_checks.3.`)
   location: any; locUS: any; combination: string | null;
   xm: number | null;    // 검토 위치 x(m) — location.x 가 있을 때
+  /** 퍼린 검토 지점 하나의 알림 글(`regions[i].result.checks[j]` 의 warnings · assumptions · scope_notes · not_checked — 보기 계약 4a). 지점이 없으면 null */
+  pointNotes?: PointNotes | null;
 }
+export interface PointNotes { warnings: string[]; assumptions: string[]; scope: string[]; notChecked: string[] }
 
 /** 퍼린 구간의 검토 지점(띠의 막대 하나) */
 export interface CheckPoint { index: number; name: string; xm: number | null; ratio: number | null; pass: boolean | null; src: string }
@@ -132,6 +135,17 @@ export interface State {
   conn: { us: any; si: any } | null;
   /** 시험 · 진단 — 마지막 다시 그리기의 시간(ms) */
   renderMs: number;
+  /**
+   * 검토 상태(K2 — 호스트가 쥔 설계 · 하중 · 접합 입력). MCP get_case_inputs 와 같은 호스트 동작(US) 그대로:
+   * inputs · spans · unit_of · sources · model_inputs · mcp_only · rev · dirty · dirty_since. 화면은 SI 로 보이기만 한다(units.caseSI)
+   */
+  caseIn: any | null;
+  caseErr?: string;
+  /**
+   * AI 가 바꾼 사람의 값 — 앞 판에서 출처가 지정 · 파일 · 하중 해석이던 칸이 다음 판에 출처 ai 가 되면(호스트 상태 두 판의 차이,
+   * MCP 응답의 case_inputs_replaced 와 같은 뜻). 늦은 것부터 20 개
+   */
+  caseReplaced: Array<{ key: string; was: unknown; wasSrc: string; now: unknown; rev: number; at: number }>;
 }
 
 export const state: State = {
@@ -144,7 +158,7 @@ export const state: State = {
     chk: { state: 'none', note: '' }, conn: { state: 'none', note: '' }, val: { state: 'none', note: '' },
   },
   running: { fsm: false }, lastChange: null,
-  analysis: null, loads: null, regions: [], lap: null, conn: null, renderMs: 0,
+  analysis: null, loads: null, regions: [], lap: null, conn: null, renderMs: 0, caseIn: null, caseReplaced: [],
 };
 
 const MEMBER_KO: Record<string, string> = { flexure: '휨 부재', compression: '압축 부재', combined: '조합 부재', tension: '인장 부재', connection: '접합' };
@@ -152,6 +166,22 @@ const CONN_KO: Record<string, string> = { bolt: '볼트', screw: '나사', fille
 
 function list(v: unknown): string[] { return Array.isArray(v) ? v.map(itemText).filter(Boolean) : []; }
 
+/** 검토 지점의 조합 — 호스트가 어느 조합인지 말할 수 없는 포락선 값이면 문자 그대로 'envelope'(보기 계약 4a) → 「포락선」 */
+export const COMBO_KO = (c: string | null | undefined): string => (c === 'envelope' ? '포락선' : String(c ?? ''));
+/** 검토 위치의 말 — 지점 · 경간은 1 부터(호스트가 채운 그대로), 구간이 딸린 지점, 소요의 근거(보기 계약 4a) */
+export function locWords(loc: any): string[] {
+  if (!loc || typeof loc !== 'object') { return []; }
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return [
+    loc.region ? `구간 ${loc.region}` : '',
+    loc.check_point ? POINT_KO(String(loc.check_point)) : '',
+    loc.segment ? String(loc.segment) : '',
+    n(loc.support) !== null && !/^support\s/.test(String(loc.check_point ?? '')) ? `지점 ${loc.support}` : '',
+    n(loc.span) !== null ? `경간 ${loc.span}` : '',
+    n(loc.region_support) !== null ? `구간의 지점 ${loc.region_support}` : '',
+    loc.demand_basis === 'envelope' ? '소요 = 포락선' : loc.demand_basis === 'combination' ? '소요 = 지배 조합의 도표' : '',
+  ].filter(Boolean);
+}
 const POINT_KO = (p: string): string => (p === 'M_max' ? 'M 최대' : p === 'V_max' ? 'V 최대' : /^support\s+/.test(p) ? `지점 ${p.replace(/^support\s+/, '')}` : p);
 export { POINT_KO };
 
@@ -198,7 +228,8 @@ function runOf(key: string, scope: Scope, label: string, where: string, us: any,
     pts.forEach((pt: any, p: number) => {
       const sp = si?.checks?.[p] ?? pt;
       const name = String(pt?.check_point ?? `지점 ${p + 1}`);
-      rows.push(...checkRows(key, scope, where, Array.isArray(pt.design_checks) ? pt.design_checks : [], sp?.design_checks ?? [], `${src}checks.${p}.`, p, name));
+      const notes: PointNotes = { warnings: list(pt?.warnings), assumptions: list(pt?.assumptions), scope: list(pt?.scope_notes), notChecked: list(pt?.not_checked) };
+      rows.push(...checkRows(key, scope, where, Array.isArray(pt.design_checks) ? pt.design_checks : [], sp?.design_checks ?? [], `${src}checks.${p}.`, p, name).map(r => ({ ...r, pointNotes: notes })));
       points.push({ index: p, name, xm: xmOf(sp?.location), ratio: typeof sp?.utilization === 'number' ? sp.utilization : null,
         pass: pt?.pass === true ? true : pt?.pass === false ? false : null, src: `${src}checks.${p}.utilization` });
     });
@@ -349,7 +380,20 @@ export async function refresh(onDone: () => void): Promise<void> {
 
 async function load(): Promise<void> {
   const id = state.designerId!;
-  const [full, msgs] = await Promise.all([mcp('get_full_state'), last(id, CMDS)]);
+  const [full, msgs, ci] = await Promise.all([mcp('get_full_state'), last(id, CMDS), mcp('get_case_inputs')]);
+  if (ci && !ci.error && ci.inputs) {
+    const prev = state.caseIn;
+    if (prev?.inputs && ci.rev !== prev.rev) {
+      for (const [k, src] of Object.entries(ci.sources ?? {})) {
+        const was = prev.sources?.[k];
+        if (src === 'ai' && ['user', 'file', 'load-analysis'].includes(String(was)) && JSON.stringify(prev.inputs[k]) !== JSON.stringify(ci.inputs[k])) {
+          state.caseReplaced.unshift({ key: k, was: prev.inputs[k], wasSrc: String(was), now: ci.inputs[k], rev: ci.rev, at: Date.now() });
+        }
+      }
+      state.caseReplaced = state.caseReplaced.slice(0, 20);
+    }
+    state.caseIn = ci; state.caseErr = undefined;
+  } else { state.caseErr = ci?.error ?? '응답 없음'; }
   if (full && !full.error) { state.full = full; state.fullErr = undefined; } else { state.fullErr = full?.error ?? '응답 없음'; }
   if (msgs) { state.msgs = msgs.data; state.msgSeq = msgs.seq; }
   if (!state.initialModel) {

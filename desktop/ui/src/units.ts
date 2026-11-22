@@ -10,7 +10,7 @@
  *  - 바꾼 값은 화면에만 있다. 모델로 되돌려 보내는 길은 없다(이 화면은 모델을 쓰지 않는다).
  */
 import {
-  convertOutputSIDeep, toSI, US_TO_SI, SI_OUT_PROPS, SI_OUT_GET_DSM, SI_OUT_MEMBER, SI_OUT_PURLIN, SI_OUT_LOADS, quantityUnit,
+  convertOutputSIDeep, toSI, US_TO_SI, SI_OUT_PROPS, SI_OUT_GET_DSM, SI_OUT_MEMBER, SI_OUT_PURLIN, SI_OUT_LOADS, quantityUnit, caseValueToSI, CASE_UNIT_KIND,
   type UnitKey, type Table,
 } from '../../../src/mcp/siUnits';
 
@@ -58,6 +58,15 @@ export const purlinSI = <T>(v: T): T => deep(v, SI_OUT_PURLIN);
 export function kindOfQuantity(q: unknown): Kind | null {
   const u = quantityUnit(q);
   return u === undefined ? null : u;
+}
+
+/**
+ * 검토 상태(K2)의 값 하나 US → SI — 제품의 `caseValueToSI`(MCP get_case_inputs units:'SI' 와 같은 표 · 같은 곱셈).
+ * fieldKind = 표(designState FIELDS)의 단위 종류(length · length_ft · thickness · stress · pressure …). 돌려주는 것: 값 · 표시 종류.
+ */
+export function caseSI(v: unknown, fieldKind: string | null): { v: unknown; kind: Kind } {
+  const u = fieldKind ? CASE_UNIT_KIND[fieldKind] : undefined;
+  return { v: caseValueToSI(v, fieldKind), kind: (u ?? 'none') as Kind };
 }
 
 /** 1 m = 1000 mm — 화면의 부재 축(m)에 검토 위치 x(mm, SI 로 바꾼 값)를 놓을 때만(표시 축척, 공학 값이 아니다) */

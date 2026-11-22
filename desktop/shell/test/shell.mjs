@@ -97,7 +97,8 @@ function shellEnv() {
   return env;
 }
 async function launch(args, label) {
-  const child = spawn(electronPath, [shellDir, '--user-data', userData, ...args], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: shellEnv(), windowsHide: true });
+  // U4: 기본 화면은 새 검토 화면 — 이 시험은 예전의 틀을 그 스위치(`--ui classic`)로 연다(새 화면은 test/ui.mjs)
+  const child = spawn(electronPath, [shellDir, '--user-data', userData, '--ui', 'classic', ...args], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: shellEnv(), windowsHide: true });
   launched.push(child);
   let out = '';
   const take = c => { out = (out + c).slice(-40_000); if (VERBOSE) { process.stdout.write(`    [${label}] ${c}`); } };
@@ -197,7 +198,7 @@ async function main() {
       fs.mkdirSync(denied);
       const acl = spawnSync('icacls', [denied, '/deny', `${process.env.USERNAME}:(OI)(CI)(W,AD,WD)`], { windowsHide: true, encoding: 'utf8' });
       const runBad = ud => new Promise(resolve => {
-        const c = spawn(electronPath, [shellDir, '--user-data', ud], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: shellEnv(), windowsHide: true });
+        const c = spawn(electronPath, [shellDir, '--user-data', ud, '--ui', 'classic'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'], env: shellEnv(), windowsHide: true });
         launched.push(c);
         const msgs = []; let err = '';
         c.on('message', m => msgs.push(m)); c.stderr.on('data', d => { err += d; }); c.stdout.on('data', () => {});
@@ -330,7 +331,7 @@ async function main() {
     const title2 = await until(async () => { const v = await A.page(`document.getElementById('file-name').textContent`); return v === path.basename(FILE_B) ? v : undefined; }, 30_000);
     check('메뉴 열기 → OS 열기 대화상자 → 파일이 열리고 제목 표시줄이 따라간다', title2 === path.basename(FILE_B), title2 ?? '바뀌지 않음');
 
-    section('3b. 아직 호스트에 가지 않은 설계 탭 입력 — 메뉴의 테마 · 새로 고침 뒤에도 그대로(V5-03)');
+    section('3b. 설계 탭 입력 — 메뉴의 테마 · 새로 고침 뒤에도 그대로(V5-03 의 뜻, K2: 호스트가 쥔다)');
     await S('design-Lb', 77.7);
     const lb0 = await A.designer(`return D.getElementById('design-Lb').value;`);
     await A.ev(`return ctx.menuClick('theme-light');`);
@@ -338,7 +339,7 @@ async function main() {
     const frameLight = await A.page(`document.documentElement.classList.contains('light')`);
     await A.ev(`return ctx.menuClick('reload');`);
     await sleep(800);
-    const restored = await until(() => A.designer(`return D.documentElement.getAttribute('data-stcfsd-preserved')==='restored' ? D.getElementById('design-Lb').value : null;`), 30_000);
+    const restored = await until(() => A.designer(`return D.getElementById('design-Lb') && D.getElementById('design-Lb').value==='77.7' && !D.documentElement.hasAttribute('data-stcfsd-preserved') ? D.getElementById('design-Lb').value : null;`), 30_000);
     const pendingQ = await A.ev('return ctx.platform.snapshot().pending.length;');
     check('V5-03 · 설계 탭 Lb 77.7 → 메뉴 「밝은 테마」(다시 싣지 않음) → 그대로 → 메뉴 「새로 고침」 → 그대로(저장 물음 없음)',
       lb0 === '77.7' && themed?.lb === '77.7' && themed.kind === 'vscode-light' && frameLight === true && restored === '77.7' && pendingQ === 0,
@@ -363,9 +364,15 @@ async function main() {
 
     section('5. 한 번만 실행 — 두 번째 실행은 파일을 넘기고 끝난다');
     t = Date.now();
+    // 3b 에서 Lb 를 고쳐 저장 안 한 변경이 있다 — 넘어온 파일을 열기 전에 화면 안에서 묻는다(V5-12c). 「저장 안 함」으로 답한다
+    const dirtyBefore = await A.ev('return await ctx.hostAction("get_unsaved_changes");');
     const second = spawn(electronPath, [shellDir, '--user-data', userData, FILE_C], { stdio: 'ignore', env: shellEnv(), windowsHide: true });
     launched.push(second);
     const secondExit = await Promise.race([new Promise(r => second.once('exit', c => r(c))), sleep(30_000).then(() => 'timeout')]);
+    const asked = await until(() => A.page(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? d.textContent : null;})()`), 20_000);
+    await A.page(`document.querySelector('#dialog-host [data-item="저장 안 함"]').click(); 1`);
+    check('V5-12c · 저장 안 한 변경이 있는데 다른 파일이 넘어오면 — 화면 안에서 저장 · 저장 안 함 · 취소를 묻는다(창 포커스 없음)',
+      dirtyBefore?.dirty === true && /저장하지 않은 변경/.test(asked ?? ''), `더러움 ${dirtyBefore?.dirty} · 「${short((asked ?? '').replace(/\s+/g, ' '), 90)}」`);
     const handed = await until(() => A.ev(`return ctx.diag.opened.find(o => o.file === ${JSON.stringify(FILE_C)}) ?? null;`), 30_000);
     const si = await A.ev('return { second: ctx.diag.secondInstances, front: ctx.diag.broughtToFront };');
     check('두 번째 실행은 곧 끝나고(코드 0) 첫 프로세스가 그 파일을 연다', secondExit === 0 && handed?.ok && si.second.some(s => s.open === FILE_C),
@@ -373,13 +380,20 @@ async function main() {
     await quiet(A, '두 번째 실행 뒤(시험은 앞으로 꺼내지 않는다)');
     // V5-12b · 여러 파일을 한 번에 넘기면 첫 것만 열고 나머지는 열지 않았다고 알린다
     const openedBefore = await A.ev('return ctx.diag.opened.length;');
+    const dirtyMulti = await A.ev('return await ctx.hostAction("get_unsaved_changes");');
+    const unsavedN = await A.ev('return ctx.diag.unsaved.length;');
     const multi = spawn(electronPath, [shellDir, '--user-data', userData, FILE_B, FILE_A], { stdio: 'ignore', env: shellEnv(), windowsHide: true });
     launched.push(multi);
     await Promise.race([new Promise(r => multi.once('exit', r)), sleep(30_000)]);
+    // 호스트가 「저장 안 한 변경 있음」이라 하면(예전의 틀은 연 파일의 경간 표를 고쳐 다시 알린다 — mirror caseEdit, K2 쪽 일로 보고) 화면 안의 물음에 「저장 안 함」
+    if (dirtyMulti?.dirty) {
+      await until(() => A.page(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? true : null;})()`), 20_000);
+      await A.page(`document.querySelector('#dialog-host [data-item="저장 안 함"]').click(); 1`);
+    }
     const mOpened = await until(() => A.ev(`return ctx.diag.opened.some((o, i) => i >= ${openedBefore} && o.file === ${JSON.stringify(FILE_B)} && o.ok) && ctx.diag.notOpened.length ? ctx.diag : null;`), 30_000);
     const mToast = await until(() => A.page(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).find(t=>/한 번에 하나만/.test(t)) || null`), 10_000);
     check('V5-12b · 여러 파일 → 첫 파일만 열고 「열지 않았다」 알림(파일 이름 포함)', !!mOpened && mOpened.notOpened.includes(FILE_A) && /검토 사본 A\.csd/.test(mToast ?? ''),
-      `열지 않음 ${short(mOpened?.notOpened, 120)} · 알림 "${short(mToast, 120)}"`);
+      `열지 않음 ${short(mOpened?.notOpened, 120)} · 알림 "${short(mToast, 120)}" · 그 전 저장 안 한 변경 ${short(dirtyMulti, 160)} · 물음 ${short(await A.ev(`return ctx.diag.unsaved.slice(${unsavedN});`), 160)}`);
 
     section('6. 창 위치 · 크기 기억');
     await A.ev('ctx.win.setBounds({ x: 137, y: 91, width: 1213, height: 777 }); return true;');

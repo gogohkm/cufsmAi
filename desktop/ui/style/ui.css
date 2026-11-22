@@ -248,3 +248,15 @@ svg .flash { stroke: var(--accent) !important; }
 
 /* 띠의 검토 지점 막대 · 위치 표지 */
 svg rect.cpb { cursor: default; }
+
+/* ── U4 — 편집 상태의 띠(템플릿 09) · 출처 꼬리표 · 저장 안 함 ───────────────────── */
+#editstrip[hidden] { display: none; }
+.strip.editstrip .btn.off { opacity: .45; }
+.tag.ai { border-color: var(--accent); color: var(--accent); }
+.tree .row .tag { margin-left: 4px; }
+.pane-detail table.t tr.on td { background: var(--bg-select); }
+.un-head { font-size: 13px; color: var(--text-dim); font-family: var(--font); }
+.pane-detail ul.notes li { overflow-wrap: anywhere; }
+/* U4: 정보 창 표의 이름 칸은 줄을 바꾸지 않고, 출처 칸의 긴 설명(검토 위치의 지점 · 경간 · 소요 근거)은 그 칸 안에서 접는다 */
+.pane-detail table.t td:first-child { white-space: nowrap; }
+.pane-detail table.t td.src .why { display: block; white-space: normal; max-width: 200px; margin-left: auto; color: var(--text-faint); font-size: 11px; text-align: right; }

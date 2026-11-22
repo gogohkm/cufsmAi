@@ -83,6 +83,12 @@ function repoSnapshot() {
   return m;
 }
 
+function shellEnv() {
+  const env = { ...process.env, STCFSD_SHELL_TEST: '1', STCFSD_DOCUMENTS: docs, STCFSD_CLAUDE_CONFIG: fakeClaude };
+  delete env.ELECTRON_RUN_AS_NODE;
+  return env;
+}
+
 async function launch(args, label) {
   const env = { ...process.env, STCFSD_SHELL_TEST: '1', STCFSD_DOCUMENTS: docs, STCFSD_CLAUDE_CONFIG: fakeClaude };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -166,10 +172,76 @@ async function main() {
     const s = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
     check('창은 보이지 않고 포커스를 받은 적이 없다', !s.visible && !s.focused && s.show === 0 && s.focus === 0, JSON.stringify(s));
 
-    section('2. 끝내기');
+    section('1b. 저장 안 한 변경 — 닫기 · 메뉴의 열기 · 다시 실행(파일 연결) 앞에서 묻는다(V5-12c, K2 §7)');
+    const unsavedLog = () => A.ev('return ctx.diag.unsaved.slice();');
+    const pageDialog = () => until(() => A.page(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? d.textContent.replace(/\\s+/g,' ') : null;})()`), 15_000);
+    const answerPage = item => A.page(`(()=>{const b=document.querySelector('#dialog-host [data-item="${item}"]'); if(b){b.click(); return true;} return false;})()`);
+    // 깨끗할 때는 묻지 않는다
+    const n0 = (await unsavedLog()).length;
+    await A.ev(`return ctx.menuClick('file-open');`);
+    await sleep(1200);
+    const l0 = (await unsavedLog()).slice(n0);
+    const asked0 = await A.page(`!!document.querySelector('#dialog-host .dialog')`);
+    check('저장 안 한 변경이 없으면 묻지 않는다(메뉴 열기 → 곧바로 열기 대화상자)', l0.length === 1 && l0[0].how === 'none' && !asked0, JSON.stringify(l0));
+    // 더럽힌다(AI 의 set_case_inputs — 호스트의 상태)
+    await hostAction({ action: 'set_case_inputs', inputs: { Lb: 61 }, reason: '창 시험' });
+    const dirty1 = await hostAction({ action: 'get_unsaved_changes' });
+    const marker = await until(() => A.page(`document.querySelector('#tbar .fname').dataset.dirty==='1' ? document.querySelector('#tbar .fname').textContent : null`), 10_000);
+    check('제목 표시줄에 저장 안 한 변경 표시(파일 이름 + ●)', dirty1?.dirty === true && /●$/.test(marker ?? ''), `${marker} · dirty ${dirty1?.dirty}`);
+    // 메뉴 열기 → 화면 안의 물음 → 취소: 열기 대화상자를 띄우지 않고 그대로
+    const osBefore = await A.ev('return ctx.diag.osDialogs.length;');
+    await A.ev(`return ctx.menuClick('file-open');`);
+    const q1 = await pageDialog();
+    await A.capture('u4_unsaved_prompt');
+    await answerPage('취소');
+    await sleep(800);
+    const osAfter = await A.ev('return ctx.diag.osDialogs.length;');
+    const dirty2 = await hostAction({ action: 'get_unsaved_changes' });
+    const l1 = (await unsavedLog()).pop();
+    check('메뉴 열기 · 저장 안 한 변경 있음 → 화면 안에서 묻고(저장 · 저장 안 함 · 취소) 「취소」면 아무것도 바꾸지 않는다',
+      /저장하지 않은 변경/.test(q1 ?? '') && l1?.where === 'open' && l1.how === 'page' && l1.answer === 'cancel' && osAfter === osBefore && dirty2?.dirty === true,
+      `「${short(q1, 80)}」 · ${JSON.stringify(l1)} · 열기 대화상자 ${osAfter - osBefore} · 여전히 더러움 ${dirty2?.dirty}`);
+    // 메뉴 열기 → 「저장 안 함」 → 열기 대화상자로 간다(시험의 가짜 대화상자는 취소로 답한다)
+    await A.ev(`return ctx.menuClick('file-open');`);
+    await pageDialog();
+    await answerPage('저장 안 함');
+    await until(() => A.ev(`return ctx.diag.osDialogs.length > ${osAfter} ? true : null;`), 10_000);
+    const l2 = (await unsavedLog()).pop();
+    check('「저장 안 함」 → 계속한다(열기 대화상자가 뜬다)', l2?.answer === 'discard', JSON.stringify(l2));
+    // 다시 실행(파일 연결과 같은 길) → 「저장」 → 지금 파일에 저장하고 넘어온 파일을 연다
+    const other = path.join(tmp, '다른 사본 U2.csd');
+    fs.copyFileSync(FILE, other);
+    const mtime0 = fs.statSync(FILE).mtimeMs;
+    const opened0 = await A.ev('return ctx.diag.opened.length;');
+    const second = spawn(electronPath, [shellDir, '--user-data', userData, other], { stdio: 'ignore', env: shellEnv(), windowsHide: true });
+    const q3 = await pageDialog();
+    await answerPage('저장');
+    const opened = await until(() => A.ev(`return ctx.diag.opened.length > ${opened0} ? ctx.diag.opened[ctx.diag.opened.length-1] : null;`), 30_000);
+    await Promise.race([new Promise(r => second.once('exit', r)), sleep(20_000)]);
+    const l3 = (await unsavedLog()).pop();
+    const savedAgain = fs.statSync(FILE).mtimeMs > mtime0 ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : null;
+    check('다시 실행 · 파일 연결(.csd 두 번 누름) → 화면 안에서 묻고 「저장」 → 지금 파일에 저장(v1.4, Lb 61 in · 출처 ai) 뒤 넘어온 파일을 연다',
+      /저장하지 않은 변경/.test(q3 ?? '') && ['file-association', 'second-instance'].includes(l3?.where) && l3?.answer === 'save' && savedAgain?.version === '1.4'
+        && Math.abs(Number(savedAgain?.case?.inputs?.Lb) - 61) < 1e-9 && savedAgain?.case?.sources?.Lb === 'ai' && opened?.file === other && opened.ok,
+      `${JSON.stringify(l3)} · 저장본 v${savedAgain?.version} Lb ${savedAgain?.case?.inputs?.Lb}(${savedAgain?.case?.sources?.Lb}) · 연 파일 ${path.basename(opened?.file ?? '')}`);
+    // 창 닫기 → OS 물음(시험은 정해 둔 답) → 「취소」 = 창도 프로그램도 그대로
+    await hostAction({ action: 'set_case_inputs', inputs: { Lb: 62 }, reason: '창 시험' });
+    await A.ev(`ctx.diag.unsavedTestAnswers.push('cancel'); ctx.win.close(); return true;`);
+    await sleep(1500);
+    const stillOpen = await A.ev('return !!ctx.win && !ctx.win.isDestroyed();');
+    const l4 = (await unsavedLog()).pop();
+    check('창 닫기 · 저장 안 한 변경 있음 → OS 물음(창을 닫는 것은 사람의 동작) — 「취소」면 창이 그대로', stillOpen && l4?.where === 'close' && l4.how === 'native' && l4.answer === 'cancel',
+      `${JSON.stringify(l4)} · 창 ${stillOpen ? '그대로' : '닫힘'}`);
+    // 그 밖의 확인 — 창은 보이지 않고 포커스를 받지 않았다(물음이 창을 앞으로 꺼내지 않는다)
+    const sf2 = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
+    check('물음 내내 창은 보이지 않고 포커스를 받지 않는다', !sf2.visible && !sf2.focused && sf2.show === 0 && sf2.focus === 0, JSON.stringify(sf2));
+
+    section('2. 끝내기 — 창 닫기 · 「저장 안 함」');
     const kids = descendants(A.pid);
-    await A.ev('setTimeout(() => ctx.app.quit(), 50); return true;').catch(() => undefined);
-    const exit = await Promise.race([A.exited, sleep(30_000).then(() => undefined)]);
+    await A.ev(`ctx.diag.unsavedTestAnswers.push('discard'); setTimeout(() => ctx.win.close(), 50); return true;`).catch(() => undefined);
+    const exitByClose = await Promise.race([A.exited, sleep(30_000).then(() => undefined)]);
+    check('창 닫기 → 「저장 안 함」 → 창이 닫히고 프로그램이 끝난다(코드 0)', exitByClose?.code === 0, exitByClose ? `코드 ${exitByClose.code}` : '안 끝남');
+    const exit = exitByClose ?? await Promise.race([A.exited, sleep(30_000).then(() => undefined)]);
     for (let i = 0; i < 100 && kids.some(k => alive(k.pid)); i++) { await sleep(100); }
     const left = kids.filter(k => alive(k.pid));
     check('끝내기 → 코드 0 · 자식 0 · 포트 파일 지움', exit?.code === 0 && left.length === 0 && !fs.existsSync(portFile),
@@ -180,6 +252,24 @@ async function main() {
     check('창 시험(--ui)이 예외 없이 끝난다', false, String(err?.stack ?? err).slice(0, 1200));
     if (A) { spawnSync('taskkill', ['/PID', String(A.pid), '/T', '/F'], { windowsHide: true }); }
   }
+  section('2b. 기본 화면 = 새 검토 화면(스위치 없이) · 예전의 틀은 --ui classic');
+  for (const [label, extra, want] of [['스위치 없이', [], '/ui/'], ['--ui classic', ['--ui', 'classic'], '/']]) {
+    let B;
+    try {
+      B = await launch([...extra, FILE], label === '스위치 없이' ? 'D' : 'C');
+      const url = await until(() => B.ev('return ctx.win.webContents.getURL() || null;'), 15_000);
+      const what = await until(() => B.page(`window.__stcfsdUi ? 'ui' : (window.__stcfsdFrame ? 'frame' : null)`), 30_000);
+      check(`창 ${label} → ${want === '/ui/' ? '새 검토 화면(/ui/)' : '예전의 틀(/)'}`, B.stage.screen === want && url === `${B.stage.origin}${want}` && what === (want === '/ui/' ? 'ui' : 'frame'),
+        `${B.stage.screen} · ${url?.replace(B.stage.origin, '')} · ${what}`);
+      await B.ev('setTimeout(() => ctx.app.quit(), 50); return true;').catch(() => undefined);
+      const ex = await Promise.race([B.exited, sleep(30_000).then(() => undefined)]);
+      if (!ex) { spawnSync('taskkill', ['/PID', String(B.pid), '/T', '/F'], { windowsHide: true }); }
+    } catch (err) {
+      check(`창 ${label}`, false, String(err?.message ?? err).slice(0, 300));
+      if (B) { spawnSync('taskkill', ['/PID', String(B.pid), '/T', '/F'], { windowsHide: true }); }
+    }
+  }
+
   section('3. 진짜 설정 · 저장소');
   const changed = real.changed();
   check('진짜 Claude Desktop 설정 · ~/.claude · %APPDATA%\\StCFSD 가 그대로(크기 · 시각, ~/.claude.json 은 MCP 등록만)', changed.length === 0, changed.join(', ') || `${real.list.length}곳`);

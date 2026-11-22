@@ -19,13 +19,14 @@
  *     (상태 글이 그대로 보이게). 빼지 않아도 끝 상태는 같지만, 다시 보낸 옛 `analysisComplete` 가 웹뷰의 자동 설계 DSM 준비를
  *     부르는 것(호스트 계산)을 막는다.
  *  3. 한 번만 뜻이 있는 것은 남기지 않는다 — `collectDesignData`(다시 보내면 저장이 돈다), `captureSection`(MCP 의 캡처 요청),
- *     `showSection`(트리 클릭의 탭 이동), `focusRequest`(AI 의 「여기를 보세요」 — 새로 고침 때 다시 따라가지 않게).
+ *     `showSection`(트리 클릭의 탭 이동), `focusRequest`(AI 의 「여기를 보세요」 — 새로 고침 때 다시 따라가지 않게),
+ *     `caseState` · `caseAck` · `caseDiscarded` · `restoreDesignInputs`(K2 — 호스트가 상태를 쥐고 새 페이지에 새로 보낸다).
  *  4. 웹뷰가 스스로 다시 묻는 것은 남기지 않는다 — `propertiesResult` · `propertiesError`. 웹뷰는 `modelLoaded` ·
  *     `templateGenerated` 를 그릴 때마다 단면 성질을 호스트에 다시 묻는다(app.js renderPreprocessor). 다시 보내면 그 답과 함께
  *     두 번 그려 도심 축이 겹친다(시험에서 본 것).
  *
- * 새로 고침이 되살리지 못하는 것: 화면 칸에만 있고 아직 호스트에 보내지 않은 설계 탭 입력(K2 전까지 웹뷰에만 있다).
- * 파일에서 연 입력은 `restoreDesignInputs` 로 되살아난다.
+ * 설계 탭 입력은 칠 때마다 호스트로 간다(K2 `caseEdit`) — 새로 고침은 호스트의 상태를 다시 받는다. 300 ms 안에 친 글자는
+ * 수신부가 `pagehide` 에서 밀어 보낸다(inject.ts).
  */
 import * as crypto from 'node:crypto';
 import type { SseStream } from './sse';
@@ -34,7 +35,15 @@ import type { SseStream } from './sse';
  * 한 번만 뜻이 있는 것(규칙 3) + `focusRequest`(AI 의 「여기를 보세요」 — 보기 계약 3절): 다시 보내기 기록에 남기면 새로 고침할 때마다
  * 화면이 다시 따라간다. 새 화면은 `host:message` 이벤트에 실린 본문으로 한 번만 받는다(index.ts).
  */
-const TRANSIENT = new Set(['collectDesignData', 'captureSection', 'showSection', 'propertiesResult', 'propertiesError', 'focusRequest']);
+/*
+ * K2(검토 상태가 호스트로 — docs/implementation/20261123-k2-design.md §4 · §9): `caseState` · `caseAck` 는 한 번만 뜻이 있다 —
+ * 다시 실린 페이지는 두 번째 `caseHello` 에 호스트가 지금 상태를 새로 보낸다. 옛 판을 다시 보내면 그 판 위에서 칸을 고쳐
+ * 호스트가 받지 않는다(3.2). `restoreDesignInputs` 도 남기지 않는다 — 다시 보내면 지난 파일의 입력이 지금 상태 위에 얹혔다
+ * (V5b-02 의 뿌리). `caseDiscarded`(저장하지 않은 변경을 버리고 열었다)는 알림이라 한 번만 — 새 화면은 이벤트의 본문으로 받는다.
+ * `caseDirty` · `caseReference` 는 마지막 것만(규칙 1).
+ */
+const TRANSIENT = new Set(['collectDesignData', 'captureSection', 'showSection', 'propertiesResult', 'propertiesError', 'focusRequest',
+  'caseState', 'caseAck', 'restoreDesignInputs', 'caseDiscarded']);
 /** `resultsCleared` 가 지우는 것 */
 const CLEARED_BY_RESULTS = new Set([
   'analysisStarted', 'analysisComplete', 'analysisError', 'dsmResult', 'classifyResult', 'classifyError', 'designDsmPrepared',
@@ -74,6 +83,11 @@ export class Channel {
   private readonly state = new Map<string, Entry>();
   /** FIRST_KEPT 명령의 첫 메시지 */
   private readonly first = new Map<string, Entry>();
+  /**
+   * 붙었지만 아직 다시 보내기를 마치지 않은 페이지에 갈 한 번만 뜻이 있는 메시지 — 다시 보내기 뒤에 그 페이지에만 보낸다.
+   * (새로 실린 페이지의 caseHello 에 호스트가 곧바로 답한 caseState 가 다시 보내기보다 먼저 와도 잃지 않게. 다음 페이지에는 가지 않는다)
+   */
+  private queued: Entry[] = [];
   /** 받은 메시지 수 · 다시 보낸 수(진단용) */
   posted = 0;
   replays = 0;
@@ -107,6 +121,7 @@ export class Channel {
       this.state.set(command, { seq: this.seq, command, text });
     }
     if (this.client?.ready) { this.client.sse.send(text, undefined, this.seq); }
+    else if (this.client && TRANSIENT.has(command)) { this.queued.push({ seq: this.seq, command, text }); }
   }
 
   /** 새 페이지가 붙었다. 앞의 연결은 멈추게 한다(웹뷰 하나에 페이지 하나 — 새로 붙는 쪽이 이긴다). */
@@ -115,6 +130,7 @@ export class Channel {
       this.client.sse.send(JSON.stringify({ reason: '다른 페이지가 이 웹뷰를 가져갔다' }), 'superseded');
       this.client.sse.close();
     }
+    this.queued = [];
     const client: ChannelClient = { conn: crypto.randomBytes(9).toString('base64url'), sse, ready: false };
     this.client = client;
     sse.onClose.push(() => { if (this.client === client) { this.client = undefined; } });
@@ -130,6 +146,8 @@ export class Channel {
     for (const e of entries) { client.sse.send(e.text, undefined, e.seq); }
     client.sse.send(JSON.stringify({ count: entries.length, commands: entries.map(e => e.command) }), 'replayed');
     client.ready = true;
+    if (this.client === client) { for (const q of this.queued) { client.sse.send(q.text, undefined, q.seq); } }
+    this.queued = [];
     this.replays += 1;
     return entries.length;
   }

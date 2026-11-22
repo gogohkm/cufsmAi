@@ -13,7 +13,8 @@ npx tsc -p ./                                   # 저장소 루트 — out/
 cd desktop && npm install && npm run build      # 호스트 · 다리(host/dist)
 cd shell && npm install                         # Electron 45.2.3 (+ esbuild · typescript)
 npm start -- --open <파일.csd>                  # 창. 맨 인자로 줘도 된다: npm start -- a.csd
-npm start -- --ui <파일.csd>                    # 새 검토 화면(U1, desktop/ui — cd desktop && npm run build 가 먼저). npm run start:ui 도 같다
+npm start -- <파일.csd>                         # 새 검토 화면(기본 — U4. cd desktop && npm run build 가 먼저)
+npm start -- --ui classic <파일.csd>            # 예전의 틀(한 판 동안). npm run start:classic 도 같다
 npm test                                        # 형 검사 → 빌드 → 단위 시험 → 창 시험 → 새 화면 창 시험(모두 보이지 않는 창)
 ```
 
@@ -110,7 +111,7 @@ npm test                                        # 형 검사 → 빌드 → 단�
 
 ## 새 검토 화면(U1)
 
-`--ui` 를 주면 창이 다리의 `/ui/`(`desktop/ui/`)를 싣는다 — 트리 · 보기 · 정보 창의 검토 화면이고, 지금의 설계 화면(탭 6개)은 그 안에 늘 끼워 두었다가 F2 로 연다. 메뉴의 「열기」 · 「저장」 · 새로 고침은 같은 길로 돈다. 테마는 틀이든 새 화면이든 페이지를 다시 싣지 않고 화면 안에서 바꾼다(`__stcfsdFrame.setTheme` · `__stcfsdUi.setTheme`, 끼운 웹뷰에는 postMessage — V5-03). 스위치가 없으면 지금처럼 틀(`/`)이다 — 기본 화면을 바꾸는 것은 U4 다. 설명은 [`../ui/README.md`](../ui/README.md).
+**U4 부터 기본으로** 창이 다리의 `/ui/`(`desktop/ui/`)를 싣는다(`--ui classic` 이면 예전의 틀 `/`) — 트리 · 보기 · 정보 창의 검토 화면이고, 지금의 설계 화면(탭 6개)은 그 안에 늘 끼워 두었다가 F2 로 연다. 메뉴의 「열기」 · 「저장」 · 새로 고침은 같은 길로 돈다. 테마는 틀이든 새 화면이든 페이지를 다시 싣지 않고 화면 안에서 바꾼다(`__stcfsdFrame.setTheme` · `__stcfsdUi.setTheme`, 끼운 웹뷰에는 postMessage — V5-03). 스위치가 없으면 지금처럼 틀(`/`)이다 — 기본 화면을 바꾸는 것은 U4 다. 설명은 [`../ui/README.md`](../ui/README.md).
 
 시험(`test/ui.mjs`, 약 20 초): `--ui` + 파일 연결 꼴로 띄움 → 창의 주소가 토큰 없는 `/ui/` → 새 화면이 명령줄의 .csd 를 검토 화면(트리 · 정보 창 · 제목 표시줄)으로 → 끼운 설계 웹뷰가 연결 · 다시 보내기를 마치고 숨겨져 있다 → F2 로 열고 닫힌다 → 메뉴의 테마가 페이지를 다시 싣지 않고 바뀐다 → 쿠키 0 · 창의 콘솔 오류 0 → 그림(`test/out/u1_window_ui.png`) → 창은 보이지 않고 포커스 0 → 끝내기(코드 0 · 자식 0 · 포트 파일) → 진짜 설정 · 저장소 그대로.
 
@@ -129,3 +130,15 @@ npm test                                        # 형 검사 → 빌드 → 단�
 5. **진짜 Claude Desktop**: 「연결」 → Claude Desktop 을 한 번 다시 시작 → 대화에서 StCFSD 도구가 보이고 `get_status` 가 되는가, 제목 표시줄이 「Claude 연결됨 · 마지막 호출」로 바뀌는가, StCFSD 를 껐다 켜면 Claude 가 「다시 시작됨」 안내를 받는가, 「끊기」 뒤 다시 시작하면 도구가 사라지는가. (개발판 항목은 `electron.exe` 를 가리킨다 — 설치본(S5)에서는 `StCFSD.exe`.)
 6. 보고서의 PDF 저장(Edge headless)과 「보고서 클립보드 복사」.
 7. 밝은 테마로 바꿨을 때 화면의 하드코딩된 어두운 색이 거슬리는 곳.
+
+
+## 저장 안 한 변경(U4 — V5-12c 닫힘, K2 §7)
+
+호스트의 `get_unsaved_changes`(검토 입력 · 모델이 연 · 저장한 판과 다른가)를 묻고, 더러울 때만 「저장 · 저장 안 함 · 취소」를 묻는다. 깨끗하면 묻지 않는다.
+
+| 언제 | 어떻게 묻나 |
+|---|---|
+| 창 닫기(✕ · 메뉴 「끝내기」 · Alt+F4) | OS 대화상자 — 사람이 창을 닫는 동작이라 이 물음만 포커스를 가져가도 된다. 시험은 정해 둔 답(`diag.unsavedTestAnswers`) |
+| 메뉴 「열기」 · 다시 실행으로 넘어온 파일 · 파일 연결(.csd 두 번 누름 — Windows 는 다시 실행으로 온다, macOS 는 `open-file`) | 화면 안의 물음(다리의 알림 — 창을 앞으로 꺼내지 않는다) |
+
+「저장」은 지금 파일이 있으면 그 파일에(호스트의 저장 길), 없으면 저장 자리를 묻는다. 「취소」면 아무것도 바꾸지 않는다. 프로그램이 스스로 끝낼 때(신호 · 시험 · IPC)는 묻지 않는다. AI 의 `load_project` 가 저장하지 않은 변경을 버리면 막지 않고 새 화면이 알린다(`caseDiscarded`). 시험: `test/ui.mjs` 1b(깨끗하면 묻지 않음 · 메뉴 열기 취소 · 저장 안 함 · 다시 실행 저장 · 창 닫기 취소 · 창 닫기 저장 안 함 → 끝남), `test/shell.mjs` 5(예전의 틀에서 다시 실행 → 화면 안의 물음).

@@ -273,8 +273,9 @@ async function main() {
 
   section('1. serve CLI 시작');
   let t = Date.now();
+  // U4: 기본 화면은 새 검토 화면이다 — 이 시험은 예전의 틀을 그 스위치(`--ui classic`)로 띄워 그대로 돌린다
   const serve = startServe(['--repo', repoRoot, '--user-data', path.join(tmp, 'userData'), '--port-file', portFile,
-    '--documents', docs, '--claude-config', claudeConfig]);
+    '--documents', docs, '--claude-config', claudeConfig, '--ui', 'classic']);
   let ready;
   try { ready = JSON.parse((await serve.waitLine(/^STCFSD_BRIDGE_READY /, 150_000)).slice('STCFSD_BRIDGE_READY '.length)); }
   catch (err) { check('serve 가 준비 줄을 낸다', false, String(err.message)); serve.child.kill(); return finish(); }
@@ -911,8 +912,9 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
       detail: `다시 보냄 ${short(JSON.parse(replay || '{}').commands, 110)} · 도형 ${before.shapes}/${after.shapes} · 곡선 잉크 ${before.ink}/${after.ink} · 호스트 절점 ${nodesHost}/${nodesAfterHost}(기본 단면으로 돌아가지 않음) · 표 ${nodesPage ?? '-'}` };
   });
 
-  section('8b. 아직 호스트에 가지 않은 설계 탭 입력 — 테마 · 새로 고침 뒤에도 그대로(V5-03)');
-  await step('s15b 설계 탭에 Fy 77.7 → 밝은 테마 → 그대로 → 새로 고침 → 그대로', async () => {
+  section('8b. 설계 탭 입력 — 테마 · 새로 고침 뒤에도 그대로(V5-03 의 뜻, K2: 호스트가 쥔다)');
+  const caseFy = async () => (await api('POST', '/api/mcp/action', { action: 'get_case_inputs', keys: ['fy'] })).json ?? {};
+  await step('s15b 설계 탭에 Fy 77.7 → 호스트의 검토 상태로(출처 user) → 밝은 테마 → 그대로 → 새로 고침 → 호스트가 다시 보낸 값 그대로', async () => {
     await tab('design');
     const typed = await setVal('design-fy', '77.7');
     const v0 = await wv(`return D.getElementById('design-fy').value;`);
@@ -920,24 +922,29 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     await waitWv(`return D.documentElement.getAttribute('data-stcfsd-theme')==='light';`, 10_000, '웹뷰 테마');
     const afterTheme = await wv(`return {fy: D.getElementById('design-fy').value, kind: D.body.getAttribute('data-vscode-theme-kind'), bg: W.getComputedStyle(D.documentElement).getPropertyValue('--vscode-editor-background').trim(), nav: performance.getEntriesByType('navigation').length};`);
     const frameLight = await evalTop(`document.documentElement.classList.contains('light')`);
+    // 페이지는 칸 변경을 caseEdit 로 곧바로(글자는 300 ms 모아) 호스트에 보낸다 — 호스트의 상태가 그 값인지
+    let hostFy = null;
+    for (let i = 0; i < 40 && !(hostFy && hostFy.sources?.fy === 'user'); i++) { hostFy = await caseFy(); await sleep(150); }
     await cdp.send('Page.reload', { ignoreCache: true });
     await sleep(500);
     await designerReady();
-    await waitWv(`return D.documentElement.getAttribute('data-stcfsd-preserved')==='restored';`, 15_000, '입력 되살림');
-    await sleep(800);
-    const afterReload = await wv(`return D.getElementById('design-fy').value;`);
-    // 새로 고침 앞의 모음(collectDesignData)은 호스트로 가지 않는다 — 갔다면 저장이 돌아 저장 물음이 떴을 것이다
+    await waitWv(`return D.getElementById('design-fy').value==='77.7';`, 15_000, '호스트가 다시 보낸 상태');
+    const afterReload = await wv(`return {fy: D.getElementById('design-fy').value, preserved: D.documentElement.getAttribute('data-stcfsd-preserved'), keep: Object.keys(sessionStorage).filter(k=>/preserve/.test(k)).length};`);
     const pending = (await api('GET', '/api/state')).json?.data?.platform?.pending ?? [];
     await evalTop(`window.__stcfsdFrame.setTheme('dark'); 1`);
-    return { ok: typed === 'ok' && v0 === '77.7' && afterTheme.fy === '77.7' && afterTheme.kind === 'vscode-light' && frameLight === true && afterReload === '77.7' && pending.length === 0,
-      detail: `입력 ${v0} → 테마 뒤 ${afterTheme.fy}(${afterTheme.kind}, 배경 ${afterTheme.bg}, 틀 밝음 ${frameLight}) → 새로 고침 뒤 ${afterReload} · 뜬 물음 ${pending.length}개` };
+    return { ok: typed === 'ok' && v0 === '77.7' && afterTheme.fy === '77.7' && afterTheme.kind === 'vscode-light' && frameLight === true && hostFy?.sources?.fy === 'user'
+      && afterReload.fy === '77.7' && afterReload.preserved === null && afterReload.keep === 0 && afterTheme.nav === 1 && pending.length === 0,
+      detail: `입력 ${v0} → 호스트 fy ${hostFy?.inputs?.fy}(${hostFy?.sources?.fy}) → 테마 뒤 ${afterTheme.fy}(${afterTheme.kind}, 다시 싣기 없음 ${afterTheme.nav === 1}, 틀 밝음 ${frameLight}) → 새로 고침 뒤 ${afterReload.fy}`
+        + ` · 옛 되살림 흔적 ${afterReload.preserved ?? '없음'} · sessionStorage 보존 ${afterReload.keep} · 뜬 물음 ${pending.length}개` };
   });
 
-  await step('s15c 설계 웹뷰가 사라진 사이 호스트가 다른 파일 Y 를 열면 — 옛 입력을 Y 위에 되살리지 않고 알린다(V5b-02)', async () => {
+  await step('s15c 설계 웹뷰가 사라진 사이 호스트가 다른 파일 Y 를 열면 — 다시 뜬 화면은 Y 의 입력(호스트의 상태)이고 옛 입력이 되살아나지 않는다(V5b-02 의 뜻)', async () => {
     // Y = 저장본 사본, 설계 Fy 만 50 MPa(엔진 단위 ksi)
     const yFile = path.join(tmp, 'saved', 'Y 파일.csd');
     const y = JSON.parse(fs.readFileSync(saved, 'utf8'));
     y.designInputs = { ...(y.designInputs ?? {}), fy: 50 / 6.894757 };
+    // K2: 1.4 는 case 를 읽는다(designInputs 는 옛 빌드용) — 둘 다 같은 값으로
+    if (y.case && y.case.inputs) { y.case.inputs.fy = 50 / 6.894757; }
     fs.writeFileSync(yFile, JSON.stringify(y));
     await tab('design');
     await setVal('design-fy', '77.7');
@@ -950,13 +957,15 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     await cdp.send('Page.reload', { ignoreCache: true });
     await sleep(500);
     await designerReady();
-    const decided = await waitWv(`return D.documentElement.getAttribute('data-stcfsd-preserved');`, 15_000, '보존한 입력의 판단');
-    await sleep(800);
-    const s = await wv(`return {fy: D.getElementById('design-fy').value, unit: D.querySelector('#btn-unit-SI.active') ? 'SI' : 'US', status: (D.getElementById('stcfsd-bridge-notice')||{}).textContent || ''};`);
+    await sleep(1500);
+    const s = await wv(`return {fy: D.getElementById('design-fy').value, unit: D.querySelector('#btn-unit-SI.active') ? 'SI' : 'US', preserved: D.documentElement.getAttribute('data-stcfsd-preserved')};`);
     const fy = Number(s.fy);
     const isY = s.unit === 'SI' ? Math.abs(fy - 50) < 0.05 : Math.abs(fy - 7.2519) < 0.005;
-    return { ok: typed === '77.7' && opened?.ok === true && isY && decided === 'dropped-other-file' && /다른 파일/.test(s.status),
-      detail: `입력 ${typed} → (웹뷰 내림) 호스트가 Y 를 엶(${opened?.ok}) → 다시 뜬 화면 design-fy=${s.fy} ${s.unit}(Y 의 값 ${isY}) · 판단 ${decided} · 상태 줄 「${short(s.status, 90)}」` };
+    const host = await caseFy();
+    // 값이 Y 의 것인지만 본다 — 출처는 페이지가 다시 실린 뒤 칸을 다시 알리면서 바뀔 수 있다(K2 의 일, 보고에 적음)
+    const hostY = Math.abs(Number(host.inputs?.fy) - 50 / 6.894757) < 1e-6;
+    return { ok: typed === '77.7' && opened?.ok === true && isY && hostY && s.preserved === null,
+      detail: `입력 ${typed} → (웹뷰 내림) 호스트가 Y 를 엶(${opened?.ok}) → 다시 뜬 화면 design-fy=${s.fy} ${s.unit}(Y 의 값 ${isY}) · 호스트 fy ${host.inputs?.fy}(${host.sources?.fy}) · 옛 되살림 ${s.preserved ?? '없음'}` };
   });
 
   section('9. 밝은 · 어두운 테마');

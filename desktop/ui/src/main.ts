@@ -12,9 +12,10 @@ import { copyText, openDrawer, setActiveTable, sortBy, toggleDrawer, tsvOf } fro
 import { fitZoom, installZoom, restoreZoom } from './zoom';
 import { answered, enqueue, initDialogs, questionOpen, setProgress, toast } from './dialogs';
 import { debounce, esc, tip } from './dom';
-import { editing, hideSide, initEdit, mountDesigner, reloadSide, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
+import { editing, hideSide, initEdit, mountDesigner, reloadSide, setEditing, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
+import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { findHtml, search, type Hit } from './find';
-import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq } from './follow';
+import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq, type Item } from './follow';
 import { hhmm } from './format';
 import { infoHtml, shareLabel } from './info';
 import { closeMenu, installMenuClosers, menuKey, menuOpen, openMenu, type MenuItem } from './menu';
@@ -57,8 +58,21 @@ const isCheck = (key: string): boolean => !!rowOfKey(key).row;
 const hasSheet = (key: string): boolean => !!rowOfKey(key).row?.us && !/#(ls|ne)\d+$/.test(key);
 
 // ── 그리기 ────────────────────────────────────────────────────────
+let wasEditing = false;
+/** 편집 상태가 바뀌었다(F2 · 단추 · Esc) — 띠의 기준 판을 잡고 푼다 */
+function onEditChange(): void {
+  const now = editing();
+  if (now && !wasEditing) { beginEdit(); }
+  if (!now && wasEditing) { endEdit(); }
+  wasEditing = now;
+  render();
+}
+
 function render(): void {
   renderTitle(editing(), questionOpen());
+  const strip = $('editstrip');
+  strip.hidden = !editing();
+  if (editing()) { strip.innerHTML = editStripHtml(pointedAt() ? 1 : 0); }
   renderFollow(following(), !!pointedAt());
   $('start').hidden = ui.screen !== 'start';
   $('tbar').classList.toggle('onstart', ui.screen === 'start');
@@ -79,7 +93,8 @@ function viewName(): string {
 
 /** 보기 보고(0.4 초 모아서) — 고른 것이 없으면 selection null */
 function reportView(now = false): void {
-  if (ui.screen !== 'review') { return; }
+  // 시작 화면도 알린다 — 보기 어휘의 `start`(보기 계약 2절)
+  if (ui.screen !== 'review') { report('start', null, ui.by, now); ui.by = 'person'; return; }
   const key = ui.sheet ?? ui.sel[ui.tab];
   report(viewName(), itemOfKey(ui.tab, key), ui.by, now);
   ui.by = 'person';
@@ -135,9 +150,11 @@ function renderShare(): void {
   const key = ui.sheet ?? ui.sel[ui.tab];
   const node = findNode(buildTree(ui.tab), key);
   const sel = r.selection;
-  b.textContent = r.recorded ? (sel ? `${shareLabel(key, node?.t)} · ${sel.kind} ${sel.id}` : '고른 것 없음') : `알리지 못함 — ${r.error ?? ''}`;
+  const dropKo = r.dropped.length ? ` · 호스트가 버림: ${r.dropped.join(', ')}` : '';
+  b.textContent = r.recorded ? `${sel ? `${shareLabel(key, node?.t)} · ${sel.kind} ${sel.id}` : '고른 것 없음'}${dropKo}` : `알리지 못함 — ${r.error ?? ''}`;
   el.setAttribute('data-item', JSON.stringify(sel));
-  el.setAttribute('data-view', r.view);
+  el.setAttribute('data-view', r.view ?? '');
+  el.setAttribute('data-dropped', r.dropped.join(','));
   el.setAttribute('data-tip', `get_view 가 돌려주는 것 — 화면 review · 보기 ${r.view} · ${sel ? `${sel.kind} ${sel.id}${sel.scope ? ` (${sel.scope})` : ''}` : '고른 것 없음'} · AI 따라가기 ${following() ? '켬' : '끔'}. Claude Desktop 에서 「이거」라고 말하면 이것을 읽는다`);
 }
 
@@ -167,6 +184,7 @@ function renderStatus(): void {
   const msg = $('status').querySelector('.msg') as HTMLElement;
   const sr = ui.sheet ? rowOfKey(ui.sheet).row : null;
   msg.textContent = ui.screen === 'start' ? (state.file.name ? `열린 검토 대상 ${state.file.name}` : '열린 검토 대상 없음')
+    : editing() ? `편집 상태 · 이번 편집 ${editChanges().length} · AI 따라가기 ${following() ? '멈춤(편집 중)' : '꺼짐'}`
     : sr ? `계산 시트 · ${sr.where} · ${sr.name} · §${sr.clause}`
       : `${TABS.find(t => t[0] === ui.tab)?.[1] ?? ''} · ${node?.t ?? ''}${state.lastChange ? ` · ${hhmm(state.lastChange.at)} ${state.lastChange.text}` : ''}`;
   const dm = state.runs.find(r => r.us?.design_method)?.us?.design_method;
@@ -314,7 +332,7 @@ function applyState(s: any): void {
     document.documentElement.setAttribute('data-theme', theme);
   }
   setWebviewOrigin(s.webviewOrigin);
-  initEdit(theme, render);
+  initEdit(theme, onEditChange);
   setFile(s.currentFile, s.currentName);
   const designer = (s.webviews ?? []).find((w: any) => w.id === s.designer);
   if (designer) { mountDesigner(designer.url); }
@@ -375,6 +393,12 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
     case 'host:message': {
       const c = String(d.command ?? '');
       if (c === 'focusRequest') { if (d.focus) { void onFocus(d.focus as FocusReq); } break; }
+      if (c === 'caseDiscarded') {
+        // 저장하지 않은 변경을 버리고 다른 파일을 열었다(K2-6 — AI 의 load_project 를 막지 않는다, 알리기만)
+        const x = d.discarded ?? {};
+        toast(`저장하지 않은 변경을 버리고 열었다(${/load_project|mcp|ai/i.test(String(x.by ?? '')) ? 'AI 의 load_project' : '열기'})${Array.isArray(x.inputs_changed) && x.inputs_changed.length ? ` — 입력 ${x.inputs_changed.length}칸` : ''}${x.model_changed ? ' · 모델' : ''}`, 'warning');
+        state.lastChange = { at: ev.at || Date.now(), text: '저장하지 않은 변경을 버리고 열었다' };
+      }
       if (c === 'analysisStarted') { setRunning(true); }
       if (['analysisComplete', 'analysisError', 'analysisInvalidated', 'resultsCleared', 'dsmResult'].includes(c)) { setRunning(false); }
       if (NOTE[c]) { state.lastChange = { at: ev.at || Date.now(), text: NOTE[c] }; }
@@ -425,6 +449,7 @@ function setTheme(t: 'dark' | 'light'): void {
 function onKey(e: KeyboardEvent): void {
   if ((e.target as HTMLElement)?.closest?.('#dialog-host')) { return; }
   if (menuKey(e)) { e.preventDefault(); return; }
+  if (e.key === 'Escape' && editing() && !(e.target as HTMLElement)?.closest?.('input, textarea, select')) { e.preventDefault(); setEditing(false); return; }
   if (e.key === 'F2') { e.preventDefault(); toggleEditing(); return; }
   if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 'o' || e.key === 'O')) { e.preventDefault(); fileOp('open'); return; }
   if (e.ctrlKey && !e.shiftKey && !e.altKey && (e.key === 's' || e.key === 'S')) { e.preventDefault(); fileOp('save'); return; }
@@ -464,7 +489,7 @@ function boot(): void {
   installMenuClosers();
   installIdle();
   initDialogs(() => renderTitle(editing(), questionOpen()));
-  initEdit(theme, render);
+  initEdit(theme, onEditChange);
   onReport(() => renderShare());
   initTitlebar($('tbar'), {
     file: fileOp,
@@ -576,6 +601,9 @@ function boot(): void {
     const hd = t.closest('[data-card-head]');
     if (hd) { const k = hd.getAttribute('data-card-head')!; if (k !== ui.sheet) { openSheet(k); } }
   });
+  $('editstrip').addEventListener('click', e => {
+    if ((e.target as HTMLElement).closest('[data-act="edit-done"]')) { setEditing(false); }
+  });
   $('aipoint').addEventListener('click', e => {
     const a = (e.target as HTMLElement).closest('[data-ai]');
     if (!a) { return; }
@@ -647,6 +675,8 @@ function boot(): void {
   setTheme,
   openSheet, closeSheet,
   get reported() { return lastReported(); },
+  /** 시험: 보기 보고 하나를 곧바로(모델 · 상태를 쓰지 않는다 — 호스트가 무엇을 버리고 칩이 그것을 보이는지 본다) */
+  reportNow: (view: string, selection: unknown) => report(view, selection as Item | null, 'program', true),
   get pointed() { return pointedAt(); },
   checkMenu: (key: string) => checkMenu(key, '', handlers).map(x => (x === '-' ? '-' : `${x.label}|${x.kbd ?? ''}|${x.off ? 'off' : 'on'}`)),
   closeMenu,

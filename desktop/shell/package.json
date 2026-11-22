@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "start": "node build.mjs && electron .",
     "start:ui": "node build.mjs && electron . --ui",
+    "start:classic": "node build.mjs && electron . --ui classic",
     "test": "npm run typecheck && node build.mjs && node test/winConsole.mjs && node test/shell.mjs && node test/ui.mjs",
     "test:unit": "node test/winConsole.mjs"
   },

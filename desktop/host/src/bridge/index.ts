@@ -19,7 +19,8 @@
  *  - `/api/webviews/<id>/close`  웹뷰 닫기(좌굴 보고서). 설계 패널은 고정이라 숨김만 된다
  *  - `/api/mcp/<경로>`      호스트의 MCP 다리로 중계(그 토큰을 다리가 붙인다 — 화면에는 주지 않는다. AI 요청 id 머리 없음)
  *  - `/api/claude/status`   Claude Desktop 연결 상태(읽기만) · `POST /api/claude/connect|disconnect` 등록 · 지우기(S4, 화면의 세션만 — claude.ts)
- *  - `/ui/`                 새 검토 화면(U1, `desktop/ui/` — `uiDir` 를 줄 때만). 기본 화면은 여전히 `/` 의 틀이다
+ *  - `/ui/`                 새 검토 화면(U1, `desktop/ui/` — `uiDir` 를 줄 때만). U4 부터 기본 화면이다 — `/` 가 여기로 보낸다
+ *                           (예전의 틀은 `defaultScreen: 'classic'` 일 때 `/` 에)
  *  - `/api/wv/<id>/last` · `…/first`  다시 보내기 기록에 남은 호스트 → 웹뷰 메시지(새 화면이 읽는다, U1)
  *  이벤트 `host:message {id, viewType, command, seq}` — 호스트가 설계 패널에 메시지를 보낼 때마다(본문 없음, U1).
  *    `focusRequest` 만 본문을 `focus` 로 싣는다(한 번만 뜻이 있어 기록에 남기지 않는다 — U3, 보기 계약 3절)
@@ -68,9 +69,13 @@ export interface StartBridgeOptions {
   frameDir?: string;
   /**
    * 새 검토 화면의 폴더(U1 — `desktop/ui`: `index.html` · `dist/` · `style/`). 주면 `/ui/` 로 내준다. 주지 않으면 `/ui/` 는 없다.
-   * 기본 화면(`/`)은 이것과 상관없이 틀이다 — 무엇을 여는지는 serve 의 `--ui` · 껍데기의 `--ui` 가 고른다.
    */
   uiDir?: string;
+  /**
+   * 기본 화면(U4) — `/` 가 무엇인가. `'ui'`(기본, `uiDir` 가 있을 때): `/` 는 새 검토 화면 `/ui/` 로 보낸다(303).
+   * `'classic'`: `/` 는 예전의 틀(제목 표시줄 + 설계 화면 탭 6개) — 한 판 동안 스위치(serve · 창의 `--ui classic`)로 남긴다.
+   */
+  defaultScreen?: 'ui' | 'classic';
 }
 
 export interface BridgeHandle {
@@ -109,6 +114,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   const repoRoot = host.context.extensionPath as string;
   const frameDir = path.resolve(options.frameDir ?? path.join(__dirname, '..', 'frame'));
   const uiDir = options.uiDir && fs.existsSync(path.join(options.uiDir, 'index.html')) ? path.resolve(options.uiDir) : undefined;
+  const uiDefault = !!uiDir && options.defaultScreen !== 'classic';
   if (options.uiDir && !uiDir) { log(`[bridge] 새 화면 폴더에 index.html 이 없다 — /ui/ 를 내주지 않는다: ${options.uiDir}`); }
   const theme: ThemeName = options.theme ?? 'dark';
   const roots: ResourceRoot[] = [
@@ -172,7 +178,10 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       const command = (message as { command?: unknown })?.command;
       // focusRequest(보기 계약 3절)는 다시 보내기 기록에 남지 않으므로(channel.ts TRANSIENT) 본문을 이 이벤트에 한 번만 싣는다
       const focus = command === 'focusRequest' ? (message as { data?: unknown }).data ?? null : undefined;
-      bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq, ...(focus !== undefined ? { focus } : {}) });
+      // caseDiscarded(K2 — 저장하지 않은 변경을 버리고 열었다)도 한 번만 뜻이 있는 알림 — 본문을 `discarded` 로 싣는다
+      const discarded = command === 'caseDiscarded' ? (message as { data?: unknown }).data ?? null : undefined;
+      bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq,
+        ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}) });
     }
   }));
   subs.push(hub.onDidRefuseDispose.event(info => { bus.emit('webview:refused', 'host', { id: info.id, viewType: info.viewType }); }));
@@ -215,6 +224,10 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     while (!loaded && Date.now() < deadline) { await new Promise(r => setTimeout(r, 25)); }
     sub.dispose();
     if (!loaded) { log('[bridge] 경고: 설계 패널이 60 초 안에 기본 단면(modelLoaded)을 보내지 않았다'); }
+    // K2 — 검토 상태의 첫 caseHello 도 다리가 한 번 낸다(입력 없이: 호스트의 상태를 바꾸지 않는다). VS Code 의 패널은 늘 떠 있어
+    // 상태가 바뀌는 것을 다 받지만, 독립 프로그램의 페이지는 다리보다 늦게(파일을 연 뒤에도) 붙는다. 그래서 페이지의 hello 는 늘
+    // 「두 번째」가 되고, 호스트는 그때마다 지금 상태(caseState)를 새로 보낸다 — 다시 보내기 기록의 옛 상태를 쓰지 않는다(channel.ts).
+    hub.deliver(designerId, { command: 'caseHello', data: {} });
   }
 
   const claude = createClaudeRoutes(host, options.claude);
@@ -277,7 +290,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
   };
 
   const state = () => ({
-    designer: designerId, webviews: webviewList(), theme, ui: !!uiDir, webviewOrigin: wvOrigin,
+    designer: designerId, webviews: webviewList(), theme, ui: !!uiDir, screen: uiDefault ? 'ui' : 'classic', webviewOrigin: wvOrigin,
     currentFile: currentFile ?? null, currentName: currentFile ? path.basename(currentFile) : null,
     platform: platform.snapshot(), lastSeq: bus.lastSeq,
   });
@@ -307,6 +320,12 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       return;
     }
 
+    // 기본 화면(U4): 새 검토 화면 — `/` 는 `/ui/` 로. 예전의 틀은 `defaultScreen: 'classic'` 일 때만 `/` 에 있다
+    if (uiDefault && (p === '/' || p === '/index.html') && method === 'GET') {
+      res.writeHead(303, { Location: `/ui/${url.search}` });
+      res.end();
+      return;
+    }
     // 틀
     if (p === '/' || p === '/index.html') {
       const file = safeFile(frameDir, 'index.html');

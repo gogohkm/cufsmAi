@@ -93,12 +93,12 @@ export function cspNonces(policy: string): string[] {
  *  - `acquireVsCodeApi()` → `{postMessage, getState, setState}`(VS Code 와 같이 한 번만). postMessage 는 묶어서
  *    `POST /api/wv/<id>/in?conn=` 로, 받는 것은 `GET /api/wv/<id>/out`(SSE)에서 표준 `message` 사건으로.
  *  - 부모가 보내는 것(그 출처 · 그 창에서 온 것만, app.js 에는 넘기지 않는다): `key` · `theme`(새로 고침 없이 테마 — V5-03) ·
- *    `click`(정해 둔 단추 둘 — 새 화면의 「열기」 · 「저장」). 부모에게 보내는 것: `need-key`, F2 키(새 화면의 편집 상태).
- *  - 새로 고침 · 다시 싣기 앞(`pagehide`): 페이지 자신의 저장 길로 설계 탭 입력을 모은다 — 페이지에 `collectDesignData` 를
- *    호스트가 보낸 것처럼 넣고, 페이지가 돌려주는 `designDataCollected` 를 호스트로 보내지 않고 이 탭의 sessionStorage 에 둔다.
- *    다시 뜬 페이지는 다시 보내기를 마친 뒤 그것을 `restoreDesignInputs`(파일을 열 때와 같은 길)로 되돌린다(V5-03).
- *    다만 모은 때와 같은 파일일 때만 — 마지막 `resultsCleared` · `restoreDesignInputs` 의 순서 번호(SSE 의 id, 호스트가 다른 파일을 열 때마다
- *    새로 생긴다)를 함께 두고 다시 보내기의 것과 비교한다. 다르면 버리고 상태 줄에 알린다(V5b-02). 10 분 넘은 것도 버린다.
+ *    `click`(정해 둔 단추 둘 — 새 화면의 「열기」 · 「저장」). 부모에게 보내는 것: `need-key`, F2 · Esc 키(새 화면의 편집 상태 —
+ *    Esc 는 칸 밖에서 페이지가 쓰지 않은 것만).
+ *  - 설계 탭 입력은 호스트가 쥔다(K2 — 페이지가 칠 때마다 `caseEdit` 로 보낸다). 새로 고침 뒤에는 호스트가 지금 상태를 새로 보낸다
+ *    (`caseState`). 그래서 예전의 「`pagehide` 에 모아 sessionStorage 에 두었다가 되돌리기」(V5-03 · V5b-02)는 걷어 냈다 — 그것은
+ *    지난 값을 파일에서 온 것처럼 다시 쓸 수 있었다. 남은 일 하나: 페이지는 글자 칸을 300 ms 모아서 알리므로, `pagehide` 에서
+ *    지금 칸에 `change` 를 일으켜 밀린 변경을 곧바로 내게 하고 그 묶음을 `keepalive` 요청으로 보낸다(페이지가 내려가도 끝까지 간다).
  *  - 연결이 끊겼다 다시 붙으면(두 번째 hello) 페이지를 다시 읽는다 — 다리가 지금 상태를 다시 보낸다(다시 보내기).
  *  - 다른 연결이 이 웹뷰를 가져가면(`superseded`) 멈추고 `<html data-stcfsd-bridge="superseded">` 로 표시한다.
  */
@@ -107,16 +107,14 @@ function clientScript(cfg: Record<string, unknown>): string {
 "use strict";
 var cfg=${JSON.stringify(cfg).replace(/</g, '\\u003c')};
 var base='/api/wv/'+encodeURIComponent(cfg.id);
-var conn=null,open=false,ever=false,dead=false,sending=false,outQ=[],key=null,es=null,capturing=false,replayDone=false;
-var fileSeq=null,PRESERVE_MS=600000;
+var conn=null,open=false,ever=false,dead=false,sending=false,outQ=[],key=null,es=null;
 var html=document.documentElement;
-var preserveKey='stcfsd.wv.preserve.'+cfg.viewType;
 function toParent(m){try{if(window.parent&&window.parent!==window){window.parent.postMessage(m,cfg.frameOrigin);}}catch(e){}}
-function send(){
-  if(!open||dead||sending||!key||outQ.length===0){return;}
+function send(keepalive){
+  if(!open||dead||(sending&&!keepalive)||!key||outQ.length===0){return;}
   sending=true;
   var body='['+outQ.join(',')+']';outQ=[];
-  fetch(base+'/in?conn='+encodeURIComponent(conn),{method:'POST',headers:{'Content-Type':'application/json','X-StCFSD-Webview-Key':key},body:body,credentials:'same-origin'})
+  fetch(base+'/in?conn='+encodeURIComponent(conn),{method:'POST',headers:{'Content-Type':'application/json','X-StCFSD-Webview-Key':key},body:body,credentials:'same-origin',keepalive:!!keepalive})
     .then(function(r){if(r.status===409){stop('superseded');}})
     .catch(function(e){console.warn('[stcfsd-bridge] 보내기 실패 — 이 묶음은 버린다',e);})
     .then(function(){sending=false;send();});
@@ -128,7 +126,6 @@ window.acquireVsCodeApi=function(){
   acquired=true;
   return Object.freeze({
     postMessage:function(m){
-      if(capturing&&m&&m.command==='designDataCollected'){try{sessionStorage.setItem(preserveKey,JSON.stringify({at:Date.now(),fileSeq:fileSeq,data:m.data}));}catch(e){}return;}
       outQ.push(JSON.stringify(m===undefined?null:m));send();
     },
     getState:function(){try{var s=sessionStorage.getItem(stateKey);return s==null?memState:JSON.parse(s);}catch(e){return memState;}},
@@ -152,7 +149,11 @@ window.addEventListener('message',function(e){
   else if(d.type==='theme'){applyTheme(d.theme);}
   else if(d.type==='click'&&CLICKABLE[d.id]===1){var b=document.getElementById(d.id);if(b){b.click();}}
 },true);
-document.addEventListener('keydown',function(e){if(e.key==='F2'){toParent({stcfsdBridge:1,type:'keydown',key:'F2'});}});
+document.addEventListener('keydown',function(e){
+  if(e.key==='F2'){toParent({stcfsdBridge:1,type:'keydown',key:'F2'});return;}
+  // Esc — 편집 상태를 마친다(U4). 칸에 있을 때 · 페이지가 이미 쓴 Esc(목록 닫기 등)는 넘기지 않는다
+  if(e.key==='Escape'&&!e.defaultPrevented){var t=e.target;var tag=t&&t.tagName;if(tag!=='INPUT'&&tag!=='TEXTAREA'&&tag!=='SELECT'&&!(t&&t.isContentEditable)){toParent({stcfsdBridge:1,type:'keydown',key:'Escape'});}}
+});
 var received=0;
 function connect(){
   es=new EventSource(base+'/out?k='+encodeURIComponent(key));
@@ -162,47 +163,20 @@ function connect(){
     ever=true;conn=d.conn;open=true;html.setAttribute('data-stcfsd-bridge','connected');send();
   });
   es.addEventListener('superseded',function(){stop('superseded');});
-  es.addEventListener('replayed',function(e){
-    html.setAttribute('data-stcfsd-replayed',e.data);
-    replayDone=true;
-    var saved=null;try{saved=JSON.parse(sessionStorage.getItem(preserveKey)||'null');sessionStorage.removeItem(preserveKey);}catch(err){saved=null;}
-    if(saved&&saved.data){
-      // V5b-02 · 모은 입력은 모은 때의 파일에만 되돌린다 — 그사이 호스트가 다른 파일을 열었으면(다시 보내기의 마지막
-      // resultsCleared · restoreDesignInputs 의 순서 번호가 다르면) 버리고 상태 줄에 알린다. 오래된 것(10 분)도 버린다.
-      var why=saved.fileSeq!==fileSeq?'dropped-other-file':(!(Date.now()-Number(saved.at)<PRESERVE_MS)?'dropped-stale':null);
-      setTimeout(function(){
-        if(why){
-          html.setAttribute('data-stcfsd-preserved',why);
-          var text=why==='dropped-other-file'
-            ?'새로 고침하는 동안 다른 파일이 열려, 이 화면에만 있던 설계 탭 입력을 되살리지 않았습니다 — 지금 파일의 값입니다.'
-            :'새로 고침 전의 설계 탭 입력이 오래되어 되살리지 않았습니다.';
-          // 페이지의 상태 줄은 페이지가 곧 다시 쓰므로, 다리의 알림 줄을 따로 맨 위에 둔다(누르면 닫힘)
-          var n=document.createElement('div');n.id='stcfsd-bridge-notice';n.setAttribute('role','status');n.textContent=text+'  ✕';
-          n.style.cssText='position:sticky;top:0;z-index:2147483646;padding:6px 10px;font-size:12px;cursor:pointer;'
-            +'background:var(--vscode-inputValidation-warningBackground,#5a4a1a);color:var(--vscode-foreground,#eee);border-bottom:1px solid var(--vscode-inputValidation-warningBorder,#b89500)';
-          n.addEventListener('click',function(){n.remove();});
-          if(document.body){document.body.insertBefore(n,document.body.firstChild);}
-          var st=document.getElementById('status-message');if(st){st.textContent=text;}
-          return;
-        }
-        var inputs=saved.data.__stcfsd_collect===2?saved.data.designInputs:saved.data;
-        if(inputs){toPage({command:'restoreDesignInputs',data:inputs});html.setAttribute('data-stcfsd-preserved','restored');}
-      },50);
-    }
-  });
+  es.addEventListener('replayed',function(e){html.setAttribute('data-stcfsd-replayed',e.data);});
   es.onmessage=function(e){
     var msg;try{msg=JSON.parse(e.data);}catch(err){return;}
     received++;
-    if(msg&&(msg.command==='resultsCleared'||msg.command==='restoreDesignInputs')){fileSeq=e.lastEventId||null;}
     toPage(msg);
   };
   es.onerror=function(){if(!dead){open=false;}};
 }
 window.addEventListener('pagehide',function(){
-  if(!replayDone||dead){return;}
-  capturing=true;
-  try{toPage({command:'collectDesignData'});}catch(e){}
-  capturing=false;
+  if(!open||dead){return;}
+  // 300 ms 안에 친 글자 — 지금 칸에 change 를 일으키면 페이지가 밀린 caseEdit 를 곧바로 낸다. 그 묶음을 keepalive 로
+  var a=document.activeElement;
+  try{if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT')){a.dispatchEvent(new Event('change',{bubbles:true}));}}catch(e){}
+  sending=false;send(true);
 });
 if(window.parent===window){html.setAttribute('data-stcfsd-bridge','no-frame');}
 else{html.setAttribute('data-stcfsd-bridge','waiting-key');toParent({stcfsdBridge:1,type:'need-key',id:cfg.id});}

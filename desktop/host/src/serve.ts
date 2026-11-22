@@ -3,10 +3,10 @@
  *
  *   node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [--port <다리 포트>]
  *                                   [--port-file <MCP 포트 파일>] [--python <python.exe>] [--user-data <폴더>]
- *                                   [--documents <폴더>] [--claude-config <Claude 설정 파일>] [--repo <저장소 루트>] [--ui]
+ *                                   [--documents <폴더>] [--claude-config <Claude 설정 파일>] [--repo <저장소 루트>] [--ui [classic]]
  *
- * `--ui` — 새 검토 화면(U1, `desktop/ui/`)의 주소(`/ui/`)를 「화면:」 줄에 낸다. 없으면 지금처럼 틀(`/`)의 주소다. 다리는 두 경우 모두
- * `/ui/` 를 내준다(`desktop/ui/index.html` 이 있을 때) — 기본으로 여는 화면만 바뀐다.
+ * 기본 화면(U4)은 새 검토 화면(`desktop/ui/` — `/ui/`, `/` 도 그리로 보낸다). `--ui classic`(또는 `--classic`)은 예전의 틀(`/` —
+ * 제목 표시줄 + 설계 화면 탭 6개)을 기본으로 연다 — 한 판 동안 남긴다. `--ui` 만 주면 새 화면(예전 스위치 — 그대로 받는다).
  *
  * 확장 호스트를 화면이 있는 모드(screenless: false)로 띄우고 다리를 연 뒤, 토큰이 붙은 주소를 출력한다. 보통 브라우저로
  * 연다(뒤에 S3 의 Electron 창). `--open` 은 확장의 「열기」 길로 연다. Ctrl+C(SIGINT) · Ctrl+Break · IPC `shutdown` 으로 끝낸다.
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const { flags, open } = parseArgs(process.argv.slice(2));
   if (flags.help || flags.h) {
     out('사용법: node desktop/host/dist/serve.js [--open <파일.csd>]… [--theme dark|light] [--port <n>] [--port-file <경로>] '
-      + '[--python <python.exe>] [--user-data <폴더>] [--documents <폴더>] [--claude-config <파일>] [--repo <루트>] [--ui]');
+      + '[--python <python.exe>] [--user-data <폴더>] [--documents <폴더>] [--claude-config <파일>] [--repo <루트>] [--ui [classic]]');
     return;
   }
   // 확장 · Python 의 console 은 stderr 로 — stdout 은 이 CLI 의 줄만.
@@ -57,6 +57,7 @@ async function main(): Promise<void> {
   const log = (line: string) => process.stderr.write(`${line}\n`);
 
   const platform = createBridgePlatform({ log, documentsDir: str(flags.documents) ? path.resolve(str(flags.documents)!) : undefined });
+  const classic = flags.ui === 'classic' || flags.classic === true;
   const host = await startHost({ repoRoot, userDataDir, platform, portFile, pythonPath: str(flags.python), screenless: false, log });
   let bridge;
   try {
@@ -66,13 +67,14 @@ async function main(): Promise<void> {
       theme: flags.theme === 'light' ? 'light' : 'dark',
       claude: { configPath: str(flags['claude-config']) ? path.resolve(str(flags['claude-config'])!) : undefined },
       uiDir: path.join(repoRoot, 'desktop', 'ui'),
+      defaultScreen: classic ? 'classic' : 'ui',
     });
   } catch (err) {
     await host.dispose();
     throw err;
   }
   out(`StCFSD 호스트 + 화면 다리 — 활성화 ${host.activationMs} ms, 설계 패널 ${host.panelMs} ms`);
-  const wantUi = flags.ui === true;
+  const wantUi = !classic;
   if (wantUi && !bridge.uiUrl) { out('새 화면(desktop/ui/index.html)이 없다 — 틀을 연다'); }
   out('알림: 브라우저로 여는 이 화면은 개발 · 시험 길입니다 — 같은 브라우저로 연 127.0.0.1 의 다른 포트도 읽기 쿠키를 받아 모델 · 상태를 읽을 수 있습니다(쓰기는 못 함). 사용자는 StCFSD 창을 씁니다.');
   out(`화면: ${wantUi && bridge.uiUrl ? bridge.uiUrl : bridge.url}`);
@@ -115,6 +117,13 @@ async function main(): Promise<void> {
         // 확장의 「열기」 길로 파일을 연다(headless 의 IPC open 과 같다) — 화면이 없을 때 호스트가 파일을 여는 경우를 시험한다
         const file = String((raw as { file?: unknown }).file ?? '');
         host.openProject(file).then(r => { if (r.ok) { bridge.setCurrentFile(r.file); } reply({ id: m.id, ok: true, result: r }); },
+          err => reply({ id: m.id, ok: false, error: String((err as Error)?.message ?? err) }));
+        return;
+      }
+      if (m.type === 'save') {
+        // 확장의 「저장」 길로 파일에 저장한다(headless 의 IPC save 와 같다) — 저장 안 한 변경 표시가 풀리는지 시험한다(U4)
+        const file = String((raw as { file?: unknown }).file ?? '');
+        host.saveProject(file).then(r => { if (r.ok) { bridge.setCurrentFile(r.file); } reply({ id: m.id, ok: true, result: r }); },
           err => reply({ id: m.id, ok: false, error: String((err as Error)?.message ?? err) }));
         return;
       }

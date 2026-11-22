@@ -7,12 +7,13 @@
 import { esc, tip } from './dom';
 import { itemText, none, num, ratio, ratioText, unitOf, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO, VERDICT_KO } from './names';
-import { isDefault, memberRuns, POINT_KO, regionLabel, rowOfKey, state } from './store';
-import { demandCapacity, gaugeHtml, qnum } from './sheet';
+import { isDefault, memberRuns, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
+import { demandCapacity, gaugeHtml, highestLine, qnum, ratioFormTag, unText } from './sheet';
+import { BRANCH_TITLE, caseNotes, caseReady, caseTables, type Branch } from './caseView';
+import { BRANCH_OF, CASE_FIELDS, caseTag } from './caseFields';
 import { modeSel } from './center';
 import { si, UNITS_NOTE, type Kind } from './units';
 
-const K2 = '설계 · 하중 · 접합 입력은 K2 전까지 편집 상태(F2)의 입력 칸에만 있다 — 호스트도 MCP 도구도 이 값을 알지 못한다';
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
 const T_SET = '<span class="tag" data-tip="누군가 정한 값. 누가 정했는지(AI · 사용자)는 변경 기록(R2)부터 보인다">지정</span>';
 const tagSec = '<span class="tag sec" data-tip="단면에서 나온 값">단면</span>';
@@ -101,7 +102,17 @@ function materialInfo(): string {
     + sec('탄성 상수', table(row_('E', num(si(f?.material?.E, 'stress'), { src: 'full:material.E', kind: 'stress', sig: 6 }), t)
       + row_('ν', num(f?.material?.v, { src: 'full:material.v', kind: 'none', sig: 3 }), t)
       + row_('G', num(si(f?.material?.G, 'stress'), { src: 'full:material.G', kind: 'stress', sig: 6 }), t)), '', 'MCP get_full_state 의 material')
-    + sec('설계 강도', table(row_('Fy · Fu', none('편집 상태의 입력 칸에만 있다', K2), '')), '', '해석의 기준 응력은 「해석 조건」에, 검토에 쓴 Fy 는 부재 검토 결과에 있다');
+    + caseTables('mat', null)
+    + sec('해석 기준 응력', table(row_('기준 응력', typeof f?.load_fy === 'number' ? num(si(f.load_fy, 'stress'), { src: 'full:load_fy', kind: 'stress' }) : none('없음', '하중 경우에 기준 응력을 주지 않았다'),
+      state.model?.loadFySource === 'ai' ? caseTag('ai') : '')), '', '좌굴 해석의 기준 응력(get_full_state.load_fy). AI 가 set_load_case 로 정하면 AI(K2 결정 3) — 설계 Fy 와 다르다');
+}
+
+/** 부재 · 하중 · 설계 조건 · 접합부 — 호스트의 검토 상태(get_case_inputs) 그대로 */
+function caseInfo(b: Branch, focus: string | null): string {
+  const c = state.caseIn;
+  const dirty = c?.dirty ? `<span class="verdict warn" data-dirty="1"${tip(`저장하지 않은 변경이 있다(검토 상태 판 ${c.rev}${c.dirty_since ? ` · ${c.dirty_since}` : ''})`)}>저장 안 함</span>` : '';
+  return hd(`모델 · ${BRANCH_TITLE[b]}`, BRANCH_TITLE[b], caseReady() ? `<span class="dim">검토 상태 판 ${esc(String(c.rev))}</span> ${dirty}` : none('읽는 중'), '')
+    + caseTables(b, focus) + caseNotes();
 }
 
 function conditionsInfo(): string {
@@ -232,9 +243,10 @@ function checksInfo(key: string): string {
   const dcLine = row && row.si?.demand && row.si?.capacity && typeof row.si.demand.value === 'number' && typeof row.si.capacity.value === 'number'
     ? `${esc(String(row.si.demand.symbol ?? ''))} ${qnum(row.si.demand, `${row.src}demand.`, { sig: 3 })} / ${esc(String(row.si.capacity.symbol ?? ''))} ${qnum(row.si.capacity, `${row.src}capacity.`, { sig: 3 })}`
     : '';
-  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}utilization`) : none(row?.kind === 'na' ? '해당 없음' : '판정비 없음')}</span>`
-    + ` <span class="dim">${dcLine}${row?.clause ? ` · §${esc(row.clause)}` : ''}</span></div>`
+  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}utilization`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : none('판정비 없음')}</span>`
+    + ` <span class="dim">${dcLine}${row?.clause ? ` · §${esc(row.clause)}` : ''}${row ? ratioFormTag(row) : ''}</span></div>`
     + (row && (row.kind === 'ne' || row.kind === 'na') ? `<div class="dim" data-reason>${esc(String(row.us?.reason ?? ''))}</div>` : '')
+    + (row ? highestLine(row) : '')
     + (typeof focusRatio === 'number' ? gaugeHtml(focusRatio, ng) : '');
   const areaKo = run.area === 'lap' ? '접합부 검토 · 랩' : run.area === 'connection' ? '접합부 검토' : '부재 검토';
   const kHead = `${areaKo} · ${esc(row ? row.where : run.where)} · 검토 전체 <span class="verdict ${ov.cls}" style="font-weight:400"${tip('엔진의 전체 판정(pass): NG 가 하나라도 있으면 NG, 평가 못 한 것이 있으면 판정 없음, 모두 만족이면 OK')}>${ov.text}</span>`;
@@ -245,8 +257,8 @@ function checksInfo(key: string): string {
   const ri = rg ? state.regions.indexOf(rg) : -1;
   const loc = row?.si?.location;
   const used = table([
-    loc?.x && typeof loc.x.value === 'number' ? row_('검토 위치', `x ${qnum(loc.x, `${row!.src}location.x.`)}`, `${tagLa}<span class="why">${esc([loc.check_point ? POINT_KO(String(loc.check_point)) : '', loc.region ?? ''].filter(Boolean).join(' · '))}</span>`) : '',
-    row?.combination ? row_('하중 조합', esc(row.combination), tagLa) : '',
+    loc?.x && typeof loc.x.value === 'number' ? row_('검토 위치', `x ${qnum(loc.x, `${row!.src}location.x.`)}`, `${tagLa}<span class="why">${esc(locWords(loc).join(' · '))}</span>`) : '',
+    row?.combination ? row_('하중 조합', `<span data-combination="${esc(row.combination)}">${esc(COMBO_KO(row.combination))}</span>`, tagLa) : '',
     rg ? row_('검토 구간', `${num(rg.si?.start_ft, { src: `purlin:regions.${ri}.start_ft`, kind: 'length_ft', unit: false })} – ${num(rg.si?.end_ft, { src: `purlin:regions.${ri}.end_ft`, kind: 'length_ft' })}`, `${tagLa}<span class="why">${esc(regionLabel(rg.us, rg.si, ri))}</span>`) : '',
     rg && typeof rg.si?.Ly_in === 'number' ? row_('Ly · Cb', `${num(rg.si.Ly_in, { src: `purlin:regions.${ri}.Ly_in`, kind: 'length', unit: false })} mm · ${num(rg.si?.Cb, { src: `purlin:regions.${ri}.Cb`, kind: 'none', unit: false, sig: 3 })}`, tagLa) : '',
     row_('설계법', esc(String(us.design_method ?? row?.us?.design_method ?? '—')), tagEng),
@@ -269,7 +281,7 @@ function checksInfo(key: string): string {
   const out = run.notChecked.length ? `<ul class="notes faint">${run.notChecked.map(t => `<li>${esc(t)}</li>`).join('')}</ul>` : none('없음');
   const sheetLink = row && row.us ? `<a class="lnk" data-sheet="${esc(row.key)}"${tip('이 검토 항목의 계산 시트(Enter · 두 번 누르기)')}>계산 시트 →</a>` : '';
   return `<div class="hd"><div class="k">${kHead}<span class="sp"></span>${RV}</div><div class="ttl">${esc(row ? `${row.where} · ${row.name}` : run.label)}</div>${head}</div>`
-    + sec('설계 가정', used, '', '이 판정에 엔진이 쓴 값. 입력 칸의 값과 누가 정했는지는 K2 · R2 부터')
+    + sec('설계 가정', used, '', '이 판정에 엔진이 쓴 값. 입력의 출처는 모델 탭의 부재 · 하중 · 설계 조건(검토 상태) — 사람별 기록은 R2 부터')
     + sec(row?.pointName ? '한계상태 · 이 위치' : '한계상태 · 이 검토', ls, sheetLink)
     + (run.neTexts.length ? sec('엔진의 미검토 글', `<ul class="notes">${run.neTexts.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`, '', '엔진 결과의 not_evaluated 글(검토 항목과 같은 것을 글로)') : '')
     + sec('범위 밖', out, '', '엔진이 이 검토에서 하지 않은 것(not_checked) — 판정에 들어가지 않는다. 미검토(not_evaluated)와 다르다')
@@ -303,15 +315,24 @@ function connInfo(): string {
 
 }
 
+/** 검토 상태 키(case:<key>) → 가지 */
+function branchOfCaseKey(k: string): Branch {
+  const key = k.slice(5);
+  if (['spans', 'supports', 'laps'].includes(key)) { return 'mem'; }
+  const g = CASE_FIELDS.find(f => f.key === key)?.group ?? '';
+  return (BRANCH_OF[g] && BRANCH_OF[g] !== 'other' ? BRANCH_OF[g] : 'dc') as Branch;
+}
+
 export function infoHtml(key: string): string {
   if (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'props'].includes(key)) { return sectionInfo(); }
   if (key.startsWith('m') && ['mat', 'mE', 'mNu', 'mG'].includes(key)) { return materialInfo(); }
-  if (key === 'mFy') { return pendingInfo('설계 Fy · Fu', K2); }
+  if (key === 'mFy' || key === 'mFyRef') { return materialInfo(); }
+  if (key.startsWith('case:')) { return caseInfo(branchOfCaseKey(key), key.slice(5)); }
   if (['cond', 'cBC', 'cLc', 'cLen', 'cStr'].includes(key)) { return conditionsInfo(); }
-  if (key === 'mem') { return pendingInfo('부재', `스팬 · 지점 · 랩 · 간격 · 데크 — ${K2}`); }
-  if (key === 'ld') { return pendingInfo('하중', `하중 케이스 · 조합 — ${K2}`); }
-  if (key === 'cj') { return pendingInfo('접합부', `접합 입력 — ${K2}`); }
-  if (key === 'dc' || key.startsWith('dc:')) { return state.runs.length ? checksInfo('') : pendingInfo('설계 조건', K2); }
+  if (key === 'mem') { return caseInfo('mem', null); }
+  if (key === 'ld') { return caseInfo('ld', null); }
+  if (key === 'cj') { return caseInfo('cj', null); }
+  if (key === 'dc') { return caseInfo('dc', null); }
   if (key === 'asm' || key.startsWith('asm:')) { return assumptionsInfo(); }
   if (key === 'fsm' || key.startsWith('fsm:')) { return bucklingInfo(); }
   if (key === 'load' || key.startsWith('load:')) { return loadInfo(); }

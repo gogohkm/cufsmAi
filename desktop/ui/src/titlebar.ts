@@ -95,9 +95,13 @@ export function renderFollow(on: boolean, pointed: boolean): void {
 
 export function renderTitle(editing: boolean, pending: boolean): void {
   if (!root) { return; }
-  (root.querySelector('.fname') as HTMLElement).textContent = state.file.name ?? '파일 없음';
-  root.querySelector('.pick')?.setAttribute('data-tip', state.file.path
-    ? `${state.file.path} — 검토 대상 하나 = .csd 파일 하나. 열기 · 저장` : '아직 파일로 열거나 저장하지 않았다. 열기 · 저장');
+  // 저장하지 않은 변경(K2 §7 — 호스트의 get_status.case.dirty · caseDirty): 파일 이름 뒤에 ●
+  const dirty = !!(state.full?.case?.dirty ?? state.caseIn?.dirty);
+  const fname = root.querySelector('.fname') as HTMLElement;
+  fname.textContent = `${state.file.name ?? '파일 없음'}${dirty ? ' ●' : ''}`;
+  fname.setAttribute('data-dirty', dirty ? '1' : '0');
+  root.querySelector('.pick')?.setAttribute('data-tip', `${state.file.path
+    ? `${state.file.path} — 검토 대상 하나 = .csd 파일 하나. 열기 · 저장` : '아직 파일로 열거나 저장하지 않았다. 열기 · 저장'}${dirty ? ' · ● 저장하지 않은 변경이 있다' : ''}`);
   (root.querySelector('.pipe-slot') as HTMLElement).innerHTML = pipeHtml();
   (root.querySelector('.ebadge') as HTMLElement).hidden = !editing;
   root.classList.toggle('edit', editing);
@@ -107,7 +111,7 @@ export function renderTitle(editing: boolean, pending: boolean): void {
   ed.setAttribute('aria-pressed', String(editing));
   ed.textContent = editing ? '편집 마치기 F2' : '편집 F2';
   const name = state.file.name;
-  document.title = `${pending ? '● 응답 필요 — ' : ''}${name ? `${name}${editing ? ' · 편집' : ''} — ` : ''}StCFSD`;
+  document.title = `${pending ? '● 응답 필요 — ' : ''}${name ? `${name}${dirty ? ' ●' : ''}${editing ? ' · 편집' : ''} — ` : ''}StCFSD`;
 }
 
 /** S4 와 같은 상태 글 · 단추(`/api/claude/status`) */

@@ -23,7 +23,7 @@ const repoRoot = path.resolve(here, '..', '..', '..');
 const HEADLESS = path.join(here, '..', 'dist', 'headless.js');
 const MCP_SERVER = path.join(repoRoot, 'media', 'mcp-server.js');
 const EXAMPLE_CSD = path.join(repoRoot, 'Example', 'test.csd');
-// 지금 코드가 쓴 .csd(v1.3, 웹뷰가 모은 설계 입력 124칸) — 화면 시험(npm run test:rendered)이 남긴다. 없으면 건너뛴다.
+// 지금 코드가 쓴 .csd(웹뷰 · 호스트가 쓴 설계 입력) — 화면 시험(npm run test:rendered)이 남긴다. 없으면 건너뛴다.
 const CURRENT_CSD_CANDIDATES = [
   path.join(repoRoot, 'test', 'rendered', 'out', 'r_blank.csd'),
   path.join(repoRoot, 'test', 'rendered', 'out', 'r_proj13.csd'),
@@ -346,23 +346,25 @@ async function main() {
   const save1 = await cli.ipc('save', { file: saved1 });
   const j1 = fs.existsSync(saved1) ? JSON.parse(fs.readFileSync(saved1, 'utf8')) : undefined;
   check('저장 — 저장 대화상자를 headless 가 답한다', save1.ok && !!j1, `${Date.now() - t} ms · ${short(save1.message, 100)}`);
-  check('저장본에 모델 · 하중 해석 · 설계 결과가 있다', j1?.version === '1.3' && j1?.model?.node?.length === 21
-    && !!j1?.loadAnalysis && !!j1?.designResult, j1 ? `v${j1.version} · 절점 ${j1.model?.node?.length} · loadAnalysis ${!!j1.loadAnalysis} · designResult ${!!j1.designResult}` : '파일 없음');
-  // 화면 없는 저장은 설계 탭 입력을 새로 모으지 못한다 — 열고 나서 MCP 로 설계 · 하중을 돌렸으니 그것을 밝혀야 한다.
-  check('화면 없는 저장이 "입력을 새로 모으지 못했다" 를 밝힌다 — MCP 로 바꾼 것까지', /새로 모으지 못했다/.test(save1.inputsNotice ?? '')
-    && /example-test\.csd/.test(save1.inputsNotice ?? '') && /designResult/.test(save1.inputsNotice ?? '')
-    && /저장 주의/.test(cli.stderr()), short(save1.inputsNotice ?? '(주의 없음)', 200));
+  check('저장본(v1.4)에 모델 · 검토 상태(case) · 하중 해석 · 설계 결과가 있다', j1?.version === '1.4' && j1?.model?.node?.length === 21
+    && j1?.case?.schema === 'stcfsd-case/1' && !!j1?.loadAnalysis && !!j1?.designResult,
+    j1 ? `v${j1.version} · 절점 ${j1.model?.node?.length} · case ${j1.case?.schema} rev ${j1.case?.rev} · loadAnalysis ${!!j1.loadAnalysis} · designResult ${!!j1.designResult}` : '파일 없음');
+  // K2: 입력은 호스트의 검토 상태 — 화면 없이 저장해도 MCP 가 정한 입력(출처 ai)이 그대로 들어간다. 예전의 「새로 모으지 못했다」 주의는 없다.
+  const aiKeys = Object.entries(j1?.case?.sources ?? {}).filter(([, v]) => v === 'ai').map(([k]) => k);
+  check('화면 없는 저장에도 MCP 가 정한 입력(출처 ai)이 저장본의 case 에 있다 — 저장 주의는 없다', aiKeys.length >= 3 && !/저장 주의/.test(cli.stderr()) && !('inputsNotice' in save1),
+    `ai 출처 ${aiKeys.length}키(${aiKeys.slice(0, 6).join(', ')}) · 저장 주의 ${/저장 주의/.test(cli.stderr())}`);
   const nodesBefore = await action('get_nodes');
   const reopen1 = await cli.ipc('open', { file: saved1 });
   const nodesAfter = await action('get_nodes');
   const saved2 = path.join(tmp, 'saved', 'smoke-2.csd');
   const save2 = await cli.ipc('save', { file: saved2 });
   const j2 = fs.existsSync(saved2) ? JSON.parse(fs.readFileSync(saved2, 'utf8')) : undefined;
-  check('열자마자 저장하면 주의에 "바뀐 것" 이 없다(열기가 다시 보낸 결과는 바뀐 것이 아니다)', /새로 모으지 못했다/.test(save2.inputsNotice ?? '')
-    && /smoke-1\.csd/.test(save2.inputsNotice ?? '') && !/바꾼 것/.test(save2.inputsNotice ?? ''), short(save2.inputsNotice ?? '(주의 없음)', 160));
+  const dirtyAfterOpen = await action('get_unsaved_changes');
+  check('열자마자는 저장 안 한 변경이 없다(get_unsaved_changes) — 열기가 다시 보낸 결과는 바뀐 것이 아니다', dirtyAfterOpen?.dirty === false, short(dirtyAfterOpen, 160));
   check('저장본을 다시 열고 다시 저장한다', reopen1.ok && save2.ok && !!j2, short(`${reopen1.message} / ${save2.message}`, 160));
   check('다시 연 입력이 같다 — 모델 · 설계 입력 · Lap 결과', isDeepStrictEqual(j1?.model, j2?.model)
-    && isDeepStrictEqual(j1?.designInputs, j2?.designInputs) && isDeepStrictEqual(j1?.lapResult, j2?.lapResult)
+    && isDeepStrictEqual(j1?.designInputs, j2?.designInputs) && isDeepStrictEqual(j1?.case?.inputs, j2?.case?.inputs) && isDeepStrictEqual(j1?.case?.sources, j2?.case?.sources)
+    && isDeepStrictEqual(j1?.lapResult, j2?.lapResult)
     && isDeepStrictEqual(nodesBefore, nodesAfter),
     `모델 키 ${Object.keys(j1?.model ?? {}).length}개 · get_nodes 같음=${isDeepStrictEqual(nodesBefore, nodesAfter)}`);
   check('다시 연 결과(하중 해석 · 설계)가 같다', isDeepStrictEqual(j1?.loadAnalysis, j2?.loadAnalysis) && isDeepStrictEqual(j1?.designResult, j2?.designResult));
@@ -373,10 +375,16 @@ async function main() {
     const saved3 = path.join(tmp, 'saved', 'smoke-current.csd');
     const save3 = await cli.ipc('save', { file: saved3 });
     const j3 = fs.existsSync(saved3) ? JSON.parse(fs.readFileSync(saved3, 'utf8')) : undefined;
-    const n = Object.keys(src.designInputs ?? {}).length;
-    check(`지금 코드가 쓴 .csd 의 설계 입력 ${n}칸이 저장 · 다시 열기에서 그대로다`, reopenCurrent.ok && save3.ok
-      && isDeepStrictEqual(src.designInputs, j3?.designInputs) && isDeepStrictEqual(src.model?.node, j3?.model?.node),
-      short(`${reopenCurrent.message} / ${save3.message}`, 160));
+    // K2: 1.3 은 열 때 검토 상태로 읽고 1.4 로 쓴다(거울 하나 — D-3). 그다음부터는 열고 저장해도 그대로여야 한다.
+    const reopen3 = await cli.ipc('open', { file: saved3 });
+    const saved4 = path.join(tmp, 'saved', 'smoke-current-2.csd');
+    const save4 = await cli.ipc('save', { file: saved4 });
+    const j4 = fs.existsSync(saved4) ? JSON.parse(fs.readFileSync(saved4, 'utf8')) : undefined;
+    const n = Object.keys(j3?.case?.inputs ?? {}).length;
+    check(`지금 코드가 쓴 .csd(v${src.version}) → v1.4 로 저장 → 다시 열고 저장해도 검토 상태 ${n}키 · 설계 입력 · 모델이 그대로다`, reopenCurrent.ok && save3.ok && reopen3.ok && save4.ok
+      && n > 80 && j3?.version === '1.4' && isDeepStrictEqual(j3?.case?.inputs, j4?.case?.inputs) && isDeepStrictEqual(j3?.designInputs, j4?.designInputs)
+      && isDeepStrictEqual(src.model?.node, j4?.model?.node),
+      short(`${reopenCurrent.message} / ${save3.message} / ${save4.message}`, 160));
   }
 
   section('4. 설계 패널은 끝까지 살아 있다');
@@ -389,11 +397,14 @@ async function main() {
   const counts = st.messageCounts;
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   for (const [k, v] of Object.entries(counts).sort((a, b) => b[1] - a[1])) { process.stdout.write(`    ${String(v).padStart(4)}  ${k}\n`); }
-  const expected = ['modelLoaded', 'analysisComplete', 'dsmResult', 'restoreDesignInputs', 'loadAnalysisComplete',
-    'designPurlinResult', 'designResult', 'collectDesignData'];
+  // K2: 열기는 검토 상태(caseState)를 보내고(옛 화면을 위한 restoreDesignInputs 도 함께 — 다리는 그것을 다시 보내지 않는다),
+  // 저장은 화면에 묻지 않는다(collectDesignData 없음)
+  const expected = ['modelLoaded', 'analysisComplete', 'dsmResult', 'caseState', 'loadAnalysisComplete',
+    'designPurlinResult', 'designResult', 'caseDirty'];
+  const gone = ['collectDesignData'].filter(k => counts[k] > 0);
   const missing = expected.filter(k => !(counts[k] > 0));
-  check('메시지가 만들어진다(명령별로 센다)', total > 0 && missing.length === 0,
-    `${total}건 · ${Object.keys(counts).length}종${missing.length ? ` · 없음: ${missing.join(', ')}` : ''}`);
+  check('메시지가 만들어진다(명령별로 센다) — K2 의 caseState · caseDirty, 옛 collectDesignData 는 없다', total > 0 && missing.length === 0 && gone.length === 0,
+    `${total}건 · ${Object.keys(counts).length}종${missing.length ? ` · 없음: ${missing.join(', ')}` : ''}${gone.length ? ` · 남음: ${gone.join(', ')}` : ''}`);
 
   section('6. 진짜 MCP 클라이언트(media/mcp-server.js, stdio)');
   if (!fs.existsSync(MCP_SERVER)) {

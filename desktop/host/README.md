@@ -16,7 +16,7 @@
 | `src/standin.ts` | 화면이 없을 때 설계 패널의 웹뷰 대역(`webviewReady` · `collectDesignData` 에만 답한다) |
 | `src/headless.ts` | 화면 없는 CLI |
 | `src/bridge/` | **화면 다리(S2)** — 127.0.0.1 + 토큰의 HTTP: 웹뷰 HTML 고쳐 쓰기(`inject.ts`) · 테마(`theme.ts`) · 호스트 ↔ 웹뷰 통로와 새로 고침 다시 보내기(`channel.ts`) · 호스트의 물음을 화면으로(`platform.ts`) · MCP 중계 · Claude 상태(`claude.ts`) · SSE(`sse.ts`) · 인증(`http.ts`). U1 에서 새 검토 화면(`../ui/`)을 위한 `/ui/` · `/api/wv/<id>/last|first`(읽기만) · 이벤트 `host:message` 를 더했다. [`BRIDGE.md`](BRIDGE.md) |
-| `src/serve.ts` | 호스트 + 다리 CLI(브라우저로 열 주소를 출력). `--ui` 면 새 검토 화면(`/ui/`)의 주소 |
+| `src/serve.ts` | 호스트 + 다리 CLI(브라우저로 열 주소를 출력). 기본은 새 검토 화면(`/ui/`)의 주소, `--ui classic` 이면 예전의 틀(`/`). IPC `open` · `save` · `status` · `shutdown` |
 | `frame/` | 틀(`/`): 제목 표시줄(파일 이름 · Claude 연결 상태) + 설계 패널 iframe + 좌굴 보고서 칸 + 호스트의 물음 · 알림. 빌드 없이 다리가 그대로 내준다 |
 | `src/index.ts` | 공개 API(시험 · 뒤의 다리 · 껍데기가 이것만 쓴다) |
 | `build.mjs` | esbuild — `dist/index.js` · `dist/headless.js` · `dist/serve.js`(Node 20 CJS 한 파일씩). `out/` 은 묶지 않고 실행 때 require. 빌드 뒤 웹뷰가 쓰는 `--vscode-*` 변수가 다리 테마에 모두 있는지 보고, 빠지면 멈춘다 |
@@ -86,7 +86,7 @@ StCFSD 에서는 모델과 결과가 `StcfsdPanel` 객체의 필드이고 MCP �
 | `designInputs` | **마지막으로 연 파일의 입력 그대로**(파일을 연 적이 없으면 null). 그 뒤 MCP 로 돌린 설계 · 하중의 조건(`aisi_design` 의 Mu · Lb, `design_purlin` 의 경간 · 하중 …)은 담기지 않는다 |
 | `lapResult` | 마지막으로 받은 `lapConnectionResult`(다른 파일을 열면 지운다) |
 
-저장할 때마다 대역이 이것을 밝히는 주의를 만든다. stderr 에 `[host] 저장 주의: 설계 탭 입력은 화면(웹뷰)에만 있어 새로 모으지 못했다 — <파일> 을(를) 열 때의 입력을 그대로 쓴다. 그 뒤 호스트가 바꾼 것(designResult, …)의 조건은 입력 칸에 들어가지 않았다 …` 를 남기고, `saveProject()` 결과(IPC `save` 의 답)의 `inputsNotice` 에도 싣는다. "바꾼 것" 은 그 파일을 연 뒤 호스트가 보낸 `modelLoaded` · `designResult` · `designPurlinResult` · `loadAnalysisComplete` · `lapConnectionResult` · `connectionResult` · `designDsmPrepared` 이다 — 열기 자체가 다시 보내는 결과는 세지 않는다. 화면(S2)이 붙으면 진짜 웹뷰가 입력을 모으고 주의는 없다.
+K2 뒤로는 설계 · 하중 · 접합 입력이 호스트의 검토 상태에 있어 화면 없이 저장해도 그대로 들어간다(`.csd` 1.4 의 `case`). 예전의 「저장 주의」(입력을 새로 모으지 못했다)는 없어졌다 — 대역은 `webviewReady` 하나만 낸다.
 
 `openProject(file)` · `saveProject(file)` 은 확장의 「열기」 · 「저장」 길을 그대로 탄다: 웹뷰 메시지(`openProject` · `saveProject`) → (저장이면 `collectDesignData` ↔ `designDataCollected`) → 열기/저장 대화상자(미리 넣은 답) → 파일 → 끝 알림. 끝 = 대화상자 뒤의 첫 알림, 한 번에 하나씩.
 
@@ -121,7 +121,7 @@ CLI 를 자식 프로세스로(`--port-file <임시> --open <Example/test.csd �
 0. `out/` 이 낡았으면 `npx tsc -p ./`
 1. 준비 줄 · 포트 파일(포트 · 토큰 · pid) · 클라이언트 환경 줄 · Claude Desktop 항목(토큰 없음) · 막은 명령 셋 · 토큰 없는 요청 401 · `.venv` · `--open` 두 번
 2. `get_status` → `generate_template`(립 C) → `set_material`(E · v) · `set_load_case`(굽힘, fy 50) · `set_lengths` → `get_properties` → `run_analysis` → `get_dsm`: My = fy · Sx_cl(호스트가 낸 단면계수로 계산한 기대값), Mcrl · Mcrd > 0 → `aisi_design`(휨, Fy 50): My = Fy · Sx, 0 < Mn ≤ My. 프로그램의 기본 강재에 기대는 리터럴은 없다
-3. `.csd` 다시 열기(IPC) → 좌굴 해석 → `analyze_loads` → `design_purlin` → `aisi_design`(압축) → 저장(저장 대화상자 길) — 주의 `inputsNotice` 가 연 파일과 그 뒤 바꾼 것(designResult …)을 밝힌다 → 다시 열기 → 다시 저장(주의에 바꾼 것 없음): 모델 · 설계 입력 · Lap · 하중 해석 · 설계 결과가 같다. 지금 코드가 쓴 `.csd`(설계 입력 124칸)도 열고 저장해 입력이 그대로다
+3. `.csd` 다시 열기(IPC) → 좌굴 해석 → `analyze_loads` → `design_purlin` → `aisi_design`(압축) → 저장(저장 대화상자 길) — v1.4 · `case` 에 MCP 가 정한 입력(출처 ai) → 다시 열기(저장 안 한 변경 없음) → 다시 저장: 모델 · 설계 입력 · Lap · 하중 해석 · 설계 결과가 같다. 지금 코드가 쓴 `.csd`(설계 입력 124칸)도 열고 저장해 입력이 그대로다
 4. 설계 패널이 살아 있고 고정돼 있다, 어느 응답에도 "No active CUFSM panel" 없음
 5. 호스트 → 웹뷰 메시지를 명령별로 센다(13종 · 50여 건)
 6. 진짜 MCP 클라이언트(`media/mcp-server.js`, stdio, CLI 가 출력한 환경): initialize · tools/list(59) · get_status. 시험의 조회는 `/last-call` 에 세지 않고 클라이언트의 호출은 센다

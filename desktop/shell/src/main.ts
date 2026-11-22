@@ -22,7 +22,7 @@ import { app, BrowserWindow, dialog, Menu, screen, session, shell, type MenuItem
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type * as HostApi from '../../host/src/index';
-import { parseArgs } from './args';
+import { parseArgs, PROJECT_EXT } from './args';
 import { createLogger, type ShellLogger } from './log';
 import { findPython, missingFiles, resolveLayout, type Layout } from './layout';
 import { effectiveEnv, questionSignal, runMode, userDataProblem, VERIFICATION_MARKER, verificationMarkerValid } from './mode';
@@ -100,6 +100,8 @@ let started = false;
 /** 시작이 끝나기 전에 온 열 파일(명령줄 · 시작 중의 다시 실행) — 차례대로 연다(V5-12a) */
 const pendingOpens: string[] = [];
 let shutDown = false;
+/** 프로그램이 스스로 끝내는 중(before-quit) — 창의 닫기 물음을 건너뛴다 */
+let appQuitting = false;
 let offBridge: (() => void) | undefined;
 let theme: 'dark' | 'light' = args.theme ?? readPrefs().theme ?? 'dark';
 /** 열기 · 저장의 기본 자리의 부모(문서 폴더). 시험은 STCFSD_DOCUMENTS 로 임시 폴더를 준다 */
@@ -127,7 +129,13 @@ const diag = {
   keyedRequests: 0,
   /** 쓰기 열쇠를 붙인 요청(방법 · 경로 · 종류) — 시험이 이동에 붙지 않았는지 본다 */
   keyedLog: [] as Array<{ method: string; path: string; type: string }>,
+  /** 저장 안 한 변경을 물은 기록(V5-12c) — 어디서 · 어떻게 · 답 */
+  unsaved: [] as Array<{ where: UnsavedWhere; how: 'none' | 'native' | 'page'; answer: UnsavedAnswer | 'proceed' }>,
+  /** 시험: 창 닫기의 OS 물음 대신 쓸 답(차례대로). 비어 있으면 '취소' — 시험은 OS 대화상자를 띄우지 않는다 */
+  unsavedTestAnswers: [] as UnsavedAnswer[],
 };
+type UnsavedWhere = 'close' | 'open' | 'second-instance' | 'file-association';
+type UnsavedAnswer = 'save' | 'discard' | 'cancel';
 
 function readPrefs(): { theme?: 'dark' | 'light' } {
   try { const j = JSON.parse(fs.readFileSync(prefsFile, 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; }
@@ -265,7 +273,77 @@ const notices: Array<() => unknown> = [];
 /** 메뉴 「열기」 · 「저장」 — 화면의 Open · Save 단추와 같은 길(웹뷰 메시지 → 호스트 → OS 대화상자) */
 function fileAction(action: 'open' | 'save'): void {
   if (!host) { return; }
-  host.designer.deliver({ command: action === 'open' ? 'openProject' : 'saveProject' });
+  if (action === 'save') { host.designer.deliver({ command: 'saveProject' }); return; }
+  void confirmUnsaved('open').then(go => { if (go && host) { host.designer.deliver({ command: 'openProject' }); } });
+}
+
+// ─── 저장 안 한 변경(V5-12c · K2 §7) ─────────────────────────────────
+/** 호스트 동작(MCP 다리의 /action — AI 호출로 세지 않는다) */
+async function hostAction<T = any>(action: string, params: Record<string, unknown> = {}): Promise<T | undefined> {
+  if (!host) { return undefined; }
+  try {
+    const r = await fetch(`http://127.0.0.1:${host.mcp.port}/action`, { method: 'POST',
+      headers: { Authorization: `Bearer ${host.mcp.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...params }) });
+    return await r.json() as T;
+  } catch { return undefined; }
+}
+
+const UNSAVED_ITEMS = ['저장', '저장 안 함', '취소'];
+const WHERE_KO: Record<UnsavedWhere, string> = {
+  close: '창을 닫기 전에', open: '다른 파일을 열기 전에', 'second-instance': '넘어온 파일을 열기 전에', 'file-association': '연결된 파일을 열기 전에',
+};
+
+/**
+ * 저장 안 한 변경이 있으면 묻는다 — 저장 · 저장 안 함 · 취소. 더러워진 것이 없으면 묻지 않는다(호스트 `get_unsaved_changes`).
+ * 창 닫기(사람이 창을 닫는 동작)만 OS 대화상자 — 이 프로그램에서 대화상자가 포커스를 가져가도 되는 곳이다. 그 밖(메뉴의 열기 ·
+ * 다시 실행 · 파일 연결)은 화면 안의 물음(다리의 알림 — 창을 앞으로 꺼내지 않는다). 시험은 OS 대화상자를 띄우지 않는다.
+ * 돌려주는 것: 계속해도 되는가(저장했거나 · 버렸거나 · 바뀐 것이 없다).
+ */
+async function confirmUnsaved(where: UnsavedWhere): Promise<boolean> {
+  const u = await hostAction<{ dirty?: boolean; file?: string | null; inputs_changed?: string[]; model_changed?: boolean; since?: string | null }>('get_unsaved_changes');
+  if (!u || !u.dirty) { diag.unsaved.push({ where, how: 'none', answer: 'proceed' }); return true; }
+  const nIn = Array.isArray(u.inputs_changed) ? u.inputs_changed.length : 0;
+  const what = [nIn ? `검토 입력 ${nIn}칸` : '', u.model_changed ? '모델' : ''].filter(Boolean).join(' · ') || '입력';
+  const message = `저장하지 않은 변경(${what})이 있습니다 — ${WHERE_KO[where]} 저장할까요?`;
+  const detail = u.file ? `파일: ${u.file}` : '아직 파일로 저장한 적이 없습니다.';
+  let answer: UnsavedAnswer;
+  let how: 'native' | 'page';
+  if (where === 'close') {
+    how = 'native';
+    if (TEST) { answer = diag.unsavedTestAnswers.shift() ?? 'cancel'; } else {
+      const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : (undefined as unknown as BrowserWindow), {
+        type: 'warning', title: 'StCFSD', message, detail, buttons: UNSAVED_ITEMS, defaultId: 0, cancelId: 2, noLink: true });
+      answer = (['save', 'discard', 'cancel'] as UnsavedAnswer[])[r.response] ?? 'cancel';
+    }
+  } else {
+    how = 'page';
+    const picked = platform ? await platform.notify({ severity: 'warning', modal: true, items: UNSAVED_ITEMS, message, detail }) : undefined;
+    answer = picked === '저장' ? 'save' : picked === '저장 안 함' ? 'discard' : 'cancel';
+  }
+  diag.unsaved.push({ where, how, answer });
+  log(`저장 안 한 변경 — ${where}: ${answer}`);
+  if (answer === 'cancel') { return false; }
+  if (answer === 'discard') { return true; }
+  return saveBeforeLeaving(u.file ?? null);
+}
+
+/** 「저장」 — 지금 파일이 있으면 그 파일에, 없으면 저장 물음(호스트의 저장 길)을 띄우고 깨끗해질 때까지 기다린다 */
+async function saveBeforeLeaving(file: string | null): Promise<boolean> {
+  if (!host) { return false; }
+  if (file) {
+    const r = await host.saveProject(file);
+    if (!r.ok) { log(`저장 실패 — ${r.message ?? ''}`, 'warn'); return false; }
+    return true;
+  }
+  // 아직 파일이 없다 — 저장 자리를 묻는다(사람이 「저장」을 고른 뒤의 OS 대화상자). 시험은 OS 대화상자를 띄우지 않는다
+  if (TEST) { log('저장 자리를 물어야 한다 — 시험이라 묻지 않고 멈춘다', 'warn'); return false; }
+  const r = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : (undefined as unknown as BrowserWindow), {
+    title: '검토 대상 저장', defaultPath: path.join(documentsDir || app.getPath('documents'), 'StCFSD', 'project.csd'),
+    filters: [{ name: 'StCFSD 검토 대상', extensions: ['csd'] }] });
+  if (r.canceled || !r.filePath) { return false; }
+  const saved = await host.saveProject(r.filePath);
+  if (saved.ok) { bridge?.setCurrentFile(saved.file); }
+  return saved.ok;
 }
 
 // ─── 창 ─────────────────────────────────────────────────────────
@@ -364,9 +442,9 @@ function createSession(b: HostApi.BridgeHandle): Electron.Session {
   return ses;
 }
 
-/** 창에 싣는 화면의 경로 — 기본은 틀(`/`). `--ui` 이고 다리가 새 검토 화면을 내줄 때만 `/ui/`(U1) */
+/** 창에 싣는 화면의 경로 — 기본은 새 검토 화면(`/ui/`, U4). `--ui classic` 이거나 다리가 새 화면을 내주지 못하면 틀(`/`) */
 function screenPath(b: HostApi.BridgeHandle): string {
-  return args.ui && b.uiUrl ? '/ui/' : '/';
+  return args.screen === 'ui' && b.uiUrl ? '/ui/' : '/';
 }
 
 function setTheme(t: 'dark' | 'light'): void {
@@ -465,7 +543,21 @@ function createWindow(b: HostApi.BridgeHandle): BrowserWindow {
   w.on('move', scheduleState);
   w.on('maximize', scheduleState);
   w.on('unmaximize', scheduleState);
-  w.on('close', () => { clearTimeout(stateTimer); saveWindowState(); });
+  // 창 닫기(창의 ✕ · 메뉴의 끝내기 · Alt+F4) — 저장 안 한 변경이 있으면 먼저 묻는다(V5-12c). 프로그램이 스스로 끝낼 때
+  // (시험 · 신호 · IPC shutdown — appQuitting)는 묻지 않는다.
+  let closeConfirmed = false;
+  w.on('close', e => {
+    if (!closeConfirmed && !appQuitting && host && started) {
+      e.preventDefault();
+      void confirmUnsaved('close').then(go => {
+        if (!go || w.isDestroyed()) { return; }
+        closeConfirmed = true;
+        w.close();
+      });
+      return;
+    }
+    clearTimeout(stateTimer); saveWindowState();
+  });
   w.on('closed', () => { if (win === w) { win = undefined; } });
   w.webContents.on('console-message', (e: Electron.Event & { level?: string; message?: string; sourceId?: string; lineNumber?: number }) => {
     const lv = String(e.level ?? 'info');
@@ -594,10 +686,11 @@ async function start(): Promise<void> {
     bridge = await api.startBridge(host, {
       platform, theme, frameDir: layout.frameDir, log: line => logger?.host(line),
       claude: { configPath: claudeConfigPath(), entry },
-      // 새 검토 화면(U1)은 `--ui` 일 때만 연다. 폴더가 없으면(설치본은 아직 묶지 않는다) 다리가 /ui/ 를 내주지 않고 틀을 연다.
-      uiDir: args.ui && fs.existsSync(path.join(layout.uiDir, 'index.html')) ? layout.uiDir : undefined,
+      // 새 검토 화면이 기본(U4). 폴더가 없으면 다리가 /ui/ 를 내주지 않고 틀을 연다. `--ui classic` 은 `/` 가 예전의 틀.
+      uiDir: fs.existsSync(path.join(layout.uiDir, 'index.html')) ? layout.uiDir : undefined,
+      defaultScreen: args.screen,
     });
-    if (args.ui && !bridge.uiUrl) { log(`새 검토 화면이 없다(${layout.uiDir}) — 틀을 연다`, 'warn'); }
+    if (args.screen === 'ui' && !bridge.uiUrl) { log(`새 검토 화면이 없다(${layout.uiDir}) — 틀을 연다`, 'warn'); }
   } catch (err) {
     return failStartup('bridge', String((err as Error)?.stack ?? err));
   }
@@ -650,6 +743,7 @@ function installTestControl(): void {
     app, win, host, bridge, platform, dialog, diag, BrowserWindow, Menu, screen, layout, entry, userData, portFile, windowFile,
     openFile, fileAction, placement, started,
     menuClick: (id: string) => { const item = Menu.getApplicationMenu()?.getMenuItemById(id); if (!item) { throw new Error(`메뉴 없음: ${id}`); } item.click(); return true; },
+    hostAction, confirmUnsaved,
   });
   process.on('message', (m: { id?: number; type?: string; code?: string; file?: string }) => {
     const reply = (msg: unknown) => send({ id: m.id, ...(msg as object) });
@@ -695,11 +789,23 @@ if (gotLock) {
     diag.secondInstances.push({ open: files[0] ?? null, at: Date.now() });
     log(`다시 실행됨${files.length ? ` — 열 파일 ${files.join(', ')}` : ''}${started ? '' : ' (아직 시작 중 — 차례에 둔다)'}`);
     bringToFront();
-    // 시작 중이면 openFile 이 차례에 둔다(V5-12a). 떠 있으면 바로 연다 — 지금 모델은 묻지 않고 바뀐다(K2 전, README 「잃는 것」)
-    void openFiles(files);
+    // 시작 중이면 openFile 이 차례에 둔다(V5-12a). 떠 있으면 — 저장 안 한 변경이 있으면 먼저 묻는다(V5-12c, 화면 안의 물음).
+    // 파일 연결(탐색기에서 .csd 두 번 누름)도 Windows 에서는 이 길(다시 실행)로 온다.
+    if (files.length && started) {
+      const viaAssoc = argv.some(a => PROJECT_EXT.test(a)) && !argv.includes('--open');
+      void confirmUnsaved(viaAssoc ? 'file-association' : 'second-instance').then(go => { if (go) { void openFiles(files); } });
+    } else { void openFiles(files); }
   });
   app.on('web-contents-created', (_e, wc) => { if (wc.getType() === 'window') { guardContents(wc); } });
   app.on('window-all-closed', () => { app.quit(); });
+  // 프로그램이 스스로 끝내는 길(신호 · 시험 · IPC) — 창의 닫기 물음을 거치지 않는다
+  app.on('before-quit', () => { appQuitting = true; });
+  // macOS 의 파일 연결(Windows 는 다시 실행으로 온다)
+  app.on('open-file', (e, file) => {
+    e.preventDefault();
+    if (!started) { void openFiles([file]); return; }
+    void confirmUnsaved('file-association').then(go => { if (go) { void openFiles([file]); } });
+  });
   app.on('will-quit', e => {
     if (shutDown) { return; }
     e.preventDefault();

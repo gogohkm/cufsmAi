@@ -331,6 +331,9 @@ async function main() {
     t = Date.now();
     A = await launch(exe, ['--user-data', userData], env, 'A'); launched.push(A.child);
     check('설치본이 뜬다(보이지 않게, 확인용 표시 파일로 시험 모드)', A.stage.stage === 'running', `${Date.now() - t} ms · ${A.stage.origin}`);
+    // U4: 설치본의 기본 화면은 새 검토 화면(resources/app/ui — 묶음 준비가 싣는다). 예전의 틀은 --ui classic(아래 3 이 그 길)
+    const aUrl = await until(() => A.ev('return ctx.win.webContents.getURL() || null;'), 15_000);
+    check('설치본의 기본 화면 = 새 검토 화면(/ui/ — 스위치 없이)', A.stage.screen === '/ui/' && aUrl === `${A.stage.origin}/ui/`, `${A.stage.screen} · ${aUrl}`);
     const lay = await A.ev('return { kind: ctx.layout.kind, appRoot: ctx.layout.appRoot, python: ctx.layout.python, hostPython: ctx.host.python, mcpServer: ctx.layout.mcpServer, portFile: ctx.portFile, wvOrigin: ctx.bridge.webviewOrigin };');
     check('배치 = installed · 모두 그 폴더 안', lay.kind === 'installed' && inside(lay.appRoot, appDir) && inside(lay.mcpServer, appDir) && inside(lay.portFile, userData), short(lay, 220));
     const procs = await until(() => { const d = descendants(A.pid).filter(r => /python/i.test(r.name)); return d.length ? d : undefined; }, 30_000);
@@ -350,7 +353,8 @@ async function main() {
 
     section('3. 명령줄의 .csd 로 실행 → 좌굴 → 하중 → 퍼린 설계(MCP 서버 = 설치본의 StCFSD.exe) → 저장 · 다시 열기');
     t = Date.now();
-    B = await launch(exe, ['--user-data', userData, fileA], env, 'B'); launched.push(B.child);
+    // 이 절은 예전의 틀(제목 표시줄의 파일 이름 · Claude 단추)을 본다 — 한 판 동안 남긴 스위치로
+    B = await launch(exe, ['--user-data', userData, '--ui', 'classic', fileA], env, 'B'); launched.push(B.child);
     const opened = await until(() => B.ev('return ctx.diag.opened.length ? ctx.diag.opened[0] : null;'), 30_000);
     check('명령줄의 .csd 를 연다', opened?.ok && opened.file === fileA, `${Date.now() - t} ms · ${short(opened?.message, 80)}`);
     const entry = await B.ev('return ctx.entry;');
