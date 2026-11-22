@@ -200,6 +200,172 @@ function main() {
     assert.strictEqual(reg.connectClaudeDesktop({ entry, configPath: given }).action, 'created');
     assert.strictEqual(reg.checkClaudeDesktop({ entry, configPath: given }).configKind, 'given');
 
+    // ─── V5 (2026-11-22): 독립 검증 V5-06 · V5-15 · V5-S5 ────────────────────────────────────────
+    const vdir = path.join(tmp, 'v5', 'Claude');
+    fs.mkdirSync(vdir, { recursive: true });
+    const vcfg = path.join(vdir, 'claude_desktop_config.json');
+    let tick = 0;
+    const vopts = { entry, configPath: vcfg, pathOptions: { platform: 'win32' }, now: () => new Date(2026, 10, 22, 10, 0, tick++) };
+    const otherServers = { windload: { command: 'C:\\x\\wl.exe', args: ['--stdio'], env: { API_KEY: 'secret' } } };
+
+    // V5-06: 읽은 뒤 rename 앞에 다른 프로그램이 쓴다 — 임시 파일을 쓰는 순간에 끼워 넣는다(우리 rename 직전의 틈).
+    const realWrite = fs.writeFileSync;
+    const interleave = (times, make) => {
+      let n = 0;
+      fs.writeFileSync = function (p, ...rest) {
+        const out = realWrite.call(this, p, ...rest);
+        if (String(p).includes('.stcfsd-tmp-') && n < times) { n += 1; realWrite(vcfg, make(n)); }
+        return out;
+      };
+      return () => { fs.writeFileSync = realWrite; return n; };
+    };
+    const concurrent = (n) => JSON.stringify({ mcpServers: { ...otherServers, [`added-by-claude-${n}`]: { command: 'npx', args: [String(n)] } } }, null, 2);
+    realWrite(vcfg, JSON.stringify({ mcpServers: otherServers }, null, 2));
+    let restore = interleave(1, concurrent);
+    r = reg.connectClaudeDesktop(vopts);
+    let interleaved = restore();
+    assert.strictEqual(interleaved, 1, 'the concurrent write happened');
+    cfg = JSON.parse(fs.readFileSync(vcfg, 'utf8'));
+    assert(r.ok && r.action === 'added', JSON.stringify(r));
+    assert(cfg.mcpServers['added-by-claude-1'], 'V5-06: a change written between our read and our rename is kept');
+    assert.deepStrictEqual(cfg.mcpServers.stcfsd, entry, 'our single change applied on top of it');
+    assert.deepStrictEqual(cfg.mcpServers.windload, otherServers.windload);
+    assert.strictEqual(fs.readFileSync(r.backupPath, 'utf8'), concurrent(1), 'the backup is the content we actually replaced');
+    assert.strictEqual(backups(vcfg).length, 1, 'the aborted attempt left no backup');
+    assert.deepStrictEqual(temps(vcfg), []);
+    // 끊기도 같다
+    restore = interleave(1, (n) => JSON.stringify({ mcpServers: { ...JSON.parse(fs.readFileSync(vcfg, 'utf8')).mcpServers, [`late-${n}`]: { command: 'x' } } }));
+    r = reg.disconnectClaudeDesktop(vopts);
+    restore();
+    cfg = JSON.parse(fs.readFileSync(vcfg, 'utf8'));
+    assert(r.ok && r.action === 'removed', JSON.stringify(r));
+    assert(cfg.mcpServers['late-1'] && cfg.mcpServers['added-by-claude-1'] && !cfg.mcpServers.stcfsd, 'disconnect keeps a concurrent change too');
+    // 계속 바뀌면 덮어쓰지 않고 config-busy
+    const nbBusy = backups(vcfg).length;
+    restore = interleave(100, concurrent);
+    r = reg.connectClaudeDesktop(vopts);
+    interleaved = restore();
+    assert.deepStrictEqual([r.ok, r.reason], [false, 'config-busy'], JSON.stringify(r));
+    assert.strictEqual(interleaved, reg.CLAUDE_WRITE_ATTEMPTS, 'a small bounded number of attempts');
+    assert.strictEqual(fs.readFileSync(vcfg, 'utf8'), concurrent(interleaved), 'the other program’s last write stands');
+    assert.strictEqual(backups(vcfg).length, nbBusy, 'no backups left from the attempts');
+    assert.deepStrictEqual(temps(vcfg), []);
+
+    // V5-15(a): 같은 키가 두 번 — 손대지 않고 까닭을 밝힌다
+    assert.strictEqual(reg.findDuplicateKey('{"a":1,"b":{"a":2},"c":[{"a":1},{"a":2}],"d":"\\"a\\":"}'), null, 'same name in different objects is fine');
+    assert.strictEqual(reg.findDuplicateKey('{"mcpServers":{"a":{"command":"first"},"a":{"command":"second"}}}'), 'mcpServers.a');
+    assert.strictEqual(reg.findDuplicateKey('{"x":[{"k":1,"k":2}]}'), 'x[0].k');
+    assert.strictEqual(reg.findDuplicateKey('{"q\\u0022":1,"q\\"":2}'), 'q"', 'keys compared after unescaping');
+    for (const dup of ['{"mcpServers":{"a":{"command":"first"},"a":{"command":"second"}}}', '{"globalShortcut":"A","globalShortcut":"B","mcpServers":{}}']) {
+      realWrite(vcfg, dup);
+      const tb = mtime(vcfg);
+      const nbb = backups(vcfg).length;
+      st = reg.checkClaudeDesktop(vopts);
+      assert.strictEqual(st.state, 'invalid-config', dup);
+      assert(/appears more than once/.test(st.configError), st.configError);
+      r = reg.connectClaudeDesktop(vopts);
+      assert.deepStrictEqual([r.ok, r.reason], [false, 'invalid-config']);
+      r = reg.disconnectClaudeDesktop(vopts);
+      assert.deepStrictEqual([r.ok, r.reason], [false, 'invalid-config']);
+      assert.strictEqual(fs.readFileSync(vcfg, 'utf8'), dup, 'duplicate-key config untouched');
+      assert.strictEqual(mtime(vcfg), tb);
+      assert.strictEqual(backups(vcfg).length, nbb);
+    }
+
+    // V5-15(b): 하드 링크는 제자리에 써서 링크를 지킨다. 심볼릭 링크는 대상에(만들 수 있을 때만 — 개발자 모드 · 관리자)
+    const realTarget = path.join(tmp, 'v5', 'real-config.json');
+    realWrite(realTarget, JSON.stringify({ mcpServers: otherServers }, null, 2));
+    fs.rmSync(vcfg);
+    fs.linkSync(realTarget, vcfg);
+    assert.strictEqual(fs.statSync(vcfg).nlink, 2);
+    r = reg.connectClaudeDesktop(vopts);
+    assert(r.ok && r.action === 'added', JSON.stringify(r));
+    assert.strictEqual(fs.statSync(vcfg).nlink, 2, 'hard link kept');
+    assert.strictEqual(fs.readFileSync(realTarget, 'utf8'), fs.readFileSync(vcfg, 'utf8'), 'both names see the new content');
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(realTarget, 'utf8')).mcpServers.stcfsd, entry);
+    r = reg.disconnectClaudeDesktop(vopts);
+    assert(r.ok && r.action === 'removed' && fs.statSync(vcfg).nlink === 2);
+    assert.deepStrictEqual(temps(vcfg), []);
+    fs.rmSync(vcfg);
+    let symlinks = true;
+    try { fs.symlinkSync(realTarget, vcfg, 'file'); } catch (e) { symlinks = false; console.log(`  (V5-15b symbolic-link case skipped: ${e.code} — needs developer mode or admin)`); }
+    if (symlinks) {
+      r = reg.connectClaudeDesktop(vopts);
+      assert(r.ok && fs.lstatSync(vcfg).isSymbolicLink(), 'symbolic link kept');
+      assert.deepStrictEqual(JSON.parse(fs.readFileSync(realTarget, 'utf8')).mcpServers.stcfsd, entry, 'written to the link target');
+      fs.rmSync(vcfg);
+      fs.symlinkSync(path.join(tmp, 'v5', 'missing.json'), vcfg, 'file');
+      r = reg.connectClaudeDesktop(vopts);
+      assert.deepStrictEqual([r.ok, r.reason], [false, 'write-failed'], 'dangling link: not written');
+      assert(/link whose target cannot be resolved/.test(r.error));
+      assert(fs.lstatSync(vcfg).isSymbolicLink() && !fs.existsSync(path.join(tmp, 'v5', 'missing.json')));
+      fs.rmSync(vcfg);
+    }
+
+    // V5-15(c): 우리 백업은 최근 CLAUDE_BACKUPS_KEPT 개만, 우리 이름 꼴이 아닌 것은 손대지 않는다
+    realWrite(vcfg, JSON.stringify({ mcpServers: otherServers }, null, 2));
+    for (const b of backups(vcfg)) { fs.rmSync(path.join(vdir, b)); }
+    const foreign = [
+      'claude_desktop_config.json.stcfsd-backup-mine.txt',                 // 꼴이 아님
+      'claude_desktop_config.json.stcfsd-backup-20200101-000000.bak',      // 꼴 뒤에 더 붙음
+      'other.json.stcfsd-backup-20200101-000000',                          // 다른 파일의 것
+      'claude_desktop_config.json.bak',
+    ];
+    for (const n of foreign) { realWrite(path.join(vdir, n), 'not ours'); }
+    fs.mkdirSync(path.join(vdir, 'claude_desktop_config.json.stcfsd-backup-20200101-000001'));   // 이름은 맞지만 폴더
+    const oldOurs = 'claude_desktop_config.json.stcfsd-backup-20200101-000002';
+    realWrite(path.join(vdir, oldOurs), '{}');
+    let lastBackup;
+    for (let i = 0; i < 6; i++) {
+      r = reg.connectClaudeDesktop(vopts); assert(r.ok && r.wrote); lastBackup = r.backupPath;
+      r = reg.disconnectClaudeDesktop(vopts); assert(r.ok && r.wrote); lastBackup = r.backupPath;
+    }
+    const ours = backups(vcfg).filter((n) => /\.stcfsd-backup-\d{8}-\d{6}(-\d+)?$/.test(n) && fs.lstatSync(path.join(vdir, n)).isFile());
+    assert.strictEqual(ours.length, reg.CLAUDE_BACKUPS_KEPT, `V5-15c: 12 writes leave ${reg.CLAUDE_BACKUPS_KEPT} backups, got ${ours.length}`);
+    assert(fs.existsSync(lastBackup), 'the newest backup is kept');
+    assert(!fs.existsSync(path.join(vdir, oldOurs)), 'the oldest of ours went first');
+    for (const n of foreign) { assert.strictEqual(fs.readFileSync(path.join(vdir, n), 'utf8'), 'not ours', `foreign file kept: ${n}`); }
+    assert(fs.statSync(path.join(vdir, 'claude_desktop_config.json.stcfsd-backup-20200101-000001')).isDirectory(), 'a directory is never removed');
+    // 같은 초의 -2 · -10 은 수로 가른다
+    const sameSec = path.join(tmp, 'v5', 'seq', 'c.json');
+    fs.mkdirSync(path.dirname(sameSec), { recursive: true });
+    for (const s of ['', '-2', '-3', '-9', '-10', '-11']) { realWrite(`${sameSec}.stcfsd-backup-20260101-000000${s}`, 'x'); }
+    reg.pruneClaudeBackups(sameSec, 2);
+    assert.deepStrictEqual(backups(sameSec).sort(), ['c.json.stcfsd-backup-20260101-000000-10', 'c.json.stcfsd-backup-20260101-000000-11']);
+
+    // V5-15(d) · V5-S5: Windows 에서는 경로의 대소문자 · 구분자만 다른 항목은 같은 항목이다
+    const caseOnly = {
+      command: entry.command.toLowerCase(),
+      args: [entry.args[0].toUpperCase().replace(/\\/g, '/')],
+      env: { ...entry.env, STCFSD_MCP_PORT_FILE: entry.env.STCFSD_MCP_PORT_FILE.toLowerCase() },
+    };
+    realWrite(vcfg, JSON.stringify({ mcpServers: { ...otherServers, stcfsd: caseOnly } }, null, 2));
+    assert.strictEqual(reg.checkClaudeDesktop(vopts).state, 'registered', 'win32: case / separator-only difference = registered');
+    const tCase = mtime(vcfg);
+    r = reg.connectClaudeDesktop(vopts);
+    assert(r.ok && r.action === 'unchanged' && mtime(vcfg) === tCase, 'connect does not rewrite it');
+    const posix = { ...vopts, pathOptions: { platform: 'linux' } };
+    assert.strictEqual(reg.checkClaudeDesktop(posix).state, 'registered-elsewhere', 'other OS: paths compared exactly');
+    assert.strictEqual(reg.disconnectClaudeDesktop(posix).action, 'kept');
+    r = reg.disconnectClaudeDesktop(vopts);
+    assert(r.ok && r.action === 'removed', 'win32: disconnect removes the case-only-different entry');
+    assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(vcfg, 'utf8')).mcpServers), ['windload']);
+    assert(!reg.samePath('C:\\a\\b', 'C:\\a\\c', 'win32') && !reg.samePath('/a/B', '/a/b', 'linux') && reg.samePath('c:/A//b', 'C:\\a\\b', 'win32'));
+    assert(!reg.sameEntry({ ...entry, env: { ...entry.env, STCFSD_MCP_STANDALONE: 'ONE' } }, { ...entry, env: { ...entry.env, STCFSD_MCP_STANDALONE: 'one' } }, 'win32'),
+      'non-path env values stay exact');
+    if (process.platform === 'win32') {
+      // V5-S5: 실행한 경로의 글자 꼴이 process.execPath 에 그대로 들어간다(확인) — 그래서 위의 비교가 필요하다
+      const lower = process.execPath.toLowerCase();
+      const seenPath = require('child_process').execFileSync(lower, ['-p', 'process.execPath'], { encoding: 'utf8', windowsHide: true }).trim();
+      console.log(`  (V5-S5: launched as "${lower}" → process.execPath = "${seenPath}")`);
+      assert(reg.samePath(seenPath, process.execPath, 'win32'), 'the same executable, however it was launched');
+      if (seenPath !== process.execPath) {
+        const asLaunched = reg.standaloneMcpEntry({ command: seenPath, serverScript: script, portFile });
+        realWrite(vcfg, JSON.stringify({ mcpServers: { stcfsd: reg.standaloneMcpEntry({ command: process.execPath, serverScript: script, portFile }) } }));
+        assert.strictEqual(reg.checkClaudeDesktop({ ...vopts, entry: asLaunched }).state, 'registered', 'V5-S5: launch-path casing does not turn into registered-elsewhere');
+      }
+    }
+
     // 10. vscode 비의존, 확장이 부르지 않는다 ----------------------------------------------------------
     const src = fs.readFileSync(path.join(ROOT, 'src', 'mcp', 'claudeDesktop.ts'), 'utf8');
     assert(!/from ['"]vscode['"]|require\(['"]vscode['"]\)/.test(src), 'no vscode import');

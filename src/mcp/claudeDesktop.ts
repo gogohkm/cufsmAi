@@ -10,13 +10,18 @@
  *    쓴 뒤 다시 읽어 확인. JSON 이 아니면(또는 루트 · mcpServers 가 객체가 아니면) 손대지 않고 백업도 하지 않는다.
  *  - Claude 설정 폴더가 없으면(= Claude Desktop 미설치) 만들지 않는다.
  *  - 끊기는 지금 쓸 항목과 **같은** 항목만 지운다.
+ *  - V5(2026-11-22): rename 바로 앞에서 다시 보고 그사이 바뀌었으면 다시 읽어 우리 한 가지만 다시 얹는다(몇 번 —
+ *    계속 바뀌면 `config-busy`, 덮어쓰지 않음). 같은 키가 두 번 있는 설정은 `invalid-config`. 심볼릭 링크는 대상에,
+ *    하드 링크는 제자리에 쓴다. 우리 백업은 최근 `CLAUDE_BACKUPS_KEPT` 개만. Windows 에서는 경로를 대소문자 ·
+ *    구분자 없이 비교한다.
  * 모든 경로는 주입할 수 있다(`configPath` · `pathOptions`) — 시험은 진짜 설정에 닿지 않는다.
  */
 
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { PORT_FILE_ENV, STANDALONE_ENV, atomicWriteFile } from './portFile';
+import { PORT_FILE_ENV, STANDALONE_ENV, atomicWriteFile, sleepSync } from './portFile';
 
 /** Claude Desktop 설정의 항목 이름. (확장의 Claude Code 등록 이름은 registration.ts 의 'stcfsd-section-designer') */
 export const CLAUDE_DESKTOP_SERVER_KEY = 'stcfsd';
@@ -153,28 +158,48 @@ export function standaloneMcpEntry(input: StandaloneEntryInput): McpEntry {
 type JsonObject = Record<string, unknown>;
 const isObject = (v: unknown): v is JsonObject => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-function sameEnv(a: Record<string, unknown> | undefined, b: Record<string, string> | undefined): boolean {
-    const ea = Object.entries(a ?? {}).sort(([x], [y]) => x.localeCompare(y));
-    const eb = Object.entries(b ?? {}).sort(([x], [y]) => x.localeCompare(y));
-    return ea.length === eb.length && ea.every(([k, v], i) => eb[i][0] === k && eb[i][1] === v);
+/**
+ * V5-15(d) · 경로 비교. Windows 에서는 대소문자 · `/` 와 `\` 를 가리지 않는다 — `process.execPath` 의 글자 꼴은 실행한
+ * 방법을 따른다(소문자 경로로 띄우면 `C:\program files\…` — V5-S5 에서 확인). 그 밖의 OS 는 글자 그대로.
+ */
+export function samePath(a: unknown, b: unknown, platform: NodeJS.Platform = process.platform): boolean {
+    if (typeof a !== 'string' || typeof b !== 'string') { return false; }
+    if (a === b) { return true; }
+    if (platform !== 'win32') { return false; }
+    const norm = (s: string) => path.win32.normalize(s).toLowerCase();
+    return norm(a) === norm(b);
 }
 
-/** 설정에 있는 값이 이 항목과 같은가(env 키 순서 무관, 다른 키가 더 있으면 다르다). */
-export function sameEntry(raw: unknown, expected: McpEntry): boolean {
+/** env 값 가운데 경로인 것(포트 파일)만 경로로 비교한다. 다른 값은 글자 그대로. */
+function sameEnv(a: Record<string, unknown> | undefined, b: Record<string, string> | undefined, platform: NodeJS.Platform): boolean {
+    const ea = Object.entries(a ?? {}).sort(([x], [y]) => x.localeCompare(y));
+    const eb = Object.entries(b ?? {}).sort(([x], [y]) => x.localeCompare(y));
+    return ea.length === eb.length && ea.every(([k, v], i) => eb[i][0] === k
+        && (k === PORT_FILE_ENV ? samePath(v, eb[i][1], platform) : eb[i][1] === v));
+}
+
+/**
+ * 설정에 있는 값이 이 항목과 같은가(env 키 순서 무관, 다른 키가 더 있으면 다르다).
+ * `command` · `args` · 포트 파일 경로는 `samePath`(Windows 는 대소문자 · 구분자 무관).
+ */
+export function sameEntry(raw: unknown, expected: McpEntry, platform: NodeJS.Platform = process.platform): boolean {
     if (!isObject(raw)) { return false; }
     const extra = Object.keys(raw).filter(k => k !== 'command' && k !== 'args' && k !== 'env');
     const args = raw.args;
     const env = raw.env;
     return extra.length === 0
-        && raw.command === expected.command
-        && Array.isArray(args) && args.length === expected.args.length && args.every((a, i) => a === expected.args[i])
+        && samePath(raw.command, expected.command, platform)
+        && Array.isArray(args) && args.length === expected.args.length && args.every((a, i) => samePath(a, expected.args[i], platform))
         && (env === undefined || isObject(env))
-        && sameEnv(env as JsonObject | undefined, expected.env);
+        && sameEnv(env as JsonObject | undefined, expected.env, platform);
 }
 
 // ─── 설정 파일 읽기 ────────────────────────────────────────────────
 
 interface TextFormat { indent: string; eol: string; finalNewline: boolean }
+
+/** V5-06 · 읽은 순간의 파일 — 크기 · 수정 시각 · 내용 해시. 없으면 null. */
+interface Fingerprint { size: number; mtimeMs: number; hash: string }
 
 interface ReadConfig {
     exists: boolean;
@@ -183,6 +208,9 @@ interface ReadConfig {
     cfg?: JsonObject;
     bom: boolean;
     format: TextFormat;
+    /** 읽은 바이트 그대로(백업은 이것을 쓴다 — 읽은 것과 다른 것을 백업하지 않게) */
+    raw?: Buffer;
+    fingerprint: Fingerprint | null;
 }
 
 const DEFAULT_FORMAT: TextFormat = { indent: '  ', eol: '\n', finalNewline: true };
@@ -194,28 +222,112 @@ function detectFormat(text: string): TextFormat {
     return { indent: m ? m[1] : '  ', eol, finalNewline: /\n$/.test(text) || text.trim() === '' };
 }
 
-function readConfig(file: string): ReadConfig {
-    let text: string;
-    try { text = fs.readFileSync(file, 'utf8'); } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-            return { exists: false, text: null, bom: false, format: DEFAULT_FORMAT };
-        }
-        return { exists: true, text: null, bom: false, format: DEFAULT_FORMAT, error: `cannot read: ${(err as Error).message}` };
+/** 파일을 한 번 열어 fstat 과 내용을 함께 읽는다(둘 사이에 바뀐 것을 섞지 않게). ENOENT 면 null. */
+function readSnapshot(file: string): { raw: Buffer; fingerprint: Fingerprint } | null {
+    let fd: number;
+    try { fd = fs.openSync(file, 'r'); } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') { return null; }
+        throw err;
     }
+    try {
+        const st = fs.fstatSync(fd);
+        const raw = fs.readFileSync(fd);
+        return { raw, fingerprint: { size: st.size, mtimeMs: st.mtimeMs, hash: crypto.createHash('sha256').update(raw).digest('hex') } };
+    } finally { fs.closeSync(fd); }
+}
+
+function sameFingerprint(a: Fingerprint | null, b: Fingerprint | null): boolean {
+    if (!a || !b) { return a === b; }
+    return a.size === b.size && a.mtimeMs === b.mtimeMs && a.hash === b.hash;
+}
+
+/**
+ * V5-15(a) · 올바른 JSON 안에서 같은 객체에 같은 키가 두 번 있는가. 있으면 그 경로(`mcpServers.a`), 없으면 null.
+ * JSON.parse 는 마지막 것만 남기므로 다시 쓰면 앞의 것이 말없이 사라진다 — 그런 설정은 손대지 않는다.
+ * JSON.parse 를 지난 글에만 부른다(문법은 이미 맞다).
+ */
+export function findDuplicateKey(text: string): string | null {
+    let i = 0;
+    const ws = () => { while (i < text.length && (text[i] === ' ' || text[i] === '\t' || text[i] === '\r' || text[i] === '\n')) { i++; } };
+    const str = (): string => {
+        const start = i;
+        i++;
+        while (i < text.length && text[i] !== '"') { i += text[i] === '\\' ? 2 : 1; }
+        i++;
+        return JSON.parse(text.slice(start, i)) as string;
+    };
+    const value = (where: string): string | null => {
+        ws();
+        const c = text[i];
+        if (c === '{') {
+            i++;
+            ws();
+            if (text[i] === '}') { i++; return null; }
+            const seen = new Set<string>();
+            for (;;) {
+                ws();
+                const key = str();
+                const at = where ? `${where}.${key}` : key;
+                if (seen.has(key)) { return at; }
+                seen.add(key);
+                ws();
+                i++;                                   // ':'
+                const inner = value(at);
+                if (inner) { return inner; }
+                ws();
+                if (text[i] === ',') { i++; continue; }
+                i++;                                   // '}'
+                return null;
+            }
+        }
+        if (c === '[') {
+            i++;
+            ws();
+            if (text[i] === ']') { i++; return null; }
+            for (let n = 0; ; n++) {
+                const inner = value(`${where}[${n}]`);
+                if (inner) { return inner; }
+                ws();
+                if (text[i] === ',') { i++; continue; }
+                i++;                                   // ']'
+                return null;
+            }
+        }
+        if (c === '"') { str(); return null; }
+        while (i < text.length && !',}] \t\r\n'.includes(text[i])) { i++; }   // 수 · true · false · null
+        return null;
+    };
+    return value('');
+}
+
+function readConfig(file: string): ReadConfig {
+    let snap: ReturnType<typeof readSnapshot>;
+    try { snap = readSnapshot(file); } catch (err) {
+        return { exists: true, text: null, bom: false, format: DEFAULT_FORMAT, fingerprint: null, error: `cannot read: ${(err as Error).message}` };
+    }
+    if (!snap) { return { exists: false, text: null, bom: false, format: DEFAULT_FORMAT, fingerprint: null }; }
+    const { raw, fingerprint } = snap;
+    const text = raw.toString('utf8');
     const bom = text.charCodeAt(0) === 0xfeff;
     const body = bom ? text.slice(1) : text;
     const format = detectFormat(body);
-    if (!body.trim()) { return { exists: true, text, bom, format, cfg: {} }; }
+    const base = { exists: true, text, bom, format, raw, fingerprint };
+    if (!body.trim()) { return { ...base, cfg: {} }; }
     let parsed: unknown;
     try { parsed = JSON.parse(body); } catch (err) {
-        return { exists: true, text, bom, format, error: `not valid JSON: ${(err as Error).message}` };
+        return { ...base, error: `not valid JSON: ${(err as Error).message}` };
     }
-    if (!isObject(parsed)) { return { exists: true, text, bom, format, error: 'the config root is not a JSON object' }; }
+    if (!isObject(parsed)) { return { ...base, error: 'the config root is not a JSON object' }; }
     if (parsed.mcpServers !== undefined && !isObject(parsed.mcpServers)) {
         // 갈아 끼우면 남의 값을 지우게 된다 — 여기서 멈춘다.
-        return { exists: true, text, bom, format, error: 'mcpServers is not a JSON object' };
+        return { ...base, error: 'mcpServers is not a JSON object' };
     }
-    return { exists: true, text, bom, format, cfg: parsed };
+    let dup: string | null;
+    try { dup = findDuplicateKey(body); } catch { dup = '(could not check)'; }
+    if (dup) {
+        return { ...base, error: `the key "${dup}" appears more than once; rewriting the file would silently drop one of them, so StCFSD leaves it alone` };
+    }
+    return { ...base, cfg: parsed };
 }
 
 function serialize(cfg: JsonObject, read: ReadConfig): string {
@@ -274,6 +386,11 @@ function locateConfig(opts: ClaudeDesktopOptions): { file: string; kind: ClaudeC
     return { file: chosen.path, kind: chosen.kind, candidates };
 }
 
+/** 경로 비교의 기준 OS — 가짜 사용자(pathOptions.platform)를 주면 그것, 아니면 이 프로세스. */
+function platformOf(opts: ClaudeDesktopOptions): NodeJS.Platform {
+    return opts.pathOptions?.platform ?? process.platform;
+}
+
 function serversOf(cfg: JsonObject | undefined): JsonObject {
     return cfg && isObject(cfg.mcpServers) ? cfg.mcpServers : {};
 }
@@ -292,7 +409,7 @@ export function checkClaudeDesktop(opts: ClaudeDesktopOptions): ClaudeDesktopSta
     const current = servers[CLAUDE_DESKTOP_SERVER_KEY];
     const others = Object.keys(servers).filter(k => k !== CLAUDE_DESKTOP_SERVER_KEY);
     const state: ClaudeDesktopState = current === undefined ? 'not-registered'
-        : sameEntry(current, opts.entry) ? 'registered' : 'registered-elsewhere';
+        : sameEntry(current, opts.entry, platformOf(opts)) ? 'registered' : 'registered-elsewhere';
     return { ...base, state, configExists: read.exists, current, others };
 }
 
@@ -313,11 +430,44 @@ function backupPath(file: string, d: Date): string {
     }
 }
 
+/**
+ * V5-15(c) · 남겨 둘 우리 백업 수. 백업은 다른 서버의 비밀 env 까지 든 전체 사본이라 끝없이 쌓이면 안 된다.
+ * 다섯 = 연결 · 끊기를 몇 번 되풀이해도 「연결 전」 사본이 남을 만큼, 그러면서 비밀 사본은 적게.
+ */
+export const CLAUDE_BACKUPS_KEPT = 5;
+
+/** `<파일 이름>.stcfsd-backup-YYYYMMDD-HHMMSS[-n]` — 이 꼴만 우리 백업으로 본다(이름 꼴은 K1 그대로). */
+function backupPattern(file: string): RegExp {
+    const base = path.basename(file).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${base}\\.stcfsd-backup-(\\d{8})-(\\d{6})(?:-(\\d+))?$`);
+}
+
+/** 우리 백업 가운데 최근 `keep` 개만 남긴다. 이름이 꼴에 맞는 일반 파일만(링크 · 폴더 · 다른 이름은 보지도 않는다). */
+export function pruneClaudeBackups(file: string, keep = CLAUDE_BACKUPS_KEPT): string[] {
+    const dir = path.dirname(file);
+    const re = backupPattern(file);
+    let names: string[];
+    try { names = fs.readdirSync(dir); } catch { return []; }
+    const ours = names.map((n) => ({ n, m: re.exec(n) })).filter((x) => x.m !== null).filter((x) => {
+        try { return fs.lstatSync(path.join(dir, x.n)).isFile(); } catch { return false; }
+    }).map((x) => ({ n: x.n, key: `${x.m![1]}${x.m![2]}`, seq: x.m![3] ? Number(x.m![3]) : 1 }));
+    ours.sort((a, b) => a.key === b.key ? b.seq - a.seq : (a.key < b.key ? 1 : -1));   // 새것부터
+    const removed: string[] = [];
+    for (const old of ours.slice(Math.max(0, keep))) {
+        try { fs.unlinkSync(path.join(dir, old.n)); removed.push(old.n); } catch { /* 다음 번에 */ }
+    }
+    return removed;
+}
+
 function fileMode(file: string): number | undefined {
     try { return fs.statSync(file).mode & 0o777; } catch { return undefined; }
 }
 
-export type ClaudeFailReason = 'claude-not-installed' | 'invalid-config' | 'write-failed';
+/**
+ * `config-busy`(V5-06) = 쓰는 동안 다른 프로그램(Claude Desktop 등)이 설정을 거듭 바꿔 쓰지 않았다 — 파일은 그 프로그램이
+ * 쓴 그대로다.
+ */
+export type ClaudeFailReason = 'claude-not-installed' | 'invalid-config' | 'write-failed' | 'config-busy';
 
 export interface ClaudeFail {
     ok: false;
@@ -355,25 +505,120 @@ export interface ClaudeDisconnectOk {
     restartRequired: boolean;
 }
 
-/** 백업 → 원자적 쓰기 → 다시 읽어 확인. 실패하면 던진다(호출자가 write-failed 로). */
-function writeWithBackup(file: string, read: ReadConfig, text: string, now: Date,
-    verify: (cfg: JsonObject) => string | null): string | undefined {
-    let backup: string | undefined;
-    const mode = read.exists ? fileMode(file) : undefined;
-    if (read.exists) {
-        backup = backupPath(file, now);
-        fs.copyFileSync(file, backup, fs.constants.COPYFILE_EXCL);
+/**
+ * V5-15(b) · 실제로 쓸 곳. rename 은 링크를 끊고 일반 파일로 바꾼다.
+ *  - 심볼릭 링크 → `realpath` 의 대상에 쓴다(그 폴더의 임시 파일 + rename — 원자적). 대상을 풀 수 없으면(끊긴 링크 ·
+ *    고리 · 권한) 쓰지 않고 `write-failed` 로 까닭을 밝힌다.
+ *  - 하드 링크(링크 수 > 1) → rename 하면 다른 이름과 갈라진다. 백업을 둔 뒤 **제자리에** 고쳐 쓴다(원자적이지 않다 —
+ *    쓰는 도중 꺼지면 백업으로 되돌린다).
+ *  - 폴더가 링크(junction)인 것은 rename 이 그 안에서 일어나므로 그대로 둔다.
+ */
+function writeTarget(file: string): { path: string; inPlace: boolean } | { error: string } {
+    let l: fs.Stats;
+    try { l = fs.lstatSync(file); } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') { return { path: file, inPlace: false }; }
+        return { error: `cannot inspect the config (${(err as Error).message}); StCFSD did not write it` };
     }
-    try {
-        atomicWriteFile(file, text, mode, 'stcfsd-tmp');
+    let real = file;
+    if (l.isSymbolicLink()) {
+        try { real = fs.realpathSync(file); } catch (err) {
+            return { error: `the config is a link whose target cannot be resolved (${(err as Error).message}); StCFSD did not write it` };
+        }
+    }
+    let s: fs.Stats;
+    try { s = fs.statSync(real); } catch (err) {
+        return { error: `cannot inspect the config (${(err as Error).message}); StCFSD did not write it` };
+    }
+    if (!s.isFile()) { return { error: 'the config is not a regular file; StCFSD did not write it' }; }
+    return { path: real, inPlace: s.nlink > 1 };
+}
+
+/** 하드 링크 · 제자리 쓰기. Windows 잠금(EPERM/EBUSY/EACCES)은 atomicWriteFile 과 같이 다시 해 본다. */
+function writeInPlace(file: string, text: string, beforeWrite: () => void): void {
+    for (let attempt = 0; ; attempt++) {
+        beforeWrite();
+        let fd: number;
+        try { fd = fs.openSync(file, 'r+'); } catch (err) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (attempt >= 4 || (code !== 'EPERM' && code !== 'EBUSY' && code !== 'EACCES')) { throw err; }
+            sleepSync(50 * (attempt + 1));
+            continue;
+        }
+        try {
+            fs.ftruncateSync(fd, 0);
+            fs.writeSync(fd, text, 0, 'utf8');
+            fs.fsyncSync(fd);
+        } finally { fs.closeSync(fd); }
+        return;
+    }
+}
+
+/** 읽은 뒤 다른 프로그램이 설정을 바꿨다(V5-06) — 이번 시도는 버리고 다시 읽는다. */
+class ConfigChangedError extends Error {
+    constructor() { super('the config changed while StCFSD was writing it'); }
+}
+
+/** V5-06 · 다시 읽어 우리 한 가지 변경을 다시 얹는 시도 수(첫 시도 포함). 다 바뀌면 `config-busy`. */
+export const CLAUDE_WRITE_ATTEMPTS = 4;
+
+/** 한 번의 읽기에 대해 무엇을 할까 — 쓸 것이 없으면 `done`, 있으면 쓸 글 · 쓴 뒤 확인 · 성공 결과. */
+type Step<T> =
+    | { done: T | ClaudeFail }
+    | { text: string; verify: (after: JsonObject) => string | null; result: (backup: string | undefined) => T };
+
+/**
+ * 읽기 → (우리 변경 한 가지) → 백업 → 쓰기 → 다시 읽어 확인. V5-06: rename(또는 제자리 쓰기) **바로 앞에서** 파일을 다시 보고
+ * (크기 · 수정 시각 · 내용 해시) 읽은 것과 다르면 쓰지 않고, 이번 시도의 백업을 지운 뒤 처음부터(다시 읽어 그 위에 우리
+ * 변경만) 한다. `CLAUDE_WRITE_ATTEMPTS` 번 다 바뀌면 `config-busy` — 덮어쓰지 않는다.
+ * 남는 틈: 다시 본 때와 rename 사이(수 µs)에 끼어든 쓰기는 여전히 알 수 없다 — Claude Desktop 은 잠그지 않으므로 더 좁힐 수 없다.
+ */
+function changeConfig<T>(file: string, now: Date, step: (read: ReadConfig) => Step<T>): T | ClaudeFail {
+    for (let attempt = 0; attempt < CLAUDE_WRITE_ATTEMPTS; attempt++) {
+        const read = readConfig(file);
+        const s = step(read);
+        if ('done' in s) { return s.done; }
+        const target = writeTarget(file);
+        if ('error' in target) { return { ok: false, reason: 'write-failed', configPath: file, error: target.error }; }
+        let backup: string | undefined;
+        try {
+            if (read.exists && read.raw) {
+                // 읽은 바이트 그대로 백업한다(복사하는 사이에 바뀐 것을 백업하지 않게). 다른 서버의 비밀이 들었으니 0600.
+                backup = backupPath(file, now);
+                fs.writeFileSync(backup, read.raw, { flag: 'wx', mode: 0o600 });
+            }
+            const guard = () => {
+                let nowSnap: ReturnType<typeof readSnapshot>;
+                try { nowSnap = readSnapshot(file); } catch { throw new ConfigChangedError(); }
+                if (!sameFingerprint(read.fingerprint, nowSnap ? nowSnap.fingerprint : null)) { throw new ConfigChangedError(); }
+            };
+            if (target.inPlace) {
+                writeInPlace(target.path, s.text, guard);
+            } else {
+                atomicWriteFile(target.path, s.text, read.exists ? fileMode(target.path) : undefined, 'stcfsd-tmp', guard);
+            }
+        } catch (err) {
+            if (err instanceof ConfigChangedError) {
+                // 원본은 바뀌지 않았다 — 이번 시도의 백업은 필요 없다(우리가 방금 만든 그 파일만 지운다).
+                if (backup) { try { fs.unlinkSync(backup); } catch { /* 남아도 해롭지 않다 */ } }
+                sleepSync(20 * (attempt + 1));
+                continue;
+            }
+            return { ok: false, reason: 'write-failed', configPath: file, error: (err as Error).message, backupPath: backup };
+        }
         const check = readConfig(file);
-        const problem = check.error ?? (check.cfg ? verify(check.cfg) : 'empty after write');
-        if (problem) { throw new Error(`re-read after writing does not match: ${problem}`); }
-    } catch (err) {
-        (err as Error & { backupPath?: string }).backupPath = backup;
-        throw err;
+        const problem = check.error ?? (check.cfg ? s.verify(check.cfg) : 'empty after write');
+        if (problem) {
+            return { ok: false, reason: 'write-failed', configPath: file,
+                error: `re-read after writing does not match: ${problem}`, backupPath: backup };
+        }
+        if (backup) { pruneClaudeBackups(file); }
+        return s.result(backup);
     }
-    return backup;
+    return {
+        ok: false, reason: 'config-busy', configPath: file,
+        error: `the config kept changing while StCFSD was writing it (${CLAUDE_WRITE_ATTEMPTS} tries); `
+            + 'nothing was written. Try again; if it keeps happening, quit Claude Desktop first.',
+    };
 }
 
 function canonical(v: unknown): string {
@@ -397,62 +642,59 @@ function othersUnchanged(before: JsonObject, after: JsonObject): string | null {
 export function connectClaudeDesktop(opts: ClaudeDesktopOptions): ClaudeConnectOk | ClaudeFail {
     const now = (opts.now ?? (() => new Date()))();
     const entry = opts.entry;
+    const platform = platformOf(opts);
     const { file } = locateConfig(opts);
     if (!exists(path.dirname(file))) { return { ok: false, reason: 'claude-not-installed', configPath: file }; }
-    const read = readConfig(file);
-    if (read.error) { return { ok: false, reason: 'invalid-config', configPath: file, error: read.error }; }
-    const cfg = read.cfg ?? {};
-    const servers = serversOf(cfg);
-    const previous = servers[CLAUDE_DESKTOP_SERVER_KEY];
-    const others = Object.keys(servers).filter(k => k !== CLAUDE_DESKTOP_SERVER_KEY);
-    if (previous !== undefined && sameEntry(previous, entry)) {
-        return { ok: true, action: 'unchanged', configPath: file, wrote: false, others, restartRequired: false, entry };
-    }
-    const value: McpEntry = { command: entry.command, args: [...entry.args], ...(entry.env ? { env: { ...entry.env } } : {}) };
-    // 키 자리를 지킨다: 이미 있으면 그 자리에서 값만, 없으면 끝에.
-    const next: JsonObject = { ...cfg, mcpServers: { ...servers, [CLAUDE_DESKTOP_SERVER_KEY]: value } };
-    let backup: string | undefined;
-    try {
-        backup = writeWithBackup(file, read, serialize(next, read), now, (after) =>
-            !sameEntry(serversOf(after)[CLAUDE_DESKTOP_SERVER_KEY], entry) ? 'stcfsd entry differs' : othersUnchanged(cfg, after));
-    } catch (err) {
-        return { ok: false, reason: 'write-failed', configPath: file, error: (err as Error).message,
-            backupPath: (err as Error & { backupPath?: string }).backupPath };
-    }
-    return {
-        ok: true,
-        action: !read.exists ? 'created' : previous === undefined ? 'added' : 'updated',
-        configPath: file, wrote: true, backupPath: backup,
-        ...(previous !== undefined ? { previous } : {}),
-        others, restartRequired: true, entry,
-    };
+    return changeConfig<ClaudeConnectOk>(file, now, (read) => {
+        if (read.error) { return { done: { ok: false, reason: 'invalid-config', configPath: file, error: read.error } }; }
+        const cfg = read.cfg ?? {};
+        const servers = serversOf(cfg);
+        const previous = servers[CLAUDE_DESKTOP_SERVER_KEY];
+        const others = Object.keys(servers).filter(k => k !== CLAUDE_DESKTOP_SERVER_KEY);
+        if (previous !== undefined && sameEntry(previous, entry, platform)) {
+            return { done: { ok: true, action: 'unchanged', configPath: file, wrote: false, others, restartRequired: false, entry } };
+        }
+        const value: McpEntry = { command: entry.command, args: [...entry.args], ...(entry.env ? { env: { ...entry.env } } : {}) };
+        // 키 자리를 지킨다: 이미 있으면 그 자리에서 값만, 없으면 끝에.
+        const next: JsonObject = { ...cfg, mcpServers: { ...servers, [CLAUDE_DESKTOP_SERVER_KEY]: value } };
+        return {
+            text: serialize(next, read),
+            verify: (after) => !sameEntry(serversOf(after)[CLAUDE_DESKTOP_SERVER_KEY], entry, platform)
+                ? 'stcfsd entry differs' : othersUnchanged(cfg, after),
+            result: (backup) => ({
+                ok: true,
+                action: !read.exists ? 'created' : previous === undefined ? 'added' : 'updated',
+                configPath: file, wrote: true, backupPath: backup,
+                ...(previous !== undefined ? { previous } : {}),
+                others, restartRequired: true, entry,
+            }),
+        };
+    });
 }
 
 /** 이 설치본의 항목과 **같은** `mcpServers.stcfsd` 만 지운다. 다르면 그대로 두고 알린다. */
 export function disconnectClaudeDesktop(opts: ClaudeDesktopOptions): ClaudeDisconnectOk | ClaudeFail {
     const now = (opts.now ?? (() => new Date()))();
+    const platform = platformOf(opts);
     const { file } = locateConfig(opts);
     if (!exists(path.dirname(file))) { return { ok: false, reason: 'claude-not-installed', configPath: file }; }
-    const read = readConfig(file);
-    if (!read.exists) { return { ok: true, action: 'absent', configPath: file, wrote: false, restartRequired: false }; }
-    if (read.error) { return { ok: false, reason: 'invalid-config', configPath: file, error: read.error }; }
-    const cfg = read.cfg ?? {};
-    const servers = serversOf(cfg);
-    const current = servers[CLAUDE_DESKTOP_SERVER_KEY];
-    if (current === undefined) { return { ok: true, action: 'absent', configPath: file, wrote: false, restartRequired: false }; }
-    if (!sameEntry(current, opts.entry)) {
-        return { ok: true, action: 'kept', configPath: file, wrote: false, current, restartRequired: false };
-    }
-    const rest = { ...servers };
-    delete rest[CLAUDE_DESKTOP_SERVER_KEY];
-    const next: JsonObject = { ...cfg, mcpServers: rest };
-    let backup: string | undefined;
-    try {
-        backup = writeWithBackup(file, read, serialize(next, read), now, (after) =>
-            CLAUDE_DESKTOP_SERVER_KEY in serversOf(after) ? 'stcfsd entry still present' : othersUnchanged(cfg, after));
-    } catch (err) {
-        return { ok: false, reason: 'write-failed', configPath: file, error: (err as Error).message,
-            backupPath: (err as Error & { backupPath?: string }).backupPath };
-    }
-    return { ok: true, action: 'removed', configPath: file, wrote: true, backupPath: backup, restartRequired: true };
+    return changeConfig<ClaudeDisconnectOk>(file, now, (read) => {
+        if (!read.exists) { return { done: { ok: true, action: 'absent', configPath: file, wrote: false, restartRequired: false } }; }
+        if (read.error) { return { done: { ok: false, reason: 'invalid-config', configPath: file, error: read.error } }; }
+        const cfg = read.cfg ?? {};
+        const servers = serversOf(cfg);
+        const current = servers[CLAUDE_DESKTOP_SERVER_KEY];
+        if (current === undefined) { return { done: { ok: true, action: 'absent', configPath: file, wrote: false, restartRequired: false } }; }
+        if (!sameEntry(current, opts.entry, platform)) {
+            return { done: { ok: true, action: 'kept', configPath: file, wrote: false, current, restartRequired: false } };
+        }
+        const rest = { ...servers };
+        delete rest[CLAUDE_DESKTOP_SERVER_KEY];
+        const next: JsonObject = { ...cfg, mcpServers: rest };
+        return {
+            text: serialize(next, read),
+            verify: (after) => CLAUDE_DESKTOP_SERVER_KEY in serversOf(after) ? 'stcfsd entry still present' : othersUnchanged(cfg, after),
+            result: (backup) => ({ ok: true, action: 'removed', configPath: file, wrote: true, backupPath: backup, restartRequired: true }),
+        };
+    });
 }

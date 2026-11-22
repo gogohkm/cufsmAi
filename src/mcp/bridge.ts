@@ -19,15 +19,29 @@
  *   그 파일에 원자적으로 쓰고(0600), 멈출 때 · 프로세스가 끝날 때 아직 자기 것이면 지운다.
  * - `GET /last-call` 이 마지막 AI 호출(언제 · 어느 클라이언트)을 돌려준다. MCP 서버는 요청마다
  *   `X-StCFSD-Request-Id` · `X-StCFSD-Client` 를 붙이고, 화면의 조회는 붙이지 않는다 — 붙은 것만 AI 호출로 센다.
- * 옵션이 없으면 지금 그대로(토큰 없음, 파일 없음, /last-call 없음).
+ * - V5-09 · 토큰을 통과한 응답에는 요청의 `X-StCFSD-Nonce` 로 만든 `X-StCFSD-Proof`(instanceProof)를 붙이고,
+ *   `GET /hello` 가 패널에 닿지 않고 그것만 돌려준다 — MCP 서버가 이 포트의 상대가 포트 파일의 그 인스턴스인지 본다.
+ * - V5-S2 · 설계 패널이 아직 없으면(프로그램이 듣기 시작한 뒤 패널을 만들기 전) VS Code 문구 대신 "아직 시작 중 —
+ *   잠시 뒤 get_status 를 다시" 라고 답한다(`HOST_STARTING`).
+ * 옵션이 없으면 지금 그대로(토큰 없음, 파일 없음, /last-call · /hello 없음, 문구도 같음).
  */
 
 import * as crypto from 'crypto';
 import * as http from 'http';
 import {
     PORT_FILE_ENV, PORT_FILE_APP, PORT_FILE_VERSION, CLIENT_HEADER, REQUEST_ID_HEADER,
+    NONCE_HEADER, PROOF_HEADER, HELLO_ENDPOINT, validNonce, instanceProof,
     newToken, newInstanceId, writePortFile, removePortFileIfOwned, type PortFileInfo,
 } from './portFile';
+
+/** VS Code 확장(지금 방식)의 패널 없음 문구 — 바뀌지 않는다. */
+export const NO_PANEL = 'No active CUFSM panel. Open Section Designer first.';
+/**
+ * V5-S2 · 포트 파일 방식(독립 프로그램)에서 패널이 아직 없을 때. 독립 프로그램은 패널을 스스로 만들고 닫지 않으므로
+ * 패널이 없는 때는 시작 중뿐이다. get_status 로 다시 물으면 되므로 재시작 막기도 그 길로 풀린다.
+ */
+export const HOST_STARTING = 'The StCFSD program is still starting (its design panel is not ready yet). '
+    + 'Nothing was changed. Wait a few seconds, then call get_status again.';
 
 /** StcfsdPanel이 구현해야 하는 인터페이스 */
 export interface McpPanelInterface {
@@ -150,6 +164,12 @@ export class McpBridgeServer {
                 res.end(JSON.stringify({ error: rejected[1] }));
                 return;
             }
+            // V5-09 · 토큰을 지난 요청에만 증명을 붙인다(토큰 없는 쪽에 HMAC 을 내주지 않는다).
+            const nonce = req.headers[NONCE_HEADER];
+            if (this._options && validNonce(nonce)) {
+                res.setHeader(PROOF_HEADER, instanceProof(this._token!, this._instanceId!, nonce));
+            }
+            const noPanel = this._options ? HOST_STARTING : NO_PANEL;
 
             try {
                 let result: any;
@@ -165,11 +185,14 @@ export class McpBridgeServer {
                         lastAiCall: this._lastAiCall ?? null, aiCalls: this._aiCalls,
                         pid: process.pid, startedAt: this._startedAt,
                     };
+                } else if (this._options && req.method === 'GET' && req.url === HELLO_ENDPOINT) {
+                    // V5-09 · 증명은 머리에. 패널에 닿지 않고 AI 호출로 세지 않는다.
+                    result = { app: PORT_FILE_APP };
                 } else if (req.method === 'GET' && req.url === '/status') {
                     if (aiCall) { this._recordAiCall(aiCall); }
                     const panel = this._getPanel();
                     if (!panel) {
-                        result = { error: 'No active CUFSM panel. Open Section Designer first.' };
+                        result = { error: noPanel };
                     } else {
                         result = panel.getStatus();
                     }
@@ -181,7 +204,7 @@ export class McpBridgeServer {
                     }
                     const panel = this._getPanel();
                     if (!panel) {
-                        result = { error: 'No active CUFSM panel. Open Section Designer first.' };
+                        result = { error: noPanel };
                     } else {
                         result = await panel.handleMcpAction(body);
                     }

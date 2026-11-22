@@ -31,11 +31,14 @@ let mcpServerPathValue = '';
 export async function activate(context: vscode.ExtensionContext) {
     console.log('StCFSD extension activating...');
     const isTestMode = process.env.STCFSD_TEST_MODE === '1';
+    // K1: STCFSD_MCP_PORT_FILE 이 있으면(독립 프로그램) 빈 포트 + 토큰 + 포트 파일. 없으면 지금 그대로(52790…, 토큰 없음).
+    const portFileOptions = bridgeOptionsFromEnv(process.env);
 
     // Python 환경 자동 검사 + 설치
+    // V5-S3: 독립 프로그램(포트 파일 방식)은 묶어 넣은 Python 을 쓴다 — python.org · pip 을 권하지 않는다.
     const pythonPath = getPythonPath(context.extensionPath);
     if (!isTestMode) {
-        await checkAndInstallDependencies(context, pythonPath);
+        await checkAndInstallDependencies(context, pythonPath, !!portFileOptions);
     }
 
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
@@ -48,9 +51,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // MCP Bridge 시작
-    // K1: STCFSD_MCP_PORT_FILE 이 있으면(독립 프로그램) 빈 포트 + 토큰 + 포트 파일. 없으면 지금 그대로(52790…, 토큰 없음).
-    const portFileOptions = bridgeOptionsFromEnv(process.env);
+    // MCP Bridge 시작 (portFileOptions 는 위에서 — K1)
     const mcpPort = portFileOptions ? 0 : await findAvailablePort(52790);
     mcpBridge = new McpBridgeServer(() => StcfsdPanel.currentPanel || undefined, mcpPort, portFileOptions);
     await mcpBridge.start();
@@ -172,8 +173,17 @@ export function deactivate() {
 // ============================================================
 // Python 의존성 자동 검사 + 설치
 // ============================================================
-async function checkAndInstallDependencies(
-    context: vscode.ExtensionContext, pythonPath: string
+/** V5-S3 · 독립 프로그램의 문구 — 묶어 넣은 Python(embeddable, pip 없음)이 망가졌으면 다시 설치가 답이다. */
+export const STANDALONE_PYTHON_BROKEN = (pythonPath: string) =>
+    `StCFSD: 프로그램에 들어 있는 해석 엔진(Python)을 실행할 수 없습니다 (${pythonPath}). `
+    + '백신 프로그램이 파일을 격리했거나 설치가 손상됐을 수 있습니다. StCFSD 를 다시 설치하세요.';
+export const STANDALONE_PACKAGES_BROKEN = (missing: string[]) =>
+    `StCFSD: 해석 엔진에 필요한 구성 요소(${missing.join(', ')})를 불러올 수 없습니다. `
+    + '백신 프로그램이 파일을 격리했거나 설치가 손상됐을 수 있습니다. StCFSD 를 다시 설치하세요.';
+
+// V5-S3: 시험이 부를 수 있게 내보낸다(동작은 그대로 — standalone 이 false 면 전과 같은 길).
+export async function checkAndInstallDependencies(
+    context: vscode.ExtensionContext, pythonPath: string, standalone = false
 ): Promise<void> {
     // 1) Python 존재 여부 확인
     let hasPython = false;
@@ -185,6 +195,11 @@ async function checkAndInstallDependencies(
         console.warn(`[StCFSD] Python not found at: ${pythonPath}`);
     }
 
+    if (!hasPython && standalone) {
+        // 단추 없이 알리고 기다리지 않는다 — 활성화(= MCP 다리 · 포트 파일)를 알림 상자 뒤에 세우지 않는다.
+        void vscode.window.showErrorMessage(STANDALONE_PYTHON_BROKEN(pythonPath));
+        return;
+    }
     if (!hasPython) {
         const action = await vscode.window.showWarningMessage(
             'StCFSD: Python을 찾을 수 없습니다. 해석 엔진을 사용하려면 Python 3.10+ 설치가 필요합니다.',
@@ -213,6 +228,11 @@ async function checkAndInstallDependencies(
     }
 
     console.warn(`[StCFSD] Missing packages: ${missingPackages.join(', ')}`);
+    if (standalone) {
+        // embeddable Python 에는 pip 이 없다 — 설치를 묻지 않는다.
+        void vscode.window.showErrorMessage(STANDALONE_PACKAGES_BROKEN(missingPackages));
+        return;
+    }
 
     // 3) 사용자에게 설치 여부 질문
     const install = await vscode.window.showWarningMessage(

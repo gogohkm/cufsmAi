@@ -62,7 +62,9 @@ const panel = {
   },
   async handleMcpAction(body) { say({ ev: 'action', body }); return { ok: true, action: body.action, host_pid: process.pid }; },
 };
-const bridge = new McpBridgeServer(() => panel, 0, bridgeOptionsFromEnv(process.env));
+// V5-S2: 패널이 듣기 시작한 뒤 늦게 생기는 호스트(독립 프로그램의 시작 순서 — 다리 → Python → 패널)
+const panelAt = Date.now() + Number(process.env.K1_PANEL_DELAY_MS || 0);
+const bridge = new McpBridgeServer(() => (Date.now() >= panelAt ? panel : undefined), 0, bridgeOptionsFromEnv(process.env));
 bridge.start().then(() => say({ ev: 'ready', port: bridge.port, pid: process.pid }), (e) => { say({ ev: 'failed', error: String(e) }); process.exit(3); });
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (d) => {
@@ -110,9 +112,9 @@ function cleanEnv(extra) {
   return { ...extra };
 }
 
-async function mcpClient(env, cwd = DRIVE_ROOT, script = BUNDLE, command = process.execPath) {
+async function mcpClient(env, cwd = DRIVE_ROOT, script = BUNDLE, command = process.execPath, name = 'k1-test-client') {
   const transport = new StdioClientTransport({ command, args: [script], env: cleanEnv(env), cwd, stderr: 'pipe' });
-  const client = new Client({ name: 'k1-test-client', version: '1.0.0' });
+  const client = new Client({ name, version: '1.0.0' });
   await client.connect(transport);
   const call = async (name, args = {}) => {
     const r = await client.callTool({ name, arguments: args });
@@ -400,6 +402,222 @@ async function main() {
     hc.confirmStatus(t2.target);
     assert(hc.resolve(false).ok, 'released by a status of the current host');
     ok('gate state machine (unit)');
+
+    // ─── V5 (2026-11-22): 독립 검증 V5 의 연결 몫 — 따로 둔 포트 파일(앞 묶음의 기록과 섞이지 않게) ─────────────
+    const pf2 = reg.standardPortFile(path.join(tmp, 'v5', 'StCFSD'));
+    const env2 = { STCFSD_MCP_PORT_FILE: pf2, STCFSD_MCP_STANDALONE: '1' };
+    const v5client = async (name) => { const c = await mcpClient(env2, DRIVE_ROOT, BUNDLE, process.execPath, name); clients.push(c); return c; };
+    const MAT = { E: 29500, v: 0.3 };
+    const statusUntilOk = async (c, ms = 10000) => {
+      const until = Date.now() + ms;
+      let last;
+      while (Date.now() < until) { last = await c.call('get_status'); if (!last.isError) { return last; } await delay(100); }
+      throw new Error(`get_status never succeeded: ${last && last.text}`);
+    };
+    const portInfo = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+
+    // 13. V5-S2 — 듣기 시작한 뒤 패널이 생기기 전 ------------------------------------------------
+    const P = startHost(tmp, pf2, { K1_PANEL_DELAY_MS: '1500' });
+    hosts.push(P);
+    await P.ready;
+    const s2 = await v5client('v5-s2-client');
+    r = await s2.call('get_status');
+    assert(r.isError && r.data.error === bridgeMod.HOST_STARTING, `starting wording before the panel exists: ${r.text}`);
+    assert(!/Section Designer|CUFSM/.test(r.text), 'no VS Code wording in the standalone program');
+    r = await s2.call('set_material', MAT);
+    assert.strictEqual(r.data.error, bridgeMod.HOST_STARTING, 'a write before the panel exists gets the same words');
+    assert.deepStrictEqual(P.actions(), [], 'nothing reached a panel');
+    r = await statusUntilOk(s2);
+    assert(!('restart_notice' in r.data), 'first contact while starting: no restart notice afterwards');
+    // 재시작 뒤 시작 중: get_status 는 시작 중 문구, 막기는 그대로, 패널이 생긴 뒤 다시 부른 get_status 가 푼다
+    P.child.kill('SIGKILL');
+    await P.exited;
+    const Q = startHost(tmp, pf2, { K1_PANEL_DELAY_MS: '1500' });
+    hosts.push(Q);
+    await Q.ready;
+    r = await s2.call('get_status');
+    assert(r.isError && r.data.error === bridgeMod.HOST_STARTING, `restarted and still starting: ${r.text}`);
+    r = await s2.call('set_material', MAT);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED, 'the gate stays closed while the program is starting');
+    r = await statusUntilOk(s2);
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE, 'a retried get_status opens the gate (not stranded)');
+    r = await s2.call('set_material', MAT);
+    assert(!r.isError && r.data.action === 'set_material');
+    // 지금 방식(옵션 없음)의 패널 없음 문구는 그대로
+    const noPanelPort = await freePort();
+    const noPanelBridge = new bridgeMod.McpBridgeServer(() => undefined, noPanelPort);
+    await noPanelBridge.start();
+    h = await raw(noPanelPort, { method: 'GET', path: '/status' });
+    noPanelBridge.stop();
+    assert.deepStrictEqual(h.json, { error: 'No active CUFSM panel. Open Section Designer first.' }, 'legacy no-panel text unchanged');
+    assert.strictEqual(bridgeMod.NO_PANEL, 'No active CUFSM panel. Open Section Designer first.');
+    ok('V5-S2: starting words before the panel, gate released by a retried get_status, legacy text unchanged');
+
+    // 14. V5-08 — 재시작 기준을 MCP 서버 프로세스 너머로(클라이언트별 기록) -------------------------------
+    const desk1 = await v5client('claude-ai');
+    r = await desk1.call('get_nodes');
+    assert(!r.isError && r.data.action === 'get_nodes', `first connection ever (no record) → no false alarm: ${r.text}`);
+    const recDesk = pf.clientRecordFile(pf2, 'claude-ai');
+    assert.strictEqual(path.dirname(recDesk), path.dirname(pf2), 'the record lives beside the port file');
+    const fileQ = portInfo(pf2);
+    let recText = fs.readFileSync(recDesk, 'utf8');
+    assert.strictEqual(JSON.parse(recText).instanceId, fileQ.instanceId, 'record = the program this client talked to');
+    assert(!recText.includes(fileQ.token), 'no token in the record');
+    await desk1.close();
+    // 밤사이 프로그램이 다시 켜지고, 아침에 Claude Desktop 이 새 MCP 서버를 띄운다
+    Q.child.kill('SIGKILL');
+    await Q.exited;
+    const R = startHost(tmp, pf2);
+    hosts.push(R);
+    await R.ready;
+    const desk2 = await v5client('claude-ai');
+    r = await desk2.call('set_material', MAT);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED, 'a new MCP server knows the program it last saw is gone');
+    assert.deepStrictEqual(R.actions(), [], 'the write was not sent');
+    r = await desk2.call('get_status');
+    assert(!r.isError && r.data.restart_notice === conn.STANDALONE_RESTARTED_NOTICE, `notice on the first get_status: ${r.text}`);
+    assert.strictEqual(R.statuses(), 1, 'the notice costs exactly one get_status');
+    r = await desk2.call('set_material', MAT);
+    assert(!r.isError && r.data.action === 'set_material', 'released after that one get_status');
+    assert.strictEqual(JSON.parse(fs.readFileSync(recDesk, 'utf8')).instanceId, portInfo(pf2).instanceId, 'record follows the confirmed program');
+    // 다른 클라이언트(Claude Code)는 기록이 따로 — 처음이면 알림 없음
+    const code1 = await v5client('claude-code');
+    assert.notStrictEqual(pf.clientRecordFile(pf2, 'claude-code'), recDesk);
+    r = await code1.call('get_nodes');
+    assert(!r.isError, 'another client, first time → no alarm');
+    // 또 다시 켜짐: 두 클라이언트 모두 막히고, 한쪽의 get_status 가 다른 쪽을 풀지 않는다
+    R.child.kill('SIGKILL');
+    await R.exited;
+    const S = startHost(tmp, pf2);
+    hosts.push(S);
+    await S.ready;
+    const fileS = portInfo(pf2);
+    r = await code1.call('get_status');
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
+    r = await code1.call('get_nodes');
+    assert(!r.isError);
+    r = await desk2.call('set_material', MAT);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED, "one client's get_status does not release another client's gate");
+    r = await desk2.call('get_status');
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
+    await desk2.close();
+    const desk3 = await v5client('claude-ai');
+    r = await desk3.call('set_material', MAT);
+    assert(!r.isError, 'program not restarted since this client last confirmed it → no alarm for a new MCP server');
+    await desk3.close();
+    // 읽을 수 없는 기록 → 이어짐을 증명하지 못하니 재시작으로 본다(get_status 한 번) → 기록을 고친다
+    fs.writeFileSync(recDesk, '{not json');
+    const desk4 = await v5client('claude-ai');
+    r = await desk4.call('set_material', MAT);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED, 'unreadable record → treated as restarted');
+    r = await desk4.call('get_status');
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
+    assert.strictEqual(JSON.parse(fs.readFileSync(recDesk, 'utf8')).instanceId, fileS.instanceId, 'record repaired');
+    // 기록을 쓸 수 없어도(그 이름이 폴더) 막기는 get_status 로 풀린다 — 교착 없음
+    const roRec = pf.clientRecordFile(pf2, 'ro-client');
+    fs.mkdirSync(roRec);
+    const ro = await v5client('ro-client');
+    r = await ro.call('set_material', MAT);
+    assert.strictEqual(r.data.error, conn.STANDALONE_RESTARTED);
+    r = await ro.call('get_status');
+    assert.strictEqual(r.data.restart_notice, conn.STANDALONE_RESTARTED_NOTICE);
+    r = await ro.call('set_material', MAT);
+    assert(!r.isError, 'released even though the record cannot be written');
+    assert(fs.statSync(roRec).isDirectory(), 'the unwritable record was left alone');
+    assert.deepStrictEqual(fs.readdirSync(path.dirname(pf2)).filter((n) => n.includes('.stcfsd-tmp-')), [], 'no temp files beside the port file');
+    ok('V5-08: per-client record beside the port file — no false alarm first time, new MCP server gated after a restart, clients independent, unreadable record → one get_status, no deadlock');
+
+    // 15. V5-09 — 포트 파일의 pid 는 살아 있지만 그 포트에서 듣는 것은 남의 프로그램 -------------------------------
+    const pf3 = path.join(tmp, 'v5-09', 'mcp', 'stcfsd-mcp-port');
+    fs.mkdirSync(path.dirname(pf3), { recursive: true });
+    const seen = [];
+    const fake = http.createServer((req, res) => {
+      seen.push(`${req.method} ${req.url}`);
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('X-StCFSD-Proof', 'ab'.repeat(32));        // 그럴듯한 꼴이지만 증명이 아니다
+      res.end('{"hasModel":true,"fake":true}');
+    });
+    await new Promise((resolve) => fake.listen(0, '127.0.0.1', resolve));
+    try {
+      fs.writeFileSync(pf3, JSON.stringify({ app: 'stcfsd', version: 1, port: fake.address().port, token: 'cd'.repeat(32),
+        pid: process.pid, instanceId: 'stale-instance', startedAt: '2026-11-21T09:00:00.000Z' }));
+      const v9 = await mcpClient({ STCFSD_MCP_PORT_FILE: pf3, STCFSD_MCP_STANDALONE: '1' }, DRIVE_ROOT, BUNDLE, process.execPath, 'v5-09-client');
+      clients.push(v9);
+      r = await v9.call('get_status');
+      assert.strictEqual(r.data.error, conn.STANDALONE_NOT_RUNNING, `another program is not taken for StCFSD: ${r.text}`);
+      r = await v9.call('set_material', MAT);
+      assert.strictEqual(r.data.error, conn.STANDALONE_NOT_RUNNING);
+      r = await v9.call('get_nodes');
+      assert.strictEqual(r.data.error, conn.STANDALONE_NOT_RUNNING);
+      assert.deepStrictEqual(seen, ['GET /hello'], 'only the connection check reached it; nothing further was sent');
+    } finally { fake.close(); }
+    // 진짜 호스트의 증명: 토큰을 지난 요청에만, nonce · instanceId 에 묶여
+    const nonce = pf.newNonce();
+    const statusesBeforeHello = S.statuses();
+    h = await raw(fileS.port, { method: 'GET', path: '/hello', headers: { Authorization: `Bearer ${fileS.token}`, 'X-StCFSD-Nonce': nonce } });
+    assert.deepStrictEqual([h.status, h.json], [200, { app: 'stcfsd' }]);
+    assert.strictEqual(h.headers['x-stcfsd-proof'], pf.instanceProof(fileS.token, fileS.instanceId, nonce), 'real host proves its instance');
+    assert(pf.proofMatches(h.headers['x-stcfsd-proof'], fileS.token, fileS.instanceId, nonce));
+    assert(!pf.proofMatches(h.headers['x-stcfsd-proof'], fileS.token, 'other-instance', nonce), 'bound to the instanceId');
+    assert(!pf.proofMatches(h.headers['x-stcfsd-proof'], fileS.token, fileS.instanceId, pf.newNonce()), 'bound to the nonce');
+    h = await raw(fileS.port, { method: 'GET', path: '/hello', headers: { 'X-StCFSD-Nonce': nonce } });
+    assert.strictEqual(h.status, 401, '/hello needs the token');
+    assert.strictEqual(h.headers['x-stcfsd-proof'], undefined, 'no proof without the token');
+    await delay(50);
+    assert.strictEqual(S.statuses(), statusesBeforeHello, '/hello never touches the panel');
+    h = await raw(legacyPort, { method: 'GET', path: '/hello', headers: { 'X-StCFSD-Nonce': nonce } });
+    assert.deepStrictEqual(h.json, { error: 'Unknown endpoint: GET /hello' }, 'legacy bridge: no /hello');
+    assert.strictEqual(h.headers['x-stcfsd-proof'], undefined, 'legacy bridge: no proof header');
+    ok('V5-09: a port held by another program is refused as "not running" after one /hello; real host proves its instance');
+
+    // 16. V5-S3 — 독립 프로그램에서 묶은 Python 이 망가졌을 때의 안내(확장의 길은 그대로) ----------------------------
+    {
+      const Module = require('module');
+      const outExt = path.join(ROOT, 'out', 'extension.js');
+      const shimFile = path.join(tmp, '__vscode_stub__.js');
+      const calls = [];
+      const dummy = new Proxy(function () { /* 아무것도 */ }, { get: (t, k) => (k === 'prototype' ? {} : dummy), construct: () => dummy, apply: () => dummy });
+      const stub = new Proxy({
+        window: {
+          showErrorMessage: (...a) => { calls.push(['error', ...a]); return Promise.resolve(undefined); },
+          showWarningMessage: (...a) => { calls.push(['warning', ...a]); return Promise.resolve(a[a.length - 1]); },
+          showInformationMessage: (...a) => { calls.push(['info', ...a]); return Promise.resolve(undefined); },
+          withProgress: () => { calls.push(['progress']); return Promise.resolve(); },
+        },
+        env: { openExternal: (u) => { calls.push(['open', String(u)]); return Promise.resolve(true); } },
+        Uri: { parse: (s) => s, file: (s) => s, joinPath: () => '' },
+        ExtensionMode: { Production: 1, Development: 2, Test: 3 },
+        ProgressLocation: { Notification: 15 },
+      }, { get: (t, k) => (k in t ? t[k] : dummy) });
+      const origResolve = Module._resolveFilename;
+      Module._resolveFilename = function (req, ...rest) { return req === 'vscode' ? shimFile : origResolve.call(this, req, ...rest); };
+      require.cache[shimFile] = { id: shimFile, filename: shimFile, loaded: true, exports: stub };
+      try {
+        const ext = require(outExt);
+        assert.strictEqual(typeof ext.checkAndInstallDependencies, 'function', 'out/extension.js is current (npx tsc -p ./)');
+        const bogus = path.join(tmp, 'no-python', 'python.exe');
+        const run = async (py, standalone) => { calls.length = 0; await ext.checkAndInstallDependencies({}, py, standalone); return calls.slice(); };
+        assert.deepStrictEqual(await run(bogus, true), [['error', ext.STANDALONE_PYTHON_BROKEN(bogus)]],
+          'standalone, no Python: reinstall wording, no python.org action');
+        assert.deepStrictEqual(await run(bogus, false), [['warning',
+          'StCFSD: Python을 찾을 수 없습니다. 해석 엔진을 사용하려면 Python 3.10+ 설치가 필요합니다.', 'Python 다운로드 페이지 열기', '무시']],
+          'extension, no Python: exactly as before');
+        // 이 node 를 "Python" 으로: --version 은 되고 `-c "import numpy"` 는 실패한다 = 패키지 없음
+        assert.deepStrictEqual(await run(process.execPath, true), [['error', ext.STANDALONE_PACKAGES_BROKEN(['numpy', 'scipy'])]],
+          'standalone, packages missing: reinstall wording, no pip offer');
+        assert.deepStrictEqual(await run(process.execPath, false), [['warning',
+          'StCFSD: 필수 Python 패키지가 없습니다: numpy, scipy. 자동 설치하시겠습니까?', '설치', '나중에']],
+          'extension, packages missing: exactly as before');
+        assert(!ext.STANDALONE_PYTHON_BROKEN('x').includes('pip') && ext.STANDALONE_PYTHON_BROKEN('x').includes('다시 설치'));
+      } finally {
+        Module._resolveFilename = origResolve;
+        delete require.cache[shimFile];
+      }
+      const extSrc = fs.readFileSync(path.join(ROOT, 'src', 'extension.ts'), 'utf8');
+      assert(/const portFileOptions = bridgeOptionsFromEnv\(process\.env\);[\s\S]*checkAndInstallDependencies\(context, pythonPath, !!portFileOptions\)/.test(extSrc),
+        'activate passes standalone = port-file mode');
+      ok('V5-S3: standalone Python problems → reinstall wording without python.org / pip; extension path unchanged');
+    }
 
     const warnings = guard.verify(assert);
     for (const w of warnings) { console.log(w); }

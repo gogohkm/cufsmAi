@@ -157,3 +157,48 @@
 - **강제 종료 뒤 남은 파일 · pid 재사용.** pid 가 다른 프로세스에 재사용되면 "살아 있음" 으로 보여 연결 거부 문구(REFUSED)가 나간다 — 뜻은 같다(켜 달라). 새 호스트는 덮어쓰고, `instanceId` 로 재시작을 알아본다.
 - 마지막 AI 호출은 메모리에만(프로그램 재시작 너머로 남기지 않음). 화면이 「어제 16:20」 을 보이려면 S4 에서 `onAiCall` 을 받아 파일에 남길 것.
 - 같은 사용자 계정으로 확장(VS Code)과 독립 프로그램이 함께 떠도 서로 섞이지 않는다 — 확장은 변수가 없어 고정 포트 · 토큰 없음, 독립 프로그램은 자기 파일. 다만 Claude Desktop 에 legacy 이름(`stcfsd-section-designer`)이 손으로 등록돼 있으면 두 서버가 다 보인다(`checkClaudeDesktop` 의 `others` 에 나온다).
+
+
+## V5 — 독립 검증 V5 의 연결 몫 (2026-11-22)
+
+근거: [V5-desktop.md](../verify/V5-desktop.md) 의 V5-06 · V5-08 · V5-09 · V5-15(a–d), 의심 V5-S2 · S3 · S5. 모두 먼저 재현했다(scratch 탐침 — 수정 전 번들 · 소스로): V5-06 `concurrent kept=false` · V5-15a `first LOST` · 15b 하드 링크 갈라짐 · 15c 연결/끊기 5 번에 백업 13 개 · 15d `registered-elsewhere/kept` · V5-08 새 MCP 서버의 첫 쓰기 통과 · V5-09 남의 서버가 `GET /status` 와 `POST /action`(Bearer 포함)을 받고 그 답이 상태로 쓰임 · S2 `No active CUFSM panel. Open Section Designer first.` · S5 소문자 경로로 띄운 node 의 `process.execPath` = `c:\program files\nodejs\node.exe`.
+
+### 무엇을 고쳤나
+
+| 번호 | 파일 · 함수 | 무엇 |
+|---|---|---|
+| V5-06 | `claudeDesktop.ts` `changeConfig`(새, connect · disconnect 가 함께 씀), `portFile.ts` `atomicWriteFile(…, beforeRename)` | 읽을 때 한 fd 로 fstat + 내용(크기 · mtime · sha256). rename(또는 제자리 쓰기) **바로 앞에서** 다시 보고 다르면 쓰지 않고, 이번 시도의 백업을 지운 뒤 다시 읽어 우리 변경 하나만 다시 얹는다. `CLAUDE_WRITE_ATTEMPTS = 4` 번 다 바뀌면 `{ok:false, reason:'config-busy'}` — 덮어쓰지 않는다. 백업은 읽은 바이트 그대로(`wx`, 0600 — 전에는 `copyFile` 이라 복사하는 사이에 바뀐 것을 백업할 수 있었다). 남는 틈: 다시 본 때와 rename 사이(µs) — Claude Desktop 이 잠그지 않아 더 좁힐 수 없다 |
+| V5-15a | `findDuplicateKey`(새) → `readConfig` | 같은 객체에 같은 키가 둘이면 `invalid-config`, `configError` 에 경로(`mcpServers.a`)와 까닭. 손대지 않고 백업 없음 |
+| V5-15b | `writeTarget` · `writeInPlace`(새) | 심볼릭 링크 → `realpath` 대상의 폴더에 임시 파일 + rename. 대상을 풀 수 없으면(끊긴 링크 · 고리 · 권한) `write-failed` + "link whose target cannot be resolved … did not write it". 하드 링크(nlink > 1) → 백업 뒤 제자리 쓰기(원자적이지 않음 — 그 대신 링크가 갈라지지 않는다). 폴더 링크(junction)는 rename 이 그 안에서 일어나 그대로 |
+| V5-15c | `pruneClaudeBackups`, `CLAUDE_BACKUPS_KEPT = 5` | 쓰기가 성공할 때마다 우리 백업(`<이름>.stcfsd-backup-YYYYMMDD-HHMMSS[-n]` 꼴의 **일반 파일**만 — 이름 꼴은 K1 그대로라 옛 백업도 센다)을 새것부터 다섯만 남긴다. 같은 초의 `-n` 은 수로 가른다. 꼴이 다른 이름 · 폴더 · 링크 · 다른 파일의 백업은 지우지 않는다 |
+| V5-15d · S5 | `samePath`(새), `sameEntry(raw, expected, platform)` | Windows 에서는 `command` · `args` · env 의 `STCFSD_MCP_PORT_FILE` 을 `path.win32.normalize` + 소문자로 비교, 다른 OS 와 다른 env 값은 글자 그대로. 기준 OS = `pathOptions.platform ?? process.platform`. S5 는 **확인**(위) — 이 비교로 덮는다 |
+| V5-08 | `hostConnection.ts` 상태 기계, `portFile.ts` `clientRecordFile` · `readClientRecord` · `writeClientRecord`, `server.ts`(클라이언트 이름을 넘김) | 아래 「재시작 기록」 |
+| V5-09 | `portFile.ts` `instanceProof` · `proofMatches` · `NONCE_HEADER` · `PROOF_HEADER` · `HELLO_ENDPOINT`, `bridge.ts`(증명 머리 · `GET /hello`), `server.ts` `verifyHost` · `bridgeRequest`, `hostConnection.ts` `markVerified` · `verificationFailed` | MCP 서버는 포트 파일 방식의 모든 요청에 nonce 를 붙이고, 아직 확인하지 않은 호스트에는 **`GET /hello` 하나만** 먼저 보낸다. 호스트는 토큰을 통과한 응답에만 `X-StCFSD-Proof = HMAC-SHA256(토큰, "stcfsd-instance-proof\n<instanceId>\n<nonce>")` 를 붙인다(instanceId 는 선 위로 가지 않으므로 Bearer 를 받은 남의 서버도 못 만든다). 틀리면 `STANDALONE_NOT_RUNNING` 그대로, 그 포트 파일 내용에는 더 보내지 않는다(파일이 바뀌면 다시 확인). 확인 뒤에도 응답마다 증명을 본다. `/hello` 는 패널에 닿지 않고 AI 호출로 세지 않는다(요청 id 머리를 붙이지 않는다). 비용: MCP 서버 프로세스 × 호스트 인스턴스마다 왕복 한 번 |
+| V5-S2 | `bridge.ts` `HOST_STARTING` · `NO_PANEL` | **문구는 확인**, 「막기가 영영 안 풀림」 은 **확인 안 됨** — 수정 전에도 패널이 생긴 뒤의 `get_status` 가 막기를 풀었다. 다만 AI 는 "Open Section Designer first" 를 받아 다시 물을 까닭이 없었다. 포트 파일 방식에서 패널이 없으면 `The StCFSD program is still starting (its design panel is not ready yet). Nothing was changed. Wait a few seconds, then call get_status again.` — 지금 방식(옵션 없음)의 문구는 바이트 그대로. 시작 중의 `get_status` 는 막기를 풀지 않고(모델이 아직 없다), 다시 부르면 푼다 |
+| V5-S3 | `extension.ts` `checkAndInstallDependencies(context, pythonPath, standalone = false)`(내보냄), `STANDALONE_PYTHON_BROKEN` · `STANDALONE_PACKAGES_BROKEN` | **확인**(코드 길: 독립 프로그램은 `STCFSD_TEST_MODE` 없이 Production 으로 활성화되어 이 검사를 탄다). `standalone = !!bridgeOptionsFromEnv(process.env)` 일 때만 "프로그램에 들어 있는 해석 엔진 … StCFSD 를 다시 설치하세요" 를 단추 없이, **기다리지 않고**(활성화 · 포트 파일을 알림 뒤에 세우지 않게) 띄운다. python.org · pip 은 내놓지 않는다. 확장(변수 없음)은 문구 · 단추 · 순서가 전과 같다(시험이 문구 전체 비교) |
+
+`ClaudeFailReason` 에 `'config-busy'` 를 더했다(덧붙임). 기존 결과 키 · 이름 · 인자는 그대로(`sameEntry` 의 세 번째 인자는 기본값이 있다).
+
+### 재시작 기록(V5-08) 설계
+
+- **무엇 · 어디**: MCP 서버가 **확인한** 프로그램의 `{instanceId, pid, startedAt, at, client}` — 토큰은 남기지 않는다. 포트 파일 옆 `<포트 파일>.client-<이름 조각>-<sha256(이름) 8자>`(설치본: `%APPDATA%\StCFSD\mcp\stcfsd-mcp-port.client-claude-ai-xxxxxxxx`). Claude 설정에는 아무것도 쓰지 않는다. 임시 파일 + rename, 0600, 폴더는 만들지 않는다(호스트가 만든 `mcp` 폴더).
+- **여러 클라이언트**: 이름(initialize 의 `clientInfo.name`)마다 파일이 따로다 — 한 파일을 함께 고치면 읽고-고치고-쓰기 사이에 남의 줄이 지워지고, 한쪽의 확인이 다른 쪽의 알림을 지운다. 각 MCP 서버의 막기는 여전히 자기 메모리(`confirmed`)이고 기록은 **첫 접촉의 기준**으로만 쓰므로, Claude Desktop 과 Claude Code 는 서로의 막기를 걸지도 풀지도 않는다(시험이 확인). 같은 이름의 두 프로세스(Claude Code 두 창)는 한 기록을 나눈다 — 나중 것이 이긴다(둘 다 자기가 확인한 값).
+- **판정(첫 접촉)**: 기록 없음 → 받아들임(헛 알림 없음 — 이 클라이언트로는 처음) · 기록 = 지금 instanceId → 받아들임 · 기록 ≠ 지금 → 재시작 · 기록을 읽을 수 없음(깨짐 · 남의 것 · 크기 · 폴더) → 이어짐을 증명하지 못하니 재시작. 「오래된 기록」 은 따로 가르지 않는다 — 가리키는 프로그램이 없어졌으면 그것이 곧 재시작이고, 값은 `get_status` 한 번이다.
+- **값**: 재시작으로 본 새 MCP 서버는 `get_status` 만 통과시키고 그 결과에 `restart_notice` 를 붙인다 — 새 대화에는 `get_status` 한 번(시험: `R.statuses() === 1`). 안내문의 흐름이 `get_status` 로 시작하므로 보통은 더 드는 것이 없다.
+- **교착 없음**: `get_status` 는 늘 보낸다. 확인되면 메모리에서 풀리고 기록을 고친다. 기록을 쓸 수 없어도(시험: 그 이름이 폴더) 메모리로 풀린다 — 다음 새 MCP 서버가 알림을 한 번 더 받을 뿐. 시작 중(패널 없음)의 `get_status` 는 풀지 않지만 그 문구가 다시 부르라고 한다.
+- **상태 기계(K1 의 `pinned`/`restartUnconfirmed` 를 바꿈)**: `confirmed` = 다른 요청을 보내도 되는 호스트. 지금 포트 파일의 호스트가 `confirmed` 와 `sameHost` 가 아니면 상태 조회만(알림), 성공하면 `confirmed = 그 호스트`. K1 의 「확인 전에 또 재시작하면 옛 조회가 풀지 못함」 은 그대로 성립한다(옛 호스트를 `confirmed` 로 해도 지금 파일과 다르다 — 단위 시험 그대로 통과). 첫 접촉으로 받아들인 것은 `/hello` 확인이 실패하면 되돌린다(남의 프로그램을 기준으로 삼지 않게).
+
+### 시험 (더함 — 기존 단언은 그대로)
+
+- `mcp_port_file_contract.js`(15 → 19 묶음): S2(패널이 1.5 s 늦는 호스트: 시작 중 문구 · 쓰기도 같은 문구 · 재시작 + 시작 중이면 막기 유지 → 다시 부른 `get_status` 가 품 · 지금 방식 문구 그대로) · V5-08(첫 연결 알림 없음 · 기록 위치 · 토큰 없음 · 프로그램 재시작 뒤 새 MCP 서버의 쓰기 거절 · `get_status` 한 번 · Claude Code 와 독립 · 한쪽 확인이 다른 쪽을 풀지 않음 · 재시작 없으면 새 서버도 알림 없음 · 깨진 기록 → 한 번 · 쓸 수 없는 기록에도 풀림) · V5-09(살아 있는 pid + 남의 서버 → 세 도구 모두 NOT_RUNNING, 그 서버가 받은 것은 `GET /hello` 하나 · 진짜 호스트의 증명이 instanceId · nonce 에 묶임 · 토큰 없으면 401 에 증명 없음 · `/hello` 는 패널에 안 닿음 · legacy 에는 `/hello` · 증명 없음) · S3(`out/extension.js` 를 vscode 대역으로: 독립 프로그램 두 경우의 문구 · 단추 없음, 확장 두 경우의 문구 · 단추 그대로, activate 가 포트 파일 방식을 넘김 — `out/` 이 새것이어야 한다). 기존 묶음의 `aiCalls === 2` 가 `/hello` 를 세지 않음도 덮는다.
+- `claude_desktop_contract.js` V5 묶음: 끼어든 쓰기(연결 · 끊기) 보존 + 백업 = 실제로 바꾼 내용 + 버린 시도의 백업 없음 · 계속 바뀌면 `config-busy`(시도 4 번, 남의 마지막 쓰기 그대로, 백업 · 임시 파일 없음) · 중복 키 단위 4 건 + 두 설정 손대지 않음 · 하드 링크(nlink 2 유지, 두 이름 같은 내용) · 심볼릭 링크(만들 수 있을 때만 — 이 PC 는 `EPERM` 으로 건너뜀) · 백업 12 번 쓰기 → 5 개, 남의 이름 · 폴더 그대로, `-10 > -9` · Windows 대소문자 · 구분자 비교, 다른 OS 는 그대로, 경로가 아닌 env 는 그대로 · S5 실측(소문자로 띄운 node 의 `execPath`)과 그 항목이 `registered`.
+- **변이 시험**(scratch `mutate.js` — `media/` 는 건드리지 않고 되돌린 번들을 scratch 로 빌드해 시험 사본이 그것을 쓰게): V5-06 다시 보기 없앰 → `V5-06: a change written between our read and our rename is kept` 에서 실패 · V5-08 첫 접촉에서 기록을 보지 않음 → `a new MCP server knows the program it last saw is gone` 에서 실패(기록 쓰기 자체를 끄면 기록 파일 확인에서 먼저 실패) · V5-09 `proofMatches` 가 늘 참 → `another program is not taken for StCFSD` 에서 실패. 소스를 되돌린 뒤 패리티 OK.
+
+### 못 한 것 · 남은 것
+
+- **심볼릭 링크 설정 파일**: 이 PC 에서 만들 수 없다(`EPERM` — 개발자 모드 · 관리자 없음). 코드(`lstat` → `realpath`)와 시험은 있고, 만들 수 있는 PC 에서 돈다. 이번에는 건너뛰었다.
+- **V5-06 의 남은 틈**: 다시 본 때와 rename 사이. 하드 링크의 제자리 쓰기는 원자적이지 않다(백업이 있다).
+- **V5-09 의 범위**: 포트 파일을 쓸 수 있는 같은 사용자의 프로그램은 막지 못한다(K1 「잔여 위험」 그대로). 막는 것은 포트 · pid 를 물려받은 남의 프로그램, 다른 사용자.
+- **진짜 Claude Desktop · Electron 으로는 돌리지 않았다**(가짜 설정 · node 대역). 기록은 MCP 의 `clientInfo.name` 으로 가른다 — Claude Desktop 이 내는 실제 이름은 확인하지 못했다(무엇이든 클라이언트마다 다르면 된다).
+- 같은 이름의 클라이언트 프로세스 여럿(Claude Code 창 둘, `--resume` 으로 옛 대화를 이은 새 프로세스)은 기록 하나를 나누므로, 다른 창이 이미 확인한 프로그램이면 새 프로세스는 알림을 받지 않는다 — MCP 에 대화 식별자가 없어 더 나눌 수 없다.
+- 독립 프로그램 쪽(`desktop/`)이 따라올 것은 보고서의 「desktop 변경 필요」 목록(오케스트레이터에게).

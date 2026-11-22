@@ -18,12 +18,26 @@
  *  풀어 줄 때까지 막는다. 그 조회가 날아가는 동안 동시에 온 쓰기도 막힌다(확인은 응답이 온 뒤에야 된다).
  *
  * port-file 방식에서는 STANDALONE 이 아니어도 이 막기를 한다 — 재시작한 호스트를 따라가면서 막지 않는 길은 두지 않는다.
+ *
+ * V5-08 · 기준을 프로세스 너머로: 이 MCP 서버가 **확인한** 호스트(`confirmed`)의 instanceId 를 포트 파일 옆에 클라이언트
+ *  이름별로 남긴다(portFile.ts 의 `clientRecordFile`). 새 MCP 서버(Claude Desktop 을 다시 켬)는 첫 접촉에서 그 기록을 본다.
+ *   - 기록 없음(이 클라이언트가 처음) → 지금 호스트를 그대로 받아들인다(헛 알림 없음).
+ *   - 기록 = 지금 호스트 → 그대로(프로그램은 그사이 다시 켜지지 않았다).
+ *   - 기록 ≠ 지금 호스트, 또는 기록을 읽을 수 없음 → 재시작으로 본다: get_status 만 통과, 그것이 성공하면 풀고 기록을 고친다.
+ *  막기는 늘 get_status 로 풀린다(그 길은 막지 않는다). 기록을 쓰지 못해도 메모리의 막기는 그대로 돈다.
+ *
+ * V5-09 · 상대가 그 인스턴스인가: 포트 파일의 pid 가 살아 있어도 그 포트에서 듣는 것이 StCFSD 라는 보장은 없다(강제 종료 뒤
+ *  pid · 포트 재사용, 남이 쓴 파일). 아직 확인하지 않은 호스트에는 먼저 `GET /hello` 하나만 보내 증명
+ *  (`instanceProof` — 토큰으로 만든 HMAC, instanceId 와 nonce 에 묶임)을 받는다. 틀리면 "실행 중이 아님" 으로 답하고
+ *  그 호스트에는 더 아무것도 보내지 않는다. 확인한 뒤에도 모든 응답의 증명을 본다(server.ts).
+ *
  * vscode 비의존. MCP 번들(media/mcp-server.js)에 들어간다.
  */
 
 import {
     PORT_FILE_ENV, STANDALONE_ENV, LEGACY_PORT_ENV,
     readPortFile, pidAlive, sameHost, type PortFileInfo,
+    clientRecordFile, readClientRecord, writeClientRecord, type ClientRecordRead,
 } from './portFile';
 
 /** 독립 프로그램 문구 — 사용자에게 그대로 전할 수 있게 쉬운 말로. */
@@ -44,6 +58,9 @@ export const STANDALONE_DROPPED = (code: string) => `The connection to the StCFS
     + 'If StCFSD is not running, ask the user to start it; then call get_status before retrying.';
 export const STANDALONE_TIMEOUT = (minutes: number) => `No reply from the StCFSD program within ${minutes} min. `
     + 'The calculation may still finish in StCFSD and change its state; call get_status before relying on the model.';
+/** V5-09 · 연결 확인(`/hello`)에 답이 없거나 끊김 — 요청은 보내지 않았다. */
+export const STANDALONE_NO_ANSWER = (code: string) => `The StCFSD program did not answer the connection check (${code}). `
+    + 'No request was sent. Try again in a moment; if it keeps failing, ask the user to close and start StCFSD again.';
 
 /** port-file 방식이지만 독립 프로그램이 아닐 때(개발 · 시험 호스트) — 어느 파일인지 밝힌다. */
 const hostNotRunning = (file: string, why: string) => `The StCFSD host named by ${PORT_FILE_ENV} (${file}) is `
@@ -62,6 +79,8 @@ const hostDropped = (code: string) => `The connection to the StCFSD host broke b
     + 'The request may or may not have run and was not re-sent; call get_status before retrying.';
 const hostTimeout = (minutes: number) => `No reply from the StCFSD host within ${minutes} min. The calculation may `
     + 'still finish and change its state; call get_status before relying on the model.';
+const hostNoAnswer = (file: string, port: number, code: string) => `The StCFSD host at 127.0.0.1:${port} (from ${file}) `
+    + `did not answer the connection check (${code}). No request was sent; try again.`;
 
 export type ConnectionMode =
     | { kind: 'legacy'; port: number }
@@ -85,6 +104,8 @@ export interface HostTarget {
     host?: PortFileInfo;
     /** 재시작 뒤 아직 확인 전이고 이 요청이 상태 조회다 — 결과에 알림을 붙이고, 성공하면 confirmStatus */
     restarted?: true;
+    /** V5-09 · 이 호스트가 포트 파일의 그 인스턴스인지 아직 모른다 — 요청 전에 `/hello` 로 증명을 받는다 */
+    verify?: true;
 }
 
 export type Resolved = { ok: true; target: HostTarget } | { ok: false; error: string };
@@ -95,6 +116,17 @@ export interface HostConnection {
     resolve(statusRead: boolean): Resolved;
     /** 상태 조회가 그 호스트에서 성공했다 — 다른 요청을 다시 보낸다. 그 사이 또 바뀐 호스트면 풀지 않는다. */
     confirmStatus(target: HostTarget): void;
+    /** V5-09 · `/hello` 의 증명이 맞았다 */
+    markVerified(target: HostTarget): void;
+    /**
+     * V5-09 · 확인하지 못했다. `impostor` = 답은 왔지만 증명이 틀림(남의 프로그램) — 그 호스트(포트 파일 내용)에는 더 보내지
+     * 않는다. 아니면 연결 문제(거부 · 끊김 · 무응답) — 다음 호출에서 다시 확인한다. 어느 쪽이든 첫 접촉으로 받아들인 것은 되돌린다.
+     */
+    verificationFailed(target: HostTarget, impostor: boolean): void;
+    /** V5-09 · 증명이 틀린 상대 — "실행 중이 아님" 문구 */
+    notStcfsdMessage(target: HostTarget): string;
+    /** V5-09 · `/hello` 에 답이 없음 · 끊김(요청은 보내지 않았다) */
+    noAnswerMessage(target: HostTarget, code: string): string;
     /** port-file 방식의 오류 문구(legacy 에서는 쓰지 않는다 — server.ts 의 원래 문구) */
     refusedMessage(target: HostTarget): string;
     unauthorizedMessage(): string;
@@ -107,15 +139,48 @@ export interface HostConnection {
 export interface HostConnectionOptions {
     /** 시험용 */
     isAlive?: (pid: number) => boolean;
+    /** V5-08 · 기록 파일을 가를 MCP 클라이언트 이름(initialize 의 clientInfo.name). 없으면 'unknown' */
+    clientName?: () => string;
+    /** V5-08 · 포트 파일 옆의 기록을 읽고 쓴다(기본 true) */
+    persist?: boolean;
 }
 
 export function createHostConnection(mode: ConnectionMode, opts: HostConnectionOptions = {}): HostConnection {
     const alive = opts.isAlive ?? pidAlive;
-    let pinned: PortFileInfo | undefined;
-    let restartUnconfirmed = false;
+    const persist = opts.persist !== false;
+    const clientName = () => { try { return opts.clientName?.() || 'unknown'; } catch { return 'unknown'; } };
+    // 막기: 지금 포트 파일의 호스트가 `confirmed` 와 같을 때만 다른 요청을 보낸다(같지 않으면 get_status 만).
+    let confirmed: PortFileInfo | undefined;
+    // confirmed 가 첫 접촉으로 받아들인 것이고 아직 그 호스트를 확인(/hello)하지 못했다 — 확인이 틀리면 되돌린다.
+    let adopted = false;
+    // V5-08 · 이 클라이언트의 기록(첫 접촉 때 한 번 읽는다). 쓸 때 고친다.
+    let baseline: ClientRecordRead | undefined;
+    // V5-09 · 증명을 받은 호스트 · 증명이 틀린 호스트
+    let verified: PortFileInfo | undefined;
+    let rejected: PortFileInfo | undefined;
     const file = mode.kind === 'port-file' ? mode.file : '';
     const standalone = mode.kind === 'port-file' && mode.standalone;
     const notRunning = (why: string) => standalone ? STANDALONE_NOT_RUNNING : hostNotRunning(file, why);
+    const recordFile = () => clientRecordFile(file, clientName());
+
+    const loadBaseline = (): ClientRecordRead => {
+        if (!baseline) { baseline = persist ? readClientRecord(recordFile()) : { kind: 'absent' }; }
+        return baseline;
+    };
+    /** 이 호스트를 「이 클라이언트가 마지막으로 확인한 프로그램」 으로 남긴다(이미 같으면 쓰지 않는다). */
+    const remember = (host: PortFileInfo) => {
+        if (!persist) { return; }
+        const b = loadBaseline();
+        if (b.kind === 'present' && b.record.instanceId === host.instanceId) { return; }
+        const client = clientName();
+        if (writeClientRecord(recordFile(), client, host)) {
+            baseline = {
+                kind: 'present',
+                record: { app: 'stcfsd-mcp-client', version: 1, client, instanceId: host.instanceId, pid: host.pid,
+                    startedAt: host.startedAt, at: new Date().toISOString() },
+            };
+        }
+    };
 
     const resolve = (statusRead: boolean): Resolved => {
         if (mode.kind === 'legacy') { return { ok: true, target: { port: mode.port } }; }
@@ -129,14 +194,23 @@ export function createHostConnection(mode: ConnectionMode, opts: HostConnectionO
             // 강제 종료로 남은 파일. 지우지 않는다 — 다음 호스트가 덮어쓴다.
             return { ok: false, error: notRunning(`process ${info.pid} has exited`) };
         }
-        if (!pinned) {
-            pinned = info;
-        } else if (!sameHost(pinned, info)) {
-            pinned = info;
-            restartUnconfirmed = true;
+        if (rejected && sameHost(rejected, info)) {
+            // V5-09 · 증명을 못 한 상대. 파일이 바뀔 때까지 아무것도 보내지 않는다.
+            return { ok: false, error: notRunning(`the program at 127.0.0.1:${info.port} did not prove it is the StCFSD instance named in the port file`) };
         }
-        const target: HostTarget = { port: info.port, token: info.token, host: info };
-        if (!restartUnconfirmed) { return { ok: true, target }; }
+        if (!confirmed) {
+            // 첫 접촉. V5-08 · 이 클라이언트의 기록이 없거나 지금 호스트와 같을 때만 그대로 받아들인다.
+            const b = loadBaseline();
+            if (b.kind === 'absent' || (b.kind === 'present' && b.record.instanceId === info.instanceId)) {
+                confirmed = info;
+                adopted = true;
+            }
+        }
+        const target: HostTarget = {
+            port: info.port, token: info.token, host: info,
+            ...(verified && sameHost(verified, info) ? {} : { verify: true as const }),
+        };
+        if (confirmed && sameHost(confirmed, info)) { return { ok: true, target }; }
         if (statusRead) { return { ok: true, target: { ...target, restarted: true } }; }
         return { ok: false, error: standalone ? STANDALONE_RESTARTED : hostRestarted };
     };
@@ -145,7 +219,31 @@ export function createHostConnection(mode: ConnectionMode, opts: HostConnectionO
         mode,
         resolve,
         confirmStatus(target: HostTarget): void {
-            if (target.host && pinned && sameHost(target.host, pinned)) { restartUnconfirmed = false; }
+            // 그 사이 파일이 또 다른 호스트를 가리키면, 다음 resolve 가 confirmed 와 달라 다시 막는다.
+            if (!target.host) { return; }
+            confirmed = target.host;
+            adopted = false;
+            remember(target.host);
+        },
+        markVerified(target: HostTarget): void {
+            if (!target.host) { return; }
+            verified = target.host;
+            if (confirmed && sameHost(confirmed, target.host)) {
+                adopted = false;
+                remember(target.host);
+            }
+        },
+        verificationFailed(target: HostTarget, impostor: boolean): void {
+            if (!target.host) { return; }
+            if (impostor) { rejected = target.host; }
+            if (verified && sameHost(verified, target.host)) { verified = undefined; }
+            if (adopted && confirmed && sameHost(confirmed, target.host)) { confirmed = undefined; adopted = false; }
+        },
+        notStcfsdMessage(target: HostTarget): string {
+            return notRunning(`the program at 127.0.0.1:${target.port} did not prove it is the StCFSD instance named in the port file`);
+        },
+        noAnswerMessage(target: HostTarget, code: string): string {
+            return standalone ? STANDALONE_NO_ANSWER(code) : hostNoAnswer(file, target.port, code);
         },
         refusedMessage(target: HostTarget): string {
             return standalone ? STANDALONE_REFUSED : hostRefused(file, target.port);

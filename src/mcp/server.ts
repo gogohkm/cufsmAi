@@ -17,8 +17,10 @@ import {
     SI_OUT_PURLIN, SI_OUT_REPORT, SI_OUT_VALIDATE,
     type Table,
 } from "./siUnits";
-import { connectionModeFromEnv, createHostConnection } from "./hostConnection";
-import { CLIENT_HEADER, REQUEST_ID_HEADER } from "./portFile";
+import { connectionModeFromEnv, createHostConnection, type HostTarget } from "./hostConnection";
+import {
+    CLIENT_HEADER, REQUEST_ID_HEADER, NONCE_HEADER, PROOF_HEADER, HELLO_ENDPOINT, newNonce, proofMatches,
+} from "./portFile";
 
 const DEFAULT_PORT = 52790;
 const BRIDGE_PORT = parseInt(process.env.STCFSD_MCP_PORT || String(DEFAULT_PORT));
@@ -28,8 +30,13 @@ const BRIDGE_HOST = '127.0.0.1';
 const BRIDGE_TIMEOUT_MS = 6 * 60 * 1000;
 // K1: STCFSD_MCP_PORT_FILE 이 있으면 호출마다 포트 파일을 읽고 토큰을 보낸다(재시작 뒤 막기 포함 — hostConnection.ts).
 // 없으면 legacy — 위의 BRIDGE_PORT 하나, 토큰 없음, 오류 문구도 전과 같다.
-const CONNECTION = createHostConnection(connectionModeFromEnv(process.env, DEFAULT_PORT));
+// V5-08: 재시작 기록은 MCP 클라이언트 이름별(Claude Desktop · Claude Code 가 서로의 막기를 풀지 않게).
+const CONNECTION = createHostConnection(connectionModeFromEnv(process.env, DEFAULT_PORT), {
+    clientName: () => server.server.getClientVersion()?.name ?? 'unknown',
+});
 const PORT_FILE_MODE = CONNECTION.mode.kind === 'port-file';
+// V5-09: 연결 확인(/hello)은 패널에 닿지 않으므로 짧게 기다린다.
+const HELLO_TIMEOUT_MS = 15 * 1000;
 let requestSeq = 0;
 
 // ============================================================
@@ -50,60 +57,119 @@ function clientLabel(): string {
     return label.replace(/[^\x20-\x7e]/g, '?').slice(0, 120);
 }
 
-function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: any): Promise<any> {
-    // K1: 상태 조회 = get_status 만 GET /status 를 부른다. 재시작 뒤에는 이것만 통과한다.
-    const statusRead = method === 'GET' && endpoint === '/status';
-    const resolved = CONNECTION.resolve(statusRead);
-    if ('error' in resolved) { return Promise.resolve({ error: resolved.error }); }
-    const target = resolved.target;
+type HttpOutcome =
+    | { kind: 'response'; status: number | undefined; headers: http.IncomingHttpHeaders; data: string }
+    | { kind: 'timeout' }
+    | { kind: 'error'; err: NodeJS.ErrnoException };
+
+/** 요청 하나. `aiCall` = 요청 id · 클라이언트 머리를 붙인다(호스트가 AI 호출로 센다). `nonce` = V5-09 증명을 청한다. */
+function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, payload: string | undefined,
+    timeoutMs: number, nonce: string | undefined, aiCall: boolean): Promise<HttpOutcome> {
     return new Promise((resolve) => {
-        const payload = body === undefined ? undefined : JSON.stringify(body);
         const headers: Record<string, string | number> = { 'Accept': 'application/json' };
         if (payload !== undefined) {
             headers['Content-Type'] = 'application/json';
             headers['Content-Length'] = Buffer.byteLength(payload);
         }
-        requestSeq += 1;
-        headers[REQUEST_ID_HEADER] = `${process.pid.toString(36)}-${requestSeq.toString(36)}`;
-        headers[CLIENT_HEADER] = clientLabel();
+        if (aiCall) {
+            requestSeq += 1;
+            headers[REQUEST_ID_HEADER] = `${process.pid.toString(36)}-${requestSeq.toString(36)}`;
+            headers[CLIENT_HEADER] = clientLabel();
+        }
+        if (nonce !== undefined) { headers[NONCE_HEADER] = nonce; }
         if (target.token !== undefined) { headers['Authorization'] = `Bearer ${target.token}`; }
         const req = http.request({
             hostname: BRIDGE_HOST, port: target.port, path: endpoint, method, headers,
-            timeout: BRIDGE_TIMEOUT_MS,
+            timeout: timeoutMs,
         }, (res) => {
             let data = '';
             res.setEncoding('utf8');
             res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                if (PORT_FILE_MODE && res.statusCode === 401) { resolve({ error: CONNECTION.unauthorizedMessage() }); return; }
-                let parsed: any;
-                try { parsed = JSON.parse(data); }
-                catch { resolve({ error: `Bridge returned non-JSON (HTTP ${res.statusCode}): ${data.slice(0, 500)}` }); return; }
-                if (target.restarted) {
-                    const ok = res.statusCode === 200 && !!parsed && typeof parsed === 'object'
-                        && !Array.isArray(parsed) && !('error' in parsed);
-                    if (ok) {
-                        CONNECTION.confirmStatus(target);
-                        parsed = { restart_notice: CONNECTION.restartedNotice(), ...parsed };
-                    }
-                }
-                resolve(parsed);
-            });
+            res.on('end', () => resolve({ kind: 'response', status: res.statusCode, headers: res.headers, data }));
         });
-        req.on('timeout', () => {
-            req.destroy();
-            resolve({
-                error: PORT_FILE_MODE ? CONNECTION.timeoutMessage(BRIDGE_TIMEOUT_MS / 60000) :
-                    `No reply from the StCFSD bridge within ${BRIDGE_TIMEOUT_MS / 60000} min. ` +
-                    'The calculation may still finish in VS Code and change the panel state; ' +
-                    'call get_status before relying on the model.',
-            });
-        });
-        req.on('error', (err: NodeJS.ErrnoException) => resolve(!PORT_FILE_MODE ? bridgeUnreachable(err)
-            : { error: err.code === 'ECONNREFUSED' ? CONNECTION.refusedMessage(target) : CONNECTION.droppedMessage(String(err.code || err.message)) }));
+        req.on('timeout', () => { req.destroy(); resolve({ kind: 'timeout' }); });
+        req.on('error', (err: NodeJS.ErrnoException) => resolve({ kind: 'error', err }));
         if (payload !== undefined) { req.write(payload); }
         req.end();
     });
+}
+
+/**
+ * V5-09: 아직 확인하지 않은 호스트에 `GET /hello` 하나만 보내 포트 파일의 그 인스턴스인지 증명을 받는다.
+ * 맞으면 null, 아니면 AI 에게 줄 문구(그때는 다른 요청을 보내지 않는다).
+ */
+async function verifyHost(target: HostTarget): Promise<string | null> {
+    const nonce = newNonce();
+    const out = await httpCall(target, 'GET', HELLO_ENDPOINT, undefined, HELLO_TIMEOUT_MS, nonce, false);
+    if (out.kind === 'timeout') {
+        CONNECTION.verificationFailed(target, false);
+        return CONNECTION.noAnswerMessage(target, 'no reply');
+    }
+    if (out.kind === 'error') {
+        CONNECTION.verificationFailed(target, false);
+        return out.err.code === 'ECONNREFUSED' ? CONNECTION.refusedMessage(target)
+            : CONNECTION.noAnswerMessage(target, String(out.err.code || out.err.message));
+    }
+    if (out.status === 401) {
+        CONNECTION.verificationFailed(target, false);
+        return CONNECTION.unauthorizedMessage();
+    }
+    if (!target.host || !target.token || !proofMatches(out.headers[PROOF_HEADER], target.token, target.host.instanceId, nonce)) {
+        CONNECTION.verificationFailed(target, true);
+        return CONNECTION.notStcfsdMessage(target);
+    }
+    CONNECTION.markVerified(target);
+    return null;
+}
+
+async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: any): Promise<any> {
+    // K1: 상태 조회 = get_status 만 GET /status 를 부른다. 재시작 뒤에는 이것만 통과한다.
+    const statusRead = method === 'GET' && endpoint === '/status';
+    let resolved = CONNECTION.resolve(statusRead);
+    // V5-09: 확인하지 않은 호스트에는 /hello 하나만 먼저. 그 사이 포트 파일이 또 바뀌면 다시 고른다(세 번까지).
+    for (let round = 0; 'target' in resolved && resolved.target.verify; round++) {
+        if (round >= 3) { return { error: CONNECTION.noAnswerMessage(resolved.target, 'the port file kept changing') }; }
+        const problem = await verifyHost(resolved.target);
+        if (problem) { return { error: problem }; }
+        resolved = CONNECTION.resolve(statusRead);
+    }
+    if ('error' in resolved) { return { error: resolved.error }; }
+    const target = resolved.target;
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const nonce = PORT_FILE_MODE ? newNonce() : undefined;
+    const out = await httpCall(target, method, endpoint, payload, BRIDGE_TIMEOUT_MS, nonce, true);
+    if (out.kind === 'timeout') {
+        return {
+            error: PORT_FILE_MODE ? CONNECTION.timeoutMessage(BRIDGE_TIMEOUT_MS / 60000) :
+                `No reply from the StCFSD bridge within ${BRIDGE_TIMEOUT_MS / 60000} min. ` +
+                'The calculation may still finish in VS Code and change the panel state; ' +
+                'call get_status before relying on the model.',
+        };
+    }
+    if (out.kind === 'error') {
+        const err = out.err;
+        return !PORT_FILE_MODE ? bridgeUnreachable(err)
+            : { error: err.code === 'ECONNREFUSED' ? CONNECTION.refusedMessage(target) : CONNECTION.droppedMessage(String(err.code || err.message)) };
+    }
+    if (PORT_FILE_MODE && out.status === 401) { return { error: CONNECTION.unauthorizedMessage() }; }
+    if (PORT_FILE_MODE && nonce !== undefined
+        && (!target.host || !target.token || !proofMatches(out.headers[PROOF_HEADER], target.token, target.host.instanceId, nonce))) {
+        // V5-09: 확인한 뒤에도 응답마다 본다 — 그 포트를 남이 이어받았으면 답을 믿지 않는다.
+        CONNECTION.verificationFailed(target, true);
+        return { error: CONNECTION.notStcfsdMessage(target) };
+    }
+    let parsed: any;
+    try { parsed = JSON.parse(out.data); }
+    catch { return { error: `Bridge returned non-JSON (HTTP ${out.status}): ${out.data.slice(0, 500)}` }; }
+    if (target.restarted) {
+        const ok = out.status === 200 && !!parsed && typeof parsed === 'object'
+            && !Array.isArray(parsed) && !('error' in parsed);
+        if (ok) {
+            CONNECTION.confirmStatus(target);
+            parsed = { restart_notice: CONNECTION.restartedNotice(), ...parsed };
+        }
+    }
+    return parsed;
 }
 
 const callBridgeGet = (endpoint: string) => bridgeRequest('GET', endpoint);
