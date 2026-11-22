@@ -4,8 +4,7 @@
 - 면내 전단(V) · 축방향 인장(T) 소요를 각 방향의 한계상태와 비교한다. 엔진은 방향마다 가정값 없이
   평가한(verified) 한계상태의 최소 설계강도와 비교하므로, 한계상태 하나하나의 비 V/φRn 중 가장 큰 것이
   엔진의 비와 같다.
-- 설계강도는 엔진이 0.001 kip 로 반올림한 값(limit_states[i].design_strength)으로 비교한다 — 계산서의
-  설계강도 단계에 rounded_to 로 밝힌다.
+- 설계강도는 반올림하지 않은 값으로 비교한다(limit_states[i].design_strength 는 표시용 소수 3자리).
 - 가정값으로 만든 한계상태(assumed)는 판정에 쓰지 않는다 → not_evaluated(참고값은 reference).
 - 소요가 없는 방향의 한계상태는 not_applicable, 소요가 하나도 없으면 not_evaluated(소요 없음).
 """
@@ -54,9 +53,9 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
             nom_idx = tr.add('equation', f'{sym} per Eq. {item.get("equation")}', equation=item.get('equation'),
                              inputs=[], result=q(sym, rn_raw, 'force'), untraced=untraced)
         cap_sym = f'φ{sym}' if dm == 'LRFD' else f'{sym}/Ω'
-        i_ds = design_strength_step(tr, dm, tr.ref(nom_idx), item['phi'], item['omega'], item['design_strength'],
-                                    cap_sym, 'force', rounded_to=0.001)
-        cap = item['design_strength']
+        # 엔진은 반올림하지 않은 설계강도로 지배 · 판정을 정한다(limit_states[i].design_strength 는 표시용).
+        cap = data['ds_raw'][i] if data.get('ds_raw') else item['design_strength']
+        i_ds = design_strength_step(tr, dm, tr.ref(nom_idx), item['phi'], item['omega'], cap, cap_sym, 'force')
         direction = item.get('direction', 'shear')
         dem = shear_dem if direction == 'shear' else tens_dem
         other = tens_dem if direction == 'shear' else shear_dem
@@ -123,6 +122,16 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
             dem = q('T', raw['value'], 'force', demand_source(params, 'Tu'))
             cap = q("φPnt'" if dm == 'LRFD' else "Pnt'/Ω", raw['limit'], 'force')
             ref_cap = tr.ref(i_x)
+        elif (data.get('itraces') or [None] * (i + 1))[i]:
+            it = data['itraces'][i]
+            tr.steps.extend(it['steps'])
+            dem = tr.ref(it['value_step'], 'value')
+            if it.get('limit_step') is not None:
+                ref_cap = tr.ref(it['limit_step'], 'limit')
+                cap = q('limit', raw['limit'], 'dimensionless')
+            else:
+                cap = q('limit', raw['limit'], 'dimensionless', spec())
+                ref_cap = cap
         else:
             i_x = tr.add('equation', f"interaction value (Eq. {ic['equation']})", equation=ic['equation'],
                          inputs=[], result=q('value', raw['value'], 'dimensionless'),

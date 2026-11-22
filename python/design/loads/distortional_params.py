@@ -251,4 +251,8 @@ def calc_Fcrd(fp: dict, ho: float, t: float,
         'k_tilde_phi_fg': round(stiff['k_tilde_phi_fg'], 5),
         'k_tilde_phi_wg': round(stiff['k_tilde_phi_wg'], 5),
         'kphi_external': kphi_external,
+        # 계산서(design_checks)용 — 반올림하지 않은 값(위 키들은 표시용 반올림)
+        'trace': {'Lcrd': Lcrd, 'L': L, 'Lm': Lm, 'stiff': dict(stiff), 'fp': dict(fp), 'E': E, 'G': G,
+                  'mu': mu, 'beta': beta_eff, 'kphi_external': kphi_external, 'xi_web': xi_web,
+                  'flexure': is_flexure},
     }

@@ -198,17 +198,17 @@ def build(ck: dict) -> list:
                                        'φvVn,lap' if dm == 'LRFD' else 'Vn,lap/Ωv', 'force',
                                        phi_symbol='φv (×2 members)', omega_symbol='Ωv (×2 members)')
             lo = fx['local']
-            i_x = tr.add('equation', '(Mu / φbMn,lap)² + (Vu / φvVn,lap)²  (squared form of Eq. H2-1)',
-                         equation='H2-1',
+            i_x = tr.add('equation', '[(Mu / φbMn,lap)² + (Vu / φvVn,lap)²]^0.5', equation='H2-1',
                          inputs=[mu, q('φbMn,lap', lo['phi_Mn_lap'], 'moment', src('check', id='lap.flexure.local')),
-                                 vu, tr.ref(i_v)], result=q('H2²', h['mv'], 'dimensionless'))
+                                 vu, tr.ref(i_v)], result=q('H2', h['mv'], 'dimensionless'))
             v = 'pass' if h['ok'] else 'fail'
-            tr.add('verdict', 'H2² ≤ 1', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
+            tr.add('verdict', 'H2 ≤ 1.0', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
                    result=q('ratio', h['mv'], 'dimensionless'), verdict=v)
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict=v,
-                                     demand=q('H2²', h['mv'], 'dimensionless'), capacity=q('limit', 1.0, 'dimensionless'),
+                                     demand=q('H2', h['mv'], 'dimensionless'), capacity=q('limit', 1.0, 'dimensionless'),
                                      ratio=h['mv'], steps=tr.steps,
-                                     note='the engine reports the sum of squares (pass-equivalent to Eq. H2-1)'))
+                                     mirrors={'ratio': {'path': 'flexure_dcr_governing', 'digits': 4}}
+                                     if h['mv'] >= max(lo['dcr'], (fx.get('dist') or {}).get('dcr') or 0) else None))
         elif fx.get('h2_missing'):
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
                                      reason='section shear strength Vn could not be computed'))

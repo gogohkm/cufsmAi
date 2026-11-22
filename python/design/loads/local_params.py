@@ -99,7 +99,7 @@ def calc_Fcrl(ho: float, bo: float, do: float, t: float,
         else:
             k_web, scale = K_STIFFENED, 1.0
         elements['web'] = {
-            'w': w_web, 'k': k_web,
+            'w': w_web, 'k': k_web, 'scale': scale,
             'Fcrl': calc_plate_Fcrl(w_web, t, k_web, E, mu) * scale,
         }
     fl_scale = (ho / 2.0) / (ho / 2.0 - t / 2.0) if (flexure and ho > t) else 1.0
@@ -112,7 +112,7 @@ def calc_Fcrl(ho: float, bo: float, do: float, t: float,
         # 보강 플랜지: 양쪽 코너 차감; 비보강 플랜지: 웹쪽 코너 1개만 차감
         w_fl = max(bo - (2.0 * corner if has_lip else corner), 0.0)
         elements['flange'] = {
-            'w': w_fl, 'k': k_fl,
+            'w': w_fl, 'k': k_fl, 'scale': fl_scale, 'corners': 2 if has_lip else 1,
             'Fcrl': calc_plate_Fcrl(w_fl, t, k_fl, E, mu) * fl_scale,
         }
 
@@ -120,7 +120,7 @@ def calc_Fcrl(ho: float, bo: float, do: float, t: float,
     if do > 0:
         w_lip = max(do - corner, 0.0)
         elements['lip'] = {
-            'w': w_lip, 'k': K_UNSTIFFENED,
+            'w': w_lip, 'k': K_UNSTIFFENED, 'scale': fl_scale,
             'Fcrl': calc_plate_Fcrl(w_lip, t, K_UNSTIFFENED, E, mu) * fl_scale,
         }
 
@@ -135,4 +135,6 @@ def calc_Fcrl(ho: float, bo: float, do: float, t: float,
         'governing': governing,
         'elements': elements,
         'loading': 'flexure' if flexure else 'compression',
+        # 계산서(design_checks)용 — 위 계산이 쓴 값
+        'trace': {'corner': corner, 'R': R, 'E': E, 'mu': mu, 'flexure': bool(flexure)},
     }

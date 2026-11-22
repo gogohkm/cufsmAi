@@ -72,6 +72,9 @@ BUCKLING_METHODS = (
 )
 
 # ---------------------------------------------------------------- 등록표
+# 이름(name · name_ko)은 이 표 한 곳에만 둔다 — 화면 · MCP 는 여기서 받아 쓴다(2026-11-23 오케스트레이터가
+# 표를 그대로 채택). 'member.flexure.global' 의 「횡좌굴」은 승인된 화면 시안의 말이다. 기준의 정식 용어는
+# 「횡비틀림좌굴」(lateral-torsional buckling)이며, 바꾸려면 이 표의 name_ko 하나만 고치면 된다.
 
 def _r(clause, equations, name, name_ko, group):
     return {'clause': clause, 'equations': list(equations), 'name': name, 'name_ko': name_ko,
@@ -606,3 +609,50 @@ def demand_source(params: dict, key: str) -> dict:
     if params.get('check_combination') is not None:
         return src('load_analysis', key=key, combination=params.get('check_combination'))
     return src('user_input', key=key)
+
+
+# ---------------------------------------------------------------- 표시용 반올림 (§8.3.1 수정 3–6 뒤)
+# 결과의 이 키들은 사람이 읽도록 반올림해 실은 값이다. 판정 · 비 · 지배 모드와 design_checks 의 값은
+# 모두 반올림하지 않은 값으로 정한다(2026-11-23). 경로의 [] 는 목록의 모든 원소, * 는 그 dict 의 모든 수.
+DISPLAY_ROUNDING = {
+    'member': {
+        'decimals': {
+            'Pn': 2, 'Pne': 2, 'Pnl': 2, 'Pnd': 2, 'Py': 2, 'phi_Pn': 2, 'Pn_omega': 2, 'design_strength': 2,
+            'Mn': 2, 'Mn_dsm': 2, 'Mne': 2, 'Mnl': 2, 'Mnd': 2, 'My': 2, 'phi_Mn': 2, 'Mn_omega': 2, 'Mnfo': 2,
+            'Fy_used': 2, 'Fy_original': 2, 'Tn': 2, 'Tn_yield': 2, 'Tn_rupture': 2, 'An_used': 4,
+            'Maxt': 2, 'Mayt': 2, 'compression.*': 2, 'flexure_x.*': 2, 'flexure_y.*': 2, 'tension.*': 2,
+            'utilization': 4, 'limit_state_checks[].ratio': 4, 'interaction.*': 4,
+            'shear.Vn': 2, 'shear.Vn_per_web': 2, 'shear.design_strength': 2, 'shear.Vu': 2,
+            'shear_interaction.*': 4, 'shear_interaction.Malo': 2, 'shear_interaction.Mnlo': 2,
+            'web_crippling.Pn': 2, 'web_crippling.design_strength': 3, 'web_crippling.P': 3,
+            'web_crippling.load': 3, 'web_crippling.ratio': 4, 'h3_interaction.*': 4,
+            'positive_region.utilization': 4, 'positive_region.*': 2, 'amplification.alpha_x': 4,
+            'amplification.alpha_y': 4, 'amplification.*': 2, 'Fcre_detail.*': '2–4',
+        },
+        'note': 'display only — verdicts, ratios and design_checks use unrounded values',
+    },
+    'connection': {
+        'decimals': {
+            'limit_states[].Rn': 3, 'limit_states[].design_strength': 3, 'Rn': 3, 'design_strength': 3,
+            'shear_design_strength': 3, 'tension_design_strength': 3, 'shear_verified_design_strength': 3,
+            'tension_verified_design_strength': 3, 'checks[].demand': 4, 'checks[].ratio': 4,
+            'utilization': 4, 'utilization_reference': 4, 'interaction_checks[].value': 4,
+            'interaction_checks[].limit': 4, 'interaction_checks[].ratio': 4, 'detailing_checks[].provided': 4,
+            'detailing_checks[].required': 4, 'demands.*': 4, 'shear_tension_interaction.*': '2–4',
+        },
+        'note': 'display only — the governing mode, verdicts, ratios and design_checks use unrounded values',
+    },
+    'lap': {
+        'decimals': {
+            'Pns': 3, 'utilization': 4, 'flexure_dcr': 4, 'flexure_dcr_governing': 4, 'flexure_reference_dcr': 4,
+            'Mn_lap': 2, 'phi_Mn_lap': 2, 'Vn_used': 3, 'steps[].value': '2–3',
+        },
+        'note': 'display only — verdicts, ratios and design_checks use unrounded values (capacity, V_transfer, '
+                'spacing are unrounded)',
+    },
+}
+
+
+def display_rounding(kind: str) -> dict:
+    d = DISPLAY_ROUNDING[kind]
+    return {'decimals': dict(d['decimals']), 'note': d['note']}

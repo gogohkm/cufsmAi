@@ -23,10 +23,12 @@ from design.connections import design_connection
 from design.steel_grades import E, STEEL_GRADES
 from design import member_checks as _mc
 from design.checks import set_governing as _set_governing, apply_context as _apply_context, \
-    make_check as _make_check
+    display_rounding as _display_rounding
 
 # 템플릿으로 단면 성질을 만든 실행의 내부 표지(입력이 아님) — 계산서 출처 'generated' 에만 쓴다.
 _PROPS_GENERATED = '_props_generated'
+# 하위 설계(압축 · 휨 · 인장)가 조합 검토에 넘기는 반올림하지 않은 설계강도(결과에는 남기지 않는다).
+_RAW_DS = '_raw_design_strength'
 
 # 안전/저항 계수
 PHI = {
@@ -551,8 +553,9 @@ def design_member(params: dict) -> dict:
             'section_type 미지정 → C 단면으로 가정하여 §E2/§F2 분기와 적용한계를 정했습니다.')
 
     # DSM 적용 한계 검증 — Table B4.1-1 은 Chapters E~H 에만 해당한다(인장 D장 제외).
+    b4_items = []
     if member_type != 'tension':
-        dsm_warnings = check_dsm_limits(params, member_type=member_type)
+        dsm_warnings = check_dsm_limits(params, member_type=member_type, _items=b4_items)
         if dsm_warnings:
             result['dsm_warnings'] = dsm_warnings
             # §B3.3 / §B4.2: Table B4.1-1 한계를 벗어난 부재는 Chapters E~H의
@@ -575,13 +578,13 @@ def design_member(params: dict) -> dict:
     _finalize_verdict(result)
 
     checks = result.setdefault('design_checks', [])
-    if result.get('b4_limits_exceeded'):
-        checks.append(_make_check(
-            'member.applicability.b4', design_method=params['design_method'], verdict='not_evaluated',
-            reason='; '.join(result.get('dsm_warnings') or []),
-            steps_unavailable='Table B4.1-1 limits are listed in dsm_warnings (not traced step by step)'))
+    if member_type != 'tension':
+        checks.append(_mc.b4_check(params['design_method'], b4_items, result.get('dsm_warnings') or [],
+                                   bool(result.get('b4_limits_exceeded')), params.get(_PROPS_GENERATED)))
     _apply_context(checks, params)
 
+    result.pop(_RAW_DS, None)
+    result['display_rounding'] = _display_rounding('member')
     result['report'] = generate_report(result, params)
     return result
 
@@ -662,7 +665,7 @@ def _not_implemented_warnings(result: dict, params: dict, member_type: str) -> N
 # DSM 적용 한계 검증 (Table B4.1-1)
 # ============================================================
 
-def check_dsm_limits(params: dict, member_type: str = None) -> list:
+def check_dsm_limits(params: dict, member_type: str = None, _items: list | None = None) -> list:
     """DSM 적용 한계 검증 (AISI S100-16 Table B4.1-1)
 
     member_type: 'compression' / 'flexure' / 'combined' / 'tension' — 웹 한계가
@@ -674,7 +677,12 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
     구현하지 않는다.
 
     Returns: list of warnings (빈 리스트면 모두 통과)
+    _items: 주면 검토한 한계마다 {label, num, den, ratio, limit, row, ok} 를 채운다(계산서용, 값 불변).
     """
+    def _rec(label, num, den, ratio, limit, row, ok, strict=False):
+        if _items is not None:
+            _items.append({'label': label, 'num': num, 'den': den, 'ratio': ratio, 'limit': limit, 'row': row,
+                           'ok': bool(ok), 'strict': strict})
     Fy = params.get('Fy')   # 없으면 Fy 한계 줄만 건너뛴다 — 강종을 짐작하지 않는다
     geom = _section_geometry(params)
     t = geom['t']
@@ -699,12 +707,16 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
     if h_web > 0:
         wt_web = h_web / t
         if member_type in ('flexure', 'combined'):
+            _rec('web h/t', ('h', h_web, 'length'), ('t', t, 'length'), wt_web, 300,
+                 'stiffened element in bending (web)', wt_web <= 300)
             if wt_web > 300:
                 warnings.append(
                     f'Web h/t = {wt_web:.1f} > 300 '
                     '(Table B4.1-1 stiffened element in bending limit)'
                 )
         else:
+            _rec('web w/t', ('w', h_web, 'length'), ('t', t, 'length'), wt_web, 500,
+                 'stiffened element in compression (web)', wt_web <= 500)
             if wt_web > 500:
                 warnings.append(
                     f'Web w/t = {wt_web:.1f} > 500 '
@@ -720,22 +732,31 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
     if b_flange > 0:
         if canon in ('RHS', 'HAT'):
             bt_fl = b_flange / t
+            _rec('flange w/t', ('w', b_flange, 'length'), ('t', t, 'length'), bt_fl, 500,
+                 'stiffened element in compression (flange)', bt_fl <= 500)
             if bt_fl > 500:
                 warnings.append(
                     f'Flange w/t = {bt_fl:.1f} > 500 (Table B4.1-1 stiffened element in compression limit)')
         elif geom['has_lip']:
             bt_fl = b_flange / t
+            _rec('flange b/t', ('b', b_flange, 'length'), ('t', t, 'length'), bt_fl, 160,
+                 'edge-stiffened element', bt_fl <= 160)
             if bt_fl > 160:
                 warnings.append(f'Flange b/t = {bt_fl:.1f} > 160 (Table B4.1-1 edge-stiffened limit)')
         elif canon != 'CHS':
             # I·T 는 웹 양쪽 돌출부가 각각 비보강요소다.
             d_out = b_flange / 2.0 if canon in ('I', 'TEE') else b_flange
             bt_fl = d_out / t
+            _rec('flange outstand d/t', ('d', d_out, 'length'), ('t', t, 'length'), bt_fl, 60,
+                 'unstiffened element in compression', bt_fl <= 60)
             if bt_fl > 60:
                 warnings.append(
                     f'Flange b/t = {bt_fl:.1f} > 60 (Table B4.1-1 unstiffened element in compression limit)')
 
     # hat 브림: 비보강 요소 d/t ≤ 60
+    if geom.get('brim_flat', 0) > 0:
+        _rec('brim d/t', ('d', geom['brim_flat'], 'length'), ('t', t, 'length'), geom['brim_flat'] / t, 60,
+             'unstiffened element in compression (brim)', geom['brim_flat'] / t <= 60)
     if geom.get('brim_flat', 0) > 0 and geom['brim_flat'] / t > 60:
         warnings.append(f"Brim d/t = {geom['brim_flat'] / t:.1f} > 60 (Table B4.1-1 unstiffened element in compression limit)")
 
@@ -743,6 +764,8 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
     d_lip = geom['d_lip']
     if d_lip > 0:
         dt_lip = d_lip / t
+        _rec('lip d/t', ('d', d_lip, 'length'), ('t', t, 'length'), dt_lip, 60, 'unstiffened element (lip)',
+             dt_lip <= 60)
         if dt_lip > 60:
             warnings.append(f'Lip d/t = {dt_lip:.1f} > 60 (Table B4.1-1 unstiffened limit)')
 
@@ -750,6 +773,7 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
     R = geom['R']
     if R > 0:
         Rt = R / t
+        _rec('corner R/t', ('R', R, 'length'), ('t', t, 'length'), Rt, 20, 'inside bend radius', Rt <= 20)
         if Rt > 20:
             warnings.append(f'Corner R/t = {Rt:.1f} > 20 (Table B4.1-1 corner limit)')
 
@@ -758,6 +782,8 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
     flange_o = geom['flange_o'] or b_flange
     if lip_o > 0 and flange_o > 0:
         do_bo = lip_o / flange_o
+        _rec('simple edge stiffener do/bo', ('do', lip_o, 'length'), ('bo', flange_o, 'length'), do_bo, 0.7,
+             'simple lip edge stiffener', do_bo <= 0.7)
         if do_bo > 0.7:
             warnings.append(
                 f'Simple edge stiffener d_o/b_o = {do_bo:.3f} > 0.7 '
@@ -773,6 +799,8 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
         warnings.append(f'n_w = {geom["n_w"]} > 4 (Table B4.1-1 web intermediate stiffener limit)')
 
     # 항복강도: Fy < 95 ksi (표의 부등호는 strict)
+    if Fy is not None:
+        _rec('Fy', ('Fy', Fy, 'stress'), None, Fy, 95, 'yield stress Fy < 95 ksi', Fy < 95, strict=True)
     if Fy is not None and Fy >= 95:
         warnings.append(f'Fy = {Fy} ksi is not < 95 ksi (Table B4.1-1 Fy limit)')
 
@@ -928,8 +956,8 @@ def _design_compression(params: dict) -> dict:
                     Pcrl = Fcrl_calc * Ag
                     Pcrl_source = '§App.1 Eq.1.1-4'
                     pcrl_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrl_calc, 'raw_product': Pcrl,
-                               'governing': fcrl_result.get('governing'),
-                               'detail_note': 'element plate buckling computed in loads.local_params.calc_Fcrl'}
+                               'governing': fcrl_result.get('governing'), 'kind': 'local',
+                               'elements': fcrl_result.get('elements'), 'trace': fcrl_result.get('trace')}
                     # 단일 극소 곡선: 서명곡선은 모든 모드의 아래 포락선이므로 분리되지 않은 모드의
                     # 임계값은 그 극소 값 이상이다 — 해석식 값이 그보다 낮을 때만 극소 값으로 올린다.
                     if diag['single_minimum'] and diag['bound'] > Pcrl:
@@ -995,8 +1023,8 @@ def _design_compression(params: dict) -> dict:
                     Pcrd = Fcrd_calc * Ag
                     Pcrd_source = '§2.3.1.3'
                     pcrd_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrd_calc, 'raw_product': Pcrd,
-                               'detail_note': ('Appendix 2 §2.3.1.3 stiffness terms computed in '
-                                               'loads.distortional_params.calc_Fcrd')}
+                               'kind': 'distortional', 'b': b_cl, 'd': d_cl, 'theta': lip_angle,
+                               'trace': fcrd_result.get('trace')}
                     if diag['single_minimum'] and diag['bound'] > Pcrd:
                         Pcrd = diag['bound']
                         Pcrd_source += ' (raised to single-minimum floor)'
@@ -1122,6 +1150,7 @@ def _design_compression(params: dict) -> dict:
         'phi_Pn': round(phi_Pn, 2),
         'Pn_omega': round(Pn_omega, 2),
         'design_strength': round(design_strength, 2),
+        _RAW_DS: design_strength,
         'utilization': round(utilization, 4) if Pu > 0 else None,
         'pass': pass_flag,
         'distortional_not_evaluated': bool(distortional_not_evaluated),
@@ -1351,8 +1380,8 @@ def _design_flexure(params: dict) -> dict:
                         Mcrl_eff = Fcrl_calc * Sf_eff
                         Mcrl_source = '§App.1 Eq.1.1-4'
                         Mcrl_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrl_calc, 'raw_product': Mcrl_eff,
-                                   'governing': fcrl_result.get('governing'),
-                                   'detail_note': 'element plate buckling computed in loads.local_params.calc_Fcrl'}
+                                   'governing': fcrl_result.get('governing'), 'kind': 'local',
+                                   'elements': fcrl_result.get('elements'), 'trace': fcrl_result.get('trace')}
                         if diag['single_minimum'] and diag['bound'] > Mcrl_eff:
                             Mcrl_eff = diag['bound']
                             Mcrl_source += ' (raised to single-minimum floor)'
@@ -1428,9 +1457,8 @@ def _design_flexure(params: dict) -> dict:
                         Mcrd_eff = Fcrd_calc * Sf_eff
                         Mcrd_source = '§2.3.3.3'
                         Mcrd_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrd_calc, 'raw_product': Mcrd_eff,
-                                   'detail_note': ('Appendix 2 §2.3.3.3 stiffness terms computed in '
-                                                   'loads.distortional_params.calc_Fcrd'
-                                                   + (f' (external kφ = {kphi_ext})' if kphi_ext else ''))}
+                                   'kind': 'distortional', 'b': b_cl, 'd': d_cl, 'theta': lip_angle,
+                                   'trace': fcrd_result.get('trace'), 'kphi_given': 'kphi' in params}
                         if diag['single_minimum'] and diag['bound'] > Mcrd_eff:
                             Mcrd_eff = diag['bound']
                             Mcrd_source += ' (raised to single-minimum floor)'
@@ -1984,6 +2012,7 @@ def _design_flexure(params: dict) -> dict:
         'phi_Mn': round(phi_Mn, 2),
         'Mn_omega': round(Mn_omega, 2),
         'design_strength': round(design_strength, 2),
+        _RAW_DS: design_strength,
         'utilization': round(utilization, 4) if Mu > 0 else None,
         'pass': pass_flag,
         'steps': steps,
@@ -2132,13 +2161,16 @@ def _design_flexure(params: dict) -> dict:
             phi_Mn_pos = Mn_pos / omega
 
         # 정모멘트 구간 이용률
+        # 판정은 반올림하지 않은 비로(utilization 은 표시용 소수 4자리).
         util_pos = None
+        ratio_pos = None
         pass_pos = None
         if Mu_pos > 0 and phi_Mn_pos > 0:
-            util_pos = round(Mu_pos / phi_Mn_pos, 4)
-            pass_pos = util_pos <= 1.0
+            ratio_pos = Mu_pos / phi_Mn_pos
+            util_pos = round(ratio_pos, 4)
+            pass_pos = ratio_pos <= 1.0
         elif Mu_pos > 0:
-            util_pos = float('inf')
+            util_pos = ratio_pos = float('inf')
             pass_pos = False
 
         result['positive_region'] = {
@@ -2172,7 +2204,7 @@ def _design_flexure(params: dict) -> dict:
                             f'Mu(+) = {Mu_pos:.2f} → {util_pos if util_pos is not None else "—"}'),
                 'equation': global_pos.get('equation', ''),
             })
-            _merge_governing_check(result, {'total': util_pos, 'pass': pass_pos}, 'F positive region')
+            _merge_governing_check(result, {'total': ratio_pos, 'pass': pass_pos}, 'F positive region')
             if 'Lb_pos' not in params:
                 _mark_not_evaluated(
                     result, 'F positive region (Lb_pos not given — assumed fully braced)',
@@ -2221,7 +2253,8 @@ def _design_flexure(params: dict) -> dict:
                 _mark_not_evaluated(result, 'G5 web crippling',
                                     f'§G5 web crippling could not be evaluated: {wc["error"]}')
                 return _attach_flexure_checks(result, ck)
-            Pn_wc = wc['Pn']
+            # 판정 · H3 는 반올림하지 않은 Pn 으로(wc['Pn'] 은 표시용 소수 3자리).
+            Pn_wc = wc_detail['Pn_final'] if wc_detail else wc['Pn']
             from design.interaction import combined_bending_web_crippling
             # 집중하중(반력) P̄: 명시 wc_P, 없으면 지점 반력으로 Vu 를 쓴다(가정으로 밝힌다).
             # 축력 Pu 는 지압 하중이 아니므로 쓰지 않는다. 둘 다 없으면 G5 · H3 는 미평가.
@@ -2548,9 +2581,10 @@ def _design_combined(params: dict) -> dict:
     Muy_amp = Muy * alpha_y
 
     # 설계강도
-    Pa = comp['design_strength']
-    Max = flex_x['design_strength']
-    May = flex_y['design_strength'] if flex_y else 1e10
+    # 상호작용은 반올림하지 않은 설계강도로 판정한다(design_strength 키는 표시용으로 반올림된 값).
+    Pa = comp.get(_RAW_DS, comp['design_strength'])
+    Max = flex_x.get(_RAW_DS, flex_x['design_strength'])
+    May = May_strength if flex_y else 1e10
 
     angle_l1000_note = None
     if not angle_exempt:
@@ -2667,12 +2701,17 @@ def _design_combined(params: dict) -> dict:
     for key in ('shear', 'shear_interaction', 'web_crippling', 'h3_interaction', 'positive_region'):
         if flex_x.get(key) is not None:
             result[key] = flex_x[key]
-    _merge_sub_verdicts(result, [('[압축]', comp), ('[휨x]', flex_x)],
+    # 압축 단독 경로의 '§H1.2 앵글 (P)L/1000 미평가'는 이 조합 검토가 바로 그 검토를 한 것이므로
+    # (앵글이고 면제가 아니면 위에서 (P)L/1000 을 넣어 상호작용을 평가했다) 조합 판정에 옮기지 않는다.
+    comp_for_merge = comp
+    if not angle_exempt:
+        comp_for_merge = dict(comp, not_evaluated=[x for x in (comp.get('not_evaluated') or [])
+                                                   if not str(x).startswith('H1.2 angle')])
+    _merge_sub_verdicts(result, [('[압축]', comp_for_merge), ('[휨x]', flex_x)],
                         ('E axial compression', 'F flexure'))
     _finalize_verdict(result)
     # 검토 항목: 성분(압축 · 휨x 와 그 G2/H2/G5/H3/정모멘트) + §H1.2 상호작용
     comp_checks = [c for c in comp.get('design_checks', []) if c['id'] != 'member.axial_bending']
-    angle_note_sub = any(c['id'] == 'member.axial_bending' for c in comp.get('design_checks', []))
     if params.get('Cmx') is not None:
         cm_src = {'kind': 'user_input', 'key': 'Cmx'}
     elif M1_M2 is not None and not params.get('transverse_load', False):
@@ -2685,10 +2724,6 @@ def _design_combined(params: dict) -> dict:
         E=E, Ag=Ag, KxLx=KxLx, rx=rx, Cmx=Cmx, Cm_src=cm_src, c1_alpha=c1_alpha,
         May=(May if flex_y else None), Muy_amp=Muy_amp, angle_note=angle_l1000_note,
         component_unavailable=_component_unavailable))
-    if angle_note_sub and h12['verdict'] == 'pass':
-        # 엔진은 압축 단독의 '§H1.2 앵글 미평가' 알림을 조합 판정에도 싣는다 — 판정은 그것을 따른다.
-        h12 = _mc.demote_to_not_evaluated(
-            h12, '[압축] H1.2 angle (P)L/1000 is carried from the compression sub-check into this verdict')
     result['design_checks'] = (_mc.remap_mirrors(comp_checks, 'compression')
                                + _mc.remap_mirrors(flex_x.get('design_checks', []), 'flexure_x') + [h12])
     _set_governing([h12])
@@ -2712,13 +2747,13 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
     tens = _design_tension({**params, 'member_type': 'tension', 'Tu': T_abs})
     if 'error' in tens:
         return tens
-    Ta = tens['design_strength']
+    Ta = tens.get(_RAW_DS, tens['design_strength'])
 
     # 휨 (x축) — Chapter F 압축좌굴 강도 (Max, Eq. H1.1-2)
     flex_x = _design_flexure({**params, 'member_type': 'flexure', 'Mu': Mux})
     if 'error' in flex_x:
         return flex_x
-    Max = flex_x['design_strength']
+    Max = flex_x.get(_RAW_DS, flex_x['design_strength'])
 
     # y축 휨: 사용자 제공 강도 (자동 약축 DSM 미구현)
     May_strength = params.get('May_strength', 0)
@@ -2777,12 +2812,12 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
         'design_method': design_method,
         'tension': {
             'Tn': tens.get('Tn'),
-            'design_strength': Ta,
+            'design_strength': tens['design_strength'],
             'controlling_mode': tens.get('controlling_mode'),
         },
         'flexure_x': {
             'Mn': flex_x['Mn'],
-            'design_strength': Max,
+            'design_strength': flex_x['design_strength'],
             'controlling_mode': flex_x['controlling_mode'],
         },
         'Maxt': round(Maxt, 2),
@@ -2897,6 +2932,7 @@ def _design_tension(params: dict) -> dict:
         'Tn_rupture': round(Tn_rupture, 2) if Tn_rupture is not None else None,
         'An_used': round(An, 4),
         'design_strength': round(design_strength, 2),
+        _RAW_DS: design_strength,
         'controlling_mode': mode,
         'utilization': round(utilization, 4) if utilization else None,
         'pass': utilization <= 1.0 if utilization else None,

@@ -7,6 +7,7 @@
 
 import math
 from design.connections import design_connection, normalize_design_method
+from design.checks import display_rounding as _display_rounding
 
 # 패스너 수요 모델 설명(결과·steps 에 그대로 싣는다). 모델을 바꾸는 것은 사용자 결정 사항이다.
 FORCE_MODEL = {
@@ -153,9 +154,17 @@ def design_lap_connection(params: dict) -> dict:
     shear_ls = [ls for ls in conn_result.get('limit_states', [])
                 if ls.get('direction', 'shear') == 'shear'
                 and not any(k in ls.get('name', '') for k in _EXCLUDED)]
+    # 패스너 1개 강도는 반올림하지 않은 설계강도로 쓴다(접합 엔진의 design_strength 키는 표시용 소수 3자리).
+    _ls_all = conn_result.get('limit_states', [])
+    _dc = conn_result.get('design_checks') or []
+    _raw_ds = {}
+    for _i, _ls in enumerate(_ls_all):
+        _c = _dc[_i] if _i < len(_dc) else {}
+        _cap = _c.get('capacity') or (_c.get('reference') or {}).get('capacity') or {}
+        _raw_ds[id(_ls)] = _cap.get('value', _ls.get('design_strength', 0))
     if shear_ls:
-        gov_shear = min(shear_ls, key=lambda x: x.get('design_strength', float('inf')))
-        Pns = gov_shear.get('design_strength', 0)
+        gov_shear = min(shear_ls, key=lambda x: _raw_ds.get(id(x), x.get('design_strength', float('inf'))))
+        Pns = _raw_ds.get(id(gov_shear), gov_shear.get('design_strength', 0))
         pns_mode = gov_shear.get('name', '')
         pns_assumed = bool(gov_shear.get('assumed'))
     else:
@@ -395,18 +404,26 @@ def design_lap_connection(params: dict) -> dict:
                 phi_Vn_lap = 0.95 * (Vn * n_members_v)
             else:
                 phi_Vn_lap = (Vn * n_members_v) / 1.60
-            mv_term = (Mu / phi_Mn_lap) ** 2 + (Vu / phi_Vn_lap) ** 2 if phi_Vn_lap > 0 else float('inf')
+            # Eq. H2-1 꼴 √((M/Ma)² + (V/Va)²) ≤ 1.0 — 부재 H2 와 같은 꼴이어야 '비 ≤ 1.0' 이 어디서나 같은 뜻이다
+            # (제곱합은 판정은 같지만 다른 비와 견줄 수 없다).
+            if phi_Vn_lap > 0:
+                mv_m, mv_v = Mu / phi_Mn_lap, Vu / phi_Vn_lap
+                mv_term = math.sqrt(mv_m ** 2 + mv_v ** 2)
+            else:
+                mv_m = mv_v = None
+                mv_term = float('inf')
             mv_ok = mv_term <= 1.0
-            _flex['h2'] = dict(Vn=Vn, vn_auto=vn_auto, phi_Vn_lap=phi_Vn_lap, mv=mv_term, ok=mv_ok)
+            _flex['h2'] = dict(Vn=Vn, vn_auto=vn_auto, phi_Vn_lap=phi_Vn_lap, mv=mv_term, ok=mv_ok,
+                               m_ratio=mv_m, v_ratio=mv_v)
             flexure_ok = flexure_ok and mv_ok
             flexure_dcr_governing = max(flexure_dcr_governing or 0, mv_term)
             steps.append({
-                'step': '8b', 'name': 'Lap Combined Bending+Shear (§H2)',
+                'step': '8b', 'name': 'Lap Combined Bending+Shear (§H2, Eq. H2-1)',
                 'value': round(mv_term, 3), 'unit': '',
                 'formula': (
-                    f'(Mu/{"φ" if design_method == "LRFD" else "1/Ω"}Mn)² + '
-                    f'(Vu/{"φ" if design_method == "LRFD" else "1/Ω"}Vn)² = '
-                    f'({Mu:.2f}/{phi_Mn_lap:.2f})² + ({Vu:.3f}/{phi_Vn_lap:.3f})² = {mv_term:.3f} ≤ 1.0'
+                    f'√((Mu/{"φ" if design_method == "LRFD" else "1/Ω"}Mn)² + '
+                    f'(Vu/{"φ" if design_method == "LRFD" else "1/Ω"}Vn)²) = '
+                    f'√(({Mu:.2f}/{phi_Mn_lap:.2f})² + ({Vu:.3f}/{phi_Vn_lap:.3f})²) = {mv_term:.3f} ≤ 1.0'
                 ),
                 'pass': mv_ok,
             })
@@ -491,7 +508,7 @@ def design_lap_connection(params: dict) -> dict:
         'edge_distance': edge_dist,
         'V_transfer': V_transfer,
         'capacity': capacity,
-        'Pns': Pns,
+        'Pns': round(Pns, 3),   # 표시용(계산은 반올림하지 않은 값)
         'Pns_governing_mode': pns_mode,  # 전단 산정에 사용된 지배 한계상태
         'Vn_used': round(Vn_in, 3) if Vn_in else None,
         'Vn_auto': vn_auto,
@@ -525,6 +542,7 @@ def design_lap_connection(params: dict) -> dict:
         'lap_left_in': lap_left,
         'lap_right_in': lap_right,
         'design_checks': lap_design_checks,
+        'display_rounding': _display_rounding('lap'),
     }
 
 

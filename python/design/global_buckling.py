@@ -417,16 +417,16 @@ def beam_global_strength(Fy: float, Fcre: float, Sf: float,
         return {'Mne': 0, 'Fn': 0, 'My': My, 'equation': 'F2 (Fcre=0)',
                 'inelastic_reserve': False}
 
-    # §F2.1 기본 (Mne ≤ My)
+    # §F2.1 기본 (Mne = Sf·Fn ≤ My, Eq. F2.1-1). equation 은 Fn 갈래의 식 번호(F2.1-3/-4/-5).
     if Fcre >= 2.78 * Fy:
         Fn = Fy
-        eq = 'F2-1 (yielding)'
+        eq = 'F2.1-3 (yielding)'
     elif Fcre > 0.56 * Fy:
         Fn = (10.0 / 9.0) * Fy * (1 - 10.0 * Fy / (36.0 * Fcre))
-        eq = 'F2-1 (inelastic LTB)'
+        eq = 'F2.1-4 (inelastic LTB)'
     else:
         Fn = Fcre
-        eq = 'F2-1 (elastic LTB)'
+        eq = 'F2.1-5 (elastic LTB)'
 
     Mne = Sf * Fn
     inelastic_applied = False

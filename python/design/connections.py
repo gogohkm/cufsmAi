@@ -13,7 +13,7 @@ PAF(J5) 접합부의 공칭강도 계산. 각 파괴 모드별 강도를 계산�
 
 import math
 
-from design.checks import Trace, q, src, CONTEXT_KEYS
+from design.checks import Trace, q, src, CONTEXT_KEYS, display_rounding
 
 # 강재 탄성계수 (ksi) — 아크스팟 슬렌더니스 분기, PAF 전단 풀아웃(J5.3.3)에 사용
 E_STEEL = 29500.0
@@ -86,6 +86,24 @@ def rupture_factors(connection_type) -> tuple:
 
 def _available(Rn: float, phi: float, omega: float, design_method: str) -> float:
     return phi * Rn if design_method == 'LRFD' else Rn / omega
+
+
+# 계산서(design_checks) 입력 꼴 — 값은 계산이 쓴 그 변수, 출처만 붙인다.
+def _ui(sym, val, qty, key, **kw):
+    return q(sym, val, qty, src('user_input', key=key, **kw))
+
+
+def _mt(sym, val, key=None):
+    return q(sym, val, 'stress', src('material', key=key or sym))
+
+
+def _sp(sym, val, qty='dimensionless', **kw):
+    return q(sym, val, qty, src('specification', **kw))
+
+
+def _interaction_trace(tr, value_idx, limit_idx=None):
+    """상호작용 항목의 계산 과정 — connection_checks 가 값 · 한계 단계를 찾는다."""
+    return {'steps': tr.steps, 'value_step': value_idx, 'limit_step': limit_idx}
 
 
 def _ne(name: str, direction: str, reason: str, category: str) -> dict:
@@ -729,22 +747,35 @@ def _finish(connection_type: str, limit_states: list, not_evaluated: list,
         'traces': [item.pop('_trace', None) for item in limit_states],
         'Rn_raw': [item['Rn'] for item in limit_states],
         'iraws': [ic.pop('_raw', None) for ic in (interaction_checks or [])],
+        'itraces': [ic.pop('_trace', None) for ic in (interaction_checks or [])],
         'draws': [dc.pop('_raw', None) for dc in (detailing_checks or [])],
     }
+    # 설계강도: 지배 모드 · 판정은 반올림하지 않은 값으로 정하고, 키(design_strength · Rn)는 표시용 소수 3자리.
+    ds_raw = {}
     for item in limit_states:
         item.setdefault('direction', 'shear')
         Rn = item['Rn']
-        item['design_strength'] = round(_available(Rn, item['phi'], item['omega'], design_method), 3)
+        ds_raw[id(item)] = _available(Rn, item['phi'], item['omega'], design_method)
+        item['design_strength'] = round(ds_raw[id(item)], 3)
         item['Rn'] = round(Rn, 3)
+    check_data['ds_raw'] = [ds_raw[id(item)] for item in limit_states]
+
+    def _raw(x):
+        return ds_raw[id(x)]
     shear_ls = [x for x in limit_states if x['direction'] == 'shear']
     tension_ls = [x for x in limit_states if x['direction'] == 'tension']
-    gov_s = min(shear_ls, key=lambda x: x['design_strength']) if shear_ls else None
-    gov_t = min(tension_ls, key=lambda x: x['design_strength']) if tension_ls else None
+    gov_s = min(shear_ls, key=_raw) if shear_ls else None
+    gov_t = min(tension_ls, key=_raw) if tension_ls else None
     # 가정값으로 만든 한계상태(assumed)는 참고로만 보이고 판정에는 쓰지 않는다 (FIXES §3.1).
     ver_s = [x for x in shear_ls if not x.get('assumed')]
     ver_t = [x for x in tension_ls if not x.get('assumed')]
-    vgov_s = min(ver_s, key=lambda x: x['design_strength']) if ver_s else None
-    vgov_t = min(ver_t, key=lambda x: x['design_strength']) if ver_t else None
+    vgov_s = min(ver_s, key=_raw) if ver_s else None
+    vgov_t = min(ver_t, key=_raw) if ver_t else None
+    check_data['gov_raw'] = {
+        'shear': _raw(gov_s) if gov_s else None, 'tension': _raw(gov_t) if gov_t else None,
+        'shear_verified': _raw(vgov_s) if vgov_s else None,
+        'tension_verified': _raw(vgov_t) if vgov_t else None,
+    }
     primary = gov_s or gov_t
     if primary is not None:
         primary['governs'] = True
@@ -1026,7 +1057,12 @@ def bolt_connection(t1: float, t2: float, d: float,
             '_trace': tr.steps,
         })
     if Pnov_bolt is not None and Pnov_bolt > 0:
+        tr = Trace()
+        tr.add('equation', 'Pnov = n Pnov,bolt  (test / rational value, A1.2(c) factors)',
+               inputs=[_ui('n', n, 'count', 'n'), _ui('Pnov,bolt', Pnov_bolt, 'force', 'Pnov_bolt')],
+               result=q('Pnov', n * Pnov_bolt, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Sheet Pull-over at Bolt Head (App. A J3.4)',
             'Rn': n * Pnov_bolt, 'phi': PHI_RATIONAL_CONNECTION, 'omega': OMEGA_RATIONAL_CONNECTION,
             'direction': 'tension', 'basis': 'user_value_A1.2c',
@@ -1038,7 +1074,14 @@ def bolt_connection(t1: float, t2: float, d: float,
         # 계수는 J4(Ω 3.00/φ 0.50) 와 A1.2(c)(Ω 3.00/φ 0.55) 중 보수 쪽.
         dwc = min(dw, 0.75)
         Pnov_b = 1.5 * t_min * dwc * Fu * n
+        tr = Trace()
+        i_dw = tr.add('modifier', "d'w ≤ 0.75 in", inputs=[_ui("d'w", dw, 'length', 'dw')],
+                      result=q("d'w", dwc, 'length'))
+        tr.add('equation', "Pnov = 1.5 t d'w Fu n  (Eq. J4.4.2-1 form, A1.2(c))", equation='J4.4.2-1',
+               inputs=[_ui('t', t_min, 'length', 'min(t1, t2)'), tr.ref(i_dw), _mt('Fu', Fu),
+                       _ui('n', n, 'count', 'n')], result=q('Pnov', Pnov_b, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Sheet Pull-over at Bolt Head (App. A J3.4)',
             'Rn': Pnov_b, 'phi': 0.50, 'omega': 3.00, 'direction': 'tension', 'basis': 'rational_A1.2c',
             'formula': f"Pnov = 1.5×t({t_min})×d'w({dwc:.3f})×Fu({Fu})×{n} = {Pnov_b:.3f} "
@@ -1438,8 +1481,17 @@ def screw_connection(t1: float, t2: float, d: float,
         else:
             Pnv1 = 2.7 * t1 * d * Fu1
             Pnov1 = 1.5 * t1 * dwc * Fu1
+            tr = Trace()
+            i1 = tr.add('equation', 'Pnv = 2.7 t1 d Fu1', equation='J4.5.1-2', inputs=[st1, sd, sfu1],
+                        result=q('Pnv', Pnv1, 'force'))
+            i2 = tr.add('equation', 'Pnov = 1.5 t1 dw Fu1', equation='J4.5.1-3',
+                        inputs=[st1, _ui('dw', dwc, 'length', 'd_head_washer / dw'), sfu1], result=q('Pnov', Pnov1, 'force'))
+            i_v = tr.add('equation', 'V/Pnv + 0.71 T/Pnov  (per screw)', equation='J4.5.1-1',
+                         inputs=[_ui('V', Vb, 'force', 'Vu / n'), tr.ref(i1), _ui('T', Tb, 'force', 'Tu / n'),
+                                 tr.ref(i2)], result=q('value', Vb / Pnv1 + 0.71 * Tb / Pnov1, 'dimensionless'))
             interaction.append(_screw_interaction('전단+풀오버 (J4.5.1)', 'J4.5.1-1',
-                                                  Vb / Pnv1 + 0.71 * Tb / Pnov1, 1.10, 0.65, 2.35, dm))
+                                                  tr.steps[i_v]['result']['value'], 1.10, 0.65, 2.35, dm,
+                                                  tr=tr, value_idx=i_v))
         # J4.5.2 전단 + 풀아웃
         lim = []
         if not (0.0297 - 1e-6 <= t2 <= 0.0724 + 1e-6):
@@ -1459,13 +1511,29 @@ def screw_connection(t1: float, t2: float, d: float,
         else:
             Pnv2 = 4.2 * math.sqrt(t2 ** 3 * d) * Fu2
             Pnot2 = 0.85 * tc_eff * d * Fu2
+            tr = Trace()
+            i1 = tr.add('equation', 'Pnv = 4.2 (t2³ d)^0.5 Fu2', equation='J4.5.2-2', inputs=[st2, sd, sfu2],
+                        result=q('Pnv', Pnv2, 'force'))
+            i2 = tr.add('equation', 'Pnot = 0.85 tc d Fu2', equation='J4.5.2-3',
+                        inputs=[q('tc', tc_eff, 'length', src('user_input', key='tc') if tc is not None
+                                  else src('engine_default', key='tc', note='tc = t2')), sd, sfu2],
+                        result=q('Pnot', Pnot2, 'force'))
+            i_v = tr.add('equation', 'V/Pnv + T/Pnot  (per screw)', equation='J4.5.2-1',
+                         inputs=[_ui('V', Vb, 'force', 'Vu / n'), tr.ref(i1), _ui('T', Tb, 'force', 'Tu / n'),
+                                 tr.ref(i2)], result=q('value', Vb / Pnv2 + Tb / Pnot2, 'dimensionless'))
             interaction.append(_screw_interaction('전단+풀아웃 (J4.5.2)', 'J4.5.2-1',
-                                                  Vb / Pnv2 + Tb / Pnot2, 1.15, 0.60, 2.55, dm))
+                                                  tr.steps[i_v]['result']['value'], 1.15, 0.60, 2.55, dm,
+                                                  tr=tr, value_idx=i_v))
         # J4.5.3 나사 자체 전단 + 인장
         if Pnvs and Pnts and Pnvs > 0 and Pnts > 0:
+            tr = Trace()
+            i_v = tr.add('equation', 'V/Pnvs + T/Pnts  (per screw)', equation='J4.5.3-1',
+                         inputs=[_ui('V', Vb, 'force', 'Vu / n'), _ui('Pnvs', Pnvs, 'force', 'Pnvs'),
+                                 _ui('T', Tb, 'force', 'Tu / n'), _ui('Pnts', Pnts, 'force', 'Pnts')],
+                         result=q('value', Vb / Pnvs + Tb / Pnts, 'dimensionless'))
             interaction.append(_screw_interaction('나사 전단+인장 (J4.5.3)', 'J4.5.3-1',
-                                                  Vb / Pnvs + Tb / Pnts, 1.3, PHI_SCREW['shear'],
-                                                  OMEGA_SCREW['shear'], dm))
+                                                  tr.steps[i_v]['result']['value'], 1.3, PHI_SCREW['shear'],
+                                                  OMEGA_SCREW['shear'], dm, tr=tr, value_idx=i_v))
         else:
             not_eval.append(_ne('나사 전단+인장 (J4.5.3)', 'interaction',
                                 'Pnvs·Pnts(제조사 값) 미입력', 'interaction'))
@@ -1501,21 +1569,41 @@ def _j45_fallback(interaction, not_eval, assumptions, enabled, dm, name, clause,
     value = Vb / Pnv + Tb / Pnt
     limit = phi if dm == 'LRFD' else 1.0 / omega
     ratio = value / limit
+    tr = Trace()
+    i_v = tr.add('equation', f'V/Pnv + T/{tname}  (per screw, Commentary C-J4.5.1-1 as A1.2(c))',
+                 equation='C-J4.5.1-1',
+                 inputs=[_ui('V', Vb, 'force', 'Vu / n'),
+                         _sp('Pnv', Pnv, 'force', note='min(J4.3.1 sheet strength per screw, J4.5 sheet term)'),
+                         _ui('T', Tb, 'force', 'Tu / n'), _sp(tname, Pnt, 'force', note='J4.4 sheet term')],
+                 result=q('value', value, 'dimensionless'))
+    if dm == 'LRFD':
+        i_l = tr.add('equation', 'limit = φ', inputs=[_sp('φ', phi)], result=q('limit', limit, 'dimensionless'))
+    else:
+        i_l = tr.add('equation', 'limit = 1 / Ω', inputs=[_sp('Ω', omega)], result=q('limit', limit, 'dimensionless'))
     interaction.append({'name': name + ' — A1.2(c) 직선식', 'equation': 'C-J4.5.1-1 (A1.2(c))',
                         'value': round(value, 4), 'limit': round(limit, 4), 'ratio': round(ratio, 4),
                         'pass': ratio <= 1.0 + 1e-9, 'basis': 'rational_A1.2c',
-                        'note': why, '_raw': {'value': value, 'limit': limit, 'ratio': ratio}})
+                        'note': why, '_raw': {'value': value, 'limit': limit, 'ratio': ratio},
+                        '_trace': _interaction_trace(tr, i_v, i_l)})
     assumptions.append(f'{name}: {why} — 기준 식 대신 Commentary C-J4.5.1-1 의 보수 직선식 '
                        f'V/Pnv + T/{tname} ≤ 1 (가용강도, Ω {omega}/φ {phi})을 A1.2(c) 합리적 해석으로 사용')
 
 
-def _screw_interaction(name, eq, value, coef, phi, omega, dm) -> dict:
+def _screw_interaction(name, eq, value, coef, phi, omega, dm, tr=None, value_idx=None) -> dict:
     limit = coef * phi if dm == 'LRFD' else coef / omega
     ratio = value / limit
-    return {'name': name, 'equation': eq + ('b' if dm == 'LRFD' else 'a'),
-            'value': round(value, 4), 'limit': round(limit, 4),
-            'ratio': round(ratio, 4), 'pass': ratio <= 1.0 + 1e-9,
-            '_raw': {'value': value, 'limit': limit, 'ratio': ratio}}
+    out = {'name': name, 'equation': eq + ('b' if dm == 'LRFD' else 'a'),
+           'value': round(value, 4), 'limit': round(limit, 4),
+           'ratio': round(ratio, 4), 'pass': ratio <= 1.0 + 1e-9,
+           '_raw': {'value': value, 'limit': limit, 'ratio': ratio}}
+    if tr is not None:
+        if dm == 'LRFD':
+            i_l = tr.add('equation', f'limit = {coef:g} φ', inputs=[_sp('φ', phi)], result=q('limit', limit, 'dimensionless'))
+        else:
+            i_l = tr.add('equation', f'limit = {coef:g} / Ω', inputs=[_sp('Ω', omega)],
+                         result=q('limit', limit, 'dimensionless'))
+        out['_trace'] = _interaction_trace(tr, value_idx, i_l)
+    return out
 
 
 # ============================================================
@@ -1544,6 +1632,7 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
         elif all(geo.get(k) is not None for k in ('Agv_bs', 'Anv_bs', 'Ant_bs')):
             Pnr, P1, P2 = block_shear_nominal(Fy, Fu, geo['Agv_bs'], geo['Anv_bs'], geo['Ant_bs'])
             limit_states.append({
+                '_trace': _block_shear_trace(Fy, Fu, geo['Agv_bs'], geo['Anv_bs'], geo['Ant_bs'], P1, P2, Pnr),
                 'name': 'Block Shear (J6.3)', 'Rn': Pnr, 'phi': PHI_RUPTURE['weld'],
                 'omega': OMEGA_RUPTURE['weld'], 'direction': 'shear',
                 'formula': f'Pnr = min({P1:.3f}, {P2:.3f}) = {Pnr:.3f} (입력 면적)', 'equation': 'J6.3-1/-2',
@@ -1587,7 +1676,17 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
             not_eval.append(_ne('Tension Rupture (J6.2)', 'shear', reason, 'rupture'))
         else:
             Pnt = Fu * Usl * Ant
+            tr = Trace()
+            ant_q = (_ui('Ant', Ant, 'area', 'Ant', note='Table J6.2-1 (3)(a): directly connected elements')
+                     if case == 'transverse_weld' else
+                     _ui('Ant', Ant, 'area', 'Ag / width·t', note='welded connection: no holes, Ant = Ag'))
+            i_u = tr.add('modifier', f'Usl ({usl_formula})', inputs=[
+                q('Usl', Usl, 'dimensionless', src('user_input', key='Usl') if geo.get('Usl')
+                  else src('specification', formula=usl_formula))], result=q('Usl', Usl, 'dimensionless'))
+            tr.add('equation', 'Pnt = Fu Usl Ant', equation='J6.2-1', inputs=[_mt('Fu', Fu), tr.ref(i_u), ant_q],
+                   result=q('Pnt', Pnt, 'force'))
             limit_states.append({
+                '_trace': tr.steps,
                 'name': 'Tension Rupture (J6.2)', 'Rn': Pnt, 'phi': phi_r, 'omega': om_r,
                 'direction': 'shear',
                 'formula': f'Pnt = Fu×Usl×Ant = {Fu}×{Usl:.4f}×{Ant:.4f} = {Pnt:.3f} ({usl_formula})',
@@ -1598,6 +1697,7 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
     elif all(v is not None for v in explicit):
         Pnr, P1, P2 = block_shear_nominal(Fy, Fu, *explicit)
         limit_states.append({
+            '_trace': _block_shear_trace(Fy, Fu, *explicit, P1, P2, Pnr),
             'name': 'Block Shear (J6.3)', 'Rn': Pnr, 'phi': phi_r, 'omega': om_r, 'direction': 'shear',
             'formula': f'Pnr = min({P1:.3f}, {P2:.3f}) = {Pnr:.3f} (입력 면적)',
             'equation': 'J6.3-1/-2',
@@ -1605,6 +1705,19 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
     elif case != 'flat_sheet':
         not_eval.append(_ne('Block Shear (J6.3)', 'shear',
                             '용접선 블록전단 면적 Agv_bs/Anv_bs/Ant_bs 미입력', 'rupture'))
+
+
+def _block_shear_trace(Fy, Fu, Agv, Anv, Ant, P1, P2, Pnr) -> list:
+    """입력 면적의 블록 전단(Eq. J6.3-1/-2) 계산 과정."""
+    tr = Trace()
+    a = [_ui('Agv', Agv, 'area', 'Agv_bs'), _ui('Anv', Anv, 'area', 'Anv_bs'), _ui('Ant', Ant, 'area', 'Ant_bs')]
+    ubs = _sp('Ubs', 1.0)
+    i1 = tr.add('equation', 'Pnr1 = 0.6 Fy Agv + Ubs Fu Ant', equation='J6.3-1',
+                inputs=[_mt('Fy', Fy), a[0], ubs, _mt('Fu', Fu), a[2]], result=q('Pnr1', P1, 'force'))
+    i2 = tr.add('equation', 'Pnr2 = 0.6 Fu Anv + Ubs Fu Ant', equation='J6.3-2',
+                inputs=[_mt('Fu', Fu), a[1], ubs, a[2]], result=q('Pnr2', P2, 'force'))
+    tr.add('equation', 'Pnr = min(Pnr1, Pnr2)', inputs=[tr.ref(i1), tr.ref(i2)], result=q('Pnr', Pnr, 'force'))
+    return tr.steps
 
 
 def fillet_weld_connection(t1: float, t2: float,
@@ -1856,10 +1969,29 @@ def arc_spot_weld_connection(t1: float, t2: float,
 
     lam = math.sqrt(E / Fu) if Fu > 0 else float('inf')
     shear_states = []
+    q_d = _ui('d', d_vis, 'length', 'da (visible diameter)')
+    q_t = _ui('t', t_sheet, 'length', 't (sheet; Σ t_sheets)')
+    q_n = _ui('n', n, 'count', 'n')
+
+    def _de_step(tr):
+        if de is not None and de > 0:
+            return tr.add('equation', 'de (input — verified by the welding procedure)',
+                          inputs=[_ui('de', de_used, 'length', 'de')], result=q('de', de_used, 'length'))
+        return tr.add('equation', 'de = 0.7 d − 1.5 t ≤ 0.55 d', equation='J2.2.2.1-5', inputs=[q_d, q_t],
+                      result=q('de', de_used, 'length'))
+
+    def _da_step(tr):
+        return tr.add('equation', 'da = d − t', inputs=[q_d, q_t], result=q('da', da_avg, 'length'))
     if jt in (None, 'sheet_to_support'):
         # (a) 용접 너겟 전단 (Eq. J2.2.2.1-1)
         Rn_weld = 0.75 * Fxx * math.pi / 4 * de_used ** 2 * n
+        tr = Trace()
+        i_de = _de_step(tr)
+        tr.add('equation', 'Pnv = (π de² / 4) 0.75 Fxx n', equation='J2.2.2.1-1',
+               inputs=[tr.ref(i_de), _ui('Fxx', Fxx, 'stress', 'Fxx', note='60 ksi (E60) when not given'), q_n],
+               result=q('Pnv', Rn_weld, 'force'))
         shear_states.append({
+            '_trace': tr.steps,
             'name': 'Weld Nugget Shear (J2.2.2.1)',
             'Rn': Rn_weld, 'phi': 0.60, 'omega': 2.55, 'direction': 'shear',
             'formula': f'Pnv = 0.75×{Fxx}×π/4×de({de_used:.3f})²×{n} = {Rn_weld:.3f}',
@@ -1876,7 +2008,21 @@ def arc_spot_weld_connection(t1: float, t2: float,
         else:
             Rn_tear = 1.40 * t_sheet * da_avg * Fu * n
             phi_t, omega_t, eq_t = 0.50, 3.05, 'J2.2.2.1-4'
+        tr = Trace()
+        i_da = _da_step(tr)
+        i_lam = tr.add('equation', 'λ = (E / Fu)^0.5', inputs=[_sp('E', E, 'stress'), _mt('Fu', Fu)],
+                       result=q('λ', lam, 'dimensionless'))
+        i_r = tr.add('slenderness', 'da / t', inputs=[tr.ref(i_da), q_t], result=q('da/t', dt, 'dimensionless'))
+        cond = {'J2.2.2.1-2': 'da/t ≤ 0.815 λ', 'J2.2.2.1-3': '0.815 λ < da/t < 1.397 λ',
+                'J2.2.2.1-4': 'da/t ≥ 1.397 λ'}[eq_t]
+        tr.branch(cond, True, eq_t, inputs=[tr.ref(i_r), tr.ref(i_lam)])
+        expr = {'J2.2.2.1-2': 'Pnv = 2.20 t da Fu n',
+                'J2.2.2.1-3': 'Pnv = 0.280 [1 + 5.59 λ / (da/t)] t da Fu n',
+                'J2.2.2.1-4': 'Pnv = 1.40 t da Fu n'}[eq_t]
+        tr.add('equation', expr, equation=eq_t, inputs=[q_t, tr.ref(i_da), _mt('Fu', Fu), q_n],
+               result=q('Pnv', Rn_tear, 'force'))
         shear_states.append({
+            '_trace': tr.steps,
             'name': 'Sheet Tear (J2.2.2.1)',
             'Rn': Rn_tear, 'phi': phi_t, 'omega': omega_t, 'direction': 'shear',
             'formula': (f'Pnv (t={t_sheet}, da={da_avg:.4f}, da/t={dt:.2f}, 0.815λ={0.815 * lam:.2f}, '
@@ -1899,7 +2045,13 @@ def arc_spot_weld_connection(t1: float, t2: float,
         else:
             da_s = max(d_vis - ts, 0.0)
             Rn_ss = 1.65 * ts * da_s * Fu * n
+            tr = Trace()
+            q_ts = _ui('t', ts, 'length', 't1 (= t2)')
+            i_da = tr.add('equation', 'da = d − t', inputs=[q_d, q_ts], result=q('da', da_s, 'length'))
+            tr.add('equation', 'Pnv = 1.65 t da Fu n', equation='J2.2.2.2-1',
+                   inputs=[q_ts, tr.ref(i_da), _mt('Fu', Fu), q_n], result=q('Pnv', Rn_ss, 'force'))
             shear_states.append({
+                '_trace': tr.steps,
                 'name': 'Sheet Tear Sheet-to-Sheet (J2.2.2.2)',
                 'Rn': Rn_ss, 'phi': 0.70, 'omega': 2.20, 'direction': 'shear',
                 'formula': f'Pnv = 1.65×t({ts})×da({da_s:.4f})×Fu({Fu})×{n} = {Rn_ss:.3f}',
@@ -1938,7 +2090,21 @@ def arc_spot_weld_connection(t1: float, t2: float,
             Pnt_weld = min(P1, P2) * red
             deck = str(application).lower() in ('deck', 'panel', 'panel_deck', 'deck_panel')
             phi_n, om_n = (0.60, 2.50) if deck else (0.50, 3.00)
+            tr = Trace()
+            i_de = _de_step(tr)
+            i_da = _da_step(tr)
+            i1 = tr.add('equation', 'Pnt1 = (π de² / 4) Fxx', equation='J2.2.3-1',
+                        inputs=[tr.ref(i_de), _ui('Fxx', Fxx, 'stress', 'Fxx', note='60 ksi (E60) when not given')],
+                        result=q('Pnt1', P1, 'force'))
+            i2 = tr.add('equation', 'Pnt2 = 0.8 (Fu/Fy)² t da Fu', equation='J2.2.3-2',
+                        inputs=[_mt('Fu', Fu), _mt('Fy', Fy), q_t, tr.ref(i_da)], result=q('Pnt2', P2, 'force'))
+            i_m = tr.add('modifier', 'Pnt = min(Pnt1, Pnt2) × r  (r: 0.5 eccentric, 0.7 sidelap)', equation='J2.2.3',
+                         inputs=[tr.ref(i1), tr.ref(i2),
+                                 _ui('r', red, 'dimensionless', 'eccentric_tension / sidelap')],
+                         result=q('Pnt', Pnt_weld, 'force'))
+            tr.add('equation', 'Pnt,total = n Pnt', inputs=[tr.ref(i_m), q_n], result=q('Pnt', Pnt_weld * n, 'force'))
             limit_states.append({
+                '_trace': tr.steps,
                 'name': 'Weld Tension (J2.2.3)',
                 'Rn': Pnt_weld * n, 'phi': phi_n, 'omega': om_n, 'direction': 'tension',
                 'formula': (f'Pnt = min(π de²/4·Fxx={P1:.3f}, 0.8(Fu/Fy)²·t·da·Fu={P2:.3f})'
@@ -2009,17 +2175,31 @@ def arc_spot_weld_connection(t1: float, t2: float,
                 Pat = _available(ten['Rn'], ten['phi'], ten['omega'], dm) / n
                 Vb, Tb = Vu / n, Tu / n
                 tt = (Tb / Pat) ** 1.5
+                tr = Trace()
+                q_pav = q('Pav', Pav, 'force', src('check', note='least available shear strength (J2.2.2) / n'))
+                q_pat = q('Pat', Pat, 'force', src('check', id='conn.arc_spot.tension', note='available / n'))
+                i_t = tr.add('equation', '(T / Pat)^1.5  (per weld)', inputs=[_ui('T', Tb, 'force', 'Tu / n'), q_pat],
+                             result=q('(T/Pat)^1.5', tt, 'dimensionless'))
+                tr.branch('(T/Pat)^1.5 ≤ 0.15 (interaction need not be checked)', tt <= 0.15,
+                          'J2.2.4' if tt <= 0.15 else 'J2.2.4-1', inputs=[tr.ref(i_t)])
                 if tt <= 0.15:
+                    i_v = tr.add('equation', 'value = (T/Pat)^1.5', inputs=[tr.ref(i_t)],
+                                 result=q('value', tt, 'dimensionless'))
                     interaction.append({'name': '전단+인장 (J2.2.4)', 'equation': 'J2.2.4',
                                         'value': round(tt, 4), 'limit': 0.15, 'ratio': round(tt / 0.15, 4),
                                         'pass': True, 'note': '(T/Pat)^1.5 ≤ 0.15 — 조합 검토 불필요',
-                                        '_raw': {'value': tt, 'limit': 0.15, 'ratio': tt / 0.15}})
+                                        '_raw': {'value': tt, 'limit': 0.15, 'ratio': tt / 0.15},
+                                        '_trace': _interaction_trace(tr, i_v)})
                 else:
                     val = (Vb / Pav) ** 1.5 + tt
+                    i_v = tr.add('equation', '(V/Pav)^1.5 + (T/Pat)^1.5  (per weld)', equation='J2.2.4-1',
+                                 inputs=[_ui('V', Vb, 'force', 'Vu / n'), q_pav, tr.ref(i_t)],
+                                 result=q('value', val, 'dimensionless'))
                     interaction.append({'name': '전단+인장 (J2.2.4)', 'equation': 'J2.2.4-1',
                                         'value': round(val, 4), 'limit': 1.0, 'ratio': round(val, 4),
                                         'pass': val <= 1.0 + 1e-9,
-                                        '_raw': {'value': val, 'limit': 1.0, 'ratio': val}})
+                                        '_raw': {'value': val, 'limit': 1.0, 'ratio': val},
+                                        '_trace': _interaction_trace(tr, i_v)})
 
     spec = ['J2.2', 'J2.2.1', 'J2.2.2.1', 'J2.2.2.2', 'J2.2.3', 'J6.1', 'J6.2', 'J6.3']
     if Vu and Tu:
@@ -2099,6 +2279,16 @@ def groove_weld_connection(t1: float, t2: float,
                                     '유효 목두께 te 미입력 — 0.5·t 는 참고값(기준 근거 없음)', 'detailing'))
         L = weld_length
         sval = str(load_direction).lower()
+        tr = Trace()
+        if te_assumed:
+            i_te = tr.add('equation', 'te = 0.5 t (reference only — no basis in the Specification)',
+                          inputs=[_ui('t', t_min, 'length', 'min(t1, t2)')], result=q('te', te, 'length'))
+        elif groove_type == 'complete' and te == t_min:
+            i_te = tr.add('equation', 'te = t (complete joint penetration)',
+                          inputs=[_ui('t', t_min, 'length', 'min(t1, t2)')], result=q('te', te, 'length'))
+        else:
+            i_te = tr.add('equation', 'te (input)', inputs=[_ui('te', te, 'length', 'te')], result=q('te', te, 'length'))
+        q_L = _ui('L', L, 'length', 'weld_length')
         if sval.startswith('shear'):
             Rn_2 = L * te * 0.6 * Fxx            # Eq. J2.1-2, φ=0.80/Ω=1.90
             Rn_3 = L * te * Fy / math.sqrt(3.0)  # Eq. J2.1-3, φ=0.90/Ω=1.70
@@ -2110,7 +2300,17 @@ def groove_weld_connection(t1: float, t2: float,
                 Rn_g, phi_g, omega_g, eq_g = Rn_2, 0.80, 1.90, 'J2.1-2'
             else:
                 Rn_g, phi_g, omega_g, eq_g = Rn_3, 0.90, 1.70, 'J2.1-3'
+            i2 = tr.add('equation', 'Pn2 = L te 0.6 Fxx  (weld metal)', equation='J2.1-2',
+                        inputs=[q_L, tr.ref(i_te), _ui('Fxx', Fxx, 'stress', 'Fxx', note='60 ksi (E60) when not given')],
+                        result=q('Pn2', Rn_2, 'force'))
+            i3 = tr.add('equation', 'Pn3 = L te Fy / √3  (base metal)', equation='J2.1-3',
+                        inputs=[q_L, tr.ref(i_te), _mt('Fy', Fy)], result=q('Pn3', Rn_3, 'force'))
+            tr.branch('0.80 Pn2 ≤ 0.90 Pn3' if dm == 'LRFD' else 'Pn2/1.90 ≤ Pn3/1.70', weld_metal_governs, eq_g,
+                      inputs=[tr.ref(i2), tr.ref(i3)])
+            tr.add('equation', 'Pn = Pn2' if weld_metal_governs else 'Pn = Pn3',
+                   inputs=[tr.ref(i2 if weld_metal_governs else i3)], result=q('Pn', Rn_g, 'force'))
             limit_states.append({
+                '_trace': tr.steps,
                 'name': 'Groove Weld Shear (J2.1)',
                 'Rn': Rn_g, 'phi': phi_g, 'omega': omega_g, 'direction': 'shear',
                 'formula': f'Pn = min(L·te·0.6Fxx, L·te·Fy/√3) = {Rn_g:.3f} (te={te:.4f})',
@@ -2118,7 +2318,10 @@ def groove_weld_connection(t1: float, t2: float,
             })
         else:
             Rn_g = L * te * Fy
+            tr.add('equation', 'Pn = L te Fy', equation='J2.1-1', inputs=[q_L, tr.ref(i_te), _mt('Fy', Fy)],
+                   result=q('Pn', Rn_g, 'force'))
             limit_states.append({
+                '_trace': tr.steps,
                 'name': 'Groove Weld Tension/Compression (J2.1)',
                 'Rn': Rn_g, 'phi': 0.90, 'omega': 1.70, 'direction': 'shear',
                 'formula': f'Pn = L({L})×te({te:.4f})×Fy({Fy}) = {Rn_g:.3f}',
@@ -2133,6 +2336,7 @@ def groove_weld_connection(t1: float, t2: float,
         proc = _norm_process(process)
         tw = None
         tw_note = 'tw 미산정'
+        tw_inputs = None   # 계산서: tw 단계(식, 입력)
         is_v = str(groove_type).lower().endswith('v')
         if not is_v and w1 is not None and w2 is not None and R is not None and w1 > 0:
             wf = math.sqrt(w1 ** 2 + w2 ** 2)
@@ -2149,6 +2353,12 @@ def groove_weld_connection(t1: float, t2: float,
                 tws.append(max(twv, 0.0))
             tw = min(tws)
             tw_note = f'tw(Eq. J2.6-5)={tw:.4f}' + ('' if proc in _TWF_BEVEL else ' (공정 미지정: 하한)')
+            tw_inputs = ('tw = (w2 + twf − R + (2 R w1 − w1²)^0.5) w1/wf − η R w2/wf, wf = (w1² + w2²)^0.5'
+                         + ('' if proc in _TWF_BEVEL else '  (least over the processes of Table J2.6-1)'),
+                         'J2.6-5', [_ui('w1', w1, 'length', 'w1'), _ui('w2', w2, 'length', 'w2'),
+                                    _ui('R', R, 'length', 'R'),
+                                    _sp('twf/R, η', None if proc not in _TWF_BEVEL else _TWF_BEVEL[proc][0],
+                                        table='J2.6-1', process=process or 'not given (lower bound)')])
         elif is_v and R is not None and d1 is not None and d2 is not None:
             Rv = min(R, R2) if R2 else R
             if proc in _TWF_V:
@@ -2157,6 +2367,10 @@ def groove_weld_connection(t1: float, t2: float,
                 twf = min(_TWF_V.values()) * Rv
             tw = max(min(twf - d1, twf - d2), 0.0)
             tw_note = f'tw(Eq. J2.6-7)={tw:.4f}' + ('' if proc in _TWF_V else ' (공정 미지정: 하한)')
+            tw_inputs = ('tw = min(twf − d1, twf − d2), twf = k R', 'J2.6-7',
+                         [q('twf', twf, 'length', src('specification', table='J2.6-2',
+                                                       process=process or 'not given (lower bound)', R=Rv)),
+                          _ui('d1', d1, 'length', 'd1'), _ui('d2', d2, 'length', 'd2')])
         sval = str(load_direction).lower()
         transverse = sval.startswith('trans')
         if transverse and is_v:
@@ -2177,6 +2391,8 @@ def groove_weld_connection(t1: float, t2: float,
                 Pnv = 0.75 * t * L * Fu      # Eq. J2.6-2 (tw 미산정 시 보수 분기)
                 eq_f = 'J2.6-2'
             phi_f, omega_f = 0.55, 2.80
+        Pnv_base = Pnv
+        Pn_cap = None
         if t > 0.10 and Pnv is not None:
             if tw is None:
                 not_eval.append(_ne('Flare Groove (J2.6-4) 용접금속 상한', 'shear',
@@ -2189,7 +2405,36 @@ def groove_weld_connection(t1: float, t2: float,
                     eq_f = f'{eq_f}≤J2.6-4'
                     phi_f, omega_f = 0.60, 2.55
         if Pnv is not None:
+            tr = Trace()
+            q_t, q_L, q_fu = _ui('t', t, 'length', 'min(t1, t2)'), _ui('L', L, 'length', 'weld_length'), _mt('Fu', Fu)
+            i_tw = None
+            if tw is not None:
+                i_tw = tr.add('equation', tw_inputs[0], equation=tw_inputs[1],
+                              inputs=[x for x in tw_inputs[2] if x['value'] is not None],
+                              result=q('tw', tw, 'length'))
+            base_eq = eq_f.split('≤')[0]
+            if transverse:
+                tr.branch('transverse load (flare bevel)', True, 'J2.6-1', inputs=[])
+                i_b = tr.add('equation', 'Pn = 0.833 t L Fu', equation='J2.6-1', inputs=[q_t, q_L, q_fu],
+                             result=q('Pn', Pnv_base, 'force'))
+            else:
+                ins = [q_t, q_L]
+                if i_tw is not None:
+                    ins.append(tr.ref(i_tw))
+                if h is not None:
+                    ins.append(_ui('h', h, 'length', 'h'))
+                tr.branch('tw ≥ 2t and h ≥ L (longitudinal)', base_eq == 'J2.6-3', base_eq, inputs=ins)
+                i_b = tr.add('equation', 'Pn = 1.50 t L Fu' if base_eq == 'J2.6-3' else 'Pn = 0.75 t L Fu',
+                             equation=base_eq, inputs=[q_t, q_L, q_fu], result=q('Pn', Pnv_base, 'force'))
+            if Pn_cap is not None:
+                i_c = tr.add('equation', 'Pn,weld = 0.75 tw L Fxx  (t > 0.10 in)', equation='J2.6-4',
+                             inputs=[tr.ref(i_tw), q_L, _ui('Fxx', Fxx, 'stress', 'Fxx',
+                                                            note='60 ksi (E60) when not given')],
+                             result=q('Pn,weld', Pn_cap, 'force'))
+                tr.add('modifier', 'Pn = min(Pn, Pn,weld)', inputs=[tr.ref(i_b), tr.ref(i_c)],
+                       result=q('Pn', Pnv, 'force'))
             limit_states.append({
+                '_trace': tr.steps,
                 'name': 'Flare Groove Shear (J2.6)',
                 'Rn': Pnv, 'phi': phi_f, 'omega': omega_f, 'direction': 'shear',
                 'formula': f'Pnv = {Pnv:.3f} ({tw_note}, t={t})',
@@ -2266,16 +2511,37 @@ def arc_seam_weld_connection(t1: float, t2: float,
     else:
         not_eval.append(_ne('끝단 거리 (J2.3.1)', 'shear', 'e 미입력', 'detailing'))
 
+    q_d = _ui('d', d, 'length', 'da (seam width)')
+    q_t = _ui('t', t_sheet, 'length', 't (sheet; Σ t_sheets)')
+    q_n = _ui('n', n, 'count', 'n')
+
+    def _leff(tr):
+        return tr.add('modifier', 'L ≤ 3d', equation='J2.3.2.1',
+                      inputs=[_ui('L', L_seam, 'length', 'weld_length / L_seam'), q_d], result=q('L', L_eff, 'length'))
     if jt in (None, 'sheet_to_support'):
         Rn_weld = 0.75 * Fxx * (L_eff * de + math.pi / 4 * de ** 2) * n
+        tr = Trace()
+        i_de = tr.add('equation', 'de = 0.7 d − 1.5 t ≤ 0.55 d', equation='J2.3.2.1-3', inputs=[q_d, q_t],
+                      result=q('de', de, 'length'))
+        i_l = _leff(tr)
+        tr.add('equation', 'Pnv = (π de² / 4 + L de) 0.75 Fxx n', equation='J2.3.2.1-1',
+               inputs=[tr.ref(i_de), tr.ref(i_l), _ui('Fxx', Fxx, 'stress', 'Fxx', note='60 ksi (E60) when not given'),
+                       q_n], result=q('Pnv', Rn_weld, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Weld Seam Shear (J2.3.2.1)',
             'Rn': Rn_weld, 'phi': 0.60, 'omega': 2.55, 'direction': 'shear',
             'formula': f'Pnv = (π·de²/4 + L·de)·0.75Fxx = (π/4×{de:.3f}² + {L_eff:.3f}×{de:.3f})×0.75×{Fxx}×{n} = {Rn_weld:.3f}',
             'equation': 'J2.3.2.1-1',
         })
         Rn_tear = 2.5 * t_sheet * Fu * (0.25 * L_eff + 0.96 * da_avg) * n
+        tr = Trace()
+        i_da = tr.add('equation', 'da = d − t', equation='J2.3.2.1-4', inputs=[q_d, q_t], result=q('da', da_avg, 'length'))
+        i_l = _leff(tr)
+        tr.add('equation', 'Pnv = 2.5 t Fu (0.25 L + 0.96 da) n', equation='J2.3.2.1-2',
+               inputs=[q_t, _mt('Fu', Fu), tr.ref(i_l), tr.ref(i_da), q_n], result=q('Pnv', Rn_tear, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Sheet Tear (J2.3.2.1)',
             'Rn': Rn_tear, 'phi': 0.60, 'omega': 2.55, 'direction': 'shear',
             'formula': f'Pnv = 2.5×{t_sheet}×{Fu}×(0.25×{L_eff:.3f}+0.96×da({da_avg:.4f}))×{n} = {Rn_tear:.3f}',
@@ -2298,7 +2564,13 @@ def arc_seam_weld_connection(t1: float, t2: float,
         else:
             da_s = max(d - ts, 0.0)
             Rn_ss = 1.65 * ts * da_s * Fu * n
+            tr = Trace()
+            q_ts = _ui('t', ts, 'length', 't1 (= t2)')
+            i_da = tr.add('equation', 'da = d − t', inputs=[q_d, q_ts], result=q('da', da_s, 'length'))
+            tr.add('equation', 'Pnv = 1.65 t da Fu n', equation='J2.3.2.2-1',
+                   inputs=[q_ts, tr.ref(i_da), _mt('Fu', Fu), q_n], result=q('Pnv', Rn_ss, 'force'))
             limit_states.append({
+                '_trace': tr.steps,
                 'name': 'Sheet Tear Sheet-to-Sheet (J2.3.2.2)',
                 'Rn': Rn_ss, 'phi': 0.70, 'omega': 2.20, 'direction': 'shear',
                 'formula': f'Pnv = 1.65×t({ts})×da({da_s:.4f})×Fu({Fu})×{n} = {Rn_ss:.3f}',
@@ -2460,9 +2732,31 @@ def paf_connection(t1: float, t2: float, d: float,
         not_eval.append(_ne('PAF 강도 F_uh (J5.2.1)', 'tension',
                             'Fuf(F_uh) 또는 HRC_p 미입력 — 120 ksi 는 참고값', 'fastener'))
 
+    q_d = _ui('ds', d, 'length', 'd (shank diameter)')
+    q_n = _ui('n', n, 'count', 'n')
+    q_t1 = _ui('t1', t1, 'length', 't1 (head side)')
+    q_fu1 = _mt('Fu1', Fu1)
+
+    def _fuh_step(tr):
+        if Fuf is not None and Fuf > 0:
+            return tr.add('equation', 'F_uh (input)', inputs=[_ui('F_uh', Fuf, 'stress', 'Fuf')],
+                          result=q('F_uh', Fuh, 'stress'))
+        if HRC_p is not None:
+            return tr.add('equation', 'F_uh = F_bs e^(HRC/40) ≤ 260 ksi when HRC ≥ 52', equation='J5.2.1-2',
+                          inputs=[_sp('F_bs', PAF_FBS, 'stress'), _ui('HRC', HRC_p, 'dimensionless', 'HRC_p')],
+                          result=q('F_uh', Fuh, 'stress'))
+        return tr.add('equation', 'F_uh = 120 ksi (reference only — no basis)',
+                      inputs=[q('F_uh', Fuh, 'stress', src('engine_default', key='Fuf', note='120 ksi'))],
+                      result=q('F_uh', Fuh, 'stress'))
+
     # (a) 핀 전단 (J5.3.1, Eq. J5.3.1-1)
     Pnvp = 0.6 * (d / 2.0) ** 2 * math.pi * Fuh * n
+    tr = Trace()
+    i_f = _fuh_step(tr)
+    tr.add('equation', 'Pnvp = 0.6 π (ds/2)² F_uh n', equation='J5.3.1-1', inputs=[q_d, tr.ref(i_f), q_n],
+           result=q('Pnvp', Pnvp, 'force'))
     item = {
+        '_trace': tr.steps,
         'name': 'Pin Shear (J5.3.1)',
         'Rn': Pnvp, 'phi': PHI_PAF['pin_shear'], 'omega': OMEGA_PAF['pin_shear'], 'direction': 'shear',
         'formula': f'Pnvp = 0.6×(d/2)²π×Fuh×{n} = {Pnvp:.3f} ({fuh_note})',
@@ -2487,7 +2781,12 @@ def paf_connection(t1: float, t2: float, d: float,
         if d > 0.177:
             warnings.append(f'J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급')
         Pnb = alpha_b * d * t1 * Fu1 * n
+        tr = Trace()
+        tr.add('equation', 'Pnb = αb ds t1 Fu1 n', equation='J5.3.2-1',
+               inputs=[_ui('αb', alpha_b, 'dimensionless', 'alpha_b', note='3.2 (Fig. J5-1(a)(b)) default'), q_d, q_t1,
+                       q_fu1, q_n], result=q('Pnb', Pnb, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Bearing/Tilting (J5.3.2)',
             'Rn': Pnb, 'phi': PHI_PAF['bearing'], 'omega': OMEGA_PAF['bearing'], 'direction': 'shear',
             'formula': f'Pnb = αb({alpha_b})×ds({d})×t1({t1})×Fu1({Fu1})×{n} = {Pnb:.3f}',
@@ -2505,7 +2804,14 @@ def paf_connection(t1: float, t2: float, d: float,
                             'Eq. J5.3.3-1 적용한계 밖: ' + ', '.join(lim), 'fastener'))
     else:
         Pnos = (dar ** 1.8) * (t2 ** 0.2) * ((Fy2 * E ** 2) ** (1.0 / 3.0)) / 30.0 * n
+        tr = Trace()
+        tr.add('equation', 'Pnos = dae^1.8 t2^0.2 (Fy2 E²)^(1/3) / 30 n', equation='J5.3.3-1',
+               inputs=[_ui('dae', dar, 'length', 'dar', note='d when not given'), _ui('t2', t2, 'length', 't2'),
+                       q('Fy2', Fy2, 'stress', src('engine_default', key='Fy2', note='head-side Fy')
+                         if fy2_default else src('material', key='Fy2')),
+                       _sp('E', E, 'stress'), q_n], result=q('Pnos', Pnos, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Pull-out in Shear (J5.3.3)',
             'Rn': Pnos, 'phi': PHI_PAF['pullout_shear'], 'omega': OMEGA_PAF['pullout_shear'],
             'direction': 'shear',
@@ -2525,7 +2831,14 @@ def paf_connection(t1: float, t2: float, d: float,
         if dw > 0.60:
             warnings.append(f"§J5: 계산용 와셔 직경 ≤ 0.60 in — d'w={dw} → 0.60")
         Pnov = alpha_w * t1 * dw_c * Fu1 * n
+        tr = Trace()
+        i_dw = tr.add('modifier', "d'w ≤ 0.60 in", inputs=[_ui("d'w", dw, 'length', 'dw')],
+                      result=q("d'w", dw_c, 'length'))
+        tr.add('equation', "Pnov = αw t1 d'w Fu1 n", equation='J5.2.3-1',
+               inputs=[_ui('αw', alpha_w, 'dimensionless', 'alpha_w', note='1.5 default'), q_t1, tr.ref(i_dw), q_fu1,
+                       q_n], result=q('Pnov', Pnov, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Pull-over (J5.2.3)',
             'Rn': Pnov, 'phi': PHI_PAF['pullover'], 'omega': OMEGA_PAF['pullover'], 'direction': 'tension',
             'formula': f"Pnov = αw({alpha_w})×t1({t1})×d'w({dw_c:.3f})×Fu1({Fu1})×{n} = {Pnov:.3f}",
@@ -2534,7 +2847,12 @@ def paf_connection(t1: float, t2: float, d: float,
 
     # (e) PAF 인장 (J5.2.1, Eq. J5.2.1-1)
     Pntp = (d / 2.0) ** 2 * math.pi * Fuh * n
+    tr = Trace()
+    i_f = _fuh_step(tr)
+    tr.add('equation', 'Pntp = π (ds/2)² F_uh n', equation='J5.2.1-1', inputs=[q_d, tr.ref(i_f), q_n],
+           result=q('Pntp', Pntp, 'force'))
     item = {
+        '_trace': tr.steps,
         'name': 'PAF Tension (J5.2.1)',
         'Rn': Pntp, 'phi': PHI_PAF['tension'], 'omega': OMEGA_PAF['tension'], 'direction': 'tension',
         'formula': f'Pntp = (d/2)²π×Fuh×{n} = {Pntp:.3f} ({fuh_note})',
@@ -2546,7 +2864,11 @@ def paf_connection(t1: float, t2: float, d: float,
 
     # (f) 인장 풀아웃 (J5.2.2): 폐쇄형 식 없음 — 시험값
     if Pnot_test is not None and Pnot_test > 0:
+        tr = Trace()
+        tr.add('equation', 'Pnot = n Pnot,test', inputs=[q_n, _ui('Pnot,test', Pnot_test, 'force', 'Pnot_test')],
+               result=q('Pnot', Pnot_test * n, 'force'))
         limit_states.append({
+            '_trace': tr.steps,
             'name': 'Pull-out in Tension (J5.2.2)',
             'Rn': Pnot_test * n, 'phi': PHI_PAF['pullout_tension'], 'omega': OMEGA_PAF['pullout_tension'],
             'direction': 'tension',
@@ -2591,10 +2913,21 @@ def paf_connection(t1: float, t2: float, d: float,
             Pav = _available(gs['Rn'], gs['phi'], gs['omega'], dm)
             p = 2 if (gt['name'].startswith('PAF Tension') and gs['name'].startswith('Pin Shear')) else 1
             val = (Tu / Pat) ** p + (Vu / Pav) ** p
+            tr = Trace()
+            i_p = tr.add('branch', None, equation='C-J5.4-1', inputs=[], result=None,
+                         condition='exponent 2 when PAF tension and pin shear govern, else 1', holds=p == 2)
+            i_v = tr.add('equation', f'(T/Pat)^{p} + (V/Pav)^{p}', equation='C-J5.4-1',
+                         inputs=[_ui('T', Tu, 'force', 'Tu'),
+                                 q('Pat', Pat, 'force', src('check', note=f"governing tension: {gt['name']}")),
+                                 _ui('V', Vu, 'force', 'Vu'),
+                                 q('Pav', Pav, 'force', src('check', note=f"governing shear: {gs['name']}"))],
+                         result=q('value', val, 'dimensionless'))
+            del i_p
             interaction.append({'name': '전단+인장 (J5.4)', 'equation': f'C-J5.4-1 (n={p})',
                                 'value': round(val, 4), 'limit': 1.0, 'ratio': round(val, 4),
                                 'pass': val <= 1.0 + 1e-9, 'basis': 'Commentary C-J5.4 (A1.2)',
-                                '_raw': {'value': val, 'limit': 1.0, 'ratio': val}})
+                                '_raw': {'value': val, 'limit': 1.0, 'ratio': val},
+                                '_trace': _interaction_trace(tr, i_v)})
 
     spec = ['J5.1', 'J5.2.1', 'J5.2.2', 'J5.2.3', 'J5.3.1', 'J5.3.2', 'J5.3.3', 'J6.1', 'J6.2']
     if Vu and Tu:
@@ -2874,29 +3207,33 @@ def design_connection(params: dict) -> dict:
 
     # 판정은 가정값 없이 평가한 한계상태(verified)로만 한다. 가정값 한계상태가 더 작으면 그 항목은
     # not_evaluated 에 있으므로 PASS 가 되지 않고, FAIL 은 제대로 평가한 한계상태에서만 나온다.
+    # 비 · 판정은 반올림하지 않은 설계강도로(capacity 키는 표시용 소수 3자리).
     checks = []
+    gov_raw = (result.get('_check_data') or {}).get('gov_raw') or {}
     if V > 0:
         cap = result.get('shear_verified_design_strength')
         if cap:
+            cap_raw = gov_raw.get('shear_verified') or cap
             checks.append({'name': f"전단(면내) — {result['shear_verified_governing_mode']}",
-                           'demand': round(V, 4), 'capacity': cap, 'ratio': round(V / cap, 4),
-                           'pass': V <= cap + 1e-9})
+                           'demand': round(V, 4), 'capacity': cap, 'ratio': round(V / cap_raw, 4),
+                           'pass': V <= cap_raw + 1e-9})
         else:
             result['not_evaluated'].append(_ne('전단(면내) 강도', 'shear',
                                                '가정값 없이 평가된 전단 한계상태 없음', 'scope'))
     if T > 0:
         cap = result.get('tension_verified_design_strength')
         if cap:
+            cap_raw = gov_raw.get('tension_verified') or cap
             checks.append({'name': f"인장(축방향) — {result['tension_verified_governing_mode']}",
-                           'demand': round(T, 4), 'capacity': cap, 'ratio': round(T / cap, 4),
-                           'pass': T <= cap + 1e-9})
+                           'demand': round(T, 4), 'capacity': cap, 'ratio': round(T / cap_raw, 4),
+                           'pass': T <= cap_raw + 1e-9})
         elif not any(x['direction'] == 'tension' for x in result['not_evaluated']):
             result['not_evaluated'].append(_ne('인장(축방향) 강도', 'tension', '평가된 인장 한계상태 없음', 'scope'))
     ref = []
-    for key, dem in (('shear_design_strength', V), ('tension_design_strength', T)):
+    for key, rkey, dem in (('shear_design_strength', 'shear', V), ('tension_design_strength', 'tension', T)):
         c = result.get(key)
         if dem > 0 and c:
-            ref.append(dem / c)
+            ref.append(dem / (gov_raw.get(rkey) or c))
     result['utilization_reference'] = round(max(ref), 4) if ref else None
     for ic in result.get('interaction_checks', []):
         checks.append({'name': ic['name'], 'demand': ic['value'], 'capacity': ic['limit'],
@@ -2940,4 +3277,5 @@ def design_connection(params: dict) -> dict:
     result['design_method'] = design_method
     from design.connection_checks import build as _build_checks
     result['design_checks'] = _build_checks(result, result.pop('_check_data'), V, T, params)
+    result['display_rounding'] = display_rounding('connection')
     return result

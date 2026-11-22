@@ -108,16 +108,23 @@
 - **모드별 검토.** 엔진은 F2 · F3 · F4 의 최소 Mn 으로 하나의 비를 냈다. 계산서는 Manual 예제(II-1B: φMne 113, φMnℓ 84.2, φMnd 89.9)처럼 모드마다 설계강도와 비를 낸다. 지배 모드 항목의 비는 옛 이용률과 같은 연산이다(`mirrors.ratio`).
 - **소요가 없으면**(Pu = 0 등) 해당 항목은 `not_evaluated`(reason: 소요 없음), 설계강도는 `reference`. 접합부에서 한 방향만 소요가 있으면 다른 방향의 한계상태는 `not_applicable`.
 
-## 5. 엔진이 반올림한 값을 쓰는 곳 (값은 바꾸지 않고 밝힌다)
+## 5. 반올림 — 판정은 반올림하지 않은 값으로 (2026-11-23 두 번째 묶음, 작업문서 §8.3.1)
 
-| 곳 | 엔진이 쓰는 값 | 계약에서 |
+**지금 참인 것:** 모든 판정 · 비 · 지배 모드 선택과 `design_checks` 의 값은 반올림하지 않은 값으로 정한다. 결과의 옛 키 가운데 사람이 읽도록 반올림해 싣는 것은 결과마다 `display_rounding`(`{decimals: {경로: 자리수}, note}`) 에 적었다 — 그 키들은 **표시용**이다(예: 접합부 `limit_states[].design_strength` 3자리, 부재 `design_strength` 2자리, `utilization` 4자리).
+
+예전에 반올림한 값으로 판정하던 곳과 고친 뒤:
+
+| 곳 | 예전 | 지금 |
 |---|---|---|
-| 접합부 한계상태의 설계강도 | `round(φRn, 3)` 로 소요와 비교 | `capacity` = 그 반올림값, 설계강도 단계에 `rounded_to: 0.001` |
-| 랩의 Pns | 접합부의 반올림된 설계강도 | 입력 출처에 적음 |
-| 조합 §H1.2 · §H1.1 의 Pa · Max · Ta | 하위 결과의 `round(…, 2)` | 입력 `source.rounded_to: 0.01` |
-| 웹 크리플링 Pn | `round(Pn, 3)` 로 Pa · H3 계산 | 반올림 단계(`modifier`, `rounded_to: 0.001`) |
-| 정모멘트 구간 판정 | 비를 소수 4자리로 반올림한 뒤 1.0 과 비교 | 판정은 엔진 것을 따른다(`note`) |
-| 냉간가공 Fya · C · Fyc | `special_topics.cold_work_strength` 의 반올림 값 | 입력 `rounded_to` |
+| 접합부 한계상태의 설계강도 | `round(φRn, 3)` 로 지배 모드를 고르고 소요와 비교 | 반올림 전 φRn(또는 Rn/Ω)으로. 표시 키는 3자리 그대로 |
+| 랩의 Pns · 용량 | 접합부의 반올림된 설계강도 × n | 반올림 전 값 × n (`Pns` 키는 표시용 3자리) |
+| 조합 §H1.2 · §H1.1 의 Pa · Max · Ta · May | 하위 결과의 `round(…, 2)` | 하위 설계의 반올림 전 설계강도(결과에 남기지 않는 내부 키로 넘김) |
+| 웹 크리플링 Pn | `round(Pn, 3)` 로 Pa · H3 계산, `web_crippling.Pn` 은 2자리로 표시 | 반올림 전 Pn 으로 계산, `web_crippling.Pn` 은 표시용 2자리 |
+| 정모멘트 구간 판정 | 비를 소수 4자리로 반올림한 뒤 1.0 과 비교 | 반올림 전 비로(`positive_region.utilization` 은 표시용 4자리) |
+| 랩 지점부 H2 | 제곱합 (M/Ma)² + (V/Va)² 을 "DCR" 로 | 부재 H2 와 같은 √((M/Ma)² + (V/Va)²) — 판정은 같고 비는 다른 비와 견줄 수 있다 |
+| 냉간가공 Fya · C · Fyc | `special_topics.cold_work_strength` 가 2 · 4자리로 반올림한 Fya 를 휨에 쓴다 | **그대로**(이번 수정 대상 아님 — 강도를 바꾸므로 따로 정할 일). 입력 `rounded_to` 로 밝힌다 |
+
+이 수정으로 바뀐 기준선 값 전부는 부록(14절)에 있다.
 
 ## 6. 위치 · 조합
 
@@ -143,18 +150,23 @@
 
 ## 8. 계산 과정이 비었거나 일부인 항목
 
+2026-11-23 두 번째 묶음에서 용접(J2.1 · J2.2 · J2.3 · J2.5 · J2.6) · PAF(J5) · 용접 경로 J6.2 / J6.3 · 볼트 머리 풀오버, 나사 J4.5.1–J4.5.3 · 아크 스폿 J2.2.4 · PAF J5.4 상호작용, 표 B4.1-1(한계마다 비 · 한계 · 행을 `branch` 단계로), 부록 1 Eq. 1.1-4 의 요소별 판좌굴(평탄폭 · k · 외연 환산)과 부록 2 의 플랜지 · 립 성질 · Lcrd · 회전강성 넷 · Fcrd 를 모두 단계로 풀었다(계산한 자리의 값 그대로). `untraced` · `detail_unavailable` 단계는 이제 없다(시험 사례 전부).
+
+남은 것:
+
 | 항목 | 상태 | 까닭 |
 |---|---|---|
-| 용접(아크 스폿 J2.2.x, 아크 심 J2.3.x, 그루브 J2.1, 플레어 J2.6) · PAF(J5.x) 한계상태, 용접 경로의 J6.2 · J6.3(`_weld_j6`), 볼트 머리 풀오버(App. A J3.4) | 공칭강도 단계 하나(`inputs: []`, `untraced`) + 설계강도 + 판정 | 공칭강도의 입력이 각 함수 안의 지역 변수로만 있다 — 이번에는 볼트 · 나사 · 필릿 · J6(볼트 · 나사 경로) · D 장을 먼저 풀었다. 같은 방법(`_trace`)으로 숫자를 바꾸지 않고 덧붙일 수 있다 |
-| 나사 J4.5.1–J4.5.3, 아크 스폿 J2.2.4, PAF J5.4 상호작용 | 상호작용 값 단계 하나(`untraced`) + 판정 | 같은 까닭. 값 · 한계 · 비는 반올림 전 값 |
-| `member.applicability.b4` | `steps: []` | 표 B4.1-1 한계 목록(`dsm_warnings`) — 계산이 아니라 적용 범위 |
-| 해석식 Fcrl · Fcrd 의 내부(요소별 판좌굴, 부록 2 강성항) | 결과 Fcr 하나(`detail_unavailable`) | `loads.local_params` · `loads.distortional_params` 안 — 하중 담당 파일 |
-| 미평가 항목(`not_evaluated` · `not_applicable`) | `steps: []` 가 많다 | 까닭은 `reason` · `steps_unavailable` |
+| 플레어 베벨 목두께 tw (Eq. J2.6-5) | 공정을 주지 않으면 표 J2.6-1 의 공정마다 tw 를 구해 최소를 쓴다 — 단계는 그 최소값 하나(공정별 값은 단계로 나누지 않음) | 계산은 같다. 필요하면 공정마다 단계를 더할 수 있다 |
+| 표 B4.1-1 의 보강재 개수 한계(n_f · n_le · n_w) | 단계 없음(경고 문구만) | 개수는 템플릿 입력에서 오고 지금 사례에서 늘 0 |
+| `member.applicability.b4` 에 두께가 없을 때 | `not_evaluated`, `counts: false` | 대조할 치수가 없다 — 엔진은 이것으로 판정을 내리지 않는다 |
+| 미평가 항목(`not_evaluated` · `not_applicable`) | `steps: []` 가 많다 | 계산한 것이 없다. 까닭은 `reason` · `steps_unavailable` |
+
+`member.applicability.b4` 는 이제 E–H 장 부재마다 나온다: 한계를 넘으면 `not_evaluated`(판정에 든다), 넘지 않으면 `pass` 이고 `counts: false`(엔진은 한계를 넘을 때만 판정을 바꾼다). 대조하지 못한 요소가 있으면 `reason` 에 적는다.
 
 ## 9. 경계층이 할 일
 
 0. **지금 깨지는 경계 시험:** `npm run test:webview` 의 `mcp_si_chain` 이 SI 출력에서 단위 표가 없는 숫자 키(`design_checks[*]…value`)를 잡아 실패한다 — SI 모드 MCP 결과에 US 값이 섞여 나가는 것을 막는 시험이므로 옳은 실패다. 아래 1 이 끝나면 닫힌다. 나머지 웹뷰 계약은 모두 통과한다.
-1. **SI 변환:** `design_checks[*]` 안의 `{symbol, value, quantity}` 꼴(`demand` · `nominal` · `capacity` · `reference.*` · `steps[*].inputs[*]` · `steps[*].result` · `source.half_wavelength`)을 `quantity` 로 바꾼다. `ratio` · `factor.value` 는 무차원. `rounded_to` 는 US 값의 반올림 자리이므로 SI 로 옮길 때 같이 바꾸거나(×) 버린다. 문자열(`expr`, `condition`)은 단위가 없어 그대로.
+1. **SI 변환:** `design_checks[*]` 안의 `{symbol, value, quantity}` 꼴(`demand` · `nominal` · `capacity` · `reference.*` · `steps[*].inputs[*]` · `steps[*].result` · `source.half_wavelength`)을 `quantity` 로 바꾼다. `ratio` · `factor.value` 는 무차원. `rounded_to` 는 US 값의 반올림 자리이므로 SI 로 옮길 때 같이 바꾸거나(×) 버린다. 결과의 `display_rounding` 은 US 표시 자리수다 — SI 로 바꾼 값에는 맞지 않으므로 SI 출력에서는 버리거나 자체 표시 규칙으로 바꾼다. 문자열(`expr`, `condition`)은 단위가 없어 그대로.
 2. **MCP 스키마:** `aisi_design` · `design_connection` · `lap_connection` 출력에 `design_checks`, `generate_section` 출력에 `element_roles` 를 덧붙이고, 입력에 `check_location` · `check_combination` 을 연다.
 3. **호스트(`StcfsdPanel`):** 퍼린 구간 결과가 `{...pick, checks: …}` 로 대표 검토 지점의 결과만 남긴다 — 구간마다 검토 지점별 `design_checks` 를 함께 넘기고, 각 호출에 `check_location`(구간 · 지점) · `check_combination`(구간의 `combo`)을 준다. 랩 구간의 Mu · Vu 절반 가정은 호스트가 만든 것이므로 그 사실은 호스트가 덧붙인다.
 4. 이름은 `name_ko` 를 쓰고, 경고 문구(`warnings`)는 이번 계약 밖이다(여전히 영 · 한 혼용).
@@ -169,7 +181,7 @@
 - 엄격 JSON(NaN · Infinity 없음).
 
 가정하면 안 된다:
-- `steps` 의 `expr` 를 계산해 같은 값이 나온다고 — 반올림한 엔진 값(5절)과 `untraced` 단계가 있다. 화면은 `result` 를 보여야 한다.
+- `steps` 의 `expr` 를 계산해 같은 값이 나온다고 — 입력 가운데 반올림해 넘어온 값(냉간가공 Fya 등, `rounded_to`)이 있다. 화면은 `result` 를 보여야 한다.
 - 항목의 순서가 화면 순서라고 — 순서는 엔진 순서다.
 - `not_evaluated` 항목에 강도가 있다고(`reference` 만 참고).
 - 무리 이름이 화면 분류와 같다고 — `group` 은 지배를 가르는 엔진 무리다.
@@ -326,3 +338,256 @@
 
 - `test/python/test_review_1123_checks.py`(두 게이트가 자동 수집): 등록 · 유일 · 어휘 · 출처 · `mirrors` 로 옛 값과 대조(300 개 넘게) · 비 = 소요/강도 · 마지막 설계강도 단계 = 강도 · 떠도는 숫자 없음 · 미평가에 강도 없음 · 무리 지배 = 최대 비 · 결과 판정 접기 = 옛 `pass` · 엄격 JSON · 서버 통과 · 위치/조합 · 요소 자리, 그리고 Manual 대조(D · E · F · G · H · I · J 장).
 - `test/python/contract_cases_1123.py`: 사례 목록과 기준선 도구. 변경 전 `python/`(git HEAD 사본이면 된다)에서 `capture`, 변경 뒤 `capture`, `compare` 로 옛 키 · 값이 비트 단위로 같은지 본다.
+
+## 14. 부록 — §8.3.1 수정(2026-11-23)으로 바뀐 기준선 값
+
+비교 도구: `contract_cases_1123.py compare <수정 전> <수정 뒤> --ignore=design_checks,report --all`. 수정 전은 커밋 `3590808` 의 엔진. 계산 과정을 더한 일(A)만으로는 옛 값이 하나도 바뀌지 않았다(같은 비교, 차이 0).
+
+비교: 수정 전(커밋 3590808) 140 사례, 값 24209 개 — 바뀐 값 304 개(design_checks · report 제외; report 는 아래 값을 그대로 찍는 글이라 같이 바뀐다). 나머지는 비트 단위로 같다.
+
+**§8.3.1-1 (식 번호)** — 문자열만: `F2-1 (yielding)` → `F2.1-3 (yielding)`, `F2-1 (inelastic LTB)` → `F2.1-4 (inelastic LTB)`, `F2-1 (elastic LTB)` → `F2.1-5 (elastic LTB)` (그 문자열을 담은 `steps[].formula` 포함).
+- `positive_region.equation` — 41 사례: G5 ASD, G5 alone governs LRFD, G5 load from Vu, G5 no bearing load, H2 Manual II-2A lap end ASD, H2-2 stiffened, H3 multi-web ETF Z, I6.2.1 R exceeds table, I6.2.1 uplift II-2A, II-1B C9 beta LRFD, II-1C Fcre 41.0, II-2B Z ASD, II-4A track LTB LRFD, II-4B track Fcre 56.6 ASD, II-4B track Fcre 56.6 LRFD, II-9 RHS F2.1.4, III-11 RHS combined ASD, III-11 RHS combined LRFD, RHS F2.1.4-2 long, band: H1.2 with rounded Pa/Max, band: positive region ratio 1.000004, band: web crippling Pn rounded, combined angle (P)L/1000, combined angle (P)L/1000 fails, combined positive region fails, combined tension + bending, combined with shear and M1/M2, default lippedc flexure (auto FSM), flexure B4 exceeded and fails, flexure Mcrd missing (F4 not evaluated), flexure Mcrl missing, flexure analytic Mcrd II-5, flexure cold work + shear + wc, flexure track F4 n/a, flexure unrestrained reference, positive region Lb_pos missing, positive region governs, purlin negative region (M_max), purlin positive region uplift R, purlin support with wc, sharp lippedz combined (auto FSM)
+- `steps[].equation` — 46 사례: G5 ASD, G5 alone governs LRFD, G5 load from Vu, G5 no bearing load, H2 Manual II-2A lap end ASD, H2-2 stiffened, H3 multi-web ETF Z, H3-2 built-up I, I-8B lippedc ASD flexure (auto FSM), I6.2.1 R exceeds table, I6.2.1 uplift II-2A, II-1B C9 beta LRFD, II-1C Fcre 41.0, II-2B Z ASD, II-4A track LTB LRFD, II-4B track Fcre 56.6 ASD, II-4B track Fcre 56.6 LRFD, II-9 RHS F2.1.4, III-11 RHS combined ASD, III-11 RHS combined LRFD, RHS F2.1.4-2 long, band: H1.2 with rounded Pa/Max, band: positive region ratio 1.000004, band: web crippling Pn rounded, combined angle (P)L/1000, combined angle (P)L/1000 fails, combined positive region fails, combined tension + bending, combined with shear and M1/M2, default lippedc flexure (auto FSM), flexure B4 exceeded and fails, flexure Lb missing, flexure Mcrd missing (F4 not evaluated), flexure Mcrl missing, flexure analytic Mcrd II-5, flexure cold work + shear + wc, flexure hat negative sign, flexure track F4 n/a, flexure unrestrained reference, positive region Lb_pos missing, positive region governs, purlin lap region (half M), purlin negative region (M_max), purlin positive region uplift R, purlin support with wc, sharp lippedz combined (auto FSM)
+
+**§8.3.1-2 (앵글 조합 판정)** — 5 값
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `combined angle (P)L/1000.result.not_evaluated` | ["[압축] H1.2 angle (P)L/1000"] | null |
+| `combined angle (P)L/1000.result.pass` | null | true |
+| `combined angle (P)L/1000.result.utilization_valid` | false | null |
+| `combined angle (P)L/1000 fails.result.not_evaluated` | ["[압축] H1.2 angle (P)L/1000"] | null |
+| `combined angle (P)L/1000 fails.result.utilization_valid` | false | null |
+
+**§8.3.1-3 (정모멘트 구간 판정)** — 4 값
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `band: positive region ratio 1.000004.result.limit_state_checks[1].pass` | true | false |
+| `band: positive region ratio 1.000004.result.pass` | true | false |
+| `band: positive region ratio 1.000004.result.positive_region.pass` | true | false |
+| `band: positive region ratio 1.000004.result.warnings` | 0 | 1 |
+
+**§8.3.1-4 (접합부 · 랩 — 반올림 전 설계강도)** — 88 값
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `IV-1 fillet ASD.result.checks[0].ratio` | 0.9268 | 0.9269 |
+| `IV-1 fillet ASD.result.utilization` | 0.9268 | 0.9269 |
+| `IV-1 fillet ASD.result.utilization_reference` | 0.9268 | 0.9269 |
+| `IV-1 fillet member tension ASD.result.checks[0].ratio` | 0.9268 | 0.9269 |
+| `IV-1 fillet member tension ASD.result.utilization` | 0.9268 | 0.9269 |
+| `IV-1 fillet member tension ASD.result.utilization_reference` | 0.9268 | 0.9269 |
+| `IV-11 screw V+T ASD.result.checks[0].ratio` | 0.8333 | 0.833 |
+| `IV-11 screw V+T ASD.result.checks[1].ratio` | 0.6888 | 0.6875 |
+| `IV-11 screw V+T ASD.result.utilization_reference` | 0.8333 | 0.833 |
+| `IV-11 screw V+T LRFD.result.checks[0].ratio` | 0.9259 | 0.9256 |
+| `IV-11 screw V+T LRFD.result.checks[1].ratio` | 0.7627 | 0.7639 |
+| `IV-11 screw V+T LRFD.result.utilization_reference` | 0.9259 | 0.9256 |
+| `IV-12 PAF V+T ASD.result.checks[0].ratio` | 0.3242 | 0.324 |
+| `IV-12 PAF V+T ASD.result.checks[1].ratio` | 0.2864 | 0.2866 |
+| `IV-12 PAF V+T ASD.result.utilization_reference` | 0.3242 | 0.324 |
+| `IV-12 PAF V+T LRFD.result.checks[0].ratio` | 0.3293 | 0.3292 |
+| `IV-12 PAF V+T LRFD.result.checks[1].ratio` | 0.3183 | 0.3184 |
+| `IV-12 PAF V+T LRFD.result.utilization_reference` | 0.3293 | 0.3292 |
+| `IV-2 arc spot LRFD.result.checks[0].ratio` | 0.5367 | 0.5368 |
+| `IV-2 arc spot LRFD.result.utilization` | 0.5367 | 0.5368 |
+| `IV-2 arc spot LRFD.result.utilization_reference` | 0.5367 | 0.5368 |
+| `IV-2 arc spot V+T ASD.result.checks[1].ratio` | 0.5948 | 0.5949 |
+| `IV-2 arc spot V+T LRFD.result.checks[0].ratio` | 0.3864 | 0.3865 |
+| `IV-2 arc spot V+T LRFD.result.checks[1].ratio` | 0.8814 | 0.8813 |
+| `IV-2 arc spot V+T LRFD.result.utilization_reference` | 0.8814 | 0.8813 |
+| `IV-2 tension direction.result.checks[0].ratio` | 0.6609 | 0.661 |
+| `IV-2 tension direction.result.utilization` | 0.6609 | 0.661 |
+| `IV-2 tension direction.result.utilization_reference` | 0.6609 | 0.661 |
+| `IV-4 flare bevel ASD.result.checks[0].ratio` | 0.875 | 0.8749 |
+| `IV-4 flare bevel ASD.result.utilization` | 0.875 | 0.8749 |
+| `IV-4 flare bevel ASD.result.utilization_reference` | 0.875 | 0.8749 |
+| `IV-4 flare bevel LRFD.result.checks[0].ratio` | 0.5829 | 0.583 |
+| `IV-4 flare bevel LRFD.result.utilization` | 0.5829 | 0.583 |
+| `IV-4 flare bevel LRFD.result.utilization_reference` | 0.5829 | 0.583 |
+| `IV-9 bolt ASD.result.checks[0].ratio` | 0.9534 | 0.9533 |
+| `IV-9 bolt ASD.result.utilization` | 0.9534 | 0.9533 |
+| `IV-9 bolt ASD.result.utilization_reference` | 0.9534 | 0.9533 |
+| `arc spot sheet-to-sheet.result.checks[0].ratio` | 0.5711 | 0.571 |
+| `arc spot sheet-to-sheet.result.utilization` | 0.5711 | 0.571 |
+| `arc spot sheet-to-sheet.result.utilization_reference` | 0.5711 | 0.571 |
+| `band: IV-9 J6.1 design strength rounded.result.checks[0].pass` | false | true |
+| `band: IV-9 J6.1 design strength rounded.result.checks[0].ratio` | 1.0001 | 0.9999 |
+| `band: IV-9 J6.1 design strength rounded.result.evaluated_pass` | false | true |
+| `band: IV-9 J6.1 design strength rounded.result.pass` | false | true |
+| `band: IV-9 J6.1 design strength rounded.result.utilization` | 1.0001 | 0.9999 |
+| `band: IV-9 J6.1 design strength rounded.result.utilization_reference` | 1.0001 | 0.9999 |
+| `band: IV-9 J6.1 design strength rounded.result.verdict` | "FAIL" | "PASS" |
+| `bolt assumed e (not decided).result.checks[0].ratio` | 0.6583 | 0.6584 |
+| `bolt assumed e (not decided).result.utilization` | 0.6583 | 0.6584 |
+| `bolt assumed e (not decided).result.utilization_reference` | 1.2158 | 1.2156 |
+| `bolt part 2 J6.result.checks[0].ratio` | 0.6079 | 0.6078 |
+| `bolt part 2 J6.result.utilization` | 0.6079 | 0.6078 |
+| `bolt part 2 J6.result.utilization_reference` | 0.6079 | 0.6078 |
+| `bolt short e fails.result.checks[0].ratio` | 0.8953 | 0.8949 |
+| `bolt short e fails.result.utilization` | 0.8953 | 0.8949 |
+| `bolt short e fails.result.utilization_reference` | 0.8953 | 0.8949 |
+| `bolt thick (AISC scope).result.checks[0].ratio` | 0.3843 | 0.3844 |
+| `bolt thick (AISC scope).result.utilization` | 0.3843 | 0.3844 |
+| `bolt thick (AISC scope).result.utilization_reference` | 0.3843 | 0.3844 |
+| `lap bolt Se Mnd.result.capacity` | 16.727999999999998 | 16.726499999999998 |
+| `lap bolt Se Mnd.result.steps[6].formula` | "Capacity = 6 ea × 2.788 kips = 16.728 kips, DCR = V_transfer / Capacity = 15… | "Capacity = 6 ea × 2.788 kips = 16.726 kips, DCR = V_transfer / Capacity = 15… |
+| `lap bolt Se e=2.result.capacity` | 16.727999999999998 | 16.726499999999998 |
+| `lap bolt Se e=2.result.steps[6].formula` | "Capacity = 6 ea × 2.788 kips = 16.728 kips, DCR = V_transfer / Capacity = 15… | "Capacity = 6 ea × 2.788 kips = 16.726 kips, DCR = V_transfer / Capacity = 15… |
+| `lap bolt Sf only.result.capacity` | 16.727999999999998 | 16.726499999999998 |
+| `lap bolt Sf only.result.steps[6].formula` | "Capacity = 6 ea × 2.788 kips = 16.728 kips, DCR = V_transfer / Capacity = 15… | "Capacity = 6 ea × 2.788 kips = 16.726 kips, DCR = V_transfer / Capacity = 15… |
+| `lap bolt no Se.result.capacity` | 18.12 | 18.120375000000003 |
+| `lap bolt no Se.result.utilization` | 0.834 | 0.8339 |
+| `lap bolt short e.result.capacity` | 11.28 | 11.2749 |
+| `lap bolt short e.result.steps[6].formula` | "Capacity = 16 ea × 0.705 kips = 11.280 kips, DCR = V_transfer / Capacity = 1… | "Capacity = 16 ea × 0.705 kips = 11.275 kips, DCR = V_transfer / Capacity = 1… |
+| `lap bolt short e.result.utilization` | 1.3397 | 1.3403 |
+| `lap bolt short e.result.warnings[5]` | "용량 부족: V_transfer = 15.111 kips > Capacity = 11.280 kips (DCR = 1.34). 패스너 수… | "용량 부족: V_transfer = 15.111 kips > Capacity = 11.275 kips (DCR = 1.34). 패스너 수… |
+| `lap bolt short lap.result.capacity` | 16.727999999999998 | 16.726499999999998 |
+| `lap bolt short lap.result.steps[6].formula` | "Capacity = 6 ea × 2.788 kips = 16.728 kips, DCR = V_transfer / Capacity = 15… | "Capacity = 6 ea × 2.788 kips = 16.726 kips, DCR = V_transfer / Capacity = 15… |
+| `lap overload fails.result.capacity` | 27.88 | 27.877499999999994 |
+| `lap overload fails.result.steps[6].formula` | "Capacity = 10 ea × 2.788 kips = 27.880 kips, DCR = V_transfer / Capacity = 2… | "Capacity = 10 ea × 2.788 kips = 27.877 kips, DCR = V_transfer / Capacity = 2… |
+| `lap screw Pnvs ASD.result.capacity` | 8.568 | 8.570554665355095 |
+| `lap screw Pnvs ASD.result.steps[6].formula` | "Capacity = 14 ea × 0.612 kips = 8.568 kips, DCR = V_transfer / Capacity = 8.… | "Capacity = 14 ea × 0.612 kips = 8.571 kips, DCR = V_transfer / Capacity = 8.… |
+| `lap screw Pnvs ASD.result.utilization` | 0.97 | 0.9698 |
+| `lap screw no Pnvs.result.capacity` | 5.651999999999999 | 5.649840000000001 |
+| `lap screw no Pnvs.result.steps[6].formula` | "Capacity = 12 ea × 0.471 kips = 5.652 kips, DCR = V_transfer / Capacity = 5.… | "Capacity = 12 ea × 0.471 kips = 5.650 kips, DCR = V_transfer / Capacity = 5.… |
+| `lap screw no Pnvs.result.steps[6].value` | 0.891 | 0.892 |
+| `lap screw no Pnvs.result.utilization` | 0.8912 | 0.8916 |
+| `screw J4.5.1 rational.result.checks[0].ratio` | 0.3356 | 0.3353 |
+| `screw J4.5.1 rational.result.checks[1].ratio` | 0.1916 | 0.1917 |
+| `screw J4.5.1 rational.result.utilization_reference` | 0.3356 | 0.3353 |
+| `screw no Pnvs (assumed).result.checks[0].ratio` | 0.9593 | 0.9594 |
+| `screw no Pnvs (assumed).result.utilization` | 0.9593 | 0.9594 |
+| `screw no Pnvs (assumed).result.utilization_reference` | 1.0296 | 1.0299 |
+
+**§8.3.1-5 (H1 의 Pa · Max · Ta)** — 23 값
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `III-11 RHS combined LRFD.result.interaction.P_ratio` | 0.7651 | 0.7652 |
+| `band: H1.2 with rounded Pa/Max.result.interaction.Mx_ratio` | 0.2349 | 0.2348 |
+| `band: H1.2 with rounded Pa/Max.result.interaction.P_ratio` | 0.7651 | 0.7652 |
+| `band: H1.2 with rounded Pa/Max.result.interaction.pass` | true | false |
+| `band: H1.2 with rounded Pa/Max.result.limit_state_checks[0].pass` | true | false |
+| `band: H1.2 with rounded Pa/Max.result.pass` | true | false |
+| `combined angle (P)L/1000.result.interaction.P_ratio` | 0.4559 | 0.4556 |
+| `combined angle (P)L/1000.result.interaction.total` | 0.4674 | 0.4671 |
+| `combined angle (P)L/1000.result.limit_state_checks[0].ratio` | 0.4674 | 0.4671 |
+| `combined angle (P)L/1000.result.steps[13].value` | 0.4674 | 0.4671 |
+| `combined angle (P)L/1000.result.utilization` | 0.4674 | 0.4671 |
+| `combined angle (P)L/1000 fails.result.interaction.P_ratio` | 0.4559 | 0.4556 |
+| `combined angle (P)L/1000 fails.result.interaction.total` | 2.0976 | 2.0973 |
+| `combined angle (P)L/1000 fails.result.limit_state_checks[0].ratio` | 2.0976 | 2.0973 |
+| `combined angle (P)L/1000 fails.result.steps[13].formula` | "Mux = B1x×0.00 = 0.00 kip-in (B1x = 1.0213), Muy = 1.64 kip-in; P/Pa + Mx/Ma… | "Mux = B1x×0.00 = 0.00 kip-in (B1x = 1.0213), Muy = 1.64 kip-in; P/Pa + Mx/Ma… |
+| `combined angle (P)L/1000 fails.result.steps[13].value` | 2.0976 | 2.0973 |
+| `combined angle (P)L/1000 fails.result.utilization` | 2.0976 | 2.0973 |
+| `combined positive region fails.result.interaction.Mx_ratio` | 0.6004 | 0.6003 |
+| `combined with shear and M1/M2.result.interaction.Mx_ratio` | 0.2646 | 0.2647 |
+| `sharp lippedz combined (auto FSM).result.interaction.total` | 0.2282 | 0.2283 |
+| `sharp lippedz combined (auto FSM).result.limit_state_checks[0].ratio` | 0.2282 | 0.2283 |
+| `sharp lippedz combined (auto FSM).result.steps[14].value` | 0.2282 | 0.2283 |
+| `sharp lippedz combined (auto FSM).result.utilization` | 0.2282 | 0.2283 |
+
+**§8.3.1-6 (웹 크리플링 Pn)** — 64 값
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `G5 ASD.result.h3_interaction.P_term` | 0.6556 | 0.6558 |
+| `G5 ASD.result.h3_interaction.total` | 0.6644 | 0.6645 |
+| `G5 ASD.result.limit_state_checks[1].ratio` | 1.2608 | 1.2611 |
+| `G5 ASD.result.limit_state_checks[2].ratio` | 0.8492 | 0.8493 |
+| `G5 ASD.result.steps[8].value` | 1.2608 | 1.2611 |
+| `G5 ASD.result.steps[9].value` | 0.6644 | 0.6645 |
+| `G5 ASD.result.utilization` | 1.2608 | 1.2611 |
+| `G5 ASD.result.web_crippling.ratio` | 1.2608 | 1.2611 |
+| `G5 alone governs LRFD.result.h3_interaction.P_term` | 1.4424 | 1.4427 |
+| `G5 alone governs LRFD.result.h3_interaction.total` | 1.4511 | 1.4515 |
+| `G5 alone governs LRFD.result.limit_state_checks[1].ratio` | 1.8647 | 1.8652 |
+| `G5 alone governs LRFD.result.limit_state_checks[2].ratio` | 1.2123 | 1.2126 |
+| `G5 alone governs LRFD.result.steps[8].value` | 1.8647 | 1.8652 |
+| `G5 alone governs LRFD.result.steps[9].formula` | "0.91(P/Pn) + M/Mnℓo = 1.442 + 1.00/114.50 = 1.451 > 1.197" | "0.91(P/Pn) + M/Mnℓo = 1.443 + 1.00/114.50 = 1.452 > 1.197" |
+| `G5 alone governs LRFD.result.steps[9].value` | 1.4511 | 1.4515 |
+| `G5 alone governs LRFD.result.utilization` | 1.8647 | 1.8652 |
+| `G5 alone governs LRFD.result.web_crippling.ratio` | 1.8647 | 1.8652 |
+| `G5 load from Vu.result.h3_interaction.P_term` | 0.3278 | 0.3279 |
+| `G5 load from Vu.result.h3_interaction.total` | 0.3365 | 0.3366 |
+| `G5 load from Vu.result.limit_state_checks[2].ratio` | 0.4238 | 0.4239 |
+| `G5 load from Vu.result.limit_state_checks[3].ratio` | 0.2811 | 0.2812 |
+| `G5 load from Vu.result.steps[9].value` | 0.4238 | 0.4239 |
+| `G5 load from Vu.result.steps[10].value` | 0.3365 | 0.3366 |
+| `G5 load from Vu.result.utilization` | 0.4238 | 0.4239 |
+| `G5 load from Vu.result.web_crippling.ratio` | 0.4238 | 0.4239 |
+| `H3 multi-web ETF Z.result.h3_interaction.P_term` | 0.8004 | 0.8005 |
+| `H3 multi-web ETF Z.result.h3_interaction.total` | 0.883 | 0.8831 |
+| `H3 multi-web ETF Z.result.limit_state_checks[2].ratio` | 1.0106 | 1.0108 |
+| `H3 multi-web ETF Z.result.limit_state_checks[3].ratio` | 0.672 | 0.6721 |
+| `H3 multi-web ETF Z.result.steps[9].value` | 1.0106 | 1.0108 |
+| `H3 multi-web ETF Z.result.steps[10].value` | 0.883 | 0.8831 |
+| `H3 multi-web ETF Z.result.utilization` | 1.0106 | 1.0108 |
+| `H3 multi-web ETF Z.result.web_crippling.ratio` | 1.0106 | 1.0108 |
+| `H3-2 built-up I.result.steps[7].formula` | "Pn = 10.443 kips (IOF, unfastened), φw×Pn = 8.877 kips, P = 1.000 kips → P/P… | "Pn = 10.443 kips (IOF, unfastened), φw×Pn = 8.876 kips, P = 1.000 kips → P/P… |
+| `H3-2 built-up I.result.web_crippling.design_strength` | 8.877 | 8.876 |
+| `band: web crippling Pn rounded.result.h3_interaction.P_term` | 0.7734 | 0.7736 |
+| `band: web crippling Pn rounded.result.h3_interaction.total` | 0.7822 | 0.7824 |
+| `band: web crippling Pn rounded.result.limit_state_checks[1].pass` | true | false |
+| `band: web crippling Pn rounded.result.limit_state_checks[1].ratio` | 0.9999 | 1.0002 |
+| `band: web crippling Pn rounded.result.limit_state_checks[2].ratio` | 0.6535 | 0.6536 |
+| `band: web crippling Pn rounded.result.pass` | true | false |
+| `band: web crippling Pn rounded.result.steps[8].value` | 0.9999 | 1.0002 |
+| `band: web crippling Pn rounded.result.steps[9].formula` | "0.91(P/Pn) + M/Mnℓo = 0.773 + 1.00/114.50 = 0.782 ≤ 1.197" | "0.91(P/Pn) + M/Mnℓo = 0.774 + 1.00/114.50 = 0.782 ≤ 1.197" |
+| `band: web crippling Pn rounded.result.steps[9].value` | 0.7822 | 0.7824 |
+| `band: web crippling Pn rounded.result.utilization` | 0.9999 | 1.0002 |
+| `band: web crippling Pn rounded.result.web_crippling.ratio` | 0.9999 | 1.0002 |
+| `flexure cold work + shear + wc.result.h3_interaction.P_term` | 0.9001 | 0.8999 |
+| `flexure cold work + shear + wc.result.h3_interaction.total` | 1.0324 | 1.0323 |
+| `flexure cold work + shear + wc.result.limit_state_checks[2].ratio` | 1.1637 | 1.1635 |
+| `flexure cold work + shear + wc.result.limit_state_checks[3].ratio` | 0.8625 | 0.8624 |
+| `flexure cold work + shear + wc.result.steps[10].formula` | "Pn = 1.011 kips (EOF, fastened), φw×Pn = 0.859 kips, P = 1.000 kips → P/Pa =… | "Pn = 1.011 kips (EOF, fastened), φw×Pn = 0.860 kips, P = 1.000 kips → P/Pa =… |
+| `flexure cold work + shear + wc.result.steps[10].value` | 1.1637 | 1.1635 |
+| `flexure cold work + shear + wc.result.steps[11].value` | 1.0324 | 1.0323 |
+| `flexure cold work + shear + wc.result.utilization` | 1.1637 | 1.1635 |
+| `flexure cold work + shear + wc.result.web_crippling.design_strength` | 0.859 | 0.86 |
+| `flexure cold work + shear + wc.result.web_crippling.ratio` | 1.1637 | 1.1635 |
+| `purlin support with wc.result.h3_interaction.P_term` | 0.839 | 0.8389 |
+| `purlin support with wc.result.h3_interaction.total` | 1.397 | 1.3969 |
+| `purlin support with wc.result.limit_state_checks[2].ratio` | 1.5213 | 1.5211 |
+| `purlin support with wc.result.limit_state_checks[3].ratio` | 1.7855 | 1.7854 |
+| `purlin support with wc.result.steps[9].value` | 1.5213 | 1.5211 |
+| `purlin support with wc.result.steps[10].value` | 1.397 | 1.3969 |
+| `purlin support with wc.result.utilization` | 1.7855 | 1.7854 |
+| `purlin support with wc.result.web_crippling.ratio` | 1.5213 | 1.5211 |
+
+**§8.3.1-7 (랩 H2 를 √ 꼴로)** — 29 값
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `lap bolt Se Mnd.result.flexure_dcr_governing` | 0.6667 | 0.6966 |
+| `lap bolt Se Mnd.result.steps[10].formula` | "(Mu/φMn)² + (Vu/φVn)² = (120.00/297.00)² + (4.000/7.049)² = 0.485 ≤ 1.0" | "√((Mu/φMn)² + (Vu/φVn)²) = √((120.00/297.00)² + (4.000/7.049)²) = 0.697 ≤ 1.0" |
+| `lap bolt Se Mnd.result.steps[10].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
+| `lap bolt Se Mnd.result.steps[10].value` | 0.485 | 0.697 |
+| `lap bolt Se e=2.result.flexure_dcr_governing` | 0.4853 | 0.6966 |
+| `lap bolt Se e=2.result.steps[9].formula` | "(Mu/φMn)² + (Vu/φVn)² = (120.00/297.00)² + (4.000/7.049)² = 0.485 ≤ 1.0" | "√((Mu/φMn)² + (Vu/φVn)²) = √((120.00/297.00)² + (4.000/7.049)²) = 0.697 ≤ 1.0" |
+| `lap bolt Se e=2.result.steps[9].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
+| `lap bolt Se e=2.result.steps[9].value` | 0.485 | 0.697 |
+| `lap bolt short e.result.flexure_dcr_governing` | 0.4853 | 0.6966 |
+| `lap bolt short e.result.steps[9].formula` | "(Mu/φMn)² + (Vu/φVn)² = (120.00/297.00)² + (4.000/7.049)² = 0.485 ≤ 1.0" | "√((Mu/φMn)² + (Vu/φVn)²) = √((120.00/297.00)² + (4.000/7.049)²) = 0.697 ≤ 1.0" |
+| `lap bolt short e.result.steps[9].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
+| `lap bolt short e.result.steps[9].value` | 0.485 | 0.697 |
+| `lap bolt short lap.result.flexure_dcr_governing` | 0.4853 | 0.6966 |
+| `lap bolt short lap.result.steps[9].formula` | "(Mu/φMn)² + (Vu/φVn)² = (120.00/297.00)² + (4.000/7.049)² = 0.485 ≤ 1.0" | "√((Mu/φMn)² + (Vu/φVn)²) = √((120.00/297.00)² + (4.000/7.049)²) = 0.697 ≤ 1.0" |
+| `lap bolt short lap.result.steps[9].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
+| `lap bolt short lap.result.steps[9].value` | 0.485 | 0.697 |
+| `lap overload fails.result.flexure_dcr_governing` | 16.6469 | 4.0801 |
+| `lap overload fails.result.steps[9].formula` | "(Mu/φMn)² + (Vu/φVn)² = (200.00/49.50)² + (4.000/7.049)² = 16.647 ≤ 1.0" | "√((Mu/φMn)² + (Vu/φVn)²) = √((200.00/49.50)² + (4.000/7.049)²) = 4.080 ≤ 1.0" |
+| `lap overload fails.result.steps[9].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
+| `lap overload fails.result.steps[9].value` | 16.647 | 4.08 |
+| `lap overload fails.result.warnings[3]` | "Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = 16.65 > 1.0." | "Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = 4.08 > 1.0." |
+| `lap screw Pnvs ASD.result.flexure_dcr_governing` | 0.6484 | 0.7314 |
+| `lap screw Pnvs ASD.result.steps[10].formula` | "(Mu/1/ΩMn)² + (Vu/1/ΩVn)² = (66.00/118.56)² + (2.200/4.637)² = 0.535 ≤ 1.0" | "√((Mu/1/ΩMn)² + (Vu/1/ΩVn)²) = √((66.00/118.56)² + (2.200/4.637)²) = 0.731 ≤… |
+| `lap screw Pnvs ASD.result.steps[10].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
+| `lap screw Pnvs ASD.result.steps[10].value` | 0.535 | 0.731 |
+| `lap screw no Pnvs.result.flexure_dcr_governing` | 0.2245 | 0.3618 |
+| `lap screw no Pnvs.result.steps[9].formula` | "(Mu/φMn)² + (Vu/φVn)² = (40.00/178.20)² + (2.000/7.049)² = 0.131 ≤ 1.0" | "√((Mu/φMn)² + (Vu/φVn)²) = √((40.00/178.20)² + (2.000/7.049)²) = 0.362 ≤ 1.0" |
+| `lap screw no Pnvs.result.steps[9].name` | "Lap Combined Bending+Shear (§H2)" | "Lap Combined Bending+Shear (§H2, Eq. H2-1)" |
+| `lap screw no Pnvs.result.steps[9].value` | 0.131 | 0.362 |

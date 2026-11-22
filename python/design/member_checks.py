@@ -181,18 +181,136 @@ def _column_fcre_steps(tr, ctx):
                   result=q('Fcre', fr['Fcre'], 'stress'), buckling_type=fr.get('buckling_type'))
 
 
+def _sp_dim(key, val):
+    return q(key, val, 'length', src('section_property', key=key, basis='out-to-out'))
+
+
+def _local_fcr_steps(tr, an, eq_label):
+    """부록 1 Eq. 1.1-4 — 요소(웹 · 플랜지 · 립)마다 평탄폭 · 판좌굴 응력, 그 최소(loads.local_params.calc_Fcrl)."""
+    tc, el = an['trace'], an['elements']
+    t_q = q('t', an['t'], 'length', src('section_property', key='t'))
+    E = q('E', tc['E'], 'stress', spec())
+    mu = q('μ', tc['mu'], 'dimensionless', spec())
+    if tc['R'] > 0:
+        i_c = tr.add('equation', 'c = R + t  (corner allowance per side)',
+                     inputs=[q('R', tc['R'], 'length', src('section_property', key='R')), t_q],
+                     result=q('c', tc['corner'], 'length'))
+    else:
+        i_c = tr.add('equation', 'c = t / 2  (R not given)', inputs=[t_q], result=q('c', tc['corner'], 'length'))
+    refs = []
+    for name, dim in (('web', 'ho'), ('flange', 'bo'), ('lip', 'do')):
+        e = el.get(name)
+        if not e:
+            continue
+        if name == 'web':
+            expr_w = 'w = ho − 2c'
+        elif name == 'flange':
+            expr_w = 'w = bo − 2c' if e.get('corners', 2) == 2 else 'w = bo − c'
+        else:
+            expr_w = 'w = do − c'
+        i_w = tr.add('equation', expr_w, inputs=[_sp_dim(dim, an[dim]), tr.ref(i_c)],
+                     result=q(f'w,{name}', e['w'], 'length'))
+        ins = [q('k', e['k'], 'dimensionless', src('specification', note=f'{name} plate buckling coefficient')),
+               E, mu, t_q, tr.ref(i_w)]
+        expr = f'Fcrl,{name} = k π² E / [12 (1 − μ²)] (t / w)²'
+        if e.get('scale', 1.0) != 1.0:
+            ins.append(q('s', e['scale'], 'dimensionless',
+                         src('specification', note='extrapolated to the extreme fibre (App. 2 §2.3.3.2)')))
+            expr += ' × s'
+        refs.append(tr.ref(tr.add('elastic_buckling', expr, equation='1.1-4', inputs=ins,
+                                  result=q(f'Fcrl,{name}', e['Fcrl'], 'stress'))))
+    return tr.add('elastic_buckling', 'Fcrl = min over the elements', equation=eq_label, inputs=refs,
+                  result=q('Fcrl', an['F'], 'stress'), governing=an.get('governing'))
+
+
+def _dist_fcr_steps(tr, an, ctx):
+    """부록 2 §2.3.1.3 / §2.3.3.3 — 플랜지 · 립 성질(표 2.3.1.3-1), Lcrd, 회전강성 넷, Fcrd
+    (loads.distortional_params 가 계산한 그 값)."""
+    tc = an['trace']
+    fp, st = tc['fp'], tc['stiff']
+    flex = tc['flexure']
+    t_q = q('t', an['t'], 'length', src('section_property', key='t'))
+    i_b = tr.add('equation', 'b = bo − t  (centreline flange)', inputs=[_sp_dim('bo', an['bo']), t_q],
+                 result=q('b', an['b'], 'length'))
+    i_d = tr.add('equation', 'd = do − t/2  (centreline lip)', inputs=[_sp_dim('do', an['do']), t_q],
+                 result=q('d', an['d'], 'length'))
+    th = q('θ', an['theta'], 'angle', src('section_property', key='lip angle'))
+    geo = [tr.ref(i_b), tr.ref(i_d), t_q, th]
+    props = {}
+    for key, qty in (('Af', 'area'), ('Jf', 'torsion_constant'), ('Ixf', 'moment_of_inertia'),
+                     ('Iyf', 'moment_of_inertia'), ('Ixyf', 'moment_of_inertia'),
+                     ('xof', 'length'), ('hxf', 'length'), ('yof', 'length')):
+        props[key] = tr.ref(tr.add('equation', f'{key} (flange + lip)', equation='Table 2.3.1.3-1', inputs=geo,
+                                   result=q(key, fp[key], qty)))
+    cwf = q('Cwf', fp['Cwf'], 'warping_constant', src('specification', note='Table 2.3.1.3-1'))
+    E = q('E', tc['E'], 'stress', spec())
+    G = q('G', tc['G'], 'stress', spec())
+    mu = q('μ', tc['mu'], 'dimensionless', spec())
+    ho = _sp_dim('ho', an['ho'])
+    if flex:
+        lexpr = ('Lcrd = {(4π⁴ ho (1−μ²)/t³)[Ixf (xof−hxf)² + Cwf − (Ixyf²/Iyf)(xof−hxf)²] + π⁴ ho⁴/720}^0.25')
+    else:
+        lexpr = 'Lcrd = {(6π⁴ ho (1−μ²)/t³)[Ixf (xof−hxf)² + Cwf − (Ixyf²/Iyf)(xof−hxf)²]}^0.25'
+    i_L = tr.add('elastic_buckling', lexpr, equation='2.3.3.3-4' if flex else '2.3.1.3-7',
+                 inputs=[ho, mu, t_q, props['Ixf'], props['xof'], props['hxf'], cwf, props['Ixyf'], props['Iyf']],
+                 result=q('Lcrd', tc['Lcrd'], 'length'))
+    if tc['Lm'] is not None:
+        i_L = tr.add('modifier', 'L = min(Lcrd, Lm)',
+                     inputs=[tr.ref(i_L), q('Lm', tc['Lm'], 'length', src('user_input', key='Lm'))],
+                     result=q('L', tc['L'], 'length'))
+    L = tr.ref(i_L, 'L')
+    i_fe = tr.add('elastic_buckling',
+                  'kφfe = (π/L)⁴ [E Ixf (xof−hxf)² + E Cwf − E (Ixyf²/Iyf)(xof−hxf)²] + (π/L)² G Jf',
+                  equation='2.3.1.3-3',
+                  inputs=[L, E, props['Ixf'], props['xof'], props['hxf'], cwf, props['Ixyf'], props['Iyf'], G,
+                          props['Jf']],
+                  result=q('kφfe', st['k_phi_fe'], 'rotational_stiffness'))
+    if flex:
+        wexpr = 'kφwe = E t³/(12(1−μ²)) [3/ho + (π/L)² 19 ho/60 + (π/L)⁴ ho³/240]'
+    else:
+        wexpr = 'kφwe = E t³ / [6 ho (1 − μ²)]'
+    i_we = tr.add('elastic_buckling', wexpr, equation='2.3.3.3-5' if flex else '2.3.1.3-4',
+                  inputs=[E, t_q, ho, mu] + ([L] if flex else []),
+                  result=q('kφwe', st['k_phi_we'], 'rotational_stiffness'))
+    i_fg = tr.add('elastic_buckling',
+                  'k̃φfg = (π/L)² [Af ((xof−hxf)² (Ixyf/Iyf)² − 2 yof (xof−hxf)(Ixyf/Iyf) + hxf² + yof²) + Ixf + Iyf]',
+                  equation='2.3.1.3-5',
+                  inputs=[L, props['Af'], props['xof'], props['hxf'], props['Ixyf'], props['Iyf'], props['yof'],
+                          props['Ixf']],
+                  result=q('k̃φfg', st['k_tilde_phi_fg'], 'area'))
+    if flex:
+        gexpr = ('k̃φwg = ho t π²/13440 {[45360(1−ξweb) + 62160](L/ho)² + 448π² + (ho/L)² [53 + 3(1−ξweb)] π⁴}'
+                 ' / [π⁴ + 28π² (L/ho)² + 420 (L/ho)⁴]')
+    else:
+        gexpr = 'k̃φwg = (π/L)² t ho³ / 60'
+    i_wg = tr.add('elastic_buckling', gexpr, equation='2.3.3.3-6' if flex else '2.3.1.3-6',
+                  inputs=[ho, t_q, L] + ([q('ξweb', tc['xi_web'], 'dimensionless', spec())] if flex else []),
+                  result=q('k̃φwg', st['k_tilde_phi_wg'], 'area'))
+    kq = q('kφ', tc['kphi_external'], 'rotational_stiffness',
+           src('user_input', key='kphi') if an.get('kphi_given') else
+           src('engine_default', key='kphi', note='0 — no external rotational restraint'))
+    ins = [tr.ref(i_fe), tr.ref(i_we), kq, tr.ref(i_fg), tr.ref(i_wg)]
+    expr = 'Fcrd = (kφfe + kφwe + kφ) / (k̃φfg + k̃φwg)'
+    if flex:
+        ins.insert(0, q('β', tc['beta'], 'dimensionless', spec()))
+        expr = 'Fcrd = β (kφfe + kφwe + kφ) / (k̃φfg + k̃φwg)  (β = 1 here; the moment-gradient β is applied to Mcrd)'
+    return tr.add('elastic_buckling', expr, equation='2.3.3.3-2' if flex else '2.3.1.3-2', inputs=ins,
+                  result=q('Fcrd', an['F'], 'stress'))
+
+
 def _analytic_crit_steps(tr, an, ctx, sym, base_sym, area_sym, area_val, area_q, eq_label, floor_bound, prefix):
-    """부록 1/2 해석식 대체: Fcr(해석식) → Pcr = Fcr·A(또는 Sf) → (하한으로 올림)."""
-    dims = [q(k, an[k], 'length', src('section_property', key=k, basis='out-to-out')) for k in ('ho', 'bo', 'do')
-            if an.get(k) is not None]
-    dims.append(q('t', an['t'], 'length', src('section_property', key='t')))
-    i_f = tr.add('elastic_buckling', f'{base_sym} = analytic elastic buckling stress ({eq_label})',
-                 equation=eq_label, inputs=dims,
-                 result=q(base_sym, an['F'], 'stress'),
-                 detail_unavailable=an.get('detail_note'), governing=an.get('governing'))
+    """부록 1/2 해석식 대체: Fcr(요소별 · 강성항까지) → Pcr = Fcr·A(또는 Sf) → (하한으로 올림)."""
+    if an.get('kind') == 'local' and an.get('trace'):
+        i_f = _local_fcr_steps(tr, an, eq_label)
+    elif an.get('kind') == 'distortional' and an.get('trace'):
+        i_f = _dist_fcr_steps(tr, an, ctx)
+    else:
+        dims = [_sp_dim(k, an[k]) for k in ('ho', 'bo', 'do') if an.get(k) is not None]
+        dims.append(q('t', an['t'], 'length', src('section_property', key='t')))
+        i_f = tr.add('elastic_buckling', f'{base_sym} = analytic elastic buckling stress ({eq_label})',
+                     equation=eq_label, inputs=dims, result=q(base_sym, an['F'], 'stress'))
     i_p = tr.add('equation', f'{sym} = {base_sym} {area_sym}', inputs=[tr.ref(i_f), area_q],
-                 result=q(sym, an['F'] * area_val if not an.get('raw_product') else an['raw_product'],
-                          'force' if area_sym == 'A' else 'moment'))
+                 result=q(sym, an['raw_product'], 'force' if area_sym == 'A' else 'moment'))
     if an.get('raised'):
         i_p = tr.add('modifier', f'{sym} = max({sym}, single-minimum floor)  (§4.1: the lone minimum is a floor)',
                      inputs=[tr.ref(i_p), q(f'{sym},floor', floor_bound, 'force' if area_sym == 'A' else 'moment',
@@ -262,7 +380,7 @@ def compression_checks(ctx):
         lr = ctx['local_result']
         an = ctx.get('pcrl_an')
         if an:
-            i_cr = _analytic_crit_steps(tr, an, ctx, 'Pcrl', 'Fcrl', 'A', ctx['Ag'], A, 'App. 1 Eq. 1.1-4',
+            i_cr = _analytic_crit_steps(tr, an, ctx, 'Pcrl', 'Fcrl', 'A', ctx['Ag'], A, '1.1-4',
                                         ctx['diag']['bound'], 'P_')
         else:
             i_cr = tr.add('elastic_buckling', 'Pcrl (elastic local buckling load)',
@@ -296,7 +414,7 @@ def compression_checks(ctx):
         i_py = tr.add('yield', 'Py = Ag Fy', equation='E4.1-4', inputs=[A, fy], result=q('Py', ctx['Py'], 'force'))
         an = ctx.get('pcrd_an')
         if an:
-            i_cr = _analytic_crit_steps(tr, an, ctx, 'Pcrd', 'Fcrd', 'A', ctx['Ag'], A, 'App. 2 Eq. 2.3.1.3-1',
+            i_cr = _analytic_crit_steps(tr, an, ctx, 'Pcrd', 'Fcrd', 'A', ctx['Ag'], A, '2.3.1.3-2',
                                         ctx['diag']['bound'], 'P_')
         else:
             i_cr = tr.add('elastic_buckling', 'Pcrd (elastic distortional buckling load)',
@@ -630,7 +748,7 @@ def _mcrl_steps(tr, ctx, st, Sf):
     an = st.get('Mcrl_an')
     if an:
         return _analytic_crit_steps(tr, an, ctx, 'Mcrl', 'Fcrl', 'Sf', st['Sf_eff'], Sf,
-                                    'App. 1 Eq. 1.1-4 (bending)', ctx['diag']['bound'], 'M_')
+                                    '1.1-4', ctx['diag']['bound'], 'M_')
     return tr.add('elastic_buckling', 'Mcrl (elastic local buckling moment)',
                   inputs=[q('Mcrl', st['Mcrl'], 'moment',
                             buckling_src(st['Mcrl_source'], ctx['dsm'], 'M_', 'local'))],
@@ -642,7 +760,7 @@ def _mcrd_steps(tr, ctx, st, Sf, use_base=False):
     base = st['Mcrd_base']
     if an:
         i = _analytic_crit_steps(tr, an, ctx, 'Mcrd', 'Fcrd', 'Sf', st['Sf_eff'], Sf,
-                                 'App. 2 Eq. 2.3.3.3-1', ctx['diag']['bound'], 'M_')
+                                 '2.3.3.3-2', ctx['diag']['bound'], 'M_')
     else:
         lbl = str(st['Mcrd_source']).split(' [β=')[0]
         i = tr.add('elastic_buckling', 'Mcrd (elastic distortional buckling moment)',
@@ -814,8 +932,6 @@ def web_crippling_check(ctx, wc):
                        inputs=[tr.ref(i), q('α', det['alpha'], 'dimensionless', spec()),
                                q('Pn,IOF', det.get('Pn_interior_cap'), 'force', spec())],
                        result=q('Pnc', det['Pn_final'], 'force'))
-        i = tr.add('modifier', 'Pn rounded to 0.001 kip (the engine uses the rounded value)',
-                   inputs=[tr.ref(i)], result=q('Pn', wc['Pn'], 'force'), rounded_to=0.001)
     else:
         i = tr.add('equation', 'Pn (Eq. G5-1)', equation=w.get('equation'),
                    inputs=[q('Pn', wc['Pn'], 'force', src('specification', table=w.get('table')))],
@@ -925,13 +1041,6 @@ def positive_region_check(ctx, pr):
                                 'capacity': _mirror('positive_region.phi_Mn', 2),
                                 'ratio': _mirror('positive_region.utilization', 4)},
                        phi_symbol='φb', omega_symbol='Ωb', location=loc)
-    # 엔진은 이 구간의 비를 소수 4자리로 반올림한 뒤 1.0 과 비교한다 — 판정은 엔진 것을 따른다.
-    if pr.get('pass_pos') is not None and c['verdict'] in ('pass', 'fail'):
-        eng = 'pass' if pr['pass_pos'] else 'fail'
-        if eng != c['verdict']:
-            c['verdict'] = eng
-            c['steps'][-1]['verdict'] = eng
-            c['steps'][-1]['note'] = 'engine compares the ratio rounded to 4 decimals with 1.0'
     return c
 
 
@@ -983,9 +1092,9 @@ def axial_bending_check(ctx):
     tr = Trace()
     raw = ctx['raw']
     P = q('P', ctx['Pu'], 'force', demand_source(p, 'Pu'))
-    Pa = q('Pa', ctx['Pa'], 'force', src('check', id='member.compression', rounded_to=0.01,
+    Pa = q('Pa', ctx['Pa'], 'force', src('check', id='member.compression',
                                          note='governing compression design strength (Chapter E)'))
-    Max = q('Max', ctx['Max'], 'moment', src('check', id='member.flexure', rounded_to=0.01,
+    Max = q('Max', ctx['Max'], 'moment', src('check', id='member.flexure',
                                              note='governing flexural design strength (Chapter F)'))
     mx = q('Mx', ctx['Mux'], 'moment', demand_source(p, 'Mux'))
     ins = [P, Pa]
@@ -1027,7 +1136,7 @@ def tension_bending_checks(ctx):
     dm, p = ctx['dm'], ctx['params']
     out = []
     T = q('T', ctx['T'], 'force', demand_source(p, 'Pu'))
-    Ta = q('Ta', ctx['Ta'], 'force', src('check', id='member.tension', rounded_to=0.01))
+    Ta = q('Ta', ctx['Ta'], 'force', src('check', id='member.tension'))
     mx = q('Mx', ctx['Mux'], 'moment', demand_source(p, 'Mux'))
     my = q('My', ctx['Muy'], 'moment', demand_source(p, 'Muy'))
     for cid, val, eq in (('member.tension_bending.flange_yield', ctx['r11'], 'H1.1-1'),
@@ -1046,7 +1155,7 @@ def tension_bending_checks(ctx):
                    T, Ta]
             expr = 'Mx/Maxt + My/Mayt + T/Ta'
         else:
-            ins = [mx, q('Max', ctx['Max'], 'moment', src('check', id='member.flexure', rounded_to=0.01)), my,
+            ins = [mx, q('Max', ctx['Max'], 'moment', src('check', id='member.flexure')), my,
                    q('May', ctx['May'], 'moment', src('user_input', key='May_strength') if ctx['May'] < 1e9
                      else src('engine_default', note='no weak-axis moment')), T, Ta]
             expr = 'Mx/Max + My/May − T/Ta'
@@ -1092,6 +1201,11 @@ def remap_mirrors(checks: list, sub: str) -> list:
             else:
                 c.pop('mirrors', None)
         c['part_of'] = sub
+        if c['verdict'] == 'not_evaluated' and str(c.get('reason') or '').startswith('no required'):
+            # 조합 검토의 성분에 그 소요가 없으면(예: Mux = 0) 그 성분 단독 검토는 해당하지 않는다 —
+            # 상호작용(§H1)이 그 성분 강도를 0 항으로 쓴다.
+            c['verdict'] = 'not_applicable'
+            c['reason'] = c['reason'] + ' — this component has no demand in the combined check'
         out.append(c)
     return out
 
@@ -1106,3 +1220,45 @@ def demote_to_not_evaluated(check: dict, reason: str) -> dict:
         c['steps'] = list(c['steps'])
         c['steps'][-1] = {**c['steps'][-1], 'verdict': 'not_evaluated'}
     return c
+
+
+# ---------------------------------------------------------------- 표 B4.1-1 적용 한계
+
+def b4_check(dm, items, dsm_warnings, exceeded, generated=None):
+    """§B4.1 표 B4.1-1 — check_dsm_limits 가 검토한 한계마다 비 · 한계 · 표의 행(단계)."""
+    tr = Trace()
+    for it in items:
+        num_sym, num_val, num_q = it['num']
+        ins = [q(num_sym, num_val, num_q, src('material', key='Fy') if num_sym == 'Fy'
+                 else src('section_property', key=num_sym, generated=True if generated else None))]
+        if it['den'] is not None:
+            den_sym, den_val, den_q = it['den']
+            ins.append(q(den_sym, den_val, den_q, src('section_property', key=den_sym,
+                                                      generated=True if generated else None)))
+            i_r = tr.add('equation', it['label'], inputs=ins, result=q(it['label'].split()[-1], it['ratio'],
+                                                                         'dimensionless'))
+            ref = tr.ref(i_r)
+            lim = q('limit', it['limit'], 'dimensionless', src('specification', table='B4.1-1', row=it['row']))
+        else:
+            ref = ins[0]
+            lim = q('limit', it['limit'], 'stress', src('specification', table='B4.1-1', row=it['row']))
+        tr.branch(f"{ref['symbol']} {'<' if it['strict'] else '≤'} {it['limit']:g}  ({it['row']})", it['ok'],
+                  'Table B4.1-1', inputs=[ref, lim])
+    labels = {it['label'].split()[-1] for it in items}
+    unchecked = []
+    if not ({'h/t', 'w/t'} & labels):
+        unchecked.append('web')
+    if not ({'b/t', 'd/t'} & labels) and 'flange' not in ' '.join(it['label'] for it in items):
+        unchecked.append('flange')
+    if exceeded:
+        return make_check('member.applicability.b4', design_method=dm, verdict='not_evaluated',
+                          reason='; '.join(dsm_warnings), steps=tr.steps)
+    if not items:
+        # 두께를 몰라 표 B4.1-1 을 하나도 대조하지 못했다 — 엔진은 이것으로 판정을 내리지 않는다(counts=False).
+        return make_check('member.applicability.b4', design_method=dm, verdict='not_evaluated', counts=False,
+                          reason='Table B4.1-1 limits not checked — thickness / element dimensions not given')
+    note = (('not checked — element dimensions not given: ' + ', '.join(unchecked)) if unchecked else None)
+    # 넘지 않으면 판정에 들지 않는다(엔진은 한계를 넘을 때만 판정을 '판정 없음'으로 내린다).
+    return make_check('member.applicability.b4', design_method=dm, verdict='pass', steps=tr.steps,
+                      counts=False, reason=note,
+                      steps_unavailable='no element dimensions given — only the limits listed were checked')

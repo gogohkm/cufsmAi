@@ -249,6 +249,28 @@ def _member():
     a(('tension no Fu', dict(member_type='tension', Fy=50, Tu=30.0, props=dict(A=0.881))))
     a(('tension no An', dict(member_type='tension', Fy=50, Fu=65, Tu=30.0, props=dict(A=0.881))))
     a(('tension no demand', dict(member_type='tension', Fy=50, Fu=65, An=0.7, props=dict(A=0.881))))
+    # --- 반올림 띠 안의 사례(§8.3.1 수정 3–6) — 옛 엔진은 반올림한 값으로 판정했다 ---
+    a(('band: positive region ratio 1.000004', dict(member_type='flexure', Fy=55, Lb=56.3, Cb=1.67, Mu=50.0,
+                                                    Mu_pos=83.2944, Lb_pos=0.0, section_type='C', props=dict(C9),
+                                                    dsm=dict(Mcrl=84.4, Mcrd=107.0, My=126.0))))
+    a(('band: H1.2 with rounded Pa/Max', dict(member_type='combined', design_method='LRFD', Fy=46.0, KxLx=120,
+                                              KyLy=120, KtLt=120, Lb=120, Cb=1.0, Pu=69.0, Mux=43.00252593173444,
+                                              Muy=0, Cmx=1.0, Cmy=1.0, section_type='RHS',
+                                              props=dict(A=2.914, Sf=5.56, Ixx=16.69, Izz=16.69, rx=2.393,
+                                                         ry=2.393, J=25.3, Cw=0.0),
+                                              dsm=dict(Pcrl=52.20 * 2.914, Pcrd=0, Mcrl=52.20 * 5.56 * 2.0,
+                                                       Mcrd=0))))
+    a(('band: web crippling Pn rounded', dict(member_type='flexure', design_method='LRFD', Fy=50, Lb=0.0001,
+                                              section_type='C', Mu=1.0, wc_P=1.1797,
+                                              props=dict(C9, t=0.059, R=0.1875, h_web=8.51, b_flange=1.98,
+                                                         d_lip=0.53),
+                                              section=dict(C9_SECTION), dsm=dict(Mcrl=1e4, Mcrd=1e4), wc_N=3.0,
+                                              wc_R=0.1875, wc_support='EOF', wc_fastened='fastened')))
+    a(('combined angle (P)L/1000 fails', dict(member_type='combined', design_method='ASD', Fy=50.0, KxLx=18.0,
+                                              KyLy=18.0, KtLt=18.0, Lb=18.0, Pu=3.0, Mux=0.0, Muy=1.5, Cmx=1.0,
+                                              Cmy=1.0, Fcre=40.0, section_type='lipped_angle', May_strength=1.0,
+                                              props=dict(A=0.4, Sf=0.2, rx=0.8, ry=0.5, J=1e-3, Cw=1e-3, xo=0.5),
+                                              dsm=dict(Pcrl=30.0, Pcrd=30.0, Mcrl=30.0, Mcrd=30.0))))
     # --- 퍼린(하중 해석 뒤 구간 설계 — StcfsdPanel 이 보내는 꼴) ---
     zr = dict(member_type='flexure', design_method='ASD', Fy=55.0, Fu=70.0, section_type='Z', props=dict(ZP),
               section=dict(Z8_SECTION))
@@ -391,6 +413,30 @@ def _connections():
                                       t2=0.06, weld_length=3.0, groove_type='flare_v', load_direction='transverse',
                                       Pu=1.0, member_case='not_tension_member', j6_3_not_applicable=True)))
     a(('connection no demand', _iv9('ASD')))
+    a(('band: IV-9 J6.1 design strength rounded', _iv9('ASD', Pu=3.6712)))
+    # --- 나머지 id · 계산 과정을 지나는 사례(2026-11-23 두 번째 묶음에서 더함)
+    a(('arc seam sheet-to-sheet', dict(connection_type='arc_seam', design_method='LRFD', Fy=33, Fu=45, t1=0.048,
+                                       t2=0.048, da=0.5, weld_length=1.0, n=1, joint='sheet_to_sheet', e=1.0,
+                                       member_case='not_tension_member', j6_3_not_applicable=True, Pu=1.0)))
+    a(('flare bevel weld-metal cap', dict(connection_type='groove', design_method='LRFD', Fy=50, Fu=65, t1=0.12,
+                                          t2=0.25, weld_length=2.0, groove_type='flare_bevel',
+                                          load_direction='longitudinal', w1=0.05, w2=0.06, R=0.1875, process='GMAW',
+                                          member_case='not_tension_member', j6_3_not_applicable=True, Pu=1.0)))
+    a(('bolt part 2 J6.2 J6.3', dict(connection_type='bolt', design_method='ASD', Fy=33, Fu=45, t1=0.06, t2=0.10,
+                                     d=0.5, n=2, e=1.0, s=2.0, g=2.0, bolt_grade='A307', width=4.0,
+                                     member_case='flat_sheet', edge_transverse=1.0, Pu=1.0,
+                                     j6_part2={'t': 0.10, 'Fu': 45, 'Fy': 33, 'e': 1.0, 'width': 4.0, 'g': 2.0,
+                                               'member_case': 'flat_sheet', 'edge_transverse': 1.0})))
+    a(('bolt oversized holes', _iv9('LRFD', hole_type='oversized', Pu=2.0)))
+    a(('screw two in a row', _iv11('LRFD', n=2, s=1.0, Vu=0.5)))
+    a(('PAF two with spacing', _iv12('LRFD', n=2, s=1.5, Vu=0.3)))
+    a(('arc spot small de', dict(connection_type='arc_spot', design_method='ASD', Fy=33, Fu=45, t1=0.06, t2=0.105,
+                                 da=0.5, n=1, e=1.0, joint='sheet_to_support', member_case='not_tension_member',
+                                 j6_3_not_applicable=True, Pu=0.5)))
+    a(('groove PJP no te', dict(connection_type='groove', design_method='LRFD', Fy=50, Fu=65, t1=0.06, t2=0.06,
+                                weld_length=2.0, groove_type='partial', load_direction='tension', Pu=0.5)))
+    a(('fillet member tension no Ag', _iv1('ASD', 0.060, 0.105, member_tension=True, Pu=1.0)))
+    a(('fillet V and T', _iv1('ASD', 0.060, 0.105, Vu=1.0, Tu=0.5)))
     return [(name, 'design_connection', p) for name, p in c]
 
 
@@ -484,6 +530,9 @@ def _same_scalar(a, b):
     return json.dumps(a) == json.dumps(b)
 
 
+IGNORE_KEYS = set()
+
+
 def diff(old, new, path='', out=None, counter=None):
     """old 의 모든 키 · 원소가 new 에 같은 값으로 있는지. (차이 목록, 비교한 잎 수)."""
     if out is None:
@@ -495,6 +544,8 @@ def diff(old, new, path='', out=None, counter=None):
             out.append((path, 'type', type(old).__name__, type(new).__name__))
             return out, counter
         for k, v in old.items():
+            if k in IGNORE_KEYS:
+                continue
             if k not in new:
                 out.append((f'{path}.{k}', 'missing', v, None))
             else:
@@ -532,8 +583,13 @@ if __name__ == '__main__':
         bad = [k for k, v in res.items() if not v['ok']]
         print(f'captured {len(res)} cases from {py_root}; exceptions: {bad}')
     elif cmd == 'compare':
+        # 선택: --ignore=key1,key2 (예: design_checks — 계약 자체가 바뀐 비교에서 엔진 값만 볼 때)
+        for arg in sys.argv[4:]:
+            if arg.startswith('--ignore='):
+                IGNORE_KEYS.update(x for x in arg[len('--ignore='):].split(',') if x)
+        limit = 400 if '--all' in sys.argv else 50
         n, leaves, diffs = compare(sys.argv[2], sys.argv[3])
-        for d in diffs[:50]:
+        for d in diffs[:limit]:
             print('DIFF', d)
         print(f'cases {n}, baseline leaves compared {leaves}, differences {len(diffs)}')
         sys.exit(1 if diffs else 0)
