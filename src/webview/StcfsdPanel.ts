@@ -14,6 +14,7 @@ import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
 import { McpPanelInterface } from '../mcp/bridge';
 import { StcfsdModel, WebviewToExtMessage, createDefaultModel } from '../models/types';
+import { defaultSteel, mpaField, steelGradeOptionsHtml } from './steelGrades';
 
 function isTestMode(): boolean {
     return process.env.STCFSD_TEST_MODE === '1';
@@ -178,9 +179,10 @@ export class StcfsdPanel implements McpPanelInterface {
     private async _initializeWithDefaultSection(): Promise<void> {
         try {
             // UI 기본값: H=100mm(3.937in), B=50mm(1.969in), D=20mm(0.787in),
-            //           t=2.3mm(0.0906in), r=4mm(0.157in), 립 90° — SGC400(Fy 245 MPa = 35.53 ksi).
+            //           t=2.3mm(0.0906in), r=4mm(0.157in), 립 90° — 기본 강종(steelGrades.ts, SGC400 Fy 295 MPa).
             // 화면의 기본 하중 case(압축)와 같은 균일 압축 응력으로 둔다 — 모델과 표지가 같아야 한다(R8-03).
-            (this._model as any).loadFy = 35.53;
+            // 화면 재료 칸의 처음 값과 같은 표에서 온다(panel_host_contract 가 대조).
+            (this._model as any).loadFy = defaultSteel().Fy;
             await this._applyTemplate('lippedc', { H: 3.937, B: 1.969, D: 0.787, t: 0.0906, r: 0.157, qlip: 90 });
         } catch (err: any) {
             console.error('[StCFSD] Failed to generate default section:', err.message);
@@ -545,7 +547,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
     /**
      * 해석 기준응력(곡선의 LF 가 곱해지는 응력): loadFy → 절점 최대 |응력|.
-     * 응력이 없으면 0 — 강종 기본값(35.53)을 지어내지 않는다. DSM 추출이 0 을 거절한다.
+     * 응력이 없으면 0 — 강종 기본값을 지어내지 않는다. DSM 추출이 0 을 거절한다.
      */
     private _getAnalysisFy(model: StcfsdModel = this._model): number {
         const fy = Number((model as any).loadFy);
@@ -665,22 +667,26 @@ export class StcfsdPanel implements McpPanelInterface {
             return { error: 'generate_section returned no nodes', ...(result || {}) };
         }
         const warnings: string[] = Array.isArray(result.warnings) ? [...result.warnings] : [];
+        const prevMaxStress = Math.max(0, ...(this._model.node || []).map((n: number[]) => Math.abs(Number(n?.[7]) || 0)));
         this._model.node = result.node;
         this._model.elem = result.elem;
         (this._model as any).sectionTemplate = sectionType;
         (this._model as any).sectionType = this._normalizeSectionType(sectionType);
         (this._model as any).sectionParams = { ...(params || {}) };
         (this._model as any).cornerRadius = params?.r ?? 0;
-        // 기준응력: 지금 모델의 것(loadFy) → 이전 응력의 최대값. 둘 다 없을 때만 화면 기본 강종(SGC400)
-        // 35.53 ksi 를 쓰고 알린다. LF·임계값은 기준응력과 무관하지만 Py 표시는 이 값을 따른다.
+        // 기준응력: 지금 모델의 것(loadFy) → 이전 응력의 최대 |응력|(custom 실하중 뒤). 둘 다 없으면 강종을
+        // 짐작하지 않는다(전: 기본 강종 35.53 ksi 를 넣었다 — Py · My 가 그 강재로 나왔다) — 응력 0 으로 두고
+        // set_load_case 의 fy 를 요구한다(_analyzeModel 이 응력 없는 해석을 거절한다).
         let fy = Number((this._model as any).loadFy);
-        if (!(fy > 0)) {
-            fy = 35.53;
-            warnings.push('Reference stress for the template stress distribution was not set; 35.53 ksi (SGC400) used — '
-                + 'use set_load_case with fy to change it.');
+        if (!(fy > 0)) { fy = prevMaxStress; }
+        for (const n of this._model.node) { n[7] = fy > 0 ? fy : 0; }
+        if (fy > 0) {
+            (this._model as any).loadFy = fy;
+        } else {
+            delete (this._model as any).loadFy;
+            warnings.push('Reference stress for the template stress distribution is not set (no previous stress) — '
+                + 'call set_load_case with fy before run_analysis; no steel grade is assumed.');
         }
-        for (const n of this._model.node) { n[7] = fy; }
-        (this._model as any).loadFy = fy;
         (this._model as any).loadCase = 'compression';
         this._invalidateAnalysisState('Section template changed', true);
         return {
@@ -689,7 +695,7 @@ export class StcfsdPanel implements McpPanelInterface {
             nelems: result.elem?.length,
             section_type: (this._model as any).sectionType,
             load_case: 'compression',
-            fy_reference: fy,
+            fy_reference: fy > 0 ? fy : null,
             ...(result.validation !== undefined ? { validation: result.validation } : {}),
             warnings,
         };
@@ -756,6 +762,11 @@ export class StcfsdPanel implements McpPanelInterface {
 
     /** FSM 해석 한 번(analyze). 실패하면 엔진 진단 문장으로 예외. */
     private async _analyzeModel(model: any, context: string): Promise<any> {
+        // 응력 분포가 없으면(모든 절점 응력 0) 좌굴해석을 하지 않는다 — 기준응력을 지어내지 않는다.
+        if (!(model?.node || []).some((n: number[]) => Math.abs(Number(n?.[7]) || 0) > 0)) {
+            throw new Error(`${context}: the model has no stress distribution (all node stresses are 0) — `
+                + 'set the load case with a reference stress fy (set_load_case) or node stresses first.');
+        }
         const result = await this._pythonBridge.analyze(this._analysisParams(model));
         this._requireSuccessfulAnalysis(result, context);
         return result;
@@ -3408,6 +3419,9 @@ ${inner}
     private _getHtmlForWebview(): string {
         const webview = this._panel.webview;
         const nonce = getNonce();
+        // 재료 칸의 처음 값(SI 화면) — 기본 강종 한 행에서(steelGrades.ts). 호스트 loadFy 도 같은 행이다.
+        const steelFy = mpaField(defaultSteel().Fy);
+        const steelFu = mpaField(defaultSteel().Fu);
 
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'css', 'theme.css')
@@ -3504,18 +3518,12 @@ ${inner}
                             <label>Steel</label>
                             <select id="input-steel-grade" style="width:110px">
                                 <option value="">-- Manual --</option>
-                                <option value="SGC400" selected>SGC400 (245/400 MPa)</option>
-                                <option value="SGC440">SGC440 (295/440 MPa)</option>
-                                <option value="SGC490">SGC490 (365/490 MPa)</option>
-                                <option value="SGC570">SGC570 — §A3.1.3 제한, 감소값 414/427 MPa</option>
-                                <option value="A653-33">A653-33 (33/45 ksi)</option>
-                                <option value="A653-50">A653-50 (50/65 ksi)</option>
-                                <option value="A653-80">A653-80 — §A3.1.3 제한, 감소값 60/61.5 ksi</option>
+                                ${steelGradeOptionsHtml()}
                             </select>
                         </div>
                         <div class="input-row">
-                            <label>Fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-fy" value="245" step="5" style="width:60px">
-                            <label>Fu<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-fu" value="400" step="5" style="width:60px">
+                            <label>Fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-fy" value="${steelFy}" step="5" style="width:60px">
+                            <label>Fu<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-fu" value="${steelFu}" step="5" style="width:60px">
                         </div>
                         <div class="input-row">
                             <label>E<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-E" value="203395" step="1000">
@@ -3778,7 +3786,7 @@ ${inner}
                         <option value="bending_zz_neg">약축 휨 -Mzz (x- 압축)</option>
                         <option value="custom">조합 (P + Mxx + Mzz)</option>
                     </select>
-                    <span class="hint" style="margin-left:8px" id="analysis-fy-display">Fy: 245 MPa</span>
+                    <span class="hint" style="margin-left:8px" id="analysis-fy-display">Fy: ${steelFy} MPa</span>
                 </div>
                 <div id="custom-load-inputs" class="input-row" style="display:none; margin-top:4px;">
                     <label>P<span class="hint-inline" data-unit="force">kN</span></label>
@@ -3878,7 +3886,7 @@ ${inner}
                     <h3>소성 상호작용 곡면 (P-M Surface)</h3>
                     <p class="hint">주축(principal axis) 좌표계 기준 P-M 소성 상호작용 다이어그램. 항복값으로 정규화된 축력-모멘트 조합을 표시합니다.</p>
                     <div class="input-row" style="margin-bottom:6px">
-                        <label>fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="plastic-fy" value="245" step="5" style="width:60px">
+                        <label>fy<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="plastic-fy" value="${steelFy}" step="5" style="width:60px">
                         <button id="btn-run-plastic" class="btn-small">곡면 생성</button>
                     </div>
                     <canvas id="plastic-surface-canvas" width="700" height="420" role="img" aria-label="소성 상호작용 곡면: 축력-모멘트 조합"></canvas>
@@ -3918,9 +3926,9 @@ ${inner}
                 <div id="sec-material-body">
                 <div class="input-row">
                     <label>Fy<span class="hint-inline" data-unit="stress">MPa</span></label>
-                    <input type="number" id="design-fy" value="245" style="width:68px" readonly tabindex="-1" class="input-readonly">
+                    <input type="number" id="design-fy" value="${steelFy}" style="width:68px" readonly tabindex="-1" class="input-readonly">
                     <label>Fu<span class="hint-inline" data-unit="stress">MPa</span></label>
-                    <input type="number" id="design-fu" value="400" style="width:68px" readonly tabindex="-1" class="input-readonly">
+                    <input type="number" id="design-fu" value="${steelFu}" style="width:68px" readonly tabindex="-1" class="input-readonly">
                 </div>
                 </div>
 
@@ -4165,7 +4173,7 @@ ${inner}
                     <p id="conn-single-hint" class="hint" style="margin:0 0 6px"></p>
                     <div class="input-row"><label style="min-width:56px;text-align:right">t1</label><input type="number" id="conn-t1" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><label>t2</label><input type="number" id="conn-t2" value="1.5" step="0.1" style="width:72px" data-unit="thickness"><span class="hint-inline conn-unit-thickness">접합 부재 두께</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">직경 d</label><input type="number" id="conn-d" value="4.8" step="0.1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">패스너/용접 직경</span><label>개수 n</label><input type="number" id="conn-n" value="4" min="1" step="1" style="width:56px"></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">Fy</label><input type="number" id="conn-Fy" value="245" step="10" style="width:72px" data-unit="stress"><label>Fu</label><input type="number" id="conn-Fu" value="400" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">전처리 재료와 자동 동기화 (수정 가능)</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">Fy</label><input type="number" id="conn-Fy" value="${steelFy}" step="10" style="width:72px" data-unit="stress"><label>Fu</label><input type="number" id="conn-Fu" value="${steelFu}" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">전처리 재료와 자동 동기화 (수정 가능)</span></div>
                     <div class="input-row" id="conn-weld-row" style="display:none"><label style="min-width:56px;text-align:right">용접길이</label><input type="number" id="conn-weld-L" value="50" step="1" style="width:72px" data-unit="length"><label>크기</label><input type="number" id="conn-weld-size" value="3" step="0.5" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">용접 유효 길이/크기</span></div>
                     <div class="input-row" id="conn-groove-row" style="display:none"><label style="min-width:56px;text-align:right">그루브</label><select id="conn-groove-type" style="font-size:12px"><option value="complete">완전용입 CJP</option><option value="partial">부분용입 PJP</option></select></div>
                     <div class="input-row" id="conn-bolt-row" style="display:none"><label style="min-width:56px;text-align:right">Fub</label><input type="number" id="conn-Fub" value="" placeholder="미입력" step="10" style="width:72px" data-unit="stress"><span id="conn-Fub-hint" class="hint-inline conn-unit-stress">볼트 인장강도 — 비우면 엔진이 최저 등급 A307 값을 쓰고 경고</span></div>

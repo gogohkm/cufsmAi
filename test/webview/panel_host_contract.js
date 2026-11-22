@@ -9,6 +9,56 @@ const { createPanel } = require('./panel_harness');
 
 const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1e-12);
 
+// S-steel-default: 기본 강종(SGC400 295/400 MPa)이 호스트 초기 모델 · 화면 재료 칸의 처음 값 · 드롭다운 ·
+// 엔진 강종 표에서 같다. 기대 MPa 는 정의값 환산(1 kip = 4.4482216152605 kN, 1 in = 25.4 mm)으로 따로 만든다.
+async function scenarioDefaultSteelAgrees(ctx) {
+  const p = ctx.panel;
+  const KSI_MPA = 4448.2216152605 / (25.4 * 25.4);
+  const st = p.__testGetState();
+  // 호스트 초기 모델: 기준응력 = 기본 강종 Fy, 응력 분포는 그 값의 균일 압축
+  assert.strictEqual(st.model.loadFy * KSI_MPA, 295, `host loadFy ${st.model.loadFy} ksi is 295 MPa`);
+  assert(ctx.model().node.every((n) => n[7] === st.model.loadFy), 'initial node stresses are the default Fy');
+  // 엔진 강종 표: 첫 항목 = 기본 강종
+  const rows = await ctx.bridge.call('steel_grades', { include_restricted: true });
+  const engine = Object.fromEntries(rows.map((r) => [r.id, r]));
+  assert.strictEqual(rows[0].id, 'SGC400', 'engine grade table starts with the default steel');
+  assert.deepStrictEqual([rows[0].Fy_MPa, rows[0].Fu_MPa], [295, 400], 'engine SGC400 = 295/400 MPa');
+  // 화면(호스트가 쓴 HTML): 드롭다운 · 재료 칸
+  const html = p.__testGetHtml();
+  const sel = html.match(/<select id="input-steel-grade"[^>]*>([\s\S]*?)<\/select>/);
+  assert(sel, 'grade dropdown present');
+  const opts = [...sel[1].matchAll(/<option value="([^"]*)"([^>]*)>([^<]*)<\/option>/g)]
+    .map(([, id, attrs, label]) => ({ id, label, selected: / selected/.test(attrs),
+      fy: Number((attrs.match(/data-fy="([^"]+)"/) || [])[1]), fu: Number((attrs.match(/data-fu="([^"]+)"/) || [])[1]) }));
+  const selected = opts.filter((o) => o.selected);
+  assert.deepStrictEqual(selected.map((o) => o.id), ['SGC400'], 'SGC400 is the selected grade');
+  for (const o of opts.filter((x) => x.id)) {
+    const e = engine[o.id];
+    assert(e, `dropdown grade ${o.id} is in the engine table`);
+    assert(o.fy === e.Fy && o.fu === e.Fu, `${o.id}: dropdown ${o.fy}/${o.fu} ksi = engine ${e.Fy}/${e.Fu} ksi`);
+  }
+  for (const [id, fy, fu] of [['SGC340', 245, 340], ['SGC400', 295, 400], ['SGC440', 335, 440], ['SGC490', 365, 490]]) {
+    const o = opts.find((x) => x.id === id);
+    assert(o && o.fy * KSI_MPA === fy && o.fu * KSI_MPA === fu, `${id} option is ${fy}/${fu} MPa`);
+    assert(o.label.includes(`(${fy}/${fu} MPa)`), `${id} label states ${fy}/${fu} MPa (${o.label})`);
+  }
+  const val = (id) => (html.match(new RegExp(`id="${id}" value="([^"]*)"`)) || [])[1];
+  const d = selected[0];
+  for (const id of ['input-fy', 'plastic-fy', 'design-fy', 'conn-Fy']) {
+    assert.strictEqual(Number(val(id)), d.fy * KSI_MPA, `${id} starts at the default Fy (${val(id)} MPa)`);
+    assert.strictEqual(val(id), '295', `${id} shows 295`);
+  }
+  for (const id of ['input-fu', 'design-fu', 'conn-Fu']) {
+    assert.strictEqual(val(id), '400', `${id} starts at the default Fu (${val(id)} MPa)`);
+  }
+  assert(/id="analysis-fy-display">Fy: 295 MPa</.test(html), 'analysis Fy display starts at 295 MPa');
+  assert.strictEqual(st.model.loadFy, d.fy, 'host loadFy is the selected dropdown Fy (one table)');
+  // 웹뷰는 따로 강종 표를 두지 않는다(드롭다운 data-fy · data-fu 를 읽는다)
+  const appJs = fs.readFileSync(path.join(__dirname, '..', '..', 'webview', 'js', 'app.js'), 'utf8');
+  assert(!/gradeMap|35\.53|58\.02/.test(appJs), 'app.js has no own grade table or old default numbers');
+  assert(/dataset\.fy/.test(appJs) && /dataset\.fu/.test(appJs), 'app.js reads the grade values from the dropdown');
+}
+
 async function scenarioTemplateLoadCaseAndDsm(ctx) {
   const p = ctx.panel;
   // R8-03: 초기 상태(화면 기본 = 압축)와 템플릿 뒤 하중 표지는 응력과 같아야 한다.
@@ -116,6 +166,31 @@ async function scenarioCustomLoadNotRescaled(ctx) {
   await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: 35.53 });
   await p.handleMcpAction({ action: 'set_node_stress', node_ids: [1], stress: 10 });
   assert.strictEqual(p.__testGetState().model.loadCase, 'custom', 'R8-03: node stress edit -> custom');
+}
+
+// S-steel-default: 기준응력이 없을 때 템플릿이 강종(전: 35.53 ksi)을 짐작하지 않는다.
+async function scenarioTemplateWithoutReferenceStress(ctx) {
+  const p = ctx.panel;
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'custom', P: 30 });
+  const prevMax = Math.max(...ctx.model().node.map((n) => Math.abs(n[7])));
+  let r = await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc',
+    params: { H: 6, B: 2, D: 0.5, t: 0.059, r: 0 } });
+  assert.strictEqual(r.fy_reference, prevMax, 'after custom loads the template keeps the previous max stress');
+  assert(ctx.model().node.every((n) => n[7] === prevMax), 'uniform at the previous max stress');
+  // 응력이 하나도 없으면: 0 으로 두고 알리고, 해석은 거절된다(강종을 지어내지 않는다).
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'custom', P: 0, Mxx: 0, Mzz: 0 });
+  assert(ctx.model().node.every((n) => n[7] === 0), 'custom zero loads leave no stress');
+  {
+    r = await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc',
+      params: { H: 6, B: 2, D: 0.5, t: 0.059, r: 0 } });
+    assert.strictEqual(r.fy_reference, null, 'no reference stress is invented');
+    assert(r.warnings.some((w) => /no steel grade is assumed/.test(w)), 'the user is told to give fy');
+    assert(ctx.model().node.every((n) => n[7] === 0) && p.__testGetState().model.loadFy == null, 'stresses stay 0');
+    let msg;
+    try { const a = await p.handleMcpAction({ action: 'run_analysis' }); msg = (a && a.error) || ''; } catch (e) { msg = String(e && e.message); }
+    assert(/no stress distribution/.test(msg), `analysis without stresses is refused (${msg})`);
+  }
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: 50 });
 }
 
 async function scenarioMemberDesignFyConsistency(ctx) {
@@ -309,8 +384,9 @@ async function main() {
     const a = ctx.panel._lastAnalysisResult;
     return { node: ctx.panel._model.node, elem: ctx.panel._model.elem, curve: a.curve };
   };
-  const scenarios = [scenarioTemplateLoadCaseAndDsm, scenarioZSectionType, scenarioSignatureAndBc,
-    scenarioNonSSAutoTerms, scenarioCustomLoadNotRescaled, scenarioMemberDesignFyConsistency,
+  const scenarios = [scenarioDefaultSteelAgrees, scenarioTemplateLoadCaseAndDsm, scenarioZSectionType, scenarioSignatureAndBc,
+    scenarioNonSSAutoTerms, scenarioCustomLoadNotRescaled, scenarioTemplateWithoutReferenceStress,
+    scenarioMemberDesignFyConsistency,
     scenarioPurlinRegions, scenarioPreviewAndProjectFiles, scenarioAllowlistsAndVibration];
   try {
     for (const s of scenarios) {

@@ -660,7 +660,7 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
 
     Returns: list of warnings (빈 리스트면 모두 통과)
     """
-    Fy = params.get('Fy', 35.53)
+    Fy = params.get('Fy')   # 없으면 Fy 한계 줄만 건너뛴다 — 강종을 짐작하지 않는다
     geom = _section_geometry(params)
     t = geom['t']
     if _is_round_section(params):
@@ -758,7 +758,7 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
         warnings.append(f'n_w = {geom["n_w"]} > 4 (Table B4.1-1 web intermediate stiffener limit)')
 
     # 항복강도: Fy < 95 ksi (표의 부등호는 strict)
-    if Fy >= 95:
+    if Fy is not None and Fy >= 95:
         warnings.append(f'Fy = {Fy} ksi is not < 95 ksi (Table B4.1-1 Fy limit)')
 
     return warnings
@@ -770,7 +770,7 @@ def check_dsm_limits(params: dict, member_type: str = None) -> list:
 
 def _design_compression(params: dict) -> dict:
     """DSM 압축 부재 설계 (§E2, §E3.2, §E4)"""
-    Fy = params.get('Fy', 35.53)
+    Fy = params['Fy']   # design_member 가 Fy > 0 을 확인한다 — 기본 강종으로 채우지 않는다
     design_method = params.get('design_method', 'LRFD')
     Pu = params.get('Pu', 0)
 
@@ -1165,8 +1165,10 @@ def _add_notes(result: dict, warnings, assumptions, tag: str) -> None:
 
 def _design_flexure(params: dict) -> dict:
     """DSM 휨 부재 설계 (§F2, §F3.2, §F4)"""
-    Fy = params.get('Fy', 35.53)
-    Fu = params.get('Fu', 58.02)
+    Fy = params['Fy']   # design_member 가 Fy > 0 을 확인한다
+    Fu = params.get('Fu')   # §A3.3.2 냉간가공에만 쓴다 — 없으면 그 경로가 오류(기본 강종 Fu 를 짓지 않는다)
+    if params.get('use_cold_work', False) and not (Fu is not None and Fu > 0):
+        return {'error': 'Fu (tensile strength, ksi) is required for the cold-work increase (§A3.3.2, use_cold_work=true).'}
     design_method = params.get('design_method', 'LRFD')
     Mu = abs(params.get('Mu', 0))
     Lb = params.get('Lb', 120)
@@ -2580,7 +2582,7 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
     Eq. H1.1-2: Mx/Max  + My/May  - T/Ta ≤ 1.0  (좌굴 — Chapter F 강도)
     """
     design_method = params.get('design_method', 'LRFD')
-    Fy = params.get('Fy', 35.53)
+    Fy = params['Fy']
     Mux = abs(params.get('Mux', 0))
     Muy = abs(params.get('Muy', 0))
     props = _plain_scalars(params.get('props', {}) or {})
@@ -2692,7 +2694,7 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
 
 def _design_tension(params: dict) -> dict:
     """인장 부재 설계 (§D2, §D3)"""
-    Fy = params.get('Fy', 35.53)
+    Fy = params['Fy']
     Fu = params.get('Fu')
     design_method = params.get('design_method', 'LRFD')
     Tu = params.get('Tu', 0)
@@ -3262,7 +3264,7 @@ def _auto_generate_props(params: dict) -> dict:
                 import numpy as np
 
                 prop_mat = np.array([[100, 29500, 29500, 0.3, 0.3, 11300]])  # G per AISI §A3.1
-                Fy = params.get('Fy', 35.53)
+                Fy = params['Fy']   # design_member 가 확인한 설계 Fy
 
                 node_p = node.copy()
                 for n in node_p:

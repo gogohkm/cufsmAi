@@ -106,6 +106,53 @@ async function main() {
   const ctx = await start({ outDir });
   const tmp = (n) => path.join(outDir, n);
   try {
+    // ── S-steel-default: 새로 시작한 화면의 재료 = SGC400 295/400 MPa, 강종 선택, 245 로 저장한 파일은 245 ──
+    // (맨 앞 — 다른 단계가 단위 · 재료를 바꾸기 전의 처음 화면을 본다)
+    await step('S-steel default steel on a fresh start, grade picks, a 245 file keeps 245', async () => {
+      const KSI_MPA = 4448.2216152605 / (25.4 * 25.4);
+      const fields = () => ctx.eval(`(()=>{const v=id=>document.getElementById(id).value; return {grade:v('input-steel-grade'),
+        fy:v('input-fy'), fu:v('input-fu'), plasticFy:v('plastic-fy'), designFy:v('design-fy'), designFu:v('design-fu'),
+        connFy:v('conn-Fy'), connFu:v('conn-Fu'), disp:document.getElementById('analysis-fy-display').textContent};})()`);
+      await ctx.settle(300);
+      let f = await fields();
+      await ctx.shotEl('rs1_fresh_material', '#input-steel-grade');
+      assert.deepStrictEqual(f, { grade: 'SGC400', fy: '295', fu: '400', plasticFy: '295', designFy: '295', designFu: '400',
+        connFy: '295', connFu: '400', disp: 'Fy: 295 MPa' }, 'fresh start shows SGC400 295/400 MPa on every tab');
+      assert.strictEqual(ctx.panel._model.loadFy * KSI_MPA, 295, 'host reference stress is 295 MPa');
+      for (const [g, fy, fu] of [['SGC340', '245', '340'], ['SGC440', '335', '440'], ['SGC400', '295', '400']]) {
+        await ctx.setVal('input-steel-grade', g);
+        f = await fields();
+        assert(f.fy === fy && f.fu === fu && f.designFy === fy && f.designFu === fu && f.plasticFy === fy
+          && f.connFy === fy && f.connFu === fu && f.disp === `Fy: ${fy} MPa`, `${g} shows ${fy}/${fu} MPa (${JSON.stringify(f)})`);
+      }
+      // 옛 기본(SGC400 표지 + Fy 245)으로 저장한 파일: 화면 칸과 모델 기준응력 모두 245
+      await ctx.setVal('input-fy', 245);
+      await ctx.panel.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: 245 / KSI_MPA });
+      const file = tmp('r_steel245.csd');
+      try { fs.unlinkSync(file); } catch { /* none */ }
+      ctx.dialogs.nextSave = file;
+      await ctx.click('#btn-file-save');
+      await ctx.settle(600);
+      assert(fs.existsSync(file), 'saved');
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert(Math.abs(saved.designInputs.fy * KSI_MPA - 245) < 1e-9 && saved.designInputs.presteelGrade === 'SGC400',
+        'the file carries SGC400 with Fy 245 MPa');
+      // 지금 화면을 새 기본으로 되돌린 뒤 연다
+      await ctx.setVal('input-steel-grade', 'SGC400');
+      await ctx.panel.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: 295 / KSI_MPA });
+      assert.strictEqual((await fields()).fy, '295');
+      ctx.dialogs.nextOpen = file;
+      await ctx.click('#btn-file-open');
+      await ctx.settle(800);
+      f = await fields();
+      await ctx.shotEl('rs1_opened_245_file', '#input-steel-grade');
+      assert(f.fy === '245' && f.designFy === '245' && f.plasticFy === '245' && f.connFy === '245' && f.disp === 'Fy: 245 MPa',
+        `a file saved with 245 opens with 245 (${JSON.stringify(f)})`);
+      assert(f.fu === '400' && f.designFu === '400', 'Fu 400 kept');
+      assert(Math.abs(ctx.panel._model.loadFy * KSI_MPA - 245) < 1e-9, 'host reference stress from the file (245 MPa)');
+      assert.strictEqual(f.grade, '', 'the grade label no longer claims SGC400 (295/400) next to 245');
+    });
+
     // ── V4-01: 무효가 된 결과를 화면에서 지운다 (MCP 단면 변경) ─────────────────────────
     await step('V4-01 stale design card after MCP template change', async () => {
       await ctx.click('#btn-unit-US');

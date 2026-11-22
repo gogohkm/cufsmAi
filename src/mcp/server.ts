@@ -995,7 +995,7 @@ server.tool("aisi_design_connection", CONNECTION_DESC + " (Same engine as design
     async (args) => postConnection('aisi_design_connection', 'aisi_design', args, { member_type: 'connection' })
 );
 
-server.tool("steel_grades", "List the steel grades known to the engine (KS SGC/SSC, ASTM A653/A792/A1003) with Fy/Fu (ksi/MPa) and notes. §A3.1.3 low-ductility grades (Fu/Fy < 1.08, e.g. SGC570, 80 ksi A653/A792) are excluded unless include_restricted=true, which returns them with the reduced §A3.1.3 values and restrictions.",
+server.tool("steel_grades", "List the steel grades known to the engine (KS SGC/SSC, ASTM A653/A792/A1003) with Fy/Fu in ksi, the same values as Fy_MPa/Fu_MPa, and notes (KS D 3506 former → current names, e.g. SGC400 = SGC295Y 295/400 MPa). The first entry (SGC400) is only the panel's initial material — no tool assumes a grade; pass Fy/Fu explicitly. §A3.1.3 low-ductility grades (Fu/Fy < 1.08, e.g. SGC570, 80 ksi A653/A792) are excluded unless include_restricted=true, which returns them with the reduced §A3.1.3 values and restrictions.",
     {
         include_restricted: z.boolean().optional().describe("Also list §A3.1.3 restricted grades with reduced values (omit → false)"),
     },

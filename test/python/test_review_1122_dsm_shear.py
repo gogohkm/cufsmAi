@@ -598,11 +598,15 @@ def test_R5_30_low_ductility_grades_are_not_offered_at_80_ksi():
     assert abs(a313_flexure_Rb(30, 80, stiffened=False) - (1.079 - 0.6 * math.sqrt(30 * 80 / 29500))) < 1e-12
 
 
-def test_R5_31_ks_grade_values_unchanged_and_annotated():
-    """R5-31(의심, 사용자 결정): 값은 그대로 두고 현행 KS 명칭 사실을 note 로 남긴다."""
-    from design.steel_grades import get_grade
+def test_R5_31_ks_grade_values_decided_and_annotated():
+    """R5-31 → 사용자 결정(2026-11-22): SGC400 = SGC295Y 295/400 MPa. note 는 옛 이름 → 현행 이름 대응.
+
+    (전: 값은 그대로 두고(245/400) 명칭 사실만 적었다. 표 전체는 test_review_1122_steel_default.py 가 고정한다.)
+    """
+    from design.steel_grades import KSI_TO_MPA, get_grade
     g = get_grade('SGC400')
-    assert (g['Fy'], g['Fu']) == (35.53, 58.02) and 'SGC245Y' in g['note']
+    assert (g['Fy'] * KSI_TO_MPA, g['Fu'] * KSI_TO_MPA) == (295.0, 400.0)
+    assert 'SGC400 = SGC295Y (295/400' in g['note'] and 'SGC340 = SGC245Y (245/340' in g['note']
 
 
 # ====================================================== V2 검증 뒤 (2026-11-22)

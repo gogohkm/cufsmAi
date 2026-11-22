@@ -63,8 +63,12 @@ def design_lap_connection(params: dict) -> dict:
         return {'error': str(exc)}
     d = params.get('d', 8.0)
     t = params.get('t', 0.059)
-    Fy = params.get('Fy', 35.53)
-    Fu = params.get('Fu', 58.02)
+    # 모재 Fy · Fu 는 패스너 지압 · 랩 휨의 기준이다 — 기본 강종으로 채우지 않는다.
+    Fy = params.get('Fy')
+    Fu = params.get('Fu')
+    for _name, _v in (('Fy', Fy), ('Fu', Fu)):
+        if not (isinstance(_v, (int, float)) and not isinstance(_v, bool) and _v > 0):
+            return {'error': f'{_name} (member steel, ksi) is required and must be > 0.'}
     lap_left = params.get('lap_left_in', 0) or 0
     lap_right = params.get('lap_right_in', 0) or 0
     Mu = abs(params.get('Mu_support', 0) or 0)

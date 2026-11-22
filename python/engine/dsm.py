@@ -44,7 +44,7 @@ _FLOOR_NOTE = ('lower bound of the critical load of the mode that was not isolat
 
 
 def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
-                        fy: float = 35.53, load_type: str = 'P',
+                        fy: float, load_type: str = 'P',
                         mode_shapes: list = None,
                         classify_fn=None,
                         mode_classifications: list = None,
@@ -58,7 +58,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         curve: list of np.ndarray — curve[i] = [length, lf1, lf2, ...] (1st mode 사용)
         node: (nnodes, 8) — 8번째 열은 해석에 넣은 절점 응력
         elem: (nelems, 5)
-        fy: 항복 응력
+        fy: 항복 응력(ksi, 필수 — 기본 강종으로 채우지 않는다)
         load_type: 'P' (축력), 'Mxx' (강축 휨), 'Mzz' (약축 휨). 그 밖은 ValueError.
         mode_shapes: (선택) curve 와 정렬된 list — mode_shapes[i] = (ndof, nmodes)
                      좌굴 모드형상. classify_fn 과 함께 주면 극소마다 cFSM

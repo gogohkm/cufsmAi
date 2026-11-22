@@ -13,21 +13,33 @@ E = 29500.0   # ksi — 탄성계수 (203,395 MPa)
 G = 11300.0   # ksi — 전단탄성계수 (77,900 MPa) — AISI S100-16 §A3.1 published constant (rounded, not E/(2*(1+nu))=11346)
 nu = 0.30     # 포아송비
 
-# KS 명칭 주의(값은 바꾸지 않았다 — 사용자 결정 필요): KDS 41 30 30 표 3.2-1/3.2-2 의
-# 현행 KS D 3506 명칭은 SGC245Y(245/340 MPa), SGC295Y(295/400), SGC335Y(335/440),
-# SGC365Y(365/490), SGC560Y 이다. 아래 'SGC400'(245/400)·'SGC440'(295/440)은 Fy 와 Fu 가
-# 현행 표의 서로 다른 행에서 온 값이다.
-_KS_NAME_NOTE = ('KS D 3506 current names (KDS 41 30 30 Table 3.2-2): SGC245Y 245/340, SGC295Y 295/400, '
-                 'SGC335Y 335/440, SGC365Y 365/490 MPa. Confirm Fy and Fu against the mill certificate.')
+# ksi → MPa. MCP siUnits.US_TO_SI.stress · 웹뷰 UNIT.stress 와 같은 정의식(1 kip = 4.4482216152605 kN,
+# 1 in = 25.4 mm) — 같은 부동소수가 나온다. MPa 로 정해진 강종은 MPa / KSI_TO_MPA 를 반올림하지 않고
+# 저장한다: 화면 · SI 응답에서 × KSI_TO_MPA 하면 295 · 400 이 정확히 돌아온다.
+KSI_TO_MPA = 4.4482216152605 * 1000 / (25.4 * 25.4)   # 6.894757293168361
+
+# 기본 강종(사내 결정 2026-11-22): SGC400, Fy 295 / Fu 400 MPa. 화면 재료 칸의 처음 값 ·
+# 호스트 초기 기준응력 · 이 표의 첫 항목이 이것이다. 계산 경로는 빠진 Fy 를 이것으로 채우지 않는다.
+DEFAULT_GRADE = 'SGC400'
+
+# KS D 3506 구조용(KDS 41 30 30 표 3.2-2): 옛 명칭 → 현행 명칭. Fy · Fu 는 현행 표의 한 행이다.
+_KS_NAME_NOTE = ('KS D 3506 structural grades, former name = current name (KDS 41 30 30 Table 3.2-2): '
+                 'SGC340 = SGC245Y (245/340 MPa), SGC400 = SGC295Y (295/400), SGC440 = SGC335Y (335/440), '
+                 'SGC490 = SGC365Y (365/490), SGC570 = SGC560Y. Confirm Fy and Fu against the mill certificate.')
+
+
+def _ks_d3506(Fy_MPa: float, Fu_MPa: float) -> dict:
+    """KS D 3506 구조용 강종 — MPa 로 정해진 값을 ksi 로(반올림 없음)."""
+    return {'Fy': Fy_MPa / KSI_TO_MPA, 'Fu': Fu_MPa / KSI_TO_MPA, 'coating': '용융아연도금', 'spec': 'KS D 3506',
+            'elongation_group': 'A3.1.1', 'note': _KS_NAME_NOTE}
+
 
 STEEL_GRADES = {
-    # KS D 3506 — 용융 아연 도금 강판 (Hot-Dip Zinc-Coated)
-    'SGC400':   {'Fy': 35.53, 'Fu': 58.02, 'coating': '용융아연도금', 'spec': 'KS D 3506',
-                 'elongation_group': 'A3.1.1', 'note': _KS_NAME_NOTE},
-    'SGC440':   {'Fy': 42.79, 'Fu': 63.82, 'coating': '용융아연도금', 'spec': 'KS D 3506',
-                 'elongation_group': 'A3.1.1', 'note': _KS_NAME_NOTE},
-    'SGC490':   {'Fy': 52.94, 'Fu': 71.08, 'coating': '용융아연도금', 'spec': 'KS D 3506',
-                 'elongation_group': 'A3.1.1', 'note': _KS_NAME_NOTE},
+    # KS D 3506 — 용융 아연 도금 강판 (Hot-Dip Zinc-Coated). 첫 항목 = DEFAULT_GRADE.
+    'SGC400':   _ks_d3506(295, 400),
+    'SGC340':   _ks_d3506(245, 340),
+    'SGC440':   _ks_d3506(335, 440),
+    'SGC490':   _ks_d3506(365, 490),
     # KS D 3530 — 일반 구조용 경량 형강 (현행 명칭 SSC275: 275/410 MPa)
     'SSC400':   {'Fy': 35.53, 'Fu': 58.02, 'coating': 'None', 'spec': 'KS D 3530',
                  'elongation_group': 'A3.1.1',
@@ -121,8 +133,13 @@ def get_grade(grade_id: str, include_restricted: bool = False) -> dict:
 
 
 def list_grades(include_restricted: bool = False) -> list:
-    """사용 가능한 강재 등급 목록 반환 (기본: 제한 없는 강종만)."""
-    out = [{'id': k, **v} for k, v in STEEL_GRADES.items()]
+    """사용 가능한 강재 등급 목록 반환 (기본: 제한 없는 강종만). 첫 항목이 DEFAULT_GRADE.
+
+    Fy/Fu 는 ksi, Fy_MPa/Fu_MPa 는 같은 값 × KSI_TO_MPA(반올림 없음 — KS 강종은 정수 MPa).
+    """
+    def _row(k, v):
+        return {'id': k, **v, 'Fy_MPa': v['Fy'] * KSI_TO_MPA, 'Fu_MPa': v['Fu'] * KSI_TO_MPA}
+    out = [_row(k, v) for k, v in STEEL_GRADES.items()]
     if include_restricted:
-        out.extend({'id': k, **v} for k, v in LOW_DUCTILITY_GRADES.items())
+        out.extend(_row(k, v) for k, v in LOW_DUCTILITY_GRADES.items())
     return out

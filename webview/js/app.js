@@ -243,10 +243,13 @@
                 if (model && msg.data) {
                     model.node = msg.data.node;
                     model.elem = msg.data.elem;
-                    // 균일 응력 기본값
-                    if (model.node) {
-                        const defaultFy = fromDisplay(getNum('input-fy', 35.53), 'stress');
-                        model.node.forEach(n => { n[7] = defaultFy; });
+                    // 균일 응력: 전처리 Fy 칸 값. 칸이 비면 호스트가 넣은 응력을 그대로 둔다(강종을 짐작하지 않는다).
+                    {
+                        const fyField = getNum('input-fy', NaN);
+                        if (model.node && fyField > 0) {
+                            const fyRef = fromDisplay(fyField, 'stress');
+                            model.node.forEach(n => { n[7] = fyRef; });
+                        }
                     }
                     renderPreprocessor();
                     renderStressPreview();
@@ -2667,7 +2670,9 @@
         }
 
         const loadCase = document.getElementById('select-load-case')?.value || 'compression';
-        const fy = fromDisplay(getNum('input-fy', 35.53), 'stress');
+        // 빈 Fy 칸을 기본 강종으로 채우지 않는다 — 분포 모양만 보이는 미리보기이므로 1 로 정규화한다.
+        const fyField = getNum('input-fy', NaN);
+        const fy = fyField > 0 ? fromDisplay(fyField, 'stress') : 1;
         const nodes = model.node;
 
         // 선택된 Load Case에 따른 응력 계산 (해석 전 프리뷰용 간이 계산)
@@ -3752,17 +3757,19 @@
 
     // --- Fy/Fu 단일 소스: 전처리 탭 input-fy, input-fu ---
     // 전처리 Fy 변경 → 설계탭 읽기전용 필드 + 해석탭 표시 갱신
-    const gradeMap = {
-        'SGC400': [35.53, 58.02], 'SGC440': [42.79, 63.82],
-        // §A3.1.3 저연성 강종(SGC570 · A653/A792-80)은 감소값(Fy = min(0.75Fsy, 60), Fu = min(0.75Fu, 62) — 엔진 steel_grades 와 같음)
-        'SGC490': [52.94, 71.08], 'SGC570': [60.0, 62.0],
-        'SSC400': [35.53, 58.02],
-        'A653-33': [33,45], 'A653-50': [50,65], 'A653-55': [55,70], 'A653-80': [60,61.5],
-        'A792-33': [33,45], 'A792-50': [50,65], 'A792-80': [60,61.5],
-        'A1003-33': [33,45], 'A1003-50': [50,65],
-    };
-
-    const RESTRICTED_GRADES = ['SGC570', 'A653-80', 'A792-80'];
+    // 강종 값은 드롭다운 <option data-fy data-fu data-restricted>(ksi)에 있다 — 호스트 steelGrades.ts 한 표에서
+    // 오며, 재료 칸의 처음 값 · 호스트 초기 기준응력도 같은 표다(여기 따로 둔 강종 표는 없앴다).
+    /** 선택한 강종의 [Fy, Fu](ksi)와 §A3.1.3 제한 여부. 값이 없는 항목(-- Manual --)은 null. */
+    function gradeValues(sel) {
+        const opt = sel && sel.selectedIndex >= 0 ? sel.options[sel.selectedIndex] : null;
+        const fy = opt ? Number(opt.dataset.fy) : NaN, fu = opt ? Number(opt.dataset.fu) : NaN;
+        if (!(fy > 0) || !(fu > 0)) { return null; }
+        return { fy, fu, restricted: opt.dataset.restricted === '1' };
+    }
+    /** 응력(ksi) → 지금 단위계의 칸 글(12 자리 — refreshUnits 와 같은 규칙: SI 에서 295 · 400 이 그대로). */
+    function stressField(ksi) {
+        return String(Number(toDisplay(ksi, 'stress').toPrecision(12)));
+    }
 
     function syncFyValue(fyVal) {
         setValue('input-fy', fyVal);
@@ -3842,16 +3849,16 @@
     const selGradePre = document.getElementById('input-steel-grade');
     if (selGradePre) {
         selGradePre.addEventListener('change', () => {
-            const v = gradeMap[selGradePre.value];
+            const v = gradeValues(selGradePre);
             if (v) {
-                setValue('input-fy', toDisplay(v[0], 'stress'));
-                setValue('input-fu', toDisplay(v[1], 'stress'));
+                setValue('input-fy', stressField(v.fy));
+                setValue('input-fu', stressField(v.fu));
                 setValue('input-E', toDisplay(29500, 'stress'));
                 setValue('input-G', toDisplay(11300, 'stress'));
                 propagateFyFuFromPreprocessor();
-                if (RESTRICTED_GRADES.includes(selGradePre.value)) {
-                    setStatus('§A3.1.3 저연성 강종: 감소값 Fy ' + toDisplay(v[0], 'stress').toFixed(0) + ' / Fu '
-                        + toDisplay(v[1], 'stress').toFixed(0) + ' ' + unitLabel('stress')
+                if (v.restricted) {
+                    setStatus('§A3.1.3 저연성 강종: 감소값 Fy ' + toDisplay(v.fy, 'stress').toFixed(0) + ' / Fu '
+                        + toDisplay(v.fu, 'stress').toFixed(0) + ' ' + unitLabel('stress')
                         + ' 을 넣었습니다 — 다중 웨브 데크·지붕·벽 패널에만 허용(C/Z/hat 부재 불가), 휨은 Rb·Fsy 규정 별도.', 'warn');
                 }
             }
@@ -5563,7 +5570,7 @@
             var _pr = data.positive_region;
             var _mU = unitLabel('moment');
             var _lU = unitLabel('length');
-            var _Fy = data.Fy_used || data.Fy_original || 35.53;
+            var _Fy = data.Fy_used || data.Fy_original;   // 결과의 Fy — 없으면 비교 줄을 쓰지 않는다
             var _phi2 = 0.90, _omega2 = 1.67;
             var _dsL2 = dm === 'LRFD' ? 'φMn(+)' : 'Mn(+)/Ω';
 
@@ -5576,7 +5583,8 @@
 
             // Step 2: LTB — Mne(+)
             var _fcreCond = '';
-            if (_pr.Fcre >= 2.78 * _Fy) _fcreCond = 'Fcre ≥ 2.78Fy → Fn = Fy (항복)';
+            if (!(_Fy > 0)) _fcreCond = '(결과에 Fy 없음 — 구간 판별 생략)';
+            else if (_pr.Fcre >= 2.78 * _Fy) _fcreCond = 'Fcre ≥ 2.78Fy → Fn = Fy (항복)';
             else if (_pr.Fcre > 0.56 * _Fy) _fcreCond = '0.56Fy < Fcre < 2.78Fy → 비탄성 LTB';
             else _fcreCond = 'Fcre ≤ 0.56Fy → 탄성 LTB';
             stepsHtml += '<div class="calc-step"><div class="calc-step-header"><span>2. Global/LTB — Mne(+)</span>';
@@ -6090,7 +6098,8 @@
         let h = '';
 
         // 재료 (입력 필드값은 이미 표시 단위 → 직접 사용, US 상수는 _ruv로 변환)
-        const fy = getNum('design-fy',35.53), fu = getNum('design-fu',58.02);
+        // 빈 칸은 빈 칸으로 적는다(기본 강종 값을 보고서에 지어 넣지 않는다).
+        const fy = getNum('design-fy', '—'), fu = getNum('design-fu', '—');
         // 강종 셀렉트 id는 input-steel-grade (구 select-steel-grade는 미존재 → 항상 'Custom' 표시됐음)
         const gradeEl = document.getElementById('input-steel-grade');
         const gradeName = (gradeEl && gradeEl.selectedIndex >= 0 && gradeEl.value)
@@ -6483,8 +6492,10 @@
             h += '<p>정모멘트 구간의 Lb(+)='+_ruv(pr.Lb,'length')+' '+_rul('length')+', Cb(+)='+pr.Cb+'로 Fcre를 재산정합니다.</p>';
             h += '<span class="eq">F<sub>cre</sub>(+) = '+pr.Fcre+' ksi → '+( pr.equation||'§F2.1')+'</span>';
             // Fcre vs 2.78Fy 판별
-            var Fy_val = d.Fy_used || d.Fy_original || 35.53;
-            if (pr.Fcre >= 2.78 * Fy_val) {
+            var Fy_val = d.Fy_used || d.Fy_original;
+            if (!(Fy_val > 0)) {
+                h += '<span class="eq">(결과에 Fy 가 없어 Fcre 구간 판별을 적지 않습니다)</span>';
+            } else if (pr.Fcre >= 2.78 * Fy_val) {
                 h += '<span class="eq">F<sub>cre</sub>(+) = '+pr.Fcre+' ksi &ge; 2.78F<sub>y</sub> = '+_rv(2.78*Fy_val,1)+' ksi → F<sub>n</sub> = F<sub>y</sub> (항복)</span>';
             } else if (pr.Fcre > 0.56 * Fy_val) {
                 h += '<span class="eq">0.56F<sub>y</sub> < F<sub>cre</sub>(+) = '+pr.Fcre+' ksi < 2.78F<sub>y</sub> → 비탄성 LTB</span>';
@@ -6819,8 +6830,9 @@
         const la = _lastLoadAnalysis;
         const p = lastProps;
         const dsm = lastDsmResult;
-        const fy = getNum('design-fy', 35.53);
-        const fu = getNum('design-fu', 58.02);
+        // 빈 칸 = 0 → 아래 재료 검토가 「Fy 가 지정되지 않았습니다」로 실패한다(기본 강종으로 통과시키지 않는다).
+        const fy = getNum('design-fy', 0);
+        const fu = getNum('design-fu', 0);
         const H = getNum('tpl-H', 0), B = getNum('tpl-B', 0), D = getNum('tpl-D', 0);
         const t = getNum('tpl-t', 0), r = getNum('tpl-r', 0);
 
@@ -7486,11 +7498,11 @@
                         criterion: '정모멘트 구간 설계강도 > 0',
                         note: prV.Mn < d.Mn ? '정모멘트 구간 Mn(' + _rv(prV.Mn) + ') < 부모멘트 Mn(' + _rv(d.Mn) + ') — 정모멘트가 지배할 수 있음' : '',
                     });
-                    if (prV.Fcre < 2.78 * (d.Fy_used || 35.53)) {
+                    if (d.Fy_used > 0 && prV.Fcre < 2.78 * d.Fy_used) {
                         checks.push({
                             category: catG, item: '정모멘트 LTB',
                             status: 'warn',
-                            value: 'Fcre(+)=' + prV.Fcre + ' ksi < 2.78Fy=' + _rv(2.78 * (d.Fy_used || 35.53)) + ' ksi',
+                            value: 'Fcre(+)=' + prV.Fcre + ' ksi < 2.78Fy=' + _rv(2.78 * d.Fy_used) + ' ksi',
                             criterion: '정모멘트 구간에서 LTB 발생 — Lb를 줄이거나 가새를 추가하세요',
                             note: '데크 없이 긴 비지지 길이에서 LTB가 휨강도를 크게 감소시킵니다.',
                         });
@@ -7558,12 +7570,14 @@
                 });
                 checks.push({
                     category: catG, item: 'Lb(+) / Cb(+) (정모멘트)',
-                    status: _posR.Lb === 0 ? 'pass' : (_posR.Fcre >= 2.78 * (d.Fy_used || 35.53) ? 'pass' : 'warn'),
+                    status: _posR.Lb === 0 ? 'pass' : (d.Fy_used > 0 && _posR.Fcre >= 2.78 * d.Fy_used ? 'pass' : 'warn'),
                     value: 'Lb(+)=' + fmtVal(_posR.Lb, 'length') + ' ' + unitLabel('length') + ', Cb(+)=' + _posR.Cb + ', Fcre(+)=' + _posR.Fcre + ' ksi',
                     criterion: '정모멘트 구간: 데크 구속 시 Lb=0, 미구속 시 변곡점 간 거리',
                     note: _posR.Lb === 0
                         ? '데크에 의한 연속 구속 — LTB 없음.'
-                        : (_posR.Fcre < 2.78 * (d.Fy_used || 35.53)
+                        : (!(d.Fy_used > 0)
+                            ? '결과에 Fy 가 없어 Fcre(+) ≥ 2.78Fy 를 판별하지 못했습니다.'
+                            : _posR.Fcre < 2.78 * d.Fy_used
                             ? 'LTB 발생 — Fcre(+)=' + _posR.Fcre + ' ksi < 2.78Fy. 가새 추가 또는 Lb 감소를 검토하세요.'
                             : 'Fcre(+) ≥ 2.78Fy — LTB 없음.'),
                 });
@@ -7727,7 +7741,7 @@
         const catH = 'H. 일관성';
 
         // Fy 일치 여부 확인
-        const fyLoad = getNum('input-fy', 35.53);
+        const fyLoad = getNum('input-fy', 0);   // 빈 칸 = 0 → 불일치로 보인다(기본 강종으로 맞추지 않는다)
         checks.push({
             category: catH, item: 'Fy 일관성 (해석 vs 설계)',
             status: Math.abs(fy - fyLoad) < 0.1 ? 'pass' : 'warn',
@@ -7853,9 +7867,31 @@
             if (typeof updatePLF === 'function') { updatePLF(); }
             if (typeof updateBetaPreview === 'function') { updateBetaPreview(); }
             renderStressPreview();
+            _labelRestoredGrade();
         } finally {
             _restoringInputs = false;
         }
+    }
+
+    /**
+     * 파일의 Fy · Fu 는 파일 값 그대로 둔다(옮기지 않는다 — 245 로 저장한 파일은 245 로 연다).
+     * 저장된 강종 이름의 표 값과 다르면(예: 옛 기본 SGC400 = 245/400 으로 저장한 파일) 강종 표시만 Manual 로 —
+     * 「SGC400 (295/400)」 옆에 245 가 보이지 않게.
+     */
+    function _labelRestoredGrade() {
+        const sel = /** @type {HTMLSelectElement|null} */ (document.getElementById('input-steel-grade'));
+        const v = gradeValues(sel);
+        if (!sel || !v) { return; }
+        const fy = fromDisplay(getNum('input-fy', NaN), 'stress');
+        const fu = fromDisplay(getNum('input-fu', NaN), 'stress');
+        const same = (a, b) => Math.abs(a - b) <= 1e-6 * Math.abs(b);
+        if (same(fy, v.fy) && same(fu, v.fu)) { return; }
+        const grade = sel.value;
+        sel.value = '';
+        const u = unitLabel('stress');
+        setStatus('열린 파일의 Fy/Fu (' + (isNaN(fy) ? '—' : stressField(fy)) + '/' + (isNaN(fu) ? '—' : stressField(fu)) + ' ' + u
+            + ')가 강종 ' + grade + ' 표 값(' + stressField(v.fy) + '/' + stressField(v.fu) + ' ' + u
+            + ')과 다릅니다 — 파일 값을 그대로 쓰고 강종 표시는 Manual 로 둡니다.', 'warn');
     }
 
     // 파일 저장/열기 버튼
