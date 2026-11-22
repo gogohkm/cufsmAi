@@ -178,12 +178,14 @@ export class StcfsdPanel implements McpPanelInterface {
     /** 초기 기본 단면 생성 후 모델 전송 — UI 기본값과 일치시킴 */
     private async _initializeWithDefaultSection(): Promise<void> {
         try {
-            // UI 기본값: H=100mm(3.937in), B=50mm(1.969in), D=20mm(0.787in),
-            //           t=2.3mm(0.0906in), r=4mm(0.157in), 립 90° — 기본 강종(steelGrades.ts, SGC400 Fy 295 MPa).
+            // UI 기본값: H=100mm, B=50mm, D=20mm, t=2.3mm, r=4mm, 립 90° — 기본 강종(steelGrades.ts, SGC400 Fy 295 MPa).
+            // mm 를 정확히 in 로 바꿔 넣는다. 반올림한 in(3.937 …)를 넣으면 화면이 모델의 치수를
+            // 되읽어 보일 때 SI 칸에 99.9998 · 50.0126 처럼 뜬다.
             // 화면의 기본 하중 case(압축)와 같은 균일 압축 응력으로 둔다 — 모델과 표지가 같아야 한다(R8-03).
             // 화면 재료 칸의 처음 값과 같은 표에서 온다(panel_host_contract 가 대조).
             (this._model as any).loadFy = defaultSteel().Fy;
-            await this._applyTemplate('lippedc', { H: 3.937, B: 1.969, D: 0.787, t: 0.0906, r: 0.157, qlip: 90 });
+            const mm = (v: number) => v / 25.4;
+            await this._applyTemplate('lippedc', { H: mm(100), B: mm(50), D: mm(20), t: mm(2.3), r: mm(4), qlip: 90 });
         } catch (err: any) {
             console.error('[StCFSD] Failed to generate default section:', err.message);
         }
