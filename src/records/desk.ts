@@ -77,7 +77,9 @@ export interface DeskEnv {
      * R4-1: 화면이 보낸 확인 대상 하나를 **지금 대상에서** 푼다(호스트가 — 지금 지문 · 판정 · 실행 · 사본). 화면이 보인 지문(`shown`)이
      * 지금 것과 다르면 `{error}`(거절 — 층 5). 없으면 확인 표시를 할 수 없다.
      */
-    resolveReview?(t: unknown): ReviewTarget | { error: string };
+    resolveReview?(t: unknown): ReviewTarget | { error: string; code?: string };
+    /** 사람이 지금 상태를 대안으로 둘 때 — 지금 실행 · 스냅숏(호스트가 짓는다) */
+    alternativeKeep?(): { caseId: string; contentFp: string; snapshot: string; runs: Record<string, { runId: string; blob: string | null }> } | { error: string; code?: string };
     /** 사람 얼굴이 기록을 바꿨다(확인 · 믿기) — 호스트가 화면에 recordsChanged 를 보낸다 */
     recordsChanged?(types: string[]): void;
     /** R5: 발행 전 점검(호스트가 — 막는 것 · 경고 · 통과, 발행할 초안, 지금의 근거). 발행 미리보기 · 발행 · documents check 가 같이 쓴다 */
@@ -179,6 +181,10 @@ function isInside(child: string, root: string): boolean {
 }
 
 export class PersonOnlyError extends Error {}
+/** 확인 표시를 받지 않은 까닭 — code(`host.review.*`, 화면은 그 code 의 한국어) */
+export class ReviewRefusedError extends Error {
+    constructor(message: string, readonly code: string) { super(message); }
+}
 
 /** 사람만 하는 일 — MCP 문맥 안이면 던진다 */
 export interface PersonFace {
@@ -201,6 +207,8 @@ export interface PersonFace {
     review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string };
     /** R4-1: 다른 작성자 믿기 · 거두기(그 작성자 소개가 이 프로젝트에 있어야 한다) — 믿은 작성자의 확인만 센다(D5) */
     trust(writerId: string, trust: boolean): { writerId: string; name: string; trusted: boolean };
+    /** R4-3: 사람의 대안 — 지금 상태를 대안으로 두기(keep) · 이름 바꾸기 · 숨기기 · 되살리기 */
+    alternative(req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }): { item: string; event: string };
     /** R5-2: 발행 미리보기 — 지문 · 일회용 숫자(2 분) · 막는 것 · 경고 · 묶일 파일 · 차수 */
     issuePreview(): IssuePreview & { nonce: string; expiresAt: string };
     /** R5-2: 발행 — 미리보기의 지문과 일회용 숫자로(그 사이 무엇이 바뀌면 거절) */
@@ -233,6 +241,7 @@ export class RecordsDesk {
             allowOverwrite: guard(() => this.allowOverwrite()),
             review: guard((req: { mark: boolean; targets: unknown[] }) => this.review(req)),
             trust: guard((writerId: string, trust: boolean) => this.trustWriter(writerId, trust)),
+            alternative: guard((req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }) => this.personAlternative(req)),
             issuePreview: guard(() => this.issuePreview()),
             issue: guard((req: { fingerprint: string; nonce: string }) => this.issue(req)),
         });
@@ -966,14 +975,14 @@ export class RecordsDesk {
     private review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string } {
         const p = this.writableProject();
         const c = this.cur;
-        if (!c || c.readOnly) { throw new Error('no writable case is open'); }
-        if (!req || !Array.isArray(req.targets) || req.targets.length === 0) { throw new Error('nothing to mark'); }
-        if (req.targets.length > 200) { throw new Error('at most 200 targets at a time'); }
-        if (!this.env.resolveReview) { throw new Error('review marks are not available here'); }
+        if (!c || c.readOnly) { throw new ReviewRefusedError('no writable case is open', 'host.review.no_case'); }
+        if (!req || !Array.isArray(req.targets) || req.targets.length === 0) { throw new ReviewRefusedError('nothing to mark', 'host.review.nothing'); }
+        if (req.targets.length > 200) { throw new ReviewRefusedError('at most 200 targets at a time', 'host.review.too_many'); }
+        if (!this.env.resolveReview) { throw new ReviewRefusedError('review marks are not available here', 'host.review.unavailable'); }
         const targets: ReviewTarget[] = [];
         for (const t of req.targets) {
             const r = this.env.resolveReview(t);
-            if ((r as any).error) { throw new Error(String((r as any).error)); }
+            if ((r as any).error) { throw new ReviewRefusedError(String((r as any).error), String((r as any).code ?? 'host.review.refused')); }
             targets.push(r as ReviewTarget);
         }
         const w = this.writer();
@@ -1008,7 +1017,29 @@ export class RecordsDesk {
         let lines: RecordLine[];
         try { lines = this.read('alternatives').lines; } catch { return []; }
         const me = this.myWriterId();
-        return foldAlternatives(lines).map((a) => ({ ...a, writtenBy: 'ai', own: !!me && a.writer === me }));
+        return foldAlternatives(lines).map((a) => ({ ...a, writtenBy: a.by === 'person' ? 'person' : 'ai', own: !!me && a.writer === me }));
+    }
+    /** 사람의 대안(person.alternative) — 행위자 person. keep 은 호스트가 지금 실행 · 스냅숏을 짓는다 */
+    private personAlternative(req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }): { item: string; event: string } {
+        this.writableProject();
+        const c = this.cur;
+        if (!c || c.readOnly) { throw new Error('no writable case is open'); }
+        const op = req?.op;
+        let args: any;
+        if (op === 'keep') {
+            const k = this.env.alternativeKeep?.();
+            if (!k) { throw new Error('alternatives are not available here'); }
+            if ((k as any).error) { throw new Error(String((k as any).error)); }
+            args = { ...(k as any), label: req.label };
+        } else if (op === 'rename' || op === 'drop' || op === 'undrop') {
+            args = { item: req.item, label: req.label };
+            const a = this.alternativeItems().find((x) => x.item === req.item);
+            if (a && a.caseId !== c.caseId) { throw new Error('that alternative belongs to another case'); }
+        } else { throw new Error('op must be keep | rename | drop | undrop'); }
+        const prep = prepareAlternative(op, args, this.read('alternatives').lines);
+        this.append('alternatives', { id: prep.id, event: prep.event, actor: { kind: 'person' }, body: prep.body as any });
+        try { this.env.recordsChanged?.(['alternatives']); } catch { /* 화면 알림은 덤 */ }
+        return { item: prep.id, event: prep.event };
     }
     /** 대안 쓰기(행위자 = 문맥 — 표가 AI 만 허락한다) */
     writeAlternative(event: string, args: any): { item: string; event: string } {

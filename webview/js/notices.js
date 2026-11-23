@@ -422,6 +422,18 @@
         'host.issue.changed-sources': { kind: 'warning', template: 'Source documents changed or are missing.', template_ko: '원자료가 바뀌었거나 없어졌습니다.', params: {} },
         'host.issue.edited-previous-issue': { kind: 'warning', template: 'A previous issue was edited or is missing.', template_ko: '지난 발행본이 고쳐졌거나 없어졌습니다.', params: {} },
         'host.issue.same-as-previous-issue': { kind: 'warning', template: 'The draft is the same as the previous issue.', template_ko: '초안이 지난 발행과 같습니다.', params: {} },
+        // 확인 표시를 받지 않은 까닭(person.review 가 던진 오류의 code)
+        'host.review.shown_differs': { kind: 'reason', template: 'the screen showed another version of this item', template_ko: '화면이 보인 것과 지금 항목이 다릅니다 — 다시 읽고 다시 확인하십시오', params: {} },
+        'host.review.not_current': { kind: 'reason', template: 'this item is not in the current results', template_ko: '지금 결과에 없는 항목입니다 — 먼저 다시 돌리십시오', params: {} },
+        'host.review.no_answer': { kind: 'reason', template: 'the question has no answer yet', template_ko: '판단 요청에 아직 답이 없습니다 — AI 가 사람의 답을 먼저 적습니다', params: {} },
+        'host.review.unknown_group': { kind: 'reason', template: 'unknown input group', template_ko: '모르는 입력 묶음입니다', params: {} },
+        'host.review.no_item': { kind: 'reason', template: 'no such item in this case', template_ko: '이 검토 대상에 그런 항목이 없습니다', params: {} },
+        'host.review.bad_type': { kind: 'reason', template: 'not a kind of item that can be reviewed', template_ko: '확인할 수 있는 항목이 아닙니다', params: {} },
+        'host.review.no_case': { kind: 'reason', template: 'no writable case is open', template_ko: '쓸 수 있는 검토 대상이 열려 있지 않습니다', params: {} },
+        'host.review.nothing': { kind: 'reason', template: 'nothing to mark', template_ko: '확인할 것을 고르지 않았습니다', params: {} },
+        'host.review.too_many': { kind: 'reason', template: 'at most 200 items at a time', template_ko: '한 번에 200 개까지 확인합니다', params: {} },
+        'host.review.unavailable': { kind: 'reason', template: 'review marks are not available here', template_ko: '여기서는 확인 표시를 할 수 없습니다', params: {} },
+        'host.review.refused': { kind: 'reason', template: 'the mark was not accepted', template_ko: '확인 표시를 받지 않았습니다', params: {} },
         // 화면의 칸 변경을 받지 않은 까닭(caseAck.rejected[].reason_code)
         'host.case.replayed_fill': { kind: 'reason', template: 'a replayed load-analysis fill (no new load analysis since the page was loaded) — not an edit', template_ko: '다시 실은 하중 해석 채우기 — 편집이 아닙니다(새 하중 해석이 없음)', params: {} },
         'host.case.reload_echo': { kind: 'reason', template: 'the reloaded page drew the state differently — not an edit', template_ko: '다시 실은 화면이 상태를 다르게 그렸을 뿐 — 편집이 아닙니다', params: {} },

@@ -87,8 +87,14 @@ async function main() {
     const checks = gr.items.filter((x) => x.type === 'check');
     assert(gr.total >= 5 && gr.reviewed === 0 && checks.every((x) => x.state === 'unreviewed' && /^sha256:/.test(x.fp)) && /not an electronic signature/.test(gr.meaning),
       'get_reviews: N checks, none reviewed, the meaning stated: ' + JSON.stringify(gr).slice(0, 300));
+    assert(/전자서명이 아닙니다/.test(gr.meaning_ko) && /^sha256:/.test(gr.group_fps.section) && /^sha256:/.test(gr.group_fps.material_model) && Object.keys(gr.group_fps).length >= 5,
+      'get_reviews: Korean meaning and the input-group fingerprints: ' + JSON.stringify(gr.group_fps));
     const c0 = checks[0], c1 = checks[1];
-    assert.throws(() => face().review({ mark: true, targets: [{ type: 'check', key: c0.key, shown: 'sha256:' + '0'.repeat(64) }] }), /another version/, 'a different shown fingerprint is refused');
+    assert.throws(() => face().review({ mark: true, targets: [{ type: 'check', key: c0.key, shown: 'sha256:' + '0'.repeat(64) }] }),
+      (e) => /another version/.test(e.message) && e.code === 'host.review.shown_differs', 'a different shown fingerprint is refused, with a code');
+    face().review({ mark: true, targets: [{ type: 'group', group: 'section', shown: gr.group_fps.section }] });
+    assert((await tool('get_reviews', { type: 'group' })).items.some((x) => x.group === 'section' && x.state === 'reviewed'), 'the group mark from group_fps');
+    face().review({ mark: false, targets: [{ type: 'group', group: 'section', shown: gr.group_fps.section }] });
     const m1 = face().review({ mark: true, targets: [{ type: 'check', key: c0.key, shown: c0.fp }, { type: 'check', key: c1.key, shown: c1.fp }] });
     assert.strictEqual(m1.targets, 2);
     gr = await tool('get_reviews', {});
@@ -120,7 +126,7 @@ async function main() {
     // 사본 손상 — 그 실행의 사본 파일을 바꾼다
     const blobDir = path.join(pdir, '.stcfsd', 'blobs');
     const allBlobs = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) { walk(q); } else { allBlobs.push(q); } } }; walk(blobDir);
-    const markLine = fs.readdirSync(reviewsDir).map((n) => fs.readFileSync(path.join(reviewsDir, n), 'utf8')).join('\n').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.event === 'mark');
+    const markLine = fs.readdirSync(reviewsDir).map((n) => fs.readFileSync(path.join(reviewsDir, n), 'utf8')).join('\n').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((l) => l.event === 'mark' && l.targets[0].resultBlob);
     const sha = markLine.targets[0].resultBlob;
     const bf = allBlobs.find((q) => path.basename(q).startsWith(sha) || q.includes(sha));
     const keep = fs.readFileSync(bf);
@@ -134,19 +140,25 @@ async function main() {
     const a = await tool('assumptions', { action: 'add', text: '데크 체결 간격 300 mm', status: 'firm', basis: '도면' });
     let ag = (await tool('assumptions', { action: 'get', item: a.item })).item;
     assert(ag.person_confirmed === false && ag.blocks_issue === true, 'firm by the AI still blocks');
+    assert.strictEqual(ag.seq, p._desk.assumptionItems().find((x) => x.item === a.item).lastSeq, 'the reply carries the version (seq) the screen confirms');
     const aSeq = (await tool('get_reviews', { type: 'assumption' })).items.length;  // 아직 표시 없음
     void aSeq;
     const asmItem = p._desk.assumptionItems().find((x) => x.item === a.item);
-    face().review({ mark: true, targets: [{ type: 'assumption', id: a.item, shown: asmItem.lastSeq }] });
+    face().review({ mark: true, targets: [{ type: 'assumption', id: a.item, shown: ag.seq }] });   // 답의 seq 로(화면이 하는 대로)
+    void asmItem;
     ag = (await tool('assumptions', { action: 'get', item: a.item })).item;
     assert(ag.person_confirmed === true && ag.blocks_issue === false, 'confirmed by the person on that version: ' + JSON.stringify(ag));
     await tool('assumptions', { action: 'update', item: a.item, text: '데크 체결 간격 300 mm (S-101)' });
     ag = (await tool('assumptions', { action: 'get', item: a.item })).item;
     assert(ag.person_confirmed === false && ag.blocks_issue === true, 'a new version needs a new confirmation');
     const q = await tool('work_items', { action: 'add', kind: 'question', title: '랩 길이', options: [{ label: '600' }, { label: '900' }] });
-    assert.throws(() => face().review({ mark: true, targets: [{ type: 'work', id: q.item, shown: p._desk.workItems().find((x) => x.item === q.item).lastSeq }] }), /no answer yet/);
+    const qSeq = async () => (await tool('work_items', { action: 'get', item: q.item })).item.seq;
+    assert.throws(() => face().review({ mark: true, targets: [{ type: 'work', id: q.item, shown: 1 }] }), (e) => /no answer yet/.test(e.message) && e.code === 'host.review.no_answer');
     await tool('work_items', { action: 'answer', item: q.item, said: '600 으로', chosen: 0 });
-    face().review({ mark: true, targets: [{ type: 'work', id: q.item, shown: p._desk.workItems().find((x) => x.item === q.item).lastSeq }] });
+    const qs = await qSeq();
+    assert(Number.isInteger(qs) && (await tool('work_items', { action: 'list' })).items.find((x) => x.item === q.item).seq === qs, 'work_items list · get carry seq');
+    face().review({ mark: true, targets: [{ type: 'work', id: q.item, shown: qs }] });
+    assert((await tool('get_reviews', { type: 'work' })).items.some((x) => x.item === q.item && x.seq === qs && x.last_seq === qs), 'get_reviews: seq and last_seq');
     const qg = (await tool('work_items', { action: 'list' })).items.find((x) => x.item === q.item);
     assert(qg.person_confirmed === true && qg.blocks_issue === false, 'answered question confirmed by the person: ' + JSON.stringify(qg));
     // 믿기 — 다른 작성자(B)의 업무 항목이 믿은 뒤에 센다
@@ -160,6 +172,7 @@ async function main() {
     const W = ctx.load(path.join('src', 'records', 'writer.ts'));
     const wB = W.loadOrCreateWriter(keyB);
     assert.throws(() => face().trust('w' + 'a'.repeat(20), true), /no card/);
+    assert((await tool('get_reviews', {})).writers.some((x) => x.writer_id === wB.writerId && x.trusted === false), 'get_reviews.writers carries the writer id for person.trust');
     const tr = face().trust(wB.writerId, true);
     assert(tr.trusted === true, 'person.trust');
     assert((await tool('work_items', { action: 'list', include_others: true })).items.some((x) => x.title === 'B 의 보고'), 'after trusting, B\'s lines count');
@@ -221,6 +234,49 @@ async function main() {
     fs.writeFileSync(sf, Buffer.from('x'));
     const bad = await raw('alternatives', { action: 'open', item: k2.item });
     assert(bad.data && /damaged|missing/.test(bad.data.error || ''), 'a damaged snapshot copy is not opened: ' + bad.text.slice(0, 200));
+    // ════ ④-2 is_now = 지금 상태와 지킨 스냅숏만 — 화면의 거울 메아리(끝자리)가 keep 앞이든 뒤든 같은 답 · A · 사람의 대안 ════
+    await design(0.065);
+    const FP = ctx.load(path.join('src', 'records', 'fp.ts'));
+    const echo = async () => {   // 화면이 지금 단위로 적고 다시 읽은 값(끝자리만 다름) — origin mirror
+      const fy = p.__testGetCase().state.inputs.fy;
+      await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', changes: { fy: fy * (1 + 3e-13) } } });
+    };
+    let flips = 0;
+    const same = [];
+    for (let i = 0; i < 20; i += 1) {
+      if (i % 2 === 0) { await echo(); }
+      const kk = await tool('alternatives', { action: 'keep', label: `same ${i}` });
+      same.push(kk.item);
+      if (i % 2 === 1) { await echo(); }
+      const kept = p._desk.alternativeItems().find((x) => x.item === kk.item);
+      if (kept.contentFp !== FP.contentFp(p._model, p.__testGetCase().state).contentFp) { flips += 1; }
+      const cm = await tool('alternatives', { action: 'compare', item: kk.item });
+      assert(cm.is_now === true && typeof cm.head.alt.A === 'number' && cm.head.alt.A > 0 && Math.abs(cm.head.alt.A - cm.head.now.A) < 1e-12 * cm.head.now.A,
+        `round ${i}: compare is_now and A: ${JSON.stringify({ is_now: cm.is_now, head: cm.head })}`);
+      const nowItems = (await tool('alternatives', { action: 'list' })).items.filter((x) => x.is_now).map((x) => x.item);
+      assert(same.every((x) => nowItems.includes(x)) && !nowItems.includes(k1.item), `round ${i}: list is_now ${JSON.stringify(nowItems)}`);
+    }
+    assert(flips >= 5, `the echo after keep moved the content fingerprint in ${flips} rounds (the old rule would have said 「not now」 there)`);
+    const l0 = (await tool('alternatives', { action: 'list' })).items;
+    const a1 = l0.find((x) => x.item === k1.item);
+    assert(typeof a1.A === 'number' && a1.A < l0.find((x) => x.item === same[0]).A && a1.A_unit === 'in²', 'A from the snapshot section (t 0.059 < t 0.065): ' + JSON.stringify(a1));
+    // 사람의 대안 — 지금 상태를 대안으로 두기 · 이름 · 숨기기 · 되살리기(행위자 person), MCP · 화면 문맥 안에서는 던진다
+    const pk = face().alternative({ op: 'keep', label: '사람이 둔 안' });
+    let li = (await tool('alternatives', { action: 'list' })).items.find((x) => x.item === pk.item);
+    assert(li && li.written_by === 'person' && li.is_now === true && p._desk.alternativeItems().find((x) => x.item === pk.item).by === 'person', 'person keep: ' + JSON.stringify(li));
+    face().alternative({ op: 'rename', item: pk.item, label: '사람 안 2' });
+    face().alternative({ op: 'drop', item: pk.item });
+    assert(!(await tool('alternatives', { action: 'list' })).items.some((x) => x.item === pk.item), 'person drop hides it');
+    face().alternative({ op: 'undrop', item: pk.item });
+    li = (await tool('alternatives', { action: 'list' })).items.find((x) => x.item === pk.item);
+    assert(li && li.label === '사람 안 2' && !li.hidden, 'person rename · undrop: ' + JSON.stringify(li));
+    for (const kind of ['ai', 'screen']) {
+      assert.throws(() => scope.runAs({ kind }, () => face().alternative({ op: 'keep', label: 'x' })), /person-only/, `${kind}: person.alternative throws`);
+    }
+    // 정말 다른 값(Fy 1 %)이면 어느 것도 지금이 아니다
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', changes: { fy: 50.5 } } });
+    assert(!(await tool('alternatives', { action: 'list' })).items.some((x) => x.is_now), 'a real change: none is now');
+    notes.push(`is_now from the kept snapshot and the current state only: 20 × keep → compare with a mirror echo before / after keep (fingerprint moved in ${flips}) — always now, A in list and compare; person keep · rename · drop · undrop (actor person), refused inside ai / screen`);
     notes.push(`alternatives: keep · list (is_now, differs) · compare by check key · open = one change bundle, results re-run, unknown keys dropped · drop · damaged copy refused; list ${sizes.alternatives_list} B, compare ${sizes.alternatives_compare} B`);
 
     // ════ ⑤ 사본 정리: 확인 · 대안이 가리키는 사본은 남는다 ════

@@ -27,7 +27,8 @@ export const WRITE_POLICY: Record<RecordType, Policy> = {
     assumptions: { add: ['ai', 'program'], update: ['ai'], close: ['ai', 'program'] },
     sources: { register: ['ai'], update: ['ai'] },
     reviews: { mark: ['person'], unmark: ['person'] },
-    alternatives: { keep: ['ai'], rename: ['ai'], drop: ['ai'], undrop: ['ai'] },
+    // 대안: AI(alternatives 도구) · 사람(화면의 「대안으로 두기」 · 이름 · 숨기기 — person.alternative)
+    alternatives: { keep: ['ai', 'person'], rename: ['ai', 'person'], drop: ['ai', 'person'], undrop: ['ai', 'person'] },
     documents: { draft: ['ai', 'person'], export: ['person'], issue: ['person'], 'issue-failed': ['program'] },
 };
 

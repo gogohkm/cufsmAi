@@ -31,6 +31,8 @@ export interface Alternative {
     item: string; caseId: string; label: string; contentFp: string; snapshot: string;
     runs: Record<string, { runId: string; blob: string | null }>;
     dropped: boolean; writer: string; createdAt: string; lastAt: string; status_line: LineStatus;
+    /** 둔 쪽(keep 줄의 행위자 — ai · person) */
+    by: string;
 }
 
 export function nextAltId(lines: RecordLine[]): string {
@@ -102,7 +104,7 @@ export function foldAlternatives(lines: RecordLine[]): Alternative[] {
         if (l.event === 'keep') {
             if (by.has(b.item)) { continue; }
             by.set(b.item, { item: b.item, caseId: b.caseId!, label: b.label ?? b.item, contentFp: b.contentFp!, snapshot: b.snapshot!, runs: b.runs ?? {},
-                dropped: false, writer: l.sig.w, createdAt: l.at, lastAt: l.at, status_line: l.status });
+                dropped: false, writer: l.sig.w, createdAt: l.at, lastAt: l.at, status_line: l.status, by: String(l.actor?.kind ?? 'ai') });
             continue;
         }
         const a = by.get(b.item);

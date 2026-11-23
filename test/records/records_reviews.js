@@ -158,9 +158,11 @@ async function run() {
     write(AL.prepareAlternative('rename', { item: 'ALT-2', label: 't 2.6' }, s.read()));
     write(AL.prepareAlternative('drop', { item: 'ALT-1' }, s.read()));
     assert.throws(() => AL.prepareAlternative('drop', { item: 'ALT-1' }, s.read()), /already hidden/);
-    assert.throws(() => s.log.append({ id: 'ALT-1', event: 'undrop', actor: { kind: 'person' }, body: { item: 'ALT-1' } }), /./, 'the table allows the AI only');
+    // 표: AI 와 사람(person.alternative)만 — 프로그램 · 파일의 줄은 쓰지 않는다
+    assert.throws(() => s.log.append({ id: 'ALT-1', event: 'undrop', actor: { kind: 'program' }, body: { item: 'ALT-1' } }), /may not write/, 'the table allows the AI and the person only');
+    assert.throws(() => s.log.append({ id: 'ALT-1', event: 'drop', actor: { kind: 'file' }, body: { item: 'ALT-1' } }), /may not write/);
     const alts = AL.foldAlternatives(s.read());
-    assert.deepStrictEqual(alts.map((a) => [a.item, a.label, a.dropped]), [['ALT-1', 't 2.3', true], ['ALT-2', 't 2.6', false]]);
+    assert.deepStrictEqual(alts.map((a) => [a.item, a.label, a.dropped, a.by]), [['ALT-1', 't 2.3', true, 'ai'], ['ALT-2', 't 2.6', false, 'ai']]);
     assert.deepStrictEqual(AL.altBlobs(alts[0]).sort(), [snap, blob].sort());
     const mk = (r, v) => ({ design_checks: [{ ...item(), ratio: r, verdict: v }, { id: 'member.shear', verdict: 'pass', ratio: 0.2 }] });
     const c = AL.compareAlternative({ member_design: mk(1.05, 'fail') }, { member_design: mk(0.73, 'pass') }, { alt: 0.81, now: 0.93 });
