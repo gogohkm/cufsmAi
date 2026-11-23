@@ -1524,7 +1524,7 @@
      "sep": " ",
      "symbol": "Mu",
      "unit_text": "kip-in",
-     "value": 120
+     "value": 200.0
     },
     {
      "fmt": "",
@@ -1538,19 +1538,25 @@
      "sep": " ",
      "symbol": "phi_Mn_lap",
      "unit_text": "kip-in",
-     "value": 297.0
+     "value": 49.5
     },
     {
      "fmt": ".2f",
      "quantity": "dimensionless",
      "symbol": "flexure_dcr",
-     "value": 0.40404040404040403
+     "value": 4.040404040404041
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "omega",
+     "value": ""
     }
    ],
-   "template": "Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn = {phi_Mn_lap} (DCR = {flexure_dcr})",
-   "template_ko": "Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn = {phi_Mn_lap} (DCR = {flexure_dcr})",
-   "text": "Lap 구간 휨강도 부족: Mu = 120.00 kip-in > φMn = 297.00 kip-in (DCR = 0.40)",
-   "text_ko": "Lap 구간 휨강도 부족: Mu = 120.00 kip-in > φMn = 297.00 kip-in (DCR = 0.40)"
+   "template": "Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn{omega} = {phi_Mn_lap} (DCR = {flexure_dcr})",
+   "template_ko": "Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn{omega} = {phi_Mn_lap} (DCR = {flexure_dcr})",
+   "text": "Lap 구간 휨강도 부족: Mu = 200.00 kip-in > φMn = 49.50 kip-in (DCR = 4.04)",
+   "text_ko": "Lap 구간 휨강도 부족: Mu = 200.00 kip-in > φMn = 49.50 kip-in (DCR = 4.04)"
   },
   {
    "code": "lap.warning.se_lap",
@@ -2016,6 +2022,89 @@
    "template_ko": "단면 성질을 입력 템플릿 치수로 생성했습니다: {auto_section}. 실제 부재 단면과 같은지 확인하십시오.",
    "text": "단면 성질을 입력 템플릿 치수로 생성했습니다: {'type': 'hat', 't': 0.06, 'r': 0.1, 'H': 3.0, 'B': 4.0, 'D': 1.0}. 실제 부재 단면과 같은지 확인하십시오.",
    "text_ko": "단면 성질을 입력 템플릿 치수로 생성했습니다: {'type': 'hat', 't': 0.06, 'r': 0.1, 'H': 3.0, 'B': 4.0, 'D': 1.0}. 실제 부재 단면과 같은지 확인하십시오."
+  },
+  {
+   "code": "member.fragment.i621_r_above_table",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "dimensionless",
+     "symbol": "R",
+     "value": 0.7
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "dimensionless",
+     "symbol": "R_tab",
+     "value": 0.4
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "profile",
+     "value": "C"
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "d",
+     "unit_text": "in",
+     "value": 9.0
+    },
+    {
+     "fmt": "",
+     "notice": {
+      "code": "member.fragment.span_type_unknown",
+      "kind": "fragment",
+      "params": [],
+      "template": "span type unknown",
+      "template_ko": "경간 형식 모름",
+      "text": "span type unknown",
+      "text_ko": "경간 형식 모름"
+     },
+     "quantity": null,
+     "symbol": "span_type",
+     "value": "span type unknown"
+    }
+   ],
+   "template": "R={R} > Table I6.2.1-1 R={R_tab} ({profile}, d={d}, {span_type})",
+   "template_ko": "R={R} > Table I6.2.1-1 R={R_tab} ({profile}, d={d}, {span_type})",
+   "text": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown)",
+   "text_ko": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, 경간 형식 모름)"
+  },
+  {
+   "code": "member.fragment.length_default_item",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "symbol",
+     "value": "KtLt"
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "L_default",
+     "text": "120",
+     "unit_text": "in",
+     "value": 120.0
+    }
+   ],
+   "template": "{symbol}={L_default}",
+   "template_ko": "{symbol}={L_default}",
+   "text": "KtLt=120 in",
+   "text_ko": "KtLt=120 in"
+  },
+  {
+   "code": "member.fragment.span_type_unknown",
+   "params": [],
+   "template": "span type unknown",
+   "template_ko": "경간 형식 모름",
+   "text": "span type unknown",
+   "text_ko": "경간 형식 모름"
   },
   {
    "code": "member.ne.b4_1_b4_limits_chapters_applicable",
@@ -2812,6 +2901,41 @@
     {
      "conv": "s",
      "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "member.fragment.length_default_item",
+        "kind": "fragment",
+        "params": [
+         {
+          "fmt": "",
+          "quantity": null,
+          "symbol": "symbol",
+          "value": "KtLt"
+         },
+         {
+          "const": true,
+          "fmt": "raw",
+          "quantity": "length",
+          "sep": " ",
+          "symbol": "L_default",
+          "text": "120",
+          "unit_text": "in",
+          "value": 120.0
+         }
+        ],
+        "template": "{symbol}={L_default}",
+        "template_ko": "{symbol}={L_default}",
+        "text": "KtLt=120 in",
+        "text_ko": "KtLt=120 in"
+       }
+      ],
+      "sep": ", ",
+      "text": "KtLt=120 in",
+      "text_ko": "KtLt=120 in"
+     },
      "quantity": null,
      "symbol": "items",
      "value": "KtLt=120 in"
@@ -2875,6 +2999,66 @@
     {
      "conv": "s",
      "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "member.fragment.i621_r_above_table",
+        "kind": "fragment",
+        "params": [
+         {
+          "fmt": "",
+          "quantity": "dimensionless",
+          "symbol": "R",
+          "value": 0.7
+         },
+         {
+          "fmt": ".2f",
+          "quantity": "dimensionless",
+          "symbol": "R_tab",
+          "value": 0.4
+         },
+         {
+          "fmt": "",
+          "quantity": null,
+          "symbol": "profile",
+          "value": "C"
+         },
+         {
+          "fmt": ".2f",
+          "quantity": "length",
+          "sep": " ",
+          "symbol": "d",
+          "unit_text": "in",
+          "value": 9.0
+         },
+         {
+          "fmt": "",
+          "notice": {
+           "code": "member.fragment.span_type_unknown",
+           "kind": "fragment",
+           "params": [],
+           "template": "span type unknown",
+           "template_ko": "경간 형식 모름",
+           "text": "span type unknown",
+           "text_ko": "경간 형식 모름"
+          },
+          "quantity": null,
+          "symbol": "span_type",
+          "value": "span type unknown"
+         }
+        ],
+        "template": "R={R} > Table I6.2.1-1 R={R_tab} ({profile}, d={d}, {span_type})",
+        "template_ko": "R={R} > Table I6.2.1-1 R={R_tab} ({profile}, d={d}, {span_type})",
+        "text": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown)",
+        "text_ko": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, 경간 형식 모름)"
+       }
+      ],
+      "sep": "; ",
+      "text": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown)",
+      "text_ko": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, 경간 형식 모름)"
+     },
      "quantity": null,
      "symbol": "i621_issues",
      "value": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown)"
@@ -2883,7 +3067,7 @@
    "template": "§I6.2.1 적용 조건 위반/미확인: {i621_issues} — K2.1 시험 또는 합리적 해석이 필요합니다.",
    "template_ko": "§I6.2.1 적용 조건 위반/미확인: {i621_issues} — K2.1 시험 또는 합리적 해석이 필요합니다.",
    "text": "§I6.2.1 적용 조건 위반/미확인: R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown) — K2.1 시험 또는 합리적 해석이 필요합니다.",
-   "text_ko": "§I6.2.1 적용 조건 위반/미확인: R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown) — K2.1 시험 또는 합리적 해석이 필요합니다."
+   "text_ko": "§I6.2.1 적용 조건 위반/미확인: R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, 경간 형식 모름) — K2.1 시험 또는 합리적 해석이 필요합니다."
   },
   {
    "code": "member.warning.lb_defaulted_verify_lateral",
@@ -2975,10 +3159,16 @@
      "quantity": "dimensionless",
      "symbol": "util_pos",
      "value": 1.3206
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "omega",
+     "value": ""
     }
    ],
-   "template": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+)={phi_Mn_pos} (DCR={util_pos})",
-   "template_ko": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+)={phi_Mn_pos} (DCR={util_pos})",
+   "template": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})",
+   "template_ko": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})",
    "text": "정모멘트 구간 NG: Mu(+)=110.00 > φMn(+)=83.29 kip-in (DCR=1.321)",
    "text_ko": "정모멘트 구간 NG: Mu(+)=110.00 > φMn(+)=83.29 kip-in (DCR=1.321)"
   },

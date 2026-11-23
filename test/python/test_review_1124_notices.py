@@ -396,6 +396,125 @@ def test_labels_with_units_carry_their_numbers():
                                                                        'unit_text': 'in'}
 
 
+# ------------------------------------------------------------------ 단언한 부등식(2026-11-24 K4f)
+_INEQ_TOK = re.compile(r'\{([A-Za-z_]\w*)\}|(>=|<=|≥|≤|(?<![-=])>(?!=)|<(?!=))|(?<![\w.§/^·(-])(\d+(?:\.\d+)?)(?![\w.%/^·])')
+_INEQ_OPS = {'>': lambda a, b: a > b, '<': lambda a, b: a < b, '≥': lambda a, b: a >= b, '≤': lambda a, b: a <= b,
+             '>=': lambda a, b: a >= b, '<=': lambda a, b: a <= b}
+
+
+def _ineq_relations(template):
+    """템플릿이 단언하는 [(왼쪽, 연산, 오른쪽 후보들)]. 왼쪽은 연산 바로 앞(사이에 빈칸 · 등호만)의 값."""
+    toks = []
+    for m in _INEQ_TOK.finditer(template):
+        if m.group(1):
+            toks.append(('p', m.group(1), m.start(), m.end()))
+        elif m.group(2):
+            toks.append(('op', m.group(2), m.start(), m.end()))
+        else:
+            toks.append(('n', float(m.group(3)), m.start(), m.end()))
+    out = []
+    for i, t in enumerate(toks):
+        if t[0] != 'op' or i == 0 or toks[i - 1][0] == 'op':
+            continue
+        left = toks[i - 1]
+        if template[left[3]:t[2]].strip(' =') != '':
+            continue
+        rights = []
+        for x in toks[i + 1:]:
+            if x[0] == 'op':
+                break
+            rights.append(x[:2])
+        if rights:
+            out.append((left[:2], t[1], rights))
+    return out
+
+
+def _ineq_value(side, params):
+    kind, v = side
+    if kind == 'n':
+        return v
+    x = (params.get(v) or {}).get('value')
+    return x if isinstance(x, (int, float)) and not isinstance(x, bool) else None
+
+
+def _ineq_check(e, where, bad):
+    """알림의 매개변수로 그 글이 단언하는 관계를 평가한다. 적용한계 조각(conn.fragment.lim_*)은 어긴 한계를 적는 글이라
+    관계가 거짓이어야 한다. 이름표(label)는 규칙 · 요구를 적는 글이라 보지 않는다."""
+    if e.get('kind') == 'group':
+        for x in e.get('parts') or []:
+            _ineq_check(x, where, bad)
+        return
+    if not e.get('code') or not e.get('template') or e.get('kind') == 'label':
+        return
+    params = {x['symbol']: x for x in e.get('params') or []}
+    for x in params.values():
+        if x.get('notice'):
+            _ineq_check(x['notice'], where, bad)
+    want = not e['code'].startswith('conn.fragment.lim_')
+    for left, op, rights in _ineq_relations(e['template']):
+        a = _ineq_value(left, params)
+        b = next((v for v in (_ineq_value(r, params) for r in rights) if v is not None), None)
+        if a is not None and b is not None and _INEQ_OPS[op](a, b) != want:
+            bad.append((where, e['code'], f'{a} {op} {b}', e['text'][:100]))
+
+
+def _ineq_walk(x, where, bad):
+    if isinstance(x, dict):
+        for e in x.get('notices') or []:
+            _ineq_check(e, where, bad)
+        for k in list(x):
+            if isinstance(k, str) and k.endswith('_kind') and x.get(k[:-5] + '_template'):
+                _ineq_check({'code': x.get(k[:-5] + '_code'), 'kind': x[k], 'template': x[k[:-5] + '_template'],
+                             'params': x.get(k[:-5] + '_params'), 'text': str(x.get(k[:-5]))}, where, bad)
+        for k, v in x.items():
+            if k != 'notices':
+                _ineq_walk(v, where, bad)
+    elif isinstance(x, list):
+        for v in x:
+            _ineq_walk(v, where, bad)
+
+
+def test_asserted_inequalities_hold():
+    """알림 글이 단언하는 부등식(>, <, ≥, ≤ — 「부족」 · 「초과」 글은 그 수로)이 그 알림의 매개변수에서 참이다 — 글이 거짓을
+    말하는 알림이 없다(2026-11-24 K4f: lap.warning.lap_mu_mn_dcr 가 비 0.40 에서 「Mu > φMn — 휨강도 부족」을 냈다)."""
+    bad = []
+    for name, method, params in cases.all_cases():
+        _ineq_walk(cases.run_case(method, params), name, bad)
+    assert not bad, bad[:10]
+
+
+def test_connection_rows_carry_their_check_id():
+    """접합부 limit_states · detailing_checks · interaction_checks 의 행마다 check_id 와 name_ko(계약 §16.13)."""
+    from design.checks import REGISTRY as CHECKS
+    bad, n = [], 0
+    for name, method, params in cases.all_cases():
+        if method not in ('design_connection', 'lap_connection', 'aisi_design'):
+            continue
+        r = cases.run_case(method, params)
+        for res in (r, r.get('fastener_design') or {}):
+            for key in ('limit_states', 'detailing_checks', 'interaction_checks'):
+                for row in res.get(key) or []:
+                    if isinstance(row, dict) and isinstance(row.get('name'), str):
+                        n += 1
+                        cid = row.get('check_id')
+                        if cid not in CHECKS or row.get('name_ko') != CHECKS[cid]['name_ko']:
+                            bad.append((name, key, row['name'], cid))
+    assert n > 200 and not bad, (n, bad[:10])
+
+
+def test_lap_flexure_warning_only_when_it_fails():
+    """랩 휨 경고 「휨강도 부족: Mu > φMn」은 국부 휨 비가 1 을 넘을 때만 — 진술이 없어 판정 없음이면 내지 않는다."""
+    from design.lap_connection import design_lap_connection
+    base = dict(d=8.0, t=0.059, Fy=55, Fu=70, lap_left_in=30, lap_right_in=42, Vu_support=1.0, fastener_type='bolt',
+                fastener_dia=0.5, n_rows=2, design_method='ASD', Se=1.8)
+    for mu, stated, expect in ((60.0, None, False), (60.0, True, False), (400.0, None, True), (400.0, True, True)):
+        r = design_lap_connection(dict(base, Mu_support=mu, **({'lap_restrained': True} if stated else {})))
+        fired = any(getattr(w, 'code', None) == 'lap.warning.lap_mu_mn_dcr' for w in r['warnings'])
+        assert fired == expect, (mu, stated, fired)
+        loc = [c for c in r['design_checks'] if c['id'] == 'lap.flexure.local'][0]
+        assert (loc['verdict'] == 'fail') == expect, (mu, stated, loc['verdict'])
+
+
 def write_fixture():
     run = _corpus()
     pairs = [run['samples'][c] for c in sorted(run['samples'])]

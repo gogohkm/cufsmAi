@@ -361,9 +361,10 @@ def design_lap_connection(params: dict) -> dict:
             ),
             'pass': flexure_ok,
         })
-        if not flexure_ok:
+        if flexure_ok is False:      # None(진술 없음 · 판정 없음)은 부족이 아니다 — 2026-11-24 K4f
             warnings.append(
-                _nt('lap.warning.lap_mu_mn_dcr', Mu=Mu, text="φ" if design_method == "LRFD" else "", phi_Mn_lap=phi_Mn_lap, flexure_dcr=flexure_dcr)
+                _nt('lap.warning.lap_mu_mn_dcr', Mu=Mu, text="φ" if design_method == "LRFD" else "",
+                    omega='' if design_method == 'LRFD' else '/Ω', phi_Mn_lap=phi_Mn_lap, flexure_dcr=flexure_dcr)
             )
 
         # 뒤틀림좌굴(§F4) 검토 — 구간 설계와 같은 계약(§6.3, V8-01): 진술이 있으면 준 Mnd 와 무관하게 해당 없음

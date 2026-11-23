@@ -1444,3 +1444,27 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
   표지: `generated: true` → 「템플릿으로 생성」, `assumption_source` → 「가정의 근거」, `restraint_source` → 「구속의 근거」(`SOURCE_FLAGS_KO`). 「사용자 진술」은 `user_input` + `key: 'lap_restrained'` 의 출처다 — 화면은 `key` 의 입력 이름을 그대로 둔다.
 - **수:** code 660 (note 81 · label 99 · fragment 26 · warning 178 · reason 122 · assumption 97 · not_evaluated 35 · scope 22). 계약 사례가 닿는 code 334. 고정값 207 쌍.
 - 함께 고친 것: 하위 결과 이름이 `_params` 로 끝나면(`auto_params`) 걷지 않던 잘못 — `analyze_loads.auto_params` 안의 글(`uplift_bracing.positive_region.note`, `uplift_R_basis`, `gravity_R_basis` …)에 이제 필드가 붙는다(code `loads.label.r_basis_*` 2 더함).
+
+### 16.13 덧붙임 — 거짓을 말하던 경고, 접합부 행의 check_id, 남은 두 글 매개변수 (2026-11-24 K4f)
+
+**1. `lap.warning.lap_mu_mn_dcr` 「Lap 구간 휨강도 부족: Mu = … > φMn = …」이 비 0.22 – 0.56 에서 나왔다.** 원인은 조건이다: 랩 국부 휨의 판정 값 `flexure_ok` 는 진술(`lap_restrained`)이 없고 비 ≤ 1 이면 `None`(판정 없음, 계약 §6.3)인데 경고가 `if not flexure_ok:` 로 걸려 `None` 에서도 나왔다. 비교한 두 값(Mu 와 두 부재의 설계강도 2·Se·Fy·φ 또는 /Ω)은 맞았다 — 「>」와 「부족」이 거짓이었다. 이제 `flexure_ok is False`(비 > 1)일 때만 — 검토 항목 `lap.flexure.local` 이 `fail` 인 때와 같다. 함께: ASD 에서 그 값은 Mn/Ω 인데 글은 「Mn」이라 했다 — 이 경고와 `member.warning.ng_mu_mn_dcr`(정모멘트 구간 NG)의 템플릿에 매개변수 `omega`(LRFD '' · ASD '/Ω')를 더해 ASD 글이 「Mn/Ω = …」 · 「Mn(+)/Ω=…」가 된다(LRFD 글은 그대로; 계약 사례의 이 두 경고는 모두 LRFD 라 기준선 글은 바뀌지 않는다).
+
+**같은 꼴을 찾은 것:** 시험 `test_asserted_inequalities_hold` 가 계약 사례 전부에서 알림 글이 단언하는 부등식(>, <, ≥, ≤ — 연산 바로 앞의 값과 뒤의 첫 수)을 그 알림의 매개변수로 평가한다(적용한계 조각 `conn.fragment.lim_*` 은 어긴 한계를 적는 글이라 거짓이어야 하고, 이름표 `label` 은 규칙 · 요구를 적는 글이라 보지 않는다). 고치기 전 엔진에서 거짓이 나온 알림은 이 하나뿐이었다(계약 · 가장자리 · 하중 사례). 엔진 소스를 훑은 것: 단언하는 경고를 `if not X:` 아래에서 내는 자리는 랩 도구의 여섯(`fastener_spacing_below_3d`, `transfer_capacity_dcr`, `lap_mu_mn_dcr`, `j6_3_lap_j6`, `h2_lap_h2`, `f4_lap_f4_dcr`)이고, 그 가운데 판정 값이 `None` 일 수 있는 것은 `flexure_ok` 하나다.
+
+**기준선에서 바뀐 값(옛 글이 빠짐, 판정 · 수는 그대로):**
+
+| 사례 | 빠진 `warnings` 글 | `lap.flexure.local` |
+|---|---|---|
+| lap bolt Se Mnd · lap bolt Se e=2 · lap bolt short e · lap bolt short lap | Lap 구간 휨강도 부족: Mu = 120.00 kip-in > φMn = 297.00 kip-in (DCR = 0.40) | not_evaluated |
+| lap screw Pnvs ASD | Lap 구간 휨강도 부족: Mu = 66.00 kip-in > Mn = 118.56 kip-in (DCR = 0.56) | not_evaluated |
+| lap screw no Pnvs | Lap 구간 휨강도 부족: Mu = 40.00 kip-in > φMn = 178.20 kip-in (DCR = 0.22) | not_evaluated |
+| (가장자리) lap screw LRFD · lap short length LRFD | … Mu = 50.00 kip-in > φMn = 178.20 kip-in (DCR = 0.28) | not_evaluated |
+| (가장자리) lap screw ASD · lap short length ASD | … Mu = 50.00 kip-in > Mn = 118.56 kip-in (DCR = 0.42) | not_evaluated |
+
+그 밖의 다른 값은 K4b 필드(`notices` 등)뿐 — 계약 사례 153,721 · 가장자리 95,530 · 하중 65,134 값과 견줌(`8f52455`).
+
+**2. 접합부 행의 check_id:** `limit_states[]` · `detailing_checks[]` · `interaction_checks[]` 의 행마다 `check_id`(`checks.connection_check_id(name)`)와 `name_ko`(§11). 시험이 계약 사례의 모든 행(접합 · 랩의 `fastener_design` · 부재)에 id 와 그 `name_ko` 가 있음을 확인한다.
+
+**3. 마지막 두 글 매개변수:** `member.warning.effective_length_defaulted_verify.items` 는 조각 `member.fragment.length_default_item` `{symbol}={L_default}`(L_default = 120 in 상수)의 이은 글, `member.warning.i6_2_1_i6_k2.i621_issues` 는 조각 `member.fragment.i621_*` 12(깊이 · 비 · 플랜지 폭은 물리량, (a) 12 in · (e) 2.125 in 은 상수, 「span type unknown」은 조각)의 이은 글. 옛 글은 그대로다. 이제 엔진 글에 호스트의 무늬 바꾸기가 필요한 매개변수는 없다.
+
+**수:** code 674 (조각 14 더함). 고정값 210 쌍.

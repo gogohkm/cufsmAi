@@ -910,7 +910,8 @@ def _design_compression(params: dict) -> dict:
     KtLt = params.get('KtLt') if params.get('KtLt') is not None else 120
     if missing_len:
         warnings.append(
-            _nt('member.warning.effective_length_defaulted_verify', items=', '.join(f'{k}=120 in' for k in missing_len)))
+            _nt('member.warning.effective_length_defaulted_verify',
+                items=_joined(', ', [_nt('member.fragment.length_default_item', symbol=k) for k in missing_len])))
         if Fcre_override <= 0:
             not_evaluated.append(_nt('member.ne.e2_e2_global_buckling_assumed', missing_len='/'.join(missing_len)))
 
@@ -2273,7 +2274,8 @@ def _design_flexure(params: dict) -> dict:
                 _mark_not_evaluated(result, _nt('member.ne.positive_region_local_buckling'))
             if pass_pos is False:
                 result['warnings'].append(
-                    _nt('member.warning.ng_mu_mn_dcr', Mu_pos=Mu_pos, text="φ" if design_method == "LRFD" else "", phi_Mn_pos=phi_Mn_pos, util_pos=util_pos)
+                    _nt('member.warning.ng_mu_mn_dcr', Mu_pos=Mu_pos, text="φ" if design_method == "LRFD" else "",
+                        omega='' if design_method == 'LRFD' else '/Ω', phi_Mn_pos=phi_Mn_pos, util_pos=util_pos)
                 )
 
     # §G5 웹 크리플링 단독 검토(P̄ ≤ Pa) + §H3 휨 상호작용
@@ -2488,32 +2490,32 @@ def _check_i621_limits(params: dict, geom: dict, Fy: float, Fu: float, R_uplift:
             R_tab = min(cands) if cands else None
             notes.append(_nt('member.assumption.i6_2_1_i6_span_type_simple'))
         if R_tab is None:
-            issues.append(f'Table I6.2.1-1 에 depth {d:.2f} in 의 R 이 없음')
+            issues.append(_nt('member.fragment.i621_no_table_row', d=d))
         elif R_uplift > R_tab + 1e-9:
-            issues.append(f'R={R_uplift} > Table I6.2.1-1 R={R_tab:.2f} '
-                          f'({profile}, d={d:.2f} in, {span_type or "span type unknown"})')
+            issues.append(_nt('member.fragment.i621_r_above_table', R=R_uplift, R_tab=R_tab, profile=profile, d=d,
+                              span_type=span_type or _nt('member.fragment.span_type_unknown')))
     elif R_uplift > 0.70:
-        issues.append(f'R={R_uplift} > 0.70 (Table I6.2.1-1 최대값)')
+        issues.append(_nt('member.fragment.i621_r_above_max', R=R_uplift))
     w = geom['b_flange']
     if d <= 0 or bo <= 0 or t <= 0:
-        issues.append('부재 깊이·플랜지 폭·두께를 알 수 없어 (a)~(f) 확인 불가')
+        issues.append(_nt('member.fragment.i621_dims_unknown'))
     else:
         if d > 12.0:
-            issues.append(f'(a) depth {d:.2f} in > 12 in')
+            issues.append(_nt('member.fragment.i621_a', d=d))
         if not geom['has_lip']:
-            issues.append('(b) 연단 보강 플랜지 아님')
+            issues.append(_nt('member.fragment.i621_b'))
         if not 60 <= d / t <= 170:
-            issues.append(f'(c) depth/t = {d / t:.1f} (60~170)')
+            issues.append(_nt('member.fragment.i621_c', ratio=d / t))
         if not 2.8 <= d / bo <= 5.5:
-            issues.append(f'(d) depth/flange width = {d / bo:.2f} (2.8~5.5)')
+            issues.append(_nt('member.fragment.i621_d', ratio=d / bo))
         if bo < 2.125:
-            issues.append(f'(e) flange width {bo:.3f} in < 2.125 in')
+            issues.append(_nt('member.fragment.i621_e', bo=bo))
         if w > 0 and not 16 <= w / t <= 43:
-            issues.append(f'(f) flange flat width/t = {w / t:.1f} (16~43)')
+            issues.append(_nt('member.fragment.i621_f', ratio=w / t))
         elif w <= 0:
-            issues.append('(f) 플랜지 평탄폭을 알 수 없음')
+            issues.append(_nt('member.fragment.i621_f_unknown'))
     if Fu is None or Fy <= 0 or Fu / Fy < 1.08:
-        issues.append(f'(o) Fu/Fy = {(Fu / Fy if Fu and Fy > 0 else 0):.3f} < 1.08')
+        issues.append(_nt('member.fragment.i621_o', ratio=(Fu / Fy if Fu and Fy > 0 else 0)))
     return issues, notes
 
 

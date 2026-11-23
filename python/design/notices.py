@@ -477,6 +477,19 @@ def _mode_fields(d, member_type):
             d[f'{k}_id'] = connection_check_id(d[k])
 
 
+_ROW_LISTS = ('limit_states', 'detailing_checks', 'interaction_checks')
+
+
+def _row_ids(rows):
+    """접합부 한계상태 · 상세 · 조합 행의 이름(영어 · 한국어 엔진 이름) → 검토 항목 id 와 그 name_ko (계약 §16.13)."""
+    from design.checks import REGISTRY as CHECKS, connection_check_id
+    for r in rows:
+        if isinstance(r, dict) and isinstance(r.get('name'), str) and 'check_id' not in r:
+            cid = connection_check_id(r['name'])
+            r['check_id'] = cid
+            r['name_ko'] = CHECKS[cid]['name_ko'] if cid in CHECKS else None
+
+
 def _is_field_key(d, k):
     """이 걸음이 단 필드인가 — {key}_notices · {key}_params · {key}_parts (auto_params 같은 이름은 아님)."""
     for suf in ('_notices', '_params', '_parts'):
@@ -512,6 +525,8 @@ def _annotate(d, member_type=None):
                 _annotate(v, {'compression': 'compression', 'flexure_x': 'flexure', 'flexure_y': 'flexure',
                               'tension': 'tension'}.get(k, mt))
         elif isinstance(v, (list, tuple)) and v:
+            if k in _ROW_LISTS:
+                _row_ids(v)
             if all(_is_notice(x) for x in v):
                 d[f'{k}_notices'] = [_label_entry(x) for x in v]
             elif all(isinstance(x, dict) and all(_is_notice(y) for y in x.values()) for x in v) and any(v):
