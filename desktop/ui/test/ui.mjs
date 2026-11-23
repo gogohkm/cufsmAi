@@ -1181,13 +1181,19 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   const distKey = await keyOf(`x=>x.scope==='member' && x.id==='member.flexure.distortional'`);
   await step('u25 누른 항목 = get_view 의 current.selection(by person) = 정보 창 아래 칩', 'u25_share', async () => {
     await ev(`(()=>{const r=[...document.querySelectorAll('#tree .row')].find(x=>x.dataset.k===${JSON.stringify(localKey)}); r&&r.click(); return !!r;})()`);
-    await sleep(1200);
+    // 누른 뒤에도 화면은 계속 다시 그려질 수 있다(결과 · 상태 · Claude 연결이 잇달아 올 때) — 0.15 초마다 다시 그려도 보고는 0.4 초 뒤에 나가야 한다.
+    // 이전에는 다시 그릴 때마다 0.4 초 시계를 새로 걸어 보고가 밀렸고, get_view 가 옛 고른 것을 돌려주었다(전체 실행의 u25 실패)
+    await ev(`(()=>{const u=window.__stcfsdUi; const m=u.modeSel; let n=0; const t=setInterval(()=>{u.setLen(m.len,m.mode); if(++n>=10) clearInterval(t);},150); return 1;})()`);
+    // 기다리는 신호: 호스트가 그 보고를 받아 적었다는 답(화면의 reported) — 누른 뒤 1.2 초 안(0.4 초 모음 + 왕복)
+    const t0 = Date.now();
+    await waitFor(`${S}.reported?.sent?.selection?.id==='member.flexure.local'`, 1200, '보고의 답').catch(() => {});
+    const waited = Date.now() - t0;
     const v = await viewNow();
     const chip = await ev(`({item:document.getElementById('share').dataset.item, text:document.querySelector('#share b').textContent})`);
     const sel = v.current?.selection;
     const ok = v.current?.screen === 'review' && sel?.kind === 'check' && sel.id === 'member.flexure.local' && sel.scope === 'member' && v.current.by === 'person'
-      && JSON.stringify(JSON.parse(chip.item)) === JSON.stringify(sel);
-    return { ok, detail: `get_view ${short(v.current, 180)} · 칩 「${short(chip.text, 60)}」` };
+      && JSON.stringify(JSON.parse(chip.item)) === JSON.stringify(sel) && /국부\s?좌굴/.test(chip.text);
+    return { ok, detail: `다시 그리는 중에 보고의 답까지 ${waited} ms · get_view ${short(v.current, 180)} · 칩 「${short(chip.text, 60)}」` };
   });
   // AI 따라가기 — 꺼져 있으면 움직이지 않고 알림
   const foc1 = await mcp.tool('focus', { item: { kind: 'check', id: 'member.flexure.distortional', scope: 'member' }, reason: '뒤틀림이 지배한다' });

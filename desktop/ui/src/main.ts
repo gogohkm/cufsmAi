@@ -15,7 +15,7 @@ import { debounce, esc, tip } from './dom';
 import { editing, hideSide, initEdit, mountDesigner, reloadSide, setEditing, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
 import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { findHtml, search, type Hit } from './find';
-import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq, type Item } from './follow';
+import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, keyOfItem, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq, type Item } from './follow';
 import { hhmm } from './format';
 import { infoHtml, shareLabel } from './info';
 import { closeMenu, installMenuClosers, menuKey, menuOpen, openMenu, type MenuItem } from './menu';
@@ -283,11 +283,13 @@ function renderShare(): void {
   const dot = el.querySelector('.dot') as HTMLElement;
   if (!r) { dot.className = 'dot un'; b.textContent = '아직 알리지 않음'; el.removeAttribute('data-item'); return; }
   dot.className = `dot ${r.recorded ? 'ok' : 'un'}`;
-  const key = ui.sheet ?? ui.sel[ui.tab];
-  const node = findNode(buildTree(ui.tab), key);
   const sel = r.selection;
+  // 이름도 받아 적힌 항목의 것 — 지금 고른 것(아직 알리는 중일 수 있다)의 이름을 옛 항목 id 에 붙이지 않는다
+  const cur = ui.sheet ?? ui.sel[ui.tab];
+  const at = !sel ? null : JSON.stringify(itemOfKey(ui.tab, cur)) === JSON.stringify(r.sent.selection) ? { tab: ui.tab, key: cur } : keyOfItem(sel);
+  const label = at ? shareLabel(at.key, findNode(buildTree(at.tab), at.key)?.t) : '';
   const dropKo = r.dropped.length ? ` · 호스트가 버림: ${r.dropped.join(', ')}` : '';
-  b.textContent = r.recorded ? `${sel ? `${shareLabel(key, node?.t)} · ${sel.kind} ${sel.id}` : '고른 것 없음'}${dropKo}` : `알리지 못함 — ${r.error ?? ''}`;
+  b.textContent = r.recorded ? `${sel ? `${label ? `${label} · ` : ''}${sel.kind} ${sel.id}` : '고른 것 없음'}${dropKo}` : `알리지 못함 — ${r.error ?? ''}`;
   el.setAttribute('data-item', JSON.stringify(sel));
   el.setAttribute('data-view', r.view ?? '');
   el.setAttribute('data-dropped', r.dropped.join(','));

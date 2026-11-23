@@ -136,6 +136,10 @@ export type FocusNote = 'followed' | 'not_in_results' | 'follow_off' | 'editing'
 let pendingResp: { request_id: string; followed: boolean; note?: FocusNote } | null = null;
 let timer: number | null = null;
 let lastSent = '';
+/** 기다리는(아직 보내지 않은) 보고의 서명 · 보낸 차례 · 답을 받아 적은 차례 */
+let pendingSig: string | null = null;
+let sentSeq = 0;
+let replySeq = 0;
 let onReported: (() => void) | null = null;
 
 export function lastReported(): Reported | null { return reported; }
@@ -146,14 +150,23 @@ export function report(view: string, selection: Item | null, by: 'person' | 'pro
   const body = { screen: 'review', view, selection, follows_focus: followOn, by };
   // 같은 보기 · 고른 것을 다시 알릴 때 「누가」만 바뀌면 보내지 않는다(AI 를 따라간 보고를 뒤의 다시 그리기가 「사람」으로 덮지 않게)
   const sig = JSON.stringify({ ...body, by: undefined });
-  if (sig === lastSent && !pendingResp) { return; }
+  // 이미 보낸 것으로 돌아왔다 — 기다리던 다른 보고는 버린다(늦게 나가 호스트에 옛 고른 것을 남기지 않게)
+  if (sig === lastSent && !pendingResp) { if (timer !== null) { clearTimeout(timer); timer = null; pendingSig = null; } return; }
+  // 같은 것이 이미 기다린다 — 다시 그릴 때마다 시계를 새로 걸지 않는다(잇단 다시 그리기가 보고를 한없이 미루지 않게: 바뀐 뒤 0.4 초 안에 나간다)
+  if (!now && timer !== null && sig === pendingSig) { return; }
   if (timer !== null) { clearTimeout(timer); timer = null; }
+  pendingSig = sig;
   const send = () => {
     timer = null;
+    pendingSig = null;
     const resp = pendingResp;
     pendingResp = null;
     lastSent = sig;
+    const my = ++sentSeq;
     void mcp<{ recorded?: boolean; error?: string; dropped?: unknown }>('report_view', { ...body, ...(resp ? { focus_response: resp } : {}) }).then(r => {
+      // 답은 따로 오므로 차례가 바뀔 수 있다 — 나중에 보낸 것의 답이 이미 왔으면 앞의 답으로 덮지 않는다(호스트도 마지막에 받은 것을 둔다)
+      if (my < replySeq) { return; }
+      replySeq = my;
       const dropped = Array.isArray(r?.dropped) ? r.dropped.map(String) : [];
       const sel = dropped.includes('selection') ? null
         : selection && dropped.includes('selection.location') ? (({ location: _l, ...rest }) => rest)(selection) as Item : selection;
