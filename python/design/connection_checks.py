@@ -57,7 +57,15 @@ def _scope_demote(checks: list, items: list, relevant) -> None:
             continue
         why = f'outside the scope of §{key}: {x.get("reason")} — computed value is a reference only, not used '               'for the verdict'
         for c in checks:
-            if c['verdict'] != 'pass' or not _in_clause(c['clause'], prefixes):
+            if not _in_clause(c['clause'], prefixes):
+                continue
+            if c['verdict'] == 'fail':
+                # 불합격은 그대로(불합격이 이긴다) — 다만 적용범위 밖의 식으로 낸 것임을 밝힌다(V6b-09).
+                c['out_of_scope'] = key
+                c['reason'] = '; '.join(r for r in (c.get('reason'), f'computed outside the scope of §{key}: '
+                                                    f'{x.get("reason")} — the fail stands (fail wins)') if r)
+                continue
+            if c['verdict'] != 'pass':
                 continue
             ref = dict(c.get('reference') or {})
             if c.get('capacity') is not None:

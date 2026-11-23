@@ -114,7 +114,8 @@
 - **적용범위 밖(2026-11-24 V6-04):** 접합부의 적용범위 항목(`conn.scope`, '적용범위 (J4)' 등)이 미평가이면, 그 범위의 조항으로 계산한 항목 가운데 `pass` 인 것을 `not_evaluated` 로 내리고(`reason` 에 범위, `out_of_scope: '<조항>'`), 계산한 강도 · 비는 `reference` 로만 둔다(판정에 쓰지 않음). 범위 → 조항: J3/J6 → J3 · J6, J2 → J2 · J6 (J6 머리글의 3/16 in 한계가 같다), J2.2 → J2.2, J4 → J4, J5 → J5. Chapter D(부재 인장)는 범위에 걸리지 않는다. 불합격은 그대로 둔다(불합격이 이긴다).
 - **비의 꼴(2026-11-24 V6-06):** 다른 비와 견주거나 max 하는 `ratio` 는 모두 하중 배율로 선형이다. 원문 좌변이 비선형인 상호작용 — J2.2.4 (지수 1.5), Commentary C-J5.4-1 (지수 2 일 때), 랩 · 부재 H2-1 (√ 꼴, 이미 선형) — 은 `ratio = (value/limit)^(1/n)` 이고 판정(≤ 1)은 같다. 엔진 전체를 찾아본 결과는 작업 보고에 있다(H1.2 의 B1, App. A J3.4 의 F'nt 처럼 강도 · 증폭이 소요에 따라 바뀌는 식은 원문의 꼴 그대로 둔다 — 그 순간의 소요에 대한 선형 비다).
 - **모드별 검토.** 엔진은 F2 · F3 · F4 의 최소 Mn 으로 하나의 비를 냈다. 계산서는 Manual 예제(II-1B: φMne 113, φMnℓ 84.2, φMnd 89.9)처럼 모드마다 설계강도와 비를 낸다. 지배 모드 항목의 비는 옛 이용률과 같은 연산이다(`mirrors.ratio`).
-- **소요가 없으면**(Pu = 0 등) 해당 항목은 `not_evaluated`(reason: 소요 없음), 설계강도는 `reference`. 접합부에서 한 방향만 소요가 있으면 다른 방향의 한계상태는 `not_applicable`.
+- **소요가 없으면**(2026-11-24 V6b-03): 한계상태의 소요가 0 이고 결과의 다른 소요는 있어 무엇이든 평가했으면 그 항목은 `not_applicable`(reason `no required … — no demand for this limit state (the other demands are checked)`, 설계강도는 `reference`). 소요가 하나도 없으면 `not_evaluated`(소요 없음). 예: Mu = 0 · Vu > 0 이면 F2–F4 는 해당 없음, G2 만 평가. 이렇게 해서 `design_checks` 를 접은 판정이 결과의 `pass` 와 늘 같다(시험: 계약 사례 전부 + 소요 0 조합 격자). 접합부에서 한 방향만 소요가 있으면 다른 방향의 한계상태는 `not_applicable`.
+- **Cm (§C1.2.1.1, 2026-11-24 V6b-02):** `Cmx` · `Cmy` 를 주면 그 값. 없으면 그 축의 끝 모멘트 비 `Cmx_M1_M2` · `Cmy_M1_M2`(그 굽힘 평면의 비지지 구간 끝, 작은/큰, 역곡률 +)로 Eq. C1.2.1.1-4. 그것도 없거나 `transverse_load: true` 면 1.0(Eq. C1.2.1.1-4 의 상한이자 (b) 가 허용하는 값 — `assumptions` 에 조항과 함께). `dist_M1_M2` 는 부록 2 β 의 입력이라 Cm 에 쓰지 않는다. 계산 과정의 Cm 출처: `user_input Cmx`, `user_input Cm?_M1_M2`(단계 C1.2.1.1-4), `specification`(1.0).
 
 ## 5. 반올림 — 판정은 반올림하지 않은 값으로 (2026-11-23 두 번째 묶음, 작업문서 §8.3.1)
 
@@ -157,7 +158,7 @@ envelope_source = {
 - 런 길이: 격자점 `start … start+count−1` 의 값이 `combos[combo_index]`(같은 결과의 `combos` 목록)와 `patterns[pattern_index]` 에서 왔다. 런은 빈틈없이 이어져 배열 전체를 덮는다.
 - 패턴은 하중 키 → 재하. 부분재하하지 않는 하중(D, W, …)은 싣지 않는다(= 모든 경간). `'spans i,j loaded'`(1 부터) · `'not acting'` · 눈 하중은 `pattern_loading.snow_cases` 의 이름. 위치 항목의 `pattern` 과 같은 말이다.
 - **그 조합 · 패턴의 도표(계수 × 하중을 그 경간에만 실은 보)를 풀면 그 점의 값이 포락값과 같다** — 시험 `test_review_1124_envelope_source.py` 가 보 해석기로 다시 풀어 확인한다(중력 · 양력 · Lr · L · S 부분재하 · 랩 · 내다지).
-- **동률 규칙:** 여러 조합이 같은 값을 내면 `combos` 에서 먼저 나온 조합. 경간의 기여가 정확히 0 이면 그 경간은 싣지 않는다(예: 끝 지점의 M — `{}` 또는 `'not acting'`). 눈 하중 경우가 같으면 먼저 나온 경우.
+- **동률 규칙:** '같다'는 그 물리량(M · V · R · VL · VR)의 허용오차 `tol = 1e-9 × max(1, 모든 조합 · 측점의 |포락값| 최대)` 안이다(V6b-07: 모든 조합이 0 인 측점에서 부동소수 잡음으로 고르지 않게). 극값에서 tol 안의 조합 가운데 `combos` 에서 먼저 나온 것. 경간의 기여가 tol 이하면 그 경간은 싣지 않는다(예: 끝 지점의 M — `{}` 또는 `'not acting'`). 눈 하중 경우가 tol 안에서 같으면 먼저 나온 경우. 처짐 출처도 같은 꼴(그 하중의 |단위 처짐| 최대 × 1e-9). 옛 위치 키 `combo` · `pattern` · `combo_R` 은 허용오차 없이 그대로다(값 불변).
 - 랩 · 6경간(격자 301점)에서 `envelope_source` 셋을 합쳐 약 4.7 KB, 위치 항목의 덧붙임을 합쳐 결과 전체가 약 9 KB(4 %) 늘었다.
 
 **이름 붙은 위치(`locations[]`)에 덧붙인 키:**
@@ -177,6 +178,33 @@ envelope_source = {
 ### 6.2 한 검토 지점의 M · V 는 같은 하중 상태가 아닐 수 있다
 
 포락선은 값마다 따로 최대를 고른다. 같은 격자점의 M 최대와 |V| 최대는 다른 조합 · 패턴에서 올 수 있다 — 따로 하는 검토(휨 단독, 전단 단독)에는 맞는 방법이지만, §H2 · §H3 의 상호작용은 **동시에 작용하는 값**(같은 하중 조합의 M 과 V)을 요구한다. `combo` 와 `combo_V`(또는 격자점의 두 출처)가 다르면 그 짝은 동시 값이 아니다(작업 보고 2026-11-24 에 예가 있다).
+
+### 6.3 랩 구간의 뒤틀림 구속 — 사람이 밝힌다 (2026-11-24 V6b-04, 랩 도구와 구간 설계에 같은 규칙)
+
+AISI Manual II-1A · II-2A 는 "the lapped section is assumed to be sufficiently restrained against lateral-torsional and distortional buckling" 을 **가정으로 밝히고** 쓴다. 엔진과 호스트는 이 가정을 스스로 쓰지 않는다 — 사람이 밝혀야 한다(§I6.2.1 의 `i621_conditions_confirmed` 와 같은 꼴).
+
+**구간 설계 `aisi_design` / `design_member`** (`member_type` 'flexure' · 'combined') 의 새 선택 입력:
+
+| 이름 | 값 | 기본 | 뜻 |
+|---|---|---|---|
+| `lap_region` | `true` | 없음(= 랩 구간 아님) | 이 구간이 겹친 두 부재의 랩 구간이다. 호스트는 랩 구간 호출에 이것을 준다 — 지금 주는 `distortional_not_applicable: true` 대신 |
+| `distortion_restrained` | `true` · `false` | 없음(= 밝히지 않음) | `lap_region: true` 일 때만 읽는다. 사람이 '겹친 부재가 뒤틀림을 구속한다'고 밝혔는가. 호스트는 그 사람의 진술을 그대로 넘긴다(지어내지 않는다) |
+
+| `lap_region` | `distortion_restrained` | `dsm.Mcrd` | `member.flexure.distortional` | 결과 |
+|---|---|---|---|---|
+| `true` | `true` | 무관 | `not_applicable`, `restraint_source: {kind: 'user_input', key: 'distortion_restrained'}`, reason `§F4 not applicable: lap region — distortion_restrained = true (user statement; AISI Manual II-1A / II-2A: lapped section sufficiently restrained)` | Mnd = My(전과 같음). `assumptions` 에 아래 (가) |
+| `true` | 없음 · `false` | 줌 | 그 Mcrd 로 평가(보통 구간과 같음) | — |
+| `true` | 없음 · `false` | 없음 | `not_evaluated`(판정에 든다), reason 에 아래 (나) | `pass` 는 불합격이 없으면 `None`, `not_evaluated` 목록에 (나) |
+| `true` | — | — | `distortional_not_applicable` 을 함께 주면 무시하고 `warnings` 에 `lap_region: distortional_not_applicable is ignored for a lap region — the restraint must be stated as distortion_restrained = true` | |
+| 없음 | — | — | 지금과 같음(`distortional_not_applicable` 은 랩이 아닌 곳의 옛 입력으로 남는다) | |
+
+문장(엔진 상수 `design.aisi_s100.LAP_DIST_STATED` · `LAP_DIST_UNSTATED` — 호스트 · 화면은 그대로 보인다):
+- (가) `F4 distortional buckling not applicable in this lap region: distortion_restrained = true (user statement — AISI Manual II-1A / II-2A: the lapped section is assumed to be sufficiently restrained against lateral-torsional and distortional buckling); Mnd = My is used.`
+- (나) `F4 distortional buckling — lap region: restraint against distortion not stated. Give distortion_restrained = true if the lapped member restrains distortional buckling (AISI Manual II-1A / II-2A assumption: the lapped section is sufficiently restrained), or give Mcrd for the lapped section.`
+
+**랩 도구 `lap_connection` / `design_lap_connection`** 의 `distortion_restrained` 는 같은 뜻이다(V6-07): Mnd 가 없으면 `true` 일 때 `lap.flexure.distortional` 이 `not_applicable`(출처 사용자 입력), 없으면 `not_evaluated` · 판정 None.
+
+호스트(K3)가 할 일: (1) 랩 구간 호출에서 `distortional_not_applicable: true` 를 빼고 `lap_region: true` 와 사람의 진술 `distortion_restrained` 를 넘긴다. (2) 퍼린 입력(화면 · `design_purlin` MCP 스키마)에 그 진술을 받는 칸을 둔다 — 이름은 호스트가 정하되 엔진에는 `distortion_restrained` 로. (3) 호스트의 랩 가정 문장("랩 안의 … 뒤틀림은 검토하지 않음")은 진술이 있을 때만. 같은 Manual 가정의 횡비틀림 쪽(랩 구간 `Lb = 0`)은 지금 호스트가 정한다 — 이번 결정 밖이며, 같은 규칙으로 할지는 결정할 일이다.
 
 ## 7. 단면 요소의 자리 `element_roles`
 
@@ -207,7 +235,7 @@ envelope_source = {
 | 표 B4.1-1 의 보강재 개수 한계(n_f · n_le · n_w) | 단계 없음(경고 문구만) | 개수는 템플릿 입력에서 오고 지금 사례에서 늘 0 |
 | `member.applicability.b4` 에 두께가 없을 때 | `not_evaluated`, `counts: false` | 대조할 치수가 없다 — 엔진은 이것으로 판정을 내리지 않는다 |
 | 미평가 항목(`not_evaluated` · `not_applicable`) | `steps: []` 가 많다 | 계산한 것이 없다. 까닭은 `reason` · `steps_unavailable` |
-| `lap.block_shear` (J6.3, 랩 패스너 무리의 블록 전단) | `not_evaluated`, `counts: false`, 랩 결과의 `scope_notes` | 이 랩 모델은 검토하지 않는다(Pns 에는 패스너마다의 J6.1 끝단 파단만). 평가하려면 웹 안의 행 간격(gauge)과 바깥 행에서 웹 끝(플랜지)까지의 거리, 구멍 크기가 필요하다(e · s 는 이미 있다). 판정에 넣을지는 결정할 일 — 넣으면 지금 입력으로는 모든 랩이 판정 없음이 된다 |
+| `lap.block_shear` (J6.3, 랩 패스너 무리의 블록 전단) | 평가 · 판정에 든다(2026-11-24) — 장력면을 뺀 하한 `Pnr = min(0.6 Fy Agv, 0.6 Fu Anv)`, `basis: lower_bound_tension_plane_ignored`, 결과 `assumptions` 에 한 줄 | 행 간격 · 웹 끝까지의 거리가 입력이 아니어서 장력면(Ubs Fu Ant ≥ 0)을 뺐다 — 보수. 두 치수가 입력이 되면 Eq. J6.3-1/-2 그대로로 바꾼다. 나사 접합은 `not_applicable`(J6 머리글: 나사 · PAF 는 J6.1 · J6.2) |
 
 `member.applicability.b4` 는 이제 E–H 장 부재마다 나온다: 한계를 넘으면 `not_evaluated`(판정에 든다), 넘지 않으면 `pass` 이고 `counts: false`(엔진은 한계를 넘을 때만 판정을 바꾼다). 대조하지 못한 요소가 있으면 `reason` 에 적는다.
 
@@ -221,7 +249,7 @@ envelope_source = {
 5. **지배 표시(V6-03):** 요약의 '지배 검토'는 `governs: true` 항목을 그대로 쓴다. `governs_basis == 'not_evaluated'` 이면 '지배: <이름> — 미평가(<reason>), 참고 비 <reference.ratio>' 로 쓰고, `highest_evaluated` 가 있으면 '평가한 최대: <id> <ratio>' 를 따로 한 줄. 그 무리의 비를 머리 이용률로 쓰지 않는다. `fail` · `ratio` 는 지금처럼.
 6. **적용범위 밖(V6-04):** `out_of_scope` 가 있는 항목은 미평가로 보이고, `reference` 의 값은 '참고(범위 밖)'으로만.
 7. **비의 꼴(V6-06):** `ratio_form` 이 있으면 '원문 좌변 <demand.value> ≤ <capacity.value>, 견줄 비 <ratio>' 로. 이 비를 다른 비와 max 해도 된다.
-8. **끝없는 값(V6-16):** `unbounded: true` 인 값은 SI 로 바꾸지 말고 '∞' 로. 옛 키 `positive_region.Fcre` · `Fcre_detail.Fcre` 는 웹뷰(`app.js`)가 숫자로 비교하므로 1e6 그대로 두고 `Fcre_unbounded: true` 를 옆에 붙였다 — 화면이 이 표시를 읽게 되면 옛 키도 `null` 로 바꿀 수 있다. SI 변환은 `Fcre_unbounded` 가 참이면 `Fcre` 를 바꾸지 않아야 한다.
+8. **끝없는 값(V6-16):** `unbounded: true` 인 값은 SI 로 바꾸지 말고 '∞' 로. 옛 키 `positive_region.Fcre` · `Fcre_detail.Fcre` 는 웹뷰(`app.js`)가 숫자로 비교하므로 1e6 그대로 두고 `Fcre_unbounded: true` 를 옆에 붙였다(옛 계산서 `steps[]` 가운데 값이 1e6 인 단계에도 `unbounded: true` — V6b) — 화면이 이 표시를 읽게 되면 옛 키도 `null` 로 바꿀 수 있다. SI 변환은 `Fcre_unbounded` 가 참이면 `Fcre` 를 바꾸지 않아야 한다.
 9. **US 단위 식(V6-11):** `expr_units: 'US'` 단계는 SI 응답에서 `units_note` 를 함께 보이고, `units_note`(SI 응답의 '식 문자열은 단위 없음' 문장)를 '식의 수는 무차원 계수뿐 — expr_units 가 US 인 단계는 예외'로 고친다.
 10. **새 입력:** 랩 `distortion_restrained`(bool, 사용자가 랩 구간의 뒤틀림 구속을 밝힘 — V6-07). MCP `design_lap_connection` 스키마에 열어야 쓸 수 있다. 랩 결과에 `scope_notes`(J6.3 미검토) 키가 새로 생겼다 — 요약이 알림으로 올려야 한다.
 
@@ -342,7 +370,7 @@ envelope_source = {
 | `lap.flexure.local` | F3.1 | F3.1-1 | Lap flexure — two members, Se·Fy | 랩 구간 휨 (2겹, Se·Fy) | `lap.flexure` |
 | `lap.flexure.distortional` | F4.1 | F4.1-2 | Lap flexure — distortional, two members | 랩 구간 뒤틀림 좌굴 (2겹) | `lap.flexure` |
 | `lap.bending_shear` | H2 | H2-1 | Lap combined bending and shear | 랩 구간 휨 + 전단 | `lap.flexure` |
-| `lap.block_shear` | J6.3 | J6.3-1, J6.3-2 | Lap fasteners — block shear rupture of the fastener group (not evaluated, `counts: false` — 8절) | 랩 패스너 무리 — 블록 전단 파단 | `lap.fasteners` |
+| `lap.block_shear` | J6.3 | J6.3-1, J6.3-2 | Lap fasteners — block shear rupture of the fastener group (lower bound, tension plane ignored — 8절) | 랩 패스너 무리 — 블록 전단 파단 | `lap.fasteners` |
 
 비탄성 예비강도(F2.4.2 · F3.2.3 · F4.3)와 냉간가공(A3.3.2)은 따로 된 검토가 아니라 각 모드 강도의 다른 식이다 — 해당 항목의 `branch` · `modifier` 단계로 나온다(한 한계상태를 두 번 세지 않는다).
 
@@ -885,6 +913,94 @@ V6-20 — 3 칸
 | I6.2.1 R exceeds table | `member.flexure.global` | verdict | "not_applicable" | "not_evaluated" |
 
 새 항목(S-1): lap bolt Se Mnd → `lap.block_shear` (not_evaluated), lap bolt Se e=2 → `lap.block_shear` (not_evaluated), lap bolt Sf only → `lap.block_shear` (not_evaluated), lap bolt no Se → `lap.block_shear` (not_evaluated), lap bolt short e → `lap.block_shear` (not_evaluated), lap bolt short lap → `lap.block_shear` (not_evaluated), lap overload fails → `lap.block_shear` (not_evaluated), lap screw Pnvs ASD → `lap.block_shear` (not_evaluated), lap screw no Pnvs → `lap.block_shear` (not_evaluated)
+
+#### §14.2 덧붙임 — 빠졌던 6 칸(V6b-09)
+
+V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `reference.capacity` 와 계산 과정에 남음):
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| bolt thick (AISC scope) | `conn.bolt.shear` | nominal | 10.602875205865551 | null |
+| bolt thick (AISC scope) | `conn.j6.shear_rupture` | nominal | 19.40625 | null |
+| bolt thick (AISC scope) | `conn.j6.tension_rupture` | nominal | 5.775468749999999 | null |
+| bolt thick (AISC scope) | `conn.j6.block_shear` | nominal | 25.875 | null |
+| screw out of scope d | `conn.screw.bearing_tilting` | nominal | 2.1385561923433376 | null |
+| screw out of scope d | `conn.screw.shear` | nominal | 5.0 | null |
+
+#### §14.3 재검증 V6b 수정(2026-11-24)으로 바뀐 값
+
+비교: `b8c9187` 의 엔진과 수정 뒤, 계약 사례 150개(새로 더한 4 사례는 비교 밖). 옛 키 26 값, `design_checks` 35 칸. 전체 판정이 바뀐 사례는 없다. 강도가 바뀐 것은 Cm(V6b-02) 하나 — `combined with shear and M1/M2` 의 H1.2 0.5563 → 0.5658(dist_M1_M2 = 0.5 로 Cmx · Cmy 를 0.4 로 낮추던 것이 1.0). 랩 J6.3 은 새로 평가한 항목이다(랩 판정은 이 사례들에서 그대로; `lap overload fails` 는 이미 불합격이고 J6.3 이 1.047 로 지배). 하중 해석(8 사례, 값 51,654 개)의 옛 키 변화 0 — `envelope_source` 21 칸만 동률 규칙(허용오차)으로 바뀌었다.
+
+**(가) 옛 키**
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `combined with shear and M1/M2.result.assumptions` | 0 | 3 |
+| `combined with shear and M1/M2.result.interaction.Mx_ratio` | 0.2647 | 0.2671 |
+| `combined with shear and M1/M2.result.interaction.My_ratio` | 0.2 | 0.207 |
+| `combined with shear and M1/M2.result.interaction.total` | 0.5563 | 0.5658 |
+| `combined with shear and M1/M2.result.limit_state_checks[0].ratio` | 0.5563 | 0.5658 |
+| `combined with shear and M1/M2.result.spec_sections` | 9 | 10 |
+| `combined with shear and M1/M2.result.steps[15].formula` | "Mux = B1x×30.00 = 30.00 kip-in (B1x = 1.0000), Muy = 2.00 kip-in; P/… | "Mux = B1x×30.00 = 30.28 kip-in (B1x = 1.0093), Muy = 2.07 kip-in; P/… |
+| `combined with shear and M1/M2.result.steps[15].value` | 0.5563 | 0.5658 |
+| `combined with shear and M1/M2.result.utilization` | 0.5563 | 0.5658 |
+| `lap bolt Se Mnd.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap bolt Se Mnd.result.steps` | 11 | 12 |
+| `lap bolt Se e=2.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap bolt Se e=2.result.steps` | 10 | 11 |
+| `lap bolt Sf only.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap bolt Sf only.result.steps` | 9 | 10 |
+| `lap bolt no Se.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap bolt no Se.result.steps` | 8 | 9 |
+| `lap bolt short e.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap bolt short e.result.steps` | 10 | 11 |
+| `lap bolt short lap.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap bolt short lap.result.steps` | 10 | 11 |
+| `lap overload fails.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap overload fails.result.steps` | 10 | 11 |
+| `lap overload fails.result.warnings` | 4 | 5 |
+| `lap screw Pnvs ASD.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+| `lap screw no Pnvs.result.scope_notes[0]` | "J6.3: J6.3 block shear rupture of the lap fastener group (shear plan… | "J6.3: J6.3 block shear of the lap fastener group is evaluated as a l… |
+
+**(나) `design_checks`**
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| combined with shear and M1/M2 | `member.axial_bending` | ratio | 0.5563286175451037 | 0.5658336897467583 |
+| lap bolt Se Mnd | `lap.block_shear` | verdict | "not_evaluated" | "pass" |
+| lap bolt Se Mnd | `lap.block_shear` | ratio | null | 0.5970308135215001 |
+| lap bolt Se Mnd | `lap.block_shear` | counts | false | true |
+| lap bolt Se Mnd | `lap.block_shear` | capacity | null | 25.311 |
+| lap bolt Se e=2 | `lap.block_shear` | verdict | "not_evaluated" | "pass" |
+| lap bolt Se e=2 | `lap.block_shear` | ratio | null | 0.5970308135215001 |
+| lap bolt Se e=2 | `lap.block_shear` | counts | false | true |
+| lap bolt Se e=2 | `lap.block_shear` | capacity | null | 25.311 |
+| lap bolt Sf only | `lap.block_shear` | verdict | "not_evaluated" | "pass" |
+| lap bolt Sf only | `lap.block_shear` | ratio | null | 0.5970308135215001 |
+| lap bolt Sf only | `lap.block_shear` | counts | false | true |
+| lap bolt Sf only | `lap.block_shear` | capacity | null | 25.311 |
+| lap bolt no Se | `lap.block_shear` | verdict | "not_evaluated" | "pass" |
+| lap bolt no Se | `lap.block_shear` | ratio | null | 0.5751364158718337 |
+| lap bolt no Se | `lap.block_shear` | counts | false | true |
+| lap bolt no Se | `lap.block_shear` | capacity | null | 26.27454375 |
+| lap bolt short e | `lap.block_shear` | verdict | "not_evaluated" | "pass" |
+| lap bolt short e | `lap.block_shear` | ratio | null | 0.6442515216418394 |
+| lap bolt short e | `lap.block_shear` | counts | false | true |
+| lap bolt short e | `lap.block_shear` | capacity | null | 23.455818750000002 |
+| lap bolt short lap | `lap.block_shear` | verdict | "not_evaluated" | "pass" |
+| lap bolt short lap | `lap.block_shear` | ratio | null | 0.7462885169018753 |
+| lap bolt short lap | `lap.block_shear` | counts | false | true |
+| lap bolt short lap | `lap.block_shear` | capacity | null | 20.2488 |
+| lap overload fails | `lap.fastener_group` | governs | true | false |
+| lap overload fails | `lap.block_shear` | verdict | "not_evaluated" | "fail" |
+| lap overload fails | `lap.block_shear` | governs | false | true |
+| lap overload fails | `lap.block_shear` | ratio | null | 1.0467964054571033 |
+| lap overload fails | `lap.block_shear` | counts | false | true |
+| lap overload fails | `lap.block_shear` | capacity | null | 24.05983125 |
+| lap screw Pnvs ASD | `lap.block_shear` | verdict | "not_evaluated" | "not_applicable" |
+| lap screw Pnvs ASD | `lap.block_shear` | counts | false | true |
+| lap screw no Pnvs | `lap.block_shear` | verdict | "not_evaluated" | "not_applicable" |
+| lap screw no Pnvs | `lap.block_shear` | counts | false | true |
 
 ## 15. 엔진 식별 `engine_id` (2026-11-24)
 

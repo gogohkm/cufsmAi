@@ -721,8 +721,10 @@ def flexure_checks(ctx):
     elif ctx['is_round']:
         checks.append(not_applicable('member.flexure.distortional', ctx, '§F4 does not apply to round HSS (§F2.3)'))
     elif not ctx['dist_applicable']:
-        checks.append(not_applicable('member.flexure.distortional', ctx,
-                                     f"§F4 not applicable: {ctx['dist_reason']}"))
+        c = not_applicable('member.flexure.distortional', ctx, f"§F4 not applicable: {ctx['dist_reason']}")
+        if ctx.get('dist_stated'):
+            c['restraint_source'] = src('user_input', key='distortion_restrained')
+        checks.append(c)
     else:
         checks.append(not_evaluated('member.flexure.distortional', ctx, '; '.join(d_items) or 'no Mcrd'))
 
@@ -821,10 +823,12 @@ def _i621_check(ctx, st, Sf, demand):
         i_lo = tr.add('equation', 'Mnℓo = My (no Mcrl — F3 not evaluated)', inputs=[tr.ref(i_my)],
                       result=q('Mnℓo', vs['Mnfo'], 'moment'))
     R = ctx['R_uplift']
-    i_r = tr.add('modifier', 'R from Table I6.2.1-1', equation='Table I6.2.1-1',
-                 inputs=[q('R', R, 'dimensionless', src('user_input', key='R_uplift', table_row=ctx['i621_row']))],
-                 result=q('R', R, 'dimensionless'))
-    i_mn = tr.add('equation', 'Mn = R Mnℓo', equation='I6.2.1-1', inputs=[tr.ref(i_r), tr.ref(i_lo)],
+    # 기호 R 은 굽힘 안쪽 반지름(길이)에도 쓰인다 — 이 감소계수는 R_uplift (한 기호 한 물리량)
+    i_r = tr.add('modifier', 'R_uplift from Table I6.2.1-1', equation='Table I6.2.1-1',
+                 inputs=[q('R_uplift', R, 'dimensionless', src('user_input', key='R_uplift',
+                                                                 table_row=ctx['i621_row']))],
+                 result=q('R_uplift', R, 'dimensionless'))
+    i_mn = tr.add('equation', 'Mn = R_uplift Mnℓo', equation='I6.2.1-1', inputs=[tr.ref(i_r), tr.ref(i_lo)],
                   result=q('Mn', ctx['Mn'], 'moment'))
     items = ne_items(ctx['not_evaluated_all'], 'I6.2.1')
     m = {'nominal': _mirror('Mn', 2)}
@@ -1109,7 +1113,8 @@ def _cm_step(tr, ctx, axis):
     sym = f'Cm{axis}'
     if basis == 'M1_M2':
         i = tr.add('modifier', f'{sym} = 0.6 − 0.4 (M1/M2)', equation='C1.2.1.1-4',
-                   inputs=[q('M1/M2', ctx['M1_M2'], 'dimensionless', src('user_input', key='dist_M1_M2'))],
+                   inputs=[q('M1/M2', ctx[f'M1_M2_{axis}'], 'dimensionless',
+                             src('user_input', key=f'{sym}_M1_M2'))],
                    result=q(sym, val, 'dimensionless'))
         return tr.ref(i)
     if basis == 'user':
@@ -1117,8 +1122,9 @@ def _cm_step(tr, ctx, axis):
     if basis == 'transverse':
         return q(sym, val, 'dimensionless', src('specification', key='transverse_load',
                                                  note='transverse load between supports → Cm = 1.0'))
-    return q(sym, val, 'dimensionless', src('engine_default', key=sym,
-                                            note='Cm = 1.0 (conservative; neither Cm nor M1/M2 given)'))
+    return q(sym, val, 'dimensionless', src('specification', key=sym, clause='C1.2.1.1',
+                                            note='Cm = 1.0: upper bound of Eq. C1.2.1.1-4, permitted by (b) — '
+                                                 'neither Cm nor this axis\'s end-moment ratio given'))
 
 
 def _b1_steps(tr, ctx, axis, P):
@@ -1222,7 +1228,7 @@ def tension_bending_checks(ctx):
         if eq == 'H1.1-1':
             fy = q('Fy', ctx['Fy'], 'stress', src('material', key='Fy'))
             sft = q('Sft', ctx['Sft'], 'section_modulus', _sec('Sft', ctx))
-            i_my = tr.add('yield', 'Mnxt = Sft Fy', equation='H1.1-3', inputs=[sft, fy],
+            i_my = tr.add('yield', 'Mnxt = Sft Fy  (§H1.1 — nominal of Eq. H1.1-3a/-3b)', inputs=[sft, fy],
                           result=q('Mnxt', ctx['Sft'] * ctx['Fy'], 'moment'))
             i_mt = design_strength_step(tr, dm, tr.ref(i_my), ctx['phi_b'], ctx['omega_b'], ctx['Maxt'], 'Maxt',
                                         'moment', phi_symbol='φb', omega_symbol='Ωb')

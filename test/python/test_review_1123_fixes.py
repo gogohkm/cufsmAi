@@ -127,7 +127,8 @@ def test_fix7_lap_H2_reported_in_the_member_H2_form():
     두 부재의 평균으로 넣는다: Se = (2.25 + 1.80)/2, Vn = 6.53·1.60/2 (Va = 2·Vn/Ωv = 6.53)."""
     p = dict(d=8.0, t=0.059, Fy=55, Fu=70, lap_left_in=12, lap_right_in=30, Mu_support=8.75 * 12,
              Vu_support=1.78, fastener_type='bolt', fastener_dia=0.5, n_rows=2, end_distance=2.0,
-             Se=(2.25 + 1.80) / 2, Vn=6.53 * 1.60 / 2, design_method='ASD')
+             Se=(2.25 + 1.80) / 2, Vn=6.53 * 1.60 / 2, design_method='ASD',
+             distortion_restrained=True)   # Manual II-2A 가정 (f): 겹친 부분은 뒤틀림이 구속됨(계약 §6.3)
     r = design_lap_connection(p)
     h = _check(r, 'lap.bending_shear')
     _Ma = 2 * p['Se'] * 55 / 1.67

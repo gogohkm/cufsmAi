@@ -596,8 +596,9 @@ def _variant_envelope(var, units, pattern_on, snow_cases):
     return env
 
 
-def _pattern_at(var, units, q, idx, sense, pattern_on, snow_cases):
-    """조합 var 의 q[idx] 를 최대(sense=+1)/최소(-1)로 만드는 경간별 하중 (plf) 과 설명."""
+def _pattern_at(var, units, q, idx, sense, pattern_on, snow_cases, tol=0.0):
+    """조합 var 의 q[idx] 를 최대(sense=+1)/최소(-1)로 만드는 경간별 하중 (plf) 과 설명.
+    tol > 0 이면 기여가 |c| ≤ tol 인 경간은 싣지 않고, 눈 경우는 극값에서 tol 안의 첫 경우(동률 규칙, 계약 §6.1)."""
     n = units['M'].shape[0]
     U = units[q]
     w_span = np.zeros(n)
@@ -612,7 +613,7 @@ def _pattern_at(var, units, q, idx, sense, pattern_on, snow_cases):
             w_span += a * wk
         elif mode == 'subset':
             c = s * U[:, idx]
-            loaded = [i for i in range(n) if sense * c[i] > 0]
+            loaded = [i for i in range(n) if sense * c[i] > tol]
             for i in loaded:
                 w_span[i] += a * wk
             desc[k] = 'spans ' + ','.join(str(i + 1) for i in loaded) + ' loaded' if loaded else 'not acting'
@@ -620,6 +621,8 @@ def _pattern_at(var, units, q, idx, sense, pattern_on, snow_cases):
             P = np.array([c[1] for c in snow_cases], dtype=float)
             vals = s * (P @ U[:, idx])
             p = int(np.argmax(vals)) if sense > 0 else int(np.argmin(vals))
+            if tol > 0:
+                p = next(i for i, x in enumerate(vals) if abs(x - vals[p]) <= tol)
             w_span += a * wk * P[p]
             desc[k] = snow_cases[p][0]
     return w_span, desc
@@ -672,12 +675,32 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
             patterns.append(desc)
         return pat_ix[key]
 
+    # 동률 허용오차: 그 물리량의 포락 크기의 1e-9 배(최소 1e-9) — 모든 조합이 0 인 측점의 부동소수 잡음으로
+    # 조합 · 경간을 고르지 않는다(V6b-07).
+    tol = {}
+    for q in ('M', 'V', 'R', 'VL', 'VR'):
+        big = max(float(np.abs(np.vstack([v['env'][q][0] for v in vars_])).max()),
+                  float(np.abs(np.vstack([v['env'][q][1] for v in vars_])).max()), 1.0)
+        tol[q] = 1e-9 * big
+
+    def pick(q, idx, sense):
+        """극값에서 tol 안의 첫 조합(combos 순서)과 그 패턴."""
+        k = 0 if sense > 0 else 1
+        vals = [float(v['env'][q][k][idx]) for v in vars_]
+        ext = max(vals) if sense > 0 else min(vals)
+        vi = next(i for i, x in enumerate(vals) if abs(x - ext) <= tol[q])
+        _, desc = _pattern_at(vars_[vi], units, q, idx, sense, pattern_on, snow_cases, tol=tol[q])
+        return vi, desc
+
+    def gov_src(q, idx, sense):
+        vi, desc = pick(q, idx, sense)
+        return vars_[vi]['name'], desc
+
     def _runs(q, sense):
         rows = arg[q][0 if sense > 0 else 1]
         out = []
         for idx in range(len(rows)):
-            vi = int(rows[idx])
-            _, desc = _pattern_at(vars_[vi], units, q, idx, sense, pattern_on, snow_cases)
+            vi, desc = pick(q, idx, sense)
             pi = _pid(desc)
             if out and out[-1][2] == vi and out[-1][3] == pi and out[-1][0] + out[-1][1] == idx:
                 out[-1][1] += 1
@@ -703,7 +726,7 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
         elif qk in ('Mmax', 'Mmin'):
             loc['combo'], loc['pattern'] = gov('M', idx, +1 if qk == 'Mmax' else -1)
             vs = +1 if abs(env['V'][0][idx]) >= abs(env['V'][1][idx]) else -1
-            loc['combo_V'], loc['pattern_V'] = gov('V', idx, vs)
+            loc['combo_V'], loc['pattern_V'] = gov_src('V', idx, vs)
         elif qk == 'support':
             if loc['Mu'] is None:
                 loc['combo'], loc['pattern'] = None, None
@@ -717,7 +740,7 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
             side = 'VL' if vl >= vr else 'VR'
             vs = +1 if abs(env[side][0][j]) >= abs(env[side][1][j]) else -1
             loc['V_side'] = 'left' if side == 'VL' else 'right'
-            loc['combo_V'], loc['pattern_V'] = gov(side, j, vs)
+            loc['combo_V'], loc['pattern_V'] = gov_src(side, j, vs)
             if loc.get('R_uplift') is not None and loc['R_uplift'] < -1e-9:
                 loc['combo_R_uplift'], loc['pattern_R_uplift'] = gov('R', j, -1)
             else:
@@ -874,7 +897,8 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
                         desc[k] = 'all spans'
                     elif mode == 'subset':
                         c = (w / 1000.0) * U[:, idx]
-                        loaded = [i for i in range(U.shape[0]) if sense * c[i] > 0]
+                        tol_d = 1e-9 * max(float(np.abs(U).max()) * abs(w) / 1000.0, 1e-12)
+                        loaded = [i for i in range(U.shape[0]) if sense * c[i] > tol_d]
                         desc[k] = ('spans ' + ','.join(str(i + 1) for i in loaded) + ' loaded') if loaded \
                             else 'not acting'
                     else:

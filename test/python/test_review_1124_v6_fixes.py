@@ -194,7 +194,8 @@ def test_V6_20_F2_to_F4_stand_when_I6_2_1_cannot_apply():
 def test_V6_S1_lap_block_shear_is_stated_not_silent():
     r = design_lap_connection(_lap(distortion_restrained=True))
     b = _check(r, 'lap.block_shear')
-    assert b['verdict'] == 'not_evaluated' and b['counts'] is False and b['clause'] == 'J6.3'
+    # 2026-11-24 V6b: 장력면을 뺀 하한으로 평가하고 판정에 든다(test_review_1124_v6b_fixes 가 값을 본다)
+    assert b['verdict'] in ('pass', 'fail') and b['counts'] is True and b['clause'] == 'J6.3'
     assert any(n.startswith('J6.3') for n in r['scope_notes'])
 
 

@@ -12,11 +12,14 @@ from design.checks import (
 
 
 LAP_BLOCK_SHEAR_NOTE = (
-    'J6.3 block shear rupture of the lap fastener group (shear planes along the lap from the member end, tension '
-    'plane between the fastener rows) is not evaluated by this lap model and is not part of the lap verdict — '
-    'the fastener design strength Pns includes J6.1 end shear rupture per fastener only. Inputs needed to evaluate '
-    'it: the gauge between fastener rows in the web and the distance from the outer row to the web edge '
-    '(flange), with the hole size; the end distance e and the spacing s are known.')
+    'J6.3 block shear of the lap fastener group is evaluated as a lower bound: the two shear planes along the '
+    'outer fastener rows, from the member end over the fastener group (length e + (m − 1) s), with the tension plane '
+    'between the rows ignored (Ant = 0) — the row gauge and the distance to the web edge are not inputs. Refine with '
+    'the full Eq. J6.3-1/-2 when those dimensions are given. Bolts only: for screw connections J6 takes Rn from '
+    'J6.1 and J6.2 (J6.3 does not apply).')
+LAP_BLOCK_SHEAR_ASSUMPTION = (
+    'J6.3 (lap fastener group): lower bound with the tension plane ignored (Ant = 0) — Pnr = min(0.6 Fy Agv, '
+    '0.6 Fu Anv); conservative, since the Ubs Fu Ant term of Eq. J6.3-1/-2 is never negative.')
 
 
 def build(ck: dict) -> list:
@@ -126,9 +129,8 @@ def build(ck: dict) -> list:
         checks.append(make_check('lap.fastener_spacing', design_method=dm, verdict='not_applicable',
                                  reason='one fastener per row (or no lap length) — spacing does not apply'))
 
-    # --- 패스너 무리의 블록 전단(J6.3) — 이 랩 모델은 검토하지 않는다(V6 S-1). 조용히 두지 않고 밝힌다.
-    checks.append(make_check('lap.block_shear', design_method=dm, verdict='not_evaluated', counts=False,
-                             reason=LAP_BLOCK_SHEAR_NOTE))
+    # --- 패스너 무리의 블록 전단(J6.3) — 장력면을 뺀 하한으로 평가하고 판정에 넣는다(2026-11-24 결정)
+    checks.append(_block_shear(ck))
 
     # --- 패스너 상세(J3.2/J4.2 끝단 거리 등) — 접합 엔진의 항목 그대로
     for c in cr.get('design_checks') or []:
@@ -245,3 +247,54 @@ def build(ck: dict) -> list:
     set_governing(checks)
     apply_context(checks, p)
     return checks
+
+
+def _block_shear(ck):
+    """J6.3 하한: Pnr = min(0.6 Fy Agv, 0.6 Fu Anv), Ant = 0 (장력면 무시). 입력은 랩 설계가 이미 가진 것뿐."""
+    dm, p = ck['dm'], ck['params']
+    bs = ck.get('block') or {}
+    if not bs.get('applies', True):
+        return make_check('lap.block_shear', design_method=dm, verdict='not_applicable',
+                          reason='J6: for screw connections the rupture strength is the lesser of J6.1 and J6.2 — '
+                                 'J6.3 block shear applies to welded and bolted connections only')
+    if bs.get('Pnr') is None:
+        return make_check('lap.block_shear', design_method=dm, verdict='not_evaluated',
+                          reason='no fastener layout (fastener design strength 0 or no fasteners placed)')
+    tr = Trace()
+    t = q('t', ck['t'], 'length', src('user_input', key='t'))
+    i_L = tr.add('equation', 'Lv = e + (m − 1) s  (shear-plane length: member end to the last fastener of a row)',
+                 equation='J6.3',
+                 inputs=[q('e', ck['edge_dist'], 'length', src('user_input', key='end_distance')
+                           if (p.get('end_distance') or 0) > 0 else
+                           src('engine_default', key='end_distance', note='1.5d minimum')),
+                         q('m', bs['m'], 'count', src('check', id='lap.fastener_count', note='fasteners per row')),
+                         q('s', ck['spacing'], 'length', src('specification', note='(L_lap − 2e)/(m − 1)'))],
+                 result=q('Lv', bs['Lv'], 'length'))
+    i_gv = tr.add('equation', 'Agv = 2 t Lv  (two shear planes, outer fastener rows)', inputs=[t, tr.ref(i_L)],
+                  result=q('Agv', bs['Agv'], 'area'))
+    dh = q('dh', bs['dh'], 'length', src('check', id='conn.j6.shear_rupture', note='hole diameter used for J6.1'))
+    m_q = q('m', bs['m'], 'count', src('check', id='lap.fastener_count', note='fasteners per row'))
+    i_nv = tr.add('equation', 'Anv = 2 t (Lv − (m − 0.5) dh)', inputs=[t, tr.ref(i_L), m_q, dh],
+                  result=q('Anv', bs['Anv'], 'area'))
+    i_1 = tr.add('equation', 'Pnr1 = 0.6 Fy Agv  (Eq. J6.3-1 with Ant = 0)', equation='J6.3-1',
+                 inputs=[q('Fy', ck['Fy'], 'stress', src('material', key='Fy')), tr.ref(i_gv)],
+                 result=q('Pnr1', bs['P1'], 'force'))
+    i_2 = tr.add('equation', 'Pnr2 = 0.6 Fu Anv  (Eq. J6.3-2 with Ant = 0)', equation='J6.3-2',
+                 inputs=[q('Fu', p.get('Fu'), 'stress', src('material', key='Fu')), tr.ref(i_nv)],
+                 result=q('Pnr2', bs['P2'], 'force'))
+    i_n = tr.add('equation', 'Pnr = min(Pnr1, Pnr2)', inputs=[tr.ref(i_1), tr.ref(i_2)], result=q('Pnr', bs['Pnr'], 'force'))
+    sym = 'φPnr' if dm == 'LRFD' else 'Pnr/Ω'
+    i_d = design_strength_step(tr, dm, tr.ref(i_n), bs['phi'], bs['omega'], bs['Pa'], sym, 'force')
+    dem = q('V_transfer', ck['V_transfer'], 'force', src('check', id='lap.fastener_group'))
+    v = 'pass' if bs['ok'] else 'fail'
+    if ck['pns_assumed']:
+        v = 'fail' if not bs['ok'] else 'not_evaluated'
+    tr.add('verdict', f'V_transfer / {sym} ≤ 1', inputs=[dem, tr.ref(i_d)], result=q('ratio', bs['ratio'], 'dimensionless'),
+           verdict=v)
+    return make_check('lap.block_shear', design_method=dm, verdict=v, demand=dem, capacity=q(sym, bs['Pa'], 'force'),
+                      nominal=q('Pnr', bs['Pnr'], 'force'), factor_=factor(dm, bs['phi'], bs['omega']),
+                      ratio=bs['ratio'], steps=tr.steps, basis='lower_bound_tension_plane_ignored',
+                      reason=('from an assumed Pns layout' if v == 'not_evaluated' else None),
+                      reference={'capacity': q(sym, bs['Pa'], 'force'), 'ratio': bs['ratio']}
+                      if v == 'not_evaluated' else None,
+                      assumed_lower_bound=True)

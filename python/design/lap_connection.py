@@ -484,7 +484,48 @@ def design_lap_connection(params: dict) -> dict:
     if lap_ok is False:
         warnings.append(f'Lap {lap_each:.2f} in < 1.5d = {min_lap:.2f} in — §I6.2.1 R 계수법과 §J3 겹친 Z 부재의 '
                         '과대·슬롯 구멍 예외를 쓸 수 없음 (접합 강도 판정에는 넣지 않음)')
-    layout = [capacity_ok, spacing_ok, n_total <= n_max_total]
+    # J6.3 패스너 무리의 블록 전단 — 장력면을 빼고(Ant = 0) 두 전단면만: 하한(보수). 볼트만(J6 머리글: 나사 · PAF
+    # 접합의 Rn 은 J6.1 · J6.2 의 작은 값 — J6.3 은 용접 · 볼트에만).  V6b 재검증 · 오케스트레이터 결정 2026-11-24.
+    bs = {'applies': fastener_type != 'screw'}
+    block_ok = True
+    if bs['applies'] and n_total_actual > 0 and Pns > 0:
+        dh = None
+        for _c in conn_result.get('design_checks') or []:
+            if _c['id'] == 'conn.j6.shear_rupture':
+                for _st in _c.get('steps') or []:
+                    for _i in _st.get('inputs') or []:
+                        if _i['symbol'] == 'dh':
+                            dh = _i['value']
+        if dh is None:   # Table J3.3-1 표준 구멍
+            dh = fastener_dia + (1.0 / 16.0 if fastener_dia >= 0.5 else 1.0 / 32.0)
+        m = n_per_row_actual
+        Lv = edge_dist + (m - 1) * spacing
+        Agv = 2.0 * t * Lv
+        Anv = 2.0 * t * max(Lv - (m - 0.5) * dh, 0.0)
+        P1 = 0.6 * Fy * Agv
+        P2 = 0.6 * Fu * Anv
+        Pnr = min(P1, P2)
+        phi_bs, om_bs = 0.65, 2.22                     # Table J6-1, bolts
+        Pa_bs = phi_bs * Pnr if design_method == 'LRFD' else Pnr / om_bs
+        ratio_bs = V_transfer / Pa_bs if Pa_bs > 0 else float('inf')
+        block_ok = ratio_bs <= 1.0
+        bs.update(dh=dh, m=m, Lv=Lv, Agv=Agv, Anv=Anv, P1=P1, P2=P2, Pnr=Pnr, phi=phi_bs, omega=om_bs, Pa=Pa_bs,
+                  ratio=ratio_bs, ok=block_ok)
+        steps.append({
+            'step': '7b', 'name': 'Lap fastener group block shear (§J6.3, lower bound — tension plane ignored)',
+            'value': round(ratio_bs, 3), 'unit': '',
+            'formula': (f'Lv = e + (m−1)s = {edge_dist:.3f} + ({m}−1)×{spacing:.3f} = {Lv:.3f} in, '
+                        f'Agv = 2tLv = {Agv:.4f}, Anv = 2t(Lv − (m−0.5)dh) = {Anv:.4f} in², '
+                        f'Pnr = min(0.6FyAgv, 0.6FuAnv) = {Pnr:.3f} kips, '
+                        f'{"φ" if design_method == "LRFD" else "1/Ω"}Pnr = {Pa_bs:.3f} kips, '
+                        f'V_transfer/{"φ" if design_method == "LRFD" else "1/Ω"}Pnr = {ratio_bs:.3f}'),
+            'pass': block_ok,
+        })
+        if not block_ok:
+            warnings.append(f'Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs:.2f} > 1.0')
+    elif bs['applies']:
+        block_ok = None if Pns <= 0 or n_total_actual <= 0 else True
+    layout = [capacity_ok, spacing_ok, n_total <= n_max_total, block_ok]
     if pns_assumed:
         # 가정값 강도로 정한 수·용량·배치는 FAIL/PASS 를 내지 않는다 (FIXES §3.1)
         layout = [None if p is False else p for p in layout]
@@ -499,14 +540,14 @@ def design_lap_connection(params: dict) -> dict:
     verdict = 'PASS' if overall_pass is True else ('FAIL' if overall_pass is False else 'NOT_CHECKED')
 
     # 검토 항목(design_checks) — 위에서 쓴 값 그대로(lap_checks.py)
-    from design.lap_checks import build as _build_lap_checks, LAP_BLOCK_SHEAR_NOTE
+    from design.lap_checks import build as _build_lap_checks, LAP_BLOCK_SHEAR_NOTE, LAP_BLOCK_SHEAR_ASSUMPTION
     _ck = dict(dm=design_method, params=params, d=d, t=t, Fy=Fy, lap_chk=lap_chk, lap_ok=lap_ok, Mu=Mu, Vu=Vu,
                d_lever=d_lever, V_transfer=V_transfer, Pns=Pns, pns_mode=pns_mode, pns_assumed=pns_assumed,
                fastener_unverified=fastener_unverified, conn_result=conn_result, n_required=n_required,
                n_per_row=n_per_row, n_total=n_total, n_rows=n_rows, n_max_per_row=n_max_per_row,
                n_max_total=n_max_total, n_total_actual=n_total_actual, spacing=spacing, min_spacing=min_spacing,
                spacing_ok=spacing_ok, edge_dist=edge_dist, capacity=capacity, utilization=utilization,
-               capacity_ok=capacity_ok, Se=Se, Sf_only=Sf_only, flex=_flex)
+               capacity_ok=capacity_ok, Se=Se, Sf_only=Sf_only, flex=_flex, block=bs)
     lap_design_checks = _build_lap_checks(_ck)
 
     return {
@@ -559,6 +600,7 @@ def design_lap_connection(params: dict) -> dict:
         'lap_right_in': lap_right,
         'design_checks': lap_design_checks,
         'scope_notes': ['J6.3: ' + LAP_BLOCK_SHEAR_NOTE],
+        'assumptions': [LAP_BLOCK_SHEAR_ASSUMPTION] if bs.get('Pnr') is not None else [],
         'display_rounding': _display_rounding('lap'),
     }
 

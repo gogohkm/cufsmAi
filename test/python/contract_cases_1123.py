@@ -281,6 +281,21 @@ def _member():
     a(('purlin lap region (half M)', dict(zr, Lb=0, Cb=1.0, distortional_not_applicable=True,
                                           Mu=0.5 * 5.5 * 12, Vu=0.5 * 2.2, moment_sign='-',
                                           dsm=dict(Mcrl=91.0, M_sign='-'))))
+    # 2026-11-24 V6b-04 (계약 §6.3): 랩 구간은 사람이 밝힌 구속만 쓴다
+    a(('purlin lap region stated', dict(zr, Lb=0, Cb=1.0, lap_region=True, distortion_restrained=True,
+                                        Mu=0.5 * 5.5 * 12, Vu=0.5 * 2.2, moment_sign='-',
+                                        dsm=dict(Mcrl=91.0, M_sign='-'))))
+    a(('purlin lap region unstated', dict(zr, Lb=0, Cb=1.0, lap_region=True,
+                                          Mu=0.5 * 5.5 * 12, Vu=0.5 * 2.2, moment_sign='-',
+                                          dsm=dict(Mcrl=91.0, M_sign='-'))))
+    # V6b-03: 휨 소요 없이 전단만 · 웹 크리플링만
+    a(('flexure V only (Mu = 0)', dict(zr, Lb=49.1, Cb=1.67, Mu=0.0, Vu=1.2, dsm=dict(Mcrl=91.0, Mcrd=101.0))))
+    # V6b-02: 축마다의 Cm 끝 모멘트 비
+    a(('combined Cmy from its own ratio', dict(member_type='combined', design_method='LRFD', Fy=55, KxLx=48.0,
+                                               KyLy=96.0, KtLt=48.0, Lb=48.0, Pu=4.0, Mux=5.0, Muy=2.0,
+                                               May_strength=10.0, Cmx_M1_M2=-0.5, Cmy_M1_M2=0.5, dist_M1_M2=0.3,
+                                               section_type='C', props=dict(C9),
+                                               dsm=dict(Pcrl=20.0, Pcrd=25.0, Mcrl=84.4, Mcrd=107.0))))
     a(('purlin positive region uplift R', dict(zr, Lb=270.0, Cb=1.0, Mu=1.81 * 12, R_uplift=0.70,
                                                span_type='continuous', dsm=dict(Mcrl=91.0, Mcrd=101.0))))
     a(('purlin support with wc', dict(zr, Lb=49.1, Cb=1.67, Mu=4.0 * 12, Vu=1.4, moment_sign='-',

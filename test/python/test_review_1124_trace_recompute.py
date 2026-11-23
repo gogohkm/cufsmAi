@@ -27,8 +27,17 @@ sqrt = math.sqrt
 REL = 1e-9
 
 
+class MissingInput(Exception):
+    """식이 쓰는 입력이 그 단계에 없다 — '모르는 식'과 구별한다(V6b-05)."""
+
+
+class _Inputs(dict):
+    def __missing__(self, key):
+        raise MissingInput(key)
+
+
 def _v(step):
-    d = {}
+    d = _Inputs()
     for i in step['inputs']:
         val = i.get('value')
         if val is None and i.get('unbounded'):
@@ -192,7 +201,7 @@ F = {
     'β = 1 + 0.4 (L/Lm)^0.7 (1 + M1/M2)^0.7, 1.0 ≤ β ≤ 1.3':
         lambda v: _clamp(1 + 0.4 * (v['L'] / v['Lm']) ** 0.7 * (1 + v['M1/M2']) ** 0.7, 1.0, 1.3),
     'Mn(+) = min(Mne, Mnℓ, Mnd)': lambda v: min(v['Mne'], v['Mnℓ'], v['Mnd']),
-    'Mn = R Mnℓo': lambda v: v['R'] * v['Mnℓo'],
+    'Mn = R_uplift Mnℓo': lambda v: v['R_uplift'] * v['Mnℓo'],
     'Fya = C Fyc + (1 − C) Fyv ≤ Fuv  (cold work of forming)':
         lambda v: min(v['C'] * v['Fyc'] + (1 - v['C']) * v['Fyv'], v['Fuv']),
     'Mcrd = max(Mcrd, single-minimum floor)  (§4.1: the lone minimum is a floor)':
@@ -261,7 +270,7 @@ F = {
     'My,amp = B1y My': lambda v: v['B1y'] * v['My'],
     'PL/1000 = P L / 1000  (angle: additional eccentricity moment, §H1.2)': lambda v: v['P'] * v['L'] / 1000,
     'My,ecc = B1y (My + PL/1000)': lambda v: v['B1y'] * (v['My'] + v['PL/1000']),
-    'Mnxt = Sft Fy': lambda v: v['Sft'] * v['Fy'],
+    'Mnxt = Sft Fy  (§H1.1 — nominal of Eq. H1.1-3a/-3b)': lambda v: v['Sft'] * v['Fy'],
     # ---- Chapter D
     'Tn = Ag Fy': lambda v: v['Ag'] * v['Fy'],
     'Tn = An Fu': lambda v: v['An'] * v['Fu'],
@@ -378,6 +387,13 @@ F = {
     'Pnr1 = 0.6 Fy Agv + Ubs Fu Ant': lambda v: 0.6 * v['Fy'] * v['Agv'] + v['Ubs'] * v['Fu'] * v['Ant'],
     'Pnr2 = 0.6 Fu Anv + Ubs Fu Ant': lambda v: 0.6 * v['Fu'] * v['Anv'] + v['Ubs'] * v['Fu'] * v['Ant'],
     'Pnr = min(Pnr1, Pnr2)': lambda v: min(v['Pnr1'], v['Pnr2']),
+    # ---- 랩 패스너 무리 J6.3 하한(장력면 무시)
+    'Lv = e + (m − 1) s  (shear-plane length: member end to the last fastener of a row)':
+        lambda v: v['e'] + (v['m'] - 1) * v['s'],
+    'Agv = 2 t Lv  (two shear planes, outer fastener rows)': lambda v: 2 * v['t'] * v['Lv'],
+    'Anv = 2 t (Lv − (m − 0.5) dh)': lambda v: 2 * v['t'] * max(v['Lv'] - (v['m'] - 0.5) * v['dh'], 0.0),
+    'Pnr1 = 0.6 Fy Agv  (Eq. J6.3-1 with Ant = 0)': lambda v: 0.6 * v['Fy'] * v['Agv'],
+    'Pnr2 = 0.6 Fu Anv  (Eq. J6.3-2 with Ant = 0)': lambda v: 0.6 * v['Fu'] * v['Anv'],
     # ---- 랩(사내 합리적 해석 §A1.2(c), 두 겹 부재)
     'arm = d − t': lambda v: v['d'] - v['t'],
     'V_flange = Mu / arm  (in-house rational model, §A1.2(c))': lambda v: v['Mu'] / v['arm'],
@@ -420,7 +436,7 @@ LOOKUPS = {
     'Pcrl (elastic local buckling load)': 'FSM / user buckling value carried as given',
     'Pcrd (elastic distortional buckling load)': 'FSM / user buckling value carried as given',
     'Fcre = rational elastic buckling stress (input)': 'user-supplied Fcre',
-    'R from Table I6.2.1-1': 'user-supplied R (table row in the source)',
+    'R_uplift from Table I6.2.1-1': 'user-supplied R (table row in the source)',
     'de (input — verified by the welding procedure)': 'user-supplied de',
     'Usl (input)': 'user-supplied Usl',
     'F_uh (input)': 'user-supplied F_uh',
@@ -557,6 +573,9 @@ def test_every_step_is_recomputed_from_its_own_inputs():
                 if st['kind'] == 'branch':
                     try:
                         h = _branch_holds(st)
+                    except MissingInput as m:
+                        wrong.append(where + ('missing input', m.args[0]))
+                        continue
                     except KeyError:
                         unknown.add(('branch', st['condition']))
                         continue
@@ -596,6 +615,10 @@ def test_every_step_is_recomputed_from_its_own_inputs():
                     continue
                 try:
                     got = _recompute(st)
+                except MissingInput as m:
+                    wrong.append(where + ('missing input — the formula needs it', m.args[0],
+                                          [i['symbol'] for i in st['inputs']]))
+                    continue
                 except KeyError:
                     unknown.add((st['kind'], st['expr']))
                     continue
@@ -622,3 +645,152 @@ def test_a_misstated_trace_is_caught():
     assert _close(_recompute(st), st['result']['value'])
     bad = dict(st, inputs=[dict(i, value=i['value'] * 2) if i['symbol'] == 'n' else i for i in st['inputs']])
     assert not _close(_recompute(bad), st['result']['value'])
+
+
+# ---------------------------------------------------------------- 기호 → 물리량 (계약 §3.2, 뜻으로 적음)
+# 정확한 기호표가 먼저, 그다음 머리글자 규칙. 엔진 출력에서 만들지 않았다 — 기호의 뜻(원문 · 계약)으로 적었다.
+_Q_EXACT = {
+    'PL/1000': 'moment', 'M1/M2': 'dimensionless', 'R': 'length', 'N': 'length', 'R_uplift': 'dimensionless',
+    'E': 'stress', 'G': 'stress', 'fv': 'stress', 'capacity': 'force', 'J': 'torsion_constant',
+    'Jf': 'torsion_constant', 'Cw': 'warping_constant', 'Cwf': 'warping_constant', 'θ': 'angle',
+    'k̃φfg': 'area', 'k̃φwg': 'area', 'kφ': 'rotational_stiffness', 'kφfe': 'rotational_stiffness',
+    'kφwe': 'rotational_stiffness', '1.5d': 'length', '3d': 'length', 'provided': 'length', 'required': 'length',
+    'arm': 'length', 'pitch': 'length', 'x̄': 'length', 'Zf': 'section_modulus', 'Se': 'section_modulus',
+    'Sf': 'section_modulus', 'Sft': 'section_modulus', 'Ky': 'dimensionless', 'Cb': 'dimensionless',
+    'C': 'dimensionless', 'CR': 'dimensionless', 'CN': 'dimensionless', 'Ch': 'dimensionless',
+    'Cyd': 'dimensionless', 'Cmx': 'dimensionless', 'Cmy': 'dimensionless', 'B1x': 'dimensionless',
+    'B1y': 'dimensionless', 'HRC': 'dimensionless', 'Ubs': 'dimensionless', 'Usl': 'dimensionless',
+    'Usl,min': 'dimensionless', 'k': 'dimensionless', 'kv': 'dimensionless', 'mf': 'dimensionless',
+    'r': 'dimensionless', 'limit': 'dimensionless', 'ratio': 'dimensionless', 'value': 'dimensionless',
+    'exponent': 'dimensionless', 's': 'length', 'm': 'count', 'n': 'count', 'members': 'count', 'rows': 'count',
+    'twf/R, η': 'dimensionless', 'h': 'length', 'Lv': 'length', 'L_lap': 'length', 'Iy': 'moment_of_inertia',
+    'I22': 'moment_of_inertia',
+}
+
+
+def _expected_quantity(sym):
+    if sym in _Q_EXACT:
+        return _Q_EXACT[sym]
+    if sym.startswith(('H1', 'H2', 'H3')) or sym.startswith('(') or '/' in sym and not any(
+            sym.startswith(x) for x in ('Mn', 'Mnd', 'Mne', 'Pn', 'Pnb', 'Pnd', 'Pne', 'Pno', 'Pnr', 'Pnt', 'Pnv',
+                                        'Pnℓ', 'Tn', 'Vn', 'Mn,lap', 'Mnd,lap', 'Vn,lap', 'n_fit')):
+        return 'dimensionless'                    # 비 · 상호작용 값 (예: h/t, λ 류는 아래)
+    if sym.startswith('n_'):
+        return 'count'
+    if sym[0] in 'φΩ':
+        rest = sym[1:].lstrip('bcvtw')
+        if not rest:
+            return 'dimensionless'                # 계수 φ, φb, Ωv …
+        sym = rest                                 # φbMne → Mne (설계강도는 강도와 같은 물리량)
+    if sym[0] in 'λβαμξ':
+        return 'dimensionless'
+    if sym[0] in 'σF':
+        return 'stress'
+    if sym[0] == 'M':
+        return 'moment'
+    if sym[0] in 'PVT':
+        return 'force'
+    if sym[0] == 'A':
+        return 'area'
+    if sym[0] == 'I':
+        return 'moment_of_inertia'
+    if sym[0] == 'S':
+        return 'section_modulus'
+    if sym[0] in 'LKbcdeghrtwxyoD' or sym.startswith(('ho', 'hxf')):
+        return 'length'
+    raise KeyError(sym)
+
+
+def test_every_symbol_has_its_contract_quantity():
+    """{symbol, quantity} 마다 기호표의 물리량 — 'Pne' 를 moment 로 적은 단계는 SI 에서 kN·m 가 된다(V6b-05)."""
+    wrong, unknown, n = [], set(), 0
+    for name, r in _all():
+        for c in _checks(r):
+            vals = [c.get(k) for k in ('demand', 'nominal', 'capacity')]
+            vals += [x for x in (c.get('reference') or {}).values() if isinstance(x, dict)]
+            for st in c['steps']:
+                vals += st['inputs'] + ([st['result']] if st.get('result') else [])
+            for x in vals:
+                if not x or 'quantity' not in x:
+                    continue
+                try:
+                    want = _expected_quantity(x['symbol'])
+                except KeyError:
+                    unknown.add(x['symbol'])
+                    continue
+                n += 1
+                if x['quantity'] != want:
+                    wrong.append((name, c['id'], x['symbol'], x['quantity'], want))
+    assert not unknown, sorted(unknown)
+    assert not wrong, wrong[:20]
+    assert n > 10000, n
+
+
+# ---------------------------------------------------------------- 식 번호 (S100-16 원문에서 옮김)
+# 원문 본문 · 부록 · 해설에 'Eq. …' 로 있는 번호 가운데 이 엔진이 쓰는 것. 2026-11-24 스킬 원문과 하나하나 대조.
+SPEC_EQS = set("""
+1.1-4 2.3.1.2-1 2.3.1.3-1 2.3.1.3-2 2.3.1.3-3 2.3.1.3-4 2.3.1.3-5 2.3.1.3-6 2.3.1.3-7 2.3.3.2-1 2.3.3.3-1
+2.3.3.3-2 2.3.3.3-3 2.3.3.3-4 2.3.3.3-5 2.3.3.3-6 A3.3.2-1 C1.2.1.1-1 C1.2.1.1-3 C1.2.1.1-4 C1.2.1.1-5 D2-1 D3-1
+E2-1 E2-2 E2-3 E2-4 E2.1-1 E2.2-1 E2.2-3 E2.2-4 E2.2-5 E2.2-6 E3.2.1-1 E3.2.1-2 E3.2.1-3 E4.1-1 E4.1-2 E4.1-3
+E4.1-4 F2.1-1 F2.1-2 F2.1-3 F2.1-4 F2.1-5 F2.1.1-1 F2.1.1-4 F2.1.1-5 F2.1.3-1 F2.1.4-1 F2.1.4-2 F2.3-1 F2.3-2
+F2.3-3 F2.3-4 F2.4.2-1 F2.4.2-2 F2.4.2-3 F3.1-1 F3.2.1-1 F3.2.1-2 F3.2.1-3 F3.2.3-1 F4.1-1 F4.1-2 F4.1-3 F4.1-4
+F4.3-1 F4.3-3 F4.3-4 G2.1-1 G2.1-2 G2.1-3a G2.1-3b G2.1-4 G2.1-5 G2.3-1 G2.3-2 G5-1 H1.1-1 H1.1-2 H1.1-3a H1.1-3b
+H1.2-1 H2-1 H2-2 H3-1a H3-1b H3-2a H3-2b H3-3a H3-3b I6.2.1-1 J2.1-1 J2.1-2 J2.1-3 J2.2.2.1-1 J2.2.2.1-2
+J2.2.2.1-3 J2.2.2.1-4 J2.2.2.1-5 J2.2.2.2-1 J2.2.3-1 J2.2.3-2 J2.2.4-1 J2.3.2.1-1 J2.3.2.1-2 J2.3.2.1-3
+J2.3.2.1-4 J2.3.2.2-1 J2.5-1 J2.5-2 J2.5-3 J2.5-4 J2.5-5 J2.5-6 J2.5-7 J2.6-1 J2.6-2 J2.6-3 J2.6-4 J2.6-5 J2.6-7
+J3.3.1-1 J3.3.2-1 J3.4-1 J3.4-2 J3.4-3 J4.3.1-1 J4.3.1-2 J4.3.1-3 J4.3.1-4 J4.3.1-5 J4.4.1-1 J4.4.2-1
+J4.5.1-1a J4.5.1-1b J4.5.1-2 J4.5.1-3 J4.5.2-1a J4.5.2-1b J4.5.2-2 J4.5.2-3 J4.5.3-1a J4.5.3-1b J5.2.1-1
+J5.2.1-2 J5.2.3-1 J5.3.1-1 J5.3.2-1 J5.3.3-1 J6.1-1 J6.1-2 J6.2-1 J6.2-3 J6.2-4 J6.2-5 J6.2-6 J6.2-7 J6.2-8
+J6.3-1 J6.3-2 C-J4.5.1-1 C-J5.4-1
+""".split())
+# 식 번호가 아닌 조항 · 표 · 묶음 이름 — 단계가 조항이나 표를 가리킬 때
+SPEC_REFS = {'H1.2', 'J2.2.3', 'J2.2.4', 'J2.3.2.1', 'J3.4', 'J4.3.2', 'J4.4.2', 'J4.4.3', 'J5.2.1', 'J5.2.3',
+             'J6.3', 'J2.6', 'J2.2', 'J3.2', 'Table 2.3.1.3-1', 'Table B4.1-1', 'Table I6.2.1-1',
+             'Table J3.3.1-1', 'Table J6.2-1 (2)', 'Table J6.2-1 (3)(a)', 'Table J6.2-1 (3)(b)', 'J6.2-4 (하한)',
+             'J2.5-1/2', 'J2.5-3/4', 'J4.3.1-1/2/3', 'J4.3.1-4/5', 'J3.4-2/-3'}
+
+# 갈래의 식 번호: 조건 → (참일 때, 거짓일 때) 의 번호(원문의 식 배치). 다른 것이면 틀린 표기.
+BRANCH_LABELS = {
+    'λc ≤ 1.5': ('E2-2', 'E2-3'),
+    'λd ≤ 0.561': ('E4.1-1', 'E4.1-2'),
+    'λd ≤ 0.673': ('F4.1-1', 'F4.1-2'),
+    'Fcre > 0.56 Fy': ('F2.1-4', 'F2.1-5'),
+    'Lb ≤ Lu': ('F2.1.4-1', 'F2.1.4-2'),
+    'da/t ≤ 0.815 λ': ('J2.2.2.1-2', None),
+    '0.815 λ < da/t < 1.397 λ': ('J2.2.2.1-3', None),
+    'da/t ≥ 1.397 λ': ('J2.2.2.1-4', None),
+}
+# 계산 단계의 식 번호: 식 → 원문 번호
+EXPR_LABELS = {
+    'Fn = 0.658^(λc²) Fy': 'E2-2', 'Fn = (0.877 / λc²) Fy': 'E2-3', 'Pne = Ag Fn': 'E2-1',
+    'Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py': 'E4.1-2', 'Pnd = Py': 'E4.1-1',
+    'Pnℓ = [1 − 0.15 (Pcrl/Pne)^0.4] (Pcrl/Pne)^0.4 Pne': 'E3.2.1-2', 'Pnℓ = Pne': 'E3.2.1-1',
+    'Fn = Fy': 'F2.1-3', 'Fn = (10/9) Fy [1 − 10 Fy / (36 Fcre)]': 'F2.1-4', 'Fn = Fcre': 'F2.1-5',
+    'Mne = Sf Fn ≤ My': 'F2.1-1', 'Mnd = My': 'F4.1-1', 'Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My': 'F4.1-2',
+    'Mnℓ = Mne': 'F3.2.1-1', 'Mnℓ = [1 − 0.15 (Mcrl/Mne)^0.4] (Mcrl/Mne)^0.4 Mne': 'F3.2.1-2',
+    'Tn = Ag Fy': 'D2-1', 'Tn = An Fu': 'D3-1', 'Pnv = 0.6 Fu Anv': 'J6.1-1', 'Pnt = Fu Usl Ant': 'J6.2-1',
+    'Pnr1 = 0.6 Fy Agv + Ubs Fu Ant': 'J6.3-1', 'Pnr2 = 0.6 Fu Anv + Ubs Fu Ant': 'J6.3-2',
+    'Pnr1 = 0.6 Fy Agv  (Eq. J6.3-1 with Ant = 0)': 'J6.3-1', 'Pnr2 = 0.6 Fu Anv  (Eq. J6.3-2 with Ant = 0)': 'J6.3-2',
+    'B1x = Cmx / (1 − α P / Pe1x) ≥ 1.0': 'C1.2.1.1-3', 'B1y = Cmy / (1 − α P / Pe1y) ≥ 1.0': 'C1.2.1.1-3',
+    'Pe1x = π² E A / (KxLx / rx)²': 'C1.2.1.1-5', 'Pe1y = π² E A / (KyLy / ry)²': 'C1.2.1.1-5',
+}
+
+
+def test_equation_labels_exist_and_name_the_right_equation():
+    """단계의 식 번호는 원문에 있는 번호(또는 조항 · 표)이고, 갈래 · 주요 식은 원문의 그 자리 번호다."""
+    bad = []
+    for name, r in _all():
+        for c in _checks(r):
+            for k, st in enumerate(c['steps']):
+                lab = st.get('equation')
+                where = (name, c['id'], k, st.get('expr') or st.get('condition'), lab)
+                if lab is not None and lab not in SPEC_EQS and lab not in SPEC_REFS:
+                    bad.append(where + ('not a specification equation',))
+                if st['kind'] == 'branch' and st['condition'] in BRANCH_LABELS:
+                    yes, no = BRANCH_LABELS[st['condition']]
+                    want = yes if st['holds'] else no
+                    if want is not None and lab != want:
+                        bad.append(where + (f'branch label should be {want}',))
+                if st.get('expr') in EXPR_LABELS and lab != EXPR_LABELS[st['expr']]:
+                    bad.append(where + (f'should be {EXPR_LABELS[st["expr"]]}',))
+    assert not bad, bad[:20]

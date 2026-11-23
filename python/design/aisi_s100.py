@@ -29,6 +29,14 @@ from design.checks import set_governing as _set_governing, apply_context as _app
 _PROPS_GENERATED = '_props_generated'
 # 하위 설계(압축 · 휨 · 인장)가 조합 검토에 넘기는 반올림하지 않은 설계강도(결과에는 남기지 않는다).
 _RAW_DS = '_raw_design_strength'
+# 랩 구간의 뒤틀림 구속(계약 §6.3) — 사람이 밝혔을 때와 밝히지 않았을 때의 문장(호스트가 그대로 보인다).
+LAP_DIST_STATED = ('F4 distortional buckling not applicable in this lap region: distortion_restrained = true '
+                   '(user statement — AISI Manual II-1A / II-2A: the lapped section is assumed to be sufficiently '
+                   'restrained against lateral-torsional and distortional buckling); Mnd = My is used.')
+LAP_DIST_UNSTATED = ('F4 distortional buckling — lap region: restraint against distortion not stated. Give '
+                     'distortion_restrained = true if the lapped member restrains distortional buckling (AISI Manual '
+                     'II-1A / II-2A assumption: the lapped section is sufficiently restrained), or give Mcrd for the '
+                     'lapped section.')
 # 반올림하지 않은 이용률(지배 이름 고르기용) — design_member 가 내보내기 전에 뺀다.
 _UTIL_RAW = '_utilization_raw'
 # global_buckling 이 '횡좌굴 없음'에 쓰는 표지값(1e6 ksi) — 이 값이면 끝없는 값(∞)이다.
@@ -199,6 +207,23 @@ def _hat_geometry(params: dict, props: dict, section: dict, t: float, R: float) 
         'n_le': int(section.get('n_le', params.get('n_le', 0)) or 0),
         'n_w': int(section.get('n_w', params.get('n_w', 0)) or 0),
     }
+
+
+def _zero_demand_not_applicable(checks: list) -> None:
+    """소요가 없는 한계상태(FIXES §3.1, V6b-03): 다른 소요가 있어 무엇이든 평가했으면 그 한계상태는 해당 없음이다
+    (예: Mu = 0 · Vu > 0 이면 F2–F4 는 not_applicable). 소요가 하나도 없을 때만 not_evaluated(소요 없음)로 둔다 —
+    엔진의 pass 와 같은 규칙."""
+    if not any(c['verdict'] in ('pass', 'fail') and c.get('counts', True) for c in checks):
+        return
+    groups = set()
+    for c in checks:
+        if c['verdict'] == 'not_evaluated' and str(c.get('reason') or '').startswith('no required'):
+            c['verdict'] = 'not_applicable'
+            c['reason'] = c['reason'] + ' — no demand for this limit state (the other demands are checked)'
+            c.pop('mirrors', None)
+            groups.add(c['group'])
+    for g in groups:
+        _set_governing([c for c in checks if c['group'] == g])
 
 
 def _governing_check_id(checks: list, group: str, value) -> str | None:
@@ -600,7 +625,12 @@ def design_member(params: dict) -> dict:
                           bool(result.get('b4_limits_exceeded')), params.get(_PROPS_GENERATED))
         checks.append(b4)
         _set_governing([b4])
+    _zero_demand_not_applicable(checks)
     _apply_context(checks, params)
+    # 옛 계산서 단계(steps[])의 1e6 ksi 는 '횡좌굴 없음(∞)'의 표지다 — 값은 화면 비교용으로 두고 옆에 표시(V6-16).
+    for st in result.get('steps') or []:
+        if isinstance(st, dict) and st.get('value') == _FCRE_INF:
+            st['unbounded'] = True
 
     result.pop(_RAW_DS, None)
     result.pop(_UTIL_RAW, None)
@@ -1286,7 +1316,18 @@ def _design_flexure(params: dict) -> dict:
     warnings = []
     assumptions = []
     not_evaluated = []
-    if dist_excluded:
+    # 랩 구간(계약 §6.3): 뒤틀림 구속은 사람이 밝힌 것만 쓴다 — 엔진 · 호스트가 가정하지 않는다(V6b-04).
+    lap_region = params.get('lap_region') is True
+    if lap_region:
+        if params.get('distortional_not_applicable'):
+            warnings.append('lap_region: distortional_not_applicable is ignored for a lap region — the restraint '
+                            'must be stated as distortion_restrained = true')
+        dist_excluded = params.get('distortion_restrained') is True
+        if dist_excluded:
+            assumptions.append(LAP_DIST_STATED)
+        elif not float(dsm.get('Mcrd', 0) or 0) > 0:
+            not_evaluated.append(LAP_DIST_UNSTATED)
+    elif dist_excluded:
         assumptions.append(
             'F4 distortional buckling was explicitly excluded by the supplied assembly/member '
             'assumption; Mnd=My is used.'
@@ -1349,7 +1390,10 @@ def _design_flexure(params: dict) -> dict:
     dist_Lcrd = dsm.get('Lcrd', 0)                # 뒤틀림좌굴 반파장 (in, DSM 추출)
 
     dist_applicable, dist_reason = _distortional_applicability(geom)
-    if dist_excluded:
+    if dist_excluded and lap_region:
+        dist_applicable, dist_reason = False, ('lap region — distortion_restrained = true (user statement; AISI '
+                                               'Manual II-1A / II-2A: lapped section sufficiently restrained)')
+    elif dist_excluded:
         dist_applicable, dist_reason = False, 'excluded by supplied assumption'
 
     def _calc_flexure_state(Fy_eval: float, allow_ir: bool) -> dict:
@@ -2056,7 +2100,7 @@ def _design_flexure(params: dict) -> dict:
               dsm=dsm, diag=diag, state=state, state_i621=state_virgin, Fy_original=Fy_original,
               cold_work_info=cold_work_info, Mu=Mu, Lb=Lb, Cb=Cb, Fcre_override=Fcre_override, Zf=Zf,
               D_over_t=D_over_t, E=E, is_round=_is_round, dist_applicable=dist_applicable,
-              dist_reason=dist_reason, f2_unavailable=f2_unavailable, R_uplift=R_uplift, Mn=Mn, mode=mode,
+              dist_reason=dist_reason, dist_stated=bool(lap_region and dist_excluded), f2_unavailable=f2_unavailable, R_uplift=R_uplift, Mn=Mn, mode=mode,
               phi=phi, omega=omega,
               i621_row=(_i621_row_text(section_type, _out_to_out_dims(geom)[0], params.get('span_type'))
                         if R_uplift is not None and R_uplift > 0 else None))
@@ -2525,19 +2569,22 @@ def _design_combined(params: dict) -> dict:
     #  (a) 지간 사이 횡하중 없음: Cm = 0.6 - 0.4(M1/M2), M1/M2는 역곡률 양수/단일곡률 음수
     #  (b) 지간 사이 횡하중 있음: Cm = 1.0 (보수적 기본값)
     # 하중 구성을 알 수 없으면 0.85가 아니라 사양이 허용하는 보수적 1.0을 기본으로 한다.
-    M1_M2 = params.get('dist_M1_M2', None)
-    if params.get('Cmx') is not None:
-        Cmx = params.get('Cmx')
-    elif M1_M2 is not None and not params.get('transverse_load', False):
-        Cmx = 0.6 - 0.4 * M1_M2  # Eq. C1.2.1.1-4
-    else:
-        Cmx = 1.0
-    if params.get('Cmy') is not None:
-        Cmy = params.get('Cmy')
-    elif M1_M2 is not None and not params.get('transverse_load', False):
-        Cmy = 0.6 - 0.4 * M1_M2
-    else:
-        Cmy = 1.0
+    # M1/M2 는 '그 굽힘 평면의 비지지 구간' 끝 모멘트 비다 — 축마다 따로 받는다(Cmx_M1_M2 · Cmy_M1_M2).
+    # dist_M1_M2 는 부록 2 Eq. 2.3.3.3-3 β(강축 뒤틀림 구간 Lm)의 입력이라 Cm 에 쓰지 않는다(V6b-02).
+    transverse = bool(params.get('transverse_load', False))
+    M1_M2_x = params.get('Cmx_M1_M2', None)
+    M1_M2_y = params.get('Cmy_M1_M2', None)
+
+    def _cm(key, ratio):
+        if params.get(key) is not None:
+            return params.get(key), 'user'
+        if transverse:
+            return 1.0, 'transverse'
+        if ratio is not None:
+            return 0.6 - 0.4 * ratio, 'M1_M2'     # Eq. C1.2.1.1-4
+        return 1.0, 'default'
+    Cmx, cmx_basis = _cm('Cmx', M1_M2_x)
+    Cmy, cmy_basis = _cm('Cmy', M1_M2_y)
 
     # 압축 설계
     comp_params = {**params, 'member_type': 'compression', 'Pu': Pu}
@@ -2695,14 +2742,15 @@ def _design_combined(params: dict) -> dict:
 
     # P1-5: Cm 근거 없이 보수적 1.0으로 defaulted된 경우 명시.
     # (지간 횡하중 있음 → (b)항 Cm=1.0이므로 정상, 경고 불필요)
-    if params.get('Cmx') is None and M1_M2 is None and not params.get('transverse_load', False):
+    for axis, basis in (('x', cmx_basis), ('y', cmy_basis)):
+        if basis == 'default':
+            result['assumptions'].append(
+                f'§C1.2.1.1: Cm{axis} 미지정 + 그 굽힘 평면의 단부모멘트비 미지정 → Cm{axis} = 1.0 '
+                f'(Eq. C1.2.1.1-4 의 상한, (b) 항이 허용하는 보수값). 모멘트 구배를 알면 Cm{axis} 또는 '
+                f'Cm{axis}_M1_M2(그 축의 비지지 구간 끝 모멘트 비, 역곡률 +)를 입력하세요.')
+    if params.get('dist_M1_M2') is not None and (cmx_basis == 'default' or cmy_basis == 'default'):
         result['assumptions'].append(
-            '§C1: Cmx 미지정 + 단부모멘트비(M1/M2) 미지정 → 보수적 Cm=1.0 사용. '
-            '모멘트 구배를 알면 Cmx 또는 dist_M1_M2를 입력하세요.')
-    if params.get('Cmy') is None and M1_M2 is None and not params.get('transverse_load', False):
-        result['assumptions'].append(
-            '§C1: Cmy 미지정 + 단부모멘트비(M1/M2) 미지정 → 보수적 Cm=1.0 사용. '
-            '모멘트 구배를 알면 Cmy 또는 dist_M1_M2를 입력하세요.')
+            '§C1.2.1.1: dist_M1_M2 는 부록 2 β(강축 뒤틀림 구간)의 입력이라 Cm 에 쓰지 않았습니다.')
 
     # y축 휨 결과
     if flex_y:
@@ -2742,18 +2790,12 @@ def _design_combined(params: dict) -> dict:
     _finalize_verdict(result)
     # 검토 항목: 성분(압축 · 휨x 와 그 G2/H2/G5/H3/정모멘트) + §H1.2 상호작용
     comp_checks = [c for c in comp.get('design_checks', []) if c['id'] != 'member.axial_bending']
-    def _cm_basis(key):
-        if params.get(key) is not None:
-            return 'user'
-        if M1_M2 is not None and not params.get('transverse_load', False):
-            return 'M1_M2'
-        return 'transverse' if params.get('transverse_load', False) else 'default'
 
     h12 = _mc.axial_bending_check(dict(
         dm=design_method, params=params, generated=params.get(_PROPS_GENERATED), raw=h12_raw,
         interaction=interaction, Pu=Pu, Pa=Pa, Max=Max, Mux=Mux, Mux_amp=Mux_amp, alpha_x=alpha_x, PEx=PEx,
-        E=E, Ag=Ag, KxLx=KxLx, rx=rx, Cmx=Cmx, c1_alpha=c1_alpha, M1_M2=M1_M2,
-        Cmx_basis=_cm_basis('Cmx'), Cmy_basis=_cm_basis('Cmy'),
+        E=E, Ag=Ag, KxLx=KxLx, rx=rx, Cmx=Cmx, c1_alpha=c1_alpha, M1_M2_x=M1_M2_x, M1_M2_y=M1_M2_y,
+        Cmx_basis=cmx_basis, Cmy_basis=cmy_basis,
         May=(May if flex_y else None), Muy=Muy, Muy_amp=Muy_amp, alpha_y=alpha_y, PEy=PEy, KyLy=KyLy, ry=ry,
         Cmy=Cmy, angle=angle_trace,
         Pa_id=_governing_check_id(comp.get('design_checks') or [], 'member.compression', Pa),
