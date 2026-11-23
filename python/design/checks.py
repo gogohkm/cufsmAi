@@ -682,7 +682,7 @@ DISPLAY_ROUNDING = {
     },
     'lap': {
         'decimals': {
-            'Pns': 3, 'utilization': 4, 'flexure_dcr': 4, 'flexure_dcr_governing': 4, 'flexure_reference_dcr': 4,
+            'Pns': 3, 'utilization': 4, 'fastener_utilization': 4, 'flexure_dcr': 4, 'flexure_dcr_governing': 4, 'flexure_reference_dcr': 4,
             'Mn_lap': 2, 'phi_Mn_lap': 2, 'Vn_used': 3, 'steps[].value': '2–3',
         },
         'note': 'display only — verdicts, ratios and design_checks use unrounded values (capacity, V_transfer, '

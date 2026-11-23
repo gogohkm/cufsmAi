@@ -24,6 +24,7 @@ import re
 import sys
 import traceback
 
+import numeric_threads  # noqa: F401 — numpy 보다 먼저: BLAS 스레드 1 (V8-04)
 import numpy as np
 
 from engine.fsm_solver import stripmain
@@ -48,7 +49,7 @@ PROTOCOL_VERSION = 2
 # 전부의 sha256. 같은 소스면 실행 · 기계 · 줄끝(CRLF/LF)과 무관하게 같고, 한 바이트라도 바뀌면 다르다.
 # 한 파일이라도 읽지 못하거나 폴더가 없으면 'unknown' — 일부만으로 만든 해시를 내지 않는다.
 ENGINE_ID_DIRS = ('engine', 'design', 'cfsm', 'fcfsm', 'vibration', 'plastic', 'fileio', 'models')
-ENGINE_ID_FILES = ('server.py',)
+ENGINE_ID_FILES = ('server.py', 'numeric_threads.py')
 ENGINE_ID_SCHEME = 'engine-id/2'
 
 
@@ -392,6 +393,7 @@ def _m_selftest(params):
     return {'ok': py_ok and not errors, 'python': sys.version.split()[0],
             'python_ok': py_ok, 'import_errors': errors,
             'protocol_version': PROTOCOL_VERSION, 'engine_id': ENGINE_ID, 'engine_runtime': engine_runtime(),
+            'numeric_threads': numeric_threads.status(),
             **({'engine_id_error': ENGINE_ID_ERROR} if ENGINE_ID_ERROR else {}),
             'methods': sorted(METHODS)}
 

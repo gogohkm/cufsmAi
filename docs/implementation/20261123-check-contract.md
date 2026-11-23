@@ -159,6 +159,10 @@ envelope_source = {
 - 패턴은 하중 키 → 재하. 부분재하하지 않는 하중(D, W, …)은 싣지 않는다(= 모든 경간). `'spans i,j loaded'`(1 부터) · `'not acting'` · 눈 하중은 `pattern_loading.snow_cases` 의 이름. 위치 항목의 `pattern` 과 같은 말이다.
 - **그 조합 · 패턴의 도표(계수 × 하중을 그 경간에만 실은 보)를 풀면 그 점의 값이 포락값과 같다** — 시험 `test_review_1124_envelope_source.py` 가 보 해석기로 다시 풀어 확인한다(중력 · 양력 · Lr · L · S 부분재하 · 랩 · 내다지).
 - **동률 규칙:** '같다'는 그 물리량(M · V · R · VL · VR)의 허용오차 `tol = 1e-9 × max(1, 모든 조합 · 측점의 |포락값| 최대)` 안이다(V6b-07: 모든 조합이 0 인 측점에서 부동소수 잡음으로 고르지 않게). 극값에서 tol 안의 조합 가운데 `combos` 에서 먼저 나온 것. 경간의 기여가 tol 이하면 그 경간은 싣지 않는다(예: 끝 지점의 M — `{}` 또는 `'not acting'`). 눈 하중 경우가 tol 안에서 같으면 먼저 나온 경우. 처짐 출처도 같은 꼴(그 하중의 |단위 처짐| 최대 × 1e-9). 옛 위치 키 `combo` · `pattern` · `combo_R` 은 허용오차 없이 그대로다(값 불변). 같은 규칙으로 **어느 측점이 최대인지**도 고른다(2026-11-24): 이름 붙은 위치의 경간 ±M 측점과 비지지 구간의 `x_M_max_ft` 는 극값에서 tol 안의 첫 측점이다. 보 유한요소(랩 · 경간별 I · 고정/자유 지점)의 풀이는 띠 Cholesky(LAPACK dpbsv)로 — 전의 `np.linalg.solve` 는 OpenBLAS 스레드 수에 따라 끝자리(상대 1e-11)가 바뀌어 실행마다 답이 달랐다.
+- **수치 라이브러리 스레드 = 1 (2026-11-24 V8-04):** 엔진 프로세스는 numpy 를 가져오기 전에 `python/numeric_threads.py` 를 가져와 `OPENBLAS_NUM_THREADS` · `OMP_NUM_THREADS` · `MKL_NUM_THREADS` · `BLIS_NUM_THREADS` · `VECLIB_MAXIMUM_THREADS` · `NUMEXPR_NUM_THREADS` 를 `1` 로 덮어쓴다(진입: `server.py` 맨 앞, `engine` · `design` 꾸러미의 `__init__`, 시험의 `run_all.py` · `conftest.py`). FSM 고유치 풀이(서명곡선 · DSM 추출)의 끝자리가 스레드 수에 따라 달랐다(Mcre 상대 7e-6, 검토 비 1e-10). `selftest` 의 `numeric_threads: {threads: 1, variables, pinned_before_numpy}` — `pinned_before_numpy: false` 면 다른 무엇이 numpy 를 먼저 올려 고정이 늦었다는 뜻이다(엔진을 모듈로 직접 쓰는 스크립트가 numpy 를 먼저 가져오면 그 프로세스는 고정되지 않는다).
+  - **보장하는 것:** 같은 PC · 같은 런타임(`engine_runtime` 의 numpy · scipy 판)에서 같은 입력은 환경 변수 · 코어 수와 무관하게 같은 바이트(시험: 하위 프로세스 `OPENBLAS_NUM_THREADS` 1 · 4 · 8 · 없음에서 서명곡선 둘 + DSM 추출 + 부재 설계의 한 해시).
+  - **보장하지 않는 것:** 다른 PC 사이. OpenBLAS(DYNAMIC_ARCH)는 CPU 마다 다른 커널(Haswell · SkylakeX · Zen …)을 고르므로 끝자리(상대 1e-10 – 1e-6 수준)가 다를 수 있다. 판정 · 4자리 표시값이 바뀌는 것은 반올림 경계에 걸린 값뿐이다. 결과 지문을 PC 사이에서 견주는 쪽은 이것을 감안해야 한다.
+  - 시간: 1 스레드가 더 빠르다(이 PC, 32 코어): 서명곡선 하나(Z 8 in, 100 길이) 기본 스레드 0.49 – 0.89 s → 0.38 – 0.41 s.
 - 랩 · 6경간(격자 301점)에서 `envelope_source` 셋을 합쳐 약 4.7 KB, 위치 항목의 덧붙임을 합쳐 결과 전체가 약 9 KB(4 %) 늘었다.
 
 **이름 붙은 위치(`locations[]`)에 덧붙인 키:**
@@ -235,9 +239,17 @@ AISI Design Manual 의 연속 퍼린 예제는 이 가정을 **가정으로 밝�
 | 없음 | — | — | 지금과 같음(랩 구간이 아닌 곳 · 옛 호출) | | |
 
 **랩 도구 `lap_connection` / `design_lap_connection`:** 같은 진술 `lap_restrained`(별칭 `distortion_restrained`). 랩 휨 `lap.flexure.local`(Mnℓ = Se·Fy — Fn = Fy, 곧 횡비틀림 없음)과 Mnd 가 없을 때의 `lap.flexure.distortional` 이 이 가정에 선다:
-- 진술 있음 → 국부 휨 평가(단계 `Mnℓ = Se Fy` 에 `assumption_source: {kind: 'user_input', key: 'lap_restrained'}`), 뒤틀림 `not_applicable`(출처 같음).
-- 진술 없음 → 국부 휨 `not_evaluated`(1 을 넘으면 `fail`), reason 아래 (라); 뒤틀림은 Mnd 를 주면 평가, 없으면 `not_evaluated` · reason (다). 판정 None.
+- 진술 있음 → 국부 휨 평가(단계 `Mnℓ = Se Fy` 에 `assumption_source: {kind: 'user_input', key: 'lap_restrained'}`), 뒤틀림 `not_applicable`(출처 같음) — **준 `Mnd` 와 무관하게**(2026-11-24 V8-01, 구간 설계가 `dsm.Mcrd` 를 쓰지 않는 것과 같다; Manual 의 읽기는 랩 안에서 Mnd = My). 준 Mnd 는 `warnings` 에 한 줄: `lap_restrained = true: the given Mnd = <값> kip-in is not used — F4 distortional buckling is not applicable under the Manual assumption (lapped section restrained against distortional buckling; Mnd = My in the lap)`.
+- 진술 없음 → 국부 휨 `not_evaluated`(1 을 넘으면 `fail`), reason 아래 (라); 뒤틀림은 Mnd 를 주면 평가, 없으면 `not_evaluated` · reason (다). 판정 None. 구간 설계의 진술 없는 랩 구간과 같은 꼴이다(F2 상한 · F3 은 미평가, F4 는 준 Mcrd 로만).
 - §H2(`lap.bending_shear`)는 원문대로 Mnℓo(Fy 기준)를 쓰므로 이 가정에 서지 않는다 — 진술과 무관하게 평가.
+
+**랩 도구의 `Se` · `Mnd` · `Vn` 은 어디서 오나(V8-01, 호스트가 지킬 규칙):** 랩이 걸친 **그 지점의 랩 단면** 값이다 — 퍼린 결과의 그 지점 `lap` 구간(부모멘트, 하부 플랜지 압축)이지 「지배 구간」이 아니다.
+- `Se` = 그 랩 구간의 Mnℓ / Fy, Mnℓ 은 **Fn = Fy**(Mne = My — `lap_restrained: true` 로 부른 랩 구간이 그렇게 낸다)에서, 비탄성 여유(`use_inelastic_reserve`) · 냉간 가공 없이. 그러면 랩 도구의 국부 비 = 그 랩 구간의 국부 비(도구: 두 부재 · Mu, 구간: 부재 하나 · Mu/2). 다른 구간의 Mnℓ(횡비틀림 · 뒤틀림으로 줄인 값, 정모멘트 쪽 값)을 쓰지 않는다. 엔진은 받은 Se 의 출처를 알 수 없다 — 지키는 것은 호출하는 쪽이다.
+- `Mnd`: 진술이 있으면 보내지 않는다(보내도 쓰지 않음). 진술이 없을 때만 그 랩 단면의 Mnd(랩 구간 결과의 것)를.
+- `Vn`: 그 랩 단면 한 부재의 §G2 전단강도(없으면 엔진이 d · t · Fy 로 §G2.1 을 계산).
+- 시험(`test_review_1124_v8_fixes.py`): II-2A 첫 안쪽 지점(Mu 105 kip-in, Se = 85.9/55 = 1.562) → `lap.flexure.local` 1.0207 = 퍼린 `lap-1` 구간; 같은 진술의 구간 설계에서 읽은 Mnℓ/Fy 를 넘기면 두 비가 1e-12 안에서 같다.
+
+**랩 도구의 맨 위 `utilization`(2026-11-24 V8-01에서 바뀜):** 판정을 낸(`pass` · `fail`) 랩 **강도** 항목 — `lap.fastener_group` · `lap.block_shear` · `lap.flexure.local` · `lap.flexure.distortional` · `lap.bending_shear` (엔진 상수 `LAP_STRENGTH_CHECKS`) — 가운데 가장 큰 비(4자리), 그 항목 id 는 새 키 `governing_check`. 상세(간격 · 끝단 거리)와 적용 조건(랩 길이)의 비는 넣지 않는다. 그런 항목이 없으면 `null`. 패스너 무리의 비(옛 `utilization`)는 새 키 **`fastener_utilization`** 이고, `lap.fastener_group` 의 `mirrors.ratio.path` 가 그 키를 가리킨다. 다른 결과(부재 · 접합)의 `utilization` 과 같은 뜻이 되었다 — 전에는 휨이 6.9 로 불합격이어도 0.9025 였다.
 
 문장(엔진 상수 — 호스트 · 화면은 그대로 보인다):
 - (가) `design.aisi_s100.LAP_STATED`: `Lap region: lap_restrained = true (user statement) — AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling" (assumption (f): "the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps"). F2 uses Lb = 0 (no lateral-torsional buckling, Fn = Fy) and F4 is not applicable (Mnd = My).`
@@ -1131,12 +1143,38 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 | purlin lap region unstated | `member.flexure.global` | reference.ratio | null | 0.5164948453608247 |
 | purlin lap region unstated | `member.flexure.global` | reference.capacity | null | 63.89221556886228 |
 
+#### §14.5 재확인 V8 수정(2026-11-24: 랩 도구 · 스레드 고정)으로 바뀐 값
+
+비교: `beb742f` 의 엔진(기본 스레드 — 이 PC 32 코어)과 수정 뒤, 계약 사례 154개, 비교한 값 131,271개, 다른 값 99개. 판정 · 4자리 표시값 · 반올림한 옛 키는 랩의 `utilization` 둘 말고는 바뀌지 않았다. 새 키(바뀐 값 아님): 랩 결과의 `fastener_utilization` · `governing_check`, `selftest` 의 `numeric_threads`.
+
+랩 도구(V8-01) — 맨 위 `utilization` 이 랩 강도 항목의 지배 비로(§6.3):
+
+| 사례 | 키 | 전 | 후 |
+|---|---|---|---|
+| lap overload fails | `utilization` | 0.9034 (패스너 무리) | 4.0801 (`lap.bending_shear`, 불합격) |
+| lap screw no Pnvs | `utilization` | 0.8916 (패스너 무리 — 가정값 강도라 `not_evaluated`) | 0.3618 (판정을 낸 강도 항목의 최대) |
+| 랩 9 사례 전부 | `design_checks[lap.fastener_group].mirrors.ratio.path` | `utilization` | `fastener_utilization` |
+
+옛 `utilization` 값은 9 사례 모두 `fastener_utilization` 에 그대로 있다.
+
+스레드 고정(V8-04) — FSM 에서 온 반올림하지 않은 값(`design_checks` 의 단계 입력 · 결과 · 비)만, 잡음 수준:
+
+| 사례 | 다른 값 | 최대 상대 차 |
+|---|---|---|
+| I-8B lippedc ASD flexure (auto FSM) | 28 | 1.2e-10 (Mcrd 107.94197623729539 → 107.94197625024616, 비 0.018000798504046 → 0.018000798503243) |
+| default lippedc compression (auto FSM) | 20 | 1.3e-13 |
+| flexure hat negative sign | 14 | 1.7e-14 |
+| rounded-corner lippedc KL100 (auto FSM) | 14 | 8.1e-15 |
+| default lippedc flexure (auto FSM) | 12 | 8.0e-12 |
+
+새 값은 스레드 1 의 값이다(전에도 `OPENBLAS_NUM_THREADS=1` 로 돌리면 이 값이었다). 기준선 파일을 다른 코어 수의 PC 에서 다시 만들면 같은 값이 나와야 한다 — 다른 CPU 에서는 §6.1 의 「보장하지 않는 것」.
+
 ## 15. 엔진 식별 `engine_id` (2026-11-24)
 
 `selftest` 응답의 `engine_id` — 결과를 낸 엔진의 소스 전부의 해시. 저장한 결과(.csd)가 지금 엔진의 것인지 가르는 데 쓴다(손으로 올리는 번호는 잊힌다).
 
 - 형식: `"sha256:" + 64자리 소문자 16진수`. 읽지 못하면 **`"unknown"`**(그때만 `engine_id_error` 에 까닭) — 일부 파일만으로 만든 해시는 내지 않는다. `"unknown"` 은 어떤 id 와도 같지 않은 것으로 다룬다.
-- 대상: `python/` 아래 `engine/ design/ cfsm/ fcfsm/ vibration/ plastic/ fileio/ models/` 의 모든 `.py`(하위 폴더 포함, `__pycache__` · `test_*.py` · `test`/`tests` 폴더 제외)와 `server.py`. 폴더가 없거나 그 안에 `.py` 가 하나도 없으면(컴파일만 한 배치) `"unknown"`.
+- 대상: `python/` 아래 `engine/ design/ cfsm/ fcfsm/ vibration/ plastic/ fileio/ models/` 의 모든 `.py`(하위 폴더 포함, `__pycache__` · `test_*.py` · `test`/`tests` 폴더 제외)와 `server.py` · `numeric_threads.py`(2026-11-24 V8-04 — 스레드 고정도 결과를 정한다). 폴더가 없거나 그 안에 `.py` 가 하나도 없으면(컴파일만 한 배치) `"unknown"`.
 - 계산: `"engine-id/2\n"`, 그다음 **결과가 기대는 실행 환경** — `python` = major.minor, `numpy` · `scipy` 의 `__version__`(scipy 가 없으면 `absent`) — 을 키 순서로 `key=value\n`, 그다음 상대 경로('/' 구분)로 정렬한 파일마다 (경로 길이 4바이트 · 경로 UTF-8 · 내용 길이 8바이트 · 내용). 내용은 CRLF → LF 로 맞춘다 — CRLF 로 꺼낸 저장소와 LF 로 꺼낸 저장소가 같은 id 다.
 - 왜 판까지(2026-11-24): 설치 프로그램의 런타임은 판을 고정하지만 개발 환경은 바뀔 수 있다(고유값 · 선형대수 결과의 끝자리). 판이 바뀐 환경에서 저장한 결과를 '지금 엔진의 것'으로 되살리지 않게 한다. `selftest` 는 해시한 그 판을 `engine_runtime: {python, numpy, scipy}` 로도 돌려준다.
 - 파일 하나가 없어진 트리는 다른 id 가 된다 — 의도한 동작이다(다른 트리는 다른 엔진; 저장한 결과가 '지금 것'으로 되살아나지 않는 쪽). 빠진 모듈은 보통 `selftest` 의 `import_errors` 로도 드러난다.

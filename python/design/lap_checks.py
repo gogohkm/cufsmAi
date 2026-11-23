@@ -101,7 +101,7 @@ def build(ck: dict) -> list:
                                  reference={'capacity': q('capacity', ck['capacity'], 'force'), 'ratio': r}
                                  if v == 'not_evaluated' else None,
                                  mirrors={'capacity': {'path': 'capacity', 'digits': None},
-                                          'ratio': {'path': 'utilization', 'digits': 4}},
+                                          'ratio': {'path': 'fastener_utilization', 'digits': 4}},
                                  basis='in_house_rational_analysis_A1.2c'))
     else:
         checks.append(make_check('lap.fastener_group', design_method=dm, verdict='fail' if not ck['pns_assumed']

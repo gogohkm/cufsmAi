@@ -375,10 +375,22 @@ def design_lap_connection(params: dict) -> dict:
                 f'(DCR = {flexure_dcr:.2f})'
             )
 
-        # 뒤틀림좌굴(§F4) 검토: Mcrd/Mnd 가 주어지면 평가하고, 없으면 경고.
+        # 뒤틀림좌굴(§F4) 검토 — 구간 설계와 같은 계약(§6.3, V8-01): 진술이 있으면 준 Mnd 와 무관하게 해당 없음
+        # (Manual 의 읽기: 랩 안에서 Mnd = My). 진술이 없으면 Mnd 를 주면 평가, 없으면 판정 없음.
         # 주: S100-16 에서 뒤틀림은 국부/전체와 동일한 계수(φ_b=0.90 / Ω_b=1.67)를 사용한다.
         Mnd_single = params.get('Mnd') or params.get('Mnd_single')
-        if Mnd_single and Mnd_single > 0:
+        if lap_stated:
+            _flex['dist_restrained'] = True
+            if Mnd_single and Mnd_single > 0:
+                _flex['dist_ignored'] = Mnd_single
+                warnings.append(f'lap_restrained = true: the given Mnd = {Mnd_single} kip-in is not used — F4 '
+                                'distortional buckling is not applicable under the Manual assumption (lapped section '
+                                'restrained against distortional buckling; Mnd = My in the lap)')
+            warnings.append(
+                '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림 좌굴에 충분히 '
+                '구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.'
+            )
+        elif Mnd_single and Mnd_single > 0:
             Mnd_lap = Mnd_single * n_members
             if design_method == 'LRFD':
                 phi_Mnd_lap = 0.90 * Mnd_lap
@@ -404,13 +416,6 @@ def design_lap_connection(params: dict) -> dict:
                 warnings.append(
                     f'Lap 구간 뒤틀림 휨강도 부족(§F4): DCR = {dist_dcr:.2f}.'
                 )
-        elif lap_stated:
-            # 사람이 Manual 의 랩 구속 가정을 밝혔다 — 그 입력을 근거로 §F4 해당 없음.
-            _flex['dist_restrained'] = True
-            warnings.append(
-                '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림 좌굴에 충분히 '
-                '구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.'
-            )
         else:
             # 구속을 엔진이 가정하지 않는다(V6-07): 해당하는데 평가하지 못한 한계상태 → 판정 없음(FIXES §3.1).
             flexure_ok = None if flexure_ok else flexure_ok
@@ -560,6 +565,13 @@ def design_lap_connection(params: dict) -> dict:
                spacing_ok=spacing_ok, edge_dist=edge_dist, capacity=capacity, utilization=utilization,
                capacity_ok=capacity_ok, Se=Se, Sf_only=Sf_only, flex=_flex, block=bs)
     lap_design_checks = _build_lap_checks(_ck)
+    # 맨 위 utilization 은 판정을 낸 랩 강도 항목(pass · fail) 가운데 가장 큰 비 — 다른 결과와 같은 뜻(V8-01).
+    # 상세(간격 · 끝단 거리)의 비는 치수 대 최소값이라 넣지 않는다. 패스너 무리의 비(옛 utilization)는 fastener_utilization.
+    _gov = None
+    for _c in lap_design_checks:
+        if _c['id'] in LAP_STRENGTH_CHECKS and _c.get('verdict') in ('pass', 'fail') and _c.get('ratio') is not None:
+            if _gov is None or float(_c['ratio']) > float(_gov['ratio']):
+                _gov = _c
 
     return {
         'fastener_type': fastener_type,
@@ -578,7 +590,9 @@ def design_lap_connection(params: dict) -> dict:
         'Pns_governing_mode': pns_mode,  # 전단 산정에 사용된 지배 한계상태
         'Vn_used': round(Vn_in, 3) if Vn_in else None,
         'Vn_auto': vn_auto,
-        'utilization': round(utilization, 4),
+        'utilization': round(float(_gov['ratio']), 4) if _gov is not None else None,
+        'governing_check': _gov['id'] if _gov is not None else None,
+        'fastener_utilization': round(utilization, 4),
         'flexure_dcr': round(flexure_dcr, 4) if flexure_dcr is not None else None,
         # 국부(§F3)·뒤틀림(§F4)·휨-전단(§H2) 중 최대 — 헤드라인 DCR이 pass 플래그와
         # 모순되지 않도록 렌더러는 이 값을 우선 사용한다.
@@ -614,6 +628,11 @@ def design_lap_connection(params: dict) -> dict:
         'assumptions': [LAP_BLOCK_SHEAR_ASSUMPTION] if bs.get('Pnr') is not None else [],
         'display_rounding': _display_rounding('lap'),
     }
+
+
+# 맨 위 utilization 을 정하는 랩 강도 항목(상세 · 적용 조건은 넣지 않는다).
+LAP_STRENGTH_CHECKS = ('lap.fastener_group', 'lap.block_shear', 'lap.flexure.local', 'lap.flexure.distortional',
+                       'lap.bending_shear')
 
 
 # 랩이 접합 엔진에 넘긴 입력 이름 → 랩 입력 이름. 접합 엔진의 'd'(패스너 지름)가 랩의 'd'(부재 깊이)와

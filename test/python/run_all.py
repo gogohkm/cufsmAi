@@ -18,6 +18,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, 'test', 'python'))
 sys.path.insert(0, os.path.join(ROOT, 'python'))
+import numeric_threads  # noqa: F401, E402 — numpy 보다 먼저: BLAS 스레드 1 (V8-04)
 
 import test_unittest_collection as existing  # noqa: E402
 import test_regression_0926 as reg0926  # noqa: E402
