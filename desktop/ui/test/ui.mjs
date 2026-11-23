@@ -1818,20 +1818,47 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   // ── 4b99968 — 호스트가 쥔 점검 · 보기 계약의 validation · 글 방향 문자 · 결과 봉인 ─────────────
   await step('u5c AI 의 validate_design → 이 화면이 누르지 않아도 점검이 보인다(by ai) · 새로 고쳐도 마지막 점검(호스트의 results.validation + 다리가 남긴 항목)', 'u5c_val_ai', async () => {
     const r = await valMcp();
-    await settle(`!!s.val && s.val.by==='ai' && s.stages.val.state==='ok'`, 'AI 의 점검');
+    const got = await settle(`!!s.val && s.val.by==='ai' && s.stages.val.state==='ok'`, 'AI 의 점검').then(() => true, () => false);
+    if (!got) {
+      const fx = await mcp.tool('get_full_state');
+      return { ok: false, detail: `AI 의 점검이 화면에 없다 · validate_design 판 ${r.case_rev} · 호스트 판 ${fx?.case?.rev} · results.validation ${JSON.stringify(fx?.results?.validation ?? null)} · 장부 ${JSON.stringify((fx?.invalidated ?? []).filter(e => e.kind === 'validation').slice(-2).map(e => [e.reason, e.cause, e.invalidated_at]))} · 화면 ${JSON.stringify(await ev(`({val:!!${S}.state.val, by:${S}.state.val&&${S}.state.val.by, st:${S}.state.stages.val})`))}` };
+    }
     await select('result', 'val');
     const a = await ev(`({by:document.querySelector('#info [data-val-by]')?.dataset.valBy, n:document.querySelectorAll('#center tr.vr').length})`);
+    const ciBefore = await caseHost();
     await cdp.send('Page.reload', { ignoreCache: false });
     await waitFor(`!!window.__stcfsdUi && window.__stcfsdUi.state.ready && window.__stcfsdUi.state.full`, 60_000, '다시 실림');
     await ev(`${S}.review()`);
-    const back = await settle(`!!s.val && s.val.by==='ai'`, '새로 고친 뒤 마지막 점검', 30_000).then(() => true, () => false);
+    await sleep(1500);
+    const ciAfter = await caseHost();
+    const reloadDiff = Object.keys(ciAfter?.inputs ?? {}).filter(k => JSON.stringify(ciBefore?.inputs?.[k]) !== JSON.stringify(ciAfter.inputs[k]) || ciBefore?.sources?.[k] !== ciAfter.sources?.[k])
+      .map(k => `${k}: ${JSON.stringify(ciBefore?.inputs?.[k])}(${ciBefore?.sources?.[k]}) → ${JSON.stringify(ciAfter.inputs[k])}(${ciAfter.sources?.[k]})`);
+    const spansDiff = JSON.stringify(ciBefore?.spans) !== JSON.stringify(ciAfter?.spans);
+    const trace = [`reload: 판 ${ciBefore?.rev} → ${ciAfter?.rev} · 바뀐 칸 ${JSON.stringify(reloadDiff)} · 경간 표 바뀜 ${spansDiff}`];
+    const t0r = Date.now();
+    let back = false;
+    for (let i = 0; i < 30 && !back; i++) {
+      const x = await ev(`(()=>{const s=${S}.state; return {val:s.val&&s.val.by, hv:!!(s.full&&s.full.results&&s.full.results.validation), msg:!!s.msgs.validationResult, ready:s.ready};})()`).catch(e => ({ err: String(e).slice(0, 60) }));
+      if (i === 0 || i === 5) {
+        const lv = (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=validationResult`)).json?.data?.validationResult;
+        const hf = (await api('POST', '/api/mcp/action', { action: 'get_full_state' })).json;
+        x.bridge = lv ? lv.seq : null; x.hostV = !!hf?.results?.validation; x.rev = hf?.case?.rev; x.revBefore = r.case_rev;
+        x.led = (hf?.invalidated ?? []).filter(e => e.kind === 'validation').slice(-1).map(e => [e.reason, e.cause]);
+        const ci = (await api('POST', '/api/mcp/action', { action: 'get_case_inputs' })).json;
+        x.changedSince = ci?.dirty_since ?? null;
+      }
+      trace.push(`${((Date.now() - t0r) / 1000).toFixed(0)}s:${JSON.stringify(x)}`);
+      back = x?.val === 'ai';
+      if (!back) { await sleep(1000); }
+    }
     await select('result', 'val');
     const c = await valCompare();
     const fs2 = await mcp.tool('get_full_state');
     const host = fs2?.results?.validation;
     if (!back) {
       const lastV = (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=validationResult`)).json?.data?.validationResult;
-      return { ok: false, detail: `새로 고친 뒤 점검 없음 · 호스트 results.validation ${JSON.stringify(host ?? null)} · 장부 ${JSON.stringify((fs2?.invalidated ?? []).filter(e => e.kind === 'validation').slice(-1))} · 다리의 기록 ${lastV ? `seq ${lastV.seq}` : '없음'}` };
+      const scr = await ev(`(()=>{const s=${S}.state; const m=s.msgs.validationResult; return {msg:!!m, seq:m&&m.seq, items:m&&m.message&&m.message.data&&Array.isArray(m.message.data.items)?m.message.data.items.length:null, hv:s.full&&s.full.results&&s.full.results.validation&&s.full.results.validation.by, val:s.val&&s.val.by, st:s.stages.val.state, scr:s.ui===undefined?null:1, msgSeq:s.msgSeq};})()`);
+      return { ok: false, detail: `흔적 ${[...new Set(trace.map(t => t.replace(/^\d+s:/, '')))].map(v => `${trace.find(t => t.endsWith(v))?.split(':')[0]}=${v}`).join(' | ')} · 화면 ${JSON.stringify(scr)} · 새로 고친 뒤 점검 없음 · 호스트 results.validation ${JSON.stringify(host ?? null)} · 장부 ${JSON.stringify((fs2?.invalidated ?? []).filter(e => e.kind === 'validation').slice(-1))} · 다리의 기록 ${lastV ? `seq ${lastV.seq}` : '없음'}` };
     }
     return { ok: Array.isArray(r.items) && a.by === 'ai' && a.n === r.items.length && c.bad.length === 0 && host?.by === 'ai',
       detail: `AI 점검 ${r.items?.length} 항목 → 화면 ${a.n}(by ${a.by}) · 새로 고침 뒤 항목 = 호스트 ${c.bad.length === 0}${c.bad.length ? ` (${c.bad.slice(0, 3).join(' / ')})` : ''} · results.validation ${JSON.stringify(host?.counts)} by ${host?.by}` };
@@ -1848,8 +1875,10 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await waitFor(`!!${S}.pointed || ${S}.ui.sel===${JSON.stringify(k)}`, 10_000, 'focus');
     const pt = await ev(`${S}.pointed ? ${S}.pointed.target : null`);
     await ev(`(()=>{const b=document.querySelector('#aipoint [data-ai="dismiss"]'); b&&b.click(); return 1;})()`);
+    const fsD = await mcp.tool('get_full_state');
+    const diag = `호스트: 판 ${fsD?.case?.rev} · results.validation ${JSON.stringify(fsD?.results?.validation ? { case_rev: fsD.results.validation.case_rev, by: fsD.results.validation.by } : null)} · 장부 ${JSON.stringify((fsD?.invalidated ?? []).filter(e => e.kind === 'validation').slice(-1).map(e => [e.reason, e.cause]))} · 화면 점검 판 ${await ev(`${S}.state.val ? ${S}.state.val.caseRev : null`)}`;
     return { ok: v.current?.selection?.kind === 'validation' && v.current.selection.id === id && (v.dropped ?? []).length === 0 && f.forwarded === true && (pt?.key === k || pt === null),
-      detail: `고른 것 ${JSON.stringify(v.current?.selection)} · focus forwarded ${f.forwarded} target_found ${f.target_found} · 화면의 목표 ${pt?.key ?? '(바로 따라감)'}` };
+      detail: `고른 것 ${JSON.stringify(v.current?.selection)} · focus forwarded ${f.forwarded} target_found ${f.target_found} · 화면의 목표 ${pt?.key ?? '(바로 따라감)'} · ${diag}` };
   });
   await step('u5e 글 방향 제어 문자(U+202E 등) — 파일 이름 · 알림 · 엔진 글이 거꾸로 읽히지 않게 보이는 대체 문자로(호스트의 그리기와 같은 규칙)', 'u5e_bidi', async () => {
     const base = path.join(tmp, 'u5e-base.csd');

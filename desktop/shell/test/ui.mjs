@@ -179,7 +179,12 @@ async function main() {
     if (want('1b') || want('1c')) {
     section('1b. 저장 안 한 변경 — 닫기 · 메뉴의 열기 · 다시 실행(파일 연결) 앞에서 묻는다(V5-12c, K2 §7)');
     const pageDialog = () => until(() => A.page(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? d.textContent.replace(/\\s+/g,' ') : null;})()`), 15_000);
-    const answerPage = item => A.page(`(()=>{const b=document.querySelector('#dialog-host [data-item="${item}"]'); if(b){b.click(); return true;} return false;})()`);
+    // 답한 뒤 그 물음이 화면에서 걷힐 때까지 — 다음 단계가 걷히기 전의 옛 물음을 새 물음으로 알고 누르지 않게
+    const answerPage = async item => {
+      const ok = await A.page(`(()=>{const b=document.querySelector('#dialog-host [data-item="${item}"]'); if(b){b.click(); return true;} return false;})()`);
+      await until(async () => ((await A.page(`!!document.querySelector('#dialog-host [data-item="${item}"]')`)) ? undefined : true), 10_000);
+      return ok;
+    };
     // 깨끗할 때는 묻지 않는다
     const n0 = (await unsavedLog()).length;
     await A.ev(`return ctx.menuClick('file-open');`);
@@ -194,17 +199,22 @@ async function main() {
     check('제목 표시줄에 저장 안 한 변경 표시(파일 이름 + ●)', dirty1?.dirty === true && /●$/.test(marker ?? ''), `${marker} · dirty ${dirty1?.dirty}`);
     // 메뉴 열기 → 화면 안의 물음 → 취소: 열기 대화상자를 띄우지 않고 그대로
     const osBefore = await A.ev('return ctx.diag.osDialogs.length;');
+    const nLog1 = (await unsavedLog()).length;
     await A.ev(`return ctx.menuClick('file-open');`);
     const q1 = await pageDialog();
     await A.capture('u4_unsaved_prompt');
-    await answerPage('취소');
-    await sleep(800);
+    const clicked1 = await answerPage('취소');
+    const tA = Date.now();
+    // 답을 받은 뒤 물음의 기록이 남을 때까지(고정 시간이 아니라 기록으로) — 걸린 시간을 적는다
+    await until(async () => ((await unsavedLog()).length > nLog1 ? true : undefined), 15_000);
+    const lag1 = Date.now() - tA;
+    const dlgAfter = await A.page(`[...document.querySelectorAll('#dialog-host .dialog')].map(d=>d.textContent.slice(0,40))`);
     const osAfter = await A.ev('return ctx.diag.osDialogs.length;');
     const dirty2 = await hostAction({ action: 'get_unsaved_changes' });
     const l1 = (await unsavedLog()).pop();
     check('메뉴 열기 · 저장 안 한 변경 있음 → 화면 안에서 묻고(저장 · 저장 안 함 · 취소) 「취소」면 아무것도 바꾸지 않는다',
       /저장하지 않은 변경/.test(q1 ?? '') && l1?.where === 'open' && l1.how === 'page' && l1.answer === 'cancel' && osAfter === osBefore && dirty2?.dirty === true,
-      `「${short(q1, 80)}」 · ${JSON.stringify(l1)} · 열기 대화상자 ${osAfter - osBefore} · 여전히 더러움 ${dirty2?.dirty}`);
+      `「${short(q1, 80)}」 · ${JSON.stringify(l1)} · 열기 대화상자 ${osAfter - osBefore} · 여전히 더러움 ${dirty2?.dirty} · 단추 눌림 ${clicked1} · 기록까지 ${lag1} ms · 남은 물음 ${JSON.stringify(dlgAfter)}`);
     // 메뉴 열기 → 「저장 안 함」 → 열기 대화상자로 간다(시험의 가짜 대화상자는 취소로 답한다)
     await A.ev(`return ctx.menuClick('file-open');`);
     await pageDialog();

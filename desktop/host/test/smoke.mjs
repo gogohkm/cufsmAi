@@ -356,17 +356,28 @@ async function main() {
   const nodesBefore = await action('get_nodes');
   const reopen1 = await cli.ipc('open', { file: saved1 });
   const nodesAfter = await action('get_nodes');
+  // V7-07(1d9d305): 열 때 파일의 출처 꼬리표를 그대로 믿지 않는다 — 처음 값과 다른 값이 default · ai · mirror 로 적혀 있으면 'file' 로,
+  // 파일에 적혀 있던 꼬리표는 get_case_inputs.sources_recorded_in_file 에
+  const ciAfter = await action('get_case_inputs');
+  const recorded = ciAfter?.sources_recorded_in_file ?? {};
   const saved2 = path.join(tmp, 'saved', 'smoke-2.csd');
   const save2 = await cli.ipc('save', { file: saved2 });
   const j2 = fs.existsSync(saved2) ? JSON.parse(fs.readFileSync(saved2, 'utf8')) : undefined;
   const dirtyAfterOpen = await action('get_unsaved_changes');
   check('열자마자는 저장 안 한 변경이 없다(get_unsaved_changes) — 열기가 다시 보낸 결과는 바뀐 것이 아니다', dirtyAfterOpen?.dirty === false, short(dirtyAfterOpen, 160));
   check('저장본을 다시 열고 다시 저장한다', reopen1.ok && save2.ok && !!j2, short(`${reopen1.message} / ${save2.message}`, 160));
-  check('다시 연 입력이 같다 — 모델 · 설계 입력 · Lap 결과', isDeepStrictEqual(j1?.model, j2?.model)
-    && isDeepStrictEqual(j1?.designInputs, j2?.designInputs) && isDeepStrictEqual(j1?.case?.inputs, j2?.case?.inputs) && isDeepStrictEqual(j1?.case?.sources, j2?.case?.sources)
+  const s1 = j1?.case?.sources ?? {}, s2 = j2?.case?.sources ?? {};
+  const srcKeys = [...new Set([...Object.keys(s1), ...Object.keys(s2)])];
+  // 출처: 같거나, 열 때 'file' 로 바뀐 것은 그 키의 파일 꼬리표(sources_recorded_in_file)가 저장본의 것과 같다. 바뀐 것은 default · ai · mirror 뿐
+  const srcBad = srcKeys.filter(k => !(s1[k] === s2[k] || (s2[k] === 'file' && recorded[k] === s1[k] && ['default', 'ai', 'mirror'].includes(s1[k]))));
+  const recBad = Object.keys(recorded).filter(k => s2[k] !== 'file' || recorded[k] !== s1[k]);
+  const reTagged = srcKeys.filter(k => s1[k] !== s2[k]);
+  check('다시 연 입력이 같다 — 모델 · 설계 입력 · Lap 결과 · 출처(V7-07: 파일의 꼬리표 default · ai · mirror 는 열 때 file, 적힌 것은 sources_recorded_in_file)', isDeepStrictEqual(j1?.model, j2?.model)
+    && isDeepStrictEqual(j1?.designInputs, j2?.designInputs) && isDeepStrictEqual(j1?.case?.inputs, j2?.case?.inputs) && srcBad.length === 0 && recBad.length === 0
     && isDeepStrictEqual(j1?.lapResult, j2?.lapResult)
     && isDeepStrictEqual(nodesBefore, nodesAfter),
-    `모델 키 ${Object.keys(j1?.model ?? {}).length}개 · get_nodes 같음=${isDeepStrictEqual(nodesBefore, nodesAfter)}`);
+    `모델 키 ${Object.keys(j1?.model ?? {}).length}개 · get_nodes 같음=${isDeepStrictEqual(nodesBefore, nodesAfter)} · 입력 같음 ${isDeepStrictEqual(j1?.case?.inputs, j2?.case?.inputs)}`
+      + ` · 열 때 file 로 바뀐 출처 ${reTagged.length}(${reTagged.slice(0, 5).map(k => `${k}:${s1[k]}→${s2[k]}`).join(', ')}) · 어긋남 ${JSON.stringify(srcBad.slice(0, 5))} ${JSON.stringify(recBad.slice(0, 5))}`);
   check('다시 연 결과(하중 해석 · 설계)가 같다', isDeepStrictEqual(j1?.loadAnalysis, j2?.loadAnalysis) && isDeepStrictEqual(j1?.designResult, j2?.designResult));
 
   if (currentCsd) {
