@@ -136,15 +136,32 @@ def walk_result(r, where, errors, codes, stats):
                 errors.append((where, 'notices do not match the old lists one to one'))
         elif has_lists and any(r.get(k) for k in LISTS):
             errors.append((where, 'a block with notice lists has no notices'))     # 하위 블록도 자기 notices
-        for prefix in FIELD_PREFIXES:
-            if prefix in r and f'{prefix}_kind' in r and r[prefix] is not None:
+        for prefix in [k for k in r if f'{k}_kind' in r]:          # 글 하나에 붙는 필드(reason · label · basis …)
+            if r[prefix] is not None:
                 stats['reasons'] += 1
                 check_entry(_field_entry(r, prefix), where + ':' + str(r.get('id', prefix)), errors, codes)
+        for k, v in r.items():                                      # 글로 된 사전 · 목록의 {key}_notices (계약 §16.11)
+            if not k.endswith('_notices'):
+                continue
+            src = r.get(k[:-len('_notices')])
+            items = list(v.values()) if isinstance(v, dict) else [
+                e for x in v for e in (x.values() if isinstance(x, dict) and 'code' not in x else [x])]
+            for e in items:
+                stats['labels'] = stats.get('labels', 0) + 1
+                check_entry(e, where + ':' + k, errors, codes)
+            if isinstance(v, dict) and isinstance(src, dict) and any(src[kk] != e['text'] for kk, e in v.items()):
+                errors.append((where, k, 'label text differs from the source value'))
+        for k in ('governing_check', 'controlling_mode'):
+            if isinstance(r.get(k), str) and r.get(f'{k}_id') is None:
+                errors.append((where, k, 'no check id for', r[k]))
+        for k in r:
+            if (k == 'governing_mode' or k.endswith('_governing_mode')) and isinstance(r[k], str)                     and r.get(f'{k}_id') is None:
+                errors.append((where, k, 'no check id for', r[k]))
         for c in r.get('design_checks') or []:
             if c.get('reason') is not None and 'reason_kind' not in c:
                 errors.append((where, c['id'], 'reason without reason_* fields'))
         for k, v in r.items():
-            if k not in ('notices',):
+            if k not in ('notices', 'steps') and not k.endswith('_notices'):
                 walk_result(v, where + '.' + k if isinstance(v, dict) else where, errors, codes, stats)
     elif isinstance(r, list):
         for v in r:
@@ -221,7 +238,7 @@ def test_registry_shape():
             if p['quantity'] not in (None, 'force', 'moment', 'stress', 'length', 'area', 'section_modulus',
                                      'moment_of_inertia', 'torsion_constant', 'warping_constant',
                                      'force_per_length', 'rotational_stiffness', 'dimensionless', 'angle', 'count',
-                                     'mass_density'):
+                                     'mass_density', 'pressure'):
                 bad.append(('quantity outside the vocabulary', code, k, p['quantity']))
     assert not bad, bad[:20]
 

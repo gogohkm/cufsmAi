@@ -612,7 +612,7 @@ def determine_unbraced_lengths(
         'lap_ends_ft': [round(le, 2) for le in sorted(lap_ends)],
         'brace_points_ft': braces,
         'deck_type': deck_type,
-        'rule': UNBRACED_RULE,
+        'rule': _nt('loads.label.unbraced_rule'),
         'assumptions': assumptions,
     }
 

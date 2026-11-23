@@ -100,6 +100,49 @@
        {
         "conv": "s",
         "fmt": "",
+        "notice": {
+         "code": null,
+         "kind": "group",
+         "parts": [
+          {
+           "code": "conn.fragment.lim_range_length",
+           "kind": "fragment",
+           "params": [
+            {
+             "fmt": "",
+             "quantity": null,
+             "symbol": "symbol",
+             "value": "t1"
+            },
+            {
+             "fmt": "",
+             "quantity": "length",
+             "symbol": "value",
+             "value": 0.0236
+            },
+            {
+             "fmt": "",
+             "quantity": "length",
+             "symbol": "lo",
+             "value": 0.0285
+            },
+            {
+             "fmt": "",
+             "quantity": "length",
+             "symbol": "hi",
+             "value": 0.0445
+            }
+           ],
+           "template": "{symbol}={value} ({lo}–{hi})",
+           "template_ko": "{symbol}={value} ({lo}–{hi})",
+           "text": "t1=0.0236 (0.0285–0.0445)",
+           "text_ko": "t1=0.0236 (0.0285–0.0445)"
+          }
+         ],
+         "sep": ", ",
+         "text": "t1=0.0236 (0.0285–0.0445)",
+         "text_ko": "t1=0.0236 (0.0285–0.0445)"
+        },
         "quantity": null,
         "symbol": "lim",
         "value": "t1=0.0236 (0.0285–0.0445)"
@@ -328,6 +371,68 @@
    "text_ko": "인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)"
   },
   {
+   "code": "conn.fragment.lim_ge_length_eighth",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "symbol",
+     "value": "t2"
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "value",
+     "value": 0.08
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "symbol": "limit",
+     "text": "1/8",
+     "value": 0.125
+    }
+   ],
+   "template": "{symbol}={value} (≥{limit})",
+   "template_ko": "{symbol}={value} (≥{limit})",
+   "text": "t2=0.08 (≥1/8)",
+   "text_ko": "t2=0.08 (≥1/8)"
+  },
+  {
+   "code": "conn.fragment.lim_range_length",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "symbol",
+     "value": "t1"
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "value",
+     "value": 0.0236
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "lo",
+     "value": 0.0285
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "hi",
+     "value": 0.0445
+    }
+   ],
+   "template": "{symbol}={value} ({lo}–{hi})",
+   "template_ko": "{symbol}={value} ({lo}–{hi})",
+   "text": "t1=0.0236 (0.0285–0.0445)",
+   "text_ko": "t1=0.0236 (0.0285–0.0445)"
+  },
+  {
    "code": "conn.reason.a1_2_dw_a1_pnov_bolt",
    "params": [],
    "template": "볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력",
@@ -548,6 +653,45 @@
     {
      "conv": "s",
      "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "conn.fragment.lim_ge_length_eighth",
+        "kind": "fragment",
+        "params": [
+         {
+          "fmt": "",
+          "quantity": null,
+          "symbol": "symbol",
+          "value": "t2"
+         },
+         {
+          "fmt": "",
+          "quantity": "length",
+          "symbol": "value",
+          "value": 0.08
+         },
+         {
+          "const": true,
+          "fmt": "raw",
+          "quantity": "length",
+          "symbol": "limit",
+          "text": "1/8",
+          "value": 0.125
+         }
+        ],
+        "template": "{symbol}={value} (≥{limit})",
+        "template_ko": "{symbol}={value} (≥{limit})",
+        "text": "t2=0.08 (≥1/8)",
+        "text_ko": "t2=0.08 (≥1/8)"
+       }
+      ],
+      "sep": ", ",
+      "text": "t2=0.08 (≥1/8)",
+      "text_ko": "t2=0.08 (≥1/8)"
+     },
      "quantity": null,
      "symbol": "lim",
      "value": "t2=0.08 (≥1/8)"
@@ -564,6 +708,49 @@
     {
      "conv": "s",
      "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "conn.fragment.lim_range_length",
+        "kind": "fragment",
+        "params": [
+         {
+          "fmt": "",
+          "quantity": null,
+          "symbol": "symbol",
+          "value": "t2"
+         },
+         {
+          "fmt": "",
+          "quantity": "length",
+          "symbol": "value",
+          "value": 0.08
+         },
+         {
+          "fmt": "",
+          "quantity": "length",
+          "symbol": "lo",
+          "value": 0.113
+         },
+         {
+          "fmt": "",
+          "quantity": "length",
+          "symbol": "hi",
+          "value": 0.75
+         }
+        ],
+        "template": "{symbol}={value} ({lo}–{hi})",
+        "template_ko": "{symbol}={value} ({lo}–{hi})",
+        "text": "t2=0.08 (0.113–0.75)",
+        "text_ko": "t2=0.08 (0.113–0.75)"
+       }
+      ],
+      "sep": ", ",
+      "text": "t2=0.08 (0.113–0.75)",
+      "text_ko": "t2=0.08 (0.113–0.75)"
+     },
      "quantity": null,
      "symbol": "lim",
      "value": "t2=0.08 (0.113–0.75)"
@@ -658,6 +845,49 @@
     {
      "conv": "s",
      "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "conn.fragment.lim_range_length",
+        "kind": "fragment",
+        "params": [
+         {
+          "fmt": "",
+          "quantity": null,
+          "symbol": "symbol",
+          "value": "t1"
+         },
+         {
+          "fmt": "",
+          "quantity": "length",
+          "symbol": "value",
+          "value": 0.0236
+         },
+         {
+          "fmt": "",
+          "quantity": "length",
+          "symbol": "lo",
+          "value": 0.0285
+         },
+         {
+          "fmt": "",
+          "quantity": "length",
+          "symbol": "hi",
+          "value": 0.0445
+         }
+        ],
+        "template": "{symbol}={value} ({lo}–{hi})",
+        "template_ko": "{symbol}={value} ({lo}–{hi})",
+        "text": "t1=0.0236 (0.0285–0.0445)",
+        "text_ko": "t1=0.0236 (0.0285–0.0445)"
+       }
+      ],
+      "sep": ", ",
+      "text": "t1=0.0236 (0.0285–0.0445)",
+      "text_ko": "t1=0.0236 (0.0285–0.0445)"
+     },
      "quantity": null,
      "symbol": "lim",
      "value": "t1=0.0236 (0.0285–0.0445)"
@@ -2216,6 +2446,21 @@
    "text_ko": "§F4 는 원형 HSS 에 해당하지 않음 (§F2.3)"
   },
   {
+   "code": "member.reason.fcre_section_not_mapped",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "section_type",
+     "value": "HAT"
+    }
+   ],
+   "template": "Section type '{section_type}' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied.",
+   "template_ko": "단면 형식 '{section_type}' 은 구현한 대칭축 식에 대응하지 않음. 해당하면 주축 · 대칭축 대응을 확인해 §E2.2 를, 아니면 §E2.4 · Appendix 2 · 합리적 해석을 쓰십시오 — C 단면의 축 가정은 쓰지 않았음.",
+   "text": "Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied.",
+   "text_ko": "단면 형식 'HAT' 은 구현한 대칭축 식에 대응하지 않음. 해당하면 주축 · 대칭축 대응을 확인해 §E2.2 를, 아니면 §E2.4 · Appendix 2 · 합리적 해석을 쓰십시오 — C 단면의 축 가정은 쓰지 않았음."
+  },
+  {
    "code": "member.reason.h1_2_h1_angle_compression_needs",
    "params": [],
    "template": "§H1.2: angle in compression needs the (P)L/1000 combined check — run member_type='combined' with May_strength",
@@ -2510,6 +2755,22 @@
    "params": [
     {
      "fmt": "",
+     "notice": {
+      "code": "member.reason.fcre_section_not_mapped",
+      "kind": "reason",
+      "params": [
+       {
+        "fmt": "",
+        "quantity": null,
+        "symbol": "section_type",
+        "value": "HAT"
+       }
+      ],
+      "template": "Section type '{section_type}' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied.",
+      "template_ko": "단면 형식 '{section_type}' 은 구현한 대칭축 식에 대응하지 않음. 해당하면 주축 · 대칭축 대응을 확인해 §E2.2 를, 아니면 §E2.4 · Appendix 2 · 합리적 해석을 쓰십시오 — C 단면의 축 가정은 쓰지 않았음.",
+      "text": "Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied.",
+      "text_ko": "단면 형식 'HAT' 은 구현한 대칭축 식에 대응하지 않음. 해당하면 주축 · 대칭축 대응을 확인해 §E2.2 를, 아니면 §E2.4 · Appendix 2 · 합리적 해석을 쓰십시오 — C 단면의 축 가정은 쓰지 않았음."
+     },
      "quantity": null,
      "symbol": "error",
      "value": "Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied."
@@ -2518,7 +2779,7 @@
    "template": "§E2.4: {error}.",
    "template_ko": "§E2.4: {error}.",
    "text": "§E2.4: Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied..",
-   "text_ko": "§E2.4: Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied.."
+   "text_ko": "§E2.4: 단면 형식 'HAT' 은 구현한 대칭축 식에 대응하지 않음. 해당하면 주축 · 대칭축 대응을 확인해 §E2.2 를, 아니면 §E2.4 · Appendix 2 · 합리적 해석을 쓰십시오 — C 단면의 축 가정은 쓰지 않았음.."
   },
   {
    "code": "member.warning.e3_e3_pcrl_pnl_pne",

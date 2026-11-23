@@ -81,9 +81,11 @@
 | `area` | in² | | `rotational_stiffness` | kip-in/rad/in |
 | `section_modulus` | in³ | | `angle` | deg |
 | `dimensionless` | — | | `count` | 개 |
-| `mass_density` | kip·s²/in⁴ (`kip*s^2/in^4`) | | | |
+| `mass_density` | kip·s²/in⁴ (`kip*s^2/in^4`) | | `pressure` | psf |
 
 `mass_density`(2026-11-24 K4c): 진동 해석의 질량밀도 `rho`. SI 는 kg/m³ — 1 kip·s²/in⁴ = 4448.2216 N·s² / (0.0254 m)⁴ ≈ 1.06870 × 10¹⁰ kg/m³ (호스트의 단위 표).
+
+`pressure`(2026-11-24 K4d): 면 하중 — 지금은 지붕 활하중 저감 한계 `20 psf`(ASCE 7-22 Sec. 4.3.3.1) 하나. SI 는 kPa — 1 psf = 0.0478803 kPa. **호스트의 단위 표에 더해야 한다**(엔진은 바꾸지 않는다).
 
 엔진은 숫자를 꾸미거나 단위를 바꾸지 않는다. 경계층은 `quantity` 로 SI 를 만든다(9절).
 
@@ -1390,10 +1392,29 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 - **템플릿의 치수 상수는 상수 매개변수다(§16.3 에 더함):** 등록표 매개변수에 `const`(엔진 단위 US 의 수)와 `text`(옛 글의 글자: `3/16` · `0.60` · `33` · `1-1/8` …). `_nt` 를 부르는 쪽은 넘기지 않는다(등록표가 채운다). 결과의 매개변수는 `{symbol, value: const, quantity, fmt: 'raw', text, const: true, (unit_text, sep)}` — **US 로는 `text` + sep + unit_text**(옛 글과 같다), **SI 로는 `value` 를 바꾼 수 + SI 단위**. `unit_text` 가 없는 상수(범위의 앞쪽 `0.08 ≤ d ≤ 0.25 in` 의 0.08 같은)는 §16.3 대로 SI 에서 단위를 붙인다. 단위 글자가 엔진 단위와 다른 상수(`33 ft`, `18 mil`)도 `value` 는 엔진 단위(in)다 — `33 ft` 의 value 는 396 in. **이렇게 바꾼 code 24 — 호스트는 이 code 들의 무늬 바꾸기를 뗄 수 있다:** `conn.assumption.e60_fxx_e60_ksi` (Fxx_min) · `conn.reason.aisi_s100_ansi_aisc` (t_lim) · `conn.reason.arc_spot_sheet_thickness_limit` (t_lim) · `conn.reason.fuf_uh_hrc_ksi` (F_uh_ref) · `conn.reason.j2_2_2_1_de_j2_de` (de_min) · `conn.reason.j4_screw_diameter_out_of_range` (d_max, d_min) · `conn.reason.table_j3_3_1_1_j3` (t_hi, t_lo) · `conn.reason.table_j3_4_1_j3` (d_min) · `conn.reason.tw_w1_w2_d1` (t_lim) · `conn.warning.j2_2_j2` (hole_min, t_lim, tw_hi, tw_lo) · `conn.warning.j3_j3_astm_a354_grade` (d_max) · `conn.warning.j4_4_j4` (dw_min) · `conn.warning.j5_3_2_j5_ds_manual_iv` (ds_cap, ds_max) · `conn.warning.j5_washer_diameter_capped` (dw_cap, dw_max) · `loads.warning.ply_thickness_outside_rp17` (t_hi, t_lo) · `member.assumption.i6_2_1_i6_ft` (span_max) · `member.ne.f2_f2_lateral_torsional_buckling_4` (Lb_default) · `member.reason.no_lateral_torsional_buckling` (Fcre_inf) · `member.warning.lb_defaulted_verify_lateral` (Lb_default) · `member.warning.table_b4_1_1_fy_ksi_b4_fy` (Fy_limit) · `shear.assumption.h3_h3_exception_interior_supports` (s_max) · `shear.warning.table_g5_5_multi_web_deck_support` (s_max) · `solver.warning.material_mass_density_outside` (rho_steel) · `solver.warning.no_mass_density_given` (rho_steel). 새 code 가운데 상수를 가진 것: `loads.label.i621_a` · `_e` · `_h` · `_j_thickness` · `_k_insulation` · `_n_spacing` · `_sys_j` · `_sys_k` · `_sys_l` · `_sys_n`. 시험이 템플릿 글자에 「숫자 + in · ksi · kips · kip-in · kip-ft · ft · psf · plf · mil」이 남지 않음을 확인한다 — 예외는 각도(°, deg)와 다른 단위계 값으로 쓴 글(`0.2836 lb/in^3`, `7850 kg/m^3`)과 단위 이름만 쓴 글(`in kip*s^2/in^4`).
 - **`rho` 는 `mass_density`**(§3.2). 매개변수 `rho_steel`(7.345e-7)도.
 - **수:** code 484 (새 41: not_checked 9 · 전단/웹 크리플링 범위 2 · §I6.2.1 이름표 22 · 이유 5 · B4 steps_unavailable 1 · 이름표 값 2). 템플릿을 바꾼 code 24(상수 매개변수 32 개). 계약 사례가 닿는 code 225. 고정값 `notice_render_fixture.json` 203 쌍.
-- **남은 글(알림 · `*_code` · `name`/`name_ko` · 물리량 값으로 덮이지 않음):**
-  - 한계상태 · 모드 이름: `governing_check`, `controlling_mode`, 접합부 `governing_mode` · `shear_governing_mode` · `tension_governing_mode` (+ `_verified_`), 랩 `Pns_governing_mode` — 영어 이름표. 같은 것을 `design_checks` 의 `governs`(id · `name_ko`)가 싣는다.
-  - 하중 해석의 설명 글: 하중 배치 이름표(`pattern.L` · `pattern_V.Lr` · `envelope_source.patterns[]` … 'spans 1,2 loaded', 'balanced (all spans full)', 눈 7.5.1 경우), `pattern_loading.rule` · `why`, `auto_params.*.basis` · `unbraced.rule`, `deflection(_cases).basis`, `load_combination_standard.reference`, `analysis_method` — 판정 · 값이 아닌 방법 설명.
-  - 랩: `force_model.description` · `known_limitations`(한국어), `lap_length_role` — 고정 설명문.
-  - 출처 이름표: `dsm_source.*`('FSM [β=1.227, …]'), 접합부 `limit_states[].factor_basis`, `interaction_checks[].ratio_form`, `cold_work.excluded_sections`, `Fcre_detail.error`.
-  - 매개변수 안의 엔진 글: 적용한계 밖의 `{lim}`(예: 't2=0.08 (≥1/8)') · 예외 메시지 `{exc}` — 글 매개변수라 단위가 바뀌지 않는다.
-  - 옛 `steps[].formula` · `steps[].name`(알려진 것).
+- **남은 글:** §16.11 로 옮겼다(K4d 에서 다시 닫음).
+
+### 16.11 덧붙임 — 이름표 · 방법 설명 · 출처 이름표 · 적용한계 조각 (2026-11-24 K4d)
+
+옛 키 · 옛 글은 바이트까지 그대로다(`4cb97d5` 와 견줌: 계약 사례 146,744 · 가장자리 91,971 · 하중 57,716 값 — 다른 것은 K4b 필드의 `text_ko` 3 칸(안쪽 오류 글이 이제 한국어)뿐).
+
+**글 하나 · 글로 된 사전 · 목록에 붙는 것(결과 어디서나, `attach` 가 걷는다):**
+- 값이 알림인 키 `k` → 옆에 `{k}_code` · `_kind` · `_ko` · `_template` · `_template_ko` · `_params` (§16.10 의 `label_*` 와 같은 꼴). 예: `analysis_method`, `pattern_loading.rule`, `auto_params.*.basis` · `rule` · `note`, `deflection(_cases).basis` · `note`, `load_combination_standard.reference`, `lap_length_role`, `force_model.clause` · `description`, `limit_states[].factor_basis`, `interaction_checks[].ratio_form` · `note`, `cold_work.excluded_sections`, `rupture_factor_basis`, `Fcre_detail.error`, 검토 항목의 `note` · `reference.basis` · `ratio_form`, `lap_section.basis`, 처짐 `per_span[].L_ratio_basis`.
+- 값이 알림의 사전(키를 더럽히지 않게) → 옆에 `{k}_notices: {키: 항목}` — 하중별 배치 이름표 `pattern` · `pattern_V` · `pattern_R` · `pattern_R_uplift` · `loads`, `pattern_loading.why`, `dsm_source`.
+- 값이 알림의 목록 → `{k}_notices: [항목]` (`force_model.known_limitations`, `snow_cases`); 알림 사전의 목록 → `{k}_notices: [{키: 항목}]` (`envelope_source.patterns`).
+- 배치 이름표 항목은 구조도 싣는다: code `loads.label.pattern_spans_loaded` 면 `spans: [1, 3]`(경간 번호). 그 밖의 배치: `pattern_all_spans` · `pattern_not_acting` · `snow_balanced` · `snow_case1` · `snow_case2`(매개변수 `side` = 조각 `loads.fragment.side_left/right`) · `snow_case3`(`s1`, `s2`).
+
+**1. 모드 · 검토 이름(영어 이름표)** — 옆에 그 이름이 가리키는 검토 항목 id:
+- `governing_check` → `governing_check_id` (이름 → 무리 → 그 무리의 `governs` 항목; 랩은 이미 id).
+- `controlling_mode` → `controlling_mode_id` (부재 종류 + 모드: `member.compression.local` …) 와 모드 이름표 `controlling_mode_code` · `_ko` …(code `member.label.mode_*` 14: 국부좌굴 · 뒤틀림좌굴 · 전체좌굴(휨 · 비틀림 · 휨비틀림 · 지원하지 않는 비대칭 · 사용자/합리적 해석 · 미평가 · 그 밖) · 전체좌굴·횡비틀림좌굴 · §I6.2.1 R 계수(R) · 항복 · 파단 · 사용자가 준 약축 강도).
+- 접합부 `governing_mode` · `shear_governing_mode` · `tension_governing_mode` (+ `_verified_`), 랩 `Pns_governing_mode` → `{k}_id` (한계상태 이름 → `checks.connection_check_id`). 화면은 그 id 의 `name_ko`(§11)를 보인다.
+
+**4. 적용한계 조각(`{lim}`)** — 문자열을 잇던 자리가 이제 조각 알림의 이은 글(`kind: group`, sep ', ')이다. 조각 code(kind `fragment`) 13: `conn.fragment.lim_range_length` `{symbol}={value} ({lo}–{hi})`, `lim_le_length` · `lim_ge_length_eighth`(≥ 1/8 — 상수), `lim_screw_gauge`(`No.12·14` 는 글), `lim_le_stress` · `lim_ge_stress`, `lim_range_ratio_2f` · `lim_ge_ratio_3f` · `lim_ge_ratio_2f`, `lim_le_force_2f`(kips), `lim_fxx_gt_fu`, `lim_equal_thickness`, `lim_tdafu_le`(≤ 3 kips — 상수). `value` · `lo` · `hi` · `limit` 은 그 기호의 물리량(length · stress · force · dimensionless)이라 SI 로 바뀐다. 예외 메시지 `{exc}` 는 Python 의 글 그대로다(엔진이 짓지 않은 글 — 바꾸지 않는다).
+
+**수:** 새 code 93 (모드 이름표 14 · 하중 해석 33 · 랩 · 출처 · 오류 33 · 적용한계 조각 13), 모두 571 → 577 (작은 글 6 더). 계약 사례가 닿는 code 270. 고정값 206 쌍. 새 물리량 `pressure`(§3.2).
+
+**아직 덮이지 않은 글과 까닭:**
+- 옛 `steps[].formula` · `steps[].name` (알려진 것).
+- 예외 메시지 `{exc}` — Python 이 지은 글.
+- **검토 항목 계산 과정 안의 출처 메모와 갈래 조건**: `design_checks[].steps[].inputs[].source.note` 와 항목의 `demand` · `capacity` · `reference` 의 `source.note`(약 60 가지, 예: 'virgin Fy', 'hole dimension along the load', 'member Mu used (conservative)', 'block shear path areas: 2 전단면 …')와 `steps[].condition`('Fcre ≥ 2.78 Fy', 'R/t ≤ 20  (inside bend radius)' …). 조건은 `expr` 와 같은 기호식이고, 메모는 출처의 덧말이다 — 다음 걸음의 후보(계산 과정 단계의 글이라 이번 범위 밖으로 남김).
+- 기계 식별자 · 고유 이름: `design_method`, `basis`(`rational_A1.2c` · `manufacturer` …), `member_app`, `span_type`, `load_type`, `section_source`, `mirrors.*.path`, `load_combination_standard.edition`('ASCE/SEI 7-10'), 기호 `L` — 화면은 이 값을 번역하지 않고 그대로 쓰거나 제 표로 옮긴다.

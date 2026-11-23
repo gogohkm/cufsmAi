@@ -6,6 +6,7 @@
 import math
 
 from design.steel_grades import E as E_STEEL, G as G_STEEL
+from design.notices import N as _nt  # noqa: E402
 
 
 # 단면 표기 → 정규 이름 — 설계(aisi_s100) 와 engine.dsm 이 같은 표를 쓴다.
@@ -226,9 +227,7 @@ def compute_column_Fcre(props: dict, Fy: float,
             'Fcre': 0.0,
             'buckling_type': 'not evaluated',
             'missing': missing,
-            'error': ('section properties required for the closed-form elastic buckling stress are '
-                      'missing: ' + ', '.join(missing)
-                      + ' (or supply a rational elastic buckling stress as Fcre)'),
+            'error': _nt('member.reason.fcre_props_missing_compression', missing=', '.join(missing)),
         }
 
     # xo/ro — Contract #2 공용 해석 (resolve_xo_ro).
@@ -273,8 +272,7 @@ def compute_column_Fcre(props: dict, Fy: float,
             'buckling_type': 'unsupported-nonsymmetric',
             'ro': ro, 'xo': xo, 'xo_source': xo_source, 'symmetry_axis': symmetry_axis,
             'unsupported': True,
-            'error': ('shear-centre offset in both x and z (non-symmetric section) — §E2.4 or a '
-                      'rational elastic buckling stress (Fcre) is required'),
+            'error': _nt('member.reason.fcre_nonsymmetric'),
         }
     if symmetry_axis == 'z' and not is_point_symmetric and not is_closed:
         # §E2.2: "the x-axis shall be the axis of symmetry" — 모델 z 축이 대칭축이므로
@@ -289,12 +287,7 @@ def compute_column_Fcre(props: dict, Fy: float,
             'buckling_type': 'unsupported-nonsymmetric',
             'ro': ro,
             'unsupported': True,
-            'error': (
-                f"Section type '{props.get('section_type', '')}' is not mapped to the implemented "
-                'symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping '
-                'when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section '
-                'axis assumptions were not applied.'
-            ),
+            'error': _nt('member.reason.fcre_section_not_mapped', section_type=props.get('section_type', '')),
         }
 
     # 단축대칭 휨-비틀림 분기 게이트: 수치적으로 의미 있는 xo가 있고,
@@ -516,9 +509,7 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
             'Fcre': 0.0,
             'equation': 'F2 (not evaluated — section properties missing)',
             'missing': names,
-            'error': ('section properties required for the closed-form lateral-torsional buckling '
-                      'stress are missing: ' + ', '.join(names)
-                      + ' (or supply a rational elastic buckling stress as Fcre)'),
+            'error': _nt('member.reason.fcre_props_missing_flexure', names=', '.join(names)),
         }
 
     # ---- 폐합-박스 단면 (§F2.1.4) ----------------------------------------
@@ -576,11 +567,8 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
             'equation': f'{required_section} (not implemented for this orientation)',
             'required_section': required_section,
             'unsupported': True,
-            'error': (
-                f"Section type '{section_type}' is outside implemented F2.1.1/F2.1.3/F2.1.4 "
-                f'closed-form cases; use §{required_section} with the required axis/orientation inputs '
-                "or provide a rational elastic buckling stress as 'Fcre' (e.g. FSM Mcre/Sf)."
-            ),
+            'error': _nt('member.reason.fcre_orientation_not_implemented', section_type=section_type,
+                         required_section=required_section),
         }
 
     # ---- 개단면 (§F2.1.1 C / §F2.1.3 Z) ----------------------------------

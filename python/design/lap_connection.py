@@ -13,23 +13,13 @@ from design.notices import N as _nt, attach as _attach_notices, prefixed as _pre
 # 패스너 수요 모델 설명(결과·steps 에 그대로 싣는다). 모델을 바꾸는 것은 사용자 결정 사항이다.
 FORCE_MODEL = {
     'basis': 'in_house_rational_analysis',
-    'clause': 'AISI S100-16 §A1.2(c) (rational engineering analysis) — not a specification provision',
+    'clause': _nt('lap.label.force_model_clause'),
     'specification_provision': False,
-    'description': (
-        'V_transfer = max(Mu/(d − t), Vu); 모든 패스너(n_rows × n_per_row)가 V_transfer 를 '
-        '균등 분담한다고 보고 n = ceil(V_transfer / Pns). Mu 는 지점 모멘트 전체, d − t 는 플랜지 '
-        '우력의 팔. 패스너 1개 강도 Pns 는 공유 엔진의 전단 방향 한계상태 최솟값.'),
+    'description': _nt('lap.label.force_model_description'),
     'user_decision_pending': True,
-    'known_limitations': [
-        '(a) 우력 F=Mu/(d−t) 는 위·아래 행에 +F/−F 로 걸리므로 각 행이 F 전체를 받는다 — '
-        '균등 분담은 행 수만큼 패스너당 수요를 과소평가할 수 있다.',
-        '(b) 팔 길이는 실제 패스너 행 간격(보통 d−t 보다 작다)이어야 한다.',
-        '(c) 연직 전단 Vu 와 수평 우력 성분을 같은 패스너가 받으므로 max 가 아니라 벡터합이 맞다.',
-        '(d) 지점 모멘트 전체를 넘기는 것은 과대할 수 있다 — 랩 끝에서 끝나는 부재가 넘기는 것은 '
-        '그 단면에서 자기가 지던 몫뿐이다(Manual II-1A 가정 a–c).',
-        '(e) Commentary J3: 랩 구간 저항의 일부는 겹친 부재의 끼움으로 생기며, 기준에는 랩 패스너 '
-        '수 산정식이 없다.',
-    ],
+    'known_limitations': [_nt('lap.label.force_model_limit_a'), _nt('lap.label.force_model_limit_b'),
+                          _nt('lap.label.force_model_limit_c'), _nt('lap.label.force_model_limit_d'),
+                          _nt('lap.label.force_model_limit_e')],
 }
 
 
@@ -601,11 +591,10 @@ def design_lap_connection(params: dict) -> dict:
         'pass': overall_pass,
         'verdict': verdict,
         'design_method': design_method,
-        'force_model': FORCE_MODEL,
+        'force_model': dict(FORCE_MODEL),
         'fastener_design': conn_result,
         'lap_ok': lap_ok,
-        'lap_length_role': 'applicability condition for §I6.2.1 R-factor method and §J3 lapped-Z hole exception '
-                           '(not a strength check; not part of pass)',
+        'lap_length_role': _nt('lap.label.lap_length_role'),
         'Pns_assumed': pns_assumed,
         'min_lap': min_lap,
         'steps': steps,

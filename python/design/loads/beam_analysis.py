@@ -10,6 +10,7 @@
 """
 
 from typing import List, Tuple, Optional
+from design.notices import N as _nt  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 해석 결과 클래스
@@ -1183,7 +1184,7 @@ def extract_max_deflection_per_span(
             'abs_delta_in': round(max_abs, 5),
             'L_ft': L,
             'L_over_delta': round(L_eff * 12.0 / max_abs, 0) if max_abs > 1e-6 else float('inf'),
-            'L_ratio_basis': '2L (cantilever)' if cant else 'L',
+            'L_ratio_basis': _nt('loads.label.l_ratio_cantilever') if cant else 'L',
         })
         x_offset += L
     return results

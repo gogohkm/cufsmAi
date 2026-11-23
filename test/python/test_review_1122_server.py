@@ -161,9 +161,20 @@ def _diff(a, b, path='', tol=1e-12, out=None):
 def _same(rpc, direct, name, extra=()):
     """rpc == direct, extra 키(서버가 덧붙이거나 따로 확인하는 것)는 양쪽에서 빼고."""
     # 'notices'(계약 §16)는 서버가 결과와 그 하위 블록의 알림 목록에서 지어 붙인다 — 엔진을 바로 부른 결과에는 없을 수 있다
+    # 서버가 덧붙이는 알림 필드(계약 §16.10 · §16.11): notices, {k}_notices, {k}_code · _kind · _ko · _template(_ko) ·
+    # _params, 모드 이름의 {k}_id — 엔진을 바로 부른 결과에는 없을 수 있다
+    _added = ('_notices', '_code', '_kind', '_template', '_template_ko', '_params', '_parts', '_sep')
+
     def _drop_notices(x):
         if isinstance(x, dict):
-            return {k: _drop_notices(v) for k, v in x.items() if k != 'notices'}
+            keep = {}
+            for k, v in x.items():
+                if k == 'notices' or (isinstance(k, str) and k.endswith(_added)):
+                    continue
+                if isinstance(k, str) and k.endswith(('_ko', '_id')) and k[:-3] in x and k not in ('name_ko',):
+                    continue
+                keep[k] = _drop_notices(v)
+            return keep
         if isinstance(x, list):
             return [_drop_notices(v) for v in x]
         return x

@@ -174,7 +174,7 @@ def analyze_loads(
 
     # ── 하중조합 · 부분재하 ──
     patterned, pattern_why = _pattern_keys(bool(lr_reduced), present, n_spans, bool(pattern_loading))
-    snow_cases = snow_partial_cases(n_spans) if 'S' in patterned else [('balanced (all spans full)', [1.0] * n_spans)]
+    snow_cases = snow_partial_cases(n_spans) if 'S' in patterned else [(_nt('loads.label.snow_balanced'), [1.0] * n_spans)]
     pattern_on = patterned  # 부분재하할 하중 키 집합 (아래 함수들은 이 집합으로 하중별 방식을 정한다)
     variants = _build_variants(present, Wp_plf, method)
     for var in variants:
@@ -327,9 +327,7 @@ def analyze_loads(
         'live_loads_patterned': [k for k in PATTERNED_LIVE_LOADS if k in patterned],
         'snow_cases': [c[0] for c in snow_cases] if 'S' in patterned else [],
         'why': pattern_why,
-        'rule': ('Patterned live loads: every span loaded or unloaded independently, the worse '
-                 'taken at each location. S: balanced plus the ASCE 7 Sec. 7.5.1 cases. Other '
-                 'loads act on all spans.') if patterned else 'All loads on all spans.',
+        'rule': _nt('loads.label.pattern_rule_patterned') if patterned else _nt('loads.label.pattern_rule_all'),
     }
     if 'S' in patterned:
         assumptions.append(_nt('loads.assumption.snow_partial_loading_sec'))
@@ -344,7 +342,7 @@ def analyze_loads(
             'edition': LOAD_COMBINATION_EDITION,
             'reference': LOAD_COMBINATION_REFERENCE[method],
         },
-        'analysis_method': 'direct stiffness (FE)' if use_fe else 'three-moment',
+        'analysis_method': _nt('loads.label.method_fe') if use_fe else _nt('loads.label.method_three_moment'),
         'governing': governing_result,
         'gravity': gravity_result,
         'uplift': uplift_result,
@@ -537,23 +535,21 @@ def _pattern_keys(lr_reduced, present, n_spans, requested):
         if k not in present:
             continue
         if n_spans < 2:
-            why[k] = 'single span: nothing to pattern'
+            why[k] = _nt('loads.label.pattern_why_single_span')
         elif not requested:
-            why[k] = 'pattern_loading=False: all spans loaded'
+            why[k] = _nt('loads.label.pattern_why_disabled')
         elif k == 'L':
             keys.add(k)
-            why[k] = 'ASCE 7 Sec. 4.3.3: any span loaded or unloaded'
+            why[k] = _nt('loads.label.pattern_why_l')
         elif k == 'Lr':
             if lr_reduced:
                 keys.add(k)
-                why[k] = ('ASCE 7-22 Sec. 4.3.3.1: Lr reduced below 20 psf (lr_reduced=True) - '
-                          'adjacent/alternate spans (all span subsets enveloped)')
+                why[k] = _nt('loads.label.pattern_why_lr_reduced')
             else:
-                why[k] = ('not patterned: ASCE 7-22 Sec. 4.3.3.1 requires roof live load partial '
-                          'loading only where Lr is reduced below 20 psf (lr_reduced=False)')
+                why[k] = _nt('loads.label.pattern_why_lr_not_reduced')
         else:
             keys.add(k)
-            why[k] = 'ASCE 7 Sec. 7.5.1: balanced and partial snow cases'
+            why[k] = _nt('loads.label.pattern_why_s')
     return frozenset(keys), why
 
 
@@ -615,7 +611,8 @@ def _pattern_at(var, units, q, idx, sense, pattern_on, snow_cases, tol=0.0):
             loaded = [i for i in range(n) if sense * c[i] > tol]
             for i in loaded:
                 w_span[i] += a * wk
-            desc[k] = 'spans ' + ','.join(str(i + 1) for i in loaded) + ' loaded' if loaded else 'not acting'
+            desc[k] = (_nt('loads.label.pattern_spans_loaded', spans=','.join(str(i + 1) for i in loaded)) if loaded
+                       else _nt('loads.label.pattern_not_acting'))
         else:
             P = np.array([c[1] for c in snow_cases], dtype=float)
             vals = s * (P @ U[:, idx])
@@ -807,11 +804,11 @@ def _positive_gov(ub, deck_type, deck_info):
     regs = ub['positive_regions']
     if deck_type == 'through-fastened':
         return {'Ly_in': 0, 'Lt_in': 0, 'Cb': 1.0, 'kphi': deck_info.get('kphi', 0),
-                'braced': True, 'basis': 'top flange continuously braced by through-fastened deck'}
+                'braced': True, 'basis': _nt('loads.label.deck_braces_top_flange')}
     if not regs:
         return {'Ly_in': 0, 'Lt_in': 0, 'Cb': 1.0, 'kphi': deck_info.get('kphi', 0),
                 'braced': False, 'not_applicable': True,
-                'note': 'No top-flange compression in this envelope.'}
+                'note': _nt('loads.label.no_top_flange_compression')}
     g = _governing_region(regs)
     return {
         'start_ft': g['start_ft'], 'end_ft': g['end_ft'],
@@ -822,8 +819,7 @@ def _positive_gov(ub, deck_type, deck_info):
         'cantilever': g.get('cantilever'),
         'kphi': deck_info.get('kphi', 0),
         'braced': False,
-        'basis': GOV_CRITERION + f' ({len(regs)} top-flange region(s); design each from '
-                                 'positive_regions where possible)',
+        'basis': _nt('loads.label.gov_region_top', n=len(regs)),
         'regions': [{k: r[k] for k in ('start_ft', 'end_ft', 'Ly_in', 'Cb', 'M_max_abs', 'cantilever', 'unrounded')}
                     for r in regs],
         'unrounded': g.get('unrounded'),
@@ -842,8 +838,7 @@ def _negative_gov(regs, ub, sup, spans):
             'M_max_abs': g.get('M_max_abs'),
             'cantilever': g.get('cantilever'),
             'kphi': 0,
-            'basis': GOV_CRITERION + f' ({len(regs)} bottom-flange region(s); design each from '
-                                     'negative_regions where possible)',
+            'basis': _nt('loads.label.gov_region_bottom', n=len(regs)),
         }
         if 'i621_region_eligible' in g:
             out['i621_region_eligible'] = g['i621_region_eligible']
@@ -908,13 +903,13 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
                 for k, w in keys:
                     mode = _load_mode(k, pattern_on)
                     if mode == 'fixed':
-                        desc[k] = 'all spans'
+                        desc[k] = _nt('loads.label.pattern_all_spans')
                     elif mode == 'subset':
                         c = (w / 1000.0) * U[:, idx]
                         tol_d = 1e-9 * max(float(np.abs(U).max()) * abs(w) / 1000.0, 1e-12)
                         loaded = [i for i in range(U.shape[0]) if sense * c[i] > tol_d]
-                        desc[k] = ('spans ' + ','.join(str(i + 1) for i in loaded) + ' loaded') if loaded \
-                            else 'not acting'
+                        desc[k] = (_nt('loads.label.pattern_spans_loaded', spans=','.join(str(i + 1) for i in loaded))
+                                   if loaded else _nt('loads.label.pattern_not_acting'))
                     else:
                         vals = (w / 1000.0) * (P @ U[:, idx])
                         desc[k] = snow_cases[int(np.argmax(vals)) if sense > 0 else int(np.argmin(vals))][0]
@@ -937,8 +932,8 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
             continue
         hi, lo = single(key, present[key])
         ps, d = per_span(hi, lo)
-        cases.append({'case': key, 'basis': 'unfactored, alone' + (' (pattern envelope)'
-                      if _load_mode(key, pattern_on) != 'fixed' else ''),
+        cases.append({'case': key, 'basis': (_nt('loads.label.defl_alone_pattern')
+                                             if _load_mode(key, pattern_on) != 'fixed' else _nt('loads.label.defl_alone')),
                       'per_span': ps, 'D_envelope_max': hi.tolist(), 'D_envelope_min': lo.tolist()})
         dsrc = d_source([(key, present[key])])
         if dsrc:
@@ -946,12 +941,11 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
     if Wp_plf > 0:
         hi, lo = single('W', Wp_plf)
         ps, d = per_span(hi, lo)
-        cases.append({'case': 'Wp', 'basis': 'unfactored, alone', 'per_span': ps,
+        cases.append({'case': 'Wp', 'basis': _nt('loads.label.defl_alone'), 'per_span': ps,
                       'D_envelope_max': hi.tolist(), 'D_envelope_min': lo.tolist()})
     for c in cases:
         if c['case'] in ('W', 'Wp'):
-            c['note'] = ('Input wind load used at 1.0 (strength level for ASCE 7-10); the building '
-                         'code may permit a reduced wind load for deflection checks.')
+            c['note'] = _nt('loads.label.wind_deflection_note')
 
     # 사용하중 합계 D + (L | Lr | S | R) — 비계수
     totals = []
@@ -967,7 +961,7 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
     best = None
     for name, hi, lo, lkey in totals:
         ps, d = per_span(hi, lo)
-        cases.append({'case': name, 'basis': 'unfactored service total', 'per_span': ps,
+        cases.append({'case': name, 'basis': _nt('loads.label.defl_service_total'), 'per_span': ps,
                       'D_envelope_max': hi.tolist(), 'D_envelope_min': lo.tolist()})
         if lkey:
             dsrc = d_source(([('D', present['D'])] if present.get('D') else []) + [(lkey, present[lkey])])
@@ -980,8 +974,8 @@ def _deflections(units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_k
         _, name, d, ps = best
         deflection = {
             'combo': name,
-            'basis': 'unfactored service gravity total, partial-loading envelope'
-                     if pattern_on else 'unfactored service gravity total',
+            'basis': (_nt('loads.label.defl_gravity_total_pattern') if pattern_on
+                      else _nt('loads.label.defl_gravity_total')),
             'D_diagram': [round(float(v), 5) for v in d],
             'per_span': ps,
             'E_ksi': E_ksi,

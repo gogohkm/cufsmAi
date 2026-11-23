@@ -221,7 +221,7 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
                                                                                               'dimensionless'),
                        capacity=cap, ratio=raw['ratio'], steps=tr.steps, basis=ic.get('basis'),
                        equation_used=ic.get('equation'),
-                       ratio_form=(f'(value/limit)^(1/{ex:g})' if ex != 1 else None),
+                       ratio_form=(_nt('conn.label.check_ratio_form_root', ex=ex) if ex != 1 else None),
                        mirrors={'demand': {'path': f'interaction_checks[{i}].value', 'digits': 4},
                                 'capacity': {'path': f'interaction_checks[{i}].limit', 'digits': 4},
                                 'ratio': {'path': f'interaction_checks[{i}].ratio', 'digits': 4}})

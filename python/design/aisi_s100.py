@@ -986,7 +986,7 @@ def _design_compression(params: dict) -> dict:
     # Step 3: 국부좌굴 (E3.2)
     # Pcrl 이 없으면 Appendix 1 §1.1 Eq. 1.1-4 판좌굴 해석식(외-외 치수 계약)으로 대체하고
     # 출처를 표시한다. 그것도 못 하면 E3 를 "평가하지 못함"으로 둔다.
-    Pcrl_source = 'FSM' if Pcrl > 0 else 'none'
+    Pcrl_source = _nt('member.label.src_fsm') if Pcrl > 0 else _nt('member.label.src_none')
     pcrl_an = None   # 해석식 대체의 값(계산서 design_checks 용)
     if Pcrl <= 0 and _supports_cz_plate_fallback(params):
         ho, bo, do = _out_to_out_dims(geom)
@@ -999,7 +999,7 @@ def _design_compression(params: dict) -> dict:
                 Fcrl_calc = fcrl_result['Fcrl']
                 if Fcrl_calc > 0:
                     Pcrl = Fcrl_calc * Ag
-                    Pcrl_source = '§App.1 Eq.1.1-4'
+                    Pcrl_source = _nt('member.label.src_app1_plate')
                     pcrl_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrl_calc, 'raw_product': Pcrl,
                                'governing': fcrl_result.get('governing'), 'kind': 'local',
                                'elements': fcrl_result.get('elements'), 'trace': fcrl_result.get('trace')}
@@ -1007,7 +1007,7 @@ def _design_compression(params: dict) -> dict:
                     # 임계값은 그 극소 값 이상이다 — 해석식 값이 그보다 낮을 때만 극소 값으로 올린다.
                     if diag['single_minimum'] and diag['bound'] > Pcrl:
                         Pcrl = diag['bound']
-                        Pcrl_source += ' (raised to single-minimum floor)'
+                        Pcrl_source = _nt('member.label.src_raised_to_floor', source=Pcrl_source)
                         pcrl_an.update(raised=True, final=Pcrl)
                     assumptions.append(
                         _nt('member.assumption.pcrl_fsm_appendix_fcrl', Fcrl_calc=Fcrl_calc, governing=fcrl_result["governing"], ho=ho, bo=bo, do=do)
@@ -1041,7 +1041,7 @@ def _design_compression(params: dict) -> dict:
 
     # Step 4: 왜곡좌굴 (E4) — 연단 보강 플랜지가 있는 개단면만 해당한다.
     dist_applicable, dist_reason = _distortional_applicability(geom)
-    Pcrd_source = 'FSM' if Pcrd > 0 else 'none'
+    Pcrd_source = _nt('member.label.src_fsm') if Pcrd > 0 else _nt('member.label.src_none')
     pcrd_an = None
     distortional_not_evaluated = False
     if Pcrd <= 0 and dist_applicable and _supports_cz_distortional_fallback(params):
@@ -1063,13 +1063,13 @@ def _design_compression(params: dict) -> dict:
                 assumptions.extend(_prefixed('§2.3.1.3: ', n) for n in (fcrd_result.get('notes') or []))
                 if Fcrd_calc > 0:
                     Pcrd = Fcrd_calc * Ag
-                    Pcrd_source = '§2.3.1.3'
+                    Pcrd_source = _nt('member.label.src_app2_compression')
                     pcrd_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrd_calc, 'raw_product': Pcrd,
                                'kind': 'distortional', 'b': b_cl, 'd': d_cl, 'theta': lip_angle,
                                'trace': fcrd_result.get('trace')}
                     if diag['single_minimum'] and diag['bound'] > Pcrd:
                         Pcrd = diag['bound']
-                        Pcrd_source += ' (raised to single-minimum floor)'
+                        Pcrd_source = _nt('member.label.src_raised_to_floor', source=Pcrd_source)
                         pcrd_an.update(raised=True, final=Pcrd)
                     assumptions.append(
                         _nt('member.assumption.pcrd_fsm_appendix_fcrd', Fcrd_calc=Fcrd_calc, Lcrd_val=Lcrd_val)
@@ -1437,7 +1437,7 @@ def _design_flexure(params: dict) -> dict:
         # yield. Scaling them would mask the increase in local/distortional slenderness
         # (λl=√(Mne/Mcrl), λd=√(My/Mcrd)) and overpredict Mnl/Mnd (unconservative).
         Mcrl_eff = Mcrl if Mcrl > 0 else 0
-        Mcrl_source = 'FSM' if Mcrl_eff > 0 else 'none'
+        Mcrl_source = _nt('member.label.src_fsm') if Mcrl_eff > 0 else _nt('member.label.src_none')
 
         # Mcrl 이 없으면 Appendix 1 §1.1 Eq. 1.1-4 판좌굴 해석식(외-외 치수 계약)으로 대체.
         if Mcrl_eff == 0 and Sf_eff > 0 and _supports_cz_plate_fallback(params):
@@ -1451,13 +1451,13 @@ def _design_flexure(params: dict) -> dict:
                     Fcrl_calc = fcrl_result['Fcrl']
                     if Fcrl_calc > 0:
                         Mcrl_eff = Fcrl_calc * Sf_eff
-                        Mcrl_source = '§App.1 Eq.1.1-4'
+                        Mcrl_source = _nt('member.label.src_app1_plate')
                         Mcrl_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrl_calc, 'raw_product': Mcrl_eff,
                                    'governing': fcrl_result.get('governing'), 'kind': 'local',
                                    'elements': fcrl_result.get('elements'), 'trace': fcrl_result.get('trace')}
                         if diag['single_minimum'] and diag['bound'] > Mcrl_eff:
                             Mcrl_eff = diag['bound']
-                            Mcrl_source += ' (raised to single-minimum floor)'
+                            Mcrl_source = _nt('member.label.src_raised_to_floor', source=Mcrl_source)
                             Mcrl_an.update(raised=True, final=Mcrl_eff)
                 except Exception as e:
                     state_warnings.append(_nt('member.warning.mcrl_fallback_appendix', e=e))
@@ -1502,7 +1502,7 @@ def _design_flexure(params: dict) -> dict:
             Mnl = Mne
 
         Mcrd_eff = Mcrd if Mcrd > 0 else 0
-        Mcrd_source = 'FSM' if Mcrd_eff > 0 else 'none'
+        Mcrd_source = _nt('member.label.src_fsm') if Mcrd_eff > 0 else _nt('member.label.src_none')
         dist_missing = False
 
         # §2.3.3.3 해석적 Fcrd fallback — 뒤틀림이 해당하는 C/Z 단면만.
@@ -1528,13 +1528,13 @@ def _design_flexure(params: dict) -> dict:
                     Fcrd_calc = fcrd_result['Fcrd']
                     if Fcrd_calc > 0:
                         Mcrd_eff = Fcrd_calc * Sf_eff
-                        Mcrd_source = '§2.3.3.3'
+                        Mcrd_source = _nt('member.label.src_app2_flexure')
                         Mcrd_an = {'ho': ho, 'bo': bo, 'do': do, 't': t, 'F': Fcrd_calc, 'raw_product': Mcrd_eff,
                                    'kind': 'distortional', 'b': b_cl, 'd': d_cl, 'theta': lip_angle,
                                    'trace': fcrd_result.get('trace'), 'kphi_given': 'kphi' in params}
                         if diag['single_minimum'] and diag['bound'] > Mcrd_eff:
                             Mcrd_eff = diag['bound']
-                            Mcrd_source += ' (raised to single-minimum floor)'
+                            Mcrd_source = _nt('member.label.src_raised_to_floor', source=Mcrd_source)
                             Mcrd_an.update(raised=True, final=Mcrd_eff)
                 except Exception as e:
                     state_warnings.append(_nt('member.warning.mcrd_fallback_appendix', e=e))
@@ -1544,7 +1544,6 @@ def _design_flexure(params: dict) -> dict:
 
         # [문제4] §2.3.3.3 Eq. 2.3.3.3-3: β 모멘트 구배 보정
         beta_dist = 1.0
-        beta_note = ''
         if Mcrd_eff > 0 and dist_M1_M2 is not None and dist_Lm > 0:
             Lcrd_val = dist_Lcrd if dist_Lcrd > 0 else dist_Lm
             L_beta = min(Lcrd_val, dist_Lm)
@@ -1559,8 +1558,7 @@ def _design_flexure(params: dict) -> dict:
                            'Lm': dist_Lm, 'M1_M2': dist_M1_M2}
             if beta_dist > 1.0:
                 Mcrd_eff *= beta_dist
-                beta_note = f' [β={beta_dist:.3f}, §2.3.3.3 Eq.3]'
-                Mcrd_source += beta_note
+                Mcrd_source = _nt('member.label.src_beta', source=Mcrd_source, beta=beta_dist)
 
         if Mcrd_eff > 0:
             # 해당하지 않는 단면이라도 값이 주어지면 쓴다(감소만 할 수 있으므로 보수측 — Manual II-4B).

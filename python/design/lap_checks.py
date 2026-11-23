@@ -43,8 +43,7 @@ def build(ck: dict) -> list:
         checks.append(make_check('lap.length_condition', design_method=dm, verdict=v, demand=dem, capacity=cap,
                                  ratio=r, steps=tr.steps, counts=False,
                                  reason=(lap['message'] or None),
-                                 note='applicability condition of the §I6.2.1 R-factor method and the §J3 '
-                                      'lapped-Z hole exception — not part of the lap verdict'))
+                                 note=_nt('lap.label.lap_length_check_note')))
 
     # --- 패스너 무리: V_transfer ≤ n·Pns (사내 합리적 해석 §A1.2(c))
     tr = Trace()
@@ -189,7 +188,7 @@ def build(ck: dict) -> list:
             if fx.get('reference'):
                 rf = fx['reference']
                 ref = {'capacity': q('φbMn,ref', rf['phi_ref'], 'moment'), 'ratio': rf['dcr'],
-                       'basis': 'gross Sf — local buckling not included'}
+                       'basis': _nt('lap.label.gross_sf_reference')}
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict='not_evaluated',
                                      reason=_nt('lap.reason.se_effective_section_modulus'), reference=ref))
         if fx.get('dist'):

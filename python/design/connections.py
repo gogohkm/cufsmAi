@@ -14,7 +14,7 @@ PAF(J5) 접합부의 공칭강도 계산. 각 파괴 모드별 강도를 계산�
 import math
 
 from design.checks import Trace, q, src, CONTEXT_KEYS, display_rounding
-from design.notices import N as _nt, attach as _attach_notices  # noqa: E402
+from design.notices import N as _nt, attach as _attach_notices, joined as _joined  # noqa: E402
 
 # 강재 탄성계수 (ksi) — 아크스팟 슬렌더니스 분기, PAF 전단 풀아웃(J5.3.3)에 사용
 E_STEEL = 29500.0
@@ -564,7 +564,7 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
                     if j62_factors is not None:
                         phi62, om62, basis62 = j62_factors
                     else:
-                        phi62, om62, basis62 = phi_r, omega_r, 'Table J6-1'
+                        phi62, om62, basis62 = phi_r, omega_r, _nt('conn.label.factor_table_j6_1')
                     tr = Trace()
                     if case == 'transverse_weld':
                         i_ant = tr.add('equation', 'Ant = area of directly connected elements (input)',
@@ -1496,15 +1496,15 @@ def screw_connection(t1: float, t2: float, d: float,
         dwc = d_head_washer if d_head_washer else dw
         lim = []
         if not (0.0285 - 1e-6 <= t1 <= 0.0445 + 1e-6):
-            lim.append(f't1={t1} (0.0285–0.0445)')
+            lim.append(_nt('conn.fragment.lim_range_length', symbol='t1', value=t1, lo=0.0285, hi=0.0445))
         if not (0.21 <= d <= 0.25):
-            lim.append(f'd={d} (No.12·14)')
+            lim.append(_nt('conn.fragment.lim_screw_gauge', symbol='d', value=d, gauges='No.12·14'))
         if dwc > 0.75:
-            lim.append(f'dw={dwc} (≤0.75)')
+            lim.append(_nt('conn.fragment.lim_le_length', symbol='dw', value=dwc, limit=0.75))
         if Fu1 > 70:
-            lim.append(f'Fu1={Fu1} (≤70)')
+            lim.append(_nt('conn.fragment.lim_le_stress', symbol='Fu1', value=Fu1, limit=70))
         if ratio < 2.5 - 1e-3:
-            lim.append(f't2/t1={ratio:.3f} (≥2.5)')
+            lim.append(_nt('conn.fragment.lim_ge_ratio_3f', symbol='t2/t1', value=ratio, limit=2.5))
         if not dw_given and d_head_washer is None:
             not_eval.append(_ne('전단+풀오버 (J4.5.1)', 'interaction',
                                 _nt('conn.reason.dw_not_given_combined'),
@@ -1530,14 +1530,14 @@ def screw_connection(t1: float, t2: float, d: float,
         # J4.5.2 전단 + 풀아웃
         lim = []
         if not (0.0297 - 1e-6 <= t2 <= 0.0724 + 1e-6):
-            lim.append(f't2={t2} (0.0297–0.0724)')
+            lim.append(_nt('conn.fragment.lim_range_length', symbol='t2', value=t2, lo=0.0297, hi=0.0724))
         if not (0.16 <= d <= 0.25):
-            lim.append(f'd={d} (No.8–14)')
+            lim.append(_nt('conn.fragment.lim_screw_gauge', symbol='d', value=d, gauges='No.8–14'))
         if Fu2 > 121:
-            lim.append(f'Fu2={Fu2} (≤121)')
+            lim.append(_nt('conn.fragment.lim_le_stress', symbol='Fu2', value=Fu2, limit=121))
         for lab, fu_i, fy_i in (('1', Fu1, Fy1), ('2', Fu2, Fy2)):
             if fy_i and not (1.0 <= fu_i / fy_i <= 1.62):
-                lim.append(f'Fu{lab}/Fy{lab}={fu_i / fy_i:.2f} (1.0–1.62)')
+                lim.append(_nt('conn.fragment.lim_range_ratio_2f', symbol=f'Fu{lab}/Fy{lab}', value=fu_i / fy_i, lo=1.0, hi=1.62))
         if lim:
             _j45_fallback(interaction, not_eval, assumptions, j45_rational, dm,
                           '전단+풀아웃 (J4.5.2)', 'J4.5.2', lim,
@@ -1594,7 +1594,7 @@ def _j45_fallback(interaction, not_eval, assumptions, enabled, dm, name, clause,
     가용강도 기준 직선 상호작용 V/(Pnv/Ω) + T/(Pnt/Ω) ≤ 1 로, A1.2(c) 합리적 해석으로 적용한다.
     enabled=False 면 미평가로 둔다.
     """
-    why = _nt('conn.reason.outside_equation_limits', clause=clause, lim=', '.join(lim))
+    why = _nt('conn.reason.outside_equation_limits', clause=clause, lim=_joined(', ', lim))
     if not enabled:
         not_eval.append(_ne(name, 'interaction',
                             _nt('conn.reason.a1_2_k2_a1_j45_rational', why=why), 'interaction'))
@@ -2064,15 +2064,15 @@ def arc_spot_weld_connection(t1: float, t2: float,
         ts = t1
         lim = []
         if Fu > 59:
-            lim.append(f'Fu={Fu} (≤59)')
+            lim.append(_nt('conn.fragment.lim_le_stress', symbol='Fu', value=Fu, limit=59))
         if not Fxx > Fu:
-            lim.append('Fxx > Fu')
+            lim.append(_nt('conn.fragment.lim_fxx_gt_fu'))
         if not (0.028 <= ts <= 0.0635):
-            lim.append(f't={ts} (0.028–0.0635)')
+            lim.append(_nt('conn.fragment.lim_range_length', symbol='t', value=ts, lo=0.028, hi=0.0635))
         if lim or not equal:
             if equal:
                 not_eval.append(_ne('Sheet Tear Sheet-to-Sheet (J2.2.2.2)', 'shear',
-                                    _nt('conn.reason.j2_2_2_2_j2', lim=', '.join(lim)), 'fastener'))
+                                    _nt('conn.reason.j2_2_2_2_j2', lim=_joined(', ', lim)), 'fastener'))
         else:
             da_s = max(d_vis - ts, 0.0)
             Rn_ss = 1.65 * ts * da_s * Fu * n
@@ -2097,16 +2097,16 @@ def arc_spot_weld_connection(t1: float, t2: float,
         lim = []
         tdaFu = t_sheet * da_avg * Fu
         if tdaFu > 3.0:
-            lim.append(f't·da·Fu={tdaFu:.2f} kips (≤3)')
+            lim.append(_nt('conn.fragment.lim_le_force_2f', symbol='t·da·Fu', value=tdaFu, limit=3))
         if Fxx < 60:
-            lim.append(f'Fxx={Fxx} (≥60)')
+            lim.append(_nt('conn.fragment.lim_ge_stress', symbol='Fxx', value=Fxx, limit=60))
         if Fu > 82:
-            lim.append(f'Fu={Fu} (≤82)')
+            lim.append(_nt('conn.fragment.lim_le_stress', symbol='Fu', value=Fu, limit=82))
         if not Fxx > Fu:
-            lim.append('Fxx > Fu')
+            lim.append(_nt('conn.fragment.lim_fxx_gt_fu'))
         if lim:
             not_eval.append(_ne('Weld Tension (J2.2.3)', 'tension',
-                                _nt('conn.reason.j2_2_3_j2', lim=', '.join(lim)), 'fastener'))
+                                _nt('conn.reason.j2_2_3_j2', lim=_joined(', ', lim)), 'fastener'))
         else:
             P1 = math.pi * de_used ** 2 / 4 * Fxx
             P2 = 0.8 * (Fu / Fy) ** 2 * t_sheet * da_avg * Fu
@@ -2155,7 +2155,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
     t_j6 = min(t_sheets) if t_sheets else t_sheet
     da_j6 = max(d_vis - t_j6, 0.0)
     geo_j6 = dict(geo)
-    j62f = (PHI_RATIONAL_CONNECTION, OMEGA_RATIONAL_CONNECTION, 'A1.2(c) (Manual IV-2)')
+    j62f = (PHI_RATIONAL_CONNECTION, OMEGA_RATIONAL_CONNECTION, _nt('conn.label.factor_rational_iv2'))
     j6_ls, j6_warn, j6_ne = _j6_rupture_limit_states(
         conn='weld', Fu=Fu, t=t_j6, dh=d_vis, n=n, e=e, Fy=Fy, d=da_j6,
         include_block_shear=True, geometry=geo_j6, dh_transverse=d_vis, dh_net=da_j6,
@@ -2186,18 +2186,18 @@ def arc_spot_weld_connection(t1: float, t2: float,
         else:
             lim = []
             if Fu > 105:
-                lim.append(f'Fu={Fu} (≤105)')
+                lim.append(_nt('conn.fragment.lim_le_stress', symbol='Fu', value=Fu, limit=105))
             if Fxx < 60:
-                lim.append(f'Fxx={Fxx} (≥60)')
+                lim.append(_nt('conn.fragment.lim_ge_stress', symbol='Fxx', value=Fxx, limit=60))
             if t_sheet * da_avg * Fu > 3.0:
-                lim.append('t·da·Fu ≤ 3 kips')
+                lim.append(_nt('conn.fragment.lim_tdafu_le'))
             if Fu / Fy < 1.02:
-                lim.append(f'Fu/Fy={Fu / Fy:.3f} (≥1.02)')
+                lim.append(_nt('conn.fragment.lim_ge_ratio_3f', symbol='Fu/Fy', value=Fu / Fy, limit=1.02))
             if not (0.47 <= d_vis <= 1.02):
-                lim.append(f'd={d_vis} (0.47–1.02)')
+                lim.append(_nt('conn.fragment.lim_range_length', symbol='d', value=d_vis, lo=0.47, hi=1.02))
             if lim:
                 not_eval.append(_ne('전단+인장 (J2.2.4)', 'interaction',
-                                    _nt('conn.reason.j2_2_4_j2', lim=', '.join(lim)), 'interaction'))
+                                    _nt('conn.reason.j2_2_4_j2', lim=_joined(', ', lim)), 'interaction'))
             else:
                 Pav = min(_available(x['Rn'], x['phi'], x['omega'], dm) for x in shear_states) / n
                 ten = [x for x in limit_states if x['name'] == 'Weld Tension (J2.2.3)'][0]
@@ -2218,8 +2218,8 @@ def arc_spot_weld_connection(t1: float, t2: float,
                     r_lin = (tt / 0.15) ** (1 / 1.5)
                     interaction.append({'name': '전단+인장 (J2.2.4)', 'equation': 'J2.2.4',
                                         'value': round(tt, 4), 'limit': 0.15, 'ratio': round(r_lin, 4),
-                                        'ratio_form': 'linear: (value/limit)^(1/1.5)',
-                                        'pass': True, 'note': '(T/Pat)^1.5 ≤ 0.15 — 조합 검토 불필요',
+                                        'ratio_form': _nt('conn.label.ratio_form_root_1_5'),
+                                        'pass': True, 'note': _nt('conn.label.interaction_not_required'),
                                         '_raw': {'value': tt, 'limit': 0.15, 'ratio': r_lin, 'exponent': 1.5},
                                         '_trace': _interaction_trace(tr, i_v)})
                 else:
@@ -2230,7 +2230,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
                     r_lin = val ** (1 / 1.5)
                     interaction.append({'name': '전단+인장 (J2.2.4)', 'equation': 'J2.2.4-1',
                                         'value': round(val, 4), 'limit': 1.0, 'ratio': round(r_lin, 4),
-                                        'ratio_form': 'linear: (value/limit)^(1/1.5)',
+                                        'ratio_form': _nt('conn.label.ratio_form_root_1_5'),
                                         'pass': val <= 1.0 + 1e-9,
                                         '_raw': {'value': val, 'limit': 1.0, 'ratio': r_lin, 'exponent': 1.5},
                                         '_trace': _interaction_trace(tr, i_v)})
@@ -2594,16 +2594,16 @@ def arc_seam_weld_connection(t1: float, t2: float,
         ts = t1
         lim = []
         if not equal:
-            lim.append('두 판 두께가 같아야 함')
+            lim.append(_nt('conn.fragment.lim_equal_thickness'))
         if Fu > 59:
-            lim.append(f'Fu={Fu} (≤59)')
+            lim.append(_nt('conn.fragment.lim_le_stress', symbol='Fu', value=Fu, limit=59))
         if not Fxx > Fu:
-            lim.append('Fxx > Fu')
+            lim.append(_nt('conn.fragment.lim_fxx_gt_fu'))
         if not (0.028 <= ts <= 0.0635):
-            lim.append(f't={ts} (0.028–0.0635)')
+            lim.append(_nt('conn.fragment.lim_range_length', symbol='t', value=ts, lo=0.028, hi=0.0635))
         if lim:
             not_eval.append(_ne('Sheet Tear Sheet-to-Sheet (J2.3.2.2)', 'shear',
-                                _nt('conn.reason.j2_3_2_2_j2', lim=', '.join(lim)), 'fastener'))
+                                _nt('conn.reason.j2_3_2_2_j2', lim=_joined(', ', lim)), 'fastener'))
         else:
             da_s = max(d - ts, 0.0)
             Rn_ss = 1.65 * ts * da_s * Fu * n
@@ -2627,7 +2627,7 @@ def arc_seam_weld_connection(t1: float, t2: float,
         dh_long, dh_tr = d, L_seam + d
     # J6 은 판 한 장의 파단 — 여러 시트면 가장 얇은 한 장 (아크 스팟과 같은 까닭)
     t_j6 = min(t_sheets) if t_sheets else t_sheet
-    j62f = (PHI_RATIONAL_CONNECTION, OMEGA_RATIONAL_CONNECTION, 'A1.2(c) (Manual IV-2 방식)')
+    j62f = (PHI_RATIONAL_CONNECTION, OMEGA_RATIONAL_CONNECTION, _nt('conn.label.factor_rational_iv2_like'))
     j6_ls, j6_warn, j6_ne = _j6_rupture_limit_states(
         conn='weld', Fu=Fu, t=t_j6, dh=dh_long, n=n, e=e, Fy=Fy, d=dh_tr,
         include_block_shear=True, geometry=dict(j6_geometry or {}), dh_transverse=dh_tr, dh_net=dh_tr,
@@ -2728,13 +2728,13 @@ def paf_connection(t1: float, t2: float, d: float,
     # 적용범위 (J5)
     lim = []
     if t1 > 0.06 + 1e-9:
-        lim.append(f't1={t1} (≤0.06)')
+        lim.append(_nt('conn.fragment.lim_le_length', symbol='t1', value=t1, limit=0.06))
     if t2 > 0.75 + 1e-9:
-        lim.append(f't2={t2} (≤0.75)')
+        lim.append(_nt('conn.fragment.lim_le_length', symbol='t2', value=t2, limit=0.75))
     if not (0.106 - 1e-9 <= d <= 0.206 + 1e-9):
-        lim.append(f'ds={d} (0.106–0.206)')
+        lim.append(_nt('conn.fragment.lim_range_length', symbol='ds', value=d, lo=0.106, hi=0.206))
     if lim:
-        not_eval.append(_ne('적용범위 (J5)', 'any', _nt('conn.reason.j5_out_of_scope', lim=', '.join(lim)), 'scope'))
+        not_eval.append(_ne('적용범위 (J5)', 'any', _nt('conn.reason.j5_out_of_scope', lim=_joined(', ', lim)), 'scope'))
 
     # Table J5.1-1 간격·연단
     if d >= 0.200:
@@ -2818,14 +2818,14 @@ def paf_connection(t1: float, t2: float, d: float,
     # (b) 지압/tilting (J5.3.2, Eq. J5.3.2-1) — 적용한계 (Manual IV-12 은 ds=0.180 을 0.177 로 본다)
     lim = []
     if t2 / t1 < 2.0:
-        lim.append(f't2/t1={t2 / t1:.2f} (≥2)')
+        lim.append(_nt('conn.fragment.lim_ge_ratio_2f', symbol='t2/t1', value=t2 / t1, limit=2))
     if t2 < 0.125 - 1e-9:
-        lim.append(f't2={t2} (≥1/8)')
+        lim.append(_nt('conn.fragment.lim_ge_length_eighth', symbol='t2', value=t2))
     if not (0.146 - 1e-9 <= d <= 0.177 + 0.003 + 1e-9):
-        lim.append(f'ds={d} (0.146–0.177)')
+        lim.append(_nt('conn.fragment.lim_range_length', symbol='ds', value=d, lo=0.146, hi=0.177))
     if lim:
         not_eval.append(_ne('Bearing/Tilting (J5.3.2)', 'shear',
-                            _nt('conn.reason.j5_3_2_j5', lim=', '.join(lim)), 'fastener'))
+                            _nt('conn.reason.j5_3_2_j5', lim=_joined(', ', lim)), 'fastener'))
     else:
         if d > 0.177:
             warnings.append(_nt('conn.warning.j5_3_2_j5_ds_manual_iv', d=d))
@@ -2845,12 +2845,12 @@ def paf_connection(t1: float, t2: float, d: float,
     # (c) 전단 풀아웃 (J5.3.3, Eq. J5.3.3-1): Pnos = d_ae^1.8·t2^0.2·(Fy2·E²)^(1/3)/30
     lim = []
     if not (0.113 - 1e-9 <= t2 <= 0.75 + 1e-9):
-        lim.append(f't2={t2} (0.113–0.75)')
+        lim.append(_nt('conn.fragment.lim_range_length', symbol='t2', value=t2, lo=0.113, hi=0.75))
     if not (0.106 - 1e-9 <= d <= 0.206 + 1e-9):
-        lim.append(f'ds={d} (0.106–0.206)')
+        lim.append(_nt('conn.fragment.lim_range_length', symbol='ds', value=d, lo=0.106, hi=0.206))
     if lim:
         not_eval.append(_ne('Pull-out in Shear (J5.3.3)', 'shear',
-                            _nt('conn.reason.j5_3_3_j5', lim=', '.join(lim)), 'fastener'))
+                            _nt('conn.reason.j5_3_3_j5', lim=_joined(', ', lim)), 'fastener'))
     else:
         Pnos = (dar ** 1.8) * (t2 ** 0.2) * ((Fy2 * E ** 2) ** (1.0 / 3.0)) / 30.0 * n
         tr = Trace()
@@ -2976,7 +2976,7 @@ def paf_connection(t1: float, t2: float, d: float,
             r_lin = val ** (1.0 / p)   # 지수 2 이면 √ — 선형 비와 견줄 수 있게(V6-06)
             interaction.append({'name': '전단+인장 (J5.4)', 'equation': f'C-J5.4-1 (n={p})',
                                 'value': round(val, 4), 'limit': 1.0, 'ratio': round(r_lin, 4),
-                                'ratio_form': 'linear: (value/limit)^(1/2)' if p == 2 else 'linear: value/limit',
+                                'ratio_form': _nt('conn.label.ratio_form_root_2') if p == 2 else _nt('conn.label.ratio_form_linear'),
                                 'pass': val <= 1.0 + 1e-9, 'basis': 'Commentary C-J5.4 (A1.2)',
                                 '_raw': {'value': val, 'limit': 1.0, 'ratio': r_lin, 'exponent': p},
                                 '_trace': _interaction_trace(tr, i_v)})

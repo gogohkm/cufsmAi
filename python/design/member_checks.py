@@ -792,8 +792,7 @@ def lap_section_block(ctx):
                                         note='Manual II-1A / II-2A: lapped section restrained against '
                                              'lateral-torsional and distortional buckling'))
     md = vs.get('Mnfo_detail') or {}
-    out = {'basis': 'Manual II-1A / II-2A lapped section: Fn = Fy (Mne = My), §F3.2.1 local buckling only, '
-                    'no inelastic reserve (§F3.2.3), no cold work (§A3.3.2); Se = Mnℓ / Fy; Vn = §G2.1, one member',
+    out = {'basis': _nt('member.label.lap_section_basis'),
            'clause': 'F3.2.1', 'equations': ['F2.1-2', 'F3.2.1-1', 'F3.2.1-2', 'F3.2.1-3', 'G2.1-1', 'G2.1-2a',
                                               'G2.1-3a'],
            'statement_source': src('user_input', key='lap_restrained')}

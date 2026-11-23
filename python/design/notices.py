@@ -373,17 +373,143 @@ def attach(result: dict, lists=NOTICE_LISTS) -> dict:
     if not isinstance(result, dict):
         return result
     result['notices'] = notices_of(result, lists)
+    _annotate(result)
     for c in result.get('design_checks') or []:
         if not isinstance(c, dict):
             continue
         for k in _REASON_KEYS + _SU_KEYS:
             c.pop(k, None)
         c.update(reason_fields(c.get('reason')))
+        _annotate(c)                         # 검토 항목의 note · reference.basis · ratio_form …(계산 과정 steps 는 빼고)
         su = c.get('steps_unavailable')
         if su is not None and str(su) != str(c.get('reason')):
             c.update(fields(su, 'steps_unavailable'))
     _attach_blocks(result, lists)
     return result
+
+
+# ---------------------------------------------------------------- 이름표 · 설명 글 (계약 §16.11, K4d)
+# 결과 안의 글 하나(알림)는 옆에 {key}_code · _ko · _template … (fields), 글로 된 사전 · 목록(하중별 배치 이름표, 좌굴값
+# 출처, 랩의 알려진 한계 …)은 옆에 {key}_notices 를 단다 — 사전의 키를 더럽히지 않게.
+_NO_ANNOTATE = ('notices', 'steps', 'design_checks', 'steps_unavailable') + NOTICE_LISTS
+_GOV_GROUP = {
+    'F flexure': 'member.flexure', 'E axial compression': 'member.compression', 'D tension': 'member.tension',
+    'G5 web crippling': 'member.web_crippling', 'H2 bending + shear': 'member.bending_shear',
+    'H3 bending + web crippling': 'member.bending_web_crippling', 'H1.2 axial + bending': 'member.axial_bending',
+    'F positive region': 'member.flexure_positive', 'H1.1-1 tension + bending': 'member.tension_bending',
+}
+_MODES = {
+    'Local Buckling': ('member.label.mode_local', 'local'),
+    'Distortional Buckling': ('member.label.mode_distortional', 'distortional'),
+    'Global/LTB': ('member.label.mode_global_ltb', 'global'), 'Yielding': ('member.label.mode_yielding', 'yielding'),
+    'Rupture': ('member.label.mode_rupture', 'rupture'),
+    'User-supplied weak-axis strength': ('member.label.mode_user_weak_axis', 'global'),
+}
+_GLOBAL_KINDS = {'flexural': 'member.label.mode_global_flexural', 'torsional': 'member.label.mode_global_torsional',
+                 'flexural-torsional': 'member.label.mode_global_flexural_torsional',
+                 'unsupported-nonsymmetric': 'member.label.mode_global_unsupported',
+                 'user/rational analysis': 'member.label.mode_global_user',
+                 'not evaluated': 'member.label.mode_global_not_evaluated'}
+
+
+def _is_notice(x):
+    return isinstance(x, (Notice, NoticeGroup))
+
+
+def _label_entry(x):
+    e = entry(x)
+    if e.get('code') == 'loads.label.pattern_spans_loaded':
+        e['spans'] = [int(v) for v in str(x.values['spans']).split(',') if v.strip()]
+    return e
+
+
+def _mode_notice(mode):
+    """부재의 controlling_mode 글 → 이름표 알림과 그 검토 항목의 끝 이름(local · global …)."""
+    m = str(mode)
+    if m in _MODES:
+        code, tail = _MODES[m]
+        return N(code), tail
+    r = re.fullmatch(r'§I6\.2\.1 R-factor \(R=(.*)\)', m)
+    if r:
+        return Notice(m, 'member.label.mode_r_factor', {'R': _Raw(r.group(1))}), 'uplift_r'
+    g = re.fullmatch(r'Global Buckling \((.*)\)', m)
+    if g:
+        kind = g.group(1)
+        if kind in _GLOBAL_KINDS:
+            return N(_GLOBAL_KINDS[kind]), 'global'
+        return N('member.label.mode_global_other', buckling_type=kind), 'global'
+    return None, None
+
+
+def _governing_check_id(d):
+    name = d.get('governing_check')
+    from design.checks import REGISTRY as CHECKS
+    if name in CHECKS:
+        return name
+    g = _GOV_GROUP.get(str(name))
+    if g is None:
+        return None
+    checks = [c for c in d.get('design_checks') or [] if isinstance(c, dict) and c.get('group') == g]
+    for c in checks:
+        if c.get('governs'):
+            return c['id']
+    ids = [k for k, r in CHECKS.items() if r['group'] == g]
+    return ids[0] if len(ids) == 1 else (checks[0]['id'] if checks else None)
+
+
+def _mode_fields(d, member_type):
+    from design.checks import REGISTRY as CHECKS, connection_check_id
+    if isinstance(d.get('governing_check'), str) and 'governing_check_id' not in d:
+        d['governing_check_id'] = _governing_check_id(d)
+    mode = d.get('controlling_mode')
+    if isinstance(mode, str) and 'controlling_mode_code' not in d:
+        n, tail = _mode_notice(mode)
+        if n is not None:
+            d.update(fields(n, 'controlling_mode'))
+            mt = d.get('member_type', member_type)
+            group = {'tension': 'member.tension', 'compression': 'member.compression'}.get(mt, 'member.flexure')
+            cid = f'{group}.{tail}'
+            d['controlling_mode_id'] = cid if cid in CHECKS else None
+    for k in list(d):
+        if not isinstance(k, str):
+            continue
+        if (k == 'governing_mode' or k.endswith('_governing_mode')) and isinstance(d[k], str) and f'{k}_id' not in d:
+            d[f'{k}_id'] = connection_check_id(d[k])
+
+
+def _annotate(d, member_type=None):
+    if isinstance(d, list):
+        for x in d:
+            _annotate(x, member_type)
+        return
+    if not isinstance(d, dict):
+        return
+    vals = [x for x in d.values() if x is not None]
+    if vals and all(_is_notice(x) for x in vals):
+        return                               # 글로 된 사전(하중별 이름표 …) — 키를 더럽히지 않는다, 위가 {k}_notices 를 단다
+    mt = d.get('member_type', member_type)
+    _mode_fields(d, mt)
+    for k in list(d):
+        v = d[k]
+        if not isinstance(k, str) or k in _NO_ANNOTATE or k.endswith(('_notices', '_params', '_parts')):
+            continue
+        if _is_notice(v):
+            if f'{k}_code' not in d:
+                d.update(fields(v, k))
+        elif isinstance(v, dict):
+            vals = [x for x in v.values() if x is not None]
+            if vals and all(_is_notice(x) for x in vals):
+                d[f'{k}_notices'] = {kk: _label_entry(x) for kk, x in v.items() if x is not None}
+            else:
+                _annotate(v, {'compression': 'compression', 'flexure_x': 'flexure', 'flexure_y': 'flexure',
+                              'tension': 'tension'}.get(k, mt))
+        elif isinstance(v, (list, tuple)) and v:
+            if all(_is_notice(x) for x in v):
+                d[f'{k}_notices'] = [_label_entry(x) for x in v]
+            elif all(isinstance(x, dict) and all(_is_notice(y) for y in x.values()) for x in v) and any(v):
+                d[f'{k}_notices'] = [{kk: _label_entry(y) for kk, y in x.items()} for x in v]
+            else:
+                _annotate(list(v), mt)
 
 
 def _attach_blocks(d: dict, lists):

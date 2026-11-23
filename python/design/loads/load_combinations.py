@@ -11,12 +11,13 @@ be considered"): 없는 하중은 0 으로 둔다. 조합은 지우지 않고 �
 """
 
 import re
+from design.notices import N as _nt  # noqa: E402
 
 
 LOAD_COMBINATION_EDITION = 'ASCE/SEI 7-10'
 LOAD_COMBINATION_REFERENCE = {
-    'LRFD': 'ASCE/SEI 7-10 Sec. 2.3.2 basic combinations (strength design)',
-    'ASD': 'ASCE/SEI 7-10 Sec. 2.4.1 basic combinations (allowable stress design)',
+    'LRFD': _nt('loads.label.combo_ref_lrfd'),
+    'ASD': _nt('loads.label.combo_ref_asd'),
 }
 
 # 조합표에 나오는 하중 기호. 이 밖의 키(예: 'Wp')는 조합 선별에 쓰지 않는다.
@@ -49,20 +50,20 @@ def snow_partial_cases(n_spans: int) -> list:
     캔틸레버(내민) 경간도 한 경간으로 본다(Sec. 7.5.1). 같은 벡터는 한 번만 둔다.
     """
     n = int(n_spans)
-    cases = [('balanced (all spans full)', [1.0] * n)]
+    cases = [(_nt('loads.label.snow_balanced'), [1.0] * n)]
     if n < 2:
         return cases
-    for side, k in (('left', 0), ('right', n - 1)):
+    for side, k in ((_nt('loads.fragment.side_left'), 0), (_nt('loads.fragment.side_right'), n - 1)):
         v = [0.5] * n
         v[k] = 1.0
-        cases.append((f'7.5.1 case 1: {side} exterior span full, others half', v))
+        cases.append((_nt('loads.label.snow_case1', side=side), v))
         v = [1.0] * n
         v[k] = 0.5
-        cases.append((f'7.5.1 case 2: {side} exterior span half, others full', v))
+        cases.append((_nt('loads.label.snow_case2', side=side), v))
     for k in range(n - 1):
         v = [0.5] * n
         v[k] = v[k + 1] = 1.0
-        cases.append((f'7.5.1 case 3: spans {k + 1}-{k + 2} full, others half', v))
+        cases.append((_nt('loads.label.snow_case3', s1=k + 1, s2=k + 2), v))
     unique, seen = [], set()
     for name, v in cases:
         key = tuple(v)
