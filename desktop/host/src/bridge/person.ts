@@ -93,7 +93,7 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
     const html = f.files.find(x => /\.html?$/i.test(x));
     let text: string | null = null;
     if (html) { try { if (fs.statSync(html).size <= 16 * 1024 * 1024) { text = fs.readFileSync(html, 'utf8'); } } catch { text = null; } }
-    ok({ item, kind: f.kind, name: html ? path.basename(html) : null, html: text });
+    ok({ item, kind: f.kind, name: html ? path.basename(html) : null, html: text, files: f.files.map(x => path.basename(x)) });
     return true;
   }
   if (method !== 'POST') { no(405, 'POST'); return true; }
@@ -320,8 +320,6 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         let draftHtml: string | null = null;
         const hf = (pv.draft?.files ?? []).find(f => /\.html?$/i.test(f));
         if (cur && hf) { const abs = insideProject(cur.dir, hf, '03_계산서'); if (abs) { try { const st = fs.statSync(abs); if (st.size <= 16 * 1024 * 1024) { draftHtml = fs.readFileSync(abs, 'utf8'); } } catch { draftHtml = null; } } }
-        served.set(pv.nonce, { expires: Date.parse(pv.expiresAt), used: false });
-        if (served.size > 50) { served.delete(served.keys().next().value as string); }
         ok({ ...pv, draft_html: draftHtml });
         return true;
       }
@@ -331,25 +329,10 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         const fp = typeof b.fingerprint === 'string' ? b.fingerprint.slice(0, 200) : '';
         const nonce = typeof b.nonce === 'string' ? b.nonce.slice(0, 200) : '';
         if (!fp || !nonce) { no(400, 'fingerprint · nonce(미리보기의 것)'); return true; }
-        const known = served.get(nonce);
-        const pre: IssueRefusal | null = !known ? 'nonce-unknown' : known.used ? 'nonce-used' : known.expires <= Date.now() ? 'nonce-expired' : null;
-        if (known) { known.used = true; }
         deps.log('[person] 발행 — 인쇄를 기다린다');
         let r: Awaited<ReturnType<typeof person.issue>>;
-        try { r = await person.issue({ fingerprint: fp, nonce }); }
-        catch (err) {
-          // 판정은 호스트(던졌다). 사람에게 보일 까닭은 부호로 — 호스트의 거절에 부호가 없어 다리가 아는 것으로 가른다(호스트에 바람)
-          let code: IssueRefusal = pre ?? 'failed';
-          if (!pre) {
-            const ck = await deps.action({ action: 'documents', op: 'check' });
-            code = ck?.fingerprint && ck.fingerprint !== fp ? 'changed' : ck?.blocked ? 'blocked' : 'failed';
-          }
-          const msg = String((err as Error)?.message ?? err);
-          deps.log(`[person] 발행 거절(${code}): ${msg}`);
-          if (code === 'failed') { deps.changed('documents'); }
-          no(200, ISSUE_REFUSAL_KO[code], { data: { code, detail: msg.slice(0, 300) } });
-          return true;
-        }
+        // 거절(숫자가 지남 · 이미 씀 · 그 사이 바뀜 · 막는 것 …)은 호스트가 code(host.issue.*)와 함께 던진다 — 아래 catch 가 error_code 로
+        try { r = await person.issue({ fingerprint: fp, nonce }); } catch (err) { deps.changed('documents'); throw err; }
         deps.changed('documents');
         ok({ item: r.item, folder: r.folder, files: r.files.map(f => ({ path: f.path, sha256: f.sha256, size: f.size, role: f.role ?? null })) });
         return true;
@@ -417,7 +400,7 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
     const msg = String((err as Error)?.message ?? err);
     deps.log(`[person] ${name} 실패: ${msg}`);
     // 호스트의 거절 부호(host.review.* 등) — 화면은 그 부호의 한국어 문장을 보인다
-    const code = typeof (err as { code?: unknown })?.code === 'string' && /^host\.[a-z_.-]{1,60}$/.test((err as { code: string }).code) ? (err as { code: string }).code : undefined;
+    const code = typeof (err as { code?: unknown })?.code === 'string' && /^host\.[a-z_.-]{1,80}$/.test((err as { code: string }).code) ? (err as { code: string }).code : undefined;
     no(200, msg, code ? { error_code: code } : {});
     return true;
   }
@@ -432,19 +415,6 @@ function insideProject(dir: string, rel: string, top: string): string | null {
   return abs;
 }
 
-/** 발행 거절의 부호 — 사람에게 보이는 말 */
-type IssueRefusal = 'nonce-unknown' | 'nonce-used' | 'nonce-expired' | 'changed' | 'blocked' | 'failed';
-const ISSUE_REFUSAL_KO: Record<IssueRefusal, string> = {
-  'nonce-unknown': '이 미리보기의 숫자를 모른다 — 발행하지 않았다. 미리보기를 다시 연다',
-  'nonce-used': '이 미리보기의 숫자는 이미 썼다(한 번만) — 발행하지 않았다. 미리보기를 다시 연다',
-  'nonce-expired': '미리보기가 2 분을 넘었다 — 발행하지 않았다. 미리보기를 다시 연다',
-  changed: '미리보기 뒤에 무엇이 바뀌었다(점검의 지문이 다르다) — 발행하지 않았다. 미리보기를 다시 연다',
-  blocked: '발행을 막는 것이 있다 — 발행하지 않았다',
-  failed: '발행하지 못했다 — 「실패한 발행」으로 적혔다(세지 않는다). 까닭을 고치고 같은 차수로 다시',
-};
-/** 이 다리가 내준 일회용 숫자(때 · 썼는가) — 판정은 호스트, 이것은 거절의 까닭을 말하는 데만 */
-const served = new Map<string, { expires: number; used: boolean }>();
-
 /** 기록에 있는 초안 · 발행의 파일(절대 경로) — documents list 가 준 것만, 03_계산서 · 04_발행본 안만 */
 async function docFiles(deps: PersonDeps, dir: string, item: string): Promise<{ kind: 'draft' | 'issue'; files: string[] } | null> {
   if (!/^[A-Za-z0-9-]{1,40}$/.test(item)) { return null; }
@@ -456,6 +426,8 @@ async function docFiles(deps: PersonDeps, dir: string, item: string): Promise<{ 
   const folder = insideProject(dir, String(is.folder), '04_발행본');
   if (!folder) { return null; }
   let names: string[] = [];
-  try { names = fs.readdirSync(folder).filter(n => /\.(html?|pdf)$/i.test(n)); } catch { names = []; }
+  try { names = fs.readdirSync(folder).filter(n => /\.(html?|pdf|csd|json)$/i.test(n)); } catch { names = []; }
+  // 계산서(.calc.)를 먼저 — 미리보기 · 「PDF 열기」 는 계산서
+  names.sort((a, b2) => Number(!/\.calc\./.test(a)) - Number(!/\.calc\./.test(b2)) || a.localeCompare(b2));
   return { kind: 'issue', files: names.map(n => path.join(folder, n)).filter(x => insideProject(dir, path.relative(dir, x), '04_발행본')) };
 }

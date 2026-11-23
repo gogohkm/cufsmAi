@@ -198,7 +198,7 @@ async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
       ], x.left - 120, x.bottom + 2, name);
       return;
     }
-    case 'save-as': fileOp('save'); return;
+    case 'save-as': fileOp('saveas'); return;
     case 'dismiss': rec.outsideDismissed = `${state.full?.project?.case?.name ?? ''}|${rec.status?.saved_at ?? ''}`; render(); return;
     case 'overwrite': r = await person('overwrite'); break;
     default: return;
@@ -370,6 +370,14 @@ function afterRender(center: HTMLElement): void {
   }
 }
 
+/** 템플릿 08 의 상태 표시줄 — 「계산서 · 초안 D-n · 대상 · n쪽 · 발행 불가 · 막는 것 n」(쪽 수는 PDF 를 쓴 때만 — 호스트가 센다) */
+function docStatus(): string {
+  const d = docsState.drafts.find(x => x.kind === 'calc');
+  const c = docsState.check;
+  const pages = state.reports.design?.reply?.pages;
+  return ['계산서', d ? `초안 ${d.item}${d.state === 'stale' ? '(낡음)' : ''}` : '초안 없음', String(state.full?.project?.case?.name ?? ''), pages ? `${pages}쪽` : '',
+    c ? (c.blocked ? `발행 불가 · 막는 것 ${c.blockers.length}` : `${c.revision} 발행 가능`) : ''].filter(Boolean).join(' · ');
+}
 function renderStatus(): void {
   const node = findNode(buildTree(ui.tab), ui.sel[ui.tab]);
   const msg = $('status').querySelector('.msg') as HTMLElement;
@@ -377,6 +385,7 @@ function renderStatus(): void {
   msg.textContent = (ui.screen === 'start' ? (state.file.name ? `열린 검토 대상 ${state.file.name}` : '열린 검토 대상 없음')
     : editing() ? `편집 상태 · 이번 편집 ${editChanges().length} · AI 따라가기 ${following() ? '멈춤(편집 중)' : '꺼짐'}`
     : sr ? `계산 시트 · ${sr.where} · ${sr.name} · §${sr.clause}`
+      : ui.tab === 'doc' && ['rpt', 'pub'].includes(ui.sel[ui.tab]) && docsState.loaded ? docStatus()
       : `${TABS.find(t => t[0] === ui.tab)?.[1] ?? ''} · ${node?.t ?? ''}${state.lastChange ? ` · ${hhmm(state.lastChange.at)} ${state.lastChange.text}` : ''}`).replace(/[‎‏‪-‮⁦-⁩؜]/g, '�');
   const dm = state.runs.find(r => r.us?.design_method)?.us?.design_method;
   ($('status').querySelector('.std') as HTMLElement).innerHTML = `<span${tip(UNITS_NOTE)}>AISI S100-16${dm ? ` · ${esc(dm)}` : ''} · SI</span>`;
@@ -818,14 +827,15 @@ async function claudeOp(op: 'connect' | 'disconnect'): Promise<void> {
  * 사람의 「열기」 · 「저장」 — 끼운 설계 화면의 Open · Save 단추를 누른다(그 화면이 늘 쓰던 길: 웹뷰 → 호스트 → 열기/저장 물음).
  * 다리에 상태를 바꾸는 새 경로를 두지 않는다.
  */
-function fileOp(action: 'open' | 'save'): void {
+function fileOp(action: 'open' | 'save' | 'saveas'): void {
   // 프로젝트의 검토 대상이면 「저장」 은 그 대상 파일에(호스트 동작 save_case — 중계라 사람의 것으로 적힌다). 끼운 화면의 Save 는 늘 「다른 이름으로」 다
   const pj = state.full?.project;
   if (action === 'save' && pj?.inProject && pj?.case && !pj?.readOnly) {
     void mcp<any>('save_case').then(r => { toast(r?.error ? `저장하지 못했다 — ${String(r.error)}` : `저장했다 — ${String(pj.case?.name ?? '')}`, r?.error ? 'warning' : 'info'); scheduleRefresh(); });
     return;
   }
-  if (postToWebviews({ type: 'click', id: action === 'open' ? 'btn-file-open' : 'btn-file-save' }, 'designer')) { return; }
+  // 8459629: 끼운 화면의 Save 는 프로젝트의 대상이면 그 대상에, 「Save As」 는 따로(btn-file-saveas) — 「다른 이름으로 저장」 은 늘 그것
+  if (postToWebviews({ type: 'click', id: action === 'open' ? 'btn-file-open' : action === 'saveas' ? 'btn-file-saveas' : 'btn-file-save' }, 'designer')) { return; }
   toast('입력 화면이 아직 붙지 않았다 — 잠시 뒤 다시', 'warning');
 }
 

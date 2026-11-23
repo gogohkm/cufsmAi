@@ -80,7 +80,7 @@
 | `platform:openExternal` · `platform:reveal` | `{target}` |
 | `webview:created` · `webview:disposed` · `webview:html` | `{id, viewType, title?, url?}` — 좌굴 보고서 칸을 열고 닫고 다시 읽는다 |
 | `webview:client` · `webview:ready` · `webview:refused` | 페이지가 붙음 · 다시 보내기 끝 `{replayed}` · 고정 패널 닫기를 숨김으로 바꿈 |
-| `file:current` | `{file, name}` — 열기 · 저장이 성공한 `.csd` |
+| `file:current` | `{file, name}` — 지금 파일. 호스트의 사건 `panel.onCaseFile` (열기 · 저장 · 놓음, 8459629)과 `panel.caseFile()` 에서만 — 알림 글 · 대화상자의 답으로 짐작하지 않는다 |
 | `claude:status` | `GET /api/claude/status` 와 같은 것 — 「연결」 · 「끊기」 뒤 |
 | `host:message` | **U1** — 호스트가 설계 패널에 메시지를 보낼 때마다 `{id, viewType, command, seq}`(본문 없음 — `/api/wv/<id>/last` 로 읽는다). **U3**: `focusRequest`(AI 의 「여기를 보세요」 — 보기 계약 3절)는 본문을 `focus` 로, **U4**: `caseDiscarded`(저장하지 않은 변경을 버리고 열었다 — K2-6)는 본문을 `discarded` 로 싣는다. **U5**: `validationResult` 는 `validation: {case_rev, items: 수}` 만(본문은 싣지 않는다 — 새 화면은 그것을 신호로 호스트 동작 `validate_design` 을 다시 읽는다) — 다시 보내기 기록에 남지 않으므로(아래 ③) 새 화면은 이 이벤트로 한 번만 받는다. 다시 붙은 같은 페이지가 `Last-Event-ID` 로 다시 받으면 화면이 `request_id` 로 한 번만 따른다 |
 

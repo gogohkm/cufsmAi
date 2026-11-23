@@ -182,9 +182,16 @@ export interface HostHandle {
   editSession(state: EditSessionState): { ok: boolean; backToStart?: boolean; restored?: string[] } | null;
   /** R2-3: AI(MCP 문맥)의 호스트 동작이 시작 · 끝날 때 — 띠 「AI 작업 중 · <도구> · 경과」 */
   onAiWork(cb: (w: AiWork) => void): void;
+  /** 8459629: 지금 파일의 사건(열기 · 저장 · 놓음) — 호스트의 panel.onCaseFile. 알림 글을 읽지 않는다 */
+  onCaseFile(cb: (e: CaseFileEvent) => void): void;
+  /** 지금 파일(경로) — 호스트의 panel.caseFile(). 패널이 없으면 null */
+  caseFile(): string | null;
   unimplemented():Array<{ name: string; count: number }>;
   dispose(): Promise<void>;
 }
+
+/** 지금 파일의 사건(호스트 panel.onCaseFile — 경로가 든다, 같은 프로세스만) */
+export interface CaseFileEvent { event: 'opened' | 'saved' | 'closed'; path: string | null; by: 'person' | 'ai'; at: string }
 
 const SHIM_FILENAME = path.join(__dirname, '__stcfsd_vscode_shim__.js');
 const DESIGNER_VIEW_TYPE = 'stcfsd.designer';
@@ -420,7 +427,8 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { projectRoots?: string[]; prototype?: Record<string, unknown>;
       currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any>; recordsPerson?: RecordsPersonFace | null;
-        editSession?: (s: string) => { ok: boolean; backToStart?: boolean; restored?: string[] }; onAiActivity?: (l: (e: any) => void) => () => void } } };
+        editSession?: (s: string) => { ok: boolean; backToStart?: boolean; restored?: string[] }; onAiActivity?: (l: (e: any) => void) => () => void;
+        onCaseFile?: (l: (e: CaseFileEvent) => void) => () => void; caseFile?: () => { path: string | null } } } };
     let screenSecretValue: string | null = null;
     let currentActor: (() => { kind?: string; tool?: string; requestId?: string; client?: string } | undefined) | null = null;
     let runAsPerson: (<T>(fn: () => T) => T) | null = null;
@@ -445,6 +453,17 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
         for (const cb of aiWorkCbs) { try { cb(w); } catch { /* 띠가 동작을 막지 않는다 */ } }
       });
     };
+    // 지금 파일 — 호스트의 panel.onCaseFile(8459629). 패널이 아직 없으면 생길 때 다시 붙는다(아래 subscribeCase)
+    const caseFileCbs: Array<(e: CaseFileEvent) => void> = [];
+    let caseSubscribedTo: unknown = null;
+    const subscribeCase = (): void => {
+      const p = panelMod.StcfsdPanel?.currentPanel;
+      if (!p || caseSubscribedTo === p || typeof p.onCaseFile !== 'function') { return; }
+      caseSubscribedTo = p;
+      p.onCaseFile((e) => { for (const cb of caseFileCbs) { try { cb(e); } catch { /* 제목 표시줄이 파일 길을 막지 않는다 */ } } });
+    };
+    // 패널이 새로 생기면(웹뷰를 닫고 다시 연 때) 그 패널에 다시 붙는다 — 웹뷰 메시지가 오갈 때마다 값싸게 본다
+    runtime.hub.onDidPostMessage.event(() => { if (caseFileCbs.length) { subscribeCase(); } });
     void currentActor;
     const designer: DesignerPanel = {
       id: info.id,
@@ -542,6 +561,8 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
         return runAsPerson(() => p.editSession!(state));
       },
       onAiWork: (cb) => { aiWorkCbs.push(cb); subscribeAi(); },
+      onCaseFile: (cb) => { caseFileCbs.push(cb); subscribeCase(); },
+      caseFile: () => { subscribeCase(); const p = panelMod.StcfsdPanel?.currentPanel; try { return p && typeof p.caseFile === 'function' ? p.caseFile().path : null; } catch { return null; } },
       writeRecoveryCopy: async (file, root) => {
         const p = panelMod.StcfsdPanel?.currentPanel;
         if (!p || typeof p.writeRecoveryCopy !== 'function') { return { ok: false, error: '설계 패널이 없거나 이 판의 호스트에 복구 사본 쓰기가 없다' }; }

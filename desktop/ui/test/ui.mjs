@@ -2972,10 +2972,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await waitFor(`document.querySelector('#info [data-issue-check]')?.dataset.blocked==='0' ? 1 : (window.__stcfsdUi.reload(), null)`, 120_000, '새 초안 뒤 막는 것 0').catch(() => undefined);
     const ready = await docCheck();
     return { ok: !/^status 200/.test(String(wvTry)) && [401, 403].includes(m1) && [401, 403].includes(m2) && k1 === 403 && k2 === 403 && o1 === 403 && !!relay?.error && !!tool?.error
-        && pre?.json?.success === false && used?.code === 'nonce-used' && /이미 썼다/.test(used?.text ?? '') && used?.reopen && changed?.code === 'changed' && /바뀌었다/.test(changed?.text ?? '')
-        && !!exp && ['nonce-expired', 'nonce-used'].includes(late?.json?.data?.code) && before === after && ready.blocked === false,
+        && pre?.json?.success === false && pre?.json?.error_code === 'host.issue.changed' && used?.code === 'host.issue.used' && used?.text === hostKo('host.issue.used') && used?.reopen
+        && changed?.code === 'host.issue.changed' && changed?.text === hostKo('host.issue.changed')
+        && !!exp && ['host.issue.expired', 'host.issue.no-preview'].includes(late?.json?.error_code) && before === after && ready.blocked === false,
       detail: `웹뷰 fetch ${wvTry} · MCP 토큰 미리보기 ${m1} · 발행 ${m2} · 열쇠 없음 ${k1} · 내보내기 열쇠 없음 ${k2} · Origin 다름 ${o1} · 중계 documents issue → ${short(relay?.error ?? '받음', 50)} · 도구 → ${short(tool?.error ?? '받음', 40)}`
-        + ` · 숫자를 먼저 씀 ${pre?.json?.data?.code} → 화면 ${used?.code} 「${short(used?.text, 50)}」 · 그 사이 바뀜 → ${changed?.code} 「${short(changed?.text, 40)}」 · 지남 → 「${short(exp, 40)}」 · 지난 숫자 ${late?.json?.data?.code}`
+        + ` · 숫자를 먼저 씀 ${pre?.json?.error_code} → 화면 ${used?.code} 「${short(used?.text, 50)}」 · 그 사이 바뀜 → ${changed?.code} 「${short(changed?.text, 40)}」 · 지남 → 「${short(exp, 40)}」 · 지난 숫자 ${late?.json?.error_code}`
         + ` · 04_발행본 그대로 ${before === after} · 새 초안 뒤 막는 것 ${(ready.blockers ?? []).map(b => b.code).join(',') || '없음'}` };
   });
   await step('r36 R5 증거(2) — 미리보기(막는 것 · 경고 · 통과 · 묶일 파일 · 차수 · 첫 쪽 · 확인의 뜻) → 「R0 발행」(사람의 길 · 보이지 않는 진짜 인쇄 · 「인쇄 중」) · 문서 탭 「R0 · 날짜 · 발행한 사람 · 그대로」 · 시작 화면 「발행 R0」', 'r36_issue_r0', async () => {
@@ -2985,7 +2986,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await ev(`document.querySelector('#info [data-issue-open]').click()`);
     await waitFor(`!!document.querySelector('#issue-host [data-issue-preview]')`, 20_000, '미리보기');
     const meaningKo = (await act2({ action: 'get_reviews' })).meaning_ko;
-    const pv = await ev(`(()=>{const d=document.querySelector('#issue-host [data-issue-preview]'); return {label:d.dataset.label, rev:d.querySelector('[data-pv-revision]')?.textContent, files:[...d.querySelectorAll('[data-pv-files] li')].map(l=>l.textContent), frame:!!d.querySelector('iframe[sandbox=""]'), meaning:d.querySelector('[data-pv-meaning]')?.textContent ?? '', off:d.querySelector('[data-pv="issue"]')?.disabled, blockers:[...d.querySelectorAll('[data-blocker]')].map(e=>e.dataset.blocker)};})()`);
+    // 첫 쪽 = 호스트의 stamped_doc(발행 도장 · 이 PC 의 날짜)을 공유 그리기로 — 그림 위에 덧댄 표지가 아니다
+    const today = await ev(`(()=>{const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})()`);
+    const casePath = await ev(`${S}.state.file.path`);
+    const caseSha = casePath && fs.existsSync(casePath) ? sha(casePath) : null;
+    const pv = await ev(`(()=>{const d=document.querySelector('#issue-host [data-issue-preview]'); const f=d.querySelector('iframe[sandbox=""]'); const src=f?.getAttribute('srcdoc') ?? ''; return {label:d.dataset.label, rev:d.querySelector('[data-pv-revision]')?.textContent, files:[...d.querySelectorAll('[data-pv-files] li')].map(l=>l.dataset.role+':'+l.textContent), frame:!!f, stamped:/report-stamp-issued/.test(src), stampDate:src.includes(${JSON.stringify(today)}), chip:!!d.querySelector('[data-pv-stamp]'), passed:d.querySelector('[data-pv-passed]')?.textContent ?? '', meaning:d.querySelector('[data-pv-meaning]')?.textContent ?? '', off:d.querySelector('[data-pv="issue"]')?.disabled, blockers:[...d.querySelectorAll('[data-blocker]')].map(e=>e.dataset.blocker)};})()`);
     await shot('r36_issue_preview_1920_dark');
     await ev(`document.querySelector('#issue-host [data-pv="issue"]').click()`);
     const printing = await waitFor(`/인쇄 중/.test(document.querySelector('#issue-host')?.textContent ?? '') || /인쇄 중/.test(document.querySelector('.status .prog')?.textContent ?? '') ? 1 : null`, 10_000, '인쇄 중').catch(() => null);
@@ -2999,6 +3004,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const pdf = files.find(f => /\.pdf$/i.test(f));
     const pdfHead = pdf ? fs.readFileSync(path.join(dir, pdf)).subarray(0, 5).toString('latin1') : '';
     if (issued) { issued.dir = dir; issued.hashes = Object.fromEntries(files.map(f => [f, sha(path.join(dir, f))])); }
+    const csdCopy = files.find(f => /\.csd$/i.test(f));
+    const csdCopySha = csdCopy ? sha(path.join(dir, csdCopy)) : null;
+    const pdfs = files.filter(f => /\.pdf$/i.test(f)).map(f => fs.readFileSync(path.join(dir, f)).subarray(0, 5).toString('latin1'));
+    let roles = [];
+    try { const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')); roles = Array.isArray(m.files) ? m.files.map(f => f.role) : Object.values(m.roles ?? {}).flat(); } catch { roles = []; }
     const toasts = await ev(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(-2).join(' / ')`);
     if (issued) { await select('doc', `iss:${issued.item}`); await sleep(800); await shot('r36_issued_r0_1920_dark'); }
     await ev(`${S}.start()`);
@@ -3007,8 +3017,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await shot('r36_start_issued_1920_dark');
     await ev(`${S}.review()`);
     return { ok: pv.label === 'R0' && startR0 === '발행 R0' && pv.frame && pv.off === false && pv.blockers.length === 0 && pv.meaning.includes(meaningKo) && !!meaningKo
-        && !!printing && issued?.revision === 0 && issued?.state === 'same' && files.length >= 3 && pdfHead === '%PDF-' && /R0/.test(row ?? '') && /그대로/.test(row ?? ''),
-      detail: `미리보기 ${pv.label}(${pv.rev}) 파일 ${pv.files.join(', ')} · 첫 쪽 sandbox ${pv.frame} · 발행 단추 꺼짐 ${pv.off}`
+        && pv.stamped && pv.stampDate && !pv.chip && pv.files.some(f => f.startsWith('case-file:')) && pv.files.some(f => f.startsWith('manifest:')) && pv.files.some(f => f.startsWith('validation-pdf:')) && !/[A-Za-z]{5,}-[a-z]/.test(pv.passed)
+        && !!printing && issued?.revision === 0 && issued?.state === 'same' && files.length === pv.files.length && pdfHead === '%PDF-' && /R0/.test(row ?? '') && /그대로/.test(row ?? '')
+        && !!csdCopy && csdCopySha === caseSha && pdfs.every(h => h === '%PDF-') && roles.includes('case-file'),
+      detail: `미리보기 ${pv.label}(${pv.rev}) 묶음 ${pv.files.length} ${pv.files.map(f => f.split(':')[0]).join(', ')} · 첫 쪽 sandbox ${pv.frame} · 발행 도장 ${pv.stamped} · 지역 날짜 ${today} ${pv.stampDate} · 덧댄 표지 ${pv.chip} · 통과 「${short(pv.passed, 40)}」 · 발행 단추 꺼짐 ${pv.off}`
+        + ` · .csd 사본 = 발행 직전 디스크의 바이트 ${csdCopySha === caseSha}(지금 파일 ${casePath ? path.basename(casePath) : '없음'}) · PDF ${pdfs.length} 개 모두 %PDF- ${pdfs.every(h => h === '%PDF-')} · 목록의 역할 ${roles.join(', ')}`
         + ` · 인쇄 중 ${!!printing} → 발행 ${issued?.item} R${issued?.revision} ${issued?.state_ko} · 폴더 ${files.join(', ')} · PDF 머리 ${pdfHead} · 트리 「${row}」 · 시작 화면 「${startR0}」 · 알림 ${short(toasts, 100)}` };
   });
   await step('r37 R0 뒤 — 모델을 바꿔 저장해도 R0 의 파일이 바이트까지 그대로 · 손으로 고치면 문서 탭이 「고쳐짐」 과 그 파일 · 발행본은 읽기 전용(해시 상태 띠) · 「초안으로 내보내기」 는 막는 것과 무관(저장 대화상자)', 'r37_issue_hashes', async () => {
@@ -3027,7 +3040,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await waitFor(`/고쳐짐/.test(document.querySelector('#tree .row[data-k="iss:${issued.item}"]')?.textContent ?? '')`, 20_000, '고쳐짐').catch(() => undefined);
     const row = await ev(`document.querySelector('#tree .row[data-k="iss:${issued.item}"]')?.textContent ?? null`);
     await select('doc', `iss:${issued.item}`);
-    await waitFor(`!!document.querySelector('#info [data-issue-files]')`, 15_000, '다른 파일').catch(() => undefined);
+    await waitFor(`document.querySelectorAll('#info [data-issue-files] li[data-file-state]').length >= ${Object.keys(issued.hashes).length}`, 15_000, '발행본의 파일 모두').catch(() => undefined);
     const inf = await ev(`({files:[...document.querySelectorAll('#info [data-issue-files] li')].map(l=>l.textContent), banner:document.querySelector('#center [data-issue-state]')?.textContent ?? null, frame:!!document.querySelector('#center iframe[sandbox=""][data-doc-frame]')})`);
     const l2 = (await docList()).issues?.[0];
     await shot('r37_issue_edited_1920_dark');
@@ -3043,7 +3056,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     if (fd) { await dlgInput(out); }
     await waitFor(`/내보냈다/.test([...document.querySelectorAll('.toast')].map(t=>t.textContent).join(' ')) ? 1 : null`, 20_000, '내보냄').catch(() => null);
     const outHead = fs.existsSync(out) ? fs.readFileSync(out).subarray(0, 5).toString('latin1') : null;
-    return { ok: same && l1?.state === 'same' && /고쳐짐/.test(row ?? '') && l2?.state === 'edited' && inf.files.some(f => f.includes(html) && /고쳐짐/.test(f)) && /고쳐짐/.test(inf.banner ?? '') && inf.frame && blockedNow === true && !!fd && !!outHead,
+    return { ok: same && l1?.state === 'same' && /고쳐짐/.test(row ?? '') && l2?.state === 'edited' && inf.files.some(f => f.includes(html) && /고쳐짐/.test(f)) && inf.files.length === Object.keys(issued.hashes).length && inf.files.filter(f => /그대로/.test(f)).length === inf.files.length - 1 && /고쳐짐/.test(inf.banner ?? '') && inf.frame && blockedNow === true && !!fd && !!outHead,
       detail: `모델을 바꿔 저장 → R0 파일 ${Object.keys(issued.hashes).length} 개 바이트 그대로 ${same}(documents ${l1?.state_ko}) · ${html} 끝에 한 줄 → 트리 「${row}」 · 정보 창 ${inf.files.join(' · ')} · 띠 「${short(inf.banner, 60)}」 · 읽기 전용 sandbox ${inf.frame} · 막는 것이 있는 지금(${blockedNow}) 「초안으로 내보내기」 → 물음 「${fd}」 → ${outHead ? `${path.basename(out)}(${outHead})` : '없음'}` };
   });
 

@@ -215,21 +215,9 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     currentFile = file;
     bus.emit('file:current', 'bridge', { file: currentFile ?? null, name: currentFile ? path.basename(currentFile) : null });
   };
-  let pendingFile: string | undefined;
-  platform.onDialogAnswered = (req, paths) => {
-    const csd = !req.filters || Object.values(req.filters).flat().some(e => e === 'csd');
-    pendingFile = csd && paths?.[0] ? paths[0] : undefined;
-  };
-  platform.onNotify = req => {
-    // b582779 부터 호스트의 열기 · 저장 알림은 한국어(「프로젝트를 열었습니다(알림 있음): …」 · 「프로젝트를 저장했습니다: <경로>」) — 옛 영어도 받는다.
-    // 알림 글로 가르는 것은 임시다(호스트에 바람: 열기 · 저장의 경로를 실은 구조 이벤트)
-    const m = /^(?:Project (?:loaded|saved)(?: with notes)?|프로젝트를 (?:열었습니다|저장했습니다)(?:\(알림 있음\))?)(?:: (.+))?$/s.exec(req.message);
-    if (m && req.severity !== 'error') {
-      const named = m[1] && fs.existsSync(m[1].trim()) ? m[1].trim() : undefined;
-      if (named || pendingFile) { setCurrentFile(named ?? pendingFile); }
-      pendingFile = undefined;
-    } else if (req.severity === 'error') { pendingFile = undefined; }
-  };
+  // 지금 파일은 호스트의 사건(panel.onCaseFile — 열기 · 저장 · 놓음, 8459629)에서만. 알림 글 · 대화상자의 답으로 짐작하지 않는다
+  host.onCaseFile(e => { setCurrentFile(e.event === 'closed' ? undefined : (e.path ?? undefined)); });
+  { const now = host.caseFile(); if (now) { setCurrentFile(now); } }
 
   // ── 플랫폼(호스트의 물음) ──────────────────────────────────────────
   const detachPlatform = platform.attach({
@@ -630,8 +618,6 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       if (disposing) { return; }
       disposing = true;
       for (const s of subs) { s.dispose(); }
-      platform.onDialogAnswered = undefined;
-      platform.onNotify = undefined;
       detachPlatform();
       for (const ch of channels.values()) { ch.close('bridge closed'); }
       bus.closeAll();
