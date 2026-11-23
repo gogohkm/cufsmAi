@@ -2672,6 +2672,20 @@ export class StcfsdPanel implements McpPanelInterface {
         return name;
     }
 
+    /**
+     * V6b-01: 지점 위 격자점의 전단 포락값은 지점 한쪽 면의 값이다(격자가 지점에서 값 하나). 그 지점의 위치 항목이 양쪽 면
+     * (Vu_left · Vu_right — 면마다 |V| 포락)을 준다: 구간 안에 든 지점이면 큰 면, 구간이 그 지점에서 끝나면 그 구간 쪽 면.
+     */
+    private static _supportFace(env: any, support: number, x: number, x0: number, x1: number): { V: number; side: 'left' | 'right' } | null {
+        const L = (Array.isArray(env?.locations) ? env.locations : []).find((l: any) => l?.support === support
+            && Number.isFinite(l?.Vu_left) && Number.isFinite(l?.Vu_right));
+        if (!L) { return null; }
+        const tol = 1e-6 * Math.max(1, Math.abs(x));
+        const vl = Math.abs(L.Vu_left), vr = Math.abs(L.Vu_right);
+        const side: 'left' | 'right' = x <= x0 + tol ? 'right' : (x >= x1 - tol ? 'left' : (vl >= vr ? 'left' : 'right'));
+        return { V: side === 'left' ? vl : vr, side };
+    }
+
     /** 조합 이름 + 패턴(있으면): '3: D+Lr [Lr: spans 1,3,4 loaded]' */
     private static _comboLabel(combo: any, pattern: any): string | null {
         if (typeof combo !== 'string' || !combo) { return null; }
@@ -2889,8 +2903,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 const envAt = this._envelopeAt(gravity, x, host.dsm === dsmNeg ? '-' : '+');
                 const mAt = supLoc && Number.isFinite(supLoc.Mu) ? Math.abs(supLoc.Mu) * 12
                     : (envAt ? envAt.M * 12 : undefined);
-                const vSides = [supLoc?.Vu_left, supLoc?.Vu_right].filter((v) => Number.isFinite(v)).map((v) => Math.abs(v));
-                const vAt = vSides.length > 0 ? Math.max(...vSides) : envAt?.V;
+                // V6b-01: 지점 면의 전단 — 지점이 구간 안이면 큰 면, 구간 끝이면 그 구간 쪽 면(위치 항목의 Vu_left · Vu_right)
+                const faceAt = StcfsdPanel._supportFace(gravity, wc.support, x, Number(host.src.start_ft), Number(host.src.end_ft));
+                const vAt = faceAt ? (envAt && Math.abs(envAt.V - faceAt.V) <= 5e-4 ? envAt.V : faceAt.V) : envAt?.V;
                 const arr = supportsAt.get(host.id) || [];
                 // V6-08: 지점 위치 항목의 값이면 그 항목의 조합 · 패턴, 포락선이면 그 판단은 아래(_demandCombination)
                 const fromLoc = !!supLoc && Number.isFinite(supLoc.Mu);
@@ -2910,8 +2925,17 @@ export class StcfsdPanel implements McpPanelInterface {
             const Mu = Number(r.M_max_abs) * 12;   // kip-ft → kip-in
             // 하부 플랜지 압축 구간(부모멘트 · 랩 · 양력 하부압축)은 −Mxx 곡선, 상부 압축은 +Mxx(V2-06).
             const sign: '+' | '-' = rg.dsm === dsmNeg ? '-' : '+';
-            const pts = this._envelopeScan(rg.env, x0, x1, sign);
-            const atMmax = r.x_M_max_ft != null ? this._envelopeAt(rg.env, Number(r.x_M_max_ft), sign) : undefined;
+            // V6b-01: 지점 위 격자점의 V 는 그 지점 면의 값으로 바꾼다(_supportFace) — M_max · V_max 지점이 지점 위일 때
+            const onFace = <T extends { x: number; V: number }>(p: T | undefined): T | undefined => {
+                if (!p) { return p; }
+                const k = supportsFt.findIndex((xs) => Math.abs(xs - p.x) <= 1e-6 * Math.max(1, Math.abs(p.x)));
+                const f = k >= 0 ? StcfsdPanel._supportFace(rg.env, k + 1, p.x, x0, x1) : null;
+                // 격자가 이미 그 면의 값이면(면 값은 소수 3자리 — 그 반올림 안) 격자의 반올림 전 값 · 출처를 그대로
+                if (f && Math.abs(p.V - f.V) <= 5e-4) { return p; }
+                return f ? { ...p, V: f.V } : p;
+            };
+            const pts = this._envelopeScan(rg.env, x0, x1, sign).map((p) => onFace(p)!);
+            const atMmax = onFace(r.x_M_max_ft != null ? this._envelopeAt(rg.env, Number(r.x_M_max_ft), sign) : undefined);
             const pV = pts.length > 0 ? pts.reduce((a, b) => (b.V > a.V ? b : a)) : undefined;
             const dsm = this._dsmForDesign(null, rg.dsm, fy, sign);
             const share = rg.lap ? 0.5 : 1.0;

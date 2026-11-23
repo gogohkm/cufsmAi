@@ -478,10 +478,24 @@ function checkPurlinStations(tag, full) {
       const M = c.Mu / 12 / share;
       const V = c.Vu === null ? null : c.Vu / share;
       const envM = sign > 0 ? Math.max(0, env.M_envelope_max[i]) : Math.max(0, -env.M_envelope_min[i]);
-      const envV = Math.max(Math.abs(env.V_envelope_max[i]), Math.abs(env.V_envelope_min[i]));
+      let envV = Math.max(Math.abs(env.V_envelope_max[i]), Math.abs(env.V_envelope_min[i]));
+      // V6b-01: 지점 위의 검토 지점은 격자(한쪽 면)가 아니라 하중 해석의 지점 면 전단(Vu_left · Vu_right) — 지점이 구간 안이면 큰 면,
+      // 구간이 그 지점에서 끝나면 그 구간 쪽 면. 이 시험이 위치 항목에서 따로 고른다(면 값은 소수 3자리 — 그만큼의 허용).
+      const kSup = supportsFt.findIndex((xs) => Math.abs(xs - x) <= 1e-6 * Math.max(1, Math.abs(x)));
+      const faceLoc = kSup >= 0 ? env.locations.find((l) => l.support === kSup + 1 && Number.isFinite(l.Vu_left) && Number.isFinite(l.Vu_right)) : null;
+      if (faceLoc) {
+        const vl = Math.abs(faceLoc.Vu_left), vr = Math.abs(faceLoc.Vu_right);
+        const side = x <= g.start_ft + 1e-6 ? 'right' : (x >= g.end_ft - 1e-6 ? 'left' : (vl >= vr ? 'left' : 'right'));
+        envV = side === 'left' ? vl : vr;
+        if (V !== null) {
+          assert(Math.abs(V - envV) <= 6e-4, `${at}: V ${V} on support ${kSup + 1} = the ${side} face ${envV} of the load analysis — V6b-01`);
+          tally.faces = (tally.faces || 0) + 1;
+          if (envV + 1e-9 < Math.max(vl, vr)) { tally.ownFaceSmaller = (tally.ownFaceSmaller || 0) + 1; }
+        }
+      }
       if (c.check_point === 'M_max' || c.check_point === 'V_max') {
         assert(near(M, envM), `${at}: M ${M} kip-ft is the ${sign > 0 ? '+' : '−'}M envelope at x = ${env.x_diagram[i]} ft (${envM}) — V6-09`);
-        if (c.check_point === 'V_max') { assert(near(V, envV), `${at}: V ${V} = |V| envelope ${envV}`); }
+        if (c.check_point === 'V_max') { assert(faceLoc ? Math.abs(V - envV) <= 6e-4 : near(V, envV), `${at}: V ${V} = |V| envelope ${envV}`); }
       }
       // 조합: 'envelope' 이 아니면 그 이름의 도표(또는 그 자리 위치 항목)가 쓴 값을 낸다 — V6-08
       tally.points++;
@@ -661,10 +675,16 @@ async function main() {
     // 3. 엔진 인자 이름 (Python 필요) · 3b 의 엔진 dict 키 ------------------------------------
     const engineKeys = {};
     const aisiSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'aisi_s100.py'), 'utf8');
-    engineKeys.aisi_design = [...new Set([...aisiSrc.matchAll(/params\.get\('([A-Za-z_0-9]+)'/g)].map((m) => m[1]))];
+    // 엔진 07caad7: Cmx · Cmy 는 _cm('Cmx', …) 안의 params.get(key) 로 읽는다 — 그 이름도 엔진이 읽는 키
+    engineKeys.aisi_design = [...new Set([...aisiSrc.matchAll(/(?:params\.get|_cm)\('([A-Za-z_0-9]+)'/g)].map((m) => m[1]))];
     const lapSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'lap_connection.py'), 'utf8');
     engineKeys.lap_connection = [...new Set([...lapSrc.matchAll(/params\.get\('([A-Za-z_0-9]+)'/g)].map((m) => m[1])
       .concat(['Pnvs', 'Fub', 'bolt_grade', 'threads_excluded', 'mf', 'hole_type']))];
+    // 엔진 17ad004: 랩 구속 진술은 aisi_s100.LAP_STATEMENT_KEYS(lap_restrained · 옛 이름 distortion_restrained)로 읽는다
+    const lapStmt = aisiSrc.match(/^LAP_STATEMENT_KEYS = \(([^)]*)\)/m);
+    const lapStmtKeys = lapStmt ? [...lapStmt[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : [];
+    engineKeys.aisi_design.push(...lapStmtKeys);
+    engineKeys.lap_connection.push(...lapStmtKeys);
     engineKeys.aisi_guide = ['query_type'];
     // K4a: 엔진이 모든 설계 dict 에서 받는 꼬리표(design.checks.CONTEXT_KEYS — 접합은 _KNOWN_KEYS 밖에서 따로 받는다)
     const checksSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'checks.py'), 'utf8');
@@ -1098,7 +1118,7 @@ async function main() {
     }
     assert(multiPoint > 0, 'some purlin region has more than one check point (V_max or a support)');
     const st2 = checkPurlinStations('design_purlin cont-2', pUS);
-    results.push(`design_purlin cont-2 stations: ${st2.points} check points = load-analysis envelope (sign of the checked flange), ${st2.labelled} labelled with the combination that produced them, ${st2.envelope} 'envelope'`);
+    results.push(`design_purlin cont-2 stations: ${st2.points} check points = load-analysis envelope (sign of the checked flange), ${st2.labelled} labelled with the combination that produced them, ${st2.envelope} 'envelope'; V6b-01: ${st2.faces || 0} points on a support use the load-analysis face shear (${st2.ownFaceSmaller || 0} on the smaller face — the region ends there)`);
     assert(lapNotes > 0, 'a lap region carries the host lap assumption on its check points');
     results.push(`design_purlin: ${pUS.regions.length} regions, ${multiPoint} with several check points — design_checks · x · combination per point`);
     for (const g of [pUS.regions[0], pUS.regions.find((x) => x.members === 2)].filter(Boolean)) {

@@ -223,6 +223,8 @@ function convertStep(obj: any, ctx: Ctx): any {
     }
     const u = STEP_UNIT[unitStr];
     const out: any = { ...obj };
+    // V6-16 나머지: 끝없는 값의 옛 단계(Fcre = ∞ 를 1e6 ksi 표지로 싣는 것 — 엔진이 unbounded: true 를 붙인다)는 바꾸지 않는다
+    if (obj.unbounded === true) { return { ...out, unit_note: 'unbounded (∞) — the number is the engine placeholder, not converted' }; }
     if (u && typeof obj.value === 'number') {
         out.value = convNum(obj.value, u, ctx.dir);
         out.unit = ctx.dir === 'toSI' ? UNIT_LABEL[u].SI : UNIT_LABEL[u].US;
