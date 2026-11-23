@@ -22,6 +22,7 @@ import { closeMenu, installMenuClosers, menuKey, menuOpen, openMenu, type MenuIt
 import { neighbours, sheetHtml } from './sheet';
 import { initStart, renderStart } from './start';
 import { makeReport, refresh, rowOfKey, setRunning, setValRunning, state, type Stage } from './store';
+import { bandHtml, KIND_KO, loadRecent, person, rec } from './records';
 import { flashTip, installTips } from './tips';
 import { claudeDone, claudeStatus, initTitlebar, renderClaude, renderFollow, renderTitle, type ClaudeStatus } from './titlebar';
 import { buildTree, findNode, keysUnder, setTreeFilter, TABS, treeFilter, treeHtml, type Tab } from './tree';
@@ -118,17 +119,101 @@ async function recompute(): Promise<void> {
   render();
 }
 
+// ── 기록(R1-3) — 띠 · 사람만 하는 일 · 제목 표시줄의 고르기 ─────────────────
+function renderBand(): void {
+  const el = $('recband');
+  const b = bandHtml();
+  el.hidden = !b;
+  if (b) { el.innerHTML = b.html; el.setAttribute('data-kind', b.kind); }
+}
+/** 사람만 하는 일 · 대상을 바꾸는 일 — 다리의 /api/person/*. 답의 까닭을 그대로 알린다 */
+async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
+  const name = el?.getAttribute('data-name') ?? '';
+  const kind = el?.getAttribute('data-kind') ?? '';
+  let r: { ok: boolean; data?: any; error?: string; status: number } | null = null;
+  switch (act) {
+    case 'open-folder': r = await person('open-folder'); break;
+    case 'new-project': r = await person('new-project'); break;
+    case 'open-project': r = await person('open-project', { name }); break;
+    case 'open-case': r = await person('open-case', { name }); break;
+    case 'new-case':
+      if (!state.full?.project?.inProject) {
+        if (kind === 'section-only') { toReview(); return; }
+        toast('새 검토 대상은 프로젝트 안에 만든다 — 먼저 「폴더에서 열기」나 「새 프로젝트」', 'warning');
+        return;
+      }
+      r = await person('new-case', { kind });
+      break;
+    case 'make-project': case 'as-new': case 'make-project-now': {
+      // 열린 프로젝트가 없으면 묻지 않고 먼저 고르게 한다(다리에 헛걸음하지 않는다). make-project-now = 방금 프로젝트를 고른 뒤의 이어 하기
+      r = act === 'make-project-now' || state.full?.project?.inProject ? await person('make-project') : { ok: false, status: 409 };
+      if (!r.ok && r.status === 409) {
+        // 열린 프로젝트가 없다 — 고르거나 만든 뒤 이어서 복사한다(설계 2.5)
+        pendingMake = true;
+        const x = (el?.getBoundingClientRect?.() ?? { left: 200, bottom: 80 }) as DOMRect;
+        await projectMenu(x.left, x.bottom + 2, '어느 프로젝트로 — 고른 뒤 이어서 복사한다');
+        return;
+      }
+      break;
+    }
+    case 'take-lock': r = await person('take-lock'); break;
+    case 'archive': r = await person('archive', { archived: true }); break;
+    case 'save-as': fileOp('save'); return;
+    case 'dismiss': rec.outsideDismissed = `${state.full?.project?.case?.name ?? ''}|${rec.status?.saved_at ?? ''}`; render(); return;
+    case 'overwrite': toast('덮어쓰기는 호스트가 아직 그 길을 주지 않는다', 'warning'); return;
+    default: return;
+  }
+  if (!r) { return; }
+  if (!r.ok) { toast(`${r.error ?? '하지 못했다'}${r.status === 403 ? ' — 사람의 누름이 있어야 한다' : ''}`, 'warning'); }
+  else if (r.data?.cancelled) { /* 사람이 물음을 닫았다 */ }
+  else {
+    const d = r.data ?? {};
+    toast(d.opened ? `「${d.opened}」을(를) 열었다` : d.created ? `「${d.created}」을(를) 만들었다` : d.project ? `프로젝트 「${d.project.name}」` : d.took ? `「${d.took}」의 잠금을 넘겨받았다` : '했다', 'info');
+    if (d.project || d.opened) { ui.screen = d.opened ? 'review' : ui.screen; }
+  }
+  await loadRecent(true);
+  scheduleRefresh();
+  // 「프로젝트로 만들기」가 프로젝트를 고르는 중이었다 — 고른(만든) 뒤 이어서 복사
+  if (pendingMake && r.ok && r.data?.project && ['open-project', 'open-folder', 'new-project'].includes(act)) { pendingMake = false; await recAct('make-project-now'); }
+}
+let pendingMake = false;
+async function projectMenu(x: number, y: number, title = '프로젝트'): Promise<void> {
+  await loadRecent();
+  const cur = state.full?.project?.project?.name;
+  const items: MenuItem[] = (rec.recent ?? []).slice(0, 12).map(p => ({ label: `${p.name}${p.name === cur ? ' ●' : ''} · 대상 ${p.cases}`, run: () => { void recAct('open-project', fakeEl({ name: p.name })); } }));
+  openMenu([...items, ...(items.length ? ['-' as const] : []), { label: '폴더에서 열기…', run: () => { void recAct('open-folder'); } }, { label: '새 프로젝트…', run: () => { void recAct('new-project'); } }], x, y, title);
+}
+async function caseMenu(x: number, y: number): Promise<void> {
+  const p = state.full?.project;
+  if (!p?.inProject) {
+    openMenu([{ label: '열기', kbd: 'Ctrl+O', run: () => fileOp('open') }, { label: '저장', kbd: 'Ctrl+S', run: () => fileOp('save') }, '-',
+      { label: '프로젝트로 만들기…', run: () => { void recAct('make-project'); }, off: !state.file.name, why: '열린 파일이 없다' }], x, y, '파일');
+    return;
+  }
+  const cs = rec.cases ?? [];
+  openMenu([...cs.slice(0, 20).map(c => ({ label: `${c.name}${c.open ? ' ●' : ''} · ${KIND_KO[c.kind] ?? c.kind}`, run: () => { void recAct('open-case', fakeEl({ name: c.name })); } })),
+    ...(cs.length ? ['-' as const] : []),
+    { label: '새 검토…', run: () => { ui.screen = 'start'; render(); } },
+    { label: '저장', kbd: 'Ctrl+S', run: () => fileOp('save') },
+    { label: '보관(목록에서 숨김)', run: () => { void recAct('archive'); }, off: !p.case, why: '열린 검토 대상이 없다' }], x, y, `검토 대상 · ${p.project?.name ?? ''}`);
+}
+const fakeEl = (d: Record<string, string>): HTMLElement => { const e = document.createElement('span'); for (const [k, v] of Object.entries(d)) { e.setAttribute(`data-${k}`, v); } return e; };
+
 function render(): void {
   renderTitle(editing(), questionOpen());
   const strip = $('editstrip');
   strip.hidden = !editing();
   if (editing()) { strip.innerHTML = editStripHtml(pointedAt() ? 1 : 0); }
   renderOpenNotice();
+  renderBand();
   renderFollow(following(), !!pointedAt());
   $('start').hidden = ui.screen !== 'start';
   $('tbar').classList.toggle('onstart', ui.screen === 'start');
   $('review').classList.toggle('behind', ui.screen === 'start');
-  if (ui.screen === 'start') { renderStart($('start'), claudeStatus()); }
+  if (ui.screen === 'start') {
+    renderStart($('start'), claudeStatus());
+    if (!rec.recent) { void loadRecent().then(() => { if (ui.screen === 'start') { renderStart($('start'), claudeStatus()); } }); }
+  }
   renderReview();
   renderStatus();
   renderAiPoint();
@@ -484,6 +569,8 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
     case 'webview:created': if (d.id !== state.designerId) { showSide(d); } break;
     case 'webview:html': reloadSide(d.id); break;
     case 'webview:disposed': hideSide(d.id); break;
+    // R1-3: 사람만 하는 일이 프로젝트 · 대상을 바꿨다(다리) — 다시 읽는다
+    case 'person:changed': void loadRecent(true).then(() => scheduleRefresh()); break;
     case 'file:current':
       setFile(d.file, d.name);
       if (d.file) { ui.screen = 'review'; }
@@ -609,8 +696,13 @@ function boot(): void {
     stage: st => { const [tab, key] = STAGE_TO[st]; ui.screen = 'review'; select(tab, key); },
     find: openFind,
     follow: () => { setFollowing(!following()); render(); reportView(true); },
+    caseMenu, projectMenu: (x, y) => projectMenu(x, y),
   });
-  initStart($('start'), { open: () => fileOp('open'), review: toReview, claude: op => { void claudeOp(op); } });
+  initStart($('start'), { open: () => fileOp('open'), review: toReview, claude: op => { void claudeOp(op); }, rec: (act, el) => { void recAct(act, el); } });
+  $('recband').addEventListener('click', e => {
+    const b = (e.target as HTMLElement).closest('[data-rec]') as HTMLElement | null;
+    if (b && !b.classList.contains('off')) { void recAct(b.getAttribute('data-rec')!, b); }
+  });
 
   $('ttabs').addEventListener('click', e => {
     const a = (e.target as HTMLElement).closest('[data-tab]');
@@ -787,6 +879,8 @@ function boot(): void {
   get ui() { return { screen: ui.screen, tab: ui.tab, sel: ui.sel[ui.tab], editing: editing(), sheet: ui.sheet, follow: following(), idleMs: idleFor(), filter: treeFilter, menu: menuOpen() }; },
   select: (tab: Tab, key: string) => { ui.screen = 'review'; select(tab, key); },
   review: toReview,
+  /** 시험: 시작 화면으로(제목 표시줄의 「새 검토…」와 같은 길) */
+  start: () => { ui.screen = 'start'; render(); },
   get modeSel() { return { ...modeSel }; },
   setLen: (i: number, m = 1) => { modeSel.len = i; modeSel.mode = m; render(); },
   views: (v: V[]) => { setViews(ui.sel[ui.tab], v); render(); },

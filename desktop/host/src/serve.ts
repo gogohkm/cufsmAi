@@ -61,6 +61,8 @@ async function main(): Promise<void> {
   // V7-01: 결과 봉인의 기록자 열쇠 폴더 — --user-data 를 준 때만 그 안(<user-data>/writer). 주지 않으면 정하지 않는다(봉인 없이 저장 —
   // 사용자의 진짜 폴더에 열쇠를 만들지 않는다). 창(Electron)은 늘 <userData>\writer
   if (flags['user-data'] !== undefined && typeof flags['user-data'] === 'string') { process.env.STCFSD_WRITER_KEY_DIR = path.join(userDataDir, 'writer'); }
+  // R1-3: 프로젝트 뿌리 — --documents 를 준 때만 그 안의 「StCFSD 프로젝트」(시험은 임시 폴더). 주지 않으면 호스트의 기본(시험 모드에서는 없음)
+  if (str(flags.documents)) { process.env.STCFSD_PROJECT_ROOTS = path.join(path.resolve(str(flags.documents)!), 'StCFSD 프로젝트'); }
   const host = await startHost({ repoRoot, userDataDir, platform, portFile, pythonPath: str(flags.python), screenless: false, log });
   let bridge;
   try {

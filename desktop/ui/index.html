@@ -18,6 +18,7 @@
   <header class="tbar" id="tbar"></header>
   <div class="strip editstrip" id="editstrip" hidden></div>
   <div class="strip" id="opennotice" hidden></div>
+  <div class="strip recband" id="recband" hidden></div>
   <div class="body" id="review">
     <nav class="rail" id="rail"></nav>
     <aside class="left" id="left"><div class="ttabs" id="ttabs"></div><div class="tree" id="tree" role="tree"></div></aside>
@@ -30,10 +31,10 @@
     <div class="aipoint" id="aipoint" hidden></div>
     <div class="find" id="find" hidden></div>
     <div class="pane-edit-embed" id="edit" aria-hidden="true">
-      <iframe id="designer" title="StCFSD 입력 화면(탭 6개)"></iframe>
+      <iframe id="designer" title="StCFSD 입력 화면(탭 6개)" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-popups"></iframe>
       <aside id="side" hidden>
         <div id="side-head"><span id="side-title"></span><button id="side-close" type="button" class="btn ghost" data-tip="닫기">✕</button></div>
-        <iframe id="side-frame" title="보고서"></iframe>
+        <iframe id="side-frame" title="보고서" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-popups"></iframe>
       </aside>
     </div>
   </div>

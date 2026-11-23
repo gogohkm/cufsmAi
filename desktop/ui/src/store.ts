@@ -20,6 +20,7 @@
  * 제품 표로 통째로 SI 로 바꾼 것(quantity 로) — 줄은 그 자리를 가리키기만 한다.
  */
 import { api, last, mcp, type LastEntry } from './bridge';
+import { loadRecords } from './records';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
 import { itemText } from './format';
 
@@ -490,6 +491,8 @@ async function load(): Promise<void> {
   if (full && !full.error) { state.full = full; state.fullErr = undefined; } else { state.fullErr = full?.error ?? '응답 없음'; }
   if (msgs) { state.msgs = msgs.data; state.msgSeq = msgs.seq; }
   buildVal();
+  // R1-3: 프로젝트 · 검토 대상(호스트의 list_cases · get_case_status) — 프로젝트가 열려 있을 때만
+  await loadRecords();
   if (!state.initialModel) {
     const first = await last(id, ['modelLoaded'], 'first');
     state.initialModel = first?.data.modelLoaded?.message?.data ?? null;

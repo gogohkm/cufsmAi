@@ -135,6 +135,8 @@ const diag = {
   unsavedTestAnswers: [] as UnsavedAnswer[],
   /** 시험: 「저장」 뒤의 저장 자리 물음에 줄 답(없으면 취소) */
   saveTestPaths: [] as string[],
+  /** R1-3: /api/person/* 쓰기 요청마다 — 열쇠를 붙였나 · 마지막 사람 입력에서 몇 ms */
+  personRequests: [] as Array<{ path: string; keyed: boolean; sinceInput: number }>,
   /** 시험: get_unsaved_changes 가 실패한 것처럼 */
   failUnsavedQuery: false,
   /** S3: 로그오프 · 시스템 종료 때 쓴 복구본 */
@@ -352,6 +354,12 @@ async function confirmUnsaved(where: UnsavedWhere): Promise<boolean> {
   return r.proceed;
 }
 
+// ─── 사람의 입력(R1-3 층 4) ─────────────────────────────────────────
+/** 맨 위 틀(창)에 사람의 누름 · 키가 마지막으로 들어온 때(webContents 의 input-event — 스크립트의 click() · dispatchEvent 는 오지 않는다) */
+let lastPersonInput = 0;
+const PERSON_INPUT_MS = 2000;
+const PERSON_INPUT_TYPES = new Set(['mouseDown', 'mouseUp', 'keyDown', 'keyUp', 'rawKeyDown', 'char']);
+
 // ─── 로그오프 · 시스템 종료(V7-S3) ───────────────────────────────────
 /**
  * Windows 가 세션을 끝내려 하면(로그오프 · 다시 시작 · 종료 — BrowserWindow 의 `query-session-end` · `session-end`) 물을 틈이 없다.
@@ -472,7 +480,13 @@ function createSession(b: HostApi.BridgeHandle): Electron.Session {
     // 문서가 틀 출처일 때만(다른 곳으로 옮겨진 맨 위 문서는 없다 — 이동을 막는다). 페이지는 열쇠를 모른다.
     const frame = (details as { frame?: Electron.WebFrameMain | null }).frame;
     const ownScript = details.resourceType === 'xhr' && !!frame && !frame.parent && isFrameOrigin(frame.url);
-    if (isFrameOrigin(details.url) && ownScript) {
+    // R1-3 층 4(기록 설계 §3.5): 사람만 하는 일(/api/person/* 의 쓰기)에는 맨 위 틀에서 사람의 입력(누름 · 키)이 있은 뒤 2 초 안에만 열쇠를 붙인다 —
+    // 화면의 스크립트가 스스로 보낸 POST 는 열쇠가 없어 403
+    let personPath = false;
+    try { personPath = details.method !== 'GET' && new URL(details.url).pathname.startsWith('/api/person/'); } catch { personPath = false; }
+    const personOk = !personPath || Date.now() - lastPersonInput <= PERSON_INPUT_MS;
+    if (personPath) { diag.personRequests.push({ path: new URL(details.url).pathname, keyed: ownScript && personOk, sinceInput: Date.now() - lastPersonInput }); }
+    if (isFrameOrigin(details.url) && ownScript && personOk) {
       headers['X-StCFSD-Key'] = b.writeKey;
       diag.keyedRequests += 1;
       diag.keyedLog.push({ method: details.method, path: new URL(details.url).pathname, type: details.resourceType });
@@ -603,6 +617,7 @@ function createWindow(b: HostApi.BridgeHandle): BrowserWindow {
     clearTimeout(stateTimer); saveWindowState();
   });
   w.on('closed', () => { if (win === w) { win = undefined; } });
+  w.webContents.on('input-event', (_e, input) => { if (PERSON_INPUT_TYPES.has(String(input.type))) { lastPersonInput = Date.now(); } });
   // V7-S3: 로그오프 · 종료 — 막지 않고 복구본을 쓴다
   w.on('query-session-end', () => { void writeRecovery('query-session-end'); });
   w.on('session-end', () => { void writeRecovery('session-end'); });
@@ -716,6 +731,9 @@ async function start(): Promise<void> {
   // 임시 폴더라 그 안이다(진짜 폴더가 아니다). 호스트(확장의 activate)가 읽기 전에 정한다. 밖에서 준 값(STCFSD_WRITER_KEY_DIR)은 받지 않는다 —
   // 열쇠는 이 프로그램의 자리에만
   process.env.STCFSD_WRITER_KEY_DIR = path.join(userData, 'writer');
+  // R1-3: 프로젝트 뿌리 — 사람의 문서 폴더(app.getPath('documents') — 옮긴 문서 폴더를 따른다) 아래 「StCFSD 프로젝트」. 시험은 STCFSD_DOCUMENTS 의
+  // 임시 폴더 안. 다른 뿌리는 사람이 「폴더에서 열기」로 고른 폴더만(최근 목록 — 호스트). 밖에서 준 값은 받지 않는다
+  process.env.STCFSD_PROJECT_ROOTS = path.join(documentsDir || app.getPath('documents'), 'StCFSD 프로젝트');
   try {
     host = await api.startHost({
       repoRoot: layout.appRoot, userDataDir: path.join(userData, 'host'), platform, portFile, screenless: false,

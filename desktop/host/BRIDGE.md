@@ -217,3 +217,10 @@ await window.CufsmViewer3D.render({ nodes: m.node, elems: m.elem, modeVec, lengt
 - 시험: `test/bridge.mjs` s14f(설계 → 페이지에서 Lb → 새로 고침 → 카드 없음) · s14g(connT1 → 접합만 지움, 설계는 남음). 고치기 전의 다리로 돌리면 둘 다 실패한다(확인함).
 
 - **4b99968 뒤**: 호스트가 결과를 지울 때마다 `derivedResultsInvalidated {kinds, scope: 'kinds'}` — 다리는 `kinds` 를 「이것을 지워라」의 근거로 쓰고(결과 이름 → 메시지: 위 표 + `validation` → `validationResult`), `get_full_state.results` 와의 맞춤은 둘째 안전으로 남긴다. `validationResult` 는 이제 결과처럼 남는다(호스트가 `results.validation` 으로 쥔 동안 — 새 화면이 새로 고친 뒤 마지막 점검의 항목을 읽는다). 시험 s14e(점검 뒤 입력 → kinds ['validation'] → 기록에서 사라짐).
+
+## R1-3 — 기록 갈래: 화면 비밀 · 사람만 하는 길(`/api/person/*`)
+
+- **화면 비밀**: 새 화면의 중계(`/api/mcp/*` · 다리 안의 호스트 동작)는 같은 프로세스의 `out/mcp/actorScope.js` `SCREEN_SECRET` 을 `X-StCFSD-Screen` 에 싣는다(적재기 `screenSecret()`). 들어온 요청의 머리는 넘기지 않으므로 끼운 웹뷰 · MCP 토큰을 가진 쪽은 낼 수 없다 — 새 화면이 시작한 실행은 사람(`person`)의 것, MCP 도구의 실행은 `ai` 로 적힌다.
+- **`/api/person/*`**(`bridge/person.ts`): `GET recent`(list_projects) · `POST open-folder`(본문 무시 — OS 폴더 물음) · `new-project`(이름 물음 → 첫 뿌리) · `open-project {name}` · `open-case {name}`(저장 안 한 변경을 먼저 묻는다 — 하나의 함수) · `new-case {kind}`(이름 물음 → new_case → open_case) · `make-project`(열린 프로젝트에 지금 파일을 new_case from current — 원본 그대로) · `take-lock`(지금 대상 — 묻는다) · `archive {archived}`(지금 대상). `relink` · `writer-name` · `overwrite` 는 501(호스트의 사람 얼굴에 없다). 받는 요청: 읽기 인증(다리 토큰 — MCP 토큰은 401) + 쓰기 열쇠(POST) + `Origin` = 틀 + `Sec-Fetch-Site: same-origin` + JSON + 본문 4 KB. caseId · 경로 · 폴더는 본문에서 읽지 않는다. 사람의 얼굴은 적재기의 `recordsPerson()`(같은 프로세스 — HTTP 로 드러나지 않는다). 바뀌면 이벤트 `person:changed`.
+- 창(Electron)은 `/api/person/*` 의 쓰기에 맨 위 틀에서 사람의 입력(누름 · 키 — `input-event`)이 있은 뒤 2 초 안에만 열쇠를 붙인다(층 4). 새 화면의 끼운 iframe 은 `sandbox`(top navigation 없음).
+- 시험: `ui/test/ui.mjs` r10 – r16, `shell/test/ui.mjs` 1d.

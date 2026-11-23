@@ -38,6 +38,7 @@ import {
   WEBVIEW_KEY_HEADER, WRITE_HEADER, type Guard,
 } from './http';
 import { injectWebviewHtml, type ResourceRoot } from './inject';
+import { handlePerson } from './person';
 import { confirmUnsaved, type UnsavedAnswer, type UnsavedWhere } from '../unsaved';
 import type { BridgePlatform } from './platform';
 import { EventBus, SseStream, type BridgeEvent } from './sse';
@@ -286,10 +287,15 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     });
   };
 
+  /**
+   * R1-3: 새 화면의 중계는 이 프로세스의 화면 비밀(`out/mcp/actorScope.js`)을 `X-StCFSD-Screen` 에 싣는다 — 새 화면이 시작한 실행이
+   * 사람(screen)의 것으로 적힌다. 들어온 요청의 머리는 넘기지 않으므로(위) 끼운 웹뷰 · MCP 토큰을 가진 쪽은 이 머리를 낼 수 없다
+   */
+  const screenHeader = (): Record<string, string> => { const s = host.screenSecret(); return s ? { 'X-StCFSD-Screen': s } : {}; };
   const relayMcp = (req: http.IncomingMessage, res: http.ServerResponse, rest: string, search: string) => {
     const mcp = host.mcp;
     // 화면의 머리(쿠키 · Origin …)는 넘기지 않는다. 토큰은 다리가 붙이고, AI 호출 표시(X-StCFSD-Request-Id)는 붙이지 않는다.
-    const headers: http.OutgoingHttpHeaders = { Authorization: `Bearer ${mcp.token}`, Accept: 'application/json', Connection: 'close' };
+    const headers: http.OutgoingHttpHeaders = { Authorization: `Bearer ${mcp.token}`, Accept: 'application/json', Connection: 'close', ...screenHeader() };
     if (req.headers['content-type']) { headers['Content-Type'] = req.headers['content-type']; }
     if (req.headers['content-length']) { headers['Content-Length'] = req.headers['content-length']; }
     const up = http.request({ host: '127.0.0.1', port: mcp.port, method: req.method, path: `/${rest}${search}`, headers }, upRes => {
@@ -306,7 +312,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     const mcp = host.mcp;
     const text = JSON.stringify(body);
     const up = http.request({ host: '127.0.0.1', port: mcp.port, method: 'POST', path: '/action',
-      headers: { Authorization: `Bearer ${mcp.token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), Connection: 'close' } }, upRes => {
+      headers: { Authorization: `Bearer ${mcp.token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), Connection: 'close', ...screenHeader() } }, upRes => {
       const chunks: Buffer[] = [];
       upRes.on('data', c => chunks.push(c as Buffer));
       upRes.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { resolve({ error: 'MCP 응답이 JSON 이 아니다' }); } });
@@ -478,6 +484,11 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       const sha256 = html === null ? null : crypto.createHash('sha256').update(html, 'utf8').digest('hex');
       sendJson(res, 200, { success: true, data: { reply, html, sha256 } });
       return;
+    }
+    // R1-3: 사람만 하는 일 — person.ts(Origin · Sec-Fetch-Site · JSON · 4 KB · 쓰기 열쇠(위에서))
+    if (p.startsWith('/api/person/')) {
+      if (await handlePerson(req, res, p, { host, platform, origin, action: mcpAction, log, changed: what => bus.emit('person:changed', 'bridge', { what }),
+        replaceGuard: () => replaceGuard('open') })) { return; }
     }
     const mcpMatch = /^\/api\/mcp\/(.+)$/.exec(p);
     if (mcpMatch) { relayMcp(req, res, mcpMatch[1], url.search); return; }

@@ -15,6 +15,9 @@ export interface ClaudeStatus {
 
 export interface TitleHandlers {
   file(action: 'open' | 'save'): void;
+  /** R1-3: 제목 표시줄의 대상 · 프로젝트 고르기 */
+  caseMenu(x: number, y: number): Promise<void>;
+  projectMenu(x: number, y: number): Promise<void>;
   edit(): void;
   claude(op: 'connect' | 'disconnect'): void;
   stage(st: Stage): void;
@@ -48,7 +51,8 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
   root = el;
   h = handlers;
   el.innerHTML = '<span class="logo">StCFSD</span>'
-    + `<button class="pick" data-act="file"${tip('검토 대상 하나 = .csd 파일 하나(단면 + 부재 조건 + 하중 + 검토). 열기 · 저장')}>검토 대상 <b class="fname"></b> ▾</button>`
+    + `<button class="pick proj" data-act="project" hidden${tip('프로젝트 — 최근 프로젝트 · 폴더에서 열기 · 새 프로젝트')}><b class="pname"></b> ▾</button>`
+    + `<button class="pick" data-act="file"${tip('검토 대상 하나 = .csd 파일 하나(단면 + 부재 조건 + 하중 + 검토). 열기 · 저장')}><span class="flabel">검토 대상</span> <b class="fname"></b> ▾</button>`
     + '<span class="sealtag" hidden></span>'
     + '<span class="ebadge" hidden data-tip="입력 화면이 열려 있다. 트리와 제목 줄은 그대로다">편집</span>'
     + '<span class="pipe-slot"></span>'
@@ -67,8 +71,11 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
     const r = b.getBoundingClientRect();
     switch (b.getAttribute('data-act')) {
       case 'file':
-        openMenu([{ label: '열기', kbd: 'Ctrl+O', run: () => h.file('open') }, { label: '저장', kbd: 'Ctrl+S', run: () => h.file('save') }],
-          r.left, r.bottom + 2, '검토 대상');
+        // R1-3: 프로젝트 안이면 대상 목록(호스트의 list_cases) · 새 검토, 밖이면 파일 열기 · 저장 · 「프로젝트로 만들기」
+        void h.caseMenu(r.left, r.bottom + 2);
+        break;
+      case 'project':
+        void h.projectMenu(r.left, r.bottom + 2);
         break;
       case 'edit': h.edit(); break;
       case 'find': h.find(); break;
@@ -99,7 +106,14 @@ export function renderTitle(editing: boolean, pending: boolean): void {
   // 저장하지 않은 변경(K2 §7 — 호스트의 get_status.case.dirty · caseDirty): 파일 이름 뒤에 ●
   const dirty = !!(state.full?.case?.dirty ?? state.caseIn?.dirty);
   const fname = root.querySelector('.fname') as HTMLElement;
-  fname.textContent = bidiSafe(`${state.file.name ?? '파일 없음'}${dirty ? ' ●' : ''}`);
+  // R1-3: 프로젝트 안이면 「프로젝트 ▾」 + 「검토 대상 <이름> ▾」, 밖이면 「파일 <이름> ▾」(템플릿 00 · 설계 §5.3)
+  const proj = state.full?.project;
+  const pb = root.querySelector('.pick.proj') as HTMLElement;
+  pb.hidden = !proj?.inProject;
+  (root.querySelector('.pname') as HTMLElement).textContent = bidiSafe(proj?.project?.name ?? '');
+  (root.querySelector('.flabel') as HTMLElement).textContent = proj?.inProject ? '검토 대상' : '파일';
+  const shown = proj?.inProject ? (proj.case?.name ?? '고르기') : (state.file.name ?? '파일 없음');
+  fname.textContent = bidiSafe(`${shown}${dirty ? ' ●' : ''}`);
   fname.setAttribute('data-dirty', dirty ? '1' : '0');
   // V7-01(82194ef): 지금 저장하면 결과에 이 PC 의 서명이 붙는가 — 아니면 저장 단추 옆에 조용히 늘 보인다(물음 · 대화상자가 아니다)
   const seal = root.querySelector('.sealtag') as HTMLElement;

@@ -35,7 +35,7 @@ const portFile = path.join(userData, 'mcp', 'stcfsd-mcp-port');
 
 const results = [];
 const started = Date.now();
-/** --only=<절 id,…> — 「1b」 또는 「1c」(둘은 한 묶음 — 1c 가 1b 의 도우미를 쓴다) · 「2b」 가운데 준 것만 돈다(1 · 2 · 3 은 늘 — 띄우기 · 끝내기 · 저장소 확인) */
+/** --only=<절 id,…> — 「1b」 또는 「1c」(둘은 한 묶음 — 1c 가 1b 의 도우미를 쓴다) · 「1d」 · 「2b」 가운데 준 것만 돈다(1 · 2 · 3 은 늘 — 띄우기 · 끝내기 · 저장소 확인) */
 const ONLY = (process.argv.find(a => a.startsWith('--only=')) ?? '').slice(7).split(',').map(x => x.trim()).filter(Boolean);
 const want = id => !ONLY.length || ONLY.includes(id);
 function check(name, ok, detail = '') {
@@ -343,6 +343,25 @@ async function main() {
     check('물음 내내 창은 보이지 않고 포커스를 받지 않는다', !sf2.visible && !sf2.focused && sf2.show === 0 && sf2.focus === 0, JSON.stringify(sf2));
 
     }
+    if (want('1d')) {
+      section('1d. R1-3 층 4 — 사람만 하는 길(/api/person/*)의 쓰기 열쇠는 맨 위 틀에서 사람의 입력이 있은 뒤 2 초 안에만');
+      const personPost = () => A.page(`fetch('/api/person/archive',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"archived":true}'}).then(r=>r.status).catch(e=>'err '+e)`);
+      await sleep(2500);
+      const s1 = await personPost();
+      const l1 = await A.ev('return ctx.diag.personRequests.slice(-1)[0] ?? null;');
+      check('입력 없이 화면의 스크립트가 보낸 POST → 열쇠가 붙지 않아 403', s1 === 403 && l1?.keyed === false, `${s1} · ${JSON.stringify(l1)}`);
+      await A.ev(`ctx.win.webContents.sendInputEvent({ type: 'mouseDown', x: 5, y: 300, button: 'left', clickCount: 1 }); ctx.win.webContents.sendInputEvent({ type: 'mouseUp', x: 5, y: 300, button: 'left', clickCount: 1 }); return true;`);
+      await sleep(150);
+      const s2 = await personPost();
+      const l2 = await A.ev('return ctx.diag.personRequests.slice(-1)[0] ?? null;');
+      check('사람의 누름(창의 입력) 뒤 2 초 안 → 열쇠가 붙는다(403 이 아니다 — 프로젝트가 없어 409 등 다리의 까닭)', s2 !== 403 && l2?.keyed === true, `${s2} · ${JSON.stringify(l2)}`);
+      const s3 = await A.ev(`const mf = ctx.win.webContents.mainFrame; const f = mf.framesInSubtree.find(x => x !== mf && x.url.includes('/wv/'));
+        return f ? await f.executeJavaScript("fetch(" + JSON.stringify(ctx.bridge.origin) + " + '/api/person/archive',{method:'POST',mode:'no-cors',credentials:'include',body:'{}'}).then(r=>'opaque '+r.type).catch(e=>'blocked')", true) : 'no-frame';`);
+      const l3 = await A.ev('return ctx.diag.personRequests.slice(-1)[0] ?? null;');
+      const n3 = await A.ev('return ctx.diag.personRequests.length;');
+      check('끼운 웹뷰(다른 출처)의 fetch — 열쇠가 붙지 않는다(보내지지 않았거나 열쇠 없이)', JSON.stringify(l3) === JSON.stringify(l2) || l3?.keyed === false, `${s3} · 요청 기록 ${n3} · ${JSON.stringify(l3)}`);
+    }
+
     section('2. 끝내기 — 창 닫기 · 「저장 안 함」');
     const kids = descendants(A.pid);
     await A.ev(`ctx.diag.unsavedTestAnswers.push('discard'); setTimeout(() => ctx.win.close(), 50); return true;`).catch(() => undefined);

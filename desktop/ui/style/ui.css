@@ -295,3 +295,15 @@ svg rect.cpb { cursor: default; }
 #opennotice[hidden] { display: none; }
 #opennotice { border-left: 3px solid var(--warn); background: var(--bg-raise); }
 #opennotice .sp { flex: 1; }
+/* R1-3 — 프로젝트 · 검토 대상(템플릿 00 · 설계 §5.3) */
+.tbar .pick.proj b { font-weight: 600; }
+.tbar .pick.proj[hidden] { display: none; }
+#recband[hidden] { display: none; }
+#recband { border-left: 3px solid var(--line); background: var(--bg-raise); gap: 8px; }
+#recband[data-kind="outside"] { border-left-color: var(--text-faint); }
+#recband[data-kind="readonly"], #recband[data-kind="outside-change"] { border-left-color: var(--warn); }
+#recband .sp { flex: 1; }
+.start .rec-mini { display: flex; align-items: center; justify-content: center; font-size: 10px; }
+.start .newc .off { opacity: .5; }
+.start .newc .two a { cursor: pointer; color: var(--accent); }
+.start .rows tr[data-rec] { cursor: pointer; }

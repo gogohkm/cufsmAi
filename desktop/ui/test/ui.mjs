@@ -10,6 +10,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
+import * as http from 'node:http';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1282,7 +1283,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await key('c', { ctrlKey: true });
     await sleep(200);
     const copied = await ev('window.__uiLastCopy || ""');
-    return { ok: open1 === true && cur === '이 위치만 보기' && !!filt.f && /이 위치만/.test(filt.head ?? '') && unf === null && sh === distKey && /확인 표시/.test(toastTxt) && /뒤틀림 좌굴/.test(copied),
+    return { ok: open1 === true && cur === '이 위치만 보기' && !!filt.f && /이 위치만/.test(filt.head ?? '') && unf === null && sh === distKey && /확인 표시/.test(toastTxt) && /뒤틀림\s?좌굴/.test(copied),
       detail: `메뉴 ${open1} · ↓↓ ${cur} · 걸러진 줄 ${filt.rows} 「${short(filt.head, 30)}」 · Esc → ${unf} · Enter → 시트 ${sh === distKey} · Space 「${short(toastTxt, 40)}」 · Ctrl+C 「${short(copied, 40)}」` };
   });
   await step('u29c 우클릭 메뉴 — 정보 창의 수(출처 보기 · 표에서 보기 · 복사) · 표의 줄 · 그림', 'u29c_menu_value', async () => {
@@ -2050,6 +2051,147 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       detail: `장부 ${a.inv.slice(0, 3).join(' · ')} · 「${short(a.fsm, 70)}」 · 새로 고침 뒤 같은 까닭 ${b.fsm === a.fsm} · 부재 검토 ${b.chk} · 화면 기억(sessionStorage) ${b.seen}`
         + ` · 호스트의 입력 새로 고침 앞뒤 같음 ${diffKeys.length === 0 && spansSame}${diffKeys.length ? `(바뀐 칸 ${diffKeys.slice(0, 5).map(k => `${k}: ${JSON.stringify(hostA.inputs[k])} → ${JSON.stringify(hostB.inputs[k])} (${hostB.sources?.[k]})`).join(', ')})` : ''} · 판 ${hostA.rev} → ${hostB.rev} · 화면 = 호스트 ${scrCi === JSON.stringify(hostB.inputs)} · 설계 화면 설계 Fy ${a.wvFy} → ${wvFy2}` };
   });
+  // ── R1-3 — 기록 갈래가 화면에: 프로젝트 · 검토 대상 · 사람만 하는 일(/api/person/*) ─────────────────────────────
+  section('7g. R1-3 — 시작 화면의 최근 검토 · 새 프로젝트 · 새 검토(카드) · 프로젝트로 만들기 · 제목 표시줄 · 띠 · 사람의 길만');
+  const dlgInput = async (value) => {
+    const q = await waitFor(`(()=>{const d=document.querySelector('#dialog-host .dialog'); const i=d&&d.querySelector('[data-role="value"]'); return i ? d.querySelector('h2')?.textContent || '물음' : null;})()`, 20_000, '이름 물음');
+    await ev(`(()=>{const d=document.querySelector('#dialog-host .dialog'); const i=d.querySelector('[data-role="value"]'); i.value=${JSON.stringify(value)}; d.querySelector('[data-role="ok"]').click(); return 1;})()`);
+    return q;
+  };
+  const answerIfUnsaved = async () => {
+    const asked = await waitFor(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? 1 : null;})()`, 2_500, '').catch(() => null);
+    if (asked) { await ev(`document.querySelector('#dialog-host [data-item="저장 안 함"]').click()`); }
+    return !!asked;
+  };
+  const recNow = async () => (await api('POST', '/api/mcp/action', { action: 'list_cases' })).json;
+  const projRoot = path.join(tmp, 'Documents', 'StCFSD 프로젝트');
+  await step('r10 새 프로젝트(시작 화면) — 이름 물음 → 뿌리(문서 › StCFSD 프로젝트) 아래에 · 제목 표시줄 「프로젝트 ▾」 · 대상 수 = list_cases', 'r10_new_project', async () => {
+    await ev(`${S}.start()`);
+    await sleep(300);
+    await ev(`document.querySelector('#start [data-rec="new-project"]').click()`);
+    const q = await dlgInput('시험 물류창고');
+    await settle(`!!s.full && !!s.full.project && s.full.project.inProject && s.full.project.project.name==='시험 물류창고'`, '열린 프로젝트', 30_000);
+    const lc = await recNow();
+    const t = await ev(`({proj:document.querySelector('#tbar .pick.proj')?.hidden===false ? document.querySelector('#tbar .pname').textContent : null, foot:document.querySelector('#start [data-foot-count]')?.textContent})`);
+    const made = fs.existsSync(path.join(projRoot, '시험 물류창고'));
+    return { ok: made && t.proj === '시험 물류창고' && Array.isArray(lc.cases) && String(lc.cases.length) === (t.foot ?? String(lc.cases.length)),
+      detail: `물음 「${q}」 · 폴더 ${made} · 제목 표시줄 「${t.proj}」 · 바닥 줄 대상 ${t.foot} = list_cases ${lc.cases?.length}` };
+  });
+  await step('r11 새 검토 카드(지붕 퍼린) — 이름 물음 → 새 대상을 만들고 연다 · 시작 화면의 줄 수 = list_cases · 「검토 대상 <이름> ▾」', 'r11_new_case', async () => {
+    await ev(`document.querySelector('#start [data-rec="new-case"][data-kind="roof-purlin"]').click()`);
+    await dlgInput('퍼린 P1');
+    await answerIfUnsaved();
+    await settle(`!!s.full && !!s.full.project && !!s.full.project.case && s.full.project.case.name==='퍼린 P1'`, '연 대상', 60_000);
+    const lc = await recNow();
+    const t = await ev(`({fname:document.querySelector('#tbar .fname').textContent, label:document.querySelector('#tbar .flabel').textContent, band:document.getElementById('recband').hidden})`);
+    await ev(`${S}.start()`);
+    const ci = await caseHost();
+    return { ok: lc.cases?.some(c => c.name === '퍼린 P1' && c.kind === 'roof-purlin' && c.open) && /퍼린 P1/.test(t.fname) && t.label === '검토 대상' && t.band === true && ci.inputs?.memberType === 'roof-purlin',
+      detail: `list_cases ${JSON.stringify(lc.cases?.map(c => `${c.name}:${c.kind}:${c.open}`))} · 제목 「${t.label} ${t.fname}」 · 띠 숨김 ${t.band} · 부재 유형 ${ci.inputs?.memberType}(${ci.sources?.memberType})` };
+  });
+  await step('r12 프로젝트 밖의 파일 → 띠 「프로젝트 밖 — 작업 기록이 남지 않음」 · 「프로젝트로 만들기」 → 열린 프로젝트에 복사(원본 그대로) · 대상 수 = list_cases', 'r12_make_project', async () => {
+    const outside = path.join(tmp, 'outside-copy.csd');
+    fs.copyFileSync(csd, outside);
+    const before = fs.readFileSync(outside);
+    await serve.ipc('open', { file: outside }, 60_000);
+    await settle(`!!s.full && !(s.full.project && s.full.project.case)`, '프로젝트 밖', 15_000).catch(() => undefined);
+    const band = await waitFor(`(()=>{const b=document.getElementById('recband'); return b && !b.hidden ? b.getAttribute('data-kind')+'|'+b.textContent : null;})()`, 15_000, '띠');
+    await shot('r12_outside_band_1920_dark');
+    await ev(`document.querySelector('#recband [data-rec="make-project"]').click()`);
+    // 프로젝트 밖의 파일을 열면 프로젝트도 닫힌다 — 「어느 프로젝트로」 목록(최근 · 뿌리)에서 고르면 이어서 이름을 묻는다
+    const menu = await waitFor(`(()=>{const m=document.querySelector('.ctx'); return m ? m.textContent : null;})()`, 10_000, '프로젝트 고르기').catch(() => null);
+    if (menu) { await ev(`(()=>{const it=[...document.querySelectorAll('.ctx .ci')].find(x=>/시험 물류창고/.test(x.textContent)); it&&it.click(); return !!it;})()`); }
+    await dlgInput('가져온 퍼린');
+    await settle(`!!s.full && !!s.full.project && !!s.full.project.case && s.full.project.case.name==='가져온 퍼린'`, '가져온 대상', 60_000);
+    const lc = await recNow();
+    const after = fs.readFileSync(outside);
+    await ev(`${S}.start()`);
+    await sleep(300);
+    const foot = await ev(`document.querySelector('#start [data-foot-count]')?.textContent`);
+    return { ok: /^outside\|/.test(band) && /작업 기록이 남지 않음/.test(band) && lc.cases?.length === 2 && Buffer.compare(before, after) === 0 && (foot === undefined || foot === '2'),
+      detail: `띠 「${short(band, 60)}」 → 「프로젝트로 만들기」 → list_cases ${lc.cases?.map(c => c.name).join(', ')} · 원본 그대로 ${Buffer.compare(before, after) === 0} · 바닥 줄 ${foot}` };
+  });
+  await step('r13 새 화면의 중계로 돌린 실행 = 사람(screen)의 것 · MCP 토큰의 실행 = ai(실행 기록의 by)', null, async () => {
+    // 화면의 중계(다리 /api/mcp/action — 쓰기 열쇠) = 사람
+    await api('POST', '/api/mcp/action', { action: 'validate_design', detail: 'summary', report_units: 'SI' });
+    const s1 = (await api('POST', '/api/mcp/action', { action: 'get_case_status', detail: 'runs' })).json;
+    const byScreen = s1?.results?.validation?.last_run?.by ?? s1?.runs?.find?.(r => r.kind === 'validation')?.by;
+    await mcp.tool('validate_design', { detail: 'summary', units: 'SI' });
+    const s2 = (await api('POST', '/api/mcp/action', { action: 'get_case_status', detail: 'runs' })).json;
+    const byAi = s2?.results?.validation?.last_run?.by ?? s2?.runs?.find?.(r => r.kind === 'validation')?.by;
+    return { ok: !!byScreen && byScreen !== 'ai' && byAi === 'ai', detail: `화면의 중계 → by ${byScreen} · MCP 도구 → by ${byAi} · 결과 ${short(JSON.stringify(s2?.results ?? null), 200)} · runs ${short(JSON.stringify(s2?.runs ?? null), 200)} · ${short(s2?.error ?? '', 80)}` };
+  });
+  await step('r14 ⚔ 사람만 하는 길 — 끼운 웹뷰의 fetch · top.location · postMessage / MCP 토큰 / 쓰기 열쇠 없음 / Origin 다름 / open-folder 본문의 경로 — 모두 거절 · 아무것도 바뀌지 않음', 'r14_person_refusals', async () => {
+    const before = JSON.stringify((await recNow()).cases);
+    const origin = await ev('location.origin');
+    const outsideDir = path.join(tmp, '남의 폴더');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    // (a) 끼운 웹뷰(다른 출처)에서 fetch — 쿠키 포함 · no-cors
+    const a = await br.frameEval(`/wv/${encodeURIComponent(designerId)}/`, `fetch(${JSON.stringify(origin)} + '/api/person/archive', {method:'POST', mode:'no-cors', credentials:'include', headers:{'Content-Type':'text/plain'}, body:'{"archived":true}'}).then(r=>'status '+r.status+' '+r.type).catch(e=>'blocked '+String(e).slice(0,40))`).catch(e => `eval ${String(e).slice(0, 40)}`);
+    // (b) top.location 으로 사람 경로 — GET 만 되고 POST 가 아니라 405, 화면은 그대로
+    const b = await br.frameEval(`/wv/${encodeURIComponent(designerId)}/`, `(()=>{try{top.location.href=${JSON.stringify(origin)}+'/api/person/open-folder'; return 'set';}catch(e){return 'blocked '+String(e).slice(0,40);}})()`).catch(e => `eval ${String(e).slice(0, 40)}`);
+    await sleep(800);
+    const stillUi = await ev(`!!window.__stcfsdUi`).catch(() => false);
+    // (c) postMessage 로 화면에 사람의 일을 시키려 함 — 화면은 그런 메시지를 받지 않는다
+    const c = await br.frameEval(`/wv/${encodeURIComponent(designerId)}/`, `(()=>{top.postMessage({stcfsdBridge:1,type:'person',act:'archive'},'*'); top.postMessage({command:'archive'},'*'); return 'sent';})()`).catch(e => `eval ${String(e).slice(0, 40)}`);
+    await sleep(500);
+    // (d) MCP 토큰 · (e) 쓰기 열쇠 없음 · (f) Origin 다름 — 다리에 직접(node)
+    const raw = (p, headers, body = '{}') => new Promise(res => {
+      const u = new URL(p, origin);
+      const r = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', ...headers } }, x => { x.resume(); x.on('end', () => res(x.statusCode)); });
+      r.on('error', () => res(-1)); r.end(body);
+    });
+    const d = await raw('/api/person/archive', { Authorization: `Bearer ${mcpToken}` });
+    const e = await raw('/api/person/archive', { Authorization: `Bearer ${token}` });
+    const f = await raw('/api/person/archive', { Authorization: `Bearer ${token}`, Origin: 'http://127.0.0.1:1', 'Sec-Fetch-Site': 'cross-site', 'X-StCFSD-Key': 'x' });
+    // (g) open-folder 본문의 경로는 쓰지 않는다 — 폴더 물음이 뜬다(취소)
+    const gp = ev(`fetch('/api/person/open-folder',{method:'POST',credentials:'same-origin',headers:Object.assign({'Content-Type':'application/json'}, (()=>{try{const k=sessionStorage.getItem('stcfsd.bridge.key.'+location.port); return k?{'X-StCFSD-Key':k}:{};}catch{return {};}})()), body:JSON.stringify({dir:${JSON.stringify(outsideDir)}, dirAbs:${JSON.stringify(outsideDir)}, path:${JSON.stringify(outsideDir)}})}).then(r=>r.json())`);
+    const fd = await waitFor(`(()=>{const d=document.querySelector('#dialog-host .dialog[data-kind="fileDialog"]'); return d ? d.querySelector('h2').textContent : null;})()`, 15_000, '폴더 물음').catch(() => null);
+    await ev(`(()=>{const d=document.querySelector('#dialog-host .dialog[data-kind="fileDialog"]'); const c=d&&d.querySelector('[data-role="cancel"]'); c&&c.click(); return !!c;})()`);
+    const g = await gp;
+    const after = JSON.stringify((await recNow()).cases);
+    const projNow = (await api('POST', '/api/mcp/action', { action: 'get_full_state' })).json?.project?.project?.name;
+    const declared = fs.existsSync(path.join(outsideDir, 'stcfsd-project.json'));
+    // 끼운 웹뷰의 공격이 남긴 콘솔 줄(CSP 가 막음 · 거절된 요청)은 바라던 결과 — 이 단계의 콘솔 오류 검사에서 뺀다(수를 적는다)
+    const ATTACK = /api\/person\/|Unsafe attempt to initiate navigation/;
+    const blockedLines = log.console.filter(x => ATTACK.test(x.text));
+    log.console.splice(0, log.console.length, ...log.console.filter(x => !ATTACK.test(x.text)));
+    return { ok: before === after && stillUi && [401, 403].includes(d) && e === 403 && f === 403 && !!fd && g?.data?.cancelled === true && projNow === '시험 물류창고' && !declared,
+      detail: `막힘의 콘솔 줄 ${blockedLines.length} · (a) 웹뷰 fetch ${a} · (b) top.location ${b} → 화면 그대로 ${stillUi} · (c) postMessage ${c} · (d) MCP 토큰 ${d} · (e) 열쇠 없음 ${e} · (f) Origin 다름 ${f} · (g) 본문 경로 → 폴더 물음 「${fd}」 · 취소 ${g?.data?.cancelled} · 그 폴더에 선언 ${declared} · 대상 목록 그대로 ${before === after} · 프로젝트 ${projNow}` };
+  });
+  await step('r15 발행본(04_발행본 안의 파일) → 띠 「읽기 전용 — 발행본이다」 · 「새 검토 대상으로」 · 입력을 고쳐도 받지 않음', 'r15_readonly_band', async () => {
+    const pdir = path.join(projRoot, '시험 물류창고');
+    const src = fs.readdirSync(path.join(pdir, '02_검토대상')).find(f => /퍼린 P1/.test(f));
+    const issuedDir = path.join(pdir, '04_발행본', '퍼린 P1', 'R0');
+    fs.mkdirSync(issuedDir, { recursive: true });
+    const issued = path.join(issuedDir, '퍼린 P1.csd');
+    fs.copyFileSync(path.join(pdir, '02_검토대상', src), issued);
+    await serve.ipc('open', { file: issued }, 60_000);
+    const band = await waitFor(`(()=>{const b=document.getElementById('recband'); return b && !b.hidden && b.getAttribute('data-kind')==='readonly' ? b.textContent+'|'+(b.querySelector('[data-ro-reason]')?.dataset.roReason||'') : null;})()`, 20_000, '읽기 전용 띠').catch(() => null);
+    if (!band) {
+      const fx = (await api('POST', '/api/mcp/action', { action: 'get_full_state' })).json;
+      const cs = (await api('POST', '/api/mcp/action', { action: 'get_case_status' })).json;
+      return { ok: false, detail: `띠 없음 · project ${JSON.stringify(fx?.project)} · case_status ${short(JSON.stringify(cs), 300)} · 화면 띠 ${await ev(`document.getElementById('recband').getAttribute('data-kind')+'|'+document.getElementById('recband').hidden`)}` };
+    }
+    await shot('r15_readonly_1920_dark');
+    const sc = await mcp.tool('set_case_inputs', { inputs: { Cb: 1.3 }, units: 'SI', reason: '읽기 전용 시험' });
+    return { ok: /읽기 전용/.test(band) && /발행본/.test(band) && /새 검토 대상으로/.test(band) && !!sc.error,
+      detail: `띠 「${short(band, 90)}」 · AI 의 set_case_inputs → ${short(sc.error ?? '받음', 80)}` };
+  });
+  await step('r16 시작 화면(템플릿 00) — 열린 프로젝트의 대상 줄 · 바닥 줄(이름 · 수) · 새 검토 카드 넷 · 그림', 'r16_start', async () => {
+    await mcp.tool('open_project', { name: '시험 물류창고' });
+    await api('POST', '/api/mcp/action', { action: 'open_case', name: '퍼린 P1', report_units: 'SI' });
+    await settle(`!!s.full && !!s.full.project && !!s.full.project.case`, '대상', 30_000);
+    await ev(`${S}.start()`);
+    await sleep(600);
+    const lc = await recNow();
+    const t = await ev(`({rows:[...document.querySelectorAll('#start .rows tr[data-rec="open-case"]')].map(r=>r.dataset.name), foot:document.querySelector('#start [data-foot-count]')?.textContent, cards:document.querySelectorAll('#start .newc [data-rec="new-case"]').length})`);
+    await shot('r16_start_1920_dark');
+    await ev(`${S}.review()`);
+    return { ok: t.rows.length === lc.cases.length && String(lc.cases.length) === t.foot && t.cards >= 4,
+      detail: `줄 ${t.rows.join(', ')} = list_cases ${lc.cases.map(c => c.name).join(', ')} · 바닥 줄 ${t.foot} · 카드 ${t.cards}` };
+  });
+
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });
   await mcp.tool('run_analysis');
   await settle(`s.stages.fsm.state==='ok'`, '다시 해석', 120_000);

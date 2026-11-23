@@ -36,6 +36,14 @@ import { createVscodeShim, type ShimRuntime, type WebviewResourceMapper } from '
 import { createExtensionContext } from './vscode/context';
 import { ExtensionMode } from './vscode/types';
 
+/** 기록의 사람만 하는 얼굴(src/records/desk.ts PersonFace) — MCP · 화면 문맥 안에서 부르면 PersonOnlyError */
+export interface RecordsPersonFace {
+  openFolder(dirAbs: string): { name: string; projectId: string; readOnly: boolean; warnings: string[]; cases: number };
+  createProject(rootAbs: string, name: string): { name: string; projectId: string; readOnly: boolean; warnings: string[]; cases: number };
+  takeLock(caseId: string): unknown;
+  archive(caseId: string, archived: boolean): void;
+}
+
 export interface StartHostOptions {
   /** 저장소 루트(뒤에 설치본에서는 리소스 폴더). `out/extension.js` · `python/` · `media/` · `webview/` · `.venv` 가 여기 있다 */
   repoRoot: string;
@@ -132,6 +140,18 @@ export interface HostHandle {
    * 같은 프로세스의 셸만 부른다(MCP 에는 없다)
    */
   writeRecoveryCopy(file: string, root: string): Promise<{ ok: true; path: string } | { ok: false; error: string }>;
+  /**
+   * R1-3: 기록의 사람만 하는 얼굴(`StcfsdPanel.currentPanel.recordsPerson` — openFolder · createProject · takeLock · archive).
+   * 같은 프로세스의 다리만 받는다(HTTP 로 드러나지 않는다 — 설계 §3.5 층 2). 열쇠 자리가 없으면 null
+   */
+  recordsPerson(): RecordsPersonFace | null;
+  /** R1-3: 프로젝트 뿌리(`StcfsdPanel.projectRoots` — STCFSD_PROJECT_ROOTS) */
+  projectRoots(): string[];
+  /**
+   * R1-3: 이 프로세스의 화면 비밀(`out/mcp/actorScope.js` SCREEN_SECRET) — 다리의 중계가 `X-StCFSD-Screen` 에 실어 새 화면이 시작한
+   * 실행을 사람의 것으로 적게 한다. 파일 · 포트 파일 · 화면에 쓰지 않는다. 없으면(옛 out/) null
+   */
+  screenSecret(): string | null;
   unimplemented(): Array<{ name: string; count: number }>;
   dispose(): Promise<void>;
 }
@@ -368,7 +388,13 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
     if (!info) { throw new Error(`stcfsd.openDesigner 뒤에 ${DESIGNER_VIEW_TYPE} 패널이 없다`); }
     runtime.hub.pin(info.id);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any> } } };
+    const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { projectRoots?: string[]; currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any>; recordsPerson?: RecordsPersonFace | null } } };
+    let screenSecretValue: string | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const scope = require(path.join(outDir, 'mcp', 'actorScope.js')) as { SCREEN_SECRET?: unknown };
+      screenSecretValue = typeof scope.SCREEN_SECRET === 'string' && scope.SCREEN_SECRET.length >= 32 ? scope.SCREEN_SECRET : null;
+    } catch { screenSecretValue = null; }
     const designer: DesignerPanel = {
       id: info.id,
       alive: () => runtime.hub.has(info.id) && !!panelMod.StcfsdPanel?.currentPanel,
@@ -456,6 +482,9 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
       mcpConfigWrites: () => changedConfigs(),
       openProject: file => runFileOp('open', file, { command: 'openProject' }),
       saveProject: file => runFileOp('save', file, { command: 'saveProject' }),
+      recordsPerson: () => panelMod.StcfsdPanel?.currentPanel?.recordsPerson ?? null,
+      projectRoots: () => (Array.isArray(panelMod.StcfsdPanel?.projectRoots) ? [...panelMod.StcfsdPanel!.projectRoots!] : []),
+      screenSecret: () => screenSecretValue,
       writeRecoveryCopy: async (file, root) => {
         const p = panelMod.StcfsdPanel?.currentPanel;
         if (!p || typeof p.writeRecoveryCopy !== 'function') { return { ok: false, error: '설계 패널이 없거나 이 판의 호스트에 복구 사본 쓰기가 없다' }; }
