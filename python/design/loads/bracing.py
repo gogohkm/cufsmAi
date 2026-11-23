@@ -462,6 +462,8 @@ def determine_unbraced_lengths(
 
     mem_hi, mem_lo = (envelope_members or (None, None))
     M_abs_env = [max(abs(a), abs(b)) for a, b in zip(M_hi, M_lo)]
+    # 동률 허용오차(계약 §6.1): 모멘트 포락 크기의 1e-9 배(최소 1e-9)
+    tie_tol = 1e-9 * max([1.0] + [abs(v) for v in M_hi + M_lo])
     M_abs_lo = [abs(v) for v in M_lo]
     M_abs_hi = [abs(v) for v in M_hi]
 
@@ -485,7 +487,9 @@ def determine_unbraced_lengths(
         sgn = 1.0 if flange == 'top' else -1.0
         pts = [k for k, xv in enumerate(x) if a - eps <= xv <= b + eps]
         if pts:
-            kmax = max(pts, key=lambda k: sgn * M_signed[k])
+            # 같은 값(허용오차 안)이면 앞 측점 — 끝자리 잡음으로 위치를 고르지 않는다(계약 §6.1 동률 규칙)
+            top = max(sgn * M_signed[k] for k in pts)
+            kmax = next(k for k in pts if sgn * M_signed[k] >= top - tie_tol)
             m_max, x_max = max(sgn * M_signed[kmax], 0.0), x[kmax]
         else:
             m_max, x_max = max(sgn * m_a, sgn * m_b, 0.0), a

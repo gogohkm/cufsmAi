@@ -237,3 +237,25 @@ def test_support_faces_unrounded_and_each_face_named():
                 env = res['M_envelope_max' if sense > 0 else 'M_envelope_min'][k]
                 assert _close(s['M'][k], env), (name, cname, loc['name'], s['M'][k], env)
     assert n > 100, n
+
+
+def test_fe_answer_does_not_depend_on_blas_threads_and_ties_take_the_first_station():
+    """보 유한요소(I_span_in4 · 랩)의 답이 OpenBLAS 스레드 수와 무관하다(띠 Cholesky 풀이). 대칭 3경간의 두 내부 지점처럼
+    값이 같은(허용오차 안) 측점은 앞 측점을 고른다 — 전에는 스레드 수에 따라 'Int span 2 -M' 이 x = 25 · 50 ft 로 갈렸다."""
+    import subprocess
+    code = ("import sys, json, hashlib; sys.path.insert(0, {py!r})\n"
+            "from design.loads.required_strength import analyze_loads\n"
+            "r = analyze_loads(member_app='roof-purlin', span_type='cont-3', span_ft=25, loads={{'D': 10, 'Lr': 100}},"
+            " design_method='LRFD', section={{'Ixx': 10.0, 'depth': 8}}, I_span_in4=[10.0, 20.0, 10.0])\n"
+            "print(hashlib.sha256(json.dumps(r, sort_keys=True, default=str).encode()).hexdigest())\n"
+            ).format(py=os.path.join(os.path.dirname(os.path.dirname(HERE)), 'python'))
+    outs = set()
+    for t in ('1', '4', '8'):
+        env = dict(os.environ, OPENBLAS_NUM_THREADS=t, PYTHONDONTWRITEBYTECODE='1')
+        outs.add(subprocess.run([sys.executable, '-c', code], env=env, capture_output=True, text=True,
+                                check=True).stdout.strip())
+    assert len(outs) == 1, outs
+    r = analyze_loads(member_app='roof-purlin', span_type='cont-3', span_ft=25, loads={'D': 10, 'Lr': 100},
+                      design_method='LRFD', section={'Ixx': 10.0, 'depth': 8}, I_span_in4=[10.0, 20.0, 10.0])
+    loc = [x for x in r['governing']['locations'] if x['name'] == 'Int span 2 -M'][0]
+    assert loc['x_ft'] == 25.0

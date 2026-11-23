@@ -475,6 +475,24 @@ def _support_shears_from_diagram(x, V, spans):
     return VL, VR
 
 
+def _solve_banded_spd(A, b):
+    """보 유한요소 강성(대칭 · 양정치 · 띠)의 풀이 — 띠 Cholesky(LAPACK dpbsv).
+
+    np.linalg.solve(dgesv)는 OpenBLAS 의 스레드 수에 따라 끝자리(상대 1e-11)가 바뀌어, 같은 입력에서 실행마다 다른
+    답(같은 값 두 측점 가운데 어느 쪽이 최대인지, 반올림 경계의 값)이 나왔다(2026-11-24). 띠 폭이 좁은 이 행렬에서
+    dpbsv 는 블록 없는 경로라 스레드와 무관하다. 띠 폭은 행렬에서 읽는다.
+    """
+    import numpy as _np
+    from scipy.linalg import solveh_banded
+    n = A.shape[0]
+    nz = _np.nonzero(A)
+    u = int(max(abs(nz[1] - nz[0]))) if len(nz[0]) else 0
+    ab = _np.zeros((u + 1, n))
+    for k in range(u + 1):
+        ab[u - k, k:] = _np.diagonal(A, offset=k)
+    return solveh_banded(ab, b, lower=False, check_finite=True)
+
+
 def _interp(x, y, xq):
     for j in range(len(x) - 1):
         if x[j] <= xq <= x[j + 1]:
@@ -544,8 +562,11 @@ def extract_critical_locations_envelope(
         else:
             real_spans = [k for k in range(n_spans) if sup[k] != 'N' and sup[k + 1] != 'N']
             base = 'End span' if (i == real_spans[0] or i == real_spans[-1]) else f'Int span {i + 1}'
-        kmax = max(idx, key=lambda k: M_max[k])
-        kmin = min(idx, key=lambda k: M_min[k])
+        # 같은 값(허용오차 tol 안)이면 앞 측점 — 끝자리 잡음으로 최대 위치를 고르지 않는다(계약 §6.1 동률 규칙)
+        top = max(M_max[k] for k in idx)
+        bot = min(M_min[k] for k in idx)
+        kmax = next(k for k in idx if M_max[k] >= top - tol)
+        kmin = next(k for k in idx if M_min[k] <= bot + tol)
         if M_max[kmax] > tol:
             locations.append({
                 'name': f'{base} +M', 'x_ft': round(x[kmax], 2),
@@ -1079,8 +1100,8 @@ def analyze_beam_fe(
     Kff = K[_np.ix_(free_dofs, free_dofs)]
     Ff = F[free_dofs]
     try:
-        d_free = _np.linalg.solve(Kff, Ff)
-    except _np.linalg.LinAlgError as exc:
+        d_free = _solve_banded_spd(Kff, Ff)
+    except (_np.linalg.LinAlgError, ValueError) as exc:
         raise ValueError(f'Beam FE solve failed: {exc}') from exc
     # 촘촘한 격자(경간당 1000 절점)에서는 조건수 때문에 상대 잔차 1e-5 수준이 정상이다.
     # 지점 부족(기구)은 위의 check_support_stability 가 먼저 거른다.
@@ -1105,7 +1126,7 @@ def analyze_beam_fe(
     V_kips = [float(v) for v in V_kips]
 
     # 반력: 지점이 보에 주는 힘(하향 +) = K d − F → 상향 + 로 부호를 바꾼다.
-    F_internal = K @ d_full
+    F_internal = (K * d_full).sum(axis=1)   # numpy 합(결정적) — BLAS 의 스레드 수와 무관
     reactions = []
     for si, node_i in enumerate(sup_node):
         if sup[si] == 'N':
