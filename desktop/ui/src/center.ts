@@ -26,6 +26,7 @@ import { memberRuns, regionLabel, rowOfKey, state, type CheckRow, type Run } fro
 import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
+import { plainText } from './notices';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
 export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean; mode3d: boolean }
@@ -291,7 +292,7 @@ function verdictView(sel: string, first: boolean, views: V[]): string {
     rows.push(`<tr class="grp"><td colspan="6">${esc(run.label)} · 전체 <span class="verdict ${ov.cls}">${ov.text}</span>${run.governing ? ` · 지배 ${esc(run.governing)}` : ''}</td></tr>`);
     for (const r of run.rows) { rows.push(checkRow(r, sel)); }
     for (const t of run.notApplicable) { rows.push(`<tr class="na"><td><span class="dot"></span></td><td>${esc(run.where)}</td><td>${esc(t)}</td><td></td><td></td><td class="r faint">해당 없음</td></tr>`); }
-    for (const t of run.notChecked) { rows.push(`<tr class="out"><td><span class="dot"></span></td><td>${esc(run.where)}</td><td class="faint">${esc(t)}</td><td></td><td></td><td class="r faint"${tip('엔진이 이 검토의 범위 밖으로 둔 것 — 판정에 들어가지 않는다')}>범위 밖</td></tr>`); }
+    for (const t of run.notChecked) { rows.push(`<tr class="out"${t.code ? ` data-code="${esc(t.code)}"` : ''}><td><span class="dot"></span></td><td>${esc(run.where)}</td><td class="faint">${esc(t.text)}</td><td></td><td></td><td class="r faint"${tip('엔진이 이 검토의 범위 밖으로 둔 것 — 판정에 들어가지 않는다')}>범위 밖</td></tr>`); }
   }
   return `<div class="dv vt-wrap"><div class="vt-head">${first ? vsel(views) : ''}<b>판정비</b><span class="faint"${tip('엔진의 design_checks(검토 항목) · not_checked 를 그 차례대로. 판정 차례: NG > 미검토 > OK. 해당 없음은 판정을 끌어내리지 않는다')}>위치 · 한계상태 · 소요 / 설계강도 · 엔진 판정</span><span class="sp"></span>`
     + `<div class="legend"${tip('판정비 구간색. 미검토는 합격이 아니다')}><i style="background:var(--r1)"></i><span>&lt;0.50</span><i style="background:var(--r2)"></i><span>0.75</span><i style="background:var(--r3)"></i><span>0.90</span><i style="background:var(--r4)"></i><span>1.00</span><i style="background:var(--r5)"></i><span>1.25</span><i style="background:var(--r6)"></i><span>NG</span><i class="un"></i><span>미검토</span></div></div>`
@@ -346,7 +347,7 @@ export function tablesFor(group: Group): DTable[] {
         const v = verdictOf(r.us?.result?.pass, '판정 없음');
         const run = state.runs.find(x => x.key === r.runKey);
         const k0 = (run?.rows.find(x => x.pass === false) ?? run?.rows[0])?.key ?? r.runKey;
-        return { key: k0, cells: [esc(String(r.us?.label ?? '')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
+        return { key: k0, cells: [esc(plainText(r.us?.label ?? '')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
           n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), typeof res.utilization === 'number' ? ratio(res.utilization, r.us?.result?.pass === false, `purlin:regions.${i}.result.utilization`) : none(), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(r.us?.result?.governing_check ?? ''))],
           sort: [String(r.us?.label ?? ''), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
           tsv: [String(r.us?.label ?? ''), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };

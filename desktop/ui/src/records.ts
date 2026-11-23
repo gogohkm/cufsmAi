@@ -76,8 +76,10 @@ export function bandHtml(): { kind: string; html: string } | null {
   const fro = p.file_read_only;
   const c = p.case ?? (fro ? { name: state.file.name, readOnly: true, readOnlyReason: fro.reason, lock: null } : null);
   if (c?.readOnly) {
-    const lock = c.lock ? `${esc(c.lock.name)} · ${esc(c.lock.host)} · ${esc(c.lock.since)} 부터` : '';
-    return { kind: 'readonly', html: `<b data-band="readonly">읽기 전용</b><span data-ro-reason="${esc(c.readOnlyReason ?? '')}"> — ${esc(roText(c.readOnlyReason))}${lock ? ` (${lock})` : ''}</span><span class="sp"></span>`
+    const lock = c.lock ? `${esc(c.lock.name)} · ${esc(c.lock.host)} · ${esc(fmtWhen(c.lock.since))} 부터` : '';
+    // 호스트는 읽기 전용 대상에서 입력 · 모델 편집(MCP 의 모델 동작 20 · 화면의 모델 편집)과 파일의 모델과 다른 해석 실행을 받지 않는다(a730256)
+    return { kind: 'readonly', html: `<b data-band="readonly">읽기 전용</b><span data-ro-reason="${esc(c.readOnlyReason ?? '')}"> — ${esc(roText(c.readOnlyReason))}${lock ? ` (${lock})` : ''}</span>`
+      + `<span class="faint" data-ro-scope${tip('호스트가 거절한다 — 사람의 편집 상태 · AI 의 도구 모두. 저장도 되지 않는다. 이 파일의 결과를 보는 것 · 같은 모델로 다시 해석하는 것은 된다')}> · 입력 · 모델을 고치거나 다른 모델로 해석을 돌려도 받지 않는다</span><span class="sp"></span>`
       + `<span class="btn" data-rec="as-new"${tip('지금 값을 이 프로젝트의 새 검토 대상으로 복사해 거기서 고친다(이 파일은 그대로)')}>새 검토 대상으로</span>`
       + (c.lock ? `<span class="btn ghost" data-rec="take-lock"${tip('다른 곳의 잠금을 넘겨받는다 — 그쪽의 저장은 거절된다(묻는다)')}>넘겨받기</span>` : '') };
   }

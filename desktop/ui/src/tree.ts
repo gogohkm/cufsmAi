@@ -10,6 +10,7 @@ import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './
 import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
+import { fastenerText, reasonNote } from './notices';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
 export const TABS: Array<[Tab, string]> = [['work', '업무'], ['model', '모델'], ['result', '결과'], ['doc', '문서']];
@@ -62,8 +63,8 @@ function rowNode(r: CheckRow): TNode {
     : r.kind === 'na' ? '<span class="vl faint">해당 없음</span>' : r.kind === 'ls' ? '<span class="vl faint">비 없음</span>' : '<span class="vl un">미검토</span>';
   return n(r.key, `${r.where} · ${r.name}`, {
     dot: r.kind === 'na' ? undefined : dot, vHtml: ratioCell, faint: r.kind === 'na' || !r.counts,
-    tip: r.kind === 'ne' ? `엔진이 평가하지 못한 항목 — 합격이 아니다: ${String(r.us?.reason ?? r.name)}`
-      : r.kind === 'na' ? `해당 없음: ${String(r.us?.reason ?? '')}` : !r.counts ? '적용 조건 — 판정에 들지 않는다(counts: false)' : `${r.id} · §${r.clause}`,
+    tip: r.kind === 'ne' ? `엔진이 평가하지 못한 항목 — 합격이 아니다: ${reasonNote(r.us)?.text ?? r.name}`
+      : r.kind === 'na' ? `해당 없음: ${reasonNote(r.us)?.text ?? ''}` : !r.counts ? '적용 조건 — 판정에 들지 않는다(counts: false)' : `${r.id} · §${r.clause}`,
   });
 }
 
@@ -145,7 +146,7 @@ export function buildTree(tab: Tab): TNode[] {
         ] : undefined,
       }),
       stageNode('conn', '접합부 검토', 'conn', state.lap || state.conn ? { kids: [
-        ...(state.lap ? [n('conn:lap', `랩 · ${String(state.lap.us.fastener_label ?? '패스너')}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tag: state.lap.us.force_model?.specification_provision === false ? '자체 가정' : undefined,
+        ...(state.lap ? [n('conn:lap', `랩 · ${fastenerText(state.lap.us)}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tag: state.lap.us.force_model?.specification_provision === false ? '자체 가정' : undefined,
           vHtml: typeof state.lap.us.utilization === 'number' ? ratio(state.lap.us.utilization, state.lap.us.pass === false, 'lap:utilization') : undefined,
           kids: (state.runs.find(r => r.key === 'lap')?.rows ?? []).filter(passFilter).map(rowNode) })] : []),
         ...(state.conn ? [n('conn:one', `단일 접합 · ${String(state.runs.find(r => r.key === 'conn')?.where.replace(/^접합 · /, '') ?? state.conn.us.connection_type ?? '')}`, { dot: state.conn.us.pass === true ? 'ok' : state.conn.us.pass === false ? 'ng' : 'un',

@@ -14,6 +14,7 @@
 import { esc } from './dom';
 import { tnum } from './format';
 import { si } from './units';
+import { fastenerText } from './notices';
 
 const f1 = (v: number) => v.toFixed(1);
 const N = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -103,7 +104,7 @@ export function lapSvg(o: LapOpt): string {
     g.push(arrowDim(XS(-lapL), dy, XS(0), dy, tnum(lapL, { src: 'lap:lap_left_in', kind: 'length', sig: 4 })));
     g.push(arrowDim(XS(0), dy, XS(lapR), dy, tnum(lapR, { src: 'lap:lap_right_in', kind: 'length', sig: 4 })));
     g.push(arrowDim(XS(lapR + ext) + 24, topY, XS(lapR + ext) + 24, topY + pxD, `d ${tnum(d, { src: 'lap:d', kind: 'length', sig: 4 })}`));
-    g.push(`<text x="${f1(XS(-lapL))}" y="${f1(sy + 30)}" font-size="11.5" fill="var(--accent)">${esc(String(o.lap.us.fastener_label ?? '패스너'))} × ${tnum(N(s.n_total), { src: 'lap:n_total', kind: 'none' })}`
+    g.push(`<text x="${f1(XS(-lapL))}" y="${f1(sy + 30)}" font-size="11.5" fill="var(--accent)">${esc(fastenerText(o.lap.us))} × ${tnum(N(s.n_total), { src: 'lap:n_total', kind: 'none' })}`
       + ` · ${tnum(N(s.n_rows), { src: 'lap:n_rows', kind: 'none' })}열 × ${tnum(N(s.n_per_row), { src: 'lap:n_per_row', kind: 'none' })}</text>`);
   }
   // 자르는 자리 A-A — 오른쪽 랩 끝 패스너 열(그림의 자리)

@@ -20,6 +20,23 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
+/**
+ * K4b: 엔진의 글은 제품의 하나뿐인 그리기(webview/js/notices.js)로 — 시험도 같은 파일을 따로 불러 화면이 보일 글을 낸다(한국어 · SI).
+ * 알림이 붙은 묶음은 lines, 붙지 않은 묶음의 옛 글은 같은 결과 나무 안의 알림(textMap) — 화면과 같은 규칙(보기 계약 4d)
+ */
+const NOTICES = require(path.join(repoRoot, 'webview', 'js', 'notices.js'));
+const NO = { units: 'SI', lang: 'ko' };
+const isNoticeArr = v => Array.isArray(v) && v.some(n => n && typeof n === 'object' && ('template' in n || 'template_ko' in n || n.kind === 'group' || 'list' in n));
+function engList(root, o, list) {
+  if (!o || typeof o !== 'object') { return []; }
+  if (isNoticeArr(o.notices)) { return NOTICES.lines(o, { ...NO, lists: [list] }).map(l => ({ text: l.subject ? `${l.subject} — ${l.text}` : l.text, code: l.code ?? null })).filter(x => x.text || x.code); }
+  const tm = NOTICES.textMap(root, NO);
+  return (Array.isArray(o[list]) ? o[list] : []).map(x => (typeof x === 'string' ? { text: tm(x) } : { text: x?.name ? `${x.name} — ${tm(String(x.reason ?? ''))}` : tm(String(x?.reason ?? '')) })).filter(x => x.text);
+}
+/** 검토 항목의 이유 — 화면이 보일 글(한국어 · SI) */
+const engReason = c => NOTICES.reason(c, NO);
+/** SI 로 읽는 글에 남은 US 수(엔진 · 호스트의 글) — notices.js 의 단위 글자와 같은 경계 */
+const US_NUM = /\d\s?(kip-in|kips|kip|ksi|in\.?)(?![A-Za-z0-9*·^\/])/;
 const SERVE = path.join(repoRoot, 'desktop', 'host', 'dist', 'serve.js');
 const MCP_SERVER = path.join(repoRoot, 'media', 'mcp-server.js');
 const OUT = path.join(here, 'out');
@@ -37,6 +54,14 @@ function check(name, ok, detail = '') {
   results.push({ name, ok: !!ok, detail });
   process.stdout.write(`${ok ? '  통과' : '  실패'}  ${name}${detail ? ` — ${detail}` : ''}\n`);
   return !!ok;
+}
+/** 그 단계가 이번 실행에서 도는가(--only 가 없으면 모두) */
+const ran = id => !ONLY.length || ONLY.includes(id);
+/** 앞 단계에 기대는 단계 밖 검사 — --only 로 그 단계를 거르면 「건너뜀」(통과도 실패도 아니다 — 걸러 낸 실행이 진짜 까닭으로만 붉어지게) */
+const skippedChecks = [];
+function skipCheck(name, needs) {
+  skippedChecks.push({ name, needs });
+  process.stdout.write(`  건너뜀  ${name} — 앞 단계 ${needs.join(', ')} 를 이번 실행에서 거름(--only)\n`);
 }
 const section = title => process.stdout.write(`\n▶ ${title}  (+${((Date.now() - started) / 1000).toFixed(1)} s)\n`);
 const short = (v, n = 200) => { const s = typeof v === 'string' ? v : JSON.stringify(v); return s && s.length > n ? `${s.slice(0, n)}…` : s; };
@@ -492,7 +517,7 @@ async function main() {
 
 function finish(serve) {
   const failed = results.filter(r => !r.ok);
-  process.stdout.write(`\n결과: ${results.length - failed.length}/${results.length} 통과 · ${((Date.now() - started) / 1000).toFixed(1)} s · 그림 ${OUT}\n`);
+  process.stdout.write(`\n결과: ${results.length - failed.length}/${results.length} 통과${skippedChecks.length ? ` · 건너뜀 ${skippedChecks.length}(앞 단계를 거름)` : ''} · ${((Date.now() - started) / 1000).toFixed(1)} s · 그림 ${OUT}\n`);
   if (failed.length) {
     process.stdout.write(`실패: ${failed.map(f => f.name).join(' / ')}\n`);
     if (serve) { process.stdout.write(`serve stderr 끝:\n${serve.stderr().split('\n').filter(l => !l.startsWith('[StCFSD Python stderr]')).slice(-30).join('\n')}\n`); }
@@ -619,7 +644,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       && /해석 조건/.test(s.tree) && /단면 「립 C 150×65×20×2」/.test(s.share);
     return { ok, detail: `트리 · 정보 · 「Claude 가 보는 선택」 = ${s.share} · 새로 고침 없음 ${(await marker()) === 1}` };
   });
-  {
+  if (!ran('u03')) {
+    skipCheck('화면의 수(트리 · 정보 창 · 절점/요소 표 · 그림 치수) = MCP 도구의 값(SI 변환 뒤)', ['u03']);
+    skipCheck('단면 그림 = 절점 · 요소(MCP get_nodes · get_elements): 수 · 경계 상자 · 축척(같은 비율, 위가 +z)', ['u03']);
+  } else {
+    // u03 이 새 단면을 기다리고 단면 보기를 고른 뒤의 화면을 잰다
     const ctx = { ...(await mcpNow()), params: params1 };
     const items = await numbers();
     const r = compareNumbers(items, ctx);
@@ -716,11 +745,17 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const rowsOk = JSON.stringify(s.rows.map(r => r.v)) === JSON.stringify(exp)
       && s.rows.filter(r => r.v === 'ne').every(r => r.verdict === '미검토' && r.ratio === null)
       && s.rows.filter(r => r.v === 'na').every(r => r.verdict === '해당 없음');
-    const wl = [...(res.warnings ?? [])], al = [...(res.assumptions ?? [])], sl = [...(res.scope_notes ?? [])];
-    for (const [k, v] of Object.entries(res)) { if (v && typeof v === 'object' && !Array.isArray(v) && k !== 'region' && k !== 'force_model') {
-      for (const x of v.warnings ?? []) { wl.push(`[${k}] ${x}`); } for (const x of v.assumptions ?? []) { al.push(`[${k}] ${x}`); } for (const x of v.scope_notes ?? []) { sl.push(`[${k}] ${x}`); } } }
-    if (res.dsm_warning) { wl.push(`[DSM] ${res.dsm_warning}`); }
+    // 엔진의 결과(호스트가 화면에 보낸 US 결과 그대로)를 notices.js 로 — 화면이 보여야 할 한국어 · SI 글
+    const usRaw = await ev(`${S}.state.runs[0].us`);
+    const wl = [], al = [], sl = [];
+    const add = (o, pre) => { wl.push(...engList(usRaw, o, 'warnings').map(x => pre + x.text)); al.push(...engList(usRaw, o, 'assumptions').map(x => pre + x.text)); sl.push(...engList(usRaw, o, 'scope_notes').map(x => pre + x.text)); };
+    add(usRaw, '');
+    if (usRaw.dsm_warning) { wl.push(`[DSM] ${NOTICES.textMap(usRaw, NO)(usRaw.dsm_warning)}`); }
+    for (const [k, v] of Object.entries(usRaw)) { if (v && typeof v === 'object' && !Array.isArray(v) && !['region', 'force_model', 'request'].includes(k)) { add(v, `[${k}] `); } }
     const listsOk = JSON.stringify(s.secs['경고'] ?? []) === JSON.stringify(wl) && JSON.stringify(s.secs['가정'] ?? []) === JSON.stringify(al) && JSON.stringify(s.secs['범위'] ?? []) === JSON.stringify(sl);
+    const usLeft = [...wl, ...al, ...sl].filter(t => US_NUM.test(t));
+    const codes = await ev(`[...document.querySelectorAll('#info li[data-code]')].length`);
+    const wantCodes = (usRaw.notices ?? []).filter(n => n && n.code && ['warnings', 'assumptions', 'scope_notes'].includes(n.list)).length;
     const overall = res.pass === false ? 'NG' : res.pass === true ? 'OK' : '판정 없음';
     const cnt = { ng: exp.filter(x => x === 'ng').length, un: exp.filter(x => x === 'ne').length, ok: exp.filter(x => x === 'ok').length };
     const treeOk = s.treeChk === `NG ${cnt.ng} · 미검토 ${cnt.un} · OK ${cnt.ok}`;
@@ -730,8 +765,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const ctx = { ...(await mcpNow()), params: params2, designSI: res };
     const r = compareNumbers(await numbers(), ctx);
     return {
-      ok: rowsOk && listsOk && headOk && treeOk && r.bad.length === 0 && (r.bySrc.design ?? 0) >= 3 && s.out === (res.not_checked ?? []).length,
-      detail: `트리 「${s.treeChk}」 · 줄 ${s.rows.map(x => `${x.v}${x.ratio ? ` ${x.ratio}` : ''}`).join(' · ')} · 전체 ${overall} · 경고 ${wl.length} / 가정 ${al.length} / 범위 ${sl.length} 따로 · 범위 밖 ${s.out}`
+      ok: rowsOk && listsOk && headOk && treeOk && r.bad.length === 0 && (r.bySrc.design ?? 0) >= 3 && s.out === (res.not_checked ?? []).length && usLeft.length === 0 && codes >= wantCodes,
+      detail: `트리 「${s.treeChk}」 · 줄 ${s.rows.map(x => `${x.v}${x.ratio ? ` ${x.ratio}` : ''}`).join(' · ')} · 전체 ${overall} · 경고 ${wl.length} / 가정 ${al.length} / 범위 ${sl.length} 따로(notices.js · 한국어 · SI) · code ${codes}/${wantCodes} · US 수 남음 ${usLeft.length}${usLeft.length ? ` 「${short(usLeft[0], 80)}」` : ''} · 범위 밖 ${s.out}`
         + ` · 수 ${r.compared}개 = MCP(design ${r.bySrc.design ?? 0})${r.bad.length ? ` · 어긋남 ${r.bad.slice(0, 3).join(' / ')}` : ''}${!rowsOk ? ` · 기대 ${exp.join(',')}` : ''}${!listsOk ? ` · 목록 ${short(s.secs, 200)}` : ''}`,
     };
   };
@@ -1093,7 +1128,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const kindsOk = JSON.stringify(g.kinds) === JSON.stringify((eng?.steps ?? []).map(s => s.kind));
     const govOk = JSON.stringify(g.cards.filter(c => c.gov).map(c => c.id)) === JSON.stringify(engineList.filter(c => c.governs).map(c => c.id));
     const vOk = g.hv === verdictOfEngine(eng?.verdict) && g.sheet === key && g.cards.find(c => c.key === key)?.open;
-    const reasonOk = eng && ['not_evaluated', 'not_applicable'].includes(eng.verdict) ? g.reason === String(eng.reason ?? '엔진이 까닭을 적지 않았다') : true;
+    const reasonOk = eng && ['not_evaluated', 'not_applicable'].includes(eng.verdict) ? g.reason === (engReason(eng) ?? '엔진이 까닭을 적지 않았다') && !US_NUM.test(g.reason ?? '') : true;
     const ctx = { ...(await mcpNow()), params: paramsS, ...(await hostRes()) };
     const r = compareNumbers(await numbers('#sheet'), ctx);
     return { ok: cardsOk && kindsOk && govOk && vOk && reasonOk && r.bad.length === 0 && r.compared > 0, g, eng, r,
@@ -1577,7 +1612,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const KO = { pass: 'OK', fail: 'NG', not_evaluated: '미검토', not_applicable: '해당 없음' };
     const bsRow = inf.rows.find(x => x.startsWith('lap.block_shear:')) ?? '';
     const bsOk = bs?.verdict === 'not_evaluated' ? /^lap\.block_shear:미검토/.test(bsRow) : bsRow.includes(KO[bs?.verdict] ?? '?') || /\d/.test(bsRow);
-    return { ok: !!bs && bsOk && ld?.verdict === 'not_evaluated' && reason === String(ld.reason) && reason.length > 10,
+    return { ok: !!bs && bsOk && ld?.verdict === 'not_evaluated' && reason === engReason(ld) && reason.length > 10 && !US_NUM.test(reason),
       detail: `블록 전단 ${bs?.verdict}(counts ${bs?.counts}) → 정보 창 「${short(bsRow, 50)}」 · 범위 글에 J6.3 ${/J6\.3/.test(inf.scope)} · 뒤틀림 ${ld?.verdict} 「${short(reason, 90)}」 = 엔진의 까닭` };
   });
   // AI 의 load_project 가 저장하지 않은 변경을 버리면 — 막지 않고 알린다
@@ -1786,6 +1821,21 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const t = await ev(`({tree:[...document.querySelectorAll('#tree .row[data-k^="asm:"]')].map(r=>r.querySelector('.nm').textContent).filter(x=>!/프로그램 기본/.test(x)), info:[...document.querySelectorAll('#info li[data-asm-where]')].map(l=>l.dataset.asmWhere)})`);
     const bare = t.tree.filter(x => !/ — /.test(x));
     return { ok: t.tree.length > 0 && bare.length === 0 && t.info.length === t.tree.length && t.info.every(Boolean), detail: `가정 ${t.tree.length}줄 · 자리 없는 줄 ${bare.length} · 예: 「${short(t.tree[0], 90)}」` };
+  });
+  await step('u60 엔진의 글(K4b) — 화면에 보인 경고 · 가정 · 범위 · 미검토 · 범위 밖 · 이유 = notices.js(한국어 · SI) · code 를 단다 · SI 글에 US 수 없음(엔진에 알림이 없는 글은 목록으로)', null, async () => {
+    // 지금 화면이 쥔 결과마다(퍼린 · 랩 · 접합 …) 정보 창을 차례로 열어 보인 글을 모은다
+    const keys = await ev(`${S}.state.runs.map(r=>{const w=r.rows.find(x=>x.kind==='ne'||x.kind==='na')||r.rows[0]; return w?w.key:null;}).filter(Boolean)`);
+    const seen = [];
+    for (const k of keys) {
+      await select('result', k);
+      seen.push(...await ev(`[...document.querySelectorAll('#info li, #info [data-reason], #center tr.out td.faint')].map(e=>({t:e.textContent.trim(), code:e.closest('[data-code]')?.dataset.code ?? null})).filter(x=>x.t)`));
+    }
+    const hangul = /[가-힣]/;
+    const usLeft = seen.filter(x => US_NUM.test(x.t));
+    const english = [...new Set(seen.filter(x => !hangul.test(x.t.replace(/^\[[^\]]*\]\s*/, ''))).map(x => `${x.code ?? '(code 없음)'}: ${short(x.t, 70)}`))];
+    const coded = seen.filter(x => x.code).length;
+    return { ok: seen.length > 0 && usLeft.length === 0 && coded > 0,
+      detail: `글 ${seen.length}줄 · code ${coded} · SI 글의 US 수 ${usLeft.length}${usLeft.length ? ` 「${short(usLeft[0].t, 80)}」` : ''} · 한국어가 아닌 글 ${english.length}${english.length ? ` — ${english.join(' | ')}` : ''}` };
   });
   await step('u5a V7-43 — 편집 중에 AI 만 바꾸면 「이번 편집 — 바뀐 것 0」, AI 가 바꾼 값은 오른쪽에 「AI」 칩으로 따로 · 사람이 고친 것만 왼쪽', 'u5a_edit_ai_chips', async () => {
     await select('model', 'dc');
@@ -2196,6 +2246,37 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await ev(`${S}.review()`);
     return { ok: t.rows.length === lc.cases.length && String(lc.cases.length) === t.foot && t.cards >= 4,
       detail: `줄 ${t.rows.join(', ')} = list_cases ${lc.cases.map(c => c.name).join(', ')} · 바닥 줄 ${t.foot} · 카드 ${t.cards}` };
+  });
+  await step('r17 남이 쥔 대상(다른 작성자의 잠금) → 띠: 까닭 · 잠금 · 「입력 · 모델을 고치거나 다른 모델로 해석을 돌려도 받지 않는다」 · 「새 검토 대상으로」 · 「넘겨받기」, AI 의 모델 편집도 거절(a730256)', 'r17_locked_band', async () => {
+    const pdir = path.join(projRoot, '시험 물류창고');
+    const act = (body) => api('POST', '/api/mcp/action', body).then(r => r.json);
+    // 「가져온 퍼린」의 caseId 를 안 뒤 다른 대상을 열어 내 잠금을 놓는다 — 그 자리에 다른 작성자의 잠금을 심는다(남의 PC 에서 열려 있는 것처럼)
+    await act({ action: 'open_case', name: '가져온 퍼린', report_units: 'SI' });
+    const caseId = (await act({ action: 'get_full_state' }))?.project?.case?.caseId;
+    await act({ action: 'open_case', name: '퍼린 P1', report_units: 'SI' });
+    const lockFile = path.join(pdir, '.stcfsd', 'locks', `${caseId}.lock`);
+    fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+    fs.writeFileSync(lockFile, JSON.stringify({ schema: 'stcfsd-lock/1', caseId, writer: 'wabcdefghijklmnopqrst', name: '다른 설계자', host: 'OTHER-PC', pid: 4242, at: new Date().toISOString(), sig: 'x' }));
+    try {
+      await act({ action: 'open_case', name: '가져온 퍼린', report_units: 'SI' });
+      const band = await waitFor(`(()=>{const b=document.getElementById('recband'); return b && !b.hidden && b.getAttribute('data-kind')==='readonly' ? {text:b.textContent, reason:b.querySelector('[data-ro-reason]')?.dataset.roReason||'', scope:!!b.querySelector('[data-ro-scope]'),
+        btns:[...b.querySelectorAll('[data-rec]')].map(x=>x.dataset.rec+':'+x.textContent)} : null;})()`, 30_000, '읽기 전용 띠').catch(() => null);
+      if (!band) { return { ok: false, detail: `띠 없음 · project ${short(JSON.stringify((await act({ action: 'get_full_state' }))?.project), 300)}` }; }
+      await shot('r17_locked_1920_dark');
+      // AI 의 모델 편집(MCP 의 모델 동작) — 호스트가 거절하고 모델은 그대로
+      const before = await mcp.tool('get_full_state');
+      const sm = await mcp.tool('set_material', { E: 210000, v: 0.3, units: 'SI' });
+      const after = await mcp.tool('get_full_state');
+      const same = JSON.stringify(before.material) === JSON.stringify(after.material);
+      return { ok: band.reason === 'locked-by-other-writer' && /다른 작성자가 잠그고 있다/.test(band.text) && /다른 설계자/.test(band.text) && band.scope && /입력 · 모델을 고치거나 다른 모델로 해석을 돌려도 받지 않는다/.test(band.text)
+        && band.btns.includes('as-new:새 검토 대상으로') && band.btns.includes('take-lock:넘겨받기') && !!sm.error && same,
+      detail: `띠 「${short(band.text.replace(/\s+/g, ' '), 140)}」 · 단추 ${band.btns.join(', ')} · AI 의 set_material → ${short(sm.error ?? '받음', 90)} · 재료 그대로 ${same}` };
+    } finally {
+      // 심은 잠금을 걷고 내 대상으로 돌아간다(뒤의 해석이 읽기 전용에 걸리지 않게)
+      try { fs.rmSync(lockFile, { force: true }); } catch { /* 없음 */ }
+      await act({ action: 'open_case', name: '퍼린 P1', report_units: 'SI' });
+      await settle(`!!s.full && !!s.full.project && !!s.full.project.case && s.full.project.case.name==='퍼린 P1' && !s.full.project.case.readOnly`, '내 대상', 30_000).catch(() => undefined);
+    }
   });
 
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });

@@ -55,6 +55,7 @@ src/
   caseView.ts       모델 탭의 부재 · 하중 · 설계 조건 · 접합부 · 재료 — get_case_inputs 의 값 · 단위 · 출처, 경간 표, 「AI 가 바꾼 사람의 값」
   editstrip.ts      편집 상태의 띠(템플릿 09) — 「이번 편집 — 바뀐 것 N」 · AI 대기 · 편집 마치기 · 버리기(R2 전 꺼짐)
   checklist.ts      점검(validate_design 의 항목 — 결과 탭)과 문서 탭(계산서 · 좌굴 해석 보고서 · 검증표 — generate_report 의 파일, sandbox 미리보기)
+  notices.ts        엔진의 글(경고 · 가정 · 범위 · 미검토 · 이유 · 패스너 이름표) — 제품의 webview/js/notices.js 를 그대로 묶어 한국어 · SI 로, code 를 data-code 에(K4b)
   records.ts        기록 갈래 R1-3 — 프로젝트 · 검토 대상(get_full_state.project · list_cases · get_case_status), 띠, 사람만 하는 일(/api/person/*)
   v3d.ts            3D 모드 형상 — 제품의 렌더러를 /ui/viewer3d/ 에서 싣고 캔버스 하나를 다시 그릴 때마다 옮겨 붙인다
   start.ts          시작 화면(템플릿 00)
@@ -115,7 +116,7 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 
 ### 단위
 
-엔진 · 호스트는 US 다. 화면은 SI(mm · MPa · kN · kN·m)로 **보이기만** 한다. 바꾸는 곳은 `src/units.ts` 하나이고, 그 파일은 제품의 `src/mcp/siUnits.ts` 를 묶는다 — MCP 도구가 `units:"SI"` 로 돌려줄 때와 같은 표 · 같은 곱셈이다(단면 성질 · cutwp · DSM · 부재 설계 · 퍼린 설계는 그 도구의 출력 표로 통째로, `get_full_state` · `get_nodes` · 모델 치수는 `toSI(값, 종류)`). 바꾼 값을 모델로 되돌리는 길은 없다(이 화면은 모델을 쓰지 않는다). 엔진이 쓴 글(경고 · 가정 · 범위)은 US 그대로다.
+엔진 · 호스트는 US 다. 화면은 SI(mm · MPa · kN · kN·m)로 **보이기만** 한다. 바꾸는 곳은 `src/units.ts` 하나이고, 그 파일은 제품의 `src/mcp/siUnits.ts` 를 묶는다 — MCP 도구가 `units:"SI"` 로 돌려줄 때와 같은 표 · 같은 곱셈이다(단면 성질 · cutwp · DSM · 부재 설계 · 퍼린 설계는 그 도구의 출력 표로 통째로, `get_full_state` · `get_nodes` · 모델 치수는 `toSI(값, 종류)`). 바꾼 값을 모델로 되돌리는 길은 없다(이 화면은 모델을 쓰지 않는다). 엔진이 쓴 글(경고 · 가정 · 범위 · 미검토 · 이유 · 패스너 이름표)은 제품의 하나뿐인 그리기 `webview/js/notices.js`(`src/notices.ts` 가 묶는다)로 한국어 · SI 로 그린다(보기 계약 4d) — 화면은 글을 고쳐 쓰지 않는다. 알림(code)이 없는 글(엔진의 not_checked · 호스트가 더한 글)은 그 글 그대로이고, SI 면 그 안의 US 상수만 notices.js 가 바꾼다.
 
 ### 진행 띠 — 무엇이 최신인가
 

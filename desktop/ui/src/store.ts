@@ -22,7 +22,7 @@
 import { api, last, mcp, type LastEntry } from './bridge';
 import { loadRecords } from './records';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
-import { itemText } from './format';
+import { finder, looseList, noteList, type Finder, type Note } from './notices';
 
 export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
 export type StageState = 'ok' | 'stale' | 'none' | 'run' | 'unk';
@@ -74,8 +74,10 @@ export interface CheckRow {
   xm: number | null;    // 검토 위치 x(m) — location.x 가 있을 때
   /** 퍼린 검토 지점 하나의 알림 글(`regions[i].result.checks[j]` 의 warnings · assumptions · scope_notes · not_checked — 보기 계약 4a). 지점이 없으면 null */
   pointNotes?: PointNotes | null;
+  /** 검토 항목이 없는 옛 결과의 미검토 줄 — 그 알림의 code */
+  noteCode?: string | null;
 }
-export interface PointNotes { warnings: string[]; assumptions: string[]; scope: string[]; notChecked: string[] }
+export interface PointNotes { warnings: Note[]; assumptions: Note[]; scope: Note[]; notChecked: Note[] }
 
 /** 퍼린 구간의 검토 지점(띠의 막대 하나) */
 export interface CheckPoint { index: number; name: string; xm: number | null; ratio: number | null; pass: boolean | null; src: string }
@@ -95,13 +97,13 @@ export interface Run {
   rows: CheckRow[];
   /** 퍼린 구간의 검토 지점 */
   points: CheckPoint[];
-  /** design_checks 가 있는 결과의 옛 not_evaluated 글(정보 창에 그대로) */
-  neTexts: string[];
-  notChecked: string[];
+  /** design_checks 가 있는 결과의 not_evaluated 알림(정보 창에 — notices.js 로 그린 한국어 · SI 글과 code) */
+  neTexts: Note[];
+  notChecked: Note[];
   notApplicable: string[];
-  warnings: string[];
-  assumptions: string[];
-  scope: string[];
+  warnings: Note[];
+  assumptions: Note[];
+  scope: Note[];
 }
 
 export interface State {
@@ -184,7 +186,6 @@ export const state: State = {
 const MEMBER_KO: Record<string, string> = { flexure: '휨 부재', compression: '압축 부재', combined: '조합 부재', tension: '인장 부재', connection: '접합' };
 const CONN_KO: Record<string, string> = { bolt: '볼트', screw: '나사', fillet_weld: '필릿 용접', arc_spot: '아크 스폿 용접', arc_seam: '아크 심 용접', groove: '그루브 용접', paf: 'PAF' };
 
-function list(v: unknown): string[] { return Array.isArray(v) ? v.map(itemText).filter(Boolean) : []; }
 
 /** 검토 지점의 조합 — 호스트가 어느 조합인지 말할 수 없는 포락선 값이면 문자 그대로 'envelope'(보기 계약 4a) → 「포락선」 */
 export const COMBO_KO = (c: string | null | undefined): string => (c === 'envelope' ? '포락선' : String(c ?? ''));
@@ -239,16 +240,16 @@ function checkRows(run: string, scope: Scope, where: string, us: any[], si: any[
 }
 
 /** 엔진 결과 하나 → 판정 줄. 엔진의 design_checks(없으면 옛 limit_state_checks · not_evaluated)를 그 차례대로 옮긴다 */
-function runOf(key: string, scope: Scope, label: string, where: string, us: any, si: any, src: string, extraNe: unknown[] = []): Run {
+function runOf(key: string, scope: Scope, label: string, where: string, us: any, si: any, src: string, find: Finder, extraNe: Note[] = []): Run {
   let rows: CheckRow[] = [];
   const points: CheckPoint[] = [];
-  const neTexts: string[] = [];
+  const neTexts: Note[] = [];
   const pts = Array.isArray(us?.checks) && us.checks.some((c: any) => Array.isArray(c?.design_checks)) ? us.checks : null;
   if (pts) {
     pts.forEach((pt: any, p: number) => {
       const sp = si?.checks?.[p] ?? pt;
       const name = String(pt?.check_point ?? `지점 ${p + 1}`);
-      const notes: PointNotes = { warnings: list(pt?.warnings), assumptions: list(pt?.assumptions), scope: list(pt?.scope_notes), notChecked: list(pt?.not_checked) };
+      const notes: PointNotes = { warnings: noteList(pt, 'warnings', find), assumptions: noteList(pt, 'assumptions', find), scope: noteList(pt, 'scope_notes', find), notChecked: looseList(pt?.not_checked, find) };
       rows.push(...checkRows(key, scope, where, Array.isArray(pt.design_checks) ? pt.design_checks : [], sp?.design_checks ?? [], `${src}checks.${p}.`, p, name).map(r => ({ ...r, pointNotes: notes })));
       points.push({ index: p, name, xm: xmOf(sp?.location), ratio: typeof sp?.utilization === 'number' ? sp.utilization : null,
         pass: pt?.pass === true ? true : pt?.pass === false ? false : null, src: `${src}checks.${p}.utilization` });
@@ -265,35 +266,36 @@ function runOf(key: string, scope: Scope, label: string, where: string, us: any,
         kind: pass === null ? 'ne' : 'ls', governs: false, counts: true, us: x, si: x, src: `${src}limit_state_checks.${i}.`, location: null, locUS: null, combination: null, xm: null });
     });
   }
-  const neList = [...list(us?.not_evaluated), ...list(extraNe)];
+  const neList = [...noteList(us, 'not_evaluated', find), ...extraNe];
   if (rows.length && !rows[0].id.startsWith('ls')) { neTexts.push(...neList); } else {
     neList.forEach((t, i) => {
-      rows.push({ key: `${key}#ne${i}`, run: key, scope, id: `ne${i}`, point: null, pointName: null, where, name: t, clause: '', verdict: 'not_evaluated', ratio: null, pass: null,
-        kind: 'ne', governs: false, counts: true, us: null, si: null, src: '', location: null, locUS: null, combination: null, xm: null });
+      rows.push({ key: `${key}#ne${i}`, run: key, scope, id: `ne${i}`, point: null, pointName: null, where, name: t.text, clause: '', verdict: 'not_evaluated', ratio: null, pass: null,
+        kind: 'ne', governs: false, counts: true, us: null, si: null, src: '', location: null, locUS: null, combination: null, xm: null, noteCode: t.code });
     });
   }
-  const warnings: string[] = [];
-  const assumptions: string[] = [];
-  const scopeNotes: string[] = [];
+  const warnings: Note[] = [];
+  const assumptions: Note[] = [];
+  const scopeNotes: Note[] = [];
+  const pre = (prefix: string) => (n: Note): Note => ({ text: prefix + n.text, code: n.code });
   const collect = (o: any, prefix: string) => {
     if (!o || typeof o !== 'object') { return; }
-    warnings.push(...list(o.warnings).map(t => prefix + t));
-    assumptions.push(...list(o.assumptions).map(t => prefix + t));
-    scopeNotes.push(...list(o.scope_notes).map(t => prefix + t));
+    warnings.push(...noteList(o, 'warnings', find).map(pre(prefix)));
+    assumptions.push(...noteList(o, 'assumptions', find).map(pre(prefix)));
+    scopeNotes.push(...noteList(o, 'scope_notes', find).map(pre(prefix)));
   };
   collect(us, '');
-  if (typeof us?.dsm_warning === 'string' && us.dsm_warning) { warnings.push(`[DSM] ${us.dsm_warning}`); }
+  if (typeof us?.dsm_warning === 'string' && us.dsm_warning) { warnings.push(pre('[DSM] ')(find(us.dsm_warning))); }
   for (const [k, v] of Object.entries(us ?? {})) {
     if (v && typeof v === 'object' && !Array.isArray(v) && !['region', 'force_model', 'request'].includes(k)) { collect(v, `[${k}] `); }
   }
   const notApplicable: string[] = [];
-  if (!rows.some(r => r.kind === 'na') && us?.distortional_applicable === false) { notApplicable.push('뒤틀림 좌굴(§F4 · §E4)'); }
+  if (!rows.some(r => r.kind === 'na') && us?.distortional_applicable === false) { notApplicable.push('뒤틀림좌굴(§F4 · §E4)'); }
   return {
     key, area: scope, label, where, result: si, us, src,
     overall: us?.pass === true ? true : us?.pass === false ? false : null,
     utilization: typeof si?.utilization === 'number' ? si.utilization : null,
     governing: typeof us?.governing_check === 'string' ? us.governing_check : null,
-    rows, points, neTexts, notChecked: list(us?.not_checked), notApplicable, warnings, assumptions, scope: scopeNotes,
+    rows, points, neTexts, notChecked: looseList(us?.not_checked, find), notApplicable, warnings, assumptions, scope: scopeNotes,
   };
 }
 
@@ -308,28 +310,29 @@ function buildRuns(): Run[] {
   if (d && typeof d === 'object' && !d.error) {
     const si = memberSI(d);
     const mt = String(d.member_type ?? '');
-    runs.push(runOf('design', 'member', `부재 검토 · ${MEMBER_KO[mt] ?? mt}`, MEMBER_KO[mt] ?? '부재', d, si, 'design:'));
+    runs.push(runOf('design', 'member', `부재 검토 · ${MEMBER_KO[mt] ?? mt}`, MEMBER_KO[mt] ?? '부재', d, si, 'design:', finder(d)));
   }
   const p = showPurlin ? state.msgs.designPurlinResult?.message?.data : null;
   if (p && typeof p === 'object' && !p.error) {
     const si = purlinSI(p);
     const regions = Array.isArray(p.regions) ? p.regions : [];
+    const findP = finder(p);
     regions.forEach((rg: any, i: number) => {
       if (!rg?.result) { return; }
       // 엔진의 구간 이름은 ft 로 적혀 있다 — 화면은 m 이므로 그 숫자 자리만 SI 값으로 바꿔 적는다(값은 엔진의 start_ft · end_ft)
       const lab = regionLabel(rg, si.regions?.[i], i);
-      runs.push(runOf(`purlin:${i}`, 'purlin', `퍼린 구간 · ${lab}`, lab, rg.result, si.regions?.[i]?.result, `purlin:regions.${i}.result.`));
+      runs.push(runOf(`purlin:${i}`, 'purlin', `퍼린 구간 · ${lab}`, lab, rg.result, si.regions?.[i]?.result, `purlin:regions.${i}.result.`, findP));
     });
     // 퍼린 묶음 전체의 미검토 · 경고 · 가정(구간에 붙지 않은 것)
     const top = runOf('purlin', 'purlin', '퍼린 설계 · 전체', '퍼린 전체', { ...p, limit_state_checks: [], regions: undefined, design_positive: undefined,
       design_negative: undefined, design_lap: undefined, design_uplift: undefined, load_analysis: undefined, props: undefined, cutwp: undefined, design_checks: undefined, checks: undefined },
-    { ...si, limit_state_checks: [] }, 'purlin:', list(p.load_not_evaluated));
+    { ...si, limit_state_checks: [] }, 'purlin:', findP, looseList(p.load_not_evaluated, findP));
     runs.push(top);
   }
-  if (state.lap) { runs.push(runOf('lap', 'lap', '랩 접합', '랩 접합', state.lap.us, state.lap.si, 'lap:')); }
+  if (state.lap) { runs.push(runOf('lap', 'lap', '랩 접합', '랩 접합', state.lap.us, state.lap.si, 'lap:', finder(state.lap.us))); }
   if (state.conn) {
     const ct = String(state.conn.us.connection_type ?? '');
-    runs.push(runOf('conn', 'connection', `단일 접합 · ${CONN_KO[ct] ?? ct}`, `접합 · ${CONN_KO[ct] ?? ct}`, state.conn.us, state.conn.si, 'conn:'));
+    runs.push(runOf('conn', 'connection', `단일 접합 · ${CONN_KO[ct] ?? ct}`, `접합 · ${CONN_KO[ct] ?? ct}`, state.conn.us, state.conn.si, 'conn:', finder(state.conn.us)));
   }
   return runs;
 }
@@ -354,13 +357,13 @@ export function rowOfKey(key: string): { run?: Run; row?: CheckRow } {
  * 실행(run)의 가정(맨 위 · 하위 묶음 — 「[deck]」처럼 묶음 이름이 앞에 붙는다)과 퍼린 검토 지점마다의 가정(regions[i].result.checks[j].assumptions).
  * 같은 자리 · 같은 글은 한 번
  */
-export function assumptionLines(): Array<{ key: string; where: string; text: string }> {
-  const out: Array<{ key: string; where: string; text: string }> = [];
+export function assumptionLines(): Array<{ key: string; where: string; text: string; code: string | null }> {
+  const out: Array<{ key: string; where: string; text: string; code: string | null }> = [];
   const seen = new Set<string>();
-  const push = (key: string, where: string, text: string) => { const id = `${where}\u0000${text}`; if (!seen.has(id)) { seen.add(id); out.push({ key, where, text }); } };
+  const push = (key: string, where: string, n: Note) => { const id = `${where}\u0000${n.text}`; if (!seen.has(id)) { seen.add(id); out.push({ key, where, text: n.text, code: n.code }); } };
   for (const r of state.runs) {
     r.assumptions.forEach((t, i) => push(`asm:${r.key}:${i}`, r.label, t));
-    const pts = new Map<number, { name: string; notes: string[] }>();
+    const pts = new Map<number, { name: string; notes: Note[] }>();
     for (const row of r.rows) { if (row.point !== null && row.pointNotes && !pts.has(row.point)) { pts.set(row.point, { name: row.pointName ?? String(row.point + 1), notes: row.pointNotes.assumptions }); } }
     for (const [p, x] of pts) { x.notes.forEach((t, i) => push(`asm:${r.key}:p${p}:${i}`, `${r.label} · ${POINT_KO(x.name)}`, t)); }
   }
