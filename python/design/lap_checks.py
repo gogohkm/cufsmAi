@@ -140,7 +140,7 @@ def build(ck: dict) -> list:
 
     # --- 랩 구간 휨
     fx = ck['flex']
-    no_m = 'no support moment (Mu_support = 0)'
+    no_m = _nt('lap.reason.no_support_moment_stated')
     phi_b, om_b = 0.90, 1.67
     if ck['Mu'] <= 0:
         for cid in ('lap.flexure.local', 'lap.flexure.distortional', 'lap.bending_shear'):
@@ -232,13 +232,22 @@ def build(ck: dict) -> list:
                          inputs=[mu, q(m_sym, lo['phi_Mn_lap'], 'moment', src('check', id='lap.flexure.local')),
                                  vu, tr.ref(i_v)], result=q('H2', h['mv'], 'dimensionless'))
             v = 'pass' if h['ok'] else 'fail'
+            unstated_h2 = fx.get('ltb_unstated') and v == 'pass'     # V9a-03: 국부 휨과 같은 규칙
+            if unstated_h2:
+                v = 'not_evaluated'
             tr.add('verdict', 'H2 ≤ 1.0', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
                    result=q('ratio', h['mv'], 'dimensionless'), verdict=v)
-            checks.append(make_check('lap.bending_shear', design_method=dm, verdict=v,
+            if unstated_h2:
+                checks.append(make_check('lap.bending_shear', design_method=dm, verdict=v,
+                                         reason=_nt('lap.reason.h2_unstated'), steps=tr.steps,
+                                         reference={'capacity': q('limit', 1.0, 'dimensionless'), 'ratio': h['mv']}))
+            else:
+                checks.append(make_check('lap.bending_shear', design_method=dm, verdict=v,
                                      demand=q('H2', h['mv'], 'dimensionless'), capacity=q('limit', 1.0, 'dimensionless'),
-                                     ratio=h['mv'], steps=tr.steps,
-                                     mirrors={'ratio': {'path': 'flexure_dcr_governing', 'digits': 4}}
-                                     if h['mv'] >= max(lo['dcr'], (fx.get('dist') or {}).get('dcr') or 0) else None))
+                                         ratio=h['mv'], steps=tr.steps,
+                                         mirrors={'ratio': {'path': 'flexure_dcr_governing', 'digits': 4}}
+                                         if h['mv'] >= max(lo['dcr'], (fx.get('dist') or {}).get('dcr') or 0)
+                                         else None))
         elif fx.get('h2_missing'):
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
                                      reason=_nt('lap.reason.section_shear_strength_vn')))
@@ -252,6 +261,49 @@ def build(ck: dict) -> list:
     set_governing(checks)
     apply_context(checks, p)
     return checks
+
+
+# 랩 검토 항목이 쓰는 소요(V9a-02)
+_NEEDS = {
+    'lap.fastener_group': ('Mu_support', 'Vu_support'), 'lap.fastener_count': ('Mu_support', 'Vu_support'),
+    'lap.block_shear': ('Mu_support', 'Vu_support'), 'lap.flexure.local': ('Mu_support',),
+    'lap.flexure.distortional': ('Mu_support',), 'lap.bending_shear': ('Mu_support', 'Vu_support'),
+}
+
+
+def apply_missing_demands(checks, missing, zero_unstated, demand_positive=True):
+    """소요가 없거나(missing) 밝히지 않은 0(zero_unstated)이면 그 소요를 쓰는 항목은 판정 없음 — 통과 · 해당 없음은
+    미평가로, 불합격은 그대로(준 소요로 이미 넘으면 전체 소요로도 넘는다: 전달력 max(Mu/(d−t), Vu) 와 H2 는 두 소요에
+    대해 줄지 않는다). 계약 §6.3."""
+    if not missing and not zero_unstated:
+        return checks
+    from design.member_checks import demote_to_not_evaluated
+    out = []
+    for c in checks:
+        need = _NEEDS.get(c.get('id'), ())
+        miss = [k for k in need if k in missing]
+        zero = [k for k in need if k in zero_unstated]
+        if not miss and not zero:
+            out.append(c)
+            continue
+        why = []
+        if miss:
+            why.append(_nt('lap.reason.demand_not_given', inputs=', '.join(miss)))
+        if zero:
+            why.append(_nt('lap.reason.zero_demand_not_stated', inputs=', '.join(zero)))
+        reason = why[0] if len(why) == 1 else _joined('; ', why)
+        if c['verdict'] == 'fail' and demand_positive:
+            c = dict(c, demand_incomplete=miss + zero,
+                     reason=_joined('; ', [r for r in (c.get('reason'), _nt('lap.reason.fail_with_incomplete_demand',
+                                                                            inputs=', '.join(miss + zero))) if r]))
+        elif c['verdict'] == 'pass':
+            c = demote_to_not_evaluated(c, reason)
+        else:
+            c = dict(c, verdict='not_evaluated', reason=reason)
+            c.pop('mirrors', None)
+        out.append(c)
+    set_governing(out)
+    return out
 
 
 def _block_shear(ck):

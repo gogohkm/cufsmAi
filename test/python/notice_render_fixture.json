@@ -117,18 +117,21 @@
             {
              "fmt": "",
              "quantity": "length",
+             "sig_digits": 3,
              "symbol": "value",
              "value": 0.0236
             },
             {
              "fmt": "",
              "quantity": "length",
+             "sig_digits": 3,
              "symbol": "lo",
              "value": 0.0285
             },
             {
              "fmt": "",
              "quantity": "length",
+             "sig_digits": 3,
              "symbol": "hi",
              "value": 0.0445
             }
@@ -289,6 +292,7 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "t",
      "value": 0.06
     }
@@ -326,12 +330,14 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "t_j6",
      "value": 0.03
     },
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "t_sheet",
      "value": 0.06
     }
@@ -353,6 +359,7 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "t",
      "value": 0.06
     }
@@ -382,6 +389,7 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "value",
      "value": 0.08
     },
@@ -411,18 +419,21 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "value",
      "value": 0.0236
     },
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "lo",
      "value": 0.0285
     },
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "hi",
      "value": 0.0445
     }
@@ -479,6 +490,7 @@
      "fmt": "",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "t_min",
      "unit_text": "in",
      "value": 0.25
@@ -584,6 +596,7 @@
      "fmt": ".4f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "de_used",
      "unit_text": "in",
      "value": 0.26
@@ -627,6 +640,7 @@
      "fmt": "",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "d",
      "unit_text": "in",
      "value": 0.375
@@ -678,6 +692,7 @@
          {
           "fmt": "",
           "quantity": "length",
+          "sig_digits": 3,
           "symbol": "value",
           "value": 0.08
          },
@@ -733,18 +748,21 @@
          {
           "fmt": "",
           "quantity": "length",
+          "sig_digits": 3,
           "symbol": "value",
           "value": 0.08
          },
          {
           "fmt": "",
           "quantity": "length",
+          "sig_digits": 3,
           "symbol": "lo",
           "value": 0.113
          },
          {
           "fmt": "",
           "quantity": "length",
+          "sig_digits": 3,
           "symbol": "hi",
           "value": 0.75
          }
@@ -870,18 +888,21 @@
          {
           "fmt": "",
           "quantity": "length",
+          "sig_digits": 3,
           "symbol": "value",
           "value": 0.0236
          },
          {
           "fmt": "",
           "quantity": "length",
+          "sig_digits": 3,
           "symbol": "lo",
           "value": 0.0285
          },
          {
           "fmt": "",
           "quantity": "length",
+          "sig_digits": 3,
           "symbol": "hi",
           "value": 0.0445
          }
@@ -925,6 +946,7 @@
         "fmt": "",
         "quantity": "length",
         "sep": " ",
+        "sig_digits": 3,
         "symbol": "t_min",
         "unit_text": "in",
         "value": 0.25
@@ -1019,6 +1041,7 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "t_min",
      "value": 0.25
     },
@@ -1076,6 +1099,7 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "de",
      "value": 0.375
     }
@@ -1091,12 +1115,14 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "t1",
      "value": 0.06
     },
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "w1",
      "value": 0.105
     }
@@ -1112,6 +1138,7 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "d",
      "value": 0.18
     },
@@ -1244,6 +1271,14 @@
    "text_ko": "패스너 강도 미확정: 나사 전단 (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
   },
   {
+   "code": "lap.reason.h2_unstated",
+   "params": [],
+   "template": "H2 uses Mn,lap = 2 Se Fy (Fn = Fy), which rests on the Manual lap assumption — restraint not stated, so the interaction is not evaluated (a fail stands)",
+   "template_ko": "H2 는 Mn,lap = 2 Se Fy (Fn = Fy)를 쓰는데 이는 Manual 의 랩 가정에 선다 — 구속을 밝히지 않아 상호작용을 판정하지 않음 (불합격은 그대로)",
+   "text": "H2 uses Mn,lap = 2 Se Fy (Fn = Fy), which rests on the Manual lap assumption — restraint not stated, so the interaction is not evaluated (a fail stands)",
+   "text_ko": "H2 는 Mn,lap = 2 Se Fy (Fn = Fy)를 쓰는데 이는 Manual 의 랩 가정에 선다 — 구속을 밝히지 않아 상호작용을 판정하지 않음 (불합격은 그대로)"
+  },
+  {
    "code": "lap.reason.j6_j6_screw_connections_rupture",
    "params": [],
    "template": "J6: for screw connections the rupture strength is the lesser of J6.1 and J6.2 — J6.3 block shear applies to welded and bolted connections only",
@@ -1311,12 +1346,14 @@
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "provided",
      "value": 0.5
     },
     {
      "fmt": "",
      "quantity": "length",
+     "sig_digits": 3,
      "symbol": "required",
      "value": 0.75
     }
@@ -1407,6 +1444,7 @@
      "fmt": ".2f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "actual",
      "unit_text": "in",
      "value": 10
@@ -1415,6 +1453,7 @@
      "fmt": ".2f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "min_lap",
      "unit_text": "in",
      "value": 12.0
@@ -1432,6 +1471,7 @@
      "fmt": ".2f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "lap_each",
      "unit_text": "in",
      "value": 10
@@ -1440,6 +1480,7 @@
      "fmt": ".2f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "min_lap",
      "unit_text": "in",
      "value": 12.0
@@ -1457,6 +1498,7 @@
      "fmt": ".3f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "edge_user",
      "unit_text": "in",
      "value": 0.5
@@ -1465,6 +1507,7 @@
      "fmt": ".3f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "edge_min",
      "unit_text": "in",
      "value": 0.75
@@ -1482,6 +1525,7 @@
      "fmt": ".3f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "edge_min",
      "unit_text": "in",
      "value": 0.75
@@ -1522,6 +1566,7 @@
      "fmt": ".2f",
      "quantity": "moment",
      "sep": " ",
+     "sig_digits": 5,
      "symbol": "Mu",
      "unit_text": "kip-in",
      "value": 200.0
@@ -1536,6 +1581,7 @@
      "fmt": ".2f",
      "quantity": "moment",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "phi_Mn_lap",
      "unit_text": "kip-in",
      "value": 49.5
@@ -1581,6 +1627,7 @@
      "fmt": ".3f",
      "quantity": "force",
      "sep": " ",
+     "sig_digits": 5,
      "symbol": "V_transfer",
      "unit_text": "kips",
      "value": 15.11144692104269
@@ -1589,6 +1636,7 @@
      "fmt": ".3f",
      "quantity": "force",
      "sep": " ",
+     "sig_digits": 5,
      "symbol": "capacity",
      "unit_text": "kips",
      "value": 11.2749
@@ -1821,6 +1869,7 @@
      "fmt": ".3f",
      "quantity": "force",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "P_wc",
      "unit_text": "kips",
      "value": 1.0
@@ -1846,6 +1895,7 @@
      "fmt": "g",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "KyLy",
      "unit_text": "in",
      "value": 18.0
@@ -1863,6 +1913,7 @@
      "fmt": ".2f",
      "quantity": "moment",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "Muy_with_ecc",
      "unit_text": "kip-in",
      "value": 0.05704718413554648
@@ -1871,6 +1922,7 @@
      "fmt": ".2f",
      "quantity": "force",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "Pu",
      "unit_text": "kips",
      "value": 3.0
@@ -1879,6 +1931,7 @@
      "fmt": ".1f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "L_angle",
      "unit_text": "in",
      "value": 18.0
@@ -1887,6 +1940,7 @@
      "fmt": ".2f",
      "quantity": "moment",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "Padd",
      "unit_text": "kip-in",
      "value": 0.054
@@ -1947,6 +2001,7 @@
      "fmt": ".2f",
      "quantity": "stress",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "Fcrd_calc",
      "unit_text": "ksi",
      "value": 17.578479578992432
@@ -1955,6 +2010,7 @@
      "fmt": "",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "Lcrd_val",
      "unit_text": "in",
      "value": 28.6
@@ -1972,6 +2028,7 @@
      "fmt": ".2f",
      "quantity": "stress",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "Fcrl_calc",
      "unit_text": "ksi",
      "value": 5.1299162149942745
@@ -1985,12 +2042,14 @@
     {
      "fmt": ".3f",
      "quantity": "length",
+     "sig_digits": 4,
      "symbol": "ho",
      "value": 9.0
     },
     {
      "fmt": ".3f",
      "quantity": "length",
+     "sig_digits": 4,
      "symbol": "bo",
      "value": 2.5
     },
@@ -1998,6 +2057,7 @@
      "fmt": ".3f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "do",
      "unit_text": "in",
      "value": 0.773
@@ -2048,6 +2108,7 @@
      "fmt": ".2f",
      "quantity": "length",
      "sep": " ",
+     "sig_digits": 3,
      "symbol": "d",
      "unit_text": "in",
      "value": 9.0
@@ -2814,6 +2875,7 @@
      "fmt": ".2f",
      "quantity": "moment",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "My_dsm",
      "unit_text": "kip-in",
      "value": 34.98171466292383
@@ -2822,6 +2884,7 @@
      "fmt": ".2f",
      "quantity": "moment",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "value",
      "unit_text": "kip-in",
      "value": 34.17713522567658
@@ -2830,6 +2893,7 @@
      "fmt": ".2f",
      "quantity": "stress",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "Fy_original",
      "unit_text": "ksi",
      "value": 35.53
@@ -2838,6 +2902,7 @@
      "fmt": ".2f",
      "quantity": "stress",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "value_2",
      "unit_text": "ksi",
      "value": 36.36642784032753
@@ -3029,6 +3094,7 @@
           "fmt": ".2f",
           "quantity": "length",
           "sep": " ",
+          "sig_digits": 3,
           "symbol": "d",
           "unit_text": "in",
           "value": 9.0
@@ -3137,6 +3203,7 @@
     {
      "fmt": ".2f",
      "quantity": "moment",
+     "sig_digits": 5,
      "symbol": "Mu_pos",
      "value": 110.0
     },
@@ -3150,6 +3217,7 @@
      "fmt": ".2f",
      "quantity": "moment",
      "sep": " ",
+     "sig_digits": 4,
      "symbol": "phi_Mn_pos",
      "unit_text": "kip-in",
      "value": 83.29407704821048
@@ -3171,6 +3239,49 @@
    "template_ko": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})",
    "text": "정모멘트 구간 NG: Mu(+)=110.00 > φMn(+)=83.29 kip-in (DCR=1.321)",
    "text_ko": "정모멘트 구간 NG: Mu(+)=110.00 > φMn(+)=83.29 kip-in (DCR=1.321)"
+  },
+  {
+   "code": "member.warning.ng_mu_mn_dcr_precise",
+   "params": [
+    {
+     "fmt": ".6f",
+     "quantity": "moment",
+     "sig_digits": 6,
+     "symbol": "Mu_pos",
+     "value": 83.2944
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "text",
+     "value": "φ"
+    },
+    {
+     "fmt": ".6f",
+     "quantity": "moment",
+     "sep": " ",
+     "sig_digits": 6,
+     "symbol": "phi_Mn_pos",
+     "unit_text": "kip-in",
+     "value": 83.29407704821048
+    },
+    {
+     "fmt": ".6f",
+     "quantity": "dimensionless",
+     "symbol": "util_pos",
+     "value": 1.0
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "omega",
+     "value": ""
+    }
+   ],
+   "template": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})",
+   "template_ko": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})",
+   "text": "정모멘트 구간 NG: Mu(+)=83.294400 > φMn(+)=83.294077 kip-in (DCR=1.000000)",
+   "text_ko": "정모멘트 구간 NG: Mu(+)=83.294400 > φMn(+)=83.294077 kip-in (DCR=1.000000)"
   },
   {
    "code": "member.warning.pcrl_pcrd_fsm_run",

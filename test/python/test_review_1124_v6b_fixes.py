@@ -128,7 +128,8 @@ def test_lap_tool_same_statement_and_alias():
     assert lo['verdict'] == 'not_evaluated' and 'lap_restrained' in lo['reason'] and un['pass'] is None
     assert lo['reference']['ratio'] < 1.0
     assert _check(un, 'lap.flexure.distortional')['verdict'] == 'not_evaluated'
-    assert _check(un, 'lap.bending_shear')['verdict'] == 'pass'           # H2 는 가정에 서지 않는다
+    # 2026-11-24 V9a-03: H2 도 Mn,lap = 2SeFy 를 쓰므로 진술 없이는 판정하지 않는다(불합격은 그대로)
+    assert _check(un, 'lap.bending_shear')['verdict'] == 'not_evaluated'
     for key in ('lap_restrained', 'distortion_restrained'):
         st = design_lap_connection(dict(L, **{key: True}))
         assert _check(st, 'lap.flexure.local')['verdict'] == 'pass'

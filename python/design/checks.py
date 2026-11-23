@@ -402,6 +402,7 @@ def q(symbol: str, value, quantity: str, source: dict | None = None, **extra) ->
     for k, v in extra.items():
         if v is not None:
             out[k] = v
+    _text_fields(out, extra)
     return out
 
 

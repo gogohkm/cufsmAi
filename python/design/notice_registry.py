@@ -1514,6 +1514,18 @@ REGISTRY = {
         'template_ko': '(L_lap − 2e)/(n/row − 1)',
         'params': {},
     },
+    'lap.reason.demand_not_given': {
+        'kind': 'reason',
+        'template': 'demand not given: {inputs} — a lap check needs the support moment and shear (give them; an explicit zero needs zero_demand_stated = true)',
+        'template_ko': '소요 미입력: {inputs} — 랩 검토에는 지점 모멘트와 전단이 필요함 (값을 주거나, 0 이면 zero_demand_stated = true)',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.reason.fail_with_incomplete_demand': {
+        'kind': 'reason',
+        'template': 'fails with the demand given ({inputs} missing) — the full demand is not smaller, so the fail stands',
+        'template_ko': '준 소요로 불합격({inputs} 없음) — 전체 소요는 더 작지 않으므로 불합격은 그대로',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'lap.reason.fastener_design_strength': {
         'kind': 'reason',
         'template': 'fastener design strength is 0',
@@ -1525,6 +1537,12 @@ REGISTRY = {
         'template': 'fastener strength not verified: {items}',
         'template_ko': '패스너 강도 미확정: {items}',
         'params': {'items': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.reason.h2_unstated': {
+        'kind': 'reason',
+        'template': 'H2 uses Mn,lap = 2 Se Fy (Fn = Fy), which rests on the Manual lap assumption — restraint not stated, so the interaction is not evaluated (a fail stands)',
+        'template_ko': 'H2 는 Mn,lap = 2 Se Fy (Fn = Fy)를 쓰는데 이는 Manual 의 랩 가정에 선다 — 구속을 밝히지 않아 상호작용을 판정하지 않음 (불합격은 그대로)',
+        'params': {},
     },
     'lap.reason.j6_j6_screw_connections_rupture': {
         'kind': 'reason',
@@ -1556,6 +1574,12 @@ REGISTRY = {
         'template_ko': '패스너 배치 없음 (패스너 설계강도 0 또는 배치한 패스너 없음)',
         'params': {},
     },
+    'lap.reason.no_support_moment_stated': {
+        'kind': 'reason',
+        'template': 'no support moment (Mu_support = 0, stated)',
+        'template_ko': '지점 모멘트 없음 (Mu_support = 0, 진술)',
+        'params': {},
+    },
     'lap.reason.no_support_shear_vu': {
         'kind': 'reason',
         'template': 'no support shear (Vu_support = 0)',
@@ -1585,6 +1609,12 @@ REGISTRY = {
         'template': 'section shear strength Vn could not be computed',
         'template_ko': '단면 전단강도 Vn 을 계산할 수 없음',
         'params': {},
+    },
+    'lap.reason.zero_demand_not_stated': {
+        'kind': 'reason',
+        'template': 'zero demand not credible at a lap over an interior support: {inputs} = 0 — give the support demand, or state zero_demand_stated = true',
+        'template_ko': '안쪽 지점 위 랩에서 소요 0 은 믿을 수 없음: {inputs} = 0 — 지점 소요를 주거나 zero_demand_stated = true 로 밝히십시오',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'lap.scope.j6_3_j6_block_shear_lap': {
         'kind': 'scope',
@@ -1652,6 +1682,12 @@ REGISTRY = {
         'template_ko': 'Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term} > 1.0.',
         'params': {'mv_term': {'quantity': 'dimensionless', 'conv': None, 'spec': '.2f', 'unit': None, 'sep': ''}},
     },
+    'lap.warning.h2_lap_h2_precise': {
+        'kind': 'warning',
+        'template': 'Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term} > 1.0.',
+        'template_ko': 'Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term} > 1.0.',
+        'params': {'mv_term': {'quantity': 'dimensionless', 'conv': None, 'spec': '.6f', 'unit': None, 'sep': ''}},
+    },
     'lap.warning.h2_vn_lap_h2': {
         'kind': 'warning',
         'template': '단면 전단강도 Vn 을 산정할 수 없습니다(퇴화 기하) — Lap 지점부 휨-전단 상호작용(§H2) 검토를 수행하지 못했습니다.',
@@ -1694,6 +1730,12 @@ REGISTRY = {
         'template_ko': 'Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0',
         'params': {'ratio_bs': {'quantity': 'dimensionless', 'conv': None, 'spec': '.2f', 'unit': None, 'sep': ''}},
     },
+    'lap.warning.j6_3_lap_j6_precise': {
+        'kind': 'warning',
+        'template': 'Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0',
+        'template_ko': 'Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0',
+        'params': {'ratio_bs': {'quantity': 'dimensionless', 'conv': None, 'spec': '.6f', 'unit': None, 'sep': ''}},
+    },
     'lap.warning.lap_mn_se_fy': {
         'kind': 'warning',
         'template': 'Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.',
@@ -1705,6 +1747,12 @@ REGISTRY = {
         'template': 'Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn{omega} = {phi_Mn_lap} (DCR = {flexure_dcr})',
         'template_ko': 'Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn{omega} = {phi_Mn_lap} (DCR = {flexure_dcr})',
         'params': {'Mu': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': 'kip-in', 'sep': ' '}, 'text': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'phi_Mn_lap': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': 'kip-in', 'sep': ' '}, 'flexure_dcr': {'quantity': 'dimensionless', 'conv': None, 'spec': '.2f', 'unit': None, 'sep': ''}, 'omega': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.warning.lap_mu_mn_dcr_precise': {
+        'kind': 'warning',
+        'template': 'Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn{omega} = {phi_Mn_lap} (DCR = {flexure_dcr})',
+        'template_ko': 'Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn{omega} = {phi_Mn_lap} (DCR = {flexure_dcr})',
+        'params': {'Mu': {'quantity': 'moment', 'conv': None, 'spec': '.6f', 'unit': 'kip-in', 'sep': ' '}, 'text': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'phi_Mn_lap': {'quantity': 'moment', 'conv': None, 'spec': '.6f', 'unit': 'kip-in', 'sep': ' '}, 'flexure_dcr': {'quantity': 'dimensionless', 'conv': None, 'spec': '.6f', 'unit': None, 'sep': ''}, 'omega': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'lap.warning.lap_shorter_than_2e': {
         'kind': 'warning',
@@ -1741,6 +1789,12 @@ REGISTRY = {
         'template': '용량 부족: V_transfer = {V_transfer} > Capacity = {capacity} (DCR = {utilization}). 패스너 수 또는 사양을 변경하세요.',
         'template_ko': '용량 부족: V_transfer = {V_transfer} > Capacity = {capacity} (DCR = {utilization}). 패스너 수 또는 사양을 변경하세요.',
         'params': {'V_transfer': {'quantity': 'force', 'conv': None, 'spec': '.3f', 'unit': 'kips', 'sep': ' '}, 'capacity': {'quantity': 'force', 'conv': None, 'spec': '.3f', 'unit': 'kips', 'sep': ' '}, 'utilization': {'quantity': 'dimensionless', 'conv': None, 'spec': '.2f', 'unit': None, 'sep': ''}},
+    },
+    'lap.warning.transfer_capacity_dcr_precise': {
+        'kind': 'warning',
+        'template': '용량 부족: V_transfer = {V_transfer} > Capacity = {capacity} (DCR = {utilization}). 패스너 수 또는 사양을 변경하세요.',
+        'template_ko': '용량 부족: V_transfer = {V_transfer} > Capacity = {capacity} (DCR = {utilization}). 패스너 수 또는 사양을 변경하세요.',
+        'params': {'V_transfer': {'quantity': 'force', 'conv': None, 'spec': '.6f', 'unit': 'kips', 'sep': ' '}, 'capacity': {'quantity': 'force', 'conv': None, 'spec': '.6f', 'unit': 'kips', 'sep': ' '}, 'utilization': {'quantity': 'dimensionless', 'conv': None, 'spec': '.6f', 'unit': None, 'sep': ''}},
     },
     'loads.assumption.app_a_standing_seam_roof_without': {
         'kind': 'assumption',
@@ -3643,6 +3697,12 @@ REGISTRY = {
         'template': '정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})',
         'template_ko': '정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})',
         'params': {'Mu_pos': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': None, 'sep': ''}, 'text': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'phi_Mn_pos': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': 'kip-in', 'sep': ' '}, 'util_pos': {'quantity': 'dimensionless', 'conv': None, 'spec': '.3f', 'unit': None, 'sep': ''}, 'omega': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.warning.ng_mu_mn_dcr_precise': {
+        'kind': 'warning',
+        'template': '정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})',
+        'template_ko': '정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+){omega}={phi_Mn_pos} (DCR={util_pos})',
+        'params': {'Mu_pos': {'quantity': 'moment', 'conv': None, 'spec': '.6f', 'unit': None, 'sep': ''}, 'text': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'phi_Mn_pos': {'quantity': 'moment', 'conv': None, 'spec': '.6f', 'unit': 'kip-in', 'sep': ' '}, 'util_pos': {'quantity': 'dimensionless', 'conv': None, 'spec': '.6f', 'unit': None, 'sep': ''}, 'omega': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'member.warning.pcrd_fallback_appendix': {
         'kind': 'warning',

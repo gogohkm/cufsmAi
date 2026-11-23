@@ -234,6 +234,15 @@ def _num(v):
     return v
 
 
+def _sig_digits(text):
+    """US 글의 유효숫자 수(3 – 6) — SI 로 바꾼 값을 이 자리수로 보인다(계약 §16.3)."""
+    m = re.search(r'[0-9.]+(?:[eE][-+]?[0-9]+)?', str(text))
+    if not m:
+        return 4
+    digits = re.sub(r'[eE].*$', '', m.group(0)).replace('.', '').lstrip('0')
+    return max(3, min(6, len(digits) or 1))
+
+
 def params_of(n: Notice) -> list:
     """매개변수 목록 [{symbol, value, quantity, fmt, (conv), (unit_text, sep), (notice)}]."""
     out = []
@@ -265,6 +274,8 @@ def params_of(n: Notice) -> list:
             continue
         if _is_number(v):
             p = {'symbol': name, 'value': _num(v), 'quantity': spec.get('quantity')}
+            if spec.get('quantity') not in (None, 'dimensionless', 'count'):
+                p['sig_digits'] = _sig_digits(_piece(dict(spec, unit=None), v))
         else:
             p = {'symbol': name, 'value': _piece(dict(spec, unit=None), v), 'quantity': None}
         p['fmt'] = spec.get('spec') or ''

@@ -220,3 +220,63 @@ def test_long_wavelength_tolerance_propagates_down_the_trace():
     loc = _c(flagged, 'member.compression.local')                      # Pne(전체좌굴에서) 를 쓰는 항목
     assert loc.get('numeric_tolerance'), [i.get('source') for s in loc['steps'] for i in s['inputs']][:6]
     assert 'numeric_tolerance' not in _c(flagged, 'member.applicability.b4')
+
+
+# ---------------------------------------------------------------- V9a-02 · V9a-03 랩의 소요와 진술
+
+_LAPD = dict(d=8.0, t=0.059, Fy=55.0, Fu=70.0, lap_left_in=30.0, lap_right_in=42.0, fastener_type='screw',
+             fastener_dia=0.25, Pnvs=2.0, n_rows=2, design_method='ASD', Se=1.8, lap_restrained=True)
+
+
+def _lapd(**kw):
+    p = dict(_LAPD)
+    p.update(kw)
+    return design_lap_connection({k: v for k, v in p.items() if v is not None})
+
+
+def test_V9a_02_a_lap_needs_its_demands():
+    """Mu · Vu 가 없으면 그 소요를 쓰는 항목은 미평가(이유에 입력 이름), 종합은 통과가 아니다. 0 은 밝혔을 때만 0."""
+    none = _lapd()
+    for cid in ('lap.flexure.local', 'lap.bending_shear', 'lap.fastener_group'):
+        c = _c(none, cid)
+        assert c['verdict'] in ('not_evaluated', 'fail') and c['verdict'] != 'pass', (cid, c['verdict'])
+    assert _c(none, 'lap.flexure.local')['reason_code'] == 'lap.reason.demand_not_given' and none['pass'] is not True
+    only_mu = _lapd(Mu_support=100.0)                                     # 전에는 0.972 로 통과
+    assert _c(only_mu, 'lap.bending_shear')['verdict'] == 'not_evaluated' and only_mu['pass'] is not True
+    both = _lapd(Mu_support=100.0, Vu_support=1.78)                       # 둘 다 주면 전과 같다 — 판정이 난다
+    assert _c(both, 'lap.bending_shear')['verdict'] in ('pass', 'fail') and both['pass'] in (True, False)
+    assert _c(both, 'lap.fastener_group')['verdict'] in ('pass', 'fail')
+    zero = _lapd(Mu_support=0.0, Vu_support=1.0)                          # 밝히지 않은 0 — 믿을 수 없음
+    assert _c(zero, 'lap.flexure.local')['reason_code'] == 'lap.reason.zero_demand_not_stated' and zero['pass'] is not True
+    stated = _lapd(Mu_support=0.0, Vu_support=1.0, zero_demand_stated=True)
+    assert _c(stated, 'lap.flexure.local')['verdict'] == 'not_applicable'
+    big = _lapd(Vu_support=50.0)                                           # 준 소요로 넘으면 불합격은 그대로
+    fg = _c(big, 'lap.fastener_group')
+    assert fg['verdict'] == 'fail' and fg['demand_incomplete'] == ['Mu_support'] and big['pass'] is False
+
+
+def test_V9a_03_h2_without_the_statement_is_not_evaluated():
+    """진술 없이 Se 를 주면 국부 휨과 H2 모두 미평가(불합격은 그대로), flexure_checked 는 거짓."""
+    r = design_lap_connection(dict(_LAP_A))
+    assert _c(r, 'lap.flexure.local')['verdict'] == 'not_evaluated'
+    h = _c(r, 'lap.bending_shear')
+    assert h['verdict'] == 'not_evaluated' and h['reason_code'] == 'lap.reason.h2_unstated'
+    assert abs(h['reference']['ratio'] - 0.708) < 0.001 and r['flexure_checked'] is False
+    s = design_lap_connection(dict(_LAP_A, lap_restrained=True))
+    assert _c(s, 'lap.bending_shear')['verdict'] == 'pass' and s['flexure_checked'] is True
+
+
+_LAP_A = dict(d=8.0, t=0.059, Fy=55.0, Fu=70.0, lap_left_in=30.0, lap_right_in=42.0, Mu_support=80.0,
+              Vu_support=1.0, fastener_type='bolt', fastener_dia=0.5, n_rows=2, design_method='ASD', Se=1.8)
+
+
+def test_V9a_06_a_comparison_reads_true_as_printed():
+    """비 1.000004 의 정모멘트 NG — 보이는 자리로 같은 두 값을 「>」 로 잇지 않는다(더 긴 자리의 판)."""
+    import contract_cases_1123 as cc
+    p = [x for x in cc.all_cases() if x[0] == 'band: positive region ratio 1.000004'][0]
+    r = cc.run_case(p[1], p[2])
+    e = [n for n in r['notices'] if n['code'].startswith('member.warning.ng_mu_mn_dcr')][0]
+    assert e['code'] == 'member.warning.ng_mu_mn_dcr_precise', e['text']
+    import re
+    a, b = [float(x) for x in re.findall(r'=\s*([0-9.]+)', e['text'])[:2]]
+    assert a > b, e['text']

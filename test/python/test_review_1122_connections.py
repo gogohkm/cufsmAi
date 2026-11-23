@@ -809,7 +809,9 @@ def test_V4_08_lap_gross_sf_is_not_a_flexure_basis():
     _close(sf_only['flexure_reference_dcr'], 120 / (0.90 * 2 * 3.0 * 55), rel=1e-3)
     assert [s for s in sf_only['steps'] if s['step'] == '8r'][0]['assumed'] is True
     se = design_lap_connection(dict(_LAP, end_distance=2.0, Se=3.0))
-    assert se['flexure_checked'] is True and se['flexure_basis'] == 'Se'
+    # 2026-11-24 V9a-03: 진술(lap_restrained)이 없으면 국부 휨 · H2 가 판정을 내지 않는다 — flexure_checked 는 거짓
+    assert se['flexure_checked'] is False and se['flexure_basis'] == 'Se'
+    assert design_lap_connection(dict(_LAP, end_distance=2.0, Se=3.0, lap_restrained=True))['flexure_checked'] is True
     _close(se['flexure_dcr'], 120 / (0.90 * 2 * 3.0 * 55), rel=1e-3)
     # 2026-11-24 V6-07: Mnd 가 없으면 랩 뒤틀림은 미평가(판정 None) — 구속을 밝히면 판정이 선다.
     assert se['pass'] is None

@@ -2274,7 +2274,9 @@ def _design_flexure(params: dict) -> dict:
                 _mark_not_evaluated(result, _nt('member.ne.positive_region_local_buckling'))
             if pass_pos is False:
                 result['warnings'].append(
-                    _nt('member.warning.ng_mu_mn_dcr', Mu_pos=Mu_pos, text="φ" if design_method == "LRFD" else "",
+                    _nt('member.warning.ng_mu_mn_dcr' + ('_precise' if f'{Mu_pos:.2f}' == f'{phi_Mn_pos:.2f}'
+                                                         or f'{util_pos:.3f}' == '1.000' else ''),
+                        Mu_pos=Mu_pos, text="φ" if design_method == "LRFD" else "",
                         omega='' if design_method == 'LRFD' else '/Ω', phi_Mn_pos=phi_Mn_pos, util_pos=util_pos)
                 )
 

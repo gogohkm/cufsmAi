@@ -281,7 +281,8 @@ def test_unreached_codes_have_a_source_site():
         if not f.endswith('notice_registry.py'):
             src += open(f, encoding='utf-8').read()
     unreached = sorted(set(REGISTRY) - run['codes'])
-    dead = [c for c in unreached if repr(c) not in src and f'"{c}"' not in src]
+    dead = [c for c in unreached if repr(c) not in src and f'"{c}"' not in src
+            and not (c.endswith('_precise') and repr(c[:-len('_precise')]) in src)]
     assert not dead, dead
     # 목록(계약 §16.7 의 수와 같아야 한다 — 사례를 더하면 줄어든다)
     print(f'notices: {len(run["codes"])} of {len(REGISTRY)} codes reached by the contract cases; '
@@ -323,7 +324,14 @@ def test_every_call_site_passes_exactly_the_registered_params():
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == '_nt':
                 n += 1
-                code = node.args[0].value
+                arg = node.args[0]
+                if isinstance(arg, ast.BinOp) and isinstance(arg.left, ast.Constant):
+                    # 'code' + _precise(…) — 보이는 자리가 같을 때의 판(계약 §16.15): 두 code 가 같은 매개변수
+                    code = arg.left.value
+                    if code + '_precise' not in REGISTRY or                             sorted(REGISTRY[code + '_precise']['params']) != sorted(REGISTRY[code]['params']):
+                        bad.append((f, code, 'no matching _precise variant'))
+                else:
+                    code = arg.value
                 if code not in REGISTRY:
                     bad.append((f, code, 'unregistered'))
                     continue

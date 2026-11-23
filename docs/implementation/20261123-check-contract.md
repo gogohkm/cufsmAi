@@ -259,6 +259,14 @@ AISI Design Manual 의 연속 퍼린 예제는 이 가정을 **가정으로 밝�
 - `Vn`: 그 랩 단면 한 부재의 §G2 전단강도(없으면 엔진이 d · t · Fy 로 §G2.1 을 계산).
 - 시험(`test_review_1124_v8_fixes.py`): II-2A 첫 안쪽 지점(Mu 105 kip-in, Se = 85.9/55 = 1.562) → `lap.flexure.local` 1.0207 = 퍼린 `lap-1` 구간; 같은 진술의 구간 설계에서 읽은 Mnℓ/Fy 를 넘기면 두 비가 1e-12 안에서 같다.
 
+**랩 검토에는 소요가 필요하다(2026-11-24 V9a-02 — 호스트가 지킬 규칙):** 랩 도구의 `Mu_support` · `Vu_support` 는
+- **없음(키가 없거나 null)** = 미입력. 그 소요를 쓰는 항목 — `lap.fastener_group` · `lap.fastener_count` · `lap.block_shear`(둘 다), `lap.flexure.local` · `lap.flexure.distortional`(Mu), `lap.bending_shear`(둘 다) — 은 `not_evaluated`, 이유 `lap.reason.demand_not_given`(입력 이름). 해당 없음(not_applicable)이 아니다. 종합 `pass` 는 `true` 가 아니다(`null`).
+- **0 은 밝혔을 때만 0:** 안쪽 지점 위 랩에서 지점 모멘트 · 전단이 0 인 것은 믿을 수 없다(연속 퍼린의 랩 지점에는 늘 모멘트와 반력이 있다). 그래서 `0` 을 주고 `zero_demand_stated: true` 를 함께 주지 않으면 미입력과 같게 다루고 이유는 `lap.reason.zero_demand_not_stated`. 밝히면 전처럼 해당 없음(`lap.reason.no_support_moment_stated`).
+- **불합격은 그대로:** 준 소요만으로 이미 넘는 항목(전달력 max(Mu/(d−t), Vu) · H2 는 두 소요에 대해 줄지 않는다)은 `fail` 로 남고 `demand_incomplete: [입력]` 과 이유 `lap.reason.fail_with_incomplete_demand` 가 붙는다. 다만 준 소요가 모두 0 이라 생긴 「배치 없음」 불합격은 미평가다. 종합은 그런 불합격이 있으면 `false`, 없으면 `null`.
+- **호스트:** 비운 칸은 보내지 않는다(0 으로 채우지 않는다). 퍼린 결과가 있으면 그 지점의 랩 구간 소요를 채워 보낸다. 0 을 보내려면 사람이 0 이라고 밝힌 것(`zero_demand_stated`)과 함께.
+
+**진술 없는 H2(2026-11-24 V9a-03):** `lap.bending_shear` 는 Mn,lap = 2·Se·Fy(Fn = Fy)를 쓰므로 국부 휨과 같은 규칙 — 진술이 없으면 `pass` 대신 `not_evaluated`(이유 `lap.reason.h2_unstated`, 값은 `reference`), `fail` 은 그대로. **`flexure_checked`** 는 `lap.flexure.local` 이 pass · fail 이고 `lap.bending_shear` 가 pass · fail · not_applicable 일 때만 참.
+
 **랩 단면 강도 블록 `lap_section` (2026-11-24) — 랩 검토가 단면 강도를 가져갈 곳은 이것이다, 구간 자신의 검토 항목이 아니다.** `lap_region: true` 와 진술(`lap_restrained: true`)로 부른 휨 구간 결과에 붙는다. 구간의 `member.flexure.local` · `Mnl` 은 비탄성 여유(§F3.2.3) · 냉간가공(§A3.3.2, Fya)을 품을 수 있다(그 선택이 켜져 있으면 랩으로 그 증가가 옮겨 간다 — V8-S2). 블록은 그 선택과 무관하게 언제나 같은 기준이다:
 
 | 키 | 뜻 |
@@ -1478,3 +1486,21 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 - **퍼짐(엔진이 계산해 단다):** 표지가 있는 입력, 표지가 있는 앞 단계(`source.kind: 'step'`), 표지가 있는 다른 항목(`source.kind: 'check'`)을 입력으로 쓴 단계의 결과에 `numeric: {…, derived: true}`. 그런 단계가 하나라도 있는 항목에 `numeric_tolerance: {source: 'fsm_long_wavelength', rel_tol: 1e-4, applies_to: 'all values of this check'}` — 그 항목의 모든 값(demand · capacity · nominal · ratio · reference · 단계 결과)에 1e-4. 세장비 · 강도 · 비처럼 표지 값에서 나온 값은 모두 느슨한 쪽(보수적인 규칙 — 값이 그 입력에 둔감한 경우, 예: Fn = Fy, 에도 퍼진다). 판정 · 지배는 값으로 견주지 않으므로 허용차 밖이다.
 - **소비자가 쓸 규칙:** 값 v 에 `numeric` 이 있거나 그 항목에 `numeric_tolerance` 가 있거나 DSM 의 `fsm_long_wavelength.keys` 에 그 키가 있으면 `|a − b| ≤ 1e-4 · max(|a|, |b|)`, 아니면 `≤ 1e-6 · max(|a|, |b|)`(0 근처는 절대 1e-12).
 - **표지하지 않은 것:** 해석 결과의 곡선 배열(`curve`) — 긴 길이의 점이 같은 민감도를 갖지만(§6.1 측정) 점마다의 표지는 없다; 곡선을 견주는 쪽은 `Lcre_signature` 의 1/4 이상 길이의 점에 1e-4 를 쓸 것(§6.1 의 측정: 8 in Z · C 단면에서 K 성분 1 ulp 섭동이 L = 251 in(끝의 0.27)에서 2 × 10⁻⁷, 402 in(0.43)에서 2 × 10⁻⁶ — 세 단면의 측정이라 다른 단면에서는 엔진의 반올림 추정 `err_est` 가 기준이다; 점마다 그 값을 싣는 것은 다음 걸음).
+
+### 16.15 덧붙임 — 최종 검증 V9a 의 엔진 몫 (2026-11-24)
+
+- **V9a-02 · V9a-03:** §6.3 의 「랩 검토에는 소요가 필요하다」 · 「진술 없는 H2」.
+- **다른 도구의 같은 꼴(찾은 것 — 고치지 않음, 결정 필요):** 부재 휨(`member_type: 'flexure'`)에 `Mu` 가 없고 `Vu` 만 있으면 휨 셋이 해당 없음, 전단이 통과 → 부재 `pass: true`(지배 소요가 없는데 통과). `Mu: 0` 도 같다. 압축 · 휨에 소요가 하나도 없으면 `pass: null`(맞음). 접합부는 `Vu` 만 있고 `Tu` 가 없으면 인장 한계상태가 해당 없음 — 계약의 「다른 소요가 평가되면 해당 없음」 그대로다(접합부에는 방향마다 소요가 따로라 지배 소요의 빈칸을 알 수 없다). 부재는 「member_type 의 주 소요(휨 Mu, 압축 Pu, 인장 Tu)가 없으면 그 항목은 미평가」로 바꾸는 것을 권한다.
+- **V9a-06 의 엔진 몫:** ③ 물리량 매개변수에 `sig_digits`(US 글의 유효숫자, 3–6) — SI 로 바꾼 값은 그 자리수로(「379.211651124 MPa」 → 379 MPa). ④ 단계의 끝없는 값(`unbounded`)의 덧말 `reason` 에도 `reason_code` · `_ko` …(`q()` 가 단다) — 「1e6 ksi」 는 상수 매개변수라 SI 로 바뀐다. ⑤ 「no support moment (Mu_support = 0)」 은 `lap.reason.no_support_moment_stated`. ⑦ 단언한 「a > b」 가 보이는 자리로 같은 글이 되면 같은 글 · 매개변수에 자리만 긴 `…_precise` code 로 낸다(`member.warning.ng_mu_mn_dcr` · `lap.warning.lap_mu_mn_dcr` · `h2_lap_h2` · `j6_3_lap_j6` · `transfer_capacity_dcr`). ② 「Fy < 95 ksi」 는 호스트가 지은 글 — 엔진의 표 B4.1-1 단계는 `Fy,limit` 을 물리량 입력(95 ksi, stress)으로 싣는다. ⑥ 질량밀도 경고의 「kip*s^2/in^4 단위의」 는 그 단위의 값을 쓰라는 안내라 그대로 둔다.
+- **V9a-07:** 엔진의 이름은 맞다 — 퍼린 랩 구간(`lap_region`) 결과는 부재 하나(소요 Mu/2, 이름 「국부좌굴」 · 「항복 및 횡비틀림좌굴」), 「2겹」 은 랩 도구의 `lap.flexure.local`(「랩 구간 휨 (2겹, Se·Fy)」)에만. 51.44 kip-in 에 「2겹」 을 붙인 것은 호스트의 검증표다.
+- **기준선에서 바뀐 것(`4a7bf9a` 와 견줌):** 계약 사례 154,910 값 가운데 81, 가장자리 96,048 가운데 46, 하중 0.
+
+| 사례 | 바뀐 것 |
+|---|---|
+| lap bolt Se Mnd · lap bolt Se e=2 · lap bolt short e · lap bolt short lap (H2 0.6966) · lap screw Pnvs ASD (0.7314) · lap screw no Pnvs (0.3618) | `lap.bending_shear` pass → not_evaluated(진술 없음), 비 → reference |
+| 같은 것 가운데 lap bolt Se e=2 · short e · short lap · screw no Pnvs | `flexure_checked` true → false |
+| lap screw no Pnvs | `utilization` 0.3618 → null(판정을 낸 강도 항목 없음), `governing_check` → null |
+| (가장자리) lap screw LRFD (0.3990) · lap short length LRFD (0.3990) · lap screw ASD (0.6032) · lap short length ASD (0.6032) | `lap.bending_shear` pass → not_evaluated; short length 둘은 `flexure_checked` true → false |
+| band: positive region ratio 1.000004 | 경고 「Mu(+)=83.29 > φMn(+)=83.29 kip-in (DCR=1.000)」 → 「Mu(+)=83.294400 > φMn(+)=83.294077 kip-in (DCR=1.000000)」 |
+
+종합 `pass` 가 바뀐 사례는 없다(그 사례들은 이미 진술 없음으로 `null` 이거나 다른 불합격으로 `false`). 계약 사례에 Mu · Vu 가 없는 랩은 없었다 — V9a-02 는 새 시험(`test_review_1124_v8_fixes.test_V9a_02_*`)이 본다.

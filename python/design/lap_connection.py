@@ -23,6 +23,12 @@ FORCE_MODEL = {
 }
 
 
+def _precise(a, b, fmt, ratio=None, rfmt=None):
+    """단언한 a > b 가 보이는 자리로 같은 글이 되면(83.29 > 83.29) 더 긴 자리의 판 code 를 쓴다(V9a-06 ⑦)."""
+    tie = format(a, fmt) == format(b, fmt) or (ratio is not None and format(ratio, rfmt) == format(1.0, rfmt))
+    return '_precise' if tie else ''
+
+
 def design_lap_connection(params: dict) -> dict:
     """Lap 접합부 설계
 
@@ -68,6 +74,11 @@ def design_lap_connection(params: dict) -> dict:
     lap_right = params.get('lap_right_in', 0) or 0
     Mu = abs(params.get('Mu_support', 0) or 0)
     Vu = abs(params.get('Vu_support', 0) or 0)
+    # 랩 검토에는 지점 소요가 필요하다(계약 §6.3, V9a-02): 없으면 0 이 아니라 「미입력」, 0 은 밝혔을 때만 0.
+    _zero_stated = params.get('zero_demand_stated') is True
+    demand_missing = [k for k in ('Mu_support', 'Vu_support') if params.get(k) is None]
+    demand_zero_unstated = [k for k in ('Mu_support', 'Vu_support')
+                            if params.get(k) is not None and abs(params.get(k) or 0) == 0 and not _zero_stated]
     fastener_type = params.get('fastener_type', 'screw')
     fastener_dia = params.get('fastener_dia', 0.19)  # #10 screw = 0.190 in
     n_rows = params.get('n_rows', 2)
@@ -363,7 +374,8 @@ def design_lap_connection(params: dict) -> dict:
         })
         if flexure_ok is False:      # None(진술 없음 · 판정 없음)은 부족이 아니다 — 2026-11-24 K4f
             warnings.append(
-                _nt('lap.warning.lap_mu_mn_dcr', Mu=Mu, text="φ" if design_method == "LRFD" else "",
+                _nt('lap.warning.lap_mu_mn_dcr' + _precise(Mu, phi_Mn_lap, '.2f', flexure_dcr, '.2f'), Mu=Mu,
+                    text="φ" if design_method == "LRFD" else "",
                     omega='' if design_method == 'LRFD' else '/Ω', phi_Mn_lap=phi_Mn_lap, flexure_dcr=flexure_dcr)
             )
 
@@ -446,7 +458,7 @@ def design_lap_connection(params: dict) -> dict:
             })
             if not mv_ok:
                 warnings.append(
-                    _nt('lap.warning.h2_lap_h2', mv_term=mv_term)
+                    _nt('lap.warning.h2_lap_h2' + _precise(mv_term, 1.0, '.2f'), mv_term=mv_term)
                 )
         elif Vu > 0:
             _flex['h2_missing'] = True
@@ -476,7 +488,7 @@ def design_lap_connection(params: dict) -> dict:
 
     if not capacity_ok:
         warnings.append(
-            _nt('lap.warning.transfer_capacity_dcr', V_transfer=V_transfer, capacity=capacity, utilization=utilization)
+            _nt('lap.warning.transfer_capacity_dcr' + _precise(V_transfer, capacity, '.3f', utilization, '.2f'), V_transfer=V_transfer, capacity=capacity, utilization=utilization)
         )
     # 랩 길이 1.5d 는 강도 규정이 아니라 R 계수법(I6.2.1(g))·J3 겹친 Z 슬롯 예외의 적용 조건이다 —
     # 못 미치면 그 두 방법을 쓸 수 없다는 경고만 남기고 판정에는 넣지 않는다(미입력이면 배치를 못 하므로 None).
@@ -520,7 +532,7 @@ def design_lap_connection(params: dict) -> dict:
             'pass': block_ok,
         })
         if not block_ok:
-            warnings.append(_nt('lap.warning.j6_3_lap_j6', ratio_bs=ratio_bs))
+            warnings.append(_nt('lap.warning.j6_3_lap_j6' + _precise(ratio_bs, 1.0, '.2f'), ratio_bs=ratio_bs))
     elif bs['applies']:
         block_ok = None if Pns <= 0 or n_total_actual <= 0 else True
     layout = [capacity_ok, spacing_ok, n_total <= n_max_total, block_ok]
@@ -547,6 +559,14 @@ def design_lap_connection(params: dict) -> dict:
                spacing_ok=spacing_ok, edge_dist=edge_dist, capacity=capacity, utilization=utilization,
                capacity_ok=capacity_ok, Se=Se, Sf_only=Sf_only, flex=_flex, block=bs)
     lap_design_checks = _build_lap_checks(_ck)
+    from design.lap_checks import apply_missing_demands as _apply_missing_demands
+    lap_design_checks = _apply_missing_demands(lap_design_checks, demand_missing, demand_zero_unstated,
+                                               demand_positive=V_transfer > 0)
+    if demand_missing or demand_zero_unstated:
+        # 소요가 모자라면 통과가 아니다. 불합격은 검토 항목이 불합격으로 남은 때만(소요 0 에서 생긴 「배치 없음」은 아님)
+        overall_pass = False if any(c['verdict'] == 'fail' and c.get('counts', True)
+                                    for c in lap_design_checks) else None
+        verdict = 'FAIL' if overall_pass is False else 'NOT_CHECKED'
     # 맨 위 utilization 은 판정을 낸 랩 강도 항목(pass · fail) 가운데 가장 큰 비 — 다른 결과와 같은 뜻(V8-01).
     # 상세(간격 · 끝단 거리)의 비는 치수 대 최소값이라 넣지 않는다. 패스너 무리의 비(옛 utilization)는 fastener_utilization.
     _gov = None
@@ -581,8 +601,8 @@ def design_lap_connection(params: dict) -> dict:
         # 모순되지 않도록 렌더러는 이 값을 우선 사용한다.
         'flexure_dcr_governing': round(flexure_dcr_governing, 4) if flexure_dcr_governing is not None else None,
         # Se 기준 휨(국부 · H2)을 평가했는가 — 뒤틀림 미평가(Mnd 없음)는 이 키가 아니라 pass · design_checks 에 난다.
-        'flexure_checked': (flexure_ok is not None or (bool(_flex.get('dist_missing'))
-                                                       and not _flex.get('h2_missing'))) and Se > 0,
+        # 휨 검토(국부 · H2)가 판정을 냈는가(V9a-03) — 진술 없음 · 소요 없음의 미평가는 아니다
+        'flexure_checked': _flexure_checked(lap_design_checks),
         'flexure_basis': 'Se' if Se > 0 else ('Sf_reference' if Sf_only > 0 else None),
         'flexure_assumed': Se <= 0 and Sf_only > 0,
         'flexure_reference_dcr': (round(flexure_reference_dcr, 4)
@@ -610,6 +630,12 @@ def design_lap_connection(params: dict) -> dict:
         'assumptions': [LAP_BLOCK_SHEAR_ASSUMPTION] if bs.get('Pnr') is not None else [],
         'display_rounding': _display_rounding('lap'),
     })
+
+
+def _flexure_checked(checks):
+    v = {c['id']: c['verdict'] for c in checks}
+    return (v.get('lap.flexure.local') in ('pass', 'fail')
+            and v.get('lap.bending_shear') in ('pass', 'fail', 'not_applicable'))
 
 
 # 맨 위 utilization 을 정하는 랩 강도 항목(상세 · 적용 조건은 넣지 않는다).
