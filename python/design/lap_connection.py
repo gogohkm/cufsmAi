@@ -8,6 +8,7 @@
 import math
 from design.connections import design_connection, normalize_design_method
 from design.checks import display_rounding as _display_rounding
+from design.notices import N as _nt, attach as _attach_notices, prefixed as _prefixed  # noqa: E402
 
 # 패스너 수요 모델 설명(결과·steps 에 그대로 싣는다). 모델을 바꾸는 것은 사용자 결정 사항이다.
 FORCE_MODEL = {
@@ -118,8 +119,7 @@ def design_lap_connection(params: dict) -> dict:
         'value': round(V_transfer, 3), 'unit': 'kips',
         'formula': v2_formula,
     })
-    warnings.append('Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — '
-                    'force_model 의 한계 (a)–(e) 를 확인하세요.')
+    warnings.append(_nt('lap.warning.a1_2_lap_step_a1_force'))
 
     # 끝단 거리 (§J3.2 볼트 / §J4.2 나사: ≥ 1.5d). 사용자 값은 그대로 엔진에 넘긴다 —
     # 1.5d 보다 짧으면 엔진의 J3.2/J4.2 검사가 불합격을 낸다(조용히 올리지 않는다).
@@ -128,12 +128,10 @@ def design_lap_connection(params: dict) -> dict:
     edge_dist = edge_user if edge_user > 0 else edge_min
     if 0 < edge_user < edge_min:
         warnings.append(
-            f'입력 단부거리 {edge_user:.3f} in < 최소 1.5d = {edge_min:.3f} in — '
-            f'§J3.2/§J4.2 불합격 (값은 그대로 사용).'
+            _nt('lap.warning.j3_2_j3_j4', edge_user=edge_user, edge_min=edge_min)
         )
     elif edge_user <= 0:
-        warnings.append(f'end_distance 미입력 — 최소 1.5d = {edge_min:.3f} in 로 배치를 제안하고 §J6.1 을 그 값으로 '
-                        '평가 (시공 상세가 이 끝단 거리를 지켜야 함)')
+        warnings.append(_nt('lap.warning.j6_1_end_distance_j6', edge_min=edge_min))
 
     # Step 3: 패스너 1개 설계강도 — 전단 방향 한계상태(지압·틸팅·패스너 전단·J6.1 끝단 파단)
     conn_type = 'screw' if fastener_type == 'screw' else 'bolt'
@@ -180,19 +178,26 @@ def design_lap_connection(params: dict) -> dict:
                            and x.get('direction') in ('shear', 'any')]
     fastener_ok = None if fastener_unverified else True
     for x in fastener_unverified:
-        warnings.append(f"패스너 강도 미확정: {x['name']} — {x['reason']}")
+        warnings.append(_nt('lap.warning.fastener_strength_unsettled', name=x['name'], reason=x['reason']))
     detail_fail = [x for x in conn_result.get('detailing_checks', []) if not x['pass']]
     if detail_fail:
         fastener_ok = False
         for x in detail_fail:
-            warnings.append(f"상세 불합격: {x['name']} (입력 {x['provided']} < 요구 {x['required']})")
+            warnings.append(_nt('lap.warning.detail_fails', name=x['name'], provided=x['provided'], required=x['required']))
     if pns_assumed:
-        warnings.append(f'Pns 가 가정값 한계상태({pns_mode})로 정해졌다 — 패스너 수·용량·배치 판정은 '
-                        '참고값이며 불합격도 합격도 내지 않는다.')
+        warnings.append(_nt('lap.warning.pns_from_assumed_limit_state', pns_mode=pns_mode))
+    # 이름표의 숫자(계약 §16.6, K4b): 글은 그대로, 옆에 템플릿과 물리량 붙은 값을 싣는다.
+    _d_param = {'symbol': 'd', 'value': fastener_dia, 'quantity': 'length', 'fmt': '.3f', 'unit_text': 'in', 'sep': ' '}
     if fastener_type == 'screw':
-        fastener_label = f'Screw #{_screw_gauge(fastener_dia)}'
+        _gauge = _screw_gauge(fastener_dia)
+        fastener_label = f'Screw #{_gauge}'
+        fastener_label_parts = {'template': 'Screw #{gauge}', 'template_ko': '나사 #{gauge}',
+                                'params': [{'symbol': 'gauge', 'value': _gauge, 'quantity': None, 'fmt': ''}],
+                                'values': [_d_param]}
     else:
         fastener_label = f'Bolt d={fastener_dia:.3f} in'
+        fastener_label_parts = {'template': 'Bolt d={d}', 'template_ko': '볼트 d={d}', 'params': [_d_param],
+                                'values': []}
 
     steps.append({
         'step': 3, 'name': f'Fastener Strength ({fastener_label})',
@@ -214,7 +219,7 @@ def design_lap_connection(params: dict) -> dict:
         n_required = 0
         n_per_row = 0
         n_total = 0
-        warnings.append('패스너 강도 = 0 — 패스너 사양을 확인하세요.')
+        warnings.append(_nt('lap.warning.fastener_strength_zero'))
 
     steps.append({
         'step': 4, 'name': 'Required Fasteners (in-house uniform-share model)',
@@ -228,7 +233,7 @@ def design_lap_connection(params: dict) -> dict:
     if lap_each > 0 and min_spacing > 0:
         if lap_each < 2 * edge_dist:
             n_max_per_row = 0
-            warnings.append(f'Lap {lap_each:.2f} in < 2e = {2 * edge_dist:.2f} in — 패스너를 배치할 수 없음')
+            warnings.append(_nt('lap.warning.lap_shorter_than_2e', lap_each=lap_each, value=2 * edge_dist))
         else:
             n_max_per_row = int((lap_each - 2 * edge_dist) / min_spacing) + 1
     else:
@@ -256,11 +261,10 @@ def design_lap_connection(params: dict) -> dict:
 
     if n_total > n_max_total:
         warnings.append(
-            f'필요 패스너 {n_total} ea > Lap 내 최대 배치 {n_max_total} ea — '
-            f'Lap 길이를 늘리거나 패스너 사양을 변경하세요.'
+            _nt('lap.warning.fasteners_do_not_fit', n_total=n_total, n_max_total=n_max_total)
         )
     if not spacing_ok:
-        warnings.append(f'패스너 간격 {spacing:.2f} in < 최소 3d = {min_spacing:.2f} in')
+        warnings.append(_nt('lap.warning.fastener_spacing_below_3d', spacing=spacing, min_spacing=min_spacing))
 
     # Step 6: 끝단 거리 (J6.1 끝단 파단은 Step 3 에 이미 포함)
     steps.append({
@@ -351,8 +355,7 @@ def design_lap_connection(params: dict) -> dict:
             _flex['ltb_unstated'] = True
             if flexure_ok:
                 flexure_ok = None
-                warnings.append('Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A '
-                                '가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.')
+                warnings.append(_nt('lap.warning.lap_mn_se_fy'))
         flexure_dcr_governing = flexure_dcr
         _flex['local'] = dict(Mnl_single=Mnl_single, Mn_lap=Mn_lap, phi_Mn_lap=phi_Mn_lap, dcr=flexure_dcr,
                               ok=flexure_ok, n_members=n_members)
@@ -370,9 +373,7 @@ def design_lap_connection(params: dict) -> dict:
         })
         if not flexure_ok:
             warnings.append(
-                f'Lap 구간 휨강도 부족: Mu = {Mu:.2f} kip-in > '
-                f'{"φ" if design_method == "LRFD" else ""}Mn = {phi_Mn_lap:.2f} kip-in '
-                f'(DCR = {flexure_dcr:.2f})'
+                _nt('lap.warning.lap_mu_mn_dcr', Mu=Mu, text="φ" if design_method == "LRFD" else "", phi_Mn_lap=phi_Mn_lap, flexure_dcr=flexure_dcr)
             )
 
         # 뒤틀림좌굴(§F4) 검토 — 구간 설계와 같은 계약(§6.3, V8-01): 진술이 있으면 준 Mnd 와 무관하게 해당 없음
@@ -383,12 +384,9 @@ def design_lap_connection(params: dict) -> dict:
             _flex['dist_restrained'] = True
             if Mnd_single and Mnd_single > 0:
                 _flex['dist_ignored'] = Mnd_single
-                warnings.append(f'lap_restrained = true: the given Mnd = {Mnd_single} kip-in is not used — F4 '
-                                'distortional buckling is not applicable under the Manual assumption (lapped section '
-                                'restrained against distortional buckling; Mnd = My in the lap)')
+                warnings.append(_nt('lap.warning.mnd_not_used_lap_restrained', Mnd_single=Mnd_single))
             warnings.append(
-                '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림 좌굴에 충분히 '
-                '구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.'
+                _nt('lap.warning.f4_f4_lap_restrained_true')
             )
         elif Mnd_single and Mnd_single > 0:
             Mnd_lap = Mnd_single * n_members
@@ -414,16 +412,14 @@ def design_lap_connection(params: dict) -> dict:
             })
             if not dist_ok:
                 warnings.append(
-                    f'Lap 구간 뒤틀림 휨강도 부족(§F4): DCR = {dist_dcr:.2f}.'
+                    _nt('lap.warning.f4_lap_f4_dcr', dist_dcr=dist_dcr)
                 )
         else:
             # 구속을 엔진이 가정하지 않는다(V6-07): 해당하는데 평가하지 못한 한계상태 → 판정 없음(FIXES §3.1).
             flexure_ok = None if flexure_ok else flexure_ok
             _flex['dist_missing'] = True
             warnings.append(
-                '뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정하지 '
-                '않습니다. Mnd 를 입력하거나, 겹친 부분이 구속되면(Manual II-1A / II-2A) lap_restrained = true 를 '
-                '주세요.'
+                _nt('lap.warning.f4_f4_mnd_mcrd_lap')
             )
 
         # 지점부 휨-전단 상호작용(§H2) 검토: Vn은 입력값 또는 §G2.1 자동산정값.
@@ -459,20 +455,18 @@ def design_lap_connection(params: dict) -> dict:
             })
             if not mv_ok:
                 warnings.append(
-                    f'Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term:.2f} > 1.0.'
+                    _nt('lap.warning.h2_lap_h2', mv_term=mv_term)
                 )
         elif Vu > 0:
             _flex['h2_missing'] = True
             flexure_ok = None if flexure_ok else flexure_ok
             warnings.append(
-                '단면 전단강도 Vn 을 산정할 수 없습니다(퇴화 기하) — Lap 지점부 '
-                '휨-전단 상호작용(§H2) 검토를 수행하지 못했습니다.'
+                _nt('lap.warning.h2_vn_lap_h2')
             )
     elif Mu > 0 and Se <= 0:
         flexure_ok = None
         warnings.append(
-            'Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). '
-            '설계 탭에서 단면 정보를 확인하세요.'
+            _nt('lap.warning.se_lap')
         )
         if Sf_only > 0 and Fy > 0:
             Mn_ref = 2 * Sf_only * Fy
@@ -487,19 +481,16 @@ def design_lap_connection(params: dict) -> dict:
                             f'{"φ" if design_method == "LRFD" else "1/Ω"}Mn = {phi_ref:.2f} kip-in, '
                             f'DCR = {flexure_reference_dcr:.3f} — Se 가 아니므로 판정에 쓰지 않음'),
             })
-            warnings.append('Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 '
-                            '휨 판정은 하지 않음. Se 를 입력하세요.')
+            warnings.append(_nt('lap.warning.sf_only_reference'))
 
     if not capacity_ok:
         warnings.append(
-            f'용량 부족: V_transfer = {V_transfer:.3f} kips > Capacity = {capacity:.3f} kips '
-            f'(DCR = {utilization:.2f}). 패스너 수 또는 사양을 변경하세요.'
+            _nt('lap.warning.transfer_capacity_dcr', V_transfer=V_transfer, capacity=capacity, utilization=utilization)
         )
     # 랩 길이 1.5d 는 강도 규정이 아니라 R 계수법(I6.2.1(g))·J3 겹친 Z 슬롯 예외의 적용 조건이다 —
     # 못 미치면 그 두 방법을 쓸 수 없다는 경고만 남기고 판정에는 넣지 않는다(미입력이면 배치를 못 하므로 None).
     if lap_ok is False:
-        warnings.append(f'Lap {lap_each:.2f} in < 1.5d = {min_lap:.2f} in — §I6.2.1 R 계수법과 §J3 겹친 Z 부재의 '
-                        '과대·슬롯 구멍 예외를 쓸 수 없음 (접합 강도 판정에는 넣지 않음)')
+        warnings.append(_nt('lap.warning.i6_2_1_lap_i6_j3', lap_each=lap_each, min_lap=min_lap))
     # J6.3 패스너 무리의 블록 전단 — 장력면을 빼고(Ant = 0) 두 전단면만: 하한(보수). 볼트만(J6 머리글: 나사 · PAF
     # 접합의 Rn 은 J6.1 · J6.2 의 작은 값 — J6.3 은 용접 · 볼트에만).  V6b 재검증 · 오케스트레이터 결정 2026-11-24.
     bs = {'applies': fastener_type != 'screw'}
@@ -538,7 +529,7 @@ def design_lap_connection(params: dict) -> dict:
             'pass': block_ok,
         })
         if not block_ok:
-            warnings.append(f'Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs:.2f} > 1.0')
+            warnings.append(_nt('lap.warning.j6_3_lap_j6', ratio_bs=ratio_bs))
     elif bs['applies']:
         block_ok = None if Pns <= 0 or n_total_actual <= 0 else True
     layout = [capacity_ok, spacing_ok, n_total <= n_max_total, block_ok]
@@ -573,10 +564,11 @@ def design_lap_connection(params: dict) -> dict:
             if _gov is None or float(_c['ratio']) > float(_gov['ratio']):
                 _gov = _c
 
-    return {
+    return _attach_notices({
         'fastener_type': fastener_type,
         'fastener_dia': fastener_dia,
         'fastener_label': fastener_label,
+        'fastener_label_parts': fastener_label_parts,
         'n_required': n_total,
         'n_total': n_total_actual,
         'n_max_total': n_max_total,
@@ -624,10 +616,10 @@ def design_lap_connection(params: dict) -> dict:
         'lap_left_in': lap_left,
         'lap_right_in': lap_right,
         'design_checks': lap_design_checks,
-        'scope_notes': ['J6.3: ' + LAP_BLOCK_SHEAR_NOTE],
+        'scope_notes': [_prefixed('J6.3: ', LAP_BLOCK_SHEAR_NOTE)],
         'assumptions': [LAP_BLOCK_SHEAR_ASSUMPTION] if bs.get('Pnr') is not None else [],
         'display_rounding': _display_rounding('lap'),
-    }
+    })
 
 
 # 맨 위 utilization 을 정하는 랩 강도 항목(상세 · 적용 조건은 넣지 않는다).
@@ -682,9 +674,7 @@ def check_lap_length(d: float, lap_left: float, lap_right: float) -> dict:
             'ok': None,
             'min_lap_in': min_lap,
             'actual_in': actual,
-            'message': (f'Lap 길이: 좌({lap_left})·우({lap_right}) 가운데 미입력(0)이 있어 판정하지 않음 — '
-                        '§I6.2.1(g) 은 각 방향 모두 1.5d 이상을 요구 '
-                        '(R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건)'),
+            'message': (_nt('lap.warning.i6_2_1_lap_i6_i6_j3_2', lap_left=lap_left, lap_right=lap_right)),
         }
     actual = min(lap_left, lap_right)
     ok = actual >= min_lap
@@ -692,8 +682,7 @@ def check_lap_length(d: float, lap_left: float, lap_right: float) -> dict:
         'ok': ok,
         'min_lap_in': min_lap,
         'actual_in': actual,
-        'message': '' if ok else (f'Lap {actual:.2f} in < 1.5d = {min_lap:.2f} in (§I6.2.1(g)) — '
-                                  'R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족'),
+        'message': '' if ok else (_nt('lap.warning.i6_2_1_lap_i6_i6_j3', actual=actual, min_lap=min_lap)),
     }
 
 

@@ -9,24 +9,18 @@ from design.checks import (
     Trace, q, src, spec, make_check, design_strength_step, factor, connection_check_id, set_governing,
     apply_context, demand_source,
 )
+from design.notices import N as _nt, joined as _joined, prefixed as _prefixed, name_ko_prefix as _name_ko_prefix  # noqa: E402
 
 
 LAP_BLOCK_SHEAR_NOTE = (
-    'J6.3 block shear of the lap fastener group is evaluated as a lower bound: the two shear planes along the '
-    'outer fastener rows, from the member end over the fastener group (length e + (m − 1) s), with the tension plane '
-    'between the rows ignored (Ant = 0) — the row gauge and the distance to the web edge are not inputs. Refine with '
-    'the full Eq. J6.3-1/-2 when those dimensions are given. Bolts only: for screw connections J6 takes Rn from '
-    'J6.1 and J6.2 (J6.3 does not apply).')
+    _nt('lap.scope.j6_3_j6_block_shear_lap'))
 LAP_BLOCK_SHEAR_ASSUMPTION = (
-    'J6.3 (lap fastener group): lower bound with the tension plane ignored (Ant = 0) — Pnr = min(0.6 Fy Agv, '
-    '0.6 Fu Anv); conservative, since the Ubs Fu Ant term of Eq. J6.3-1/-2 is never negative.')
+    _nt('lap.assumption.j6_3_j6_lap_fastener_group'))
 
 
 from design.aisi_s100 import LAP_MANUAL_ASSUMPTION, LAP_DIST_UNSTATED  # noqa: E402
 
-LAP_LTB_UNSTATED_TOOL = ('lap flexure Mnℓ = Se Fy (Fn = Fy, no lateral-torsional buckling) rests on the Manual '
-                         'assumption — restraint not stated. Give lap_restrained = true to apply it (' +
-                         LAP_MANUAL_ASSUMPTION + ').')
+LAP_LTB_UNSTATED_TOOL = (_nt('lap.reason.lap_flexure_mn_se', manual_quote=LAP_MANUAL_ASSUMPTION))
 
 
 def build(ck: dict) -> list:
@@ -84,13 +78,13 @@ def build(ck: dict) -> list:
                      result=q('capacity', ck['capacity'], 'force'))
         r = ck['utilization']
         if ck['pns_assumed']:
-            v, why = 'not_evaluated', f"Pns is from an assumed limit state ({ck['pns_mode']}) — reference only"
+            v, why = 'not_evaluated', _nt('lap.reason.pns_from_assumed_limit', pns_mode=ck['pns_mode'])
         elif not ck['capacity_ok']:
             v, why = 'fail', None
         elif ck['fastener_unverified']:
             v = 'not_evaluated'
-            why = 'fastener strength not verified: ' + '; '.join(
-                f"{x['name']} — {x['reason']}" for x in ck['fastener_unverified'])
+            why = _nt('lap.reason.fastener_strength_verified', items=_joined('; ', (
+                _prefixed(f"{x['name']} — ", x['reason'], _name_ko_prefix(x['name'], ' — ')) for x in ck['fastener_unverified'])))
         else:
             v, why = 'pass', None
         tr.add('verdict', 'V_transfer / capacity ≤ 1', inputs=[tr.ref(i_v), tr.ref(i_c)],
@@ -107,7 +101,7 @@ def build(ck: dict) -> list:
         checks.append(make_check('lap.fastener_group', design_method=dm, verdict='fail' if not ck['pns_assumed']
                                  else 'not_evaluated', demand=q('V_transfer', ck['V_transfer'], 'force'),
                                  capacity=q('capacity', 0.0, 'force'), ratio=None,
-                                 reason='fastener design strength is 0', steps=tr.steps))
+                                 reason=_nt('lap.reason.fastener_design_strength'), steps=tr.steps))
 
     # --- 배치 개수
     tr = Trace()
@@ -134,7 +128,7 @@ def build(ck: dict) -> list:
                                  reference={'ratio': r} if v == 'not_evaluated' else None))
     else:
         checks.append(make_check('lap.fastener_spacing', design_method=dm, verdict='not_applicable',
-                                 reason='one fastener per row (or no lap length) — spacing does not apply'))
+                                 reason=_nt('lap.reason.one_fastener_per_row')))
 
     # --- 패스너 무리의 블록 전단(J6.3) — 장력면을 뺀 하한으로 평가하고 판정에 넣는다(2026-11-24 결정)
     checks.append(_block_shear(ck))
@@ -197,7 +191,7 @@ def build(ck: dict) -> list:
                 ref = {'capacity': q('φbMn,ref', rf['phi_ref'], 'moment'), 'ratio': rf['dcr'],
                        'basis': 'gross Sf — local buckling not included'}
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict='not_evaluated',
-                                     reason='Se (effective section modulus) not given', reference=ref))
+                                     reason=_nt('lap.reason.se_effective_section_modulus'), reference=ref))
         if fx.get('dist'):
             ds = fx['dist']
             tr = Trace()
@@ -217,14 +211,14 @@ def build(ck: dict) -> list:
                                      factor_=factor(dm, phi_b, om_b, 'φb', 'Ωb'), ratio=ds['dcr'], steps=tr.steps))
         elif fx.get('local') and fx.get('dist_restrained'):
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_applicable',
-                                     reason='lap_restrained = true (user statement): ' + LAP_MANUAL_ASSUMPTION,
+                                     reason=_nt('lap.reason.lap_restrained_true_user', manual_quote=LAP_MANUAL_ASSUMPTION),
                                      restraint_source=src('user_input', key='lap_restrained')))
         elif fx.get('local'):
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
                                      reason=LAP_DIST_UNSTATED))
         else:
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
-                                     reason='lap flexure not evaluated (no Se)'))
+                                     reason=_nt('lap.reason.lap_flexure_evaluated_no')))
         if fx.get('h2'):
             h = fx['h2']
             tr = Trace()
@@ -251,13 +245,13 @@ def build(ck: dict) -> list:
                                      if h['mv'] >= max(lo['dcr'], (fx.get('dist') or {}).get('dcr') or 0) else None))
         elif fx.get('h2_missing'):
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
-                                     reason='section shear strength Vn could not be computed'))
+                                     reason=_nt('lap.reason.section_shear_strength_vn')))
         elif ck['Vu'] <= 0:
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_applicable',
-                                     reason='no support shear (Vu_support = 0)'))
+                                     reason=_nt('lap.reason.no_support_shear_vu')))
         else:
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
-                                     reason='lap flexure not evaluated (no Se)'))
+                                     reason=_nt('lap.reason.lap_flexure_evaluated_no')))
 
     set_governing(checks)
     apply_context(checks, p)
@@ -270,11 +264,10 @@ def _block_shear(ck):
     bs = ck.get('block') or {}
     if not bs.get('applies', True):
         return make_check('lap.block_shear', design_method=dm, verdict='not_applicable',
-                          reason='J6: for screw connections the rupture strength is the lesser of J6.1 and J6.2 — '
-                                 'J6.3 block shear applies to welded and bolted connections only')
+                          reason=_nt('lap.reason.j6_j6_screw_connections_rupture'))
     if bs.get('Pnr') is None:
         return make_check('lap.block_shear', design_method=dm, verdict='not_evaluated',
-                          reason='no fastener layout (fastener design strength 0 or no fasteners placed)')
+                          reason=_nt('lap.reason.no_fastener_layout_fastener'))
     tr = Trace()
     t = q('t', ck['t'], 'length', src('user_input', key='t'))
     i_L = tr.add('equation', 'Lv = e + (m − 1) s  (shear-plane length: member end to the last fastener of a row)',

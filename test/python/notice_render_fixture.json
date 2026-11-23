@@ -1,0 +1,2597 @@
+{
+ "grammar": "notice-template/1",
+ "pairs": [
+  {
+   "code": "conn.assumption.e60_fxx_e60_ksi",
+   "params": [],
+   "template": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
+   "template_ko": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
+   "text": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
+   "text_ko": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)"
+  },
+  {
+   "code": "conn.assumption.j1_concentric_load",
+   "params": [],
+   "template": "J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.",
+   "template_ko": "J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.",
+   "text": "J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.",
+   "text_ko": "J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토."
+  },
+  {
+   "code": "conn.assumption.j2_2_3_j2_eccentric_tension",
+   "params": [],
+   "template": "J2.2.3: eccentric_tension 미입력 — 동심 상향 인장으로 평가 (편심이면 50 %)",
+   "template_ko": "J2.2.3: eccentric_tension 미입력 — 동심 상향 인장으로 평가 (편심이면 50 %)",
+   "text": "J2.2.3: eccentric_tension 미입력 — 동심 상향 인장으로 평가 (편심이면 50 %)",
+   "text_ko": "J2.2.3: eccentric_tension 미입력 — 동심 상향 인장으로 평가 (편심이면 50 %)"
+  },
+  {
+   "code": "conn.assumption.j2_2_3_j2_sidelap",
+   "params": [],
+   "template": "J2.2.3: sidelap 미입력 — 사이드랩이 아닌 접합으로 평가 (데크 사이드랩이면 70 %)",
+   "template_ko": "J2.2.3: sidelap 미입력 — 사이드랩이 아닌 접합으로 평가 (데크 사이드랩이면 70 %)",
+   "text": "J2.2.3: sidelap 미입력 — 사이드랩이 아닌 접합으로 평가 (데크 사이드랩이면 70 %)",
+   "text_ko": "J2.2.3: sidelap 미입력 — 사이드랩이 아닌 접합으로 평가 (데크 사이드랩이면 70 %)"
+  },
+  {
+   "code": "conn.assumption.j2_5_j2_load_direction",
+   "params": [],
+   "template": "J2.5: load_direction 미입력 — 종방향(횡방향보다 작은 값)으로 평가",
+   "template_ko": "J2.5: load_direction 미입력 — 종방향(횡방향보다 작은 값)으로 평가",
+   "text": "J2.5: load_direction 미입력 — 종방향(횡방향보다 작은 값)으로 평가",
+   "text_ko": "J2.5: load_direction 미입력 — 종방향(횡방향보다 작은 값)으로 평가"
+  },
+  {
+   "code": "conn.assumption.j3_3_1_bearing_thinner_sheet",
+   "params": [],
+   "template": "J3.3.1: 지압은 얇은 판(t_min, Fu 하나)으로 검토 — 두 판 Fu 가 같으면 C·t 가 t 에 따라 증가하므로 얇은 판이 지배한다(Table J3.3.1-1). 판 강도가 다르면 낮은 Fu 를 넣으세요.",
+   "template_ko": "J3.3.1: 지압은 얇은 판(t_min, Fu 하나)으로 검토 — 두 판 Fu 가 같으면 C·t 가 t 에 따라 증가하므로 얇은 판이 지배한다(Table J3.3.1-1). 판 강도가 다르면 낮은 Fu 를 넣으세요.",
+   "text": "J3.3.1: 지압은 얇은 판(t_min, Fu 하나)으로 검토 — 두 판 Fu 가 같으면 C·t 가 t 에 따라 증가하므로 얇은 판이 지배한다(Table J3.3.1-1). 판 강도가 다르면 낮은 Fu 를 넣으세요.",
+   "text_ko": "J3.3.1: 지압은 얇은 판(t_min, Fu 하나)으로 검토 — 두 판 Fu 가 같으면 C·t 가 t 에 따라 증가하므로 얇은 판이 지배한다(Table J3.3.1-1). 판 강도가 다르면 낮은 Fu 를 넣으세요."
+  },
+  {
+   "code": "conn.assumption.j3_hole_type_standard",
+   "params": [],
+   "template": "J3: hole_type 미입력 — 표준공(Table J3-1) 가정. 과대·슬롯 구멍이면 C·mf 가 작아 비보수",
+   "template_ko": "J3: hole_type 미입력 — 표준공(Table J3-1) 가정. 과대·슬롯 구멍이면 C·mf 가 작아 비보수",
+   "text": "J3: hole_type 미입력 — 표준공(Table J3-1) 가정. 과대·슬롯 구멍이면 C·mf 가 작아 비보수",
+   "text_ko": "J3: hole_type 미입력 — 표준공(Table J3-1) 가정. 과대·슬롯 구멍이면 C·mf 가 작아 비보수"
+  },
+  {
+   "code": "conn.assumption.j4_4_1_tc_equals_t2",
+   "params": [],
+   "template": "J4.4.1: tc 미입력 — 나사가 t2 를 모두 관통한다고 보고 tc = t2",
+   "template_ko": "J4.4.1: tc 미입력 — 나사가 t2 를 모두 관통한다고 보고 tc = t2",
+   "text": "J4.4.1: tc 미입력 — 나사가 t2 를 모두 관통한다고 보고 tc = t2",
+   "text_ko": "J4.4.1: tc 미입력 — 나사가 t2 를 모두 관통한다고 보고 tc = t2"
+  },
+  {
+   "code": "conn.assumption.j4_5_1_commentary_j4_pnv_a1",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "name",
+     "value": "전단+풀오버 (J4.5.1)"
+    },
+    {
+     "fmt": "",
+     "notice": {
+      "code": "conn.reason.outside_equation_limits",
+      "kind": "reason",
+      "params": [
+       {
+        "fmt": "",
+        "quantity": null,
+        "symbol": "clause",
+        "value": "J4.5.1"
+       },
+       {
+        "conv": "s",
+        "fmt": "",
+        "quantity": null,
+        "symbol": "lim",
+        "value": "t1=0.0236 (0.0285–0.0445)"
+       }
+      ],
+      "template": "Eq. {clause}-1 적용한계 밖: {lim}",
+      "template_ko": "Eq. {clause}-1 적용한계 밖: {lim}",
+      "text": "Eq. J4.5.1-1 적용한계 밖: t1=0.0236 (0.0285–0.0445)",
+      "text_ko": "Eq. J4.5.1-1 적용한계 밖: t1=0.0236 (0.0285–0.0445)"
+     },
+     "quantity": null,
+     "symbol": "why",
+     "value": "Eq. J4.5.1-1 적용한계 밖: t1=0.0236 (0.0285–0.0445)"
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "tname",
+     "value": "Pnov"
+    },
+    {
+     "fmt": "",
+     "quantity": "dimensionless",
+     "symbol": "omega",
+     "value": 3.0
+    },
+    {
+     "fmt": "",
+     "quantity": "dimensionless",
+     "symbol": "phi",
+     "value": 0.5
+    }
+   ],
+   "template": "{name}: {why} — 기준 식 대신 Commentary C-J4.5.1-1 의 보수 직선식 V/Pnv + T/{tname} ≤ 1 (가용강도, Ω {omega}/φ {phi})을 A1.2(c) 합리적 해석으로 사용",
+   "template_ko": "{name}: {why} — 기준 식 대신 Commentary C-J4.5.1-1 의 보수 직선식 V/Pnv + T/{tname} ≤ 1 (가용강도, Ω {omega}/φ {phi})을 A1.2(c) 합리적 해석으로 사용",
+   "text": "전단+풀오버 (J4.5.1): Eq. J4.5.1-1 적용한계 밖: t1=0.0236 (0.0285–0.0445) — 기준 식 대신 Commentary C-J4.5.1-1 의 보수 직선식 V/Pnv + T/Pnov ≤ 1 (가용강도, Ω 3.0/φ 0.5)을 A1.2(c) 합리적 해석으로 사용",
+   "text_ko": "전단+풀오버 (J4.5.1): Eq. J4.5.1-1 적용한계 밖: t1=0.0236 (0.0285–0.0445) — 기준 식 대신 Commentary C-J4.5.1-1 의 보수 직선식 V/Pnv + T/Pnov ≤ 1 (가용강도, Ω 3.0/φ 0.5)을 A1.2(c) 합리적 해석으로 사용"
+  },
+  {
+   "code": "conn.assumption.j4_5_1_j4_dw",
+   "params": [],
+   "template": "J4.5.1: dw(머리·와셔 큰 직경) 미입력 — d'w 사용(보수)",
+   "template_ko": "J4.5.1: dw(머리·와셔 큰 직경) 미입력 — d'w 사용(보수)",
+   "text": "J4.5.1: dw(머리·와셔 큰 직경) 미입력 — d'w 사용(보수)",
+   "text_ko": "J4.5.1: dw(머리·와셔 큰 직경) 미입력 — d'w 사용(보수)"
+  },
+  {
+   "code": "conn.assumption.j5_2_3_j5_alpha_paf_fig",
+   "params": [],
+   "template": "J5.2.3: alpha_w 미입력 — 1.5 (단순·평머리 PAF, Fig. J5-1(a)(b)); 테이퍼 머리는 1.25",
+   "template_ko": "J5.2.3: alpha_w 미입력 — 1.5 (단순·평머리 PAF, Fig. J5-1(a)(b)); 테이퍼 머리는 1.25",
+   "text": "J5.2.3: alpha_w 미입력 — 1.5 (단순·평머리 PAF, Fig. J5-1(a)(b)); 테이퍼 머리는 1.25",
+   "text_ko": "J5.2.3: alpha_w 미입력 — 1.5 (단순·평머리 PAF, Fig. J5-1(a)(b)); 테이퍼 머리는 1.25"
+  },
+  {
+   "code": "conn.assumption.j5_3_2_point_below_t2",
+   "params": [],
+   "template": "J5.3.2/J5.2.2: 점(point) 전체가 t2 아래로 관입했다고 가정 (시공 조건)",
+   "template_ko": "J5.3.2/J5.2.2: 점(point) 전체가 t2 아래로 관입했다고 가정 (시공 조건)",
+   "text": "J5.3.2/J5.2.2: 점(point) 전체가 t2 아래로 관입했다고 가정 (시공 조건)",
+   "text_ko": "J5.3.2/J5.2.2: 점(point) 전체가 t2 아래로 관입했다고 가정 (시공 조건)"
+  },
+  {
+   "code": "conn.assumption.j5_3_3_penetration_0_6t2",
+   "params": [],
+   "template": "J5.3.3: 관입 깊이 ≥ 0.6·t2 가정 (시공 조건)",
+   "template_ko": "J5.3.3: 관입 깊이 ≥ 0.6·t2 가정 (시공 조건)",
+   "text": "J5.3.3: 관입 깊이 ≥ 0.6·t2 가정 (시공 조건)",
+   "text_ko": "J5.3.3: 관입 깊이 ≥ 0.6·t2 가정 (시공 조건)"
+  },
+  {
+   "code": "conn.assumption.j6_2_flat_weld_no_holes",
+   "params": [],
+   "template": "J6.2/J6.3: 평판 용접 접합 — 구멍이 없어 Table J6.2-1 (1)(볼트식)은 해당하지 않음. Manual IV-1·IV-4–IV-7 처럼 인장재면 Chapter D(member_tension=True, Ag 또는 width)로 순단면을 검토한다.",
+   "template_ko": "J6.2/J6.3: 평판 용접 접합 — 구멍이 없어 Table J6.2-1 (1)(볼트식)은 해당하지 않음. Manual IV-1·IV-4–IV-7 처럼 인장재면 Chapter D(member_tension=True, Ag 또는 width)로 순단면을 검토한다.",
+   "text": "J6.2/J6.3: 평판 용접 접합 — 구멍이 없어 Table J6.2-1 (1)(볼트식)은 해당하지 않음. Manual IV-1·IV-4–IV-7 처럼 인장재면 Chapter D(member_tension=True, Ag 또는 width)로 순단면을 검토한다.",
+   "text_ko": "J6.2/J6.3: 평판 용접 접합 — 구멍이 없어 Table J6.2-1 (1)(볼트식)은 해당하지 않음. Manual IV-1·IV-4–IV-7 처럼 인장재면 Chapter D(member_tension=True, Ag 또는 width)로 순단면을 검토한다."
+  },
+  {
+   "code": "conn.assumption.j6_2_j6_a1_usl_manual",
+   "params": [],
+   "template": "J6.2: 아크 시임 용접에는 기준 식이 없어 볼트 식을 A1.2(c) 합리적 해석으로 사용 (제거 폭 = L + d, Usl = 0.9 + 0.1·(L+d)/s, Ω=3.00/φ=0.55). Manual IV-3 은 Usl=1.0, Ω=2.50 을 썼다 — 이 값이 더 작다(보수).",
+   "template_ko": "J6.2: 아크 시임 용접에는 기준 식이 없어 볼트 식을 A1.2(c) 합리적 해석으로 사용 (제거 폭 = L + d, Usl = 0.9 + 0.1·(L+d)/s, Ω=3.00/φ=0.55). Manual IV-3 은 Usl=1.0, Ω=2.50 을 썼다 — 이 값이 더 작다(보수).",
+   "text": "J6.2: 아크 시임 용접에는 기준 식이 없어 볼트 식을 A1.2(c) 합리적 해석으로 사용 (제거 폭 = L + d, Usl = 0.9 + 0.1·(L+d)/s, Ω=3.00/φ=0.55). Manual IV-3 은 Usl=1.0, Ω=2.50 을 썼다 — 이 값이 더 작다(보수).",
+   "text_ko": "J6.2: 아크 시임 용접에는 기준 식이 없어 볼트 식을 A1.2(c) 합리적 해석으로 사용 (제거 폭 = L + d, Usl = 0.9 + 0.1·(L+d)/s, Ω=3.00/φ=0.55). Manual IV-3 은 Usl=1.0, Ω=2.50 을 썼다 — 이 값이 더 작다(보수)."
+  },
+  {
+   "code": "conn.assumption.j6_2_j6_manual_iv_a1",
+   "params": [],
+   "template": "J6.2: 아크 스팟 용접에는 기준 식이 없어 Manual IV-2 처럼 볼트 식을 A1.2(c) 합리적 해석으로 사용(구멍=da, Ω=3.00/φ=0.55)",
+   "template_ko": "J6.2: 아크 스팟 용접에는 기준 식이 없어 Manual IV-2 처럼 볼트 식을 A1.2(c) 합리적 해석으로 사용(구멍=da, Ω=3.00/φ=0.55)",
+   "text": "J6.2: 아크 스팟 용접에는 기준 식이 없어 Manual IV-2 처럼 볼트 식을 A1.2(c) 합리적 해석으로 사용(구멍=da, Ω=3.00/φ=0.55)",
+   "text_ko": "J6.2: 아크 스팟 용접에는 기준 식이 없어 Manual IV-2 처럼 볼트 식을 A1.2(c) 합리적 해석으로 사용(구멍=da, Ω=3.00/φ=0.55)"
+  },
+  {
+   "code": "conn.assumption.j6_2_j6_member_case_tension",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "label",
+     "value": ""
+    }
+   ],
+   "template": "J6.2{label}: 호출자 진술 member_case=not_tension_member — 이 판은 접합력을 인장재로 받지 않으므로 순단면 인장파단(J6.2)을 적용하지 않음",
+   "template_ko": "J6.2{label}: 호출자 진술 member_case=not_tension_member — 이 판은 접합력을 인장재로 받지 않으므로 순단면 인장파단(J6.2)을 적용하지 않음",
+   "text": "J6.2: 호출자 진술 member_case=not_tension_member — 이 판은 접합력을 인장재로 받지 않으므로 순단면 인장파단(J6.2)을 적용하지 않음",
+   "text_ko": "J6.2: 호출자 진술 member_case=not_tension_member — 이 판은 접합력을 인장재로 받지 않으므로 순단면 인장파단(J6.2)을 적용하지 않음"
+  },
+  {
+   "code": "conn.assumption.j6_2_j6_member_case_tension_2",
+   "params": [],
+   "template": "J6.2: 호출자 진술 member_case=not_tension_member — 인장재가 아니므로 J6.2 를 적용하지 않음",
+   "template_ko": "J6.2: 호출자 진술 member_case=not_tension_member — 인장재가 아니므로 J6.2 를 적용하지 않음",
+   "text": "J6.2: 호출자 진술 member_case=not_tension_member — 인장재가 아니므로 J6.2 를 적용하지 않음",
+   "text_ko": "J6.2: 호출자 진술 member_case=not_tension_member — 인장재가 아니므로 J6.2 를 적용하지 않음"
+  },
+  {
+   "code": "conn.assumption.j6_3_not_applicable_stated",
+   "params": [],
+   "template": "J6.3: 호출자 진술 j6_3_not_applicable=True — 적용하지 않음",
+   "template_ko": "J6.3: 호출자 진술 j6_3_not_applicable=True — 적용하지 않음",
+   "text": "J6.3: 호출자 진술 j6_3_not_applicable=True — 적용하지 않음",
+   "text_ko": "J6.3: 호출자 진술 j6_3_not_applicable=True — 적용하지 않음"
+  },
+  {
+   "code": "conn.assumption.j6_3_not_applicable_stated_path",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "label",
+     "value": ""
+    }
+   ],
+   "template": "J6.3{label}: 호출자 진술 j6_3_not_applicable=True — 블록전단 경로 없음으로 보고 적용하지 않음",
+   "template_ko": "J6.3{label}: 호출자 진술 j6_3_not_applicable=True — 블록전단 경로 없음으로 보고 적용하지 않음",
+   "text": "J6.3: 호출자 진술 j6_3_not_applicable=True — 블록전단 경로 없음으로 보고 적용하지 않음",
+   "text_ko": "J6.3: 호출자 진술 j6_3_not_applicable=True — 블록전단 경로 없음으로 보고 적용하지 않음"
+  },
+  {
+   "code": "conn.assumption.j6_both_parts_checked",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "t",
+     "value": 0.06
+    }
+   ],
+   "template": "J6: 두 판을 각각 검토 (판 1 t={t}, 판 2 는 j6_part2)",
+   "template_ko": "J6: 두 판을 각각 검토 (판 1 t={t}, 판 2 는 j6_part2)",
+   "text": "J6: 두 판을 각각 검토 (판 1 t=0.06, 판 2 는 j6_part2)",
+   "text_ko": "J6: 두 판을 각각 검토 (판 1 t=0.06, 판 2 는 j6_part2)"
+  },
+  {
+   "code": "conn.assumption.j6_butt_joint_no_rupture_path",
+   "params": [],
+   "template": "J6: 버트 이음은 겹침이 없어 J6.1–J6.3 파단 경로가 해당하지 않음",
+   "template_ko": "J6: 버트 이음은 겹침이 없어 J6.1–J6.3 파단 경로가 해당하지 않음",
+   "text": "J6: 버트 이음은 겹침이 없어 J6.1–J6.3 파단 경로가 해당하지 않음",
+   "text_ko": "J6: 버트 이음은 겹침이 없어 J6.1–J6.3 파단 경로가 해당하지 않음"
+  },
+  {
+   "code": "conn.assumption.j6_j6_seam_orientation_manual",
+   "params": [],
+   "template": "J6: seam_orientation 미입력 — 시임 길이가 하중에 직각(Manual IV-3)이라고 봄",
+   "template_ko": "J6: seam_orientation 미입력 — 시임 길이가 하중에 직각(Manual IV-3)이라고 봄",
+   "text": "J6: seam_orientation 미입력 — 시임 길이가 하중에 직각(Manual IV-3)이라고 봄",
+   "text_ko": "J6: seam_orientation 미입력 — 시임 길이가 하중에 직각(Manual IV-3)이라고 봄"
+  },
+  {
+   "code": "conn.assumption.j6_multi_sheet_thinnest_j2_2",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "value",
+     "value": "[0.03, 0.03]"
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "t_j6",
+     "value": 0.03
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "t_sheet",
+     "value": 0.06
+    }
+   ],
+   "template": "J6: 여러 시트({value}) — 파단(J6.1–J6.3)은 가장 얇은 한 장 t={t_j6} 로 검토, 용접 전단·인장(J2.2.2.1, J2.2.3)은 합 t={t_sheet}",
+   "template_ko": "J6: 여러 시트({value}) — 파단(J6.1–J6.3)은 가장 얇은 한 장 t={t_j6} 로 검토, 용접 전단·인장(J2.2.2.1, J2.2.3)은 합 t={t_sheet}",
+   "text": "J6: 여러 시트([0.03, 0.03]) — 파단(J6.1–J6.3)은 가장 얇은 한 장 t=0.03 로 검토, 용접 전단·인장(J2.2.2.1, J2.2.3)은 합 t=0.06",
+   "text_ko": "J6: 여러 시트([0.03, 0.03]) — 파단(J6.1–J6.3)은 가장 얇은 한 장 t=0.03 로 검토, 용접 전단·인장(J2.2.2.1, J2.2.3)은 합 t=0.06"
+  },
+  {
+   "code": "conn.assumption.j6_one_part_checked",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "kind",
+     "value": ""
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "t",
+     "value": 0.06
+    }
+   ],
+   "template": "J6{kind}: 판 1(t={t}, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요",
+   "template_ko": "J6{kind}: 판 1(t={t}, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요",
+   "text": "J6: 판 1(t=0.06, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요",
+   "text_ko": "J6: 판 1(t=0.06, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요"
+  },
+  {
+   "code": "conn.assumption.tension_demand_not_given",
+   "params": [],
+   "template": "인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)",
+   "template_ko": "인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)",
+   "text": "인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)",
+   "text_ko": "인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)"
+  },
+  {
+   "code": "conn.reason.a1_2_dw_a1_pnov_bolt",
+   "params": [],
+   "template": "볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력",
+   "template_ko": "볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력",
+   "text": "볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력",
+   "text_ko": "볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력"
+  },
+  {
+   "code": "conn.reason.ag_width",
+   "params": [],
+   "template": "부재 총단면적 Ag 또는 폭 width 미입력",
+   "template_ko": "부재 총단면적 Ag 또는 폭 width 미입력",
+   "text": "부재 총단면적 Ag 또는 폭 width 미입력",
+   "text_ko": "부재 총단면적 Ag 또는 폭 width 미입력"
+  },
+  {
+   "code": "conn.reason.agv_bs_anv_bs",
+   "params": [],
+   "template": "Agv_bs/Anv_bs/Ant_bs 또는 j6_3_not_applicable=True 필요",
+   "template_ko": "Agv_bs/Anv_bs/Ant_bs 또는 j6_3_not_applicable=True 필요",
+   "text": "Agv_bs/Anv_bs/Ant_bs 또는 j6_3_not_applicable=True 필요",
+   "text_ko": "Agv_bs/Anv_bs/Ant_bs 또는 j6_3_not_applicable=True 필요"
+  },
+  {
+   "code": "conn.reason.agv_bs_anv_bs_2",
+   "params": [],
+   "template": "용접선 블록전단 면적 Agv_bs/Anv_bs/Ant_bs 미입력",
+   "template_ko": "용접선 블록전단 면적 Agv_bs/Anv_bs/Ant_bs 미입력",
+   "text": "용접선 블록전단 면적 Agv_bs/Anv_bs/Ant_bs 미입력",
+   "text_ko": "용접선 블록전단 면적 Agv_bs/Anv_bs/Ant_bs 미입력"
+  },
+  {
+   "code": "conn.reason.aisi_s100_ansi_aisc",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "t_min",
+     "unit_text": "in",
+     "value": 0.25
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "clause",
+     "value": "J3/J6"
+    }
+   ],
+   "template": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+   "template_ko": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+   "text": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용",
+   "text_ko": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용"
+  },
+  {
+   "code": "conn.reason.arc_seam_no_tension",
+   "params": [],
+   "template": "아크 시임 용접에는 인장 한계상태가 없음",
+   "template_ko": "아크 시임 용접에는 인장 한계상태가 없음",
+   "text": "아크 시임 용접에는 인장 한계상태가 없음",
+   "text_ko": "아크 시임 용접에는 인장 한계상태가 없음"
+  },
+  {
+   "code": "conn.reason.combined_check_not_implemented",
+   "params": [],
+   "template": "이 접합 유형의 조합 검토가 구현되지 않음",
+   "template_ko": "이 접합 유형의 조합 검토가 구현되지 않음",
+   "text": "이 접합 유형의 조합 검토가 구현되지 않음",
+   "text_ko": "이 접합 유형의 조합 검토가 구현되지 않음"
+  },
+  {
+   "code": "conn.reason.computed_from_assumed_input",
+   "params": [],
+   "template": "computed from an assumed input (e = 1.5d minimum or an estimated fastener strength) — reference only, not used for the verdict",
+   "template_ko": "가정한 입력(최소 e = 1.5d 또는 추정 패스너 강도)으로 계산 — 참고값이며 판정에 쓰지 않음",
+   "text": "computed from an assumed input (e = 1.5d minimum or an estimated fastener strength) — reference only, not used for the verdict",
+   "text_ko": "가정한 입력(최소 e = 1.5d 또는 추정 패스너 강도)으로 계산 — 참고값이며 판정에 쓰지 않음"
+  },
+  {
+   "code": "conn.reason.dw_not_given_2d_reference",
+   "params": [],
+   "template": "d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값",
+   "template_ko": "d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값",
+   "text": "d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값",
+   "text_ko": "d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값"
+  },
+  {
+   "code": "conn.reason.e_not_given",
+   "params": [],
+   "template": "e 미입력",
+   "template_ko": "e 미입력",
+   "text": "e 미입력",
+   "text_ko": "e 미입력"
+  },
+  {
+   "code": "conn.reason.edge_transverse_agv_bs",
+   "params": [],
+   "template": "단면당 패스너 1개 — 블록전단 경로는 나란한 연단까지 가므로 edge_transverse (패스너 선 → 연단 거리) 또는 Agv_bs/Anv_bs/Ant_bs 필요 (경로가 없으면 j6_3_not_applicable=True)",
+   "template_ko": "단면당 패스너 1개 — 블록전단 경로는 나란한 연단까지 가므로 edge_transverse (패스너 선 → 연단 거리) 또는 Agv_bs/Anv_bs/Ant_bs 필요 (경로가 없으면 j6_3_not_applicable=True)",
+   "text": "단면당 패스너 1개 — 블록전단 경로는 나란한 연단까지 가므로 edge_transverse (패스너 선 → 연단 거리) 또는 Agv_bs/Anv_bs/Ant_bs 필요 (경로가 없으면 j6_3_not_applicable=True)",
+   "text_ko": "단면당 패스너 1개 — 블록전단 경로는 나란한 연단까지 가므로 edge_transverse (패스너 선 → 연단 거리) 또는 Agv_bs/Anv_bs/Ant_bs 필요 (경로가 없으면 j6_3_not_applicable=True)"
+  },
+  {
+   "code": "conn.reason.end_distance_not_given",
+   "params": [],
+   "template": "끝단 거리 e 미입력",
+   "template_ko": "끝단 거리 e 미입력",
+   "text": "끝단 거리 e 미입력",
+   "text_ko": "끝단 거리 e 미입력"
+  },
+  {
+   "code": "conn.reason.fillet_no_out_of_plane_tension",
+   "params": [],
+   "template": "필릿 용접에는 면외 인장 한계상태가 없음",
+   "template_ko": "필릿 용접에는 면외 인장 한계상태가 없음",
+   "text": "필릿 용접에는 면외 인장 한계상태가 없음",
+   "text_ko": "필릿 용접에는 면외 인장 한계상태가 없음"
+  },
+  {
+   "code": "conn.reason.groove_no_out_of_plane_tension",
+   "params": [],
+   "template": "그루브 용접에는 면외 인장 한계상태가 없음",
+   "template_ko": "그루브 용접에는 면외 인장 한계상태가 없음",
+   "text": "그루브 용접에는 면외 인장 한계상태가 없음",
+   "text_ko": "그루브 용접에는 면외 인장 한계상태가 없음"
+  },
+  {
+   "code": "conn.reason.j2_2_2_1_de_j2_de",
+   "params": [
+    {
+     "fmt": ".4f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "de_used",
+     "unit_text": "in",
+     "value": 0.26
+    }
+   ],
+   "template": "de={de_used} < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
+   "template_ko": "de={de_used} < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
+   "text": "de=0.2600 in < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
+   "text_ko": "de=0.2600 in < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요"
+  },
+  {
+   "code": "conn.reason.j2_2_3_j2_joint",
+   "params": [],
+   "template": "J2.2.3 은 시트-지지재 접합에만 해당 (joint 미지정·시트-시트)",
+   "template_ko": "J2.2.3 은 시트-지지재 접합에만 해당 (joint 미지정·시트-시트)",
+   "text": "J2.2.3 은 시트-지지재 접합에만 해당 (joint 미지정·시트-시트)",
+   "text_ko": "J2.2.3 은 시트-지지재 접합에만 해당 (joint 미지정·시트-시트)"
+  },
+  {
+   "code": "conn.reason.j2_6_flare_v_transverse_no_equation",
+   "params": [],
+   "template": "J2.6(a) Eq. J2.6-1 은 플레어 베벨 전용 — 플레어 V 홈의 횡방향 하중 식은 기준에 없음 (시험 또는 A1.2 합리적 해석 필요)",
+   "template_ko": "J2.6(a) Eq. J2.6-1 은 플레어 베벨 전용 — 플레어 V 홈의 횡방향 하중 식은 기준에 없음 (시험 또는 A1.2 합리적 해석 필요)",
+   "text": "J2.6(a) Eq. J2.6-1 은 플레어 베벨 전용 — 플레어 V 홈의 횡방향 하중 식은 기준에 없음 (시험 또는 A1.2 합리적 해석 필요)",
+   "text_ko": "J2.6(a) Eq. J2.6-1 은 플레어 베벨 전용 — 플레어 V 홈의 횡방향 하중 식은 기준에 없음 (시험 또는 A1.2 합리적 해석 필요)"
+  },
+  {
+   "code": "conn.reason.j4_screw_diameter_out_of_range",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "d",
+     "unit_text": "in",
+     "value": 0.375
+    }
+   ],
+   "template": "나사 직경 d={d} 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖",
+   "template_ko": "나사 직경 d={d} 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖",
+   "text": "나사 직경 d=0.375 in 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖",
+   "text_ko": "나사 직경 d=0.375 in 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖"
+  },
+  {
+   "code": "conn.reason.j5_3_2_j5",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "lim",
+     "value": "t2=0.08 (≥1/8)"
+    }
+   ],
+   "template": "Eq. J5.3.2-1 적용한계 밖: {lim}",
+   "template_ko": "Eq. J5.3.2-1 적용한계 밖: {lim}",
+   "text": "Eq. J5.3.2-1 적용한계 밖: t2=0.08 (≥1/8)",
+   "text_ko": "Eq. J5.3.2-1 적용한계 밖: t2=0.08 (≥1/8)"
+  },
+  {
+   "code": "conn.reason.j5_3_3_j5",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "lim",
+     "value": "t2=0.08 (0.113–0.75)"
+    }
+   ],
+   "template": "Eq. J5.3.3-1 적용한계 밖: {lim}",
+   "template_ko": "Eq. J5.3.3-1 적용한계 밖: {lim}",
+   "text": "Eq. J5.3.3-1 적용한계 밖: t2=0.08 (0.113–0.75)",
+   "text_ko": "Eq. J5.3.3-1 적용한계 밖: t2=0.08 (0.113–0.75)"
+  },
+  {
+   "code": "conn.reason.j6_1_j6",
+   "params": [],
+   "template": "e 미입력 — J6.1 은 최소 1.5d 로 계산, 실제 끝단 거리 확인 필요",
+   "template_ko": "e 미입력 — J6.1 은 최소 1.5d 로 계산, 실제 끝단 거리 확인 필요",
+   "text": "e 미입력 — J6.1 은 최소 1.5d 로 계산, 실제 끝단 거리 확인 필요",
+   "text_ko": "e 미입력 — J6.1 은 최소 1.5d 로 계산, 실제 끝단 거리 확인 필요"
+  },
+  {
+   "code": "conn.reason.j6_2_member_case_flat_sheet",
+   "params": [],
+   "template": "member_case(flat_sheet / angle_welded / channel_welded / transverse_weld / all_elements) 미입력 — 앵글·채널 용접은 전단지연(J6.2) 검토 필요",
+   "template_ko": "member_case(flat_sheet / angle_welded / channel_welded / transverse_weld / all_elements) 미입력 — 앵글·채널 용접은 전단지연(J6.2) 검토 필요",
+   "text": "member_case(flat_sheet / angle_welded / channel_welded / transverse_weld / all_elements) 미입력 — 앵글·채널 용접은 전단지연(J6.2) 검토 필요",
+   "text_ko": "member_case(flat_sheet / angle_welded / channel_welded / transverse_weld / all_elements) 미입력 — 앵글·채널 용접은 전단지연(J6.2) 검토 필요"
+  },
+  {
+   "code": "conn.reason.member_case",
+   "params": [],
+   "template": "member_case 미입력",
+   "template_ko": "member_case 미입력",
+   "text": "member_case 미입력",
+   "text_ko": "member_case 미입력"
+  },
+  {
+   "code": "conn.reason.member_tension_true_ag",
+   "params": [],
+   "template": "member_tension=True 인데 Ag 또는 width 미입력",
+   "template_ko": "member_tension=True 인데 Ag 또는 width 미입력",
+   "text": "member_tension=True 인데 Ag 또는 width 미입력",
+   "text_ko": "member_tension=True 인데 Ag 또는 width 미입력"
+  },
+  {
+   "code": "conn.reason.no_demand_on_connection",
+   "params": [
+    {
+     "fmt": "",
+     "notice": {
+      "code": "conn.fragment.axial_tension",
+      "kind": "fragment",
+      "params": [],
+      "template": "axial tension",
+      "template_ko": "축방향 인장",
+      "text": "axial tension",
+      "text_ko": "축방향 인장"
+     },
+     "quantity": null,
+     "symbol": "text",
+     "value": "axial tension"
+    }
+   ],
+   "template": "no {text} demand on the connection",
+   "template_ko": "접합부에 {text} 소요강도 없음",
+   "text": "no axial tension demand on the connection",
+   "text_ko": "접합부에 축방향 인장 소요강도 없음"
+  },
+  {
+   "code": "conn.reason.no_required_strength_given",
+   "params": [],
+   "template": "no required strength given (Vu = Tu = 0)",
+   "template_ko": "소요강도 미입력 (Vu = Tu = 0)",
+   "text": "no required strength given (Vu = Tu = 0)",
+   "text_ko": "소요강도 미입력 (Vu = Tu = 0)"
+  },
+  {
+   "code": "conn.reason.no_verified_shear_limit_state",
+   "params": [],
+   "template": "가정값 없이 평가된 전단 한계상태 없음",
+   "template_ko": "가정값 없이 평가된 전단 한계상태 없음",
+   "text": "가정값 없이 평가된 전단 한계상태 없음",
+   "text_ko": "가정값 없이 평가된 전단 한계상태 없음"
+  },
+  {
+   "code": "conn.reason.outside_equation_limits",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "clause",
+     "value": "J4.5.1"
+    },
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "lim",
+     "value": "t1=0.0236 (0.0285–0.0445)"
+    }
+   ],
+   "template": "Eq. {clause}-1 적용한계 밖: {lim}",
+   "template_ko": "Eq. {clause}-1 적용한계 밖: {lim}",
+   "text": "Eq. J4.5.1-1 적용한계 밖: t1=0.0236 (0.0285–0.0445)",
+   "text_ko": "Eq. J4.5.1-1 적용한계 밖: t1=0.0236 (0.0285–0.0445)"
+  },
+  {
+   "code": "conn.reason.outside_scope_computed_value",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "key",
+     "value": "J3/J6"
+    },
+    {
+     "fmt": "",
+     "notice": {
+      "code": "conn.reason.aisi_s100_ansi_aisc",
+      "kind": "reason",
+      "params": [
+       {
+        "fmt": "",
+        "quantity": "length",
+        "sep": " ",
+        "symbol": "t_min",
+        "unit_text": "in",
+        "value": 0.25
+       },
+       {
+        "fmt": "",
+        "quantity": null,
+        "symbol": "clause",
+        "value": "J3/J6"
+       }
+      ],
+      "template": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+      "template_ko": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+      "text": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용",
+      "text_ko": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용"
+     },
+     "quantity": null,
+     "symbol": "reason",
+     "value": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용"
+    }
+   ],
+   "template": "outside the scope of §{key}: {reason} — computed value is a reference only, not used for the verdict",
+   "template_ko": "§{key} 적용범위 밖: {reason} — 계산값은 참고값이며 판정에 쓰지 않음",
+   "text": "outside the scope of §J3/J6: 가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용 — computed value is a reference only, not used for the verdict",
+   "text_ko": "§J3/J6 적용범위 밖: 가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용 — 계산값은 참고값이며 판정에 쓰지 않음"
+  },
+  {
+   "code": "conn.reason.pnts_not_given",
+   "params": [],
+   "template": "Pnts(제조사·독립시험 나사 인장강도) 미입력",
+   "template_ko": "Pnts(제조사·독립시험 나사 인장강도) 미입력",
+   "text": "Pnts(제조사·독립시험 나사 인장강도) 미입력",
+   "text_ko": "Pnts(제조사·독립시험 나사 인장강도) 미입력"
+  },
+  {
+   "code": "conn.reason.pnvs_fub_as",
+   "params": [],
+   "template": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+   "template_ko": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+   "text": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+   "text_ko": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+  },
+  {
+   "code": "conn.reason.relevant_given_demand_direction",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "conn.reason.fillet_no_out_of_plane_tension",
+        "kind": "reason",
+        "params": [],
+        "prefix": "면외 인장: ",
+        "prefix_ko": "면외 인장: ",
+        "template": "필릿 용접에는 면외 인장 한계상태가 없음",
+        "template_ko": "필릿 용접에는 면외 인장 한계상태가 없음",
+        "text": "면외 인장: 필릿 용접에는 면외 인장 한계상태가 없음",
+        "text_ko": "면외 인장: 필릿 용접에는 면외 인장 한계상태가 없음"
+       }
+      ],
+      "sep": "; ",
+      "text": "면외 인장: 필릿 용접에는 면외 인장 한계상태가 없음",
+      "text_ko": "면외 인장: 필릿 용접에는 면외 인장 한계상태가 없음"
+     },
+     "quantity": null,
+     "symbol": "reason",
+     "value": "면외 인장: 필릿 용접에는 면외 인장 한계상태가 없음"
+    }
+   ],
+   "template": "{reason} — not relevant to the given demand direction(s)",
+   "template_ko": "{reason} — 주어진 소요 방향과 관계없음",
+   "text": "면외 인장: 필릿 용접에는 면외 인장 한계상태가 없음 — not relevant to the given demand direction(s)",
+   "text_ko": "면외 인장: 필릿 용접에는 면외 인장 한계상태가 없음 — 주어진 소요 방향과 관계없음"
+  },
+  {
+   "code": "conn.reason.table_j3_3_1_1_j3",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "t_min",
+     "value": 0.25
+    }
+   ],
+   "template": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t={t_min} — 시험 필요",
+   "template_ko": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t={t_min} — 시험 필요",
+   "text": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t=0.25 — 시험 필요",
+   "text_ko": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t=0.25 — 시험 필요"
+  },
+  {
+   "code": "conn.reason.table_j6_2_1_member_case_j6_flat",
+   "params": [],
+   "template": "member_case(Table J6.2-1 분류: flat_sheet, angle_bolted, channel_bolted, …) 또는 Usl 미입력 — 앵글·채널이면 평판식은 비보수",
+   "template_ko": "member_case(Table J6.2-1 분류: flat_sheet, angle_bolted, channel_bolted, …) 또는 Usl 미입력 — 앵글·채널이면 평판식은 비보수",
+   "text": "member_case(Table J6.2-1 분류: flat_sheet, angle_bolted, channel_bolted, …) 또는 Usl 미입력 — 앵글·채널이면 평판식은 비보수",
+   "text_ko": "member_case(Table J6.2-1 분류: flat_sheet, angle_bolted, channel_bolted, …) 또는 Usl 미입력 — 앵글·채널이면 평판식은 비보수"
+  },
+  {
+   "code": "conn.reason.te_not_given",
+   "params": [],
+   "template": "유효 목두께 te 미입력 — 0.5·t 는 참고값(기준 근거 없음)",
+   "template_ko": "유효 목두께 te 미입력 — 0.5·t 는 참고값(기준 근거 없음)",
+   "text": "유효 목두께 te 미입력 — 0.5·t 는 참고값(기준 근거 없음)",
+   "text_ko": "유효 목두께 te 미입력 — 0.5·t 는 참고값(기준 근거 없음)"
+  },
+  {
+   "code": "conn.warning.app_a_j3_bolt_grade_fub",
+   "params": [],
+   "template": "App. A Table J3.4-1: bolt_grade·Fub 미입력 — 승인 볼트 중 최저인 A307 값 사용",
+   "template_ko": "App. A Table J3.4-1: bolt_grade·Fub 미입력 — 승인 볼트 중 최저인 A307 값 사용",
+   "text": "App. A Table J3.4-1: bolt_grade·Fub 미입력 — 승인 볼트 중 최저인 A307 값 사용",
+   "text_ko": "App. A Table J3.4-1: bolt_grade·Fub 미입력 — 승인 볼트 중 최저인 A307 값 사용"
+  },
+  {
+   "code": "conn.warning.j2_2_3_j2_de",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "de",
+     "value": 0.375
+    }
+   ],
+   "template": "J2.2.3: 유효직경 de={de} 입력 — 시공 절차로 꾸준히 확보됨을 측정으로 보인 경우에만",
+   "template_ko": "J2.2.3: 유효직경 de={de} 입력 — 시공 절차로 꾸준히 확보됨을 측정으로 보인 경우에만",
+   "text": "J2.2.3: 유효직경 de=0.375 입력 — 시공 절차로 꾸준히 확보됨을 측정으로 보인 경우에만",
+   "text_ko": "J2.2.3: 유효직경 de=0.375 입력 — 시공 절차로 꾸준히 확보됨을 측정으로 보인 경우에만"
+  },
+  {
+   "code": "conn.warning.j2_5_j2_w1_t1_fig",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "t1",
+     "value": 0.06
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "w1",
+     "value": 0.105
+    }
+   ],
+   "template": "J2.5: 겹침이음에서 w1 ≤ t1 (Fig. J2.5-1) — 목두께 계산에 w1 = t1 = {t1} 사용 (입력 w1={w1})",
+   "template_ko": "J2.5: 겹침이음에서 w1 ≤ t1 (Fig. J2.5-1) — 목두께 계산에 w1 = t1 = {t1} 사용 (입력 w1={w1})",
+   "text": "J2.5: 겹침이음에서 w1 ≤ t1 (Fig. J2.5-1) — 목두께 계산에 w1 = t1 = 0.06 사용 (입력 w1=0.105)",
+   "text_ko": "J2.5: 겹침이음에서 w1 ≤ t1 (Fig. J2.5-1) — 목두께 계산에 w1 = t1 = 0.06 사용 (입력 w1=0.105)"
+  },
+  {
+   "code": "conn.warning.j5_3_2_j5_ds_manual_iv",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "d",
+     "value": 0.18
+    }
+   ],
+   "template": "J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급",
+   "template_ko": "J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급",
+   "text": "J5.3.2: ds=0.18 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급",
+   "text_ko": "J5.3.2: ds=0.18 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급"
+  },
+  {
+   "code": "conn.warning.limit_state_not_evaluated",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "name",
+     "value": "면외 인장"
+    },
+    {
+     "fmt": "",
+     "notice": {
+      "code": "conn.reason.fillet_no_out_of_plane_tension",
+      "kind": "reason",
+      "params": [],
+      "template": "필릿 용접에는 면외 인장 한계상태가 없음",
+      "template_ko": "필릿 용접에는 면외 인장 한계상태가 없음",
+      "text": "필릿 용접에는 면외 인장 한계상태가 없음",
+      "text_ko": "필릿 용접에는 면외 인장 한계상태가 없음"
+     },
+     "quantity": null,
+     "symbol": "reason",
+     "value": "필릿 용접에는 면외 인장 한계상태가 없음"
+    }
+   ],
+   "template": "{name} 미평가: {reason}",
+   "template_ko": "{name} 미평가: {reason}",
+   "text": "면외 인장 미평가: 필릿 용접에는 면외 인장 한계상태가 없음",
+   "text_ko": "면외 인장 미평가: 필릿 용접에는 면외 인장 한계상태가 없음"
+  },
+  {
+   "code": "conn.warning.table_j3_3_1_2_j3_mf",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "dimensionless",
+     "symbol": "mf",
+     "value": 0.75
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "mf_note",
+     "value": "단전단/이중전단 바깥 판, 표준공, 와셔 없음 또는 한쪽(와셔·전단면 미지정 시 최소값)"
+    }
+   ],
+   "template": "Table J3.3.1-2 mf={mf} ({mf_note})",
+   "template_ko": "Table J3.3.1-2 mf={mf} ({mf_note})",
+   "text": "Table J3.3.1-2 mf=0.75 (단전단/이중전단 바깥 판, 표준공, 와셔 없음 또는 한쪽(와셔·전단면 미지정 시 최소값))",
+   "text_ko": "Table J3.3.1-2 mf=0.75 (단전단/이중전단 바깥 판, 표준공, 와셔 없음 또는 한쪽(와셔·전단면 미지정 시 최소값))"
+  },
+  {
+   "code": "lap.assumption.j6_3_j6_lap_fastener_group",
+   "params": [],
+   "template": "J6.3 (lap fastener group): lower bound with the tension plane ignored (Ant = 0) — Pnr = min(0.6 Fy Agv, 0.6 Fu Anv); conservative, since the Ubs Fu Ant term of Eq. J6.3-1/-2 is never negative.",
+   "template_ko": "J6.3 (랩 패스너 무리): 장력면을 무시한 하한(Ant = 0) — Pnr = min(0.6 Fy Agv, 0.6 Fu Anv). Eq. J6.3-1/-2 의 Ubs Fu Ant 항은 음이 아니므로 보수측.",
+   "text": "J6.3 (lap fastener group): lower bound with the tension plane ignored (Ant = 0) — Pnr = min(0.6 Fy Agv, 0.6 Fu Anv); conservative, since the Ubs Fu Ant term of Eq. J6.3-1/-2 is never negative.",
+   "text_ko": "J6.3 (랩 패스너 무리): 장력면을 무시한 하한(Ant = 0) — Pnr = min(0.6 Fy Agv, 0.6 Fu Anv). Eq. J6.3-1/-2 의 Ubs Fu Ant 항은 음이 아니므로 보수측."
+  },
+  {
+   "code": "lap.reason.fastener_strength_verified",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "conn.reason.pnvs_fub_as",
+        "kind": "reason",
+        "params": [],
+        "prefix": "Screw Shear (J4.3.2) — ",
+        "prefix_ko": "나사 전단 (J4.3.2) — ",
+        "template": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+        "template_ko": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+        "text": "Screw Shear (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+        "text_ko": "나사 전단 (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+       }
+      ],
+      "sep": "; ",
+      "text": "Screw Shear (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+      "text_ko": "나사 전단 (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+     },
+     "quantity": null,
+     "symbol": "items",
+     "value": "Screw Shear (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+    }
+   ],
+   "template": "fastener strength not verified: {items}",
+   "template_ko": "패스너 강도 미확정: {items}",
+   "text": "fastener strength not verified: Screw Shear (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+   "text_ko": "패스너 강도 미확정: 나사 전단 (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+  },
+  {
+   "code": "lap.reason.j6_j6_screw_connections_rupture",
+   "params": [],
+   "template": "J6: for screw connections the rupture strength is the lesser of J6.1 and J6.2 — J6.3 block shear applies to welded and bolted connections only",
+   "template_ko": "J6: 나사 접합의 파단강도는 J6.1 과 J6.2 의 작은 값 — J6.3 블록전단은 용접 · 볼트 접합에만 해당",
+   "text": "J6: for screw connections the rupture strength is the lesser of J6.1 and J6.2 — J6.3 block shear applies to welded and bolted connections only",
+   "text_ko": "J6: 나사 접합의 파단강도는 J6.1 과 J6.2 의 작은 값 — J6.3 블록전단은 용접 · 볼트 접합에만 해당"
+  },
+  {
+   "code": "lap.reason.lap_flexure_evaluated_no",
+   "params": [],
+   "template": "lap flexure not evaluated (no Se)",
+   "template_ko": "랩 구간 휨 미평가 (Se 없음)",
+   "text": "lap flexure not evaluated (no Se)",
+   "text_ko": "랩 구간 휨 미평가 (Se 없음)"
+  },
+  {
+   "code": "lap.reason.lap_flexure_mn_se",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "manual_quote",
+     "value": "AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\")"
+    }
+   ],
+   "template": "lap flexure Mnℓ = Se Fy (Fn = Fy, no lateral-torsional buckling) rests on the Manual assumption — restraint not stated. Give lap_restrained = true to apply it ({manual_quote}).",
+   "template_ko": "랩 휨 Mnℓ = Se Fy (Fn = Fy, 횡비틀림좌굴 없음)는 Manual 의 가정에 선다 — 구속을 밝히지 않음. 그 가정을 쓰려면 lap_restrained = true 를 주십시오 ({manual_quote}).",
+   "text": "lap flexure Mnℓ = Se Fy (Fn = Fy, no lateral-torsional buckling) rests on the Manual assumption — restraint not stated. Give lap_restrained = true to apply it (AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\")).",
+   "text_ko": "랩 휨 Mnℓ = Se Fy (Fn = Fy, 횡비틀림좌굴 없음)는 Manual 의 가정에 선다 — 구속을 밝히지 않음. 그 가정을 쓰려면 lap_restrained = true 를 주십시오 (AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\"))."
+  },
+  {
+   "code": "lap.reason.se_effective_section_modulus",
+   "params": [],
+   "template": "Se (effective section modulus) not given",
+   "template_ko": "Se (유효 단면계수) 미입력",
+   "text": "Se (effective section modulus) not given",
+   "text_ko": "Se (유효 단면계수) 미입력"
+  },
+  {
+   "code": "lap.scope.j6_3_j6_block_shear_lap",
+   "params": [],
+   "template": "J6.3 block shear of the lap fastener group is evaluated as a lower bound: the two shear planes along the outer fastener rows, from the member end over the fastener group (length e + (m − 1) s), with the tension plane between the rows ignored (Ant = 0) — the row gauge and the distance to the web edge are not inputs. Refine with the full Eq. J6.3-1/-2 when those dimensions are given. Bolts only: for screw connections J6 takes Rn from J6.1 and J6.2 (J6.3 does not apply).",
+   "template_ko": "J6.3 랩 패스너 무리의 블록전단은 하한으로 평가합니다: 바깥 패스너 열을 따라 부재 끝에서 패스너 무리까지(길이 e + (m − 1) s)의 두 전단면, 열 사이의 장력면은 무시(Ant = 0) — 열 간격과 웹 연단까지의 거리는 입력이 아닙니다. 그 치수를 주면 Eq. J6.3-1/-2 전체로 다듬으십시오. 볼트만: 나사 접합은 J6 이 Rn 을 J6.1 과 J6.2 에서 정합니다(J6.3 해당 없음).",
+   "text": "J6.3 block shear of the lap fastener group is evaluated as a lower bound: the two shear planes along the outer fastener rows, from the member end over the fastener group (length e + (m − 1) s), with the tension plane between the rows ignored (Ant = 0) — the row gauge and the distance to the web edge are not inputs. Refine with the full Eq. J6.3-1/-2 when those dimensions are given. Bolts only: for screw connections J6 takes Rn from J6.1 and J6.2 (J6.3 does not apply).",
+   "text_ko": "J6.3 랩 패스너 무리의 블록전단은 하한으로 평가합니다: 바깥 패스너 열을 따라 부재 끝에서 패스너 무리까지(길이 e + (m − 1) s)의 두 전단면, 열 사이의 장력면은 무시(Ant = 0) — 열 간격과 웹 연단까지의 거리는 입력이 아닙니다. 그 치수를 주면 Eq. J6.3-1/-2 전체로 다듬으십시오. 볼트만: 나사 접합은 J6 이 Rn 을 J6.1 과 J6.2 에서 정합니다(J6.3 해당 없음)."
+  },
+  {
+   "code": "lap.warning.a1_2_lap_step_a1_force",
+   "params": [],
+   "template": "Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요.",
+   "template_ko": "Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요.",
+   "text": "Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요.",
+   "text_ko": "Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요."
+  },
+  {
+   "code": "lap.warning.detail_fails",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "name",
+     "value": "끝단 거리 e ≥ 1.5d (J3.2)"
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "provided",
+     "value": 0.5
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "symbol": "required",
+     "value": 0.75
+    }
+   ],
+   "template": "상세 불합격: {name} (입력 {provided} < 요구 {required})",
+   "template_ko": "상세 불합격: {name} (입력 {provided} < 요구 {required})",
+   "text": "상세 불합격: 끝단 거리 e ≥ 1.5d (J3.2) (입력 0.5 < 요구 0.75)",
+   "text_ko": "상세 불합격: 끝단 거리 e ≥ 1.5d (J3.2) (입력 0.5 < 요구 0.75)"
+  },
+  {
+   "code": "lap.warning.f4_f4_mnd_mcrd_lap",
+   "params": [],
+   "template": "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정하지 않습니다. Mnd 를 입력하거나, 겹친 부분이 구속되면(Manual II-1A / II-2A) lap_restrained = true 를 주세요.",
+   "template_ko": "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정하지 않습니다. Mnd 를 입력하거나, 겹친 부분이 구속되면(Manual II-1A / II-2A) lap_restrained = true 를 주세요.",
+   "text": "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정하지 않습니다. Mnd 를 입력하거나, 겹친 부분이 구속되면(Manual II-1A / II-2A) lap_restrained = true 를 주세요.",
+   "text_ko": "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정하지 않습니다. Mnd 를 입력하거나, 겹친 부분이 구속되면(Manual II-1A / II-2A) lap_restrained = true 를 주세요."
+  },
+  {
+   "code": "lap.warning.fastener_strength_unsettled",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "name",
+     "value": "Screw Shear (J4.3.2)"
+    },
+    {
+     "fmt": "",
+     "notice": {
+      "code": "conn.reason.pnvs_fub_as",
+      "kind": "reason",
+      "params": [],
+      "template": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+      "template_ko": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+      "text": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+      "text_ko": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+     },
+     "quantity": null,
+     "symbol": "reason",
+     "value": "Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+    }
+   ],
+   "template": "패스너 강도 미확정: {name} — {reason}",
+   "template_ko": "패스너 강도 미확정: {name} — {reason}",
+   "text": "패스너 강도 미확정: Screw Shear (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값",
+   "text_ko": "패스너 강도 미확정: Screw Shear (J4.3.2) — Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값"
+  },
+  {
+   "code": "lap.warning.fasteners_do_not_fit",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "count",
+     "symbol": "n_total",
+     "value": 22
+    },
+    {
+     "fmt": "",
+     "quantity": "count",
+     "symbol": "n_max_total",
+     "value": 16
+    }
+   ],
+   "template": "필요 패스너 {n_total} ea > Lap 내 최대 배치 {n_max_total} ea — Lap 길이를 늘리거나 패스너 사양을 변경하세요.",
+   "template_ko": "필요 패스너 {n_total} ea > Lap 내 최대 배치 {n_max_total} ea — Lap 길이를 늘리거나 패스너 사양을 변경하세요.",
+   "text": "필요 패스너 22 ea > Lap 내 최대 배치 16 ea — Lap 길이를 늘리거나 패스너 사양을 변경하세요.",
+   "text_ko": "필요 패스너 22 ea > Lap 내 최대 배치 16 ea — Lap 길이를 늘리거나 패스너 사양을 변경하세요."
+  },
+  {
+   "code": "lap.warning.h2_lap_h2",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "dimensionless",
+     "symbol": "mv_term",
+     "value": 4.080060318125868
+    }
+   ],
+   "template": "Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term} > 1.0.",
+   "template_ko": "Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = {mv_term} > 1.0.",
+   "text": "Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = 4.08 > 1.0.",
+   "text_ko": "Lap 지점부 휨-전단 상호작용(§H2) 초과: 상호작용값 = 4.08 > 1.0."
+  },
+  {
+   "code": "lap.warning.i6_2_1_lap_i6_i6_j3",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "actual",
+     "unit_text": "in",
+     "value": 10
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "min_lap",
+     "unit_text": "in",
+     "value": 12.0
+    }
+   ],
+   "template": "Lap {actual} < 1.5d = {min_lap} (§I6.2.1(g)) — R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족",
+   "template_ko": "Lap {actual} < 1.5d = {min_lap} (§I6.2.1(g)) — R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족",
+   "text": "Lap 10.00 in < 1.5d = 12.00 in (§I6.2.1(g)) — R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족",
+   "text_ko": "Lap 10.00 in < 1.5d = 12.00 in (§I6.2.1(g)) — R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족"
+  },
+  {
+   "code": "lap.warning.i6_2_1_lap_i6_j3",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "lap_each",
+     "unit_text": "in",
+     "value": 10
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "min_lap",
+     "unit_text": "in",
+     "value": 12.0
+    }
+   ],
+   "template": "Lap {lap_each} < 1.5d = {min_lap} — §I6.2.1 R 계수법과 §J3 겹친 Z 부재의 과대·슬롯 구멍 예외를 쓸 수 없음 (접합 강도 판정에는 넣지 않음)",
+   "template_ko": "Lap {lap_each} < 1.5d = {min_lap} — §I6.2.1 R 계수법과 §J3 겹친 Z 부재의 과대·슬롯 구멍 예외를 쓸 수 없음 (접합 강도 판정에는 넣지 않음)",
+   "text": "Lap 10.00 in < 1.5d = 12.00 in — §I6.2.1 R 계수법과 §J3 겹친 Z 부재의 과대·슬롯 구멍 예외를 쓸 수 없음 (접합 강도 판정에는 넣지 않음)",
+   "text_ko": "Lap 10.00 in < 1.5d = 12.00 in — §I6.2.1 R 계수법과 §J3 겹친 Z 부재의 과대·슬롯 구멍 예외를 쓸 수 없음 (접합 강도 판정에는 넣지 않음)"
+  },
+  {
+   "code": "lap.warning.j3_2_j3_j4",
+   "params": [
+    {
+     "fmt": ".3f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "edge_user",
+     "unit_text": "in",
+     "value": 0.5
+    },
+    {
+     "fmt": ".3f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "edge_min",
+     "unit_text": "in",
+     "value": 0.75
+    }
+   ],
+   "template": "입력 단부거리 {edge_user} < 최소 1.5d = {edge_min} — §J3.2/§J4.2 불합격 (값은 그대로 사용).",
+   "template_ko": "입력 단부거리 {edge_user} < 최소 1.5d = {edge_min} — §J3.2/§J4.2 불합격 (값은 그대로 사용).",
+   "text": "입력 단부거리 0.500 in < 최소 1.5d = 0.750 in — §J3.2/§J4.2 불합격 (값은 그대로 사용).",
+   "text_ko": "입력 단부거리 0.500 in < 최소 1.5d = 0.750 in — §J3.2/§J4.2 불합격 (값은 그대로 사용)."
+  },
+  {
+   "code": "lap.warning.j6_1_end_distance_j6",
+   "params": [
+    {
+     "fmt": ".3f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "edge_min",
+     "unit_text": "in",
+     "value": 0.75
+    }
+   ],
+   "template": "end_distance 미입력 — 최소 1.5d = {edge_min} 로 배치를 제안하고 §J6.1 을 그 값으로 평가 (시공 상세가 이 끝단 거리를 지켜야 함)",
+   "template_ko": "end_distance 미입력 — 최소 1.5d = {edge_min} 로 배치를 제안하고 §J6.1 을 그 값으로 평가 (시공 상세가 이 끝단 거리를 지켜야 함)",
+   "text": "end_distance 미입력 — 최소 1.5d = 0.750 in 로 배치를 제안하고 §J6.1 을 그 값으로 평가 (시공 상세가 이 끝단 거리를 지켜야 함)",
+   "text_ko": "end_distance 미입력 — 최소 1.5d = 0.750 in 로 배치를 제안하고 §J6.1 을 그 값으로 평가 (시공 상세가 이 끝단 거리를 지켜야 함)"
+  },
+  {
+   "code": "lap.warning.j6_3_lap_j6",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "dimensionless",
+     "symbol": "ratio_bs",
+     "value": 1.0467964054571033
+    }
+   ],
+   "template": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0",
+   "template_ko": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0",
+   "text": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: 1.05 > 1.0",
+   "text_ko": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: 1.05 > 1.0"
+  },
+  {
+   "code": "lap.warning.lap_mn_se_fy",
+   "params": [],
+   "template": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
+   "template_ko": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
+   "text": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
+   "text_ko": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다."
+  },
+  {
+   "code": "lap.warning.lap_mu_mn_dcr",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "sep": " ",
+     "symbol": "Mu",
+     "unit_text": "kip-in",
+     "value": 120
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "text",
+     "value": "φ"
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "sep": " ",
+     "symbol": "phi_Mn_lap",
+     "unit_text": "kip-in",
+     "value": 297.0
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "dimensionless",
+     "symbol": "flexure_dcr",
+     "value": 0.40404040404040403
+    }
+   ],
+   "template": "Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn = {phi_Mn_lap} (DCR = {flexure_dcr})",
+   "template_ko": "Lap 구간 휨강도 부족: Mu = {Mu} > {text}Mn = {phi_Mn_lap} (DCR = {flexure_dcr})",
+   "text": "Lap 구간 휨강도 부족: Mu = 120.00 kip-in > φMn = 297.00 kip-in (DCR = 0.40)",
+   "text_ko": "Lap 구간 휨강도 부족: Mu = 120.00 kip-in > φMn = 297.00 kip-in (DCR = 0.40)"
+  },
+  {
+   "code": "lap.warning.se_lap",
+   "params": [],
+   "template": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
+   "template_ko": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
+   "text": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
+   "text_ko": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요."
+  },
+  {
+   "code": "lap.warning.sf_only_reference",
+   "params": [],
+   "template": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
+   "template_ko": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
+   "text": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
+   "text_ko": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요."
+  },
+  {
+   "code": "lap.warning.transfer_capacity_dcr",
+   "params": [
+    {
+     "fmt": ".3f",
+     "quantity": "force",
+     "sep": " ",
+     "symbol": "V_transfer",
+     "unit_text": "kips",
+     "value": 15.11144692104269
+    },
+    {
+     "fmt": ".3f",
+     "quantity": "force",
+     "sep": " ",
+     "symbol": "capacity",
+     "unit_text": "kips",
+     "value": 11.2749
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "dimensionless",
+     "symbol": "utilization",
+     "value": 1.340273254844184
+    }
+   ],
+   "template": "용량 부족: V_transfer = {V_transfer} > Capacity = {capacity} (DCR = {utilization}). 패스너 수 또는 사양을 변경하세요.",
+   "template_ko": "용량 부족: V_transfer = {V_transfer} > Capacity = {capacity} (DCR = {utilization}). 패스너 수 또는 사양을 변경하세요.",
+   "text": "용량 부족: V_transfer = 15.111 kips > Capacity = 11.275 kips (DCR = 1.34). 패스너 수 또는 사양을 변경하세요.",
+   "text_ko": "용량 부족: V_transfer = 15.111 kips > Capacity = 11.275 kips (DCR = 1.34). 패스너 수 또는 사양을 변경하세요."
+  },
+  {
+   "code": "loads.assumption.appendix_analytical_compression_fcrd",
+   "params": [],
+   "template": "Appendix 2 analytical compression Fcrd for Z-sections exceeded the FSM distortional minimum by 18-31 % in this tool checks (8ZS2.25x059, lip 90/50 deg); prefer the FSM value where it is available.",
+   "template_ko": "Z 단면의 Appendix 2 해석식 압축 Fcrd 가 이 도구의 검토(8ZS2.25x059, 립 90/50도)에서 FSM 뒤틀림 극소보다 18-31 % 컸습니다 — FSM 값이 있으면 그것을 쓰십시오.",
+   "text": "Appendix 2 analytical compression Fcrd for Z-sections exceeded the FSM distortional minimum by 18-31 % in this tool checks (8ZS2.25x059, lip 90/50 deg); prefer the FSM value where it is available.",
+   "text_ko": "Z 단면의 Appendix 2 해석식 압축 Fcrd 가 이 도구의 검토(8ZS2.25x059, 립 90/50도)에서 FSM 뒤틀림 극소보다 18-31 % 컸습니다 — FSM 값이 있으면 그것을 쓰십시오."
+  },
+  {
+   "code": "loads.assumption.bottom_flange_segments_inside",
+   "params": [],
+   "template": "Bottom-flange segments inside laps are reported in lap_regions (two members; Design Manual assumptions c-d) and are not part of negative_regions.",
+   "template_ko": "랩 안의 하부 플랜지 구간은 lap_regions 에 냄(두 부재; Design Manual 가정 c-d) — negative_regions 에는 넣지 않음.",
+   "text": "Bottom-flange segments inside laps are reported in lap_regions (two members; Design Manual assumptions c-d) and are not part of negative_regions.",
+   "text_ko": "랩 안의 하부 플랜지 구간은 lap_regions 에 냄(두 부재; Design Manual 가정 c-d) — negative_regions 에는 넣지 않음."
+  },
+  {
+   "code": "loads.assumption.fastener_taken_at_mid",
+   "params": [],
+   "template": "Fastener taken at mid-width of the flange (b = c = B/2) for kphi.",
+   "template_ko": "kphi 계산에서 패스너는 플랜지 폭 가운데(b = c = B/2)로 봄.",
+   "text": "Fastener taken at mid-width of the flange (b = c = B/2) for kphi.",
+   "text_ko": "kphi 계산에서 패스너는 플랜지 폭 가운데(b = c = B/2)로 봄."
+  },
+  {
+   "code": "loads.assumption.i6_2_1_i6_conditions_confirmed_user",
+   "params": [],
+   "template": "I6.2.1 conditions (i)-(n) confirmed by the user.",
+   "template_ko": "I6.2.1 조건 (i)-(n) 은 사용자가 확인함.",
+   "text": "I6.2.1 conditions (i)-(n) confirmed by the user.",
+   "text_ko": "I6.2.1 조건 (i)-(n) 은 사용자가 확인함."
+  },
+  {
+   "code": "loads.assumption.inflection_points_taken_as",
+   "params": [],
+   "template": "Inflection points taken as brace points of the bottom flange (top flange continuously attached to a through-fastened deck; Design Manual Examples II-1A/II-2A).",
+   "template_ko": "변곡점을 하부 플랜지의 가새점으로 봄 (상부 플랜지가 관통 체결 데크에 연속 부착; Design Manual Examples II-1A/II-2A).",
+   "text": "Inflection points taken as brace points of the bottom flange (top flange continuously attached to a through-fastened deck; Design Manual Examples II-1A/II-2A).",
+   "text_ko": "변곡점을 하부 플랜지의 가새점으로 봄 (상부 플랜지가 관통 체결 데크에 연속 부착; Design Manual Examples II-1A/II-2A)."
+  },
+  {
+   "code": "loads.assumption.kx_fastener_shear_strength",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "defaulted",
+     "value": "Fss_kip, D_screw_in, Fu1_ksi"
+    }
+   ],
+   "template": "kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used ({defaulted}).",
+   "template_ko": "kx: 패스너 전단강도 · 지름 · 인장강도 미입력 — Example II-1C 의 값 사용 ({defaulted}).",
+   "text": "kx: fastener shear strength/diameter/tensile strengths not given - Example II-1C values used (Fss_kip, D_screw_in, Fu1_ksi).",
+   "text_ko": "kx: 패스너 전단강도 · 지름 · 인장강도 미입력 — Example II-1C 의 값 사용 (Fss_kip, D_screw_in, Fu1_ksi)."
+  },
+  {
+   "code": "loads.assumption.lap_lengths_given_as",
+   "params": [],
+   "template": "Lap lengths given as a single laps dict were applied to every interior support.",
+   "template_ko": "하나의 laps dict 로 준 랩 길이를 모든 안쪽 지점에 적용함.",
+   "text": "Lap lengths given as a single laps dict were applied to every interior support.",
+   "text_ko": "하나의 laps dict 로 준 랩 길이를 모든 안쪽 지점에 적용함."
+  },
+  {
+   "code": "loads.assumption.one_ix_every_span",
+   "params": [],
+   "template": "One Ix for every span: if end and interior members differ (e.g. Example II-2A 0.070/0.059), give I_span_in4 - a uniform Ix shifts moments by about 2 % and can change a close check.",
+   "template_ko": "모든 경간에 Ix 하나: 끝 경간과 안쪽 경간의 부재가 다르면(예: Example II-2A 0.070/0.059) I_span_in4 를 주십시오 — 같은 Ix 는 모멘트를 약 2 % 옮겨 아슬아슬한 검토를 바꿀 수 있음.",
+   "text": "One Ix for every span: if end and interior members differ (e.g. Example II-2A 0.070/0.059), give I_span_in4 - a uniform Ix shifts moments by about 2 % and can change a close check.",
+   "text_ko": "모든 경간에 Ix 하나: 끝 경간과 안쪽 경간의 부재가 다르면(예: Example II-2A 0.070/0.059) I_span_in4 를 주십시오 — 같은 Ix 는 모멘트를 약 2 % 옮겨 아슬아슬한 검토를 바꿀 수 있음."
+  },
+  {
+   "code": "loads.assumption.section_ixx_given_lap",
+   "params": [],
+   "template": "Section Ixx not given: lap analysis uses relative stiffness only (moments, shears and reactions are unaffected; deflections not computed).",
+   "template_ko": "단면 Ixx 미입력: 랩 해석은 상대 강성만 씀 (모멘트 · 전단 · 반력은 영향 없음, 처짐은 계산하지 않음).",
+   "text": "Section Ixx not given: lap analysis uses relative stiffness only (moments, shears and reactions are unaffected; deflections not computed).",
+   "text_ko": "단면 Ixx 미입력: 랩 해석은 상대 강성만 씀 (모멘트 · 전단 · 반력은 영향 없음, 처짐은 계산하지 않음)."
+  },
+  {
+   "code": "loads.scope.deck_restraint_estimates_preliminary",
+   "params": [],
+   "template": "Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available.",
+   "template_ko": "데크 구속 추정값은 예비값입니다. 프로젝트의 접합 · 패널 시험 강성(override)이 있으면 그것을 쓰십시오.",
+   "text": "Deck restraint estimates are preliminary. Use project-specific connection/panel test stiffness overrides when available.",
+   "text_ko": "데크 구속 추정값은 예비값입니다. 프로젝트의 접합 · 패널 시험 강성(override)이 있으면 그것을 쓰십시오."
+  },
+  {
+   "code": "loads.scope.deflection_limits_checked_deflections",
+   "params": [],
+   "template": "Deflection limits are not checked; deflections are reported for the user to compare.",
+   "template_ko": "처짐 한계는 검토하지 않습니다 — 처짐은 사용자가 비교하도록 보고만 합니다.",
+   "text": "Deflection limits are not checked; deflections are reported for the user to compare.",
+   "text_ko": "처짐 한계는 검토하지 않습니다 — 처짐은 사용자가 비교하도록 보고만 합니다."
+  },
+  {
+   "code": "loads.scope.i6_4_1_s100_i6_anchorage_bracing",
+   "params": [],
+   "template": "S100-16 I6.4.1 anchorage of bracing for purlin roof systems (restraint forces P_L) is not calculated by this tool.",
+   "template_ko": "S100-16 I6.4.1 퍼린 지붕 시스템의 가새 정착(구속력 P_L)은 이 도구가 계산하지 않습니다.",
+   "text": "S100-16 I6.4.1 anchorage of bracing for purlin roof systems (restraint forces P_L) is not calculated by this tool.",
+   "text_ko": "S100-16 I6.4.1 퍼린 지붕 시스템의 가새 정착(구속력 P_L)은 이 도구가 계산하지 않습니다."
+  },
+  {
+   "code": "loads.scope.member_self_weight_added",
+   "params": [],
+   "template": "Member self-weight is not added automatically; include it in D.",
+   "template_ko": "부재 자중은 자동으로 더하지 않습니다 — D 에 포함하십시오.",
+   "text": "Member self-weight is not added automatically; include it in D.",
+   "text_ko": "부재 자중은 자동으로 더하지 않습니다 — D 에 포함하십시오."
+  },
+  {
+   "code": "loads.scope.rp17_curve_fit_has",
+   "params": [],
+   "template": "RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness (kx_override) where available.",
+   "template_ko": "RP17-2 곡선 맞춤의 변동계수는 0.86 — S917 시험 강성(kx_override)이 있으면 그것을 쓰십시오.",
+   "text": "RP17-2 curve fit has a coefficient of variation of 0.86; use S917 test stiffness (kx_override) where available.",
+   "text_ko": "RP17-2 곡선 맞춤의 변동계수는 0.86 — S917 시험 강성(kx_override)이 있으면 그것을 쓰십시오."
+  },
+  {
+   "code": "loads.warning.section_ixx_given_deflections",
+   "params": [],
+   "template": "Section Ixx not given: deflections not computed.",
+   "template_ko": "단면 Ixx 미입력: 처짐을 계산하지 않음.",
+   "text": "Section Ixx not given: deflections not computed.",
+   "text_ko": "단면 Ixx 미입력: 처짐을 계산하지 않음."
+  },
+  {
+   "code": "member.assumption.c1_2_1_1_c1_cm_cm_c1",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "axis",
+     "value": "x"
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "axis_2",
+     "value": "x"
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "axis_3",
+     "value": "x"
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "axis_4",
+     "value": "x"
+    }
+   ],
+   "template": "§C1.2.1.1: Cm{axis} 미지정 + 그 굽힘 평면의 단부모멘트비 미지정 → Cm{axis_2} = 1.0 (Eq. C1.2.1.1-4 의 상한, (b) 항이 허용하는 보수값). 모멘트 구배를 알면 Cm{axis_3} 또는 Cm{axis_4}_M1_M2(그 축의 비지지 구간 끝 모멘트 비, 역곡률 +)를 입력하세요.",
+   "template_ko": "§C1.2.1.1: Cm{axis} 미지정 + 그 굽힘 평면의 단부모멘트비 미지정 → Cm{axis_2} = 1.0 (Eq. C1.2.1.1-4 의 상한, (b) 항이 허용하는 보수값). 모멘트 구배를 알면 Cm{axis_3} 또는 Cm{axis_4}_M1_M2(그 축의 비지지 구간 끝 모멘트 비, 역곡률 +)를 입력하세요.",
+   "text": "§C1.2.1.1: Cmx 미지정 + 그 굽힘 평면의 단부모멘트비 미지정 → Cmx = 1.0 (Eq. C1.2.1.1-4 의 상한, (b) 항이 허용하는 보수값). 모멘트 구배를 알면 Cmx 또는 Cmx_M1_M2(그 축의 비지지 구간 끝 모멘트 비, 역곡률 +)를 입력하세요.",
+   "text_ko": "§C1.2.1.1: Cmx 미지정 + 그 굽힘 평면의 단부모멘트비 미지정 → Cmx = 1.0 (Eq. C1.2.1.1-4 의 상한, (b) 항이 허용하는 보수값). 모멘트 구배를 알면 Cmx 또는 Cmx_M1_M2(그 축의 비지지 구간 끝 모멘트 비, 역곡률 +)를 입력하세요."
+  },
+  {
+   "code": "member.assumption.c1_2_1_1_c1_dist_m1_m2",
+   "params": [],
+   "template": "§C1.2.1.1: dist_M1_M2 는 부록 2 β(강축 뒤틀림 구간)의 입력이라 Cm 에 쓰지 않았습니다.",
+   "template_ko": "§C1.2.1.1: dist_M1_M2 는 부록 2 β(강축 뒤틀림 구간)의 입력이라 Cm 에 쓰지 않았습니다.",
+   "text": "§C1.2.1.1: dist_M1_M2 는 부록 2 β(강축 뒤틀림 구간)의 입력이라 Cm 에 쓰지 않았습니다.",
+   "text_ko": "§C1.2.1.1: dist_M1_M2 는 부록 2 β(강축 뒤틀림 구간)의 입력이라 Cm 에 쓰지 않았습니다."
+  },
+  {
+   "code": "member.assumption.d3_d3_ag",
+   "params": [],
+   "template": "§D3: 순단면적 An 미입력 → An = Ag 가정(볼트 구멍 등 순단면 공제 없음). 구멍이 있으면 An 을 입력하세요.",
+   "template_ko": "§D3: 순단면적 An 미입력 → An = Ag 가정(볼트 구멍 등 순단면 공제 없음). 구멍이 있으면 An 을 입력하세요.",
+   "text": "§D3: 순단면적 An 미입력 → An = Ag 가정(볼트 구멍 등 순단면 공제 없음). 구멍이 있으면 An 을 입력하세요.",
+   "text_ko": "§D3: 순단면적 An 미입력 → An = Ag 가정(볼트 구멍 등 순단면 공제 없음). 구멍이 있으면 An 을 입력하세요."
+  },
+  {
+   "code": "member.assumption.e2_section_type_e2_f2",
+   "params": [],
+   "template": "section_type 미지정 → C 단면으로 가정하여 §E2/§F2 분기와 적용한계를 정했습니다.",
+   "template_ko": "section_type 미지정 → C 단면으로 가정하여 §E2/§F2 분기와 적용한계를 정했습니다.",
+   "text": "section_type 미지정 → C 단면으로 가정하여 §E2/§F2 분기와 적용한계를 정했습니다.",
+   "text_ko": "section_type 미지정 → C 단면으로 가정하여 §E2/§F2 분기와 적용한계를 정했습니다."
+  },
+  {
+   "code": "member.assumption.f2_lap_region_lap_restrained",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "manual_quote",
+     "value": "AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\")"
+    }
+   ],
+   "template": "Lap region: lap_restrained = true (user statement) — {manual_quote}. F2 uses Lb = 0 (no lateral-torsional buckling, Fn = Fy) and F4 is not applicable (Mnd = My).",
+   "template_ko": "랩 구간: lap_restrained = true (사용자 진술) — {manual_quote}. F2 는 Lb = 0 (횡비틀림좌굴 없음, Fn = Fy), F4 는 해당 없음 (Mnd = My).",
+   "text": "Lap region: lap_restrained = true (user statement) — AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\"). F2 uses Lb = 0 (no lateral-torsional buckling, Fn = Fy) and F4 is not applicable (Mnd = My).",
+   "text_ko": "랩 구간: lap_restrained = true (사용자 진술) — AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\"). F2 는 Lb = 0 (횡비틀림좌굴 없음, Fn = Fy), F4 는 해당 없음 (Mnd = My)."
+  },
+  {
+   "code": "member.assumption.f4_f4_distortional_buckling_was",
+   "params": [],
+   "template": "F4 distortional buckling was explicitly excluded by the supplied assembly/member assumption; Mnd=My is used.",
+   "template_ko": "F4 뒤틀림좌굴은 입력한 조립 · 부재 가정으로 명시적으로 제외됨 — Mnd=My 사용.",
+   "text": "F4 distortional buckling was explicitly excluded by the supplied assembly/member assumption; Mnd=My is used.",
+   "text_ko": "F4 뒤틀림좌굴은 입력한 조립 · 부재 가정으로 명시적으로 제외됨 — Mnd=My 사용."
+  },
+  {
+   "code": "member.assumption.g5_g5_h3_vu_wc",
+   "params": [
+    {
+     "fmt": ".3f",
+     "quantity": "force",
+     "sep": " ",
+     "symbol": "P_wc",
+     "unit_text": "kips",
+     "value": 1.0
+    }
+   ],
+   "template": "§G5/§H3: 웹 크리플링 하중으로 Vu = {P_wc} 를 썼다 — 반력 · 집중하중(wc_P)을 주지 않음.",
+   "template_ko": "§G5/§H3: 웹 크리플링 하중으로 Vu = {P_wc} 를 썼다 — 반력 · 집중하중(wc_P)을 주지 않음.",
+   "text": "§G5/§H3: 웹 크리플링 하중으로 Vu = 1.000 kips 를 썼다 — 반력 · 집중하중(wc_P)을 주지 않음.",
+   "text_ko": "§G5/§H3: 웹 크리플링 하중으로 Vu = 1.000 kips 를 썼다 — 반력 · 집중하중(wc_P)을 주지 않음."
+  },
+  {
+   "code": "member.assumption.h1_1_h1_maxt_sft_fy",
+   "params": [],
+   "template": "§H1.1: 순 인장축력 + 휨으로 평가했습니다(P-δ 모멘트 증폭 미적용). Maxt=φb·Sft·Fy(인장항복), Max=Chapter F(압축좌굴). Pu 부호 규약: 음수=인장.",
+   "template_ko": "§H1.1: 순 인장축력 + 휨으로 평가했습니다(P-δ 모멘트 증폭 미적용). Maxt=φb·Sft·Fy(인장항복), Max=Chapter F(압축좌굴). Pu 부호 규약: 음수=인장.",
+   "text": "§H1.1: 순 인장축력 + 휨으로 평가했습니다(P-δ 모멘트 증폭 미적용). Maxt=φb·Sft·Fy(인장항복), Max=Chapter F(압축좌굴). Pu 부호 규약: 음수=인장.",
+   "text_ko": "§H1.1: 순 인장축력 + 휨으로 평가했습니다(P-δ 모멘트 증폭 미적용). Maxt=φb·Sft·Fy(인장항복), Max=Chapter F(압축좌굴). Pu 부호 규약: 음수=인장."
+  },
+  {
+   "code": "member.assumption.h1_2_h1_member_length_given",
+   "params": [
+    {
+     "fmt": "g",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "KyLy",
+     "unit_text": "in",
+     "value": 18.0
+    }
+   ],
+   "template": "§H1.2 (P)L/1000: member length L not given — KyLy = {KyLy} (y-axis effective length) is used for L. §H1.2 does not define L; the Commentary (Chapter E, angles) describes PL/1000 as an initial out-of-straightness of L/1000, and §E2 defines L as the \"Laterally unbraced length of member\". Give L (the unbraced length of the member) if K is not 1.",
+   "template_ko": "§H1.2 (P)L/1000: 부재 길이 L 미입력 — L 로 KyLy = {KyLy} (y축 유효길이)를 씀. §H1.2 는 L 을 정의하지 않음; 해설(Chapter E, 앵글)은 PL/1000 을 L/1000 의 초기 휨으로 설명하고, §E2 는 L 을 「부재의 횡비지지 길이」로 정의함. K 가 1 이 아니면 L(부재의 비지지 길이)을 주십시오.",
+   "text": "§H1.2 (P)L/1000: member length L not given — KyLy = 18 in (y-axis effective length) is used for L. §H1.2 does not define L; the Commentary (Chapter E, angles) describes PL/1000 as an initial out-of-straightness of L/1000, and §E2 defines L as the \"Laterally unbraced length of member\". Give L (the unbraced length of the member) if K is not 1.",
+   "text_ko": "§H1.2 (P)L/1000: 부재 길이 L 미입력 — L 로 KyLy = 18 in (y축 유효길이)를 씀. §H1.2 는 L 을 정의하지 않음; 해설(Chapter E, 앵글)은 PL/1000 을 L/1000 의 초기 휨으로 설명하고, §E2 는 L 을 「부재의 횡비지지 길이」로 정의함. K 가 1 이 아니면 L(부재의 비지지 길이)을 주십시오."
+  },
+  {
+   "code": "member.assumption.h1_2_h1_my_b1y_muy",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "sep": " ",
+     "symbol": "Muy_with_ecc",
+     "unit_text": "kip-in",
+     "value": 0.05704718413554648
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "force",
+     "sep": " ",
+     "symbol": "Pu",
+     "unit_text": "kips",
+     "value": 3.0
+    },
+    {
+     "fmt": ".1f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "L_angle",
+     "unit_text": "in",
+     "value": 18.0
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "sep": " ",
+     "symbol": "Padd",
+     "unit_text": "kip-in",
+     "value": 0.054
+    }
+   ],
+   "template": "§H1.2: 앵글 → My = B1y·(Muy + (P)L/1000) = {Muy_with_ecc} (P={Pu}, L={L_angle}, 추가편심모멘트={Padd})이 지배",
+   "template_ko": "§H1.2: 앵글 → My = B1y·(Muy + (P)L/1000) = {Muy_with_ecc} (P={Pu}, L={L_angle}, 추가편심모멘트={Padd})이 지배",
+   "text": "§H1.2: 앵글 → My = B1y·(Muy + (P)L/1000) = 0.06 kip-in (P=3.00 kips, L=18.0 in, 추가편심모멘트=0.05 kip-in)이 지배",
+   "text_ko": "§H1.2: 앵글 → My = B1y·(Muy + (P)L/1000) = 0.06 kip-in (P=3.00 kips, L=18.0 in, 추가편심모멘트=0.05 kip-in)이 지배"
+  },
+  {
+   "code": "member.assumption.h3_h3_wc_mu",
+   "params": [],
+   "template": "§H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).",
+   "template_ko": "§H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).",
+   "text": "§H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).",
+   "text_ko": "§H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측)."
+  },
+  {
+   "code": "member.assumption.i6_2_1_i6_ft",
+   "params": [],
+   "template": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
+   "template_ko": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
+   "text": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
+   "text_ko": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오."
+  },
+  {
+   "code": "member.assumption.i6_2_1_i6_span_type_simple",
+   "params": [],
+   "template": "§I6.2.1: span_type(simple/continuous)이 없어 Table I6.2.1-1 의 두 값 중 작은 쪽으로 R 을 확인했습니다.",
+   "template_ko": "§I6.2.1: span_type(simple/continuous)이 없어 Table I6.2.1-1 의 두 값 중 작은 쪽으로 R 을 확인했습니다.",
+   "text": "§I6.2.1: span_type(simple/continuous)이 없어 Table I6.2.1-1 의 두 값 중 작은 쪽으로 R 을 확인했습니다.",
+   "text_ko": "§I6.2.1: span_type(simple/continuous)이 없어 Table I6.2.1-1 의 두 값 중 작은 쪽으로 R 을 확인했습니다."
+  },
+  {
+   "code": "member.assumption.mcrd_fsm_appendix",
+   "params": [],
+   "template": "Mcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.3.3 해석적 공식 사용 (외-외 치수)",
+   "template_ko": "Mcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.3.3 해석적 공식 사용 (외-외 치수)",
+   "text": "Mcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.3.3 해석적 공식 사용 (외-외 치수)",
+   "text_ko": "Mcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.3.3 해석적 공식 사용 (외-외 치수)"
+  },
+  {
+   "code": "member.assumption.pcrd_fsm_appendix_fcrd",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "stress",
+     "sep": " ",
+     "symbol": "Fcrd_calc",
+     "unit_text": "ksi",
+     "value": 17.578479578992432
+    },
+    {
+     "fmt": "",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "Lcrd_val",
+     "unit_text": "in",
+     "value": 28.6
+    }
+   ],
+   "template": "Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd={Fcrd_calc}, Lcrd={Lcrd_val})",
+   "template_ko": "Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd={Fcrd_calc}, Lcrd={Lcrd_val})",
+   "text": "Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=17.58 ksi, Lcrd=28.6 in)",
+   "text_ko": "Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=17.58 ksi, Lcrd=28.6 in)"
+  },
+  {
+   "code": "member.assumption.pcrl_fsm_appendix_fcrl",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "stress",
+     "sep": " ",
+     "symbol": "Fcrl_calc",
+     "unit_text": "ksi",
+     "value": 5.1299162149942745
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "governing",
+     "value": "web"
+    },
+    {
+     "fmt": ".3f",
+     "quantity": "length",
+     "symbol": "ho",
+     "value": 9.0
+    },
+    {
+     "fmt": ".3f",
+     "quantity": "length",
+     "symbol": "bo",
+     "value": 2.5
+    },
+    {
+     "fmt": ".3f",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "do",
+     "unit_text": "in",
+     "value": 0.773
+    }
+   ],
+   "template": "Pcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 (Fcrl={Fcrl_calc}, 지배요소={governing}, ho/bo/do={ho}/{bo}/{do} 외-외)",
+   "template_ko": "Pcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 (Fcrl={Fcrl_calc}, 지배요소={governing}, ho/bo/do={ho}/{bo}/{do} 외-외)",
+   "text": "Pcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 (Fcrl=5.13 ksi, 지배요소=web, ho/bo/do=9.000/2.500/0.773 in 외-외)",
+   "text_ko": "Pcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 (Fcrl=5.13 ksi, 지배요소=web, ho/bo/do=9.000/2.500/0.773 in 외-외)"
+  },
+  {
+   "code": "member.assumption.section_from_template",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "auto_section",
+     "value": "{'type': 'hat', 't': 0.06, 'r': 0.1, 'H': 3.0, 'B': 4.0, 'D': 1.0}"
+    }
+   ],
+   "template": "단면 성질을 입력 템플릿 치수로 생성했습니다: {auto_section}. 실제 부재 단면과 같은지 확인하십시오.",
+   "template_ko": "단면 성질을 입력 템플릿 치수로 생성했습니다: {auto_section}. 실제 부재 단면과 같은지 확인하십시오.",
+   "text": "단면 성질을 입력 템플릿 치수로 생성했습니다: {'type': 'hat', 't': 0.06, 'r': 0.1, 'H': 3.0, 'B': 4.0, 'D': 1.0}. 실제 부재 단면과 같은지 확인하십시오.",
+   "text_ko": "단면 성질을 입력 템플릿 치수로 생성했습니다: {'type': 'hat', 't': 0.06, 'r': 0.1, 'H': 3.0, 'B': 4.0, 'D': 1.0}. 실제 부재 단면과 같은지 확인하십시오."
+  },
+  {
+   "code": "member.ne.b4_1_b4_limits_chapters_applicable",
+   "params": [],
+   "template": "B4.1 limits (φ/Ω of Chapters E-H not applicable)",
+   "template_ko": "B4.1 적용한계 (Chapter E-H 의 φ/Ω 를 쓸 수 없음)",
+   "text": "B4.1 limits (φ/Ω of Chapters E-H not applicable)",
+   "text_ko": "B4.1 적용한계 (Chapter E-H 의 φ/Ω 를 쓸 수 없음)"
+  },
+  {
+   "code": "member.ne.d3_d3_rupture_fu_given",
+   "params": [],
+   "template": "D3 rupture (Fu not given)",
+   "template_ko": "D3 파단 (Fu 미입력)",
+   "text": "D3 rupture (Fu not given)",
+   "text_ko": "D3 파단 (Fu 미입력)"
+  },
+  {
+   "code": "member.ne.dsm_values_other_moment",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "name",
+     "value": "F3 local buckling"
+    }
+   ],
+   "template": "{name} (DSM values are for the other moment sign)",
+   "template_ko": "{name} (DSM 값이 반대 모멘트 부호의 것)",
+   "text": "F3 local buckling (DSM values are for the other moment sign)",
+   "text_ko": "F3 local buckling (DSM 값이 반대 모멘트 부호의 것)"
+  },
+  {
+   "code": "member.ne.e2_2_e2_flexural_torsional_buckling",
+   "params": [],
+   "template": "E2.2 flexural-torsional buckling",
+   "template_ko": "E2.2 휨비틀림좌굴",
+   "text": "E2.2 flexural-torsional buckling",
+   "text_ko": "E2.2 휨비틀림좌굴"
+  },
+  {
+   "code": "member.ne.e2_e2_global_buckling",
+   "params": [],
+   "template": "E2 global buckling",
+   "template_ko": "E2 전체좌굴",
+   "text": "E2 global buckling",
+   "text_ko": "E2 전체좌굴"
+  },
+  {
+   "code": "member.ne.e2_e2_global_buckling_assumed",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "missing_len",
+     "value": "KtLt"
+    }
+   ],
+   "template": "E2 global buckling (assumed {missing_len})",
+   "template_ko": "E2 전체좌굴 ({missing_len} 가정)",
+   "text": "E2 global buckling (assumed KtLt)",
+   "text_ko": "E2 전체좌굴 (KtLt 가정)"
+  },
+  {
+   "code": "member.ne.e3_e3_local_buckling",
+   "params": [],
+   "template": "E3 local buckling",
+   "template_ko": "E3 국부좌굴",
+   "text": "E3 local buckling",
+   "text_ko": "E3 국부좌굴"
+  },
+  {
+   "code": "member.ne.f2_f2_lateral_torsional_buckling_3",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "manual_quote",
+     "value": "AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\")"
+    }
+   ],
+   "template": "F2 lateral-torsional buckling — lap region: restraint not stated. Give lap_restrained = true to apply the Manual assumption ({manual_quote}), or give Lb for the lap region.",
+   "template_ko": "F2 횡비틀림좌굴 — 랩 구간: 구속을 밝히지 않음. Manual 의 가정({manual_quote})을 쓰려면 lap_restrained = true 를, 아니면 랩 구간의 Lb 를 주십시오.",
+   "text": "F2 lateral-torsional buckling — lap region: restraint not stated. Give lap_restrained = true to apply the Manual assumption (AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\")), or give Lb for the lap region.",
+   "text_ko": "F2 횡비틀림좌굴 — 랩 구간: 구속을 밝히지 않음. Manual 의 가정(AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\"))을 쓰려면 lap_restrained = true 를, 아니면 랩 구간의 Lb 를 주십시오."
+  },
+  {
+   "code": "member.ne.f2_f2_lateral_torsional_buckling_4",
+   "params": [],
+   "template": "F2 lateral-torsional buckling (assumed Lb=120 in)",
+   "template_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)",
+   "text": "F2 lateral-torsional buckling (assumed Lb=120 in)",
+   "text_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)"
+  },
+  {
+   "code": "member.ne.f3_f3_local_buckling",
+   "params": [],
+   "template": "F3 local buckling",
+   "template_ko": "F3 국부좌굴",
+   "text": "F3 local buckling",
+   "text_ko": "F3 국부좌굴"
+  },
+  {
+   "code": "member.ne.f4_f4_distortional_buckling",
+   "params": [],
+   "template": "F4 distortional buckling",
+   "template_ko": "F4 뒤틀림좌굴",
+   "text": "F4 distortional buckling",
+   "text_ko": "F4 뒤틀림좌굴"
+  },
+  {
+   "code": "member.ne.f4_f4_distortional_buckling_lap",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "manual_quote",
+     "value": "AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\")"
+    }
+   ],
+   "template": "F4 distortional buckling — lap region: restraint not stated. Give lap_restrained = true to apply the Manual assumption ({manual_quote}), or give Mcrd for the lapped section.",
+   "template_ko": "F4 뒤틀림좌굴 — 랩 구간: 구속을 밝히지 않음. Manual 의 가정({manual_quote})을 쓰려면 lap_restrained = true 를, 아니면 겹친 단면의 Mcrd 를 주십시오.",
+   "text": "F4 distortional buckling — lap region: restraint not stated. Give lap_restrained = true to apply the Manual assumption (AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\")), or give Mcrd for the lapped section.",
+   "text_ko": "F4 뒤틀림좌굴 — 랩 구간: 구속을 밝히지 않음. Manual 의 가정(AISI Design Manual Examples II-1A / II-2A: \"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling\" (assumption (f): \"the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps\"))을 쓰려면 lap_restrained = true 를, 아니면 겹친 단면의 Mcrd 를 주십시오."
+  },
+  {
+   "code": "member.ne.fsm_from_unrestrained_bending",
+   "params": [
+    {
+     "fmt": "",
+     "notice": {
+      "code": "member.ne.f3_f3_local_buckling",
+      "kind": "not_evaluated",
+      "params": [],
+      "template": "F3 local buckling",
+      "template_ko": "F3 국부좌굴",
+      "text": "F3 local buckling",
+      "text_ko": "F3 국부좌굴"
+     },
+     "quantity": null,
+     "symbol": "local_name",
+     "value": "F3 local buckling"
+    }
+   ],
+   "template": "{local_name} (FSM from unrestrained-bending stress)",
+   "template_ko": "{local_name} (비구속 휨 응력으로 한 FSM)",
+   "text": "F3 local buckling (FSM from unrestrained-bending stress)",
+   "text_ko": "F3 국부좌굴 (비구속 휨 응력으로 한 FSM)"
+  },
+  {
+   "code": "member.ne.fsm_from_unrestrained_bending_2",
+   "params": [
+    {
+     "fmt": "",
+     "notice": {
+      "code": "member.ne.f4_f4_distortional_buckling",
+      "kind": "not_evaluated",
+      "params": [],
+      "template": "F4 distortional buckling",
+      "template_ko": "F4 뒤틀림좌굴",
+      "text": "F4 distortional buckling",
+      "text_ko": "F4 뒤틀림좌굴"
+     },
+     "quantity": null,
+     "symbol": "dist_name",
+     "value": "F4 distortional buckling"
+    }
+   ],
+   "template": "{dist_name} (FSM from unrestrained-bending stress)",
+   "template_ko": "{dist_name} (비구속 휨 응력으로 한 FSM)",
+   "text": "F4 distortional buckling (FSM from unrestrained-bending stress)",
+   "text_ko": "F4 뒤틀림좌굴 (비구속 휨 응력으로 한 FSM)"
+  },
+  {
+   "code": "member.ne.fsm_minimum_at_shortest",
+   "params": [
+    {
+     "fmt": "",
+     "notice": {
+      "code": "member.ne.e3_e3_local_buckling",
+      "kind": "not_evaluated",
+      "params": [],
+      "template": "E3 local buckling",
+      "template_ko": "E3 국부좌굴",
+      "text": "E3 local buckling",
+      "text_ko": "E3 국부좌굴"
+     },
+     "quantity": null,
+     "symbol": "local_name",
+     "value": "E3 local buckling"
+    }
+   ],
+   "template": "{local_name} (FSM minimum at the shortest half-wavelength)",
+   "template_ko": "{local_name} (FSM 극소가 가장 짧은 반파장에 있음)",
+   "text": "E3 local buckling (FSM minimum at the shortest half-wavelength)",
+   "text_ko": "E3 국부좌굴 (FSM 극소가 가장 짧은 반파장에 있음)"
+  },
+  {
+   "code": "member.ne.g5_g5_web_crippling_no",
+   "params": [],
+   "template": "G5 web crippling (no bearing load wc_P or Vu)",
+   "template_ko": "G5 웹 크리플링 (지압하중 wc_P 또는 Vu 없음)",
+   "text": "G5 web crippling (no bearing load wc_P or Vu)",
+   "text_ko": "G5 웹 크리플링 (지압하중 wc_P 또는 Vu 없음)"
+  },
+  {
+   "code": "member.ne.h1_2_h1_angle",
+   "params": [],
+   "template": "H1.2 angle (P)L/1000",
+   "template_ko": "H1.2 앵글 (P)L/1000",
+   "text": "H1.2 angle (P)L/1000",
+   "text_ko": "H1.2 앵글 (P)L/1000"
+  },
+  {
+   "code": "member.ne.h3_h3_bending_web_crippling",
+   "params": [],
+   "template": "H3 bending + web crippling (no bearing load wc_P or Vu)",
+   "template_ko": "H3 휨 + 웹 크리플링 (지압하중 wc_P 또는 Vu 없음)",
+   "text": "H3 bending + web crippling (no bearing load wc_P or Vu)",
+   "text_ko": "H3 휨 + 웹 크리플링 (지압하중 wc_P 또는 Vu 없음)"
+  },
+  {
+   "code": "member.ne.i6_2_1_i6_outside_i6_conditions",
+   "params": [],
+   "template": "I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))",
+   "template_ko": "I6.2.1 (Table I6.2.1-1 / 조건 (a)-(o) 밖)",
+   "text": "I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))",
+   "text_ko": "I6.2.1 (Table I6.2.1-1 / 조건 (a)-(o) 밖)"
+  },
+  {
+   "code": "member.ne.positive_region_lb_pos",
+   "params": [],
+   "template": "F positive region (Lb_pos not given — assumed fully braced)",
+   "template_ko": "F 정모멘트 구간 (Lb_pos 미입력 — 완전 횡지지로 가정)",
+   "text": "F positive region (Lb_pos not given — assumed fully braced)",
+   "text_ko": "F 정모멘트 구간 (Lb_pos 미입력 — 완전 횡지지로 가정)"
+  },
+  {
+   "code": "member.ne.sub_result_item",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "label",
+     "value": "[압축]"
+    },
+    {
+     "fmt": "",
+     "notice": {
+      "code": "member.ne.e2_2_e2_flexural_torsional_buckling",
+      "kind": "not_evaluated",
+      "params": [],
+      "template": "E2.2 flexural-torsional buckling",
+      "template_ko": "E2.2 휨비틀림좌굴",
+      "text": "E2.2 flexural-torsional buckling",
+      "text_ko": "E2.2 휨비틀림좌굴"
+     },
+     "quantity": null,
+     "symbol": "item",
+     "value": "E2.2 flexural-torsional buckling"
+    }
+   ],
+   "template": "{label} {item}",
+   "template_ko": "{label} {item}",
+   "text": "[압축] E2.2 flexural-torsional buckling",
+   "text_ko": "[압축] E2.2 휨비틀림좌굴"
+  },
+  {
+   "code": "member.reason.checked_element_dimensions_given",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "unchecked",
+     "value": "web, flange"
+    }
+   ],
+   "template": "not checked — element dimensions not given: {unchecked}",
+   "template_ko": "검토하지 않음 — 요소 치수 미입력: {unchecked}",
+   "text": "not checked — element dimensions not given: web, flange",
+   "text_ko": "검토하지 않음 — 요소 치수 미입력: web, flange"
+  },
+  {
+   "code": "member.reason.d3_fu_given_rupture_d3",
+   "params": [],
+   "template": "Fu not given — rupture (D3) not evaluated",
+   "template_ko": "Fu 미입력 — 파단(D3) 미평가",
+   "text": "Fu not given — rupture (D3) not evaluated",
+   "text_ko": "Fu 미입력 — 파단(D3) 미평가"
+  },
+  {
+   "code": "member.reason.e2_pne_e2_available_local",
+   "params": [],
+   "template": "Pne (E2) not available — local buckling interacts with global strength",
+   "template_ko": "Pne (E2)를 얻을 수 없음 — 국부좌굴은 전체 강도와 상관함",
+   "text": "Pne (E2) not available — local buckling interacts with global strength",
+   "text_ko": "Pne (E2)를 얻을 수 없음 — 국부좌굴은 전체 강도와 상관함"
+  },
+  {
+   "code": "member.reason.e2_uses_pne_from_e2",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "member.ne.e2_e2_global_buckling_assumed",
+        "kind": "not_evaluated",
+        "params": [
+         {
+          "conv": "s",
+          "fmt": "",
+          "quantity": null,
+          "symbol": "missing_len",
+          "value": "KtLt"
+         }
+        ],
+        "template": "E2 global buckling (assumed {missing_len})",
+        "template_ko": "E2 전체좌굴 ({missing_len} 가정)",
+        "text": "E2 global buckling (assumed KtLt)",
+        "text_ko": "E2 전체좌굴 (KtLt 가정)"
+       }
+      ],
+      "sep": "; ",
+      "text": "E2 global buckling (assumed KtLt)",
+      "text_ko": "E2 전체좌굴 (KtLt 가정)"
+     },
+     "quantity": null,
+     "symbol": "g_items",
+     "value": "E2 global buckling (assumed KtLt)"
+    }
+   ],
+   "template": "uses Pne from E2, which is not evaluated: {g_items}",
+   "template_ko": "미평가인 E2 의 Pne 를 씀: {g_items}",
+   "text": "uses Pne from E2, which is not evaluated: E2 global buckling (assumed KtLt)",
+   "text_ko": "미평가인 E2 의 Pne 를 씀: E2 전체좌굴 (KtLt 가정)"
+  },
+  {
+   "code": "member.reason.e4_e4_applicable",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "dist_reason",
+     "value": "closed section"
+    }
+   ],
+   "template": "§E4 not applicable: {dist_reason}",
+   "template_ko": "§E4 해당 없음: {dist_reason}",
+   "text": "§E4 not applicable: closed section",
+   "text_ko": "§E4 해당 없음: closed section"
+  },
+  {
+   "code": "member.reason.f2_uses_mne_from_f2",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "member.ne.f2_f2_lateral_torsional_buckling_4",
+        "kind": "not_evaluated",
+        "params": [],
+        "template": "F2 lateral-torsional buckling (assumed Lb=120 in)",
+        "template_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)",
+        "text": "F2 lateral-torsional buckling (assumed Lb=120 in)",
+        "text_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)"
+       }
+      ],
+      "sep": "; ",
+      "text": "F2 lateral-torsional buckling (assumed Lb=120 in)",
+      "text_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)"
+     },
+     "quantity": null,
+     "symbol": "g_items",
+     "value": "F2 lateral-torsional buckling (assumed Lb=120 in)"
+    }
+   ],
+   "template": "uses Mne from F2, which is not evaluated: {g_items}",
+   "template_ko": "미평가인 F2 의 Mne 를 씀: {g_items}",
+   "text": "uses Mne from F2, which is not evaluated: F2 lateral-torsional buckling (assumed Lb=120 in)",
+   "text_ko": "미평가인 F2 의 Mne 를 씀: F2 횡비틀림좌굴 (Lb=120 in 가정)"
+  },
+  {
+   "code": "member.reason.f3_1_1_f3_round_hss_fy",
+   "params": [],
+   "template": "§F3.1.1: round HSS with D/t ≤ 0.441 E/Fy — local buckling need not be checked",
+   "template_ko": "§F3.1.1: D/t ≤ 0.441 E/Fy 인 원형 HSS — 국부좌굴을 검토하지 않아도 됨",
+   "text": "§F3.1.1: round HSS with D/t ≤ 0.441 E/Fy — local buckling need not be checked",
+   "text_ko": "§F3.1.1: D/t ≤ 0.441 E/Fy 인 원형 HSS — 국부좌굴을 검토하지 않아도 됨"
+  },
+  {
+   "code": "member.reason.f4_f4_applicable",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "dist_reason",
+     "value": "closed section"
+    }
+   ],
+   "template": "§F4 not applicable: {dist_reason}",
+   "template_ko": "§F4 해당 없음: {dist_reason}",
+   "text": "§F4 not applicable: closed section",
+   "text_ko": "§F4 해당 없음: closed section"
+  },
+  {
+   "code": "member.reason.f4_f4_does_apply_round",
+   "params": [],
+   "template": "§F4 does not apply to round HSS (§F2.3)",
+   "template_ko": "§F4 는 원형 HSS 에 해당하지 않음 (§F2.3)",
+   "text": "§F4 does not apply to round HSS (§F2.3)",
+   "text_ko": "§F4 는 원형 HSS 에 해당하지 않음 (§F2.3)"
+  },
+  {
+   "code": "member.reason.h1_2_h1_angle_compression_needs",
+   "params": [],
+   "template": "§H1.2: angle in compression needs the (P)L/1000 combined check — run member_type='combined' with May_strength",
+   "template_ko": "§H1.2: 압축 앵글은 (P)L/1000 조합 검토가 필요 — member_type='combined' 와 May_strength 로 실행하십시오",
+   "text": "§H1.2: angle in compression needs the (P)L/1000 combined check — run member_type='combined' with May_strength",
+   "text_ko": "§H1.2: 압축 앵글은 (P)L/1000 조합 검토가 필요 — member_type='combined' 와 May_strength 로 실행하십시오"
+  },
+  {
+   "code": "member.reason.i6_2_1_i6_cannot_applied_chapter",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "notice": {
+      "code": null,
+      "kind": "group",
+      "parts": [
+       {
+        "code": "member.ne.i6_2_1_i6_outside_i6_conditions",
+        "kind": "not_evaluated",
+        "params": [],
+        "template": "I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))",
+        "template_ko": "I6.2.1 (Table I6.2.1-1 / 조건 (a)-(o) 밖)",
+        "text": "I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))",
+        "text_ko": "I6.2.1 (Table I6.2.1-1 / 조건 (a)-(o) 밖)"
+       }
+      ],
+      "sep": "; ",
+      "text": "I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))",
+      "text_ko": "I6.2.1 (Table I6.2.1-1 / 조건 (a)-(o) 밖)"
+     },
+     "quantity": null,
+     "symbol": "i621_items",
+     "value": "I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))"
+    }
+   ],
+   "template": "§I6.2.1 cannot be applied ({i621_items}) — Chapter F then gives the flexural strength, and this run did not compute it (run without R_uplift, or within the §I6.2.1 limits)",
+   "template_ko": "§I6.2.1 을 적용할 수 없음 ({i621_items}) — 그러면 Chapter F 가 휨강도를 정하는데 이번 실행은 그것을 계산하지 않음 (R_uplift 없이, 또는 §I6.2.1 한계 안에서 실행)",
+   "text": "§I6.2.1 cannot be applied (I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))) — Chapter F then gives the flexural strength, and this run did not compute it (run without R_uplift, or within the §I6.2.1 limits)",
+   "text_ko": "§I6.2.1 을 적용할 수 없음 (I6.2.1 (Table I6.2.1-1 / 조건 (a)-(o) 밖)) — 그러면 Chapter F 가 휨강도를 정하는데 이번 실행은 그것을 계산하지 않음 (R_uplift 없이, 또는 §I6.2.1 한계 안에서 실행)"
+  },
+  {
+   "code": "member.reason.i6_2_1_replaced_i6_mn_mn",
+   "params": [],
+   "template": "replaced by §I6.2.1 (Mn = R·Mnℓo) for this through-fastened C/Z member under uplift",
+   "template_ko": "양력을 받는 이 관통 체결 C/Z 부재는 §I6.2.1 (Mn = R·Mnℓo)로 대체",
+   "text": "replaced by §I6.2.1 (Mn = R·Mnℓo) for this through-fastened C/Z member under uplift",
+   "text_ko": "양력을 받는 이 관통 체결 C/Z 부재는 §I6.2.1 (Mn = R·Mnℓo)로 대체"
+  },
+  {
+   "code": "member.reason.no_demand_in_combined_check",
+   "params": [],
+   "template": "this component has no demand in the combined check",
+   "template_ko": "이 성분은 조합 검토에서 소요가 없음",
+   "text": "this component has no demand in the combined check",
+   "text_ko": "이 성분은 조합 검토에서 소요가 없음"
+  },
+  {
+   "code": "member.reason.no_demand_this_limit_state",
+   "params": [],
+   "template": "no demand for this limit state (the other demands are checked)",
+   "template_ko": "이 한계상태의 소요 없음 (다른 소요는 검토함)",
+   "text": "no demand for this limit state (the other demands are checked)",
+   "text_ko": "이 한계상태의 소요 없음 (다른 소요는 검토함)"
+  },
+  {
+   "code": "member.reason.no_required_axial_strength",
+   "params": [],
+   "template": "no required axial strength (Pu = 0)",
+   "template_ko": "소요 압축강도 없음 (Pu = 0)",
+   "text": "no required axial strength (Pu = 0)",
+   "text_ko": "소요 압축강도 없음 (Pu = 0)"
+  },
+  {
+   "code": "member.reason.no_required_flexural_strength",
+   "params": [],
+   "template": "no required flexural strength (Mu = 0)",
+   "template_ko": "소요 휨강도 없음 (Mu = 0)",
+   "text": "no required flexural strength (Mu = 0)",
+   "text_ko": "소요 휨강도 없음 (Mu = 0)"
+  },
+  {
+   "code": "member.reason.no_required_tensile_strength",
+   "params": [],
+   "template": "no required tensile strength (Tu = 0)",
+   "template_ko": "소요 인장강도 없음 (Tu = 0)",
+   "text": "no required tensile strength (Tu = 0)",
+   "text_ko": "소요 인장강도 없음 (Tu = 0)"
+  },
+  {
+   "code": "member.reason.table_b4_1_1_b4_limits_checked_thickness",
+   "params": [],
+   "template": "Table B4.1-1 limits not checked — thickness / element dimensions not given",
+   "template_ko": "Table B4.1-1 적용한계 미검토 — 두께 · 요소 치수 미입력",
+   "text": "Table B4.1-1 limits not checked — thickness / element dimensions not given",
+   "text_ko": "Table B4.1-1 적용한계 미검토 — 두께 · 요소 치수 미입력"
+  },
+  {
+   "code": "member.scope.c1_c1_b2",
+   "params": [],
+   "template": "§C1 B2(P-Δ, 횡이동 증폭)는 적용하지 않았습니다 — 비횡이동(가새) 부재로 가정했습니다.",
+   "template_ko": "§C1 B2(P-Δ, 횡이동 증폭)는 적용하지 않았습니다 — 비횡이동(가새) 부재로 가정했습니다.",
+   "text": "§C1 B2(P-Δ, 횡이동 증폭)는 적용하지 않았습니다 — 비횡이동(가새) 부재로 가정했습니다.",
+   "text_ko": "§C1 B2(P-Δ, 횡이동 증폭)는 적용하지 않았습니다 — 비횡이동(가새) 부재로 가정했습니다."
+  },
+  {
+   "code": "member.scope.d1_d1_chapter_j6",
+   "params": [],
+   "template": "§D1: 접합부(Chapter J, 예: J6 전단지연·블록전단)가 지배할 수 있습니다 — 별도 검토하십시오.",
+   "template_ko": "§D1: 접합부(Chapter J, 예: J6 전단지연·블록전단)가 지배할 수 있습니다 — 별도 검토하십시오.",
+   "text": "§D1: 접합부(Chapter J, 예: J6 전단지연·블록전단)가 지배할 수 있습니다 — 별도 검토하십시오.",
+   "text_ko": "§D1: 접합부(Chapter J, 예: J6 전단지연·블록전단)가 지배할 수 있습니다 — 별도 검토하십시오."
+  },
+  {
+   "code": "member.scope.e2_1_1_e2_kl_l0_rr",
+   "params": [],
+   "template": "§E2.1.1 미구현: 연신율 3~10 % 강재의 폐단면이고 KL < 1.1L0 이면 감소 회전반경 Rr·r 를 써야 합니다.",
+   "template_ko": "§E2.1.1 미구현: 연신율 3~10 % 강재의 폐단면이고 KL < 1.1L0 이면 감소 회전반경 Rr·r 를 써야 합니다.",
+   "text": "§E2.1.1 미구현: 연신율 3~10 % 강재의 폐단면이고 KL < 1.1L0 이면 감소 회전반경 Rr·r 를 써야 합니다.",
+   "text_ko": "§E2.1.1 미구현: 연신율 3~10 % 강재의 폐단면이고 KL < 1.1L0 이면 감소 회전반경 Rr·r 를 써야 합니다."
+  },
+  {
+   "code": "member.scope.e2_5_e2_e3_e4_f2",
+   "params": [],
+   "template": "구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오.",
+   "template_ko": "구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오.",
+   "text": "구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오.",
+   "text_ko": "구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오."
+  },
+  {
+   "code": "member.scope.h4_torsion_not_implemented",
+   "params": [],
+   "template": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.",
+   "template_ko": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.",
+   "text": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.",
+   "text_ko": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다."
+  },
+  {
+   "code": "member.warning.b3_3_b3_b4_b4_chapters",
+   "params": [],
+   "template": "§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. 내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다.",
+   "template_ko": "§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. 내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다.",
+   "text": "§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. 내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다.",
+   "text_ko": "§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. 내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다."
+  },
+  {
+   "code": "member.warning.d3_d3_fu",
+   "params": [],
+   "template": "§D3: 인장강도 Fu 가 없어 파단 한계상태를 평가하지 못했습니다.",
+   "template_ko": "§D3: 인장강도 Fu 가 없어 파단 한계상태를 평가하지 못했습니다.",
+   "text": "§D3: 인장강도 Fu 가 없어 파단 한계상태를 평가하지 못했습니다.",
+   "text_ko": "§D3: 인장강도 Fu 가 없어 파단 한계상태를 평가하지 못했습니다."
+  },
+  {
+   "code": "member.warning.dsm_local_minimum_at_first_length",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "tag",
+     "value": "P"
+    }
+   ],
+   "template": "[DSM {tag}] 국부 극소가 해석 격자의 첫 반파장에 있습니다 — 실제 최소가 격자 하한 아래일 수 있어 이 값으로 판정하지 않습니다. 짧은 반파장까지 다시 해석하세요.",
+   "template_ko": "[DSM {tag}] 국부 극소가 해석 격자의 첫 반파장에 있습니다 — 실제 최소가 격자 하한 아래일 수 있어 이 값으로 판정하지 않습니다. 짧은 반파장까지 다시 해석하세요.",
+   "text": "[DSM P] 국부 극소가 해석 격자의 첫 반파장에 있습니다 — 실제 최소가 격자 하한 아래일 수 있어 이 값으로 판정하지 않습니다. 짧은 반파장까지 다시 해석하세요.",
+   "text_ko": "[DSM P] 국부 극소가 해석 격자의 첫 반파장에 있습니다 — 실제 최소가 격자 하한 아래일 수 있어 이 값으로 판정하지 않습니다. 짧은 반파장까지 다시 해석하세요."
+  },
+  {
+   "code": "member.warning.dsm_my_sf_fy",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "sep": " ",
+     "symbol": "My_dsm",
+     "unit_text": "kip-in",
+     "value": 34.98171466292383
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "sep": " ",
+     "symbol": "value",
+     "unit_text": "kip-in",
+     "value": 34.17713522567658
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "stress",
+     "sep": " ",
+     "symbol": "Fy_original",
+     "unit_text": "ksi",
+     "value": 35.53
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "stress",
+     "sep": " ",
+     "symbol": "value_2",
+     "unit_text": "ksi",
+     "value": 36.36642784032753
+    }
+   ],
+   "template": "DSM My={My_dsm} ≠ Sf·Fy={value} (설계 Fy={Fy_original}; 해석 fy≈{value_2}로 추정). My 는 설계 Fy 로 다시 산정했고 Mcrl·Mcrd 는 탄성 임계모멘트로 그대로 사용했습니다.",
+   "template_ko": "DSM My={My_dsm} ≠ Sf·Fy={value} (설계 Fy={Fy_original}; 해석 fy≈{value_2}로 추정). My 는 설계 Fy 로 다시 산정했고 Mcrl·Mcrd 는 탄성 임계모멘트로 그대로 사용했습니다.",
+   "text": "DSM My=34.98 kip-in ≠ Sf·Fy=34.18 kip-in (설계 Fy=35.53 ksi; 해석 fy≈36.37 ksi로 추정). My 는 설계 Fy 로 다시 산정했고 Mcrl·Mcrd 는 탄성 임계모멘트로 그대로 사용했습니다.",
+   "text_ko": "DSM My=34.98 kip-in ≠ Sf·Fy=34.18 kip-in (설계 Fy=35.53 ksi; 해석 fy≈36.37 ksi로 추정). My 는 설계 Fy 로 다시 산정했고 Mcrl·Mcrd 는 탄성 임계모멘트로 그대로 사용했습니다."
+  },
+  {
+   "code": "member.warning.e2_2_e2_xo_xo_xs",
+   "params": [],
+   "template": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
+   "template_ko": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
+   "text": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
+   "text_ko": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요."
+  },
+  {
+   "code": "member.warning.e2_4_e2",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "error",
+     "value": "Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied."
+    }
+   ],
+   "template": "§E2.4: {error}.",
+   "template_ko": "§E2.4: {error}.",
+   "text": "§E2.4: Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied..",
+   "text_ko": "§E2.4: Section type 'HAT' is not mapped to the implemented symmetry-axis equations. Use §E2.2 with verified principal/symmetry-axis mapping when applicable, or §E2.4/Appendix 2/rational engineering analysis; the C-section axis assumptions were not applied.."
+  },
+  {
+   "code": "member.warning.e3_e3_pcrl_pnl_pne",
+   "params": [],
+   "template": "§E3: Pcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Pnl=Pne 로 표시). FSM 국부 극소(Pcrl)를 제공하세요.",
+   "template_ko": "§E3: Pcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Pnl=Pne 로 표시). FSM 국부 극소(Pcrl)를 제공하세요.",
+   "text": "§E3: Pcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Pnl=Pne 로 표시). FSM 국부 극소(Pcrl)를 제공하세요.",
+   "text_ko": "§E3: Pcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Pnl=Pne 로 표시). FSM 국부 극소(Pcrl)를 제공하세요."
+  },
+  {
+   "code": "member.warning.effective_length_defaulted_verify",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "items",
+     "value": "KtLt=120 in"
+    }
+   ],
+   "template": "Effective length defaulted to {items} — verify against actual unbraced/braced lengths",
+   "template_ko": "유효길이를 {items} 로 기본 설정함 — 실제 비지지 · 지지 길이와 대조하십시오",
+   "text": "Effective length defaulted to KtLt=120 in — verify against actual unbraced/braced lengths",
+   "text_ko": "유효길이를 KtLt=120 in 로 기본 설정함 — 실제 비지지 · 지지 길이와 대조하십시오"
+  },
+  {
+   "code": "member.warning.f3_dsm_mcrl_mcrd_unsymm",
+   "params": [],
+   "template": "[DSM M] Mcrl/Mcrd 가 비구속 휨(unsymm=1) 응력으로 계산되었습니다. 이 도구의 My 는 구속 휨 Sf·Fy 이므로 두 기준을 섞지 않고 F3/F4 를 판정하지 않습니다 — 구속 휨 응력으로 다시 해석하세요.",
+   "template_ko": "[DSM M] Mcrl/Mcrd 가 비구속 휨(unsymm=1) 응력으로 계산되었습니다. 이 도구의 My 는 구속 휨 Sf·Fy 이므로 두 기준을 섞지 않고 F3/F4 를 판정하지 않습니다 — 구속 휨 응력으로 다시 해석하세요.",
+   "text": "[DSM M] Mcrl/Mcrd 가 비구속 휨(unsymm=1) 응력으로 계산되었습니다. 이 도구의 My 는 구속 휨 Sf·Fy 이므로 두 기준을 섞지 않고 F3/F4 를 판정하지 않습니다 — 구속 휨 응력으로 다시 해석하세요.",
+   "text_ko": "[DSM M] Mcrl/Mcrd 가 비구속 휨(unsymm=1) 응력으로 계산되었습니다. 이 도구의 My 는 구속 휨 Sf·Fy 이므로 두 기준을 섞지 않고 F3/F4 를 판정하지 않습니다 — 구속 휨 응력으로 다시 해석하세요."
+  },
+  {
+   "code": "member.warning.f3_f3_mcrl_mnl_mne",
+   "params": [],
+   "template": "§F3: Mcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Mnl=Mne 로 표시). FSM 국부 극소(Mcrl)를 제공하세요.",
+   "template_ko": "§F3: Mcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Mnl=Mne 로 표시). FSM 국부 극소(Mcrl)를 제공하세요.",
+   "text": "§F3: Mcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Mnl=Mne 로 표시). FSM 국부 극소(Mcrl)를 제공하세요.",
+   "text_ko": "§F3: Mcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 (Mnl=Mne 로 표시). FSM 국부 극소(Mcrl)를 제공하세요."
+  },
+  {
+   "code": "member.warning.f4_f4_mcrd_appendix_cfsm",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "value",
+     "value": "C"
+    }
+   ],
+   "template": "§F4: 단면 '{value}'은 연단 보강 압축 플랜지가 있어 뒤틀림좌굴이 해당하지만 Mcrd 가 없고 해석식 대체(Appendix 2 §2.3.3.3, C/Z 전용·기하 필요)도 할 수 없습니다. cFSM/유한요소 또는 합리적 해석으로 F4를 평가하세요.",
+   "template_ko": "§F4: 단면 '{value}'은 연단 보강 압축 플랜지가 있어 뒤틀림좌굴이 해당하지만 Mcrd 가 없고 해석식 대체(Appendix 2 §2.3.3.3, C/Z 전용·기하 필요)도 할 수 없습니다. cFSM/유한요소 또는 합리적 해석으로 F4를 평가하세요.",
+   "text": "§F4: 단면 'C'은 연단 보강 압축 플랜지가 있어 뒤틀림좌굴이 해당하지만 Mcrd 가 없고 해석식 대체(Appendix 2 §2.3.3.3, C/Z 전용·기하 필요)도 할 수 없습니다. cFSM/유한요소 또는 합리적 해석으로 F4를 평가하세요.",
+   "text_ko": "§F4: 단면 'C'은 연단 보강 압축 플랜지가 있어 뒤틀림좌굴이 해당하지만 Mcrd 가 없고 해석식 대체(Appendix 2 §2.3.3.3, C/Z 전용·기하 필요)도 할 수 없습니다. cFSM/유한요소 또는 합리적 해석으로 F4를 평가하세요."
+  },
+  {
+   "code": "member.warning.g5_h3_no_bearing_load",
+   "params": [],
+   "template": "§G5/§H3: 지압 길이(wc_N)는 있으나 반력 · 집중하중(wc_P)도 Vu 도 없어 웹 크리플링을 평가하지 못했습니다 — wc_P 를 입력하세요.",
+   "template_ko": "§G5/§H3: 지압 길이(wc_N)는 있으나 반력 · 집중하중(wc_P)도 Vu 도 없어 웹 크리플링을 평가하지 못했습니다 — wc_P 를 입력하세요.",
+   "text": "§G5/§H3: 지압 길이(wc_N)는 있으나 반력 · 집중하중(wc_P)도 Vu 도 없어 웹 크리플링을 평가하지 못했습니다 — wc_P 를 입력하세요.",
+   "text_ko": "§G5/§H3: 지압 길이(wc_N)는 있으나 반력 · 집중하중(wc_P)도 Vu 도 없어 웹 크리플링을 평가하지 못했습니다 — wc_P 를 입력하세요."
+  },
+  {
+   "code": "member.warning.h1_2_h1_muy_member_type",
+   "params": [],
+   "template": "§H1.2: 앵글 압축재는 Muy + (P)L/1000 을 포함한 조합 검토가 필요합니다 — member_type='combined' 와 May_strength 로 검토하세요.",
+   "template_ko": "§H1.2: 앵글 압축재는 Muy + (P)L/1000 을 포함한 조합 검토가 필요합니다 — member_type='combined' 와 May_strength 로 검토하세요.",
+   "text": "§H1.2: 앵글 압축재는 Muy + (P)L/1000 을 포함한 조합 검토가 필요합니다 — member_type='combined' 와 May_strength 로 검토하세요.",
+   "text_ko": "§H1.2: 앵글 압축재는 Muy + (P)L/1000 을 포함한 조합 검토가 필요합니다 — member_type='combined' 와 May_strength 로 검토하세요."
+  },
+  {
+   "code": "member.warning.i6_2_1_i6_k2",
+   "params": [
+    {
+     "conv": "s",
+     "fmt": "",
+     "quantity": null,
+     "symbol": "i621_issues",
+     "value": "R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown)"
+    }
+   ],
+   "template": "§I6.2.1 적용 조건 위반/미확인: {i621_issues} — K2.1 시험 또는 합리적 해석이 필요합니다.",
+   "template_ko": "§I6.2.1 적용 조건 위반/미확인: {i621_issues} — K2.1 시험 또는 합리적 해석이 필요합니다.",
+   "text": "§I6.2.1 적용 조건 위반/미확인: R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown) — K2.1 시험 또는 합리적 해석이 필요합니다.",
+   "text_ko": "§I6.2.1 적용 조건 위반/미확인: R=0.7 > Table I6.2.1-1 R=0.40 (C, d=9.00 in, span type unknown) — K2.1 시험 또는 합리적 해석이 필요합니다."
+  },
+  {
+   "code": "member.warning.lb_defaulted_verify_lateral",
+   "params": [],
+   "template": "Lb defaulted to 120 in — verify lateral unbraced length",
+   "template_ko": "Lb 를 120 in 로 기본 설정함 — 횡비지지 길이를 확인하십시오",
+   "text": "Lb defaulted to 120 in — verify lateral unbraced length",
+   "text_ko": "Lb 를 120 in 로 기본 설정함 — 횡비지지 길이를 확인하십시오"
+  },
+  {
+   "code": "member.warning.lb_pos_not_given",
+   "params": [],
+   "template": "정모멘트 구간 Lb_pos 가 없어 0(완전 횡지지)으로 계산했습니다 — 압축 플랜지의 실제 횡지지 간격을 Lb_pos 로 입력하세요.",
+   "template_ko": "정모멘트 구간 Lb_pos 가 없어 0(완전 횡지지)으로 계산했습니다 — 압축 플랜지의 실제 횡지지 간격을 Lb_pos 로 입력하세요.",
+   "text": "정모멘트 구간 Lb_pos 가 없어 0(완전 횡지지)으로 계산했습니다 — 압축 플랜지의 실제 횡지지 간격을 Lb_pos 로 입력하세요.",
+   "text_ko": "정모멘트 구간 Lb_pos 가 없어 0(완전 횡지지)으로 계산했습니다 — 압축 플랜지의 실제 횡지지 간격을 Lb_pos 로 입력하세요."
+  },
+  {
+   "code": "member.warning.mcrl_mcrd_fsm_run",
+   "params": [],
+   "template": "Mcrl=0, Mcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).",
+   "template_ko": "Mcrl=0, Mcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).",
+   "text": "Mcrl=0, Mcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).",
+   "text_ko": "Mcrl=0, Mcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values)."
+  },
+  {
+   "code": "member.warning.mcrl_mcrd_mxx_dsm",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "value",
+     "value": "hat"
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "text",
+     "value": "부"
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "text_2",
+     "value": "정"
+    }
+   ],
+   "template": "단면 '{value}'은 굽힘축(x)에 대칭이 아닌데 이 검토는 {text}모멘트이고 Mcrl/Mcrd 는 {text_2}모멘트(+Mxx 응력) 해석값입니다 — 반대 부호로 다시 해석한 값을 dsm(M_sign='-')으로 주세요. Sf 도 압축 연단 기준이어야 합니다.",
+   "template_ko": "단면 '{value}'은 굽힘축(x)에 대칭이 아닌데 이 검토는 {text}모멘트이고 Mcrl/Mcrd 는 {text_2}모멘트(+Mxx 응력) 해석값입니다 — 반대 부호로 다시 해석한 값을 dsm(M_sign='-')으로 주세요. Sf 도 압축 연단 기준이어야 합니다.",
+   "text": "단면 'hat'은 굽힘축(x)에 대칭이 아닌데 이 검토는 부모멘트이고 Mcrl/Mcrd 는 정모멘트(+Mxx 응력) 해석값입니다 — 반대 부호로 다시 해석한 값을 dsm(M_sign='-')으로 주세요. Sf 도 압축 연단 기준이어야 합니다.",
+   "text_ko": "단면 'hat'은 굽힘축(x)에 대칭이 아닌데 이 검토는 부모멘트이고 Mcrl/Mcrd 는 정모멘트(+Mxx 응력) 해석값입니다 — 반대 부호로 다시 해석한 값을 dsm(M_sign='-')으로 주세요. Sf 도 압축 연단 기준이어야 합니다."
+  },
+  {
+   "code": "member.warning.ng_mu_mn_dcr",
+   "params": [
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "symbol": "Mu_pos",
+     "value": 110.0
+    },
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "text",
+     "value": "φ"
+    },
+    {
+     "fmt": ".2f",
+     "quantity": "moment",
+     "sep": " ",
+     "symbol": "phi_Mn_pos",
+     "unit_text": "kip-in",
+     "value": 83.29407704821048
+    },
+    {
+     "fmt": ".3f",
+     "quantity": "dimensionless",
+     "symbol": "util_pos",
+     "value": 1.3206
+    }
+   ],
+   "template": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+)={phi_Mn_pos} (DCR={util_pos})",
+   "template_ko": "정모멘트 구간 NG: Mu(+)={Mu_pos} > {text}Mn(+)={phi_Mn_pos} (DCR={util_pos})",
+   "text": "정모멘트 구간 NG: Mu(+)=110.00 > φMn(+)=83.29 kip-in (DCR=1.321)",
+   "text_ko": "정모멘트 구간 NG: Mu(+)=110.00 > φMn(+)=83.29 kip-in (DCR=1.321)"
+  },
+  {
+   "code": "member.warning.pcrl_pcrd_fsm_run",
+   "params": [],
+   "template": "Pcrl=0, Pcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).",
+   "template_ko": "Pcrl=0, Pcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).",
+   "text": "Pcrl=0, Pcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).",
+   "text_ko": "Pcrl=0, Pcrd=0: 좌굴 해석 결과가 없습니다. FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values)."
+  },
+  {
+   "code": "member.warning.table_b4_1_1_corner_b4_corner_limit",
+   "params": [
+    {
+     "fmt": ".1f",
+     "quantity": "dimensionless",
+     "symbol": "Rt",
+     "value": 25.423728813559322
+    }
+   ],
+   "template": "Corner R/t = {Rt} > 20 (Table B4.1-1 corner limit)",
+   "template_ko": "모서리 R/t = {Rt} > 20 (Table B4.1-1 모서리 한계)",
+   "text": "Corner R/t = 25.4 > 20 (Table B4.1-1 corner limit)",
+   "text_ko": "모서리 R/t = 25.4 > 20 (Table B4.1-1 모서리 한계)"
+  },
+  {
+   "code": "shear.assumption.table_g5_1_g5_per_web_heading",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "count",
+     "symbol": "webs",
+     "value": 2
+    },
+    {
+     "fmt": "",
+     "notice": {
+      "code": "shear.fragment.default_two_back_to_back_channels",
+      "kind": "fragment",
+      "params": [],
+      "template": " (default: two back-to-back channels)",
+      "template_ko": " (기본값: 맞댄 두 채널)",
+      "text": " (default: two back-to-back channels)",
+      "text_ko": " (기본값: 맞댄 두 채널)"
+     },
+     "quantity": null,
+     "symbol": "text",
+     "value": " (default: two back-to-back channels)"
+    }
+   ],
+   "template": "Table G5-1 is per web (table heading; Commentary G5). Total nominal strength uses n_webs={webs}{text}.",
+   "template_ko": "Table G5-1 은 웹 하나당(표 머리말; Commentary G5). 전체 공칭강도는 n_webs={webs}{text} 를 씀.",
+   "text": "Table G5-1 is per web (table heading; Commentary G5). Total nominal strength uses n_webs=2 (default: two back-to-back channels).",
+   "text_ko": "Table G5-1 은 웹 하나당(표 머리말; Commentary G5). 전체 공칭강도는 n_webs=2 (기본값: 맞댄 두 채널) 를 씀."
+  },
+  {
+   "code": "shear.assumption.table_g5_5_g5_per_web_total",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": "count",
+     "symbol": "webs",
+     "value": 3
+    }
+   ],
+   "template": "Table G5-5 is per web. Total nominal strength uses n_webs={webs}.",
+   "template_ko": "Table G5-5 는 웹 하나당. 전체 공칭강도는 n_webs={webs} 를 씀.",
+   "text": "Table G5-5 is per web. Total nominal strength uses n_webs=3.",
+   "text_ko": "Table G5-5 는 웹 하나당. 전체 공칭강도는 n_webs=3 를 씀."
+  },
+  {
+   "code": "shear.fragment.default_two_back_to_back_channels",
+   "params": [],
+   "template": " (default: two back-to-back channels)",
+   "template_ko": " (기본값: 맞댄 두 채널)",
+   "text": " (default: two back-to-back channels)",
+   "text_ko": " (기본값: 맞댄 두 채널)"
+  },
+  {
+   "code": "shear.warning.g2_2_g2_webs_transverse_stiffeners",
+   "params": [],
+   "template": "§G2.2 (webs with transverse stiffeners) is not implemented; the §G2.1 curve is used with the given kv, which is conservative relative to §G2.2.",
+   "template_ko": "§G2.2 (횡방향 보강재가 있는 웹)는 구현되지 않음 — 준 kv 로 §G2.1 곡선을 씀(§G2.2 보다 보수측).",
+   "text": "§G2.2 (webs with transverse stiffeners) is not implemented; the §G2.1 curve is used with the given kv, which is conservative relative to §G2.2.",
+   "text_ko": "§G2.2 (횡방향 보강재가 있는 웹)는 구현되지 않음 — 준 kv 로 §G2.1 곡선을 씀(§G2.2 보다 보수측)."
+  },
+  {
+   "code": "shear.warning.h3_web_config_multi_web",
+   "params": [
+    {
+     "fmt": "",
+     "quantity": null,
+     "symbol": "family",
+     "value": "multi_web"
+    }
+   ],
+   "template": "web_config='multi_web' selects Eq. H3-2 (I-sections), but a {family} section has single unreinforced webs: §H3(a) Eq. H3-1 applies.",
+   "template_ko": "web_config='multi_web' 는 Eq. H3-2 (I 단면)를 고르지만 {family} 단면은 보강하지 않은 단일 웹 — §H3(a) Eq. H3-1 적용.",
+   "text": "web_config='multi_web' selects Eq. H3-2 (I-sections), but a multi_web section has single unreinforced webs: §H3(a) Eq. H3-1 applies.",
+   "text_ko": "web_config='multi_web' 는 Eq. H3-2 (I 단면)를 고르지만 multi_web 단면은 보강하지 않은 단일 웹 — §H3(a) Eq. H3-1 적용."
+  }
+ ],
+ "rule": "docs/implementation/20261123-check-contract.md §16.3 — {name} → format(value, fmt) (conv r: repr first; fmt raw: the text as cut from an old string) + sep + unit_text; a text parameter is its value; a parameter carrying a notice renders that notice (text_ko in Korean); {{ }} are braces. US values; to render SI convert value by quantity and use the SI unit label instead of unit_text."
+}

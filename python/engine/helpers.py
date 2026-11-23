@@ -8,6 +8,7 @@
 import math
 
 import numpy as np
+from design.notices import N as _nt  # noqa: E402
 
 
 def doubler(node: np.ndarray, elem: np.ndarray) -> tuple:
@@ -373,7 +374,7 @@ def _characteristic_half_wavelengths(prop, node, elem) -> dict:
         chk = check_cfsm_model(node, elem)
     except Exception as exc:
         chk = {'supported': False, 'code': 'CHECK_FAILED',
-               'message': f'{type(exc).__name__}: {exc}'}
+               'message': _nt('fsm_solver.warning.exception', exc_type=type(exc).__name__, exc=exc)}
 
     Lcrl = Lcrd = None
     if chk.get('supported'):
@@ -403,12 +404,10 @@ def _characteristic_half_wavelengths(prop, node, elem) -> dict:
                 if wl_d:
                     Lcrd = wl_d[0]
         except Exception as exc:
-            warnings.append(f'cFSM signature curves failed ({type(exc).__name__}: {exc})')
+            warnings.append(_nt('fsm.warning.cfsm_signature_curves_failed', exc_type=type(exc).__name__, exc=exc))
     else:
         warnings.append(
-            f'Classical cFSM does not apply to this model ({chk.get("code")}); '
-            f'the cFSM branch of m_recommend is skipped and the plain signature '
-            f'curve minima are used.')
+            _nt('fsm.warning.classical_cfsm_does_apply', code=chk.get("code")))
 
     if Lcrl is not None and Lcrd is not None:
         return {'Lcrl': float(Lcrl), 'Lcrd': float(Lcrd), 'method': 'cfsm',
@@ -422,10 +421,7 @@ def _characteristic_half_wavelengths(prop, node, elem) -> dict:
         Lcrd = wl[-1]
     if Lcrl is None and Lcrd is None:
         warnings.append(
-            'No interior minimum on the S-S signature curve (the lowest load factor '
-            'decreases with half-wavelength, so the critical mode has the longest '
-            'half-wavelength); longitudinal terms 1..7 are used. Check the result '
-            'with more terms if local or distortional buckling matters.')
+            _nt('fsm.warning.no_interior_minimum_on'))
         return {'Lcrl': None, 'Lcrd': None, 'method': 'no_minimum', 'minima': wl,
                 'extra_lengths': [], 'cfsm_check': chk.get('code'),
                 'warnings': warnings}
@@ -434,10 +430,7 @@ def _characteristic_half_wavelengths(prop, node, elem) -> dict:
     if Lcrd is None:
         Lcrd = Lcrl
     warnings.append(
-        (f'{" and ".join(found)} from the cFSM curves; the rest ' if found else '')
-        + f'taken from the plain signature curve minima {[round(x, 4) for x in wl]} '
-        f'(Lcrl={Lcrl:.4g}, Lcrd={Lcrd:.4g}; terms near every minimum are added). '
-        f'Check the recommended terms.')
+        _nt('fsm.warning.taken_from_plain_signature', text=_nt('fsm.fragment.from_cfsm_curves', found=' and '.join(found)) if found else '', value=[round(x, 4) for x in wl], Lcrl=Lcrl, Lcrd=Lcrd))
     return {'Lcrl': float(Lcrl), 'Lcrd': float(Lcrd), 'method': 'signature_fallback',
             'minima': wl, 'extra_lengths': list(wl), 'cfsm_check': chk.get('code'),
             'warnings': warnings}

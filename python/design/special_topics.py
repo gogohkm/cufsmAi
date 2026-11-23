@@ -12,6 +12,7 @@ from design.connections import (
     OMEGA_RUPTURE, PHI_RUPTURE, block_shear_nominal, normalize_design_method,
     normalize_member_case, rupture_factors, shear_lag_factor, MEMBER_CASES,
 )
+from design.notices import N as _nt  # noqa: E402
 
 
 def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
@@ -69,13 +70,12 @@ def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
         formula_str = f"{sl['formula']} (Eq./Table {usl_eq})"
         warnings.extend(sl['warnings'])
         if case == 'transverse_weld':
-            warnings.append('Table J6.2-1 (3)(a): An_net 에 직접 접합된 요소의 면적을 넣어야 함')
+            warnings.append(_nt('special.warning.table_j6_2_1_j6_net'))
     U = max(min(U, 1.0), 0.0)
 
     if connection_type is None:
         phi_r, omega_r, rkey = 0.50, 3.00, 'screw/paf (most conservative)'
-        warnings.append('connection_type 미지정 — J6.2 파단에 Table J6-1 의 가장 보수적인 계수'
-                        '(나사·PAF Ω=3.00, φ=0.50) 사용. bolted/welded 를 지정하세요.')
+        warnings.append(_nt('special.warning.j6_2_connection_type_j6_j6'))
     else:
         try:
             phi_r, omega_r, rkey = rupture_factors(connection_type)
@@ -172,11 +172,10 @@ def block_shear(Agv: float, Anv: float, Ant: float,
     omega = omega_factor if omega_factor is not None else omega_default
     warnings = []
     if phi_factor is None and omega_factor is None:
-        warnings.append(f'Using Table J6-1 factors for {key} connection (phi={phi}, omega={omega}).')
+        warnings.append(_nt('special.warning.table_j6_1_using_j6_factors_connection', key=key, phi=phi, omega=omega))
     if (phi_factor is not None and phi_factor > phi_default) or \
             (omega_factor is not None and omega_factor < omega_default):
-        warnings.append('A1.2: 사용자 계수가 Table J6-1 보다 덜 보수적임 '
-                        f'(표: φ={phi_default}, Ω={omega_default}) — 시험 근거(K2) 없이는 쓸 수 없음')
+        warnings.append(_nt('special.warning.a1_2_a1_j6_k2', phi_default=phi_default, omega_default=omega_default))
 
     is_asd = dm == 'ASD'
     phi_Rn = Rn / omega if is_asd else phi * Rn
@@ -245,7 +244,7 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
     """
     warnings = []
     if A_corners < 0 or A_flange < 0 or A_total < 0:
-        warnings.append('A_corners/A_flange/A_total 음수 입력 → 0(미제공)으로 처리.')
+        warnings.append(_nt('special.warning.corners_flange_total'))
         A_corners = max(A_corners, 0.0)
         A_flange = max(A_flange, 0.0)
         A_total = max(A_total, 0.0)
@@ -256,19 +255,18 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
         bp = 'not_met'
     else:
         bp = 'not_checked'
-        warnings.append('§A3.3.2 좌굴 전제(Pnℓ=Pne, Pnd=Py / Mnℓ=Mne, Mnd=My)는 확인하지 않음 — '
-                        'Fya 는 그 전제가 성립할 때만 쓸 수 있다(fya_usable=None).')
+        warnings.append(_nt('special.warning.a3_3_2_a3_pn_pne_pnd'))
 
     applicable = True
     if Fuv / Fyv < 1.2:
         applicable = False
-        warnings.append(f'Fu/Fy = {Fuv/Fyv:.3f} < 1.2 — Eq. A3.3.2-2 적용 불가')
+        warnings.append(_nt('special.warning.a3_3_2_fu_fy_a3', value=Fuv/Fyv))
     if Rt > 7:
         applicable = False
-        warnings.append(f'R/t = {Rt:.2f} > 7 — Eq. A3.3.2-2 적용 불가')
+        warnings.append(_nt('special.warning.a3_3_2_a3', Rt=Rt))
     if corner_angle > 120:
         applicable = False
-        warnings.append(f'코너 각도 {corner_angle}° > 120° — Eq. A3.3.2-2 적용 불가')
+        warnings.append(_nt('special.warning.a3_3_2_a3_2', corner_angle=corner_angle))
 
     def _usable(formula_ok):
         if not formula_ok or bp == 'not_met':
@@ -301,8 +299,7 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
         C = corners_per_flange * A_corner_each / A_flange
         c_note = f'C = {corners_per_flange}×A_corner/A_flange (휨부재)'
         warnings.append(
-            f'A_corners 미제공 → 제어 플랜지 코너 {corners_per_flange}개 면적으로 '
-            'C 자동 산정(Eq. A3.3.2-1, 휨부재).')
+            _nt('special.warning.a3_3_2_corners_a3', corners_per_flange=corners_per_flange))
     elif A_total > 0:
         A_c = A_corners if A_corners > 0 else n_corners * A_corner_each
         C = A_c / A_total
@@ -311,8 +308,7 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
     else:
         C = 0.0
         c_note = 'C = 0 (면적 미제공 — 증가 없음)'
-        warnings.append('A_flange(휨) 또는 A_total(압축) 미제공 — C 를 추정하지 않고 증가 없음(C=0). '
-                        '과거의 C=0.15 는 압축부재(C≈0.09–0.10)에서 비보수였다.')
+        warnings.append(_nt('special.warning.flange_total'))
 
     C = min(max(C, 0.0), 1.0)
     Fyf = Fyv

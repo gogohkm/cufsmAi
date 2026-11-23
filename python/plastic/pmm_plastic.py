@@ -13,6 +13,7 @@ import numpy as np
 
 from engine.properties import grosprop
 from engine.stress import yieldMP
+from design.notices import N as _nt  # noqa: E402
 
 
 PLASTIC_SCOPE_NOTES = (
@@ -136,9 +137,7 @@ def pmm_plastic(node: np.ndarray, elem: np.ndarray,
         if defined:
             return grid / y_val
         warnings.append(
-            f'{name}_y is not defined for this section (centerline {name[1:]}-axis '
-            f'moment of inertia {axis_I:.3g}); the normalized {name} values are left undefined (null) — '
-            f'use {name}_raw.')
+            _nt('plastic.warning.defined_this_section_centerline', name=name, name_2=name[1:], axis_I=axis_I, name_3=name, name_4=name))
         return np.full_like(grid, np.nan)
 
     if abs(Py) > 0:
@@ -147,7 +146,7 @@ def pmm_plastic(node: np.ndarray, elem: np.ndarray,
     else:
         P_n = np.full_like(P_grid, np.nan)
         normalized['P'] = False
-        warnings.append('Py is zero; the normalized P values are left undefined (null) — use P_raw.')
+        warnings.append(_nt('plastic.warning.py_zero_normalized_values'))
     M11_n = _norm(M11_grid, M11_y, 'M11', I11)
     M22_n = _norm(M22_grid, M22_y, 'M22', I22)
 
@@ -171,9 +170,7 @@ def pmm_plastic(node: np.ndarray, elem: np.ndarray,
         'normalized': normalized,
         'warnings': warnings,
         'assumptions': [
-            f'Rigid-plastic fibres at +/-fy = {float(fy):g} over the gross section '
-            f'({n_thick} through-thickness fibre(s) per element); normalized by the '
-            'first-yield values Py, M11_y, M22_y of the centerline model.'],
+            _nt('plastic.assumption.rigid_plastic_fibres_at', fy=float(fy), n_thick=n_thick)],
         'scope_notes': list(PLASTIC_SCOPE_NOTES),
     }
 

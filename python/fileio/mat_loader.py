@@ -11,6 +11,7 @@
 import numpy as np
 
 from models.data import CufsmModel, GBTConfig
+from design.notices import N as _nt  # noqa: E402
 
 
 def _matrix(data: dict, key: str, ncols: int, required: bool, max_cols: int = None) -> np.ndarray:
@@ -41,10 +42,8 @@ def _old_springs(arr: np.ndarray, warnings: list, assumptions: list) -> np.ndarr
         out.append([i, nodei, 0, k * (dof == 1), k * (dof == 2), k * (dof == 3),
                     k * (dof == 4), 0, 0, 0])
         if int(kflag) == 0:
-            warnings.append(f'Old spring {i} has kflag=0 (total stiffness); foundation springs '
-                            'are now per unit length — check its stiffness.')
-    assumptions.append('Springs from CUFSM 4.2 or earlier were converted to the 10-column form '
-                       '(as CUFSM loader.m does).')
+            warnings.append(_nt('file.warning.old_spring_has_kflag', i=i))
+    assumptions.append(_nt('file.assumption.springs_from_cufsm_earlier'))
     return np.array(out, dtype=float)
 
 
@@ -67,8 +66,7 @@ def _constraints(data: dict, assumptions: list) -> np.ndarray:
         if np.any(arr[:, 5:]):
             raise ValueError(f'.mat constraints has {arr.shape[1]} columns with non-zero '
                              'entries beyond column 5')
-        assumptions.append(f'constraints had {arr.shape[1]} columns; the zero columns after '
-                           'column 5 were dropped.')
+        assumptions.append(_nt('file.assumption.constraints_had_columns_zero', value=arr.shape[1]))
         arr = arr[:, :5]
     return arr
 
@@ -78,8 +76,7 @@ def _bc(data: dict, assumptions: list) -> str:
     if isinstance(raw, np.ndarray):
         raw = str(raw.flat[0]) if raw.size > 0 else None
     if raw is None or str(raw).strip() == '':
-        assumptions.append('BC is not stored (CUFSM 3 file): read as S-S, as CUFSM loader.m '
-                           'does (CUFSM 3 analysed S-S only).')
+        assumptions.append(_nt('file.assumption.bc_stored_cufsm_file'))
         return 'S-S'
     return str(raw).strip()
 
@@ -89,11 +86,9 @@ def _m_all(data: dict, n_lengths: int, BC: str, warnings: list, assumptions: lis
     if raw is None or np.size(raw) == 0:
         if BC == 'S-S':
             if raw is None:
-                assumptions.append('m_all is not stored: m=[1] per length (S-S), as CUFSM '
-                                   'loader.m does.')
+                assumptions.append(_nt('file.assumption.all_stored_per_length'))
             return [np.array([1.0]) for _ in range(n_lengths)]
-        warnings.append(f'm_all is not stored and BC={BC}: no longitudinal terms were read — '
-                        "give m_all (or m_all='auto') before analysing.")
+        warnings.append(_nt('file.warning.all_stored_bc_no', BC=BC))
         return []
     if np.isscalar(raw) or (isinstance(raw, np.ndarray) and raw.dtype != object):
         # simplify_cells 는 항 하나짜리 1x1 셀을 숫자 하나로 푼다.
@@ -135,15 +130,13 @@ def _gbtcon(data: dict, assumptions: list) -> GBTConfig:
     if 'basis' in raw and np.size(raw['basis']) > 0 and not {'ospace', 'orth', 'couple'} & set(d):
         basis = int(np.array(raw['basis']).reshape(-1)[0])
         d.update(_BASIS_TO_SETTINGS.get(basis, _BASIS_OTHER))
-        assumptions.append(f'GBTcon.basis={basis} (old CUFSM file) read as '
-                           f"ospace={d['ospace']}, orth={d['orth']}, couple={d['couple']} (loader.m).")
+        assumptions.append(_nt('file.assumption.gbtcon_basis_old_cufsm', basis=basis, ospace=d['ospace'], orth=d['orth'], couple=d['couple']))
     filled = [k for k in CUFSM_LOADER_GBT_DEFAULTS if k not in d]
     for k in filled:
         d[k] = CUFSM_LOADER_GBT_DEFAULTS[k]
     if filled:
-        assumptions.append('cFSM settings not stored (' + ', '.join(
-            f'{k}={CUFSM_LOADER_GBT_DEFAULTS[k]}' for k in filled) + ') filled with the CUFSM '
-            'loader defaults (loader.m).')
+        assumptions.append(_nt('file.assumption.cfsm_settings_stored_filled', items=', '.join(
+            f'{k}={CUFSM_LOADER_GBT_DEFAULTS[k]}' for k in filled)))
     return GBTConfig.from_dict(d)
 
 
@@ -168,8 +161,7 @@ def read_mat_file(filepath: str):
     if data.get('lengths') is None or np.size(data.get('lengths')) == 0:
         # 단면만 담은 파일(템플릿 아이콘 등). 길이를 지어내지 않는다 — 해석 전에 정해야 한다.
         lengths = np.array([])
-        warnings.append('No analysis lengths are stored (section-only file): set lengths '
-                        'before analysing.')
+        warnings.append(_nt('file.warning.no_analysis_lengths_stored'))
     else:
         lengths = np.array(data['lengths'], dtype=float).reshape(-1)
     springs = _springs(data, warnings, assumptions)
@@ -182,8 +174,7 @@ def read_mat_file(filepath: str):
 
     ignored = sorted(k for k in ('curve', 'shapes', 'clas') if k in data)
     if ignored:
-        assumptions.append(f"Stored analysis results ({', '.join(ignored)}) were not imported; "
-                           're-run the analysis.')
+        assumptions.append(_nt('file.assumption.stored_analysis_results_were', ignored=', '.join(ignored)))
     model = CufsmModel(prop=prop, node=node, elem=elem, lengths=lengths, springs=springs,
                        constraints=constraints, BC=BC, m_all=m_all,
                        GBTcon=_gbtcon(data, assumptions), **kw)

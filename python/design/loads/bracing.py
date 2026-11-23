@@ -8,6 +8,7 @@ Sections:
   - 비지지 영역 — determine_unbraced_lengths 의 규칙
   - R (uplift reduction factor) — Section I6.2.1 (through-fastened)
 """
+from design.notices import N as _nt  # noqa: E402
 
 
 E_STEEL = 29500.0  # ksi
@@ -105,7 +106,7 @@ def lateral_stiffness_detail(
     out = {'kx': 0.0, 'Ka': None, 'psi': None, 'Ke': None, 'defaulted': [], 'notes': [],
            'warnings': [], 'scope_notes': []}
     if min(t1, t2, fastener_spacing, E) <= 0:
-        out['warnings'].append('Non-positive thickness, spacing or E: kx taken as 0.')
+        out['warnings'].append(_nt('loads.warning.non_positive_thickness_spacing'))
         out['notes'] = out['warnings'] + out['scope_notes']
         return out
     vals = {'Fss_kip': Fss_kip, 'D_screw_in': D_screw_in, 'Fu1_ksi': Fu1_ksi, 'Fu2_ksi': Fu2_ksi}
@@ -119,9 +120,8 @@ def lateral_stiffness_detail(
     Ke = 0.27 * psi ** -0.69 * Ka
     out.update({'kx': Ke / fastener_spacing, 'Ka': Ka, 'psi': psi, 'Ke': Ke, 'inputs': vals})
     if min(t1, t2) < 0.0179 or max(t1, t2) > 0.097:
-        out['warnings'].append('Ply thickness outside the RP17-2 test range (18 - 97 mil).')
-    out['scope_notes'].append('RP17-2 curve fit has a coefficient of variation of 0.86; '
-                              'use S917 test stiffness (kx_override) where available.')
+        out['warnings'].append(_nt('loads.warning.ply_thickness_outside_rp17'))
+    out['scope_notes'].append(_nt('loads.scope.rp17_curve_fit_has'))
     out['notes'] = out['warnings'] + out['scope_notes']
     return out
 
@@ -569,13 +569,9 @@ def determine_unbraced_lengths(
                 else:
                     negative_regions.append(r)
         if negative_regions:
-            assumptions.append('Inflection points taken as brace points of the bottom flange '
-                               '(top flange continuously attached to a through-fastened deck; '
-                               'Design Manual Examples II-1A/II-2A).')
+            assumptions.append(_nt('loads.assumption.inflection_points_taken_as'))
         if lap_regions:
-            assumptions.append('Bottom-flange segments inside laps are reported in lap_regions '
-                               '(two members; Design Manual assumptions c-d) and are not part of '
-                               'negative_regions.')
+            assumptions.append(_nt('loads.assumption.bottom_flange_segments_inside'))
     else:
         pts = brace_x[:]
         intervals = []
@@ -598,9 +594,7 @@ def determine_unbraced_lengths(
                 r['inflection_brace_assumed'] = False
                 negative_regions.append(r)
         assumptions.append(
-            ('Standing-seam roof: ' if deck_type == 'standing-seam' else 'No deck bracing: ')
-            + 'flanges braced only at supports and discrete brace points; unbraced length = '
-              'brace-to-brace distance (inflection points are not brace points).')
+            _nt('loads.assumption.flanges_braced_only_at', text=_nt('loads.fragment.standing_seam_roof') if deck_type == 'standing-seam' else _nt('loads.fragment.no_deck_bracing')))
 
     # 변곡점 (legacy 키) — M 의 부호가 부재 안에서 실제로 바뀌는 곳만(계약 §6.1, 2026-11-24)
     inflections = inflection_points(x, M_hi)
@@ -638,6 +632,24 @@ I621_SYSTEM_CONDITIONS = (
     '(m) fasteners are not standoff type screws',
     '(n) fasteners <= 12 in. o.c., near the center of the flange and adjacent to the panel high rib',
 )
+
+
+# §I6.2.1 조건 이름표(label)에 든 한계값 — 숫자와 물리량(계약 §3.2 어휘). 이름표 글은 그대로 두고 옆에 싣는다(K4b).
+# 'ft' 는 어휘에 없다(길이는 in) — 경간 한계는 quantity None, unit_text 'ft' 로 둔다(계약 §16.6).
+I621_LIMITS = {
+    '(a)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '<=', 'value': 12.0},)},
+    '(b)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>', 'value': 0.0},)},
+    '(c)': {'quantity': 'dimensionless', 'limits': ({'op': '>=', 'value': 60.0}, {'op': '<=', 'value': 170.0})},
+    '(d)': {'quantity': 'dimensionless', 'limits': ({'op': '>=', 'value': 2.8}, {'op': '<=', 'value': 5.5})},
+    '(e)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>=', 'value': 2.125},)},
+    '(f)': {'quantity': 'dimensionless', 'limits': ({'op': '>=', 'value': 16.0}, {'op': '<=', 'value': 43.0})},
+    '(g)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>=', 'value': 1.5, 'times': 'd'},)},
+    '(h)': {'quantity': None, 'unit_text': 'ft', 'limits': ({'op': '<=', 'value': 33.0},)},
+    '(j)-t': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>=', 'value': 0.018, 'accepted': 0.0179},)},
+    '(k)-t': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '<=', 'value': 6.0},)},
+    '(n)-s': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '<=', 'value': 12.0},)},
+    '(o)': {'quantity': 'dimensionless', 'limits': ({'op': '>=', 'value': 1.08},)},
+}
 
 
 def _i621_profile(sec_type) -> str:
@@ -732,7 +744,14 @@ def check_i621_conditions(
     conds = []
 
     def add(cid, label, status, value=None):
-        conds.append({'id': cid, 'label': label, 'status': status, 'value': value})
+        c = {'id': cid, 'label': label, 'status': status, 'value': value}
+        lim = I621_LIMITS.get(cid)
+        if lim is not None:   # 이름표 안의 숫자(한계) · value 의 물리량 — 계약 §16.6 (K4b)
+            c['limits'] = [dict(x) for x in lim['limits']]
+            c['value_quantity'] = lim['quantity'] if isinstance(value, (int, float)) and not isinstance(value, bool)                 else None
+            if lim.get('unit_text'):
+                c['value_unit_text'] = lim['unit_text']
+        conds.append(c)
 
     def pf(ok):
         return 'pass' if ok else 'fail'

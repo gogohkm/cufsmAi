@@ -14,6 +14,7 @@ PAF(J5) 접합부의 공칭강도 계산. 각 파괴 모드별 강도를 계산�
 import math
 
 from design.checks import Trace, q, src, CONTEXT_KEYS, display_rounding
+from design.notices import N as _nt, attach as _attach_notices  # noqa: E402
 
 # 강재 탄성계수 (ksi) — 아크스팟 슬렌더니스 분기, PAF 전단 풀아웃(J5.3.3)에 사용
 E_STEEL = 29500.0
@@ -186,7 +187,7 @@ def shear_lag_factor(member_case, d: float = None, s: float = None,
                        formula='Usl = 0.9 (d 또는 s 미지정 — Eq. J6.2-4 의 하한)',
                        expr='Usl = Usl,min  (d or s not given — lower bound of Eq. J6.2-4)',
                        terms=[('Usl,min', 0.9, 'dimensionless')])
-            out['warnings'].append('J6.2: d 또는 s(시트폭/구멍수) 미지정 — Usl=0.9(Eq. J6.2-4 하한) 사용')
+            out['warnings'].append(_nt('conn.warning.j6_2_j6_usl_j6'))
         return out
     if case in ('flat_sheet_staggered', 'all_elements', 'transverse_weld'):
         row = {'flat_sheet_staggered': '(2)', 'all_elements': '(3)(b)', 'transverse_weld': '(3)(a)'}[case]
@@ -462,19 +463,19 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
     pitch = geo.get('pitch')
     if n_rows < 1 or n % n_rows != 0:
         ne.append(_ne('J6 파단', 'shear',
-                      f'패스너 수 n={n} 이 하중방향 행 수 n_rows_long={n_rows} 로 나누어떨어지지 않음',
+                      _nt('conn.reason.rows_long', n=n, n_rows=n_rows),
                       'rupture'))
         return ls, warnings, ne
     n_cross = n // n_rows
     if n_rows > 1 and not (pitch and pitch > 0):
-        ne.append(_ne('J6.1/J6.3', 'shear', 'n_rows_long>1 인데 하중방향 간격 pitch 미입력', 'rupture'))
+        ne.append(_ne('J6.1/J6.3', 'shear', _nt('conn.reason.rows_long_pitch'), 'rupture'))
         pitch_ok = False
     else:
         pitch_ok = True
 
     # --- J6.1 전단파단 (Eq. J6.1-1, J6.1-2) ---
     if e is None:
-        ne.append(_ne('Shear Rupture (J6.1)', 'shear', '끝단 거리 e 미입력', 'rupture'))
+        ne.append(_ne('Shear Rupture (J6.1)', 'shear', _nt('conn.reason.end_distance_not_given'), 'rupture'))
     elif pitch_ok:
         e_net = max(e - dh / 2.0, 0.0) + (n_rows - 1) * max((pitch or 0.0) - dh, 0.0)
         Anv = 2.0 * n_cross * t * e_net
@@ -510,22 +511,20 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
         Ag = width * t
     if not_tension:
         # Table J6.2-1 은 인장재 접합의 전단지연 표다 — 인장재가 아니면 J6 머리글의 "as applicable" 로 제외
-        notes.append(f'J6.2{label}: 호출자 진술 member_case=not_tension_member — 이 판은 접합력을 인장재로 '
-                     '받지 않으므로 순단면 인장파단(J6.2)을 적용하지 않음')
+        notes.append(_nt('conn.assumption.j6_2_j6_member_case_tension', label=label))
     elif Ag is None or Ag <= 0:
         ne.append(_ne('Tension Rupture (J6.2)', 'shear',
-                      '부재 총단면적 Ag 또는 폭 width 미입력', 'rupture'))
+                      _nt('conn.reason.ag_width'), 'rupture'))
     else:
         case = normalize_member_case(geo.get('member_case'))
         Usl_in = geo.get('Usl')
         if case is None and geo.get('member_case') is not None:
             ne.append(_ne('Tension Rupture (J6.2)', 'shear',
-                          f"member_case '{geo.get('member_case')}' 를 Table J6.2-1 에서 찾을 수 없음",
+                          _nt('conn.reason.table_j6_2_1_member_case_j6', member_case=geo.get('member_case')),
                           'rupture'))
         elif case is None and Usl_in is None:
             ne.append(_ne('Tension Rupture (J6.2)', 'shear',
-                          'member_case(Table J6.2-1 분류: flat_sheet, angle_bolted, channel_bolted, …) '
-                          '또는 Usl 미입력 — 앵글·채널이면 평판식은 비보수', 'rupture'))
+                          _nt('conn.reason.table_j6_2_1_member_case_j6_flat'), 'rupture'))
         else:
             if case == 'transverse_weld':
                 Ant = geo.get('Ant')
@@ -538,7 +537,7 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
                     ant_note += ' + t·s\'²/(4g+2dh)'
             if Ant is None:
                 ne.append(_ne('Tension Rupture (J6.2)', 'shear',
-                              'Table J6.2-1 (3)(a): 직접 접합된 요소 면적 Ant 미입력', 'rupture'))
+                              _nt('conn.reason.table_j6_2_1_j6_ant'), 'rupture'))
             else:
                 Ant = max(Ant, 0.0)
                 sl = None
@@ -603,7 +602,7 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
 
     # --- J6.3 블록전단 (볼트/용접만, Eq. J6.3-1/-2) ---
     if include_block_shear and conn in ('bolt', 'weld') and j63_na:
-        notes.append(f'J6.3{label}: 호출자 진술 j6_3_not_applicable=True — 블록전단 경로 없음으로 보고 적용하지 않음')
+        notes.append(_nt('conn.assumption.j6_3_not_applicable_stated_path', label=label))
     elif include_block_shear and conn in ('bolt', 'weld'):
         explicit = [geo.get('Agv_bs'), geo.get('Anv_bs'), geo.get('Ant_bs')]
         paths = []
@@ -634,7 +633,7 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
                     best = (Pnr, P1, P2, plabel, Agv, Anv, Ant_bs)
             Pnr, P1, P2, plabel, Agv, Anv, Ant_bs = best
             if Fy is None:
-                warnings.append('J6.3: Fy 미입력 — Eq. J6.3-1 에 Fu 사용(비보수 가능)')
+                warnings.append(_nt('conn.warning.j6_3_j6_fy_j6_fu'))
             area_src = (src('user_input', key='Agv_bs/Anv_bs/Ant_bs') if plabel == '입력 면적'
                         else src('specification', note=f'block shear path areas: {plabel} '
                                  '(from e, pitch, g, edge_transverse, hole size)'))
@@ -664,15 +663,13 @@ def _j6_rupture_limit_states(conn: str, Fu: float, t: float, dh: float,
             ls.append(item)
         else:
             if Fy is None:
-                reason = 'Fy 미입력'
+                reason = _nt('conn.reason.fy_not_given')
             elif e is None:
-                reason = '끝단 거리 e 미입력'
+                reason = _nt('conn.reason.end_distance_not_given')
             elif n_cross >= 2:
-                reason = '게이지 g(하중직각 패스너 간격) 미입력'
+                reason = _nt('conn.reason.gauge_not_given')
             else:
-                reason = ('단면당 패스너 1개 — 블록전단 경로는 나란한 연단까지 가므로 edge_transverse '
-                          '(패스너 선 → 연단 거리) 또는 Agv_bs/Anv_bs/Ant_bs 필요 '
-                          '(경로가 없으면 j6_3_not_applicable=True)')
+                reason = (_nt('conn.reason.edge_transverse_agv_bs'))
             ne.append(_ne('Block Shear (J6.3)', 'shear', reason, 'rupture'))
     if label:
         for x in ls:
@@ -692,7 +689,7 @@ def _j6_second_part(conn: str, part2: dict, n: int, dh: float, d_usl: float, not
     p = dict(part2)
     t2p, Fu2p = p.get('t'), p.get('Fu')
     if t2p is None or Fu2p is None:
-        return [], [], [_ne('J6 [part 2]', 'shear', 'j6_part2 에 t 와 Fu 가 필요함', 'rupture')]
+        return [], [], [_ne('J6 [part 2]', 'shear', _nt('conn.reason.j6_part2_fu'), 'rupture')]
     return _j6_rupture_limit_states(
         conn=conn, Fu=Fu2p, t=t2p, dh=dh, n=n, e=p.get('e'), Fy=p.get('Fy'),
         d=d_usl, include_block_shear=include_block_shear, geometry=p,
@@ -702,9 +699,8 @@ def _j6_second_part(conn: str, part2: dict, n: int, dh: float, d_usl: float, not
 
 def _part_basis_note(kind: str, t: float, has_part2: bool) -> str:
     if has_part2:
-        return f'J6: 두 판을 각각 검토 (판 1 t={t}, 판 2 는 j6_part2)'
-    return (f'J6{kind}: 판 1(t={t}, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 '
-            '강도가 낮으면 j6_part2 로 그 판도 검토하세요')
+        return _nt('conn.assumption.j6_both_parts_checked', t=t)
+    return (_nt('conn.assumption.j6_one_part_checked', kind=kind, t=t))
 
 
 # Chapter D 인장 한계상태 계수
@@ -764,8 +760,7 @@ def _chapter_d_tension_caps(Fy: float, Fu: float, t: float, dh: float,
     })
     if Ae is None:
         warnings.append(
-            'Chapter D 캡: 유효순단면 Ae 미입력 — An=Ag−n·dh·t 사용(전단지연 미반영). '
-            '접합부 전단지연은 J6.2 한계상태에서 따로 평가한다.')
+            _nt('conn.warning.j6_2_chapter_ae_ag_dh'))
     return ls, warnings
 
 
@@ -838,7 +833,7 @@ def _finish(connection_type: str, limit_states: list, not_evaluated: list,
         'warnings': list(warnings),
     }
     for x in not_evaluated:
-        result['warnings'].append(f"{x['name']} 미평가: {x['reason']}")
+        result['warnings'].append(_nt('conn.warning.limit_state_not_evaluated', name=x['name'], reason=x['reason']))
     if extra:
         result.update(extra)
     # 소요를 모르는 단계의 검토 항목(직접 호출용). design_connection 이 소요로 다시 만든다.
@@ -857,11 +852,10 @@ def _detail(name: str, provided: float, required: float, clause: str) -> dict:
 def _scope_thickness(t_min: float, clause: str, not_eval: list):
     if t_min > T_SCOPE_MAX + 1e-9:
         not_eval.append(_ne(f'적용범위 ({clause})', 'any',
-                            f'가장 얇은 접합 부재 t={t_min} in > 3/16 in — AISI S100 {clause} 가 아니라 '
-                            'ANSI/AISC 360 을 적용', 'scope'))
+                            _nt('conn.reason.aisi_s100_ansi_aisc', t_min=t_min, clause=clause), 'scope'))
 
 
-_CONCENTRIC = 'J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.'
+_CONCENTRIC = _nt('conn.assumption.j1_concentric_load')
 
 
 # ============================================================
@@ -954,7 +948,7 @@ def bolt_connection(t1: float, t2: float, d: float,
         e = 1.5 * d
         e_assumed = True
         not_eval.append(_ne('끝단 거리 (J3.2)', 'shear',
-                            'e 미입력 — J6.1 은 최소 1.5d 로 계산, 실제 끝단 거리 확인 필요', 'detailing'))
+                            _nt('conn.reason.j6_1_j6'), 'detailing'))
     else:
         detailing.append(_detail('끝단 거리 e ≥ 1.5d (J3.2)', e, 1.5 * d, 'J3.2'))
         if hole != 'standard':
@@ -971,7 +965,7 @@ def bolt_connection(t1: float, t2: float, d: float,
             spacing = g
     if n > 1:
         if spacing is None:
-            not_eval.append(_ne('볼트 간격 (J3.1)', 'shear', 's 미입력 — 3d 이상 확인 필요', 'detailing'))
+            not_eval.append(_ne('볼트 간격 (J3.1)', 'shear', _nt('conn.reason.spacing_not_given_3d'), 'detailing'))
         else:
             detailing.append(_detail('볼트 간격 s ≥ 3d (J3.1)', spacing, 3.0 * d, 'J3.1'))
             if hole != 'standard':
@@ -980,7 +974,7 @@ def bolt_connection(t1: float, t2: float, d: float,
     # (a) 지압 강도 (J3.3.1, Eq. J3.3.1-1): Pnb = C·mf·d·t·Fu, C 는 Table J3.3.1-1 (d/t)
     if not (0.024 <= t_min < 0.1875):
         not_eval.append(_ne('Bearing (J3.3.1)', 'shear',
-                            f'Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t={t_min} — 시험 필요',
+                            _nt('conn.reason.table_j3_3_1_1_j3', t_min=t_min),
                             'fastener'))
     else:
         dt = d / t_min
@@ -992,7 +986,7 @@ def bolt_connection(t1: float, t2: float, d: float,
         mf_given = mf is not None
         if mf is None:
             mf, mf_note = _mf_from_table(hole, orient, washers, shear_plane)
-            warnings.append(f'Table J3.3.1-2 mf={mf} ({mf_note})')
+            warnings.append(_nt('conn.warning.table_j3_3_1_2_j3_mf', mf=mf, mf_note=mf_note))
         Pnb = n * C * mf * d * t_min * Fu
         d_q = q('d', d, 'length', src('user_input', key='d'))
         t_q = q('t', t_min, 'length', src('user_input', key='min(t1, t2)'))
@@ -1036,21 +1030,21 @@ def bolt_connection(t1: float, t2: float, d: float,
     Fnv = Fnt = None
     grade_label = None
     if d < 0.25:
-        not_eval.append(_ne('Bolt Shear (J3.4)', 'shear', f'd={d} in < 1/4 in: Table J3.4-1 범위 밖',
+        not_eval.append(_ne('Bolt Shear (J3.4)', 'shear', _nt('conn.reason.table_j3_4_1_j3', d=d),
                             'fastener'))
-        not_eval.append(_ne('Bolt Tension (J3.4)', 'tension', f'd={d} in < 1/4 in: Table J3.4-1 범위 밖',
+        not_eval.append(_ne('Bolt Tension (J3.4)', 'tension', _nt('conn.reason.table_j3_4_1_j3', d=d),
                             'fastener'))
     else:
         grade = bolt_grade
         if not grade and not (Fub and Fub > 0):
             grade = 'A307'
-            warnings.append('App. A Table J3.4-1: bolt_grade·Fub 미입력 — 승인 볼트 중 최저인 A307 값 사용')
+            warnings.append(_nt('conn.warning.app_a_j3_bolt_grade_fub'))
         try:
             Fnv, Fnt, grade_label = _bolt_Fnv_Fnt(d, Fub or 0.0, grade, threads_excluded)
         except ValueError as exc:
             return {'error': str(exc)}
         if grade_label == 'A354BD' and d >= 0.5:
-            warnings.append('J3: ASTM A354 Grade BD 는 d < 1/2 in 볼트에만 승인됨 — 도면에 강도 명시 필요')
+            warnings.append(_nt('conn.warning.j3_j3_astm_a354_grade'))
         Fnv_table = Fnv
         if pattern_length is not None and pattern_length > 38.0:
             Fnv *= 0.833
@@ -1125,12 +1119,10 @@ def bolt_connection(t1: float, t2: float, d: float,
                        '(Eq. J4.4.2-1 꼴, A1.2(c) 합리적 해석)',
             'equation': 'J4.4.2-1 (A1.2(c))',
         })
-        assumptions.append("App. A J3.4 볼트머리 풀오버: 기준식이 없어 Eq. J4.4.2-1 꼴 1.5·t·d'w·Fu 를 "
-                           'A1.2(c) 합리적 해석으로 사용 (Ω 3.00 / φ 0.50, 얇은 판)')
+        assumptions.append(_nt('conn.assumption.app_a_j3_j4_fu_a1'))
     else:
         not_eval.append(_ne('Sheet Pull-over at Bolt Head (App. A J3.4)', 'tension',
-                            '볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — '
-                            "dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력", 'fastener'))
+                            _nt('conn.reason.a1_2_dw_a1_pnov_bolt'), 'fastener'))
 
     # (c) J6 파단: J6.1/J6.3 은 실제 구멍, J6.2 Ant 는 표준공(Eq. J6.2-3)
     j6_ls, j6_warn, j6_ne = _j6_rupture_limit_states(
@@ -1148,8 +1140,7 @@ def bolt_connection(t1: float, t2: float, d: float,
         warnings.extend(p_w)
         not_eval.extend(p_ne)
     assumptions.append(_part_basis_note('', t_min, bool(j6_part2)))
-    assumptions.append('J3.3.1: 지압은 얇은 판(t_min, Fu 하나)으로 검토 — 두 판 Fu 가 같으면 C·t 가 t 에 따라 '
-                       '증가하므로 얇은 판이 지배한다(Table J3.3.1-1). 판 강도가 다르면 낮은 Fu 를 넣으세요.')
+    assumptions.append(_nt('conn.assumption.j3_3_1_bearing_thinner_sheet'))
 
     if member_tension:
         d_ls, d_warn = _chapter_d_tension_caps(
@@ -1168,7 +1159,7 @@ def bolt_connection(t1: float, t2: float, d: float,
         if Vu is None:
             V_req = 0.0
             not_eval.append(_ne('전단-인장 상호작용 (App. A J3.4)', 'interaction',
-                                'Vu 미입력 — fv=0 으로만 계산됨', 'interaction'))
+                                _nt('conn.reason.vu_fv'), 'interaction'))
         else:
             V_req = abs(Vu)
         fv = V_req / (n * Ab)
@@ -1176,8 +1167,7 @@ def bolt_connection(t1: float, t2: float, d: float,
         fv_cap = phi_v * Fnv if dm == 'LRFD' else Fnv / omega_v
         if fv > fv_cap:
             st_warn.append(
-                f'App. A J3.4: 소요 전단응력 fv={fv:.2f} ksi가 허용 전단응력 {fv_cap:.2f} ksi 초과 — '
-                f'전단 단독으로 볼트 부적합')
+                _nt('conn.warning.app_a_j3_fv', fv=fv, fv_cap=fv_cap))
         if dm == 'LRFD':
             Fnt_red = 1.3 * Fnt - (Fnt / (phi_v * Fnv)) * fv
         else:
@@ -1297,24 +1287,23 @@ def screw_connection(t1: float, t2: float, d: float,
 
     if not (0.08 <= d <= 0.25):
         not_eval.append(_ne('적용범위 (J4)', 'any',
-                            f'나사 직경 d={d} in 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖', 'scope'))
+                            _nt('conn.reason.j4_screw_diameter_out_of_range', d=d), 'scope'))
     if t1 > t2:
         warnings.append(
-            f'§J4: t1(머리·와셔 접촉 부재)={t1} > t2(먼 부재)={t2} — 보통은 얇은 시트가 머리 쪽이다. '
-            't1/t2 를 바꿔 넣으면 풀오버(J4.4.2)가 비보수가 되므로 입력을 확인하세요.')
+            _nt('conn.warning.j4_j4_t1_t2_t1', t1=t1, t2=t2))
 
     e_assumed = False
     if e is None:
         e = 1.5 * d
         e_assumed = True
         not_eval.append(_ne('끝단 거리 (J4.2)', 'shear',
-                            'e 미입력 — J6.1 은 최소 1.5d 로 계산, 실제 끝단 거리 확인 필요', 'detailing'))
+                            _nt('conn.reason.j6_1_j6'), 'detailing'))
     else:
         detailing.append(_detail('끝단 거리 e ≥ 1.5d (J4.2)', e, 1.5 * d, 'J4.2'))
     if n > 1:
         spacing = s if s is not None else g
         if spacing is None:
-            not_eval.append(_ne('나사 간격 (J4.1)', 'shear', 's 미입력 — 3d 이상 확인 필요', 'detailing'))
+            not_eval.append(_ne('나사 간격 (J4.1)', 'shear', _nt('conn.reason.spacing_not_given_3d'), 'detailing'))
         else:
             detailing.append(_detail('나사 간격 ≥ 3d (J4.1)', spacing, 3.0 * d, 'J4.1'))
 
@@ -1400,7 +1389,7 @@ def screw_connection(t1: float, t2: float, d: float,
             'equation': 'J4.3.2 (estimate)', 'basis': 'in_house_estimate', 'assumed': True,
         })
         not_eval.append(_ne('Screw Shear (J4.3.2)', 'shear',
-                            'Pnvs(제조사·독립시험 나사 전단강도) 미입력 — 사내 추정 0.5·Fub·As 는 참고값',
+                            _nt('conn.reason.pnvs_fub_as'),
                             'fastener'))
 
     # (c) 풀아웃 (J4.4.1, Eq. J4.4.1-1): Pnot = 0.85·tc·d·Fu2
@@ -1424,10 +1413,10 @@ def screw_connection(t1: float, t2: float, d: float,
     if dw is None:
         dw = min(d * 2.0, 0.75)
         not_eval.append(_ne('Pull-over (J4.4.2)', 'tension',
-                            "d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값", 'fastener'))
+                            _nt('conn.reason.dw_not_given_2d_reference'), 'fastener'))
     else:
         if dw < 5.0 / 16.0:
-            warnings.append(f"J4.4: 인장 받는 나사의 머리·와셔 직경은 5/16 in 이상이어야 함 (d'w={dw})")
+            warnings.append(_nt('conn.warning.j4_4_j4', dw=dw))
         dw_in = dw
         dw = min(dw, 0.75)
     Pnov = 1.5 * t1 * dw * Fu1 * n
@@ -1469,7 +1458,7 @@ def screw_connection(t1: float, t2: float, d: float,
         })
     else:
         not_eval.append(_ne('Screw Tension (J4.4.3)', 'tension',
-                            'Pnts(제조사·독립시험 나사 인장강도) 미입력', 'fastener'))
+                            _nt('conn.reason.pnts_not_given'), 'fastener'))
 
     # (f) J6 파단 (나사: J6.1 + J6.2, 블록전단 제외 — J6 머리글). 얇은 부재 기준.
     t_crit = min(t1, t2)
@@ -1488,7 +1477,7 @@ def screw_connection(t1: float, t2: float, d: float,
         not_eval.extend(p_ne)
     assumptions.append(_part_basis_note('', t_crit, bool(j6_part2)))
     if tc is None:
-        assumptions.append('J4.4.1: tc 미입력 — 나사가 t2 를 모두 관통한다고 보고 tc = t2')
+        assumptions.append(_nt('conn.assumption.j4_4_1_tc_equals_t2'))
 
     if member_tension:
         d_ls, d_warn = _chapter_d_tension_caps(
@@ -1518,7 +1507,7 @@ def screw_connection(t1: float, t2: float, d: float,
             lim.append(f't2/t1={ratio:.3f} (≥2.5)')
         if not dw_given and d_head_washer is None:
             not_eval.append(_ne('전단+풀오버 (J4.5.1)', 'interaction',
-                                "d'w(머리·와셔 직경) 미입력 — 풀오버 강도가 추정값이라 조합을 판정할 수 없음",
+                                _nt('conn.reason.dw_not_given_combined'),
                                 'interaction'))
         elif lim:
             _j45_fallback(interaction, not_eval, assumptions, j45_rational, dm,
@@ -1582,9 +1571,9 @@ def screw_connection(t1: float, t2: float, d: float,
                                                   OMEGA_SCREW['shear'], dm, tr=tr, value_idx=i_v))
         else:
             not_eval.append(_ne('나사 전단+인장 (J4.5.3)', 'interaction',
-                                'Pnvs·Pnts(제조사 값) 미입력', 'interaction'))
+                                _nt('conn.reason.pnvs_pnts'), 'interaction'))
         if d_head_washer is None:
-            assumptions.append("J4.5.1: dw(머리·와셔 큰 직경) 미입력 — d'w 사용(보수)")
+            assumptions.append(_nt('conn.assumption.j4_5_1_j4_dw'))
 
     spec_sections = ['J4.1', 'J4.2', 'J4.3.1', 'J4.3.2', 'J4.4.1', 'J4.4.2', 'J4.4.3', 'J6.1', 'J6.2']
     if Vu and Tu:
@@ -1605,11 +1594,10 @@ def _j45_fallback(interaction, not_eval, assumptions, enabled, dm, name, clause,
     가용강도 기준 직선 상호작용 V/(Pnv/Ω) + T/(Pnt/Ω) ≤ 1 로, A1.2(c) 합리적 해석으로 적용한다.
     enabled=False 면 미평가로 둔다.
     """
-    why = f'Eq. {clause}-1 적용한계 밖: ' + ', '.join(lim)
+    why = _nt('conn.reason.outside_equation_limits', clause=clause, lim=', '.join(lim))
     if not enabled:
         not_eval.append(_ne(name, 'interaction',
-                            why + ' — 기준 식 없음: 시험(K2) 또는 A1.2 합리적 해석 필요 '
-                            '(j45_rational=True 면 Commentary C-J4.5.1-1 직선식 사용)', 'interaction'))
+                            _nt('conn.reason.a1_2_k2_a1_j45_rational', why=why), 'interaction'))
         return
     phi, omega = PHI_SCREW['shear'], OMEGA_SCREW['shear']
     value = Vb / Pnv + Tb / Pnt
@@ -1631,8 +1619,7 @@ def _j45_fallback(interaction, not_eval, assumptions, enabled, dm, name, clause,
                         'pass': ratio <= 1.0 + 1e-9, 'basis': 'rational_A1.2c',
                         'note': why, '_raw': {'value': value, 'limit': limit, 'ratio': ratio},
                         '_trace': _interaction_trace(tr, i_v, i_l)})
-    assumptions.append(f'{name}: {why} — 기준 식 대신 Commentary C-J4.5.1-1 의 보수 직선식 '
-                       f'V/Pnv + T/{tname} ≤ 1 (가용강도, Ω {omega}/φ {phi})을 A1.2(c) 합리적 해석으로 사용')
+    assumptions.append(_nt('conn.assumption.j4_5_1_commentary_j4_pnv_a1', name=name, why=why, tname=tname, omega=omega, phi=phi))
 
 
 def _screw_interaction(name, eq, value, coef, phi, omega, dm, tr=None, value_idx=None) -> dict:
@@ -1673,9 +1660,9 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
     raw_case = str(geo.get('member_case') or '').strip().lower().replace('-', '_')
     j63_na = bool(geo.get('j6_3_not_applicable'))
     if raw_case == 'not_tension_member':
-        notes.append('J6.2: 호출자 진술 member_case=not_tension_member — 인장재가 아니므로 J6.2 를 적용하지 않음')
+        notes.append(_nt('conn.assumption.j6_2_j6_member_case_tension_2'))
         if j63_na:
-            notes.append('J6.3: 호출자 진술 j6_3_not_applicable=True — 적용하지 않음')
+            notes.append(_nt('conn.assumption.j6_3_not_applicable_stated'))
         elif all(geo.get(k) is not None for k in ('Agv_bs', 'Anv_bs', 'Ant_bs')):
             Pnr, P1, P2 = block_shear_nominal(Fy, Fu, geo['Agv_bs'], geo['Anv_bs'], geo['Ant_bs'])
             limit_states.append({
@@ -1686,25 +1673,22 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
             })
         else:
             not_eval.append(_ne('Block Shear (J6.3)', 'shear',
-                                'Agv_bs/Anv_bs/Ant_bs 또는 j6_3_not_applicable=True 필요', 'rupture'))
+                                _nt('conn.reason.agv_bs_anv_bs'), 'rupture'))
         return
     case = normalize_member_case(geo.get('member_case'))
     if case is None:
         not_eval.append(_ne('Tension Rupture (J6.2)', 'shear',
-                            'member_case(flat_sheet / angle_welded / channel_welded / transverse_weld / '
-                            'all_elements) 미입력 — 앵글·채널 용접은 전단지연(J6.2) 검토 필요', 'rupture'))
-        not_eval.append(_ne('Block Shear (J6.3)', 'shear', 'member_case 미입력', 'rupture'))
+                            _nt('conn.reason.j6_2_member_case_flat_sheet'), 'rupture'))
+        not_eval.append(_ne('Block Shear (J6.3)', 'shear', _nt('conn.reason.member_case'), 'rupture'))
         return
     if case in ('angle_bolted', 'channel_bolted', 'flat_sheet_staggered'):
         not_eval.append(_ne('Tension Rupture (J6.2)', 'shear',
-                            f"member_case '{case}' 는 볼트 분류 — 용접 접합에 쓸 수 없음", 'rupture'))
+                            _nt('conn.reason.member_case_2', case=case), 'rupture'))
         return
     explicit = [geo.get('Agv_bs'), geo.get('Anv_bs'), geo.get('Ant_bs')]
     phi_r, om_r = PHI_RUPTURE['weld'], OMEGA_RUPTURE['weld']
     if case == 'flat_sheet':
-        notes.append('J6.2/J6.3: 평판 용접 접합 — 구멍이 없어 Table J6.2-1 (1)(볼트식)은 해당하지 않음. '
-                     'Manual IV-1·IV-4–IV-7 처럼 인장재면 Chapter D(member_tension=True, Ag 또는 width)로 '
-                     '순단면을 검토한다.')
+        notes.append(_nt('conn.assumption.j6_2_flat_weld_no_holes'))
     else:
         Ag = geo.get('Ag')
         if Ag is None and geo.get('width') is not None:
@@ -1719,7 +1703,7 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
             warnings.extend(sl['warnings'])
         if Ant is None or Ant <= 0:
             not_eval.append(_ne('Tension Rupture (J6.2)', 'shear',
-                                'Ag(또는 (3)(a) 의 직접 접합 요소 면적 Ant) 미입력', 'rupture'))
+                                _nt('conn.reason.ag_ant'), 'rupture'))
         elif Usl is None:
             not_eval.append(_ne('Tension Rupture (J6.2)', 'shear', reason, 'rupture'))
         else:
@@ -1739,7 +1723,7 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
                 'equation': 'J6.2-1',
             })
     if j63_na:
-        notes.append('J6.3: 호출자 진술 j6_3_not_applicable=True — 적용하지 않음')
+        notes.append(_nt('conn.assumption.j6_3_not_applicable_stated'))
     elif all(v is not None for v in explicit):
         Pnr, P1, P2 = block_shear_nominal(Fy, Fu, *explicit)
         limit_states.append({
@@ -1750,7 +1734,7 @@ def _weld_j6(member_case_geo: dict, Fy: float, Fu: float, t: float, warnings: li
         })
     elif case != 'flat_sheet':
         not_eval.append(_ne('Block Shear (J6.3)', 'shear',
-                            '용접선 블록전단 면적 Agv_bs/Anv_bs/Ant_bs 미입력', 'rupture'))
+                            _nt('conn.reason.agv_bs_anv_bs_2'), 'rupture'))
 
 
 def _block_shear_trace(Fy, Fu, Agv, Anv, Ant, P1, P2, Pnr) -> list:
@@ -1813,7 +1797,7 @@ def fillet_weld_connection(t1: float, t2: float,
     _scope_thickness(t_min, 'J2', not_eval)
     lap_joint = not str(joint_type or 'lap').lower().startswith('t')
     if lap_joint and w1 is not None and w1 > t1 + 1e-9:
-        warnings.append(f'J2.5: 겹침이음에서 w1 ≤ t1 (Fig. J2.5-1) — 목두께 계산에 w1 = t1 = {t1} 사용 (입력 w1={w1})')
+        warnings.append(_nt('conn.warning.j2_5_j2_w1_t1_fig', t1=t1, w1=w1))
         w1 = t1
 
     longitudinal = str(load_direction).lower().startswith('long')
@@ -1889,7 +1873,7 @@ def fillet_weld_connection(t1: float, t2: float,
     if member_tension:
         _weld_chapter_d(geo, Fy, min(Fu1, Fu2), t_min, warnings, not_eval, limit_states)
         spec += ['D2', 'D3']
-    not_eval.append(_ne('면외 인장', 'tension', '필릿 용접에는 면외 인장 한계상태가 없음', 'fastener'))
+    not_eval.append(_ne('면외 인장', 'tension', _nt('conn.reason.fillet_no_out_of_plane_tension'), 'fastener'))
     return _finish('fillet_weld', limit_states, not_eval, warnings, dm, spec, assumptions=assumptions)
 
 
@@ -1899,7 +1883,7 @@ def _weld_chapter_d(geo, Fy, Fu, t, warnings, not_eval, limit_states):
                                            Ag=geo.get('Ag'), width=geo.get('width'), Ae=None)
     if not d_ls:
         not_eval.append(_ne('Member Tension (D2/D3)', 'shear',
-                            'member_tension=True 인데 Ag 또는 width 미입력', 'member'))
+                            _nt('conn.reason.member_tension_true_ag'), 'member'))
     limit_states.extend(d_ls)
     warnings.extend(w for w in d_warn if '전단지연' not in w)
 
@@ -1975,32 +1959,31 @@ def arc_spot_weld_connection(t1: float, t2: float,
         t_sheet = min(t1, t2)
     if jt is None:
         if equal:
-            warnings.append('J2.2: joint 미지정이고 t1=t2 — 시트-지지재(J2.2.2.1)와 시트-시트(J2.2.2.2)를 '
-                            '모두 평가해 작은 값을 사용')
+            warnings.append(_nt('conn.warning.j2_2_j2_joint_t1_t2'))
         else:
-            warnings.append('J2.2: joint 미지정 — 얇은 판을 시트, 두꺼운 판을 지지재로 보고 J2.2.2.1 적용')
+            warnings.append(_nt('conn.warning.j2_2_j2_joint_j2'))
     if jt == 'sheet_to_sheet' and not equal:
         not_eval.append(_ne('Sheet Tear Sheet-to-Sheet (J2.2.2.2)', 'shear',
-                            f'J2.2.2.2 는 같은 두께 두 판에만 적용 (t1={t1}, t2={t2})', 'fastener'))
+                            _nt('conn.reason.j2_2_2_2_j2_t1_t2', t1=t1, t2=t2), 'fastener'))
 
     # 적용범위 (J2.2)
     thinnest = min(t_sheets) if t_sheets else min(t1, t2)
     if thinnest > 0.15 or t_sheet > 0.15:
         not_eval.append(_ne('적용범위 (J2.2)', 'any',
-                            f'아크 스팟 용접은 시트 두께(합) ≤ 0.15 in 에만 허용 (t={t_sheet})', 'scope'))
+                            _nt('conn.reason.arc_spot_sheet_thickness_limit', t_sheet=t_sheet), 'scope'))
     if t_sheet < 0.028 and jt != 'sheet_to_sheet':
-        warnings.append('J2.2: 시트 두께 < 0.028 in — 용접 와셔(두께 0.05–0.08 in, 구멍 ≥ 3/8 in) 필수')
+        warnings.append(_nt('conn.warning.j2_2_j2'))
 
     da_avg = max(d_vis - t_sheet, 0.0)
     de_calc = min(max(0.7 * d_vis - 1.5 * t_sheet, 0.0), 0.55 * d_vis)
     if de is not None and de > 0:
         de_used = de
-        warnings.append(f'J2.2.3: 유효직경 de={de} 입력 — 시공 절차로 꾸준히 확보됨을 측정으로 보인 경우에만')
+        warnings.append(_nt('conn.warning.j2_2_3_j2_de', de=de))
     else:
         de_used = de_calc
     if de_used < 0.375 - 1e-9:
         not_eval.append(_ne('최소 유효직경 (J2.2)', 'shear',
-                            f'de={de_used:.4f} in < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요',
+                            _nt('conn.reason.j2_2_2_1_de_j2_de', de_used=de_used),
                             'detailing'))
 
     # J2.2.1 연단·끝단 거리
@@ -2008,7 +1991,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
         detailing.append(_detail('용접 중심 → 끝단 ≥ 1.5d (J2.2.1)', e, 1.5 * d_vis, 'J2.2.1'))
         detailing.append(_detail('용접 → 끝단 순거리 ≥ 1.0d (J2.2.1)', e - d_vis / 2.0, d_vis, 'J2.2.1'))
     else:
-        not_eval.append(_ne('끝단 거리 (J2.2.1)', 'shear', 'e 미입력', 'detailing'))
+        not_eval.append(_ne('끝단 거리 (J2.2.1)', 'shear', _nt('conn.reason.e_not_given'), 'detailing'))
     geo = dict(j6_geometry or {})
     if n > 1 and geo.get('g') is not None:
         detailing.append(_detail('용접 사이 순거리 ≥ 1.0d (J2.2.1)', geo['g'] - d_vis, d_vis, 'J2.2.1'))
@@ -2089,7 +2072,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
         if lim or not equal:
             if equal:
                 not_eval.append(_ne('Sheet Tear Sheet-to-Sheet (J2.2.2.2)', 'shear',
-                                    'Eq. J2.2.2.2-1 적용한계 밖: ' + ', '.join(lim), 'fastener'))
+                                    _nt('conn.reason.j2_2_2_2_j2', lim=', '.join(lim)), 'fastener'))
         else:
             da_s = max(d_vis - ts, 0.0)
             Rn_ss = 1.65 * ts * da_s * Fu * n
@@ -2123,7 +2106,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
             lim.append('Fxx > Fu')
         if lim:
             not_eval.append(_ne('Weld Tension (J2.2.3)', 'tension',
-                                'J2.2.3 적용한계 밖: ' + ', '.join(lim), 'fastener'))
+                                _nt('conn.reason.j2_2_3_j2', lim=', '.join(lim)), 'fastener'))
         else:
             P1 = math.pi * de_used ** 2 / 4 * Fxx
             P2 = 0.8 * (Fu / Fy) ** 2 * t_sheet * da_avg * Fu
@@ -2131,10 +2114,10 @@ def arc_spot_weld_connection(t1: float, t2: float,
             notes = []
             if eccentric_tension:
                 red *= 0.5
-                notes.append('편심 50%')
+                notes.append(_nt('conn.assumption.eccentric_tension_50pct'))
             if sidelap:
                 red *= 0.7
-                notes.append('사이드랩 70%')
+                notes.append(_nt('conn.assumption.sidelap_70pct'))
             Pnt_weld = min(P1, P2) * red
             deck = str(application).lower() in ('deck', 'panel', 'panel_deck', 'deck_panel')
             phi_n, om_n = (0.60, 2.50) if deck else (0.50, 3.00)
@@ -2162,7 +2145,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
             })
     else:
         not_eval.append(_ne('Weld Tension (J2.2.3)', 'tension',
-                            'J2.2.3 은 시트-지지재 접합에만 해당 (joint 미지정·시트-시트)', 'fastener'))
+                            _nt('conn.reason.j2_2_3_j2_joint'), 'fastener'))
 
     # J6 (아크 스팟: J6.1 e_net=e−d/2, J6.3 Manual IV-2; J6.2 는 Manual IV-2 의 합리적 해석:
     # 구멍=da, Usl=0.9+0.1·da/s, A1.2(c) 계수)
@@ -2189,18 +2172,16 @@ def arc_spot_weld_connection(t1: float, t2: float,
         warnings.extend(p_w)
         not_eval.extend(p_ne)
     if t_sheets and len(t_sheets) > 1:
-        assumptions.append(f'J6: 여러 시트({list(t_sheets)}) — 파단(J6.1–J6.3)은 가장 얇은 한 장 t={t_j6} 로 검토, '
-                           f'용접 전단·인장(J2.2.2.1, J2.2.3)은 합 t={t_sheet}')
+        assumptions.append(_nt('conn.assumption.j6_multi_sheet_thinnest_j2_2', value=list(t_sheets), t_j6=t_j6, t_sheet=t_sheet))
     assumptions.append(_part_basis_note('', t_j6, bool(j6_part2)))
     if any(x['name'].startswith('Tension Rupture') for x in j6_ls):
-        assumptions.append('J6.2: 아크 스팟 용접에는 기준 식이 없어 Manual IV-2 처럼 볼트 식을 '
-                           'A1.2(c) 합리적 해석으로 사용(구멍=da, Ω=3.00/φ=0.55)')
+        assumptions.append(_nt('conn.assumption.j6_2_j6_manual_iv_a1'))
 
     # J2.2.4 조합 (용접 1개당)
     interaction = []
     if Vu and Tu and Vu > 0 and Tu > 0:
         if Pnt_weld is None or not shear_states:
-            not_eval.append(_ne('전단+인장 (J2.2.4)', 'interaction', 'J2.2.2 또는 J2.2.3 강도 없음',
+            not_eval.append(_ne('전단+인장 (J2.2.4)', 'interaction', _nt('conn.reason.j2_2_2_no_strength'),
                                 'interaction'))
         else:
             lim = []
@@ -2216,7 +2197,7 @@ def arc_spot_weld_connection(t1: float, t2: float,
                 lim.append(f'd={d_vis} (0.47–1.02)')
             if lim:
                 not_eval.append(_ne('전단+인장 (J2.2.4)', 'interaction',
-                                    'Eq. J2.2.4-1 적용한계 밖: ' + ', '.join(lim), 'interaction'))
+                                    _nt('conn.reason.j2_2_4_j2', lim=', '.join(lim)), 'interaction'))
             else:
                 Pav = min(_available(x['Rn'], x['phi'], x['omega'], dm) for x in shear_states) / n
                 ten = [x for x in limit_states if x['name'] == 'Weld Tension (J2.2.3)'][0]
@@ -2329,7 +2310,7 @@ def groove_weld_connection(t1: float, t2: float,
                 te = 0.5 * t_min
                 te_assumed = True
                 not_eval.append(_ne('Groove Weld (J2.1) PJP 목두께', 'shear',
-                                    '유효 목두께 te 미입력 — 0.5·t 는 참고값(기준 근거 없음)', 'detailing'))
+                                    _nt('conn.reason.te_not_given'), 'detailing'))
         L = weld_length
         sval = str(load_direction).lower()
         tr = Trace()
@@ -2382,7 +2363,7 @@ def groove_weld_connection(t1: float, t2: float,
             })
         if te_assumed:
             limit_states[-1]['assumed'] = True
-        notes = ['J6: 버트 이음은 겹침이 없어 J6.1–J6.3 파단 경로가 해당하지 않음']
+        notes = [_nt('conn.assumption.j6_butt_joint_no_rupture_path')]
     else:
         t = t_min
         L = weld_length
@@ -2398,7 +2379,7 @@ def groove_weld_connection(t1: float, t2: float,
             else:
                 choices = list(set(_TWF_BEVEL.values()))
                 if proc is not None:
-                    warnings.append(f"J2.6: 공정 '{process}' 를 Table J2.6-1 에서 찾지 못함 — 하한값 사용")
+                    warnings.append(_nt('conn.warning.j2_6_process_not_in_table', process=process))
             tws = []
             for twf_r, eta in choices:
                 twv = ((w2 + twf_r * R - R + math.sqrt(max(2.0 * R * w1 - w1 ** 2, 0.0))) * (w1 / wf)
@@ -2431,8 +2412,7 @@ def groove_weld_connection(t1: float, t2: float,
             # 기준 식이 없다(시험 K2 또는 A1.2 합리적 해석).
             Pnv = None
             not_eval.append(_ne('Flare V-Groove Transverse (J2.6)', 'shear',
-                                'J2.6(a) Eq. J2.6-1 은 플레어 베벨 전용 — 플레어 V 홈의 횡방향 하중 식은 기준에 없음 '
-                                '(시험 또는 A1.2 합리적 해석 필요)', 'fastener'))
+                                _nt('conn.reason.j2_6_flare_v_transverse_no_equation'), 'fastener'))
         elif transverse:
             Pnv = 0.833 * t * L * Fu            # Eq. J2.6-1
             phi_f, omega_f, eq_f = 0.60, 2.55, 'J2.6-1'
@@ -2449,7 +2429,7 @@ def groove_weld_connection(t1: float, t2: float,
         if t > 0.10 and Pnv is not None:
             if tw is None:
                 not_eval.append(_ne('Flare Groove (J2.6-4) 용접금속 상한', 'shear',
-                                    't > 0.10 in 인데 목두께 tw 산정 입력(w1,w2,R 또는 R,d1,d2) 없음',
+                                    _nt('conn.reason.tw_w1_w2_d1'),
                                     'detailing'))
             else:
                 Pn_cap = 0.75 * tw * L * Fxx
@@ -2501,7 +2481,7 @@ def groove_weld_connection(t1: float, t2: float,
         if member_tension:
             _weld_chapter_d(geo, Fy, Fu, t, warnings, not_eval, limit_states)
 
-    not_eval.append(_ne('면외 인장', 'tension', '그루브 용접에는 면외 인장 한계상태가 없음', 'fastener'))
+    not_eval.append(_ne('면외 인장', 'tension', _nt('conn.reason.groove_no_out_of_plane_tension'), 'fastener'))
     return _finish('groove_weld', limit_states, not_eval, warnings, dm,
                    ['J2.6', 'J6.2', 'J6.3'] if flare else ['J2.1'],
                    assumptions=[_CONCENTRIC] + notes)
@@ -2551,12 +2531,12 @@ def arc_seam_weld_connection(t1: float, t2: float,
         jt = 'sheet_to_support'
     _scope_thickness(min(t1, t2), 'J2', not_eval)
     if jt is None:
-        warnings.append('J2.3: joint 미지정 — ' + ('t1=t2 이므로 시트-지지재와 시트-시트 식을 모두 평가'
-                                                  if equal else '얇은 판을 시트로 보고 J2.3.2.1 적용'))
+        warnings.append(_nt('conn.warning.j2_3_j2_joint', text=_nt('conn.fragment.j2_3_equal_thickness')
+                                                  if equal else _nt('conn.fragment.j2_3_thinner_as_sheet')))
 
     L_eff = min(L_seam, 3.0 * d)
     if L_seam > 3.0 * d + 1e-9:
-        warnings.append(f'J2.3.2.1: 계산용 L ≤ 3d — L={L_seam} → {L_eff:.3f} in')
+        warnings.append(_nt('conn.warning.j2_3_2_1_j2', L_seam=L_seam, L_eff=L_eff))
     da_avg = max(d - t_sheet, 0.0)                      # Eq. J2.3.2.1-4
     # Eq. J2.3.2.1-3 은 de = 0.7d − 1.5t 뿐이다. 0.55d 상한은 원문 식에 없다(아크 스폿 Eq. J2.2.2.1-5 의 상한이고,
     # Figure J2.3.2.2-1 의 주석에만 보인다) — 사내 보수 상한(A1.2)으로 두고 따로 밝힌다(V6-15).
@@ -2567,7 +2547,7 @@ def arc_seam_weld_connection(t1: float, t2: float,
         detailing.append(_detail('시임 중심 → 끝단 ≥ 1.5d (J2.3.1)', e, 1.5 * d, 'J2.3.1'))
         detailing.append(_detail('시임 → 끝단 순거리 ≥ 1.0d (J2.3.1)', e - d / 2.0, d, 'J2.3.1'))
     else:
-        not_eval.append(_ne('끝단 거리 (J2.3.1)', 'shear', 'e 미입력', 'detailing'))
+        not_eval.append(_ne('끝단 거리 (J2.3.1)', 'shear', _nt('conn.reason.e_not_given'), 'detailing'))
 
     q_d = _ui('d', d, 'length', 'da (seam width)')
     q_t = _ui('t', t_sheet, 'length', 't (sheet; Σ t_sheets)')
@@ -2579,9 +2559,7 @@ def arc_seam_weld_connection(t1: float, t2: float,
     if jt in (None, 'sheet_to_support'):
         if de < de_eq:
             # de 를 쓰는 식(J2.3.2.1-1)에서만 밝힌다 — 시트-시트(J2.3.2.2)는 de 를 쓰지 않는다.
-            assumptions.append(f'J2.3.2.1: de = 0.7d − 1.5t = {de_eq:.4f} in 을 0.55d = {0.55 * d:.4f} in 로 낮춤 — '
-                               '원문 Eq. J2.3.2.1-3 에 없는 사내 보수 상한(A1.2, 아크 스폿 Eq. J2.2.2.1-5 와 '
-                               'Figure J2.3.2.2-1 의 주석을 따름). 용접 너겟 전단 강도가 원문보다 낮다(보수).')
+            assumptions.append(_nt('conn.assumption.j2_3_2_1_de_capped_0_55d', de_eq=de_eq, value=0.55 * d))
         Rn_weld = 0.75 * Fxx * (L_eff * de + math.pi / 4 * de ** 2) * n
         tr = Trace()
         i_de = tr.add('equation', 'de = 0.7 d − 1.5 t  (≥ 0)', equation='J2.3.2.1-3', inputs=[q_d, q_t],
@@ -2625,7 +2603,7 @@ def arc_seam_weld_connection(t1: float, t2: float,
             lim.append(f't={ts} (0.028–0.0635)')
         if lim:
             not_eval.append(_ne('Sheet Tear Sheet-to-Sheet (J2.3.2.2)', 'shear',
-                                'Eq. J2.3.2.2-1 적용한계 밖: ' + ', '.join(lim), 'fastener'))
+                                _nt('conn.reason.j2_3_2_2_j2', lim=', '.join(lim)), 'fastener'))
         else:
             da_s = max(d - ts, 0.0)
             Rn_ss = 1.65 * ts * da_s * Fu * n
@@ -2664,14 +2642,11 @@ def arc_seam_weld_connection(t1: float, t2: float,
         warnings.extend(p_w)
         not_eval.extend(p_ne)
     if t_sheets and len(t_sheets) > 1:
-        assumptions.append(f'J6: 여러 시트({list(t_sheets)}) — 파단(J6.1–J6.3)은 가장 얇은 한 장 t={t_j6} 로 검토, '
-                           f'J2.3.2.1 은 합 t={t_sheet}')
+        assumptions.append(_nt('conn.assumption.j6_multi_sheet_thinnest_j2_3', value=list(t_sheets), t_j6=t_j6, t_sheet=t_sheet))
     assumptions.append(_part_basis_note('', t_j6, bool(j6_part2)))
     if any(x['name'].startswith('Tension Rupture') for x in j6_ls):
-        assumptions.append('J6.2: 아크 시임 용접에는 기준 식이 없어 볼트 식을 A1.2(c) 합리적 해석으로 사용 '
-                           '(제거 폭 = L + d, Usl = 0.9 + 0.1·(L+d)/s, Ω=3.00/φ=0.55). '
-                           'Manual IV-3 은 Usl=1.0, Ω=2.50 을 썼다 — 이 값이 더 작다(보수).')
-    not_eval.append(_ne('면외 인장', 'tension', '아크 시임 용접에는 인장 한계상태가 없음', 'fastener'))
+        assumptions.append(_nt('conn.assumption.j6_2_j6_a1_usl_manual'))
+    not_eval.append(_ne('면외 인장', 'tension', _nt('conn.reason.arc_seam_no_tension'), 'fastener'))
     return _finish('arc_seam', limit_states, not_eval, warnings, dm,
                    ['J2.3.1', 'J2.3.2.1', 'J2.3.2.2', 'J6.1', 'J6.2', 'J6.3'],
                    {'joint': jt, 'L_effective': round(L_eff, 4)}, None, detailing, assumptions)
@@ -2747,8 +2722,8 @@ def paf_connection(t1: float, t2: float, d: float,
     geo = dict(j6_geometry or {})
     limit_states, warnings, not_eval, detailing = [], [], [], []
     assumptions = [_CONCENTRIC,
-                   'J5.3.2/J5.2.2: 점(point) 전체가 t2 아래로 관입했다고 가정 (시공 조건)',
-                   'J5.3.3: 관입 깊이 ≥ 0.6·t2 가정 (시공 조건)']
+                   _nt('conn.assumption.j5_3_2_point_below_t2'),
+                   _nt('conn.assumption.j5_3_3_penetration_0_6t2')]
 
     # 적용범위 (J5)
     lim = []
@@ -2759,7 +2734,7 @@ def paf_connection(t1: float, t2: float, d: float,
     if not (0.106 - 1e-9 <= d <= 0.206 + 1e-9):
         lim.append(f'ds={d} (0.106–0.206)')
     if lim:
-        not_eval.append(_ne('적용범위 (J5)', 'any', '§J5 적용범위 밖: ' + ', '.join(lim), 'scope'))
+        not_eval.append(_ne('적용범위 (J5)', 'any', _nt('conn.reason.j5_out_of_scope', lim=', '.join(lim)), 'scope'))
 
     # Table J5.1-1 간격·연단
     if d >= 0.200:
@@ -2771,12 +2746,12 @@ def paf_connection(t1: float, t2: float, d: float,
         e = e_min
         e_assumed = True
         not_eval.append(_ne('연단 거리 (Table J5.1-1)', 'shear',
-                            f'e 미입력 — J6.1 은 최소 {e_min} in 로 계산, 실제 거리 확인 필요', 'detailing'))
+                            _nt('conn.reason.j6_1_j6_2', e_min=e_min), 'detailing'))
     else:
         detailing.append(_detail('연단 거리 (Table J5.1-1)', e, e_min, 'J5.1'))
     if n > 1:
         if s is None:
-            not_eval.append(_ne('PAF 간격 (Table J5.1-1)', 'shear', f's 미입력 — {s_min} in 이상 확인', 'detailing'))
+            not_eval.append(_ne('PAF 간격 (Table J5.1-1)', 'shear', _nt('conn.reason.spacing_not_given_min', s_min=s_min), 'detailing'))
         else:
             detailing.append(_detail('PAF 간격 (Table J5.1-1)', s, s_min, 'J5.1'))
 
@@ -2793,9 +2768,9 @@ def paf_connection(t1: float, t2: float, d: float,
     else:
         Fuh, fuh_note, fuh_ok = PAF_FUH, f'F_uh={PAF_FUH} (참고값, 기준 근거 없음)', False
         not_eval.append(_ne('PAF 강도 F_uh (J5.2.1)', 'shear',
-                            'Fuf(F_uh) 또는 HRC_p 미입력 — 120 ksi 는 참고값', 'fastener'))
+                            _nt('conn.reason.fuf_uh_hrc_ksi'), 'fastener'))
         not_eval.append(_ne('PAF 강도 F_uh (J5.2.1)', 'tension',
-                            'Fuf(F_uh) 또는 HRC_p 미입력 — 120 ksi 는 참고값', 'fastener'))
+                            _nt('conn.reason.fuf_uh_hrc_ksi'), 'fastener'))
 
     q_d = _ui('ds', d, 'length', 'd (shank diameter)')
     q_n = _ui('n', n, 'count', 'n')
@@ -2850,10 +2825,10 @@ def paf_connection(t1: float, t2: float, d: float,
         lim.append(f'ds={d} (0.146–0.177)')
     if lim:
         not_eval.append(_ne('Bearing/Tilting (J5.3.2)', 'shear',
-                            'Eq. J5.3.2-1 적용한계 밖: ' + ', '.join(lim), 'fastener'))
+                            _nt('conn.reason.j5_3_2_j5', lim=', '.join(lim)), 'fastener'))
     else:
         if d > 0.177:
-            warnings.append(f'J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급')
+            warnings.append(_nt('conn.warning.j5_3_2_j5_ds_manual_iv', d=d))
         Pnb = alpha_b * d * t1 * Fu1 * n
         tr = Trace()
         tr.add('equation', 'Pnb = αb ds t1 Fu1 n', equation='J5.3.2-1',
@@ -2875,7 +2850,7 @@ def paf_connection(t1: float, t2: float, d: float,
         lim.append(f'ds={d} (0.106–0.206)')
     if lim:
         not_eval.append(_ne('Pull-out in Shear (J5.3.3)', 'shear',
-                            'Eq. J5.3.3-1 적용한계 밖: ' + ', '.join(lim), 'fastener'))
+                            _nt('conn.reason.j5_3_3_j5', lim=', '.join(lim)), 'fastener'))
     else:
         Pnos = (dar ** 1.8) * (t2 ** 0.2) * ((Fy2 * E ** 2) ** (1.0 / 3.0)) / 30.0 * n
         tr = Trace()
@@ -2895,15 +2870,15 @@ def paf_connection(t1: float, t2: float, d: float,
         if fy2_default:
             limit_states[-1]['assumed'] = True
             not_eval.append(_ne('Pull-out in Shear (J5.3.3)', 'shear',
-                                'Fy2(먼 부재 = 지지재 항복강도) 미입력 — 머리쪽 Fy 로 계산한 값은 참고값', 'fastener'))
+                                _nt('conn.reason.fy2_fy'), 'fastener'))
 
     # (d) 풀오버 (J5.2.3, Eq. J5.2.3-1): Pnov = αw·t1·d'w·Fu1, d'w ≤ 0.60 in
     if dw is None:
-        not_eval.append(_ne('Pull-over (J5.2.3)', 'tension', "d'w(머리·와셔 접촉 직경) 미입력", 'fastener'))
+        not_eval.append(_ne('Pull-over (J5.2.3)', 'tension', _nt('conn.reason.dw_contact_not_given'), 'fastener'))
     else:
         dw_c = min(dw, 0.60)
         if dw > 0.60:
-            warnings.append(f"§J5: 계산용 와셔 직경 ≤ 0.60 in — d'w={dw} → 0.60")
+            warnings.append(_nt('conn.warning.j5_washer_diameter_capped', dw=dw))
         Pnov = alpha_w * t1 * dw_c * Fu1 * n
         tr = Trace()
         i_dw = tr.add('modifier', "d'w = min(d'w, d'w,max)", equation='J5.2.3',
@@ -2952,7 +2927,7 @@ def paf_connection(t1: float, t2: float, d: float,
         })
     else:
         not_eval.append(_ne('Pull-out in Tension (J5.2.2)', 'tension',
-                            '폐쇄형 식 없음 — 독립 시험값(Pnot_test) 필요 (φ=0.40, Ω=4.00)', 'fastener'))
+                            _nt('conn.reason.pnot_test'), 'fastener'))
 
     # (g) J6 (J5.3.4/J5.3.5): 구멍 = 1.10·ds, 나사/PAF 계수(Table J6-1)
     t_crit = min(t1, t2)
@@ -2979,7 +2954,7 @@ def paf_connection(t1: float, t2: float, d: float,
         if (any(x['direction'] in ('tension', 'shear') and x['category'] == 'fastener' for x in not_eval)
                 or any(x.get('assumed') for x in tens + shr) or not tens or not shr):
             not_eval.append(_ne('전단+인장 (J5.4)', 'interaction',
-                                '인장 또는 전단 가용강도가 확정되지 않음(미평가·가정값 한계상태 있음)',
+                                _nt('conn.reason.strength_not_settled_combined'),
                                 'interaction'))
         else:
             gt = min(tens, key=lambda x: _available(x['Rn'], x['phi'], x['omega'], dm))
@@ -3084,8 +3059,7 @@ def design_connection(params: dict) -> dict:
                              '(두 번째 판이 더 얇으면 비보수). 두 판 두께를 모두 넘기세요.'}
         # t_sheets 가 시트 두께를 주므로 지지재 두께는 J2.2.2.1·J2.2.3·J2.3.2.1 에 쓰이지 않는다.
         t2 = t1
-        entry_notes.append('t2(지지재) 미입력 — t_sheets 가 시트 두께를 주므로 지지재 두께는 강도식에 쓰이지 않음 '
-                           '(지지재가 시트보다 두껍다는 J2.2.2.1/J2.3.2.1 전제는 호출자가 확인)')
+        entry_notes.append(_nt('conn.assumption.j2_2_2_1_t2_not_used_with_t_sheets'))
     Fy = params.get('Fy')
     Fu = params.get('Fu')
     if Fy is None or Fu is None:
@@ -3130,22 +3104,22 @@ def design_connection(params: dict) -> dict:
             if not is_flare:
                 return {'error': "groove(J2.1): load_direction 미입력 ('tension'|'compression'|'shear') — "
                                  '전단이 인장보다 약하므로 가정하지 않는다'}
-            entry_notes.append('J2.6: load_direction 미입력 — 종방향(Eq. J2.6-2, 횡방향보다 작은 값)으로 평가')
+            entry_notes.append(_nt('conn.assumption.j2_6_load_direction_longitudinal'))
     if conn_type in ('fillet_weld', 'arc_spot', 'arc_seam', 'groove') and params.get('Fxx') is None:
-        entry_notes.append('Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)')
+        entry_notes.append(_nt('conn.assumption.e60_fxx_e60_ksi'))
     if conn_type == 'fillet_weld' and params.get('load_direction') is None:
-        entry_notes.append('J2.5: load_direction 미입력 — 종방향(횡방향보다 작은 값)으로 평가')
+        entry_notes.append(_nt('conn.assumption.j2_5_j2_load_direction'))
     if conn_type == 'bolt' and params.get('hole_type') is None:
-        entry_notes.append('J3: hole_type 미입력 — 표준공(Table J3-1) 가정. 과대·슬롯 구멍이면 C·mf 가 작아 비보수')
+        entry_notes.append(_nt('conn.assumption.j3_hole_type_standard'))
     if conn_type == 'arc_seam' and params.get('seam_orientation') is None:
-        entry_notes.append('J6: seam_orientation 미입력 — 시임 길이가 하중에 직각(Manual IV-3)이라고 봄')
+        entry_notes.append(_nt('conn.assumption.j6_j6_seam_orientation_manual'))
     if conn_type == 'arc_spot' and T > 0:
         if params.get('eccentric_tension') is None:
-            entry_notes.append('J2.2.3: eccentric_tension 미입력 — 동심 상향 인장으로 평가 (편심이면 50 %)')
+            entry_notes.append(_nt('conn.assumption.j2_2_3_j2_eccentric_tension'))
         if params.get('sidelap') is None:
-            entry_notes.append('J2.2.3: sidelap 미입력 — 사이드랩이 아닌 접합으로 평가 (데크 사이드랩이면 70 %)')
+            entry_notes.append(_nt('conn.assumption.j2_2_3_j2_sidelap'))
     if conn_type == 'paf' and params.get('alpha_w') is None:
-        entry_notes.append('J5.2.3: alpha_w 미입력 — 1.5 (단순·평머리 PAF, Fig. J5-1(a)(b)); 테이퍼 머리는 1.25')
+        entry_notes.append(_nt('conn.assumption.j5_2_3_j5_alpha_paf_fig'))
     geo = {k: params[k] for k in _J6_GEOMETRY_KEYS if params.get(k) is not None}
 
     def _need(key, alt=None):
@@ -3270,7 +3244,7 @@ def design_connection(params: dict) -> dict:
         return result
     result['assumptions'].extend(entry_notes)
     if unknown:
-        result['warnings'].append('알 수 없는 입력 키(무시됨): ' + ', '.join(unknown))
+        result['warnings'].append(_nt('conn.warning.unknown_input_keys', unknown=', '.join(unknown)))
 
     # 주 방향의 지배값을 기존 키(design_strength/governing_mode/Rn)에 둔다.
     if force_dir == 'tension' and result.get('tension_design_strength') is not None:
@@ -3296,7 +3270,7 @@ def design_connection(params: dict) -> dict:
                            'pass': V <= cap_raw + 1e-9})
         else:
             result['not_evaluated'].append(_ne('전단(면내) 강도', 'shear',
-                                               '가정값 없이 평가된 전단 한계상태 없음', 'scope'))
+                                               _nt('conn.reason.no_verified_shear_limit_state'), 'scope'))
     if T > 0:
         cap = result.get('tension_verified_design_strength')
         if cap:
@@ -3305,7 +3279,7 @@ def design_connection(params: dict) -> dict:
                            'demand': round(T, 4), 'capacity': cap, 'ratio': round(T / cap_raw, 4),
                            'pass': T <= cap_raw + 1e-9})
         elif not any(x['direction'] == 'tension' for x in result['not_evaluated']):
-            result['not_evaluated'].append(_ne('인장(축방향) 강도', 'tension', '평가된 인장 한계상태 없음', 'scope'))
+            result['not_evaluated'].append(_ne('인장(축방향) 강도', 'tension', _nt('conn.reason.no_evaluated_tension_limit_state'), 'scope'))
     ref = []
     for key, rkey, dem in (('shear_design_strength', 'shear', V), ('tension_design_strength', 'tension', T)):
         c = result.get(key)
@@ -3328,11 +3302,10 @@ def design_connection(params: dict) -> dict:
                 or (x['direction'] == 'interaction' and V > 0 and T > 0)]
     if V > 0 and T > 0 and not result.get('interaction_checks') and \
             not any(x['direction'] == 'interaction' for x in result['not_evaluated']):
-        relevant.append(_ne('전단+인장 조합', 'interaction', '이 접합 유형의 조합 검토가 구현되지 않음',
+        relevant.append(_ne('전단+인장 조합', 'interaction', _nt('conn.reason.combined_check_not_implemented'),
                             'interaction'))
     if V > 0 and T == 0:
-        result['assumptions'].append('인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 '
-                                     '(상향 인장이 있으면 Tu 를 입력)')
+        result['assumptions'].append(_nt('conn.assumption.tension_demand_not_given'))
 
     ratios = [c['ratio'] for c in checks if c['ratio'] is not None]
     result['checks'] = checks
@@ -3355,4 +3328,5 @@ def design_connection(params: dict) -> dict:
     from design.connection_checks import build as _build_checks
     result['design_checks'] = _build_checks(result, result.pop('_check_data'), V, T, params)
     result['display_rounding'] = display_rounding('connection')
+    _attach_notices(result)
     return result

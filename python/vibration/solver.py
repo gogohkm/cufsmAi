@@ -20,6 +20,7 @@ from engine.transform import trans, spring_trans
 from engine.assembly import assemble, spring_assemble
 from engine.properties import elemprop
 from engine.boundary import BC_I1_5
+from design.notices import N as _nt  # noqa: E402
 
 PI = math.pi
 
@@ -214,19 +215,14 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             # 기본값으로 채운 입력 = 가정(FIXES §3.1.1), 경고가 아니다
             'severity': 'info', 'category': 'assumption', 'code': 'DEFAULT_DENSITY',
             'length_index': None, 'length': None,
-            'message': ('No mass density given; steel 7.345e-7 kip*s^2/in^4 '
-                        '(0.2836 lb/in^3, 7850 kg/m^3) was assumed.'),
+            'message': (_nt('solver.warning.no_mass_density_given')),
         })
     for matnum, rho in rho_by_mat.items():
         if not (_PLAUSIBLE_RHO[0] <= rho <= _PLAUSIBLE_RHO[1]):
             diagnostics.append({
                 'severity': 'warning', 'category': 'warning', 'code': 'DENSITY_UNITS_SUSPECT',
                 'length_index': None, 'length': None,
-                'message': (f'Material {matnum}: mass density {rho:g} is outside the range '
-                            'of structural materials in kip*s^2/in^4 (steel 7.345e-7). '
-                            'Frequencies scale with 1/sqrt(rho); check the units '
-                            '(weight density lb/in^3 must be divided by 386.09*1000, '
-                            'kg/m^3 multiplied by 9.357e-11).'),
+                'message': (_nt('solver.warning.material_mass_density_outside', matnum=matnum, rho=rho)),
             })
 
     has_springs = springs is not None and np.size(springs) > 0
@@ -298,7 +294,7 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             diagnostics.append({
                 'severity': 'error', 'code': 'NO_FREE_DOF',
                 'length_index': l_idx, 'length': float(a),
-                'message': 'No free degrees of freedom remain after constraints.',
+                'message': _nt('fsm_solver.warning.no_free_degrees_freedom'),
             })
             freq_list.append(np.array([0.0]))
             shapes_list.append(np.zeros((0, 1)))
@@ -310,7 +306,7 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
                 diagnostics.append({
                     'severity': 'error', 'code': 'NO_POSITIVE_EIGENVALUE',
                     'length_index': l_idx, 'length': float(a),
-                    'message': 'The eigensolver returned no finite positive real eigenvalue.',
+                    'message': _nt('fsm_solver.warning.eigensolver_returned_no_finite'),
                 })
                 freq_list.append(np.array([0.0]))
                 shapes_list.append(np.zeros((n_free, 1)))
@@ -322,7 +318,7 @@ def stripmain_vib(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             diagnostics.append({
                 'severity': 'error', 'code': 'EIGENSOLVE_FAILED',
                 'length_index': l_idx, 'length': float(a),
-                'message': f'{type(exc).__name__}: {exc}',
+                'message': _nt('fsm_solver.warning.exception', exc_type=type(exc).__name__, exc=exc),
             })
             freq_list.append(np.array([0.0]))
             shapes_list.append(np.zeros((n_free, 1)))

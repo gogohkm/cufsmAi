@@ -27,6 +27,7 @@ from .boundary import VALID_BCS
 from .helpers import msort
 from .properties import elemprop
 from models.data import CufsmResult, GBTConfig
+from design.notices import N as _nt  # noqa: E402
 
 _EPS = np.finfo(float).eps
 
@@ -91,8 +92,7 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             diagnostics.append({
                 'severity': 'info', 'code': 'LONGITUDINAL_TERMS_SORTED',
                 'length_index': i, 'length': float(lengths[i]),
-                'message': (f'm_all[{i}] was cleaned by msort (zeros and duplicates '
-                            f'removed, ascending order): {m_a.tolist()}'),
+                'message': (_nt('fsm_solver.warning.all_was_cleaned_msort', i=i, value=m_a.tolist())),
             })
 
     if BC != 'S-S':
@@ -262,7 +262,7 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             diagnostics.append({
                 'severity': 'error', 'code': 'NO_FREE_DOF',
                 'length_index': length_idx, 'length': float(a),
-                'message': 'No free degrees of freedom remain after constraints.',
+                'message': _nt('fsm_solver.warning.no_free_degrees_freedom'),
             })
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
@@ -280,7 +280,7 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             diagnostics.append({
                 'severity': 'error', 'code': 'EIGENSOLVE_FAILED',
                 'length_index': length_idx, 'length': float(a),
-                'message': f'{type(exc).__name__}: {exc}',
+                'message': _nt('fsm_solver.warning.exception', exc_type=type(exc).__name__, exc=exc),
             })
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
@@ -290,7 +290,7 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
             diagnostics.append({
                 'severity': 'error', 'code': 'NO_POSITIVE_EIGENVALUE',
                 'length_index': length_idx, 'length': float(a),
-                'message': 'The eigensolver returned no finite positive real eigenvalue.',
+                'message': _nt('fsm_solver.warning.eigensolver_returned_no_finite'),
             })
             curve_list.append(np.array([[a, 0.0]]))
             shapes_list.append(np.zeros((ndof, 1)))
@@ -307,12 +307,8 @@ def stripmain(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
                 # 비정부호 K(추정 불가)는 JSON 에 inf 를 싣지 않고 None
                 'error_estimate': float(err_est) if math.isfinite(err_est) else None,
                 'message': (
-                    f'Length {float(a):g}: estimated round-off error of the first '
-                    f'load factor is {err_est:.1e} (relative). The stiffness matrix '
-                    f'is ill-conditioned (membrane/bending stiffness ratio grows '
-                    f'with L^4). '
-                    + ('The result is discarded.' if is_error else
-                       'The result may be inaccurate.')),
+                    _nt('fsm_solver.warning.length_estimated_round_off', a=float(a), err_est=err_est, text=_nt('fsm_solver.fragment.result_discarded') if is_error else
+                       _nt('fsm_solver.fragment.result_may_be_inaccurate'))),
             })
             if is_error:
                 curve_list.append(np.array([[a, 0.0]]))
@@ -508,11 +504,7 @@ def _longitudinal_term_diagnostics(prop, node, elem, lengths, BC, m_all,
                 'severity': 'warning', 'code': 'INSUFFICIENT_LONGITUDINAL_TERMS',
                 'length_index': i, 'length': float(a),
                 'message': (
-                    f'BC {BC}: length {float(a):g} is solved with longitudinal terms '
-                    f'{sorted(have)}. A non S-S member needs the terms from m_recommend '
-                    f'(1..7 plus terms near L/Lcr); with too few terms local '
-                    f'and distortional buckling are missed and the load factor is '
-                    f'overestimated (unconservative). ' + _NON_SS_GLOBAL_NOTE),
+                    _nt('fsm_solver.warning.bc_length_solved_longitudinal', BC=BC, a=float(a), value=sorted(have), global_note=_NON_SS_GLOBAL_NOTE)),
             })
             continue
         if lcr is None:
@@ -524,8 +516,7 @@ def _longitudinal_term_diagnostics(prop, node, elem, lengths, BC, m_all,
             diags.append({
                 'severity': 'warning', 'code': 'INSUFFICIENT_LONGITUDINAL_TERMS',
                 'length_index': i, 'length': float(a),
-                'message': (f'BC {BC}: could not verify the longitudinal terms at length '
-                            f'{float(a):g} against m_recommend ({lcr["error"]}).'),
+                'message': (_nt('fsm_solver.warning.bc_could_verify_longitudinal', BC=BC, a=float(a), error=lcr["error"])),
             })
             continue
         need = set(int(m) for m in terms_from_half_wavelengths(a, lcr))
@@ -536,10 +527,7 @@ def _longitudinal_term_diagnostics(prop, node, elem, lengths, BC, m_all,
                 'length_index': i, 'length': float(a),
                 'missing_terms': missing,
                 'message': (
-                    f'BC {BC}: length {float(a):g} lacks longitudinal terms recommended '
-                    f'by m_recommend (Lcrl={_fmt(lcr["Lcrl"])}, Lcrd={_fmt(lcr["Lcrd"])}): '
-                    f'missing {missing}. Local or distortional buckling may be missed '
-                    f'(unconservative). ' + _NON_SS_GLOBAL_NOTE),
+                    _nt('fsm_solver.warning.bc_length_lacks_longitudinal', BC=BC, a=float(a), value=_fmt(lcr["Lcrl"]), value_2=_fmt(lcr["Lcrd"]), missing=missing, global_note=_NON_SS_GLOBAL_NOTE)),
             })
     return diags
 
@@ -575,27 +563,20 @@ def _cfsm_constraint_diagnostics(node, elem, GBTcon, prop):
         diags.append({
             'severity': 'warning', 'code': 'CFSM_GLOBAL_ONLY',
             'message': (
-                'cFSM constrained to the global (G) space: the load factor is the '
-                'classical global value times about 1/(1-nu^2) '
-                f'(+{100 * (1 / (1 - nu * nu) - 1):.1f} % for nu={nu:g}) because the '
-                'GBT assumptions restrain transverse membrane strain. Do not use it '
-                'as Pcre/Mcre; use the unconstrained FSM curve or the AISI closed form.'),
+                _nt('fsm_solver.warning.cfsm_constrained_global_space', value=100 * (1 / (1 - nu * nu) - 1), nu=nu)),
         })
     try:
         from cfsm.node_utils import check_cfsm_model
         chk = check_cfsm_model(node, elem)
     except Exception as exc:  # 판정 실패도 알린다
         chk = {'supported': False, 'code': 'CHECK_FAILED',
-               'message': f'{type(exc).__name__}: {exc}'}
+               'message': _nt('fsm_solver.warning.exception', exc_type=type(exc).__name__, exc=exc)}
     if not chk.get('supported', False):
         diags.append({
             'severity': 'warning', 'code': 'CFSM_MODEL_NOT_SUPPORTED',
             'cfsm_code': chk.get('code'),
             'message': (
-                'cFSM constrained analysis on a model outside classical cFSM '
-                f'({chk.get("code")}: {chk.get("message")}). The G/D/L/O spaces are '
-                'not the physical buckling modes for this model; the constrained '
-                'load factors are not pure-mode values.'),
+                _nt('fsm_solver.warning.cfsm_constrained_analysis_on', code=chk.get("code"), message=chk.get("message"))),
         })
     return diags
 

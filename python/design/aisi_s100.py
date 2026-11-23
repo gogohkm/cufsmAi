@@ -34,12 +34,10 @@ LAP_MANUAL_ASSUMPTION = ('AISI Design Manual Examples II-1A / II-2A: "The lapped
                          'restrained against lateral-torsional buckling and distortional buckling" (assumption (f): '
                          '"the region at and near the interior supports is assumed to be not subject to '
                          'lateral-torsional or distortional buckling between the support and the ends of the laps")')
-LAP_STATED = ('Lap region: lap_restrained = true (user statement) — ' + LAP_MANUAL_ASSUMPTION + '. F2 uses Lb = 0 '
-              '(no lateral-torsional buckling, Fn = Fy) and F4 is not applicable (Mnd = My).')
-LAP_LTB_UNSTATED = ('F2 lateral-torsional buckling — lap region: restraint not stated. Give lap_restrained = true '
-                    'to apply the Manual assumption (' + LAP_MANUAL_ASSUMPTION + '), or give Lb for the lap region.')
-LAP_DIST_UNSTATED = ('F4 distortional buckling — lap region: restraint not stated. Give lap_restrained = true to apply '
-                     'the Manual assumption (' + LAP_MANUAL_ASSUMPTION + '), or give Mcrd for the lapped section.')
+from design.notices import N as _nt, attach as _attach_notices, joined as _joined, prefixed as _prefixed  # noqa: E402
+LAP_STATED = (_nt('member.assumption.f2_lap_region_lap_restrained', manual_quote=LAP_MANUAL_ASSUMPTION))
+LAP_LTB_UNSTATED = (_nt('member.ne.f2_f2_lateral_torsional_buckling_3', manual_quote=LAP_MANUAL_ASSUMPTION))
+LAP_DIST_UNSTATED = (_nt('member.ne.f4_f4_distortional_buckling_lap', manual_quote=LAP_MANUAL_ASSUMPTION))
 LAP_DIST_STATED = LAP_STATED      # 옛 이름(2026-11-24 첫 판) — 같은 문장
 # 구간 설계 · 랩 도구의 진술 입력. distortion_restrained 는 같은 뜻의 옛 이름(별칭)이다.
 LAP_STATEMENT_KEYS = ('lap_restrained', 'distortion_restrained')
@@ -238,7 +236,7 @@ def _zero_demand_not_applicable(checks: list) -> None:
     for c in checks:
         if c['verdict'] == 'not_evaluated' and str(c.get('reason') or '').startswith('no required'):
             c['verdict'] = 'not_applicable'
-            c['reason'] = c['reason'] + ' — no demand for this limit state (the other demands are checked)'
+            c['reason'] = _joined(' — ', [c['reason'], _nt('member.reason.no_demand_this_limit_state')])
             c.pop('mirrors', None)
             groups.add(c['group'])
     for g in groups:
@@ -314,7 +312,7 @@ def _dsm_diagnostics(dsm: dict, prefix: str) -> dict:
         'boundary_minimum': bool(_g('boundary_minimum', False)),
         'ref_consistent': _g('reference_stress_consistent'),
         'ref_unsymm': _g('reference_unsymm'),
-        'warnings': [str(w) for w in (_g('warnings') or [])],
+        'warnings': [w if isinstance(w, str) else str(w) for w in (_g('warnings') or [])],
     }
 
 
@@ -328,28 +326,25 @@ def _apply_fsm_diagnostics(diag: dict, warnings: list, not_evaluated: list, tag:
     """
     sink = assumptions if assumptions is not None else warnings
     for w in diag['warnings']:
-        msg = f'[DSM {tag}] {w}'
+        msg = _prefixed(f'[DSM {tag}] ', w)
         if msg not in sink:
             sink.append(msg)
     if diag['boundary_minimum'] and local_from_fsm:
-        not_evaluated.append(f'{local_name} (FSM minimum at the shortest half-wavelength)')
-        warnings.append(f'[DSM {tag}] 국부 극소가 해석 격자의 첫 반파장에 있습니다 — 실제 최소가 격자 '
-                        '하한 아래일 수 있어 이 값으로 판정하지 않습니다. 짧은 반파장까지 다시 해석하세요.')
+        not_evaluated.append(_nt('member.ne.fsm_minimum_at_shortest', local_name=local_name))
+        warnings.append(_nt('member.warning.dsm_local_minimum_at_first_length', tag=tag))
     if diag['ref_consistent'] is False:
         if local_from_fsm:
-            not_evaluated.append(f'{local_name} (FSM reference stress inconsistent)')
+            not_evaluated.append(_nt('member.ne.fsm_reference_stress_inconsistent', local_name=local_name))
         if dist_from_fsm:
-            not_evaluated.append(f'{dist_name} (FSM reference stress inconsistent)')
-        warnings.append(f'[DSM {tag}] 해석 응력분포가 기준 하중의 순수 분포와 달라 FSM 임계값으로 판정하지 않습니다.')
+            not_evaluated.append(_nt('member.ne.fsm_reference_stress_inconsistent_2', dist_name=dist_name))
+        warnings.append(_nt('member.warning.dsm_fsm', tag=tag))
     if tag == 'M' and diag.get('ref_unsymm') == 1 and (local_from_fsm or dist_from_fsm):
         # 비구속 휨 응력의 Mcr(P_ref = 비구속 첫 항복)은 구속 My = Sf·Fy 와 같은 기준이 아니다.
         if local_from_fsm:
-            not_evaluated.append(f'{local_name} (FSM from unrestrained-bending stress)')
+            not_evaluated.append(_nt('member.ne.fsm_from_unrestrained_bending', local_name=local_name))
         if dist_from_fsm:
-            not_evaluated.append(f'{dist_name} (FSM from unrestrained-bending stress)')
-        warnings.append('[DSM M] Mcrl/Mcrd 가 비구속 휨(unsymm=1) 응력으로 계산되었습니다. 이 도구의 My 는 '
-                        '구속 휨 Sf·Fy 이므로 두 기준을 섞지 않고 F3/F4 를 판정하지 않습니다 — 구속 휨 응력으로 '
-                        '다시 해석하세요.')
+            not_evaluated.append(_nt('member.ne.fsm_from_unrestrained_bending_2', dist_name=dist_name))
+        warnings.append(_nt('member.warning.f3_dsm_mcrl_mcrd_unsymm'))
 
 
 def _out_to_out_dims(geom: dict) -> tuple:
@@ -464,18 +459,17 @@ def _validate_section_keys(params: dict) -> list:
         try:
             if int(float(wc)) < 1:
                 warnings.append(
-                    f'section.web_count={wc!r} 유효하지 않음 — 1 이상 정수를 입력하세요 '
-                    '(무시하고 family 추론 계속)')
+                    _nt('member.warning.section_web_count_family', wc=wc))
         except (ValueError, TypeError):
             warnings.append(
-                f'section.web_count={wc!r} 숫자가 아님 — 무시하고 family 추론 계속')
+                _nt('member.warning.section_web_count_family_2', wc=wc))
     nw = params.get('wc_n_webs')
     if nw not in (None, ''):
         try:
             if int(float(nw)) < 1:
-                warnings.append(f'wc_n_webs={nw!r} 유효하지 않음 — 1 이상 정수를 입력하세요 (무시됨)')
+                warnings.append(_nt('member.warning.wc_webs', nw=nw))
         except (ValueError, TypeError):
-            warnings.append(f'wc_n_webs={nw!r} 숫자가 아님 — 무시됨')
+            warnings.append(_nt('member.warning.wc_webs_2', nw=nw))
     return warnings
 
 
@@ -604,14 +598,13 @@ def design_member(params: dict) -> dict:
         result['auto_generated_section'] = auto_section
         result['section_source'] = 'auto-template'
         result['assumptions'].append(
-            f"단면 성질을 입력 템플릿 치수로 생성했습니다: {auto_section}. "
-            '실제 부재 단면과 같은지 확인하십시오.')
+            _nt('member.assumption.section_from_template', auto_section=auto_section))
     for _w in auto_warnings:
         if _w not in result['warnings']:
             result['warnings'].append(_w)
     if not params.get('section_type') and not (params.get('section') or {}).get('type'):
         result['assumptions'].append(
-            'section_type 미지정 → C 단면으로 가정하여 §E2/§F2 분기와 적용한계를 정했습니다.')
+            _nt('member.assumption.e2_section_type_e2_f2'))
 
     # DSM 적용 한계 검증 — Table B4.1-1 은 Chapters E~H 에만 해당한다(인장 D장 제외).
     b4_items = []
@@ -624,11 +617,8 @@ def design_member(params: dict) -> dict:
             # 불합격은 그대로 두고, 합격만 '판정 없음'으로 내린다.
             result['b4_limits_exceeded'] = True
             _mark_not_evaluated(
-                result, 'B4.1 limits (φ/Ω of Chapters E-H not applicable)',
-                '§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. '
-                'Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, '
-                'A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. '
-                '내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다.')
+                result, _nt('member.ne.b4_1_b4_limits_chapters_applicable'),
+                _nt('member.warning.b3_3_b3_b4_b4_chapters'))
 
     # 구현하지 않은 조항 — 해당할 수 있으면 사용자에게 보인다.
     result['not_checked'] = _not_checked_provisions(params, member_type)
@@ -655,6 +645,7 @@ def design_member(params: dict) -> dict:
     result.pop(_UTIL_RAW, None)
     result['display_rounding'] = _display_rounding('member')
     result['report'] = generate_report(result, params)
+    _attach_notices(result)
     return result
 
 
@@ -717,17 +708,15 @@ def _not_implemented_warnings(result: dict, params: dict, member_type: str) -> N
             w.append(msg)
 
     if member_type in ('compression', 'flexure', 'combined'):
-        _add('구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — '
-             '구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오.')
+        _add(_nt('member.scope.e2_5_e2_e3_e4_f2'))
     if member_type in ('compression', 'combined') and canon == 'RHS':
-        _add('§E2.1.1 미구현: 연신율 3~10 % 강재의 폐단면이고 KL < 1.1L0 이면 감소 회전반경 Rr·r 를 써야 합니다.')
+        _add(_nt('member.scope.e2_1_1_e2_kl_l0_rr'))
     if member_type in ('flexure', 'combined') and canon not in ('RHS', 'CHS', 'Z', 'I'):
-        _add('§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) '
-             '비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.')
+        _add(_nt('member.scope.h4_torsion_not_implemented'))
     if member_type == 'combined':
-        _add('§C1 B2(P-Δ, 횡이동 증폭)는 적용하지 않았습니다 — 비횡이동(가새) 부재로 가정했습니다.')
+        _add(_nt('member.scope.c1_c1_b2'))
     if member_type == 'tension':
-        _add('§D1: 접합부(Chapter J, 예: J6 전단지연·블록전단)가 지배할 수 있습니다 — 별도 검토하십시오.')
+        _add(_nt('member.scope.d1_d1_chapter_j6'))
 
 
 # ============================================================
@@ -780,16 +769,14 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
                  'stiffened element in bending (web)', wt_web <= 300)
             if wt_web > 300:
                 warnings.append(
-                    f'Web h/t = {wt_web:.1f} > 300 '
-                    '(Table B4.1-1 stiffened element in bending limit)'
+                    _nt('member.warning.table_b4_1_1_web_b4_stiffened_element', wt_web=wt_web)
                 )
         else:
             _rec('web w/t', ('w', h_web, 'length'), ('t', t, 'length'), wt_web, 500,
                  'stiffened element in compression (web)', wt_web <= 500)
             if wt_web > 500:
                 warnings.append(
-                    f'Web w/t = {wt_web:.1f} > 500 '
-                    '(Table B4.1-1 stiffened element in compression limit)'
+                    _nt('member.warning.table_b4_1_1_web_b4_stiffened_element_2', wt_web=wt_web)
                 )
 
     # 플랜지: 요소 종류별 한계 (Table B4.1-1)
@@ -805,13 +792,13 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
                  'stiffened element in compression (flange)', bt_fl <= 500)
             if bt_fl > 500:
                 warnings.append(
-                    f'Flange w/t = {bt_fl:.1f} > 500 (Table B4.1-1 stiffened element in compression limit)')
+                    _nt('member.warning.table_b4_1_1_flange_b4_stiffened_element', bt_fl=bt_fl))
         elif geom['has_lip']:
             bt_fl = b_flange / t
             _rec('flange b/t', ('b', b_flange, 'length'), ('t', t, 'length'), bt_fl, 160,
                  'edge-stiffened element', bt_fl <= 160)
             if bt_fl > 160:
-                warnings.append(f'Flange b/t = {bt_fl:.1f} > 160 (Table B4.1-1 edge-stiffened limit)')
+                warnings.append(_nt('member.warning.table_b4_1_1_flange_b4_edge_stiffened', bt_fl=bt_fl))
         elif canon != 'CHS':
             # I·T 는 웹 양쪽 돌출부가 각각 비보강요소다.
             d_out = b_flange / 2.0 if canon in ('I', 'TEE') else b_flange
@@ -820,14 +807,14 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
                  'unstiffened element in compression', bt_fl <= 60)
             if bt_fl > 60:
                 warnings.append(
-                    f'Flange b/t = {bt_fl:.1f} > 60 (Table B4.1-1 unstiffened element in compression limit)')
+                    _nt('member.warning.table_b4_1_1_flange_b4_unstiffened_element', bt_fl=bt_fl))
 
     # hat 브림: 비보강 요소 d/t ≤ 60
     if geom.get('brim_flat', 0) > 0:
         _rec('brim d/t', ('d', geom['brim_flat'], 'length'), ('t', t, 'length'), geom['brim_flat'] / t, 60,
              'unstiffened element in compression (brim)', geom['brim_flat'] / t <= 60)
     if geom.get('brim_flat', 0) > 0 and geom['brim_flat'] / t > 60:
-        warnings.append(f"Brim d/t = {geom['brim_flat'] / t:.1f} > 60 (Table B4.1-1 unstiffened element in compression limit)")
+        warnings.append(_nt('member.warning.table_b4_1_1_brim_b4_unstiffened_element', value=geom['brim_flat'] / t))
 
     # 비보강 요소 (립): d/t ≤ 60
     d_lip = geom['d_lip']
@@ -836,7 +823,7 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
         _rec('lip d/t', ('d', d_lip, 'length'), ('t', t, 'length'), dt_lip, 60, 'unstiffened element (lip)',
              dt_lip <= 60)
         if dt_lip > 60:
-            warnings.append(f'Lip d/t = {dt_lip:.1f} > 60 (Table B4.1-1 unstiffened limit)')
+            warnings.append(_nt('member.warning.table_b4_1_1_lip_b4_unstiffened_limit', dt_lip=dt_lip))
 
     # 코너 반경: R/t ≤ 20
     R = geom['R']
@@ -844,7 +831,7 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
         Rt = R / t
         _rec('corner R/t', ('R', R, 'length'), ('t', t, 'length'), Rt, 20, 'inside bend radius', Rt <= 20)
         if Rt > 20:
-            warnings.append(f'Corner R/t = {Rt:.1f} > 20 (Table B4.1-1 corner limit)')
+            warnings.append(_nt('member.warning.table_b4_1_1_corner_b4_corner_limit', Rt=Rt))
 
     # 단순 연단보강재 길이/플랜지폭: do/bo ≤ 0.7
     lip_o = geom['lip_o'] or d_lip
@@ -855,23 +842,22 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
              'simple lip edge stiffener', do_bo <= 0.7)
         if do_bo > 0.7:
             warnings.append(
-                f'Simple edge stiffener d_o/b_o = {do_bo:.3f} > 0.7 '
-                '(Table B4.1-1 simple edge stiffener limit)'
+                _nt('member.warning.table_b4_1_1_simple_edge_stiffener_b4', do_bo=do_bo)
             )
 
     # 중간/연단 보강재 개수
     if geom['n_f'] > 4:
-        warnings.append(f'n_f = {geom["n_f"]} > 4 (Table B4.1-1 flange intermediate stiffener limit)')
+        warnings.append(_nt('member.warning.table_b4_1_1_b4_flange_intermediate_stiffener', n_f=geom["n_f"]))
     if geom['n_le'] > 2:
-        warnings.append(f'n_le = {geom["n_le"]} > 2 (Table B4.1-1 edge stiffener count limit)')
+        warnings.append(_nt('member.warning.table_b4_1_1_le_b4_edge_stiffener', n_le=geom["n_le"]))
     if geom['n_w'] > 4:
-        warnings.append(f'n_w = {geom["n_w"]} > 4 (Table B4.1-1 web intermediate stiffener limit)')
+        warnings.append(_nt('member.warning.table_b4_1_1_b4_web_intermediate_stiffener', n_w=geom["n_w"]))
 
     # 항복강도: Fy < 95 ksi (표의 부등호는 strict)
     if Fy is not None:
         _rec('Fy', ('Fy', Fy, 'stress'), None, Fy, 95, 'yield stress limit (§B4.1)', Fy < 95, strict=True)
     if Fy is not None and Fy >= 95:
-        warnings.append(f'Fy = {Fy} ksi is not < 95 ksi (Table B4.1-1 Fy limit)')
+        warnings.append(_nt('member.warning.table_b4_1_1_fy_ksi_b4_fy', Fy=Fy))
 
     return warnings
 
@@ -924,15 +910,13 @@ def _design_compression(params: dict) -> dict:
     KtLt = params.get('KtLt') if params.get('KtLt') is not None else 120
     if missing_len:
         warnings.append(
-            'Effective length defaulted to ' + ', '.join(f'{k}=120 in' for k in missing_len)
-            + ' — verify against actual unbraced/braced lengths')
+            _nt('member.warning.effective_length_defaulted_verify', items=', '.join(f'{k}=120 in' for k in missing_len)))
         if Fcre_override <= 0:
-            not_evaluated.append('E2 global buckling (assumed ' + '/'.join(missing_len) + ')')
+            not_evaluated.append(_nt('member.ne.e2_e2_global_buckling_assumed', missing_len='/'.join(missing_len)))
 
     if Pcrl == 0 and Pcrd == 0:
         warnings.append(
-            'Pcrl=0, Pcrd=0: 좌굴 해석 결과가 없습니다. '
-            'FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).'
+            _nt('member.warning.pcrl_pcrd_fsm_run')
         )
 
     # Step 1: Py = Ag·Fy (Eq. E4.1-4) — 설계 Fy 로 산정한다. DSM 의 Py 는 해석 fy 기준이므로
@@ -940,14 +924,11 @@ def _design_compression(params: dict) -> dict:
     Py = Ag * Fy
     if Py_dsm > 0 and abs(Py_dsm / Py - 1.0) > 0.02:
         warnings.append(
-            f'DSM Py={Py_dsm:.2f} kips ≠ Ag·Fy={Py:.2f} kips (설계 Fy={Fy:.2f} ksi; '
-            f'해석 fy≈{Py_dsm / Ag:.2f} ksi로 추정). Py 는 설계 Fy 로 다시 산정했고 '
-            'Pcrl·Pcrd 는 탄성 임계하중으로 그대로 사용했습니다.')
+            _nt('member.warning.dsm_py_ag_fy', Py_dsm=Py_dsm, Py=Py, Fy=Fy, value=Py_dsm / Ag))
     _fy_an = dsm.get('fy_analysis')
     if _fy_an and abs(float(_fy_an) - Fy) > 1e-6 * max(Fy, 1.0):
         warnings.append(
-            f'DSM 해석 fy={float(_fy_an):.2f} ksi ≠ 설계 Fy={Fy:.2f} ksi — '
-            'Py·My 는 설계 Fy 로 산정했습니다.')
+            _nt('member.warning.dsm_fy_fy_py', _fy_an=float(_fy_an), Fy=Fy))
     steps.append({
         'step': 1, 'name': 'Yield Load (Py)',
         'value': round(Py, 2), 'unit': 'kips',
@@ -973,29 +954,24 @@ def _design_compression(params: dict) -> dict:
     # 단축대칭 개단면에서 xo 를 확인할 수 없으면 E2.2 를 평가하지 못한 것이다.
     ft_not_evaluated = bool(Fcre_result.get('ft_not_evaluated', False))
     if ft_not_evaluated:
-        not_evaluated.append('E2.2 flexural-torsional buckling')
+        not_evaluated.append(_nt('member.ne.e2_2_e2_flexural_torsional_buckling'))
         warnings.append(
-            '§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) '
-            '휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 '
-            'Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.'
+            _nt('member.warning.e2_2_e2_xo_xo_xs')
         )
     if Fcre_result.get('symmetry_axis') == 'z':
         assumptions.append(
-            '§E2.2: 전단중심 편심이 z 방향 — 대칭축을 z 로 보고 σex(대칭축)=π²E/(KyLy/ry)², '
-            'σey=π²E/(KxLx/rx)², xo=|Zs−zcg| 로 휨-비틀림좌굴을 산정했습니다.')
+            _nt('member.assumption.e2_2_e2_ex_kyly_ry'))
 
     # §E2: Fcre를 계산할 수 없으면 Pne=0 → Pn=0. 0 강도는 "불합격"이 아니라 "평가하지 못함"이다.
     e2_unavailable = Fcre <= 0 or Pne <= 0
     if e2_unavailable:
         _cutwp_note = ' (cutwp 해석 실패로 J/Cw=0이 되었습니다)' if props.get('cutwp_failed') else ''
-        not_evaluated.append('E2 global buckling')
+        not_evaluated.append(_nt('member.ne.e2_e2_global_buckling'))
         if Fcre_result.get('unsupported'):
-            warnings.append(f'§E2.4: {Fcre_result.get("error", "rational analysis is required")}.')
+            warnings.append(_nt('member.warning.e2_4_e2', error=Fcre_result.get("error", "rational analysis is required")))
         else:
             warnings.append(
-                '§E2: 전체 탄성좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). '
-                f'비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{_cutwp_note}. '
-                '0 강도를 유효한 설계로 해석하지 마십시오.'
+                _nt('member.warning.e2_e2_fcre_fcre_pne', cutwp_note=_cutwp_note)
             )
 
     steps.append({
@@ -1034,12 +1010,10 @@ def _design_compression(params: dict) -> dict:
                         Pcrl_source += ' (raised to single-minimum floor)'
                         pcrl_an.update(raised=True, final=Pcrl)
                     assumptions.append(
-                        f'Pcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 '
-                        f'(Fcrl={Fcrl_calc:.2f} ksi, 지배요소={fcrl_result["governing"]}, '
-                        f'ho/bo/do={ho:.3f}/{bo:.3f}/{do:.3f} in 외-외)'
+                        _nt('member.assumption.pcrl_fsm_appendix_fcrl', Fcrl_calc=Fcrl_calc, governing=fcrl_result["governing"], ho=ho, bo=bo, do=do)
                     )
             except Exception as e:
-                warnings.append(f'Pcrl 해석적 fallback(Appendix 1 §1.1 Eq.1.1-4) 실패: {e}')
+                warnings.append(_nt('member.warning.pcrl_fallback_appendix', e=e))
 
     local_not_evaluated = Pcrl <= 0
     if Pcrl > 0:
@@ -1049,10 +1023,9 @@ def _design_compression(params: dict) -> dict:
     else:
         Pnl = Pne
         local_result = {'lambda_l': 0, 'equation': 'N/A (E3 not evaluated: no Pcrl)'}
-        not_evaluated.append('E3 local buckling')
+        not_evaluated.append(_nt('member.ne.e3_e3_local_buckling'))
         warnings.append(
-            '§E3: Pcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 '
-            '(Pnl=Pne 로 표시). FSM 국부 극소(Pcrl)를 제공하세요.')
+            _nt('member.warning.e3_e3_pcrl_pnl_pne'))
 
     steps.append({
         'step': 3, 'name': 'Local Buckling (Pnl)',
@@ -1087,7 +1060,7 @@ def _design_compression(params: dict) -> dict:
                 fcrd_result = calc_Fcrd(fp, ho, t, xi_web=0)  # compression
                 Fcrd_calc = fcrd_result['Fcrd']
                 Lcrd_val = fcrd_result.get('Lcrd', '')
-                assumptions.extend(f'§2.3.1.3: {n}' for n in (fcrd_result.get('notes') or []))
+                assumptions.extend(_prefixed('§2.3.1.3: ', n) for n in (fcrd_result.get('notes') or []))
                 if Fcrd_calc > 0:
                     Pcrd = Fcrd_calc * Ag
                     Pcrd_source = '§2.3.1.3'
@@ -1099,11 +1072,10 @@ def _design_compression(params: dict) -> dict:
                         Pcrd_source += ' (raised to single-minimum floor)'
                         pcrd_an.update(raised=True, final=Pcrd)
                     assumptions.append(
-                        f'Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 '
-                        f'(Fcrd={Fcrd_calc:.2f} ksi, Lcrd={Lcrd_val} in)'
+                        _nt('member.assumption.pcrd_fsm_appendix_fcrd', Fcrd_calc=Fcrd_calc, Lcrd_val=Lcrd_val)
                     )
             except Exception as e:
-                warnings.append(f'Pcrd 해석적 fallback(Appendix 2 §2.3.1.3) 실패: {e}')
+                warnings.append(_nt('member.warning.pcrd_fallback_appendix', e=e))
 
     if Pcrd > 0:
         # 해당하지 않는 단면이라도 값이 주어지면 쓴다(감소만 할 수 있으므로 보수측 — Manual II-4B).
@@ -1117,11 +1089,9 @@ def _design_compression(params: dict) -> dict:
         Pnd = Py
         distortional_not_evaluated = True
         dist_result = {'lambda_d': 0, 'equation': 'N/A (E4 not evaluated: no Pcrd)'}
-        not_evaluated.append('E4 distortional buckling')
+        not_evaluated.append(_nt('member.ne.e4_e4_distortional_buckling'))
         warnings.append(
-            f"§E4: 단면 '{_effective_section_type(params)}'은 연단 보강 플랜지가 있어 뒤틀림좌굴이 "
-            '해당하지만 Pcrd 가 없고 해석식 대체(Appendix 2 §2.3.1.3, C/Z 전용·기하 필요)도 '
-            '할 수 없습니다. cFSM/유한요소 또는 합리적 해석으로 E4를 평가하세요.')
+            _nt('member.warning.e4_e4_pcrd_appendix_cfsm', value=_effective_section_type(params)))
 
     steps.append({
         'step': 4, 'name': 'Distortional Buckling (Pnd)',
@@ -1139,17 +1109,16 @@ def _design_compression(params: dict) -> dict:
 
     _apply_fsm_diagnostics(diag, warnings, not_evaluated, 'P',
                            local_from_fsm=(Pcrl_source == 'FSM'), dist_from_fsm=(Pcrd_source == 'FSM'),
-                           local_name='E3 local buckling', dist_name='E4 distortional buckling',
+                           local_name=_nt('member.ne.e3_e3_local_buckling'), dist_name=_nt('member.ne.e4_e4_distortional_buckling'),
                            assumptions=assumptions)
 
     # §H1.2: 앵글은 압축 단독이라도 (P)L/1000 편심 모멘트를 조합식으로 검토해야 한다
     # (면제: 단축대칭 무보강 앵글이면서 Pnl = Pne).
     if _canonical_section_type(params) in ('ANGLE', 'LIPPEDANGLE') and not _angle_l1000_exempt(
             params, geom, Pnl, Pne):
-        not_evaluated.append('H1.2 angle (P)L/1000')
+        not_evaluated.append(_nt('member.ne.h1_2_h1_angle'))
         warnings.append(
-            '§H1.2: 앵글 압축재는 Muy + (P)L/1000 을 포함한 조합 검토가 필요합니다 — '
-            "member_type='combined' 와 May_strength 로 검토하세요.")
+            _nt('member.warning.h1_2_h1_muy_member_type'))
 
     # Step 5: 공칭강도
     # 지배 모드는 실제로 좌굴이 강도를 감소시킨 경우에만 국부/왜곡으로 표시한다.
@@ -1302,7 +1271,7 @@ def _add_notes(result: dict, warnings, assumptions, tag: str) -> None:
             result['warnings'].append(w)
     for a in assumptions or []:
         key = 'scope_notes' if 'hole' in str(a).lower() else 'assumptions'
-        msg = f'{tag}: {a}'
+        msg = _prefixed(f'{tag}: ', a)
         if msg not in result.setdefault(key, []):
             result[key].append(msg)
 
@@ -1322,19 +1291,15 @@ def _design_flexure(params: dict) -> dict:
     lap_notes_ne = []
     if lap_stated:
         if 'Lb' in params and params.get('Lb') not in (0, 0.0):
-            lap_notes.append(f"lap_region with lap_restrained = true: the given Lb = {params.get('Lb')} in is not used "
-                             '— the Manual assumption (lapped section restrained against lateral-torsional buckling) '
-                             'applies (Lb = 0)')
+            lap_notes.append(_nt('member.warning.lap_region_lap_restrained', Lb=params.get('Lb')))
         if params.get('Cb') is not None and params.get('Cb') != 1.0:
-            lap_notes.append(f"lap_region with lap_restrained = true: the given Cb = {params.get('Cb')} is not used "
-                             '(Lb = 0 under the Manual assumption; Cb = 1.0)')
+            lap_notes.append(_nt('member.warning.lap_region_lap_restrained_2', Cb=params.get('Cb')))
         # F4 는 해당 없음(Manual 가정) — 단일 단면으로 계산해 넘어온 뒤틀림 값은 쓰지 않는다(계약 §6.3).
         _dsm_in = params.get('dsm') or {}
         _ign = [k for k in LAP_IGNORED_DSM if (_dsm_in.get(k) or 0)]
         if _ign:
-            lap_notes.append('lap_region with lap_restrained = true: dsm ' + ', '.join(
-                f'{k} = {_dsm_in.get(k)}' for k in _ign) + ' not used — F4 distortional buckling is not applicable '
-                'under the Manual assumption (lapped section restrained against distortional buckling)')
+            lap_notes.append(_nt('member.warning.f4_lap_region_lap_restrained', items=', '.join(
+                f'{k} = {_dsm_in.get(k)}' for k in _ign)))
         _dsm_lap = {k: v for k, v in _dsm_in.items() if k not in LAP_IGNORED_DSM}
         params = {**params, 'Lb': 0.0, 'Cb': 1.0, _LAP_LB: True, 'dsm': _dsm_lap}
         for k in ('dist_M1_M2', 'dist_Lm'):
@@ -1369,8 +1334,7 @@ def _design_flexure(params: dict) -> dict:
     not_evaluated.extend(lap_notes_ne)
     if lap_region:
         if params.get('distortional_not_applicable'):
-            warnings.append('lap_region: distortional_not_applicable is ignored for a lap region — the restraint '
-                            'must be stated as lap_restrained = true')
+            warnings.append(_nt('member.warning.lap_region_distortional_applicable'))
         dist_excluded = lap_stated
         if dist_excluded:
             assumptions.append(LAP_STATED)
@@ -1378,8 +1342,7 @@ def _design_flexure(params: dict) -> dict:
             not_evaluated.append(LAP_DIST_UNSTATED)
     elif dist_excluded:
         assumptions.append(
-            'F4 distortional buckling was explicitly excluded by the supplied assembly/member '
-            'assumption; Mnd=My is used.'
+            _nt('member.assumption.f4_f4_distortional_buckling_was')
         )
     steps = []
     spec_sections = []
@@ -1404,34 +1367,30 @@ def _design_flexure(params: dict) -> dict:
 
     # Lb 미지정 시 기본 120 in 으로 계산하되, 그 LTB 결과는 판정에 쓰지 않는다.
     if 'Lb' not in params:
-        warnings.append('Lb defaulted to 120 in — verify lateral unbraced length')
+        warnings.append(_nt('member.warning.lb_defaulted_verify_lateral'))
         if Fcre_override <= 0 and not _is_round:
-            not_evaluated.append(LAP_LTB_UNSTATED if lap_region else 'F2 lateral-torsional buckling (assumed Lb=120 in)')
+            not_evaluated.append(LAP_LTB_UNSTATED if lap_region else _nt('member.ne.f2_f2_lateral_torsional_buckling_4'))
 
     # §F2.1.1: Cb — 캔틸레버/자유단 비지지 돌출부는 1.0, 공식(Eq. F2.1.1-2) 범위 밖 값은 경고.
     if params.get('cantilever') and Cb != 1.0:
-        warnings.append(f'§F2.1.1: 캔틸레버/돌출부는 Cb=1.0 이어야 합니다 — 입력 Cb={Cb} 대신 1.0 사용.')
+        warnings.append(_nt('member.warning.f2_1_1_f2_cb_cb', Cb=Cb))
         Cb = 1.0
     if Cb < 1.0 or Cb > 3.0:
-        warnings.append(f'§F2.1.1: Cb={Cb} 는 통상 범위(1.0~3.0) 밖입니다 — Eq. F2.1.1-2 로 확인하세요.')
+        warnings.append(_nt('member.warning.f2_1_1_f2_cb_f2', Cb=Cb))
 
     if Mcrl == 0 and Mcrd == 0:
         warnings.append(
-            'Mcrl=0, Mcrd=0: 좌굴 해석 결과가 없습니다. '
-            'FSM 해석을 먼저 실행하세요 (run_analysis → get_dsm_values).'
+            _nt('member.warning.mcrl_mcrd_fsm_run')
         )
 
     # My = Sf·Fy (Eq. F2.1-2/F4.1-4) — 설계 Fy 로 산정. DSM 의 My 는 해석 fy 기준이므로 비교만 한다.
     if My_dsm > 0 and abs(My_dsm / (Sf * Fy_original) - 1.0) > 0.02:
         warnings.append(
-            f'DSM My={My_dsm:.2f} kip-in ≠ Sf·Fy={Sf * Fy_original:.2f} kip-in (설계 Fy={Fy_original:.2f} ksi; '
-            f'해석 fy≈{My_dsm / Sf:.2f} ksi로 추정). My 는 설계 Fy 로 다시 산정했고 '
-            'Mcrl·Mcrd 는 탄성 임계모멘트로 그대로 사용했습니다.')
+            _nt('member.warning.dsm_my_sf_fy', My_dsm=My_dsm, value=Sf * Fy_original, Fy_original=Fy_original, value_2=My_dsm / Sf))
     _fy_an = dsm.get('fy_analysis')
     if _fy_an and abs(float(_fy_an) - Fy_original) > 1e-6 * max(Fy_original, 1.0):
         warnings.append(
-            f'DSM 해석 fy={float(_fy_an):.2f} ksi ≠ 설계 Fy={Fy_original:.2f} ksi — '
-            'My 는 설계 Fy 로 산정했습니다.')
+            _nt('member.warning.dsm_fy_fy_my', _fy_an=float(_fy_an), Fy_original=Fy_original))
 
     # [문제4] β 보정계수 파라미터 (§Appendix 2 §2.3.3.3 Eq. 2.3.3.3-3)
     dist_M1_M2 = params.get('dist_M1_M2', None)  # M1/M2 비율 (양: 역곡률, 음: 단일곡률)
@@ -1501,7 +1460,7 @@ def _design_flexure(params: dict) -> dict:
                             Mcrl_source += ' (raised to single-minimum floor)'
                             Mcrl_an.update(raised=True, final=Mcrl_eff)
                 except Exception as e:
-                    state_warnings.append(f'Mcrl 해석적 fallback(Appendix 1 §1.1 Eq.1.1-4) 실패: {e}')
+                    state_warnings.append(_nt('member.warning.mcrl_fallback_appendix', e=e))
 
         # §F2.4.2-3: 부재 소성모멘트 Mp = Zf×Fy (탄성 임계값과 달리 Fy/Fya에 비례)
         Mp = Zf * Fy_eval if Zf > 0 else 0.0
@@ -1578,7 +1537,7 @@ def _design_flexure(params: dict) -> dict:
                             Mcrd_source += ' (raised to single-minimum floor)'
                             Mcrd_an.update(raised=True, final=Mcrd_eff)
                 except Exception as e:
-                    state_warnings.append(f'Mcrd 해석적 fallback(Appendix 2 §2.3.3.3) 실패: {e}')
+                    state_warnings.append(_nt('member.warning.mcrd_fallback_appendix', e=e))
 
         # 정모멘트 구간 등 다른 곡률을 위한 β 미적용 기준 Mcrd 보존 (positive-region용)
         Mcrd_base = Mcrd_eff
@@ -1707,13 +1666,12 @@ def _design_flexure(params: dict) -> dict:
                     'applicable', cold_work_info.get('formula_applicable', False))
 
             if use_ir:
-                warnings.append('§A3.3.2: Cold Work(Fya)와 §F2.4.2 Inelastic Reserve는 동시 적용 불가. Cold Work를 적용하지 않았습니다.')
+                warnings.append(_nt('member.warning.a3_3_2_a3_cold_work_fya'))
                 cold_work_info = None
             elif not _no_buckling_reduction(state):
                 # 국부 또는 왜곡좌굴이 강도를 감소시키는(또는 확인되지 않은) 단면 → §A3.3.2 적용 불가.
                 warnings.append(
-                    '§A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 '
-                    '(Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.'
+                    _nt('member.warning.a3_3_2_a3_fy_mnl_mne')
                 )
                 cold_work_info = None
             elif _cw_formula_ok and cold_work_info['Fya'] > Fy_original:
@@ -1723,13 +1681,11 @@ def _design_flexure(params: dict) -> dict:
                 if not _no_buckling_reduction(state_cw):
                     cold_work_info = None
                     warnings.append(
-                        '§A3.3.2: Fya 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키므로 '
-                        '냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.')
+                        _nt('member.warning.a3_3_2_a3_fya_virgin_fy'))
                 elif Mn_cw <= Mn_virgin:
                     cold_work_info = None
                     warnings.append(
-                        '§A3.3.2 cold work(Fya) 적용 시 좌굴 감소가 증가하여 '
-                        '강도 개선 효과가 없습니다. Virgin Fy를 사용합니다.'
+                        _nt('member.warning.a3_3_2_a3_cold_work_fya_2')
                     )
                 else:
                     state = state_cw
@@ -1799,8 +1755,7 @@ def _design_flexure(params: dict) -> dict:
             spec_sections.append('I6.1.2')
         else:
             assumptions.append(
-                '§I6.1.2: 데크 스프링이 있는 모델입니다. Mcrl·Mcrd 는 FSM(스프링 포함) 값이지만 Fcre 는 '
-                '데크 구속을 넣지 않은 §F2 폐형식입니다 — 데크 강성을 포함한 Fcre 를 쓰려면 Fcre 를 입력하세요.')
+                _nt('member.assumption.i6_1_2_i6_mcrl_mcrd_fsm'))
 
     ir_note = ''
     if use_ir and Zf > 0:
@@ -1817,8 +1772,7 @@ def _design_flexure(params: dict) -> dict:
         else:
             ir_note = ' [§F2.4.2 not applicable]'
             warnings.append(
-                '§F2.4.2: Inelastic Reserve를 요청했으나 어떤 한계상태(F2.4.2/F3.2.3/F4.3)도 '
-                '비탄성 예비강도를 발휘하지 못했습니다(λ 한계 초과 또는 Mp≤My). My로 상한됩니다.'
+                _nt('member.warning.f2_4_2_f2_inelastic_reserve_f2')
             )
 
     # [문제5] Cb + Fcre 상세 계산과정 — 식(F2.1.1/F2.1.3 대 F2.1.4)별로 다른 문구.
@@ -1826,8 +1780,8 @@ def _design_flexure(params: dict) -> dict:
     f2_unavailable = False
     if fcre_detail.get('unsupported'):
         _required_f = fcre_detail.get('required_section', 'F2.1.5')
-        warnings.append(f'§{_required_f}: {fcre_detail.get("error", "rational analysis is required")}.')
-        not_evaluated.append(f'F2 lateral-torsional buckling (§{_required_f})')
+        warnings.append(_nt('member.warning.fcre_unavailable', clause=_required_f, error=fcre_detail.get("error", "rational analysis is required")))
+        not_evaluated.append(_nt('member.ne.f2_f2_lateral_torsional_buckling', clause=_required_f))
         f2_unavailable = True
     _eq = str(fcre_detail.get('equation', ''))
     if (fcre_detail and Lb > 0 and not fcre_detail.get('user_supplied')
@@ -1896,22 +1850,21 @@ def _design_flexure(params: dict) -> dict:
     })
 
     if _is_round and 'F2.3' not in _geq and Fcre_override <= 0:
-        not_evaluated.append('F2.3 round HSS (D/t outside 0.441E/Fy or unknown)')
-        warnings.append('§F2.3: 원형관 D/t 가 0.441E/Fy 를 넘거나 외경·두께가 없어 Mne 를 산정할 수 없습니다.')
+        not_evaluated.append(_nt('member.ne.f2_3_f2_round_hss_outside'))
+        warnings.append(_nt('member.warning.f2_3_f2_fy_mne'))
         f2_unavailable = True
     elif Mne <= 0 and not f2_unavailable:
-        not_evaluated.append('F2 lateral-torsional buckling')
-        warnings.append('§F2: Fcre=0 → Mne=0 — 비틀림 성질(J/Cw) 또는 길이 입력을 확인하세요.')
+        not_evaluated.append(_nt('member.ne.f2_f2_lateral_torsional_buckling_2'))
+        warnings.append(_nt('member.warning.f2_f2_fcre_mne_cw'))
         f2_unavailable = True
 
     if Mcrl_source.startswith('§App.1'):
-        assumptions.append('Mcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식'
-                           '(휨 응력 구배, 외-외 치수) 사용')
+        assumptions.append(_nt('member.assumption.mcrl_fsm_appendix'))
     local_not_evaluated = bool(state['local_missing'])
     _apply_fsm_diagnostics(diag, warnings, not_evaluated, 'M',
                            local_from_fsm=(Mcrl_source == 'FSM' and not state['skip_round_local']),
                            dist_from_fsm=str(Mcrd_source).startswith('FSM'),
-                           local_name='F3 local buckling', dist_name='F4 distortional buckling',
+                           local_name=_nt('member.ne.f3_f3_local_buckling'), dist_name=_nt('member.ne.f4_f4_distortional_buckling'),
                            assumptions=assumptions)
     # 휨 부호: DSM 값(Mcrl·Mcrd)과 Sf 는 한 부호(기본 +Mxx)의 값이다. 굽힘축에 대칭이 아닌
     # 단면은 반대 부호에서 압축 플랜지가 바뀌므로 그 값으로 판정하지 않는다.
@@ -1921,17 +1874,13 @@ def _design_flexure(params: dict) -> dict:
     if sign_mismatch:
         for name, from_value in (('F3 local buckling', Mcrl > 0), ('F4 distortional buckling', Mcrd > 0)):
             if from_value:
-                not_evaluated.append(f'{name} (DSM values are for the other moment sign)')
+                not_evaluated.append(_nt('member.ne.dsm_values_other_moment', name=name))
         warnings.append(
-            f"단면 '{_effective_section_type(params)}'은 굽힘축(x)에 대칭이 아닌데 이 검토는 "
-            f"{'부' if moment_sign < 0 else '정'}모멘트이고 Mcrl/Mcrd 는 "
-            f"{'부' if dsm_sign < 0 else '정'}모멘트(+Mxx 응력) 해석값입니다 — 반대 부호로 다시 해석한 값을 "
-            "dsm(M_sign='-')으로 주세요. Sf 도 압축 연단 기준이어야 합니다.")
+            _nt('member.warning.mcrl_mcrd_mxx_dsm', value=_effective_section_type(params), text='부' if moment_sign < 0 else '정', text_2='부' if dsm_sign < 0 else '정'))
     if local_not_evaluated:
-        not_evaluated.append('F3 local buckling')
+        not_evaluated.append(_nt('member.ne.f3_f3_local_buckling'))
         warnings.append(
-            '§F3: Mcrl 이 없고 해석식 대체도 할 수 없어 국부좌굴이 평가되지 않았습니다 '
-            '(Mnl=Mne 로 표시). FSM 국부 극소(Mcrl)를 제공하세요.')
+            _nt('member.warning.f3_f3_mcrl_mnl_mne'))
 
     steps.append({
         'step': 3, 'name': 'Local Buckling (Mnl)',
@@ -1948,14 +1897,12 @@ def _design_flexure(params: dict) -> dict:
     })
 
     if Mcrd_source.startswith('§2.3.3.3'):
-        assumptions.append('Mcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.3.3 해석적 공식 사용 (외-외 치수)')
+        assumptions.append(_nt('member.assumption.mcrd_fsm_appendix'))
     distortional_not_evaluated = bool(state['dist_missing'])
     if distortional_not_evaluated:
-        not_evaluated.append('F4 distortional buckling')
+        not_evaluated.append(_nt('member.ne.f4_f4_distortional_buckling'))
         warnings.append(
-            f"§F4: 단면 '{_effective_section_type(params)}'은 연단 보강 압축 플랜지가 있어 뒤틀림좌굴이 "
-            '해당하지만 Mcrd 가 없고 해석식 대체(Appendix 2 §2.3.3.3, C/Z 전용·기하 필요)도 '
-            '할 수 없습니다. cFSM/유한요소 또는 합리적 해석으로 F4를 평가하세요.')
+            _nt('member.warning.f4_f4_mcrd_appendix_cfsm', value=_effective_section_type(params)))
 
     steps.append({
         'step': 4, 'name': 'Distortional Buckling (Mnd)',
@@ -1997,13 +1944,11 @@ def _design_flexure(params: dict) -> dict:
         i621_issues, i621_notes = _check_i621_limits(
             params, geom, Fy_original, params.get('Fu'), R_uplift, section_type)
         if i621_issues:
-            not_evaluated.append('I6.2.1 (outside Table I6.2.1-1 / conditions (a)-(o))')
-            warnings.append('§I6.2.1 적용 조건 위반/미확인: ' + '; '.join(i621_issues)
-                            + ' — K2.1 시험 또는 합리적 해석이 필요합니다.')
+            not_evaluated.append(_nt('member.ne.i6_2_1_i6_outside_i6_conditions'))
+            warnings.append(_nt('member.warning.i6_2_1_i6_k2', i621_issues=_joined('; ', i621_issues)))
         assumptions.extend(i621_notes)
         assumptions.append(
-            '§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 '
-            '연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.')
+            _nt('member.assumption.i6_2_1_i6_ft'))
         # Mnfo: 국부좌굴 강도만 고려 (Fn=Fy, Mne=My 조건). state['Mnfo']는 IR 활성 시
         # §F3.2.3 소성 상한(λl=√(My/Mcrl)≤0.776)을 이미 반영하므로, 왜곡(Mnd)이 제외된
         # 이 경로에서도 국부 비탄성 상한을 초과하지 않는다(§A3.3.2/§F3.2.3 일관성).
@@ -2039,7 +1984,7 @@ def _design_flexure(params: dict) -> dict:
             'formula': (f'R = {R_uplift} (Table I6.2.1-1: {_row}); '
                         f'Mn = R × Mnℓo = {R_uplift} × {Mnfo:.2f} = {Mn_R:.2f} kip-in — '
                         'F2(LTB)·F4 대신 적용; 조건 ' + ('(a)~(f)·(o) 확인' if not i621_issues
-                                                       else '위반/미확인: ' + '; '.join(i621_issues))
+                                                       else '위반/미확인: ' + _joined('; ', i621_issues))
                         + ', (g)~(n) 사용자 확인'),
             'equation': 'I6.2.1-1',
             'R': R_uplift,
@@ -2220,9 +2165,8 @@ def _design_flexure(params: dict) -> dict:
             _merge_governing_check(result, shear_int, 'H2 bending + shear')
         else:
             _mark_not_evaluated(
-                result, 'G2/H2 shear',
-                'Vu가 입력되었으나 web flat depth h 또는 thickness t가 없어 '
-                '§G2/§H2 전단 검토를 수행할 수 없습니다.')
+                result, _nt('member.ne.g2_g2_h2_shear'),
+                _nt('member.warning.g2_vu_web_flat_depth'))
 
     # ── 정모멘트 구간 별도 검토 ──
     Lb_pos = params.get('Lb_pos', 0)
@@ -2325,16 +2269,13 @@ def _design_flexure(params: dict) -> dict:
             _merge_governing_check(result, {'total': ratio_pos, 'pass': pass_pos}, 'F positive region')
             if 'Lb_pos' not in params:
                 _mark_not_evaluated(
-                    result, 'F positive region (Lb_pos not given — assumed fully braced)',
-                    '정모멘트 구간 Lb_pos 가 없어 0(완전 횡지지)으로 계산했습니다 — '
-                    '압축 플랜지의 실제 횡지지 간격을 Lb_pos 로 입력하세요.')
+                    result, _nt('member.ne.positive_region_lb_pos'),
+                    _nt('member.warning.lb_pos_not_given'))
             if local_not_evaluated:
-                _mark_not_evaluated(result, 'F positive region local buckling (no Mcrl)')
+                _mark_not_evaluated(result, _nt('member.ne.positive_region_local_buckling'))
             if pass_pos is False:
                 result['warnings'].append(
-                    f'정모멘트 구간 NG: Mu(+)={Mu_pos:.2f} > '
-                    f'{"φ" if design_method == "LRFD" else ""}Mn(+)={phi_Mn_pos:.2f} kip-in '
-                    f'(DCR={util_pos:.3f})'
+                    _nt('member.warning.ng_mu_mn_dcr', Mu_pos=Mu_pos, text="φ" if design_method == "LRFD" else "", phi_Mn_pos=phi_Mn_pos, util_pos=util_pos)
                 )
 
     # §G5 웹 크리플링 단독 검토(P̄ ≤ Pa) + §H3 휨 상호작용
@@ -2368,8 +2309,8 @@ def _design_flexure(params: dict) -> dict:
                 support_fastener_spacing=wc_spacing)
             if 'error' in wc:
                 result['web_crippling'] = wc
-                _mark_not_evaluated(result, 'G5 web crippling',
-                                    f'§G5 web crippling could not be evaluated: {wc["error"]}')
+                _mark_not_evaluated(result, _nt('member.ne.g5_g5_web_crippling'),
+                                    _nt('member.warning.g5_g5_web_crippling_could', error=wc["error"]))
                 return _attach_flexure_checks(result, ck)
             # 판정 · H3 는 반올림하지 않은 Pn 으로(wc['Pn'] 은 표시용 소수 3자리).
             Pn_wc = wc_detail['Pn_final'] if wc_detail else wc['Pn']
@@ -2381,7 +2322,7 @@ def _design_flexure(params: dict) -> dict:
             elif abs(params.get('Vu') or 0) > 0:
                 P_wc, P_wc_source = abs(params['Vu']), 'Vu'
                 result.setdefault('assumptions', []).append(
-                    f'§G5/§H3: 웹 크리플링 하중으로 Vu = {P_wc:.3f} kips 를 썼다 — 반력 · 집중하중(wc_P)을 주지 않음.')
+                    _nt('member.assumption.g5_g5_h3_vu_wc', P_wc=P_wc))
             else:
                 P_wc, P_wc_source = 0.0, None
             # §H3 의 M̄ 은 반력 위치의 모멘트다. 주지 않으면 부재 최대 Mu 를 쓴다(보수측).
@@ -2390,12 +2331,11 @@ def _design_flexure(params: dict) -> dict:
             result['web_crippling'] = wc_result
             if P_wc_source is None:
                 _mark_not_evaluated(
-                    result, 'G5 web crippling (no bearing load wc_P or Vu)',
-                    '§G5/§H3: 지압 길이(wc_N)는 있으나 반력 · 집중하중(wc_P)도 Vu 도 없어 웹 크리플링을 '
-                    '평가하지 못했습니다 — wc_P 를 입력하세요.')
+                    result, _nt('member.ne.g5_g5_web_crippling_no'),
+                    _nt('member.warning.g5_h3_no_bearing_load'))
             _add_notes(result, wc.get('warnings'), wc.get('assumptions'), '§G5')
             if wc.get('within_limits') is False or wc.get('not_covered'):
-                _mark_not_evaluated(result, 'G5 web crippling (outside Table G5 limits)')
+                _mark_not_evaluated(result, _nt('member.ne.g5_g5_web_crippling_outside'))
 
             # §G5 단독: P̄ ≤ Pa (LRFD φw·Pn, ASD Pn/Ωw)
             _phi_w = wc.get('phi')
@@ -2423,7 +2363,7 @@ def _design_flexure(params: dict) -> dict:
                         'equation': wc.get('equation'),
                     })
                 else:
-                    _mark_not_evaluated(result, 'G5 web crippling (no φw/Ωw)')
+                    _mark_not_evaluated(result, _nt('member.ne.g5_g5_web_crippling_no_2'))
 
             # §H3: (a) 단일 무보강 웹(C·Z·hat 의 각 웹) → H3-1, (b) 맞댄 두 C 의 I 등 → H3-2,
             # (c) 겹친 Z → H3-3. shear.py 가 hat·built-up I·돌출(G5-2)을 "미구현"으로 두어도
@@ -2440,11 +2380,9 @@ def _design_flexure(params: dict) -> dict:
                                or wc.get('bearing_case') == 'overhang_bearing'):
                 h3_run = True
                 result.setdefault('assumptions', []).append(
-                    f"§H3: 웹 크리플링 표({wc.get('table')})가 H3 를 정하지 않아 원문 §H3 "
-                    f"{'(b) Eq. H3-2' if h3_cfg == 'multi_web' else '(a) Eq. H3-1' if h3_cfg == 'single' else '(c) Eq. H3-3'}"
-                    ' 로 계산했습니다(§H3(a) 데크 내부 지점 예외는 적용하지 않음 — 보수측).')
+                    _nt('member.assumption.h3_equation_from_text', table=wc.get('table'), text='(b) Eq. H3-2' if h3_cfg == 'multi_web' else '(a) Eq. H3-1' if h3_cfg == 'single' else '(c) Eq. H3-3'))
             if h3_run and P_wc_source is None:
-                _mark_not_evaluated(result, 'H3 bending + web crippling (no bearing load wc_P or Vu)')
+                _mark_not_evaluated(result, _nt('member.ne.h3_h3_bending_web_crippling'))
             elif h3_run:
                 # §H3 Eq. H3-1/2/3: limit is method-dependent (LRFD/LSD → coeff·φ;
                 # ASD → coeff/Ω with Ω=1.70 per spec). Pass design_method (in scope)
@@ -2471,12 +2409,12 @@ def _design_flexure(params: dict) -> dict:
                 _merge_governing_check(result, h3, 'H3 bending + web crippling', h3_ratio)
                 if params.get('wc_M') is None and M_wc > 0:
                     result.setdefault('assumptions', []).append(
-                        '§H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).')
+                        _nt('member.assumption.h3_h3_wc_mu'))
             else:
                 _mark_not_evaluated(
-                    result, 'H3 bending + web crippling',
-                    '§H3: ' + (wc.get('h3_not_applicable_reason')
-                               or '웹 크리플링-휨 상호작용을 평가하지 못했습니다.'))
+                    result, _nt('member.ne.h3_h3_bending_web_crippling_2'),
+                    _nt('member.warning.h3_not_evaluated', value=wc.get('h3_not_applicable_reason')
+                               or _nt('member.fragment.h3_interaction_not_evaluated')))
             result['Mnfo'] = round(Mnfo_v, 2)
             result['spec_sections'].append('G5')
             if result.get('h3_interaction'):
@@ -2547,7 +2485,7 @@ def _check_i621_limits(params: dict, geom: dict, Fy: float, Fu: float, R_uplift:
             cands = [v for v in (_i621_table_R(profile, d, 'simple'),
                                  _i621_table_R(profile, d, 'continuous')) if v is not None]
             R_tab = min(cands) if cands else None
-            notes.append('§I6.2.1: span_type(simple/continuous)이 없어 Table I6.2.1-1 의 두 값 중 작은 쪽으로 R 을 확인했습니다.')
+            notes.append(_nt('member.assumption.i6_2_1_i6_span_type_simple'))
         if R_tab is None:
             issues.append(f'Table I6.2.1-1 에 depth {d:.2f} in 의 R 이 없음')
         elif R_uplift > R_tab + 1e-9:
@@ -2594,7 +2532,7 @@ def _merge_sub_verdicts(result: dict, subs: list, main_names: tuple) -> None:
             _merge_governing_check(result, {'total': chk.get('ratio'), 'pass': chk.get('pass')},
                                    chk.get('name'))
         for item in sub.get('not_evaluated', []) or []:
-            _mark_not_evaluated(result, f'{label} {item}')
+            _mark_not_evaluated(result, _nt('member.ne.sub_result_item', label=label, item=item))
 
 
 def _design_combined(params: dict) -> dict:
@@ -2716,10 +2654,7 @@ def _design_combined(params: dict) -> dict:
             # §H1.2 의 (P)L/1000 — L 은 H1.2 에 정의가 없다. Commentary E(앵글)는 그것을 부재의 초기 굽음 L/1000 으로,
             # §E2 는 L 을 'Laterally unbraced length of member' 로 정의한다. 부재 길이를 받지 않았으면 KyLy 로 쓴다.
             result_notes_angle = (
-                f'§H1.2 (P)L/1000: member length L not given — KyLy = {KyLy:g} in (y-axis effective length) is '
-                'used for L. §H1.2 does not define L; the Commentary (Chapter E, angles) describes PL/1000 as an '
-                'initial out-of-straightness of L/1000, and §E2 defines L as the "Laterally unbraced length of '
-                'member". Give L (the unbraced length of the member) if K is not 1.')
+                _nt('member.assumption.h1_2_h1_member_length_given', KyLy=KyLy))
         else:
             result_notes_angle = None
         Padd = Pu * L_angle / 1000.0
@@ -2734,12 +2669,11 @@ def _design_combined(params: dict) -> dict:
         if inter_ecc['total'] >= inter_no_ecc['total']:
             Muy_amp = Muy_with_ecc
             angle_l1000_note = (
-                f'§H1.2: 앵글 → My = B1y·(Muy + (P)L/1000) = {Muy_with_ecc:.2f} kip-in '
-                f'(P={Pu:.2f} kips, L={L_angle:.1f} in, 추가편심모멘트={Padd:.2f} kip-in)이 지배'
+                _nt('member.assumption.h1_2_h1_my_b1y_muy', Muy_with_ecc=Muy_with_ecc, Pu=Pu, L_angle=L_angle, Padd=Padd)
             )
         else:
             angle_l1000_note = (
-                f'§H1.2: 앵글 추가편심 (P)L/1000={Padd:.2f} kip-in 검토 — Muy만 사용한 경우가 지배'
+                _nt('member.assumption.h1_2_h1_muy', Padd=Padd)
             )
 
     # 상호작용 검토 (증폭된 모멘트 사용)
@@ -2784,7 +2718,7 @@ def _design_combined(params: dict) -> dict:
     })
     if _component_unavailable:
         _merge_governing_check(result, {**interaction, 'pass': None}, 'H1.2 axial + bending')
-        _mark_not_evaluated(result, 'H1.2 axial + bending (component strength not evaluated)')
+        _mark_not_evaluated(result, _nt('member.ne.h1_2_h1_axial_bending_component'))
     else:
         _merge_governing_check(result, interaction, 'H1.2 axial + bending')
     if angle_trace and not angle_trace['L_given']:
@@ -2806,12 +2740,10 @@ def _design_combined(params: dict) -> dict:
     for axis, basis in (('x', cmx_basis), ('y', cmy_basis)):
         if basis == 'default':
             result['assumptions'].append(
-                f'§C1.2.1.1: Cm{axis} 미지정 + 그 굽힘 평면의 단부모멘트비 미지정 → Cm{axis} = 1.0 '
-                f'(Eq. C1.2.1.1-4 의 상한, (b) 항이 허용하는 보수값). 모멘트 구배를 알면 Cm{axis} 또는 '
-                f'Cm{axis}_M1_M2(그 축의 비지지 구간 끝 모멘트 비, 역곡률 +)를 입력하세요.')
+                _nt('member.assumption.c1_2_1_1_c1_cm_cm_c1', axis=axis, axis_2=axis, axis_3=axis, axis_4=axis))
     if params.get('dist_M1_M2') is not None and (cmx_basis == 'default' or cmy_basis == 'default'):
         result['assumptions'].append(
-            '§C1.2.1.1: dist_M1_M2 는 부록 2 β(강축 뒤틀림 구간)의 입력이라 Cm 에 쓰지 않았습니다.')
+            _nt('member.assumption.c1_2_1_1_c1_dist_m1_m2'))
 
     # y축 휨 결과
     if flex_y:
@@ -2965,8 +2897,7 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
         'spec_sections': sorted(set(tens.get('spec_sections', []) + flex_x['spec_sections'] + ['H1.1'])),
         'warnings': list(dict.fromkeys(tens.get('warnings', []) + flex_x.get('warnings', []))),
         'assumptions': list(dict.fromkeys(tens.get('assumptions', []) + flex_x.get('assumptions', []) + [
-            '§H1.1: 순 인장축력 + 휨으로 평가했습니다(P-δ 모멘트 증폭 미적용). '
-            'Maxt=φb·Sft·Fy(인장항복), Max=Chapter F(압축좌굴). Pu 부호 규약: 음수=인장.'
+            _nt('member.assumption.h1_1_h1_maxt_sft_fy')
         ])),
         'scope_notes': list(dict.fromkeys(tens.get('scope_notes', []) + flex_x.get('scope_notes', []))),
         'pass': None,
@@ -3014,12 +2945,11 @@ def _design_tension(params: dict) -> dict:
     An = params.get('An')
     if An is None or An <= 0:
         An = Ag
-        assumptions.append('§D3: 순단면적 An 미입력 → An = Ag 가정(볼트 구멍 등 순단면 공제 없음). '
-                        '구멍이 있으면 An 을 입력하세요.')
+        assumptions.append(_nt('member.assumption.d3_d3_ag'))
     if Fu is None or Fu <= 0:
         Fu = None
-        not_evaluated.append('D3 rupture (Fu not given)')
-        warnings.append('§D3: 인장강도 Fu 가 없어 파단 한계상태를 평가하지 못했습니다.')
+        not_evaluated.append(_nt('member.ne.d3_d3_rupture_fu_given'))
+        warnings.append(_nt('member.warning.d3_d3_fu'))
 
     steps = []
 
@@ -3330,7 +3260,7 @@ def generate_report(result: dict, params: dict = None) -> str:
     else:
         lines.append(f'  Verdict = {status}')
     if result.get('not_evaluated'):
-        lines.append('  Not evaluated: ' + '; '.join(result['not_evaluated']))
+        lines.append('  Not evaluated: ' + _joined('; ', result['not_evaluated']))
 
     # Interaction
     inter = result.get('interaction')
@@ -3373,7 +3303,7 @@ def generate_report(result: dict, params: dict = None) -> str:
                 lines.append(f'    - {w}')
     if result.get('not_checked'):
         lines.append('')
-        lines.append('  NOT IMPLEMENTED (not checked): ' + '; '.join(result['not_checked']))
+        lines.append('  NOT IMPLEMENTED (not checked): ' + _joined('; ', result['not_checked']))
 
     lines.append('')
     lines.append('=' * 60)

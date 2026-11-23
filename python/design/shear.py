@@ -3,6 +3,7 @@
 import math
 
 from design.steel_grades import E as E_STEEL
+from design.notices import N as _nt  # noqa: E402
 
 
 # Chapter G 가운데 이 모듈이 다루지 않는 조항 — 결과의 assumptions 에 그대로 남긴다.
@@ -51,8 +52,7 @@ def shear_strength(h: float, t: float, Fy: float,
 
     warnings = []
     if transverse_stiffeners or abs(kv - 5.34) > 1e-9:
-        warnings.append('§G2.2 (webs with transverse stiffeners) is not implemented; the §G2.1 '
-                        'curve is used with the given kv, which is conservative relative to §G2.2.')
+        warnings.append(_nt('shear.warning.g2_2_g2_webs_transverse_stiffeners'))
 
     Vy = 0.60 * Fy * h * t
     Vcr = (math.pi ** 2 * E * kv) / (12 * (1 - 0.3 ** 2)) * (t / h) ** 2 * h * t
@@ -252,8 +252,7 @@ def _resolve_section_family(section_family: str | None,
                                     '(expected built_up_i, C, Z, hat or multi_web).')
         if fam == 'c' and fam_from_type not in (None, 'c'):
             warnings.append(
-                f"section_family='{section_family}' conflicts with section_type='{section_type}'; "
-                f"the {_G5_TABLES[fam_from_type]['table']} table for the section type is used.")
+                _nt('shear.warning.section_family_conflicts_section', section_family=section_family, section_type=section_type, table=_G5_TABLES[fam_from_type]['table']))
             return fam_from_type, warnings, None
         return fam, warnings, None
     if fam_from_type is None:
@@ -347,18 +346,17 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
 
     if family == 'multi_web' and support_fastener_spacing is not None and support_fastener_spacing > 18.0:
         if fas != 'unfastened':
-            warnings.append('Multi-web deck with support fastener spacing > 18 in. is treated as unfastened per Table G5-5 note.')
+            warnings.append(_nt('shear.warning.table_g5_5_multi_web_deck_support'))
         fas = 'unfastened'
 
     if (family == 'c' and flange_condition in (None, '')
             and _canon_name(section_type) in _UNLIPPED_CHANNEL_NAMES):
         flange_condition = 'unstiffened'
-        assumptions.append(f"Section type '{section_type}' has no edge stiffeners; the unstiffened-flange "
-                           'rows of Table G5-2 are used.')
+        assumptions.append(_nt('shear.assumption.table_g5_2_section_type_has_no', section_type=section_type))
     flange = _normalize_flange_condition(flange_condition, family)
     webs, webs_explicit = _default_n_webs(family, n_webs)
     if family in ('c', 'z') and webs > 1:
-        warnings.append('Single-web C/Z coefficients were requested with n_webs > 1. Using one web only; use section_family=multi_web for deck sections.')
+        warnings.append(_nt('shear.warning.single_web_coefficients_were'))
         webs = 1
 
     table_meta = _G5_TABLES[family]
@@ -374,17 +372,14 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
             if row is not None:
                 row_used = 'unfastened_substitute'
                 assumptions.append(
-                    f'Table {table} has no fastened-to-support row for unstiffened flanges ({sup}); the '
-                    f'unfastened unstiffened-flange {sup} row (with its Ω/φ) is used as a conservative '
-                    'substitute (in the tabulated one-flange rows fastening never lowers Pn).')
+                    _nt('shear.assumption.has_no_fastened_support', table=table, sup=sup, sup_2=sup))
     else:
         row = table_meta['rows'].get((fas, sup))
         detail = f'{fas}, {sup}'
     if row is None:
         why = ''
         if fas == 'fastened' and sup in ('ETF', 'ITF') and family in ('built_up_i', 'c', 'z'):
-            why = ('No conservative substitute exists: for two-flange loading the tabulated fastened '
-                   'coefficients can be lower than the unfastened ones.')
+            why = (_nt('shear.reason.no_conservative_substitute_exists'))
         return _not_covered(table, detail, warnings, why)
 
     loc = _support_location(sup)
@@ -393,9 +388,9 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
     lo_val = float(Lo or 0.0)
     is_overhang_length = lo_val > 0 and h > 0 and lo_val <= 1.5 * h
     if lo_val > 0 and sup == 'EOF' and h > 0 and lo_val > 1.5 * h:
-        assumptions.append(f'Lo={lo_val:.3f} in exceeds 1.5h={1.5 * h:.3f} in, so the case is treated as standard EOF instead of overhang per §G5 definition.')
+        assumptions.append(_nt('shear.assumption.g5_lo_exceeds_so_case', lo_val=lo_val, value=1.5 * h))
     if explicit_bearing_case in ('overhang', 'overhang_bearing') and not is_overhang_length:
-        warnings.append('Explicit overhang_bearing was requested, but Lo does not satisfy the §G5 overhang definition (Lo ≤ 1.5h). Falling back to standard bearing case.')
+        warnings.append(_nt('shear.warning.g5_explicit_overhang_bearing_was'))
     if (explicit_bearing_case in ('overhang', 'overhang_bearing') and is_overhang_length) or (is_overhang_length and sup == 'EOF'):
         bcase = 'overhang_bearing'
     elif loc == 'end':
@@ -404,7 +399,7 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
         bcase = 'interior_bearing'
 
     if bcase == 'overhang_bearing' and not (family in ('c', 'z') and sup == 'EOF'):
-        warnings.append('Overhang bearing (Eq. G5-2) applies only to EOF loading on C/Z sections. Falling back to Eq. G5-1.')
+        warnings.append(_nt('shear.warning.g5_overhang_bearing_g5_applies'))
         bcase = 'end_bearing' if loc == 'end' else 'interior_bearing'
 
     equation = 'G5-2' if bcase == 'overhang_bearing' else 'G5-1'
@@ -435,7 +430,7 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
         else:
             # 바깥 깊이 = 웹 평면폭 + 양쪽 (내측 반경 + 두께)
             d_val, d_note = h + 2.0 * (R + t), 'estimated as h + 2(R + t)'
-            assumptions.append(f'Out-to-out depth d={d_val:.3f} in {d_note} for the Table {table} d ≥ {row["d_min"]} in limit.')
+            assumptions.append(_nt('shear.assumption.out_out_depth_limit', d_val=d_val, d_note=d_note, table=table, d_min=row["d_min"]))
         if d_val + 1e-9 < row['d_min']:
             limit_violations.append(
                 f'd={d_val:.3f} in ({d_note}) is below the Table {table} limit d ≥ {row["d_min"]} in '
@@ -450,7 +445,7 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
         req = 2.5 if fas == 'fastened' else 1.5
         required_edge_distance = req * h
         if edge_val is None:
-            assumptions.append(f'ITF edge distance extension ≥ {req:.1f}h is assumed; current input set does not verify it directly.')
+            assumptions.append(_nt('shear.assumption.itf_edge_distance_extension', req=req))
         else:
             if edge_val + 1e-9 < required_edge_distance:
                 limit_violations.append(
@@ -458,17 +453,16 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
                 )
             else:
                 assumptions.append(
-                    f'Provided ITF edge distance {edge_val:.3f} in satisfies the ≥ {required_edge_distance:.3f} in (={req:.1f}h) requirement.'
+                    _nt('shear.assumption.provided_itf_edge_distance', edge_val=edge_val, required_edge_distance=required_edge_distance, req=req)
                 )
     warnings.extend(limit_violations)
     if family == 'hat':
-        assumptions.append(f'Table G5-4 is per web. Total nominal strength uses n_webs={webs}.')
+        assumptions.append(_nt('shear.assumption.table_g5_4_g5_per_web_total', webs=webs))
     if family == 'multi_web':
-        assumptions.append(f'Table G5-5 is per web. Total nominal strength uses n_webs={webs}.')
+        assumptions.append(_nt('shear.assumption.table_g5_5_g5_per_web_total', webs=webs))
     if family == 'built_up_i':
         assumptions.append(
-            f'Table G5-1 is per web (table heading; Commentary G5). Total nominal strength uses '
-            f'n_webs={webs}{"" if webs_explicit else " (default: two back-to-back channels)"}.')
+            _nt('shear.assumption.table_g5_1_g5_per_web_heading', webs=webs, text='' if webs_explicit else _nt('shear.fragment.default_two_back_to_back_channels')))
 
     # §H3 는 무보강 평판 웨브의 모든 단면에 해당한다: (a) 단일 웨브(C·Z·hat·다중 웨브 데크 —
     # 웨브 하나하나가 단일 웨브), (b) 두 C 를 맞댄 I, (c) 겹친 Z. 돌출(G5-2)은 Pn 자리에 Pnc.
@@ -480,22 +474,19 @@ def classify_web_crippling_case(h: float, t: float, R: float, N: float,
         h3_candidate = 'H3-2'  # §H3(b) I-sections made of two C-sections back-to-back
     elif web_cfg == 'nested_z' and family == 'z':
         h3_candidate = 'H3-3'  # §H3(c) two nested Z-shapes
-        assumptions.append('§H3(c) Eq. H3-3 assumes conditions (i)-(iv) (bolting, webs in contact, '
-                           'thickness ratio <= 1.3); they are not checked here.')
+        assumptions.append(_nt('shear.assumption.h3_c_conditions_assumed'))
     elif web_cfg == 'multi_web' and family in ('c', 'z'):
         h3_candidate = 'H3-2'  # 호출자가 맞댄 I 로 지정
     else:
         h3_candidate = 'H3-1'  # §H3(a) single unreinforced webs
         if web_cfg == 'multi_web':
-            warnings.append(f"web_config='multi_web' selects Eq. H3-2 (I-sections), but a {family} section "
-                            'has single unreinforced webs: §H3(a) Eq. H3-1 applies.')
+            warnings.append(_nt('shear.warning.h3_web_config_multi_web', family=family))
         elif web_cfg == 'nested_z':
-            warnings.append("web_config='nested_z' applies only to Z-sections; §H3(a) Eq. H3-1 applies.")
+            warnings.append(_nt('shear.warning.h3_web_config_nested_applies'))
     if family in ('hat', 'multi_web') and loc == 'interior':
-        assumptions.append('§H3(a) exception for interior supports of continuous decks/beams with laterally '
-                           'supported webs <= 10 in apart is not claimed; Eq. H3-1 is applied.')
+        assumptions.append(_nt('shear.assumption.h3_h3_exception_interior_supports'))
     if bcase == 'overhang_bearing':
-        assumptions.append('§H3 uses the overhang strength Pnc (Eq. G5-2) in place of Pn.')
+        assumptions.append(_nt('shear.assumption.h3_h3_uses_overhang_strength'))
 
     return {
         'section_family': family,
@@ -574,9 +565,9 @@ def _solve_g52_overhang(case: dict, h: float, t: float, R: float, N: float,
         if 0.5 <= lo_h <= 1.5 and h_t <= 154:
             alpha = max(1.34 * (lo_h ** 0.26) / (0.009 * h_t + 0.3), 1.0)
         else:
-            warnings.append('Overhang Eq. G5-2 applicability limits not met (0.5 ≤ Lo/h ≤ 1.5 and h/t ≤ 154); using α = 1.0.')
+            warnings.append(_nt('shear.warning.g5_overhang_g5_applicability_limits'))
     else:
-        warnings.append('Invalid h/t for overhang evaluation; using α = 1.0.')
+        warnings.append(_nt('shear.warning.invalid_overhang_evaluation_using'))
 
     interior_case = classify_web_crippling_case(
         h=h, t=t, R=R, N=N, theta=theta,
@@ -591,7 +582,7 @@ def _solve_g52_overhang(case: dict, h: float, t: float, R: float, N: float,
     )
     if 'error' in interior_case:
         # Pnc 는 내부 1-플랜지 강도를 넘을 수 없다 — 그 상한을 못 구하면 α 를 쓰지 않는다.
-        warnings.append('Interior one-flange cap for Eq. G5-2 is not available; using α = 1.0.')
+        warnings.append(_nt('shear.warning.g5_interior_one_flange_cap'))
         return {**base, 'alpha': 1.0, 'Lo': lo_val, 'cap_applied': False,
                 'Pn_interior_cap': None, 'Pnc_raw': base['Pn'], 'warnings': warnings}
     interior = _solve_g51(interior_case, h, t, R, N, Fy, theta)

@@ -41,6 +41,7 @@ from plastic.pmm_plastic import pmm_plastic
 from fileio.mat_loader import read_mat_file
 from fileio.project_io import save_project, read_project
 from models.data import CufsmModel, GBTConfig, curve_rows_to_lists
+from design.notices import N as _nt, attach as attach_notices, NOTICE_LISTS  # noqa: E402
 
 PROTOCOL_VERSION = 2
 
@@ -353,7 +354,7 @@ def _drop_discarded_lengths(curve, shapes, m_all, lengths, diagnostics):
     if not keep:
         diags.append({'severity': 'error', 'code': 'ALL_LENGTHS_DISCARDED',
                       'length_index': None, 'length': None,
-                      'message': 'Every analysis length was discarded as ill-conditioned.'})
+                      'message': _nt('server.warning.every_analysis_length_was')})
     other_error = any(d.get('severity') == 'error' and not d.get('discarded') for d in diags)
 
     def _pick(seq):
@@ -597,8 +598,7 @@ def _m_signature_ss(params):
     unused = [k for k in ('springs', 'constraints') if np.size(params.get(k) or []) > 0]
     if unused:
         out['warnings'].append(
-            f"signature_ss: {', '.join(unused)} are not used (the CUFSM signature curve "
-            'is an S-S analysis of the bare section)')
+            _nt('server.warning.signature_ss_used_cufsm', unused=', '.join(unused)))
     out['assumptions'] = []
     return out
 
@@ -716,7 +716,7 @@ def _m_calc_deck_stiffness(params):
             **shared, **_optional(params, 'flange_width', 'k_per_fastener',
                                   'b_fastener', 'c_fastener'))
         if not kphi > 0:
-            warnings.append('kphi = 0: thickness, spacing, flange width or E is not positive.')
+            warnings.append(_nt('server.warning.kphi_thickness_spacing_flange'))
     else:
         kphi = kphi_o
     kx_detail = None
@@ -727,8 +727,7 @@ def _m_calc_deck_stiffness(params):
             **shared, **_optional(params, 'Fss_kip', 'D_screw_in', 'Fu1_ksi', 'Fu2_ksi'))
         kx = kx_detail['kx']
         if kx_detail.get('defaulted'):
-            warnings.append('kx: fastener values ' + ', '.join(kx_detail['defaulted'])
-                            + ' not given — Design Manual Example II-1C values used.')
+            warnings.append(_nt('server.warning.kx_fastener_values_given', defaulted=', '.join(kx_detail['defaulted'])))
         # 엔진 notes 는 kx_detail 에 그대로 있다. 범위 밖 · 0 처리는 사용자가 볼 일, 나머지는 참고.
         for note in kx_detail.get('notes') or []:
             attention = 'outside' in note or 'taken as 0' in note
@@ -837,6 +836,8 @@ def handle_request(request) -> dict:
     except Exception as e:  # noqa: BLE001 — 엔진 예외는 그 요청의 오류다
         return _error(rid, str(e) or type(e).__name__, 'ENGINE_ERROR', e)
     try:
+        if isinstance(result, dict) and any(k in result for k in NOTICE_LISTS):
+            attach_notices(result)
         return {'id': rid, 'result': to_jsonable(result)}
     except Exception as e:  # noqa: BLE001
         return _error(rid, f'serialization: {e}', 'SERIALIZATION_ERROR')

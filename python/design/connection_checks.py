@@ -13,6 +13,7 @@ from design.checks import (
     Trace, q, src, spec, make_check, design_strength_step, factor, connection_check_id, set_governing,
     apply_context, demand_source,
 )
+from design.notices import N as _nt, joined as _joined, prefixed as _prefixed, name_ko_prefix as _name_ko_prefix  # noqa: E402
 
 _UNTRACED = ('nominal-strength inputs of this limit state are not traced step by step — '
              'see limit_states[{i}].formula for the engine text')
@@ -55,15 +56,15 @@ def _scope_demote(checks: list, items: list, relevant) -> None:
         prefixes = _SCOPE_CLAUSES.get(key)
         if not prefixes:
             continue
-        why = f'outside the scope of §{key}: {x.get("reason")} — computed value is a reference only, not used '               'for the verdict'
+        why = _nt('conn.reason.outside_scope_computed_value', key=key, reason=x.get("reason"))
         for c in checks:
             if not _in_clause(c['clause'], prefixes):
                 continue
             if c['verdict'] == 'fail':
                 # 불합격은 그대로(불합격이 이긴다) — 다만 적용범위 밖의 식으로 낸 것임을 밝힌다(V6b-09).
                 c['out_of_scope'] = key
-                c['reason'] = '; '.join(r for r in (c.get('reason'), f'computed outside the scope of §{key}: '
-                                                    f'{x.get("reason")} — the fail stands (fail wins)') if r)
+                c['reason'] = _joined('; ', (r for r in (c.get('reason'), _nt('conn.reason.fail_stands_outside_scope', key=key,
+                                                        reason=x.get("reason"))) if r))
                 continue
             if c['verdict'] != 'pass':
                 continue
@@ -73,7 +74,7 @@ def _scope_demote(checks: list, items: list, relevant) -> None:
             if c.get('ratio') is not None:
                 ref['ratio'] = c['ratio']
             c.update(verdict='not_evaluated', capacity=None, ratio=None, nominal=None, factor=None,
-                     reason='; '.join(r for r in (c.get('reason'), why) if r), out_of_scope=key)
+                     reason=_joined('; ', (r for r in (c.get('reason'), why) if r)), out_of_scope=key)
             c['reference'] = ref
             c.pop('mirrors', None)
             for st in c['steps']:
@@ -125,18 +126,16 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
         if dem is None:
             if other is not None:
                 c = make_check(cid, verdict='not_applicable',
-                               reason=f'no {"in-plane shear" if direction == "shear" else "axial tension"} '
-                                      'demand on the connection', capacity=None,
+                               reason=_nt('conn.reason.no_demand_on_connection', text=_nt('conn.fragment.in_plane_shear') if direction == 'shear' else _nt('conn.fragment.axial_tension')), capacity=None,
                                reference={'capacity': q(cap_sym, cap, 'force')}, **common)
             else:
-                c = make_check(cid, verdict='not_evaluated', reason='no required strength given (Vu = Tu = 0)',
+                c = make_check(cid, verdict='not_evaluated', reason=_nt('conn.reason.no_required_strength_given'),
                                reference={'capacity': q(cap_sym, cap, 'force')}, **common)
         else:
             ratio = dem['value'] / cap if cap > 0 else None
             if item.get('assumed'):
                 c = make_check(cid, verdict='not_evaluated',
-                               reason='computed from an assumed input (e = 1.5d minimum or an estimated fastener '
-                                      'strength) — reference only, not used for the verdict',
+                               reason=_nt('conn.reason.computed_from_assumed_input'),
                                demand=dem, reference={'capacity': q(cap_sym, cap, 'force'), 'ratio': ratio},
                                **common)
                 tr.add('verdict', f'{dem["symbol"]} / {cap_sym} ≤ 1', inputs=[dem, tr.ref(i_ds)],
@@ -264,13 +263,13 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
             raise KeyError(f"not-evaluated item {x['name']!r} has no registered check id")
         rel = relevant is None or x in relevant
         m = merged.setdefault(cid, {'reasons': [], 'relevant': False})
-        m['reasons'].append(f"{x['name']}: {x['reason']}")
+        m['reasons'].append(_prefixed(f"{x['name']}: ", x['reason'], _name_ko_prefix(x['name'])))
         m['relevant'] = m['relevant'] or rel
     for cid, m in merged.items():
-        reason = '; '.join(m['reasons'])
+        reason = _joined('; ', m['reasons'])
         if cid in by_id:
             c = by_id[cid]
-            c['reason'] = '; '.join(r for r in (c.get('reason'), reason) if r)
+            c['reason'] = _joined('; ', (r for r in (c.get('reason'), reason) if r))
             if m['relevant'] and c['verdict'] == 'pass':
                 c.update(verdict='not_evaluated', reference={'capacity': c['capacity'], 'ratio': c['ratio']},
                          capacity=None, ratio=None, nominal=None, factor=None)
@@ -279,7 +278,7 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
             c = make_check(cid, design_method=dm, verdict='not_evaluated', reason=reason)
         else:
             c = make_check(cid, design_method=dm, verdict='not_applicable',
-                           reason=reason + ' — not relevant to the given demand direction(s)')
+                           reason=_nt('conn.reason.relevant_given_demand_direction', reason=reason))
         by_id[cid] = c
         checks.append(c)
 

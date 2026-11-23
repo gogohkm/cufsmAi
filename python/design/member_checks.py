@@ -9,6 +9,7 @@ from design.checks import (
     Trace, q, src, spec, make_check, ratio_of, verdict_from, verdict_step, design_strength_step,
     factor, demand_source,
 )
+from design.notices import N as _nt, joined as _joined  # noqa: E402
 
 PI = 'π'
 
@@ -19,7 +20,7 @@ def ne_items(not_evaluated, *prefixes):
     """엔진의 not_evaluated 목록에서 이 한계상태에 걸린 항목(이름 접두로)."""
     out = []
     for item in not_evaluated or []:
-        s = str(item)
+        s = item if isinstance(item, str) else str(item)
         if any(s.startswith(p) for p in prefixes):
             out.append(s)
     return out
@@ -72,7 +73,7 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
     dval = demand['value'] if demand else None
     if not dval or dval <= 0:
         return make_check(cid, design_method=dm, verdict='not_evaluated', demand=None,
-                          reason=no_demand_reason or 'no required strength given (demand = 0)',
+                          reason=no_demand_reason or _nt('member.reason.no_required_strength_given'),
                           steps=tr.steps, reference={'capacity': cap_q, 'nominal': nom_q},
                           location=location, group=group, mirrors=mirrors)
     r = ratio_of(dval, cap)
@@ -350,7 +351,7 @@ def compression_checks(ctx):
     i_fcre = _column_fcre_steps(tr, ctx)
     if ctx['e2_unavailable'] or i_fcre is None:
         checks.append(not_evaluated('member.compression.global', ctx,
-                                    '; '.join(g_items) or 'E2 global buckling stress Fcre not available',
+                                    _joined('; ', g_items) or _nt('member.reason.e2_e2_global_buckling_stress'),
                                     steps=tr.steps))
         g_trusted = False
     else:
@@ -365,18 +366,18 @@ def compression_checks(ctx):
         g_trusted = not g_items
         checks.append(strength_check('member.compression.global', tr, ctx, i_pne, 'Pne', 'φcPne'
                                      if dm == 'LRFD' else 'Pne/Ωc', 'force', demand, phi=phi, omega=omega,
-                                     trusted=g_trusted, untrusted_reason='; '.join(g_items),
+                                     trusted=g_trusted, untrusted_reason=_joined('; ', g_items),
                                      mirrors=mir('member.compression.global', 'Pne'),
                                      phi_symbol='φc', omega_symbol='Ωc',
-                                     no_demand_reason='no required axial strength (Pu = 0)'))
+                                     no_demand_reason=_nt('member.reason.no_required_axial_strength')))
 
     # --- E3.2
     l_items = ne_items(ne, 'E3')
     if ctx['local_not_evaluated']:
-        checks.append(not_evaluated('member.compression.local', ctx, '; '.join(l_items) or 'no Pcrl'))
+        checks.append(not_evaluated('member.compression.local', ctx, _joined('; ', l_items) or _nt('member.reason.no_pcrl')))
     elif ctx['e2_unavailable']:
         checks.append(not_evaluated('member.compression.local', ctx,
-                                    'Pne (E2) not available — local buckling interacts with global strength'))
+                                    _nt('member.reason.e2_pne_e2_available_local')))
     else:
         tr = Trace()
         lr = ctx['local_result']
@@ -400,13 +401,13 @@ def compression_checks(ctx):
                      equation=lr['equation'], inputs=[pne_in, tr.ref(i_cr)], result=q('Pnℓ', ctx['Pnl'], 'force'))
         reasons = list(l_items)
         if g_items:
-            reasons.append('uses Pne from E2, which is not evaluated: ' + '; '.join(g_items))
+            reasons.append(_nt('member.reason.e2_uses_pne_from_e2', g_items=_joined('; ', g_items)))
         checks.append(strength_check('member.compression.local', tr, ctx, i_n, 'Pnℓ',
                                      'φcPnℓ' if dm == 'LRFD' else 'Pnℓ/Ωc', 'force', demand, phi=phi,
-                                     omega=omega, trusted=not reasons, untrusted_reason='; '.join(reasons),
+                                     omega=omega, trusted=not reasons, untrusted_reason=_joined('; ', reasons),
                                      mirrors=mir('member.compression.local', 'Pnl'),
                                      phi_symbol='φc', omega_symbol='Ωc',
-                                     no_demand_reason='no required axial strength (Pu = 0)'))
+                                     no_demand_reason=_nt('member.reason.no_required_axial_strength')))
 
     # --- E4
     d_items = ne_items(ne, 'E4')
@@ -432,22 +433,21 @@ def compression_checks(ctx):
                      equation=dr['equation'], inputs=[tr.ref(i_py), tr.ref(i_cr)], result=q('Pnd', ctx['Pnd'], 'force'))
         checks.append(strength_check('member.compression.distortional', tr, ctx, i_n, 'Pnd',
                                      'φcPnd' if dm == 'LRFD' else 'Pnd/Ωc', 'force', demand, phi=phi, omega=omega,
-                                     trusted=not d_items, untrusted_reason='; '.join(d_items),
+                                     trusted=not d_items, untrusted_reason=_joined('; ', d_items),
                                      mirrors=mir('member.compression.distortional', 'Pnd'),
                                      phi_symbol='φc', omega_symbol='Ωc',
-                                     no_demand_reason='no required axial strength (Pu = 0)'))
+                                     no_demand_reason=_nt('member.reason.no_required_axial_strength')))
     elif not ctx['dist_applicable']:
         checks.append(not_applicable('member.compression.distortional', ctx,
-                                     f"§E4 not applicable: {ctx['dist_reason']}"))
+                                     _nt('member.reason.e4_e4_applicable', dist_reason=ctx['dist_reason'])))
     else:
-        checks.append(not_evaluated('member.compression.distortional', ctx, '; '.join(d_items) or 'no Pcrd'))
+        checks.append(not_evaluated('member.compression.distortional', ctx, _joined('; ', d_items) or _nt('member.reason.no_pcrd')))
 
     # --- §H1.2 앵글: 압축 단독이라도 조합 검토가 필요
     h_items = ne_items(ne, 'H1.2')
     if h_items:
         checks.append(not_evaluated('member.axial_bending', ctx,
-                                    '§H1.2: angle in compression needs the (P)L/1000 combined check — run '
-                                    "member_type='combined' with May_strength"))
+                                    _nt('member.reason.h1_2_h1_angle_compression_needs')))
     return checks
 
 
@@ -456,7 +456,7 @@ def compression_checks(ctx):
 def _unbounded(symbol, quantity='stress'):
     """끝없는 값(횡좌굴 없음 → Fcre = ∞). 숫자로 싣지 않는다(엔진 안의 1e6 ksi 는 '없음'의 표지일 뿐 — V6-16)."""
     return q(symbol, None, quantity, unbounded=True,
-             reason='no lateral-torsional buckling: the value is unbounded (∞); the engine uses 1e6 ksi internally')
+             reason=_nt('member.reason.no_lateral_torsional_buckling'))
 
 
 def _beam_fcre_steps(tr, ctx, st, Lb, Cb, Lb_src, Cb_src, sym_suffix=''):
@@ -606,7 +606,7 @@ def flexure_checks(ctx):
     sym_phi, sym_om = 'φb', 'Ωb'
     checks = []
     Sf = q('Sf', st['Sf_eff'], 'section_modulus', _sec('Sf', ctx))
-    no_dem = 'no required flexural strength (Mu = 0)'
+    no_dem = _nt('member.reason.no_required_flexural_strength')
 
     def mir(cid, nominal_path):
         m = {'nominal': _mirror(nominal_path, 2)} if nominal_path else {}
@@ -615,7 +615,7 @@ def flexure_checks(ctx):
             m['ratio'] = _mirror('limit_state_checks[0].ratio', 4)
         return m or None
 
-    replaced = 'replaced by §I6.2.1 (Mn = R·Mnℓo) for this through-fastened C/Z member under uplift'
+    replaced = _nt('member.reason.i6_2_1_replaced_i6_mn_mn')
     g_items = ne_items(ne, 'F2')
     l_items = ne_items(ne, 'F3')
     d_items = ne_items(ne, 'F4')
@@ -625,12 +625,11 @@ def flexure_checks(ctx):
         # I6.2.1 자체를 쓸 수 없으면(표 밖 등) 대신할 것이 없다: 그때는 F2–F4 가 휨강도이고, 이 실행은 그것을
         # 계산하지 않았다 → not_evaluated (V6-20). '대체됨 — 해당 없음'이라고 적지 않는다.
         i621_items = ne_items(ctx['not_evaluated_all'], 'I6.2.1')
-        stands = ('§I6.2.1 cannot be applied (' + '; '.join(i621_items) + ') — Chapter F then gives the flexural '
-                  'strength, and this run did not compute it (run without R_uplift, or within the §I6.2.1 limits)')
+        stands = (_nt('member.reason.i6_2_1_i6_cannot_applied_chapter', i621_items=_joined('; ', i621_items)))
         for cid, items in (('member.flexure.global', g_items), ('member.flexure.local', l_items),
                            ('member.flexure.distortional', d_items)):
             if items:
-                checks.append(not_evaluated(cid, ctx, '; '.join(items)))
+                checks.append(not_evaluated(cid, ctx, _joined('; ', items)))
             elif i621_items:
                 checks.append(not_evaluated(cid, ctx, stands))
             else:
@@ -643,11 +642,11 @@ def flexure_checks(ctx):
     i_mne = _mne_steps(tr, ctx, st, ctx['Lb'], ctx['Cb'], Lb_src, Cb_src)
     if i_mne is None or ctx['f2_unavailable']:
         checks.append(not_evaluated('member.flexure.global', ctx,
-                                    '; '.join(g_items) or 'F2 strength not available', steps=tr.steps))
+                                    _joined('; ', g_items) or _nt('member.reason.f2_f2_strength_available'), steps=tr.steps))
     else:
         checks.append(strength_check('member.flexure.global', tr, ctx, i_mne, 'Mne',
                                      'φbMne' if dm == 'LRFD' else 'Mne/Ωb', 'moment', demand, phi=phi, omega=omega,
-                                     trusted=not g_items, untrusted_reason='; '.join(g_items),
+                                     trusted=not g_items, untrusted_reason=_joined('; ', g_items),
                                      mirrors=mir('member.flexure.global', 'Mne'),
                                      phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem))
     g_bad = bool(g_items) or ctx['f2_unavailable']
@@ -656,12 +655,12 @@ def flexure_checks(ctx):
     lr = st['local_result']
     if st['skip_round_local']:
         checks.append(not_applicable('member.flexure.local', ctx,
-                                     '§F3.1.1: round HSS with D/t ≤ 0.441 E/Fy — local buckling need not be checked'))
+                                     _nt('member.reason.f3_1_1_f3_round_hss_fy')))
     elif st['local_missing']:
-        checks.append(not_evaluated('member.flexure.local', ctx, '; '.join(l_items) or 'no Mcrl'))
+        checks.append(not_evaluated('member.flexure.local', ctx, _joined('; ', l_items) or _nt('member.reason.no_mcrl')))
     elif ctx['f2_unavailable'] or i_mne is None:
         checks.append(not_evaluated('member.flexure.local', ctx,
-                                    'Mne (F2) not available — local buckling interacts with global strength'))
+                                    _nt('member.reason.f2_mne_f2_available_local')))
     else:
         tr = Trace()
         i_cr = _mcrl_steps(tr, ctx, st, Sf)
@@ -690,10 +689,10 @@ def flexure_checks(ctx):
                          equation=lr['equation'], inputs=[mne_in, tr.ref(i_cr)], result=q('Mnℓ', st['Mnl'], 'moment'))
         reasons = list(l_items)
         if g_bad:
-            reasons.append('uses Mne from F2, which is not evaluated: ' + '; '.join(g_items))
+            reasons.append(_nt('member.reason.f2_uses_mne_from_f2', g_items=_joined('; ', g_items)))
         checks.append(strength_check('member.flexure.local', tr, ctx, i_n, 'Mnℓ',
                                      'φbMnℓ' if dm == 'LRFD' else 'Mnℓ/Ωb', 'moment', demand, phi=phi, omega=omega,
-                                     trusted=not reasons, untrusted_reason='; '.join(reasons),
+                                     trusted=not reasons, untrusted_reason=_joined('; ', reasons),
                                      mirrors=mir('member.flexure.local', 'Mnl'),
                                      phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem))
 
@@ -726,18 +725,18 @@ def flexure_checks(ctx):
                          result=q('Mnd', st['Mnd'], 'moment'))
         checks.append(strength_check('member.flexure.distortional', tr, ctx, i_n, 'Mnd',
                                      'φbMnd' if dm == 'LRFD' else 'Mnd/Ωb', 'moment', demand, phi=phi, omega=omega,
-                                     trusted=not d_items, untrusted_reason='; '.join(d_items),
+                                     trusted=not d_items, untrusted_reason=_joined('; ', d_items),
                                      mirrors=mir('member.flexure.distortional', 'Mnd'),
                                      phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem))
     elif ctx['is_round']:
-        checks.append(not_applicable('member.flexure.distortional', ctx, '§F4 does not apply to round HSS (§F2.3)'))
+        checks.append(not_applicable('member.flexure.distortional', ctx, _nt('member.reason.f4_f4_does_apply_round')))
     elif not ctx['dist_applicable']:
-        c = not_applicable('member.flexure.distortional', ctx, f"§F4 not applicable: {ctx['dist_reason']}")
+        c = not_applicable('member.flexure.distortional', ctx, _nt('member.reason.f4_f4_applicable', dist_reason=ctx['dist_reason']))
         if ctx.get('dist_stated'):
             c['restraint_source'] = src('user_input', key='lap_restrained')
         checks.append(c)
     else:
-        checks.append(not_evaluated('member.flexure.distortional', ctx, '; '.join(d_items) or 'no Mcrd'))
+        checks.append(not_evaluated('member.flexure.distortional', ctx, _joined('; ', d_items) or _nt('member.reason.no_mcrd')))
 
     return checks
 
@@ -751,7 +750,7 @@ def flexure_checks_all(ck):
         g2, h2 = shear_checks(ck, ck['shear'])
         checks += g2 + h2
     elif ne_items(ne, 'G2/H2'):
-        why = '; '.join(ne_items(ne, 'G2/H2')) + ' — web flat depth h or thickness t not available'
+        why = _nt('member.reason.web_flat_depth_thickness', value=_joined('; ', ne_items(ne, 'G2/H2')))
         checks += [not_evaluated('member.shear', ck, why), not_evaluated('member.bending_shear', ck, why)]
     if ck.get('positive'):
         checks.append(positive_region_check(ck, {**ck['positive'],
@@ -760,12 +759,12 @@ def flexure_checks_all(ck):
     if ck.get('wc'):
         checks.append(web_crippling_check(ck, {**ck['wc'], 'ne_items': g5}))
     elif g5:
-        checks.append(not_evaluated('member.web_crippling', ck, '; '.join(g5)))
+        checks.append(not_evaluated('member.web_crippling', ck, _joined('; ', g5)))
     h3 = ne_items(ne, 'H3')
     if ck.get('h3'):
         checks.append(h3_check(ck, ck['h3']))
     elif h3:
-        checks.append(not_evaluated('member.bending_web_crippling', ck, '; '.join(h3)))
+        checks.append(not_evaluated('member.bending_web_crippling', ck, _joined('; ', h3)))
     i621 = ck['R_uplift'] is not None and ck['R_uplift'] > 0
     gov = ('member.flexure.uplift_r' if i621 else
            {'Local Buckling': 'member.flexure.local',
@@ -848,8 +847,8 @@ def _i621_check(ctx, st, Sf, demand):
         m['ratio'] = _mirror('limit_state_checks[0].ratio', 4)
     return strength_check('member.flexure.uplift_r', tr, ctx, i_mn, 'Mn',
                           'φbMn' if dm == 'LRFD' else 'Mn/Ωb', 'moment', demand, phi=ctx['phi'], omega=ctx['omega'],
-                          trusted=not items, untrusted_reason='; '.join(items), mirrors=m,
-                          phi_symbol='φb', omega_symbol='Ωb', no_demand_reason='no required flexural strength (Mu = 0)')
+                          trusted=not items, untrusted_reason=_joined('; ', items), mirrors=m,
+                          phi_symbol='φb', omega_symbol='Ωb', no_demand_reason=_nt('member.reason.no_required_flexural_strength'))
 
 
 def shear_checks(ctx, sh):
@@ -970,7 +969,7 @@ def web_crippling_check(ctx, wc):
                    result=q('Pn', wc['Pn'], 'force'))
     phi_w, om_w = w.get('phi'), w.get('omega')
     if not wc.get('Pa'):
-        return not_evaluated('member.web_crippling', ctx, 'no φw/Ωw for this Table G5 row', steps=tr.steps)
+        return not_evaluated('member.web_crippling', ctx, _nt('member.reason.table_g5_no_this_g5_row'), steps=tr.steps)
     i_ds = design_strength_step(tr, dm, tr.ref(i), phi_w, om_w, wc['Pa'], 'φwPn' if dm == 'LRFD' else 'Pn/Ωw',
                                 'force', phi_symbol='φw', omega_symbol='Ωw')
     dem = q('P', wc['P'], 'force', src('user_input', key='wc_P') if wc['P_source'] == 'wc_P'
@@ -982,7 +981,7 @@ def web_crippling_check(ctx, wc):
     return make_check('member.web_crippling', design_method=dm, verdict=v, demand=dem,
                       capacity=q('φwPn' if dm == 'LRFD' else 'Pn/Ωw', wc['Pa'], 'force'),
                       nominal=q('Pn', wc['Pn'], 'force'), factor_=factor(dm, phi_w, om_w, 'φw', 'Ωw'), ratio=r,
-                      reason='; '.join(items) or None, steps=tr.steps, trusted=False if items else None,
+                      reason=_joined('; ', items) or None, steps=tr.steps, trusted=False if items else None,
                       reference={'capacity': q('Pa', wc['Pa'], 'force'), 'ratio': r} if v == 'not_evaluated' else None,
                       mirrors={'nominal': _mirror('web_crippling.Pn', 2),
                                'capacity': _mirror('web_crippling.design_strength', 3),
@@ -1068,7 +1067,7 @@ def positive_region_check(ctx, pr):
     loc = {'segment': 'positive_moment_region', 'Lb': pr['Lb'], 'Cb': pr['Cb']}
     c = strength_check('member.flexure.positive_region', tr, ctx, i_mn, 'Mn(+)',
                        'φbMn(+)' if dm == 'LRFD' else 'Mn(+)/Ωb', 'moment', dem, phi=ctx['phi'], omega=ctx['omega'],
-                       trusted=not items, untrusted_reason='; '.join(items),
+                       trusted=not items, untrusted_reason=_joined('; ', items),
                        mirrors={'nominal': _mirror('positive_region.Mn', 2),
                                 'capacity': _mirror('positive_region.phi_Mn', 2),
                                 'ratio': _mirror('positive_region.utilization', 4)},
@@ -1099,9 +1098,9 @@ def tension_checks(ctx):
     out.append(strength_check('member.tension.yielding', tr, ctx, i, 'Tn', 'φtTn' if dm == 'LRFD' else 'Tn/Ωt',
                               'force', demand, phi=ctx['phi_y'], omega=ctx['omega_y'],
                               mirrors=mir('member.tension.yielding', 'Tn_yield'), phi_symbol='φt', omega_symbol='Ωt',
-                              no_demand_reason='no required tensile strength (Tu = 0)'))
+                              no_demand_reason=_nt('member.reason.no_required_tensile_strength')))
     if ctx['Tn_rupture'] is None:
-        out.append(not_evaluated('member.tension.rupture', ctx, 'Fu not given — rupture (D3) not evaluated'))
+        out.append(not_evaluated('member.tension.rupture', ctx, _nt('member.reason.d3_fu_given_rupture_d3')))
     else:
         tr = Trace()
         An = q('An', ctx['An'], 'area', src('user_input', key='An') if ctx['An_given'] else
@@ -1112,7 +1111,7 @@ def tension_checks(ctx):
         out.append(strength_check('member.tension.rupture', tr, ctx, i, 'Tn', 'φtTn' if dm == 'LRFD' else 'Tn/Ωt',
                                   'force', demand, phi=ctx['phi_r'], omega=ctx['omega_r'],
                                   mirrors=mir('member.tension.rupture', 'Tn_rupture'), phi_symbol='φt',
-                                  omega_symbol='Ωt', no_demand_reason='no required tensile strength (Tu = 0)'))
+                                  omega_symbol='Ωt', no_demand_reason=_nt('member.reason.no_required_tensile_strength')))
     return out
 
 
@@ -1216,7 +1215,7 @@ def axial_bending_check(ctx):
            result=q('ratio', raw['total'], 'dimensionless'),
            verdict='pass' if ctx['interaction']['pass'] else 'fail')
     if ctx['component_unavailable']:
-        return not_evaluated('member.axial_bending', ctx, 'component strength (Pn or Mn) not evaluated',
+        return not_evaluated('member.axial_bending', ctx, _nt('member.reason.component_strength_pn_mn'),
                              steps=tr.steps, reference={'ratio': raw['total']})
     return make_check('member.axial_bending', design_method=dm,
                       verdict='pass' if ctx['interaction']['pass'] else 'fail',
@@ -1305,7 +1304,7 @@ def remap_mirrors(checks: list, sub: str) -> list:
             # 조합 검토의 성분에 그 소요가 없으면(예: Mux = 0) 그 성분 단독 검토는 해당하지 않는다 —
             # 상호작용(§H1)이 그 성분 강도를 0 항으로 쓴다.
             c['verdict'] = 'not_applicable'
-            c['reason'] = c['reason'] + ' — this component has no demand in the combined check'
+            c['reason'] = _joined(' — ', [c['reason'], _nt('member.reason.no_demand_in_combined_check')])
         out.append(c)
     return out
 
@@ -1357,12 +1356,12 @@ def b4_check(dm, items, dsm_warnings, exceeded, generated=None):
         unchecked.append('flange')
     if exceeded:
         return make_check('member.applicability.b4', design_method=dm, verdict='not_evaluated',
-                          reason='; '.join(dsm_warnings), steps=tr.steps)
+                          reason=_joined('; ', dsm_warnings), steps=tr.steps)
     if not items:
         # 두께를 몰라 표 B4.1-1 을 하나도 대조하지 못했다 — 엔진은 이것으로 판정을 내리지 않는다(counts=False).
         return make_check('member.applicability.b4', design_method=dm, verdict='not_evaluated', counts=False,
-                          reason='Table B4.1-1 limits not checked — thickness / element dimensions not given')
-    note = (('not checked — element dimensions not given: ' + ', '.join(unchecked)) if unchecked else None)
+                          reason=_nt('member.reason.table_b4_1_1_b4_limits_checked_thickness'))
+    note = ((_nt('member.reason.checked_element_dimensions_given', unchecked=', '.join(unchecked))) if unchecked else None)
     # 넘지 않으면 판정에 들지 않는다(엔진은 한계를 넘을 때만 판정을 '판정 없음'으로 내린다).
     return make_check('member.applicability.b4', design_method=dm, verdict='pass', steps=tr.steps,
                       counts=False, reason=note,

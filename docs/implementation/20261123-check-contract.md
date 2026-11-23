@@ -1179,3 +1179,96 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 - 왜 판까지(2026-11-24): 설치 프로그램의 런타임은 판을 고정하지만 개발 환경은 바뀔 수 있다(고유값 · 선형대수 결과의 끝자리). 판이 바뀐 환경에서 저장한 결과를 '지금 엔진의 것'으로 되살리지 않게 한다. `selftest` 는 해시한 그 판을 `engine_runtime: {python, numpy, scipy}` 로도 돌려준다.
 - 파일 하나가 없어진 트리는 다른 id 가 된다 — 의도한 동작이다(다른 트리는 다른 엔진; 저장한 결과가 '지금 것'으로 되살아나지 않는 쪽). 빠진 모듈은 보통 `selftest` 의 `import_errors` 로도 드러난다.
 - 서버를 띄울 때 한 번 계산한다(54 파일, 약 12 ms). 같은 소스면 실행 · 기계와 무관하게 같고, 한 바이트라도(또는 파일 이름이) 바뀌면 다르다. 시험: `test_review_1124_engine_id.py`.
+
+## 16. 알림 — code · 한국어 · 물리량 붙은 매개변수 (2026-11-24 K4b)
+
+엔진이 내는 **경고 · 가정 · 범위 · 미평가 · 이유** 글마다 바뀌지 않는 `code`, 한국어 글, 그리고 글 안의 숫자를 `quantity` 가 붙은 값으로 싣는다. **옛 키와 옛 글은 바이트까지 그대로다** — 새 키만 더해진다.
+
+### 16.1 등록표 `design.notice_registry.REGISTRY` (만드는 도구 `design.notices`)
+
+| 필드 | 뜻 |
+|---|---|
+| code | 점으로 이은 소문자 `영역.종류.이름` (예: `lap.warning.mnd_not_used_lap_restrained`). **바꾸지도, 다시 쓰지도, 번호를 다시 매기지도 않는다.** 글을 고치면 같은 code 로 템플릿을 고치고, 뜻이 바뀌면 새 code |
+| kind | `warning` · `assumption` · `scope` · `not_evaluated` · `reason` · `fragment` (fragment: 다른 알림의 매개변수로만 쓰는 글 조각 — 'in-plane shear' · 'The result is discarded.' 같은) |
+| template | 옛 글을 그대로 그리는 템플릿 — 옛 글이 한국어였으면 한국어다(§16.8) |
+| template_ko | 한국어 템플릿. 모든 code 에 있다 |
+| params | 자리표마다 `{quantity, conv, spec, unit, sep}` — `quantity` 는 §3.2 어휘 또는 `None`(글 매개변수 · 어휘에 없는 물리량) |
+
+엔진 코드는 알림을 `_nt('code', name=value, …)`(= `design.notices.N`)로 만든다. 돌려주는 것은 `str` 의 하위형 `Notice` 라서 옛 목록에 들어가는 글은 전과 같고, code 와 매개변수 값이 함께 다닌다. 하위 결과를 옮길 때의 머리('[압축] ', 'G5: ', 'Tension Rupture (J6.2): ')는 `prefixed`, 이유를 '; ' 로 잇는 것은 `joined` — 둘 다 글을 바꾸지 않는다.
+
+### 16.2 결과에 붙는 것
+
+**`notices`** — 옛 목록 `warnings` · `assumptions` · `scope_notes` · `not_evaluated` 를 이 순서로 한 줄씩 옮긴 목록(옛 글과 하나씩 맞는다; 접합부 `not_evaluated` 의 `{name, reason}` 항목은 그 reason 을 싣고 `subject` 에 name). 붙는 결과: 부재 `design_member`, 접합 `design_connection`(과 그 안의 결과), 랩 `design_lap_connection`(과 `fastener_design`), 하중 해석 `analyze_loads`, 그리고 서버를 거치는 나머지 결과 가운데 그 네 목록 하나라도 있는 것(DSM · 서명곡선 · 파일 · 소성 · cFSM 분류 …). 항목 하나:
+
+```json
+{"code": "lap.warning.i6_2_1_lap_i6_i6_j3", "kind": "warning", "list": "warnings",
+ "text": "Lap 10.00 in < 1.5d = 12.00 in (§I6.2.1(g)) — R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족",
+ "text_ko": "Lap 10.00 in < 1.5d = 12.00 in (§I6.2.1(g)) — R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족",
+ "template": "Lap {actual} < 1.5d = {min_lap} (§I6.2.1(g)) — R 계수법(I6.2.1)·J3 겹친 Z 슬롯 예외의 적용 조건 미충족",
+ "template_ko": "…같음…",
+ "params": [{"symbol": "actual", "value": 10, "quantity": "length", "fmt": ".2f", "unit_text": "in", "sep": " "},
+            {"symbol": "min_lap", "value": 12.0, "quantity": "length", "fmt": ".2f", "unit_text": "in", "sep": " "}]}
+```
+
+- 머리가 붙은 항목: `prefix` · `prefix_ko` (`text = prefix + 그린 글`). 접합부 한계상태 이름의 한국어 머리는 검토 항목 등록표의 `name_ko` 와 조항에서 온다.
+- 이은 글: `kind: "group"`, `code: null`, `sep`, `parts`(조각마다 같은 모양), `text = (prefix) + sep.join(parts[].text)`.
+- 매개변수가 또 하나의 알림이면 그 매개변수에 `notice`(같은 모양) — 한국어 글은 안쪽 알림의 `text_ko` 로 그린다.
+- 엔진 밖을 한 번 거쳐 그냥 글로 돌아온 알림(호스트가 `dsm` 결과를 `aisi_design` 에 다시 넘길 때의 DSM 경고)은 등록표로 되짚는다: `recognized: true`, 매개변수는 옛 글에서 잘라 낸 글자(`fmt: "raw"`, 숫자면 `value` 는 수 · `text` 는 그 글자). 템플릿에 글자가 8 자 미만인 code 와 fragment 는 되짚지 않는다.
+- 등록되지 않은 글은 `code: null` — 계약 사례에서는 하나도 없다(시험).
+
+**검토 항목의 이유** — `design_checks[]` 에 `reason` 이 있으면 같은 필드를 그 항목에 단다: `reason_code`, `reason_kind`, `reason_ko`, `reason_template`, `reason_template_ko`, `reason_params`; 이은 이유는 `reason_kind: "group"`, `reason_parts`, `reason_sep`; 머리는 `reason_prefix` · `reason_prefix_ko`. 그 항목이 어느 검토의 것인지는 항목 자신(`id`)이다. 결과를 접어 내기 전 마지막에 단다 — 엔진이 reason 을 고치면(no demand · 적용범위 밖 …) 그 뒤의 것이 실린다.
+
+### 16.3 템플릿 문법과 그리는 규칙 (`notice-template/1`)
+
+- 자리표는 `{name}` 하나뿐. `{{` · `}}` 는 글자 중괄호.
+- 숫자 매개변수: `format(value, fmt)` — `conv` 가 `"r"` 면 `repr(value)` 를, `"s"` 면 `str(value)` 를 먼저(Python 의 f-string 과 같은 규칙; `fmt` 가 빈 글이면 Python `str(float)`). 글 매개변수(`quantity: null`, 이름 · 조항 · 목록 · 문장 조각): `value` 그대로. `fmt: "raw"`: 잘라 낸 글자 그대로.
+- 그 뒤 `unit_text` 가 있으면 `sep + unit_text` (US 단위 글자 — `in` · `ksi` · `kips` · `kip-in` · `°`).
+- **US 로 그리면 `text` · `text_ko` 와 글자까지 같다**(시험이 계약 사례 전부에서, 그리고 고정값 `test/python/notice_render_fixture.json` 192 쌍에서 확인). 호스트는 이 고정값을 읽어 자기 렌더러를 시험한다.
+- **SI 로 그릴 때:** `quantity` 가 길이 · 힘 · 응력 · 모멘트 … 인 숫자는 §3.2 로 바꾸고, `unit_text` 대신 그 물리량의 SI 단위 글자를 쓴다. `unit_text` 가 없는 물리량 매개변수(예: `t={t}` — 옛 글이 단위를 쓰지 않음)는 SI 에서 단위를 붙여야 한다(바꾼 수만 두면 읽는 이가 in 으로 읽는다). 자리수(`fmt`)는 US 의 것이다 — SI 자리수는 호스트가 정한다(§5 의 표시 자리와 같은 원칙). `dimensionless` · `count` · `angle` · `null` 은 바꾸지 않는다.
+
+### 16.4 수
+
+- code 443: warning 178 · reason 111 · assumption 97 · not_evaluated 35 · scope 11 · fragment 11. 영역: member 156 · conn 126 · lap 39 · loads 33 · shear 25 · fsm_solver 12 · dsm 11 · file 11 · special 11 · fsm 5 · server 4 · cfsm 3 · plastic 3 · base_vectors 2 · solver 2.
+- 만드는 자리 464곳(`_nt(` 호출, 21 파일). 이은 글 · 머리 붙임 40곳.
+- 옛 글이 영어였던 것 215 (한국어 템플릿을 새로 씀), 한국어였던 것 228 (template = template_ko).
+- 계약 사례가 닿는 code 194, 가장자리 · 하중 사례까지 204. 닿지 않는 239 code 는 엔진 소스에 그 code 를 쓰는 자리가 있다(시험) — 입력 오류 · 드문 단면 · 파일 읽기 · cFSM 옵션 같은 갈래다. 모든 `_nt` 호출의 매개변수 이름이 등록표와 같다(정적 시험).
+
+### 16.5 용어표 (영어에서 옮긴 한국어 템플릿 — 한 개념에 한 낱말)
+
+| 영어 | 한국어 | | 영어 | 한국어 |
+|---|---|---|---|---|
+| local buckling | 국부좌굴 | | required strength | 소요강도 |
+| distortional buckling | 뒤틀림좌굴 | | nominal strength | 공칭강도 |
+| lateral-torsional buckling | 횡비틀림좌굴 | | design / available strength | 설계강도 |
+| flexural buckling | 휨좌굴 | | limit state | 한계상태 |
+| flexural-torsional buckling | 휨비틀림좌굴 | | applicability limit | 적용한계 |
+| global buckling | 전체좌굴 | | scope | 적용범위 |
+| web crippling | 웹 크리플링 | | not evaluated / not given | 미평가 / 미입력 |
+| effective width | 유효폭 | | not applicable | 해당 없음 |
+| effective section modulus | 유효 단면계수 | | unbraced length | 비지지 길이 |
+| net section | 순단면 | | braced · bracing | 횡지지 · 가새 |
+| shear lag | 전단지연 | | half-wavelength | 반파장 |
+| block shear | 블록전단 | | signature curve | 서명곡선 |
+| rupture | 파단 | | load factor | 하중계수 |
+| bearing | 지압 | | lap · lapped section | 랩 · 겹친 단면 |
+| pull-over · pull-out | 풀오버 · 뽑힘 | | uplift | 양력 |
+| end distance · edge distance | 끝단 거리 · 연단 거리 | | (un)conservative | 보수측 · 비보수 |
+
+조항 번호 · 식 번호 · 기호 · 입력 이름(`lap_restrained` …)과 Manual 인용문은 옮기지 않는다. 시험이 영어에서 옮긴 템플릿에 `국부 좌굴` · `뒤틀림 좌굴` · `횡 비틀림` · `횡좌굴` · `전단 지연` · `블록 전단` · `유효 폭` 이 없음을 확인한다. **맞지 않는 곳(고치지 않음):** 검토 항목의 `name_ko`(§11)는 띄어 쓴다(`국부 좌굴`, `뒤틀림 좌굴`, `블록 전단 파단`, `전단 지연`), `member.flexure.global` 은 `항복 및 횡좌굴`; 옛 한국어 알림 몇은 `뒤틀림 좌굴` 로 띄어 쓴다(바이트 그대로 두어야 해서). 하나로 맞추려면 `name_ko` 쪽을 고치는 것이 싸다.
+
+### 16.6 이름표 안의 숫자
+
+이름표 글은 그대로 두고 옆에 숫자를 싣는다.
+- 랩 `fastener_label` ('Bolt d=0.500 in', 'Screw #10') → `fastener_label_parts: {template, template_ko, params, values}` — 볼트 `Bolt d={d}` (`d`: length, `.3f`, `in`), 나사 `Screw #{gauge}`(게이지는 글) + `values` 에 지름 `d`(length).
+- §I6.2.1 조건(`analyze_loads` 의 R 조건 `conditions[]`, 이름표 '(a) d <= 12 in.' …) → `limits: [{op, value, (times), (accepted)}]`, `value_quantity`, `value_unit_text`. 상수표 `design.loads.bracing.I621_LIMITS`. (h) 경간 '≤ 33 ft' 는 `quantity: null`, `value_unit_text: 'ft'` — ft 는 어휘에 없다(§16.7).
+- 찾았지만 바꾸지 않은 것: 옛 `steps[].formula` · `steps[].name` 글(예: 'Positive-moment region (Lb_pos = 120.0 in, Cb = 1.00)', 'Fastener Strength (Bolt d=0.500 in)') — 옛 계산서 글이고, 같은 숫자는 `design_checks` 의 단계에 물리량과 함께 있다.
+
+### 16.7 어휘에 없는 물리량 (새로 짓지 않음)
+
+알림 매개변수에는 없다(kip-ft · plf · psf · ft 는 알림 글에 자리표 뒤 단위로 나오지 않는다). 이름표 · 글 매개변수로 남은 것: §I6.2.1 (h) 경간 한계 `ft`, 진동 해석 경고의 질량밀도 `rho`(kip·s²/in⁴ — `quantity: null`). 서명곡선 극소 목록 `{value}`(길이의 목록)는 글 매개변수다(목록은 물리량을 싣지 않는다).
+
+### 16.8 남은 것
+
+- 옛 글이 한국어였던 228 code 는 `template` 이 한국어다 — 영어 템플릿은 없다(옛 글이 영어인 것만 영어). 영어 화면이 필요하면 `template_en` 을 따로 더해야 한다.
+- 글 매개변수 가운데 문장 조각이 엔진 안의 글(예외 메시지 `{exc}`, 하위 결과의 이유 `{reason}`, Manual 인용 `{manual_quote}`)이면 한국어 글에도 그 원문이 들어간다.
+- 스레드 고정(§6.1)은 알림을 내지 않는다(`selftest` 의 `numeric_threads` 로만).

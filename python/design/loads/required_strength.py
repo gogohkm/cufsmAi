@@ -27,6 +27,7 @@ from design.loads.bracing import (
     calc_rotational_stiffness, lateral_stiffness_detail,
     determine_unbraced_lengths, check_i621_conditions,
 )
+from design.notices import N as _nt, attach as _attach_notices  # noqa: E402
 
 E_STEEL = 29500.0  # ksi — CFS 표준 탄성계수 (기본값)
 
@@ -37,9 +38,8 @@ WALL_APPS = ('wall-girt', 'wall-stud')
 DECK_TYPES = ('through-fastened', 'standing-seam', 'none')
 
 NOT_EVALUATED_ALWAYS = [
-    'S100-16 I6.4.1 anchorage of bracing for purlin roof systems (restraint forces P_L) is not '
-    'calculated by this tool.',
-    'Deflection limits are not checked; deflections are reported for the user to compare.',
+    _nt('loads.scope.i6_4_1_s100_i6_anchorage_bracing'),
+    _nt('loads.scope.deflection_limits_checked_deflections'),
 ]
 
 
@@ -118,8 +118,7 @@ def analyze_loads(
     laps_ps = _resolve_laps(laps, laps_per_support, n_spans, sup, warnings)
     has_laps = n_spans > 1 and any(lp for lp in laps_ps)
     if has_laps and laps_per_support is None:
-        assumptions.append('Lap lengths given as a single laps dict were applied to every '
-                           'interior support.')
+        assumptions.append(_nt('loads.assumption.lap_lengths_given_as'))
 
     deck = dict(deck or {})
     deck_type = deck.get('type') or 'none'
@@ -136,7 +135,7 @@ def analyze_loads(
     loads_in = {k: (float(v) if v is not None else 0.0) for k, v in (loads or {}).items()}
     Wp_plf = loads_in.pop('Wp', 0.0)
     if Wp_plf < 0:
-        warnings.append('Wp (wind pressure) must be positive (downward); negative Wp ignored.')
+        warnings.append(_nt('loads.warning.wp_wind_pressure_must'))
         Wp_plf = 0.0
     strong = dict(loads_in)
     if member_app in WALL_APPS:
@@ -145,11 +144,8 @@ def analyze_loads(
             strong[k] = 0.0
         if dropped:
             warnings.append(
-                f'{member_app}: {", ".join(dropped)} act out of the plane of the web (weak axis for '
-                'girts, axial for studs) and are not added to strong-axis bending, shear or '
-                'reactions. Weak-axis/axial effects are not evaluated by analyze_loads.')
-            not_evaluated.append(f'{member_app}: weak-axis bending / axial load from '
-                                 f'{", ".join(dropped)}.')
+                _nt('loads.warning.act_out_plane_web', member_app=member_app, dropped=", ".join(dropped)))
+            not_evaluated.append(_nt('loads.ne.weak_axis_bending_axial', member_app=member_app, dropped=", ".join(dropped)))
     present = {k: v for k, v in strong.items() if v}
 
     # ── 단위하중 응답 (경간별 1 kip/ft) ──
@@ -164,12 +160,9 @@ def analyze_loads(
             raise ValueError(f'I_span_in4 needs {n_spans} positive values (one per span).')
         if Ixx is None:
             Ixx = min(I_span_in4)
-        assumptions.append('Per-span member Ix used (I_span_in4); Ix within a lap = sum of the two '
-                           'members (Design Manual assumption b).')
+        assumptions.append(_nt('loads.assumption.per_span_member_ix'))
     elif n_spans > 1:
-        assumptions.append('One Ix for every span: if end and interior members differ (e.g. Example '
-                           'II-2A 0.070/0.059), give I_span_in4 - a uniform Ix shifts moments by about '
-                           '2 % and can change a close check.')
+        assumptions.append(_nt('loads.assumption.one_ix_every_span'))
     E_fe = E or (section.get('E') if section else None) or E_STEEL
     varying_I = I_span_in4 is not None and max(I_span_in4) - min(I_span_in4) > 1e-12 * max(I_span_in4)
     use_fe = has_laps or varying_I or any(s in ('F', 'N') for s in sup[1:-1])
@@ -177,8 +170,7 @@ def analyze_loads(
     units = _unit_responses(spans, sup, laps_ps if has_laps else None, Ixx, E_fe, use_fe, npts,
                             I_span_in4=I_span_in4)
     if has_laps and not Ixx:
-        assumptions.append('Section Ixx not given: lap analysis uses relative stiffness only '
-                           '(moments, shears and reactions are unaffected; deflections not computed).')
+        assumptions.append(_nt('loads.assumption.section_ixx_given_lap'))
 
     # ── 하중조합 · 부분재하 ──
     patterned, pattern_why = _pattern_keys(bool(lr_reduced), present, n_spans, bool(pattern_loading))
@@ -268,33 +260,26 @@ def analyze_loads(
             uplift_R = i621.get('R')
             R_basis = 'S100-16 Table I6.2.1-1' if uplift_R is not None else None
             if uplift_R is not None:
-                assumptions.append('I6.2.1 conditions (i)-(n) confirmed by the user.')
+                assumptions.append(_nt('loads.assumption.i6_2_1_i6_conditions_confirmed_user'))
                 assumptions.extend(i621['reasons'])
             elif uplift_result:
-                warnings.append('I6.2.1 uplift R not applied: ' + ' '.join(i621['reasons'])
-                                + ' Uplift is checked as unbraced bending over the bottom-flange '
-                                  'compression regions (uplift_bracing).')
+                warnings.append(_nt('loads.warning.i6_2_1_i6_uplift_applied_uplift', reasons=' '.join(i621['reasons'])))
         elif uplift_result:
-            warnings.append('Section not provided: I6.2.1 uplift R not evaluated (no default R). '
-                            'Uplift is checked as unbraced bending over the bottom-flange '
-                            'compression regions.')
+            warnings.append(_nt('loads.warning.i6_2_1_section_provided_i6_uplift'))
     elif deck_type == 'standing-seam':
         R_t = deck.get('R_tested_uplift', deck.get('R_tested'))
         if R_t:
             uplift_R = float(R_t)
             R_basis = 'user-supplied AISI S908 test value (App. A I6.2.2)'
-            assumptions.append(f'Standing-seam uplift R = {uplift_R} from the user\'s S908 test.')
+            assumptions.append(_nt('loads.assumption.standing_seam_uplift_from', uplift_R=uplift_R))
         elif uplift_result:
-            warnings.append('Standing-seam roof: no S908 test R given - uplift R not applied; '
-                            'discrete bracing governs (App. A I6.2.2).')
+            warnings.append(_nt('loads.warning.app_a_standing_seam_roof_no'))
         if deck.get('R_tested_gravity'):
             auto_params['gravity_R'] = float(deck['R_tested_gravity'])
             auto_params['gravity_R_basis'] = 'user-supplied AISI S908 test value (App. A I6.2.2)'
-            warnings.append('Standing-seam gravity R is reported in auto_params.gravity_R only; '
-                            'positive_region still uses discrete bracing.')
+            warnings.append(_nt('loads.warning.standing_seam_gravity_reported'))
         if not brace_points_ft:
-            assumptions.append('Standing-seam roof without discrete brace points: the top flange is '
-                               'taken as braced only at the supports (App. A I6.2.2).')
+            assumptions.append(_nt('loads.assumption.app_a_standing_seam_roof_without'))
     auto_params['uplift_R'] = uplift_R
     auto_params['uplift_R_basis'] = R_basis
 
@@ -316,7 +301,7 @@ def analyze_loads(
     deflection_result, deflection_cases = _deflections(
         units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_fe, Ixx)
     if Ixx is None:
-        warnings.append('Section Ixx not given: deflections not computed.')
+        warnings.append(_nt('loads.warning.section_ixx_given_deflections'))
 
     all_detail = []
     for v in variants:
@@ -347,12 +332,10 @@ def analyze_loads(
                  'loads act on all spans.') if patterned else 'All loads on all spans.',
     }
     if 'S' in patterned:
-        assumptions.append('Snow partial loading (Sec. 7.5) applied. It need not be applied to '
-                           'members spanning perpendicular to the ridge of gable roofs sloped '
-                           '1/2:12 to 7:12 - set pattern_loading=False only in that case.')
-    scope_notes.append('Member self-weight is not added automatically; include it in D.')
+        assumptions.append(_nt('loads.assumption.snow_partial_loading_sec'))
+    scope_notes.append(_nt('loads.scope.member_self_weight_added'))
 
-    return {
+    return _attach_notices({
         'member_app': member_app,
         'span_type': span_type,
         'n_spans': n_spans,
@@ -398,7 +381,7 @@ def analyze_loads(
         'assumptions': assumptions,
         'scope_notes': scope_notes,
         'not_evaluated': not_evaluated,
-    }
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +437,7 @@ def _resolve_laps(laps, laps_per_support, n_spans, sup, warnings):
             if lL <= 0 and lR <= 0:
                 continue
             if j == 0 or j == n_spans or sup[j] == 'N':
-                warnings.append(f'Lap at support {j + 1} ignored (laps only act at interior supports).')
+                warnings.append(_nt('loads.warning.lap_at_support_ignored', value=j + 1))
                 continue
             out[j] = {'left_ft': lL, 'right_ft': lR}
     elif laps:
@@ -1112,8 +1095,7 @@ def _calc_deck_info(deck: dict, section: dict = None,
         kphi, kphi_method = kphi_override, 'test_override'
     elif dtype == 'standing-seam':
         kphi, kphi_method = 0.0, 'not_computed_standing_seam'
-        d_assume.append('Standing-seam roof: no analytical rotational stiffness; kphi = 0 unless a '
-                        'tested kphi_override is given.')
+        d_assume.append(_nt('loads.assumption.standing_seam_roof_no'))
     elif not t_purlin or not flange_w:
         kphi, kphi_method = 0.0, 'not_computed_missing_section'
         d_warn.append('Purlin thickness/flange width not given: deck kphi taken as 0 (conservative).')
@@ -1130,7 +1112,7 @@ def _calc_deck_info(deck: dict, section: dict = None,
             d_warn.append('Panel thinner than 0.018 in.: the Gao & Moen pull-out trendline may '
                           'overpredict kphi.')
         if deck.get('b_fastener_in') is None or deck.get('c_fastener_in') is None:
-            d_assume.append('Fastener taken at mid-width of the flange (b = c = B/2) for kphi.')
+            d_assume.append(_nt('loads.assumption.fastener_taken_at_mid'))
 
     if kx_override is not None and kx_override > 0:
         kx, kx_method = kx_override, 'test_override'
@@ -1150,14 +1132,12 @@ def _calc_deck_info(deck: dict, section: dict = None,
         kx_method = ('rp17_2_example_calibrated_approximation' if det['defaulted']
                      else 'rp17_2_curve_fit')
         if det['defaulted']:
-            d_assume.append('kx: fastener shear strength/diameter/tensile strengths not given - '
-                            'Example II-1C values used (' + ', '.join(det['defaulted']) + ').')
+            d_assume.append(_nt('loads.assumption.kx_fastener_shear_strength', defaulted=', '.join(det['defaulted'])))
         d_warn.extend(det['warnings'])
         d_scope.extend(det['scope_notes'])
 
     approx = 'override' not in kphi_method or 'override' not in kx_method
-    preliminary = ('Deck restraint estimates are preliminary. Use project-specific '
-                   'connection/panel test stiffness overrides when available.')
+    preliminary = (_nt('loads.scope.deck_restraint_estimates_preliminary'))
     if approx:
         d_scope.insert(0, preliminary)
     return {

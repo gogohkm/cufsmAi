@@ -15,6 +15,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from engine.properties import elemprop
+from design.notices import N as _nt  # noqa: E402
 
 
 def _cutwp_prop2(coord, ends):
@@ -1066,10 +1067,7 @@ def constrained_selection_notes(GBTcon, prop=None):
         notes.append({
             'severity': 'warning', 'category': 'warning', 'code': 'CFSM_PURE_G_NOT_PCRE',
             'factor': factor,
-            'message': (f'Pure global (G) cFSM solution: about {factor:.3f} x the classical '
-                        'Euler/flexural-torsional value (zero transverse strain, '
-                        'E/(1-nu^2)). Do not use it as Pcre/Mcre; use the unconstrained '
-                        'FSM curve or the closed-form global buckling value.'),
+            'message': (_nt('base_vectors.warning.pure_global_cfsm_solution', factor=factor)),
         })
     partial = [k for k, v in sel.items() if v.size and 0 < on[k] < v.size]
     if partial:
@@ -1077,10 +1075,7 @@ def constrained_selection_notes(GBTcon, prop=None):
             'severity': 'info', 'category': 'assumption',
             'code': 'CFSM_INDIVIDUAL_MODES_BASIS_DEPENDENT',
             'classes': partial, 'settings': settings,
-            'message': (f'Individual modes selected in {", ".join(partial)}: the mode an '
-                        f'index refers to depends on the basis (orth={settings["orth"]}, '
-                        f'couple={settings["couple"]}, ospace={settings["ospace"]}); '
-                        'orth=1 natural modes, orth=2/3 modes sorted by load factor.'),
+            'message': (_nt('base_vectors.warning.individual_modes_selected_mode', partial=", ".join(partial), orth=settings["orth"], couple=settings["couple"], ospace=settings["ospace"])),
         })
     return notes
 

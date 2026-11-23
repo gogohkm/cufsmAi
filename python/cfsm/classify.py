@@ -15,6 +15,7 @@ whose decomposition fails. The returned list carries the reason
 import numpy as np
 import sys
 import os
+from design.notices import N as _nt  # noqa: E402
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
@@ -160,9 +161,7 @@ def classify(prop, node, elem, lengths, shapes, GBTcon, BC, m_all):
     assumptions = []
     if defaulted:
         assumptions.append(
-            'cFSM basis options not given (' + ', '.join(defaulted) + ') were set to '
-            "CUFSM's classification defaults: " +
-            ', '.join(f'{k}={settings[k]}' for k in defaulted) + '.')
+            _nt('cfsm.assumption.cfsm_basis_options_given', defaulted=', '.join(defaulted), items=', '.join(f'{k}={settings[k]}' for k in defaulted)))
     nnodes = node.shape[0]
     ndof_m = 4 * nnodes
     nlengths = len(lengths)
@@ -173,7 +172,7 @@ def classify(prop, node, elem, lengths, shapes, GBTcon, BC, m_all):
                 for i in range(nlengths)]
         diag = [{'severity': 'warning', 'code': 'CFSM_UNSUPPORTED_MODEL',
                  'length_index': None, 'length': None,
-                 'message': f"cFSM classification not performed: {chk['message']}"}]
+                 'message': _nt('cfsm.warning.cfsm_classification_performed', message=chk['message'])}]
         return CfsmClassification(rows, status='unsupported', code=chk['code'],
                                   message=chk['message'], diagnostics=diag,
                                   settings=settings, assumptions=assumptions)
@@ -243,8 +242,7 @@ def classify(prop, node, elem, lengths, shapes, GBTcon, BC, m_all):
             diagnostics.append({
                 'severity': 'warning', 'code': 'MODE_NOT_CLASSIFIED',
                 'length_index': l_idx, 'length': float(a),
-                'message': f'{n_bad} of {n_modes} mode(s) could not be decomposed '
-                           'into the cFSM basis (zero or non-representable shape).'})
+                'message': _nt('cfsm.warning.mode_could_decomposed_into', n_bad=n_bad, n_modes=n_modes)})
         clas.append(clas_l)
 
     any_nan = any(not np.all(np.isfinite(c)) for c in clas)

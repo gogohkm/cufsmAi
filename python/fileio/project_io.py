@@ -12,6 +12,7 @@ import os
 import tempfile
 
 from models.data import CufsmModel
+from design.notices import N as _nt  # noqa: E402
 
 PROJECT_FORMAT = 'cufsm-vscode'
 PROJECT_VERSION = '1.0'
@@ -84,7 +85,7 @@ def read_project(filepath: str):
         if major < SUPPORTED_MAJOR:
             raise ValueError(f"load_project: unsupported file version {ver}")
     if fmt is None and ver is None:
-        assumptions.append('No format/version header: the file was read as a bare model JSON.')
+        assumptions.append(_nt('file.assumption.no_format_version_header'))
 
     missing = [k for k in _REQUIRED_KEYS if k not in data]
     if missing:

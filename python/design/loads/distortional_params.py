@@ -12,6 +12,7 @@ C-단면/Z-단면의 플랜지+립 기하 성질과
 """
 
 import math
+from design.notices import N as _nt  # noqa: E402
 
 E_STEEL = 29500.0  # ksi
 G_STEEL = 11300.0  # ksi — AISI S100-16 §A3.1 published shear modulus (77,900 MPa)
@@ -237,9 +238,7 @@ def calc_Fcrd(fp: dict, ho: float, t: float,
 
     notes = []
     if not is_flexure and str(fp.get('section_type', '')).upper().startswith('Z'):
-        notes.append('Appendix 2 analytical compression Fcrd for Z-sections exceeded the FSM '
-                     'distortional minimum by 18-31 % in this tool checks (8ZS2.25x059, lip '
-                     '90/50 deg); prefer the FSM value where it is available.')
+        notes.append(_nt('loads.assumption.appendix_analytical_compression_fcrd'))
     return {
         'notes': notes,
         'Fcrd': Fcrd,

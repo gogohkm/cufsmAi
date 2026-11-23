@@ -92,7 +92,9 @@ def test_vocabularies_and_sources():
     """단계 종류 · 물리량 · 출처는 정해진 어휘만, 단계 입력은 모두 출처를 갖는다."""
     def walk_q(x, where):
         if isinstance(x, dict) and 'quantity' in x and 'symbol' in x:
-            assert x['quantity'] in QUANTITIES, (where, x)
+            # 알림의 글 매개변수(이름 · 조각 · 목록)는 quantity None — 계약 §16.2 (reason_params · reason_parts)
+            if not (x['quantity'] is None and '.reason_' in where):
+                assert x['quantity'] in QUANTITIES, (where, x)
         if isinstance(x, dict):
             if 'source' in x and isinstance(x['source'], dict):
                 assert x['source'].get('kind') in SOURCE_KINDS, (where, x['source'])

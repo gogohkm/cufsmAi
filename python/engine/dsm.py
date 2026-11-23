@@ -28,6 +28,7 @@ import math
 import numpy as np
 from .properties import grosprop
 from .stress import stresgen, yieldMP
+from design.notices import N as _nt  # noqa: E402
 
 
 _LOAD_TYPES = ('P', 'Mxx', 'Mzz')
@@ -156,9 +157,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         signature_curve = str(BC).strip().upper() == 'S-S'
         if not signature_curve:
             warnings.append(
-                f"BC='{BC}': 단부 조건이 S-S 가 아닌 곡선은 서명곡선이 아니므로 극소에서 "
-                'Pcrl/Pcrd 를 뽑지 않았습니다. S-S 서명곡선으로 다시 해석하거나 '
-                '부재 길이의 일반 경계조건 해석에서 모드를 따로 식별하십시오 (App. 2 §2.2).')
+                _nt('dsm.warning.app_2_bc_pcrl_pcrd', BC=BC))
 
     # 3) 극소점 찾기 — 평탄 구간(같은 값 연속)도 극소로 본다. 짧은 끝(index 0)은
     # 경계 극소로 넣는다. 긴 끝은 전체좌굴 장파장 꼬리이므로 넣지 않는다.
@@ -191,15 +190,13 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
 
     if len(points) < 3:
         classification = 'insufficient_points'
-        warnings.append('곡선의 유효 점이 3개 미만이라 극소를 찾을 수 없습니다.')
+        warnings.append(_nt('dsm.warning.fewer_than_three_points'))
     elif signature_curve is False:
         classification = 'not_signature_curve'
     elif len(minima) == 0:
         classification = 'no_minimum'
         warnings.append(
-            '서명곡선에 국부/뒤틀림 극소가 없습니다(단조 곡선). Pcrl·Pcrd 를 이 곡선에서 '
-            '분리하지 못했습니다 — 해석식(App. 2 §2.3) 또는 순수모드 cFSM 으로 정하십시오. '
-            '모드가 없다는 뜻이 아닙니다.')
+            _nt('dsm.warning.app_2_pcrl_pcrd_cfsm'))
     elif len(minima) == 1:
         single_minimum = True
         classification = 'single_minimum'
@@ -216,10 +213,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
             local_basis = 'cfsm_label' if mn['mode_class'] == 'L' else 'single_minimum_assumed_local'
             other = 'Pcrd'
         assumptions.append(
-            f"서명곡선의 극소가 하나뿐입니다(L={mn['length']:.3g} in). "
-            f"{'뒤틀림(cFSM D 라벨)' if other == 'Pcrl' else '국부'}로 썼고 {other} 는 이 곡선에서 "
-            f"분리되지 않았습니다({other}=0). {other} 는 해석식(App. 2) 등으로 정하고, 이 극소 값"
-            f"(LF={mn['load_factor'] * scale:.4g})은 그 하한(floor)으로만 쓰십시오.")
+            _nt('dsm.assumption.app_2_lf_floor', length=mn['length'], text='뒤틀림(cFSM D 라벨)' if other == 'Pcrl' else '국부', other=other, other_2=other, other_3=other, value=mn['load_factor'] * scale))
     else:
         local_min, local_basis, dist_min, dist_basis, notes = _assign_two_or_more(minima)
         for kind, text in notes:
@@ -235,15 +229,12 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         if (modal_available and classification_note is None
                 and (local_basis != 'cfsm_label' or dist_basis != 'cfsm_label')):
             assumptions.append(
-                'cFSM 라벨이 국부·뒤틀림 극소를 하나씩 가르지 못했습니다(같은 라벨 중복, '
-                '미분류/G·O 우세, 또는 반파장 순서와 어긋남). 라벨이 없는 쪽은 반파장 순서로 정했습니다.')
+                _nt('dsm.assumption.cfsm_labels_not_separating'))
 
     boundary_minimum = bool(local_min is not None and local_min['index'] == 0)
     if boundary_minimum:
         warnings.append(
-            f"국부 극소가 격자의 첫 길이(L={lengths[0]:.3g} in)에서 정해졌습니다. 실제 "
-            '최소가 더 짧은 반파장에 있을 수 있어 Pcrl 이 과대(비보수)일 수 있습니다 — '
-            '격자 하한을 낮춰 다시 해석하십시오.')
+            _nt('dsm.warning.local_minimum_at_first_length', lengths=lengths[0]))
 
     Pcrl = local_min['load_factor'] * scale * P_ref if local_min else 0.0
     Lcrl = local_min['length'] if local_min else 0.0
@@ -277,9 +268,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         lf_s, lf_i = mn['load_factor'], mn['load_factor_interp']
         if lf_s > 0 and (lf_s - lf_i) / lf_s > _GRID_TOL:
             warnings.append(
-                f"{tag} 극소 근처 격자가 성깁니다: 표본 LF={lf_s * scale:.4g}, 보간 LF="
-                f"{lf_i * scale:.4g} (차이 {100 * (lf_s - lf_i) / lf_s:.1f}%). "
-                'L 격자를 촘촘히 하십시오.')
+                _nt('dsm.warning.coarse_grid_near_minimum', tag=tag, value=lf_s * scale, value_2=lf_i * scale, value_3=100 * (lf_s - lf_i) / lf_s))
 
     # 전체 좌굴(SIGNATURE-CURVE 점근값 — 주의: AISI 설계용 글로벌 Pcre 아님)
     if points:
@@ -481,8 +470,7 @@ def _check_reference_stress(node: np.ndarray, fy: float, load_type: str,
         out['P_ref_restrained'] = _p_ref(0)
         out['unsymm'] = u0
         out['assumptions'].append(
-            '절점 응력이 없어(0) 기준 하중과의 일관성을 확인하지 못했습니다. '
-            'Pcr = LF × P_ref 는 해석 응력의 최대 |σ| = fy 를 가정합니다.')
+            _nt('dsm.assumption.pcr_lf_ref_fy'))
         return out
 
     out['max_stress'] = s_max
@@ -518,9 +506,7 @@ def _check_reference_stress(node: np.ndarray, fy: float, load_type: str,
             out['distribution'] = f"{load_type}_{'unrestrained' if matched == 1 else 'restrained'}"
         if matched == 1:
             out['warnings'].append(
-                f'절점 응력이 비구속 휨(unsymm=1) {load_type} 분포입니다. P_ref 는 그 분포의 '
-                f'첫 항복 모멘트({out["P_ref"]:.4g})로 잡았습니다 — 구속 휨 My({_p_ref(0):.4g})와 '
-                '섞지 마십시오.')
+                _nt('dsm.warning.unsymm_ref_my', load_type=load_type, P_ref=out["P_ref"], value=_p_ref(0)))
     else:
         u0 = 0 if unsymm is None else int(unsymm)
         out['P_ref'] = _p_ref(u0)
@@ -528,13 +514,10 @@ def _check_reference_stress(node: np.ndarray, fy: float, load_type: str,
         out['consistent'] = False
         out['distribution'] = 'unmatched'
         out['warnings'].append(
-            f"절점 응력 분포가 load_type='{load_type}' 의 순수 분포와 다릅니다(정규화 차이 "
-            f'{best:.3g}). Pcr/P_ref 는 해석 응력의 첫 항복 기준 비율이며, P_ref 와 같은 '
-            '응력상태의 값이 아닙니다 — 순수 압축/순수 휨 응력으로 다시 해석하십시오.')
+            _nt('dsm.warning.load_type_pcr_ref', load_type=load_type, best=best))
     if abs(scale - 1.0) > _SCALE_TOL:
         out['assumptions'].append(
-            f'절점 응력의 최대 |σ|={s_max:.4g} 가 fy={fy:.4g} 와 다릅니다. 하중계수를 '
-            f'σmax/fy={scale:.4g} 로 환산해 Pcr 을 냈습니다.')
+            _nt('dsm.assumption.fy_max_fy_pcr', s_max=s_max, fy=fy, scale=scale))
     return out
 
 
