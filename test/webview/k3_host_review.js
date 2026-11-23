@@ -13,6 +13,7 @@ const { createPanel, loadTs, makeFakeVscode } = require('./panel_harness');
 
 async function main() {
   const RF = loadTs('src/case/reportFiles.ts', makeFakeVscode());
+  const PP = loadTs('src/case/pdfPrint.ts', makeFakeVscode());
   // ── 이름 다듬기(검토 대상 이름이 경로를 만들지 못한다) ─────────────────────────
   const cases = [['beam-1', 'beam-1'], ['../../evil', '_.._evil'], ['C:\\Windows\\x', 'C__Windows_x'], ['.hidden', 'hidden'], ['CON', '_CON'],
     ['nul.report', '_nul.report'], ['a\u202ebc', 'abc'], ['tab\there', 'tab_here'], ['trailing. ', 'trailing'], ['', 'stcfsd'], ['x'.repeat(90), 'x'.repeat(60)]];
@@ -56,8 +57,10 @@ async function main() {
     assert.strictEqual(path.dirname(r1.files.html), tmpDir, 'no .csd open: the temporary report folder — the AI\'s path arguments are ignored');
     assert(!fs.existsSync(path.join(dir, 'steer.html')), 'nothing written where the AI pointed');
     assert(fs.readFileSync(r1.files.html, 'utf8').startsWith(RF.HTML_MARKER), 'HTML carries the program marker');
+    // V7-02: 인쇄의 허용 목록(CSP 와 따로 서는 막음)은 진짜 보고서를 한 글자도 바꾸지 않는다 — 보고서는 이스케이프한 글과 그리기의 태그뿐
+    { const page = fs.readFileSync(r1.files.html, 'utf8').slice(RF.HTML_MARKER.length + 1); assert.strictEqual(PP.sanitizeForPrint(page), page, 'the print allow-list keeps the real report unchanged'); }
     assert(r1.files.pdf && fs.readFileSync(r1.files.pdf).toString('latin1').includes(RF.PDF_MARKER.trim()), 'PDF written with the marker');
-    assert(r1.pages >= 3 && r1.sections.includes('CUFSM — 냉간성형강 설계 보고서'), `pages ${r1.pages}, sections ${r1.sections.slice(0, 3)}`);
+    assert(r1.pages >= 3 && r1.sections.includes('StCFSD — 냉간성형강 설계 보고서') && r1.sections.some((x) => /설계 계산/.test(x)), `pages ${r1.pages}, sections ${r1.sections.slice(0, 3)}`);
     assert(kb(r1) <= 12 * 1024, `generate_report summary ${kb(r1)} B ≤ 12 KB`);
     results.push(`generate_report ${r1.pages} pages, summary ${kb(r1)} B`);
 
@@ -103,16 +106,33 @@ async function main() {
     const proj = path.join(dir, '03_계산서');
     fs.mkdirSync(proj, { recursive: true });
     const rr = await p.generateReportFiles({ format: 'html' }, { folder: proj, stamp: { kind: 'draft', label: 'R1', notChecked: true },
-      appendSections: [{ title: '가정', html: '<p>assumption A</p>' }] });
+      appendSections: [{ title: '가정', blocks: [{ kind: 'para', text: 'assumption A' }] }, { title: '<b>옛 꼴</b>', html: '<img src=x onerror=alert(1)>' }] });
     assert.strictEqual(path.dirname(rr.files.html), fs.realpathSync.native(proj), 'an internal caller decides the folder');
     const rh = fs.readFileSync(rr.files.html, 'utf8');
-    assert(/report-stamp-draft[\s\S]*초안 · R1 · 확인 안 함/.test(rh) && /<h2>가정<\/h2><p>assumption A<\/p>/.test(rh), 'stamp on top, appended section');
+    assert(/report-stamp-draft[\s\S]*초안 · R1 · 확인 안 함/.test(rh) && /<h2>\d+\. 가정<\/h2><p>assumption A<\/p>/.test(rh), 'stamp on top, appended section (ReportDoc blocks)');
+    // K3-7 · V7-02: 덧붙일 절도 글로만 — 옛 {title, html} 의 HTML 은 글 그대로(이스케이프)
+    assert(/&lt;b&gt;옛 꼴&lt;\/b&gt;<\/h2><p>&lt;img src=x onerror=alert\(1\)&gt;<\/p>/.test(rh) && !/<img src=x/.test(rh), 'appended HTML is escaped text');
+    assert(/Content-Security-Policy[^>]*default-src 'none'/.test(rh), 'the written HTML carries the CSP');
     const jn = path.join(dir, 'linked-folder');
     fs.symlinkSync(proj, jn, 'junction');
     await assert.rejects(() => p.generateReportFiles({ format: 'html' }, { folder: jn }), /not a plain folder/, 'a linked folder is refused');
     const viaMcp = await p.handleMcpAction({ action: 'generate_report', format: 'html', folder: proj, stamp: { kind: 'issued' } });
     assert(path.dirname(viaMcp.files.html) !== fs.realpathSync.native(proj) && !/report-stamp/.test(fs.readFileSync(viaMcp.files.html, 'utf8')),
       'the MCP path never takes a folder or a stamp');
+
+    // ── save_project / load_project: Windows 장치 이름(기록 갈래의 segmentError 한 규칙) ────────────
+    for (const nm of ['NUL.json', 'CON.stcfsd', 'com1.json', 'Lpt3.JSON', 'NUL', 'AUX.json', 'COM².json', 'prn.tmp.json']) {
+      const fp = path.join(dir, nm);
+      const sv = await p.handleMcpAction({ action: 'save_project', filepath: fp });
+      // 확장자가 없으면 확장자 규칙이 먼저 거절한다 — 어느 쪽이든 쓰지 않는다
+      const why = nm.includes('.') ? /device name/ : /device name|extension/;
+      assert(sv.error && why.test(sv.error), `save_project refuses the device name ${nm}: ${JSON.stringify(sv).slice(0, 200)}`);
+      const ld = await p.handleMcpAction({ action: 'load_project', filepath: fp });
+      assert(ld.error && why.test(ld.error), `load_project refuses the device name ${nm}: ${JSON.stringify(ld).slice(0, 200)}`);
+    }
+    const okSave = await p.handleMcpAction({ action: 'save_project', filepath: path.join(dir, 'console-ok.json') });
+    assert(okSave.success, `an ordinary name is still accepted: ${JSON.stringify(okSave).slice(0, 200)}`);
+    for (const nm of ['NUL', 'con.report', 'COM1']) { assert(/^_/.test(RF.safeBaseName(nm)), `report base name ${nm} is not a device`); }
 
     // ── 3. 좌굴 보고서, 화면 없이 ───────────────────────────────────────────
     const b = await p.handleMcpAction({ action: 'generate_report', kind: 'buckling', format: 'html', detail: 'full' });

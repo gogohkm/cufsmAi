@@ -383,7 +383,7 @@ async function scenarioPreviewAndProjectFiles(ctx) {
       await refusedBoth(victim + ':evil.json', 'V5b-08: alternate data stream', /':' is not accepted/);
       assert(!fs.existsSync(`${victim}:evil.json.tmp-${process.pid}`), 'V5b-08: no stream left on the other file');
       const spaced = boxFile('folder ');
-      await refusedBoth(path.join(spaced, 'x.json'), 'name ending in a space', /ending in/);
+      await refusedBoth(path.join(spaced, 'x.json'), 'name ending in a space', /end with '.' or a space|ending in/);
     }
     await refusedBoth(boxFile('.mcp.json'), 'V5b-01: hidden file name', /hidden/);
     const dotDir = boxFile('.claude');

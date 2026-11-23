@@ -17,8 +17,6 @@ const CASES = {
   overhang: { member_app: 'roof-purlin', span_type: 'cont-4', span_ft: 25, spans_ft: [1, 25, 25, 1], supports: ['N', 'P', 'P', 'P', 'N'],
     loads: { D: 15, Lr: 100, W: -170 }, deck: DECK, design_method: 'ASD', Fy: 55, Fu: 70 },
 };
-// 하중 해석은 면 전단을 소수 3자리(kips)로 싣는다 — 격자 값과는 그 반올림만큼 다를 수 있다(면이 같으면). 면이 다르면 훨씬 크다
-const near = (a, b) => Math.abs(a - b) <= 6e-4;
 
 function checkFaces(name, r) {
   const la = r.load_analysis;
@@ -34,10 +32,18 @@ function checkFaces(name, r) {
       if (k < 0) { continue; }
       const L = env.locations.find((l) => l.support === k + 1 && Number.isFinite(l.Vu_left));
       assert(L, `${name} ${g.id} ${c.check_point}: support ${k + 1} has a location entry`);
-      const vl = Math.abs(L.Vu_left), vr = Math.abs(L.Vu_right);
+      // 엔진 65e5ed6: 반올림하지 않은 면 값과 면마다의 출처 [combo, pattern, sense] — 이 시험이 따로 고른다
+      assert(Number.isFinite(L.Vu_left_unrounded) && Number.isFinite(L.Vu_right_unrounded), `${name}: support ${k + 1} has the unrounded faces`);
+      const vl = Math.abs(L.Vu_left_unrounded), vr = Math.abs(L.Vu_right_unrounded);
       const side = x <= g.start_ft + 1e-6 ? 'right' : (x >= g.end_ft - 1e-6 ? 'left' : (vl >= vr ? 'left' : 'right'));
       const want = (side === 'left' ? vl : vr) * share;
-      assert(near(c.Vu, want), `${name} ${g.id} [${g.start_ft}–${g.end_ft}] ${c.check_point} at support ${k + 1}: Vu ${c.Vu} — the ${side} face of the load analysis is ${want}`);
+      assert(Math.abs(c.Vu - want) <= 1e-9 * Math.max(1, want), `${name} ${g.id} [${g.start_ft}–${g.end_ft}] ${c.check_point} at support ${k + 1}: Vu ${c.Vu} — the ${side} face of the load analysis is ${want}`);
+      const src = side === 'left' ? L.V_left_source : L.V_right_source;
+      const pat = env.envelope_source.patterns[src[1]];
+      const parts = pat && typeof pat === 'object' ? Object.entries(pat).map(([k2, v]) => `${k2}: ${Array.isArray(v) ? v.join(',') : v}`) : [];
+      const vLab = parts.length ? `${env.combos[src[0]]} [${parts.join('; ')}]` : env.combos[src[0]];
+      assert(c.combination === vLab || String(c.combination).includes(`V: ${vLab}`), `${name} ${g.id} ${c.check_point}: label '${c.combination}' names the ${side} face's combination '${vLab}'`);
+      assert(!/조합을 주지 않음/.test(String(c.combination)), `${name} ${g.id} ${c.check_point}: no 'combination not reported' label any more`);
       t.points++;
       if (want + 1e-12 < Math.max(vl, vr) * share) { t.own++; }
     }

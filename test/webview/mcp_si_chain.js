@@ -483,23 +483,57 @@ function checkPurlinStations(tag, full) {
       // 구간이 그 지점에서 끝나면 그 구간 쪽 면. 이 시험이 위치 항목에서 따로 고른다(면 값은 소수 3자리 — 그만큼의 허용).
       const kSup = supportsFt.findIndex((xs) => Math.abs(xs - x) <= 1e-6 * Math.max(1, Math.abs(x)));
       const faceLoc = kSup >= 0 ? env.locations.find((l) => l.support === kSup + 1 && Number.isFinite(l.Vu_left) && Number.isFinite(l.Vu_right)) : null;
+      let face = null;
       if (faceLoc) {
-        const vl = Math.abs(faceLoc.Vu_left), vr = Math.abs(faceLoc.Vu_right);
+        // 엔진 65e5ed6: 반올림하지 않은 면 값 · 면마다의 출처
+        const vl = Math.abs(faceLoc.Vu_left_unrounded), vr = Math.abs(faceLoc.Vu_right_unrounded);
         const side = x <= g.start_ft + 1e-6 ? 'right' : (x >= g.end_ft - 1e-6 ? 'left' : (vl >= vr ? 'left' : 'right'));
-        envV = side === 'left' ? vl : vr;
+        face = { side, V: side === 'left' ? vl : vr, larger: Math.max(vl, vr), combo: (() => { const sx = side === 'left' ? faceLoc.V_left_source : faceLoc.V_right_source; return lab(env.combos[sx[0]], env.envelope_source.patterns[sx[1]]); })() };
+        envV = face.V;
         if (V !== null) {
-          assert(Math.abs(V - envV) <= 6e-4, `${at}: V ${V} on support ${kSup + 1} = the ${side} face ${envV} of the load analysis — V6b-01`);
+          assert(Math.abs(V - face.V) <= 1e-9 * Math.max(1, face.V), `${at}: V ${V} on support ${kSup + 1} = the ${side} face ${face.V} of the load analysis — V6b-01`);
           tally.faces = (tally.faces || 0) + 1;
-          if (envV + 1e-9 < Math.max(vl, vr)) { tally.ownFaceSmaller = (tally.ownFaceSmaller || 0) + 1; }
+          if (face.V + 1e-9 < face.larger) { tally.ownFaceSmaller = (tally.ownFaceSmaller || 0) + 1; }
         }
       }
       if (c.check_point === 'M_max' || c.check_point === 'V_max') {
         assert(near(M, envM), `${at}: M ${M} kip-ft is the ${sign > 0 ? '+' : '−'}M envelope at x = ${env.x_diagram[i]} ft (${envM}) — V6-09`);
-        if (c.check_point === 'V_max') { assert(faceLoc ? Math.abs(V - envV) <= 6e-4 : near(V, envV), `${at}: V ${V} = |V| envelope ${envV}`); }
+        if (c.check_point === 'V_max') { assert(faceLoc ? Math.abs(V - envV) <= 1e-9 * Math.max(1, envV) : near(V, envV), `${at}: V ${V} = |V| envelope ${envV}`); }
       }
-      // 조합: 'envelope' 이 아니면 그 이름의 도표(또는 그 자리 위치 항목)가 쓴 값을 낸다 — V6-08
+      // K3-6(계약 §6.1 · 6.2): 조합 꼬리표는 하중 해석의 envelope_source(이 시험이 따로 푼다) · 위치 항목의 combo / combo_V / combo_R 에서.
+      // 출처가 하나면 그 조합, 다르면 'M: … | V: …' + 그 지점의 가정 한 줄(소요는 그대로)
       tally.points++;
-      if (c.combination === 'envelope') { tally.envelope++; assert.strictEqual(c.location.demand_basis, 'envelope', `${at}: demand_basis`); }
+      const srcAt = (key, idx) => {
+        const run = (env.envelope_source[key] || []).find((r) => idx >= r[0] && idx < r[0] + r[1]);
+        return run ? lab(env.combos[run[2]], env.envelope_source.patterns[run[3]]) : null;
+      };
+      const loc = /^support /.test(c.check_point) ? env.locations.find((l) => Math.abs(l.x_ft - x) < 1e-6 && l.R_bearing !== undefined) : null;
+      const mSrc = loc && Number.isFinite(loc.Mu) ? lab(loc.combo, loc.pattern) : srcAt(sign > 0 ? 'M_max' : 'M_min', i);
+      const vSrc = V === null ? null : (face ? (face.combo ?? 'FACE?')
+        : srcAt(Math.abs(env.V_envelope_max[i]) >= Math.abs(env.V_envelope_min[i]) ? 'V_max' : 'V_min', i));
+      const rSrc = loc ? lab(loc.combo_R, loc.pattern_R) : null;
+      const others = [['V', vSrc], ['P', rSrc]].filter(([, s]) => s && s !== mSrc);
+      if (env.envelope_source && mSrc) {
+        if (others.length === 0) {
+          assert.strictEqual(c.combination, mSrc, `${at}: one source → that combination`);
+          assert.strictEqual(c.location.demand_basis, 'combination', `${at}: demand_basis`);
+          assert(!(c.assumptions || []).some((a) => /서로 다른 조합/.test(a)), `${at}: no mixed-pair line`);
+          tally.labelled++;
+        } else {
+          const want = [`M: ${mSrc}`, ...others.map(([k, s]) => `${k}: ${s}`)].join(' | ');
+          if (vSrc === 'FACE?') {
+            // 작은 면의 조합은 하중 해석이 주지 않는다 — 꼬리표가 그렇게 밝힌다
+            assert(c.combination.startsWith(`M: ${mSrc} | V: envelope (지점 ${kSup + 1} `) && /조합을 주지 않음/.test(c.combination), `${at}: face combination unknown — ${c.combination}`);
+            tally.faceUnknown = (tally.faceUnknown || 0) + 1;
+          } else { assert.strictEqual(c.combination, want, `${at}: mixed label`); }
+          assert.strictEqual(c.location.demand_basis, 'envelope', `${at}: mixed demand_basis`);
+          const line = (c.assumptions || []).filter((a) => /서로 다른 조합의 포락값/.test(a));
+          assert.strictEqual(line.length, 1, `${at}: exactly one mixed-pair assumption`);
+          assert(line[0].includes(mSrc) && others.every(([, s]) => s === 'FACE?' || line[0].includes(s)), `${at}: the line names the combinations`);
+          tally.mixed = (tally.mixed || 0) + 1;
+        }
+        assert.notStrictEqual(c.combination, 'envelope', `${at}: envelope_source gives the combination`);
+      } else if (c.combination === 'envelope') { tally.envelope++; assert.strictEqual(c.location.demand_basis, 'envelope', `${at}: demand_basis`); }
       else {
         tally.labelled++;
         const mLab = Math.max(0, sign * env.M_diagram[i]);
@@ -1118,7 +1152,7 @@ async function main() {
     }
     assert(multiPoint > 0, 'some purlin region has more than one check point (V_max or a support)');
     const st2 = checkPurlinStations('design_purlin cont-2', pUS);
-    results.push(`design_purlin cont-2 stations: ${st2.points} check points = load-analysis envelope (sign of the checked flange), ${st2.labelled} labelled with the combination that produced them, ${st2.envelope} 'envelope'; V6b-01: ${st2.faces || 0} points on a support use the load-analysis face shear (${st2.ownFaceSmaller || 0} on the smaller face — the region ends there)`);
+    results.push(`design_purlin cont-2 stations: ${st2.points} check points = load-analysis envelope (sign of the checked flange), ${st2.labelled} labelled with the combination that produced them (envelope_source), ${st2.mixed || 0} mixed M / V pairs with their assumption line, ${st2.envelope} 'envelope'; V6b-01: ${st2.faces || 0} points on a support use the load-analysis face shear (${st2.ownFaceSmaller || 0} on the smaller face — region ends there; ${st2.faceUnknown || 0} with that face's combination not reported)`);
     assert(lapNotes > 0, 'a lap region carries the host lap assumption on its check points');
     results.push(`design_purlin: ${pUS.regions.length} regions, ${multiPoint} with several check points — design_checks · x · combination per point`);
     for (const g of [pUS.regions[0], pUS.regions.find((x) => x.members === 2)].filter(Boolean)) {
@@ -1155,8 +1189,9 @@ async function main() {
       deck: { t_panel: L, fastener_spacing: L } }, {}, { levels: ['full', 'summary'], label: 'design_purlin pattern' });
     assert(patUS.load_analysis.gravity.pattern && Object.keys(patUS.load_analysis.gravity.pattern).length > 0, 'the pattern case really patterns Lr');
     const stP = checkPurlinStations('design_purlin pattern', patUS);
-    assert(stP.envelope > 0, 'with pattern loading some check points come from the envelope and say so');
-    results.push(`design_purlin pattern stations: ${stP.points} check points, ${stP.labelled} labelled, ${stP.envelope} 'envelope'`);
+    // K3-6: 패턴 하중에서도 envelope_source 가 조합을 준다 — 'envelope' 꼬리표는 없다(전: 있어야 했다)
+    assert.strictEqual(stP.envelope, 0, 'with envelope_source no check point is labelled only "envelope"');
+    results.push(`design_purlin pattern stations: ${stP.points} check points, ${stP.labelled} labelled, ${stP.mixed || 0} mixed M / V, ${stP.envelope} 'envelope'`);
 
     // 8c. V4-31: 「0 = 없음」 을 엔진이 받는 선택 인자를 스키마가 거절하지 않는다(design_purlin · analyze_loads)
     //     엔진에 0 을 준 결과가 인자를 뺀 결과와 같으면 0 은 「주지 않음」 의 뜻이므로 스키마가 0 을 받아야 한다.

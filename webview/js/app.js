@@ -168,7 +168,8 @@
             renderDesignResult(_lastDesignResult);
         }
         const activeReportContainer = document.getElementById('report-container');
-        if (activeReportContainer && activeReportContainer.innerHTML) {
+        // K3-6(D9): 보고서가 열려 있을 때만(오류 글 · 빈 칸이면 다시 만들지 않는다 — 결과 없는 빈 보고서가 생겼다)
+        if (activeReportContainer && activeReportContainer.querySelector('h1')) {
             vscode.postMessage({ command: 'generateReport', data: { reason: 'units', force: true, unitSystem: _unitSystem } });
         }
         // (2) 단면 성질 테이블이 표시 중이면 다시 렌더링

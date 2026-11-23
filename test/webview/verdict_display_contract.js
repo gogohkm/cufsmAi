@@ -121,7 +121,10 @@ function testAppTripwires() {
 
   // 판정 옆에 경고 · 미평가 목록
   assert(appJs.includes('function _verdictListsHtml('), 'verdict list renderer must exist');
-  for (const fn of ['renderLapConnectionResult', 'renderConnectionResult', 'renderDesignResult', '_rptSummary']) {
+  // K3-7: 보고서의 요약은 데이터(_docSummary) — 알림 목록은 _noticeBlocks(엔진 글 그대로, 그리기가 이스케이프)
+  { const st = appJs.indexOf('function _docSummary('); assert(st > 0, '_docSummary must exist');
+    assert(appJs.slice(st, appJs.indexOf('\n        function ', st + 10)).includes('_noticeBlocks('), 'the report summary shows warnings / not-evaluated next to the verdict'); }
+  for (const fn of ['renderLapConnectionResult', 'renderConnectionResult', 'renderDesignResult']) {
     const start = appJs.indexOf('function ' + fn + '(');
     assert(start > 0, fn + ' must exist');
     const end = appJs.indexOf('\n    function ', start + 10);

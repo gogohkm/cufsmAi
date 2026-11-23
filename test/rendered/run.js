@@ -454,10 +454,12 @@ async function main() {
       await ctx.click('#btn-generate-report');
       await ctx.settle(400);
       const rep = await ctx.text('#report-container');
-      assert(rep && rep.includes('지배 구간(') && rep.includes(String(govReg.combo)), 'report names the governing region and its combination');
+      // K3-7: 보고서의 요약 표가 「지배 구간」 · 「지배 하중조합」 을 적고, 계산 절은 엔진의 검토 항목(design_checks) 그대로
+      assert(rep && rep.includes('지배 구간') && rep.includes(String(govReg.label || '').slice(0, 6)) && rep.includes(String(govReg.combo)),
+        'report names the governing region and its combination');
       if (govReg.R_uplift != null) {
-        assert(has(rep, /Mn\(-\) = R · Mnℓo = 0\.7 ×/), 'report step 5 follows R·Mnℓo');
-        assert(!has(rep, /Mn\(-\) = min\(Mne, Mnl, Mnd\)/), 'report does not claim min(Mne, Mnl, Mnd) on the R route');
+        assert(has(rep, /Mn = R_uplift Mnℓo/) && has(rep, /R_uplift = 0\.70/), 'the report shows the engine step Mn = R_uplift Mnℓo (§I6.2.1)');
+        assert(!has(rep, /min\(Mne, Mnl, Mnd\)/), 'report does not claim min(Mne, Mnl, Mnd) on the R route');
       }
       await ctx.shot('r_v430_report', { maxHeight: 9000 });
       await ctx.tab('design');

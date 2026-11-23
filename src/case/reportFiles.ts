@@ -14,10 +14,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
+// 이름 마디의 규칙 하나(기록 갈래 · save_project 와 같은 것)
+import { segmentError } from '../records/names';
 
 export const HTML_MARKER = '<!-- stcfsd-report/1 -->';
 export const PDF_MARKER = '\n%stcfsd-report/1\n';
-const DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)$/i;
 
 /** 검토 대상 이름 → 파일 이름 앞부분(규칙은 머리말). 비면 'stcfsd' */
 export function safeBaseName(raw: unknown): string {
@@ -29,9 +30,9 @@ export function safeBaseName(raw: unknown): string {
     s = s.replace(/^[.\s]+/, '').replace(/[.\s]+$/, '');                     // 숨김 · 끝의 점 / 공백
     if (s.length > 60) { s = s.slice(0, 60).replace(/[.\s]+$/, ''); }
     if (!s) { s = 'stcfsd'; }
-    const stem = s.split('.')[0];
-    if (DEVICE.test(stem)) { s = '_' + s; }
-    return s;
+    // 장치 이름(CON · NUL · COM1 … — 확장자가 붙어도)은 앞에 '_' — 판정은 src/records/names.ts segmentError 하나
+    if (/device name/.test(segmentError(s) || '')) { s = '_' + s; }
+    return segmentError(s) ? 'stcfsd' : s;
 }
 
 /** 보고서를 둘 폴더 — 열린 .csd 의 폴더(진짜 경로), 없거나 쓸 수 없으면 임시 폴더의 stcfsd-reports */
@@ -75,6 +76,7 @@ export function isOwnReport(file: string, kind: 'html' | 'pdf'): boolean {
 export function pickTarget(dir: string, stem: string, ext: 'html' | 'pdf'): string {
     for (let i = 1; i < 100; i++) {
         const name = `${stem}${i === 1 ? '' : '-' + i}.${ext}`;
+        if (segmentError(name)) { throw new Error('report name refused: ' + segmentError(name)); }
         const file = path.join(dir, name);
         if (path.dirname(file) !== dir) { throw new Error('report name left the folder'); }
         let st: fs.Stats;

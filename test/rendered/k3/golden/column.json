@@ -8,6 +8,14 @@
    "value": [
     {
      "category": "A. 단면 입력",
+     "item": "표 B4.1-1 적용 한계 (엔진)",
+     "status": "pass",
+     "value": "한계 안",
+     "criterion": "표 B4.1-1 적용 한계 — 엔진이 평탄폭 · 요소 종류로 대조(member.applicability.b4)",
+     "note": "엔진: 적용 한계 (표 B4.1-1) — 통과"
+    },
+    {
+     "category": "A. 단면 입력",
      "item": "단면 정의",
      "status": "pass",
      "value": "37 절점",
@@ -19,7 +27,7 @@
      "item": "두께 (t)",
      "status": "pass",
      "value": "2.3 mm",
-     "criterion": "0.46 ≤ t ≤ 12.70 mm (CFS 일반 범위)",
+     "criterion": "0.46 ≤ t ≤ 12.70 mm (프로그램 경험값(냉간성형 일반 범위 — 원문 한계 없음))",
      "note": ""
     },
     {
@@ -27,7 +35,7 @@
      "item": "웹 w/t 비",
      "status": "pass",
      "value": "38.0",
-     "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
+     "criterion": "압축 웹 w/t ≤ 500 (표 B4.1-1, DSM — 보강 압축 요소) · w/t > 250 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -35,7 +43,7 @@
      "item": "플랜지 b/t 비",
      "status": "pass",
      "value": "16.3",
-     "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
+     "criterion": "에지보강 플랜지 b/t ≤ 160 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -43,7 +51,7 @@
      "item": "립 d/t 비",
      "status": "pass",
      "value": "8.7",
-     "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
+     "criterion": "비보강 요소(립) d/t ≤ 60 (표 B4.1-1) · d/t > 30 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -51,7 +59,7 @@
      "item": "코너 R/t 비",
      "status": "pass",
      "value": "1.7",
-     "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
+     "criterion": "안쪽 굽힘 반경 R/t ≤ 20 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -59,7 +67,7 @@
      "item": "항복강도 (Fy)",
      "status": "pass",
      "value": "295 MPa",
-     "criterion": "Fy ≤ 655.0 MPa (Table B4.1-1 Fy 한계)",
+     "criterion": "Fy < 655.0 MPa (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
      "note": ""
     },
     {
@@ -67,7 +75,7 @@
      "item": "Fu/Fy 비",
      "status": "pass",
      "value": "1.356",
-     "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
+     "criterion": "Fu/Fy ≥ 1.08 (§I6.2.1(o) — R 계수법의 조건)",
      "note": ""
     },
     {
@@ -83,7 +91,7 @@
      "item": "반파장 최솟값",
      "status": "pass",
      "value": "25.4 mm",
-     "criterion": "국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈100.0 mm) 필요",
+     "criterion": "국부좌굴 포착: 최솟값 ≤ 0.8 × 단면 높이(80.0 mm) (프로그램 경험값(원문 조항 없음 — 서명곡선의 국부 극소 포착))",
      "note": ""
     },
     {
@@ -163,7 +171,7 @@
      "item": "스팬 길이",
      "status": "pass",
      "value": "5 m",
-     "criterion": "스팬 > 0 필요; CFS 일반 ≤ 10.06 m (§I6.2.1)",
+     "criterion": "스팬 > 0; §I6.2.1(h) R 계수법: 경간 ≤ 10.06 m",
      "note": ""
     },
     {
@@ -189,14 +197,6 @@
      "value": "Lr=1, S=0.5 kPa",
      "criterion": "최소 하나의 중력 활하중 예상",
      "note": ""
-    },
-    {
-     "category": "E. 하중 입력",
-     "item": "풍하중 (W, 양력)",
-     "status": "pass",
-     "value": "1 kPa ↑",
-     "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
-     "note": "양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요."
     },
     {
      "category": "F. 하중 분석",
@@ -227,16 +227,16 @@
      "item": "Pnl vs Pne (국부좌굴 감소)",
      "status": "pass",
      "value": "Pnl=10.16, Pne=10.16",
-     "criterion": "Pnl ≤ Pne; 감소 시 → 국부좌굴 지배",
-     "note": ""
+     "criterion": "§E3.2 국부좌굴(엔진 판정)",
+     "note": "엔진: 국부 좌굴 — 통과"
     },
     {
      "category": "G. 설계 결과",
      "item": "Pnd vs Py (뒤틀림좌굴 감소)",
-     "status": "warn",
+     "status": "pass",
      "value": "Pnd=32.67, Py=33.82",
-     "criterion": "Pnd ≤ Py; 감소 시 → 뒤틀림좌굴 지배",
-     "note": ""
+     "criterion": "§E4 뒤틀림좌굴(엔진 판정)",
+     "note": "엔진: 뒤틀림 좌굴 — 통과"
     },
     {
      "category": "G. 설계 결과",
@@ -247,28 +247,31 @@
      "note": ""
     },
     {
-     "category": "G. 설계 결과",
-     "item": "저항계수 (φ)",
-     "status": "pass",
-     "value": "φc = 0.85",
-     "criterion": "AISI S100-16 LRFD 저항계수",
-     "note": ""
-    },
-    {
      "category": "H. 일관성",
      "item": "Fy 일관성 (해석 vs 설계)",
      "status": "pass",
-     "value": "해석 fy=295, 설계 Fy=295 MPa",
-     "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
+     "value": "해석 기준응력 295.0, 설계 Fy 295.0 MPa",
+     "criterion": "좌굴 해석의 기준응력과 설계 Fy 가 같으면 DSM 값을 그대로 쓴다",
      "note": ""
     },
     {
      "category": "H. 일관성",
      "item": "해석 최신성",
      "status": "pass",
-     "value": "해석 결과 존재",
-     "criterion": "해석이 현재 단면 형상과 일치해야 함",
-     "note": "해석 후 단면이 변경되었으면 재실행하여 결과를 갱신하세요."
+     "value": "현재 모델의 해석",
+     "criterion": "해석이 현재 단면 · 재료 · 해석 조건과 일치해야 함",
+     "note": ""
+    }
+   ],
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -276,29 +279,51 @@
    "id": "SI.validation.counts",
    "expect": "pin",
    "value": {
-    "total": 33,
+    "total": 32,
     "pass": 31,
-    "warn": 1,
+    "warn": 0,
     "fail": 1,
-    "badge": "통과 31 / 주의 1 / 실패 1",
+    "badge": "통과 31 / 주의 0 / 실패 1",
     "tree": {
      "validationPass": 31,
-     "validationWarn": 1,
+     "validationWarn": 0,
      "validationFail": 1
     }
-   }
+   },
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "SI.report.text",
    "expect": "pin",
-   "value": "CUFSM — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM)\n1. 단면\n단면 제원\n항목 값 단위\n단면 유형 립 C형강\nH (높이) 100 mm\nB (플랜지 폭) 50 mm\nD (립 깊이) 20 mm\nt (두께) 2.3 mm\nr (코너 반경) 4 mm\n절점 / 요소 37 / 36\n계산된 단면 성질\n성질 기호 값 단위\n총단면적 A 510 mm²\n강축 단면2차모멘트 Ixx 788155 mm⁴\n약축 단면2차모멘트 Izz 184771 mm⁴\n단면상승모멘트 Ixz 0 mm⁴\n강축 단면계수 Sx 15763 mm³\n약축 단면계수 Sz 5874 mm³\n강축 소성단면계수 Zx 18590 mm³\n약축 소성단면계수 Zz 8493 mm³\n강축 회전반경 rx 39.3 mm\n약축 회전반경 rz 19.0 mm\n도심 x xcg 17.4 mm\n도심 z zcg 48.8 mm\n주축 각도 θp 0.0 °\n주축 단면2차모멘트 1 I11 788155 mm⁴\n주축 단면2차모멘트 2 I22 184771 mm⁴\n2. 탄성 좌굴 해석\n좌굴 곡선 (하중계수 vs. 반파장)\n1\n10\n100\n1000\n1.00\n2.00\n3.00\n4.00\n5.00\n6.00\nPcrl=1.939 @ L=78.5\nPcrd=2.258 @ L=425.9\nPcre=0.004 @ L=25400.0\n반파장 (mm)\n하중계수\nDSM 설계값 (좌굴 곡선에서 추출)\n성질 값 반파장 하중계수\n압축 (kN)\nPy (항복) 150.46 kN\nPcrl (국부) 291.80 kN 78.5 mm 1.9394\nPcrd (뒤틀림) 339.79 kN 425.9 mm 2.2584\nPcre (전체) 0.58 kN 25400.0 mm 0.0038\n휨 (kN-m)\nMy (항복) — kN-m\nMcrl (국부) — kN-m — mm —\nMcrd (뒤틀림) — kN-m — mm —\nMcre (전체) — kN-m — mm —\n2개 최솟값 검출. 최솟값 1: L=78.5 mm, LF=1.9394. 최솟값 2: L=425.9 mm, LF=2.2584.\n3. 설계 입력\n재료\n항목 값 단위\n강종 SGC400 (295/400 MPa)\n항복강도, Fy 295 MPa\n인장강도, Fu 400 MPa\n탄성계수, E 203395.3 MPa\n포아송비, ν 0.30\n부재 구성\n항목 값\n부재 적용 일반 기둥 (압축)\n스팬 유형 3경간 연속보\n스팬 길이 5, 5, 5 m\n분담폭 (간격) 1 m\n설계 방법 LRFD\n설계 하중\n하중 유형 kPa kN/m (×1 m) 설명\nD 0.3 kPa 0.300 kN/m 고정하중 (자중 + 부가하중)\nLr 1 kPa 1.000 kN/m 지붕 활하중\nS 0.5 kPa 0.500 kN/m 적설하중\nWu (양력) 1 kPa 1.000 kN/m 풍양력 하중(부압)\n데크 정보\n항목 값\n데크 유형 없음\n패널 두께, tpanel 0.5 mm\n체결구 간격 300 mm\n4. 설계 계산 — 압축 (Chapter E)\n단계 1: 항복 하중, Py\nPy = Ag × Fy = 150.44 kN\n단계 2: 전체좌굴 — §E2\n휨, 비틀림 또는 휨-비틀림 좌굴응력 Fcre는 KL/r, J, Cw 및 단면 대칭성에서 결정됩니다.\nλc = √(Fy / Fcre)\nCondition Equation\nλc ≤ 1.5 Fn = (0.658λc²) Fy\nλc > 1.5 Fn = (0.877/λc²) Fy\nPne = Ag × Fn = 45.19 kN\n단계 3: 국부좌굴 — §E3.2\nλl = √(Pne/Pcrl)\nCondition Equation\nλl ≤ 0.776 Pnl = Pne\nλl > 0.776 Pnl = [1-0.15(Pcrl/Pne)0.4](Pcrl/Pne)0.4 Pne\nPnl = 45.19 kN\n단계 4: 뒤틀림좌굴 — §E4\nλd = √(Py/Pcrd)\nCondition Equation\nλd ≤ 0.561 Pnd = Py\nλd > 0.561 Pnd = [1-0.25(Pcrd/Py)0.6](Pcrd/Py)0.6 Py\nPnd = 145.32 kN\n단계 5: 공칭강도 & 설계강도\nPn = min(Pne,Pnl,Pnd) = min(45.19,45.19,145.32) = 45.19 kN\n지배 모드: Global Buckling (flexural-torsional)\nφPn = 0.85 × 45.19 = 38.43 kN\n계산 단계 요약\n# 단계 수식 결과 단위\n1 Yield Load (Py) Py = Ag×Fy = 0.7905 in²×42.79 ksi = 33.82 kips 150.44 kN\n2 Global Buckling (Pne) Fcre = 14.65 ksi, λc = 1.709, Fn = 12.85 ksi → Pne = 10.16 kips 45.19 kN\n3 Local Buckling (Pnl) Pcrl = 65.60 kips (FSM), λl = √(Pne/Pcrl) = √(10.16 kips/65.60 kips) = 0.394 ≤ 0.776 → Pnl = 10.16 kips 45.19 kN\n4 Distortional Buckling (Pnd) Pcrd = 76.39 kips (FSM), λd = √(Py/Pcrd) = √(33.82 kips/76.39 kips) = 0.665 > 0.561 → Pnd = 32.67 kips 145.32 kN\n5 Nominal Strength (Pn) [지배] Pn = min(Pne=10.16 kips, Pnl=10.16 kips, Pnd=32.67 kips) = 10.16 kips 45.19 kN\n6 Design Strength (LRFD) φPn = 0.85 × 10.16 kips = 8.64 kips 38.43 kN\n5. 설계 요약\n본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 압축 부재 (기둥/스터드)의 설계 검토 결과입니다. 설계 방법은 LRFD입니다. 지배 파괴 모드는 Global Buckling (flexural-torsional)입니다.\n항목 값\n설계 기준 AISI S100-16\n해석 방법 직접강도법 (DSM) — 유한스트립법\n부재 유형 압축 부재 (기둥/스터드)\n설계 방법 LRFD\n지배 파괴 모드 Global Buckling (flexural-torsional)\n공칭강도, Pn 45.19 kN\n설계강도, φPn 38.43 kN\n소요/저항 비율 (DCR) 52.1% — OK\n지배 검토 E axial compression\nE axial compression 0.521 — OK\n참조 규준 조항 E2, E3.2, E4\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위 (1)\nCUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+   "value": "StCFSD — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) / LRFD / SI 단위\n1. 단면\n단면 제원\n항목 값\n단면 유형 Lipped C (립부 채널)\nH (높이) — 템플릿 입력 100.0 mm\nB (플랜지 폭) — 템플릿 입력 50.0 mm\nD (립 깊이) — 템플릿 입력 20.0 mm\nt (두께) — 템플릿 입력 2.30 mm\nr (코너 반경) — 템플릿 입력 4.0 mm\n절점 37\n요소 36\n계산된 단면 성질\n성질 기호 값\n총단면적 A 510.0 mm²\n강축 단면2차모멘트 Ixx 788155 mm⁴\n약축 단면2차모멘트 Izz 184771 mm⁴\n단면상승모멘트 Ixz 0 mm⁴\n강축 단면계수 Sx 15763 mm³\n약축 단면계수 Sz 5874 mm³\n강축 소성단면계수 Zx 18590 mm³\n약축 소성단면계수 Zz 8493 mm³\n강축 회전반경 rx 39.3 mm\n약축 회전반경 rz 19.0 mm\n도심 x xcg 17.4 mm\n도심 z zcg 48.8 mm\n주축 각도 θp 0.0 °\n주축 단면2차모멘트 1 I11 788155 mm⁴\n주축 단면2차모멘트 2 I22 184771 mm⁴\n2. 탄성 좌굴 해석\n좌굴 곡선 (하중계수 vs. 반파장)\n100\n1000\n10000\nPcrl=1.939 @ L=78.5 mm\nPcrd=2.258 @ L=425.9 mm\nPcre=0.004 @ L=25400.0 mm\n반파장 (mm)\n하중계수\nDSM 설계값 (좌굴 곡선에서 추출)\n성질 값 반파장 하중계수\n압축\nPy (항복) 150.46 kN\nPcrl (국부) 291.80 kN 78.5 mm 1.9394\nPcrd (뒤틀림) 339.79 kN 425.9 mm 2.2584\nPcre (전체) 0.58 kN 25400.0 mm 0.0038\n휨\nMy (항복) —\nMcrl (국부) —\nMcrd (뒤틀림) —\nMcre (전체) —\n서명곡선의 극소 반파장 하중계수\n극소 1 78.5 mm 1.9394\n극소 2 425.9 mm 2.2584\n2개 극소(엔진이 찾음)\n3. 설계 입력\n재료\n항목 값\n강종 SGC400 (295/400 MPa)\n항복강도 Fy (설계) 295.0 MPa\n인장강도 Fu (설계) 400.0 MPa\n탄성계수 E (모델) 203395 MPa\n포아송비 ν (모델) 0.300\n전단탄성계수 G (모델) 77911 MPa\n부재 구성\n항목 값\n부재 적용 일반 기둥 (압축)\n설계 방법 LRFD\n4. 설계 계산 — 압축 (Chapter E) (엔진 검토 항목)\n항복 및 전체 좌굴 E2 · Eq. E2-1, E2-2, E2-3, E2-4, E2.1-1, E2.2-1, E2.2-3, E2.2-5 통과 지배 — 비 최대\nmember.compression.global · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 20.00 kN\n입력 Pu\nPne = 45.19 kN φc = 0.85 φcPne = 38.41 kN 0.521\n# 식 입력 결과\n1 σex = π² E / (KxLx / rx)² (Eq. E2.2-6) E = 203395.3 MPa [기준 ]\nKxLx = 2500.0 mm [입력 KxLx]\nrx = 39.3 mm [단면 rx] σex = 496.3 MPa\n2 σey = π² E / (KyLy / ry)² (Eq. E2.1-1) E = 203395.3 MPa [기준 ]\nKyLy = 2500.0 mm [입력 KyLy]\nry = 19.0 mm [단면 ry] σey = 116.4 MPa\n3 ro = (rx² + ry² + xo²)^0.5 (Eq. E2.2-4) rx = 39.3 mm [단면 rx]\nry = 19.0 mm [단면 ry]\nxo = 43.4 mm [단면 Xs-xcg] ro = 61.6 mm\n4 σt = [G J + π² E Cw / (KtLt)²] / (A ro²) (Eq. E2.2-5) G = 77910.8 MPa [기준 ]\nJ = 899 mm⁴ [단면 J]\nE = 203395.3 MPa [기준 ]\nCw = 466912548 mm⁶ [단면 Cw]\nKtLt = 2500.0 mm [입력 KtLt]\nA = 510.0 mm² [단면 A]\nro = 61.6 mm [단계 3] σt = 113.9 MPa\n5 β = 1 − (xo / ro)² (Eq. E2.2-3) xo = 43.4 mm [단면 xo]\nro = 61.6 mm [단계 3] β = 0.503\n6 Fcre,ft = [(σex + σt) − ((σex + σt)² − 4 β σex σt)^0.5] / (2 β) (Eq. E2.2-1) σex = 496.3 MPa [단계 1]\nσt = 113.9 MPa [단계 4]\nβ = 0.503 [단계 5] Fcre,ft = 101.0 MPa\n7 Fcre = min(σey, Fcre,ft) σey = 116.4 MPa [단계 2]\nFcre,ft = 101.0 MPa [단계 6] Fcre = 101.0 MPa\n8 λc = (Fy / Fcre)^0.5 (Eq. E2-4) Fy = 295.0 MPa [재료 Fy]\nFcre = 101.0 MPa [단계 7] λc = 1.709\n9 λc ≤ 1.5 → 거짓 → Eq. E2-3 λc = 1.709 [단계 8]\n10 Fn = (0.877 / λc²) Fy (Eq. E2-3) λc = 1.709 [단계 8]\nFy = 295.0 MPa [재료 Fy] Fn = 88.6 MPa\n11 Pne = Ag Fn (Eq. E2-1) A = 510.0 mm² [단면 A]\nFn = 88.6 MPa [단계 10] Pne = 45.19 kN\n12 φcPne = φc Pne Pne = 45.19 kN [단계 11]\nφc = 0.850 [기준 ] φcPne = 38.41 kN\n13 Pu / φcPne ≤ 1 Pu = 20.00 kN [입력 Pu]\nφcPne = 38.41 kN [단계 12] ratio = 0.521\n국부 좌굴 E3.2.1 · Eq. E3.2.1-1, E3.2.1-2, E3.2.1-3 통과\nmember.compression.local · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 20.00 kN\n입력 Pu\nPnℓ = 45.19 kN φc = 0.85 φcPnℓ = 38.41 kN 0.521\n# 식 입력 결과\n1 Pcrl (elastic local buckling load) Pcrl = 291.80 kN [좌굴 해석 fsm_minimum FSM] Pcrl = 291.80 kN\n2 λℓ = (Pne / Pcrl)^0.5 (Eq. E3.2.1-3) Pne = 45.19 kN [항목 member.compression.global]\nPcrl = 291.80 kN [단계 1] λℓ = 0.394\n3 λℓ ≤ 0.776 → 참 → Eq. E3.2.1-1 λℓ = 0.394 [단계 2]\n4 Pnℓ = Pne (Eq. E3.2.1-1) Pne = 45.19 kN [항목 member.compression.global]\nPcrl = 291.80 kN [단계 1] Pnℓ = 45.19 kN\n5 φcPnℓ = φc Pnℓ Pnℓ = 45.19 kN [단계 4]\nφc = 0.850 [기준 ] φcPnℓ = 38.41 kN\n6 Pu / φcPnℓ ≤ 1 Pu = 20.00 kN [입력 Pu]\nφcPnℓ = 38.41 kN [단계 5] ratio = 0.521\n뒤틀림 좌굴 E4.1 · Eq. E4.1-1, E4.1-2, E4.1-3, E4.1-4 통과\nmember.compression.distortional · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 20.00 kN\n입력 Pu\nPnd = 145.32 kN φc = 0.85 φcPnd = 123.52 kN 0.162\n# 식 입력 결과\n1 Py = Ag Fy (Eq. E4.1-4) A = 510.0 mm² [단면 A]\nFy = 295.0 MPa [재료 Fy] Py = 150.46 kN\n2 Pcrd (elastic distortional buckling load) Pcrd = 339.79 kN [좌굴 해석 fsm_minimum FSM] Pcrd = 339.79 kN\n3 λd = (Py / Pcrd)^0.5 (Eq. E4.1-3) Py = 150.46 kN [단계 1]\nPcrd = 339.79 kN [단계 2] λd = 0.665\n4 λd ≤ 0.561 → 거짓 → Eq. E4.1-2 λd = 0.665 [단계 3]\n5 Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py (Eq. E4.1-2) Py = 150.46 kN [단계 1]\nPcrd = 339.79 kN [단계 2] Pnd = 145.32 kN\n6 φcPnd = φc Pnd Pnd = 145.32 kN [단계 5]\nφc = 0.850 [기준 ] φcPnd = 123.52 kN\n7 Pu / φcPnd ≤ 1 Pu = 20.00 kN [입력 Pu]\nφcPnd = 123.52 kN [단계 6] ratio = 0.162\n적용 한계 (표 B4.1-1) B4.1 · Eq. Table B4.1-1 통과\nmember.applicability.b4 · LRFD\n소요 공칭강도 계수 설계강도 비\n— — — — —\n# 식 입력 결과\n1 web w/t w = 87.4 mm [단면 w]\nt = 2.3 mm [단면 t] w/t = 38.000\n2 w/t ≤ 500 (stiffened element in compression (web)) → 참 → Eq. Table B4.1-1 w/t = 38.000 [단계 1]\nlimit = 500.000 [기준 B4.1-1 stiffened element in compression (web)]\n3 flange b/t b = 37.4 mm [단면 b]\nt = 2.3 mm [단면 t] b/t = 16.261\n4 b/t ≤ 160 (edge-stiffened element) → 참 → Eq. Table B4.1-1 b/t = 16.261 [단계 3]\nlimit = 160.000 [기준 B4.1-1 edge-stiffened element]\n5 lip d/t d = 13.7 mm [단면 d]\nt = 2.3 mm [단면 t] d/t = 5.957\n6 d/t ≤ 60 (unstiffened element (lip)) → 참 → Eq. Table B4.1-1 d/t = 5.957 [단계 5]\nlimit = 60.000 [기준 B4.1-1 unstiffened element (lip)]\n7 corner R/t R = 4.0 mm [단면 R]\nt = 2.3 mm [단면 t] R/t = 1.739\n8 R/t ≤ 20 (inside bend radius) → 참 → Eq. Table B4.1-1 R/t = 1.739 [단계 7]\nlimit = 20.000 [기준 B4.1-1 inside bend radius]\n9 simple edge stiffener do/bo do = 20.0 mm [단면 do]\nbo = 50.0 mm [단면 bo] do/bo = 0.400\n10 do/bo ≤ 0.7 (simple lip edge stiffener) → 참 → Eq. Table B4.1-1 do/bo = 0.400 [단계 9]\nlimit = 0.700 [기준 B4.1-1 simple lip edge stiffener]\n11 Fy < Fy,limit (yield stress limit (§B4.1)) → 참 → Eq. Table B4.1-1 Fy = 295.0 MPa [재료 Fy]\nFy,limit = 655.0 MPa [기준 B4.1-1 yield stress limit (§B4.1)]\n5. 설계 요약\n항목 값\n설계 기준 AISI S100-16\n부재 유형 compression\n설계 방법 LRFD\n종합 판정 (엔진) 통과\n이용률 (엔진) 0.521\n지배 파괴 모드 (엔진) Global Buckling (flexural-torsional)\n지배 검토 (엔진) E axial compression\n참조 조항 E2, E3.2, E4\n무리마다 지배 항목 (엔진 design_checks)\n자리 항목 조항 소요 설계강도 비 판정\n항복 및 전체 좌굴 E2 20.00 kN 38.41 kN 0.521 통과\n검토하지 않은 항목 — 해당하면 별도 검토\nholes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위\n구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오.\nStCFSD 냉간성형강 단면 설계 — AISI S100-16",
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list.",
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "SI.report.shape",
    "expect": "pin",
    "value": {
     "heads": [
-     "H1 CUFSM — 냉간성형강 설계 보고서",
+     "H1 StCFSD — 냉간성형강 설계 보고서",
      "H2 1. 단면",
      "H3 단면 제원",
      "H3 계산된 단면 성질",
@@ -308,70 +333,78 @@
      "H2 3. 설계 입력",
      "H3 재료",
      "H3 부재 구성",
-     "H3 설계 하중",
-     "H3 데크 정보",
-     "H2 4. 설계 계산 — 압축 (Chapter E)",
-     "H3 단계 1: 항복 하중, Py",
-     "H3 단계 2: 전체좌굴 — §E2",
-     "H3 단계 3: 국부좌굴 — §E3.2",
-     "H3 단계 4: 뒤틀림좌굴 — §E4",
-     "H3 단계 5: 공칭강도 & 설계강도",
-     "H3 계산 단계 요약",
-     "H2 5. 설계 요약"
+     "H2 4. 설계 계산 — 압축 (Chapter E) (엔진 검토 항목)",
+     "H2 5. 설계 요약",
+     "H3 무리마다 지배 항목 (엔진 design_checks)"
     ],
     "svgs": 2,
-    "tables": 13,
-    "htmlSha": "d88a66c9919ba1ba",
-    "htmlLength": 21363,
+    "tables": 17,
+    "htmlSha": "550277b9c32b260c",
+    "htmlLength": 24170,
     "printShown": true
-   }
+   },
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list.",
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "SI.pdf",
    "expect": "pin",
-   "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)",
-   "accepted_from": "pin",
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list.",
    "value": {
-    "pages": 5,
-    "bytesKB": 572,
+    "pages": 6,
+    "bytesKB": 545,
     "text": [
-     "CUFSM — 냉간성형강 설계 보고서 날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) 1. 단면 단면 제원 항목 값 단위 단면 유형 립 C 형강 H ( 높이 ) 100 mm B ( 플랜지 폭 ) 50 mm D ( 립 깊이 ) 20 mm t ( 두께 ) 2.3 mm r ( 코너 반경 ) 4 mm 절점 / 요소 37 / 36 계산된 단면 성질 성질 기호 값 단위 총단면적 A 510 mm² 강축 단면 2 차모멘트 I xx 788155 mm⁴ 약축 단면 2 차모멘트 I zz 184771 mm⁴ 단면상승모멘트 I xz 0 mm⁴ 강축 단면계수 S x 15763 mm³ 약축 단면계수 S z 5874 mm³ 강축 소성단면계수 Z x 18590 mm³ 약축 소성단면계수 Z z 8493 mm³ 강축 회전반경 r x 39.3 mm 약축 회전반경 r z 19.0 mm 도심 x x cg 17.4 mm 도심 z z cg 48.8 mm 주축 각도 θ p 0.0 ° 주축 단면 2 차모멘트 1 I 11 788155 mm⁴ 주축 단면 2 차모멘트 2 I 22 184771 mm⁴",
-     "2. 탄성 좌굴 해석 좌굴 곡선 ( 하중계수 vs. 반파장 ) 1 10 100 1000 1.00 2.00 3.00 4.00 5.00 6.00 Pcrl=1.939 @ L=78.5 Pcrd=2.258 @ L=425.9 Pcr 반파장 (mm) 하중계수 DSM 설계값 ( 좌굴 곡선에서 추출 ) 성질 값 반파장 하중계수 압축 (kN) P y ( 항복 ) 150.46 kN P crl ( 국부 ) 291.80 kN 78.5 mm 1.9394 P crd ( 뒤틀림 ) 339.79 kN 425.9 mm 2.2584 P cre ( 전체 ) 0.58 kN 25400.0 mm 0.0038 휨 (kN-m) M y ( 항복 ) — kN-m M crl ( 국부 ) — kN-m — mm — M crd ( 뒤틀림 ) — kN-m — mm — M cre ( 전체 ) — kN-m — mm — 2 개 최솟값 검출 . 최솟값 1: L=78.5 mm, LF=1.9394. 최솟값 2: L=425.9 mm, LF=2.2584. 3. 설계 입력 재료 항목 값 단위 강종 SGC400 (295/400 MPa) 항복강도 , F y 295 MPa 인장강도 , F u 400 MPa 탄성계수 , E 203395.3 MPa 포아송비 , ν 0.30 부재 구성",
-     "항목 값 부재 적용 일반 기둥 ( 압축 ) 스팬 유형 3 경간 연속보 스팬 길이 5, 5, 5 m 분담폭 ( 간격 ) 1 m 설계 방법 LRFD 설계 하중 하중 유형 kPa kN/m (×1 m) 설명 D 0.3 kPa 0.300 kN/m 고정하중 ( 자중 + 부가하중 ) Lr 1 kPa 1.000 kN/m 지붕 활하중 S 0.5 kPa 0.500 kN/m 적설하중 Wu ( 양력 ) 1 kPa 1.000 kN/m 풍양력 하중 ( 부압 ) 데크 정보 항목 값 데크 유형 없음 패널 두께 , t panel 0.5 mm 체결구 간격 300 mm 4. 설계 계산 — 압축 (Chapter E) 단계 1: 항복 하중 , P y P y = A g × F y = 150.44 kN 단계 2: 전체좌굴 — §E2 휨 , 비틀림 또는 휨 - 비틀림 좌굴응력 F cre 는 KL/r, J, C w 및 단면 대칭성에서 결정됩니다 . λ c = √(F y / F cre ) Condition Equation λ c ≤ 1.5 F n = (0.658 λ c ² ) F y λ c > 1.5 F n = (0.877/λ c ²) F y P ne = A g × F n = 45.19 kN 단계 3: 국부좌굴 — §E3.2 λ l = √(P ne /P crl ) Condition Equation",
-     "λ l ≤ 0.776 P nl = P ne λ l > 0.776 P nl = [1-0.15(P crl /P ne ) 0.4 ](P crl /P ne ) 0.4 P ne P nl = 45.19 kN 단계 4: 뒤틀림좌굴 — §E4 λ d = √(P y /P crd ) Condition Equation λ d ≤ 0.561 P nd = P y λ d > 0.561 P nd = [1-0.25(P crd /P y ) 0.6 ](P crd /P y ) 0.6 P y P nd = 145.32 kN 단계 5: 공칭강도 & 설계강도 P n = min(P ne ,P nl ,P nd ) = min(45.19,45.19,145.32) = 45.19 kN 지배 모드 : Global Buckling (flexural-torsional) φP n = 0.85 × 45.19 = 38.43 kN 계산 단계 요약 # 단계 수식 결과 단 위 1 Yield Load (Py) Py = Ag×Fy = 0.7905 in²×42.79 ksi = 33.82 kips 150.44 kN 2 Global Buckling (Pne) Fcre = 14.65 ksi, λc = 1.709, Fn = 12.85 ksi → Pne = 10.16 kips 45.19 kN 3 Local Buckling (Pnl) Pcrl = 65.60 kips (FSM), λl = √(Pne/Pcrl) = √(10.16 kips/65.60 kips) = 0.394 ≤ 0.776 → Pnl = 10.16 kips 45.19 kN 4 Distortional Buckling (Pnd) Pcrd = 76.39 kips (FSM), λd = √(Py/Pcrd) = √(33.82 kips/76.39 kips) = 0.665 > 0.561 → Pnd = 32.67 kips 145.32 kN 5 Nominal Strength (Pn) [ 지 배 ] Pn = min(Pne=10.16 kips, Pnl=10.16 kips, Pnd=32.67 kips) = 10.16 kips 45.19 kN 6 Design Strength (LRFD) φPn = 0.85 × 10.16 kips = 8.64 kips 38.43 kN 5. 설계 요약 본 보고서는 AISI S100-16 직접강도법 (DSM) 에 의한 압축 부재 ( 기둥 / 스터드 ) 의 설계 검토 결과입니다 . 설계 방법은 LRFD 입니다 . 지배 파괴 모드는 Global Buckling (flexural-torsional) 입니다 . 항목 값 설계 기준 AISI S100-16 해석 방법 직접강도법 (DSM) — 유한스트립법",
-     "부재 유형 압축 부재 ( 기둥 / 스터드 ) 설계 방법 LRFD 지배 파괴 모드 Global Buckling (flexural-torsional) 공칭강도 , P n 45.19 kN 설계강도 , φP n 38.43 kN 소요 / 저항 비율 (DCR) 52.1% — OK 지배 검토 E axial compression E axial compression 0.521 — OK 참조 규준 조항 E2, E3.2, E4 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+     "StCFSD — 냉간성형강 설계 보고서 날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) / LRFD / SI 단위 1. 단면 단면 제원 항목 값 단면 유형 Lipped C ( 립부 채널 ) H ( 높이 ) — 템플릿 입력 100.0 mm B ( 플랜지 폭 ) — 템플릿 입력 50.0 mm D ( 립 깊이 ) — 템플릿 입력 20.0 mm t ( 두께 ) — 템플릿 입력 2.30 mm r ( 코너 반경 ) — 템플릿 입력 4.0 mm 절점 37 요소 36 계산된 단면 성질 성질 기호 값 총단면적 A 510.0 mm² 강축 단면 2 차모멘트 Ixx 788155 mm⁴ 약축 단면 2 차모멘트 Izz 184771 mm⁴ 단면상승모멘트 Ixz 0 mm⁴ 강축 단면계수 Sx 15763 mm³ 약축 단면계수 Sz 5874 mm³ 강축 소성단면계수 Zx 18590 mm³ 약축 소성단면계수 Zz 8493 mm³ 강축 회전반경 rx 39.3 mm 약축 회전반경 rz 19.0 mm",
+     "도심 x xcg 17.4 mm 도심 z zcg 48.8 mm 주축 각도 θp 0.0 ° 주축 단면 2 차모멘트 1 I11 788155 mm⁴ 주축 단면 2 차모멘트 2 I22 184771 mm⁴ 2. 탄성 좌굴 해석 좌굴 곡선 ( 하중계수 vs. 반파장 ) 100 1000 10000 Pcrl=1.939 @ L=78.5 mm Pcrd=2.258 @ L=425.9 mm Pcr 반파장 (mm) 하중계수 DSM 설계값 ( 좌굴 곡선에서 추출 ) 성질 값 반파장 하중계수 압축 Py ( 항복 ) 150.46 kN Pcrl ( 국부 ) 291.80 kN 78.5 mm 1.9394 Pcrd ( 뒤틀림 ) 339.79 kN 425.9 mm 2.2584 Pcre ( 전체 ) 0.58 kN 25400.0 mm 0.0038 휨 My ( 항복 ) — Mcrl ( 국부 ) — Mcrd ( 뒤틀림 ) — Mcre ( 전체 ) — 서명곡선의 극소 반파장 하중계수 극소 1 78.5 mm 1.9394 극소 2 425.9 mm 2.2584 2 개 극소 ( 엔진이 찾음 ) 3. 설계 입력",
+     "재료 항목 값 강종 SGC400 (295/400 MPa) 항복강도 Fy ( 설계 ) 295.0 MPa 인장강도 Fu ( 설계 ) 400.0 MPa 탄성계수 E ( 모델 ) 203395 MPa 포아송비 ν ( 모델 ) 0.300 전단탄성계수 G ( 모델 ) 77911 MPa 부재 구성 항목 값 부재 적용 일반 기둥 ( 압축 ) 설계 방법 LRFD 4. 설계 계산 — 압축 (Chapter E) ( 엔진 검토 항목 ) 항복 및 전체 좌굴 E2 · Eq. E2-1, E2-2, E2-3, E2-4, E2.1-1, E2.2-1, E2.2-3, E2.2-5 통과 지배 — 비 최대 member.compression.global · LRFD 소요 공칭강도 계수 설계강도 비 Pu = 20.00 kN 입력 Pu Pne = 45.19 kN φc = 0.85 φcPne = 38.41 kN 0.521 # 식 입력 결과 1 σex = π² E / (KxLx / rx)² (Eq. E2.2-6) E = 203395.3 MPa [ 기준 ] KxLx = 2500.0 mm [ 입력 KxLx] rx = 39.3 mm [ 단면 rx] σex = 496.3 MPa 2 σey = π² E / (KyLy / ry)² (Eq. E2.1-1) E = 203395.3 MPa [ 기준 ] KyLy = 2500.0 mm [ 입력 KyLy] ry = 19.0 mm [ 단면 ry] σey = 116.4 MPa 3 ro = (rx² + ry² + xo²)^0.5 (Eq. E2.2-4) rx = 39.3 mm [ 단면 rx] ry = 19.0 mm [ 단면 ry] xo = 43.4 mm [ 단면 Xs-xcg] ro = 61.6 mm 4 σt = [G J + π² E Cw / (KtLt)²] / (A ro²) (Eq. E2.2-5) G = 77910.8 MPa [ 기준 ] J = 899 mm⁴ [ 단면 J] E = 203395.3 MPa [ 기준 ] Cw = 466912548 mm⁶ [ 단면 Cw] KtLt = 2500.0 mm [ 입력 KtLt] A = 510.0 mm² [ 단면 A] ro = 61.6 mm [ 단계 3] σt = 113.9 MPa 5 β = 1 − (xo / ro)² (Eq. E2.2-3) xo = 43.4 mm [ 단면 xo] ro = 61.6 mm [ 단계 3] β = 0.503 6 Fcre,ft = [(σex + σt) − ((σex + σt)² − 4 β σex σt)^0.5] / (2 β) (Eq. E2.2-1) σex = 496.3 MPa [ 단계 1] σt = 113.9 MPa [ 단계 4] β = 0.503 [ 단계 5] Fcre,ft = 101.0 MPa",
+     "7 Fcre = min(σey, Fcre,ft) σey = 116.4 MPa [ 단계 2] Fcre,ft = 101.0 MPa [ 단계 6] Fcre = 101.0 MPa 8 λc = (Fy / Fcre)^0.5 (Eq. E2-4) Fy = 295.0 MPa [ 재료 Fy] Fcre = 101.0 MPa [ 단계 7] λc = 1.709 9 λc ≤ 1.5 → 거짓 → Eq. E2-3 λc = 1.709 [ 단계 8] 10 Fn = (0.877 / λc²) Fy (Eq. E2-3) λc = 1.709 [ 단계 8] Fy = 295.0 MPa [ 재료 Fy] Fn = 88.6 MPa 11 Pne = Ag Fn (Eq. E2-1) A = 510.0 mm² [ 단면 A] Fn = 88.6 MPa [ 단계 10] Pne = 45.19 kN 12 φcPne = φc Pne Pne = 45.19 kN [ 단계 11] φc = 0.850 [ 기준 ] φcPne = 38.41 kN 13 Pu / φcPne ≤ 1 Pu = 20.00 kN [ 입력 Pu] φcPne = 38.41 kN [ 단계 12] ratio = 0.521 국부 좌굴 E3.2.1 · Eq. E3.2.1-1, E3.2.1-2, E3.2.1-3 통과 member.compression.local · LRFD 소요 공칭강도 계수 설계강도 비 Pu = 20.00 kN 입력 Pu Pnℓ = 45.19 kN φc = 0.85 φcPnℓ = 38.41 kN 0.521 # 식 입력 결과 1 Pcrl (elastic local buckling load) Pcrl = 291.80 kN [ 좌굴 해석 fsm_minimum FSM] Pcrl = 291.80 kN 2 λℓ = (Pne / Pcrl)^0.5 (Eq. E3.2.1-3) Pne = 45.19 kN [ 항목 member.compression.global] Pcrl = 291.80 kN [ 단계 1] λℓ = 0.394 3 λℓ ≤ 0.776 → 참 → Eq. E3.2.1-1 λℓ = 0.394 [ 단계 2] 4 Pnℓ = Pne (Eq. E3.2.1-1) Pne = 45.19 kN [ 항목 member.compression.global] Pcrl = 291.80 kN [ 단계 1] Pnℓ = 45.19 kN 5 φcPnℓ = φc Pnℓ Pnℓ = 45.19 kN [ 단계 4] φc = 0.850 [ 기준 ] φcPnℓ = 38.41 kN 6 Pu / φcPnℓ ≤ 1 Pu = 20.00 kN [ 입력 Pu] φcPnℓ = 38.41 kN [ 단계 5] ratio = 0.521 뒤틀림 좌굴 E4.1 · Eq. E4.1-1, E4.1-2, E4.1-3, E4.1-4 통과 member.compression.distortional · LRFD 소요 공칭강도 계수 설계강도 비 Pu = 20.00 kN 입력 Pu Pnd = 145.32 kN φc = 0.85 φcPnd = 123.52 kN 0.162 # 식 입력 결과 1 Py = Ag Fy (Eq. E4.1-4) A = 510.0 mm² [ 단면 A] Fy = 295.0 MPa [ 재료 Fy] Py = 150.46 kN 2 Pcrd (elastic distortional buckling load) Pcrd = 339.79 kN [ 좌굴 해석 fsm_minimum FSM] Pcrd = 339.79 kN 3 λd = (Py / Pcrd)^0.5 (Eq. E4.1-3) Py = 150.46 kN [ 단계 1] Pcrd = 339.79 kN [ 단계 2] λd = 0.665 4 λd ≤ 0.561 → 거짓 → Eq. E4.1-2 λd = 0.665 [ 단계 3]",
+     "5 Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py (Eq. E4.1-2) Py = 150.46 kN [ 단계 1] Pcrd = 339.79 kN [ 단계 2] Pnd = 145.32 kN 6 φcPnd = φc Pnd Pnd = 145.32 kN [ 단계 5] φc = 0.850 [ 기준 ] φcPnd = 123.52 kN 7 Pu / φcPnd ≤ 1 Pu = 20.00 kN [ 입력 Pu] φcPnd = 123.52 kN [ 단계 6] ratio = 0.162 적용 한계 ( 표 B4.1-1) B4.1 · Eq. Table B4.1-1 통과 member.applicability.b4 · LRFD 소요 공칭강도 계수 설계강도 비 — — — — — # 식 입력 결과 1 web w/t w = 87.4 mm [ 단면 w] t = 2.3 mm [ 단면 t] w/t = 38.000 2 w/t ≤ 500 (stiffened element in compression (web)) → 참 → Eq. Table B4.1-1 w/t = 38.000 [ 단계 1] limit = 500.000 [ 기준 B4.1-1 stiffened element in compression (web)] 3 flange b/t b = 37.4 mm [ 단면 b] t = 2.3 mm [ 단면 t] b/t = 16.261 4 b/t ≤ 160 (edge-stiffened element) → 참 → Eq. Table B4.1-1 b/t = 16.261 [ 단계 3] limit = 160.000 [ 기준 B4.1-1 edge-stiffened element] 5 lip d/t d = 13.7 mm [ 단면 d] t = 2.3 mm [ 단면 t] d/t = 5.957 6 d/t ≤ 60 (unstiffened element (lip)) → 참 → Eq. Table B4.1-1 d/t = 5.957 [ 단계 5] limit = 60.000 [ 기준 B4.1-1 unstiffened element (lip)] 7 corner R/t R = 4.0 mm [ 단면 R] t = 2.3 mm [ 단면 t] R/t = 1.739 8 R/t ≤ 20 (inside bend radius) → 참 → Eq. Table B4.1-1 R/t = 1.739 [ 단계 7] limit = 20.000 [ 기준 B4.1-1 inside bend radius] 9 simple edge stiffener do/bo do = 20.0 mm [ 단면 do] bo = 50.0 mm [ 단면 bo] do/bo = 0.400 10 do/bo ≤ 0.7 (simple lip edge stiffener) → 참 → Eq. Table B4.1-1 do/bo = 0.400 [ 단계 9] limit = 0.700 [ 기준 B4.1-1 simple lip edge stiffener] 11 Fy < Fy,limit (yield stress limit (§B4.1)) → 참 → Eq. Table B4.1-1 Fy = 295.0 MPa [ 재료 Fy] Fy,limit = 655.0 MPa [ 기준 B4.1-1 yield stress limit (§B4.1)] 5. 설계 요약 항목 값 설계 기준 AISI S100-16 부재 유형 compression 설계 방법 LRFD",
+     "종합 판정 ( 엔진 ) 통과 이용률 ( 엔진 ) 0.521 지배 파괴 모드 ( 엔진 ) Global Buckling (flexural-torsional) 지배 검토 ( 엔진 ) E axial compression 참조 조항 E2, E3.2, E4 무리마다 지배 항목 ( 엔진 design_checks) 자리 항목 조항 소요 설계강도 비 판정 항복 및 전체 좌굴 E2 20.00 kN 38.41 kN 0.521 통과 검토하지 않은 항목 — 해당하면 별도 검토 holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) 적용 범위 구멍 ( 웹 천공 ) 감소 (§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6) 는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다 . 천공 스터드 등은 별도 검토하 십시오 . StCFSD 냉간성형강 단면 설계 — AISI S100-16"
     ],
-    "compact": "3ef20e6a3994fab6",
-    "printedHtmlSha": "623bf604f72f51dc"
-   }
+    "compact": "ef51b8bdc93366f6",
+    "printedHtmlSha": "58c42e2d8d917ad0"
+   },
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)"
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "SI.findings",
-   "expect": "defect",
-   "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report",
+   "expect": "pin",
+   "reason": "K3-6 / K3-7: the defects pinned here are fixed (see the item reasons in k3_review_defects.js); what remains is pinned as the new behaviour. K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
    "value": {
     "alwaysSame": [
      "pass: 경계조건 (BC) = S-S",
-     "pass: 풍하중 (W, 양력) = 1 kPa ↑",
-     "pass: 저항계수 (φ) = φc = 0.85",
-     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=295, 설계 Fy=295 MPa",
-     "pass: 해석 최신성 = 해석 결과 존재"
-    ],
-    "reportPageValues": [
-     "탄성계수, E 203395.3 MPa",
-     "포아송비, ν 0.30",
-     "분담폭 (간격) 1 m",
-     "패널 두께, tpanel 0.5 mm",
-     "체결구 간격 300 mm"
-    ],
-    "usUnitsInSiReport": 6,
-    "usUnitsSample": [
-     "1 Yield Load (Py) Py = Ag×Fy = 0.7905 in²×42.79 ksi = 33.82 kips 150.44 kN",
-     "2 Global Buckling (Pne) Fcre = 14.65 ksi, λc = 1.709, Fn = 12.85 ksi → Pne = 10.16 kips 45.19 kN",
-     "3 Local Buckling (Pnl) Pcrl = 65.60 kips (FSM), λl = √(Pne/Pcrl) = √(10.16 kips/65.60 kips) = 0.394 ≤ 0.776 → Pnl = 10.16 kips 45.19 kN",
-     "4 Distortional Buckling (Pnd) Pcrd = 76.39 kips (FSM), λd = √(Py/Pcrd) = √(33.82 kips/76.39 kips) = 0.665 > 0.561 → Pnd = 32.67 kips 145.32 kN"
+     "pass: Fy 일관성 (해석 vs 설계) = 해석 기준응력 295.0, 설계 Fy 295.0 MPa",
+     "pass: 해석 최신성 = 현재 모델의 해석"
     ]
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "defect",
+      "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report"
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "SI.crossCheck",
@@ -386,52 +419,90 @@
      },
      {
       "item": "Pnd vs Py (뒤틀림좌굴 감소)",
-      "page": "warn",
+      "page": "pass",
       "engine": "pass"
      }
     ],
     "passOnNotEvaluated": []
-   }
+   },
+   "reason": "K3-6: the page column of the engine cross-check now follows the engine verdict (D1 · D4 · D6). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "buckling",
    "expect": "pin",
+   "reason": "K3-7: the buckling report is a ReportDoc too (analysis conditions from the model, DSM table from the result — the page DSM-table HTML is no longer inserted); V7-02 escaping and CSP.",
    "value": {
     "sent": true,
-    "text": "좌굴해석 결과 보고서 (FSM — Signature Curve) 해석 조건 항목 값 단면 Lipped C (립부 채널) (H=100, B=50, D=20, t=2.3 mm) 재료 Fy = 295 MPa, Fu = 400 MPa 하중 케이스 압축 (Compression) 경계조건 S-S 반파장 범위 25.4 ~ 25400 mm (50점) 모델 37 절점 / 36 요소 DSM 설계값 Property Value Half-wavelength Load Factor Compression (kN) Py (해석 응력 첫 항복) 150.46 Pcrl (local) 291.80 78.5 1.9394 Pcrd (distortional) 339.79 425.9 2.2584 Pcre (global) 0.58 25400.0 0.0038 Basis: P analysis (other families not applicable to this curve) Detected 2 minima | Min 1: L=78.5 mm, LF=1.9394 | Min 2: L=425.9 mm, LF=2.2584 P — 분류: heuristic 좌굴 곡선 (Signature Curve) \"> 모드 분류 (G/D/L/O) \"> 모드 형상 (2D) \"> 모드 형상 (3D) \"> 소성 상호작용 곡면 \"> StCFSD — CUFSM 기반 유한스트립 좌굴해석. 차트는 해석 시점의 화면 렌더링을 캡처한 것입니다.",
+    "text": ".chk{border:1px solid #ddd;border-left:4px solid #999;padding:4px 8px;margin:6px 0}.chk-ok{border-left-color:#2e7d32}.chk-ng{border-left-color:#c62828}.chk-ne{border-left-color:#ef6c00}.chk-na{border-left-color:#bbb}.chk h4{margin:2px 0}.clause{color:#555;font-weight:400}.v{font-size:10px;padding:0 4px;border-radius:2px}.v-ok{background:#e8f5e9}.v-ng{background:#ffebee}.v-ne{background:#fff3e0}.gov{font-size:10px;color:#1565c0}.chk-id,.src,.eqn{font-size:9px;color:#777}.us-eq{font-size:9px;color:#b36b00}.t-ng{color:#c62828;font-weight:600}.t-ok{color:#2e7d32}.t-ne,.t-warn{color:#ef6c00}.t-muted{color:#777}.note{font-size:10px;color:#555} 좌굴해석 결과 보고서 (FSM — Signature Curve) 날짜: AISI S100-16 / FSM / SI 단위 1. 해석 조건 항목 값 단면 Lipped C (립부 채널) H (템플릿 입력) 100.0 mm B (템플릿 입력) 50.0 mm D (템플릿 입력) 20.0 mm t (템플릿 입력) 2.3 mm 기준응력 fy (모델 — 해석이 쓴 값) 295.0 MPa E (모델) 203395 MPa ν (모델) 0.300 하중 케이스 (모델) compression 경계조건 (모델) S-S 반파장 최솟값 25.4 mm 반파장 최댓값 25400.0 mm 반파장 개수 50 절점 37 요소 36 2. 서명곡선 · DSM 값 좌굴 곡선 (하중계수 vs. 반파장) 100 1000 10000 Pcrl=1.939 @ L=78.5 mm Pcrd=2.258 @ L=425.9 mm Pcre=0.004 @ L=25400.0 mm 반파장 (mm) 하중계수 DSM 설계값 (좌굴 곡선에서 추출) 성질 값 반파장 하중계수 압축 Py (항복) 150.46 kN Pcrl (국부) 291.80 kN 78.5 mm 1.9394 Pcrd (뒤틀림) 339.79 kN 425.9 mm 2.2584 Pcre (전체) 0.58 kN 25400.0 mm 0.0038 휨 My (항복) — Mcrl (국부) — Mcrd (뒤틀림) — Mcre (전체) — 서명곡선의 극소 반파장 하중계수 극소 1 78.5 mm 1.9394 극소 2 425.9 mm 2.2584 2개 극소(엔진이 찾음) 3. 화면 그림 좌굴 곡선 (Signature Curve) \"> 모드 분류 (G/D/L/O) \"> 모드 형상 (2D) \"> 모드 형상 (3D) \"> 소성 상호작용 곡면 \"> 그림은 해석 시점의 화면 렌더링을 캡처한 것입니다. StCFSD 냉간성형강 단면 설계 — AISI S100-16",
     "heads": [
      "좌굴해석 결과 보고서 (FSM — Signature Curve)",
-     "해석 조건",
-     "DSM 설계값",
-     "좌굴 곡선 (Signature Curve)",
-     "모드 분류 (G/D/L/O)",
-     "모드 형상 (2D)",
-     "모드 형상 (3D)",
-     "소성 상호작용 곡면"
+     "1. 해석 조건",
+     "2. 서명곡선 · DSM 값",
+     "3. 화면 그림"
     ],
     "pngs": 5,
-    "htmlSha": "c546cdaa56e05693",
+    "htmlSha": "f0880bec0c26a86b",
     "pdf": {
-     "pages": 4,
+     "pages": 5,
      "text": [
-      "좌굴해석 결과 보고서 (FSM — Signature Curve) 해석 조건 항목 값 단면 Lipped C ( 립부 채널 ) (H=100, B=50, D=20, t=2.3 mm) 재료 Fy = 295 MPa, Fu = 400 MPa 하중 케이스 압축 (Compression) 경계조건 S-S 반파장 범위 25.4 ~ 25400 mm (50 점 ) 모델 37 절점 / 36 요소 DSM 설계값 Property Value Half-wavelength Load Factor Compression (kN) Py ( 해석 응력 첫 항복 ) 150.46 Pcrl (local) 291.80 78.5 1.9394 Pcrd (distortional) 339.79 425.9 2.2584 Pcre (global) 0.58 25400.0 0.0038 Basis: P analysis (other families not applicable to this curve) Detected 2 minima | Min 1: L=78.5 mm, LF=1.9394 | Min 2: L=425.9 mm, LF=2.2584 P — 분류 : heuristic 좌굴 곡선 (Signature Curve)",
-      "모드 분류 (G/D/L/O) 모드 형상 (2D)",
-      "모드 형상 (3D) 소성 상호작용 곡면",
-      ""
+      "좌굴해석 결과 보고서 (FSM — Signature Curve) 날짜: <DATE> AISI S100-16 / FSM / SI 단위 1. 해석 조건 항목 값 단면 Lipped C ( 립부 채널 ) H ( 템플릿 입력 ) 100.0 mm B ( 템플릿 입력 ) 50.0 mm D ( 템플릿 입력 ) 20.0 mm t ( 템플릿 입력 ) 2.3 mm 기준응력 fy ( 모델 — 해석이 쓴 값 ) 295.0 MPa E ( 모델 ) 203395 MPa ν ( 모델 ) 0.300 하중 케이스 ( 모델 ) compression 경계조건 ( 모델 ) S-S 반파장 최솟값 25.4 mm 반파장 최댓값 25400.0 mm 반파장 개수 50 절점 37 요소 36 2. 서명곡선 · DSM 값 좌굴 곡선 ( 하중계수 vs. 반파장 ) 100 1000 10000 Pcrl=1.939 @ L=78.5 mm Pcrd=2.258 @ L=425.9 mm Pcr 반파장 (mm) 하중계수 DSM 설계값 ( 좌굴 곡선에서 추출 ) 성질 값 반파장 하중계수",
+      "압축 Py ( 항복 ) 150.46 kN Pcrl ( 국부 ) 291.80 kN 78.5 mm 1.9394 Pcrd ( 뒤틀림 ) 339.79 kN 425.9 mm 2.2584 Pcre ( 전체 ) 0.58 kN 25400.0 mm 0.0038 휨 My ( 항복 ) — Mcrl ( 국부 ) — Mcrd ( 뒤틀림 ) — Mcre ( 전체 ) — 서명곡선의 극소 반파장 하중계수 극소 1 78.5 mm 1.9394 극소 2 425.9 mm 2.2584 2 개 극소 ( 엔진이 찾음 ) 3. 화면 그림 좌굴 곡선 (Signature Curve) 모드 분류 (G/D/L/O)",
+      "모드 형상 (2D) 모드 형상 (3D)",
+      "소성 상호작용 곡면 그림은 해석 시점의 화면 렌더링을 캡처한 것입니다 .",
+      "StCFSD 냉간성형강 단면 설계 — AISI S100-16"
      ],
-     "compact": "53b5d5afcd8266c0"
+     "compact": "6b861cdcffce5f77"
     }
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "US.report.afterToggle",
    "expect": "pin",
-   "value": "CUFSM — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM)\n1. 단면\n단면 제원\n항목 값 단위\n단면 유형 립 C형강\nH (높이) 3.93700787402 in\nB (플랜지 폭) 1.96850393701 in\nD (립 깊이) 0.787401574803 in\nt (두께) 0.0905511811024 in\nr (코너 반경) 0.157480314961 in\n절점 / 요소 37 / 36\n계산된 단면 성질\n성질 기호 값 단위\n총단면적 A 0.7905 in²\n강축 단면2차모멘트 Ixx 1.8935 in⁴\n약축 단면2차모멘트 Izz 0.4439 in⁴\n단면상승모멘트 Ixz 0.0000 in⁴\n강축 단면계수 Sx 0.9619 in³\n약축 단면계수 Sz 0.3585 in³\n강축 소성단면계수 Zx 1.1344 in³\n약축 소성단면계수 Zz 0.5183 in³\n강축 회전반경 rx 1.5477 in\n약축 회전반경 rz 0.7494 in\n도심 x xcg 0.6849 in\n도심 z zcg 1.9232 in\n주축 각도 θp 0.0 °\n주축 단면2차모멘트 1 I11 1.8935 in⁴\n주축 단면2차모멘트 2 I22 0.4439 in⁴\n2. 탄성 좌굴 해석\n좌굴 곡선 (하중계수 vs. 반파장)\n1\n10\n100\n1000\n1.00\n2.00\n3.00\n4.00\n5.00\n6.00\nPcrl=1.939 @ L=3.0888\nPcrd=2.258 @ L=16.7683\nPcre=0.004 @ L=1000.0000\n반파장 (in)\n하중계수\nDSM 설계값 (좌굴 곡선에서 추출)\n성질 값 반파장 하중계수\n압축 (kips)\nPy (항복) 33.82 kips\nPcrl (국부) 65.60 kips 3.0888 in 1.9394\nPcrd (뒤틀림) 76.39 kips 16.7683 in 2.2584\nPcre (전체) 0.13 kips 1000.0000 in 0.0038\n휨 (kip-in)\nMy (항복) — kip-in\nMcrl (국부) — kip-in — in —\nMcrd (뒤틀림) — kip-in — in —\nMcre (전체) — kip-in — in —\n2개 최솟값 검출. 최솟값 1: L=3.0888 in, LF=1.9394. 최솟값 2: L=16.7683 in, LF=2.2584.\n3. 설계 입력\n재료\n항목 값 단위\n강종 SGC400 (295/400 MPa)\n항복강도, Fy 42.7861326304 ksi\n인장강도, Fu 58.0150950921 ksi\n탄성계수, E 29500.0 ksi\n포아송비, ν 0.30\n부재 구성\n항목 값\n부재 적용 일반 기둥 (압축)\n스팬 유형 3경간 연속보\n스팬 길이 16.4041994751, 16.4041994751, 16.4041994751 ft\n분담폭 (간격) 3.28083989501 ft\n설계 방법 LRFD\n설계 하중\n하중 유형 psf plf (×3.28083989501 ft) 설명\nD 6.26563026995 psf 21 plf 고정하중 (자중 + 부가하중)\nLr 20.8854342332 psf 69 plf 지붕 활하중\nS 10.4427171166 psf 34 plf 적설하중\nWu (양력) 20.8854342332 psf 69 plf 풍양력 하중(부압)\n데크 정보\n항목 값\n데크 유형 없음\n패널 두께, tpanel 0.0196850393701 in\n체결구 간격 11.811023622 in\n4. 설계 계산 — 압축 (Chapter E)\n단계 1: 항복 하중, Py\nPy = Ag × Fy = 33.82 kips\n단계 2: 전체좌굴 — §E2\n휨, 비틀림 또는 휨-비틀림 좌굴응력 Fcre는 KL/r, J, Cw 및 단면 대칭성에서 결정됩니다.\nλc = √(Fy / Fcre)\nCondition Equation\nλc ≤ 1.5 Fn = (0.658λc²) Fy\nλc > 1.5 Fn = (0.877/λc²) Fy\nPne = Ag × Fn = 10.16 kips\n단계 3: 국부좌굴 — §E3.2\nλl = √(Pne/Pcrl)\nCondition Equation\nλl ≤ 0.776 Pnl = Pne\nλl > 0.776 Pnl = [1-0.15(Pcrl/Pne)0.4](Pcrl/Pne)0.4 Pne\nPnl = 10.16 kips\n단계 4: 뒤틀림좌굴 — §E4\nλd = √(Py/Pcrd)\nCondition Equation\nλd ≤ 0.561 Pnd = Py\nλd > 0.561 Pnd = [1-0.25(Pcrd/Py)0.6](Pcrd/Py)0.6 Py\nPnd = 32.67 kips\n단계 5: 공칭강도 & 설계강도\nPn = min(Pne,Pnl,Pnd) = min(10.16,10.16,32.67) = 10.16 kips\n지배 모드: Global Buckling (flexural-torsional)\nφPn = 0.85 × 10.16 = 8.64 kips\n계산 단계 요약\n# 단계 수식 결과 단위\n1 Yield Load (Py) Py = Ag×Fy = 0.7905 in²×42.79 ksi = 33.82 kips 33.82 kips\n2 Global Buckling (Pne) Fcre = 14.65 ksi, λc = 1.709, Fn = 12.85 ksi → Pne = 10.16 kips 10.16 kips\n3 Local Buckling (Pnl) Pcrl = 65.60 kips (FSM), λl = √(Pne/Pcrl) = √(10.16 kips/65.60 kips) = 0.394 ≤ 0.776 → Pnl = 10.16 kips 10.16 kips\n4 Distortional Buckling (Pnd) Pcrd = 76.39 kips (FSM), λd = √(Py/Pcrd) = √(33.82 kips/76.39 kips) = 0.665 > 0.561 → Pnd = 32.67 kips 32.67 kips\n5 Nominal Strength (Pn) [지배] Pn = min(Pne=10.16 kips, Pnl=10.16 kips, Pnd=32.67 kips) = 10.16 kips 10.16 kips\n6 Design Strength (LRFD) φPn = 0.85 × 10.16 kips = 8.64 kips 8.64 kips\n5. 설계 요약\n본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 압축 부재 (기둥/스터드)의 설계 검토 결과입니다. 설계 방법은 LRFD입니다. 지배 파괴 모드는 Global Buckling (flexural-torsional)입니다.\n항목 값\n설계 기준 AISI S100-16\n해석 방법 직접강도법 (DSM) — 유한스트립법\n부재 유형 압축 부재 (기둥/스터드)\n설계 방법 LRFD\n지배 파괴 모드 Global Buckling (flexural-torsional)\n공칭강도, Pn 10.16 kips\n설계강도, φPn 8.64 kips\n소요/저항 비율 (DCR) 52.1% — OK\n지배 검토 E axial compression\nE axial compression 0.521 — OK\n참조 규준 조항 E2, E3.2, E4\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위 (1)\nCUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+   "value": "StCFSD — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) / LRFD / US 단위\n1. 단면\n단면 제원\n항목 값\n단면 유형 Lipped C (립부 채널)\nH (높이) — 템플릿 입력 3.9370 in\nB (플랜지 폭) — 템플릿 입력 1.9685 in\nD (립 깊이) — 템플릿 입력 0.7874 in\nt (두께) — 템플릿 입력 0.0906 in\nr (코너 반경) — 템플릿 입력 0.1575 in\n절점 37\n요소 36\n계산된 단면 성질\n성질 기호 값\n총단면적 A 0.7905 in²\n강축 단면2차모멘트 Ixx 1.8935 in⁴\n약축 단면2차모멘트 Izz 0.4439 in⁴\n단면상승모멘트 Ixz 0.0000 in⁴\n강축 단면계수 Sx 0.9619 in³\n약축 단면계수 Sz 0.3585 in³\n강축 소성단면계수 Zx 1.1344 in³\n약축 소성단면계수 Zz 0.5183 in³\n강축 회전반경 rx 1.5477 in\n약축 회전반경 rz 0.7494 in\n도심 x xcg 0.6849 in\n도심 z zcg 1.9232 in\n주축 각도 θp 0.0 °\n주축 단면2차모멘트 1 I11 1.8935 in⁴\n주축 단면2차모멘트 2 I22 0.4439 in⁴\n2. 탄성 좌굴 해석\n좌굴 곡선 (하중계수 vs. 반파장)\n1\n10\n100\n1000\nPcrl=1.939 @ L=3.0888 in\nPcrd=2.258 @ L=16.7683 in\nPcre=0.004 @ L=1000.0000 in\n반파장 (in)\n하중계수\nDSM 설계값 (좌굴 곡선에서 추출)\n성질 값 반파장 하중계수\n압축\nPy (항복) 33.82 kips\nPcrl (국부) 65.60 kips 3.0888 in 1.9394\nPcrd (뒤틀림) 76.39 kips 16.7683 in 2.2584\nPcre (전체) 0.13 kips 1000.0000 in 0.0038\n휨\nMy (항복) —\nMcrl (국부) —\nMcrd (뒤틀림) —\nMcre (전체) —\n서명곡선의 극소 반파장 하중계수\n극소 1 3.0888 in 1.9394\n극소 2 16.7683 in 2.2584\n2개 극소(엔진이 찾음)\n3. 설계 입력\n재료\n항목 값\n강종 SGC400 (295/400 MPa)\n항복강도 Fy (설계) 42.79 ksi\n인장강도 Fu (설계) 58.02 ksi\n탄성계수 E (모델) 29500 ksi\n포아송비 ν (모델) 0.300\n전단탄성계수 G (모델) 11300 ksi\n부재 구성\n항목 값\n부재 적용 일반 기둥 (압축)\n설계 방법 LRFD\n4. 설계 계산 — 압축 (Chapter E) (엔진 검토 항목)\n항복 및 전체 좌굴 E2 · Eq. E2-1, E2-2, E2-3, E2-4, E2.1-1, E2.2-1, E2.2-3, E2.2-5 통과 지배 — 비 최대\nmember.compression.global · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 4.50 kips\n입력 Pu\nPne = 10.16 kips φc = 0.85 φcPne = 8.64 kips 0.521\n# 식 입력 결과\n1 σex = π² E / (KxLx / rx)² (Eq. E2.2-6) E = 29500.00 ksi [기준 ]\nKxLx = 98.4252 in [입력 KxLx]\nrx = 1.5477 in [단면 rx] σex = 71.99 ksi\n2 σey = π² E / (KyLy / ry)² (Eq. E2.1-1) E = 29500.00 ksi [기준 ]\nKyLy = 98.4252 in [입력 KyLy]\nry = 0.7494 in [단면 ry] σey = 16.88 ksi\n3 ro = (rx² + ry² + xo²)^0.5 (Eq. E2.2-4) rx = 1.5477 in [단면 rx]\nry = 0.7494 in [단면 ry]\nxo = 1.7078 in [단면 Xs-xcg] ro = 2.4235 in\n4 σt = [G J + π² E Cw / (KtLt)²] / (A ro²) (Eq. E2.2-5) G = 11300.00 ksi [기준 ]\nJ = 0.002161 in⁴ [단면 J]\nE = 29500.00 ksi [기준 ]\nCw = 1.7387 in⁶ [단면 Cw]\nKtLt = 98.4252 in [입력 KtLt]\nA = 0.7905 in² [단면 A]\nro = 2.4235 in [단계 3] σt = 16.51 ksi\n5 β = 1 − (xo / ro)² (Eq. E2.2-3) xo = 1.7078 in [단면 xo]\nro = 2.4235 in [단계 3] β = 0.503\n6 Fcre,ft = [(σex + σt) − ((σex + σt)² − 4 β σex σt)^0.5] / (2 β) (Eq. E2.2-1) σex = 71.99 ksi [단계 1]\nσt = 16.51 ksi [단계 4]\nβ = 0.503 [단계 5] Fcre,ft = 14.65 ksi\n7 Fcre = min(σey, Fcre,ft) σey = 16.88 ksi [단계 2]\nFcre,ft = 14.65 ksi [단계 6] Fcre = 14.65 ksi\n8 λc = (Fy / Fcre)^0.5 (Eq. E2-4) Fy = 42.79 ksi [재료 Fy]\nFcre = 14.65 ksi [단계 7] λc = 1.709\n9 λc ≤ 1.5 → 거짓 → Eq. E2-3 λc = 1.709 [단계 8]\n10 Fn = (0.877 / λc²) Fy (Eq. E2-3) λc = 1.709 [단계 8]\nFy = 42.79 ksi [재료 Fy] Fn = 12.85 ksi\n11 Pne = Ag Fn (Eq. E2-1) A = 0.7905 in² [단면 A]\nFn = 12.85 ksi [단계 10] Pne = 10.16 kips\n12 φcPne = φc Pne Pne = 10.16 kips [단계 11]\nφc = 0.850 [기준 ] φcPne = 8.64 kips\n13 Pu / φcPne ≤ 1 Pu = 4.50 kips [입력 Pu]\nφcPne = 8.64 kips [단계 12] ratio = 0.521\n국부 좌굴 E3.2.1 · Eq. E3.2.1-1, E3.2.1-2, E3.2.1-3 통과\nmember.compression.local · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 4.50 kips\n입력 Pu\nPnℓ = 10.16 kips φc = 0.85 φcPnℓ = 8.64 kips 0.521\n# 식 입력 결과\n1 Pcrl (elastic local buckling load) Pcrl = 65.60 kips [좌굴 해석 fsm_minimum FSM] Pcrl = 65.60 kips\n2 λℓ = (Pne / Pcrl)^0.5 (Eq. E3.2.1-3) Pne = 10.16 kips [항목 member.compression.global]\nPcrl = 65.60 kips [단계 1] λℓ = 0.394\n3 λℓ ≤ 0.776 → 참 → Eq. E3.2.1-1 λℓ = 0.394 [단계 2]\n4 Pnℓ = Pne (Eq. E3.2.1-1) Pne = 10.16 kips [항목 member.compression.global]\nPcrl = 65.60 kips [단계 1] Pnℓ = 10.16 kips\n5 φcPnℓ = φc Pnℓ Pnℓ = 10.16 kips [단계 4]\nφc = 0.850 [기준 ] φcPnℓ = 8.64 kips\n6 Pu / φcPnℓ ≤ 1 Pu = 4.50 kips [입력 Pu]\nφcPnℓ = 8.64 kips [단계 5] ratio = 0.521\n뒤틀림 좌굴 E4.1 · Eq. E4.1-1, E4.1-2, E4.1-3, E4.1-4 통과\nmember.compression.distortional · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 4.50 kips\n입력 Pu\nPnd = 32.67 kips φc = 0.85 φcPnd = 27.77 kips 0.162\n# 식 입력 결과\n1 Py = Ag Fy (Eq. E4.1-4) A = 0.7905 in² [단면 A]\nFy = 42.79 ksi [재료 Fy] Py = 33.82 kips\n2 Pcrd (elastic distortional buckling load) Pcrd = 76.39 kips [좌굴 해석 fsm_minimum FSM] Pcrd = 76.39 kips\n3 λd = (Py / Pcrd)^0.5 (Eq. E4.1-3) Py = 33.82 kips [단계 1]\nPcrd = 76.39 kips [단계 2] λd = 0.665\n4 λd ≤ 0.561 → 거짓 → Eq. E4.1-2 λd = 0.665 [단계 3]\n5 Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py (Eq. E4.1-2) Py = 33.82 kips [단계 1]\nPcrd = 76.39 kips [단계 2] Pnd = 32.67 kips\n6 φcPnd = φc Pnd Pnd = 32.67 kips [단계 5]\nφc = 0.850 [기준 ] φcPnd = 27.77 kips\n7 Pu / φcPnd ≤ 1 Pu = 4.50 kips [입력 Pu]\nφcPnd = 27.77 kips [단계 6] ratio = 0.162\n적용 한계 (표 B4.1-1) B4.1 · Eq. Table B4.1-1 통과\nmember.applicability.b4 · LRFD\n소요 공칭강도 계수 설계강도 비\n— — — — —\n# 식 입력 결과\n1 web w/t w = 3.4409 in [단면 w]\nt = 0.0906 in [단면 t] w/t = 38.000\n2 w/t ≤ 500 (stiffened element in compression (web)) → 참 → Eq. Table B4.1-1 w/t = 38.000 [단계 1]\nlimit = 500.000 [기준 B4.1-1 stiffened element in compression (web)]\n3 flange b/t b = 1.4724 in [단면 b]\nt = 0.0906 in [단면 t] b/t = 16.261\n4 b/t ≤ 160 (edge-stiffened element) → 참 → Eq. Table B4.1-1 b/t = 16.261 [단계 3]\nlimit = 160.000 [기준 B4.1-1 edge-stiffened element]\n5 lip d/t d = 0.5394 in [단면 d]\nt = 0.0906 in [단면 t] d/t = 5.957\n6 d/t ≤ 60 (unstiffened element (lip)) → 참 → Eq. Table B4.1-1 d/t = 5.957 [단계 5]\nlimit = 60.000 [기준 B4.1-1 unstiffened element (lip)]\n7 corner R/t R = 0.1575 in [단면 R]\nt = 0.0906 in [단면 t] R/t = 1.739\n8 R/t ≤ 20 (inside bend radius) → 참 → Eq. Table B4.1-1 R/t = 1.739 [단계 7]\nlimit = 20.000 [기준 B4.1-1 inside bend radius]\n9 simple edge stiffener do/bo do = 0.7874 in [단면 do]\nbo = 1.9685 in [단면 bo] do/bo = 0.400\n10 do/bo ≤ 0.7 (simple lip edge stiffener) → 참 → Eq. Table B4.1-1 do/bo = 0.400 [단계 9]\nlimit = 0.700 [기준 B4.1-1 simple lip edge stiffener]\n11 Fy < Fy,limit (yield stress limit (§B4.1)) → 참 → Eq. Table B4.1-1 Fy = 42.79 ksi [재료 Fy]\nFy,limit = 95.00 ksi [기준 B4.1-1 yield stress limit (§B4.1)]\n5. 설계 요약\n항목 값\n설계 기준 AISI S100-16\n부재 유형 compression\n설계 방법 LRFD\n종합 판정 (엔진) 통과\n이용률 (엔진) 0.521\n지배 파괴 모드 (엔진) Global Buckling (flexural-torsional)\n지배 검토 (엔진) E axial compression\n참조 조항 E2, E3.2, E4\n무리마다 지배 항목 (엔진 design_checks)\n자리 항목 조항 소요 설계강도 비 판정\n항복 및 전체 좌굴 E2 4.50 kips 8.64 kips 0.521 통과\n검토하지 않은 항목 — 해당하면 별도 검토\nholes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위\n구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오.\nStCFSD 냉간성형강 단면 설계 — AISI S100-16",
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list.",
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "US.validation",
    "expect": "pin",
    "value": [
+    {
+     "category": "A. 단면 입력",
+     "item": "표 B4.1-1 적용 한계 (엔진)",
+     "status": "pass",
+     "value": "한계 안",
+     "criterion": "표 B4.1-1 적용 한계 — 엔진이 평탄폭 · 요소 종류로 대조(member.applicability.b4)",
+     "note": "엔진: 적용 한계 (표 B4.1-1) — 통과"
+    },
     {
      "category": "A. 단면 입력",
      "item": "단면 정의",
@@ -445,7 +516,7 @@
      "item": "두께 (t)",
      "status": "pass",
      "value": "0.0905511811024 in",
-     "criterion": "0.0180 ≤ t ≤ 0.5000 in (CFS 일반 범위)",
+     "criterion": "0.0180 ≤ t ≤ 0.5000 in (프로그램 경험값(냉간성형 일반 범위 — 원문 한계 없음))",
      "note": ""
     },
     {
@@ -453,7 +524,7 @@
      "item": "웹 w/t 비",
      "status": "pass",
      "value": "38.0",
-     "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
+     "criterion": "압축 웹 w/t ≤ 500 (표 B4.1-1, DSM — 보강 압축 요소) · w/t > 250 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -461,7 +532,7 @@
      "item": "플랜지 b/t 비",
      "status": "pass",
      "value": "16.3",
-     "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
+     "criterion": "에지보강 플랜지 b/t ≤ 160 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -469,7 +540,7 @@
      "item": "립 d/t 비",
      "status": "pass",
      "value": "8.7",
-     "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
+     "criterion": "비보강 요소(립) d/t ≤ 60 (표 B4.1-1) · d/t > 30 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -477,7 +548,7 @@
      "item": "코너 R/t 비",
      "status": "pass",
      "value": "1.7",
-     "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
+     "criterion": "안쪽 굽힘 반경 R/t ≤ 20 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -485,7 +556,7 @@
      "item": "항복강도 (Fy)",
      "status": "pass",
      "value": "42.7861326304 ksi",
-     "criterion": "Fy ≤ 95.0 ksi (Table B4.1-1 Fy 한계)",
+     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
      "note": ""
     },
     {
@@ -493,7 +564,7 @@
      "item": "Fu/Fy 비",
      "status": "pass",
      "value": "1.356",
-     "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
+     "criterion": "Fu/Fy ≥ 1.08 (§I6.2.1(o) — R 계수법의 조건)",
      "note": ""
     },
     {
@@ -509,7 +580,7 @@
      "item": "반파장 최솟값",
      "status": "pass",
      "value": "1.0000 in",
-     "criterion": "국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈3.9370 in) 필요",
+     "criterion": "국부좌굴 포착: 최솟값 ≤ 0.8 × 단면 높이(3.1496 in) (프로그램 경험값(원문 조항 없음 — 서명곡선의 국부 극소 포착))",
      "note": ""
     },
     {
@@ -589,7 +660,7 @@
      "item": "스팬 길이",
      "status": "pass",
      "value": "16.4041994751 ft",
-     "criterion": "스팬 > 0 필요; CFS 일반 ≤ 33.00 ft (§I6.2.1)",
+     "criterion": "스팬 > 0; §I6.2.1(h) R 계수법: 경간 ≤ 33.00 ft",
      "note": ""
     },
     {
@@ -615,14 +686,6 @@
      "value": "Lr=20.8854342332, S=10.4427171166 psf",
      "criterion": "최소 하나의 중력 활하중 예상",
      "note": ""
-    },
-    {
-     "category": "E. 하중 입력",
-     "item": "풍하중 (W, 양력)",
-     "status": "pass",
-     "value": "20.8854342332 psf ↑",
-     "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
-     "note": "양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요."
     },
     {
      "category": "F. 하중 분석",
@@ -653,16 +716,16 @@
      "item": "Pnl vs Pne (국부좌굴 감소)",
      "status": "pass",
      "value": "Pnl=10.16, Pne=10.16",
-     "criterion": "Pnl ≤ Pne; 감소 시 → 국부좌굴 지배",
-     "note": ""
+     "criterion": "§E3.2 국부좌굴(엔진 판정)",
+     "note": "엔진: 국부 좌굴 — 통과"
     },
     {
      "category": "G. 설계 결과",
      "item": "Pnd vs Py (뒤틀림좌굴 감소)",
-     "status": "warn",
+     "status": "pass",
      "value": "Pnd=32.67, Py=33.82",
-     "criterion": "Pnd ≤ Py; 감소 시 → 뒤틀림좌굴 지배",
-     "note": ""
+     "criterion": "§E4 뒤틀림좌굴(엔진 판정)",
+     "note": "엔진: 뒤틀림 좌굴 — 통과"
     },
     {
      "category": "G. 설계 결과",
@@ -673,28 +736,31 @@
      "note": ""
     },
     {
-     "category": "G. 설계 결과",
-     "item": "저항계수 (φ)",
-     "status": "pass",
-     "value": "φc = 0.85",
-     "criterion": "AISI S100-16 LRFD 저항계수",
-     "note": ""
-    },
-    {
      "category": "H. 일관성",
      "item": "Fy 일관성 (해석 vs 설계)",
      "status": "pass",
-     "value": "해석 fy=42.7861326304, 설계 Fy=42.7861326304 ksi",
-     "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
+     "value": "해석 기준응력 42.8, 설계 Fy 42.8 ksi",
+     "criterion": "좌굴 해석의 기준응력과 설계 Fy 가 같으면 DSM 값을 그대로 쓴다",
      "note": ""
     },
     {
      "category": "H. 일관성",
      "item": "해석 최신성",
      "status": "pass",
-     "value": "해석 결과 존재",
-     "criterion": "해석이 현재 단면 형상과 일치해야 함",
-     "note": "해석 후 단면이 변경되었으면 재실행하여 결과를 갱신하세요."
+     "value": "현재 모델의 해석",
+     "criterion": "해석이 현재 단면 · 재료 · 해석 조건과 일치해야 함",
+     "note": ""
+    }
+   ],
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -702,29 +768,51 @@
    "id": "US.validation.counts",
    "expect": "pin",
    "value": {
-    "total": 33,
+    "total": 32,
     "pass": 31,
-    "warn": 1,
+    "warn": 0,
     "fail": 1,
-    "badge": "통과 31 / 주의 1 / 실패 1",
+    "badge": "통과 31 / 주의 0 / 실패 1",
     "tree": {
      "validationPass": 31,
-     "validationWarn": 1,
+     "validationWarn": 0,
      "validationFail": 1
     }
-   }
+   },
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "US.report.text",
    "expect": "pin",
-   "value": "CUFSM — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM)\n1. 단면\n단면 제원\n항목 값 단위\n단면 유형 립 C형강\nH (높이) 3.93700787402 in\nB (플랜지 폭) 1.96850393701 in\nD (립 깊이) 0.787401574803 in\nt (두께) 0.0905511811024 in\nr (코너 반경) 0.157480314961 in\n절점 / 요소 37 / 36\n계산된 단면 성질\n성질 기호 값 단위\n총단면적 A 0.7905 in²\n강축 단면2차모멘트 Ixx 1.8935 in⁴\n약축 단면2차모멘트 Izz 0.4439 in⁴\n단면상승모멘트 Ixz 0.0000 in⁴\n강축 단면계수 Sx 0.9619 in³\n약축 단면계수 Sz 0.3585 in³\n강축 소성단면계수 Zx 1.1344 in³\n약축 소성단면계수 Zz 0.5183 in³\n강축 회전반경 rx 1.5477 in\n약축 회전반경 rz 0.7494 in\n도심 x xcg 0.6849 in\n도심 z zcg 1.9232 in\n주축 각도 θp 0.0 °\n주축 단면2차모멘트 1 I11 1.8935 in⁴\n주축 단면2차모멘트 2 I22 0.4439 in⁴\n2. 탄성 좌굴 해석\n좌굴 곡선 (하중계수 vs. 반파장)\n1\n10\n100\n1000\n1.00\n2.00\n3.00\n4.00\n5.00\n6.00\nPcrl=1.939 @ L=3.0888\nPcrd=2.258 @ L=16.7683\nPcre=0.004 @ L=1000.0000\n반파장 (in)\n하중계수\nDSM 설계값 (좌굴 곡선에서 추출)\n성질 값 반파장 하중계수\n압축 (kips)\nPy (항복) 33.82 kips\nPcrl (국부) 65.60 kips 3.0888 in 1.9394\nPcrd (뒤틀림) 76.39 kips 16.7683 in 2.2584\nPcre (전체) 0.13 kips 1000.0000 in 0.0038\n휨 (kip-in)\nMy (항복) — kip-in\nMcrl (국부) — kip-in — in —\nMcrd (뒤틀림) — kip-in — in —\nMcre (전체) — kip-in — in —\n2개 최솟값 검출. 최솟값 1: L=3.0888 in, LF=1.9394. 최솟값 2: L=16.7683 in, LF=2.2584.\n3. 설계 입력\n재료\n항목 값 단위\n강종 SGC400 (295/400 MPa)\n항복강도, Fy 42.7861326304 ksi\n인장강도, Fu 58.0150950921 ksi\n탄성계수, E 29500.0 ksi\n포아송비, ν 0.30\n부재 구성\n항목 값\n부재 적용 일반 기둥 (압축)\n스팬 유형 3경간 연속보\n스팬 길이 16.4041994751, 16.4041994751, 16.4041994751 ft\n분담폭 (간격) 3.28083989501 ft\n설계 방법 LRFD\n설계 하중\n하중 유형 psf plf (×3.28083989501 ft) 설명\nD 6.26563026995 psf 21 plf 고정하중 (자중 + 부가하중)\nLr 20.8854342332 psf 69 plf 지붕 활하중\nS 10.4427171166 psf 34 plf 적설하중\nWu (양력) 20.8854342332 psf 69 plf 풍양력 하중(부압)\n데크 정보\n항목 값\n데크 유형 없음\n패널 두께, tpanel 0.0196850393701 in\n체결구 간격 11.811023622 in\n4. 설계 계산 — 압축 (Chapter E)\n단계 1: 항복 하중, Py\nPy = Ag × Fy = 33.82 kips\n단계 2: 전체좌굴 — §E2\n휨, 비틀림 또는 휨-비틀림 좌굴응력 Fcre는 KL/r, J, Cw 및 단면 대칭성에서 결정됩니다.\nλc = √(Fy / Fcre)\nCondition Equation\nλc ≤ 1.5 Fn = (0.658λc²) Fy\nλc > 1.5 Fn = (0.877/λc²) Fy\nPne = Ag × Fn = 10.16 kips\n단계 3: 국부좌굴 — §E3.2\nλl = √(Pne/Pcrl)\nCondition Equation\nλl ≤ 0.776 Pnl = Pne\nλl > 0.776 Pnl = [1-0.15(Pcrl/Pne)0.4](Pcrl/Pne)0.4 Pne\nPnl = 10.16 kips\n단계 4: 뒤틀림좌굴 — §E4\nλd = √(Py/Pcrd)\nCondition Equation\nλd ≤ 0.561 Pnd = Py\nλd > 0.561 Pnd = [1-0.25(Pcrd/Py)0.6](Pcrd/Py)0.6 Py\nPnd = 32.67 kips\n단계 5: 공칭강도 & 설계강도\nPn = min(Pne,Pnl,Pnd) = min(10.16,10.16,32.67) = 10.16 kips\n지배 모드: Global Buckling (flexural-torsional)\nφPn = 0.85 × 10.16 = 8.64 kips\n계산 단계 요약\n# 단계 수식 결과 단위\n1 Yield Load (Py) Py = Ag×Fy = 0.7905 in²×42.79 ksi = 33.82 kips 33.82 kips\n2 Global Buckling (Pne) Fcre = 14.65 ksi, λc = 1.709, Fn = 12.85 ksi → Pne = 10.16 kips 10.16 kips\n3 Local Buckling (Pnl) Pcrl = 65.60 kips (FSM), λl = √(Pne/Pcrl) = √(10.16 kips/65.60 kips) = 0.394 ≤ 0.776 → Pnl = 10.16 kips 10.16 kips\n4 Distortional Buckling (Pnd) Pcrd = 76.39 kips (FSM), λd = √(Py/Pcrd) = √(33.82 kips/76.39 kips) = 0.665 > 0.561 → Pnd = 32.67 kips 32.67 kips\n5 Nominal Strength (Pn) [지배] Pn = min(Pne=10.16 kips, Pnl=10.16 kips, Pnd=32.67 kips) = 10.16 kips 10.16 kips\n6 Design Strength (LRFD) φPn = 0.85 × 10.16 kips = 8.64 kips 8.64 kips\n5. 설계 요약\n본 보고서는 AISI S100-16 직접강도법(DSM)에 의한 압축 부재 (기둥/스터드)의 설계 검토 결과입니다. 설계 방법은 LRFD입니다. 지배 파괴 모드는 Global Buckling (flexural-torsional)입니다.\n항목 값\n설계 기준 AISI S100-16\n해석 방법 직접강도법 (DSM) — 유한스트립법\n부재 유형 압축 부재 (기둥/스터드)\n설계 방법 LRFD\n지배 파괴 모드 Global Buckling (flexural-torsional)\n공칭강도, Pn 10.16 kips\n설계강도, φPn 8.64 kips\n소요/저항 비율 (DCR) 52.1% — OK\n지배 검토 E axial compression\nE axial compression 0.521 — OK\n참조 규준 조항 E2, E3.2, E4\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위 (1)\nCUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+   "value": "StCFSD — 냉간성형강 설계 보고서\n날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) / LRFD / US 단위\n1. 단면\n단면 제원\n항목 값\n단면 유형 Lipped C (립부 채널)\nH (높이) — 템플릿 입력 3.9370 in\nB (플랜지 폭) — 템플릿 입력 1.9685 in\nD (립 깊이) — 템플릿 입력 0.7874 in\nt (두께) — 템플릿 입력 0.0906 in\nr (코너 반경) — 템플릿 입력 0.1575 in\n절점 37\n요소 36\n계산된 단면 성질\n성질 기호 값\n총단면적 A 0.7905 in²\n강축 단면2차모멘트 Ixx 1.8935 in⁴\n약축 단면2차모멘트 Izz 0.4439 in⁴\n단면상승모멘트 Ixz 0.0000 in⁴\n강축 단면계수 Sx 0.9619 in³\n약축 단면계수 Sz 0.3585 in³\n강축 소성단면계수 Zx 1.1344 in³\n약축 소성단면계수 Zz 0.5183 in³\n강축 회전반경 rx 1.5477 in\n약축 회전반경 rz 0.7494 in\n도심 x xcg 0.6849 in\n도심 z zcg 1.9232 in\n주축 각도 θp 0.0 °\n주축 단면2차모멘트 1 I11 1.8935 in⁴\n주축 단면2차모멘트 2 I22 0.4439 in⁴\n2. 탄성 좌굴 해석\n좌굴 곡선 (하중계수 vs. 반파장)\n1\n10\n100\n1000\nPcrl=1.939 @ L=3.0888 in\nPcrd=2.258 @ L=16.7683 in\nPcre=0.004 @ L=1000.0000 in\n반파장 (in)\n하중계수\nDSM 설계값 (좌굴 곡선에서 추출)\n성질 값 반파장 하중계수\n압축\nPy (항복) 33.82 kips\nPcrl (국부) 65.60 kips 3.0888 in 1.9394\nPcrd (뒤틀림) 76.39 kips 16.7683 in 2.2584\nPcre (전체) 0.13 kips 1000.0000 in 0.0038\n휨\nMy (항복) —\nMcrl (국부) —\nMcrd (뒤틀림) —\nMcre (전체) —\n서명곡선의 극소 반파장 하중계수\n극소 1 3.0888 in 1.9394\n극소 2 16.7683 in 2.2584\n2개 극소(엔진이 찾음)\n3. 설계 입력\n재료\n항목 값\n강종 SGC400 (295/400 MPa)\n항복강도 Fy (설계) 42.79 ksi\n인장강도 Fu (설계) 58.02 ksi\n탄성계수 E (모델) 29500 ksi\n포아송비 ν (모델) 0.300\n전단탄성계수 G (모델) 11300 ksi\n부재 구성\n항목 값\n부재 적용 일반 기둥 (압축)\n설계 방법 LRFD\n4. 설계 계산 — 압축 (Chapter E) (엔진 검토 항목)\n항복 및 전체 좌굴 E2 · Eq. E2-1, E2-2, E2-3, E2-4, E2.1-1, E2.2-1, E2.2-3, E2.2-5 통과 지배 — 비 최대\nmember.compression.global · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 4.50 kips\n입력 Pu\nPne = 10.16 kips φc = 0.85 φcPne = 8.64 kips 0.521\n# 식 입력 결과\n1 σex = π² E / (KxLx / rx)² (Eq. E2.2-6) E = 29500.00 ksi [기준 ]\nKxLx = 98.4252 in [입력 KxLx]\nrx = 1.5477 in [단면 rx] σex = 71.99 ksi\n2 σey = π² E / (KyLy / ry)² (Eq. E2.1-1) E = 29500.00 ksi [기준 ]\nKyLy = 98.4252 in [입력 KyLy]\nry = 0.7494 in [단면 ry] σey = 16.88 ksi\n3 ro = (rx² + ry² + xo²)^0.5 (Eq. E2.2-4) rx = 1.5477 in [단면 rx]\nry = 0.7494 in [단면 ry]\nxo = 1.7078 in [단면 Xs-xcg] ro = 2.4235 in\n4 σt = [G J + π² E Cw / (KtLt)²] / (A ro²) (Eq. E2.2-5) G = 11300.00 ksi [기준 ]\nJ = 0.002161 in⁴ [단면 J]\nE = 29500.00 ksi [기준 ]\nCw = 1.7387 in⁶ [단면 Cw]\nKtLt = 98.4252 in [입력 KtLt]\nA = 0.7905 in² [단면 A]\nro = 2.4235 in [단계 3] σt = 16.51 ksi\n5 β = 1 − (xo / ro)² (Eq. E2.2-3) xo = 1.7078 in [단면 xo]\nro = 2.4235 in [단계 3] β = 0.503\n6 Fcre,ft = [(σex + σt) − ((σex + σt)² − 4 β σex σt)^0.5] / (2 β) (Eq. E2.2-1) σex = 71.99 ksi [단계 1]\nσt = 16.51 ksi [단계 4]\nβ = 0.503 [단계 5] Fcre,ft = 14.65 ksi\n7 Fcre = min(σey, Fcre,ft) σey = 16.88 ksi [단계 2]\nFcre,ft = 14.65 ksi [단계 6] Fcre = 14.65 ksi\n8 λc = (Fy / Fcre)^0.5 (Eq. E2-4) Fy = 42.79 ksi [재료 Fy]\nFcre = 14.65 ksi [단계 7] λc = 1.709\n9 λc ≤ 1.5 → 거짓 → Eq. E2-3 λc = 1.709 [단계 8]\n10 Fn = (0.877 / λc²) Fy (Eq. E2-3) λc = 1.709 [단계 8]\nFy = 42.79 ksi [재료 Fy] Fn = 12.85 ksi\n11 Pne = Ag Fn (Eq. E2-1) A = 0.7905 in² [단면 A]\nFn = 12.85 ksi [단계 10] Pne = 10.16 kips\n12 φcPne = φc Pne Pne = 10.16 kips [단계 11]\nφc = 0.850 [기준 ] φcPne = 8.64 kips\n13 Pu / φcPne ≤ 1 Pu = 4.50 kips [입력 Pu]\nφcPne = 8.64 kips [단계 12] ratio = 0.521\n국부 좌굴 E3.2.1 · Eq. E3.2.1-1, E3.2.1-2, E3.2.1-3 통과\nmember.compression.local · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 4.50 kips\n입력 Pu\nPnℓ = 10.16 kips φc = 0.85 φcPnℓ = 8.64 kips 0.521\n# 식 입력 결과\n1 Pcrl (elastic local buckling load) Pcrl = 65.60 kips [좌굴 해석 fsm_minimum FSM] Pcrl = 65.60 kips\n2 λℓ = (Pne / Pcrl)^0.5 (Eq. E3.2.1-3) Pne = 10.16 kips [항목 member.compression.global]\nPcrl = 65.60 kips [단계 1] λℓ = 0.394\n3 λℓ ≤ 0.776 → 참 → Eq. E3.2.1-1 λℓ = 0.394 [단계 2]\n4 Pnℓ = Pne (Eq. E3.2.1-1) Pne = 10.16 kips [항목 member.compression.global]\nPcrl = 65.60 kips [단계 1] Pnℓ = 10.16 kips\n5 φcPnℓ = φc Pnℓ Pnℓ = 10.16 kips [단계 4]\nφc = 0.850 [기준 ] φcPnℓ = 8.64 kips\n6 Pu / φcPnℓ ≤ 1 Pu = 4.50 kips [입력 Pu]\nφcPnℓ = 8.64 kips [단계 5] ratio = 0.521\n뒤틀림 좌굴 E4.1 · Eq. E4.1-1, E4.1-2, E4.1-3, E4.1-4 통과\nmember.compression.distortional · LRFD\n소요 공칭강도 계수 설계강도 비\nPu = 4.50 kips\n입력 Pu\nPnd = 32.67 kips φc = 0.85 φcPnd = 27.77 kips 0.162\n# 식 입력 결과\n1 Py = Ag Fy (Eq. E4.1-4) A = 0.7905 in² [단면 A]\nFy = 42.79 ksi [재료 Fy] Py = 33.82 kips\n2 Pcrd (elastic distortional buckling load) Pcrd = 76.39 kips [좌굴 해석 fsm_minimum FSM] Pcrd = 76.39 kips\n3 λd = (Py / Pcrd)^0.5 (Eq. E4.1-3) Py = 33.82 kips [단계 1]\nPcrd = 76.39 kips [단계 2] λd = 0.665\n4 λd ≤ 0.561 → 거짓 → Eq. E4.1-2 λd = 0.665 [단계 3]\n5 Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py (Eq. E4.1-2) Py = 33.82 kips [단계 1]\nPcrd = 76.39 kips [단계 2] Pnd = 32.67 kips\n6 φcPnd = φc Pnd Pnd = 32.67 kips [단계 5]\nφc = 0.850 [기준 ] φcPnd = 27.77 kips\n7 Pu / φcPnd ≤ 1 Pu = 4.50 kips [입력 Pu]\nφcPnd = 27.77 kips [단계 6] ratio = 0.162\n적용 한계 (표 B4.1-1) B4.1 · Eq. Table B4.1-1 통과\nmember.applicability.b4 · LRFD\n소요 공칭강도 계수 설계강도 비\n— — — — —\n# 식 입력 결과\n1 web w/t w = 3.4409 in [단면 w]\nt = 0.0906 in [단면 t] w/t = 38.000\n2 w/t ≤ 500 (stiffened element in compression (web)) → 참 → Eq. Table B4.1-1 w/t = 38.000 [단계 1]\nlimit = 500.000 [기준 B4.1-1 stiffened element in compression (web)]\n3 flange b/t b = 1.4724 in [단면 b]\nt = 0.0906 in [단면 t] b/t = 16.261\n4 b/t ≤ 160 (edge-stiffened element) → 참 → Eq. Table B4.1-1 b/t = 16.261 [단계 3]\nlimit = 160.000 [기준 B4.1-1 edge-stiffened element]\n5 lip d/t d = 0.5394 in [단면 d]\nt = 0.0906 in [단면 t] d/t = 5.957\n6 d/t ≤ 60 (unstiffened element (lip)) → 참 → Eq. Table B4.1-1 d/t = 5.957 [단계 5]\nlimit = 60.000 [기준 B4.1-1 unstiffened element (lip)]\n7 corner R/t R = 0.1575 in [단면 R]\nt = 0.0906 in [단면 t] R/t = 1.739\n8 R/t ≤ 20 (inside bend radius) → 참 → Eq. Table B4.1-1 R/t = 1.739 [단계 7]\nlimit = 20.000 [기준 B4.1-1 inside bend radius]\n9 simple edge stiffener do/bo do = 0.7874 in [단면 do]\nbo = 1.9685 in [단면 bo] do/bo = 0.400\n10 do/bo ≤ 0.7 (simple lip edge stiffener) → 참 → Eq. Table B4.1-1 do/bo = 0.400 [단계 9]\nlimit = 0.700 [기준 B4.1-1 simple lip edge stiffener]\n11 Fy < Fy,limit (yield stress limit (§B4.1)) → 참 → Eq. Table B4.1-1 Fy = 42.79 ksi [재료 Fy]\nFy,limit = 95.00 ksi [기준 B4.1-1 yield stress limit (§B4.1)]\n5. 설계 요약\n항목 값\n설계 기준 AISI S100-16\n부재 유형 compression\n설계 방법 LRFD\n종합 판정 (엔진) 통과\n이용률 (엔진) 0.521\n지배 파괴 모드 (엔진) Global Buckling (flexural-torsional)\n지배 검토 (엔진) E axial compression\n참조 조항 E2, E3.2, E4\n무리마다 지배 항목 (엔진 design_checks)\n자리 항목 조항 소요 설계강도 비 판정\n항복 및 전체 좌굴 E2 4.50 kips 8.64 kips 0.521 통과\n검토하지 않은 항목 — 해당하면 별도 검토\nholes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위\n구멍(웹 천공) 감소(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6)는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다. 천공 스터드 등은 별도 검토하십시오.\nStCFSD 냉간성형강 단면 설계 — AISI S100-16",
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list.",
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "US.report.shape",
    "expect": "pin",
    "value": {
     "heads": [
-     "H1 CUFSM — 냉간성형강 설계 보고서",
+     "H1 StCFSD — 냉간성형강 설계 보고서",
      "H2 1. 단면",
      "H3 단면 제원",
      "H3 계산된 단면 성질",
@@ -734,72 +822,87 @@
      "H2 3. 설계 입력",
      "H3 재료",
      "H3 부재 구성",
-     "H3 설계 하중",
-     "H3 데크 정보",
-     "H2 4. 설계 계산 — 압축 (Chapter E)",
-     "H3 단계 1: 항복 하중, Py",
-     "H3 단계 2: 전체좌굴 — §E2",
-     "H3 단계 3: 국부좌굴 — §E3.2",
-     "H3 단계 4: 뒤틀림좌굴 — §E4",
-     "H3 단계 5: 공칭강도 & 설계강도",
-     "H3 계산 단계 요약",
-     "H2 5. 설계 요약"
+     "H2 4. 설계 계산 — 압축 (Chapter E) (엔진 검토 항목)",
+     "H2 5. 설계 요약",
+     "H3 무리마다 지배 항목 (엔진 design_checks)"
     ],
     "svgs": 2,
-    "tables": 13,
-    "htmlSha": "9820426570461659",
-    "htmlLength": 21626,
+    "tables": 17,
+    "htmlSha": "23d3aa93899d7be3",
+    "htmlLength": 24346,
     "printShown": true
-   }
+   },
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list.",
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "US.pdf",
    "expect": "pin",
-   "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)",
-   "accepted_from": "pin",
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list.",
    "value": {
-    "pages": 5,
-    "bytesKB": 573,
+    "pages": 6,
+    "bytesKB": 546,
     "text": [
-     "CUFSM — 냉간성형강 설계 보고서 날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) 1. 단면 단면 제원 항목 값 단위 단면 유형 립 C 형강 H ( 높이 ) 3.93700787402 in B ( 플랜지 폭 ) 1.96850393701 in D ( 립 깊이 ) 0.787401574803 in t ( 두께 ) 0.0905511811024 in r ( 코너 반경 ) 0.157480314961 in 절점 / 요소 37 / 36 계산된 단면 성질 성질 기호 값 단위 총단면적 A 0.7905 in² 강축 단면 2 차모멘트 I xx 1.8935 in⁴ 약축 단면 2 차모멘트 I zz 0.4439 in⁴ 단면상승모멘트 I xz 0.0000 in⁴ 강축 단면계수 S x 0.9619 in³ 약축 단면계수 S z 0.3585 in³ 강축 소성단면계수 Z x 1.1344 in³ 약축 소성단면계수 Z z 0.5183 in³ 강축 회전반경 r x 1.5477 in 약축 회전반경 r z 0.7494 in 도심 x x cg 0.6849 in 도심 z z cg 1.9232 in 주축 각도 θ p 0.0 ° 주축 단면 2 차모멘트 1 I 11 1.8935 in⁴ 주축 단면 2 차모멘트 2 I 22 0.4439 in⁴",
-     "2. 탄성 좌굴 해석 좌굴 곡선 ( 하중계수 vs. 반파장 ) 1 10 100 1000 1.00 2.00 3.00 4.00 5.00 6.00 Pcrl=1.939 @ L=3.0888 Pcrd=2.258 @ L=16.7683 Pcr 반파장 (in) 하중계수 DSM 설계값 ( 좌굴 곡선에서 추출 ) 성질 값 반파장 하중계수 압축 (kips) P y ( 항복 ) 33.82 kips P crl ( 국부 ) 65.60 kips 3.0888 in 1.9394 P crd ( 뒤틀림 ) 76.39 kips 16.7683 in 2.2584 P cre ( 전체 ) 0.13 kips 1000.0000 in 0.0038 휨 (kip-in) M y ( 항복 ) — kip-in M crl ( 국부 ) — kip-in — in — M crd ( 뒤틀림 ) — kip-in — in — M cre ( 전체 ) — kip-in — in — 2 개 최솟값 검출 . 최솟값 1: L=3.0888 in, LF=1.9394. 최솟값 2: L=16.7683 in, LF=2.2584. 3. 설계 입력 재료 항목 값 단위 강종 SGC400 (295/400 MPa) 항복강도 , F y 42.7861326304 ksi 인장강도 , F u 58.0150950921 ksi 탄성계수 , E 29500.0 ksi 포아송비 , ν 0.30 부재 구성",
-     "항목 값 부재 적용 일반 기둥 ( 압축 ) 스팬 유형 3 경간 연속보 스팬 길이 16.4041994751, 16.4041994751, 16.4041994751 ft 분담폭 ( 간격 ) 3.28083989501 ft 설계 방법 LRFD 설계 하중 하중 유형 psf plf (×3.28083989501 ft) 설명 D 6.26563026995 psf 21 plf 고정하중 ( 자중 + 부가하중 ) Lr 20.8854342332 psf 69 plf 지붕 활하중 S 10.4427171166 psf 34 plf 적설하중 Wu ( 양력 ) 20.8854342332 psf 69 plf 풍양력 하중 ( 부압 ) 데크 정보 항목 값 데크 유형 없음 패널 두께 , t panel 0.0196850393701 in 체결구 간격 11.811023622 in 4. 설계 계산 — 압축 (Chapter E) 단계 1: 항복 하중 , P y P y = A g × F y = 33.82 kips 단계 2: 전체좌굴 — §E2 휨 , 비틀림 또는 휨 - 비틀림 좌굴응력 F cre 는 KL/r, J, C w 및 단면 대칭성에서 결정됩니다 . λ c = √(F y / F cre ) Condition Equation λ c ≤ 1.5 F n = (0.658 λ c ² ) F y λ c > 1.5 F n = (0.877/λ c ²) F y P ne = A g × F n = 10.16 kips 단계 3: 국부좌굴 — §E3.2 λ l = √(P ne /P crl ) Condition Equation",
-     "λ l ≤ 0.776 P nl = P ne λ l > 0.776 P nl = [1-0.15(P crl /P ne ) 0.4 ](P crl /P ne ) 0.4 P ne P nl = 10.16 kips 단계 4: 뒤틀림좌굴 — §E4 λ d = √(P y /P crd ) Condition Equation λ d ≤ 0.561 P nd = P y λ d > 0.561 P nd = [1-0.25(P crd /P y ) 0.6 ](P crd /P y ) 0.6 P y P nd = 32.67 kips 단계 5: 공칭강도 & 설계강도 P n = min(P ne ,P nl ,P nd ) = min(10.16,10.16,32.67) = 10.16 kips 지배 모드 : Global Buckling (flexural-torsional) φP n = 0.85 × 10.16 = 8.64 kips 계산 단계 요약 # 단계 수식 결과 단위 1 Yield Load (Py) Py = Ag×Fy = 0.7905 in²×42.79 ksi = 33.82 kips 33.82 kips 2 Global Buckling (Pne) Fcre = 14.65 ksi, λc = 1.709, Fn = 12.85 ksi → Pne = 10.16 kips 10.16 kips 3 Local Buckling (Pnl) Pcrl = 65.60 kips (FSM), λl = √(Pne/Pcrl) = √(10.16 kips/65.60 kips) = 0.394 ≤ 0.776 → Pnl = 10.16 kips 10.16 kips 4 Distortional Buckling (Pnd) Pcrd = 76.39 kips (FSM), λd = √(Py/Pcrd) = √(33.82 kips/76.39 kips) = 0.665 > 0.561 → Pnd = 32.67 kips 32.67 kips 5 Nominal Strength (Pn) [ 지 배 ] Pn = min(Pne=10.16 kips, Pnl=10.16 kips, Pnd=32.67 kips) = 10.16 kips 10.16 kips 6 Design Strength (LRFD) φPn = 0.85 × 10.16 kips = 8.64 kips 8.64 kips 5. 설계 요약 본 보고서는 AISI S100-16 직접강도법 (DSM) 에 의한 압축 부재 ( 기둥 / 스터드 ) 의 설계 검토 결과입니다 . 설계 방법은 LRFD 입니다 . 지배 파괴 모드는 Global Buckling (flexural-torsional) 입니다 . 항목 값 설계 기준 AISI S100-16 해석 방법 직접강도법 (DSM) — 유한스트립법 부재 유형 압축 부재 ( 기둥 / 스터드 )",
-     "설계 방법 LRFD 지배 파괴 모드 Global Buckling (flexural-torsional) 공칭강도 , P n 10.16 kips 설계강도 , φP n 8.64 kips 소요 / 저항 비율 (DCR) 52.1% — OK 지배 검토 E axial compression E axial compression 0.521 — OK 참조 규준 조항 E2, E3.2, E4 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
+     "StCFSD — 냉간성형강 설계 보고서 날짜: <DATE> AISI S100-16 / 직접강도법 (DSM) / LRFD / US 단위 1. 단면 단면 제원 항목 값 단면 유형 Lipped C ( 립부 채널 ) H ( 높이 ) — 템플릿 입력 3.9370 in B ( 플랜지 폭 ) — 템플릿 입력 1.9685 in D ( 립 깊이 ) — 템플릿 입력 0.7874 in t ( 두께 ) — 템플릿 입력 0.0906 in r ( 코너 반경 ) — 템플릿 입력 0.1575 in 절점 37 요소 36 계산된 단면 성질 성질 기호 값 총단면적 A 0.7905 in² 강축 단면 2 차모멘트 Ixx 1.8935 in⁴ 약축 단면 2 차모멘트 Izz 0.4439 in⁴ 단면상승모멘트 Ixz 0.0000 in⁴ 강축 단면계수 Sx 0.9619 in³ 약축 단면계수 Sz 0.3585 in³ 강축 소성단면계수 Zx 1.1344 in³ 약축 소성단면계수 Zz 0.5183 in³ 강축 회전반경 rx 1.5477 in 약축 회전반경 rz 0.7494 in",
+     "도심 x xcg 0.6849 in 도심 z zcg 1.9232 in 주축 각도 θp 0.0 ° 주축 단면 2 차모멘트 1 I11 1.8935 in⁴ 주축 단면 2 차모멘트 2 I22 0.4439 in⁴ 2. 탄성 좌굴 해석 좌굴 곡선 ( 하중계수 vs. 반파장 ) 1 10 100 1000 Pcrl=1.939 @ L=3.0888 in Pcrd=2.258 @ L=16.7683 in Pcr 반파장 (in) 하중계수 DSM 설계값 ( 좌굴 곡선에서 추출 ) 성질 값 반파장 하중계수 압축 Py ( 항복 ) 33.82 kips Pcrl ( 국부 ) 65.60 kips 3.0888 in 1.9394 Pcrd ( 뒤틀림 ) 76.39 kips 16.7683 in 2.2584 Pcre ( 전체 ) 0.13 kips 1000.0000 in 0.0038 휨 My ( 항복 ) — Mcrl ( 국부 ) — Mcrd ( 뒤틀림 ) — Mcre ( 전체 ) — 서명곡선의 극소 반파장 하중계수 극소 1 3.0888 in 1.9394 극소 2 16.7683 in 2.2584 2 개 극소 ( 엔진이 찾음 ) 3. 설계 입력",
+     "재료 항목 값 강종 SGC400 (295/400 MPa) 항복강도 Fy ( 설계 ) 42.79 ksi 인장강도 Fu ( 설계 ) 58.02 ksi 탄성계수 E ( 모델 ) 29500 ksi 포아송비 ν ( 모델 ) 0.300 전단탄성계수 G ( 모델 ) 11300 ksi 부재 구성 항목 값 부재 적용 일반 기둥 ( 압축 ) 설계 방법 LRFD 4. 설계 계산 — 압축 (Chapter E) ( 엔진 검토 항목 ) 항복 및 전체 좌굴 E2 · Eq. E2-1, E2-2, E2-3, E2-4, E2.1-1, E2.2-1, E2.2-3, E2.2-5 통과 지배 — 비 최대 member.compression.global · LRFD 소요 공칭강도 계수 설계강도 비 Pu = 4.50 kips 입력 Pu Pne = 10.16 kips φc = 0.85 φcPne = 8.64 kips 0.521 # 식 입력 결과 1 σex = π² E / (KxLx / rx)² (Eq. E2.2-6) E = 29500.00 ksi [ 기준 ] KxLx = 98.4252 in [ 입력 KxLx] rx = 1.5477 in [ 단면 rx] σex = 71.99 ksi 2 σey = π² E / (KyLy / ry)² (Eq. E2.1-1) E = 29500.00 ksi [ 기준 ] KyLy = 98.4252 in [ 입력 KyLy] ry = 0.7494 in [ 단면 ry] σey = 16.88 ksi 3 ro = (rx² + ry² + xo²)^0.5 (Eq. E2.2-4) rx = 1.5477 in [ 단면 rx] ry = 0.7494 in [ 단면 ry] xo = 1.7078 in [ 단면 Xs-xcg] ro = 2.4235 in 4 σt = [G J + π² E Cw / (KtLt)²] / (A ro²) (Eq. E2.2-5) G = 11300.00 ksi [ 기준 ] J = 0.002161 in⁴ [ 단면 J] E = 29500.00 ksi [ 기준 ] Cw = 1.7387 in⁶ [ 단면 Cw] KtLt = 98.4252 in [ 입력 KtLt] A = 0.7905 in² [ 단면 A] ro = 2.4235 in [ 단계 3] σt = 16.51 ksi 5 β = 1 − (xo / ro)² (Eq. E2.2-3) xo = 1.7078 in [ 단면 xo] ro = 2.4235 in [ 단계 3] β = 0.503 6 Fcre,ft = [(σex + σt) − ((σex + σt)² − 4 β σex σt)^0.5] / (2 β) (Eq. E2.2-1) σex = 71.99 ksi [ 단계 1] σt = 16.51 ksi [ 단계 4] β = 0.503 [ 단계 5] Fcre,ft = 14.65 ksi",
+     "7 Fcre = min(σey, Fcre,ft) σey = 16.88 ksi [ 단계 2] Fcre,ft = 14.65 ksi [ 단계 6] Fcre = 14.65 ksi 8 λc = (Fy / Fcre)^0.5 (Eq. E2-4) Fy = 42.79 ksi [ 재료 Fy] Fcre = 14.65 ksi [ 단계 7] λc = 1.709 9 λc ≤ 1.5 → 거짓 → Eq. E2-3 λc = 1.709 [ 단계 8] 10 Fn = (0.877 / λc²) Fy (Eq. E2-3) λc = 1.709 [ 단계 8] Fy = 42.79 ksi [ 재료 Fy] Fn = 12.85 ksi 11 Pne = Ag Fn (Eq. E2-1) A = 0.7905 in² [ 단면 A] Fn = 12.85 ksi [ 단계 10] Pne = 10.16 kips 12 φcPne = φc Pne Pne = 10.16 kips [ 단계 11] φc = 0.850 [ 기준 ] φcPne = 8.64 kips 13 Pu / φcPne ≤ 1 Pu = 4.50 kips [ 입력 Pu] φcPne = 8.64 kips [ 단계 12] ratio = 0.521 국부 좌굴 E3.2.1 · Eq. E3.2.1-1, E3.2.1-2, E3.2.1-3 통과 member.compression.local · LRFD 소요 공칭강도 계수 설계강도 비 Pu = 4.50 kips 입력 Pu Pnℓ = 10.16 kips φc = 0.85 φcPnℓ = 8.64 kips 0.521 # 식 입력 결과 1 Pcrl (elastic local buckling load) Pcrl = 65.60 kips [ 좌굴 해석 fsm_minimum FSM] Pcrl = 65.60 kips 2 λℓ = (Pne / Pcrl)^0.5 (Eq. E3.2.1-3) Pne = 10.16 kips [ 항목 member.compression.global] Pcrl = 65.60 kips [ 단계 1] λℓ = 0.394 3 λℓ ≤ 0.776 → 참 → Eq. E3.2.1-1 λℓ = 0.394 [ 단계 2] 4 Pnℓ = Pne (Eq. E3.2.1-1) Pne = 10.16 kips [ 항목 member.compression.global] Pcrl = 65.60 kips [ 단계 1] Pnℓ = 10.16 kips 5 φcPnℓ = φc Pnℓ Pnℓ = 10.16 kips [ 단계 4] φc = 0.850 [ 기준 ] φcPnℓ = 8.64 kips 6 Pu / φcPnℓ ≤ 1 Pu = 4.50 kips [ 입력 Pu] φcPnℓ = 8.64 kips [ 단계 5] ratio = 0.521 뒤틀림 좌굴 E4.1 · Eq. E4.1-1, E4.1-2, E4.1-3, E4.1-4 통과 member.compression.distortional · LRFD 소요 공칭강도 계수 설계강도 비 Pu = 4.50 kips 입력 Pu Pnd = 32.67 kips φc = 0.85 φcPnd = 27.77 kips 0.162 # 식 입력 결과 1 Py = Ag Fy (Eq. E4.1-4) A = 0.7905 in² [ 단면 A] Fy = 42.79 ksi [ 재료 Fy] Py = 33.82 kips 2 Pcrd (elastic distortional buckling load) Pcrd = 76.39 kips [ 좌굴 해석 fsm_minimum FSM] Pcrd = 76.39 kips 3 λd = (Py / Pcrd)^0.5 (Eq. E4.1-3) Py = 33.82 kips [ 단계 1] Pcrd = 76.39 kips [ 단계 2] λd = 0.665 4 λd ≤ 0.561 → 거짓 → Eq. E4.1-2 λd = 0.665 [ 단계 3]",
+     "5 Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py (Eq. E4.1-2) Py = 33.82 kips [ 단계 1] Pcrd = 76.39 kips [ 단계 2] Pnd = 32.67 kips 6 φcPnd = φc Pnd Pnd = 32.67 kips [ 단계 5] φc = 0.850 [ 기준 ] φcPnd = 27.77 kips 7 Pu / φcPnd ≤ 1 Pu = 4.50 kips [ 입력 Pu] φcPnd = 27.77 kips [ 단계 6] ratio = 0.162 적용 한계 ( 표 B4.1-1) B4.1 · Eq. Table B4.1-1 통과 member.applicability.b4 · LRFD 소요 공칭강도 계수 설계강도 비 — — — — — # 식 입력 결과 1 web w/t w = 3.4409 in [ 단면 w] t = 0.0906 in [ 단면 t] w/t = 38.000 2 w/t ≤ 500 (stiffened element in compression (web)) → 참 → Eq. Table B4.1-1 w/t = 38.000 [ 단계 1] limit = 500.000 [ 기준 B4.1-1 stiffened element in compression (web)] 3 flange b/t b = 1.4724 in [ 단면 b] t = 0.0906 in [ 단면 t] b/t = 16.261 4 b/t ≤ 160 (edge-stiffened element) → 참 → Eq. Table B4.1-1 b/t = 16.261 [ 단계 3] limit = 160.000 [ 기준 B4.1-1 edge-stiffened element] 5 lip d/t d = 0.5394 in [ 단면 d] t = 0.0906 in [ 단면 t] d/t = 5.957 6 d/t ≤ 60 (unstiffened element (lip)) → 참 → Eq. Table B4.1-1 d/t = 5.957 [ 단계 5] limit = 60.000 [ 기준 B4.1-1 unstiffened element (lip)] 7 corner R/t R = 0.1575 in [ 단면 R] t = 0.0906 in [ 단면 t] R/t = 1.739 8 R/t ≤ 20 (inside bend radius) → 참 → Eq. Table B4.1-1 R/t = 1.739 [ 단계 7] limit = 20.000 [ 기준 B4.1-1 inside bend radius] 9 simple edge stiffener do/bo do = 0.7874 in [ 단면 do] bo = 1.9685 in [ 단면 bo] do/bo = 0.400 10 do/bo ≤ 0.7 (simple lip edge stiffener) → 참 → Eq. Table B4.1-1 do/bo = 0.400 [ 단계 9] limit = 0.700 [ 기준 B4.1-1 simple lip edge stiffener] 11 Fy < Fy,limit (yield stress limit (§B4.1)) → 참 → Eq. Table B4.1-1 Fy = 42.79 ksi [ 재료 Fy] Fy,limit = 95.00 ksi [ 기준 B4.1-1 yield stress limit (§B4.1)] 5. 설계 요약 항목 값 설계 기준 AISI S100-16 부재 유형 compression 설계 방법 LRFD",
+     "종합 판정 ( 엔진 ) 통과 이용률 ( 엔진 ) 0.521 지배 파괴 모드 ( 엔진 ) Global Buckling (flexural-torsional) 지배 검토 ( 엔진 ) E axial compression 참조 조항 E2, E3.2, E4 무리마다 지배 항목 ( 엔진 design_checks) 자리 항목 조항 소요 설계강도 비 판정 항복 및 전체 좌굴 E2 4.50 kips 8.64 kips 0.521 통과 검토하지 않은 항목 — 해당하면 별도 검토 holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) 적용 범위 구멍 ( 웹 천공 ) 감소 (§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2, §G3/§G6) 는 구현되지 않았습니다 — 구멍 없는 부재로 계산했습니다 . 천공 스터드 등은 별도 검토하 십시오 . StCFSD 냉간성형강 단면 설계 — AISI S100-16"
     ],
-    "compact": "938e8e267ea23740",
-    "printedHtmlSha": "caffe751f66d46d1"
-   }
+    "compact": "7b028dc9b5e5e38b",
+    "printedHtmlSha": "d59c6e34a2972f9b"
+   },
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)"
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "US.findings",
-   "expect": "defect",
-   "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report",
+   "expect": "pin",
+   "reason": "K3-6 / K3-7: the defects pinned here are fixed (see the item reasons in k3_review_defects.js); what remains is pinned as the new behaviour. K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
    "value": {
     "alwaysSame": [
      "pass: 경계조건 (BC) = S-S",
-     "pass: 풍하중 (W, 양력) = 20.8854342332 psf ↑",
-     "pass: 저항계수 (φ) = φc = 0.85",
-     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=42.7861326304, 설계 Fy=42.7861326304 ksi",
-     "pass: 해석 최신성 = 해석 결과 존재"
-    ],
-    "reportPageValues": [
-     "탄성계수, E 29500.0 ksi",
-     "포아송비, ν 0.30",
-     "분담폭 (간격) 3.28083989501 ft",
-     "패널 두께, tpanel 0.0196850393701 in",
-     "체결구 간격 11.811023622 in"
+     "pass: Fy 일관성 (해석 vs 설계) = 해석 기준응력 42.8, 설계 Fy 42.8 ksi",
+     "pass: 해석 최신성 = 현재 모델의 해석"
     ]
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "defect",
+      "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report"
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "column.mcp",
    "expect": "pin",
-   "reason": "engine 07caad7 / 17ad004: the same change appears when these flows run on HEAD without the V6b-01 patch (attributed by running both) — engine output in the report (column / beam: one byte; purlin: report HTML hash, MCP summary size); not from this patch.",
+   "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 997,
+     "bytes": 733,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -818,7 +921,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 997,
+     "bytes": 733,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -837,7 +940,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 7058,
+     "bytes": 7234,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -854,7 +957,7 @@
     },
     "report.summary": {
      "isError": false,
-     "bytes": 893,
+     "bytes": 917,
      "keys": [
       "case_rev",
       "checks",
@@ -877,7 +980,7 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 812,
+     "bytes": 836,
      "keys": [
       "case_rev",
       "checks",
@@ -900,7 +1003,7 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 24412,
+     "bytes": 27472,
      "keys": [
       "case_rev",
       "checks",
@@ -930,25 +1033,42 @@
       "reason": "K3-3 · K3-5: 새 응답(검증 항목 · 보고서 파일). 시험은 generate_report 의 SI · full 을 HTML 만으로(PDF 인쇄는 흐름마다 한 번 — 부하에서 Edge 가 끝나지 않아 MCP 시간 초과가 한 번 났다)"
      },
      "date": "2026-11-23"
+    },
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": "engine 07caad7 / 17ad004: the same change appears when these flows run on HEAD without the V6b-01 patch (attributed by running both) — engine output in the report (column / beam: one byte; purlin: report HTML hash, MCP summary size); not from this patch."
+     },
+     "date": "2026-11-24"
     }
    ]
   },
   {
    "id": "aiReference.findings",
-   "expect": "defect",
-   "reason": "K3-D6 / K3-D8: the analysis ran with the AI reference stress 50 ksi but \"Fy 일관성\" compares only the two mirrored Fy fields (pass); the report prints E = 29500 ksi while the model E is 29000",
+   "expect": "pin",
+   "reason": "K3-6 / K3-7: the defects pinned here are fixed (see the item reasons in k3_review_defects.js); what remains is pinned as the new behaviour. K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
    "value": {
     "fyItem": [
-     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=42.7861326304, 설계 Fy=42.7861326304 ksi",
-     "pass: 해석 최신성 = 해석 결과 존재"
+     "warn: Fy 일관성 (해석 vs 설계) = 해석 기준응력 50.0, 설계 Fy 42.8 ksi",
+     "pass: 해석 최신성 = 현재 모델의 해석"
     ],
     "hostLoadFy": 50,
     "modelE": 29000,
     "reportE": [
-     "탄성계수, E 29500.0 ksi",
-     "포아송비, ν 0.30"
+     "포아송비 ν (모델) 0.300"
     ]
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "defect",
+      "reason": "K3-D6 / K3-D8: the analysis ran with the AI reference stress 50 ksi but \"Fy 일관성\" compares only the two mirrored Fy fields (pass); the report prints E = 29500 ksi while the model E is 29000"
+     },
+     "date": "2026-11-24"
+    }
+   ]
   }
  ]
 }

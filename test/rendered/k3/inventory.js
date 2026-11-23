@@ -136,31 +136,31 @@ function numbers(text) {
 // hc: 박힌 공학 한계(화면 코드의 상수)
 const NOTE = {
   '단면 정의': { eng: 'page', to: 'host', checks: 'the model has nodes' },
-  '두께 (t)': { eng: 'page', to: 'host', checks: 't from the template field within a "usual CFS" band', hc: ['0.018 in ≤ t ≤ 0.5 in (warn outside)'] },
-  '웹 w/t 비': { eng: 'contra', ref: 'member.applicability.b4 / check_dsm_limits (web h/t ≤ 300 in bending, w/t ≤ 500 in compression, flat width from the section)', to: 'engine', checks: '(H − 2(t + r))/t from the template fields', hc: ['200 (warn)', '500 (fail)'], defect: 'page ignores the 300 limit for webs in bending that the engine applies; uses out-to-out template dims, not the analysed section' },
-  '플랜지 b/t 비': { eng: 'dup', ref: 'member.applicability.b4 (edge-stiffened b/t ≤ 160)', to: 'engine', checks: '(B − 2(t + r))/t', hc: ['60 (warn)', '160 (fail)'], defect: 'applies the edge-stiffened 160 limit to every section (Z, hat, track, angle …) — the engine picks the row by element type' },
-  '립 d/t 비': { eng: 'dup', ref: 'member.applicability.b4 (lip d/t ≤ 60)', to: 'engine', checks: 'D/t', hc: ['60 (fail)'] },
-  '코너 R/t 비': { eng: 'page', to: 'host', checks: 'r/t', hc: ['10 (warn)', '20 (fail)'], defect: 'labelled "Table B4.1-1" but S100-16 Table B4.1-1 has no R/t row; the engine does not check it' },
-  '항복강도 (Fy)': { eng: 'dup', ref: 'check_dsm_limits Fy row / §A3.1', to: 'engine', checks: 'design Fy field > 0 and ≤ 95 ksi', hc: ['95 ksi (fail)'] },
-  'Fu/Fy 비': { eng: 'dup', ref: 'auto_params.i621_check (o) — §I6.2.1(o) ductility', to: 'host', checks: 'Fu/Fy ≥ 1.08', hc: ['1.08 (warn)'] },
+  '표 B4.1-1 적용 한계 (엔진)': { eng: 'engine', ref: 'member.applicability.b4 (check_dsm_limits)', to: 'host', checks: 'K3-6 (D17): the engine B4.1-1 verdict shown once — pass / fail / not evaluated' },
+  '두께 (t)': { eng: 'page', to: 'host', checks: 't from the template field within a "usual CFS" band', hc: ['THRESHOLDS.t_min 0.018 in', 'THRESHOLDS.t_max 0.5 in (warn outside — program value, no clause)'] },
+  '웹 w/t 비': { eng: 'dup', ref: 'member.applicability.b4 / check_dsm_limits (web h/t ≤ 300 in bending, w/t ≤ 500 in compression)', to: 'host', checks: 'preliminary (H − 2(t + r))/t from the template fields; the engine row above is the verdict', hc: ['THRESHOLDS.web_note_b 250 (warn, Table B4.1-1 note b)', 'THRESHOLDS.web_ht 300 / web_wt 500 (fail, Table B4.1-1)'], defect: 'fixed in K3-6 (D17): the 300 limit in bending (spec and engine) — was 200 / 500 for every member' },
+  '플랜지 b/t 비': { eng: 'dup', ref: 'member.applicability.b4 (edge-stiffened b/t ≤ 160)', to: 'host', checks: 'preliminary (B − 2(t + r))/t', hc: ['THRESHOLDS.flange_bt 160 (fail, Table B4.1-1)'], defect: 'K3-6: the invented 60 warn band removed; the element-type row is the engine row (표 B4.1-1 적용 한계 (엔진))' },
+  '립 d/t 비': { eng: 'dup', ref: 'member.applicability.b4 (lip d/t ≤ 60)', to: 'host', checks: 'preliminary D/t', hc: ['THRESHOLDS.unstiff_dt_note 30 (warn, Table B4.1-1 note b)', 'THRESHOLDS.lip_dt 60 (fail, Table B4.1-1)'] },
+  '코너 R/t 비': { eng: 'dup', ref: 'check_dsm_limits corner R/t ≤ 20', to: 'host', checks: 'r/t', hc: ['THRESHOLDS.corner_rt 20 (fail, Table B4.1-1)'], defect: 'K3-6 correction: S100-16 Table B4.1-1 (DSM column) does have R/t ≤ 20 (≤ 10 for the effective width method) and the engine checks it — the K3 phase-0 note said otherwise and was wrong; the 10 warn band (an EWM row) removed' },
+  '항복강도 (Fy)': { eng: 'dup', ref: 'check_dsm_limits Fy < 95 ksi (strict)', to: 'host', checks: 'design Fy field > 0 and < 95 ksi', hc: ['THRESHOLDS.fy_max 95 ksi (fail at 95 — Table B4.1-1)'], defect: 'fixed in K3-6 (D17): strict < 95 (spec and engine) — was ≤ 95' },
+  'Fu/Fy 비': { eng: 'dup', ref: 'auto_params.i621_check (o) — §I6.2.1(o)', to: 'host', checks: 'Fu/Fy ≥ 1.08', hc: ['THRESHOLDS.fu_fy 1.08 (warn, §I6.2.1(o))'] },
   '인장강도 (Fu)': { eng: 'page', to: 'host', checks: 'Fu > Fy' },
-  '반파장 최솟값': { eng: 'page', to: 'host', checks: 'shortest half-wavelength ≤ 0.8·H (or ≤ 5 in without H)', hc: ['0.8·H', '5 in'], defect: 'criterion text says "≤ widest plate"; note says "0.3–0.5·H"; the rule is 0.8·H — three different numbers' },
-  '반파장 최댓값': { eng: 'page', to: 'host', checks: 'longest half-wavelength ≥ max(Lb, longest span, 120 in); pass at ≥ 1.5×', hc: ['120 in', '1.5×'] },
-  '반파장 개수': { eng: 'page', to: 'host', checks: 'number of lengths ≥ 30', hc: ['30'] },
-  '경계조건 (BC)': { eng: 'always', to: 'host', checks: 'always pass; note if not S-S for a purlin / stud' },
-  'Load Case 적합성': { eng: 'dup', ref: 'host _dsmForDesign load-family check (R2-05)', to: 'host', checks: 'flexural member with a compression load case (or the reverse) → warn' },
-  '해석 실행 여부': { eng: 'page', to: 'host', checks: 'the page holds an analysis curve', defect: 'does not ask whether the analysis is current (host _isAnalysisCurrent knows)' },
-  'DSM 값 추출': { eng: 'page', to: 'host', checks: 'page holds DSM P or Mxx' },
+  '반파장 최솟값': { eng: 'page', to: 'host', checks: 'shortest half-wavelength (model lengths) ≤ 0.8·H (or ≤ 5 in without H)', hc: ['THRESHOLDS.len_min_ratio 0.8·H', 'len_min_abs 5 in (program values)'], defect: 'fixed in K3-6 (D14 · D19): one rule in status, criterion and note; lengths from the model, not the display field' },
+  '반파장 최댓값': { eng: 'page', to: 'host', checks: 'longest half-wavelength (model lengths) ≥ max(Lb, longest span, 120 in); pass at ≥ 1.5×', hc: ['THRESHOLDS.len_max_ref 120 in', 'len_max_factor 1.5× (program values)'], defect: 'fixed in K3-6 (D19): the verdict no longer depends on the display units (blank field read as 1000 in US, 1000 mm in SI)' },
+  '반파장 개수': { eng: 'page', to: 'host', checks: 'number of model lengths ≥ 30', hc: ['THRESHOLDS.len_count 30 (program value)'] },
+  '경계조건 (BC)': { eng: 'page', to: 'host', checks: 'K3-6 (D6): purlin / joist / girt / stud with a boundary condition other than S-S → warn (was always pass)' },
+  'Load Case 적합성': { eng: 'dup', ref: 'host _dsmForDesign load-family check (R2-05)', to: 'host', checks: 'flexural member with a compression load case (or the reverse) → warn; K3-6 (D3): purlin designs run their own ±M curves → pass' },
+  '해석 실행 여부': { eng: 'page', to: 'host', checks: 'an analysis curve, or a purlin design (its own curves — K3-6 D3)' },
+  'DSM 값 추출': { eng: 'page', to: 'host', checks: 'DSM P or Mxx, or a purlin design (K3-6 D3)' },
   'Mcrl 식별 (국부좌굴)': { eng: 'dup', ref: 'design_checks source.buckling_analysis.method (fsm_minimum …)', to: 'engine', checks: 'Mcrl > 0' },
   'Mcrd 식별 (뒤틀림좌굴)': { eng: 'dup', ref: 'design_checks source.buckling_analysis.method (analytic / analytic_raised_to_floor)', to: 'engine', checks: 'Mcrd > 0, else analytic fallback possible from template dims' },
   '성질 계산 여부': { eng: 'page', to: 'host', checks: 'page holds section properties' },
   '단면계수 Sx': { eng: 'page', to: 'host', checks: 'Sx > 0' },
   '회전반경 rx, rz': { eng: 'page', to: 'host', checks: 'rx, rz > 0' },
-  '스팬 길이': { eng: 'contra', ref: 'auto_params.i621_check (span ≤ 33 ft, §I6.2.1)', to: 'host', checks: 'longest span field > 0 and ≤ 40 ft', hc: ['40 ft (status)', '33 ft (criterion · note)'], defect: 'status uses 40 ft, criterion and note say 33 ft — 33 < span ≤ 40 ft passes with a note saying the §I6.2.1 limit is exceeded' },
-  '분담폭 (간격)': { eng: 'page', to: 'host', checks: 'spacing > 0 and ≤ 8 ft', hc: ['8 ft', '"typical 4–6 ft" text'], defect: 'blank spacing reads as 3.281 (getNum fallback) — the item passes with a value nobody entered' },
+  '스팬 길이': { eng: 'dup', ref: 'auto_params.i621_check (h) span ≤ 33 ft', to: 'host', checks: 'longest span > 0 and ≤ 33 ft', hc: ['THRESHOLDS.span_i621 33 ft (§I6.2.1(h))'], defect: 'fixed in K3-6 (D7): status, criterion and note all 33 ft (spec §I6.2.1(h) and engine) — status used 40 ft' },
+  '분담폭 (간격)': { eng: 'page', to: 'host', checks: 'spacing > 0 and ≤ 8 ft', hc: ['THRESHOLDS.spacing_max 8 ft (program value)'], defect: 'fixed in K3-6 (D6): a blank spacing is "미설정" — was read as 3.281' },
   '고정하중 (D)': { eng: 'page', to: 'host', checks: 'D > 0', hc: ['"typical 5–15 psf" text'] },
   '중력 활하중/적설하중': { eng: 'page', to: 'host', checks: 'any of Lr, S, L > 0' },
-  '풍하중 (W, 양력)': { eng: 'always', to: 'host', checks: 'always pass; notes uplift' },
   '하중 분석 실행 여부': { eng: 'page', to: 'host', checks: 'page holds a load analysis' },
   '최대 Mu': { eng: 'page', to: 'host', checks: 'max |Mu| over the governing locations > 0' },
   '전단력 (Vu)': { eng: 'page', to: 'host', checks: 'some location has Vu > 0' },
@@ -169,30 +169,26 @@ const NOTE = {
   '양력 R 계수 (§I6.2.1)': { eng: 'engine', ref: 'auto_params.uplift_R · i621_check', to: 'host', checks: 'R > 0 when the engine gave R; warn when uplift exists without R' },
   '비지지 길이 Ly(+) (정모멘트)': { eng: 'page', to: 'host', checks: 'positive region unbraced: Ly > 0' },
   '모멘트 구배 Cb(+)': { eng: 'page', to: 'host', checks: 'positive region Cb ≥ 1.0', hc: ['1.0'] },
-  '정모멘트 구간 구속': { eng: 'always', to: 'host', checks: 'braced positive region → always pass' },
   'Lap 끝단 Mu 추출': { eng: 'page', to: 'host', checks: 'laps exist → a "Lap end" location with Mu exists' },
-  '처짐 — 스팬': { eng: 'page', to: 'engine', checks: 'L/δ per span ≥ live-load limit (pass at ≥ 1.1×)', hc: ['roof L/240 (LL) · L/180 (TL)', 'floor L/360 · L/240', '1.1× margin'], defect: 'prints the total-load limit but never checks it; the δ is the engine\'s one service combination, not LL alone — the LL limit is applied to whatever combination the engine used' },
+  '처짐 — 스팬': { eng: 'page', to: 'host', checks: 'per span: live-load L/δ (engine deflection_cases L · Lr · S · R alone) ≥ LL limit and total service L/δ (engine deflection) ≥ TL limit; warn within 1.1×', hc: ['THRESHOLDS.deflection_roof L/240 · L/180', 'deflection_floor L/360 · L/240 (IBC Table 1604.3 — not in AISI S100, not verified here)', 'deflection_margin 1.1×'], defect: 'fixed in K3-6 (D13): both limits checked, the LL limit against live load alone' },
   '처짐 검토': { eng: 'page', to: 'host', checks: 'deflection invalid (fail) or missing (warn)' },
   '설계 검토 실행 여부': { eng: 'page', to: 'host', checks: 'page holds a design result' },
   '종합 판정 (엔진)': { eng: 'engine', ref: 'result pass / verdict (fail > not_evaluated > pass)', to: 'host', checks: 'engine three-state verdict → pass / warn (not evaluated) / fail' },
-  'Mne vs My': { eng: 'contra', ref: 'member.flexure.global', to: 'drop', checks: 'Mne ≤ 1.01·My (or ≤ Mp with inelastic reserve, detected by "F2.4.2" in a step equation; Mp fallback 1.5·My)', hc: ['1.01', '1.5·My'], defect: 'Mne > My is legitimate with Cb > 1 and no IR? (Mne is capped at My by F2.1 except IR) — the item can fail (null) when the engine marks the check not applicable (R route)' },
+  'Mne vs My': { eng: 'engine', ref: 'member.flexure.global', to: 'host', checks: 'K3-6 (D1): the engine verdict (not evaluated → warn with its reason); the old 1.01·My rule only for results without design_checks' },
   '§F2.4.2 Inelastic Reserve': { eng: 'page', to: 'host', checks: 'inelastic reserve applied (steps contain F2.4.2) → pass, else warn', hc: ['"Mcre > 2.78My" text'], defect: 'not applying an optional provision is shown as a caution in every flexure check' },
   '§I6.2.1 R-factor (양력)': { eng: 'engine', ref: 'member.flexure.uplift_r', to: 'host', checks: 'R applied → pass; uplift region without R → warn; else pass' },
-  '§A3.3.2 Cold Work (냉간가공)': { eng: 'engine', ref: 'design.cold_work · use_cold_work', to: 'host', checks: 'cold work requested / applied / blocked by IR', hc: ['"Fu/Fy ≥ 1.2, R/t ≤ 7, ≤ 120°" text'] },
+  '§A3.3.2 Cold Work (냉간가공)': { eng: 'engine', ref: 'design.cold_work · use_cold_work · warnings (§A3.3.2)', to: 'host', checks: 'cold work requested / applied / blocked by IR; K3-6 (D2): requested but not applied → warn with the engine reason (was fail)', hc: ['"Fu/Fy ≥ 1.2, R/t ≤ 7, ≤ 120°" text (only when the engine gave no reason)'] },
   '§A3.3.2 ↔ §F2.4.2 배타 관계': { eng: 'engine', ref: 'design.use_cold_work · use_inelastic_reserve', to: 'host', checks: 'both options requested → warn' },
-  'Mnl vs Mne (국부좌굴 감소)': { eng: 'contra', ref: 'member.flexure.local', to: 'drop', checks: 'Mnl < Mne → warn (reduction shown as a caution), null → fail', defect: 'a local reduction is normal design behaviour, not a caution; null Mnl → fail even when the engine reports the check not applicable' },
-  'Mnd vs My (뒤틀림좌굴 감소)': { eng: 'contra', ref: 'member.flexure.distortional', to: 'drop', checks: 'Mnd < My → warn, null → fail', defect: 'same as above; the engine may report distortional not evaluated (no Mcrd) while the item shows pass (Mnd = My placeholder)' },
-  '모든 Mn 동일 (잠재적 문제)': { eng: 'contra', ref: 'member.flexure.* (λ computed by the engine)', to: 'drop', checks: 'Mne = Mnl = Mnd = My → warn; recomputes λl = √(My/Mcrl), λd = √(My/Mcrd) from the page DSM', hc: ['0.776', '0.673'], defect: 'λl is computed with My — the specification (F3.2.1) uses Mne; the engine already reports λ in design_checks steps' },
+  'Mnl vs Mne (국부좌굴 감소)': { eng: 'engine', ref: 'member.flexure.local', to: 'host', checks: 'K3-6 (D1): the engine verdict — a reduction is not a caution' },
+  'Mnd vs My (뒤틀림좌굴 감소)': { eng: 'engine', ref: 'member.flexure.distortional', to: 'host', checks: 'K3-6 (D1): the engine verdict (not evaluated without Mcrd → warn, not pass)' },
   '정모멘트 φMn(+)': { eng: 'engine', ref: 'member.flexure.positive_region', to: 'host', checks: 'positive-region φMn > 0' },
-  '정모멘트 LTB': { eng: 'dup', ref: 'member.flexure.positive_region steps (Fcre vs 2.78Fy branch)', to: 'drop', checks: 'Fcre(+) < 2.78·Fy → warn', hc: ['2.78'] },
-  'Pnl vs Pne (국부좌굴 감소)': { eng: 'contra', ref: 'member.compression.local', to: 'drop', checks: 'Pnl < Pne → warn, null → fail' },
-  'Pnd vs Py (뒤틀림좌굴 감소)': { eng: 'contra', ref: 'member.compression.distortional', to: 'drop', checks: 'Pnd < Py → warn, null → fail' },
+  'Pnl vs Pne (국부좌굴 감소)': { eng: 'engine', ref: 'member.compression.local', to: 'host', checks: 'K3-6 (D1): the engine verdict' },
+  'Pnd vs Py (뒤틀림좌굴 감소)': { eng: 'engine', ref: 'member.compression.distortional', to: 'host', checks: 'K3-6 (D1): the engine verdict' },
   '이용률 — 부모멘트 (-M)': { eng: 'engine', ref: "limit_state_checks 'F flexure' / member.flexure.*", to: 'host', checks: 'F flexure verdict and ratio' },
   'Lb(-) / Cb(-) (부모멘트)': { eng: 'page', to: 'host', checks: 'design-Lb > 0 (note Cb > 2.3) — from the input fields, not from the result', hc: ['2.3'], defect: 'reads the current fields, not the Lb/Cb the result used (purlin regions have their own) — stale after an edit' },
   '이용률 (DCR)': { eng: 'engine', ref: 'result utilization + verdict', to: 'host', checks: 'engine verdict with utilization' },
   '이용률 — 정모멘트 (+M)': { eng: 'engine', ref: 'member.flexure.positive_region', to: 'host', checks: 'positive region verdict; no Mu(+) → warn' },
-  'Lb(+) / Cb(+) (정모멘트)': { eng: 'dup', ref: 'member.flexure.positive_region steps', to: 'drop', checks: 'Lb(+) = 0 or Fcre(+) ≥ 2.78·Fy → pass, else warn', hc: ['2.78'] },
-  '저항계수 (φ)': { eng: 'always', ref: 'design_checks[].factor', to: 'engine', checks: 'always pass in LRFD; prints φb = 0.90 / φc = 0.85 constants', hc: ['φb 0.90', 'φc 0.85'], defect: 'constants, not the factors the engine used (design_checks factor); nothing for ASD' },
+  'Lb(+) / Cb(+) (정모멘트)': { eng: 'engine', ref: 'member.flexure.positive_region', to: 'host', checks: 'K3-6: the engine positive-region verdict (no 2.78·Fy re-check); an unbounded Fcre prints ∞ (D5)' },
   '조합 검토 (§H1.2)': { eng: 'engine', ref: 'member.axial_bending', to: 'host', checks: 'interaction verdict' },
   'DSM 경고 #': { eng: 'engine', ref: 'dsm_warnings', to: 'host', checks: 'each engine DSM warning → warn' },
   '설계 경고 #': { eng: 'engine', ref: 'warnings', to: 'host', checks: 'each engine warning → warn (positive-region NG skipped)' },
@@ -201,12 +197,12 @@ const NOTE = {
   'DSM 추출 경고': { eng: 'engine', ref: 'dsm_warning', to: 'host', checks: 'warn' },
   'Lap 구간 휨강도 (§F3, 2겹)': { eng: 'engine', ref: 'design.design_lap', to: 'host', checks: 'design_lap verdict' },
   'Lap 길이 (지점': { eng: 'dup', ref: 'lap.length_condition (lap result)', to: 'engine', checks: 'min(left, right lap) ≥ 1.5·H (template field)', hc: ['1.5·d'], defect: 'uses the template H field and the load-analysis laps, not the lap check of the lap result' },
-  'Lap 패스너 전단 (DCR)': { eng: 'engine', ref: 'lap.fastener_group', to: 'host', checks: 'lap utilization + pass' },
+  'Lap 패스너 전단 (DCR)': { eng: 'engine', ref: 'lap.fastener_group', to: 'host', checks: 'K3-6 (D4): the engine lap.fastener_group verdict (was "not checked" unless the whole lap passed)' },
   'Lap 휨강도 DCR (2겹 §F3/F4/H2)': { eng: 'engine', ref: 'lap.flexure.* / lap.bending_shear', to: 'host', checks: 'flexure_dcr_governing + flexure_checked' },
   'Lap 접합부 종합 판정': { eng: 'engine', ref: 'lap result verdict', to: 'host', checks: 'lap three-state verdict' },
   'Lap 접합부 설계 실행 여부': { eng: 'page', to: 'host', checks: 'laps + flexure result but no lap result → fail' },
-  'Fy 일관성 (해석 vs 설계)': { eng: 'always', to: 'host', checks: '|design Fy field − ① Fy field| < 0.1 (display units)', hc: ['0.1 (ksi or MPa — depends on the display)'], defect: 'both fields mirror the same state since K2 (D-3) — always pass; the analysis reference stress (host loadFy, decision 3) is never compared' },
-  '해석 최신성': { eng: 'always', to: 'host', checks: 'always pass when an analysis exists', defect: 'does not compare signatures — says pass after the section changed' },
+  'Fy 일관성 (해석 vs 설계)': { eng: 'page', to: 'host', checks: 'K3-6 (D6): the analysis reference stress (model loadFy) against the design Fy, in US units — warn when they differ' },
+  '해석 최신성': { eng: 'page', ref: 'host _isAnalysisCurrent (model signature)', to: 'host', checks: 'K3-6 (D6): fail when the host says the analysis is stale (was always pass)' },
 };
 const noteFor = (item) => NOTE[item] || NOTE[Object.keys(NOTE).find((k) => item.startsWith(k))] || null;
 
@@ -270,9 +266,9 @@ function validationItems() {
 }
 
 // ── 보고서 절 ──────────────────────────────────────────────────────────────
-const REPORT_FUNCS = ['generateDetailedReport', '_rptSection', '_rptBuckling', '_rptDesignInput', '_rptLoadAnalysis', '_rptDesignCalc', '_rptFlexure',
-  '_rptCompression', '_rptCombined', '_rptTension', '_rptSummary', '_verdictListsHtml', '_requiredMoment', 'renderBeamSchematic', 'renderDiagramSVG',
-  '_buildBucklingReportHtml', '_canvasPng'];
+// K3-7: 보고서는 데이터(ReportDoc)를 만드는 함수들 — 그리기는 webview/js/reportRender.js(수를 만들지 않는다)
+const REPORT_FUNCS = ['buildReportDoc', '_docSection', '_docDsm', '_docBuckling', '_docDesignInput', '_docLoadAnalysis', '_checkBlocks', '_noticeBlocks',
+  '_docDesignCalc', '_docSummary', 'buildBucklingDoc'];
 const DERIVED = [
   [/_ruv\(29500/, 'E = 29500 ksi printed (constant, not the model E)'], [/<td>0\.30<\/td>/, 'ν = 0.30 printed (constant, not the model ν)'],
   [/psfUS \* spacingUS/, 'line load = pressure × spacing computed in the page'], [/1-d\.Mnl\/d\.Mne|1-pr\.Mnl\/pr\.Mne/, '% local reduction = 1 − Mnl/Mne'],
@@ -295,7 +291,7 @@ function reportSections() {
     const heads = [...bodyH.matchAll(/<h([123])[^>]*>([^<']*(?:'\+[^+]+\+'[^<']*)?)/g)].map((m) => `h${m[1]} ${m[2].replace(/'\s*\+\s*/g, '«').replace(/\s*\+\s*'/g, '»')}`);
     const rd = reads(body);
     const derived = DERIVED.filter(([re]) => re.test(body)).map(([, t]) => t);
-    const calls = [...new Set([...body.matchAll(/\b(_rpt\w+|renderBeamSchematic|renderDiagramSVG|_verdictListsHtml|_canvasPng)\(/g)].map((m) => m[1]))].filter((c) => c !== name);
+    const calls = [...new Set([...body.matchAll(/\b(_doc\w+|_checkBlocks|_noticeBlocks)\(/g)].map((m) => m[1]))].filter((c) => c !== name);
     return { name, line: fr.line, lines: lineOf(fr.end) - fr.line + 1, heads, dom: rd.dom, stateKeys: rd.stateKeys, fields: rd.fields, derived, calls };
   });
 }

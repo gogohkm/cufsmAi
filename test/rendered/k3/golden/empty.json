@@ -1,6 +1,6 @@
 {
  "about": "K3 phase 0 golden — empty. Recorded from the current code; 'k3-change' entries are the behaviour K3 is meant to change, 'defect' entries are findings.",
- "recorded": "2026-11-22",
+ "recorded": "2026-11-23",
  "entries": [
   {
    "id": "SI.validation",
@@ -19,7 +19,7 @@
      "item": "두께 (t)",
      "status": "pass",
      "value": "2.3 mm",
-     "criterion": "0.46 ≤ t ≤ 12.70 mm (CFS 일반 범위)",
+     "criterion": "0.46 ≤ t ≤ 12.70 mm (프로그램 경험값(냉간성형 일반 범위 — 원문 한계 없음))",
      "note": ""
     },
     {
@@ -27,7 +27,7 @@
      "item": "웹 w/t 비",
      "status": "pass",
      "value": "38.0",
-     "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
+     "criterion": "휨 웹 h/t ≤ 300 (표 B4.1-1, DSM — 휨을 받는 보강 요소) · w/t > 250 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -35,7 +35,7 @@
      "item": "플랜지 b/t 비",
      "status": "pass",
      "value": "16.3",
-     "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
+     "criterion": "에지보강 플랜지 b/t ≤ 160 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -43,7 +43,7 @@
      "item": "립 d/t 비",
      "status": "pass",
      "value": "8.7",
-     "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
+     "criterion": "비보강 요소(립) d/t ≤ 60 (표 B4.1-1) · d/t > 30 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -51,7 +51,7 @@
      "item": "코너 R/t 비",
      "status": "pass",
      "value": "1.7",
-     "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
+     "criterion": "안쪽 굽힘 반경 R/t ≤ 20 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -59,7 +59,7 @@
      "item": "항복강도 (Fy)",
      "status": "pass",
      "value": "295 MPa",
-     "criterion": "Fy ≤ 655.0 MPa (Table B4.1-1 Fy 한계)",
+     "criterion": "Fy < 655.0 MPa (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
      "note": ""
     },
     {
@@ -67,7 +67,7 @@
      "item": "Fu/Fy 비",
      "status": "pass",
      "value": "1.356",
-     "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
+     "criterion": "Fu/Fy ≥ 1.08 (§I6.2.1(o) — R 계수법의 조건)",
      "note": ""
     },
     {
@@ -83,7 +83,7 @@
      "item": "반파장 최솟값",
      "status": "pass",
      "value": "25.4 mm",
-     "criterion": "국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈100.0 mm) 필요",
+     "criterion": "국부좌굴 포착: 최솟값 ≤ 0.8 × 단면 높이(80.0 mm) (프로그램 경험값(원문 조항 없음 — 서명곡선의 국부 극소 포착))",
      "note": ""
     },
     {
@@ -163,7 +163,7 @@
      "item": "스팬 길이",
      "status": "pass",
      "value": "5 m",
-     "criterion": "스팬 > 0 필요; CFS 일반 ≤ 10.06 m (§I6.2.1)",
+     "criterion": "스팬 > 0; §I6.2.1(h) R 계수법: 경간 ≤ 10.06 m",
      "note": ""
     },
     {
@@ -191,14 +191,6 @@
      "note": ""
     },
     {
-     "category": "E. 하중 입력",
-     "item": "풍하중 (W, 양력)",
-     "status": "pass",
-     "value": "1 kPa ↑",
-     "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
-     "note": "양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요."
-    },
-    {
      "category": "F. 하중 분석",
      "item": "하중 분석 실행 여부",
      "status": "fail",
@@ -218,9 +210,20 @@
      "category": "H. 일관성",
      "item": "Fy 일관성 (해석 vs 설계)",
      "status": "pass",
-     "value": "해석 fy=295, 설계 Fy=295 MPa",
-     "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
+     "value": "해석 기준응력 295.0, 설계 Fy 295.0 MPa",
+     "criterion": "좌굴 해석의 기준응력과 설계 Fy 가 같으면 DSM 값을 그대로 쓴다",
      "note": ""
+    }
+   ],
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -228,17 +231,28 @@
    "id": "SI.validation.counts",
    "expect": "pin",
    "value": {
-    "total": 27,
-    "pass": 22,
+    "total": 26,
+    "pass": 21,
     "warn": 1,
     "fail": 4,
-    "badge": "통과 22 / 주의 1 / 실패 4",
+    "badge": "통과 21 / 주의 1 / 실패 4",
     "tree": {
-     "validationPass": 22,
+     "validationPass": 21,
      "validationWarn": 1,
      "validationFail": 4
     }
-   }
+   },
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "SI.report.text",
@@ -259,32 +273,39 @@
   },
   {
    "id": "SI.findings",
-   "expect": "defect",
-   "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report",
+   "expect": "pin",
+   "reason": "K3-6 / K3-7: the defects pinned here are fixed (see the item reasons in k3_review_defects.js); what remains is pinned as the new behaviour. K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
    "value": {
     "alwaysSame": [
      "pass: 경계조건 (BC) = S-S",
-     "pass: 풍하중 (W, 양력) = 1 kPa ↑",
-     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=295, 설계 Fy=295 MPa"
+     "pass: Fy 일관성 (해석 vs 설계) = 해석 기준응력 295.0, 설계 Fy 295.0 MPa"
     ]
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "defect",
+      "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report"
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "unitToggle.reportAfterError",
-   "expect": "defect",
-   "reason": "K3-D9: with no result the report box shows an error; a unit switch regenerates a full report (no design, page defaults) into it because the box is not empty",
-   "value": [
-    "H1 CUFSM — 냉간성형강 설계 보고서",
-    "H2 1. 단면",
-    "H3 단면 제원",
-    "H3 계산된 단면 성질",
-    "H2 2. 탄성 좌굴 해석",
-    "H3 DSM 설계값 (좌굴 곡선에서 추출)",
-    "H2 3. 설계 입력",
-    "H3 재료",
-    "H3 부재 구성",
-    "H3 설계 하중",
-    "H3 데크 정보"
+   "expect": "pin",
+   "reason": "K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the calculation section is the engine design_checks (name, clause, equations, demand / nominal / factor / capacity / ratio, steps with sources, governs basis, out-of-scope, unbounded, US-written equations marked); E · ν from the model (D8), state values not field text, no invented defaults (D11), no US units in SI (D10); title StCFSD. V7-02: every string escaped by one function, a CSP in the document, print allow-list. D9: a unit switch regenerates only an open report — the error box stays an error.",
+   "value": [],
+   "flipped": [
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "defect",
+      "reason": "K3-D9: with no result the report box shows an error; a unit switch regenerates a full report (no design, page defaults) into it because the box is not empty"
+     },
+     "date": "2026-11-24"
+    }
    ]
   },
   {
@@ -304,7 +325,7 @@
      "item": "두께 (t)",
      "status": "pass",
      "value": "0.0905511811024 in",
-     "criterion": "0.0180 ≤ t ≤ 0.5000 in (CFS 일반 범위)",
+     "criterion": "0.0180 ≤ t ≤ 0.5000 in (프로그램 경험값(냉간성형 일반 범위 — 원문 한계 없음))",
      "note": ""
     },
     {
@@ -312,7 +333,7 @@
      "item": "웹 w/t 비",
      "status": "pass",
      "value": "38.0",
-     "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
+     "criterion": "휨 웹 h/t ≤ 300 (표 B4.1-1, DSM — 휨을 받는 보강 요소) · w/t > 250 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -320,7 +341,7 @@
      "item": "플랜지 b/t 비",
      "status": "pass",
      "value": "16.3",
-     "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
+     "criterion": "에지보강 플랜지 b/t ≤ 160 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -328,7 +349,7 @@
      "item": "립 d/t 비",
      "status": "pass",
      "value": "8.7",
-     "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
+     "criterion": "비보강 요소(립) d/t ≤ 60 (표 B4.1-1) · d/t > 30 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)",
      "note": ""
     },
     {
@@ -336,7 +357,7 @@
      "item": "코너 R/t 비",
      "status": "pass",
      "value": "1.7",
-     "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
+     "criterion": "안쪽 굽힘 반경 R/t ≤ 20 (표 B4.1-1, DSM)",
      "note": ""
     },
     {
@@ -344,7 +365,7 @@
      "item": "항복강도 (Fy)",
      "status": "pass",
      "value": "42.7861326304 ksi",
-     "criterion": "Fy ≤ 95.0 ksi (Table B4.1-1 Fy 한계)",
+     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
      "note": ""
     },
     {
@@ -352,7 +373,7 @@
      "item": "Fu/Fy 비",
      "status": "pass",
      "value": "1.356",
-     "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
+     "criterion": "Fu/Fy ≥ 1.08 (§I6.2.1(o) — R 계수법의 조건)",
      "note": ""
     },
     {
@@ -368,7 +389,7 @@
      "item": "반파장 최솟값",
      "status": "pass",
      "value": "1.0000 in",
-     "criterion": "국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈3.9370 in) 필요",
+     "criterion": "국부좌굴 포착: 최솟값 ≤ 0.8 × 단면 높이(3.1496 in) (프로그램 경험값(원문 조항 없음 — 서명곡선의 국부 극소 포착))",
      "note": ""
     },
     {
@@ -448,7 +469,7 @@
      "item": "스팬 길이",
      "status": "pass",
      "value": "16.4041994751 ft",
-     "criterion": "스팬 > 0 필요; CFS 일반 ≤ 33.00 ft (§I6.2.1)",
+     "criterion": "스팬 > 0; §I6.2.1(h) R 계수법: 경간 ≤ 33.00 ft",
      "note": ""
     },
     {
@@ -476,14 +497,6 @@
      "note": ""
     },
     {
-     "category": "E. 하중 입력",
-     "item": "풍하중 (W, 양력)",
-     "status": "pass",
-     "value": "20.8854342332 psf ↑",
-     "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
-     "note": "양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요."
-    },
-    {
      "category": "F. 하중 분석",
      "item": "하중 분석 실행 여부",
      "status": "fail",
@@ -503,9 +516,20 @@
      "category": "H. 일관성",
      "item": "Fy 일관성 (해석 vs 설계)",
      "status": "pass",
-     "value": "해석 fy=42.7861326304, 설계 Fy=42.7861326304 ksi",
-     "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
+     "value": "해석 기준응력 42.8, 설계 Fy 42.8 ksi",
+     "criterion": "좌굴 해석의 기준응력과 설계 Fy 가 같으면 DSM 값을 그대로 쓴다",
      "note": ""
+    }
+   ],
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -513,17 +537,28 @@
    "id": "US.validation.counts",
    "expect": "pin",
    "value": {
-    "total": 27,
-    "pass": 22,
+    "total": 26,
+    "pass": 21,
     "warn": 1,
     "fail": 4,
-    "badge": "통과 22 / 주의 1 / 실패 4",
+    "badge": "통과 21 / 주의 1 / 실패 4",
     "tree": {
-     "validationPass": 22,
+     "validationPass": 21,
      "validationWarn": 1,
      "validationFail": 4
     }
-   }
+   },
+   "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "US.report.text",
@@ -544,15 +579,24 @@
   },
   {
    "id": "US.findings",
-   "expect": "defect",
-   "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report",
+   "expect": "pin",
+   "reason": "K3-6 / K3-7: the defects pinned here are fixed (see the item reasons in k3_review_defects.js); what remains is pinned as the new behaviour. K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS).",
    "value": {
     "alwaysSame": [
      "pass: 경계조건 (BC) = S-S",
-     "pass: 풍하중 (W, 양력) = 20.8854342332 psf ↑",
-     "pass: Fy 일관성 (해석 vs 설계) = 해석 fy=42.7861326304, 설계 Fy=42.7861326304 ksi"
+     "pass: Fy 일관성 (해석 vs 설계) = 해석 기준응력 42.8, 설계 Fy 42.8 ksi"
     ]
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-6",
+     "from": {
+      "expect": "defect",
+      "reason": "K3 defects found while pinning (design doc appendix): cold work \"fail\" on an optional provision, analysis items that ignore the purlin chain's own analyses, 1e6 ksi printed for an unbounded Fcre, always-pass items, lap fastener shown \"not checked\" while the engine passes it, constants and raw field text in the report, US units in the SI report"
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "buckling",
@@ -565,11 +609,11 @@
   {
    "id": "empty.mcp",
    "expect": "pin",
-   "reason": "K3-3 · K3-5: validate_design 은 화면과 같은 검증 항목(호스트 · id 붙음 — 요약: 수 · 통과 아닌 항목 · 통과 항목 주석), generate_report 는 보고서를 파일로(HTML · PDF, 경로 응답). 수용 기준",
+   "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 1859,
+     "bytes": 1765,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -577,7 +621,6 @@
       "detail",
       "items",
       "more",
-      "pass_notes",
       "source",
       "units"
      ],
@@ -588,7 +631,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 1859,
+     "bytes": 1765,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -596,7 +639,6 @@
       "detail",
       "items",
       "more",
-      "pass_notes",
       "source",
       "units"
      ],
@@ -607,7 +649,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 6073,
+     "bytes": 6134,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -664,6 +706,14 @@
       "reason": "K3: validate_design returns checks: [] (raw session data, not the 70 items); generate_report returns a JSON packet, no HTML/PDF — acceptance criterion: the same 70 items without a webview and a report PDF"
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "K3-7",
+     "from": {
+      "expect": "pin",
+      "reason": "K3-3 · K3-5: validate_design 은 화면과 같은 검증 항목(호스트 · id 붙음 — 요약: 수 · 통과 아닌 항목 · 통과 항목 주석), generate_report 는 보고서를 파일로(HTML · PDF, 경로 응답). 수용 기준"
+     },
+     "date": "2026-11-24"
     }
    ]
   }

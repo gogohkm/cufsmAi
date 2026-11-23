@@ -1,81 +1,104 @@
 {
- "generated": "2026-11-22",
+ "generated": "2026-11-23",
  "by": "test/rendered/k3/inventory.js",
  "summary": {
   "validation": {
-   "pushSites": 72,
-   "function": "review.js 490–1428",
+   "pushSites": 68,
+   "function": "review.js 206–1159",
    "byCategory": {
-    "A. 단면 입력": 6,
+    "A. 단면 입력": 7,
     "B. 재료": 3,
     "C. 좌굴 해석": 9,
     "D. 단면 성질": 3,
-    "E. 하중 입력": 5,
-    "F. 하중 분석": 14,
-    "G. 설계 결과": 24,
+    "E. 하중 입력": 4,
+    "F. 하중 분석": 13,
+    "G. 설계 결과": 21,
     "G2. Lap 접합부": 6,
     "H. 일관성": 2
    },
    "byEngineRelation": {
-    "page": 30,
-    "contra": 8,
-    "dup": 10,
-    "always": 6,
-    "engine": 18
+    "engine": 25,
+    "page": 32,
+    "dup": 11
    },
    "byDestination": {
-    "host": 55,
-    "engine": 9,
-    "drop": 8
+    "host": 65,
+    "engine": 3
    },
    "hardCodedThresholds": {
-    "items": 26,
-    "thresholds": 39
+    "items": 20,
+    "thresholds": 28
    },
-   "withDefect": 18,
+   "withDefect": 12,
    "missingNote": []
   },
   "report": {
-   "functions": 17,
-   "pageDerived": 16
+   "functions": 11,
+   "pageDerived": 0
   },
   "observed": {
    "available": true,
-   "observed": 560,
+   "observed": 530,
    "flows": {
-    "empty.SI": 27,
-    "empty.US": 27,
-    "column.SI": 33,
-    "column.US": 33,
-    "beam.US": 45,
-    "beam.SI": 45,
-    "beam.fail.US": 45,
-    "beam.notEvaluated.US": 43,
-    "purlin.US": 61,
-    "purlin.SI": 61,
-    "purlin.uplift.US": 59,
-    "connection.SI": 27,
-    "connection.US": 27,
-    "connection.afterMcpLap.US": 27
+    "empty.SI": 26,
+    "empty.US": 26,
+    "column.SI": 32,
+    "column.US": 32,
+    "beam.US": 43,
+    "beam.SI": 43,
+    "beam.fail.US": 43,
+    "beam.notEvaluated.US": 41,
+    "purlin.US": 56,
+    "purlin.SI": 56,
+    "purlin.uplift.US": 54,
+    "connection.SI": 26,
+    "connection.US": 26,
+    "connection.afterMcpLap.US": 26
    },
    "unmatched": [],
    "neverSeen": [
     "V-F-33 양력 R 계수 (§I6.2.1)",
     "V-F-34 비지지 길이 Ly(+) (정모멘트)",
     "V-F-35 모멘트 구배 Cb(+)",
+    "V-F-38 처짐 검토",
     "V-F-39 처짐 검토",
-    "V-F-40 처짐 검토",
-    "V-G-47 §A3.3.2 ↔ §F2.4.2 배타 관계",
-    "V-G-52 정모멘트 LTB",
-    "V-G-61 조합 검토 (§H1.2)",
-    "V-G-62 DSM 경고 #(i1)",
-    "V-G-64 DSM 추출 경고"
+    "V-G-46 §A3.3.2 ↔ §F2.4.2 배타 관계",
+    "V-G-57 조합 검토 (§H1.2)",
+    "V-G-58 DSM 경고 #(i1)",
+    "V-G-60 DSM 추출 경고"
    ]
   }
  },
  "validation": [
   {
-   "line": 507,
+   "line": 227,
+   "category": "A. 단면 입력",
+   "item": "표 B4.1-1 적용 한계 (엔진)",
+   "status": "_b4.verdict === 'not_evaluated' ? 'warn' : (_b4.verdict === 'fail' ? 'fail' : 'pass')",
+   "outcomes": [
+    "pass",
+    "warn",
+    "fail"
+   ],
+   "guards": [
+    "if (_b4)"
+   ],
+   "criterion": "THRESHOLDS.b4_engine.criterion",
+   "note": "_engineNote(_b4)",
+   "dom": [],
+   "stateKeys": [],
+   "fields": [],
+   "numbers": [],
+   "annotation": {
+    "eng": "engine",
+    "ref": "member.applicability.b4 (check_dsm_limits)",
+    "to": "host",
+    "checks": "K3-6 (D17): the engine B4.1-1 verdict shown once — pass / fail / not evaluated"
+   },
+   "id": "V-A-01"
+  },
+  {
+   "line": 236,
    "category": "A. 단면 입력",
    "item": "단면 정의",
    "status": "(model && model.node && model.node.length > 0) ? 'pass' : 'fail'",
@@ -97,21 +120,21 @@
     "to": "host",
     "checks": "the model has nodes"
    },
-   "id": "V-A-01"
+   "id": "V-A-02"
   },
   {
-   "line": 515,
+   "line": 244,
    "category": "A. 단면 입력",
    "item": "두께 (t)",
-   "status": "t > 0 ? (t >= toDisplay(0.018,'thickness') && t <= toDisplay(0.5,'thickness') ? 'pass' : 'warn') : 'fail'",
+   "status": "t > 0 ? (t >= toDisplay(THRESHOLDS.t_min.value,'thickness') && t <= toDisplay(THRESHOLDS.t_max.value,'thickness') ? 'pass' : 'warn') : 'fail'",
    "outcomes": [
     "pass",
     "warn",
     "fail"
    ],
    "guards": [],
-   "criterion": "_ruv(0.018,'thickness')+' ≤ t ≤ '+_ruv(0.5,'thickness')+' '+_rul('thickness')+' (CFS 일반 범위)'",
-   "note": "t <= 0 ? '두께가 지정되지 않았습니다.' : (t < toDisplay(0.018,'thickness') ? '매우 얇음 — 재료 가용성을 확인하세요.' : (t > toDisplay(0.5,'thickness') ? '두꺼움 — 냉간성형이 아닐 수 있습니다.' : ''))",
+   "criterion": "_ruv(THRESHOLDS.t_min.value,'thickness')+' ≤ t ≤ '+_ruv(THRESHOLDS.t_max.value,'thickness')+' '+_rul('thickness')+' (' + THRESHOLDS.t_min.source + ')'",
+   "note": "t <= 0 ? '두께가 지정되지 않았습니다.' : (t < toDisplay(THRESHOLDS.t_min.value,'thickness') ? '매우 얇음 — 재료 가용성을 확인하세요.' : (t > toDisplay(THRESHOLDS.t_max.value,'thickness') ? '두꺼움 — 냉간성형이 아닐 수 있습니다.' : ''))",
    "dom": [
     "tpl-t"
    ],
@@ -119,25 +142,23 @@
     "tplT"
    ],
    "fields": [],
-   "numbers": [
-    "0.018",
-    "0.5"
-   ],
+   "numbers": [],
    "annotation": {
     "eng": "page",
     "to": "host",
     "checks": "t from the template field within a \"usual CFS\" band",
     "hc": [
-     "0.018 in ≤ t ≤ 0.5 in (warn outside)"
+     "THRESHOLDS.t_min 0.018 in",
+     "THRESHOLDS.t_max 0.5 in (warn outside — program value, no clause)"
     ]
    },
-   "id": "V-A-02"
+   "id": "V-A-03"
   },
   {
-   "line": 525,
+   "line": 256,
    "category": "A. 단면 입력",
    "item": "웹 w/t 비",
-   "status": "wt_web <= 200 ? 'pass' : (wt_web <= 500 ? 'warn' : 'fail')",
+   "status": "wt_web <= THRESHOLDS.web_note_b.value ? 'pass' : (wt_web <= _webLim.value ? 'warn' : 'fail')",
    "outcomes": [
     "pass",
     "warn",
@@ -146,51 +167,49 @@
    "guards": [
     "if (t > 0 && H > 0)"
    ],
-   "criterion": "w/t ≤ 500 (Table B4.1-1 보강요소 한계), 일반 ≤200",
-   "note": "wt_web > 500 ? 'DSM 적용 한계 초과 — Table B4.1-1.' : (wt_web > 200 ? '높은 웹 세장비 — 뒤틀림/국부좌굴이 지배합니다.' : '')",
+   "criterion": "_webLim.criterion + ' · ' + THRESHOLDS.web_note_b.criterion",
+   "note": "wt_web > _webLim.value ? '적용 한계 초과 — ' + _webLim.source + '.' : (wt_web > THRESHOLDS.web_note_b.value ? THRESHOLDS.web_note_b.source + ': 강도 전에 변형이 눈에 띌 수 있습니다.' : '')",
    "dom": [
+    "select-member-type",
     "tpl-H",
     "tpl-r",
     "tpl-t"
    ],
    "stateKeys": [
+    "memberType",
     "tplH",
     "tplR",
     "tplT"
    ],
    "fields": [],
-   "numbers": [
-    "200",
-    "500"
-   ],
+   "numbers": [],
    "annotation": {
-    "eng": "contra",
-    "ref": "member.applicability.b4 / check_dsm_limits (web h/t ≤ 300 in bending, w/t ≤ 500 in compression, flat width from the section)",
-    "to": "engine",
-    "checks": "(H − 2(t + r))/t from the template fields",
+    "eng": "dup",
+    "ref": "member.applicability.b4 / check_dsm_limits (web h/t ≤ 300 in bending, w/t ≤ 500 in compression)",
+    "to": "host",
+    "checks": "preliminary (H − 2(t + r))/t from the template fields; the engine row above is the verdict",
     "hc": [
-     "200 (warn)",
-     "500 (fail)"
+     "THRESHOLDS.web_note_b 250 (warn, Table B4.1-1 note b)",
+     "THRESHOLDS.web_ht 300 / web_wt 500 (fail, Table B4.1-1)"
     ],
-    "defect": "page ignores the 300 limit for webs in bending that the engine applies; uses out-to-out template dims, not the analysed section"
+    "defect": "fixed in K3-6 (D17): the 300 limit in bending (spec and engine) — was 200 / 500 for every member"
    },
-   "id": "V-A-03"
+   "id": "V-A-04"
   },
   {
-   "line": 535,
+   "line": 266,
    "category": "A. 단면 입력",
    "item": "플랜지 b/t 비",
-   "status": "bt_fl <= 60 ? 'pass' : (bt_fl <= 160 ? 'warn' : 'fail')",
+   "status": "bt_fl <= THRESHOLDS.flange_bt.value ? 'pass' : 'fail'",
    "outcomes": [
     "pass",
-    "warn",
     "fail"
    ],
    "guards": [
     "if (t > 0 && B > 0)"
    ],
-   "criterion": "b/t ≤ 160 (Table B4.1-1 에지보강요소 한계)",
-   "note": "bt_fl > 160 ? 'DSM 적용 한계 초과.' : ''",
+   "criterion": "THRESHOLDS.flange_bt.criterion",
+   "note": "bt_fl > THRESHOLDS.flange_bt.value ? '적용 한계 초과 — ' + THRESHOLDS.flange_bt.source + '.' : ''",
    "dom": [
     "tpl-B",
     "tpl-r",
@@ -202,37 +221,34 @@
     "tplT"
    ],
    "fields": [],
-   "numbers": [
-    "60",
-    "160"
-   ],
+   "numbers": [],
    "annotation": {
     "eng": "dup",
     "ref": "member.applicability.b4 (edge-stiffened b/t ≤ 160)",
-    "to": "engine",
-    "checks": "(B − 2(t + r))/t",
+    "to": "host",
+    "checks": "preliminary (B − 2(t + r))/t",
     "hc": [
-     "60 (warn)",
-     "160 (fail)"
+     "THRESHOLDS.flange_bt 160 (fail, Table B4.1-1)"
     ],
-    "defect": "applies the edge-stiffened 160 limit to every section (Z, hat, track, angle …) — the engine picks the row by element type"
+    "defect": "K3-6: the invented 60 warn band removed; the element-type row is the engine row (표 B4.1-1 적용 한계 (엔진))"
    },
-   "id": "V-A-04"
+   "id": "V-A-05"
   },
   {
-   "line": 545,
+   "line": 276,
    "category": "A. 단면 입력",
    "item": "립 d/t 비",
-   "status": "dt_lip <= 60 ? 'pass' : 'fail'",
+   "status": "dt_lip <= THRESHOLDS.unstiff_dt_note.value ? 'pass' : (dt_lip <= THRESHOLDS.lip_dt.value ? 'warn' : 'fail')",
    "outcomes": [
     "pass",
+    "warn",
     "fail"
    ],
    "guards": [
     "if (t > 0 && D > 0)"
    ],
-   "criterion": "d/t ≤ 60 (Table B4.1-1 비보강요소 한계)",
-   "note": "dt_lip > 60 ? 'DSM 적용에 립이 너무 세장합니다.' : ''",
+   "criterion": "THRESHOLDS.lip_dt.criterion + ' · ' + THRESHOLDS.unstiff_dt_note.criterion",
+   "note": "dt_lip > THRESHOLDS.lip_dt.value ? '적용 한계 초과 — ' + THRESHOLDS.lip_dt.source + '.' : (dt_lip > THRESHOLDS.unstiff_dt_note.value ? THRESHOLDS.unstiff_dt_note.source + ': 강도 전에 변형이 눈에 띌 수 있습니다.' : '')",
    "dom": [
     "tpl-D",
     "tpl-t"
@@ -242,35 +258,33 @@
     "tplT"
    ],
    "fields": [],
-   "numbers": [
-    "60"
-   ],
+   "numbers": [],
    "annotation": {
     "eng": "dup",
     "ref": "member.applicability.b4 (lip d/t ≤ 60)",
-    "to": "engine",
-    "checks": "D/t",
+    "to": "host",
+    "checks": "preliminary D/t",
     "hc": [
-     "60 (fail)"
+     "THRESHOLDS.unstiff_dt_note 30 (warn, Table B4.1-1 note b)",
+     "THRESHOLDS.lip_dt 60 (fail, Table B4.1-1)"
     ]
    },
-   "id": "V-A-05"
+   "id": "V-A-06"
   },
   {
-   "line": 555,
+   "line": 286,
    "category": "A. 단면 입력",
    "item": "코너 R/t 비",
-   "status": "Rt <= 10 ? 'pass' : (Rt <= 20 ? 'warn' : 'fail')",
+   "status": "Rt <= THRESHOLDS.corner_rt.value ? 'pass' : 'fail'",
    "outcomes": [
     "pass",
-    "warn",
     "fail"
    ],
    "guards": [
     "if (r > 0 && t > 0)"
    ],
-   "criterion": "R/t ≤ 20 (Table B4.1-1), 일반 ≤10",
-   "note": "Rt > 20 ? '코너 반경 한계 초과.' : ''",
+   "criterion": "THRESHOLDS.corner_rt.criterion",
+   "note": "Rt > THRESHOLDS.corner_rt.value ? '적용 한계 초과 — ' + THRESHOLDS.corner_rt.source + '.' : ''",
    "dom": [
     "tpl-r",
     "tpl-t"
@@ -280,34 +294,31 @@
     "tplT"
    ],
    "fields": [],
-   "numbers": [
-    "10",
-    "20"
-   ],
+   "numbers": [],
    "annotation": {
-    "eng": "page",
+    "eng": "dup",
+    "ref": "check_dsm_limits corner R/t ≤ 20",
     "to": "host",
     "checks": "r/t",
     "hc": [
-     "10 (warn)",
-     "20 (fail)"
+     "THRESHOLDS.corner_rt 20 (fail, Table B4.1-1)"
     ],
-    "defect": "labelled \"Table B4.1-1\" but S100-16 Table B4.1-1 has no R/t row; the engine does not check it"
+    "defect": "K3-6 correction: S100-16 Table B4.1-1 (DSM column) does have R/t ≤ 20 (≤ 10 for the effective width method) and the engine checks it — the K3 phase-0 note said otherwise and was wrong; the 10 warn band (an EWM row) removed"
    },
-   "id": "V-A-06"
+   "id": "V-A-07"
   },
   {
-   "line": 569,
+   "line": 300,
    "category": "B. 재료",
    "item": "항복강도 (Fy)",
-   "status": "fy > 0 ? (fy <= toDisplay(95,'stress') ? 'pass' : 'fail') : 'fail'",
+   "status": "fy > 0 ? (fy < toDisplay(THRESHOLDS.fy_max.value,'stress') ? 'pass' : 'fail') : 'fail'",
    "outcomes": [
     "pass",
     "fail"
    ],
    "guards": [],
-   "criterion": "'Fy ≤ '+_ruv(95,'stress')+' '+_rul('stress')+' (Table B4.1-1 Fy 한계)'",
-   "note": "fy > toDisplay(95,'stress') ? 'AISI S100 DSM Fy 한계 초과.' : (fy <= 0 ? 'Fy가 지정되지 않았습니다.' : '')",
+   "criterion": "'Fy < '+_ruv(THRESHOLDS.fy_max.value,'stress')+' '+_rul('stress')+' (' + THRESHOLDS.fy_max.source + ')'",
+   "note": "fy >= toDisplay(THRESHOLDS.fy_max.value,'stress') ? '적용 한계 초과 — ' + THRESHOLDS.fy_max.source + '.' : (fy <= 0 ? 'Fy가 지정되지 않았습니다.' : '')",
    "dom": [
     "design-fy",
     "tpl-B"
@@ -317,33 +328,32 @@
     "tplB"
    ],
    "fields": [],
-   "numbers": [
-    "95"
-   ],
+   "numbers": [],
    "annotation": {
     "eng": "dup",
-    "ref": "check_dsm_limits Fy row / §A3.1",
-    "to": "engine",
-    "checks": "design Fy field > 0 and ≤ 95 ksi",
+    "ref": "check_dsm_limits Fy < 95 ksi (strict)",
+    "to": "host",
+    "checks": "design Fy field > 0 and < 95 ksi",
     "hc": [
-     "95 ksi (fail)"
-    ]
+     "THRESHOLDS.fy_max 95 ksi (fail at 95 — Table B4.1-1)"
+    ],
+    "defect": "fixed in K3-6 (D17): strict < 95 (spec and engine) — was ≤ 95"
    },
-   "id": "V-B-07"
+   "id": "V-B-08"
   },
   {
-   "line": 577,
+   "line": 308,
    "category": "B. 재료",
    "item": "Fu/Fy 비",
-   "status": "fy > 0 && fu > 0 ? (fu/fy >= 1.08 ? 'pass' : 'warn') : 'fail'",
+   "status": "fy > 0 && fu > 0 ? (fu/fy >= THRESHOLDS.fu_fy.value ? 'pass' : 'warn') : 'fail'",
    "outcomes": [
     "pass",
     "warn",
     "fail"
    ],
    "guards": [],
-   "criterion": "Fu/Fy ≥ 1.08 (§A2.3.1, §I6.2.1(o))",
-   "note": "fu/fy < 1.08 ? '낮은 연성비 — §I6.2.1 R 계수가 적용되지 않을 수 있습니다.' : ''",
+   "criterion": "THRESHOLDS.fu_fy.criterion",
+   "note": "fy > 0 && fu > 0 && fu/fy < THRESHOLDS.fu_fy.value ? '낮은 연성비 — §I6.2.1(o): R 계수법을 쓸 수 없습니다.' : ''",
    "dom": [
     "design-fu",
     "design-fy",
@@ -355,22 +365,20 @@
     "tplB"
    ],
    "fields": [],
-   "numbers": [
-    "1.08"
-   ],
+   "numbers": [],
    "annotation": {
     "eng": "dup",
-    "ref": "auto_params.i621_check (o) — §I6.2.1(o) ductility",
+    "ref": "auto_params.i621_check (o) — §I6.2.1(o)",
     "to": "host",
     "checks": "Fu/Fy ≥ 1.08",
     "hc": [
-     "1.08 (warn)"
+     "THRESHOLDS.fu_fy 1.08 (warn, §I6.2.1(o))"
     ]
    },
-   "id": "V-B-08"
+   "id": "V-B-09"
   },
   {
-   "line": 585,
+   "line": 316,
    "category": "B. 재료",
    "item": "인장강도 (Fu)",
    "status": "fu > 0 ? (fu > fy ? 'pass' : 'fail') : 'fail'",
@@ -398,50 +406,48 @@
     "to": "host",
     "checks": "Fu > Fy"
    },
-   "id": "V-B-09"
+   "id": "V-B-10"
   },
   {
-   "line": 607,
+   "line": 343,
    "category": "C. 좌굴 해석",
    "item": "반파장 최솟값",
-   "status": "localOK ? 'pass' : 'warn'",
+   "status": "!_lenKnown ? 'fail' : (localOK ? 'pass' : 'warn')",
    "outcomes": [
     "pass",
-    "warn"
+    "warn",
+    "fail"
    ],
    "guards": [],
-   "criterion": "'국부좌굴 포착을 위해 최솟값 ≤ 단면 최대 판폭(≈'+_ruv(webH,'length')+' '+_rul('length')+') 필요'",
-   "note": "!localOK ? '최솟값이 너무 큼 — 국부좌굴 곡선이 잘릴 수 있습니다. 단면 높이의 0.3~0.5배 이하로 설정하세요.' : ''",
+   "criterion": "'국부좌굴 포착: 최솟값 ≤ ' + (webH > 0 ? '0.8 × 단면 높이(' + _ruv(_minLim,'length') + ' ' + _rul('length') + ')' : _ruv(_minLim,'length') + ' ' + _rul('length')) + ' (' + THRESHOLDS.len_min_ratio.source + ')'",
+   "note": "!_lenKnown ? '반파장 범위가 없습니다 — 해석 조건을 정하세요.' : (!localOK ? '최솟값이 너무 큼 — 국부좌굴 곡선이 잘릴 수 있습니다. ' + _ruv(_minLim,'length') + ' ' + _rul('length') + ' 이하로 설정하세요.' : '')",
    "dom": [
-    "input-len-min",
     "tpl-H"
    ],
    "stateKeys": [
-    "analysisLenMin",
     "tplH"
    ],
-   "fields": [],
-   "numbers": [
-    "0.8",
-    "5"
+   "fields": [
+    "model.lengths"
    ],
+   "numbers": [],
    "annotation": {
     "eng": "page",
     "to": "host",
-    "checks": "shortest half-wavelength ≤ 0.8·H (or ≤ 5 in without H)",
+    "checks": "shortest half-wavelength (model lengths) ≤ 0.8·H (or ≤ 5 in without H)",
     "hc": [
-     "0.8·H",
-     "5 in"
+     "THRESHOLDS.len_min_ratio 0.8·H",
+     "len_min_abs 5 in (program values)"
     ],
-    "defect": "criterion text says \"≤ widest plate\"; note says \"0.3–0.5·H\"; the rule is 0.8·H — three different numbers"
+    "defect": "fixed in K3-6 (D14 · D19): one rule in status, criterion and note; lengths from the model, not the display field"
    },
-   "id": "V-C-10"
+   "id": "V-C-11"
   },
   {
-   "line": 623,
+   "line": 359,
    "category": "C. 좌굴 해석",
    "item": "반파장 최댓값",
-   "status": "globalOK ? (lenMax >= refLen * 1.5 ? 'pass' : 'warn') : 'fail'",
+   "status": "globalOK ? (lenMax >= refLen * THRESHOLDS.len_max_factor.value ? 'pass' : 'warn') : 'fail'",
    "outcomes": [
     "pass",
     "warn",
@@ -452,71 +458,62 @@
    "note": "!globalOK ? '최댓값이 비지지 길이보다 짧음 — 전체좌굴(LTB)이 곡선에 나타나지 않습니다. 최소 '+_ruv(refLen*1.5,'length')+' '+_rul('length')+' 이상으로 설정하세요.' : (lenMax < refLen * 1.5 ? '비지지 길이의 1.5배 미만 — 전체좌굴 영역이 부족할 수 있습니다.' : '')",
    "dom": [
     ".span-tbl-len",
-    "design-Lb",
-    "input-len-max"
+    "design-Lb"
    ],
    "stateKeys": [
-    "Lb",
-    "analysisLenMax"
+    "Lb"
    ],
-   "fields": [],
-   "numbers": [
-    "1.5",
-    "1000",
-    "120"
+   "fields": [
+    "model.lengths"
    ],
+   "numbers": [],
    "annotation": {
     "eng": "page",
     "to": "host",
-    "checks": "longest half-wavelength ≥ max(Lb, longest span, 120 in); pass at ≥ 1.5×",
+    "checks": "longest half-wavelength (model lengths) ≥ max(Lb, longest span, 120 in); pass at ≥ 1.5×",
     "hc": [
-     "120 in",
-     "1.5×"
-    ]
-   },
-   "id": "V-C-11"
-  },
-  {
-   "line": 632,
-   "category": "C. 좌굴 해석",
-   "item": "반파장 개수",
-   "status": "lenN >= 30 ? 'pass' : 'warn'",
-   "outcomes": [
-    "pass",
-    "warn"
-   ],
-   "guards": [],
-   "criterion": "곡선 해상도 ≥ 30점 권장 (일반 50점, 복잡단면 80~100점)",
-   "note": "lenN < 30 ? '점 수가 부족하면 좌굴 최솟값을 놓칠 수 있습니다.' : ''",
-   "dom": [
-    "input-len-n"
-   ],
-   "stateKeys": [
-    "analysisLenN"
-   ],
-   "fields": [],
-   "numbers": [
-    "30",
-    "50"
-   ],
-   "annotation": {
-    "eng": "page",
-    "to": "host",
-    "checks": "number of lengths ≥ 30",
-    "hc": [
-     "30"
-    ]
+     "THRESHOLDS.len_max_ref 120 in",
+     "len_max_factor 1.5× (program values)"
+    ],
+    "defect": "fixed in K3-6 (D19): the verdict no longer depends on the display units (blank field read as 1000 in US, 1000 mm in SI)"
    },
    "id": "V-C-12"
   },
   {
-   "line": 652,
+   "line": 368,
+   "category": "C. 좌굴 해석",
+   "item": "반파장 개수",
+   "status": "!_lenKnown ? 'fail' : (lenN >= THRESHOLDS.len_count.value ? 'pass' : 'warn')",
+   "outcomes": [
+    "pass",
+    "warn",
+    "fail"
+   ],
+   "guards": [],
+   "criterion": "곡선 해상도 ≥ 30점 권장 (일반 50점, 복잡단면 80~100점)",
+   "note": "lenN < 30 ? '점 수가 부족하면 좌굴 최솟값을 놓칠 수 있습니다.' : ''",
+   "dom": [],
+   "stateKeys": [],
+   "fields": [
+    "model.lengths"
+   ],
+   "numbers": [],
+   "annotation": {
+    "eng": "page",
+    "to": "host",
+    "checks": "number of model lengths ≥ 30",
+    "hc": [
+     "THRESHOLDS.len_count 30 (program value)"
+    ]
+   },
+   "id": "V-C-13"
+  },
+  {
+   "line": 388,
    "category": "C. 좌굴 해석",
    "item": "경계조건 (BC)",
-   "status": "'pass'",
-   "outcomes": [
-    "pass"
-   ],
+   "status": "",
+   "outcomes": [],
    "guards": [],
    "criterion": "bcNote || '부재 양단 지지 상태에 맞는 경계조건 선택 필요'",
    "note": "bcVal !== bcExpected && bcNote ? '현재 '+bcVal+' 설정됨 — '+bcNote+'.' : ''",
@@ -529,81 +526,81 @@
    "fields": [],
    "numbers": [],
    "annotation": {
-    "eng": "always",
+    "eng": "page",
     "to": "host",
-    "checks": "always pass; note if not S-S for a purlin / stud"
+    "checks": "K3-6 (D6): purlin / joist / girt / stud with a boundary condition other than S-S → warn (was always pass)"
    },
-   "id": "V-C-13"
+   "id": "V-C-14"
   },
   {
-   "line": 672,
+   "line": 409,
    "category": "C. 좌굴 해석",
    "item": "Load Case 적합성",
-   "status": "lcOK ? 'pass' : 'warn'",
-   "outcomes": [
-    "pass",
-    "warn"
-   ],
+   "status": "",
+   "outcomes": [],
    "guards": [],
    "criterion": "설계 부재유형과 해석 Load Case가 일치해야 함",
-   "note": "lcNote",
+   "note": "(d && d.purlin_mode === true) ? '' : lcNote",
    "dom": [
     "select-load-case"
    ],
    "stateKeys": [
     "analysisLoadCase"
    ],
-   "fields": [],
+   "fields": [
+    "d.purlin_mode"
+   ],
    "numbers": [],
    "annotation": {
     "eng": "dup",
     "ref": "host _dsmForDesign load-family check (R2-05)",
     "to": "host",
-    "checks": "flexural member with a compression load case (or the reverse) → warn"
+    "checks": "flexural member with a compression load case (or the reverse) → warn; K3-6 (D3): purlin designs run their own ±M curves → pass"
    },
-   "id": "V-C-14"
+   "id": "V-C-15"
   },
   {
-   "line": 680,
+   "line": 418,
    "category": "C. 좌굴 해석",
    "item": "해석 실행 여부",
-   "status": "analysisResult && analysisResult.curve ? 'pass' : 'fail'",
+   "status": "(analysisResult && analysisResult.curve) || (d && d.purlin_mode === true) ? 'pass' : 'fail'",
    "outcomes": [
     "pass",
     "fail"
    ],
    "guards": [],
    "criterion": "설계 전 FSM 좌굴해석 완료 필요",
-   "note": "!analysisResult ? '③좌굴해석·부재설계 탭의 \"A. 좌굴해석\"에서 해석을 실행하세요.' : ''",
+   "note": "!analysisResult && !(d && d.purlin_mode === true) ? '③좌굴해석·부재설계 탭의 \"A. 좌굴해석\"에서 해석을 실행하세요.' : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
-    "analysisResult.curve"
+    "analysisResult.curve",
+    "d.purlin_mode"
    ],
    "numbers": [],
    "annotation": {
     "eng": "page",
     "to": "host",
-    "checks": "the page holds an analysis curve",
-    "defect": "does not ask whether the analysis is current (host _isAnalysisCurrent knows)"
+    "checks": "an analysis curve, or a purlin design (its own curves — K3-6 D3)"
    },
-   "id": "V-C-15"
+   "id": "V-C-16"
   },
   {
-   "line": 691,
+   "line": 429,
    "category": "C. 좌굴 해석",
    "item": "DSM 값 추출",
-   "status": "dP || dM ? 'pass' : 'fail'",
+   "status": "dP || dM || (d && d.purlin_mode === true) ? 'pass' : 'fail'",
    "outcomes": [
     "pass",
     "fail"
    ],
    "guards": [],
    "criterion": "Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함",
-   "note": "!dP && !dM ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : ''",
+   "note": "!dP && !dM && !(d && d.purlin_mode === true) ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
+    "d.purlin_mode",
     "dP.crd",
     "dP.crl",
     "dsm.Mxx",
@@ -613,12 +610,12 @@
    "annotation": {
     "eng": "page",
     "to": "host",
-    "checks": "page holds DSM P or Mxx"
+    "checks": "DSM P or Mxx, or a purlin design (K3-6 D3)"
    },
-   "id": "V-C-16"
+   "id": "V-C-17"
   },
   {
-   "line": 700,
+   "line": 438,
    "category": "C. 좌굴 해석",
    "item": "Mcrl 식별 (국부좌굴)",
    "status": "dM.crl > 0 ? 'pass' : 'warn'",
@@ -645,10 +642,10 @@
     "to": "engine",
     "checks": "Mcrl > 0"
    },
-   "id": "V-C-17"
+   "id": "V-C-18"
   },
   {
-   "line": 719,
+   "line": 457,
    "category": "C. 좌굴 해석",
    "item": "Mcrd 식별 (뒤틀림좌굴)",
    "status": "hasFsmMcrd ? 'pass' : (canFallback ? 'warn' : 'warn')",
@@ -685,10 +682,10 @@
     "to": "engine",
     "checks": "Mcrd > 0, else analytic fallback possible from template dims"
    },
-   "id": "V-C-18"
+   "id": "V-C-19"
   },
   {
-   "line": 735,
+   "line": 473,
    "category": "D. 단면 성질",
    "item": "성질 계산 여부",
    "status": "p ? 'pass' : 'fail'",
@@ -714,10 +711,10 @@
     "to": "host",
     "checks": "page holds section properties"
    },
-   "id": "V-D-19"
+   "id": "V-D-20"
   },
   {
-   "line": 744,
+   "line": 482,
    "category": "D. 단면 성질",
    "item": "단면계수 Sx",
    "status": "p.Sx > 0 ? 'pass' : 'fail'",
@@ -745,10 +742,10 @@
     "to": "host",
     "checks": "Sx > 0"
    },
-   "id": "V-D-20"
+   "id": "V-D-21"
   },
   {
-   "line": 751,
+   "line": 489,
    "category": "D. 단면 성질",
    "item": "회전반경 rx, rz",
    "status": "p.rx > 0 && p.rz > 0 ? 'pass' : 'warn'",
@@ -777,47 +774,40 @@
     "to": "host",
     "checks": "rx, rz > 0"
    },
-   "id": "V-D-21"
+   "id": "V-D-22"
   },
   {
-   "line": 776,
+   "line": 514,
    "category": "E. 하중 입력",
    "item": "스팬 길이",
-   "status": "spanFt > 0 ? (spanFt <= toDisplay(40,'length_ft') ? 'pass' : 'warn') : 'fail'",
-   "outcomes": [
-    "pass",
-    "warn",
-    "fail"
-   ],
+   "status": "",
+   "outcomes": [],
    "guards": [],
-   "criterion": "'스팬 > 0 필요; CFS 일반 ≤ '+_ruv(33,'length_ft')+' '+_rul('length_ft')+' (§I6.2.1)'",
-   "note": "spanFt <= 0 ? '스팬 길이를 설정하세요.' : (spanFt > toDisplay(33,'length_ft') ? '§I6.2.1 스팬 한계 초과 — R 계수가 적용되지 않을 수 있습니다.' : '')",
+   "criterion": "'스팬 > 0; ' + THRESHOLDS.span_i621.criterion.replace('33 ft', _ruv(THRESHOLDS.span_i621.value,'length_ft')+' '+_rul('length_ft'))",
+   "note": "spanFt <= 0 ? '스팬 길이를 설정하세요.' : (spanFt > toDisplay(THRESHOLDS.span_i621.value,'length_ft') ? THRESHOLDS.span_i621.source + ' 를 넘음 — 양력 R 계수법(§I6.2.1)을 쓸 수 없습니다.' : '')",
    "dom": [
     ".span-tbl-len"
    ],
    "stateKeys": [],
    "fields": [],
-   "numbers": [
-    "40"
-   ],
+   "numbers": [],
    "annotation": {
-    "eng": "contra",
-    "ref": "auto_params.i621_check (span ≤ 33 ft, §I6.2.1)",
+    "eng": "dup",
+    "ref": "auto_params.i621_check (h) span ≤ 33 ft",
     "to": "host",
-    "checks": "longest span field > 0 and ≤ 40 ft",
+    "checks": "longest span > 0 and ≤ 33 ft",
     "hc": [
-     "40 ft (status)",
-     "33 ft (criterion · note)"
+     "THRESHOLDS.span_i621 33 ft (§I6.2.1(h))"
     ],
-    "defect": "status uses 40 ft, criterion and note say 33 ft — 33 < span ≤ 40 ft passes with a note saying the §I6.2.1 limit is exceeded"
+    "defect": "fixed in K3-6 (D7): status, criterion and note all 33 ft (spec §I6.2.1(h) and engine) — status used 40 ft"
    },
-   "id": "V-E-22"
+   "id": "V-E-23"
   },
   {
-   "line": 784,
+   "line": 523,
    "category": "E. 하중 입력",
    "item": "분담폭 (간격)",
-   "status": "spacing > 0 ? (spacing <= toDisplay(8,'length_ft') ? 'pass' : 'warn') : 'fail'",
+   "status": "spacing > 0 ? (spacing <= toDisplay(THRESHOLDS.spacing_max.value,'length_ft') ? 'pass' : 'warn') : 'fail'",
    "outcomes": [
     "pass",
     "warn",
@@ -833,24 +823,20 @@
     "spacing"
    ],
    "fields": [],
-   "numbers": [
-    "8",
-    "3.281"
-   ],
+   "numbers": [],
    "annotation": {
     "eng": "page",
     "to": "host",
     "checks": "spacing > 0 and ≤ 8 ft",
     "hc": [
-     "8 ft",
-     "\"typical 4–6 ft\" text"
+     "THRESHOLDS.spacing_max 8 ft (program value)"
     ],
-    "defect": "blank spacing reads as 3.281 (getNum fallback) — the item passes with a value nobody entered"
+    "defect": "fixed in K3-6 (D6): a blank spacing is \"미설정\" — was read as 3.281"
    },
-   "id": "V-E-23"
+   "id": "V-E-24"
   },
   {
-   "line": 792,
+   "line": 531,
    "category": "E. 하중 입력",
    "item": "고정하중 (D)",
    "status": "loadD > 0 ? 'pass' : 'warn'",
@@ -879,10 +865,10 @@
      "\"typical 5–15 psf\" text"
     ]
    },
-   "id": "V-E-24"
+   "id": "V-E-25"
   },
   {
-   "line": 801,
+   "line": 540,
    "category": "E. 하중 입력",
    "item": "중력 활하중/적설하중",
    "status": "hasGravity ? 'pass' : 'warn'",
@@ -910,36 +896,10 @@
     "to": "host",
     "checks": "any of Lr, S, L > 0"
    },
-   "id": "V-E-25"
-  },
-  {
-   "line": 809,
-   "category": "E. 하중 입력",
-   "item": "풍하중 (W, 양력)",
-   "status": "'pass'",
-   "outcomes": [
-    "pass"
-   ],
-   "guards": [],
-   "criterion": "양력 검토 시 Wu 입력 (uplift 조합)",
-   "note": "loadW > 0 ? '양력 입력됨 — uplift 지배조합·R계수 검토를 확인하세요.' : ''",
-   "dom": [
-    "load-Wu-psf"
-   ],
-   "stateKeys": [
-    "loadWu"
-   ],
-   "fields": [],
-   "numbers": [],
-   "annotation": {
-    "eng": "always",
-    "to": "host",
-    "checks": "always pass; notes uplift"
-   },
    "id": "V-E-26"
   },
   {
-   "line": 822,
+   "line": 555,
    "category": "F. 하중 분석",
    "item": "하중 분석 실행 여부",
    "status": "la ? 'pass' : 'fail'",
@@ -965,7 +925,7 @@
    "id": "V-F-27"
   },
   {
-   "line": 833,
+   "line": 566,
    "category": "F. 하중 분석",
    "item": "최대 Mu",
    "status": "maxMu > 0 ? 'pass' : 'warn'",
@@ -994,7 +954,7 @@
    "id": "V-F-28"
   },
   {
-   "line": 841,
+   "line": 574,
    "category": "F. 하중 분석",
    "item": "전단력 (Vu)",
    "status": "hasVu ? 'pass' : 'warn'",
@@ -1023,7 +983,7 @@
    "id": "V-F-29"
   },
   {
-   "line": 854,
+   "line": 587,
    "category": "F. 하중 분석",
    "item": "비지지 길이 Ly (부모멘트)",
    "status": "negRegion.Ly_in > 0 ? 'pass' : 'warn'",
@@ -1054,7 +1014,7 @@
    "id": "V-F-30"
   },
   {
-   "line": 861,
+   "line": 594,
    "category": "F. 하중 분석",
    "item": "모멘트 구배 Cb",
    "status": "negRegion.Cb >= 1.0 ? 'pass' : 'warn'",
@@ -1089,7 +1049,7 @@
    "id": "V-F-31"
   },
   {
-   "line": 870,
+   "line": 603,
    "category": "F. 하중 분석",
    "item": "양력 R 계수 (§I6.2.1)",
    "status": "ap.uplift_R > 0 ? 'pass' : 'warn'",
@@ -1120,7 +1080,7 @@
    "id": "V-F-32"
   },
   {
-   "line": 880,
+   "line": 613,
    "category": "F. 하중 분석",
    "item": "양력 R 계수 (§I6.2.1)",
    "status": "'warn'",
@@ -1151,7 +1111,7 @@
    "id": "V-F-33"
   },
   {
-   "line": 895,
+   "line": 628,
    "category": "F. 하중 분석",
    "item": "비지지 길이 Ly(+) (정모멘트)",
    "status": "posR.Ly_in > 0 ? 'pass' : 'warn'",
@@ -1181,7 +1141,7 @@
    "id": "V-F-34"
   },
   {
-   "line": 902,
+   "line": 635,
    "category": "F. 하중 분석",
    "item": "모멘트 구배 Cb(+)",
    "status": "posR.Cb >= 1.0 ? 'pass' : 'warn'",
@@ -1214,34 +1174,7 @@
    "id": "V-F-35"
   },
   {
-   "line": 910,
-   "category": "F. 하중 분석",
-   "item": "정모멘트 구간 구속",
-   "status": "'pass'",
-   "outcomes": [
-    "pass"
-   ],
-   "guards": [
-    "else",
-    "if (la && la.auto_params && la.auto_params.positive_region)"
-   ],
-   "criterion": "Through-fastened/Standing-seam 데크 시 LTB 불필요",
-   "note": "",
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "la.auto_params"
-   ],
-   "numbers": [],
-   "annotation": {
-    "eng": "always",
-    "to": "host",
-    "checks": "braced positive region → always pass"
-   },
-   "id": "V-F-36"
-  },
-  {
-   "line": 930,
+   "line": 657,
    "category": "F. 하중 분석",
    "item": "Lap 끝단 Mu 추출",
    "status": "hasLapEnd ? 'pass' : 'warn'",
@@ -1268,14 +1201,14 @@
     "to": "host",
     "checks": "laps exist → a \"Lap end\" location with Mu exists"
    },
-   "id": "V-F-37"
+   "id": "V-F-36"
   },
   {
-   "line": 960,
+   "line": 688,
    "category": "F. 하중 분석",
    "item": "처짐 — 스팬(idx1)(L/δ)",
    "itemExpr": "'처짐 — 스팬 '+(idx+1)+' (L/δ)'",
-   "status": "ldOK ? (ld >= limitLL * 1.1 ? 'pass' : 'warn') : 'fail'",
+   "status": "okTL && okLL ? (near ? 'warn' : 'pass') : 'fail'",
    "outcomes": [
     "pass",
     "warn",
@@ -1285,35 +1218,38 @@
     "la.deflection.per_span.forEach((ps, idx) =>",
     "if (la && la.deflection && la.deflection.valid !== false && la.deflection.per_span)"
    ],
-   "criterion": "limitLabel+': L/δ ≥ '+limitLL+' (활하중), ≥ '+limitTL+' (전체하중) — IBC Table 1604.3'",
-   "note": "!ldOK ? '처짐 한계 초과 (L/'+limitLL+') — 단면을 키우거나 스팬을 줄이세요.' : (ld < limitLL * 1.1 ? '한계에 근접 — 여유를 확인하세요.' : '')",
-   "dom": [],
-   "stateKeys": [],
+   "criterion": "lim.label + ': 활하중 L/δ ≥ ' + lim.LL + ', 전체하중 L/δ ≥ ' + lim.TL + ' — ' + lim.source",
+   "note": "!okLL ? '활하중 처짐 한계 초과 (L/' + lim.LL + ').' : (!okTL ? '전체하중 처짐 한계 초과 (L/' + lim.TL + ').' : (ll == null ? '활하중 단독 처짐이 없어(활하중 없음) 전체하중만 보았습니다.' : (near ? '한계에 근접 — 여유를 확인하세요.' : '')))",
+   "dom": [
+    "select-member-type"
+   ],
+   "stateKeys": [
+    "memberType"
+   ],
    "fields": [
+    "c.case",
+    "c.per_span",
     "la.deflection",
+    "la.deflection_cases",
     "ps.L_over_delta",
     "ps.abs_delta_in"
    ],
-   "numbers": [
-    "1.1",
-    "360",
-    "240"
-   ],
+   "numbers": [],
    "annotation": {
     "eng": "page",
-    "to": "engine",
-    "checks": "L/δ per span ≥ live-load limit (pass at ≥ 1.1×)",
+    "to": "host",
+    "checks": "per span: live-load L/δ (engine deflection_cases L · Lr · S · R alone) ≥ LL limit and total service L/δ (engine deflection) ≥ TL limit; warn within 1.1×",
     "hc": [
-     "roof L/240 (LL) · L/180 (TL)",
-     "floor L/360 · L/240",
-     "1.1× margin"
+     "THRESHOLDS.deflection_roof L/240 · L/180",
+     "deflection_floor L/360 · L/240 (IBC Table 1604.3 — not in AISI S100, not verified here)",
+     "deflection_margin 1.1×"
     ],
-    "defect": "prints the total-load limit but never checks it; the δ is the engine's one service combination, not LL alone — the LL limit is applied to whatever combination the engine used"
+    "defect": "fixed in K3-6 (D13): both limits checked, the LL limit against live load alone"
    },
-   "id": "V-F-38"
+   "id": "V-F-37"
   },
   {
-   "line": 969,
+   "line": 698,
    "category": "F. 하중 분석",
    "item": "처짐 검토",
    "status": "'fail'",
@@ -1336,10 +1272,10 @@
     "to": "host",
     "checks": "deflection invalid (fail) or missing (warn)"
    },
-   "id": "V-F-39"
+   "id": "V-F-38"
   },
   {
-   "line": 977,
+   "line": 706,
    "category": "F. 하중 분석",
    "item": "처짐 검토",
    "status": "'warn'",
@@ -1362,10 +1298,10 @@
     "to": "host",
     "checks": "deflection invalid (fail) or missing (warn)"
    },
-   "id": "V-F-40"
+   "id": "V-F-39"
   },
   {
-   "line": 991,
+   "line": 720,
    "category": "G. 설계 결과",
    "item": "설계 검토 실행 여부",
    "status": "d ? 'pass' : 'fail'",
@@ -1388,10 +1324,10 @@
     "to": "host",
     "checks": "page holds a design result"
    },
-   "id": "V-G-41"
+   "id": "V-G-40"
   },
   {
-   "line": 1003,
+   "line": 732,
    "category": "G. 설계 결과",
    "item": "종합 판정 (엔진)",
    "status": "_statusFromVerdict(_dv, d.utilization)",
@@ -1421,24 +1357,25 @@
     "to": "host",
     "checks": "engine three-state verdict → pass / warn (not evaluated) / fail"
    },
-   "id": "V-G-42"
+   "id": "V-G-41"
   },
   {
-   "line": 1020,
+   "line": 754,
    "category": "G. 설계 결과",
    "item": "Mne vs My",
-   "status": "d.Mne != null && d.My != null ? (d.Mne <= mneLimit * 1.01 ? 'pass' : 'warn') : 'fail'",
+   "status": "_es !== undefined ? _es : (d.Mne != null && d.My != null ? (d.Mne <= mneLimit * 1.01 ? 'pass' : 'warn') : 'fail')",
    "outcomes": [
     "pass",
     "warn",
     "fail"
    ],
    "guards": [
+    "if (_es !== null)",
     "if (d.member_type === 'flexure')",
     "if (d && !d.error)"
    ],
-   "criterion": "irApplied ? '§F2.4.2 Inelastic Reserve: My ≤ Mne ≤ Mp' : 'Mne ≤ My 예상 (LTB가 항복 이하로 감소)'",
-   "note": "irApplied ? 'Inelastic Reserve 적용됨 — Mne가 My를 초과합니다 (정상).' : (d.Mne > d.My * 1.01 ? 'Mne > My — Cb 효과가 아니면 비정상. Lb와 Cb를 확인하세요.' : '')",
+   "criterion": "irApplied ? '§F2.4.2 Inelastic Reserve: My ≤ Mne ≤ Mp' : '§F2 전체좌굴(엔진 판정)'",
+   "note": "_ec ? _engineNote(_ec) : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
@@ -1454,20 +1391,15 @@
     "1.5"
    ],
    "annotation": {
-    "eng": "contra",
+    "eng": "engine",
     "ref": "member.flexure.global",
-    "to": "drop",
-    "checks": "Mne ≤ 1.01·My (or ≤ Mp with inelastic reserve, detected by \"F2.4.2\" in a step equation; Mp fallback 1.5·My)",
-    "hc": [
-     "1.01",
-     "1.5·My"
-    ],
-    "defect": "Mne > My is legitimate with Cb > 1 and no IR? (Mne is capped at My by F2.1 except IR) — the item can fail (null) when the engine marks the check not applicable (R route)"
+    "to": "host",
+    "checks": "K3-6 (D1): the engine verdict (not evaluated → warn with its reason); the old 1.01·My rule only for results without design_checks"
    },
-   "id": "V-G-43"
+   "id": "V-G-42"
   },
   {
-   "line": 1034,
+   "line": 766,
    "category": "G. 설계 결과",
    "item": "§F2.4.2 Inelastic Reserve",
    "status": "irApplied ? 'pass' : (hasZf ? 'warn' : 'warn')",
@@ -1502,10 +1434,10 @@
     ],
     "defect": "not applying an optional provision is shown as a caution in every flexure check"
    },
-   "id": "V-G-44"
+   "id": "V-G-43"
   },
   {
-   "line": 1054,
+   "line": 786,
    "category": "G. 설계 결과",
    "item": "§I6.2.1 R-factor (양력)",
    "status": "",
@@ -1532,10 +1464,10 @@
     "to": "host",
     "checks": "R applied → pass; uplift region without R → warn; else pass"
    },
-   "id": "V-G-45"
+   "id": "V-G-44"
   },
   {
-   "line": 1095,
+   "line": 829,
    "category": "G. 설계 결과",
    "item": "§A3.3.2 Cold Work (냉간가공)",
    "status": "cwStatus",
@@ -1557,22 +1489,23 @@
     "d.Fy_used",
     "d.cold_work",
     "d.error",
-    "d.member_type"
+    "d.member_type",
+    "d.warnings"
    ],
    "numbers": [],
    "annotation": {
     "eng": "engine",
-    "ref": "design.cold_work · use_cold_work",
+    "ref": "design.cold_work · use_cold_work · warnings (§A3.3.2)",
     "to": "host",
-    "checks": "cold work requested / applied / blocked by IR",
+    "checks": "cold work requested / applied / blocked by IR; K3-6 (D2): requested but not applied → warn with the engine reason (was fail)",
     "hc": [
-     "\"Fu/Fy ≥ 1.2, R/t ≤ 7, ≤ 120°\" text"
+     "\"Fu/Fy ≥ 1.2, R/t ≤ 7, ≤ 120°\" text (only when the engine gave no reason)"
     ]
    },
-   "id": "V-G-46"
+   "id": "V-G-45"
   },
   {
-   "line": 1105,
+   "line": 839,
    "category": "G. 설계 결과",
    "item": "§A3.3.2 ↔ §F2.4.2 배타 관계",
    "status": "'warn'",
@@ -1585,7 +1518,7 @@
     "if (d && !d.error)"
    ],
    "criterion": "§A3.3.2 적용 범위에서 §F2.4(Inelastic Reserve)가 명시적으로 제외됨",
-   "note": "cwApplied ? 'Cold Work(Fya)는 Mnl/Mnd에만 적용, Mne(IR)에는 원래 Fy=' + _rv(d.Fy_original) + ' ksi 사용. 두 옵션 중 하나만 사용을 권장.' : 'Cold Work 조건 미충족으로 Fya 미적용. IR만 활성 상태.'",
+   "note": "cwApplied ? 'Cold Work(Fya)는 Mnl/Mnd에만 적용, Mne(IR)에는 원래 Fy=' + _ruv(d.Fy_original,'stress') + ' ' + _rul('stress') + ' 사용. 두 옵션 중 하나만 사용을 권장.' : 'Cold Work 조건 미충족으로 Fya 미적용. IR만 활성 상태.'",
    "dom": [],
    "stateKeys": [],
    "fields": [
@@ -1603,24 +1536,24 @@
     "to": "host",
     "checks": "both options requested → warn"
    },
-   "id": "V-G-47"
+   "id": "V-G-46"
   },
   {
-   "line": 1116,
+   "line": 855,
    "category": "G. 설계 결과",
    "item": "Mnl vs Mne (국부좌굴 감소)",
-   "status": "d.Mnl != null ? (d.Mnl < d.Mne ? 'warn' : 'pass') : 'fail'",
+   "status": "_es !== undefined ? _es : (d.Mnl != null ? 'pass' : 'fail')",
    "outcomes": [
     "pass",
-    "warn",
     "fail"
    ],
    "guards": [
+    "if (_es !== null)",
     "if (d.member_type === 'flexure')",
     "if (d && !d.error)"
    ],
-   "criterion": "Mnl ≤ Mne; Mnl < Mne → 국부좌굴이 강도를 감소시킴",
-   "note": "d.Mnl != null && d.Mnl >= d.Mne ? '국부좌굴 감소 없음 (λl ≤ 0.776).' : '국부좌굴로 강도 '+(d.Mne>0?((1-d.Mnl/d.Mne)*100).toFixed(1):'?')+'% 감소.'",
+   "criterion": "§F3.2 국부좌굴(엔진 판정) — Mnl < Mne 는 감소일 뿐 결함이 아니다",
+   "note": "_ec ? _engineNote(_ec) : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
@@ -1631,89 +1564,48 @@
    ],
    "numbers": [],
    "annotation": {
-    "eng": "contra",
+    "eng": "engine",
     "ref": "member.flexure.local",
-    "to": "drop",
-    "checks": "Mnl < Mne → warn (reduction shown as a caution), null → fail",
-    "defect": "a local reduction is normal design behaviour, not a caution; null Mnl → fail even when the engine reports the check not applicable"
+    "to": "host",
+    "checks": "K3-6 (D1): the engine verdict — a reduction is not a caution"
+   },
+   "id": "V-G-47"
+  },
+  {
+   "line": 869,
+   "category": "G. 설계 결과",
+   "item": "Mnd vs My (뒤틀림좌굴 감소)",
+   "status": "_es !== undefined ? _es : (d.Mnd != null ? 'pass' : 'fail')",
+   "outcomes": [
+    "pass",
+    "fail"
+   ],
+   "guards": [
+    "if (_es !== null)",
+    "if (d.member_type === 'flexure')",
+    "if (d && !d.error)"
+   ],
+   "criterion": "§F4 뒤틀림좌굴(엔진 판정) — Mnd < My 는 감소일 뿐 결함이 아니다",
+   "note": "_ec ? _engineNote(_ec) : ''",
+   "dom": [],
+   "stateKeys": [],
+   "fields": [
+    "d.Mnd",
+    "d.My",
+    "d.error",
+    "d.member_type"
+   ],
+   "numbers": [],
+   "annotation": {
+    "eng": "engine",
+    "ref": "member.flexure.distortional",
+    "to": "host",
+    "checks": "K3-6 (D1): the engine verdict (not evaluated without Mcrd → warn, not pass)"
    },
    "id": "V-G-48"
   },
   {
-   "line": 1123,
-   "category": "G. 설계 결과",
-   "item": "Mnd vs My (뒤틀림좌굴 감소)",
-   "status": "d.Mnd != null ? (d.Mnd < d.My ? 'warn' : 'pass') : 'fail'",
-   "outcomes": [
-    "pass",
-    "warn",
-    "fail"
-   ],
-   "guards": [
-    "if (d.member_type === 'flexure')",
-    "if (d && !d.error)"
-   ],
-   "criterion": "Mnd ≤ My; Mnd < My → 뒤틀림좌굴이 강도를 감소시킴",
-   "note": "d.Mnd != null && d.Mnd >= d.My ? '뒤틀림좌굴 감소 없음 (λd ≤ 0.673).' : '뒤틀림좌굴로 강도 '+(d.My>0?((1-d.Mnd/d.My)*100).toFixed(1):'?')+'% 감소.'",
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "d.Mnd",
-    "d.My",
-    "d.error",
-    "d.member_type"
-   ],
-   "numbers": [],
-   "annotation": {
-    "eng": "contra",
-    "ref": "member.flexure.distortional",
-    "to": "drop",
-    "checks": "Mnd < My → warn, null → fail",
-    "defect": "same as above; the engine may report distortional not evaluated (no Mcrd) while the item shows pass (Mnd = My placeholder)"
-   },
-   "id": "V-G-49"
-  },
-  {
-   "line": 1146,
-   "category": "G. 설계 결과",
-   "item": "모든 Mn 동일 (잠재적 문제)",
-   "status": "allSame ? 'warn' : 'pass'",
-   "outcomes": [
-    "pass",
-    "warn"
-   ],
-   "guards": [
-    "if (d.member_type === 'flexure')",
-    "if (d && !d.error)"
-   ],
-   "criterion": "네 값 모두 같으면 DSM이 좌굴 감소를 적용하지 않을 수 있음",
-   "note": "allSameNote",
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "d.Mnd",
-    "d.Mne",
-    "d.Mnl",
-    "d.My",
-    "d.error",
-    "d.member_type"
-   ],
-   "numbers": [],
-   "annotation": {
-    "eng": "contra",
-    "ref": "member.flexure.* (λ computed by the engine)",
-    "to": "drop",
-    "checks": "Mne = Mnl = Mnd = My → warn; recomputes λl = √(My/Mcrl), λd = √(My/Mcrd) from the page DSM",
-    "hc": [
-     "0.776",
-     "0.673"
-    ],
-    "defect": "λl is computed with My — the specification (F3.2.1) uses Mne; the engine already reports λ in design_checks steps"
-   },
-   "id": "V-G-50"
-  },
-  {
-   "line": 1157,
+   "line": 883,
    "category": "G. 설계 결과",
    "item": "정모멘트 φMn(+)",
    "status": "prV.phi_Mn > 0 ? 'pass' : 'warn'",
@@ -1747,61 +1639,24 @@
     "to": "host",
     "checks": "positive-region φMn > 0"
    },
-   "id": "V-G-51"
+   "id": "V-G-49"
   },
   {
-   "line": 1165,
-   "category": "G. 설계 결과",
-   "item": "정모멘트 LTB",
-   "status": "'warn'",
-   "outcomes": [
-    "warn"
-   ],
-   "guards": [
-    "if (d.Fy_used > 0 && prV.Fcre < 2.78 * d.Fy_used)",
-    "if (d.positive_region)",
-    "if (d.member_type === 'flexure')",
-    "if (d && !d.error)"
-   ],
-   "criterion": "정모멘트 구간에서 LTB 발생 — Lb를 줄이거나 가새를 추가하세요",
-   "note": "데크 없이 긴 비지지 길이에서 LTB가 휨강도를 크게 감소시킵니다.",
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "d.Fy_used",
-    "d.error",
-    "d.member_type",
-    "d.positive_region",
-    "prV.Fcre"
-   ],
-   "numbers": [],
-   "annotation": {
-    "eng": "dup",
-    "ref": "member.flexure.positive_region steps (Fcre vs 2.78Fy branch)",
-    "to": "drop",
-    "checks": "Fcre(+) < 2.78·Fy → warn",
-    "hc": [
-     "2.78"
-    ]
-   },
-   "id": "V-G-52"
-  },
-  {
-   "line": 1177,
+   "line": 900,
    "category": "G. 설계 결과",
    "item": "Pnl vs Pne (국부좌굴 감소)",
-   "status": "d.Pnl != null ? (d.Pnl < d.Pne ? 'warn' : 'pass') : 'fail'",
+   "status": "_es !== undefined ? _es : (d.Pnl != null ? 'pass' : 'fail')",
    "outcomes": [
     "pass",
-    "warn",
     "fail"
    ],
    "guards": [
+    "if (_es !== null)",
     "if (d.member_type === 'compression')",
     "if (d && !d.error)"
    ],
-   "criterion": "Pnl ≤ Pne; 감소 시 → 국부좌굴 지배",
-   "note": "",
+   "criterion": "§E3.2 국부좌굴(엔진 판정)",
+   "note": "_ec ? _engineNote(_ec) : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
@@ -1812,29 +1667,29 @@
    ],
    "numbers": [],
    "annotation": {
-    "eng": "contra",
+    "eng": "engine",
     "ref": "member.compression.local",
-    "to": "drop",
-    "checks": "Pnl < Pne → warn, null → fail"
+    "to": "host",
+    "checks": "K3-6 (D1): the engine verdict"
    },
-   "id": "V-G-53"
+   "id": "V-G-50"
   },
   {
-   "line": 1184,
+   "line": 914,
    "category": "G. 설계 결과",
    "item": "Pnd vs Py (뒤틀림좌굴 감소)",
-   "status": "d.Pnd != null ? (d.Pnd < d.Py ? 'warn' : 'pass') : 'fail'",
+   "status": "_es !== undefined ? _es : (d.Pnd != null ? 'pass' : 'fail')",
    "outcomes": [
     "pass",
-    "warn",
     "fail"
    ],
    "guards": [
+    "if (_es !== null)",
     "if (d.member_type === 'compression')",
     "if (d && !d.error)"
    ],
-   "criterion": "Pnd ≤ Py; 감소 시 → 뒤틀림좌굴 지배",
-   "note": "",
+   "criterion": "§E4 뒤틀림좌굴(엔진 판정)",
+   "note": "_ec ? _engineNote(_ec) : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
@@ -1845,15 +1700,15 @@
    ],
    "numbers": [],
    "annotation": {
-    "eng": "contra",
+    "eng": "engine",
     "ref": "member.compression.distortional",
-    "to": "drop",
-    "checks": "Pnd < Py → warn, null → fail"
+    "to": "host",
+    "checks": "K3-6 (D1): the engine verdict"
    },
-   "id": "V-G-54"
+   "id": "V-G-51"
   },
   {
-   "line": 1198,
+   "line": 932,
    "category": "G. 설계 결과",
    "item": "이용률 — 부모멘트 (-M)",
    "status": "_statusFromVerdict(_checkVerdict(d, 'F flexure', _negUtil), _negUtil)",
@@ -1883,10 +1738,10 @@
     "to": "host",
     "checks": "F flexure verdict and ratio"
    },
-   "id": "V-G-55"
+   "id": "V-G-52"
   },
   {
-   "line": 1205,
+   "line": 939,
    "category": "G. 설계 결과",
    "item": "Lb(-) / Cb(-) (부모멘트)",
    "status": "_negLb2 > 0 ? 'pass' : 'warn'",
@@ -1909,8 +1764,10 @@
     "Lb"
    ],
    "fields": [
+    "d.design_negative",
     "d.error",
     "d.member_type",
+    "d.purlin_mode",
     "d.utilization"
    ],
    "numbers": [],
@@ -1923,10 +1780,10 @@
     ],
     "defect": "reads the current fields, not the Lb/Cb the result used (purlin regions have their own) — stale after an edit"
    },
-   "id": "V-G-56"
+   "id": "V-G-53"
   },
   {
-   "line": 1213,
+   "line": 947,
    "category": "G. 설계 결과",
    "item": "이용률 (DCR)",
    "status": "_statusFromVerdict(_v3(d), d.utilization)",
@@ -1955,10 +1812,10 @@
     "to": "host",
     "checks": "engine verdict with utilization"
    },
-   "id": "V-G-57"
+   "id": "V-G-54"
   },
   {
-   "line": 1225,
+   "line": 959,
    "category": "G. 설계 결과",
    "item": "이용률 — 정모멘트 (+M)",
    "status": "_posR.utilization != null ? _statusFromVerdict(_v3(_posR), _posR.utilization) : 'warn'",
@@ -1989,85 +1846,40 @@
     "to": "host",
     "checks": "positive region verdict; no Mu(+) → warn"
    },
-   "id": "V-G-58"
+   "id": "V-G-55"
   },
   {
-   "line": 1234,
+   "line": 971,
    "category": "G. 설계 결과",
    "item": "Lb(+) / Cb(+) (정모멘트)",
-   "status": "_posR.Lb === 0 ? 'pass' : (d.Fy_used > 0 && _posR.Fcre >= 2.78 * d.Fy_used ? 'pass' : 'warn')",
-   "outcomes": [
-    "pass",
-    "warn"
-   ],
+   "status": "",
+   "outcomes": [],
    "guards": [
     "if (d.positive_region && d.member_type === 'flexure')",
     "if (d && !d.error)"
    ],
    "criterion": "정모멘트 구간: 데크 구속 시 Lb=0, 미구속 시 변곡점 간 거리",
-   "note": "_posR.Lb === 0 ? '데크에 의한 연속 구속 — LTB 없음.' : (!(d.Fy_used > 0) ? '결과에 Fy 가 없어 Fcre(+) ≥ 2.78Fy 를 판별하지 못했습니다.' : _posR.Fcre < 2.78 * d.Fy_used ? 'LTB 발생 — Fcre(+)=' + _posR.Fcre + ' ksi < 2.78Fy. 가새 추가 또는 Lb 감소를 검토하세요.' : 'Fcre(+) ≥ 2.78Fy — LTB 없음.')",
+   "note": "_posR.Lb === 0 ? '데크에 의한 연속 구속 — LTB 없음.' : (_pc ? _engineNote(_pc) : '')",
    "dom": [],
    "stateKeys": [],
    "fields": [
     "_posR.Cb",
-    "_posR.Fcre",
     "_posR.Lb",
-    "d.Fy_used",
     "d.error",
     "d.member_type",
     "d.positive_region"
    ],
-   "numbers": [
-    "2.78"
-   ],
-   "annotation": {
-    "eng": "dup",
-    "ref": "member.flexure.positive_region steps",
-    "to": "drop",
-    "checks": "Lb(+) = 0 or Fcre(+) ≥ 2.78·Fy → pass, else warn",
-    "hc": [
-     "2.78"
-    ]
-   },
-   "id": "V-G-59"
-  },
-  {
-   "line": 1251,
-   "category": "G. 설계 결과",
-   "item": "저항계수 (φ)",
-   "status": "'pass'",
-   "outcomes": [
-    "pass"
-   ],
-   "guards": [
-    "if (d.design_method === 'LRFD')",
-    "if (d && !d.error)"
-   ],
-   "criterion": "AISI S100-16 LRFD 저항계수",
-   "note": "",
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "d.design_method",
-    "d.error",
-    "d.member_type"
-   ],
    "numbers": [],
    "annotation": {
-    "eng": "always",
-    "ref": "design_checks[].factor",
-    "to": "engine",
-    "checks": "always pass in LRFD; prints φb = 0.90 / φc = 0.85 constants",
-    "hc": [
-     "φb 0.90",
-     "φc 0.85"
-    ],
-    "defect": "constants, not the factors the engine used (design_checks factor); nothing for ASD"
+    "eng": "engine",
+    "ref": "member.flexure.positive_region",
+    "to": "host",
+    "checks": "K3-6: the engine positive-region verdict (no 2.78·Fy re-check); an unbounded Fcre prints ∞ (D5)"
    },
-   "id": "V-G-60"
+   "id": "V-G-56"
   },
   {
-   "line": 1262,
+   "line": 986,
    "category": "G. 설계 결과",
    "item": "조합 검토 (§H1.2)",
    "status": "_statusFromVerdict(_v3(d.interaction), d.interaction.total)",
@@ -2096,10 +1908,10 @@
     "to": "host",
     "checks": "interaction verdict"
    },
-   "id": "V-G-61"
+   "id": "V-G-57"
   },
   {
-   "line": 1275,
+   "line": 999,
    "category": "G. 설계 결과",
    "item": "DSM 경고 #(i1)",
    "itemExpr": "'DSM 경고 #'+(i+1)",
@@ -2127,10 +1939,10 @@
     "to": "host",
     "checks": "each engine DSM warning → warn"
    },
-   "id": "V-G-62"
+   "id": "V-G-58"
   },
   {
-   "line": 1291,
+   "line": 1015,
    "category": "G. 설계 결과",
    "item": "isFallback ? 뒤틀림좌굴 해석적 Fallback : 설계 경고 #(i1)",
    "itemExpr": "isFallback ? '뒤틀림좌굴 해석적 Fallback' : '설계 경고 #'+(i+1)",
@@ -2158,10 +1970,10 @@
     "to": "host",
     "checks": "each engine warning → warn (\"뒤틀림좌굴 해석적 Fallback\" when it names §2.3.3.3 / §2.3.1.3; positive-region NG warnings skipped)"
    },
-   "id": "V-G-63"
+   "id": "V-G-59"
   },
   {
-   "line": 1303,
+   "line": 1027,
    "category": "G. 설계 결과",
    "item": "DSM 추출 경고",
    "status": "'warn'",
@@ -2187,10 +1999,10 @@
     "to": "host",
     "checks": "warn"
    },
-   "id": "V-G-64"
+   "id": "V-G-60"
   },
   {
-   "line": 1326,
+   "line": 1050,
    "category": "G2. Lap 접합부",
    "item": "Lap 구간 휨강도 (§F3, 2겹)",
    "status": "_statusFromVerdict(_v3(lapDesign), lapDesign.utilization)",
@@ -2223,10 +2035,10 @@
     "to": "host",
     "checks": "design_lap verdict"
    },
-   "id": "V-G2-65"
+   "id": "V-G2-61"
   },
   {
-   "line": 1344,
+   "line": 1068,
    "category": "G2. Lap 접합부",
    "item": "Lap 길이 (지점(idx1)) §I6.2.1(g)",
    "itemExpr": "'Lap 길이 (지점 ' + (idx + 1) + ') §I6.2.1(g)'",
@@ -2266,13 +2078,13 @@
     ],
     "defect": "uses the template H field and the load-analysis laps, not the lap check of the lap result"
    },
-   "id": "V-G2-66"
+   "id": "V-G2-62"
   },
   {
-   "line": 1358,
+   "line": 1084,
    "category": "G2. Lap 접합부",
    "item": "Lap 패스너 전단 (DCR)",
-   "status": "_lr.utilization != null ? _statusFromVerdict(_ratioVerdict(_lr.utilization, _lr.pass === true), _lr.utilization) : 'warn'",
+   "status": "_fg ? (_engineStatus(_fg) || 'pass') === 'pass' ? _statusFromVerdict(_v3(true), _lr.utilization) : _engineStatus(_fg) : (_lr.utilization != null ? _statusFromVerdict(_ratioVerdict(_lr.utilization, _lr.pass === true), _lr.utilization) : 'warn')",
    "outcomes": [
     "pass",
     "warn",
@@ -2301,12 +2113,12 @@
     "eng": "engine",
     "ref": "lap.fastener_group",
     "to": "host",
-    "checks": "lap utilization + pass"
+    "checks": "K3-6 (D4): the engine lap.fastener_group verdict (was \"not checked\" unless the whole lap passed)"
    },
-   "id": "V-G2-67"
+   "id": "V-G2-63"
   },
   {
-   "line": 1370,
+   "line": 1097,
    "category": "G2. Lap 접합부",
    "item": "Lap 휨강도 DCR (2겹 §F3/F4/H2)",
    "status": "_statusFromVerdict(_ratioVerdict(_lrGov, _lr.flexure_checked === true), _lrGov)",
@@ -2341,10 +2153,10 @@
     "to": "host",
     "checks": "flexure_dcr_governing + flexure_checked"
    },
-   "id": "V-G2-68"
+   "id": "V-G2-64"
   },
   {
-   "line": 1379,
+   "line": 1106,
    "category": "G2. Lap 접합부",
    "item": "Lap 접합부 종합 판정",
    "status": "_statusFromVerdict(_v3(_lr), null)",
@@ -2374,10 +2186,10 @@
     "to": "host",
     "checks": "lap three-state verdict"
    },
-   "id": "V-G2-69"
+   "id": "V-G2-65"
   },
   {
-   "line": 1390,
+   "line": 1117,
    "category": "G2. Lap 접합부",
    "item": "Lap 접합부 설계 실행 여부",
    "status": "'fail'",
@@ -2403,58 +2215,56 @@
     "to": "host",
     "checks": "laps + flexure result but no lap result → fail"
    },
-   "id": "V-G2-70"
+   "id": "V-G2-66"
   },
   {
-   "line": 1408,
+   "line": 1138,
    "category": "H. 일관성",
    "item": "Fy 일관성 (해석 vs 설계)",
-   "status": "Math.abs(fy - fyLoad) < 0.1 ? 'pass' : 'warn'",
+   "status": "_fyOk ? 'pass' : 'warn'",
    "outcomes": [
     "pass",
     "warn"
    ],
    "guards": [],
-   "criterion": "해석 응력 fy와 설계 Fy가 일치해야 함",
-   "note": "Math.abs(fy - fyLoad) >= 0.1 ? 'Fy 불일치 — 좌굴해석에 다른 Fy가 사용됨. 올바른 Fy로 해석을 재실행하세요.' : ''",
+   "criterion": "좌굴 해석의 기준응력과 설계 Fy 가 같으면 DSM 값을 그대로 쓴다",
+   "note": "_fyOk ? '' : '좌굴 해석이 다른 기준응력으로 돌았습니다(모델 loadFy) — 엔진이 DSM 값을 설계 Fy 로 다시 맞추는지 설계 결과의 경고를 확인하거나, 설계 Fy 로 해석을 다시 돌리세요.'",
    "dom": [
     "design-fy",
-    "input-fy",
     "tpl-H"
    ],
    "stateKeys": [
     "fy",
-    "fyLoad",
     "tplH"
    ],
-   "fields": [],
+   "fields": [
+    "analysisResult.curve",
+    "model.loadFy"
+   ],
    "numbers": [
-    "0.1"
+    "6"
    ],
    "annotation": {
-    "eng": "always",
+    "eng": "page",
     "to": "host",
-    "checks": "|design Fy field − ① Fy field| < 0.1 (display units)",
-    "hc": [
-     "0.1 (ksi or MPa — depends on the display)"
-    ],
-    "defect": "both fields mirror the same state since K2 (D-3) — always pass; the analysis reference stress (host loadFy, decision 3) is never compared"
+    "checks": "K3-6 (D6): the analysis reference stress (model loadFy) against the design Fy, in US units — warn when they differ"
    },
-   "id": "V-H-71"
+   "id": "V-H-67"
   },
   {
-   "line": 1418,
+   "line": 1149,
    "category": "H. 일관성",
    "item": "해석 최신성",
-   "status": "'pass'",
+   "status": "env.analysisCurrent === false ? 'fail' : 'pass'",
    "outcomes": [
-    "pass"
+    "pass",
+    "fail"
    ],
    "guards": [
     "if (model && model.node && analysisResult)"
    ],
-   "criterion": "해석이 현재 단면 형상과 일치해야 함",
-   "note": "해석 후 단면이 변경되었으면 재실행하여 결과를 갱신하세요.",
+   "criterion": "해석이 현재 단면 · 재료 · 해석 조건과 일치해야 함",
+   "note": "env.analysisCurrent === false ? '해석 뒤 단면 · 재료 · 경계조건 · 길이가 바뀌었습니다 — 해석을 다시 실행하세요.' : ''",
    "dom": [
     "tpl-H"
    ],
@@ -2466,67 +2276,46 @@
    ],
    "numbers": [],
    "annotation": {
-    "eng": "always",
+    "eng": "page",
+    "ref": "host _isAnalysisCurrent (model signature)",
     "to": "host",
-    "checks": "always pass when an analysis exists",
-    "defect": "does not compare signatures — says pass after the section changed"
+    "checks": "K3-6 (D6): fail when the host says the analysis is stale (was always pass)"
    },
-   "id": "V-H-72"
+   "id": "V-H-68"
   }
  ],
  "report": [
   {
-   "name": "generateDetailedReport",
-   "line": 1476,
-   "lines": 45,
-   "heads": [
-    "h1 CUFSM — 냉간성형강 설계 보고서",
-    "h2 #. 단면",
-    "h2 #. 탄성 좌굴 해석",
-    "h2 #. 설계 입력",
-    "h2 #. 하중 분석 결과",
-    "h2 #. 설계 계산 — «mtLabel»",
-    "h2 #. 설계 요약"
-   ],
+   "name": "buildReportDoc",
+   "line": 1548,
+   "lines": 28,
+   "heads": [],
    "dom": [],
    "stateKeys": [],
    "fields": [
-    "d.member_type"
+    "d.controlling_mode",
+    "d.design_method",
+    "d.governing_check",
+    "d.member_type",
+    "d.utilization"
    ],
    "derived": [],
    "calls": [
-    "_rptSection",
-    "_rptBuckling",
-    "_rptDesignInput",
-    "_rptLoadAnalysis",
-    "_rptDesignCalc",
-    "_rptSummary"
+    "_docSection",
+    "_docBuckling",
+    "_docDesignInput",
+    "_docLoadAnalysis",
+    "_docDesignCalc",
+    "_docSummary"
    ]
   },
   {
-   "name": "_rptSection",
-   "line": 1522,
-   "lines": 58,
-   "heads": [
-    "h3 단면 제원",
-    "h3 계산된 단면 성질"
-   ],
-   "dom": [
-    "select-template",
-    "tpl-B",
-    "tpl-D",
-    "tpl-H",
-    "tpl-r",
-    "tpl-t"
-   ],
-   "stateKeys": [
-    "templateType",
-    "tplB",
-    "tplD",
-    "tplH",
-    "tplR",
-    "tplT"
-   ],
+   "name": "_docSection",
+   "line": 1244,
+   "lines": 29,
+   "heads": [],
+   "dom": [],
+   "stateKeys": [],
    "fields": [
     "model.elem",
     "model.node",
@@ -2546,23 +2335,17 @@
     "p.xcg",
     "p.zcg"
    ],
-   "derived": [
-    "section / analysis values printed from the current input fields, not from the model or the analysis"
-   ],
+   "derived": [],
    "calls": []
   },
   {
-   "name": "_rptBuckling",
-   "line": 1581,
-   "lines": 97,
-   "heads": [
-    "h3 좌굴 곡선 (하중계수 vs. 반파장)",
-    "h3 DSM 설계값 (좌굴 곡선에서 추출)"
-   ],
+   "name": "_docDsm",
+   "line": 1274,
+   "lines": 21,
+   "heads": [],
    "dom": [],
    "stateKeys": [],
    "fields": [
-    "analysisResult.curve",
     "dM.LF_dist",
     "dM.LF_global",
     "dM.LF_local",
@@ -2585,70 +2368,47 @@
     "dP.crl",
     "dP.n_minima"
    ],
-   "derived": [
-    "curve drawn from the page copy of the analysis (scale ×1.15, minimum searched in the page)"
-   ],
+   "derived": [],
    "calls": []
   },
   {
-   "name": "_rptDesignInput",
-   "line": 1679,
-   "lines": 81,
-   "heads": [
-    "h3 재료",
-    "h3 부재 구성",
-    "h3 설계 하중",
-    "h3 데크 정보"
+   "name": "_docBuckling",
+   "line": 1296,
+   "lines": 20,
+   "heads": [],
+   "dom": [],
+   "stateKeys": [],
+   "fields": [
+    "analysisResult.curve"
    ],
+   "derived": [],
+   "calls": [
+    "_docDsm"
+   ]
+  },
+  {
+   "name": "_docDesignInput",
+   "line": 1317,
+   "lines": 50,
+   "heads": [],
    "dom": [
     ".span-tbl-lapl",
-    ".span-tbl-len",
-    "config-spacing",
-    "deck-fastener-spacing",
-    "deck-t-panel",
-    "design-fu",
-    "design-fy",
-    "input-steel-grade",
-    "select-deck-type",
-    "select-design-method",
-    "select-member-type",
-    "select-span-type"
+    ".span-tbl-len"
    ],
-   "stateKeys": [
-    "deckFastenerSpacing",
-    "deckTPanel",
-    "deckType",
-    "designMethod",
-    "fu",
-    "fy",
-    "memberType",
-    "presteelGrade",
-    "spacing",
-    "spanType"
-   ],
+   "stateKeys": [],
    "fields": [
-    "la.n_spans"
+    "la.input_loads_plf",
+    "la.n_spans",
+    "model.prop"
    ],
-   "derived": [
-    "E = 29500 ksi printed (constant, not the model E)",
-    "ν = 0.30 printed (constant, not the model ν)",
-    "line load = pressure × spacing computed in the page",
-    "blank input printed as a page default (0.018 · 12 · 5)"
-   ],
+   "derived": [],
    "calls": []
   },
   {
-   "name": "_rptLoadAnalysis",
-   "line": 1761,
-   "lines": 155,
-   "heads": [
-    "h3 소요강도 포락 (대표 조합: «rptGov.combo»)",
-    "h3 양력 지배 하중조합: «la.uplift.combo»",
-    "h3 하중조합 상세 («la.design_method», ASCE 7)",
-    "h3 자동 결정 설계 매개변수",
-    "h3 처짐 검토 (사용하중: «la.deflection.combo»)",
-    "h3 처짐 검토"
-   ],
+   "name": "_docLoadAnalysis",
+   "line": 1368,
+   "lines": 92,
+   "heads": [],
    "dom": [],
    "stateKeys": [],
    "fields": [
@@ -2659,6 +2419,9 @@
     "ap.unbraced",
     "ap.uplift_R",
     "ap.uplift_R_basis",
+    "c.basis",
+    "c.case",
+    "c.per_span",
     "cd.factors",
     "cd.governs_gravity",
     "cd.governs_overall",
@@ -2669,402 +2432,126 @@
     "la.all_combos_detail",
     "la.auto_params",
     "la.deflection",
+    "la.deflection_cases",
     "la.design_method",
     "la.governing",
     "la.gravity",
     "la.input_loads_plf",
+    "la.laps_per_support",
     "la.spans_ft",
+    "la.supports",
     "la.uplift",
-    "loc.Mu",
-    "loc.R_bearing",
-    "loc.R_uplift",
-    "loc.Ru",
-    "loc.Vu",
-    "loc.combo",
-    "loc.name",
-    "loc.pattern",
-    "loc.region",
-    "loc.x_ft",
-    "ps.L_over_delta",
-    "ps.abs_delta_in",
-    "ps.span",
-    "ps.x_ft",
-    "rptGov.M_diagram",
-    "rptGov.V_diagram",
-    "rptGov.combo",
-    "rptGov.locations",
-    "rptGov.x_diagram"
-   ],
-   "derived": [],
-   "calls": [
-    "renderBeamSchematic",
-    "renderDiagramSVG"
-   ]
-  },
-  {
-   "name": "_rptDesignCalc",
-   "line": 1917,
-   "lines": 56,
-   "heads": [
-    "h3 조합 검토 — §H1.2 (Eq. «( ir.equation||'H1.2-1')»)",
-    "h3 휨 + 전단 조합 검토 — §H2 (Eq. «(si.equation||'H2-1')»)",
-    "h3 계산 단계 요약"
-   ],
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "d.design_method",
-    "d.interaction",
-    "d.member_type",
-    "d.shear_interaction",
-    "d.steps",
-    "ir.Mx_ratio",
-    "ir.My_ratio",
-    "ir.P_ratio",
-    "ir.equation",
-    "ir.total",
-    "si.M_ratio",
-    "si.Malo",
-    "si.Mnlo",
-    "si.V_ratio",
-    "si.equation",
-    "si.total"
-   ],
-   "derived": [],
-   "calls": [
-    "_rptFlexure",
-    "_rptCompression",
-    "_rptCombined",
-    "_rptTension"
-   ]
-  },
-  {
-   "name": "_rptFlexure",
-   "line": 1974,
-   "lines": 205,
-   "heads": [
-    "h2 1) 부모멘트 구간 (-M)",
-    "h3 단계 1: 항복 모멘트, M",
-    "h3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2",
-    "h3 단계 3: 국부좌굴 — §F3.2",
-    "h3 단계 4: 뒤틀림좌굴 — §F4",
-    "h3 단계 5: 부모멘트 구간 (-M) 공칭강도 & 설계강도",
-    "h3 단계 5: 공칭강도 & 설계강도",
-    "h2 2) 정모멘트 구간 (+M)",
-    "h3 단계 1: 항복 모멘트, M",
-    "h3 단계 2: 전체좌굴 / 횡-비틀림좌굴 — §F2 (정모멘트)",
-    "h3 단계 3: 국부좌굴 — §F3.2 (정모멘트)",
-    "h3 단계 4: 뒤틀림좌굴 — §F4 (정모멘트)",
-    "h3 단계 5: 공칭강도 & 설계강도 (정모멘트)",
-    "h2 종합 판정",
-    "h3 §A3.3.2 Cold Work of Forming",
-    "h3 Lap Splice 접합부 검토 (§I6.2.1, §J3/§J4)"
-   ],
-   "dom": [
-    "design-Cb",
-    "design-Lb"
-   ],
-   "stateKeys": [
-    "Cb",
-    "Lb"
-   ],
-   "fields": [
-    "cw.Bc",
-    "cw.C",
-    "cw.R_over_t",
-    "cw.increase_pct",
-    "cw.m",
-    "d.Fy_original",
-    "d.Fy_used",
-    "d.Mn",
-    "d.Mn_omega",
-    "d.Mnd",
-    "d.Mne",
-    "d.Mnl",
-    "d.My",
-    "d.R_uplift",
-    "d.cold_work",
-    "d.controlling_mode",
-    "d.design_strength",
-    "d.phi_Mn",
-    "d.positive_region",
-    "d.utilization",
-    "lr.Mn_lap",
-    "lr.V_transfer",
-    "lr.capacity",
-    "lr.fastener_label",
-    "lr.flexure_checked",
-    "lr.flexure_dcr",
-    "lr.flexure_dcr_governing",
-    "lr.lap_left_in",
-    "lr.lap_ok",
-    "lr.min_lap",
-    "lr.n_per_row",
-    "lr.n_rows",
-    "lr.n_total",
-    "lr.pass",
-    "lr.phi_Mn_lap",
-    "lr.spacing",
-    "lr.steps",
-    "lr.utilization",
-    "pr.Cb",
-    "pr.Fcre",
-    "pr.Lb",
-    "pr.Mn",
-    "pr.Mnd",
-    "pr.Mne",
-    "pr.Mnl",
-    "pr.Mu_pos",
-    "pr.equation",
-    "pr.phi_Mn",
-    "pr.utilization",
-    "prV.cls",
-    "prV.short"
-   ],
-   "derived": [
-    "% local reduction = 1 − Mnl/Mne",
-    "2.78·Fy and 0.56·Fy computed to classify the positive-region LTB zone",
-    "φ / Ω printed from page constants (0.90/1.67, 0.85/1.80), not design_checks factor",
-    "a stress printed with a literal \"ksi\" (not converted in SI)",
-    "Lb(−) / Cb(−) printed from the current input fields, not from the result"
-   ],
-   "calls": [
-    "_verdictListsHtml"
-   ]
-  },
-  {
-   "name": "_rptCompression",
-   "line": 2180,
-   "lines": 38,
-   "heads": [
-    "h3 단계 1: 항복 하중, P",
-    "h3 단계 2: 전체좌굴 — §E2",
-    "h3 단계 3: 국부좌굴 — §E3.2",
-    "h3 단계 4: 뒤틀림좌굴 — §E4",
-    "h3 단계 5: 공칭강도 & 설계강도"
-   ],
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "d.Pn",
-    "d.Pn_omega",
-    "d.Pnd",
-    "d.Pne",
-    "d.Pnl",
-    "d.Py",
-    "d.controlling_mode",
-    "d.phi_Pn"
-   ],
-   "derived": [
-    "φ / Ω printed from page constants (0.90/1.67, 0.85/1.80), not design_checks factor"
-   ],
-   "calls": []
-  },
-  {
-   "name": "_rptCombined",
-   "line": 2219,
-   "lines": 17,
-   "heads": [
-    "h3 압축 강도",
-    "h3 휨 강도 (x축)",
-    "h3 §C1 모멘트 확대 (P-&delta; 효과)"
-   ],
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "amp.Mux_amp",
-    "amp.PEx",
-    "amp.alpha_x",
-    "c.Pn",
-    "c.controlling_mode",
-    "c.design_strength",
-    "d.amplification",
-    "d.compression",
-    "d.flexure_x",
-    "f.Mn",
-    "f.controlling_mode",
-    "f.design_strength"
+    "p.L_over_delta",
+    "p.abs_delta_in",
+    "p.span",
+    "p.x_ft"
    ],
    "derived": [],
    "calls": []
   },
   {
-   "name": "_rptTension",
-   "line": 2237,
-   "lines": 13,
-   "heads": [
-    "h3 §D2 — 총단면 인장항복",
-    "h3 §D3 — 순단면 인장파단"
-   ],
+   "name": "_checkBlocks",
+   "line": 1462,
+   "lines": 5,
+   "heads": [],
    "dom": [],
    "stateKeys": [],
-   "fields": [
-    "d.Tn_rupture",
-    "d.Tn_yield",
-    "d.controlling_mode",
-    "d.design_strength"
-   ],
-   "derived": [
-    "tension φt / Ωt printed as constants"
-   ],
+   "fields": [],
+   "derived": [],
    "calls": []
   },
   {
-   "name": "_rptSummary",
-   "line": 2251,
-   "lines": 118,
+   "name": "_noticeBlocks",
+   "line": 1467,
+   "lines": 10,
+   "heads": [],
+   "dom": [],
+   "stateKeys": [],
+   "fields": [],
+   "derived": [],
+   "calls": []
+  },
+  {
+   "name": "_docDesignCalc",
+   "line": 1478,
+   "lines": 39,
    "heads": [],
    "dom": [],
    "stateKeys": [],
    "fields": [
-    "c.name",
+    "d.purlin_mode",
+    "d.purlin_regions",
+    "p.Mu",
+    "p.Vu",
+    "p.assumptions",
+    "p.check_point",
+    "p.combination",
+    "p.error",
+    "p.host_assumption",
+    "p.pass",
+    "p.utilization"
+   ],
+   "derived": [],
+   "calls": [
+    "_checkBlocks"
+   ]
+  },
+  {
+   "name": "_docSummary",
+   "line": 1518,
+   "lines": 28,
+   "heads": [],
+   "dom": [],
+   "stateKeys": [],
+   "fields": [
+    "c.capacity",
+    "c.clause",
+    "c.demand",
+    "c.governs",
+    "c.id",
+    "c.name_ko",
     "c.ratio",
-    "d.Mn",
-    "d.Pn",
+    "c.verdict",
     "d.controlling_mode",
     "d.design_method",
-    "d.design_strength",
     "d.dsm_warnings",
     "d.governing_check",
-    "d.interaction",
-    "d.limit_state_checks",
     "d.member_type",
-    "d.positive_region",
+    "d.purlin_assumptions",
     "d.purlin_governing",
     "d.purlin_mode",
     "d.purlin_not_evaluated",
-    "d.purlin_regions",
     "d.purlin_warnings",
     "d.spec_sections",
     "d.utilization",
     "la.governing",
-    "la.gravity",
-    "la.n_spans"
+    "la.gravity"
    ],
    "derived": [],
    "calls": [
-    "_verdictListsHtml"
+    "_noticeBlocks"
    ]
   },
   {
-   "name": "_verdictListsHtml",
-   "line": 124,
-   "lines": 41,
-   "heads": [],
-   "dom": [],
-   "stateKeys": [],
-   "fields": [],
-   "derived": [],
-   "calls": []
-  },
-  {
-   "name": "_requiredMoment",
-   "line": 210,
-   "lines": 8,
+   "name": "buildBucklingDoc",
+   "line": 1578,
+   "lines": 27,
    "heads": [],
    "dom": [],
    "stateKeys": [],
    "fields": [
-    "c.name",
-    "d.Mu",
-    "d.Mu_checked",
-    "d.design_strength",
-    "d.limit_state_checks",
-    "f.ratio"
-   ],
-   "derived": [
-    "required moment Mu = ratio × design strength when the result has no Mu (page-derived demand)"
-   ],
-   "calls": []
-  },
-  {
-   "name": "renderBeamSchematic",
-   "line": 225,
-   "lines": 110,
-   "heads": [],
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "loc.x_ft"
-   ],
-   "derived": [],
-   "calls": []
-  },
-  {
-   "name": "renderDiagramSVG",
-   "line": 336,
-   "lines": 143,
-   "heads": [],
-   "dom": [],
-   "stateKeys": [],
-   "fields": [],
-   "derived": [],
-   "calls": []
-  },
-  {
-   "name": "_buildBucklingReportHtml",
-   "line": 2370,
-   "lines": 36,
-   "heads": [
-    "h1 좌굴해석 결과 보고서 (FSM — Signature Curve)",
-    "h2 해석 조건",
-    "h2 DSM 설계값",
-    "h2 "
-   ],
-   "dom": [
-    "dsm-table-container",
-    "input-fu",
-    "input-fy",
-    "input-len-max",
-    "input-len-min",
-    "input-len-n",
-    "select-bc",
-    "select-load-case",
-    "select-template",
-    "tpl-B",
-    "tpl-D",
-    "tpl-H",
-    "tpl-t"
-   ],
-   "stateKeys": [
-    "analysisBC",
-    "analysisLenMax",
-    "analysisLenMin",
-    "analysisLenN",
-    "analysisLoadCase",
-    "fuPre",
-    "fyLoad",
-    "templateType",
-    "tplB",
-    "tplD",
-    "tplH",
-    "tplT"
-   ],
-   "fields": [
+    "model.BC",
     "model.elem",
-    "model.node"
+    "model.lengths",
+    "model.loadCase",
+    "model.loadFy",
+    "model.node",
+    "model.prop"
    ],
-   "derived": [
-    "section / analysis values printed from the current input fields, not from the model or the analysis"
-   ],
+   "derived": [],
    "calls": [
-    "_canvasPng"
+    "_docBuckling"
    ]
-  },
-  {
-   "name": "_canvasPng",
-   "line": 480,
-   "lines": 9,
-   "heads": [],
-   "dom": [],
-   "stateKeys": [],
-   "fields": [
-    "c.toDataURL"
-   ],
-   "derived": [
-    "chart = PNG of the on-screen canvas (needs the page)"
-   ],
-   "calls": []
   }
  ]
 }

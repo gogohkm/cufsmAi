@@ -453,6 +453,9 @@ export const SI_OUT_LOADS: Table = {
     ...MEMBER_KEYS,
     // 엔진 6b283a5: 포락선 측점마다의 조합 · 패턴 — 격자 색인 · 하중 경우 · 패턴 번호의 연속 구간([시작, 개수, 경우, 패턴]), 랩 끝의 이웃 격자점. 단위 없음
     envelope_source: { '*': 'none' }, D_envelope_source: { '*': 'none' }, source_stations: 'none',
+    // 엔진 65e5ed6: 지점 면마다의 출처 [조합, 패턴, 부호] 와 지점 모멘트의 출처 — 색인 · 부호, 단위 없음. 표시 반올림 자릿수도
+    V_left_source: 'none', V_right_source: 'none', M_source: 'none', display_rounding: 'keepUS',
+    Vu_left_unrounded: 'force', Vu_right_unrounded: 'force',
     ...Object.fromEntries(['Mu', 'Mu_max', 'Mu_min', 'M1', 'M2', 'MA', 'MB', 'MC', 'Mmax', 'M_max_abs',
         'max_abs_M', 'max_neg_M', 'max_pos_M', 'M_diagram', 'M_envelope_max', 'M_envelope_min',
         'Mu_kipft'].map((k) => [k, 'moment_ft' as const])),
@@ -529,26 +532,44 @@ export const SI_OUT_PURLIN: Table = {
     ...SI_OUT_MEMBER,
 };
 
-/** generate_report 묶음. */
-export const SI_OUT_REPORT: Table = {
-    section_props: SI_OUT_PROPS, cutwp_props: SI_OUT_PROPS,
-    dsm_P: SI_OUT_DSM_P, dsm_Mxx: SI_OUT_DSM_M, dsm_Mzz: SI_OUT_DSM_M,
-    prepared_design_dsm: { P: SI_OUT_DSM_P, Mxx: SI_OUT_DSM_M, Mzz: SI_OUT_DSM_M },
-    load_analysis: SI_OUT_LOADS,
-    design_result: (v: any) => (v && typeof v === 'object' && 'load_analysis' in v ? SI_OUT_PURLIN : SI_OUT_MEMBER),
-    model_summary: 'keepUS', analysis_meta: 'keepUS',
-    ...SI_OUT_MEMBER,
+/**
+ * K3-7: 보고서 데이터(ReportDoc — webview/js/review.js buildReportDoc · buildBucklingDoc) US → SI. 수는 모두 `{value, quantity}` 또는
+ * 수열 `{values, quantity}` 꼴이라 키 이름이 아니라 quantity 로 바꾼다(검토 항목 계약의 어휘 + 보고서의 ft · kip-ft · psf · plf ·
+ * 횡강성). 그 꼴이 아닌 수(예상하지 않은 자리)는 바꾸지 않고 `unconverted` 에 경로를 남긴다 — 시험은 그것이 비었음을 본다.
+ * 검토 항목(블록 check 의 check)은 design_checks 와 같은 표(SI_OUT_DESIGN_CHECK 의 check)로.
+ */
+const REPORT_QUANTITY_UNITS: Record<string, UnitKey | 'none'> = {
+    ...QUANTITY_UNITS, length_ft: 'length_ft', moment_ft: 'moment_ft', pressure: 'pressure', linload: 'linload', lat_stiff: 'lat_stiff',
 };
-
-/** validate_design 묶음. */
-export const SI_OUT_VALIDATE: Table = {
-    props: SI_OUT_PROPS, cutwp: SI_OUT_PROPS,
-    dsm_P: SI_OUT_DSM_P, dsm_Mxx: SI_OUT_DSM_M, dsm_Mzz: SI_OUT_DSM_M,
-    last_load_analysis: SI_OUT_LOADS,
-    last_design_result: (v: any) => (v && typeof v === 'object' && 'load_analysis' in v ? SI_OUT_PURLIN : SI_OUT_MEMBER),
-    status: 'keepUS',
-    ...SI_OUT_MEMBER,
-};
+const REPORT_BARE_OK = new Set(['digits', 'US', 'SI']);
+export function reportDocToSI(doc: any): { value: any; unconverted: string[] } {
+    const unconverted: string[] = [];
+    const conv = (v: any, unit: UnitKey | 'none'): any => (Array.isArray(v) ? v.map((x) => conv(x, unit))
+        : (typeof v === 'number' ? convNum(v, unit, 'toSI') : v));
+    const walkDoc = (v: any, p: string, key: string): any => {
+        if (Array.isArray(v)) { return v.map((x, i) => walkDoc(x, `${p}[${i}]`, key)); }
+        if (typeof v === 'number') { if (!REPORT_BARE_OK.has(key)) { unconverted.push(p || '(root)'); } return v; }
+        if (v === null || typeof v !== 'object') { return v; }
+        if (v.kind === 'check' && v.check && typeof v.check === 'object') {
+            const r = convertOutputSIDeep({ check: v.check }, SI_OUT_DESIGN_CHECK);
+            for (const u of r.unconverted) { unconverted.push(`${p}.${u}`); }
+            return { ...v, check: r.value.check };
+        }
+        const q = typeof v.quantity === 'string' && ('value' in v || 'values' in v);
+        const unit: UnitKey | 'none' | undefined = q ? (v.unbounded === true ? 'none' : REPORT_QUANTITY_UNITS[v.quantity]) : undefined;
+        if (q && unit === undefined) { unconverted.push(`${p} (unknown quantity '${String(v.quantity)}')`); }
+        const out: any = {};
+        for (const [k, x] of Object.entries(v)) {
+            const pk = p ? `${p}.${k}` : k;
+            if (q && (k === 'value' || k === 'values')) { out[k] = unit === undefined ? x : conv(x, unit); continue; }
+            out[k] = walkDoc(x, pk, k);
+        }
+        return out;
+    };
+    const value = walkDoc(doc, '', '');
+    if (value && value.meta && typeof value.meta === 'object') { value.meta = { ...value.meta, units: 'SI' }; }
+    return { value, unconverted };
+}
 
 // ============================================================
 // 입력 표 — 도구 이름 → 인자 단위 (SI 일 때만 쓴다)

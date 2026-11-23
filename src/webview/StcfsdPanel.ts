@@ -8,7 +8,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as os from 'os';
-import * as cp from 'child_process';
 import * as fs from 'fs';
 import { PythonBridge } from '../bridge/PythonBridge';
 import { ProjectExplorerProvider } from './ProjectExplorerProvider';
@@ -25,6 +24,10 @@ import { toDesignInputs13, toCaseRecord, migrateProject, readDesignInputs, Migra
 import { mcpWrite } from '../case/mcpGroups';
 import { buildReviewDoc, modelAnalysisDrafts, selectOptionsFromHtml } from '../case/reviewInput';
 import { HTML_MARKER, PDF_MARKER, pickTarget, reportDir, safeBaseName, writeVia } from '../case/reportFiles';
+import { reportDocToSI } from '../mcp/siUnits';
+import { printHtmlToPdf, REPORT_CSP, withCsp } from '../case/pdfPrint';
+// 경로 마디의 규칙 하나(기록 갈래와 같은 것 — 장치 이름 · 숨김 · 금지 글자 · 글 방향 글자 · 끝의 점 / 공백)
+import { segmentError } from '../records/names';
 import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, UNIT_LABEL } from '../mcp/siUnits';
 import {
     buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts, isCalcMode,
@@ -234,6 +237,10 @@ export class StcfsdPanel implements McpPanelInterface {
             doc: buildReviewDoc({ inputs, spans: k.state.spans, unitSystem: us, options: this._reviewOptions }),
             unitSystem: us, model: v.model, analysisResult: v.analysis, lastDsmResult: v.dsm, lastProps: ctx.props,
             design: ctx.lastDesign, load: v.load, lap: k.pageLap,
+            // K3-6(D6): 해석의 최신성(모델 서명) — 호스트만 안다
+            analysisCurrent: v.analysis ? this._isAnalysisCurrent() : undefined,
+            // K3-7: 보고서 데이터의 SI — MCP 와 같은 변환(siUnits)
+            reportToSI: (doc: any) => reportDocToSI(doc).value,
         };
     }
     private _reviewOptions: Record<string, { value: string; text: string }[]> | null = null;
@@ -250,11 +257,27 @@ export class StcfsdPanel implements McpPanelInterface {
         return REVIEW.withIds(REVIEW.make(env || this._reviewEnv()).runAllValidationChecks());
     }
 
-    /** K3-5: 상세 보고서 HTML. 설계 · 하중 결과가 모두 없으면 null(force 면 그래도 — 지금 화면의 단위 전환 동작) */
-    private _reportHtml(unitSystem?: 'SI' | 'US', force = false): string | null {
+    /**
+     * K3-7: 상세 보고서의 데이터(ReportDoc) — 그 단위로(US 는 엔진 값 그대로, SI 는 reportDocToSI). 설계 · 하중 결과가 모두 없으면 null
+     * (force 면 그래도). opts = 안쪽 고리(stamp · appendSections — 기록 갈래).
+     */
+    private _reportDoc(unitSystem?: 'SI' | 'US', force = false, opts: { stamp?: any; appendSections?: any[] } = {}): any | null {
         const env = this._reviewEnv(unitSystem);
         if (!force && !env.design && !env.load) { return null; }
-        return REVIEW.make(env).generateDetailedReport();
+        const doc = REVIEW.make(env).buildReportDoc(opts);
+        return env.unitSystem === 'SI' ? reportDocToSI(doc).value : doc;
+    }
+    /** K3-5 · K3-7: 상세 보고서 HTML(ReportDoc 을 그린 것) */
+    private _reportHtml(unitSystem?: 'SI' | 'US', force = false): string | null {
+        const doc = this._reportDoc(unitSystem, force);
+        return doc ? REVIEW.renderReportDoc(doc) : null;
+    }
+    /** K3-7: 좌굴 보고서의 데이터 — 그 단위로 */
+    private _bucklingDoc(page: { charts?: Record<string, string>; headless?: boolean }, unitSystem?: 'SI' | 'US', opts: { stamp?: any } = {}): any {
+        const env = this._reviewEnv(unitSystem);
+        const doc = REVIEW.make(env).buildBucklingDoc(page);
+        if (opts.stamp && typeof opts.stamp === 'object') { doc.meta.stamp = opts.stamp; }
+        return env.unitSystem === 'SI' ? reportDocToSI(doc).value : doc;
     }
 
     /**
@@ -262,16 +285,9 @@ export class StcfsdPanel implements McpPanelInterface {
      * 화면이 없으면(headless) 서명곡선 SVG · DSM 값 표와 「화면 없이 만든 보고서」 라는 글.
      */
     private _bucklingReportHtml_(page: { charts?: Record<string, string>; dsmHtml?: string | null; headless?: boolean }, unitSystem?: 'SI' | 'US'): string {
-        const env = this._reviewEnv(unitSystem);
-        const extra = new Map<string, any>();
-        if (typeof page.dsmHtml === 'string') { extra.set('dsm-table-container', { innerHTML: page.dsmHtml }); }
-        for (const [id, png] of Object.entries(page.charts || {})) {
-            if (typeof png === 'string' && png.startsWith('data:image/png;base64,')) { extra.set(id, { toDataURL: () => png }); }
-        }
-        const base = env.doc;
-        env.doc = { ...base, getElementById: (id: string) => extra.get(id) || base.getElementById(id) };
-        const R = REVIEW.make(env);
-        return page.headless ? R.buildBucklingReportHeadless() : R.buildBucklingReportHtml();
+        // K3-7: 화면이 보낸 DSM 표의 HTML(dsmHtml)은 쓰지 않는다 — DSM 값은 호스트가 쥔 결과에서 표로(글을 그대로 넣지 않는다).
+        // 그림은 data:image/png;base64 만(buildBucklingDoc 이 거른다).
+        return REVIEW.renderReportDoc(this._bucklingDoc({ charts: page.charts, headless: page.headless }, unitSystem));
     }
 
     /**
@@ -333,23 +349,24 @@ export class StcfsdPanel implements McpPanelInterface {
      * K3-5: 보고서 파일을 만든다 — MCP generate_report 와 호스트 안의 호출자(기록 갈래 R5 — 프로젝트의 03_계산서/)가 같이 쓴다.
      * internal 은 **호스트 코드만** 준다(AI 가 줄 수 없다): folder(쓰는 폴더 — 진짜 경로의 보통 폴더여야, 링크 거절),
      * stamp(ReportDoc.meta.stamp — {kind 'draft' | 'issued', label?, notChecked?, reviewer?, date?}, 쪽마다 머리에),
-     * appendSections([{title, html}] — 보고서 끝(맺음말 앞)에 덧붙일 절: 가정 · 검토 기록 …).
+     * appendSections([{title, blocks}] — ReportDoc.sections 끝에 덧붙일 절: 가정 · 검토 기록 …. blocks 는 ReportDoc 블록
+     * (reportRender.js 머리말) — 글은 모두 이스케이프된다. K3-7: HTML 은 받지 않는다 — {title, text} 나 옛 {title, html} 의 글은 문단 하나(글 그대로)).
      */
     public async generateReportFiles(opts: { kind?: string; format?: string; detail?: string; units?: string },
-        internal: { folder?: string; stamp?: any; appendSections?: { title: string; html: string }[] } = {}): Promise<any> {
+        internal: { folder?: string; stamp?: any; appendSections?: { title: string; blocks?: any[]; text?: string; html?: string }[] } = {}): Promise<any> {
         const options: any = { kind: opts.kind, format: opts.format, detail: opts.detail, report_units: opts.units };
         const us: 'SI' | 'US' = options?.report_units === 'SI' ? 'SI' : 'US';
         const kind = options?.kind === 'buckling' ? 'buckling' : 'design';
         const format = options?.format === 'html' ? 'html' : options?.format === 'pdf' ? 'pdf' : 'both';
-        let inner: string | null;
+        let doc: any;
         if (kind === 'buckling') {
-            inner = this._isAnalysisCurrent() || this._caseKeeper.pageView.analysis ? this._bucklingReportHtml_({ headless: true }, us) : null;
-            if (!inner) { return { error: 'No buckling analysis — run_analysis first.' }; }
+            doc = this._isAnalysisCurrent() || this._caseKeeper.pageView.analysis ? this._bucklingDoc({ headless: true }, us, { stamp: internal.stamp }) : null;
+            if (!doc) { return { error: 'No buckling analysis — run_analysis first.' }; }
         } else {
-            inner = this._reportHtml(us);
-            if (!inner) { return { error: 'No design or load-analysis result to report — run a design tool, design_purlin, analyze_loads or run_case_check first.' }; }
+            doc = this._reportDoc(us, false, { stamp: internal.stamp, appendSections: internal.appendSections });
+            if (!doc) { return { error: 'No design or load-analysis result to report — run a design tool, design_purlin, analyze_loads or run_case_check first.' }; }
         }
-        inner = REVIEW.composeReport(inner, { stamp: internal.stamp, appendSections: internal.appendSections }) as string;
+        const inner: string = REVIEW.renderReportDoc(doc);
         const page = kind === 'buckling' ? this._buildPrintableBucklingHtmlFrom(inner) : REVIEW.printableReportHtml(inner);
         const html = HTML_MARKER + '\n' + page;
         const { dir, where } = internal.folder ? reportDir(null, internal.folder) : reportDir(this._casePath);
@@ -366,18 +383,20 @@ export class StcfsdPanel implements McpPanelInterface {
         if (format !== 'html') {
             const target = pickTarget(dir, stem, 'pdf');
             let printed = true;
+            // V7-03: 인쇄가 끝나지 않거나 실패하면 예외가 아니라 응답의 pdf_note(HTML 은 그대로 있다)
             await writeVia(target, async (tmp) => {
                 printed = await this._printHtmlToPdf(page, tmp);
                 if (!printed) { throw new Error('no PDF printer'); }
                 fs.appendFileSync(tmp, PDF_MARKER);
-            }).catch((e) => { if (printed) { throw e; } });
+            }).catch((e) => { if (printed) { printed = false; pdfNote = 'The PDF was not written: ' + (e?.message || String(e)) + ' (the HTML is).'; } });
             if (printed) {
                 files.pdf = target;
                 const txt = fs.readFileSync(target).toString('latin1');
                 pages = (txt.match(/\/Type\s*\/Page\b(?!s)/g) || []).length;
-            } else { pdfNote = 'No Edge/Chrome found — the PDF was not written (the HTML is).'; }
+            } else if (!pdfNote) { pdfNote = 'No Edge/Chrome found — the PDF was not written (the HTML is).'; }
         }
-        const sections = [...inner.matchAll(/<h[12][^>]*>([^<]*)<\/h[12]>/g)].map((m) => m[1].replace(/&amp;/g, '&').trim()).filter(Boolean);
+        // K3-7: 절 이름은 ReportDoc 에서(HTML 을 다시 읽지 않는다)
+        const sections = [String(doc.meta?.title || ''), ...(doc.sections || []).map((x: any, i: number) => `${i + 1}. ${x.title}`)].filter(Boolean);
         const env = this._reviewEnv(us);
         const n = this._resultNotices([env.design, env.lap, env.load]);
         const d = env.design;
@@ -390,6 +409,8 @@ export class StcfsdPanel implements McpPanelInterface {
             detail: options?.detail === 'full' ? 'full' : 'summary',
         };
         if (options?.detail === 'full') { out.html = inner; } else { out.more = "detail: 'full' adds the report HTML."; }
+        // K3-7: 새 화면 · 기록이 그릴 수 있는 데이터(그 단위)는 호스트 안의 호출자에게만(MCP 응답에는 넣지 않는다 — 크기)
+        Object.defineProperty(out, 'doc', { value: doc, enumerable: false });
         return out;
     }
 
@@ -400,10 +421,11 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /** 시험: 호스트가 만든 검증 항목 · 보고서 HTML(화면이 만든 것과 맞댄다 — test/rendered/k3) */
-    public __testReview(unitSystem?: 'SI' | 'US'): { validation: any[]; reportHtml: string; bucklingHtml: string } {
+    public __testReview(unitSystem?: 'SI' | 'US'): { validation: any[]; reportHtml: string; bucklingHtml: string; reportDoc: any } {
         if (!isTestMode()) { throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1'); }
         const R = REVIEW.make(this._reviewEnv(unitSystem));
-        return { validation: R.runAllValidationChecks(), reportHtml: R.generateDetailedReport(), bucklingHtml: R.buildBucklingReportHtml() };
+        return { validation: R.runAllValidationChecks(), reportHtml: R.generateDetailedReport(), bucklingHtml: R.buildBucklingReportHtml(),
+            reportDoc: this._reportDoc(unitSystem, true) };
     }
 
     public __testGetHtml(): string {
@@ -592,11 +614,6 @@ export class StcfsdPanel implements McpPanelInterface {
                     : this._bucklingReportHtml_(message.data || {}, StcfsdPanel._unitOf(message.data)));
                 break;
 
-            case 'saveReportPdf':
-                // 옛 화면(K3 전)의 길 — 화면이 만든 인쇄용 HTML. K3 화면은 saveReport 를 보낸다.
-                await this._saveReportPdf(message.data);
-                break;
-
             case 'runValidation': {
                 // K3-3: 「설계 검증 실행」 — 호스트가 만든 항목(webview/js/review.js, MCP validate_design 과 같은 목록). 단위는 화면의 것
                 const env = this._reviewEnv(StcfsdPanel._unitOf(message.data));
@@ -608,12 +625,15 @@ export class StcfsdPanel implements McpPanelInterface {
                 // K3-5: 「상세 보고서 생성」 · 단위 전환 뒤 다시 그리기(force — 지금 화면 그대로, 결과가 없어도 만든다: 부록 D9)
                 const html = this._reportHtml(StcfsdPanel._unitOf(message.data), message.data?.force === true);
                 this._lastReportHtml = html;
-                this._postMessage('reportResult', { html, case_rev: this._caseKeeper.state.rev, reason: message.data?.reason === 'units' ? 'units' : undefined });
+                this._postMessage('reportResult', { html, doc: html ? this._reportDoc(StcfsdPanel._unitOf(message.data), message.data?.force === true) : null,
+                    case_rev: this._caseKeeper.state.rev, reason: message.data?.reason === 'units' ? 'units' : undefined });
                 break;
             }
 
+            // V7-02: 옛 화면의 saveReportPdf {html} — 화면이 보낸 HTML 은 인쇄하지 않는다 — 호스트가 만든 보고서만(saveReport 와 같게)
+            case 'saveReportPdf':
             case 'saveReport':
-                // K3-5: 「PDF 저장」 — 화면에 보이는 보고서(마지막으로 보낸 것)를 인쇄용으로 감싸 사람이 고른 곳에
+                // K3-5: 「PDF 저장」 — 화면에 보이는 보고서(호스트가 마지막으로 만들어 보낸 것)를 인쇄용으로 감싸 사람이 고른 곳에
                 await this._saveReportPdf({ html: REVIEW.printableReportHtml(this._lastReportHtml ?? this._reportHtml(undefined, true) ?? '') });
                 break;
 
@@ -2386,12 +2406,9 @@ export class StcfsdPanel implements McpPanelInterface {
             const below = home ? path.relative(home, target) : target;
             for (const seg of below.split(/[\\/]+/).filter(Boolean)) {
                 if (/^[A-Za-z]:$/.test(seg)) { continue; }
-                if (seg.startsWith('.')) {
-                    return `${action} failed: hidden files and folders (a name starting with '.') are not accepted`;
-                }
-                if (win && /[. ]$/.test(seg)) {
-                    return `${action} failed: a name ending in '.' or a space is not accepted`;
-                }
+                // K3-6(기록 작성자): 장치 이름(NUL · CON · COM1 … — 확장자가 붙어도, 대소문자 없이)을 포함해 src/records/names.ts 의 한 규칙으로
+                const e = segmentError(seg);
+                if (e) { return `${action} failed: ${e} — not accepted ('${seg}')`; }
             }
             return null;
         };
@@ -2673,17 +2690,67 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /**
+     * K3-6(엔진 작성자 · 계약 §6.1): 포락선 격자점 i 의 값(key = M_max · M_min · V_max · V_min)을 만든 조합 · 패턴 —
+     * 하중 해석의 envelope_source 런 [start, count, combo_index, pattern_index] 에서. 없으면 null.
+     */
+    private static _envSource(env: any, key: string, i: number | undefined): string | null {
+        const src = env?.envelope_source;
+        const runs = src?.[key];
+        if (!Array.isArray(runs) || i === undefined || !Array.isArray(env?.combos)) { return null; }
+        const run = runs.find((r: any) => Array.isArray(r) && i >= r[0] && i < r[0] + r[1]);
+        if (!run) { return null; }
+        const pat = Array.isArray(src.patterns) ? src.patterns[run[3]] : undefined;
+        return StcfsdPanel._comboLabel(env.combos[run[2]], pat);
+    }
+
+    /**
+     * K3-6: 검토 지점의 조합 꼬리표. 출처 m (모멘트) · v (전단) · r (지점 반력, 웹 크리플링)이 모두 같으면 그 조합 하나(demand_basis
+     * 'combination'), 다르면 'M: … | V: …'(그 짝은 동시 값이 아니다 — 계약 §6.2) 과 가정 한 줄. 출처를 모르면 옛 판단(_demandCombination).
+     */
+    private static _pairLabel(m: string | null, v: string | null, r: string | null, fallback: () => string):
+        { combo: string; basis: 'combination' | 'envelope'; mixed: string | null } {
+        if (!m) { const c = fallback(); return { combo: c, basis: c === 'envelope' ? 'envelope' : 'combination', mixed: null }; }
+        const others = ([['V', v], ['P', r]] as Array<[string, string | null]>)
+            .filter((x): x is [string, string] => typeof x[1] === 'string' && x[1] !== m);
+        if (others.length === 0) { return { combo: m, basis: 'combination', mixed: null }; }
+        const combo = [`M: ${m}`, ...others.map(([k, lab]) => `${k}: ${lab}`)].join(' | ');
+        const hasP = others.some(([k]) => k === 'P'), hasV = others.some(([k]) => k === 'V');
+        const what = hasP ? (hasV ? '§H2 · §H3' : '§H3') : '§H2';
+        const mixed = `${what} 상호작용을 서로 다른 조합의 포락값으로 검토함 — M: ${m}; `
+            + others.map(([k, lab]) => `${k === 'P' ? '지점 반력 P' : 'V'}: ${lab}`).join('; ')
+            + ' (보수 측: 상호작용 식은 두 값 모두에 대해 증가한다 — 계약 §6.2)';
+        return { combo, basis: 'envelope', mixed };
+    }
+
+    /**
      * V6b-01: 지점 위 격자점의 전단 포락값은 지점 한쪽 면의 값이다(격자가 지점에서 값 하나). 그 지점의 위치 항목이 양쪽 면
      * (Vu_left · Vu_right — 면마다 |V| 포락)을 준다: 구간 안에 든 지점이면 큰 면, 구간이 그 지점에서 끝나면 그 구간 쪽 면.
+     * 조합 · 패턴은 하중 해석이 큰 면(V_side)의 것만 준다 — 다른 면이면 null(모름; 꼬리표가 그렇게 밝힌다).
      */
-    private static _supportFace(env: any, support: number, x: number, x0: number, x1: number): { V: number; side: 'left' | 'right' } | null {
+    private static _supportFace(env: any, support: number, x: number, x0: number, x1: number):
+        { V: number; side: 'left' | 'right'; combo: string | null; unrounded: boolean } | null {
         const L = (Array.isArray(env?.locations) ? env.locations : []).find((l: any) => l?.support === support
             && Number.isFinite(l?.Vu_left) && Number.isFinite(l?.Vu_right));
         if (!L) { return null; }
         const tol = 1e-6 * Math.max(1, Math.abs(x));
-        const vl = Math.abs(L.Vu_left), vr = Math.abs(L.Vu_right);
+        // 엔진 65e5ed6(계약 §6.1): 판정은 반올림하지 않은 면 값(Vu_*_unrounded), 면마다의 출처 V_*_source = [combo, pattern, sense].
+        // 옛 결과(그 키가 없음)는 표시용 3자리 값과 큰 면의 combo_V 만
+        const un = Number.isFinite(L.Vu_left_unrounded) && Number.isFinite(L.Vu_right_unrounded);
+        const vl = Math.abs(un ? L.Vu_left_unrounded : L.Vu_left), vr = Math.abs(un ? L.Vu_right_unrounded : L.Vu_right);
         const side: 'left' | 'right' = x <= x0 + tol ? 'right' : (x >= x1 - tol ? 'left' : (vl >= vr ? 'left' : 'right'));
-        return { V: side === 'left' ? vl : vr, side };
+        const src = side === 'left' ? L.V_left_source : L.V_right_source;
+        const combo = Array.isArray(src) && Array.isArray(env?.combos)
+            ? StcfsdPanel._comboLabel(env.combos[src[0]], env?.envelope_source?.patterns?.[src[1]])
+            : (L.V_side === side ? StcfsdPanel._comboLabel(L.combo_V, L.pattern_V) : null);
+        return { V: side === 'left' ? vl : vr, side, combo, unrounded: un };
+    }
+
+    /** 격자점 i 의 M(부호 쪽) · |V| 큰 쪽의 출처 */
+    private static _pointSources(env: any, i: number | undefined, sign: '+' | '-'): { m: string | null; v: string | null } {
+        if (i === undefined) { return { m: null, v: null }; }
+        const vmax = Math.abs(Number(env?.V_envelope_max?.[i] ?? 0)), vmin = Math.abs(Number(env?.V_envelope_min?.[i] ?? 0));
+        return { m: StcfsdPanel._envSource(env, sign === '+' ? 'M_max' : 'M_min', i),
+            v: StcfsdPanel._envSource(env, vmax >= vmin ? 'V_max' : 'V_min', i) };
     }
 
     /** 조합 이름 + 패턴(있으면): '3: D+Lr [Lr: spans 1,3,4 loaded]' */
@@ -2905,12 +2972,19 @@ export class StcfsdPanel implements McpPanelInterface {
                     : (envAt ? envAt.M * 12 : undefined);
                 // V6b-01: 지점 면의 전단 — 지점이 구간 안이면 큰 면, 구간 끝이면 그 구간 쪽 면(위치 항목의 Vu_left · Vu_right)
                 const faceAt = StcfsdPanel._supportFace(gravity, wc.support, x, Number(host.src.start_ft), Number(host.src.end_ft));
-                const vAt = faceAt ? (envAt && Math.abs(envAt.V - faceAt.V) <= 5e-4 ? envAt.V : faceAt.V) : envAt?.V;
+                const vSides = faceAt ? [faceAt.V] : [];
+                const vAt = vSides.length > 0 ? (faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - vSides[0]) <= 5e-4 ? envAt.V : vSides[0]) : envAt?.V;
                 const arr = supportsAt.get(host.id) || [];
                 // V6-08: 지점 위치 항목의 값이면 그 항목의 조합 · 패턴, 포락선이면 그 판단은 아래(_demandCombination)
                 const fromLoc = !!supLoc && Number.isFinite(supLoc.Mu);
+                // K3-6: 지점의 M · V · 반력 출처 — 위치 항목(combo · combo_V · combo_R)이 있으면 그것, 포락선 값이면 envelope_source
+                const envSrc = StcfsdPanel._pointSources(gravity, envAt?.i, host.dsm === dsmNeg ? '-' : '+');
+                const srcM = fromLoc ? StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) : envSrc.m;
+                const gridIsFace = !!(faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - faceAt.V) <= 5e-4);
+                const srcV = gridIsFace ? envSrc.v : faceAt ? (faceAt.combo ?? `envelope (지점 ${wc.support} ${faceAt.side === 'left' ? '왼쪽' : '오른쪽'} 면 — 하중 해석이 그 면의 조합을 주지 않음)`) : envSrc.v;
+                const srcR = supLoc ? StcfsdPanel._comboLabel(supLoc.combo_R, supLoc.pattern_R) : null;
                 arr.push({ ...wc, M_kipin: mAt, V_kips: vAt, __combo: fromLoc ? (StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) ?? 'envelope') : undefined,
-                    __envI: envAt?.i });
+                    __envI: envAt?.i, __src: { m: srcM, v: vAt !== undefined ? srcV : null, r: srcR } });
                 supportsAt.set(host.id, arr);
             }
         }
@@ -2926,16 +3000,19 @@ export class StcfsdPanel implements McpPanelInterface {
             // 하부 플랜지 압축 구간(부모멘트 · 랩 · 양력 하부압축)은 −Mxx 곡선, 상부 압축은 +Mxx(V2-06).
             const sign: '+' | '-' = rg.dsm === dsmNeg ? '-' : '+';
             // V6b-01: 지점 위 격자점의 V 는 그 지점 면의 값으로 바꾼다(_supportFace) — M_max · V_max 지점이 지점 위일 때
-            const onFace = <T extends { x: number; V: number }>(p: T | undefined): T | undefined => {
+            const onFace = <T extends { x: number; V: number }>(p: T | undefined): (T & { faceCombo?: string | null; face?: string }) | undefined => {
                 if (!p) { return p; }
                 const k = supportsFt.findIndex((xs) => Math.abs(xs - p.x) <= 1e-6 * Math.max(1, Math.abs(p.x)));
                 const f = k >= 0 ? StcfsdPanel._supportFace(rg.env, k + 1, p.x, x0, x1) : null;
                 // 격자가 이미 그 면의 값이면(면 값은 소수 3자리 — 그 반올림 안) 격자의 반올림 전 값 · 출처를 그대로
-                if (f && Math.abs(p.V - f.V) <= 5e-4) { return p; }
-                return f ? { ...p, V: f.V } : p;
+                if (f && !f.unrounded && Math.abs(p.V - f.V) <= 5e-4) { return p; }
+                return f ? { ...p, V: f.V, face: `지점 ${k + 1} ${f.side === 'left' ? '왼쪽' : '오른쪽'} 면`, faceCombo: f.combo } : p;
             };
             const pts = this._envelopeScan(rg.env, x0, x1, sign).map((p) => onFace(p)!);
             const atMmax = onFace(r.x_M_max_ft != null ? this._envelopeAt(rg.env, Number(r.x_M_max_ft), sign) : undefined);
+            // 면 값이면 V 의 출처는 그 면의 조합(모르면 그렇다고)
+            const vSrcOf = (p: any, fallback: string | null): string | null => (p && p.face
+                ? (p.faceCombo ?? `envelope (${p.face} — 하중 해석이 그 면의 조합을 주지 않음)`) : fallback);
             const pV = pts.length > 0 ? pts.reduce((a, b) => (b.V > a.V ? b : a)) : undefined;
             const dsm = this._dsmForDesign(null, rg.dsm, fy, sign);
             const share = rg.lap ? 0.5 : 1.0;
@@ -2971,15 +3048,20 @@ export class StcfsdPanel implements McpPanelInterface {
             }
             // K4a: x_ft = 그 검토 지점의 위치(하중 분석 좌표, 왼쪽 끝부터 ft). 검토 항목의 location 에 실린다.
             // V6-08: combo = 그 지점 소요의 조합(지배 조합의 도표와 같은 값일 때만 그 이름, 아니면 'envelope').
-            const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any; combo: string }> = [];
+            const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any; combo: string;
+                basis: 'combination' | 'envelope'; mixed: string | null }> = [];
             const vA = atMmax ? atMmax.V : (pV ? pV.V : undefined);
             const xMmax = Number.isFinite(Number(r.x_M_max_ft)) && r.x_M_max_ft != null ? Number(r.x_M_max_ft)
                 : (atMmax ? atMmax.x : null);
+            const sA = StcfsdPanel._pointSources(rg.env, atMmax ? atMmax.i : pV?.i, sign);
             calls.push({ tag: 'M_max', x_ft: xMmax,
-                combo: StcfsdPanel._demandCombination(rg.env, atMmax?.i, Number(r.M_max_abs), vA, sign),
+                ...StcfsdPanel._pairLabel(sA.m, vA !== undefined ? vSrcOf(atMmax ?? pV, sA.v) : null, null,
+                    () => StcfsdPanel._demandCombination(rg.env, atMmax?.i, Number(r.M_max_abs), vA, sign)),
                 p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
             if (pV && atMmax && Math.abs(pV.x - atMmax.x) > 1e-6 && pV.V > (vA ?? 0) + 1e-9) {
-                calls.push({ tag: 'V_max', x_ft: pV.x, combo: StcfsdPanel._demandCombination(rg.env, pV.i, pV.M, pV.V, sign),
+                const sB = StcfsdPanel._pointSources(rg.env, pV.i, sign);
+                calls.push({ tag: 'V_max', x_ft: pV.x,
+                    ...StcfsdPanel._pairLabel(sB.m, vSrcOf(pV, sB.v), null, () => StcfsdPanel._demandCombination(rg.env, pV.i, pV.M, pV.V, sign)),
                     p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
             }
             const sups = supportsAt.get(rg.id) || [];
@@ -2991,7 +3073,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 calls.push({ tag: `support ${s.support}`, x_ft: Number.isFinite(Number(s.x_ft)) ? Number(s.x_ft) : null,
                     support: s.support ?? null,
-                    combo: s.__combo ?? StcfsdPanel._demandCombination(rg.env, s.__envI, s.M_kipin / 12, s.V_kips, sign), p: {
+                    ...StcfsdPanel._pairLabel(s.__src?.m ?? null, s.__src?.v ?? null, s.__src?.r ?? null,
+                        () => s.__combo ?? StcfsdPanel._demandCombination(rg.env, s.__envI, s.M_kipin / 12, s.V_kips, sign)), p: {
                     ...params, ...wcOpts,
                     Mu: s.M_kipin * share,
                     ...(s.V_kips !== undefined ? { Vu: s.V_kips * share } : {}),
@@ -3011,13 +3094,17 @@ export class StcfsdPanel implements McpPanelInterface {
                     ...((rg.kind === 'negative' || rg.kind === 'lap' || rg.id.startsWith('uplift_lap')) && r.support != null
                         && Number.isInteger(Number(r.support)) ? { region_support: Number(r.support) + 1 } : {}),
                     x: c.x_ft !== null && Number.isFinite(c.x_ft) ? { symbol: 'x', value: c.x_ft * 12, quantity: 'length' } : null,
-                    demand_basis: c.combo === 'envelope' ? 'envelope' : 'combination',
+                    demand_basis: c.basis,
                 };
                 let res: any;
                 try {
                     res = await this._pythonBridge.call('aisi_design', { ...c.p, check_location: loc, check_combination: c.combo });
                 } catch (e: any) {
                     res = { error: e?.message || String(e), pass: null };
+                }
+                // K3-6(계약 §6.2): M · V(· P)가 다른 조합에서 왔으면 그 지점의 가정 한 줄(소요는 그대로)
+                if (c.mixed && res && typeof res === 'object' && !res.error) {
+                    res.assumptions = [...(Array.isArray(res.assumptions) ? res.assumptions : []), c.mixed];
                 }
                 results.push({ ...res, check_point: c.tag, Mu_checked: c.p.Mu, Vu_checked: c.p.Vu ?? null,
                     __location: loc, __combination: c.combo });
@@ -4356,7 +4443,8 @@ export class StcfsdPanel implements McpPanelInterface {
     private _buildPrintableBucklingHtml(): string { return this._buildPrintableBucklingHtmlFrom(this._bucklingReportHtml); }
     private _buildPrintableBucklingHtmlFrom(inner: string): string {
         void inner;
-        return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>좌굴해석 결과 보고서</title>
+        // V7-02: 인쇄 · 저장 문서에 CSP(스크립트 · 외부 자원 없음)
+        return `<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${REPORT_CSP}"><title>좌굴해석 결과 보고서</title>
 <style>body{font-family:'Segoe UI',sans-serif;color:#111;background:#fff;max-width:800px;margin:0 auto;padding:24px;font-size:13px}
 h1{font-size:18px;border-bottom:2px solid #333;padding-bottom:6px}h2{font-size:14px;margin-top:20px;color:#0b5394}
 table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0}td,th{border:1px solid #999;padding:4px 8px;text-align:left}
@@ -4394,7 +4482,8 @@ ${inner}
             // HTML로 저장 선택 시 기존 방식
             if (uri.fsPath.endsWith('.html')) {
                 const encoder = new TextEncoder();
-                await vscode.workspace.fs.writeFile(uri, encoder.encode(data.html));
+                // V7-02: 저장하는 HTML 도 CSP 를 맨 앞에(스크립트 · 외부 자원 없음)
+                await vscode.workspace.fs.writeFile(uri, encoder.encode(withCsp(data.html)));
                 vscode.window.showInformationMessage(`보고서가 저장되었습니다: ${uri.fsPath}`);
                 return;
             }
@@ -4421,64 +4510,13 @@ ${inner}
      */
     public static pdfPrinter: ((html: string, pdfPath: string) => Promise<void>) | null = null;
     private async _printHtmlToPdf(html: string, pdfPath: string): Promise<boolean> {
-        if (StcfsdPanel.pdfPrinter) { await StcfsdPanel.pdfPrinter(html, pdfPath); return true; }
+        if (StcfsdPanel.pdfPrinter) { await StcfsdPanel.pdfPrinter(withCsp(html), pdfPath); return true; }
         const browserPath = this._findBrowser();
         if (!browserPath) { return false; }
-        const tmpHtml = path.join(os.tmpdir(), `cufsm_report_${Date.now()}_${process.pid}.html`);
-        fs.writeFileSync(tmpHtml, html, 'utf-8');
-        // 임시 사용자 데이터 디렉터리 (실행 중인 Edge와 프로필 충돌 방지)
-        const tmpUserData = path.join(os.tmpdir(), `cufsm_pdf_${Date.now()}_${process.pid}`);
-        fs.mkdirSync(tmpUserData, { recursive: true });
-        const fileUrl = 'file:///' + tmpHtml.split(path.sep).join('/');
-        const before = (() => { try { return fs.statSync(pdfPath).mtimeMs; } catch { return -1; } })();
-        // spawn 사용 (execFile/spawnSync는 Windows에서 PDF flush 문제 발생)
-        await new Promise<void>((resolve, reject) => {
-            const proc = cp.spawn(browserPath, [
-                '--headless=new',
-                '--disable-gpu',
-                '--no-sandbox',
-                '--no-pdf-header-footer',
-                '--user-data-dir=' + tmpUserData,
-                '--print-to-pdf=' + pdfPath,
-                fileUrl,
-            ], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'] });
-            proc.on('error', (err) => { clearInterval(watch); this._cleanupTempFiles(tmpHtml, tmpUserData); reject(err); });
-            // 지키미: Edge headless 가 PDF 를 다 쓰고도 끝나지 않는 일이 있다(부하에서 시험 중 한 번 — 프로세스가 남고 호스트가 끝나지 않았다).
-            // PDF 의 크기가 멈춘 뒤 15 초가 지나도 살아 있으면, 또는 전체 120 초가 지나면 끝낸다(→ close 가 나머지를 한다).
-            const t0 = Date.now();
-            let lastSize = -1, stableSince = 0;
-            const watch = setInterval(() => {
-                let size = -1;
-                try { const st = fs.statSync(pdfPath); size = st.mtimeMs !== before ? st.size : -1; } catch { /* 아직 */ }
-                if (size > 0 && size === lastSize) { stableSince = stableSince || Date.now(); } else { stableSince = 0; }
-                lastSize = size;
-                if ((stableSince && Date.now() - stableSince > 15000) || Date.now() - t0 > 120000) {
-                    clearInterval(watch);
-                    try { proc.kill(); } catch { /* 이미 끝남 */ }
-                }
-            }, 1000);
-            proc.on('close', (code) => {
-                clearInterval(watch);
-                // Edge가 종료 후에도 PDF가 디스크에 flush되는 데 시간이 걸림 — 500ms 간격으로 최대 10회 (5초) 대기
-                const checkPdf = (retries: number) => {
-                    try {
-                        const st = fs.statSync(pdfPath);
-                        if (st.size > 0 && st.mtimeMs !== before) { this._cleanupTempFiles(tmpHtml, tmpUserData); resolve(); return; }
-                    } catch { /* not yet */ }
-                    if (retries > 0) { setTimeout(() => checkPdf(retries - 1), 500); } else {
-                        this._cleanupTempFiles(tmpHtml, tmpUserData);
-                        reject(new Error(`PDF 파일이 생성되지 않았습니다 (Edge headless 종료 코드: ${code ?? 'unknown'})`));
-                    }
-                };
-                setTimeout(() => checkPdf(10), 500);
-            });
-        });
+        // V7-02 · V7-03: 닫힌 인쇄(스크립트 · 통신 · 다른 파일 없음, 샌드박스 켬)와 나무 전체를 끝내는 지키미 — src/case/pdfPrint.ts
+        const r = await printHtmlToPdf(browserPath, html, pdfPath);
+        if (!r.ok) { throw new Error(r.error); }
         return true;
-    }
-
-    private _cleanupTempFiles(tmpHtml: string, tmpUserData: string): void {
-        try { fs.unlinkSync(tmpHtml); } catch { /* ignore */ }
-        try { fs.rmSync(tmpUserData, { recursive: true, force: true }); } catch { /* ignore */ }
     }
 
     /** 시스템에 설치된 Edge 또는 Chrome 경로 탐색 */
@@ -5635,6 +5673,7 @@ ${inner}
 
     <script nonce="${nonce}" src="${designStateUri}"></script>
     <script nonce="${nonce}" src="${utilsUri}"></script>
+    <script nonce="${nonce}" src="${webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'reportRender.js'))}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'review.js'))}"></script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(

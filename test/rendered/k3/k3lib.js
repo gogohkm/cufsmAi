@@ -143,7 +143,8 @@ async function bucklingReport(ctx, name, withPdf) {
   // K3-5: 화면은 그림 · DSM 표만 보내고 호스트가 만든다 — 호스트가 패널에 연 HTML 을 읽는다(옛 화면은 msg.data.html)
   const html = String(msg.data.html || ctx.panel._bucklingReportHtml || '');
   const pngs = (html.match(/data:image\/png;base64,/g) || []).length;
-  const clean = html.replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, '<png>');
+  // K3-7: 좌굴 보고서에도 날짜가 있다(ReportDoc meta.date) — 다른 보고서처럼 지운다
+  const clean = normDate(html.replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, '<png>'));
   const text = clean.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
   const out = { sent: true, text, heads: [...clean.matchAll(/<h[12]>([^<]*)<\/h[12]>/g)].map((x) => x[1]), pngs, htmlSha: sha(clean) };
   if (withPdf) {
