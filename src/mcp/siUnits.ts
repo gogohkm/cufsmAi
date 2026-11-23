@@ -676,6 +676,8 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
     // K3: 수 인자가 없다 — 단위는 호스트가 보고서 · 항목의 글을 그 단위로 쓴다
     generate_report: {},
     validate_design: {},
+    // V7-05: 수 인자가 없다 — units 는 응답의 버린 값의 단위(호스트가 report_units 로)
+    load_project: {},
     design_lap_connection: {
         d: L, t: L, Fy: S, Fu: S, lap_left_in: L, lap_right_in: L, Mu_support: MOM, Vu_support: F,
         fastener_dia: L, end_distance: L, Se: 'modulus', Sf: 'modulus', Mnd: MOM, Mnd_single: MOM,

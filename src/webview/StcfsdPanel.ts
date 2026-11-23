@@ -3993,7 +3993,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 const check = this._checkLoadedModel(model);
                 if (check.error) { return { error: `Invalid project file: ${check.error}` }; }
                 // K2-6: 저장하지 않은 변경을 말없이 버리지 않는다 — 응답에 싣고 화면에 알린다
-                const discarded = this._caseDiscardNotice('load_project');
+                const discarded = this._caseDiscardNotice('load_project', options?.report_units === 'SI' ? 'SI' : 'US');
                 this._model = { ...this._model, ...check.model };
                 this._loadFyAi = false;
                 for (const k of ['elementRoles', 'sectionEdited']) {
@@ -4004,15 +4004,19 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._invalidateAnalysisState('Project loaded', true, { action: 'load_project' });
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
-                // K2-6: .csd 면 검토 상태도(표의 키만 — 조작된 파일의 남의 키는 버린다). 원시 모델이면 입력은 그대로.
+                // K2-6 · V7-04: 검토 상태 — 화면의 열기(_loadProjectFile)와 같은 규칙. .csd 면 파일의 입력(표의 키만), 입력 기록이 없는
+                // 파일(원시 모델 · 1.0 .csd)이면 모두 처음 값(앞 검토의 입력을 남기지 않는다). 저장 기준은 그 뒤에(열린 파일 = 저장된 상태).
                 const caseWarnings: string[] = [];
-                if (data && data.model && (data.case || data.designInputs)) {
-                    const mig = migrateProject(data);
+                {
+                    const hasCase = !!(data && data.model && (data.case || data.designInputs));
+                    const mig = migrateProject(hasCase ? data : {});
                     caseWarnings.push(...mig.warnings);
-                    const fu = data.case?.view?.unitSystem ?? data.designInputs?.unitSystem;
+                    if (!hasCase) { caseWarnings.push('This file has no saved case inputs — every input was reset to its initial value (as when the person opens it).'); }
+                    const fu = hasCase ? (data.case?.view?.unitSystem ?? data.designInputs?.unitSystem) : undefined;
                     this._caseKeeper.loadFromFile(mig.state, fu !== 'US' && fu !== 'SI');
+                    this._caseKeeper.noteLoadAnalysis(false);
                     this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: [], conflicts: [] });
-                    this._postMessage('restoreDesignInputs', this._caseRestorePayload(mig, data));
+                    this._postMessage('restoreDesignInputs', this._caseRestorePayload(mig, hasCase ? data : { model: data }));
                 }
                 this._caseKeeper.markSaved(this._currentModelSignature());
                 this._casePath = options.filepath;
@@ -4758,13 +4762,47 @@ ${inner}
     }
 
     /** K2-6: 열기 직전 — 저장 안 한 변경이 있으면 그것을 적고 화면에 알린다(묻지 않는다 — 묻는 것은 화면이 정한다) */
-    private _caseDiscardNotice(by: string): any | null {
+    private _caseDiscardNotice(by: string, units?: 'SI' | 'US'): any | null {
         const u = this._caseUnsaved();
         if (!u.dirty) { return null; }
-        const notice = { since: u.since, inputs_changed: u.inputs_changed, model_changed: u.model_changed, file: u.file, by };
+        // V7-05: 버리는 값을 남긴다 — 키 · 값 · 출처(정해진 크기 안, 요청하면 SI). 다음 저장 · 열기까지 호스트가 쥐고,
+        // set_case_inputs 한 번으로 되돌릴 수 있게 그 인자를 그대로 싣는다(restore). 모델의 변경은 값이 아니라 그렇다는 것만.
+        const DSm = require('../../webview/js/designState');
+        const k = this._caseKeeper;
+        const si = units === 'SI';
+        const conv = (v: any, kind: string | null) => (si && kind ? caseValueToSI(v, kind) : v);
+        const MAX_KEYS = 200, MAX_CHARS = 2000;
+        const values: Array<{ key: string; value: any; source: string | null }> = [];
+        const inputs: Record<string, any> = {};
+        let truncated = 0;
+        let spans: any;
+        for (const key of u.inputs_changed as string[]) {
+            if (key === 'spans' || key === 'supports' || key === 'lapsPerSupport') {
+                spans = { spans: conv(k.state.spans.spans, 'length_ft'), supports: k.state.spans.supports,
+                    lapsPerSupport: k.state.spans.lapsPerSupport.map((l: any) => ({ left: conv(l.left, 'length_ft'), right: conv(l.right, 'length_ft') })) };
+                continue;
+            }
+            if (!(key in k.state.inputs)) { continue; }
+            const m = DSm.fieldMeta(key) || {};
+            const value = conv(k.state.inputs[key], m.unit || null);
+            if (values.length >= MAX_KEYS || JSON.stringify(value ?? null).length > MAX_CHARS) { truncated++; continue; }
+            values.push({ key, value, source: k.state.sources[key] ?? null });
+            inputs[key] = value;
+        }
+        const restore = { tool: 'set_case_inputs', arguments: { units: si ? 'SI' : 'US', inputs, ...(spans ? { spans } : {}),
+            reason: 'restore the unsaved values discarded by ' + by } };
+        this._discarded = { at: new Date().toISOString(), by, restore };
+        const notice = { since: u.since, inputs_changed: u.inputs_changed, model_changed: u.model_changed, file: u.file, by,
+            units: si ? 'SI' : 'US', values, ...(spans ? { spans } : {}), ...(truncated ? { values_left_out: truncated } : {}),
+            restore,
+            restore_note: 'These unsaved values were replaced by the opened file. Call set_case_inputs with restore.arguments to put them back '
+                + '(ask the person first). ' + (u.model_changed ? 'The model was also changed and is not restorable this way. ' : '')
+                + 'The values are kept until the next save or open.' };
         this._postMessage('caseDiscarded', notice);
         return notice;
     }
+    /** V7-05: 마지막으로 버린 저장 안 한 값(다음 저장 · 열기까지) */
+    private _discarded: { at: string; by: string; restore: any } | null = null;
 
     /** K2-5: get_case_inputs {units?, keys?} — 검토 상태(값 · 출처 · 단위), 모델 칸(읽기), MCP 전용 인자, 판 · 저장 안 한 변경 */
     private _caseGetInputs(options: any): any {
@@ -5944,7 +5982,7 @@ ${inner}
         const tmp = `${fsPath}.tmp-${process.pid}`;
         fs.writeFileSync(tmp, json, 'utf-8');
         fs.renameSync(tmp, fsPath);
-        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._casePath = fsPath; this._caseFileOrigin = 'person'; this._postCaseDirty(); }
+        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._casePath = fsPath; this._caseFileOrigin = 'person'; this._discarded = null; this._postCaseDirty(); }
         if (sealNote) { Object.defineProperty(projectData, 'seal_note', { value: sealNote, enumerable: false }); }
         return projectData;
     }
@@ -5997,7 +6035,7 @@ ${inner}
         if (!isWrapper) { projectData = { model: projectData }; }
 
         // K2-6: 저장하지 않은 변경을 말없이 버리지 않는다 — 경고에 싣고 화면에 알린다(묻는 것은 화면이 정한다)
-        const discarded = this._caseDiscardNotice('open_project');
+        const discarded = this._caseDiscardNotice('open_project', this._caseKeeper.state.view.unitSystem === 'SI' ? 'SI' : 'US');
         if (discarded) {
             warnings.push(`Unsaved changes were discarded by opening this file (since ${discarded.since}; ${discarded.inputs_changed.length} input(s)${discarded.model_changed ? ', model' : ''} changed)`);
         }

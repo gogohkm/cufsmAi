@@ -1224,9 +1224,11 @@ server.tool("save_project", "Save the current panel model to a raw model JSON fi
     async (args) => postState('save_project', 'save_project', args)
 );
 
-server.tool("load_project", "Load a model saved by save_project (also accepts the GUI .csd wrapper {model}). Reports the panel's reply (file info, warnings); a missing or invalid file is an error and the current model is kept.",
-    { filepath: z.string().describe("Absolute file path to read, ending in .stcfsd, .json or .csd (a drive path in a documents or project folder; network share paths, hidden names and system or application folders are refused)") },
-    async (args) => postState('load_project', 'load_project', args)
+server.tool("load_project", "Load a model saved by save_project (also accepts the GUI .csd wrapper {model}). Reports the panel's reply (file info, warnings); a missing or invalid file is an error and the current model is kept. The case inputs are replaced exactly as when the person opens the file (a file without saved inputs resets every input). Stored results are never restored (run_case_check recomputes them). If the person had unsaved changes, discarded_unsaved_changes lists each replaced value (key, value, source) and restore.arguments — one set_case_inputs call puts them back; ask the person first.",
+    { units: z.enum(["US", "SI"]).optional().describe("Units of the discarded values in the reply (default US)"),
+      filepath: z.string().describe("Absolute file path to read, ending in .stcfsd, .json or .csd (a drive path in a documents or project folder; network share paths, hidden names and system or application folders are refused)") },
+    // V7-05: units 는 응답의 버린 값의 단위 — 호스트에 report_units 로(엔진 인자 변환이 아니다)
+    async (args) => json(await callBridgePost('/action', { action: 'load_project', filepath: args.filepath, ...(args.units === 'SI' ? { report_units: 'SI' } : {}) }))
 );
 
 // ============================================================
