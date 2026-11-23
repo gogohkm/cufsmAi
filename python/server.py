@@ -49,7 +49,7 @@ PROTOCOL_VERSION = 2
 # 한 파일이라도 읽지 못하거나 폴더가 없으면 'unknown' — 일부만으로 만든 해시를 내지 않는다.
 ENGINE_ID_DIRS = ('engine', 'design', 'cfsm', 'fcfsm', 'vibration', 'plastic', 'fileio', 'models')
 ENGINE_ID_FILES = ('server.py',)
-ENGINE_ID_SCHEME = 'engine-id/1'
+ENGINE_ID_SCHEME = 'engine-id/2'
 
 
 def _engine_sources(root: str) -> list:
@@ -78,10 +78,24 @@ def _engine_sources(root: str) -> list:
     return sorted(items)
 
 
-def engine_id_of(items) -> str:
-    """'sha256:<64 hex>' — 경로와 (줄끝을 LF 로 맞춘) 내용을 길이와 함께 차례로 넣는다."""
+def engine_runtime() -> dict:
+    """결과가 기대는 수치 라이브러리 판과 Python major.minor — 개발 환경이 바뀌면 id 도 바뀐다."""
+    out = {'python': f'{sys.version_info[0]}.{sys.version_info[1]}', 'numpy': getattr(np, '__version__', 'unknown')}
+    try:
+        import scipy
+        out['scipy'] = getattr(scipy, '__version__', 'unknown')
+    except Exception:  # noqa: BLE001 — 없으면 없다고 해시에 넣는다
+        out['scipy'] = 'absent'
+    return out
+
+
+def engine_id_of(items, runtime: dict | None = None) -> str:
+    """'sha256:<64 hex>' — 판 정보(runtime), 그다음 경로와 (줄끝을 LF 로 맞춘) 내용을 길이와 함께 차례로 넣는다."""
     import hashlib
+    runtime = engine_runtime() if runtime is None else runtime
     h = hashlib.sha256(ENGINE_ID_SCHEME.encode('ascii') + b'\n')
+    for k in sorted(runtime):
+        h.update(f'{k}={runtime[k]}'.encode('utf-8') + b'\n')
     for rel, data in sorted(items):
         body = data.replace(b'\r\n', b'\n')
         path = rel.encode('utf-8')
@@ -89,11 +103,11 @@ def engine_id_of(items) -> str:
     return 'sha256:' + h.hexdigest()
 
 
-def compute_engine_id(root: str | None = None) -> tuple:
+def compute_engine_id(root: str | None = None, runtime: dict | None = None) -> tuple:
     """(engine_id, error) — 읽지 못하면 ('unknown', 까닭)."""
     root = root or os.path.dirname(os.path.abspath(__file__))
     try:
-        return engine_id_of(_engine_sources(root)), None
+        return engine_id_of(_engine_sources(root), runtime), None
     except Exception as e:  # noqa: BLE001 — 어떤 실패든 'unknown'
         return 'unknown', f'{type(e).__name__}: {e}'
 
@@ -377,7 +391,7 @@ def _m_selftest(params):
     py_ok = sys.version_info >= (3, 10)
     return {'ok': py_ok and not errors, 'python': sys.version.split()[0],
             'python_ok': py_ok, 'import_errors': errors,
-            'protocol_version': PROTOCOL_VERSION, 'engine_id': ENGINE_ID,
+            'protocol_version': PROTOCOL_VERSION, 'engine_id': ENGINE_ID, 'engine_runtime': engine_runtime(),
             **({'engine_id_error': ENGINE_ID_ERROR} if ENGINE_ID_ERROR else {}),
             'methods': sorted(METHODS)}
 

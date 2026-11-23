@@ -29,16 +29,31 @@ from design.checks import set_governing as _set_governing, apply_context as _app
 _PROPS_GENERATED = '_props_generated'
 # 하위 설계(압축 · 휨 · 인장)가 조합 검토에 넘기는 반올림하지 않은 설계강도(결과에는 남기지 않는다).
 _RAW_DS = '_raw_design_strength'
-# 랩 구간의 뒤틀림 구속(계약 §6.3) — 사람이 밝혔을 때와 밝히지 않았을 때의 문장(호스트가 그대로 보인다).
-LAP_DIST_STATED = ('F4 distortional buckling not applicable in this lap region: distortion_restrained = true '
-                   '(user statement — AISI Manual II-1A / II-2A: the lapped section is assumed to be sufficiently '
-                   'restrained against lateral-torsional and distortional buckling); Mnd = My is used.')
-LAP_DIST_UNSTATED = ('F4 distortional buckling — lap region: restraint against distortion not stated. Give '
-                     'distortion_restrained = true if the lapped member restrains distortional buckling (AISI Manual '
-                     'II-1A / II-2A assumption: the lapped section is sufficiently restrained), or give Mcrd for the '
-                     'lapped section.')
+# 랩 구간의 구속(계약 §6.3) — Design Manual 의 가정을 사람이 밝힌 것만 쓴다(횡비틀림 + 뒤틀림, 한 진술).
+LAP_MANUAL_ASSUMPTION = ('AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently '
+                         'restrained against lateral-torsional buckling and distortional buckling" (assumption (f): '
+                         '"the region at and near the interior supports is assumed to be not subject to '
+                         'lateral-torsional or distortional buckling between the support and the ends of the laps")')
+LAP_STATED = ('Lap region: lap_restrained = true (user statement) — ' + LAP_MANUAL_ASSUMPTION + '. F2 uses Lb = 0 '
+              '(no lateral-torsional buckling, Fn = Fy) and F4 is not applicable (Mnd = My).')
+LAP_LTB_UNSTATED = ('F2 lateral-torsional buckling — lap region: restraint not stated. Give lap_restrained = true '
+                    'to apply the Manual assumption (' + LAP_MANUAL_ASSUMPTION + '), or give Lb for the lap region.')
+LAP_DIST_UNSTATED = ('F4 distortional buckling — lap region: restraint not stated. Give lap_restrained = true to apply '
+                     'the Manual assumption (' + LAP_MANUAL_ASSUMPTION + '), or give Mcrd for the lapped section.')
+LAP_DIST_STATED = LAP_STATED      # 옛 이름(2026-11-24 첫 판) — 같은 문장
+# 구간 설계 · 랩 도구의 진술 입력. distortion_restrained 는 같은 뜻의 옛 이름(별칭)이다.
+LAP_STATEMENT_KEYS = ('lap_restrained', 'distortion_restrained')
+
+
+def lap_restraint_stated(params: dict) -> bool:
+    return any(params.get(k) is True for k in LAP_STATEMENT_KEYS)
+
+
 # 반올림하지 않은 이용률(지배 이름 고르기용) — design_member 가 내보내기 전에 뺀다.
 _UTIL_RAW = '_utilization_raw'
+# 랩 구간에서 Lb = 0 을 사람의 진술(lap_restrained)로 정했다는 표지(계산 과정의 출처용, 결과에 나가지 않음)
+_LAP_LB = '_lb_from_lap_restrained'
+_LAP_LB_BOUND = '_lb_lap_upper_bound'
 # global_buckling 이 '횡좌굴 없음'에 쓰는 표지값(1e6 ksi) — 이 값이면 끝없는 값(∞)이다.
 _FCRE_INF = 1e6
 
@@ -1296,6 +1311,22 @@ def _design_flexure(params: dict) -> dict:
         return {'error': 'Fu (tensile strength, ksi) is required for the cold-work increase (§A3.3.2, use_cold_work=true).'}
     design_method = params.get('design_method', 'LRFD')
     Mu = abs(params.get('Mu', 0))
+    # 랩 구간(계약 §6.3): 사람이 lap_restrained 를 밝혔으면 엔진이 Manual 가정을 쓴다 — Lb = 0, Cb = 1.0.
+    lap_region = params.get('lap_region') is True
+    lap_stated = lap_region and lap_restraint_stated(params)
+    lap_notes = []
+    lap_notes_ne = []
+    if lap_stated:
+        if 'Lb' in params and params.get('Lb') not in (0, 0.0):
+            lap_notes.append(f"lap_region with lap_restrained = true: the given Lb = {params.get('Lb')} in is not used "
+                             '— the Manual assumption (lapped section restrained against lateral-torsional buckling) '
+                             'applies (Lb = 0)')
+        params = {**params, 'Lb': 0.0, 'Cb': 1.0, _LAP_LB: True}
+    elif lap_region and 'Lb' not in params:
+        # 진술도 Lb 도 없다: 120 in 같은 길이를 지어 횡비틀림을 판정하지 않는다. Lb = 0 은 상한(Mne ≤ My)으로만 —
+        # 그 값으로 불합격이면 진짜 불합격(가정 없이 강도는 더 작다), 합격이면 F2 는 미평가(LAP_LTB_UNSTATED).
+        params = {**params, 'Lb': 0.0, _LAP_LB_BOUND: True}
+        lap_notes_ne = [LAP_LTB_UNSTATED]
     Lb = params.get('Lb', 120)
     Cb = params.get('Cb', 1.0)
 
@@ -1316,15 +1347,16 @@ def _design_flexure(params: dict) -> dict:
     warnings = []
     assumptions = []
     not_evaluated = []
-    # 랩 구간(계약 §6.3): 뒤틀림 구속은 사람이 밝힌 것만 쓴다 — 엔진 · 호스트가 가정하지 않는다(V6b-04).
-    lap_region = params.get('lap_region') is True
+    # 랩 구간(계약 §6.3): 구속은 사람이 밝힌 것만 쓴다 — 엔진 · 호스트가 가정하지 않는다(V6b-04).
+    warnings.extend(lap_notes)
+    not_evaluated.extend(lap_notes_ne)
     if lap_region:
         if params.get('distortional_not_applicable'):
             warnings.append('lap_region: distortional_not_applicable is ignored for a lap region — the restraint '
-                            'must be stated as distortion_restrained = true')
-        dist_excluded = params.get('distortion_restrained') is True
+                            'must be stated as lap_restrained = true')
+        dist_excluded = lap_stated
         if dist_excluded:
-            assumptions.append(LAP_DIST_STATED)
+            assumptions.append(LAP_STATED)
         elif not float(dsm.get('Mcrd', 0) or 0) > 0:
             not_evaluated.append(LAP_DIST_UNSTATED)
     elif dist_excluded:
@@ -1357,7 +1389,7 @@ def _design_flexure(params: dict) -> dict:
     if 'Lb' not in params:
         warnings.append('Lb defaulted to 120 in — verify lateral unbraced length')
         if Fcre_override <= 0 and not _is_round:
-            not_evaluated.append('F2 lateral-torsional buckling (assumed Lb=120 in)')
+            not_evaluated.append(LAP_LTB_UNSTATED if lap_region else 'F2 lateral-torsional buckling (assumed Lb=120 in)')
 
     # §F2.1.1: Cb — 캔틸레버/자유단 비지지 돌출부는 1.0, 공식(Eq. F2.1.1-2) 범위 밖 값은 경고.
     if params.get('cantilever') and Cb != 1.0:
@@ -1391,7 +1423,7 @@ def _design_flexure(params: dict) -> dict:
 
     dist_applicable, dist_reason = _distortional_applicability(geom)
     if dist_excluded and lap_region:
-        dist_applicable, dist_reason = False, ('lap region — distortion_restrained = true (user statement; AISI '
+        dist_applicable, dist_reason = False, ('lap region — lap_restrained = true (user statement; AISI '
                                                'Manual II-1A / II-2A: lapped section sufficiently restrained)')
     elif dist_excluded:
         dist_applicable, dist_reason = False, 'excluded by supplied assumption'
@@ -2663,6 +2695,16 @@ def _design_combined(params: dict) -> dict:
     angle_trace = None
     if not angle_exempt:
         L_angle = params.get('L', 0) or KyLy
+        if not params.get('L'):
+            # §H1.2 의 (P)L/1000 — L 은 H1.2 에 정의가 없다. Commentary E(앵글)는 그것을 부재의 초기 굽음 L/1000 으로,
+            # §E2 는 L 을 'Laterally unbraced length of member' 로 정의한다. 부재 길이를 받지 않았으면 KyLy 로 쓴다.
+            result_notes_angle = (
+                f'§H1.2 (P)L/1000: member length L not given — KyLy = {KyLy:g} in (y-axis effective length) is '
+                'used for L. §H1.2 does not define L; the Commentary (Chapter E, angles) describes PL/1000 as an '
+                'initial out-of-straightness of L/1000, and §E2 defines L as the "Laterally unbraced length of '
+                'member". Give L (the unbraced length of the member) if K is not 1.')
+        else:
+            result_notes_angle = None
         Padd = Pu * L_angle / 1000.0
         # 추가 편심 모멘트도 증폭한다: B1·(Muy + P̄L/1000) (Manual Example III-5B).
         Muy_with_ecc = alpha_y * (Muy + Padd)
@@ -2728,6 +2770,8 @@ def _design_combined(params: dict) -> dict:
         _mark_not_evaluated(result, 'H1.2 axial + bending (component strength not evaluated)')
     else:
         _merge_governing_check(result, interaction, 'H1.2 axial + bending')
+    if angle_trace and not angle_trace['L_given']:
+        result['assumptions'].append(result_notes_angle)
     if angle_l1000_note:
         result['assumptions'].append(angle_l1000_note)
         result['angle_l1000'] = angle_l1000_note

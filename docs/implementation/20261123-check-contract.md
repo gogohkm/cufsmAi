@@ -179,32 +179,47 @@ envelope_source = {
 
 포락선은 값마다 따로 최대를 고른다. 같은 격자점의 M 최대와 |V| 최대는 다른 조합 · 패턴에서 올 수 있다 — 따로 하는 검토(휨 단독, 전단 단독)에는 맞는 방법이지만, §H2 · §H3 의 상호작용은 **동시에 작용하는 값**(같은 하중 조합의 M 과 V)을 요구한다. `combo` 와 `combo_V`(또는 격자점의 두 출처)가 다르면 그 짝은 동시 값이 아니다(작업 보고 2026-11-24 에 예가 있다).
 
-### 6.3 랩 구간의 뒤틀림 구속 — 사람이 밝힌다 (2026-11-24 V6b-04, 랩 도구와 구간 설계에 같은 규칙)
+### 6.3 랩 구간의 구속 — 사람이 밝힌다, 한 진술이 횡비틀림 · 뒤틀림 둘 다 (2026-11-24 V6b-04, 최종)
 
-AISI Manual II-1A · II-2A 는 "the lapped section is assumed to be sufficiently restrained against lateral-torsional and distortional buckling" 을 **가정으로 밝히고** 쓴다. 엔진과 호스트는 이 가정을 스스로 쓰지 않는다 — 사람이 밝혀야 한다(§I6.2.1 의 `i621_conditions_confirmed` 와 같은 꼴).
+AISI Design Manual 의 연속 퍼린 예제는 이 가정을 **가정으로 밝히고** 쓴다(스킬 원문에서 옮김):
 
-**구간 설계 `aisi_design` / `design_member`** (`member_type` 'flexure' · 'combined') 의 새 선택 입력:
+- Example II-1A · II-2A (랩 구간 검토마다): **"The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling and therefore:"** (그 뒤 Fn = Fy, Mne = Mnd = My).
+- 같은 예제의 설계 가정 (f): **"For gravity loads, the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps."**
 
-| 이름 | 값 | 기본 | 뜻 |
-|---|---|---|---|
-| `lap_region` | `true` | 없음(= 랩 구간 아님) | 이 구간이 겹친 두 부재의 랩 구간이다. 호스트는 랩 구간 호출에 이것을 준다 — 지금 주는 `distortional_not_applicable: true` 대신 |
-| `distortion_restrained` | `true` · `false` | 없음(= 밝히지 않음) | `lap_region: true` 일 때만 읽는다. 사람이 '겹친 부재가 뒤틀림을 구속한다'고 밝혔는가. 호스트는 그 사람의 진술을 그대로 넘긴다(지어내지 않는다) |
+엔진과 호스트는 이 가정을 스스로 쓰지 않는다. 사람이 밝히면 엔진이 Manual 대로 쓴다(§I6.2.1 의 `i621_conditions_confirmed` 와 같은 꼴). **진술 하나가 두 반쪽(횡비틀림 · 뒤틀림)을 함께 덮는다.**
 
-| `lap_region` | `distortion_restrained` | `dsm.Mcrd` | `member.flexure.distortional` | 결과 |
-|---|---|---|---|---|
-| `true` | `true` | 무관 | `not_applicable`, `restraint_source: {kind: 'user_input', key: 'distortion_restrained'}`, reason `§F4 not applicable: lap region — distortion_restrained = true (user statement; AISI Manual II-1A / II-2A: lapped section sufficiently restrained)` | Mnd = My(전과 같음). `assumptions` 에 아래 (가) |
-| `true` | 없음 · `false` | 줌 | 그 Mcrd 로 평가(보통 구간과 같음) | — |
-| `true` | 없음 · `false` | 없음 | `not_evaluated`(판정에 든다), reason 에 아래 (나) | `pass` 는 불합격이 없으면 `None`, `not_evaluated` 목록에 (나) |
-| `true` | — | — | `distortional_not_applicable` 을 함께 주면 무시하고 `warnings` 에 `lap_region: distortional_not_applicable is ignored for a lap region — the restraint must be stated as distortion_restrained = true` | |
-| 없음 | — | — | 지금과 같음(`distortional_not_applicable` 은 랩이 아닌 곳의 옛 입력으로 남는다) | |
+**입력 이름 — 어디서나 `lap_restrained`** (`true` · `false` · 없음; 없음 = 밝히지 않음). `distortion_restrained` 는 같은 뜻의 옛 이름으로 **별칭**이다(구간 설계 · 랩 도구 모두 받음 — 새 호출은 `lap_restrained`).
 
-문장(엔진 상수 `design.aisi_s100.LAP_DIST_STATED` · `LAP_DIST_UNSTATED` — 호스트 · 화면은 그대로 보인다):
-- (가) `F4 distortional buckling not applicable in this lap region: distortion_restrained = true (user statement — AISI Manual II-1A / II-2A: the lapped section is assumed to be sufficiently restrained against lateral-torsional and distortional buckling); Mnd = My is used.`
-- (나) `F4 distortional buckling — lap region: restraint against distortion not stated. Give distortion_restrained = true if the lapped member restrains distortional buckling (AISI Manual II-1A / II-2A assumption: the lapped section is sufficiently restrained), or give Mcrd for the lapped section.`
+**구간 설계 `aisi_design` / `design_member`** (`member_type` 'flexure' · 'combined'):
 
-**랩 도구 `lap_connection` / `design_lap_connection`** 의 `distortion_restrained` 는 같은 뜻이다(V6-07): Mnd 가 없으면 `true` 일 때 `lap.flexure.distortional` 이 `not_applicable`(출처 사용자 입력), 없으면 `not_evaluated` · 판정 None.
+| 입력 | 뜻 |
+|---|---|
+| `lap_region: true` | 이 구간이 겹친 두 부재의 랩 구간. 호스트는 랩 구간 호출에 이것을 준다 |
+| `lap_restrained` | 사람의 진술(위). 호스트는 그 진술을 그대로 넘긴다 — 지어내지 않는다 |
 
-호스트(K3)가 할 일: (1) 랩 구간 호출에서 `distortional_not_applicable: true` 를 빼고 `lap_region: true` 와 사람의 진술 `distortion_restrained` 를 넘긴다. (2) 퍼린 입력(화면 · `design_purlin` MCP 스키마)에 그 진술을 받는 칸을 둔다 — 이름은 호스트가 정하되 엔진에는 `distortion_restrained` 로. (3) 호스트의 랩 가정 문장("랩 안의 … 뒤틀림은 검토하지 않음")은 진술이 있을 때만. 같은 Manual 가정의 횡비틀림 쪽(랩 구간 `Lb = 0`)은 지금 호스트가 정한다 — 이번 결정 밖이며, 같은 규칙으로 할지는 결정할 일이다.
+**호스트가 보낼 것(랩 구간):** `lap_region: true` + 사람의 `lap_restrained`. **`Lb = 0` · `Cb = 1.0` · `distortional_not_applicable` · `dsm.Mcrd` 지우기를 호스트가 정하지 않는다** — 엔진이 진술을 보고 가정을 쓴다. (사람이 랩 구간의 실제 비지지 길이 `Lb` 나 `Mcrd` 를 따로 줬다면 그 값을 넘겨도 된다 — 아래 표.)
+
+| `lap_region` | `lap_restrained` | `Lb` · `Mcrd` | `member.flexure.global` (F2) | `member.flexure.distortional` (F4) | 결과 |
+|---|---|---|---|---|---|
+| `true` | `true` | 무관 | 엔진이 Lb = 0, Cb = 1.0 으로 평가(Fcre → ∞, Fn = Fy). 계산 과정의 Lb · Cb 출처 `{kind: 'user_input', key: 'lap_restrained', note: …}`. 준 Lb 가 0 이 아니면 쓰지 않고 `warnings` 에 밝힘 | `not_applicable`, `restraint_source: {kind: 'user_input', key: 'lap_restrained'}`, Mnd = My | `assumptions` 에 아래 (가) |
+| `true` | 없음 · `false` | Lb 줌 | 그 Lb 로 평가(보통 구간) | Mcrd 줌 → 평가 | — |
+| `true` | 없음 · `false` | Lb 없음 | `not_evaluated`, reason 에 (나). 엔진은 길이를 짓지 않는다(120 in 기본값을 쓰지 않음): Lb = 0 을 **상한**(Mne ≤ My)으로만 계산해 참고값으로 두고(출처 `engine_default`, note 에 상한), 그 상한으로도 1 을 넘으면 `fail`(가정 없이 강도는 더 작다) | Mcrd 없음 → `not_evaluated`, reason 에 (다) | 불합격이 없으면 `pass` None, `not_evaluated` 목록에 (나) · (다) |
+| `true` | — | — | `distortional_not_applicable` 을 함께 주면 무시하고 `warnings` 에 `lap_region: distortional_not_applicable is ignored for a lap region — the restraint must be stated as lap_restrained = true` | | |
+| 없음 | — | — | 지금과 같음(랩 구간이 아닌 곳 · 옛 호출) | | |
+
+**랩 도구 `lap_connection` / `design_lap_connection`:** 같은 진술 `lap_restrained`(별칭 `distortion_restrained`). 랩 휨 `lap.flexure.local`(Mnℓ = Se·Fy — Fn = Fy, 곧 횡비틀림 없음)과 Mnd 가 없을 때의 `lap.flexure.distortional` 이 이 가정에 선다:
+- 진술 있음 → 국부 휨 평가(단계 `Mnℓ = Se Fy` 에 `assumption_source: {kind: 'user_input', key: 'lap_restrained'}`), 뒤틀림 `not_applicable`(출처 같음).
+- 진술 없음 → 국부 휨 `not_evaluated`(1 을 넘으면 `fail`), reason 아래 (라); 뒤틀림은 Mnd 를 주면 평가, 없으면 `not_evaluated` · reason (다). 판정 None.
+- §H2(`lap.bending_shear`)는 원문대로 Mnℓo(Fy 기준)를 쓰므로 이 가정에 서지 않는다 — 진술과 무관하게 평가.
+
+문장(엔진 상수 — 호스트 · 화면은 그대로 보인다):
+- (가) `design.aisi_s100.LAP_STATED`: `Lap region: lap_restrained = true (user statement) — AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling" (assumption (f): "the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps"). F2 uses Lb = 0 (no lateral-torsional buckling, Fn = Fy) and F4 is not applicable (Mnd = My).`
+- (나) `design.aisi_s100.LAP_LTB_UNSTATED`: `F2 lateral-torsional buckling — lap region: restraint not stated. Give lap_restrained = true to apply the Manual assumption (AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling" (assumption (f): "the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps")), or give Lb for the lap region.`
+- (다) `design.aisi_s100.LAP_DIST_UNSTATED`: `F4 distortional buckling — lap region: restraint not stated. Give lap_restrained = true to apply the Manual assumption (AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling" (assumption (f): "the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps")), or give Mcrd for the lapped section.`
+- (라) `design.lap_checks.LAP_LTB_UNSTATED_TOOL`: `lap flexure Mnℓ = Se Fy (Fn = Fy, no lateral-torsional buckling) rests on the Manual assumption — restraint not stated. Give lap_restrained = true to apply it (AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling" (assumption (f): "the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps")).`
+- 공통 인용 `design.aisi_s100.LAP_MANUAL_ASSUMPTION`: `AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling" (assumption (f): "the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps")`
+
+호스트(K3)가 할 일: (1) 랩 구간 호출에서 `Lb = 0` · `Cb = 1.0` · `distortional_not_applicable` · `dsm.Mcrd` 삭제를 빼고 `lap_region: true` 와 `lap_restrained` 를 넘긴다. (2) 퍼린 입력(화면 · `design_purlin` MCP 스키마)과 랩 도구 스키마(`design_lap_connection`)에 `lap_restrained` 를 둔다(뜻: 위 인용 문장을 사람이 확인). (3) 호스트의 랩 가정 문장은 진술이 있을 때만 — 엔진이 (가)를 싣는다.
 
 ## 7. 단면 요소의 자리 `element_roles`
 
@@ -1002,11 +1017,100 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 | lap screw no Pnvs | `lap.block_shear` | verdict | "not_evaluated" | "not_applicable" |
 | lap screw no Pnvs | `lap.block_shear` | counts | false | true |
 
+#### §14.4 랩 구속 한 진술 · 앵글 L 가정(2026-11-24 셋째 묶음)으로 바뀐 값
+
+비교: `699e133` 의 엔진과 수정 뒤, 계약 사례 154개. 옛 키 25 값, `design_checks` 52 칸. 강도는 바뀌지 않았다. 전체 판정이 바뀐 것: `lap bolt Se Mnd` · `lap screw Pnvs ASD` PASS → NOT_CHECKED — 랩 휨 Mnℓ = Se·Fy(Fn = Fy)가 Manual 의 랩 구속 가정에 서는데 `lap_restrained` 진술이 없다(계약 §6.3). 진술을 주면 전과 같다. 앵글 두 사례는 `assumptions` 에 (P)L/1000 의 L = KyLy 한 줄이 더해졌다.
+
+| 사례 · 키 | 전 | 후 |
+|---|---|---|
+| `combined angle (P)L/1000.result.assumptions` | 1 | 2 |
+| `combined angle (P)L/1000 fails.result.assumptions` | 1 | 2 |
+| `lap bolt Se Mnd.result.flexure_checked` | true | false |
+| `lap bolt Se Mnd.result.pass` | true | null |
+| `lap bolt Se Mnd.result.steps[8].pass` | true | null |
+| `lap bolt Se Mnd.result.verdict` | "PASS" | "NOT_CHECKED" |
+| `lap bolt Se Mnd.result.warnings` | 1 | 3 |
+| `lap bolt Se e=2.result.steps[8].pass` | true | null |
+| `lap bolt Se e=2.result.warnings` | 2 | 4 |
+| `lap bolt short e.result.steps[8].pass` | true | null |
+| `lap bolt short e.result.warnings` | 6 | 8 |
+| `lap bolt short lap.result.steps[8].pass` | true | null |
+| `lap bolt short lap.result.warnings` | 4 | 6 |
+| `lap overload fails.result.warnings[2]` | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정… | "뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정… |
+| `lap screw Pnvs ASD.result.flexure_checked` | true | false |
+| `lap screw Pnvs ASD.result.pass` | true | null |
+| `lap screw Pnvs ASD.result.steps[8].pass` | true | null |
+| `lap screw Pnvs ASD.result.verdict` | "PASS" | "NOT_CHECKED" |
+| `lap screw Pnvs ASD.result.warnings` | 1 | 3 |
+| `lap screw no Pnvs.result.steps[8].pass` | true | null |
+| `lap screw no Pnvs.result.warnings` | 4 | 6 |
+| `purlin lap region stated.result.assumptions[0]` | "F4 distortional buckling not applicable in this lap region… | "Lap region: lap_restrained = true (user statement) — AISI … |
+| `purlin lap region stated.result.steps[3].equation` | "N/A (F4 not applicable: lap region — distortion_restrained… | "N/A (F4 not applicable: lap region — lap_restrained = true… |
+| `purlin lap region stated.result.steps[3].formula` | "N/A (F4 not applicable: lap region — distortion_restrained… | "N/A (F4 not applicable: lap region — lap_restrained = true… |
+| `purlin lap region unstated.result.not_evaluated` | 1 | 2 |
+
+| 사례 | id | 칸 | 전 | 후 |
+|---|---|---|---|---|
+| lap bolt Se Mnd | `lap.flexure.local` | verdict | "pass" | "not_evaluated" |
+| lap bolt Se Mnd | `lap.flexure.local` | governs | false | true |
+| lap bolt Se Mnd | `lap.flexure.local` | ratio | 0.40404040404040403 | null |
+| lap bolt Se Mnd | `lap.flexure.local` | capacity | 297.0 | null |
+| lap bolt Se Mnd | `lap.flexure.local` | reference.ratio | null | 0.40404040404040403 |
+| lap bolt Se Mnd | `lap.flexure.local` | reference.capacity | null | 297.0 |
+| lap bolt Se Mnd | `lap.bending_shear` | governs | true | false |
+| lap bolt Se e=2 | `lap.flexure.local` | verdict | "pass" | "not_evaluated" |
+| lap bolt Se e=2 | `lap.flexure.local` | governs | false | true |
+| lap bolt Se e=2 | `lap.flexure.local` | ratio | 0.40404040404040403 | null |
+| lap bolt Se e=2 | `lap.flexure.local` | capacity | 297.0 | null |
+| lap bolt Se e=2 | `lap.flexure.local` | reference.ratio | null | 0.40404040404040403 |
+| lap bolt Se e=2 | `lap.flexure.local` | reference.capacity | null | 297.0 |
+| lap bolt Se e=2 | `lap.flexure.distortional` | governs | true | false |
+| lap bolt short e | `lap.flexure.local` | verdict | "pass" | "not_evaluated" |
+| lap bolt short e | `lap.flexure.local` | governs | false | true |
+| lap bolt short e | `lap.flexure.local` | ratio | 0.40404040404040403 | null |
+| lap bolt short e | `lap.flexure.local` | capacity | 297.0 | null |
+| lap bolt short e | `lap.flexure.local` | reference.ratio | null | 0.40404040404040403 |
+| lap bolt short e | `lap.flexure.local` | reference.capacity | null | 297.0 |
+| lap bolt short e | `lap.flexure.distortional` | governs | true | false |
+| lap bolt short lap | `lap.flexure.local` | verdict | "pass" | "not_evaluated" |
+| lap bolt short lap | `lap.flexure.local` | governs | false | true |
+| lap bolt short lap | `lap.flexure.local` | ratio | 0.40404040404040403 | null |
+| lap bolt short lap | `lap.flexure.local` | capacity | 297.0 | null |
+| lap bolt short lap | `lap.flexure.local` | reference.ratio | null | 0.40404040404040403 |
+| lap bolt short lap | `lap.flexure.local` | reference.capacity | null | 297.0 |
+| lap bolt short lap | `lap.flexure.distortional` | governs | true | false |
+| lap screw Pnvs ASD | `lap.flexure.local` | verdict | "pass" | "not_evaluated" |
+| lap screw Pnvs ASD | `lap.flexure.local` | governs | false | true |
+| lap screw Pnvs ASD | `lap.flexure.local` | ratio | 0.5566666666666666 | null |
+| lap screw Pnvs ASD | `lap.flexure.local` | capacity | 118.562874251497 | null |
+| lap screw Pnvs ASD | `lap.flexure.local` | reference.ratio | null | 0.5566666666666666 |
+| lap screw Pnvs ASD | `lap.flexure.local` | reference.capacity | null | 118.562874251497 |
+| lap screw Pnvs ASD | `lap.bending_shear` | governs | true | false |
+| lap screw no Pnvs | `lap.flexure.local` | verdict | "pass" | "not_evaluated" |
+| lap screw no Pnvs | `lap.flexure.local` | governs | false | true |
+| lap screw no Pnvs | `lap.flexure.local` | ratio | 0.22446689113355778 | null |
+| lap screw no Pnvs | `lap.flexure.local` | capacity | 178.20000000000002 | null |
+| lap screw no Pnvs | `lap.flexure.local` | reference.ratio | null | 0.22446689113355778 |
+| lap screw no Pnvs | `lap.flexure.local` | reference.capacity | null | 178.20000000000002 |
+| lap screw no Pnvs | `lap.flexure.distortional` | governs | true | false |
+| purlin lap region unstated | `member.flexure.local` | verdict | "pass" | "not_evaluated" |
+| purlin lap region unstated | `member.flexure.local` | ratio | 0.6406113376381318 | null |
+| purlin lap region unstated | `member.flexure.local` | capacity | 51.51329372606425 | null |
+| purlin lap region unstated | `member.flexure.local` | reference.ratio | null | 0.6406113376381318 |
+| purlin lap region unstated | `member.flexure.local` | reference.capacity | null | 51.51329372606425 |
+| purlin lap region unstated | `member.flexure.global` | verdict | "pass" | "not_evaluated" |
+| purlin lap region unstated | `member.flexure.global` | ratio | 0.5164948453608247 | null |
+| purlin lap region unstated | `member.flexure.global` | capacity | 63.89221556886228 | null |
+| purlin lap region unstated | `member.flexure.global` | reference.ratio | null | 0.5164948453608247 |
+| purlin lap region unstated | `member.flexure.global` | reference.capacity | null | 63.89221556886228 |
+
 ## 15. 엔진 식별 `engine_id` (2026-11-24)
 
 `selftest` 응답의 `engine_id` — 결과를 낸 엔진의 소스 전부의 해시. 저장한 결과(.csd)가 지금 엔진의 것인지 가르는 데 쓴다(손으로 올리는 번호는 잊힌다).
 
 - 형식: `"sha256:" + 64자리 소문자 16진수`. 읽지 못하면 **`"unknown"`**(그때만 `engine_id_error` 에 까닭) — 일부 파일만으로 만든 해시는 내지 않는다. `"unknown"` 은 어떤 id 와도 같지 않은 것으로 다룬다.
 - 대상: `python/` 아래 `engine/ design/ cfsm/ fcfsm/ vibration/ plastic/ fileio/ models/` 의 모든 `.py`(하위 폴더 포함, `__pycache__` · `test_*.py` · `test`/`tests` 폴더 제외)와 `server.py`. 폴더가 없거나 그 안에 `.py` 가 하나도 없으면(컴파일만 한 배치) `"unknown"`.
-- 계산: 상대 경로('/' 구분)로 정렬, `"engine-id/1\n"` 다음에 파일마다 (경로 길이 4바이트 · 경로 UTF-8 · 내용 길이 8바이트 · 내용)을 넣는다. 내용은 CRLF → LF 로 맞춘다 — CRLF 로 꺼낸 저장소와 LF 로 꺼낸 저장소가 같은 id 다.
+- 계산: `"engine-id/2\n"`, 그다음 **결과가 기대는 실행 환경** — `python` = major.minor, `numpy` · `scipy` 의 `__version__`(scipy 가 없으면 `absent`) — 을 키 순서로 `key=value\n`, 그다음 상대 경로('/' 구분)로 정렬한 파일마다 (경로 길이 4바이트 · 경로 UTF-8 · 내용 길이 8바이트 · 내용). 내용은 CRLF → LF 로 맞춘다 — CRLF 로 꺼낸 저장소와 LF 로 꺼낸 저장소가 같은 id 다.
+- 왜 판까지(2026-11-24): 설치 프로그램의 런타임은 판을 고정하지만 개발 환경은 바뀔 수 있다(고유값 · 선형대수 결과의 끝자리). 판이 바뀐 환경에서 저장한 결과를 '지금 엔진의 것'으로 되살리지 않게 한다. `selftest` 는 해시한 그 판을 `engine_runtime: {python, numpy, scipy}` 로도 돌려준다.
+- 파일 하나가 없어진 트리는 다른 id 가 된다 — 의도한 동작이다(다른 트리는 다른 엔진; 저장한 결과가 '지금 것'으로 되살아나지 않는 쪽). 빠진 모듈은 보통 `selftest` 의 `import_errors` 로도 드러난다.
 - 서버를 띄울 때 한 번 계산한다(54 파일, 약 12 ms). 같은 소스면 실행 · 기계와 무관하게 같고, 한 바이트라도(또는 파일 이름이) 바뀌면 다르다. 시험: `test_review_1124_engine_id.py`.

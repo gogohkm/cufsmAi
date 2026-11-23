@@ -53,8 +53,9 @@ def design_lap_connection(params: dict) -> dict:
             Pnvs: 나사 전단 공칭강도(제조사 값, kips/개) — 나사일 때
             Fub, bolt_grade: 볼트 강도 — 볼트일 때 (없으면 A307 가정)
             Se, Mnd, Vn, h_web: Lap 구간 휨·뒤틀림·H2 검토용
-            distortion_restrained: True 면 Lap 구간의 뒤틀림이 겹친 부재로 구속됨(사용자가 밝힘) — Mnd 가
-                없을 때 §F4 를 해당 없음으로. 없으면 Mnd 없이 §F4 는 미평가(판정 None)
+            lap_restrained: True 면 사람이 Design Manual II-1A / II-2A 의 가정('겹친 부분은 횡비틀림 · 뒤틀림 좌굴에
+                충분히 구속됨')을 밝힘 — 랩 휨 Mnℓ = Se·Fy(횡비틀림 없음)와 §F4 해당 없음(Mnd 가 없을 때)이 그
+                가정에 선다. 없으면 그 두 검토는 미평가(판정 None). distortion_restrained 는 같은 뜻의 옛 이름(별칭)
         }
 
     Returns:
@@ -298,6 +299,8 @@ def design_lap_connection(params: dict) -> dict:
     # Se 대신 쓰지 않는다 — Sf 만 있으면 참고값(assumed)으로만 보이고 휨은 미평가(FIXES §3.1).
     Se = params.get('Se') or 0
     Sf_only = params.get('Sf') or 0
+    from design.aisi_s100 import lap_restraint_stated
+    lap_stated = lap_restraint_stated(params)
 
     # §H2 검토용 전단강도 Vn: 미입력이면 §G2.1(비보강 웹)로 직접 산정한다 —
     # 본 도구는 d, t, Fy를 이미 보유하므로 외부 입력에 의존할 이유가 없다.
@@ -342,6 +345,14 @@ def design_lap_connection(params: dict) -> dict:
             flexure_dcr = Mu / phi_Mn_lap if phi_Mn_lap > 0 else float('inf')
 
         flexure_ok = flexure_dcr <= 1.0
+        # Mnℓ = Se·Fy 는 Fn = Fy(횡비틀림 없음)다 — Manual 의 가정에 선다(계약 §6.3). 밝히지 않았으면 판정 없음
+        # (불합격은 그대로: 가정 없이 강도는 더 작아질 뿐이다).
+        if not lap_stated:
+            _flex['ltb_unstated'] = True
+            if flexure_ok:
+                flexure_ok = None
+                warnings.append('Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A '
+                                '가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.')
         flexure_dcr_governing = flexure_dcr
         _flex['local'] = dict(Mnl_single=Mnl_single, Mn_lap=Mn_lap, phi_Mn_lap=phi_Mn_lap, dcr=flexure_dcr,
                               ok=flexure_ok, n_members=n_members)
@@ -377,7 +388,7 @@ def design_lap_connection(params: dict) -> dict:
             dist_ok = dist_dcr <= 1.0
             _flex['dist'] = dict(Mnd_single=Mnd_single, Mnd_lap=Mnd_lap, phi_Mnd_lap=phi_Mnd_lap, dcr=dist_dcr,
                                  ok=dist_ok)
-            flexure_ok = flexure_ok and dist_ok
+            flexure_ok = _and3(flexure_ok, dist_ok)
             flexure_dcr_governing = max(flexure_dcr_governing or 0, dist_dcr)
             steps.append({
                 'step': '8a', 'name': 'Lap Distortional Flexural Strength (§F4, 2-member sum)',
@@ -393,12 +404,12 @@ def design_lap_connection(params: dict) -> dict:
                 warnings.append(
                     f'Lap 구간 뒤틀림 휨강도 부족(§F4): DCR = {dist_dcr:.2f}.'
                 )
-        elif params.get('distortion_restrained') is True:
-            # 사용자가 랩 구간의 뒤틀림 구속을 밝혔다(Manual II-2A 가정 (f)) — 그 입력을 근거로 해당 없음.
+        elif lap_stated:
+            # 사람이 Manual 의 랩 구속 가정을 밝혔다 — 그 입력을 근거로 §F4 해당 없음.
             _flex['dist_restrained'] = True
             warnings.append(
-                '뒤틀림좌굴(§F4): distortion_restrained = true — 사용자가 Lap 구간이 겹친 부재로 뒤틀림이 '
-                '구속된다고 밝혔으므로(Manual II-2A 가정 (f)) §F4 검토를 하지 않았습니다.'
+                '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림 좌굴에 충분히 '
+                '구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.'
             )
         else:
             # 구속을 엔진이 가정하지 않는다(V6-07): 해당하는데 평가하지 못한 한계상태 → 판정 없음(FIXES §3.1).
@@ -406,8 +417,8 @@ def design_lap_connection(params: dict) -> dict:
             _flex['dist_missing'] = True
             warnings.append(
                 '뒤틀림좌굴(§F4) 강도 Mnd(또는 Mcrd)가 미입력 — Lap 구간의 뒤틀림 검토를 하지 못해 판정하지 '
-                '않습니다. Mnd 를 입력하거나, 겹친 부재로 뒤틀림이 구속되면(Manual II-2A 가정 (f)) '
-                'distortion_restrained = true 를 주세요.'
+                '않습니다. Mnd 를 입력하거나, 겹친 부분이 구속되면(Manual II-1A / II-2A) lap_restrained = true 를 '
+                '주세요.'
             )
 
         # 지점부 휨-전단 상호작용(§H2) 검토: Vn은 입력값 또는 §G2.1 자동산정값.
@@ -429,7 +440,7 @@ def design_lap_connection(params: dict) -> dict:
             mv_ok = mv_term <= 1.0
             _flex['h2'] = dict(Vn=Vn, vn_auto=vn_auto, phi_Vn_lap=phi_Vn_lap, mv=mv_term, ok=mv_ok,
                                m_ratio=mv_m, v_ratio=mv_v)
-            flexure_ok = flexure_ok and mv_ok
+            flexure_ok = _and3(flexure_ok, mv_ok)
             flexure_dcr_governing = max(flexure_dcr_governing or 0, mv_term)
             steps.append({
                 'step': '8b', 'name': 'Lap Combined Bending+Shear (§H2, Eq. H2-1)',
@@ -623,6 +634,15 @@ def _rekey_fastener_sources(checks: list) -> None:
         for st in c.get('steps') or []:
             for i in st.get('inputs') or []:
                 fix(i)
+
+
+def _and3(a, b):
+    """판정 접기: 하나라도 False 면 False, 아니고 하나라도 None 이면 None, 아니면 True."""
+    if a is False or b is False:
+        return False
+    if a is None or b is None:
+        return None
+    return True
 
 
 def check_lap_length(d: float, lap_left: float, lap_right: float) -> dict:

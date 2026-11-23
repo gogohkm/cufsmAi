@@ -282,10 +282,10 @@ def _member():
                                           Mu=0.5 * 5.5 * 12, Vu=0.5 * 2.2, moment_sign='-',
                                           dsm=dict(Mcrl=91.0, M_sign='-'))))
     # 2026-11-24 V6b-04 (계약 §6.3): 랩 구간은 사람이 밝힌 구속만 쓴다
-    a(('purlin lap region stated', dict(zr, Lb=0, Cb=1.0, lap_region=True, distortion_restrained=True,
+    a(('purlin lap region stated', dict(zr, lap_region=True, lap_restrained=True,
                                         Mu=0.5 * 5.5 * 12, Vu=0.5 * 2.2, moment_sign='-',
                                         dsm=dict(Mcrl=91.0, M_sign='-'))))
-    a(('purlin lap region unstated', dict(zr, Lb=0, Cb=1.0, lap_region=True,
+    a(('purlin lap region unstated', dict(zr, lap_region=True,
                                           Mu=0.5 * 5.5 * 12, Vu=0.5 * 2.2, moment_sign='-',
                                           dsm=dict(Mcrl=91.0, M_sign='-'))))
     # V6b-03: 휨 소요 없이 전단만 · 웹 크리플링만

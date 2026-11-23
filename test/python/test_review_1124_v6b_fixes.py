@@ -12,7 +12,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(HERE)), 'python'))
 sys.path.insert(0, HERE)
 
-from design.aisi_s100 import design_member, LAP_DIST_STATED, LAP_DIST_UNSTATED  # noqa: E402
+from design.aisi_s100 import (  # noqa: E402
+    design_member, LAP_STATED, LAP_LTB_UNSTATED, LAP_DIST_UNSTATED, LAP_MANUAL_ASSUMPTION,
+)
 from design.checks import overall_verdict  # noqa: E402
 from design.lap_connection import design_lap_connection  # noqa: E402
 from design.loads.required_strength import analyze_loads  # noqa: E402
@@ -87,27 +89,62 @@ def test_lap_block_shear_lower_bound_is_evaluated_and_counts():
 
 
 # ---------------------------------------------------------------- 3. 랩 구간의 뒤틀림 구속 (§6.3)
-def test_lap_region_distortion_needs_an_explicit_statement():
-    base = dict(member_type='flexure', design_method='ASD', Fy=55, Lb=0, Cb=1.0, Mu=20.0, section_type='C',
+def test_lap_region_one_statement_covers_ltb_and_distortion():
+    """계약 §6.3: 랩 구간은 lap_restrained(별칭 distortion_restrained) 하나가 Manual 가정 두 반쪽을 덮는다.
+    호스트는 Lb = 0 을 정하지 않는다 — 엔진이 진술을 보고 Lb = 0 · F4 해당 없음을 쓴다."""
+    base = dict(member_type='flexure', design_method='ASD', Fy=55, Mu=20.0, section_type='C',
                 props=dict(C9), section=dict(S9), dsm=dict(Mcrl=84.4), lap_region=True, moment_sign='-')
     un = design_member(dict(base))
-    d = _check(un, 'member.flexure.distortional')
+    g, d = _check(un, 'member.flexure.global'), _check(un, 'member.flexure.distortional')
+    assert g['verdict'] == 'not_evaluated' and LAP_LTB_UNSTATED in g['reason']
     assert d['verdict'] == 'not_evaluated' and LAP_DIST_UNSTATED in d['reason'] and un['pass'] is None
-    assert LAP_DIST_UNSTATED in un['not_evaluated']
-    st = design_member(dict(base, distortion_restrained=True))
-    d2 = _check(st, 'member.flexure.distortional')
-    assert d2['verdict'] == 'not_applicable' and d2['restraint_source'] == {'kind': 'user_input',
-                                                                            'key': 'distortion_restrained'}
-    assert LAP_DIST_STATED in st['assumptions'] and st['pass'] is True
-    legacy = design_member(dict(base, distortional_not_applicable=True))   # 자동 가정은 랩 구간에서 무시
+    assert LAP_LTB_UNSTATED in un['not_evaluated'] and LAP_DIST_UNSTATED in un['not_evaluated']
+    assert 'lateral-torsional buckling and distortional buckling' in LAP_MANUAL_ASSUMPTION
+    for key in ('lap_restrained', 'distortion_restrained'):              # 새 이름과 별칭
+        st = design_member(dict(base, **{key: True}))
+        g2, d2 = _check(st, 'member.flexure.global'), _check(st, 'member.flexure.distortional')
+        assert g2['verdict'] == 'pass' and d2['verdict'] == 'not_applicable', key
+        assert d2['restraint_source'] == {'kind': 'user_input', 'key': 'lap_restrained'}
+        lb = [i for s in g2['steps'] for i in s['inputs'] if i['symbol'] == 'Lb'][0]
+        assert lb['value'] == 0.0 and lb['source']['key'] == 'lap_restrained'
+        assert LAP_STATED in st['assumptions'] and st['pass'] is True
+        # Mne = My (Fn = Fy): 손계산 Sf·Fy / Ωb 와 같은 설계강도
+        assert abs(g2['capacity']['value'] - 2.29 * 55 / 1.67) <= 1e-9
+    over = design_member(dict(base, lap_restrained=True, Lb=40.0))           # 진술이 있으면 준 Lb 대신 가정
+    assert any('is not used' in w for w in over['warnings'])
+    legacy = design_member(dict(base, Lb=0, Cb=1.0, distortional_not_applicable=True))   # 호스트의 옛 호출
     assert _check(legacy, 'member.flexure.distortional')['verdict'] == 'not_evaluated'
     assert any('distortional_not_applicable is ignored' in w for w in legacy['warnings'])
-    given = design_member(dict(base, dsm=dict(Mcrl=84.4, Mcrd=107.0)))      # Mcrd 를 주면 평가
+    given = design_member(dict(base, Lb=30.0, dsm=dict(Mcrl=84.4, Mcrd=107.0)))   # Lb · Mcrd 를 주면 평가
+    assert _check(given, 'member.flexure.global')['verdict'] in ('pass', 'fail')
     assert _check(given, 'member.flexure.distortional')['verdict'] in ('pass', 'fail')
-    lap = design_lap_connection(dict(d=8.0, t=0.059, Fy=55, Fu=70, lap_left_in=12, lap_right_in=30,
-                                     Mu_support=105.0, Vu_support=1.78, fastener_type='bolt', fastener_dia=0.5,
-                                     n_rows=2, end_distance=2.0, Se=2.025, design_method='ASD'))
-    assert _check(lap, 'lap.flexure.distortional')['verdict'] == 'not_evaluated'     # 랩 도구도 같은 규칙
+
+
+def test_lap_tool_same_statement_and_alias():
+    L = dict(d=8.0, t=0.059, Fy=55, Fu=70, lap_left_in=12, lap_right_in=30, Mu_support=105.0, Vu_support=1.78,
+             fastener_type='bolt', fastener_dia=0.5, n_rows=2, end_distance=2.0, Se=2.025, design_method='ASD')
+    un = design_lap_connection(dict(L))
+    lo = _check(un, 'lap.flexure.local')
+    assert lo['verdict'] == 'not_evaluated' and 'lap_restrained' in lo['reason'] and un['pass'] is None
+    assert lo['reference']['ratio'] < 1.0
+    assert _check(un, 'lap.flexure.distortional')['verdict'] == 'not_evaluated'
+    assert _check(un, 'lap.bending_shear')['verdict'] == 'pass'           # H2 는 가정에 서지 않는다
+    for key in ('lap_restrained', 'distortion_restrained'):
+        st = design_lap_connection(dict(L, **{key: True}))
+        assert _check(st, 'lap.flexure.local')['verdict'] == 'pass'
+        assert _check(st, 'lap.flexure.distortional')['restraint_source']['key'] == 'lap_restrained'
+        assert st['pass'] is True, key
+    bad = design_lap_connection(dict(L, Mu_support=400.0))                 # 가정 없이도 불합격은 불합격
+    assert _check(bad, 'lap.flexure.local')['verdict'] == 'fail' and bad['pass'] is False
+
+
+def test_angle_L_substitution_is_an_assumption():
+    """§H1.2 (P)L/1000: L 을 받지 않으면 KyLy 를 쓴다 — 계산 과정만이 아니라 assumptions 에(조항 · 두 양과 함께)."""
+    r = design_member(dict([p for nm, _, p in cases._member() if nm == 'combined angle (P)L/1000'][0]))
+    a = [x for x in r['assumptions'] if x.startswith('§H1.2 (P)L/1000: member length L not given')]
+    assert len(a) == 1 and 'KyLy' in a[0] and 'Laterally unbraced length of member' in a[0]
+    p = dict([p for nm, _, p in cases._member() if nm == 'combined angle (P)L/1000'][0], L=18.0)
+    assert not any(x.startswith('§H1.2 (P)L/1000: member length') for x in design_member(p)['assumptions'])
 
 
 # ---------------------------------------------------------------- 4. 소요 0 (V6b-03)

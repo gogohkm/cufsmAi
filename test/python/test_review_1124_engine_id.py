@@ -62,3 +62,14 @@ def test_unreadable_or_missing_source_gives_unknown_not_a_partial_hash():
     assert eid == 'unknown' and 'PermissionError' in err
     eid2, err2 = server.compute_engine_id(os.path.join(PY, 'design'))      # 폴더가 없는 배치
     assert eid2 == 'unknown' and 'missing' in err2
+
+
+def test_numeric_library_versions_are_part_of_the_id():
+    """같은 소스라도 numpy · scipy · Python major.minor 가 다르면 다른 엔진이다(개발 환경의 판 바뀜)."""
+    items = server._engine_sources(PY)
+    rt = server.engine_runtime()
+    assert set(rt) == {'python', 'numpy', 'scipy'} and rt['python'].count('.') == 1
+    assert server.engine_id_of(items, rt) == server.ENGINE_ID == server._m_selftest({})['engine_id']
+    for k, v in (('numpy', '0.0.1'), ('scipy', '0.0.1'), ('python', '3.0')):
+        assert server.engine_id_of(items, dict(rt, **{k: v})) != server.engine_id_of(items, rt), k
+    assert server._m_selftest({})['engine_runtime'] == rt

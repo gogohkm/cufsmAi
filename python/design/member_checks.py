@@ -586,8 +586,19 @@ def flexure_checks(ctx):
     st = ctx['state']
     Mu = ctx['Mu']
     demand = q('Mu', Mu, 'moment', demand_source(p, 'Mu')) if Mu and Mu > 0 else None
-    Lb_src = (src('engine_default', key='Lb', note='120 in') if 'Lb' not in p else src('user_input', key='Lb'))
+    if p.get('_lb_from_lap_restrained'):
+        Lb_src = src('user_input', key='lap_restrained',
+                     note='lap region: Manual II-1A / II-2A assumption — lapped section restrained against '
+                          'lateral-torsional buckling → Lb = 0')
+    elif p.get('_lb_lap_upper_bound'):
+        Lb_src = src('engine_default', key='Lb',
+                     note='lap region, restraint not stated and Lb not given: Lb = 0 only as an upper bound '
+                          '(Mne ≤ My) — F2 is not evaluated unless this bound already fails')
+    else:
+        Lb_src = (src('engine_default', key='Lb', note='120 in') if 'Lb' not in p else src('user_input', key='Lb'))
     Cb_src = src('user_input', key='Cb') if p.get('Cb') is not None else src('engine_default', key='Cb', note='1.0')
+    if p.get('_lb_from_lap_restrained'):
+        Cb_src = src('user_input', key='lap_restrained', note='lap region: Cb = 1.0 (Lb = 0)')
     i621 = ctx['R_uplift'] is not None and ctx['R_uplift'] > 0
     gov_id = ('member.flexure.uplift_r' if i621 else
               {'Local Buckling': 'member.flexure.local',
@@ -723,7 +734,7 @@ def flexure_checks(ctx):
     elif not ctx['dist_applicable']:
         c = not_applicable('member.flexure.distortional', ctx, f"§F4 not applicable: {ctx['dist_reason']}")
         if ctx.get('dist_stated'):
-            c['restraint_source'] = src('user_input', key='distortion_restrained')
+            c['restraint_source'] = src('user_input', key='lap_restrained')
         checks.append(c)
     else:
         checks.append(not_evaluated('member.flexure.distortional', ctx, '; '.join(d_items) or 'no Mcrd'))

@@ -22,6 +22,13 @@ LAP_BLOCK_SHEAR_ASSUMPTION = (
     '0.6 Fu Anv); conservative, since the Ubs Fu Ant term of Eq. J6.3-1/-2 is never negative.')
 
 
+from design.aisi_s100 import LAP_MANUAL_ASSUMPTION, LAP_DIST_UNSTATED  # noqa: E402
+
+LAP_LTB_UNSTATED_TOOL = ('lap flexure Mnℓ = Se Fy (Fn = Fy, no lateral-torsional buckling) rests on the Manual '
+                         'assumption — restraint not stated. Give lap_restrained = true to apply it (' +
+                         LAP_MANUAL_ASSUMPTION + ').')
+
+
 def build(ck: dict) -> list:
     dm, p = ck['dm'], ck['params']
     checks = []
@@ -161,11 +168,22 @@ def build(ck: dict) -> list:
             i_d = design_strength_step(tr, dm, tr.ref(i_l), phi_b, om_b, lo['phi_Mn_lap'],
                                        'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', 'moment',
                                        phi_symbol='φb', omega_symbol='Ωb')
-            v = 'pass' if lo['ok'] else 'fail'
+            v = 'pass' if lo['dcr'] <= 1.0 else 'fail'
+            unstated = fx.get('ltb_unstated') and v == 'pass'
+            if unstated:
+                v = 'not_evaluated'
             tr.add('verdict', f"Mu / {tr.steps[i_d]['result']['symbol']} ≤ 1", inputs=[mu, tr.ref(i_d)],
                    result=q('ratio', lo['dcr'], 'dimensionless'),
                    verdict=v)
+            if not fx.get('ltb_unstated'):
+                tr.steps[i_m]['assumption_source'] = src('user_input', key='lap_restrained',
+                                                         note='Fn = Fy: lapped section restrained against '
+                                                              'lateral-torsional buckling (Manual II-1A / II-2A)')
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict=v, demand=mu,
+                                     reason=(LAP_LTB_UNSTATED_TOOL if unstated else None),
+                                     reference=({'capacity': q('φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb',
+                                                               lo['phi_Mn_lap'], 'moment'), 'ratio': lo['dcr']}
+                                                if unstated else None),
                                      capacity=q('φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', lo['phi_Mn_lap'], 'moment'),
                                      nominal=q('Mn,lap', lo['Mn_lap'], 'moment'),
                                      factor_=factor(dm, phi_b, om_b, 'φb', 'Ωb'), ratio=lo['dcr'], steps=tr.steps,
@@ -199,14 +217,11 @@ def build(ck: dict) -> list:
                                      factor_=factor(dm, phi_b, om_b, 'φb', 'Ωb'), ratio=ds['dcr'], steps=tr.steps))
         elif fx.get('local') and fx.get('dist_restrained'):
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_applicable',
-                                     reason='distortion_restrained = true (user input): the lapped portion is '
-                                            'restrained against distortional buckling (Manual II-2A assumption (f))',
-                                     restraint_source=src('user_input', key='distortion_restrained')))
+                                     reason='lap_restrained = true (user statement): ' + LAP_MANUAL_ASSUMPTION,
+                                     restraint_source=src('user_input', key='lap_restrained')))
         elif fx.get('local'):
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
-                                     reason='Mnd not given and the restraint against distortion is not stated — '
-                                            'give Mnd, or distortion_restrained = true when the lapped member '
-                                            'restrains distortion (Manual II-2A assumption (f))'))
+                                     reason=LAP_DIST_UNSTATED))
         else:
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
                                      reason='lap flexure not evaluated (no Se)'))
