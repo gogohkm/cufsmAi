@@ -183,6 +183,21 @@ envelope_source = {
 
 하중 해석 결과에 `display_rounding`(`{decimals: {'locations[].Vu_left': 3, …}, note}`)이 새로 있다 — 반올림해 실은 위치 키 목록이다.
 
+**반올림하지 않은 값 — `unrounded` 하위 객체(2026-11-24):** 소비자가 소요 · 길이로 쓸 수 있는 반올림 키는 같은 이름으로 반올림하지 않은 값을 그 레코드의 `unrounded` 에 함께 싣는다. 판정 · 길이 계산은 이것으로(반올림 키는 표시용 — `display_rounding` 에 목록).
+
+| 레코드 | `unrounded` 의 키 |
+|---|---|
+| `governing` · `gravity` · `uplift` 의 `locations[]` — 경간 ±M | `x_ft`, `Mu`, `Vu` |
+| 같은 목록 — 지점 | `x_ft`, `Mu`(끝 지점의 0 은 null), `Vu`, `Ru`, `Mu_max`, `Mu_min`, `Vu_left`, `Vu_right`, `R_max`, `R_min`, `R_bearing`, `R_uplift` (앞의 `Vu_left_unrounded` · `Vu_right_unrounded` 도 그대로) |
+| 같은 목록 — 랩 끝 | `x_ft`, `Mu`, `Vu`, `Mu_max`, `Mu_min` |
+| `auto_params.unbraced` · `auto_params.uplift_bracing.unbraced` 의 `positive_regions[]` · `negative_regions[]` · `lap_regions[]` | `start_ft`, `end_ft`, `Ly_in`, `Lt_in`, `Cb`, `M1`, `M2`, `M_max_abs`, `x_M_max_ft` |
+| `auto_params.positive_region` · `negative_region` (· `negative_region_gov`), 그 `regions[]` | 지배 구간의 같은 키 |
+| `wc_reactions[]` | `Pu`, `x_ft` |
+| `uplift_reactions[]` | `R_uplift`, `x_ft` |
+| `auto_params.unbraced` (· `uplift_bracing.unbraced`) | 목록 `inflection_points_ft_unrounded` · `inflection_points_min_envelope_ft_unrounded` |
+
+**변곡점의 정의(2026-11-24):** M 의 부호가 부재 **안에서** 실제로 바뀌는 점. 측점의 부호는 M > tol → +, M < −tol → −, 그 밖은 0, `tol = 1e-7 × max(1, max|M|)`(비지지 구간을 가르는 `_sign_zones` 와 같은 허용오차). 0 이 아닌 두 측점 사이에서 부호가 바뀔 때만: 이웃한 두 측점이면 그 사이의 선형보간 영점, 사이에 0 인 측점들이 끼면(모멘트 0 구간) 그 0 구간의 가운데. 그래서 자유단 · 핀 끝 지점의 M = 0, 실리지 않은 내다지의 M = 0 구간은 변곡점이 아니다. 비지지 구간(`_sign_zones`)은 전부터 같은 허용오차를 써서 영향이 없다. 바뀐 옛 값: 랩이 있는 유한요소 사례에서 끝의 0.0 ft 가 빠졌다(`cont-4 laps D L W ASD` 네 목록, `analyze_loads II-2A purlin with laps` 두 목록 — 각 목록의 첫 원소 0.0 만).
+
 **처짐 포락(`deflection_cases[]`)** 가운데 부분재하가 든 것(L · Lr(감소) · S 와 D + 그것)에 `D_envelope_source = {"D_max": [[start, count, pattern_index], …], "D_min": […], "patterns": [{"loads": {"D": "all spans", "L": "spans 1,3 loaded"}}, …]}`. 처짐은 비계수 하중이라 조합 칸이 없다.
 
 **호스트가 쓸 것:** 검토 지점의 소요가 포락선 격자점 i 에서 왔으면 `'envelope'` 대신 `combos[ci]` + `patterns[pi]`(`_comboLabel` 과 같은 꼴). 같은 검토 지점의 M 과 V 의 출처가 다르면(아래 6.2) 그 지점은 하나의 하중 상태가 아니다.

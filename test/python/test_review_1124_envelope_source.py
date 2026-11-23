@@ -259,3 +259,78 @@ def test_fe_answer_does_not_depend_on_blas_threads_and_ties_take_the_first_stati
                       design_method='LRFD', section={'Ixx': 10.0, 'depth': 8}, I_span_in4=[10.0, 20.0, 10.0])
     loc = [x for x in r['governing']['locations'] if x['name'] == 'Int span 2 -M'][0]
     assert loc['x_ft'] == 25.0
+
+
+def _infl_ok(x, M, pts):
+    """변곡점마다: 양쪽에 부호가 0 이 아닌(허용오차 밖) 반대 부호의 측점이 있고, 부재 끝이 아니다."""
+    tol = 1e-7 * max([1.0] + [abs(v) for v in M])
+    for p in pts:
+        assert x[0] < p < x[-1], p
+        left = [v for xv, v in zip(x, M) if xv <= p + 1e-9 and abs(v) > tol]
+        right = [v for xv, v in zip(x, M) if xv >= p - 1e-9 and abs(v) > tol]
+        assert left and right and left[-1] * right[0] < 0, p
+
+
+OVERHANG = [
+    ('symmetric overhangs', dict(member_app='roof-purlin', span_type='cont-n', span_ft=25.0,
+                                  spans_ft=[1.0, 25.0, 25.0, 25.0, 25.0, 1.0], supports=['N', 'P', 'R', 'R', 'R', 'P', 'N'],
+                                  loads={'D': 15, 'Lr': 100}, design_method='ASD', lr_reduced=True,
+                                  section={'Ixx': 10.0, 'depth': 8},
+                                  laps_per_support=[None, None] + [{'left_ft': 1.0, 'right_ft': 2.5}] * 3 + [None, None])),
+    ('asymmetric overhangs', dict(member_app='floor-joist', span_type='cont-n', span_ft=20.0,
+                                   spans_ft=[2.0, 20.0, 18.0, 4.0], supports=['N', 'P', 'R', 'P', 'N'],
+                                   loads={'D': 30, 'L': 120}, design_method='LRFD', section={'Ixx': 10.0})),
+    ('pinned ends', dict(member_app='floor-joist', span_type='cont-3', span_ft=20.0, loads={'D': 30, 'L': 120},
+                         design_method='LRFD', section={'Ixx': 10.0})),
+]
+
+
+def test_inflection_points_are_real_sign_changes_inside_the_member():
+    """자유단 · 핀 끝의 M = 0, 실리지 않은 구간의 0 은 변곡점이 아니다(허용오차 1e-7 × max(1, max|M|))."""
+    for name, p in OVERHANG + [CASES[0], CASES[4]]:
+        r = analyze_loads(**p)
+        for cls in ('governing', 'gravity', 'uplift'):
+            ub = ((r['auto_params'] or {}).get('unbraced') if cls == 'governing' else None)
+            res = r.get(cls)
+            if not res or not ub:
+                continue
+            x = res['x_diagram']
+            _infl_ok(x, res['M_envelope_max'], ub['inflection_points_ft_unrounded'])
+            _infl_ok(x, res['M_envelope_min'], ub['inflection_points_min_envelope_ft_unrounded'])
+            assert ub['inflection_points_ft'] == [round(v, 2) for v in ub['inflection_points_ft_unrounded']]
+
+
+def test_named_location_values_are_given_unrounded():
+    """내다지 지점 M = w a²/2 (D 115 plf, a = 1 ft → 0.0575 kip-ft): 반올림 경계라 3자리는 흔들린다 — unrounded 로."""
+    r = analyze_loads(member_app='roof-purlin', span_type='cont-n', span_ft=20.0, spans_ft=[1.0, 20.0, 20.0, 1.0],
+                      supports=['N', 'P', 'R', 'P', 'N'], loads={'D': 115}, design_method='ASD', section={'Ixx': 10.0},
+                      pattern_loading=False)
+    g = r['gravity']
+    sup2 = [x for x in g['locations'] if x.get('support') == 2][0]
+    assert abs(abs(sup2['unrounded']['Mu']) - 0.115 * 1.0 ** 2 / 2) <= 1e-6
+    for res in (r['governing'], r['gravity']):
+        for loc in res['locations']:
+            u = loc['unrounded']
+            for k, v in u.items():
+                if v is None or loc.get(k) is None:
+                    continue
+                nd = {'x_ft': 2, 'R_max': 4, 'R_min': 4, 'R_bearing': 4, 'R_uplift': 4}.get(k, 3)
+                assert loc[k] == round(v, nd), (loc['name'], k, loc[k], v)
+    for reg in r['auto_params']['unbraced']['negative_regions'] + r['auto_params']['unbraced']['positive_regions']:
+        assert reg['M_max_abs'] == round(reg['unrounded']['M_max_abs'], 4)
+    assert all('unrounded' in w for w in r['wc_reactions'])
+
+
+def test_overhang_answer_does_not_depend_on_blas_threads():
+    import subprocess
+    code = ("import sys, json, hashlib; sys.path.insert(0, {py!r})\n"
+            "from design.loads.required_strength import analyze_loads\n"
+            "r = analyze_loads(**{p!r})\n"
+            "print(hashlib.sha256(json.dumps(r, sort_keys=True, default=str).encode()).hexdigest())\n"
+            ).format(py=os.path.join(os.path.dirname(os.path.dirname(HERE)), 'python'), p=OVERHANG[0][1])
+    outs = set()
+    for t in ('1', '4', '8'):
+        env = dict(os.environ, OPENBLAS_NUM_THREADS=t, PYTHONDONTWRITEBYTECODE='1')
+        outs.add(subprocess.run([sys.executable, '-c', code], env=env, capture_output=True, text=True,
+                                check=True).stdout.strip())
+    assert len(outs) == 1, outs

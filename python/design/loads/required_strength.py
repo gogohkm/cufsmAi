@@ -307,6 +307,8 @@ def analyze_loads(
                 uplift_reactions.append({
                     'name': loc['name'], 'x_ft': loc['x_ft'], 'support': loc.get('support'),
                     'R_uplift': loc['R_uplift'], 'combo': loc.get('combo_R_uplift'),
+                    'unrounded': {'R_uplift': (loc.get('unrounded') or {}).get('R_uplift', loc['R_uplift']),
+                                  'x_ft': (loc.get('unrounded') or {}).get('x_ft', loc['x_ft'])},
                     'pattern': loc.get('pattern_R_uplift'),
                 })
 
@@ -370,11 +372,18 @@ def analyze_loads(
         'uplift_reactions': uplift_reactions,
         'all_combos': [v['name'] for v in variants],
         # 사람이 읽도록 반올림한 위치 키(판정은 반올림하지 않은 값 — locations[].Vu_left_unrounded 등, 계약 §6.1)
-        'display_rounding': {'decimals': {'locations[].Mu': 3, 'locations[].Vu': 3, 'locations[].Ru': 3,
+        'display_rounding': {'decimals': {'wc_reactions[].Pu': 3, 'uplift_reactions[].R_uplift': 4,
+                                          'auto_params.*_regions[].start_ft · end_ft · M1 · M2 · M_max_abs': 4,
+                                          'auto_params.*_regions[].x_M_max_ft': 3,
+                                          'auto_params.*_regions[].Ly_in · Lt_in': 1,
+                                          'auto_params.*_regions[].Cb': 2,
+                                          'auto_params.*.inflection_points_ft': 2,
+                                          'locations[].Mu': 3, 'locations[].Vu': 3, 'locations[].Ru': 3,
                                           'locations[].Vu_left': 3, 'locations[].Vu_right': 3,
                                           'locations[].Mu_max': 3, 'locations[].Mu_min': 3, 'locations[].R_max': 4,
                                           'locations[].R_min': 4, 'locations[].x_ft': 2},
-                             'note': 'display only — use locations[].Vu_left_unrounded / Vu_right_unrounded and the '
+                             'note': 'display only — every listed record carries the same keys unrounded in its '
+                                     '`unrounded` sub-object (and inflection_points_ft_unrounded); use those and the '
                                      'envelope arrays for decisions'},
         'all_combos_detail': all_detail,
         'pattern_loading': pattern_info,
@@ -832,8 +841,9 @@ def _positive_gov(ub, deck_type, deck_info):
         'braced': False,
         'basis': GOV_CRITERION + f' ({len(regs)} top-flange region(s); design each from '
                                  'positive_regions where possible)',
-        'regions': [{k: r[k] for k in ('start_ft', 'end_ft', 'Ly_in', 'Cb', 'M_max_abs', 'cantilever')}
+        'regions': [{k: r[k] for k in ('start_ft', 'end_ft', 'Ly_in', 'Cb', 'M_max_abs', 'cantilever', 'unrounded')}
                     for r in regs],
+        'unrounded': g.get('unrounded'),
     }
 
 
@@ -854,6 +864,7 @@ def _negative_gov(regs, ub, sup, spans):
         }
         if 'i621_region_eligible' in g:
             out['i621_region_eligible'] = g['i621_region_eligible']
+        out['unrounded'] = g.get('unrounded')
         return out
     # 하부 플랜지 압축이 없으면 가장 긴 브레이스 간격 (보수측 대표값)
     pts = sorted(set([x for j, x in enumerate(ub['supports_ft']) if sup[j] != 'N']
@@ -867,7 +878,8 @@ def _negative_gov(regs, ub, sup, spans):
     p, q = max(segs, key=lambda s: s[1] - s[0]) if segs else (0.0, sum(spans))
     Ly = round((q - p) * 12.0, 1)
     return {'start_ft': p, 'end_ft': q, 'Ly_in': Ly, 'Lt_in': Ly, 'Cb': 1.0, 'kphi': 0,
-            'fallback': True,
+            'fallback': True, 'unrounded': {'start_ft': p, 'end_ft': q, 'Ly_in': (q - p) * 12.0,
+                                            'Lt_in': (q - p) * 12.0, 'Cb': 1.0},
             'note': 'No bottom-flange compression in this envelope; longest brace-to-brace '
                     'length given with Cb = 1.0.'}
 
@@ -1174,6 +1186,8 @@ def _extract_wc_reactions(gravity_result: dict, spans: list) -> list:
             wc.append({
                 'name': loc['name'],
                 'Pu': round(Rb, 3),
+                'unrounded': {'Pu': float((loc.get('unrounded') or {}).get('R_bearing', Rb)),
+                              'x_ft': (loc.get('unrounded') or {}).get('x_ft', loc.get('x_ft'))},
                 'case': case,
                 'x_ft': loc.get('x_ft'),
                 'support': loc.get('support'),

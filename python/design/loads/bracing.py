@@ -322,6 +322,37 @@ UNBRACED_RULE = (
 )
 
 
+INFLECTION_TOL = 1e-7    # |M| ≤ 1e-7 × max(1, max|M|) 는 0 (부호 없음) — _sign_zones 와 같은 허용오차
+
+
+def inflection_points(x, M) -> list:
+    """M 의 부호가 부재 안에서 바뀌는 점(ft).
+
+    측점의 부호: M > tol → +, M < −tol → −, |M| ≤ tol → 0 (tol = INFLECTION_TOL × max(1, max|M|)). 부호가 0 이 아닌
+    두 측점 사이에서 부호가 바뀔 때만 변곡점이다:
+    - 이웃한 두 측점이면 그 사이를 선형보간한 영점;
+    - 사이에 0 인 측점들이 끼어 있으면(모멘트 0 인 구간) 그 0 구간의 가운데.
+    따라서 자유단 · 핀 끝 지점의 M = 0, 실을 하중이 없는 내다지의 M = 0 구간처럼 부호가 바뀌지 않는 0 은 변곡점이 아니다.
+    """
+    if len(M) < 2:
+        return []
+    tol = INFLECTION_TOL * max([1.0] + [abs(v) for v in M])
+    sg = [1 if v > tol else (-1 if v < -tol else 0) for v in M]
+    out = []
+    prev = None
+    for i, s_i in enumerate(sg):
+        if s_i == 0:
+            continue
+        if prev is not None and sg[prev] != s_i:
+            if i == prev + 1:
+                m0, m1 = M[prev], M[i]
+                out.append(x[prev] - m0 * (x[i] - x[prev]) / (m1 - m0))
+            else:
+                out.append(0.5 * (x[prev + 1] + x[i - 1]))
+        prev = i
+    return out
+
+
 def _sign_zones(x, M, sign: int, members=None) -> list:
     """sign*M > 0 인 연속 구간 [(a, b), ...] (경계는 선형보간한 영점).
 
@@ -506,6 +537,9 @@ def determine_unbraced_lengths(
             'M1': round(M1, 4), 'M2': round(M2, 4),
             'M_max_abs': round(m_max, 4), 'x_M_max_ft': round(x_max, 3),
             'flange': flange, 'braced': braced, 'cantilever': cantilever, 'kind': kind,
+            'unrounded': {'start_ft': float(a), 'end_ft': float(b), 'Ly_in': float(Ly), 'Lt_in': float(Ly),
+                          'Cb': float(cb), 'M1': float(M1), 'M2': float(M2), 'M_max_abs': float(m_max),
+                          'x_M_max_ft': float(x_max)},
         }
 
     positive_regions, negative_regions, lap_regions = [], [], []
@@ -568,15 +602,9 @@ def determine_unbraced_lengths(
             + 'flanges braced only at supports and discrete brace points; unbraced length = '
               'brace-to-brace distance (inflection points are not brace points).')
 
-    # 단일 다이어그램 변곡점 (legacy 키)
-    inflections = []
-    for i in range(len(M_hi) - 1):
-        if M_hi[i] * M_hi[i + 1] < 0:
-            inflections.append(x[i] - M_hi[i] * (x[i + 1] - x[i]) / (M_hi[i + 1] - M_hi[i]))
-    infl_lo = []
-    for i in range(len(M_lo) - 1):
-        if M_lo[i] * M_lo[i + 1] < 0:
-            infl_lo.append(x[i] - M_lo[i] * (x[i + 1] - x[i]) / (M_lo[i + 1] - M_lo[i]))
+    # 변곡점 (legacy 키) — M 의 부호가 부재 안에서 실제로 바뀌는 곳만(계약 §6.1, 2026-11-24)
+    inflections = inflection_points(x, M_hi)
+    infl_lo = inflection_points(x, M_lo)
 
     return {
         'positive_regions': positive_regions,
@@ -584,6 +612,8 @@ def determine_unbraced_lengths(
         'lap_regions': lap_regions,
         'inflection_points_ft': [round(ip, 2) for ip in inflections],
         'inflection_points_min_envelope_ft': [round(ip, 2) for ip in infl_lo],
+        'inflection_points_ft_unrounded': [float(ip) for ip in inflections],
+        'inflection_points_min_envelope_ft_unrounded': [float(ip) for ip in infl_lo],
         'supports_ft': xs,
         'lap_ends_ft': [round(le, 2) for le in sorted(lap_ends)],
         'brace_points_ft': braces,

@@ -572,12 +572,14 @@ def extract_critical_locations_envelope(
                 'name': f'{base} +M', 'x_ft': round(x[kmax], 2),
                 'Mu': round(M_max[kmax], 3), 'Vu': round(vabs(kmax), 3),
                 'Ru': None, 'region': 'positive', 'span': i + 1, '_idx': kmax, '_q': 'Mmax',
+                'unrounded': {'x_ft': float(x[kmax]), 'Mu': float(M_max[kmax]), 'Vu': float(vabs(kmax))},
             })
         if M_min[kmin] < -tol:
             locations.append({
                 'name': f'{base} -M', 'x_ft': round(x[kmin], 2),
                 'Mu': round(M_min[kmin], 3), 'Vu': round(vabs(kmin), 3),
                 'Ru': None, 'region': 'negative', 'span': i + 1, '_idx': kmin, '_q': 'Mmin',
+                'unrounded': {'x_ft': float(x[kmin]), 'Mu': float(M_min[kmin]), 'Vu': float(vabs(kmin))},
             })
 
     # 2. 지점 (자유단 제외)
@@ -633,6 +635,10 @@ def extract_critical_locations_envelope(
             'R_bearing': round(r_bear, 4), 'R_uplift': round(r_up, 4),
             'wc_case': wc_case,
             '_idx': k, '_q': 'support', '_sup': j,
+            'unrounded': {'x_ft': float(xs[j]), 'Mu': (float(mu) if (abs(mu) > 1e-6 or not is_end) else None),
+                          'Vu': float(max(vl, vr)), 'Ru': float(ru), 'Mu_max': float(m_hi), 'Mu_min': float(m_lo),
+                          'Vu_left': float(vl), 'Vu_right': float(vr), 'R_max': r_hi, 'R_min': r_lo,
+                          'R_bearing': float(r_bear), 'R_uplift': float(r_up)},
         }
         if overhang > 1e-9:
             loc['overhang_ft'] = round(overhang, 3)
@@ -664,6 +670,8 @@ def extract_critical_locations_envelope(
                     'support': j + 1, 'side': side,
                     'Mu_max': round(m_hi, 3), 'Mu_min': round(m_lo, 3),
                     '_idx': node_of(xe), '_q': 'Mmin' if abs(m_lo) >= abs(m_hi) else 'Mmax',
+                    'unrounded': {'x_ft': float(xe), 'Mu': float(mu), 'Vu': float(v), 'Mu_max': float(m_hi),
+                                  'Mu_min': float(m_lo)},
                 })
 
     if direction == 'single':
