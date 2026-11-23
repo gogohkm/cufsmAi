@@ -52,7 +52,7 @@ async function main() {
       o = open(variant(name, mutate));
       assert(!o.r.error, o.r.error);
       assert(!o.design && !o.analysis, `${name}: results dropped`);
-      assert(o.r.warnings.some((w) => /were not restored — inputs were kept/.test(w)), `${name}: notice says why (${o.r.warnings.join(' | ')})`);
+      assert(o.r.warnings.some((w) => /were not restored\.\s*Inputs were kept|were not restored — inputs were kept/i.test(w)), `${name}: notice says why (${o.r.warnings.join(' | ')})`);
       assert.strictEqual(p.__testGetCase().state.inputs.KxLx, saved.case.inputs.KxLx, `${name}: inputs kept`);
     }
     // 지금 엔진이 unknown 이면 같은 파일도 되살리지 않는다

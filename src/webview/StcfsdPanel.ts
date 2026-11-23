@@ -26,6 +26,7 @@ import { buildReviewDoc, modelAnalysisDrafts, selectOptionsFromHtml } from '../c
 import { HTML_MARKER, PDF_MARKER, pickTarget, reportDir, safeBaseName, writeVia } from '../case/reportFiles';
 import { reportDocToSI } from '../mcp/siUnits';
 import { printHtmlToPdf, REPORT_CSP, withCsp } from '../case/pdfPrint';
+import { makeSeal, sealParts, verifySeal } from '../case/resultSeal';
 // 경로 마디의 규칙 하나(기록 갈래와 같은 것 — 장치 이름 · 숨김 · 금지 글자 · 글 방향 글자 · 끝의 점 / 공백)
 import { segmentError } from '../records/names';
 import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, UNIT_LABEL } from '../mcp/siUnits';
@@ -3952,6 +3953,11 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._caseKeeper.markSaved(this._currentModelSignature());
                 this._casePath = options.filepath;
                 this._postCaseDirty();
+                // V7-01: AI 가 연 파일의 결과는 되살리지 않는다(입력만) — 다시 계산은 한 번(run_case_check)
+                if (data && ['analysisResult', 'dsm', 'properties', 'loadAnalysis', 'designResult', 'preparedDesignDsm', 'lapResult'].some((k) => data[k])) {
+                    caseWarnings.push('The results stored in this file were not restored — load_project opens inputs and the model only; '
+                        + 'nothing from those results is shown, validated or reported. Recompute here with one call: run_case_check.');
+                }
                 return { success: true, filepath: options.filepath, warnings: [...check.warnings, ...caseWarnings],
                     ...(discarded ? { discarded_unsaved_changes: discarded } : {}) };
             }
@@ -4509,6 +4515,12 @@ ${inner}
      * 반환: 인쇄했으면 true, 인쇄기(브라우저)가 없으면 false.
      */
     public static pdfPrinter: ((html: string, pdfPath: string) => Promise<void>) | null = null;
+    /**
+     * V7-01: 이 PC 의 기록자 열쇠 폴더(src/records/writer.ts). 확장은 활성화 때 확장의 사용자별 저장 폴더 아래 `writer` 로,
+     * 독립 프로그램은 프로그램의 사용자 자료 폴더로 정한다. 없으면 결과를 봉인하지 않는다(다음에 열 때 되살리지 않는다).
+     * 기록 갈래의 기본 열쇠 폴더(사용자의 진짜 자료 폴더)는 여기서 쓰지 않는다 — 시험은 늘 자기 출력 폴더를 준다.
+     */
+    public static writerKeyDir: string | null = null;
     private async _printHtmlToPdf(html: string, pdfPath: string): Promise<boolean> {
         if (StcfsdPanel.pdfPrinter) { await StcfsdPanel.pdfPrinter(withCsp(html), pdfPath); return true; }
         const browserPath = this._findBrowser();
@@ -5693,8 +5705,9 @@ ${inner}
             saveLabel: 'Save Project',
         });
         if (!uri) return;
-        await this._writeProjectFile(uri.fsPath, designData);
+        const saved = await this._writeProjectFile(uri.fsPath, designData);
         vscode.window.showInformationMessage(`Project saved: ${uri.fsPath}`);
+        if (saved?.seal_note) { vscode.window.showWarningMessage(saved.seal_note); }
     }
 
     /**
@@ -5784,6 +5797,20 @@ ${inner}
             } catch { /* 성질은 열 때 웹뷰가 다시 계산한다 */ }
         }
 
+        // V7-01: 결과 봉인 — 열 때 하는 것과 같게(파일에 쓴 모양의 모델 · 검토 상태 · 결과 칸) 지문을 만들고 이 PC 의 열쇠로 서명한다.
+        // 열쇠를 쓸 수 없으면 봉인 없이 저장하고 알린다(그 결과는 다음에 열 때 되살리지 않는다).
+        let sealNote: string | undefined;
+        const hasResults = ['analysisResult', 'dsm', 'properties', 'loadAnalysis', 'designResult', 'preparedDesignDsm', 'lapResult']
+            .some((k) => projectData[k] !== undefined && projectData[k] !== null);
+        if (hasResults) {
+            const saved = JSON.parse(JSON.stringify(projectData));
+            const parts = sealParts(projectData.resultsEngine.engine_id, saved.model, migrateProject(saved).state, saved);
+            const { seal, note } = makeSeal(StcfsdPanel.writerKeyDir, parts);
+            if (seal) { projectData.resultsSeal = seal; } else {
+                sealNote = 'The results were saved unsigned (' + note + ') — they will not be restored as current when the file is opened again; inputs are saved as usual.';
+            }
+        }
+
         this._requireCurrentSignature(saveSignature, 'Project save');
 
         const json = JSON.stringify(projectData, null, 2);
@@ -5791,6 +5818,7 @@ ${inner}
         fs.writeFileSync(tmp, json, 'utf-8');
         fs.renameSync(tmp, fsPath);
         if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._casePath = fsPath; this._postCaseDirty(); }
+        if (sealNote) { Object.defineProperty(projectData, 'seal_note', { value: sealNote, enumerable: false }); }
         return projectData;
     }
 
@@ -5871,27 +5899,42 @@ ${inner}
         // 'unknown' 은 어느 쪽이든 되살리지 않는다(결과 형식 · 프로토콜이 같아도 엔진의 값이 바뀌었을 수 있다 — a2d5172 · b288448).
         const fileEngineId = savedEngine && typeof savedEngine.engine_id === 'string' ? savedEngine.engine_id : 'unknown';
         const engineSame = fileEngineId !== 'unknown' && this._engineId() !== 'unknown' && fileEngineId === this._engineId();
-        const resultsCurrent = !!savedEngine
+        const engineCurrent = !!savedEngine
             && savedEngine.results_format === StcfsdPanel.RESULTS_FORMAT
             && (currentProtocol === undefined || savedEngine.protocol_version === currentProtocol)
             && engineSame;
         const hadResults = !!(projectData.analysisResult || projectData.loadAnalysis || projectData.designResult
-            || projectData.preparedDesignDsm || projectData.lapResult);
+            || projectData.preparedDesignDsm || projectData.lapResult || projectData.dsm || projectData.properties);
+        // V7-01: 엔진이 같아도 — 파일 자신의 모델 · 입력으로 지금 만든 요청 지문 · 결과 지문이 봉인과 같고, 봉인이 이 PC 의 열쇠로 서명됐을 때만
+        const seal = engineCurrent && hadResults
+            ? verifySeal(StcfsdPanel.writerKeyDir, isWrapper ? projectData.resultsSeal : null,
+                sealParts(fileEngineId, projectData.model, migrateProject(projectData).state, projectData))
+            : null;
+        const resultsCurrent = engineCurrent && (!seal || seal.ok);
+        const RERUN = ' Inputs were kept and every result was dropped — nothing from them is shown, validated or reported. Run the checks again here (one call: run_case_check).';
         if (!resultsCurrent && hadResults) {
-            warnings.push(`Results stored in this file were computed by an older engine/file version (${projectData.version ?? 'unknown'}${savedEngine ? `, protocol ${savedEngine.protocol_version}` : ''}${savedEngine ? `, engine ${fileEngineId === 'unknown' ? 'not recorded' : fileEngineId.replace(/^sha256:/, '').slice(0, 12)} — this engine ${this._engineId() === 'unknown' ? 'unknown' : this._engineId().replace(/^sha256:/, '').slice(0, 12)}` : ''}) and were not restored — inputs were kept; run the analysis and checks again.`);
+            if (seal && !seal.ok) {
+                warnings.push(seal.cause === 'inputs_differ'
+                    ? 'The results stored in this file do not match the model and inputs saved with them (' + seal.detail + ') — the file was changed after it was saved.' + RERUN
+                    : 'The results stored in this file were not computed by this program on this PC (' + seal.detail + ') — for example a file from a colleague.' + RERUN);
+            } else {
+                warnings.push(`Results stored in this file were computed by another engine (${projectData.version ?? 'unknown'}${savedEngine ? `, protocol ${savedEngine.protocol_version}` : ''}${savedEngine ? `, engine ${fileEngineId === 'unknown' ? 'not recorded' : fileEngineId.replace(/^sha256:/, '').slice(0, 12)} — this engine ${this._engineId() === 'unknown' ? 'unknown' : this._engineId().replace(/^sha256:/, '').slice(0, 12)}` : ''}) and were not restored.` + RERUN);
+            }
+            const dropWhy = seal && !seal.ok ? (seal.cause === 'inputs_differ' ? 'The saved results do not match the inputs saved with them'
+                : 'The saved results were not computed by this program on this PC') : 'Results stored in this file were computed by another engine';
             // K4a: 버린 결과를 장부에 — 화면이 「결과 없음」 이 아니라 「낡음(까닭)」 으로 보이게.
             const old: Array<[LedgerKind, any]> = [['buckling_analysis', projectData.analysisResult],
                 ['load_analysis', projectData.loadAnalysis], ['member_design', projectData.designResult],
                 ['design_dsm', projectData.preparedDesignDsm], ['lap', projectData.lapResult]];
             for (const [kind, r] of old) {
                 if (r) {
-                    this._ledgerAdd(kind, 'Results stored in this file were computed by an older engine/file version',
+                    this._ledgerAdd(kind, dropWhy,
                         { action: 'open_project' }, projectData.timestamp ?? null,
                         kind === 'member_design' ? { result_type: this._designResultType(r) } : {});
                 }
             }
             projectData = { ...projectData, analysisResult: null, loadAnalysis: null, designResult: null,
-                preparedDesignDsm: null, lapResult: null, dsm: null };
+                preparedDesignDsm: null, lapResult: null, dsm: null, properties: null };
         }
 
         // 모델 복원. 호스트 메타데이터(템플릿 · 하중 경우 · 기준응력)는 파일의 것만 — 파일에 없으면 이전 프로젝트의

@@ -106,6 +106,8 @@ async function createPanel() {
   const { StcfsdPanel } = loadTs(path.join('src', 'webview', 'StcfsdPanel.ts'), vscode);
   const bridge = new PythonBridge(ROOT, py);
   await bridge.start();
+  // V7-01: 결과 봉인의 열쇠 폴더는 시험의 출력 폴더(진짜 폴더 — 기록 갈래 defaultKeyDir — 는 쓰지 않는다)
+  StcfsdPanel.writerKeyDir = path.join(ROOT, 'test', 'rendered', 'out', 'writer-key');
   StcfsdPanel.currentPanel = undefined;
   StcfsdPanel.createOrShow(vscode.Uri.file(ROOT), bridge, undefined);
   const panel = StcfsdPanel.currentPanel;

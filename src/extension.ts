@@ -33,6 +33,11 @@ export async function activate(context: vscode.ExtensionContext) {
     const isTestMode = process.env.STCFSD_TEST_MODE === '1';
     // K1: STCFSD_MCP_PORT_FILE 이 있으면(독립 프로그램) 빈 포트 + 토큰 + 포트 파일. 없으면 지금 그대로(52790…, 토큰 없음).
     const portFileOptions = bridgeOptionsFromEnv(process.env);
+    // V7-01: 결과를 봉인하는 이 PC 의 기록자 열쇠 폴더. 독립 프로그램은 STCFSD_WRITER_KEY_DIR(프로그램의 사용자 자료 폴더)로 주고,
+    // VS Code 확장은 확장의 사용자별 저장 폴더 아래 writer. 시험 모드에서는 시험이 준 것만(진짜 폴더를 쓰지 않는다).
+    const keyEnv = process.env.STCFSD_WRITER_KEY_DIR;
+    StcfsdPanel.writerKeyDir = keyEnv && path.isAbsolute(keyEnv) ? keyEnv
+        : (!isTestMode && context.globalStorageUri ? path.join(context.globalStorageUri.fsPath, 'writer') : null);
 
     // Python 환경 자동 검사 + 설치
     // V5-S3: 독립 프로그램(포트 파일 방식)은 묶어 넣은 Python 을 쓴다 — python.org · pip 을 권하지 않는다.

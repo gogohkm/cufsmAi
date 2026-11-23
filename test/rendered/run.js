@@ -201,7 +201,8 @@ async function main() {
       await ctx.shotEl('r01b_after_open_old_file', '#design-summary');
       assert(!cmds.includes('designResult') && !cmds.includes('designPurlinResult'), 'V4-11: old design result not restored');
       assert(!has(card, /✓ OK/), 'V4-01/11: no OK card after opening an older file');
-      assert(ctx.log.warn.some((w) => /older engine\/file version/.test(w)), 'V4-11: user told results were discarded');
+      // V7-01: 까닭은 셋 가운데 하나(다른 엔진 · 입력과 맞지 않음 · 이 PC 의 것이 아님) — 옛 파일은 「다른 엔진」
+      assert(ctx.log.warn.some((w) => /computed by another engine|not computed by this program on this PC|do not match the model and inputs/.test(w)), 'V4-11 · V7-01: user told results were discarded');
       const mpos = await ctx.eval(`document.getElementById('design-Mx-pos').value`);
       assert(!(parseFloat(mpos) > 80), `V4-10: previous project's Mu(+) leaked into the opened file (${mpos})`);
     });
