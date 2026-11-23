@@ -22,6 +22,7 @@
 import { api, last, mcp, type LastEntry } from './bridge';
 import { loadRecords } from './records';
 import { loadChanges } from './changes';
+import { loadRecordsWork, prefetchOpenQuestions } from './work';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
 import { fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
 
@@ -499,6 +500,9 @@ async function load(): Promise<void> {
   // R1-3: 프로젝트 · 검토 대상(호스트의 list_cases · get_case_status) — 프로젝트가 열려 있을 때만
   await loadRecords();
   await loadChanges();
+  // R3-3: 업무 · 가정 · 원자료 — 대상이 바뀌었을 때만(그 밖에는 recordsChanged 가 말한 종류만)
+  await loadRecordsWork();
+  await prefetchOpenQuestions();
   if (!state.initialModel) {
     const first = await last(id, ['modelLoaded'], 'first');
     state.initialModel = first?.data.modelLoaded?.message?.data ?? null;

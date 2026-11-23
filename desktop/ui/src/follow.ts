@@ -10,10 +10,11 @@
  *  - 하지 않는 것: 창의 포커스를 가져가지 않는다(window.focus 를 부르지 않는다), 모델을 바꾸지 않는다, 편집 상태를 스스로 열지 않는다.
  */
 import { chg } from './changes';
+import { asm, srcs, work } from './work';
 import { mcp } from './bridge';
 import { allRows, state, type CheckRow, type Scope } from './store';
 
-export interface Item { kind: 'check' | 'model' | 'result' | 'validation'; id: string; scope?: Scope; location?: any }
+export interface Item { kind: 'check' | 'model' | 'result' | 'validation' | 'record'; id: string; scope?: Scope; location?: any; type?: 'change' | 'work' | 'assumption' | 'source' }
 export interface FocusReq { request_id: string; item: Item; reason: string | null; requested_at?: string }
 export type Tab = 'work' | 'model' | 'result' | 'doc';
 
@@ -63,6 +64,9 @@ export function itemOfRow(r: CheckRow): Item {
 export function itemOfKey(tab: Tab, key: string): Item | null {
   // 점검 항목 — 보기 계약의 kind 'validation'(id val.* — 마지막 점검에 있는 것만, 4b99968). 묶음 · 점검 전체는 그 어휘에 없다
   if (key.startsWith('val#')) { const id = key.slice(4); return /^val\./.test(id) ? { kind: 'validation', id } : null; }
+  // 보기 계약의 record(373d81f) — 변경 · 업무 항목 · 가정 · 원자료 한 줄
+  const rk = /^(chg|work|asmr|srcr):(.+)$/.exec(key);
+  if (rk) { return { kind: 'record', type: ({ chg: 'change', work: 'work', asmr: 'assumption', srcr: 'source' } as const)[rk[1] as 'chg' | 'work' | 'asmr' | 'srcr'], id: rk[2] }; }
   if (key === 'val' || key.startsWith('val:cat:')) { return null; }
   if (key.includes('#')) {
     const r = allRows().find(x => x.key === key);
@@ -95,10 +99,15 @@ export function keyOfItem(item: Item): { tab: Tab; key: string } | null {
     }
     return { tab: 'result', key: hit.key };
   }
-  // 보기 계약의 `record`(R2-3 — 호스트가 아직 받지 않는다: _viewItem · _checkedSelection 에 바람). 변경 묶음 id 가 지금 목록에 있으면 그 줄
-  if ((item as { kind: string }).kind === 'record') {
+  // 보기 계약의 `record {type, id}`(373d81f) — 지금 화면의 목록에 있는 줄만
+  if (item.kind === 'record') {
     const id = String(item.id);
-    return chg.list.some(c => c.id === id) ? { tab: 'work', key: `chg:${id}` } : null;
+    const t = item.type ?? 'change';
+    if (t === 'change') { return chg.list.some(c => c.id === id) ? { tab: 'work', key: `chg:${id}` } : null; }
+    if (t === 'work') { return work.items.some(w => w.item === id) ? { tab: 'work', key: `work:${id}` } : null; }
+    if (t === 'assumption') { return asm.items.some(a => a.item === id) ? { tab: 'model', key: `asmr:${id}` } : null; }
+    if (t === 'source') { return srcs.items.some(x => x.item === id) ? { tab: 'doc', key: `srcr:${id}` } : null; }
+    return null;
   }
   if (item.kind === 'validation') {
     const id = String(item.id);

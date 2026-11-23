@@ -234,6 +234,17 @@ async function openExternal(url: string): Promise<boolean> {
   try { await shell.openExternal(url); return true; } catch (err) { log(`외부 열기 실패 ${url}: ${String(err)}`, 'warn'); return false; }
 }
 
+/**
+ * R3-3: 프로젝트의 원자료 파일을 OS 의 기본 앱으로 연다 — 다리가 원자료 폴더 안의 파일임을 확인한 경로만 온다. 내용은 읽지 않는다(AI 에게 가지 않는다).
+ * 시험에서는 열지 않고 기록만
+ */
+async function openLocalFile(abs: string): Promise<boolean> {
+  diag.externalOpened.push(`file:${path.basename(abs)}`);
+  if (TEST) { log(`원자료 열기(시험이라 하지 않음): ${path.basename(abs)}`); return false; }
+  try { const err = await shell.openPath(abs); if (err) { log(`원자료 열기 실패 ${path.basename(abs)}: ${err}`, 'warn'); return false; } return true; }
+  catch (err) { log(`원자료 열기 실패 ${path.basename(abs)}: ${String(err)}`, 'warn'); return false; }
+}
+
 /** 화면이 아직 붙기 전(시작 중)의 단추 있는 알림 — OS 알림 상자. VS Code 처럼 「취소」가 늘 있다 */
 async function notifyWithoutScreen(req: HostApi.NotifyRequest): Promise<string | undefined> {
   const buttons = req.items.length > 0 ? [...req.items, '취소'] : ['확인'];
@@ -725,6 +736,7 @@ async function start(): Promise<void> {
     documentsDir,
     fileDialog: nativeFileDialog,
     openExternal,
+    openPath: openLocalFile,
     notifyWithoutScreen,
   });
   // V7-01(82194ef): 결과를 봉인하는 이 PC 의 기록자 열쇠 폴더 — 프로그램의 사용자 자료 폴더 안(<userData>\writer). 시험은 --user-data 의

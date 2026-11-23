@@ -51,6 +51,8 @@ export interface BridgePlatform extends HostPlatform {
   onDialogAnswered?: (req: FileDialogRequest, paths: string[] | undefined) => void;
   /** 호스트가 알림을 냈다 */
   onNotify?: (req: NotifyRequest) => void;
+  /** R3-3: 원자료 파일 하나를 OS 의 기본 앱으로(껍데기만 — 없으면 false). 경로는 이 프로세스 안에서만 */
+  openPath(abs: string): Promise<boolean>;
 }
 
 export interface BridgePlatformOptions {
@@ -61,6 +63,8 @@ export interface BridgePlatformOptions {
   fileDialog?: (req: FileDialogRequest & { suggestedPath: string }) => Promise<string[] | undefined>;
   /** S3: 외부 주소를 OS 브라우저로 연다(http/https 만 — 껍데기가 거른다). 없으면 기록만 */
   openExternal?: (target: string) => Promise<boolean>;
+  /** R3-3: 프로젝트의 원자료 파일 하나를 OS 의 기본 앱으로 연다(껍데기 — shell.openPath). 없으면 열지 않고 알리기만(헤드리스 · 시험) */
+  openPath?: (abs: string) => Promise<boolean>;
   /**
    * S3: 화면이 아직 안 붙었을 때(시작 중)의 단추 있는 알림 · modal 알림을 OS 대화상자로 묻는다.
    * 없으면 headless 처럼 곧바로 닫음(답 없음)이다.
@@ -194,6 +198,11 @@ export function createBridgePlatform(options: BridgePlatformOptions = {}): Bridg
     openExternal(target) {
       sink?.emit('platform:openExternal', { target });
       return options.openExternal ? options.openExternal(target) : headless.openExternal(target);
+    },
+    openPath(abs: string) {
+      // 경로는 이 프로세스 안에서만(화면 · 이벤트에는 파일 이름만)
+      sink?.emit('platform:openPath', { name: abs.split(/[\\/]/).pop() ?? '' });
+      return options.openPath ? options.openPath(abs) : Promise.resolve(false);
     },
     progress(state) {
       if (state.done) { progress.delete(state.id); } else { progress.set(state.id, state); }

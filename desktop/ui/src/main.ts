@@ -13,8 +13,9 @@ import { fitZoom, installZoom, restoreZoom } from './zoom';
 import { answered, enqueue, initDialogs, questionOpen, setProgress, toast } from './dialogs';
 import { debounce, esc, tip } from './dom';
 import { editing, hideSide, initEdit, mountDesigner, reloadSide, setEditing, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
-import { beginEdit, editChanges, editChangesBySource, editStripHtml, endEdit } from './editstrip';
-import { chg } from './changes';
+import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
+import { chg, loadChanges } from './changes';
+import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes } from './work';
 import { findHtml, search, type Hit } from './find';
 import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, keyOfItem, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq, type Item } from './follow';
 import { hhmm } from './format';
@@ -76,17 +77,17 @@ function onEditChange(): void {
 }
 let discarding = false;
 /**
- * 「버리기」 — 호스트는 묶음을 내지 않을 뿐 값을 되돌리지 않는다(editSession 'discard' → backToStart). 그래서 이번 편집에 바뀐 것이
- * 없을 때만 산다(그때는 묶음 없이 닫는다). 바뀐 것이 있으면 꺼져 있다 — 버리면 기록에 남지 않은 변경이 된다(호스트에 바람: 되돌리기)
+ * 「버리기」 — 호스트가 편집 상태를 시작할 때의 모델 · 입력으로 되돌린다(editSession 'discard' — 373d81f). 그 사이 AI · 밖이 바꾼 칸은 그대로다.
+ * 답의 restored(되돌린 칸)를 알린다. 앞서 적힌 사람 묶음까지 되돌렸으면 호스트가 「편집 버림」 줄 하나를 남긴다
  */
 async function discardEdit(): Promise<void> {
-  const { person: p, ai, other } = editChangesBySource();
-  if (p.length || other.length || ai.length) { toast('바뀐 것이 있어 버리지 않는다 — 되돌리는 길이 호스트에 아직 없다. 「편집 마치기」로 묶음을 남긴다', 'warning'); return; }
   const r = await person('edit-session', { state: 'discard' });
   if (!r.ok) { toast(`버리지 못했다 — ${r.error ?? ''}`, 'warning'); return; }
-  if (r.data?.back_to_start === false) { toast('호스트가 들어올 때와 다르다고 한다 — 묶음 없이 닫혔다(호스트에 바람: 되돌리기)', 'warning'); }
+  const n = Array.isArray(r.data?.restored) ? r.data.restored.length : 0;
+  toast(n ? `이번 편집을 버렸다 — 되돌린 칸 ${n}` : '이번 편집을 버렸다(바뀐 것 없음)', 'info');
   discarding = true;
   setEditing(false);
+  scheduleRefresh();
 }
 
 // ── 입력만 열었다(V7-01 — 82194ef) ─────────────────────────────────
@@ -277,7 +278,9 @@ function renderReview(): void {
   // 시트가 가리키던 항목이 결과에서 사라졌으면(무효 · 다른 결과) 시트를 닫지 않고 그 까닭을 보인다(sheetHtml)
   const sheetOn = !!ui.sheet;
   $('review').classList.toggle('sheetl', sheetOn);
-  $('ttabs').innerHTML = TABS.map(([k, t]) => `<a class="${k === ui.tab ? 'on' : ''}" data-tab="${k}">${esc(t)}</a>`).join('');
+  // 업무 탭의 배지 — 열린(답 기다리는) 판단 요청 수
+  const nq = openQuestions().length;
+  $('ttabs').innerHTML = TABS.map(([k, t]) => `<a class="${k === ui.tab ? 'on' : ''}" data-tab="${k}">${esc(t)}${k === 'work' && nq ? ` <span class="badge warn" data-work-badge="${nq}"${tip(`답을 기다리는 판단 요청 ${nq}`)}>${nq}</span>` : ''}</a>`).join('');
   const nodes = buildTree(ui.tab);
   const sel = ui.sheet ?? ui.sel[ui.tab];
   const tree = $('tree');
@@ -454,6 +457,8 @@ function select(tab: Tab, key: string, by: 'person' | 'program' | 'focus' = 'per
   if (ui.sheet && key !== ui.sheet) { ui.sheet = hasSheet(key) ? key : null; }
   ui.by = by;
   render();
+  // R3-3: 업무 항목 · 가정의 전부(get)는 고를 때 한 번 읽는다
+  if (/^(work|asmr):/.test(key)) { void fetchFull(key).then(read => { if (read) { render(); } }); }
 }
 
 function openSheet(key: string): void {
@@ -511,7 +516,7 @@ function docAction(t: HTMLElement): boolean {
 }
 
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg'].includes(key) || key.startsWith('chg:') ? 'work' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg', 'ins'].includes(key) || key.startsWith('chg:') || key.startsWith('work:') ? 'work' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -671,6 +676,16 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
         break;
       }
       if (c === 'reportResult') { break; }
+      // R3-3: 기록이 바뀌었다 — 말한 종류만 다시 읽는다(변경 · 업무 · 가정 · 원자료)
+      if (c === 'recordsChanged') {
+        const types: string[] = Array.isArray(d.records?.types) ? d.records.types : [];
+        // 고른 업무 항목 · 가정의 전부도 다시(목록을 다시 읽으면 그 전부를 비운다)
+        const cur = ui.sel[ui.tab];
+        void Promise.all([reloadTypes(types), types.includes('changes') ? loadChanges() : Promise.resolve()]).then(() => prefetchOpenQuestions())
+          .then(() => (/^(work|asmr):/.test(cur) ? fetchFull(cur) : false)).then(() => rerender());
+        break;
+      }
+      if (c === 'aiActivity') { break; }
       // 읽기 전용 대상의 거절(부호 host.readonly.* — 8f52455) — 띠가 까닭과 두 길을 이미 보인다. 받지 않은 것을 알린다
       if (typeof d.refusal?.code === 'string' && d.refusal.code.startsWith('host.readonly')) {
         toast(`읽기 전용 — 호스트가 받지 않았다(${c === 'analysisError' ? '해석 실행' : `칸 ${Array.isArray(d.refusal.keys) ? d.refusal.keys.length : 0}`}) · 「새 검토 대상으로」 또는 잠금 넘겨받기`, 'warning');
@@ -785,6 +800,33 @@ function boot(): void {
     if (go && go.getAttribute('data-chg-go')) { e.stopPropagation(); ui.screen = 'review'; select('work', `chg:${go.getAttribute('data-chg-go')}`); return; }
     const cr = t.closest?.('#center tr[data-k^="chg:"]');
     if (cr) { e.stopPropagation(); select('work', cr.getAttribute('data-k')!); return; }
+    // R3-3: 업무 항목 · 가정의 걸린 대상 → 그 대상, 원자료 「열기」 → OS 의 기본 앱(사람의 길)
+    const rg = t.closest?.('[data-ref-go]');
+    if (rg) { e.stopPropagation(); const [tb, k] = String(rg.getAttribute('data-ref-go')).split('|'); if (k) { ui.screen = 'review'; select(tb as Tab, k); } return; }
+    const rc = t.closest?.('[data-ref-check]');
+    if (rc) {
+      e.stopPropagation();
+      let ck: any = null; try { ck = JSON.parse(String(rc.getAttribute('data-ref-check'))); } catch { ck = null; }
+      const to = ck ? keyOfItem({ kind: 'check', id: String(ck.id), scope: ck.scope, ...(ck.location ? { location: ck.location } : {}) } as Item) : null;
+      if (to) { select(to.tab, to.key); } else { toast('그 검토 항목이 지금 결과에 없다', 'warning'); }
+      return;
+    }
+    const rr = t.closest?.('[data-ref-result]');
+    if (rr) {
+      e.stopPropagation();
+      // 결과가 지금 있으면 그 자리, 없으면(낡아 지웠다) 그 결과의 단계 — 진행 띠와 같은 자리에서 낡음 · 없음을 보인다
+      const id = String(rr.getAttribute('data-ref-result'));
+      const to = keyOfItem({ kind: 'result', id } as Item);
+      const STAGE: Record<string, string> = { lap: 'conn', connection: 'conn', member_design: 'chk', buckling_analysis: 'fsm', design_dsm: 'fsm', signature_ss: 'fsm', load_analysis: 'load', validation: 'val' };
+      if (to) { select(to.tab, to.key); } else if (STAGE[id]) { select(STAGE[id] === 'val' ? 'work' : 'result', STAGE[id]); } else { toast('그 결과가 이 화면에 없다', 'warning'); }
+      return;
+    }
+    const os2 = t.closest?.('[data-open-src]');
+    if (os2) {
+      e.stopPropagation();
+      void person('open-source', { id: String(os2.getAttribute('data-open-src')) }).then(r => toast(r.ok ? (r.data?.opened ? `「${r.data.name}」을(를) 열었다` : `「${r.data?.name ?? ''}」 — 이 환경에서는 OS 로 열지 않는다`) : `열지 못했다 — ${r.error ?? ''}`, r.ok ? 'info' : 'warning'));
+      return;
+    }
     const bs = t.closest?.('[data-chg-base]');
     if (bs) {
       e.stopPropagation();

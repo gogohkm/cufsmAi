@@ -11,6 +11,7 @@ import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
 import { afterBase, BY_KO, chg } from './changes';
+import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
 import { fastenerText, reasonNote } from './notices';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
@@ -68,6 +69,8 @@ function rowNode(r: CheckRow): TNode {
       : r.kind === 'na' ? `해당 없음: ${reasonNote(r.us)?.text ?? ''}` : !r.counts ? '적용 조건 — 판정에 들지 않는다(counts: false)' : `${r.id} · §${r.clause}`,
   });
 }
+
+const workTail = (): string => `${work.othersOmitted ? ` · 다른 작성자의 항목 ${work.othersOmitted}(빼고 보인다)` : ''}${work.unverified ? ` · 세지 않은 줄 ${work.unverified}` : ''}`;
 
 export function buildTree(tab: Tab): TNode[] {
   const f = state.full;
@@ -160,8 +163,15 @@ export function buildTree(tab: Tab): TNode[] {
   }
   if (tab === 'work') {
     return [
-      n('ask', '판단 요청', { v: '기록 없음', vCls: 'un', tip: 'AI 의 판단 요청은 기록(R3)부터 남는다' }),
-      n('rep', '보고', { v: '기록 없음', vCls: 'un', tip: 'AI 의 보고는 기록(R3)부터 남는다' }),
+      // R3-3: 업무 항목(work_items) — 판단 요청(열린 수 · 주황) · 보고 · 지시. 글은 쓴 쪽의 것(자료), 이름 옆에 쓴 쪽
+      n('ask', '판단 요청', { v: work.err ? '읽지 못함' : String(openQuestions().length || questions().length), vCls: openQuestions().length ? 'warn' : '', open: true,
+        tip: `AI 가 사람에게 묻는 것(work_items question) — 답은 Claude Desktop 대화에서(AI 가 옮겨 적는다). 열린 것 ${openQuestions().length}${workTail()}`,
+        kids: questions().map(w => n(`work:${w.item}`, w.title, { dot: w.state === 'closed' ? undefined : w.answered ? 'ok' : 'warn', v: w.state === 'closed' ? '닫힘' : w.answered ? '답함' : '답 기다림',
+          vCls: w.answered || w.state === 'closed' ? 'faint' : 'warn', tip: `${w.item} · ${w.written_by} · ${hhmm(w.created_at)}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
+      n('rep', '보고', { v: work.err ? '읽지 못함' : String(reports().length), open: true, tip: `AI 의 보고(work_items report) — 항목마다 완료 · 가정 · 미결${workTail()}`,
+        kids: reports().map(w => n(`work:${w.item}`, w.title, { v: `${w.items ? `항목 ${w.items} · ` : ''}${hhmm(w.created_at)}`, tip: `${w.item} · ${w.written_by}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
+      ...(instructions().length ? [n('ins', '지시', { v: String(instructions().length), tip: '사람의 지시를 AI 가 옮겨 적은 것(work_items instruction) — 변경이 그 지시를 가리킨다',
+        kids: instructions().map(w => n(`work:${w.item}`, w.title, { v: hhmm(w.created_at), tip: `${w.item} · ${w.written_by} · AI 가 옮겨 적음` })) })] : []),
       n('chg', '변경', { v: chg.err ? '읽지 못함' : String(chg.total), vCls: chg.err ? 'un' : '', open: true,
         tip: `누가 · 언제 · 전 → 후 — 호스트의 변경 묶음(list_changes). 사람 · AI · 프로그램 · 밖에서가 한 목록(꼬리표로 가른다). 새 것이 위, 마지막 실행 뒤의 것에 점${chg.persisted ? '' : ' · 프로젝트 밖 — 이 세션만(저장되지 않음)'}`,
         kids: chg.list.map(c => n(`chg:${c.id}`, c.title || '(제목 없음)', { dot: afterBase(c) ? 'acc' : undefined, v: `${BY_KO[c.by.kind] ?? c.by.kind} · ${hhmm(c.at)}`,
@@ -172,7 +182,11 @@ export function buildTree(tab: Tab): TNode[] {
     n('rpt', '계산서', { ...docV('design'), tip: '호스트가 만든 계산서(generate_report) — 열린 .csd 의 폴더 · 없으면 임시 폴더에 쓴다' }),
     n('brpt', '좌굴 해석 보고서', { ...docV('buckling'), tip: '호스트가 만든 좌굴 해석 보고서(generate_report kind buckling)' }),
     n('vtab', '검증표', { v: state.val ? valCountsText(state.val.counts) : '점검 안 함', vCls: state.val ? (state.stages.val.state === 'stale' ? 'warn' : state.val.counts.fail ? 'ng' : '') : 'un', tip: '점검(validate_design)의 항목을 문서 꼴로 — 결과 탭의 점검과 같은 목록' }),
-    n('src', '원자료', { v: '기록 없음', vCls: 'un', tip: '원자료(도면 · 제품 자료)는 프로젝트 기록(R1)부터' }),
+    n('src', '원자료', { v: srcs.err ? '읽지 못함' : String(srcs.items.length), vCls: srcs.items.some(s => s.state !== 'same') ? 'warn' : '', open: true,
+      tip: `프로젝트의 01_원자료(sources) — 이름 · 해시 · 상태만, 내용은 읽지 않는다${srcs.unregistered.length ? ` · 등록 안 된 파일 ${srcs.unregistered.length}` : ''}`,
+      kids: [...srcs.items.map(s => n(`srcr:${s.item}`, s.title, { dot: s.state === 'same' ? 'ok' : s.state === 'missing' ? 'ng' : 'warn', v: s.state === 'same' ? '같음' : s.state === 'changed' ? '바뀜' : s.state === 'missing' ? '없음' : '모름',
+        tip: `${s.item} · ${s.file} · ${s.written_by}` })),
+        ...(srcs.unregistered.length ? [n('src:unreg', `등록 안 된 파일 ${srcs.unregistered.length}`, { faint: true, tip: srcs.unregistered.slice(0, 10).join(', ') })] : [])] }),
     n('pub', '발행', { v: '기록 없음', vCls: 'un', tip: '발행은 기록(R5)부터' }),
   ];
 }
@@ -199,7 +213,11 @@ function assumptionsNode(): Partial<TNode> {
   if (isDefault('conditions')) { kids.push(n('asm:cond', '해석 조건 — 프로그램 기본값', { tag: '기본값' })); }
   // 줄마다 어느 결과 · 구간 · 검토 지점의 것인지 앞에 적는다(글은 엔진이 쓴 그대로)
   assumptionLines().forEach(a => kids.push(n(a.key, `${a.where} — ${a.text}`, { tip: `${a.where} · 엔진이 밝힌 가정 — ${a.text}`, v: '엔진' })));
-  return { v: kids.length ? String(kids.length) : '없음', vCls: kids.length ? 'warn' : '', tip: '기본값으로 채운 입력과 엔진이 밝힌 가정. 누가 정했는지는 변경 기록(R2)부터', open: true, kids };
+  // R3-3: 가정 등록부(assumptions) — 줄마다 상태(임시 · 확정 · 현장 확인 · 해당 없음) · 쓴 쪽(프로그램의 자동 가정 · AI). 사람의 확인은 R4 부터(늘 없음)
+  const reg = asm.items.map(a => n(`asmr:${a.item}`, `${a.item} ${a.text}`, { faint: a.closed, tagHtml: a.closed ? undefined : a.status === 'provisional' ? `<span class="tag def"${tip('임시 가정 — 사람의 확인 전까지 발행을 막는다')}>임시</span>` : a.status === 'field-check' ? `<span class="tag def"${tip('현장 확인이 필요한 가정')}>현장 확인</span>` : undefined,
+    v: a.closed ? '닫힘' : a.written_by.startsWith('program') ? '프로그램' : a.written_by.startsWith('ai') ? 'AI' : a.written_by, tip: `${a.item} · ${a.written_by} · 발행 ${a.blocks_issue ? '막음' : '막지 않음'} · 사람의 확인 없음(R4 부터)` }));
+  const all = [...(reg.length ? [n('asm:reg', '가정 등록부', { v: String(asm.items.filter(a => !a.closed).length), open: true, tip: '기록의 가정(assumptions) — 프로그램 · AI 가 쓴 것', kids: reg })] : []), ...kids];
+  return { v: all.length ? String(asm.items.filter(a => !a.closed).length + kids.length) : '없음', vCls: all.length ? 'warn' : '', tip: '기본값으로 채운 입력 · 엔진이 밝힌 가정 · 가정 등록부', open: true, kids: all };
 }
 
 // ── 그리기 ────────────────────────────────────────────────────────

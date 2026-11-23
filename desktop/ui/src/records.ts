@@ -12,6 +12,7 @@
 import { api, mcp } from './bridge';
 import { esc, tip } from './dom';
 import { state } from './store';
+import { nextJudgement } from './work';
 
 export interface RecCase { name: string; kind: string; open: boolean; archived?: boolean; missing?: boolean; last_saved: string | null; section: string | null; steel: string | null; max_ratio: number | null; pass: boolean | null;
   /** 215cb5a: 대상 id(보관 · 넘겨받기 · 다시 잇기가 열지 않은 대상에도) · 저장에 든 결과 종류 · 작은 단면 그림(outline: true 로 부를 때) */
@@ -48,7 +49,7 @@ export const project = (): any => state.full?.project ?? null;
 export async function loadRecords(): Promise<void> {
   const p = project();
   if (!p?.inProject) { rec.cases = null; rec.unregistered = []; rec.status = null; return; }
-  const [lc, cs] = await Promise.all([mcp<any>('list_cases', { outline: true }), mcp<any>('get_case_status', {})]);
+  const [lc, cs] = await Promise.all([mcp<any>('list_cases', { outline: true }), mcp<any>('get_case_status', { detail: 'runs' })]);
   if (lc && !lc.error) { rec.cases = Array.isArray(lc.cases) ? lc.cases : []; rec.unregistered = Array.isArray(lc.unregistered) ? lc.unregistered : []; rec.err = undefined; }
   else { rec.err = String(lc?.error ?? '대상 목록을 읽지 못함'); }
   rec.status = cs && !cs.error ? cs : null;
@@ -123,7 +124,7 @@ export function startRows(): { rows: string; foot: string; inProject: boolean } 
         + `<td><b>${esc(c.name)}</b>${c.missing ? ' <span class="tag def">파일 없음</span>' : ''}<div class="faint">${esc(p.project?.name ?? '')} · ${esc(KIND_KO[c.kind] ?? c.kind)}</div></td>`
         + `<td>${esc(c.section ?? '—')}<div class="faint">${esc(c.steel ?? '')}${c.steel ? ' · ' : ''}<span class="verdict ${v}" data-ratio>${esc(ratio)}</span></div></td>`
         + `<td data-results="${esc((c.results ?? []).join(','))}">${progressHtml(c.results ?? [], !!c.outline || !!c.section)}</td>`
-        + `<td><span class="dot"></span> <span${tip('판단 요청 · 보고는 기록(R3)부터 생긴다')}>기록 없음</span></td>`
+        + `<td data-next>${nextJudgement(c.open, rec.status)}</td>`
         + `<td class="r" data-last="${esc(c.last_saved ?? '')}">${esc(fmtWhen(c.last_saved))}<div class="faint">저장</div></td>`
         + `<td class="r">${c.case_id ? `<span class="btn ghost" data-rec="case-menu" data-case-id="${esc(c.case_id)}" data-name="${esc(c.name)}" data-open="${c.open ? 1 : 0}"${tip('이 대상 — 보관 · 잠금 넘겨받기 · 파일 다시 잇기(사람만)')}>⋯</span>` : ''}</td></tr>`;
     }).join('');

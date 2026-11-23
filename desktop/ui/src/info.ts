@@ -15,7 +15,9 @@ import { modeSel } from './center';
 import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
-import { baseOf, byTag, BY_KO, changeOf, chg, KIND_RESULT_KO, modelTag, staleCause, type Change } from './changes';
+import { baseOf, byTag, BY_KO, changeOf, chg, KIND_RESULT_KO, modelTag, staleCause, valText, type Change, type FieldRec } from './changes';
+import { rec } from './records';
+import { asmInfo, questionsAbout, srcInfo, workInfo } from './work';
 import { stageNow } from './center';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
@@ -312,13 +314,30 @@ function changeInfo(key: string): string {
     + `${chg.persisted ? '' : `<div class="dim" data-memory${tip('프로젝트 밖(또는 읽기 전용) — 이 세션의 메모리에만 있다')}>이 세션 · 저장되지 않음</div>`}</div>`;
   const i = chg.list.indexOf(c);
   const prev = chg.list.slice(i + 1).find(x => x.by.kind === c.by.kind) ?? null;
+  // 실행 이력(get_case_status detail runs 의 history — 새 것부터): 그 때 앞의 마지막 실행 · 뒤의 첫 실행(판정비 · 단면 성질의 전 → 후)
+  const hist: any[] = Array.isArray(rec.status?.history) ? rec.status.history : [];
+  const around = (at: string, until?: string) => ({
+    before: hist.find(h => typeof h?.at === 'string' && h.at < at && typeof h.max_ratio === 'number') ?? null,
+    after: [...hist].reverse().find(h => typeof h?.at === 'string' && h.at > at && (!until || h.at < until) && typeof h.max_ratio === 'number') ?? null,
+  });
+  const r2 = (v: unknown) => (typeof v === 'number' ? sigText(v, 3) : '—');
+  const pr = prev ? around(prev.at, c.at) : null;
+  const ar = around(c.at);
   const why = c.reason || c.source || prev
     ? `<dl class="kv">${c.reason ? `<dt>이유</dt><dd data-reason-text>${esc(c.reason)}</dd>` : `<dt>이유</dt><dd class="faint">밝히지 않음</dd>`}`
       + (c.source ? `<dt>원자료</dt><dd>${esc(c.source)}</dd>` : '')
-      + (prev ? `<dt>먼저 한 것</dt><dd><a class="lnk" data-chg-go="${esc(prev.id)}">${esc(prev.title)} · ${esc(hhmm(prev.at))}</a></dd>` : '') + '</dl>'
+      + (prev ? `<dt>먼저 한 것</dt><dd><a class="lnk" data-chg-go="${esc(prev.id)}">${esc(prev.title)} · ${esc(hhmm(prev.at))}</a>${pr?.before || pr?.after ? ` <span class="why" data-prev-ratio${tip('그 변경 앞의 마지막 실행 → 뒤의 첫 실행의 최대 판정비(호스트의 실행 이력)')}>${r2(pr?.before?.max_ratio)} → ${r2(pr?.after?.max_ratio)}</span>` : ''}</dd>` : '') + '</dl>'
     : none('밝힌 이유 없음', c.by.kind === 'person' ? '사람의 묶음에는 이유 칸이 없다' : '도구의 reason 인자를 주지 않았다');
   const fs = c.field_changes ?? [];
-  const changed = fs.length ? `<table class="t" data-chg-fields><tbody>${fs.map(f => `<tr><td>${esc(f)}</td></tr>`).join('')}${c.fields > fs.length ? `<tr><td class="faint">외 ${c.fields - fs.length} 칸</td></tr>` : ''}</tbody></table>`
+  // 바뀐 칸(호스트의 구조 — 이름 · 전 · 후 · 단위) + 그 앞 · 뒤 실행의 단면 성질(실행 이력의 props, 엔진 US → 이 화면의 변환)
+  const fRow = (f: FieldRec) => (f.summary || !('from' in f || 'to' in f)
+    ? `<tr data-path="${esc(f.path)}"><td colspan="4">${esc(f.text)}</td></tr>`
+    : `<tr data-path="${esc(f.path)}"><td>${esc(f.label_ko || f.key)}</td><td class="r num dim">${esc(valText(f.from))}</td><td class="r">→</td><td class="r num" style="color:var(--mod)">${esc(valText(f.to))}${f.unit ? ` ${esc(f.unit)}` : ''}</td></tr>`);
+  const PROP_KIND: Array<[string, Kind]> = [['A', 'area'], ['Ixx', 'inertia'], ['Izz', 'inertia'], ['Sx', 'modulus'], ['Sxx', 'modulus'], ['Sf', 'modulus'], ['J', 'inertia'], ['Cw', 'warping']];
+  const pb = ar.before?.props ?? null, pa = ar.after?.props ?? null;
+  const propRows = pb && pa ? PROP_KIND.filter(([k]) => typeof pb[k] === 'number' && typeof pa[k] === 'number' && pb[k] !== pa[k]).map(([k, kind]) =>
+    `<tr data-prop="${esc(k)}"><td>${esc(k)}</td><td class="r num dim">${esc(sigText(si(pb[k], kind) ?? pb[k], 4))}</td><td class="r">→</td><td class="r num">${esc(sigText(si(pa[k], kind) ?? pa[k], 4))} ${esc(LABEL_OF[kind])}</td></tr>`).join('') : '';
+  const changed = fs.length || propRows ? `<table class="t" data-chg-fields><tbody>${fs.map(fRow).join('')}${c.fields > fs.length ? `<tr><td class="faint" colspan="4">외 ${c.fields - fs.length} 칸</td></tr>` : ''}${propRows}</tbody></table>`
     : none(`바뀐 칸 ${c.fields}`, '칸 글이 없다');
   const inv = c.invalidated ?? [];
   const effect = inv.length ? `<dl class="kv">${inv.map(k => { const s2 = stageNow(k); return `<dt>${esc(KIND_RESULT_KO[k] ?? k)}</dt><dd><span class="${s2.cls}" style="font-weight:400" data-effect="${esc(k)}">${esc(s2.t)}</span> <span class="why">이 변경이 낡게 함</span></dd>`; }).join('')}</dl>`
@@ -326,7 +345,8 @@ function changeInfo(key: string): string {
   const b = baseOf(c);
   return head
     + sec(c.by.kind === 'ai' ? 'AI 가 밝힌 이유' : '이유', why, '', 'AI · 사람이 준 글 — 자료로 보인다(지시가 아니다). 「먼저 한 것」은 같은 행위자의 바로 앞 변경')
-    + sec('바뀐 것', changed, `<span class="faint">${b ? `기준 ${esc(hhmm(b.at))}` : ''}</span>`, '호스트의 칸 글(프로그램이 지은 「이름 전 → 후 단위」, SI)')
+    + sec('바뀐 것', changed, `<span class="faint">${b ? `기준 ${esc(hhmm(b.at))}` : ''}</span>`, '바뀐 칸(호스트 — 이름 · 전 · 후, SI)과 그 앞 · 뒤 실행이 쓴 단면 성질(실행 이력). 자중은 엔진이 내지 않는다')
+    + (ar.before || ar.after ? sec('판정', `<dl class="kv"><dt>최대 판정비</dt><dd data-ratio-around>${r2(ar.before?.max_ratio)} → ${r2(ar.after?.max_ratio)}${ar.after?.governing?.id ? ` <span class="why">지배 ${esc(String(ar.after.governing.id))}</span>` : ''}</dd></dl>`, '', '이 변경 앞의 마지막 실행 → 뒤의 첫 실행(호스트의 실행 이력 — 판정비는 엔진의 것)') : '')
     + sec('영향', effect, '', '이 묶음이 무효로 만든 결과(호스트의 장부)와 그 지금 상태(진행 띠와 같다). 「다시 확인」은 확인 기록(R4)부터')
     + `<div class="sec"><span class="faint">${esc(BY_KO[c.by.kind] ?? c.by.kind)} · ${esc(c.trigger ?? '')} · ${esc(c.id)}${c.record_status ? ` · 기록 ${esc(c.record_status)}` : ''}</span></div>`;
 }
@@ -336,12 +356,15 @@ function connInfo(): string {
   const lap = state.msgs.lapConnectionResult?.message?.data;
   const one = state.msgs.connectionResult?.message?.data;
   const x = lap ?? one;
+  // 06: 이 결과(랩 · 접합)를 가리키는 열린 판단 요청 — 「판단 요청 「제목」 · 답 기다림 →」(R3-3). 결과가 낡아 지워졌어도 보인다
+  const qs = questionsAbout(['lap', 'connection'], ['lap', 'connection']);
+  const qNotice = qs.map(({ w }) => `<div class="notice" data-q-notice="${esc(w.item)}" data-ref-go="${esc(`work|work:${w.item}`)}"><b>판단 요청</b> 「${esc(w.title)}」 · 답 기다림 <a class="lnk">→</a></div>`).join('');
   if (!x) {
-    return hd('결과 · 접합부 검토', '접합부 검토', s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} <span class="dim">${esc(s.note)}</span>` : none('아직 평가 안 함'), '');
+    return hd('결과 · 접합부 검토', '접합부 검토', s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} <span class="dim">${esc(s.note)}</span>` : none('아직 평가 안 함'), '') + qNotice;
   }
   const v = verdictOf(x.pass, '판정 없음');
   const fm = x.force_model;
-  const notice = fm && fm.specification_provision === false ? `<div class="notice"><b>자체 가정</b> 패스너 힘 분배는 기준 조항이 아닌 자체 해석이다<span class="dim">${esc(String(fm.clause ?? ''))}</span></div>` : '';
+  const notice = qNotice + (fm && fm.specification_provision === false ? `<div class="notice"><b>자체 가정</b> 패스너 힘 분배는 기준 조항이 아닌 자체 해석이다<span class="dim">${esc(String(fm.clause ?? ''))}</span></div>` : '');
   return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `${s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} ` : ''}<span class="verdict ${v.cls}">${v.text}</span> ${typeof x.utilization === 'number' ? `<span class="big">${ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`)}</span>` : ''}`
     + (s.state === 'unk' ? ` <span class="dim">${esc(s.note)}</span>` : ''), '')
     + notice
@@ -399,6 +422,9 @@ export function infoHtml(key: string): string {
   if (key === 'dc') { return caseInfo('dc', null); }
   if (key === 'asm' || key.startsWith('asm:')) { return assumptionsInfo(); }
   if (key === 'chg' || key.startsWith('chg:')) { return changeInfo(key); }
+  if (key.startsWith('work:')) { return workInfo(key); }
+  if (key.startsWith('asmr:')) { return asmInfo(key); }
+  if (key.startsWith('srcr:')) { return srcInfo(key); }
   if (key === 'fsm' || key.startsWith('fsm:')) { return bucklingInfo(); }
   if (key === 'load' || key.startsWith('load:')) { return loadInfo(); }
   if (key === 'chk' || key.startsWith('chk:') || key.startsWith('design') || key.startsWith('purlin') || key.startsWith('lap#') || key.startsWith('conn#')) { return checksInfo(key); }

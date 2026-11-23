@@ -27,7 +27,9 @@ import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
 import { fieldText, pageOf } from './notices';
-import { baseOf, BY_KO, changeOf, chg, KIND_RESULT_KO, sinceBase, type Change } from './changes';
+import { refKey, work } from './work';
+import { keyOfItem } from './follow';
+import { baseOf, BY_KO, changeOf, chg, KIND_RESULT_KO, sinceBase, valText, type Change } from './changes';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
 export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean; mode3d: boolean }
@@ -47,7 +49,7 @@ export function groupOf(key: string): Group {
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
   if (key === 'conn' || key.startsWith('conn:')) { return 'conn'; }
   if (['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return 'doc'; }
-  if (['ask', 'rep', 'chg', 'val', 'alt'].includes(key) || key.startsWith('chg:')) { return 'other'; }
+  if (['ask', 'rep', 'chg', 'ins', 'val', 'alt'].includes(key) || /^(chg|work|asmr|srcr):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
   return 'model';
 }
 
@@ -414,6 +416,25 @@ export function tablesFor(group: Group): DTable[] {
   return [];
 }
 
+/** 업무 항목의 첫 걸린 대상 → 화면의 키(검토 · 결과 · 칸) */
+function workTarget(id: string): string | null {
+  const f = work.full.get(id);
+  const refs: any[] = Array.isArray(f?.item?.refs) ? f.item.refs : [];
+  for (const r of refs) {
+    if (r?.kind === 'check' && r.check) { const k = keyOfItem({ kind: 'check', id: String(r.check.id), scope: r.check.scope, ...(r.check.location ? { location: r.check.location } : {}) } as never); if (k) { return k.key; } }
+    if (r?.kind === 'result' && r.result) {
+      const k = keyOfItem({ kind: 'result', id: String(r.result) } as never);
+      if (k) { return k.key; }
+      // 결과가 지금 없으면(낡아 지웠다) 그 단계 — 그 자리에서 낡음 · 없음을 보인다
+      const st: Record<string, string> = { lap: 'conn', connection: 'conn', member_design: 'chk', buckling_analysis: 'fsm', design_dsm: 'fsm', load_analysis: 'load' };
+      if (st[String(r.result)]) { return st[String(r.result)]; }
+    }
+    const k = refKey(r);
+    if (k && k.tab !== 'work') { return k.key; }
+  }
+  return null;
+}
+
 // ── 업무 › 변경(R2-3 · 템플릿 07) ───────────────────────────────────
 /** 결과 종류의 지금 상태(진행 띠와 같은 것) */
 const STAGE_OF: Record<string, keyof typeof state.stages> = { buckling_analysis: 'fsm', design_dsm: 'fsm', load_analysis: 'load', member_design: 'chk', lap: 'conn', connection: 'conn', validation: 'val' };
@@ -436,31 +457,50 @@ function changeView(key: string, size: { w: number; h: number }): { html: string
   const since = sinceBase(c);
   const W = Math.max(420, Math.round(size.w));
   const H = Math.max(320, size.h - 300);
+  // 고른 변경이 건드린 요소(호스트의 geometry.element_ids — 요소 번호): 바뀜은 주황, 더함은 초록. 뺀 요소는 지금 모델에 없다(수만 칩에)
+  const g = c.geometry ?? null;
+  const eids = g?.element_ids ?? { changed: [], added: [], removed: [] };
   const svg = sectionSvg({ w: W, h: H, nodes: state.nodes, elems: state.elems, props: state.props, shear: state.cutwp, extent: state.full?.section ?? null, template: tplOf(),
-    labels: false, elemLabels: false, dims: true, axes: false, stress: false });
+    labels: false, elemLabels: false, dims: true, axes: false, stress: false, modElems: eids.changed ?? [], addElems: eids.added ?? [] });
   const inv = [...new Set(since.flatMap(x => x.invalidated ?? []))];
-  const nf = since.reduce((a, x) => a + (x.fields ?? 0), 0);
+  // 칩 「바뀜 · 추가 · 삭제」 — 요소(절점 · 요소가 바뀐 변경이면 호스트의 geometry), 아니면 바뀐 칸 수(호스트의 fields)
+  const el = g?.elements ?? null;
+  const nMod = el ? el.changed : c.fields, nAdd = el ? el.added : 0, nDel = el ? el.removed : 0;
+  const what = el ? '요소' : '칸';
   const view = `<div class="dv" data-draw="section" data-zoom="section" data-chg-view="${esc(c.id)}">${svg}`
-    + `<div class="hud tl"><span class="chip" data-chg-fields="${nf}"${tip('기준 → 지금 사이의 묶음이 바꾼 칸 수(호스트의 fields). 절점 · 요소의 바뀜 · 더함 · 뺌은 호스트가 칸 글로만 준다')}><i class="key" style="background:var(--mod)"></i>바뀐 칸 ${nf}</span>`
-    + `<span class="chip" data-chg-n="${since.length}">묶음 ${since.length}</span>`
-    + (inv.length ? `<span class="chip"${tip('이 묶음들이 무효로 만든 결과(호스트의 장부)')}><i class="key" style="background:var(--warn)"></i>낡게 한 결과 ${inv.length}</span>` : '') + '</div>'
+    + `<div class="hud tl"><span class="chip" data-chg-mod="${nMod}"${tip(`이 변경이 바꾼 ${what}(호스트 ${el ? 'geometry' : 'fields'})${g?.explained_by_dimensions ? ' — 템플릿 치수의 변경으로 다시 만든 절점 · 요소' : ''}`)}><i class="key" style="background:var(--mod)"></i>바뀜 ${nMod}</span>`
+    + `<span class="chip" data-chg-add="${nAdd}"><i class="key" style="background:var(--add)"></i>추가 ${nAdd}</span>`
+    + `<span class="chip" data-chg-del="${nDel}"><i class="key" style="background:var(--del)"></i>삭제 ${nDel}</span>`
+    + (inv.length ? `<span class="chip"${tip('기준 뒤의 묶음들이 무효로 만든 결과(호스트의 장부)')}><i class="key" style="background:var(--warn)"></i>낡게 한 결과 ${inv.length}</span>` : '') + '</div>'
     + `<div class="hud tr"><span class="chip" data-chg-base="${esc(c.id)}"${tip('비교 기준 — 이 때 뒤의 묶음을 지금까지 모아 서랍에 보인다(앞 변경을 고른다)')}>비교 기준 · ${b ? esc(hhmm(b.at)) : '처음'} ▾</span>${fitBtn('section')}</div>`
-    + `<div class="hud bl"><span class="cap">지금 모델 · 절점 ${state.nodes.length} · 요소 ${state.elems.length}</span></div></div>`;
+    + `<div class="hud bl"><span class="cap">지금 모델 · 절점 ${state.nodes.length} · 요소 ${state.elems.length}${el ? ` · 색 = 이 변경이 건드린 요소` : ''}</span></div></div>`;
   const rows: DTable['rows'] = [];
+  const AREA: Record<string, string> = { sectionParams: '단면', sectionTemplate: '단면', node: '단면', elem: '단면', prop: '재료', inputs: '입력', spans: '경간', mcpOnly: 'MCP 인자' };
+  const areaOf = (path: string) => AREA[path.split('.')[1] ?? ''] ?? (path.startsWith('case.') ? '입력' : '모델');
   for (const x of since) {
     const who = `${BY_KO[x.by.kind] ?? x.by.kind}`;
-    const fs = x.field_changes?.length ? x.field_changes : [x.title];
-    fs.forEach(f => rows.push({ key: `chg:${x.id}`, cells: [esc(hhmm(x.at)), `<span data-by="${esc(x.by.kind)}">${esc(who)}</span>`, esc(f)], sort: [x.at, who, f], tsv: [hhmm(x.at), who, f] }));
-    if ((x.field_changes?.length ?? 0) < x.fields) { rows.push({ key: `chg:${x.id}`, cls: 'faint', cells: ['', '', `외 ${x.fields - (x.field_changes?.length ?? 0)} 칸`], sort: [x.at, who, ''], tsv: ['', '', ''] }); }
+    const fs = x.field_changes ?? [];
+    for (const f of fs) {
+      const sm = f.summary;
+      const was = sm ? `${sm.count.from}개` : 'from' in f || 'to' in f ? `${valText(f.from)}${f.unit && typeof f.from === 'number' ? ` ${f.unit}` : ''}` : '';
+      const now = sm ? `${sm.count.to}개 · 바뀜 ${sm.changed}${sm.added ? ` · 더함 ${sm.added}` : ''}${sm.removed ? ` · 뺌 ${sm.removed}` : ''}` : 'from' in f || 'to' in f ? `${valText(f.to)}${f.unit && typeof f.to === 'number' ? ` ${f.unit}` : ''}` : f.text;
+      rows.push({ key: `chg:${x.id}`, cells: [`${esc(hhmm(x.at))} <span class="faint" data-by="${esc(x.by.kind)}">${esc(who)}</span>`, esc(areaOf(f.path)), `<span data-path="${esc(f.path)}">${esc(f.label_ko || f.key)}</span>`,
+        `<span class="dim">${esc(was)}</span>`, `<span style="color:var(--mod)">${esc(now)}</span>`],
+      sort: [x.at, areaOf(f.path), f.label_ko || f.key, was, now], tsv: [`${hhmm(x.at)} ${who}`, areaOf(f.path), f.label_ko || f.key, was, now] });
+    }
+    if (!fs.length) { rows.push({ key: `chg:${x.id}`, cells: [`${esc(hhmm(x.at))} ${esc(who)}`, '', esc(x.title), '', ''], sort: [x.at, '', x.title, '', ''], tsv: [hhmm(x.at), '', x.title, '', ''] }); }
+    if (fs.length < x.fields) { rows.push({ key: `chg:${x.id}`, cls: 'faint', cells: ['', '', `외 ${x.fields - fs.length} 칸`, '', ''], sort: [x.at, '', '', '', ''], tsv: ['', '', '', '', ''] }); }
   }
   if (inv.length) {
-    rows.push({ cls: 'grp', cells: ['', '', '<span data-tip="이 묶음들이 무효로 만든 결과 — 지금 상태는 진행 띠와 같다">따라 바뀐 것</span>'], sort: ['', '', ''], tsv: ['', '', '따라 바뀐 것'] });
+    rows.push({ cls: 'grp', cells: ['', '', '<span data-tip="기준 뒤의 묶음들이 무효로 만든 결과 — 지금 상태는 진행 띠와 같다">따라 바뀐 것</span>', '', ''], sort: ['', '', '', '', ''], tsv: ['', '', '따라 바뀐 것', '', ''] });
     for (const k of inv) {
       const s2 = stageNow(k);
-      rows.push({ cells: ['', '<span class="dim">결과</span>', `<span data-follow="${esc(k)}">${esc(KIND_RESULT_KO[k] ?? k)} · 일치 → <span class="${s2.cls}">${esc(s2.t)}</span></span>`], sort: ['', '', k], tsv: ['', '결과', `${KIND_RESULT_KO[k] ?? k} → ${s2.t}`] });
+      rows.push({ cells: ['', '<span class="dim">결과</span>', `<span data-follow="${esc(k)}">${esc(KIND_RESULT_KO[k] ?? k)}</span>`, '<span class="dim">일치</span>', `<span class="${s2.cls}">${esc(s2.t)}</span>`],
+        sort: ['', '', k, '', s2.t], tsv: ['', '결과', KIND_RESULT_KO[k] ?? k, '일치', s2.t] });
     }
   }
-  const table: DTable = { id: 'chg', title: '바뀐 값', note: `${b ? hhmm(b.at) : '처음'} → 지금`, cols: [{ t: '때' }, { t: '누가' }, { t: '바뀐 것(전 → 후)' }], rows, empty: '바뀐 칸 없음' };
+  const table: DTable = { id: 'chg', title: '바뀐 값', note: `${b ? hhmm(b.at) : '처음'} → 지금`,
+    cols: [{ t: '때 · 누가' }, { t: '대상' }, { t: '항목' }, { t: '이전', num: true }, { t: '이후', num: true }], rows, empty: '바뀐 칸 없음' };
   return { html: view + drawerHtml([table], { sel: `chg:${c.id}`, collapsedDefault: false }), cls: 'v1 withdrawer' };
 }
 
@@ -471,6 +511,15 @@ export function centerHtml(key: string, size: { w: number; h: number } = { w: 12
   if (key === 'vtab') { return { html: vtabView(key), cls: 'v1 docc' }; }
   if (reportKindOf(key)) { return { html: reportView(key), cls: 'v1 docc' }; }
   if (key === 'chg' || key.startsWith('chg:')) { return changeView(key, size); }
+  // R3-3: 업무 항목 — 걸린 대상(첫째)의 보기를 그대로(정보 창이 그 항목). 가정 · 원자료는 글뿐이라 가운데는 비운다
+  if (key.startsWith('work:')) {
+    const t = workTarget(key.slice(5));
+    if (t && !t.startsWith('work:')) { return centerHtml(t, size); }
+    return { html: honest('걸린 대상 없음', '이 업무 항목은 검토 · 결과 · 칸을 가리키지 않는다 — 정보 창에 글'), cls: 'v1' };
+  }
+  if (key.startsWith('asmr:') || key.startsWith('srcr:') || key === 'asm:reg' || key === 'src:unreg') {
+    return { html: honest(key.startsWith('src') ? '원자료' : '가정 등록부', key.startsWith('src') ? '내용은 프로그램이 읽지 않는다 — 정보 창의 「열기」가 OS 의 기본 앱으로 연다' : '가정의 글 · 상태 · 근거는 정보 창에'), cls: 'v1' };
+  }
   const group = groupOf(key);
   syncModeFromKey(key);
   const views = viewsFor(key);

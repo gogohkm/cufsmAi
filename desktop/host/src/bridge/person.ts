@@ -245,7 +245,28 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         if (!r) { no(409, '설계 패널이 없다'); return true; }
         if (!r.ok) { no(200, '호스트가 받지 않았다'); return true; }
         deps.changed('changes');
-        ok({ state: st, ...(r.backToStart !== undefined ? { back_to_start: r.backToStart } : {}) });
+        ok({ state: st, ...(r.backToStart !== undefined ? { back_to_start: r.backToStart } : {}), ...(Array.isArray(r.restored) ? { restored: r.restored.slice(0, 200) } : {}) });
+        return true;
+      }
+      case 'open-source': {
+        // R3-3: 원자료 하나를 OS 의 기본 앱으로 — id 로만(본문의 경로는 읽지 않는다). 그 파일은 호스트가 등록한 01_원자료 안의 상대경로,
+        // 프로젝트 폴더는 사람의 얼굴에서. 폴더 밖 · 링크는 열지 않는다. 내용은 읽지 않는다(AI 에게 가지 않는다)
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const id = typeof b.id === 'string' ? b.id.slice(0, 40) : '';
+        if (!id) { no(400, 'id(원자료)'); return true; }
+        const cur = person.currentProject();
+        if (!cur) { no(409, '열린 프로젝트가 없다'); return true; }
+        const ls = await deps.action({ action: 'sources', op: 'list', include_others: true });
+        const hit = (Array.isArray(ls?.items) ? ls.items : []).find((x: any) => x?.item === id);
+        if (!hit || typeof hit.file !== 'string') { no(404, '그 원자료가 없다'); return true; }
+        const base = path.resolve(cur.dir, '01_원자료');
+        const abs = path.resolve(base, hit.file);
+        const inside = abs.toLowerCase().startsWith(base.toLowerCase() + path.sep);
+        let plain = false;
+        try { const st2 = fs.lstatSync(abs); plain = st2.isFile() && !st2.isSymbolicLink(); } catch { plain = false; }
+        if (!inside || !plain) { no(409, '원자료 폴더 안의 파일이 아니다(없음 · 링크 · 폴더 밖)'); return true; }
+        const opened = await deps.platform.openPath(abs);
+        ok({ opened, name: path.basename(abs) });
         return true;
       }
       default:

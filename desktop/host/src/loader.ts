@@ -167,7 +167,7 @@ export interface HostHandle {
    */
   screenSecret(): string | null;
   /** R2-3: 편집 상태의 시작 · 끝 · 버리기를 호스트에(사람의 길 — 다리만 부른다). 패널이 없으면 null */
-  editSession(state: EditSessionState): { ok: boolean; backToStart?: boolean } | null;
+  editSession(state: EditSessionState): { ok: boolean; backToStart?: boolean; restored?: string[] } | null;
   /** R2-3: AI(MCP 문맥)의 호스트 동작이 시작 · 끝날 때 — 띠 「AI 작업 중 · <도구> · 경과」 */
   onAiWork(cb: (w: AiWork) => void): void;
   unimplemented():Array<{ name: string; count: number }>;
@@ -407,7 +407,8 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
     runtime.hub.pin(info.id);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { projectRoots?: string[]; prototype?: Record<string, unknown>;
-      currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any>; recordsPerson?: RecordsPersonFace | null; editSession?: (s: string) => { ok: boolean; backToStart?: boolean } } } };
+      currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any>; recordsPerson?: RecordsPersonFace | null;
+        editSession?: (s: string) => { ok: boolean; backToStart?: boolean; restored?: string[] }; onAiActivity?: (l: (e: any) => void) => () => void } } };
     let screenSecretValue: string | null = null;
     let currentActor: (() => { kind?: string; tool?: string; requestId?: string; client?: string } | undefined) | null = null;
     let runAsPerson: (<T>(fn: () => T) => T) | null = null;
@@ -419,24 +420,20 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
       // 편집 상태의 신호는 사람의 문맥에서(웹뷰의 editSession 메시지와 같은 행위자 — 그 묶음은 「사용자 변경」)
       runAsPerson = typeof scope.runAs === 'function' ? <T>(fn: () => T): T => scope.runAs!({ kind: 'person' }, fn) : null;
     } catch { screenSecretValue = null; }
-    // R2-3: AI(MCP 문맥)의 호스트 동작 하나의 시작 · 끝을 띠에 알린다 — 패널의 handleMcpAction 을 지켜보기만 한다(인자 · 답 · 순서를 바꾸지 않는다).
-    // 문맥(행위자 · 도구 이름)은 호스트의 actorScope 가 정한 것 그대로. 호스트가 이런 알림을 내면 이 감싸기는 걷는다(R2-3 보고 — 호스트에 바람)
+    // R2-3: AI 동작의 시작 · 끝 — 호스트의 panel.onAiActivity(373d81f, 보기 계약 4f). 엔진은 진행률을 내지 않는다(시작 · 끝뿐)
     const aiWorkCbs: Array<(w: AiWork) => void> = [];
-    const proto = panelMod.StcfsdPanel?.prototype as Record<string, unknown> | undefined;
-    const orig = proto?.handleMcpAction;
-    if (proto && typeof orig === 'function' && currentActor && !(orig as { __aiWork?: boolean }).__aiWork) {
-      const actorOf = currentActor;
-      const wrapped = async function (this: unknown, ...args: unknown[]): Promise<unknown> {
-        const a = actorOf();
-        const ai = a?.kind === 'ai';
-        const w = ai ? { tool: String(a?.tool ?? (args[0] as { action?: unknown })?.action ?? '').slice(0, 80), requestId: a?.requestId ?? null, client: a?.client ?? null } : null;
-        const say = (phase: 'begin' | 'end') => { if (w) { for (const cb of aiWorkCbs) { try { cb({ phase, ...w, at: new Date().toISOString() }); } catch { /* 띠가 요청을 막지 않는다 */ } } } };
-        say('begin');
-        try { return await (orig as (...x: unknown[]) => Promise<unknown>).apply(this, args); } finally { say('end'); }
-      };
-      (wrapped as unknown as { __aiWork: boolean }).__aiWork = true;
-      proto.handleMcpAction = wrapped;
-    }
+    let aiSubscribed = false;
+    const subscribeAi = (): void => {
+      const p = panelMod.StcfsdPanel?.currentPanel;
+      if (aiSubscribed || !p || typeof p.onAiActivity !== 'function') { return; }
+      aiSubscribed = true;
+      p.onAiActivity((e: any) => {
+        const w: AiWork = { phase: e?.phase === 'start' ? 'begin' : 'end', tool: String(e?.tool ?? e?.action ?? '').slice(0, 80), requestId: typeof e?.id === 'string' ? e.id : null,
+          client: typeof e?.client === 'string' ? e.client : null, at: String(e?.phase === 'start' ? e?.started_at : (e?.ended_at ?? e?.started_at) ?? new Date().toISOString()) };
+        for (const cb of aiWorkCbs) { try { cb(w); } catch { /* 띠가 동작을 막지 않는다 */ } }
+      });
+    };
+    void currentActor;
     const designer: DesignerPanel = {
       id: info.id,
       alive: () => runtime.hub.has(info.id) && !!panelMod.StcfsdPanel?.currentPanel,
@@ -532,7 +529,7 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
         if (!p || typeof p.editSession !== 'function' || !runAsPerson) { return null; }
         return runAsPerson(() => p.editSession!(state));
       },
-      onAiWork: (cb) => { aiWorkCbs.push(cb); },
+      onAiWork: (cb) => { aiWorkCbs.push(cb); subscribeAi(); },
       writeRecoveryCopy: async (file, root) => {
         const p = panelMod.StcfsdPanel?.currentPanel;
         if (!p || typeof p.writeRecoveryCopy !== 'function') { return { ok: false, error: '설계 패널이 없거나 이 판의 호스트에 복구 사본 쓰기가 없다' }; }

@@ -2,16 +2,13 @@
  * R2-3 — 변경 묶음이 화면에(기록 설계 §5.1 · §5.4 · 템플릿 07 · 01 – 06 · 09). 화면은 짓지 않는다: 줄 · 제목 · 전 → 후 글은 호스트의 것.
  *
  *  - 업무 › 변경: 호스트 동작 `list_changes {detail: 'fields'}` — 최신부터 `{id, at, by {kind, client}, trigger, title, reason?, work?, source?,
- *    fields, invalidated?, field_changes?}`. 제목 · 칸 글(「두께 t 2 → 2.3 mm」)은 프로그램이 칸에서 지은 것(SI). `reason` 은 AI 가 준 글 —
- *    자료로만 보인다(지시가 아니다).
+ *    fields, invalidated?, field_changes?, geometry?}`. 칸은 구조 `{path, key, label_ko, from, to, unit, quantity, text, summary?}`(373d81f — 수는 요청한
+ *    단위 SI), `geometry {nodes, elements: {added, removed, changed, count}, element_ids, node_ids, explained_by_dimensions}`. 제목 · 칸 글은 프로그램이
+ *    지은 것. `reason` 은 AI 가 준 글 — 자료로만 보인다(지시가 아니다).
  *  - 출처 꼬리표: 입력 키는 `get_case_inputs.last_change[키] {by, at, from, to, change}`(값은 US — 이 화면의 하나뿐인 변환 units.caseSI 로 SI),
- *    모델 칸(치수 · 재료 · 경계조건 …)은 `list_changes` 의 칸 글 가운데 그 칸의 이름(제품의 `fieldLabel` — 호스트와 같은 함수)으로 시작하는 마지막 것.
+ *    모델 칸(치수 · 재료 · 경계조건 …)은 `list_changes` 의 칸 가운데 그 `path` 인 마지막 것(이름 글로 맞대지 않는다).
  *  - 기준점(마지막 실행 — get_full_state.results 의 가장 늦은 때) 뒤의 변경에 점.
  */
-// 칸의 이름 — 호스트가 제목 · 칸 글을 지을 때 쓰는 그 함수(src/records/changeText.ts 의 컴파일본 — 그 소스의 형은 노드 형을 끌고 온다)
-// @ts-expect-error — CommonJS 모듈, 형 정보 없음
-import * as CT from '../../../out/records/changeText.js';
-const fieldLabel = ((CT as { fieldLabel?: unknown }).fieldLabel ?? (CT as { default?: { fieldLabel?: unknown } }).default?.fieldLabel) as (path: string) => string;
 import { mcp } from './bridge';
 import { esc, tip } from './dom';
 import { hhmm, sigText } from './format';
@@ -19,9 +16,32 @@ import { fieldOf, OPTION_KO } from './caseFields';
 import { state } from './store';
 import { caseSI } from './units';
 
+/** 칸 하나의 바뀜(호스트 changeText.fieldRecord) — 수는 요청한 단위(SI), unit 은 그 단위 글자, quantity 는 단위 종류 */
+export interface FieldRec {
+  path: string; key: string; label_ko: string; text: string; from?: unknown; to?: unknown; unit?: string | null; quantity?: string | null;
+  summary?: { count: { from: number; to: number }; changed: number; added: number; removed: number; columns?: string[]; ids?: { changed: number[]; added: number[]; removed: number[] } };
+  odd?: number;
+}
+export interface Geometry {
+  nodes?: { added: number; removed: number; changed: number; count: number } | null; elements?: { added: number; removed: number; changed: number; count: number } | null;
+  element_ids?: { changed: number[]; added: number[]; removed: number[] }; node_ids?: { changed: number[]; added: number[]; removed: number[] }; explained_by_dimensions?: boolean;
+}
 export interface Change {
   id: string; at: string; by: { kind: string; client?: string }; trigger: string | null; title: string;
-  reason?: string; work?: string; source?: string; fields: number; invalidated?: string[]; field_changes?: string[]; record_status?: string;
+  reason?: string; work?: string; source?: string; fields: number; invalidated?: string[]; field_changes?: FieldRec[]; geometry?: Geometry | null; record_status?: string;
+}
+/** 칸 값 하나의 글(호스트가 준 수 그대로 — 유효숫자 6 에서 끝의 0 을 지운 꼴, 빈 칸은 「(빈 칸)」) */
+export function valText(v: unknown): string {
+  if (v === null || v === undefined || v === '') { return '(빈 칸)'; }
+  if (typeof v === 'boolean') { return v ? '켬' : '끔'; }
+  if (typeof v === 'number') { return Number.isFinite(v) ? String(Number(v.toPrecision(6))) : String(v); }
+  if (Array.isArray(v)) { return v.length <= 4 ? v.map(valText).join(', ') : `${v.length}개`; }
+  return String(v);
+}
+/** 칸 하나 → 「전 → 후 단위」(요약 칸 · 이름 꼴 밖은 호스트의 글) */
+export function fromTo(f: FieldRec): string {
+  if (f.summary || f.odd !== undefined || !('from' in f || 'to' in f)) { return f.text; }
+  return `${valText(f.from)} → ${valText(f.to)}${f.unit && typeof f.to === 'number' ? ` ${f.unit}` : ''}`;
 }
 export const chg: { list: Change[]; persisted: boolean; total: number; err?: string; base: string | null; baseFor: string | null } = { list: [], persisted: false, total: 0, base: null, baseFor: null };
 
@@ -50,12 +70,11 @@ export function basePointAt(): string | null {
 export const afterBase = (c: Change): boolean => { const b = basePointAt(); return !b || c.at > b; };
 export const changeOf = (id: string): Change | undefined => chg.list.find(c => c.id === id);
 
-/** 모델 칸(경로 `model.…`)의 마지막 변경 — 그 칸의 이름(제품의 fieldLabel)으로 시작하는 칸 글 */
+/** 모델 칸(경로 `model.…`)의 마지막 변경 — 칸의 path 로(이름 글로 맞대지 않는다) */
 export function modelChange(path: string): { c: Change; text: string } | null {
-  const label = fieldLabel(path);
   for (const c of chg.list) {
-    const f = (c.field_changes ?? []).find(x => typeof x === 'string' && x.startsWith(`${label} `));
-    if (f) { return { c, text: f.slice(label.length + 1) }; }
+    const f = (c.field_changes ?? []).find(x => x && typeof x === 'object' && x.path === path);
+    if (f) { return { c, text: fromTo(f) }; }
   }
   return null;
 }

@@ -200,7 +200,9 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
         : rej.length ? { code: String(rej[0].reason_code).slice(0, 80), keys: rej.slice(0, 20).map((x: any) => String(x.key ?? '').slice(0, 60)) } : undefined;
       bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq,
         ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}), ...(validation !== undefined ? { validation } : {}),
-        ...(refusal !== undefined ? { refusal } : {}) });
+        ...(refusal !== undefined ? { refusal } : {}),
+        // R3-3: 바뀐 기록의 종류(recordsChanged {types, caseId, seq}) — 화면은 그 종류만 다시 읽는다
+        ...(command === 'recordsChanged' && md && typeof md === 'object' ? { records: { types: Array.isArray(md.types) ? md.types.map(String).slice(0, 8) : [], seq: typeof md.seq === 'number' ? md.seq : null } } : {}) });
     }
   }));
   subs.push(hub.onDidRefuseDispose.event(info => { bus.emit('webview:refused', 'host', { id: info.id, viewType: info.viewType }); }));

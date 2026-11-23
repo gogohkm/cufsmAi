@@ -44,6 +44,8 @@ export interface SectionDrawOpt {
   template?: { name: string; params: Record<string, number> } | null;
   labels?: boolean; elemLabels?: boolean; dims?: boolean; axes?: boolean; stress?: boolean;
   hiNode?: number | null; hiElem?: number | null;
+  /** R2-3: 변경이 건드린 요소 번호(바뀜 · 더함 — 호스트의 geometry.element_ids). 그 요소만 색으로 */
+  modElems?: number[] | null; addElems?: number[] | null;
   mode?: ModeOverlay | null;
   mini?: boolean;
   /** 뒤집어 그리기 — 쓰지 않는다(엔진의 좌표 그대로) */
@@ -127,8 +129,10 @@ export function sectionSvg(o: SectionDrawOpt): string {
     if (!a || !b) { continue; }
     const t = si(e[3], 'length') ?? 0;
     const hi = o.hiElem === Number(e[0]);
-    lines.push(`<line data-e="${Number(e[0])}" data-i="${Number(e[1])}" data-j="${Number(e[2])}" x1="${f1(X(a.x))}" y1="${f1(Y(a.z))}" x2="${f1(X(b.x))}" y2="${f1(Y(b.z))}" `
-      + `stroke="${hi ? 'var(--accent)' : o.mode ? 'var(--ghost)' : 'var(--steel)'}" stroke-width="${Math.max(o.mini ? 1.6 : 1.8, s * t).toFixed(2)}" stroke-linecap="round"/>`);
+    const add = !!o.addElems && o.addElems.includes(Number(e[0]));
+    const mod = !add && !!o.modElems && o.modElems.includes(Number(e[0]));
+    lines.push(`<line data-e="${Number(e[0])}" data-i="${Number(e[1])}" data-j="${Number(e[2])}"${mod ? ' data-mod="1"' : add ? ' data-add="1"' : ''} x1="${f1(X(a.x))}" y1="${f1(Y(a.z))}" x2="${f1(X(b.x))}" y2="${f1(Y(b.z))}" `
+      + `stroke="${hi ? 'var(--accent)' : add ? 'var(--add)' : mod ? 'var(--mod)' : o.mode ? 'var(--ghost)' : 'var(--steel)'}" stroke-width="${Math.max(o.mini ? 1.6 : 1.8, s * t).toFixed(2)}" stroke-linecap="round"/>`);
   }
   g.push(`<g class="sec-elems">${lines.join('')}</g>`);
 
