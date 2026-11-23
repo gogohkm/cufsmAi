@@ -773,6 +773,77 @@ def flexure_checks_all(ck):
     return checks
 
 
+def lap_section_block(ctx):
+    """랩 구간(lap_region + 구속 진술)의 랩 단면 강도 — 랩 도구가 단면 강도를 가져갈 곳(계약 §6.3, 2026-11-24).
+
+    기준: Manual II-1A / II-2A 의 랩 구간 — Fn = Fy(Mne = My), §F3.2.1 국부좌굴만, 비탄성 여유(§F3.2.3)와
+    냉간가공(§A3.3.2) 없이(virgin Fy). Se = Mnℓ / Fy. Vn 은 그 단면 한 부재의 §G2.1 (웹 하나 — C · Z).
+    구간 자신의 검토 항목은 비탄성 여유 · 냉간가공을 품을 수 있어 랩 검토의 단면 강도로 쓰지 않는다.
+    """
+    from design.shear import shear_strength
+    vs = ctx['state_i621']                    # virgin 상태(냉간가공 전 Fy)
+    Fy0 = ctx['Fy_original']
+    tr = Trace()
+    Sf = q('Sf', vs['Sf_eff'], 'section_modulus', _sec('Sf', ctx))
+    fy = q('Fy', Fy0, 'stress', src('material', key='Fy', note='virgin Fy — no cold work (§A3.3.2)'))
+    i_my = tr.add('yield', 'My = Sf Fy  (Mne = My, Fn = Fy: lapped section restrained)', equation='F2.1-2',
+                  inputs=[Sf, fy], result=q('My', vs['My'], 'moment'),
+                  assumption_source=src('user_input', key='lap_restrained',
+                                        note='Manual II-1A / II-2A: lapped section restrained against '
+                                             'lateral-torsional and distortional buckling'))
+    md = vs.get('Mnfo_detail') or {}
+    out = {'basis': 'Manual II-1A / II-2A lapped section: Fn = Fy (Mne = My), §F3.2.1 local buckling only, '
+                    'no inelastic reserve (§F3.2.3), no cold work (§A3.3.2); Se = Mnℓ / Fy; Vn = §G2.1, one member',
+           'clause': 'F3.2.1', 'equations': ['F2.1-2', 'F3.2.1-1', 'F3.2.1-2', 'F3.2.1-3', 'G2.1-1', 'G2.1-2a',
+                                              'G2.1-3a'],
+           'statement_source': src('user_input', key='lap_restrained')}
+    if vs['Mcrl'] > 0 and md.get('Mnl') is not None:
+        i_cr = _mcrl_steps(tr, ctx, vs, Sf)
+        i_l = tr.add('slenderness', 'λℓ = (My / Mcrl)^0.5', equation='F3.2.1-3',
+                     inputs=[tr.ref(i_my), tr.ref(i_cr)], result=q('λℓ', md.get('lambda_l'), 'dimensionless'))
+        holds = md.get('equation') == 'F3.2.1-1'
+        tr.branch('λℓ ≤ 0.776', holds, md.get('equation'), inputs=[tr.ref(i_l)])
+        i_lo = tr.add('equation', 'Mnℓ = My' if holds else 'Mnℓ = [1 − 0.15 (Mcrl/My)^0.4] (Mcrl/My)^0.4 My',
+                      equation=md.get('equation'), inputs=[tr.ref(i_my), tr.ref(i_cr)],
+                      result=q('Mnℓ', md['Mnl'], 'moment'))
+        se = md['Mnl'] / Fy0
+        i_se = tr.add('equation', 'Se = Mnℓ / Fy  (effective section modulus at Fn = Fy)', equation='F3.1-1',
+                      inputs=[tr.ref(i_lo), fy], result=q('Se', se, 'section_modulus'))
+        out.update(available=True, Mnl=tr.steps[i_lo]['result'], Se=tr.steps[i_se]['result'], My=tr.steps[i_my]['result'])
+    else:
+        out.update(available=False, Mnl=None, Se=None, My=tr.steps[i_my]['result'],
+                   reason=_nt('member.reason.no_mcrl'))
+    h, t = ctx.get('h_web') or 0.0, ctx.get('t_web') or 0.0
+    if h > 0 and t > 0:
+        sr = shear_strength(h, t, Fy0)
+        hq = q('h', h, 'length', src('section_property', key='h_web'))
+        tq = q('t', t, 'length', src('section_property', key='t'))
+        i_vy = tr.add('yield', 'Vy = 0.6 Aw Fy, Aw = h t', equation='G2.1-5', inputs=[hq, tq, fy],
+                      result=q('Vy', sr['Vy'], 'force'))
+        i_vcr = tr.add('elastic_buckling', f'Vcr = Aw {PI}² E kv / [12 (1 − μ²) (h/t)²], μ = 0.3', equation='G2.3-2',
+                       inputs=[hq, tq, q('E', ctx['E'], 'stress', spec()), q('kv', 5.34, 'dimensionless', spec())],
+                       result=q('Vcr', sr['Vcr'], 'force'))
+        i_lv = tr.add('slenderness', 'λv = (Vy / Vcr)^0.5', equation='G2.1-4', inputs=[tr.ref(i_vy), tr.ref(i_vcr)],
+                      result=q('λv', sr['lambda_v'], 'dimensionless'))
+        eq = sr['equation']
+        if 'yielding' in eq:
+            tr.branch('λv ≤ 0.815', True, 'G2.1-1', inputs=[tr.ref(i_lv)])
+            i_v = tr.add('equation', 'Vn = Vy', equation='G2.1-1', inputs=[tr.ref(i_vy)], result=q('Vn', sr['Vn'], 'force'))
+        elif 'inelastic' in eq:
+            tr.branch('0.815 < λv ≤ 1.227', True, 'G2.1-2a', inputs=[tr.ref(i_lv)])
+            i_v = tr.add('equation', 'Vn = 0.815 (Vcr Vy)^0.5', equation='G2.1-2a',
+                         inputs=[tr.ref(i_vcr), tr.ref(i_vy)], result=q('Vn', sr['Vn'], 'force'))
+        else:
+            tr.branch('λv > 1.227', True, 'G2.1-3a', inputs=[tr.ref(i_lv)])
+            i_v = tr.add('equation', 'Vn = Vcr', equation='G2.1-3a', inputs=[tr.ref(i_vcr)],
+                         result=q('Vn', sr['Vn'], 'force'))
+        out['Vn'] = tr.steps[i_v]['result']
+    else:
+        out['Vn'] = None
+    out['steps'] = tr.steps
+    return out
+
+
 def _mcrl_steps(tr, ctx, st, Sf):
     an = st.get('Mcrl_an')
     if an:

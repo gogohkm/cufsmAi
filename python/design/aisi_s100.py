@@ -2095,7 +2095,7 @@ def _design_flexure(params: dict) -> dict:
               cold_work_info=cold_work_info, Mu=Mu, Lb=Lb, Cb=Cb, Fcre_override=Fcre_override, Zf=Zf,
               D_over_t=D_over_t, E=E, is_round=_is_round, dist_applicable=dist_applicable,
               dist_reason=dist_reason, dist_stated=bool(lap_region and dist_excluded), f2_unavailable=f2_unavailable, R_uplift=R_uplift, Mn=Mn, mode=mode,
-              phi=phi, omega=omega,
+              phi=phi, omega=omega, lap_stated=bool(lap_stated), h_web=geom.get('h_web'), t_web=geom.get('t'),
               i621_row=(_i621_row_text(section_type, _out_to_out_dims(geom)[0], params.get('span_type'))
                         if R_uplift is not None and R_uplift > 0 else None))
 
@@ -2428,6 +2428,9 @@ def _attach_flexure_checks(result: dict, ck: dict) -> dict:
     """_design_flexure 가 모은 값(ck)으로 검토 항목을 붙인다(옛 키 · 값은 그대로)."""
     ck['not_evaluated_all'] = list(result.get('not_evaluated') or [])
     result['design_checks'] = _mc.flexure_checks_all(ck)
+    if ck.get('lap_stated'):
+        # 랩 도구가 단면 강도를 가져갈 곳 — Fn = Fy, 비탄성 여유 · 냉간가공 없이(계약 §6.3)
+        result['lap_section'] = _mc.lap_section_block(ck)
     return result
 
 

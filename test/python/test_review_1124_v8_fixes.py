@@ -76,6 +76,46 @@ def test_V8_01_top_level_utilization_is_the_governing_lap_strength_ratio():
     assert fg['mirrors']['ratio']['path'] == 'fastener_utilization'
 
 
+def _region(**kw):
+    p = dict(member_type='flexure', design_method='ASD', Fy=55.0, Fu=70, moment_sign='-', lap_region=True,
+             lap_restrained=True, Mu=52.5, Vu=0.89)
+    p.update(kw)
+    return design_member(p)
+
+
+def test_lap_section_block_is_the_plain_region_whatever_reserve_or_cold_work():
+    """계약 §6.3: 랩 구간 결과의 lap_section 은 Fn = Fy · 비탄성 여유 없이 · 냉간가공 없이의 단면 강도다 — 두 선택을
+    켜서 구간의 Mnℓ 이 올라가도(여기 212.9 · 194.0 kip-in) 블록은 끈 구간의 값과 같다."""
+    sec = dict(section_type='lippedz', H=8.0, B=2.25, D=0.91, t=0.105, r=0.1875)
+    plain = _region(**sec)
+    loc = _c(plain, 'member.flexure.local')
+    for extra in ({'use_inelastic_reserve': True}, {'use_cold_work': True}):
+        r = _region(**sec, **extra)
+        assert r['Mnl'] > plain['Mnl'] + 1.0, (extra, r['Mnl'], plain['Mnl'])        # 구간 자신은 올라간다
+        for k in ('Mnl', 'Se', 'Vn'):
+            assert r['lap_section'][k] == plain['lap_section'][k], (extra, k)
+    b = plain['lap_section']
+    assert abs(b['Mnl']['value'] - loc['nominal']['value']) <= 1e-12
+    assert abs(b['Se']['value'] - b['Mnl']['value'] / 55.0) <= 1e-15
+    assert b['Mnl']['quantity'] == 'moment' and b['Se']['quantity'] == 'section_modulus' and b['Vn']['quantity'] == 'force'
+    assert b['statement_source'] == {'kind': 'user_input', 'key': 'lap_restrained'} and b['steps']
+    assert 'lap_section' not in _region(**sec, lap_restrained=None)                  # 진술이 없으면 없다
+
+
+def test_lap_section_block_II_2A_first_interior_support():
+    """II-2A 첫 안쪽 지점의 lap-1 (호스트 기록 test/rendered/k3/golden/purlin.json: Mcrl 90.85, My 106.64 kip-in,
+    Mnℓ 85.95, 비 1.020): 블록 Se = 1.5627 in³, 그 Se · Vn 으로 랩 도구의 국부 비 = 그 구간의 국부 비."""
+    zp = dict(ZP, Sf=106.64 / 55.0)
+    r = _region(section_type='Z', props=zp, section=dict(Z8), dsm=dict(Mcrl=90.85, Mcrd=101.0, M_sign='-'),
+                use_cold_work=True)
+    b = r['lap_section']
+    assert abs(b['Se']['value'] - 1.5627) <= 5e-5 and round(b['Mnl']['value'], 2) == 85.95
+    lap = design_lap_connection(dict(LAP, Se=b['Se']['value'], Vn=b['Vn']['value'], lap_restrained=True))
+    ratio = _c(lap, 'lap.flexure.local')['ratio']
+    assert abs(ratio - _c(r, 'member.flexure.local')['ratio']) <= 1e-12 and round(ratio, 3) == 1.020
+    assert _c(lap, 'lap.flexure.distortional')['verdict'] == 'not_applicable'
+
+
 # ---------------------------------------------------------------- V8-04 스레드 수
 
 # 엔진 프로세스처럼 server 를 먼저 가져온 뒤(그 맨 앞이 스레드 고정): Z 단면 정 · 부 서명곡선, DSM 추출, 부재 설계

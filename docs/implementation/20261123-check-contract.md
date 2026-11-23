@@ -161,7 +161,10 @@ envelope_source = {
 - **동률 규칙:** '같다'는 그 물리량(M · V · R · VL · VR)의 허용오차 `tol = 1e-9 × max(1, 모든 조합 · 측점의 |포락값| 최대)` 안이다(V6b-07: 모든 조합이 0 인 측점에서 부동소수 잡음으로 고르지 않게). 극값에서 tol 안의 조합 가운데 `combos` 에서 먼저 나온 것. 경간의 기여가 tol 이하면 그 경간은 싣지 않는다(예: 끝 지점의 M — `{}` 또는 `'not acting'`). 눈 하중 경우가 tol 안에서 같으면 먼저 나온 경우. 처짐 출처도 같은 꼴(그 하중의 |단위 처짐| 최대 × 1e-9). 옛 위치 키 `combo` · `pattern` · `combo_R` 은 허용오차 없이 그대로다(값 불변). 같은 규칙으로 **어느 측점이 최대인지**도 고른다(2026-11-24): 이름 붙은 위치의 경간 ±M 측점과 비지지 구간의 `x_M_max_ft` 는 극값에서 tol 안의 첫 측점이다. 보 유한요소(랩 · 경간별 I · 고정/자유 지점)의 풀이는 띠 Cholesky(LAPACK dpbsv)로 — 전의 `np.linalg.solve` 는 OpenBLAS 스레드 수에 따라 끝자리(상대 1e-11)가 바뀌어 실행마다 답이 달랐다.
 - **수치 라이브러리 스레드 = 1 (2026-11-24 V8-04):** 엔진 프로세스는 numpy 를 가져오기 전에 `python/numeric_threads.py` 를 가져와 `OPENBLAS_NUM_THREADS` · `OMP_NUM_THREADS` · `MKL_NUM_THREADS` · `BLIS_NUM_THREADS` · `VECLIB_MAXIMUM_THREADS` · `NUMEXPR_NUM_THREADS` 를 `1` 로 덮어쓴다(진입: `server.py` 맨 앞, `engine` · `design` 꾸러미의 `__init__`, 시험의 `run_all.py` · `conftest.py`). FSM 고유치 풀이(서명곡선 · DSM 추출)의 끝자리가 스레드 수에 따라 달랐다(Mcre 상대 7e-6, 검토 비 1e-10). `selftest` 의 `numeric_threads: {threads: 1, variables, pinned_before_numpy}` — `pinned_before_numpy: false` 면 다른 무엇이 numpy 를 먼저 올려 고정이 늦었다는 뜻이다(엔진을 모듈로 직접 쓰는 스크립트가 numpy 를 먼저 가져오면 그 프로세스는 고정되지 않는다).
   - **보장하는 것:** 같은 PC · 같은 런타임(`engine_runtime` 의 numpy · scipy 판)에서 같은 입력은 환경 변수 · 코어 수와 무관하게 같은 바이트(시험: 하위 프로세스 `OPENBLAS_NUM_THREADS` 1 · 4 · 8 · 없음에서 서명곡선 둘 + DSM 추출 + 부재 설계의 한 해시).
-  - **보장하지 않는 것:** 다른 PC 사이. OpenBLAS(DYNAMIC_ARCH)는 CPU 마다 다른 커널(Haswell · SkylakeX · Zen …)을 고르므로 끝자리(상대 1e-10 – 1e-6 수준)가 다를 수 있다. 판정 · 4자리 표시값이 바뀌는 것은 반올림 경계에 걸린 값뿐이다. 결과 지문을 PC 사이에서 견주는 쪽은 이것을 감안해야 한다.
+  - **보장하지 않는 것:** 다른 PC 사이. OpenBLAS(DYNAMIC_ARCH)는 CPU 마다 다른 커널(Haswell · SkylakeX · Zen …)을 고르므로 끝자리가 다를 수 있다 — **국부 · 뒤틀림 값은 상대 1e-9 안, 긴 반파장의 전체좌굴 값(서명곡선 끝의 `Mxxcre` · `LF_global` · `Pcre`, 길이 ≥ 약 400 in)은 상대 1e-5 안(다섯째 유효숫자)**. 판정 · 4자리 표시값이 바뀌는 것은 반올림 경계에 걸린 값뿐이다. 결과 지문을 PC 사이에서 견주는 쪽은 이것을 감안해야 한다.
+  - **왜 전체좌굴만 1e-5 인가(2026-11-24 측정, 8ZS2.25×059 ±M · 8CS2.5×059 P, 서명곡선 100 길이):** 긴 반파장에서 K 의 조건이 L⁴ 로 나빠져(막 강성 ≫ 휨 강성) 1차 고유치가 K 성분의 반올림에 민감하다. K 의 성분마다 ±1 ulp 섭동(조립 반올림의 크기)만으로 하중계수가 L = 402 / 644 / 938 in 에서 상대 0.4 – 2 × 10⁻⁶ / 0.5 – 1 × 10⁻⁵ / 2 – 3.4 × 10⁻⁵ 움직인다 — 스레드 1 · 4 · 8 차(≤ 7 × 10⁻⁶)는 그 안이다. 엔진의 반올림 추정 `err_est`(fsm_solver, eps·cond)는 같은 길이에서 5 × 10⁻⁶ – 2.6 × 10⁻⁴ 로 그 흔들림을 위에서 묶는다. 짧은 반파장(국부 · 뒤틀림, L < 100 in)은 섭동 ≤ 2 × 10⁻⁹.
+  - **풀이를 바꿔도 줄지 않는다:** 흔들림은 K 를 double 로 조립할 때 이미 있다(위 섭동 시험은 풀이를 그대로 두고 K 만 1 ulp 흔든 것). 엔진은 이미 대칭 정부호 일반 고유치(eigh/sygvx, 가장 큰 μ = 1/λ 몇 개만)로 풀고 대각 스케일에 불변이다 — 다른 풀이 · 스케일 · 낮은 모드만 풀기로는 1e-10 에 닿지 않는다. 닿으려면 K 를 더 높은 정밀도로 조립해야 한다(값싸지 않다).
+  - **정확도의 기준:** 그 값의 물리 모형 오차가 훨씬 크다 — 8CS2.5×059 압축의 서명곡선 전체좌굴 응력은 L = 402 / 644 / 938 in 에서 약축 오일러 π²E/(L/ry)² 와 +2.0 × 10⁻⁴ / +7.4 × 10⁻⁴ / +8.9 × 10⁻⁴ 다르다(판 이론 대 보 이론). 다섯째 자리의 반올림 흔들림은 그 1/20 – 1/90 이다.
   - 시간: 1 스레드가 더 빠르다(이 PC, 32 코어): 서명곡선 하나(Z 8 in, 100 길이) 기본 스레드 0.49 – 0.89 s → 0.38 – 0.41 s.
 - 랩 · 6경간(격자 301점)에서 `envelope_source` 셋을 합쳐 약 4.7 KB, 위치 항목의 덧붙임을 합쳐 결과 전체가 약 9 KB(4 %) 늘었다.
 
@@ -248,6 +251,21 @@ AISI Design Manual 의 연속 퍼린 예제는 이 가정을 **가정으로 밝�
 - `Mnd`: 진술이 있으면 보내지 않는다(보내도 쓰지 않음). 진술이 없을 때만 그 랩 단면의 Mnd(랩 구간 결과의 것)를.
 - `Vn`: 그 랩 단면 한 부재의 §G2 전단강도(없으면 엔진이 d · t · Fy 로 §G2.1 을 계산).
 - 시험(`test_review_1124_v8_fixes.py`): II-2A 첫 안쪽 지점(Mu 105 kip-in, Se = 85.9/55 = 1.562) → `lap.flexure.local` 1.0207 = 퍼린 `lap-1` 구간; 같은 진술의 구간 설계에서 읽은 Mnℓ/Fy 를 넘기면 두 비가 1e-12 안에서 같다.
+
+**랩 단면 강도 블록 `lap_section` (2026-11-24) — 랩 검토가 단면 강도를 가져갈 곳은 이것이다, 구간 자신의 검토 항목이 아니다.** `lap_region: true` 와 진술(`lap_restrained: true`)로 부른 휨 구간 결과에 붙는다. 구간의 `member.flexure.local` · `Mnl` 은 비탄성 여유(§F3.2.3) · 냉간가공(§A3.3.2, Fya)을 품을 수 있다(그 선택이 켜져 있으면 랩으로 그 증가가 옮겨 간다 — V8-S2). 블록은 그 선택과 무관하게 언제나 같은 기준이다:
+
+| 키 | 뜻 |
+|---|---|
+| `basis` | 'Manual II-1A / II-2A lapped section: Fn = Fy (Mne = My), §F3.2.1 local buckling only, no inelastic reserve (§F3.2.3), no cold work (§A3.3.2); Se = Mnℓ / Fy; Vn = §G2.1, one member' |
+| `clause` · `equations` | `F3.2.1` · F2.1-2, F3.2.1-1/-2/-3, G2.1-1/-2a/-3a |
+| `statement_source` | `{kind: 'user_input', key: 'lap_restrained'}` |
+| `available` | Mcrl 이 있어 Mnℓ 을 냈는가. 없으면 `false`, `Mnl` · `Se` 는 `null`, `reason`(`member.reason.no_mcrl`) |
+| `My` · `Mnl` · `Se` · `Vn` | 물리량 붙은 값 `{symbol, value, quantity}` — `My = Sf·Fy`(virgin Fy), `Mnℓ` (Eq. F3.2.1-1/-2, Mne = My), `Se = Mnℓ / Fy` (section_modulus), `Vn` = 그 단면 한 부재(웹 하나)의 §G2.1 (force) |
+| `steps` | 계산 과정(§3 의 단계 — 출처 · 식 번호, 검토 항목과 같은 꼴) |
+
+- 랩 도구 `design_lap_connection` 에는 `Se = lap_section.Se.value`, `Vn = lap_section.Vn.value` 를 그대로 넘긴다. `available: false` 면 `Se` 를 짓지 않는다(랩 휨은 판정 없음).
+- 같은 단면 · 같은 진술이면 블록의 `Mnl` = 두 선택을 끈 구간의 `member.flexure.local` 공칭값(1e-12), 랩 도구의 국부 비 = 그 구간의 국부 비.
+- 시험: 두 선택을 켜서 구간의 Mnℓ 이 176.8 → 212.9 (여유) · 194.0 (냉간가공) kip-in 으로 올라가도 블록은 176.8 그대로(lippedz 8×2.25×0.105). II-2A 의 `lap-1`(호스트 기록 `test/rendered/k3/golden/purlin.json`: Mcrl 90.85, My 106.64 kip-in) — 냉간가공을 켜도 블록 Mnℓ 85.95, **Se 1.5627 in³**, Vn 3.895 kips, 랩 국부 비 **1.0201** = 그 구간의 1.020. (위 1.0207 은 Mnℓ 을 85.9 로 반올림해 넣은 값이다.)
 
 **랩 도구의 맨 위 `utilization`(2026-11-24 V8-01에서 바뀜):** 판정을 낸(`pass` · `fail`) 랩 **강도** 항목 — `lap.fastener_group` · `lap.block_shear` · `lap.flexure.local` · `lap.flexure.distortional` · `lap.bending_shear` (엔진 상수 `LAP_STRENGTH_CHECKS`) — 가운데 가장 큰 비(4자리), 그 항목 id 는 새 키 `governing_check`. 상세(간격 · 끝단 거리)와 적용 조건(랩 길이)의 비는 넣지 않는다. 그런 항목이 없으면 `null`. 패스너 무리의 비(옛 `utilization`)는 새 키 **`fastener_utilization`** 이고, `lap.fastener_group` 의 `mirrors.ratio.path` 가 그 키를 가리킨다. 다른 결과(부재 · 접합)의 `utilization` 과 같은 뜻이 되었다 — 전에는 휨이 6.9 로 불합격이어도 0.9025 였다.
 
@@ -1176,6 +1194,7 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 - 형식: `"sha256:" + 64자리 소문자 16진수`. 읽지 못하면 **`"unknown"`**(그때만 `engine_id_error` 에 까닭) — 일부 파일만으로 만든 해시는 내지 않는다. `"unknown"` 은 어떤 id 와도 같지 않은 것으로 다룬다.
 - 대상: `python/` 아래 `engine/ design/ cfsm/ fcfsm/ vibration/ plastic/ fileio/ models/` 의 모든 `.py`(하위 폴더 포함, `__pycache__` · `test_*.py` · `test`/`tests` 폴더 제외)와 `server.py` · `numeric_threads.py`(2026-11-24 V8-04 — 스레드 고정도 결과를 정한다). 폴더가 없거나 그 안에 `.py` 가 하나도 없으면(컴파일만 한 배치) `"unknown"`.
 - 계산: `"engine-id/2\n"`, 그다음 **결과가 기대는 실행 환경** — `python` = major.minor, `numpy` · `scipy` 의 `__version__`(scipy 가 없으면 `absent`) — 을 키 순서로 `key=value\n`, 그다음 상대 경로('/' 구분)로 정렬한 파일마다 (경로 길이 4바이트 · 경로 UTF-8 · 내용 길이 8바이트 · 내용). 내용은 CRLF → LF 로 맞춘다 — CRLF 로 꺼낸 저장소와 LF 로 꺼낸 저장소가 같은 id 다.
+- 같은 id · 같은 PC 면 같은 입력이 같은 바이트다(스레드 고정, §6.1). PC 가 다르면 FSM 값의 끝자리가 다를 수 있다 — 국부 · 뒤틀림 상대 1e-9, 긴 반파장의 전체좌굴 상대 1e-5(§6.1 의 측정). 기록이 「이 결과는 기록한 실행과 같다」를 PC 사이에서 말할 때는 지문이 아니라 이 허용차로 견줘야 한다.
 - 왜 판까지(2026-11-24): 설치 프로그램의 런타임은 판을 고정하지만 개발 환경은 바뀔 수 있다(고유값 · 선형대수 결과의 끝자리). 판이 바뀐 환경에서 저장한 결과를 '지금 엔진의 것'으로 되살리지 않게 한다. `selftest` 는 해시한 그 판을 `engine_runtime: {python, numpy, scipy}` 로도 돌려준다.
 - 파일 하나가 없어진 트리는 다른 id 가 된다 — 의도한 동작이다(다른 트리는 다른 엔진; 저장한 결과가 '지금 것'으로 되살아나지 않는 쪽). 빠진 모듈은 보통 `selftest` 의 `import_errors` 로도 드러난다.
 - 서버를 띄울 때 한 번 계산한다(54 파일, 약 12 ms). 같은 소스면 실행 · 기계와 무관하게 같고, 한 바이트라도(또는 파일 이름이) 바뀌면 다르다. 시험: `test_review_1124_engine_id.py`.
