@@ -764,7 +764,7 @@
 - 자동 가정의 열쇠: 기본값 `default:<표의 group>`, 엔진 `engine:<결과 종류>:<부호 또는 h+글 해시 12자>`(K4b 의 부호가 오면 그것).
 - 이름 규칙에 더한 것: 앞의 공백, 글 방향 제어 문자, UTF-8 180 바이트, 프로그램의 이름(선언 · 폴더 넷 — 대소문자 · NFD 무시). 선언 파일 앞의 BOM 은 받아들인다.
 - 제목의 수: 유효숫자 6 자리에서 끝의 0 을 지운다 — 템플릿의 「2.0 → 2.3」은 「2 → 2.3 mm」로 나온다(값은 기록에 그대로).
-- 묶음 끊기(`ChangeBatcher`): 다른 행위자의 행동이 끼면 지금 묶음을 닫고, 편집 상태가 이어지면 그 뒤에 새 묶음을 연다(템플릿 09 의 「이번 편집」 하나가 AI 의 끼어듦으로 둘로 나뉠 수 있다 — AI 의 몫이 사람 묶음에 섞이지 않게).
+- 묶음 끊기(`ChangeBatcher`): 다른 행위자의 행동이 **무언가를 바꾸면** 지금 묶음을 그 직전까지로 닫고(묻기만 한 요청은 끼어듦이 아니다 — 고침 2026-11-24), 편집 상태가 이어지면 그 뒤에 새 묶음을 연다(템플릿 09 의 「이번 편집」 하나가 AI 의 끼어듦으로 둘로 나뉠 수 있다 — AI 의 몫이 사람 묶음에 섞이지 않게).
 
 호스트가 함께 쓸 수 있는 규칙(지금은 기록만 쓴다): `names.segmentError` 는 `StcfsdPanel._projectPathError` 의 이름 규칙(점으로 시작 · 점 / 공백으로 끝 · `:`)과 같은 뜻에 **장치 이름(CON · NUL · COM1 …, 확장자가 붙어도)** 을 더했다 — 지금 `save_project` 의 경로 검사는 장치 이름을 보지 않는다(`C:\임시\NUL.json` 같은 경로). 호스트가 그 이름 검사를 이것으로 바꿀지는 오케스트레이터가 정한다.
 
@@ -929,12 +929,12 @@ R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 �
 | MCP 요청 하나 = 묶음 하나 | `handleMcpAction` 이 `_changes.run(ctx, …)` 로 감싼다(요청 전후 스냅숏 비교 — 바뀐 것이 없으면 줄이 없다). 같은 행위자의 겹친 요청은 바깥 것이 닫는다 |
 | 편집 상태(U4)의 시작 · 끝 = 사람 묶음 하나, 버리기는 묶음 없음 | `editSession('start' | 'end' | 'discard')`(공개 — 새 화면은 다리가 사람의 길로 부른다) · 웹뷰 메시지 `{command: 'editSession', data: {state}}`. MCP 문맥에서는 거절 |
 | 편집 상태 밖의 화면 편집 = 조용한 2 초 | `_handleMessage` 가 `caseEdit`(사람이 친 것) · `updateModel` · `generateTemplate` · `setStress` · `applyStress` · `runAnalysis` 를 바꾸기 **전에** `touch` — 2.05 초 타이머가 `tick` |
-| 다른 행위자가 끼면 지금 묶음을 닫는다 | `ChangeBatcher.ensure` — 편집 상태 안의 AI 요청은 사람 · AI · 사람 셋이 된다. MCP 로 묻는 것(읽기 도구)도 끼어듦이다 |
+| 다른 행위자가 바꾸면 지금 묶음을 닫는다 | `ChangeBatcher.run` — 사람의 묶음(편집 상태 · 조용한 2 초)이 열린 동안 다른 행위자의 요청은 그 앞뒤를 찍어, 바꾼 것이 있으면 사람 묶음(전 → 요청 직전) · 요청 묶음을 내고 편집 상태면 다시 연다(사람 · AI · 사람). **바꾼 것이 없으면(상태 묻기) 사람 묶음은 그대로** — 고침 2026-11-24, 전에는 AI 의 질문마다 한 편집이 여러 줄로 갈렸다 |
 | 파일 열기 = 기준선 | 열기 전에 `closeForSwitch`(열린 조용함 · 편집 상태를 지금 것으로 닫는다), 연 뒤 `rebase`(연 요청이 옛 파일 → 새 파일을 한 묶음으로 내지 않는다) — `_loadProjectFile` · `load_project` |
 | 밖에서 바뀐 것 | 연 파일이 마지막으로 알려진 바이트와 다르고 마지막 `saved` 줄에 스냅숏이 있으면 — 그 스냅숏과 지금을 비교한 한 줄(행위자 `external`, trigger `external`). 저장할 때 스냅숏(`{model, case}` — 사본)을 `saved` 줄에 단다 |
 
 - **문맥 → 줄**: 행위자 = `toActor(currentActor())`(다리 `ai` + `client` · 요청 id · 도구 이름, 화면 비밀 → `person`, 웹뷰 → `person`, 문맥 없음 → `program`), `reason` · `work` · `source` 는 머리에서만(`X-StCFSD-Reason` · `-Work` · `-Source`, 퍼센트 부호화). 몸의 `actor` · `kind` 키, 질의 문자열(`/action?reason=…` — 다리는 경로만 본다)은 쓰이지 않는다.
-- **쓰기 도구의 공용 인자** 33 도구(`server.ts` `WRITE_TOOLS` — 모델 · 입력을 바꾸는 것): `reason`(2만 자까지 받아 MCP 서버가 300 자로, 호스트가 제어 문자를 지운다) · `work` · `source`(id 꼴이 아니면 버린다). 엔진에 보내지 않는다. `set_case_inputs` 는 자기 `reason`(300 자 — 넘으면 도구가 거절)을 그대로 쓰고 머리로도 보낸다.
+- **쓰기 도구의 공용 인자** 33 도구(`server.ts` `WRITE_TOOLS` — 모델 · 입력을 바꾸는 것): `reason`(2만 자까지 받아 MCP 서버가 300 자로, 호스트가 제어 문자를 지운다) · `work` · `source`(id 꼴이 아니면 버린다). 엔진에 보내지 않는다. `set_case_inputs` 도 같은 규칙(2만 자까지 받아 300 자로 자른다 — 고침 2026-11-24, 전에는 300 자를 넘으면 거절)이고 그 글을 무효 장부와 머리에 함께 쓴다.
 - **어디에**: 프로젝트의 쓸 수 있는 대상이면 `log/changes`(행위자 표 그대로), 아니면 이 세션의 메모리만(500 줄, 쓰지 않는다 — `list_changes` 의 `persisted: false`).
 - **`list_changes {case?, since?, limit?(20), detail?: 'fields', units?}`(→ 73 도구)** — 최신부터 `{id, at, by {kind, client?}, trigger, title, reason?, work?, source?, fields(수), invalidated?(종류), field_changes?}`, `text_note`. 제목은 프로그램이 칸에서 짓는다(기록에는 SI, `units: 'US'` 면 칸에서 US 로 다시). 경로 없음. 잰 크기: 14 묶음 20 줄 3.4 KB, `fields` 4.2 KB(상한 8 / 24 KB).
 - **출처 꼬리표**: `get_case_inputs` 에 `last_change {키: {by, client?, at, from, to, change, reason?}}`(프로젝트가 열려 있을 때만 — 기록에서, 요청한 단위로).

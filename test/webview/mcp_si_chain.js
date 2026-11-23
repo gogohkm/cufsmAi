@@ -56,7 +56,7 @@ const F = {
   length: 25.4, area: 645.16, modulus: 25.4 ** 3, inertia: 25.4 ** 4, warping: 25.4 ** 6,
   force: KIP, stress: KIP * 1000 / 645.16, moment: KIP * 0.0254, moment_ft: KIP * 0.3048,
   length_ft: 0.3048, linload: KIP / 1000 / 0.3048, density: KIP * 1000 / 0.0254 ** 4,
-  rot_stiff: KIP, lat_stiff: KIP / 0.0254 ** 2, spring_disc: KIP / 0.0254,
+  rot_stiff: KIP, lat_stiff: KIP / 0.0254 ** 2, spring_disc: KIP / 0.0254, pressure: KIP / 1000 / 0.3048 ** 2,
 };
 const FACTORS = Object.values(F);
 
@@ -247,11 +247,15 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
     } else if (/\.(unit_text|fmt|sep|value_unit_text)$/.test(p)) {
       // K4b: 알림 매개변수 · §I6.2.1 조건의 단위 글자는 SI 글자로(값은 위에서 물리량으로 맞댄다)
       continue;
+    } else if (/params\[\d+\]\.text$/.test(p) && at(siR, p.replace(/\.text$/, '.const')) === true) {
+      // K4d: 상수 매개변수(템플릿의 치수)의 글은 그 값의 SI 글 — 값은 위에서 물리량으로 맞댄다
+      assert(/^-?\d/.test(String(s)), `${tool}: ${p} const text in SI is a number: ${JSON.stringify(s)}`);
+      continue;
     } else if (typeof v === 'string' && typeof s === 'string' && s !== v) {
       // K4b: 알림 · 이유 · 이름표 글은 SI 로 다시 그렸다 — US 글에 US 단위의 수가 있었고, SI 글에는 남지 않는다
       // (US 글에 단위 없이 쓴 물리량 — 예 「fy = 50」 — 은 SI 에서 단위를 붙인다: 계약 §16.3)
-      assert(/\d\s?(in\b|in\.|ksi|kips?\b|kip-in|ft\b)/.test(v) || /\d\s?(mm|MPa|kN|kN-m|m)\b/.test(s), `${tool}: ${p} changed although it had no US number (${JSON.stringify(v)} → ${JSON.stringify(s)})`);
-      assert(!/\d\s?(ksi|kips?\b|kip-in)/.test(s), `${tool}: ${p} still has a US number in SI: ${JSON.stringify(s)}`);
+      assert(/\d\s?(in\b|in\.|in[²³⁴⁶]|ksi|kips?\b|kip-in|kip-ft|ft\b|psf|plf)/.test(v) || /\d\s?(mm|mm[²³⁴⁶]|MPa|kN|kN-m|kN\/m|kPa|m)(?![A-Za-z])/.test(s), `${tool}: ${p} changed although it had no US number (${JSON.stringify(v)} → ${JSON.stringify(s)})`);
+      assert(!/\d\s?(ksi|kips?\b|kip-in|kip-ft|psf\b|plf\b|in[²³⁴⁶])/.test(s), `${tool}: ${p} still has a US number in SI: ${JSON.stringify(s)}`);
       TEXT_SI.n++;
       continue;
     } else {
@@ -274,6 +278,7 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
 const ENGINE_UNIT_F = {
   'kip': 'force', 'kip-in': 'moment', 'ksi': 'stress', 'in': 'length', 'in^2': 'area', 'in^3': 'modulus',
   'in^4': 'inertia', 'in^6': 'warping', 'kip/in': 'spring_disc', 'kip-in/rad/in': 'rot_stiff', '-': 'none', 'deg': 'none',
+  'kip*s^2/in^4': 'density', 'psf': 'pressure',
 };
 /** 엔진 소스에서 읽은 quantity → F 이름 (main 에서 채운다) */
 const QUNIT = {};
@@ -1426,7 +1431,9 @@ async function main() {
     const cases = JSON.parse(dump);
     const SH = loadShapers(si);
     const toolOf = { aisi_design: 'aisi_design_flexure', design_connection: 'design_connection', lap_connection: 'design_lap_connection' };
-    const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 16 };
+    // K4e: 랩 17 KB — 엔진의 마지막 한국어(force_model 의 설명 · 한계 (a)–(e), 이름표)가 한글 한 자 3 바이트라 16,162 → 16,633 B.
+    //      글을 줄이거나 빼지 않는다(사람이 정할 일 — user_decision_pending 의 근거). 그 밖은 그대로
+    const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 17 };
     const largest = {};
     let nCases = 0; let nUnb = 0;
     // K4b: 호스트가 하듯 먼저 읽는 꼴(forReader — 알림 · 이유를 그 단위의 한국어로)로 바꾼 뒤 모양을 줄인다

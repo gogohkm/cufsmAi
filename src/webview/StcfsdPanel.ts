@@ -578,10 +578,11 @@ export class StcfsdPanel implements McpPanelInterface {
         return runAs({ kind: 'person' }, () => {
             const ro = this._pageModelRefusal(message);
             if (ro) {
-                // 읽기 전용 대상 — 화면의 모델 변경을 받지 않고 파일의 모델을 다시 보낸다(까닭과 함께)
+                // 읽기 전용 대상 — 화면의 모델 변경을 받지 않고 파일의 모델을 다시 보낸다(까닭과 함께 — 사람에게는 한국어)
+                const ko = NOTICES.render(ro, { lang: 'ko' });
                 this._postMessage('modelLoaded', this._model);
-                if (message.command === 'runAnalysis') { this._postMessage('analysisError', { error: ro }); }
-                vscode.window.showWarningMessage(ro);
+                if (message.command === 'runAnalysis') { this._postMessage('analysisError', { error: ko, error_code: ro.code }); }
+                vscode.window.showWarningMessage(ko);
                 return Promise.resolve();
             }
             const cmd = (message as any)?.command;
@@ -595,8 +596,8 @@ export class StcfsdPanel implements McpPanelInterface {
         });
     }
     /** 읽기 전용 대상에서 화면이 모델을 바꾸려 하면 그 까닭(해석 실행은 화면의 칸이 모델과 다를 때만) */
-    private _pageModelRefusal(message: WebviewToExtMessage): string | null {
-        const ro = this._recordsReadOnly();
+    private _pageModelRefusal(message: WebviewToExtMessage): any | null {
+        const ro = this._recordsReadOnlyNotice('model');
         if (!ro) { return null; }
         const cmd = (message as any)?.command;
         const d = (message as any)?.data;
@@ -607,7 +608,7 @@ export class StcfsdPanel implements McpPanelInterface {
             changes = differs('prop', d.prop) || differs('lengths', d.lengths) || differs('BC', d.BC)
                 || (d.neigs !== undefined && d.neigs !== null && d.neigs !== m.neigs);
         }
-        return changes ? `${ro.replace(/ — not changed$/, '')} — the model is not changed (make a new case from it, or take the lock)` : null;
+        return changes ? ro : null;
     }
 
     private async _handleMessageInner(message: WebviewToExtMessage): Promise<void> {
@@ -694,7 +695,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 const roEdit = this._recordsReadOnly();
                 if (roEdit && message.data?.origin === 'user') {
                     const keys = Object.keys(message.data?.changes || {});
-                    this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: keys.map((key) => ({ key, reason: roEdit })), conflicts: keys });
+                    const roKo = NOTICES.render(this._recordsReadOnlyNotice('case'), { lang: 'ko' });
+                    this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: keys.map((key) => ({ key, reason: roKo, reason_code: 'host.readonly.case' })), conflicts: keys });
                     this._postCaseState('conflict');
                     break;
                 }
@@ -2990,16 +2992,26 @@ export class StcfsdPanel implements McpPanelInterface {
     private static _attachLapSource(result: any, request: any, sec: ReturnType<typeof lapSectionFor>): void {
         const se = typeof request?.Se === 'number' ? request.Se : null;
         let src: any;
+        // 호스트가 쓰는 글은 알림(host.lap.* — 한국어 · 보이는 단위로 그린다): section_source 의 from · reason 은 옆 필드, 가정 한 줄은 결과의 notices 에도
+        const sn = (sec as any);
+        let fromN: any = null, reasonN: any = null;
         if (se !== null && sec.Se !== null && Math.abs(se - sec.Se) <= 1e-12 * Math.max(1, se)) {
             src = { Se: se, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: sec.from, support: sec.support, regions: sec.regions, reason: null };
+            fromN = sn.from_notice ?? null;
         } else if (se !== null) {
-            src = { Se: se, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: 'given by the caller (not derived from the purlin result)', support: null, regions: [], reason: null };
+            fromN = NOTICES.hostNotice('host.lap.from_caller');
+            src = { Se: se, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: fromN.text, support: null, regions: [], reason: null };
         } else {
-            src = { Se: null, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: null, support: sec.support, regions: [], reason: sec.reason || 'no effective section modulus (Se) was given' };
+            reasonN = sn.reason_notice ?? NOTICES.hostNotice('host.lap.no_se');
+            src = { Se: null, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: null, support: sec.support, regions: [], reason: reasonN.text };
         }
+        if (fromN) { NOTICES.attachField(src, 'from', fromN); }
+        if (reasonN) { NOTICES.attachField(src, 'reason', reasonN); }
         result.section_source = src;
-        const line = src.Se !== null ? `랩 단면 Se = ${src.Se.toFixed(4)} in³ — ${src.from}` : `랩 단면 Se 없음 — ${src.reason} (랩 휨 검토는 판정 없음)`;
-        result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), line];
+        const lineN = src.Se !== null ? NOTICES.hostNotice('host.lap.se_from', { Se: src.Se, from: fromN ?? { code: null, text: String(src.from ?? ''), text_ko: String(src.from ?? '') } }, 'assumptions')
+            : NOTICES.hostNotice('host.lap.se_none', { why: reasonN }, 'assumptions');
+        result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), lineN.text];
+        result.notices = [...(Array.isArray(result.notices) ? result.notices : []), lineN];
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -3056,12 +3068,19 @@ export class StcfsdPanel implements McpPanelInterface {
 
     /** 지금 대상이 읽기 전용이면 그 까닭(글), 아니면 null */
     private _recordsReadOnly(): string | null {
+        const n = this._recordsReadOnlyNotice('case');
+        return n ? n.text : null;
+    }
+    /** 읽기 전용의 까닭 — 호스트 알림(host.readonly.* — 사람에게는 한국어로 그린다) */
+    private _recordsReadOnlyNotice(kind: 'case' | 'model'): any | null {
         const ro = this._recordsRO;
         if (!ro || !this._casePath || path.resolve(this._casePath).toLowerCase() !== ro.path.toLowerCase()) { return null; }
-        return `this case is open read-only (${ro.reason}${ro.detail ? ` — ${ro.detail}` : ''}) — not changed`;
+        const detail = ro.lock ? NOTICES.hostNotice('host.readonly.lock_detail', { host: ro.lock.host || 'another PC', name: ro.lock.name || '?', since: ro.lock.at || '?' })
+            : NOTICES.EMPTY_FRAGMENT;
+        return NOTICES.hostNotice(kind === 'model' ? 'host.readonly.model' : 'host.readonly.case', { reason: ro.reason, detail });
     }
     /** 읽기 전용으로 연 파일(발행본 · 남이 쥔 잠금 · 보호 폴더 · 02 밖의 .csd …) — 열 때 정하고, 다른 파일을 열거나 다른 이름으로 저장하면 풀린다 */
-    private _recordsRO: { path: string; reason: string; detail: string | null } | null = null;
+    private _recordsRO: { path: string; reason: string; lock: { host: string; name: string; at: string } | null } | null = null;
 
     private _recordsStatus(): any {
         const st = this._desk?.status();
@@ -3075,7 +3094,7 @@ export class StcfsdPanel implements McpPanelInterface {
             // 열쇠 자리가 없어도 발행본은 읽기 전용(기록 없음)
             const pj = findProjectDirFor(fsPath);
             if (pj?.issued) {
-                this._recordsRO = { path: path.resolve(fsPath), reason: 'issued-copy', detail: null };
+                this._recordsRO = { path: path.resolve(fsPath), reason: 'issued-copy', lock: null };
                 warnings.push('records: an issued copy — opened read-only');
             }
             return;
@@ -3085,7 +3104,7 @@ export class StcfsdPanel implements McpPanelInterface {
             if (o.readOnly) {
                 const by = o.lock && typeof o.lock === 'object' ? o.lock as any : null;
                 this._recordsRO = { path: path.resolve(fsPath), reason: String(o.readOnlyReason || 'read-only'),
-                    detail: by && (by.host || by.name) ? `open on ${by.host || 'another PC'}${by.name ? ` by ${by.name}` : ''}${by.at ? ` since ${by.at}` : ''}` : null };
+                    lock: by && (by.host || by.name) ? { host: String(by.host || ''), name: String(by.name || ''), at: String(by.at || '') } : null };
             }
             // 최근 목록에는 사람이 연 프로젝트만(AI 의 load_project 로 닿은 폴더는 이름 목록에 오르지 않는다 — 설계 §2.1)
             if (o.inProject && !o.readOnly && !isMcpContext(currentActor())) {
@@ -3309,6 +3328,14 @@ export class StcfsdPanel implements McpPanelInterface {
         if (!isTestMode()) { throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1'); }
         this._changes.tick();
         return { pending: this._changes.pending, memory: this._memChanges.length, cost: { ...this._changeCost } };
+    }
+
+    /** 구간 이름표의 옆 필드(label 은 한국어 US — 화면 · 요약이 옆 필드로 단위 · 말을 바꿔 그린다) */
+    private static _labelFields(n: any): Record<string, unknown> {
+        if (!n) { return {}; }
+        const o: any = NOTICES.attachField({}, 'label', n);
+        delete o.label;
+        return o;
     }
 
     /** 지금 결과마다의 지문(get_case_status 의 「일치」 판단) */
@@ -3578,34 +3605,46 @@ export class StcfsdPanel implements McpPanelInterface {
 
         type Region = {
             id: string; kind: string; label: string; env: any; dsm: any; lap?: boolean;
-            src: any; R?: number | null; flangeTop: boolean;
+            src: any; R?: number | null; flangeTop: boolean; labelNotice?: any;
+        };
+        // 호스트가 쓰는 글은 알림(host.* — webview/js/notices.js HOST): 목록의 글 → 그 알림(마지막에 결과의 notices 로)
+        const hostMade = new Map<string, any>();
+        const H = (code: string, values: Record<string, unknown> = {}): string => {
+            const n = NOTICES.hostNotice(code, values);
+            hostMade.set(n.text, n);
+            return n.text;
         };
         const regions: Region[] = [];
         // V4-26: id 는 목록마다가 아니라 이름(idTag)마다 이어 센다 — 같은 kind 를 여러 목록에서 부를 때 겹치지 않게.
         const idCount = new Map<string, number>();
-        const addRegions = (list: any[], kind: string, env: any, dsm: any, labelFn: (r: any) => string,
+        const addRegions = (list: any[], kind: string, env: any, dsm: any, labelFn: (r: any) => any,
             extra?: (r: any) => Partial<Region>, idTag: string = kind) => {
             (Array.isArray(list) ? list : []).forEach((r: any) => {
                 if (!(Number(r?.M_max_abs) > 1e-9)) { return; }
                 const n = (idCount.get(idTag) || 0) + 1;
                 idCount.set(idTag, n);
+                const ln = labelFn(r);
                 regions.push({
-                    id: `${idTag}-${n}`, kind, label: labelFn(r), env, dsm, src: r,
+                    // 이름표는 호스트 알림 — label 은 한국어(US), 옆 필드가 단위 · 말을 바꿔 그린다
+                    id: `${idTag}-${n}`, kind, label: ln.text_ko, labelNotice: ln, env, dsm, src: r,
                     flangeTop: r?.flange === 'top', ...(extra ? extra(r) : {}),
                 });
             });
         };
-        const span = (r: any) => `${Number(r.start_ft).toFixed(2)}–${Number(r.end_ft).toFixed(2)} ft`;
+        const xs = (r: any) => ({ x0: Number(Number(r.start_ft).toFixed(2)), x1: Number(Number(r.end_ft).toFixed(2)) });
         // V4-22: 엔진 구간의 support 는 0 부터 — 화면 · 웹 크리플링 문장과 같게 1 부터 센 번호로.
-        const supLabel = (r: any) => `지점 ${Number(r.support) + 1}${r.side === 'left' ? ' 왼쪽' : r.side === 'right' ? ' 오른쪽' : ''}`;
-        addRegions(unbraced.positive_regions, 'positive', gravity, dsmPos, (r) => `정모멘트 ${span(r)}`);
+        const supLabel = (r: any) => NOTICES.hostNotice('host.region.support', { n: Number(r.support) + 1,
+            side: r.side === 'left' ? NOTICES.hostNotice('host.region.side_left') : r.side === 'right' ? NOTICES.hostNotice('host.region.side_right') : NOTICES.EMPTY_FRAGMENT });
+        const L = (code: string, r: any, extra: Record<string, unknown> = {}) => NOTICES.hostNotice(code, { ...xs(r), ...extra });
+        addRegions(unbraced.positive_regions, 'positive', gravity, dsmPos, (r) => L('host.region.positive', r));
         addRegions(ap.negative_regions, 'negative', gravity, dsmNeg,
-            (r) => `${r.cantilever ? '내민 부모멘트' : '부모멘트'} ${span(r)}${r.support != null ? ` (${supLabel(r)})` : ''}`);
+            (r) => L(r.cantilever ? 'host.region.cantilever' : 'host.region.negative', r,
+                { at: r.support != null ? NOTICES.hostNotice('host.region.at_support', { support: supLabel(r) }) : NOTICES.EMPTY_FRAGMENT }));
         addRegions(ap.lap_regions, 'lap', gravity, dsmNeg,
-            (r) => `랩 구간 ${span(r)} (${supLabel(r)})`, () => ({ lap: true }));
+            (r) => L('host.region.lap', r, { support: supLabel(r) }), () => ({ lap: true }));
         if (uplift && ub) {
             addRegions(ub.negative_regions, 'uplift', uplift, dsmNeg,
-                (r) => `양력 하부압축 ${span(r)}`,
+                (r) => L('host.region.uplift', r),
                 (r) => ({ R: (r.i621_region_eligible === true && upliftR != null) ? upliftR : null }));
             // 양력의 지점부(상부 압축, 데크 지지) 구간은 엔진이 랩 끝에서 나누지 않는다 — 중력 해석의 랩 구간으로
             // 잘라 랩 안은 두 부재, 밖은 한 부재로 본다. 각 조각의 M 은 양력 포락선의 그 조각 최대 |M|.
@@ -3639,18 +3678,21 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
             }
             addRegions(pieces.filter((r) => !r.__lap), 'uplift_support', uplift, dsmPos,
-                (r) => `양력 지점부 상부압축 ${span(r)}`);
+                (r) => L('host.region.uplift_support', r));
             addRegions(pieces.filter((r) => r.__lap), 'uplift_support', uplift, dsmPos,
-                (r) => `양력 랩 구간 상부압축 ${span(r)}`, () => ({ lap: true }), 'uplift_support_lap');
+                (r) => L('host.region.uplift_support_lap', r), () => ({ lap: true }), 'uplift_support_lap');
             addRegions(ub.lap_regions, 'uplift_support', uplift, dsmPos,
-                (r) => `양력 랩 구간 ${span(r)} (${supLabel(r)})`, () => ({ lap: true }), 'uplift_lap');
+                (r) => L('host.region.uplift_lap', r, { support: supLabel(r) }), () => ({ lap: true }), 'uplift_lap');
             if (upliftR == null) {
-                const reasons = Array.isArray(ap.i621_check?.reasons) ? ap.i621_check.reasons.join('; ') : '';
-                warnings.push('§I6.2.1 R 을 쓰지 않았습니다 — 양력 하부압축 구간은 Ly 를 쓴 횡비틀림(F2)으로 검토했습니다'
-                    + (reasons ? ` (${reasons})` : ' (i621_conditions_confirmed 가 없거나 조건 밖)') + '.');
+                // 까닭은 엔진의 §I6.2.1 이유(그 블록의 알림, 계약 §16.10) — 이은 글로
+                const ic = ap.i621_check;
+                const rs = Array.isArray(ic?.reasons) ? ic.reasons : [];
+                const rn = Array.isArray(ic?.notices) ? ic.notices.filter((n: any) => n && n.list === 'reasons') : [];
+                const parts = rs.map((t: string, i: number) => (rn[i] && rn[i].text === t ? rn[i] : { code: null, kind: 'reason', text: t, text_ko: t }));
+                warnings.push(H('host.purlin.i621_r_not_used', { reasons: parts.length ? NOTICES.group(parts, '; ') : NOTICES.hostNotice('host.purlin.i621_r_unconfirmed') }));
             }
         } else if (uplift && !ub) {
-            notEvaluated.push('양력 구간 검토 (하중 분석이 양력 구간 정보를 내지 않음)');
+            notEvaluated.push(H('host.purlin.no_uplift_regions'));
         }
         if (regions.length === 0) {
             notEvaluated.push('휨 구간 없음 — 하중 분석이 설계 구간을 내지 않았습니다');
@@ -3708,7 +3750,7 @@ export class StcfsdPanel implements McpPanelInterface {
         //   (A) 구간 최대 M(엔진 M_max_abs) + 그 위치의 V, (B) 구간 최대 V + 그 위치의 M,
         //   (C) 구간 안 지점마다 지점 M + 지점 양쪽 V 중 큰 값 + 웹 크리플링(wc_P · wc_M · 지점 형식).
         const out: any[] = [];
-        const regionNotices = new Map<string, string[]>();
+        const regionNotices = new Map<string, Region[]>();
         for (const rg of regions) {
             const r = rg.src;
             const x0 = un(r, 'start_ft', rg.kind), x1 = un(r, 'end_ft', rg.kind);
@@ -3839,9 +3881,8 @@ export class StcfsdPanel implements McpPanelInterface {
             // K4a: 구간 결과는 그대로(대표 지점의 결과 — 그 design_checks 도 대표 지점의 것). 검토 지점마다의 요약(checks[j])에
             // 그 지점의 위치 · 조합 · design_checks 를 덧붙인다 — 화면이 구간 안 어디서 어느 검토가 지배하는지 보이게.
             // 지배 지점 · 판정 · 이용률은 바꾸지 않는다(위의 pick · regionPass 그대로).
-            const lapNote = rg.lap
-                ? 'lap: each of the two members carries half of the region Mu and Vu (host assumption, AISI Manual II-2A (a)-(c)); the demands in design_checks are those halves'
-                : undefined;
+            const lapNoteN = rg.lap ? NOTICES.hostNotice('host.purlin.lap_half_demand') : null;
+            const lapNote = lapNoteN ? lapNoteN.text : undefined;
             const { __location: _pl, __combination: _pc, ...pickClean } = pick || {};
             void _pl; void _pc;
             const result = { ...pickClean, pass: regionPass, not_evaluated: notEvalRegion,
@@ -3853,11 +3894,13 @@ export class StcfsdPanel implements McpPanelInterface {
                     // V6-02: 그 지점 결과의 알림(대표 지점이 아니어도) — 판정에 붙는 가정 · 범위를 버리지 않는다.
                     ...Object.fromEntries(['warnings', 'assumptions', 'scope_notes', 'not_checked']
                         .filter((k) => Array.isArray(x[k]) && x[k].length > 0).map((k) => [k, x[k]])),
-                    ...(lapNote ? { host_assumption: lapNote } : {}) })) };
+                    ...(lapNoteN ? NOTICES.attachField({}, 'host_assumption', lapNoteN) : {}) })) };
+            void lapNote;
             if (sups.length > 0) {
                 result.supports_checked = sups.map((s) => ({ support: s.support, name: s.name, case: s.case, Pu: s.Pu }));
             }
             out.push({
+                ...StcfsdPanel._labelFields(rg.labelNotice),
                 id: rg.id, kind: rg.kind, label: rg.label, span: r.span ?? null, support: r.support ?? null,
                 side: r.side ?? null, start_ft: r.start_ft, end_ft: r.end_ft,
                 // 랩 구간의 Ly · Cb: 진술이 있으면 엔진이 Lb = 0 · Cb = 1.0 을 쓴다(Manual 의 가정), 없으면 그 검토는 판정 없음 — 지어 적지 않는다
@@ -3872,32 +3915,44 @@ export class StcfsdPanel implements McpPanelInterface {
             });
             // 같은 글은 구간마다 되풀이하지 않는다 — 글 하나에 그 구간들의 이름(아래에서 한 줄로)
             for (const item of notEvalRegion) {
-                const labels = regionNotices.get(item) || [];
-                labels.push(rg.label);
-                regionNotices.set(item, labels);
+                const regs = regionNotices.get(item) || [];
+                regs.push(rg);
+                regionNotices.set(item, regs);
             }
             if (results.some((x) => x?.error)) {
-                notEvaluated.push(`[${rg.label}] 설계 오류: ${results.filter((x) => x?.error).map((x) => x.error).join('; ')}`);
+                notEvaluated.push(H('host.purlin.region_error', { region: rg.labelNotice, errors: results.filter((x) => x?.error).map((x) => x.error).join('; ') }));
             }
         }
-        for (const [item, labels] of regionNotices) { notEvaluated.push(`[${labels.join(' · ')}] ${item}`); }
+        // 구간마다의 같은 알림은 한 줄 — 「[구간 이름표 · …] 글」(그 글은 엔진의 알림 — 구간 결과의 notices 에서)
+        for (const [item, regs] of regionNotices) {
+            const eng = (() => { for (const rg of regs) { for (const o of out.filter((x) => x.id === rg.id)) { const n = (o.result?.notices || []).find((x: any) => x && x.text === item); if (n) { return n; } } } return null; })();
+            notEvaluated.push(H('host.purlin.region_note', { regions: NOTICES.group(regs.map((rg) => rg.labelNotice), ' · '), item: eng || { code: null, kind: 'not_evaluated', text: item, text_ko: item } }));
+        }
         if (regions.some((rg) => rg.lap)) {
-            assumptions.push('랩 구간: 겹친 두 부재의 강도 합(각 부재가 M · V 의 절반)으로 검토 (AISI Manual II-2A 가정 (a)–(c) — 기준 조항이 아닌 설계 가정).');
+            assumptions.push(H('host.purlin.lap_two_members'));
             if (lapStated) {
-                assumptions.push('랩 안의 구속: 사람이 「랩 구간의 구속 확인」(lap_restrained) 으로 밝혔습니다 — 횡비틀림(F2)은 비지지 길이 0(Mne = My), 뒤틀림(F4)은 해당 없음(엔진이 그 진술을 출처로 기록).');
+                assumptions.push(H('host.purlin.lap_stated'));
             } else {
-                notEvaluated.push('랩 구간의 횡비틀림(F2) · 뒤틀림(F4): 구속을 밝히지 않음 — 「랩 구간의 구속 확인」(lap_restrained) 을 확인하면 Design Manual II-1A / II-2A 의 가정으로 검토합니다');
+                notEvaluated.push(H('host.purlin.lap_not_stated'));
             }
         }
-        assumptions.push('구간의 Vu 는 그 구간 안 전단 포락선의 최대 |V| 를 구간 최대 모멘트와 함께 썼습니다(보수 측).');
-        for (const a of (Array.isArray(loadResult.assumptions) ? loadResult.assumptions : [])) { assumptions.push(`[하중] ${a}`); }
-        for (const w of (Array.isArray(loadResult.warnings) ? loadResult.warnings : [])) { warnings.push(`[하중] ${w}`); }
+        assumptions.push(H('host.purlin.vu_envelope'));
+        // 「[하중] …」 — 하중 해석의 알림에 머리를 단 것(계약 §16.2 prefix · prefix_ko): code 를 지킨다
+        const loadNotices: any[] = Array.isArray(loadResult.notices) ? loadResult.notices : [];
+        const loadPrefixed = (list: string, t: string): string => {
+            const n = loadNotices.find((x: any) => x && x.list === list && x.text === t);
+            const pn = n ? NOTICES.withPrefix(n, '[하중] ', '[하중] ') : { code: null, kind: list === 'warnings' ? 'warning' : 'assumption', text: `[하중] ${t}`, text_ko: `[하중] ${t}` };
+            hostMade.set(pn.text, pn);
+            return pn.text;
+        };
+        for (const a of (Array.isArray(loadResult.assumptions) ? loadResult.assumptions : [])) { assumptions.push(loadPrefixed('assumptions', a)); }
+        for (const w of (Array.isArray(loadResult.warnings) ? loadResult.warnings : [])) { warnings.push(loadPrefixed('warnings', w)); }
         const loadNotEvaluated = Array.isArray(loadResult.not_evaluated) ? loadResult.not_evaluated : [];
 
         // e42adf1: 반올림 전 값이 없어 반올림 값으로 검토한 것을 밝힌다(옛 엔진 · 그 키가 빠진 기록)
         const roundedDemandFallbacks = [...roundedFallbacks].sort();
         if (roundedDemandFallbacks.length) {
-            warnings.push(`하중 해석이 반올림 전 값(unrounded)을 주지 않아 표시용 반올림 값으로 검토한 것: ${roundedDemandFallbacks.join(", ")}`);
+            warnings.push(H('host.purlin.rounded_fallbacks', { keys: roundedDemandFallbacks.join(', ') }));
         }
 
         // 6. 합친 판정 · 지배 구간
@@ -3940,12 +3995,15 @@ export class StcfsdPanel implements McpPanelInterface {
             ...(roundedDemandFallbacks.length ? { rounded_demand_fallbacks: roundedDemandFallbacks } : {}),
             i621_check: ap.i621_check ?? null,
             wc_reactions: wcList,
+            // (아래 notices 는 attachNotices 가 — 목록의 글마다 같은 글의 알림)
             uplift_reactions: loadResult.uplift_reactions ?? [],
             props,
             cutwp,
             deck: deckInfo,
             span_type: options?.span_type ?? null,
         };
+        // K4b · 호스트 글: 목록(warnings · assumptions · not_evaluated · load_not_evaluated)의 글마다 알림 — 호스트가 지은 것, 엔진의 것(구간 · 하중 해석 · 서명곡선)
+        NOTICES.attachNotices(result, [loadResult, out.map((o) => o.result), dsmPos, dsmNeg], hostMade);
         this._requireCurrentSignature(baseSignature, 'Purlin design');
         this._requireDerivedRevision(purlinInputRevision, 'Purlin design');
         this._storeLoadAnalysis(loadResult, this._loadRequestKey({ ...options, Fy: fy, Fu: fu }));

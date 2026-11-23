@@ -314,9 +314,9 @@
    "id": "aisi_design_compression.shown",
    "expect": "pin",
    "value": {
-    "design-summary": "종합 판정: ✓ OK 지배 검토: E axial compression\nGlobal\n142.12\nkN\nLocal\n70.64\nkN\n지배\nDistort.\n85.09\nkN\nφPn = 60.05 kN (Local Buckling)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
+    "design-summary": "종합 판정: ✓ OK 지배 검토: 국부좌굴\nGlobal\n142.12\nkN\nLocal\n70.64\nkN\n지배\nDistort.\n85.09\nkN\nφPn = 60.05 kN (국부좌굴)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
    },
-   "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\").",
+   "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
    "flipped": [
     {
      "step": "K4b",
@@ -325,6 +325,14 @@
       "reason": null
      },
      "date": "2026-11-23"
+    },
+    {
+     "step": "renderer",
+     "from": {
+      "expect": "pin",
+      "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -449,9 +457,9 @@
   {
    "id": "gui.runDesign.shown",
    "expect": "pin",
-   "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\").",
+   "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
    "value": {
-    "design-summary": "종합 판정: ✓ OK 지배 검토: E axial compression\nGlobal\n142.12\nkN\nLocal\n70.64\nkN\n지배\nDistort.\n85.09\nkN\nφPn = 60.05 kN (Local Buckling)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
+    "design-summary": "종합 판정: ✓ OK 지배 검토: 국부좌굴\nGlobal\n142.12\nkN\nLocal\n70.64\nkN\n지배\nDistort.\n85.09\nkN\nφPn = 60.05 kN (국부좌굴)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
    },
    "flipped": [
     {
@@ -469,6 +477,14 @@
       "reason": "K2-5: 화면 단추가 검토 상태(MCP 가 정한 것)로 계산한다 — 압축 결과 카드"
      },
      "date": "2026-11-23"
+    },
+    {
+     "step": "renderer",
+     "from": {
+      "expect": "pin",
+      "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
     }
    ]
   }

@@ -222,7 +222,7 @@ async function main() {
         p.__testClearPostedMessages();
         await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', changes: { Lb: 13 } } });
         const ack = p.__testGetPostedMessages().filter((m) => m.command === 'caseAck').pop();
-        assert(ack && ack.data.rejected.some((x) => x.key === 'Lb' && /read-only/.test(x.reason)), `${where}: the person's edit is refused with the reason`);
+        assert(ack && ack.data.rejected.some((x) => x.key === 'Lb' && x.reason_code === 'host.readonly.case' && /읽기 전용/.test(x.reason)), `${where}: the person's edit is refused with the reason`);
         assert.notStrictEqual(caseOf().inputs.Lb, 13, `${where}: the value is unchanged`);
         const lbBefore = caseOf().inputs.Lb;
         const des = await call({ action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy: 50, Fu: 65, Lb: 61, Cb: 1.14, Mu: 40 });
@@ -241,8 +241,8 @@ async function main() {
         p.__testClearPostedMessages();
         await p.__testDispatchMessage({ command: 'updateModel', data: { ...p.__testGetState().model, BC: 'C-C' } });
         await p.__testDispatchMessage({ command: 'runAnalysis', data: { lengths: [7, 9], BC: 'S-S' } });
-        assert(ctx.log.warn.some((w) => /read-only/.test(w)), `${where}: the person is told the model is not changed`);
-        assert(p.__testGetPostedMessages().some((m) => m.command === 'analysisError' && /read-only/.test(m.data.error)), `${where}: the page's analysis with other conditions is refused`);
+        assert(ctx.log.warn.some((w) => /읽기 전용.*모델을 바꾸지 않았다/.test(w)), `${where}: the person is told the model is not changed`);
+        assert(p.__testGetPostedMessages().some((m) => m.command === 'analysisError' && m.data.error_code === 'host.readonly.model' && /읽기 전용/.test(m.data.error)), `${where}: the page's analysis with other conditions is refused`);
         assert.strictEqual(modelSig(), sigBefore, `${where}: the model is unchanged`);
       };
       await roBlocked('issued copy');

@@ -85,6 +85,8 @@ export const QUANTITY_UNITS: Record<string, UnitKey | 'none'> = {
     warping_constant: 'warping',
     force_per_length: 'force_per_length',
     rotational_stiffness: 'rot_stiff',
+    mass_density: 'density',      // K4c — kip·s²/in⁴ → kg/m³
+    pressure: 'pressure',         // K4d — psf → kPa
     dimensionless: 'none',
     angle: 'none',
     count: 'none',
@@ -92,9 +94,12 @@ export const QUANTITY_UNITS: Record<string, UnitKey | 'none'> = {
 
 /** quantity 이름 → 단위 종류. 어휘에 없으면 undefined. */
 export function quantityUnit(quantity: unknown): UnitKey | 'none' | undefined {
-    return typeof quantity === 'string' && Object.prototype.hasOwnProperty.call(QUANTITY_UNITS, quantity)
-        ? QUANTITY_UNITS[quantity] : undefined;
+    if (typeof quantity !== 'string') { return undefined; }
+    if (Object.prototype.hasOwnProperty.call(QUANTITY_UNITS, quantity)) { return QUANTITY_UNITS[quantity]; }
+    return Object.prototype.hasOwnProperty.call(HOST_QUANTITY_UNITS, quantity) ? HOST_QUANTITY_UNITS[quantity] : undefined;
 }
+/** 호스트만 쓰는 물리량(호스트 알림 host.* 의 매개변수 — 하중 해석 좌표 ft · plf · kip-ft; webview/js/notices.js Q 와 같은 이름) */
+export const HOST_QUANTITY_UNITS: Record<string, UnitKey> = { length_ft: 'length_ft', linload: 'linload', moment_ft: 'moment_ft' };
 
 /** 엔진 steps[].unit 문자열 → 단위 종류. '' · 'ea' 등 무차원은 null. */
 const STEP_UNIT: Record<string, UnitKey | null> = {
@@ -314,11 +319,10 @@ export function convertOutputSIDeep(result: any, table: Table): { value: any; un
 }
 
 export const TEXT_UNITS_NOTE =
-    'units=SI: numbers are SI (mm, mm^2, mm^3, mm^4, mm^6, MPa, kN, kN-m, m, kN/m, kg/m^3), converted by key or by quantity (dimensionless, angle, '
-    + 'count unchanged). Notices, check reasons and fastener labels are rendered in SI (K4b); report text, step names / formulas, notes, '
-    + 'condition labels and errors stay in US units (in, kips, kip-in, kip-ft, ksi, ft, plf), as do objects marked units:"US". Numbers in '
-    + 'steps[].expr / condition are coefficients, except steps with expr_units:"US" (an equation written for US units; see their units_note). '
-    + 'unbounded:true values and the Fcre placeholder (1e6 ksi beside Fcre_unbounded:true) are not converted.';
+    'units=SI: numbers are SI (mm, mm^2, mm^3, mm^4, mm^6, MPa, kN, kN-m, m, kN/m, kPa, kg/m^3), converted by key or by quantity '
+    + '(dimensionless, angle, count unchanged). Coded texts (notices, reasons, labels, trace notes, host lines) are rendered in SI; '
+    + 'step names / formulas, branch conditions and errors stay in US units, as do objects marked units:"US". Numbers in steps[].expr are '
+    + 'coefficients, except steps with expr_units:"US". unbounded:true values and the Fcre placeholder (1e6 ksi beside Fcre_unbounded:true) are not converted.';
 
 // ============================================================
 // 출력 표 — 엔진 결과 키 → 단위 (test/webview/mcp_si_chain.js 가 실제 엔진 출력의 모든 수치 키를 대조)
@@ -334,6 +338,8 @@ const NONE_KEYS = [
     'R_over_t', 'increase_pct', 'bf_over_t', 'n', 'n_minima', 'reference_unsymm', 'stress_scale',
     'curve_index', 'index', 'load_factor', 'load_factor_interp', 'flexure_dcr', 'flexure_dcr_governing',
     'n_max_total', 'n_per_row', 'n_required', 'n_rows', 'n_total', 'n_members', 'n_spans', 'span',
+    'spans',   // K4d: 하중 패턴 이름표(loads.label.pattern_spans_loaded)의 경간 번호 목록 — 개수
+
     'support', 'L_over_delta', 'psi', 'n_lengths', 'n_elements', 'n_theta', 'n_na', 'n_thick',
     'neigs_requested', 'neigs_actual', 'nnodes', 'nelems', 'region_support', 'Ct', 'Cv', 'kv', 'mf', 'interaction_value',
     'LF_dist', 'LF_dist_interp', 'LF_global', 'LF_local', 'LF_local_interp', 'LF_single_minimum',

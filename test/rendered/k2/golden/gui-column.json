@@ -116,12 +116,23 @@
    "id": "design.shown",
    "expect": "pin",
    "value": {
-    "design-summary": "종합 판정: ✓ OK 지배 검토: E axial compression\nGlobal\n45.19\nkN\n지배\nLocal\n45.19\nkN\n지배\nDistort.\n145.32\nkN\nφPn = 38.43 kN (Global Buckling (flexural-torsional))\n52% ✓ OK\n검토 비 판정\nE axial compression 0.521 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위 (1)",
+    "design-summary": "종합 판정: ✓ OK 지배 검토: 항복 및 전체좌굴\nGlobal\n45.19\nkN\n지배\nLocal\n45.19\nkN\n지배\nDistort.\n145.32\nkN\nφPn = 38.43 kN (전체좌굴 (휨비틀림좌굴))\n52% ✓ OK\n검토 비 판정\nE axial compression 0.521 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n적용 범위 (1)",
     "design-steps": "1. Yield Load (Py)\nPy = Ag×Fy = 510 mm²×295.0 MPa = 150.44 kN\n150.44 kN\n2. Global Buckling (Pne)\n§E2-3\nFcre = 101.0 MPa, λc = 1.709, Fn = 88.6 MPa → Pne = 45.19 kN\n45.19 kN\n3. Local Buckling (Pnl)\n§E3.2.1-1\nPcrl = 291.80 kN (FSM), λl = √(Pne/Pcrl) = √(45.19 kN/291.80 kN) = 0.394 ≤ 0.776 → Pnl = 45.19 kN\n45.19 kN\n4. Distortional Buckling (Pnd)\n§E4.1-2\nPcrd = 339.80 kN (FSM), λd = √(Py/Pcrd) = √(150.44 kN/339.80 kN) = 0.665 > 0.561 → Pnd = 145.32 kN\n145.32 kN\n5. Nominal Strength (Pn)\n지배\nPn = min(Pne=45.19 kN, Pnl=45.19 kN, Pnd=145.32 kN) = 45.19 kN\n45.19 kN\n6. Design Strength (LRFD)\nφPn = 0.85 × 45.19 kN = 38.43 kN\n38.43 kN",
     "design-interaction": "",
     "dsm-table-container": "Property Value Half-wavelength Load Factor\nCompression (kN)\nPy (해석 응력 첫 항복) 150.46\nPcrl (local) 291.80 78.5 1.9394\nPcrd (distortional) 339.79 425.9 2.2584\nPcre (global) 0.58 25400.0 0.0038\nBasis: P analysis (other families not applicable to this curve)\nDetected 2 minima | Min 1: L=78.5 mm, LF=1.9394 | Min 2: L=425.9 mm, LF=2.2584\nP — 분류: heuristic",
     "analysis-warnings": "종방향 항: 경계조건에 따라 자동 · S-S · 길이당 최대 1항\n모드 분류: cFSM 을 쓸 수 없는 모델(둥근 모서리) — DSM 극소는 곡선 모양(반파장 순서)으로 정했습니다"
-   }
+   },
+   "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
+   "flipped": [
+    {
+     "step": "renderer",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   }
  ]
 }

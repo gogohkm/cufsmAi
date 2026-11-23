@@ -90,12 +90,14 @@
         const _koText = NOTICES ? NOTICES.textMap([env.design, env.load, env.lap, env.lastDsmResult], { units: _unitSystem, lang: 'ko' }) : (x) => x;
         const _koCheck = (c) => (NOTICES ? NOTICES.readerCheck(c, _uo) : c);
         const model = env.model || null;
-        const analysisResult = env.analysisResult || null;
-        const lastDsmResult = env.lastDsmResult || null;
+        // K4b: 결과의 글 필드 · 알림 사전 · 모드 이름을 한국어 · 보이는 단위로(목록 · 알림 · 검토 항목은 그대로 — 아래 도우미가 그린다)
+        const _fp = (r) => (NOTICES && r && typeof r === 'object' && !Array.isArray(r) ? NOTICES.forPage(r, env.unitSystem === 'US' ? 'US' : 'SI') : r);
+        const analysisResult = _fp(env.analysisResult) || null;
+        const lastDsmResult = _fp(env.lastDsmResult) || null;
         const lastProps = env.lastProps || null;
-        const _lastDesignResult = env.design || null;
-        const _lastLoadAnalysis = env.load || null;
-        const _lastLapResult = env.lap || null;
+        const _lastDesignResult = _fp(env.design) || null;
+        const _lastLoadAnalysis = _fp(env.load) || null;
+        const _lastLapResult = _fp(env.lap) || null;
 
         function toDisplay(usValue, unitType) {
             if (_unitSystem === 'US' || !UNIT[unitType]) return usValue;
@@ -172,7 +174,12 @@
             const arr = (v) => Array.isArray(v) ? v.filter(Boolean).map(String) : [];
             if (!deck) { return { warnings: [], assumptions: [], scope: [] }; }
             const hasNew = Array.isArray(deck.warnings) || Array.isArray(deck.scope_notes) || Array.isArray(deck.assumptions);
-            if (Array.isArray(deck.notices)) { return { warnings: _warnList(deck), assumptions: _assumpList(deck), scope: _scopeList(deck) }; }
+            if (Array.isArray(deck.notices)) {
+                // 옛 한 줄 warning 은 범위 안내의 사본 — 경고로 다시 싣지 않는다(화면 _deckNotes 와 같게)
+                const dup = typeof deck.warning === 'string' && deck.notices.some((n) => n && n.list === 'scope_notes'
+                    && ((deck.warning_code && n.code === deck.warning_code) || n.text === deck.warning || n.text_ko === deck.warning));
+                return { warnings: _warnList(dup ? Object.assign({}, deck, { warning: undefined }) : deck), assumptions: _assumpList(deck), scope: _scopeList(deck) };
+            }
             return {
                 warnings: arr(deck.warnings),
                 assumptions: arr(deck.assumptions),
@@ -1555,7 +1562,8 @@
                 blocks.push({ kind: 'heading', text: '무리마다 지배 항목 (엔진 design_checks)' },
                     { kind: 'table', head: ['자리', '항목', '조항', '소요', '설계강도', '비', '판정'], rows: govs });
             }
-            blocks.push(..._noticeBlocks(d, { ne: d.purlin_not_evaluated, warn: (d.dsm_warnings || []).concat(d.purlin_warnings || []), asm: d.purlin_assumptions }));
+            const _pl = UTILS.purlinLists(d, _uo);
+            blocks.push(..._noticeBlocks(d, { ne: _pl.ne, warn: (d.dsm_warnings || []).concat(_pl.warn), asm: _pl.asm }));
             if (k === 'not_evaluated') {
                 blocks.push({ kind: 'para', tone: 'ne', text: d.utilization == null ? '판정 없음: 소요값이 없어 판정하지 않았습니다(강도 조회).'
                     : '판정 없음: 미평가 한계상태가 있어 전체 적합을 확정할 수 없습니다. 위 항목을 해소할 입력을 추가한 뒤 다시 검토하십시오.' });

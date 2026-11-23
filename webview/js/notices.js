@@ -1,16 +1,22 @@
+/* global module, globalThis */
 /**
  * K4b — 엔진 알림의 경계(계약 docs/implementation/20261123-check-contract.md §16). 화면 · 검증 목록 · 보고서 · MCP 요약이 같은 함수로 그린다.
  *
  *  - render(notice, {units, lang}): 알림 하나(`{code, kind, template, template_ko, params, prefix?, parts?, …}`)를 글로.
  *    US 는 엔진의 `text` · `text_ko` 와 글자까지 같다(`notice-template/1`, 고정값 test/python/notice_render_fixture.json).
  *    SI 는 물리량(`quantity`) 매개변수를 바꾸고 SI 단위 글자를 쓴다 — 자리수는 여기서 정한다(엔진의 fmt 는 US 의 것).
- *    템플릿 글 자체에 박힌 US 상수(「0.60 in」 「95 ksi」 「33 ft」)도 SI 로 바꾼다 — SI 로 읽는 문장에 US 수가 남지 않게.
+ *    상수 매개변수(`const: true` — 템플릿에 있던 치수, 계약 §16.10)도 물리량이라 같은 길이다. **템플릿 글은 바꾸지 않는다.**
  *    `quantity: null` 매개변수는 단위계와 무관하게 받은 그대로.
- *  - reason(check, opts): 검토 항목의 이유(`reason_*`)를 같은 규칙으로. 없으면 옛 `reason` 글.
- *  - lines(result, opts): 결과 맨 위의 알림(`notices`)을 목록 차례대로 `{list, code, kind, text}` — 알림이 없는 옛 글(호스트가 더한 것)은 code null 로 뒤에.
- *  - localize(tree, units): MCP 의 `detail: 'full'` SI 응답 — 알림 · 이유 · 옛 글 목록의 글을 SI 로 다시 그리고 매개변수의 단위 글자를 SI 로
- *    (값은 그 뒤 siUnits 의 걸음이 quantity 로 바꾼다).
- *  - fastenerLabel(parts, opts): 랩 패스너 이름표(`fastener_label_parts`).
+ *  - 무늬 바꾸기(`fallbackSI`)는 마지막 수단: code 가 없는 글(호스트가 아직 알림으로 짓지 않은 글)과, 엔진이 글로 넘긴 매개변수
+ *    (중첩 알림이 없는 글 — 지금 `member.warning.effective_length_defaulted_verify` 의 items · `member.warning.i6_2_1_i6_k2` 의
+ *    i621_issues 둘)에만. 정확히 아는 단위 낱말(표의 것)과 경계가 맞을 때만 바꾼다 — 위첨자 · `^n` · 모르는 겹단위가 붙으면 그대로 둔다.
+ *    시험(notice_render_contract)이 계약 사례에서 이것이 그 둘에서만 쓰임을 확인한다.
+ *  - 호스트가 쓰는 글도 알림이다: `HOST`(`host.*` code — 영어 · 한국어 템플릿과 물리량 붙은 매개변수), `hostNotice(code, values)`.
+ *  - 글 하나에 붙는 엔진 필드(계약 §16.10 – 16.11): `{k}_code · _kind · _ko · _template · _template_ko · _params(· _parts · _sep · _prefix · _prefix_ko)`
+ *    — `field(o, k, opts)`, 알림 사전 · 목록 `{k}_notices`, 모드 · 검토 이름 `{k}_id`(그 검토 항목의 `name_ko`).
+ *  - lines(result, opts): 결과의 알림을 목록 차례대로 `{list, code, kind, text}`.
+ *  - forReader(tree, {units, detail}): MCP 요약(한국어 · 그 단위) — 'full' 은 두 말을 다 두고 SI 면 다시 그린다(localize).
+ *  - forPage(tree, units): 화면 · 보고서 — 글 필드 · 알림 사전 · 모드 이름을 한국어 · 그 단위로(목록과 알림은 그대로 — 도우미가 그린다).
  * 말: 사람과 AI 가 읽는 것은 한국어(`lang: 'ko'`, 기본) — 오케스트레이터 결정(K4b). 영어 글은 결과에 그대로 남는다.
  */
 (function (root, factory) {
@@ -19,7 +25,7 @@
 }(typeof globalThis !== 'undefined' ? globalThis : this, function () {
     'use strict';
 
-    // ── 물리량(계약 §3.2 + mass_density) — US → SI 계수(정의값), SI 글자, SI 기본 자리수 ──────────────────
+    // ── 물리량(계약 §3.2) — US → SI 계수(정의값), SI 글자, SI 기본 자리수 ──────────────────────────────
     const KIP_KN = 4.4482216152605, IN_MM = 25.4, IN_M = 0.0254, FT_M = 0.3048;
     const Q = {
         length: { f: IN_MM, si: 'mm', d: 1 },
@@ -33,12 +39,17 @@
         stress: { f: KIP_KN * 1000 / (IN_MM * IN_MM), si: 'MPa', d: 1 },
         force_per_length: { f: KIP_KN / IN_M, si: 'kN/m', d: 2 },
         rotational_stiffness: { f: KIP_KN, si: 'kN-m/rad/m', d: 3 },
-        // 계약 §16.7 의 후보 — 1 kip·s²/in⁴ = 4448.2216 N·s² / (0.0254 m)⁴ ≈ 1.06870 × 10¹⁰ kg/m³
+        // §3.2 (K4c): 1 kip·s²/in⁴ = 4448.2216 N·s² / (0.0254 m)⁴ ≈ 1.06870 × 10¹⁰ kg/m³
         mass_density: { f: KIP_KN * 1000 / Math.pow(IN_M, 4), si: 'kg/m³', d: 0 },
+        // §3.2 (K4d): 1 psf = 0.0478803 kPa
+        pressure: { f: KIP_KN / 1000 / (FT_M * FT_M), si: 'kPa', d: 3 },
+        // 호스트만(하중 해석 좌표 · 구간 이름표): ft → m, plf → kN/m, kip-ft → kN-m
+        length_ft: { f: FT_M, si: 'm', d: 2, fixed: true },   // 좌표 · 범위 — 자리를 늘리지 않는다(「0.32–6.07 m」)
+        linload: { f: KIP_KN / 1000 / FT_M, si: 'kN/m', d: 3 },
+        moment_ft: { f: KIP_KN * FT_M, si: 'kN-m', d: 2 },
     };
     const UNCHANGED = { dimensionless: 1, count: 1, angle: 1 };
-    // 템플릿 글에 박힌 US 상수 → 물리량
-    const LITERAL_UNITS = { 'in': 'length', 'in.': 'length', 'ksi': 'stress', 'kip': 'force', 'kips': 'force', 'kip-in': 'moment', 'ft': 'length_ft' };
+    const M_LEN = { f: IN_M, si: 'm', d: 2, fixed: true };
 
     function isDimensional(q) { return typeof q === 'string' && Object.prototype.hasOwnProperty.call(Q, q); }
 
@@ -93,7 +104,6 @@
         const dot = long.indexOf('.');
         const tail = long.slice(dot + 1 + d);
         if (/^50*$/.test(tail)) {
-            // 꼭 가운데 — 짝수 쪽으로(Python)
             const down = long.slice(0, d === 0 ? dot : dot + 1 + d);
             if (Number(down.slice(-1)) % 2 === 0) { s = down; }
         }
@@ -122,26 +132,69 @@
         let m = /^\.(\d+)f$/.exec(spec);
         if (m) { return fixed(v, Number(m[1])); }
         m = /^(?:\.(\d+))?g$/.exec(spec);
-        if (m) {
-            return gFormat(v, m[1] === undefined ? 6 : Number(m[1]), false);
-        }
+        if (m) { return gFormat(v, m[1] === undefined ? 6 : Number(m[1]), false); }
         m = /^\.(\d+)e$/.exec(spec);
         if (m) { const t = v.toExponential(Number(m[1])).split('e'); const n = Number(t[1]); return t[0] + 'e' + (n < 0 ? '-' : '+') + String(Math.abs(n)).padStart(2, '0'); }
         return pyStr(v, intForm);
     }
 
+    // ── 마지막 수단: 글 안의 US 수 → SI(정확히 아는 단위 낱말만) ─────────────────────────────────────────
+    /** 아는 단위 낱말 → 물리량(이 표에 없는 꼴은 바꾸지 않는다) */
+    const LITERAL_UNITS = {
+        'in': 'length', 'in.': 'length', 'ft': 'length_ft',
+        'in²': 'area', 'in^2': 'area', 'in³': 'section_modulus', 'in^3': 'section_modulus',
+        'in⁴': 'moment_of_inertia', 'in^4': 'moment_of_inertia', 'in⁶': 'warping_constant', 'in^6': 'warping_constant',
+        'ksi': 'stress', 'kip': 'force', 'kips': 'force', 'kip-in': 'moment', 'kip-ft': 'moment_ft',
+        'kip/in': 'force_per_length', 'psf': 'pressure', 'plf': 'linload',
+    };
+    const NUM = '(\\d+/\\d+|\\d+(?:\\.\\d+)?)';
+    // 긴 것부터(겹단위 · 위첨자를 짧은 낱말로 읽지 않게). 낱말 뒤에는 글자 · 숫자 · 위첨자 · ^ · * · / · · · - 가 오지 않는다
+    const UNIT = '(kip-in|kip-ft|kip\\/in|kips|kip|ksi|psf|plf|ft|in\\^[2346]|in[²³⁴⁶]|in\\.?)(?![A-Za-z0-9_²³⁴⁶⁵⁷⁸⁹¹⁰^*/·\\-])(?!\\s+[a-z])';
+    // 앞 글자: 글자 · 숫자 · 소수점 · 분수 · 지수(7.345e-7)의 일부 · 겹단위의 일부가 아닐 것
+    const PRE = '(^|[^A-Za-z0-9_./+\\-*·^])';
+    const RANGE_RE = new RegExp(PRE + NUM + '(\\s*(?:≤|<|–|~|-)\\s*(?:[A-Za-z][A-Za-z0-9_\']{0,3}\\s*(?:≤|<)\\s*)?)' + NUM + '\\s?' + UNIT, 'g');
+    const ONE_RE = new RegExp(PRE + NUM + '\\s?' + UNIT, 'g');
+    function numOf(s) { const m = /^(\d+)\/(\d+)$/.exec(s); return m ? Number(m[1]) / Number(m[2]) : Number(s); }
+    function litSI(num, unit) { const q = Q[LITERAL_UNITS[unit]]; const v = numOf(num) * q.f; return { v: q.fixed ? fixed(v, q.d) : siFixed(v, q.d), u: q.si }; }
+    /** 무늬 바꾸기가 실제로 바꾼 자리(시험이 본다) */
+    const STATS = { fallback: [] };
+    function literalToSI(text) {
+        return text
+            .replace(RANGE_RE, (all, pre, a, mid, b, unit) => {
+                if (!LITERAL_UNITS[unit]) { return all; }
+                const q = Q[LITERAL_UNITS[unit]];
+                const A = litSI(a, unit), B = litSI(b, unit);
+                const dec = (x) => (x.includes('.') ? x.split('.')[1].length : 0);
+                const d = Math.max(dec(A.v), dec(B.v));
+                return pre + fixed(numOf(a) * q.f, d) + mid + fixed(numOf(b) * q.f, d) + ' ' + q.si + (unit === 'in.' ? '.' : '');
+            })
+            .replace(ONE_RE, (all, pre, num, unit) => {
+                if (!LITERAL_UNITS[unit]) { return all; }
+                const A = litSI(num, unit);
+                return pre + A.v + ' ' + A.u + (unit === 'in.' ? '.' : '');
+            });
+    }
+    /** 마지막 수단 — code 가 없는 글 · 엔진이 글로 넘긴 매개변수. 바꾼 것이 있으면 STATS 에 그 자리를 적는다 */
+    function fallbackSI(text, where) {
+        const out = literalToSI(text);
+        if (out !== text && STATS.fallback.length < 1000) { STATS.fallback.push(where || '?'); }
+        return out;
+    }
+
     // ── 그리기 ────────────────────────────────────────────────────────────────
     /** 매개변수 하나 — US 면 엔진과 같게, SI 면 물리량을 바꿔서 */
-    function renderParam(p, units, lang, intForm) {
+    function renderParam(p, units, lang, intForm, code) {
         if (!p || typeof p !== 'object') { return ''; }
         if (p.notice && typeof p.notice === 'object') { return render(p.notice, { units, lang }); }
         let v = p.value;
         const unitText = typeof p.unit_text === 'string' && p.unit_text ? p.unit_text : '';
         const sep = typeof p.sep === 'string' ? p.sep : '';
         if (units === 'SI' && isDimensional(p.quantity) && typeof v === 'number' && isFinite(v)) {
-            const q = Q[p.quantity];
+            // US 가 ft 로 쓴 길이(엔진 값은 in — 「스팬 ≤ 33 ft」)는 m 로(mm 로 쓰면 10058.4 mm)
+            const q = p.quantity === 'length' && unitText === 'ft' ? M_LEN : Q[p.quantity];
             const vs = v * q.f;
-            const s = /g$|e$/.test(p.fmt || '') ? pyFormat(vs, p.fmt, false) : siFixed(vs, q.d);
+            const s = /g$|e$/.test(p.fmt || '') ? pyFormat(vs, p.fmt, false) : (q.fixed ? fixed(vs, q.d) : siFixed(vs, q.d));
+            if (p.no_unit) { return s; }
             return s + (unitText ? sep : (sep || ' ')) + q.si;
         }
         let s;
@@ -150,71 +203,34 @@
             if (p.conv === 'r' || p.conv === 's') { v = pyStr(v, intForm, p.conv === 'r'); }
             s = pyFormat(v, p.fmt || '', intForm);
         }
-        // 글 매개변수(목록 · 문장 조각) 안에 박힌 US 수(「KtLt=120 in」)도 SI 로 — 오케스트레이터 결정(SI 로 읽는 글에 US 수가 남지 않는다).
-        // 단위 글자가 따로 붙은 물리량 없는 수(quantity null + unit_text — 'ft' · 'kip*s^2/in^4')는 계약 §16.3 대로 그대로
-        if (units === 'SI' && typeof p.value === 'string' && !unitText) { s = literalToSI(s); }
+        // 엔진이 글로 넘긴 매개변수(목록 · 문장 조각) 안의 US 수 — 마지막 수단(계약 §16.3 의 「받은 그대로」 를 SI 화면에서만 넘는다:
+        // 오케스트레이터 결정, SI 로 읽는 글에 US 수를 남기지 않는다). 단위 글자가 따로 붙은 수(quantity null + unit_text)는 그대로
+        if (units === 'SI' && typeof p.value === 'string' && !unitText) { s = fallbackSI(s, (code || '?') + '.' + p.symbol); }
         return s + (unitText ? sep + unitText : '');
     }
 
-    /** 템플릿 글 조각의 US 상수 → SI(「0.60 in」 → 「15.2 mm」) */
-    const NUM = '(\\d+/\\d+|\\d+(?:\\.\\d+)?)';
-    const UNIT = '(kip-in|kips|kip|ksi|ft|in\\.?)(?![A-Za-z0-9*·^/])(?!\\s+[a-z])';
-    // 앞 글자: 글자 · 숫자 · 소수점 · 분수 · 지수(7.345e-7)의 일부가 아닐 것
-    const PRE = '(^|[^A-Za-z0-9_./+\\-])';
-    // 범위(「0.08 ≤ d ≤ 0.25 in」 「0.024 ≤ t < 0.1875 in」 「4–8 in」)는 앞의 수도 같은 단위로
-    const RANGE_RE = new RegExp(PRE + NUM + '(\\s*(?:≤|<|–|~|-)\\s*(?:[A-Za-z][A-Za-z0-9_\']{0,3}\\s*(?:≤|<)\\s*)?)' + NUM + '\\s?' + UNIT, 'g');
-    const ONE_RE = new RegExp(PRE + NUM + '\\s?' + UNIT, 'g');
-    function numOf(s) { const m = /^(\d+)\/(\d+)$/.exec(s); return m ? Number(m[1]) / Number(m[2]) : Number(s); }
-    function litSI(num, unit) {
-        const q = LITERAL_UNITS[unit];
-        if (q === 'length_ft') { return { v: siFixed(numOf(num) * FT_M, 2), u: 'm' }; }
-        const d = Q[q];
-        return { v: siFixed(numOf(num) * d.f, d.d), u: d.si };
-    }
-    function literalToSI(text) {
-        return text
-            .replace(RANGE_RE, (all, pre, a, mid, b, unit) => {
-                if (!LITERAL_UNITS[unit]) { return all; }
-                // 범위의 두 수는 같은 자리수로(작은 쪽이 정한 자리)
-                const A = litSI(a, unit), B = litSI(b, unit);
-                const dec = (x) => (x.includes('.') ? x.split('.')[1].length : 0);
-                const d = Math.max(dec(A.v), dec(B.v));
-                const fx = (num) => { const q = LITERAL_UNITS[unit]; return fixed(numOf(num) * (q === 'length_ft' ? FT_M : Q[q].f), d); };
-                return pre + fx(a) + mid + fx(b) + ' ' + B.u + (unit === 'in.' ? '.' : '');
-            })
-            .replace(ONE_RE, (all, pre, num, unit) => {
-                if (!LITERAL_UNITS[unit]) { return all; }
-                const A = litSI(num, unit);
-                return pre + A.v + ' ' + A.u + (unit === 'in.' ? '.' : '');
-            });
-    }
-
-    /** 템플릿을 매개변수로 채운다 — `{name}` · `{{` · `}}` */
-    function fill(template, params, units, lang, intForms) {
+    /** 템플릿을 매개변수로 채운다 — `{name}` · `{{` · `}}`. 템플릿 글 자체는 바꾸지 않는다 */
+    function fill(template, params, units, lang, intForms, code) {
         const byName = {};
         (params || []).forEach((p) => { if (p && typeof p.symbol === 'string') { byName[p.symbol] = p; } });
         let out = '';
         let i = 0;
         const t = String(template);
-        let literal = '';
-        const flush = () => { out += units === 'SI' ? literalToSI(literal) : literal; literal = ''; };
         while (i < t.length) {
             const c = t[i];
-            if (c === '{' && t[i + 1] === '{') { literal += '{'; i += 2; continue; }
-            if (c === '}' && t[i + 1] === '}') { literal += '}'; i += 2; continue; }
+            if (c === '{' && t[i + 1] === '{') { out += '{'; i += 2; continue; }
+            if (c === '}' && t[i + 1] === '}') { out += '}'; i += 2; continue; }
             if (c === '{') {
                 const j = t.indexOf('}', i);
                 const name = t.slice(i + 1, j);
-                flush();
                 const p = byName[name];
-                out += p ? renderParam(p, units, lang, intForms ? !!intForms[name] : intDefault(p)) : '{' + name + '}';
+                out += p ? renderParam(p, units, lang, intForms ? !!intForms[name] : intDefault(p), code) : '{' + name + '}';
                 i = j + 1;
                 continue;
             }
-            literal += c;
+            out += c;
             i++;
         }
-        flush();
         return out;
     }
     /** 정수 꼴 값을 정수로 쓸지(Python int) — JSON 이 3.0 과 3 을 가르지 못한다. 개수 · 글 매개변수 · conv 없는 차원 없는 수는 정수로 */
@@ -222,17 +238,17 @@
         return p.quantity === 'count' || p.quantity === null || p.quantity === undefined;
     }
     /** 정수 꼴 매개변수(모호한 것)의 조합 가운데 엔진의 글과 같아지는 것을 고른다 — US 를 글자까지 같게 */
-    function fillMatching(template, params, units, lang, want) {
+    function fillMatching(template, params, units, lang, want, code) {
         const amb = (params || []).filter((p) => p && !p.notice && typeof p.value === 'number' && Number.isInteger(p.value)
             && p.fmt !== 'raw' && (!p.fmt || p.fmt === 'g'));
-        if (!amb.length || typeof want !== 'string' || units !== 'US' || amb.length > 6) { return fill(template, params, units, lang, null); }
-        const first = fill(template, params, units, lang, null);
+        if (!amb.length || typeof want !== 'string' || units !== 'US' || amb.length > 6) { return fill(template, params, units, lang, null, code); }
+        const first = fill(template, params, units, lang, null, code);
         if (first === want) { return first; }
         for (let mask = 0; mask < (1 << amb.length); mask++) {
             const forms = {};
             amb.forEach((p, k) => { forms[p.symbol] = !!(mask & (1 << k)); });
             (params || []).forEach((p) => { if (p && !(p.symbol in forms)) { forms[p.symbol] = intDefault(p); } });
-            const s = fill(template, params, units, lang, forms);
+            const s = fill(template, params, units, lang, forms, code);
             if (s === want) { return s; }
         }
         return first;
@@ -240,36 +256,62 @@
 
     /**
      * 알림 하나 → 글. opts.units 'US' | 'SI'(기본 US), opts.lang 'ko'(기본) | 'en'(옛 글 — `template` · `text`).
-     * 템플릿이 없는 알림(등록되지 않은 글 code null)은 그 글 그대로(SI 면 글 안의 US 상수만 바꾼다).
+     * 템플릿이 없는 알림(등록되지 않은 글 code null)은 그 글 그대로(SI 면 마지막 수단만).
      */
     function render(n, opts) {
         const units = opts && opts.units === 'SI' ? 'SI' : 'US';
         const ko = !(opts && opts.lang === 'en');
         if (n === null || n === undefined) { return ''; }
-        if (typeof n === 'string') { return units === 'SI' ? literalToSI(n) : n; }
+        if (typeof n === 'string') { return units === 'SI' ? fallbackSI(n, 'text') : n; }
         const prefix = ko ? (n.prefix_ko !== undefined ? n.prefix_ko : n.prefix) : n.prefix;
         if (n.kind === 'group' && Array.isArray(n.parts)) {
             return (prefix || '') + n.parts.map((p) => render(p, { units, lang: ko ? 'ko' : 'en' })).join(typeof n.sep === 'string' ? n.sep : '; ');
         }
-        const template = ko ? n.template_ko : n.template;
+        const template = ko ? (n.template_ko !== undefined ? n.template_ko : n.template) : n.template;
         if (typeof template !== 'string') {
             const raw = ko ? (n.text_ko !== undefined ? n.text_ko : n.text) : n.text;
             return render(typeof raw === 'string' ? raw : '', { units });
         }
         const want = ko ? n.text_ko : n.text;
         const body = typeof want === 'string' && typeof prefix === 'string' && want.startsWith(prefix) ? want.slice(prefix.length) : want;
-        return (prefix || '') + fillMatching(template, n.params, units, ko ? 'ko' : 'en', body);
+        return (prefix || '') + fillMatching(template, n.params, units, ko ? 'ko' : 'en', body, n.code);
     }
 
+    // ── 글 하나에 붙는 필드(엔진 §16.10 – 16.11 · 호스트) ────────────────────────────────────────
+    const SIB = ['_code', '_kind', '_ko', '_template', '_template_ko', '_params', '_parts', '_sep', '_prefix', '_prefix_ko'];
+    /** o[k] 의 알림(옆 필드) — 없으면 null */
+    function siblingNotice(o, k) {
+        if (!o || typeof o !== 'object') { return null; }
+        const has = o[k + '_template'] !== undefined || o[k + '_template_ko'] !== undefined || o[k + '_kind'] === 'group';
+        if (!has) { return null; }
+        return {
+            code: o[k + '_code'] !== undefined ? o[k + '_code'] : null, kind: o[k + '_kind'],
+            template: o[k + '_template'], template_ko: o[k + '_template_ko'], params: o[k + '_params'],
+            parts: o[k + '_parts'], sep: o[k + '_sep'], prefix: o[k + '_prefix'], prefix_ko: o[k + '_prefix_ko'],
+            text: o[k], text_ko: o[k + '_ko'] !== undefined ? o[k + '_ko'] : o[k],
+        };
+    }
+    /** o 의 키 가운데 옆 필드가 붙은 글 키 */
+    function siblingKeys(o) {
+        const out = [];
+        for (const key of Object.keys(o)) {
+            const m = /^(.+)_(template|template_ko|kind)$/.exec(key);
+            if (m && !out.includes(m[1]) && siblingNotice(o, m[1]) && (typeof o[m[1]] === 'string' || o[m[1]] === undefined)) { out.push(m[1]); }
+        }
+        return out;
+    }
+    /** 글 필드 하나 → 글(알림이 붙어 있으면 그것, 아니면 옛 글 — SI 면 마지막 수단) */
+    function field(o, k, opts) {
+        const n = siblingNotice(o, k);
+        if (n) { return render(n, opts); }
+        const v = o ? o[k] : undefined;
+        if (typeof v !== 'string') { return v; }
+        return opts && opts.units === 'SI' ? fallbackSI(v, 'field.' + k) : v;
+    }
     /** 검토 항목의 이유 → 글(같은 규칙). 구조가 없으면 옛 글(한국어면 reason_ko) */
     function reasonNotice(c) {
         if (!c || (c.reason === undefined && c.reason_ko === undefined)) { return null; }
-        return {
-            code: c.reason_code !== undefined ? c.reason_code : null, kind: c.reason_kind,
-            template: c.reason_template, template_ko: c.reason_template_ko, params: c.reason_params,
-            parts: c.reason_parts, sep: c.reason_sep, prefix: c.reason_prefix, prefix_ko: c.reason_prefix_ko,
-            text: c.reason, text_ko: c.reason_ko !== undefined ? c.reason_ko : c.reason,
-        };
+        return siblingNotice(c, 'reason') || { code: c.reason_code !== undefined ? c.reason_code : null, text: c.reason, text_ko: c.reason_ko !== undefined ? c.reason_ko : c.reason };
     }
     function reason(c, opts) {
         const n = reasonNotice(c);
@@ -278,17 +320,144 @@
         const ko = !(opts && opts.lang === 'en');
         return render(String((ko ? n.text_ko : n.text) || ''), opts);
     }
+    /** `{k}_notices` — 사전 · 목록 · 사전의 목록 → 같은 모양의 글 */
+    function renderNoticeMap(v, opts) {
+        if (Array.isArray(v)) { return v.map((x) => renderNoticeMap(x, opts)); }
+        if (!v || typeof v !== 'object') { return v; }
+        if ('template' in v || 'template_ko' in v || v.kind === 'group' || 'code' in v) { return render(v, opts); }
+        const out = {};
+        for (const key of Object.keys(v)) { out[key] = renderNoticeMap(v[key], opts); }
+        return out;
+    }
 
-    const LISTS = ['warnings', 'assumptions', 'scope_notes', 'not_evaluated'];
+    // ── 호스트가 쓰는 글(`host.*`) — 영어 · 한국어 템플릿과 물리량 붙은 매개변수 ───────────────────────
+    const P = (quantity, fmt, unit, extra) => Object.assign({ quantity: quantity || null, fmt: fmt || '', unit: unit || null }, extra || {});
+    const HOST = {
+        'host.lap.se_from': { kind: 'assumption', template: 'Lap section Se = {Se} — {from}', template_ko: '랩 단면 Se = {Se} — {from}',
+            params: { Se: P('section_modulus', '.4f', 'in³') } },
+        'host.lap.se_none': { kind: 'assumption', template: 'Lap section Se not available — {why} (the lap flexure check has no verdict)',
+            template_ko: '랩 단면 Se 없음 — {why} (랩 휨 검토는 판정 없음)', params: {} },
+        'host.lap.from_regions': { kind: 'fragment', template: 'lap_section of the purlin lap region(s) {regions} at support {support} (Se = Mnl / Fy with Fn = Fy, no inelastic reserve, no cold work; Vn per member — Manual II-1A / II-2A)',
+            template_ko: '지점 {support} 의 퍼린 랩 구간 {regions} 의 lap_section(Fn = Fy, 비탄성 여유 · 냉간가공 없음, Se = Mnℓ / Fy, Vn 은 한 부재 — Manual II-1A / II-2A)',
+            params: { support: P('count') } },
+        'host.lap.from_caller': { kind: 'fragment', template: 'given by the caller (not derived from the purlin result)', template_ko: '부른 쪽이 준 값(퍼린 결과에서 짓지 않음)', params: {} },
+        'host.lap.no_purlin': { kind: 'reason', template: "no purlin design result — the lap section strength is taken only from the purlin result's lap region",
+            template_ko: '퍼린 설계 결과 없음 — 랩 단면 강도는 퍼린 결과의 랩 구간에서만 가져온다', params: {} },
+        'host.lap.no_support': { kind: 'reason', template: 'the support the lap spans is not set (lap support number)', template_ko: '랩이 걸친 지점이 정해지지 않음(랩 지점 번호)', params: {} },
+        'host.lap.not_stated': { kind: 'reason', template: 'the lap restraint is not stated — the lap section strength with Fn = Fy (Manual II-2A) is not derived',
+            template_ko: '랩 구속을 밝히지 않음 — Fn = Fy 의 랩 단면 강도(Manual II-2A)를 짓지 않는다', params: {} },
+        'host.lap.no_region': { kind: 'reason', template: 'the purlin result has no lap region at support {support}', template_ko: '퍼린 결과에 지점 {support} 의 랩 구간이 없음', params: { support: P('count') } },
+        'host.lap.no_block': { kind: 'reason', template: 'the purlin lap region {region} has no lap_section block (re-run the purlin design with the lap restraint stated)',
+            template_ko: '퍼린 랩 구간 {region} 에 lap_section 블록이 없음(랩 구속을 밝히고 퍼린 설계를 다시 실행)', params: {} },
+        'host.lap.unavailable': { kind: 'reason', template: 'the lap section strength of {region} is not available — {why}', template_ko: '{region} 의 랩 단면 강도를 쓸 수 없음 — {why}', params: {} },
+        'host.lap.no_se': { kind: 'reason', template: 'no effective section modulus (Se) was given', template_ko: '유효단면계수 Se 를 주지 않음', params: {} },
+        'host.readonly.case': { kind: 'reason', template: 'this case is open read-only ({reason}{detail}) — not changed', template_ko: '이 검토 대상은 읽기 전용으로 열려 있다({reason}{detail}) — 바꾸지 않았다', params: {} },
+        'host.readonly.model': { kind: 'reason', template: 'this case is open read-only ({reason}{detail}) — the model is not changed (make a new case from it, or take the lock)',
+            template_ko: '이 검토 대상은 읽기 전용으로 열려 있다({reason}{detail}) — 모델을 바꾸지 않았다(이것으로 새 검토 대상을 만들거나 잠금을 넘겨받기)', params: {} },
+        'host.readonly.lock_detail': { kind: 'fragment', template: ' — open on {host} by {name} since {since}', template_ko: ' — {host} 의 {name} 이(가) {since} 부터 열고 있음', params: {} },
+        'host.purlin.rounded_fallbacks': { kind: 'warning', template: 'The load analysis gave no unrounded values for these — the rounded display values were checked: {keys}',
+            template_ko: '하중 해석이 반올림 전 값(unrounded)을 주지 않아 표시용 반올림 값으로 검토한 것: {keys}', params: {} },
+        'host.purlin.vu_envelope': { kind: 'assumption', template: "The region's Vu is the largest |V| of the shear envelope inside the region, used with the region's largest moment (conservative).",
+            template_ko: '구간의 Vu 는 그 구간 안 전단 포락선의 최대 |V| 를 구간 최대 모멘트와 함께 썼습니다(보수 측).', params: {} },
+        'host.purlin.lap_two_members': { kind: 'assumption', template: 'Lap region: the sum of the two lapped members (each carries half of M and V) is checked (AISI Manual II-2A assumptions (a)–(c) — a design assumption, not a specification provision).',
+            template_ko: '랩 구간: 겹친 두 부재의 강도 합(각 부재가 M · V 의 절반)으로 검토 (AISI Manual II-2A 가정 (a)–(c) — 기준 조항이 아닌 설계 가정).', params: {} },
+        'host.purlin.lap_stated': { kind: 'assumption', template: 'Restraint inside the lap: the person stated it ("lap restraint confirmed", lap_restrained) — lateral-torsional buckling (F2) with unbraced length 0 (Mne = My), distortional buckling (F4) not applicable (the engine records the statement as the source).',
+            template_ko: '랩 안의 구속: 사람이 「랩 구간의 구속 확인」(lap_restrained) 으로 밝혔습니다 — 횡비틀림(F2)은 비지지 길이 0(Mne = My), 뒤틀림(F4)은 해당 없음(엔진이 그 진술을 출처로 기록).', params: {} },
+        'host.purlin.lap_not_stated': { kind: 'not_evaluated', template: 'Lateral-torsional (F2) and distortional (F4) buckling in the lap regions: the restraint is not stated — confirm "lap restraint" (lap_restrained) to check them with the Design Manual II-1A / II-2A assumption',
+            template_ko: '랩 구간의 횡비틀림(F2) · 뒤틀림(F4): 구속을 밝히지 않음 — 「랩 구간의 구속 확인」(lap_restrained) 을 확인하면 Design Manual II-1A / II-2A 의 가정으로 검토합니다', params: {} },
+        'host.purlin.i621_r_not_used': { kind: 'warning', template: '§I6.2.1 R was not used — the uplift bottom-compression regions were checked for lateral-torsional buckling (F2) with Ly ({reasons}).',
+            template_ko: '§I6.2.1 R 을 쓰지 않았습니다 — 양력 하부압축 구간은 Ly 를 쓴 횡비틀림(F2)으로 검토했습니다 ({reasons}).', params: {} },
+        'host.purlin.i621_r_unconfirmed': { kind: 'fragment', template: 'i621_conditions_confirmed is not given or the conditions are not met', template_ko: 'i621_conditions_confirmed 가 없거나 조건 밖', params: {} },
+        'host.purlin.no_uplift_regions': { kind: 'not_evaluated', template: 'Uplift region check (the load analysis gave no uplift region information)', template_ko: '양력 구간 검토 (하중 분석이 양력 구간 정보를 내지 않음)', params: {} },
+        'host.purlin.region_note': { kind: 'not_evaluated', template: '[{regions}] {item}', template_ko: '[{regions}] {item}', params: {} },
+        'host.purlin.region_error': { kind: 'not_evaluated', template: '[{region}] design error: {errors}', template_ko: '[{region}] 설계 오류: {errors}', params: {} },
+        'host.purlin.lap_half_demand': { kind: 'assumption', template: 'lap: each of the two members carries half of the region Mu and Vu (host assumption, AISI Manual II-2A (a)-(c)); the demands in design_checks are those halves',
+            template_ko: '랩: 두 부재가 각각 구간 Mu · Vu 의 절반을 받는다(호스트 가정, AISI Manual II-2A (a)–(c)) — design_checks 의 소요는 그 절반이다', params: {} },
+        // 구간 이름표(하중 해석 좌표 ft — SI 는 m). 범위의 앞 수는 단위 없이
+        'host.region.positive': { kind: 'label', template: 'positive moment {x0}–{x1}', template_ko: '정모멘트 {x0}–{x1}', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.negative': { kind: 'label', template: 'negative moment {x0}–{x1}{at}', template_ko: '부모멘트 {x0}–{x1}{at}', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.cantilever': { kind: 'label', template: 'cantilever negative moment {x0}–{x1}{at}', template_ko: '내민 부모멘트 {x0}–{x1}{at}', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.lap': { kind: 'label', template: 'lap region {x0}–{x1} ({support})', template_ko: '랩 구간 {x0}–{x1} ({support})', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.uplift': { kind: 'label', template: 'uplift bottom compression {x0}–{x1}', template_ko: '양력 하부압축 {x0}–{x1}', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.uplift_support': { kind: 'label', template: 'uplift support top compression {x0}–{x1}', template_ko: '양력 지점부 상부압축 {x0}–{x1}', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.uplift_support_lap': { kind: 'label', template: 'uplift lap region top compression {x0}–{x1}', template_ko: '양력 랩 구간 상부압축 {x0}–{x1}', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.uplift_lap': { kind: 'label', template: 'uplift lap region {x0}–{x1} ({support})', template_ko: '양력 랩 구간 {x0}–{x1} ({support})', params: { x0: P('length_ft', '.2f', null, { no_unit: true }), x1: P('length_ft', '.2f', 'ft') } },
+        'host.region.support': { kind: 'fragment', template: 'support {n}{side}', template_ko: '지점 {n}{side}', params: { n: P('count') } },
+        'host.region.at_support': { kind: 'fragment', template: ' ({support})', template_ko: ' ({support})', params: {} },
+        'host.region.side_left': { kind: 'fragment', template: ' left', template_ko: ' 왼쪽', params: {} },
+        'host.region.side_right': { kind: 'fragment', template: ' right', template_ko: ' 오른쪽', params: {} },
+        'host.load.prefix': { kind: 'fragment', template: '[load] ', template_ko: '[하중] ', params: {} },
+    };
+    const EMPTY_FRAGMENT = { code: null, kind: 'fragment', template: '', template_ko: '', params: [], text: '', text_ko: '' };
+
+    /**
+     * 호스트 알림 하나 — values: 매개변수 이름 → 값(수 · 글) 또는 알림(중첩). list 를 주면 그 목록의 알림.
+     * text · text_ko 는 US 로 그린 글(엔진 알림과 같은 꼴).
+     */
+    function hostNotice(code, values, list) {
+        const def = HOST[code];
+        if (!def) { throw new Error('unknown host notice ' + code); }
+        const vals = values || {};
+        const names = [];
+        const re = /\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
+        let m;
+        while ((m = re.exec(def.template + ' ' + def.template_ko))) { if (!names.includes(m[1])) { names.push(m[1]); } }
+        const params = names.map((name) => {
+            const spec = def.params[name] || P(null);
+            const v = vals[name];
+            if (v && typeof v === 'object' && !Array.isArray(v)) {
+                return { symbol: name, value: typeof v.text === 'string' ? v.text : '', quantity: null, fmt: '', notice: v };
+            }
+            const p = { symbol: name, value: v === undefined || v === null ? '' : v, quantity: typeof v === 'number' ? spec.quantity : null, fmt: typeof v === 'number' ? spec.fmt : '' };
+            if (typeof v === 'number' && spec.unit) { p.unit_text = spec.unit; p.sep = ' '; }
+            if (spec.no_unit) { p.no_unit = true; }
+            return p;
+        });
+        const n = { code, kind: def.kind, template: def.template, template_ko: def.template_ko, params };
+        n.text = render(n, { units: 'US', lang: 'en' });
+        n.text_ko = render(n, { units: 'US', lang: 'ko' });
+        if (list) { n.list = list; }
+        return n;
+    }
+    /** 이은 글(알림 조각들) — 엔진 꼴의 group */
+    function group(parts, sep, prefix, prefixKo) {
+        const ps = (parts || []).filter(Boolean);
+        const g = { code: null, kind: 'group', sep: sep === undefined ? '; ' : sep, parts: ps };
+        if (prefix !== undefined) { g.prefix = prefix; g.prefix_ko = prefixKo !== undefined ? prefixKo : prefix; }
+        g.text = render(g, { units: 'US', lang: 'en' });
+        g.text_ko = render(g, { units: 'US', lang: 'ko' });
+        return g;
+    }
+    /** 알림을 글 필드로 붙인다: o[k] = 영어 글, o[k_code · _kind · _ko · _template · _template_ko · _params …] */
+    function attachField(o, k, n) {
+        if (!o || !n) { return o; }
+        o[k] = n.text;
+        o[k + '_code'] = n.code;
+        o[k + '_kind'] = n.kind;
+        o[k + '_ko'] = n.text_ko;
+        if (n.kind === 'group') { o[k + '_parts'] = n.parts; o[k + '_sep'] = n.sep; }
+        else { o[k + '_template'] = n.template; o[k + '_template_ko'] = n.template_ko; o[k + '_params'] = n.params; }
+        if (n.prefix !== undefined) { o[k + '_prefix'] = n.prefix; o[k + '_prefix_ko'] = n.prefix_ko; }
+        return o;
+    }
+    /** 엔진 알림에 머리를 단다(계약 §16.2 prefix · prefix_ko) — 「[하중] …」 */
+    function withPrefix(n, prefix, prefixKo, list) {
+        const out = Object.assign({}, n, { prefix: prefix + (n.prefix || ''), prefix_ko: prefixKo + (n.prefix_ko !== undefined ? n.prefix_ko : (n.prefix || '')) });
+        out.text = prefix + n.text;
+        out.text_ko = prefixKo + (n.text_ko !== undefined ? n.text_ko : n.text);
+        if (list) { out.list = list; }
+        return out;
+    }
+
+    const LISTS = ['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'reasons', 'dsm_warnings', 'load_not_evaluated'];
     /** 엔진의 알림 목록인가(호스트가 같은 이름으로 쓰는 글 목록 — 예 generate_report 의 notices — 과 가른다) */
     const isNotices = (v) => Array.isArray(v) && v.some((n) => n && typeof n === 'object' && ('template' in n || 'template_ko' in n || n.kind === 'group' || 'list' in n));
-    const LIST_KIND = { warnings: 'warning', assumptions: 'assumption', scope_notes: 'scope', not_evaluated: 'not_evaluated' };
+    const LIST_KIND = { warnings: 'warning', assumptions: 'assumption', scope_notes: 'scope', not_evaluated: 'not_evaluated', not_checked: 'not_evaluated', reasons: 'reason', dsm_warnings: 'warning', load_not_evaluated: 'not_evaluated' };
     const textOf = (x) => (typeof x === 'string' ? x : (x && typeof x === 'object' && typeof x.reason === 'string' ? x.reason : null));
 
     /**
-     * 결과 맨 위의 알림 → [{list, code, kind, text}] (목록 차례: warnings · assumptions · scope_notes · not_evaluated).
-     * 알림이 옛 글과 하나씩 맞으면 알림을 그리고, 알림에 없는 옛 글(호스트가 더한 것)은 code null 로 그 목록 끝에.
-     * opts.lists 로 목록을 고른다.
+     * 결과의 알림 → [{list, code, kind, text}] (목록 차례). 알림이 옛 글과 하나씩 맞으면 알림을 그리고, 알림에 없는 옛 글(호스트가 더한 것)은
+     * code null 로 그 목록 끝에. opts.lists 로 목록을 고른다.
      */
     function lines(result, opts) {
         const out = [];
@@ -310,12 +479,11 @@
                     out.push({ list, code: null, kind: LIST_KIND[list], text: render(t, opts), ...(o && typeof o === 'object' && typeof o.name === 'string' ? { subject: o.name } : {}) });
                 }
             });
-            // 옛 목록이 없는(알림만 있는) 경우
             if (!(list in result)) { mine.forEach((n) => out.push({ list, code: n.code !== undefined ? n.code : null, kind: n.kind || LIST_KIND[list], text: render(n, opts) })); }
         }
         return out;
     }
-    /** 한 목록의 글만(옛 글 목록 자리에 그대로 놓을 수 있게) */
+    /** 한 목록의 글만 */
     function texts(result, list, opts) { return lines(result, { ...(opts || {}), lists: [list] }).map((l) => l.text); }
 
     /** 랩 패스너 이름표 — `fastener_label_parts {template, template_ko, params, values}` */
@@ -324,9 +492,48 @@
         return render({ kind: 'label', template: parts.template, template_ko: parts.template_ko || parts.template, params: parts.params, text: fallback, text_ko: fallback }, opts);
     }
 
+    /** 나무 안의 검토 항목 id → name_ko(모드 · 지배 검토 이름 `{k}_id` 를 그 이름으로) */
+    function checkNames(tree) {
+        const names = new Map();
+        const walk = (o, depth) => {
+            if (!o || typeof o !== 'object' || depth > 40) { return; }
+            if (Array.isArray(o)) { o.forEach((x) => walk(x, depth + 1)); return; }
+            if (typeof o.id === 'string' && typeof o.name_ko === 'string' && 'verdict' in o && !names.has(o.id)) { names.set(o.id, o.name_ko); }
+            for (const k of Object.keys(o)) { if (o[k] && typeof o[k] === 'object') { walk(o[k], depth + 1); } }
+        };
+        walk(tree, 0);
+        return names;
+    }
+    const ID_KEYS_RE = /^(governing_check|controlling_mode|governing_mode|shear_governing_mode|tension_governing_mode|shear_verified_governing_mode|tension_verified_governing_mode|Pns_governing_mode)$/;
+
     /**
-     * MCP detail 'full' · SI: 나무 안의 알림 · 이유 · 옛 글 목록의 글을 SI 로 다시 그리고, 매개변수의 단위 글자를 SI 로(값은 siUnits 가 바꾼다).
-     * US 면 아무것도 하지 않는다. 제자리에서 바꾸지 않고 새 나무를 돌려준다.
+     * 글 필드 · 알림 사전 · 모드 이름을 그린다(제자리 아님). keepSiblings: 옆 필드를 남기는가(화면 · 보고서는 남기고, MCP 요약은 뺀다).
+     */
+    function renderFieldsInto(out, o, opts, names, keepSiblings) {
+        for (const k of siblingKeys(o)) {
+            out[k] = render(siblingNotice(o, k), opts);
+            if (!keepSiblings) { for (const s of SIB) { if (s !== '_code') { delete out[k + s]; } } }
+        }
+        for (const key of Object.keys(o)) {
+            const m = /^(.+)_notices$/.exec(key);
+            if (m && o[key] && typeof o[key] === 'object') {
+                out[m[1]] = renderNoticeMap(o[key], opts);
+                if (!keepSiblings) { delete out[key]; }
+            }
+        }
+        for (const key of Object.keys(o)) {
+            if (!ID_KEYS_RE.test(key) || typeof o[key + '_id'] !== 'string') { continue; }
+            const nm = names.get(o[key + '_id']);
+            // 모드 이름표(controlling_mode_code · _ko)가 있으면 그것, 없으면 그 검토 항목의 name_ko
+            if (siblingNotice(o, key)) { continue; }
+            // 화면은 원래 이름을 `{key}_en` 에 둔다(한계상태 표의 행 이름과 맞대는 데 — 그 행들은 code 가 없다)
+            if (nm) { if (keepSiblings && typeof o[key] === 'string') { out[key + '_en'] = o[key]; } out[key] = nm; }
+        }
+    }
+
+    /**
+     * MCP detail 'full' · SI: 나무 안의 알림 · 이유 · 글 필드 · 옛 글 목록을 SI 로 다시 그리고, 매개변수의 단위 글자를 SI 로(값은 siUnits 가 바꾼다).
+     * US 면 아무것도 하지 않는다. 새 나무를 돌려준다.
      */
     function localize(tree, units) {
         if (units !== 'SI') { return tree; }
@@ -341,6 +548,8 @@
                     o.unit_text = Q[o.quantity].si;
                     if (!o.sep) { o.sep = ' '; }
                     if (o.fmt && !/g$|e$/.test(o.fmt)) { o.fmt = ''; }
+                    // 상수(템플릿의 치수): 글도 SI 로(값은 siUnits 가 바꾼다)
+                    if (o.const) { o.text = siFixed(o.value * Q[o.quantity].f, Q[o.quantity].d); }
                 }
                 return o;
             }) : ps;
@@ -358,13 +567,13 @@
                 if (Array.isArray(o.params)) { out.params = paramsSI(o.params); }
                 out.units = 'SI';
             }
-            if (o.reason_template !== undefined || o.reason_template_ko !== undefined || o.reason_kind === 'group') {
-                out.reason = reason(o, { units: 'SI', lang: 'en' });
-                out.reason_ko = reason(o, { units: 'SI', lang: 'ko' });
-                if (Array.isArray(o.reason_params)) { out.reason_params = paramsSI(o.reason_params); }
+            for (const k of siblingKeys(o)) {
+                const n = siblingNotice(o, k);
+                out[k] = render(n, { units: 'SI', lang: 'en' });
+                out[k + '_ko'] = render(n, { units: 'SI', lang: 'ko' });
+                if (Array.isArray(o[k + '_params'])) { out[k + '_params'] = paramsSI(o[k + '_params']); }
             }
             if (isNotices(o.notices)) {
-                // 옛 글 목록도 같은 글로(하나씩 맞는 것만 — 호스트가 더한 글은 그 안의 US 상수만)
                 for (const list of LISTS) {
                     if (!Array.isArray(o[list])) { continue; }
                     const mine = o.notices.filter((n) => n && n.list === list);
@@ -373,7 +582,7 @@
                         const t = textOf(x);
                         const n = mine[k];
                         if (n && t === n.text) { k++; const s = render(n, { units: 'SI', lang: 'en' }); return typeof x === 'string' ? s : { ...walk(x), reason: s }; }
-                        return typeof x === 'string' ? literalToSI(x) : walk(x);
+                        return typeof x === 'string' ? fallbackSI(x, 'list.' + list) : walk(x);
                     });
                 }
             }
@@ -394,9 +603,8 @@
             value_unit_text: q.si };
     }
 
-    const REASON_KEYS = ['reason_template', 'reason_template_ko', 'reason_params', 'reason_parts', 'reason_sep', 'reason_prefix', 'reason_prefix_ko', 'reason_ko', 'reason_kind'];
     /**
-     * AI · 사람이 읽는 요약(MCP summary · checks): 알림 · 이유 · 이름표를 한국어로, 요청한 단위로 그린 글만 남긴다(결정 K4b — code 는 함께).
+     * AI · 사람이 읽는 요약(MCP summary · checks): 알림 · 이유 · 글 필드 · 이름표를 한국어로, 요청한 단위로 그린 글만 남긴다(code 는 함께).
      * 옛 글 목록의 항목은 code 가 있으면 {code, text}, 없으면 글. 검토 항목: reason = 한국어 이유 + reason_code, 영어 이름(name)은 뺀다(name_ko).
      * detail 'full' 은 두 말 모두 — SI 면 localize 로 글을 SI 로 다시 그린다. 새 나무를 돌려준다.
      */
@@ -416,7 +624,8 @@
         };
         if (full) { return fixI621(localize(tree, units)); }
         const ro = { units, lang: 'ko' };
-        // 알림이 붙지 않은 하위 묶음(하중 해석의 auto_params …)의 옛 글도 같은 글의 알림으로 그린다 — 나무 안의 알림을 글로 찾는다
+        const names = checkNames(tree);
+        // 알림이 붙지 않은 하위 묶음의 옛 글도 같은 글의 알림으로 — 나무 안의 알림을 글로 찾는다(엔진이 블록마다 알림을 단 뒤에는 거의 쓰이지 않는다)
         const byText = new Map();
         const gather = (o, depth) => {
             if (!o || typeof o !== 'object' || depth > 40) { return; }
@@ -456,16 +665,11 @@
                 }
             } else {
                 for (const list of LISTS) {
-                    if (Array.isArray(o[list])) { out[list] = o[list].map(loose); }
+                    if (Array.isArray(o[list]) && o[list].every((x) => typeof x === 'string' || (x && typeof x === 'object' && !Array.isArray(x)))) { out[list] = o[list].map(loose); }
                 }
             }
-            if (o.reason_template !== undefined || o.reason_template_ko !== undefined || o.reason_kind === 'group' || o.reason_ko !== undefined) {
-                out.reason = reason(o, ro);
-                for (const k of REASON_KEYS) { delete out[k]; }
-            } else if (typeof o.reason === 'string' && units === 'SI') { out.reason = literalToSI(o.reason); }
+            renderFieldsInto(out, o, ro, names, false);
             if (typeof o.name_ko === 'string' && typeof o.id === 'string' && 'verdict' in o) { delete out.name; }
-            // 구간 · 지점 이름표(「정모멘트 3.25–12.50 ft」)의 수도 SI 로
-            if (units === 'SI' && typeof o.label === 'string') { out.label = literalToSI(o.label); }
             if (o.fastener_label_parts && typeof o.fastener_label_parts === 'object') {
                 out.fastener_label = fastenerLabel(o.fastener_label_parts, ro, o.fastener_label);
                 delete out.fastener_label_parts;
@@ -476,10 +680,32 @@
     }
 
     /**
-     * 나무(결과 · 여러 결과) 안의 알림을 글로 찾는 함수 — 호스트가 옮겨 담은 옛 글(dsm_warnings · purlin_warnings …)을 같은 알림의 한국어로.
-     * 찾지 못한 글은 그대로(SI 면 그 안의 US 상수만 바꾼다).
+     * 화면 · 보고서 — 글 필드(`{k}_*`) · 알림 사전(`{k}_notices`) · 모드 이름(`{k}_id`)을 한국어 · 그 단위로 바꾼 나무(제자리 아님).
+     * 목록 · `notices` · 검토 항목은 그대로(도우미 utils · review 가 그 단위로 그린다).
      */
-    function textMap(tree, opts) {
+    function forPage(tree, units) {
+        const ro = { units: units === 'SI' ? 'SI' : 'US', lang: 'ko' };
+        const names = checkNames(tree);
+        const seen = new WeakMap();
+        function walk(o) {
+            if (Array.isArray(o)) { return o.map(walk); }
+            if (!o || typeof o !== 'object') { return o; }
+            if (seen.has(o)) { return seen.get(o); }
+            if (isNotices([o]) && 'code' in o) { return o; }     // 알림 그 자체는 그대로(도우미가 그린다)
+            const out = {};
+            seen.set(o, out);
+            for (const k of Object.keys(o)) { out[k] = k === 'notices' || k === 'design_checks' ? o[k] : walk(o[k]); }
+            renderFieldsInto(out, o, ro, names, true);
+            return out;
+        }
+        return walk(tree);
+    }
+
+    /**
+     * 나무(결과 · 여러 결과) 안의 알림을 글로 찾는 함수 — 호스트가 옮겨 담은 옛 글(dsm_warnings · purlin_warnings …)을 같은 알림으로.
+     * extra: 글 → 알림(호스트가 지은 것). 찾지 못한 글은 그대로(SI 면 마지막 수단).
+     */
+    function noticeIndex(tree, extra) {
         const byText = new Map();
         const gather = (o, depth) => {
             if (!o || typeof o !== 'object' || depth > 40) { return; }
@@ -488,23 +714,83 @@
             for (const k of Object.keys(o)) { if ((k !== 'notices' || !isNotices(o[k])) && o[k] && typeof o[k] === 'object') { gather(o[k], depth + 1); } }
         };
         gather(tree, 0);
+        if (extra) { for (const [t, n] of extra) { byText.set(t, n); } }
+        return byText;
+    }
+    function textMap(tree, opts) {
+        const byText = noticeIndex(tree);
         const o2 = { units: opts && opts.units === 'SI' ? 'SI' : 'US', lang: opts && opts.lang === 'en' ? 'en' : 'ko' };
         return (s) => {
             if (typeof s !== 'string') { return s; }
             const n = byText.get(s);
-            return n ? render(n, o2) : (o2.units === 'SI' ? literalToSI(s) : s);
+            return n ? render(n, o2) : (o2.units === 'SI' ? fallbackSI(s, 'textMap') : s);
         };
     }
 
-    /** 보고서 · 화면에 넘길 검토 항목 하나 — 이유를 한국어(그 단위)로 그리고 구조 필드를 뺀다, 이름은 name_ko 를 먼저 */
+    /**
+     * 호스트가 엮은 결과(퍼린 묶음 …)의 목록에 `notices` 를 단다 — 목록 글마다 같은 글의 알림(호스트가 지은 것 · 나무 안의 엔진 알림),
+     * 없으면 그 글(code null). 목록과 차례가 같다.
+     */
+    function attachNotices(result, sources, hostMade) {
+        if (!result || typeof result !== 'object') { return result; }
+        const idx = noticeIndex(sources, hostMade);
+        const notices = [];
+        for (const list of LISTS) {
+            if (!Array.isArray(result[list])) { continue; }
+            for (const x of result[list]) {
+                const t = textOf(x);
+                if (t === null) { continue; }
+                const n = idx.get(t);
+                notices.push(n ? Object.assign({}, n, { list }) : { code: null, kind: LIST_KIND[list], list, text: t, text_ko: t });
+            }
+        }
+        result.notices = notices;
+        return result;
+    }
+
+    const REASON_KEYS = SIB.map((s) => 'reason' + s).filter((k) => k !== 'reason_code');
+    /** 출처 종류 · 좌굴값 방법 · 표지의 한국어 이름(계약 §16.12 — 엔진 용어표 SOURCE_KINDS_KO · BUCKLING_METHODS_KO · SOURCE_FLAGS_KO 의 사본) */
+    const SOURCE_KINDS_KO = { step: '앞 단계', check: '다른 검토 항목', section_property: '단면 성질', material: '재료', buckling_analysis: '좌굴 해석',
+        load_analysis: '하중 해석', user_input: '사용자 입력', engine_default: '엔진 기본값', specification: '기준' };
+    const BUCKLING_METHODS_KO = { fsm_minimum: 'FSM 극소', fsm_single_minimum: 'FSM 단일 극소', analytic: '해석식 (부록 1 · 2)',
+        analytic_raised_to_floor: '해석식 (곡선 하한으로 올림)', closed_form: '폐형식 (§E2 · §F2)', user_supplied: '사용자가 준 값 (합리적 해석)' };
+    const SOURCE_FLAGS_KO = { generated: '템플릿으로 생성', assumption_source: '가정의 근거', restraint_source: '구속의 근거' };
+
+    /**
+     * 보고서 · 화면에 넘길 검토 항목 하나 — 이유 · 글 필드(계산 과정 단계 · 출처의 note 까지)를 한국어(그 단위)로 그리고 구조 필드를 뺀다.
+     * 출처에는 kind_ko · method_ko(그 이름표) — 그리는 쪽(reportRender)이 쓴다. 이름은 name_ko 를 먼저.
+     */
     function readerCheck(c, opts) {
         if (!c || typeof c !== 'object') { return c; }
-        const r = reason(c, { units: opts && opts.units === 'SI' ? 'SI' : 'US', lang: 'ko' });
-        const out = { ...c };
+        const o2 = { units: opts && opts.units === 'SI' ? 'SI' : 'US', lang: 'ko' };
+        const deep = (o, depth) => {
+            if (Array.isArray(o)) { return o.map((x) => deep(x, depth + 1)); }
+            if (!o || typeof o !== 'object' || depth > 12) { return o; }
+            const out = {};
+            const sibs = siblingKeys(o);
+            for (const k of Object.keys(o)) { out[k] = deep(o[k], depth + 1); }
+            for (const k of sibs) {
+                out[k] = render(siblingNotice(o, k), o2);
+                for (const sfx of SIB) { if (sfx !== '_code') { delete out[k + sfx]; } }
+            }
+            if (typeof o.kind === 'string' && SOURCE_KINDS_KO[o.kind] && ('key' in o || 'step' in o || 'method' in o || 'table' in o || 'note' in o || 'id' in o || 'combination' in o)) {
+                out.kind_ko = SOURCE_KINDS_KO[o.kind];
+                if (typeof o.method === 'string' && BUCKLING_METHODS_KO[o.method]) { out.method_ko = BUCKLING_METHODS_KO[o.method]; }
+                const flags = Object.keys(SOURCE_FLAGS_KO).filter((fl) => o[fl]);
+                if (flags.length) { out.flags_ko = flags.map((fl) => SOURCE_FLAGS_KO[fl]); }
+            }
+            return out;
+        };
+        const r = reason(c, o2);
+        const out = deep(c, 0);
         for (const k of REASON_KEYS) { delete out[k]; }
         if (r !== null) { out.reason = r; }
         return out;
     }
 
-    return { render, reason, reasonNotice, lines, texts, fastenerLabel, localize, forReader, textMap, readerCheck, i621ToSI, pyFormat, reprFloat, literalToSI, QUANTITY: Q, UNCHANGED, isDimensional };
+    return {
+        render, reason, reasonNotice, field, siblingNotice, lines, texts, fastenerLabel, localize, forReader, forPage, textMap, attachNotices,
+        readerCheck, SOURCE_KINDS_KO, BUCKLING_METHODS_KO, SOURCE_FLAGS_KO, i621ToSI, pyFormat, reprFloat, literalToSI, fallbackSI, STATS, HOST, hostNotice, group, attachField, withPrefix, EMPTY_FRAGMENT,
+        QUANTITY: Q, UNCHANGED, isDimensional, LISTS,
+    };
 }));

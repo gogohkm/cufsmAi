@@ -72,6 +72,8 @@ export interface BatcherDeps {
 
 export class ChangeBatcher {
     private open: OpenBatch | null = null;
+    /** 사람의 묶음이 열린 채로 돌고 있는 다른 행위자의 요청(겹친 요청은 그 안에서 묶지 않는다) */
+    private foreign = 0;
     private session: ChangeContext | null = null;
     constructor(private readonly d: BatcherDeps) {}
 
@@ -98,6 +100,28 @@ export class ChangeBatcher {
 
     /** MCP 요청 하나(또는 같은 행위자의 겹친 요청) */
     async run<T>(ctx: ChangeContext, fn: () => T | Promise<T>): Promise<T> {
+        if (this.foreign > 0) { return await fn(); }
+        const o = this.open;
+        const sameActor = !!o && o.ctx.actor.kind === ctx.actor.kind && o.ctx.caseId === ctx.caseId;
+        if (o && (o.kind === 'quiet' || o.kind === 'session') && !sameActor) {
+            // 다른 행위자의 요청 — 묻기만 했으면(바뀐 것 없음) 사람의 묶음을 그대로 둔다. 바꾼 것이 있을 때만 끼어듦:
+            // 사람 묶음을 그 요청 직전까지로 닫고, 요청 묶음을 내고, 편집 상태면 그 뒤에서 다시 연다
+            const mid = this.d.snapshot();
+            const build = this.d.build ?? ((c: ChangeContext, x: Snapshot, y: Snapshot) => buildChange(c, x, y));
+            this.foreign += 1;
+            try { return await fn(); } finally {
+                this.foreign -= 1;
+                const after = this.d.snapshot();
+                const reqBody = build(ctx, mid, after);
+                if (reqBody && this.open === o) {
+                    const personBody = build(o.ctx, o.before, mid);
+                    if (personBody) { this.d.emit(personBody, o.ctx); }
+                    this.d.emit(reqBody, ctx);
+                    this.open = o.kind === 'session' && this.session
+                        ? { ctx: this.session, before: after, depth: 0, kind: 'session', lastTouch: this.d.now() } : null;
+                }
+            }
+        }
         const b = this.ensure(ctx, 'request');
         b.depth += 1;
         try { return await fn(); } finally {

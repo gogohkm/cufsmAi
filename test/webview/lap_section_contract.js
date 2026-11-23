@@ -74,7 +74,10 @@ async function main() {
     assert(src && src.Se === ls1.Se.value && src.Vn === ls1.Vn.value && src.support === 3 && src.regions.includes('lap-1') && /lap_section/.test(src.from),
       `section_source names the lap region at support 3 and takes its lap_section block: ${JSON.stringify(src)}`);
     assert(Math.abs(src.Se - gov.result.Mnl / gov.result.Fy_used) > 1e-6, 'Se does not follow the governing region');
-    assert(lr.assumptions.some((a) => /랩 단면 Se = .* lap-1/.test(a)), 'the result says where Se came from');
+    // 호스트 글은 알림(host.lap.se_from — 옛 글은 영어, 한국어 · 보이는 단위는 그려서)
+    assert(lr.assumptions.some((a) => /^Lap section Se = .* lap-1/.test(a)), 'the result says where Se came from');
+    const seN = (lr.notices || []).find((n) => n && n.code === 'host.lap.se_from');
+    assert(seN && /^랩 단면 Se = .* in³ — 지점 3 의 퍼린 랩 구간 lap-1/.test(seN.text_ko) && src.from_code === 'host.lap.from_regions', 'the lap Se line is a host notice: ' + JSON.stringify(seN && seN.text_ko));
     notes.push(`II-2A support 3: lap local ${loc.ratio.toFixed(4)} = lap-1 F3 ${f3.ratio.toFixed(4)} (governing ${gov.id})`);
 
     // ── 2. 지점 · 진술이 없으면 짓지 않는다 ───────────────────────────────

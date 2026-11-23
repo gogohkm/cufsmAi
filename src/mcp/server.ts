@@ -917,9 +917,14 @@ server.tool("set_case_inputs",
                 .describe("Lap length each side of each support — ft, or m if units='SI'; null where the table has no cell (first support's left, last support's right, simple spans)"),
         }).optional().describe("The span table (checked against spanType / nSpans)"),
         units: CASE_UNITS,
-        reason: z.string().max(300).optional().describe("Short reason (recorded with the invalidated results)"),
+        reason: z.string().max(20000).optional().describe("Short reason — recorded with the invalidated results and with the change (the first 300 characters, control characters removed; same rule as every write tool)"),
     },
-    async (args) => { const { work: _w, source: _s, ...rest } = args as any; void _w; void _s; return json(await callBridgePost('/action', { action: 'set_case_inputs', ...rest })); }
+    async (args) => {
+        // R2-2: 까닭의 길이는 한 규칙 — 300 자로 자른다(공용 reason 과 같게, 거절하지 않는다)
+        const { work: _w, source: _s, ...rest } = args as any; void _w; void _s;
+        if (typeof rest.reason === 'string') { rest.reason = rest.reason.slice(0, 300); }
+        return json(await callBridgePost('/action', { action: 'set_case_inputs', ...rest }));
+    }
 );
 
 server.tool("run_case_check",

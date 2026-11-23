@@ -127,19 +127,26 @@ async function main() {
     n0 = lc.total;
     await page('editSession', { state: 'start' });
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.1 } });
+    // 묻기만 하는 요청(바뀐 것 없음)은 끼어듦이 아니다 — 사람의 묶음은 그대로
+    await tool('get_case_inputs', { keys: ['Cb'] });
+    await tool('get_status', {});
+    assert.strictEqual(p.__testChanges().pending, 'session', 'a read-only MCP request leaves the edit session open');
+    assert.strictEqual((await changes({ limit: 100 })).total, n0, 'and writes no line');
     await tool('set_case_inputs', { inputs: { Cb: 1.25 } });
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.3 } });
     await page('editSession', { state: 'end' });
     lc = await changes({ limit: 100 });
     assert.deepStrictEqual(lc.changes.slice(0, 3).map((c) => c.by.kind), ['person', 'ai', 'person'], 'an AI call inside an edit session splits it: ' + JSON.stringify(lc.changes.slice(0, 3)));
-    notes.push('an AI call inside an edit session closes the person bundle (person · ai · person)');
+    notes.push('read-only MCP requests leave the edit session open; an AI change inside it splits it (person · ai · person)');
 
     // ── 편집 상태 밖: 조용한 2 초 ──
     n0 = lc.total;
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.0 } });
     await page('caseEdit', { origin: 'user', changes: { Lb: 120 } });
-    // (묻는 것도 행동이다 — MCP 로 물으면 다른 행위자라 그 묶음을 닫는다. 여기서는 호스트의 상태로 본다)
-    assert.strictEqual(p.__testChanges().pending, 'quiet', 'not yet closed');
+    // 상태 묻기는 조용한 묶음을 닫지 않는다(R2-2 고침 — 전에는 AI 의 질문마다 한 편집이 여러 줄로 갈렸다)
+    await tool('get_status', {});
+    await tool('list_changes', { limit: 1 });
+    assert.strictEqual(p.__testChanges().pending, 'quiet', 'not yet closed (a status question does not cut in)');
     await sleep(2200);
     assert.strictEqual(p.__testChanges().pending, null, 'closed by 2 s of quiet');
     lc = await changes({ limit: 100 });
@@ -158,8 +165,12 @@ async function main() {
     assert(last3.every((c) => c.by.kind === 'ai'), 'token without request id / with a wrong screen secret / body actor → ai: ' + JSON.stringify(last3));
     assert(!JSON.stringify(lc).includes('evil') && !last3.some((c) => c.work), 'a reason in the query string is ignored');
     const ctl = 'x\u0007y\u202Ez' + '가'.repeat(19995);
-    // (set_case_inputs 의 reason 은 그 도구 자신의 300 자 인자 — 넘으면 도구가 거절한다; 공용 reason 은 2만 자까지 받아 300 자로)
-    await assert.rejects(tool('set_case_inputs', { inputs: { Cb: 1.08 }, reason: ctl }), /300/);
+    // 까닭의 길이는 한 규칙 — set_case_inputs 도 다른 쓰기 도구처럼 2만 자까지 받아 300 자로 자른다(거절하지 않는다)
+    await tool('set_case_inputs', { inputs: { Cb: 1.08 }, reason: ctl });
+    lc = await changes({ limit: 1 });
+    const rs = lc.changes[0].reason || '';
+    assert(lc.changes[0].by.kind === 'ai' && rs.length > 0 && rs.length <= 300 && ![...rs].some((ch) => ch.charCodeAt(0) < 0x20 || ch === '\u202E'),
+      'set_case_inputs takes a 20,000-character reason and keeps 300: ' + rs.length);
     await tool('set_material', { E: 29400, v: 0.3, reason: ctl });
     lc = await changes({ limit: 1 });
     const rr = lc.changes[0].reason || '';
@@ -167,7 +178,7 @@ async function main() {
     const big = await post('/action', { action: 'set_case_inputs', inputs: { Cb: 1.09 } }, { 'X-StCFSD-Reason': encodeURIComponent('가'.repeat(20000)) });
     lc = await changes({ limit: 100 });
     assert(big.status === 431 || big.status === 0 || (lc.changes[0].reason || '').length <= 300, `a 20,000-character reason header: HTTP ${big.status}, nothing over 300 stored`);
-    notes.push(`⚔ token without request id → ai, body actor / wrong screen secret → ai, query reason ignored, control chars + 20,000 chars → ${rr.length} kept, raw 20,000-char header → HTTP ${big.status}`);
+    notes.push(`⚔ token without request id → ai, body actor / wrong screen secret → ai, query reason ignored, control chars + 20,000 chars → ${rr.length} kept (set_case_inputs too: ${rs.length}), raw 20,000-char header → HTTP ${big.status}`);
 
     // ── 밖에서 바뀐 것 = external ──
     await tool('save_case', {});

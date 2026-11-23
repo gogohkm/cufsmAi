@@ -219,6 +219,22 @@
     /** 범위 안내(언제나 참인 적용 범위 문장) — 접어서 보인다. */
     function scopeNotesList(result, opts) { return _listOf(result, 'scope_notes', opts); }
 
+    /**
+     * 퍼린 묶음의 목록(purlinPacket 의 purlin_*) → 사람이 읽는 글(한국어, opts.units). 묶음의 알림(purlin_notices)으로 그리고,
+     * 알림이 없는 옛 글은 그대로. { warn, ne, asm, loadNe }
+     */
+    function purlinLists(d, opts) {
+        const ns = d && Array.isArray(d.purlin_notices) ? d.purlin_notices : [];
+        const of = (key, list, as) => {
+            const arr = d && Array.isArray(d[key]) ? d[key] : [];
+            if (!NOTICES || !ns.length) { return arr.filter((x) => typeof x === 'string'); }
+            const r = { [as]: arr, notices: ns.filter((n) => n && n.list === list).map((n) => (list === as ? n : Object.assign({}, n, { list: as }))) };
+            return _noticeTexts(r, as, opts) || arr;
+        };
+        return { warn: of('purlin_warnings', 'warnings', 'warnings'), ne: of('purlin_not_evaluated', 'not_evaluated', 'not_evaluated'),
+            asm: of('purlin_assumptions', 'assumptions', 'assumptions'), loadNe: of('purlin_load_not_evaluated', 'load_not_evaluated', 'not_evaluated') };
+    }
+
     /** 이용률(비) 표시값. 판정이 OK 가 아니면 「OK」 문구를 붙이지 않는다. */
     function ratioWithVerdict(ratio, result) {
         const v = verdictOf(result);
@@ -268,7 +284,10 @@
         return {
             ...design,
             member_type: 'flexure',
-            controlling_mode: `${gov.label}: ${design.controlling_mode || ''}`.trim(),
+            // 지배 구간 이름표 + 그 구간의 모드(엔진 이름표의 한국어). 모드의 옆 필드 · id 는 빼서 forPage 가 이름표를 지우지 않게
+            controlling_mode: `${gov.label}: ${design.controlling_mode_ko || design.controlling_mode || ''}`.trim(),
+            controlling_mode_code: design.controlling_mode_code, controlling_mode_kind: undefined, controlling_mode_ko: undefined,
+            controlling_mode_template: undefined, controlling_mode_template_ko: undefined, controlling_mode_params: undefined, controlling_mode_id: undefined,
             purlin_mode: true,
             pass: combinedPass,
             verification_complete: combinedPass === true ? design.verification_complete : false,
@@ -280,6 +299,8 @@
             purlin_warnings: Array.isArray(data.warnings) ? data.warnings : [],
             purlin_assumptions: Array.isArray(data.assumptions) ? data.assumptions : [],
             purlin_load_not_evaluated: Array.isArray(data.load_not_evaluated) ? data.load_not_evaluated : [],
+            // 묶음의 목록마다 알림(호스트 host.* · 엔진 · 「[하중] …」) — purlinLists 가 그 단위의 한국어로 그린다
+            purlin_notices: Array.isArray(data.notices) ? data.notices : [],
             design_positive: data.design_positive || null,
             design_negative: data.design_negative || null,
             design_lap: data.design_lap || null,
@@ -305,21 +326,28 @@
      * @returns {{Se: number|null, Vn: number|null, from: string|null, regions: string[], support: number|null, reason: string|null}}
      */
     function deriveLapSection(purlin, support, opts) {
-        const none = (reason) => ({ Se: null, Vn: null, from: null, regions: [], support: Number.isInteger(support) ? support : null, reason });
-        if (!purlin || !Array.isArray(purlin.regions)) { return none('no purlin design result — the lap section strength is taken only from the purlin result\'s lap region'); }
-        if (!Number.isInteger(support) || support < 1) { return none('the support the lap spans is not set (lap support number)'); }
-        if (!(opts && opts.stated)) { return none('the lap restraint is not stated — the lap section strength with Fn = Fy (Manual II-2A) is not derived'); }
+        // 까닭 · 출처는 호스트 알림(host.lap.* — notices.js HOST): reason / from 은 그 영어 글, *_notice 가 알림(한국어 · 단위는 그리는 쪽이)
+        const none = (code, values) => {
+            const n = NOTICES ? NOTICES.hostNotice(code, values || {}) : null;
+            return { Se: null, Vn: null, from: null, regions: [], support: Number.isInteger(support) ? support : null, reason: n ? n.text : code, reason_notice: n };
+        };
+        if (!purlin || !Array.isArray(purlin.regions)) { return none('host.lap.no_purlin'); }
+        if (!Number.isInteger(support) || support < 1) { return none('host.lap.no_support'); }
+        if (!(opts && opts.stated)) { return none('host.lap.not_stated'); }
         const regs = purlin.regions.filter((g) => g && g.kind === 'lap' && Number(g.support) === support - 1 && g.result && !g.result.error);
-        if (regs.length === 0) { return none('the purlin result has no lap region at support ' + support); }
+        if (regs.length === 0) { return none('host.lap.no_region', { support }); }
         let Se = null, Vn = null;
         const ids = [];
         for (const g of regs) {
             // K4b(엔진 e38af69, 계약 §6.3): 랩 단면 강도는 그 구간 결과의 lap_section 블록에서 — Fn = Fy(Mne = My), §F3.2.1 국부좌굴만,
             // 비탄성 여유 · 냉간가공 없음, Se = Mnℓ / Fy, Vn = §G2.1 한 부재. 구간 자신의 검토 항목 · Mnl(여유 · 냉간가공을 품을 수 있다)은 쓰지 않는다.
             const ls = g.result.lap_section;
-            if (!ls || typeof ls !== 'object') { return none('the purlin lap region ' + g.id + ' has no lap_section block (re-run the purlin design with the lap restraint stated)'); }
+            if (!ls || typeof ls !== 'object') { return none('host.lap.no_block', { region: String(g.id) }); }
             if (ls.available === false || !ls.Se || !(Number(ls.Se.value) > 0)) {
-                return none('the lap section strength of ' + g.id + ' is not available' + (ls.reason ? ' — ' + (typeof ls.reason === 'string' ? ls.reason : JSON.stringify(ls.reason)) : ''));
+                // 엔진의 까닭(lap_section.reason — 알림이면 그것)
+                const why = NOTICES && NOTICES.siblingNotice(ls, 'reason') ? NOTICES.siblingNotice(ls, 'reason')
+                    : { code: null, kind: 'reason', text: typeof ls.reason === 'string' ? ls.reason : (ls.reason ? JSON.stringify(ls.reason) : 'no Mnl'), text_ko: typeof ls.reason === 'string' ? ls.reason : '' };
+                return none('host.lap.unavailable', { region: String(g.id), why });
             }
             const se = Number(ls.Se.value);
             if (Se === null || se < Se) { Se = se; }
@@ -327,14 +355,14 @@
             if (vn > 0 && (Vn === null || vn < Vn)) { Vn = vn; }
             ids.push(String(g.id));
         }
-        return { Se, Vn, from: 'lap_section of the purlin lap region' + (ids.length > 1 ? 's ' : ' ') + ids.join(', ') + ' at support ' + support + ' (Se = Mnl / Fy with Fn = Fy, no inelastic reserve, no cold work; Vn per member — Manual II-1A / II-2A)',
-            regions: ids, support, reason: null };
+        const fromN = NOTICES ? NOTICES.hostNotice('host.lap.from_regions', { regions: ids.join(', '), support }) : null;
+        return { Se, Vn, from: fromN ? fromN.text : 'lap_section', from_notice: fromN, regions: ids, support, reason: null };
     }
 
     return {
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
-        assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason,
+        assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason, purlinLists,
         pickGoverningPurlinDesign, deriveLapSection,
     };
 });

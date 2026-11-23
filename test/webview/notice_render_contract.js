@@ -40,7 +40,8 @@ const US_NUM = /(^|[^A-Za-z0-9_.])\d+(?:\.\d+)?\s?(in\b|in\.|ksi|kips?\b|kip-in)
     for (const p of c.params || []) {
       if (!N.isDimensional(p.quantity) || typeof p.value !== 'number') { continue; }
       dims++;
-      const label = N.QUANTITY[p.quantity].si;
+      // US 가 ft 로 쓴 길이(값은 in)는 m 로
+      const label = p.quantity === 'length' && p.unit_text === 'ft' ? 'm' : N.QUANTITY[p.quantity].si;
       assert(si.includes(label), `SI ${c.code}: ${p.symbol} carries ${label}: ${si}`);
     }
     for (const p of c.params || []) {
@@ -59,7 +60,7 @@ const US_NUM = /(^|[^A-Za-z0-9_.])\d+(?:\.\d+)?\s?(in\b|in\.|ksi|kips?\b|kip-in)
   assert(/^ρ=78\d\d(\.\d)? kg\/m³$/.test(N.render(md, { units: 'SI' })), `mass_density in kg/m³: ${N.render(md, { units: 'SI' })}`);
   for (const [us, si] of [['t > 3/16 in', 't > 4.76 mm'], ['(0.08 ≤ d ≤ 0.25 in)', '(2.03 ≤ d ≤ 6.35 mm)'], ['Fy < 95 ksi', 'Fy < 655.0 MPa'], ['span ≤ 33 ft', 'span ≤ 10.06 m'],
     ['d <= 12 in.', 'd <= 304.8 mm.'], ['7.345e-7 kip*s^2/in^4', '7.345e-7 kip*s^2/in^4'], ['2 in the web', '2 in the web'], ['1e6 ksi', '1e6 ksi'], ['E60(60 ksi)', 'E60(413.7 MPa)'],
-    ['정모멘트 3.25–12.50 ft', '정모멘트 0.991–3.810 m']]) {
+    ['정모멘트 3.25–12.50 ft', '정모멘트 0.99–3.81 m']]) {   // ft 좌표는 자리를 늘리지 않는다(구간 이름표와 같게)
     assert.strictEqual(N.literalToSI(us), si, `literal ${us}`);
   }
   notes.push(`SI: ${dims} physical parameters in SI units, no US number left, null quantities as given, template constants (fractions, ranges, ksi, ft) converted`);
@@ -123,6 +124,90 @@ const RESULT = {
   assert.deepStrictEqual([map('Inflection points taken as brace points.'), map('unknown 12 in')], ['변곡점을 가새점으로 봄.', 'unknown 12 in']);
   assert.strictEqual(N.textMap(RESULT, { units: 'SI' })('unknown 12 in'), 'unknown 304.8 mm');
   notes.push('helpers: list texts in the page units, reasons, fastener label, report check, host-copied texts');
+}
+
+// 6 ─ 무늬 바꾸기: 정확히 아는 단위 낱말만, 경계가 맞을 때만(엔진 · 호스트가 내는 단위 꼴 전부 — 위첨자 · ^n · 겹단위) ───────
+{
+  const cases = [
+    ['랩 단면 Se = 1.2345 in³ — x', '랩 단면 Se = 20230 mm³ — x'],          // 회귀: 전에는 31.4 mm³(길이로 읽음)
+    ['A = 0.8134 in²', 'A = 525 mm²'], ['Ixx = 9.18 in⁴', 'Ixx = 3821004 mm⁴'], ['Ixx = 9.18 in^4', 'Ixx = 3821004 mm⁴'], ['Cw = 12 in⁶', 'Cw = 3222430398 mm⁶'],
+    ['Sx = 1.5 in^3', 'Sx = 24581 mm³'], ['M = 40 kip-in', 'M = 4.52 kN-m'], ['M = 12 kip-ft', 'M = 16.27 kN-m'], ['20 psf', '0.958 kPa'], ['100 plf', '1.459 kN/m'],
+    ['k = 1.5 kip/in', 'k = 262.69 kN/m'], ['Fy = 50 ksi', 'Fy = 344.7 MPa'], ['P = 3 kips', 'P = 13.34 kN'], ['P = 1 kip', 'P = 4.45 kN'], ['d <= 12 in.', 'd <= 304.8 mm.'],
+    ['t > 3/16 in', 't > 4.76 mm'], ['(0.08 ≤ d ≤ 0.25 in)', '(2.03 ≤ d ≤ 6.35 mm)'], ['span ≤ 33 ft', 'span ≤ 10.06 m'],
+    // 모르는 꼴 · 다른 단위계 · 단위 이름만 — 그대로
+    ['7.345e-7 kip*s^2/in^4', '7.345e-7 kip*s^2/in^4'], ['0.2836 lb/in^3', '0.2836 lb/in^3'], ['in kip*s^2/in^4', 'in kip*s^2/in^4'], ['2 in the web', '2 in the web'],
+    ['1e6 ksi', '1e6 ksi'], ['7850 kg/m^3', '7850 kg/m^3'], ['5 in^5', '5 in^5'], ['5 in⁵', '5 in⁵'], ['3 kip-in/rad/in', '3 kip-in/rad/in'], ['4 in-lb', '4 in-lb'],
+  ];
+  for (const [us, si] of cases) { assert.strictEqual(N.literalToSI(us), si, 'literal ' + us); }
+  // 계약 사례(엔진 고정값 전부): 템플릿 글은 바꾸지 않는다 — 마지막 수단은 엔진이 글로 넘긴 매개변수 둘에서만 쓰인다
+  N.STATS.fallback.length = 0;
+  for (const c of FIX.pairs) { N.render(c, { units: 'SI', lang: 'ko' }); N.render(c, { units: 'SI', lang: 'en' }); }
+  const hits = [...new Set(N.STATS.fallback)].sort();
+  assert.deepStrictEqual(hits, ['member.warning.effective_length_defaulted_verify.items', 'member.warning.i6_2_1_i6_k2.i621_issues'],
+    'the pattern fallback fires only on the two engine text parameters: ' + JSON.stringify(hits));
+  notes.push(`pattern: ${cases.length} unit forms (in³ regression, ^n, compounds left alone); on the corpus only ${hits.length} engine text params use the fallback`);
+}
+
+// 7 ─ 호스트 알림(host.*) ───────────────────────────────────────────
+{
+  const codes = Object.keys(N.HOST);
+  for (const code of codes) {
+    const def = N.HOST[code];
+    const vals = {};
+    for (const m of (def.template + def.template_ko).matchAll(/\{([A-Za-z_]+)\}/g)) { vals[m[1]] = def.params[m[1]] && def.params[m[1]].quantity ? 1.5 : 'x'; }
+    const n = N.hostNotice(code, vals);
+    assert(typeof n.text === 'string' && n.text && !/\{[A-Za-z_]+\}/.test(n.text) && !/\{[A-Za-z_]+\}/.test(n.text_ko), code);
+    assert(/[가-힣]/.test(n.text_ko) || /^[[ ]|^ \(| — /.test(def.template_ko) || def.template_ko === '[{regions}] {item}', 'Korean template: ' + code);
+  }
+  const se = N.hostNotice('host.lap.se_from', { Se: 1.2345, from: N.hostNotice('host.lap.from_regions', { regions: 'lap-1', support: 3 }) });
+  assert.strictEqual(se.text, 'Lap section Se = 1.2345 in³ — lap_section of the purlin lap region(s) lap-1 at support 3 (Se = Mnl / Fy with Fn = Fy, no inelastic reserve, no cold work; Vn per member — Manual II-1A / II-2A)');
+  assert(/^랩 단면 Se = 20230 mm³ — 지점 3 의 퍼린 랩 구간 lap-1 의 lap_section/.test(N.render(se, { units: 'SI' })), N.render(se, { units: 'SI' }));
+  const lab = N.hostNotice('host.region.lap', { x0: 23.5, x1: 26, support: N.hostNotice('host.region.support', { n: 3, side: N.hostNotice('host.region.side_left') }) });
+  assert.strictEqual(lab.text_ko, '랩 구간 23.50–26.00 ft (지점 3 왼쪽)');
+  assert.strictEqual(N.render(lab, { units: 'SI' }), '랩 구간 7.16–7.92 m (지점 3 왼쪽)');
+  N.STATS.fallback.length = 0;
+  N.render(se, { units: 'SI' }); N.render(lab, { units: 'SI' });
+  assert.deepStrictEqual(N.STATS.fallback, [], 'host notices never go through the pattern fallback');
+  notes.push(`host registry: ${codes.length} host.* codes render in both languages; lap Se line 「${N.render(se, { units: 'SI' }).slice(0, 26)}…」, labels in m`);
+}
+
+// 8 ─ 글 필드 · 알림 사전 · 모드 이름 · 머리(엔진 §16.10 – 16.12) ──────────────────
+{
+  const meth = N.hostNotice('host.purlin.vu_envelope');
+  const res = { governing_check: 'Flexural strength', governing_check_id: 'member.flexure.global',
+    design_checks: [{ id: 'member.flexure.global', name: 'Yielding and LTB', name_ko: '항복 및 횡비틀림좌굴', verdict: 'pass' }],
+    controlling_mode: 'Local', controlling_mode_code: 'member.label.mode_local', controlling_mode_kind: 'label', controlling_mode_template: 'Local', controlling_mode_template_ko: '국부좌굴', controlling_mode_params: [],
+    analysis_method: meth.text, analysis_method_code: meth.code, analysis_method_kind: meth.kind, analysis_method_template: meth.template, analysis_method_template_ko: meth.template_ko, analysis_method_params: meth.params,
+    pattern: { M: 'all spans', V: 'spans 1, 3' }, pattern_notices: { M: { code: 'x.all', kind: 'label', template: 'all spans', template_ko: '모든 경간', params: [] },
+      V: { code: 'x.sp', kind: 'label', template: 'spans {s}', template_ko: '경간 {s}', params: [{ symbol: 's', value: '1, 3', quantity: null, fmt: '' }] } } };
+  const r = N.forReader(res, { units: 'US' });
+  assert.deepStrictEqual([r.governing_check, r.controlling_mode, r.analysis_method, r.pattern], ['항복 및 횡비틀림좌굴', '국부좌굴', meth.text_ko, { M: '모든 경간', V: '경간 1, 3' }]);
+  assert(!('analysis_method_template' in r) && !('pattern_notices' in r) && r.analysis_method_code === meth.code, 'the summary keeps the code, not the template fields');
+  const pg = N.forPage(res, 'SI');
+  assert.deepStrictEqual([pg.governing_check, pg.controlling_mode, pg.pattern.V], ['항복 및 횡비틀림좌굴', '국부좌굴', '경간 1, 3']);
+  assert(pg.analysis_method_template && pg.design_checks === res.design_checks, 'the page keeps the fields and the checks');
+  // 머리 — 하중 해석의 알림을 퍼린 묶음으로 옮긴 「[하중] …」 은 code 를 지킨다
+  const ln = { code: 'loads.assumption.x', kind: 'assumption', list: 'assumptions', template: 'Inflection points taken as brace points.', template_ko: '변곡점을 가새점으로 봄.', params: [],
+    text: 'Inflection points taken as brace points.', text_ko: '변곡점을 가새점으로 봄.' };
+  const pre = N.withPrefix(ln, '[하중] ', '[하중] ', 'assumptions');
+  const bundle = { assumptions: [pre.text], notices: [pre] };
+  assert.deepStrictEqual(N.lines(bundle, { units: 'US' }), [{ list: 'assumptions', code: 'loads.assumption.x', kind: 'assumption', text: '[하중] 변곡점을 가새점으로 봄.' }]);
+  // attachNotices: 호스트가 엮은 목록 — 같은 글의 알림(엔진 · 호스트), 모르는 글은 code null
+  const host = N.hostNotice('host.purlin.vu_envelope');
+  const made = new Map([[host.text, host], [pre.text, pre]]);
+  const out = N.attachNotices({ assumptions: [host.text, pre.text, 'other'] }, [], made);
+  assert.deepStrictEqual(out.notices.map((n) => n.code), ['host.purlin.vu_envelope', 'loads.assumption.x', null]);
+  // 계산 과정의 출처 메모 · 출처 이름(§16.12)
+  const chk = { id: 'c', verdict: 'pass', steps: [{ inputs: [{ symbol: 'Fy', value: 50, quantity: 'stress', source: { kind: 'material', key: 'Fy', note: 'virgin Fy', note_code: 'member.note.virgin_fy',
+    note_kind: 'note', note_template: 'virgin Fy', note_template_ko: '원소재 Fy', note_params: [] } }, { symbol: 'Lb', value: 120, quantity: 'length',
+    source: { kind: 'engine_default', key: 'Lb', note: 'Lb defaulted to 120 in', note_code: 'member.note.lb_default', note_kind: 'note', note_template: 'Lb defaulted to {L_default}',
+    note_template_ko: 'Lb 를 {L_default} 로 둠', note_params: [{ symbol: 'L_default', value: 120, quantity: 'length', fmt: 'raw', text: '120', const: true, unit_text: 'in', sep: ' ' }] } },
+    { symbol: 'Mcrl', value: 1, quantity: 'moment', source: { kind: 'buckling_analysis', method: 'fsm_minimum' } }] }] };
+  const rc = N.readerCheck(chk, { units: 'SI' });
+  const srcs = rc.steps[0].inputs.map((x) => x.source);
+  assert.deepStrictEqual([srcs[0].note, srcs[0].kind_ko, srcs[1].note, srcs[2].method_ko], ['원소재 Fy', '재료', 'Lb 를 3048.0 mm 로 둠', 'FSM 극소']);
+  assert(!('note_template' in srcs[0]) && srcs[0].note_code === 'member.note.virgin_fy', 'note fields rendered, code kept');
+  notes.push('fields: {k}_* · {k}_notices · mode ids → name_ko · [하중] prefix keeps the code · trace notes and source names in Korean / SI');
 }
 
 console.log(`notice_render_contract: PASS (${notes.join('; ')})`);

@@ -21,6 +21,8 @@
     const _warnList = (r) => _U.warningsList(r, _uo());
     const _assumpList = (r) => _U.assumptionsList(r, _uo());
     const _scopeList = (r) => _U.scopeNotesList(r, _uo());
+    /** K4b: 결과의 글 필드(모드 · 방법 · 이름표 · 출처) · 알림 사전 · 모드 이름(id → name_ko)을 한국어 · 화면 단위로(목록 · 알림은 도우미가) */
+    const _fp = (r) => (_N && r && typeof r === 'object' && !Array.isArray(r) ? _N.forPage(r, _unitSystem) : r);
     /** 랩 패스너 이름표 — fastener_label_parts(물리량)를 화면 단위로 */
     const _fastenerLabel = (r) => (r && _N ? _N.fastenerLabel(r.fastener_label_parts, { units: _unitSystem, lang: 'ko' }, r.fastener_label) : (r && r.fastener_label) || '');
 
@@ -885,6 +887,7 @@
     // DSM 설계값 테이블
     // ============================================================
     function renderDsmResults(data) {
+        data = _fp(data);
         const el = document.getElementById('dsm-table-container');
         if (!el || !data) { return; }
 
@@ -1295,6 +1298,7 @@
     }
 
     function renderLapConnectionResult(result) {
+        result = _fp(result);
         const el = document.getElementById('connection-result');
         if (!el || !result) return;
         // 오류 응답: 기본값 도면 + NG 대신 실제 오류를 표시
@@ -1376,7 +1380,8 @@
             html += '<h4 style="margin-top:10px">패스너 한계상태 (1개당)</h4>';
             html += '<table style="width:100%;font-size:11px;border-collapse:collapse">';
             html += '<tr><th style="text-align:left;padding:2px">모드</th><th style="text-align:right;padding:2px">Rn</th><th style="text-align:right;padding:2px">' + rnLbl + '</th><th style="padding:2px">지배</th></tr>';
-            var _pnsGov = result.Pns_governing_mode || fd.governing_mode;
+            // 행 이름(엔진 영어)과 맞댄다 — forPage 가 지배 모드를 한국어 이름으로 바꾸고 원래 이름은 *_en 에 둔다
+            var _pnsGov = result.Pns_governing_mode_en || result.Pns_governing_mode || fd.governing_mode_en || fd.governing_mode;
             fd.limit_states.forEach(ls => {
                 const isGov = ls.name === _pnsGov;
                 html += '<tr style="' + (isGov ? 'font-weight:700;background:rgba(79,195,247,0.1)' : '') + '">';
@@ -1479,6 +1484,7 @@
     }
 
     function renderConnectionResult(result) {
+        result = _fp(result);
         const el = document.getElementById('connection-result');
         if (!el || !result) return;
         if (result.error) {
@@ -1558,7 +1564,7 @@
             html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
             html += '<tr><th style="text-align:left;padding:3px">모드</th><th style="text-align:right;padding:3px">Rn</th><th style="text-align:right;padding:3px">' + rnLbl + '</th><th style="padding:3px">지배?</th></tr>';
             result.limit_states.forEach(ls => {
-                const isGov = ls.name === result.governing_mode;
+                const isGov = ls.name === (result.governing_mode_en || result.governing_mode);
                 html += '<tr style="' + (isGov ? 'font-weight:700;background:rgba(79,195,247,0.1)' : '') + '">';
                 html += '<td style="padding:3px">' + ls.name + '</td>';
                 html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.Rn, 'force') + '</td>';
@@ -2321,6 +2327,7 @@
     /** 마지막 진동 요청(큰 요청 확인 뒤 같은 입력으로 다시 보낸다). */
     let _lastVibRequest = {};
     function renderVibrationResult(data) {
+        data = _fp(data);
         const el = document.getElementById('vibration-result');
         if (!el) { return; }
         if (data && data.needs_confirmation) {
@@ -2380,6 +2387,7 @@
     }
 
     function renderPlasticSurface(data) {
+        data = _fp(data);
         const canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('plastic-surface-canvas'));
         if (!canvas || !data || !data.P) { return; }
         const ctx = canvas.getContext('2d');
@@ -4798,6 +4806,7 @@
 
     // Analyze Loads 결과 렌더링
     function renderLoadAnalysisResult(data) {
+        data = _fp(data);
         const el = document.getElementById('load-analysis-result');
         if (!el) return;
 
@@ -5328,6 +5337,7 @@
 
     // 설계 결과 렌더링
     function renderDesignResult(data) {
+        data = _fp(data);
         if (!data) { return; }
         const summaryEl = document.getElementById('design-summary');
         const stepsEl = document.getElementById('design-steps');
@@ -5573,18 +5583,20 @@
 
         // 경고 · 미평가 · 검토하지 않은 항목 — 판정 바로 아래에 엔진 문장 그대로
         {
+            // 퍼린 묶음의 목록(호스트 글 · 「[하중] …」 포함)은 묶음의 알림으로 — 한국어 · 화면 단위
+            const _pl = _U.purlinLists(data, _uo());
             const _extraWarn = [
                 ...(data.flexure_x ? _warnList(data.flexure_x) : []),
                 ...(data.compression ? _warnList(data.compression) : []),
-                ...(Array.isArray(data.purlin_warnings) ? data.purlin_warnings : []),
+                ..._pl.warn,
             ];
             const _extraNe = [
                 ...(data.flexure_x ? _notEvalList(data.flexure_x) : []),
                 ...(data.compression ? _notEvalList(data.compression) : []),
-                ...(Array.isArray(data.purlin_not_evaluated) ? data.purlin_not_evaluated : []),
-                ...(Array.isArray(data.purlin_load_not_evaluated) ? data.purlin_load_not_evaluated.map(s => '[하중 분석] ' + s) : []),
+                ..._pl.ne,
+                ..._pl.loadNe.map(s => '[하중 분석] ' + s),
             ];
-            const _extraAsm = Array.isArray(data.purlin_assumptions) ? data.purlin_assumptions : [];
+            const _extraAsm = _pl.asm;
             summaryHtml += _verdictListsHtml(data, _extraNe, _extraWarn, _extraAsm);
         }
 
@@ -5884,7 +5896,12 @@
         if (!deck) { return { warnings: [], assumptions: [], scope: [] }; }
         const hasNew = Array.isArray(deck.warnings) || Array.isArray(deck.scope_notes) || Array.isArray(deck.assumptions);
         if (Array.isArray(deck.notices)) {
-            return { warnings: _warnList(deck), assumptions: _assumpList(deck), scope: _scopeList(deck) };
+            // 옛 한 줄 warning 은 범위 안내(scope_notes)의 사본 — 경고로 다시 싣지 않는다(V4-34; 엔진 8479b02 가 데크에 알림을 단 뒤 드러났다)
+            // (forPage 가 warning 을 한국어로 그렸을 수 있다 — code · 두 말로 맞댄다)
+            const dup = typeof deck.warning === 'string' && deck.notices.some((n) => n && n.list === 'scope_notes'
+                && ((deck.warning_code && n.code === deck.warning_code) || n.text === deck.warning || n.text_ko === deck.warning));
+            const d2 = dup ? Object.assign({}, deck, { warning: undefined }) : deck;
+            return { warnings: _warnList(d2), assumptions: _assumpList(deck), scope: _scopeList(deck) };
         }
         return {
             warnings: arr(deck.warnings),

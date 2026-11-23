@@ -202,15 +202,17 @@
             // 엔진의 step 은 0 부터(같은 항목 steps 의 자리) — 표의 # 는 1 부터
             step: () => '단계 ' + (typeof src.step === 'number' ? src.step + 1 : ''),
             check: () => '항목 ' + (src.id || src.group || ''),
-            section_property: () => '단면 ' + (src.key || '') + (src.generated ? ' (템플릿)' : ''),
+            section_property: () => '단면 ' + (src.key || '') + (src.generated ? ' (' + (src.flags_ko && src.flags_ko.includes('템플릿으로 생성') ? '템플릿으로 생성' : '템플릿') + ')' : ''),
             material: () => '재료 ' + (src.key || ''),
-            buckling_analysis: () => '좌굴 해석 ' + (src.method || '') + (src.label ? ' ' + src.label : ''),
+            buckling_analysis: () => '좌굴 해석 ' + (src.method_ko || src.method || '') + (src.label ? ' ' + src.label : ''),
             load_analysis: () => '하중 해석' + (src.combination ? ' ' + src.combination : ''),
             user_input: () => '입력 ' + (src.key || ''),
             engine_default: () => '엔진 기본값 ' + (src.key || ''),
             specification: () => '기준 ' + [src.table, src.row, src.equation].filter(Boolean).join(' '),
         }[k];
-        return bits ? bits() : String(k || '');
+        // K4e: 출처 메모(엔진 note — readerCheck 가 한국어 · 보이는 단위로 그려 둔 글)
+        const note = typeof src.note === 'string' && src.note ? ' — ' + src.note : '';
+        return (bits ? bits() : String(src.kind_ko || k || '')) + note;
     }
     function qWithSym(q, units) {
         if (!q) { return '—'; }
