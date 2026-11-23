@@ -91,10 +91,11 @@ export function createProject(rootDir: string, rawName: unknown, opts: { now: st
 }
 
 /**
- * 파일에서 위로(최대 `depth` 단계 — `<프로젝트>/02_검토대상/x.csd`) 선언을 찾는다. 링크인 선언은 인정하지 않는다.
+ * 파일에서 위로(최대 `depth` 단계 — 기본 3: 발행본 `<프로젝트>/04_발행본/<대상>/R0/x.csd` 까지, V7-25) 선언을 찾는다.
+ * 링크인 선언은 인정하지 않는다.
  * `issued: true` 면 그 파일이 발행본 폴더 안이다(발행본 — 읽기 전용 · 기록 없음으로 연다).
  */
-export function findProjectFor(file: string, depth = 2): { dir: string; issued: boolean } | null {
+export function findProjectFor(file: string, depth = 3): { dir: string; issued: boolean } | null {
     let dir = path.dirname(path.resolve(file));
     for (let level = 0; level <= depth; level += 1) {
         try {

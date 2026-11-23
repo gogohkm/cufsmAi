@@ -6,11 +6,12 @@
  *    (a) `planDefaultAssumptions`: 실행의 엔진 요청에 든 키 가운데 출처가 `default` 이고 「손으로 정한 공학 기본값」인 것을
  *        표의 묶음마다 한 항목(「<묶음>: <칸들> — 입력 기본값 그대로」). 값이 정해지면 닫는다.
  *    (b) `planEngineAssumptions`: 결과가 밝힌 엔진 자체 가정 · 범위 알림을 결과 종류 + 부호(없으면 글의 해시)마다 한 항목. 사라지면 닫는다.
- *  - 「확정」은 AI 의 상태만으로는 발행을 막는 것에서 빠지지 않는다 — 사람이 그 판(마지막 seq)에 확인 표시를 해야 한다
- *    (`blocksIssue` — 결정 D7).
+ *  - 「확정」 · 「해당 없음」 · AI 가 닫은 것은 사람이 그 판(마지막 seq)에 확인 표시를 해야 발행을 막는 것에서 빠진다
+ *    (`blocksIssue` — 결정 D7 · 설계 §2.6). 프로그램이 닫은 자동 가정만 확인 없이 풀린다.
+ *  - 접기는 세는 줄(`ok`)만 — 검증 안 된 줄은 상태를 바꾸지 못한다(V7-23). 다음 번호도 세는 줄에서만(V7-30).
  * 파일을 읽거나 쓰지 않는다.
  */
-import type { LogSpec, RecordLine, LineStatus } from './log';
+import { countable, type LogSpec, type RecordLine, type LineStatus } from './log';
 import { cleanText, ID_RE } from './names';
 import { CASE_ID_RE } from './project';
 import { Ref, sanitizeRefs } from './refs';
@@ -53,14 +54,19 @@ function sources(raw: unknown): AssumptionSourceRef[] {
 export interface Assumption {
     key: string; item: string; caseId: string | null; text: string; basis: string; status: AssumptionStatus; scope: Ref[];
     sources: AssumptionSourceRef[]; impact: string; origin: AssumptionOrigin; originKey: string | null;
-    closed: boolean; closedBy: string | null; writer: string; createdAt: string; lastSeq: number; lastAt: string; status_line: LineStatus;
+    closed: boolean; closedBy: string | null;
+    /** 닫은 줄의 행위자가 프로그램인가(자동 가정의 원인이 사라져 닫힘 — 확인 없이 풀리는 유일한 경우) */
+    closedByProgram: boolean;
+    writer: string; createdAt: string; lastSeq: number; lastAt: string; status_line: LineStatus;
     history: Array<{ event: string; at: string; writer: string; status?: AssumptionStatus; status_line: LineStatus }>;
 }
 
 export function nextAssumptionId(lines: RecordLine[]): string {
     let max = 0;
-    for (const l of lines) { if (l.event === 'add' && typeof l.body.item === 'string' && ITEM_RE.test(l.body.item)) { max = Math.max(max, Number(l.body.item.slice(2))); } }
-    return `A-${String(max + 1).padStart(2, '0')}`;
+    for (const l of lines) { if (countable(l) && l.event === 'add' && typeof l.body.item === 'string' && ITEM_RE.test(l.body.item)) { max = Math.max(max, Number(l.body.item.slice(2))); } }
+    const next = `A-${String(max + 1).padStart(2, '0')}`;
+    if (!ITEM_RE.test(next)) { throw new AssumptionInputError('no more assumption ids in this project'); }
+    return next;
 }
 
 /** AI 의 쓰기. `add {text, basis?, status, scope?, sources?, impact?, caseId?}` · `update {item, …}` · `close {item, basis?}` */
@@ -133,7 +139,7 @@ export const ASSUMPTION_SPEC: LogSpec = { type: 'assumptions', major: 1, events:
 export function foldAssumptions(lines: RecordLine[]): Assumption[] {
     const byKey = new Map<string, Assumption>();
     const firstWriter = new Map<string, string>();
-    for (const l of lines) {
+    for (const l of lines.filter(countable)) {
         const b = l.body as AssumptionBody;
         const writer = l.sig.w;
         if (l.event === 'add') {
@@ -143,7 +149,7 @@ export function foldAssumptions(lines: RecordLine[]): Assumption[] {
             byKey.set(key, {
                 key, item: b.item, caseId: b.caseId ?? null, text: b.text ?? '', basis: b.basis ?? '', status: b.status ?? 'provisional',
                 scope: b.scope ?? [], sources: b.sources ?? [], impact: b.impact ?? '', origin: b.origin ?? 'ai', originKey: b.originKey ?? null,
-                closed: false, closedBy: null, writer, createdAt: l.at, lastSeq: l.seq, lastAt: l.at, status_line: l.status,
+                closed: false, closedBy: null, closedByProgram: false, writer, createdAt: l.at, lastSeq: l.seq, lastAt: l.at, status_line: l.status,
                 history: [{ event: 'add', at: l.at, writer, status: b.status, status_line: l.status }],
             });
             continue;
@@ -154,7 +160,6 @@ export function foldAssumptions(lines: RecordLine[]): Assumption[] {
         if (!a) { continue; }
         a.history.push({ event: l.event, at: l.at, writer, status: b.status, status_line: l.status });
         a.lastSeq = l.seq; a.lastAt = l.at;
-        if (l.status !== 'ok' && a.status_line === 'ok') { a.status_line = l.status; }
         if (l.event === 'update') {
             if (b.text !== undefined) { a.text = b.text; }
             if (b.basis !== undefined) { a.basis = b.basis; }
@@ -162,19 +167,20 @@ export function foldAssumptions(lines: RecordLine[]): Assumption[] {
             if (b.scope !== undefined) { a.scope = b.scope; }
             if (b.sources !== undefined) { a.sources = b.sources; }
             if (b.impact !== undefined) { a.impact = b.impact; }
-        } else if (l.event === 'close') { a.closed = true; a.closedBy = b.closedBy ?? null; if (b.basis !== undefined) { a.basis = b.basis; } }
+        } else if (l.event === 'close') { a.closed = true; a.closedBy = b.closedBy ?? null; a.closedByProgram = l.actor.kind === 'program'; if (b.basis !== undefined) { a.basis = b.basis; } }
     }
     return [...byKey.values()];
 }
 
 /**
- * 발행을 막는가(결정 D7): 닫히지 않았고 — 임시 · 현장 확인 필요이거나, 확정인데 사람의 확인이 그 판(lastSeq)에 없거나.
+ * 발행을 막는가(결정 D7 · 설계 §2.6): 임시 · 현장 확인 필요는 늘 막는다. 확정 · 해당 없음 · AI 가 닫은 것은 사람의 확인이 그 판(lastSeq)에
+ * 있어야 풀린다 — AI 의 줄만으로는 풀리지 않는다. 프로그램이 닫은 자동 가정만 확인 없이 풀린다.
  * `personConfirmedSeq` = 그 가정에 유효한 사람의 확인이 가리키는 seq(R4 가 준다). 해당 없음은 막지 않는다.
  */
 export function blocksIssue(a: Assumption, personConfirmedSeq: number | null): boolean {
-    if (a.closed || a.status === 'not-applicable') { return false; }
-    if (a.status === 'provisional' || a.status === 'field-check') { return true; }
-    return personConfirmedSeq !== a.lastSeq;
+    if (a.closed && a.closedByProgram) { return false; }   // 자동 가정의 원인이 사라짐(그 변경 id 가 적혀 있다)
+    if (!a.closed && (a.status === 'provisional' || a.status === 'field-check')) { return true; }
+    return personConfirmedSeq !== a.lastSeq;               // firm · not-applicable · AI 가 닫은 것 — 사람이 그 판을 확인해야 (§2.6)
 }
 
 /** (a) 기본값 가정 — 추가할 것 · 닫을 것. 글은 칸 이름을 늘어놓을 뿐(판단 없음) */

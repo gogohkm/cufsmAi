@@ -52,5 +52,40 @@ export function fp(ns: string, v: unknown): string {
     return 'sha256:' + sha256Hex(canonicalJson({ ns, v }));
 }
 
+/** 줄에서 받지 않는 키 — 프로토타입을 건드리는 이름 */
+export const FORBIDDEN_KEYS = ['__proto__', 'constructor', 'prototype'];
+
+function scan(v: unknown): string | null {
+    if (typeof v === 'number') {
+        if (Number.isInteger(v) && Math.abs(v) > Number.MAX_SAFE_INTEGER && Math.abs(v) < 1e21) { return 'an integer outside the safe range'; }
+        return null;
+    }
+    if (Array.isArray(v)) { for (const x of v) { const e = scan(x); if (e) { return e; } } return null; }
+    if (v && typeof v === 'object') {
+        for (const k of Object.keys(v)) {
+            if (FORBIDDEN_KEYS.includes(k)) { return `the key '${k}'`; }
+            const e = scan((v as any)[k]);
+            if (e) { return e; }
+        }
+    }
+    return null;
+}
+
+/**
+ * 줄 글 하나를 읽는다 — **글이 그 값의 정규 JSON 과 바이트까지 같을 때만** 받는다(V7-34). 그래서 겹친 키 · `1.0e0` ·
+ * `t` 같은 다른 꼴 · 2^53 을 넘는 정수 · 키 차례가 다른 글은 거절된다(한 서명에 두 글이 붙지 않는다).
+ * 프로토타입 이름(`__proto__` · `constructor` · `prototype`)의 키도 거절한다. 줄 끝의 CR · 글 앞의 BOM 은 부르는 쪽이 벗긴다.
+ */
+export function parseCanonicalLine(raw: string): { ok: true; value: any } | { ok: false; reason: string } {
+    let v: any;
+    try { v = JSON.parse(raw); } catch { return { ok: false, reason: 'not JSON' }; }
+    const bad = scan(v);
+    if (bad) { return { ok: false, reason: `contains ${bad}` }; }
+    let c: string;
+    try { c = canonicalJson(v); } catch (e: any) { return { ok: false, reason: e?.message || 'not canonical' }; }
+    if (c !== raw) { return { ok: false, reason: 'not in canonical form (key order, number form, escapes or duplicate keys differ)' }; }
+    return { ok: true, value: v };
+}
+
 /** 정규 JSON 으로 깊게 복제(지문과 같은 규칙 — 던질 수 있다) */
 export function canonicalClone<T>(v: T): T { return JSON.parse(canonicalJson(v)) as T; }

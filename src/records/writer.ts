@@ -89,18 +89,33 @@ export function loadOrCreateWriter(keyDir: string): Writer {
     let pem: Buffer | null;
     try { pem = readBounded(file, 16 * 1024); } catch (e: any) { throw new KeyUnavailableError(`the writer key cannot be read (${e?.message || e})`); }
     if (pem === null) {
+        // V7-28: 다 쓴 임시 파일을 링크(있으면 실패 — 원자적)로 그 이름에 건다. 반쯤 쓴 열쇠를 남이 읽거나, 쓰다 죽어 빈 열쇠가
+        // 남는 일이 없다. 링크를 못 거는 파일 시스템이면 같은 폴더의 rename 으로(그때는 없을 때만 — 겹친 순간에는 한쪽이 진다).
         const { privateKey } = generateKeyPairSync('ed25519');
         const out = privateKey.export({ type: 'pkcs8', format: 'pem' });
+        const tmp = path.join(dir, `.${KEY_FILE}.tmp-${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
         try {
-            fs.writeFileSync(file, out, { flag: 'wx', mode: 0o600 });
+            const fd = fs.openSync(tmp, 'wx', 0o600);
+            try { fs.writeSync(fd, String(out)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+            try { fs.linkSync(tmp, file); } catch (e: any) {
+                if (e?.code === 'EEXIST') { return loadOrCreateWriter(keyDir); }   // 다른 프로세스가 먼저 — 그 열쇠를 쓴다
+                if (!['EPERM', 'ENOTSUP', 'EXDEV', 'EINVAL', 'ENOSYS'].includes(e?.code) || fs.existsSync(file)) { throw e; }
+                fs.renameSync(tmp, file);
+            }
         } catch (e: any) {
-            if (e?.code === 'EEXIST') { return loadOrCreateWriter(keyDir); }   // 다른 프로세스가 먼저 만들었다
-            throw new KeyUnavailableError(`the writer key cannot be created (${e?.code || e})`);
+            throw new KeyUnavailableError(`the writer key cannot be created (${e?.code || e?.message || e})`);
+        } finally {
+            try { fs.unlinkSync(tmp); } catch { /* 이미 옮겨졌다 */ }
         }
         return makeWriter(privateKey);
     }
     let priv: KeyObject;
-    try { priv = createPrivateKey({ key: pem, format: 'pem' }); } catch { throw new KeyUnavailableError('the writer key file is not a key'); }
+    const recovery = ` — ${file}. Records are not written until it is fixed: restore it from a backup, or delete it to start a new writer `
+        + '(lines written with the old key stay verifiable through trust.json).';
+    if (pem.length === 0 || !/-----END PRIVATE KEY-----\s*$/.test(pem.toString('utf8'))) {
+        throw new KeyUnavailableError(`the writer key file is empty or incomplete${recovery}`);
+    }
+    try { priv = createPrivateKey({ key: pem, format: 'pem' }); } catch { throw new KeyUnavailableError(`the writer key file is not a key${recovery}`); }
     if (priv.asymmetricKeyType !== 'ed25519') { throw new KeyUnavailableError('the writer key is not an Ed25519 key'); }
     return makeWriter(priv);
 }

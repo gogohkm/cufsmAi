@@ -23,7 +23,7 @@ async function run() {
 
   await t('template regeneration: one meaningful field (t) + summaries; title "두께 t 2 → 2.3 mm" in SI, inches in US', () => {
     const d = D.diffSnapshots(snap(zModel(T20)), snap(zModel(T23)), info);
-    assert.deepStrictEqual(d.fields.map((f) => f.path), ['model.sectionParams.t', 'model.node', 'model.elem']);
+    assert.deepStrictEqual(d.fields.map((f) => f.path), ['model.sectionParams.t', 'model.elem', 'model.node']);
     const elem = d.fields.find((f) => f.path === 'model.elem');
     assert.deepStrictEqual([elem.summary.changed, elem.summary.columns], [36, ['t']]);
     assert.strictEqual(T.changeTitle(d.fields, 'SI'), '두께 t 2 → 2.3 mm');

@@ -137,8 +137,10 @@ async function run() {
     const a2 = A.foldAssumptions(s.read())[0];
     assert.strictEqual(A.blocksIssue(a2, a.lastSeq), true, 'confirmation of an older version');
     assert.strictEqual(A.blocksIssue({ ...a2, status: 'provisional' }, a2.lastSeq), true);
-    assert.strictEqual(A.blocksIssue({ ...a2, status: 'not-applicable' }, null), false);
-    assert.strictEqual(A.blocksIssue({ ...a2, closed: true }, null), false);
+    assert.strictEqual(A.blocksIssue({ ...a2, status: 'not-applicable' }, null), true, 'not-applicable by the AI needs a person mark');
+    assert.strictEqual(A.blocksIssue({ ...a2, status: 'not-applicable' }, a2.lastSeq), false);
+    assert.strictEqual(A.blocksIssue({ ...a2, closed: true, closedByProgram: false }, null), true, 'closed by the AI needs a person mark');
+    assert.strictEqual(A.blocksIssue({ ...a2, closed: true, closedByProgram: true }, null), false, 'closed by the program (cause gone)');
   });
   await t('program default assumptions: grouped per field group from default-sourced hand defaults; closed when a value is set', () => {
     const groupOf = (k) => ({ deckT: 'deck', deckSpacing: 'deck', wcN: 'webCrippling', fy: 'material' }[k]);

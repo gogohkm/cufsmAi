@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
-import { segmentError } from './names';
+import { hiddenCharError, segmentError } from './names';
 
 export class RecordsPathError extends Error {}
 
@@ -38,7 +38,7 @@ export function assertNoLinks(rootReal: string, abs: string): void {
     for (const seg of rel ? rel.split(path.sep) : []) {
         cur = path.join(cur, seg);
         let st: fs.Stats;
-        try { st = fs.lstatSync(cur); } catch { return; }
+        try { st = fs.lstatSync(cur); } catch { break; }   // 없는 마디 — 아래의 진짜 경로 확인으로(V7-27 M5: 전에는 여기서 돌아가 그 확인을 건너뛰었다)
         if (st.isSymbolicLink()) { throw new RecordsPathError(`a link or junction is not followed: ${path.relative(rootReal, cur)}`); }
     }
     // 마지막 확인: 있는 가장 깊은 조상의 진짜 경로가 뿌리 안
@@ -63,7 +63,7 @@ export function resolveInside(rootReal: string, relative: unknown, opts: { under
     }
     const segs = text.split('/');
     for (const s of segs) {
-        const err = segmentError(s);
+        const err = segmentError(s) || hiddenCharError(s);
         if (err) { throw new RecordsPathError(`path part '${s}': ${err}`); }
     }
     if (opts.under && segs[0] !== opts.under) { throw new RecordsPathError(`the path must be inside ${opts.under}/`); }
@@ -135,10 +135,21 @@ export function readBounded(abs: string, maxBytes: number): Buffer | null {
     return buf;
 }
 
-/** 파일의 sha256(한도까지, 보통 파일만) — 원자료 등록 */
+/**
+ * 하드 링크가 아닌가(링크 수 1). 하드 링크는 마디의 링크 검사에 걸리지 않고 프로젝트 밖 파일과 같은 내용을 가리킬 수 있다 —
+ * 그 파일의 해시 · 크기를 알리거나(V7-32) 거기에 덧붙이는 일을 막는다. 없는 파일은 통과.
+ */
+export function assertSingleLink(abs: string): void {
+    let st: fs.Stats;
+    try { st = fs.lstatSync(abs); } catch (e: any) { if (e?.code === 'ENOENT') { return; } throw e; }
+    if (st.isFile() && st.nlink > 1) { throw new RecordsPathError(`a file with ${st.nlink} hard links is not used: ${path.basename(abs)}`); }
+}
+
+/** 파일의 sha256(한도까지, 보통 파일만, 하드 링크 아님) — 원자료 등록 */
 export function hashFile(abs: string, maxBytes: number): { sha256: string; size: number } {
     const st = fs.lstatSync(abs);
     if (st.isSymbolicLink() || !st.isFile()) { throw new RecordsPathError('not a plain file'); }
+    assertSingleLink(abs);
     if (st.size > maxBytes) { throw new RecordsPathError(`file is larger than ${maxBytes} bytes`); }
     const { createHash } = require('crypto') as typeof import('crypto');
     const h = createHash('sha256');

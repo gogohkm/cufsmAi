@@ -25,7 +25,18 @@ export interface FieldChange {
     path: string; group: string; unit: UnitKey | null;
     from?: unknown; to?: unknown;
     summary?: ArraySummary;
+    /** 이름 꼴 밖의 키(V7-24 ⑤) — 이름과 값은 싣지 않고 바뀐 수만 */
+    odd?: number;
+    /**
+     * 절점 · 요소 요약이 템플릿 치수의 변경으로 설명되는가(제목의 「외 n」 에 세지 않는다) — 조건: 치수가 바뀌었고, 손 편집 표지가
+     * 없고, 요소 두께가 바뀌었다면 모든 요소의 두께 = 치수 t. 아니면 이 칸은 따로 센다(V7-24 ②).
+     */
+    explainedBy?: 'sectionParams';
 }
+/** 비교의 규칙(하나): **허용 오차 없음** — 두 값의 정규 JSON 이 다르면 바뀐 것이다(지문 · 비교 · 제목이 같은 규칙) */
+export const NO_TOLERANCE = true;
+const PARAM_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,15}$/;
+const INPUT_KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,40}$/;
 export interface DiffResult { fields: FieldChange[]; omitted: number }
 
 export const MAX_FIELDS = 200;
@@ -80,17 +91,31 @@ export function diffSnapshots(before: Snapshot, after: Snapshot, fieldInfo: Fiel
     }
     const p0 = (m0.sectionParams && typeof m0.sectionParams === 'object') ? m0.sectionParams : {};
     const p1 = (m1.sectionParams && typeof m1.sectionParams === 'object') ? m1.sectionParams : {};
+    let oddParams = 0;
     for (const k of [...new Set([...Object.keys(p0), ...Object.keys(p1)])].sort()) {
-        if (!same(p0[k], p1[k])) {
-            push({ path: `model.sectionParams.${k}`, group: 'section', unit: SECTION_PARAM_UNITS[k] ?? null, from: p0[k] ?? null, to: p1[k] ?? null });
-        }
+        if (same(p0[k], p1[k])) { continue; }
+        if (!PARAM_KEY_RE.test(k)) { oddParams += 1; continue; }
+        push({ path: `model.sectionParams.${k}`, group: 'section', unit: SECTION_PARAM_UNITS[k] ?? null, from: p0[k] ?? null, to: p1[k] ?? null });
     }
+    if (oddParams) { push({ path: 'model.sectionParams.(other)', group: 'section', unit: null, odd: oddParams }); }
+    const paramsChanged = out.some((f) => f.path.startsWith('model.sectionParams.'));
     if (!same(!!m0.sectionEdited, !!m1.sectionEdited)) {
         push({ path: 'model.sectionEdited', group: 'section', unit: null, from: !!m0.sectionEdited, to: !!m1.sectionEdited });
     }
-    for (const [key, cols] of [['node', NODE_COLS], ['elem', ELEM_COLS]] as const) {
+    let elemUnexplained = false;   // 요소가 설명되지 않으면 절점도 설명되지 않는다(템플릿으로 다시 만든 단면이 아니다)
+    for (const [key, cols] of [['elem', ELEM_COLS], ['node', NODE_COLS]] as const) {
         const s = arraySummary(m0[key], m1[key], cols as unknown as string[]);
-        if (s) { push({ path: `model.${key}`, group: 'section', unit: null, summary: s }); }
+        if (!s) { continue; }
+        const f: FieldChange = { path: `model.${key}`, group: 'section', unit: null, summary: s };
+        const tAfter = Number(p1.t);
+        const thicknessOk = key !== 'elem' || !(s.columns || []).includes('t')
+            || (Number.isFinite(tAfter) && rows(m1.elem).every((e) => e[3] === tAfter));
+        const onlyGeometry = key !== 'elem' || (s.columns || []).every((c) => c === 't' || c === 'i' || c === 'j' || c === 'id');
+        if (paramsChanged && !m1.sectionEdited && same(m0.sectionTemplate ?? null, m1.sectionTemplate ?? null) && thicknessOk && onlyGeometry && !(key === 'node' && elemUnexplained)) {
+            f.explainedBy = 'sectionParams';
+        }
+        if (key === 'elem' && !f.explainedBy) { elemUnexplained = true; }
+        push(f);
     }
     // 재료 — prop 첫 줄 [id, Ex, Ey, vx, vy, G]
     const r0 = rows(m0.prop)[0] || [], r1 = rows(m1.prop)[0] || [];
@@ -116,12 +141,15 @@ export function diffSnapshots(before: Snapshot, after: Snapshot, fieldInfo: Fiel
     // 검토 입력
     const c0 = before.case || {}, c1 = after.case || {};
     const i0 = c0.inputs || {}, i1 = c1.inputs || {};
+    let oddInputs = 0;
     for (const k of [...new Set([...Object.keys(i0), ...Object.keys(i1)])].sort()) {
         if (same(i0[k], i1[k])) { continue; }
+        if (!INPUT_KEY_RE.test(k)) { oddInputs += 1; continue; }
         const info = fieldInfo(k);
         const kind = info?.unit ?? null;
         push({ path: `case.inputs.${k}`, group: info?.group ?? 'case', unit: kind ? (CASE_UNIT_KIND[kind] ?? null) : null, from: i0[k] ?? null, to: i1[k] ?? null });
     }
+    if (oddInputs) { push({ path: 'case.inputs.(other)', group: 'case', unit: null, odd: oddInputs }); }
     const s0 = c0.spans || {}, s1 = c1.spans || {};
     const sp0: unknown[] = Array.isArray(s0.spans) ? s0.spans : [], sp1: unknown[] = Array.isArray(s1.spans) ? s1.spans : [];
     const su0: unknown[] = Array.isArray(s0.supports) ? s0.supports : [], su1: unknown[] = Array.isArray(s1.supports) ? s1.supports : [];
@@ -139,12 +167,16 @@ export function diffSnapshots(before: Snapshot, after: Snapshot, fieldInfo: Fiel
         }
     }
     const mo0 = c0.mcpOnly || {}, mo1 = c1.mcpOnly || {};
+    let oddMcp = 0;
     for (const tool of [...new Set([...Object.keys(mo0), ...Object.keys(mo1)])].sort()) {
         const a = mo0[tool] || {}, b = mo1[tool] || {};
         for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) {
-            if (!same(a[k], b[k])) { push({ path: `case.mcpOnly.${tool}.${k}`, group: 'mcp', unit: null, from: a[k] ?? null, to: b[k] ?? null }); }
+            if (same(a[k], b[k])) { continue; }
+            if (!INPUT_KEY_RE.test(tool) || !INPUT_KEY_RE.test(k)) { oddMcp += 1; continue; }
+            push({ path: `case.mcpOnly.${tool}.${k}`, group: 'mcp', unit: null, from: a[k] ?? null, to: b[k] ?? null });
         }
     }
+    if (oddMcp) { push({ path: 'case.mcpOnly.(other)', group: 'mcp', unit: null, odd: oddMcp }); }
     const omitted = Math.max(0, out.length - MAX_FIELDS);
     return { fields: out.slice(0, MAX_FIELDS), omitted };
 }

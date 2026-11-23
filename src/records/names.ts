@@ -20,8 +20,17 @@ export const NAME_MAX_BYTES = 180;
 
 // eslint-disable-next-line no-control-regex
 const FORBIDDEN_CHARS = /[<>:"/\\|?*\u0000-\u001f\u007f]/;
-const BIDI = /[‎‏‪-‮⁦-⁩؜]/;
-const DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)$/i;
+const BIDI = /[\u200e\u200f\u202a-\u202e\u2066-\u2069\u061c]/;
+/** 장치 이름 — Windows 의 예약 이름 전부(CLOCK$ 포함). 확장자가 붙어도 */
+const DEVICE = /^(con|prn|aux|nul|com[0-9\u00b9\u00b2\u00b3]|lpt[0-9\u00b9\u00b2\u00b3]|conin\$|conout\$|clock\$)$/i;
+/**
+ * 새 이름(프로젝트 · 검토 대상)에 쓸 수 있는 글자 — 적극 목록(V7-31): 글자(`\p{L}`) · 결합 표지(`\p{M}`, 글자 뒤에서만) ·
+ * 숫자(`\p{N}`) · 공백(U+0020 하나씩) · `. _ - ( ) [ ] , + & # @ ' · ×`. 그 밖(보이지 않는 글자 · 채움 글자 · 전각 공백 ·
+ * 다른 공백 · 기호 · `~` — 8.3 별칭 꼴 — · `$`)은 거절하고 그 글자를 말한다.
+ */
+const NAME_ALLOWED = /^[\p{L}\p{M}\p{N} ._\-()[\],+&#@'\u00b7\u00d7]$/u;
+/** 글자 분류로는 글자(Lo)지만 보이지 않는 채움 글자 */
+const FILLERS = new Set([0x115f, 0x1160, 0x3164, 0xffa0, 0x17b4, 0x17b5]);
 
 /** 프로그램이 정한 이름(상수) — 이름으로 쓸 수 없다 */
 export const RESERVED_NAMES = ['stcfsd-project.json', '01_원자료', '02_검토대상', '03_계산서', '04_발행본'];
@@ -51,9 +60,41 @@ export function checkName(raw: unknown): NameResult {
     if (Buffer.byteLength(name, 'utf8') > NAME_MAX_BYTES) { return { ok: false, error: `a name may have at most ${NAME_MAX_BYTES} bytes` }; }
     const seg = segmentError(name);
     if (seg) { return { ok: false, error: seg }; }
+    const bad = nameCharError(name);
+    if (bad) { return { ok: false, error: bad }; }
     const key = nameKey(name);
     if (RESERVED_NAMES.some((r) => nameKey(r) === key)) { return { ok: false, error: `'${name}' is used by the program` }; }
     return { ok: true, name, key };
+}
+
+const cp = (ch: string): string => 'U+' + ch.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0');
+
+/** 새 이름의 글자 검사 — 적극 목록 밖의 첫 글자를 말한다. 문제 없으면 null */
+export function nameCharError(name: string): string | null {
+    const chars = [...name];
+    for (let i = 0; i < chars.length; i += 1) {
+        const ch = chars[i];
+        if (FILLERS.has(ch.codePointAt(0)!) || !NAME_ALLOWED.test(ch)) {
+            return `the character ${cp(ch)} ${JSON.stringify(ch)} is not allowed in a name (letters, digits, space and . _ - ( ) [ ] , + & # @ ' · × only)`;
+        }
+        if (/\p{M}/u.test(ch) && (i === 0 || !/[\p{L}\p{M}]/u.test(chars[i - 1]))) { return `the combining mark ${cp(ch)} must follow a letter`; }
+        if (ch === ' ' && chars[i - 1] === ' ') { return 'a name may not contain two spaces in a row'; }
+    }
+    return null;
+}
+
+/**
+ * 있는 파일 · 폴더의 마디(상대경로)에 더 보는 것 — 보이지 않는 글자(서식 · 채움)와 8.3 별칭 꼴(`STCFSD~1` — 숨은 폴더의 다른 이름이
+ * 될 수 있다, V7-31). `segmentError` 는 호스트도 쓰므로 바꾸지 않고 이것을 따로 둔다.
+ */
+export function hiddenCharError(seg: string): string | null {
+    for (const ch of seg) {
+        if (FILLERS.has(ch.codePointAt(0)!) || /[\p{Cf}\p{Zl}\p{Zp}\u3000\u00a0\u2000-\u200a\u202f\u205f]/u.test(ch)) {
+            return `the invisible character ${cp(ch)} is not accepted in a path`;
+        }
+    }
+    if (/~[0-9]/.test(seg)) { return "a short-name alias ('~' followed by a digit) is not accepted in a path"; }
+    return null;
 }
 
 /** 비교 열쇠 — NFC + 소문자 */

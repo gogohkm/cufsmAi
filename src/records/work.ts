@@ -2,12 +2,14 @@
  * 기록(R3-1) · 업무 항목 — 설계 §2.4.5. 지시(I-n — 사람이 대화에서 한 말을 AI 가 옮겨 적은 것) · 보고(R-n) · 판단 요청(Q-n).
  *
  *  - 쓰는 이는 AI(MCP `work_items` — R3-2 에서 잇는다). 이 모듈은 쓸 줄의 몸을 만들고(`prepareWork` — 한도를 넘으면 **거절**,
- *    자르지 않는다), 읽은 줄을 접는다(`foldWork`).
+ *    자르지 않는다), 읽은 줄을 접는다(`foldWork` — **세는 줄(`ok`)만**: 서명 없는 · 믿지 않는 · 자리가 틀린 · 표 밖 행위자의 줄은
+ *    상태를 바꾸지 않는다, V7-23. 그 줄들은 `log.unverifiedEntries` 로 따로 보인다).
+ *  - 판단 요청이 발행을 막는지는 `questionBlocksIssue` — 답 · 닫기는 AI 가 쓸 수 있지만 사람의 확인이 그 판에 있어야 풀린다(설계 §2.6).
  *  - 판단 요청의 답(`said`)은 「AI 가 옮겨 적은 사람의 말」이다 — 프로그램은 대화를 듣지 않는다.
  *  - 두 작성자가 같은 id(Q-3)를 만들면 뒤의 것은 `Q-3~<작성자 앞 4자>` 로 보인다(같은 작성자의 뒤 사건은 자기 것에 붙는다).
  * 파일을 읽거나 쓰지 않는다.
  */
-import type { LogSpec, RecordLine, LineStatus } from './log';
+import { countable, type LogSpec, type RecordLine, type LineStatus } from './log';
 import { cleanText, ID_RE } from './names';
 import { CASE_ID_RE } from './project';
 import { Ref, sanitizeRefs } from './refs';
@@ -77,14 +79,26 @@ export interface WorkItem {
     history: Array<{ event: string; at: string; writer: string; status: LineStatus }>;
 }
 
-/** 다음 id(같은 종류의 가장 큰 번호 + 1) */
+/** 다음 id(같은 종류의 가장 큰 번호 + 1) — **세는 줄에서만**(V7-30: 서명 없는 `add Q-99999` 가 번호를 다 쓰지 못한다) */
 export function nextWorkId(kind: WorkKind, lines: RecordLine[]): string {
     const p = WORK_KINDS[kind];
     let max = 0;
     for (const l of lines) {
-        if (l.event === 'add' && typeof l.body.item === 'string' && l.body.item.startsWith(`${p}-`)) { max = Math.max(max, Number(l.body.item.slice(2)) || 0); }
+        if (!countable(l) || l.event !== 'add' || typeof l.body.item !== 'string' || !ITEM_RE.test(l.body.item) || l.body.item[0] !== p) { continue; }
+        max = Math.max(max, Number(l.body.item.slice(2)));
     }
-    return `${p}-${max + 1}`;
+    const next = `${p}-${max + 1}`;
+    if (!ITEM_RE.test(next)) { throw new WorkInputError(`no more ${kind} ids in this project`); }
+    return next;
+}
+
+/**
+ * 판단 요청이 발행을 막는가 — 답했거나 닫혔어도(AI 의 줄로 바뀔 수 있다) 사람이 **그 판(lastSeq)** 에 확인 표시를 해야 풀린다
+ * (설계 §2.6 의 표 — 결정 D7 과 같은 규칙). 판단 요청이 아니면 막지 않는다.
+ */
+export function questionBlocksIssue(item: WorkItem, personConfirmedSeq: number | null): boolean {
+    if (item.kind !== 'question') { return false; }
+    return !(item.state !== 'open' && personConfirmedSeq === item.lastSeq);
 }
 
 /**
@@ -96,7 +110,7 @@ export function prepareWork(event: string, args: any, lines: RecordLine[]): { id
     if (!(WORK_EVENTS as readonly string[]).includes(event)) { throw new WorkInputError(`unknown action '${String(event).slice(0, 20)}'`); }
     const a = args && typeof args === 'object' ? args : {};
     if (event === 'add') {
-        if (!(a.kind in WORK_KINDS)) { throw new WorkInputError('kind must be instruction | report | question'); }
+        if (typeof a.kind !== 'string' || !Object.prototype.hasOwnProperty.call(WORK_KINDS, a.kind)) { throw new WorkInputError('kind must be instruction | report | question'); }
         const kind = a.kind as WorkKind;
         const refs = sanitizeRefs(a.refs, WORK_LIMITS.refs);
         if (!refs) { throw new WorkInputError('refs is not valid'); }
@@ -144,7 +158,7 @@ export function readWorkBody(event: string, b: Record<string, any>): Record<stri
         if (typeof b.item !== 'string' || !ITEM_RE.test(b.item)) { return null; }
         const out: any = { item: b.item };
         if (event === 'add') {
-            if (!(b.kind in WORK_KINDS) || WORK_KINDS[b.kind as WorkKind] !== b.item[0]) { return null; }
+            if (typeof b.kind !== 'string' || !Object.prototype.hasOwnProperty.call(WORK_KINDS, b.kind) || WORK_KINDS[b.kind as WorkKind] !== b.item[0]) { return null; }
             out.kind = b.kind;
             out.caseId = typeof b.caseId === 'string' && CASE_ID_RE.test(b.caseId) ? b.caseId : null;
         }
@@ -176,7 +190,7 @@ export function foldWork(lines: RecordLine[], opts: { nowContentFp?: string } = 
         const own = `${item}~${writer.slice(1, 5)}`;
         return byKey.has(own) ? own : item;
     };
-    for (const l of lines) {
+    for (const l of lines.filter(countable)) {
         const b = l.body as WorkBody;
         const writer = l.sig.w;
         if (l.event === 'add') {
@@ -196,7 +210,6 @@ export function foldWork(lines: RecordLine[], opts: { nowContentFp?: string } = 
         if (!it) { continue; }
         it.history.push({ event: l.event, at: l.at, writer, status: l.status });
         it.lastSeq = l.seq; it.lastAt = l.at;
-        if (l.status !== 'ok' && it.status === 'ok') { it.status = l.status; }
         if (l.event === 'answer' && b.answer && it.kind === 'question') {
             it.answer = { said: b.answer.said, chosen: b.answer.chosen ?? null, at: l.at, transcribedBy: 'ai' };
             if (it.state !== 'closed') { it.state = 'answered'; }

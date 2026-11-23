@@ -52,16 +52,16 @@ async function run() {
     assert.deepStrictEqual(r.lines.map((l) => [l.seq, l.status]), [[1, 'ok'], [2, 'ok'], [3, 'ok']]);
     assert.deepStrictEqual(r.stats.chainBreaks, []);
   });
-  await t('corrupted middle line: its signature fails and the chain breaks after it', () => {
+  await t('corrupted middle line: only that line is lost — a gap is reported and the next verified line counts (V7-20)', () => {
     const s = setup();
     for (let i = 1; i <= 3; i += 1) { add(s.log, i); }
     const ls = lines(s);
     ls[1] = ls[1].replace('보고 2', '보고 X');
     put(s, ls);
     const r = s.log.read(s.trust());
-    assert.deepStrictEqual(r.lines.map((l) => [l.seq, l.status]), [[1, 'ok'], [2, 'unverified'], [3, 'chain']]);
-    assert.deepStrictEqual(r.stats.chainBreaks, [{ stream: s.w.writerId, atSeq: 3 }]);
-    assert.strictEqual(r.lines.filter(L.countable).length, 1);
+    assert.deepStrictEqual(r.lines.map((l) => [l.seq, l.status]), [[1, 'ok'], [2, 'unverified'], [3, 'ok']]);
+    assert.deepStrictEqual(r.stats.chainBreaks, [{ stream: s.w.writerId, atSeq: 3, afterSeq: 1 }]);
+    assert.strictEqual(r.lines.filter(L.countable).length, 2);
   });
   await t('replaced signature (taken from another line) does not verify', () => {
     const s = setup();
@@ -79,7 +79,8 @@ async function run() {
     const ls = lines(s);
     put(s, [ls[0], ls[2], ls[3]]);
     let r = s.log.read(s.trust());
-    assert.deepStrictEqual(r.stats.chainBreaks, [{ stream: s.w.writerId, atSeq: 3 }]);
+    assert.deepStrictEqual(r.stats.chainBreaks, [{ stream: s.w.writerId, atSeq: 3, afterSeq: 1 }]);
+    assert.deepStrictEqual(r.lines.map((l) => [l.seq, l.status]), [[1, 'ok'], [3, 'ok'], [4, 'ok']]);
     put(s, ls.slice(0, 3));
     r = s.log.read(s.trust());
     assert.deepStrictEqual(r.stats.chainBreaks, []);
@@ -121,7 +122,7 @@ async function run() {
     const ls = lines(s);
     const last = JSON.parse(ls[ls.length - 1]);
     const v = { schema: 'stcfsd-rec/work/1', seq: last.seq + 1, id: 'R-90', event: 'add', at: '2026-11-24T00:00:00Z', project: PID,
-      actor: { kind: 'ai' }, prev: 'sha256:' + C.sha256Hex(ls[ls.length - 1]), item: 'R-90', kind: 'report', title: 'raw', ...patch };
+      stream: s.w.writerId, actor: { kind: 'ai' }, prev: 'sha256:' + C.sha256Hex(ls[ls.length - 1]), item: 'R-90', kind: 'report', title: 'raw', ...patch };
     fs.appendFileSync(file(s), C.canonicalJson({ ...v, sig: { w: s.w.writerId, s: s.w.sign(W.signingBytes(v)) } }) + '\n');
   }
   await t('higher major version: that record type becomes read-only; the chain still holds', () => {
@@ -207,18 +208,35 @@ async function run() {
     assert.strictEqual(a.read(s.trust()).lines.length, 0);
     assert.deepStrictEqual(fs.readdirSync(outside), [`${s.w.writerId}.jsonl`]);
   });
-  await t('ownership: a stale owner of this host is taken over; another host keeps it (next stream name)', () => {
+  await t('ownership: an owner signed by this PC for a live other process keeps its stream; unsigned / dead / other-host owners are taken over (V7-29)', () => {
     const s = setup();
     s.log.close();
     const dir = path.dirname(file(s));
-    fs.writeFileSync(path.join(dir, `${s.w.writerId}.owner`), JSON.stringify({ pid: 2147483000, host: 'test-host', startedAt: 'x' }));
+    const signedOwner = (stream, pid, host) => {
+      const body = { pid, host, startedAt: 'x', stream };
+      return JSON.stringify({ ...body, sig: s.w.sign('stcfsd-owner/1\n' + C.canonicalJson(body)) });
+    };
+    // 서명 없는 표지(이 PC 이름 · 산 pid 를 흉내 내도) — 넘겨받는다
+    fs.writeFileSync(path.join(dir, `${s.w.writerId}.owner`), JSON.stringify({ pid: process.ppid, host: 'test-host', startedAt: 'x' }));
     assert.strictEqual(s.log.open(s.w), s.w.writerId);
     s.log.close();
-    fs.writeFileSync(path.join(dir, `${s.w.writerId}.owner`), JSON.stringify({ pid: process.pid, host: 'other-pc', startedAt: 'x' }));
+    // 서명했지만 죽은 pid — 넘겨받는다
+    fs.writeFileSync(path.join(dir, `${s.w.writerId}.owner`), signedOwner(s.w.writerId, 2147483000, 'test-host'));
+    assert.strictEqual(s.log.open(s.w), s.w.writerId);
+    s.log.close();
+    // 서명했고 이 PC 의 산 다른 프로세스(부모) — 다음 이름
+    fs.writeFileSync(path.join(dir, `${s.w.writerId}.owner`), signedOwner(s.w.writerId, process.ppid, 'test-host'));
     assert.strictEqual(s.log.open(s.w), `${s.w.writerId}-2`);
     s.log.close();
     assert(!fs.existsSync(path.join(dir, `${s.w.writerId}-2.owner`)));
-    assert(fs.existsSync(path.join(dir, `${s.w.writerId}.owner`)), 'another host\'s owner file is left alone');
+    assert(fs.existsSync(path.join(dir, `${s.w.writerId}.owner`)), 'the live owner is left alone');
+    // 다른 키로 서명한 표지 — 넘겨받는다
+    fs.unlinkSync(path.join(dir, `${s.w.writerId}.owner`));
+    const other = W.loadOrCreateWriter(path.join(tmp(), 'k'));
+    const body = { pid: process.ppid, host: 'test-host', startedAt: 'x', stream: s.w.writerId };
+    fs.writeFileSync(path.join(dir, `${s.w.writerId}.owner`), JSON.stringify({ ...body, sig: other.sign('stcfsd-owner/1\n' + C.canonicalJson(body)) }));
+    assert.strictEqual(s.log.open(s.w), s.w.writerId);
+    s.log.close();
   });
   await t('read budget: past the project limit, files are skipped and reported', () => {
     const s = setup();

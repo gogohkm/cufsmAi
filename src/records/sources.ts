@@ -3,13 +3,14 @@
  *
  *  - 등록하는 경로는 프로젝트 기준 상대경로 · `01_원자료/` 아래만(`resolveInside` — 절대 · 드라이브 · `..` · `:` · 링크 · junction 거절).
  *  - **내용은 읽어 주지 않는다** — 해시만(크기 한도 512 MB). Cowork 는 연결한 폴더를 직접 읽는다.
- *  - 등록 안 된 파일 목록은 깊이 4 · 2,000 개까지, 링크 · 숨김 이름은 건너뛴다.
+ *  - 등록 안 된 파일 목록은 깊이 4 · 2,000 개까지, 링크 · 숨김 이름은 건너뛴다. 하드 링크는 등록하지 않는다(V7-32).
+ *  - 접기 · 다음 번호는 세는 줄(`ok`)만(V7-23 · 30).
  * VS Code 를 쓰지 않는다.
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import type { LogSpec, RecordLine, LineStatus } from './log';
-import { cleanText, segmentError } from './names';
+import { countable, type LogSpec, type RecordLine, type LineStatus } from './log';
+import { cleanText, hiddenCharError, segmentError } from './names';
 import { FOLDERS } from './project';
 import { hashFile, resolveInside } from './fsx';
 
@@ -29,8 +30,10 @@ export interface Source {
 
 export function nextSourceId(lines: RecordLine[]): string {
     let max = 0;
-    for (const l of lines) { if (l.event === 'register' && typeof l.body.item === 'string' && ITEM_RE.test(l.body.item)) { max = Math.max(max, Number(l.body.item.slice(2))); } }
-    return `S-${max + 1}`;
+    for (const l of lines) { if (countable(l) && l.event === 'register' && typeof l.body.item === 'string' && ITEM_RE.test(l.body.item)) { max = Math.max(max, Number(l.body.item.slice(2))); } }
+    const next = `S-${max + 1}`;
+    if (!ITEM_RE.test(next)) { throw new SourceInputError('no more source ids in this project'); }
+    return next;
 }
 
 /** 등록 · 갱신(다시 해시). `register {path, title?, kind?}` · `update {item, title?, kind?, rehash?}` */
@@ -71,7 +74,7 @@ export function readSourceBody(event: string, b: Record<string, any>): Record<st
     if (b.path !== undefined) {
         if (typeof b.path !== 'string' || b.path.length > 400) { return null; }
         const segs = b.path.split('/');
-        if (segs[0] !== FOLDERS.sources || segs.some((s: string) => segmentError(s))) { return null; }
+        if (segs[0] !== FOLDERS.sources || segs.some((s: string) => segmentError(s) || hiddenCharError(s))) { return null; }
         out.path = b.path;
     }
     if (b.sha256 !== undefined) { if (typeof b.sha256 !== 'string' || !SHA_RE.test(b.sha256)) { return null; } out.sha256 = b.sha256; }
@@ -86,7 +89,7 @@ export const SOURCE_SPEC: LogSpec = { type: 'sources', major: 1, events: SOURCE_
 
 export function foldSources(lines: RecordLine[]): Source[] {
     const by = new Map<string, Source>();
-    for (const l of lines) {
+    for (const l of lines.filter(countable)) {
         const b = l.body as SourceBody;
         if (l.event === 'register') {
             if (by.has(b.item)) { continue; }
@@ -97,7 +100,6 @@ export function foldSources(lines: RecordLine[]): Source[] {
             if (b.title !== undefined) { s.title = b.title; }
             if (b.kind !== undefined) { s.kind = b.kind; }
             if (b.sha256 !== undefined) { s.sha256 = b.sha256; s.size = b.size ?? s.size; s.at = l.at; }
-            if (l.status !== 'ok' && s.status_line === 'ok') { s.status_line = l.status; }
         }
     }
     return [...by.values()];
@@ -123,7 +125,7 @@ export function listUnregistered(rootReal: string, registered: Source[], limits 
         try { ents = fs.readdirSync(path.join(rootReal, ...rel), { withFileTypes: true }); } catch { return; }
         for (const d of ents) {
             if (++seen > limits.entries) { return; }
-            if (d.isSymbolicLink() || segmentError(d.name)) { continue; }
+            if (d.isSymbolicLink() || segmentError(d.name) || hiddenCharError(d.name)) { continue; }
             const next = [...rel, d.name];
             if (d.isDirectory()) { walk(next, depth + 1); }
             else if (d.isFile()) { const p = next.join('/').normalize('NFC'); if (!known.has(p.toLowerCase())) { out.push(p); } }
