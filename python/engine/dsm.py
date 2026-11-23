@@ -389,6 +389,15 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         'global_source': global_source,
         'cre_signature': Pcre_sig,
         'Lcre_signature': Lcre_sig,
+        # 값 비교의 허용차(계약 §6.1 · §16.14): 서명곡선의 가장 긴 반파장에서 읽은 값은 상대 1e-4, 그 밖은 1e-6
+        'numeric_tolerance': {
+            'default_rel_tol': 1e-6,
+            'fsm_long_wavelength': {
+                'rel_tol': 1e-4, 'length': Lcre_sig,
+                'keys': (['cre_signature'] + ([f'{label}cre', 'cre', 'LF_global']
+                                              if global_is_signature_asymptote else [])) if points else [],
+            },
+        },
 
         # 기준 항복값 (load_type에 무관한 정규화 키)
         'P_y': P_ref,

@@ -3398,6 +3398,12 @@ REGISTRY = {
         'template_ko': '§A3.3.2: Fya 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키므로 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
         'params': {},
     },
+    'member.warning.auto_fsm_failed': {
+        'kind': 'warning',
+        'template': '자동 FSM/DSM 해석 실패: {e} — Pcrl/Pcrd/Mcrl/Mcrd 없이 계산합니다.',
+        'template_ko': '자동 FSM/DSM 해석 실패: {e} — Pcrl/Pcrd/Mcrl/Mcrd 없이 계산합니다.',
+        'params': {'e': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'member.warning.b3_3_b3_b4_b4_chapters': {
         'kind': 'warning',
         'template': '§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. 내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다.',
@@ -3774,6 +3780,12 @@ REGISTRY = {
         'kind': 'warning',
         'template': 'Py is zero; the normalized P values are left undefined (null) — use P_raw.',
         'template_ko': 'Py 가 0 — 정규화한 P 값은 정의하지 않음(null); P_raw 를 쓰십시오.',
+        'params': {},
+    },
+    'server.warning.dsm_bc_not_given': {
+        'kind': 'warning',
+        'template': 'server: BC was not given, so the curve could not be checked to be an S-S signature curve (Pcrl/Pcrd are read from curve minima).',
+        'template_ko': 'server: BC 미입력 — 곡선이 S-S 서명곡선인지 확인하지 못함 (Pcrl/Pcrd 는 곡선의 극소에서 읽음).',
         'params': {},
     },
     'server.warning.every_analysis_length_was': {

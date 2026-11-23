@@ -374,6 +374,9 @@ def attach(result: dict, lists=NOTICE_LISTS) -> dict:
         return result
     result['notices'] = notices_of(result, lists)
     _annotate(result)
+    if result.get('design_checks'):
+        from design.checks import propagate_numeric
+        propagate_numeric(result['design_checks'])
     for c in result.get('design_checks') or []:
         if not isinstance(c, dict):
             continue

@@ -704,6 +704,47 @@ DISPLAY_ROUNDING = {
 }
 
 
+# ---------------------------------------------------------------- 값 비교의 허용차 (계약 §16.14, K4g)
+LONG_WAVELENGTH = {'source': 'fsm_long_wavelength', 'rel_tol': 1e-4}
+
+
+def propagate_numeric(checks: list) -> None:
+    """긴 반파장 값(표지 numeric)이 계산 과정을 따라 퍼진다: 표지가 있는 입력 · 표지가 있는 앞 단계 · 표지가 있는
+    다른 검토 항목을 입력으로 쓴 단계의 결과에 numeric(derived=True)을, 그런 단계가 하나라도 있는 항목에
+    numeric_tolerance 를 단다(그 항목의 모든 값 — demand · capacity · nominal · ratio · reference — 에 rel_tol 1e-4)."""
+    flagged_checks = set()
+    for _ in range(3):                      # 항목 사이의 참조(src check)가 앞뒤로 있을 수 있다
+        changed = False
+        for c in checks:
+            if not isinstance(c, dict):
+                continue
+            hit = False
+            steps = c.get('steps') or []
+            for st in steps:
+                ins = st.get('inputs') or []
+                from_input = any(isinstance(i, dict) and (
+                    'numeric' in i
+                    or ((i.get('source') or {}).get('kind') == 'step'
+                        and 0 <= (i['source'].get('step') or 0) < len(steps)
+                        and 'numeric' in (steps[i['source']['step']].get('result') or {}))
+                    or ((i.get('source') or {}).get('kind') == 'check' and i['source'].get('id') in flagged_checks))
+                    for i in ins)
+                res = st.get('result')
+                if from_input and isinstance(res, dict) and 'numeric' not in res:
+                    res['numeric'] = dict(LONG_WAVELENGTH, derived=True)
+                hit = hit or from_input
+            for key in ('demand', 'capacity', 'nominal'):
+                v = c.get(key)
+                if isinstance(v, dict) and 'numeric' in v:
+                    hit = True
+            if hit and c.get('id') not in flagged_checks:
+                flagged_checks.add(c.get('id'))
+                c['numeric_tolerance'] = dict(LONG_WAVELENGTH, applies_to='all values of this check')
+                changed = True
+        if not changed:
+            break
+
+
 def display_rounding(kind: str) -> dict:
     d = DISPLAY_ROUNDING[kind]
     from design.notices import N

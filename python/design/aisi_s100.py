@@ -3563,8 +3563,7 @@ def _auto_generate_props(params: dict) -> dict:
                             params['dsm'][_pre + _k] = _src[_k]
                 params['dsm'] = _plain_scalars(params['dsm'])
             except Exception as e:
-                auto_warnings.append(
-                    f'자동 FSM/DSM 해석 실패: {e} — Pcrl/Pcrd/Mcrl/Mcrd 없이 계산합니다.')
+                auto_warnings.append(_nt('member.warning.auto_fsm_failed', e=e))
 
         params['props'] = props
         params['node'] = node.tolist()

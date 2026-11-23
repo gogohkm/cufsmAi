@@ -1468,3 +1468,13 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 **3. 마지막 두 글 매개변수:** `member.warning.effective_length_defaulted_verify.items` 는 조각 `member.fragment.length_default_item` `{symbol}={L_default}`(L_default = 120 in 상수)의 이은 글, `member.warning.i6_2_1_i6_k2.i621_issues` 는 조각 `member.fragment.i621_*` 12(깊이 · 비 · 플랜지 폭은 물리량, (a) 12 in · (e) 2.125 in 은 상수, 「span type unknown」은 조각)의 이은 글. 옛 글은 그대로다. 이제 엔진 글에 호스트의 무늬 바꾸기가 필요한 매개변수는 없다.
 
 **수:** code 674 (조각 14 더함). 고정값 210 쌍.
+
+### 16.14 값 비교의 허용차 표지 — 서명곡선 긴 반파장 값 (2026-11-24 K4g)
+
+기록이 다시 돌린 결과의 값을 견줄 때의 규칙(§6.1 · §15): 기본은 **상대 1e-6**, 서명곡선의 **가장 긴 반파장에서 읽은 값과 그 값에서 나온 값은 상대 1e-4**. 엔진이 그 값을 밝힌다 — 기호 · 출처로 짐작하지 않는다.
+
+- **DSM 결과(`dsm` · `extract_dsm_values`):** `numeric_tolerance: {default_rel_tol: 1e-6, fsm_long_wavelength: {rel_tol: 1e-4, length: Lcre_signature, keys: [...]}}`. `keys` 는 그 dict 의 키 이름: 언제나 `cre_signature`; 전체좌굴이 서명곡선 끝 값이면(`global_is_signature_asymptote: true`) `{P|Mxx|Mzz}cre` · `cre` · `LF_global` 도. 유효길이를 줘서 폐형식(§E2 · §F2)이면 그 값들은 목록에 없다. 국부 · 뒤틀림 극소(`crl` · `crd` …), 길이 `Lcre` 는 표지 밖(1e-6 / 격자값).
+- **검토 항목(`design_checks`):** 긴 반파장 값이 들어오는 길은 사용자가 준 `Fcre` 뿐이다(엔진의 전체좌굴은 폐형식). 호출자가 그 값이 FSM 서명곡선의 긴 반파장 값이라고 **`Fcre_basis: 'fsm_long_wavelength'`** 로 밝히면 그 입력에 `numeric: {source: 'fsm_long_wavelength', rel_tol: 1e-4}`. 밝히지 않으면 표지는 없다(엔진은 입력의 출처를 짐작하지 않는다).
+- **퍼짐(엔진이 계산해 단다):** 표지가 있는 입력, 표지가 있는 앞 단계(`source.kind: 'step'`), 표지가 있는 다른 항목(`source.kind: 'check'`)을 입력으로 쓴 단계의 결과에 `numeric: {…, derived: true}`. 그런 단계가 하나라도 있는 항목에 `numeric_tolerance: {source: 'fsm_long_wavelength', rel_tol: 1e-4, applies_to: 'all values of this check'}` — 그 항목의 모든 값(demand · capacity · nominal · ratio · reference · 단계 결과)에 1e-4. 세장비 · 강도 · 비처럼 표지 값에서 나온 값은 모두 느슨한 쪽(보수적인 규칙 — 값이 그 입력에 둔감한 경우, 예: Fn = Fy, 에도 퍼진다). 판정 · 지배는 값으로 견주지 않으므로 허용차 밖이다.
+- **소비자가 쓸 규칙:** 값 v 에 `numeric` 이 있거나 그 항목에 `numeric_tolerance` 가 있거나 DSM 의 `fsm_long_wavelength.keys` 에 그 키가 있으면 `|a − b| ≤ 1e-4 · max(|a|, |b|)`, 아니면 `≤ 1e-6 · max(|a|, |b|)`(0 근처는 절대 1e-12).
+- **표지하지 않은 것:** 해석 결과의 곡선 배열(`curve`) — 긴 길이의 점이 같은 민감도를 갖지만(§6.1 측정) 점마다의 표지는 없다; 곡선을 견주는 쪽은 `Lcre_signature` 의 1/4 이상 길이의 점에 1e-4 를 쓸 것(§6.1 의 측정: 8 in Z · C 단면에서 K 성분 1 ulp 섭동이 L = 251 in(끝의 0.27)에서 2 × 10⁻⁷, 402 in(0.43)에서 2 × 10⁻⁶ — 세 단면의 측정이라 다른 단면에서는 엔진의 반올림 추정 `err_est` 가 기준이다; 점마다 그 값을 싣는 것은 다음 걸음).

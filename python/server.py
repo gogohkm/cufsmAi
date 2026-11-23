@@ -620,9 +620,7 @@ def _m_dsm(params):
         **_optional(params, 'load_type', 'KxLx', 'KyLy', 'KtLt', 'Lb', 'Cb',
                     'section_type', 'BC', 'unsymm'))
     if params.get('BC') is None:
-        result = _add_notes(result, 'warnings', [
-            'server: BC was not given, so the curve could not be checked to be an S-S '
-            'signature curve (Pcrl/Pcrd are read from curve minima).'])
+        result = _add_notes(result, 'warnings', [_nt('server.warning.dsm_bc_not_given')])
     return result
 
 

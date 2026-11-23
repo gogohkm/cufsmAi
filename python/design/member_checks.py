@@ -5,6 +5,7 @@ aisi_s100 의 각 설계 함수가 계산을 마친 자리에서 자기 지역 �
 엔진에 따로 없던 곱 하나만 새로 만들고, 그것도 지배 모드에서는 엔진의 φ·Pn 과 같은 연산이다.
 """
 
+from design.checks import LONG_WAVELENGTH  # noqa: E402
 from design.checks import (
     Trace, q, src, spec, make_check, ratio_of, verdict_from, verdict_step, design_strength_step,
     factor, demand_source,
@@ -117,14 +118,21 @@ def _mirror(path, digits):
 
 # ---------------------------------------------------------------- 압축 (E)
 
+def _fcre_input(ctx, value):
+    """사용자가 준 Fcre. 호출자가 Fcre_basis='fsm_long_wavelength'(FSM 서명곡선의 긴 반파장 값)라고 밝히면 표지(§16.14)."""
+    v = q('Fcre', value, 'stress', src('user_input', key='Fcre', method='user_supplied'))
+    if (ctx.get('params') or {}).get('Fcre_basis') == 'fsm_long_wavelength':
+        v['numeric'] = dict(LONG_WAVELENGTH)
+    return v
+
+
 def _column_fcre_steps(tr, ctx):
     """§E2 Fcre 의 단계. 돌려주는 값: Fcre 단계 번호(없으면 None)."""
     p = ctx['params']
     if ctx['Fcre_override'] > 0:
         return tr.add('elastic_buckling', 'Fcre = rational elastic buckling stress (input)',
                       equation=None,
-                      inputs=[q('Fcre', ctx['Fcre'], 'stress',
-                                src('user_input', key='Fcre', method='user_supplied'))],
+                      inputs=[_fcre_input(ctx, ctx['Fcre'])],
                       result=q('Fcre', ctx['Fcre'], 'stress'))
     fr = ctx['Fcre_result']
     tc = fr.get('trace')
@@ -465,8 +473,7 @@ def _beam_fcre_steps(tr, ctx, st, Lb, Cb, Lb_src, Cb_src, sym_suffix=''):
     Fsym = 'Fcre' + sym_suffix
     if ctx['Fcre_override'] > 0:
         return tr.add('elastic_buckling', f'{Fsym} = rational elastic buckling stress (input)',
-                      inputs=[q('Fcre', ctx['Fcre_override'], 'stress',
-                                src('user_input', key='Fcre', method='user_supplied'))],
+                      inputs=[_fcre_input(ctx, ctx['Fcre_override'])],
                       result=q(Fsym, st['Fcre'], 'stress'))
     br = raw.get('branch')
     if br == 'fully_braced':

@@ -168,3 +168,55 @@ def test_V8_04_engine_results_do_not_depend_on_the_blas_thread_count():
     st = server.METHODS['selftest']({})['numeric_threads']
     assert st['threads'] == 1 and 'OPENBLAS_NUM_THREADS' in st['variables']
     assert os.environ['OPENBLAS_NUM_THREADS'] == '1'
+
+
+# ---------------------------------------------------------------- 긴 반파장 값의 허용차 표지 (계약 §16.14)
+
+def _signature_dsm(**kw):
+    import numpy as np
+    from engine.template import generate_section
+    from engine.properties import grosprop
+    from engine.stress import stresgen
+    from engine.helpers import signature_ss
+    from engine.dsm import extract_dsm_values
+    sec = generate_section('lippedz', {'H': 8.0, 'B': 2.25, 'D': 0.91, 't': 0.059, 'r': 0.1875})
+    node, elem = sec['node'], sec['elem']
+    p = grosprop(node, elem)
+    n2 = stresgen(node.copy(), 0, 1.0, 0, 0, 0, p['A'], p['xcg'], p['zcg'], p['Ixx'], p['Izz'], p['Ixz'],
+                  p['thetap'], p['I11'], p['I22'], unsymm=0)
+    n2[:, 7] *= 55.0 / np.max(np.abs(n2[:, 7]))
+    curve = signature_ss(np.array([[100, 29500, 29500, 0.3, 0.3, 11346]]), n2, elem)['curve']
+    return extract_dsm_values(curve, n2, elem, 55.0, 'Mxx', **kw)
+
+
+def test_dsm_flags_the_values_read_at_the_long_wavelength_end():
+    d = _signature_dsm()
+    nt = d['numeric_tolerance']
+    lw = nt['fsm_long_wavelength']
+    assert nt['default_rel_tol'] == 1e-6 and lw['rel_tol'] == 1e-4 and lw['length'] == d['Lcre_signature']
+    assert set(lw['keys']) == {'cre_signature', 'Mxxcre', 'cre', 'LF_global'} and d['global_is_signature_asymptote']
+    # 유효길이를 주면 전체좌굴은 폐형식(§F2) — 그 값은 표지 밖, 서명곡선 끝의 참조값만 남는다
+    c = _signature_dsm(Lb=60.0, section_type='Z')
+    assert c['global_source'] == 'closed_form_F2' and c['numeric_tolerance']['fsm_long_wavelength']['keys'] == [
+        'cre_signature']
+    # 국부 · 뒤틀림 극소는 표지 밖
+    assert not {'Mxxcrl', 'Mxxcrd', 'crl', 'crd'} & set(lw['keys'])
+
+
+def test_long_wavelength_tolerance_propagates_down_the_trace():
+    """사용자 Fcre 를 FSM 서명곡선의 긴 반파장 값이라고 밝히면(Fcre_basis) 그 입력 · 그 입력에서 나온 단계 결과 ·
+    그 결과를 쓴 다른 항목까지 표지가 붙는다. 밝히지 않으면 아무 데도 없다. 값은 같다."""
+    base = dict(member_type='compression', design_method='LRFD', Fy=55.0, Fu=70.0, section_type='lippedc',
+                H=8.0, B=2.5, D=0.773, t=0.059, r=0.1875, Pu=5.0, KxLx=96.0, KyLy=48.0, KtLt=48.0,
+                dsm=dict(Pcrl=12.0, Pcrd=15.0), Fcre=30.0)
+    plain = design_member(dict(base))
+    flagged = design_member(dict(base, Fcre_basis='fsm_long_wavelength'))
+    assert not any('numeric_tolerance' in c for c in plain['design_checks'])
+    g = _c(flagged, 'member.compression.global')
+    assert g['numeric_tolerance']['rel_tol'] == 1e-4 and g['ratio'] == _c(plain, 'member.compression.global')['ratio']
+    ins = [i for s in g['steps'] for i in s['inputs'] if i['symbol'] == 'Fcre']
+    assert ins and ins[0]['numeric']['source'] == 'fsm_long_wavelength'
+    assert any((s.get('result') or {}).get('numeric', {}).get('derived') for s in g['steps'])
+    loc = _c(flagged, 'member.compression.local')                      # Pne(전체좌굴에서) 를 쓰는 항목
+    assert loc.get('numeric_tolerance'), [i.get('source') for s in loc['steps'] for i in s['inputs']][:6]
+    assert 'numeric_tolerance' not in _c(flagged, 'member.applicability.b4')
