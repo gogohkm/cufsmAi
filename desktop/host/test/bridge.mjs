@@ -27,6 +27,8 @@ const W = 1400, H = 1000;
 
 const results = [];
 const started = Date.now();
+/** --only=<단계 id,…>(예: --only=s14f) — 준 단계만(앞 단계의 상태에 기대면 그 id 도 준다) */
+const ONLY = (process.argv.find(a => a.startsWith('--only=')) ?? '').slice(7).split(',').map(x => x.trim()).filter(Boolean);
 function check(name, ok, detail = '') {
   results.push({ name, ok: !!ok, detail });
   process.stdout.write(`${ok ? '  통과' : '  실패'}  ${name}${detail ? ` — ${detail}` : ''}\n`);
@@ -526,6 +528,7 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
   };
   /** 한 단계: 실행 → 보이는 것 확인 → 그림 → 예외 · 콘솔 오류 · 깨진 글자 0 */
   const step = async (name, fn) => {
+    if (ONLY.length && !ONLY.includes(String(name).split(' ')[0])) { return; }
     const m = mark();
     let detail = '';
     let ok = false;
@@ -944,7 +947,9 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     await reloadDesigner();
     const after = await lastOf(['designResult']);
     const page = await wv(`return {sum:D.getElementById('design-summary').textContent.replace(/\\s+/g,' ').trim(), lb:D.getElementById('design-Lb').value};`);
-    return { ok: !d.json?.error && !!before.designResult && !res.member_design && !after.designResult && !/종합 판정|종합판정/.test(page.sum),
+    // V8-05: 시작 때 열기의 resultsCleared {reason: 'project opened'} 는 그 뒤에 결과가 오면 지난 일이다 — 다시 보내지 않는다(카드가 「프로젝트를 열었습니다」 로 까닭을 바꾸지 않게)
+    const keptCleared = (await lastOf(['resultsCleared'])).resultsCleared;
+    return { ok: !d.json?.error && !!before.designResult && !res.member_design && !after.designResult && !/종합 판정|종합판정/.test(page.sum) && !/프로젝트를 열었습니다/.test(page.sum) && !keptCleared,
       detail: `설계 ${d.json?.pass} → 기록에 designResult ${!!before.designResult} → Lb 9999(페이지) → 호스트 결과 member_design ${res.member_design ? '있음' : '없음'} → 새로 고침 → 기록 ${after.designResult ? '있음' : '없음'} · 카드 「${short(page.sum, 70)}」 · 새로 고친 뒤 Lb 칸 ${page.lb}(하중 해석이 있으면 그 Ly 로 자동 — 페이지의 일)` };
   });
   await step('s14g V7-45 — 접합 범위의 무효화(set_case_inputs connT1)는 단일 접합만 지운다 — 부재 설계는 기록 · 새로 고친 페이지에 남는다', async () => {

@@ -155,6 +155,9 @@ export class Channel {
         for (const c of CLEARED_BY_INVALIDATION) { this.state.delete(c); }
         if (m.data?.invalidateLoads) { this.state.delete('loadAnalysisComplete'); }
       }
+      // V8-05: 결과가 새로 오면 그 앞의 「모든 결과를 지웠다」(resultsCleared — 열기 · 새 모델)는 지난 일 — 다시 실린 페이지에 다시 보내면
+      // 그 뒤에 다른 까닭으로 지운 결과의 카드가 「프로젝트를 열었습니다」 로 보인다
+      if (RESULT_KIND_OF[command]) { this.state.delete('resultsCleared'); }
       this.state.delete(command);
       this.state.set(command, { seq: this.seq, command, text });
     }
