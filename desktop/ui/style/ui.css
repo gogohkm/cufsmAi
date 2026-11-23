@@ -289,3 +289,9 @@ svg rect.cpb { cursor: default; }
 .pane-detail table.t td.path { word-break: break-all; white-space: normal; text-align: left; font-size: 11px; }
 .pane-detail .publish { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pane-detail .btns { display: flex; gap: 8px; margin-top: 6px; }
+/* V7-01 — 결과 서명 안 됨(저장 단추 옆, 조용히 늘) · 입력만 열었다는 띠 */
+.tbar .sealtag { font-size: 11px; color: var(--warn); border: 1px dashed var(--warn); border-radius: 3px; padding: 0 6px; margin-left: 6px; white-space: nowrap; }
+.tbar .sealtag[hidden] { display: none; }
+#opennotice[hidden] { display: none; }
+#opennotice { border-left: 3px solid var(--warn); background: var(--bg-raise); }
+#opennotice .sp { flex: 1; }

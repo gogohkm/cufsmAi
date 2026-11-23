@@ -11,6 +11,7 @@
  * 메시지로 보낸다. 웹뷰 안에서 누른 F2 는 웹뷰가 메시지로 알려 준다.
  */
 import { api, keyHeaders } from './bridge';
+import { bidiSafe } from './dom';
 
 let on = false;
 let designerSrc = '';
@@ -120,7 +121,7 @@ export function toggleEditing(): void { setEditing(!on); }
 
 export function showSide(w: { id: string; title?: string; viewType?: string; url: string }): void {
   sideId = w.id;
-  document.getElementById('side-title')!.textContent = w.title || w.viewType || '';
+  document.getElementById('side-title')!.textContent = bidiSafe(w.title || w.viewType || '');
   (document.getElementById('side-frame') as HTMLIFrameElement).src = `${w.url}?theme=${theme}`;
   document.getElementById('side')!.hidden = false;
 }

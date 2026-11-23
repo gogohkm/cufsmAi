@@ -1,4 +1,5 @@
 /** 풍선 도움말 — data-tip 을 가진 것 위에 커서를 올리면 뜬다. 화면에 안내 문장을 쓰지 않는 대신이다. (StAnal ui/src/tips.ts) */
+import { bidiSafe } from './dom';
 
 let box: HTMLElement | null = null;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -15,7 +16,7 @@ function show(t: Element, text: string): void {
   box = document.createElement('div');
   box.className = 'tipbox';
   box.setAttribute('role', 'tooltip');
-  box.textContent = text;
+  box.textContent = bidiSafe(text);
   document.body.appendChild(box);
   const r = t.getBoundingClientRect();
   box.style.left = `${Math.max(6, Math.min(r.left, window.innerWidth - box.offsetWidth - 6))}px`;

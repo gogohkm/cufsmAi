@@ -3,7 +3,7 @@
  * 단추는 사람만 하는 일뿐이다(열기 · 저장 · 편집 상태 · Claude 연결). 해석 실행 · 값 수정 단추는 없다.
  * 찾기(Ctrl+F) · AI 따라가기(켜고 끄기 — 켜 두면 AI 의 focus 요청을 따른다, 구성안 3.9)도 보는 일이다.
  */
-import { tip } from './dom';
+import { bidiSafe, tip } from './dom';
 import { openMenu } from './menu';
 import { state, type Stage } from './store';
 
@@ -49,6 +49,7 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
   h = handlers;
   el.innerHTML = '<span class="logo">StCFSD</span>'
     + `<button class="pick" data-act="file"${tip('검토 대상 하나 = .csd 파일 하나(단면 + 부재 조건 + 하중 + 검토). 열기 · 저장')}>검토 대상 <b class="fname"></b> ▾</button>`
+    + '<span class="sealtag" hidden></span>'
     + '<span class="ebadge" hidden data-tip="입력 화면이 열려 있다. 트리와 제목 줄은 그대로다">편집</span>'
     + '<span class="pipe-slot"></span>'
     + '<span class="sp"></span>'
@@ -98,8 +99,18 @@ export function renderTitle(editing: boolean, pending: boolean): void {
   // 저장하지 않은 변경(K2 §7 — 호스트의 get_status.case.dirty · caseDirty): 파일 이름 뒤에 ●
   const dirty = !!(state.full?.case?.dirty ?? state.caseIn?.dirty);
   const fname = root.querySelector('.fname') as HTMLElement;
-  fname.textContent = `${state.file.name ?? '파일 없음'}${dirty ? ' ●' : ''}`;
+  fname.textContent = bidiSafe(`${state.file.name ?? '파일 없음'}${dirty ? ' ●' : ''}`);
   fname.setAttribute('data-dirty', dirty ? '1' : '0');
+  // V7-01(82194ef): 지금 저장하면 결과에 이 PC 의 서명이 붙는가 — 아니면 저장 단추 옆에 조용히 늘 보인다(물음 · 대화상자가 아니다)
+  const seal = root.querySelector('.sealtag') as HTMLElement;
+  const signed = state.full?.case?.results_signed;
+  seal.hidden = signed !== false;
+  if (signed === false) {
+    const why = String(state.full?.case?.results_signed_reason ?? '');
+    seal.textContent = '결과 서명 안 됨';
+    seal.setAttribute('data-unsigned', '1');
+    seal.setAttribute('data-tip', `지금 저장하면 결과에 이 PC 의 서명이 붙지 않는다 — 다시 열 때 결과는 되살아나지 않고 입력만 열린다. ${why ? `까닭(호스트): ${why}` : ''}`);
+  } else { seal.removeAttribute('data-unsigned'); }
   root.querySelector('.pick')?.setAttribute('data-tip', `${state.file.path
     ? `${state.file.path} — 검토 대상 하나 = .csd 파일 하나. 열기 · 저장` : '아직 파일로 열거나 저장하지 않았다. 열기 · 저장'}${dirty ? ' · ● 저장하지 않은 변경이 있다' : ''}`);
   (root.querySelector('.pipe-slot') as HTMLElement).innerHTML = pipeHtml();

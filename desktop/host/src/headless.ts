@@ -87,6 +87,9 @@ async function main(): Promise<void> {
 
   const log = (line: string) => process.stderr.write(`${line}\n`);
   const platform: HeadlessPlatform = createHeadlessPlatform({ log });
+  // V7-01: 결과 봉인의 기록자 열쇠 폴더 — --user-data 를 준 때만 그 안(<user-data>/writer). 주지 않으면 정하지 않는다(봉인 없이 저장 —
+  // 사용자의 진짜 폴더에 열쇠를 만들지 않는다). 창(Electron)은 늘 <userData>\writer
+  if (flags['user-data'] !== undefined && typeof flags['user-data'] === 'string') { process.env.STCFSD_WRITER_KEY_DIR = path.join(userDataDir, 'writer'); }
   const host = await startHost({ repoRoot, userDataDir, platform, pythonPath, portFile, mcpPort, log });
 
   out(`StCFSD headless 호스트 — 명령 ${host.commands.ids().length}개, 활성화 ${host.activationMs} ms, 설계 패널 ${host.panelMs} ms`);

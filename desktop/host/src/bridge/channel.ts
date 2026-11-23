@@ -41,11 +41,12 @@ import type { SseStream } from './sse';
  * 호스트가 받지 않는다(3.2). `restoreDesignInputs` 도 남기지 않는다 — 다시 보내면 지난 파일의 입력이 지금 상태 위에 얹혔다
  * (V5b-02 의 뿌리). `caseDiscarded`(저장하지 않은 변경을 버리고 열었다)는 알림이라 한 번만 — 새 화면은 이벤트의 본문으로 받는다.
  * `caseDirty` · `caseReference` 는 마지막 것만(규칙 1).
- * K3(f08e10e): `validationResult {items}` · `reportResult {html}` 은 페이지가 물은 것(`runValidation` · `generateReport`)에 대한 답이라
- * 남기지 않는다 — 다시 실린 페이지는 다시 묻는다(다시 보내면 낡은 검증 · 보고서가 지금 상태 위에 뜬다).
+ * K3(f08e10e): `reportResult {html}` 은 페이지가 물은 것(`generateReport`)에 대한 답이라 남기지 않는다 — 다시 실린 페이지는 다시 묻는다.
+ * `validationResult {items}` 는 4b99968 부터 호스트가 쥔 결과(`results.validation`, 장부 kind 'validation')의 항목이라 결과처럼 남긴다 —
+ * 호스트가 `derivedResultsInvalidated {kinds: ['validation']}` 로 지우거나 `results.validation` 이 없으면 기록에서도 지운다.
  */
 const TRANSIENT = new Set(['collectDesignData', 'captureSection', 'showSection', 'propertiesResult', 'propertiesError', 'focusRequest',
-  'caseState', 'caseAck', 'restoreDesignInputs', 'caseDiscarded', 'validationResult', 'reportResult']);
+  'caseState', 'caseAck', 'restoreDesignInputs', 'caseDiscarded', 'reportResult']);
 /** `resultsCleared` 가 지우는 것 */
 const CLEARED_BY_RESULTS = new Set([
   'analysisStarted', 'analysisComplete', 'analysisError', 'dsmResult', 'classifyResult', 'classifyError', 'designDsmPrepared',
@@ -76,6 +77,7 @@ export const RESULT_KIND_OF: Record<string, string> = {
   analysisComplete: 'buckling_analysis', dsmResult: 'buckling_analysis', classifyResult: 'buckling_analysis',
   designDsmPrepared: 'design_dsm', loadAnalysisComplete: 'load_analysis',
   designResult: 'member_design', designPurlinResult: 'member_design', lapConnectionResult: 'lap', connectionResult: 'connection',
+  validationResult: 'validation',
 };
 const COMMANDS_OF_KIND: Record<string, string[]> = {};
 for (const [c, k] of Object.entries(RESULT_KIND_OF)) { (COMMANDS_OF_KIND[k] ??= []).push(c); }

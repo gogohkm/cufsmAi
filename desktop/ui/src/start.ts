@@ -5,7 +5,7 @@
  * 최근 검토 목록 · 프로젝트 폴더는 기록 갈래(R1)가 만든다 — 지금 호스트에는 없다. 그래서 목록에는 지금 모델 한 줄만 있고,
  * 새 검토의 템플릿 넷 가운데 「단면만」만 된다(나머지는 R1 전에는 Claude 에게 말로).
  */
-import { esc, tip } from './dom';
+import { bidiSafe, esc, tip } from './dom';
 import { hhmm } from './format';
 import { sectionLabel } from './names';
 import { sectionSvg } from './section';
@@ -61,7 +61,7 @@ export function renderStart(root: HTMLElement, claude: ClaudeStatus | null): voi
       + `<td class="r">${claude?.lastAiCall ? `${esc(hhmm(claude.lastAiCall.at))}<div class="faint">AI</div>` : '<span class="faint">—</span>'}</td></tr>`;
   }
   const where = root.querySelector('.where') as HTMLElement | null;
-  if (where) { where.textContent = state.file.path ?? '열린 파일 없음'; }
+  if (where) { where.textContent = bidiSafe(state.file.path ?? '열린 파일 없음'); }
   const steps = root.querySelector('.steps') as HTMLElement | null;
   if (steps) { steps.innerHTML = claudeSteps(claude); }
   const v = root.querySelector('.verdict.cl') as HTMLElement | null;

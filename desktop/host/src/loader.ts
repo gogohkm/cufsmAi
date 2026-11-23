@@ -127,6 +127,11 @@ export interface HostHandle {
   openProject(file: string): Promise<FileResult>;
   /** `.csd` 로 저장한다 — 「저장」 길(saveProject → 저장 대화상자 → `_writeProjectFile` — K2: 입력은 호스트의 검토 상태에서) */
   saveProject(file: string): Promise<FileResult>;
+  /**
+   * 복구 사본(V7-S3 — 4b99968 의 `StcfsdPanel.writeRecoveryCopy`): root 안의 새 `.csd` 하나. 지금 파일 · 저장 기준 · 화면을 바꾸지 않는다.
+   * 같은 프로세스의 셸만 부른다(MCP 에는 없다)
+   */
+  writeRecoveryCopy(file: string, root: string): Promise<{ ok: true; path: string } | { ok: false; error: string }>;
   unimplemented(): Array<{ name: string; count: number }>;
   dispose(): Promise<void>;
 }
@@ -363,7 +368,7 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
     if (!info) { throw new Error(`stcfsd.openDesigner 뒤에 ${DESIGNER_VIEW_TYPE} 패널이 없다`); }
     runtime.hub.pin(info.id);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { currentPanel?: unknown } };
+    const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any> } } };
     const designer: DesignerPanel = {
       id: info.id,
       alive: () => runtime.hub.has(info.id) && !!panelMod.StcfsdPanel?.currentPanel,
@@ -451,6 +456,11 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
       mcpConfigWrites: () => changedConfigs(),
       openProject: file => runFileOp('open', file, { command: 'openProject' }),
       saveProject: file => runFileOp('save', file, { command: 'saveProject' }),
+      writeRecoveryCopy: async (file, root) => {
+        const p = panelMod.StcfsdPanel?.currentPanel;
+        if (!p || typeof p.writeRecoveryCopy !== 'function') { return { ok: false, error: '설계 패널이 없거나 이 판의 호스트에 복구 사본 쓰기가 없다' }; }
+        try { return await p.writeRecoveryCopy(file, root); } catch (err) { return { ok: false, error: String((err as Error)?.message ?? err) }; }
+      },
       unimplemented: () => runtime.tracker.list(),
       dispose: teardown,
     };

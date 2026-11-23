@@ -190,8 +190,8 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       // caseDiscarded(K2 — 저장하지 않은 변경을 버리고 열었다)도 한 번만 뜻이 있는 알림 — 본문을 `discarded` 로 싣는다
       const discarded = command === 'caseDiscarded' ? (message as { data?: unknown }).data ?? null : undefined;
       // K3: 검증 결과는 판(case_rev)과 수만 싣는다 — 새 화면은 그것을 신호로 호스트 동작 validate_design 을 다시 읽는다(본문 전체는 싣지 않는다)
-      const vd = command === 'validationResult' ? (message as { data?: { items?: unknown[]; case_rev?: unknown } }).data : undefined;
-      const validation = vd ? { case_rev: typeof vd.case_rev === 'number' ? vd.case_rev : null, items: Array.isArray(vd.items) ? vd.items.length : 0 } : undefined;
+      const vd = command === 'validationResult' ? (message as { data?: { items?: unknown[]; case_rev?: unknown; by?: unknown } }).data : undefined;
+      const validation = vd ? { case_rev: typeof vd.case_rev === 'number' ? vd.case_rev : null, items: Array.isArray(vd.items) ? vd.items.length : 0, by: typeof vd.by === 'string' ? vd.by : null } : undefined;
       bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq,
         ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}), ...(validation !== undefined ? { validation } : {}) });
     }

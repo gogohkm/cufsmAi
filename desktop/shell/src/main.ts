@@ -372,8 +372,10 @@ function writeRecovery(event: string): Promise<void> {
     if (dirty === false) { diag.recovery.push({ event, dirty }); log(`세션 끝(${event}) — 저장 안 한 변경 없음`); return; }
     try { fs.mkdirSync(recoveryDir, { recursive: true }); } catch { /* 아래에서 실패 */ }
     const file = path.join(recoveryDir, `recovery-${new Date().toISOString().replace(/[:.]/g, '-')}.csd`);
-    const r = await host.saveProject(file);
-    diag.recovery.push({ event, dirty, file, ok: r.ok, message: r.message });
+    // 4b99968: 호스트의 복구 사본 쓰기 — 지금 파일 · 저장 기준 · 화면을 바꾸지 않는다(root 안의 새 파일만, 링크 거절)
+    const w = await host.writeRecoveryCopy(file, recoveryDir);
+    const r = { ok: w.ok, message: w.ok ? undefined : w.error };
+    diag.recovery.push({ event, dirty, file: w.ok ? w.path : file, ok: r.ok, message: r.message });
     log(`세션 끝(${event}) — 저장 안 한 변경을 복구본으로: ${file} (${r.ok ? '씀' : `실패 ${r.message ?? ''}`})`, r.ok ? 'warn' : 'error');
   })().finally(() => { recoveryRunning = null; });
   return recoveryRunning;
@@ -710,6 +712,10 @@ async function start(): Promise<void> {
     openExternal,
     notifyWithoutScreen,
   });
+  // V7-01(82194ef): 결과를 봉인하는 이 PC 의 기록자 열쇠 폴더 — 프로그램의 사용자 자료 폴더 안(<userData>\writer). 시험은 --user-data 의
+  // 임시 폴더라 그 안이다(진짜 폴더가 아니다). 호스트(확장의 activate)가 읽기 전에 정한다. 밖에서 준 값(STCFSD_WRITER_KEY_DIR)은 받지 않는다 —
+  // 열쇠는 이 프로그램의 자리에만
+  process.env.STCFSD_WRITER_KEY_DIR = path.join(userData, 'writer');
   try {
     host = await api.startHost({
       repoRoot: layout.appRoot, userDataDir: path.join(userData, 'host'), platform, portFile, screenless: false,

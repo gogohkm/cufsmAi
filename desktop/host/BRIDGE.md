@@ -215,3 +215,5 @@ await window.CufsmViewer3D.render({ nodes: m.node, elems: m.elem, modeVec, lengt
   화면 안의 저장 자리 물음)을 부른다. 취소면 넘기지 않는다.
 - **밀린 입력(V7-44)**: 수신부가 `window.__stcfsdFlush()` 를 둔다 — 지금 칸에 `change` 를 일으켜 밀린 `caseEdit` 를 내고 보내기가 끝날 때까지(1.2 초까지) 기다린다. 창이 닫기 물음 앞에 부른다.
 - 시험: `test/bridge.mjs` s14f(설계 → 페이지에서 Lb → 새로 고침 → 카드 없음) · s14g(connT1 → 접합만 지움, 설계는 남음). 고치기 전의 다리로 돌리면 둘 다 실패한다(확인함).
+
+- **4b99968 뒤**: 호스트가 결과를 지울 때마다 `derivedResultsInvalidated {kinds, scope: 'kinds'}` — 다리는 `kinds` 를 「이것을 지워라」의 근거로 쓰고(결과 이름 → 메시지: 위 표 + `validation` → `validationResult`), `get_full_state.results` 와의 맞춤은 둘째 안전으로 남긴다. `validationResult` 는 이제 결과처럼 남는다(호스트가 `results.validation` 으로 쥔 동안 — 새 화면이 새로 고친 뒤 마지막 점검의 항목을 읽는다). 시험 s14e(점검 뒤 입력 → kinds ['validation'] → 기록에서 사라짐).

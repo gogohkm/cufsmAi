@@ -5,7 +5,7 @@
  * 오면 0.25 초 뒤 다시 읽는다. 보는 자리(탭 · 고른 줄)는 바꾸지 않는다(구성안 3.9) — 바꾸는 것은 사람과, 켜 둔 「AI 따라가기」뿐이다.
  * U3: 계산 시트(sheet.ts) · 우클릭 메뉴(ctxmenu.ts) · 찾기(find.ts) · 보기 보고와 AI 따라가기(follow.ts) · 3D 모드 형상(v3d.ts).
  */
-import { api, connectEvents } from './bridge';
+import { api, connectEvents, mcp } from './bridge';
 import { centerHtml, groupOf, modeSel, opts, setViews, tablesFor, viewsFor, type CenterOpts, type V } from './center';
 import { menuAt, checkMenu, type MenuHandlers } from './ctxmenu';
 import { copyText, openDrawer, setActiveTable, sortBy, toggleDrawer, tsvOf } from './drawer';
@@ -21,7 +21,7 @@ import { infoHtml, shareLabel } from './info';
 import { closeMenu, installMenuClosers, menuKey, menuOpen, openMenu, type MenuItem } from './menu';
 import { neighbours, sheetHtml } from './sheet';
 import { initStart, renderStart } from './start';
-import { makeReport, refresh, rowOfKey, runValidation, setRunning, state, type Stage } from './store';
+import { makeReport, refresh, rowOfKey, setRunning, setValRunning, state, type Stage } from './store';
 import { flashTip, installTips } from './tips';
 import { claudeDone, claudeStatus, initTitlebar, renderClaude, renderFollow, renderTitle, type ClaudeStatus } from './titlebar';
 import { buildTree, findNode, keysUnder, setTreeFilter, TABS, treeFilter, treeHtml, type Tab } from './tree';
@@ -68,11 +68,60 @@ function onEditChange(): void {
   render();
 }
 
+// ── 입력만 열었다(V7-01 — 82194ef) ─────────────────────────────────
+/**
+ * 파일을 열 때 호스트가 결과를 버렸으면(봉인이 맞지 않음 · 다른 엔진) 장부에 cause.action 'open_project' 의 줄이 생긴다 — 그 까닭을
+ * 눈에 띄게(제목 표시줄 아래 띠) 보이고 다시 계산하는 길 하나(run_case_check)를 둔다. 결과가 다시 생기거나 닫으면 사라진다
+ */
+const OPEN_WHY: Array<[RegExp, string]> = [
+  [/do not match the inputs saved with them/i, '파일의 결과가 함께 저장된 모델 · 입력과 맞지 않습니다(저장한 뒤 파일이 바뀌었다)'],
+  [/not computed by this program on this PC/i, '이 PC 에서 이 프로그램이 계산한 결과가 아닙니다(예: 동료의 파일)'],
+  [/another engine/i, '다른 엔진이 계산한 결과입니다'],
+];
+let noticeDismissed = '';
+let recomputing = false;
+function openDrop(): { key: string; why: string; kinds: string[] } | null {
+  const inv: any[] = Array.isArray(state.full?.invalidated) ? state.full.invalidated : [];
+  const drops = inv.filter(e => e?.cause?.action === 'open_project' && OPEN_WHY.some(([re]) => re.test(String(e.reason ?? ''))));
+  if (!drops.length) { return null; }
+  const last = drops[drops.length - 1];
+  const res = state.full?.results ?? {};
+  const kinds = [...new Set(drops.filter(e => e.reason === last.reason).map(e => String(e.kind)))].filter(k => !res[k]);
+  if (!kinds.length) { return null; }
+  const why = OPEN_WHY.find(([re]) => re.test(String(last.reason)))![1];
+  return { key: `${String(last.invalidated_at ?? '')}|${String(last.reason)}`, why, kinds };
+}
+function renderOpenNotice(): void {
+  const el = $('opennotice');
+  const d = openDrop();
+  el.hidden = !d || d.key === noticeDismissed;
+  if (!d || el.hidden) { return; }
+  const KO: Record<string, string> = { buckling_analysis: '좌굴 해석', load_analysis: '하중 해석', member_design: '부재 검토', design_dsm: '설계용 좌굴값', lap: '랩 접합', connection: '단일 접합' };
+  el.innerHTML = `<b data-open-notice>입력만 열었습니다 — ${esc(d.why)}</b><span class="faint">버린 결과: ${esc(d.kinds.map(k => KO[k] ?? k).join(' · '))}</span><span class="sp"></span>`
+    + `<span class="btn${recomputing ? ' off' : ''}" data-act="recompute"${tip('화면의 입력으로 부재 검토를 다시 돌린다(run_case_check — 화면의 「설계 검토 실행」과 같은 요청). Claude 에게 「다시 계산해」라고 해도 된다')}>${recomputing ? '계산 중…' : '다시 계산'}</span>`
+    + `<span class="btn ghost" data-act="notice-close"${tip('이 알림을 닫는다(까닭은 결과 탭의 낡음에 남는다)')}>닫기</span>`;
+}
+async function recompute(): Promise<void> {
+  if (recomputing) { return; }
+  recomputing = true;
+  render();
+  const d = openDrop();
+  const r = await mcp<any>('run_case_check', { what: 'member' });
+  let err = r?.error ? String(r.error) : '';
+  if (!err && d?.kinds.includes('lap')) { const l = await mcp<any>('run_case_check', { what: 'lap' }); if (l?.error) { err = `랩: ${String(l.error)}`; } }
+  recomputing = false;
+  if (err) { toast(`다시 계산하지 못했다 — ${err}. Claude 에게 「다시 계산해」라고 해도 된다`, 'warning'); }
+  else if (d) { noticeDismissed = d.key; toast('화면의 입력으로 다시 계산했다(부재 검토)', 'info'); }
+  scheduleRefresh();
+  render();
+}
+
 function render(): void {
   renderTitle(editing(), questionOpen());
   const strip = $('editstrip');
   strip.hidden = !editing();
   if (editing()) { strip.innerHTML = editStripHtml(pointedAt() ? 1 : 0); }
+  renderOpenNotice();
   renderFollow(following(), !!pointedAt());
   $('start').hidden = ui.screen !== 'start';
   $('tbar').classList.toggle('onstart', ui.screen === 'start');
@@ -183,10 +232,10 @@ function renderStatus(): void {
   const node = findNode(buildTree(ui.tab), ui.sel[ui.tab]);
   const msg = $('status').querySelector('.msg') as HTMLElement;
   const sr = ui.sheet ? rowOfKey(ui.sheet).row : null;
-  msg.textContent = ui.screen === 'start' ? (state.file.name ? `열린 검토 대상 ${state.file.name}` : '열린 검토 대상 없음')
+  msg.textContent = (ui.screen === 'start' ? (state.file.name ? `열린 검토 대상 ${state.file.name}` : '열린 검토 대상 없음')
     : editing() ? `편집 상태 · 이번 편집 ${editChanges().length} · AI 따라가기 ${following() ? '멈춤(편집 중)' : '꺼짐'}`
     : sr ? `계산 시트 · ${sr.where} · ${sr.name} · §${sr.clause}`
-      : `${TABS.find(t => t[0] === ui.tab)?.[1] ?? ''} · ${node?.t ?? ''}${state.lastChange ? ` · ${hhmm(state.lastChange.at)} ${state.lastChange.text}` : ''}`;
+      : `${TABS.find(t => t[0] === ui.tab)?.[1] ?? ''} · ${node?.t ?? ''}${state.lastChange ? ` · ${hhmm(state.lastChange.at)} ${state.lastChange.text}` : ''}`).replace(/[‎‏‪-‮⁦-⁩؜]/g, '�');
   const dm = state.runs.find(r => r.us?.design_method)?.us?.design_method;
   ($('status').querySelector('.std') as HTMLElement).innerHTML = `<span${tip(UNITS_NOTE)}>AISI S100-16${dm ? ` · ${esc(dm)}` : ''} · SI</span>`;
   const c = claudeStatus();
@@ -253,13 +302,18 @@ function toReview(): void { ui.screen = 'review'; render(); }
 
 // ── 메뉴의 일 ─────────────────────────────────────────────────────
 // ── 점검 · 계산서(K3 — 호스트가 만든다) ─────────────────────────────
-async function doValidate(by: 'person' | 'page' = 'person'): Promise<void> {
+/**
+ * 「점검 실행」 — 끼운 설계 화면의 「설계 검증 실행」을 누른다(그 화면이 늘 쓰던 길: 웹뷰 → 호스트 runValidation → by 'page').
+ * MCP validate_design 을 부르지 않는다(그러면 호스트는 AI 가 돌린 것으로 적는다). 끝은 호스트가 그 페이지에 보낸 validationResult 가 알린다
+ */
+let valTimer: number | null = null;
+async function doValidate(): Promise<void> {
   if (state.valRunning) { return; }
-  const p = runValidation(by);
+  if (!postToWebviews({ type: 'click', id: 'btn-run-validation' }, 'designer')) { toast('입력 화면이 아직 붙지 않았다 — 잠시 뒤 다시', 'warning'); return; }
+  setValRunning(true);
   render();
-  await p;
-  if (state.valErr && by === 'person') { toast(`점검을 읽지 못했다 — ${state.valErr}`, 'warning'); }
-  render();
+  if (valTimer !== null) { clearTimeout(valTimer); }
+  valTimer = window.setTimeout(() => { valTimer = null; if (state.valRunning) { setValRunning(false, '호스트가 답하지 않았다'); toast('점검의 답이 오지 않았다', 'warning'); render(); } }, 20_000);
 }
 const reportBusy = new Set<string>();
 async function doReport(kind: 'design' | 'buckling', format: 'html' | 'pdf'): Promise<void> {
@@ -277,7 +331,7 @@ async function doReport(kind: 'design' | 'buckling', format: 'html' | 'pdf'): Pr
 function docAction(t: HTMLElement): boolean {
   const a = t.closest('[data-act]');
   const act = a?.getAttribute('data-act');
-  if (act === 'val-run') { void doValidate('person'); return true; }
+  if (act === 'val-run') { void doValidate(); return true; }
   if (act === 'rpt-make' || act === 'rpt-pdf') {
     const kind = a!.getAttribute('data-kind') === 'buckling' ? 'buckling' : 'design';
     void doReport(kind, act === 'rpt-pdf' ? 'pdf' : 'html');
@@ -436,7 +490,14 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
         state.lastChange = { at: ev.at || Date.now(), text: '저장하지 않은 변경을 버리고 열었다' };
       }
       // 편집 상태의 검증 탭에서 「설계 검증 실행」을 눌렀다(K3 — 호스트가 그 페이지에 항목을 보냈다): 이 화면도 같은 호스트 동작으로 다시 읽는다
-      if (c === 'validationResult') { void doValidate('page'); state.lastChange = { at: ev.at || Date.now(), text: '설계 검증을 다시 했다(편집 상태의 검증 탭)' }; break; }
+      if (c === 'validationResult') {
+        // 호스트가 점검을 했다(이 화면 · 편집 화면의 「설계 검증 실행」 = by page, AI 의 validate_design = by ai) — 다시 읽는다
+        if (valTimer !== null) { clearTimeout(valTimer); valTimer = null; }
+        setValRunning(false);
+        state.lastChange = { at: ev.at || Date.now(), text: d.validation?.by === 'ai' ? 'AI 가 점검했다(validate_design)' : '점검했다' };
+        scheduleRefresh();
+        break;
+      }
       if (c === 'reportResult') { break; }
       if (c === 'analysisStarted') { setRunning(true); }
       if (['analysisComplete', 'analysisError', 'analysisInvalidated', 'resultsCleared', 'dsmResult'].includes(c)) { setRunning(false); }
@@ -642,6 +703,11 @@ function boot(): void {
     const hd = t.closest('[data-card-head]');
     if (hd) { const k = hd.getAttribute('data-card-head')!; if (k !== ui.sheet) { openSheet(k); } }
   });
+  $('opennotice').addEventListener('click', e => {
+    const t = e.target as HTMLElement;
+    if (t.closest('[data-act="recompute"]')) { void recompute(); return; }
+    if (t.closest('[data-act="notice-close"]')) { noticeDismissed = openDrop()?.key ?? ''; render(); }
+  });
   $('editstrip').addEventListener('click', e => {
     if ((e.target as HTMLElement).closest('[data-act="edit-done"]')) { setEditing(false); }
   });
@@ -717,7 +783,7 @@ function boot(): void {
   openSheet, closeSheet,
   get reported() { return lastReported(); },
   /** 시험: 「점검 실행」 · 보고서 만들기와 같은 길(사람의 단추와 같은 함수) */
-  validate: () => doValidate('person'),
+  validate: () => doValidate(),
   report: (kind: 'design' | 'buckling', format: 'html' | 'pdf') => doReport(kind, format),
   /** 시험: 보기 보고 하나를 곧바로(모델 · 상태를 쓰지 않는다 — 호스트가 무엇을 버리고 칩이 그것을 보이는지 본다) */
   reportNow: (view: string, selection: unknown) => report(view, selection as Item | null, 'program', true),

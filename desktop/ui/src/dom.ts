@@ -2,8 +2,15 @@
 
 const ESC: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
+/**
+ * 글 방향 제어 문자(LRM · RLM · LRE … RLO · LRI … PDI · ALM) — 파일 이름 · 엔진 글 · 알림이 거꾸로 읽히게(「txt.exe」를 「exe.txt」처럼)
+ * 하지 못하게 보이는 대체 문자 U+FFFD 로 바꾼다. 호스트의 그리기(webview/js/reportRender.js esc)와 같은 규칙
+ */
+const BIDI = /[‎‏‪-‮⁦-⁩؜]/g;
+export function bidiSafe(v: unknown): string { return String(v ?? '').replace(BIDI, '�'); }
+
 export function esc(v: unknown): string {
-  return String(v ?? '').replace(/[&<>"']/g, c => ESC[c]);
+  return bidiSafe(v).replace(/[&<>"']/g, c => ESC[c]);
 }
 
 export function $(sel: string, root: ParentNode = document): HTMLElement {

@@ -156,6 +156,8 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 
 보기 보고(b60e62d — 보기 계약 2절): 화면은 id · 어휘만 보낸다 — 보기 `start` · `sheet` · `<트리 탭>/<무리>:<보기>`, 검토 항목의 위치는 퍼린의 `{region, check_point}` · 엔진의 `{segment}` 만(x · 지점 번호 등 수는 보내지 않는다), focus 답의 `note` 는 코드(`followed` · `not_in_results` · `follow_off` · `editing` · `busy`). 「Claude 가 보는 선택」 칩은 호스트가 받아 적은 것 — 호스트가 버린 칸(`dropped`)은 빼고 「호스트가 버림: …」 이라고 보인다(`data-dropped`). 퍼린 검토 지점(보기 계약 4a): 「검토 위치」에 지점 n · 경간 n(1 부터, 호스트가 채운 그대로) · 구간의 지점 · 소요 근거, 조합이 `'envelope'` 이면 「포락선」(어느 조합인지 모름), 시트의 「설계 가정과 출처」 끝에 그 지점 자신의 경고 · 가정 · 범위 · 검토 안 함.
 
+보기 계약 kind `validation`(4b99968): 점검 항목을 고르면 `{kind: 'validation', id: 'val.*'}` 을 알리고, AI 의 `focus` 가 그 kind 면 그 항목으로(마지막 점검에 있을 때). 글 방향 제어 문자(LRM · RLM · LRE – RLO · LRI – PDI · ALM)는 화면의 모든 글(파일 이름 · 알림 · 엔진 글 · 풍선)에서 U+FFFD 로 — 호스트의 그리기(`reportRender.esc`)와 같은 규칙. 파일의 결과를 버리고 연 때(봉인 · 엔진 — 장부의 `open_project`) 제목 표시줄 아래 「입력만 열었습니다 — 까닭」 띠와 「다시 계산」(run_case_check member · 랩이 버려졌으면 lap), 지금 저장하면 서명이 붙지 않으면 「결과 서명 안 됨」. 랩 구간 구속 진술(`lap_restrained`)이 검토 상태에 생기면 부재 · 접합부 가지에 출처와 함께.
+
 엔진 계약(b288448)의 표시: 무리의 지배가 미검토(`governs_basis: 'not_evaluated'`)면 덩어리 머리 「지배 — 미검토」 · 「미검토 (참고 판정비 r)」, 「평가한 최대: 이름 비」 줄을 따로(머리 비로 쓰지 않는다 — 정보 창도). `out_of_scope` 는 「참고 — 적용 범위 밖」. `ratio_form` 은 「원문 좌변 소요 ≤ 강도, 견줄 비 r」 + 「비의 꼴」 꼬리표. `unbounded` 는 「∞」(바꾸지 않는다). `expr_units: 'US'` 단계는 「US 단위로 쓴 식」 + `units_note`. 랩의 `lap.block_shear`(미검토 · 판정에 안 듦)와 범위 글, Mnd 없는 랩의 뒤틀림 미검토는 엔진이 내는 대로.
 
 ## U5 — 호스트가 만든 점검 · 계산서(K3, f08e10e)
@@ -163,7 +165,7 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 | 자리 | 무엇 | 어디서 |
 |---|---|---|
 | 결과 탭 「점검」 · 진행 띠 「점검」 | 항목마다 고정 id(`val.*`) · 판정(호스트의 셋 pass · warn · fail 을 편집 상태 검증 탭의 말 통과 · 주의 · 실패로) · 값 · 기준 · 주석, 분류(A … H — 검증 탭과 같은 차례)마다 수, 고르면 정보 창 | 호스트 동작 `validate_design`(detail 'full' · SI) — 「점검 실행」을 누를 때, 그리고 편집 상태의 검증 탭에서 「설계 검증 실행」을 눌렀을 때(호스트가 그 페이지에 보낸 `validationResult` 를 신호로). 화면은 다시 판정하지 않는다 |
-| 점검의 낡음 | 마지막 점검 뒤 입력 판(`case.rev`) · 남은 결과(종류와 시각) · 무효 장부의 길이 · 모델(절점 · 요소 · 기준 응력)이 바뀌면 「낡음」과 무엇이 바뀌었는지 | `get_full_state` — 호스트는 마지막 점검을 쥐지 않는다(결과 · 장부에 없다). 그래서 새로 고치면 「실행 안 함」, AI 의 `validate_design` 은 이 화면에 오지 않는다 |
+| 점검의 낡음 · 마지막 점검(4b99968) | 호스트의 `results.validation {at, case_rev, counts, units, by}` 이 있으면 「일치」(누가 — 편집 화면 · 이 화면 / AI), 없고 장부에 kind `validation` 이면 「낡음」과 그 까닭. 항목은 호스트가 설계 패널에 보낸 마지막 `validationResult`(다리가 그 점검이 지금 것인 동안 남긴다) — 새로 고쳐도 · AI 의 `validate_design` 도 보인다. 「점검 실행」은 끼운 화면의 「설계 검증 실행」을 누른다(MCP 를 부르지 않는다 — 그러면 AI 가 돌린 것으로 적힌다) | `get_full_state` · `/api/wv/<id>/last` |
 | 문서 탭 · 계산서 · 좌굴 해석 보고서 | 「만들기」 → 호스트가 HTML 을 쓰고 미리보기, 「PDF 저장」 → 호스트의 길(보이지 않는 Edge 인쇄)로 같은 폴더에 PDF · 쪽 수. 쓴 곳(열린 `.csd` 의 폴더 · 없으면 임시 폴더)과 파일 경로, 판정, 알림, 통과 아닌 검토 id | 다리 `POST /api/report` → 호스트 동작 `generate_report`. 화면은 경로를 주지 않는다 |
 | 미리보기의 틀 | `<iframe sandbox="" referrerpolicy="no-referrer" srcdoc="호스트 파일 그대로">` — 빈 sandbox: 스크립트 · 폼 · 팝업 · 같은 출처 · 위 문서 이동 모두 없음(불투명 출처라 바깥 문서에 닿지 않는다). srcdoc 문서는 이 화면의 CSP(`default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'` …)를 물려받는다 | 시험 u54(파일 sha256 = srcdoc) · u55(스크립트 · onerror · svg onload · 외부 스크립트를 넣어도 실행 0, Chromium 이 막은 줄이 남는다) |
 | 검증표(문서 탭) | 점검과 같은 항목을 문서 꼴로 | 같음 |

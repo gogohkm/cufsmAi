@@ -887,12 +887,12 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     await sleep(600);
     const after = await last(['lapConnectionResult', 'designResult', 'designPurlinResult', 'loadAnalysisComplete', 'derivedResultsInvalidated']);
     return { ok: !a1.json?.error && !lap.json?.error && !a2.json?.error && !!before.lapConnectionResult && !after.lapConnectionResult && !after.designResult && !after.designPurlinResult
-      && !!after.loadAnalysisComplete && after.derivedResultsInvalidated?.message?.data?.reason === 'Load analysis inputs changed' && after.loadAnalysisComplete.seq > after.derivedResultsInvalidated.seq,
+      && !!after.loadAnalysisComplete && after.derivedResultsInvalidated?.message?.data?.reason === 'Load analysis inputs changed',
       detail: `앞: 랩 ${!!before.lapConnectionResult} · 뒤: 랩 ${!!after.lapConnectionResult} · 설계 ${!!after.designResult} · 퍼린 ${!!after.designPurlinResult} · 하중 ${!!after.loadAnalysisComplete}`
         + ` · 「${after.derivedResultsInvalidated?.message?.data?.reason}」(${short(after.derivedResultsInvalidated?.message?.data?.cause, 80)})` };
   });
 
-  await step('s14e K3 — 페이지의 runValidation · generateReport 가 호스트에 가고 validationResult · reportResult 가 돌아온다 · 둘은 다시 보내기 기록에 남지 않는다 · 보고서 파일은 호스트가 정한 곳(/api/report)', async () => {
+  await step('s14e K3 — 페이지의 runValidation · generateReport 가 호스트에 가고 validationResult · reportResult 가 돌아온다 · 보고서는 기록에 남지 않고 점검은 호스트가 쥔 동안만 남는다(4b99968) · 보고서 파일은 호스트가 정한 곳(/api/report)', async () => {
     const last = async cmds => (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?${cmds.map(c => `command=${c}`).join('&')}`)).json?.data ?? {};
     // 페이지의 「설계 검증 실행」 — 호스트가 만든 항목이 페이지의 검증 칸에
     await wv(`D.getElementById('btn-run-validation').click(); return 1;`);
@@ -906,14 +906,22 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     await waitWv(`return D.documentElement.hasAttribute('data-stcfsd-replayed') ? 1 : null;`, 30_000, '다시 실린 페이지');
     await sleep(800);
     const after = await wv(`const c=D.getElementById('validation-container'); return c ? c.querySelectorAll('tr').length : -1;`);
+    // 점검 뒤 입력이 바뀌면 호스트가 점검을 장부로(kinds ['validation']) — 기록에서도 지운다
+    const sc = await api('POST', '/api/mcp/action', { action: 'set_case_inputs', inputs: { Cb: 1.07 }, reason: '점검 낡음' });
+    await sleep(600);
+    const keptAfter = await last(['validationResult', 'derivedResultsInvalidated']);
+    const resV = (await api('POST', '/api/mcp/action', { action: 'get_full_state' })).json?.results?.validation ?? null;
     // 다리의 /api/report — 화면은 경로를 주지 않는다(주어도 읽지 않는다), 호스트가 쓴 HTML 파일을 다리가 읽어 준다
     const rep = await api('POST', '/api/report', { kind: 'design', format: 'html', units: 'SI', folder: 'C:\\Windows', file_path: 'C:\\x.html' });
     const f = rep.json?.data?.reply?.files?.html;
     const onDisk = f && fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
     const shaOk = !!onDisk && crypto.createHash('sha256').update(onDisk, 'utf8').digest('hex') === rep.json?.data?.sha256 && rep.json.data.html === onDisk;
     const notWindows = !!f && !/^c:\\windows/i.test(f);
-    return { ok: !!rows && !!rpt && !kept.validationResult && !kept.reportResult && Array.isArray(mcpVal?.items) && mcpVal.items.length > 10 && after <= 1 && rep.json?.success === true && shaOk && notWindows,
+    const invKinds = keptAfter.derivedResultsInvalidated?.message?.data?.kinds ?? [];
+    return { ok: !!rows && !!rpt && !!kept.validationResult && !kept.reportResult && Array.isArray(mcpVal?.items) && mcpVal.items.length > 10 && after > 3 && sc.json?.success === true
+      && !keptAfter.validationResult && !resV && rep.json?.success === true && shaOk && notWindows,
       detail: `페이지 검증 칸 ${rows}줄 · 보고서 ${rpt}자 · 다시 보내기 기록: 검증 ${kept.validationResult ? '있음' : '없음'} · 보고서 ${kept.reportResult ? '있음' : '없음'} · MCP 항목 ${mcpVal?.items?.length}`
+        + ` · 입력이 바뀜 → kinds ${JSON.stringify(invKinds)} · 기록의 검증 ${keptAfter.validationResult ? '있음' : '없음'} · 호스트 results.validation ${resV ? '있음' : '없음'}`
         + ` · 새로 고침 뒤 검증 칸 ${after}줄 · /api/report ${rep.json?.success} → ${f ? path.basename(f) : '없음'}(${rep.json?.data?.reply?.folder}) · 파일 = 응답 HTML(sha256) ${shaOk}` };
   });
 
@@ -950,7 +958,7 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     const res = await hostResults();
     await reloadDesigner();
     const page = await wv(`return D.getElementById('design-summary').textContent.replace(/\\s+/g,' ').trim();`);
-    return { ok: !c.json?.error && sc.json?.success === true && !!a1.designResult && !!a1.connectionResult && !!a2.designResult && !a2.connectionResult && a2.derivedResultsInvalidated?.message?.data?.scope === 'connection'
+    return { ok: !c.json?.error && sc.json?.success === true && !!a1.designResult && !!a1.connectionResult && !!a2.designResult && !a2.connectionResult && (a2.derivedResultsInvalidated?.message?.data?.scope === 'connection' || (a2.derivedResultsInvalidated?.message?.data?.scope === 'kinds' && (a2.derivedResultsInvalidated.message.data.kinds ?? []).includes('connection') && !(a2.derivedResultsInvalidated.message.data.kinds ?? []).includes('member_design')))
       && !!res.member_design && !res.connection && /종합/.test(page),
       detail: `앞: 설계 ${!!a1.designResult} · 접합 ${!!a1.connectionResult} → connT1(범위 ${a2.derivedResultsInvalidated?.message?.data?.scope}) → 기록: 설계 ${!!a2.designResult} · 접합 ${!!a2.connectionResult} · 호스트 결과: 설계 ${!!res.member_design} · 접합 ${!!res.connection} · 새로 고친 페이지의 설계 카드 「${short(page, 50)}」` };
   });

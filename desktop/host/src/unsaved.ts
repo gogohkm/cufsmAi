@@ -83,16 +83,19 @@ async function run(ctx: UnsavedCtx, where: UnsavedWhere): Promise<UnsavedResult>
   ctx.log?.(`저장 안 한 변경 — ${where}: ${answer}${failed ? ' (상태를 읽지 못함)' : ''}`);
   if (answer === 'cancel') { return { proceed: false, how: 'asked', answer, failed }; }
   if (answer === 'discard') { return { proceed: true, how: 'asked', answer, failed }; }
-  const s = await saveSafely(ctx, failed ? null : (u.file ?? null));
+  const s = await saveSafely(ctx, failed ? null : (u.file ?? null), failed ? null : (u.file_origin ?? undefined));
   return { proceed: s.ok, how: 'asked', answer, failed, saved: s.file, note: s.note };
 }
 
 /** 「저장」의 자리 — 사람이 정한 그 `.csd`(이 프로그램이 쓴 것)만 묻지 않고, 그 밖은 묻는다 */
-export async function saveSafely(ctx: UnsavedCtx, hostFile: string | null): Promise<{ ok: boolean; file?: string; note?: string }> {
+export async function saveSafely(ctx: UnsavedCtx, hostFile: string | null, fileOrigin?: string | null): Promise<{ ok: boolean; file?: string; note?: string }> {
   const mine = ctx.personFile();
   const same = (a?: string | null, b?: string | null) => !!a && !!b && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  // 호스트가 말하는 지금 파일의 출처(4b99968 — get_unsaved_changes.file_origin: person · ai)가 근거. 화면이 적은 「사람이 정한 파일」은
+  // 맞대어 보는 것 — 둘이 다르면(또는 호스트가 출처를 말하지 않으면 화면의 기록만으로) 묻는다
+  const byHost = fileOrigin === undefined ? same(hostFile, mine) : fileOrigin === 'person' && same(hostFile, mine);
   let target: string | undefined;
-  if (hostFile && same(hostFile, mine) && isOurCsd(hostFile)) {
+  if (hostFile && byHost && isOurCsd(hostFile)) {
     target = hostFile;
   } else {
     const base = hostFile ? path.basename(hostFile).replace(/\.[^.]*$/, '') : 'project';

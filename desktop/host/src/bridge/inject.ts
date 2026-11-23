@@ -139,7 +139,7 @@ function applyTheme(t){
   var b=document.body;if(b){b.classList.remove('vscode-dark','vscode-light','vscode-high-contrast');b.classList.add(th.cls);b.setAttribute('data-vscode-theme-kind',th.cls);}
   html.setAttribute('data-stcfsd-theme',t);
 }
-var CLICKABLE={'btn-file-open':1,'btn-file-save':1};
+var CLICKABLE={'btn-file-open':1,'btn-file-save':1,'btn-run-validation':1};
 window.addEventListener('message',function(e){
   var d=e.data;
   if(!(d&&d.stcfsdBridge===1)){return;}

@@ -80,6 +80,8 @@ export function branchKids(b: Branch): Array<{ k: string; t: string; vHtml: stri
       { k: 'case:supports', t: '지점', vHtml: esc(String((S.supports ?? []).length)), src: srcOf('supports') },
       { k: 'case:laps', t: '랩', vHtml: lapN ? `${lapN} · ${spanNum(firstLap!.left, `lapsPerSupport.${laps.indexOf(firstLap!)}.left`)}/${spanNum(firstLap!.right, `lapsPerSupport.${laps.indexOf(firstLap!)}.right`)} <span class="u">m</span>` : '0', src: srcOf('lapsPerSupport') },
       kid('spacing', '간격'), kid('deckType', '데크'),
+      // 랩 구간의 구속 진술 — 호스트의 검토 상태에 생기면(출처와 함께) 보인다
+      ...('lap_restrained' in x.inputs ? [kid('lap_restrained', '랩 구속 진술')] : []),
     ];
   }
   if (b === 'ld') { return ['loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL'].map(k => kid(k, CASE_KO[k].split(' ')[0])).concat([kid('chkPatternLoading', '부분재하')]); }
@@ -110,6 +112,10 @@ export function caseTables(b: Branch, focus: string | null): string {
       + `<td class="r">${laps[i]?.right === null || laps[i]?.right === undefined ? '<span class="faint">—</span>' : spanNum(laps[i].right, `lapsPerSupport.${i}.right`)}</td></tr>`).join('');
     html += `<div class="sec"><h4${tip('검토 상태의 경간 표(m) — spans · supports · lapsPerSupport')}>경간 · 지점 · 랩<span class="sp"></span>${caseTag(srcOf('spans'))}</h4>`
       + `<table class="t etab" data-table="case-spans"><thead><tr><th>지점</th><th>조건</th><th class="r">스팬 m</th><th class="r">랩 좌 m</th><th class="r">랩 우 m</th></tr></thead><tbody>${rows || `<tr><td colspan="5">${none('없음')}</td></tr>`}</tbody></table></div>`;
+  }
+  // 표(designState FIELDS)에 아직 없는데 호스트의 상태에 있는 랩 구간 구속 진술 — 부재 · 접합부 가지에 따로(표에 생기면 그 묶음에서)
+  if ((b === 'mem' || b === 'cj') && 'lap_restrained' in x.inputs && !CASE_FIELDS.some(f => f.key === 'lap_restrained')) {
+    html += `<div class="sec"><h4${tip('없으면 엔진이 퍼린의 랩 구간과 랩 검토를 「검토 안 함 — 진술 없음」으로 낸다')}>랩 구간</h4><table class="t" data-table="case-lapRestraint"><tbody>${row('lap_restrained')}</tbody></table></div>`;
   }
   for (const g of BRANCH_GROUPS[b]) {
     const keys = CASE_FIELDS.filter(f => f.group === g).map(f => f.key);

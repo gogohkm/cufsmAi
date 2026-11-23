@@ -12,7 +12,7 @@
 import { mcp } from './bridge';
 import { allRows, state, type CheckRow, type Scope } from './store';
 
-export interface Item { kind: 'check' | 'model' | 'result'; id: string; scope?: Scope; location?: any }
+export interface Item { kind: 'check' | 'model' | 'result' | 'validation'; id: string; scope?: Scope; location?: any }
 export interface FocusReq { request_id: string; item: Item; reason: string | null; requested_at?: string }
 export type Tab = 'work' | 'model' | 'result' | 'doc';
 
@@ -60,8 +60,9 @@ export function itemOfRow(r: CheckRow): Item {
 
 /** 화면의 고른 것 → item(없으면 null) */
 export function itemOfKey(tab: Tab, key: string): Item | null {
-  // 점검 항목(val.*)은 보기 계약의 item 어휘에 없다 — 고른 것 없음으로 알린다(id 를 지어내지 않는다)
-  if (key === 'val' || key.startsWith('val#') || key.startsWith('val:cat:')) { return null; }
+  // 점검 항목 — 보기 계약의 kind 'validation'(id val.* — 마지막 점검에 있는 것만, 4b99968). 묶음 · 점검 전체는 그 어휘에 없다
+  if (key.startsWith('val#')) { const id = key.slice(4); return /^val\./.test(id) ? { kind: 'validation', id } : null; }
+  if (key === 'val' || key.startsWith('val:cat:')) { return null; }
   if (key.includes('#')) {
     const r = allRows().find(x => x.key === key);
     if (r && r.us) { return itemOfRow(r); }
@@ -92,6 +93,10 @@ export function keyOfItem(item: Item): { tab: Tab; key: string } | null {
       hit = m;
     }
     return { tab: 'result', key: hit.key };
+  }
+  if (item.kind === 'validation') {
+    const id = String(item.id);
+    return (state.val?.items ?? []).some(x => x.id === id) ? { tab: 'result', key: `val#${id}` } : null;
   }
   if (item.kind === 'model') {
     const id = String(item.id);
@@ -139,7 +144,8 @@ export function onReport(cb: () => void): void { onReported = cb; }
 /** 보고 — 같은 것이면 보내지 않는다(focus_response 가 있으면 보낸다). now = 모으지 않고 곧바로 */
 export function report(view: string, selection: Item | null, by: 'person' | 'program' | 'focus', now = false): void {
   const body = { screen: 'review', view, selection, follows_focus: followOn, by };
-  const sig = JSON.stringify(body);
+  // 같은 보기 · 고른 것을 다시 알릴 때 「누가」만 바뀌면 보내지 않는다(AI 를 따라간 보고를 뒤의 다시 그리기가 「사람」으로 덮지 않게)
+  const sig = JSON.stringify({ ...body, by: undefined });
   if (sig === lastSent && !pendingResp) { return; }
   if (timer !== null) { clearTimeout(timer); timer = null; }
   const send = () => {

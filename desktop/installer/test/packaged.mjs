@@ -416,6 +416,12 @@ async function main() {
     check('메뉴 열기 → 저장한 모델이 돌아온다(절점 좌표가 같다)', !!back && Array.isArray(n2) && n2.length === n1?.length && isDeepStrictEqual(n2.map(p => p.map(v => +Number(v).toFixed(9))), n1.map(p => p.map(v => +Number(v).toFixed(9)))),
       `절점 ${n2?.length} / ${n1?.length}`);
     await B.capture('s5_02_after_reopen');
+    // V7-01(82194ef): 설치본의 기록자 열쇠는 <userData>\writer — 저장한 결과가 서명되어 다시 열면 되살아난다
+    const st1 = await B.ev('return await ctx.hostAction("get_full_state");');
+    const keyFile = path.join(userData, 'writer', 'writer.key');
+    check('V7-01 · 설치본의 저장 = 서명(열쇠 <userData>\\writer\\writer.key) · 저장 → 메뉴 열기 → 결과(하중 해석 · 부재 검토)가 되살아난다',
+      !!j1.resultsSeal && fs.existsSync(keyFile) && fs.statSync(keyFile).size > 0 && st1?.case?.results_signed === true && !!st1?.results?.member_design && !!st1?.results?.load_analysis,
+      `봉인 ${!!j1.resultsSeal} · 열쇠 ${fs.existsSync(keyFile)} · results_signed ${st1?.case?.results_signed} · 되살린 결과 ${Object.keys(st1?.results ?? {}).filter(k => st1.results[k]).join(', ')}`);
     const hits = fs.readdirSync(h.hits);
     check('V5-16d · 적대적 환경의 가짜 numpy · sitecustomize · PYTHONSTARTUP · 사용자 site .pth 가 하나도 돌지 않았다', hits.length === 0, hits.join(', ') || '0');
 
@@ -431,6 +437,17 @@ async function main() {
     const mcpPort = JSON.parse(fs.readFileSync(lay.portFile, 'utf8')).port;
     await quit(B, 'B');
     check('포트가 풀리고 포트 파일이 지워졌다', await portFree(port) && await portFree(mcpPort) && !fs.existsSync(lay.portFile));
+    // V7-01: 다른 열쇠(다른 사용자 폴더 = 다른 PC 와 같다)로 서명된 파일 — 입력만 열고 까닭을 알린다
+    const userData2 = path.join(tmp, '다른 사용자');
+    const C = await launch(exe, ['--user-data', userData2, '--ui', 'classic', saved], env, 'C'); launched.push(C.child);
+    const openedC = await until(() => C.ev('return ctx.diag.opened.length ? ctx.diag.opened[0] : null;'), 30_000);
+    const stC = await until(async () => { const f = await C.ev('return await ctx.hostAction("get_full_state");'); return f && Array.isArray(f.invalidated) ? f : undefined; }, 30_000);
+    const dropC = (stC?.invalidated ?? []).filter(e => e?.cause?.action === 'open_project');
+    const resC = Object.keys(stC?.results ?? {}).filter(k => stC.results[k]);
+    check('V7-01 · 다른 열쇠로 서명된 .csd → 입력만 연다(결과 0) · 까닭 「이 PC 에서 이 프로그램이 계산한 것이 아님」 · 입력은 그대로',
+      !!openedC?.ok && resC.length === 0 && dropC.length > 0 && dropC.every(e => /not computed by this program on this PC/i.test(String(e.reason))) && (stC?.nnodes ?? 0) === (j1.model?.node?.length ?? -1),
+      `열기 ${openedC?.ok} · 남은 결과 ${resC.join(', ') || '없음'} · 장부 ${dropC.map(e => e.kind).join(', ')} 「${short(dropC[0]?.reason, 70)}」 · 절점 ${stC?.nnodes}`);
+    await quit(C, 'C');
     // 제거 도우미 — 제거 프로그램이 부르는 것 그대로(그 폴더의 StCFSD.exe 를 node 로), 다만 설정 · 사용자 폴더는 가짜 · 임시
     const plainEnv = hostileEnv(h);
     const d1 = runDisconnect(exe, res, fakeClaude, userData, plainEnv);

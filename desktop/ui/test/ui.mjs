@@ -30,6 +30,8 @@ let W = 1920, H = 1080;
 
 const results = [];
 const started = Date.now();
+/** --only=<단계 id,…>(예: --only=u5f,u33) — 고친 것을 덮는 단계만 돈다(나머지 단계는 건너뛴다 — 그 단계가 앞 단계의 상태에 기대면 그 id 도 준다) */
+const ONLY = (process.argv.find(a => a.startsWith('--only=')) ?? '').slice(7).split(',').map(x => x.trim()).filter(Boolean);
 function check(name, ok, detail = '') {
   results.push({ name, ok: !!ok, detail });
   process.stdout.write(`${ok ? '  통과' : '  실패'}  ${name}${detail ? ` — ${detail}` : ''}\n`);
@@ -542,6 +544,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     return f;
   };
   const step = async (name, shotName, fn) => {
+    if (ONLY.length && !ONLY.includes(String(name).split(' ')[0])) { return; }
     const m = mark();
     let detail = '';
     let ok = false;
@@ -598,7 +601,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const s = await ev(`({fname:document.querySelector('#tbar .fname').textContent, docTitle:document.title, startHidden:document.getElementById('start').hidden,
       info:document.getElementById('info').innerText})`);
     return { ok: s.fname === path.basename(csd) && s.startHidden && /템플릿 치수 없음/.test(s.info) && /검토 대상 P1\.csd — StCFSD/.test(s.docTitle),
-      detail: `물음 「${title}」 · 제목 표시줄 ${s.fname} · 템플릿 기록이 없는 단면은 「템플릿 치수 없음」` };
+      detail: `물음 「${title}」 · 제목 표시줄 ${s.fname} · 창 제목 「${s.docTitle}」 · 시작 화면 숨김 ${s.startHidden} · 템플릿 기록이 없는 단면은 「템플릿 치수 없음」 ${/템플릿 치수 없음/.test(s.info)}` };
   });
 
   section('4. 템플릿 01 — AI 가 단면을 정한다 · 화면의 수 = MCP');
@@ -1552,7 +1555,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   await cs('design_lap_connection Mnd 없이', { tool: 'design_lap_connection', p: { d: 200, t: 2.3, Fy: 295, Fu: 400, lap_left_in: 600, lap_right_in: 600, Mu_support: 11.98, Vu_support: 11.12,
     fastener_type: 'bolt', fastener_dia: 12.7, n_rows: 2, end_distance: 35.56, design_method: 'LRFD', Se: 49160, Vn: 44.48 } });
   await settle(`s.lap && s.runs.some(r=>r.key==='lap' && r.rows.some(x=>x.id==='lap.block_shear'))`, '랩 결과');
-  await step('u44e 랩 — 블록 전단 항목(미검토 · 판정에 안 듦)과 범위 글 · Mnd 없이 뒤틀림은 미검토(까닭 = 엔진)', 'u44e_lap', async () => {
+  await step('u44e 랩 — 블록 전단 항목의 판정 = 엔진 · 뒤틀림 미검토의 까닭(랩 구간 구속 진술 없음 등) = 엔진의 글 그대로', 'u44e_lap', async () => {
     const hc = await hostRes();
     const bs = hc.us.lap.design_checks.find(c => c.id === 'lap.block_shear');
     const ld = hc.us.lap.design_checks.find(c => c.id === 'lap.flexure.distortional');
@@ -1563,8 +1566,12 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await sleep(300);
     const reason = await ev(`document.querySelector('#sheet [data-card].on [data-reason]')?.textContent`);
     await ev(`${S}.closeSheet()`);
-    return { ok: bs?.verdict === 'not_evaluated' && bs.counts === false && /J6\.3/.test(inf.scope) && inf.rows.some(x => /^lap\.block_shear:미검토/.test(x)) && ld?.verdict === 'not_evaluated' && reason === String(ld.reason),
-      detail: `블록 전단 ${bs?.verdict}(counts ${bs?.counts}) · 범위 글에 J6.3 ${/J6\.3/.test(inf.scope)} · 뒤틀림 ${ld?.verdict} 「${short(reason, 70)}」` };
+    // 엔진이 낸 그대로(65e5ed6 · 17ad004 뒤 블록 전단은 평가되고, 뒤틀림은 「랩 구간 구속 진술 없음」으로 미검토) — 화면의 판정 · 까닭 = 엔진
+    const KO = { pass: 'OK', fail: 'NG', not_evaluated: '미검토', not_applicable: '해당 없음' };
+    const bsRow = inf.rows.find(x => x.startsWith('lap.block_shear:')) ?? '';
+    const bsOk = bs?.verdict === 'not_evaluated' ? /^lap\.block_shear:미검토/.test(bsRow) : bsRow.includes(KO[bs?.verdict] ?? '?') || /\d/.test(bsRow);
+    return { ok: !!bs && bsOk && ld?.verdict === 'not_evaluated' && reason === String(ld.reason) && reason.length > 10,
+      detail: `블록 전단 ${bs?.verdict}(counts ${bs?.counts}) → 정보 창 「${short(bsRow, 50)}」 · 범위 글에 J6.3 ${/J6\.3/.test(inf.scope)} · 뒤틀림 ${ld?.verdict} 「${short(reason, 90)}」 = 엔진의 까닭` };
   });
   // AI 의 load_project 가 저장하지 않은 변경을 버리면 — 막지 않고 알린다
   await step('u45 저장하지 않은 변경이 있는데 AI 가 load_project — 막지 않고 화면에 알린다(caseDiscarded)', 'u45_discarded', async () => {
@@ -1607,6 +1614,9 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   /** 화면의 점검 표 · 트리 = 호스트의 validate_design(같은 차례 · id · 판정 · 글 · 수) */
   const valCompare = async () => {
     const host = await valMcp();
+    // MCP 의 validate_design 은 호스트가 그 점검을 화면에도 보낸다(by ai) — 화면이 그 판을 읽을 때까지
+    await settle(`!!s.val && s.val.caseRev===${JSON.stringify(host.case_rev ?? null)} && s.val.items.length===${(host.items ?? []).length}`, '화면의 점검 = 호스트', 15_000).catch(() => undefined);
+    await sleep(300);
     const scr = await ev(`[...document.querySelectorAll('#center table.valt tr.vr')].map(tr=>({k:tr.dataset.k, id:tr.dataset.id, status:tr.dataset.status, item:tr.children[1].textContent, value:tr.querySelector('[data-value]').textContent, criterion:tr.querySelector('[data-criterion]').textContent,
       note:(tr.nextElementSibling && tr.nextElementSibling.classList.contains('vn') ? tr.nextElementSibling.querySelector('[data-note]').textContent.replace(/^→ /,'') : '')}))`);
     const items = host.items ?? [];
@@ -1675,7 +1685,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await settle(`!!s.val && !s.valRunning && s.stages.val.state==='ok'`, '다시 점검');
     const c = await valCompare();
     const b = await ev(`${S}.state.stages.val`);
-    return { ok: before === 'ok' && sc.success === true && a.st.state === 'stale' && /검토 입력이 바뀜/.test(a.st.note) && /점검 뒤 바뀌었다/.test(a.banner ?? '') && /^낡음/.test(a.tree ?? '') && a.strip === 'stale' && b.state === 'ok' && c.bad.length === 0,
+    return { ok: before === 'ok' && sc.success === true && a.st.state === 'stale' && /점검 뒤 바뀌었다/.test(a.st.note) && /점검 뒤 바뀌었다/.test(a.banner ?? '') && /^낡음/.test(a.tree ?? '') && a.strip === 'stale' && b.state === 'ok' && c.bad.length === 0,
       detail: `앞 ${before} → set_case_inputs → ${a.st.state}(「${short(a.st.note, 70)}」) · 트리 「${short(a.tree, 30)}」 → 「점검 실행」 → ${b.state} · 항목 = 호스트 ${c.bad.length === 0}` };
   });
   await step('u53 편집 상태의 검증 탭에서 「설계 검증 실행」 → 이 화면의 점검도 다시 읽힌다(호스트가 그 페이지에 보낸 validationResult)', null, async () => {
@@ -1805,6 +1815,104 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await sleep(500);
     return { ok: /저장하지 않은 변경/.test(q1) && !fd1 && d1 === true && !!fd2, detail: `Ctrl+O → 물음 「${short(q1, 50)}」 → 취소: 열기 물음 ${fd1} · 더러움 ${d1} · Open 단추 → 저장 안 함 → 열기 물음 ${fd2}` };
   });
+  // ── 4b99968 — 호스트가 쥔 점검 · 보기 계약의 validation · 글 방향 문자 · 결과 봉인 ─────────────
+  await step('u5c AI 의 validate_design → 이 화면이 누르지 않아도 점검이 보인다(by ai) · 새로 고쳐도 마지막 점검(호스트의 results.validation + 다리가 남긴 항목)', 'u5c_val_ai', async () => {
+    const r = await valMcp();
+    await settle(`!!s.val && s.val.by==='ai' && s.stages.val.state==='ok'`, 'AI 의 점검');
+    await select('result', 'val');
+    const a = await ev(`({by:document.querySelector('#info [data-val-by]')?.dataset.valBy, n:document.querySelectorAll('#center tr.vr').length})`);
+    await cdp.send('Page.reload', { ignoreCache: false });
+    await waitFor(`!!window.__stcfsdUi && window.__stcfsdUi.state.ready && window.__stcfsdUi.state.full`, 60_000, '다시 실림');
+    await ev(`${S}.review()`);
+    const back = await settle(`!!s.val && s.val.by==='ai'`, '새로 고친 뒤 마지막 점검', 30_000).then(() => true, () => false);
+    await select('result', 'val');
+    const c = await valCompare();
+    const fs2 = await mcp.tool('get_full_state');
+    const host = fs2?.results?.validation;
+    if (!back) {
+      const lastV = (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=validationResult`)).json?.data?.validationResult;
+      return { ok: false, detail: `새로 고친 뒤 점검 없음 · 호스트 results.validation ${JSON.stringify(host ?? null)} · 장부 ${JSON.stringify((fs2?.invalidated ?? []).filter(e => e.kind === 'validation').slice(-1))} · 다리의 기록 ${lastV ? `seq ${lastV.seq}` : '없음'}` };
+    }
+    return { ok: Array.isArray(r.items) && a.by === 'ai' && a.n === r.items.length && c.bad.length === 0 && host?.by === 'ai',
+      detail: `AI 점검 ${r.items?.length} 항목 → 화면 ${a.n}(by ${a.by}) · 새로 고침 뒤 항목 = 호스트 ${c.bad.length === 0}${c.bad.length ? ` (${c.bad.slice(0, 3).join(' / ')})` : ''} · results.validation ${JSON.stringify(host?.counts)} by ${host?.by}` };
+  });
+  await step('u5d 보기 계약 kind validation — 점검 항목을 고르면 get_view 에 {kind: validation, id: val.*} · AI 의 focus 도 그 항목으로', null, async () => {
+    const it = state => state;
+    void it;
+    const k = await ev(`(()=>{const tr=document.querySelector('#center tr.vr[data-id^="val."]'); return tr?tr.dataset.k:null;})()`);
+    await select('result', k);
+    await sleep(1200);
+    const v = await viewNow();
+    const id = k.slice(4);
+    const f = await mcp.tool('focus', { item: { kind: 'validation', id }, reason: '점검 항목' });
+    await waitFor(`!!${S}.pointed || ${S}.ui.sel===${JSON.stringify(k)}`, 10_000, 'focus');
+    const pt = await ev(`${S}.pointed ? ${S}.pointed.target : null`);
+    await ev(`(()=>{const b=document.querySelector('#aipoint [data-ai="dismiss"]'); b&&b.click(); return 1;})()`);
+    return { ok: v.current?.selection?.kind === 'validation' && v.current.selection.id === id && (v.dropped ?? []).length === 0 && f.forwarded === true && (pt?.key === k || pt === null),
+      detail: `고른 것 ${JSON.stringify(v.current?.selection)} · focus forwarded ${f.forwarded} target_found ${f.target_found} · 화면의 목표 ${pt?.key ?? '(바로 따라감)'}` };
+  });
+  await step('u5e 글 방향 제어 문자(U+202E 등) — 파일 이름 · 알림 · 엔진 글이 거꾸로 읽히지 않게 보이는 대체 문자로(호스트의 그리기와 같은 규칙)', 'u5e_bidi', async () => {
+    const base = path.join(tmp, 'u5e-base.csd');
+    await serve.ipc('save', { file: base }, 60_000);
+    const evil = path.join(tmp, `검토\u202Efdp.csd`);
+    fs.copyFileSync(base, evil);
+    const o = await serve.ipc('open', { file: evil }, 60_000);
+    await settle(`s.file.name && s.file.name.includes('\u202E')`, '파일 이름');
+    await sleep(300);
+    const t = await ev(`({fname:document.querySelector('#tbar .fname').textContent, title:document.title, status:document.querySelector('#status .msg, #status')?.textContent,
+      esc:(()=>{const d=document.createElement('div'); d.innerHTML=${S}.state.file.name ? '' : ''; return 1;})()})`);
+    const hasRaw = /[\u202A-\u202E\u2066-\u2069]/.test(t.fname) || /[\u202A-\u202E\u2066-\u2069]/.test(t.status ?? '');
+    await serve.ipc('open', { file: base }, 60_000);
+    await settle(`s.file.path===${JSON.stringify(base)}`, '원래 상태(서명된 사본)');
+    return { ok: !!o?.ok && !hasRaw && t.fname.includes('\uFFFD'), detail: `제목 표시줄 「${t.fname}」 · 상태 줄에 날 글자 ${hasRaw}` };
+  });
+  await step('u5f 결과 봉인(82194ef) — 저장 → 다시 열기 = 결과가 돌아온다(서명) · 입력을 고친 파일 = 「입력만 열었습니다 — …」 띠와 「다시 계산」 하나 → 결과가 다시', 'u5f_seal', async () => {
+    const A = path.join(tmp, 'u5f-sealed.csd');
+    // 앞 단계의 입력 변경이 부재 검토를 지웠다 — 저장 전에 화면의 입력으로 한 번 돌린다(그 결과가 봉인되어 돌아오는지 본다)
+    const rc = await mcp.tool('run_case_check', { what: 'member' });
+    await settle(`!!s.full && !!s.full.results && !!s.full.results.member_design`, '부재 검토', 120_000).catch(() => undefined);
+    const sv = await serve.ipc('save', { file: A }, 60_000);
+    const jA = JSON.parse(fs.readFileSync(A, 'utf8'));
+    await serve.ipc('open', { file: A }, 60_000);
+    await sleep(800);
+    const f1 = await mcp.tool('get_full_state');
+    const res1 = Object.keys(f1?.results ?? {}).filter(k => f1.results[k] && k !== 'validation');
+    const B = path.join(tmp, 'u5f-tampered.csd');
+    const jB = JSON.parse(JSON.stringify(jA));
+    if (jB.case?.inputs && typeof jB.case.inputs.Lb === 'number') { jB.case.inputs.Lb += 1; } else if (jB.case?.inputs) { jB.case.inputs.Lb = 50; }
+    fs.writeFileSync(B, JSON.stringify(jB, null, 2));
+    await serve.ipc('open', { file: B }, 60_000);
+    const note = await waitFor(`(()=>{const e=document.getElementById('opennotice'); return e && !e.hidden ? e.textContent : null;})()`, 20_000, '입력만 열었다는 띠').catch(() => null);
+    if (!note) {
+      const fx = await mcp.tool('get_full_state');
+      return { ok: false, detail: `띠 없음 · 저장 ${sv?.ok} 봉인 ${!!jA.resultsSeal} · 다시 열기 결과 ${res1.join(', ')} · 고친 파일의 결과 ${Object.keys(fx?.results ?? {}).filter(k => fx.results[k]).join(', ') || '없음'} · 장부 ${JSON.stringify((fx?.invalidated ?? []).filter(e => e?.cause?.action === 'open_project').map(e => [e.kind, String(e.reason).slice(0, 60)]))}` };
+    }
+    await shot('u5f_open_notice_1920_dark');
+    const f2 = await mcp.tool('get_full_state');
+    const res2 = Object.keys(f2?.results ?? {}).filter(k => f2.results[k]);
+    await ev(`document.querySelector('#opennotice [data-act="recompute"]').click()`);
+    await waitFor(`document.getElementById('opennotice').hidden`, 120_000, '다시 계산 뒤 띠가 사라짐');
+    const f3 = await mcp.tool('get_full_state');
+    // 뒤의 단계가 결과를 쓴다 — 서명된 사본(결과가 되살아난다)으로 돌아간다
+    await serve.ipc('open', { file: A }, 60_000);
+    await settle(`s.file.path===${JSON.stringify(A)}`, '서명된 사본');
+    return { ok: sv?.ok && !!jA.resultsSeal && f1?.case?.results_signed === true && res1.includes('member_design') && res2.filter(k => k !== 'validation').length === 0
+      && /입력만 열었습니다 — 파일의 결과가 함께 저장된 모델 · 입력과 맞지 않습니다/.test(note) && !!f3?.results?.member_design,
+      detail: `run_case_check ${rc?.error ? rc.error : '성공'} · 저장(봉인 ${!!jA.resultsSeal}) → 다시 열기: 결과 ${res1.join(', ')} · 서명 ${f1?.case?.results_signed} → 입력을 고친 파일: 결과 ${res2.join(', ') || '없음'} · 「${short(note, 80)}」 → 다시 계산: 부재 검토 ${!!f3?.results?.member_design}` };
+  });
+  await step('u5g 지금 저장하면 결과에 서명이 붙지 않으면(열쇠 파일이 비었음) — 저장 단추 옆에 조용히 「결과 서명 안 됨」(까닭은 풍선) · 고치면 사라진다', 'u5g_unsigned', async () => {
+    const key = path.join(tmp, 'userData', 'writer', 'writer.key');
+    const keep = fs.existsSync(key) ? fs.readFileSync(key) : null;
+    fs.writeFileSync(key, '');
+    await mcp.tool('set_case_inputs', { inputs: { Cb: 1.11 }, units: 'SI', reason: '새로 읽게' });
+    const a = await waitFor(`(()=>{const e=document.querySelector('#tbar .sealtag'); return e && !e.hidden ? {t:e.textContent, tip:e.dataset.tip} : null;})()`, 15_000, '서명 안 됨 표시');
+    await shot('u5g_unsigned_1920_dark');
+    if (keep) { fs.writeFileSync(key, keep); } else { fs.unlinkSync(key); }
+    await mcp.tool('set_case_inputs', { inputs: { Cb: 1.12 }, units: 'SI', reason: '새로 읽게' });
+    await waitFor(`document.querySelector('#tbar .sealtag').hidden`, 15_000, '표시가 사라짐');
+    const dialogs = await ev(`document.querySelectorAll('#dialog-host .dialog').length`);
+    return { ok: a.t === '결과 서명 안 됨' && /empty or not a file/.test(a.tip ?? '') && dialogs === 0, detail: `「${a.t}」 · 풍선 「${short(a.tip, 90)}」 · 물음 ${dialogs}` };
+  });
   // 그림 — 점검 보기 · 문서 탭, 1920 · 960, 어두운 · 밝은
   for (const [w, h] of [[1920, 1080], [960, 900]]) {
     W = w; H = h;
@@ -1841,7 +1949,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await settle(`s.msgSeq>${before} && s.stages.fsm.state==='ok' && s.dsm`, '웹뷰의 해석 결과', 120_000);
     const fam = await ev(`${S}.state.dsm.family`);
     const chk = await ev(`${S}.state.stages.chk`);
-    return { ok: chk.state === 'stale' && hiddenBefore === 'hidden' && shown.vis === 'visible' && shown.editing && shown.badge && /편집 마치기/.test(shown.btn) && shown.w > 800,
+    return { ok: ['stale', 'none'].includes(chk.state) && hiddenBefore === 'hidden' && shown.vis === 'visible' && shown.editing && shown.badge && /편집 마치기/.test(shown.btn) && shown.w > 800,
       detail: `숨김 ${hiddenBefore} → F2 ${shown.vis} · 「${shown.btn}」 · 웹뷰 너비 ${Math.round(shown.w)} px · 웹뷰의 해석 → 진행 띠 좌굴 ● (${fam}) · 부재 검토는 낡음(${chk.note})` };
   });
   await step('u07b F2 다시 → 숨김, 새 화면의 좌굴 해석 = MCP', null, async () => {

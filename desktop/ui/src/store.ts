@@ -27,7 +27,7 @@ export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
 export type StageState = 'ok' | 'stale' | 'none' | 'run' | 'unk';
 
 export const CMDS = ['modelLoaded', 'dsmResult', 'designResult', 'designPurlinResult', 'loadAnalysisComplete',
-  'lapConnectionResult', 'connectionResult', 'analysisInvalidated', 'resultsCleared', 'restoreDesignInputs', 'analysisError', 'classifyResult'];
+  'lapConnectionResult', 'connectionResult', 'analysisInvalidated', 'resultsCleared', 'restoreDesignInputs', 'analysisError', 'classifyResult', 'validationResult'];
 
 /**
  * 좌굴 해석의 곡선 · 모드 형상 · 모드 분류(U2). 곡선은 MCP get_buckling_curve(`get_curve`), 모드 형상 · 분류는 호스트가 설계 패널에
@@ -159,8 +159,12 @@ export interface State {
 
 /** 점검 항목 하나 — 호스트 그대로(webview/js/review.js withIds): id(val.*) · 분류 · 이름 · 판정(pass · warn · fail) · 값 · 기준 · 주석 */
 export interface ValItem { id: string | null; category: string; item: string; status: string; value: string; criterion: string; note: string; source?: unknown }
-export interface ValBasis { caseRev: number | null; results: string; ledger: number; model: string }
-export interface ValState { items: ValItem[]; counts: Record<string, number>; caseRev: number | null; units: string; analysisCurrent: boolean | null; basis: ValBasis; at: number; by: 'person' | 'page' | 'start' }
+/**
+ * 마지막 점검 — 호스트가 쥔다(4b99968): get_full_state.results.validation {at, case_rev, counts, units, by}(지금 것), 입력 · 모델이 바뀌면
+ * 장부의 kind 'validation'(낡음 · 까닭). 항목은 호스트가 설계 패널에 보낸 마지막 `validationResult {items, unitSystem, case_rev, by}` —
+ * 다리가 그 판이 지금 것인 동안 남긴다(호스트가 kinds ['validation'] 로 지우면 사라진다). 화면은 다시 판정하지 않는다
+ */
+export interface ValState { items: ValItem[]; counts: Record<string, number>; caseRev: number | null; units: string; at: string | null; by: string; seq: number }
 export interface ReportState { reply: any; html: string | null; sha256: string | null; at: number; caseRev: number | null; format: string; error?: string; pdfAt?: number }
 
 export const state: State = {
@@ -376,6 +380,7 @@ function staleNote(e: any): string {
 
 /** 진행 띠 — 결과가 지금 입력과 맞는가. 계산하지 않는다: 호스트의 `results`(남은 결과)와 무효 장부만 본다 */
 function buildStages(): void {
+  buildVal();
   const f = state.full;
   const res = f?.results ?? {};
   const st = (present: boolean, kinds: string[], okNote: string, noneNote: string): { state: StageState; note: string } => {
@@ -395,61 +400,40 @@ function buildStages(): void {
 }
 
 // ── 점검(K3) ─────────────────────────────────────────────────────────
-/** 점검의 기준 — 지금 입력 판 · 남은 결과(종류와 그 시각) · 무효 장부의 길이 · 모델(절점 · 요소 수, 해석 기준 응력). 모두 호스트가 준 것 */
-export function valBasisNow(): ValBasis {
-  const f = state.full ?? {};
-  const res = f.results ?? {};
-  return {
-    caseRev: typeof f.case?.rev === 'number' ? f.case.rev : typeof state.caseIn?.rev === 'number' ? state.caseIn.rev : null,
-    results: Object.keys(res).sort().map(k => `${k}@${String(res[k]?.at ?? '')}`).join('|'),
-    ledger: Array.isArray(f.invalidated) ? f.invalidated.length : 0,
-    model: `${f.nnodes ?? ''}/${f.nelems ?? ''}/${f.load_fy ?? ''}/${f.load_case ?? ''}`,
-  };
+/** 호스트의 마지막 점검(지금 것) — results.validation */
+export function hostValidation(): any | null { const v = state.full?.results?.validation; return v && typeof v === 'object' ? v : null; }
+/** 호스트의 마지막 점검을 읽는다 — 항목은 설계 패널에 간 마지막 validationResult(다리가 지금 것인 동안 남긴다) */
+function buildVal(): void {
+  const hv = hostValidation();
+  const m = state.msgs.validationResult;
+  const d = m?.message?.data;
+  if (!hv || !d || !Array.isArray(d.items)) { state.val = null; return; }
+  const items: ValItem[] = d.items.map((x: any) => ({ id: typeof x?.id === 'string' ? x.id : null, category: String(x?.category ?? ''), item: String(x?.item ?? ''),
+    status: String(x?.status ?? ''), value: String(x?.value ?? ''), criterion: String(x?.criterion ?? ''), note: String(x?.note ?? ''), ...(x?.source ? { source: x.source } : {}) }));
+  const counts: Record<string, number> = { ...(hv.counts ?? {}) };
+  if (!('total' in counts)) { counts.total = items.length; }
+  state.val = { items, counts, caseRev: typeof hv.case_rev === 'number' ? hv.case_rev : typeof d.case_rev === 'number' ? d.case_rev : null,
+    units: String(d.unitSystem ?? hv.units ?? ''), at: hv.at ?? null, by: String(hv.by ?? d.by ?? ''), seq: m?.seq ?? -1 };
 }
-const RESULT_KO: Record<string, string> = { buckling_analysis: '좌굴 해석', design_dsm: '설계용 좌굴값', load_analysis: '하중 해석', member_design: '부재 검토', lap: '랩 접합', connection: '단일 접합' };
-/** 마지막 점검 뒤 바뀐 것(없으면 빈 목록) — 무엇이 바뀌었는지만 말한다(점검을 다시 하지 않는다) */
+/** 마지막 점검 뒤 바뀐 것 — 호스트의 장부(kind 'validation')가 말한다 */
 export function valChanges(): string[] {
-  const v = state.val;
-  if (!v) { return []; }
-  const now = valBasisNow();
-  const out: string[] = [];
-  if (now.caseRev !== v.basis.caseRev) { out.push(`검토 입력이 바뀜(판 ${v.basis.caseRev ?? '—'} → ${now.caseRev ?? '—'})`); }
-  if (now.results !== v.basis.results) {
-    const names = (s: string) => new Map(s.split('|').filter(Boolean).map(x => [x.split('@')[0], x]));
-    const a = names(v.basis.results), b = names(now.results);
-    const changed = [...new Set([...a.keys(), ...b.keys()])].filter(k => a.get(k) !== b.get(k)).map(k => RESULT_KO[k] ?? k);
-    out.push(`결과가 바뀜 — ${changed.join(' · ')}`);
-  }
-  if (now.ledger !== v.basis.ledger) { out.push('호스트가 결과를 지웠다(무효 장부)'); }
-  if (now.model !== v.basis.model) { out.push('모델이 바뀜'); }
-  return out;
+  if (hostValidation()) { return []; }
+  const e = ledgerOf(['validation']);
+  return e ? [`${String(e.reason ?? '입력이 바뀜')}${e.cause?.action ? ` · ${String(e.cause.action)}` : ''}`] : [];
 }
 function valStage(): { state: StageState; note: string } {
   if (state.valRunning) { return { state: 'run', note: '점검 중' }; }
-  const v = state.val;
-  if (!v) { return { state: 'none', note: state.valErr ? `점검을 읽지 못함 — ${state.valErr}` : '실행 안 함 — 결과 탭의 점검에서 「점검 실행」(호스트 validate_design)' }; }
-  const ch = valChanges();
-  const c = v.counts;
-  if (ch.length) { return { state: 'stale', note: `점검 뒤 바뀌었다 — ${ch.join(' · ')}` }; }
-  return { state: 'ok', note: `통과 ${c.pass ?? 0} · 주의 ${c.warn ?? 0} · 실패 ${c.fail ?? 0}` };
+  const hv = hostValidation();
+  if (hv) {
+    const c = hv.counts ?? {};
+    return { state: 'ok', note: `통과 ${c.pass ?? 0} · 주의 ${c.warn ?? 0} · 실패 ${c.fail ?? 0}${hv.by === 'ai' ? ' · AI 가 돌림' : ''}` };
+  }
+  const e = ledgerOf(['validation']);
+  if (e) { return { state: 'stale', note: `점검 뒤 바뀌었다 — ${String(e.reason ?? '')}` }; }
+  return { state: 'none', note: state.valErr ? `점검을 하지 못함 — ${state.valErr}` : '실행 안 함 — 결과 탭의 점검에서 「점검 실행」(편집 화면의 「설계 검증 실행」과 같은 길)' };
 }
-
-/** 점검을 호스트에 묻는다(호스트 동작 validate_design — 엔진을 부르지 않는다 · 항목은 호스트가 만든다) */
-export async function runValidation(by: ValState['by'] = 'person'): Promise<void> {
-  state.valRunning = true;
-  buildStages();
-  const basis = valBasisNow();
-  const r = await mcp<any>('validate_design', { detail: 'full', report_units: 'SI' });
-  state.valRunning = false;
-  if (!r || r.error || !Array.isArray(r.items)) { state.valErr = String(r?.error ?? '답이 없다'); buildStages(); return; }
-  state.valErr = undefined;
-  const items: ValItem[] = r.items.map((x: any) => ({ id: typeof x?.id === 'string' ? x.id : null, category: String(x?.category ?? ''), item: String(x?.item ?? ''),
-    status: String(x?.status ?? ''), value: String(x?.value ?? ''), criterion: String(x?.criterion ?? ''), note: String(x?.note ?? ''), ...(x?.source ? { source: x.source } : {}) }));
-  const rev = typeof r.case_rev === 'number' ? r.case_rev : null;
-  state.val = { items, counts: r.counts ?? {}, caseRev: rev, units: String(r.units ?? ''),
-    analysisCurrent: typeof r.analysis_current === 'boolean' ? r.analysis_current : null, basis: { ...basis, caseRev: rev ?? basis.caseRev }, at: Date.now(), by };
-  buildStages();
-}
+/** 「점검 실행」을 눌렀다 — 끝은 호스트의 validationResult(이벤트)가 알린다 */
+export function setValRunning(on: boolean, err?: string): void { state.valRunning = on; state.valErr = err; buildStages(); }
 
 /** 계산서 · 좌굴 해석 보고서를 호스트가 쓴다(다리의 /api/report — 자리 · 이름은 호스트가 정한다). format: html(미리보기) · pdf */
 export async function makeReport(kind: 'design' | 'buckling', format: 'html' | 'pdf'): Promise<void> {
@@ -505,6 +489,7 @@ async function load(): Promise<void> {
   } else { state.caseErr = ci?.error ?? '응답 없음'; }
   if (full && !full.error) { state.full = full; state.fullErr = undefined; } else { state.fullErr = full?.error ?? '응답 없음'; }
   if (msgs) { state.msgs = msgs.data; state.msgSeq = msgs.seq; }
+  buildVal();
   if (!state.initialModel) {
     const first = await last(id, ['modelLoaded'], 'first');
     state.initialModel = first?.data.modelLoaded?.message?.data ?? null;

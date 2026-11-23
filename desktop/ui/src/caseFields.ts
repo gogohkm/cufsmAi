@@ -31,6 +31,8 @@ export const GROUP_KO: Record<string, string> = {
 /** 칸의 한국어 이름(설계 화면 칸의 이름을 줄인 것) */
 export const CASE_KO: Record<string, string> = {
   fy: '설계 Fy', fu: '설계 Fu', presteelGrade: '강종', designMethod: '설계법',
+  // 17ad004 다음 — 랩 구간의 구속 진술(없으면 엔진이 퍼린의 랩 구간 · 랩 검토를 「검토 안 함」으로 낸다)
+  lap_restrained: '랩 구간 구속 진술',
   memberType: '부재 유형', spanType: '스팬 형식', nSpans: '스팬 수', spacing: '간격',
   loadD: 'D 고정', loadLr: 'Lr 지붕 활', loadS: 'S 적설', loadWu: 'W↑ 양압', loadWp: 'W↓ 정압', loadL: 'L 활하중',
   chkPatternLoading: '활하중 부분재하', chkLrReduced: '지붕 활하중 감소', spanIxIn4: '경간별 Ix',

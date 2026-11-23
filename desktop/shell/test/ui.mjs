@@ -35,6 +35,9 @@ const portFile = path.join(userData, 'mcp', 'stcfsd-mcp-port');
 
 const results = [];
 const started = Date.now();
+/** --only=<절 id,…> — 「1b」 또는 「1c」(둘은 한 묶음 — 1c 가 1b 의 도우미를 쓴다) · 「2b」 가운데 준 것만 돈다(1 · 2 · 3 은 늘 — 띄우기 · 끝내기 · 저장소 확인) */
+const ONLY = (process.argv.find(a => a.startsWith('--only=')) ?? '').slice(7).split(',').map(x => x.trim()).filter(Boolean);
+const want = id => !ONLY.length || ONLY.includes(id);
 function check(name, ok, detail = '') {
   results.push({ name, ok: !!ok });
   process.stdout.write(`${ok ? '  통과' : '  실패'}  ${name}${detail ? ` — ${detail}` : ''}\n`);
@@ -172,8 +175,9 @@ async function main() {
     const s = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
     check('창은 보이지 않고 포커스를 받은 적이 없다', !s.visible && !s.focused && s.show === 0 && s.focus === 0, JSON.stringify(s));
 
-    section('1b. 저장 안 한 변경 — 닫기 · 메뉴의 열기 · 다시 실행(파일 연결) 앞에서 묻는다(V5-12c, K2 §7)');
     const unsavedLog = () => A.ev('return ctx.diag.unsaved.slice();');
+    if (want('1b') || want('1c')) {
+    section('1b. 저장 안 한 변경 — 닫기 · 메뉴의 열기 · 다시 실행(파일 연결) 앞에서 묻는다(V5-12c, K2 §7)');
     const pageDialog = () => until(() => A.page(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? d.textContent.replace(/\\s+/g,' ') : null;})()`), 15_000);
     const answerPage = item => A.page(`(()=>{const b=document.querySelector('#dialog-host [data-item="${item}"]'); if(b){b.click(); return true;} return false;})()`);
     // 깨끗할 때는 묻지 않는다
@@ -312,19 +316,23 @@ async function main() {
       `${JSON.stringify(l46)} · 남은 시험 답 ${left46} · 창 ${open46 ? '그대로' : '닫힘'}`);
     // V7-S3: 로그오프 · 종료 — 막지 않고 복구본(사용자 폴더 안)을 쓴다 · 다음 실행에 알린다
     await hostAction({ action: 'set_case_inputs', inputs: { Lb: 67 }, reason: 'S3' });
+    const fileBefore = (await hostAction({ action: 'get_unsaved_changes' }))?.file;
     await A.ev(`ctx.win.emit('query-session-end', { preventDefault(){}, reasons: ['logoff'] }); return true;`);
     const rec = await until(() => A.ev('return ctx.diag.recovery.length ? ctx.diag.recovery[ctx.diag.recovery.length-1] : null;'), 20_000);
     const recDir = await A.ev('return ctx.recoveryDir;');
     const inUser = !!rec?.file && path.resolve(rec.file).toLowerCase().startsWith(path.resolve(userData).toLowerCase());
     const recJson = rec?.file && fs.existsSync(rec.file) ? JSON.parse(fs.readFileSync(rec.file, 'utf8')) : null;
-    check('V7-S3 · 세션 끝(query-session-end) · 저장 안 한 변경 있음 → 사용자 폴더의 recovery/ 에 복구본(.csd 1.4, Lb 67 in)',
-      rec?.ok === true && inUser && path.dirname(rec.file) === recDir && recJson?.version === '1.4' && Math.abs(Number(recJson?.case?.inputs?.Lb) - 67) < 1e-9,
-      `${path.relative(userData, rec?.file ?? '')} · ${JSON.stringify({ ok: rec?.ok, dirty: rec?.dirty })}`);
+    const afterRec = await hostAction({ action: 'get_unsaved_changes' });
+    check('V7-S3 · 세션 끝(query-session-end) · 저장 안 한 변경 있음 → 사용자 폴더의 recovery/ 에 복구본(.csd 1.4, Lb 67 in) — 지금 파일 · 저장 안 한 변경은 그대로(writeRecoveryCopy)',
+      rec?.ok === true && inUser && path.dirname(rec.file) === recDir && recJson?.version === '1.4' && Math.abs(Number(recJson?.case?.inputs?.Lb) - 67) < 1e-9
+        && afterRec?.file === fileBefore && afterRec?.dirty === true,
+      `${path.relative(userData, rec?.file ?? '')} · ${JSON.stringify({ ok: rec?.ok, dirty: rec?.dirty })} · 지금 파일 그대로 ${afterRec?.file === fileBefore} · 여전히 저장 안 함 ${afterRec?.dirty}`);
 
     // 그 밖의 확인 — 창은 보이지 않고 포커스를 받지 않았다(물음이 창을 앞으로 꺼내지 않는다)
     const sf2 = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
     check('물음 내내 창은 보이지 않고 포커스를 받지 않는다', !sf2.visible && !sf2.focused && sf2.show === 0 && sf2.focus === 0, JSON.stringify(sf2));
 
+    }
     section('2. 끝내기 — 창 닫기 · 「저장 안 함」');
     const kids = descendants(A.pid);
     await A.ev(`ctx.diag.unsavedTestAnswers.push('discard'); setTimeout(() => ctx.win.close(), 50); return true;`).catch(() => undefined);
@@ -341,6 +349,7 @@ async function main() {
     check('창 시험(--ui)이 예외 없이 끝난다', false, String(err?.stack ?? err).slice(0, 1200));
     if (A) { spawnSync('taskkill', ['/PID', String(A.pid), '/T', '/F'], { windowsHide: true }); }
   }
+  if (want('2b')) {
   section('2b. 기본 화면 = 새 검토 화면(스위치 없이) · 예전의 틀은 --ui classic');
   for (const [label, extra, want] of [['스위치 없이', [], '/ui/'], ['--ui classic', ['--ui', 'classic'], '/']]) {
     let B;
@@ -359,6 +368,7 @@ async function main() {
     }
   }
 
+  }
   section('3. 진짜 설정 · 저장소');
   const changed = real.changed();
   check('진짜 Claude Desktop 설정 · ~/.claude · %APPDATA%\\StCFSD 가 그대로(크기 · 시각, ~/.claude.json 은 MCP 등록만)', changed.length === 0, changed.join(', ') || `${real.list.length}곳`);

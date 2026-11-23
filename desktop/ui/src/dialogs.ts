@@ -5,7 +5,7 @@
  * 그 밖: 잠깐 뜨는 알림(platform:notify) · 진행(platform:progress)은 상태 표시줄 오른쪽.
  */
 import { api } from './bridge';
-import { esc } from './dom';
+import { bidiSafe, esc } from './dom';
 
 export interface Question { qid: string; kind: 'notify' | 'pick' | 'input' | 'fileDialog'; request: any; at: number }
 
@@ -50,7 +50,7 @@ function answer(q: Question, value: unknown, err: HTMLElement): void {
 function el(tag: string, attrs: Record<string, string> = {}, text?: string): HTMLElement {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) { if (k === 'class') { e.className = v; } else { e.setAttribute(k, v); } }
-  if (text !== undefined) { e.textContent = text; }
+  if (text !== undefined) { e.textContent = bidiSafe(text); }
   return e;
 }
 
@@ -136,7 +136,7 @@ export function toast(text: string, level: 'info' | 'warning' | 'error' = 'info'
   const ms = level === 'error' ? 12000 : 6000;
   const t = document.createElement('span');
   t.className = `toast ${level}`;
-  t.textContent = text.length > 140 ? `${text.slice(0, 140)}…` : text;
+  t.textContent = bidiSafe(text.length > 140 ? `${text.slice(0, 140)}…` : text);
   if (text.length > 140) { t.setAttribute('data-tip', text); }
   host.appendChild(t);
   while (host.children.length > 2) { host.firstElementChild?.remove(); }

@@ -25,7 +25,7 @@ const VAL_DOT: Record<string, string> = { pass: 'ok', warn: 'warn', fail: 'ng' }
 export const valLabel = (s: string): string => VAL_KO[s] ?? s;
 
 export function valKey(it: ValItem, i: number): string { return `val#${it.id ?? `n${i}`}`; }
-export function isValKey(key: string): boolean { return key === 'val' || key.startsWith('val#') || key.startsWith('val:cat:'); }
+export function isValKey(key: string): boolean { return typeof key === 'string' && (key === 'val' || key.startsWith('val#') || key.startsWith('val:cat:')); }
 
 /** 분류마다(처음 나온 차례) */
 export function valGroups(): Array<{ cat: string; idx: number; items: Array<{ it: ValItem; key: string }>; counts: Record<string, number> }> {
@@ -50,18 +50,19 @@ const dot = (s: string): string => `<span class="dot ${VAL_DOT[s] ?? 'un'}"></sp
 
 function staleBanner(): string {
   const ch = valChanges();
-  return ch.length ? `<div class="banner warn" data-val-stale="1"${tip('호스트는 점검을 쥐지 않는다 — 마지막 점검 때의 입력 판 · 남은 결과 · 무효 장부와 지금을 맞대어 본 것')}>점검 뒤 바뀌었다 — ${esc(ch.join(' · '))}. 「점검 실행」으로 다시</div>` : '';
+  return ch.length ? `<div class="banner warn" data-val-stale="1"${tip('호스트의 장부(kind validation) — 마지막 점검 뒤 입력 · 모델이 바뀌었다')}>점검 뒤 바뀌었다 — ${esc(ch.join(' · '))}. 「점검 실행」으로 다시</div>` : '';
 }
-const runBtn = (label = '점검 실행'): string => `<span class="btn${state.valRunning ? ' off' : ''}" data-act="val-run"${tip('호스트 validate_design — 지금 입력 · 모델 · 결과로 항목을 만든다(엔진을 부르지 않는다)')}>${esc(label)}</span>`;
+const runBtn = (label = '점검 실행'): string => `<span class="btn${state.valRunning ? ' off' : ''}" data-act="val-run"${tip('편집 화면의 「설계 검증 실행」과 같은 길 — 호스트가 지금 입력 · 모델 · 결과로 항목을 만든다(엔진을 부르지 않는다)')}>${esc(label)}</span>`;
 
 /** 가운데 — 점검 목록(분류마다 표). sel = 고른 항목 키 */
 export function valView(sel: string, asDocument = false): string {
   const v = state.val;
   const head = `<div class="pv-bar">${asDocument ? docChips('vtab') : '<b>점검</b>'}<span class="sp"></span>`
-    + `${v ? `<span class="faint">${esc(countsText(v.counts))} · 판 ${esc(v.caseRev ?? '—')} · ${hhmm(v.at)}</span>` : ''}${runBtn(v ? '다시 점검' : '점검 실행')}</div>`;
+    + `${v ? `<span class="faint">${esc(countsText(v.counts))} · 판 ${esc(v.caseRev ?? '—')} · ${hhmm(v.at)} · ${(v.by === 'ai' ? 'AI 가 돌림' : v.by === 'page' ? '편집 화면 · 이 화면' : esc(v.by))}</span>` : ''}${runBtn(v ? '다시 점검' : '점검 실행')}</div>`;
   if (!v) {
     return `<div class="dv docv" data-docview="val">${head}${state.valErr ? `<div class="banner warn">점검을 읽지 못함 — ${esc(state.valErr)}</div>` : ''}`
-      + `<div class="ph-box" style="margin:40px auto">${none('점검 안 함', '「점검 실행」을 누르면 호스트가 지금 입력 · 모델 · 결과로 항목을 만든다')}</div></div>`;
+      + staleBanner()
+      + `<div class="ph-box" style="margin:40px auto">${none(valChanges().length ? '점검이 낡았다' : '점검 안 함', '「점검 실행」을 누르면 호스트가 지금 입력 · 모델 · 결과로 항목을 만든다(편집 화면의 「설계 검증 실행」과 같은 길)')}</div></div>`;
   }
   const groups = valGroups();
   const body = groups.map(g => `<section class="valg" data-cat="${esc(g.cat)}"><h4>${esc(g.cat)}<span class="sp"></span><span class="faint">${esc(countsText(g.counts))}</span></h4>`
@@ -95,7 +96,7 @@ export function valInfo(key: string): string {
   const cat = key.startsWith('val:cat:') ? valGroups()[Number(key.slice(8))] : null;
   const list = (cat ? cat.items.map(x => x.it) : v.items).filter(x => x.status !== 'pass');
   return `<div class="hd"><div class="k">결과 · 점검<span class="sp"></span><span class="verdict ${v.counts.fail ? 'ng' : v.counts.warn ? 'warn' : 'ok'}">${esc(countsText(cat ? cat.counts : v.counts))}</span></div>`
-    + `<div class="ttl">${esc(cat ? cat.cat : '점검')}</div><div class="dim">판 ${esc(v.caseRev ?? '—')} · ${hhmm(v.at)} · ${esc(v.units)}${v.analysisCurrent === false ? ' · 해석이 지금 입력과 맞지 않음(호스트)' : ''}</div></div>`
+    + `<div class="ttl">${esc(cat ? cat.cat : '점검')}</div><div class="dim" data-val-by="${esc(v.by)}">판 ${esc(v.caseRev ?? '—')} · ${hhmm(v.at)} · ${esc(v.units)} · ${(v.by === 'ai' ? 'AI 가 돌림' : v.by === 'page' ? '편집 화면 · 이 화면' : esc(v.by))}</div></div>`
     + staleBanner()
     + secH('수', `<table class="t"><tbody>${['pass', 'warn', 'fail'].map(s => `<tr data-count="${s}"><td>${dot(s)}${VAL_KO[s]}</td><td class="r num">${(cat ? cat.counts : v.counts)[s] ?? 0}</td></tr>`).join('')}`
       + `<tr><td>모두</td><td class="r num" data-count="total">${cat ? cat.items.length : v.counts.total ?? v.items.length}</td></tr></tbody></table>`)
