@@ -61,16 +61,14 @@ def build(ck: dict) -> list:
         i_v = tr.add('demand', 'V_transfer = Vu', inputs=[vu], result=q('V_transfer', ck['V_transfer'], 'force'))
     cr = ck['conn_result']
     pns_id = connection_check_id(ck['pns_mode']) if ck['pns_mode'] else None
-    pns = q('Pns', ck['Pns'], 'force', src('check', id=pns_id, note='one fastener: governing in-plane design '
-                                                                    'strength of the connection engine (rounded '
-                                                                    'to 0.001)'))
+    pns = q('Pns', ck['Pns'], 'force', src('check', id=pns_id, note=_nt('lap.note.one_fastener_governing_plane')))
     if ck['Pns'] > 0:
         i_n = tr.add('equation', 'n = ceil(ceil(V_transfer/Pns) / rows) · rows', inputs=[tr.ref(i_v), pns,
                      q('rows', ck['n_rows'], 'count', src('user_input', key='n_rows'))],
                      result=q('n', ck['n_total'], 'count'))
         i_na = tr.add('equation', 'n_used = min(n/rows, n_fit/row) · rows',
                       inputs=[tr.ref(i_n), q('n_fit/row', ck['n_max_per_row'], 'count',
-                                             src('specification', note='fit within the lap: (L_lap − 2e)/3d + 1')),
+                                             src('specification', note=_nt('lap.note.fit_within_lap_lap'))),
                               q('rows', ck['n_rows'], 'count', src('user_input', key='n_rows'))],
                       result=q('n_used', ck['n_total_actual'], 'count'))
         i_c = tr.add('design_strength', 'capacity = n_used Pns', inputs=[tr.ref(i_na), pns],
@@ -118,7 +116,7 @@ def build(ck: dict) -> list:
     if ck['spacing'] > 0:
         tr = Trace()
         dem = q('3d', ck['min_spacing'], 'length', spec())
-        cap = q('s', ck['spacing'], 'length', src('specification', note='(L_lap − 2e)/(n/row − 1)'))
+        cap = q('s', ck['spacing'], 'length', src('specification', note=_nt('lap.note.spacing_from_count')))
         r = ck['min_spacing'] / ck['spacing']
         v = 'pass' if ck['spacing_ok'] else ('not_evaluated' if ck['pns_assumed'] else 'fail')
         tr.add('verdict', 's ≥ 3d', inputs=[dem, cap], result=q('ratio', r, 'dimensionless'), verdict=v)
@@ -170,8 +168,7 @@ def build(ck: dict) -> list:
                    verdict=v)
             if not fx.get('ltb_unstated'):
                 tr.steps[i_m]['assumption_source'] = src('user_input', key='lap_restrained',
-                                                         note='Fn = Fy: lapped section restrained against '
-                                                              'lateral-torsional buckling (Manual II-1A / II-2A)')
+                                                         note=_nt('lap.note.fn_fy_lapped_section'))
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict=v, demand=mu,
                                      reason=(LAP_LTB_UNSTATED_TOOL if unstated else None),
                                      reference=({'capacity': q('φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb',
@@ -221,7 +218,7 @@ def build(ck: dict) -> list:
         if fx.get('h2'):
             h = fx['h2']
             tr = Trace()
-            vn = q('Vn', h['Vn'], 'force', src('specification', note='§G2.1 for one web (computed)')
+            vn = q('Vn', h['Vn'], 'force', src('specification', note=_nt('lap.note.g2_1_g2_one_web_computed'))
                    if h['vn_auto'] else src('user_input', key='Vn'))
             # 두 겹 부재의 전단강도 합 — ×2 를 기호에 숨기지 않고 단계로(V6-05)
             i_vl = tr.add('equation', 'Vn,lap = 2 Vn  (two lapped members)',
@@ -273,14 +270,14 @@ def _block_shear(ck):
                  equation='J6.3',
                  inputs=[q('e', ck['edge_dist'], 'length', src('user_input', key='end_distance')
                            if (p.get('end_distance') or 0) > 0 else
-                           src('engine_default', key='end_distance', note='1.5d minimum')),
-                         q('m', bs['m'], 'count', src('check', id='lap.fastener_count', note='fasteners per row')),
-                         q('s', ck['spacing'], 'length', src('specification', note='(L_lap − 2e)/(m − 1)'))],
+                           src('engine_default', key='end_distance', note=_nt('lap.note.e_min_1_5d'))),
+                         q('m', bs['m'], 'count', src('check', id='lap.fastener_count', note=_nt('lap.note.fasteners_per_row'))),
+                         q('s', ck['spacing'], 'length', src('specification', note=_nt('lap.note.pitch_from_rows')))],
                  result=q('Lv', bs['Lv'], 'length'))
     i_gv = tr.add('equation', 'Agv = 2 t Lv  (two shear planes, outer fastener rows)', inputs=[t, tr.ref(i_L)],
                   result=q('Agv', bs['Agv'], 'area'))
-    dh = q('dh', bs['dh'], 'length', src('check', id='conn.j6.shear_rupture', note='hole diameter used for J6.1'))
-    m_q = q('m', bs['m'], 'count', src('check', id='lap.fastener_count', note='fasteners per row'))
+    dh = q('dh', bs['dh'], 'length', src('check', id='conn.j6.shear_rupture', note=_nt('lap.note.j6_1_hole_diameter_used_j6')))
+    m_q = q('m', bs['m'], 'count', src('check', id='lap.fastener_count', note=_nt('lap.note.fasteners_per_row')))
     i_nv = tr.add('equation', 'Anv = 2 t (Lv − (m − 0.5) dh)', inputs=[t, tr.ref(i_L), m_q, dh],
                   result=q('Anv', bs['Anv'], 'area'))
     i_1 = tr.add('equation', 'Pnr1 = 0.6 Fy Agv  (Eq. J6.3-1 with Ant = 0)', equation='J6.3-1',

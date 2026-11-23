@@ -32,7 +32,7 @@ def _sec(key, ctx):
 
 def _len_src(key, params, defaulted):
     if defaulted:
-        return src('engine_default', key=key, note='120 in — Effective length defaulted')
+        return src('engine_default', key=key, note=_nt('member.note.effective_length_defaulted'))
     return src('user_input', key=key)
 
 
@@ -81,7 +81,7 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
         # 강도 0 에 소요 > 0 — 엔진은 E2/F2 를 평가하지 못한 경우가 아니면 불합격이다.
         v = 'fail' if trusted else 'not_evaluated'
         tr.add('verdict', f'{demand["symbol"]} / {cap_symbol}', inputs=[demand, tr.ref(i_ds)],
-               result=None, verdict=v, note='zero design strength')
+               result=None, verdict=v, note=_nt('member.note.zero_design_strength'))
         return make_check(cid, design_method=dm, verdict=v, demand=demand, capacity=cap_q, nominal=nom_q,
                           factor_=fac, ratio=None, reason='zero design strength' if trusted else untrusted_reason,
                           steps=tr.steps, location=location, group=group, mirrors=mirrors,
@@ -211,12 +211,12 @@ def _local_fcr_steps(tr, an, eq_label):
             expr_w = 'w = do − c'
         i_w = tr.add('equation', expr_w, inputs=[_sp_dim(dim, an[dim]), tr.ref(i_c)],
                      result=q(f'w,{name}', e['w'], 'length'))
-        ins = [q('k', e['k'], 'dimensionless', src('specification', note=f'{name} plate buckling coefficient')),
+        ins = [q('k', e['k'], 'dimensionless', src('specification', note=_nt('member.note.plate_buckling_coefficient', name=name))),
                E, mu, t_q, tr.ref(i_w)]
         expr = f'Fcrl,{name} = k π² E / [12 (1 − μ²)] (t / w)²'
         if e.get('scale', 1.0) != 1.0:
             ins.append(q('s', e['scale'], 'dimensionless',
-                         src('specification', note='extrapolated to the extreme fibre (App. 2 §2.3.3.2)')))
+                         src('specification', note=_nt('member.note.app_2_extrapolated_extreme_fibre'))))
             expr += ' × s'
         refs.append(tr.ref(tr.add('elastic_buckling', expr, equation='1.1-4', inputs=ins,
                                   result=q(f'Fcrl,{name}', e['Fcrl'], 'stress'))))
@@ -243,7 +243,7 @@ def _dist_fcr_steps(tr, an, ctx):
                      ('xof', 'length'), ('hxf', 'length'), ('yof', 'length')):
         props[key] = tr.ref(tr.add('equation', f'{key} (flange + lip)', equation='Table 2.3.1.3-1', inputs=geo,
                                    result=q(key, fp[key], qty)))
-    cwf = q('Cwf', fp['Cwf'], 'warping_constant', src('specification', note='Table 2.3.1.3-1'))
+    cwf = q('Cwf', fp['Cwf'], 'warping_constant', src('specification', note=_nt('member.note.table_2_3_1_3_1')))
     E = q('E', tc['E'], 'stress', spec())
     G = q('G', tc['G'], 'stress', spec())
     mu = q('μ', tc['mu'], 'dimensionless', spec())
@@ -289,7 +289,7 @@ def _dist_fcr_steps(tr, an, ctx):
                   result=q('k̃φwg', st['k_tilde_phi_wg'], 'area'))
     kq = q('kφ', tc['kphi_external'], 'rotational_stiffness',
            src('user_input', key='kphi') if an.get('kphi_given') else
-           src('engine_default', key='kphi', note='0 — no external rotational restraint'))
+           src('engine_default', key='kphi', note=_nt('member.note.no_external_rotational_restraint')))
     ins = [tr.ref(i_fe), tr.ref(i_we), kq, tr.ref(i_fg), tr.ref(i_wg)]
     expr = 'Fcrd = (kφfe + kφwe + kφ) / (k̃φfg + k̃φwg)'
     if flex:
@@ -588,17 +588,15 @@ def flexure_checks(ctx):
     demand = q('Mu', Mu, 'moment', demand_source(p, 'Mu')) if Mu and Mu > 0 else None
     if p.get('_lb_from_lap_restrained'):
         Lb_src = src('user_input', key='lap_restrained',
-                     note='lap region: Manual II-1A / II-2A assumption — lapped section restrained against '
-                          'lateral-torsional buckling → Lb = 0')
+                     note=_nt('member.note.lap_region_manual_ii'))
     elif p.get('_lb_lap_upper_bound'):
         Lb_src = src('engine_default', key='Lb',
-                     note='lap region, restraint not stated and Lb not given: Lb = 0 only as an upper bound '
-                          '(Mne ≤ My) — F2 is not evaluated unless this bound already fails')
+                     note=_nt('member.note.f2_lap_region_restraint_stated'))
     else:
-        Lb_src = (src('engine_default', key='Lb', note='120 in') if 'Lb' not in p else src('user_input', key='Lb'))
-    Cb_src = src('user_input', key='Cb') if p.get('Cb') is not None else src('engine_default', key='Cb', note='1.0')
+        Lb_src = (src('engine_default', key='Lb', note=_nt('member.note.length_default')) if 'Lb' not in p else src('user_input', key='Lb'))
+    Cb_src = src('user_input', key='Cb') if p.get('Cb') is not None else src('engine_default', key='Cb', note=_nt('member.note.cb_default'))
     if p.get('_lb_from_lap_restrained'):
-        Cb_src = src('user_input', key='lap_restrained', note='lap region: Cb = 1.0 (Lb = 0)')
+        Cb_src = src('user_input', key='lap_restrained', note=_nt('member.note.lap_region_cb_lb'))
     i621 = ctx['R_uplift'] is not None and ctx['R_uplift'] > 0
     gov_id = ('member.flexure.uplift_r' if i621 else
               {'Local Buckling': 'member.flexure.local',
@@ -785,12 +783,11 @@ def lap_section_block(ctx):
     Fy0 = ctx['Fy_original']
     tr = Trace()
     Sf = q('Sf', vs['Sf_eff'], 'section_modulus', _sec('Sf', ctx))
-    fy = q('Fy', Fy0, 'stress', src('material', key='Fy', note='virgin Fy — no cold work (§A3.3.2)'))
+    fy = q('Fy', Fy0, 'stress', src('material', key='Fy', note=_nt('member.note.a3_3_2_virgin_fy_no_cold')))
     i_my = tr.add('yield', 'My = Sf Fy  (Mne = My, Fn = Fy: lapped section restrained)', equation='F2.1-2',
                   inputs=[Sf, fy], result=q('My', vs['My'], 'moment'),
                   assumption_source=src('user_input', key='lap_restrained',
-                                        note='Manual II-1A / II-2A: lapped section restrained against '
-                                             'lateral-torsional and distortional buckling'))
+                                        note=_nt('member.note.manual_ii_ii_lapped')))
     md = vs.get('Mnfo_detail') or {}
     out = {'basis': _nt('member.label.lap_section_basis'),
            'clause': 'F3.2.1', 'equations': ['F2.1-2', 'F3.2.1-1', 'F3.2.1-2', 'F3.2.1-3', 'G2.1-1', 'G2.1-2a',
@@ -929,7 +926,7 @@ def shear_checks(ctx, sh):
     tr = Trace()
     h = q('h', sh['h'], 'length', src('section_property', key='h_web'))
     t = q('t', sh['t'], 'length', src('section_property', key='t'))
-    fy = q('Fy', sh['Fy'], 'stress', src('material', key='Fy', note='virgin Fy (§A3.3.2 excludes Chapter G)'))
+    fy = q('Fy', sh['Fy'], 'stress', src('material', key='Fy', note=_nt('member.note.a3_3_2_virgin_fy_a3_excludes')))
     E = q('E', sh['E'], 'stress', spec())
     i_vy = tr.add('yield', 'Vy = 0.6 Aw Fy, Aw = h t', equation='G2.1-5', inputs=[h, t, fy],
                   result=q('Vy', sr['Vy'], 'force'))
@@ -969,7 +966,7 @@ def shear_checks(ctx, sh):
     si = sh['shear_int']
     raw = sh['h2_raw']
     mlo_in = q('Mnℓo', sh['Mnlo'], 'moment', src('check', id='member.flexure.local',
-                                                  note='Mnℓo: §F3 local strength with Fn = Fy (Mne = My), virgin'))
+                                                  note=_nt('member.note.f3_mn_f3_local_strength')))
     i_malo = design_strength_step(tr, dm, mlo_in, ctx['phi'], ctx['omega'], sh['Malo'],
                                   'Maℓo', 'moment', phi_symbol='φb', omega_symbol='Ωb')
     mu = q('M', sh['Mu'], 'moment', demand_source(p, 'Mu'))
@@ -1016,8 +1013,8 @@ def web_crippling_check(ctx, wc):
                q('CN', row.get('CN'), 'dimensionless', src('specification', table=w.get('table'))),
                q('Ch', row.get('Ch'), 'dimensionless', src('specification', table=w.get('table'))),
                q('t', wc['t'], 'length', src('section_property', key='t')),
-               q('Fy', wc['Fy'], 'stress', src('material', key='Fy', note='virgin Fy')),
-               q('θ', terms['theta'], 'angle', src('specification', note='web inclination, default 90')),
+               q('Fy', wc['Fy'], 'stress', src('material', key='Fy', note=_nt('member.note.virgin_fy'))),
+               q('θ', terms['theta'], 'angle', src('specification', note=_nt('member.note.web_inclination_default'))),
                q('R', terms['R'], 'length', src('user_input', key='wc_R')),
                q('N', terms['N'], 'length', src('user_input', key='wc_N')),
                q('h', wc['h'], 'length', src('section_property', key='h_web'))]
@@ -1043,7 +1040,7 @@ def web_crippling_check(ctx, wc):
     i_ds = design_strength_step(tr, dm, tr.ref(i), phi_w, om_w, wc['Pa'], 'φwPn' if dm == 'LRFD' else 'Pn/Ωw',
                                 'force', phi_symbol='φw', omega_symbol='Ωw')
     dem = q('P', wc['P'], 'force', src('user_input', key='wc_P') if wc['P_source'] == 'wc_P'
-            else src('user_input', key='Vu', note='support reaction taken as Vu (assumption)'))
+            else src('user_input', key='Vu', note=_nt('member.note.support_reaction_taken_as')))
     r = ratio_of(wc['P'], wc['Pa'])
     items = wc.get('ne_items') or []
     v = verdict_from(r, trusted=not items)
@@ -1067,8 +1064,8 @@ def h3_check(ctx, h):
     P = q('P', h['P'], 'force', src('user_input', key=h['P_source'] or 'wc_P'))
     Pn = q('Pn', h['Pn'], 'force', src('check', id='member.web_crippling'))
     M = q('M', h['M'], 'moment', src('user_input', key='wc_M') if h['M_given'] else
-          src('engine_default', key='wc_M', note='member Mu used (conservative)'))
-    Mlo = q('Mnℓo', h['Mnlo'], 'moment', src('check', id='member.flexure.local', note='§F3 with Fn = Fy, virgin'))
+          src('engine_default', key='wc_M', note=_nt('member.note.member_mu_used_conservative')))
+    Mlo = q('Mnℓo', h['Mnlo'], 'moment', src('check', id='member.flexure.local', note=_nt('member.note.f3_f3_fn_fy_virgin')))
     i_x = tr.add('equation', f'{coef[0]:g} (P/Pn) + M/Mnℓo', equation=h3['equation'] + ('b' if dm == 'LRFD' else 'a'),
                  inputs=[P, Pn, M, Mlo], result=q('H3', raw['total'], 'dimensionless'))
     if dm == 'LRFD':
@@ -1094,7 +1091,7 @@ def positive_region_check(ctx, pr):
     Sf = q('Sf', pr['Sf'], 'section_modulus', _sec('Sf', ctx))
     fy = q('Fy', pr['Fy'], 'stress', src('material', key='Fy'))
     lbs = src('user_input', key='Lb_pos') if 'Lb_pos' in p else src('engine_default', key='Lb_pos',
-                                                                    note='0 (fully braced) — not given')
+                                                                    note=_nt('member.note.fully_braced_given'))
     cbs = src('user_input', key='Cb_pos') if p.get('Cb_pos') is not None else src('engine_default', key='Cb_pos')
     st_like = {'Fcre_raw': pr['raw'], 'Fcre': pr['Fcre'], 'global_result': pr['global_'], 'Sf_eff': pr['Sf'],
                'Fy': pr['Fy'], 'Mne': pr['Mne'], 'My': pr['Sf'] * pr['Fy'], 'Mp': 0.0}
@@ -1174,7 +1171,7 @@ def tension_checks(ctx):
     else:
         tr = Trace()
         An = q('An', ctx['An'], 'area', src('user_input', key='An') if ctx['An_given'] else
-               src('engine_default', key='An', note='An = Ag (no holes deducted) — assumption'))
+               src('engine_default', key='An', note=_nt('member.note.ag_no_holes_deducted')))
         i = tr.add('equation', 'Tn = An Fu', equation='D3-1', inputs=[An, q('Fu', ctx['Fu'], 'stress',
                                                                          src('material', key='Fu'))],
                    result=q('Tn', ctx['Tn_rupture'], 'force'))
@@ -1201,10 +1198,9 @@ def _cm_step(tr, ctx, axis):
         return q(sym, val, 'dimensionless', src('user_input', key=sym))
     if basis == 'transverse':
         return q(sym, val, 'dimensionless', src('specification', key='transverse_load',
-                                                 note='transverse load between supports → Cm = 1.0'))
+                                                 note=_nt('member.note.transverse_load_between_supports')))
     return q(sym, val, 'dimensionless', src('specification', key=sym, clause='C1.2.1.1',
-                                            note='Cm = 1.0: upper bound of Eq. C1.2.1.1-4, permitted by (b) — '
-                                                 'neither Cm nor this axis\'s end-moment ratio given'))
+                                            note=_nt('member.note.c1_2_1_1_cm_upper_bound_c1')))
 
 
 def _b1_steps(tr, ctx, axis, P):
@@ -1212,7 +1208,7 @@ def _b1_steps(tr, ctx, axis, P):
     p = ctx['params']
     L_key, r_key = ('KxLx', 'rx') if axis == 'x' else ('KyLy', 'ry')
     Lq = q(L_key, ctx[L_key], 'length', src('user_input', key=L_key) if p.get(L_key) is not None
-           else src('engine_default', key=L_key, note='120 in'))
+           else src('engine_default', key=L_key, note=_nt('member.note.length_default')))
     i_pe = tr.add('elastic_buckling', f'Pe1{axis} = {PI}² E A / ({L_key} / {r_key})²', equation='C1.2.1.1-5',
                   inputs=[q('E', ctx['E'], 'stress', spec()), q('A', ctx['Ag'], 'area', _sec('A', ctx)), Lq,
                           q(r_key, ctx[r_key], 'length', _sec(r_key, ctx))],
@@ -1235,9 +1231,9 @@ def axial_bending_check(ctx):
     raw = ctx['raw']
     P = q('P', ctx['Pu'], 'force', demand_source(p, 'Pu'))
     Pa = q('Pa', ctx['Pa'], 'force', src('check', id=ctx.get('Pa_id'), group='member.compression',
-                                         note='least compression design strength (Chapter E)'))
+                                         note=_nt('member.note.least_compression_design_strength')))
     Max = q('Max', ctx['Max'], 'moment', src('check', id=ctx.get('Max_id'), group='member.flexure',
-                                             note='least flexural design strength (Chapter F)'))
+                                             note=_nt('member.note.least_flexural_design_strength')))
     mx = q('Mx', ctx['Mux'], 'moment', demand_source(p, 'Mux'))
     ins = [P, Pa]
     mx_sym = 'Mx'
@@ -1255,11 +1251,11 @@ def axial_bending_check(ctx):
         i_b1y = _b1_steps(tr, ctx, 'y', P) if ctx['PEy'] < 1e9 else None
         b1y = (tr.ref(i_b1y) if i_b1y is not None else
                q('B1y', ctx['alpha_y'], 'dimensionless',
-                 src('engine_default', key='B1y', note='no amplification: P = 0 or ry not given')))
+                 src('engine_default', key='B1y', note=_nt('member.note.no_amplification_ry_given'))))
         ang = ctx.get('angle')
         if ang:
             Lq = q('L', ang['L'], 'length', src('user_input', key='L') if ang['L_given'] else
-                   src('engine_default', key='L', note='member length not given — KyLy used'))
+                   src('engine_default', key='L', note=_nt('member.note.member_length_given_kyly')))
             i_pl = tr.add('demand', 'PL/1000 = P L / 1000  (angle: additional eccentricity moment, §H1.2)',
                           inputs=[P, Lq], result=q('PL/1000', ang['Padd'], 'moment'))
             i_e = tr.add('demand', 'My,ecc = B1y (My + PL/1000)', inputs=[b1y, my, tr.ref(i_pl)],
@@ -1299,7 +1295,7 @@ def tension_bending_checks(ctx):
     out = []
     T = q('T', ctx['T'], 'force', demand_source(p, 'Pu'))
     Ta = q('Ta', ctx['Ta'], 'force', src('check', id=ctx.get('Ta_id'), group='member.tension',
-                                         note='least tension design strength (Chapter D)'))
+                                         note=_nt('member.note.least_tension_design_strength')))
     mx = q('Mx', ctx['Mux'], 'moment', demand_source(p, 'Mux'))
     my = q('My', ctx['Muy'], 'moment', demand_source(p, 'Muy'))
     for cid, val, eq in (('member.tension_bending.flange_yield', ctx['r11'], 'H1.1-1'),
@@ -1322,7 +1318,7 @@ def tension_bending_checks(ctx):
                 ins, expr = [mx, tr.ref(i_mt), T, Ta], 'Mx/Maxt + T/Ta  (no weak-axis moment)'
         else:
             mxa = q('Max', ctx['Max'], 'moment', src('check', id=ctx.get('Max_id'), group='member.flexure',
-                                                     note='least flexural design strength (Chapter F)'))
+                                                     note=_nt('member.note.least_flexural_design_strength')))
             if ctx['May'] < 1e9:
                 ins = [mx, mxa, my, q('May', ctx['May'], 'moment', src('user_input', key='May_strength')), T, Ta]
                 expr = 'Mx/Max + My/May − T/Ta'

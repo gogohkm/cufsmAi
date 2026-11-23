@@ -53,7 +53,35 @@ TERMS = (
     ('uplift', '양력', ()),
     ('conservative · unconservative', '보수측 · 비보수', ()),
     ('reference only', '참고값', ()),
+    ('virgin Fy (before cold work)', '원소재 Fy', (r'처녀\s*Fy', r'버진\s*Fy')),
 )
+
+# 계산서가 값 옆에 찍는 출처의 한국어 이름(계약 §3.3 · §16.12) — checks.SOURCE_KINDS · BUCKLING_METHODS 와 같은 키
+SOURCE_KINDS_KO = {
+    'step': '앞 단계',
+    'check': '다른 검토 항목',
+    'section_property': '단면 성질',
+    'material': '재료',
+    'buckling_analysis': '좌굴 해석',
+    'load_analysis': '하중 해석',
+    'user_input': '사용자 입력',
+    'engine_default': '엔진 기본값',
+    'specification': '기준',
+}
+BUCKLING_METHODS_KO = {
+    'fsm_minimum': 'FSM 극소',
+    'fsm_single_minimum': 'FSM 단일 극소',
+    'analytic': '해석식 (부록 1 · 2)',
+    'analytic_raised_to_floor': '해석식 (곡선 하한으로 올림)',
+    'closed_form': '폐형식 (§E2 · §F2)',
+    'user_supplied': '사용자가 준 값 (합리적 해석)',
+}
+# 출처에 붙는 표지
+SOURCE_FLAGS_KO = {
+    'generated': '템플릿으로 생성',
+    'assumption_source': '가정의 근거',
+    'restraint_source': '구속의 근거',
+}
 
 # 웹 크리플링은 지금 쓰는 꼴이 아닌 것을 모두 막는다
 _WEB_VARIANTS = tuple(v for v in ('웹 크리플링', '웹크리플링', '웨브 크리플링', '웨브크리플링') if v != WEB_CRIPPLING)

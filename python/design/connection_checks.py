@@ -170,8 +170,8 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
             n_q = q('n', raw['n'], 'count', src('user_input', key='n'))
             i_ab = tr.add('equation', 'Ab = π d² / 4', inputs=[q('d', raw['d'], 'length', src('user_input', key='d'))],
                           result=q('Ab', raw['Ab'], 'area'))
-            fnt = q('Fnt', raw['Fnt'], 'stress', src('specification', note='Table J3.4-1 (bolt grade) or Fub input'))
-            fnv = q('Fnv', raw['Fnv'], 'stress', src('specification', note='Table J3.4-1 (bolt grade) or Fub input'))
+            fnt = q('Fnt', raw['Fnt'], 'stress', src('specification', note=_nt('conn.note.table_j3_4_1_j3_bolt_grade_fub')))
+            fnv = q('Fnv', raw['Fnv'], 'stress', src('specification', note=_nt('conn.note.table_j3_4_1_j3_bolt_grade_fub')))
             i_fv = tr.add('equation', 'fv = V / (n Ab)', inputs=[q('V', raw['V'], 'force', demand_source(params, 'Vu')),
                                                                  n_q, tr.ref(i_ab)],
                           result=q('fv', raw['fv'], 'stress'), equation='J3.4')

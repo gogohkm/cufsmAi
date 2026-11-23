@@ -477,6 +477,14 @@ def _mode_fields(d, member_type):
             d[f'{k}_id'] = connection_check_id(d[k])
 
 
+def _is_field_key(d, k):
+    """이 걸음이 단 필드인가 — {key}_notices · {key}_params · {key}_parts (auto_params 같은 이름은 아님)."""
+    for suf in ('_notices', '_params', '_parts'):
+        if k.endswith(suf) and (k[:-len(suf)] in d or suf == '_notices'):
+            return True
+    return False
+
+
 def _annotate(d, member_type=None):
     if isinstance(d, list):
         for x in d:
@@ -491,7 +499,7 @@ def _annotate(d, member_type=None):
     _mode_fields(d, mt)
     for k in list(d):
         v = d[k]
-        if not isinstance(k, str) or k in _NO_ANNOTATE or k.endswith(('_notices', '_params', '_parts')):
+        if not isinstance(k, str) or k in _NO_ANNOTATE or _is_field_key(d, k):
             continue
         if _is_notice(v):
             if f'{k}_code' not in d:

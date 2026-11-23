@@ -91,6 +91,8 @@
 
 ### 3.3 `source` 어휘
 
+한국어 이름(계산서가 값 옆에 찍는 말)은 용어표 `design.glossary.SOURCE_KINDS_KO` · `BUCKLING_METHODS_KO` 한 곳 — §16.12 의 표. 시험이 이 어휘와 그 표의 키가 같음을 확인한다.
+
 | kind | 뜻 | 덧붙는 것 |
 |---|---|---|
 | `step` | 같은 항목의 앞 단계 결과 | `step`(번호) |
@@ -1413,8 +1415,32 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 
 **수:** 새 code 93 (모드 이름표 14 · 하중 해석 33 · 랩 · 출처 · 오류 33 · 적용한계 조각 13), 모두 571 → 577 (작은 글 6 더). 계약 사례가 닿는 code 270. 고정값 206 쌍. 새 물리량 `pressure`(§3.2).
 
-**아직 덮이지 않은 글과 까닭:**
+**아직 덮이지 않은 글과 까닭 (K4e 뒤, 최종):**
 - 옛 `steps[].formula` · `steps[].name` (알려진 것).
 - 예외 메시지 `{exc}` — Python 이 지은 글.
-- **검토 항목 계산 과정 안의 출처 메모와 갈래 조건**: `design_checks[].steps[].inputs[].source.note` 와 항목의 `demand` · `capacity` · `reference` 의 `source.note`(약 60 가지, 예: 'virgin Fy', 'hole dimension along the load', 'member Mu used (conservative)', 'block shear path areas: 2 전단면 …')와 `steps[].condition`('Fcre ≥ 2.78 Fy', 'R/t ≤ 20  (inside bend radius)' …). 조건은 `expr` 와 같은 기호식이고, 메모는 출처의 덧말이다 — 다음 걸음의 후보(계산 과정 단계의 글이라 이번 범위 밖으로 남김).
-- 기계 식별자 · 고유 이름: `design_method`, `basis`(`rational_A1.2c` · `manufacturer` …), `member_app`, `span_type`, `load_type`, `section_source`, `mirrors.*.path`, `load_combination_standard.edition`('ASCE/SEI 7-10'), 기호 `L` — 화면은 이 값을 번역하지 않고 그대로 쓰거나 제 표로 옮긴다.
+- 검토 항목 계산 과정의 갈래 조건 `steps[].condition`('Fcre ≥ 2.78 Fy', 'R/t ≤ 20  (inside bend radius)' …) — `expr` 와 같은 기호식(오케스트레이터 결정: 기호 그대로).
+- 기계 식별자 · 고유 이름: `design_method`, `basis`(`rational_A1.2c` · `manufacturer` …), `member_app`, `span_type`, `load_type`, `section_source`, `mirrors.*.path`, `load_combination_standard.edition`('ASCE/SEI 7-10'), 기호 `L`.
+
+### 16.12 덧붙임 — 계산 과정의 출처 메모 · 출처 종류의 한국어 이름 (2026-11-24 K4e)
+
+옛 키 · 옛 글은 바이트까지 그대로다(`3bc83d0` 과 견줌: 계약 사례 150,404 · 가장자리 93,760 · 하중 64,643 값, 다른 것 0).
+
+- **출처 메모(`source.note`)마다 code · 한국어:** 새 kind `note` — 검토 항목 계산 과정의 `steps[].inputs[].source.note`, 항목의 `demand` · `capacity` · `reference` 의 `source.note`, 단계 자체의 `note`, 그리고 결과의 `display_rounding.note`. code 81(`member.note.*` · `conn.note.*` · `lap.note.*`), 엔진 자리 82 곳 + Table J3.3.1-2 `mf` 행 이름표 7 + 표시 반올림 메모 3. 메모가 든 `source` dict(과 단계)에 옆 필드 `note_code` · `note_kind` · `note_ko` · `note_template` · `note_template_ko` · `note_params` (§16.11 의 `{k}_*` 와 같은 꼴 — `checks.src()` · `Trace.add()` 가 단다). 숫자를 품은 메모는 매개변수(예: `governing shear: {name}`, `{name} plate buckling coefficient`); 치수 상수를 품은 메모 7은 상수 매개변수(§16.3: `{L_default}` = 120 in, `{Fxx_min}` = 60 ksi, `{F_uh}` = 120 ksi, `{Fub}` = 100 ksi, `{dw_max}` = 0.75 in). 시험이 계약 사례의 모든 검토 항목 계산 과정에서 `note` 가 있는 출처마다 `note_code` 가 있음을 확인한다.
+- 「virgin Fy」는 용어표에 「원소재 Fy」.
+- **출처 종류 · 좌굴값 방법의 한국어 이름(용어표 한 곳):**
+
+| `source.kind` | 한국어 | | `buckling_analysis.method` | 한국어 |
+|---|---|---|---|---|
+| `step` | 앞 단계 | | `fsm_minimum` | FSM 극소 |
+| `check` | 다른 검토 항목 | | `fsm_single_minimum` | FSM 단일 극소 |
+| `section_property` | 단면 성질 | | `analytic` | 해석식 (부록 1 · 2) |
+| `material` | 재료 | | `analytic_raised_to_floor` | 해석식 (곡선 하한으로 올림) |
+| `buckling_analysis` | 좌굴 해석 | | `closed_form` | 폐형식 (§E2 · §F2) |
+| `load_analysis` | 하중 해석 | | `user_supplied` | 사용자가 준 값 (합리적 해석) |
+| `user_input` | 사용자 입력 | | | |
+| `engine_default` | 엔진 기본값 | | | |
+| `specification` | 기준 | | | |
+
+  표지: `generated: true` → 「템플릿으로 생성」, `assumption_source` → 「가정의 근거」, `restraint_source` → 「구속의 근거」(`SOURCE_FLAGS_KO`). 「사용자 진술」은 `user_input` + `key: 'lap_restrained'` 의 출처다 — 화면은 `key` 의 입력 이름을 그대로 둔다.
+- **수:** code 660 (note 81 · label 99 · fragment 26 · warning 178 · reason 122 · assumption 97 · not_evaluated 35 · scope 22). 계약 사례가 닿는 code 334. 고정값 207 쌍.
+- 함께 고친 것: 하위 결과 이름이 `_params` 로 끝나면(`auto_params`) 걷지 않던 잘못 — `analyze_loads.auto_params` 안의 글(`uplift_bracing.positive_region.note`, `uplift_R_basis`, `gravity_R_basis` …)에 이제 필드가 붙는다(code `loads.label.r_basis_*` 2 더함).

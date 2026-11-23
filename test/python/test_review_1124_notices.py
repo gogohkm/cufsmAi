@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(ROOT, 'python'))
 sys.path.insert(0, HERE)
 
 from design.notice_registry import REGISTRY, KINDS  # noqa: E402
+from design.checks import SOURCE_KINDS, BUCKLING_METHODS  # noqa: E402
 import contract_cases_1123 as cases  # noqa: E402
 
 FIXTURE = os.path.join(HERE, 'notice_render_fixture.json')
@@ -160,9 +161,13 @@ def walk_result(r, where, errors, codes, stats):
         for c in r.get('design_checks') or []:
             if c.get('reason') is not None and 'reason_kind' not in c:
                 errors.append((where, c['id'], 'reason without reason_* fields'))
+        if r.get('kind') in SOURCE_KINDS and isinstance(r.get('note'), str) and 'note_code' not in r:
+            errors.append((where, 'source note without a code', r['note'][:80]))      # 계약 §16.12
+        is_check = 'verdict' in r and 'id' in r
         for k, v in r.items():
-            if k not in ('notices', 'steps') and not k.endswith('_notices'):
-                walk_result(v, where + '.' + k if isinstance(v, dict) else where, errors, codes, stats)
+            if k == 'notices' or k.endswith('_notices') or (k == 'steps' and not is_check):
+                continue                    # 옛 steps[] 는 알려진 밖; 검토 항목의 계산 과정 steps 는 본다
+            walk_result(v, where + '.' + k if isinstance(v, dict) else where, errors, codes, stats)
     elif isinstance(r, list):
         for v in r:
             walk_result(v, where, errors, codes, stats)
@@ -288,7 +293,7 @@ def test_dimensional_constants_in_templates_are_params():
     text)로 두어 SI 로 바뀐다. 각도(°, deg — 단위계와 무관)와 단위 이름만 쓴 글(kip*s^2/in^4 · lb/in^3 · kg/m^3 의
     다른 단위계 값)은 예외."""
     unit = r'(in\.?|ksi|kips?|kip-in|kip-ft|ft|psf|plf|mil)(?![A-Za-z])'
-    rx = re.compile(r'(\d+-\d+/\d+|\d+/\d+|\d*\.\d+(?:e-?\d+)?|\d+)\s?' + unit)
+    rx = re.compile(r'(?<![A-Za-z_])(\d+-\d+/\d+|\d+/\d+|\d*\.\d+(?:e-?\d+)?|\d+)\s?' + unit)
     bad = []
     for code, e in REGISTRY.items():
         for t in (e['template'], e['template_ko']):
@@ -298,6 +303,15 @@ def test_dimensional_constants_in_templates_are_params():
             if 'const' in p:
                 assert p['quantity'] and isinstance(p['const'], float) and p['text'], (code, k)
     assert not bad, bad
+
+
+def test_every_source_kind_and_method_has_a_korean_name():
+    """계산서가 값 옆에 찍는 출처(§3.3)의 종류 · 좌굴값 방법마다 용어표에 한국어 이름이 있다(계약 §16.12)."""
+    from design.glossary import SOURCE_KINDS_KO, BUCKLING_METHODS_KO, violations
+    assert set(SOURCE_KINDS_KO) == set(SOURCE_KINDS), set(SOURCE_KINDS) ^ set(SOURCE_KINDS_KO)
+    assert set(BUCKLING_METHODS_KO) == set(BUCKLING_METHODS), set(BUCKLING_METHODS) ^ set(BUCKLING_METHODS_KO)
+    for name in list(SOURCE_KINDS_KO.values()) + list(BUCKLING_METHODS_KO.values()):
+        assert name and HANGUL.search(name) and not violations(name), name
 
 
 def test_every_call_site_passes_exactly_the_registered_params():

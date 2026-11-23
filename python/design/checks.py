@@ -412,7 +412,16 @@ def src(kind: str, **detail) -> dict:
     for k, v in detail.items():
         if v is not None:
             out[k] = _num(v) if not isinstance(v, (dict, list, str)) else v
+    _text_fields(out, detail)
     return out
+
+
+def _text_fields(out: dict, detail: dict) -> None:
+    """값이 알림(출처 메모 note …)인 키 옆에 {key}_code · _ko · _template(_ko) · _params (계약 §16.11 · §16.12)."""
+    from design.notices import Notice, NoticeGroup, fields
+    for k, v in detail.items():
+        if isinstance(v, (Notice, NoticeGroup)):
+            out.update(fields(v, k))
 
 
 def spec() -> dict:
@@ -434,6 +443,7 @@ class Trace:
         for k, v in extra.items():
             if v is not None:
                 step[k] = v
+        _text_fields(step, extra)
         self.steps.append(step)
         return len(self.steps) - 1
 
@@ -696,4 +706,5 @@ DISPLAY_ROUNDING = {
 
 def display_rounding(kind: str) -> dict:
     d = DISPLAY_ROUNDING[kind]
-    return {'decimals': dict(d['decimals']), 'note': d['note']}
+    from design.notices import N
+    return {'decimals': dict(d['decimals']), 'note': N(f'member.note.display_rounding_{kind}')}

@@ -258,7 +258,7 @@ def analyze_loads(
             )
             auto_params['i621_check'] = i621
             uplift_R = i621.get('R')
-            R_basis = 'S100-16 Table I6.2.1-1' if uplift_R is not None else None
+            R_basis = _nt('loads.label.r_basis_table_i6_2_1') if uplift_R is not None else None
             if uplift_R is not None:
                 assumptions.append(_nt('loads.assumption.i6_2_1_i6_conditions_confirmed_user'))
                 assumptions.extend(i621['reasons'])
@@ -270,13 +270,13 @@ def analyze_loads(
         R_t = deck.get('R_tested_uplift', deck.get('R_tested'))
         if R_t:
             uplift_R = float(R_t)
-            R_basis = 'user-supplied AISI S908 test value (App. A I6.2.2)'
+            R_basis = _nt('loads.label.r_basis_s908_test')
             assumptions.append(_nt('loads.assumption.standing_seam_uplift_from', uplift_R=uplift_R))
         elif uplift_result:
             warnings.append(_nt('loads.warning.app_a_standing_seam_roof_no'))
         if deck.get('R_tested_gravity'):
             auto_params['gravity_R'] = float(deck['R_tested_gravity'])
-            auto_params['gravity_R_basis'] = 'user-supplied AISI S908 test value (App. A I6.2.2)'
+            auto_params['gravity_R_basis'] = _nt('loads.label.r_basis_s908_test')
             warnings.append(_nt('loads.warning.standing_seam_gravity_reported'))
         if not brace_points_ft:
             assumptions.append(_nt('loads.assumption.app_a_standing_seam_roof_without'))
