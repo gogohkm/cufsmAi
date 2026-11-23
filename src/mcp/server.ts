@@ -14,7 +14,7 @@ import * as http from "http";
 import {
     convertInputSI, convertOutputSIDeep, TEXT_UNITS_NOTE, SI_INPUT_TABLES,
     SI_OUT_MEMBER, SI_OUT_PROPS, SI_OUT_LOADS, SI_OUT_DECK, SI_OUT_VIBRATION, SI_OUT_GET_DSM,
-    SI_OUT_PURLIN, SI_OUT_REPORT, SI_OUT_VALIDATE, SI_OUT_DESIGN_CHECK, caseValueToSI,
+    SI_OUT_PURLIN, SI_OUT_DESIGN_CHECK, caseValueToSI,
     type Table,
 } from "./siUnits";
 import { connectionModeFromEnv, createHostConnection, type HostTarget } from "./hostConnection";
@@ -583,34 +583,6 @@ function shapeLoads(r: any, detail: Detail): any {
     return out;
 }
 
-/** 묶음 안의 하중 해석: 조합 이름과 입력만(전체는 analyze_loads 또는 detail:'full'). */
-function loadMini(la: any): any {
-    return {
-        governing_combo: la.governing?.combo ?? null, gravity_combo: la.gravity?.combo ?? null, uplift_combo: la.uplift?.combo ?? null,
-        all_combos: la.all_combos ?? null, input_loads_plf: la.input_loads_plf ?? null, member_app: la.member_app ?? null,
-        span_type: la.span_type ?? null, spans_ft: la.spans_ft ?? null, wc_reactions: la.wc_reactions ?? null,
-        uplift_reactions: la.uplift_reactions ?? null, warnings: la.warnings ?? [], assumptions: la.assumptions ?? [],
-        scope_notes: la.scope_notes ?? [], not_evaluated: la.not_evaluated ?? [],
-    };
-}
-
-/** generate_report · validate_design: 안의 설계 결과 · 하중 해석을 같은 규칙으로. */
-function shapePacket(designKey: string, loadKey: string): Shaper {
-    return (r: any, detail: Detail): any => {
-        if (detail === 'full' || !r || typeof r !== 'object') { return r; }
-        const out: any = { ...r };
-        const d = r[designKey];
-        if (d && typeof d === 'object' && !d.error) {
-            out[designKey] = Array.isArray(d.regions) ? shapePurlin(d, detail) : shapeDesign('member')(d, detail);
-        }
-        if (r[loadKey] && typeof r[loadKey] === 'object' && !r[loadKey].error) { out[loadKey] = loadMini(r[loadKey]); }
-        out.detail = detail;
-        out.more = `${designKey} is a summary (see its own 'more') and ${loadKey} keeps only its combinations, reactions and notices `
-            + "(analyze_loads gives the load analysis, with diagrams on detail:'full'); call again with detail:'full' for the whole packet as before.";
-        return out;
-    };
-}
-
 /** 도구 → 응답 모양. 없는 도구는 결과 그대로. */
 const SHAPERS: Record<string, Shaper> = {
     aisi_design_compression: shapeDesign('member'), aisi_design_flexure: shapeDesign('member'),
@@ -618,8 +590,6 @@ const SHAPERS: Record<string, Shaper> = {
     aisi_design_connection: shapeDesign('connection'), design_connection: shapeDesign('connection'),
     design_lap_connection: shapeDesign('lap'),
     design_purlin: shapePurlin,
-    generate_report: shapePacket('design_result', 'load_analysis'),
-    validate_design: shapePacket('last_design_result', 'last_load_analysis'),
     analyze_loads: shapeLoads,
     run_plastic_surface: shapeData([], 'Py, M11_y, M22_y (the surface extremes), normalized and the grid sizes are kept.'),
     run_vibration: shapeData(['frequencies', 'lengths'], 'frequencies (Hz) per length and mode are kept; only the mode shapes are left out.'),
@@ -685,13 +655,13 @@ WORKFLOW.
 3 Loads (purlins, joists, girts, studs): analyze_loads → required strengths and unbraced regions; design_purlin runs the whole purlin chain.
 4 Member check on the current section: aisi_design_compression / aisi_design_flexure / aisi_design_combined / aisi_design_tension (needs a current analysis of the matching load family).
 5 Connections: aisi_design_connection or design_connection, design_lap_connection, check_lap_length, check_shear_lag, check_block_shear.
-6 validate_design / generate_report collect the session state.
+6 validate_design → the checklist the screen shows (설계 검증, ~70 items: id, status pass/warn/fail, value, criterion, note). generate_report → the calculation report written as HTML + PDF next to the open .csd (or in the temp folder) — the reply gives the file paths; tell the person where it is.
 
 INPUTS. The tools never invent engineering input: give the design Fy, Fu, lengths, loads, thicknesses and connection geometry explicitly. If something required is missing the engine answers with an error that names it — ask the user, do not guess. Argument names are the engine's names.
 
 VERDICTS. pass=true: all applicable limit states evaluated and satisfied. pass=false: an evaluated limit state fails (wins over unevaluated items). pass=null: NO VERDICT — something applicable could not be evaluated (not_evaluated / not_checked list why). Never present null as OK. Design results also list design_checks (one item per limit state: stable id, clause, demand / capacity, ratio, verdict, calculation steps) — refer to a check by its id.
 
-REPLIES. Design tools (aisi_design_*, design_connection, design_lap_connection, design_purlin, generate_report, validate_design) answer with a summary by default: the verdict, the governing checks (id, clause, name, demand, capacity, ratio, location, combination), one line per check, and every warning / assumption / scope note / not-evaluated text of the result (top-level lists and notices_elsewhere) — report those; a governing check with governs_basis not_evaluated means that group has no verdict. Ask for more only when needed: detail='checks' (every check with demand / nominal / capacity), detail='full' (everything, large), or get_design_check for one check with its calculation steps (quote the steps from there, never reconstruct them). analyze_loads, run_plastic_surface and run_vibration leave out long number arrays unless detail='full'. Each reply's "more" field says what was left out.
+REPLIES. Design tools (aisi_design_*, design_connection, design_lap_connection, design_purlin) answer with a summary by default: the verdict, the governing checks (id, clause, name, demand, capacity, ratio, location, combination), one line per check, and every warning / assumption / scope note / not-evaluated text of the result (top-level lists and notices_elsewhere) — report those; a governing check with governs_basis not_evaluated means that group has no verdict. Ask for more only when needed: detail='checks' (every check with demand / nominal / capacity), detail='full' (everything, large), or get_design_check for one check with its calculation steps (quote the steps from there, never reconstruct them). analyze_loads, run_plastic_surface and run_vibration leave out long number arrays unless detail='full'. Each reply's "more" field says what was left out.
 
 CASE INPUTS. The design, load and connection inputs on the StCFSD screen are the case state of the open review (.csd). Read them with get_case_inputs (value, unit, and who set each — sources: default, user, ai, file, load-analysis, mirror). Three ways to work, choose deliberately:
 (1) A design tool with arguments (aisi_design_*, design_purlin, analyze_loads, design_connection, design_lap_connection) computes with exactly the arguments you pass and then REPLACES that tool's input group on the screen with them — inputs of that group you leave out become blank ("AI: 주지 않음"). Material Fy/Fu, design method and member type change only when you pass them. The reply lists case_inputs_replaced: values the person (or the opened file, or the load analysis) had set that you replaced, with the previous value — tell the person, and restore one with set_case_inputs if that was not intended.
@@ -1756,40 +1726,29 @@ server.tool("design_purlin",
 // ============================================================
 // Report / validation
 // ============================================================
-server.tool("generate_report", "Collect the current session's section, buckling, load analysis and design into a JSON report packet (not the HTML report). Recommended: run the design with the aisi_design_* / design_purlin tools (which take the full input set) and the loads with analyze_loads first, then call generate_report WITHOUT member_type — it reports that last design and last load analysis. If member_type is given the member design is re-run with only the inputs given here (same rules as aisi_design_*: Fy required). " + VERDICT + " design_result carries the design_checks of that design (see aisi_design_flexure); model_summary is the get_status reply (US)." + SUMMARY_NOTE,
+server.tool("generate_report",
+    "Write the calculation report of the open review as files: kind 'design' (default) — the detailed report the screen's 보고서 tab makes (section, buckling, design inputs, load analysis, design calculation, summary) — or kind 'buckling' (the buckling-analysis report; without the screen it carries the signature curve as SVG and says so). "
+    + "The report is built by StCFSD from what is on the screen (case inputs and the current results) — run the design / loads first (run_case_check, a design tool, design_purlin, analyze_loads). "
+    + "Files: <case name>.report.r<rev>.html and .pdf in the folder of the open .csd, or in the temporary folder when no .csd is open. StCFSD chooses the folder and the name (you cannot pass a path); it never overwrites a file it did not write (a numbered name is used instead). "
+    + "The reply: files {html, pdf}, pages, sections, verdict, notices (every distinct warning / not-evaluated / assumption / scope text of the results) and checks {fail, not_evaluated} (design_checks ids). Tell the person the path. detail:'full' adds the report HTML.",
     {
-        member_type: z.enum(["compression", "flexure", "combined", "tension"]).optional().describe("Member type to (re)compute"),
-        design_method: DM,
-        Fy: z.number().positive().optional().describe("Design yield stress — ksi, or MPa (required when member_type is given)"),
-        Fu: z.number().positive().optional().describe("Tensile strength — ksi, or MPa"),
-        Mu: z.number().optional().describe("Required flexural strength — kip-in, or kN-m"),
-        Pu: z.number().optional().describe("Required axial strength — kips, or kN"),
-        Lb: z.number().nonnegative().optional().describe("Unbraced length — in, or mm"),
-        Cb: z.number().optional().describe("Moment gradient factor"),
-        KxLx: z.number().positive().optional().describe("Effective length x — in, or mm"),
-        KyLy: z.number().positive().optional().describe("Effective length y — in, or mm"),
-        KtLt: z.number().positive().optional().describe("Torsional effective length — in, or mm"),
-        member_app: z.enum(["roof-purlin", "floor-joist", "wall-girt", "wall-stud"]).optional().describe("Load analysis: member application"),
-        span_type: SPAN_TYPE.optional(),
-        span_ft: z.number().positive().optional().describe("Load analysis: span — ft, or m"),
-        spacing_ft: z.number().positive().optional().describe("Load analysis: member spacing — ft, or m"),
-        loads: z.object({
-            D: z.number().optional(), L: z.number().optional(), Lr: z.number().optional(),
-            S: z.number().optional(), R: z.number().optional(), W: z.number().optional(), Wp: z.number().optional(),
-        }).optional().describe("Load analysis: service line loads — plf, or kN/m (W uplift negative, Wp pressure positive)"),
-        detail: DETAIL_DESIGN,
-        units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI' for inputs and numeric results (member values in, ksi, kips, kip-in ↔ mm, MPa, kN, kN-m; load values ft, plf, kip-ft ↔ m, kN/m, kN-m)."),
+        kind: z.enum(['design', 'buckling']).optional().describe("'design' (default) — the detailed design report; 'buckling' — the buckling-analysis report"),
+        format: z.enum(['both', 'pdf', 'html']).optional().describe("Which files: 'both' (default), 'pdf', 'html'"),
+        detail: z.enum(['summary', 'full']).optional().describe("Reply size: 'summary' (default) or 'full' (adds the report HTML)"),
+        units: z.enum(['US', 'SI']).optional().describe("Units the report is written in: 'US' (default) or 'SI'"),
     },
-    async (args) => postTool('generate_report', 'generate_report', args, SI_OUT_REPORT)
+    async (args) => json(await callBridgePost('/action', { action: 'generate_report', kind: args.kind, format: args.format, detail: args.detail, report_units: args.units }))
 );
 
-server.tool("validate_design", "Collect the current design state for validation: section properties, cutwp, current DSM values, last load analysis and last design result. This is session data, not an evaluated pass/warn/fail checklist; verdicts inside follow the pass true/false/null rule. last_design_result carries its design_checks (see aisi_design_flexure); status is the get_status reply (US)." + SUMMARY_NOTE,
+server.tool("validate_design",
+    "The design checklist the screen shows (검증 tab, 설계 검증 실행) — built by StCFSD from the case inputs, the model and the current results: about 70 items in groups A section · B material · C buckling · D properties · E load inputs · F load analysis · G design · G2 lap · H consistency, each {id (val.*), category, item, status pass | warn | fail, value, criterion, note}. "
+    + "warn includes NO VERDICT from the engine; never present warn or fail as OK. Summary (default): counts and every item that is not pass, plus the distinct notes of the passing items (pass_notes); detail:'full' lists every item. "
+    + "Values are written in the requested units (text — the same words as the screen).",
     {
-        Fy: z.number().positive().optional().describe("Design yield stress — ksi, or MPa (passed to the panel; see its reply for what it used)"),
-        detail: DETAIL_DESIGN,
-        units: z.enum(['US', 'SI']).optional().describe("'US' (default) or 'SI' for the numeric results"),
+        detail: z.enum(['summary', 'full']).optional().describe("Reply size: 'summary' (default) or 'full' (every item)"),
+        units: z.enum(['US', 'SI']).optional().describe("Units of the values: 'US' (default) or 'SI'"),
     },
-    async (args) => postTool('validate_design', 'validate_design', args, SI_OUT_VALIDATE)
+    async (args) => json(await callBridgePost('/action', { action: 'validate_design', detail: args.detail, report_units: args.units }))
 );
 
 // ============================================================

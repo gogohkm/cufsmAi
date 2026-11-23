@@ -68,7 +68,8 @@ function testHelpers() {
 }
 
 function testAppTripwires() {
-  const appJs = readUtf8(path.join('webview', 'js', 'app.js'));
+  // K3-1: 검증 · 보고서 함수는 webview/js/review.js(화면 · 호스트가 같이 쓰는 모듈)로 옮겼다 — 같은 글을 둘에서 찾는다
+  const appJs = readUtf8(path.join('webview', 'js', 'app.js')) + String.fromCharCode(10) + readUtf8(path.join('webview', 'js', 'review.js'));
 
   // 판정 규칙은 utils.js 한 곳 — app.js 안의 사본 금지
   assert(!appJs.includes('function _verdictOf('), 'app.js must not define its own _verdictOf');

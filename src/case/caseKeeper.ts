@@ -34,6 +34,12 @@ export class CaseKeeper {
     pageDesign: any = null;
     /** 화면의 _lastLapResult 거울 */
     pageLap: any = null;
+    /**
+     * K3: 화면이 쥐는 나머지 결과의 거울(검증 · 보고서의 입력 — webview/js/review.js 의 env). 화면의 처리기와 같은 규칙으로 적고 지운다:
+     * model ← modelLoaded, analysis ← analysisComplete(곡선 줄 정규화), dsm ← dsmResult, load ← loadAnalysisComplete(오류가 아니면) ·
+     * 퍼린 결과의 load_analysis. 지우기는 화면의 clearStaleResults(scope) 그대로.
+     */
+    pageView: { model: any; analysis: any; dsm: any; load: any } = { model: null, analysis: null, dsm: null, load: null };
     /** 시험 모드: 화면 본문 ↔ 호스트 본문, 처음 값 대조 */
     shadow: ShadowRecord[] = [];
     helloMismatch: string[] | null = null;
@@ -45,30 +51,55 @@ export class CaseKeeper {
 
     /** 호스트 → 화면 메시지를 보낼 때 — 화면이 그 메시지로 바꾸는 것을 같이 적는다(app.js 의 처리기와 같은 규칙). */
     onPosted(command: string, data: any): void {
+        const v = this.pageView;
         switch (command) {
             case 'propertiesResult': this.props = data; break;
+            case 'modelLoaded': v.model = data; break;
+            case 'analysisComplete':
+                // app.js 와 같은 정규화: [[10, 0.05, …]] → [10, 0.05, …]
+                v.analysis = data && Array.isArray(data.curve)
+                    ? { ...data, curve: data.curve.map((row: any) => (Array.isArray(row) && row.length === 1 && Array.isArray(row[0]) ? row[0] : row)) }
+                    : data;
+                break;
+            case 'dsmResult': v.dsm = data; break;
+            case 'loadAnalysisComplete': if (data && !data.error) { v.load = data; } break;
             case 'designResult':
+                if (data && data.design_positive) { v.load = data.load_analysis || v.load; }
                 this.pageDesign = data && data.design_positive ? UTILS.pickGoverningPurlinDesign(data) : data;
                 break;
-            case 'designPurlinResult': this.pageDesign = UTILS.pickGoverningPurlinDesign(data); break;
-            case 'lapConnectionResult': this.pageLap = data; break;
-            case 'analysisInvalidated':
-            case 'resultsCleared':
-                // 화면의 clearStaleResults: 설계 결과는 어느 범위든, Lap 결과도
-                this.pageDesign = null; this.pageLap = null; break;
-            case 'derivedResultsInvalidated':
-                this.onPageInvalidated(data && data.scope);
+            case 'designPurlinResult':
+                v.load = (data && data.load_analysis) || v.load;
+                this.pageDesign = UTILS.pickGoverningPurlinDesign(data);
                 break;
+            case 'lapConnectionResult': this.pageLap = data; break;
+            case 'analysisInvalidated': this.clearStale(data && data.invalidateLoads ? 'model' : 'analysis'); break;
+            case 'resultsCleared': this.clearStale('all'); break;
+            case 'derivedResultsInvalidated': {
+                const sc = data && data.scope;
+                this.clearStale(sc === 'load' ? 'load' : (sc === 'lap' || sc === 'connection') ? sc : 'design');
+                break;
+            }
             default: break;
         }
     }
 
     /** 화면이 스스로 결과를 지웠다(invalidateDerivedResults — 화면의 clearStaleResults 와 같은 범위) */
     onPageInvalidated(scope?: unknown): void {
+        this.clearStale(scope === 'load' ? 'load' : (scope === 'lap' || scope === 'connection') ? scope : 'design');
+    }
+
+    /** app.js clearStaleResults(scope) 의 거울 — 결과 사본만(화면의 글은 화면이 지운다) */
+    private clearStale(scope: string): void {
         // D-4(K2-7): 접합부 탭의 범위는 그 결과만 — 'connection' 은 단일 접합(거울 없음), 'lap' 은 Lap 결과만
         if (scope === 'connection') { return; }
         if (scope === 'lap') { this.pageLap = null; return; }
-        this.pageDesign = null; this.pageLap = null;
+        const order = ['design', 'load', 'analysis', 'model', 'all'];
+        const lvl = order.indexOf(scope) < 0 ? 0 : order.indexOf(scope);
+        const has = (x: string) => lvl >= order.indexOf(x);
+        this.pageDesign = null;
+        this.pageLap = null;
+        if (scope === 'load' || has('model')) { this.pageView.load = null; }
+        if (scope !== 'design' && scope !== 'load') { this.pageView.analysis = null; this.pageView.dsm = null; }
     }
 
     /**
@@ -145,10 +176,22 @@ export class CaseKeeper {
         const { writer, keepSource } = writerOf(d.origin);
         const opts: { baseRev?: number; keepSource?: boolean } = { keepSource };
         if (d.origin === 'user' && Number.isInteger(d.baseRev)) { opts.baseRev = d.baseRev; }
+        const wasClean = this.state.rev === this.savedRev;
         const r = applyChanges(this.state, d.changes || {}, writer, opts);
         this.state = r.state;
+        // 열기 바로 뒤 화면의 메아리(복원한 값을 화면이 다시 적어 알린 것 — origin file · 그 앞의 mirror)는 사람 · AI 의 변경이 아니다:
+        // 저장 안 한 변경의 기준(savedRev)을 그만큼 옮긴다. 화면이 같은 값을 다른 글로 적어도(빈 경간 표의 처음 값 16.40 ft 등)
+        // 연 파일이 dirty 가 되지 않는다. 사람 · AI 의 변경이 먼저 오면 메아리를 기다리지 않는다.
+        if (this.openEcho) {
+            if (d.origin === 'file' || d.origin === 'mirror') {
+                if (wasClean) { this.savedRev = this.state.rev; this.dirtySince = null; }
+                if (d.origin === 'file') { this.openEcho = false; }
+            } else { this.openEcho = false; }
+        }
         return r;
     }
+    /** 열기 뒤 화면의 복원 메아리를 기다리는 중(edit 의 주석) */
+    private openEcho = false;
 
     /**
      * 화면이 처음 떴다(caseHello {inputs, drafts}) — 처음 값이 표의 처음 값과 같은지 본다(다르면 기록 — 시험이 본다).
@@ -181,6 +224,7 @@ export class CaseKeeper {
         st.rev = rev;
         for (const k of Object.keys(st.revs)) { st.revs[k] = rev; }
         this.state = st;
+        this.openEcho = true;
     }
 
     /** 저장 · 열기 한 순간의 판과 모델 서명 */

@@ -142,8 +142,11 @@ async function main() {
       await ctx.panel.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: 295 / KSI_MPA });
       assert.strictEqual((await fields()).fy, '295');
       ctx.dialogs.nextOpen = file;
+      const mOpen = ctx.mark();
       await ctx.click('#btn-file-open');
-      await ctx.settle(800);
+      // 열기가 끝날 때까지 — 시간이 아니라 순서로(호스트가 복원을 보낸 뒤, 화면이 그것까지 다 처리한 뒤). 부하에서 한 번 295 를 읽었다.
+      await ctx.waitMsg('restoreDesignInputs', mOpen.h2w, 60000);
+      await ctx.drain();
       f = await fields();
       await ctx.shotEl('rs1_opened_245_file', '#input-steel-grade');
       assert(f.fy === '245' && f.designFy === '245' && f.plasticFy === '245' && f.connFy === '245' && f.disp === 'Fy: 245 MPa',
@@ -254,7 +257,8 @@ async function main() {
       await ctx.panel.handleMcpAction({ action: 'set_bc', BC: 'C-C' });
       await ctx.panel.handleMcpAction({ action: 'set_lengths', min: 20, max: 200, n: 4 });
       await ctx.panel.handleMcpAction({ action: 'set_load_case', load_case: 'custom', P: 5, Mxx: 12 });
-      await ctx.settle(300);
+      // 시간이 아니라 순서로 기다린다: 호스트가 보낸 modelLoaded 를 화면이 다 처리했다(부하에서 「BC」 가 한 번 실패한 까닭 — settle 300 ms)
+      await ctx.drain();
       let v = await ctx.eval(`(()=>Object.fromEntries(['select-bc','input-len-min','input-len-max','input-len-n','select-load-case',
         'input-load-P','input-load-Mxx','input-load-Mzz'].map(i=>[i,document.getElementById(i).value])))()`);
       assert.strictEqual(v['select-bc'], 'C-C', 'BC');
@@ -262,7 +266,9 @@ async function main() {
       assert.strictEqual(v['select-load-case'], 'custom', 'load case');
       assert.deepStrictEqual([v['input-load-P'], v['input-load-Mxx'], v['input-load-Mzz']].map(Number), [5, 12, 0], 'custom P/M values');
       await ctx.panel.handleMcpAction({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: 50 });
-      await ctx.settle(300);
+      // 그리고 AI 가 곧바로 상태를 쓴다(caseState) — 화면이 아직 알리지 않은 옛 모델 칸 초안(「조합」)이 새 하중 경우를 덮지 않는다
+      await ctx.panel.handleMcpAction({ action: 'set_case_inputs', inputs: { deckInsulationIn: 1 } });
+      await ctx.drain();
       v = await ctx.eval(`document.getElementById('select-load-case').value`);
       assert.strictEqual(v, 'bending_xx_pos', 'load case after set_load_case bending');
       // GUI 「해석 실행」 은 칸 값을 보낸다 — MCP 가 정한 C-C 가 S-S 로 돌아가지 않는다(V4 재검증의 함정)
@@ -275,7 +281,7 @@ async function main() {
       assert.strictEqual(ctx.panel._model.BC, 'C-C', 'model still C-C after the GUI run');
       assert.strictEqual(sent.lengths.length, 4, 'GUI run sent the MCP length count');
       await ctx.panel.handleMcpAction({ action: 'set_bc', BC: 'S-S' });
-      await ctx.settle(300);
+      await ctx.drain();
       assert.strictEqual(await ctx.eval(`document.getElementById('select-bc').value`), 'S-S', 'BC back to S-S on the widget');
       for (const [k, val] of Object.entries({ 'input-len-min': 1, 'input-len-max': 1000, 'input-len-n': 30 })) { await ctx.setVal(k, val); }
     });

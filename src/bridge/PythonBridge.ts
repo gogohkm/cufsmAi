@@ -14,6 +14,8 @@ export interface PythonSelftest {
     python_ok?: boolean;
     import_errors?: Array<{ module?: string; error?: string } | string> | Record<string, string>;
     protocol_version?: number;
+    /** 엔진 자신의 소스에 대한 sha256(읽지 못하면 'unknown') — 저장한 결과가 이 엔진의 것인지(StcfsdPanel resultsEngine) */
+    engine_id?: string;
     methods?: string[];
 }
 

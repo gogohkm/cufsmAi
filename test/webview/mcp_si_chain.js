@@ -103,10 +103,9 @@ const HOST_ONLY = {
   classify: { GBTcon: '설정은 set_gbtcon 으로 모델에 둔다' },
   prepare_design_dsm: { '*': 'GUI 전용 action — 패널이 설계 때 스스로 준비한다' },
   apply_deck_springs: { '*': 'GUI 전용 action — MCP 는 set_springs' },
-  generate_report: {
-    fy: 'Fy 의 별칭(GUI 호환)', '*design': '부재 설계 인자는 aisi_design_* 가 내놓는다 — generate_report 는 마지막 설계를 쓰라고 설명',
-    '*loads': '하중 인자는 analyze_loads 가 내놓는다 — generate_report 는 마지막 하중 분석을 쓴다',
-  },
+  // K3: 도구의 units 는 서버가 report_units 로 넘긴다(설계 도구의 units 와 달리 값을 바꾸지 않고 보고서 · 항목의 글을 그 단위로)
+  generate_report: { report_units: '도구의 units 를 서버가 이 이름으로 넘긴다' },
+  validate_design: { report_units: '도구의 units 를 서버가 이 이름으로 넘긴다' },
   aisi_design: {
     member_type: '도구가 정한다', props: '호스트가 현재 단면에서 채운다', dsm: '호스트가 현재 해석에서 채운다',
     section: '호스트가 템플릿 치수에서 채운다', section_type: '호스트가 모델 형식으로 채운다(MCP 덮어쓰기 없음)',
@@ -345,7 +344,7 @@ function checkDesignChecks(tool, us, si, seen) {
 // ------------------------------------------------------------------ K4a 3a: 응답의 모양
 const DESIGN_SHAPED = new Set(['aisi_design_compression', 'aisi_design_flexure', 'aisi_design_combined', 'aisi_design_tension',
   'aisi_design_connection', 'design_connection', 'design_lap_connection', 'design_purlin']);
-const DATA_SHAPED = new Set(['generate_report', 'validate_design', 'analyze_loads', 'run_plastic_surface', 'run_vibration']);
+const DATA_SHAPED = new Set(['analyze_loads', 'run_plastic_surface', 'run_vibration']);
 const KB = 1024;
 const NOTICES = ['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'force_model', 'dsm_warning', 'host_warnings'];
 const stepless = (c) => { const { steps: _s, ...x } = c; void _s; return x; };
@@ -707,9 +706,6 @@ async function main() {
 
     // 3b. 호스트 ↔ 스키마 (V4-05) --------------------------------------------------
     const { out: host } = hostAcceptedParams(engineKeys);
-    const loadKeys = new Set(props('analyze_loads'));
-    const memberKeys = new Set(['aisi_design_compression', 'aisi_design_flexure', 'aisi_design_combined',
-      'aisi_design_tension'].flatMap(props));
     const gaps = [];
     for (const [action, accepted] of Object.entries(host)) {
       const toolsFor = ACTION_TOOLS[action];
@@ -724,15 +720,14 @@ async function main() {
       if (action === 'generate_template') { continue; } // params 의 키는 템플릿 세 도구가 각각 내놓음(§4 에서 본문 확인)
       for (const k of accepted) {
         if (offered.has(k) || skip[k]) { continue; }
-        if (action === 'generate_report' && (memberKeys.has(k) || loadKeys.has(k)
-          || engineKeys.aisi_design.includes(k))) { continue; }
         if (action === 'aisi_design' && engineKeys.design_connection && engineKeys.design_connection.includes(k)
           && offered.has(k)) { continue; }
         // design_member 의 params.get 키 가운데 접합 디스패처로만 가는 키(connection)는 aisi_design_connection 이 내놓는다
         gaps.push(`host action '${action}' accepts '${k}' but no MCP tool (${toolsFor.join(', ')}) offers it`);
       }
       // (b) 도구가 보내는데 호스트가 받지 않는 인자 → 조용히 버려짐
-      const dictLike = ['aisi_design', 'design_connection', 'lap_connection', 'aisi_guide', 'generate_report'].includes(action);
+      // generate_report · validate_design: 도구의 units 는 report_units 로 간다(서버가 이름을 바꾼다 — 위 HOST_ONLY)
+      const dictLike = ['aisi_design', 'design_connection', 'lap_connection', 'aisi_guide', 'generate_report', 'validate_design'].includes(action);
       if (!dictLike) {
         for (const t of toolsFor) {
           for (const k of props(t)) {
@@ -1202,9 +1197,15 @@ async function main() {
     results.push(`design_purlin/analyze_loads bound probe: ${probed} bounded optional fields exercised, 0 ≡ absent for none; not exercised by these inputs: ${inert.join(', ') || '-'}`);
 
     // 보고서 · 검증 (마지막 설계 = 퍼린 묶음, 마지막 하중 분석)
-    await usVsSi('generate_report', {}, {}, { 'section_props.A': A, 'section_props.Ixx': 'inertia',
-      'cutwp_props.Cw': 'warping', 'load_analysis.input_loads_plf.D': 'linload' });
-    await usVsSi('validate_design', { Fy: 50 }, { Fy: S }, { 'props.Ixx': 'inertia', 'cutwp.J': 'inertia' });
+    // K3: 검증 · 보고서는 호스트가 만든다 — US · SI 는 같은 항목(id · 판정)을 그 단위의 글로(값을 바꾸는 표가 없다)
+    {
+      const vUS = await call('validate_design', { detail: 'full' });
+      const vSI = await call('validate_design', { detail: 'full', units: 'SI' });
+      assert(!vUS.isError && !vSI.isError, JSON.stringify(vUS.data).slice(0, 300));
+      const dU = vUS.data.items.map((i) => `${i.id} ${i.status}`), dS = vSI.data.items.map((i) => `${i.id} ${i.status}`);
+      assert.deepStrictEqual(dS, dU, 'validate_design: the same items and verdicts in US and SI — ' + JSON.stringify(vUS.data.items.filter((i, k) => dS[k] !== dU[k]).concat(vSI.data.items.filter((i, k) => dS[k] !== dU[k]))).slice(0, 1500));
+      assert(vSI.data.units === 'SI' && vUS.data.units === 'US');
+    }
 
     // 진동 (S-S, 짧은 길이 목록)
     await ok('set_lengths', { min: 10, max: 100, n: 3 });
@@ -1231,6 +1232,32 @@ async function main() {
       assert(Math.max(z.us, z.si) <= budget[z.tool] * KB, `budget: ${z.tool} summary ${Math.max(z.us, z.si)} B > ${budget[z.tool]} KB`);
     }
     results.push(`reply budgets (summary, bytes US/SI): ${SIZES.filter((x) => x.level === 'summary').map((x) => `${x.tool} ${x.us}/${x.si}`).join(', ')}`);
+    // K3: validate_design · generate_report — 38 구간 퍼린 묶음 뒤(가장 큰 사례) 요약 ≤ 40 KB, 요약 규칙: full 의 통과 아닌 항목 id ·
+    // 알림 글이 모두 요약에. generate_report 는 파일을 쓴다(열린 .csd 가 없으면 임시 폴더) — 경로가 응답에.
+    {
+      const sizes = [];
+      for (const u of ['US', 'SI']) {
+        const vs = await call('validate_design', { units: u });
+        const vf = await call('validate_design', { units: u, detail: 'full' });
+        assert(!vs.isError && !vf.isError, JSON.stringify(vs.data).slice(0, 300));
+        const fullNotPass = vf.data.items.filter((i) => i.status !== 'pass');
+        assert.deepStrictEqual(vs.data.items.map((i) => i.id), fullNotPass.map((i) => i.id), `validate_design ${u}: every failing / caution id of the full reply is in the summary`);
+        const passNotes = [...new Set(vf.data.items.filter((i) => i.status === 'pass' && i.note).map((i) => i.note))];
+        assert.deepStrictEqual(vs.data.pass_notes || [], passNotes, `validate_design ${u}: every distinct note of the full reply is in the summary`);
+        assert(vs.bytes <= 40 * KB, `budget: validate_design (38-region purlin) summary ${vs.bytes} B > 40 KB`);
+        const rs = await call('generate_report', { units: u, format: 'html' });
+        const rf = await call('generate_report', { units: u, format: 'html', detail: 'full' });
+        assert(!rs.isError && !rf.isError && rs.data.files && rs.data.files.html, JSON.stringify(rs.data).slice(0, 300));
+        assert(typeof rf.data.html === 'string' && !('html' in rs.data), 'generate_report: detail full adds the HTML');
+        assert.deepStrictEqual(rs.data.notices, rf.data.notices, `generate_report ${u}: the summary carries every notice of the full reply`);
+        assert.deepStrictEqual(rs.data.checks, rf.data.checks, `generate_report ${u}: the summary carries every failing / not-evaluated check id`);
+        const fullNotices = new Set(rf.data.notices);
+        assert(rs.data.notices.every((t) => fullNotices.has(t)) && rs.data.notices.length === fullNotices.size, 'notices are distinct');
+        assert(rs.bytes <= 40 * KB, `budget: generate_report (38-region purlin) summary ${rs.bytes} B > 40 KB`);
+        sizes.push(`${u} validate ${vs.bytes}/${vf.bytes} B, report ${rs.bytes}/${rf.bytes} B`);
+      }
+      results.push(`K3 validate_design · generate_report after the 38-region purlin (summary/full): ${sizes.join('; ')}`);
+    }
     results.push(`get_design_check: ${DC_SWEEP.n} items fetched one by one, largest ${DC_SWEEP.max} B (budget 20 KB)`);
 
     // 9b'. K2-5: 검토 상태 도구 — 응답 크기(12 KB), SI 왕복, 받지 않는 키, 설계 도구가 바꾼 사람의 값(case_inputs_replaced)

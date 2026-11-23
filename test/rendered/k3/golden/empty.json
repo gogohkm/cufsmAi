@@ -564,139 +564,108 @@
   },
   {
    "id": "empty.mcp",
-   "expect": "k3-change",
-   "reason": "K3: validate_design returns checks: [] (raw session data, not the 70 items); generate_report returns a JSON packet, no HTML/PDF — acceptance criterion: the same 70 items without a webview and a report PDF",
+   "expect": "pin",
+   "reason": "K3-3 · K3-5: validate_design 은 화면과 같은 검증 항목(호스트 · id 붙음 — 요약: 수 · 통과 아닌 항목 · 통과 항목 주석), generate_report 는 보고서를 파일로(HTML · PDF, 경로 응답). 수용 기준",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 3294,
+     "bytes": 1859,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
+      "case_rev",
+      "counts",
       "detail",
-      "last_design_result",
-      "last_load_analysis",
+      "items",
       "more",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
+      "pass_notes",
+      "source",
       "units"
      ],
      "detail": "summary",
-     "checks": 0,
+     "checks": null,
      "errors": null,
      "error": null
     },
     "validate.si": {
      "isError": false,
-     "bytes": 4285,
+     "bytes": 1859,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
+      "case_rev",
+      "counts",
       "detail",
-      "last_design_result",
-      "last_load_analysis",
+      "items",
       "more",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
-      "text_units",
-      "units",
-      "units_note"
+      "pass_notes",
+      "source",
+      "units"
      ],
      "detail": "summary",
-     "checks": 0,
+     "checks": null,
      "errors": null,
      "error": null
     },
     "validate.full": {
      "isError": false,
-     "bytes": 3004,
+     "bytes": 6073,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
-      "last_design_result",
-      "last_load_analysis",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
+      "case_rev",
+      "counts",
+      "detail",
+      "items",
+      "source",
       "units"
      ],
-     "detail": null,
-     "checks": 0,
+     "detail": "full",
+     "checks": null,
      "errors": null,
      "error": null
     },
     "report.summary": {
-     "isError": false,
-     "bytes": 3131,
+     "isError": true,
+     "bytes": 132,
      "keys": [
-      "cutwp_props",
-      "detail",
-      "model_summary",
-      "more",
-      "section_props",
-      "timestamp",
-      "units"
-     ],
-     "detail": "summary",
-     "checks": null,
-     "errors": null,
-     "error": null
-    },
-    "report.si": {
-     "isError": false,
-     "bytes": 4122,
-     "keys": [
-      "cutwp_props",
-      "detail",
-      "model_summary",
-      "more",
-      "section_props",
-      "text_units",
-      "timestamp",
-      "units",
-      "units_note"
-     ],
-     "detail": "summary",
-     "checks": null,
-     "errors": null,
-     "error": null
-    },
-    "report.full": {
-     "isError": false,
-     "bytes": 2851,
-     "keys": [
-      "cutwp_props",
-      "model_summary",
-      "section_props",
-      "timestamp",
-      "units"
+      "error"
      ],
      "detail": null,
      "checks": null,
      "errors": null,
-     "error": null
+     "error": "No design or load-analysis result to report — run a design tool, design_purlin, analyze_loads or run_case_check first."
+    },
+    "report.si": {
+     "isError": true,
+     "bytes": 132,
+     "keys": [
+      "error"
+     ],
+     "detail": null,
+     "checks": null,
+     "errors": null,
+     "error": "No design or load-analysis result to report — run a design tool, design_purlin, analyze_loads or run_case_check first."
+    },
+    "report.full": {
+     "isError": true,
+     "bytes": 132,
+     "keys": [
+      "error"
+     ],
+     "detail": null,
+     "checks": null,
+     "errors": null,
+     "error": "No design or load-analysis result to report — run a design tool, design_purlin, analyze_loads or run_case_check first."
     }
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "k3-change",
+      "reason": "K3: validate_design returns checks: [] (raw session data, not the 70 items); generate_report returns a JSON packet, no HTML/PDF — acceptance criterion: the same 70 items without a webview and a report PDF"
+     },
+     "date": "2026-11-22"
+    }
+   ]
   }
  ]
 }

@@ -1,6 +1,6 @@
 {
  "about": "K3 phase 0 golden — column. Recorded from the current code; 'k3-change' entries are the behaviour K3 is meant to change, 'defect' entries are findings.",
- "recorded": "2026-11-22",
+ "recorded": "2026-11-23",
  "entries": [
   {
    "id": "SI.validation",
@@ -340,8 +340,19 @@
      "부재 유형 압축 부재 ( 기둥 / 스터드 ) 설계 방법 LRFD 지배 파괴 모드 Global Buckling (flexural-torsional) 공칭강도 , P n 45.19 kN 설계강도 , φP n 38.43 kN 소요 / 저항 비율 (DCR) 52.1% — OK 지배 검토 E axial compression E axial compression 0.521 — OK 참조 규준 조항 E2, E3.2, E4 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
     ],
     "compact": "3ef20e6a3994fab6",
-    "printedHtmlSha": "b9676ef1f09e4aa3"
-   }
+    "printedHtmlSha": "623bf604f72f51dc"
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)"
   },
   {
    "id": "SI.findings",
@@ -764,8 +775,19 @@
      "설계 방법 LRFD 지배 파괴 모드 Global Buckling (flexural-torsional) 공칭강도 , P n 10.16 kips 설계강도 , φP n 8.64 kips 소요 / 저항 비율 (DCR) 52.1% — OK 지배 검토 E axial compression E axial compression 0.521 — OK 참조 규준 조항 E2, E3.2, E4 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
     ],
     "compact": "938e8e267ea23740",
-    "printedHtmlSha": "f6e67c78b3955735"
-   }
+    "printedHtmlSha": "caffe751f66d46d1"
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)"
   },
   {
    "id": "US.findings",
@@ -790,123 +812,81 @@
   },
   {
    "id": "column.mcp",
-   "expect": "k3-change",
-   "reason": "K3: validate_design returns checks: [] (raw session data, not the 70 items); generate_report returns a JSON packet, no HTML/PDF — acceptance criterion: the same 70 items without a webview and a report PDF",
+   "expect": "pin",
+   "reason": "K3-3 · K3-5: 새 응답(검증 항목 · 보고서 파일). 시험은 generate_report 의 SI · full 을 HTML 만으로(PDF 인쇄는 흐름마다 한 번 — 부하에서 Edge 가 끝나지 않아 MCP 시간 초과가 한 번 났다)",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 8084,
+     "bytes": 997,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
+      "case_rev",
+      "counts",
       "detail",
-      "dsm_Mxx",
-      "dsm_Mzz",
-      "dsm_P",
-      "dsm_basis",
-      "dsm_load_family",
-      "last_design_result",
-      "last_load_analysis",
+      "items",
       "more",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
+      "pass_notes",
+      "source",
       "units"
      ],
      "detail": "summary",
-     "checks": 0,
+     "checks": null,
      "errors": null,
      "error": null
     },
     "validate.si": {
      "isError": false,
-     "bytes": 9148,
+     "bytes": 997,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
+      "case_rev",
+      "counts",
       "detail",
-      "dsm_Mxx",
-      "dsm_Mzz",
-      "dsm_P",
-      "dsm_basis",
-      "dsm_load_family",
-      "last_design_result",
-      "last_load_analysis",
+      "items",
       "more",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
-      "text_units",
-      "units",
-      "units_note"
+      "pass_notes",
+      "source",
+      "units"
      ],
      "detail": "summary",
-     "checks": 0,
+     "checks": null,
      "errors": null,
      "error": null
     },
     "validate.full": {
      "isError": false,
-     "bytes": 27738,
+     "bytes": 7058,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
-      "dsm_Mxx",
-      "dsm_Mzz",
-      "dsm_P",
-      "dsm_basis",
-      "dsm_load_family",
-      "last_design_result",
-      "last_load_analysis",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
+      "case_rev",
+      "counts",
+      "detail",
+      "items",
+      "source",
       "units"
      ],
-     "detail": null,
-     "checks": 0,
+     "detail": "full",
+     "checks": null,
      "errors": null,
      "error": null
     },
     "report.summary": {
      "isError": false,
-     "bytes": 15568,
+     "bytes": 893,
      "keys": [
-      "analysis_meta",
-      "curve_length",
-      "cutwp_props",
-      "design_cache_hit",
-      "design_result",
+      "case_rev",
+      "checks",
       "detail",
-      "dsm_Mxx",
-      "dsm_Mzz",
-      "dsm_P",
-      "dsm_basis",
-      "dsm_load_family",
-      "model_summary",
+      "files",
+      "folder",
+      "kind",
       "more",
-      "prepared_design_dsm",
-      "section_props",
-      "timestamp",
-      "units"
+      "note",
+      "notices",
+      "pages",
+      "sections",
+      "units",
+      "verdict"
      ],
      "detail": "summary",
      "checks": null,
@@ -915,27 +895,21 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 16617,
+     "bytes": 812,
      "keys": [
-      "analysis_meta",
-      "curve_length",
-      "cutwp_props",
-      "design_cache_hit",
-      "design_result",
+      "case_rev",
+      "checks",
       "detail",
-      "dsm_Mxx",
-      "dsm_Mzz",
-      "dsm_P",
-      "dsm_basis",
-      "dsm_load_family",
-      "model_summary",
+      "files",
+      "folder",
+      "kind",
       "more",
-      "prepared_design_dsm",
-      "section_props",
-      "text_units",
-      "timestamp",
+      "note",
+      "notices",
+      "pages",
+      "sections",
       "units",
-      "units_note"
+      "verdict"
      ],
      "detail": "summary",
      "checks": null,
@@ -944,30 +918,38 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 35232,
+     "bytes": 24411,
      "keys": [
-      "analysis_meta",
-      "curve_length",
-      "cutwp_props",
-      "design_cache_hit",
-      "design_result",
-      "dsm_Mxx",
-      "dsm_Mzz",
-      "dsm_P",
-      "dsm_basis",
-      "dsm_load_family",
-      "model_summary",
-      "prepared_design_dsm",
-      "section_props",
-      "timestamp",
-      "units"
+      "case_rev",
+      "checks",
+      "detail",
+      "files",
+      "folder",
+      "html",
+      "kind",
+      "note",
+      "notices",
+      "pages",
+      "sections",
+      "units",
+      "verdict"
      ],
-     "detail": null,
+     "detail": "full",
      "checks": null,
      "errors": null,
      "error": null
     }
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": "K3-3 · K3-5: validate_design 은 화면과 같은 검증 항목(호스트 · id 붙음 — 요약: 수 · 통과 아닌 항목 · 통과 항목 주석), generate_report 는 보고서를 파일로(HTML · PDF, 경로 응답). 수용 기준"
+     },
+     "date": "2026-11-23"
+    }
+   ]
   },
   {
    "id": "aiReference.findings",

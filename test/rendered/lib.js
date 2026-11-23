@@ -202,6 +202,16 @@ async function start(opts = {}) {
       }
       throw new Error('timeout waiting for ' + command);
     },
+    /**
+     * 호스트가 지금까지 보낸 메시지를 화면이 다 처리할 때까지 — 시간이 아니라 순서로(부하에 흔들리지 않게).
+     * 호스트 → 화면은 Runtime.evaluate(window.postMessage) 로 차례대로 간다. 그 뒤에 표지 메시지를 같은 길로 보내고, 화면이 그것을
+     * 받으면(같은 작업 출처라 앞의 메시지가 먼저) 앞의 메시지 처리기는 모두 끝난 것이다. 그 사이 화면이 보낸 것의 호스트 처리도 기다린다.
+     */
+    async drain() {
+      await Promise.all(pendingW2H.splice(0));
+      await ctx.eval(`new Promise((r)=>{const h=(e)=>{if(e.data&&e.data.__drain){window.removeEventListener('message',h);setTimeout(r,0);}};window.addEventListener('message',h);window.postMessage({__drain:1},'*');})`);
+      await Promise.all(pendingW2H.splice(0));
+    },
     mark() { return { h2w: log.h2w.length, w2h: log.w2h.length, con: log.console.length, exc: log.exceptions.length }; },
     since(m) {
       return { h2w: log.h2w.slice(m.h2w).map((x) => x.command), w2h: log.w2h.slice(m.w2h).map((x) => x.command),

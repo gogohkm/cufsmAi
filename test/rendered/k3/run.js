@@ -102,7 +102,8 @@ async function pinMcpPackets(ctx, getMcp, g, id) {
   const out = {};
   for (const [k, tool, args] of [
     ['validate.summary', 'validate_design', {}], ['validate.si', 'validate_design', { units: 'SI' }], ['validate.full', 'validate_design', { detail: 'full' }],
-    ['report.summary', 'generate_report', {}], ['report.si', 'generate_report', { units: 'SI' }], ['report.full', 'generate_report', { detail: 'full' }],
+    // 보고서: 기본(HTML + PDF) 한 번, 나머지는 HTML 만(PDF 인쇄는 한 흐름에 한 번이면 된다)
+    ['report.summary', 'generate_report', {}], ['report.si', 'generate_report', { units: 'SI', format: 'html' }], ['report.full', 'generate_report', { detail: 'full', format: 'html' }],
   ]) {
     const r = await c.call(tool, args);
     out[k] = L.mcpShape(r);
@@ -348,10 +349,12 @@ async function main() {
   fs.writeFileSync(path.join(L.OUT, 'observed_validation_items.json'), JSON.stringify(observed, null, 1));
   fs.writeFileSync(path.join(L.OUT, 'results.json'), JSON.stringify({ results, exceptions }, null, 1));
   console.log(report.join('\n'));
+  console.log(`K3 shadow (page ↔ host): ${L.shadowStats()} comparisons, ${L.shadowProblems.length} problems`);
+  for (const p of L.shadowProblems.slice(0, 8)) { console.log('  SHADOW ' + p); }
   console.log(`page exceptions: ${exceptions.length}`);
   for (const e of exceptions.slice(0, 5)) { console.log('  EXC', e.session, String(e.text).slice(0, 200)); }
   const failed = results.filter((r) => !r.ok).length;
-  const ok = failed === 0 && mism === 0 && exceptions.length === 0;
+  const ok = failed === 0 && mism === 0 && exceptions.length === 0 && L.shadowProblems.length === 0;
   console.log(`test:k3: ${ok ? 'PASS' : 'FAIL'} (${results.length - failed}/${results.length} steps, ${mism} golden mismatches, ${Math.round((Date.now() - t0) / 1000)} s)`);
   if (!ok) { process.exitCode = 1; }
 }

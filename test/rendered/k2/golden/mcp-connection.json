@@ -15,7 +15,7 @@
   {
    "id": "design_connection.inputsChanged",
    "expect": "pin",
-   "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — 접합 유형 · t1/t2 · d · n · Fy/Fu · Pu …(E 글은 D-5 의 12 자리)",
+   "reason": "K2 결함(desktop 작성자): caseState 가 모델 칸(E · ν · G · 단면 치수 · 해석 조건)을 싣지 않는다 — 옛 초안이 modelLoaded 의 새 값을 덮던 경주. 그래서 MCP design_connection 뒤 E 칸의 글을 다시 적지 않는다(전: 10 → 12 자리로 다시 적음). 값은 그대로",
    "value": {
     "input-E": {
      "before": "203395.340148",
@@ -100,10 +100,10 @@
    },
    "flipped": [
     {
-     "step": "K2-5/6",
+     "step": "K3-5",
      "from": {
-      "expect": "k2-change",
-      "reason": "K2: a design condition set through MCP must show in the edit-state input fields (acceptance criterion 1) — connection type, t1/t2, d, n, Fy/Fu, Pu, Pnvs, e, s do not reach the page"
+      "expect": "pin",
+      "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — 접합 유형 · t1/t2 · d · n · Fy/Fu · Pu …(E 글은 D-5 의 12 자리)"
      },
      "date": "2026-11-22"
     }

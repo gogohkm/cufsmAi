@@ -606,6 +606,39 @@ async function phaseExamples() {
   });
 }
 
+/**
+ * 열기 → 깨끗 · 저장 → 깨끗(desktop 작성자의 결함 — 열자마자 dirty: 화면이 연 상태를 다시 적어 알린 메아리가 변경으로 세어졌다).
+ * 고정한 모든 .csd(Example · 이 시험이 쓴 csd/*.in.csd)를 US · SI 화면에서 연 바로 뒤 · 저장 바로 뒤 get_unsaved_changes 가 깨끗해야 한다.
+ */
+async function phaseDirty() {
+  const files = [];
+  const walk = (d) => { if (!fs.existsSync(d)) { return; } for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    const p = path.join(d, e.name);
+    if (e.isDirectory() && !e.name.startsWith('.')) { walk(p); } else if (e.isFile() && /.csd$/i.test(e.name) && !/.out.csd$|-[12].csd$|^dirty-/.test(e.name)) { files.push(p); }
+  } };
+  walk(path.join(K.ROOT, 'Example'));
+  walk(path.join(K.OUT, 'csd'));
+  await withSession('dirty', async (ctx) => {
+    for (const unit of ['US', 'SI']) {
+      await step(`open → clean · save → clean for ${files.length} .csd (${unit} display)`, async () => {
+        await ctx.click(`#btn-unit-${unit}`);
+        await ctx.settle(200);
+        const bad = [];
+        for (const f of files) {
+          ctx.dialogs.nextOpen = f; await ctx.click('#btn-file-open'); await ctx.settle(800);
+          const u1 = await ctx.panel.handleMcpAction({ action: 'get_unsaved_changes' });
+          if (u1.dirty) { bad.push(`open ${path.basename(f)}: dirty ${JSON.stringify(u1.inputs_changed)} model ${u1.model_changed}`); }
+          const out = path.join(K.OUT, 'csd', `dirty-${unit}-${path.basename(f)}`);
+          ctx.dialogs.nextSave = out; await ctx.click('#btn-file-save'); await ctx.settle(800);
+          const u2 = await ctx.panel.handleMcpAction({ action: 'get_unsaved_changes' });
+          if (u2.dirty) { bad.push(`save ${path.basename(f)}: dirty ${JSON.stringify(u2.inputs_changed)} model ${u2.model_changed}`); }
+        }
+        assert.deepStrictEqual(bad, [], 'a freshly opened / saved case is clean');
+      });
+    }
+  });
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 async function main() {
   if (!findBrowser()) { console.log('test:k2: SKIP — no Edge/Chrome found (set V4_BROWSER to the browser executable).'); return; }
@@ -618,6 +651,7 @@ async function main() {
   if (want('reload')) { await phaseReload(); }
   if (want('csd')) { await phaseCsd(); }
   if (want('example')) { await phaseExamples(); }
+  if (want('dirty')) { await phaseDirty(); }
 
   let mism = 0;
   const report = [];

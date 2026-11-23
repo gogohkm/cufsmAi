@@ -34,6 +34,28 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex').s
 const normDate = (s) => String(s).replace(/날짜\s*:\s*[^<]*?\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?/g, '날짜: <DATE>');
 const normIso = (s) => String(s).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, '<ISO>');
 
+/**
+ * K3-2 그림자: 화면이 만든 것(검증 표 · 보고서 HTML)과 호스트가 검토 상태로 만든 것(__testReview)을 같은 브라우저로 그려 맞댄다.
+ * 다르면 shadowProblems 에 — run.js 가 실패로 센다.
+ */
+const shadowProblems = [];
+let shadowCount = 0;
+async function shadow(ctx, what, containerId, hostHtml) {
+  shadowCount += 1;
+  const r = await ctx.eval(`(()=>{const c=document.getElementById(${JSON.stringify(containerId)}); const d=document.createElement('div');
+    d.innerHTML=${JSON.stringify(hostHtml)}; return {page: c? c.innerHTML : '', host: d.innerHTML};})()`);
+  // 화면은 모델 칸(단면 치수 · 반파장)을 modelLoaded 로 적을 때 10 자리, 단위 전환 · 상태로 적을 때 12 자리로 쓴다 — 호스트는 늘 12 자리.
+  // 그 글만 다르다(값은 같다): 맞댈 때 10 자리 넘는 수를 10 자리로.
+  const ten = (t) => t.replace(/\d+\.\d{6,}/g, (x) => String(Number(Number(x).toPrecision(10))));
+  const page = ten(normDate(r.page)), host = ten(normDate(r.host));
+  if (page !== host) {
+    let i = 0; while (i < page.length && i < host.length && page[i] === host[i]) { i++; }
+    shadowProblems.push(`${ctx.name}: ${what} — page …${JSON.stringify(page.slice(Math.max(0, i - 120), i + 160))}
+        host …${JSON.stringify(host.slice(Math.max(0, i - 120), i + 160))}`);
+  }
+}
+function hostReview(ctx) { return ctx.panel.__testReview(); }
+
 /** 「설계 검증 실행」 → 화면 표를 항목으로. 트리에 보낸 수(treeUpdate)도. */
 async function runValidation(ctx) {
   await ctx.tab('validation');
@@ -47,6 +69,9 @@ async function runValidation(ctx) {
         else if (td.length===2 && last) { last.note=td[1].innerText.replace(/^→\\s*/,'').trim(); } } }
     const b=document.getElementById('validation-summary-badge'); return {items: out, badge: b? b.innerText.trim(): null};})()`);
   const tree = ctx.log.w2h.slice(m.w2h).filter((x) => x.command === 'treeUpdate').map((x) => x.data).pop() || null;
+  const R = require('../../../webview/js/review.js');
+  const hv = hostReview(ctx);
+  await shadow(ctx, 'validation', 'validation-container', R.make({ doc: null, unitSystem: 'SI' }).renderValidationDashboard(hv.validation));
   const count = (s) => r.items.filter((i) => i.status === s).length;
   return { ...r, tree, counts: { total: r.items.length, pass: count('pass'), warn: count('warn'), fail: count('fail') } };
 }
@@ -56,6 +81,9 @@ async function runReport(ctx) {
   await ctx.tab('report');
   await ctx.click('#btn-generate-report');
   await ctx.settle(300);
+  // 결과가 없으면 화면은 오류 글만(보고서를 만들지 않는다) — 그때는 맞대지 않는다
+  const hasResult = await ctx.eval("!!document.querySelector('#report-container h1')");
+  if (hasResult) { await shadow(ctx, 'report', 'report-container', hostReview(ctx).reportHtml); }
   return readReport(ctx);
 }
 async function readReport(ctx) {
@@ -99,7 +127,9 @@ async function reportPdf(ctx, name) {
   const msg = ctx.log.w2h.slice(w0).find((x) => x.command === 'saveReportPdf');
   await waitFile(f);
   await K.sleep(500);
-  return { ...pdfSummary(f), printedHtmlSha: msg ? sha(normDate(msg.data.html)) : null };
+  // K3-5: 인쇄용 HTML 은 호스트가 만든다(화면에 보낸 보고서를 review.js printableReportHtml 로) — 옛 화면은 saveReportPdf 의 html
+  const printed = msg ? msg.data.html : require('../../../webview/js/review.js').printableReportHtml(ctx.panel._lastReportHtml || '');
+  return { ...pdfSummary(f), printedHtmlSha: sha(normDate(printed)) };
 }
 
 /** 좌굴해석 결과 보고서(별도 패널) — 화면이 보낸 HTML, 그리고 그 패널의 「PDF 저장」 길(호스트의 _saveReportPdf). */
@@ -110,7 +140,8 @@ async function bucklingReport(ctx, name, withPdf) {
   await ctx.settle(300);
   const msg = ctx.log.w2h.slice(w0).find((x) => x.command === 'showBucklingReport');
   if (!msg) { return { sent: false, status: await ctx.text('#analysis-status') }; }
-  const html = String(msg.data.html || '');
+  // K3-5: 화면은 그림 · DSM 표만 보내고 호스트가 만든다 — 호스트가 패널에 연 HTML 을 읽는다(옛 화면은 msg.data.html)
+  const html = String(msg.data.html || ctx.panel._bucklingReportHtml || '');
   const pngs = (html.match(/data:image\/png;base64,/g) || []).length;
   const clean = html.replace(/data:image\/png;base64,[A-Za-z0-9+/=]+/g, '<png>');
   const text = clean.replace(/<[^>]+>/g, ' ').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim();
@@ -201,5 +232,5 @@ function firstDiff(a, b, p = '') {
   return `${p || '(value)'}: ${JSON.stringify(a)?.slice(0, 160)} → ${JSON.stringify(b)?.slice(0, 160)}`;
 }
 
-module.exports = { ROOT, OUT, GOLDEN_DIR, K, session, runValidation, runReport, readReport, reportPdf, bucklingReport, engineVerdicts, mcpShape,
+module.exports = { shadowProblems, shadowStats: () => shadowCount, ROOT, OUT, GOLDEN_DIR, K, session, runValidation, runReport, readReport, reportPdf, bucklingReport, engineVerdicts, mcpShape,
   Golden, sha, normDate, RECORD_ALL, ACCEPT };

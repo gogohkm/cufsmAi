@@ -1,6 +1,6 @@
 {
  "about": "K3 phase 0 golden — purlin. Recorded from the current code; 'k3-change' entries are the behaviour K3 is meant to change, 'defect' entries are findings.",
- "recorded": "2026-11-22",
+ "recorded": "2026-11-23",
  "entries": [
   {
    "id": "US.validation",
@@ -585,8 +585,19 @@
      "양력 랩 구간 상부압축 50.00–51.00 ft 51.2% — OK 양력 랩 구간 상부압축 51.00–52.00 ft 51.2% — OK 양력 랩 구간 상부압축 72.50–76.00 ft 87.4% — OK 양력 랩 구간 상부압축 76.00–78.50 ft 87.4% — OK 참조 규준 조항 F3.2, G2, H2, I6.2.1 평가하지 못한 항목 ( 판정 없음의 원인 ) • §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) • H2-2 (shear stiffened webs) • weak-axis DSM flexure • G5/H3 web crippling (no bearing length wc_N given) 경고 ( 값 또는 판정에 영향 ) • §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습 니다 . Virgin Fy 를 사용합니다 . 가정 • §I6.2.1: 조건 (g)~(n)( 랩 길이 , 스팬 ≤ 33 ft, 지점 횡구속 , 패널 · 단열재 · 체결재 상세 ) 과 연속보 변곡점 사이 지점부 · 캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오 . 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
     ],
     "compact": "88cc31bb6b3c42b0",
-    "printedHtmlSha": "e1580fb06f375627"
-   }
+    "printedHtmlSha": "0537fe21484cec99"
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)"
   },
   {
    "id": "US.findings",
@@ -1266,8 +1277,19 @@
      "양력 지점부 상부압축 30.77–31.09 m 4.0% — OK 양력 랩 구간 상부압축 7.16–7.92 m 86.4% — OK 양력 랩 구간 상부압축 7.92–8.99 m 86.4% — OK 양력 랩 구간 상부압축 15.24–15.54 m 51.2% — OK 양력 랩 구간 상부압축 15.54–15.85 m 51.2% — OK 양력 랩 구간 상부압축 22.10–23.16 m 87.4% — OK 양력 랩 구간 상부압축 23.16–23.93 m 87.4% — OK 참조 규준 조항 F3.2, G2, H2, I6.2.1 평가하지 못한 항목 ( 판정 없음의 원인 ) • §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) • H2-2 (shear stiffened webs) • weak-axis DSM flexure • G5/H3 web crippling (no bearing length wc_N given) 경고 ( 값 또는 판정에 영향 ) • §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습 니다 . Virgin Fy 를 사용합니다 . 가정 • §I6.2.1: 조건 (g)~(n)( 랩 길이 , 스팬 ≤ 33 ft, 지점 횡구속 , 패널 · 단열재 · 체결재 상세 ) 과 연속보 변곡점 사이 지점부 · 캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오 . 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
     ],
     "compact": "5a6145a1afc7690f",
-    "printedHtmlSha": "7f5973deeb614710"
-   }
+    "printedHtmlSha": "7aaf5dfe2bfbe4c1"
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)"
   },
   {
    "id": "SI.findings",
@@ -1313,101 +1335,81 @@
   },
   {
    "id": "purlin.mcp",
-   "expect": "k3-change",
-   "reason": "K3: validate_design returns checks: [] (raw session data, not the 70 items); generate_report returns a JSON packet, no HTML/PDF — acceptance criterion: the same 70 items without a webview and a report PDF",
+   "expect": "pin",
+   "reason": "K3-3 · K3-5: 새 응답(검증 항목 · 보고서 파일). 시험은 generate_report 의 SI · full 을 HTML 만으로(PDF 인쇄는 흐름마다 한 번 — 부하에서 Edge 가 끝나지 않아 MCP 시간 초과가 한 번 났다)",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 42280,
+     "bytes": 6151,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
+      "case_rev",
+      "counts",
       "detail",
-      "last_design_result",
-      "last_load_analysis",
+      "items",
       "more",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
+      "pass_notes",
+      "source",
       "units"
      ],
      "detail": "summary",
-     "checks": 0,
+     "checks": null,
      "errors": null,
      "error": null
     },
     "validate.si": {
      "isError": false,
-     "bytes": 44749,
+     "bytes": 6132,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
+      "case_rev",
+      "counts",
       "detail",
-      "last_design_result",
-      "last_load_analysis",
+      "items",
       "more",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
-      "text_units",
-      "units",
-      "units_note"
+      "pass_notes",
+      "source",
+      "units"
      ],
      "detail": "summary",
-     "checks": 0,
+     "checks": null,
      "errors": null,
      "error": null
     },
     "validate.full": {
      "isError": false,
-     "bytes": 2906417,
+     "bytes": 15181,
      "keys": [
-      "Fy",
       "analysis_current",
-      "analysis_run",
-      "checks",
-      "cutwp",
-      "last_design_result",
-      "last_load_analysis",
-      "nelems",
-      "nnodes",
-      "prepared_design_dsm",
-      "props",
-      "section_defined",
-      "status",
+      "case_rev",
+      "counts",
+      "detail",
+      "items",
+      "source",
       "units"
      ],
-     "detail": null,
-     "checks": 0,
+     "detail": "full",
+     "checks": null,
      "errors": null,
      "error": null
     },
     "report.summary": {
      "isError": false,
-     "bytes": 42183,
+     "bytes": 4961,
      "keys": [
-      "cutwp_props",
-      "design_cache_hit",
-      "design_result",
+      "case_rev",
+      "checks",
       "detail",
-      "load_analysis",
-      "model_summary",
+      "files",
+      "folder",
+      "kind",
       "more",
-      "section_props",
-      "timestamp",
-      "units"
+      "note",
+      "notices",
+      "pages",
+      "sections",
+      "units",
+      "verdict"
      ],
      "detail": "summary",
      "checks": null,
@@ -1416,20 +1418,21 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 44652,
+     "bytes": 4878,
      "keys": [
-      "cutwp_props",
-      "design_cache_hit",
-      "design_result",
+      "case_rev",
+      "checks",
       "detail",
-      "load_analysis",
-      "model_summary",
+      "files",
+      "folder",
+      "kind",
       "more",
-      "section_props",
-      "text_units",
-      "timestamp",
+      "note",
+      "notices",
+      "pages",
+      "sections",
       "units",
-      "units_note"
+      "verdict"
      ],
      "detail": "summary",
      "checks": null,
@@ -1438,23 +1441,38 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 2906330,
+     "bytes": 85362,
      "keys": [
-      "cutwp_props",
-      "design_cache_hit",
-      "design_result",
-      "load_analysis",
-      "model_summary",
-      "section_props",
-      "timestamp",
-      "units"
+      "case_rev",
+      "checks",
+      "detail",
+      "files",
+      "folder",
+      "html",
+      "kind",
+      "note",
+      "notices",
+      "pages",
+      "sections",
+      "units",
+      "verdict"
      ],
-     "detail": null,
+     "detail": "full",
      "checks": null,
      "errors": null,
      "error": null
     }
-   }
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": "K3-3 · K3-5: validate_design 은 화면과 같은 검증 항목(호스트 · id 붙음 — 요약: 수 · 통과 아닌 항목 · 통과 항목 주석), generate_report 는 보고서를 파일로(HTML · PDF, 경로 응답). 수용 기준"
+     },
+     "date": "2026-11-23"
+    }
+   ]
   },
   {
    "id": "uplift.US.validation",
@@ -2021,8 +2039,19 @@
      "랩 구간 51.00–52.00 ft ( 지점 4 오른쪽 ) 8.3% — OK 랩 구간 72.50–76.00 ft ( 지점 5 왼쪽 ) 14.1% — OK 랩 구간 76.00–78.50 ft ( 지점 5 오른쪽 ) 14.1% — OK 양력 하부압축 1.05–19.90 ft 137.5% — NG 양력 하부압축 33.59–46.05 ft 60.2% — OK 양력 하부압축 55.95–68.41 ft 60.2% — OK 양력 하부압축 82.10–100.95 ft 137.5% — NG 양력 지점부 상부압축 0.00–1.05 ft 36.2% — OK 양력 지점부 상부압축 19.90–23.50 ft 100.5% — NG 양력 지점부 상부압축 29.50–33.59 ft 83.1% — OK 양력 지점부 상부압축 46.05–50.00 ft 80.0% — OK 양력 지점부 상부압축 52.00–55.95 ft 80.0% — OK 양력 지점부 상부압축 68.41–72.50 ft 83.1% — OK 양력 지점부 상부압축 78.50–82.10 ft 100.5% — NG 양력 지점부 상부압축 100.95–102.00 ft 4.0% — OK 양력 랩 구간 상부압축 23.50–26.00 ft 86.4% — OK 양력 랩 구간 상부압축 26.00–29.50 ft 86.4% — OK 양력 랩 구간 상부압축 50.00–51.00 ft 51.2% — OK 양력 랩 구간 상부압축 51.00–52.00 ft 51.2% — OK 양력 랩 구간 상부압축 72.50–76.00 ft 87.4% — OK 양력 랩 구간 상부압축 76.00–78.50 ft 87.4% — OK 참조 규준 조항 F3.2, G2, H2, I6.2.1 평가하지 못한 항목 ( 판정 없음의 원인 ) • §G5 웹 크리플링 · §H3 — 랩 안의 지점 3 (1st interior): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 4 (Center): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . • §G5 웹 크리플링 · §H3 — 랩 안의 지점 5 (Support 5): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오 . 검토하지 않은 항목 — 해당하면 별도 검토 • holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6) • H2-2 (shear stiffened webs) • weak-axis DSM flexure • G5/H3 web crippling (no bearing length wc_N given) 경고 ( 값 또는 판정에 영향 ) • §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습 니다 . Virgin Fy 를 사용합니다 . 가정 • §I6.2.1: 조건 (g)~(n)( 랩 길이 , 스팬 ≤ 33 ft, 지점 횡구속 , 패널 · 단열재 · 체결재 상세 ) 과 연속보 변곡점 사이 지점부 · 캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오 . 적용 범위 (1) CUFSM 냉간성형강 단면 설계 프로그램 — AISI S100-16 DSM"
     ],
     "compact": "20d009c2b7793832",
-    "printedHtmlSha": "2f7ed569c0143b43"
-   }
+    "printedHtmlSha": "436c0688911c7462"
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-22"
+    }
+   ],
+   "reason": "K3-5: 인쇄용 HTML 을 호스트가 만든다 — 화면이 다시 적은 innerHTML 대신 호스트가 보낸 글 그대로(review.js printableReportHtml). PDF 의 쪽 수 · 글은 그대로(대조함)"
   },
   {
    "id": "uplift.US.findings",

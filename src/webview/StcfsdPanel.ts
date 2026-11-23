@@ -19,8 +19,12 @@ import {
 } from '../models/types';
 import { defaultSteel, mpaField, steelGradeOptionsHtml } from './steelGrades';
 import { CaseKeeper } from '../case/caseKeeper';
+// K3: 검증 · 보고서(순수 · UMD — 화면과 같은 모듈)
+const REVIEW = require('../../webview/js/review');
 import { toDesignInputs13, toCaseRecord, migrateProject, readDesignInputs, MigrateResult, applyChanges, invalidationScope } from '../case/caseState';
 import { mcpWrite } from '../case/mcpGroups';
+import { buildReviewDoc, modelAnalysisDrafts, selectOptionsFromHtml } from '../case/reviewInput';
+import { HTML_MARKER, PDF_MARKER, pickTarget, reportDir, safeBaseName, writeVia } from '../case/reportFiles';
 import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, UNIT_LABEL } from '../mcp/siUnits';
 import {
     buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts, isCalcMode,
@@ -213,6 +217,195 @@ export class StcfsdPanel implements McpPanelInterface {
             designInputs: toDesignInputs13(k.state, k.drafts || {}) }));
     }
 
+    /**
+     * K3: 검증 · 보고서의 env(webview/js/review.js) — 검토 상태 · 모델 칸의 초안 · 화면 결과의 거울로. 화면이 없어도 된다.
+     * unitSystem 을 주지 않으면 화면의 단위(검토 상태의 보기 설정).
+     */
+    private _reviewEnv(unitSystem?: 'SI' | 'US'): any {
+        const k = this._caseKeeper;
+        if (!this._reviewOptions) { this._reviewOptions = selectOptionsFromHtml(this._getHtmlForWebview()); }
+        const ctx = k.context(this._model, this._lastDesignResult, null);
+        const us: 'SI' | 'US' = unitSystem || (k.state.view.unitSystem === 'US' ? 'US' : 'SI');
+        // 화면이 붙은 적이 없으면 모델 칸의 초안을 모델에서(단면 치수 — K2 modelDrafts, 해석 조건 — 화면이 modelLoaded 로 적는 것)
+        const drafts = k.drafts !== null ? ctx.drafts : { ...modelAnalysisDrafts(this._model), ...ctx.drafts } as any;
+        const inputs = toDesignInputs13(k.state, drafts);
+        const v = k.pageView;
+        return {
+            doc: buildReviewDoc({ inputs, spans: k.state.spans, unitSystem: us, options: this._reviewOptions }),
+            unitSystem: us, model: v.model, analysisResult: v.analysis, lastDsmResult: v.dsm, lastProps: ctx.props,
+            design: ctx.lastDesign, load: v.load, lap: k.pageLap,
+        };
+    }
+    private _reviewOptions: Record<string, { value: string; text: string }[]> | null = null;
+    /** K3-5: 화면에 마지막으로 보낸 보고서 HTML(「PDF 저장」 이 그것을 인쇄한다) */
+    private _lastReportHtml: string | null = null;
+
+    /** 화면이 보낸 단위(없으면 undefined — 검토 상태의 보기 설정) */
+    private static _unitOf(data: any): 'SI' | 'US' | undefined {
+        return data && (data.unitSystem === 'SI' || data.unitSystem === 'US') ? data.unitSystem : undefined;
+    }
+
+    /** K3-3: 검증 항목(id 붙음) — 화면 · MCP · 새 화면이 같은 것 */
+    private _validationItems(env?: any): any[] {
+        return REVIEW.withIds(REVIEW.make(env || this._reviewEnv()).runAllValidationChecks());
+    }
+
+    /** K3-5: 상세 보고서 HTML. 설계 · 하중 결과가 모두 없으면 null(force 면 그래도 — 지금 화면의 단위 전환 동작) */
+    private _reportHtml(unitSystem?: 'SI' | 'US', force = false): string | null {
+        const env = this._reviewEnv(unitSystem);
+        if (!force && !env.design && !env.load) { return null; }
+        return REVIEW.make(env).generateDetailedReport();
+    }
+
+    /**
+     * K3-5: 좌굴해석 결과 보고서. 화면이 넘긴 그림(캔버스 id → PNG)과 DSM 표의 글이 있으면 그것을 넣는다(화면이 만들던 것과 같은 글).
+     * 화면이 없으면(headless) 서명곡선 SVG · DSM 값 표와 「화면 없이 만든 보고서」 라는 글.
+     */
+    private _bucklingReportHtml_(page: { charts?: Record<string, string>; dsmHtml?: string | null; headless?: boolean }, unitSystem?: 'SI' | 'US'): string {
+        const env = this._reviewEnv(unitSystem);
+        const extra = new Map<string, any>();
+        if (typeof page.dsmHtml === 'string') { extra.set('dsm-table-container', { innerHTML: page.dsmHtml }); }
+        for (const [id, png] of Object.entries(page.charts || {})) {
+            if (typeof png === 'string' && png.startsWith('data:image/png;base64,')) { extra.set(id, { toDataURL: () => png }); }
+        }
+        const base = env.doc;
+        env.doc = { ...base, getElementById: (id: string) => extra.get(id) || base.getElementById(id) };
+        const R = REVIEW.make(env);
+        return page.headless ? R.buildBucklingReportHeadless() : R.buildBucklingReportHtml();
+    }
+
+    /**
+     * K3-3: MCP validate_design. 요약(기본): 수와, 통과가 아닌 항목 전부(id · 분류 · 이름 · 판정 · 값 · 기준 · 주석), 통과 항목의 주석
+     * (서로 다른 글 전부 — 요약 규칙: full 에 있는 알림 글 · 통과 아닌 id 는 요약에도). detail 'full': 모든 항목.
+     */
+    private _mcpValidate(options: any): any {
+        const us: 'SI' | 'US' = options?.report_units === 'SI' ? 'SI' : 'US';
+        const items = this._validationItems(this._reviewEnv(us));
+        const count = (st: string) => items.filter((i) => i.status === st).length;
+        const counts = { total: items.length, pass: count('pass'), warn: count('warn'), fail: count('fail') };
+        const full = options?.detail === 'full';
+        const out: any = {
+            source: 'host — webview/js/review.js, the same items the screen shows (설계 검증 실행)',
+            units: us, case_rev: this._caseKeeper.state.rev, analysis_current: this._isAnalysisCurrent(), counts,
+            detail: full ? 'full' : 'summary',
+            items: full ? items : items.filter((i) => i.status !== 'pass'),
+        };
+        if (!full) {
+            const notes = [...new Set(items.filter((i) => i.status === 'pass' && i.note).map((i) => String(i.note)))];
+            if (notes.length) { out.pass_notes = notes; }
+            out.more = `${counts.pass} passing items are left out (their notes are in pass_notes) — detail: 'full' lists all ${counts.total} items.`;
+        }
+        return out;
+    }
+
+    /** 결과에서 알림 글(경고 · 미평가 · 가정 · 범위)과 통과가 아닌 검토 항목 id — 보고서 응답의 요약 규칙 */
+    private _resultNotices(results: any[]): { notices: string[]; checks: { fail: string[]; not_evaluated: string[] } } {
+        const U = require('../../webview/js/utils');
+        const notices = new Set<string>();
+        const fail = new Set<string>(), ne = new Set<string>();
+        const walk = (r: any, depth: number) => {
+            if (!r || typeof r !== 'object' || depth > 4) { return; }
+            for (const f of [U.notEvaluatedList, U.warningsList, U.assumptionsList, U.scopeNotesList]) {
+                for (const t of f(r) || []) { if (t) { notices.add(String(t)); } }
+            }
+            for (const c of Array.isArray(r.design_checks) ? r.design_checks : []) {
+                if (c && c.verdict === 'fail') { fail.add(String(c.id)); }
+                if (c && c.verdict === 'not_evaluated' && c.counts !== false) { ne.add(String(c.id)); }
+            }
+            for (const sub of ['fastener_design', 'design_lap', 'positive_region']) { if (r[sub]) { walk(r[sub], depth + 1); } }
+            for (const g of Array.isArray(r.regions) ? r.regions : []) { walk(g && g.result, depth + 1); }
+        };
+        for (const r of results) { walk(r, 0); }
+        return { notices: [...notices], checks: { fail: [...fail], not_evaluated: [...ne] } };
+    }
+
+    /**
+     * K3-5: MCP generate_report — 상세 보고서(kind 'design') 또는 좌굴해석 결과 보고서('buckling')를 만들어 파일로.
+     * 자리: 열린 .csd 의 폴더 · 없으면 임시 폴더(stcfsd-reports). 이름: <검토 대상>.report.r<판>.html/.pdf(좌굴은 .buckling.r<판>).
+     * 새 파일이거나 이 프로그램이 쓴 보고서(표지)만 덮는다 · 링크를 따라가지 않는다 · 이름은 다듬는다(reportFiles.ts).
+     */
+    private async _mcpGenerateReport(options: any): Promise<any> {
+        // MCP(AI)의 길: 폴더 · 도장 · 덧붙일 절은 받지 않는다 — 인자에서 그 키를 읽지 않는다
+        return this.generateReportFiles({ kind: options?.kind, format: options?.format, detail: options?.detail, units: options?.report_units });
+    }
+
+    /**
+     * K3-5: 보고서 파일을 만든다 — MCP generate_report 와 호스트 안의 호출자(기록 갈래 R5 — 프로젝트의 03_계산서/)가 같이 쓴다.
+     * internal 은 **호스트 코드만** 준다(AI 가 줄 수 없다): folder(쓰는 폴더 — 진짜 경로의 보통 폴더여야, 링크 거절),
+     * stamp(ReportDoc.meta.stamp — {kind 'draft' | 'issued', label?, notChecked?, reviewer?, date?}, 쪽마다 머리에),
+     * appendSections([{title, html}] — 보고서 끝(맺음말 앞)에 덧붙일 절: 가정 · 검토 기록 …).
+     */
+    public async generateReportFiles(opts: { kind?: string; format?: string; detail?: string; units?: string },
+        internal: { folder?: string; stamp?: any; appendSections?: { title: string; html: string }[] } = {}): Promise<any> {
+        const options: any = { kind: opts.kind, format: opts.format, detail: opts.detail, report_units: opts.units };
+        const us: 'SI' | 'US' = options?.report_units === 'SI' ? 'SI' : 'US';
+        const kind = options?.kind === 'buckling' ? 'buckling' : 'design';
+        const format = options?.format === 'html' ? 'html' : options?.format === 'pdf' ? 'pdf' : 'both';
+        let inner: string | null;
+        if (kind === 'buckling') {
+            inner = this._isAnalysisCurrent() || this._caseKeeper.pageView.analysis ? this._bucklingReportHtml_({ headless: true }, us) : null;
+            if (!inner) { return { error: 'No buckling analysis — run_analysis first.' }; }
+        } else {
+            inner = this._reportHtml(us);
+            if (!inner) { return { error: 'No design or load-analysis result to report — run a design tool, design_purlin, analyze_loads or run_case_check first.' }; }
+        }
+        inner = REVIEW.composeReport(inner, { stamp: internal.stamp, appendSections: internal.appendSections }) as string;
+        const page = kind === 'buckling' ? this._buildPrintableBucklingHtmlFrom(inner) : REVIEW.printableReportHtml(inner);
+        const html = HTML_MARKER + '\n' + page;
+        const { dir, where } = internal.folder ? reportDir(null, internal.folder) : reportDir(this._casePath);
+        const base = safeBaseName(this._casePath ? path.basename(this._casePath).replace(/\.[^.]*$/, '') : 'stcfsd');
+        const stem = `${base}.${kind === 'buckling' ? 'buckling' : 'report'}.r${this._caseKeeper.state.rev}`;
+        const files: any = {};
+        if (format !== 'pdf') {
+            const target = pickTarget(dir, stem, 'html');
+            await writeVia(target, (tmp) => fs.writeFileSync(tmp, html, 'utf-8'));
+            files.html = target;
+        }
+        let pages: number | null = null;
+        let pdfNote: string | undefined;
+        if (format !== 'html') {
+            const target = pickTarget(dir, stem, 'pdf');
+            let printed = true;
+            await writeVia(target, async (tmp) => {
+                printed = await this._printHtmlToPdf(page, tmp);
+                if (!printed) { throw new Error('no PDF printer'); }
+                fs.appendFileSync(tmp, PDF_MARKER);
+            }).catch((e) => { if (printed) { throw e; } });
+            if (printed) {
+                files.pdf = target;
+                const txt = fs.readFileSync(target).toString('latin1');
+                pages = (txt.match(/\/Type\s*\/Page\b(?!s)/g) || []).length;
+            } else { pdfNote = 'No Edge/Chrome found — the PDF was not written (the HTML is).'; }
+        }
+        const sections = [...inner.matchAll(/<h[12][^>]*>([^<]*)<\/h[12]>/g)].map((m) => m[1].replace(/&amp;/g, '&').trim()).filter(Boolean);
+        const env = this._reviewEnv(us);
+        const n = this._resultNotices([env.design, env.lap, env.load]);
+        const d = env.design;
+        const verdict = d ? (d.pass === true ? 'PASS' : d.pass === false ? 'FAIL' : 'NOT_CHECKED') : null;
+        const out: any = {
+            files, folder: where, kind, units: us, case_rev: this._caseKeeper.state.rev, pages, sections, verdict,
+            notices: n.notices, checks: n.checks,
+            note: `The report was written by StCFSD into ${where === 'case_folder' ? 'the folder of the open .csd' : 'the temporary folder (no .csd is open)'} — tell the person the path.`,
+            ...(pdfNote ? { pdf_note: pdfNote } : {}),
+            detail: options?.detail === 'full' ? 'full' : 'summary',
+        };
+        if (options?.detail === 'full') { out.html = inner; } else { out.more = "detail: 'full' adds the report HTML."; }
+        return out;
+    }
+
+    /** 돌고 있는 엔진의 식별(selftest.engine_id — 엔진 소스의 sha256). 모르면 'unknown' */
+    private _engineId(): string {
+        const id = this._pythonBridge.selftest?.engine_id;
+        return typeof id === 'string' && /^(sha256:)?[0-9a-f]{16,128}$/i.test(id) ? id : 'unknown';
+    }
+
+    /** 시험: 호스트가 만든 검증 항목 · 보고서 HTML(화면이 만든 것과 맞댄다 — test/rendered/k3) */
+    public __testReview(unitSystem?: 'SI' | 'US'): { validation: any[]; reportHtml: string; bucklingHtml: string } {
+        if (!isTestMode()) { throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1'); }
+        const R = REVIEW.make(this._reviewEnv(unitSystem));
+        return { validation: R.runAllValidationChecks(), reportHtml: R.generateDetailedReport(), bucklingHtml: R.buildBucklingReportHtml() };
+    }
+
     public __testGetHtml(): string {
         if (!isTestMode()) {
             throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
@@ -394,11 +587,34 @@ export class StcfsdPanel implements McpPanelInterface {
                 break;
 
             case 'showBucklingReport':
-                this._showBucklingReport(message.data?.html || '');
+                // K3-5: 호스트가 만든다 — 화면은 화면에만 있는 그림(캔버스 PNG)과 DSM 표의 글만 넘긴다. 옛 화면의 {html} 도 받는다.
+                this._showBucklingReport(typeof message.data?.html === 'string' ? message.data.html
+                    : this._bucklingReportHtml_(message.data || {}, StcfsdPanel._unitOf(message.data)));
                 break;
 
             case 'saveReportPdf':
+                // 옛 화면(K3 전)의 길 — 화면이 만든 인쇄용 HTML. K3 화면은 saveReport 를 보낸다.
                 await this._saveReportPdf(message.data);
+                break;
+
+            case 'runValidation': {
+                // K3-3: 「설계 검증 실행」 — 호스트가 만든 항목(webview/js/review.js, MCP validate_design 과 같은 목록). 단위는 화면의 것
+                const env = this._reviewEnv(StcfsdPanel._unitOf(message.data));
+                this._postMessage('validationResult', { items: this._validationItems(env), unitSystem: env.unitSystem, case_rev: this._caseKeeper.state.rev });
+                break;
+            }
+
+            case 'generateReport': {
+                // K3-5: 「상세 보고서 생성」 · 단위 전환 뒤 다시 그리기(force — 지금 화면 그대로, 결과가 없어도 만든다: 부록 D9)
+                const html = this._reportHtml(StcfsdPanel._unitOf(message.data), message.data?.force === true);
+                this._lastReportHtml = html;
+                this._postMessage('reportResult', { html, case_rev: this._caseKeeper.state.rev, reason: message.data?.reason === 'units' ? 'units' : undefined });
+                break;
+            }
+
+            case 'saveReport':
+                // K3-5: 「PDF 저장」 — 화면에 보이는 보고서(마지막으로 보낸 것)를 인쇄용으로 감싸 사람이 고른 곳에
+                await this._saveReportPdf({ html: REVIEW.printableReportHtml(this._lastReportHtml ?? this._reportHtml(undefined, true) ?? '') });
                 break;
 
             case 'generateTemplate':
@@ -3464,81 +3680,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 return result;
             }
 
-            case 'generate_report': {
-                // 리포트에 필요한 모든 데이터를 수집하여 반환
-                const reportData: any = {
-                    timestamp: new Date().toISOString(),
-                    model_summary: this.getStatus(),
-                };
-
-                // 1. 단면 성질
-                if (this._model.node && this._model.node.length > 0) {
-                    try {
-                        reportData.section_props = await this._pythonBridge.call('get_properties', {
-                            node: this._model.node, elem: this._model.elem
-                        });
-                    } catch (e: any) { (reportData.errors ||= []).push(`section_props: ${e?.message || e}`); }
-                    try {
-                        reportData.cutwp_props = await this._pythonBridge.call('cutwp', {
-                            node: this._model.node, elem: this._model.elem
-                        });
-                    } catch (e: any) { (reportData.errors ||= []).push(`cutwp_props: ${e?.message || e}`); }
-                }
-
-                // 2. DSM 값 (R2-05: 해석 family와 일치하는 항목만)
-                if (this._isAnalysisCurrent()) {
-                    reportData.dsm_basis = {
-                        load_family: this._lastAnalysisResult?._meta?.load_family,
-                        load_case: this._lastAnalysisResult?._meta?.load_type,
-                    };
-                    try {
-                        const dsm = await this._extractCurrentAnalysisDsm();
-                        reportData.dsm_P = dsm.P;
-                        reportData.dsm_Mxx = dsm.Mxx;
-                        reportData.dsm_Mzz = dsm.Mzz;
-                        reportData.dsm_load_family = dsm.load_family;
-                        reportData.dsm_warning = dsm.warning;
-                    } catch (e: any) { (reportData.errors ||= []).push(`dsm: ${e?.message || e}`); }
-                    reportData.curve_length = this._lastAnalysisResult.curve.length;
-                    reportData.analysis_meta = this._lastAnalysisResult._meta || null;
-                }
-                const reportFy = options.Fy ?? options.fy ?? this._getAnalysisFy();
-                if (this._preparedDsmMatchesCurrent(reportFy)) {
-                    reportData.prepared_design_dsm = this._preparedDesignDsm;
-                }
-
-                // 3. 하중 분석 (옵션)
-                if (this._lastLoadAnalysis) {
-                    reportData.load_analysis = this._lastLoadAnalysis;
-                } else if (options.loads) {
-                    try {
-                        reportData.load_analysis = await this._analyzeLoads(options);
-                    } catch (e: any) { (reportData.errors ||= []).push(`load_analysis: ${e?.message || e}`); }
-                }
-
-                // 4. 설계 결과
-                // F01: action을 제외한 업무 입력으로 명시적 dispatch (재귀 방지).
-                // F02: 요청과 일치하는 캐시만 재사용하고, 다르면 새로 계산한다.
-                if (options.member_type) {
-                    if (this._designCacheMatches(options)) {
-                        reportData.design_result = this._lastDesignResult;
-                        reportData.design_cache_hit = true;
-                    } else {
-                        try {
-                            const { action: _action, ...designOptions } = options;
-                            void _action;
-                            const designResult = await this._pageAction({ ...designOptions, action: 'aisi_design' });
-                            reportData.design_result = designResult;
-                            reportData.design_cache_hit = false;
-                        } catch (e: any) { (reportData.errors ||= []).push(`design_result: ${e?.message || e}`); }
-                    }
-                } else if (this._lastDesignResult) {
-                    reportData.design_result = this._lastDesignResult;
-                    reportData.design_cache_hit = true;
-                }
-
-                return reportData;
-            }
+            case 'generate_report':
+                // K3-5: 보고서를 만들어 파일로(HTML · PDF). 쓰는 자리 · 이름은 호스트가 정한다(AI 가 경로를 주지 않는다 — reportFiles.ts)
+                return await this._mcpGenerateReport(options);
 
             case 'capture_section_preview': {
                 // R8-18: 요청마다 새 파일. 이번 캡처가 파일을 쓴 경우에만 경로를 돌려준다 — 오류·시간 초과에
@@ -3580,52 +3724,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 return result;
             }
 
-            case 'validate_design': {
-                // AI/MCP용 — 현재 모델 상태를 기반으로 검증 데이터 수집 후 반환
-                const valData: any = { checks: [] };
-                const node = this._model.node || [];
-                const elem = this._model.elem || [];
-                valData.section_defined = node.length > 0;
-                valData.nnodes = node.length;
-                valData.nelems = elem.length;
-                valData.analysis_current = this._isAnalysisCurrent();
-                valData.last_load_analysis = this._lastLoadAnalysis || null;
-                valData.last_design_result = this._lastDesignResult || null;
-
-                // Properties
-                if (node.length > 0) {
-                    try {
-                        valData.props = await this._pythonBridge.call('get_properties', { node, elem });
-                    } catch (e: any) { (valData.errors ||= []).push(`props: ${e?.message || e}`); }
-                    try {
-                        valData.cutwp = await this._pythonBridge.call('cutwp', { node, elem });
-                    } catch (e: any) { (valData.errors ||= []).push(`cutwp: ${e?.message || e}`); }
-                }
-
-                // Analysis/DSM (R2-05: 해석 family와 일치하는 항목만)
-                valData.analysis_run = this._isAnalysisCurrent();
-                if (this._isAnalysisCurrent()) {
-                    valData.dsm_basis = {
-                        load_family: this._lastAnalysisResult?._meta?.load_family,
-                        load_case: this._lastAnalysisResult?._meta?.load_type,
-                    };
-                    try {
-                        const dsm = await this._extractCurrentAnalysisDsm();
-                        valData.dsm_P = dsm.P;
-                        valData.dsm_Mxx = dsm.Mxx;
-                        valData.dsm_Mzz = dsm.Mzz;
-                        valData.dsm_load_family = dsm.load_family;
-                        valData.dsm_warning = dsm.warning;
-                    } catch (e: any) { (valData.errors ||= []).push(`dsm: ${e?.message || e}`); }
-                }
-
-                // R8-28: 요청한 설계 Fy 로 준비된 설계용 DSM 이 있으면 함께(없으면 null).
-                valData.prepared_design_dsm = options.Fy !== undefined && this._preparedDsmMatchesCurrent(options.Fy)
-                    ? this._preparedDesignDsm : null;
-                valData.Fy = options.Fy ?? null;
-                valData.status = this.getStatus();
-                return valData;
-            }
+            case 'validate_design':
+                // K3-3: 화면의 「설계 검증 실행」 과 같은 항목(호스트가 만든다 — webview/js/review.js)
+                return this._mcpValidate(options);
 
             case 'apply_deck_springs': {
                 // 데크 강성(kφ, kx)을 압축 플랜지에 스프링으로 적용 (F06: 10열 계약)
@@ -4228,13 +4329,15 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /** 인쇄용 완결 HTML (흰 배경, 이미지 배경 유지) */
-    private _buildPrintableBucklingHtml(): string {
+    private _buildPrintableBucklingHtml(): string { return this._buildPrintableBucklingHtmlFrom(this._bucklingReportHtml); }
+    private _buildPrintableBucklingHtmlFrom(inner: string): string {
+        void inner;
         return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>좌굴해석 결과 보고서</title>
 <style>body{font-family:'Segoe UI',sans-serif;color:#111;background:#fff;max-width:800px;margin:0 auto;padding:24px;font-size:13px}
 h1{font-size:18px;border-bottom:2px solid #333;padding-bottom:6px}h2{font-size:14px;margin-top:20px;color:#0b5394}
 table{border-collapse:collapse;width:100%;font-size:12px;margin:6px 0}td,th{border:1px solid #999;padding:4px 8px;text-align:left}
 img{max-width:100%}.chart{background:#1e1e1e;padding:8px;border-radius:4px;margin:6px 0}</style></head>
-<body>${this._bucklingReportHtml}</body></html>`;
+<body>${inner}</body></html>`;
     }
 
     /** 웹뷰 패널용 래핑 (툴바 + CSP) */
@@ -4272,75 +4375,81 @@ ${inner}
                 return;
             }
 
-            // PDF: 임시 HTML 파일 생성 → headless 브라우저로 변환
-            const tmpHtml = path.join(os.tmpdir(), `cufsm_report_${Date.now()}.html`);
-            fs.writeFileSync(tmpHtml, data.html, 'utf-8');
-
-            const browserPath = this._findBrowser();
-            if (!browserPath) {
-                // 브라우저 없으면 HTML 폴백
-                fs.unlinkSync(tmpHtml);
+            // PDF: 호스트의 인쇄기(기본: 시스템 Edge/Chrome headless). 브라우저가 없으면 HTML 로.
+            const printed = await this._printHtmlToPdf(data.html, uri.fsPath);
+            if (!printed) {
                 const htmlPath = uri.fsPath.replace(/\.pdf$/i, '.html');
                 fs.writeFileSync(htmlPath, data.html, 'utf-8');
-                vscode.window.showWarningMessage(
-                    `Edge/Chrome을 찾을 수 없어 HTML로 저장했습니다: ${htmlPath}`
-                );
+                vscode.window.showWarningMessage(`Edge/Chrome을 찾을 수 없어 HTML로 저장했습니다: ${htmlPath}`);
                 return;
             }
-
-            // 임시 사용자 데이터 디렉터리 (실행 중인 Edge와 프로필 충돌 방지)
-            const tmpUserData = path.join(os.tmpdir(), `cufsm_pdf_${Date.now()}`);
-            fs.mkdirSync(tmpUserData, { recursive: true });
-
-            const fileUrl = 'file:///' + tmpHtml.split(path.sep).join('/');
-            const pdfPath = uri.fsPath;
-
-            // spawn 사용 (execFile/spawnSync는 Windows에서 PDF flush 문제 발생)
-            await new Promise<void>((resolve, reject) => {
-                const proc = cp.spawn(browserPath, [
-                    '--headless=new',
-                    '--disable-gpu',
-                    '--no-sandbox',
-                    '--no-pdf-header-footer',
-                    '--user-data-dir=' + tmpUserData,
-                    '--print-to-pdf=' + pdfPath,
-                    fileUrl,
-                ], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'] });
-
-                proc.on('error', (err) => {
-                    this._cleanupTempFiles(tmpHtml, tmpUserData);
-                    reject(err);
-                });
-
-                proc.on('close', (code) => {
-                    // Edge가 종료 후에도 PDF가 디스크에 flush되는 데 시간이 걸림
-                    const checkPdf = (retries: number) => {
-                        try {
-                            const stat = fs.statSync(pdfPath);
-                            if (stat.size > 0) {
-                                this._cleanupTempFiles(tmpHtml, tmpUserData);
-                                resolve();
-                                return;
-                            }
-                        } catch { /* not yet */ }
-                        if (retries > 0) {
-                            setTimeout(() => checkPdf(retries - 1), 500);
-                        } else {
-                            this._cleanupTempFiles(tmpHtml, tmpUserData);
-                            reject(new Error(
-                                `PDF 파일이 생성되지 않았습니다 (Edge headless 종료 코드: ${code ?? 'unknown'})`
-                            ));
-                        }
-                    };
-                    // 500ms 간격으로 최대 10회 (5초) 대기
-                    setTimeout(() => checkPdf(10), 500);
-                });
-            });
 
             vscode.window.showInformationMessage(`PDF가 저장되었습니다: ${uri.fsPath}`);
         } catch (err: any) {
             vscode.window.showErrorMessage(`PDF 저장 실패: ${err.message}`);
         }
+    }
+
+    /**
+     * K3-5: HTML → PDF. 결정 5: 기본은 시스템 Edge/Chrome headless(--print-to-pdf, windowsHide — 보이지 않는다).
+     * 독립 프로그램은 StcfsdPanel.pdfPrinter 로 다른 인쇄기(Electron printToPDF 등)를 꽂을 수 있다.
+     * 반환: 인쇄했으면 true, 인쇄기(브라우저)가 없으면 false.
+     */
+    public static pdfPrinter: ((html: string, pdfPath: string) => Promise<void>) | null = null;
+    private async _printHtmlToPdf(html: string, pdfPath: string): Promise<boolean> {
+        if (StcfsdPanel.pdfPrinter) { await StcfsdPanel.pdfPrinter(html, pdfPath); return true; }
+        const browserPath = this._findBrowser();
+        if (!browserPath) { return false; }
+        const tmpHtml = path.join(os.tmpdir(), `cufsm_report_${Date.now()}_${process.pid}.html`);
+        fs.writeFileSync(tmpHtml, html, 'utf-8');
+        // 임시 사용자 데이터 디렉터리 (실행 중인 Edge와 프로필 충돌 방지)
+        const tmpUserData = path.join(os.tmpdir(), `cufsm_pdf_${Date.now()}_${process.pid}`);
+        fs.mkdirSync(tmpUserData, { recursive: true });
+        const fileUrl = 'file:///' + tmpHtml.split(path.sep).join('/');
+        const before = (() => { try { return fs.statSync(pdfPath).mtimeMs; } catch { return -1; } })();
+        // spawn 사용 (execFile/spawnSync는 Windows에서 PDF flush 문제 발생)
+        await new Promise<void>((resolve, reject) => {
+            const proc = cp.spawn(browserPath, [
+                '--headless=new',
+                '--disable-gpu',
+                '--no-sandbox',
+                '--no-pdf-header-footer',
+                '--user-data-dir=' + tmpUserData,
+                '--print-to-pdf=' + pdfPath,
+                fileUrl,
+            ], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'] });
+            proc.on('error', (err) => { clearInterval(watch); this._cleanupTempFiles(tmpHtml, tmpUserData); reject(err); });
+            // 지키미: Edge headless 가 PDF 를 다 쓰고도 끝나지 않는 일이 있다(부하에서 시험 중 한 번 — 프로세스가 남고 호스트가 끝나지 않았다).
+            // PDF 의 크기가 멈춘 뒤 15 초가 지나도 살아 있으면, 또는 전체 120 초가 지나면 끝낸다(→ close 가 나머지를 한다).
+            const t0 = Date.now();
+            let lastSize = -1, stableSince = 0;
+            const watch = setInterval(() => {
+                let size = -1;
+                try { const st = fs.statSync(pdfPath); size = st.mtimeMs !== before ? st.size : -1; } catch { /* 아직 */ }
+                if (size > 0 && size === lastSize) { stableSince = stableSince || Date.now(); } else { stableSince = 0; }
+                lastSize = size;
+                if ((stableSince && Date.now() - stableSince > 15000) || Date.now() - t0 > 120000) {
+                    clearInterval(watch);
+                    try { proc.kill(); } catch { /* 이미 끝남 */ }
+                }
+            }, 1000);
+            proc.on('close', (code) => {
+                clearInterval(watch);
+                // Edge가 종료 후에도 PDF가 디스크에 flush되는 데 시간이 걸림 — 500ms 간격으로 최대 10회 (5초) 대기
+                const checkPdf = (retries: number) => {
+                    try {
+                        const st = fs.statSync(pdfPath);
+                        if (st.size > 0 && st.mtimeMs !== before) { this._cleanupTempFiles(tmpHtml, tmpUserData); resolve(); return; }
+                    } catch { /* not yet */ }
+                    if (retries > 0) { setTimeout(() => checkPdf(retries - 1), 500); } else {
+                        this._cleanupTempFiles(tmpHtml, tmpUserData);
+                        reject(new Error(`PDF 파일이 생성되지 않았습니다 (Edge headless 종료 코드: ${code ?? 'unknown'})`));
+                    }
+                };
+                setTimeout(() => checkPdf(10), 500);
+            });
+        });
+        return true;
     }
 
     private _cleanupTempFiles(tmpHtml: string, tmpUserData: string): void {
@@ -4644,7 +4753,19 @@ ${inner}
     /** K2: 상태 전체를 화면에(칸에 얹는다 — 복원과 같은 길). */
     private _postCaseState(reason: string): void {
         const k = this._caseKeeper;
-        this._postMessage('caseState', { rev: k.state.rev, reason, designInputs: toDesignInputs13(k.state, k.drafts || {}) });
+        // 모델 칸(단면 치수 · 재료 E/ν/G · 해석 조건)은 싣지 않는다 — 그 주인은 모델이고 화면은 modelLoaded 로 받는다. 실으면 화면이
+        // 아직 알리지 않은 옛 초안(예: MCP set_load_case 바로 뒤의 하중 경우 「조합」)이 modelLoaded 가 적은 새 값을 덮는다(desktop 작성자의 결함).
+        const di = toDesignInputs13(k.state, k.drafts || {});
+        for (const key of Object.keys(di)) { if (StcfsdPanel._isModelKey(key)) { delete (di as any)[key]; } }
+        this._postMessage('caseState', { rev: k.state.rev, reason, designInputs: di });
+    }
+    private static _modelKeys: Set<string> | null = null;
+    private static _isModelKey(key: string): boolean {
+        if (!StcfsdPanel._modelKeys) {
+            const DSm = require('../../webview/js/designState');
+            StcfsdPanel._modelKeys = new Set(DSm.FIELDS.filter((f: any) => DSm.fieldMeta(f[0])?.owner === 'model').map((f: any) => f[0]));
+        }
+        return StcfsdPanel._modelKeys.has(key);
     }
 
     /** K2: 상태로 만든 엔진 본문(문맥 = 화면이 쥔 초안 · 단면 성질 · 화면의 마지막 설계 결과) */
@@ -5490,6 +5611,7 @@ ${inner}
 
     <script nonce="${nonce}" src="${designStateUri}"></script>
     <script nonce="${nonce}" src="${utilsUri}"></script>
+    <script nonce="${nonce}" src="${webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'review.js'))}"></script>
     <script nonce="${nonce}" src="${scriptUri}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'charts', 'modeShape3D.js')
@@ -5557,6 +5679,8 @@ ${inner}
                 results_format: StcfsdPanel.RESULTS_FORMAT,
                 protocol_version: this._pythonBridge.selftest?.protocol_version ?? null,
                 python: this._pythonBridge.selftest?.python ?? null,
+                // 결과는 그것을 만든 엔진의 것이다 — 엔진 소스의 sha256(없으면 'unknown': 그 결과는 다시 열 때 되살리지 않는다)
+                engine_id: this._engineId(),
             },
             model: this._cloneModel(this._model),
             derivedStateSignature: saveSignature,
@@ -5680,13 +5804,18 @@ ${inner}
         // 다르거나 기록이 없는 옛 파일(1.0–1.2)의 결과 — 해석 · 하중 · 설계 · 준비 DSM · Lap — 는 버리고 입력만 쓴다.
         const savedEngine = isWrapper ? projectData.resultsEngine : undefined;
         const currentProtocol = this._pythonBridge.selftest?.protocol_version;
+        // 엔진이 같아야 한다(engine_id — 엔진 소스의 sha256). 기록이 없는 파일(지금까지 저장한 것 전부)은 다른 엔진으로 본다,
+        // 'unknown' 은 어느 쪽이든 되살리지 않는다(결과 형식 · 프로토콜이 같아도 엔진의 값이 바뀌었을 수 있다 — a2d5172 · b288448).
+        const fileEngineId = savedEngine && typeof savedEngine.engine_id === 'string' ? savedEngine.engine_id : 'unknown';
+        const engineSame = fileEngineId !== 'unknown' && this._engineId() !== 'unknown' && fileEngineId === this._engineId();
         const resultsCurrent = !!savedEngine
             && savedEngine.results_format === StcfsdPanel.RESULTS_FORMAT
-            && (currentProtocol === undefined || savedEngine.protocol_version === currentProtocol);
+            && (currentProtocol === undefined || savedEngine.protocol_version === currentProtocol)
+            && engineSame;
         const hadResults = !!(projectData.analysisResult || projectData.loadAnalysis || projectData.designResult
             || projectData.preparedDesignDsm || projectData.lapResult);
         if (!resultsCurrent && hadResults) {
-            warnings.push(`Results stored in this file were computed by an older engine/file version (${projectData.version ?? 'unknown'}${savedEngine ? `, protocol ${savedEngine.protocol_version}` : ''}) and were not restored — inputs were kept; run the analysis and checks again.`);
+            warnings.push(`Results stored in this file were computed by an older engine/file version (${projectData.version ?? 'unknown'}${savedEngine ? `, protocol ${savedEngine.protocol_version}` : ''}${savedEngine ? `, engine ${fileEngineId === 'unknown' ? 'not recorded' : fileEngineId.replace(/^sha256:/, '').slice(0, 12)} — this engine ${this._engineId() === 'unknown' ? 'unknown' : this._engineId().replace(/^sha256:/, '').slice(0, 12)}` : ''}) and were not restored — inputs were kept; run the analysis and checks again.`);
             // K4a: 버린 결과를 장부에 — 화면이 「결과 없음」 이 아니라 「낡음(까닭)」 으로 보이게.
             const old: Array<[LedgerKind, any]> = [['buckling_analysis', projectData.analysisResult],
                 ['load_analysis', projectData.loadAnalysis], ['member_design', projectData.designResult],

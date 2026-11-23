@@ -3,7 +3,7 @@
 //   node test/rendered/k3/inventory.js   (먼저 `npm run test:k3` 를 돌려 흐름마다 본 검증 항목을 test/rendered/out/k3/ 에 남긴다)
 // 쓰는 것: docs/implementation/20261124-k3-inventory.json, 그리고 같은 이름의 .md 안 <!-- inventory:begin --> … <!-- inventory:end --> 표.
 // 출처(자동):
-//   1. webview/js/app.js 의 runAllValidationChecks 안 checks.push({...}) 자리 전부 — 분류(그 위의 const cat…), 항목 이름, 판정식,
+//   1. webview/js/review.js(K3-1 에서 app.js 에서 글 그대로 옮김)의 runAllValidationChecks 안 checks.push({...}) 자리 전부 — 분류(그 위의 const cat…), 항목 이름, 판정식,
 //      그 자리를 품은 조건(if · forEach), 읽는 화면 칸(getNum · getElementById · _optNum → designState 키), 읽는 결과 필드, 판정식의 수.
 //   2. 보고서: generateDetailedReport 가 부르는 _rpt* 와 _buildBucklingReportHtml — 제목(h2 · h3), 읽는 칸 · 결과 필드, 박힌 수.
 //   3. 렌더 시험이 본 항목(test/rendered/out/k3/observed_validation_items.json)을 정적 목록과 맞댄다 — 빠짐 · 남음.
@@ -17,7 +17,7 @@ const OUT = path.join(ROOT, 'test', 'rendered', 'out', 'k3');
 const DOC_JSON = path.join(ROOT, 'docs', 'implementation', '20261124-k3-inventory.json');
 const DOC_MD = path.join(ROOT, 'docs', 'implementation', '20261124-k3-inventory.md');
 const DS = require(path.join(ROOT, 'webview', 'js', 'designState.js'));
-const SRC = fs.readFileSync(path.join(ROOT, 'webview', 'js', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+const SRC = fs.readFileSync(path.join(ROOT, 'webview', 'js', 'review.js'), 'utf8').replace(/\r\n/g, '\n');
 const lineOf = (i) => SRC.slice(0, i).split('\n').length;
 const ID2KEY = Object.fromEntries(DS.FIELDS.map((f) => [f[1], f[0]]));
 
@@ -331,7 +331,7 @@ function main() {
   const hcCount = hcItems.reduce((a, it) => a + it.annotation.hc.length, 0);
   const derivedCount = R.reduce((a, r) => a + r.derived.length, 0);
   const missingNote = V.items.filter((it) => !it.annotation).map((it) => it.item);
-  const summary = { validation: { pushSites: V.items.length, function: `app.js ${V.line}–${V.end}`, byCategory: byCat, byEngineRelation: byEng, byDestination: byTo,
+  const summary = { validation: { pushSites: V.items.length, function: `review.js ${V.line}–${V.end}`, byCategory: byCat, byEngineRelation: byEng, byDestination: byTo,
     hardCodedThresholds: { items: hcItems.length, thresholds: hcCount }, withDefect: V.items.filter((it) => it.annotation && it.annotation.defect).length, missingNote },
   report: { functions: R.length, pageDerived: derivedCount }, observed: X };
   if (process.argv.includes('--check')) {
@@ -340,11 +340,11 @@ function main() {
     const sig = (arr) => arr.map((it) => `${it.category}|${it.item}`).join('\n');
     const problems = [];
     if (!doc) { problems.push('no inventory JSON — run node test/rendered/k3/inventory.js'); }
-    else if (sig(doc.validation) !== sig(V.items)) { problems.push('the validation items in app.js differ from the inventory JSON — regenerate it (node test/rendered/k3/inventory.js) and review the notes'); }
+    else if (sig(doc.validation) !== sig(V.items)) { problems.push('the validation items in review.js differ from the inventory JSON — regenerate it (node test/rendered/k3/inventory.js) and review the notes'); }
     if (missingNote.length) { problems.push('items without a NOTE: ' + missingNote.join(', ')); }
     if (X.available && X.unmatched.length) { problems.push('items seen in the rendered run but not in the static list: ' + X.unmatched.join('; ')); }
     if (doc && doc.report && sig(doc.report.map((r) => ({ category: r.name, item: r.heads.join(';') }))) !== sig(R.map((r) => ({ category: r.name, item: r.heads.join(';') })))) {
-      problems.push('the report sections in app.js differ from the inventory JSON — regenerate it');
+      problems.push('the report sections in review.js differ from the inventory JSON — regenerate it');
     }
     console.log(problems.length ? 'k3 inventory: FAIL\n  ' + problems.join('\n  ') : `k3 inventory: PASS (${V.items.length} validation push sites — all annotated; ${R.length} report functions; rendered run saw ${X.observed || 0} items, none outside the list; never seen ${X.neverSeen ? X.neverSeen.length : '?'})`);
     if (problems.length) { process.exitCode = 1; }
@@ -354,7 +354,7 @@ function main() {
 
   const L = [];
   L.push(`생성: \`node test/rendered/k3/inventory.js\` (${new Date().toISOString().slice(0, 10)}). 손으로 고치지 않는다 — 이 표 밖의 글만 손으로 쓴다.`, '');
-  L.push(`### 검증 항목 — \`checks.push\` 자리 ${V.items.length} (app.js ${V.line}–${V.end})`, '');
+  L.push(`### 검증 항목 — \`checks.push\` 자리 ${V.items.length} (review.js ${V.line}–${V.end})`, '');
   L.push(`분류별: ${Object.entries(byCat).map(([k, v]) => `${k} ${v}`).join(' · ')}`, '');
   L.push(`엔진과의 관계: ${Object.entries(byEng).map(([k, v]) => `${k} ${v}`).join(' · ')} · K3 에서 갈 곳: ${Object.entries(byTo).map(([k, v]) => `${k} ${v}`).join(' · ')}`, '');
   L.push(`박힌 공학 한계: 항목 ${hcItems.length} · 한계 ${hcCount}. 결함 표시가 있는 항목 ${summary.validation.withDefect}.${missingNote.length ? ' 주석 없는 항목: ' + missingNote.join(', ') : ''}`, '');

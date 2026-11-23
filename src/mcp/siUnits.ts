@@ -449,6 +449,8 @@ export const SI_OUT_PROPS: Table = { ...MEMBER_KEYS, P: 'none', M11: 'none', M22
 /** 하중 해석(analyze_loads): 모멘트 kip-ft, 위치 ft, 하중 plf, 비지지길이 in, 처짐 in. */
 export const SI_OUT_LOADS: Table = {
     ...MEMBER_KEYS,
+    // 엔진 6b283a5: 포락선 측점마다의 조합 · 패턴 — 격자 색인 · 하중 경우 · 패턴 번호의 연속 구간([시작, 개수, 경우, 패턴]), 랩 끝의 이웃 격자점. 단위 없음
+    envelope_source: { '*': 'none' }, D_envelope_source: { '*': 'none' }, source_stations: 'none',
     ...Object.fromEntries(['Mu', 'Mu_max', 'Mu_min', 'M1', 'M2', 'MA', 'MB', 'MC', 'Mmax', 'M_max_abs',
         'max_abs_M', 'max_neg_M', 'max_pos_M', 'M_diagram', 'M_envelope_max', 'M_envelope_min',
         'Mu_kipft'].map((k) => [k, 'moment_ft' as const])),
@@ -648,11 +650,9 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
         b_fastener: L, c_fastener: L, Fss_kip: F, D_screw_in: L, Fu1_ksi: S, Fu2_ksi: S,
         kphi_override: 'rot_stiff', kx_override: 'lat_stiff',
     },
-    generate_report: {
-        Fy: S, Fu: S, Mu: MOM, Pu: F, Lb: L, KxLx: L, KyLy: L, KtLt: L, span_ft: 'length_ft',
-        spacing_ft: 'length_ft', loads: { '*': 'linload' },
-    },
-    validate_design: { Fy: S },
+    // K3: 수 인자가 없다 — 단위는 호스트가 보고서 · 항목의 글을 그 단위로 쓴다
+    generate_report: {},
+    validate_design: {},
     design_lap_connection: {
         d: L, t: L, Fy: S, Fu: S, lap_left_in: L, lap_right_in: L, Mu_support: MOM, Vu_support: F,
         fastener_dia: L, end_distance: L, Se: 'modulus', Sf: 'modulus', Mnd: MOM, Mnd_single: MOM,
@@ -695,7 +695,7 @@ export const SI_INPUT_DIMENSIONLESS: Record<string, string[]> = {
     analyze_loads: [],
     design_purlin: ['wc_n_webs'],
     calc_deck_stiffness: [],
-    generate_report: ['Cb'],
+    generate_report: [],
     validate_design: [],
     design_lap_connection: ['n_rows', 'mf'],
     check_lap_length: [],
