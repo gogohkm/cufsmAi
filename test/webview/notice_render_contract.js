@@ -139,13 +139,16 @@ const RESULT = {
     ['1e6 ksi', '1e6 ksi'], ['7850 kg/m^3', '7850 kg/m^3'], ['5 in^5', '5 in^5'], ['5 in⁵', '5 in⁵'], ['3 kip-in/rad/in', '3 kip-in/rad/in'], ['4 in-lb', '4 in-lb'],
   ];
   for (const [us, si] of cases) { assert.strictEqual(N.literalToSI(us), si, 'literal ' + us); }
-  // 계약 사례(엔진 고정값 전부): 템플릿 글은 바꾸지 않는다 — 마지막 수단은 엔진이 글로 넘긴 매개변수 둘에서만 쓰인다
+  // 계약 사례(엔진 고정값 전부): code 가 있는 글에는 무늬 바꾸기가 한 번도 쓰이지 않는다(엔진 6fa25f7 — 글로 넘기던 매개변수 둘도 조각 목록이 됐다).
+  // 마지막 수단은 code 가 없는 글에만 남는다
   N.STATS.fallback.length = 0;
   for (const c of FIX.pairs) { N.render(c, { units: 'SI', lang: 'ko' }); N.render(c, { units: 'SI', lang: 'en' }); }
   const hits = [...new Set(N.STATS.fallback)].sort();
-  assert.deepStrictEqual(hits, ['member.warning.effective_length_defaulted_verify.items', 'member.warning.i6_2_1_i6_k2.i621_issues'],
-    'the pattern fallback fires only on the two engine text parameters: ' + JSON.stringify(hits));
-  notes.push(`pattern: ${cases.length} unit forms (in³ regression, ^n, compounds left alone); on the corpus only ${hits.length} engine text params use the fallback`);
+  assert.deepStrictEqual(hits, [], 'the pattern fallback never fires on coded engine text: ' + JSON.stringify(hits));
+  N.STATS.fallback.length = 0;
+  assert.strictEqual(N.render('span ≤ 33 ft', { units: 'SI' }), 'span ≤ 10.06 m');
+  assert.deepStrictEqual(N.STATS.fallback, ['text'], 'text with no code still has the guarded fallback');
+  notes.push(`pattern: ${cases.length} unit forms (in³ regression, ^n, compounds left alone); never fires on the coded corpus (${FIX.pairs.length} pairs), kept only for text with no code`);
 }
 
 // 7 ─ 호스트 알림(host.*) ───────────────────────────────────────────

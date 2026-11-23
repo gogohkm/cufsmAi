@@ -1382,10 +1382,12 @@
             html += '<tr><th style="text-align:left;padding:2px">모드</th><th style="text-align:right;padding:2px">Rn</th><th style="text-align:right;padding:2px">' + rnLbl + '</th><th style="padding:2px">지배</th></tr>';
             // 행 이름(엔진 영어)과 맞댄다 — forPage 가 지배 모드를 한국어 이름으로 바꾸고 원래 이름은 *_en 에 둔다
             var _pnsGov = result.Pns_governing_mode_en || result.Pns_governing_mode || fd.governing_mode_en || fd.governing_mode;
+            var _pnsGovId = result.Pns_governing_mode_id || fd.governing_mode_id || null;
             fd.limit_states.forEach(ls => {
-                const isGov = ls.name === _pnsGov;
+                // 엔진 6fa25f7: 행마다 check_id · name_ko — 지배는 id 로 맞대고(없으면 옛 이름), 이름은 한국어로
+                const isGov = ls.check_id && _pnsGovId ? ls.check_id === _pnsGovId : ls.name === _pnsGov;
                 html += '<tr style="' + (isGov ? 'font-weight:700;background:rgba(79,195,247,0.1)' : '') + '">';
-                html += '<td style="padding:2px">' + ls.name + '</td>';
+                html += '<td style="padding:2px">' + _esc(ls.name_ko || ls.name) + '</td>';
                 html += '<td style="text-align:right;padding:2px">' + fmtVal(ls.Rn, 'force') + '</td>';
                 html += '<td style="text-align:right;padding:2px">' + fmtVal(ls.design_strength, 'force') + '</td>';
                 html += '<td style="text-align:center;padding:2px">' + (isGov ? '★' : '') + '</td>';
@@ -1564,9 +1566,9 @@
             html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
             html += '<tr><th style="text-align:left;padding:3px">모드</th><th style="text-align:right;padding:3px">Rn</th><th style="text-align:right;padding:3px">' + rnLbl + '</th><th style="padding:3px">지배?</th></tr>';
             result.limit_states.forEach(ls => {
-                const isGov = ls.name === (result.governing_mode_en || result.governing_mode);
+                const isGov = ls.check_id && result.governing_mode_id ? ls.check_id === result.governing_mode_id : ls.name === (result.governing_mode_en || result.governing_mode);
                 html += '<tr style="' + (isGov ? 'font-weight:700;background:rgba(79,195,247,0.1)' : '') + '">';
-                html += '<td style="padding:3px">' + ls.name + '</td>';
+                html += '<td style="padding:3px">' + _esc(ls.name_ko || ls.name) + '</td>';
                 html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.Rn, 'force') + '</td>';
                 html += '<td style="text-align:right;padding:3px">' + fmtVal(ls.design_strength, 'force') + '</td>';
                 html += '<td style="text-align:center;padding:3px">' + (isGov ? '★' : '') + '</td>';
@@ -5497,7 +5499,7 @@
             summaryHtml += '<table style="width:100%;font-size:12px">';
             ls.forEach(l => {
                 const mark = l.governs ? ' <span class="governing-badge">지배</span>' : '';
-                summaryHtml += _summaryRow(l.name + mark, l.design_strength, fU, l.governs ? '#ffab00' : undefined, 'force');
+                summaryHtml += _summaryRow(_esc(l.name_ko || l.name) + mark, l.design_strength, fU, l.governs ? '#ffab00' : undefined, 'force');
             });
             summaryHtml += _summaryRow('설계강도', data.design_strength, fU, '#4fc3f7', 'force');
             summaryHtml += '</table>';
@@ -5708,7 +5710,7 @@
                 const isGov = !!ls.governs;
                 stepsHtml += '<div class="calc-step' + (isGov ? ' governing' : '') + '">';
                 stepsHtml += '<div class="calc-step-header">';
-                stepsHtml += '<span>' + (i+1) + '. ' + ls.name + '</span>';
+                stepsHtml += '<span>' + (i+1) + '. ' + _esc(ls.name_ko || ls.name) + '</span>';
                 stepsHtml += '<span>';
                 if (isGov) stepsHtml += '<span class="governing-badge">지배</span>';
                 if (ls.equation) stepsHtml += '<span class="calc-step-ref">' + specRefSpan(ls.equation) + '</span>';

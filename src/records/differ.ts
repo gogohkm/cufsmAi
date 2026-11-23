@@ -20,6 +20,8 @@ export type FieldInfoFn = (key: string) => FieldInfo | null;
 
 export interface ArraySummary {
     count: { from: number; to: number }; changed: number; added: number; removed: number; indices: number[]; columns?: string[];
+    /** 줄의 번호(첫 칸 — 절점 · 요소 번호)가 수이면 바뀐 · 더한 · 뺀 줄의 번호(각 200 개까지) — 화면이 강조한다(R2-3) */
+    ids?: { changed: number[]; added: number[]; removed: number[] };
 }
 export interface FieldChange {
     path: string; group: string; unit: UnitKey | null;
@@ -76,6 +78,11 @@ function arraySummary(a: unknown, b: unknown, cols?: string[]): ArraySummary | n
     }
     const s: ArraySummary = { count: { from: A.length, to: B.length }, changed, added: Math.max(0, B.length - A.length), removed: Math.max(0, A.length - B.length), indices };
     if (cols) { s.columns = [...colSet].sort(); }
+    const idOf = (r: unknown[] | undefined) => (r && typeof r[0] === 'number' && Number.isFinite(r[0]) ? r[0] as number : null);
+    if ([...A, ...B].every((r) => idOf(r) !== null)) {
+        const cap = (xs: number[]) => xs.slice(0, MAX_INDICES);
+        s.ids = { changed: cap(indices.map((i) => idOf(B[i - 1])!)), added: cap(B.slice(n).map((r) => idOf(r)!)), removed: cap(A.slice(n).map((r) => idOf(r)!)) };
+    }
     return s;
 }
 

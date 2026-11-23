@@ -102,6 +102,37 @@ export function fieldText(f: FieldChange, units: DisplayUnits, labelOf?: LabelFn
     return `${label} ${a} → ${b}${u && typeof f.to === 'number' ? ` ${u}` : ''}`;
 }
 
+/**
+ * 칸 하나의 구조(R2-3 — 화면의 열 · 칩 · 요소 강조가 쓴다, 이름 글로 맞대지 않게): 경로 · 키 · 한국어 이름 · 전 · 후(표시 단위의 수 —
+ * 글로 꾸미지 않는다) · 단위 글자 · 단위 종류. 배열 칸은 개수 · 바뀐 줄 번호. `text` 는 같은 칸의 한 줄(fieldText).
+ */
+export interface FieldRecord {
+    path: string; key: string; label_ko: string; text: string;
+    from?: unknown; to?: unknown; unit?: string | null; quantity?: UnitKey | null;
+    summary?: { count: { from: number; to: number }; changed: number; added: number; removed: number; columns?: string[]; ids?: ArraySummary['ids'] };
+    odd?: number;
+}
+function convertValue(v: unknown, unit: UnitKey | null, units: DisplayUnits): unknown {
+    if (typeof v === 'number' && unit && units === 'SI') { return toSI(v, unit); }
+    if (Array.isArray(v) && unit && units === 'SI') { return v.map((x) => (typeof x === 'number' ? toSI(x, unit) : x)); }
+    return v ?? null;
+}
+export function fieldRecord(f: FieldChange, units: DisplayUnits, labelOf?: LabelFn): FieldRecord {
+    const key = f.path.replace(/^(model|case).(sectionParams.|prop.|inputs.|spans.|mcpOnly.)?/, '');
+    const out: FieldRecord = { path: f.path, key, label_ko: fieldLabel(f.path, labelOf), text: fieldText(f, units, labelOf) };
+    if (f.odd !== undefined) { out.odd = f.odd; return out; }
+    if (f.summary) {
+        const sm = f.summary;
+        out.summary = { count: sm.count, changed: sm.changed, added: sm.added, removed: sm.removed, ...(sm.columns ? { columns: sm.columns } : {}), ...(sm.ids ? { ids: sm.ids } : {}) };
+        return out;
+    }
+    out.from = convertValue(f.from, f.unit, units);
+    out.to = convertValue(f.to, f.unit, units);
+    out.unit = f.unit ? unitLabel(f.unit, units) : null;
+    out.quantity = f.unit;
+    return out;
+}
+
 /** 칸의 무게 — 상대 변화 |후 − 전| / max(|전|, |후|). 수가 아닌 변경 · 요약은 1(가장 크다고 본다) */
 function weight(f: FieldChange): number {
     if (f.summary || f.odd !== undefined) { return f.explainedBy ? 0 : 1; }

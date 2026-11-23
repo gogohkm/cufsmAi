@@ -20,12 +20,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { sha256Hex } from './canonical';
-import { CaseEntry, CASES_SPEC, caseFileOk, foldCases, lastKnownSha } from './cases';
+import { CaseEntry, CASES_SPEC, caseFileOk, foldCases, lastKnown } from './cases';
 import { readIndex, summarizeCsd, writeIndex, CSD_MAX_BYTES } from './caseIndex';
 import { ActorContext, isMcpContext, toActor } from './context';
 import { contentFp, normalizeEngineId, requestFp, resultFp } from './fp';
 import { assertNoLinks, assertSingleLink, mkdirInside, projectRelative, readBounded, realRoot, RecordsPathError, writeExclusive } from './fsx';
-import { acquireLock, LockInfo, LockResult, releaseLock, takeOver } from './locks';
+import { acquireLock, LockInfo, LockResult, readLock, releaseLock, takeOver } from './locks';
 /** 열쇠 자리의 작성자 이름 파일 */
 export const WRITER_NAME_FILE = 'writer-name.json';
 import { DATA_DIR, ReadBudget, ReadResult, RecordLine, RecordLog, RecordType, Actor, LogSpec } from './log';
@@ -37,8 +37,9 @@ import {
 } from './project';
 import { foldRuns, lastRunByKind, RunEntry, RunKind, RUN_KINDS, runSummary, RUNS_SPEC } from './runs';
 import { getBlob, putBlob } from './blobs';
-import { ASSUMPTION_SPEC, foldAssumptions } from './assumptions';
-import { WORK_SPEC, foldWork } from './work';
+import { Assumption, ASSUMPTION_SPEC, foldAssumptions, prepareAssumption } from './assumptions';
+import { WORK_SPEC, foldWork, prepareWork, WorkItem } from './work';
+import { foldSources, listUnregistered, prepareSource, Source, SOURCE_SPEC, sourceState } from './sources';
 import { KeyUnavailableError, loadOrCreateWriter, makeWriterCard, readTrust, readWriterCard, trustSelf, TrustStore, Writer, WriterCard } from './writer';
 
 /** 데스크가 받는 것 — 모두 주입(시험은 임시 폴더와 가짜 시계로) */
@@ -124,6 +125,9 @@ export interface CaseStatusData {
     provisionalAssumptions: number;
     records: RecordsHealth;
     runs?: Array<{ kind: RunKind; at: string; by: string; client: string | null; engine: string | null; status: string; ms: number | null }>;
+    /** 이 대상의 실행 이력(새 것부터 20) — 실행마다 요약(판정 · 최대 판정비 · 지배 항목 · 단면 성질 몇 개). R2-3: 07 의 「먼저 한 것」 */
+    history?: Array<{ run: string; kind: RunKind; at: string; by: string; client: string | null; status: string;
+        pass: boolean | null; maxRatio: number | null; governing: { id: string; ratio: number | null; verdict: string } | null; props: Record<string, number> | null }>;
 }
 
 interface OpenProject { dir: string; decl: Declaration; readOnly: boolean; warnings: string[] }
@@ -246,6 +250,7 @@ export class RecordsDesk {
         if (type === 'runs') { return RUNS_SPEC; }
         if (type === 'work') { return WORK_SPEC; }
         if (type === 'assumptions') { return ASSUMPTION_SPEC; }
+        if (type === 'sources') { return SOURCE_SPEC; }
         return plainSpec(type);
     }
 
@@ -411,6 +416,7 @@ export class RecordsDesk {
     /** 열린 프로젝트의 검토 대상(이름 · 종류 · 색인 · 저장 · 보관)과 등록 안 된 `.csd`(충돌 사본일 수 있음) */
     listCases(opts: { includeArchived?: boolean } = {}): {
         cases: Array<{ name: string; caseId: string; kind: string; file: string; archived: boolean; lastSaved: string | null; open: boolean; missing: boolean;
+            lock: { name: string; host: string; since: string; mine: boolean } | null;
             index: { memberType: string | null; section: string | null; steel: string | null; maxRatio: number | null; pass: boolean | null;
                 results: string[]; outline: { paths: number[][]; aspect: number } | null } | null }>;
         unregistered: Array<{ name: string; maybeConflictCopy: boolean }>;
@@ -434,8 +440,14 @@ export class RecordsDesk {
                     if (ix) { index = { memberType: ix.memberType, section: ix.section, steel: ix.steel, maxRatio: ix.maxRatio, pass: ix.pass, results: ix.results, outline: ix.outline }; }
                 }
             } catch { missing = true; }
+            // R2-3: 잠금을 쥔 쪽(이 창이 쥔 지금 대상은 빼고) — 이름 · 호스트 · 때. mine = 이 PC 의 같은 작성자(다른 창일 수 있다)
+            let lock: { name: string; host: string; since: string; mine: boolean } | null = null;
+            if (!(this.cur?.caseId === e.caseId && this.cur.lockHeld)) {
+                const lk = readLock(p.dir, e.caseId, this.writerObj ?? undefined);
+                if (lk) { lock = { name: lk.info.name, host: lk.info.host, since: lk.info.at, mine: lk.mine }; }
+            }
             cases.push({ name: e.name, caseId: e.caseId, kind: e.kind, file: e.file, archived: e.archived, lastSaved: e.lastSaved?.at ?? null,
-                open: this.cur?.caseId === e.caseId, missing, index });
+                open: this.cur?.caseId === e.caseId, missing, lock, index });
         }
         const unregistered: Array<{ name: string; maybeConflictCopy: boolean }> = [];
         try {
@@ -497,7 +509,7 @@ export class RecordsDesk {
      * 패널이 `.csd` 를 연 뒤(그 바이트로). 프로젝트 안이면 대상을 찾거나(`record` 키 → 경로) 등록(`discovered`)하고, 잠금을 쥐고, `opened` ·
      * (마지막으로 알려진 바이트와 다르면) `external` 줄을 쓴다. 읽기 전용이면 아무것도 쓰지 않는다.
      */
-    afterOpen(abs: string, bytes: Buffer, info: { contentFp?: string | null; record?: unknown } = {}): OpenOutcome {
+    afterOpen(abs: string, bytes: Buffer, info: { contentFp?: string | null; record?: unknown; snapshot?: unknown } = {}): OpenOutcome {
         this.closeCase();
         this.roFile = null;
         const out: OpenOutcome = { inProject: false, project: null, case: null, readOnly: false, readOnlyReason: null, lock: null, wrote: [], notices: [] };
@@ -565,15 +577,18 @@ export class RecordsDesk {
             this.append('cases', { id: this.newLineId('case'), event: 'discovered', actor, body: { caseId, name: checkName(name).ok ? name : cleanHeaderText(name, 60) ?? 'case', file: rel, kind: 'section-only' } });
             out.wrote.push('discovered');
         }
-        this.append('cases', { id: this.newLineId('case'), event: 'opened', actor, body: { caseId, fileSha } });
+        // 연 바이트의 모델 · 입력 사본 — 다음에 밖에서 바뀐 것을 비교할 기준(저장 없이 연 대상도 — R2-3 고침)
+        let openSnap: string | null = null;
+        if (info.snapshot !== undefined) { try { openSnap = putBlob(p.dir, info.snapshot).sha256; } catch { openSnap = null; } }
+        const known = entry ? lastKnown(entry) : null;
+        this.append('cases', { id: this.newLineId('case'), event: 'opened', actor, body: { caseId, fileSha, ...(openSnap ? { snapshot: openSnap } : {}) } });
         out.wrote.push('opened');
-        const known = entry ? lastKnownSha(entry) : null;
-        if (known && known !== fileSha) {
+        if (known && known.fileSha !== fileSha) {
             this.append('cases', { id: this.newLineId('case'), event: 'external', actor: { kind: 'program' },
-                body: { caseId, fileSha, ...(info.contentFp ? { contentFp: info.contentFp } : {}) } });
+                body: { caseId, fileSha, ...(info.contentFp ? { contentFp: info.contentFp } : {}), ...(openSnap ? { snapshot: openSnap } : {}) } });
             out.wrote.push('external');
-            // R2-2: 밖에서 바뀐 것의 변경 줄 — 마지막 저장의 스냅숏(있으면)과 비교한다(호스트가)
-            if (entry?.lastSaved?.snapshot) { out.externalFrom = entry.lastSaved.snapshot; }
+            // R2-2: 밖에서 바뀐 것의 변경 줄 — 마지막으로 알려진 파일의 사본(저장 · 열기)과 비교한다(호스트가)
+            if (known.snapshot) { out.externalFrom = known.snapshot; }
             out.notices.push('the file changed outside StCFSD since it was last saved or opened here');
         }
         this.cur = { caseId, name, rel, abs: path.resolve(abs), kind: out.case.kind, readOnly: false, readOnlyReason: null, lock: lock.info, lockHeld: true, knownSha: fileSha };
@@ -681,7 +696,7 @@ export class RecordsDesk {
             caseId: c.caseId, kind, engineId: normalizeEngineId(this.env.engineId()), modelFp: mFp, caseFp: cFp, requestFp: requestFp(requestText),
             resultFp: rFp, blob, snapshot, caseRev: Number.isSafeInteger(extra.caseRev) ? extra.caseRev : null,
             ms: Number.isSafeInteger(extra.ms) && extra.ms! >= 0 ? extra.ms : null, status: failed ? 'failed' : 'ok',
-            summary: failed ? null : runSummary(result),
+            summary: failed ? null : runSummary(result, extra.props),
         };
         if (failed) { body.error = cleanHeaderText(extra.error ?? (result as any)?.error, 300) ?? ''; }
         const line = this.append('runs', { id: this.newLineId('run'), event: 'run', actor: toActor(extra.actor ?? this.ctx(), 'program'), body });
@@ -763,6 +778,11 @@ export class RecordsDesk {
         }
         if (opts.detail === 'runs') {
             data.runs = [...last.values()].map((r) => ({ kind: r.kind, at: r.at, by: r.actor, client: r.client, engine: r.engineId ? r.engineId.slice(7, 19) : null, status: r.status, ms: r.ms }));
+            data.history = runs.filter((r) => r.caseId === caseId).slice(-20).reverse().map((r) => {
+                const g = r.summary?.governing?.[0] ?? null;
+                return { run: r.runId, kind: r.kind, at: r.at, by: r.actor, client: r.client, status: r.status, pass: r.summary?.pass ?? null,
+                    maxRatio: r.summary?.maxRatio ?? null, governing: g ? { id: g.id, ratio: g.ratio, verdict: g.verdict } : null, props: r.summary?.props ?? null };
+            });
         }
         return data;
     }
@@ -773,6 +793,103 @@ export class RecordsDesk {
         const all = foldRuns(this.read('runs').lines);
         const id = caseId === undefined ? this.cur?.caseId ?? null : caseId;
         return all.filter((r) => r.caseId === id);
+    }
+
+    // ── 업무 · 가정 · 원자료(R3-2 — 설계 §2.4.5 – 2.4.7 · §4.3 · §4.4) ─────────────────────
+
+    /** 쓸 수 있는 프로젝트(아니면 던진다 — 아무것도 쓰지 않는다) */
+    private writableProject(): OpenProject {
+        const p = this.proj;
+        if (!p) { throw new Error('no project is open'); }
+        if (p.readOnly) { throw new Error('the project is read-only'); }
+        return p;
+    }
+    /** 이 PC 의 작성자 id(열쇠가 없으면 만들지 않고 null) */
+    private myWriterId(): string | null {
+        if (this.writerObj) { return this.writerObj.writerId; }
+        try { return this.writer().writerId; } catch { return null; }
+    }
+    /** 기록 하나의 줄 · 세지 않은 줄 수 · 항목(add · register 줄)마다 쓴 쪽 */
+    private recordLines(type: 'work' | 'assumptions' | 'sources'): { lines: RecordLine[]; uncounted: number; firstActor: Map<string, { kind: string; writer: string }> } {
+        if (!this.proj) { return { lines: [], uncounted: 0, firstActor: new Map() }; }
+        let r: ReadResult;
+        try { r = this.read(type); } catch { return { lines: [], uncounted: 0, firstActor: new Map() }; }
+        const firstActor = new Map<string, { kind: string; writer: string }>();
+        for (const l of r.lines) {
+            if (l.status !== 'ok' || (l.event !== 'add' && l.event !== 'register') || typeof l.body?.item !== 'string') { continue; }
+            const key = firstActor.has(l.body.item) && firstActor.get(l.body.item)!.writer !== l.sig.w ? `${l.body.item}~${l.sig.w.slice(1, 5)}` : l.body.item;
+            if (!firstActor.has(key)) { firstActor.set(key, { kind: l.actor.kind, writer: l.sig.w }); }
+        }
+        return { lines: r.lines, uncounted: r.lines.filter((l) => l.status !== 'ok').length, firstActor };
+    }
+    private stamp<T extends { writer: string }>(items: Array<T & { key?: string; item: string }>, first: Map<string, { kind: string; writer: string }>):
+    Array<T & { writtenBy: string; own: boolean }> {
+        const me = this.myWriterId();
+        return items.map((x) => ({ ...x, writtenBy: first.get(x.key ?? x.item)?.kind ?? 'unverified', own: !!me && x.writer === me }));
+    }
+
+    /** 업무 항목(세는 줄로 접은 것) — 쓴 쪽 · 이 PC 의 작성자인가 · 지금 내용과 다른 기준인가 */
+    workItems(nowContentFp?: string): Array<WorkItem & { writtenBy: string; own: boolean }> {
+        const v = this.recordLines('work');
+        return this.stamp(foldWork(v.lines, nowContentFp ? { nowContentFp } : {}), v.firstActor);
+    }
+    assumptionItems(): Array<Assumption & { writtenBy: string; own: boolean }> {
+        const v = this.recordLines('assumptions');
+        return this.stamp(foldAssumptions(v.lines), v.firstActor);
+    }
+    sourceItems(): Array<Source & { writtenBy: string; own: boolean }> {
+        const v = this.recordLines('sources');
+        return this.stamp(foldSources(v.lines) as Array<Source & { item: string }>, v.firstActor);
+    }
+    /** 세지 않은 줄(서명 없음 · 믿지 않는 작성자 · 자리 틀림 · 표 밖) 수 */
+    uncountedLines(type: 'work' | 'assumptions' | 'sources'): number { return this.recordLines(type).uncounted; }
+
+    /** 업무 항목 쓰기(행위자 = 지금 문맥 — 표가 AI 만 허락한다). 틀리면 던진다(아무것도 쓰지 않는다) */
+    writeWork(event: string, args: any): { item: string; event: string } {
+        this.writableProject();
+        const lines = this.read('work').lines;
+        const prep = prepareWork(event, args, lines);
+        this.append('work', { id: prep.id, event: prep.event, actor: toActor(this.ctx(), 'program'), body: prep.body as any });
+        return { item: prep.id, event: prep.event };
+    }
+    /** 가정 쓰기 — AI(문맥) 또는 프로그램의 자동 가정(origin program-*, 행위자 program) */
+    writeAssumption(event: string, args: any, origin: 'ai' | 'program-default' | 'program-engine' = 'ai'): { item: string; event: string } {
+        this.writableProject();
+        const lines = this.read('assumptions').lines;
+        const prep = prepareAssumption(event, args, lines, origin);
+        const actor: Actor = origin === 'ai' ? toActor(this.ctx(), 'program') : { kind: 'program' };
+        this.append('assumptions', { id: prep.id, event: prep.event, actor, body: prep.body as any });
+        return { item: prep.id, event: prep.event };
+    }
+    /** 프로그램이 닫는 자동 가정(원인이 사라짐 — 그 변경 · 실행 id) */
+    closeProgramAssumption(item: string, closedBy?: string): void {
+        this.writableProject();
+        const lines = this.read('assumptions').lines;
+        const prep = prepareAssumption('close', { item, ...(closedBy ? { closedBy } : {}) }, lines, 'program-default');
+        this.append('assumptions', { id: prep.id, event: prep.event, actor: { kind: 'program' }, body: prep.body as any });
+    }
+    /** 원자료 등록 · 갱신(`01_원자료/` 안의 상대경로만 — 내용은 읽지 않고 해시만) */
+    writeSource(event: string, args: any): { item: string; event: string } {
+        const p = this.writableProject();
+        const lines = this.read('sources').lines;
+        const prep = prepareSource(p.dir, event, args, lines);
+        this.append('sources', { id: prep.id, event: prep.event, actor: toActor(this.ctx(), 'program'), body: prep.body as any });
+        return { item: prep.id, event: prep.event };
+    }
+    /** 원자료마다 지금 파일과 견준 상태 · 등록 안 된 파일(상대경로) — 내용은 주지 않는다 */
+    sourceStates(): { states: Map<string, 'same' | 'changed' | 'missing' | 'unreadable'>; unregistered: string[] } {
+        const p = this.proj;
+        if (!p) { return { states: new Map(), unregistered: [] }; }
+        const items = foldSources(this.recordLines('sources').lines);
+        const states = new Map(items.map((s) => [s.item, sourceState(p.dir, s)] as [string, 'same' | 'changed' | 'missing' | 'unreadable']));
+        return { states, unregistered: listUnregistered(p.dir, items) };
+    }
+    /** 지금 대상 id(쓸 수 있을 때) */
+    writableCaseId(): string | null { const c = this.cur; return c && !c.readOnly && this.proj && !this.proj.readOnly ? c.caseId : null; }
+    /** 지금 대상 · 종류의 실행 id(새 것부터) — 업무 항목의 기준 */
+    recentRunIds(limit = 5): string[] {
+        if (!this.proj || !this.cur) { return []; }
+        try { return foldRuns(this.read('runs').lines).filter((r) => r.caseId === this.cur!.caseId).slice(-limit).reverse().map((r) => r.runId); } catch { return []; }
     }
 
     // ── 사람만(얼굴 `person` 이 감싼다) ─────────────────────────────────

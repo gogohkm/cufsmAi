@@ -3,7 +3,8 @@
  *
  * 사건과 몸:
  *  - `create` · `import` · `discovered` `{caseId, name, file, kind, sourceName?, sourceSha?}` — 대상이 생김(`import` 는 밖의 `.csd` 사본)
- *  - `opened {caseId, fileSha}` · `saved {caseId, fileSha, contentFp, bytes}` · `external {caseId, fileSha, contentFp}`
+ *  - `opened {caseId, fileSha, snapshot?}` · `saved {caseId, fileSha, contentFp, bytes, snapshot?}` · `external {caseId, fileSha, contentFp, snapshot?}`
+ *    (snapshot = 그 바이트의 모델 · 입력 사본의 해시 — 밖에서 바뀐 것을 비교하는 기준)
  *  - `relink {caseId, file}` · `archive {caseId}` · `unarchive {caseId}` — 사람만
  * `file` 은 프로젝트 기준 상대경로(`/`, NFC) — **`02_검토대상/` 아래만**. 접기는 세는 줄(`ok`)만(V7-23).
  * 두 작성자가 같은 파일을 따로 등록하면 먼저 적힌 것(`at` 차례)이 이긴다 — 뒤의 대상 id 는 그 대상의 다른 이름으로 접힌다.
@@ -48,9 +49,9 @@ function readCaseBody(event: string, b: Record<string, any>): Record<string, any
         if (event !== 'opened') {
             if (typeof b.contentFp === 'string' && FP_RE.test(b.contentFp)) { out.contentFp = b.contentFp; }
             if (event === 'saved' && Number.isSafeInteger(b.bytes) && b.bytes >= 0) { out.bytes = b.bytes; }
-            // R2-2: 저장한 모델 · 입력의 사본(밖에서 바뀐 것을 비교할 기준)
-            if (event === 'saved' && typeof b.snapshot === 'string' && SHA_RE.test(b.snapshot)) { out.snapshot = b.snapshot; }
         }
+        // R2-2: 그 바이트의 모델 · 입력 사본(밖에서 바뀐 것을 비교할 기준) — 저장 · 열기 · 밖에서 바뀜 모두(R2-3 고침: 저장 없이 연 대상도)
+        if (typeof b.snapshot === 'string' && SHA_RE.test(b.snapshot)) { out.snapshot = b.snapshot; }
         return out;
     }
     if (event === 'relink') { if (!caseFileOk(b.file)) { return null; } out.file = b.file; return out; }
@@ -63,9 +64,9 @@ export const CASES_SPEC: LogSpec = { type: 'cases', major: 1, events: CASE_EVENT
 export interface CaseEntry {
     caseId: string; name: string; file: string; kind: string; archived: boolean;
     createdAt: string; createdBy: string; writer: string;
-    lastOpened: { at: string; fileSha: string } | null;
+    lastOpened: { at: string; fileSha: string; snapshot?: string } | null;
     lastSaved: { at: string; fileSha: string; contentFp: string | null; bytes: number | null; writer: string; snapshot?: string } | null;
-    lastExternal: { at: string; fileSha: string } | null;
+    lastExternal: { at: string; fileSha: string; snapshot?: string } | null;
     /** 같은 파일을 뒤에 등록한 다른 대상 id(접힌 것) */
     aliases: string[];
 }
@@ -89,9 +90,9 @@ export function foldCases(lines: RecordLine[]): Map<string, CaseEntry> {
         }
         const e = byId.get(alias.get(b.caseId) ?? b.caseId);
         if (!e) { continue; }
-        if (l.event === 'opened') { e.lastOpened = { at: l.at, fileSha: b.fileSha }; }
+        if (l.event === 'opened') { e.lastOpened = { at: l.at, fileSha: b.fileSha, ...(b.snapshot ? { snapshot: b.snapshot } : {}) }; }
         else if (l.event === 'saved') { e.lastSaved = { at: l.at, fileSha: b.fileSha, contentFp: b.contentFp ?? null, bytes: b.bytes ?? null, writer: l.sig.w, ...(b.snapshot ? { snapshot: b.snapshot } : {}) }; }
-        else if (l.event === 'external') { e.lastExternal = { at: l.at, fileSha: b.fileSha }; }
+        else if (l.event === 'external') { e.lastExternal = { at: l.at, fileSha: b.fileSha, ...(b.snapshot ? { snapshot: b.snapshot } : {}) }; }
         else if (l.event === 'archive') { e.archived = true; }
         else if (l.event === 'unarchive') { e.archived = false; }
         else if (l.event === 'relink') {
@@ -102,9 +103,15 @@ export function foldCases(lines: RecordLine[]): Map<string, CaseEntry> {
     return byId;
 }
 
-/** 대상의 마지막으로 알려진 파일 해시(저장 · 열기 가운데 늦은 것) */
-export function lastKnownSha(e: CaseEntry): string | null {
+/** 대상의 마지막으로 알려진 파일(저장 · 열기 · 밖에서 바뀜 가운데 늦은 것) — 해시와 그 사본 */
+export function lastKnown(e: CaseEntry): { fileSha: string; snapshot: string | null } | null {
     const s = e.lastSaved, o = e.lastOpened, x = e.lastExternal;
-    const cands = [s, o, x].filter((v): v is { at: string; fileSha: string } => !!v).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-    return cands.length ? cands[cands.length - 1].fileSha : null;
+    const cands = [s, o, x].filter((v): v is { at: string; fileSha: string; snapshot?: string } => !!v).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    if (!cands.length) { return null; }
+    const last = cands[cands.length - 1];
+    // 같은 바이트의 사본이 늦은 줄에 없으면(옛 기록 — 열기에 사본이 없던 때) 같은 해시의 다른 줄의 사본
+    const snap = last.snapshot ?? cands.filter((c) => c.fileSha === last.fileSha && c.snapshot).map((c) => c.snapshot!).pop() ?? null;
+    return { fileSha: last.fileSha, snapshot: snap };
 }
+/** 대상의 마지막으로 알려진 파일 해시 */
+export function lastKnownSha(e: CaseEntry): string | null { return lastKnown(e)?.fileSha ?? null; }

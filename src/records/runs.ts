@@ -29,13 +29,22 @@ export interface RunSummary {
     governing: Array<{ id: string; ratio: number | null; verdict: string; location?: string }>;
     counts: { pass: number; fail: number; not_evaluated: number; other: number };
     regions?: number;
+    /** 그 실행이 쓴 단면 성질 몇 개(엔진 US — in · in² · in⁴ · in³ · in⁶) — 07 의 「먼저 한 것」 전 → 후 */
+    props?: Record<string, number>;
 }
+/** 실행 요약에 남기는 단면 성질(있는 것만) */
+export const SUMMARY_PROPS = ['A', 'Ixx', 'Izz', 'Sx', 'Sxx', 'Sf', 'J', 'Cw', 't'] as const;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 /** 결과에서 작은 요약을 짓는다(엔진 결과의 꼴에 기대지 않는 것만 — 없으면 빈 값) */
-export function runSummary(result: any): RunSummary {
+export function runSummary(result: any, props?: any): RunSummary {
     const s: RunSummary = { pass: null, maxRatio: null, governing: [], counts: { pass: 0, fail: 0, not_evaluated: 0, other: 0 } };
+    if (props && typeof props === 'object') {
+        const p: Record<string, number> = {};
+        for (const k of SUMMARY_PROPS) { const v = num(props[k]); if (v !== null) { p[k] = v; } }
+        if (Object.keys(p).length) { s.props = p; }
+    }
     if (!result || typeof result !== 'object') { return s; }
     s.pass = typeof result.pass === 'boolean' ? result.pass : null;
     s.maxRatio = num(result.utilization);

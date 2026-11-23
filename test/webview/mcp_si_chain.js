@@ -65,6 +65,8 @@ const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_d
   'get_design_check',
   // R1-2: 기록 도구 일곱(이름으로만 — 경로 없음)
   'get_case_status', 'list_projects', 'open_project', 'list_cases', 'open_case', 'new_case', 'save_case', 'list_changes',
+  // R3-2: 업무 항목 · 가정 · 원자료
+  'work_items', 'assumptions', 'sources',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
   'check_shear_lag', 'classify_modes', 'cold_work', 'custom_section_guide', 'delete_element', 'delete_node',
@@ -408,7 +410,23 @@ function checkDesignSummary(tag, level, s, fullRaw) {
   assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
   assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
   checkComplete(tag, s, full);
-  for (const k of NOTICES) { if (k in full) { assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k} in full`); } }
+  for (const k of NOTICES) {
+    if (!(k in full)) { continue; }
+    if (k === 'force_model' && level === 'summary' && full.force_model && full.force_model.description_code) {
+      // 결과마다 같은 고정 글은 요약에서 code + 한 줄 제목(글 전체는 detail 'checks') — 나머지 칸은 그대로
+      const f = full.force_model, g = s.force_model;
+      assert(g && g.description && g.description.code === f.description_code && typeof g.description.title === 'string' && g.description.title.length < 120,
+        `${tag}: force_model.description as code + title`);
+      assert.deepStrictEqual((g.known_limitations || []).map((x) => x.code), f.known_limitations_codes, `${tag}: known limitations by code`);
+      assert((g.known_limitations || []).every((x) => typeof x.title === 'string' && x.title.length < 80), `${tag}: one-line titles`);
+      for (const kk of ['basis', 'clause', 'clause_code', 'specification_provision', 'user_decision_pending']) {
+        assert.deepStrictEqual(g[kk], f[kk], `${tag}: force_model.${kk} kept`);
+      }
+      assert(/force_model\.description \/ known_limitations text/.test(s.more) && /detail:'checks'/.test(s.more), `${tag}: more says where the force model text is`);
+      continue;
+    }
+    assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k} in full`);
+  }
   if (full.display_rounding) { assert.strictEqual(s.display_rounding.note, full.display_rounding.note, `${tag}: display rounding note`); }
   assert(/get_design_check/.test(s.more) && /detail:'full'/.test(s.more), `${tag}: more says where the rest is`);
   const dc = Array.isArray(full.design_checks) ? full.design_checks : [];
@@ -1431,9 +1449,8 @@ async function main() {
     const cases = JSON.parse(dump);
     const SH = loadShapers(si);
     const toolOf = { aisi_design: 'aisi_design_flexure', design_connection: 'design_connection', lap_connection: 'design_lap_connection' };
-    // K4e: 랩 17 KB — 엔진의 마지막 한국어(force_model 의 설명 · 한계 (a)–(e), 이름표)가 한글 한 자 3 바이트라 16,162 → 16,633 B.
-    //      글을 줄이거나 빼지 않는다(사람이 정할 일 — user_decision_pending 의 근거). 그 밖은 그대로
-    const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 17 };
+    // 랩 16 KB — 결과마다 같은 force_model 의 설명 · 한계 (a)–(e) 는 요약에서 code + 한 줄 제목(글 전체는 detail:'checks')
+    const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 16 };
     const largest = {};
     let nCases = 0; let nUnb = 0;
     // K4b: 호스트가 하듯 먼저 읽는 꼴(forReader — 알림 · 이유를 그 단위의 한국어로)로 바꾼 뒤 모양을 줄인다

@@ -110,8 +110,10 @@ export interface LedgerEntry {
  * 계약: docs/implementation/20261123-view-contract.md
  */
 export interface ViewItem {
-    kind: 'check' | 'model' | 'result' | 'validation';
+    kind: 'check' | 'model' | 'result' | 'validation' | 'record';
     id: string;
+    /** record: 기록의 종류 — change(변경 묶음) · work(업무 항목) · assumption(가정) · source(원자료) */
+    type?: string;
     /** check: 그 항목이 든 결과 — member · purlin · connection · lap */
     scope?: string;
     /** check: design_checks[].location 과 같은 값(퍼린은 {region, check_point}) */

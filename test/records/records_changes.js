@@ -63,7 +63,8 @@ async function run() {
     const m0 = zModel(T20), m1 = JSON.parse(JSON.stringify(m0));
     m1.node[4][1] += 0.5; m1.node.push([38, 9, 9, 1, 1, 1, 1, 50]);
     const d = D.diffSnapshots(snap(m0), snap(m1));
-    assert.deepStrictEqual(d.fields[0].summary, { count: { from: 37, to: 38 }, changed: 1, added: 1, removed: 0, indices: [5], columns: ['x'] });
+    // R2-3: 줄 번호(첫 칸 — 절점 번호)도 — 화면의 강조
+    assert.deepStrictEqual(d.fields[0].summary, { count: { from: 37, to: 38 }, changed: 1, added: 1, removed: 0, indices: [5], columns: ['x'], ids: { changed: [5], added: [38], removed: [] } });
     const many0 = {}, many1 = {};
     for (let i = 0; i < 250; i += 1) { many0[`k${i}`] = i; many1[`k${i}`] = i + 1; }
     const big = D.diffSnapshots(snap({}, many0), snap({}, many1));
@@ -111,14 +112,49 @@ async function run() {
     x.b.sessionEnd();
     assert.deepStrictEqual(x.out.map((c) => [c.fields[0].from, c.fields[0].to]), [[0, 1], [1, 5], [5, 7]]);
   });
+  await t('R2-3: no read closes a bundle; a request of the same actor joins the edit session or the quiet bundle', async () => {
+    const x = batcher();
+    x.b.sessionStart(person);
+    x.set({ a: 1 }); x.b.touch(person);
+    await x.b.run(ai, () => {});                         // AI 가 묻기만 — 그대로
+    await x.b.run(person, () => {});                     // 화면 자신의 읽기 — 그대로
+    await x.b.run(person, () => x.set({ a: 2 }));        // 화면 자신의 쓰기 — 그 묶음에
+    assert.strictEqual(x.b.pending, 'session');
+    x.b.sessionEnd();
+    const o1 = x.out.map((c) => [c.__actor, c.fields[0].from, c.fields[0].to]);
+    assert.deepStrictEqual(o1, [['person', 0, 2]], JSON.stringify(o1));
+    x.b.touch(person); x.set({ a: 3 });              // 화면은 바꾸기 전에 touch 한다(호스트와 같게)
+    await x.b.run(person, () => x.set({ a: 4 }));
+    await x.b.run(ai, () => {});
+    assert.strictEqual(x.b.pending, 'quiet', 'the quiet bundle stays open');
+    x.tick(2500); x.b.tick();
+    const o2 = x.out.slice(1).map((c) => [c.__actor, c.fields[0].from, c.fields[0].to]);
+    assert.deepStrictEqual(o2, [['person', 2, 4]], JSON.stringify(o2));
+  });
+  await t('R2-3: discard after a split session — recordDiscard writes the undo of what was already recorded', async () => {
+    const x = batcher();
+    x.b.sessionStart(person);
+    x.set({ a: 1 }); x.b.touch(person);
+    await x.b.run(ai, () => x.set({ v: 9, a: 1 }));      // AI 가 모델만(비교 밖) — 끼어듦 아님
+    await x.b.run({ ...ai, trigger: 'x' }, () => x.set({ a: 1 }));
+    x.set({ a: 6 }); x.b.touch(person);
+    await x.b.run(ai, () => x.set({ a: 7 }));            // AI 가 바꿈 → 사람 [0→6] · AI [6→7], 다시 연다
+    const d = x.b.sessionDiscard();
+    assert.strictEqual(d.backToStart, true, 'nothing since the AI line');
+    x.set({ a: 0 });                                      // 호스트가 시작으로 되돌렸다(사람의 몫)
+    x.b.recordDiscard(person, { model: d.before.model, case: d.before.case });
+    assert.deepStrictEqual(x.out.map((c) => [c.__actor, c.trigger, c.fields[0].from, c.fields[0].to]), [['person', 'edit-session', 0, 6], ['ai', 'set_case_inputs', 6, 7], ['person', 'edit-discard', 7, 0]]);
+  });
   await t('discard emits nothing and says whether the content is back to the start', () => {
     const x = batcher();
     x.b.sessionStart(person);
     x.set({ a: 3 });
-    assert.deepStrictEqual(x.b.sessionDiscard(), { backToStart: false });
+    // R2-3: 들어올 때의 사본도 돌려준다(호스트가 되돌린다)
+    const d1 = x.b.sessionDiscard();
+    assert.strictEqual(d1.backToStart, false); assert(d1.before && d1.ctx, 'the start snapshot and context');
     x.set({ a: 0 });
     x.b.sessionStart(person); x.set({ a: 9 }); x.set({ a: 0 });
-    assert.deepStrictEqual(x.b.sessionDiscard(), { backToStart: true });
+    assert.strictEqual(x.b.sessionDiscard().backToStart, true);
     assert.strictEqual(x.out.length, 0);
   });
   await t('outside the edit session, screen edits are grouped by 2 s of quiet', () => {

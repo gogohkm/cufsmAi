@@ -102,7 +102,7 @@ async function main() {
     lc = await changes({ detail: 'fields' });
     assert(lc.persisted && lc.changes.some((c) => c.id === t1.id && /두께 t 2 → 2\.3 mm/.test(c.title)), 'the thickness line survives reopening');
     const flds = lc.changes.find((c) => c.id === t1.id).field_changes;
-    assert(flds.some((x) => /두께 t/.test(x)), 'detail fields lists the field: ' + JSON.stringify(flds));
+    assert(flds.some((x) => x.label_ko === '두께 t' && /두께 t/.test(x.text)), 'detail fields lists the field (structured, R2-3): ' + JSON.stringify(flds));
     const lcUS = await changes({ units: 'US' });
     assert(/두께 t 0\.0787\d* → 0\.0905\d* in/.test(lcUS.changes.find((c) => c.id === t1.id).title), 'US titles: ' + lcUS.changes.find((c) => c.id === t1.id).title);
     notes.push(`project: 「${t1.title} · AI」 (reason · work · source) survives reopening; last_change Lb by ai`);
@@ -191,7 +191,7 @@ async function main() {
     await tool('open_case', { name: 'A' });
     lc = await changes({ limit: 5, detail: 'fields' });
     const ext = lc.changes.find((c) => c.by.kind === 'external');
-    assert(ext && ext.trigger === 'external' && ext.field_changes.some((x) => /Cb/.test(x)), 'the outside change is one external line: ' + JSON.stringify(lc.changes.slice(0, 2)));
+    assert(ext && ext.trigger === 'external' && ext.field_changes.some((x) => x.path === 'case.inputs.Cb'), 'the outside change is one external line: ' + JSON.stringify(lc.changes.slice(0, 2)));
     notes.push(`outside change: 「${ext.title}」 by external`);
 
     // ── 크기 · 경로 없음 ──

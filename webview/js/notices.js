@@ -7,10 +7,9 @@
  *    SI 는 물리량(`quantity`) 매개변수를 바꾸고 SI 단위 글자를 쓴다 — 자리수는 여기서 정한다(엔진의 fmt 는 US 의 것).
  *    상수 매개변수(`const: true` — 템플릿에 있던 치수, 계약 §16.10)도 물리량이라 같은 길이다. **템플릿 글은 바꾸지 않는다.**
  *    `quantity: null` 매개변수는 단위계와 무관하게 받은 그대로.
- *  - 무늬 바꾸기(`fallbackSI`)는 마지막 수단: code 가 없는 글(호스트가 아직 알림으로 짓지 않은 글)과, 엔진이 글로 넘긴 매개변수
- *    (중첩 알림이 없는 글 — 지금 `member.warning.effective_length_defaulted_verify` 의 items · `member.warning.i6_2_1_i6_k2` 의
- *    i621_issues 둘)에만. 정확히 아는 단위 낱말(표의 것)과 경계가 맞을 때만 바꾼다 — 위첨자 · `^n` · 모르는 겹단위가 붙으면 그대로 둔다.
- *    시험(notice_render_contract)이 계약 사례에서 이것이 그 둘에서만 쓰임을 확인한다.
+ *  - 무늬 바꾸기(`fallbackSI`)는 마지막 수단: code 가 없는 글에만(엔진 6fa25f7 뒤 엔진 글에는 남은 것이 없다). 정확히 아는 단위 낱말
+ *    (표의 것)과 경계가 맞을 때만 바꾼다 — 위첨자 · `^n` · 모르는 겹단위가 붙으면 그대로 둔다.
+ *    시험(notice_render_contract)이 계약 사례 전부에서 이것이 한 번도 쓰이지 않음을 확인한다.
  *  - 호스트가 쓰는 글도 알림이다: `HOST`(`host.*` code — 영어 · 한국어 템플릿과 물리량 붙은 매개변수), `hostNotice(code, values)`.
  *  - 글 하나에 붙는 엔진 필드(계약 §16.10 – 16.11): `{k}_code · _kind · _ko · _template · _template_ko · _params(· _parts · _sep · _prefix · _prefix_ko)`
  *    — `field(o, k, opts)`, 알림 사전 · 목록 `{k}_notices`, 모드 · 검토 이름 `{k}_id`(그 검토 항목의 `name_ko`).
@@ -518,7 +517,11 @@
             const m = /^(.+)_notices$/.exec(key);
             if (m && o[key] && typeof o[key] === 'object') {
                 out[m[1]] = renderNoticeMap(o[key], opts);
-                if (!keepSiblings) { delete out[key]; }
+                if (!keepSiblings) {
+                    delete out[key];
+                    // 목록이면 code 를 나란히(요약이 고정 글을 code 로 줄일 때 — server.ts compactFixed)
+                    if (Array.isArray(o[key]) && o[key].every((n) => n && typeof n.code === 'string')) { out[m[1] + '_codes'] = o[key].map((n) => n.code); }
+                }
             }
         }
         for (const key of Object.keys(o)) {

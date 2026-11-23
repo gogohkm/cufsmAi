@@ -5,7 +5,9 @@
  *  - MCP 요청 하나 = 묶음 하나(`run`). 같은 행위자의 겹친 요청은 바깥 것이 닫을 때 한 묶음.
  *  - 편집 상태(F2) 시작 → 끝 = 「사용자 변경」 하나(`sessionStart` · `sessionEnd`), 버리기는 묶음 없음(`sessionDiscard`).
  *  - 그 밖의 화면 변경은 조용한 시간(기본 2 초)으로(`touch` · `tick`).
- *  - 다른 행위자의 행동이 끼면 지금 묶음을 먼저 닫는다(행위자가 섞인 묶음은 없다). 편집 상태가 이어지면 그 뒤 새 묶음으로 다시 연다.
+ *  - 사람의 묶음(편집 상태 · 조용한 시간)이 열린 동안의 요청: 바꾼 것이 없으면(읽기 — 누구의 것이든) 묶음을 그대로 둔다. 같은 행위자가
+ *    바꾸면 그 묶음에 든다. 다른 행위자가 바꾸면 사람 묶음을 그 요청 직전까지로 닫고 요청 묶음을 내고, 편집 상태면 그 뒤 새 묶음으로 다시 연다
+ *    (행위자가 섞인 묶음은 없다).
  * 시계 · 스냅숏 · 내보내기는 주입한다 — 순수하게 시험한다.
  */
 import { contentFp } from './fp';
@@ -72,8 +74,8 @@ export interface BatcherDeps {
 
 export class ChangeBatcher {
     private open: OpenBatch | null = null;
-    /** 사람의 묶음이 열린 채로 돌고 있는 다른 행위자의 요청(겹친 요청은 그 안에서 묶지 않는다) */
-    private foreign = 0;
+    /** 사람의 묶음이 열린 채로 돌고 있는 요청(겹친 요청은 그 안에서 따로 묶지 않는다) */
+    private inner = 0;
     private session: ChangeContext | null = null;
     constructor(private readonly d: BatcherDeps) {}
 
@@ -100,17 +102,25 @@ export class ChangeBatcher {
 
     /** MCP 요청 하나(또는 같은 행위자의 겹친 요청) */
     async run<T>(ctx: ChangeContext, fn: () => T | Promise<T>): Promise<T> {
-        if (this.foreign > 0) { return await fn(); }
+        if (this.inner > 0) { return await fn(); }
         const o = this.open;
         const sameActor = !!o && o.ctx.actor.kind === ctx.actor.kind && o.ctx.caseId === ctx.caseId;
+        if (o && (o.kind === 'quiet' || o.kind === 'session') && sameActor) {
+            // 같은 행위자의 요청(화면 자신의 읽기 · 쓰기) — 그 묶음 안에서. 읽기는 아무것도 바꾸지 않고, 쓰기는 그 사람의 묶음에 든다
+            this.inner += 1;
+            try { return await fn(); } finally {
+                this.inner -= 1;
+                if (this.open === o) { o.lastTouch = this.d.now(); }
+            }
+        }
         if (o && (o.kind === 'quiet' || o.kind === 'session') && !sameActor) {
             // 다른 행위자의 요청 — 묻기만 했으면(바뀐 것 없음) 사람의 묶음을 그대로 둔다. 바꾼 것이 있을 때만 끼어듦:
             // 사람 묶음을 그 요청 직전까지로 닫고, 요청 묶음을 내고, 편집 상태면 그 뒤에서 다시 연다
             const mid = this.d.snapshot();
             const build = this.d.build ?? ((c: ChangeContext, x: Snapshot, y: Snapshot) => buildChange(c, x, y));
-            this.foreign += 1;
+            this.inner += 1;
             try { return await fn(); } finally {
-                this.foreign -= 1;
+                this.inner -= 1;
                 const after = this.d.snapshot();
                 const reqBody = build(ctx, mid, after);
                 if (reqBody && this.open === o) {
@@ -144,14 +154,28 @@ export class ChangeBatcher {
         this.session = null;
     }
 
-    /** 버리기 — 묶음을 내지 않는다. 들어올 때의 내용과 같아졌는지 돌려준다(호스트가 확인) */
-    sessionDiscard(): { backToStart: boolean } {
+    /**
+     * 버리기 — 묶음을 내지 않는다. 들어올 때(마지막으로 적힌 때 — 끼어든 요청 뒤면 그 뒤)의 내용과 같아졌는지와 그 사본을 돌려준다.
+     * 호스트가 되돌리고(R2-3), 되돌린 상태가 그 사본과 다르면(앞서 적힌 사람 묶음까지 되돌렸으면) recordDiscard 로 한 줄을 낸다.
+     */
+    sessionDiscard(): { backToStart: boolean; before: Snapshot | null; ctx: ChangeContext | null } {
         const b = this.open?.kind === 'session' ? this.open : null;
+        const ctx = this.session;
         this.open = null; this.session = null;
-        if (!b) { return { backToStart: true }; }
+        if (!b) { return { backToStart: true, before: null, ctx }; }
         const now = this.d.snapshot();
-        return { backToStart: contentFp(b.before.model, b.before.case).contentFp === contentFp(now.model, now.case).contentFp };
+        return { backToStart: contentFp(b.before.model, b.before.case).contentFp === contentFp(now.model, now.case).contentFp, before: b.before, ctx: b.ctx };
     }
+
+    /** 되돌린 버리기의 한 줄(적힌 것과 지금이 다를 때만) — 사람의 문맥, trigger 'edit-discard' */
+    recordDiscard(ctx: ChangeContext, before: Snapshot): void {
+        const after = this.d.snapshot();
+        const body = (this.d.build ?? ((c, x, y) => buildChange(c, x, y)))({ ...ctx, trigger: 'edit-discard' }, before, after);
+        if (body) { this.d.emit(body, ctx); }
+    }
+
+    /** 편집 상태인가 */
+    get inSession(): boolean { return this.session !== null; }
 
     /** 편집 상태 밖의 화면 변경 — 조용한 시간으로 묶는다 */
     touch(ctx: ChangeContext): void {

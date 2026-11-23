@@ -1693,7 +1693,7 @@
   {
    "id": "purlin.mcp",
    "expect": "pin",
-   "reason": "Renderer stop: MCP reply sizes follow the Korean texts above.",
+   "reason": "Engine 6fa25f7: the ASD lap / member warnings read Mn/Ω (3 more bytes in the purlin report replies: summary 6063 → 6066, SI 5971 → 5974, full 142609 → 142612).",
    "value": {
     "validate.summary": {
      "isError": false,
@@ -1755,7 +1755,7 @@
     },
     "report.summary": {
      "isError": false,
-     "bytes": 6063,
+     "bytes": 6066,
      "keys": [
       "case_rev",
       "checks",
@@ -1779,7 +1779,7 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 5971,
+     "bytes": 5974,
      "keys": [
       "case_rev",
       "checks",
@@ -1803,7 +1803,7 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 142609,
+     "bytes": 142612,
      "keys": [
       "case_rev",
       "checks",
@@ -1888,6 +1888,14 @@
      "from": {
       "expect": "pin",
       "reason": "K4b: MCP reply sizes follow the Korean notice texts and the report changes above."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "R2-3/R3-2",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: MCP reply sizes follow the Korean texts above."
      },
      "date": "2026-11-24"
     }
