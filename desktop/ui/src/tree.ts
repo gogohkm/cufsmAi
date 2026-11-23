@@ -3,13 +3,14 @@
  * 가지는 호스트에 있는 것만 만든다. 호스트에 아직 없는 것(설계 입력 · 기록 · 검증)은 그 까닭을 값 자리에 적는다 — 빈칸이 아니다.
  */
 import { esc, tip } from './dom';
-import { num, ratio } from './format';
+import { hhmm, num, ratio } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
 import { assumptionLines, isDefault, memberRuns, state, type CheckRow } from './store';
 import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
 import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
+import { afterBase, BY_KO, chg } from './changes';
 import { fastenerText, reasonNote } from './notices';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
@@ -161,7 +162,10 @@ export function buildTree(tab: Tab): TNode[] {
     return [
       n('ask', '판단 요청', { v: '기록 없음', vCls: 'un', tip: 'AI 의 판단 요청은 기록(R3)부터 남는다' }),
       n('rep', '보고', { v: '기록 없음', vCls: 'un', tip: 'AI 의 보고는 기록(R3)부터 남는다' }),
-      n('chg', '변경', { v: '기록 없음', vCls: 'un', tip: '누가 · 왜 · 전 → 후 는 변경 기록(R2)부터 남는다' }),
+      n('chg', '변경', { v: chg.err ? '읽지 못함' : String(chg.total), vCls: chg.err ? 'un' : '', open: true,
+        tip: `누가 · 언제 · 전 → 후 — 호스트의 변경 묶음(list_changes). 사람 · AI · 프로그램 · 밖에서가 한 목록(꼬리표로 가른다). 새 것이 위, 마지막 실행 뒤의 것에 점${chg.persisted ? '' : ' · 프로젝트 밖 — 이 세션만(저장되지 않음)'}`,
+        kids: chg.list.map(c => n(`chg:${c.id}`, c.title || '(제목 없음)', { dot: afterBase(c) ? 'acc' : undefined, v: `${BY_KO[c.by.kind] ?? c.by.kind} · ${hhmm(c.at)}`,
+          tip: `${BY_KO[c.by.kind] ?? c.by.kind}${c.by.client ? ` (${c.by.client})` : ''} · ${hhmm(c.at)} · 바뀐 칸 ${c.fields}${c.invalidated?.length ? ` · 낡게 한 결과 ${c.invalidated.join(', ')}` : ''}${c.reason ? ` · 이유: ${c.reason}` : ''}` })) }),
     ];
   }
   return [

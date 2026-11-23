@@ -198,6 +198,8 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     }
   }));
   subs.push(hub.onDidRefuseDispose.event(info => { bus.emit('webview:refused', 'host', { id: info.id, viewType: info.viewType }); }));
+  // R2-3: AI 의 호스트 동작 하나(시작 · 끝) — 새 화면의 띠 「AI 작업 중 · <도구> · 경과」. 도구 이름 · 때만(인자 · 답은 싣지 않는다)
+  host.onAiWork(w => { bus.emit('ai:work', 'host', { phase: w.phase, tool: w.tool, request_id: w.requestId, at: w.at }); });
 
   // ── 지금 파일(제목 표시줄) ──────────────────────────────────────────
   const setCurrentFile = (file: string | undefined) => {

@@ -1,6 +1,7 @@
 /**
  * 편집 상태의 띠(템플릿 09) — 「이번 편집 — 바뀐 것 N」 칩(편집 상태를 연 때의 검토 상태와 지금의 차이), 「AI 대기 · 알림 N」,
- * 「편집 마치기 F2」 · 「버리기」(되돌리는 길은 변경 기록 R2 부터 — 꺼 둔다).
+ * 「편집 마치기 F2」(→ 호스트의 「사용자 변경」 묶음 하나 — editSession end) · 「버리기」(바뀐 것이 없을 때만 — editSession discard. 호스트가 값을
+ * 되돌리지 않으므로 바뀐 것이 있으면 꺼 둔다: 버리면 기록에 남지 않은 변경이 된다).
  *
  * 차이는 호스트의 검토 상태(get_case_inputs) 두 판의 같은 키를 견주는 것이다 — 편집 상태의 설계 화면이 칸을 고치면 호스트의 상태가 바뀌고
  * (K2 caseEdit) 이 화면은 다시 읽는다. 값은 화면의 단위(SI)로 보이기만 한다(units.caseSI).
@@ -62,5 +63,7 @@ export function editStripHtml(aiWaiting: number): string {
     + (ai.length > 3 ? `<span class="faint">AI 외 ${ai.length - 3}</span>` : '')
     + `<span class="faint" data-ai-waiting${tip('편집 중에는 AI 의 「여기를 보세요」(focus)가 알림으로만 쌓이고, AI 가 바꾼 값은 왼쪽 칩과 따로 보인다')}>AI 대기 · 알림 ${aiWaiting}${ai.length ? ` · AI 가 바꿈 ${ai.length}` : ''}</span>`
     + `<span class="btn editp" data-act="edit-done"${tip('편집 상태를 마치고 검토 화면으로(F2 · Esc). 고친 값은 이미 호스트에 있다 — 저장은 따로(Ctrl+S)')}>편집 마치기 F2</span>`
-    + `<span class="btn ghost off"${tip('이번 편집을 되돌리는 길은 변경 기록(R2)부터 — 지금은 설계 화면에서 값을 다시 고친다')}>버리기</span>`;
+    + (ch.length || ai.length || other.length
+      ? `<span class="btn ghost off" data-act="edit-discard"${tip('바뀐 것이 있다 — 호스트가 이번 편집을 되돌리는 길을 아직 주지 않는다. 버리면 기록에 남지 않은 변경이 되므로 꺼 둔다(「편집 마치기」로 묶음을 남긴다)')}>버리기</span>`
+      : `<span class="btn ghost" data-act="edit-discard"${tip('이번 편집을 묶음 없이 닫는다(바뀐 것 없음 — 호스트 editSession discard)')}>버리기</span>`);
 }

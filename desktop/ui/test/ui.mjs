@@ -624,6 +624,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const title = await ev(`document.querySelector('#dialog-host .dialog h2').textContent`);
     await ev(`(()=>{const d=document.querySelector('#dialog-host .dialog'); d.querySelector('input').value=${JSON.stringify(csd)}; d.querySelector('[data-role="ok"]').click(); return 1;})()`);
     await settle(`s.file.path===${JSON.stringify(csd)} && ${S}.ui.screen==='review' && s.full && s.full.nnodes===21`, '파일이 열리고 검토 화면');
+    // 상태는 다시 읽기(load)의 중간에 바뀌고 그림은 읽기가 다 끝난 뒤(기록 · 변경 목록까지) — 그려진 정보 창을 기다린다
+    await waitFor(`/템플릿 치수 없음/.test(document.getElementById('info').innerText)`, 15_000, '정보 창').catch(() => undefined);
     const s = await ev(`({fname:document.querySelector('#tbar .fname').textContent, docTitle:document.title, startHidden:document.getElementById('start').hidden,
       info:document.getElementById('info').innerText})`);
     return { ok: s.fname === path.basename(csd) && s.startHidden && /템플릿 치수 없음/.test(s.info) && /검토 대상 P1\.csd — StCFSD/.test(s.docTitle),
@@ -695,7 +697,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const pipe = await ev(`[...document.querySelectorAll('#tbar .pipe .ps')].map(e=>e.dataset.stage+':'+e.dataset.state).join(' ')`);
     return { ok: /fsm:ok/.test(pipe) && /chk:ok/.test(pipe) && (await marker()) === 1, detail: pipe };
   });
-  {
+  if (!ran('u04a')) { skipCheck('결과 · 좌굴 해석의 수 = MCP get_dsm_values(SI)', ['u04a']); } else {
+    // u04a 가 해석 · 검토 결과가 화면에 올 때까지 기다린 뒤의 화면을 잰다
     const dsmSI = await mcp.tool('get_dsm_values', { load_type: 'Mxx', units: 'SI' });
     await select('result', 'fsm');
     const ctx = { ...(await mcpNow()), params: params1, dsmSI, designSI: flex };
@@ -717,7 +720,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await select('result', 'chk');
     return { ok, detail: `${s.pipe} · 옛 결과의 수 ${s.old}개 · 그림 절점 ${sec.n} · 까닭 「Section template changed」` };
   });
-  {
+  if (!ran('u04')) { skipCheck('바뀐 단면의 수도 MCP 와 같다', ['u04']); } else {
+    // u04 가 새 단면이 화면에 올 때까지 기다린 뒤의 화면을 잰다
     const ctx = { ...(await mcpNow()), params: params2 };
     await select('model', 'sec');
     const r = compareNumbers(await numbers(), ctx);
@@ -2277,6 +2281,169 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       await act({ action: 'open_case', name: '퍼린 P1', report_units: 'SI' });
       await settle(`!!s.full && !!s.full.project && !!s.full.project.case && s.full.project.case.name==='퍼린 P1' && !s.full.project.case.readOnly`, '내 대상', 30_000).catch(() => undefined);
     }
+  });
+
+  // ── R1-3 끝(215cb5a 의 호스트 것으로) ──────────────────────────────
+  const act2 = (body) => api('POST', '/api/mcp/action', body).then(r => r.json);
+  const pdir2 = path.join(projRoot, '시험 물류창고');
+  await step('r18 시작 화면 — 「진행」 = list_cases 의 results · 작은 단면 그림 = 색인의 outline(받은 그대로) · 바닥 줄의 폴더 경로(사람의 얼굴) · 작성자 이름', 'r18_start_index', async () => {
+    await act2({ action: 'save_case' });
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    await ev(`${S}.start()`);
+    await sleep(800);
+    const lc = await act2({ action: 'list_cases', outline: true });
+    const rows = await ev(`[...document.querySelectorAll('#start .rows tr[data-rec="open-case"]')].map(r=>({name:r.dataset.name, res:r.querySelector('[data-results]')?.dataset.results ?? null,
+      svg:r.querySelector('svg[data-outline]')?.dataset.outline ?? null, pl:r.querySelectorAll('svg[data-outline] polyline').length}))`);
+    const foot = await ev(`({path:document.querySelector('#start [data-foot-path]')?.textContent ?? null, writer:document.querySelector('#start [data-foot-writer]')?.textContent ?? null})`);
+    await shot('r18_start_index_1920_dark');
+    const bad = rows.filter(r => { const c = (lc.cases ?? []).find(x => x.name === r.name); return !c || r.res !== (c.results ?? []).join(',') || (c.outline ? r.pl !== c.outline.paths.length : r.svg !== null); });
+    const drawn = rows.filter(r => r.pl > 0).length;
+    const pathOk = !!foot.path && path.resolve(foot.path).toLowerCase().endsWith(path.join('StCFSD 프로젝트', '시험 물류창고').toLowerCase());
+    return { ok: rows.length === (lc.cases ?? []).length && bad.length === 0 && drawn >= 1 && pathOk && !!foot.writer,
+      detail: `줄 ${rows.length} = list_cases ${(lc.cases ?? []).length} · 진행 · 그림이 다른 줄 ${bad.length} · 그림 ${drawn}줄(선 ${rows.map(r => r.pl).join('/')}) · 진행 「${rows.map(r => `${r.name}:${r.res}`).join(' · ')}」 · 경로 ${foot.path} · 작성자 ${foot.writer}` };
+  });
+  await step('r19 열지 않은 대상을 보관(case_id — 줄의 ⋯) · 작성자 이름 바꾸기(이름 물음) · 파일 다시 잇기(OS 대화상자 — 501 이 아니다)', 'r19_case_menu', async () => {
+    const nc = await act2({ action: 'new_case', name: 'R19 보관', kind: 'section-only' });
+    await ev(`${S}.reload()`);
+    await waitFor(`!!document.querySelector('#start .rows tr[data-name="R19 보관"] [data-rec="case-menu"]') || (window.__stcfsdUi.start(), false)`, 20_000, '새 줄');
+    await ev(`document.querySelector('#start .rows tr[data-name="R19 보관"] [data-rec="case-menu"]').click()`);
+    await sleep(250);
+    const items = await ev(`[...document.querySelectorAll('.ctx .ci')].map(c=>c.querySelector('span').textContent)`);
+    await ev(`[...document.querySelectorAll('.ctx .ci')].find(c=>c.textContent.startsWith('보관')).click()`);
+    await waitFor(`!document.querySelector('#start .rows tr[data-name="R19 보관"]')`, 20_000, '보관한 줄이 사라짐').catch(() => undefined);
+    const lcA = await act2({ action: 'list_cases', include_archived: true });
+    const arch = (lcA.cases ?? []).find(c => c.name === 'R19 보관');
+    // 작성자 이름
+    await ev(`document.querySelector('#start [data-rec="writer-name"]').click()`);
+    await dlgInput('김 시험');
+    await waitFor(`document.querySelector('#start [data-foot-writer]')?.textContent==='김 시험'`, 15_000, '바닥 줄의 작성자').catch(() => undefined);
+    const writer = await ev(`document.querySelector('#start [data-foot-writer]')?.textContent`);
+    // 파일 다시 잇기 — OS 대화상자가 뜨고(경로는 사람이 고른다) 취소
+    await ev(`document.querySelector('#start .rows tr[data-name="퍼린 P1"] [data-rec="case-menu"]').click()`);
+    await sleep(250);
+    await ev(`[...document.querySelectorAll('.ctx .ci')].find(c=>c.textContent.startsWith('파일 다시 잇기')).click()`);
+    const fd = await waitFor(`(()=>{const d=document.querySelector('#dialog-host .dialog[data-kind="fileDialog"]'); return d ? d.querySelector('h2').textContent : null;})()`, 15_000, '파일 물음').catch(() => null);
+    await ev(`(()=>{const d=document.querySelector('#dialog-host .dialog[data-kind="fileDialog"]'); const c=d&&d.querySelector('[data-role="cancel"]'); c&&c.click(); return !!c;})()`);
+    return { ok: !nc.error && items.includes('보관') && arch?.archived === true && writer === '김 시험' && /다시 잇기/.test(fd ?? ''),
+      detail: `메뉴 ${items.join(' · ')} · 보관 → list_cases(include_archived) archived ${arch?.archived} · 작성자 「${writer}」 · 다시 잇기 물음 「${fd}」 → 취소` };
+  });
+  await step('r20 밖에서 바뀐 파일 → 띠 「밖에서 바뀜」 · 「덮어쓰기」(묻는다) → 저장 · 띠가 사라진다', 'r20_overwrite', async () => {
+    await ev(`${S}.review()`);
+    const f = path.join(pdir2, '02_검토대상', fs.readdirSync(path.join(pdir2, '02_검토대상')).find(x => /퍼린 P1/.test(x)));
+    // 프로그램 밖에서 입력 하나를 고친다 — 호스트는 다시 열 때 마지막 저장의 사본과 견줘 「밖에서」 줄을 남긴다
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    j.case.inputs.Lb = typeof j.case.inputs.Lb === 'number' ? j.case.inputs.Lb + 1 : 50;
+    fs.writeFileSync(f, JSON.stringify(j, null, 2));
+    await act2({ action: 'open_case', name: '퍼린 P1', report_units: 'SI' });
+    await ev(`${S}.reload()`);
+    const band = await waitFor(`(()=>{const b=document.getElementById('recband'); return b && !b.hidden && b.getAttribute('data-kind')==='outside-change' ? b.textContent : null;})()`, 20_000, '밖에서 바뀜 띠').catch(() => null);
+    if (!band) { return { ok: false, detail: `띠 없음 · ${short(JSON.stringify(await act2({ action: 'get_case_status' })), 300)}` }; }
+    await ev(`document.querySelector('#recband [data-rec="overwrite"]').click()`);
+    await waitFor(`!!document.querySelector('#dialog-host [data-item="덮어쓰기"]')`, 15_000, '덮어쓰기 물음');
+    await ev(`document.querySelector('#dialog-host [data-item="덮어쓰기"]').click()`);
+    await waitFor(`(()=>{const b=document.getElementById('recband'); return b.hidden || b.getAttribute('data-kind')!=='outside-change';})()`, 20_000, '띠가 사라짐').catch(() => undefined);
+    const st = await act2({ action: 'get_case_status' });
+    const all = (await act2({ action: 'list_changes', limit: 50 })).changes ?? [];
+    const ext = all.find(c => c.by?.kind === 'external');
+    return { ok: /밖에서 바뀜/.test(band) && st?.changed_outside_since_save === false,
+      detail: `띠 「${short(band.replace(/\s+/g, ' '), 80)}」 → 덮어쓰기 → changed_outside_since_save ${st?.changed_outside_since_save} · 변경 목록의 「밖에서」 줄 ${ext ? `「${short(ext.title, 50)}」` : '없음(호스트가 그 줄을 쓰지 않았다 — 보고)'}` };
+  });
+
+  // ── R2-3 — 변경 묶음이 화면에 ────────────────────────────────────
+  await step('r21 AI 가 두께를 바꾸면(이유와 함께) — 새로 고침 없이 업무 › 변경에 줄 · 01 의 꼬리표 「AI · 2 → 2.3 mm · hh:mm」 · 그 꼬리표를 누르면 그 줄', 'r21_ai_thickness', async () => {
+    await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.0, r: 3, units: 'SI' });
+    await mcp.tool('design_lap_connection', { d: 200, t: 2.0, Fy: 295, Fu: 400, lap_left_in: 600, lap_right_in: 600, Mu_support: 11.98, Vu_support: 11.12,
+      fastener_type: 'bolt', fastener_dia: 12.7, n_rows: 2, end_distance: 35.56, design_method: 'LRFD', Se: 49160, Vn: 44.48, units: 'SI' });
+    await settle(`!!s.lap`, '랩 결과', 30_000).catch(() => undefined);
+    await ev(`${S}.review()`);
+    await select('work', 'chg');
+    const t0 = await marker();
+    const r = await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.3, r: 3, units: 'SI', reason: '뒤틀림이 넘어 두께부터 올린다' });
+    // 새로 고침 없이 — 트리(업무 탭)를 그대로 둔 채 줄이 생긴다
+    const row = await waitFor(`(()=>{const r=[...document.querySelectorAll('#tree .row[data-k^="chg:"]')].find(x=>x.textContent.includes('두께 t 2 → 2.3 mm')); return r ? r.dataset.k+'|'+r.textContent : null;})()`, 30_000, '변경 줄');
+    await select('model', 'sec');
+    await sleep(400);
+    const tag = await ev(`(()=>{const tr=[...document.querySelectorAll('#info tr')].find(t=>t.firstElementChild?.textContent==='두께 t'); return tr?{tag:tr.querySelector('.tag')?.textContent, by:tr.querySelector('.tag')?.dataset.by, why:tr.querySelector('.why[data-last-change]')?.textContent, id:tr.querySelector('.why[data-last-change]')?.dataset.lastChange}:null;})()`);
+    await shot('r21_section_tag_1920_dark');
+    // 그 칸(두께 t)의 「2 → 2.3 · 때」를 누른다
+    await ev(`(()=>{const tr=[...document.querySelectorAll('#info tr')].find(t=>t.firstElementChild?.textContent==='두께 t'); tr?.querySelector('.why[data-chg-go]')?.click(); return 1;})()`);
+    await sleep(400);
+    const went = await ev(`${S}.ui`);
+    const noReload = (await marker()) === t0;
+    return { ok: !r.error && !!row && noReload && tag?.by === 'ai' && /^2 → 2\.3 mm · \d\d:\d\d$/.test(tag?.why ?? '') && went.tab === 'work' && went.sel === `chg:${tag?.id}` && row.startsWith(`chg:${tag?.id}|`),
+      detail: `줄 「${short(row, 80)}」 · 새로 고침 없음 ${noReload} · 01 꼬리표 「${tag?.tag} · ${tag?.why}」 · 누름 → ${went.tab}/${went.sel}` };
+  });
+  await step('r22 업무 › 변경(템플릿 07) — 정보 창(행위자 · 때 · 제목 · AI 가 밝힌 이유 · 바뀐 것 · 영향) · 서랍 「바뀐 값 <기준> → 지금」 + 「따라 바뀐 것」 · 비교 기준 ▾ · 06 낡음 풍선의 원인 전 → 후', 'r22_work_change', async () => {
+    const lc = await act2({ action: 'list_changes', detail: 'fields', limit: 5 });
+    const c = (lc.changes ?? []).find(x => /두께 t/.test(x.title));
+    await select('work', `chg:${c?.id}`);
+    await sleep(500);
+    const v = await ev(`({head:document.querySelector('#info .hd .k')?.textContent, by:document.querySelector('#info .hd [data-by]')?.dataset.by, title:document.querySelector('#info [data-chg-title]')?.textContent,
+      reason:document.querySelector('#info [data-reason-text]')?.textContent, fields:[...document.querySelectorAll('#info [data-chg-fields] td')].map(t=>t.textContent),
+      effect:[...document.querySelectorAll('#info [data-effect]')].map(e=>e.dataset.effect+':'+e.textContent), base:document.querySelector('#center [data-chg-base]')?.textContent,
+      drawer:[...document.querySelectorAll('#center .drawer tbody tr')].map(t=>t.textContent.replace(/\s+/g,' ').trim()), on:document.querySelectorAll('#center .drawer tbody tr.on').length,
+      share:document.querySelector('#share b').textContent})`);
+    await shot('r22_work_change_1920_dark');
+    // 비교 기준 — 메뉴에서 「목록의 처음부터」 → 서랍이 앞 묶음까지
+    await ev(`document.querySelector('#center [data-chg-base]').click()`);
+    await sleep(250);
+    await ev(`[...document.querySelectorAll('.ctx .ci')].find(c=>c.textContent.startsWith('목록의 처음부터')).click()`);
+    await sleep(300);
+    const wide = await ev(`({base:document.querySelector('#center [data-chg-base]')?.textContent, n:document.querySelectorAll('#center .drawer tbody tr').length})`);
+    // 06 — 랩 결과가 낡음: 풍선에 원인의 전 → 후
+    await select('result', 'conn');
+    await sleep(400);
+    const b6 = await ev(`({cause:document.querySelector('#info [data-stale-cause]')?.dataset.staleCause ?? null, text:document.querySelector('#info [data-stale-text]')?.textContent ?? null})`);
+    await shot('r22_conn_stale_1920_dark');
+    const want = (c?.field_changes ?? []).find(f => /^두께 t /.test(f));
+    return { ok: !!c && v.by === 'ai' && v.title === c.title && v.reason === '뒤틀림이 넘어 두께부터 올린다' && v.fields.includes(want) && v.drawer.some(t => t.includes(want)) && v.on >= 1
+      && (c.invalidated ?? []).every(k => v.effect.some(e => e.startsWith(`${k}:`))) && wide.n >= v.drawer.length && /처음/.test(wide.base ?? '')
+      && b6.cause === c.id && /두께 t 2 → 2\.3 mm/.test(b6.text ?? '') && /뒤에 다시 돌리지 않았다/.test(b6.text ?? ''),
+      detail: `머리 「${short(v.head, 40)}」 · 제목 ${v.title} · 이유 「${v.reason}」 · 바뀐 것 ${v.fields.length}(${short(want, 30)}) · 영향 ${v.effect.join(', ')} · 기준 「${v.base}」 서랍 ${v.drawer.length}줄 → 처음부터 ${wide.n}줄 · 06 풍선 「${short(b6.text, 80)}」 · 칩 「${short(v.share, 40)}」` };
+  });
+  await step('r23 편집 상태 — F2 로 열고 닫으면 사람의 「사용자 변경」 묶음 하나(editSession) · 입력 꼬리표 「사용자 · 전 → 후 · hh:mm」 · 바뀐 것이 없으면 「버리기」가 산다(묶음 없음)', 'r23_edit_session', async () => {
+    const n0 = (await act2({ action: 'list_changes', limit: 1 })).total;
+    await ev(`${S}.review()`);
+    await select('model', 'mat');
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(500);
+    await wv(`D.querySelector('.tab-btn[data-tab="preprocessor"]').click(); return 1;`);
+    await sleep(300);
+    await wv(`const t=D.getElementById('design-fy'); t.value='310'; t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+    await waitFor(`!!${S}.state.caseIn && ${S}.state.caseIn.sources.fy==='user' && Math.abs(${S}.state.caseIn.inputs.fy*6.894757-310)<0.5`, 15_000, '호스트의 fy');
+    await sleep(2600);
+    const mid = (await act2({ action: 'list_changes', limit: 1 })).total;
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(800);
+    const lc = await act2({ action: 'list_changes', detail: 'fields', limit: 2 });
+    const last = lc.changes?.[0];
+    await ev(`${S}.reload()`);
+    await sleep(1200);
+    const why = await ev(`document.querySelector('#info tr[data-k="case:fy"] .why[data-last-change]')?.textContent ?? null`);
+    // 다시 열고 아무것도 바꾸지 않으면 「버리기」가 산다 → 묶음 없이 닫힌다
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(500);
+    const offBefore = await ev(`document.querySelector('#editstrip [data-act="edit-discard"]')?.classList.contains('off')`);
+    await ev(`document.querySelector('#editstrip [data-act="edit-discard"]').click()`);
+    await sleep(800);
+    const after = await ev(`${S}.ui.editing`);
+    const n2 = (await act2({ action: 'list_changes', limit: 1 })).total;
+    await shot('r23_edit_session_1920_dark');
+    // 편집 상태 한 번 = 사람의 묶음 하나(이 편집에서 늘어난 수). mid 는 호스트가 편집 중에 묶음을 먼저 닫았는지(화면의 읽기가 끼면 닫는다 — 호스트에 알림)
+    return { ok: last?.by?.kind === 'person' && last?.trigger === 'edit-session' && (last.field_changes ?? []).some(f => /fy|Fy/.test(f)) && lc.total === n0 + 1
+      && /^사용자 · .+ → 310 · \d\d:\d\d$/.test(why ?? '') && offBefore === false && after === false && n2 === lc.total,
+      detail: `묶음 ${n0} → 편집 중 ${mid} → 마치기 ${lc.total}(${last?.by?.kind} · ${last?.trigger} · 「${short(last?.title, 40)}」) · 꼬리표 「${why}」 · 바뀐 것 없을 때 버리기 꺼짐 ${offBefore} → 닫힘 ${after === false} · 묶음 ${n2}` };
+  });
+  await step('r24 「AI 작업 중 · <도구> · 경과」 띠 — AI 의 해석이 도는 동안(0.5 초 넘게) 보이고 끝나면 사라진다 · 상태 표시줄 「AI 작업 중」', 'r24_ai_band', async () => {
+    const pr = mcp.tool('run_analysis');
+    const band = await waitFor(`(()=>{const b=document.getElementById('aibar'); return b && !b.hidden ? {tool:b.querySelector('[data-ai-tool]')?.dataset.aiTool, text:b.textContent, status:document.querySelector('#status .ai').textContent} : null;})()`, 20_000, 'AI 작업 중 띠').catch(() => null);
+    await shot('r24_ai_band_1920_dark');
+    const run = await pr;
+    await waitFor(`document.getElementById('aibar').hidden`, 15_000, '띠가 사라짐').catch(() => undefined);
+    const gone = await ev(`document.getElementById('aibar').hidden`);
+    return { ok: !!band && band.tool === 'run_analysis' && /AI 작업 중/.test(band.text) && /경과/.test(band.text) && band.status === 'AI 작업 중' && gone && !run.error,
+      detail: `띠 「${short(band?.text?.replace(/\s+/g, ' '), 90)}」 · 상태 표시줄 「${band?.status}」 · 끝나면 숨김 ${gone}` };
   });
 
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });

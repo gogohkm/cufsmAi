@@ -13,18 +13,23 @@ import { api, mcp } from './bridge';
 import { esc, tip } from './dom';
 import { state } from './store';
 
-export interface RecCase { name: string; kind: string; open: boolean; archived?: boolean; missing?: boolean; last_saved: string | null; section: string | null; steel: string | null; max_ratio: number | null; pass: boolean | null }
+export interface RecCase { name: string; kind: string; open: boolean; archived?: boolean; missing?: boolean; last_saved: string | null; section: string | null; steel: string | null; max_ratio: number | null; pass: boolean | null;
+  /** 215cb5a: 대상 id(보관 · 넘겨받기 · 다시 잇기가 열지 않은 대상에도) · 저장에 든 결과 종류 · 작은 단면 그림(outline: true 로 부를 때) */
+  case_id?: string; results?: string[]; outline?: { paths: number[][]; aspect: number } }
 export interface RecState {
   cases: RecCase[] | null;
   unregistered: Array<{ name: string }>;
   status: any | null;
-  recent: Array<{ name: string; cases: number; last_work: string | null; open: boolean }> | null;
+  recent: Array<{ name: string; dir?: string; cases: number; last_work: string | null; open: boolean }> | null;
+  /** 지금 프로젝트의 이름 · 폴더 경로(사람의 얼굴 — 이 화면에만) · 작성자 이름 */
+  current: { name: string; dir: string; readOnly: boolean } | null;
+  writer: string | null;
   recentAt: number;
   err?: string;
   /** 「밖에서 바뀜」 물음을 닫은 판(같은 상태에서 다시 띄우지 않는다) */
   outsideDismissed: string;
 }
-export const rec: RecState = { cases: null, unregistered: [], status: null, recent: null, recentAt: 0, outsideDismissed: '' };
+export const rec: RecState = { cases: null, unregistered: [], status: null, recent: null, recentAt: 0, outsideDismissed: '', current: null, writer: null };
 
 export const KIND_KO: Record<string, string> = { 'roof-purlin': '지붕 퍼린', 'wall-girt': '벽 거트', 'floor-joist': '바닥 장선', 'wall-stud': '스터드', 'section-only': '단면만' };
 const RO_KO: Record<string, string> = {
@@ -43,7 +48,7 @@ export const project = (): any => state.full?.project ?? null;
 export async function loadRecords(): Promise<void> {
   const p = project();
   if (!p?.inProject) { rec.cases = null; rec.unregistered = []; rec.status = null; return; }
-  const [lc, cs] = await Promise.all([mcp<any>('list_cases', {}), mcp<any>('get_case_status', {})]);
+  const [lc, cs] = await Promise.all([mcp<any>('list_cases', { outline: true }), mcp<any>('get_case_status', {})]);
   if (lc && !lc.error) { rec.cases = Array.isArray(lc.cases) ? lc.cases : []; rec.unregistered = Array.isArray(lc.unregistered) ? lc.unregistered : []; rec.err = undefined; }
   else { rec.err = String(lc?.error ?? '대상 목록을 읽지 못함'); }
   rec.status = cs && !cs.error ? cs : null;
@@ -53,6 +58,8 @@ export async function loadRecent(force = false): Promise<void> {
   if (!force && rec.recent && Date.now() - rec.recentAt < 5000) { return; }
   const r = await api<any>('GET', '/api/person/recent');
   rec.recent = r.success && Array.isArray(r.data?.projects) ? r.data.projects : [];
+  rec.current = r.success && r.data?.current && typeof r.data.current.dir === 'string' ? r.data.current : null;
+  rec.writer = r.success && typeof r.data?.writer === 'string' ? r.data.writer : null;
   rec.recentAt = Date.now();
 }
 
@@ -67,7 +74,7 @@ export async function person(name: string, body: Record<string, unknown> = {}): 
 export function bandHtml(): { kind: string; html: string } | null {
   const p = project();
   const fileOpen = !!state.file.name;
-  if (!p?.inProject) {
+  if (!p?.inProject && !p?.file_read_only) {
     if (!fileOpen) { return null; }
     return { kind: 'outside', html: `<b data-band="outside">프로젝트 밖</b><span${tip('이 파일은 프로젝트 폴더에 없다 — 작업 기록(누가 · 언제 · 무엇을 돌렸나)이 남지 않는다. 변경은 이 세션에만')}> — 작업 기록이 남지 않음</span><span class="sp"></span>`
       + `<span class="btn" data-rec="make-project"${tip('지금 파일을 열린 프로젝트의 새 검토 대상으로 복사한다(원본은 그대로). 열린 프로젝트가 없으면 먼저 고르거나 만든다')}>프로젝트로 만들기</span>` };
@@ -88,7 +95,7 @@ export function bandHtml(): { kind: string; html: string } | null {
   if (c && st?.changed_outside_since_save && rec.outsideDismissed !== key) {
     return { kind: 'outside-change', html: `<b data-band="outside-change">밖에서 바뀜</b><span> — 저장한 뒤 이 파일이 다른 곳에서 바뀌었다. 저장하면 그 변경을 덮는다</span><span class="sp"></span>`
       + `<span class="btn" data-rec="save-as"${tip('다른 이름으로 저장 — 밖의 변경은 그 파일에 그대로')}>다른 이름으로 저장</span>`
-      + `<span class="btn off" data-rec="overwrite" aria-disabled="true"${tip('밖의 변경을 덮어쓰고 저장 — 호스트가 아직 그 길을 주지 않는다(사람만 하는 일로 바란다)')}>덮어쓰기</span>`
+      + `<span class="btn" data-rec="overwrite"${tip('밖의 변경을 덮어쓰고 저장한다 — 묻는다. 밖에서 바뀐 내용은 변경 기록에 「밖에서」 한 줄로 남는다')}>덮어쓰기</span>`
       + `<span class="btn ghost" data-rec="dismiss"${tip('지금은 저장하지 않는다')}>취소</span>`, };
   }
   return null;
@@ -112,21 +119,52 @@ export function startRows(): { rows: string; foot: string; inProject: boolean } 
       const ratio = typeof c.max_ratio === 'number' ? `최대 ${c.max_ratio.toFixed(2)}` : '결과 없음';
       const v = c.pass === true ? 'ok' : c.pass === false ? 'ng' : 'un';
       return `<tr class="${c.open ? 'on' : ''}" data-rec="open-case" data-name="${esc(c.name)}"${tip(c.missing ? '파일이 없다 — 옮겼거나 지웠다' : '누르면 이 검토 대상을 연다')}>`
-        + `<td><div class="mini-sec dv rec-mini"><span class="faint">${esc((KIND_KO[c.kind] ?? c.kind).slice(0, 2))}</span></div></td>`
+        + `<td><div class="mini-sec dv rec-mini">${outlineSvg(c.outline) || `<span class="faint">${esc((KIND_KO[c.kind] ?? c.kind).slice(0, 2))}</span>`}</div></td>`
         + `<td><b>${esc(c.name)}</b>${c.missing ? ' <span class="tag def">파일 없음</span>' : ''}<div class="faint">${esc(p.project?.name ?? '')} · ${esc(KIND_KO[c.kind] ?? c.kind)}</div></td>`
         + `<td>${esc(c.section ?? '—')}<div class="faint">${esc(c.steel ?? '')}${c.steel ? ' · ' : ''}<span class="verdict ${v}" data-ratio>${esc(ratio)}</span></div></td>`
-        + `<td><span class="faint"${tip('결과마다의 일치 · 낡음은 그 대상을 열면 진행 띠에 — 목록의 진행은 색인에 아직 없다(호스트에 바람)')}>—</span></td>`
+        + `<td data-results="${esc((c.results ?? []).join(','))}">${progressHtml(c.results ?? [], !!c.outline || !!c.section)}</td>`
         + `<td><span class="dot"></span> <span${tip('판단 요청 · 보고는 기록(R3)부터 생긴다')}>기록 없음</span></td>`
-        + `<td class="r" data-last="${esc(c.last_saved ?? '')}">${esc(fmtWhen(c.last_saved))}<div class="faint">저장</div></td></tr>`;
+        + `<td class="r" data-last="${esc(c.last_saved ?? '')}">${esc(fmtWhen(c.last_saved))}<div class="faint">저장</div></td>`
+        + `<td class="r">${c.case_id ? `<span class="btn ghost" data-rec="case-menu" data-case-id="${esc(c.case_id)}" data-name="${esc(c.name)}" data-open="${c.open ? 1 : 0}"${tip('이 대상 — 보관 · 잠금 넘겨받기 · 파일 다시 잇기(사람만)')}>⋯</span>` : ''}</td></tr>`;
     }).join('');
-    const unreg = rec.unregistered.length ? `<tr><td></td><td colspan="5" class="faint">등록되지 않은 파일 ${rec.unregistered.length} — ${esc(rec.unregistered.slice(0, 3).map(u => u.name).join(', '))}</td></tr>` : '';
-    return { inProject: true, rows: (rows || `<tr><td></td><td colspan="5" class="faint">이 프로젝트에 검토 대상이 없다 — 아래 「새 검토」</td></tr>`) + unreg,
-      foot: `<span data-foot-project>${esc(p.project?.name ?? '')}</span> · 검토 대상 <b data-foot-count>${list.length}</b>${p.project?.readOnly ? ' · 읽기 전용' : ''}` };
+    const unreg = rec.unregistered.length ? `<tr><td></td><td colspan="6" class="faint">등록되지 않은 파일 ${rec.unregistered.length} — ${esc(rec.unregistered.slice(0, 3).map(u => u.name).join(', '))}</td></tr>` : '';
+    return { inProject: true, rows: (rows || `<tr><td></td><td colspan="6" class="faint">이 프로젝트에 검토 대상이 없다 — 아래 「새 검토」</td></tr>`) + unreg,
+      foot: `<span data-foot-project>${esc(p.project?.name ?? '')}</span> · 검토 대상 <b data-foot-count>${list.length}</b>${p.project?.readOnly ? ' · 읽기 전용' : ''}`
+        + (rec.current?.dir ? ` · <span class="path num" data-foot-path${tip('프로젝트 폴더 — 사람의 화면에만 보인다(AI 에게 가지 않는다)')}>${esc(rec.current.dir)}</span>` : '') + writerFoot() };
   }
   const rp = rec.recent ?? [];
   const rows = rp.map(r => `<tr data-rec="open-project" data-name="${esc(r.name)}"${tip('누르면 이 프로젝트를 연다(검토 대상은 그다음에 고른다)')}><td><div class="mini-sec dv rec-mini"><span class="faint">폴더</span></div></td>`
     + `<td><b>${esc(r.name)}</b><div class="faint">프로젝트</div></td><td class="faint">검토 대상 ${esc(r.cases)}</td><td></td><td></td><td class="r">${esc(fmtWhen(r.last_work))}</td></tr>`).join('');
-  return { inProject: false, rows, foot: rp.length ? `<span class="faint">최근 프로젝트 ${rp.length}</span>` : '<span class="faint">열린 프로젝트 없음 — 「폴더에서 열기」 · 「새 프로젝트」</span>' };
+  return { inProject: false, rows, foot: (rp.length ? `<span class="faint">최근 프로젝트 ${rp.length}</span>` : '<span class="faint">열린 프로젝트 없음 — 「폴더에서 열기」 · 「새 프로젝트」</span>') + writerFoot() };
+}
+
+/** 바닥 줄의 작성자 이름(기본 OS 사용자 이름 — 잠금 · 작성자 소개에 보인다) · 바꾸기 */
+function writerFoot(): string {
+  return rec.writer ? ` · 작성자 <b data-foot-writer>${esc(rec.writer)}</b> <a class="lnk" data-rec="writer-name"${tip('작성자 이름을 바꾼다 — 잠금 · 기록의 작성자 소개에 보이는 이름(사람만)')}>바꾸기</a>` : '';
+}
+
+/** 「진행」 — 템플릿 00 의 작은 진행 띠(단면 · 좌굴 · 하중 · 검토 · 접합 · 점검). 색인의 results(저장에 든 결과 종류)에 있으면 ● — 일치 · 낡음은 그 대상을 열면 진행 띠가 말한다 */
+const RESULT_STEPS: Array<[string[], string]> = [[['__section'], '단면'], [['buckling_analysis', 'signature_ss'], '좌굴 해석'], [['load_analysis'], '하중 해석'], [['member_design'], '부재 검토'],
+  [['lap', 'connection'], '접합부'], [['validation'], '점검']];
+function progressHtml(results: string[], hasSection: boolean): string {
+  const has = (ks: string[]) => ks.some(k => (k === '__section' ? hasSection : results.includes(k)));
+  const n = RESULT_STEPS.filter(([ks]) => ks[0] !== '__section' && has(ks)).length;
+  return `<span class="pipe sm"${tip(`저장에 든 결과: ${RESULT_STEPS.filter(([ks]) => has(ks)).map(([, t]) => t).join(' · ') || '없음'} — 지금 입력과 맞는지는 그 대상을 열면 진행 띠가 말한다`)}>`
+    + RESULT_STEPS.map(([ks, t]) => `<span class="ps ${has(ks) ? 'ok' : 'none'}" data-step="${esc(t)}"><i></i></span>`).join('') + `</span><div class="faint">${n ? `결과 ${n}` : '결과 없음'}</div>`;
+}
+
+/** 작은 단면 그림 — 색인의 outline {paths: [[x0, z0, x1, z1, …] 0 – 1000 정수], aspect} 를 받은 그대로 선으로(믿지 않는다: 수 · 범위만 보고 넘치면 그리지 않는다) */
+function outlineSvg(o: RecCase['outline']): string {
+  if (!o || !Array.isArray(o.paths) || !o.paths.length || o.paths.length > 8) { return ''; }
+  const lines: string[] = [];
+  let n = 0;
+  for (const p of o.paths) {
+    if (!Array.isArray(p) || p.length < 4 || p.length % 2 || p.some(v => !Number.isInteger(v) || v < 0 || v > 1000)) { return ''; }
+    n += p.length / 2;
+    if (n > 96) { return ''; }
+    lines.push(`<polyline points="${p.reduce((a: string[], v, i) => (i % 2 ? (a[a.length - 1] += `,${v}`, a) : (a.push(String(v)), a)), []).join(' ')}"/>`);
+  }
+  return `<svg viewBox="-60 -60 1120 1120" preserveAspectRatio="xMidYMid meet" data-outline="${o.paths.length}" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="45" stroke-linejoin="round" stroke-linecap="round">${lines.join('')}</g></svg>`;
 }
 
 /** 제목 표시줄의 프로젝트 · 대상 글 */

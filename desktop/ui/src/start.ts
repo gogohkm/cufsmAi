@@ -30,7 +30,7 @@ export function initStart(root: HTMLElement, h: StartHandlers): void {
     + `<button class="btn" data-rec="open-folder"${tip('폴더를 골라 프로젝트로 연다(OS 폴더 물음)')}>폴더에서 열기</button>`
     + `<button class="btn ghost" data-rec="new-project"${tip('프로젝트 뿌리(문서 › StCFSD 프로젝트) 아래에 새 프로젝트를 만든다(이름을 묻는다)')}>새 프로젝트</button>`
     + `<button class="btn primary" data-rec="to-cards"${tip('아래 「새 검토」의 카드로 — 부재 유형 하나로 새 검토 대상을 만든다')}>새 검토</button></h4>`
-    + '<table class="t"><thead><tr><th></th><th>검토 대상</th><th>단면</th><th>진행</th><th>다음 판단</th><th class="r">마지막 작업</th></tr></thead><tbody class="rows"></tbody></table>'
+    + '<table class="t"><thead><tr><th></th><th>검토 대상</th><th>단면</th><th>진행</th><th>다음 판단</th><th class="r">마지막 작업</th><th></th></tr></thead><tbody class="rows"></tbody></table>'
     + `<div class="in foot"><a data-act="open"${tip('프로젝트 폴더 없이 .csd 하나만 연다. 작업 기록이 남지 않는다')}>파일만 열기 (.csd)</a><span class="faint where"></span></div></div>`
     + `<div class="box claude"><h4><span${tip('대화는 Claude Desktop 에서만 한다. StCFSD 에는 대화창이 없다')}>Claude Desktop 연결</span><span class="sp"></span><span class="verdict cl"></span></h4><div class="in steps"></div></div>`
     + `<div class="box newc-box" style="grid-column:1 / 3"><h4><span${tip('새 검토는 부재 유형 하나로 시작한다(값은 표의 처음 값). 열린 프로젝트 안에 만든다')}>새 검토</span><span class="sp"></span></h4>`

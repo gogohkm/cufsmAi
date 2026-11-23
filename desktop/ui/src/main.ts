@@ -13,7 +13,8 @@ import { fitZoom, installZoom, restoreZoom } from './zoom';
 import { answered, enqueue, initDialogs, questionOpen, setProgress, toast } from './dialogs';
 import { debounce, esc, tip } from './dom';
 import { editing, hideSide, initEdit, mountDesigner, reloadSide, setEditing, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
-import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
+import { beginEdit, editChanges, editChangesBySource, editStripHtml, endEdit } from './editstrip';
+import { chg } from './changes';
 import { findHtml, search, type Hit } from './find';
 import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, keyOfItem, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq, type Item } from './follow';
 import { hhmm } from './format';
@@ -65,10 +66,27 @@ let wasEditing = false;
 /** 편집 상태가 바뀌었다(F2 · 단추 · Esc) — 띠의 기준 판을 잡고 푼다 */
 function onEditChange(): void {
   const now = editing();
-  if (now && !wasEditing) { beginEdit(); }
-  if (!now && wasEditing) { endEdit(); }
+  // R2-3: 편집 상태를 열고 닫을 때 호스트에 알린다(다리의 사람 길 → editSession) — 그 사이의 사람 편집이 「사용자 변경」 묶음 하나.
+  // 버리기(discarding)는 그 길이 따로 알렸다
+  if (now && !wasEditing) { beginEdit(); void person('edit-session', { state: 'start' }); }
+  if (!now && wasEditing) { endEdit(); if (!discarding) { void person('edit-session', { state: 'end' }).then(() => scheduleRefresh()); } }
+  discarding = false;
   wasEditing = now;
   render();
+}
+let discarding = false;
+/**
+ * 「버리기」 — 호스트는 묶음을 내지 않을 뿐 값을 되돌리지 않는다(editSession 'discard' → backToStart). 그래서 이번 편집에 바뀐 것이
+ * 없을 때만 산다(그때는 묶음 없이 닫는다). 바뀐 것이 있으면 꺼져 있다 — 버리면 기록에 남지 않은 변경이 된다(호스트에 바람: 되돌리기)
+ */
+async function discardEdit(): Promise<void> {
+  const { person: p, ai, other } = editChangesBySource();
+  if (p.length || other.length || ai.length) { toast('바뀐 것이 있어 버리지 않는다 — 되돌리는 길이 호스트에 아직 없다. 「편집 마치기」로 묶음을 남긴다', 'warning'); return; }
+  const r = await person('edit-session', { state: 'discard' });
+  if (!r.ok) { toast(`버리지 못했다 — ${r.error ?? ''}`, 'warning'); return; }
+  if (r.data?.back_to_start === false) { toast('호스트가 들어올 때와 다르다고 한다 — 묶음 없이 닫혔다(호스트에 바람: 되돌리기)', 'warning'); }
+  discarding = true;
+  setEditing(false);
 }
 
 // ── 입력만 열었다(V7-01 — 82194ef) ─────────────────────────────────
@@ -156,11 +174,28 @@ async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
       }
       break;
     }
-    case 'take-lock': r = await person('take-lock'); break;
-    case 'archive': r = await person('archive', { archived: true }); break;
+    // 열지 않은 대상에도(시작 화면 줄의 ⋯ — case_id, 215cb5a). 없으면 지금 열린 대상
+    case 'take-lock': r = await person('take-lock', caseIdOf(el)); break;
+    case 'archive': r = await person('archive', { ...caseIdOf(el), archived: true }); break;
+    case 'relink': r = await person('relink', caseIdOf(el)); break;
+    case 'writer-name': r = await person('writer-name'); break;
+    case 'case-menu': {
+      const id = el?.getAttribute('data-case-id') ?? '';
+      const open = el?.getAttribute('data-open') === '1';
+      const x = (el?.getBoundingClientRect?.() ?? { left: 400, bottom: 200 }) as DOMRect;
+      const e2 = fakeEl({ 'case-id': id, name });
+      openMenu([
+        { label: '열기', off: open, why: open ? '이미 열려 있다' : undefined, run: () => { void recAct('open-case', e2); } },
+        '-',
+        { label: '보관', run: () => { void recAct('archive', e2); } },
+        { label: '잠금 넘겨받기…', run: () => { void recAct('take-lock', e2); } },
+        { label: '파일 다시 잇기…', run: () => { void recAct('relink', e2); } },
+      ], x.left - 120, x.bottom + 2, name);
+      return;
+    }
     case 'save-as': fileOp('save'); return;
     case 'dismiss': rec.outsideDismissed = `${state.full?.project?.case?.name ?? ''}|${rec.status?.saved_at ?? ''}`; render(); return;
-    case 'overwrite': toast('덮어쓰기는 호스트가 아직 그 길을 주지 않는다', 'warning'); return;
+    case 'overwrite': r = await person('overwrite'); break;
     default: return;
   }
   if (!r) { return; }
@@ -168,7 +203,8 @@ async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
   else if (r.data?.cancelled) { /* 사람이 물음을 닫았다 */ }
   else {
     const d = r.data ?? {};
-    toast(d.opened ? `「${d.opened}」을(를) 열었다` : d.created ? `「${d.created}」을(를) 만들었다` : d.project ? `프로젝트 「${d.project.name}」` : d.took ? `「${d.took}」의 잠금을 넘겨받았다` : '했다', 'info');
+    toast(d.opened ? `「${d.opened}」을(를) 열었다` : d.created ? `「${d.created}」을(를) 만들었다` : d.project ? `프로젝트 「${d.project.name}」` : d.took ? `「${d.took}」의 잠금을 넘겨받았다`
+      : d.archived ? `「${d.case}」을(를) 보관했다` : d.relinked ? `「${d.relinked}」을(를) ${d.file} 에 다시 이었다` : d.writer ? `작성자 이름 ${d.writer}` : d.saved ? '덮어써 저장했다' : '했다', 'info');
     if (d.project || d.opened) { ui.screen = d.opened ? 'review' : ui.screen; }
   }
   await loadRecent(true);
@@ -197,6 +233,7 @@ async function caseMenu(x: number, y: number): Promise<void> {
     { label: '저장', kbd: 'Ctrl+S', run: () => fileOp('save') },
     { label: '보관(목록에서 숨김)', run: () => { void recAct('archive'); }, off: !p.case, why: '열린 검토 대상이 없다' }], x, y, `검토 대상 · ${p.project?.name ?? ''}`);
 }
+const caseIdOf = (el?: HTMLElement | null): Record<string, string> => { const id = el?.getAttribute('data-case-id'); return id ? { case_id: id } : {}; };
 const fakeEl = (d: Record<string, string>): HTMLElement => { const e = document.createElement('span'); for (const [k, v] of Object.entries(d)) { e.setAttribute(`data-${k}`, v); } return e; };
 
 function render(): void {
@@ -337,7 +374,40 @@ function renderStatus(): void {
   const dm = state.runs.find(r => r.us?.design_method)?.us?.design_method;
   ($('status').querySelector('.std') as HTMLElement).innerHTML = `<span${tip(UNITS_NOTE)}>AISI S100-16${dm ? ` · ${esc(dm)}` : ''} · SI</span>`;
   const c = claudeStatus();
-  ($('status').querySelector('.ai') as HTMLElement).textContent = c?.lastAiCall ? `AI 마지막 호출 ${hhmm(c.lastAiCall.at)}` : 'AI 호출 없음';
+  const w = aiWorkNow();
+  ($('status').querySelector('.ai') as HTMLElement).textContent = w ? 'AI 작업 중' : c?.lastAiCall ? `AI 대기 · 마지막 호출 ${hhmm(c.lastAiCall.at)}` : 'AI 대기';
+  renderAiBar();
+}
+
+// ── 「AI 작업 중 · <도구> · 경과」 띠(R2-3 · 템플릿 07) — 다리의 ai:work(AI 의 호스트 동작 하나의 시작 · 끝) ─────────────
+const aiWork = new Map<string, { tool: string; at: number }>();
+let aiBarTimer: number | null = null;
+/** 0.5 초 넘게 이어지는 AI 동작(읽기 한 번은 띠를 깜빡이지 않는다) — 가장 오래된 것 */
+function aiWorkNow(): { tool: string; at: number; n: number } | null {
+  const now = Date.now();
+  const long = [...aiWork.values()].filter(x => now - x.at >= 500).sort((a, b) => a.at - b.at);
+  return long.length ? { ...long[0], n: long.length } : null;
+}
+const TOOL_KO: Record<string, string> = {
+  run_analysis: '좌굴 해석', analyze: '좌굴 해석', design_purlin: '퍼린 설계', analyze_loads: '하중 해석', aisi_design: '부재 검토', lap_connection: '랩 접합 검토',
+  design_connection: '접합부 검토', generate_template: '단면 만들기', validate_design: '점검', generate_report: '보고서', run_case_check: '다시 계산',
+};
+function renderAiBar(): void {
+  const el = $('aibar');
+  const w = aiWorkNow();
+  el.hidden = !w;
+  if (!w) { if (aiBarTimer !== null) { clearInterval(aiBarTimer); aiBarTimer = null; } return; }
+  const sec = Math.max(0, Math.round((Date.now() - w.at) / 1000));
+  el.innerHTML = `<span class="pulse"></span><b>AI 작업 중</b><span data-ai-tool="${esc(w.tool)}">${esc(TOOL_KO[w.tool] ? `${TOOL_KO[w.tool]} · ${w.tool}` : w.tool)}</span>`
+    + `<span class="faint" data-ai-elapsed="${sec}">경과 ${sec} 초${w.n > 1 ? ` · 함께 ${w.n}` : ''}</span><span class="sp"></span>`
+    + `<span class="dim">${following() ? '화면이 AI 를 따라가는 중(5 초 규칙)' : 'AI 따라가기 꺼짐 — 바뀐 것은 업무 › 변경에'}</span>`;
+  if (aiBarTimer === null) { aiBarTimer = window.setInterval(() => { renderAiBar(); if (!aiWorkNow()) { renderStatus(); } }, 1000); }
+}
+function onAiWork(d: any): void {
+  const id = String(d.request_id ?? d.tool ?? '');
+  if (d.phase === 'begin') { aiWork.set(id, { tool: String(d.tool ?? ''), at: Date.parse(String(d.at)) || Date.now() }); setTimeout(() => renderStatus(), 520); }
+  else { aiWork.delete(id); }
+  renderStatus();
 }
 
 /** 「AI 가 가리킴」(따르지 않은 요청 — 누르면 그리로) · 「AI 를 따라왔다 — 까닭」(10 초) */
@@ -441,7 +511,7 @@ function docAction(t: HTMLElement): boolean {
 }
 
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg'].includes(key) ? 'work' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg'].includes(key) || key.startsWith('chg:') ? 'work' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -580,6 +650,8 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
       rerender();
       break;
     case 'claude:status': renderClaude(d as ClaudeStatus); rerender(); break;
+    // R2-3: AI 의 호스트 동작 하나 — 띠만 다시 그린다(그 동작이 바꾼 것은 그 메시지가 다시 읽게 한다)
+    case 'ai:work': onAiWork(d); if (d.phase === 'end') { scheduleRefresh(); } break;
     case 'host:message': {
       const c = String(d.command ?? '');
       if (c === 'focusRequest') { if (d.focus) { void onFocus(d.focus as FocusReq); } break; }
@@ -701,6 +773,24 @@ function boot(): void {
     caseMenu, projectMenu: (x, y) => projectMenu(x, y),
   });
   initStart($('start'), { open: () => fileOp('open'), review: toReview, claude: op => { void claudeOp(op); }, rec: (act, el) => { void recAct(act, el); } });
+  // R2-3: 꼬리표의 「2 → 2.3 · 10:12」 · 영향 줄 → 업무 › 변경의 그 줄, 비교 기준 칩 → 앞 변경 고르기
+  document.addEventListener('click', e => {
+    const t = e.target as HTMLElement;
+    const go = t.closest?.('[data-chg-go]');
+    if (go && go.getAttribute('data-chg-go')) { e.stopPropagation(); ui.screen = 'review'; select('work', `chg:${go.getAttribute('data-chg-go')}`); return; }
+    const cr = t.closest?.('#center tr[data-k^="chg:"]');
+    if (cr) { e.stopPropagation(); select('work', cr.getAttribute('data-k')!); return; }
+    const bs = t.closest?.('[data-chg-base]');
+    if (bs) {
+      e.stopPropagation();
+      const sel = String(bs.getAttribute('data-chg-base'));
+      const i = chg.list.findIndex(c => c.id === sel);
+      const older = i >= 0 ? chg.list.slice(i + 1, i + 13) : [];
+      const r = bs.getBoundingClientRect();
+      openMenu([...older.map(c => ({ label: `${hhmm(c.at)} · ${c.title}`, run: () => { chg.base = c.id; chg.baseFor = sel; render(); } })),
+        ...(older.length ? ['-' as const] : []), { label: '목록의 처음부터', run: () => { chg.base = '__first__'; chg.baseFor = sel; render(); } }], r.left, r.bottom + 2, '비교 기준 — 이 때 → 지금');
+    }
+  }, true);
   $('recband').addEventListener('click', e => {
     const b = (e.target as HTMLElement).closest('[data-rec]') as HTMLElement | null;
     if (b && !b.classList.contains('off')) { void recAct(b.getAttribute('data-rec')!, b); }
@@ -815,6 +905,7 @@ function boot(): void {
   });
   $('editstrip').addEventListener('click', e => {
     if ((e.target as HTMLElement).closest('[data-act="edit-done"]')) { setEditing(false); }
+    if ((e.target as HTMLElement).closest('[data-act="edit-discard"]:not(.off)')) { void discardEdit(); }
   });
   $('aipoint').addEventListener('click', e => {
     const a = (e.target as HTMLElement).closest('[data-ai]');
@@ -883,6 +974,8 @@ function boot(): void {
   review: toReview,
   /** 시험: 시작 화면으로(제목 표시줄의 「새 검토…」와 같은 길) */
   start: () => { ui.screen = 'start'; render(); },
+  /** 시험: 호스트에서 다시 읽기(화면의 새로 고침과 같은 길 — 쓰지 않는다) */
+  reload: () => scheduleRefresh(),
   get modeSel() { return { ...modeSel }; },
   setLen: (i: number, m = 1) => { modeSel.len = i; modeSel.mode = m; render(); },
   views: (v: V[]) => { setViews(ui.sel[ui.tab], v); render(); },

@@ -19,6 +19,7 @@ import { memberSvg } from './member';
 import { BUCKLING_METHOD_KO, SOURCE_KO, STEP_KO, VERDICT_KO, sectionLabel } from './names';
 import { allRows, POINT_KO, rowOfKey, state, type CheckRow, type Run, COMBO_KO, locWords } from './store';
 import { noteLi, plainText, reasonNote, type Note } from './notices';
+import { inputWhy } from './changes';
 import { kindOfQuantity, LABEL, si } from './units';
 import { caseTag, ENGINE_TO_CASE } from './caseFields';
 
@@ -248,7 +249,7 @@ function caseSourceOf(src: any): string {
   if (!['user_input', 'engine_default', 'material'].includes(k) || !src?.key || !state.caseIn?.sources) { return ''; }
   const ck = ENGINE_TO_CASE[String(src.key)] ?? String(src.key);
   const cs = state.caseIn.sources[ck];
-  return cs ? ` <span class="why2">검토 상태</span>${caseTag(cs, state.caseIn.inputs?.[ck] === null && cs === 'ai')}` : '';
+  return cs ? ` <span class="why2">검토 상태</span>${caseTag(cs, state.caseIn.inputs?.[ck] === null && cs === 'ai')}${inputWhy(ck)}` : '';
 }
 
 /** 시트 1절의 표 — 이 항목 단계 입력의 출처별 */

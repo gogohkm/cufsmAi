@@ -9,6 +9,7 @@
  *    이 화면의 지금 결과에 없는 항목이면 따르지 않고 그렇다고 보인다. 어느 쪽이든 다음 보고에 focus_response 를 싣는다.
  *  - 하지 않는 것: 창의 포커스를 가져가지 않는다(window.focus 를 부르지 않는다), 모델을 바꾸지 않는다, 편집 상태를 스스로 열지 않는다.
  */
+import { chg } from './changes';
 import { mcp } from './bridge';
 import { allRows, state, type CheckRow, type Scope } from './store';
 
@@ -93,6 +94,11 @@ export function keyOfItem(item: Item): { tab: Tab; key: string } | null {
       hit = m;
     }
     return { tab: 'result', key: hit.key };
+  }
+  // 보기 계약의 `record`(R2-3 — 호스트가 아직 받지 않는다: _viewItem · _checkedSelection 에 바람). 변경 묶음 id 가 지금 목록에 있으면 그 줄
+  if ((item as { kind: string }).kind === 'record') {
+    const id = String(item.id);
+    return chg.list.some(c => c.id === id) ? { tab: 'work', key: `chg:${id}` } : null;
   }
   if (item.kind === 'validation') {
     const id = String(item.id);

@@ -12,6 +12,7 @@ import { esc, tip } from './dom';
 import { none, num, sigText } from './format';
 import { state } from './store';
 import { caseSI, si, type Kind } from './units';
+import { inputWhy } from './changes';
 
 export type Branch = 'mem' | 'ld' | 'dc' | 'cj' | 'mat';
 
@@ -100,7 +101,7 @@ void BRANCH_OF;
 export function caseTables(b: Branch, focus: string | null): string {
   const x = ci();
   if (!x?.inputs) { return `<div class="sec"><h4>검토 상태</h4>${none('검토 상태를 읽지 못함', state.caseErr)}</div>`; }
-  const row = (key: string) => `<tr data-k="case:${esc(key)}"${focus === key ? ' class="on"' : ''}><td>${esc(LABEL_FALLBACK(key))}</td><td class="r">${caseValue(key)}</td><td class="src">${caseTag(srcOf(key), blankByAi(key))}</td></tr>`;
+  const row = (key: string) => `<tr data-k="case:${esc(key)}"${focus === key ? ' class="on"' : ''}><td>${esc(LABEL_FALLBACK(key))}</td><td class="r">${caseValue(key)}</td><td class="src">${caseTag(srcOf(key), blankByAi(key))}${inputWhy(key)}</td></tr>`;
   let html = '';
   if (b === 'mem') {
     const S = x.spans ?? {};

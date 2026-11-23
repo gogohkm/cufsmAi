@@ -42,7 +42,21 @@ export interface RecordsPersonFace {
   createProject(rootAbs: string, name: string): { name: string; projectId: string; readOnly: boolean; warnings: string[]; cases: number };
   takeLock(caseId: string): unknown;
   archive(caseId: string, archived: boolean): void;
+  /** 뿌리 · 최근의 프로젝트 — 폴더 경로는 사람의 얼굴로만(215cb5a) */
+  projects(): Array<{ name: string; dir: string; cases: number; lastWork: string | null; open: boolean }>;
+  currentProject(): { name: string; dir: string; readOnly: boolean } | null;
+  /** 옮긴 · 이름을 바꾼 대상을 사람이 고른 파일(02_검토대상 안의 .csd)에 다시 잇는다 */
+  relink(caseId: string, fileAbs: string): { caseId: string; file: string };
+  writerName(): string;
+  setWriterName(name: string): string;
+  /** 밖에서 바뀐 파일을 덮어써도 된다 — external 줄을 남기고 다음 저장의 대조를 지금 파일로 */
+  allowOverwrite(): { fileSha: string };
 }
+
+/** R2-2: 편집 상태의 시작 · 끝 · 버리기(StcfsdPanel.editSession — 사람의 길로만, MCP 문맥에서는 ok false) */
+export type EditSessionState = 'start' | 'end' | 'discard';
+/** AI 의 호스트 동작 하나(시작 · 끝) — 「AI 작업 중 · <도구> · 경과」 띠 */
+export interface AiWork { phase: 'begin' | 'end'; tool: string; requestId: string | null; client: string | null; at: string }
 
 export interface StartHostOptions {
   /** 저장소 루트(뒤에 설치본에서는 리소스 폴더). `out/extension.js` · `python/` · `media/` · `webview/` · `.venv` 가 여기 있다 */
@@ -152,7 +166,11 @@ export interface HostHandle {
    * 실행을 사람의 것으로 적게 한다. 파일 · 포트 파일 · 화면에 쓰지 않는다. 없으면(옛 out/) null
    */
   screenSecret(): string | null;
-  unimplemented(): Array<{ name: string; count: number }>;
+  /** R2-3: 편집 상태의 시작 · 끝 · 버리기를 호스트에(사람의 길 — 다리만 부른다). 패널이 없으면 null */
+  editSession(state: EditSessionState): { ok: boolean; backToStart?: boolean } | null;
+  /** R2-3: AI(MCP 문맥)의 호스트 동작이 시작 · 끝날 때 — 띠 「AI 작업 중 · <도구> · 경과」 */
+  onAiWork(cb: (w: AiWork) => void): void;
+  unimplemented():Array<{ name: string; count: number }>;
   dispose(): Promise<void>;
 }
 
@@ -388,13 +406,37 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
     if (!info) { throw new Error(`stcfsd.openDesigner 뒤에 ${DESIGNER_VIEW_TYPE} 패널이 없다`); }
     runtime.hub.pin(info.id);
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { projectRoots?: string[]; currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any>; recordsPerson?: RecordsPersonFace | null } } };
+    const panelMod = require(path.join(outDir, 'webview', 'StcfsdPanel.js')) as { StcfsdPanel?: { projectRoots?: string[]; prototype?: Record<string, unknown>;
+      currentPanel?: { writeRecoveryCopy?: (f: string, r: string) => Promise<any>; recordsPerson?: RecordsPersonFace | null; editSession?: (s: string) => { ok: boolean; backToStart?: boolean } } } };
     let screenSecretValue: string | null = null;
+    let currentActor: (() => { kind?: string; tool?: string; requestId?: string; client?: string } | undefined) | null = null;
+    let runAsPerson: (<T>(fn: () => T) => T) | null = null;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const scope = require(path.join(outDir, 'mcp', 'actorScope.js')) as { SCREEN_SECRET?: unknown };
+      const scope = require(path.join(outDir, 'mcp', 'actorScope.js')) as { SCREEN_SECRET?: unknown; currentActor?: () => any; runAs?: <T>(ctx: unknown, fn: () => T) => T };
       screenSecretValue = typeof scope.SCREEN_SECRET === 'string' && scope.SCREEN_SECRET.length >= 32 ? scope.SCREEN_SECRET : null;
+      currentActor = typeof scope.currentActor === 'function' ? scope.currentActor : null;
+      // 편집 상태의 신호는 사람의 문맥에서(웹뷰의 editSession 메시지와 같은 행위자 — 그 묶음은 「사용자 변경」)
+      runAsPerson = typeof scope.runAs === 'function' ? <T>(fn: () => T): T => scope.runAs!({ kind: 'person' }, fn) : null;
     } catch { screenSecretValue = null; }
+    // R2-3: AI(MCP 문맥)의 호스트 동작 하나의 시작 · 끝을 띠에 알린다 — 패널의 handleMcpAction 을 지켜보기만 한다(인자 · 답 · 순서를 바꾸지 않는다).
+    // 문맥(행위자 · 도구 이름)은 호스트의 actorScope 가 정한 것 그대로. 호스트가 이런 알림을 내면 이 감싸기는 걷는다(R2-3 보고 — 호스트에 바람)
+    const aiWorkCbs: Array<(w: AiWork) => void> = [];
+    const proto = panelMod.StcfsdPanel?.prototype as Record<string, unknown> | undefined;
+    const orig = proto?.handleMcpAction;
+    if (proto && typeof orig === 'function' && currentActor && !(orig as { __aiWork?: boolean }).__aiWork) {
+      const actorOf = currentActor;
+      const wrapped = async function (this: unknown, ...args: unknown[]): Promise<unknown> {
+        const a = actorOf();
+        const ai = a?.kind === 'ai';
+        const w = ai ? { tool: String(a?.tool ?? (args[0] as { action?: unknown })?.action ?? '').slice(0, 80), requestId: a?.requestId ?? null, client: a?.client ?? null } : null;
+        const say = (phase: 'begin' | 'end') => { if (w) { for (const cb of aiWorkCbs) { try { cb({ phase, ...w, at: new Date().toISOString() }); } catch { /* 띠가 요청을 막지 않는다 */ } } } };
+        say('begin');
+        try { return await (orig as (...x: unknown[]) => Promise<unknown>).apply(this, args); } finally { say('end'); }
+      };
+      (wrapped as unknown as { __aiWork: boolean }).__aiWork = true;
+      proto.handleMcpAction = wrapped;
+    }
     const designer: DesignerPanel = {
       id: info.id,
       alive: () => runtime.hub.has(info.id) && !!panelMod.StcfsdPanel?.currentPanel,
@@ -485,6 +527,12 @@ export async function startHost(opts: StartHostOptions): Promise<HostHandle> {
       recordsPerson: () => panelMod.StcfsdPanel?.currentPanel?.recordsPerson ?? null,
       projectRoots: () => (Array.isArray(panelMod.StcfsdPanel?.projectRoots) ? [...panelMod.StcfsdPanel!.projectRoots!] : []),
       screenSecret: () => screenSecretValue,
+      editSession: (state) => {
+        const p = panelMod.StcfsdPanel?.currentPanel;
+        if (!p || typeof p.editSession !== 'function' || !runAsPerson) { return null; }
+        return runAsPerson(() => p.editSession!(state));
+      },
+      onAiWork: (cb) => { aiWorkCbs.push(cb); },
       writeRecoveryCopy: async (file, root) => {
         const p = panelMod.StcfsdPanel?.currentPanel;
         if (!p || typeof p.writeRecoveryCopy !== 'function') { return { ok: false, error: '설계 패널이 없거나 이 판의 호스트에 복구 사본 쓰기가 없다' }; }

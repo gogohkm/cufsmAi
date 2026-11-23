@@ -55,6 +55,7 @@ src/
   caseView.ts       모델 탭의 부재 · 하중 · 설계 조건 · 접합부 · 재료 — get_case_inputs 의 값 · 단위 · 출처, 경간 표, 「AI 가 바꾼 사람의 값」
   editstrip.ts      편집 상태의 띠(템플릿 09) — 「이번 편집 — 바뀐 것 N」 · AI 대기 · 편집 마치기 · 버리기(R2 전 꺼짐)
   checklist.ts      점검(validate_design 의 항목 — 결과 탭)과 문서 탭(계산서 · 좌굴 해석 보고서 · 검증표 — generate_report 의 파일, sandbox 미리보기)
+  changes.ts        R2-3 — 변경 묶음(list_changes detail fields) · 출처 꼬리표(입력 키 last_change, 모델 칸은 칸 글) · 06 의 낡음 풍선 · 비교 기준
   notices.ts        엔진의 글(경고 · 가정 · 범위 · 미검토 · 이유 · 패스너 이름표) — 제품의 webview/js/notices.js 를 그대로 묶어 한국어 · SI 로, code 를 data-code 에(K4b)
   records.ts        기록 갈래 R1-3 — 프로젝트 · 검토 대상(get_full_state.project · list_cases · get_case_status), 띠, 사람만 하는 일(/api/person/*)
   v3d.ts            3D 모드 형상 — 제품의 렌더러를 /ui/viewer3d/ 에서 싣고 캔버스 하나를 다시 그릴 때마다 옮겨 붙인다

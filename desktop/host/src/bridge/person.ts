@@ -4,10 +4,12 @@
  *  - 읽기 인증(쿠키 · Bearer — 다리 토큰. MCP 토큰은 다른 토큰이라 401) + 쓰기 열쇠(POST — 맨 위 틀의 스크립트에만 붙는다,
  *    Electron 은 맨 위 틀에서 사람의 입력이 있은 뒤 2 초 안에만 — 층 4, 껍데기가 한다)
  *  - `Origin` = 틀 출처, `Sec-Fetch-Site: same-origin`(끼운 웹뷰는 다른 출처 — 거절), `Content-Type: application/json`, 본문 4 KB 까지
- *  - 본문의 경로 · 폴더는 읽지 않는다 — 폴더 · 이름은 호스트의 물음(OS 대화상자 · 이름 물음)이 사람에게 묻는다. caseId 도 받지 않는다(지금 열린 대상)
+ *  - 본문의 경로 · 폴더는 읽지 않는다 — 폴더 · 파일 · 이름은 호스트의 물음(OS 대화상자 · 이름 물음)이 사람에게 묻는다.
+ *    대상은 `case_id`(경로가 아니다 — 열린 프로젝트의 list_cases 에 있는 것만) 또는 지금 열린 대상
  *
- * 경로: GET recent · POST open-folder · new-project · open-project {name} · open-case {name} · new-case {kind} · make-project · take-lock · archive {archived}.
- * relink · 작성자 이름 · 밖에서 바뀐 파일 덮어쓰기는 호스트의 사람 얼굴에 아직 없다 — 501 과 그 까닭(호스트에 바라는 것)
+ * 경로: GET recent(최근 · 뿌리의 프로젝트와 폴더 경로 · 지금 프로젝트 · 작성자 이름 — 사람의 얼굴에서, 215cb5a) · POST open-folder · new-project ·
+ * open-project {name} · open-case {name} · new-case {kind} · make-project · take-lock {case_id?} · archive {case_id?, archived} ·
+ * relink {case_id?}(파일은 OS 대화상자) · writer-name(이름 물음) · overwrite(밖에서 바뀐 파일을 덮어써도 된다 → 저장) · edit-session {state}(R2-3)
  */
 import * as fs from 'node:fs';
 import type * as http from 'node:http';
@@ -61,11 +63,18 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
   const no = (status: number, error: string, extra: Record<string, unknown> = {}) => sendJson(res, status, { success: false, error, ...extra });
 
   if (name === 'recent' && method === 'GET') {
-    // 최근 · 뿌리의 프로젝트(이름 · 대상 수 · 마지막 작업). 경로는 화면에만 보일 자리지만 호스트가 아직 주지 않는다(바라는 것)
-    const r = await deps.action({ action: 'list_projects', limit: 20 });
-    if (r?.error) { no(200, String(r.error)); return true; }
-    ok({ projects: Array.isArray(r?.projects) ? r.projects : [], total: r?.total ?? 0, roots: deps.host.projectRoots(),
-      path_note: '프로젝트 폴더의 경로는 호스트가 아직 주지 않는다(사람의 얼굴에 최근 목록 · 경로를 바란다)' });
+    // 최근 · 뿌리의 프로젝트(이름 · 폴더 경로 · 대상 수 · 마지막 작업) · 지금 프로젝트 · 작성자 이름 — 사람의 얼굴에서(경로는 이 화면에만)
+    const person = deps.host.recordsPerson();
+    if (!person) {
+      const r = await deps.action({ action: 'list_projects', limit: 20 });
+      if (r?.error) { no(200, String(r.error)); return true; }
+      ok({ projects: Array.isArray(r?.projects) ? r.projects : [], total: r?.total ?? 0, roots: deps.host.projectRoots(), current: null, writer: null });
+      return true;
+    }
+    try {
+      const list = person.projects().slice(0, 20).map(x => ({ name: x.name, dir: x.dir, cases: x.cases, last_work: x.lastWork, open: x.open }));
+      ok({ projects: list, total: list.length, roots: deps.host.projectRoots(), current: person.currentProject(), writer: person.writerName() });
+    } catch (err) { no(200, String((err as Error)?.message ?? err)); }
     return true;
   }
   if (method !== 'POST') { no(405, 'POST'); return true; }
@@ -75,6 +84,16 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
   try { b = await body(req); } catch (err) { no((err as { status?: number }).status ?? 400, String((err as Error).message)); return true; }
   const person = deps.host.recordsPerson();
   const status = async () => (await deps.action({ action: 'get_full_state' }))?.project ?? null;
+  /** 본문의 case_id — 열린 프로젝트의 대상(list_cases)에 있는 것만. 없으면 지금 열린 대상 */
+  const target = async (): Promise<{ caseId: string; name: string; open: boolean } | null> => {
+    if (typeof b.case_id === 'string' && b.case_id) {
+      const lc = await deps.action({ action: 'list_cases', include_archived: true });
+      const hit = (Array.isArray(lc?.cases) ? lc.cases : []).find((c: any) => c.case_id === b.case_id);
+      return hit ? { caseId: String(hit.case_id), name: String(hit.name), open: !!hit.open } : null;
+    }
+    const c = (await status())?.case;
+    return c?.caseId ? { caseId: String(c.caseId), name: String(c.name), open: true } : null;
+  };
   try {
     switch (name) {
       case 'open-folder': {
@@ -155,32 +174,80 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
       }
       case 'take-lock': {
         if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
-        const st = await status();
-        const c = st?.case;
-        if (!c?.caseId) { no(409, '열린 검토 대상이 없다'); return true; }
-        if (!c.lock) { no(409, '이 대상은 다른 곳이 잠그지 않았다'); return true; }
+        const t = await target();
+        if (!t) { no(409, typeof b.case_id === 'string' ? '그 대상이 열린 프로젝트에 없다' : '열린 검토 대상이 없다'); return true; }
+        // 열린 대상이면 잠금이 누구 것인지 보인다(열지 않은 대상은 목록에 잠금 정보가 없다 — 넘겨받는다고만 묻는다)
+        const lock = t.open ? (await status())?.case?.lock ?? null : null;
+        if (t.open && !lock) { no(409, '이 대상은 다른 곳이 잠그지 않았다'); return true; }
         const yes = await deps.platform.notify({ severity: 'warning', modal: true, items: ['넘겨받기', '취소'],
-          message: `${c.lock.name} (${c.lock.host}) 이(가) ${c.lock.since} 부터 이 검토 대상을 잠그고 있습니다 — 넘겨받을까요?`,
+          message: lock ? `${lock.name} (${lock.host}) 이(가) ${lock.since} 부터 「${t.name}」을(를) 잠그고 있습니다 — 넘겨받을까요?` : `「${t.name}」의 잠금을 넘겨받을까요?`,
           detail: '넘겨받으면 그쪽의 저장은 거절됩니다. 그쪽이 아직 작업 중이면 먼저 그 사람과 이야기하세요.' });
         if (yes !== '넘겨받기') { ok({ cancelled: true }); return true; }
-        person.takeLock(String(c.caseId));
+        person.takeLock(t.caseId);
         deps.changed('case');
-        ok({ took: c.name });
+        ok({ took: t.name });
         return true;
       }
       case 'archive': {
         if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
-        const st = await status();
-        const c = st?.case;
-        if (!c?.caseId) { no(409, '열린 검토 대상이 없다'); return true; }
-        person.archive(String(c.caseId), b.archived !== false);
+        const t = await target();
+        if (!t) { no(409, typeof b.case_id === 'string' ? '그 대상이 열린 프로젝트에 없다' : '열린 검토 대상이 없다'); return true; }
+        person.archive(t.caseId, b.archived !== false);
         deps.changed('case');
-        ok({ archived: b.archived !== false, case: c.name });
+        ok({ archived: b.archived !== false, case: t.name });
         return true;
       }
-      case 'relink': case 'writer-name': case 'overwrite':
-        no(501, `호스트의 사람 얼굴에 아직 없다(${name}) — RecordsDesk.person 에 바란다`);
+      case 'relink': {
+        // 옮긴 · 이름을 바꾼 대상을 다시 잇는다 — 파일은 OS 대화상자로 사람이 고른다(본문의 경로는 읽지 않는다)
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const t = await target();
+        if (!t) { no(409, typeof b.case_id === 'string' ? '그 대상이 열린 프로젝트에 없다' : '열린 검토 대상이 없다'); return true; }
+        const cur = person.currentProject();
+        const picked = await deps.platform.fileDialog({ kind: 'open', canSelectFiles: true, canSelectFolders: false, canSelectMany: false,
+          title: `「${t.name}」의 파일 다시 잇기`, openLabel: '이 파일로 잇기', filters: { 'StCFSD 검토 대상': ['csd'] },
+          defaultPath: cur ? path.join(cur.dir, '02_검토대상') : undefined });
+        const file = picked?.[0];
+        if (!file) { ok({ cancelled: true }); return true; }
+        const r = person.relink(t.caseId, file);
+        deps.changed('case');
+        ok({ relinked: t.name, file: path.basename(r.file) });
         return true;
+      }
+      case 'writer-name': {
+        // 작성자 이름(잠금 · 작성자 소개에 쓰인다) — 이름 물음, 지금 이름이 기본
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const now = person.writerName();
+        const nm = (await deps.platform.input({ title: '작성자 이름', prompt: '잠금 · 기록의 작성자 소개에 보이는 이름', value: now }))?.trim();
+        if (!nm || nm === now) { ok({ cancelled: !nm, writer: now }); return true; }
+        const set = person.setWriterName(nm);
+        deps.changed('writer');
+        ok({ writer: set });
+        return true;
+      }
+      case 'overwrite': {
+        // 밖에서 바뀐 파일을 덮어쓴다 — 사람이 「덮어쓰기」를 눌렀다: 호스트가 external 줄을 남기고 대조를 지금 파일로 → 저장
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const yes = await deps.platform.notify({ severity: 'warning', modal: true, items: ['덮어쓰기', '취소'],
+          message: '저장한 뒤 다른 곳에서 바뀐 파일을 지금 화면의 내용으로 덮어쓸까요?', detail: '밖에서 바뀐 내용은 기록(「밖에서」 변경 한 줄)에 남고 파일에서는 사라집니다.' });
+        if (yes !== '덮어쓰기') { ok({ cancelled: true }); return true; }
+        person.allowOverwrite();
+        const sv = await deps.action({ action: 'save_case' });
+        if (sv?.error) { no(200, String(sv.error)); return true; }
+        deps.changed('case');
+        ok({ saved: true });
+        return true;
+      }
+      case 'edit-session': {
+        // R2-3: 편집 상태의 시작 · 끝 · 버리기 — 그 사이의 사람 편집이 묶음 하나(호스트 editSession, 사람의 문맥)
+        const st = String(b.state ?? '');
+        if (!['start', 'end', 'discard'].includes(st)) { no(400, 'state 는 start · end · discard'); return true; }
+        const r = deps.host.editSession(st as 'start' | 'end' | 'discard');
+        if (!r) { no(409, '설계 패널이 없다'); return true; }
+        if (!r.ok) { no(200, '호스트가 받지 않았다'); return true; }
+        deps.changed('changes');
+        ok({ state: st, ...(r.backToStart !== undefined ? { back_to_start: r.backToStart } : {}) });
+        return true;
+      }
       default:
         no(404, `없는 사람 경로: ${name}`);
         return true;

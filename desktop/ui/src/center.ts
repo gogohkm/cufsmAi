@@ -17,7 +17,7 @@ import { isValKey, reportKindOf, reportView, valView, vtabView } from './checkli
 import { curveSvg, type CurveMark } from './curve';
 import { esc, tip } from './dom';
 import { drawerHtml, type DTable } from './drawer';
-import { bandVar, none, num, ratio, sigText, tnum, tnumX, verdictOf } from './format';
+import { bandVar, hhmm, none, num, ratio, sigText, tnum, tnumX, verdictOf } from './format';
 import { connSvg, lapFasteners, lapSvg } from './lap';
 import { memberSvg, type PointBar, type Region, type Row } from './member';
 import { FAMILY_KO } from './names';
@@ -27,6 +27,7 @@ import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
 import { plainText } from './notices';
+import { baseOf, BY_KO, changeOf, chg, KIND_RESULT_KO, sinceBase, type Change } from './changes';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
 export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean; mode3d: boolean }
@@ -46,7 +47,7 @@ export function groupOf(key: string): Group {
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
   if (key === 'conn' || key.startsWith('conn:')) { return 'conn'; }
   if (['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return 'doc'; }
-  if (['ask', 'rep', 'chg', 'val', 'alt'].includes(key)) { return 'other'; }
+  if (['ask', 'rep', 'chg', 'val', 'alt'].includes(key) || key.startsWith('chg:')) { return 'other'; }
   return 'model';
 }
 
@@ -413,12 +414,63 @@ export function tablesFor(group: Group): DTable[] {
   return [];
 }
 
+// ── 업무 › 변경(R2-3 · 템플릿 07) ───────────────────────────────────
+/** 결과 종류의 지금 상태(진행 띠와 같은 것) */
+const STAGE_OF: Record<string, keyof typeof state.stages> = { buckling_analysis: 'fsm', design_dsm: 'fsm', load_analysis: 'load', member_design: 'chk', lap: 'conn', connection: 'conn', validation: 'val' };
+const STAGE_KO: Record<string, string> = { ok: '일치', stale: '낡음', none: '없음', run: '다시 실행 중', unk: '모름' };
+export function stageNow(kind: string): { t: string; cls: string } {
+  const st = state.stages[STAGE_OF[kind]]?.state ?? 'unk';
+  return { t: STAGE_KO[st] ?? st, cls: st === 'stale' ? 'verdict warn' : st === 'run' ? 'acc' : st === 'ok' ? 'dim' : 'faint' };
+}
+
+/**
+ * 가운데 — 단면(지금 모델) · 칩(바뀐 칸 · 낡게 한 결과) · 「비교 기준 ▾」 · 표 서랍 「바뀐 값 <기준> → 지금」 + 「따라 바뀐 것」.
+ * 줄 · 글은 호스트의 것(list_changes 의 칸 글 — 프로그램이 지은 「이름 전 → 후 단위」). 화면은 기준 뒤의 묶음을 고르기만 한다
+ */
+function changeView(key: string, size: { w: number; h: number }): { html: string; cls: string } {
+  const c: Change | undefined = key.startsWith('chg:') ? changeOf(key.slice(4)) : chg.list[0];
+  if (!c) {
+    return { html: honest(chg.err ? '변경을 읽지 못함' : '변경 없음', chg.err ?? '이 대상에 기록된 변경 묶음이 없다 — AI 의 도구 하나 · 편집 상태 한 번 · 화면의 고침(조용한 2 초)이 묶음 하나가 된다'), cls: 'v1' };
+  }
+  const b = baseOf(c);
+  const since = sinceBase(c);
+  const W = Math.max(420, Math.round(size.w));
+  const H = Math.max(320, size.h - 300);
+  const svg = sectionSvg({ w: W, h: H, nodes: state.nodes, elems: state.elems, props: state.props, shear: state.cutwp, extent: state.full?.section ?? null, template: tplOf(),
+    labels: false, elemLabels: false, dims: true, axes: false, stress: false });
+  const inv = [...new Set(since.flatMap(x => x.invalidated ?? []))];
+  const nf = since.reduce((a, x) => a + (x.fields ?? 0), 0);
+  const view = `<div class="dv" data-draw="section" data-zoom="section" data-chg-view="${esc(c.id)}">${svg}`
+    + `<div class="hud tl"><span class="chip" data-chg-fields="${nf}"${tip('기준 → 지금 사이의 묶음이 바꾼 칸 수(호스트의 fields). 절점 · 요소의 바뀜 · 더함 · 뺌은 호스트가 칸 글로만 준다')}><i class="key" style="background:var(--mod)"></i>바뀐 칸 ${nf}</span>`
+    + `<span class="chip" data-chg-n="${since.length}">묶음 ${since.length}</span>`
+    + (inv.length ? `<span class="chip"${tip('이 묶음들이 무효로 만든 결과(호스트의 장부)')}><i class="key" style="background:var(--warn)"></i>낡게 한 결과 ${inv.length}</span>` : '') + '</div>'
+    + `<div class="hud tr"><span class="chip" data-chg-base="${esc(c.id)}"${tip('비교 기준 — 이 때 뒤의 묶음을 지금까지 모아 서랍에 보인다(앞 변경을 고른다)')}>비교 기준 · ${b ? esc(hhmm(b.at)) : '처음'} ▾</span>${fitBtn('section')}</div>`
+    + `<div class="hud bl"><span class="cap">지금 모델 · 절점 ${state.nodes.length} · 요소 ${state.elems.length}</span></div></div>`;
+  const rows: DTable['rows'] = [];
+  for (const x of since) {
+    const who = `${BY_KO[x.by.kind] ?? x.by.kind}`;
+    const fs = x.field_changes?.length ? x.field_changes : [x.title];
+    fs.forEach(f => rows.push({ key: `chg:${x.id}`, cells: [esc(hhmm(x.at)), `<span data-by="${esc(x.by.kind)}">${esc(who)}</span>`, esc(f)], sort: [x.at, who, f], tsv: [hhmm(x.at), who, f] }));
+    if ((x.field_changes?.length ?? 0) < x.fields) { rows.push({ key: `chg:${x.id}`, cls: 'faint', cells: ['', '', `외 ${x.fields - (x.field_changes?.length ?? 0)} 칸`], sort: [x.at, who, ''], tsv: ['', '', ''] }); }
+  }
+  if (inv.length) {
+    rows.push({ cls: 'grp', cells: ['', '', '<span data-tip="이 묶음들이 무효로 만든 결과 — 지금 상태는 진행 띠와 같다">따라 바뀐 것</span>'], sort: ['', '', ''], tsv: ['', '', '따라 바뀐 것'] });
+    for (const k of inv) {
+      const s2 = stageNow(k);
+      rows.push({ cells: ['', '<span class="dim">결과</span>', `<span data-follow="${esc(k)}">${esc(KIND_RESULT_KO[k] ?? k)} · 일치 → <span class="${s2.cls}">${esc(s2.t)}</span></span>`], sort: ['', '', k], tsv: ['', '결과', `${KIND_RESULT_KO[k] ?? k} → ${s2.t}`] });
+    }
+  }
+  const table: DTable = { id: 'chg', title: '바뀐 값', note: `${b ? hhmm(b.at) : '처음'} → 지금`, cols: [{ t: '때' }, { t: '누가' }, { t: '바뀐 것(전 → 후)' }], rows, empty: '바뀐 칸 없음' };
+  return { html: view + drawerHtml([table], { sel: `chg:${c.id}`, collapsedDefault: false }), cls: 'v1 withdrawer' };
+}
+
 /** 그림 칸의 크기(px) — 그 비율로 viewBox 를 잡는다 */
 export function centerHtml(key: string, size: { w: number; h: number } = { w: 1240, h: 900 }): { html: string; cls: string } {
   // 점검 · 문서(K3) — 표 · 미리보기 하나
   if (isValKey(key)) { return { html: valView(key), cls: 'v1 docc' }; }
   if (key === 'vtab') { return { html: vtabView(key), cls: 'v1 docc' }; }
   if (reportKindOf(key)) { return { html: reportView(key), cls: 'v1 docc' }; }
+  if (key === 'chg' || key.startsWith('chg:')) { return changeView(key, size); }
   const group = groupOf(key);
   syncModeFromKey(key);
   const views = viewsFor(key);

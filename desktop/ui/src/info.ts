@@ -5,7 +5,7 @@
  * `지정`(누군가 정함 — 누가인지는 R2) / `단면` · `좌굴 해석`(다른 결과에서 나옴). 엔진의 경고 · 가정 · 범위는 세 목록으로 따로 보인다.
  */
 import { esc, tip } from './dom';
-import { none, num, ratio, ratioText, sigText, unitOf, verdictOf } from './format';
+import { hhmm, none, num, ratio, ratioText, sigText, unitOf, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO, VERDICT_KO } from './names';
 import { assumptionLines, isDefault, memberRuns, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
 import { demandCapacity, gaugeHtml, highestLine, qnum, ratioFormTag, unText } from './sheet';
@@ -15,6 +15,8 @@ import { modeSel } from './center';
 import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { fastenerText, finder, noteLi, noteList, plainText, reasonNote, type Note } from './notices';
+import { baseOf, byTag, BY_KO, changeOf, chg, KIND_RESULT_KO, modelTag, staleCause, type Change } from './changes';
+import { stageNow } from './center';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
 const T_SET = '<span class="tag" data-tip="누군가 정한 값. 누가 정했는지(AI · 사용자)는 변경 기록(R2)부터 보인다">지정</span>';
@@ -45,8 +47,8 @@ function sectionInfo(): string {
   const p = f.section_params ?? {};
   const def = isDefault('section');
   const given = (k: string) => Object.prototype.hasOwnProperty.call(p, k) && p[k] !== undefined && p[k] !== null;
-  const tagOf = (k: string, defaultWhy?: string) => (def ? T_DEF : given(k) ? T_SET : `${T_DEF}${defaultWhy ? `<span class="why">${esc(defaultWhy)}</span>` : ''}`);
-  let dims = row_('템플릿', esc(TEMPLATE_KO[tpl] ?? TYPE_KO[String(f.section_type ?? '')] ?? '임의 단면'), def ? T_DEF : T_SET);
+  const tagOf = (k: string, defaultWhy?: string) => modelTag(`model.sectionParams.${k}`, def ? T_DEF : given(k) ? T_SET : `${T_DEF}${defaultWhy ? `<span class="why">${esc(defaultWhy)}</span>` : ''}`);
+  let dims = row_('템플릿', esc(TEMPLATE_KO[tpl] ?? TYPE_KO[String(f.section_type ?? '')] ?? '임의 단면'), modelTag('model.sectionTemplate', def ? T_DEF : T_SET));
   if (tpl && tpl !== 'custom' && tpl !== 'custom_builder') {
     for (const [k, label] of [...dimNames(tpl), ['t', '두께 t'] as [string, string]]) {
       if (!given(k) && !['D', 'tf', 'tw'].includes(k)) { dims += row_(label, none('입력 없음'), tagOf(k)); continue; }
@@ -102,9 +104,9 @@ function materialInfo(): string {
   const def = isDefault('material');
   const t = def ? T_DEF : T_SET;
   return hd('재료', '재료')
-    + sec('탄성 상수', table(row_('E', num(si(f?.material?.E, 'stress'), { src: 'full:material.E', kind: 'stress', sig: 6 }), t)
-      + row_('ν', num(f?.material?.v, { src: 'full:material.v', kind: 'none', sig: 3 }), t)
-      + row_('G', num(si(f?.material?.G, 'stress'), { src: 'full:material.G', kind: 'stress', sig: 6 }), t)), '', 'MCP get_full_state 의 material')
+    + sec('탄성 상수', table(row_('E', num(si(f?.material?.E, 'stress'), { src: 'full:material.E', kind: 'stress', sig: 6 }), modelTag('model.prop.E', t))
+      + row_('ν', num(f?.material?.v, { src: 'full:material.v', kind: 'none', sig: 3 }), modelTag('model.prop.nu', t))
+      + row_('G', num(si(f?.material?.G, 'stress'), { src: 'full:material.G', kind: 'stress', sig: 6 }), modelTag('model.prop.G', t))), '', 'MCP get_full_state 의 material · 꼬리표의 전 → 후 는 변경 기록(list_changes)')
     + caseTables('mat', null)
     + sec('해석 기준 응력', table(row_('기준 응력', typeof f?.load_fy === 'number' ? num(si(f.load_fy, 'stress'), { src: 'full:load_fy', kind: 'stress' }) : none('없음', '하중 경우에 기준 응력을 주지 않았다'),
       state.model?.loadFySource === 'ai' ? caseTag('ai') : '')), '', '좌굴 해석의 기준 응력(get_full_state.load_fy). AI 가 set_load_case 로 정하면 AI(K2 결정 3) — 설계 Fy 와 다르다');
@@ -123,11 +125,11 @@ function conditionsInfo(): string {
   const t = isDefault('conditions') ? T_DEF : T_SET;
   const L = f?.lengths;
   return hd('해석 조건', '좌굴 해석 조건', esc(f ? `${f.BC} · ${BC_KO[f.BC] ?? ''}` : ''))
-    + sec('조건', table(row_('경계조건', esc(f ? `${f.BC} · ${BC_KO[f.BC] ?? ''}` : ''), t)
-      + row_('하중 경우', f?.load_case ? esc(LOADCASE_KO[f.load_case] ?? f.load_case) : none('정하지 않음'), f?.load_case ? t : '')
+    + sec('조건', table(row_('경계조건', esc(f ? `${f.BC} · ${BC_KO[f.BC] ?? ''}` : ''), modelTag('model.BC', t))
+      + row_('하중 경우', f?.load_case ? esc(LOADCASE_KO[f.load_case] ?? f.load_case) : none('정하지 않음'), modelTag('model.loadCase', f?.load_case ? t : ''))
       + row_('기준 응력', typeof f?.load_fy === 'number' ? num(si(f.load_fy, 'stress'), { src: 'full:load_fy', kind: 'stress' }) : none('없음', '하중 경우에 기준 응력을 주지 않았다 — 해석은 절점 응력의 최대 |σ| 를 쓴다'), typeof f?.load_fy === 'number' ? t : '')
-      + row_('고유치 수', num(typeof f?.neigs === 'number' ? f.neigs : null, { src: 'full:neigs', kind: 'none' }), t)
-      + row_('반파장 수', num(L?.n, { src: 'full:lengths.n', kind: 'none' }), t)
+      + row_('고유치 수', num(typeof f?.neigs === 'number' ? f.neigs : null, { src: 'full:neigs', kind: 'none' }), modelTag('model.neigs', t))
+      + row_('반파장 수', num(L?.n, { src: 'full:lengths.n', kind: 'none' }), modelTag('model.lengths', t))
       + row_('반파장 범위', L ? `${num(si(L.min, 'length'), { src: 'full:lengths.min', kind: 'length', unit: false })} ~ ${num(si(L.max, 'length'), { src: 'full:lengths.max', kind: 'length' })}` : none(), t)
       + row_('절점 응력', f ? `${num(si(f.stress?.min, 'stress'), { src: 'full:stress.min', kind: 'stress', unit: false })} ~ ${num(si(f.stress?.max, 'stress'), { src: 'full:stress.max', kind: 'stress' })}` : none(), '')),
     '', '모두 MCP get_full_state(경계조건 · 반파장 · 응력, 하중 경우 · 기준 응력 · 고유치 수 — K4a)');
@@ -292,18 +294,55 @@ function checksInfo(key: string): string {
     + `<div class="sec chkrow"><span class="chk off"${tip('내가 확인했다는 표시. 사람만 켠다. 확인 기록은 R4 부터 남는다 — 지금은 꺼져 있다')}>확인 표시</span><span class="faint">Space</span><span class="sp"></span></div>`;
 }
 
+/** 낡음 표지 — 풍선에 그 결과를 무효로 만든 변경의 때 · 전 → 후(R2-3 · 템플릿 06). 기록에 없으면 장부의 까닭만 */
+function staleBalloon(kinds: string[]): string {
+  const sc = staleCause(kinds);
+  return `<span class="verdict warn" data-stale-cause="${esc(sc?.c.id ?? '')}"${tip(sc ? `${sc.text} — 누르면 업무 › 변경의 그 줄` : '입력이 바뀌어 호스트가 결과를 지웠다(변경 기록에 그 묶음이 없다)')}${sc ? ` data-chg-go="${esc(sc.c.id)}"` : ''}>● 낡음</span>`
+    + (sc ? ` <span class="why" data-stale-text>${esc(sc.text)}</span>` : '');
+}
+
+// ── 업무 › 변경(R2-3 · 템플릿 07 정보 창) ─────────────────────────────
+function changeInfo(key: string): string {
+  const c: Change | undefined = key.startsWith('chg:') ? changeOf(key.slice(4)) : chg.list[0];
+  if (!c) { return hd('업무 · 변경', '변경', chg.err ? none('변경을 읽지 못함', chg.err) : none('변경 없음', '이 대상에 기록된 변경 묶음이 없다'), ''); }
+  const RVc = `<span class="rv off"${tip('내가 확인했다는 표시 — 확인 기록은 R4 부터')}>확인</span>`;
+  const head = `<div class="hd"><div class="k">${byTag(c.by.kind)}변경 · ${esc(hhmm(c.at))}${c.by.client ? ` <span class="faint">${esc(c.by.client)}</span>` : ''}<span class="sp"></span>${RVc}</div>`
+    + `<div class="ttl" data-chg-title${tip('제목은 프로그램이 바뀐 칸에서 지었다. 되돌리려면 Claude 에게 말한다 — 되돌리기도 새 변경으로 이 목록에 남는다')}>${esc(c.title || '(제목 없음)')}</div>`
+    + (c.work ? `<div class="say usr" data-work="${esc(c.work)}"><span class="faint">업무 ${esc(c.work)}</span> 이 변경이 가리킨 업무 항목 — 지시 · 판단 요청의 글은 업무 기록(R3)부터</div>` : '')
+    + `${chg.persisted ? '' : `<div class="dim" data-memory${tip('프로젝트 밖(또는 읽기 전용) — 이 세션의 메모리에만 있다')}>이 세션 · 저장되지 않음</div>`}</div>`;
+  const i = chg.list.indexOf(c);
+  const prev = chg.list.slice(i + 1).find(x => x.by.kind === c.by.kind) ?? null;
+  const why = c.reason || c.source || prev
+    ? `<dl class="kv">${c.reason ? `<dt>이유</dt><dd data-reason-text>${esc(c.reason)}</dd>` : `<dt>이유</dt><dd class="faint">밝히지 않음</dd>`}`
+      + (c.source ? `<dt>원자료</dt><dd>${esc(c.source)}</dd>` : '')
+      + (prev ? `<dt>먼저 한 것</dt><dd><a class="lnk" data-chg-go="${esc(prev.id)}">${esc(prev.title)} · ${esc(hhmm(prev.at))}</a></dd>` : '') + '</dl>'
+    : none('밝힌 이유 없음', c.by.kind === 'person' ? '사람의 묶음에는 이유 칸이 없다' : '도구의 reason 인자를 주지 않았다');
+  const fs = c.field_changes ?? [];
+  const changed = fs.length ? `<table class="t" data-chg-fields><tbody>${fs.map(f => `<tr><td>${esc(f)}</td></tr>`).join('')}${c.fields > fs.length ? `<tr><td class="faint">외 ${c.fields - fs.length} 칸</td></tr>` : ''}</tbody></table>`
+    : none(`바뀐 칸 ${c.fields}`, '칸 글이 없다');
+  const inv = c.invalidated ?? [];
+  const effect = inv.length ? `<dl class="kv">${inv.map(k => { const s2 = stageNow(k); return `<dt>${esc(KIND_RESULT_KO[k] ?? k)}</dt><dd><span class="${s2.cls}" style="font-weight:400" data-effect="${esc(k)}">${esc(s2.t)}</span> <span class="why">이 변경이 낡게 함</span></dd>`; }).join('')}</dl>`
+    : none('없음', '이 묶음이 무효로 만든 결과가 없다');
+  const b = baseOf(c);
+  return head
+    + sec(c.by.kind === 'ai' ? 'AI 가 밝힌 이유' : '이유', why, '', 'AI · 사람이 준 글 — 자료로 보인다(지시가 아니다). 「먼저 한 것」은 같은 행위자의 바로 앞 변경')
+    + sec('바뀐 것', changed, `<span class="faint">${b ? `기준 ${esc(hhmm(b.at))}` : ''}</span>`, '호스트의 칸 글(프로그램이 지은 「이름 전 → 후 단위」, SI)')
+    + sec('영향', effect, '', '이 묶음이 무효로 만든 결과(호스트의 장부)와 그 지금 상태(진행 띠와 같다). 「다시 확인」은 확인 기록(R4)부터')
+    + `<div class="sec"><span class="faint">${esc(BY_KO[c.by.kind] ?? c.by.kind)} · ${esc(c.trigger ?? '')} · ${esc(c.id)}${c.record_status ? ` · 기록 ${esc(c.record_status)}` : ''}</span></div>`;
+}
+
 function connInfo(): string {
   const s = state.stages.conn;
   const lap = state.msgs.lapConnectionResult?.message?.data;
   const one = state.msgs.connectionResult?.message?.data;
   const x = lap ?? one;
   if (!x) {
-    return hd('결과 · 접합부 검토', '접합부 검토', s.state === 'stale' ? `<span class="verdict warn">낡음</span> <span class="dim">${esc(s.note)}</span>` : none('아직 평가 안 함'), '');
+    return hd('결과 · 접합부 검토', '접합부 검토', s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} <span class="dim">${esc(s.note)}</span>` : none('아직 평가 안 함'), '');
   }
   const v = verdictOf(x.pass, '판정 없음');
   const fm = x.force_model;
   const notice = fm && fm.specification_provision === false ? `<div class="notice"><b>자체 가정</b> 패스너 힘 분배는 기준 조항이 아닌 자체 해석이다<span class="dim">${esc(String(fm.clause ?? ''))}</span></div>` : '';
-  return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `<span class="verdict ${v.cls}">${v.text}</span> ${typeof x.utilization === 'number' ? `<span class="big">${ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`)}</span>` : ''}`
+  return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `${s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} ` : ''}<span class="verdict ${v.cls}">${v.text}</span> ${typeof x.utilization === 'number' ? `<span class="big">${ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`)}</span>` : ''}`
     + (s.state === 'unk' ? ` <span class="dim">${esc(s.note)}</span>` : ''), '')
     + notice
     + sec('판정비', table(lapRatios(x, !!lap)))
@@ -359,6 +398,7 @@ export function infoHtml(key: string): string {
   if (key === 'cj') { return caseInfo('cj', null); }
   if (key === 'dc') { return caseInfo('dc', null); }
   if (key === 'asm' || key.startsWith('asm:')) { return assumptionsInfo(); }
+  if (key === 'chg' || key.startsWith('chg:')) { return changeInfo(key); }
   if (key === 'fsm' || key.startsWith('fsm:')) { return bucklingInfo(); }
   if (key === 'load' || key.startsWith('load:')) { return loadInfo(); }
   if (key === 'chk' || key.startsWith('chk:') || key.startsWith('design') || key.startsWith('purlin') || key.startsWith('lap#') || key.startsWith('conn#')) { return checksInfo(key); }

@@ -427,7 +427,7 @@ async function main() {
     skip('화면 단계(3 – 9)', '이 PC 에 Edge/Chrome 이 없다 — STCFSD_BROWSER 로 실행 파일을 줄 수 있다');
   } else {
     br = await startBrowser(exe, path.join(tmp, 'browser-profile'));
-    try { await screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId, wvOrigin, writeKey, token, claudeConfig }); }
+    try { await screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId, wvOrigin, writeKey, token, claudeConfig, mcpToken }); }
     catch (err) { check('화면 단계가 예외 없이 끝난다', false, String(err?.stack ?? err).slice(0, 1500)); }
     finally {
       // V5-S4 · 정상으로 닫아 방문 기록을 디스크에 쓰게 한 뒤, ?t= 주소(토큰)가 기록에 남았는지 본다
@@ -480,7 +480,7 @@ function finish(serve) {
 }
 
 // ── 화면 단계 ───────────────────────────────────────────────────────────
-async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId, wvOrigin, writeKey, token, claudeConfig }) {
+async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, designerId, wvOrigin, writeKey, token, claudeConfig, mcpToken }) {
   const { cdp, log } = br;
   const evalTop = async expr => {
     const r = await cdp.send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
@@ -876,6 +876,52 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     const others = evs.filter(e => e.type === 'host:message' && e.data?.command !== 'focusRequest' && 'focus' in (e.data ?? {}));
     return { ok: f.json?.forwarded === true && hits.length === 1 && hits[0].data.focus?.request_id === f.json.request_id && hits[0].data.focus?.reason === '시험' && kept === null && others.length === 0,
       detail: `${f.json?.request_id} · 이벤트 ${hits.length}번(본문 ${short(hits[0]?.data?.focus?.item, 60)}) · 다시 보내기 기록 ${kept === null ? '없음' : '있음'} · 다른 이벤트에 본문 ${others.length}` };
+  });
+
+  await step('s14h R2-3 — AI(MCP 토큰)의 호스트 동작은 ai:work 시작 · 끝(도구 이름만), 화면의 중계는 아니다 · /api/person/edit-session(사람의 길만 — MCP 토큰 401, 쓰기 열쇠 없음 403, 틀의 Origin 이면 받는다)', async () => {
+    const evs = [];
+    const ac = new AbortController();
+    const res = await fetch(`${origin}/api/events`, { headers: { Authorization: `Bearer ${token}` }, signal: ac.signal });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    const pump = (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) { break; }
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+            const data = chunk.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('\n');
+            try { evs.push(JSON.parse(data)); } catch { /* hello 등 */ }
+          }
+        }
+      } catch { /* 끊음 */ }
+    })();
+    await sleep(300);
+    // AI — MCP 포트에 MCP 토큰으로(다리를 거치지 않는다 — Claude Desktop 의 MCP 서버와 같은 길)
+    const ai = await fetch(`http://127.0.0.1:${ready.mcpPort}/action`, { method: 'POST', headers: { Authorization: `Bearer ${mcpToken}`, 'Content-Type': 'application/json', 'X-StCFSD-Request-Id': 'bridge-s14h-1', Connection: 'close' },
+      body: JSON.stringify({ action: 'get_full_state' }) }).then(r => r.status);
+    // 화면 — 다리의 중계(화면 비밀 머리를 다리가 싣는다)
+    const scr = await api('POST', '/api/mcp/action', { action: 'get_full_state' });
+    await sleep(600);
+    const work = evs.filter(e => e.type === 'ai:work');
+    const pair = work.filter(e => e.data?.tool === 'get_full_state').map(e => e.data.phase).join(',');
+    const leak = work.some(e => Object.keys(e.data ?? {}).some(k => !['phase', 'tool', 'request_id', 'at'].includes(k)));
+    // 사람의 길 — edit-session
+    const personH = { Origin: origin, 'Sec-Fetch-Site': 'same-origin' };
+    const viaMcpToken = await fetch(`${origin}/api/person/edit-session`, { method: 'POST', headers: { Authorization: `Bearer ${mcpToken}`, 'Content-Type': 'application/json', ...personH, Connection: 'close' }, body: '{"state":"start"}' }).then(r => r.status);
+    const noKey = (await api('POST', '/api/person/edit-session', { state: 'start' }, personH, { key: false })).status;
+    const badState = (await api('POST', '/api/person/edit-session', { state: 'open' }, personH)).status;
+    const start = await api('POST', '/api/person/edit-session', { state: 'start' }, personH);
+    const end = await api('POST', '/api/person/edit-session', { state: 'end' }, personH);
+    ac.abort();
+    await pump;
+    return { ok: ai === 200 && scr.status === 200 && pair === 'begin,end' && work.length === 2 && !leak && viaMcpToken === 401 && noKey === 403 && badState === 400
+      && start.json?.success === true && end.json?.success === true,
+      detail: `AI ${ai} → ai:work ${pair}(모두 ${work.length} — 화면의 중계는 없음) · 실린 키 ${leak ? '넘침' : 'phase · tool · request_id · at'} · edit-session: MCP 토큰 ${viaMcpToken} · 열쇠 없음 ${noKey} · state 틀림 ${badState} · start ${start.json?.success} · end ${end.json?.success}` };
   });
 
   await step('s14d derivedResultsInvalidated — MCP analyze_loads 의 바뀐 입력이 지운 부재 설계 · 랩 결과는 다시 보내기 기록에서도 빠진다(U3)', async () => {
