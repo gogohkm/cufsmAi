@@ -64,9 +64,8 @@ function makeFakeVscode(log) {
 }
 
 /** src 의 TS 파일을 메모리에서 CommonJS 로 불러온다. 'vscode' 는 fake 로. */
-function loadTs(relFile, fakeVscode) {
+function loadTs(relFile, fakeVscode, cache = new Map()) {
   const ts = require(path.join(ROOT, 'node_modules', 'typescript'));
-  const cache = new Map();
   function load(absFile) {
     if (cache.has(absFile)) { return cache.get(absFile).exports; }
     const src = fs.readFileSync(absFile, 'utf8');
@@ -103,7 +102,9 @@ async function createPanel() {
   const log = { posted: [], info: [], warn: [], error: [] };
   const vscode = makeFakeVscode(log);
   const { PythonBridge } = loadTs(path.join('src', 'bridge', 'PythonBridge.ts'), vscode);
-  const { StcfsdPanel } = loadTs(path.join('src', 'webview', 'StcfsdPanel.ts'), vscode);
+  // R1-2: 패널과 같은 모듈 저장소 — 시험이 같은 행위자 문맥(actorScope) · 다리를 불러 쓸 수 있게(load)
+  const panelCache = new Map();
+  const { StcfsdPanel } = loadTs(path.join('src', 'webview', 'StcfsdPanel.ts'), vscode, panelCache);
   const bridge = new PythonBridge(ROOT, py);
   await bridge.start();
   // V7-01: 결과 봉인의 열쇠 폴더는 시험의 출력 폴더(진짜 폴더 — 기록 갈래 defaultKeyDir — 는 쓰지 않는다)
@@ -115,7 +116,8 @@ async function createPanel() {
   // V7-17 ⑦: 시험의 임시 파일은 이 패널의 상자(mkdtemp) 안에 — close 가 상자째 지운다
   const box = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd_w3_'));
   return {
-    panel, bridge, log, vscode,
+    panel, bridge, log, vscode, StcfsdPanel,
+    load(rel) { return loadTs(rel, vscode, panelCache); },
     posted(command) { return panel.__testGetPostedMessages().filter((m) => m.command === command); },
     tmpFile(name) { return path.join(box, name); },
     close() {

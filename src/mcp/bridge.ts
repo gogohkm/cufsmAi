@@ -27,6 +27,7 @@
  */
 
 import * as crypto from 'crypto';
+import { contextFromHeaders, runAs } from './actorScope';
 import * as http from 'http';
 import {
     PORT_FILE_ENV, PORT_FILE_APP, PORT_FILE_VERSION, CLIENT_HEADER, REQUEST_ID_HEADER,
@@ -209,7 +210,9 @@ export class McpBridgeServer {
                     if (!panel) {
                         result = { error: noPanel };
                     } else {
-                        result = await panel.handleMcpAction(body);
+                        // R1-2: 행위자 문맥 — 기본 ai, 이 프로세스의 화면 비밀 머리가 맞을 때만 screen(기록의 행위자 · 사람만 하는 함수의 막음)
+                        const ctx = contextFromHeaders(req.headers, typeof body.action === 'string' ? body.action.slice(0, 80) : undefined);
+                        result = await runAs(ctx, () => panel.handleMcpAction(body));
                     }
                 } else {
                     result = { error: `Unknown endpoint: ${req.method} ${req.url}` };

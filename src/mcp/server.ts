@@ -18,6 +18,7 @@ import {
     type Table,
 } from "./siUnits";
 import { connectionModeFromEnv, createHostConnection, type HostTarget } from "./hostConnection";
+import * as rec from "./recordTools";
 import {
     CLIENT_HEADER, REQUEST_ID_HEADER, NONCE_HEADER, PROOF_HEADER, HELLO_ENDPOINT, newNonce, proofMatches,
 } from "./portFile";
@@ -67,7 +68,7 @@ type HttpOutcome =
  * `withToken` = Bearer 토큰을 붙인다 — V5b-05: 아직 증명하지 않은 상대(`/hello`)에는 붙이지 않는다.
  */
 function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, payload: string | undefined,
-    timeoutMs: number, nonce: string | undefined, aiCall: boolean, withToken = true): Promise<HttpOutcome> {
+    timeoutMs: number, nonce: string | undefined, aiCall: boolean, withToken = true, meta?: { reason?: string }): Promise<HttpOutcome> {
     return new Promise((resolve) => {
         const headers: Record<string, string | number> = { 'Accept': 'application/json' };
         if (payload !== undefined) {
@@ -80,6 +81,8 @@ function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, 
             headers[CLIENT_HEADER] = clientLabel();
         }
         if (nonce !== undefined) { headers[NONCE_HEADER] = nonce; }
+        // R1-2: 쓰기의 까닭은 머리로(호스트는 문맥으로만 읽는다 — 몸의 키로는 행위자를 바꾸지 못한다). 머리는 ASCII 라 퍼센트 부호화
+        if (aiCall && meta?.reason) { headers['X-StCFSD-Reason'] = encodeURIComponent(meta.reason.slice(0, 300)); }
         if (withToken && target.token !== undefined) { headers['Authorization'] = `Bearer ${target.token}`; }
         const req = http.request({
             hostname: BRIDGE_HOST, port: target.port, path: endpoint, method, headers,
@@ -121,7 +124,7 @@ async function verifyHost(target: HostTarget): Promise<string | null> {
     return null;
 }
 
-async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: any): Promise<any> {
+async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: any, meta?: { reason?: string }): Promise<any> {
     // K1: 상태 조회 = get_status 만 GET /status 를 부른다. 재시작 뒤에는 이것만 통과한다.
     const statusRead = method === 'GET' && endpoint === '/status';
     let resolved = CONNECTION.resolve(statusRead);
@@ -136,7 +139,7 @@ async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: an
     const target = resolved.target;
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const nonce = PORT_FILE_MODE ? newNonce() : undefined;
-    const out = await httpCall(target, method, endpoint, payload, BRIDGE_TIMEOUT_MS, nonce, true);
+    const out = await httpCall(target, method, endpoint, payload, BRIDGE_TIMEOUT_MS, nonce, true, true, meta);
     if (out.kind === 'timeout') {
         return {
             error: PORT_FILE_MODE ? CONNECTION.timeoutMessage(BRIDGE_TIMEOUT_MS / 60000) :
@@ -1965,6 +1968,18 @@ server.tool("flange_curling",
     },
     async (args) => postTool('flange_curling', 'flange_curling', args, SI_OUT_MEMBER)
 );
+
+// ============================================================
+// 기록(R1-2) — 프로젝트 · 검토 대상(이름으로만, 경로 없음). src/mcp/recordTools.ts
+// ============================================================
+const REC_IO: rec.RecordToolIo = { post: (body, meta) => bridgeRequest('POST', '/action', body, meta), reply: json };
+rec.getCaseStatus(server, REC_IO);
+rec.listProjects(server, REC_IO);
+rec.openProject(server, REC_IO);
+rec.listCases(server, REC_IO);
+rec.openCase(server, REC_IO);
+rec.newCase(server, REC_IO);
+rec.saveCase(server, REC_IO);
 
 // ============================================================
 // 서버 시작

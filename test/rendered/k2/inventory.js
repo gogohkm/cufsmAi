@@ -276,10 +276,8 @@ async function listTools() {
   const { StdioClientTransport } = require(path.join(ROOT, 'node_modules', '@modelcontextprotocol', 'sdk', 'dist', 'cjs', 'client', 'stdio.js'));
   const dir = path.join(OUT, 'inventory-mcpjs');
   fs.mkdirSync(dir, { recursive: true });
-  for (const f of ['server', 'siUnits', 'bridge', 'portFile', 'hostConnection']) {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'mcp', `${f}.ts`), 'utf8');
-    fs.writeFileSync(path.join(dir, `${f}.js`), ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText);
-  }
+  void ts;
+  require(path.join(ROOT, 'test', 'webview', 'mcp_transpile.js')).transpileMcp(dir, ['server', 'siUnits', 'bridge', 'portFile', 'hostConnection']);
   const env = { ...process.env, STCFSD_MCP_PORT: '1', NODE_PATH: path.join(ROOT, 'node_modules') };
   delete env.STCFSD_MCP_PORT_FILE; delete env.STCFSD_MCP_STANDALONE;
   const c = new Client({ name: 'stcfsd-k2-inventory', version: '1' });

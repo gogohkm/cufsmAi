@@ -49,6 +49,8 @@ export interface DeskEnv {
     recentProjects?(): string[];
     /** 프로젝트를 두지 않는 폴더(시스템 · 프로그램 · 앱 설정 — 진짜 경로). 그 안의 프로젝트는 열지 않는다 */
     protectedRoots?(): string[];
+    /** 보호 폴더 안이지만 쓸 수 있는 곳(호스트의 규칙 — 임시 폴더가 사용자 앱 설정 폴더 아래인 경우) */
+    protectedExceptions?(): string[];
     now(): string;
     host: string;
     pid?: number;
@@ -177,10 +179,14 @@ export class RecordsDesk {
     }
 
     private protectedHit(real: string): boolean {
+        const realOf = (d: string): string => { try { return fs.realpathSync.native(d); } catch { return path.resolve(d); } };
+        const exceptions = (this.env.protectedExceptions?.() ?? []).map(realOf);
         for (const p of this.env.protectedRoots?.() ?? []) {
-            let pr: string;
-            try { pr = fs.realpathSync.native(p); } catch { pr = path.resolve(p); }
-            if (isInside(real, pr)) { return true; }
+            const pr = realOf(p);
+            if (!isInside(real, pr)) { continue; }
+            // 예외(임시 폴더)는 「그 예외가 이 보호 폴더 아래라서」 생기는 막힘만 푼다 — 호스트의 _projectPathError(V5c-04)와 같은 규칙
+            if (exceptions.some((xr) => isInside(real, xr) && isInside(xr, pr) && path.relative(pr, xr) !== '')) { continue; }
+            return true;
         }
         return false;
     }
@@ -252,6 +258,8 @@ export class RecordsDesk {
     private openDir(dirAbs: string): ProjectSummary {
         const real = realRoot(dirAbs);
         if (this.protectedHit(real)) { throw new RecordsPathError('a project inside a protected folder (system, programs, application settings) is not opened'); }
+        // 이미 연 프로젝트면 그대로(열린 대상 · 잠금을 놓지 않는다)
+        if (this.proj && this.proj.dir === real) { return this.summary(); }
         const d = readDeclaration(real);
         if (!d.ok) { throw new RecordsPathError(d.error); }
         this.closeProject();

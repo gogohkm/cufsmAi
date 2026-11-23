@@ -91,7 +91,9 @@ async function start(opts = {}) {
     return p;
   };
   const { PythonBridge } = loadTs(path.join('src', 'bridge', 'PythonBridge.ts'), vscode);
-  const { StcfsdPanel } = loadTs(path.join('src', 'webview', 'StcfsdPanel.ts'), vscode);
+  // R1-2: 패널과 같은 모듈 저장소(시험이 같은 행위자 문맥 · 다리를 불러 쓴다 — ctx.loadHost)
+  const panelCache = new Map();
+  const { StcfsdPanel } = loadTs(path.join('src', 'webview', 'StcfsdPanel.ts'), vscode, panelCache);
   const py = pythonPath();
   if (!py) { throw new Error('no .venv python'); }
   const bridge = new PythonBridge(REPO, py);
@@ -180,7 +182,8 @@ async function start(opts = {}) {
   await cdp.send('Page.navigate', { url: `http://127.0.0.1:${httpPort}/index.html` });
 
   const ctx = {
-    panel, bridge, vscode, log, cdp, dialogs, out, shots, REPO,
+    panel, bridge, vscode, log, cdp, dialogs, out, shots, REPO, StcfsdPanel,
+    loadHost(rel) { return loadTs(rel, vscode, panelCache); },
     async eval(expr, awaitPromise = true) {
       const r = await cdp.send('Runtime.evaluate', { expression: expr, awaitPromise, returnByValue: true });
       if (r.exceptionDetails) { throw new Error('eval: ' + ((r.exceptionDetails.exception && r.exceptionDetails.exception.description) || r.exceptionDetails.text)); }

@@ -9,6 +9,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as http from 'http';
@@ -38,6 +39,11 @@ export async function activate(context: vscode.ExtensionContext) {
     const keyEnv = process.env.STCFSD_WRITER_KEY_DIR;
     StcfsdPanel.writerKeyDir = keyEnv && path.isAbsolute(keyEnv) ? keyEnv
         : (!isTestMode && context.globalStorageUri ? path.join(context.globalStorageUri.fsPath, 'writer') : null);
+    // R1-2: 프로젝트를 두는 뿌리 — STCFSD_PROJECT_ROOTS(절대 경로, path.delimiter 로 여럿) 또는 기본 「문서\StCFSD 프로젝트」(기록 설계 §2.1 · 구성안 결정 6).
+    // 기록의 열쇠 자리는 위의 writerKeyDir(봉인과 같은 열쇠). 시험 모드에서는 시험이 준 것만 — 진짜 문서 폴더를 보지 않는다.
+    const rootsEnv = (process.env.STCFSD_PROJECT_ROOTS || '').split(path.delimiter).map((r) => r.trim()).filter((r) => r && path.isAbsolute(r));
+    StcfsdPanel.projectRoots = rootsEnv.length > 0 ? rootsEnv : (!isTestMode ? [path.join(os.homedir(), 'Documents', 'StCFSD 프로젝트')] : []);
+    StcfsdPanel.projectRootsIsDefault = rootsEnv.length === 0 && !isTestMode;
 
     // Python 환경 자동 검사 + 설치
     // V5-S3: 독립 프로그램(포트 파일 방식)은 묶어 넣은 Python 을 쓴다 — python.org · pip 을 권하지 않는다.

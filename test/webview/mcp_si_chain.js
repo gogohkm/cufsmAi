@@ -63,6 +63,8 @@ const FACTORS = Object.values(F);
 const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_design_compression', 'focus', 'get_view',
   'get_case_inputs', 'set_case_inputs', 'run_case_check',
   'get_design_check',
+  // R1-2: 기록 도구 일곱(이름으로만 — 경로 없음)
+  'get_case_status', 'list_projects', 'open_project', 'list_cases', 'open_case', 'new_case', 'save_case',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
   'check_shear_lag', 'classify_modes', 'cold_work', 'custom_section_guide', 'delete_element', 'delete_node',
@@ -124,13 +126,8 @@ function transpile(outDir) {
   const ts = require(path.join(ROOT, 'node_modules', 'typescript'));
   fs.mkdirSync(outDir, { recursive: true });
   // K1: server.ts · bridge.ts 가 hostConnection · portFile 을 import 한다
-  for (const f of ['server', 'siUnits', 'bridge', 'hostConnection', 'portFile']) {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'mcp', `${f}.ts`), 'utf8');
-    const js = ts.transpileModule(src, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-    }).outputText;
-    fs.writeFileSync(path.join(outDir, `${f}.js`), js);
-  }
+  void ts;
+  require('./mcp_transpile.js').transpileMcp(outDir, ['server', 'siUnits', 'bridge', 'hostConnection', 'portFile']);
 }
 
 function freePort() {

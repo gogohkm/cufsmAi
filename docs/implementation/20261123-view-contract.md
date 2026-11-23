@@ -89,6 +89,14 @@
 
 설계 도구의 `summary` · `checks` 응답은 **전체 결과 어디에 있는 알림 글이든 하나도 빼지 않는다** — `warnings` · `assumptions` · `scope_notes` · `not_evaluated` · `not_checked` · `not_evaluated_relevant` · `host_warnings` · `dsm_warning(s)` · `load_not_evaluated`(검토 항목 안 · 계산 과정 · 보고서 글은 빼고 — 항목은 id 로 본다). 맨 위 목록은 그대로, 그 밖의 자리(구간 · 검토 지점 · 하위 결과 · 하중 해석)의 글은 `notices_elsewhere: [{kind, text, where: [...]}]` 에 (종류, 글)마다 한 번(퍼린은 자리를 구간 id 로 묶고, 모든 구간이면 `'all regions'`). 결과 어디서든 불합격 · 판정에 드는 미평가 · 지배인 검토 id 는 요약에 이름이 있다(퍼린 구간 줄의 `failing` · `not_evaluated` · `governs`, 랩은 패스너 줄을 다 남기고 위로 옮긴 것만 `moved_to_top`). 지배 머리는 엔진의 `governs` 그대로 — `governs_basis: 'not_evaluated'` 면 `reference_ratio`(참고)와 `highest_evaluated` 를 따로 싣고 `utilization_caveat` 가 옛 `utilization` 을 머리 판정비로 읽지 말라고 밝힌다. `out_of_scope` · `ratio_form` 도 줄 · 머리에 실린다.
 
+## 4c. 기록 — 프로젝트 · 검토 대상 (R1-2)
+
+- `get_status` · `get_full_state` 맨 앞에 `project`: 프로젝트 밖이면 `null`, 안이면 `{inProject, project {name, projectId, readOnly}, case {name, caseId, kind, readOnly, readOnlyReason, lock {name, host, since}} | null, note}` — 경로 없음.
+- 도구 `get_case_status` · `list_projects` · `open_project` · `list_cases` · `open_case` · `new_case` · `save_case` — 이름으로만(경로를 받지도 주지도 않는다). 답의 모양 · 크기는 기록 설계 §10.4.
+- 읽기 전용으로 연 대상(발행본 `04_발행본/` · 남이 쥔 잠금 · 보호 폴더 · `02_검토대상/` 밖의 `.csd` · 링크로 닿은 파일): 화면의 칸 변경은 `caseAck.rejected [{key, reason: 'this case is open read-only (…) — not changed'}]` 와 상태 다시 보내기(`caseState` 까닭 `conflict`)로 돌아온다. 저장은 오류(사람에게는 오류 상자).
+- `open_case` 가 저장 안 한 변경을 덮으면 `caseDiscarded`(`by: 'open_case'`)가 화면에 간다 — `load_project` 와 같은 모양.
+- 행위자: 웹뷰의 메시지는 사람, MCP 다리의 요청은 AI, 다리의 중계가 프로세스 안의 비밀 머리 `X-StCFSD-Screen` 을 실으면 새 화면(기록에는 사람).
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).
@@ -99,3 +107,4 @@
 
 - 다리: `focusRequest` 를 다시 보내기 기록에서 한 번만 뜻이 있는 것으로(`TRANSIENT`), `resultsLedger`(무효 장부)는 마지막 것을 남기는 것으로.
 - 새 검토 화면: 고를 때 · 보기를 바꿀 때 `report_view` 를 부르고(`screen: 'review'`, `follows_focus` = 「AI 따라가기」), `focusRequest` 를 받아 3.9 대로 따르거나 알림으로 쌓고, 그 결과를 `focus_response` 로 알린다.
+- 다리의 MCP 중계(`relayMcp` · `/api/mcp/action`): `X-StCFSD-Screen` 머리에 같은 프로세스의 `out/mcp/actorScope.js` 의 `SCREEN_SECRET` 을 싣는다(없으면 그 요청은 AI 로 적힌다). 사람만 하는 일은 패널의 `recordsPerson` 으로(R1-3 의 `/api/person/*`).

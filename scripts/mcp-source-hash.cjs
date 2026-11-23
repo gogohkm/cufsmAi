@@ -21,6 +21,8 @@ const BUNDLE_INPUTS = [
     // K1: 포트 파일 · 재시작 뒤 막기(server.ts 가 import)
     'src/mcp/hostConnection.ts',
     'src/mcp/portFile.ts',
+    // R1-2: 기록 도구 일곱(server.ts 가 import)
+    'src/mcp/recordTools.ts',
     'package.json',
     'tsconfig.mcp.json',
     'webpack.mcp.config.js',

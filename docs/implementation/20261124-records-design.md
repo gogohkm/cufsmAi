@@ -858,3 +858,47 @@ R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 �
 - `openProject` 는 저장 안 한 변경을 묻지 않는다(§3.3 의 `discard_unsaved`) — 패널이 먼저 본다.
 - 「다시 잇기」(`relink`)는 아직 없다(후보 번호 — R1-3).
 - 작성자 이름(`writerName`): 검토자 이름(`%APPDATA%\StCFSD\reviewer.json`)을 호스트가 읽어 넘길지, OS 사용자 이름인지.
+
+### 10.4 R1-2 2 걸음: 데스크를 호스트에 이었다
+
+결정: §10.1 의 자리표 그대로(R2 의 `ChangeBatcher` · 편집 상태 신호 · 모르는 동작의 `records.ai` 는 R2). 프로젝트 밖에서는 아무것도 쓰지 않고 답은 `project: null` 하나만 늘었다.
+
+**자리(한 줄씩)**
+
+| 자리 | 한 일 |
+|---|---|
+| `src/mcp/actorScope.ts`(새) | `AsyncLocalStorage<ActorContext>` · `runAs` · `currentActor` · `contextFromHeaders`. 프로세스마다 새 `SCREEN_SECRET`(32 바이트 — 파일 · 포트 파일에 쓰지 않는다) |
+| `mcp/bridge.ts` `POST /action` | `runAs(contextFromHeaders(req.headers, action), () => panel.handleMcpAction(body))` — 기본 `ai`, `X-StCFSD-Screen` 이 그 비밀과 같을 때만(`timingSafeEqual`) `screen`. `X-StCFSD-Client` · `-Request-Id` · `-Reason` · `-Work` · `-Source` 는 `cleanContext`(→ `names.cleanHeaderText`), 글 머리 셋은 퍼센트 부호화(MCP 서버가 `reason` 을 머리로 옮긴다 — 지금은 `save_case` 만) |
+| 패널 `_handleMessage` | 웹뷰(편집 상태의 화면)의 메시지는 `runAs({kind: 'person'})` 안에서 |
+| `_loadProjectFile` 성공 뒤(사람의 열기 · `open_case`) · `load_project` 성공 뒤 | `_recordsAfterOpen` → `afterOpen(abs, bytes, {contentFp, record})`. 알림은 `records: …` 경고로. 읽기 전용이면 그 파일 · 까닭을 쥔다(`_recordsRO`). 사람이 연(MCP 문맥이 아닌) 프로젝트만 「최근」에 |
+| `_writeProjectFile` 쓰기 앞 · 조립 · 뒤 | 읽기 전용으로 연 그 파일이면 거절(까닭), `beforeSave` 가 ok 가 아니면 거절. `recordKey` 가 있으면 맨 위 `record` 키. 쓴 뒤 `afterSave`. 다른 이름으로 저장하면 읽기 전용이 풀린다. 복구 사본(`neutral`)은 건드리지 않는다 |
+| 결과 자리 | `_setAnalysisResult`(해석 · 서명곡선 — 지문은 뒤에 붙는 `analysis_warnings` · `classifications` · `classification_status` 를 뺀 몸), `_storeDesignResult`, 하중 해석 저장, `_storeConnection`, 준비 DSM, 랩, `plastic`, `vibration`, `_noteValidation` → `_recordRun(kind, request, result)`(쓸 수 있는 대상이 열려 있을 때만) |
+| `getStatus()` · `get_full_state` | 맨 앞에 `project` — 프로젝트 안이면 `desk.status()`(경로 없음), 밖이면 `null` |
+| 읽기 전용 | `caseEdit`(사람) → `caseAck.rejected[{key, reason}]` + 상태 다시 보내기, `set_case_inputs` → 오류, 설계 도구의 묶음 쓰기 → 계산은 하고 `case_inputs_not_written [{arg: '*', reason}]`, 저장 → 오류. 모델 칸(단면 · 재료)의 MCP 쓰기는 막지 않는다 — 저장할 수 없을 뿐(R1-3 에서 띠와 함께 정한다) |
+| `save_project` | 이름 `stcfsd-project.json` 거절, 프로젝트의 `01_원자료` · `04_발행본` 안 거절(`.stcfsd` 는 점 이름 규칙이 이미 막는다) |
+| 데스크 | `engineId` = `normalizeEngineId(selftest.engine_id)`(`.csd` 의 `resultsEngine.engine_id` 는 그대로). 같은 프로젝트를 다시 `openProject` 하면 열린 대상 · 잠금을 놓지 않는다. `protectedExceptions`(임시 폴더 — `_projectPathError` V5c-04 와 같은 규칙). 패널이 닫히면 `dispose` |
+
+**열쇠 자리 · 뿌리(규칙).** 열쇠 자리 = `StcfsdPanel.writerKeyDir`(결과 봉인과 같은 열쇠): `STCFSD_WRITER_KEY_DIR`(절대 경로 — 독립 프로그램은 `--user-data` 의 `writer`), 없으면 VS Code 확장의 사용자별 저장 폴더 아래 `writer`, 시험 모드에서는 시험이 준 것만. 없으면 기록이 없다(도구는 그렇다고 답하고, 발행본은 그래도 읽기 전용). 뿌리 = `StcfsdPanel.projectRoots`: `STCFSD_PROJECT_ROOTS`(절대 경로, `path.delimiter` 로 여럿), 없으면 `<홈>\Documents\StCFSD 프로젝트`(첫 `open_project create` 때 만든다 — 환경 변수로 준 뿌리는 만들지 않는다), 시험 모드에서는 시험이 준 것만. `extension.ts` 가 정한다 — 독립 프로그램도 `activate` 를 거치므로 같다(OneDrive 로 옮긴 문서 폴더는 따라가지 않는다 — 필요하면 독립 프로그램이 환경 변수로 준다).
+
+**도구 일곱(65 → 72, `src/mcp/recordTools.ts`, `server.ts` 에 한 줄씩).** 답은 호스트가 지은 요약 — 경로 없음(데스크 · 호스트의 오류 글도 `_noPaths` 로 뿌리 · 드라이브 · UNC · 절대 경로를 `<path>` 로), 폴더에서 온 이름 · 제목이 든 답에 `text_note`. 잰 크기(시험의 최대): `get_case_status` 541 B(상한 6 KB), `list_projects` 269 B(8 KB), `open_project` 860 B(6 KB), `list_cases` 568 B(8 KB), `open_case` 1.2 KB(6 KB), `new_case` 157 B(2 KB), `save_case` 152 B(1 KB).
+
+- `open_project` 는 대상을 열지 않는다. 다른 프로젝트의 대상이 화면에 있으면 그 파일과의 연결만 푼다(`previous_case_closed` — 값은 화면에 그대로, 버리는 것 없음: 기록 키 없이 그 파일을 덮어쓰지 않게). 설계 §3.3 의 「저장 안 한 변경이면 열지 않는다(`discard_unsaved`)」 대신 오케스트레이터의 규칙 — 알리고 막지 않는다.
+- `open_case` 는 사람의 열기와 같은 길(`_loadProjectFile`) — 저장 안 한 변경은 `load_project` 처럼 `discarded_unsaved_changes`(파일은 이름만)로 알린다. `discard_unsaved` 인자는 없다.
+- `new_case` `{name, kind(다섯), from?: 'current'}` — 결과 없이. `from` 이 없으면 지금 모델 + 처음 입력 + `memberType = kind`(section-only 제외). 열지 않는다.
+- `save_case {reason?}` — `{saved, case_rev, file_sha12, recorded}`. `reason` 은 머리로 문맥까지 오지만 R1 의 `saved` 줄(행위자 program)에는 싣지 않는다 — R2 의 변경 줄이 쓴다.
+
+**시험.** `test/webview/records_host_contract.js`(진짜 패널 · 파이썬 · 다리 HTTP + 진짜 토큰): 프로젝트 밖 무변화, 도구 · 이름 규칙, 행위자(다리 ai + 클라이언트 · 웹뷰 person · 화면 비밀 → person · 몸의 키 / 틀린 비밀 / 토큰을 비밀로 / 머리 없음 → ai), 저장 → 다른 대상 → 다시 열기 「일치」 · 누가 · 언제, 밖에서 바뀐 파일(save_case · 사람의 저장 모두 거절, 파일 그대로, 다시 열면 알림), 발행본 · 심은 잠금(입력 세 길 · 저장 거절, 어디에도 쓰지 않음), 꾸민 프로젝트(1 걸음 고정물 — 선언의 폴더 역할 · 절대 경로, 지시문 같은 파일 이름 — 열기 · 목록 · 상태 · 거절된 이름이 아무것도 쓰지 않음), `save_project` 의 네 자리, 사람만 하는 일(아래). `test/rendered/records/run.js`(헤드리스 Edge): 다시 연 대상의 곡선이 그려지고(캔버스의 그린 점) 상태가 「일치」, 마지막 실행의 ai · 클라이언트 · 때가 실행 기록에서.
+
+**사람만 하는 일에 닿아 본 것(모두 막힘 — 진짜 토큰).** 동작 이름 22: `person.openFolder` · `person.createProject` · `person.takeLock` · `person.archive` · `openFolder` · `open_folder` · `createProject` · `create_project` · `new_project` · `takeLock` · `take_lock` · `take_over_lock` · `archive` · `archive_case` · `unarchive` · `relink` · `person` · `records.person` · `recordsPerson` · `__proto__` · `constructor` · `toString`(몸에 `dirAbs` · `rootAbs` · `caseId` · `archived` 를 실어). 다리 끝점 5: `POST /api/person/open-folder` · `POST /api/person/new-project` · `POST /person` · `GET /person` · `POST /action/person`. 몸의 `actor` · `kind` · `context` 키, `X-StCFSD-Screen` 에 0 · 토큰. `open_project` 이름으로 뿌리 · 밖 폴더의 절대 경로 · `..` · `../outside` · UNC, `open_case` 로 `../다른 프로젝트/…` · `..\..\outside\…` · 절대 경로 · `02_검토대상/x`. 사람의 얼굴(`panel.recordsPerson`, 얼린 객체)의 네 함수는 `ai` · `screen` 문맥 안에서 `PersonOnlyError`. MCP 도구 소스(`server.ts` · `recordTools.ts`)는 그 얼굴을 부르지 않는다.
+
+**시험 도구.** `test/webview/mcp_transpile.js` — `src/mcp` 를 한 폴더에 transpile 하는 다섯 곳(`k2lib` · `k2/inventory` · `rendered/mcp` · `mcp_si_chain` · `mcp_port_file_contract`)이 함께 쓴다(`server → recordTools`, `bridge → actorScope → records/context → names`). `panel_harness.loadTs` 에 모듈 저장소 인자 — 시험이 패널과 같은 `actorScope` · 다리를 부른다(`ctx.load` · `ctx.loadHost`).
+
+**R1-3 · R2 에 남긴 것.**
+
+- 새 화면의 중계(`desktop/host` `relayMcp` · `/api/mcp/action`)가 `X-StCFSD-Screen: SCREEN_SECRET` 을 실어야 `screen` 이 된다 — 같은 프로세스의 `out/mcp/actorScope.js` 에서 읽는다(데스크톱 담당). 지금은 그 중계도 `ai` 로 적힌다.
+- 사람의 얼굴 건네기: 패널의 `recordsPerson`(열쇠 자리가 없으면 null). 다리의 `/api/person/*`(물음 · 폴더 고르기 · 넘겨받기 · 보관)는 R1-3.
+- 읽기 전용 띠 · 「다른 이름으로 · 덮어쓰기 · 취소」 물음(밖에서 바뀜) · 잠금 넘겨받기 단추, 읽기 전용에서 모델 칸 쓰기를 막을지.
+- `relink`, 「프로젝트로 만들기」(`import`), 작성자 이름(지금 OS 사용자 이름).
+- R2: `handleMcpAction` 처음 · 끝의 `ChangeBatcher`, `caseEdit` 의 `touch` · 편집 상태 신호, `reason` · `work` · `source` 를 변경 줄에, 모르는 동작의 `records.ai`, 쓰기 도구 전부의 `reason` 인자.
+- `list_cases` 의 열린 판단 요청 · 마지막 발행 · 결과 상태 칸, `get_case_status` 의 「마지막 보고 이후 변경 수」(R2) · 「확인 n/N」(R4).
+- 실행 사본의 정리(`prune`)는 R4-3.

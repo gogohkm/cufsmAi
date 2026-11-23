@@ -14,13 +14,8 @@ function transpile(outDir) {
   const ts = require(path.join(ROOT, 'node_modules', 'typescript'));
   fs.mkdirSync(outDir, { recursive: true });
   // server · bridge 가 불러오는 지역 모듈(hostConnection · portFile)도 함께 — 빠지면 사슬이 "Cannot find module" 로 멈춘다.
-  for (const f of ['server', 'siUnits', 'bridge', 'portFile', 'hostConnection']) {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'mcp', `${f}.ts`), 'utf8');
-    const js = ts.transpileModule(src, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-    }).outputText;
-    fs.writeFileSync(path.join(outDir, `${f}.js`), js);
-  }
+  void ts;
+  require(path.join(ROOT, 'test', 'webview', 'mcp_transpile.js')).transpileMcp(outDir, ['server', 'siUnits', 'bridge', 'portFile', 'hostConnection']);
 }
 
 function freePort() {

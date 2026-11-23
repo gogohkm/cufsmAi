@@ -33,13 +33,8 @@ const DRIVE_ROOT = path.parse(os.tmpdir()).root;
 function transpile(outDir) {
   const ts = require(path.join(ROOT, 'node_modules', 'typescript'));
   fs.mkdirSync(outDir, { recursive: true });
-  for (const f of ['bridge', 'portFile', 'hostConnection', 'claudeDesktop']) {
-    const src = fs.readFileSync(path.join(ROOT, 'src', 'mcp', `${f}.ts`), 'utf8');
-    const js = ts.transpileModule(src, {
-      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-    }).outputText;
-    fs.writeFileSync(path.join(outDir, `${f}.js`), js);
-  }
+  void ts;
+  require('./mcp_transpile.js').transpileMcp(outDir, ['bridge', 'portFile', 'hostConnection', 'claudeDesktop']);
 }
 
 function freePort() {
@@ -183,7 +178,7 @@ async function main() {
     const standaloneEnv = { STCFSD_MCP_PORT_FILE: portFile, STCFSD_MCP_STANDALONE: '1', STCFSD_MCP_PORT: String(decoyPort) };
     const ai = await mcpClient(standaloneEnv);
     clients.push(ai);
-    assert.strictEqual((await ai.client.listTools()).tools.length, 65, '65 tools (K4a: get_view · focus · get_design_check; K2-5: get_case_inputs · set_case_inputs · run_case_check)');
+    assert.strictEqual((await ai.client.listTools()).tools.length, 72, '72 tools (K4a: get_view · focus · get_design_check; K2-5: get_case_inputs · set_case_inputs · run_case_check; R1-2: seven record tools)');
 
     // 1. 프로그램이 꺼져 있음(파일 없음) --------------------------------------------------
     let r = await ai.call('get_status');
@@ -336,7 +331,7 @@ async function main() {
     assert.deepStrictEqual(entry.env, { ELECTRON_RUN_AS_NODE: '1', STCFSD_MCP_PORT_FILE: portFile, STCFSD_MCP_STANDALONE: '1' });
     const viaEntry = await mcpClient(entry.env, DRIVE_ROOT, entry.args[0], entry.command);
     clients.push(viaEntry);
-    assert.strictEqual((await viaEntry.client.listTools()).tools.length, 65);
+    assert.strictEqual((await viaEntry.client.listTools()).tools.length, 72);
     r = await viaEntry.call('get_status');
     assert(!r.isError && r.data.host_pid === D0.child.pid, 'registered entry reaches the running program from any folder');
     ok('registered entry runs the moved bundle from the drive root');
