@@ -52,7 +52,8 @@ function main() {
 
   // StcfsdPanel 구간 설계의 12x 변환 tripwire (§4 이슈2B). W3: 퍼린은 구간별 M_max_abs(kip-ft) → kip-in.
   const panelTs = readUtf8(path.join('src', 'webview', 'StcfsdPanel.ts'));
-  assert(panelTs.includes('const Mu = Number(r.M_max_abs) * 12;'),
+  // e42adf1: 구간 M 은 하중 해석의 반올림 전 값(r.unrounded.M_max_abs, kip-ft)에서 — 그 값 × 12
+  assert(panelTs.includes("const Mmax = un(r, 'M_max_abs', rg.kind);") && panelTs.includes('const Mu = Mmax * 12;'),
     'StcfsdPanel must convert region M_max_abs kip-ft -> kip-in (x12)');
 
   console.log('lap_governing_contract: PASS');

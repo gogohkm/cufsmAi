@@ -2845,14 +2845,30 @@ export class StcfsdPanel implements McpPanelInterface {
         const tol = 1e-6 * Math.max(1, Math.abs(x));
         // 엔진 65e5ed6(계약 §6.1): 판정은 반올림하지 않은 면 값(Vu_*_unrounded), 면마다의 출처 V_*_source = [combo, pattern, sense].
         // 옛 결과(그 키가 없음)는 표시용 3자리 값과 큰 면의 combo_V 만
-        const un = Number.isFinite(L.Vu_left_unrounded) && Number.isFinite(L.Vu_right_unrounded);
-        const vl = Math.abs(un ? L.Vu_left_unrounded : L.Vu_left), vr = Math.abs(un ? L.Vu_right_unrounded : L.Vu_right);
+        // e42adf1: 같은 값이 L.unrounded.Vu_left · Vu_right 에도 — 그것을 먼저, 그다음 65e5ed6 의 키
+        const uL = Number.isFinite(L.unrounded?.Vu_left) ? L.unrounded.Vu_left : L.Vu_left_unrounded;
+        const uR = Number.isFinite(L.unrounded?.Vu_right) ? L.unrounded.Vu_right : L.Vu_right_unrounded;
+        const un = Number.isFinite(uL) && Number.isFinite(uR);
+        const vl = Math.abs(un ? uL : L.Vu_left), vr = Math.abs(un ? uR : L.Vu_right);
         const side: 'left' | 'right' = x <= x0 + tol ? 'right' : (x >= x1 - tol ? 'left' : (vl >= vr ? 'left' : 'right'));
         const src = side === 'left' ? L.V_left_source : L.V_right_source;
         const combo = Array.isArray(src) && Array.isArray(env?.combos)
             ? StcfsdPanel._comboLabel(env.combos[src[0]], env?.envelope_source?.patterns?.[src[1]])
             : (L.V_side === side ? StcfsdPanel._comboLabel(L.combo_V, L.pattern_V) : null);
         return { V: side === 'left' ? vl : vr, side, combo, unrounded: un };
+    }
+
+    /**
+     * 엔진 e42adf1(계약 §6.1): 하중 해석의 한 기록(위치 · 구간 · 반력)의 값 — 엔진에 보내는 소요 · 길이 · 계수는 반올림 전 값
+     * rec.unrounded[key](같은 키 이름), 없으면 표시용 반올림 값(그때 fallbacks 에 'where.key' 를 적는다 — 결과가 밝힌다).
+     * 화면 · 보고서는 반올림 값을 그대로 보인다(이 함수는 판정 값에만).
+     */
+    private static _un(rec: any, key: string, fallbacks?: Set<string>, where?: string): number {
+        const u = rec?.unrounded?.[key];
+        if (typeof u === 'number' && Number.isFinite(u)) { return u; }
+        const v = Number(rec?.[key]);
+        if (fallbacks && rec && rec[key] !== undefined && rec[key] !== null && Number.isFinite(v)) { fallbacks.add(`${where ?? 'record'}.${key}`); }
+        return v;
     }
 
     /** 격자점 i 의 M(부호 쪽) · |V| 큰 쪽의 출처 */
@@ -2927,6 +2943,9 @@ export class StcfsdPanel implements McpPanelInterface {
         }
         const ap = loadResult.auto_params || {};
         const deckInfo = ap.deck || { kphi: 0, kx: 0 };
+        // e42adf1: 판정 값은 반올림 전 값 — 없어서 반올림 값을 쓴 것(기록.키)을 모은다(결과의 rounded_demand_fallbacks · 경고)
+        const roundedFallbacks = new Set<string>();
+        const un = (rec: any, key: string, where: string): number => StcfsdPanel._un(rec, key, roundedFallbacks, where);
 
         // 2. 서명곡선 DSM (정·부모멘트) — 설계 Fy 로 응력을 만든다
         const posSprings = this._deckSpringsForFlange(baseModel, deckInfo.kphi || 0, deckInfo.kx || 0, 'top');
@@ -3011,12 +3030,12 @@ export class StcfsdPanel implements McpPanelInterface {
             // 양력의 지점부(상부 압축, 데크 지지) 구간은 엔진이 랩 끝에서 나누지 않는다 — 중력 해석의 랩 구간으로
             // 잘라 랩 안은 두 부재, 밖은 한 부재로 본다. 각 조각의 M 은 양력 포락선의 그 조각 최대 |M|.
             const lapZones: Array<[number, number]> = (Array.isArray(ap.lap_regions) ? ap.lap_regions : [])
-                .map((z: any) => [Number(z.start_ft), Number(z.end_ft)] as [number, number])
+                .map((z: any) => [un(z, 'start_ft', 'lap_regions'), un(z, 'end_ft', 'lap_regions')] as [number, number])
                 .filter((z: [number, number]) => Number.isFinite(z[0]) && Number.isFinite(z[1]) && z[1] > z[0])
                 .sort((a: [number, number], b: [number, number]) => a[0] - b[0]);
             const pieces: any[] = [];
             for (const r of (Array.isArray(ub.unbraced?.positive_regions) ? ub.unbraced.positive_regions : [])) {
-                const a0 = Number(r.start_ft), a1 = Number(r.end_ft);
+                const a0 = un(r, 'start_ft', 'uplift_bracing.unbraced.positive_regions'), a1 = un(r, 'end_ft', 'uplift_bracing.unbraced.positive_regions');
                 const cuts = [a0, a1];
                 for (const [z0, z1] of lapZones) {
                     if (z0 > a0 && z0 < a1) { cuts.push(z0); }
@@ -3030,9 +3049,13 @@ export class StcfsdPanel implements McpPanelInterface {
                     const inLap = lapZones.some(([z0, z1]) => mid > z0 && mid < z1);
                     const segPts = this._envelopeScan(uplift, s0, s1, '+');
                     const top = segPts.length > 0 ? segPts.reduce((p, q) => (q.M > p.M ? q : p)) : undefined;
+                    // 조각의 경계 · M 은 포락선(반올림 없음)에서 — 판정 값(unrounded)도 그 값, Ly · Cb 는 원래 구간의 반올림 전 값
                     pieces.push({ ...r, start_ft: s0, end_ft: s1, M_max_abs: top ? top.M : 0,
                         x_M_max_ft: top ? top.x : mid, __lap: inLap,
-                        Ly_in: inLap ? 0 : r.Ly_in, Cb: inLap ? 1.0 : r.Cb });
+                        Ly_in: inLap ? 0 : r.Ly_in, Cb: inLap ? 1.0 : r.Cb,
+                        unrounded: { ...(r.unrounded || {}), start_ft: s0, end_ft: s1, M_max_abs: top ? top.M : 0, x_M_max_ft: top ? top.x : mid,
+                            Ly_in: inLap ? 0 : un(r, 'Ly_in', 'uplift_bracing.unbraced.positive_regions'),
+                            Cb: inLap ? 1.0 : un(r, 'Cb', 'uplift_bracing.unbraced.positive_regions') } });
                 }
             }
             addRegions(pieces.filter((r) => !r.__lap), 'uplift_support', uplift, dsmPos,
@@ -3063,15 +3086,15 @@ export class StcfsdPanel implements McpPanelInterface {
         }
         if (hasN) {
             for (const wc of wcList) {
-                const x = Number(wc.x_ft);
+                const x = un(wc, 'x_ft', 'wc_reactions');
                 const inLap = regions.find((rg) => rg.lap && rg.kind === 'lap'
-                    && x > Number(rg.src.start_ft) - 1e-6 && x < Number(rg.src.end_ft) + 1e-6);
+                    && x > un(rg.src, 'start_ft', rg.kind) - 1e-6 && x < un(rg.src, 'end_ft', rg.kind) + 1e-6);
                 if (inLap) {
                     notEvaluated.push(`§G5 웹 크리플링 · §H3 — 랩 안의 지점 ${wc.support} (${wc.name}): 겹친 두 부재의 웹 크리플링은 이 도구가 모형화하지 않습니다 — 따로 검토하십시오.`);
                     continue;
                 }
                 const host = regions.filter((rg) => (rg.kind === 'negative' || rg.kind === 'positive')
-                    && x >= Number(rg.src.start_ft) - 1e-6 && x <= Number(rg.src.end_ft) + 1e-6)
+                    && x >= un(rg.src, 'start_ft', rg.kind) - 1e-6 && x <= un(rg.src, 'end_ft', rg.kind) + 1e-6)
                     .sort((a, b) => (a.kind === 'negative' ? -1 : 1) - (b.kind === 'negative' ? -1 : 1))[0];
                 if (!host) {
                     notEvaluated.push(`§G5 웹 크리플링 — 지점 ${wc.support} (${wc.name}): 지점을 품은 휨 구간이 없습니다.`);
@@ -3080,10 +3103,10 @@ export class StcfsdPanel implements McpPanelInterface {
                 const supLoc = locs.find((l) => l?.support === wc.support && l?.R_bearing !== undefined);
                 // 지점 M: 위치 항목의 Mu(끝 지점은 null 일 수 있음 → 포락선), V: 지점 양쪽 전단 중 큰 값(V3 T3).
                 const envAt = this._envelopeAt(gravity, x, host.dsm === dsmNeg ? '-' : '+');
-                const mAt = supLoc && Number.isFinite(supLoc.Mu) ? Math.abs(supLoc.Mu) * 12
+                const mAt = supLoc && Number.isFinite(supLoc.Mu) ? Math.abs(un(supLoc, 'Mu', 'locations')) * 12
                     : (envAt ? envAt.M * 12 : undefined);
                 // V6b-01: 지점 면의 전단 — 지점이 구간 안이면 큰 면, 구간 끝이면 그 구간 쪽 면(위치 항목의 Vu_left · Vu_right)
-                const faceAt = StcfsdPanel._supportFace(gravity, wc.support, x, Number(host.src.start_ft), Number(host.src.end_ft));
+                const faceAt = StcfsdPanel._supportFace(gravity, wc.support, x, un(host.src, 'start_ft', host.kind), un(host.src, 'end_ft', host.kind));
                 const vSides = faceAt ? [faceAt.V] : [];
                 const vAt = vSides.length > 0 ? (faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - vSides[0]) <= 5e-4 ? envAt.V : vSides[0]) : envAt?.V;
                 const arr = supportsAt.get(host.id) || [];
@@ -3095,7 +3118,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 const gridIsFace = !!(faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - faceAt.V) <= 5e-4);
                 const srcV = gridIsFace ? envSrc.v : faceAt ? (faceAt.combo ?? `envelope (지점 ${wc.support} ${faceAt.side === 'left' ? '왼쪽' : '오른쪽'} 면 — 하중 해석이 그 면의 조합을 주지 않음)`) : envSrc.v;
                 const srcR = supLoc ? StcfsdPanel._comboLabel(supLoc.combo_R, supLoc.pattern_R) : null;
-                arr.push({ ...wc, M_kipin: mAt, V_kips: vAt, __combo: fromLoc ? (StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) ?? 'envelope') : undefined,
+                arr.push({ ...wc, x_ft: x, __Pu: un(wc, 'Pu', 'wc_reactions'), M_kipin: mAt, V_kips: vAt, __combo: fromLoc ? (StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) ?? 'envelope') : undefined,
                     __envI: envAt?.i, __src: { m: srcM, v: vAt !== undefined ? srcV : null, r: srcR } });
                 supportsAt.set(host.id, arr);
             }
@@ -3108,8 +3131,10 @@ export class StcfsdPanel implements McpPanelInterface {
         const regionNotices = new Map<string, string[]>();
         for (const rg of regions) {
             const r = rg.src;
-            const x0 = Number(r.start_ft), x1 = Number(r.end_ft);
-            const Mu = Number(r.M_max_abs) * 12;   // kip-ft → kip-in
+            const x0 = un(r, 'start_ft', rg.kind), x1 = un(r, 'end_ft', rg.kind);
+            const Mmax = un(r, 'M_max_abs', rg.kind);   // kip-ft, 반올림 전
+            const Mu = Mmax * 12;   // kip-ft → kip-in
+            const xMaxU = r.x_M_max_ft != null ? un(r, 'x_M_max_ft', rg.kind) : null;
             // 하부 플랜지 압축 구간(부모멘트 · 랩 · 양력 하부압축)은 −Mxx 곡선, 상부 압축은 +Mxx(V2-06).
             const sign: '+' | '-' = rg.dsm === dsmNeg ? '-' : '+';
             // V6b-01: 지점 위 격자점의 V 는 그 지점 면의 값으로 바꾼다(_supportFace) — M_max · V_max 지점이 지점 위일 때
@@ -3122,7 +3147,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 return f ? { ...p, V: f.V, face: `지점 ${k + 1} ${f.side === 'left' ? '왼쪽' : '오른쪽'} 면`, faceCombo: f.combo } : p;
             };
             const pts = this._envelopeScan(rg.env, x0, x1, sign).map((p) => onFace(p)!);
-            const atMmax = onFace(r.x_M_max_ft != null ? this._envelopeAt(rg.env, Number(r.x_M_max_ft), sign) : undefined);
+            const atMmax = onFace(xMaxU !== null ? this._envelopeAt(rg.env, xMaxU, sign) : undefined);
             // 면 값이면 V 의 출처는 그 면의 조합(모르면 그렇다고)
             const vSrcOf = (p: any, fallback: string | null): string | null => (p && p.face
                 ? (p.faceCombo ?? `envelope (${p.face} — 하중 해석이 그 면의 조합을 주지 않음)`) : fallback);
@@ -3139,12 +3164,13 @@ export class StcfsdPanel implements McpPanelInterface {
             } else {
                 // V4-20: 엔진이 구간의 Ly 를 주지 않으면 0(완전 구속)으로 채우지 않는다 — Lb 를 보내지 않아 엔진이
                 // 횡비틀림을 「판정 없음」으로 밝힌다. Cb 가 없으면 보내지 않는다(엔진 1.0 + 알림).
-                const ly = Number(r.Ly_in);
+                const ly = un(r, 'Ly_in', rg.kind);
                 if (Number.isFinite(ly)) { params.Lb = ly; }
-                if (Number.isFinite(Number(r.Cb))) { params.Cb = Number(r.Cb); }
+                const cb = un(r, 'Cb', rg.kind);
+                if (Number.isFinite(cb)) { params.Cb = cb; }
                 if (r.cantilever) { params.cantilever = true; }
                 // V4-03: §2.3.3.3 β — 구간 끝 모멘트 M1/M2(작은 쪽/큰 쪽, 단일곡률 −, 역곡률 +)와 Lm = 구간 Ly.
-                const m1 = Number(r.M1), m2 = Number(r.M2);
+                const m1 = un(r, 'M1', rg.kind), m2 = un(r, 'M2', rg.kind);
                 if (Number.isFinite(m1) && Number.isFinite(m2) && ly > 0) {
                     const small = Math.abs(m1) <= Math.abs(m2) ? m1 : m2;
                     const large = Math.abs(m1) <= Math.abs(m2) ? m2 : m1;
@@ -3164,12 +3190,11 @@ export class StcfsdPanel implements McpPanelInterface {
             const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any; combo: string;
                 basis: 'combination' | 'envelope'; mixed: string | null }> = [];
             const vA = atMmax ? atMmax.V : (pV ? pV.V : undefined);
-            const xMmax = Number.isFinite(Number(r.x_M_max_ft)) && r.x_M_max_ft != null ? Number(r.x_M_max_ft)
-                : (atMmax ? atMmax.x : null);
+            const xMmax = xMaxU !== null && Number.isFinite(xMaxU) ? xMaxU : (atMmax ? atMmax.x : null);
             const sA = StcfsdPanel._pointSources(rg.env, atMmax ? atMmax.i : pV?.i, sign);
             calls.push({ tag: 'M_max', x_ft: xMmax,
                 ...StcfsdPanel._pairLabel(sA.m, vA !== undefined ? vSrcOf(atMmax ?? pV, sA.v) : null, null,
-                    () => StcfsdPanel._demandCombination(rg.env, atMmax?.i, Number(r.M_max_abs), vA, sign)),
+                    () => StcfsdPanel._demandCombination(rg.env, atMmax?.i, Mmax, vA, sign)),
                 p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
             if (pV && atMmax && Math.abs(pV.x - atMmax.x) > 1e-6 && pV.V > (vA ?? 0) + 1e-9) {
                 const sB = StcfsdPanel._pointSources(rg.env, pV.i, sign);
@@ -3191,7 +3216,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     ...params, ...wcOpts,
                     Mu: s.M_kipin * share,
                     ...(s.V_kips !== undefined ? { Vu: s.V_kips * share } : {}),
-                    wc_P: s.Pu, wc_support: s.case,
+                    wc_P: s.__Pu, wc_support: s.case,
                     ...(s.M_kipin !== undefined ? { wc_M: s.M_kipin } : {}),
                 } });
             }
@@ -3289,6 +3314,12 @@ export class StcfsdPanel implements McpPanelInterface {
         for (const w of (Array.isArray(loadResult.warnings) ? loadResult.warnings : [])) { warnings.push(`[하중] ${w}`); }
         const loadNotEvaluated = Array.isArray(loadResult.not_evaluated) ? loadResult.not_evaluated : [];
 
+        // e42adf1: 반올림 전 값이 없어 반올림 값으로 검토한 것을 밝힌다(옛 엔진 · 그 키가 빠진 기록)
+        const roundedDemandFallbacks = [...roundedFallbacks].sort();
+        if (roundedDemandFallbacks.length) {
+            warnings.push(`하중 해석이 반올림 전 값(unrounded)을 주지 않아 표시용 반올림 값으로 검토한 것: ${roundedDemandFallbacks.join(", ")}`);
+        }
+
         // 6. 합친 판정 · 지배 구간
         const hostBlocks = notEvaluated.filter((s) => !s.startsWith('['));
         const pass = StcfsdPanel._combinePass([
@@ -3326,6 +3357,7 @@ export class StcfsdPanel implements McpPanelInterface {
             warnings,
             assumptions,
             uplift_R: upliftR,
+            ...(roundedDemandFallbacks.length ? { rounded_demand_fallbacks: roundedDemandFallbacks } : {}),
             i621_check: ap.i621_check ?? null,
             wc_reactions: wcList,
             uplift_reactions: loadResult.uplift_reactions ?? [],

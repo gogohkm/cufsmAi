@@ -213,6 +213,8 @@ function engineArgs(tool: string, args: Record<string, any>): Record<string, any
  */
 function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, detail?: string) {
     if (!r || typeof r !== 'object' || Array.isArray(r)) { return json(r); }
+    // 퍼린 요약은 표시 값 — US 에서 반올림한 뒤 SI 로(SI 요약 = 표시 값의 정확한 변환, US/SI 비교가 같은 것끼리)
+    if (shape === shapePurlin && detail !== 'full' && detail !== 'checks' && !r.error) { r = purlinDisplayValues(r); }
     // K2-5: 설계 도구가 검토 상태에서 바꾼 사람의 값 — 키마다 단위 종류가 있다(SI 면 그것으로 바꾸고, 표 변환에서는 뺀다)
     if (Array.isArray(r.case_inputs_replaced)) {
         const replaced = r.case_inputs_replaced.map((x: any) => (units === 'SI' && x && x.unit_kind
@@ -231,7 +233,9 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
     const held = r.__case_replaced;
     const { __case_replaced: _h, ...forTable } = r;
     void _h;
-    const { value, unconverted } = convertOutputSIDeep(forTable, table);
+    const { value: converted, unconverted } = convertOutputSIDeep(forTable, table);
+    // 퍼린 요약(표시 값): SI 로 바꾼 뒤에도 표시 자릿수로(바꾼 수의 긴 자리를 싣지 않는다)
+    const value = forTable.__display_rounded ? purlinDisplaySI(converted) : converted;
     const out: any = { ...sh(value), units: 'SI', text_units: 'US', units_note: TEXT_UNITS_NOTE };
     if (held !== undefined) { out.case_inputs_replaced = held; }
     if (typeof out.report === 'string') {
@@ -453,6 +457,68 @@ function shapeDesign(scope: string): Shaper {
     return shape;
 }
 
+/**
+ * 엔진 e42adf1(계약 §6.1): 하중 해석의 기록은 반올림 값(표시)과 같은 키의 반올림 전 값(`unrounded`)을 함께 준다. 퍼린 요약은 읽는 것이라
+ * 표시 값만 — 반올림 전 값(`unrounded` · `*_unrounded`)은 빼고, 구간 줄의 수는 하중 해석의 display_rounding 과 같은 규칙으로
+ * (경계 4 자리 ft · Ly 0.1 in · Cb 2 자리 · Mu · Vu 3 자리). 판정에 쓴 정확한 값은 detail 'checks' · 'full' · get_design_check 에.
+ */
+const PURLIN_DISPLAY_DECIMALS: Record<string, number> = { start_ft: 4, end_ft: 4, x_M_max_ft: 3, Ly_in: 1, Cb: 2, Mu: 3, Vu: 3 };
+function roundTo(v: any, d: number): any {
+    if (typeof v !== 'number' || !Number.isFinite(v)) { return v; }
+    const f = Math.pow(10, d);
+    const x = Math.round(v * f) / f;
+    return Object.is(x, -0) ? 0 : x;
+}
+function withoutUnrounded(v: any): any {
+    if (Array.isArray(v)) { return v.map(withoutUnrounded); }
+    if (!v || typeof v !== 'object') { return v; }
+    const out: any = {};
+    for (const [k, x] of Object.entries(v)) {
+        if (k === 'unrounded' || /_unrounded$/.test(k)) { continue; }
+        out[k] = withoutUnrounded(x);
+    }
+    return out;
+}
+/** SI 요약의 표시 자릿수(같은 칸, SI 단위): m 4 자리, mm 1 자리, kN-m 4 자리, kN 3 자리 — US 표시 값을 바꾼 뒤 다시 표시용으로 */
+const PURLIN_DISPLAY_DECIMALS_SI: Record<string, number> = { start_ft: 4, end_ft: 4, x_M_max_ft: 4, Ly_in: 1, Cb: 2, Mu: 4, Vu: 3 };
+const REACTION_DISPLAY_DECIMALS_SI: Record<string, number> = { Pu: 3, R_uplift: 3, x_ft: 4 };
+function purlinDisplaySI(v: any): any {
+    if (!v || typeof v !== 'object' || !Array.isArray(v.regions)) { return v; }
+    const out: any = { ...v };
+    out.regions = v.regions.map((g: any) => {
+        if (!g || typeof g !== 'object') { return g; }
+        const line: any = { ...g };
+        for (const [k, d] of Object.entries(PURLIN_DISPLAY_DECIMALS_SI)) { if (k in line) { line[k] = roundTo(line[k], d); } }
+        return line;
+    });
+    for (const k of ['wc_reactions', 'uplift_reactions']) {
+        if (Array.isArray(v[k])) {
+            out[k] = v[k].map((x: any) => {
+                if (!x || typeof x !== 'object') { return x; }
+                const y: any = { ...x };
+                for (const [kk, d] of Object.entries(REACTION_DISPLAY_DECIMALS_SI)) { if (kk in y) { y[kk] = roundTo(y[kk], d); } }
+                return y;
+            });
+        }
+    }
+    return out;
+}
+function purlinDisplayValues(r: any): any {
+    if (!Array.isArray(r.regions)) { return r; }
+    const out: any = { ...r };
+    for (const k of ['wc_reactions', 'uplift_reactions', 'i621_check', 'deck', 'governing']) {
+        if (k in r) { out[k] = withoutUnrounded(r[k]); }
+    }
+    out.regions = r.regions.map((g: any) => {
+        if (!g || typeof g !== 'object') { return g; }
+        const line: any = { ...g };
+        for (const [k, d] of Object.entries(PURLIN_DISPLAY_DECIMALS)) { if (k in line) { line[k] = roundTo(line[k], d); } }
+        return line;
+    });
+    out.__display_rounded = true;
+    return out;
+}
+
 /** design_purlin 묶음의 요약: 구간마다 한 줄, 지배 구간의 지배 검토, 하중 해석은 조합 이름만. */
 function shapePurlin(r: any, detail: Detail): any {
     if (detail === 'full' || !r || typeof r !== 'object' || !Array.isArray(r.regions)) { return r; }
@@ -524,9 +590,15 @@ function shapePurlin(r: any, detail: Detail): any {
     omitted.push("regions[].result (each region's full design result)",
         'design_positive / design_negative / design_lap / design_uplift (the governing region of each kind, in full — ids in governing_by_kind)');
     out.detail = detail;
+    delete out.__display_rounded;
+    let displayNote = '';
+    if (r.__display_rounded) {
+        displayNote = "This summary shows display values (rounded as the load analysis's display_rounding: region bounds 4 decimals ft, Ly 0.1 in, Cb 2 decimals, Mu / Vu 3 decimals; in SI m 4, mm 1, kN-m 4, kN 3 decimals; reactions without their 'unrounded' sub-objects). The exact (unrounded) values the engine checked are in detail:'checks' (each check point's Mu, Vu, location), detail:'full' and get_design_check.";
+    }
     out.more = `Left out: ${omitted.join('; ')}. detail:'checks' adds every check point of every region with its checks (id, demand, capacity, ratio, verdict); `
         + "detail:'full' returns the whole bundle as before (several MB for many regions); "
-        + "get_design_check {scope:'purlin', id, location:{region, check_point}} returns one check with its calculation steps.";
+        + "get_design_check {scope:'purlin', id, location:{region, check_point}} returns one check with its calculation steps."
+        + (displayNote ? ' ' + displayNote : '');
     return out;
 }
 

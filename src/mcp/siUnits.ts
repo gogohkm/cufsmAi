@@ -463,7 +463,7 @@ export const SI_OUT_LOADS: Table = {
         'V_diagram', 'V_envelope_max', 'V_envelope_min', 'R_envelope_max', 'R_envelope_min', 'max_R',
         'max_abs_V', 'Pu'].map((k) => [k, 'force' as const])),
     ...Object.fromEntries(['x_ft', 'overhang_ft', 'L_ft', 'start_ft', 'end_ft', 'x_M_max_ft', 'x_diagram',
-        'inflection_points_ft', 'inflection_points_min_envelope_ft', 'lap_ends_ft', 'supports_ft',
+        'inflection_points_ft', 'inflection_points_min_envelope_ft', 'inflection_points_ft_unrounded', 'inflection_points_min_envelope_ft_unrounded', 'lap_ends_ft', 'supports_ft',
         'spans_ft', 'left_ft', 'right_ft', 'span_ft', 'brace_points_ft', 'spacing_ft'].map((k) => [k, 'length_ft' as const])),
     ...Object.fromEntries(['Lt_in', 'Ly_in', 'Lt', 'Ly', 'delta_in', 'abs_delta_in', 'D_diagram',
         'D_envelope_max', 'D_envelope_min', 'insulation_in'].map((k) => [k, 'length' as const])),

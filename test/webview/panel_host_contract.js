@@ -241,8 +241,12 @@ async function scenarioPurlinRegions(ctx) {
     assert(src, 'negative region comes from auto_params.negative_regions');
     assert.strictEqual(g.Ly_in, src.Ly_in, 'region Ly');
     assert.strictEqual(g.Cb, src.Cb, 'region Cb (not 1.67 / not the envelope minimum)');
-    assert(rel(g.Mu, src.M_max_abs * 12) < 1e-12, 'region M (kip-ft -> kip-in)');
-    assert.strictEqual(g.result.Lb ?? g.result.Fcre_detail?.Lb ?? src.Ly_in, src.Ly_in);
+    // e42adf1: 판정 값은 반올림 전 값(src.unrounded.M_max_abs) — 표시 값(소수 4 자리)이 아니다
+    assert(src.unrounded && Number.isFinite(src.unrounded.M_max_abs), 'the engine region carries its unrounded M');
+    assert(rel(g.Mu, src.unrounded.M_max_abs * 12) < 1e-12, 'region M (unrounded kip-ft -> kip-in)');
+    // e42adf1: 엔진에 보낸 Lb 는 반올림 전 Ly_in(표시 값 Ly_in 은 소수 1 자리)
+    const lyU = src.unrounded && Number.isFinite(src.unrounded.Ly_in) ? src.unrounded.Ly_in : src.Ly_in;
+    assert.strictEqual(g.result.Lb ?? g.result.Fcre_detail?.Lb ?? lyU, lyU, 'region Lb = the unrounded Ly_in');
   }
   // R 은 엔진이 적격이라 한 양력 구간에만, R 표 확인용 span_type 과 함께.
   for (const g of res.regions.filter((x) => x.kind === 'uplift')) {

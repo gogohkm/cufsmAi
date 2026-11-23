@@ -219,7 +219,8 @@ function at(o, p) {
 }
 
 const IGNORE_TOP = new Set(['units', 'text_units', 'units_note', 'report', 'timestamp']);
-function comparePhysical(tool, us, siR, spot) {
+/** displayTol(p) → SI 표시 반올림의 허용(그 칸이 표시 값이면) — 그때는 SI = 바꾼 US 표시 값 ± 그 반올림 */
+function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
   assert(!us.error, `${tool} US errored: ${us.error}`);
   assert.strictEqual(siR.units, 'SI', `${tool} SI result labelled`);
   assert.strictEqual(siR.text_units, 'US', `${tool} SI text labelled US`);
@@ -238,7 +239,9 @@ function comparePhysical(tool, us, siR, spot) {
     if (typeof v === 'number') {
       if (v === 0) { assert.strictEqual(s, 0, `${tool}: ${p} 0 → ${s}`); continue; }
       const ratio = s / v;
-      const ok = Math.abs(ratio - 1) < 1e-12 || FACTORS.some((f) => Math.abs(ratio / f - 1) < 1e-12);
+      const tolD = displayTol(p);
+      const ok = Math.abs(ratio - 1) < 1e-12 || FACTORS.some((f) => Math.abs(ratio / f - 1) < 1e-12)
+        || (tolD !== null && [1, ...FACTORS].some((f) => Math.abs(s - v * f) <= tolD));
       assert(ok, `${tool}: ${p} US ${v} → SI ${s} (ratio ${ratio} is not 1 or a unit factor)`);
       if (Math.abs(ratio - 1) >= 1e-12) { converted++; }
     } else if (/\.unit$/.test(p) || /\.formula_units$/.test(p) || /\.units$/.test(p)) {
@@ -427,19 +430,33 @@ function checkDesignSummary(tag, level, s, full) {
   }
 }
 
+// 엔진 e42adf1: 요약은 표시 값 — 하중 해석 기록의 반올림 전 값(unrounded · *_unrounded)은 빼고, 구간 줄의 수는 display_rounding 의 규칙.
+// 요약은 그 규칙으로 바꾼 full 과 맞댄다(같은 것끼리); checks · full 은 반올림 전 값 그대로.
+const stripUnrounded = (v) => (Array.isArray(v) ? v.map(stripUnrounded) : (v && typeof v === 'object'
+  ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'unrounded' && !/_unrounded$/.test(k)).map(([k, x]) => [k, stripUnrounded(x)])) : v));
+const roundTo = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? (Math.round(v * 10 ** d) / 10 ** d) || 0 : v);
 function checkPurlinSummary(tag, level, s, full) {
   assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
   assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
   checkComplete(tag, s, full);
   assert.deepStrictEqual(s.governing, full.governing, `${tag}: governing region`);
+  const disp = level === 'summary';
   for (const k of ['warnings', 'assumptions', 'not_evaluated', 'load_not_evaluated', 'wc_reactions', 'uplift_reactions', 'i621_check']) {
-    assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k}`);
+    assert.deepStrictEqual(s[k], disp ? stripUnrounded(full[k]) : full[k], `${tag} keeps ${k}`);
+  }
+  if (disp) {
+    assert(!/"unrounded"|_unrounded"/.test(JSON.stringify(s)), `${tag}: the summary carries display values only (no unrounded sub-objects)`);
+    assert(/display values/.test(s.more) && /detail:'checks'/.test(s.more), `${tag}: more says the values are display-rounded and where the exact ones are`);
   }
   assert.strictEqual(s.regions.length, full.regions.length, `${tag}: one line per region`);
   s.regions.forEach((line, i) => {
     const g = full.regions[i];
+    const r4 = (x) => (disp ? roundTo(x, 4) : x);
     assert.deepStrictEqual([line.id, line.kind, line.start_ft, line.end_ft, line.ratio, line.pass, line.check_point],
-      [g.id, g.kind, g.start_ft, g.end_ft, g.result.utilization ?? null, g.result.pass ?? null, g.result.check_point ?? null], `${tag}: region ${g.id}`);
+      [g.id, g.kind, r4(g.start_ft), r4(g.end_ft), g.result.utilization ?? null, g.result.pass ?? null, g.result.check_point ?? null], `${tag}: region ${g.id}`);
+    if (disp) {
+      assert.deepStrictEqual([line.Mu, line.Vu, line.Ly_in, line.Cb], [roundTo(g.Mu, 3), roundTo(g.Vu, 3), roundTo(g.Ly_in, 1), roundTo(g.Cb, 2)], `${tag}: region ${g.id} display values`);
+    }
     const fails = new Set(g.result.checks.flatMap((pt) => pt.design_checks.filter((c) => c.verdict === 'fail').map((c) => c.id)));
     assert.deepStrictEqual(new Set(line.failing), fails, `${tag}: region ${g.id} failing ids`);
     const govs = new Set(g.result.checks.flatMap((pt) => pt.design_checks.filter((c) => c.governs === true).map((c) => c.id)));
@@ -955,7 +972,14 @@ async function main() {
         assert(!a.isError, `${tag} US: ${JSON.stringify(a.data).slice(0, 400)}`);
         assert(!b.isError, `${tag} SI: ${JSON.stringify(b.data).slice(0, 400)}`);
         assert.deepStrictEqual(b.body, a.body, `${tag}: SI input must reach the panel as the identical US values (detail is not sent)`);
-        const n = comparePhysical(tag, a.data, b.data, level === undefined || level === 'full' ? spot : {});
+        // 퍼린 요약은 표시 값(US · SI 각자의 표시 자릿수) — 그 칸은 SI 표시 반올림 안에서 같은 값
+        const SI_DEC = { start_ft: 4, end_ft: 4, x_M_max_ft: 4, Ly_in: 1, Cb: 2, Mu: 4, Vu: 3, Pu: 3, R_uplift: 3, x_ft: 4 };
+        const displayTol = tool === 'design_purlin' && level === 'summary' ? (p) => {
+          const m = /^(?:regions\[\d+\]\.(start_ft|end_ft|x_M_max_ft|Ly_in|Cb|Mu|Vu)|(?:wc_reactions|uplift_reactions)\[\d+\]\.(Pu|R_uplift|x_ft))$/.exec(p);
+          const k = m && (m[1] || m[2]);
+          return k ? 0.5 * 10 ** -SI_DEC[k] + 1e-9 : null;
+        } : undefined;
+        const n = comparePhysical(tag, a.data, b.data, level === undefined || level === 'full' ? spot : {}, displayTol);
         const dcs = checkDesignChecks(tag, a.data, b.data, QTY_SEEN);
         if (level === undefined || level === 'full') {
           if (extra.check) { extra.check(a.data, b.data); }
