@@ -8,7 +8,7 @@ Sections:
   - 비지지 영역 — determine_unbraced_lengths 의 규칙
   - R (uplift reduction factor) — Section I6.2.1 (through-fastened)
 """
-from design.notices import N as _nt  # noqa: E402
+from design.notices import N as _nt, joined as _joined, fields as _fields  # noqa: E402
 
 
 E_STEEL = 29500.0  # ksi
@@ -622,15 +622,13 @@ def determine_unbraced_lengths(
 # ---------------------------------------------------------------------------
 
 # 시스템 조건 (i) – (n) 중 입력으로 확인할 수 없는 부분 — 사용자가 확인해야 한다.
-I621_SYSTEM_CONDITIONS = (
-    '(i) both flanges prevented from moving laterally at the supports',
-    '(j) panels: steel sheets, Fy >= 50 ksi, t >= 0.018 in., rib depth >= 1-1/8 in., ribs <= 12 in. '
-    'o.c., attached to inhibit relative movement between panel and flange',
-    '(k) insulation is glass fiber blanket 0 to 6 in. thick, compressed between member and panel',
-    '(l) fasteners at least No. 12 self-drilling/self-tapping screws or 3/16 in. rivets with '
-    '1/2 in. washers',
-    '(m) fasteners are not standoff type screws',
-    '(n) fasteners <= 12 in. o.c., near the center of the flange and adjacent to the panel high rib',
+I621_SYSTEM_CONDITIONS = (   # 이름표(kind 'label') — 글은 전과 같고 code · 한국어 · 치수 상수가 붙는다(K4c)
+    _nt('loads.label.i621_sys_i'),
+    _nt('loads.label.i621_sys_j'),
+    _nt('loads.label.i621_sys_k'),
+    _nt('loads.label.i621_sys_l'),
+    _nt('loads.label.i621_sys_m'),
+    _nt('loads.label.i621_sys_n'),
 )
 
 
@@ -748,6 +746,9 @@ def check_i621_conditions(
 
     def add(cid, label, status, value=None):
         c = {'id': cid, 'label': label, 'status': status, 'value': value}
+        c.update(_fields(label, 'label'))      # 이름표의 code · 한국어 · 치수 매개변수(계약 §16.6, K4c)
+        if getattr(value, 'code', None):       # 값이 글(알림)일 때만 — 'Z' · 'through-fastened' 같은 입력값은 그대로
+            c.update(_fields(value, 'value'))
         lim = I621_LIMITS.get(cid)
         if lim is not None:   # 이름표 안의 숫자(한계) · value 의 물리량 — 계약 §16.6 (K4b)
             c['limits'] = [dict(x) for x in lim['limits']]
@@ -761,17 +762,17 @@ def check_i621_conditions(
     def pf(ok):
         return 'pass' if ok else 'fail'
 
-    add('profile', 'C- or Z-section (Table I6.2.1-1)', pf(profile is not None), sec_type)
+    add('profile', _nt('loads.label.i621_profile'), pf(profile is not None), sec_type)
     deck_type = deck.get('type')
     if deck_type is not None:
-        add('deck', 'tension flange through-fastened to deck or sheathing',
+        add('deck', _nt('loads.label.i621_deck'),
             pf(deck_type == 'through-fastened'), deck_type)
-    add('(a)', '(a) d <= 12 in.', pf(0 < d <= 12.0), d)
-    add('(b)', '(b) flanges with edge stiffeners', pf(lip > 0), lip)
-    add('(c)', '(c) 60 <= d/t <= 170', pf(t > 0 and 60 <= d / t <= 170), round(d / t, 1) if t > 0 else None)
-    add('(d)', '(d) 2.8 <= d/b <= 5.5', pf(b > 0 and 2.8 <= d / b <= 5.5), round(d / b, 2) if b > 0 else None)
-    add('(e)', '(e) b >= 2.125 in.', pf(b >= 2.125), b)
-    add('(f)', '(f) 16 <= flat b/t <= 43', pf(t > 0 and 16 <= flat_b / t <= 43),
+    add('(a)', _nt('loads.label.i621_a'), pf(0 < d <= 12.0), d)
+    add('(b)', _nt('loads.label.i621_b'), pf(lip > 0), lip)
+    add('(c)', _nt('loads.label.i621_c'), pf(t > 0 and 60 <= d / t <= 170), round(d / t, 1) if t > 0 else None)
+    add('(d)', _nt('loads.label.i621_d'), pf(b > 0 and 2.8 <= d / b <= 5.5), round(d / b, 2) if b > 0 else None)
+    add('(e)', _nt('loads.label.i621_e'), pf(b >= 2.125), b)
+    add('(f)', _nt('loads.label.i621_f'), pf(t > 0 and 16 <= flat_b / t <= 43),
         round(flat_b / t, 1) if t > 0 else None)
 
     laps = [float(v) for v in (lap_lengths_in or []) if v is not None]
@@ -779,34 +780,34 @@ def check_i621_conditions(
         laps = [float(lap_length_in)]
     if continuous:
         if laps:
-            add('(g)', '(g) lap length at each interior support in each direction >= 1.5d',
+            add('(g)', _nt('loads.label.i621_g'),
                 pf(min(laps) >= 1.5 * d), round(min(laps), 2))
         else:
-            add('(g)', '(g) lap length at each interior support in each direction >= 1.5d',
-                'unverified', 'lap lengths not given')
+            add('(g)', _nt('loads.label.i621_g'),
+                'unverified', _nt('loads.label.i621_lap_lengths_not_given'))
     else:
-        add('(g)', '(g) lap length (not applicable to simple span)', 'pass')
+        add('(g)', _nt('loads.label.i621_g_simple'), 'pass')
 
-    add('(h)', '(h) span <= 33 ft', pf(max(sp for sp, rs in zip(spans, real_span) if rs) <= 33.0)
+    add('(h)', _nt('loads.label.i621_h'), pf(max(sp for sp, rs in zip(spans, real_span) if rs) <= 33.0)
         if n_real else 'fail', max(spans))
 
     # (i) – (n): 입력으로 확인 가능한 부분은 검사, 나머지는 사용자 확인
     t_panel = deck.get('t_panel')
     if t_panel is not None:
-        add('(j)-t', '(j) panel base metal thickness >= 0.018 in. (0.0179 in. accepted as 18 mil)',
+        add('(j)-t', _nt('loads.label.i621_j_thickness'),
             pf(t_panel >= 0.0179), t_panel)
     if insulation_in is not None:
-        add('(k)-t', '(k) insulation thickness <= 6 in.', pf(0 <= insulation_in <= 6.0), insulation_in)
+        add('(k)-t', _nt('loads.label.i621_k_insulation'), pf(0 <= insulation_in <= 6.0), insulation_in)
     s_fast = deck.get('fastener_spacing')
     if s_fast is not None:
-        add('(n)-s', '(n) fastener spacing <= 12 in.', pf(s_fast <= 12.0 + 1e-9), s_fast)
-    add('(i)-(n)', 'system conditions (i)-(n) confirmed by the user: ' + '; '.join(I621_SYSTEM_CONDITIONS),
+        add('(n)-s', _nt('loads.label.i621_n_spacing'), pf(s_fast <= 12.0 + 1e-9), s_fast)
+    add('(i)-(n)', _nt('loads.label.i621_system', items=_joined('; ', I621_SYSTEM_CONDITIONS)),
         'pass' if system_confirmed else 'unverified', bool(system_confirmed))
 
     if Fy and Fu:
-        add('(o)', '(o) Fu/Fy >= 1.08', pf(Fu / Fy >= 1.08), round(Fu / Fy, 3))
+        add('(o)', _nt('loads.label.i621_o'), pf(Fu / Fy >= 1.08), round(Fu / Fy, 3))
     else:
-        add('(o)', '(o) Fu/Fy >= 1.08', 'unverified', 'Fy/Fu not given')
+        add('(o)', _nt('loads.label.i621_o'), 'unverified', _nt('loads.label.i621_fy_fu_not_given'))
 
     geometric_ok = all(c['status'] == 'pass' for c in conds if c['id'] != '(i)-(n)')
     all_pass = all(c['status'] == 'pass' for c in conds)
@@ -818,8 +819,7 @@ def check_i621_conditions(
         ti = insulation_in if insulation_in is not None else 0.0
         r_ins = 1.00 - 0.01 * ti
         if insulation_in is None:
-            reasons.append('Insulation thickness not given: r = 1.00 (t_i = 0) assumed for the '
-                           'simple-span R (Eq. I6.2.1-2).')
+            reasons.append(_nt('loads.reason.i621_insulation_not_given'))
     R_per_span = []
     real_idx = [i for i in range(len(spans)) if real_span[i]]
     for i in range(len(spans)):
@@ -842,14 +842,12 @@ def check_i621_conditions(
             Rv = Rv * r_ins
         R_per_span.append(round(Rv, 4))
         if continuous and use_simple:
-            reasons.append(f'Span {i + 1}: adjacent bay span lengths vary by more than 20 % - '
-                           'simple-span R value used.')
+            reasons.append(_nt('loads.reason.i621_adjacent_spans_vary', span=i + 1))
     # I6.2.1: "shall not apply to a continuous beam for the region between inflection points
     # adjacent to a support or to a cantilever beam" — 빠지는 것은 내민(캔틸레버) 구간이지 보 전체가
     # 아니다. 내민 구간은 R_per_span None, 영역은 i621_region_eligible=False 로 뺀다.
     if any(not rs for rs in real_span):
-        reasons.append('I6.2.1 does not apply to a cantilever: R is not given for the overhang '
-                       'span(s); the other spans keep their R.')
+        reasons.append(_nt('loads.reason.i621_cantilever'))
 
     eligible = [r for r, rs in zip(R_per_span, real_span) if rs]
     R_if_confirmed = None
@@ -860,9 +858,9 @@ def check_i621_conditions(
         failed = [c['label'] for c in conds if c['status'] == 'fail']
         unver = [c['id'] for c in conds if c['status'] == 'unverified']
         if failed:
-            reasons.append('I6.2.1 limits not met: ' + '; '.join(failed))
+            reasons.append(_nt('loads.reason.i621_limits_not_met', items=_joined('; ', failed)))
         if unver:
-            reasons.append('I6.2.1 conditions not verified: ' + ', '.join(unver))
+            reasons.append(_nt('loads.reason.i621_not_verified', ids=', '.join(unver)))
 
     checks = [(c['label'], c['status'] == 'pass') for c in conds]
     return {

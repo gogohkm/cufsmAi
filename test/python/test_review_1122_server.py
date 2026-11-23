@@ -160,9 +160,16 @@ def _diff(a, b, path='', tol=1e-12, out=None):
 
 def _same(rpc, direct, name, extra=()):
     """rpc == direct, extra 키(서버가 덧붙이거나 따로 확인하는 것)는 양쪽에서 빼고."""
-    # 'notices'(계약 §16)는 서버가 결과의 알림 목록에서 지어 붙인다 — 엔진을 바로 부른 결과에는 없을 수 있다
+    # 'notices'(계약 §16)는 서버가 결과와 그 하위 블록의 알림 목록에서 지어 붙인다 — 엔진을 바로 부른 결과에는 없을 수 있다
+    def _drop_notices(x):
+        if isinstance(x, dict):
+            return {k: _drop_notices(v) for k, v in x.items() if k != 'notices'}
+        if isinstance(x, list):
+            return [_drop_notices(v) for v in x]
+        return x
+
     def _strip(x):
-        return {k: v for k, v in x.items() if k not in extra and k != 'notices'} if isinstance(x, dict) else x
+        return {k: v for k, v in _drop_notices(x).items() if k not in extra} if isinstance(x, dict) else x
     d = _diff(_strip(rpc), _strip(_plain(direct)))
     assert not d, f'{name}: ' + '; '.join(d[:6])
 

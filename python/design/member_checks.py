@@ -1436,4 +1436,4 @@ def b4_check(dm, items, dsm_warnings, exceeded, generated=None):
     # 넘지 않으면 판정에 들지 않는다(엔진은 한계를 넘을 때만 판정을 '판정 없음'으로 내린다).
     return make_check('member.applicability.b4', design_method=dm, verdict='pass', steps=tr.steps,
                       counts=False, reason=note,
-                      steps_unavailable='no element dimensions given — only the limits listed were checked')
+                      steps_unavailable=_nt('member.reason.b4_only_listed_limits_checked'))

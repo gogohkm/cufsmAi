@@ -70,6 +70,8 @@ class _Raw(str):
 
 
 def _piece(spec, v):
+    if spec.get('text') is not None:     # 상수 매개변수 — US 글은 등록표의 글자 그대로(3/16 · 0.60 …)
+        return spec['text'] + ((spec.get('sep') or '') + spec['unit'] if spec.get('unit') else '')
     if isinstance(v, _Raw):
         return str(v) + ((spec.get('sep') or '') + spec['unit'] if spec.get('unit') else '')
     conv, fmt = spec.get('conv'), spec.get('spec') or ''
@@ -115,6 +117,9 @@ def render(template: str, code: str, values: dict, ko: bool = False) -> str:
 def N(_code: str, /, **values) -> Notice:
     """등록된 알림 하나 — 옛 f-string 과 같은 글. (매개변수 이름 'code' 와 겹치지 않게 첫 인자는 위치 전용)"""
     ent = REGISTRY[_code]
+    for k, sp in ent['params'].items():      # 상수 매개변수(템플릿의 치수 상수)는 등록표가 채운다
+        if 'const' in sp and k not in values:
+            values[k] = sp['const']
     missing = [k for k in ent['params'] if k not in values]
     extra = [k for k in values if k not in ent['params']]
     if missing or extra:
@@ -143,9 +148,13 @@ def _compile_recognizers():
             else:
                 name = m.group(1)
                 sp = ent['params'][name]
+                unit = re.escape((sp.get('sep') or '') + sp['unit']) if sp.get('unit') else ''
+                if sp.get('text') is not None:
+                    parts.append(re.escape(sp['text']) + unit)
+                    pos = m.end()
+                    continue
                 g = f'p{len(names)}'
                 names.append(name)
-                unit = re.escape((sp.get('sep') or '') + sp['unit']) if sp.get('unit') else ''
                 parts.append(f'(?P<{g}>.*?)' + unit)
             pos = m.end()
         parts.append(re.escape(tpl[pos:]))
@@ -169,6 +178,7 @@ def recognize(text):
         if not m:
             continue
         vals = {n: _Raw(m.group(f'p{i}')) for i, n in enumerate(names)}
+        vals.update({k: sp['const'] for k, sp in REGISTRY[code]['params'].items() if 'const' in sp})
         if render(REGISTRY[code]['template'], code, vals) == text:
             n = Notice(text, code, vals)
             n.recognized = True
@@ -229,6 +239,15 @@ def params_of(n: Notice) -> list:
     out = []
     for name, spec in REGISTRY[n.code]['params'].items():
         v = n.values.get(name)
+        if spec.get('text') is not None:
+            # 템플릿의 치수 상수: value = 엔진 단위(US)의 수, text = US 글자(3/16 · 33 …) — SI 는 value 를 바꾼다
+            p = {'symbol': name, 'value': _num(spec['const']), 'quantity': spec.get('quantity'), 'fmt': 'raw',
+                 'text': spec['text'], 'const': True}
+            if spec.get('unit'):
+                p['unit_text'] = spec['unit']
+                p['sep'] = spec.get('sep') or ''
+            out.append(p)
+            continue
         if isinstance(v, _Raw):
             try:
                 num = float(v)
@@ -293,7 +312,7 @@ def entry(n, list_name=None, check_id=None) -> dict:
     return out
 
 
-NOTICE_LISTS = ('warnings', 'assumptions', 'scope_notes', 'not_evaluated')
+NOTICE_LISTS = ('warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'reasons', 'dsm_warnings')
 
 
 def notices_of(result: dict, lists=NOTICE_LISTS) -> list:
@@ -318,42 +337,64 @@ _REASON_KEYS = ('reason_code', 'reason_kind', 'reason_ko', 'reason_template', 'r
                 'reason_params', 'reason_parts', 'reason_sep', 'reason_prefix', 'reason_prefix_ko')
 
 
+def fields(n, prefix: str) -> dict:
+    """글 하나(이유 · 이름표 …) → {prefix}_code · _kind · _ko · _template(_ko) · _params (이은 글은 _parts · _sep,
+    머리는 _prefix · _prefix_ko). 검토 항목의 reason_* 와 같은 모양(계약 §16.2)."""
+    if n is None:
+        return {}
+    e = entry(n)
+    out = {f'{prefix}_code': e['code'], f'{prefix}_kind': e['kind'], f'{prefix}_ko': e['text_ko']}
+    if e['kind'] == 'group':
+        out[f'{prefix}_parts'] = e['parts']
+        out[f'{prefix}_sep'] = e['sep']
+    elif e['code'] is not None:
+        out[f'{prefix}_template'] = e['template']
+        out[f'{prefix}_template_ko'] = e['template_ko']
+        out[f'{prefix}_params'] = e['params']
+    if 'prefix' in e:
+        out[f'{prefix}_prefix'], out[f'{prefix}_prefix_ko'] = e['prefix'], e['prefix_ko']
+    return out
+
+
 def reason_fields(reason) -> dict:
     """검토 항목의 reason → reason_code · reason_ko · reason_template(_ko) · reason_params, 이은 이유는
     reason_parts · reason_sep(조각마다 같은 모양)."""
-    if reason is None:
-        return {}
-    e = entry(reason)
-    out = {'reason_code': e['code'], 'reason_kind': e['kind'], 'reason_ko': e['text_ko']}
-    if e['kind'] == 'group':
-        out['reason_parts'] = e['parts']
-        out['reason_sep'] = e['sep']
-    elif e['code'] is not None:
-        out['reason_template'] = e['template']
-        out['reason_template_ko'] = e['template_ko']
-        out['reason_params'] = e['params']
-    if 'prefix' in e:
-        out['reason_prefix'], out['reason_prefix_ko'] = e['prefix'], e['prefix_ko']
-    return out
+    return fields(reason, 'reason')
+
+
+_SU_KEYS = tuple('steps_unavailable' + k[len('reason'):] for k in _REASON_KEYS)
+_NO_DESCEND = ('notices', 'design_checks', 'steps', 'lap_section')
 
 
 def attach(result: dict, lists=NOTICE_LISTS) -> dict:
     """결과에 notices 를 달고, 그 결과의 design_checks 항목마다 지금의 reason 으로 reason_* 를 단다.
-    하위 결과(fastener_design)에도 같은 일을 한다. 여러 번 불러도 같다(마지막 상태로 다시 만든다)."""
+    알림 목록을 가진 하위 블록(fastener_design · shear · web_crippling · auto_params.i621_check …)에도 그 블록의
+    notices 를 단다(계약 §16.2 — 블록마다 자기 것). 여러 번 불러도 같다(마지막 상태로 다시 만든다)."""
     if not isinstance(result, dict):
         return result
     result['notices'] = notices_of(result, lists)
     for c in result.get('design_checks') or []:
         if not isinstance(c, dict):
             continue
-        for k in _REASON_KEYS:
+        for k in _REASON_KEYS + _SU_KEYS:
             c.pop(k, None)
         c.update(reason_fields(c.get('reason')))
-    sub = result.get('fastener_design')
-    if isinstance(sub, dict):
-        attach(sub, lists)
+        su = c.get('steps_unavailable')
+        if su is not None and str(su) != str(c.get('reason')):
+            c.update(fields(su, 'steps_unavailable'))
+    _attach_blocks(result, lists)
     return result
 
 
+def _attach_blocks(d: dict, lists):
+    for k, v in d.items():
+        if k in _NO_DESCEND or not isinstance(v, dict):
+            continue
+        if any(isinstance(v.get(x), list) for x in lists):
+            attach(v, lists)
+        else:
+            _attach_blocks(v, lists)
+
+
 __all__ = ['N', 'Notice', 'NoticeGroup', 'prefixed', 'joined', 'name_ko_prefix', 'notices_of', 'attach',
-           'reason_fields', 'render', 'text_ko', 'entry', 'recognize', 'REGISTRY', 'KINDS', 'NOTICE_LISTS']
+           'reason_fields', 'fields', 'render', 'text_ko', 'entry', 'recognize', 'REGISTRY', 'KINDS', 'NOTICE_LISTS']

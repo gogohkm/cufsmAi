@@ -7,11 +7,8 @@ from design.notices import N as _nt  # noqa: E402
 
 
 # Chapter G 가운데 이 모듈이 다루지 않는 조항 — 결과의 assumptions 에 그대로 남긴다.
-_SHEAR_SCOPE_NOTE = ('§G2.1 web without holes and without transverse stiffeners. '
-                     'Not evaluated here: §G2.2/§G2.3(b) stiffened webs, §G3 webs with holes, '
-                     '§G4 transverse web stiffeners.')
-_WC_SCOPE_NOTE = ('§G5 web without holes. §G6 (web crippling of C-section webs with holes) '
-                  'is not evaluated.')
+_SHEAR_SCOPE_NOTE = _nt('shear.scope.g2_1_web_without_holes')
+_WC_SCOPE_NOTE = _nt('shear.scope.g5_web_without_holes')
 
 
 def shear_strength(h: float, t: float, Fy: float,

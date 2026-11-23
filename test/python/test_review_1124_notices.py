@@ -101,8 +101,23 @@ def check_entry(e, where, errors, codes):
             errors.append((where, 'text_ko != rendered template_ko', e['code'], e['text_ko'][:120], tko[:120]))
 
 
+LISTS = ('warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'reasons', 'dsm_warnings')
+FIELD_PREFIXES = ('reason', 'label', 'value', 'steps_unavailable')   # 글 하나에 붙는 필드(계약 §16.2)
+
+
+def _field_entry(d, prefix):
+    e = {'text': d[prefix], 'code': d.get(f'{prefix}_code'), 'kind': d.get(f'{prefix}_kind'),
+         'text_ko': d.get(f'{prefix}_ko'), 'template': d.get(f'{prefix}_template'),
+         'template_ko': d.get(f'{prefix}_template_ko'), 'params': d.get(f'{prefix}_params'),
+         'parts': d.get(f'{prefix}_parts'), 'sep': d.get(f'{prefix}_sep')}
+    if d.get(f'{prefix}_prefix') is not None:
+        e['prefix'], e['prefix_ko'] = d[f'{prefix}_prefix'], d[f'{prefix}_prefix_ko']
+    return e
+
+
 def walk_result(r, where, errors, codes, stats):
     if isinstance(r, dict):
+        has_lists = any(isinstance(r.get(k), list) for k in LISTS)
         if isinstance(r.get('notices'), list):
             stats['results'] += 1
             for e in r['notices']:
@@ -110,7 +125,7 @@ def walk_result(r, where, errors, codes, stats):
                 check_entry(e, where + ':' + str(e.get('list')), errors, codes)
             # 옛 목록과 하나씩 맞는다(같은 순서, 같은 글)
             olds = []
-            for key in ('warnings', 'assumptions', 'scope_notes', 'not_evaluated'):
+            for key in LISTS:
                 for x in r.get(key) or []:
                     if isinstance(x, dict):
                         if x.get('reason') is not None:
@@ -119,20 +134,18 @@ def walk_result(r, where, errors, codes, stats):
                         olds.append(x)
             if olds != [e['text'] for e in r['notices']]:
                 errors.append((where, 'notices do not match the old lists one to one'))
-            for c in r.get('design_checks') or []:
-                if c.get('reason') is None:
-                    continue
+        elif has_lists and any(r.get(k) for k in LISTS):
+            errors.append((where, 'a block with notice lists has no notices'))     # 하위 블록도 자기 notices
+        for prefix in FIELD_PREFIXES:
+            if prefix in r and f'{prefix}_kind' in r and r[prefix] is not None:
                 stats['reasons'] += 1
-                e = {'text': c['reason'], 'code': c.get('reason_code'), 'kind': c.get('reason_kind'),
-                     'text_ko': c.get('reason_ko'), 'template': c.get('reason_template'),
-                     'template_ko': c.get('reason_template_ko'), 'params': c.get('reason_params'),
-                     'parts': c.get('reason_parts'), 'sep': c.get('reason_sep')}
-                if c.get('reason_prefix') is not None:
-                    e['prefix'], e['prefix_ko'] = c['reason_prefix'], c['reason_prefix_ko']
-                check_entry(e, where + ':' + c['id'], errors, codes)
+                check_entry(_field_entry(r, prefix), where + ':' + str(r.get('id', prefix)), errors, codes)
+        for c in r.get('design_checks') or []:
+            if c.get('reason') is not None and 'reason_kind' not in c:
+                errors.append((where, c['id'], 'reason without reason_* fields'))
         for k, v in r.items():
             if k not in ('notices',):
-                walk_result(v, where + '.' + k if k == 'fastener_design' else where, errors, codes, stats)
+                walk_result(v, where + '.' + k if isinstance(v, dict) else where, errors, codes, stats)
     elif isinstance(r, list):
         for v in r:
             walk_result(v, where, errors, codes, stats)
@@ -207,7 +220,8 @@ def test_registry_shape():
         for k, p in e['params'].items():
             if p['quantity'] not in (None, 'force', 'moment', 'stress', 'length', 'area', 'section_modulus',
                                      'moment_of_inertia', 'torsion_constant', 'warping_constant',
-                                     'force_per_length', 'rotational_stiffness', 'dimensionless', 'angle', 'count'):
+                                     'force_per_length', 'rotational_stiffness', 'dimensionless', 'angle', 'count',
+                                     'mass_density'):
                 bad.append(('quantity outside the vocabulary', code, k, p['quantity']))
     assert not bad, bad[:20]
 
@@ -252,6 +266,23 @@ def test_unreached_codes_have_a_source_site():
           f'{len(unreached)} reachable only outside the corpus')
 
 
+def test_dimensional_constants_in_templates_are_params():
+    """계약 §16.3: 템플릿 글자에 치수 상수(숫자 + in · ksi · kips · ft · mil …)가 남지 않는다 — 상수 매개변수(const ·
+    text)로 두어 SI 로 바뀐다. 각도(°, deg — 단위계와 무관)와 단위 이름만 쓴 글(kip*s^2/in^4 · lb/in^3 · kg/m^3 의
+    다른 단위계 값)은 예외."""
+    unit = r'(in\.?|ksi|kips?|kip-in|kip-ft|ft|psf|plf|mil)(?![A-Za-z])'
+    rx = re.compile(r'(\d+-\d+/\d+|\d+/\d+|\d*\.\d+(?:e-?\d+)?|\d+)\s?' + unit)
+    bad = []
+    for code, e in REGISTRY.items():
+        for t in (e['template'], e['template_ko']):
+            lit = PH.sub('{}', t)
+            bad += [(code, m.group(0)) for m in rx.finditer(lit)]
+        for k, p in e['params'].items():
+            if 'const' in p:
+                assert p['quantity'] and isinstance(p['const'], float) and p['text'], (code, k)
+    assert not bad, bad
+
+
 def test_every_call_site_passes_exactly_the_registered_params():
     """사례가 닿지 않는 자리도: 엔진 소스의 _nt('code', …) 호출마다 code 가 등록되어 있고 매개변수 이름이 같다."""
     import ast
@@ -266,8 +297,10 @@ def test_every_call_site_passes_exactly_the_registered_params():
                     bad.append((f, code, 'unregistered'))
                     continue
                 kws = sorted(k.arg for k in node.keywords)
-                if kws != sorted(REGISTRY[code]['params']):
-                    bad.append((os.path.basename(f), node.lineno, code, kws, sorted(REGISTRY[code]['params'])))
+                ps = REGISTRY[code]['params']
+                need = sorted(k for k, p in ps.items() if 'const' not in p)      # 상수 매개변수는 등록표가 채운다
+                if not (set(need) <= set(kws) <= set(ps)):
+                    bad.append((os.path.basename(f), node.lineno, code, kws, need))
     assert n > 400 and not bad, (n, bad[:10])
 
 

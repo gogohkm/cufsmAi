@@ -46,6 +46,7 @@ QUANTITIES = {
     'dimensionless': '-',
     'angle': 'deg',
     'count': '-',
+    'mass_density': 'kip*s^2/in^4',   # 진동 해석의 질량밀도 rho(2026-11-24 K4c — 호스트 표: SI kg/m³)
 }
 
 # 단계 입력의 출처

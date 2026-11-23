@@ -1,11 +1,11 @@
 """알림 등록표(자동 생성 뒤 손으로 다듬음 — code 는 바꾸거나 다시 쓰지 않는다). 계약 §16.
 
-code: 점으로 이은 소문자(영역.종류.이름). kind: warning · assumption · scope · not_evaluated · reason · fragment(다른 알림의 매개변수로만 쓰는 글 조각).
+code: 점으로 이은 소문자(영역.종류.이름). kind: warning · assumption · scope · not_evaluated · reason · fragment(다른 알림의 매개변수로만 쓰는 글 조각) · label(이름표 — §I6.2.1 조건 …).
 template: 옛 글을 그대로 만드는 템플릿(옛 글이 한국어면 한국어). template_ko: 한국어 템플릿.
-params: 자리표마다 {quantity, conv, spec, unit, sep} — quantity 는 계약 §3.2 어휘(숫자가 아니면 None).
+params: 자리표마다 {quantity, conv, spec, unit, sep[, const, text]} — quantity 는 계약 §3.2 어휘(숫자가 아니면 None). const · text: 템플릿의 치수 상수 — const 는 엔진 단위(US)의 수, text 는 옛 글의 글자(3/16 · 33 …).
 """
 
-KINDS = ('warning', 'assumption', 'scope', 'not_evaluated', 'reason', 'fragment')
+KINDS = ('warning', 'assumption', 'scope', 'not_evaluated', 'reason', 'fragment', 'label')
 
 REGISTRY = {
     'base_vectors.warning.individual_modes_selected_mode': {
@@ -46,9 +46,9 @@ REGISTRY = {
     },
     'conn.assumption.e60_fxx_e60_ksi': {
         'kind': 'assumption',
-        'template': 'Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)',
-        'template_ko': 'Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)',
-        'params': {},
+        'template': 'Fxx 미입력 — 최저 표준 전극 E60({Fxx_min}) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)',
+        'template_ko': 'Fxx 미입력 — 최저 표준 전극 E60({Fxx_min}) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)',
+        'params': {'Fxx_min': {'quantity': 'stress', 'conv': None, 'spec': '', 'unit': 'ksi', 'sep': ' ', 'const': 60.0, 'text': '60'}},
     },
     'conn.assumption.eccentric_tension_50pct': {
         'kind': 'assumption',
@@ -298,9 +298,9 @@ REGISTRY = {
     },
     'conn.reason.aisi_s100_ansi_aisc': {
         'kind': 'reason',
-        'template': '가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용',
-        'template_ko': '가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용',
-        'params': {'t_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' '}, 'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+        'template': '가장 얇은 접합 부재 t={t_min} > {t_lim} — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용',
+        'template_ko': '가장 얇은 접합 부재 t={t_min} > {t_lim} — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용',
+        'params': {'t_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' '}, 'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 't_lim': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.1875, 'text': '3/16'}},
     },
     'conn.reason.arc_seam_no_tension': {
         'kind': 'reason',
@@ -310,9 +310,9 @@ REGISTRY = {
     },
     'conn.reason.arc_spot_sheet_thickness_limit': {
         'kind': 'reason',
-        'template': '아크 스팟 용접은 시트 두께(합) ≤ 0.15 in 에만 허용 (t={t_sheet})',
-        'template_ko': '아크 스팟 용접은 시트 두께(합) ≤ 0.15 in 에만 허용 (t={t_sheet})',
-        'params': {'t_sheet': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+        'template': '아크 스팟 용접은 시트 두께(합) ≤ {t_lim} 에만 허용 (t={t_sheet})',
+        'template_ko': '아크 스팟 용접은 시트 두께(합) ≤ {t_lim} 에만 허용 (t={t_sheet})',
+        'params': {'t_sheet': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 't_lim': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.15, 'text': '0.15'}},
     },
     'conn.reason.combined_check_not_implemented': {
         'kind': 'reason',
@@ -376,9 +376,9 @@ REGISTRY = {
     },
     'conn.reason.fuf_uh_hrc_ksi': {
         'kind': 'reason',
-        'template': 'Fuf(F_uh) 또는 HRC_p 미입력 — 120 ksi 는 참고값',
-        'template_ko': 'Fuf(F_uh) 또는 HRC_p 미입력 — 120 ksi 는 참고값',
-        'params': {},
+        'template': 'Fuf(F_uh) 또는 HRC_p 미입력 — {F_uh_ref} 는 참고값',
+        'template_ko': 'Fuf(F_uh) 또는 HRC_p 미입력 — {F_uh_ref} 는 참고값',
+        'params': {'F_uh_ref': {'quantity': 'stress', 'conv': None, 'spec': '', 'unit': 'ksi', 'sep': ' ', 'const': 120.0, 'text': '120'}},
     },
     'conn.reason.fy2_fy': {
         'kind': 'reason',
@@ -406,9 +406,9 @@ REGISTRY = {
     },
     'conn.reason.j2_2_2_1_de_j2_de': {
         'kind': 'reason',
-        'template': 'de={de_used} < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요',
-        'template_ko': 'de={de_used} < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요',
-        'params': {'de_used': {'quantity': 'length', 'conv': None, 'spec': '.4f', 'unit': 'in', 'sep': ' '}},
+        'template': 'de={de_used} < {de_min} (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요',
+        'template_ko': 'de={de_used} < {de_min} (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요',
+        'params': {'de_used': {'quantity': 'length', 'conv': None, 'spec': '.4f', 'unit': 'in', 'sep': ' '}, 'de_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.375, 'text': '3/8'}},
     },
     'conn.reason.j2_2_2_2_j2': {
         'kind': 'reason',
@@ -460,9 +460,9 @@ REGISTRY = {
     },
     'conn.reason.j4_screw_diameter_out_of_range': {
         'kind': 'reason',
-        'template': '나사 직경 d={d} 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖',
-        'template_ko': '나사 직경 d={d} 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖',
-        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' '}},
+        'template': '나사 직경 d={d} 이 §J4 범위({d_min} ≤ d ≤ {d_max}) 밖',
+        'template_ko': '나사 직경 d={d} 이 §J4 범위({d_min} ≤ d ≤ {d_max}) 밖',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' '}, 'd_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 0.08, 'text': '0.08'}, 'd_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.25, 'text': '0.25'}},
     },
     'conn.reason.j5_3_2_j5': {
         'kind': 'reason',
@@ -622,15 +622,15 @@ REGISTRY = {
     },
     'conn.reason.table_j3_3_1_1_j3': {
         'kind': 'reason',
-        'template': 'Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t={t_min} — 시험 필요',
-        'template_ko': 'Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t={t_min} — 시험 필요',
-        'params': {'t_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+        'template': 'Table J3.3.1-1 두께 범위({t_lo} ≤ t < {t_hi}) 밖: t={t_min} — 시험 필요',
+        'template_ko': 'Table J3.3.1-1 두께 범위({t_lo} ≤ t < {t_hi}) 밖: t={t_min} — 시험 필요',
+        'params': {'t_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 't_lo': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 0.024, 'text': '0.024'}, 't_hi': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.1875, 'text': '0.1875'}},
     },
     'conn.reason.table_j3_4_1_j3': {
         'kind': 'reason',
-        'template': 'd={d} < 1/4 in: Table J3.4-1 범위 밖',
-        'template_ko': 'd={d} < 1/4 in: Table J3.4-1 범위 밖',
-        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' '}},
+        'template': 'd={d} < {d_min}: Table J3.4-1 범위 밖',
+        'template_ko': 'd={d} < {d_min}: Table J3.4-1 범위 밖',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' '}, 'd_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.25, 'text': '1/4'}},
     },
     'conn.reason.table_j6_2_1_j6_ant': {
         'kind': 'reason',
@@ -658,9 +658,9 @@ REGISTRY = {
     },
     'conn.reason.tw_w1_w2_d1': {
         'kind': 'reason',
-        'template': 't > 0.10 in 인데 목두께 tw 산정 입력(w1,w2,R 또는 R,d1,d2) 없음',
-        'template_ko': 't > 0.10 in 인데 목두께 tw 산정 입력(w1,w2,R 또는 R,d1,d2) 없음',
-        'params': {},
+        'template': 't > {t_lim} 인데 목두께 tw 산정 입력(w1,w2,R 또는 R,d1,d2) 없음',
+        'template_ko': 't > {t_lim} 인데 목두께 tw 산정 입력(w1,w2,R 또는 R,d1,d2) 없음',
+        'params': {'t_lim': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.1, 'text': '0.10'}},
     },
     'conn.reason.vu_fv': {
         'kind': 'reason',
@@ -688,9 +688,9 @@ REGISTRY = {
     },
     'conn.warning.j2_2_j2': {
         'kind': 'warning',
-        'template': 'J2.2: 시트 두께 < 0.028 in — 용접 와셔(두께 0.05–0.08 in, 구멍 ≥ 3/8 in) 필수',
-        'template_ko': 'J2.2: 시트 두께 < 0.028 in — 용접 와셔(두께 0.05–0.08 in, 구멍 ≥ 3/8 in) 필수',
-        'params': {},
+        'template': 'J2.2: 시트 두께 < {t_lim} — 용접 와셔(두께 {tw_lo}–{tw_hi}, 구멍 ≥ {hole_min}) 필수',
+        'template_ko': 'J2.2: 시트 두께 < {t_lim} — 용접 와셔(두께 {tw_lo}–{tw_hi}, 구멍 ≥ {hole_min}) 필수',
+        'params': {'t_lim': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.028, 'text': '0.028'}, 'tw_lo': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 0.05, 'text': '0.05'}, 'tw_hi': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.08, 'text': '0.08'}, 'hole_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.375, 'text': '3/8'}},
     },
     'conn.warning.j2_2_j2_joint_j2': {
         'kind': 'warning',
@@ -730,15 +730,15 @@ REGISTRY = {
     },
     'conn.warning.j3_j3_astm_a354_grade': {
         'kind': 'warning',
-        'template': 'J3: ASTM A354 Grade BD 는 d < 1/2 in 볼트에만 승인됨 — 도면에 강도 명시 필요',
-        'template_ko': 'J3: ASTM A354 Grade BD 는 d < 1/2 in 볼트에만 승인됨 — 도면에 강도 명시 필요',
-        'params': {},
+        'template': 'J3: ASTM A354 Grade BD 는 d < {d_max} 볼트에만 승인됨 — 도면에 강도 명시 필요',
+        'template_ko': 'J3: ASTM A354 Grade BD 는 d < {d_max} 볼트에만 승인됨 — 도면에 강도 명시 필요',
+        'params': {'d_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.5, 'text': '1/2'}},
     },
     'conn.warning.j4_4_j4': {
         'kind': 'warning',
-        'template': "J4.4: 인장 받는 나사의 머리·와셔 직경은 5/16 in 이상이어야 함 (d'w={dw})",
-        'template_ko': "J4.4: 인장 받는 나사의 머리·와셔 직경은 5/16 in 이상이어야 함 (d'w={dw})",
-        'params': {'dw': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+        'template': "J4.4: 인장 받는 나사의 머리·와셔 직경은 {dw_min} 이상이어야 함 (d'w={dw})",
+        'template_ko': "J4.4: 인장 받는 나사의 머리·와셔 직경은 {dw_min} 이상이어야 함 (d'w={dw})",
+        'params': {'dw': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'dw_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.3125, 'text': '5/16'}},
     },
     'conn.warning.j4_j4_t1_t2_t1': {
         'kind': 'warning',
@@ -748,15 +748,15 @@ REGISTRY = {
     },
     'conn.warning.j5_3_2_j5_ds_manual_iv': {
         'kind': 'warning',
-        'template': 'J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급',
-        'template_ko': 'J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급',
-        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+        'template': 'J5.3.2: ds={d} 는 상한 {ds_max} 을 근소하게 넘음 — Manual IV-12 처럼 ≅{ds_cap} 로 취급',
+        'template_ko': 'J5.3.2: ds={d} 는 상한 {ds_max} 을 근소하게 넘음 — Manual IV-12 처럼 ≅{ds_cap} 로 취급',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'ds_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.177, 'text': '0.177'}, 'ds_cap': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 0.177, 'text': '0.177'}},
     },
     'conn.warning.j5_washer_diameter_capped': {
         'kind': 'warning',
-        'template': "§J5: 계산용 와셔 직경 ≤ 0.60 in — d'w={dw} → 0.60",
-        'template_ko': "§J5: 계산용 와셔 직경 ≤ 0.60 in — d'w={dw} → 0.60",
-        'params': {'dw': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+        'template': "§J5: 계산용 와셔 직경 ≤ {dw_max} — d'w={dw} → {dw_cap}",
+        'template_ko': "§J5: 계산용 와셔 직경 ≤ {dw_max} — d'w={dw} → {dw_cap}",
+        'params': {'dw': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'dw_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.6, 'text': '0.60'}, 'dw_cap': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 0.6, 'text': '0.60'}},
     },
     'conn.warning.j6_2_chapter_ae_ag_dh': {
         'kind': 'warning',
@@ -1364,11 +1364,185 @@ REGISTRY = {
         'template_ko': '스탠딩심 지붕: ',
         'params': {},
     },
+    'loads.label.i621_a': {
+        'kind': 'label',
+        'template': '(a) d <= {d_max}.',
+        'template_ko': '(a) d <= {d_max}',
+        'params': {'d_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 12.0, 'text': '12'}},
+    },
+    'loads.label.i621_b': {
+        'kind': 'label',
+        'template': '(b) flanges with edge stiffeners',
+        'template_ko': '(b) 플랜지에 연단 보강재가 있음',
+        'params': {},
+    },
+    'loads.label.i621_c': {
+        'kind': 'label',
+        'template': '(c) 60 <= d/t <= 170',
+        'template_ko': '(c) 60 <= d/t <= 170',
+        'params': {},
+    },
+    'loads.label.i621_d': {
+        'kind': 'label',
+        'template': '(d) 2.8 <= d/b <= 5.5',
+        'template_ko': '(d) 2.8 <= d/b <= 5.5',
+        'params': {},
+    },
+    'loads.label.i621_deck': {
+        'kind': 'label',
+        'template': 'tension flange through-fastened to deck or sheathing',
+        'template_ko': '인장 플랜지가 데크 또는 외장재에 관통 체결됨',
+        'params': {},
+    },
+    'loads.label.i621_e': {
+        'kind': 'label',
+        'template': '(e) b >= {b_min}.',
+        'template_ko': '(e) b >= {b_min}',
+        'params': {'b_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 2.125, 'text': '2.125'}},
+    },
+    'loads.label.i621_f': {
+        'kind': 'label',
+        'template': '(f) 16 <= flat b/t <= 43',
+        'template_ko': '(f) 16 <= 평판 b/t <= 43',
+        'params': {},
+    },
+    'loads.label.i621_fy_fu_not_given': {
+        'kind': 'label',
+        'template': 'Fy/Fu not given',
+        'template_ko': 'Fy/Fu 미입력',
+        'params': {},
+    },
+    'loads.label.i621_g': {
+        'kind': 'label',
+        'template': '(g) lap length at each interior support in each direction >= 1.5d',
+        'template_ko': '(g) 각 안쪽 지점의 랩 길이(양방향 각각) >= 1.5d',
+        'params': {},
+    },
+    'loads.label.i621_g_simple': {
+        'kind': 'label',
+        'template': '(g) lap length (not applicable to simple span)',
+        'template_ko': '(g) 랩 길이 (단순보에는 해당 없음)',
+        'params': {},
+    },
+    'loads.label.i621_h': {
+        'kind': 'label',
+        'template': '(h) span <= {span_max}',
+        'template_ko': '(h) 경간 <= {span_max}',
+        'params': {'span_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'ft', 'sep': ' ', 'const': 396.0, 'text': '33'}},
+    },
+    'loads.label.i621_j_thickness': {
+        'kind': 'label',
+        'template': '(j) panel base metal thickness >= {t_min}. ({t_acc}. accepted as {t_mil})',
+        'template_ko': '(j) 패널 강판 두께 >= {t_min} ({t_acc} 는 {t_mil} 로 인정)',
+        'params': {'t_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.018, 'text': '0.018'}, 't_acc': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.0179, 'text': '0.0179'}, 't_mil': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'mil', 'sep': ' ', 'const': 0.018, 'text': '18'}},
+    },
+    'loads.label.i621_k_insulation': {
+        'kind': 'label',
+        'template': '(k) insulation thickness <= {t_max}.',
+        'template_ko': '(k) 단열재 두께 <= {t_max}',
+        'params': {'t_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 6.0, 'text': '6'}},
+    },
+    'loads.label.i621_lap_lengths_not_given': {
+        'kind': 'label',
+        'template': 'lap lengths not given',
+        'template_ko': '랩 길이 미입력',
+        'params': {},
+    },
+    'loads.label.i621_n_spacing': {
+        'kind': 'label',
+        'template': '(n) fastener spacing <= {s_max}.',
+        'template_ko': '(n) 패스너 간격 <= {s_max}',
+        'params': {'s_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 12.0, 'text': '12'}},
+    },
+    'loads.label.i621_o': {
+        'kind': 'label',
+        'template': '(o) Fu/Fy >= 1.08',
+        'template_ko': '(o) Fu/Fy >= 1.08',
+        'params': {},
+    },
+    'loads.label.i621_profile': {
+        'kind': 'label',
+        'template': 'C- or Z-section (Table I6.2.1-1)',
+        'template_ko': 'C 또는 Z 단면 (Table I6.2.1-1)',
+        'params': {},
+    },
+    'loads.label.i621_sys_i': {
+        'kind': 'label',
+        'template': '(i) both flanges prevented from moving laterally at the supports',
+        'template_ko': '(i) 지점에서 두 플랜지의 횡이동이 구속됨',
+        'params': {},
+    },
+    'loads.label.i621_sys_j': {
+        'kind': 'label',
+        'template': '(j) panels: steel sheets, Fy >= {Fy_min}, t >= {t_min}., rib depth >= {rib_min}., ribs <= {rib_s}. o.c., attached to inhibit relative movement between panel and flange',
+        'template_ko': '(j) 패널: 강판, Fy >= {Fy_min}, t >= {t_min}, 리브 높이 >= {rib_min}, 리브 간격 <= {rib_s}, 패널과 플랜지의 상대 이동을 막도록 부착',
+        'params': {'Fy_min': {'quantity': 'stress', 'conv': None, 'spec': '', 'unit': 'ksi', 'sep': ' ', 'const': 50.0, 'text': '50'}, 't_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.018, 'text': '0.018'}, 'rib_min': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 1.125, 'text': '1-1/8'}, 'rib_s': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 12.0, 'text': '12'}},
+    },
+    'loads.label.i621_sys_k': {
+        'kind': 'label',
+        'template': '(k) insulation is glass fiber blanket {t_lo} to {t_hi}. thick, compressed between member and panel',
+        'template_ko': '(k) 단열재는 두께 {t_lo} ~ {t_hi} 의 유리섬유 블랭킷, 부재와 패널 사이에 압축',
+        'params': {'t_lo': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 0.0, 'text': '0'}, 't_hi': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 6.0, 'text': '6'}},
+    },
+    'loads.label.i621_sys_l': {
+        'kind': 'label',
+        'template': '(l) fasteners at least No. 12 self-drilling/self-tapping screws or {d_rivet}. rivets with {d_washer}. washers',
+        'template_ko': '(l) 패스너는 No. 12 이상의 셀프드릴링 · 셀프태핑 나사 또는 {d_washer} 와셔를 쓴 {d_rivet} 리벳',
+        'params': {'d_rivet': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.1875, 'text': '3/16'}, 'd_washer': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 0.5, 'text': '1/2'}},
+    },
+    'loads.label.i621_sys_m': {
+        'kind': 'label',
+        'template': '(m) fasteners are not standoff type screws',
+        'template_ko': '(m) 패스너는 스탠드오프형 나사가 아님',
+        'params': {},
+    },
+    'loads.label.i621_sys_n': {
+        'kind': 'label',
+        'template': '(n) fasteners <= {s_max}. o.c., near the center of the flange and adjacent to the panel high rib',
+        'template_ko': '(n) 패스너 간격 <= {s_max}, 플랜지 가운데 근처 · 패널 높은 리브 옆',
+        'params': {'s_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 12.0, 'text': '12'}},
+    },
+    'loads.label.i621_system': {
+        'kind': 'label',
+        'template': 'system conditions (i)-(n) confirmed by the user: {items}',
+        'template_ko': '시스템 조건 (i)-(n) 을 사용자가 확인: {items}',
+        'params': {'items': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'loads.ne.weak_axis_bending_axial': {
         'kind': 'not_evaluated',
         'template': '{member_app}: weak-axis bending / axial load from {dropped}.',
         'template_ko': '{member_app}: {dropped} 에서 오는 약축 휨 · 축력.',
         'params': {'member_app': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'dropped': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.reason.i621_adjacent_spans_vary': {
+        'kind': 'reason',
+        'template': 'Span {span}: adjacent bay span lengths vary by more than 20 % - simple-span R value used.',
+        'template_ko': '경간 {span}: 이웃 경간 길이 차가 20 % 를 넘음 — 단순보 R 값 사용.',
+        'params': {'span': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.reason.i621_cantilever': {
+        'kind': 'reason',
+        'template': 'I6.2.1 does not apply to a cantilever: R is not given for the overhang span(s); the other spans keep their R.',
+        'template_ko': 'I6.2.1 은 캔틸레버에 적용하지 않음: 내민 경간에는 R 을 주지 않고, 다른 경간은 그 R 을 유지.',
+        'params': {},
+    },
+    'loads.reason.i621_insulation_not_given': {
+        'kind': 'reason',
+        'template': 'Insulation thickness not given: r = 1.00 (t_i = 0) assumed for the simple-span R (Eq. I6.2.1-2).',
+        'template_ko': '단열재 두께 미입력: 단순보 R 에 r = 1.00 (t_i = 0) 가정 (Eq. I6.2.1-2).',
+        'params': {},
+    },
+    'loads.reason.i621_limits_not_met': {
+        'kind': 'reason',
+        'template': 'I6.2.1 limits not met: {items}',
+        'template_ko': 'I6.2.1 적용한계 미충족: {items}',
+        'params': {'items': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.reason.i621_not_verified': {
+        'kind': 'reason',
+        'template': 'I6.2.1 conditions not verified: {ids}',
+        'template_ko': 'I6.2.1 조건 미확인: {ids}',
+        'params': {'ids': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'loads.scope.deck_restraint_estimates_preliminary': {
         'kind': 'scope',
@@ -1438,9 +1612,9 @@ REGISTRY = {
     },
     'loads.warning.ply_thickness_outside_rp17': {
         'kind': 'warning',
-        'template': 'Ply thickness outside the RP17-2 test range (18 - 97 mil).',
-        'template_ko': '판 두께가 RP17-2 시험 범위(18 - 97 mil) 밖.',
-        'params': {},
+        'template': 'Ply thickness outside the RP17-2 test range ({t_lo} - {t_hi}).',
+        'template_ko': '판 두께가 RP17-2 시험 범위({t_lo} - {t_hi}) 밖.',
+        'params': {'t_lo': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 0.018, 'text': '18'}, 't_hi': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'mil', 'sep': ' ', 'const': 0.097, 'text': '97'}},
     },
     'loads.warning.section_ixx_given_deflections': {
         'kind': 'warning',
@@ -1552,9 +1726,9 @@ REGISTRY = {
     },
     'member.assumption.i6_2_1_i6_ft': {
         'kind': 'assumption',
-        'template': '§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.',
-        'template_ko': '§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.',
-        'params': {},
+        'template': '§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ {span_max}, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.',
+        'template_ko': '§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ {span_max}, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.',
+        'params': {'span_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'ft', 'sep': ' ', 'const': 396.0, 'text': '33'}},
     },
     'member.assumption.i6_2_1_i6_span_type_simple': {
         'kind': 'assumption',
@@ -1672,9 +1846,9 @@ REGISTRY = {
     },
     'member.ne.f2_f2_lateral_torsional_buckling_4': {
         'kind': 'not_evaluated',
-        'template': 'F2 lateral-torsional buckling (assumed Lb=120 in)',
-        'template_ko': 'F2 횡비틀림좌굴 (Lb=120 in 가정)',
-        'params': {},
+        'template': 'F2 lateral-torsional buckling (assumed Lb={Lb_default})',
+        'template_ko': 'F2 횡비틀림좌굴 (Lb={Lb_default} 가정)',
+        'params': {'Lb_default': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 120.0, 'text': '120'}},
     },
     'member.ne.f3_f3_local_buckling': {
         'kind': 'not_evaluated',
@@ -1802,6 +1976,12 @@ REGISTRY = {
         'template_ko': '{label} {item}',
         'params': {'label': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
+    'member.reason.b4_only_listed_limits_checked': {
+        'kind': 'reason',
+        'template': 'no element dimensions given — only the limits listed were checked',
+        'template_ko': '요소 치수 미입력 — 나열한 한계만 대조함',
+        'params': {},
+    },
     'member.reason.checked_element_dimensions_given': {
         'kind': 'reason',
         'template': 'not checked — element dimensions not given: {unchecked}',
@@ -1912,9 +2092,9 @@ REGISTRY = {
     },
     'member.reason.no_lateral_torsional_buckling': {
         'kind': 'reason',
-        'template': 'no lateral-torsional buckling: the value is unbounded (∞); the engine uses 1e6 ksi internally',
-        'template_ko': '횡비틀림좌굴 없음: 값은 무한대(∞) — 엔진 안에서는 1e6 ksi 를 씀',
-        'params': {},
+        'template': 'no lateral-torsional buckling: the value is unbounded (∞); the engine uses {Fcre_inf} internally',
+        'template_ko': '횡비틀림좌굴 없음: 값은 무한대(∞) — 엔진 안에서는 {Fcre_inf} 를 씀',
+        'params': {'Fcre_inf': {'quantity': 'stress', 'conv': None, 'spec': '', 'unit': 'ksi', 'sep': ' ', 'const': 1000000.0, 'text': '1e6'}},
     },
     'member.reason.no_mcrd': {
         'kind': 'reason',
@@ -2010,6 +2190,60 @@ REGISTRY = {
         'kind': 'scope',
         'template': '§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.',
         'template_ko': '§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.',
+        'params': {},
+    },
+    'member.scope.not_checked_c1_b2_sway': {
+        'kind': 'scope',
+        'template': 'C1 B2 (P-Δ sway amplification)',
+        'template_ko': 'C1 B2 (P-Δ 횡이동 증폭)',
+        'params': {},
+    },
+    'member.scope.not_checked_d1_connection_governed': {
+        'kind': 'scope',
+        'template': 'D1 connection-governed strength (Chapter J)',
+        'template_ko': 'D1 접합부가 지배하는 강도 (Chapter J)',
+        'params': {},
+    },
+    'member.scope.not_checked_e2_1_1_closed_box_rr': {
+        'kind': 'scope',
+        'template': 'E2.1.1 closed-box Rr (elongation 3-10 %)',
+        'template_ko': 'E2.1.1 폐단면 Rr (연신율 3-10 %)',
+        'params': {},
+    },
+    'member.scope.not_checked_f2_1_2_ltb_this_shape': {
+        'kind': 'scope',
+        'template': 'F2.1.2 lateral-torsional buckling of this shape',
+        'template_ko': 'F2.1.2 이 단면 형상의 횡비틀림좌굴',
+        'params': {},
+    },
+    'member.scope.not_checked_g5_h3_no_bearing_length': {
+        'kind': 'scope',
+        'template': 'G5/H3 web crippling (no bearing length wc_N given)',
+        'template_ko': 'G5/H3 웹 크리플링 (지압 길이 wc_N 미입력)',
+        'params': {},
+    },
+    'member.scope.not_checked_h2_2_stiffened_webs': {
+        'kind': 'scope',
+        'template': 'H2-2 (shear stiffened webs)',
+        'template_ko': 'H2-2 (전단 보강 웹)',
+        'params': {},
+    },
+    'member.scope.not_checked_h4_bending_torsion': {
+        'kind': 'scope',
+        'template': 'H4 combined bending and torsion',
+        'template_ko': 'H4 휨 + 비틀림 조합',
+        'params': {},
+    },
+    'member.scope.not_checked_holes': {
+        'kind': 'scope',
+        'template': 'holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)',
+        'template_ko': '구멍 (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)',
+        'params': {},
+    },
+    'member.scope.not_checked_weak_axis_dsm_flexure': {
+        'kind': 'scope',
+        'template': 'weak-axis DSM flexure',
+        'template_ko': '약축 DSM 휨',
         'params': {},
     },
     'member.warning.a3_3_2_a3_cold_work_fya': {
@@ -2236,9 +2470,9 @@ REGISTRY = {
     },
     'member.warning.lb_defaulted_verify_lateral': {
         'kind': 'warning',
-        'template': 'Lb defaulted to 120 in — verify lateral unbraced length',
-        'template_ko': 'Lb 를 120 in 로 기본 설정함 — 횡비지지 길이를 확인하십시오',
-        'params': {},
+        'template': 'Lb defaulted to {Lb_default} — verify lateral unbraced length',
+        'template_ko': 'Lb 를 {Lb_default} 로 기본 설정함 — 횡비지지 길이를 확인하십시오',
+        'params': {'Lb_default': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 120.0, 'text': '120'}},
     },
     'member.warning.lb_pos_not_given': {
         'kind': 'warning',
@@ -2350,9 +2584,9 @@ REGISTRY = {
     },
     'member.warning.table_b4_1_1_fy_ksi_b4_fy': {
         'kind': 'warning',
-        'template': 'Fy = {Fy} is not < 95 ksi (Table B4.1-1 Fy limit)',
-        'template_ko': 'Fy = {Fy} 가 95 ksi 미만이 아님 (Table B4.1-1 Fy 한계)',
-        'params': {'Fy': {'quantity': 'stress', 'conv': None, 'spec': '', 'unit': 'ksi', 'sep': ' '}},
+        'template': 'Fy = {Fy} is not < {Fy_limit} (Table B4.1-1 Fy limit)',
+        'template_ko': 'Fy = {Fy} 가 {Fy_limit} 미만이 아님 (Table B4.1-1 Fy 한계)',
+        'params': {'Fy': {'quantity': 'stress', 'conv': None, 'spec': '', 'unit': 'ksi', 'sep': ' '}, 'Fy_limit': {'quantity': 'stress', 'conv': None, 'spec': '', 'unit': 'ksi', 'sep': ' ', 'const': 95.0, 'text': '95'}},
     },
     'member.warning.table_b4_1_1_le_b4_edge_stiffener': {
         'kind': 'warning',
@@ -2452,9 +2686,9 @@ REGISTRY = {
     },
     'shear.assumption.h3_h3_exception_interior_supports': {
         'kind': 'assumption',
-        'template': '§H3(a) exception for interior supports of continuous decks/beams with laterally supported webs <= 10 in apart is not claimed; Eq. H3-1 is applied.',
-        'template_ko': '웹 간격 <= 10 in 로 횡지지된 연속 데크 · 보의 안쪽 지점에 대한 §H3(a) 예외는 쓰지 않음 — Eq. H3-1 적용.',
-        'params': {},
+        'template': '§H3(a) exception for interior supports of continuous decks/beams with laterally supported webs <= {s_max} apart is not claimed; Eq. H3-1 is applied.',
+        'template_ko': '웹 간격 <= {s_max} 로 횡지지된 연속 데크 · 보의 안쪽 지점에 대한 §H3(a) 예외는 쓰지 않음 — Eq. H3-1 적용.',
+        'params': {'s_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 10.0, 'text': '10'}},
     },
     'shear.assumption.h3_h3_uses_overhang_strength': {
         'kind': 'assumption',
@@ -2522,6 +2756,18 @@ REGISTRY = {
         'template_ko': '보수적 대용이 없음: 두 플랜지 재하에서는 표의 체결 계수가 비체결 계수보다 작을 수 있음.',
         'params': {},
     },
+    'shear.scope.g2_1_web_without_holes': {
+        'kind': 'scope',
+        'template': '§G2.1 web without holes and without transverse stiffeners. Not evaluated here: §G2.2/§G2.3(b) stiffened webs, §G3 webs with holes, §G4 transverse web stiffeners.',
+        'template_ko': '§G2.1 구멍과 횡방향 보강재가 없는 웹. 여기서 평가하지 않음: §G2.2/§G2.3(b) 보강 웹, §G3 구멍이 있는 웹, §G4 횡방향 웹 보강재.',
+        'params': {},
+    },
+    'shear.scope.g5_web_without_holes': {
+        'kind': 'scope',
+        'template': '§G5 web without holes. §G6 (web crippling of C-section webs with holes) is not evaluated.',
+        'template_ko': '§G5 구멍이 없는 웹. §G6 (구멍이 있는 C 단면 웹의 웹 크리플링)은 평가하지 않음.',
+        'params': {},
+    },
     'shear.warning.g2_2_g2_webs_transverse_stiffeners': {
         'kind': 'warning',
         'template': '§G2.2 (webs with transverse stiffeners) is not implemented; the §G2.1 curve is used with the given kv, which is conservative relative to §G2.2.',
@@ -2584,21 +2830,21 @@ REGISTRY = {
     },
     'shear.warning.table_g5_5_multi_web_deck_support': {
         'kind': 'warning',
-        'template': 'Multi-web deck with support fastener spacing > 18 in. is treated as unfastened per Table G5-5 note.',
-        'template_ko': '지점 패스너 간격 > 18 in 인 다중 웹 데크는 Table G5-5 주에 따라 비체결로 다룸.',
-        'params': {},
+        'template': 'Multi-web deck with support fastener spacing > {s_max}. is treated as unfastened per Table G5-5 note.',
+        'template_ko': '지점 패스너 간격 > {s_max} 인 다중 웹 데크는 Table G5-5 주에 따라 비체결로 다룸.',
+        'params': {'s_max': {'quantity': 'length', 'conv': None, 'spec': '', 'unit': 'in', 'sep': ' ', 'const': 18.0, 'text': '18'}},
     },
     'solver.warning.material_mass_density_outside': {
         'kind': 'warning',
-        'template': 'Material {matnum}: mass density {rho} is outside the range of structural materials in kip*s^2/in^4 (steel 7.345e-7). Frequencies scale with 1/sqrt(rho); check the units (weight density lb/in^3 must be divided by 386.09*1000, kg/m^3 multiplied by 9.357e-11).',
-        'template_ko': '재료 {matnum}: 질량밀도 {rho} 가 kip*s^2/in^4 단위의 구조재료 범위 밖 (강재 7.345e-7). 진동수는 1/sqrt(rho) 에 비례하므로 단위를 확인하십시오 (단위중량 lb/in^3 은 386.09*1000 으로 나누고, kg/m^3 은 9.357e-11 을 곱함).',
-        'params': {'matnum': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'rho': {'quantity': None, 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+        'template': 'Material {matnum}: mass density {rho} is outside the range of structural materials in kip*s^2/in^4 (steel {rho_steel}). Frequencies scale with 1/sqrt(rho); check the units (weight density lb/in^3 must be divided by 386.09*1000, kg/m^3 multiplied by 9.357e-11).',
+        'template_ko': '재료 {matnum}: 질량밀도 {rho} 가 kip*s^2/in^4 단위의 구조재료 범위 밖 (강재 {rho_steel}). 진동수는 1/sqrt(rho) 에 비례하므로 단위를 확인하십시오 (단위중량 lb/in^3 은 386.09*1000 으로 나누고, kg/m^3 은 9.357e-11 을 곱함).',
+        'params': {'matnum': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'rho': {'quantity': 'mass_density', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}, 'rho_steel': {'quantity': 'mass_density', 'conv': None, 'spec': '', 'unit': None, 'sep': '', 'const': 7.345e-07, 'text': '7.345e-7'}},
     },
     'solver.warning.no_mass_density_given': {
         'kind': 'warning',
-        'template': 'No mass density given; steel 7.345e-7 kip*s^2/in^4 (0.2836 lb/in^3, 7850 kg/m^3) was assumed.',
-        'template_ko': '질량밀도 미입력 — 강재 7.345e-7 kip*s^2/in^4 (0.2836 lb/in^3, 7850 kg/m^3)로 가정함.',
-        'params': {},
+        'template': 'No mass density given; steel {rho_steel} (0.2836 lb/in^3, 7850 kg/m^3) was assumed.',
+        'template_ko': '질량밀도 미입력 — 강재 {rho_steel} (0.2836 lb/in^3, 7850 kg/m^3)로 가정함.',
+        'params': {'rho_steel': {'quantity': 'mass_density', 'conv': None, 'spec': '', 'unit': 'kip*s^2/in^4', 'sep': ' ', 'const': 7.345e-07, 'text': '7.345e-7'}},
     },
     'special.warning.a1_2_a1_j6_k2': {
         'kind': 'warning',

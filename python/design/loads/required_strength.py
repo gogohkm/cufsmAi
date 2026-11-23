@@ -27,7 +27,7 @@ from design.loads.bracing import (
     calc_rotational_stiffness, lateral_stiffness_detail,
     determine_unbraced_lengths, check_i621_conditions,
 )
-from design.notices import N as _nt, attach as _attach_notices  # noqa: E402
+from design.notices import N as _nt, attach as _attach_notices, joined as _joined  # noqa: E402
 
 E_STEEL = 29500.0  # ksi — CFS 표준 탄성계수 (기본값)
 
@@ -263,7 +263,7 @@ def analyze_loads(
                 assumptions.append(_nt('loads.assumption.i6_2_1_i6_conditions_confirmed_user'))
                 assumptions.extend(i621['reasons'])
             elif uplift_result:
-                warnings.append(_nt('loads.warning.i6_2_1_i6_uplift_applied_uplift', reasons=' '.join(i621['reasons'])))
+                warnings.append(_nt('loads.warning.i6_2_1_i6_uplift_applied_uplift', reasons=_joined(' ', i621['reasons'])))
         elif uplift_result:
             warnings.append(_nt('loads.warning.i6_2_1_section_provided_i6_uplift'))
     elif deck_type == 'standing-seam':

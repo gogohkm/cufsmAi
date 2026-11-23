@@ -3,9 +3,20 @@
  "pairs": [
   {
    "code": "conn.assumption.e60_fxx_e60_ksi",
-   "params": [],
-   "template": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
-   "template_ko": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
+   "params": [
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "stress",
+     "sep": " ",
+     "symbol": "Fxx_min",
+     "text": "60",
+     "unit_text": "ksi",
+     "value": 60.0
+    }
+   ],
+   "template": "Fxx 미입력 — 최저 표준 전극 E60({Fxx_min}) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
+   "template_ko": "Fxx 미입력 — 최저 표준 전극 E60({Fxx_min}) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
    "text": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)",
    "text_ko": "Fxx 미입력 — 최저 표준 전극 E60(60 ksi) 사용 (더 높은 전극이면 용접금속 강도·적용한계가 달라짐)"
   },
@@ -364,10 +375,20 @@
      "quantity": null,
      "symbol": "clause",
      "value": "J3/J6"
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "t_lim",
+     "text": "3/16",
+     "unit_text": "in",
+     "value": 0.1875
     }
    ],
-   "template": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
-   "template_ko": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+   "template": "가장 얇은 접합 부재 t={t_min} > {t_lim} — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+   "template_ko": "가장 얇은 접합 부재 t={t_min} > {t_lim} — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
    "text": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용",
    "text_ko": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용"
   },
@@ -453,10 +474,20 @@
      "symbol": "de_used",
      "unit_text": "in",
      "value": 0.26
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "de_min",
+     "text": "3/8",
+     "unit_text": "in",
+     "value": 0.375
     }
    ],
-   "template": "de={de_used} < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
-   "template_ko": "de={de_used} < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
+   "template": "de={de_used} < {de_min} (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
+   "template_ko": "de={de_used} < {de_min} (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
    "text": "de=0.2600 in < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요",
    "text_ko": "de=0.2600 in < 3/8 in (Eq. J2.2.2.1-5) — 절차로 확보한 de 를 입력하세요"
   },
@@ -486,10 +517,28 @@
      "symbol": "d",
      "unit_text": "in",
      "value": 0.375
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "symbol": "d_min",
+     "text": "0.08",
+     "value": 0.08
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "d_max",
+     "text": "0.25",
+     "unit_text": "in",
+     "value": 0.25
     }
    ],
-   "template": "나사 직경 d={d} 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖",
-   "template_ko": "나사 직경 d={d} 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖",
+   "template": "나사 직경 d={d} 이 §J4 범위({d_min} ≤ d ≤ {d_max}) 밖",
+   "template_ko": "나사 직경 d={d} 이 §J4 범위({d_min} ≤ d ≤ {d_max}) 밖",
    "text": "나사 직경 d=0.375 in 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖",
    "text_ko": "나사 직경 d=0.375 in 이 §J4 범위(0.08 ≤ d ≤ 0.25 in) 밖"
   },
@@ -647,10 +696,20 @@
         "quantity": null,
         "symbol": "clause",
         "value": "J3/J6"
+       },
+       {
+        "const": true,
+        "fmt": "raw",
+        "quantity": "length",
+        "sep": " ",
+        "symbol": "t_lim",
+        "text": "3/16",
+        "unit_text": "in",
+        "value": 0.1875
        }
       ],
-      "template": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
-      "template_ko": "가장 얇은 접합 부재 t={t_min} > 3/16 in — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+      "template": "가장 얇은 접합 부재 t={t_min} > {t_lim} — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
+      "template_ko": "가장 얇은 접합 부재 t={t_min} > {t_lim} — AISI S100 {clause} 가 아니라 ANSI/AISC 360 을 적용",
       "text": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용",
       "text_ko": "가장 얇은 접합 부재 t=0.25 in > 3/16 in — AISI S100 J3/J6 가 아니라 ANSI/AISC 360 을 적용"
      },
@@ -724,10 +783,28 @@
      "quantity": "length",
      "symbol": "t_min",
      "value": 0.25
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "symbol": "t_lo",
+     "text": "0.024",
+     "value": 0.024
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "t_hi",
+     "text": "0.1875",
+     "unit_text": "in",
+     "value": 0.1875
     }
    ],
-   "template": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t={t_min} — 시험 필요",
-   "template_ko": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t={t_min} — 시험 필요",
+   "template": "Table J3.3.1-1 두께 범위({t_lo} ≤ t < {t_hi}) 밖: t={t_min} — 시험 필요",
+   "template_ko": "Table J3.3.1-1 두께 범위({t_lo} ≤ t < {t_hi}) 밖: t={t_min} — 시험 필요",
    "text": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t=0.25 — 시험 필요",
    "text_ko": "Table J3.3.1-1 두께 범위(0.024 ≤ t < 0.1875 in) 밖: t=0.25 — 시험 필요"
   },
@@ -799,10 +876,28 @@
      "quantity": "length",
      "symbol": "d",
      "value": 0.18
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "ds_max",
+     "text": "0.177",
+     "unit_text": "in",
+     "value": 0.177
+    },
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "symbol": "ds_cap",
+     "text": "0.177",
+     "value": 0.177
     }
    ],
-   "template": "J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급",
-   "template_ko": "J5.3.2: ds={d} 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급",
+   "template": "J5.3.2: ds={d} 는 상한 {ds_max} 을 근소하게 넘음 — Manual IV-12 처럼 ≅{ds_cap} 로 취급",
+   "template_ko": "J5.3.2: ds={d} 는 상한 {ds_max} 을 근소하게 넘음 — Manual IV-12 처럼 ≅{ds_cap} 로 취급",
    "text": "J5.3.2: ds=0.18 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급",
    "text_ko": "J5.3.2: ds=0.18 는 상한 0.177 in 을 근소하게 넘음 — Manual IV-12 처럼 ≅0.177 로 취급"
   },
@@ -1559,9 +1654,20 @@
   },
   {
    "code": "member.assumption.i6_2_1_i6_ft",
-   "params": [],
-   "template": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
-   "template_ko": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
+   "params": [
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "span_max",
+     "text": "33",
+     "unit_text": "ft",
+     "value": 396.0
+    }
+   ],
+   "template": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ {span_max}, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
+   "template_ko": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ {span_max}, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
    "text": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오.",
    "text_ko": "§I6.2.1: 조건 (g)~(n)(랩 길이, 스팬 ≤ 33 ft, 지점 횡구속, 패널·단열재·체결재 상세)과 연속보 변곡점 사이 지점부·캔틸레버 제외는 이 도구가 확인하지 않습니다 — 사용자가 확인하십시오."
   },
@@ -1753,9 +1859,20 @@
   },
   {
    "code": "member.ne.f2_f2_lateral_torsional_buckling_4",
-   "params": [],
-   "template": "F2 lateral-torsional buckling (assumed Lb=120 in)",
-   "template_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)",
+   "params": [
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "Lb_default",
+     "text": "120",
+     "unit_text": "in",
+     "value": 120.0
+    }
+   ],
+   "template": "F2 lateral-torsional buckling (assumed Lb={Lb_default})",
+   "template_ko": "F2 횡비틀림좌굴 (Lb={Lb_default} 가정)",
    "text": "F2 lateral-torsional buckling (assumed Lb=120 in)",
    "text_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)"
   },
@@ -2035,9 +2152,20 @@
        {
         "code": "member.ne.f2_f2_lateral_torsional_buckling_4",
         "kind": "not_evaluated",
-        "params": [],
-        "template": "F2 lateral-torsional buckling (assumed Lb=120 in)",
-        "template_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)",
+        "params": [
+         {
+          "const": true,
+          "fmt": "raw",
+          "quantity": "length",
+          "sep": " ",
+          "symbol": "Lb_default",
+          "text": "120",
+          "unit_text": "in",
+          "value": 120.0
+         }
+        ],
+        "template": "F2 lateral-torsional buckling (assumed Lb={Lb_default})",
+        "template_ko": "F2 횡비틀림좌굴 (Lb={Lb_default} 가정)",
         "text": "F2 lateral-torsional buckling (assumed Lb=120 in)",
         "text_ko": "F2 횡비틀림좌굴 (Lb=120 in 가정)"
        }
@@ -2226,6 +2354,78 @@
    "text_ko": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다."
   },
   {
+   "code": "member.scope.not_checked_c1_b2_sway",
+   "params": [],
+   "template": "C1 B2 (P-Δ sway amplification)",
+   "template_ko": "C1 B2 (P-Δ 횡이동 증폭)",
+   "text": "C1 B2 (P-Δ sway amplification)",
+   "text_ko": "C1 B2 (P-Δ 횡이동 증폭)"
+  },
+  {
+   "code": "member.scope.not_checked_d1_connection_governed",
+   "params": [],
+   "template": "D1 connection-governed strength (Chapter J)",
+   "template_ko": "D1 접합부가 지배하는 강도 (Chapter J)",
+   "text": "D1 connection-governed strength (Chapter J)",
+   "text_ko": "D1 접합부가 지배하는 강도 (Chapter J)"
+  },
+  {
+   "code": "member.scope.not_checked_e2_1_1_closed_box_rr",
+   "params": [],
+   "template": "E2.1.1 closed-box Rr (elongation 3-10 %)",
+   "template_ko": "E2.1.1 폐단면 Rr (연신율 3-10 %)",
+   "text": "E2.1.1 closed-box Rr (elongation 3-10 %)",
+   "text_ko": "E2.1.1 폐단면 Rr (연신율 3-10 %)"
+  },
+  {
+   "code": "member.scope.not_checked_f2_1_2_ltb_this_shape",
+   "params": [],
+   "template": "F2.1.2 lateral-torsional buckling of this shape",
+   "template_ko": "F2.1.2 이 단면 형상의 횡비틀림좌굴",
+   "text": "F2.1.2 lateral-torsional buckling of this shape",
+   "text_ko": "F2.1.2 이 단면 형상의 횡비틀림좌굴"
+  },
+  {
+   "code": "member.scope.not_checked_g5_h3_no_bearing_length",
+   "params": [],
+   "template": "G5/H3 web crippling (no bearing length wc_N given)",
+   "template_ko": "G5/H3 웹 크리플링 (지압 길이 wc_N 미입력)",
+   "text": "G5/H3 web crippling (no bearing length wc_N given)",
+   "text_ko": "G5/H3 웹 크리플링 (지압 길이 wc_N 미입력)"
+  },
+  {
+   "code": "member.scope.not_checked_h2_2_stiffened_webs",
+   "params": [],
+   "template": "H2-2 (shear stiffened webs)",
+   "template_ko": "H2-2 (전단 보강 웹)",
+   "text": "H2-2 (shear stiffened webs)",
+   "text_ko": "H2-2 (전단 보강 웹)"
+  },
+  {
+   "code": "member.scope.not_checked_h4_bending_torsion",
+   "params": [],
+   "template": "H4 combined bending and torsion",
+   "template_ko": "H4 휨 + 비틀림 조합",
+   "text": "H4 combined bending and torsion",
+   "text_ko": "H4 휨 + 비틀림 조합"
+  },
+  {
+   "code": "member.scope.not_checked_holes",
+   "params": [],
+   "template": "holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)",
+   "template_ko": "구멍 (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)",
+   "text": "holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)",
+   "text_ko": "구멍 (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)"
+  },
+  {
+   "code": "member.scope.not_checked_weak_axis_dsm_flexure",
+   "params": [],
+   "template": "weak-axis DSM flexure",
+   "template_ko": "약축 DSM 휨",
+   "text": "weak-axis DSM flexure",
+   "text_ko": "약축 DSM 휨"
+  },
+  {
    "code": "member.warning.b3_3_b3_b4_b4_chapters",
    "params": [],
    "template": "§B3.3/§B4.2: 단면이 Table B4.1-1 적용한계를 벗어났습니다. Chapters E~H의 φ/Ω(예: φc=0.85/φb=0.90, Ωc=1.80/Ωb=1.67)는 잠정값이며, A1.2(c) 합리적 공학해석 또는 K2 시험자료(B4.2(b))로 φ/Ω를 재정립해야 합니다. 내측굽힘 R/t>10만 초과한 경우 Table B4.1-1 각주(d)에 따라 합리적 해석(A1.2(c))이 허용됩니다.",
@@ -2409,9 +2609,20 @@
   },
   {
    "code": "member.warning.lb_defaulted_verify_lateral",
-   "params": [],
-   "template": "Lb defaulted to 120 in — verify lateral unbraced length",
-   "template_ko": "Lb 를 120 in 로 기본 설정함 — 횡비지지 길이를 확인하십시오",
+   "params": [
+    {
+     "const": true,
+     "fmt": "raw",
+     "quantity": "length",
+     "sep": " ",
+     "symbol": "Lb_default",
+     "text": "120",
+     "unit_text": "in",
+     "value": 120.0
+    }
+   ],
+   "template": "Lb defaulted to {Lb_default} — verify lateral unbraced length",
+   "template_ko": "Lb 를 {Lb_default} 로 기본 설정함 — 횡비지지 길이를 확인하십시오",
    "text": "Lb defaulted to 120 in — verify lateral unbraced length",
    "text_ko": "Lb 를 120 in 로 기본 설정함 — 횡비지지 길이를 확인하십시오"
   },
@@ -2568,6 +2779,22 @@
    "template_ko": " (기본값: 맞댄 두 채널)",
    "text": " (default: two back-to-back channels)",
    "text_ko": " (기본값: 맞댄 두 채널)"
+  },
+  {
+   "code": "shear.scope.g2_1_web_without_holes",
+   "params": [],
+   "template": "§G2.1 web without holes and without transverse stiffeners. Not evaluated here: §G2.2/§G2.3(b) stiffened webs, §G3 webs with holes, §G4 transverse web stiffeners.",
+   "template_ko": "§G2.1 구멍과 횡방향 보강재가 없는 웹. 여기서 평가하지 않음: §G2.2/§G2.3(b) 보강 웹, §G3 구멍이 있는 웹, §G4 횡방향 웹 보강재.",
+   "text": "§G2.1 web without holes and without transverse stiffeners. Not evaluated here: §G2.2/§G2.3(b) stiffened webs, §G3 webs with holes, §G4 transverse web stiffeners.",
+   "text_ko": "§G2.1 구멍과 횡방향 보강재가 없는 웹. 여기서 평가하지 않음: §G2.2/§G2.3(b) 보강 웹, §G3 구멍이 있는 웹, §G4 횡방향 웹 보강재."
+  },
+  {
+   "code": "shear.scope.g5_web_without_holes",
+   "params": [],
+   "template": "§G5 web without holes. §G6 (web crippling of C-section webs with holes) is not evaluated.",
+   "template_ko": "§G5 구멍이 없는 웹. §G6 (구멍이 있는 C 단면 웹의 웹 크리플링)은 평가하지 않음.",
+   "text": "§G5 web without holes. §G6 (web crippling of C-section webs with holes) is not evaluated.",
+   "text_ko": "§G5 구멍이 없는 웹. §G6 (구멍이 있는 C 단면 웹의 웹 크리플링)은 평가하지 않음."
   },
   {
    "code": "shear.warning.g2_2_g2_webs_transverse_stiffeners",

@@ -678,23 +678,23 @@ def _not_checked_provisions(params: dict, member_type: str) -> list:
     canon = _canonical_section_type(params)
     items = []
     if member_type in ('compression', 'flexure', 'combined'):
-        items.append('holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)')
+        items.append(_nt('member.scope.not_checked_holes'))
     if member_type in ('compression', 'combined') and canon == 'RHS':
-        items.append('E2.1.1 closed-box Rr (elongation 3-10 %)')
+        items.append(_nt('member.scope.not_checked_e2_1_1_closed_box_rr'))
     if member_type in ('flexure', 'combined'):
         if canon in ('ANGLE', 'LIPPEDANGLE', 'HAT', 'TEE'):
-            items.append('F2.1.2 lateral-torsional buckling of this shape')
+            items.append(_nt('member.scope.not_checked_f2_1_2_ltb_this_shape'))
         if canon not in ('RHS', 'CHS', 'Z', 'I'):
-            items.append('H4 combined bending and torsion')
+            items.append(_nt('member.scope.not_checked_h4_bending_torsion'))
         if not params.get('transverse_stiffeners'):
-            items.append('H2-2 (shear stiffened webs)')
-        items.append('weak-axis DSM flexure')
+            items.append(_nt('member.scope.not_checked_h2_2_stiffened_webs'))
+        items.append(_nt('member.scope.not_checked_weak_axis_dsm_flexure'))
         if not (params.get('wc_N') or 0) > 0 and canon not in ('RHS', 'CHS', 'ANGLE', 'TEE'):
-            items.append('G5/H3 web crippling (no bearing length wc_N given)')
+            items.append(_nt('member.scope.not_checked_g5_h3_no_bearing_length'))
     if member_type == 'combined':
-        items.append('C1 B2 (P-Δ sway amplification)')
+        items.append(_nt('member.scope.not_checked_c1_b2_sway'))
     if member_type == 'tension':
-        items.append('D1 connection-governed strength (Chapter J)')
+        items.append(_nt('member.scope.not_checked_d1_connection_governed'))
     return items
 
 
