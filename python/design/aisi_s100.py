@@ -243,6 +243,83 @@ def _zero_demand_not_applicable(checks: list) -> None:
         _set_governing([c for c in checks if c['group'] == g])
 
 
+# 계약 §6.4 주 소요: 설계 결과는 설계하는 것의 주 소요를 주고 평가했을 때만 합격할 수 있다.
+# 무리마다 하나 이상을 주어야 한다(조합: 축력과 모멘트 하나). 0 은 zero_demand_stated = true 일 때만 0 이다.
+_MAIN_DEMAND = {
+    'flexure': (('Mu',),),
+    'compression': (('Pu',),),
+    'tension': (('Tu',),),
+    'combined': (('Pu',), ('Mux', 'Muy')),
+}
+# 그 주 소요 없이는 판정할 수 없는 검토(id, '.' 으로 끝나면 접두). 정모멘트 구간(Mu_pos)은 Mu 를 쓰지 않는다.
+_BENDING_NEEDS = ('member.flexure.', 'member.bending_shear', 'member.bending_web_crippling')
+_NEEDS_MAIN = {
+    'Mu': _BENDING_NEEDS,
+    'Mux': _BENDING_NEEDS + ('member.axial_bending', 'member.tension_bending.'),
+    'Pu': ('member.compression.', 'member.tension.', 'member.axial_bending', 'member.tension_bending.'),
+    'Tu': ('member.tension.',),
+}
+_NEEDS_NOT = ('member.flexure.positive_region',)
+
+
+def _main_demand_gaps(params: dict, member_type: str) -> list:
+    """주 소요 무리 중 채워지지 않은 것: [(무리 첫 키, 'missing' | 'zero', 입력 이름 글)]."""
+    stated = params.get('zero_demand_stated') is True
+    gaps = []
+    for grp in _MAIN_DEMAND.get(member_type, ()):
+        vals = {k: params.get(k) for k in grp}
+        given = [k for k in grp if vals[k] is not None]
+        nonzero = False
+        for k in given:
+            try:
+                nonzero = nonzero or float(vals[k]) != 0.0
+            except (TypeError, ValueError):
+                nonzero = True     # 수가 아닌 값은 여기서 다루지 않는다
+        if nonzero or (given and stated):
+            continue
+        gaps.append((grp[0], 'zero', ', '.join(given)) if given else (grp[0], 'missing', ' / '.join(grp)))
+    return gaps
+
+
+def _main_demand_rule(result: dict, params: dict, member_type: str, checks: list) -> None:
+    """주 소요가 없거나 밝히지 않은 0 이면: 그것을 쓰는 검토는 판정 없음(합격 → 미평가, 해당 없음(소요 없음) → 미평가,
+    불합격은 그대로 — 준 소요로 이미 넘으면 전체 소요로도 넘는다), 결과는 합격이 아니다(not_evaluated 에 적는다).
+    소요가 하나도 없어 아무것도 평가하지 않았으면 이미 판정 없음이라 그대로 둔다."""
+    gaps = _main_demand_gaps(params, member_type)
+    if not gaps or not any(c['verdict'] in ('pass', 'fail') and c.get('counts', True) for c in checks):
+        return
+    groups = set()
+    for i, c in enumerate(checks):
+        cid = c.get('id') or ''
+        if cid in _NEEDS_NOT:
+            continue
+        hit = [g for g in gaps if any(cid.startswith(p) if p.endswith('.') else cid == p for p in _NEEDS_MAIN[g[0]])]
+        if not hit:
+            continue
+        why = [(_nt('member.reason.main_demand_not_given', inputs=txt) if kind == 'missing'
+                else _nt('member.reason.main_demand_zero_not_stated', inputs=txt)) for _k, kind, txt in hit]
+        reason = why[0] if len(why) == 1 else _joined('; ', why)
+        inputs = ', '.join(txt for _k, _kind, txt in hit)
+        if c['verdict'] == 'fail':
+            c = dict(c, demand_incomplete=[txt for _k, _kind, txt in hit],
+                     reason=_joined('; ', [r for r in (c.get('reason'), _nt('member.reason.fail_with_incomplete_demand',
+                                                                            inputs=inputs)) if r]))
+        elif c['verdict'] == 'pass':
+            c = _mc.demote_to_not_evaluated(c, reason)
+        elif str(c.get('reason') or '').startswith('no required'):
+            c = dict(c, verdict='not_evaluated', reason=reason)
+            c.pop('mirrors', None)
+        else:
+            continue       # 다른 까닭으로 해당 없음 · 미평가(예: 랩 구속 진술의 §F4)는 그대로
+        checks[i] = c
+        groups.add(c['group'])
+    for g in groups:
+        _set_governing([c for c in checks if c['group'] == g])
+    for _k, kind, txt in gaps:
+        _mark_not_evaluated(result, _nt('member.ne.main_demand_not_given', inputs=txt) if kind == 'missing'
+                            else _nt('member.ne.main_demand_zero_not_stated', inputs=txt))
+
+
 def _governing_check_id(checks: list, group: str, value) -> str | None:
     """하위 설계의 설계강도(Pa · Max · Ta)는 그 무리에서 설계강도가 가장 작은 모드의 값이다 — 그 항목의 id."""
     if value is None:
@@ -634,6 +711,7 @@ def design_member(params: dict) -> dict:
                           bool(result.get('b4_limits_exceeded')), params.get(_PROPS_GENERATED))
         checks.append(b4)
         _set_governing([b4])
+    _main_demand_rule(result, params, member_type, checks)
     _zero_demand_not_applicable(checks)
     _apply_context(checks, params)
     # 옛 계산서 단계(steps[])의 1e6 ksi 는 '횡좌굴 없음(∞)'의 표지다 — 값은 화면 비교용으로 두고 옆에 표시(V6-16).

@@ -293,6 +293,32 @@ AISI Design Manual 의 연속 퍼린 예제는 이 가정을 **가정으로 밝�
 
 호스트(K3)가 할 일: (1) 랩 구간 호출에서 `Lb = 0` · `Cb = 1.0` · `distortional_not_applicable` · `dsm.Mcrd` 삭제를 빼고 `lap_region: true` 와 `lap_restrained` 를 넘긴다. (2) 퍼린 입력(화면 · `design_purlin` MCP 스키마)과 랩 도구 스키마(`design_lap_connection`)에 `lap_restrained` 를 둔다(뜻: 위 인용 문장을 사람이 확인). (3) 호스트의 랩 가정 문장은 진술이 있을 때만 — 엔진이 (가)를 싣는다.
 
+### 6.4 주 소요 — 설계 결과는 설계하는 것의 주 소요를 주고 평가했을 때만 합격할 수 있다 (2026-11-24, 오케스트레이터 결정)
+
+「전단만 검토」 는 정당한 요청이지만 **밝혀서** 요청한다 — 빈칸으로 그렇게 되지 않는다. 모든 도구에서 같은 이름 `zero_demand_stated: true` 가 「준 0 은 정말 0」 이라는 진술이다(§6.3 의 랩 도구와 같다).
+
+| 도구 · 종류 | 주 소요 (무리마다 하나 이상) | 그것을 쓰는 검토 |
+|---|---|---|
+| 부재 휨 `flexure` | `Mu` | `member.flexure.*`(정모멘트 구간 `member.flexure.positive_region` 은 `Mu_pos` 를 써서 빼다) · `member.bending_shear` · `member.bending_web_crippling` |
+| 부재 압축 `compression` | `Pu` | `member.compression.*` |
+| 부재 인장 `tension` | `Tu` | `member.tension.*` |
+| 부재 조합 `combined` | 축력 `Pu`(음수 = 인장) **그리고** 모멘트 하나(`Mux` 또는 `Muy`) | 축력: `member.compression.*` · `member.tension.*` · `member.axial_bending` · `member.tension_bending.*`; 모멘트: 휨의 것 + `member.axial_bending` · `member.tension_bending.*` |
+| 랩 도구 | `Mu_support` 와 `Vu_support` (§6.3) | §6.3 |
+| 퍼린 구간 | 호스트가 구간마다 `Mu` 와 `Vu` 를 보낸다 — 부재 휨의 규칙 그대로 | |
+| 접합부 `force_direction: 'shear'` | `Vu` (또는 `Pu`) | 전단 방향의 한계상태 |
+| 접합부 `force_direction: 'tension'` | `Tu` (또는 `Pu`) | 인장 방향의 한계상태 |
+| 접합부, `force_direction` 없음 | `Vu` · `Tu` 중 하나 — 둘 다 없으면 평가한 검토가 없어 이미 `pass: null`(옛 규칙 그대로) | |
+
+규칙(엔진 `design.aisi_s100._main_demand_rule` · `design.connections.main_demand_gap`):
+- 주 소요가 **없음**(키가 없거나 `null`) 또는 **밝히지 않은 0** → 그것을 쓰는 검토는 판정 없음: `pass` → `not_evaluated`(값은 `reference`), 「소요 없음」 으로 해당 없음이던 것 → `not_evaluated`, 까닭 `member.reason.main_demand_not_given` / `member.reason.main_demand_zero_not_stated` {inputs}. 불합격은 그대로(준 소요로 이미 넘으면 전체 소요로도 넘는다) — `demand_incomplete: [입력]` 과 까닭 `member.reason.fail_with_incomplete_demand`. 다른 까닭의 해당 없음(예: 랩 구속 진술의 §F4)은 그대로.
+- 결과: `not_evaluated` 에 `member.ne.main_demand_not_given` / `member.ne.main_demand_zero_not_stated` {inputs} 하나, `utilization_valid: false`, `pass` 는 불합격이 없으면 `null`. `utilization` 의 수는 그대로(평가한 비 가운데 가장 큰 것) — `utilization_valid` 가 거짓이다.
+- 접합부: 밝힌 방향의 한계상태가 `not_evaluated`(까닭 `conn.reason.main_demand_not_given` / `conn.reason.main_demand_zero_not_stated`), `not_evaluated` · `not_evaluated_relevant` 에 그 방향의 행(「전단(면내) 강도」 · 「인장(축방향) 강도」 → `conn.shear_strength` · `conn.tension_strength`), `pass: null`, `verdict: 'NOT_CHECKED'`.
+- 소요가 **하나도** 없어 아무것도 평가하지 않은 결과(강도만 보는 호출)는 옛 그대로 — 검토마다 「no required … strength」, `pass: null`, 새 항목 없음.
+- 부 소요(주 소요가 아닌 것: 휨의 `Vu` · `wc_P`, 조합의 두 번째 모멘트, 접합부의 다른 방향)는 옛 규칙 그대로 — 주 소요를 평가했으면 해당 없음.
+- 주 소요를 주고 평가했으면 아무것도 바뀌지 않는다.
+
+호스트가 할 일: (1) 퍼린 구간 · 지점 호출(`StcfsdPanel` 의 M_max · V_max · support 호출)에서 하중 해석이 낸 `Mu` 가 정확히 0 이면(단순 끝 지점 등) `zero_demand_stated: true` 를 함께 보낸다 — 해석이 그 0 을 밝힌 것이다. 0 이 아니면 보내지 않는다. (2) 부재 도구(`aisi_design_flexure` · `_compression` · `_tension` · `_combined`)와 접합부 도구(`aisi_design_connection`) 스키마에 `zero_demand_stated` (boolean, 뜻: 「준 0 인 주 소요는 정말 0 — 다른 소요만 검토」)를 연다. (3) `L/1000` 만으로 압축 앵글을 조합으로 부를 때처럼 모멘트를 일부러 0 으로 주는 호출도 그 진술을 함께. (4) 호스트가 빈칸을 0 으로 채워 보내지 않는다(없으면 키를 빼고 보낸다) — 0 으로 채우면 「밝히지 않은 0」 으로 같은 판정 없음이 된다.
+
 ## 7. 단면 요소의 자리 `element_roles`
 
 템플릿 생성 결과에 요소 순서대로 붙는다(`len == len(elem)`). 손으로 만든 단면(`custom` · `custom_builder`)에는 **붙이지 않는다**(짐작하지 않는다).
@@ -1504,3 +1530,18 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 | band: positive region ratio 1.000004 | 경고 「Mu(+)=83.29 > φMn(+)=83.29 kip-in (DCR=1.000)」 → 「Mu(+)=83.294400 > φMn(+)=83.294077 kip-in (DCR=1.000000)」 |
 
 종합 `pass` 가 바뀐 사례는 없다(그 사례들은 이미 진술 없음으로 `null` 이거나 다른 불합격으로 `false`). 계약 사례에 Mu · Vu 가 없는 랩은 없었다 — V9a-02 는 새 시험(`test_review_1124_v8_fixes.test_V9a_02_*`)이 본다.
+
+### 16.16 덧붙임 — 주 소요 규칙 (2026-11-24, §6.4)
+
+- 16.15 의 「다른 도구의 같은 꼴」 은 결정되어 §6.4 로 닫았다 — 부재(휨 · 압축 · 인장 · 조합)와 밝힌 `force_direction` 의 접합부. 접합부가 아무 소요 없이 합격하는 길은 없었다(평가한 검토가 없으면 `pass: null`, 상세 검토는 불합격만 판정에 든다).
+- 새 code 7: `member.ne.main_demand_not_given` · `member.ne.main_demand_zero_not_stated`(not_evaluated), `member.reason.main_demand_not_given` · `member.reason.main_demand_zero_not_stated` · `member.reason.fail_with_incomplete_demand` · `conn.reason.main_demand_not_given` · `conn.reason.main_demand_zero_not_stated`(reason). 매개변수 `inputs` 는 입력 이름 글(quantity 없음).
+- 접합부 입력 키 `zero_demand_stated` 를 `connections._KNOWN_KEYS` 에 더했다(모르는 키 경고가 나지 않게). 부재는 `params.get('zero_demand_stated')` 로 읽는다.
+- **기준선에서 바뀐 것(`5df4464` 와 견줌):** 계약 사례 155,135 값 가운데 63(사례 둘), 가장자리 96,254 가운데 0, 하중 65,134 가운데 0. `utilization` 의 수가 바뀐 사례는 없다(둘 다 `utilization_valid: false` 가 새로 붙는다).
+
+| 사례 | 바뀐 것 |
+|---|---|
+| flexure V only (Mu = 0) — 퍼린 구간 꼴, `Mu: 0` · `Vu: 1.2`, 진술 없음 | 종합 `pass` true → **null**; `member.flexure.*` 셋 not_applicable → not_evaluated(`member.reason.main_demand_zero_not_stated`); `member.bending_shear` pass → not_evaluated(비 0.4929 → reference); `not_evaluated` 에 `member.ne.main_demand_zero_not_stated`; `utilization` 그대로 |
+| combined angle (P)L/1000 — `Pu: 3` · `Mux: 0` · `Muy: 0`, 진술 없음 | 종합 `pass` true → **null**; `member.flexure.*` 셋 not_applicable → not_evaluated; `member.axial_bending` pass → not_evaluated(비 0.4671 → reference); `not_evaluated` 에 `member.ne.main_demand_zero_not_stated`; `utilization` 그대로 |
+
+두 사례는 진술(`zero_demand_stated: true`)을 더하면 옛 결과 그대로다. 새 시험: `test_review_1124_v8_fixes.test_main_demand_*`.
+옛 규칙을 적던 시험 둘을 고쳤다: `test_review_1123_fixes.test_fix2_angle_PL1000_*`(진술을 더해 PL/1000 갈래를 보고, 진술 없이는 `pass: null`), `test_review_1124_v6b_fixes.test_folded_design_checks_equal_the_result_pass_everywhere`(밝히지 않은 `Mu = 0` 의 휨은 not_evaluated, 진술하면 not_applicable).

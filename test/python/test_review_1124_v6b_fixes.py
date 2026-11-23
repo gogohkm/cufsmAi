@@ -184,7 +184,10 @@ def test_folded_design_checks_equal_the_result_pass_everywhere():
                 continue
             assert overall_verdict(r['design_checks']) == FOLD[r['pass']], (mt, P, M, V, W, r['pass'])
             if mt == 'flexure' and not M and (V or W):
-                assert _check(r, 'member.flexure.global')['verdict'] == 'not_applicable'
+                # 계약 §6.4(2026-11-24): 밝히지 않은 Mu = 0 은 주 소요 없음 — 휨은 미평가, 결과는 합격이 아니다
+                assert _check(r, 'member.flexure.global')['verdict'] == 'not_evaluated' and r['pass'] is not True
+                s = design_member(dict(p, zero_demand_stated=True))
+                assert _check(s, 'member.flexure.global')['verdict'] == 'not_applicable'
             n += 1
     assert n > 150, n
 

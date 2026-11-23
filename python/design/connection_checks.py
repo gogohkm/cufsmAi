@@ -85,6 +85,8 @@ def _scope_demote(checks: list, items: list, relevant) -> None:
 def build(result: dict, data: dict, V: float, T: float, params: dict | None = None) -> list:
     """result: _finish 가 만든 접합부 결과, data: _finish 가 떼어 둔 계산서 재료."""
     params = params or {}
+    from design.connections import main_demand_gap
+    gap = main_demand_gap(params, V, T)
     dm = result['design_method']
     checks = []
     by_id = {}
@@ -124,7 +126,13 @@ def build(result: dict, data: dict, V: float, T: float, params: dict | None = No
                       direction=direction, basis=item.get('basis'), assumed=True if item.get('assumed') else None,
                       steps_note=untraced)
         if dem is None:
-            if other is not None:
+            if other is not None and gap is not None and gap[0] == direction:
+                # 계약 §6.4: 밝힌 힘 방향의 소요가 없거나 밝히지 않은 0 — 해당 없음이 아니라 판정 없음
+                c = make_check(cid, verdict='not_evaluated', reason=(
+                    _nt('conn.reason.main_demand_not_given', inputs=gap[2]) if gap[1] == 'missing'
+                    else _nt('conn.reason.main_demand_zero_not_stated', inputs=gap[2])),
+                    reference={'capacity': q(cap_sym, cap, 'force')}, **common)
+            elif other is not None:
                 c = make_check(cid, verdict='not_applicable',
                                reason=_nt('conn.reason.no_demand_on_connection', text=_nt('conn.fragment.in_plane_shear') if direction == 'shear' else _nt('conn.fragment.axial_tension')), capacity=None,
                                reference={'capacity': q(cap_sym, cap, 'force')}, **common)

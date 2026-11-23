@@ -3004,9 +3004,29 @@ _KNOWN_KEYS = set(_J6_GEOMETRY_KEYS) | {
     'w1', 'w2', 'E', 'joint', 't_sheets', 'de', 'application', 'eccentric_tension', 'sidelap',
     'groove_type', 'te', 'R', 'h', 'process', 'd1', 'd2', 'R2', 'seam_orientation', 'Fuf', 'dar',
     'Pnot_test', 'HRC_p', 'alpha_w', 'alpha_b', 'j6_part2', 'j45_rational', 'joint_type',
+    'zero_demand_stated',
     # 상위 호출자(aisi_design/server)가 함께 보내는 키
     'member_type', 'units', 'action', 'section', 'props', 'dsm',
 }
+
+
+def main_demand_gap(params: dict, V: float, T: float):
+    """계약 §6.4 접합부의 주 소요: force_direction 을 밝히면 그 방향의 소요(shear: Vu 또는 Pu, tension: Tu 또는 Pu)가
+    주 소요다 — 없거나 밝히지 않은 0 이면 (방향, 'missing' | 'zero', 입력 이름 글). 밝히지 않으면 Vu · Tu 중 하나가
+    주 소요이고, 둘 다 없으면 평가한 검토가 없어 이미 판정 없음이다(None)."""
+    fd = params.get('force_direction')
+    if fd is None:
+        return None
+    fd = str(fd).strip().lower()
+    if fd not in ('shear', 'tension'):
+        return None
+    if (V if fd == 'shear' else T) > 0:
+        return None
+    key = 'Vu' if fd == 'shear' else 'Tu'
+    given = [k for k in (key, 'Pu') if params.get(k) is not None]
+    if given and params.get('zero_demand_stated') is True:
+        return None
+    return (fd, 'zero', ', '.join(given)) if given else (fd, 'missing', f'{key} (or Pu)')
 
 
 def design_connection(params: dict) -> dict:
@@ -3305,6 +3325,15 @@ def design_connection(params: dict) -> dict:
                             'interaction'))
     if V > 0 and T == 0:
         result['assumptions'].append(_nt('conn.assumption.tension_demand_not_given'))
+    # 계약 §6.4: 밝힌 힘 방향의 소요가 없으면 다른 방향만 평가한 결과는 합격이 아니다.
+    gap = main_demand_gap(params, V, T)
+    if gap is not None and checks:
+        fd, kind, txt = gap
+        why = (_nt('conn.reason.main_demand_not_given', inputs=txt) if kind == 'missing'
+               else _nt('conn.reason.main_demand_zero_not_stated', inputs=txt))
+        item = _ne('전단(면내) 강도' if fd == 'shear' else '인장(축방향) 강도', fd, why, 'scope')
+        result['not_evaluated'].append(item)
+        relevant.append(item)
 
     ratios = [c['ratio'] for c in checks if c['ratio'] is not None]
     result['checks'] = checks

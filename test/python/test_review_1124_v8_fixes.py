@@ -280,3 +280,63 @@ def test_V9a_06_a_comparison_reads_true_as_printed():
     import re
     a, b = [float(x) for x in re.findall(r'=\s*([0-9.]+)', e['text'])[:2]]
     assert a > b, e['text']
+
+
+# ---------------------------------------------------------------- 주 소요(계약 §6.4)
+
+_MSEC = dict(section_type='lippedc', H=8.0, B=2.5, D=0.75, t=0.068, r=0.1, Fy=50.0, Fu=65.0, design_method='LRFD',
+             KxLx=60.0, KyLy=60.0, KtLt=60.0, Lb=60.0, Cb=1.0)
+
+
+def _m(mt, **kw):
+    return design_member(dict(_MSEC, member_type=mt, **kw))
+
+
+def _ne_codes(r):
+    return [n['code'] for n in r['notices'] if n['kind'] == 'not_evaluated']
+
+
+def test_main_demand_flexure_cannot_pass_on_shear_alone():
+    """휨 부재의 주 소요는 Mu — 없으면(또는 밝히지 않은 0) 전단만 평가한 결과는 합격이 아니다(전에는 pass)."""
+    from design.checks import overall_verdict
+    r = _m('flexure', Vu=1.0)
+    assert r['pass'] is None and r['utilization_valid'] is False
+    assert 'member.ne.main_demand_not_given' in _ne_codes(r)
+    assert _c(r, 'member.flexure.local')['reason_code'] == 'member.reason.main_demand_not_given'
+    assert _c(r, 'member.shear')['verdict'] == 'pass'                          # 부 소요의 검토는 그대로
+    h2 = _c(r, 'member.bending_shear')                                         # Mu 를 쓰는 H2 는 미평가(값은 참고)
+    assert h2['verdict'] == 'not_evaluated' and h2['reference']['ratio'] is not None
+    assert overall_verdict(r['design_checks']) == 'not_evaluated'
+    z = _m('flexure', Mu=0, Vu=1.0)
+    assert z['pass'] is None and 'member.ne.main_demand_zero_not_stated' in _ne_codes(z)
+    s = _m('flexure', Mu=0, Vu=1.0, zero_demand_stated=True)                  # 「전단만」은 밝혀서 요청한다
+    assert s['pass'] is True and _c(s, 'member.flexure.local')['verdict'] == 'not_applicable'
+    none = _m('flexure')                                                       # 소요가 하나도 없으면 전과 같다
+    assert none['pass'] is None and 'member.ne.main_demand_not_given' not in _ne_codes(none)
+    assert _m('flexure', Mu=20.0)['pass'] is True
+
+
+def test_main_demand_combined_needs_the_axial_force_and_one_moment():
+    for kw in ({'Pu': 5.0}, {'Mux': 20.0}, {'Pu': 0, 'Mux': 20.0}, {'Pu': 5.0, 'Mux': 0, 'Muy': 0}):
+        r = _m('combined', **kw)
+        assert r['pass'] is None, kw                                             # 전에는 모두 pass
+        assert _c(r, 'member.axial_bending')['verdict'] == 'not_evaluated', kw
+    for kw in ({'Pu': 5.0, 'Mux': 20.0}, {'Pu': -5.0, 'Mux': 20.0}, {'Pu': 0, 'Mux': 20.0, 'zero_demand_stated': True}):
+        assert _m('combined', **kw)['pass'] is True, kw
+
+
+def test_main_demand_connection_with_a_stated_force_direction():
+    """접합부: force_direction 을 밝히면 그 방향의 소요가 주 소요 — 없으면 다른 방향만 평가한 결과는 합격이 아니다."""
+    from design.connections import design_connection
+    p = dict(connection_type='fillet_weld', design_method='ASD', Fy=50, Fu=65, t1=0.105, t2=0.060, weld_size=0.105,
+             weld_length=2.25, n=2, member_case='flat_sheet', Vu=4.0)
+    assert design_connection(p)['pass'] is True                                # 방향을 밝히지 않으면 Vu 가 주 소요
+    t = design_connection(dict(p, force_direction='tension'))
+    assert t['pass'] is None and t['verdict'] == 'NOT_CHECKED'
+    row = [c for c in t['design_checks'] if c['id'] == 'conn.tension_strength'][0]
+    assert row['verdict'] == 'not_evaluated'
+    assert [x['code'] for x in row['reason_parts']] == ['conn.reason.main_demand_not_given']
+    z = design_connection(dict(p, force_direction='tension', Tu=0))
+    assert z['pass'] is None
+    assert design_connection(dict(p, force_direction='tension', Tu=0, zero_demand_stated=True))['pass'] is True
+    assert design_connection(dict(p, Vu=None, Pu=4.0, force_direction='shear'))['pass'] is True

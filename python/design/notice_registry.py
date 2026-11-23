@@ -872,6 +872,18 @@ REGISTRY = {
         'template_ko': 'j6_part2 에 t 와 Fu 가 필요함',
         'params': {},
     },
+    'conn.reason.main_demand_not_given': {
+        'kind': 'reason',
+        'template': 'main demand not given: {inputs} — a connection result passes only when the demand in its force direction is given and evaluated (give it; an explicit zero needs zero_demand_stated = true)',
+        'template_ko': '주 소요 미입력: {inputs} — 접합부 결과는 그 힘 방향의 소요를 주고 평가했을 때만 합격할 수 있음 (값을 주거나, 0 이면 zero_demand_stated = true)',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'conn.reason.main_demand_zero_not_stated': {
+        'kind': 'reason',
+        'template': 'main demand {inputs} = 0 not stated — not taken as zero (state zero_demand_stated = true if meant)',
+        'template_ko': '주 소요 {inputs} = 0 을 밝히지 않음 — 0 으로 보지 않음 (그 뜻이면 zero_demand_stated = true)',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'conn.reason.member_case': {
         'kind': 'reason',
         'template': 'member_case 미입력',
@@ -2918,6 +2930,18 @@ REGISTRY = {
         'template_ko': 'I6.2.1 (Table I6.2.1-1 / 조건 (a)-(o) 밖)',
         'params': {},
     },
+    'member.ne.main_demand_not_given': {
+        'kind': 'not_evaluated',
+        'template': 'main demand not given: {inputs} — a member result passes only when its main demand is given and evaluated (give it; an explicit zero needs zero_demand_stated = true)',
+        'template_ko': '주 소요 미입력: {inputs} — 부재 결과는 주 소요를 주고 평가했을 때만 합격할 수 있음 (값을 주거나, 0 이면 zero_demand_stated = true)',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.main_demand_zero_not_stated': {
+        'kind': 'not_evaluated',
+        'template': 'main demand given as zero without a statement: {inputs} = 0 — to check only the other demands, state zero_demand_stated = true',
+        'template_ko': '주 소요를 밝힘 없이 0 으로 줌: {inputs} = 0 — 다른 소요만 검토하려면 zero_demand_stated = true 로 밝히십시오',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'member.ne.positive_region_lb_pos': {
         'kind': 'not_evaluated',
         'template': 'F positive region (Lb_pos not given — assumed fully braced)',
@@ -3212,6 +3236,12 @@ REGISTRY = {
         'template_ko': '§F4 는 원형 HSS 에 해당하지 않음 (§F2.3)',
         'params': {},
     },
+    'member.reason.fail_with_incomplete_demand': {
+        'kind': 'reason',
+        'template': 'fails with the demand given ({inputs} missing) — the full demand is not smaller, so the fail stands',
+        'template_ko': '준 소요로 불합격({inputs} 없음) — 전체 소요는 더 작지 않으므로 불합격은 그대로',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'member.reason.fcre_nonsymmetric': {
         'kind': 'reason',
         'template': 'shear-centre offset in both x and z (non-symmetric section) — §E2.4 or a rational elastic buckling stress (Fcre) is required',
@@ -3259,6 +3289,18 @@ REGISTRY = {
         'template': 'replaced by §I6.2.1 (Mn = R·Mnℓo) for this through-fastened C/Z member under uplift',
         'template_ko': '양력을 받는 이 관통 체결 C/Z 부재는 §I6.2.1 (Mn = R·Mnℓo)로 대체',
         'params': {},
+    },
+    'member.reason.main_demand_not_given': {
+        'kind': 'reason',
+        'template': 'main demand not given: {inputs} — this check needs it (give it; an explicit zero needs zero_demand_stated = true)',
+        'template_ko': '주 소요 미입력: {inputs} — 이 검토에 필요함 (값을 주거나, 0 이면 zero_demand_stated = true)',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.main_demand_zero_not_stated': {
+        'kind': 'reason',
+        'template': 'main demand {inputs} = 0 not stated — not taken as zero (state zero_demand_stated = true if meant)',
+        'template_ko': '주 소요 {inputs} = 0 을 밝히지 않음 — 0 으로 보지 않음 (그 뜻이면 zero_demand_stated = true)',
+        'params': {'inputs': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'member.reason.no_demand_in_combined_check': {
         'kind': 'reason',

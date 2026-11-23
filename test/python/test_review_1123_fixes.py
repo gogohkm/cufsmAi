@@ -42,7 +42,9 @@ def test_fix1_f2_equation_labels_are_S100_16_numbers():
 def test_fix2_angle_PL1000_is_evaluated_in_combined_and_not_in_compression():
     """§8.3.1-2: 조합 검토가 (P)L/1000 을 넣어 평가했으면 압축 쪽 '미평가' 알림을 판정에 옮기지 않는다.
     반대로, 압축 단독(조합을 하지 않은) 앵글은 여전히 미평가다."""
-    r = design_member(_case('combined angle (P)L/1000'))
+    # 계약 §6.4(2026-11-24): 이 사례는 Mux = Muy = 0 을 준다 — 진술이 있어야 0 이다(없으면 판정 없음)
+    assert design_member(_case('combined angle (P)L/1000'))['pass'] is None
+    r = design_member(dict(_case('combined angle (P)L/1000'), zero_demand_stated=True))
     assert r['pass'] is True and not r.get('not_evaluated'), r.get('not_evaluated')
     h = _check(r, 'member.axial_bending')
     assert h['verdict'] == 'pass'
