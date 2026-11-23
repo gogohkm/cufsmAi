@@ -1224,51 +1224,135 @@ V6-04 로 범위 밖이 된 항목의 `nominal` 이 값 → `null` (값은 `refe
 - 숫자 매개변수: `format(value, fmt)` — `conv` 가 `"r"` 면 `repr(value)` 를, `"s"` 면 `str(value)` 를 먼저(Python 의 f-string 과 같은 규칙; `fmt` 가 빈 글이면 Python `str(float)`). 글 매개변수(`quantity: null`, 이름 · 조항 · 목록 · 문장 조각): `value` 그대로. `fmt: "raw"`: 잘라 낸 글자 그대로.
 - 그 뒤 `unit_text` 가 있으면 `sep + unit_text` (US 단위 글자 — `in` · `ksi` · `kips` · `kip-in` · `°`).
 - **US 로 그리면 `text` · `text_ko` 와 글자까지 같다**(시험이 계약 사례 전부에서, 그리고 고정값 `test/python/notice_render_fixture.json` 192 쌍에서 확인). 호스트는 이 고정값을 읽어 자기 렌더러를 시험한다.
-- **SI 로 그릴 때:** `quantity` 가 길이 · 힘 · 응력 · 모멘트 … 인 숫자는 §3.2 로 바꾸고, `unit_text` 대신 그 물리량의 SI 단위 글자를 쓴다. `unit_text` 가 없는 물리량 매개변수(예: `t={t}` — 옛 글이 단위를 쓰지 않음)는 SI 에서 단위를 붙여야 한다(바꾼 수만 두면 읽는 이가 in 으로 읽는다). 자리수(`fmt`)는 US 의 것이다 — SI 자리수는 호스트가 정한다(§5 의 표시 자리와 같은 원칙). `dimensionless` · `count` · `angle` · `null` 은 바꾸지 않는다.
+- **SI 로 그릴 때:** `quantity` 가 길이 · 힘 · 응력 · 모멘트 … 인 숫자는 §3.2 로 바꾸고, `unit_text` 대신 그 물리량의 SI 단위 글자를 쓴다. `unit_text` 가 없는 물리량 매개변수(예: `t={t}` — 옛 글이 단위를 쓰지 않음)는 SI 에서 단위를 붙여야 한다(바꾼 수만 두면 읽는 이가 in 으로 읽는다). 자리수(`fmt`)는 US 의 것이다 — SI 자리수는 호스트가 정한다(§5 의 표시 자리와 같은 원칙). `dimensionless` · `count` · `angle` 은 바꾸지 않는다.
+- **`quantity` 가 `null` 인 매개변수 — 단위계와 무관하게 받은 그대로 그린다:** `value` 를 위 규칙대로(숫자면 `format(value, fmt)`, 글이면 그대로) 쓰고, `unit_text` 가 있으면 `sep + unit_text` 를 그대로 붙인다. 바꾸지도, 단위 글자를 갈지도, 숫자를 다시 자리 맞추지도 않는다 — SI 화면에서도 'ft' · 'kip*s^2/in^4' 가 그대로 나온다. `null` 은 글 매개변수(이름 · 조항 · 목록 · 문장 조각)이거나 §3.2 어휘에 없는 물리량이다(§16.7).
 
 ### 16.4 수
 
 - code 443: warning 178 · reason 111 · assumption 97 · not_evaluated 35 · scope 11 · fragment 11. 영역: member 156 · conn 126 · lap 39 · loads 33 · shear 25 · fsm_solver 12 · dsm 11 · file 11 · special 11 · fsm 5 · server 4 · cfsm 3 · plastic 3 · base_vectors 2 · solver 2.
 - 만드는 자리 464곳(`_nt(` 호출, 21 파일). 이은 글 · 머리 붙임 40곳.
 - 옛 글이 영어였던 것 215 (한국어 템플릿을 새로 씀), 한국어였던 것 228 (template = template_ko).
-- 계약 사례가 닿는 code 194, 가장자리 · 하중 사례까지 204. 닿지 않는 239 code 는 엔진 소스에 그 code 를 쓰는 자리가 있다(시험) — 입력 오류 · 드문 단면 · 파일 읽기 · cFSM 옵션 같은 갈래다. 모든 `_nt` 호출의 매개변수 이름이 등록표와 같다(정적 시험).
+- 계약 사례가 닿는 code 194, 가장자리 · 하중 사례까지 204. 닿지 않는 239 code 는 엔진 소스에 그 code 를 쓰는 자리가 있고(시험), 모든 `_nt` 호출의 매개변수 이름이 등록표와 같다(정적 시험) — 글을 그려 본 시험은 없는 갈래다:
+  - 부재 설계의 드문 입력 71 — 표 B4.1-1 적용한계 넘음 12, 냉간가공 · 비탄성 여유 · 해석식 대체(App. 1/2) 실패 · DSM 의 fy 불일치 15, 랩 구간 진술과 함께 준 Lb · Cb · dsm 4, 웹 크리플링 · H3 · G2 의 드문 갈래 12, 미평가 이름표 · 이유(no Pcrl · no Mcrd · 원형 HSS …) 18, 그 밖의 입력 오류(web_count · Cb 범위 · §E2.2 편심 · Fcre = 0) 10.
+  - 접합부의 드문 입력 56 — 용접(J2.2 · J2.3 · J2.6 의 joint 미지정 · 적용한계 밖 · 공정 표 · 여러 시트 · 사이드랩) 23, 볼트 · 나사 · PAF 의 미입력 · 범위 밖(App. A J3.4, d'w, Pnvs/Pnts, 게이지 · 행 · 알 수 없는 입력 키) 24, J6 파단의 member_case · 둘째 판 · Usl 9.
+  - FSM · cFSM · DSM 해석 옵션과 수치 갈래 32 — 고유치 풀이 · 조건 불량 · 비 S-S 길이방향 항 · cFSM 구속(fsm_solver 12, fsm 5), cFSM 기저 · 분류(cfsm 3, base_vectors 2), DSM 추출의 격자 · 기준 응력 · 단일 극소(dsm 10).
+  - 전단 · 웹 크리플링 표의 드문 갈래 18 — 내민 끝(Eq. G5-2) 적용한계, 표 G5-2/4/5 의 행 대용, §H3(a)(c) 조건.
+  - 랩 도구의 드문 갈래 16 — 패스너 강도 0 · 배치 불가 · 가정값 Pns, 랩 길이 미입력, 진술과 함께 준 Mnd.
+  - 하중 해석의 옵션 15 — 스탠딩심 지붕(S908 R), 거트 · 스터드의 약축 · 축력, RP17-2 범위, Wp 부호, 끝 지점의 랩.
+  - 특수 주제 11 — §A3.3.2 냉간가공 입력(코너 · 면적 · Fu/Fy), Table J6-1 계수 · A1.2 사용자 계수.
+  - 파일 읽기(옛 CUFSM .mat · 머리글 없는 JSON) 11.
+  - 서버 입력(kphi · kx 기본값, signature_ss 의 쓰지 않는 입력, 모든 길이 버림) 4.
+  - 진동 해석의 질량밀도 2, 소성 곡면의 정규화 3.
 
-### 16.5 용어표 (영어에서 옮긴 한국어 템플릿 — 한 개념에 한 낱말)
+### 16.5 용어표 — 한 곳: `python/design/glossary.py` (2026-11-24 오케스트레이터 결정: 붙여 쓰는 꼴)
 
-| 영어 | 한국어 | | 영어 | 한국어 |
-|---|---|---|---|---|
-| local buckling | 국부좌굴 | | required strength | 소요강도 |
-| distortional buckling | 뒤틀림좌굴 | | nominal strength | 공칭강도 |
-| lateral-torsional buckling | 횡비틀림좌굴 | | design / available strength | 설계강도 |
-| flexural buckling | 휨좌굴 | | limit state | 한계상태 |
-| flexural-torsional buckling | 휨비틀림좌굴 | | applicability limit | 적용한계 |
-| global buckling | 전체좌굴 | | scope | 적용범위 |
-| web crippling | 웹 크리플링 | | not evaluated / not given | 미평가 / 미입력 |
-| effective width | 유효폭 | | not applicable | 해당 없음 |
-| effective section modulus | 유효 단면계수 | | unbraced length | 비지지 길이 |
-| net section | 순단면 | | braced · bracing | 횡지지 · 가새 |
-| shear lag | 전단지연 | | half-wavelength | 반파장 |
-| block shear | 블록전단 | | signature curve | 서명곡선 |
-| rupture | 파단 | | load factor | 하중계수 |
-| bearing | 지압 | | lap · lapped section | 랩 · 겹친 단면 |
-| pull-over · pull-out | 풀오버 · 뽑힘 | | uplift | 양력 |
-| end distance · edge distance | 끝단 거리 · 연단 거리 | | (un)conservative | 보수측 · 비보수 |
+한 개념에 한 낱말, KDS 의 표기(붙여 씀). 검토 항목 이름(`name_ko`, §11)과 알림의 한국어 템플릿(옛 글이 한국어인 `template` 포함)이 이 표를 따른다. 표는 `design.glossary.TERMS` 하나이고, 아래는 그 사본이다. **시험**(`test_review_1124_notices.test_glossary_one_form_per_term`)이 이름과 템플릿 전부에서 오른쪽 열의 꼴(띄어 쓴 꼴 · 다른 말)을 찾으면 실패한다.
 
-조항 번호 · 식 번호 · 기호 · 입력 이름(`lap_restrained` …)과 Manual 인용문은 옮기지 않는다. 시험이 영어에서 옮긴 템플릿에 `국부 좌굴` · `뒤틀림 좌굴` · `횡 비틀림` · `횡좌굴` · `전단 지연` · `블록 전단` · `유효 폭` 이 없음을 확인한다. **맞지 않는 곳(고치지 않음):** 검토 항목의 `name_ko`(§11)는 띄어 쓴다(`국부 좌굴`, `뒤틀림 좌굴`, `블록 전단 파단`, `전단 지연`), `member.flexure.global` 은 `항복 및 횡좌굴`; 옛 한국어 알림 몇은 `뒤틀림 좌굴` 로 띄어 쓴다(바이트 그대로 두어야 해서). 하나로 맞추려면 `name_ko` 쪽을 고치는 것이 싸다.
+| 영어 | 한국어 | 쓰지 않는 꼴(정규식) |
+|---|---|---|
+| local buckling | 국부좌굴 | `국부\s+좌굴` |
+| distortional buckling | 뒤틀림좌굴 | `뒤틀림\s+좌굴` · `왜곡\s*좌굴` |
+| lateral-torsional buckling | 횡비틀림좌굴 | `횡\s+비틀림` · `횡비틀림\s+좌굴` · `횡좌굴` |
+| flexural buckling | 휨좌굴 | `휨\s+좌굴` |
+| torsional buckling | 비틀림좌굴 | `(?<![횡휨])비틀림\s+좌굴` |
+| flexural-torsional buckling | 휨비틀림좌굴 | `휨\s*-\s*비틀림` · `휨\s+비틀림\s*좌굴` |
+| global buckling | 전체좌굴 | `전체\s+좌굴` · `전체\s+탄성좌굴` |
+| web crippling | 웹 크리플링 |  |
+| effective width | 유효폭 | `유효\s+폭` |
+| effective section modulus | 유효단면계수 | `유효\s+단면\s*계수` · `단면\s+계수` |
+| net section | 순단면 | `순\s+단면` |
+| gross section | 총단면 | `총\s+단면` |
+| shear lag | 전단지연 | `전단\s+지연` |
+| block shear | 블록전단 | `블록\s+전단` |
+| block shear rupture | 블록전단파단 | `블록전단\s+파단` |
+| rupture | 파단 |  |
+| bearing | 지압 |  |
+| pull-over · pull-out | 풀오버 · 뽑힘 |  |
+| end distance | 끝단 거리 | `끝단거리` |
+| edge distance | 연단 거리 | `연단거리` |
+| unbraced length | 비지지 길이 | `비지지길이` |
+| required strength | 소요강도 | `소요\s+강도` |
+| nominal strength | 공칭강도 | `공칭\s+강도` |
+| design / available strength | 설계강도 · 가용강도 | `설계\s+강도` · `가용\s+강도` |
+| shear · tensile · compressive · flexural strength | 전단강도 · 인장강도 · 압축강도 · 휨강도 | `(?<![가-힣])(전단|인장|압축|휨)\s+강도` |
+| limit state | 한계상태 | `한계\s+상태` |
+| applicability limit | 적용한계 | `적용\s+한계` |
+| scope | 적용범위 | `적용\s+범위` |
+| half-wavelength | 반파장 | `반\s+파장` |
+| signature curve | 서명곡선 | `서명\s+곡선` |
+| load factor | 하중계수 | `하중\s+계수` |
+| not evaluated · not given · not applicable | 미평가 · 미입력 · 해당 없음 |  |
+| braced · bracing | 횡지지 · 가새 | `횡\s+지지` |
+| lap · lapped section | 랩 · 겹친 단면 |  |
+| uplift | 양력 |  |
+| conservative · unconservative | 보수측 · 비보수 |  |
+| reference only | 참고값 |  |
+
+- **「웹 크리플링」은 한 줄로 바꿀 수 있다:** `design.glossary.WEB_CRIPPLING`. 등록표 · 이름은 저장된 꼴 ('웹 크리플링')로 두고 `localize` 가 읽어 들일 때(알림 템플릿 · `checks._r`) 바꿔 넣는다. 그 꼴이 아닌 것(웹크리플링 · 웨브 크리플링 …)은 시험이 막는다. (주인이 「웨브 크리플링」을 고르면 이 한 줄과 바뀐 글의 부록.)
+- 조항 번호 · 식 번호 · 기호 · 입력 이름(`lap_restrained` …)과 Manual 인용문은 옮기지 않는다.
+- 「끝단 거리 · 연단 거리 · 비지지 길이」는 띄어 쓴 꼴이 표의 꼴이다 — 접합부 한계상태 이름(`끝단 거리 (J3.2)` …)이 엔진의 식별 이름(`checks.connection_check_id`)이라 그쪽을 바꾸지 않는다.
+- 알림이 아닌 옛 글(옛 `steps[].formula` · `steps[].name` 의 한국어, 코드 주석)은 이 결정의 범위 밖이다.
+- 바뀐 옛 글: §16.9.
 
 ### 16.6 이름표 안의 숫자
 
 이름표 글은 그대로 두고 옆에 숫자를 싣는다.
 - 랩 `fastener_label` ('Bolt d=0.500 in', 'Screw #10') → `fastener_label_parts: {template, template_ko, params, values}` — 볼트 `Bolt d={d}` (`d`: length, `.3f`, `in`), 나사 `Screw #{gauge}`(게이지는 글) + `values` 에 지름 `d`(length).
-- §I6.2.1 조건(`analyze_loads` 의 R 조건 `conditions[]`, 이름표 '(a) d <= 12 in.' …) → `limits: [{op, value, (times), (accepted)}]`, `value_quantity`, `value_unit_text`. 상수표 `design.loads.bracing.I621_LIMITS`. (h) 경간 '≤ 33 ft' 는 `quantity: null`, `value_unit_text: 'ft'` — ft 는 어휘에 없다(§16.7).
+- §I6.2.1 조건(`analyze_loads` 의 R 조건 `conditions[]`, 이름표 '(a) d <= 12 in.' …) → `limits: [{op, value, (times), (accepted)}]`, `value_quantity`, `value_unit_text`. 상수표 `design.loads.bracing.I621_LIMITS`. (h) 경간 '≤ 33 ft' 는 이름표 · 값이 ft 라 `quantity: null`, `unit_text` · `value_unit_text: 'ft'` 로 그대로 두고, **같은 값을 엔진의 길이 단위로 함께 싣는다** — `limits[0].as_length: {value: 396.0, quantity: 'length', unit_text: 'in'}`, 조건의 `value_as_length: {value: 경간 × 12, quantity: 'length', unit_text: 'in'}` (1 ft = 12 in, 정확). SI 화면은 `as_length` 를 §3.2 로 m 에 바꿔 보이면 된다 — 새 어휘가 필요 없다.
 - 찾았지만 바꾸지 않은 것: 옛 `steps[].formula` · `steps[].name` 글(예: 'Positive-moment region (Lb_pos = 120.0 in, Cb = 1.00)', 'Fastener Strength (Bolt d=0.500 in)') — 옛 계산서 글이고, 같은 숫자는 `design_checks` 의 단계에 물리량과 함께 있다.
 
 ### 16.7 어휘에 없는 물리량 (새로 짓지 않음)
 
-알림 매개변수에는 없다(kip-ft · plf · psf · ft 는 알림 글에 자리표 뒤 단위로 나오지 않는다). 이름표 · 글 매개변수로 남은 것: §I6.2.1 (h) 경간 한계 `ft`, 진동 해석 경고의 질량밀도 `rho`(kip·s²/in⁴ — `quantity: null`). 서명곡선 극소 목록 `{value}`(길이의 목록)는 글 매개변수다(목록은 물리량을 싣지 않는다).
+알림 매개변수에는 없다(kip-ft · plf · psf · ft 는 알림 글에 자리표 뒤 단위로 나오지 않는다). 이름표 · 글 매개변수로 남은 것: §I6.2.1 (h) 경간 한계 `ft`(→ 위의 `as_length` 로 길이로도 실린다), 진동 해석 경고의 질량밀도 `rho`(kip·s²/in⁴ — `quantity: null`, §16.3 의 규칙대로 받은 그대로). **호스트 작성자에게 — 어휘에 더할 후보:** `mass_density` (US `kip·s²/in⁴`, SI `kg/m³`; 1 kip·s²/in⁴ = 4448.2216 N·s² / (0.0254 m)⁴ ≈ 1.06870 × 10¹⁰ kg/m³). 엔진은 이 환산을 하지 않는다 — 어휘에 들어오면 등록표의 `rho` 에 그 이름을 단다. 서명곡선 극소 목록 `{value}`(길이의 목록)는 글 매개변수다(목록은 물리량을 싣지 않는다).
 
 ### 16.8 남은 것
 
 - 옛 글이 한국어였던 228 code 는 `template` 이 한국어다 — 영어 템플릿은 없다(옛 글이 영어인 것만 영어). 영어 화면이 필요하면 `template_en` 을 따로 더해야 한다.
 - 글 매개변수 가운데 문장 조각이 엔진 안의 글(예외 메시지 `{exc}`, 하위 결과의 이유 `{reason}`, Manual 인용 `{manual_quote}`)이면 한국어 글에도 그 원문이 들어간다.
 - 스레드 고정(§6.1)은 알림을 내지 않는다(`selftest` 의 `numeric_threads` 로만).
+
+### 16.9 부록 — 용어표로 바뀐 옛 글 (2026-11-24)
+
+§16.5 의 결정으로 **낱말만** 바꿨다(띄어쓰기, 「왜곡좌굴」 → 「뒤틀림좌굴」, 「횡좌굴」 → 「횡비틀림좌굴」, 「전체 탄성좌굴」 → 「탄성 전체좌굴」). 숫자 · 뜻 · 자리표는 그대로다. 고정한 글이 있는 쪽은 이 까닭으로 다시 받으면 된다. 영어 글 · 값 · 판정은 바뀌지 않았다.
+
+**알림 — 옛 글(한국어 원문, `template` = `template_ko`)이 바뀐 code 11:**
+
+| code | 옛 템플릿 (옛 글) | 새 템플릿 |
+|---|---|---|
+| `conn.assumption.j2_3_2_1_de_capped_0_55d` | J2.3.2.1: de = 0.7d − 1.5t = {de_eq} 을 0.55d = {value} 로 낮춤 — 원문 Eq. J2.3.2.1-3 에 없는 사내 보수 상한(A1.2, 아크 스폿 Eq. J2.2.2.1-5 와 Figure J2.3.2.2-1 의 주석을 따름). 용접 너겟 전단 강도가 원문보다 낮다(보수). | J2.3.2.1: de = 0.7d − 1.5t = {de_eq} 을 0.55d = {value} 로 낮춤 — 원문 Eq. J2.3.2.1-3 에 없는 사내 보수 상한(A1.2, 아크 스폿 Eq. J2.2.2.1-5 와 Figure J2.3.2.2-1 의 주석을 따름). 용접 너겟 전단강도가 원문보다 낮다(보수). |
+| `lap.warning.f4_f4_lap_restrained_true` | 뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림 좌굴에 충분히 구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다. | 뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림좌굴에 충분히 구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다. |
+| `lap.warning.j6_3_lap_j6` | Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0 | Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0 |
+| `lap.warning.lap_mn_se_fy` | Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다. | Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다. |
+| `lap.warning.se_lap` | Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요. | Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요. |
+| `lap.warning.sf_only_reference` | Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요. | Sf(총단면계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요. |
+| `member.assumption.e2_2_e2_ex_kyly_ry` | §E2.2: 전단중심 편심이 z 방향 — 대칭축을 z 로 보고 σex(대칭축)=π²E/(KyLy/ry)², σey=π²E/(KxLx/rx)², xo=\|Zs−zcg\| 로 휨-비틀림좌굴을 산정했습니다. | §E2.2: 전단중심 편심이 z 방향 — 대칭축을 z 로 보고 σex(대칭축)=π²E/(KyLy/ry)², σey=π²E/(KxLx/rx)², xo=\|Zs−zcg\| 로 휨비틀림좌굴을 산정했습니다. |
+| `member.warning.a3_3_2_a3_fy_mnl_mne` | §A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다. | §A3.3.2: Fy 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다. |
+| `member.warning.a3_3_2_a3_fya_virgin_fy` | §A3.3.2: Fya 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키므로 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다. | §A3.3.2: Fya 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키므로 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다. |
+| `member.warning.e2_2_e2_xo_xo_xs` | §E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요. | §E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요. |
+| `member.warning.e2_e2_fcre_fcre_pne` | §E2: 전체 탄성좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오. | §E2: 탄성 전체좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오. |
+
+**알림 — 한국어 템플릿만 바뀐 code 1** (옛 글은 영어 — 그대로):
+
+| code | 옛 template_ko | 새 template_ko |
+|---|---|---|
+| `lap.reason.se_effective_section_modulus` | Se (유효 단면계수) 미입력 | Se (유효단면계수) 미입력 |
+
+**검토 항목 이름 `name_ko` 15:**
+
+| 검토 항목 id | 옛 name_ko | 새 name_ko |
+|---|---|---|
+| `member.applicability.b4` | 적용 한계 (표 B4.1-1) | 적용한계 (표 B4.1-1) |
+| `member.compression.global` | 항복 및 전체 좌굴 | 항복 및 전체좌굴 |
+| `member.compression.local` | 국부 좌굴 | 국부좌굴 |
+| `member.compression.distortional` | 뒤틀림 좌굴 | 뒤틀림좌굴 |
+| `member.flexure.global` | 항복 및 횡좌굴 | 항복 및 횡비틀림좌굴 |
+| `member.flexure.local` | 국부 좌굴 | 국부좌굴 |
+| `member.flexure.distortional` | 뒤틀림 좌굴 | 뒤틀림좌굴 |
+| `conn.j6.tension_rupture` | 순단면 인장 파단 (전단 지연) | 순단면 인장 파단 (전단지연) |
+| `conn.j6.block_shear` | 블록 전단 파단 | 블록전단파단 |
+| `conn.j6.block_shear.part2` | 블록 전단 파단 — 두 번째 판 | 블록전단파단 — 두 번째 판 |
+| `conn.scope` | 적용 범위 (두께 · 패스너 지름) | 적용범위 (두께 · 패스너 지름) |
+| `conn.shear_strength` | 면내 전단 강도 (평가된 한계상태) | 면내 전단강도 (평가된 한계상태) |
+| `conn.tension_strength` | 축방향 인장 강도 (평가된 한계상태) | 축방향 인장강도 (평가된 한계상태) |
+| `lap.flexure.distortional` | 랩 구간 뒤틀림 좌굴 (2겹) | 랩 구간 뒤틀림좌굴 (2겹) |
+| `lap.block_shear` | 랩 패스너 무리 — 블록 전단 파단 | 랩 패스너 무리 — 블록전단파단 |

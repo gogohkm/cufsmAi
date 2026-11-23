@@ -73,36 +73,37 @@ BUCKLING_METHODS = (
 
 # ---------------------------------------------------------------- 등록표
 # 이름(name · name_ko)은 이 표 한 곳에만 둔다 — 화면 · MCP 는 여기서 받아 쓴다(2026-11-23 오케스트레이터가
-# 표를 그대로 채택). 'member.flexure.global' 의 「횡좌굴」은 승인된 화면 시안의 말이다. 기준의 정식 용어는
-# 「횡비틀림좌굴」(lateral-torsional buckling)이며, 바꾸려면 이 표의 name_ko 하나만 고치면 된다.
+# 표를 그대로 채택). name_ko 의 말은 용어표(design/glossary.py, 계약 §16.5)를 따른다 — 붙여 쓰는 꼴
+# (국부좌굴 · 횡비틀림좌굴 · 블록전단파단 …, 2026-11-24 오케스트레이터 결정). 시험이 어긋난 꼴을 잡는다.
 
 def _r(clause, equations, name, name_ko, group):
-    return {'clause': clause, 'equations': list(equations), 'name': name, 'name_ko': name_ko,
+    from design.glossary import localize
+    return {'clause': clause, 'equations': list(equations), 'name': name, 'name_ko': localize(name_ko),
             'group': group}
 
 
 REGISTRY = {
     # ---- 부재 (Chapters B, D – I)
     'member.applicability.b4': _r('B4.1', ('Table B4.1-1',),
-                                  'Dimensional limits for Chapters E–H factors', '적용 한계 (표 B4.1-1)',
+                                  'Dimensional limits for Chapters E–H factors', '적용한계 (표 B4.1-1)',
                                   'member.applicability'),
     'member.tension.yielding': _r('D2', ('D2-1',), 'Yielding of gross section', '총단면 항복',
                                   'member.tension'),
     'member.tension.rupture': _r('D3', ('D3-1',), 'Rupture of net section', '순단면 파단', 'member.tension'),
     'member.compression.global': _r('E2', ('E2-1', 'E2-2', 'E2-3', 'E2-4', 'E2.1-1', 'E2.2-1', 'E2.2-3',
                                            'E2.2-5'),
-                                    'Yielding and global buckling', '항복 및 전체 좌굴', 'member.compression'),
+                                    'Yielding and global buckling', '항복 및 전체좌굴', 'member.compression'),
     'member.compression.local': _r('E3.2.1', ('E3.2.1-1', 'E3.2.1-2', 'E3.2.1-3'),
-                                   'Local buckling', '국부 좌굴', 'member.compression'),
+                                   'Local buckling', '국부좌굴', 'member.compression'),
     'member.compression.distortional': _r('E4.1', ('E4.1-1', 'E4.1-2', 'E4.1-3', 'E4.1-4'),
-                                          'Distortional buckling', '뒤틀림 좌굴', 'member.compression'),
+                                          'Distortional buckling', '뒤틀림좌굴', 'member.compression'),
     'member.flexure.global': _r('F2', ('F2.1-1', 'F2.1-3', 'F2.1-4', 'F2.1-5', 'F2.1.1-1', 'F2.1.3-1',
                                        'F2.1.4-1', 'F2.1.4-2', 'F2.3-1', 'F2.4.2-1'),
-                                'Yielding and lateral-torsional buckling', '항복 및 횡좌굴', 'member.flexure'),
+                                'Yielding and lateral-torsional buckling', '항복 및 횡비틀림좌굴', 'member.flexure'),
     'member.flexure.local': _r('F3.2.1', ('F3.2.1-1', 'F3.2.1-2', 'F3.2.1-3', 'F3.2.3-1'),
-                               'Local buckling', '국부 좌굴', 'member.flexure'),
+                               'Local buckling', '국부좌굴', 'member.flexure'),
     'member.flexure.distortional': _r('F4.1', ('F4.1-1', 'F4.1-2', 'F4.1-3', 'F4.1-4', 'F4.3-1'),
-                                      'Distortional buckling', '뒤틀림 좌굴', 'member.flexure'),
+                                      'Distortional buckling', '뒤틀림좌굴', 'member.flexure'),
     'member.flexure.uplift_r': _r('I6.2.1', ('I6.2.1-1',),
                                   'Flexure of through-fastened C/Z under uplift (R factor)',
                                   '관통 체결 C·Z 양력 휨 (R 계수)', 'member.flexure'),
@@ -194,16 +195,16 @@ REGISTRY = {
     'conn.j6.shear_rupture': _r('J6.1', ('J6.1-1', 'J6.1-2'), 'Shear rupture', '전단 파단', 'conn.shear'),
     'conn.j6.tension_rupture': _r('J6.2', ('J6.2-1', 'J6.2-3', 'J6.2-4', 'J6.2-5', 'J6.2-6', 'J6.2-7',
                                            'J6.2-8'),
-                                  'Tension rupture of net section (shear lag)', '순단면 인장 파단 (전단 지연)',
+                                  'Tension rupture of net section (shear lag)', '순단면 인장 파단 (전단지연)',
                                   'conn.shear'),
-    'conn.j6.block_shear': _r('J6.3', ('J6.3-1', 'J6.3-2'), 'Block shear rupture', '블록 전단 파단',
+    'conn.j6.block_shear': _r('J6.3', ('J6.3-1', 'J6.3-2'), 'Block shear rupture', '블록전단파단',
                               'conn.shear'),
     'conn.j6.shear_rupture.part2': _r('J6.1', ('J6.1-1', 'J6.1-2'), 'Shear rupture — second part',
                                       '전단 파단 — 두 번째 판', 'conn.shear'),
     'conn.j6.tension_rupture.part2': _r('J6.2', ('J6.2-1',), 'Tension rupture — second part',
                                         '순단면 인장 파단 — 두 번째 판', 'conn.shear'),
     'conn.j6.block_shear.part2': _r('J6.3', ('J6.3-1', 'J6.3-2'), 'Block shear rupture — second part',
-                                    '블록 전단 파단 — 두 번째 판', 'conn.shear'),
+                                    '블록전단파단 — 두 번째 판', 'conn.shear'),
     'conn.j6.inputs': _r('J6', (), 'Rupture checks — required geometry', '파단 검토 — 필요한 기하',
                          'conn.shear'),
     'conn.member.tension_yield': _r('D2', ('D2-1',), 'Connected member — tension yielding',
@@ -212,12 +213,12 @@ REGISTRY = {
                                       '접합 부재 — 순단면 파단', 'conn.shear'),
     'conn.member.tension': _r('D2', ('D2-1', 'D3-1'), 'Connected member — tension (Chapter D)',
                               '접합 부재 — 인장 (D 장)', 'conn.shear'),
-    'conn.scope': _r('J1', (), 'Scope of Chapter J (thickness, fastener size)', '적용 범위 (두께 · 패스너 지름)',
+    'conn.scope': _r('J1', (), 'Scope of Chapter J (thickness, fastener size)', '적용범위 (두께 · 패스너 지름)',
                      'conn.scope'),
     'conn.shear_strength': _r('J1', (), 'In-plane shear strength (any verified limit state)',
-                              '면내 전단 강도 (평가된 한계상태)', 'conn.scope'),
+                              '면내 전단강도 (평가된 한계상태)', 'conn.scope'),
     'conn.tension_strength': _r('J1', (), 'Out-of-plane tension strength (any verified limit state)',
-                                '축방향 인장 강도 (평가된 한계상태)', 'conn.scope'),
+                                '축방향 인장강도 (평가된 한계상태)', 'conn.scope'),
     'conn.out_of_plane_tension': _r('J1', (), 'Out-of-plane tension of this connection type',
                                     '면외 인장 (이 접합 유형)', 'conn.tension'),
     'conn.shear_tension': _r('J1', (), 'Combined shear and tension (not implemented for this type)',
@@ -269,11 +270,11 @@ REGISTRY = {
     'lap.flexure.local': _r('F3.1', ('F3.1-1',), 'Lap flexure — two members, Se·Fy', '랩 구간 휨 (2겹, Se·Fy)',
                             'lap.flexure'),
     'lap.flexure.distortional': _r('F4.1', ('F4.1-2',), 'Lap flexure — distortional, two members',
-                                   '랩 구간 뒤틀림 좌굴 (2겹)', 'lap.flexure'),
+                                   '랩 구간 뒤틀림좌굴 (2겹)', 'lap.flexure'),
     'lap.bending_shear': _r('H2', ('H2-1',), 'Lap combined bending and shear', '랩 구간 휨 + 전단',
                             'lap.flexure'),
     'lap.block_shear': _r('J6.3', ('J6.3-1', 'J6.3-2'), 'Lap fasteners — block shear rupture of the fastener group',
-                          '랩 패스너 무리 — 블록 전단 파단', 'lap.fasteners'),
+                          '랩 패스너 무리 — 블록전단파단', 'lap.fasteners'),
 }
 
 # 접합부 limit_states / not_evaluated / interaction / detailing 의 엔진 이름 → id.

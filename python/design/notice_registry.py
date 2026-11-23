@@ -82,8 +82,8 @@ REGISTRY = {
     },
     'conn.assumption.j2_3_2_1_de_capped_0_55d': {
         'kind': 'assumption',
-        'template': 'J2.3.2.1: de = 0.7d − 1.5t = {de_eq} 을 0.55d = {value} 로 낮춤 — 원문 Eq. J2.3.2.1-3 에 없는 사내 보수 상한(A1.2, 아크 스폿 Eq. J2.2.2.1-5 와 Figure J2.3.2.2-1 의 주석을 따름). 용접 너겟 전단 강도가 원문보다 낮다(보수).',
-        'template_ko': 'J2.3.2.1: de = 0.7d − 1.5t = {de_eq} 을 0.55d = {value} 로 낮춤 — 원문 Eq. J2.3.2.1-3 에 없는 사내 보수 상한(A1.2, 아크 스폿 Eq. J2.2.2.1-5 와 Figure J2.3.2.2-1 의 주석을 따름). 용접 너겟 전단 강도가 원문보다 낮다(보수).',
+        'template': 'J2.3.2.1: de = 0.7d − 1.5t = {de_eq} 을 0.55d = {value} 로 낮춤 — 원문 Eq. J2.3.2.1-3 에 없는 사내 보수 상한(A1.2, 아크 스폿 Eq. J2.2.2.1-5 와 Figure J2.3.2.2-1 의 주석을 따름). 용접 너겟 전단강도가 원문보다 낮다(보수).',
+        'template_ko': 'J2.3.2.1: de = 0.7d − 1.5t = {de_eq} 을 0.55d = {value} 로 낮춤 — 원문 Eq. J2.3.2.1-3 에 없는 사내 보수 상한(A1.2, 아크 스폿 Eq. J2.2.2.1-5 와 Figure J2.3.2.2-1 의 주석을 따름). 용접 너겟 전단강도가 원문보다 낮다(보수).',
         'params': {'de_eq': {'quantity': 'length', 'conv': None, 'spec': '.4f', 'unit': 'in', 'sep': ' '}, 'value': {'quantity': 'length', 'conv': None, 'spec': '.4f', 'unit': 'in', 'sep': ' '}},
     },
     'conn.assumption.j2_5_j2_load_direction': {
@@ -1097,7 +1097,7 @@ REGISTRY = {
     'lap.reason.se_effective_section_modulus': {
         'kind': 'reason',
         'template': 'Se (effective section modulus) not given',
-        'template_ko': 'Se (유효 단면계수) 미입력',
+        'template_ko': 'Se (유효단면계수) 미입력',
         'params': {},
     },
     'lap.reason.section_shear_strength_vn': {
@@ -1126,8 +1126,8 @@ REGISTRY = {
     },
     'lap.warning.f4_f4_lap_restrained_true': {
         'kind': 'warning',
-        'template': '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림 좌굴에 충분히 구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.',
-        'template_ko': '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림 좌굴에 충분히 구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.',
+        'template': '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림좌굴에 충분히 구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.',
+        'template_ko': '뒤틀림좌굴(§F4): lap_restrained = true — 사용자가 겹친 부분이 횡비틀림 · 뒤틀림좌굴에 충분히 구속된다고 밝혔으므로(Manual II-1A / II-2A) §F4 검토를 하지 않았습니다.',
         'params': {},
     },
     'lap.warning.f4_f4_mnd_mcrd_lap': {
@@ -1210,14 +1210,14 @@ REGISTRY = {
     },
     'lap.warning.j6_3_lap_j6': {
         'kind': 'warning',
-        'template': 'Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0',
-        'template_ko': 'Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0',
+        'template': 'Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0',
+        'template_ko': 'Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0',
         'params': {'ratio_bs': {'quantity': 'dimensionless', 'conv': None, 'spec': '.2f', 'unit': None, 'sep': ''}},
     },
     'lap.warning.lap_mn_se_fy': {
         'kind': 'warning',
-        'template': 'Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.',
-        'template_ko': 'Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.',
+        'template': 'Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.',
+        'template_ko': 'Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.',
         'params': {},
     },
     'lap.warning.lap_mu_mn_dcr': {
@@ -1246,14 +1246,14 @@ REGISTRY = {
     },
     'lap.warning.se_lap': {
         'kind': 'warning',
-        'template': 'Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.',
-        'template_ko': 'Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.',
+        'template': 'Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.',
+        'template_ko': 'Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.',
         'params': {},
     },
     'lap.warning.sf_only_reference': {
         'kind': 'warning',
-        'template': 'Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.',
-        'template_ko': 'Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.',
+        'template': 'Sf(총단면계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.',
+        'template_ko': 'Sf(총단면계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.',
         'params': {},
     },
     'lap.warning.transfer_capacity_dcr': {
@@ -1480,8 +1480,8 @@ REGISTRY = {
     },
     'member.assumption.e2_2_e2_ex_kyly_ry': {
         'kind': 'assumption',
-        'template': '§E2.2: 전단중심 편심이 z 방향 — 대칭축을 z 로 보고 σex(대칭축)=π²E/(KyLy/ry)², σey=π²E/(KxLx/rx)², xo=|Zs−zcg| 로 휨-비틀림좌굴을 산정했습니다.',
-        'template_ko': '§E2.2: 전단중심 편심이 z 방향 — 대칭축을 z 로 보고 σex(대칭축)=π²E/(KyLy/ry)², σey=π²E/(KxLx/rx)², xo=|Zs−zcg| 로 휨-비틀림좌굴을 산정했습니다.',
+        'template': '§E2.2: 전단중심 편심이 z 방향 — 대칭축을 z 로 보고 σex(대칭축)=π²E/(KyLy/ry)², σey=π²E/(KxLx/rx)², xo=|Zs−zcg| 로 휨비틀림좌굴을 산정했습니다.',
+        'template_ko': '§E2.2: 전단중심 편심이 z 방향 — 대칭축을 z 로 보고 σex(대칭축)=π²E/(KyLy/ry)², σey=π²E/(KxLx/rx)², xo=|Zs−zcg| 로 휨비틀림좌굴을 산정했습니다.',
         'params': {},
     },
     'member.assumption.e2_section_type_e2_f2': {
@@ -2026,14 +2026,14 @@ REGISTRY = {
     },
     'member.warning.a3_3_2_a3_fy_mnl_mne': {
         'kind': 'warning',
-        'template': '§A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
-        'template_ko': '§A3.3.2: Fy 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
+        'template': '§A3.3.2: Fy 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
+        'template_ko': '§A3.3.2: Fy 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
         'params': {},
     },
     'member.warning.a3_3_2_a3_fya_virgin_fy': {
         'kind': 'warning',
-        'template': '§A3.3.2: Fya 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키므로 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
-        'template_ko': '§A3.3.2: Fya 응력 수준에서 국부 또는 왜곡좌굴이 강도를 감소시키므로 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
+        'template': '§A3.3.2: Fya 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키므로 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
+        'template_ko': '§A3.3.2: Fya 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키므로 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.',
         'params': {},
     },
     'member.warning.b3_3_b3_b4_b4_chapters': {
@@ -2086,8 +2086,8 @@ REGISTRY = {
     },
     'member.warning.e2_2_e2_xo_xo_xs': {
         'kind': 'warning',
-        'template': '§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.',
-        'template_ko': '§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.',
+        'template': '§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.',
+        'template_ko': '§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.',
         'params': {},
     },
     'member.warning.e2_4_e2': {
@@ -2098,8 +2098,8 @@ REGISTRY = {
     },
     'member.warning.e2_e2_fcre_fcre_pne': {
         'kind': 'warning',
-        'template': '§E2: 전체 탄성좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오.',
-        'template_ko': '§E2: 전체 탄성좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오.',
+        'template': '§E2: 탄성 전체좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오.',
+        'template_ko': '§E2: 탄성 전체좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오.',
         'params': {'cutwp_note': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'member.warning.e3_e3_pcrl_pnl_pne': {

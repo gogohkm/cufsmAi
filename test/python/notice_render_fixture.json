@@ -937,9 +937,9 @@
    "code": "lap.reason.se_effective_section_modulus",
    "params": [],
    "template": "Se (effective section modulus) not given",
-   "template_ko": "Se (유효 단면계수) 미입력",
+   "template_ko": "Se (유효단면계수) 미입력",
    "text": "Se (effective section modulus) not given",
-   "text_ko": "Se (유효 단면계수) 미입력"
+   "text_ko": "Se (유효단면계수) 미입력"
   },
   {
    "code": "lap.scope.j6_3_j6_block_shear_lap",
@@ -1160,18 +1160,18 @@
      "value": 1.0467964054571033
     }
    ],
-   "template": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0",
-   "template_ko": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0",
-   "text": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: 1.05 > 1.0",
-   "text_ko": "Lap 패스너 무리 블록 전단(§J6.3, 장력면 무시 하한) 초과: 1.05 > 1.0"
+   "template": "Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0",
+   "template_ko": "Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: {ratio_bs} > 1.0",
+   "text": "Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: 1.05 > 1.0",
+   "text_ko": "Lap 패스너 무리 블록전단(§J6.3, 장력면 무시 하한) 초과: 1.05 > 1.0"
   },
   {
    "code": "lap.warning.lap_mn_se_fy",
    "params": [],
-   "template": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
-   "template_ko": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
-   "text": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
-   "text_ko": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림 좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다."
+   "template": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
+   "template_ko": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
+   "text": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다.",
+   "text_ko": "Lap 구간 휨(Mnℓ = Se·Fy)은 겹친 부분이 횡비틀림좌굴에 구속된다는 Manual II-1A / II-2A 가정에 선다 — lap_restrained = true 로 그 가정을 밝히지 않아 판정하지 않습니다."
   },
   {
    "code": "lap.warning.lap_mu_mn_dcr",
@@ -1213,18 +1213,18 @@
   {
    "code": "lap.warning.se_lap",
    "params": [],
-   "template": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
-   "template_ko": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
-   "text": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
-   "text_ko": "Se(유효 단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요."
+   "template": "Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
+   "template_ko": "Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
+   "text": "Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.",
+   "text_ko": "Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요."
   },
   {
    "code": "lap.warning.sf_only_reference",
    "params": [],
-   "template": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
-   "template_ko": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
-   "text": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
-   "text_ko": "Sf(총단면 계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요."
+   "template": "Sf(총단면계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
+   "template_ko": "Sf(총단면계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
+   "text": "Sf(총단면계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요.",
+   "text_ko": "Sf(총단면계수)만 입력 — 국부좌굴을 반영하지 않은 참고값만 계산했고 휨 판정은 하지 않음. Se 를 입력하세요."
   },
   {
    "code": "lap.warning.transfer_capacity_dcr",
@@ -2300,10 +2300,10 @@
   {
    "code": "member.warning.e2_2_e2_xo_xo_xs",
    "params": [],
-   "template": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
-   "template_ko": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
-   "text": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
-   "text_ko": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨-비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요."
+   "template": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
+   "template_ko": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
+   "text": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요.",
+   "text_ko": "§E2.2: 전단중심 편심 xo를 확인할 수 없어(xo=0, Xs/xcg 미제공) 휨비틀림좌굴이 평가되지 않았습니다. 단축대칭 개단면(C/hat/track/angle)에서는 Pne가 과대평가될 수 있으므로 xo(또는 Xs, xcg)를 제공하세요."
   },
   {
    "code": "member.warning.e2_4_e2",

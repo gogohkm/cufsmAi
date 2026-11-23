@@ -19,6 +19,12 @@ import math
 import re
 
 from design.notice_registry import REGISTRY, KINDS
+from design.glossary import localize
+
+# 용어표의 한 줄(예: 웹 크리플링)을 바꾸면 템플릿에도 — 저장된 꼴과 같으면 아무것도 바뀌지 않는다(계약 §16.5)
+for _e in REGISTRY.values():
+    _e['template'] = localize(_e['template'])
+    _e['template_ko'] = localize(_e['template_ko'])
 
 _PH = re.compile(r'\{\{|\}\}|\{([A-Za-z_]\w*)\}')
 _HANGUL = re.compile(r'[가-힣]')

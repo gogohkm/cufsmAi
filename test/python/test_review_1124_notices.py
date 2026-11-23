@@ -28,8 +28,6 @@ FIXTURE = os.path.join(HERE, 'notice_render_fixture.json')
 CODE_RE = re.compile(r'^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9_]*$')
 PH = re.compile(r'\{\{|\}\}|\{([A-Za-z_]\w*)\}')
 HANGUL = re.compile('[가-힣]')
-# 용어표(계약 §16.5)에서 쓰지 않기로 한 낱말 — 영어에서 옮긴 한국어 템플릿에만(옛 한국어 글은 바이트 그대로 둔다)
-AVOID = ('국부 좌굴', '뒤틀림 좌굴', '횡 비틀림', '횡좌굴', '전단 지연', '블록 전단', '유효 폭')
 
 
 # ------------------------------------------------------------------ 렌더러 (계약 §16.3 — 호스트가 옮겨 쓸 규칙)
@@ -211,11 +209,25 @@ def test_registry_shape():
                                      'moment_of_inertia', 'torsion_constant', 'warping_constant',
                                      'force_per_length', 'rotational_stiffness', 'dimensionless', 'angle', 'count'):
                 bad.append(('quantity outside the vocabulary', code, k, p['quantity']))
-        if not HANGUL.search(e['template']):
-            for w in AVOID:
-                if w in e['template_ko']:
-                    bad.append(('glossary', code, w))
     assert not bad, bad[:20]
+
+
+def test_glossary_one_form_per_term():
+    """용어표(design/glossary.py, 계약 §16.5): 검토 항목 이름(name_ko)과 한국어 템플릿(옛 글이 한국어인 template 포함)에
+    띄어 쓴 꼴 · 다른 말(국부 좌굴, 횡좌굴, 왜곡좌굴, 블록 전단, 적용 범위 …)이 없다."""
+    from design.checks import REGISTRY as CHECKS
+    from design.glossary import violations, WEB_CRIPPLING, localize
+    bad = []
+    for cid, r in CHECKS.items():
+        bad += [(cid, 'name_ko', v) for v in violations(r['name_ko'])]
+    for code, e in REGISTRY.items():
+        bad += [(code, 'template_ko', v) for v in violations(e['template_ko'])]
+        if HANGUL.search(e['template']):
+            bad += [(code, 'template', v) for v in violations(e['template'])]
+    assert not bad, bad[:20]
+    # 웹 크리플링은 한 곳(glossary.WEB_CRIPPLING)에서 — 이름과 템플릿이 그 꼴을 쓴다
+    assert CHECKS['member.web_crippling']['name_ko'] == WEB_CRIPPLING
+    assert localize('웹 크리플링') == WEB_CRIPPLING
 
 
 def test_every_emitted_notice_is_registered_and_renders():
@@ -298,6 +310,26 @@ def test_labels_with_units_carry_their_numbers():
     sp = s['fastener_label_parts']
     assert render(sp['template'], sp['params']) == s['fastener_label'] and sp['values'][0]['value'] == 0.19
     assert I621_LIMITS['(a)']['limits'][0]['value'] == 12.0 and I621_LIMITS['(h)']['quantity'] is None
+    assert I621_LIMITS['(h)']['limits'][0]['as_length'] == {'value': 396.0, 'quantity': 'length', 'unit_text': 'in'}
+    from design.loads.required_strength import analyze_loads
+    r = analyze_loads(member_app='roof-purlin', span_type='cont-4', span_ft=25.0, loads={'D': 15, 'Lr': 100},
+                      design_method='ASD', laps={'left_ft': 1.0, 'right_ft': 2.5},
+                      deck={'type': 'through-fastened', 't_panel': 0.018, 'fastener_spacing': 12},
+                      section={'depth': 8.0, 'flange_width': 2.25, 'thickness': 0.070, 'lip_depth': 0.91,
+                               'R_corner': 0.1875, 'type': 'Z', 'Fy': 55, 'Fu': 70})
+
+    def conds(x):
+        if isinstance(x, dict):
+            if isinstance(x.get('conditions'), list) and x['conditions'] and 'status' in x['conditions'][0]:
+                return x['conditions']
+            for v in x.values():
+                c = conds(v)
+                if c:
+                    return c
+        return None
+    h = [c for c in conds(r) if c['id'] == '(h)'][0]
+    assert h['value_unit_text'] == 'ft' and h['value_as_length'] == {'value': h['value'] * 12.0, 'quantity': 'length',
+                                                                       'unit_text': 'in'}
 
 
 def write_fixture():

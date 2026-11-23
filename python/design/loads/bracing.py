@@ -635,7 +635,8 @@ I621_SYSTEM_CONDITIONS = (
 
 
 # §I6.2.1 조건 이름표(label)에 든 한계값 — 숫자와 물리량(계약 §3.2 어휘). 이름표 글은 그대로 두고 옆에 싣는다(K4b).
-# 'ft' 는 어휘에 없다(길이는 in) — 경간 한계는 quantity None, unit_text 'ft' 로 둔다(계약 §16.6).
+# 경간은 이름표 · 값이 ft 다 — quantity None, unit_text 'ft' 로 그대로 두고, 경계층이 바꿀 수 있게 엔진의 길이 단위(in)로
+# 같은 값을 as_length · value_as_length 에 함께 싣는다(1 ft = 12 in, 정확 — 계약 §16.6).
 I621_LIMITS = {
     '(a)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '<=', 'value': 12.0},)},
     '(b)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>', 'value': 0.0},)},
@@ -644,7 +645,9 @@ I621_LIMITS = {
     '(e)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>=', 'value': 2.125},)},
     '(f)': {'quantity': 'dimensionless', 'limits': ({'op': '>=', 'value': 16.0}, {'op': '<=', 'value': 43.0})},
     '(g)': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>=', 'value': 1.5, 'times': 'd'},)},
-    '(h)': {'quantity': None, 'unit_text': 'ft', 'limits': ({'op': '<=', 'value': 33.0},)},
+    '(h)': {'quantity': None, 'unit_text': 'ft',
+            'limits': ({'op': '<=', 'value': 33.0, 'unit_text': 'ft',
+                        'as_length': {'value': 396.0, 'quantity': 'length', 'unit_text': 'in'}},)},
     '(j)-t': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '>=', 'value': 0.018, 'accepted': 0.0179},)},
     '(k)-t': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '<=', 'value': 6.0},)},
     '(n)-s': {'quantity': 'length', 'unit_text': 'in', 'limits': ({'op': '<=', 'value': 12.0},)},
@@ -751,6 +754,8 @@ def check_i621_conditions(
             c['value_quantity'] = lim['quantity'] if isinstance(value, (int, float)) and not isinstance(value, bool)                 else None
             if lim.get('unit_text'):
                 c['value_unit_text'] = lim['unit_text']
+            if lim.get('unit_text') == 'ft' and isinstance(value, (int, float)) and not isinstance(value, bool):
+                c['value_as_length'] = {'value': float(value) * 12.0, 'quantity': 'length', 'unit_text': 'in'}
         conds.append(c)
 
     def pf(ok):
