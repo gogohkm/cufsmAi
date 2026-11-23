@@ -97,6 +97,21 @@
 - `open_case` 가 저장 안 한 변경을 덮으면 `caseDiscarded`(`by: 'open_case'`)가 화면에 간다 — `load_project` 와 같은 모양.
 - 행위자: 웹뷰의 메시지는 사람, MCP 다리의 요청은 AI, 다리의 중계가 프로세스 안의 비밀 머리 `X-StCFSD-Screen` 을 실으면 새 화면(기록에는 사람).
 
+## 4d. 엔진 알림 · 이유 · 이름표의 글 (K4b — 엔진 83a7ae1 · b880f6b · e38af69, 계약 §16)
+
+**그리는 곳은 하나 — `webview/js/notices.js`(UMD `StcfsdNotices`).** 화면(`app.js`, 목록 도우미 `utils.js`), 검증 · 보고서(`review.js` → `reportRender.js`), 호스트의 MCP 답(`StcfsdPanel.handleMcpAction` 의 `forReader`)이 같은 함수를 부른다. 화면은 `notices.js` 를 `utils.js` 앞에 싣는다.
+
+- **그리기 `render(notice, {units, lang})`** — 계약 §16.3 `notice-template/1`. US 는 엔진의 `text` · `text_ko` 와 글자까지 같다(고정값 `test/python/notice_render_fixture.json` 192 쌍 · 두 말 — `notice_render_contract`). Python `format` 을 옮겼다(`.Nf` 의 짝수 반올림, `g` · `.Ng` · `.Ne`, `repr` 의 지수 꼴). JSON 이 3 과 3.0 을 가르지 못하므로 정수 꼴 값은 엔진의 글과 같아지는 꼴을 고른다(US); 개수 · 글 매개변수는 정수.
+- **SI** — `quantity` 가 물리량(§3.2 + `mass_density`)인 매개변수는 정의값으로 바꾸고 SI 단위 글자(mm, mm², mm³, mm⁴, mm⁶, kN, kN-m, MPa, kN/m, kN-m/rad/m, kg/m³)를 쓴다. 단위 글자가 없던 물리량(`t={t}`)에도 붙인다. 자리수: 물리량의 기본 자리(길이 1 · 응력 1 · 힘 2 · 모멘트 2 · 면적 0 …)에서 유효숫자가 셋보다 적으면 늘린다(6 까지); `g` · `e` 형식은 그 형식 그대로. `dimensionless` · `count` · `angle` 은 바꾸지 않는다. `quantity: null` + `unit_text`(예 'ft', 'kip*s^2/in^4')는 받은 그대로(계약 §16.3). **SI 로 읽는 글에 US 수를 남기지 않는다(결정 K4b):** 템플릿 글에 박힌 US 상수(「3/16 in」 「0.08 ≤ d ≤ 0.25 in」 「95 ksi」 「33 ft」 — 22 code)와 글 매개변수 안의 US 수(「KtLt=120 in」)도 SI 로. 지수 꼴 · 복합 단위(「7.345e-7 kip*s^2/in^4」)와 「1e6 ksi」 같은 엔진 표지는 건드리지 않는다.
+- **말 — 사람과 AI 가 읽는 것은 한국어(결정 K4b).** 화면 · 검증 목록 · 보고서 · MCP 요약(`summary`, `checks`, `get_design_check`)은 `text_ko` · `reason_ko` · `name_ko` 를 보이는 단위로 그리고 code 를 함께 싣는다. MCP `detail: 'full'` 은 두 말을 다 둔다(SI 면 `text` · `text_ko` · 옛 글 목록 · 이유를 SI 로 다시 그리고 매개변수의 `unit_text` 를 SI 글자로 — 값은 `siUnits` 가 quantity 로 바꾼다). 결과 안의 영어 글은 그대로다(화면 · .csd 가 받는 결과는 바꾸지 않는다).
+- **목록 `lines(result)` / 도우미 `utils.warningsList(result, {units})` …** — 알림이 옛 글과 하나씩 맞으면 알림을 그리고, 맞지 않는 옛 글(호스트가 더한 글)은 그 글 그대로. 알림이 붙지 않은 하위 묶음(하중 해석의 `auto_params` …)의 같은 글은 나무 안의 알림을 글로 찾아 그린다(`textMap`, `forReader`).
+- **검토 항목** — 이유는 `reason_*`(묶음 · 머리 포함)로, 보고서에는 `readerCheck` 로 바꾼 항목(이유 = 한국어 · 그 단위, 구조 필드는 뺀다). MCP 요약의 지배 항목 머리는 `name_ko` · `reason` · `reason_code`, 검토 줄은 지배 항목이 아니면 `reason` · `reason_code`(지배 항목의 까닭은 머리에만 — 한국어 글이 길어 두 번 싣지 않는다).
+- **이름표** — 랩 패스너 `fastener_label_parts` → `fastenerLabel`(볼트 d=12.7 mm). §I6.2.1 조건의 `value` · `limits` 는 `value_quantity` 로 SI(`i621ToSI`), `as_length` 는 quantity 로.
+- **MCP 답의 모양** — MCP 서버가 도구마다 `units` · `detail` 을 `__reply` 로 본문에 싣고(엔진 인자가 아니다 — 호스트가 뺀다) 호스트가 `forReader` 로 그린 뒤 MCP 서버가 줄인다. 알림 항목은 `{code, text}`(code 가 없는 호스트 글은 글), `notices_elsewhere` 는 `{kind, code?, text, where}`. 퍼린 요약의 §I6.2.1 은 조건마다 `{id, status, value, limits, unit, value_as_length}`(이름표 목록은 `detail:'checks'`).
+- 화면이 단위를 바꾸면 다시 그리는 카드(설계 · DSM · 하중 해석 · 보고서)는 새 단위로 그린다. 랩 · 접합 카드는 지금처럼 다음 실행까지 그 단위(전부터 그랬다).
+
+**독립 프로그램(데스크톱 담당)이 따를 것:** 새 화면이 엔진 결과의 글을 보일 때 `StcfsdNotices`(같은 파일)를 쓴다 — `render` · `lines` · `reason` · `fastenerLabel`, 단위는 화면의 단위, 말은 한국어, code 를 함께. 다리의 MCP 중계는 `__reply` 를 넘겨도 되고(그대로 호스트에 간다) 넘기지 않으면 결과는 엔진 그대로다.
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).

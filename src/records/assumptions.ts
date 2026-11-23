@@ -214,6 +214,39 @@ export function planDefaultAssumptions(input: {
     return { add, close };
 }
 
+/**
+ * K4b: 결과 나무에서 엔진 가정을 뽑는다 — 알림(notices, list 'assumptions')의 code 와 한국어 글(text_ko).
+ * 알림이 없는 결과(옛 엔진)의 가정 글은 code 없이(그러면 planEngineAssumptions 가 글의 해시를 쓴다). 같은 code 는 한 번.
+ */
+export function engineAssumptionNotes(resultKind: string, result: unknown): Array<{ resultKind: string; code: string | null; text: string }> {
+    const out: Array<{ resultKind: string; code: string | null; text: string }> = [];
+    const seen = new Set<string>();
+    const walk = (o: any, depth: number): void => {
+        if (!o || typeof o !== 'object' || depth > 30) { return; }
+        if (Array.isArray(o)) { o.forEach((x) => walk(x, depth + 1)); return; }
+        if (Array.isArray(o.notices)) {
+            for (const n of o.notices) {
+                if (!n || n.list !== 'assumptions') { continue; }
+                const text = typeof n.text_ko === 'string' ? n.text_ko : (typeof n.text === 'string' ? n.text : '');
+                const code = typeof n.code === 'string' ? n.code : null;
+                const key = code ?? 't:' + text;
+                if (!text || seen.has(key)) { continue; }
+                seen.add(key);
+                out.push({ resultKind, code, text });
+            }
+        } else if (Array.isArray(o.assumptions)) {
+            for (const a of o.assumptions) {
+                if (typeof a !== 'string' || seen.has('t:' + a)) { continue; }
+                seen.add('t:' + a);
+                out.push({ resultKind, code: null, text: a });
+            }
+        }
+        for (const [k, v] of Object.entries(o)) { if (k !== 'notices' && k !== 'steps' && v && typeof v === 'object') { walk(v, depth + 1); } }
+    };
+    walk(result, 0);
+    return out;
+}
+
 /** (b) 엔진 자체 가정 — 결과의 알림(부호가 있으면 그것, 없으면 글의 해시) */
 export function planEngineAssumptions(input: {
     notes: Array<{ resultKind: string; code?: string | null; text: string }>;

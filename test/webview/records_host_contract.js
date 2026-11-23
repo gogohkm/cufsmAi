@@ -216,6 +216,21 @@ async function main() {
         assert(!des.error && Array.isArray(des.case_inputs_not_written) && /read-only/.test(des.case_inputs_not_written[0].reason),
           `${where}: a design tool computes but does not write the inputs ` + JSON.stringify(des).slice(0, 200));
         assert.strictEqual(caseOf().inputs.Lb, lbBefore, `${where}: Lb unchanged by the design tool`);
+        // K4b(오케스트레이터 결정): 모델도 바꾸지 않는다 — MCP 의 모델 동작 · 화면의 모델 변경 · 화면 칸이 다른 해석 실행
+        const modelSig = () => { const st = p.getStatus(); return JSON.stringify([st.material, st.lengths, st.BC, st.section, st.nnodes, st.section_params]); };
+        const sigBefore = modelSig();
+        for (const [action, args] of [['set_material', { E: 29000, v: 0.3 }], ['set_lengths', { lengths: [10, 20] }], ['generate_template', { section_type: 'lippedc', params: { H: 6, B: 2, D: 0.5, t: 0.059, r: 0.1 } }],
+          ['set_bc', { BC: 'C-C' }], ['modify_node', { node_id: 1, x: 0.5 }]]) {
+          const r = await call({ action, ...args });
+          assert(r.error && /read-only/.test(r.error) && /new_case|take the lock/.test(r.error), `${where}: ${action} refused — ${JSON.stringify(r).slice(0, 200)}`);
+        }
+        ctx.log.warn.length = 0;
+        p.__testClearPostedMessages();
+        await p.__testDispatchMessage({ command: 'updateModel', data: { ...p.__testGetState().model, BC: 'C-C' } });
+        await p.__testDispatchMessage({ command: 'runAnalysis', data: { lengths: [7, 9], BC: 'S-S' } });
+        assert(ctx.log.warn.some((w) => /read-only/.test(w)), `${where}: the person is told the model is not changed`);
+        assert(p.__testGetPostedMessages().some((m) => m.command === 'analysisError' && /read-only/.test(m.data.error)), `${where}: the page's analysis with other conditions is refused`);
+        assert.strictEqual(modelSig(), sigBefore, `${where}: the model is unchanged`);
       };
       await roBlocked('issued copy');
       ctx.vscode.window.showSaveDialog = () => Promise.resolve(ctx.vscode.Uri.file(iss));

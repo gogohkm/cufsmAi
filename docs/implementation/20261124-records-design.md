@@ -902,3 +902,8 @@ R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 �
 - R2: `handleMcpAction` 처음 · 끝의 `ChangeBatcher`, `caseEdit` 의 `touch` · 편집 상태 신호, `reason` · `work` · `source` 를 변경 줄에, 모르는 동작의 `records.ai`, 쓰기 도구 전부의 `reason` 인자.
 - `list_cases` 의 열린 판단 요청 · 마지막 발행 · 결과 상태 칸, `get_case_status` 의 「마지막 보고 이후 변경 수」(R2) · 「확인 n/N」(R4).
 - 실행 사본의 정리(`prune`)는 R4-3.
+
+### 10.5 K4b 에 따라 바뀐 것 (오케스트레이터 결정)
+
+- **엔진 가정의 열쇠는 엔진의 `code`.** `assumptions.engineAssumptionNotes(resultKind, result)` — 결과 나무의 알림(`notices`, list `assumptions`)에서 `{resultKind, code, text: text_ko}` 를 뽑는다(같은 code 는 한 번). 글이 용어표 · 단위로 바뀌어도 같은 code 면 같은 가정이다(닫고 새로 열지 않는다 — `records_work` 시험). 알림이 없는 옛 결과는 code 없이(그러면 `planEngineAssumptions` 가 글의 해시). 부르는 자리(가정 장부)는 R3.
+- **읽기 전용 대상은 모델도 바꾸지 않는다.** MCP 의 모델 동작(`set_material` · `set_bc` · `set_lengths` · `set_load_case` · `set_stress` · 템플릿 · 절점 · 요소 · 스프링 · 구속 · `set_gbtcon` · 두 배 나누기 · 데크 스프링 — 20)은 까닭과 「새 대상으로(`new_case from: 'current'`) 또는 사람이 잠금을 넘겨받기」를 담은 오류. 화면의 모델 변경(`updateModel` · `generateTemplate` · `setStress` · `applyStress`)과 칸이 모델과 다른 해석 실행은 받지 않고 파일의 모델을 다시 보내며 알린다. 계산(같은 모델의 해석 · 검토)은 막지 않는다. 시험: `records_host_contract`.

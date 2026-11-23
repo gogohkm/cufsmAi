@@ -158,6 +158,20 @@ async function run() {
     const q = A.planEngineAssumptions({ notes: [], current: [{ item: 'A-03', origin: 'program-engine', originKey: p.add[0].originKey, closed: false, caseId: CASE }], caseId: CASE });
     assert.deepStrictEqual(q.close, [{ item: 'A-03' }]);
   });
+  await t('K4b: engine assumptions come from the notices — the engine code is the key, the Korean text is the text; old results fall back to text', () => {
+    const res = { assumptions: ['Inflection points taken as brace points'], notices: [
+      { code: 'loads.assumption.inflection_points_taken_as', list: 'assumptions', text: 'Inflection points taken as brace points', text_ko: '변곡점을 가새점으로 봄' },
+      { code: 'loads.warning.x', list: 'warnings', text: 'w', text_ko: 'w' }],
+      regions: [{ result: { notices: [{ code: 'loads.assumption.inflection_points_taken_as', list: 'assumptions', text: 'Inflection points taken as brace points', text_ko: '변곡점을 가새점으로 봄' }] } }] };
+    const notes = A.engineAssumptionNotes('load_analysis', res);
+    assert.deepStrictEqual(notes, [{ resultKind: 'load_analysis', code: 'loads.assumption.inflection_points_taken_as', text: '변곡점을 가새점으로 봄' }]);
+    const p = A.planEngineAssumptions({ notes, current: [], caseId: CASE });
+    assert.strictEqual(p.add[0].originKey, 'engine:load_analysis:loads.assumption.inflection_points_taken_as');
+    // 글이 바뀌어도(용어표 · 단위) 같은 code 면 같은 가정 — 닫고 새로 열지 않는다
+    const again = A.planEngineAssumptions({ notes: [{ ...notes[0], text: '변곡점을 하부 플랜지의 가새점으로 봄' }], current: [{ item: 'A-01', origin: 'program-engine', originKey: p.add[0].originKey, closed: false, caseId: CASE }], caseId: CASE });
+    assert.deepStrictEqual(again, { add: [], close: [] });
+    assert.deepStrictEqual(A.engineAssumptionNotes('member_design', { assumptions: ['old text'] }), [{ resultKind: 'member_design', code: null, text: 'old text' }]);
+  });
 
   // ── 원자료 ──────────────────────────────────────────────────────
   function project() {

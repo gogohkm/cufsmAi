@@ -314,14 +314,11 @@ export function convertOutputSIDeep(result: any, table: Table): { value: any; un
 }
 
 export const TEXT_UNITS_NOTE =
-    'units=SI: numeric fields are SI (mm, mm^2, mm^3, mm^4, mm^6, MPa, kN, kN-m, m, kN/m, kg/m^3). Engine text (report, warnings, '
-    + 'assumptions, scope_notes, notes, labels, errors) is in US units (in, kips, kip-in, kip-ft, ksi, ft, plf) and was NOT converted; '
-    + 'objects marked units:"US" were left in US units too — quote engine text with its US units. Values tagged with a quantity '
-    + '(design_checks, locations) were converted by it: force kN, moment kN-m, stress MPa, length mm, area mm^2, section_modulus mm^3, '
-    + 'moment_of_inertia / torsion_constant mm^4, warping_constant mm^6, force_per_length kN/m, rotational_stiffness kN-m/rad/m; '
-    + 'dimensionless, angle (deg) and count unchanged. Numbers inside steps[].expr / condition are dimensionless coefficients — except '
-    + 'steps with expr_units:"US" (an equation written for US units; see their units_note). unbounded:true values (Fcre = infinity) '
-    + 'are not numbers and Fcre beside Fcre_unbounded:true is the 1e6 ksi placeholder — neither was converted.';
+    'units=SI: numbers are SI (mm, mm^2, mm^3, mm^4, mm^6, MPa, kN, kN-m, m, kN/m, kg/m^3), converted by key or by quantity (dimensionless, angle, '
+    + 'count unchanged). Notices, check reasons and fastener labels are rendered in SI (K4b); report text, step names / formulas, notes, '
+    + 'condition labels and errors stay in US units (in, kips, kip-in, kip-ft, ksi, ft, plf), as do objects marked units:"US". Numbers in '
+    + 'steps[].expr / condition are coefficients, except steps with expr_units:"US" (an equation written for US units; see their units_note). '
+    + 'unbounded:true values and the Fcre placeholder (1e6 ksi beside Fcre_unbounded:true) are not converted.';
 
 // ============================================================
 // 출력 표 — 엔진 결과 키 → 단위 (test/webview/mcp_si_chain.js 가 실제 엔진 출력의 모든 수치 키를 대조)
@@ -497,8 +494,39 @@ export const SI_OUT_GET_DSM: Table = { P: SI_OUT_DSM_P, Mxx: SI_OUT_DSM_M, Mzz: 
 export const SI_OUT_RUN_ANALYSIS: Table = {
     dsm_P: SI_OUT_DSM_P, dsm_Mxx: SI_OUT_DSM_M, dsm_Mzz: SI_OUT_DSM_M,
     lengths: 'length', lengths_requested: 'length', discarded_lengths: 'length',
+    fy_reference: 'stress', m_terms_max: 'none',
     ...Object.fromEntries(NONE_KEYS.map((k) => [k, 'none' as const])),
 };
+
+// ── K4b: 단위 인자가 없던 도구(그때까지 US 만) ─────────────────────────────────────────────
+/** 템플릿 치수(set_section_template 의 인자와 같은 이름) */
+const SECTION_PARAMS: Table = { H: 'length', B: 'length', D: 'length', t: 'length', r: 'length', OD: 'length', top_width: 'length', depth: 'length',
+    brim: 'length', tf: 'length', tw: 'length', qlip: 'none', nseg: 'none', n_elem: 'none' };
+/** get_status · get_full_state */
+export const SI_OUT_STATUS: Table = {
+    section: { width: 'length', height: 'length', xRange: 'length', zRange: 'length' },
+    material: { E: 'stress', v: 'none', G: 'stress' },
+    stress: { min: 'stress', max: 'stress' },
+    lengths: { min: 'length', max: 'length', n: 'none' },
+    section_params: SECTION_PARAMS,
+    load_fy: 'stress', neigs: 'none', nlengths: 'none', nsprings: 'none', nconstraints: 'none',
+    GBTcon: { '*': 'none' }, case: { rev: 'none' },
+    results: { '*': { fy_reference: 'stress', '*': 'none' } },
+    curve_summary: { n_points: 'none', LF_min: 'none', minima: { length: 'length', LF: 'none' } },
+    // load_values(set_load_case) — 계열마다 힘 · 모멘트
+    load_values: { P: 'force', Mxx: 'moment', Mzz: 'moment', M11: 'moment', M22: 'moment' },
+    ...Object.fromEntries(NONE_KEYS.map((k) => [k, 'none' as const])),
+};
+/** get_buckling_curve: 줄 [반파장(in), 하중계수 …] */
+export const SI_OUT_CURVE: Table = { curve: { columns: (row: number[]) => row.map((_x, i) => (i === 0 ? 'length' : 'none')) } };
+/** get_nodes: [node#, x, z, dofx, dofz, dofy, dofrot, stress] */
+export const SI_OUT_NODES: Table = { nodes: { columns: ['none', 'length', 'length', 'none', 'none', 'none', 'none', 'stress'] } };
+/** get_elements: [elem#, nodei, nodej, t, matnum] */
+export const SI_OUT_ELEMENTS: Table = { elements: { columns: ['none', 'none', 'none', 'length', 'none'] } };
+/** steel_grades: 항목마다 Fy · Fu(ksi) — Fy_MPa · Fu_MPa 는 이미 SI */
+export const SI_OUT_STEEL: Table = { Fy: 'stress', Fu: 'stress', Fy_MPa: 'none', Fu_MPa: 'none', '*': 'none' };
+/** get_energy_recovery: 에너지는 모드(정규화)의 상대값 — 단위 없음. 길이만 */
+export const SI_OUT_ENERGY: Table = { energy: { columns: ['none', 'none'] }, length: 'length', m_a: 'none', n_elements: 'none' };
 
 /**
  * 퍼린 구간 설계의 구간 결과(호스트 StcfsdPanel._designPurlin): 부재 설계 결과 + 그 구간에서 검토한 M · V.
@@ -680,6 +708,9 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
     load_project: {},
     // R1-2: 같은 뜻 — open_case 의 units 는 응답의 버린 값의 단위
     open_case: {},
+    // K4b: 결과만 SI(수 인자는 단위가 없다 — 개수 · 색인)
+    get_status: {}, get_full_state: {}, get_buckling_curve: {}, get_nodes: {}, get_elements: {}, steel_grades: {},
+    run_analysis: {}, get_energy_recovery: {},
     design_lap_connection: {
         d: L, t: L, Fy: S, Fu: S, lap_left_in: L, lap_right_in: L, Mu_support: MOM, Vu_support: F,
         fastener_dia: L, end_distance: L, Se: 'modulus', Sf: 'modulus', Mnd: MOM, Mnd_single: MOM,
@@ -706,6 +737,8 @@ export const SI_INPUT_DIMENSIONLESS: Record<string, string[]> = {
     set_material: ['v'],
     set_lengths: ['n'],
     set_node_stress: ['node_ids'],
+    // K4b: 수 인자가 개수 · 색인뿐인 도구
+    run_analysis: ['neigs'], get_energy_recovery: ['length_index', 'mode_index'],
     add_element: ['nodei', 'nodej'],
     modify_node: ['node_id'],
     modify_element: ['elem_id', 'nodei', 'nodej'],

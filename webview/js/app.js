@@ -12,9 +12,17 @@
     const vscode = acquireVsCodeApi();
 
     // 순수 유틸 (webview/js/utils.js — app.js보다 먼저 로드되어야 함)
-    const { fmt, logspace, convexHull: _convexHull, verdictOf: _v3, combineVerdicts: _v3all,
-        notEvaluatedList: _notEvalList, warningsList: _warnList,
-        assumptionsList: _assumpList, scopeNotesList: _scopeList, userText } = globalThis.StcfsdUtils;
+    const { fmt, logspace, convexHull: _convexHull, verdictOf: _v3, combineVerdicts: _v3all, userText } = globalThis.StcfsdUtils;
+    // K4b: 엔진 알림은 한국어로, 화면의 단위로 그린다(webview/js/notices.js) — 목록 도우미는 지금 단위를 넘긴다
+    const _U = globalThis.StcfsdUtils;
+    const _N = globalThis.StcfsdNotices;
+    const _uo = () => ({ units: _unitSystem });
+    const _notEvalList = (r) => _U.notEvaluatedList(r, _uo());
+    const _warnList = (r) => _U.warningsList(r, _uo());
+    const _assumpList = (r) => _U.assumptionsList(r, _uo());
+    const _scopeList = (r) => _U.scopeNotesList(r, _uo());
+    /** 랩 패스너 이름표 — fastener_label_parts(물리량)를 화면 단위로 */
+    const _fastenerLabel = (r) => (r && _N ? _N.fastenerLabel(r.fastener_label_parts, { units: _unitSystem, lang: 'ko' }, r.fastener_label) : (r && r.fastener_label) || '');
 
     /** 현재 모델 */
     let model = null;
@@ -470,7 +478,10 @@
         if (!res) { box.style.display = 'none'; box.innerHTML = ''; return 0; }
         const warns = Array.isArray(res.analysis_warnings) ? res.analysis_warnings
             : (Array.isArray(res.warnings) ? res.warnings : []);
-        const lines = warns.map(w => '⚠ ' + _esc(userText(String(w))));
+        // K4b: 엔진 경고는 알림으로(한국어 · 화면 단위), 호스트가 더한 해석 경고는 그대로
+        const engineW = Array.isArray(res.notices) ? _warnList(res) : null;
+        const extraW = engineW ? warns.filter(w => !(Array.isArray(res.warnings) && res.warnings.includes(w))).map(w => userText(String(w))) : null;
+        const lines = (engineW ? engineW.concat(extraW) : warns.map(w => userText(String(w)))).map(w => '⚠ ' + _esc(w));
         const sel = res.m_all_selection;
         const info = [];
         if (sel) {
@@ -1334,7 +1345,7 @@
         var lapLenV = _v3(result.lap_ok === true ? true : (result.lap_ok === false ? false : null));
         html += '<tr><td>Lap 길이 검증</td><td>' + lapLenV.icon + ' ' + lapLenV.short + '</td><td>≥ ' + fmtVal(result.min_lap, 'length') + ' ' + unitLabel('length') + '</td></tr>';
         html += '<tr><td>전달 전단력</td><td>' + fmtVal(result.V_transfer, 'force') + ' ' + unitLabel('force') + '</td><td></td></tr>';
-        html += '<tr><td>패스너 설계강도 (' + rnLbl + ')</td><td>' + fmtVal(result.Pns, 'force') + ' ' + unitLabel('force') + '/ea</td><td>' + result.fastener_label + '</td></tr>';
+        html += '<tr><td>패스너 설계강도 (' + rnLbl + ')</td><td>' + fmtVal(result.Pns, 'force') + ' ' + unitLabel('force') + '/ea</td><td>' + _esc(_fastenerLabel(result)) + '</td></tr>';
         html += '<tr><td>필요 패스너 수 (행 반올림)</td><td>' + (result.n_required || result.n_total) + ' ea</td><td></td></tr>';
         html += '<tr><td>배치 가능 최대</td><td>' + (result.n_max_total || '-') + ' ea</td><td>Lap 길이 제약</td></tr>';
         html += '<tr><td><b>실제 배치</b></td><td><b>' + result.n_total + ' ea</b></td><td>' + result.n_rows + ' rows × ' + result.n_per_row + '/row</td></tr>';
@@ -1371,7 +1382,7 @@
             html += '<p class="hint" style="margin:2px 0 0">★ = 전단 전달 산정에 사용된 지배 모드. 인장계 한계상태(풀아웃 J4.4.1 / 풀오버 J4.4.2)와 부재 단면검토(J6/D)는 전단 패스너 수 산정에서 제외됩니다 (양력 인장은 별도 검토).</p>';
             if (fd.warnings && fd.warnings.length > 0) {
                 html += '<div style="margin-top:4px">';
-                fd.warnings.forEach(w => { html += '<div style="font-size:10px;color:#f90">• ' + w + '</div>'; });
+                _warnList(fd).forEach(w => { html += '<div style="font-size:10px;color:#f90">• ' + _esc(w) + '</div>'; });
                 html += '</div>';
             }
         }
@@ -1523,9 +1534,12 @@
             if (hasRelevant && Array.isArray(result.not_evaluated)) {
                 const rel = new Set(result.not_evaluated_relevant.map(x => JSON.stringify(x)));
                 const others = result.not_evaluated.filter(x => !rel.has(JSON.stringify(x)));
+                // K4b: 항목마다의 한국어 글(알림 — 옛 목록과 같은 차례)
+                const koNe = Array.isArray(result.notices) && _N ? _N.lines(result, { units: _unitSystem, lang: 'ko', lists: ['not_evaluated'] })
+                    .map(l => (l.subject ? l.subject + ' — ' : '') + userText(l.text)) : null;
                 if (others.length > 0) {
                     html += '<div style="padding:2px 8px;font-size:10px;color:var(--vscode-descriptionForeground)">참고 — 이 하중 방향에는 해당하지 않는 미평가 항목: '
-                        + others.map(o => _esc(_notEvalList({ not_evaluated: [o] })[0] || '')).join(' / ') + '</div>';
+                        + others.map(o => _esc((koNe && koNe[result.not_evaluated.indexOf(o)]) || _notEvalList({ not_evaluated: [o] })[0] || '')).join(' / ') + '</div>';
                 }
             }
         }
@@ -1611,7 +1625,7 @@
         // ── 타이틀 ──
         var passText = _v3(r).short;
         var titleExtra = passText ? '  [' + passText + ']' : '';
-        s += '<text x="'+svgW/2+'" y="14" text-anchor="middle" fill="'+fg+'" font-size="10.5" font-weight="600">Lap Splice Detail — '+(r.n_total||0)+' '+(r.fastener_label||'fasteners')+' ('+nRows+'\u00d7'+nPerRow+')'+titleExtra+'</text>';
+        s += '<text x="'+svgW/2+'" y="14" text-anchor="middle" fill="'+fg+'" font-size="10.5" font-weight="600">Lap Splice Detail — '+(r.n_total||0)+' '+(_fastenerLabel(r)||'fasteners')+' ('+nRows+'\u00d7'+nPerRow+')'+titleExtra+'</text>';
 
         // ── 섹션 라벨 ──
         s += '<text x="'+(elev.x+elev.w/2)+'" y="'+(topY-2)+'" text-anchor="middle" fill="'+dim+'" font-size="8">ELEVATION</text>';
@@ -1833,7 +1847,7 @@
         }
 
         // 패스너 타입/사이즈 정보
-        s += '<text x="12" y="'+(infoY-12)+'" fill="'+dim+'" font-size="7.5">'+(r.fastener_label||'')+' d='+fmtVal(fastDia,'length')+' '+unitLabel('length')+'</text>';
+        s += '<text x="12" y="'+(infoY-12)+'" fill="'+dim+'" font-size="7.5">'+_fastenerLabel(r)+' d='+fmtVal(fastDia,'length')+' '+unitLabel('length')+'</text>';
 
         s += '</svg>';
         return s;
@@ -2336,9 +2350,9 @@
                 'mat ' + m + ': ' + toDisplay(Number(r), 'density').toPrecision(4) + ' ' + unitLabel('density'));
             html += '<div class="hint">사용한 질량밀도 — ' + rhos.join(', ') + '</div>';
         }
-        const vw = Array.isArray(data.warnings) ? data.warnings : [];
+        const vw = _warnList(data);
         if (vw.length > 0) {
-            html += '<div class="validation-box" style="font-size:11px">' + vw.map(w => '⚠ ' + w).join('<br>') + '</div>';
+            html += '<div class="validation-box" style="font-size:11px">' + vw.map(w => '⚠ ' + _esc(w)).join('<br>') + '</div>';
         }
         if (data.m_all_source) { html += '<div class="hint">종방향 항: ' + _esc(_termSourceKo(data.m_all_source)) + '</div>'; }
         if (data.size) {
@@ -2381,7 +2395,7 @@
             if (ok(P[i]) && ok(M11[i])) { pts11.push([M11[i], P[i]]); } else { nullPts++; }
             if (ok(P[i]) && ok(M22[i])) { pts22.push([M22[i], P[i]]); } else { nullPts++; }
         }
-        const pw = Array.isArray(data.warnings) ? data.warnings : [];
+        const pw = _warnList(data);
         if (nullPts > 0 || pw.length > 0) {
             setStatus('소성 곡면: ' + (nullPts > 0 ? '정의되지 않는 정규화 값 ' + nullPts + '개는 그리지 않음. ' : '')
                 + pw.join(' / '), 'warn');
@@ -5552,8 +5566,8 @@
         // 경고 · 미평가 · 검토하지 않은 항목 — 판정 바로 아래에 엔진 문장 그대로
         {
             const _extraWarn = [
-                ...(data.flexure_x && Array.isArray(data.flexure_x.warnings) ? data.flexure_x.warnings : []),
-                ...(data.compression && Array.isArray(data.compression.warnings) ? data.compression.warnings : []),
+                ...(data.flexure_x ? _warnList(data.flexure_x) : []),
+                ...(data.compression ? _warnList(data.compression) : []),
                 ...(Array.isArray(data.purlin_warnings) ? data.purlin_warnings : []),
             ];
             const _extraNe = [
@@ -5720,9 +5734,12 @@
             const wcV = _v3(wc);
             const pTermLabel = h3?.P_term_label || 'P/Pn';
             // V4-18: 반력 칸이 비어 엔진이 Vu 를 지압 하중으로 쓴 경우(엔진 가정 「§G5/§H3 … Vu … wc_P」) 카드에 밝힌다.
-            const _vuBearing = !data.purlin_mode && _assumpList(data).some(a => /G5/.test(a) && /\bVu\b/.test(a));
-            const _wcAssump = (wc.assumptions || []).map(a => _esc(userText(String(a))));
-            const _wcWarn = (wc.warnings || []).map(a => _esc(userText(String(a))));
+            // K4b: 글의 모양이 아니라 알림의 code 로
+            const _vuBearing = !data.purlin_mode && (Array.isArray(data.notices)
+                ? data.notices.some(n => n && n.code === 'member.assumption.g5_g5_h3_vu_wc')
+                : _assumpList(data).some(a => /G5/.test(a) && /\bVu\b/.test(a)));
+            const _wcAssump = _assumpList(wc).map(a => _esc(a));
+            const _wcWarn = _warnList(wc).map(a => _esc(a));
             interEl.innerHTML += `
                 <div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--vscode-panel-border,#333)">
                 <b>Web Crippling (§G5)</b>
@@ -5858,6 +5875,9 @@
         const arr = (v) => Array.isArray(v) ? v.filter(Boolean).map(String) : [];
         if (!deck) { return { warnings: [], assumptions: [], scope: [] }; }
         const hasNew = Array.isArray(deck.warnings) || Array.isArray(deck.scope_notes) || Array.isArray(deck.assumptions);
+        if (Array.isArray(deck.notices)) {
+            return { warnings: _warnList(deck), assumptions: _assumpList(deck), scope: _scopeList(deck) };
+        }
         return {
             warnings: arr(deck.warnings),
             assumptions: arr(deck.assumptions),

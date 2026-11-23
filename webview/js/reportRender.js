@@ -291,7 +291,8 @@
             case 'list': {
                 const items = (Array.isArray(b.items) ? b.items : []).filter((x) => x != null && String(x) !== '');
                 if (!items.length) { return ''; }
-                return '<div class="list"' + tone(b.tone) + '><b>' + txt(b.title) + '</b><ul>' + items.map((x) => '<li>' + txt(typeof x === 'string' ? x : JSON.stringify(x)) + '</li>').join('') + '</ul></div>';
+                // K4b: 목록의 어조는 같은 class 속성 안에(전: class 가 두 번 — 둘째는 버려져 어조가 보이지 않았다)
+                return '<div class="list' + (tone(b.tone) ? ' t-' + b.tone : '') + '"><b>' + txt(b.title) + '</b><ul>' + items.map((x) => '<li>' + txt(typeof x === 'string' ? x : JSON.stringify(x)) + '</li>').join('') + '</ul></div>';
             }
             case 'check': return renderCheck(b.check, units);
             case 'section': return '<div class="section-fig">' + svgSection(b) + '</div>';

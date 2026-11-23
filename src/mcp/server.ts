@@ -11,10 +11,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import * as http from "http";
+import { AsyncLocalStorage } from "async_hooks";
 import {
     convertInputSI, convertOutputSIDeep, TEXT_UNITS_NOTE, SI_INPUT_TABLES,
     SI_OUT_MEMBER, SI_OUT_PROPS, SI_OUT_LOADS, SI_OUT_DECK, SI_OUT_VIBRATION, SI_OUT_GET_DSM,
     SI_OUT_PURLIN, SI_OUT_DESIGN_CHECK, caseValueToSI,
+    SI_OUT_STATUS, SI_OUT_CURVE, SI_OUT_NODES, SI_OUT_ELEMENTS, SI_OUT_STEEL, SI_OUT_ENERGY, SI_OUT_RUN_ANALYSIS,
     type Table,
 } from "./siUnits";
 import { connectionModeFromEnv, createHostConnection, type HostTarget } from "./hostConnection";
@@ -124,7 +126,17 @@ async function verifyHost(target: HostTarget): Promise<string | null> {
     return null;
 }
 
+/**
+ * K4b: 도구 한 번의 응답 모양(units · detail) — 도구의 콜백마다 문맥에 둔다(server.tool 을 감싼다). POST /action 의 몸에 __reply 로 실어
+ * 호스트가 알림 · 이유 · 이름표를 그 단위의 한국어로 그린다(webview/js/notices.js forReader). 엔진 인자가 아니다(호스트가 뺀다).
+ */
+const REPLY = new AsyncLocalStorage<{ units: 'US' | 'SI'; detail: string }>();
+
 async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: any, meta?: { reason?: string }): Promise<any> {
+    const reply = REPLY.getStore();
+    if (reply && method === 'POST' && endpoint === '/action' && body && typeof body === 'object' && !Array.isArray(body)) {
+        body = { ...body, __reply: reply };
+    }
     // K1: 상태 조회 = get_status 만 GET /status 를 부른다. 재시작 뒤에는 이것만 통과한다.
     const statusRead = method === 'GET' && endpoint === '/status';
     let resolved = CONNECTION.resolve(statusRead);
@@ -292,12 +304,14 @@ function checkHead(c: any): any {
     const q = (x: any) => (x && typeof x === 'object'
         ? { symbol: x.symbol, value: x.value, quantity: x.quantity, ...(x.source?.kind ? { source: x.source.kind } : {}) } : x ?? null);
     const head: any = {
-        id: c.id, clause: c.clause ?? null, name: c.name ?? null, name_ko: c.name_ko ?? null,
+        // K4b: 이름은 한국어(name_ko — 화면 · 보고서와 같은 말). 영어 이름은 detail 'full' 에
+        id: c.id, clause: c.clause ?? null, name_ko: c.name_ko ?? c.name ?? null,
         demand: q(c.demand), nominal: q(c.nominal),
         factor: c.factor && typeof c.factor === 'object' ? { symbol: c.factor.symbol, value: c.factor.value, kind: c.factor.kind } : c.factor ?? null,
         capacity: q(c.capacity), ratio: c.ratio ?? null, verdict: c.verdict, location: c.location ?? null, combination: c.combination ?? null,
     };
     if (c.reason) { head.reason = c.reason; }
+    if (c.reason_code) { head.reason_code = c.reason_code; }
     if (c.trusted === false) { head.trusted = false; }
     if (c.part_of) { head.part_of = c.part_of; }
     if (c.equation_used) { head.equation_used = c.equation_used; }
@@ -315,7 +329,7 @@ function checkHead(c: any): any {
 }
 
 /** 검토 한 줄: id · 비 · 판정 · 지배(그럴 때만 governs: true), 미평가 · 해당 없음 · 믿지 않는 값이면 그 까닭. withValues = 소요 · 설계강도도. */
-function checkLine(c: any, withValues = false): any {
+function checkLine(c: any, withValues = false, headHasReason = false): any {
     if (!c || typeof c !== 'object') { return c; }
     const line: any = { id: c.id, ratio: c.ratio ?? null, verdict: c.verdict };
     if (c.governs === true) { line.governs = true; }
@@ -324,7 +338,9 @@ function checkLine(c: any, withValues = false): any {
         if (c.capacity) { line.capacity = { symbol: c.capacity.symbol, value: c.capacity.value, quantity: c.capacity.quantity }; }
     }
     if (c.governs === true && c.governs_basis) { line.governs_basis = c.governs_basis; }
-    if (c.reason) { line.reason = c.reason; }
+    // K4b: 지배 항목의 까닭은 governing_checks 의 머리에 있다 — 줄에는 그 밖의 항목만(한국어 글이 길어 두 번 싣지 않는다)
+    if (c.reason && !(c.governs === true && headHasReason)) { line.reason = c.reason; }
+    if (c.reason_code && !(c.governs === true && headHasReason)) { line.reason_code = c.reason_code; }
     if (c.trusted === false) { line.trusted = false; }
     if (c.counts === false) { line.counts = false; }
     if (c.part_of) { line.part_of = c.part_of; }
@@ -379,7 +395,10 @@ function collectNotices(r: any): Array<{ kind: string; text: any; where: string[
         }
     };
     walk(r, []);
-    return [...found.values()].map((e) => ({ kind: e.kind, text: e.text, where: [...e.where].map((w) => w || '(top)') }));
+    // K4b: 알림 항목은 {code, text}(호스트가 한국어로 그린 것) — 한 단계로 편다
+    return [...found.values()].map((e) => ({ kind: e.kind,
+        ...(e.text && typeof e.text === 'object' && typeof e.text.text === 'string' ? { ...(e.text.code ? { code: e.text.code } : {}), text: e.text.text, ...(e.text.name ? { name: e.text.name } : {}) } : { text: e.text }),
+        where: [...e.where].map((w) => w || '(top)') }));
 }
 
 /** 요약에 아직 그 글이 없는 알림만(글은 한 번만 싣는다 — 크기를 지키는 길). 붙은 자리를 함께. */
@@ -423,13 +442,13 @@ function moreNote(scope: string, omitted: string[], detail: Detail): string {
 
 /** 부재 · 접합 · 랩 결과의 요약. 랩의 fastener_design(접합 결과)도 같은 규칙으로. */
 function shapeDesign(scope: string): Shaper {
-    const shape = (r: any, detail: Detail): any => {
+    const shape = (r: any, detail: Detail, inner = false): any => {
         if (detail === 'full' || !r || typeof r !== 'object') { return r; }
         const omitted: string[] = [];
         const out = topLevel(r, new Set(['design_checks', 'fastener_design']), omitted);
         const dc: any[] = Array.isArray(r.design_checks) ? r.design_checks : [];
         if (r.fastener_design && typeof r.fastener_design === 'object') {
-            const { more: _m, detail: _d, ...fd } = shape(r.fastener_design, detail);
+            const { more: _m, detail: _d, ...fd } = shape(r.fastener_design, detail, true);
             void _m; void _d;
             // 랩(V6-10): 위 목록에 part_of 'fastener_design' 으로 옮겨 실린 항목만 두 번 싣지 않는다 — 나머지 줄은 그대로.
             const movedUp = new Set(dc.filter((c) => c && c.part_of === 'fastener_design').map((c) => c.id));
@@ -447,7 +466,8 @@ function shapeDesign(scope: string): Shaper {
         if (detail === 'checks') {
             out.design_checks = dc.map((c) => { const { steps: _s, ...x } = c || {}; void _s; return x; });
         } else {
-            out.check_lines = dc.map((c) => checkLine(c));
+            // 지배 항목의 까닭은 머리(governing_checks)에 — 안쪽 결과(fastener_design)는 머리를 빼므로 줄에 둔다
+            out.check_lines = dc.map((c) => checkLine(c, false, !inner));
         }
         headlineCaveat(out, out.governing_checks);
         // 하위 결과(web_crippling · shear · 조합의 compression … · fastener_design)의 알림 — 하나도 버리지 않는다.
@@ -530,6 +550,17 @@ function shapePurlin(r: any, detail: Detail): any {
         'dsm_positive', 'dsm_negative', 'props', 'cutwp']);
     const out = topLevel(r, skip, omitted);
     for (const k of ['props', 'cutwp']) { if (k in r) { omitted.push(k); } }
+    // K4b: §I6.2.1 조건 — 요약에는 id · 판정 · 값 · 한계만(엔진이 조건마다 limits · 단위 · as_length 를 더해 이름표 목록 checks 와 같은 것을
+    // 두 번 싣게 됐다 — 38 구간 요약이 예산을 넘은 까닭). 이름표 글은 detail 'checks' · 'full' 에.
+    if (detail === 'summary' && out.i621_check && typeof out.i621_check === 'object' && Array.isArray(out.i621_check.conditions)) {
+        const { checks: _ck, conditions, ...restI } = out.i621_check;
+        void _ck;
+        out.i621_check = { ...restI, conditions: conditions.map((c: any) => (c && typeof c === 'object' ? {
+            id: c.id, status: c.status, ...(c.value !== undefined ? { value: c.value } : {}), ...(c.limits ? { limits: c.limits } : {}),
+            ...(c.value_unit_text ? { unit: c.value_unit_text } : {}), ...(c.value_as_length ? { value_as_length: c.value_as_length } : {}),
+        } : c)) };
+        omitted.push("i621_check.checks and the condition labels (detail:'checks')");
+    }
     const ids = (pts: any[], pred: (c: any) => boolean) => Array.from(new Set(pts.flatMap((pt) =>
         (Array.isArray(pt?.design_checks) ? pt.design_checks : []).filter((c: any) => c && pred(c)).map((c: any) => c.id))));
     out.regions = r.regions.map((g: any) => {
@@ -746,10 +777,26 @@ The section, material E/ν/G and the analysis conditions belong to the model (se
 
 VIEW. get_view says what the person is looking at in StCFSD (use it for "this"); focus asks the screen to show an item by the same ids. Neither changes the model; the screen may decline to follow. get_status lists results the program deleted because their inputs changed (invalidated) — re-run those, never quote their old numbers.
 
-NOTICES. Always report warnings, assumptions and scope_notes to the user with the verdict. In-house assumptions that are not specification provisions — e.g. the lap-splice fastener force model (force_model), default fastener values in kx, I6.2.1 conditions confirmed by the user — must be stated to the user as assumptions.
+NOTICES. Always report warnings, assumptions and scope_notes to the user with the verdict. In summaries (and detail 'checks') every engine notice, check reason and check name is given in Korean — the words the screen and the report use — and each notice item is {code, text} (code = the engine's fixed notice code; quote the text, cite the code when useful); detail 'full' keeps the engine's original text and text_ko side by side. In-house assumptions that are not specification provisions — e.g. the lap-splice fastener force model (force_model), default fastener values in kx, I6.2.1 conditions confirmed by the user — must be stated to the user as assumptions.
 
-UNITS. Engine units are US: in, in², ksi, kips, kip-in (load analysis: ft, plf, kip-ft). Tools that have a 'units' argument accept units="SI" (mm, mm², MPa, kN, kN-m; load tools m, kN/m) and then return numeric results in SI; engine text (report, formulas, warnings) stays in US units and is labelled so. Tools without 'units' are US only.`,
+UNITS. Engine units are US: in, in², ksi, kips, kip-in (load analysis: ft, plf, kip-ft). Tools that have a 'units' argument accept units="SI" (mm, mm², MPa, kN, kN-m; load tools m, kN/m) and then return numeric results in SI; notice texts, check reasons and fastener labels are rendered in SI too (numbers and unit words), while report text and step formulas stay in US units and are labelled so. Tools without 'units' are US only.`,
 });
+
+// K4b: 모든 도구의 콜백을 응답 모양의 문맥 안에서(인자의 units · detail — 없으면 US · summary)
+{
+    const original = server.tool.bind(server) as (...a: any[]) => any;
+    (server as any).tool = (...a: any[]) => {
+        const k = a.length - 1;
+        const cb = a[k];
+        if (typeof cb === 'function') {
+            a[k] = (args: any, extra: any) => REPLY.run({
+                units: args && args.units === 'SI' ? 'SI' : 'US',
+                detail: args && typeof args.detail === 'string' ? args.detail : 'summary',
+            }, () => cb(args, extra));
+        }
+        return original(...a);
+    };
+}
 
 // ============================================================
 // 1. STATUS & INFO
@@ -757,13 +804,17 @@ UNITS. Engine units are US: in, in², ksi, kips, kip-in (load analysis: ft, plf,
 // K4a: 상태 응답에 더한 것 — 단면 템플릿 · 치수, 요소 자리, 하중 경우, 고유치 수, 해석 계열, 남은 결과, 무효 장부.
 const STATUS_FIELDS = " Also: section_template (lippedc, lippedz, …, custom, custom_builder) and section_params (the dimensions the section was generated from, as stored — in, angles deg), section_edited (nodes / elements were edited by hand after the template), element_roles (template sections only, else null), load_case and load_fy (reference stress, ksi), neigs (eigenvalues per length), analysis_load_family (P | Mxx | Mzz | custom of the current analysis, null when there is none), results (which results are current: buckling_analysis, design_dsm, load_analysis, member_design, connection, lap — with when they were made) and invalidated — the ledger of results the program deleted because their inputs changed [{kind, id?, reason, cause {action | message, inputs?}, invalidated_at, result_at}]; an entry is removed when a new result of that kind arrives. A deleted result is never served: re-run it.";
 
-server.tool("get_status", "Get the current panel status (section, analysis state). Fails with a clear error when VS Code or the Section Designer panel is not open. US units." + STATUS_FIELDS, {},
-    async () => json(await callBridgeGet('/status'))
+// K4b: 수가 든 도구는 모두 units 를 받는다 — 결과만 SI(인자의 수는 개수 · 색인)
+const UNITS_OUT = z.enum(['US', 'SI']).optional().describe("Units of the numeric results: 'US' (default) in, ksi, kips, kip-in or 'SI' mm, MPa, kN, kN-m (converted by quantity).");
+
+server.tool("get_status", "Get the current panel status (section, analysis state). Fails with a clear error when VS Code or the Section Designer panel is not open. Values in US units unless units='SI'." + STATUS_FIELDS,
+    { units: UNITS_OUT },
+    async (args) => unitReply(await callBridgeGet('/status'), args.units, SI_OUT_STATUS)
 );
 
-server.tool("get_full_state", "Get the complete panel model state: section dimensions, material, stresses, BC, lengths, analysis summary and minima. All values in the engine's US units (in, ksi)." + STATUS_FIELDS,
-    {},
-    async () => json(await callBridgePost('/action', { action: 'get_full_state' }))
+server.tool("get_full_state", "Get the complete panel model state: section dimensions, material, stresses, BC, lengths, analysis summary and minima. Values in the engine's US units (in, ksi) unless units='SI'." + STATUS_FIELDS,
+    { units: UNITS_OUT },
+    async (args) => unitReply(await callBridgePost('/action', { action: 'get_full_state' }), args.units, SI_OUT_STATUS)
 );
 
 server.tool("get_section_properties", "Gross cross-section properties of the current model (A, xcg, zcg, Ixx, Izz, Ixz, thetap, I11, I22, Sx, Sz (extreme fibre), Sx_cl, Sz_cl (centre-line), rx, rz, Zx, Zz). Set units='SI' for mm-based results.",
@@ -793,8 +844,9 @@ server.tool("get_dsm_values",
     async (args) => postTool('get_dsm_values', 'get_dsm', args, SI_OUT_GET_DSM)
 );
 
-server.tool("get_buckling_curve", "Buckling curve of the current analysis: rows [half-wavelength or member length (in), load factor mode 1, mode 2, …]. Load factors are multiples of the applied reference stress distribution. US units (in).", {},
-    async () => json(await callBridgePost('/action', { action: 'get_curve' }))
+server.tool("get_buckling_curve", "Buckling curve of the current analysis: rows [half-wavelength or member length (in, or mm with units='SI'), load factor mode 1, mode 2, …]. Load factors are multiples of the applied reference stress distribution.",
+    { units: UNITS_OUT },
+    async (args) => unitReply(await callBridgePost('/action', { action: 'get_curve' }), args.units, SI_OUT_CURVE)
 );
 
 // ============================================================
@@ -1143,8 +1195,9 @@ server.tool("set_lengths", "Set the analysis lengths: n log-spaced values from m
 // ============================================================
 server.tool("run_analysis",
     "Run the finite-strip buckling analysis on the current model and extract DSM values of the current load family. Longitudinal terms are chosen automatically for the boundary condition unless set (m_all_selection says how). Read and report: `warnings` (insufficient longitudinal terms, ill-conditioned lengths, m_recommend notes), `discarded_lengths` (lengths dropped as numerically unreliable; lengths_analyzed counts the rest), `classification_status`, `dsm_warning` / `dsm_error`.",
-    { neigs: z.number().int().min(1).max(50).optional().describe("Number of eigenvalues per length (omit → the model's setting, default 10)") },
-    async (args) => postState('run_analysis', 'run_analysis', args)
+    { neigs: z.number().int().min(1).max(50).optional().describe("Number of eigenvalues per length (omit → the model's setting, default 10)"),
+      units: UNITS_OUT },
+    async (args) => unitReply(await callBridgePost('/action', { action: 'run_analysis', ...engineArgs('run_analysis', args) }), args.units, SI_OUT_RUN_ANALYSIS)
 );
 
 server.tool("run_signature_curve", "Run a signature-curve analysis (S-S, automatic length range) of the current stress distribution. Returns the panel's reply including warnings.",
@@ -1161,12 +1214,14 @@ server.tool("classify_modes",
 // ============================================================
 // 4. NODE/ELEMENT EDITING
 // ============================================================
-server.tool("get_nodes", "Get all nodes: [node#, x, z, dofx, dofz, dofy, dofrot, stress] (in, ksi)", {},
-    async () => json(await callBridgePost('/action', { action: 'get_nodes' }))
+server.tool("get_nodes", "Get all nodes: [node#, x, z, dofx, dofz, dofy, dofrot, stress] (in, ksi — or mm, MPa with units='SI')",
+    { units: UNITS_OUT },
+    async (args) => unitReply(await callBridgePost('/action', { action: 'get_nodes' }), args.units, SI_OUT_NODES)
 );
 
-server.tool("get_elements", "Get all elements: [elem#, nodei, nodej, t, matnum] (t in in)", {},
-    async () => json(await callBridgePost('/action', { action: 'get_elements' }))
+server.tool("get_elements", "Get all elements: [elem#, nodei, nodej, t, matnum] (t in in — or mm with units='SI')",
+    { units: UNITS_OUT },
+    async (args) => unitReply(await callBridgePost('/action', { action: 'get_elements' }), args.units, SI_OUT_ELEMENTS)
 );
 
 server.tool("set_node_stress", "Set the reference stress of specific nodes (the load family becomes custom).",
@@ -1344,8 +1399,9 @@ server.tool("get_energy_recovery", "Element-wise strain energy (membrane vs bend
     {
         length_index: z.number().int().min(0).describe("0-based index into the analysis lengths actually solved (run_analysis `lengths`; discarded lengths are not counted)"),
         mode_index: z.number().int().min(0).describe("0-based mode index (0 = first mode)"),
+        units: UNITS_OUT,
     },
-    async (args) => postState('get_energy_recovery', 'energy_recovery', args)
+    async (args) => unitReply(await callBridgePost('/action', { action: 'energy_recovery', ...engineArgs('get_energy_recovery', args) }), args.units, SI_OUT_ENERGY)
 );
 
 // ============================================================
@@ -1638,8 +1694,14 @@ server.tool("aisi_design_connection", CONNECTION_DESC + " (Same engine as design
 server.tool("steel_grades", "List the steel grades known to the engine (KS SGC/SSC, ASTM A653/A792/A1003) with Fy/Fu in ksi, the same values as Fy_MPa/Fu_MPa, and notes (KS D 3506 former → current names, e.g. SGC400 = SGC295Y 295/400 MPa). The first entry (SGC400) is only the panel's initial material — no tool assumes a grade; pass Fy/Fu explicitly. §A3.1.3 low-ductility grades (Fu/Fy < 1.08, e.g. SGC570, 80 ksi A653/A792) are excluded unless include_restricted=true, which returns them with the reduced §A3.1.3 values and restrictions.",
     {
         include_restricted: z.boolean().optional().describe("Also list §A3.1.3 restricted grades with reduced values (omit → false)"),
+        units: UNITS_OUT,
     },
-    async (args) => postState('steel_grades', 'steel_grades', args)
+    async (args) => {
+        const r = await callBridgePost('/action', { action: 'steel_grades', ...engineArgs('steel_grades', args) });
+        // 목록(배열) — 항목마다 바꾼다
+        if (args.units !== 'SI' || !Array.isArray(r)) { return json(r); }
+        return json({ grades: r.map((g: any) => convertOutputSIDeep(g, SI_OUT_STEEL).value), units: 'SI', units_note: 'Fy / Fu in MPa (Fy_MPa / Fu_MPa are the catalogue values)' });
+    }
 );
 
 server.tool("aisi_design_guide", "AISI S100-16 design workflow guide for the AI — steps, formulas, examples (text in US units).",

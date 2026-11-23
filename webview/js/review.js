@@ -20,9 +20,10 @@
     }
 }(typeof globalThis !== 'undefined' ? globalThis : this, function (UTILS, DS, RENDER) {
     'use strict';
-    const { fmt, verdictOf: _v3, notEvaluatedList: _notEvalList, warningsList: _warnList,
-        assumptionsList: _assumpList, scopeNotesList: _scopeList, userText } = UTILS;
+    const { fmt, verdictOf: _v3, userText } = UTILS;
     void fmt;
+    // K4b: 엔진 알림의 경계(한국어 · 보이는 단위) — 브라우저는 StcfsdNotices, node 는 require
+    const NOTICES = (typeof module === 'object' && module.exports) ? require('./notices.js') : globalThis.StcfsdNotices;
 
     // 단위 표 — app.js 의 UNIT 과 글 그대로(시험 review_contract 가 맞댄다)
     const _KIP_KN = 4.4482216152605, _IN_MM = 25.4, _IN_M = 0.0254, _FT_M = 0.3048;
@@ -79,6 +80,15 @@
     function make(env) {
         const document = env.doc;
         const _unitSystem = env.unitSystem === 'US' ? 'US' : 'SI';
+        // K4b: 목록 도우미는 보이는 단위로 그린 한국어 알림(옛 글은 알림이 없을 때만)
+        const _uo = { units: _unitSystem };
+        const _notEvalList = (r) => UTILS.notEvaluatedList(r, _uo);
+        const _warnList = (r) => UTILS.warningsList(r, _uo);
+        const _assumpList = (r) => UTILS.assumptionsList(r, _uo);
+        const _scopeList = (r) => UTILS.scopeNotesList(r, _uo);
+        /** 호스트가 옮겨 담은 옛 글(dsm_warnings · purlin_* · 검토 지점의 가정)을 같은 알림의 한국어로 */
+        const _koText = NOTICES ? NOTICES.textMap([env.design, env.load, env.lap, env.lastDsmResult], { units: _unitSystem, lang: 'ko' }) : (x) => x;
+        const _koCheck = (c) => (NOTICES ? NOTICES.readerCheck(c, _uo) : c);
         const model = env.model || null;
         const analysisResult = env.analysisResult || null;
         const lastDsmResult = env.lastDsmResult || null;
@@ -162,6 +172,7 @@
             const arr = (v) => Array.isArray(v) ? v.filter(Boolean).map(String) : [];
             if (!deck) { return { warnings: [], assumptions: [], scope: [] }; }
             const hasNew = Array.isArray(deck.warnings) || Array.isArray(deck.scope_notes) || Array.isArray(deck.assumptions);
+            if (Array.isArray(deck.notices)) { return { warnings: _warnList(deck), assumptions: _assumpList(deck), scope: _scopeList(deck) }; }
             return {
                 warnings: arr(deck.warnings),
                 assumptions: arr(deck.assumptions),
@@ -194,7 +205,8 @@
             const nm = c.name_ko || c.name || c.id;
             if (c.verdict === 'pass') { return '엔진: ' + nm + ' — 통과'; }
             if (c.verdict === 'fail') { return '엔진: ' + nm + ' — 불합격'; }
-            return '엔진: ' + nm + ' — 판정 없음' + (c.reason ? ' (' + c.reason + ')' : '');
+            const why = UTILS.checkReason(c, _uo);
+            return '엔진: ' + nm + ' — 판정 없음' + (why ? ' (' + why + ')' : '');
         }
         /** 끝없는 값(엔진 unbounded — Fcre = ∞)을 수로 적지 않는다 */
         function _fcreText(r) {
@@ -615,7 +627,7 @@
                         status: 'warn',
                         value: '적용 안 함',
                         criterion: '§I6.2.1 조건 (a)–(o) 확인 시에만 R 법 적용',
-                        note: (Array.isArray(_i6.reasons) && _i6.reasons.length > 0 ? _i6.reasons.join('; ') + ' — ' : '')
+                        note: (Array.isArray(_i6.reasons) && _i6.reasons.length > 0 ? _i6.reasons.map(_koText).join('; ') + ' — ' : '')
                             + '양력 구간은 R 법이 아닌 F2(LTB)로 검토되거나 판정 없음이 됩니다. 조건 확인 입력을 확인하세요.',
                     });
                 }
@@ -818,7 +830,7 @@
                         }
                     } else if (cwRequested) {
                         // K3-6(D2): 선택 조항을 쓰지 못한 것은 「실패」 가 아니다 — 주의, 까닭은 엔진이 적은 것(없으면 조건)
-                        const _cwW = (Array.isArray(d.warnings) ? d.warnings : []).find(w => /A3\.3\.2/.test(String(w)));
+                        const _cwW = _warnList(d).find(w => /A3\.3\.2/.test(String(w)));
                         cwStatus = 'warn';
                         cwValue = '적용 안 됨';
                         cwNote = _cwW ? String(_cwW) : '§A3.3.2 조건(Fu/Fy ≥ 1.2, R/t ≤ 7, 각도 ≤ 120°)을 확인하세요.';
@@ -995,7 +1007,7 @@
 
                 // 설계 엔진의 DSM 경고
                 if (d.dsm_warnings && d.dsm_warnings.length > 0) {
-                    d.dsm_warnings.forEach((w, i) => {
+                    d.dsm_warnings.map(_koText).forEach((w, i) => {
                         checks.push({
                             category: catG, item: 'DSM 경고 #'+(i+1),
                             status: 'warn',
@@ -1008,7 +1020,7 @@
 
                 // 설계 결과 warnings (Mcrd fallback, R-factor 등 — 정모멘트 NG 중복 제외)
                 if (d.warnings && d.warnings.length > 0) {
-                    d.warnings.forEach((w, i) => {
+                    _warnList(d).forEach((w, i) => {
                         // 정모멘트 NG 경고는 이용률 항목에서 이미 표시하므로 제외
                         if (w.includes('정모멘트 구간 NG')) return;
                         const isFallback = w.includes('§2.3.3.3') || w.includes('§2.3.1.3');
@@ -1435,7 +1447,7 @@
                 if (ap.uplift_R != null) {
                     rows.push(['양력 R (§I6.2.1)', RQ(ap.uplift_R, 'dimensionless', { digits: 2 }), '표 I6.2.1-1 — ' + (ap.uplift_R_basis || '')]);
                 } else if (ap.i621_check || ap.uplift_R === null) {
-                    const rs = ap.i621_check && Array.isArray(ap.i621_check.reasons) ? ap.i621_check.reasons.join('; ') : '';
+                    const rs = ap.i621_check && Array.isArray(ap.i621_check.reasons) ? ap.i621_check.reasons.map(_koText).join('; ') : '';
                     rows.push(['양력 R (§I6.2.1)', '— (적용 안 함)', '§I6.2.1 조건 미확인 또는 불충족 — R 법으로 판정하지 않음' + (rs ? ': ' + rs : '')]);
                 }
                 if (ap.unbraced && Array.isArray(ap.unbraced.inflection_points_ft)) {
@@ -1469,15 +1481,15 @@
         function _checkBlocks(r) {
             const list = r && Array.isArray(r.design_checks) ? r.design_checks : null;
             if (!list || list.length === 0) { return [{ kind: 'para', tone: 'muted', text: '이 결과에는 검토 항목(design_checks)이 없습니다 — 계산 과정을 보이지 않습니다.' }]; }
-            return list.map((c) => ({ kind: 'check', check: c }));
+            return list.map((c) => ({ kind: 'check', check: _koCheck(c) }));
         }
         function _noticeBlocks(r, extra) {
             const e = extra || {};
             return [
-                { kind: 'list', tone: 'ne', title: '평가하지 못한 항목 (판정 없음의 원인)', items: _uniq(_notEvalList(r).concat(_strs(e.ne))) },
+                { kind: 'list', tone: 'ne', title: '평가하지 못한 항목 (판정 없음의 원인)', items: _uniq(_notEvalList(r).concat(_strs(e.ne).map(_koText))) },
                 { kind: 'list', tone: 'muted', title: '검토하지 않은 항목 — 해당하면 별도 검토', items: _uniq(_strs(r && r.not_checked)) },
-                { kind: 'list', tone: 'warn', title: '경고 (값 또는 판정에 영향)', items: _uniq(_warnList(r).concat(_strs(e.warn))) },
-                { kind: 'list', title: '가정', items: _uniq(_assumpList(r).concat(_strs(e.asm))) },
+                { kind: 'list', tone: 'warn', title: '경고 (값 또는 판정에 영향)', items: _uniq(_warnList(r).concat(_strs(e.warn).map(_koText))) },
+                { kind: 'list', title: '가정', items: _uniq(_assumpList(r).concat(_strs(e.asm).map(_koText))) },
                 { kind: 'list', tone: 'muted', title: '적용 범위', items: _uniq(_scopeList(r)) },
             ];
         }
@@ -1497,7 +1509,7 @@
                         blocks.push({ kind: 'table', head: ['검토 지점', '하중 조합 · 패턴', 'Mu', 'Vu', '이용률', '판정'], rows: pts.map((p) => [p.check_point || '', p.combination || '',
                             RQ(p.Mu, 'moment'), RQ(p.Vu, 'force'), RQ(p.utilization, 'dimensionless', { digits: 3 }),
                             { text: p.error ? '오류: ' + p.error : _VTXT[p.pass === true ? 'pass' : (p.pass === false ? 'fail' : 'not_evaluated')], tone: _tone(p.pass === true ? 'pass' : (p.pass === false ? 'fail' : 'not_evaluated')) }]) });
-                        const asm = _uniq([].concat(...pts.map((p) => _strs(p.assumptions).map((a) => '[' + (p.check_point || '') + '] ' + a))));
+                        const asm = _uniq([].concat(...pts.map((p) => (Array.isArray(p.notices) ? _assumpList(p) : _strs(p.assumptions).map(_koText)).map((a) => '[' + (p.check_point || '') + '] ' + a))));
                         blocks.push({ kind: 'list', title: '검토 지점의 가정', items: asm });
                         const hostA = _uniq(pts.map((p) => p.host_assumption).filter(Boolean));
                         blocks.push({ kind: 'list', title: '호스트 가정', items: hostA });

@@ -4,7 +4,8 @@
 //  1. II-2A(랩 진술): 첫 안쪽 지점(지점 3)의 랩 → 랩 휨 국부 비 = 퍼린 lap-1 구간의 F3 비, 뒤틀림은 불합격이 아니다(Mnd 를 보내지 않음),
 //     결과의 section_source 가 그 구간 · 지점을 말한다. 화면 단추 · run_case_check 의 본문(호스트) — 같은 함수(utils.deriveLapSection)
 //  2. 지점을 모르거나 · 진술이 없으면 짓지 않는다(Se 없음 · 까닭) — 랩 휨은 판정 없음
-//  3. 비탄성 여유를 켜도(V8-S2) Se 는 그 지점 랩 구간의 Mnℓ/Fy — 지배 구간을 따라가지 않는다
+//  3. 비탄성 여유를 켜도(V8-S2) Se 는 그 지점 랩 구간의 lap_section 블록(엔진 e38af69 — Fn = Fy, 여유 · 냉간가공 없음) — 여유가 랩으로 옮겨 가지 않고,
+//     지배 구간을 따라가지도 않는다(K4b: 전에는 짓지 않았다 — 블록이 그 경우를 위해 있다)
 //  4. 순수 함수: 정모멘트 구간이 지배해도(V8-S2) · 그 지점의 랩 구간이 없으면 · 왼쪽 · 오른쪽이 다르면(작은 쪽)
 'use strict';
 const assert = require('assert');
@@ -18,18 +19,22 @@ const II2A = { member_app: 'roof-purlin', span_type: 'cont-6', span_ft: 25, span
   deck: { type: 'through-fastened', kphi_override: 0.3 }, pattern_loading: false, lr_reduced: false, i621_conditions_confirmed: true,
   I_span_in4: [9.18, 9.18, 7.76, 7.76, 9.18, 9.18], Fy: 55, Fu: 70, use_cold_work: true, lap_restrained: true };
 const check = (r, id) => (r.design_checks || []).find((c) => c.id === id);
+const lapMnl2 = (r) => (r.design_checks.find((c) => c.id === 'member.flexure.local') || {}).nominal.value;
 
 async function main() {
   const notes = [];
   // ── 4. 순수 함수 ─────────────────────────────────────────────────────
   {
-    const reg = (id, kind, support, Mnl, Vn, util) => ({ id, kind, support, result: { Mnl, Fy_used: 50, shear: { Vn }, utilization: util, pass: util <= 1 } });
+    const reg = (id, kind, support, Mnl, Vn, util) => ({ id, kind, support, result: { Mnl, Fy_used: 50, shear: { Vn }, utilization: util, pass: util <= 1,
+      ...(kind === 'lap' ? { lap_section: { available: Mnl > 0, Se: Mnl > 0 ? { symbol: 'Se', value: Mnl / 50, quantity: 'section_modulus' } : null,
+        Vn: { symbol: 'Vn', value: Vn, quantity: 'force' }, ...(Mnl > 0 ? {} : { reason: 'no Mcrl' }) } } : {}) } });
     const purlin = { pass: false, regions: [reg('positive-1', 'positive', null, 120, 5, 1.4), reg('lap-1', 'lap', 2, 90, 4, 0.8), reg('lap-2', 'lap', 2, 80, 3.5, 0.7)] };
     assert.strictEqual(U.pickGoverningPurlinDesign(purlin).Mnl, 120, 'the positive region governs this bundle');
     const d = U.deriveLapSection(purlin, 3, { stated: true });
     assert.deepStrictEqual([d.Se, d.Vn, d.regions, d.support, d.reason], [80 / 50, 3.5, ['lap-1', 'lap-2'], 3, null], 'the smaller lap region at support 3 — not the governing positive region');
     for (const [args, re] of [[[purlin, 2, { stated: true }], /no lap region at support 2/], [[purlin, null, { stated: true }], /not set/],
-      [[purlin, 3, {}], /not stated/], [[null, 3, { stated: true }], /no purlin/], [[{ regions: [reg('lap-1', 'lap', 2, 0, 4, 1)] }, 3, { stated: true }], /no local-buckling strength/]]) {
+      [[purlin, 3, {}], /not stated/], [[null, 3, { stated: true }], /no purlin/], [[{ regions: [reg('lap-1', 'lap', 2, 0, 4, 1)] }, 3, { stated: true }], /not available — no Mcrl/],
+      [[{ regions: [{ id: 'lap-1', kind: 'lap', support: 2, result: { Mnl: 90, Fy_used: 50 } }] }, 3, { stated: true }], /no lap_section block/]]) {
       const x = U.deriveLapSection(...args);
       assert(x.Se === null && x.Vn === null && re.test(x.reason), `${JSON.stringify(args[1])}: ${x.reason}`);
     }
@@ -64,9 +69,10 @@ async function main() {
     const dist = check(lr, 'lap.flexure.distortional');
     assert(!dist || dist.verdict !== 'fail', `distortional is not failed from an unrestrained Mnd (${dist && dist.verdict} ${dist && dist.ratio})`);
     const src = lr.section_source;
-    const lapMnl = (r) => (r.design_checks.find((c) => c.id === 'member.flexure.local') || {}).nominal.value;
-    assert(src && Math.abs(src.Se - lapMnl(lap1.result) / lap1.result.Fy_used) < 1e-12 && src.support === 3 && src.regions.includes('lap-1') && /lap region/.test(src.from),
-      `section_source names the lap region at support 3: ${JSON.stringify(src)}`);
+    const ls1 = lap1.result.lap_section;
+    assert(ls1 && ls1.available === true && ls1.Se.quantity === 'section_modulus', 'the lap region carries the lap_section block');
+    assert(src && src.Se === ls1.Se.value && src.Vn === ls1.Vn.value && src.support === 3 && src.regions.includes('lap-1') && /lap_section/.test(src.from),
+      `section_source names the lap region at support 3 and takes its lap_section block: ${JSON.stringify(src)}`);
     assert(Math.abs(src.Se - gov.result.Mnl / gov.result.Fy_used) > 1e-6, 'Se does not follow the governing region');
     assert(lr.assumptions.some((a) => /랩 단면 Se = .* lap-1/.test(a)), 'the result says where Se came from');
     notes.push(`II-2A support 3: lap local ${loc.ratio.toFixed(4)} = lap-1 F3 ${f3.ratio.toFixed(4)} (governing ${gov.id})`);
@@ -89,11 +95,15 @@ async function main() {
     lr = JSON.parse(JSON.stringify(await p.handleMcpAction({ action: 'run_case_check', what: 'lap' })));
     const l1 = pr2.regions.find((g) => g.id === 'lap-1');
     const g2 = pr2.regions.find((g) => g.id === pr2.governing.id);
-    // 엔진 733c18e: Se 는 비탄성 여유 없이 낸 랩 구간의 Mnℓ/Fy — 이 결과(여유를 켠 퍼린)에는 그 값이 없다 → 짓지 않는다. 지배 구간도 따라가지 않는다
+    // 엔진 e38af69: 블록은 여유 · 냉간가공과 무관하게 같은 기준 — 구간의 Mnℓ 은 여유로 올라가도 랩의 Se · 국부 비는 여유 없는 것 그대로
     assert(l1.result.Mne > l1.result.My, 'the reserve is applied in the lap region of this run');
-    assert(lr.section_source.Se === null && /inelastic reserve/.test(lr.section_source.reason), `inelastic reserve on: not derived (${JSON.stringify(lr.section_source)})`);
-    assert.strictEqual(check(lr, 'lap.flexure.local')?.verdict ?? 'not_evaluated', 'not_evaluated');
-    notes.push(`inelastic reserve: Se not derived (lap-1 Mne ${l1.result.Mne} > My; governing ${g2.id} not used)`);
+    assert(lapMnl2(l1.result) > ls1.Mnl.value * (1 + 1e-9), `the region's Mnl rose with the reserve (${lapMnl2(l1.result)} > ${ls1.Mnl.value})`);
+    assert(Math.abs(l1.result.lap_section.Se.value - ls1.Se.value) <= 1e-12 * ls1.Se.value, 'the block does not move with the reserve');
+    assert(lr.section_source.Se === l1.result.lap_section.Se.value, `inelastic reserve on: Se from the block (${JSON.stringify(lr.section_source)})`);
+    const loc2 = check(lr, 'lap.flexure.local');
+    assert(loc2 && Math.abs(loc2.ratio - loc.ratio) <= 1e-9 * loc.ratio, `the lap local ratio is the one without reserve (${loc2 && loc2.ratio} vs ${loc.ratio})`);
+    assert(Math.abs(lr.section_source.Se - g2.result.Mnl / g2.result.Fy_used) > 1e-6 || g2.id === 'lap-1', 'Se does not follow the governing region');
+    notes.push(`inelastic reserve: lap-1 Mnl ${lapMnl2(l1.result).toFixed(2)} (with reserve) — lap Se ${lr.section_source.Se.toFixed(4)} from the block, lap local ${loc2.ratio.toFixed(4)} unchanged`);
 
     // ── AI 가 Se 를 직접 주면 그 값과 「부른 쪽이 준 값」 ──────────────────────
     const direct = await p.handleMcpAction({ action: 'lap_connection', d: 8, t: 0.059, Fy: 55, Fu: 70, lap_left_in: 30, lap_right_in: 42, Mu_support: 105,

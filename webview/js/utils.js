@@ -1,12 +1,14 @@
+/* global module, globalThis, require */
 // StcfsdUtils — DOM 무의존 순수 유틸 (app.js에서 분리, 0926 후속-1).
 // UMD: 브라우저에서는 globalThis.StcfsdUtils, node 테스트에서는 require.
 (function (root, factory) {
     if (typeof module === 'object' && module.exports) {
-        module.exports = factory();
+        module.exports = factory(require('./notices'));
         return;
     }
-    root.StcfsdUtils = factory();
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+    // K4b: 엔진 알림의 경계(webview/js/notices.js — 브라우저에서는 utils.js 보다 먼저 싣는다)
+    root.StcfsdUtils = factory(root.StcfsdNotices);
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (NOTICES) {
     // 숫자 포맷: 비숫자 '-', 미소값 지수, 나머지 소수 4자리
     function fmt(v) {
         if (typeof v !== 'number') { return '-'; }
@@ -131,8 +133,29 @@
         return userText(String(item));
     }
 
+    /**
+     * K4b: 결과의 알림(notices)이 있으면 그것을 한국어로, opts.units(US · SI)로 그린 글 — 옛 글과 하나씩 맞는 것만, 나머지(호스트가 더한 글)는
+     * 그 글 그대로. 알림이 없는 결과는 null(옛 글을 쓴다).
+     */
+    function _noticeTexts(result, key, opts) {
+        if (!NOTICES || !result || typeof result !== 'object' || !Array.isArray(result.notices) || !result.notices.some((n) => n && typeof n === 'object')) { return null; }
+        if (!['warnings', 'assumptions', 'scope_notes', 'not_evaluated'].includes(key)) { return null; }
+        const units = opts && opts.units === 'SI' ? 'SI' : 'US';
+        return NOTICES.lines(result, { units, lang: 'ko', lists: [key] }).map((l) => {
+            // 입력 이름(wc_P …)은 화면의 칸 이름으로 — 알림이든 옛 글이든
+            const t = userText(l.text);
+            return l.subject ? l.subject + ' — ' + t : t;
+        });
+    }
+    /** 검토 항목의 이유(한국어, opts.units) — 구조가 없으면 옛 글 */
+    function checkReason(check, opts) {
+        if (!check || typeof check !== 'object') { return null; }
+        if (NOTICES) { const r = NOTICES.reason(check, { units: opts && opts.units === 'SI' ? 'SI' : 'US', lang: 'ko' }); if (r !== null) { return r; } }
+        return typeof check.reason === 'string' ? check.reason : null;
+    }
+
     /** 엔진의 「평가하지 못한 것」 목록(키 이름이 모듈마다 다르다)을 사람이 읽는 문장 목록으로. */
-    function notEvaluatedList(result) {
+    function notEvaluatedList(result, opts) {
         if (!result || typeof result !== 'object') { return []; }
         const out = [];
         const seen = new Set();
@@ -140,9 +163,17 @@
             const s = _itemText(item);
             if (s && !seen.has(s)) { seen.add(s); out.push(s); }
         };
+        const viaNotices = _noticeTexts(result, 'not_evaluated', opts);
         // 접합부는 not_evaluated_relevant 가 판정을 막는 것(not_evaluated 는 정보 포함 전체)이다.
         const keys = ['not_evaluated_relevant', 'not_evaluated', 'checks_not_evaluated'];
         for (const k of keys) {
+            if (k === 'not_evaluated' && viaNotices) {
+                // not_evaluated_relevant(옛 글)에 이미 실린 항목은 다시 싣지 않는다 — 같은 자리의 옛 글로 맞댄다
+                const relevant = new Set((Array.isArray(result.not_evaluated_relevant) ? result.not_evaluated_relevant : []).map((x) => JSON.stringify(x)));
+                const olds = Array.isArray(result.not_evaluated) ? result.not_evaluated : [];
+                viaNotices.forEach((t, i) => { if (!relevant.has(JSON.stringify(olds[i])) && t && !seen.has(t)) { seen.add(t); out.push(t); } });
+                continue;
+            }
             const v = result[k];
             if (Array.isArray(v)) { v.forEach(push); }
             else if (typeof v === 'string' && v) { push(v); }
@@ -151,7 +182,7 @@
     }
 
     /** 엔진 경고 목록(문자열 배열) — 중복 제거. */
-    function warningsList(result) {
+    function warningsList(result, opts) {
         if (!result || typeof result !== 'object') { return []; }
         const out = [];
         const seen = new Set();
@@ -159,16 +190,20 @@
             const s = _itemText(w);
             if (s && !seen.has(s)) { seen.add(s); out.push(s); }
         };
-        if (Array.isArray(result.warnings)) { result.warnings.forEach(add); }
+        const viaNotices = _noticeTexts(result, 'warnings', opts);
+        if (viaNotices) { viaNotices.forEach((t) => { if (t && !seen.has(t)) { seen.add(t); out.push(t); } }); }
+        else if (Array.isArray(result.warnings)) { result.warnings.forEach(add); }
         if (typeof result.warning === 'string' && result.warning) { add(result.warning); }
         if (typeof result.dsm_warning === 'string' && result.dsm_warning) { add(result.dsm_warning); }
         return out;
     }
 
-    function _listOf(result, key) {
+    function _listOf(result, key, opts) {
         if (!result || typeof result !== 'object') { return []; }
         const out = [];
         const seen = new Set();
+        const viaNotices = _noticeTexts(result, key, opts);
+        if (viaNotices) { viaNotices.forEach((t) => { if (t && !seen.has(t)) { seen.add(t); out.push(t); } }); return out; }
         const v = result[key];
         const items = Array.isArray(v) ? v : (typeof v === 'string' && v ? [v] : []);
         items.forEach((it) => {
@@ -179,10 +214,10 @@
     }
 
     /** 엔진 가정 목록(FIXES §3.1.1 — 기본값 입력·해석식 대체·보수 대체·자체 해석). */
-    function assumptionsList(result) { return _listOf(result, 'assumptions'); }
+    function assumptionsList(result, opts) { return _listOf(result, 'assumptions', opts); }
 
     /** 범위 안내(언제나 참인 적용 범위 문장) — 접어서 보인다. */
-    function scopeNotesList(result) { return _listOf(result, 'scope_notes'); }
+    function scopeNotesList(result, opts) { return _listOf(result, 'scope_notes', opts); }
 
     /** 이용률(비) 표시값. 판정이 OK 가 아니면 「OK」 문구를 붙이지 않는다. */
     function ratioWithVerdict(ratio, result) {
@@ -279,34 +314,27 @@
         let Se = null, Vn = null;
         const ids = [];
         for (const g of regs) {
-            const r = g.result;
-            const fy = Number(r.Fy_used);
-            // 반올림 전 값(검토 항목의 nominal — 엔진 계약), 없으면 결과 필드(표시 반올림)
-            const nominalOf = (id) => {
-                const c = Array.isArray(r.design_checks) ? r.design_checks.find((x) => x && x.id === id) : null;
-                return c && c.nominal && typeof c.nominal.value === 'number' && isFinite(c.nominal.value) ? c.nominal.value : null;
-            };
-            const mnl = nominalOf('member.flexure.local') ?? Number(r.Mnl);
-            if (!(mnl > 0) || !(fy > 0)) { return none('the lap region ' + g.id + ' has no local-buckling strength (Mnl)'); }
-            // 엔진 733c18e(계약 §6.3): Se 는 비탄성 여유 · 냉간 가공 없이 낸 랩 구간의 Mnℓ / Fy. 그 결과가 둘 가운데 하나를 품으면
-            // (Mne > My — 비탄성 여유, Fy_used > Fy_original — 냉간 가공) 그 값이 결과에 없다 — 짓지 않는다(호스트는 강도를 계산하지 않는다)
-            const my = Number(r.My), mne = Number(r.Mne), fyo = Number(r.Fy_original);
-            if (my > 0 && mne > my * (1 + 1e-9)) { return none('the purlin lap region ' + g.id + ' was designed with inelastic reserve (Mne > My) — its Mnl is not the lap section strength; the result has no Mnl without the reserve'); }
-            if (fyo > 0 && fy > fyo * (1 + 1e-9)) { return none('the purlin lap region ' + g.id + ' was designed with cold work (Fy_used > Fy) — its Mnl is not the lap section strength'); }
-            const se = mnl / fy;
+            // K4b(엔진 e38af69, 계약 §6.3): 랩 단면 강도는 그 구간 결과의 lap_section 블록에서 — Fn = Fy(Mne = My), §F3.2.1 국부좌굴만,
+            // 비탄성 여유 · 냉간가공 없음, Se = Mnℓ / Fy, Vn = §G2.1 한 부재. 구간 자신의 검토 항목 · Mnl(여유 · 냉간가공을 품을 수 있다)은 쓰지 않는다.
+            const ls = g.result.lap_section;
+            if (!ls || typeof ls !== 'object') { return none('the purlin lap region ' + g.id + ' has no lap_section block (re-run the purlin design with the lap restraint stated)'); }
+            if (ls.available === false || !ls.Se || !(Number(ls.Se.value) > 0)) {
+                return none('the lap section strength of ' + g.id + ' is not available' + (ls.reason ? ' — ' + (typeof ls.reason === 'string' ? ls.reason : JSON.stringify(ls.reason)) : ''));
+            }
+            const se = Number(ls.Se.value);
             if (Se === null || se < Se) { Se = se; }
-            const vn = nominalOf('member.shear') ?? Number(r.Vn || (r.shear && r.shear.Vn));
+            const vn = ls.Vn && Number(ls.Vn.value);
             if (vn > 0 && (Vn === null || vn < Vn)) { Vn = vn; }
             ids.push(String(g.id));
         }
-        return { Se, Vn, from: 'Mnl / Fy of the purlin lap region' + (ids.length > 1 ? 's ' : ' ') + ids.join(', ') + ' at support ' + support + ' (per member, Fn = Fy under the lap restraint statement)',
+        return { Se, Vn, from: 'lap_section of the purlin lap region' + (ids.length > 1 ? 's ' : ' ') + ids.join(', ') + ' at support ' + support + ' (Se = Mnl / Fy with Fn = Fy, no inelastic reserve, no cold work; Vn per member — Manual II-1A / II-2A)',
             regions: ids, support, reason: null };
     }
 
     return {
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
-        assumptionsList, scopeNotesList, userText, USER_TERMS,
+        assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason,
         pickGoverningPurlinDesign, deriveLapSection,
     };
 });

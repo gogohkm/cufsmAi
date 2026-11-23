@@ -217,6 +217,7 @@ function at(o, p) {
 
 const IGNORE_TOP = new Set(['units', 'text_units', 'units_note', 'report', 'timestamp']);
 /** displayTol(p) → SI 표시 반올림의 허용(그 칸이 표시 값이면) — 그때는 SI = 바꾼 US 표시 값 ± 그 반올림 */
+const TEXT_SI = { n: 0 };
 function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
   assert(!us.error, `${tool} US errored: ${us.error}`);
   assert.strictEqual(siR.units, 'SI', `${tool} SI result labelled`);
@@ -242,6 +243,16 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
       assert(ok, `${tool}: ${p} US ${v} → SI ${s} (ratio ${ratio} is not 1 or a unit factor)`);
       if (Math.abs(ratio - 1) >= 1e-12) { converted++; }
     } else if (/\.unit$/.test(p) || /\.formula_units$/.test(p) || /\.units$/.test(p)) {
+      continue;
+    } else if (/\.(unit_text|fmt|sep|value_unit_text)$/.test(p)) {
+      // K4b: 알림 매개변수 · §I6.2.1 조건의 단위 글자는 SI 글자로(값은 위에서 물리량으로 맞댄다)
+      continue;
+    } else if (typeof v === 'string' && typeof s === 'string' && s !== v) {
+      // K4b: 알림 · 이유 · 이름표 글은 SI 로 다시 그렸다 — US 글에 US 단위의 수가 있었고, SI 글에는 남지 않는다
+      // (US 글에 단위 없이 쓴 물리량 — 예 「fy = 50」 — 은 SI 에서 단위를 붙인다: 계약 §16.3)
+      assert(/\d\s?(in\b|in\.|ksi|kips?\b|kip-in|ft\b)/.test(v) || /\d\s?(mm|MPa|kN|kN-m|m)\b/.test(s), `${tool}: ${p} changed although it had no US number (${JSON.stringify(v)} → ${JSON.stringify(s)})`);
+      assert(!/\d\s?(ksi|kips?\b|kip-in)/.test(s), `${tool}: ${p} still has a US number in SI: ${JSON.stringify(s)}`);
+      TEXT_SI.n++;
       continue;
     } else {
       assert.deepStrictEqual(s, v, `${tool}: ${p} changed (${JSON.stringify(v)} → ${JSON.stringify(s)})`);
@@ -347,6 +358,7 @@ const DESIGN_SHAPED = new Set(['aisi_design_compression', 'aisi_design_flexure',
 const DATA_SHAPED = new Set(['analyze_loads', 'run_plastic_surface', 'run_vibration']);
 const KB = 1024;
 const NOTICES = ['warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'force_model', 'dsm_warning', 'host_warnings'];
+const NOTICES_JS = require(path.join(ROOT, 'webview', 'js', 'notices.js'));
 const stepless = (c) => { const { steps: _s, ...x } = c; void _s; return x; };
 
 // V6-02 · V5c-01 · V6-10 · V6-13: 요약 ⊇ 전체 — 이 시험이 따로 모은다(서버의 모으는 함수를 쓰지 않는다).
@@ -359,7 +371,8 @@ function noticeTexts(o, out = new Set()) {
   for (const [k, v] of Object.entries(o)) {
     if (k === 'design_checks' || k === 'steps' || k === 'report') { continue; }
     if (NOTICE_KEYS_T.has(k) && (Array.isArray(v) || typeof v === 'string')) {
-      for (const t of (Array.isArray(v) ? v : [v])) { if (t !== null && t !== undefined && t !== '') { out.add(JSON.stringify(t)); } }
+      // K4b: 알림 항목 {code, text} 는 그 글로(notices_elsewhere 는 한 단계로 편다)
+      for (const t of (Array.isArray(v) ? v : [v])) { if (t !== null && t !== undefined && t !== '') { out.add(JSON.stringify(t && typeof t === 'object' && typeof t.text === 'string' ? t.text : t)); } }
     } else { noticeTexts(v, out); }
   }
   return out;
@@ -382,7 +395,10 @@ function checkComplete(tag, s, full) {
 }
 
 /** 요약 · 검토 목록 수준이 판정의 뜻을 바꾸지 않는다: 판정 · 지배 · 검토 줄 · 알림 · 반올림 안내가 전체 결과와 같다. */
-function checkDesignSummary(tag, level, s, full) {
+function checkDesignSummary(tag, level, s, fullRaw) {
+  // K4b: 요약 · 검토 목록은 사람 · AI 가 읽는 꼴 — 알림 · 이유는 한국어(code 와 함께), 영어 이름은 빼고 name_ko. 전체 결과를 같은 함수로
+  // 그 꼴로 바꾼 것과 맞댄다(webview/js/notices.js forReader — 호스트가 쓰는 것)
+  const full = NOTICES_JS.forReader(fullRaw, { units: 'US', detail: level });
   if (Array.isArray(full.regions)) { return checkPurlinSummary(tag, level, s, full); }
   assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
   assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
@@ -409,7 +425,8 @@ function checkDesignSummary(tag, level, s, full) {
   }
   if (level === 'summary') {
     assert.deepStrictEqual(s.check_lines.map((c) => [c.id, c.ratio, c.verdict, c.governs === true, c.reason ?? null]),
-      dc.map((c) => [c.id, c.ratio ?? null, c.verdict, c.governs === true, c.reason || null]), `${tag}: one line per check`);
+      dc.map((c) => [c.id, c.ratio ?? null, c.verdict, c.governs === true, (c.governs === true ? null : c.reason) || null]), `${tag}: one line per check (a governing check's reason is in its head)`);
+    for (const g of s.governing_checks) { const f = dc.find((c) => c.id === g.id); assert.strictEqual(g.reason ?? null, f.reason || null, `${tag}: governing ${g.id} reason in the head`); }
     assert(!('design_checks' in s), `${tag}: no full items in the summary`);
   } else {
     assert.deepStrictEqual(s.design_checks, dc.map(stepless), `${tag}: every item without steps`);
@@ -432,6 +449,12 @@ function checkDesignSummary(tag, level, s, full) {
 const stripUnrounded = (v) => (Array.isArray(v) ? v.map(stripUnrounded) : (v && typeof v === 'object'
   ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'unrounded' && !/_unrounded$/.test(k)).map(([k, x]) => [k, stripUnrounded(x)])) : v));
 const roundTo = (v, d) => (typeof v === 'number' && Number.isFinite(v) ? (Math.round(v * 10 ** d) / 10 ** d) || 0 : v);
+function i621Compact(i) {
+  if (!i || typeof i !== 'object' || !Array.isArray(i.conditions)) { return i; }
+  const { checks: _c, conditions, ...rest } = i; void _c;
+  return { ...rest, conditions: conditions.map((c) => (c && typeof c === 'object' ? { id: c.id, status: c.status, ...(c.value !== undefined ? { value: c.value } : {}),
+    ...(c.limits ? { limits: c.limits } : {}), ...(c.value_unit_text ? { unit: c.value_unit_text } : {}), ...(c.value_as_length ? { value_as_length: c.value_as_length } : {}) } : c)) };
+}
 function checkPurlinSummary(tag, level, s, full) {
   assert.strictEqual(s.detail, level, `${tag}: detail echoed`);
   assert.deepStrictEqual(s.pass, full.pass, `${tag}: verdict`);
@@ -439,8 +462,10 @@ function checkPurlinSummary(tag, level, s, full) {
   assert.deepStrictEqual(s.governing, full.governing, `${tag}: governing region`);
   const disp = level === 'summary';
   for (const k of ['warnings', 'assumptions', 'not_evaluated', 'load_not_evaluated', 'wc_reactions', 'uplift_reactions', 'i621_check']) {
-    assert.deepStrictEqual(s[k], disp ? stripUnrounded(full[k]) : full[k], `${tag} keeps ${k}`);
+    const want = k === 'i621_check' && disp ? i621Compact(stripUnrounded(full[k])) : (disp ? stripUnrounded(full[k]) : full[k]);
+    assert.deepStrictEqual(s[k], want, `${tag} keeps ${k}`);
   }
+  // K4b: 요약의 §I6.2.1 은 조건마다 id · 판정 · 값 · 한계(이름표 목록 checks 와 이름표 글은 detail 'checks')
   if (disp) {
     assert(!/"unrounded"|_unrounded"/.test(JSON.stringify(s)), `${tag}: the summary carries display values only (no unrounded sub-objects)`);
     assert(/display values/.test(s.more) && /detail:'checks'/.test(s.more), `${tag}: more says the values are display-rounded and where the exact ones are`);
@@ -638,7 +663,13 @@ async function main() {
     let target = echo;
     const proxy = {
       getStatus: () => target.getStatus(),
-      async handleMcpAction(body) { recorded.push(JSON.parse(JSON.stringify(body))); return target.handleMcpAction(body); },
+      async handleMcpAction(body) {
+        // K4b: MCP 서버는 응답 모양(__reply {units, detail})을 함께 싣는다 — 엔진 인자가 아니다(호스트가 뺀다). 기록하는 본문은 그것을 뺀 것
+        const { __reply, ...rest } = body || {};
+        assert(__reply && (__reply.units === 'US' || __reply.units === 'SI') && typeof __reply.detail === 'string', `every POST carries __reply: ${JSON.stringify(__reply)}`);
+        recorded.push(JSON.parse(JSON.stringify(rest)));
+        return target.handleMcpAction(body);
+      },
     };
     bridge = new McpBridgeServer(() => proxy, port);
     await bridge.start();
@@ -1004,14 +1035,15 @@ async function main() {
         const args = { scope, id: item.id, ...(location ? { location } : {}) };
         const a = await call('get_design_check', args);
         assert(!a.isError, `get_design_check ${scope} ${item.id}: ${JSON.stringify(a.data).slice(0, 300)}`);
-        assert.deepStrictEqual(a.data.check, item, `get_design_check ${scope} ${item.id}: the item of the current result, with its steps`);
+        // K4b: AI 가 읽는 꼴(이유는 한국어 + reason_code, 이름은 name_ko) — 같은 함수로 바꾼 항목과 같다
+        assert.deepStrictEqual(a.data.check, NOTICES_JS.forReader(item, { units: 'US' }), `get_design_check ${scope} ${item.id}: the item of the current result, with its steps`);
         assert(a.data.current === true && a.bytes <= 20 * KB, `get_design_check ${scope} ${item.id}: ${a.bytes} B (budget 20 KB)`);
         DC_SWEEP.n++; DC_SWEEP.max = Math.max(DC_SWEEP.max, a.bytes);
       }
       const it = items.find((c) => Array.isArray(c.steps) && c.steps.length > 0) || items[0];
       const b = await call('get_design_check', { scope, id: it.id, ...(location ? { location } : {}), units: 'SI' });
       assert(!b.isError && b.data.units === 'SI', `get_design_check SI ${scope} ${it.id}`);
-      checkDesignChecks(`get_design_check ${scope}`, { design_checks: [it] }, { design_checks: [b.data.check] }, QTY_SEEN);
+      checkDesignChecks(`get_design_check ${scope}`, { design_checks: [NOTICES_JS.forReader(it, { units: "US" })] }, { design_checks: [b.data.check] }, QTY_SEEN);
     };
     await usVsSi('aisi_design_compression', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Pu: 5 },
       { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Pu: Fo },
@@ -1396,7 +1428,8 @@ async function main() {
     const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 16 };
     const largest = {};
     let nCases = 0; let nUnb = 0;
-    const reply = (r, units, detail, t) => JSON.parse(SH.unitReply(r, units, units === 'SI' ? si.SI_OUT_MEMBER : null, SH.SHAPERS[t], detail).content[0].text);
+    // K4b: 호스트가 하듯 먼저 읽는 꼴(forReader — 알림 · 이유를 그 단위의 한국어로)로 바꾼 뒤 모양을 줄인다
+    const reply = (r, units, detail, t) => JSON.parse(SH.unitReply(NOTICES_JS.forReader(r, { units, detail }), units, units === 'SI' ? si.SI_OUT_MEMBER : null, SH.SHAPERS[t], detail).content[0].text);
     for (const [name, c] of Object.entries(cases)) {
       if (!c.result || c.result.error) { continue; }
       const t = toolOf[c.method];
@@ -1417,7 +1450,7 @@ async function main() {
         for (const detail of ['summary', 'checks']) {
           const sh = reply(c.result, units, detail, t);
           const bytes = require('buffer').Buffer.byteLength(JSON.stringify(sh));
-          checkComplete(`${name} [${units} ${detail}]`, sh, c.result);
+          checkComplete(`${name} [${units} ${detail}]`, sh, NOTICES_JS.forReader(c.result, { units, detail }));
           if (detail === 'summary') {
             assert(bytes <= limitOf[c.method] * KB, `${name} ${units} summary ${bytes} B > ${limitOf[c.method]} KB`);
             const key = `${c.method} ${units}`;
@@ -1429,6 +1462,27 @@ async function main() {
     assert(nCases >= 120 && nUnb > 0, `broad set: ${nCases} cases, ${nUnb} unbounded values`);
     results.push(`contract cases through the reply shapers: ${nCases} × US/SI × summary/checks complete (notices, failing / not-evaluated / governing ids); `
       + `largest summaries ${Object.entries(largest).map(([k, v]) => `${k} ${v.b} B (${v.name})`).join(', ')}; ${nUnb} unbounded values left as they are`);
+
+    // K4b: 수가 든 도구는 모두 units 를 받는다(전에는 US 만) — 결과를 물리량으로 바꾼다
+    await usVsSi('get_status', {}, {}, { 'section.width': L, 'material.E': S, 'stress.max': S, 'lengths.max': L, 'section_params.H': L, load_fy: S });
+    await usVsSi('get_full_state', {}, {}, { 'section.height': L, 'material.G': S, 'lengths.min': L });
+    await usVsSi('get_nodes', {}, {}, {}, { check: (u, si2) => {
+      const i = u.nodes.findIndex((n) => n[1] !== 0 && n[2] !== 0 && n[7] !== 0);
+      assert(i >= 0 && Math.abs(si2.nodes[i][1] - u.nodes[i][1] * F.length) <= 1e-9 * Math.abs(si2.nodes[i][1]) && Math.abs(si2.nodes[i][7] - u.nodes[i][7] * F.stress) <= 1e-9 * Math.abs(si2.nodes[i][7]), 'get_nodes SI: x · z mm, stress MPa');
+    } });
+    await usVsSi('get_elements', {}, {}, { 'elements[0][3]': L });
+    await usVsSi('run_analysis', { neigs: 6 }, {}, { 'lengths[0]': L, 'dsm_P.Pcrl': Fo, 'dsm_P.Lcrl': L, fy_reference: S });
+    await usVsSi('get_buckling_curve', {}, {}, { 'curve[0][0]': L, 'curve[0][1]': 'none' });
+    await usVsSi('get_energy_recovery', { length_index: 1, mode_index: 0 }, {}, { length: L });
+    {
+      // 목록(배열) — SI 는 {grades, units}
+      const u = (await call('steel_grades', {})).data;
+      const s = (await call('steel_grades', { units: 'SI' })).data;
+      assert(Array.isArray(u) && Array.isArray(s.grades) && s.grades.length === u.length && s.units === 'SI', 'steel_grades SI: the same list');
+      s.grades.forEach((g, i) => assert(Math.abs(g.Fy - u[i].Fy * F.stress) <= 1e-9 * g.Fy && Math.abs(g.Fu - u[i].Fu * F.stress) <= 1e-9 * g.Fu
+        && g.Fy_MPa === u[i].Fy_MPa, `steel_grades SI ${g.id}: Fy · Fu in MPa (${g.Fy} vs ${u[i].Fy})`));
+      results.push(`steel_grades: ${u.length} grades, Fy · Fu in MPa with units SI`);
+    }
 
     // 9c. 실제 엔진 출력이 지난 quantity 종류(나머지는 9a 의 합성 항목으로만 — 엔진이 아직 내지 않는다)
     const realKinds = [...QTY_SEEN.keys()].sort();

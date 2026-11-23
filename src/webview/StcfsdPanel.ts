@@ -36,6 +36,8 @@ import { isMcpContext } from '../records/context';
 import { RunKind } from '../records/runs';
 import { createCaseState } from '../case/caseState';
 import { currentActor, runAs } from '../mcp/actorScope';
+// K4b: 엔진 알림의 경계(화면 · 검증 · 보고서 · MCP 가 같은 함수로) — webview/js/notices.js
+const NOTICES = require('../../webview/js/notices');
 import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, UNIT_LABEL } from '../mcp/siUnits';
 import {
     buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts, isCalcMode, lapSectionFor,
@@ -568,7 +570,32 @@ export class StcfsdPanel implements McpPanelInterface {
     /** WebView에서 수신한 메시지 처리 */
     /** R1-2: 편집 상태의 화면(웹뷰)의 메시지 — 사람의 문맥 안에서(그 안에서 부른 동작의 기록 줄 행위자 = person) */
     private _handleMessage(message: WebviewToExtMessage): Promise<void> {
-        return runAs({ kind: 'person' }, () => this._handleMessageInner(message));
+        return runAs({ kind: 'person' }, () => {
+            const ro = this._pageModelRefusal(message);
+            if (ro) {
+                // 읽기 전용 대상 — 화면의 모델 변경을 받지 않고 파일의 모델을 다시 보낸다(까닭과 함께)
+                this._postMessage('modelLoaded', this._model);
+                if (message.command === 'runAnalysis') { this._postMessage('analysisError', { error: ro }); }
+                vscode.window.showWarningMessage(ro);
+                return Promise.resolve();
+            }
+            return this._handleMessageInner(message);
+        });
+    }
+    /** 읽기 전용 대상에서 화면이 모델을 바꾸려 하면 그 까닭(해석 실행은 화면의 칸이 모델과 다를 때만) */
+    private _pageModelRefusal(message: WebviewToExtMessage): string | null {
+        const ro = this._recordsReadOnly();
+        if (!ro) { return null; }
+        const cmd = (message as any)?.command;
+        const d = (message as any)?.data;
+        let changes = StcfsdPanel.PAGE_MODEL_COMMANDS.has(cmd);
+        if (cmd === 'runAnalysis' && d && typeof d === 'object') {
+            const m: any = this._model;
+            const differs = (k: string, v: any) => v !== undefined && v !== null && JSON.stringify(v) !== JSON.stringify(m[k]);
+            changes = differs('prop', d.prop) || differs('lengths', d.lengths) || differs('BC', d.BC)
+                || (d.neigs !== undefined && d.neigs !== null && d.neigs !== m.neigs);
+        }
+        return changes ? `${ro.replace(/ — not changed$/, '')} — the model is not changed (make a new case from it, or take the lock)` : null;
     }
 
     private async _handleMessageInner(message: WebviewToExtMessage): Promise<void> {
@@ -3734,6 +3761,29 @@ export class StcfsdPanel implements McpPanelInterface {
      * 성공하면 그 도구의 인자 묶음을 검토 상태에 통째로 쓴다 — 응답에 case_rev 와, 사람이 정했던 값 가운데 바꾼 것(case_inputs_replaced).
      */
     public async handleMcpAction(options: any): Promise<any> {
+        // K4b: MCP 서버가 싣는 응답 모양(단위 · detail) — 엔진 인자가 아니다. 답을 AI 가 읽는 꼴로(알림 · 이유 · 이름표를 한국어 · 그 단위로)
+        let reply: { units?: string; detail?: string } | null = null;
+        if (options && typeof options === 'object' && !Array.isArray(options) && Object.prototype.hasOwnProperty.call(options, '__reply')) {
+            const { __reply, ...rest } = options;
+            reply = __reply && typeof __reply === 'object' ? __reply : {};
+            options = rest;
+        }
+        // R1-2(오케스트레이터 결정): 읽기 전용으로 연 대상은 모델도 바꾸지 않는다 — 화면의 판정이 파일이 담을 수 없는 상태의 것이 되지 않게
+        const roModel = StcfsdPanel.MODEL_ACTIONS.has(String(options?.action)) ? this._recordsReadOnly() : null;
+        if (roModel) {
+            return { error: `${options.action}: ${roModel}. To work on it, make a new case from it (new_case {name, kind, from: 'current'}) or ask the person to take the lock.` };
+        }
+        const r = await this._handleMcpActionInner(options);
+        return reply ? NOTICES.forReader(r, { units: reply.units === 'SI' ? 'SI' : 'US', detail: reply.detail }) : r;
+    }
+    /** 모델(단면 · 재료 · 경계 · 길이 · 응력 · 스프링 · 구속)을 바꾸는 MCP 동작 — 읽기 전용 대상에서 거절 */
+    private static readonly MODEL_ACTIONS = new Set(['generate_template', 'set_material', 'set_bc', 'set_lengths', 'set_load_case', 'set_stress',
+        'doubler', 'apply_deck_springs', 'set_node_stress', 'set_springs', 'set_constraints', 'set_nodes', 'set_elements', 'add_node', 'add_element',
+        'modify_node', 'delete_node', 'modify_element', 'delete_element', 'set_gbtcon']);
+    /** 화면의 모델을 바꾸는 메시지 */
+    private static readonly PAGE_MODEL_COMMANDS = new Set(['setStress', 'updateModel', 'generateTemplate', 'applyStress']);
+
+    private async _handleMcpActionInner(options: any): Promise<any> {
         const fromPage = !!options && typeof options === 'object' && this._pageActions.has(options);
         const r = await this._handleAction(options);
         if (fromPage || !r || typeof r !== 'object' || Array.isArray(r) || r.error) { return r; }
@@ -5474,6 +5524,9 @@ ${inner}
         const designStateUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'designState.js')
         );
+        const noticesUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'notices.js')
+        );
         const utilsUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'utils.js')
         );
@@ -6276,6 +6329,7 @@ ${inner}
     </div>
 
     <script nonce="${nonce}" src="${designStateUri}"></script>
+    <script nonce="${nonce}" src="${noticesUri}"></script>
     <script nonce="${nonce}" src="${utilsUri}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'reportRender.js'))}"></script>
     <script nonce="${nonce}" src="${webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, 'webview', 'js', 'review.js'))}"></script>
