@@ -1,6 +1,8 @@
 /* global process */
 // W3 — 렌더 시험(opt-in): 진짜 StcfsdPanel + 진짜 파이썬 + 진짜 웹뷰(헤드리스 Edge/Chrome, DevTools 프로토콜).
 //   npm run test:rendered          (Edge 또는 Chrome 필요 — 없으면 SKIP 을 분명히 적고 끝냄)
+//   node test/rendered/run.js --only=V4-08,K4a   이름에 그 글(대소문자 무시)이 든 시나리오만 — 바꾼 화면 코드의 시나리오만 돌릴 때.
+//                                  시나리오마다 제 단면 · 입력을 스스로 만든다; 건너뛴 것은 결과에 넣지 않는다.
 // 검증 V4(docs/reviews/20261122-engine-review/verify/V4-boundary-rendered.md)의 결함을 화면에서 재현하는 시나리오.
 // 그림은 test/rendered/out/shots/ (git 에 넣지 않음 — test/rendered/.gitignore).
 'use strict';
@@ -12,8 +14,10 @@ const { pythonPath } = require('../webview/panel_harness');
 const { startMcp } = require('./mcp');
 
 const results = [];
+const ONLY = ((process.argv.find((a) => a.startsWith('--only=')) || '').slice('--only='.length)).split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 
 async function step(name, fn) {
+  if (ONLY.length && !ONLY.some((o) => name.toLowerCase().includes(o))) { console.log(`  skip ${name} (--only)`); return; }
   const t0 = Date.now();
   try {
     await fn();
@@ -84,6 +88,8 @@ async function ii2aLoads(ctx, opts = {}) {
   await S('chk-pattern-loading', false);
   await S('chk-lr-reduced', false);
   await S('chk-i621-confirmed', true);
+  // 계약 §6.3: II-2A 는 랩 구속을 가정으로 밝힌다(Design Manual) — 사람의 진술
+  await S('chk-lap-restrained', true);
   await S('span-Ix-list', '9.18, 9.18, 7.76, 7.76, 9.18, 9.18');
   for (const id of (opts.blank || [])) { await S(id, ''); }
   const m = ctx.mark();
@@ -679,8 +685,8 @@ async function main() {
   fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ results, console: ctx.log.console.filter((c) => c.type === 'error'),
     exceptions: ctx.log.exceptions }, null, 1));
   console.log(`page exceptions: ${ctx.log.exceptions.length}, console errors: ${ctx.log.console.filter((c) => c.type === 'error').length}`);
-  console.log(`test:rendered: ${failed.length === 0 ? 'PASS' : 'FAIL'} (${results.length - failed.length}/${results.length}; screenshots in test/rendered/out/shots)`);
-  if (failed.length > 0 || ctx.log.exceptions.length > 0) { process.exitCode = 1; }
+  console.log(`test:rendered: ${failed.length === 0 ? 'PASS' : 'FAIL'} (${results.length - failed.length}/${results.length}${ONLY.length ? `, --only=${ONLY.join(',')}` : ''}; screenshots in test/rendered/out/shots)`);
+  if ((ONLY.length && results.length === 0) || failed.length > 0 || ctx.log.exceptions.length > 0) { process.exitCode = 1; }
   await sleep(200);
 }
 

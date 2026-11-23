@@ -229,6 +229,8 @@ export function buildPurlinRequest(st: CaseState, ctx: RequestContext): BuiltReq
         'wc_section_family', 'wc_flange_condition', 'wc_overhang', 'wc_edge_distance', 'wc_n_webs', 'wc_support_fastener_spacing']) {
         if (design.data[k] !== undefined) { opts[k] = design.data[k]; }
     }
+    // 계약 §6.3: 사람이 밝힌 랩 구속(확인했을 때만 — 없음 = 밝히지 않음)
+    if (new Reader(st, ctx.drafts).chk('lapRestrained')) { opts.lap_restrained = true; }
     return { data: { ...loads.data, ...opts, Fy: design.data.Fy, Fu: design.data.Fu }, missing: [] };
 }
 
@@ -265,9 +267,8 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
         Mnd: lpMnd,
         Vn: lpVn,
     };
-    // 엔진 b288448: 화면 칸이 아직 없는 Lap 입력 — AI 가 design_lap_connection 으로 준 것(검토 상태의 mcpOnly)만. 없으면 키를 넣지 않는다(화면 본문과 같게).
-    const lapOnly = (st.mcpOnly && st.mcpOnly.design_lap_connection) || {};
-    if (lapOnly.distortion_restrained === true) { data.distortion_restrained = true; }
+    // 계약 §6.3: 랩 구속의 진술 — 검토 상태의 lapRestrained(화면 칸 · MCP · 파일이 같은 키). 확인했을 때만 넣는다
+    if (r.chk('lapRestrained')) { data.lap_restrained = true; }
     return { data, missing: r.missing };
 }
 

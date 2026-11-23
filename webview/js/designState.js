@@ -70,6 +70,9 @@
         ['deckKxOverride', 'deck-kx-override', 'latStiff', 'num', _C('deck', null, 'load')],
         ['bracePointsFt', 'brace-points', 'length_ft', 'list', _C('deck', null, 'load')],
         ['chkI621Confirmed', 'chk-i621-confirmed', null, 'chk', _C('deck', false, 'load')],
+        // 계약 §6.3: 랩 구속의 진술(사람이 밝힌다 — 처음 값 없음 = 밝히지 않음). 퍼린 랩 구간과 랩 도구가 같이 쓴다; 랩 탭의 칸은 거울
+        ['lapRestrained', 'chk-lap-restrained', null, 'chk', _C('lap', false, 'design')],
+        ['lapRestrainedLap', 'chk-lap-restrained-lap', null, 'chk', _MIR('lap', 'lapRestrained', 'design')],
         ['deckInsulationIn', 'deck-insulation', 'length', 'num', _C('deck', null, 'load')],
         ['deckRTested', 'deck-R-tested', null, 'num', _C('deck', null, 'load')],
         // 설계 길이 · 계수 · 소요강도 (소요강도 칸은 ② 탭에 있다 — 바꾸면 하중 해석부터 낡는다: 지금 규칙)

@@ -1,12 +1,13 @@
 {
  "about": "K2 phase 0 golden — csd-roundtrip. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-22",
+ "recorded": "2026-11-23",
  "entries": [
   {
    "id": "consistent.US.diff",
    "expect": "pin",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
-    "exactCount": 123,
+    "exactCount": 125,
     "changed": {
      "analysisLenMax": {
       "kind": "float-noise",
@@ -24,9 +25,16 @@
       "reason": null
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — analysisLenMax 는 모델 길이의 최댓값 그대로(499.99999999999994 — 파일의 모델이 그 값, 전: 10 자리 글을 되읽어 500)"
+     },
+     "date": "2026-11-24"
     }
-   ],
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — analysisLenMax 는 모델 길이의 최댓값 그대로(499.99999999999994 — 파일의 모델이 그 값, 전: 10 자리 글을 되읽어 500)"
+   ]
   },
   {
    "id": "consistent.US.dom",
@@ -62,6 +70,8 @@
     "deck-kx-override": "1.27",
     "brace-points": "6.25, 12.5",
     "chk-i621-confirmed": true,
+    "chk-lap-restrained": true,
+    "chk-lap-restrained-lap": true,
     "deck-insulation": "3",
     "deck-R-tested": "0.6",
     "design-KxLx": "120",
@@ -177,11 +187,23 @@
      "2.5"
     ],
     "__unitSystem": "US"
-   }
+   },
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
+   "flipped": [
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
+    }
+   ]
   },
   {
    "id": "consistent.US.saved",
    "expect": "pin",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
     "unitSystem": "US",
     "analysisMethod": "DSM",
@@ -223,6 +245,8 @@
      12.5
     ],
     "chkI621Confirmed": true,
+    "lapRestrained": true,
+    "lapRestrainedLap": true,
     "deckInsulationIn": 3,
     "deckRTested": 0.6,
     "KxLx": 120,
@@ -359,15 +383,23 @@
       "reason": null
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 위와 같음"
+     },
+     "date": "2026-11-24"
     }
-   ],
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 위와 같음"
+   ]
   },
   {
    "id": "consistent.SI.diff",
    "expect": "pin",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
-    "exactCount": 122,
+    "exactCount": 124,
     "changed": {
      "analysisLenMax": {
       "kind": "float-noise",
@@ -400,13 +432,21 @@
       "reason": null
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — SI 왕복에서 정확히 같은 키 77 → 122"
+     },
+     "date": "2026-11-24"
     }
-   ],
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — SI 왕복에서 정확히 같은 키 77 → 122"
+   ]
   },
   {
    "id": "consistent.SI.dom",
    "expect": "pin",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
     "design-fy": "344.737864658",
     "design-fu": "448.159224056",
@@ -438,6 +478,8 @@
     "deck-kx-override": "8756.34176232",
     "brace-points": "1.905, 3.81",
     "chk-i621-confirmed": true,
+    "chk-lap-restrained": true,
+    "chk-lap-restrained-lap": true,
     "deck-insulation": "76.2",
     "deck-R-tested": "0.6",
     "design-KxLx": "3048",
@@ -562,13 +604,21 @@
       "reason": null
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 열 때의 Fy 글을 12 자리로(전: 반올림 없는 344.73786465841806)"
+     },
+     "date": "2026-11-24"
     }
-   ],
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 열 때의 Fy 글을 12 자리로(전: 반올림 없는 344.73786465841806)"
+   ]
   },
   {
    "id": "consistent.SI.saved",
    "expect": "pin",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
     "unitSystem": "SI",
     "analysisMethod": "DSM",
@@ -610,6 +660,8 @@
      12.5
     ],
     "chkI621Confirmed": true,
+    "lapRestrained": true,
+    "lapRestrainedLap": true,
     "deckInsulationIn": 3,
     "deckRTested": 0.6,
     "KxLx": 120,
@@ -746,9 +798,16 @@
       "reason": null
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 저장값이 파일 값 그대로(65, 전 65.0000000000082)"
+     },
+     "date": "2026-11-24"
     }
-   ],
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 저장값이 파일 값 그대로(65, 전 65.0000000000082)"
+   ]
   },
   {
    "id": "coupled.dom",

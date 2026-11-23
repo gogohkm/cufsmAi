@@ -32,6 +32,7 @@ const NON_DEFAULT = {
   deckKxOverride: 1.27,              // kip/in/in (II-1C kx 1.28 정도)
   bracePointsFt: [6.25, 12.5],
   chkI621Confirmed: true,
+  lapRestrained: true, lapRestrainedLap: true,   // 계약 §6.3 랩 구속의 진술(랩 탭 칸은 거울)
   deckInsulationIn: 3,               // in
   deckRTested: 0.6,
   // 설계 길이 · 계수 · 소요강도

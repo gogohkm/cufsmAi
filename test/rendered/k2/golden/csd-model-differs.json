@@ -1,12 +1,13 @@
 {
  "about": "K2 phase 0 golden — csd-model-differs. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-22",
+ "recorded": "2026-11-23",
  "entries": [
   {
    "id": "modelDiffers.US.diff",
    "expect": "pin",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
-    "exactCount": 108,
+    "exactCount": 110,
     "changed": {
      "analysisBC": {
       "kind": "changed",
@@ -99,9 +100,16 @@
       "reason": null
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 모델 칸 tplB 가 정확한 값(1.968503937007874)"
+     },
+     "date": "2026-11-24"
     }
-   ],
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — 모델 칸 tplB 가 정확한 값(1.968503937007874)"
+   ]
   }
  ]
 }

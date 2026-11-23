@@ -1152,10 +1152,22 @@
                 Mnd: lpMnd, // §F4 뒤틀림 공칭휨강도 (kip-in, 있을 때만)
                 Vn: lpVn,   // §G 공칭전단강도 (kips, 없으면 python이 §G2.1 자동산정)
             };
+            // 계약 §6.3: 랩 구속의 진술 — 퍼린 탭과 같은 검토 상태 키(lapRestrained, 이 칸은 거울)
+            if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked) { data.lap_restrained = true; }
             if (_blockIfMissing('Lap 접합부')) { return; }
             vscode.postMessage({ command: 'runLapConnection', data });
         });
     }
+
+    // 계약 §6.3: 랩 구속의 칸 둘(퍼린 탭 · 랩 탭)은 검토 상태의 한 값(lapRestrained — 랩 탭은 거울)
+    ['chk-lap-restrained', 'chk-lap-restrained-lap'].forEach((id, i, all) => {
+        const el = /** @type {HTMLInputElement|null} */ (document.getElementById(id));
+        if (!el) { return; }
+        el.addEventListener('change', () => {
+            const other = /** @type {HTMLInputElement|null} */ (document.getElementById(all[1 - i]));
+            if (other) { other.checked = el.checked; }
+        });
+    });
 
     const btnSingleConn = document.getElementById('btn-run-single-conn');
     if (btnSingleConn) {
@@ -4200,6 +4212,8 @@
                 ['use_inelastic_reserve', 'use_cold_work', 'wc_N', 'wc_R', 'wc_fastened', 'wc_web_config',
                     'wc_section_family', 'wc_flange_condition', 'wc_overhang', 'wc_edge_distance', 'wc_n_webs',
                     'wc_support_fastener_spacing'].forEach(k => { if (data[k] !== undefined) opts[k] = data[k]; });
+                // 계약 §6.3: 사람이 밝힌 랩 구속(확인했을 때만)
+                if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked) { opts.lap_restrained = true; }
                 vscode.postMessage({ command: 'runPurlinDesign', data: { ...loads, ...opts, Fy: data.Fy, Fu: data.Fu } });
                 return;
             }

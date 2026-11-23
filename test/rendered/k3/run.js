@@ -269,6 +269,8 @@ async function ii2aGui(ctx) {
   await S('chk-pattern-loading', false);
   await S('chk-lr-reduced', false);
   await S('chk-i621-confirmed', true);
+  // 계약 §6.3: II-2A 는 랩 구속을 가정으로 밝힌다(Design Manual) — 사람의 진술
+  await S('chk-lap-restrained', true);
   await S('span-Ix-list', '9.18, 9.18, 7.76, 7.76, 9.18, 9.18');
 }
 

@@ -2900,6 +2900,8 @@ export class StcfsdPanel implements McpPanelInterface {
         const geom = this._designSectionGeometry(baseModel);
         warnings.push(...geom.warnings);
         const sectionType = geom.section.type;
+        // 계약 §6.3: 사람이 밝힌 랩 구속(design_purlin · 화면 · 파일 — 같은 검토 상태 키)
+        const lapStated = options?.lap_restrained === true || options?.distortion_restrained === true;
         const memberOpts: any = {};
         for (const k of StcfsdPanel.PURLIN_MEMBER_OPTIONS) {
             if (options?.[k] !== undefined) { memberOpts[k] = options[k]; }
@@ -3058,6 +3060,7 @@ export class StcfsdPanel implements McpPanelInterface {
         //   (A) 구간 최대 M(엔진 M_max_abs) + 그 위치의 V, (B) 구간 최대 V + 그 위치의 M,
         //   (C) 구간 안 지점마다 지점 M + 지점 양쪽 V 중 큰 값 + 웹 크리플링(wc_P · wc_M · 지점 형식).
         const out: any[] = [];
+        const regionNotices = new Map<string, string[]>();
         for (const rg of regions) {
             const r = rg.src;
             const x0 = Number(r.start_ft), x1 = Number(r.end_ft);
@@ -3084,10 +3087,10 @@ export class StcfsdPanel implements McpPanelInterface {
             const params: any = { ...baseDesign, dsm, moment_sign: sign };
             if (rg.lap) {
                 // 랩: 두 부재 강도의 합(매뉴얼 II-2A 가정 (a)–(c)) — 같은 뜻으로 각 부재가 M·V 의 절반을 진다.
-                // 랩 안에서는 횡비틀림 · 뒤틀림을 검토하지 않는다(가정, 아래 assumptions).
-                params.Lb = 0; params.Cb = 1.0;
-                params.distortional_not_applicable = true;
-                delete params.dsm.Mcrd;
+                // 계약 §6.3: 랩 안의 횡비틀림 · 뒤틀림 구속은 사람이 밝힌다 — 호스트는 Lb · Cb · distortional_not_applicable · Mcrd 를 정하지 않고
+                // lap_region 과 그 진술(lap_restrained — 옛 이름 distortion_restrained)을 그대로 넘긴다. 엔진이 가정을 쓰거나 판정 없음으로 밝힌다.
+                params.lap_region = true;
+                if (lapStated) { params.lap_restrained = true; }
             } else {
                 // V4-20: 엔진이 구간의 Ly 를 주지 않으면 0(완전 구속)으로 채우지 않는다 — Lb 를 보내지 않아 엔진이
                 // 횡비틀림을 「판정 없음」으로 밝힌다. Cb 가 없으면 보내지 않는다(엔진 1.0 + 알림).
@@ -3207,7 +3210,8 @@ export class StcfsdPanel implements McpPanelInterface {
             out.push({
                 id: rg.id, kind: rg.kind, label: rg.label, span: r.span ?? null, support: r.support ?? null,
                 side: r.side ?? null, start_ft: r.start_ft, end_ft: r.end_ft,
-                Ly_in: rg.lap ? 0 : r.Ly_in, Cb: rg.lap ? 1.0 : r.Cb,
+                // 랩 구간의 Ly · Cb: 진술이 있으면 엔진이 Lb = 0 · Cb = 1.0 을 쓴다(Manual 의 가정), 없으면 그 검토는 판정 없음 — 지어 적지 않는다
+                Ly_in: rg.lap ? (lapStated ? 0 : null) : r.Ly_in, Cb: rg.lap ? (lapStated ? 1.0 : null) : r.Cb,
                 // V4-13: 랩은 두 부재 — Mu · Vu 는 합계, 결과의 강도는 한 부재. 화면이 부재당 값을 함께 보인다.
                 Mu, Vu: pV ? pV.V : null, members: rg.lap ? 2 : 1, R_uplift: rg.R ?? null,
                 // V4-30: 이 구간 값을 만든 하중조합(포락의 대표 조합 — 중력 · 양력)
@@ -3216,16 +3220,24 @@ export class StcfsdPanel implements McpPanelInterface {
                 i621_region_eligible: r.i621_region_eligible,
                 result,
             });
+            // 같은 글은 구간마다 되풀이하지 않는다 — 글 하나에 그 구간들의 이름(아래에서 한 줄로)
             for (const item of notEvalRegion) {
-                notEvaluated.push(`[${rg.label}] ${item}`);
+                const labels = regionNotices.get(item) || [];
+                labels.push(rg.label);
+                regionNotices.set(item, labels);
             }
             if (results.some((x) => x?.error)) {
                 notEvaluated.push(`[${rg.label}] 설계 오류: ${results.filter((x) => x?.error).map((x) => x.error).join('; ')}`);
             }
         }
+        for (const [item, labels] of regionNotices) { notEvaluated.push(`[${labels.join(' · ')}] ${item}`); }
         if (regions.some((rg) => rg.lap)) {
-            assumptions.push('랩 구간: 겹친 두 부재의 강도 합(각 부재가 M · V 의 절반)으로 검토하고 랩 안의 횡비틀림 · 뒤틀림은 검토하지 않음 '
-                + '(AISI Manual II-2A 가정 (a)–(c) — 기준 조항이 아닌 설계 가정).');
+            assumptions.push('랩 구간: 겹친 두 부재의 강도 합(각 부재가 M · V 의 절반)으로 검토 (AISI Manual II-2A 가정 (a)–(c) — 기준 조항이 아닌 설계 가정).');
+            if (lapStated) {
+                assumptions.push('랩 안의 구속: 사람이 「랩 구간의 구속 확인」(lap_restrained) 으로 밝혔습니다 — 횡비틀림(F2)은 비지지 길이 0(Mne = My), 뒤틀림(F4)은 해당 없음(엔진이 그 진술을 출처로 기록).');
+            } else {
+                notEvaluated.push('랩 구간의 횡비틀림(F2) · 뒤틀림(F4): 구속을 밝히지 않음 — 「랩 구간의 구속 확인」(lap_restrained) 을 확인하면 Design Manual II-1A / II-2A 의 가정으로 검토합니다');
+            }
         }
         assumptions.push('구간의 Vu 는 그 구간 안 전단 포락선의 최대 |V| 를 구간 최대 모멘트와 함께 썼습니다(보수 측).');
         for (const a of (Array.isArray(loadResult.assumptions) ? loadResult.assumptions : [])) { assumptions.push(`[하중] ${a}`); }
@@ -5177,6 +5189,9 @@ ${inner}
                         <input type="number" id="config-spacing" value="1.0" step="0.1" style="width:68px">
                     </div>
 
+                    <div class="input-row" title="AISI Design Manual Examples II-1A / II-2A: &quot;The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling&quot; (assumption (f): &quot;the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps&quot;). 확인하면 랩 구간의 횡비틀림(F2, Lb = 0)과 뒤틀림(F4, 해당 없음)을 이 가정으로 검토합니다. 확인하지 않으면 그 두 검토는 판정 없음입니다.">
+                        <label><input type="checkbox" id="chk-lap-restrained"> 랩 구간의 구속 확인 — 겹친 부분은 횡비틀림 · 뒤틀림 좌굴에 충분히 구속됨 (Design Manual II-1A / II-2A 의 가정)</label>
+                    </div>
                     <!-- 스팬/지점/랩 테이블 -->
                     <div id="span-table-container" style="margin-top:6px;overflow-x:auto">
                         <table id="span-config-table" style="width:100%;font-size:10px;border-collapse:collapse;border:1px solid var(--vscode-panel-border)">
@@ -5712,6 +5727,9 @@ ${inner}
                     <div class="input-row"><label style="min-width:56px;text-align:right">행 수</label><input type="number" id="conn-n-rows" value="2" min="1" max="4" step="1" style="width:56px"><span class="hint-inline">웹 높이 방향 패스너 열 수</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">단부거리 e</label><input type="number" id="conn-edge-dist" value="" placeholder="미입력" step="1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">비우면 1.5d 배치 제안(판정 근거 아님). 입력값은 그대로 J3.2/J4.2 로 검토</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">Pnvs</label><input type="number" id="conn-lap-Pnvs" value="" placeholder="제조사 값" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">나사 공칭 전단강도(§J4.3.2) — 나사 랩은 없으면 판정 없음</span></div>
+                    <div class="input-row" title="AISI Design Manual Examples II-1A / II-2A: &quot;The lapped section is assumed to be sufficiently restrained against lateral-torsional buckling and distortional buckling&quot; (assumption (f): &quot;the region at and near the interior supports is assumed to be not subject to lateral-torsional or distortional buckling between the support and the ends of the laps&quot;). 확인하면 랩 구간의 횡비틀림(F2, Lb = 0)과 뒤틀림(F4, 해당 없음)을 이 가정으로 검토합니다. 확인하지 않으면 그 두 검토는 판정 없음입니다.">
+                        <label><input type="checkbox" id="chk-lap-restrained-lap"> 랩 구속 확인 (퍼린 탭과 같은 값) — 없으면 랩 휨(Mnℓ = Se·Fy) · 뒤틀림은 판정 없음</label>
+                    </div>
                     <button id="btn-run-lap-design" class="btn-action-green" style="margin-top:8px;width:100%;padding:6px">Lap 접합부 설계</button>
                 </div>
 

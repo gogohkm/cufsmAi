@@ -138,7 +138,7 @@ function loadsLike(withDesign: boolean): Mapper {
         const groupKeys = ['spanType', 'nSpans', 'spacing', 'loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL', 'chkPatternLoading',
             'chkLrReduced', 'spanIxIn4', 'deckType', 'deckTPanel', 'deckFastenerSpacing', 'deckKphiOverride', 'deckKxOverride',
             'bracePointsFt', 'chkI621Confirmed', 'deckInsulationIn', 'deckRTested'];
-        if (withDesign) { groupKeys.push(...Object.values(WC), ...Object.values(USE)); }
+        if (withDesign) { groupKeys.push(...Object.values(WC), ...Object.values(USE), 'lapRestrained'); }
         blank(w, groupKeys);
         // 경간 유형 · 수
         let n: number | null = null;
@@ -179,7 +179,14 @@ function loadsLike(withDesign: boolean): Mapper {
             for (const [k, v] of Object.entries(d)) { if (t[k]) { put(w, 'group', t[k], v, `deck.${k}`); } else { extra[k] = v; } }
             if (Object.keys(extra).length) { w.mcpOnly.deck = extra; }
         }
-        if (withDesign) { direct(a, w, { ...WC, ...USE }, used); }
+        if (withDesign) {
+            direct(a, w, { ...WC, ...USE }, used);
+            // 계약 §6.3: lap_restrained(옛 이름 distortion_restrained 도) → 검토 상태의 lapRestrained
+            if (a.lap_restrained !== undefined || a.distortion_restrained !== undefined) {
+                used.add('lap_restrained'); used.add('distortion_restrained');
+                put(w, 'group', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
+            }
+        }
         // 경간 표
         if (Array.isArray(a.spans_ft) || Array.isArray(a.supports) || Array.isArray(a.laps_per_support)) {
             for (const k of ['spans_ft', 'supports', 'laps_per_support', 'span_ft', 'laps']) { if (a[k] !== undefined) { used.add(k); } }
@@ -220,8 +227,13 @@ const lap: Mapper = (a, w) => {
     material(a, w, used);
     const t: Record<string, string> = { lap_left_in: 'connLapLeft', lap_right_in: 'connLapRight', Mu_support: 'connMu', Vu_support: 'connVu',
         fastener_type: 'connFastenerType', fastener_dia: 'connFastenerDia', n_rows: 'connNRows', end_distance: 'connEdgeDist', Pnvs: 'connLapPnvs' };
-    blank(w, Object.values(t));
+    blank(w, [...Object.values(t), 'lapRestrained']);
     direct(a, w, t, used);
+    // 계약 §6.3: 랩 구속의 진술(옛 이름 distortion_restrained) — 퍼린과 같은 검토 상태 키
+    if (a.lap_restrained !== undefined || a.distortion_restrained !== undefined) {
+        used.add('lap_restrained'); used.add('distortion_restrained');
+        put(w, 'group', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
+    }
     rest(a, w, used);   // d · t(단면 — 모델 칸) · Se · Sf · Mnd · Vn … 은 mcpOnly
 };
 

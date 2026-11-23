@@ -46,7 +46,7 @@ t('every FIELDS row has a meta column with a known owner, group, invalidation an
 t('owner model = the 19 controls the page overwrites from the host model (inventory)', () => {
   const ids = DS.KEYS.model.map((k) => DS.fieldMeta(k).id).sort();
   assert.deepStrictEqual(ids, MODEL_FROM_INV);
-  assert.deepStrictEqual(DS.KEYS.mirror.sort(), ['fuPre', 'fyLoad', 'plasticFy']);
+  assert.deepStrictEqual(DS.KEYS.mirror.sort(), ['fuPre', 'fyLoad', 'lapRestrainedLap', 'plasticFy']);
   assert.deepStrictEqual(DS.KEYS.view.map((k) => DS.fieldMeta(k).id).sort(),
     INV.items.filter((i) => /^chk-cfsm-/.test(i.id)).map((i) => i.id).sort());
 });
@@ -65,7 +65,9 @@ t('invalidation column = today\'s rule (② tab → load, ① · ③ → design 
   for (const r of DS.FIELDS) {
     const inv = invById.get(r[1]);
     let want;
-    if (inv.tab === 'tab-loads') { want = 'load'; }
+    // 계약 §6.3 의 랩 구속 진술(퍼린 탭의 칸 · 랩 탭의 거울): 하중 해석과 접합에는 쓰이지 않는다 — 부재 설계 · 랩 결과만 지운다(design)
+    if (r[0] === 'lapRestrained' || r[0] === 'lapRestrainedLap') { want = 'design'; }
+    else if (inv.tab === 'tab-loads') { want = 'load'; }
     else if (inv.tab === 'tab-connection') { want = 'connection'; }
     else if (vo.has(r[1])) { want = /해석 실행/.test(vo.get(r[1])) ? 'analysis-at-run' : 'none'; }
     else { want = 'design'; }

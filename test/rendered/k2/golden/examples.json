@@ -1,11 +1,11 @@
 {
  "about": "K2 phase 0 golden — examples. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-22",
+ "recorded": "2026-11-23",
  "entries": [
   {
    "id": "Example/test.csd.SI.saved",
    "expect": "pin",
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — E 29500 그대로(전 29499.999992970508)",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
     "unitSystem": "SI",
     "analysisMethod": "DSM",
@@ -39,6 +39,8 @@
     "deckKxOverride": null,
     "bracePointsFt": null,
     "chkI621Confirmed": false,
+    "lapRestrained": false,
+    "lapRestrainedLap": false,
     "deckInsulationIn": null,
     "deckRTested": null,
     "KxLx": 118.11023622047244,
@@ -166,6 +168,14 @@
       "reason": "D-9 고침(K2-3): 파일을 열 때의 연동이 β 의 Lm 칸에 Lb 를 넣지 않는다 — distLm 0(파일 · 처음 값 그대로). 전: 118.11 in(Lb)"
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — E 29500 그대로(전 29499.999992970508)"
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -177,7 +187,7 @@
   {
    "id": "Example/test.csd.US.saved",
    "expect": "pin",
-   "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — Fy 정확한 값",
+   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
     "unitSystem": "US",
     "analysisMethod": "DSM",
@@ -211,6 +221,8 @@
     "deckKxOverride": null,
     "bracePointsFt": null,
     "chkI621Confirmed": false,
+    "lapRestrained": false,
+    "lapRestrainedLap": false,
     "deckInsulationIn": null,
     "deckRTested": null,
     "KxLx": 118.11023622047244,
@@ -338,6 +350,14 @@
       "reason": "D-9 고침(K2-3): 위와 같음 — US 화면에서도 distLm 0. 그 밖의 값(US 화면의 12 자리 표시값)은 전과 바이트까지 같다"
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — Fy 정확한 값"
+     },
+     "date": "2026-11-24"
     }
    ]
   },

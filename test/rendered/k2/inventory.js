@@ -204,6 +204,8 @@ const MCP_MAP = {
   'deck-kx-override': ['design_purlin.deck.kx_override', 'analyze_loads.deck.kx_override', 'calc_deck_stiffness.kx_override'],
   'brace-points': ['design_purlin.brace_points_ft', 'analyze_loads.brace_points_ft'],
   'chk-i621-confirmed': ['design_purlin.i621_conditions_confirmed', 'analyze_loads.i621_conditions_confirmed'],
+  'chk-lap-restrained': ['design_purlin.lap_restrained', 'design_purlin.distortion_restrained', 'design_lap_connection.lap_restrained', 'design_lap_connection.distortion_restrained'],
+  'chk-lap-restrained-lap': ['design_lap_connection.lap_restrained', 'design_lap_connection.distortion_restrained', 'design_purlin.lap_restrained', 'design_purlin.distortion_restrained'],
   'deck-insulation': ['design_purlin.insulation_in', 'analyze_loads.insulation_in'],
   'deck-R-tested': ['design_purlin.deck.R_tested_uplift', 'analyze_loads.deck.R_tested_uplift'],
   'design-KxLx': ['aisi_design_compression.KxLx', 'aisi_design_combined.KxLx', 'get_dsm_values.KxLx', 'generate_report.KxLx'],

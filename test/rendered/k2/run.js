@@ -145,6 +145,8 @@ async function ii2aGui(ctx) {
   await S('chk-pattern-loading', false);
   await S('chk-lr-reduced', false);
   await S('chk-i621-confirmed', true);
+  // 계약 §6.3: II-2A 는 랩 구속을 가정으로 밝힌다(Design Manual) — 사람의 진술
+  await S('chk-lap-restrained', true);
   await S('span-Ix-list', '9.18, 9.18, 7.76, 7.76, 9.18, 9.18');
 }
 
@@ -373,7 +375,7 @@ async function phaseMcp() {
       await pinMcp(ctx, c, g, 'set_section_template', 'set_section_template', { type: 'lippedz', H: 8, B: 2.25, D: 0.91, t: 0.059, r: 0.1875, qlip: 50 });
       await pinMcp(ctx, c, g, 'analyze_loads', 'analyze_loads', { ...II2A_MCP, Fy: 55, Fu: 70 }, {
         inputsExpect: 'k2-change', inputsReason: K2_INPUTS + ' — spans, supports, laps, loads, spacing, deck, ASD do not reach the page', texts: LOAD_BOXES });
-      await pinMcp(ctx, c, g, 'design_purlin', 'design_purlin', { ...II2A_MCP, Fy: 55, Fu: 70 }, {
+      await pinMcp(ctx, c, g, 'design_purlin', 'design_purlin', { ...II2A_MCP, Fy: 55, Fu: 70, lap_restrained: true }, {
         inputsExpect: 'k2-change', inputsReason: K2_INPUTS + ' — only the derived fields filled from the posted load analysis change; the inputs MCP gave do not',
         texts: ['design-summary', ...LOAD_BOXES] });
       await ctx.tab('design');
