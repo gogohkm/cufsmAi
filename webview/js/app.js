@@ -383,14 +383,6 @@
                 }
                 break;
             }
-            case 'collectDesignData':
-                // v1.3: 입력과 함께 Lap 결과도 저장한다(전: 저장되지 않음).
-                vscode.postMessage({ command: 'designDataCollected', data: {
-                    __stcfsd_collect: 2,
-                    designInputs: collectAllDesignInputs(),
-                    lapResult: _lastLapResult || null,
-                } });
-                break;
             case 'restoreDesignInputs':
                 restoreAllDesignInputs(msg.data);
                 break;
@@ -3413,12 +3405,11 @@
                 setStatus('해석 결과가 없습니다. 먼저 해석을 실행하세요.', 'error');
                 return;
             }
-            // K3-5: 보고서는 호스트가 만든다 — 화면에만 있는 것(캔버스 그림 · DSM 표의 그린 글)만 넘긴다
+            // K3-5: 보고서는 호스트가 만든다 — 화면에만 있는 캔버스 그림만 넘긴다(DSM 값은 호스트가 쥔 결과에서 — K3-8)
             const charts = {};
             ['buckling-curve-canvas', 'classify-curve-canvas', 'mode-shape-canvas', 'mode-shape-3d-canvas', 'plastic-surface-canvas']
                 .forEach(id => { const png = _canvasPng(id); if (png) { charts[id] = png; } });
-            const dsmEl = document.getElementById('dsm-table-container');
-            vscode.postMessage({ command: 'showBucklingReport', data: { charts, dsmHtml: dsmEl && lastDsmResult ? dsmEl.innerHTML : null, unitSystem: _unitSystem } });
+            vscode.postMessage({ command: 'showBucklingReport', data: { charts, unitSystem: _unitSystem } });
         });
     }
 
@@ -5850,17 +5841,6 @@
         return s && typeof s.value === 'number' ? s.value : null;
     }
 
-    /** 결과의 소요 모멘트(kip-in): 퍼린 검토점의 Mu_checked → 'F flexure' 한계상태 비 × 설계강도. 모르면 null. */
-    function _requiredMoment(d) {
-        if (!d) { return null; }
-        if (typeof d.Mu_checked === 'number') { return d.Mu_checked; }
-        if (typeof d.Mu === 'number') { return d.Mu; }
-        const f = Array.isArray(d.limit_state_checks) ? d.limit_state_checks.find(c => c && c.name === 'F flexure') : null;
-        if (f && typeof f.ratio === 'number' && d.design_strength > 0) { return f.ratio * d.design_strength; }
-        return null;
-    }
-
-    function _rv(v, dec) { return v != null ? Number(v).toFixed(dec != null ? dec : 2) : '—'; }
     /** Report용 단위 변환 값 포맷: _ruv(value, unitType) */
     function _ruv(v, ut) { return fmtVal(v, ut); }
     /** Report용 단위 라벨: _rul(unitType) */

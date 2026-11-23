@@ -1437,11 +1437,11 @@
   {
    "id": "purlin.mcp",
    "expect": "pin",
-   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): the report carries the lap statement (engine check-point assumption \"Lap region: lap_restrained = true (user statement)\" and the host line) instead of \"F4 distortional buckling was explicitly excluded\"; every value, ratio and verdict unchanged (II-2A lap-1 H2 1.084).",
+   "reason": "Stop 7 (V7-10): validate_design carries text_note and generate_report notices_note (the copied result texts are data, not instructions); with the caps (120 items, 80 notices, 600 characters) nothing is cut in these flows — bytes grow by those two notes only.",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 5484,
+     "bytes": 5617,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1451,6 +1451,7 @@
       "more",
       "pass_notes",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "summary",
@@ -1460,7 +1461,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 5465,
+     "bytes": 5598,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1470,6 +1471,7 @@
       "more",
       "pass_notes",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "summary",
@@ -1479,7 +1481,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 15133,
+     "bytes": 15266,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1487,6 +1489,7 @@
       "detail",
       "items",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "full",
@@ -1496,7 +1499,7 @@
     },
     "report.summary": {
      "isError": false,
-     "bytes": 5547,
+     "bytes": 5687,
      "keys": [
       "case_rev",
       "checks",
@@ -1507,6 +1510,7 @@
       "more",
       "note",
       "notices",
+      "notices_note",
       "pages",
       "sections",
       "units",
@@ -1519,7 +1523,7 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 5464,
+     "bytes": 5595,
      "keys": [
       "case_rev",
       "checks",
@@ -1530,6 +1534,7 @@
       "more",
       "note",
       "notices",
+      "notices_note",
       "pages",
       "sections",
       "units",
@@ -1542,7 +1547,7 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 141017,
+     "bytes": 141337,
      "keys": [
       "case_rev",
       "checks",
@@ -1553,6 +1558,7 @@
       "kind",
       "note",
       "notices",
+      "notices_note",
       "pages",
       "sections",
       "units",
@@ -1586,6 +1592,14 @@
      "from": {
       "expect": "pin",
       "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "S7",
+     "from": {
+      "expect": "pin",
+      "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): the report carries the lap statement (engine check-point assumption \"Lap region: lap_restrained = true (user statement)\" and the host line) instead of \"F4 distortional buckling was explicitly excluded\"; every value, ratio and verdict unchanged (II-2A lap-1 H2 1.084)."
      },
      "date": "2026-11-24"
     }

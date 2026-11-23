@@ -107,15 +107,15 @@ K3(「검증 · 보고서를 호스트로」)의 0단계 목록. 설계: [`20261
 
 | 함수 | 줄 | 길이 | 제목 | 읽는 칸(상태 키) | 결과 필드 | 화면이 만든 수 · 박힌 값 |
 |---|---|---|---|---|---|---|
-| buildReportDoc | 1548 | 28 |  |  | d.controlling_mode, d.design_method, d.governing_check, d.member_type, d.utilization |  |
-| _docSection | 1244 | 29 |  |  | model.elem, model.node, p.A, p.I11, p.I22, p.Ixx, p.Ixz, p.Izz, p.Sx, p.Sz, p.Zx, p.Zz, p.rx, p.rz, p.thetap, p.xcg, p.zcg |  |
-| _docDsm | 1274 | 21 |  |  | dM.LF_dist, dM.LF_global, dM.LF_local, dM.Lcrd, dM.Lcre, dM.Lcrl, dM.P_y, dM.crd, dM.cre, dM.crl, dP.LF_dist, dP.LF_global, dP.LF_local, dP.Lcrd, dP.Lcre, dP.Lcrl, dP.Py, dP.crd, dP.cre, dP.crl, dP.n_minima |  |
-| _docBuckling | 1296 | 20 |  |  | analysisResult.curve |  |
-| _docDesignInput | 1317 | 50 |  | .span-tbl-lapl, .span-tbl-len | la.input_loads_plf, la.n_spans, model.prop |  |
-| _docLoadAnalysis | 1368 | 92 |  |  | ap.deck, ap.i621_check, ap.negative_region, ap.positive_region, ap.unbraced, ap.uplift_R, ap.uplift_R_basis, c.basis, c.case, c.per_span, cd.factors, cd.governs_gravity, cd.governs_overall, cd.governs_uplift, cd.max_abs_M, cd.max_abs_V, cd.name, la.all_combos_detail, la.auto_params, la.deflection, la.deflection_cases, la.design_method, la.governing, la.gravity, la.input_loads_plf, la.laps_per_support, la.spans_ft, la.supports, la.uplift, p.L_over_delta, p.abs_delta_in, p.span, p.x_ft |  |
-| _checkBlocks | 1462 | 5 |  |  |  |  |
-| _noticeBlocks | 1467 | 10 |  |  |  |  |
-| _docDesignCalc | 1478 | 39 |  |  | d.purlin_mode, d.purlin_regions, p.Mu, p.Vu, p.assumptions, p.check_point, p.combination, p.error, p.host_assumption, p.pass, p.utilization |  |
-| _docSummary | 1518 | 28 |  |  | c.capacity, c.clause, c.demand, c.governs, c.id, c.name_ko, c.ratio, c.verdict, d.controlling_mode, d.design_method, d.dsm_warnings, d.governing_check, d.member_type, d.purlin_assumptions, d.purlin_governing, d.purlin_mode, d.purlin_not_evaluated, d.purlin_warnings, d.spec_sections, d.utilization, la.governing, la.gravity |  |
-| buildBucklingDoc | 1578 | 27 |  |  | model.BC, model.elem, model.lengths, model.loadCase, model.loadFy, model.node, model.prop |  |
+| buildReportDoc | 1553 | 28 |  |  | d.controlling_mode, d.design_method, d.governing_check, d.member_type, d.utilization |  |
+| _docSection | 1249 | 29 |  |  | model.elem, model.node, p.A, p.I11, p.I22, p.Ixx, p.Ixz, p.Izz, p.Sx, p.Sz, p.Zx, p.Zz, p.rx, p.rz, p.thetap, p.xcg, p.zcg |  |
+| _docDsm | 1279 | 21 |  |  | dM.LF_dist, dM.LF_global, dM.LF_local, dM.Lcrd, dM.Lcre, dM.Lcrl, dM.P_y, dM.crd, dM.cre, dM.crl, dP.LF_dist, dP.LF_global, dP.LF_local, dP.Lcrd, dP.Lcre, dP.Lcrl, dP.Py, dP.crd, dP.cre, dP.crl, dP.n_minima |  |
+| _docBuckling | 1301 | 20 |  |  | analysisResult.curve |  |
+| _docDesignInput | 1322 | 50 |  | .span-tbl-lapl, .span-tbl-len | la.input_loads_plf, la.n_spans, model.prop |  |
+| _docLoadAnalysis | 1373 | 92 |  |  | ap.deck, ap.i621_check, ap.negative_region, ap.positive_region, ap.unbraced, ap.uplift_R, ap.uplift_R_basis, c.basis, c.case, c.per_span, cd.factors, cd.governs_gravity, cd.governs_overall, cd.governs_uplift, cd.max_abs_M, cd.max_abs_V, cd.name, la.all_combos_detail, la.auto_params, la.deflection, la.deflection_cases, la.design_method, la.governing, la.gravity, la.input_loads_plf, la.laps_per_support, la.spans_ft, la.supports, la.uplift, p.L_over_delta, p.abs_delta_in, p.span, p.x_ft |  |
+| _checkBlocks | 1467 | 5 |  |  |  |  |
+| _noticeBlocks | 1472 | 10 |  |  |  |  |
+| _docDesignCalc | 1483 | 39 |  |  | d.purlin_mode, d.purlin_regions, p.Mu, p.Vu, p.assumptions, p.check_point, p.combination, p.error, p.host_assumption, p.pass, p.utilization |  |
+| _docSummary | 1523 | 28 |  |  | c.capacity, c.clause, c.demand, c.governs, c.id, c.name_ko, c.ratio, c.verdict, d.controlling_mode, d.design_method, d.dsm_warnings, d.governing_check, d.member_type, d.purlin_assumptions, d.purlin_governing, d.purlin_mode, d.purlin_not_evaluated, d.purlin_warnings, d.spec_sections, d.utilization, la.governing, la.gravity |  |
+| buildBucklingDoc | 1583 | 27 |  |  | model.BC, model.elem, model.lengths, model.loadCase, model.loadFy, model.node, model.prop |  |
 <!-- inventory:end -->

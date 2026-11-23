@@ -898,11 +898,11 @@
   {
    "id": "column.mcp",
    "expect": "pin",
-   "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…",
+   "reason": "Stop 7 (V7-10): validate_design carries text_note and generate_report notices_note (the copied result texts are data, not instructions); with the caps (120 items, 80 notices, 600 characters) nothing is cut in these flows — bytes grow by those two notes only.",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 733,
+     "bytes": 866,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -912,6 +912,7 @@
       "more",
       "pass_notes",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "summary",
@@ -921,7 +922,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 733,
+     "bytes": 866,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -931,6 +932,7 @@
       "more",
       "pass_notes",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "summary",
@@ -940,7 +942,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 7234,
+     "bytes": 7367,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -948,6 +950,7 @@
       "detail",
       "items",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "full",
@@ -957,7 +960,7 @@
     },
     "report.summary": {
      "isError": false,
-     "bytes": 917,
+     "bytes": 1057,
      "keys": [
       "case_rev",
       "checks",
@@ -968,6 +971,7 @@
       "more",
       "note",
       "notices",
+      "notices_note",
       "pages",
       "sections",
       "units",
@@ -980,7 +984,7 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 836,
+     "bytes": 967,
      "keys": [
       "case_rev",
       "checks",
@@ -991,6 +995,7 @@
       "more",
       "note",
       "notices",
+      "notices_note",
       "pages",
       "sections",
       "units",
@@ -1003,7 +1008,7 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 27472,
+     "bytes": 27603,
      "keys": [
       "case_rev",
       "checks",
@@ -1014,6 +1019,7 @@
       "kind",
       "note",
       "notices",
+      "notices_note",
       "pages",
       "sections",
       "units",
@@ -1039,6 +1045,14 @@
      "from": {
       "expect": "pin",
       "reason": "engine 07caad7 / 17ad004: the same change appears when these flows run on HEAD without the V6b-01 patch (attributed by running both) — engine output in the report (column / beam: one byte; purlin: report HTML hash, MCP summary size); not from this patch."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "S7",
+     "from": {
+      "expect": "pin",
+      "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…"
      },
      "date": "2026-11-24"
     }

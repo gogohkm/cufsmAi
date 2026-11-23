@@ -609,11 +609,11 @@
   {
    "id": "empty.mcp",
    "expect": "pin",
-   "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…",
+   "reason": "Stop 7 (V7-10): validate_design carries text_note and generate_report notices_note (the copied result texts are data, not instructions); with the caps (120 items, 80 notices, 600 characters) nothing is cut in these flows — bytes grow by those two notes only.",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 1765,
+     "bytes": 1898,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -622,6 +622,7 @@
       "items",
       "more",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "summary",
@@ -631,7 +632,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 1765,
+     "bytes": 1898,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -640,6 +641,7 @@
       "items",
       "more",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "summary",
@@ -649,7 +651,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 6134,
+     "bytes": 6267,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -657,6 +659,7 @@
       "detail",
       "items",
       "source",
+      "text_note",
       "units"
      ],
      "detail": "full",
@@ -712,6 +715,14 @@
      "from": {
       "expect": "pin",
       "reason": "K3-3 · K3-5: validate_design 은 화면과 같은 검증 항목(호스트 · id 붙음 — 요약: 수 · 통과 아닌 항목 · 통과 항목 주석), generate_report 는 보고서를 파일로(HTML · PDF, 경로 응답). 수용 기준"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "S7",
+     "from": {
+      "expect": "pin",
+      "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…"
      },
      "date": "2026-11-24"
     }

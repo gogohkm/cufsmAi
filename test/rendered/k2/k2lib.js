@@ -206,8 +206,23 @@ class Golden {
     this.entries.push(entry);
     return v;
   }
+  /** V7-17: 이번 실행이 만들지 않은 고정 항목 = 불일치(흐름 · 단계가 빠졌다), 고정 파일이 없으면 --record 일 때만 기록(아니면 실패) */
+  finish() {
+    if (this.finished) { return; }
+    this.finished = true;
+    if (RECORD_ALL) { return; }
+    if (!this.old) {
+      this.mismatch.push({ id: '(file)', expect: 'pin', reason: 'no golden file — run with --record to create it', detail: this.file });
+      return;
+    }
+    const made = new Set(this.entries.map((e) => e.id));
+    for (const e of this.old.entries) {
+      if (!made.has(e.id)) { this.mismatch.push({ id: e.id, expect: e.expect, reason: 'pinned entry not produced this run (flow or step missing)', detail: '' }); }
+    }
+  }
   save() {
-    const write = this.fresh || RECORD_ALL || ACCEPT.size > 0;
+    this.finish();
+    const write = RECORD_ALL || (!this.fresh && ACCEPT.size > 0);
     if (!write) { return false; }
     fs.mkdirSync(GOLDEN_DIR, { recursive: true });
     const doc = { about: `K2 phase 0 golden — ${this.name}. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.`,

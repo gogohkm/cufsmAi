@@ -35,6 +35,7 @@
    "select-span-type ← analyze_loads",
    "config-n-spans ← analyze_loads",
    "config-spacing ← aisi_design_compression, analyze_loads, design_connection",
+   "chk-lap-restrained ← design_purlin",
    ".span-tbl-sup ← analyze_loads",
    ".span-tbl-len ← aisi_design_compression, analyze_loads, design_connection",
    ".span-tbl-lapr ← analyze_loads",
@@ -92,6 +93,7 @@
    "conn-fastener-dia ← design_lap_connection",
    "conn-edge-dist ← design_lap_connection",
    "conn-lap-Pnvs ← design_lap_connection",
+   "chk-lap-restrained-lap ← design_purlin",
    "conn-Fy ← aisi_design_compression, aisi_design_flexure, analyze_loads, design_connection, design_lap_connection",
    "conn-Fu ← aisi_design_compression, aisi_design_flexure, analyze_loads, design_connection, design_lap_connection",
    "conn-weld-L ← design_connection",
@@ -472,7 +474,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5064
+    "htmlLine": 5133
    },
    "options": [
     "",
@@ -512,14 +514,14 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2106,
-    2162,
-    2603,
-    2635,
-    4364,
-    6009,
-    6286,
-    6297
+    2098,
+    2154,
+    2595,
+    2627,
+    4355,
+    5989,
+    6266,
+    6277
    ],
    "mcp": [
     {
@@ -535,7 +537,7 @@
    "drives": [
     {
      "what": "shows tpl-qlip for lipped C/Z/angle; dimension hint",
-     "line": 2624
+     "line": 2616
     }
    ]
   },
@@ -558,7 +560,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5080
+    "htmlLine": 5149
    },
    "options": null,
    "readOnly": false,
@@ -588,13 +590,13 @@
     "(written from the host model)"
    ],
    "appLines": [
-    1135,
-    2107,
-    2173,
-    2642,
-    4377,
-    4378,
-    6289
+    1127,
+    2099,
+    2165,
+    2634,
+    4368,
+    4369,
+    6269
    ],
    "mcp": [
     {
@@ -632,7 +634,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5081
+    "htmlLine": 5150
    },
    "options": null,
    "readOnly": false,
@@ -656,12 +658,12 @@
     "(written from the host model)"
    ],
    "appLines": [
-    1551,
-    2174,
-    2645,
-    4377,
-    4378,
-    6290
+    1543,
+    2166,
+    2637,
+    4368,
+    4369,
+    6270
    ],
    "mcp": [
     {
@@ -695,7 +697,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5082
+    "htmlLine": 5151
    },
    "options": null,
    "readOnly": false,
@@ -719,11 +721,11 @@
     "(written from the host model)"
    ],
    "appLines": [
-    1555,
-    2175,
-    2647,
-    4380,
-    6291
+    1547,
+    2167,
+    2639,
+    4371,
+    6271
    ],
    "mcp": [
     {
@@ -757,7 +759,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5083
+    "htmlLine": 5152
    },
    "options": null,
    "readOnly": false,
@@ -788,12 +790,12 @@
     "(written from the host model)"
    ],
    "appLines": [
-    1136,
-    2176,
-    2643,
-    4146,
-    4379,
-    6292
+    1128,
+    2168,
+    2635,
+    4137,
+    4370,
+    6272
    ],
    "mcp": [
     {
@@ -835,7 +837,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5084
+    "htmlLine": 5153
    },
    "options": null,
    "readOnly": false,
@@ -862,10 +864,10 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2648,
-    4145,
-    4381,
-    6293
+    2640,
+    4136,
+    4372,
+    6273
    ],
    "mcp": [
     {
@@ -899,7 +901,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5086
+    "htmlLine": 5155
    },
    "options": null,
    "readOnly": false,
@@ -917,8 +919,8 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2654,
-    6294
+    2646,
+    6274
    ],
    "mcp": [
     {
@@ -954,7 +956,7 @@
     "source": "steel-grade table (src/webview/steelGrades.ts — steelGradeOptionsHtml marks SGC400 selected)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5096
+    "htmlLine": 5165
    },
    "options": [
     "",
@@ -983,9 +985,9 @@
     "(.csd restore: grade label)"
    ],
    "appLines": [
-    2166,
-    3855,
-    6029
+    2158,
+    3846,
+    6009
    ],
    "mcp": [],
    "mcpCanSet": false,
@@ -999,7 +1001,7 @@
    "drives": [
     {
      "what": "writes input-fy · input-fu (grade table), input-E = 29500 ksi, input-G = 11300 ksi, then mirrors Fy/Fu",
-     "line": 3857
+     "line": 3848
     }
    ]
   },
@@ -1022,7 +1024,7 @@
     "source": "steel-grade table (src/webview/steelGrades.ts, SGC400)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5102
+    "htmlLine": 5171
    },
    "options": null,
    "readOnly": false,
@@ -1051,16 +1053,16 @@
    ],
    "appLines": [
     263,
-    1008,
-    2685,
-    2844,
-    2904,
-    3768,
-    3814,
-    3833,
-    3863,
-    3876,
-    6032
+    1000,
+    2677,
+    2836,
+    2896,
+    3759,
+    3805,
+    3824,
+    3854,
+    3867,
+    6012
    ],
    "mcp": [
     {
@@ -1086,7 +1088,7 @@
    "drives": [
     {
      "what": "mirrors to design-fy · plastic-fy · conn-Fy and the analysis Fy label; also the analysis reference stress for the GUI run",
-     "line": 3831
+     "line": 3822
     }
    ]
   },
@@ -1109,7 +1111,7 @@
     "source": "steel-grade table (src/webview/steelGrades.ts, SGC400)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5103
+    "htmlLine": 5172
    },
    "options": null,
    "readOnly": false,
@@ -1131,12 +1133,12 @@
     "(.csd restore: grade label)"
    ],
    "appLines": [
-    3772,
-    3834,
-    3839,
-    3864,
-    3877,
-    6033
+    3763,
+    3825,
+    3830,
+    3855,
+    3868,
+    6013
    ],
    "mcp": [],
    "mcpCanSet": false,
@@ -1152,7 +1154,7 @@
    "drives": [
     {
      "what": "mirrors to design-fu · conn-Fu",
-     "line": 3771
+     "line": 3762
     }
    ]
   },
@@ -1175,7 +1177,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5106
+    "htmlLine": 5175
    },
    "options": null,
    "readOnly": false,
@@ -1197,11 +1199,11 @@
     "runAnalysis"
    ],
    "appLines": [
-    571,
-    2857,
-    2864,
-    2890,
-    6279
+    563,
+    2849,
+    2856,
+    2882,
+    6259
    ],
    "mcp": [
     {
@@ -1222,7 +1224,7 @@
    "drives": [
     {
      "what": "G = E / 2(1 + ν) written into input-G on input",
-     "line": 2856
+     "line": 2848
     }
    ]
   },
@@ -1245,7 +1247,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5107
+    "htmlLine": 5176
    },
    "options": null,
    "readOnly": false,
@@ -1267,11 +1269,11 @@
     "runAnalysis"
    ],
    "appLines": [
-    572,
-    2858,
-    2865,
-    2891,
-    6280
+    564,
+    2850,
+    2857,
+    2883,
+    6260
    ],
    "mcp": [
     {
@@ -1285,7 +1287,7 @@
    "drives": [
     {
      "what": "G = E / 2(1 + ν) written into input-G on input",
-     "line": 2856
+     "line": 2848
     }
    ]
   },
@@ -1308,7 +1310,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5108
+    "htmlLine": 5177
    },
    "options": null,
    "readOnly": false,
@@ -1329,10 +1331,10 @@
     "runAnalysis"
    ],
    "appLines": [
-    573,
-    2861,
-    2892,
-    6281
+    565,
+    2853,
+    2884,
+    6261
    ],
    "mcp": [
     {
@@ -1373,7 +1375,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5111
+    "htmlLine": 5180
    },
    "options": null,
    "readOnly": false,
@@ -1395,9 +1397,9 @@
     "(.csd restore: change events)"
    ],
    "appLines": [
-    4139,
-    4227,
-    6010
+    4130,
+    4218,
+    5990
    ],
    "mcp": [
     {
@@ -1415,7 +1417,7 @@
    "drives": [
     {
      "what": "notice next to inelastic reserve",
-     "line": 4229
+     "line": 4220
     }
    ]
   },
@@ -1438,7 +1440,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5155
+    "htmlLine": 5224
    },
    "options": [
     "roof-purlin",
@@ -1475,14 +1477,14 @@
     "(.csd restore: change events)"
    ],
    "appLines": [
-    505,
-    2112,
-    2163,
-    3991,
-    4092,
-    4198,
-    4293,
-    6009
+    497,
+    2104,
+    2155,
+    3982,
+    4083,
+    4189,
+    4284,
+    5989
    ],
    "mcp": [
     {
@@ -1510,7 +1512,7 @@
    "drives": [
     {
      "what": "shows/hides rows: calc mode (roof-purlin · floor-joist · wall-girt · wall-stud) ↔ direct; KxLx/KtLt rows (compression · combined), Lb/Cb (flexure · combined), Cm (combined), web crippling (flexure · combined), Lr/S/W/L load rows; calc → direct clears design-Mx-pos · Lb-pos · Cb-pos · dist-M1M2 · dist-Lm and unchecks β (V4-17)",
-     "line": 3993
+     "line": 3984
     }
    ]
   },
@@ -1533,7 +1535,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5177
+    "htmlLine": 5246
    },
    "options": [
     "simple",
@@ -1564,11 +1566,11 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    2113,
-    2164,
-    3914,
-    4358,
-    5154
+    2105,
+    2156,
+    3905,
+    4349,
+    5145
    ],
    "mcp": [
     {
@@ -1588,7 +1590,7 @@
    "drives": [
     {
      "what": "rebuilds the span table (count = 1 · 2 · 3 · 4 · config-n-spans); config-n-spans visible only for cont-n; laps only for continuous",
-     "line": 3984
+     "line": 3975
     }
    ]
   },
@@ -1611,7 +1613,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5185
+    "htmlLine": 5254
    },
    "options": null,
    "readOnly": false,
@@ -1633,10 +1635,10 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    3920,
-    3979,
-    3985,
-    4360
+    3911,
+    3970,
+    3976,
+    4351
    ],
    "mcp": [
     {
@@ -1658,7 +1660,7 @@
    "drives": [
     {
      "what": "rebuilds the span table (cont-n)",
-     "line": 3986
+     "line": 3977
     }
    ]
   },
@@ -1681,7 +1683,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5187
+    "htmlLine": 5256
    },
    "options": null,
    "readOnly": false,
@@ -1705,11 +1707,11 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    2114,
-    2193,
-    3893,
-    3904,
-    4357
+    2106,
+    2185,
+    3884,
+    3895,
+    4348
    ],
    "mcp": [
     {
@@ -1731,7 +1733,7 @@
    "drives": [
     {
      "what": "loads are sent as plf = psf × spacing; plf display",
-     "line": 3892
+     "line": 3883
     }
    ]
   },
@@ -1754,7 +1756,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5191
+    "htmlLine": 5260
    },
    "options": null,
    "readOnly": false,
@@ -1771,9 +1773,9 @@
     "runLapConnection"
    ],
    "appLines": [
-    1156,
-    1163,
-    4216
+    1148,
+    1155,
+    4207
    ],
    "mcp": [
     {
@@ -1794,7 +1796,9 @@
     }
    ],
    "mcpCanSet": true,
-   "mcpReachesPage": [],
+   "mcpReachesPage": [
+    "design_purlin"
+   ],
    "dependsOn": [],
    "drives": []
   },
@@ -1841,9 +1845,9 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    3946,
-    3972,
-    4397
+    3937,
+    3963,
+    4388
    ],
    "mcp": [
     {
@@ -1905,9 +1909,9 @@
    ],
    "appLines": [
     111,
-    2192,
-    3950,
-    4392
+    2184,
+    3941,
+    4383
    ],
    "mcp": [
     {
@@ -1973,8 +1977,8 @@
    ],
    "appLines": [
     111,
-    3962,
-    4404
+    3953,
+    4395
    ],
    "mcp": [
     {
@@ -2038,8 +2042,8 @@
    ],
    "appLines": [
     111,
-    3956,
-    4403
+    3947,
+    4394
    ],
    "mcp": [
     {
@@ -2081,7 +2085,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5217
+    "htmlLine": 5286
    },
    "options": [
     "through-fastened",
@@ -2106,8 +2110,8 @@
     "(.csd restore: change events)"
    ],
    "appLines": [
-    4452,
-    6010
+    4443,
+    5990
    ],
    "mcp": [
     {
@@ -2145,7 +2149,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5225
+    "htmlLine": 5294
    },
    "options": null,
    "readOnly": false,
@@ -2164,7 +2168,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4453
+    4444
    ],
    "mcp": [
     {
@@ -2206,7 +2210,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5227
+    "htmlLine": 5296
    },
    "options": null,
    "readOnly": false,
@@ -2225,7 +2229,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4454
+    4445
    ],
    "mcp": [
     {
@@ -2267,7 +2271,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5231
+    "htmlLine": 5300
    },
    "options": null,
    "readOnly": false,
@@ -2286,7 +2290,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4456
+    4447
    ],
    "mcp": [
     {
@@ -2328,7 +2332,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5235
+    "htmlLine": 5304
    },
    "options": null,
    "readOnly": false,
@@ -2347,7 +2351,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4457
+    4448
    ],
    "mcp": [
     {
@@ -2387,7 +2391,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5240
+    "htmlLine": 5309
    },
    "options": null,
    "readOnly": false,
@@ -2408,7 +2412,7 @@
    "appLines": [
     108,
     132,
-    4471
+    4462
    ],
    "mcp": [
     {
@@ -2444,7 +2448,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5244
+    "htmlLine": 5313
    },
    "options": null,
    "readOnly": false,
@@ -2461,7 +2465,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4465
+    4456
    ],
    "mcp": [
     {
@@ -2499,7 +2503,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5248
+    "htmlLine": 5317
    },
    "options": null,
    "readOnly": false,
@@ -2516,7 +2520,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4467
+    4458
    ],
    "mcp": [
     {
@@ -2552,7 +2556,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5250
+    "htmlLine": 5319
    },
    "options": null,
    "readOnly": false,
@@ -2569,7 +2573,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4469
+    4460
    ],
    "mcp": [
     {
@@ -2605,7 +2609,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5259
+    "htmlLine": 5328
    },
    "options": null,
    "readOnly": false,
@@ -2627,10 +2631,10 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    2116,
-    2194,
-    3904,
-    4419
+    2108,
+    2186,
+    3895,
+    4410
    ],
    "mcp": [
     {
@@ -2668,7 +2672,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5264
+    "htmlLine": 5333
    },
    "options": null,
    "readOnly": false,
@@ -2690,10 +2694,10 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    2117,
-    2195,
-    3904,
-    4420
+    2109,
+    2187,
+    3895,
+    4411
    ],
    "mcp": [
     {
@@ -2733,7 +2737,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5269
+    "htmlLine": 5338
    },
    "options": null,
    "readOnly": false,
@@ -2755,10 +2759,10 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    2118,
-    2196,
-    3904,
-    4421
+    2110,
+    2188,
+    3895,
+    4412
    ],
    "mcp": [
     {
@@ -2796,7 +2800,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5274
+    "htmlLine": 5343
    },
    "options": null,
    "readOnly": false,
@@ -2818,10 +2822,10 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    2120,
-    2197,
-    3904,
-    4422
+    2112,
+    2189,
+    3895,
+    4413
    ],
    "mcp": [
     {
@@ -2861,7 +2865,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5279
+    "htmlLine": 5348
    },
    "options": null,
    "readOnly": false,
@@ -2881,9 +2885,9 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    2198,
-    3904,
-    4423
+    2190,
+    3895,
+    4414
    ],
    "mcp": [
     {
@@ -2919,7 +2923,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5284
+    "htmlLine": 5353
    },
    "options": null,
    "readOnly": false,
@@ -2941,10 +2945,10 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    2119,
-    2199,
-    3904,
-    4424
+    2111,
+    2191,
+    3895,
+    4415
    ],
    "mcp": [
     {
@@ -2980,7 +2984,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5288
+    "htmlLine": 5357
    },
    "options": null,
    "readOnly": false,
@@ -2997,7 +3001,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4462
+    4453
    ],
    "mcp": [
     {
@@ -3035,7 +3039,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5291
+    "htmlLine": 5360
    },
    "options": null,
    "readOnly": false,
@@ -3052,7 +3056,7 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    4463
+    4454
    ],
    "mcp": [
     {
@@ -3088,7 +3092,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5295
+    "htmlLine": 5364
    },
    "options": null,
    "readOnly": false,
@@ -3109,7 +3113,7 @@
    "appLines": [
     108,
     132,
-    4474
+    4465
    ],
    "mcp": [
     {
@@ -3147,7 +3151,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5306
+    "htmlLine": 5375
    },
    "options": null,
    "readOnly": false,
@@ -3167,8 +3171,8 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4113,
-    4120
+    4104,
+    4111
    ],
    "mcp": [
     {
@@ -3214,7 +3218,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5308
+    "htmlLine": 5377
    },
    "options": null,
    "readOnly": false,
@@ -3237,9 +3241,9 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    2123,
-    4119,
-    5092
+    2115,
+    4110,
+    5083
    ],
    "mcp": [
     {
@@ -3278,7 +3282,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5312
+    "htmlLine": 5381
    },
    "options": null,
    "readOnly": false,
@@ -3300,9 +3304,9 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4076,
-    4115,
-    5089
+    4067,
+    4106,
+    5080
    ],
    "mcp": [
     {
@@ -3338,7 +3342,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5314
+    "htmlLine": 5383
    },
    "options": null,
    "readOnly": false,
@@ -3364,11 +3368,11 @@
     "(result card labels)"
    ],
    "appLines": [
-    2122,
-    4114,
-    4116,
-    5086,
-    5361
+    2114,
+    4105,
+    4107,
+    5077,
+    5352
    ],
    "mcp": [
     {
@@ -3413,7 +3417,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5318
+    "htmlLine": 5387
    },
    "options": null,
    "readOnly": false,
@@ -3432,7 +3436,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4117
+    4108
    ],
    "mcp": [
     {
@@ -3464,7 +3468,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5322
+    "htmlLine": 5391
    },
    "options": null,
    "readOnly": false,
@@ -3484,8 +3488,8 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4118,
-    4186
+    4109,
+    4177
    ],
    "mcp": [
     {
@@ -3517,7 +3521,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5361
+    "htmlLine": 5430
    },
    "options": [
     "compression",
@@ -3547,11 +3551,11 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2683,
-    2834,
-    2903,
-    6009,
-    6254
+    2675,
+    2826,
+    2895,
+    5989,
+    6234
    ],
    "mcp": [
     {
@@ -3567,7 +3571,7 @@
    "drives": [
     {
      "what": "custom → shows input-load-P/Mxx/Mzz; stress preview",
-     "line": 2836
+     "line": 2828
     }
    ]
   },
@@ -3590,7 +3594,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5373
+    "htmlLine": 5442
    },
    "options": null,
    "readOnly": false,
@@ -3613,12 +3617,12 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2715,
-    2849,
-    2920,
-    2924,
-    6260,
-    6266
+    2707,
+    2841,
+    2912,
+    2916,
+    6240,
+    6246
    ],
    "mcp": [
     {
@@ -3654,7 +3658,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5375
+    "htmlLine": 5444
    },
    "options": null,
    "readOnly": false,
@@ -3677,12 +3681,12 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2716,
-    2849,
-    2920,
-    2925,
-    6261,
-    6266
+    2708,
+    2841,
+    2912,
+    2917,
+    6241,
+    6246
    ],
    "mcp": [
     {
@@ -3716,7 +3720,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5377
+    "htmlLine": 5446
    },
    "options": null,
    "readOnly": false,
@@ -3739,12 +3743,12 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2717,
-    2849,
-    2920,
-    2926,
-    6262,
-    6266
+    2709,
+    2841,
+    2912,
+    2918,
+    6242,
+    6246
    ],
    "mcp": [
     {
@@ -3776,7 +3780,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5384
+    "htmlLine": 5453
    },
    "options": [
     "S-S",
@@ -3800,8 +3804,8 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2882,
-    6233
+    2874,
+    6213
    ],
    "mcp": [
     {
@@ -3835,7 +3839,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5399
+    "htmlLine": 5468
    },
    "options": null,
    "readOnly": false,
@@ -3853,8 +3857,8 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2878,
-    6239
+    2870,
+    6219
    ],
    "mcp": [
     {
@@ -3888,7 +3892,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5400
+    "htmlLine": 5469
    },
    "options": null,
    "readOnly": false,
@@ -3906,8 +3910,8 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2879,
-    6240
+    2871,
+    6220
    ],
    "mcp": [
     {
@@ -3941,7 +3945,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5401
+    "htmlLine": 5470
    },
    "options": null,
    "readOnly": false,
@@ -3959,8 +3963,8 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2880,
-    6241
+    2872,
+    6221
    ],
    "mcp": [
     {
@@ -3994,7 +3998,7 @@
     "source": "host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5408
+    "htmlLine": 5477
    },
    "options": null,
    "readOnly": false,
@@ -4012,8 +4016,8 @@
     "(written from the host model)"
    ],
    "appLines": [
-    2881,
-    6234
+    2873,
+    6214
    ],
    "mcp": [
     {
@@ -4047,7 +4051,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5414
+    "htmlLine": 5483
    },
    "options": null,
    "readOnly": false,
@@ -4084,7 +4088,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5415
+    "htmlLine": 5484
    },
    "options": null,
    "readOnly": false,
@@ -4121,7 +4125,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5416
+    "htmlLine": 5485
    },
    "options": null,
    "readOnly": false,
@@ -4158,7 +4162,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5417
+    "htmlLine": 5486
    },
    "options": null,
    "readOnly": false,
@@ -4195,7 +4199,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5418
+    "htmlLine": 5487
    },
    "options": null,
    "readOnly": false,
@@ -4232,7 +4236,7 @@
     "source": "mirror of input-fy (two-way)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5469
+    "htmlLine": 5538
    },
    "options": null,
    "readOnly": false,
@@ -4253,11 +4257,11 @@
     "(mirror Fy to the other tabs)"
    ],
    "appLines": [
-    2237,
-    3768,
-    3849,
-    3850,
-    3878
+    2229,
+    3759,
+    3840,
+    3841,
+    3869
    ],
    "mcp": [
     {
@@ -4278,7 +4282,7 @@
    "drives": [
     {
      "what": "mirrors back to input-fy · design-fy · conn-Fy",
-     "line": 3847
+     "line": 3838
     }
    ]
   },
@@ -4301,7 +4305,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5476
+    "htmlLine": 5545
    },
    "options": null,
    "readOnly": false,
@@ -4317,7 +4321,7 @@
     "runVibration"
    ],
    "appLines": [
-    2253
+    2245
    ],
    "mcp": [
     {
@@ -4349,7 +4353,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5477
+    "htmlLine": 5546
    },
    "options": null,
    "readOnly": false,
@@ -4369,7 +4373,7 @@
    "appLines": [
     108,
     132,
-    2261
+    2253
    ],
    "mcp": [
     {
@@ -4401,7 +4405,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5487
+    "htmlLine": 5556
    },
    "options": [],
    "readOnly": false,
@@ -4417,9 +4421,9 @@
    ],
    "leadsTo": [],
    "appLines": [
-    3208,
-    3328,
-    3539
+    3200,
+    3320,
+    3530
    ],
    "mcp": [],
    "mcpCanSet": false,
@@ -4446,7 +4450,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5489
+    "htmlLine": 5558
    },
    "options": [],
    "readOnly": false,
@@ -4462,9 +4466,9 @@
    ],
    "leadsTo": [],
    "appLines": [
-    3209,
-    3329,
-    3540
+    3201,
+    3321,
+    3531
    ],
    "mcp": [],
    "mcpCanSet": false,
@@ -4491,7 +4495,7 @@
     "source": "mirror of input-fy",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5509
+    "htmlLine": 5578
    },
    "options": null,
    "readOnly": true,
@@ -4525,15 +4529,15 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    512,
-    1008,
-    1137,
-    2108,
-    2178,
-    3664,
-    3768,
-    4102,
-    4383
+    504,
+    1000,
+    1129,
+    2100,
+    2170,
+    3655,
+    3759,
+    4093,
+    4374
    ],
    "mcp": [
     {
@@ -4613,7 +4617,7 @@
     "source": "mirror of input-fu",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5511
+    "htmlLine": 5580
    },
    "options": null,
    "readOnly": true,
@@ -4642,12 +4646,12 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    1138,
-    2179,
-    3665,
-    3772,
-    4103,
-    4384
+    1130,
+    2171,
+    3656,
+    3763,
+    4094,
+    4375
    ],
    "mcp": [
     {
@@ -4710,7 +4714,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5518
+    "htmlLine": 5587
    },
    "options": [
     "LRFD",
@@ -4741,11 +4745,11 @@
     "runPurlinDesign → host design_purlin"
    ],
    "appLines": [
-    1148,
-    1182,
-    2167,
-    4095,
-    4446
+    1140,
+    1174,
+    2159,
+    4086,
+    4437
    ],
    "mcp": [
     {
@@ -4812,7 +4816,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5531
+    "htmlLine": 5600
    },
    "options": null,
    "readOnly": false,
@@ -4832,8 +4836,8 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    3666,
-    4104
+    3657,
+    4095
    ],
    "mcp": [
     {
@@ -4879,7 +4883,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5533
+    "htmlLine": 5602
    },
    "options": null,
    "readOnly": false,
@@ -4899,8 +4903,8 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    3667,
-    4105
+    3658,
+    4096
    ],
    "mcp": [
     {
@@ -4946,7 +4950,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5537
+    "htmlLine": 5606
    },
    "options": null,
    "readOnly": false,
@@ -4966,8 +4970,8 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    3668,
-    4106
+    3659,
+    4097
    ],
    "mcp": [
     {
@@ -5013,7 +5017,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5542
+    "htmlLine": 5611
    },
    "options": null,
    "readOnly": false,
@@ -5035,9 +5039,9 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4076,
-    4110,
-    5165
+    4067,
+    4101,
+    5156
    ],
    "mcp": [
     {
@@ -5073,7 +5077,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5547
+    "htmlLine": 5616
    },
    "options": null,
    "readOnly": false,
@@ -5095,9 +5099,9 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4076,
-    4109,
-    5164
+    4067,
+    4100,
+    5155
    ],
    "mcp": [
     {
@@ -5129,7 +5133,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5553
+    "htmlLine": 5622
    },
    "options": null,
    "readOnly": false,
@@ -5154,11 +5158,11 @@
     "(result card labels)"
    ],
    "appLines": [
-    3670,
-    4108,
-    4323,
-    5112,
-    5360
+    3661,
+    4099,
+    4314,
+    5103,
+    5351
    ],
    "mcp": [
     {
@@ -5207,7 +5211,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5558
+    "htmlLine": 5627
    },
    "options": null,
    "readOnly": false,
@@ -5234,12 +5238,12 @@
     "(result card labels)"
    ],
    "appLines": [
-    2115,
-    3669,
-    4107,
-    4275,
-    5111,
-    5359
+    2107,
+    3660,
+    4098,
+    4266,
+    5102,
+    5350
    ],
    "mcp": [
     {
@@ -5286,7 +5290,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5565
+    "htmlLine": 5634
    },
    "options": null,
    "readOnly": false,
@@ -5309,12 +5313,12 @@
     "(.csd restore: change events)"
    ],
    "appLines": [
-    4079,
-    4141,
-    4143,
-    4249,
-    5131,
-    6010
+    4070,
+    4132,
+    4134,
+    4240,
+    5122,
+    5990
    ],
    "mcp": [
     {
@@ -5330,7 +5334,7 @@
    "drives": [
     {
      "what": "shows design-dist-M1M2 · design-dist-Lm; when switched on with Lm 0 fills them from the load analysis or Lb",
-     "line": 4255
+     "line": 4246
     }
    ]
   },
@@ -5353,7 +5357,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5570
+    "htmlLine": 5639
    },
    "options": null,
    "readOnly": false,
@@ -5374,13 +5378,13 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4076,
-    4142,
+    4067,
+    4133,
+    4262,
     4271,
-    4280,
-    4290,
-    4316,
-    5141
+    4281,
+    4307,
+    5132
    ],
    "mcp": [
     {
@@ -5420,7 +5424,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5572
+    "htmlLine": 5641
    },
    "options": null,
    "readOnly": false,
@@ -5441,14 +5445,14 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4076,
-    4144,
-    4261,
-    4272,
-    4277,
-    4291,
-    4317,
-    5142
+    4067,
+    4135,
+    4252,
+    4263,
+    4268,
+    4282,
+    4308,
+    5133
    ],
    "mcp": [
     {
@@ -5484,7 +5488,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5578
+    "htmlLine": 5647
    },
    "options": null,
    "readOnly": false,
@@ -5503,7 +5507,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4111
+    4102
    ],
    "mcp": [
     {
@@ -5540,7 +5544,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5580
+    "htmlLine": 5649
    },
    "options": null,
    "readOnly": false,
@@ -5559,7 +5563,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4112
+    4103
    ],
    "mcp": [
     {
@@ -5596,7 +5600,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5587
+    "htmlLine": 5656
    },
    "options": null,
    "readOnly": false,
@@ -5615,7 +5619,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4122
+    4113
    ],
    "mcp": [
     {
@@ -5658,7 +5662,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5589
+    "htmlLine": 5658
    },
    "options": null,
    "readOnly": false,
@@ -5677,7 +5681,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4124
+    4115
    ],
    "mcp": [
     {
@@ -5720,7 +5724,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5591
+    "htmlLine": 5660
    },
    "options": null,
    "readOnly": false,
@@ -5741,8 +5745,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4123,
-    5100
+    4114,
+    5091
    ],
    "mcp": [
     {
@@ -5776,7 +5780,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5596
+    "htmlLine": 5665
    },
    "options": [
     "EOF",
@@ -5802,8 +5806,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4125,
-    5101
+    4116,
+    5092
    ],
    "mcp": [
     {
@@ -5841,7 +5845,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5605
+    "htmlLine": 5674
    },
    "options": [
     "fastened",
@@ -5863,7 +5867,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4126
+    4117
    ],
    "mcp": [
     {
@@ -5903,7 +5907,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5610
+    "htmlLine": 5679
    },
    "options": [
     "single",
@@ -5926,7 +5930,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4127
+    4118
    ],
    "mcp": [
     {
@@ -5966,7 +5970,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5618
+    "htmlLine": 5687
    },
    "options": [
     "auto",
@@ -5990,7 +5994,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4129
+    4120
    ],
    "mcp": [
     {
@@ -6030,7 +6034,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5627
+    "htmlLine": 5696
    },
    "options": [
     "stiffened",
@@ -6052,7 +6056,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4132
+    4123
    ],
    "mcp": [
     {
@@ -6092,7 +6096,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5634
+    "htmlLine": 5703
    },
    "options": null,
    "readOnly": false,
@@ -6111,7 +6115,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4134
+    4125
    ],
    "mcp": [
     {
@@ -6154,7 +6158,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5636
+    "htmlLine": 5705
    },
    "options": null,
    "readOnly": false,
@@ -6173,7 +6177,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4135
+    4126
    ],
    "mcp": [
     {
@@ -6216,7 +6220,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5638
+    "htmlLine": 5707
    },
    "options": null,
    "readOnly": false,
@@ -6235,7 +6239,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4136
+    4127
    ],
    "mcp": [
     {
@@ -6278,7 +6282,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5640
+    "htmlLine": 5709
    },
    "options": null,
    "readOnly": false,
@@ -6297,7 +6301,7 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4137
+    4128
    ],
    "mcp": [
     {
@@ -6340,7 +6344,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5650
+    "htmlLine": 5719
    },
    "options": null,
    "readOnly": false,
@@ -6360,8 +6364,8 @@
     "runPurlinDesign (wc_* · use_* · Fy · Fu)"
    ],
    "appLines": [
-    4138,
-    4226
+    4129,
+    4217
    ],
    "mcp": [
     {
@@ -6397,7 +6401,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5657
+    "htmlLine": 5726
    },
    "options": null,
    "readOnly": false,
@@ -6416,8 +6420,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4149,
-    5149
+    4140,
+    5140
    ],
    "mcp": [
     {
@@ -6431,7 +6435,7 @@
    "drives": [
     {
      "what": "R_uplift + span_type sent only when checked and select-r-value > 0",
-     "line": 4149
+     "line": 4140
     }
    ]
   },
@@ -6454,7 +6458,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5658
+    "htmlLine": 5727
    },
    "options": [
     "0",
@@ -6481,8 +6485,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    4150,
-    5150
+    4141,
+    5141
    ],
    "mcp": [
     {
@@ -6520,7 +6524,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5717
+    "htmlLine": 5786
    },
    "options": null,
    "readOnly": false,
@@ -6540,8 +6544,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    1139,
-    5236
+    1131,
+    5227
    ],
    "mcp": [
     {
@@ -6576,7 +6580,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5718
+    "htmlLine": 5787
    },
    "options": null,
    "readOnly": false,
@@ -6596,8 +6600,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    1140,
-    5240
+    1132,
+    5231
    ],
    "mcp": [
     {
@@ -6632,7 +6636,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5719
+    "htmlLine": 5788
    },
    "options": null,
    "readOnly": false,
@@ -6652,8 +6656,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    1141,
-    5253
+    1133,
+    5244
    ],
    "mcp": [
     {
@@ -6688,7 +6692,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5720
+    "htmlLine": 5789
    },
    "options": null,
    "readOnly": false,
@@ -6708,8 +6712,8 @@
     "(written from the load-analysis result)"
    ],
    "appLines": [
-    1142,
-    5260
+    1134,
+    5251
    ],
    "mcp": [
     {
@@ -6744,7 +6748,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5722
+    "htmlLine": 5791
    },
    "options": [
     "screw",
@@ -6763,7 +6767,7 @@
     "runLapConnection"
    ],
    "appLines": [
-    1143
+    1135
    ],
    "mcp": [
     {
@@ -6795,7 +6799,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5723
+    "htmlLine": 5792
    },
    "options": null,
    "readOnly": false,
@@ -6813,7 +6817,7 @@
     "runLapConnection"
    ],
    "appLines": [
-    1144
+    1136
    ],
    "mcp": [
     {
@@ -6847,7 +6851,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5725
+    "htmlLine": 5794
    },
    "options": null,
    "readOnly": false,
@@ -6865,7 +6869,7 @@
     "runLapConnection"
    ],
    "appLines": [
-    1145
+    1137
    ],
    "mcp": [
     {
@@ -6897,7 +6901,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5726
+    "htmlLine": 5795
    },
    "options": null,
    "readOnly": false,
@@ -6915,7 +6919,7 @@
     "runLapConnection"
    ],
    "appLines": [
-    1146
+    1138
    ],
    "mcp": [
     {
@@ -6949,7 +6953,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5727
+    "htmlLine": 5796
    },
    "options": null,
    "readOnly": false,
@@ -6967,7 +6971,7 @@
     "runLapConnection"
    ],
    "appLines": [
-    1147
+    1139
    ],
    "mcp": [
     {
@@ -7001,7 +7005,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5729
+    "htmlLine": 5798
    },
    "options": null,
    "readOnly": false,
@@ -7015,7 +7019,7 @@
    ],
    "leadsTo": [],
    "appLines": [
-    1163
+    1155
    ],
    "mcp": [
     {
@@ -7036,7 +7040,9 @@
     }
    ],
    "mcpCanSet": true,
-   "mcpReachesPage": [],
+   "mcpReachesPage": [
+    "design_purlin"
+   ],
    "dependsOn": [],
    "drives": []
   },
@@ -7059,7 +7065,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5742
+    "htmlLine": 5811
    },
    "options": [
     "screw",
@@ -7086,9 +7092,9 @@
     "(.csd restore: change events)"
    ],
    "appLines": [
-    1175,
-    1235,
-    6009
+    1167,
+    1227,
+    5989
    ],
    "mcp": [
     {
@@ -7102,7 +7108,7 @@
    "drives": [
     {
      "what": "shows weld / groove / Fub / Pnvs / d'w / Fuf rows; decides which of them are sent",
-     "line": 1247
+     "line": 1239
     }
    ]
   },
@@ -7125,7 +7131,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5757
+    "htmlLine": 5826
    },
    "options": null,
    "readOnly": false,
@@ -7143,7 +7149,7 @@
     "runConnection"
    ],
    "appLines": [
-    1178
+    1170
    ],
    "mcp": [
     {
@@ -7175,7 +7181,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5757
+    "htmlLine": 5826
    },
    "options": null,
    "readOnly": false,
@@ -7193,7 +7199,7 @@
     "runConnection"
    ],
    "appLines": [
-    1205
+    1197
    ],
    "mcp": [
     {
@@ -7225,7 +7231,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5758
+    "htmlLine": 5827
    },
    "options": null,
    "readOnly": false,
@@ -7243,7 +7249,7 @@
     "runConnection"
    ],
    "appLines": [
-    1205
+    1197
    ],
    "mcp": [
     {
@@ -7275,7 +7281,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5758
+    "htmlLine": 5827
    },
    "options": null,
    "readOnly": false,
@@ -7293,7 +7299,7 @@
     "runConnection"
    ],
    "appLines": [
-    1205
+    1197
    ],
    "mcp": [
     {
@@ -7325,7 +7331,7 @@
     "source": "mirror of input-fy (copied on change, then free)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5759
+    "htmlLine": 5828
    },
    "options": null,
    "readOnly": false,
@@ -7345,8 +7351,8 @@
     "(mirror Fy)"
    ],
    "appLines": [
-    1179,
-    3768
+    1171,
+    3759
    ],
    "mcp": [
     {
@@ -7387,7 +7393,7 @@
     "source": "mirror of input-fu (copied on change, then free)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5759
+    "htmlLine": 5828
    },
    "options": null,
    "readOnly": false,
@@ -7407,8 +7413,8 @@
     "(mirror Fu)"
    ],
    "appLines": [
-    1180,
-    3772
+    1172,
+    3763
    ],
    "mcp": [
     {
@@ -7448,7 +7454,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5760
+    "htmlLine": 5829
    },
    "options": null,
    "readOnly": false,
@@ -7464,7 +7470,7 @@
     "runConnection"
    ],
    "appLines": [
-    1211
+    1203
    ],
    "mcp": [
     {
@@ -7498,7 +7504,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5760
+    "htmlLine": 5829
    },
    "options": null,
    "readOnly": false,
@@ -7514,7 +7520,7 @@
     "runConnection"
    ],
    "appLines": [
-    1212
+    1204
    ],
    "mcp": [
     {
@@ -7548,7 +7554,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": true,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5761
+    "htmlLine": 5830
    },
    "options": [
     "complete",
@@ -7569,7 +7575,7 @@
     "runConnection"
    ],
    "appLines": [
-    1217
+    1209
    ],
    "mcp": [
     {
@@ -7601,7 +7607,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5762
+    "htmlLine": 5831
    },
    "options": null,
    "readOnly": false,
@@ -7617,7 +7623,7 @@
     "runConnection"
    ],
    "appLines": [
-    1221
+    1213
    ],
    "mcp": [
     {
@@ -7649,7 +7655,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5763
+    "htmlLine": 5832
    },
    "options": null,
    "readOnly": false,
@@ -7665,7 +7671,7 @@
     "runConnection"
    ],
    "appLines": [
-    1201
+    1193
    ],
    "mcp": [
     {
@@ -7699,7 +7705,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5764
+    "htmlLine": 5833
    },
    "options": null,
    "readOnly": false,
@@ -7715,7 +7721,7 @@
     "runConnection"
    ],
    "appLines": [
-    1197
+    1189
    ],
    "mcp": [
     {
@@ -7747,7 +7753,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5765
+    "htmlLine": 5834
    },
    "options": null,
    "readOnly": false,
@@ -7763,7 +7769,7 @@
     "runConnection"
    ],
    "appLines": [
-    1226
+    1218
    ],
    "mcp": [
     {
@@ -7795,7 +7801,7 @@
     "source": "page HTML (value attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": true,
-    "htmlLine": 5766
+    "htmlLine": 5835
    },
    "options": null,
    "readOnly": false,
@@ -7813,7 +7819,7 @@
     "runConnection"
    ],
    "appLines": [
-    1181
+    1173
    ],
    "mcp": [
     {
@@ -7847,7 +7853,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5766
+    "htmlLine": 5835
    },
    "options": null,
    "readOnly": false,
@@ -7865,7 +7871,7 @@
     "runConnection"
    ],
    "appLines": [
-    1185
+    1177
    ],
    "mcp": [
     {
@@ -7897,7 +7903,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5767
+    "htmlLine": 5836
    },
    "options": null,
    "readOnly": false,
@@ -7915,7 +7921,7 @@
     "runConnection"
    ],
    "appLines": [
-    1185
+    1177
    ],
    "mcp": [
     {
@@ -7949,7 +7955,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5767
+    "htmlLine": 5836
    },
    "options": null,
    "readOnly": false,
@@ -7967,7 +7973,7 @@
     "runConnection"
    ],
    "appLines": [
-    1185
+    1177
    ],
    "mcp": [
     {
@@ -8001,7 +8007,7 @@
     "source": "page HTML (selected option)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5768
+    "htmlLine": 5837
    },
    "options": [
     "",
@@ -8028,7 +8034,7 @@
     "runConnection"
    ],
    "appLines": [
-    1191
+    1183
    ],
    "mcp": [
     {
@@ -8060,7 +8066,7 @@
     "source": "blank (no value — the input is absent)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5768
+    "htmlLine": 5837
    },
    "options": null,
    "readOnly": false,
@@ -8078,7 +8084,7 @@
     "runConnection"
    ],
    "appLines": [
-    1186
+    1178
    ],
    "mcp": [
     {
@@ -8110,7 +8116,7 @@
     "source": "page HTML (checked attribute)",
     "hardCodedEngineeringDefault": false,
     "zeroOrNoneDefault": false,
-    "htmlLine": 5769
+    "htmlLine": 5838
    },
    "options": null,
    "readOnly": false,
@@ -8126,7 +8132,7 @@
     "runConnection"
    ],
    "appLines": [
-    1193
+    1185
    ],
    "mcp": [
     {

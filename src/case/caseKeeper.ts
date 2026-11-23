@@ -178,7 +178,21 @@ export class CaseKeeper {
         const { writer, keepSource } = writerOf(d.origin);
         const opts: { baseRev?: number; keepSource?: boolean } = { keepSource };
         if (d.origin === 'user' && Number.isInteger(d.baseRev)) { opts.baseRev = d.baseRev; }
+        // V7-S1: 출처(origin)는 화면이 정한다 — 화면의 연동(mirror)도 그것을 만들 때 본 판(seenRev)으로 충돌 규칙을 건다:
+        // 그 판 뒤에 다른 쓰는 이(AI · 파일 …)가 바꾼 키를 옛 화면 값으로 되쓰지 않는다.
+        else if (d.origin === 'mirror' && Number.isInteger(d.seenRev)) { opts.baseRev = d.seenRev; }
         const wasClean = this.state.rev === this.savedRev;
+        // V7-08: 파일을 연 판(경계)보다 오래된 판을 보고 만든 화면의 변경은 키와 무관하게 받지 않는다 — 열기 전에 친 글자가
+        // 새로 연 파일의 값을 덮지 않는다(파일은 「다른 쓰는 이」 — 설계 §3.2). 호출자가 상태를 다시 보낸다(conflicts).
+        if (opts.baseRev !== undefined && opts.baseRev < this.boundaryRev) {
+            const raw: Record<string, unknown> = d.changes && typeof d.changes === 'object' ? d.changes : {};
+            const keys = Object.keys(raw).filter((k) => {
+                const cur = (['spans', 'supports', 'lapsPerSupport'] as string[]).includes(k) ? (this.state.spans as any)[k] : this.state.inputs[k];
+                return JSON.stringify(cur) !== JSON.stringify(raw[k]);
+            });
+            return { state: this.state, accepted: [], conflicts: keys,
+                rejected: keys.map((key) => ({ key, reason: `made on rev ${opts.baseRev}, before a file was opened at rev ${this.boundaryRev} — not applied` })) };
+        }
         // u33 · V7-S1: 하중 해석에서 채운 값(origin load-analysis)은 그 하중 해석보다 뒤에 사람 · AI · 파일이 쓴 키를 덮지 않는다 —
         // 다시 싣기에 다시 온 옛 loadAnalysisComplete 의 채움은 새 해석이 아니다. 하중 해석이 없으면 그런 키는 하나도 덮지 않는다.
         let changes: Record<string, unknown> = d.changes && typeof d.changes === 'object' ? d.changes : {};
@@ -208,6 +222,10 @@ export class CaseKeeper {
         }
         return r;
     }
+    /** V7-08: 마지막으로 파일을 연 판(그보다 오래된 화면의 변경은 받지 않는다) */
+    boundaryRev = 0;
+    /** V7-07: 연 파일이 적었던 출처 가운데 'file' 로 바꾼 것 — get_case_inputs 가 보여 준다 */
+    recordedSources: Record<string, Source> = {};
     /** 열기 뒤 화면의 복원 메아리를 기다리는 중(edit 의 주석) */
     private openEcho = false;
     /** u33: 지금 하중 해석을 얻었을 때의 판(없으면 null) — 호스트가 하중 해석을 쥘 때 noteLoadAnalysis 로 적는다 */
@@ -237,8 +255,10 @@ export class CaseKeeper {
     }
 
     /** 파일을 열었다 — 상태를 바꾼다. 판은 앞으로만(화면의 baseRev 가 거꾸로 가지 않게): 모든 키의 판 = 새 판. */
-    loadFromFile(next: CaseState, keepUnitSystem = false): void {
+    loadFromFile(next: CaseState, keepUnitSystem = false, recordedSources: Record<string, Source> = {}): void {
         const rev = this.state.rev + 1;
+        this.boundaryRev = rev;
+        this.recordedSources = { ...recordedSources };
         const st = JSON.parse(JSON.stringify(next)) as CaseState;
         // 단위가 적히지 않은 파일(1.0 · 옛 파일)은 화면이 지금 단위 그대로 연다 — 상태도 그대로
         if (keepUnitSystem) { st.view.unitSystem = this.state.view.unitSystem; }

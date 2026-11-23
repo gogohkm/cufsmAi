@@ -151,7 +151,7 @@ async function main() {
     assert.strictEqual(p._model.sectionTemplate, 'lippedz', 'D-6: the model survives a page reload');
     const cmds = p.__testGetPostedMessages().map((m) => m.command);
     assert(cmds.includes('modelLoaded') && cmds.includes('caseState') && cmds.indexOf('modelLoaded') < cmds.lastIndexOf('caseState'), `re-posted model then state (${cmds.join(',')})`);
-    // ── 엔진 b288448 의 Lap 입력 distortion_restrained — 화면 칸이 없어 검토 상태의 mcpOnly 에. 호스트 본문이 그것을 싣는다 ─────
+    // ── 계약 §6.3(6 번째 멈춤): Lap 도구의 옛 이름 distortion_restrained 도 검토 상태의 키 lapRestrained 에(mcpOnly 가 아니다) — 호스트 본문은 lap_restrained ─────
     {
       const { loadTs, makeFakeVscode } = require('./panel_harness');
       const G = loadTs('src/case/mcpGroups.ts', makeFakeVscode());
@@ -161,9 +161,12 @@ async function main() {
       const lapArgs = { action: 'lap_connection', d: 8, t: 0.059, Fy: 50, Fu: 65, lap_left_in: 30, lap_right_in: 30, fastener_dia: 0.19, n_rows: 2, Pnvs: 1.1 };
       k.applyMcp(G.mcpWrite('lap_connection', { ...lapArgs, distortion_restrained: true }));
       const ctxR = { drafts: { tplH: 8, tplT: 0.059 }, lastDesign: null, props: null };
-      assert.strictEqual(R.buildLapRequest(k.state, ctxR).data.distortion_restrained, true, 'distortion_restrained kept in the case and sent with the lap request');
+      assert.strictEqual(k.state.inputs.lapRestrained, true, 'the old name writes the case key lapRestrained');
+      assert(!k.state.mcpOnly.design_lap_connection || !('distortion_restrained' in k.state.mcpOnly.design_lap_connection), 'not kept as an MCP-only argument');
+      const sent = R.buildLapRequest(k.state, ctxR).data;
+      assert(sent.lap_restrained === true && !('distortion_restrained' in sent), 'sent with the lap request as lap_restrained');
       k.applyMcp(G.mcpWrite('lap_connection', lapArgs));
-      assert(!('distortion_restrained' in R.buildLapRequest(k.state, ctxR).data), 'a later design_lap_connection without it clears it (decision 1)');
+      assert(!('lap_restrained' in R.buildLapRequest(k.state, ctxR).data), 'a later design_lap_connection without it clears it (decision 1)');
     }
   } finally {
     ctx.close();

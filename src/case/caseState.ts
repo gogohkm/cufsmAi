@@ -106,6 +106,40 @@ export interface MigrateResult {
     warnings: string[];
     /** 파일의 designInputs 에 든 모델 키 값(초안 — 상태에는 두지 않는다. 열 때는 모델이 이긴다: 고정값 csd-model-differs) */
     modelDrafts: Record<string, InputValue>;
+    /** V7-07: 파일이 적은 출처 가운데 열 때 'file' 로 바꾼 것(키 → 파일에 적힌 출처) — 보여 주기만, 「덮은 값」 판단에는 쓰지 않는다 */
+    recordedSources?: Record<string, Source>;
+}
+
+/** V7-09: .csd 의 case.mcpOnly 로 받는 것 — 이 호스트가 쓰는 도구 이름, 인자 이름 꼴, 크기 상한(넘으면 버리고 알린다) */
+export const MCP_ONLY_TOOLS = ['aisi_design_flexure', 'aisi_design_compression', 'aisi_design_combined', 'aisi_design_tension',
+    'aisi_design_connection', 'design_purlin', 'analyze_loads', 'design_connection', 'design_lap_connection'] as const;
+export const MCP_ONLY_LIMITS = { argBytes: 16 * 1024, toolBytes: 64 * 1024, totalBytes: 256 * 1024 } as const;
+const ARG_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+/** 파일의 mcpOnly → 받을 것(규칙은 위). 버린 것은 warnings 에 */
+export function sanitizeMcpOnly(raw: unknown, warnings: string[]): Record<string, Record<string, unknown>> {
+    const out: Record<string, Record<string, unknown>> = {};
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { return out; }
+    let total = 0;
+    for (const [tool, args] of Object.entries(raw as Record<string, unknown>)) {
+        if (!(MCP_ONLY_TOOLS as readonly string[]).includes(tool)) { warnings.push(`case.mcpOnly: '${tool.slice(0, 64)}' is not a design tool of this program — dropped`); continue; }
+        if (!args || typeof args !== 'object' || Array.isArray(args)) { warnings.push(`case.mcpOnly.${tool}: not an argument object — dropped`); continue; }
+        const keep: Record<string, unknown> = {};
+        let toolBytes = 0;
+        for (const [name, v] of Object.entries(args as Record<string, unknown>)) {
+            const bytes = Buffer.byteLength(JSON.stringify(v ?? null) || 'null', 'utf8');
+            if (!ARG_NAME.test(name)) { warnings.push(`case.mcpOnly.${tool}: an argument name that is not an identifier — dropped`); continue; }
+            if (bytes > MCP_ONLY_LIMITS.argBytes || toolBytes + bytes > MCP_ONLY_LIMITS.toolBytes || total + bytes > MCP_ONLY_LIMITS.totalBytes) {
+                warnings.push(`case.mcpOnly.${tool}.${name}: ${bytes} B is over the size limit — dropped`);
+                continue;
+            }
+            keep[name] = clone(v);
+            toolBytes += bytes;
+            total += bytes;
+        }
+        if (Object.keys(keep).length) { out[tool] = keep; }
+    }
+    return out;
 }
 
 /**
@@ -189,11 +223,12 @@ export function readDesignInputs(di: Record<string, unknown> | null | undefined)
 }
 
 /** .csd 1.4 의 `case` → 상태(키 · 종류 · 선택지를 검사하고, 맞지 않는 것은 버리고 알린다 — V5b-01 과 같은 태도). */
-export function readCaseRecord(rec: unknown): { state: CaseState; warnings: string[] } {
+export function readCaseRecord(rec: unknown): { state: CaseState; warnings: string[]; recordedSources: Record<string, Source> } {
     const state = createCaseState();
     const warnings: string[] = [];
+    const recordedSources: Record<string, Source> = {};
     const r = rec as Partial<CaseRecord> | null;
-    if (!r || typeof r !== 'object') { warnings.push('case 가 비었다 — 처음 값'); return { state, warnings }; }
+    if (!r || typeof r !== 'object') { warnings.push('case 가 비었다 — 처음 값'); return { state, warnings, recordedSources }; }
     if (r.schema !== CASE_SCHEMA) { warnings.push(`case 의 판 ${JSON.stringify(r.schema)} 은(는) 이 빌드의 ${CASE_SCHEMA} 가 아니다 — 아는 키만 읽는다`); }
     for (const [k, v] of Object.entries(r.inputs || {})) {
         const m = DS.fieldMeta(k);
@@ -203,6 +238,12 @@ export function readCaseRecord(rec: unknown): { state: CaseState; warnings: stri
         state.inputs[k] = clone(v);
         const src = (r.sources || {})[k];
         state.sources[k] = isSource(src) ? src : 'file';
+        // V7-07: 파일의 꼬리표를 그대로 믿지 않는다 — 처음 값과 다른 값을 'default' · 'ai' · 'mirror' 로 적었으면 열 때는 'file'
+        // (연 사람의 값 — 설계 도구가 덮으면 case_inputs_replaced 에 나온다). 적힌 출처는 recordedSources 로 따로(보여 주기만).
+        if (isSource(src) && FILE_RETAGGED.includes(src) && v !== null && JSON.stringify(v) !== JSON.stringify(DS.defaultValue(k))) {
+            state.sources[k] = 'file';
+            recordedSources[k] = src;
+        }
     }
     if (r.spans) {
         const errs = DS.validateSpanTable(r.spans, String(state.inputs.spanType), Number(state.inputs.nSpans));
@@ -212,13 +253,14 @@ export function readCaseRecord(rec: unknown): { state: CaseState; warnings: stri
             for (const k of SPAN_KEYS) { const s = (r.sources || {})[k]; state.sources[k] = isSource(s) ? s : 'file'; }
         }
     }
-    if (r.mcpOnly && typeof r.mcpOnly === 'object') { state.mcpOnly = clone(r.mcpOnly); }
+    state.mcpOnly = sanitizeMcpOnly(r.mcpOnly, warnings);
     if (r.view && (r.view.unitSystem === 'US' || r.view.unitSystem === 'SI')) { state.view.unitSystem = r.view.unitSystem; }
     if (r.view && r.view.cfsm) { for (const k of DS.KEYS.view) { if (typeof r.view.cfsm[k] === 'boolean') { state.view.cfsm[k] = r.view.cfsm[k]; } } }
     state.rev = Number.isInteger(r.rev) && (r.rev as number) >= 0 ? r.rev as number : 0;
     for (const k of Object.keys(state.revs)) { state.revs[k] = 0; }
-    return { state, warnings };
+    return { state, warnings, recordedSources };
 }
+const FILE_RETAGGED: Source[] = ['default', 'ai', 'mirror'];
 
 function isSource(s: unknown): s is Source {
     return typeof s === 'string' && ['default', 'user', 'ai', 'file', 'load-analysis', 'mirror'].includes(s);
@@ -232,11 +274,11 @@ export function migrateProject(projectData: unknown): MigrateResult {
     const p = (projectData && typeof projectData === 'object' ? projectData : {}) as Record<string, unknown>;
     const fromVersion = typeof p.version === 'string' ? p.version : '1.0';
     if (p.case && typeof p.case === 'object') {
-        const { state, warnings } = readCaseRecord(p.case);
+        const { state, warnings, recordedSources } = readCaseRecord(p.case);
         const di = p.designInputs as Record<string, unknown> | undefined;
         const modelDrafts: Record<string, InputValue> = {};
         if (di && typeof di === 'object') { for (const k of DS.KEYS.model) { if (k in di) { modelDrafts[k] = clone(di[k] as InputValue); } } }
-        return { state, fromVersion, warnings, modelDrafts };
+        return { state, fromVersion, warnings, modelDrafts, recordedSources };
     }
     const { state, warnings, modelDrafts } = readDesignInputs(p.designInputs as Record<string, unknown> | null);
     return { state, fromVersion, warnings, modelDrafts };

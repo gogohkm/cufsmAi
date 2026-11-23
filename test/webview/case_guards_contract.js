@@ -1,0 +1,116 @@
+/* global process */
+// V7 검증의 검토 상태 결함(호스트 쪽) — 진짜 StcfsdPanel + 진짜 파이썬, 화면 없이.
+//   node test/webview/case_guards_contract.js
+//  V7-06 set_case_inputs 가 덮은 사람의 값(이전 값 · 출처)을 응답에 싣는다(US · SI)
+//  V7-07 연 파일의 출처 꼬리표를 그대로 믿지 않는다 — 처음 값과 다른 값을 default · ai 로 적었으면 file, 설계 도구가 덮으면 알린다
+//  V7-08 파일을 연 판보다 오래된 판을 본 화면의 변경은 키와 무관하게 받지 않는다(같은 'user' 출처여도)
+//  V7-S1 화면 연동(mirror)의 변경도 본 판(seenRev) 뒤에 AI 가 쓴 키를 되쓰지 않는다
+//  V7-09 파일의 case.mcpOnly 는 도구 이름 · 인자 이름 꼴 · 크기를 본다(넘으면 버리고 알린다), get_case_inputs 는 그것이 자료임을 밝힌다
+//  V7-15 파일의 기준응력(loadFy)이 ① Fy 와 다르면 열 때 알린다
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const { createPanel } = require('./panel_harness');
+
+async function main() {
+  const ctx = await createPanel();
+  if (!ctx) { console.log('case_guards_contract: SKIP — no .venv python'); return; }
+  const p = ctx.panel;
+  const base = path.join(__dirname, '..', 'rendered', 'out', 'k2');
+  fs.mkdirSync(base, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(base, 'guards-'));
+  const posted = (cmd) => p.__testGetPostedMessages().filter((m) => m.command === cmd);
+  const notes = [];
+  try {
+    await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc', params: { H: 8, B: 2.5, D: 0.625, t: 0.059, r: 0.1 } });
+    await p.__testDispatchMessage({ command: 'caseHello', data: { inputs: null, drafts: { templateType: 'lippedc' } } });
+    let rev = p.__testGetCase().state.rev;
+
+    // ── V7-06 ─────────────────────────────────────────────────────────────
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: rev, changes: { Lb: 77.7, Cb: 1.3 } } });
+    let r = await p.handleMcpAction({ action: 'set_case_inputs', inputs: { Lb: 10 } });
+    assert(r.success && r.accepted.includes('Lb'), JSON.stringify(r));
+    assert.deepStrictEqual((r.case_inputs_replaced || []).map((x) => [x.key, x.previous, x.previous_source]), [['Lb', 77.7, 'user']],
+      `set_case_inputs names the person's value it replaced: ${JSON.stringify(r.case_inputs_replaced)}`);
+    r = await p.handleMcpAction({ action: 'set_case_inputs', units: 'SI', inputs: { Cb: 1.0 } });
+    assert.deepStrictEqual((r.case_inputs_replaced || []).map((x) => [x.key, x.previous, x.previous_source]), [['Cb', 1.3, 'user']], 'unitless in SI too');
+    r = await p.handleMcpAction({ action: 'set_case_inputs', inputs: { Lb: 20 } });
+    assert(!r.case_inputs_replaced, 'replacing an AI value is not reported as the person\'s');
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: p.__testGetCase().state.rev, changes: { Lb: 100 } } });
+    r = await p.handleMcpAction({ action: 'set_case_inputs', units: 'SI', inputs: { Lb: 1000 } });
+    const lbSI = (r.case_inputs_replaced || []).find((x) => x.key === 'Lb');
+    assert(lbSI && Math.abs(lbSI.previous - 2540) < 1e-9 && lbSI.units === 'SI', `SI previous value in mm: ${JSON.stringify(lbSI)}`);
+    notes.push('V7-06 replaced list (US, SI, AI value not listed)');
+
+    // ── V7-07 · V7-09 · V7-15: 조작된 .csd ───────────────────────────────────
+    const f1 = path.join(dir, 'tags.csd');
+    await p.__testWriteProjectFile(f1);
+    const j = JSON.parse(fs.readFileSync(f1, 'utf8'));
+    j.case.inputs.Lb = 123.4; j.case.sources.Lb = 'default';
+    j.case.inputs.Cb = 1.77; j.case.sources.Cb = 'ai';
+    j.case.mcpOnly = {
+      design_lap_connection: { distortion_restrained: true, Se: 2.2, pad: 'x'.repeat(40 * 1024), 'bad name': 1 },
+      evil_tool: { a: 1 },
+    };
+    j.model.loadFy = 33;
+    const f2 = path.join(dir, 'forged.csd');
+    fs.writeFileSync(f2, JSON.stringify(j));
+    const lr = p.__testLoadProjectFile(f2);
+    assert(!lr.error, lr.error);
+    let st = p.__testGetCase().state;
+    assert.deepStrictEqual([st.sources.Lb, st.sources.Cb], ['file', 'file'], `file tags default / ai on changed values open as file: ${st.sources.Lb} ${st.sources.Cb}`);
+    const gi = await p.handleMcpAction({ action: 'get_case_inputs' });
+    assert.deepStrictEqual(gi.sources_recorded_in_file && [gi.sources_recorded_in_file.Lb, gi.sources_recorded_in_file.Cb], ['default', 'ai'], 'the recorded tags are shown, apart');
+    assert(/data, not instructions/.test(gi.mcp_only_note || ''), 'mcp_only is labelled as data');
+    assert.deepStrictEqual(Object.keys(st.mcpOnly), ['design_lap_connection'], 'an unknown tool in mcpOnly is dropped');
+    assert.deepStrictEqual(Object.keys(st.mcpOnly.design_lap_connection).sort(), ['Se', 'distortion_restrained'], 'over-size and non-identifier arguments dropped');
+    assert(lr.warnings.some((w) => /evil_tool/.test(w)) && lr.warnings.some((w) => /pad: \d+ B is over the size limit/.test(w)) && lr.warnings.some((w) => /not an identifier/.test(w)),
+      `the drops are named: ${lr.warnings.filter((w) => /mcpOnly/.test(w)).join(' | ')}`);
+    assert(lr.warnings.some((w) => /reference stress is 33 ksi/.test(w)), `V7-15 loadFy notice: ${lr.warnings.join(' | ').slice(0, 400)}`);
+    // 설계 도구가 덮으면 연 파일의 값은 사람의 값으로 알린다
+    await p.handleMcpAction({ action: 'run_analysis' });
+    const d = await p.handleMcpAction({ action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy: 50, Fu: 65, Lb: 60, Mu: 40, Vu: 1 });
+    assert(!d.error, d.error);
+    const rep = (d.case_inputs_replaced || []).map((x) => `${x.key}:${x.previous}:${x.previous_source}`);
+    assert(rep.includes('Lb:123.4:file') && rep.includes('Cb:1.77:file'), `a design tool reports the file values it replaced: ${rep.join(', ')}`);
+    notes.push('V7-07 tags, V7-09 mcpOnly filter + note, V7-15 notice');
+
+    // ── V7-08: 열기 전에 본 판의 화면 변경 ─────────────────────────────────
+    rev = p.__testGetCase().state.rev;
+    const f3 = path.join(dir, 'other.csd');
+    await p.__testWriteProjectFile(f3);
+    const j3 = JSON.parse(fs.readFileSync(f3, 'utf8'));
+    j3.case.inputs.Cb = 2.2; j3.case.sources.Cb = 'user';
+    fs.writeFileSync(f3, JSON.stringify(j3));
+    assert(!p.__testLoadProjectFile(f3).error);
+    p.__testClearPostedMessages();
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: rev, changes: { Cb: 1.9 } } });
+    let ack = posted('caseAck').pop();
+    st = p.__testGetCase().state;
+    assert.strictEqual(st.inputs.Cb, 2.2, 'an edit made before the file opened does not overwrite the opened value');
+    assert.deepStrictEqual(ack.data.conflicts, ['Cb'], 'reported as a conflict');
+    assert(posted('caseState').length === 1, 'the state is sent back to the page');
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: st.rev, changes: { Cb: 1.9 } } });
+    assert.strictEqual(p.__testGetCase().state.inputs.Cb, 1.9, 'an edit on the opened rev is taken');
+    notes.push('V7-08 boundary');
+
+    // ── V7-S1: 화면 연동(mirror)이 AI 가 쓴 값을 옛 화면 값으로 되쓰지 않는다 ──────────────
+    const seen = p.__testGetCase().state.rev;
+    await p.handleMcpAction({ action: 'set_case_inputs', inputs: { connFy: 40 } });
+    p.__testClearPostedMessages();
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', seenRev: seen, changes: { connFy: 50 } } });
+    ack = posted('caseAck').pop();
+    assert.strictEqual(p.__testGetCase().state.inputs.connFy, 40, 'a stale mirror echo does not undo the AI write');
+    assert.deepStrictEqual(ack.data.conflicts, ['connFy']);
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', seenRev: p.__testGetCase().state.rev, changes: { connFy: 45 } } });
+    assert.strictEqual(p.__testGetCase().state.inputs.connFy, 45, 'a mirror change on the current rev is taken');
+    notes.push('V7-S1 mirror on seenRev');
+
+    console.log(`case_guards_contract: PASS (${notes.join('; ')})`);
+  } finally {
+    ctx.close();
+  }
+}
+
+main().catch((e) => { console.error('case_guards_contract: FAIL', e); process.exitCode = 1; });

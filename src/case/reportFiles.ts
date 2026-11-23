@@ -22,13 +22,21 @@ export const PDF_MARKER = '\n%stcfsd-report/1\n';
 
 /** 검토 대상 이름 → 파일 이름 앞부분(규칙은 머리말). 비면 'stcfsd' */
 export function safeBaseName(raw: unknown): string {
-    let s = String(raw ?? '').normalize('NFC');
+    let s = String(raw ?? '');
+    // V7-14: 짝 없는 서로게이트(파일 이름이 될 수 없다)는 '_'
+    s = s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '_').normalize('NFC');
     s = s.replace(/[‎‏‪-‮⁦-⁩؜]/g, '')     // 글 방향 제어
+        // V7-14: 보이지 않는 글자(형식 글자 — 폭 없는 공백 · 결합 막기 …)와 한글 채움 글자는 지운다(보기에 같은 두 이름이 생기지 않게)
+        .replace(/[\p{Cf}\u115f\u1160\u3164\uffa0]/gu, '')
+        // 경로 구분자처럼 보이는 글자(전각 · 나눗셈 · 분수 빗금, 전각 역빗금)도 구분자처럼 '_'
+        .replace(/[\uff0f\u2215\u2044\uff3c\u29f5\u2571\u2572]/g, '_')
+        .replace(/\p{Zs}/gu, ' ')                                             // 여러 공백 글자 → 보통 공백(아래에서 모으고 끝을 뗀다)
         .replace(/[<>:"/\\|?*]/g, '_');                                     // 구분자 · 드라이브 · 금지 글자
     s = [...s].map((ch) => (ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f ? '_' : ch)).join('')   // 제어 문자
         .replace(/\s+/g, ' ').trim();
     s = s.replace(/^[.\s]+/, '').replace(/[.\s]+$/, '');                     // 숨김 · 끝의 점 / 공백
-    if (s.length > 60) { s = s.slice(0, 60).replace(/[.\s]+$/, ''); }
+    // 60 글자(코드 포인트 — 서로게이트 짝을 가르지 않는다)
+    if ([...s].length > 60) { s = [...s].slice(0, 60).join('').replace(/[.\s]+$/, ''); }
     if (!s) { s = 'stcfsd'; }
     // 장치 이름(CON · NUL · COM1 … — 확장자가 붙어도)은 앞에 '_' — 판정은 src/records/names.ts segmentError 하나
     if (/device name/.test(segmentError(s) || '')) { s = '_' + s; }

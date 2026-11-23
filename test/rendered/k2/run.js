@@ -693,6 +693,10 @@ async function main() {
   fs.writeFileSync(path.join(K.OUT, 'results.json'), JSON.stringify({ results, exceptions, mismatches: goldens.flatMap((g) => g.mismatch.map((m) => ({ golden: g.name, ...m }))) }, null, 1));
   console.log(`page exceptions: ${exceptions.length}`);
   console.log(`K2 invariants: ${caseChecked.length} sessions, ${caseChecked.reduce((a, x) => a + x.shadow, 0)} shadow comparisons, ${caseProblems.length} problems`);
+  // V7-17 ①: 「화면 본문 = 호스트 본문」 은 화면이 본문을 보낸 만큼만 본다 — 모든 흐름을 돌렸으면 그 수의 하한(지금 13)
+  const MIN_SHADOW = 13;
+  const nShadow = caseChecked.reduce((a, x) => a + x.shadow, 0);
+  if (ONLY.size === 0 && nShadow < MIN_SHADOW) { caseProblems.push(`only ${nShadow} page ↔ host body comparisons (at least ${MIN_SHADOW} expected — the page stopped sending its bodies?)`); }
   for (const p of caseProblems) { console.log('  CASE ' + p); }
   console.log(`test:k2: ${failed.length === 0 && mism === 0 && exceptions.length === 0 && caseProblems.length === 0 ? 'PASS' : 'FAIL'} (${results.length - failed.length}/${results.length} steps, ${mism} golden mismatches, ${((Date.now() - t0) / 1000).toFixed(0)} s)`);
   if (failed.length > 0 || mism > 0 || exceptions.length > 0 || caseProblems.length > 0) { process.exitCode = 1; }

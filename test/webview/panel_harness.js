@@ -112,13 +112,16 @@ async function createPanel() {
   StcfsdPanel.createOrShow(vscode.Uri.file(ROOT), bridge, undefined);
   const panel = StcfsdPanel.currentPanel;
   await panel.__testDispatchMessage({ command: 'webviewReady' });
+  // V7-17 ⑦: 시험의 임시 파일은 이 패널의 상자(mkdtemp) 안에 — close 가 상자째 지운다
+  const box = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd_w3_'));
   return {
     panel, bridge, log, vscode,
     posted(command) { return panel.__testGetPostedMessages().filter((m) => m.command === command); },
-    tmpFile(name) { return path.join(os.tmpdir(), `stcfsd_w3_${process.pid}_${name}`); },
+    tmpFile(name) { return path.join(box, name); },
     close() {
       try { vscode.panels.forEach((p) => p.dispose()); } catch { /* ignore */ }
       bridge.dispose();
+      try { fs.rmSync(box, { recursive: true, force: true }); } catch { /* ignore */ }
     },
   };
 }
