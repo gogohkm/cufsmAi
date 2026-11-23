@@ -378,7 +378,8 @@ async function main() {
     const loads = { member_app: 'roof-purlin', span_type: 'simple', span_ft: 20, loads: { D: 10, Lr: 20 }, design_method: 'LRFD', spacing_ft: 5, Fy: 55, Fu: 70 };
     const la = await T('analyze_loads', loads);
     check('하중 해석', !la.isError && !!la.json?.governing?.combo, short(la.json?.governing?.combo ?? la.text, 100));
-    const pur = await T('design_purlin', loads);
+    // MCP 의 글 답은 기본이 요약이다(f96f94c) — 구간마다의 결과를 읽으려면 detail 'full'
+    const pur = await T('design_purlin', { ...loads, detail: 'full' });
     const regions = pur.json?.regions ?? [];
     check('퍼린 설계 — 구간별 판정', !pur.isError && regions.length > 0 && regions.every(g => typeof g.result?.pass === 'boolean'), `${steps.join(' · ')} · 구간 ${regions.length} · pass=${pur.json?.pass} · 이용률 ${pur.json?.utilization}`);
     const saved = path.join(tmp, '저장', '설치본 저장.csd');
@@ -389,7 +390,25 @@ async function main() {
     check('메뉴 저장 → 파일(모델 · 하중 해석 · 퍼린 결과 · 설계 입력)', savedOk && j1.model?.node?.length > 0 && !!j1.loadAnalysis && !!j1.designResult && Object.keys(j1.designInputs ?? {}).length > 50,
       `${savedOk ? human(fs.statSync(saved).size) : '없음'} · 설계 입력 ${Object.keys(j1.designInputs ?? {}).length}칸`);
     await mcp.tool('set_section_template', { type: 'lippedc', H: 6, B: 2, D: 0.5, t: 0.06, r: 0.1 });
+    // U4: 저장 안 한 변경(모델이 바뀜)이 있으면 메뉴 열기 앞에서 화면 안에서 묻는다 — 「취소」면 아무것도 바꾸지 않고, 「저장 안 함」이면 연다
+    const pageAsk = () => until(() => B.page(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? d.textContent.replace(/\\s+/g,' ') : null;})()`), 20_000);
+    const answer = item => B.page(`(()=>{const b=document.querySelector('#dialog-host [data-item="${item}"]'); if(b){b.click(); return true;} return false;})()`);
+    const dirtyA = await B.ev('return await ctx.hostAction("get_unsaved_changes");');
+    const nodesA = await mcp.tool('get_nodes');
+    const nameA = await B.page(`document.getElementById('file-name').textContent`);
     await B.ev(`ctx.dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [${JSON.stringify(saved)}] }); return ctx.menuClick('file-open');`);
+    const q1 = await pageAsk();
+    await answer('취소');
+    await sleep(1500);
+    const dirtyB = await B.ev('return await ctx.hostAction("get_unsaved_changes");');
+    const nodesB = await mcp.tool('get_nodes');
+    const nameB = await B.page(`document.getElementById('file-name').textContent`);
+    check('저장 안 한 변경(모델) → 메뉴 열기 앞에서 화면 안에서 묻는다 · 「취소」면 모델 · 파일 · 저장 안 한 변경이 그대로',
+      dirtyA?.dirty === true && /저장하지 않은 변경/.test(q1 ?? '') && dirtyB?.dirty === true && nameB === nameA && JSON.stringify(nodesB.json) === JSON.stringify(nodesA.json),
+      `물음 「${short(q1, 70)}」 · 취소 뒤 더러움 ${dirtyB?.dirty} · 파일 ${nameB} · 모델 그대로 ${JSON.stringify(nodesB.json) === JSON.stringify(nodesA.json)}`);
+    await B.ev("return ctx.menuClick('file-open');");
+    await pageAsk();
+    await answer('저장 안 함');
     const back = await until(async () => ((await B.page(`document.getElementById('file-name').textContent`)) === path.basename(saved) ? true : undefined), 30_000);
     const nodes = await mcp.tool('get_nodes');
     const n1 = j1.model?.node?.map(r => [r[1], r[2]]);

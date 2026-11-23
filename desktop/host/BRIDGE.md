@@ -51,6 +51,7 @@
 | `POST /api/webviews/<id>/close` | 웹뷰 닫기(좌굴 보고서 칸의 ✕). 설계 패널은 고정이라 숨김이 될 뿐 없어지지 않는다(S1). 쓰기 열쇠 |
 | `GET·POST /api/mcp/<경로>` | 호스트 MCP 다리로 중계(`/status` · `/action` · `/last-call`). 다리가 MCP 토큰을 붙인다 — 화면에는 그 토큰이 가지 않는다. 화면의 머리(쿠키 · Origin)는 넘기지 않고, AI 호출 표시 `X-StCFSD-Request-Id` 도 붙이지 않는다(이 조회는 「마지막 호출」로 세지 않는다). POST 는 쓰기 열쇠. MCP 다리의 `GET /hello` · `X-StCFSD-Proof`(K1 V5-09)는 MCP 서버가 쓰는 것이라 중계는 쓰지 않는다 |
 | `GET /ui/viewer3d/viewer3d.js` · `/ui/viewer3d/viewer3d.mode-shape-renderer.js` | 새 검토 화면의 3D 모드 형상(아래 「3D 렌더러를 새 화면에서」) — 제품의 렌더러 번들(`media/` 의 이 두 파일만, 다른 이름 · `.map` 은 404)을 화면과 같은 출처로. `uiDir` 를 줄 때만 |
+| `POST /api/report` | **U5(K3)** — `{kind: 'design' \| 'buckling', format: 'html' \| 'pdf' \| 'both', units: 'SI' \| 'US'}` 만 받는다(그 밖의 키 — 경로 · 폴더 — 는 읽지 않는다). 다리가 호스트 동작 `generate_report` 를 부르고(자리 · 이름은 호스트가 정한다: 열린 `.csd` 의 폴더 · 없으면 임시 폴더의 `stcfsd-reports`), 호스트가 쓴 HTML 파일을 읽어 `{reply, html, sha256}` 로 준다 — 새 화면의 미리보기(sandbox iframe 의 srcdoc). 쓰기 열쇠가 있어야 한다 |
 | `GET /` | **U4** — 기본 화면: 새 검토 화면이 있으면 `/ui/` 로 303(질의 그대로). `startBridge({ defaultScreen: 'classic' })`(serve · 창의 `--ui classic`)이면 예전의 틀 HTML |
 | `GET /ui/` · `/ui/index.html` · `/ui/dist/<파일>` · `/ui/style/<파일>` | **U1** — 새 검토 화면(`startBridge({ uiDir })`, serve 는 `<저장소>/desktop/ui`, 설치본은 `resources/app/ui` — 껍데기의 `--ui` 일 때). HTML 의 CSP 는 틀과 같다. 소스(`src/`) · 시험 · `build.mjs` 는 내주지 않는다(404). `uiDir` 를 주지 않으면 이 경로는 없다(404). 기본 화면 `/` 는 이것과 상관없이 틀이다 |
 | `GET /api/wv/<id>/last?command=a&command=b` | **U1** — 다시 보내기 기록(5절)에 남은 그 명령의 마지막 메시지 `{success, data: {a: {seq, message: {command, data}} \| null, …}, seq}`. 페이지가 새로 고침하면 받을 것과 같다: 결과를 지우는 메시지가 지운 결과는 `null`, 한 번만 뜻이 있는 명령(`collectDesignData` · `propertiesResult` …)은 늘 `null`. 40 개까지 |
@@ -81,7 +82,7 @@
 | `webview:client` · `webview:ready` · `webview:refused` | 페이지가 붙음 · 다시 보내기 끝 `{replayed}` · 고정 패널 닫기를 숨김으로 바꿈 |
 | `file:current` | `{file, name}` — 열기 · 저장이 성공한 `.csd` |
 | `claude:status` | `GET /api/claude/status` 와 같은 것 — 「연결」 · 「끊기」 뒤 |
-| `host:message` | **U1** — 호스트가 설계 패널에 메시지를 보낼 때마다 `{id, viewType, command, seq}`(본문 없음 — `/api/wv/<id>/last` 로 읽는다). **U3**: `focusRequest`(AI 의 「여기를 보세요」 — 보기 계약 3절)는 본문을 `focus` 로, **U4**: `caseDiscarded`(저장하지 않은 변경을 버리고 열었다 — K2-6)는 본문을 `discarded` 로 싣는다 — 다시 보내기 기록에 남지 않으므로(아래 ③) 새 화면은 이 이벤트로 한 번만 받는다. 다시 붙은 같은 페이지가 `Last-Event-ID` 로 다시 받으면 화면이 `request_id` 로 한 번만 따른다 |
+| `host:message` | **U1** — 호스트가 설계 패널에 메시지를 보낼 때마다 `{id, viewType, command, seq}`(본문 없음 — `/api/wv/<id>/last` 로 읽는다). **U3**: `focusRequest`(AI 의 「여기를 보세요」 — 보기 계약 3절)는 본문을 `focus` 로, **U4**: `caseDiscarded`(저장하지 않은 변경을 버리고 열었다 — K2-6)는 본문을 `discarded` 로 싣는다. **U5**: `validationResult` 는 `validation: {case_rev, items: 수}` 만(본문은 싣지 않는다 — 새 화면은 그것을 신호로 호스트 동작 `validate_design` 을 다시 읽는다) — 다시 보내기 기록에 남지 않으므로(아래 ③) 새 화면은 이 이벤트로 한 번만 받는다. 다시 붙은 같은 페이지가 `Last-Event-ID` 로 다시 받으면 화면이 `request_id` 로 한 번만 따른다 |
 
 ### 틀 ↔ 끼운 웹뷰 (postMessage, `{stcfsdBridge: 1, type, …}`)
 
@@ -126,7 +127,7 @@ VS Code 웹뷰는 `retainContextWhenHidden` 이라 다시 뜨지 않는다. 호�
 
 - 설계 패널의 `webviewReady` 는 다리가 뜰 때 **한 번만** 호스트에 보낸다(VS Code 에서 패널이 처음 뜬 때와 같은 자리). 페이지가 보내는 `webviewReady` 는 넘기지 않고 "받을 준비 됨" 으로만 쓴다. 그래서 `serve --open` 으로 화면보다 먼저 연 파일도 지워지지 않는다.
 - 호스트 → 웹뷰 메시지는 번호와 함께 기록된다. 페이지가 준비되면(처음이든 새로 고침이든, 다른 탭이든) 줄인 기록을 차례대로 보내고(`replayed`), 그 뒤로는 오는 대로 보낸다.
-- 줄이는 규칙: ① 같은 명령은 마지막 것만(남은 것끼리는 원래 차례) ② `resultsCleared` · `analysisInvalidated` · `derivedResultsInvalidated`(U3 — 호스트가 MCP `analyze_loads` 의 바뀐 입력으로 부재 설계 · 랩 결과를 지웠다: `designResult` · `designPurlinResult` · `lapConnectionResult` 를 뺀다, 새로 고침이 낡은 판정을 되살리지 않게) 가 오면 그것이 지우는 앞의 결과를 뺀다 ③ 한 번만 뜻이 있는 `collectDesignData`(다시 보내면 저장이 돈다) · `captureSection` · `showSection` · `focusRequest`(U3 — 새로 고침 때 화면이 다시 따라가지 않게) · K2 의 `caseState` · `caseAck` · `caseDiscarded` · `restoreDesignInputs` 는 남기지 않는다 — 다시 실린 페이지는 그 페이지의 `caseHello` 에 호스트가 지금 상태를 새로 보낸다(다리가 뜰 때 입력 없는 첫 `caseHello` 를 한 번 내므로 페이지의 것은 늘 「두 번째」다). 붙었지만 다시 보내기를 마치지 않은 페이지에 온 한 번만 뜻이 있는 메시지는 다시 보내기 뒤에 그 페이지에만 보낸다(다음 페이지에는 가지 않는다). `caseDirty` · `caseReference` 는 마지막 것만 ④ 웹뷰가 그릴 때마다 스스로 다시 묻는 `propertiesResult` · `propertiesError` 는 남기지 않는다(남기면 도심 축이 두 번 그려졌다 — 시험에서 봄).
+- 줄이는 규칙: ① 같은 명령은 마지막 것만(남은 것끼리는 원래 차례) ② `resultsCleared` · `analysisInvalidated` · `derivedResultsInvalidated`(U3 — 호스트가 MCP `analyze_loads` 의 바뀐 입력으로 부재 설계 · 랩 결과를 지웠다: `designResult` · `designPurlinResult` · `lapConnectionResult` 를 뺀다, 새로 고침이 낡은 판정을 되살리지 않게) 가 오면 그것이 지우는 앞의 결과를 뺀다 ③ 한 번만 뜻이 있는 `collectDesignData`(다시 보내면 저장이 돈다) · `captureSection` · `showSection` · `focusRequest`(U3 — 새로 고침 때 화면이 다시 따라가지 않게) · K2 의 `caseState` · `caseAck` · `caseDiscarded` · `restoreDesignInputs` · K3 의 `validationResult {items}` · `reportResult {html}`(페이지가 `runValidation` · `generateReport` 로 물은 것의 답 — 다시 실린 페이지는 다시 묻는다)는 남기지 않는다 — 다시 실린 페이지는 그 페이지의 `caseHello` 에 호스트가 지금 상태를 새로 보낸다(다리가 뜰 때 입력 없는 첫 `caseHello` 를 한 번 내므로 페이지의 것은 늘 「두 번째」다). 붙었지만 다시 보내기를 마치지 않은 페이지에 온 한 번만 뜻이 있는 메시지는 다시 보내기 뒤에 그 페이지에만 보낸다(다음 페이지에는 가지 않는다). `caseDirty` · `caseReference` 는 마지막 것만 ④ 웹뷰가 그릴 때마다 스스로 다시 묻는 `propertiesResult` · `propertiesError` 는 남기지 않는다(남기면 도심 축이 두 번 그려졌다 — 시험에서 봄).
 - 좌굴 보고서 패널은 `webviewReady` 를 보내지 않으므로 붙자마자 준비된 것으로 본다.
 - SSE 가 끊겼다 다시 붙으면 페이지가 스스로 다시 읽는다(두 번째 `hello`) — 위의 다시 보내기로 돌아온다.
 - **(U4 에서 걷어 냄 — K2 가 대신한다) 아직 호스트에 가지 않은 설계 탭 입력(V5-03)**: 설계 탭 입력은 칠 때마다 호스트의 검토 상태로 간다(`caseEdit`). 수신부는 `pagehide` 에 지금 칸의 밀린 변경(300 ms 모음)만 `change` 로 내게 해 `keepalive` 로 보낸다. 아래는 예전의 기법이다(지난 값을 파일에서 온 것처럼 다시 쓸 수 있어 없앴다): 새로 고침 · 다시 싣기 앞(`pagehide`)에 수신부가 페이지 자신의 저장 길로 입력을 모은다 — 페이지에 `collectDesignData` 를 호스트가 보낸 것처럼 넣고, 페이지가 돌려주는 `designDataCollected`(파일에 저장하는 것과 같은 꼴, 단위계 포함)를 **호스트로 보내지 않고** 이 탭의 sessionStorage(웹뷰 출처)에 둔다. 다시 뜬 페이지는 다시 보내기를 마친 뒤 그것을 `restoreDesignInputs`(파일을 열 때와 같은 길)로 되돌린다(`<html data-stcfsd-preserved="restored">`). **같은 파일일 때만(V5b-02)**: 모을 때 그 페이지가 마지막으로 받은 `resultsCleared` · `restoreDesignInputs` 의 순서 번호(SSE `id` — 호스트가 다른 파일을 열 때마다 이 둘을 새로 보낸다)를 함께 두고, 다시 보내기의 것과 다르면(그사이 호스트가 다른 파일을 열었으면) 버리고 페이지의 상태 줄에 「새로 고침하는 동안 다른 파일이 열려 … 되살리지 않았습니다 — 지금 파일의 값입니다」 를 쓴다(`data-stcfsd-preserved="dropped-other-file"`). 10 분 넘은 것도 버린다(`dropped-stale`). AI 의 `load_project`(모델만 바꾸고 설계 탭 입력은 건드리지 않는다)는 파일 바뀜으로 치지 않는다 — 페이지가 떠 있을 때와 같다. 테마 바꾸기는 다시 싣지 않으므로 이 길도 필요 없다. 남는 것: 탭 · 창을 닫거나 프로그램이 끝나면 sessionStorage 도 사라진다(저장하지 않은 입력은 파일에만 남는다).
@@ -193,3 +194,24 @@ await window.CufsmViewer3D.render({ nodes: m.node, elems: m.elem, modeVec, lengt
 ```
 
 (이것은 웹뷰의 `renderModeShape3DWrapper`(webview/js/app.js)가 하는 것과 같다. WebGL 이 없는 PC 에서는 `render` 가 던진다 — 웹뷰처럼 2D 로 물러설지는 화면이 정한다.)
+
+
+## K3 — 검증 · 계산서(U5, f08e10e)
+
+페이지 → 호스트 `runValidation {unitSystem}` · `generateReport {unitSystem, force?, reason?}` · `saveReport` · `showBucklingReport {charts, dsmHtml}`(그림은 화면에만 있는 캔버스 PNG), 호스트 → 페이지 `validationResult {items, unitSystem, case_rev}` · `reportResult {html, case_rev}` — 다리는 모두 그대로 넘긴다(받는 쪽 목록이 따로 없다). `validationResult` · `reportResult` 는 한 번만 뜻이 있는 답이라 다시 보내기 기록에 남지 않는다(2절 ③). 시험: `test/bridge.mjs` s14e(페이지의 검증 · 보고서 단추 → 답이 페이지에 · 기록에 없음 · 새로 고침 뒤 빈 칸 · `/api/report` 의 파일 = 응답 HTML 의 sha256 · 준 경로 무시).
+
+
+## V7 — 다시 보내기는 지금 것의 근거가 아니다 · 열기 앞의 물음(U5)
+
+- **결과의 다시 보내기(V7-40)**: 설계 패널의 페이지가 (다시) 실리면 다리는 기록을 보내기 **전에** 호스트 동작 `get_full_state` 의 `results` 를 읽어,
+  거기 없는(좌굴 해석은 `current: false` 인) 결과의 메시지를 보내지 않고 기록에서도 지운다 — `analysisComplete` · `dsmResult` · `classifyResult` →
+  `buckling_analysis`, `designDsmPrepared` → `design_dsm`, `loadAnalysisComplete` → `load_analysis`, `designResult` · `designPurlinResult` → `member_design`,
+  `lapConnectionResult` → `lap`, `connectionResult` → `connection`. 읽지 못하면 결과 메시지를 모두 뺀다(기록을 믿지 않는다). `replayed` 이벤트에 `dropped`.
+  호스트의 `resultsLedger {results}` 가 올 때도 같은 규칙으로 기록을 지운다(화면이 시작한 무효화 — 호스트가 결과를 지우는 메시지를 따로 보내지 않는 경우).
+- **무효화의 범위(V7-45)**: `derivedResultsInvalidated {scope}` — `connection` → 단일 접합만, `lap` → 랩만, `load` → 하중 해석 + 부재 설계 · 랩,
+  `design`(그 밖) → 부재 설계 · 랩(호스트 `_invalidateDerived` 와 같은 표). `kinds`(지운 결과 이름 목록)가 오면 그것을 따른다(호스트가 낼 일반 계약 자리).
+- **열기 앞의 물음(V7-41)**: 페이지가 보낸 `openProject`(끼운 화면의 Open — 새 화면의 Ctrl+O · 시작 화면 · 제목 표시줄도 이 단추를 누른다)는
+  넘기기 전에 `startBridge({ beforeReplace })`(창은 자기의 confirmUnsaved) 또는 다리의 기본(`host/src/unsaved.ts` confirmUnsaved — 화면 안의 물음 ·
+  화면 안의 저장 자리 물음)을 부른다. 취소면 넘기지 않는다.
+- **밀린 입력(V7-44)**: 수신부가 `window.__stcfsdFlush()` 를 둔다 — 지금 칸에 `change` 를 일으켜 밀린 `caseEdit` 를 내고 보내기가 끝날 때까지(1.2 초까지) 기다린다. 창이 닫기 물음 앞에 부른다.
+- 시험: `test/bridge.mjs` s14f(설계 → 페이지에서 Lb → 새로 고침 → 카드 없음) · s14g(connT1 → 접합만 지움, 설계는 남음). 고치기 전의 다리로 돌리면 둘 다 실패한다(확인함).

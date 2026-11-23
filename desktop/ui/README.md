@@ -14,14 +14,14 @@
 ```
 npx tsc -p ./                                  # 저장소 루트 — out/
 cd desktop && npm install && npm run build     # 호스트 · 다리 + 이 화면(ui/dist)
-npm run serve:ui -- --open <파일.csd>           # = serve --ui. 「화면:」 줄의 /ui/?t=… 주소를 브라우저로 연다
+npm run serve -- --open <파일.csd>              # 기본이 이 화면(U4) — 「화면:」 줄의 /ui/?t=… 주소를 브라우저로. 예전의 틀은 npm run serve:classic
 npm run test:ui                                # 빌드 → 화면 시험(진짜 호스트 · Python · MCP 클라이언트, headless Edge)
-cd shell && npm start -- --ui <파일.csd>        # 창(Electron)에서. npm run start:ui 도 같다
+cd shell && npm start -- <파일.csd>             # 창(Electron) — 기본이 이 화면. 예전의 틀은 npm run start:classic(= --ui classic)
 ```
 
-- 브라우저: `serve --ui` 가 낸 주소(`http://127.0.0.1:<포트>/ui/?t=<토큰>`). 토큰은 첫 요청에서 HttpOnly 쿠키로 바뀌고 주소에서 빠진다. `?theme=light|dark`.
+- 브라우저: `serve` 가 낸 주소(`http://127.0.0.1:<포트>/ui/?t=<토큰>`). 토큰은 첫 요청에서 HttpOnly 쿠키로 바뀌고 주소에서 빠진다. `?theme=light|dark`.
 - 테마는 페이지를 다시 싣지 않고 바꾼다(`window.__stcfsdUi.setTheme` — 창의 메뉴 「보기 › 테마」가 이것을 부른다). 끼운 설계 화면은 아직 보내지 않은 입력을 잃지 않게 다시 싣지 않으므로, 그 안의 색은 다음에 실을 때부터 새 테마다(다리가 웹뷰의 테마를 HTML 을 내줄 때만 넣는다).
-- `--ui` 없이 띄우면 지금처럼 틀(`/`)이다. 다리는 두 경우 모두 `/ui/` 를 내준다(`serve`) — 무엇을 여는지만 바뀐다. 창(Electron)은 `--ui` 일 때만 이 폴더를 다리에 준다.
+- U4 부터 스위치 없이 이 화면이 기본이다 — `/` 는 `/ui/` 로 간다. 예전의 틀은 한 판 동안 `--ui classic`(serve · 창 모두, `npm run serve:classic` · `cd shell && npm run start:classic`)일 때 `/` 에 있다. 창(Electron)은 이 폴더가 있으면 늘 다리에 준다.
 - 같은 다리에 화면을 둘(`/` 와 `/ui/`) 열면 끼운 설계 웹뷰는 뒤에 연 쪽이 가져간다(BRIDGE.md 8절 「두 탭」).
 
 ## 구조
@@ -54,6 +54,7 @@ src/
   caseFields.ts     검토 상태(K2)의 칸 — 제품의 하나뿐인 표(webview/js/designState.js FIELDS)를 묶고 화면의 한국어 이름 · 출처 꼬리표만 더한다
   caseView.ts       모델 탭의 부재 · 하중 · 설계 조건 · 접합부 · 재료 — get_case_inputs 의 값 · 단위 · 출처, 경간 표, 「AI 가 바꾼 사람의 값」
   editstrip.ts      편집 상태의 띠(템플릿 09) — 「이번 편집 — 바뀐 것 N」 · AI 대기 · 편집 마치기 · 버리기(R2 전 꺼짐)
+  checklist.ts      점검(validate_design 의 항목 — 결과 탭)과 문서 탭(계산서 · 좌굴 해석 보고서 · 검증표 — generate_report 의 파일, sandbox 미리보기)
   v3d.ts            3D 모드 형상 — 제품의 렌더러를 /ui/viewer3d/ 에서 싣고 캔버스 하나를 다시 그릴 때마다 옮겨 붙인다
   start.ts          시작 화면(템플릿 00)
   edit.ts           편집 상태 — 설계 웹뷰를 늘 붙여 두고 F2 로 보인다, 두 번째 웹뷰(좌굴 보고서) 칸. 끼운 웹뷰는 다리의 웹뷰 서버(다른 출처)라
@@ -145,7 +146,7 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 
 | 자리 | 무엇 | 어디서 |
 |---|---|---|
-| 모델 탭의 부재 · 하중 · 설계 조건 · 접합부 · 재료(설계 강도) | 값 · 단위 · 출처 꼬리표(기본값 · 지정 · AI · 파일 · 하중 해석 · 재료(거울)), 경간 · 지점 · 랩 표. AI 가 그 도구의 묶음에서 주지 않은 칸은 「AI: 주지 않음」, 그 밖의 빈칸은 「빈칸」 | 호스트 동작 `get_case_inputs`(MCP 와 같은 값, US) → 제품의 `caseValueToSI`(표의 단위 종류) — `data-src="case:inputs.<키>"` |
+| 모델 탭의 부재 · 하중 · 설계 조건 · 접합부 · 재료(설계 강도) | 값 · 단위 · 출처 꼬리표(기본값 · 지정 · AI · 파일 · 하중 해석 · 연동), 경간 · 지점 · 랩 표. AI 가 그 도구의 묶음에서 주지 않은 칸은 「AI: 주지 않음」, 그 밖의 빈칸은 「빈칸」 | 호스트 동작 `get_case_inputs`(MCP 와 같은 값, US) → 제품의 `caseValueToSI`(표의 단위 종류) — `data-src="case:inputs.<키>"` |
 | 「AI 가 바꾼 사람의 값」 | 앞 판에서 지정 · 파일 · 하중 해석이던 칸이 다음 판에 AI 가 된 것(이름 · 앞 값 → 지금 값) | 검토 상태 두 판의 차이(MCP 응답의 `case_inputs_replaced` 와 같은 뜻) |
 | 해석 기준 응력 | 재료 자리에, AI 가 `set_load_case` 로 정했으면 꼬리표 AI | `get_full_state.load_fy` · 모델 메시지의 `loadFySource` |
 | 계산 시트 「설계 가정과 출처」 | 입력 · 기본값 · 재료에서 온 단계 입력 옆에 그 칸의 검토 상태 출처 | 엔진 인자 → 상태 키(caseFields.ENGINE_TO_CASE) |
@@ -156,6 +157,19 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 보기 보고(b60e62d — 보기 계약 2절): 화면은 id · 어휘만 보낸다 — 보기 `start` · `sheet` · `<트리 탭>/<무리>:<보기>`, 검토 항목의 위치는 퍼린의 `{region, check_point}` · 엔진의 `{segment}` 만(x · 지점 번호 등 수는 보내지 않는다), focus 답의 `note` 는 코드(`followed` · `not_in_results` · `follow_off` · `editing` · `busy`). 「Claude 가 보는 선택」 칩은 호스트가 받아 적은 것 — 호스트가 버린 칸(`dropped`)은 빼고 「호스트가 버림: …」 이라고 보인다(`data-dropped`). 퍼린 검토 지점(보기 계약 4a): 「검토 위치」에 지점 n · 경간 n(1 부터, 호스트가 채운 그대로) · 구간의 지점 · 소요 근거, 조합이 `'envelope'` 이면 「포락선」(어느 조합인지 모름), 시트의 「설계 가정과 출처」 끝에 그 지점 자신의 경고 · 가정 · 범위 · 검토 안 함.
 
 엔진 계약(b288448)의 표시: 무리의 지배가 미검토(`governs_basis: 'not_evaluated'`)면 덩어리 머리 「지배 — 미검토」 · 「미검토 (참고 판정비 r)」, 「평가한 최대: 이름 비」 줄을 따로(머리 비로 쓰지 않는다 — 정보 창도). `out_of_scope` 는 「참고 — 적용 범위 밖」. `ratio_form` 은 「원문 좌변 소요 ≤ 강도, 견줄 비 r」 + 「비의 꼴」 꼬리표. `unbounded` 는 「∞」(바꾸지 않는다). `expr_units: 'US'` 단계는 「US 단위로 쓴 식」 + `units_note`. 랩의 `lap.block_shear`(미검토 · 판정에 안 듦)와 범위 글, Mnd 없는 랩의 뒤틀림 미검토는 엔진이 내는 대로.
+
+## U5 — 호스트가 만든 점검 · 계산서(K3, f08e10e)
+
+| 자리 | 무엇 | 어디서 |
+|---|---|---|
+| 결과 탭 「점검」 · 진행 띠 「점검」 | 항목마다 고정 id(`val.*`) · 판정(호스트의 셋 pass · warn · fail 을 편집 상태 검증 탭의 말 통과 · 주의 · 실패로) · 값 · 기준 · 주석, 분류(A … H — 검증 탭과 같은 차례)마다 수, 고르면 정보 창 | 호스트 동작 `validate_design`(detail 'full' · SI) — 「점검 실행」을 누를 때, 그리고 편집 상태의 검증 탭에서 「설계 검증 실행」을 눌렀을 때(호스트가 그 페이지에 보낸 `validationResult` 를 신호로). 화면은 다시 판정하지 않는다 |
+| 점검의 낡음 | 마지막 점검 뒤 입력 판(`case.rev`) · 남은 결과(종류와 시각) · 무효 장부의 길이 · 모델(절점 · 요소 · 기준 응력)이 바뀌면 「낡음」과 무엇이 바뀌었는지 | `get_full_state` — 호스트는 마지막 점검을 쥐지 않는다(결과 · 장부에 없다). 그래서 새로 고치면 「실행 안 함」, AI 의 `validate_design` 은 이 화면에 오지 않는다 |
+| 문서 탭 · 계산서 · 좌굴 해석 보고서 | 「만들기」 → 호스트가 HTML 을 쓰고 미리보기, 「PDF 저장」 → 호스트의 길(보이지 않는 Edge 인쇄)로 같은 폴더에 PDF · 쪽 수. 쓴 곳(열린 `.csd` 의 폴더 · 없으면 임시 폴더)과 파일 경로, 판정, 알림, 통과 아닌 검토 id | 다리 `POST /api/report` → 호스트 동작 `generate_report`. 화면은 경로를 주지 않는다 |
+| 미리보기의 틀 | `<iframe sandbox="" referrerpolicy="no-referrer" srcdoc="호스트 파일 그대로">` — 빈 sandbox: 스크립트 · 폼 · 팝업 · 같은 출처 · 위 문서 이동 모두 없음(불투명 출처라 바깥 문서에 닿지 않는다). srcdoc 문서는 이 화면의 CSP(`default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'` …)를 물려받는다 | 시험 u54(파일 sha256 = srcdoc) · u55(스크립트 · onerror · svg onload · 외부 스크립트를 넣어도 실행 0, Chromium 이 막은 줄이 남는다) |
+| 검증표(문서 탭) | 점검과 같은 항목을 문서 꼴로 | 같음 |
+| 발행 · 검토 도장 | 꺼짐 — 발행은 기록(R5), 확인 표시는 R4 | — |
+
+점검 규칙은 지금 제품에서 고치는 중이다(K3-6) — 그동안 점검 보기 위에 그렇다고 적는다(`checklist.ts` 의 `VAL_RULES_CHANGING`, 끝나면 false).
 
 ## 진짜와 자리
 
@@ -231,7 +245,7 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 7e. U4 — u40 모델 탭의 부재 · 하중 · 설계 조건 · 접합부 · 재료 = get_case_inputs(값 · SI · 출처 꼬리표, 트리도) / u40b AI 의 기준 응력 · 시트의 출처 / u41 편집 상태의 사람 값 → AI 설계 도구 → 「AI: 주지 않음」 · 「AI 가 바꾼 사람의 값」 / u42 편집 상태 띠 · 뒤의 화면이 곧바로 · 제목 줄 ● · 저장하면 사라짐 · Esc · 고른 것 그대로 / u44a–e 엔진 계약(지배 미검토 · 범위 밖 · 비의 꼴 · ∞ · 랩 블록 전단 · Mnd 없는 랩) / u45 caseDiscarded / u46 그림 1920 · 960 × 어두운 · 밝은(모델 탭 · 편집 상태)
 7b. u07 끼운 웹뷰가 붙어 있다(숨김) → F2 → 그 「해석 실행」 → 새 화면의 좌굴 ● · 부재 검토 낡음(「New analysis started」) → F2 → 숨김 · 좌굴의 수 = MCP · MCP 토큰이 DOM 에 없다 · 시험 내내 예외 · 오류 0
 8. IPC shutdown → 코드 0 · 자식 0 · 포트 · 포트 파일
-9. `--ui` 없이 띄운 serve — 「화면:」 은 틀 · `/` 는 틀
+9. `--ui classic` 으로 띄운 serve — 「화면:」 은 틀 · `/` 는 틀(스위치 없이 띄운 serve 는 1절 — `/` 가 `/ui/` 로)
 10. desktop/ 밖 저장소 · 사용자 설정 · Claude 설정 그대로
 
 창(Electron)은 `desktop/shell/test/ui.mjs`(shell 의 `npm test` 끝): `--ui` 로 띄워 `/ui/` · 명령줄의 .csd 가 검토 화면 · 끼운 웹뷰 · F2 · 쿠키 0 · 창은 보이지 않고 포커스 0 · 끝내면 자식 · 포트 파일 0.

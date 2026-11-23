@@ -7,12 +7,13 @@
 import { esc, tip } from './dom';
 import { itemText, none, num, ratio, ratioText, unitOf, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO, VERDICT_KO } from './names';
-import { isDefault, memberRuns, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
+import { assumptionLines, isDefault, memberRuns, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
 import { demandCapacity, gaugeHtml, highestLine, qnum, ratioFormTag, unText } from './sheet';
 import { BRANCH_TITLE, caseNotes, caseReady, caseTables, type Branch } from './caseView';
 import { BRANCH_OF, CASE_FIELDS, caseTag } from './caseFields';
 import { modeSel } from './center';
 import { si, UNITS_NOTE, type Kind } from './units';
+import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
 const T_SET = '<span class="tag" data-tip="누군가 정한 값. 누가 정했는지(AI · 사용자)는 변경 기록(R2)부터 보인다">지정</span>';
@@ -130,10 +131,6 @@ function conditionsInfo(): string {
     '', '모두 MCP get_full_state(경계조건 · 반파장 · 응력, 하중 경우 · 기준 응력 · 고유치 수 — K4a)');
 }
 
-function pendingInfo(title: string, why: string): string {
-  return hd(title, title, '', '') + sec('지금', table(row_('값', none('편집 상태의 입력 칸에만 있다', why), '')), '', why);
-}
-
 function recordInfo(title: string, why: string): string {
   return hd(title, title, '', '') + sec('지금', table(row_('기록', none('기록 없음', why), '')), '', why);
 }
@@ -143,7 +140,7 @@ function assumptionsInfo(): string {
   if (isDefault('section')) { items.push(`<tr><td>단면</td><td class="r">프로그램 기본 단면</td><td class="src">${T_DEF}</td></tr>`); }
   if (isDefault('material')) { items.push(`<tr><td>재료</td><td class="r">프로그램 기본값</td><td class="src">${T_DEF}</td></tr>`); }
   if (isDefault('conditions')) { items.push(`<tr><td>해석 조건</td><td class="r">프로그램 기본값</td><td class="src">${T_DEF}</td></tr>`); }
-  const eng = state.runs.flatMap(r => r.assumptions.map(a => `<li>${esc(a)} <span class="faint">· ${esc(r.label)}</span></li>`));
+  const eng = assumptionLines().map(a => `<li data-asm-where="${esc(a.where)}"><b>${esc(a.where)}</b> — ${esc(a.text)}</li>`);
   return hd('모델 · 가정', '가정')
     + sec('기본값으로 채운 입력', items.length ? table(items.join('')) : none('없음'), '', '프로그램이 채운 그대로인 묶음. 누가 정했는지는 변경 기록(R2)부터')
     + sec('엔진이 밝힌 가정', eng.length ? `<ul class="notes">${eng.join('')}</ul>` : none('없음'));
@@ -342,9 +339,8 @@ export function infoHtml(key: string): string {
   if (key === 'ask') { return recordInfo('판단 요청', 'AI 의 판단 요청은 기록(R3)부터 남는다'); }
   if (key === 'rep') { return recordInfo('보고', 'AI 의 보고는 기록(R3)부터 남는다'); }
   if (key === 'chg') { return recordInfo('변경', '누가 · 왜 · 전 → 후 는 변경 기록(R2)부터 남는다'); }
-  if (key === 'val') { return pendingInfo('점검', '검증 70항목은 K3 전까지 편집 상태의 검증 탭에서만 돈다'); }
-  if (key === 'rpt' || key === 'vtab') { return pendingInfo(key === 'rpt' ? '계산서' : '검증표', '계산서 · 검증표는 K3 전까지 편집 상태의 보고서 · 검증 탭에서만 만든다'); }
-  if (key === 'brpt') { return pendingInfo('좌굴 해석 보고서', '좌굴 해석 보고서는 편집 상태의 좌굴해석 탭에서 연다'); }
+  if (isValKey(key) || key === 'vtab') { return valInfo(key === 'vtab' ? 'val' : key); }
+  if (reportKindOf(key)) { return reportInfo(key); }
   if (key === 'src') { return recordInfo('원자료', '원자료(도면 · 제품 자료)는 프로젝트 기록(R1)부터'); }
   if (key === 'pub') { return recordInfo('발행', '발행은 기록(R5)부터'); }
   return hd('', '고른 것 없음', '', '');
@@ -353,6 +349,7 @@ export function infoHtml(key: string): string {
 /** 「Claude 가 보는 선택」의 글 */
 export function shareLabel(key: string, rowText: string | undefined): string {
   if (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon'].includes(key)) { return `단면 「${sectionLabel()}」`; }
+  if (isValKey(key)) { return rowText ? `점검 「${rowText}」` : '점검'; }
   if (key.includes('#')) { const { run, row: r } = rowOfKey(key); return r ? `${r.scope === 'lap' || r.scope === 'connection' ? '접합부 검토' : '부재 검토'} 「${r.where} · ${r.name}」${r.kind === 'ls' && typeof r.ratio === 'number' ? ` · ${ratioText(r.ratio, r.pass === false)}` : ''}` : (run?.label ?? ''); }
   return rowText ?? '없음';
 }

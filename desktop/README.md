@@ -1,6 +1,6 @@
 # desktop/ — StCFSD 독립 프로그램
 
-2026-11-23 · 상태: **S5 끝(첫 배포판 준비) · U1 끝(새 검토 화면의 틀) · U2 끝(보기) · U3 끝(계산 시트 · 메뉴 · 찾기 · AI 따라가기 · 3D) · U4 끝(편집 상태 · 새 화면이 기본 · K2 따라가기) · 독립 검증 V5 의 desktop 몫 고침** — 화면 템플릿(`design/`), 화면 없는 호스트(S1), 화면 다리(S2), 독립 창(S3 — Electron), Claude Desktop 연결(S4), Windows 설치 파일 + 함께 묶은 Python(S5), 새 검토 화면(U1 틀 · U2 보기 — `ui/`, `--ui` 로만 연다)이 있다. 기본 화면은 아직 틀(`/`)이다 — U4 에서 바꾼다. **기본 화면은 새 검토 화면이다(U4).** 예전의 틀(제목 표시줄 + 설계 화면 탭 6개)은 한 판 동안 스위치로 연다 — 창 `StCFSD.exe --ui classic`(개발판 `cd shell && npm run start:classic`), 브라우저 길 `npm run serve:classic`(= `serve --ui classic`).
+2026-11-23 · 상태: **S5 끝(첫 배포판 준비) · U1 끝(새 검토 화면의 틀) · U2 끝(보기) · U3 끝(계산 시트 · 메뉴 · 찾기 · AI 따라가기 · 3D) · U4 끝(편집 상태 · 새 화면이 기본 · K2 따라가기) · U5 끝(호스트가 만든 점검 · 계산서 — K3) · 독립 검증 V5 의 desktop 몫 고침** — 화면 템플릿(`design/`), 화면 없는 호스트(S1), 화면 다리(S2), 독립 창(S3 — Electron), Claude Desktop 연결(S4), Windows 설치 파일 + 함께 묶은 Python(S5), 새 검토 화면(U1 틀 · U2 보기 — `ui/`, `--ui` 로만 연다)이 있다. 기본 화면은 아직 틀(`/`)이다 — U4 에서 바꾼다. **기본 화면은 새 검토 화면이다(U4).** 예전의 틀(제목 표시줄 + 설계 화면 탭 6개)은 한 판 동안 스위치로 연다 — 창 `StCFSD.exe --ui classic`(개발판 `cd shell && npm run start:classic`), 브라우저 길 `npm run serve:classic`(= `serve --ui classic`).
 
 Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하나에 StCFSD, 다른 모니터에 Claude Desktop 을 띄우고, 대화는 Claude Desktop 에서만 한다. 둘은 로컬 MCP 서버로 잇는다.
 
@@ -25,7 +25,7 @@ Windows 용 독립 프로그램을 만드는 자리다. 직원은 모니터 하�
 npx tsc -p ./                                  # 저장소 루트 — out/ 을 만든다
 cd desktop && npm install && npm test          # 형 검사 → 빌드(호스트 · 새 화면) → 연기 시험 → 다리 시험(진짜 Python, headless Edge) → Claude 연결 시험 → 새 화면 시험
 npm run serve -- --open <파일.csd>              # 화면 다리. 출력된 「화면:」 주소를 브라우저로 연다
-npm run serve:ui -- --open <파일.csd>           # 같은 다리, 「화면:」 이 새 검토 화면(/ui/) — U1
+npm run serve:classic -- --open <파일.csd>      # 같은 다리, 예전의 틀(/) — 한 판 동안(U4 부터 serve 의 기본은 새 검토 화면)
 npm run test:ui                                # 새 검토 화면 시험(진짜 호스트 · Python · MCP 클라이언트, headless Edge)
 npm run headless -- --open <파일.csd>           # 화면 없이. MCP 다리 주소와 클라이언트가 쓸 환경을 출력하고 떠 있다
 cd shell && npm install && npm start -- <파일.csd>   # 창(Electron) — 새 검토 화면. npm start -- --ui classic <파일.csd> 면 예전의 틀
@@ -42,7 +42,7 @@ npm run test:packaged                          # 설치본 확인(설치하지 �
 
 | 경로 | 내용 |
 |---|---|
-| `ui/` 의 나머지 | 기록(R1–R5 — 확인 표시 · 변경 · 대안 · 이번 편집 버리기), K3(계산서 · 검증표 · 점검을 호스트로) |
+| `ui/` 의 나머지 | 기록(R1–R5 — 확인 표시 · 변경 · 대안 · 이번 편집 버리기 · 발행), K3-6 – 8(점검 규칙 고치기 · 보고서 계산 절을 design_checks 에서 · 단위 분리) |
 
 ## 규칙 — 디렉토리는 나누되 계산은 한 벌
 

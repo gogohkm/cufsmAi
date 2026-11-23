@@ -178,6 +178,13 @@ window.addEventListener('pagehide',function(){
   try{if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT')){a.dispatchEvent(new Event('change',{bubbles:true}));}}catch(e){}
   sending=false;send(true);
 });
+// V7-44: 창을 닫기 전에(껍데기가 부른다) — 지금 칸의 밀린 변경(300 ms 모음)을 곧바로 내게 하고 보내기가 끝날 때까지(1.2 초까지) 기다린다
+window.__stcfsdFlush=function(){
+  var a=document.activeElement;
+  try{if(a&&(a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT')){a.dispatchEvent(new Event('change',{bubbles:true}));}}catch(e){}
+  send();
+  return new Promise(function(res){var t0=Date.now();(function w(){if(outQ.length===0&&!sending){res(true);}else if(Date.now()-t0>1200){res(false);}else{setTimeout(w,25);}})();});
+};
 if(window.parent===window){html.setAttribute('data-stcfsd-bridge','no-frame');}
 else{html.setAttribute('data-stcfsd-bridge','waiting-key');toParent({stcfsdBridge:1,type:'need-key',id:cfg.id});}
 window.__stcfsdBridge={id:cfg.id,viewType:cfg.viewType,get connected(){return open;},get received(){return received;}};

@@ -130,12 +130,18 @@ const diag = {
   /** 쓰기 열쇠를 붙인 요청(방법 · 경로 · 종류) — 시험이 이동에 붙지 않았는지 본다 */
   keyedLog: [] as Array<{ method: string; path: string; type: string }>,
   /** 저장 안 한 변경을 물은 기록(V5-12c) — 어디서 · 어떻게 · 답 */
-  unsaved: [] as Array<{ where: UnsavedWhere; how: 'none' | 'native' | 'page'; answer: UnsavedAnswer | 'proceed' }>,
+  unsaved: [] as Array<{ where: UnsavedWhere; how: 'none' | 'native' | 'page'; answer: UnsavedAnswer | 'proceed'; failed?: boolean; saved?: string; note?: string; flushed?: boolean }>,
   /** 시험: 창 닫기의 OS 물음 대신 쓸 답(차례대로). 비어 있으면 '취소' — 시험은 OS 대화상자를 띄우지 않는다 */
   unsavedTestAnswers: [] as UnsavedAnswer[],
+  /** 시험: 「저장」 뒤의 저장 자리 물음에 줄 답(없으면 취소) */
+  saveTestPaths: [] as string[],
+  /** 시험: get_unsaved_changes 가 실패한 것처럼 */
+  failUnsavedQuery: false,
+  /** S3: 로그오프 · 시스템 종료 때 쓴 복구본 */
+  recovery: [] as Array<{ event: string; dirty: boolean | null; file?: string; ok?: boolean; message?: string }>,
 };
-type UnsavedWhere = 'close' | 'open' | 'second-instance' | 'file-association';
-type UnsavedAnswer = 'save' | 'discard' | 'cancel';
+type UnsavedWhere = HostApi.UnsavedWhere;
+type UnsavedAnswer = HostApi.UnsavedAnswer;
 
 function readPrefs(): { theme?: 'dark' | 'light' } {
   try { const j = JSON.parse(fs.readFileSync(prefsFile, 'utf8')); return j && typeof j === 'object' ? j : {}; } catch { return {}; }
@@ -281,6 +287,8 @@ function fileAction(action: 'open' | 'save'): void {
 /** 호스트 동작(MCP 다리의 /action — AI 호출로 세지 않는다) */
 async function hostAction<T = any>(action: string, params: Record<string, unknown> = {}): Promise<T | undefined> {
   if (!host) { return undefined; }
+  // 시험: 저장 안 한 변경을 읽지 못하는 경우(V7-46 — 묻지 않고 닫지 않는지)
+  if (TEST && diag.failUnsavedQuery && action === 'get_unsaved_changes') { return { error: '시험 — 상태를 읽지 못함' } as T; }
   try {
     const r = await fetch(`http://127.0.0.1:${host.mcp.port}/action`, { method: 'POST',
       headers: { Authorization: `Bearer ${host.mcp.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, ...params }) });
@@ -288,62 +296,96 @@ async function hostAction<T = any>(action: string, params: Record<string, unknow
   } catch { return undefined; }
 }
 
-const UNSAVED_ITEMS = ['저장', '저장 안 함', '취소'];
-const WHERE_KO: Record<UnsavedWhere, string> = {
-  close: '창을 닫기 전에', open: '다른 파일을 열기 전에', 'second-instance': '넘어온 파일을 열기 전에', 'file-association': '연결된 파일을 열기 전에',
-};
-
-/**
- * 저장 안 한 변경이 있으면 묻는다 — 저장 · 저장 안 함 · 취소. 더러워진 것이 없으면 묻지 않는다(호스트 `get_unsaved_changes`).
- * 창 닫기(사람이 창을 닫는 동작)만 OS 대화상자 — 이 프로그램에서 대화상자가 포커스를 가져가도 되는 곳이다. 그 밖(메뉴의 열기 ·
- * 다시 실행 · 파일 연결)은 화면 안의 물음(다리의 알림 — 창을 앞으로 꺼내지 않는다). 시험은 OS 대화상자를 띄우지 않는다.
- * 돌려주는 것: 계속해도 되는가(저장했거나 · 버렸거나 · 바뀐 것이 없다).
- */
-async function confirmUnsaved(where: UnsavedWhere): Promise<boolean> {
-  const u = await hostAction<{ dirty?: boolean; file?: string | null; inputs_changed?: string[]; model_changed?: boolean; since?: string | null }>('get_unsaved_changes');
-  if (!u || !u.dirty) { diag.unsaved.push({ where, how: 'none', answer: 'proceed' }); return true; }
-  const nIn = Array.isArray(u.inputs_changed) ? u.inputs_changed.length : 0;
-  const what = [nIn ? `검토 입력 ${nIn}칸` : '', u.model_changed ? '모델' : ''].filter(Boolean).join(' · ') || '입력';
-  const message = `저장하지 않은 변경(${what})이 있습니다 — ${WHERE_KO[where]} 저장할까요?`;
-  const detail = u.file ? `파일: ${u.file}` : '아직 파일로 저장한 적이 없습니다.';
-  let answer: UnsavedAnswer;
-  let how: 'native' | 'page';
-  if (where === 'close') {
-    how = 'native';
-    if (TEST) { answer = diag.unsavedTestAnswers.shift() ?? 'cancel'; } else {
-      const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : (undefined as unknown as BrowserWindow), {
-        type: 'warning', title: 'StCFSD', message, detail, buttons: UNSAVED_ITEMS, defaultId: 0, cancelId: 2, noLink: true });
-      answer = (['save', 'discard', 'cancel'] as UnsavedAnswer[])[r.response] ?? 'cancel';
-    }
-  } else {
-    how = 'page';
-    const picked = platform ? await platform.notify({ severity: 'warning', modal: true, items: UNSAVED_ITEMS, message, detail }) : undefined;
-    answer = picked === '저장' ? 'save' : picked === '저장 안 함' ? 'discard' : 'cancel';
-  }
-  diag.unsaved.push({ where, how, answer });
-  log(`저장 안 한 변경 — ${where}: ${answer}`);
-  if (answer === 'cancel') { return false; }
-  if (answer === 'discard') { return true; }
-  return saveBeforeLeaving(u.file ?? null);
+/** 저장 자리 — 사람이 「저장」을 고른 뒤의 OS 대화상자(시험은 diag.saveTestPaths 의 답, 없으면 취소) */
+async function askSavePath(defaultName: string): Promise<string | undefined> {
+  if (TEST) { const p = diag.saveTestPaths.shift(); diag.osDialogs.push({ kind: 'save', summary: defaultName, answer: p }); return p; }
+  const r = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : (undefined as unknown as BrowserWindow), {
+    title: '검토 대상 저장', defaultPath: path.join(documentsDir || app.getPath('documents'), 'StCFSD', defaultName),
+    filters: [{ name: 'StCFSD 검토 대상', extensions: ['csd'] }] });
+  return r.canceled || !r.filePath ? undefined : r.filePath;
 }
 
-/** 「저장」 — 지금 파일이 있으면 그 파일에, 없으면 저장 물음(호스트의 저장 길)을 띄우고 깨끗해질 때까지 기다린다 */
-async function saveBeforeLeaving(file: string | null): Promise<boolean> {
-  if (!host) { return false; }
-  if (file) {
-    const r = await host.saveProject(file);
-    if (!r.ok) { log(`저장 실패 — ${r.message ?? ''}`, 'warn'); return false; }
-    return true;
+/** V7-44: 끼운 설계 화면의 밀린 입력(300 ms 모음)을 호스트로 — 그 프레임에서 다리 수신부의 __stcfsdFlush 를 부른다 */
+async function flushDesigner(): Promise<boolean> {
+  if (!win || win.isDestroyed() || !bridge) { return false; }
+  const frames = win.webContents.mainFrame.framesInSubtree.filter(f => { try { return new URL(f.url).origin === bridge!.webviewOrigin; } catch { return false; } });
+  let any = false;
+  for (const f of frames) {
+    try { any = (await f.executeJavaScript('typeof window.__stcfsdFlush==="function" ? window.__stcfsdFlush() : false')) === true || any; } catch { /* 프레임이 없어짐 */ }
   }
-  // 아직 파일이 없다 — 저장 자리를 묻는다(사람이 「저장」을 고른 뒤의 OS 대화상자). 시험은 OS 대화상자를 띄우지 않는다
-  if (TEST) { log('저장 자리를 물어야 한다 — 시험이라 묻지 않고 멈춘다', 'warn'); return false; }
-  const r = await dialog.showSaveDialog(win && !win.isDestroyed() ? win : (undefined as unknown as BrowserWindow), {
-    title: '검토 대상 저장', defaultPath: path.join(documentsDir || app.getPath('documents'), 'StCFSD', 'project.csd'),
-    filters: [{ name: 'StCFSD 검토 대상', extensions: ['csd'] }] });
-  if (r.canceled || !r.filePath) { return false; }
-  const saved = await host.saveProject(r.filePath);
-  if (saved.ok) { bridge?.setCurrentFile(saved.file); }
-  return saved.ok;
+  return any;
+}
+
+/**
+ * 저장 안 한 변경 — 하나의 함수(host/src/unsaved.ts confirmUnsaved: 밀린 입력 → get_unsaved_changes → 묻기 → 안전한 저장).
+ * 창 닫기(사람이 창을 닫는 동작)만 OS 대화상자 — 그 밖(메뉴의 열기 · 끼운 화면의 Open · Ctrl+O · 시작 화면 · 제목 표시줄 · 다시 실행 ·
+ * 파일 연결)은 화면 안의 물음(다리의 알림 — 창을 앞으로 꺼내지 않는다). 시험은 OS 대화상자를 띄우지 않는다(diag.unsavedTestAnswers).
+ * 「저장」은 이번 세션에 사람이 정한 .csd 에만 묻지 않고 쓴다 — AI 의 load_project 가 정한 경로면 저장 자리를 묻는다(V7-42).
+ */
+async function confirmUnsaved(where: UnsavedWhere): Promise<boolean> {
+  if (!host || !api) { return true; }
+  let how: 'native' | 'page' = where === 'close' ? 'native' : 'page';
+  let flushed: boolean | undefined;
+  const ctx: HostApi.UnsavedCtx = {
+    hostAction: (action, params) => hostAction(action, params ?? {}),
+    ask: async (w, q) => {
+      if (w === 'close') {
+        how = 'native';
+        if (TEST) { return diag.unsavedTestAnswers.shift() ?? 'cancel'; }
+        const r = await dialog.showMessageBox(win && !win.isDestroyed() ? win : (undefined as unknown as BrowserWindow), {
+          type: 'warning', title: 'StCFSD', message: q.message, detail: q.detail, buttons: q.items, defaultId: 0, cancelId: 2, noLink: true });
+        return (['save', 'discard', 'cancel'] as UnsavedAnswer[])[r.response] ?? 'cancel';
+      }
+      how = 'page';
+      const picked = platform ? await platform.notify({ severity: 'warning', modal: true, items: q.items, message: q.message, detail: q.detail }) : undefined;
+      return picked === q.items[0] ? 'save' : picked === q.items[1] ? 'discard' : 'cancel';
+    },
+    personFile: () => bridge?.personFile(),
+    askSavePath,
+    saveProject: async file => { const r = await host!.saveProject(file); if (r.ok) { bridge?.setCurrentFile(r.file); } return r; },
+    flush: where === 'close' ? async () => { flushed = await flushDesigner(); } : undefined,
+    log: line => log(line),
+  };
+  const r = await api.confirmUnsaved(ctx, where);
+  diag.unsaved.push({ where, how: r.how === 'none' ? 'none' : how, answer: r.answer, ...(r.failed ? { failed: true } : {}), ...(r.saved ? { saved: r.saved } : {}),
+    ...(r.note ? { note: r.note } : {}), ...(flushed !== undefined ? { flushed } : {}) });
+  return r.proceed;
+}
+
+// ─── 로그오프 · 시스템 종료(V7-S3) ───────────────────────────────────
+/**
+ * Windows 가 세션을 끝내려 하면(로그오프 · 다시 시작 · 종료 — BrowserWindow 의 `query-session-end` · `session-end`) 물을 틈이 없다.
+ * 끝을 막지 않고(사람이 고른 종료를 존중 — 막으면 Windows 가 「이 앱이 종료를 막고 있다」 화면을 띄운다), 저장 안 한 변경이 있으면
+ * **복구본**을 이 프로그램의 사용자 폴더(`<userData>/recovery/`)에 쓴다 — AI 가 준 경로가 아니다. 다음 실행 때 그 자리를 알린다.
+ * 한계: 호스트의 저장 길을 쓰므로 호스트의 「지금 파일」이 복구본으로 바뀐다(세션이 끝나지 않고 취소되면 제목에 그 이름이 보인다).
+ * 경로를 바꾸지 않는 복구 쓰기는 호스트에 바란다.
+ */
+const recoveryDir = path.join(userData, 'recovery');
+let recoveryRunning: Promise<void> | null = null;
+function writeRecovery(event: string): Promise<void> {
+  if (recoveryRunning) { return recoveryRunning; }
+  recoveryRunning = (async () => {
+    if (!host || !started) { diag.recovery.push({ event, dirty: null, message: '시작 전' }); return; }
+    const u = await hostAction<{ dirty?: boolean }>('get_unsaved_changes');
+    const dirty = typeof u?.dirty === 'boolean' ? u.dirty : null;
+    // 읽지 못하면 쓴다(fail closed — 잃는 쪽보다 복구본이 하나 더 있는 쪽)
+    if (dirty === false) { diag.recovery.push({ event, dirty }); log(`세션 끝(${event}) — 저장 안 한 변경 없음`); return; }
+    try { fs.mkdirSync(recoveryDir, { recursive: true }); } catch { /* 아래에서 실패 */ }
+    const file = path.join(recoveryDir, `recovery-${new Date().toISOString().replace(/[:.]/g, '-')}.csd`);
+    const r = await host.saveProject(file);
+    diag.recovery.push({ event, dirty, file, ok: r.ok, message: r.message });
+    log(`세션 끝(${event}) — 저장 안 한 변경을 복구본으로: ${file} (${r.ok ? '씀' : `실패 ${r.message ?? ''}`})`, r.ok ? 'warn' : 'error');
+  })().finally(() => { recoveryRunning = null; });
+  return recoveryRunning;
+}
+/** 다음 실행 — 남은 복구본을 알린다(열지 않는다 — 사람이 고른다) */
+function tellRecovery(): void {
+  let files: string[] = [];
+  try { files = fs.readdirSync(recoveryDir).filter(f => /^recovery-.*\.csd$/.test(f)).sort().reverse(); } catch { return; }
+  if (!files.length) { return; }
+  void platform?.notify({ severity: 'warning', items: [], modal: false,
+    message: `지난번 Windows 가 끝날 때 저장하지 않은 변경을 복구본으로 남겼습니다(${files.length}개) — 메뉴 「열기」로 열 수 있습니다.`,
+    detail: files.slice(0, 5).map(f => path.join(recoveryDir, f)).join('\n') });
 }
 
 // ─── 창 ─────────────────────────────────────────────────────────
@@ -559,6 +601,9 @@ function createWindow(b: HostApi.BridgeHandle): BrowserWindow {
     clearTimeout(stateTimer); saveWindowState();
   });
   w.on('closed', () => { if (win === w) { win = undefined; } });
+  // V7-S3: 로그오프 · 종료 — 막지 않고 복구본을 쓴다
+  w.on('query-session-end', () => { void writeRecovery('query-session-end'); });
+  w.on('session-end', () => { void writeRecovery('session-end'); });
   w.webContents.on('console-message', (e: Electron.Event & { level?: string; message?: string; sourceId?: string; lineNumber?: number }) => {
     const lv = String(e.level ?? 'info');
     const msg = String(e.message ?? '');
@@ -689,6 +734,8 @@ async function start(): Promise<void> {
       // 새 검토 화면이 기본(U4). 폴더가 없으면 다리가 /ui/ 를 내주지 않고 틀을 연다. `--ui classic` 은 `/` 가 예전의 틀.
       uiDir: fs.existsSync(path.join(layout.uiDir, 'index.html')) ? layout.uiDir : undefined,
       defaultScreen: args.screen,
+      // V7-41: 끼운 화면의 Open(새 화면의 Ctrl+O · 시작 화면 · 제목 표시줄도 그것을 누른다)도 같은 물음으로
+      beforeReplace: () => confirmUnsaved('page-open'),
     });
     if (args.screen === 'ui' && !bridge.uiUrl) { log(`새 검토 화면이 없다(${layout.uiDir}) — 틀을 연다`, 'warn'); }
   } catch (err) {
@@ -711,6 +758,7 @@ async function start(): Promise<void> {
   if (args.open) { await openFiles([args.open, ...(args.extra ?? [])]); }
   for (const f of queued) { await openFile(f); }
   for (const n of notices.splice(0)) { void n(); }
+  tellRecovery();
   send({ type: 'stage', stage: 'running', pid: process.pid, origin: bridge.origin, portFile, userData, screen: screenPath(bridge) });
 }
 
@@ -743,7 +791,7 @@ function installTestControl(): void {
     app, win, host, bridge, platform, dialog, diag, BrowserWindow, Menu, screen, layout, entry, userData, portFile, windowFile,
     openFile, fileAction, placement, started,
     menuClick: (id: string) => { const item = Menu.getApplicationMenu()?.getMenuItemById(id); if (!item) { throw new Error(`메뉴 없음: ${id}`); } item.click(); return true; },
-    hostAction, confirmUnsaved,
+    hostAction, confirmUnsaved, writeRecovery, recoveryDir,
   });
   process.on('message', (m: { id?: number; type?: string; code?: string; file?: string }) => {
     const reply = (msg: unknown) => send({ id: m.id, ...(msg as object) });

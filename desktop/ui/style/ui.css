@@ -260,3 +260,32 @@ svg rect.cpb { cursor: default; }
 /* U4: 정보 창 표의 이름 칸은 줄을 바꾸지 않고, 출처 칸의 긴 설명(검토 위치의 지점 · 경간 · 소요 근거)은 그 칸 안에서 접는다 */
 .pane-detail table.t td:first-child { white-space: nowrap; }
 .pane-detail table.t td.src .why { display: block; white-space: normal; max-width: 200px; margin-left: auto; color: var(--text-faint); font-size: 11px; text-align: right; }
+/* K3 — 점검 · 문서 탭(템플릿 08) */
+.pane-view.docc { display: flex; flex-direction: column; }
+.dv.docv { display: flex; flex-direction: column; min-height: 0; flex: 1; overflow: auto; padding: 10px 16px 16px; background: var(--bg-view); }
+.docv .pv-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.docv .pv-bar .sp { flex: 1; }
+.docv .pv-bar .chip[data-doc] { cursor: pointer; }
+.docv .banner { margin: 0 0 10px; }
+.docv .banner:not(.warn) { border-left-color: var(--accent); }
+.docv .valg { margin-bottom: 14px; }
+.docv .valg h4 { display: flex; align-items: center; gap: 8px; font-size: 12.5px; margin: 0 0 4px; padding: 3px 8px; border-left: 3px solid var(--line); background: var(--bg-raise); border-radius: 0 3px 3px 0; }
+.docv .valg h4 .sp { flex: 1; }
+.docv table.valt { width: 100%; }
+.docv table.valt td:first-child { width: 18px; }
+.docv table.valt td[data-value] { white-space: nowrap; }
+.docv table.valt tr.vr { cursor: default; }
+.docv table.valt tr.on td { background: var(--bg-select); }
+.docv table.valt tr.vn td { padding-top: 0; font-size: 11px; font-style: italic; }
+.docv .note-ng { color: var(--ng); } .docv .note-warn { color: var(--warn); } .docv .note-ok { color: var(--text-dim); }
+.docv .thumbs { display: flex; gap: 10px; justify-content: flex-start; margin-bottom: 10px; overflow-x: auto; }
+.docv .thumb { width: 84px; flex: none; text-align: center; font-size: 10.5px; color: var(--text-dim); }
+.docv .thumb .pg-s { height: 60px; border: 1px solid var(--line); border-radius: 3px; background: var(--bg-panel); padding: 7px; margin-bottom: 4px; }
+.docv .pg-s i { display: block; height: 3px; border-radius: 1px; background: var(--line); margin-bottom: 5px; }
+.docv .pg-s i.h { height: 5px; width: 60%; background: var(--text-faint); }
+.docv .pg-s i.s { width: 70%; }
+/* 보고서 미리보기 — 종이처럼 흰 바탕(보고서 HTML 은 인쇄용 밝은 색) */
+.docv iframe.rframe { flex: 1; min-height: 480px; width: 100%; max-width: 900px; align-self: center; border: 1px solid var(--line); border-radius: 3px; background: #fff; box-shadow: 0 4px 18px rgba(0,0,0,.25); }
+.pane-detail table.t td.path { word-break: break-all; white-space: normal; text-align: left; font-size: 11px; }
+.pane-detail .publish { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pane-detail .btns { display: flex; gap: 8px; margin-top: 6px; }

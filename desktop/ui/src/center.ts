@@ -13,6 +13,7 @@
  * 보기 칩(단면 · 모드 형상 · 좌굴 곡선 · 부재 · 판정비 · 접합 도면)으로 바꿀 수 있다 — 다른 가지를 고르면 그 가지의 기본으로 돌아간다.
  * 그림 위의 수는 모두 엔진 · 호스트에서 온 값이고 `data-src` 를 단다(format.ts). 3D 모드 형상은 이 화면에 없다(README — 다리 변경이 필요).
  */
+import { isValKey, reportKindOf, reportView, valView, vtabView } from './checklist';
 import { curveSvg, type CurveMark } from './curve';
 import { esc, tip } from './dom';
 import { drawerHtml, type DTable } from './drawer';
@@ -36,6 +37,8 @@ let override: { group: string; views: V[] } | null = null;
 
 export type Group = 'model' | 'fsm' | 'load' | 'chk' | 'conn' | 'doc' | 'other';
 export function groupOf(key: string): Group {
+  // 점검(K3)은 결과 탭에 있지만 보기 어휘로는 「그 밖(other) · 문서(doc)」 — 표 하나다
+  if (isValKey(key)) { return 'other'; }
   if (key.startsWith('lap#') || key.startsWith('conn#')) { return 'conn'; }
   if (key === 'chk' || key.startsWith('chk:') || key.includes('#') || key === 'dc' || key.startsWith('dc:')) { return 'chk'; }
   if (key === 'fsm' || key.startsWith('fsm:')) { return 'fsm'; }
@@ -59,6 +62,7 @@ function defaultViews(g: Group): V[] {
 
 export function setViews(key: string, views: V[]): void { override = { group: groupOf(key), views }; }
 export function viewsFor(key: string): V[] {
+  if (isValKey(key) || ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return ['doc']; }
   const g = groupOf(key);
   if (override && override.group !== g) { override = null; }
   return override?.views ?? defaultViews(g);
@@ -410,6 +414,10 @@ export function tablesFor(group: Group): DTable[] {
 
 /** 그림 칸의 크기(px) — 그 비율로 viewBox 를 잡는다 */
 export function centerHtml(key: string, size: { w: number; h: number } = { w: 1240, h: 900 }): { html: string; cls: string } {
+  // 점검 · 문서(K3) — 표 · 미리보기 하나
+  if (isValKey(key)) { return { html: valView(key), cls: 'v1 docc' }; }
+  if (key === 'vtab') { return { html: vtabView(key), cls: 'v1 docc' }; }
+  if (reportKindOf(key)) { return { html: reportView(key), cls: 'v1 docc' }; }
   const group = groupOf(key);
   syncModeFromKey(key);
   const views = viewsFor(key);

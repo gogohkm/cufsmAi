@@ -3,7 +3,7 @@
  *
  * 값: `state.caseIn.inputs[key]`(US) → units.caseSI(제품의 caseValueToSI, 표의 단위 종류)로 SI. 수마다 `data-src="case:inputs.<key>"`.
  * 경간 표: `spans.spans[i]`(ft → m) · `spans.supports[i]` · `spans.lapsPerSupport[i].left|right`(ft → m).
- * 출처: `sources[key]` — 기본값 · 지정 · AI · 파일 · 하중 해석 · 재료(거울). AI 가 그 도구의 묶음에서 주지 않은 칸은 값이 null 이고
+ * 출처: `sources[key]` — 기본값 · 지정 · AI · 파일 · 하중 해석 · 연동(화면이 다른 칸을 따라 채움). AI 가 그 도구의 묶음에서 주지 않은 칸은 값이 null 이고
  * 출처가 ai — 「AI: 주지 않음」. 그 밖의 null 은 「빈칸」(입력 없음 — 지어낸 값을 쓰지 않는다).
  */
 import { BRANCH_OF, CASE_FIELDS, CASE_KO, CASE_SOURCE, caseTag, fieldOf, GROUP_KO, OPTION_KO } from './caseFields';

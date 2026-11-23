@@ -60,6 +60,8 @@ export function itemOfRow(r: CheckRow): Item {
 
 /** 화면의 고른 것 → item(없으면 null) */
 export function itemOfKey(tab: Tab, key: string): Item | null {
+  // 점검 항목(val.*)은 보기 계약의 item 어휘에 없다 — 고른 것 없음으로 알린다(id 를 지어내지 않는다)
+  if (key === 'val' || key.startsWith('val#') || key.startsWith('val:cat:')) { return null; }
   if (key.includes('#')) {
     const r = allRows().find(x => x.key === key);
     if (r && r.us) { return itemOfRow(r); }

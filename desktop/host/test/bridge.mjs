@@ -8,6 +8,7 @@
 // 브라우저가 없으면 화면 단계는 건너뛴다고 분명히 적고 HTTP 단계만 돈다. 브라우저는 STCFSD_BROWSER 로 지정할 수 있다.
 // 그림은 host/test/out/(git 에 넣지 않음). 모델 파일은 임시 폴더 사본만 쓴다. Claude 설정은 임시 폴더의 가짜 경로만 준다.
 import { spawn, spawnSync } from 'node:child_process';
+import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as net from 'node:net';
@@ -758,6 +759,9 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     await setVal('config-spacing', 7);
     const restoreBefore = await cnt('restoreDesignInputs');
     await click('#btn-file-open');
+    // V7-41: 단면을 바꿨으니(모델 — 저장 안 한 변경) 다리가 열기 앞에 묻는다 — 「저장 안 함」이면 열기 물음으로
+    const asked = await waitFor(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && /저장하지 않은 변경/.test(d.textContent) ? d.textContent : null;})()`, 20_000, '저장 안 한 변경 물음');
+    await evalTop(`document.querySelector('#dialog-host [data-item="저장 안 함"]').click(); true`);
     await dialogAnswer('열기', saved);
     await waitMsg('restoreDesignInputs', restoreBefore, 60_000);
     await sleep(1500);
@@ -767,7 +771,7 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     const card = await text('#design-summary');
     const ink = await canvasInk('buckling-curve-canvas');
     return { ok: Number(spacing) === Number(savedJson.designInputs?.['config-spacing'] ?? 5) && /OK|NG|판정 없음/.test(card ?? '') && ink > 50,
-      detail: `간격 ${spacing} · 템플릿 ${tpl} · 설계 카드 ${short(card ?? '', 60)} · 곡선 잉크 ${ink}` };
+      detail: `열기 앞 물음 「${short(asked, 50)}」 → 저장 안 함 · 간격 ${spacing} · 템플릿 ${tpl} · 설계 카드 ${short(card ?? '', 60)} · 곡선 잉크 ${ink}` };
   });
 
   section('6. 좌굴 보고서 패널(두 번째 웹뷰) · PDF');
@@ -886,6 +890,69 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
       && !!after.loadAnalysisComplete && after.derivedResultsInvalidated?.message?.data?.reason === 'Load analysis inputs changed' && after.loadAnalysisComplete.seq > after.derivedResultsInvalidated.seq,
       detail: `앞: 랩 ${!!before.lapConnectionResult} · 뒤: 랩 ${!!after.lapConnectionResult} · 설계 ${!!after.designResult} · 퍼린 ${!!after.designPurlinResult} · 하중 ${!!after.loadAnalysisComplete}`
         + ` · 「${after.derivedResultsInvalidated?.message?.data?.reason}」(${short(after.derivedResultsInvalidated?.message?.data?.cause, 80)})` };
+  });
+
+  await step('s14e K3 — 페이지의 runValidation · generateReport 가 호스트에 가고 validationResult · reportResult 가 돌아온다 · 둘은 다시 보내기 기록에 남지 않는다 · 보고서 파일은 호스트가 정한 곳(/api/report)', async () => {
+    const last = async cmds => (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?${cmds.map(c => `command=${c}`).join('&')}`)).json?.data ?? {};
+    // 페이지의 「설계 검증 실행」 — 호스트가 만든 항목이 페이지의 검증 칸에
+    await wv(`D.getElementById('btn-run-validation').click(); return 1;`);
+    const rows = await waitWv(`const c=D.getElementById('validation-container'); return c && c.querySelectorAll('tr').length>3 ? c.querySelectorAll('tr').length : null;`, 15_000, '페이지의 검증 칸');
+    await wv(`D.getElementById('btn-generate-report').click(); return 1;`);
+    const rpt = await waitWv(`const c=D.getElementById('report-container'); return c && c.textContent.trim().length>20 ? c.textContent.trim().length : null;`, 20_000, '페이지의 보고서 칸');
+    const kept = await last(['validationResult', 'reportResult']);
+    const mcpVal = (await api('POST', '/api/mcp/action', { action: 'validate_design', detail: 'full', report_units: 'SI' })).json;
+    // 새로 고침 — 다시 실린 페이지는 검증 · 보고서를 다시 받지 않는다(빈 칸) — 다시 묻는다
+    await cdp.send('Page.reload', { ignoreCache: true });
+    await waitWv(`return D.documentElement.hasAttribute('data-stcfsd-replayed') ? 1 : null;`, 30_000, '다시 실린 페이지');
+    await sleep(800);
+    const after = await wv(`const c=D.getElementById('validation-container'); return c ? c.querySelectorAll('tr').length : -1;`);
+    // 다리의 /api/report — 화면은 경로를 주지 않는다(주어도 읽지 않는다), 호스트가 쓴 HTML 파일을 다리가 읽어 준다
+    const rep = await api('POST', '/api/report', { kind: 'design', format: 'html', units: 'SI', folder: 'C:\\Windows', file_path: 'C:\\x.html' });
+    const f = rep.json?.data?.reply?.files?.html;
+    const onDisk = f && fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
+    const shaOk = !!onDisk && crypto.createHash('sha256').update(onDisk, 'utf8').digest('hex') === rep.json?.data?.sha256 && rep.json.data.html === onDisk;
+    const notWindows = !!f && !/^c:\\windows/i.test(f);
+    return { ok: !!rows && !!rpt && !kept.validationResult && !kept.reportResult && Array.isArray(mcpVal?.items) && mcpVal.items.length > 10 && after <= 1 && rep.json?.success === true && shaOk && notWindows,
+      detail: `페이지 검증 칸 ${rows}줄 · 보고서 ${rpt}자 · 다시 보내기 기록: 검증 ${kept.validationResult ? '있음' : '없음'} · 보고서 ${kept.reportResult ? '있음' : '없음'} · MCP 항목 ${mcpVal?.items?.length}`
+        + ` · 새로 고침 뒤 검증 칸 ${after}줄 · /api/report ${rep.json?.success} → ${f ? path.basename(f) : '없음'}(${rep.json?.data?.reply?.folder}) · 파일 = 응답 HTML(sha256) ${shaOk}` };
+  });
+
+  // V7-40 · V7-45 — 다시 보내기 기록은 지금 것의 근거가 아니다: 호스트가 지운 판정은 새로 고침 뒤 되살아나지 않고, 범위 밖 결과는 남는다
+  const lastOf = async cmds => (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?${cmds.map(c => `command=${c}`).join('&')}`)).json?.data ?? {};
+  const hostResults = async () => (await api('POST', '/api/mcp/action', { action: 'get_full_state' })).json?.results ?? {};
+  const flexUS = { action: 'aisi_design', member_type: 'flexure', Fy: 50, Fu: 65, Mu: 30, Vu: 2, Lb: 60, design_method: 'LRFD' };
+  const reloadDesigner = async () => {
+    await cdp.send('Page.reload', { ignoreCache: true });
+    await waitWv(`return D.documentElement.hasAttribute('data-stcfsd-replayed') ? 1 : null;`, 30_000, '다시 실린 페이지');
+    await sleep(1200);
+  };
+  await step('s14f V7-40 — 설계 → 편집 화면에서 Lb 를 바꿈(호스트가 판정을 지움 — 화면이 시작한 무효화) → 새로 고침 → 지운 「종합 판정」 이 다시 나오지 않는다(칸은 새 값)', async () => {
+    const d = await api('POST', '/api/mcp/action', flexUS);
+    await waitWv(`return /종합/.test(D.getElementById('design-summary').textContent) ? 1 : null;`, 20_000, '설계 결과 카드');
+    const before = await lastOf(['designResult']);
+    await wv(`D.querySelector('.tab-btn[data-tab="design"]').click(); const e=D.getElementById('design-Lb'); e.value='9999'; e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+    let res = {};
+    for (let i = 0; i < 60; i++) { res = await hostResults(); if (!res.member_design) { break; } await sleep(200); }
+    await reloadDesigner();
+    const after = await lastOf(['designResult']);
+    const page = await wv(`return {sum:D.getElementById('design-summary').textContent.replace(/\\s+/g,' ').trim(), lb:D.getElementById('design-Lb').value};`);
+    return { ok: !d.json?.error && !!before.designResult && !res.member_design && !after.designResult && !/종합 판정|종합판정/.test(page.sum),
+      detail: `설계 ${d.json?.pass} → 기록에 designResult ${!!before.designResult} → Lb 9999(페이지) → 호스트 결과 member_design ${res.member_design ? '있음' : '없음'} → 새로 고침 → 기록 ${after.designResult ? '있음' : '없음'} · 카드 「${short(page.sum, 70)}」 · 새로 고친 뒤 Lb 칸 ${page.lb}(하중 해석이 있으면 그 Ly 로 자동 — 페이지의 일)` };
+  });
+  await step('s14g V7-45 — 접합 범위의 무효화(set_case_inputs connT1)는 단일 접합만 지운다 — 부재 설계는 기록 · 새로 고친 페이지에 남는다', async () => {
+    await api('POST', '/api/mcp/action', flexUS);
+    const c = await api('POST', '/api/mcp/action', { action: 'design_connection', connection_type: 'bolt', t1: 0.06, t2: 0.06, Fu: 65, Fy: 50, d: 0.5, n: 2, s: 1.5, e: 1.0, Pu: 3, design_method: 'LRFD' });
+    await sleep(600);
+    const a1 = await lastOf(['designResult', 'connectionResult']);
+    const sc = await api('POST', '/api/mcp/action', { action: 'set_case_inputs', inputs: { connT1: 0.07 }, reason: '시험 — 접합 판 두께' });
+    await sleep(600);
+    const a2 = await lastOf(['designResult', 'connectionResult', 'derivedResultsInvalidated']);
+    const res = await hostResults();
+    await reloadDesigner();
+    const page = await wv(`return D.getElementById('design-summary').textContent.replace(/\\s+/g,' ').trim();`);
+    return { ok: !c.json?.error && sc.json?.success === true && !!a1.designResult && !!a1.connectionResult && !!a2.designResult && !a2.connectionResult && a2.derivedResultsInvalidated?.message?.data?.scope === 'connection'
+      && !!res.member_design && !res.connection && /종합/.test(page),
+      detail: `앞: 설계 ${!!a1.designResult} · 접합 ${!!a1.connectionResult} → connT1(범위 ${a2.derivedResultsInvalidated?.message?.data?.scope}) → 기록: 설계 ${!!a2.designResult} · 접합 ${!!a2.connectionResult} · 호스트 결과: 설계 ${!!res.member_design} · 접합 ${!!res.connection} · 새로 고친 페이지의 설계 카드 「${short(page, 50)}」` };
   });
 
   section('8. 새로 고침 — 지금 모델과 결과로 돌아온다');

@@ -21,7 +21,7 @@ import { infoHtml, shareLabel } from './info';
 import { closeMenu, installMenuClosers, menuKey, menuOpen, openMenu, type MenuItem } from './menu';
 import { neighbours, sheetHtml } from './sheet';
 import { initStart, renderStart } from './start';
-import { refresh, rowOfKey, setRunning, state, type Stage } from './store';
+import { makeReport, refresh, rowOfKey, runValidation, setRunning, state, type Stage } from './store';
 import { flashTip, installTips } from './tips';
 import { claudeDone, claudeStatus, initTitlebar, renderClaude, renderFollow, renderTitle, type ClaudeStatus } from './titlebar';
 import { buildTree, findNode, keysUnder, setTreeFilter, TABS, treeFilter, treeHtml, type Tab } from './tree';
@@ -252,8 +252,44 @@ function closeSheet(): void { if (ui.sheet) { ui.sheet = null; render(); } }
 function toReview(): void { ui.screen = 'review'; render(); }
 
 // ── 메뉴의 일 ─────────────────────────────────────────────────────
+// ── 점검 · 계산서(K3 — 호스트가 만든다) ─────────────────────────────
+async function doValidate(by: 'person' | 'page' = 'person'): Promise<void> {
+  if (state.valRunning) { return; }
+  const p = runValidation(by);
+  render();
+  await p;
+  if (state.valErr && by === 'person') { toast(`점검을 읽지 못했다 — ${state.valErr}`, 'warning'); }
+  render();
+}
+const reportBusy = new Set<string>();
+async function doReport(kind: 'design' | 'buckling', format: 'html' | 'pdf'): Promise<void> {
+  const k = `${kind}:${format}`;
+  if (reportBusy.has(k)) { return; }
+  reportBusy.add(k);
+  setProgress({ id: `report:${k}`, title: format === 'pdf' ? 'PDF 를 쓰는 중' : '보고서를 만드는 중', message: '호스트' });
+  try { await makeReport(kind, format); } finally { reportBusy.delete(k); setProgress({ id: `report:${k}`, done: true }); }
+  const r = state.reports[kind];
+  if (r?.error) { toast(`보고서를 만들지 못했다 — ${r.error}`, 'warning'); }
+  else if (format === 'pdf') { toast(r?.reply?.files?.pdf ? `PDF 를 썼다 — ${String(r.reply.files.pdf)}${r.reply.pages ? ` (${r.reply.pages}쪽)` : ''}` : `PDF 를 쓰지 못했다 — ${String(r?.reply?.pdf_note ?? '')}`, r?.reply?.files?.pdf ? 'info' : 'warning'); }
+  render();
+}
+/** 가운데 · 정보 창의 점검 · 보고서 단추(data-act) — 처리했으면 true */
+function docAction(t: HTMLElement): boolean {
+  const a = t.closest('[data-act]');
+  const act = a?.getAttribute('data-act');
+  if (act === 'val-run') { void doValidate('person'); return true; }
+  if (act === 'rpt-make' || act === 'rpt-pdf') {
+    const kind = a!.getAttribute('data-kind') === 'buckling' ? 'buckling' : 'design';
+    void doReport(kind, act === 'rpt-pdf' ? 'pdf' : 'html');
+    return true;
+  }
+  const d = t.closest('[data-doc]');
+  if (d) { select('doc', d.getAttribute('data-doc')!); return true; }
+  return false;
+}
+
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg', 'val'].includes(key) ? 'work' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg'].includes(key) ? 'work' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -399,6 +435,9 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
         toast(`저장하지 않은 변경을 버리고 열었다(${/load_project|mcp|ai/i.test(String(x.by ?? '')) ? 'AI 의 load_project' : '열기'})${Array.isArray(x.inputs_changed) && x.inputs_changed.length ? ` — 입력 ${x.inputs_changed.length}칸` : ''}${x.model_changed ? ' · 모델' : ''}`, 'warning');
         state.lastChange = { at: ev.at || Date.now(), text: '저장하지 않은 변경을 버리고 열었다' };
       }
+      // 편집 상태의 검증 탭에서 「설계 검증 실행」을 눌렀다(K3 — 호스트가 그 페이지에 항목을 보냈다): 이 화면도 같은 호스트 동작으로 다시 읽는다
+      if (c === 'validationResult') { void doValidate('page'); state.lastChange = { at: ev.at || Date.now(), text: '설계 검증을 다시 했다(편집 상태의 검증 탭)' }; break; }
+      if (c === 'reportResult') { break; }
       if (c === 'analysisStarted') { setRunning(true); }
       if (['analysisComplete', 'analysisError', 'analysisInvalidated', 'resultsCleared', 'dsmResult'].includes(c)) { setRunning(false); }
       if (NOTE[c]) { state.lastChange = { at: ev.at || Date.now(), text: NOTE[c] }; }
@@ -534,6 +573,7 @@ function boot(): void {
   installZoom($('center'));
   $('center').addEventListener('click', e => {
     const t = e.target as HTMLElement;
+    if (docAction(t)) { return; }
     const sel = ui.sheet ?? ui.sel[ui.tab];
     const chip = t.closest('[data-opt]');
     if (chip) { const k = chip.getAttribute('data-opt') as keyof CenterOpts; opts[k] = !opts[k]; render(); return; }
@@ -584,6 +624,7 @@ function boot(): void {
   });
   $('info').addEventListener('click', e => {
     const t = e.target as HTMLElement;
+    if (docAction(t)) { return; }
     const lnk = t.closest('[data-sheet]');
     if (lnk) { openSheet(lnk.getAttribute('data-sheet')!); return; }
     const tr = t.closest('tr[data-k]');
@@ -675,6 +716,9 @@ function boot(): void {
   setTheme,
   openSheet, closeSheet,
   get reported() { return lastReported(); },
+  /** 시험: 「점검 실행」 · 보고서 만들기와 같은 길(사람의 단추와 같은 함수) */
+  validate: () => doValidate('person'),
+  report: (kind: 'design' | 'buckling', format: 'html' | 'pdf') => doReport(kind, format),
   /** 시험: 보기 보고 하나를 곧바로(모델 · 상태를 쓰지 않는다 — 호스트가 무엇을 버리고 칩이 그것을 보이는지 본다) */
   reportNow: (view: string, selection: unknown) => report(view, selection as Item | null, 'program', true),
   get pointed() { return pointedAt(); },

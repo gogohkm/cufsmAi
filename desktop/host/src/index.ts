@@ -2,6 +2,8 @@
 export { startHost, isOutStale, mcpConfigCandidates, defaultUserDataDir } from './loader';
 export type { StartHostOptions, HostHandle, McpEndpoint, DesignerPanel, FileResult } from './loader';
 export { createHeadlessPlatform, withScriptedAnswers } from './platform';
+export { confirmUnsaved, saveSafely, isOurCsd, UNSAVED_ITEMS } from './unsaved';
+export type { UnsavedCtx, UnsavedWhere, UnsavedAnswer, UnsavedResult } from './unsaved';
 export type {
   HostPlatform, HeadlessPlatform, HeadlessPlatformOptions, NotifyRequest, PickRequest, InputRequest,
   FileDialogRequest, ProgressState, PlatformQuestion, ScriptedPlatform, ScriptedDialog,

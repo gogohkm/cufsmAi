@@ -232,6 +232,95 @@ async function main() {
     const l4 = (await unsavedLog()).pop();
     check('창 닫기 · 저장 안 한 변경 있음 → OS 물음(창을 닫는 것은 사람의 동작) — 「취소」면 창이 그대로', stillOpen && l4?.where === 'close' && l4.how === 'native' && l4.answer === 'cancel',
       `${JSON.stringify(l4)} · 창 ${stillOpen ? '그대로' : '닫힘'}`);
+    section('1c. V7-41 · 42 · 44 · 46 · S3 — 열기의 모든 길 · 「저장」의 자리 · 닫기 직전의 입력 · 읽지 못함 · 세션 끝');
+    const frameJs = js => A.ev(`const mf = ctx.win.webContents.mainFrame;
+      const f = mf.framesInSubtree.find(x => x !== mf && x.url.includes('/wv/' + encodeURIComponent(ctx.host.designer.id) + '/'));
+      return f ? await f.executeJavaScript(${JSON.stringify(js)}, true) : null;`);
+    const noDialog = () => until(async () => ((await A.page(`!!document.querySelector('#dialog-host .dialog')`)) ? null : true), 10_000);
+    // 길마다: 저장 안 한 변경 있음 → 화면 안의 물음 → 「취소」 = 열기 대화상자 없음 · 그대로 더러움 / 「저장 안 함」 = 열기 대화상자
+    const paths = [
+      ['새 화면의 Ctrl+O', () => A.page(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'o',ctrlKey:true,bubbles:true})); true`)],
+      ['시작 화면의 「파일만 열기」', () => A.page(`document.querySelector('#start [data-act="open"]').click(); true`)],
+      ['제목 표시줄 「검토 대상 ▾ › 열기」', () => A.page(`(async()=>{document.querySelector('#tbar [data-act="file"]').click(); await new Promise(r=>setTimeout(r,200)); const it=[...document.querySelectorAll('.ci[data-i]')].find(x=>/열기/.test(x.textContent)); it&&it.click(); return !!it;})()`)],
+      ['끼운 설계 화면의 Open 단추', () => frameJs(`document.getElementById('btn-file-open').click(); true`)],
+    ];
+    for (const [label, go] of paths) {
+      await hostAction({ action: 'set_case_inputs', inputs: { Lb: 63 }, reason: '열기 길 시험' });
+      for (const ans of ['취소', '저장 안 함']) {
+        const os0 = await A.ev('return ctx.diag.osDialogs.length;');
+        const n1 = (await unsavedLog()).length;
+        await go();
+        const q = await pageDialog();
+        await answerPage(ans);
+        await noDialog();
+        if (ans === '저장 안 함') { await until(() => A.ev(`return ctx.diag.osDialogs.length > ${os0} ? true : null;`), 10_000); } else { await sleep(800); }
+        const os1 = await A.ev('return ctx.diag.osDialogs.length;');
+        const lg = (await unsavedLog()).slice(n1);
+        const d = await hostAction({ action: 'get_unsaved_changes' });
+        const okAns = ans === '취소' ? os1 === os0 && d?.dirty === true : os1 > os0;
+        check(`V7-41 · ${label} → 묻는다 · 「${ans}」 ${ans === '취소' ? '= 열기 대화상자 없음 · 그대로' : '= 계속(열기 대화상자)'}`, /저장하지 않은 변경/.test(q ?? '') && lg.length === 1 && lg[0].how === 'page' && okAns,
+          `「${short(q, 50)}」 · ${JSON.stringify(lg)} · 열기 대화상자 ${os1 - os0} · 더러움 ${d?.dirty}`);
+      }
+    }
+    // V7-42: AI 의 load_project 가 정한 경로(원시 모델 .json)에 닫기의 「저장」이 묻지 않고 쓰지 않는다 — 저장 자리를 묻는다
+    const raw = path.join(tmp, 'AI 가 연 원시 모델.json');
+    const sp = await hostAction({ action: 'save_project', filepath: raw });
+    const lp = await hostAction({ action: 'load_project', filepath: raw });
+    await hostAction({ action: 'set_case_inputs', inputs: { Lb: 66 }, reason: 'V7-42' });
+    const rawBefore = fs.readFileSync(raw, 'utf8');
+    const osS = await A.ev('return ctx.diag.osDialogs.filter(d => d.kind === "save").length;');
+    await A.ev(`ctx.diag.unsavedTestAnswers.push('save'); ctx.win.close(); return true;`);
+    await sleep(2000);
+    const after42 = { raw: fs.readFileSync(raw, 'utf8') === rawBefore, open: await A.ev('return !!ctx.win && !ctx.win.isDestroyed();'),
+      asked: (await A.ev('return ctx.diag.osDialogs.filter(d => d.kind === "save").length;')) - osS, log: (await unsavedLog()).pop() };
+    check('V7-42 · AI 가 load_project 로 연 .json 이 지금 파일 → 닫기 「저장」 = 그 파일에 쓰지 않고 저장 자리를 묻는다(시험의 답: 취소 → 창 그대로)',
+      !sp?.error && !lp?.error && after42.raw && after42.open && after42.asked === 1 && after42.log?.answer === 'save',
+      `원시 모델 그대로 ${after42.raw} · 저장 자리 물음 ${after42.asked} · 창 ${after42.open ? '그대로' : '닫힘'} · ${JSON.stringify(after42.log)}`);
+    // 사람이 고른 자리로 저장 — 저장 자리 물음의 답이 .json 이어도 .csd 로만 쓴다
+    const pick = path.join(tmp, '사람이 고른 자리.json');
+    await A.ev(`ctx.diag.saveTestPaths.push(${JSON.stringify(pick)}); ctx.diag.unsavedTestAnswers.push('save'); ctx.win.close(); return true;`);
+    const closed42 = await Promise.race([A.exited.then(() => true), sleep(20_000).then(() => false)]);
+    // 창이 닫혔으면 다시 띄운다(이 절의 나머지 · 2절이 창을 쓴다)
+    check('V7-42 · 저장 자리를 고르면 그 자리에 .csd 로 쓰고(.json 이 아니다) 닫힌다', closed42 && fs.existsSync(`${pick}.csd`) && !fs.existsSync(pick) && JSON.parse(fs.readFileSync(`${pick}.csd`, 'utf8')).version === '1.4',
+      `닫힘 ${closed42} · ${path.basename(pick)}.csd ${fs.existsSync(`${pick}.csd`)} · ${path.basename(pick)} ${fs.existsSync(pick)}`);
+    if (closed42) {
+      A = await launch([FILE], 'A2');
+      await until(() => A.page(`(()=>{const s=window.__stcfsdUi&&window.__stcfsdUi.state; return s && s.file.path ? 1 : null;})()`), 90_000);
+      await until(async () => (await frameJs(`document.documentElement.getAttribute('data-stcfsd-bridge')==='connected' && document.documentElement.hasAttribute('data-stcfsd-replayed')`)) ? 1 : null, 60_000);
+    }
+    // V7-44: 닫기 직전 300 ms 안에 친 글자 — 깨끗한 상태에서 칸에 쳐서 곧바로 닫으면 밀린 입력을 먼저 보내고 묻는다
+    const clean = await hostAction({ action: 'get_unsaved_changes' });
+    await frameJs(`(()=>{document.querySelector('.tab-btn[data-tab="design"]').click(); const e=document.getElementById('design-Lb'); e.focus(); e.value='4321'; e.dispatchEvent(new Event('input',{bubbles:true})); return true;})()`);
+    await A.ev(`ctx.diag.unsavedTestAnswers.push('cancel'); ctx.win.close(); return true;`);
+    await sleep(2000);
+    const l44 = (await unsavedLog()).pop();
+    const d44 = await hostAction({ action: 'get_unsaved_changes' });
+    check('V7-44 · 깨끗한 상태 → 칸에 쳐서(300 ms 모음 안) 곧바로 닫기 → 밀린 입력을 먼저 호스트로 · 묻는다(취소 → 그대로)',
+      clean?.dirty === false && l44?.where === 'close' && l44.how === 'native' && l44.answer === 'cancel' && l44.flushed === true && d44?.dirty === true && (d44.inputs_changed ?? []).includes('Lb'),
+      `앞 더러움 ${clean?.dirty} · ${JSON.stringify(l44)} · 뒤 ${JSON.stringify(d44?.inputs_changed)}`);
+    // V7-46: 읽지 못하면 묻는다(fail closed) · 물음이 떠 있는 동안 ✕ 를 또 눌러도 물음은 하나 · 지나치지 않는다
+    await A.ev('ctx.diag.failUnsavedQuery = true; return true;');
+    const qBefore = await A.ev('return ctx.diag.unsavedTestAnswers.length;');
+    await A.ev(`ctx.diag.unsavedTestAnswers.push('cancel'); ctx.win.close(); ctx.win.close(); return true;`);
+    await sleep(2000);
+    const l46 = (await unsavedLog()).slice(-2);
+    const left46 = await A.ev('return ctx.diag.unsavedTestAnswers.length;');
+    const open46 = await A.ev('return !!ctx.win && !ctx.win.isDestroyed();');
+    await A.ev('ctx.diag.failUnsavedQuery = false; return true;');
+    check('V7-46 · get_unsaved_changes 를 읽지 못함 → 묻는다(「확인할 수 없다」) · ✕ 두 번 → 물음 하나 · 취소면 창 그대로',
+      l46.every(x => x.where === 'close' && x.failed === true && x.answer === 'cancel') && left46 === qBefore && open46,
+      `${JSON.stringify(l46)} · 남은 시험 답 ${left46} · 창 ${open46 ? '그대로' : '닫힘'}`);
+    // V7-S3: 로그오프 · 종료 — 막지 않고 복구본(사용자 폴더 안)을 쓴다 · 다음 실행에 알린다
+    await hostAction({ action: 'set_case_inputs', inputs: { Lb: 67 }, reason: 'S3' });
+    await A.ev(`ctx.win.emit('query-session-end', { preventDefault(){}, reasons: ['logoff'] }); return true;`);
+    const rec = await until(() => A.ev('return ctx.diag.recovery.length ? ctx.diag.recovery[ctx.diag.recovery.length-1] : null;'), 20_000);
+    const recDir = await A.ev('return ctx.recoveryDir;');
+    const inUser = !!rec?.file && path.resolve(rec.file).toLowerCase().startsWith(path.resolve(userData).toLowerCase());
+    const recJson = rec?.file && fs.existsSync(rec.file) ? JSON.parse(fs.readFileSync(rec.file, 'utf8')) : null;
+    check('V7-S3 · 세션 끝(query-session-end) · 저장 안 한 변경 있음 → 사용자 폴더의 recovery/ 에 복구본(.csd 1.4, Lb 67 in)',
+      rec?.ok === true && inUser && path.dirname(rec.file) === recDir && recJson?.version === '1.4' && Math.abs(Number(recJson?.case?.inputs?.Lb) - 67) < 1e-9,
+      `${path.relative(userData, rec?.file ?? '')} · ${JSON.stringify({ ok: rec?.ok, dirty: rec?.dirty })}`);
+
     // 그 밖의 확인 — 창은 보이지 않고 포커스를 받지 않았다(물음이 창을 앞으로 꺼내지 않는다)
     const sf2 = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
     check('물음 내내 창은 보이지 않고 포커스를 받지 않는다', !sf2.visible && !sf2.focused && sf2.show === 0 && sf2.focus === 0, JSON.stringify(sf2));

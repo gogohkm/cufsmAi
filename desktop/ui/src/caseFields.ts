@@ -63,7 +63,9 @@ export const CASE_SOURCE: Record<string, { t: string; cls: string; tip: string }
   ai: { t: 'AI', cls: 'ai', tip: 'AI 가 MCP 도구로 정했다(그 도구의 입력 묶음 — 주지 않은 칸은 빈칸)' },
   file: { t: '파일', cls: '', tip: '연 .csd 파일에서 왔다' },
   'load-analysis': { t: '하중 해석', cls: 'drv', tip: '하중 해석 결과가 채웠다' },
-  mirror: { t: '재료', cls: 'sec', tip: '재료의 값을 따른다(거울 — 사람이 고치면 지정)' },
+  // K2 의 'mirror' 는 「화면이 다른 칸을 따라 채운 값」 — 재료의 거울(① Fy → 설계 · 소성 · 접합)만이 아니라 강종 → Fy · Fu, E · ν → G,
+  // 모드 전환의 비우기, β 를 켤 때의 채우기 같은 화면의 연동 모두(K2 설계 표 「화면 JS 의 파생」). 그래서 「재료」가 아니라 「연동」
+  mirror: { t: '연동', cls: 'sec', tip: '화면이 다른 칸을 따라 채운 값(재료의 거울 · 강종 → Fy · Fu · 모드 전환 등 화면의 연동) — 사람이 고치면 지정' },
 };
 
 export function caseTag(src: string | undefined, blankByAi = false): string {

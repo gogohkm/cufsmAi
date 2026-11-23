@@ -30,26 +30,37 @@ const show = (key: string, v: unknown): string => {
   return Array.isArray(sv) ? sv.map(x => (typeof x === 'number' ? sigText(x, 3) : String(x))).join(', ') + u : typeof sv === 'number' ? `${sigText(sv, 3)}${u}` : String(sv);
 };
 
-/** 이번 편집의 바뀐 키 */
-export function editChanges(): Array<{ key: string; label: string; was: string; now: string }> {
+export interface EditChange { key: string; label: string; was: string; now: string; src: string }
+
+/**
+ * 이번 편집의 바뀐 키 — 출처(호스트 sources)마다 나눈다(V7-43). person = 출처 「지정」(사람이 칸에서 정함)만 「이번 편집 — 바뀐 것」,
+ * ai = 편집 중에 AI 가 쓴 것(「AI 가 바꿈」 — 사람의 편집으로 세지 않는다), other = 연동 · 하중 해석 · 파일 · 출처를 모르는 것
+ */
+export function editChangesBySource(): { person: EditChange[]; ai: EditChange[]; other: EditChange[] } {
   const c = state.caseIn;
-  if (!base || !c?.inputs) { return []; }
-  const out: Array<{ key: string; label: string; was: string; now: string }> = [];
+  const out = { person: [] as EditChange[], ai: [] as EditChange[], other: [] as EditChange[] };
+  if (!base || !c?.inputs) { return out; }
+  const put = (x: EditChange) => { (x.src === 'user' ? out.person : x.src === 'ai' ? out.ai : out.other).push(x); };
   for (const f of CASE_FIELDS) {
     const a = base.inputs[f.key], b = c.inputs[f.key];
-    if (JSON.stringify(a) !== JSON.stringify(b)) { out.push({ key: f.key, label: CASE_KO[f.key] ?? f.key, was: show(f.key, a), now: show(f.key, b) }); }
+    if (JSON.stringify(a) !== JSON.stringify(b)) { put({ key: f.key, label: CASE_KO[f.key] ?? f.key, was: show(f.key, a), now: show(f.key, b), src: String(c.sources?.[f.key] ?? '') }); }
   }
-  if (JSON.stringify(base.spans) !== JSON.stringify(c.spans ?? null)) { out.push({ key: 'spans', label: '경간 표', was: '앞', now: '바뀜' }); }
+  if (JSON.stringify(base.spans) !== JSON.stringify(c.spans ?? null)) { put({ key: 'spans', label: '경간 표', was: '앞', now: '바뀜', src: String(c.sources?.spans ?? '') }); }
   return out;
 }
+/** 사람이 이번 편집에서 바꾼 것(띠의 칩) */
+export function editChanges(): EditChange[] { return editChangesBySource().person; }
 
 export function editStripHtml(aiWaiting: number): string {
-  const ch = editChanges();
+  const { person: ch, ai, other } = editChangesBySource();
   return `<b>이번 편집 — 바뀐 것 ${ch.length}</b>`
     + ch.slice(0, 6).map(c => `<span class="chip" data-change="${esc(c.key)}">${esc(c.label)} <s>${esc(c.was)}</s> → ${esc(c.now)}</span>`).join('')
     + (ch.length > 6 ? `<span class="faint">외 ${ch.length - 6}</span>` : '')
+    + (other.length ? `<span class="faint" data-other-changes="${other.length}"${tip(`사람이 고친 것이 아닌 변경(연동 · 하중 해석 · 파일): ${other.map(o => o.label).join(', ')}`)}>그 밖 ${other.length}</span>` : '')
     + '<span class="sp"></span>'
-    + `<span class="faint"${tip('편집 중에는 AI 의 「여기를 보세요」(focus)가 알림으로만 쌓인다 — 마치면 그 알림을 눌러 간다')}>AI 대기 · 알림 ${aiWaiting}</span>`
+    + ai.slice(0, 3).map(c => `<span class="chip ai" data-ai-change="${esc(c.key)}"${tip('편집 중에 AI 가 MCP 도구로 바꾼 값 — 사람의 편집이 아니다')}><b>AI</b> ${esc(c.label)} <s>${esc(c.was)}</s> → ${esc(c.now)}</span>`).join('')
+    + (ai.length > 3 ? `<span class="faint">AI 외 ${ai.length - 3}</span>` : '')
+    + `<span class="faint" data-ai-waiting${tip('편집 중에는 AI 의 「여기를 보세요」(focus)가 알림으로만 쌓이고, AI 가 바꾼 값은 왼쪽 칩과 따로 보인다')}>AI 대기 · 알림 ${aiWaiting}${ai.length ? ` · AI 가 바꿈 ${ai.length}` : ''}</span>`
     + `<span class="btn editp" data-act="edit-done"${tip('편집 상태를 마치고 검토 화면으로(F2 · Esc). 고친 값은 이미 호스트에 있다 — 저장은 따로(Ctrl+S)')}>편집 마치기 F2</span>`
     + `<span class="btn ghost off"${tip('이번 편집을 되돌리는 길은 변경 기록(R2)부터 — 지금은 설계 화면에서 값을 다시 고친다')}>버리기</span>`;
 }

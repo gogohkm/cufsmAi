@@ -41,9 +41,11 @@ import type { SseStream } from './sse';
  * 호스트가 받지 않는다(3.2). `restoreDesignInputs` 도 남기지 않는다 — 다시 보내면 지난 파일의 입력이 지금 상태 위에 얹혔다
  * (V5b-02 의 뿌리). `caseDiscarded`(저장하지 않은 변경을 버리고 열었다)는 알림이라 한 번만 — 새 화면은 이벤트의 본문으로 받는다.
  * `caseDirty` · `caseReference` 는 마지막 것만(규칙 1).
+ * K3(f08e10e): `validationResult {items}` · `reportResult {html}` 은 페이지가 물은 것(`runValidation` · `generateReport`)에 대한 답이라
+ * 남기지 않는다 — 다시 실린 페이지는 다시 묻는다(다시 보내면 낡은 검증 · 보고서가 지금 상태 위에 뜬다).
  */
 const TRANSIENT = new Set(['collectDesignData', 'captureSection', 'showSection', 'propertiesResult', 'propertiesError', 'focusRequest',
-  'caseState', 'caseAck', 'restoreDesignInputs', 'caseDiscarded']);
+  'caseState', 'caseAck', 'restoreDesignInputs', 'caseDiscarded', 'validationResult', 'reportResult']);
 /** `resultsCleared` 가 지우는 것 */
 const CLEARED_BY_RESULTS = new Set([
   'analysisStarted', 'analysisComplete', 'analysisError', 'dsmResult', 'classifyResult', 'classifyError', 'designDsmPrepared',
@@ -55,6 +57,28 @@ const CLEARED_BY_RESULTS = new Set([
  * 새로 고침이 낡은 판정 카드를 되살리지 않게. 새 하중 결과(`loadAnalysisComplete`)는 이 뒤에 오므로 남는다.
  */
 const CLEARED_BY_DERIVED = new Set(['designResult', 'designPurlinResult', 'lapConnectionResult']);
+/**
+ * V7-45: `derivedResultsInvalidated {scope}` 의 범위마다 지우는 것 — 호스트 `_invalidateDerived` 와 같은 규칙.
+ * connection → 단일 접합만, lap → 랩만, load → 하중 해석 + 부재 설계 · 랩, design(그 밖 · 없음) → 부재 설계 · 랩.
+ * 호스트가 지운 결과 종류(`kinds` — 결과 이름 member_design · lap …)를 함께 주면 그것을 따른다(뒤의 계약)
+ */
+const CLEARED_BY_SCOPE: Record<string, string[]> = {
+  connection: ['connectionResult'],
+  lap: ['lapConnectionResult'],
+  load: ['loadAnalysisComplete', ...CLEARED_BY_DERIVED],
+  design: [...CLEARED_BY_DERIVED],
+};
+/**
+ * V7-40: 결과를 싣는 메시지 → 호스트 `results` 의 이름(get_full_state). 다시 보내기 기록은 지금 것의 근거가 아니다 —
+ * 페이지가 새로 실릴 때 다리가 호스트의 `results` 를 읽어, 거기 없는(또는 지금 것이 아닌) 결과의 메시지는 보내지 않고 기록에서 지운다.
+ */
+export const RESULT_KIND_OF: Record<string, string> = {
+  analysisComplete: 'buckling_analysis', dsmResult: 'buckling_analysis', classifyResult: 'buckling_analysis',
+  designDsmPrepared: 'design_dsm', loadAnalysisComplete: 'load_analysis',
+  designResult: 'member_design', designPurlinResult: 'member_design', lapConnectionResult: 'lap', connectionResult: 'connection',
+};
+const COMMANDS_OF_KIND: Record<string, string[]> = {};
+for (const [c, k] of Object.entries(RESULT_KIND_OF)) { (COMMANDS_OF_KIND[k] ??= []).push(c); }
 /** `analysisInvalidated` 가 지우는 것(웹뷰 clearStaleResults: 해석 · 설계 · Lap) */
 const CLEARED_BY_INVALIDATION = new Set([
   'analysisStarted', 'analysisComplete', 'dsmResult', 'classifyResult', 'designDsmPrepared',
@@ -112,7 +136,19 @@ export class Channel {
       if (command === 'resultsCleared') {
         for (const c of CLEARED_BY_RESULTS) { this.state.delete(c); }
       } else if (command === 'derivedResultsInvalidated') {
-        for (const c of CLEARED_BY_DERIVED) { this.state.delete(c); }
+        const d = (message as { data?: { scope?: unknown; kinds?: unknown } }).data ?? {};
+        const kinds = Array.isArray(d.kinds) ? d.kinds.map(String) : null;
+        const list = kinds ? kinds.flatMap(k => COMMANDS_OF_KIND[k] ?? []) : CLEARED_BY_SCOPE[String(d.scope ?? 'design')] ?? CLEARED_BY_SCOPE.design;
+        for (const c of list) { this.state.delete(c); }
+      } else if (command === 'resultsLedger') {
+        // V7-40: 호스트의 장부 메시지가 지금 결과(results — 없는 것은 null)를 싣는다 — 거기 없는 결과의 메시지는 기록에서 지운다
+        const res = (message as { data?: { results?: Record<string, any> | null } }).data?.results;
+        if (res && typeof res === 'object') {
+          for (const c of Object.keys(RESULT_KIND_OF)) {
+            const k = RESULT_KIND_OF[c];
+            if (k in res && (!res[k] || (k === 'buckling_analysis' && res[k].current === false))) { this.state.delete(c); }
+          }
+        }
       } else if (command === 'analysisInvalidated') {
         for (const c of CLEARED_BY_INVALIDATION) { this.state.delete(c); }
         if (m.data?.invalidateLoads) { this.state.delete('loadAnalysisComplete'); }
@@ -139,12 +175,22 @@ export class Channel {
     return client;
   }
 
-  /** 기록을 차례대로 보내고 준비 상태로 둔다 */
-  replayTo(client: ChannelClient): number {
+  /**
+   * 기록을 차례대로 보내고 준비 상태로 둔다. current(V7-40) = 호스트가 지금 쥔 결과의 이름(get_full_state.results 중 지금 것) —
+   * 주면 거기 없는 결과의 메시지는 보내지 않고 기록에서도 지운다(null = 호스트를 읽지 못함 → 결과 메시지를 모두 뺀다: 기록을 믿지 않는다)
+   */
+  replayTo(client: ChannelClient, current?: Set<string> | null): number {
     if (client.ready) { return 0; }
+    const dropped: string[] = [];
+    if (current !== undefined) {
+      for (const [c, e] of [...this.state.entries()]) {
+        const kind = RESULT_KIND_OF[c];
+        if (kind && (current === null || !current.has(kind))) { this.state.delete(c); dropped.push(e.command); }
+      }
+    }
     const entries = [...this.state.values()].sort((a, b) => a.seq - b.seq);
     for (const e of entries) { client.sse.send(e.text, undefined, e.seq); }
-    client.sse.send(JSON.stringify({ count: entries.length, commands: entries.map(e => e.command) }), 'replayed');
+    client.sse.send(JSON.stringify({ count: entries.length, commands: entries.map(e => e.command), dropped }), 'replayed');
     client.ready = true;
     if (this.client === client) { for (const q of this.queued) { client.sse.send(q.text, undefined, q.seq); } }
     this.queued = [];

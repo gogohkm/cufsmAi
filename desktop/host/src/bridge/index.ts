@@ -38,6 +38,7 @@ import {
   WEBVIEW_KEY_HEADER, WRITE_HEADER, type Guard,
 } from './http';
 import { injectWebviewHtml, type ResourceRoot } from './inject';
+import { confirmUnsaved, type UnsavedAnswer, type UnsavedWhere } from '../unsaved';
 import type { BridgePlatform } from './platform';
 import { EventBus, SseStream, type BridgeEvent } from './sse';
 import type { ThemeName } from './theme';
@@ -76,6 +77,12 @@ export interface StartBridgeOptions {
    * `'classic'`: `/` 는 예전의 틀(제목 표시줄 + 설계 화면 탭 6개) — 한 판 동안 스위치(serve · 창의 `--ui classic`)로 남긴다.
    */
   defaultScreen?: 'ui' | 'classic';
+  /**
+   * V7-41: 검토 대상을 바꾸기 전에 — 끼운 화면의 Open 단추(새 화면의 Ctrl+O · 시작 화면 · 제목 표시줄도 이 단추를 누른다)가 보낸
+   * `openProject` 를 호스트에 넘기기 전에 부른다. 창(껍데기)은 자기의 confirmUnsaved(같은 함수 — unsaved.ts)를 준다.
+   * 주지 않으면 다리가 같은 함수를 화면 안의 물음 · 화면 안의 저장 자리 물음으로 돌린다(브라우저 길)
+   */
+  beforeReplace?: (where: UnsavedWhere) => Promise<boolean>;
 }
 
 export interface BridgeHandle {
@@ -97,6 +104,8 @@ export interface BridgeHandle {
   on(listener: (ev: BridgeEvent) => void): () => void;
   /** 지금 파일(제목 표시줄) — 다리를 거치지 않고 연 파일(`--open`)을 알린다 */
   setCurrentFile(file: string | undefined): void;
+  /** 이번 세션에 사람이 스스로(대화상자 · 자기 손의 열기 · 저장) 정한 지금 파일 — AI 의 load_project 는 바꾸지 않는다(V7-42) */
+  personFile(): string | undefined;
   /** 통로 진단(시험) */
   channels(): Array<{ id: string; viewType: string; connected: boolean; ready: boolean; posted: number; replays: number; replay: string[] }>;
   dispose(): Promise<void>;
@@ -180,8 +189,11 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       const focus = command === 'focusRequest' ? (message as { data?: unknown }).data ?? null : undefined;
       // caseDiscarded(K2 — 저장하지 않은 변경을 버리고 열었다)도 한 번만 뜻이 있는 알림 — 본문을 `discarded` 로 싣는다
       const discarded = command === 'caseDiscarded' ? (message as { data?: unknown }).data ?? null : undefined;
+      // K3: 검증 결과는 판(case_rev)과 수만 싣는다 — 새 화면은 그것을 신호로 호스트 동작 validate_design 을 다시 읽는다(본문 전체는 싣지 않는다)
+      const vd = command === 'validationResult' ? (message as { data?: { items?: unknown[]; case_rev?: unknown } }).data : undefined;
+      const validation = vd ? { case_rev: typeof vd.case_rev === 'number' ? vd.case_rev : null, items: Array.isArray(vd.items) ? vd.items.length : 0 } : undefined;
       bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq,
-        ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}) });
+        ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}), ...(validation !== undefined ? { validation } : {}) });
     }
   }));
   subs.push(hub.onDidRefuseDispose.event(info => { bus.emit('webview:refused', 'host', { id: info.id, viewType: info.viewType }); }));
@@ -287,6 +299,47 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     up.setTimeout(10 * 60_000, () => up.destroy(new Error('MCP 응답 시간 초과')));
     up.on('error', err => sendJson(res, 502, { success: false, error: `MCP 중계 실패: ${err.message}` }));
     req.pipe(up);
+  };
+
+  /** 호스트 MCP 다리의 `/action` 을 다리가 스스로 부른다(화면의 머리를 넘기지 않는다 · AI 호출 표시 없음) */
+  const mcpAction = (body: Record<string, unknown>): Promise<any> => new Promise((resolve) => {
+    const mcp = host.mcp;
+    const text = JSON.stringify(body);
+    const up = http.request({ host: '127.0.0.1', port: mcp.port, method: 'POST', path: '/action',
+      headers: { Authorization: `Bearer ${mcp.token}`, Accept: 'application/json', 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(text), Connection: 'close' } }, upRes => {
+      const chunks: Buffer[] = [];
+      upRes.on('data', c => chunks.push(c as Buffer));
+      upRes.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { resolve({ error: 'MCP 응답이 JSON 이 아니다' }); } });
+    });
+    up.setTimeout(10 * 60_000, () => up.destroy(new Error('MCP 응답 시간 초과')));
+    up.on('error', err => resolve({ error: `MCP 중계 실패: ${err.message}` }));
+    up.end(text);
+  });
+
+  /** V7-40: 호스트가 지금 쥔 결과의 이름 — get_full_state.results 의 키(좌굴 해석은 current 가 false 가 아닐 때만). 읽지 못하면 null */
+  const currentResults = async (): Promise<Set<string> | null> => {
+    const f = await mcpAction({ action: 'get_full_state' });
+    const res = f && !f.error && f.results && typeof f.results === 'object' ? f.results as Record<string, any> : null;
+    if (!res) { log(`[bridge] 다시 보내기 전에 호스트의 결과를 읽지 못함 — 결과 메시지는 보내지 않는다: ${String(f?.error ?? '')}`); return null; }
+    return new Set(Object.keys(res).filter(k => res[k] && !(k === 'buckling_analysis' && res[k].current === false)));
+  };
+
+  /** V7-41 · 42: 다리의 기본 물음(브라우저 길) — 같은 함수를 화면 안의 물음 · 저장 자리 물음으로 */
+  const unsavedCtx = {
+    hostAction: (action: string, params: Record<string, unknown> = {}) => mcpAction({ action, ...params }),
+    ask: async (_where: UnsavedWhere, q: { message: string; detail: string; items: string[] }): Promise<UnsavedAnswer> => {
+      const picked = await platform.notify({ severity: 'warning', modal: true, items: q.items, message: q.message, detail: q.detail });
+      return picked === q.items[0] ? 'save' : picked === q.items[1] ? 'discard' : 'cancel';
+    },
+    personFile: () => currentFile,
+    askSavePath: async (defaultName: string) => (await platform.fileDialog({ kind: 'save', title: '검토 대상 저장', saveLabel: '저장',
+      defaultPath: path.join(currentFile ? path.dirname(currentFile) : process.cwd(), defaultName), filters: { 'StCFSD 검토 대상': ['csd'] } }))?.[0],
+    saveProject: async (file: string) => { const r = await host.saveProject(file); if (r.ok) { setCurrentFile(r.file); } return r; },
+    log,
+  };
+  const replaceGuard = async (where: UnsavedWhere): Promise<boolean> => {
+    if (options.beforeReplace) { return options.beforeReplace(where); }
+    return (await confirmUnsaved(unsavedCtx, where)).proceed;
   };
 
   const state = () => ({
@@ -410,6 +463,22 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       sendJson(res, 200, { success: true, data: out });
       return;
     }
+    // K3 — 계산서(U5): 호스트가 보고서 파일을 쓰고(자리 · 이름은 호스트가 정한다 — 화면은 경로를 주지 않는다), 다리가 그 HTML 파일을
+    // 읽어 화면에 준다(미리보기 — 화면은 sandbox iframe 의 srcdoc 으로). 받는 것: kind 'design' | 'buckling', format 'html' | 'pdf' | 'both', units 'SI' | 'US'
+    if (p === '/api/report' && method === 'POST') {
+      const b = await readJson(req) as { kind?: unknown; format?: unknown; units?: unknown };
+      const kind = b?.kind === 'buckling' ? 'buckling' : 'design';
+      const format = b?.format === 'pdf' ? 'pdf' : b?.format === 'both' ? 'both' : 'html';
+      const units = b?.units === 'US' ? 'US' : 'SI';
+      const reply = await mcpAction({ action: 'generate_report', kind, format, report_units: units });
+      if (!reply || reply.error) { sendJson(res, 200, { success: false, error: String(reply?.error ?? '보고서를 만들지 못했다'), data: { reply } }); return; }
+      const htmlFile = typeof reply.files?.html === 'string' ? reply.files.html : null;
+      let html: string | null = null;
+      if (htmlFile) { try { html = fs.readFileSync(htmlFile, 'utf8'); } catch (err) { log(`[bridge] 보고서 HTML 을 읽지 못함: ${String(err)}`); } }
+      const sha256 = html === null ? null : crypto.createHash('sha256').update(html, 'utf8').digest('hex');
+      sendJson(res, 200, { success: true, data: { reply, html, sha256 } });
+      return;
+    }
     const mcpMatch = /^\/api\/mcp\/(.+)$/.exec(p);
     if (mcpMatch) { relayMcp(req, res, mcpMatch[1], url.search); return; }
 
@@ -485,8 +554,20 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
         try {
           if (ch.readyCommand && command === ch.readyCommand) {
             // 페이지의 webviewReady 는 호스트에 넘기지 않는다(넘기면 모델이 기본 단면으로 돌아간다). 다시 보내기로 답한다.
-            const n = ch.replayTo(client);
-            bus.emit('webview:ready', 'bridge', { id, replayed: n });
+            // V7-40: 설계 패널이면 먼저 호스트의 지금 결과(get_full_state.results)를 읽어 기록과 맞춘다 — 지운 판정이 되살아나지 않게
+            if (id === designerId) {
+              void currentResults().then(cur => {
+                if (ch.client !== client) { return; }
+                const n = ch.replayTo(client, cur);
+                bus.emit('webview:ready', 'bridge', { id, replayed: n, reconciled: cur ? [...cur] : null });
+              });
+            } else {
+              const n = ch.replayTo(client);
+              bus.emit('webview:ready', 'bridge', { id, replayed: n });
+            }
+          } else if (command === 'openProject' && id === designerId) {
+            // V7-41: 다른 파일을 열기 전에 저장 안 한 변경을 묻는다(하나의 함수). 취소면 넘기지 않는다
+            void replaceGuard('page-open').then(go => { if (go) { hub.deliver(id, msg); } else { log('[bridge] 열기 취소 — 저장 안 한 변경'); } });
           } else {
             hub.deliver(id, msg);
           }
@@ -512,6 +593,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     events: bus,
     on: listener => bus.on(listener),
     setCurrentFile,
+    personFile: () => currentFile,
     channels: () => [...channels.values()].map(c => ({ id: c.id, viewType: c.viewType, connected: !!c.client,
       ready: !!c.client?.ready, posted: c.posted, replays: c.replays, replay: c.replayCommands() })),
     async dispose() {

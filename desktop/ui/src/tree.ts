@@ -5,10 +5,11 @@
 import { esc, tip } from './dom';
 import { num, ratio } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
-import { isDefault, memberRuns, state, type CheckRow } from './store';
+import { assumptionLines, isDefault, memberRuns, state, type CheckRow } from './store';
 import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
 import { caseTag } from './caseFields';
 import { si } from './units';
+import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
 export const TABS: Array<[Tab, string]> = [['work', '업무'], ['model', '모델'], ['result', '결과'], ['doc', '문서']];
@@ -27,6 +28,21 @@ const n = (k: string, t: string, o: Partial<TNode> = {}): TNode => ({ k, t, ...o
 const STATE_V: Record<string, [string, string, string]> = {
   ok: ['일치', 'ok', 'ok'], stale: ['낡음', 'warn', 'warn'], none: ['결과 없음', 'un', ''], run: ['해석 중', 'acc', 'acc'], unk: ['결과 있음', '', ''],
 };
+
+/** 문서 탭 — 보고서의 상태(만들지 않음 · 초안 · 낡음) */
+function docV(kind: 'design' | 'buckling'): Partial<TNode> { const s = reportSummary(kind); return { v: s.v, vCls: s.cls }; }
+
+/** 결과 탭의 점검 — 진행 띠와 같은 상태, 분류마다 수, 항목마다 호스트의 판정 */
+function valNode(): TNode {
+  const v = state.val;
+  const stale = state.stages.val.state === 'stale';
+  return stageNode('val', '점검', 'val', v ? {
+    v: `${stale ? '낡음 · ' : ''}${valCountsText(v.counts)}`, vCls: stale ? 'warn' : v.counts.fail ? 'ng' : v.counts.warn ? 'un' : 'ok', dot: stale ? 'warn' : v.counts.fail ? 'ng' : v.counts.warn ? 'warn' : 'ok',
+    open: true,
+    kids: valGroups().map(g => n(`val:cat:${g.idx}`, g.cat, { v: valCountsText(g.counts), vCls: g.counts.fail ? 'ng' : g.counts.warn ? 'un' : '', open: !!(g.counts.fail || g.counts.warn),
+      kids: g.items.map(({ it, key }) => n(key, it.item, { dot: it.status === 'pass' ? 'ok' : it.status === 'fail' ? 'ng' : 'warn', v: valLabel(it.status), vCls: it.status === 'fail' ? 'ng' : it.status === 'warn' ? 'un' : 'faint', tip: it.note || it.criterion })) })),
+  } : {});
+}
 
 function stageNode(k: string, t: string, st: keyof typeof state.stages, extra: Partial<TNode> = {}): TNode {
   const s = state.stages[st];
@@ -136,6 +152,7 @@ export function buildTree(tab: Tab): TNode[] {
           vHtml: typeof state.conn.us.utilization === 'number' ? ratio(state.conn.us.utilization, state.conn.us.pass === false, 'conn:utilization') : undefined,
           kids: (state.runs.find(r => r.key === 'conn')?.rows ?? []).filter(passFilter).map(rowNode) })] : []),
       ] } : {}),
+      valNode(),
       n('alt', '대안', { v: '기록 없음', vCls: 'un', tip: '단면 대안 비교는 기록(R4)부터 생긴다' }),
     ];
   }
@@ -144,13 +161,12 @@ export function buildTree(tab: Tab): TNode[] {
       n('ask', '판단 요청', { v: '기록 없음', vCls: 'un', tip: 'AI 의 판단 요청은 기록(R3)부터 남는다' }),
       n('rep', '보고', { v: '기록 없음', vCls: 'un', tip: 'AI 의 보고는 기록(R3)부터 남는다' }),
       n('chg', '변경', { v: '기록 없음', vCls: 'un', tip: '누가 · 왜 · 전 → 후 는 변경 기록(R2)부터 남는다' }),
-      n('val', '점검', { v: '편집 상태에서', vCls: 'un', tip: '검증 70항목은 K3 전까지 편집 상태의 검증 탭에서만 돈다' }),
     ];
   }
   return [
-    n('rpt', '계산서', { v: '편집 상태에서', vCls: 'un', tip: '계산서는 K3 전까지 편집 상태의 보고서 탭에서만 만든다' }),
-    n('brpt', '좌굴 해석 보고서', { v: '편집 상태에서', vCls: 'un', tip: '좌굴 해석 보고서는 편집 상태의 좌굴해석 탭에서 연다' }),
-    n('vtab', '검증표', { v: '편집 상태에서', vCls: 'un', tip: '검증표는 K3 전까지 편집 상태의 검증 탭에서만 만든다' }),
+    n('rpt', '계산서', { ...docV('design'), tip: '호스트가 만든 계산서(generate_report) — 열린 .csd 의 폴더 · 없으면 임시 폴더에 쓴다' }),
+    n('brpt', '좌굴 해석 보고서', { ...docV('buckling'), tip: '호스트가 만든 좌굴 해석 보고서(generate_report kind buckling)' }),
+    n('vtab', '검증표', { v: state.val ? valCountsText(state.val.counts) : '점검 안 함', vCls: state.val ? (state.stages.val.state === 'stale' ? 'warn' : state.val.counts.fail ? 'ng' : '') : 'un', tip: '점검(validate_design)의 항목을 문서 꼴로 — 결과 탭의 점검과 같은 목록' }),
     n('src', '원자료', { v: '기록 없음', vCls: 'un', tip: '원자료(도면 · 제품 자료)는 프로젝트 기록(R1)부터' }),
     n('pub', '발행', { v: '기록 없음', vCls: 'un', tip: '발행은 기록(R5)부터' }),
   ];
@@ -176,7 +192,8 @@ function assumptionsNode(): Partial<TNode> {
   if (isDefault('section')) { kids.push(n('asm:sec', '단면 — 프로그램 기본 단면', { tag: '기본값' })); }
   if (isDefault('material')) { kids.push(n('asm:mat', '재료 — 프로그램 기본값', { tag: '기본값' })); }
   if (isDefault('conditions')) { kids.push(n('asm:cond', '해석 조건 — 프로그램 기본값', { tag: '기본값' })); }
-  state.runs.forEach(r => r.assumptions.forEach((t, i) => kids.push(n(`asm:${r.key}:${i}`, t, { tip: `${r.label} · 엔진이 밝힌 가정`, v: '엔진' }))));
+  // 줄마다 어느 결과 · 구간 · 검토 지점의 것인지 앞에 적는다(글은 엔진이 쓴 그대로)
+  assumptionLines().forEach(a => kids.push(n(a.key, `${a.where} — ${a.text}`, { tip: `${a.where} · 엔진이 밝힌 가정 — ${a.text}`, v: '엔진' })));
   return { v: kids.length ? String(kids.length) : '없음', vCls: kids.length ? 'warn' : '', tip: '기본값으로 채운 입력과 엔진이 밝힌 가정. 누가 정했는지는 변경 기록(R2)부터', open: true, kids };
 }
 
