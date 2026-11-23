@@ -146,7 +146,7 @@ export function workInfo(key: string): string {
   const ans = it?.answer ?? null;
   const head = `<div class="hd"><div class="k"><span class="tag" data-work-kind="${esc(w.kind)}">${esc(KIND_KO[w.kind] ?? w.kind)}</span>${writerTag(w.written_by)}${esc(w.item)} · ${esc(hhmm(w.created_at))}`
     + `${w.basis_differs_from_now ? ` <span class="tag def" data-basis-differs${tip('이 항목을 쓸 때의 대상 내용과 지금이 다르다(입력 · 모델이 그 뒤에 바뀌었다)')}>기준과 다름</span>` : ''}<span class="sp"></span>`
-    + `<span class="rv off"${tip('확인 표시는 기록(R4)부터 — 사람만')}>확인</span></div>`
+    + `<span class="rv off" data-rv-off${tip('업무 항목의 확인은 그 항목의 판(lastSeq)을 shown 으로 보내야 한다 — 호스트의 work_items 답에 그 판이 없다(호스트에 바람)')}>확인</span></div>`
     + `<div class="ttl" data-work-title>${esc(w.title)}</div>`
     + `<div class="dim">${esc(w.state === 'closed' ? '닫힘' : w.kind === 'question' ? (w.answered || ans ? '답함' : '답 기다림') : '열림')} · ${esc(w.scope === 'project' ? '프로젝트 전체' : w.scope === 'this case' ? '이 대상' : '다른 대상')}</div></div>`;
   if (!f) { return head + sec('본문', none('읽는 중')); }
@@ -181,10 +181,10 @@ export function asmInfo(key: string): string {
   const st = STATUS_KO[a.status] ?? { t: a.status, cls: '' };
   const kv = (k: string, v: string) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
   return `<div class="hd"><div class="k"><span class="tag ${st.cls}" data-asm-status="${esc(a.status)}">${esc(st.t)}</span>${writerTag(a.written_by)}${esc(a.item)}${a.closed ? ' <span class="tag">닫힘</span>' : ''}<span class="sp"></span>`
-    + `<span class="rv off"${tip('사람의 확인은 R4 부터 — 지금은 늘 없음(person_confirmed false)')}>확인</span></div>`
+    + `<span class="rv off" data-rv-off${tip('가정의 확인은 그 가정의 판(lastSeq)을 shown 으로 보내야 한다 — 호스트의 assumptions 답에 그 판이 없다(호스트에 바람)')}>확인</span></div>`
     + `<div class="ttl" data-asm-text>${esc(it?.text ?? a.text)}</div>`
     + `<div class="dim">${esc(ORIGIN_KO[a.origin] ?? a.origin)} · ${esc(a.scope_of === 'project' ? '프로젝트 전체' : '이 대상')}</div></div>`
-    + sec('상태', `<dl class="kv">${kv('사람의 확인', `<span data-person-confirmed="${a.person_confirmed}">${a.person_confirmed ? '있음' : '없음 — 확인은 R4 부터(사람만)'}</span>`)}`
+    + sec('상태', `<dl class="kv">${kv('사람의 확인', `<span data-person-confirmed="${a.person_confirmed}">${a.person_confirmed ? '있음(이 판)' : '없음 — 사람만 확인한다'}</span>`)}`
       + kv('발행', a.blocks_issue ? '<span class="verdict warn" data-blocks-issue="1">막는다</span>' : '<span data-blocks-issue="0">막지 않는다</span>')
       + (it?.closed_by ? kv('닫은 것', esc(typeof it.closed_by === 'string' ? it.closed_by : JSON.stringify(it.closed_by))) : '') + '</dl>',
     '프로그램이 쓴 자동 가정은 원인이 사라지면 프로그램이 닫는다(사람의 확인 없이 풀리는 유일한 닫기). 그 밖의 가정은 사람의 확인 전까지 발행을 막는다')

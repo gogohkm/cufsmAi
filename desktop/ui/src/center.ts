@@ -28,6 +28,7 @@ import { ROLE_KO } from './names';
 import { si } from './units';
 import { fieldText, pageOf } from './notices';
 import { refKey, work } from './work';
+import { alts, sideBySide, visibleAlts } from './alts';
 import { keyOfItem } from './follow';
 import { baseOf, BY_KO, changeOf, chg, KIND_RESULT_KO, sinceBase, valText, type Change } from './changes';
 
@@ -49,7 +50,7 @@ export function groupOf(key: string): Group {
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
   if (key === 'conn' || key.startsWith('conn:')) { return 'conn'; }
   if (['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return 'doc'; }
-  if (['ask', 'rep', 'chg', 'ins', 'val', 'alt'].includes(key) || /^(chg|work|asmr|srcr):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
+  if (['ask', 'rep', 'chg', 'ins', 'val', 'alt'].includes(key) || /^(chg|work|asmr|srcr|alt):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
   return 'model';
 }
 
@@ -516,6 +517,13 @@ export function centerHtml(key: string, size: { w: number; h: number } = { w: 12
     const t = workTarget(key.slice(5));
     if (t && !t.startsWith('work:')) { return centerHtml(t, size); }
     return { html: honest('걸린 대상 없음', '이 업무 항목은 검토 · 결과 · 칸을 가리키지 않는다 — 정보 창에 글'), cls: 'v1' };
+  }
+  // R4-3: 대안 — 고른 대안(지금 | 그 대안) · 대안 가지(지금 | 모든 대안)를 검토 열쇠마다 나란히(호스트의 compare)
+  if (key === 'alt' || key.startsWith('alt:')) {
+    const list = key === 'alt' ? visibleAlts() : alts.items.filter(a => a.item === key.slice(4));
+    if (!list.length) { return { html: honest('대안 없음', alts.err ?? '이 대상에 지킨 대안이 없다 — AI 가 alternatives keep 으로, 또는 정보 창의 「지금 것을 대안으로」'), cls: 'v1' }; }
+    return { html: `<div class="dv docv" data-alt-view="${esc(key)}"><div class="hud tl"><span class="chip">대안 ${list.length}</span><span class="faint">열쇠마다 지금 | 대안 — 판정비 · 판정(호스트의 비교)</span></div>`
+      + `<div class="doc-body" style="padding:48px 16px 16px;overflow:auto;height:100%">${sideBySide(list)}</div></div>`, cls: 'v1' };
   }
   if (key.startsWith('asmr:') || key.startsWith('srcr:') || key === 'asm:reg' || key === 'src:unreg') {
     return { html: honest(key.startsWith('src') ? '원자료' : '가정 등록부', key.startsWith('src') ? '내용은 프로그램이 읽지 않는다 — 정보 창의 「열기」가 OS 의 기본 앱으로 연다' : '가정의 글 · 상태 · 근거는 정보 창에'), cls: 'v1' };

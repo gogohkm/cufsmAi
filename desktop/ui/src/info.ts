@@ -18,6 +18,9 @@ import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, 
 import { baseOf, byTag, BY_KO, changeOf, chg, KIND_RESULT_KO, modelTag, staleCause, valText, type Change, type FieldRec } from './changes';
 import { rec } from './records';
 import { asmInfo, questionsAbout, srcInfo, workInfo } from './work';
+import { itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
+import { alts, altInfo, altRootInfo, visibleAlts } from './alts';
+import type { CheckRow } from './store';
 import { stageNow } from './center';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
@@ -177,7 +180,7 @@ function bucklingInfo(): string {
     + row_('기준 응력', num(dsm.si?.fy_used, { src: 'dsm:fy_used', kind: 'stress' }), tagFsm)
     + row_('모드 식별', esc(us.classification_method ? fieldText(us, 'classification_method') : '—'), '')
     + row_('극소 수', num(us.n_minima, { src: `dsm:${fam}.n_minima`, kind: 'none' }), ''));
-  return hd('결과 · 좌굴 해석', `좌굴 해석 · ${FAMILY_KO[fam] ?? fam}`, `<span class="verdict ok">일치</span> <span class="dim">MCP get_dsm_values 와 같은 값</span>`, '')
+  return hd('결과 · 좌굴 해석', `좌굴 해석 · ${FAMILY_KO[fam] ?? fam}`, `<span class="verdict ok">일치</span> <span class="dim">MCP get_dsm_values 와 같은 값</span>`, resultMark('buckling_analysis'))
     + sec('탄성 좌굴', tbl, tagFsm) + selectedLength() + sec('해석', meta)
     + resultLists(dsm.us, us);
 }
@@ -219,7 +222,7 @@ function loadInfo(): string {
   const wl: number[] = Array.isArray(g.governing_span_loads_plf) ? g.governing_span_loads_plf : [];
   const defl: any[] = Array.isArray(la.deflection?.per_span) ? la.deflection.per_span : [];
   const R: number[] = Array.isArray(g.R_envelope_max) ? g.R_envelope_max : [];
-  return hd(`결과 · 하중 해석${L.from === 'purlin' ? ' · 퍼린 설계의 하중 해석' : ''}`, `지배 조합 — ${String(us.governing?.combo ?? '')}`, v, '')
+  return hd(`결과 · 하중 해석${L.from === 'purlin' ? ' · 퍼린 설계의 하중 해석' : ''}`, `지배 조합 — ${String(us.governing?.combo ?? '')}`, v, resultMark('load_analysis'))
     + sec('조합', table(row_('설계법', esc(String(us.design_method ?? '—')), tagLa)
       + row_('해석', esc(us.analysis_method ? fieldText(us, 'analysis_method') : '—'), tagLa)
       + wl.map((w, i) => row_(`wu 경간 ${i + 1}`, num(w, { src: `loads:governing.governing_span_loads_plf.${i}`, kind: 'linload' }), tagLa)).join('')), '', '엔진의 지배 조합과 그 경간 하중(kN/m)')
@@ -287,14 +290,35 @@ function checksInfo(key: string): string {
     : none('평가한 한계상태 없음', '소요강도를 주지 않으면 엔진은 강도만 내고 판정비를 내지 않는다');
   const out = run.notChecked.length ? ul(run.notChecked, 'notes faint') : none('없음');
   const sheetLink = row && row.us ? `<a class="lnk" data-sheet="${esc(row.key)}"${tip('이 검토 항목의 계산 시트(Enter · 두 번 누르기)')}>계산 시트 →</a>` : '';
-  return `<div class="hd"><div class="k">${kHead}<span class="sp"></span>${RV}</div><div class="ttl">${esc(row ? `${row.where} · ${row.name}` : run.label)}</div>${head}</div>`
+  const rvIt = row && rv.loaded ? itemOfRow(row) : null;
+  const rvBtn = !row?.us ? RV : !rv.loaded ? markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만 — 이 파일은 프로젝트 밖이다') : !rvIt ? markButton(null, '', '이 줄의 항목이 확인 목록(get_reviews)에 없다')
+    : markButton(rvIt, `data-rv-check="${esc(row.key)}"`);
+  return `<div class="hd"><div class="k">${kHead}<span class="sp"></span>${rvBtn}</div><div class="ttl">${esc(row ? `${row.where} · ${row.name}` : run.label)}</div>${head}</div>`
     + sec('설계 가정', used, '', '이 판정에 엔진이 쓴 값. 입력의 출처는 모델 탭의 부재 · 하중 · 설계 조건(검토 상태) — 사람별 기록은 R2 부터')
     + sec(row?.pointName ? '한계상태 · 이 위치' : '한계상태 · 이 검토', ls, sheetLink)
     + (run.neTexts.length ? sec('엔진의 미검토 글', ul(run.neTexts), '', '엔진 결과의 not_evaluated 알림(검토 항목과 같은 것을 글로)') : '')
     + sec('범위 밖', out, '', '엔진이 이 검토에서 하지 않은 것(not_checked) — 판정에 들어가지 않는다. 미검토(not_evaluated)와 다르다')
     + lists(run.warnings, run.assumptions, run.scope)
-    + `<div class="sec chkrow"><span class="chk off"${tip('내가 확인했다는 표시. 사람만 켠다. 확인 기록은 R4 부터 남는다 — 지금은 꺼져 있다')}>확인 표시</span><span class="faint">Space</span><span class="sp"></span></div>`;
+    + (row?.us && rv.loaded ? `<div class="sec chkrow"><span class="chk${rvIt?.state === 'reviewed' ? ' on' : ''}" data-rv-check="${esc(row.key)}"${tip(markTip(rvIt))}>확인 표시</span><span class="faint">Space</span><span class="sp"></span>`
+      + `<span class="faint">확인 ${rv.reviewed}/${rv.total}${rv.again ? ` · 다시 확인 ${rv.again}` : ''}</span></div>` + meaningHtml() + othersHtml()
+      : `<div class="sec chkrow"><span class="chk off"${tip('확인 표시는 프로젝트의 검토 대상에서만(기록이 그곳에 남는다)')}>확인 표시</span><span class="faint">Space</span><span class="sp"></span></div>`)
+    + (row?.us && alts.items.length ? altSeeAlso(row) : '');
 }
+
+/** 같이 볼 것 · 대안 — 그 검토 열쇠의 판정비를 대안마다(호스트의 compare 그대로 — 순위를 짓지 않는다) */
+function altSeeAlso(row: CheckRow): string {
+  const it = itemOfRow(row);
+  const list = visibleAlts();
+  const cells = list.map(a => {
+    const c = alts.cmp.get(a.item);
+    if (!c) { return `<li class="faint">${esc(a.label)} · 읽는 중</li>`; }
+    const r = (Array.isArray(c.rows) ? c.rows : []).find((x: any) => x.key === it?.key);
+    const x = r?.alt ?? null;
+    return `<li data-alt-see="${esc(a.item)}"><a class="lnk" data-ref-go="${esc(`result|alt:${a.item}`)}">${esc(a.label)}</a> · ${x && typeof x.ratio === 'number' ? `${ratioText(x.ratio, x.verdict === 'fail')} ${x.verdict === 'fail' ? 'NG' : x.verdict === 'pass' ? 'OK' : '미검토'}` : '없음'}</li>`;
+  }).join('');
+  return `<div class="sec"><h4${tip('이 검토 항목(같은 열쇠)의 판정비를 대안마다 — 호스트의 비교. 프로그램은 대안의 순위를 짓지 않는다')}>같이 볼 것 · 대안<span class="sp"></span></h4><ul class="notes">${cells}</ul></div>`;
+}
+function unusedRowCloser(): void {}
 
 /** 낡음 표지 — 풍선에 그 결과를 무효로 만든 변경의 때 · 전 → 후(R2-3 · 템플릿 06). 기록에 없으면 장부의 까닭만 */
 function staleBalloon(kinds: string[]): string {
@@ -307,7 +331,7 @@ function staleBalloon(kinds: string[]): string {
 function changeInfo(key: string): string {
   const c: Change | undefined = key.startsWith('chg:') ? changeOf(key.slice(4)) : chg.list[0];
   if (!c) { return hd('업무 · 변경', '변경', chg.err ? none('변경을 읽지 못함', chg.err) : none('변경 없음', '이 대상에 기록된 변경 묶음이 없다'), ''); }
-  const RVc = `<span class="rv off"${tip('내가 확인했다는 표시 — 확인 기록은 R4 부터')}>확인</span>`;
+  const RVc = rv.loaded ? markButton(markOf('change', c.id), `data-rv-change="${esc(c.id)}"`) : markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만');
   const head = `<div class="hd"><div class="k">${byTag(c.by.kind)}변경 · ${esc(hhmm(c.at))}${c.by.client ? ` <span class="faint">${esc(c.by.client)}</span>` : ''}<span class="sp"></span>${RVc}</div>`
     + `<div class="ttl" data-chg-title${tip('제목은 프로그램이 바뀐 칸에서 지었다. 되돌리려면 Claude 에게 말한다 — 되돌리기도 새 변경으로 이 목록에 남는다')}>${esc(c.title || '(제목 없음)')}</div>`
     + (c.work ? `<div class="say usr" data-work="${esc(c.work)}"><span class="faint">업무 ${esc(c.work)}</span> 이 변경이 가리킨 업무 항목 — 지시 · 판단 요청의 글은 업무 기록(R3)부터</div>` : '')
@@ -347,7 +371,9 @@ function changeInfo(key: string): string {
     + sec(c.by.kind === 'ai' ? 'AI 가 밝힌 이유' : '이유', why, '', 'AI · 사람이 준 글 — 자료로 보인다(지시가 아니다). 「먼저 한 것」은 같은 행위자의 바로 앞 변경')
     + sec('바뀐 것', changed, `<span class="faint">${b ? `기준 ${esc(hhmm(b.at))}` : ''}</span>`, '바뀐 칸(호스트 — 이름 · 전 · 후, SI)과 그 앞 · 뒤 실행이 쓴 단면 성질(실행 이력). 자중은 엔진이 내지 않는다')
     + (ar.before || ar.after ? sec('판정', `<dl class="kv"><dt>최대 판정비</dt><dd data-ratio-around>${r2(ar.before?.max_ratio)} → ${r2(ar.after?.max_ratio)}${ar.after?.governing?.id ? ` <span class="why">지배 ${esc(String(ar.after.governing.id))}</span>` : ''}</dd></dl>`, '', '이 변경 앞의 마지막 실행 → 뒤의 첫 실행(호스트의 실행 이력 — 판정비는 엔진의 것)') : '')
-    + sec('영향', effect, '', '이 묶음이 무효로 만든 결과(호스트의 장부)와 그 지금 상태(진행 띠와 같다). 「다시 확인」은 확인 기록(R4)부터')
+    + sec('영향', effect + againHtml(), '', '이 묶음이 무효로 만든 결과(호스트의 장부)와 그 지금 상태(진행 띠와 같다). 「다시 확인」은 지금 확인 표시 가운데 유효하지 않은 것(호스트의 get_reviews)')
+    + (visibleAlts().length ? sec('대안', `<dl class="kv">${visibleAlts().map(a => `<dt>${esc(a.label)}</dt><dd>${typeof a.max_ratio === 'number' ? ratioText(a.max_ratio, a.pass === false) : '—'}${a.is_now ? ' · 지금' : ''}</dd>`).join('')}</dl>`, '', '대안의 최대 판정비(호스트) — 순위 · 「가장 얇은」은 프로그램이 짓지 않는다(AI 의 이유 글에)') : '')
+    + meaningHtml()
     + `<div class="sec"><span class="faint">${esc(BY_KO[c.by.kind] ?? c.by.kind)} · ${esc(c.trigger ?? '')} · ${esc(c.id)}${c.record_status ? ` · 기록 ${esc(c.record_status)}` : ''}</span></div>`;
 }
 
@@ -425,11 +451,12 @@ export function infoHtml(key: string): string {
   if (key.startsWith('work:')) { return workInfo(key); }
   if (key.startsWith('asmr:')) { return asmInfo(key); }
   if (key.startsWith('srcr:')) { return srcInfo(key); }
+  if (key.startsWith('alt:')) { return altInfo(key); }
   if (key === 'fsm' || key.startsWith('fsm:')) { return bucklingInfo(); }
   if (key === 'load' || key.startsWith('load:')) { return loadInfo(); }
   if (key === 'chk' || key.startsWith('chk:') || key.startsWith('design') || key.startsWith('purlin') || key.startsWith('lap#') || key.startsWith('conn#')) { return checksInfo(key); }
   if (key === 'conn' || key.startsWith('conn:')) { return connInfo(); }
-  if (key === 'alt') { return recordInfo('대안', '단면 대안 비교는 기록(R4)부터 생긴다'); }
+  if (key === 'alt') { return altRootInfo(); }
   if (key === 'ask') { return recordInfo('판단 요청', 'AI 의 판단 요청은 기록(R3)부터 남는다'); }
   if (key === 'rep') { return recordInfo('보고', 'AI 의 보고는 기록(R3)부터 남는다'); }
   if (key === 'chg') { return recordInfo('변경', '누가 · 왜 · 전 → 후 는 변경 기록(R2)부터 남는다'); }
@@ -446,4 +473,17 @@ export function shareLabel(key: string, rowText: string | undefined): string {
   if (isValKey(key)) { return rowText ? `점검 「${rowText}」` : '점검'; }
   if (key.includes('#')) { const { run, row: r } = rowOfKey(key); return r ? `${r.scope === 'lap' || r.scope === 'connection' ? '접합부 검토' : '부재 검토'} 「${r.where} · ${r.name}」${r.kind === 'ls' && typeof r.ratio === 'number' ? ` · ${ratioText(r.ratio, r.pass === false)}` : ''}` : (run?.label ?? ''); }
   return rowText ?? '없음';
+}
+
+/** 결과(02 좌굴 해석 · 03 하중 해석)의 확인 — 그린 결과의 지문(get_reviews.result_fps) */
+function resultMark(kind: string): string {
+  if (!rv.loaded) { return ''; }
+  const fp = rv.resultFps[kind];
+  return fp ? markButton(markOf('result', kind), `data-rv-result="${esc(kind)}" data-rv-fp="${esc(fp)}"`) : markButton(null, '', '지금 이 결과가 기록에 없다(다시 돌린 뒤 확인)');
+}
+/** 「다시 확인」 줄 — 지금 유효하지 않은 표시(호스트의 get_reviews: why_ko · 다른 곳) */
+function againHtml(): string {
+  const xs = rv.items.filter(x => x.state === 'review-again');
+  if (!xs.length) { return ''; }
+  return `<dl class="kv" data-review-again="${xs.length}"><dt>다시 확인</dt><dd>${xs.length} · ${xs.slice(0, 4).map(x => `<span${tip(markTip(x))}>${esc(String(x.id ?? x.kind ?? x.item ?? x.change ?? ''))} — ${esc(x.why_ko ?? '')}</span>`).join(' · ')}</dd></dl>`;
 }

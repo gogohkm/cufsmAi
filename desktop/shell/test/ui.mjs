@@ -350,6 +350,11 @@ async function main() {
       const s1 = await personPost();
       const l1 = await A.ev('return ctx.diag.personRequests.slice(-1)[0] ?? null;');
       check('입력 없이 화면의 스크립트가 보낸 POST → 열쇠가 붙지 않아 403', s1 === 403 && l1?.keyed === false, `${s1} · ${JSON.stringify(l1)}`);
+      // R4-2: 확인 표시 · 믿기도 같은 길 — 사람의 입력 없이 스크립트가 보내면 열쇠가 붙지 않아 403
+      const sRv = await A.page(`fetch('/api/person/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mark:true,targets:[{type:'result',kind:'buckling_analysis',shown:'x'}]})}).then(r=>r.status).catch(e=>'err '+e)`);
+      const sTr = await A.page(`fetch('/api/person/trust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({writer_id:'wabcdefghijklmnopqrst',trust:true})}).then(r=>r.status).catch(e=>'err '+e)`);
+      const lRv = await A.ev('return ctx.diag.personRequests.slice(-2);');
+      check('입력 없이 스크립트의 확인 표시 · 믿기 POST → 열쇠가 붙지 않아 403', sRv === 403 && sTr === 403 && lRv.every(x => x.keyed === false), `review ${sRv} · trust ${sTr} · ${JSON.stringify(lRv)}`);
       await A.ev(`ctx.win.webContents.sendInputEvent({ type: 'mouseDown', x: 5, y: 300, button: 'left', clickCount: 1 }); ctx.win.webContents.sendInputEvent({ type: 'mouseUp', x: 5, y: 300, button: 'left', clickCount: 1 }); return true;`);
       await sleep(150);
       const s2 = await personPost();

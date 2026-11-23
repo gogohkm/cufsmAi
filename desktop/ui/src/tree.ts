@@ -3,7 +3,7 @@
  * 가지는 호스트에 있는 것만 만든다. 호스트에 아직 없는 것(설계 입력 · 기록 · 검증)은 그 까닭을 값 자리에 적는다 — 빈칸이 아니다.
  */
 import { esc, tip } from './dom';
-import { hhmm, num, ratio } from './format';
+import { hhmm, num, ratio, ratioText } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
 import { assumptionLines, isDefault, memberRuns, state, type CheckRow } from './store';
 import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
@@ -11,6 +11,8 @@ import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
 import { afterBase, BY_KO, chg } from './changes';
+import { glyph, itemOfRow, markOf, rv } from './reviews';
+import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
 import { fastenerText, reasonNote } from './notices';
 
@@ -63,8 +65,10 @@ function rowNode(r: CheckRow): TNode {
   const dot = r.pass === true ? 'ok' : r.pass === false ? 'ng' : 'un';
   const ratioCell = r.kind === 'ls' && typeof r.ratio === 'number' ? ratio(r.ratio, ng, `${r.src}ratio`)
     : r.kind === 'na' ? '<span class="vl faint">해당 없음</span>' : r.kind === 'ls' ? '<span class="vl faint">비 없음</span>' : '<span class="vl un">미검토</span>';
+  // R4-2: 확인 표시 ✓ · ◌(호스트의 get_reviews — 그 줄의 항목)
+  const g = rv.loaded ? glyph(itemOfRow(r)) : '';
   return n(r.key, `${r.where} · ${r.name}`, {
-    dot: r.kind === 'na' ? undefined : dot, vHtml: ratioCell, faint: r.kind === 'na' || !r.counts,
+    dot: r.kind === 'na' ? undefined : dot, vHtml: ratioCell, faint: r.kind === 'na' || !r.counts, ...(g ? { tagHtml: g } : {}),
     tip: r.kind === 'ne' ? `엔진이 평가하지 못한 항목 — 합격이 아니다: ${reasonNote(r.us)?.text ?? r.name}`
       : r.kind === 'na' ? `해당 없음: ${reasonNote(r.us)?.text ?? ''}` : !r.counts ? '적용 조건 — 판정에 들지 않는다(counts: false)' : `${r.id} · §${r.clause}`,
   });
@@ -136,7 +140,7 @@ export function buildTree(tab: Tab): TNode[] {
         n('load:def', '처짐', { vHtml: (state.loads.si.deflection?.per_span ?? []).map((d: any, i: number) => `L/${num(d.L_over_delta, { src: `loads:deflection.per_span.${i}.L_over_delta`, kind: 'none' })}`).join(' · ') || '<span class="vl un">없음</span>' }),
       ], tip: state.loads.from === 'purlin' ? '퍼린 설계가 함께 돌린 하중 해석' : '마지막 하중 해석' } : {}),
       n('chk', '부재 검토', {
-        v: chkStage.state === 'ok' ? `NG ${ng.length} · 미검토 ${un.length} · OK ${ok.length}` : STATE_V[chkStage.state][0],
+        v: chkStage.state === 'ok' ? `NG ${ng.length} · 미검토 ${un.length} · OK ${ok.length}${rv.loaded ? ` · 확인 ${rv.reviewed}/${rv.total}${rv.again ? ` · 다시 확인 ${rv.again}` : ''}` : ''}` : STATE_V[chkStage.state][0],
         vCls: chkStage.state === 'ok' ? (ng.length ? 'ng' : un.length ? 'un' : 'ok') : STATE_V[chkStage.state][1],
         dot: chkStage.state === 'stale' ? 'warn' : undefined, tip: chkStage.state === 'ok' ? '판정 차례: NG > 미검토 > OK. 미검토는 합격이 아니다' : chkStage.note,
         open: true,
@@ -158,7 +162,10 @@ export function buildTree(tab: Tab): TNode[] {
           kids: (state.runs.find(r => r.key === 'conn')?.rows ?? []).filter(passFilter).map(rowNode) })] : []),
       ] } : {}),
       valNode(),
-      n('alt', '대안', { v: '기록 없음', vCls: 'un', tip: '단면 대안 비교는 기록(R4)부터 생긴다' }),
+      // R4-3: 대안(alternatives list) — 라벨(AI 의 글) · 최대 판정비 · 「지금」. 프로그램은 순위를 짓지 않는다
+      n('alt', '대안', { v: alts.err ? '읽지 못함' : String(visibleAlts().length), open: true, tip: '실행 묶음에 붙인 이름(대안) — 고르면 검토 열쇠마다 지금 | 대안. 「이 대안으로」는 변경 묶음 하나',
+        kids: visibleAlts().map(a => n(`alt:${a.item}`, a.label, { faint: !!a.hidden, vHtml: `${typeof a.max_ratio === 'number' ? `<span class="num${a.pass === false ? ' ng' : ''}">${ratioText(a.max_ratio, a.pass === false)}</span>` : '<span class="vl faint">—</span>'}${a.is_now ? ' <span class="tag">지금</span>' : ''}`,
+          tip: `${a.item} · ${a.written_by} · 실행 ${a.runs.join(', ')}` })) }),
     ];
   }
   if (tab === 'work') {
@@ -168,7 +175,7 @@ export function buildTree(tab: Tab): TNode[] {
         tip: `AI 가 사람에게 묻는 것(work_items question) — 답은 Claude Desktop 대화에서(AI 가 옮겨 적는다). 열린 것 ${openQuestions().length}${workTail()}`,
         kids: questions().map(w => n(`work:${w.item}`, w.title, { dot: w.state === 'closed' ? undefined : w.answered ? 'ok' : 'warn', v: w.state === 'closed' ? '닫힘' : w.answered ? '답함' : '답 기다림',
           vCls: w.answered || w.state === 'closed' ? 'faint' : 'warn', tip: `${w.item} · ${w.written_by} · ${hhmm(w.created_at)}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
-      n('rep', '보고', { v: work.err ? '읽지 못함' : String(reports().length), open: true, tip: `AI 의 보고(work_items report) — 항목마다 완료 · 가정 · 미결${workTail()}`,
+      n('rep', '보고', { v: work.err ? '읽지 못함' : `${reports().length}${reports().length ? ` · ${reports().filter(w => markOf('work', w.item)?.state !== 'reviewed').length} 미확인` : ''}`, open: true, tip: `AI 의 보고(work_items report) — 항목마다 완료 · 가정 · 미결${workTail()}`,
         kids: reports().map(w => n(`work:${w.item}`, w.title, { v: `${w.items ? `항목 ${w.items} · ` : ''}${hhmm(w.created_at)}`, tip: `${w.item} · ${w.written_by}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
       ...(instructions().length ? [n('ins', '지시', { v: String(instructions().length), tip: '사람의 지시를 AI 가 옮겨 적은 것(work_items instruction) — 변경이 그 지시를 가리킨다',
         kids: instructions().map(w => n(`work:${w.item}`, w.title, { v: hhmm(w.created_at), tip: `${w.item} · ${w.written_by} · AI 가 옮겨 적음` })) })] : []),

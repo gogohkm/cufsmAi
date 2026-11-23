@@ -2125,6 +2125,14 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   };
   const recNow = async () => (await api('POST', '/api/mcp/action', { action: 'list_cases' })).json;
   const projRoot = path.join(tmp, 'Documents', 'StCFSD 프로젝트');
+  /*
+   * 기록(r) 단계가 기대는 앞 단계 — --only 로 고를 때 함께 준다(그 단계가 만든 프로젝트 · 대상 · 결과를 쓴다):
+   *   r10 — 없음(프로젝트 「시험 물류창고」를 만든다)      r11 — r10(대상 「퍼린 P1」)       r12 — r10 · r11(「가져온 퍼린」 — 연 대상이 된다. 대상 수 2 를 본다)
+   *   r13 · r14 · r16 · r18 · r19 — r10 · r11 · r12          r15 · r17 · r20 — r10 · r11 · r12
+   *   r21 — r10 · r12(AI 의 두께 2.0 → 2.3 · 랩 결과)       r22 — r21                         r23 · r24 — r10 · r12
+   *   r25 · r26 · r27 · r28 — r10 · r12(r26 의 06 알림은 r21 의 랩 결과도)
+   *   r29 · r30 — r10 · r12(부재 검토를 그 단계가 돌린다)  r31 — r10 · r12                    r32 — r31(대안 셋)
+   */
   await step('r10 새 프로젝트(시작 화면) — 이름 물음 → 뿌리(문서 › StCFSD 프로젝트) 아래에 · 제목 표시줄 「프로젝트 ▾」 · 대상 수 = list_cases', 'r10_new_project', async () => {
     await ev(`${S}.start()`);
     await sleep(300);
@@ -2144,6 +2152,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await dlgInput('퍼린 P1');
     await answerIfUnsaved();
     await settle(`!!s.full && !!s.full.project && !!s.full.project.case && s.full.project.case.name==='퍼린 P1'`, '연 대상', 60_000);
+    // 제목 표시줄은 다시 읽기(기록 · 변경 · 업무 · 확인까지)가 끝난 뒤 그려진다 — 그려진 이름을 기다린다
+    await waitFor(`/퍼린 P1/.test(document.querySelector('#tbar .fname')?.textContent ?? '')`, 15_000, '제목 표시줄').catch(() => undefined);
     const lc = await recNow();
     const t = await ev(`({fname:document.querySelector('#tbar .fname').textContent, label:document.querySelector('#tbar .flabel').textContent, band:document.getElementById('recband').hidden})`);
     await ev(`${S}.start()`);
@@ -2568,6 +2578,167 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     return { ok: !q.error && !a.error && !sr.error && w.title === S1 && (w.body ?? '').includes(S2) && (w.body ?? '').includes(S3) && (w.tree ?? '').includes('<script>') && (at ?? '').includes(S2) && (st ?? '').includes('<img')
       && dom.scripts === 0 && dom.imgs === 0 && dom.pwn === 0 && before === after,
       detail: `제목 글자 「${short(w.title, 50)}」 · 본문에 <img …> 글자 ${(w.body ?? '').includes(S2)} · 지시 문장 글자 ${(w.body ?? '').includes(S3)} · 가정 「${short(at, 40)}」 · 원자료 「${short(st, 40)}」 · script ${dom.scripts} · img ${dom.imgs} · 돈 것 ${dom.pwn} · 대상 파일 그대로 ${before === after}` };
+  });
+
+  // ── R4-2 · R4-3 — 확인 표시 · 대안 ─────────────────────────────────
+  /** 화면의 스크립트로 사람의 길(쓰기 열쇠 — 창에서는 사람의 입력 뒤에만) */
+  const pfetch = (route, body) => ev(`fetch(${JSON.stringify(route)},{method:'POST',credentials:'same-origin',headers:Object.assign({'Content-Type':'application/json'}, (()=>{try{const k=sessionStorage.getItem('stcfsd.bridge.key.'+location.port); return k?{'X-StCFSD-Key':k}:{};}catch{return {};}})()), body:JSON.stringify(${JSON.stringify(body)})}).then(async r=>({status:r.status, json:await r.json().catch(()=>null)}))`);
+  const flexArgsR = (Mu, Vu = 5) => ({ detail: 'full', Fy: 295, Fu: 400, Mu, Vu, Lb: 1524, design_method: 'LRFD', units: 'SI' });
+  const reviewFiles = () => { const dir = path.join(pdir2, '.stcfsd', 'log', 'reviews'); try { return fs.readdirSync(dir).map(f => `${f}:${crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, f))).digest('hex')}`).join('|'); } catch { return 'none'; } };
+  await step('r29 확인 표시(04 · 05 · 02 · 07) — 정보 창의 「확인」 · Space · 시트 머리 → 사람의 길 · ✓ · 「확인 n/N」 · 결과(02)와 변경(07)도 · 확인의 뜻(호스트의 글 그대로)', 'r29_review_marks', async () => {
+    await ev(`${S}.review()`);
+    const fr = await mcp.tool('aisi_design_flexure', flexArgsR(6.8));
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '부재 검토', 60_000);
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    // 소요(Mu)에 따라 판정비가 바뀌는 항목 — r30 이 다시 돌려 지문이 바뀐 것을 본다
+    const k1 = await keyOf(`x=>x.scope==='member' && (x.verdict==='pass' || x.verdict==='fail')`);
+    await select('result', k1);
+    await waitFor(`!!document.querySelector('#info [data-rv-check]')`, 15_000, '확인 단추');
+    await ev(`document.querySelector('#info .hd [data-rv-check]').click()`);
+    await waitFor(`document.querySelector('#info .hd [data-rv-check]')?.dataset.rvState==='reviewed'`, 15_000, '확인됨');
+    const g1 = await ev(`({glyph:document.querySelector('#tree .row.on [data-rv-state]')?.dataset.rvState ?? null, chk:document.querySelector('#tree .row[data-k="chk"] .vl')?.textContent, meaning:document.querySelector('#info [data-rv-meaning]')?.textContent ?? null})`);
+    const gr = await act2({ action: 'get_reviews' });
+    // Space — 다른 줄(키보드)
+    const k2 = await keyOf(`x=>x.scope==='member' && x.verdict!=='not_applicable' && x.key!==${JSON.stringify(k1)}`);
+    await select('result', k2);
+    await ev(`document.getElementById('tree').focus()`);
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}))`);
+    await waitFor(`document.querySelector('#info .hd [data-rv-check]')?.dataset.rvState==='reviewed'`, 15_000, 'Space 로 확인').catch(() => undefined);
+    const sp = await ev(`document.querySelector('#info .hd [data-rv-check]')?.dataset.rvState`);
+    // 시트 머리(05) — 그 줄을 다시 누르면 푼다
+    await ev(`${S}.openSheet(${JSON.stringify(k2)})`);
+    await sleep(400);
+    await ev(`document.querySelector('#sheet [data-rv-check]').click()`);
+    await waitFor(`document.querySelector('#sheet [data-rv-check]')?.dataset.rvState==='unreviewed'`, 15_000, '시트에서 풂').catch(() => undefined);
+    const sh = await ev(`document.querySelector('#sheet [data-rv-check]')?.dataset.rvState`);
+    await shot('r29_sheet_mark_1920_dark');
+    await ev(`${S}.closeSheet()`);
+    // 07 — 변경의 확인
+    await select('work', 'chg');
+    const chgKey = await ev(`document.querySelector('#tree .row[data-k^="chg:"]')?.dataset.k ?? null`);
+    let cm = null;
+    if (chgKey) {
+      await select('work', chgKey);
+      await sleep(300);
+      await ev(`document.querySelector('#info [data-rv-change]')?.click()`);
+      cm = await waitFor(`document.querySelector('#info [data-rv-change]')?.dataset.rvState==='reviewed' ? 'reviewed' : null`, 15_000, '변경 확인').catch(() => null);
+    }
+    await select('result', k1);
+    await sleep(300);
+    await shot('r29_checks_mark_1920_dark');
+    const it1 = (gr.items ?? []).find(x => x.type === 'check' && x.state === 'reviewed');
+    return { ok: !fr.error && g1.glyph === 'reviewed' && /확인 1\/\d+/.test(g1.chk ?? '') && !!it1 && sp === 'reviewed' && sh === 'unreviewed' && cm === 'reviewed' && (g1.meaning ?? '').length > 40 && g1.meaning === gr.meaning,
+      detail: `정보 창 확인 → 트리 ${g1.glyph} · 「${g1.chk}」 · get_reviews reviewed ${gr.reviewed}/${gr.total} · Space → ${sp} · 시트 머리 다시 누름 → ${sh} · 07 변경 → ${cm} · 뜻 「${short(g1.meaning, 50)}」(= get_reviews.meaning)` };
+  });
+  await step('r30 ⚔ 확인 표시의 막는 것 — 끼운 웹뷰 · MCP 토큰 · 쓰기 열쇠 없음 · 다른 Origin 은 표시 · 믿기를 하지 못한다(기록 바이트 그대로) · 그린 뒤 바뀐 항목(옛 지문)은 거절 → 다시 읽고 「다시 확인 ◌」 와 그 까닭', 'r30_review_refusals', async () => {
+    const gr = await act2({ action: 'get_reviews' });
+    const it = (gr.items ?? []).find(x => x.type === 'check' && x.state === 'reviewed');
+    const body = { mark: true, targets: [{ type: 'check', key: it.key, shown: it.fp }] };
+    const before = reviewFiles();
+    const origin = await ev('location.origin');
+    const a = await br.frameEval(`/wv/${encodeURIComponent(designerId)}/`, `fetch(${JSON.stringify(origin)} + '/api/person/review', {method:'POST', mode:'no-cors', credentials:'include', headers:{'Content-Type':'text/plain'}, body:${JSON.stringify(JSON.stringify(body))}}).then(r=>'status '+r.status+' '+r.type).catch(e=>'blocked '+String(e).slice(0,40))`).catch(e => `eval ${String(e).slice(0, 40)}`);
+    const raw = (route, headers, b = body) => new Promise(res => {
+      const u = new URL(route, origin);
+      const r = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', ...headers } }, x => { x.resume(); x.on('end', () => res(x.statusCode)); });
+      r.on('error', () => res(-1)); r.end(JSON.stringify(b));
+    });
+    const d1 = await raw('/api/person/review', { Authorization: `Bearer ${mcpToken}` });
+    const e1 = await raw('/api/person/review', { Authorization: `Bearer ${token}` });
+    const f1 = await raw('/api/person/review', { Authorization: `Bearer ${token}`, Origin: 'http://127.0.0.1:1', 'Sec-Fetch-Site': 'cross-site', 'X-StCFSD-Key': 'x' });
+    const t1 = await raw('/api/person/trust', { Authorization: `Bearer ${mcpToken}` }, { writer_id: 'wabcdefghijklmnopqrst', trust: true });
+    const t2 = await raw('/api/person/trust', { Authorization: `Bearer ${token}` }, { writer_id: 'wabcdefghijklmnopqrst', trust: true });
+    // MCP 중계 · 도구로는 표시하는 길이 없다
+    const viaRelay = await act2({ action: 'review', mark: true, targets: body.targets });
+    log.console.splice(0, log.console.length, ...log.console.filter(x => !/api\/person\//.test(x.text)));
+    const mid = reviewFiles();
+    // 그린 뒤 바뀐 항목 — 결과를 다시 돌려 지문이 바뀐 뒤 옛 지문으로 누르면 거절
+    await mcp.tool('aisi_design_flexure', { ...flexArgsR(9.5, 9), Fy: 320 });
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '다시 돌린 부재 검토', 60_000);
+    await sleep(800);
+    const gr2 = await act2({ action: 'get_reviews' });
+    const now = (gr2.items ?? []).find(x => x.key === it.key);
+    const stale = await pfetch('/api/person/review', body);
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    const k = await ev(`(()=>{const r=${S}.state.runs.flatMap(r=>r.rows).find(x=>x.id===${JSON.stringify(it.id)} && x.scope===${JSON.stringify(it.scope)}); return r?r.key:null;})()`);
+    await select('result', k);
+    await sleep(400);
+    const again = await ev(`({state:document.querySelector('#info .hd [data-rv-check]')?.dataset.rvState ?? null, tip:document.querySelector('#info .hd [data-rv-check]')?.getAttribute('data-tip') ?? '', glyph:document.querySelector('#tree .row.on [data-rv-state]')?.dataset.rvState ?? null})`);
+    await shot('r30_review_again_1920_dark');
+    return { ok: before === mid && [401, 403].includes(d1) && e1 === 403 && f1 === 403 && [401, 403].includes(t1) && t2 === 403 && !!viaRelay?.error && now?.fp !== it.fp && stale?.json?.success === false
+      && (now?.state !== 'reviewed' ? again.state === 'review-again' && /다시 확인/.test(again.tip) && again.glyph === 'review-again' : true),
+      detail: `웹뷰 fetch ${a} · MCP 토큰 ${d1} · 열쇠 없음 ${e1} · Origin 다름 ${f1} · 믿기 MCP 토큰 ${t1} · 믿기 열쇠 없음 ${t2} · 중계의 review 동작 → ${short(viaRelay?.error ?? '받음', 50)} · 기록 바이트 그대로 ${before === mid}`
+        + ` · 다시 돌린 뒤 옛 지문으로 → ${stale?.status} ${short(stale?.json?.error ?? '', 70)} · 그 표시 ${now?.state}(${now?.why_ko ?? now?.how ?? ''}) → 화면 ${again.state} 「${short(again.tip, 60)}」` };
+  });
+  await step('r31 대안 — t 2.0 · 2.3 · 2.6 을 지키고(AI 의 alternatives keep) 결과 › 대안에 나란히: 열쇠마다의 판정비 = 그 세 번의 엔진 실행(칸마다) · 「지금」 표지', 'r31_alternatives', async () => {
+    const runs = {};
+    for (const t of [2.0, 2.3, 2.6]) {
+      await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t, r: 3, units: 'SI' });
+      const f = await mcp.tool('aisi_design_flexure', flexArgsR(6.8));
+      runs[t] = Object.fromEntries((f.design_checks ?? []).map(c => [c.id, c.ratio ?? null]));
+      const kp = await mcp.tool('alternatives', { action: 'keep', label: `t ${t.toFixed(1)}` });
+      if (kp.error) { return { ok: false, detail: `keep ${t}: ${kp.error}` }; }
+    }
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    await select('result', 'alt');
+    const tbl = await waitFor(`(()=>{const t=document.querySelector('#center [data-alt-table]'); return t && !/읽는 중/.test(document.getElementById('center').textContent) ? 1 : null;})()`, 20_000, '나란히 표').catch(() => null);
+    const cols = await ev(`[...document.querySelectorAll('#center [data-alt-col]')].map(c=>({item:c.dataset.altCol, label:c.textContent}))`);
+    const cells = await ev(`[...document.querySelectorAll('#center tr[data-alt-key]')].map(tr=>({id:tr.dataset.altId, v:[...tr.querySelectorAll('[data-alt-cell]')].map(td=>({item:td.dataset.altCell, r:td.dataset.ratioV}))}))`);
+    await shot('r31_alternatives_1920_dark');
+    let compared = 0; const bad = [];
+    for (const row of cells) {
+      for (const c of row.v) {
+        const col = cols.find(x => x.item === c.item);
+        const t = Number(/t (\d\.\d)/.exec(col?.label ?? '')?.[1]);
+        const want = runs[t]?.[row.id];
+        if (want === undefined || c.r === '') { continue; }
+        compared += 1;
+        if (Math.abs(Number(c.r) - want) > 1e-12 * Math.max(1, Math.abs(want))) { bad.push(`${row.id}@t${t}: ${c.r} ≠ ${want}`); }
+      }
+    }
+    const now = await ev(`!!document.querySelector('#center [data-alt-col] .tag')`);
+    const hostNow = ((await mcp.tool('alternatives', { action: 'list' })).items ?? []).filter(a => a.is_now).map(a => a.label);
+    return { ok: !!tbl && cols.length === 3 && compared >= 6 && bad.length === 0 && now === (hostNow.length > 0),
+      detail: `열 ${cols.map(c => c.label.trim()).join(' | ')} · 칸 ${compared} = 엔진 세 번의 판정비(칸마다)${bad.length ? ` · 어긋남 ${bad.slice(0, 3).join(' / ')}` : ''} · 「지금」 표지 ${now}(호스트 is_now ${hostNow.join(', ') || '없음'})` };
+  });
+  await step('r32 대안 하나 — 정보 창(지금과 다른 것) · 같이 볼 것 · 대안(04) · 「이 대안으로」(변경 묶음 하나 · 결과는 다시) · 이름 바꾸기 · 숨기기(화면에서는 꺼짐 — 호스트의 행위자 표) · AI 의 숨김이 트리에서 빠진다 · 07 의 대안 줄', 'r32_alternative_open', async () => {
+    const list = (await mcp.tool('alternatives', { action: 'list' })).items ?? [];
+    const a20 = list.find(a => /2\.0/.test(a.label));
+    await select('result', `alt:${a20.item}`);
+    await sleep(500);
+    const inf = await ev(`({label:document.querySelector('#info [data-alt-label]')?.textContent, diff:document.getElementById('info').textContent})`);
+    // 04 같이 볼 것 · 대안
+    const k = await keyOf(`x=>x.scope==='member' && x.verdict!=='not_applicable'`);
+    await select('result', k);
+    await waitFor(`document.querySelectorAll('#info [data-alt-see]').length>=3`, 15_000, '같이 볼 것 · 대안').catch(() => undefined);
+    const see = await ev(`[...document.querySelectorAll('#info [data-alt-see]')].map(l=>l.textContent)`);
+    await shot('r32_see_also_1920_dark');
+    // 이름 바꾸기 · 숨기기
+    await select('result', `alt:${a20.item}`);
+    await sleep(300);
+    // 이름 바꾸기 · 숨기기 · 지키기는 호스트의 행위자 표가 AI 에게만 연다 — 화면에서는 꺼짐(까닭 풍선)
+    const offs = await ev(`[...document.querySelectorAll('#info [data-alt-rename], #info [data-alt-drop]')].map(b=>b.classList.contains('off'))`);
+    const renamed = offs.length === 2 && offs.every(Boolean) ? 'off' : 'on';
+    // 「이 대안으로」 — 변경 묶음 하나(trigger alternatives), 모델의 t = 2.0
+    const n0 = (await act2({ action: 'list_changes', limit: 1 })).total;
+    await ev(`document.querySelector('#info [data-alt-open]').click()`);
+    await waitFor(`!!${S}.state.full && Math.abs(${S}.state.full.section_params.t*25.4-2.0)<1e-6`, 20_000, '대안의 두께').catch(() => undefined);
+    const lc = await act2({ action: 'list_changes', limit: 2 });
+    const tNow = await ev(`${S}.state.full.section_params.t*25.4`);
+    await select('work', 'chg');
+    await sleep(300);
+    await select('work', `chg:${lc.changes?.[0]?.id}`);
+    await sleep(300);
+    const alt07 = await ev(`[...document.querySelectorAll('#info .sec h4')].some(h=>/^대안/.test(h.textContent))`);
+    // 숨기기 — AI 의 drop 뒤 트리에서 빠진다(「숨긴 대안도 보이기」로 다시)
+    await mcp.tool('alternatives', { action: 'drop', item: a20.item });
+    await waitFor(`!document.querySelector('#tree .row[data-k="alt:${a20.item}"]')`, 15_000, '숨김').catch(() => undefined);
+    const hidden = await ev(`!document.querySelector('#tree .row[data-k="alt:${a20.item}"]')`);
+    const toasts = await ev(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(-3).join(' / ')`);
+    return { ok: inf.label === 't 2.0' && see.length >= 3 && renamed === 'off' && Math.abs(tNow - 2.0) < 1e-6 && lc.total === n0 + 1 && lc.changes?.[0]?.trigger === 'alternatives' && alt07 && hidden,
+      detail: `정보 창 「${inf.label}」 · 같이 볼 것 ${see.map(x => x.replace(/\s+/g, ' ')).join(' | ')} · 이름 바꾸기 · 숨기기 단추 ${renamed}(호스트의 행위자 표 — AI 만) · 이 대안으로 → t ${tNow} · 변경 ${n0} → ${lc.total}(${lc.changes?.[0]?.trigger}) · 07 의 대안 줄 ${alt07} · 숨김 ${hidden} · 알림 ${short(toasts, 160)}` };
   });
 
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });

@@ -24,10 +24,13 @@ export interface MenuHandlers {
   showItems(dv: HTMLElement, x: number, y: number): void;
   copySvg(dv: HTMLElement): void;
   isCheck(key: string): boolean;
+  /** R4-2: 확인 표시(켜고 끄기 — 사람의 길) · 그 줄을 표시할 수 있는가(프로젝트의 대상 · 확인 목록에 있는 항목) */
+  review(key: string): void;
+  canReview(key: string): boolean;
   hasSheet(key: string): boolean;
 }
 
-const RV_WHY = '내가 확인했다는 표시. 사람만 켠다 — 확인 기록은 R4 부터 남는다(지금은 꺼져 있다)';
+const RV_WHY = '확인 표시는 프로젝트의 검토 대상에서, 확인 목록(get_reviews)에 있는 항목만 — 사람만 켠다';
 
 /** 검토 항목 줄의 메뉴 */
 export function checkMenu(key: string, name: string, h: MenuHandlers): MenuItem[] {
@@ -38,7 +41,7 @@ export function checkMenu(key: string, name: string, h: MenuHandlers): MenuItem[
     { label: '계산 시트 열기', kbd: 'Enter', run: () => h.sheet(key), off: !h.hasSheet(key), why: '이 항목은 엔진의 검토 항목(design_checks)이 아니다 — 계산 과정이 없다' },
     { label: '표에서 보기', run: () => h.table(key) },
     '-',
-    { label: '확인 표시', kbd: 'Space', run: () => h.copy('', 'rv'), off: true, why: RV_WHY },
+    { label: '확인 표시', kbd: 'Space', run: () => h.review(key), off: !h.canReview(key), why: RV_WHY },
     { label: '이름 복사', kbd: 'Ctrl+C', run: () => h.copy(name, '이름') },
   ];
 }

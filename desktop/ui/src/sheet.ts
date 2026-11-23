@@ -19,6 +19,7 @@ import { memberSvg } from './member';
 import { BUCKLING_METHOD_KO, SOURCE_KO, STEP_KO, VERDICT_KO, sectionLabel } from './names';
 import { allRows, POINT_KO, rowOfKey, state, type CheckRow, type Run, COMBO_KO, locWords } from './store';
 import { fieldText, noteLi, readerOf, reasonNote, type Note } from './notices';
+import { itemOfRow, markButton, rv } from './reviews';
 import { inputWhy } from './changes';
 import { kindOfQuantity, LABEL, si } from './units';
 import { caseTag, ENGINE_TO_CASE } from './caseFields';
@@ -353,7 +354,7 @@ export function sheetHtml(key: string, w = 900): string {
   const big = typeof r.ratio === 'number' ? `<span class="num" style="font-size:20px">${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}</span>` : '';
   return `<article class="sheet" data-sheet-key="${esc(key)}">`
     + `<div class="hd"><div><h2>${esc(r.where)} · ${esc(r.name)} — 계산 시트</h2><div class="dim" style="margin-top:3px">${esc(sub)}</div></div><span class="sp"></span>`
-    + `<div style="text-align:right"><div>${verdictSpan(v)} ${big}</div><div class="dim"><span class="rv off"${tip('내가 확인했다는 표시. 사람만 켠다. 확인 기록은 R4 부터 남는다 — 지금은 꺼져 있다')}>미확인</span></div></div></div>`
+    + `<div style="text-align:right"><div>${verdictSpan(v)} ${big}</div><div class="dim">${rv.loaded && itemOfRow(r) ? markButton(itemOfRow(r), `data-rv-check="${esc(r.key)}"`) : markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만')}</div></div></div>`
     + `<div class="btns" style="margin-top:12px">${prev ? `<span class="btn ghost" data-sheet-go="${esc(prev.key)}"${tip('앞 항목 (Alt+←)')}>← ${esc(prev.where)} · ${esc(prev.name)}</span>` : ''}`
     + `${next ? `<span class="btn ghost" data-sheet-go="${esc(next.key)}"${tip('다음 항목 (Alt+→)')}>${esc(next.where)} · ${esc(next.name)} →</span>` : ''}<span style="flex:1"></span>`
     + `<span class="btn ghost" data-sheet-close${tip('Esc')}>시트 닫기 ✕</span></div>`

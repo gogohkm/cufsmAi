@@ -16,6 +16,8 @@ import { editing, hideSide, initEdit, mountDesigner, reloadSide, setEditing, sho
 import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { chg, loadChanges } from './changes';
 import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes } from './work';
+import { itemOfRow, loadReviews, mark as markTargets, markOf, rowTarget, rv, trust as trustWriter, type MarkTarget } from './reviews';
+import { altAction, alts, compareOf, loadAlts, visibleAlts } from './alts';
 import { findHtml, search, type Hit } from './find';
 import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, keyOfItem, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq, type Item } from './follow';
 import { hhmm } from './format';
@@ -459,6 +461,8 @@ function select(tab: Tab, key: string, by: 'person' | 'program' | 'focus' = 'per
   render();
   // R3-3: 업무 항목 · 가정의 전부(get)는 고를 때 한 번 읽는다
   if (/^(work|asmr):/.test(key)) { void fetchFull(key).then(read => { if (read) { render(); } }); }
+  // R4-3: 대안의 비교(같이 볼 것 · 대안 가지 · 고른 대안)
+  if (alts.items.length && (key === 'alt' || key.startsWith('alt:') || isCheck(key))) { loadCompares(key); }
 }
 
 function openSheet(key: string): void {
@@ -516,7 +520,7 @@ function docAction(t: HTMLElement): boolean {
 }
 
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg', 'ins'].includes(key) || key.startsWith('chg:') || key.startsWith('work:') ? 'work' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg', 'ins'].includes(key) || key.startsWith('chg:') || key.startsWith('work:') ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -524,7 +528,66 @@ const SRC_KO: Record<string, string> = {
   loads: '하중 해석(엔진)', curve: '좌굴 곡선(get_buckling_curve)', cls: 'cFSM 분류(analysisComplete)', const: '프로그램의 고정값(엔진 기본)',
 };
 
+// ── R4-2: 확인 표시(사람의 길) · R4-3: 대안 ─────────────────────────
+/** 표시 · 풀기 — 그린 지문을 그대로. 거절이면 다시 읽고 까닭을 알린다 */
+async function doMark(targets: MarkTarget[], on: boolean): Promise<void> {
+  const r = await markTargets(targets, on);
+  await loadReviews();
+  render();
+  if (r.ok) { toast(on ? `확인 표시 ${targets.length}` : `확인 표시를 풀었다 ${targets.length}`, 'info'); return; }
+  toast(`확인하지 못했다 — 화면이 그린 판과 지금이 다르면 다시 읽었으니 다시 보고 누른다 · ${r.why ?? ''}`, 'warning');
+}
+function reviewRow(key: string): void {
+  const row = rowOfKey(key).row;
+  const t = row ? rowTarget(row) : null;
+  if (!row || !t) { toast('확인 표시 — 이 줄은 확인 목록에 없다(프로젝트의 검토 대상의 지금 결과만 표시한다)', 'warning'); return; }
+  void doMark([t], itemOfRow(row)?.state !== 'reviewed');
+}
+/** 정보 창 · 시트의 「확인」 단추 */
+function reviewClick(el: HTMLElement): boolean {
+  const ck = el.closest('[data-rv-check]');
+  if (ck) { reviewRow(String(ck.getAttribute('data-rv-check'))); return true; }
+  const rs = el.closest('[data-rv-result]');
+  if (rs) {
+    const kind = String(rs.getAttribute('data-rv-result'));
+    const on = markOf('result', kind)?.state !== 'reviewed';
+    void doMark([{ type: 'result', kind, shown: String(rs.getAttribute('data-rv-fp')) }], on);
+    return true;
+  }
+  const cg = el.closest('[data-rv-change]');
+  if (cg) { const id = String(cg.getAttribute('data-rv-change')); void doMark([{ type: 'change', changeId: id, shown: id }], markOf('change', id)?.state !== 'reviewed'); return true; }
+  const tr = el.closest('[data-rv-trust]');
+  if (tr) { void trustWriter(String(tr.getAttribute('data-rv-trust'))).then(async r => { await loadReviews(); render(); toast(r.ok ? '그 작성자를 믿는다 — 그 확인 표시를 센다' : `믿기를 하지 못했다 — ${r.why ?? ''}`, r.ok ? 'info' : 'warning'); }); return true; }
+  return false;
+}
+/** 대안 단추(「이 대안으로」 · 숨기기 · 다시 보이기 · 이름 바꾸기 · 지금 것을 대안으로) */
+function altClick(el: HTMLElement): boolean {
+  const hid = el.closest('[data-alt-hidden]') as HTMLInputElement | null;
+  if (hid) { alts.showHidden = !!hid.checked; render(); return true; }
+  const act = (['open', 'drop', 'undrop', 'rename', 'keep'] as const).find(a => el.closest(`[data-alt-${a}]`) && !el.closest(`[data-alt-${a}].off`));
+  if (!act) { return false; }
+  const item = String(el.closest(`[data-alt-${act}]`)!.getAttribute(`data-alt-${act}`));
+  const label = act === 'rename' || act === 'keep' ? String(alts.draft[item] ?? (document.querySelector(`[data-alt-newlabel="${CSS.escape(item)}"]`) as HTMLInputElement | null)?.value ?? '').trim() : '';
+  if ((act === 'rename' || act === 'keep') && !label) { toast('이름을 적는다', 'warning'); return true; }
+  void altAction(act, act === 'keep' ? { label } : { item, ...(label ? { label } : {}) }).then(async r => {
+    if (r?.error) { toast(`대안: ${String(r.error)}`, 'warning'); return; }
+    if (act === 'rename' || act === 'keep') { delete alts.draft[item]; }
+    toast(act === 'open' ? '이 대안의 모델 · 입력을 얹었다 — 결과는 다시 돌린다' : act === 'rename' ? '이름을 바꿨다' : act === 'drop' ? '숨겼다' : act === 'keep' ? `「${label}」 대안으로 지켰다` : '다시 보인다', 'info');
+    await loadAlts();
+    scheduleRefresh();
+  });
+  return true;
+}
+/** 대안의 비교를 읽는다(고른 대안 · 대안 가지 · 같이 볼 것) */
+function loadCompares(key: string): void {
+  const list = key === 'alt' || isCheck(key) ? visibleAlts() : key.startsWith('alt:') ? alts.items.filter(a => a.item === key.slice(4)) : [];
+  const need = list.filter(a => !alts.cmp.has(a.item));
+  if (need.length) { void Promise.all(need.map(a => compareOf(a.item))).then(() => render()); }
+}
+
 const handlers: MenuHandlers = {
+  review: key => reviewRow(key),
+  canReview: key => { const row = rowOfKey(key).row; return !!(row && rv.loaded && rowTarget(row)); },
   find: key => { select(tabOfKey(key), key); ui.after = { flash: true }; render(); },
   onlyHere: key => {
     const r = rowOfKey(key).row;
@@ -679,6 +742,8 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
       // R3-3: 기록이 바뀌었다 — 말한 종류만 다시 읽는다(변경 · 업무 · 가정 · 원자료)
       if (c === 'recordsChanged') {
         const types: string[] = Array.isArray(d.records?.types) ? d.records.types : [];
+        if (types.includes('reviews')) { void loadReviews().then(() => rerender()); }
+        if (types.includes('alternatives')) { void loadAlts().then(() => { loadCompares(ui.sel[ui.tab]); rerender(); }); }
         // 고른 업무 항목 · 가정의 전부도 다시(목록을 다시 읽으면 그 전부를 비운다)
         const cur = ui.sel[ui.tab];
         void Promise.all([reloadTypes(types), types.includes('changes') ? loadChanges() : Promise.resolve()]).then(() => prefetchOpenQuestions())
@@ -771,7 +836,8 @@ function onKey(e: KeyboardEvent): void {
   if (e.key === 'Enter' && isCheck(key)) { e.preventDefault(); openSheet(key); return; }
   if (e.key === 'f' || e.key === 'F') { handlers.find(key); return; }
   if ((e.key === 'i' || e.key === 'I') && isCheck(key)) { handlers.onlyHere(key); return; }
-  if (e.key === ' ' && isCheck(key)) { e.preventDefault(); toast('확인 표시는 기록(R4)부터 — 지금은 꺼져 있다', 'info'); return; }
+  // R4-2: Space — 고른 검토 줄의 확인 표시를 켜고 끈다(사람의 길)
+  if (e.key === ' ' && isCheck(key)) { e.preventDefault(); reviewRow(key); return; }
   if (e.key === 'Home') { for (const z of ['section', 'mode', 'curve', 'member', 'lap']) { fitZoom(z, $('center')); } }
 }
 
@@ -793,6 +859,12 @@ function boot(): void {
     caseMenu, projectMenu: (x, y) => projectMenu(x, y),
   });
   initStart($('start'), { open: () => fileOp('open'), review: toReview, claude: op => { void claudeOp(op); }, rec: (act, el) => { void recAct(act, el); } });
+  // R4-3: 대안 이름 칸 — 친 글을 두어 다시 그려도 지워지지 않게(정보 창은 자주 다시 그린다)
+  document.addEventListener('input', e => {
+    const el = e.target as HTMLInputElement;
+    const k = el?.getAttribute?.('data-alt-newlabel');
+    if (k) { alts.draft[k] = el.value; }
+  }, true);
   // R2-3: 꼬리표의 「2 → 2.3 · 10:12」 · 영향 줄 → 업무 › 변경의 그 줄, 비교 기준 칩 → 앞 변경 고르기
   document.addEventListener('click', e => {
     const t = e.target as HTMLElement;
@@ -800,6 +872,7 @@ function boot(): void {
     if (go && go.getAttribute('data-chg-go')) { e.stopPropagation(); ui.screen = 'review'; select('work', `chg:${go.getAttribute('data-chg-go')}`); return; }
     const cr = t.closest?.('#center tr[data-k^="chg:"]');
     if (cr) { e.stopPropagation(); select('work', cr.getAttribute('data-k')!); return; }
+    if (reviewClick(t) || altClick(t)) { e.stopPropagation(); return; }
     // R3-3: 업무 항목 · 가정의 걸린 대상 → 그 대상, 원자료 「열기」 → OS 의 기본 앱(사람의 길)
     const rg = t.closest?.('[data-ref-go]');
     if (rg) { e.stopPropagation(); const [tb, k] = String(rg.getAttribute('data-ref-go')).split('|'); if (k) { ui.screen = 'review'; select(tb as Tab, k); } return; }

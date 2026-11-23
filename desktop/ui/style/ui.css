@@ -317,3 +317,9 @@ svg rect.cpb { cursor: default; }
 .drawer tr.grp td { color: var(--fg-dim); font-size: 11px; }
 #recband.flash { animation: recflash 1.2s ease-out 1; }
 @keyframes recflash { from { box-shadow: inset 0 0 0 2px var(--warn); } to { box-shadow: inset 0 0 0 0 transparent; } }
+.rvg { margin-left: 4px; font-size: 11px; }
+.rvg.ok { color: var(--ok); }
+.rvg.again { color: var(--warn); }
+.rv.on { color: var(--ok); border-color: var(--ok); }
+.rv.again { color: var(--warn); border-color: var(--warn); }
+.chk.on::before { content: "✓ "; }

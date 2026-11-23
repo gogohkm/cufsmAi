@@ -51,6 +51,10 @@ export interface RecordsPersonFace {
   setWriterName(name: string): string;
   /** 밖에서 바뀐 파일을 덮어써도 된다 — external 줄을 남기고 다음 저장의 대조를 지금 파일로 */
   allowOverwrite(): { fileSha: string };
+  /** R4: 확인 표시(사람만) — 대상 {type, key | kind | group | changeId | id, shown}. shown 이 지금 지문과 다르면 던진다 */
+  review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string };
+  /** R4: 다른 작성자를 믿는다 / 믿지 않는다(그 작성자 소개가 프로젝트에 있어야) */
+  trust(writerId: string, trust: boolean): { writerId: string; name: string; trusted: boolean };
 }
 
 /** R2-2: 편집 상태의 시작 · 끝 · 버리기(StcfsdPanel.editSession — 사람의 길로만, MCP 문맥에서는 ok false) */

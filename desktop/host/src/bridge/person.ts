@@ -9,7 +9,8 @@
  *
  * 경로: GET recent(최근 · 뿌리의 프로젝트와 폴더 경로 · 지금 프로젝트 · 작성자 이름 — 사람의 얼굴에서, 215cb5a) · POST open-folder · new-project ·
  * open-project {name} · open-case {name} · new-case {kind} · make-project · take-lock {case_id?} · archive {case_id?, archived} ·
- * relink {case_id?}(파일은 OS 대화상자) · writer-name(이름 물음) · overwrite(밖에서 바뀐 파일을 덮어써도 된다 → 저장) · edit-session {state}(R2-3)
+ * relink {case_id?}(파일은 OS 대화상자) · writer-name(이름 물음) · overwrite(밖에서 바뀐 파일을 덮어써도 된다 → 저장) · edit-session {state}(R2-3) ·
+ * review {mark, targets[]}(R4 — 확인 표시, shown = 화면이 그린 지문) · trust {writer_id, trust}(R4 — 다른 작성자 믿기)
  */
 import * as fs from 'node:fs';
 import type * as http from 'node:http';
@@ -246,6 +247,37 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         if (!r.ok) { no(200, '호스트가 받지 않았다'); return true; }
         deps.changed('changes');
         ok({ state: st, ...(r.backToStart !== undefined ? { back_to_start: r.backToStart } : {}), ...(Array.isArray(r.restored) ? { restored: r.restored.slice(0, 200) } : {}) });
+        return true;
+      }
+      case 'review': {
+        // R4: 확인 표시 — 사람의 길로만(층 3 · 4). 대상의 꼴만 보고 호스트의 사람 얼굴에 넘긴다: 지금 지문과 다르면(다른 판을 보았다) 호스트가 던진다
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const raw = Array.isArray(b.targets) ? b.targets : null;
+        if (!raw || !raw.length || raw.length > 200) { no(400, 'targets 는 1 – 200 개'); return true; }
+        const TYPES = ['check', 'result', 'group', 'change', 'work', 'assumption'];
+        const str = (v: unknown, n: number) => (typeof v === 'string' && v.length > 0 && v.length <= n ? v : undefined);
+        const targets: Array<Record<string, unknown>> = [];
+        for (const t of raw) {
+          const o = t && typeof t === 'object' && !Array.isArray(t) ? t as Record<string, unknown> : null;
+          if (!o || !TYPES.includes(String(o.type))) { no(400, `대상의 type 은 ${TYPES.join(' · ')}`); return true; }
+          const shown = typeof o.shown === 'number' && Number.isInteger(o.shown) ? o.shown : str(o.shown, 200);
+          if (shown === undefined) { no(400, 'shown(화면이 그린 지문)이 없다'); return true; }
+          targets.push({ type: o.type, shown, ...(str(o.key, 2000) ? { key: o.key } : {}), ...(str(o.kind, 40) ? { kind: o.kind } : {}), ...(str(o.group, 40) ? { group: o.group } : {}),
+            ...(str(o.changeId, 80) ? { changeId: o.changeId } : {}), ...(str(o.id, 40) ? { id: o.id } : {}) });
+        }
+        const r = person.review({ mark: b.mark !== false, targets });
+        deps.changed('reviews');
+        ok({ event: r.event, targets: r.targets });
+        return true;
+      }
+      case 'trust': {
+        // R4: 다른 작성자를 믿기 — 사람만. 그 작성자 소개가 프로젝트에 있어야(호스트가 본다)
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const w = typeof b.writer_id === 'string' ? b.writer_id.slice(0, 40) : '';
+        if (!/^w[a-z2-7]{20}$/.test(w)) { no(400, 'writer_id(작성자 id)'); return true; }
+        const r = person.trust(w, b.trust !== false);
+        deps.changed('reviews');
+        ok({ writer: r.name, trusted: r.trusted });
         return true;
       }
       case 'open-source': {

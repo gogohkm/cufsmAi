@@ -23,6 +23,8 @@ import { api, last, mcp, type LastEntry } from './bridge';
 import { loadRecords } from './records';
 import { loadChanges } from './changes';
 import { loadRecordsWork, prefetchOpenQuestions } from './work';
+import { loadReviews } from './reviews';
+import { loadAlts } from './alts';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
 import { fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
 
@@ -503,6 +505,9 @@ async function load(): Promise<void> {
   // R3-3: 업무 · 가정 · 원자료 — 대상이 바뀌었을 때만(그 밖에는 recordsChanged 가 말한 종류만)
   await loadRecordsWork();
   await prefetchOpenQuestions();
+  // R4: 확인 표시는 결과 · 입력이 바뀔 때마다 유효성이 바뀐다 — 새로 고칠 때마다(지문도 그때의 것). 대안은 대상이 바뀌었을 때 · recordsChanged 에
+  await loadReviews();
+  await loadAltsIfCaseChanged();
   if (!state.initialModel) {
     const first = await last(id, ['modelLoaded'], 'first');
     state.initialModel = first?.data.modelLoaded?.message?.data ?? null;
@@ -598,4 +603,12 @@ export function regionLabel(us: any, _si: any, i: number): string {
   // 구간 이름표 — 호스트의 label_* 옆 필드(host.region.* 알림)를 이 화면의 단위(m)로(notices.js — 화면은 숫자 자리를 고쳐 쓰지 않는다)
   if (us?.label !== undefined && us?.label !== null) { return fieldText(us, 'label'); }
   return String(us?.id ?? `구간 ${i + 1}`);
+}
+
+let altsFor = '';
+async function loadAltsIfCaseChanged(): Promise<void> {
+  const c = state.full?.project?.case?.caseId ?? '';
+  if (c === altsFor) { return; }
+  altsFor = c;
+  await loadAlts();
 }
