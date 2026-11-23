@@ -178,7 +178,7 @@ async function main() {
     const standaloneEnv = { STCFSD_MCP_PORT_FILE: portFile, STCFSD_MCP_STANDALONE: '1', STCFSD_MCP_PORT: String(decoyPort) };
     const ai = await mcpClient(standaloneEnv);
     clients.push(ai);
-    assert.strictEqual((await ai.client.listTools()).tools.length, 78, '78 tools (K4a: get_view · focus · get_design_check; K2-5: get_case_inputs · set_case_inputs · run_case_check; R1-2: seven record tools; R2-2: list_changes; R3-2: work_items · assumptions · sources; R4: get_reviews · alternatives)');
+    assert.strictEqual((await ai.client.listTools()).tools.length, 79, '79 tools (K4a: get_view · focus · get_design_check; K2-5: get_case_inputs · set_case_inputs · run_case_check; R1-2: seven record tools; R2-2: list_changes; R3-2: work_items · assumptions · sources; R4: get_reviews · alternatives; R5: documents)');
 
     // 1. 프로그램이 꺼져 있음(파일 없음) --------------------------------------------------
     let r = await ai.call('get_status');
@@ -331,7 +331,7 @@ async function main() {
     assert.deepStrictEqual(entry.env, { ELECTRON_RUN_AS_NODE: '1', STCFSD_MCP_PORT_FILE: portFile, STCFSD_MCP_STANDALONE: '1' });
     const viaEntry = await mcpClient(entry.env, DRIVE_ROOT, entry.args[0], entry.command);
     clients.push(viaEntry);
-    assert.strictEqual((await viaEntry.client.listTools()).tools.length, 78);
+    assert.strictEqual((await viaEntry.client.listTools()).tools.length, 79);
     r = await viaEntry.call('get_status');
     assert(!r.isError && r.data.host_pid === D0.child.pid, 'registered entry reaches the running program from any folder');
     ok('registered entry runs the moved bundle from the drive root');

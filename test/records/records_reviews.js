@@ -30,14 +30,16 @@ async function run() {
       { expr: 'Mnℓ = …', equation: 'F3.2.1-2', inputs: [
         { symbol: 'Mcrℓ', value: o.Mcrl ?? 87.0512345678, quantity: 'moment', source: { kind: 'buckling_analysis', method: 'fsm_minimum', label: 'FSM' } },
         { symbol: 'Fy', value: o.Fy ?? 50, quantity: 'stress', source: { kind: 'material', key: 'Fy' } },
-        ...(o.global ? [{ symbol: 'Mcre', value: o.Mcre ?? 120.123456, quantity: 'moment', source: { kind: 'buckling_analysis', method: 'fsm_minimum' } }] : []),
+        // 엔진 663771d(검토 계약 §16.14): 서명곡선 긴 반파장에서 읽은 Fcre 를 사람이 주면 그 입력에 numeric, 그 항목에 numeric_tolerance
+        ...(o.global ? [{ symbol: 'Fcre', value: o.Fcre ?? 120.123456, quantity: 'stress', source: { kind: 'user_input', key: 'Fcre' }, numeric: { source: 'fsm_long_wavelength', rel_tol: 1e-4 } }] : []),
       ], result: { symbol: 'Mnℓ', value: o.Mnl ?? 54.712682 * (o.k ?? 1), quantity: 'moment' } },
     ],
     ...(o.verdict ? { verdict: o.verdict } : {}),
+    ...(o.global ? { numeric_tolerance: { source: 'fsm_long_wavelength', rel_tol: 1e-4, applies_to: 'all values of this check' } } : {}),
   });
   const perturb = (it, rel) => JSON.parse(JSON.stringify(it), (k, v) => (typeof v === 'number' && k !== 'value' ? v : typeof v === 'number' ? v * (1 + rel) : v));
 
-  await t('D16: 1e-9 keeps a mark; 1e-5 on a non-global value drops it; 1e-5 is kept when the item uses long-wavelength global values', () => {
+  await t('D16 + engine flags (§16.14): 1e-9 keeps a mark; 1e-5 on an unflagged value drops it; a flagged check (numeric_tolerance) keeps 1e-5', () => {
     const a = item();
     // 계산된 값만 흔든다(Mcrℓ · Mnℓ — 사람 · 재료 입력은 그대로)
     const shake = (it, rel) => { const x = JSON.parse(JSON.stringify(it)); x.ratio *= 1 + rel; x.capacity.value *= 1 + rel; x.steps[1].inputs[0].value *= 1 + rel; x.steps[1].result.value *= 1 + rel; return x; };
@@ -46,8 +48,19 @@ async function run() {
     assert(!d5.same && d5.tol === 1e-6 && d5.differences.some((x) => x.path === 'ratio' && x.why === 'number'), '1e-5 on a local value: review again ' + JSON.stringify(d5));
     const g = item({ global: true });
     const g5 = RV.compareItems(g, shake(g, 1e-5));
-    assert(g5.same && g5.tol === 1e-4, 'an item that uses Mcre (FSM) gets 1e-4');
+    assert(g5.same && g5.tol === 1e-4, 'a check the engine flags with numeric_tolerance gets 1e-4');
     assert.strictEqual(RV.compareItems(g, shake(g, 3e-4)).same, false, '3e-4 is still too much');
+    // 사람이 준 Fcre 라도 표지가 있으면 정규 값이 아니라 허용차로(다른 PC 의 서명곡선 끝에서 다시 읽은 값)
+    const gf = JSON.parse(JSON.stringify(g)); gf.steps[1].inputs[2].value *= 1 + 5e-5;
+    assert.strictEqual(RV.compareItems(g, gf).same, true, 'a flagged user Fcre compares at 1e-4');
+    // 표지 없는 항목에 기호만 Mcre — 이제 짐작하지 않는다(1e-6)
+    const h = item(); h.steps[1].inputs.push({ symbol: 'Mcre', value: 120, quantity: 'moment', source: { kind: 'buckling_analysis', method: 'fsm_minimum' } });
+    assert.strictEqual(RV.compareItems(h, shake(h, 1e-5)).tol, 1e-6, 'no guessing by symbol and source');
+    // DSM 사전: fsm_long_wavelength.keys 의 키만 1e-4
+    const dsm = { crl: 87.05, crd: 85.39, cre: 120.5, LF_global: 3.1, numeric_tolerance: { default_rel_tol: 1e-6, fsm_long_wavelength: { rel_tol: 1e-4, length: 600, keys: ['cre', 'LF_global'] } } };
+    const dsm2 = { ...dsm, cre: 120.5 * (1 + 5e-5), LF_global: 3.1 * (1 + 5e-5) };
+    assert.strictEqual(RV.compareItems(dsm, dsm2).same, true, 'listed DSM keys at 1e-4');
+    assert.strictEqual(RV.compareItems(dsm, { ...dsm2, crl: 87.05 * (1 + 5e-5) }).same, false, 'crl is not listed: 1e-6');
     void perturb;
   });
   await t('D16: verdict, clause, branch, equations and person / material inputs must be the same exactly', () => {

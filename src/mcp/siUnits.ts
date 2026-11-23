@@ -339,6 +339,7 @@ const NONE_KEYS = [
     'curve_index', 'index', 'load_factor', 'load_factor_interp', 'flexure_dcr', 'flexure_dcr_governing',
     'n_max_total', 'n_per_row', 'n_required', 'n_rows', 'n_total', 'n_members', 'n_spans', 'span',
     'spans',   // K4d: 하중 패턴 이름표(loads.label.pattern_spans_loaded)의 경간 번호 목록 — 개수
+    'rel_tol', 'default_rel_tol',   // 엔진 663771d: 값 비교의 허용차 표지(검토 계약 §16.14) — 무차원
 
     'support', 'L_over_delta', 'psi', 'n_lengths', 'n_elements', 'n_theta', 'n_na', 'n_thick',
     'neigs_requested', 'neigs_actual', 'nnodes', 'nelems', 'region_support', 'Ct', 'Cv', 'kv', 'mf', 'interaction_value',

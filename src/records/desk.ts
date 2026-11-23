@@ -29,7 +29,7 @@ import { acquireLock, LockInfo, LockResult, readLock, releaseLock, takeOver } fr
 /** 열쇠 자리의 작성자 이름 파일 */
 export const WRITER_NAME_FILE = 'writer-name.json';
 import { DATA_DIR, ReadBudget, ReadResult, RecordLine, RecordLog, RecordType, Actor, LogSpec } from './log';
-import { checkName, cleanHeaderText, nameKey } from './names';
+import { checkName, cleanHeaderText, nameKey, segmentError } from './names';
 import { plainSpec } from './policy';
 import {
     caseFileFor, createProject, Declaration, findProjectByName, findProjectFor as findProjectDirFor, FOLDERS, newId, readDeclaration,
@@ -44,6 +44,9 @@ import { KeyUnavailableError, loadOrCreateWriter, makeWriterCard, readTrust, rea
 import { foldReviews, MarkState, prepareReview, ReviewTarget, REVIEWS_SPEC } from './reviews';
 import { Alternative, ALTERNATIVES_SPEC, altBlobs, altRunIds, foldAlternatives, prepareAlternative } from './alternatives';
 import { blobPath } from './blobs';
+import { checkIssue, DocKind, DOCUMENTS_SPEC, Draft, foldDocuments, Issue, nextDraftId, nextRevision, readDocBody } from './documents';
+import { fp } from './canonical';
+import { randomBytes } from 'crypto';
 
 /** 데스크가 받는 것 — 모두 주입(시험은 임시 폴더와 가짜 시계로) */
 export interface DeskEnv {
@@ -77,6 +80,26 @@ export interface DeskEnv {
     resolveReview?(t: unknown): ReviewTarget | { error: string };
     /** 사람 얼굴이 기록을 바꿨다(확인 · 믿기) — 호스트가 화면에 recordsChanged 를 보낸다 */
     recordsChanged?(types: string[]): void;
+    /** R5: 발행 전 점검(호스트가 — 막는 것 · 경고 · 통과, 발행할 초안, 지금의 근거). 발행 미리보기 · 발행 · documents check 가 같이 쓴다 */
+    issueCheck?(): IssueCheckInput | { error: string };
+    /** R5-2: 초안의 ReportDoc 을 도장만 바꿔 다시 그린 최종본(HTML · PDF 바이트) — 호스트의 그리기 · 인쇄(D14) */
+    issueRender?(input: { doc: unknown; kind: DocKind; stamp: Record<string, unknown>; baseName: string }): Promise<Array<{ name: string; role: string; bytes: Buffer }>>;
+    /** 시험만(STCFSD_TEST_MODE=1): 발행의 한 걸음에서 던진다(디스크가 찬 것처럼) */
+    issueFault?(step: string): void;
+}
+
+/** 호스트가 주는 발행 전 점검(D4) */
+export interface IssueCheckInput {
+    blockers: Array<{ code: string; count?: number; detail?: string }>;
+    warnings: Array<{ code: string; count?: number; detail?: string }>;
+    passed: string[];
+    draft: Draft | null;
+    basis: { contentFp: string; engineId: string | null; runs: Record<string, string>; registerFp: string };
+}
+export interface IssuePreview {
+    caseId: string; caseName: string; revision: number; label: string; folder: string;
+    blockers: IssueCheckInput['blockers']; warnings: IssueCheckInput['warnings']; passed: string[];
+    draft: { item: string; kind: string; files: string[] } | null; files: string[]; fingerprint: string;
 }
 
 export const CSD_HASH_MAX_BYTES = 256 * 1024 * 1024;
@@ -176,6 +199,10 @@ export interface PersonFace {
     review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string };
     /** R4-1: 다른 작성자 믿기 · 거두기(그 작성자 소개가 이 프로젝트에 있어야 한다) — 믿은 작성자의 확인만 센다(D5) */
     trust(writerId: string, trust: boolean): { writerId: string; name: string; trusted: boolean };
+    /** R5-2: 발행 미리보기 — 지문 · 일회용 숫자(2 분) · 막는 것 · 경고 · 묶일 파일 · 차수 */
+    issuePreview(): IssuePreview & { nonce: string; expiresAt: string };
+    /** R5-2: 발행 — 미리보기의 지문과 일회용 숫자로(그 사이 무엇이 바뀌면 거절) */
+    issue(req: { fingerprint: string; nonce: string }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }>;
 }
 
 export class RecordsDesk {
@@ -204,6 +231,8 @@ export class RecordsDesk {
             allowOverwrite: guard(() => this.allowOverwrite()),
             review: guard((req: { mark: boolean; targets: unknown[] }) => this.review(req)),
             trust: guard((writerId: string, trust: boolean) => this.trustWriter(writerId, trust)),
+            issuePreview: guard(() => this.issuePreview()),
+            issue: guard((req: { fingerprint: string; nonce: string }) => this.issue(req)),
         });
     }
 
@@ -269,6 +298,7 @@ export class RecordsDesk {
         if (type === 'sources') { return SOURCE_SPEC; }
         if (type === 'reviews') { return REVIEWS_SPEC; }
         if (type === 'alternatives') { return ALTERNATIVES_SPEC; }
+        if (type === 'documents') { return DOCUMENTS_SPEC; }
         return plainSpec(type);
     }
 
@@ -1008,6 +1038,9 @@ export class RecordsDesk {
             if (t.resultBlob) { keepBlobs.add(t.resultBlob); }
         }
         for (const a of this.alternativeItems()) { altRunIds(a).forEach((r) => keepRuns.add(r)); altBlobs(a).forEach((b) => keepBlobs.add(b)); }
+        // R5: 발행이 가리키는 초안의 실행(근거)
+        const docs = this.documents();
+        for (const i of docs.issues) { const d = docs.drafts.find((x) => x.item === i.from); if (d) { Object.values(d.basis.runs).forEach((r) => keepRuns.add(r)); } }
         try { for (const l of this.read('cases').lines) { if (typeof l.body?.snapshot === 'string') { keepBlobs.add(l.body.snapshot); } } } catch { return 0; }
         const already = new Set<string>();
         for (const l of runLines) { if (l.event === 'prune' && Array.isArray(l.body?.blobs)) { l.body.blobs.forEach((b: string) => already.add(b)); } }
@@ -1018,6 +1051,161 @@ export class RecordsDesk {
             this.append('runs', { id: this.newLineId('prn'), event: 'prune', actor: { kind: 'program' }, body: { blobs: drop.slice(i, i + 2000) } });
         }
         return drop.length;
+    }
+
+    // ── 문서 · 발행(R5-1 · R5-2) ───────────────────────────────────────
+
+    /** 초안을 둘 폴더(`03_계산서/` — 호스트만 쓴다, AI 에게 경로를 주지 않는다). 쓸 수 있는 대상이 열려 있을 때만 */
+    reportsFolder(): { abs: string; rel: string; caseName: string; caseId: string } | null {
+        const p = this.proj, c = this.cur;
+        if (!p || p.readOnly || !c || c.readOnly) { return null; }
+        const abs = path.join(p.dir, FOLDERS.reports);
+        mkdirInside(p.dir, abs);
+        return { abs, rel: FOLDERS.reports, caseName: c.name, caseId: c.caseId };
+    }
+    /** 문서 줄을 접은 것 */
+    documents(): ReturnType<typeof foldDocuments> {
+        if (!this.proj) { return { drafts: [], issues: [], failed: [] }; }
+        try { return foldDocuments(this.read('documents').lines); } catch { return { drafts: [], issues: [], failed: [] }; }
+    }
+    /** 다음 초안 id(이름 · 도장에 미리 쓴다) */
+    nextDraftItem(): string { return this.proj ? nextDraftId(this.read('documents').lines) : 'D-1'; }
+    /** 초안 줄(행위자 = 문맥 — AI · 사람) */
+    writeDraft(body: Record<string, unknown>): { item: string } {
+        this.writableProject();
+        const b = readDocBody('draft', body as any);
+        if (!b) { throw new Error('the draft record is not valid'); }
+        this.append('documents', { id: this.newLineId('doc'), event: 'draft', actor: toActor(this.ctx(), 'program'), body: b });
+        return { item: String(b.item) };
+    }
+    /** 가정 · 업무 · 확인을 접은 것의 지문(초안의 근거 · 발행 전 점검 — 그 판까지) */
+    registerFp(caseId: string | null): string {
+        const asm = this.assumptionItems().filter((a) => a.caseId === null || a.caseId === caseId).map((a) => [a.item, a.status, a.closed, a.lastSeq]);
+        const work = this.workItems().filter((w) => w.caseId === null || w.caseId === caseId).map((w) => [w.item, w.state, w.lastSeq]);
+        const marks = [...this.reviewMarks().marks.values()].map((m) => [m.key, m.marked, m.seq]).sort((a, b) => (String(a[0]) < String(b[0]) ? -1 : 1));
+        return fp('stcfsd-fp/register/1', { asm, work, marks });
+    }
+    /** 발행 폴더(상대) */
+    private issueFolder(caseName: string, revision: number): string { return `${FOLDERS.issued}/${caseName}/R${revision}`; }
+    /** 지금 대상의 발행들과 그 폴더 상태(볼 때마다 해시 대조) */
+    issuesOf(caseId?: string): Array<Issue & { check_now: ReturnType<typeof checkIssue> }> {
+        const p = this.proj;
+        if (!p) { return []; }
+        const id = caseId ?? this.cur?.caseId;
+        return this.documents().issues.filter((x) => x.caseId === id).map((x) => ({ ...x, check_now: checkIssue(p.dir, x) }));
+    }
+
+    /** 발행 전 점검의 몸(미리보기 · 발행 · documents check 가 같은 것) */
+    issueCheckData(): IssuePreview & { input: IssueCheckInput } {
+        const p = this.proj, c = this.cur;
+        if (!p || !c) { throw new Error('no case of a project is open'); }
+        if (!this.env.issueCheck) { throw new Error('issuing is not available here'); }
+        const r = this.env.issueCheck();
+        if ((r as any).error) { throw new Error(String((r as any).error)); }
+        const input = r as IssueCheckInput;
+        const blockers = [...input.blockers], warnings = [...input.warnings];
+        const docs = this.documents();
+        const revision = nextRevision(docs.issues, c.caseId);
+        const folder = this.issueFolder(c.name, revision);
+        const abs = path.join(p.dir, ...folder.split('/'));
+        if (c.readOnly || p.readOnly) { blockers.push({ code: 'read-only', detail: String(c.readOnlyReason ?? 'project') }); }
+        // 기록에 없는 R<n> 폴더 — 다시 쓰지 않고 막는다(실패한 발행으로 적힌 폴더는 발행할 때 옆으로 옮긴다)
+        if (fs.existsSync(abs) && !this.failedFolderPending(folder)) { blockers.push({ code: 'unknown-issue-folder', detail: `${folder} exists but the records have no issue or failed issue for it` }); }
+        // 지난 발행: 고쳐짐 · 같은 내용
+        const mine = this.issuesOf(c.caseId);
+        const edited = mine.filter((x) => x.check_now.state !== 'same');
+        if (edited.length) { warnings.push({ code: 'edited-previous-issue', count: edited.length, detail: edited.map((x) => `${x.item}: ${x.check_now.state}`).join(', ') }); }
+        const last = mine[mine.length - 1];
+        if (last && input.draft && last.from && docs.drafts.find((d) => d.item === last.from)?.docFp === input.draft.docFp) { warnings.push({ code: 'same-as-previous-issue', detail: last.item }); }
+        const draft = input.draft ? { item: input.draft.item, kind: input.draft.kind, files: input.draft.files.map((x) => x.path) } : null;
+        const base = c.name;
+        const files = draft ? [`${folder}/${base}.${draft.kind}.R${revision}.html`, `${folder}/${base}.${draft.kind}.R${revision}.pdf`, `${folder}/manifest.json`] : [];
+        const fingerprint = fp('stcfsd-fp/issue-check/1', { caseId: c.caseId, revision, folder, draft: input.draft ? { item: input.draft.item, docFp: input.draft.docFp } : null,
+            basis: input.basis, blockers: blockers.map((b) => [b.code, b.count ?? null]), warnings: warnings.map((w) => [w.code, w.count ?? null]) });
+        return { caseId: c.caseId, caseName: c.name, revision, label: `R${revision}`, folder, blockers, warnings, passed: input.passed, draft, files, fingerprint, input };
+    }
+    /** 실패한 발행으로 적혔고 아직 옆으로 옮기지 않은 폴더인가 */
+    private failedFolderPending(folder: string): boolean {
+        const f = this.documents().failed.filter((x) => x.folder === folder);
+        return f.length > 0 && !f[f.length - 1].movedTo;
+    }
+
+    /** 일회용 숫자(미리보기 → 발행, 2 분, 한 번) */
+    static ISSUE_NONCE_MS = 120_000;
+    private nonces = new Map<string, { fingerprint: string; expires: number; used: boolean }>();
+    private issuePreview(): IssuePreview & { nonce: string; expiresAt: string } {
+        const d = this.issueCheckData();
+        const { input: _i, ...pv } = d; void _i;
+        const nonce = randomBytes(16).toString('hex');
+        const expires = Date.now() + RecordsDesk.ISSUE_NONCE_MS;
+        for (const [k, v] of this.nonces) { if (v.expires < Date.now() || v.used) { this.nonces.delete(k); } }
+        this.nonces.set(nonce, { fingerprint: d.fingerprint, expires, used: false });
+        return { ...pv, nonce, expiresAt: new Date(expires).toISOString() };
+    }
+    private fault(step: string): void { if (process.env.STCFSD_TEST_MODE === '1') { this.env.issueFault?.(step); } }
+
+    private async issue(req: { fingerprint: string; nonce: string }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }> {
+        const p = this.writableProject();
+        const c = this.cur;
+        if (!c || c.readOnly) { throw new Error('no writable case is open'); }
+        const n = req && typeof req.nonce === 'string' ? this.nonces.get(req.nonce) : undefined;
+        if (!n || n.used || n.expires < Date.now()) { throw new Error('the preview has expired or was already used — open the preview again'); }
+        n.used = true;
+        const d = this.issueCheckData();
+        if (!req || req.fingerprint !== d.fingerprint || n.fingerprint !== d.fingerprint) { throw new Error('something changed since the preview (its fingerprint is not the current one) — open the preview again'); }
+        if (d.blockers.length) { throw new Error('issuing is blocked: ' + d.blockers.map((b) => b.code).join(', ')); }
+        const draft = d.input.draft!;
+        const docBlob = this.blob(draft.doc);
+        if (!docBlob.ok) { throw new Error(`the draft's report copy is ${docBlob.error} — make a new draft`); }
+        if (!this.env.issueRender) { throw new Error('issuing is not available here'); }
+        const w = this.writer();
+        const folderAbs = path.join(p.dir, ...d.folder.split('/'));
+        // 실패한 발행의 폴더 — 옆으로 옮기고(그 차수를 다시 쓴다, 차수를 두 번 쓰지 않는다) 그 옮김을 적는다
+        if (fs.existsSync(folderAbs)) {
+            if (!this.failedFolderPending(d.folder)) { throw new Error(`${d.folder} exists but the records do not know it — not issued`); }
+            let k = 1;
+            while (fs.existsSync(`${folderAbs}.failed-${k}`)) { k += 1; }
+            assertNoLinks(p.dir, folderAbs);
+            fs.renameSync(folderAbs, `${folderAbs}.failed-${k}`);
+            this.append('documents', { id: this.newLineId('iss'), event: 'issue-failed', actor: { kind: 'program' },
+                body: { caseId: c.caseId, revision: d.revision, folder: d.folder, reason: 'moved aside before the next attempt', movedTo: `${d.folder}.failed-${k}` } });
+        }
+        mkdirInside(p.dir, path.dirname(folderAbs));
+        assertNoLinks(p.dir, path.dirname(folderAbs));
+        fs.mkdirSync(folderAbs);                         // 배타적으로 — 있으면 던진다
+        const written: Array<{ path: string; sha256: string; size: number; role?: string }> = [];
+        try {
+            this.fault('folder');
+            const stamp = { kind: 'issued', label: d.label, reviewer: this.nameOfWriter(), date: this.env.now().slice(0, 10) };
+            const rendered = await this.env.issueRender({ doc: docBlob.value, kind: draft.kind, stamp, baseName: `${c.name}.${draft.kind}.${d.label}` });
+            for (const r of rendered) {
+                if (segmentError(r.name) || r.name === 'manifest.json') { throw new Error('a file name was refused: ' + r.name); }
+                this.fault('file:' + r.name);
+                writeExclusive(p.dir, path.join(folderAbs, r.name), r.bytes);
+                written.push({ path: `${d.folder}/${r.name}`, sha256: sha256Hex(r.bytes), size: r.bytes.length, role: r.role });
+            }
+            const manifest = { schema: 'stcfsd-issue/1', project: { name: path.basename(p.dir), projectId: p.decl.projectId }, case: { caseId: c.caseId, name: c.name },
+                revision: d.revision, label: d.label, issuedAt: this.env.now(), issuedBy: { name: this.nameOfWriter(), writerId: w.writerId },
+                engineId: normalizeEngineId(this.env.engineId()), contentFp: d.input.basis.contentFp, runs: d.input.basis.runs, from: draft.item, files: written,
+                check: { fingerprint: d.fingerprint, warnings: d.warnings.map((x) => x.code) } };
+            const text = Buffer.from(JSON.stringify(manifest, null, 1) + '\n', 'utf8');
+            this.fault('manifest');
+            writeExclusive(p.dir, path.join(folderAbs, 'manifest.json'), text);
+            this.fault('line');
+            this.append('documents', { id: this.newLineId('iss'), event: 'issue', actor: { kind: 'person' }, body: {
+                item: d.label, revision: d.revision, caseId: c.caseId, folder: d.folder, manifest: { sha256: sha256Hex(text), size: text.length }, files: written,
+                check: { fingerprint: d.fingerprint, warnings: d.warnings.map((x) => x.code) }, issuedBy: { name: this.nameOfWriter(), writerId: w.writerId }, from: draft.item } });
+            try { this.env.recordsChanged?.(['documents']); } catch { /* 덤 */ }
+            return { item: d.label, folder: d.folder, files: written, manifest: `${d.folder}/manifest.json` };
+        } catch (e: any) {
+            const reason = String(e?.code ?? '') + ' ' + String(e?.message || e);
+            try {
+                this.append('documents', { id: this.newLineId('iss'), event: 'issue-failed', actor: { kind: 'program' },
+                    body: { caseId: c.caseId, revision: d.revision, folder: d.folder, reason: reason.slice(0, 300) } });
+            } catch { /* 그 줄도 쓰지 못하면 폴더는 「기록에 없는 폴더」 로 남는다 — 다음 발행을 막는다 */ }
+            try { this.env.recordsChanged?.(['documents']); } catch { /* 덤 */ }
+            throw new Error(`the issue failed (${reason.trim().slice(0, 200)}) — the half-made folder ${d.folder} is kept as a failed issue (not counted); fix the cause and issue again (the same revision)`, { cause: e });
+        }
     }
 
     // ── 사람만(얼굴 `person` 이 감싼다) ─────────────────────────────────

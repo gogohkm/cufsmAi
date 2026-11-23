@@ -168,7 +168,7 @@ async function main() {
     // ════ ③ ⚔ 표시를 만드는 길이 없다 ════
     const before = reviewBytes();
     const names = (await client.listTools()).tools.map((x) => x.name);
-    assert(names.length === 78 && names.includes('get_reviews') && !names.some((n) => /^(mark|review|set_review|person|trust|confirm)/.test(n)), 'no tool marks: ' + names.filter((n) => /review|mark|trust|confirm/.test(n)));
+    assert(names.length === 79 && names.includes('get_reviews') && !names.some((n) => /^(mark|review|set_review|person|trust|confirm)/.test(n)), 'no tool marks: ' + names.filter((n) => /review|mark|trust|confirm/.test(n)));
     for (const action of ['review', 'mark', 'unmark', 'person.review', 'reviews', 'set_review', 'mark_review', 'confirm', 'confirm_assumption', 'trust', 'person.trust', 'recordsPerson']) {
       const r = await post('/action', { action, mark: true, targets: [{ type: 'check', key: c1.key, shown: c1.fp }], writerId: wB.writerId, trust: true });
       assert(r.json && r.json.error, `direct POST action '${action}': refused ` + JSON.stringify(r.json).slice(0, 160));
@@ -183,7 +183,7 @@ async function main() {
     assert.strictEqual(reviewBytes(), before, 'no mark written by any of them');
     const src = fs.readFileSync(path.join(ROOT, 'src', 'mcp', 'recordTools.ts'), 'utf8') + fs.readFileSync(path.join(ROOT, 'src', 'mcp', 'server.ts'), 'utf8');
     assert(!/person\.(review|trust)|\.review\(|recordsPerson/.test(src.replace(/\/\/.*$/gm, '')), 'no MCP source names the person face');
-    notes.push('⚔ no way to mark: 78 tools without one, 12 action names by direct POST with the real token, 4 page messages, the face inside ai / screen contexts — the review records unchanged');
+    notes.push('⚔ no way to mark: 79 tools without one, 12 action names by direct POST with the real token, 4 page messages, the face inside ai / screen contexts — the review records unchanged');
 
     // ════ ④ 대안 ════
     await design();   // ① 에서 흔든 결과 대신 기록된 실행

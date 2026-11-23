@@ -69,6 +69,8 @@ const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_d
   'work_items', 'assumptions', 'sources',
   // R4: 확인 표시(읽기) · 대안
   'get_reviews', 'alternatives',
+  // R5: 문서(목록 · 점검 · 초안)
+  'documents',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
   'check_shear_lag', 'classify_modes', 'cold_work', 'custom_section_guide', 'delete_element', 'delete_node',
@@ -782,6 +784,9 @@ async function main() {
     const aisiSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'aisi_s100.py'), 'utf8');
     // 엔진 07caad7: Cmx · Cmy 는 _cm('Cmx', …) 안의 params.get(key) 로 읽는다 — 그 이름도 엔진이 읽는 키
     engineKeys.aisi_design = [...new Set([...aisiSrc.matchAll(/(?:params\.get|_cm)\('([A-Za-z_0-9]+)'/g)].map((m) => m[1]))];
+    // 엔진 663771d: Fcre_basis 는 검토 항목을 짓는 곳(member_checks)이 ctx 의 params 에서 읽는다(검토 계약 §16.14)
+    const memberChecksSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'member_checks.py'), 'utf8');
+    engineKeys.aisi_design.push(...[...memberChecksSrc.matchAll(/\(ctx\.get\('params'\) or \{\}\)\.get\('([A-Za-z_0-9]+)'\)/g)].map((m) => m[1]));
     const lapSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'lap_connection.py'), 'utf8');
     engineKeys.lap_connection = [...new Set([...lapSrc.matchAll(/params\.get\('([A-Za-z_0-9]+)'/g)].map((m) => m[1])
       .concat(['Pnvs', 'Fub', 'bolt_grade', 'threads_excluded', 'mf', 'hole_type']))];

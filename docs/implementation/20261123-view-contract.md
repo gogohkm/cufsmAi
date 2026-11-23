@@ -160,6 +160,15 @@
 
 **R4-2 · R4-3 화면(데스크톱 담당)이 따를 것:** 확인 표시 단추는 사람의 길(다리의 `/api/person/review`)로만 — MCP 중계로 보내지 않는다. `shown` 에는 그 화면이 **그린** 항목의 `fp`(get_reviews 의 값)를 넣는다(다시 읽은 값이 아니라). ✓ · ◌(풍선에 `why_ko` 와 `differences`) · 없음, 「확인 n/N」 · 「다시 확인 m」, 다른 작성자의 표시는 「이름(PC) · 아직 믿지 않음」 + 「믿기」(`person.trust` — 사람만). 확인 표시를 설명하는 곳에 D15 의 말. 가정 · 판단 요청의 「확인」 도 같은 `review`(type assumption · work, `shown` = lastSeq). 대안: 결과 › 대안 목록(라벨 · 최대 판정비 · 「지금」), 고르면 compare 의 표(열쇠마다 지금 | 대안 | 차이), 「이 대안으로」 는 open(AI 와 같은 동작 — 사람 길이 필요하면 말하라), 숨김은 drop. `recordsChanged` 의 `reviews` · `alternatives` 종류도 받는다.
 
+## 4i. 문서 · 발행 (R5, 2026-11-24 — 도구 78 → 79)
+
+- `documents {action: list | get | check | draft}` — list `{drafts[{item, kind, at, by, files, not_checked, state: current | stale, stale_because?}], issues[{item, revision, at, issued_by, from, folder, state: same | edited | missing, state_ko: 그대로 | 고쳐짐 | 없어짐, files?, added?}], failed?}`, check `{revision, folder, blocked, blockers[{code, count?, detail?}], warnings[...], passed[], draft, files, fingerprint}`(막는 것의 code 는 기록 설계 §10.9 의 표), draft = 프로젝트의 `generate_report`. **issue 는 없다.** 파일 이름은 프로젝트 기준 상대.
+- 프로젝트의 대상에서 `generate_report` 는 `03_계산서/` 의 새 초안(덮어쓰지 않는다) · 도장 「초안 · D-n · 확인 안 함」 · 「가정」 · 「검토 기록」 절. 답 `{draft, files (상대), folder: 'project', stamp}`. 프로젝트 밖은 그대로.
+- **발행은 사람만**: 다리가 `panel.recordsPerson.issuePreview()` → `{label, folder, blockers, warnings, passed, draft, files, fingerprint, nonce, expiresAt}` 를 보이고, 사람이 「R<n> 발행」 을 누르면 `panel.recordsPerson.issue({fingerprint, nonce})`(약속 — Promise; 인쇄를 기다린다) → `{item, folder, files[{path, sha256, size, role}], manifest}`. 거절: 숫자가 지남 · 이미 씀(「미리보기를 다시」), 그 사이 바뀜(지문), 막는 것이 있음, 기록에 없는 폴더. 실패하면 「실패한 발행」(documents list 의 `failed`) — 같은 차수로 다시.
+- `recordsChanged` 의 `documents` 종류.
+
+**R5-3 화면(데스크톱 담당)이 따를 것:** 문서 탭은 `documents list` 를 그린다(초안 「일치 · 낡음」 과 까닭, 발행 줄 「R0 · 날짜 · 발행자 · 그대로 / 고쳐짐」 — 고쳐짐이면 다른 파일 목록). 「R<n> 발행」 단추는 사람의 길(`/api/person/issue/preview` → `issuePreview`, `/api/person/issue` → `issue`)로만, 미리보기 창에 막는 것(한국어 이름 — code 로 가른다) · 경고 · 통과 · 묶일 파일 · 차수 · 도장 찍힌 최종본의 첫 쪽(초안의 ReportDoc 을 그리기에 `meta.stamp = {kind: 'issued', label, reviewer, date}` 로 — 미리보기 그림) · 확인의 뜻(D15)을 보이고, 막는 것이 있으면 단추를 끈다. 2 분이 지나면 미리보기를 다시 연다. 「초안으로 내보내기」 는 막는 것과 무관하게(사람의 저장 대화상자 — R1 의 export 길). 발행본은 읽기 전용으로 연다(이미 그렇다). 발행 · 확인 단추를 MCP 중계로 보내지 않는다.
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).

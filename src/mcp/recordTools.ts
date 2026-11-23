@@ -168,3 +168,17 @@ export function alternatives(server: McpServer, io: RecordToolIo): void {
         },
         async (args) => { const { action: op, ...rest } = args; return io.post({ ...rest, action: "alternatives", op }).then(io.reply); });
 }
+
+// ── R5-1: 문서 — 목록 · 발행 전 점검 · 초안(발행은 사람만 — 이 도구에 issue 는 없다) ─────────────────────
+export function documents(server: McpServer, io: RecordToolIo): void {
+    server.tool("documents",
+        "Documents of the open case: list (drafts in 03_계산서 with current / stale and why, issues R0, R1 … with their hash check — 그대로 · 고쳐짐 · 없어짐, failed issues), get {item}, check (the pre-issue check the person's issue preview runs: blockers — no design result, stale results, not evaluated, NG, open questions, incomplete reviews, provisional assumptions, unsaved changes, no draft / stale draft, damaged records, read-only, an issue folder the records do not know — warnings and what passed), draft {kind: 'calc' | 'buckling'} (a new draft file, never overwriting one; same as generate_report inside a project). Issuing is the person's action in StCFSD (preview with a one-time number, then issue) — no tool can issue; tell the person what blocks it. File names are relative to the project folder." + TEXT_NOTE,
+        {
+            action: z.enum(["list", "get", "check", "draft"]),
+            item: z.string().max(12).optional().describe("get: a draft (D-3) or an issue (R0)"),
+            kind: z.enum(["calc", "buckling"]).optional().describe("draft: the calculation report (default) or the buckling report"),
+            format: z.enum(["html", "pdf", "both"]).optional().describe("draft: files to write (default both)"),
+            report_units: z.enum(["US", "SI"]).optional().describe("draft: units of the report (default US)"),
+        },
+        async (args) => { const { action: op, ...rest } = args; return io.post({ ...rest, action: "documents", op }).then(io.reply); });
+}

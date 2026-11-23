@@ -84,40 +84,37 @@ export function enumerateChecks(scope: string, result: any): Array<{ key: string
 }
 
 // ── 비교(D16) ────────────────────────────────────────────────────────
-export const COMPARE_TOL = { normal: 1e-6, longWavelengthGlobal: 1e-4 } as const;
-/** 정규 값이 같아야 하는 입력의 출처(사람 · 기준 · 재료 · 엔진 기본값 · 다른 항목의 결과가 아닌 것) */
+export const COMPARE_TOL = { normal: 1e-6, longWavelengthGlobal: 1e-4, absoluteNearZero: 1e-12 } as const;
+/** 정규 값이 같아야 하는 입력의 출처(사람 · 기준 · 재료 · 엔진 기본값 · 다른 항목의 결과가 아닌 것) — 엔진이 허용차 표지를 단 값은 빼고 */
 const EXACT_SOURCES = new Set(['user_input', 'specification', 'material', 'engine_default']);
-const GLOBAL_SYMBOL_RE = /^(F|M|P)[a-z]{0,3}cre$|^LF_global$|cre_signature$/i;
+const relTolOf = (x: any): number | null => (x && typeof x === 'object' && typeof x.rel_tol === 'number' && Number.isFinite(x.rel_tol) && x.rel_tol > 0 ? x.rel_tol : null);
 
-/** 항목이 FSM 의 긴 반파장 전체좌굴 값을 쓰는가(그 항목의 모든 수에 1e-4) — 엔진에 따로 표지가 없어 기호 · 출처로 고른다 */
-export function usesLongWavelengthGlobal(item: unknown): boolean {
-    let hit = false;
-    const walk = (o: any, depth: number) => {
-        if (hit || !o || typeof o !== 'object' || depth > 30) { return; }
-        if (Array.isArray(o)) { o.forEach((x) => walk(x, depth + 1)); return; }
-        if (typeof o.symbol === 'string' && GLOBAL_SYMBOL_RE.test(o.symbol) && o.source && o.source.kind === 'buckling_analysis'
-            && typeof o.source.method === 'string' && /^fsm/.test(o.source.method)) { hit = true; return; }
-        for (const v of Object.values(o)) { if (v && typeof v === 'object') { walk(v, depth + 1); } }
-    };
-    walk(item, 0);
-    return hit;
+/**
+ * 항목 · 결과 전체에 걸리는 허용차(엔진의 표지 — 검토 계약 §16.14): 검토 항목의 `numeric_tolerance.rel_tol`(그 항목의 모든 값),
+ * 없으면 1e-6. 값 하나의 `numeric.rel_tol` · DSM 사전의 `numeric_tolerance.fsm_long_wavelength.keys` 는 비교하며 그 자리에서.
+ */
+export function itemTolerance(item: unknown): number {
+    const t = item && typeof item === 'object' ? relTolOf((item as any).numeric_tolerance) : null;
+    return t ?? COMPARE_TOL.normal;
 }
 
 export interface ItemDifference { path: string; reviewed: unknown; current: unknown; why: 'text' | 'number' | 'input' | 'shape' }
 
 /**
- * 확인한 항목과 지금 항목 — 같은 내용인가(D16). 글 · 참거짓 · null 은 같아야 하고(id · 판정 · 조항 · 식 · 갈래 · 조건 글),
- * 입력 가운데 정규 값이 같아야 하는 출처의 값은 같아야 하고, 그 밖의 수는 상대 tol 안. 다른 곳은 20 개까지.
+ * 확인한 항목과 지금 항목 — 같은 내용인가(D16, 엔진 표지는 검토 계약 §16.14). 글 · 참거짓 · null 은 같아야 하고(id · 판정 · 조항 · 식 · 갈래 · 조건 글),
+ * 입력 가운데 사람 · 기준 · 재료 · 기본값에서 온 값은 정규 값이 같아야 하고(엔진이 허용차 표지를 단 값은 빼고), 그 밖의 수는 상대 허용차 안:
+ * 값에 `numeric` 이 있거나 항목에 `numeric_tolerance` 가 있거나 DSM 사전의 `fsm_long_wavelength.keys` 의 키이면 1e-4, 아니면 1e-6
+ * (0 근처는 절대 1e-12). 다른 곳은 20 개까지.
  */
 export function compareItems(reviewed: unknown, current: unknown): { same: boolean; tol: number; differences: ItemDifference[] } {
-    const tol = usesLongWavelengthGlobal(reviewed) || usesLongWavelengthGlobal(current) ? COMPARE_TOL.longWavelengthGlobal : COMPARE_TOL.normal;
+    const base = Math.max(itemTolerance(reviewed), itemTolerance(current));
     const diffs: ItemDifference[] = [];
     let count = 0;
     const add = (d: ItemDifference) => { count += 1; if (diffs.length < 20) { diffs.push(d); } };
-    const close = (a: number, b: number) => a === b || Math.abs(a - b) <= tol * Math.max(Math.abs(a), Math.abs(b));
-    const walk = (a: any, b: any, p: string, exact: boolean) => {
+    const close = (a: number, b: number, tol: number) => a === b || Math.abs(a - b) <= Math.max(tol * Math.max(Math.abs(a), Math.abs(b)), COMPARE_TOL.absoluteNearZero);
+    const walk = (a: any, b: any, p: string, exact: boolean, tol: number) => {
         if (typeof a === 'number' && typeof b === 'number') {
-            if (exact ? canonicalJson(a) !== canonicalJson(b) : !(Number.isFinite(a) && Number.isFinite(b) ? close(a, b) : Object.is(a, b))) {
+            if (exact ? canonicalJson(a) !== canonicalJson(b) : !(Number.isFinite(a) && Number.isFinite(b) ? close(a, b, tol) : Object.is(a, b))) {
                 add({ path: p, reviewed: a, current: b, why: exact ? 'input' : 'number' });
             }
             return;
@@ -129,19 +126,27 @@ export function compareItems(reviewed: unknown, current: unknown): { same: boole
         if (Array.isArray(a) !== Array.isArray(b)) { add({ path: p, reviewed: '(shape)', current: '(shape)', why: 'shape' }); return; }
         if (Array.isArray(a)) {
             if (a.length !== b.length) { add({ path: `${p}.length`, reviewed: a.length, current: b.length, why: 'shape' }); }
-            for (let i = 0; i < Math.min(a.length, b.length); i += 1) { walk(a[i], b[i], `${p}[${i}]`, exact); }
+            for (let i = 0; i < Math.min(a.length, b.length); i += 1) { walk(a[i], b[i], `${p}[${i}]`, exact, tol); }
             return;
         }
-        // 입력 물리량: 출처가 사람 · 기준 · 재료 · 기본값이면 값은 정규 값이 같아야
-        const exactHere = exact || (!!a.source && typeof a.source === 'object' && EXACT_SOURCES.has(a.source.kind) && 'value' in a);
+        // 이 값의 표지(numeric.rel_tol) — 그 값은 허용차로(사람이 준 값이어도: 서명곡선 끝에서 읽은 Fcre 같은 것)
+        const own = Math.max(relTolOf(a.numeric) ?? 0, relTolOf(b.numeric) ?? 0);
+        const here = own > 0 ? Math.max(tol, own) : tol;
+        // 입력 물리량: 출처가 사람 · 기준 · 재료 · 기본값이면 값은 정규 값이 같아야(표지가 없을 때)
+        const exactHere = exact || (own === 0 && !!a.source && typeof a.source === 'object' && EXACT_SOURCES.has(a.source.kind) && 'value' in a);
+        // DSM 사전: 긴 반파장에서 읽은 키
+        const lw = a.numeric_tolerance && typeof a.numeric_tolerance === 'object' ? a.numeric_tolerance.fsm_long_wavelength : null;
+        const lwKeys = new Set<string>(lw && Array.isArray(lw.keys) ? lw.keys.filter((k: unknown) => typeof k === 'string') : []);
+        const lwTol = relTolOf(lw) ?? COMPARE_TOL.longWavelengthGlobal;
         const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
         for (const k of keys) {
             if (!(k in a) || !(k in b)) { add({ path: `${p}.${k}`, reviewed: k in a ? '(present)' : '(absent)', current: k in b ? '(present)' : '(absent)', why: 'shape' }); continue; }
-            walk(a[k], b[k], p ? `${p}.${k}` : k, exactHere && k === 'value' ? true : exact);
+            const kt = lwKeys.has(k) ? Math.max(here, lwTol) : here;
+            walk(a[k], b[k], p ? `${p}.${k}` : k, exactHere && k === 'value' ? true : exact, kt);
         }
     };
-    walk(reviewed, current, '', false);
-    return { same: count === 0, tol, differences: diffs };
+    walk(reviewed, current, '', false, base);
+    return { same: count === 0, tol: base, differences: diffs };
 }
 
 // ── 줄 ──────────────────────────────────────────────────────────────

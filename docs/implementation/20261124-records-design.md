@@ -1001,3 +1001,42 @@ R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 �
 - **바깥(K2 · K3) 행동은 바뀌지 않았다**: 엔진 요청 · 프로젝트 밖의 길을 건드리지 않는다. 확인 · 대안 · 정리는 프로젝트의 대상에서만.
 
 **R4-2 · R4-3 화면(데스크톱 담당)이 따를 것**: 보기 계약 §4h.
+
+
+### 10.9 R5-1 문서 · R5-2 발행 — 호스트 쪽 (2026-11-24) · 엔진의 허용차 표지
+
+**발행 전 점검(D4, 지은 그대로 — 호스트 `_issueCheck` + 데스크 `issueCheckData`; documents check · 사람의 미리보기 · 발행이 같은 함수)**
+
+| code | 막는 것 | 풀리는 때 |
+|---|---|---|
+| `no-design-result` | 지금 부재 설계 결과가 없음 | 설계를 돌림 |
+| `stale-results` | 지금 결과가 기록한 마지막 실행과 다르거나(differs) 낡음 · 다른 엔진 | 다시 돌림 |
+| `not-evaluated` | 지금 검토 항목 가운데 미평가(개수) | 입력을 채워 다시 돌림 |
+| `ng` | 불합격 항목(개수) | 설계를 바꿈 |
+| `open-questions` | 대상 · 프로젝트의 판단 요청 가운데 답이 없거나 사람이 그 판에 확인하지 않은 것 | 답(AI 가 옮겨 적음) + 사람의 확인 |
+| `incomplete-reviews` | 확인 n < N 또는 다시 확인 > 0(N = 0 도) | 사람이 모두 확인 |
+| `provisional-assumptions` | `assumptions.blocksIssue`(임시 · 현장 확인 · 사람이 그 판에 확인하지 않은 확정 · AI 가 닫은 것) | 사람의 확인(D7) · 프로그램이 닫음 |
+| `unsaved-changes` | 저장 안 한 변경 | 저장 |
+| `no-draft` · `stale-draft` | 계산서 초안이 없거나 그 근거(내용 지문 · 엔진 · 결과마다 실행 · 가정 · 업무 · 확인의 지문)가 지금과 다름 | 새 초안 |
+| `damaged-records` | 기록의 깨진 줄 · 틈 · 줄어듦 | 기록을 되살림 |
+| `read-only` | 대상 · 프로젝트가 읽기 전용 | — |
+| `unknown-issue-folder` | 기록에 없는 `R<n>` 폴더가 있음(실패한 발행으로 적힌 것은 빼고) — 다시 쓰지 않는다 | 사람이 그 폴더를 치움 |
+
+경고: `report-notices`(설계 결과의 경고 수) · `changed-sources`(원자료가 바뀜 · 없어짐) · `edited-previous-issue`(지난 발행본이 고쳐짐 · 없어짐) · `same-as-previous-issue`(지난 발행과 같은 초안). 「초안으로 내보내기」 는 막지 않는다(R5-3 의 사람 길).
+
+**초안(R5-1)**: 프로젝트의 쓸 수 있는 대상이 열려 있으면 `generate_report`(과 `documents draft`)는 `03_계산서/<대상>.calc.r<판>[-k].html|pdf` 의 **새 파일**(임시 이름에 쓰고 배타 복사 — 덮어쓰지 않는다)과 `draft` 줄(ReportDoc 사본 · `docFp` · 근거 · 도장 `{kind: 'draft', label: 'D-n', notChecked}`)을 쓴다. 계산서 끝에 「가정」 절과 「검토 기록」 절(검토 항목마다 확인 · 검토자 · 때, 확인 n/N, D15 의 말). 프로젝트 밖은 그대로(K3 고정값이 증명).
+
+**발행(R5-2) — 차례와 디스크**
+1. `person.issuePreview()` → `{label: 'R<n>', folder, blockers, warnings, passed, draft, files, fingerprint, nonce, expiresAt}` — 일회용 숫자는 2 분, 한 번(`RecordsDesk.ISSUE_NONCE_MS`). 디스크: 아무것도.
+2. `person.issue({fingerprint, nonce})` — 숫자가 지났거나 썼으면 거절, 점검을 다시 해 지문이 다르면 거절, 막는 것이 있으면 거절.
+3. 실패한 발행으로 적힌 같은 차수의 폴더가 있으면 `R<n>.failed-<k>` 로 옮기고 `issue-failed {movedTo}` 줄. 기록에 없는 폴더면 거절.
+4. `04_발행본/<대상>/R<n>/` 을 배타적으로 만든다(있으면 던진다).
+5. 초안의 ReportDoc 사본을 도장만 바꿔(`{kind: 'issued', label, reviewer, date}`, D14) 다시 그린 HTML(인쇄 틀)과 PDF(닫힌 인쇄 길 — `pdfPrint` 의 모든 층)를 `wx` 로: `<대상>.calc.R<n>.html` · `.pdf`.
+6. `manifest.json`(`stcfsd-issue/1` — 프로젝트 · 대상 · 차수 · 때 · 발행자 · 엔진 · 내용 지문 · 실행 · 초안 · 파일마다 sha256 · 크기 · 점검 지문 · 경고)을 마지막에 `wx` 로.
+7. 서명된 `issue` 줄(행위자 person — 목록 파일의 해시 · 파일마다 해시). 3 – 7 의 어디서든 실패하면 `issue-failed`(program) 줄을 남기고 폴더는 그대로 — 세지 않는다, 다음 시도가 같은 차수를 쓴다.
+- 볼 때마다(`documents list` · 점검의 경고) 목록 파일 · 파일의 해시를 견준다: 그대로 · 고쳐짐 · 없어짐 · 더해진 파일.
+- 사본 정리는 발행이 가리키는 초안의 실행을 지우지 않는다.
+
+**⚔(records_issue_contract)**: 막는 것 열둘이 하나씩 생기고 풀린다. R0 을 낸 뒤 모델을 바꿔 저장해도 R0 의 세 파일이 바이트까지 그대로, 손으로 고치면 「고쳐짐」. 미리보기 뒤의 변경 · 지난 숫자 · 쓴 숫자 → 거절. 목록 파일을 쓸 때 디스크가 찬 것(시험 주입) → R1 이 「실패한 발행」(세지 않음), 다음 시도가 그 폴더를 `R1.failed-1` 로 옮기고 R1 을 낸다. AI 는 발행하지 못한다: `documents` 에 issue 를 실으면 스키마가 거절, 동작 이름 일곱을 진짜 토큰으로 직접 — 오류, 웹뷰 메시지 — 아무것도, 사람 얼굴은 MCP 문맥 안에서 던진다. 진짜 인쇄(보이지 않게)로 R0 · R1 의 PDF.
+
+**엔진의 허용차 표지(663771d, 검토 계약 §16.14)**: 확인의 비교가 기호 · 출처로 짐작하지 않고 표지를 쓴다 — 항목의 `numeric_tolerance.rel_tol`(그 항목의 모든 값), 값의 `numeric.rel_tol`(사람이 준 값이어도 정규 값 비교가 아니라 허용차), DSM 사전의 `numeric_tolerance.fsm_long_wavelength.keys`, 그 밖은 1e-6(0 근처 절대 1e-12). **호스트는 서명곡선 끝에서 읽은 `Fcre` · `Mcre` · `Pcre` 를 엔진에 보내지 않는다**(`requests.ts` 의 설계 요청에 `Fcre` 가 없다 — 엔진의 전체좌굴은 폐형식). `Fcre` 는 AI 가 MCP 도구(`aisi_design_compression` · `flexure` · `combined`)로만 줄 수 있어, 그 셋에 `Fcre_basis: 'fsm_long_wavelength'` 인자를 더했다(엔진으로 그대로).
