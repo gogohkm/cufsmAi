@@ -213,7 +213,7 @@ AISI Design Manual 의 연속 퍼린 예제는 이 가정을 **가정으로 밝�
 
 | `lap_region` | `lap_restrained` | `Lb` · `Mcrd` | `member.flexure.global` (F2) | `member.flexure.distortional` (F4) | 결과 |
 |---|---|---|---|---|---|
-| `true` | `true` | 무관 | 엔진이 Lb = 0, Cb = 1.0 으로 평가(Fcre → ∞, Fn = Fy). 계산 과정의 Lb · Cb 출처 `{kind: 'user_input', key: 'lap_restrained', note: …}`. 준 Lb 가 0 이 아니면 쓰지 않고 `warnings` 에 밝힘 | `not_applicable`, `restraint_source: {kind: 'user_input', key: 'lap_restrained'}`, Mnd = My | `assumptions` 에 아래 (가) |
+| `true` | `true` | 무관 | 엔진이 Lb = 0, Cb = 1.0 으로 평가(Fcre → ∞, Fn = Fy). 계산 과정의 Lb · Cb 출처 `{kind: 'user_input', key: 'lap_restrained', note: …}`. 준 Lb(≠ 0) · Cb(≠ 1.0)는 쓰지 않고 `warnings` 에 한 줄씩 | `not_applicable`, `restraint_source: {kind: 'user_input', key: 'lap_restrained'}`, Mnd = My — **`dsm` 에 Mcrd 가 있어도**(퍼린 경로는 단일 단면으로 계산한 dsm 전부를 넘긴다). 쓰지 않는 dsm 값: `Mcrd` · `M_Lcrd` · `Lcrd` (엔진 상수 `LAP_IGNORED_DSM`)와 β 입력 `dist_M1_M2` · `dist_Lm` — 준 것은 `warnings` 에 한 줄. `Mcrl` · `M_Lcrl` · `My` · `M_sign` 은 그대로 쓴다(국부 좌굴은 가정 밖) | `assumptions` 에 아래 (가) |
 | `true` | 없음 · `false` | Lb 줌 | 그 Lb 로 평가(보통 구간) | Mcrd 줌 → 평가 | — |
 | `true` | 없음 · `false` | Lb 없음 | `not_evaluated`, reason 에 (나). 엔진은 길이를 짓지 않는다(120 in 기본값을 쓰지 않음): Lb = 0 을 **상한**(Mne ≤ My)으로만 계산해 참고값으로 두고(출처 `engine_default`, note 에 상한), 그 상한으로도 1 을 넘으면 `fail`(가정 없이 강도는 더 작다) | Mcrd 없음 → `not_evaluated`, reason 에 (다) | 불합격이 없으면 `pass` None, `not_evaluated` 목록에 (나) · (다) |
 | `true` | — | — | `distortional_not_applicable` 을 함께 주면 무시하고 `warnings` 에 `lap_region: distortional_not_applicable is ignored for a lap region — the restraint must be stated as lap_restrained = true` | | |

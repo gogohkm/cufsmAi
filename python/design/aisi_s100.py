@@ -45,6 +45,10 @@ LAP_DIST_STATED = LAP_STATED      # 옛 이름(2026-11-24 첫 판) — 같은 �
 LAP_STATEMENT_KEYS = ('lap_restrained', 'distortion_restrained')
 
 
+# 진술이 있는 랩 구간에서 쓰지 않는 dsm 값(F4 해당 없음) — 퍼린 경로가 단일 단면으로 계산해 넘긴다.
+LAP_IGNORED_DSM = ('Mcrd', 'M_Lcrd', 'Lcrd')
+
+
 def lap_restraint_stated(params: dict) -> bool:
     return any(params.get(k) is True for k in LAP_STATEMENT_KEYS)
 
@@ -1321,7 +1325,20 @@ def _design_flexure(params: dict) -> dict:
             lap_notes.append(f"lap_region with lap_restrained = true: the given Lb = {params.get('Lb')} in is not used "
                              '— the Manual assumption (lapped section restrained against lateral-torsional buckling) '
                              'applies (Lb = 0)')
-        params = {**params, 'Lb': 0.0, 'Cb': 1.0, _LAP_LB: True}
+        if params.get('Cb') is not None and params.get('Cb') != 1.0:
+            lap_notes.append(f"lap_region with lap_restrained = true: the given Cb = {params.get('Cb')} is not used "
+                             '(Lb = 0 under the Manual assumption; Cb = 1.0)')
+        # F4 는 해당 없음(Manual 가정) — 단일 단면으로 계산해 넘어온 뒤틀림 값은 쓰지 않는다(계약 §6.3).
+        _dsm_in = params.get('dsm') or {}
+        _ign = [k for k in LAP_IGNORED_DSM if (_dsm_in.get(k) or 0)]
+        if _ign:
+            lap_notes.append('lap_region with lap_restrained = true: dsm ' + ', '.join(
+                f'{k} = {_dsm_in.get(k)}' for k in _ign) + ' not used — F4 distortional buckling is not applicable '
+                'under the Manual assumption (lapped section restrained against distortional buckling)')
+        _dsm_lap = {k: v for k, v in _dsm_in.items() if k not in LAP_IGNORED_DSM}
+        params = {**params, 'Lb': 0.0, 'Cb': 1.0, _LAP_LB: True, 'dsm': _dsm_lap}
+        for k in ('dist_M1_M2', 'dist_Lm'):
+            params.pop(k, None)
     elif lap_region and 'Lb' not in params:
         # 진술도 Lb 도 없다: 120 in 같은 길이를 지어 횡비틀림을 판정하지 않는다. Lb = 0 은 상한(Mne ≤ My)으로만 —
         # 그 값으로 불합격이면 진짜 불합격(가정 없이 강도는 더 작다), 합격이면 F2 는 미평가(LAP_LTB_UNSTATED).

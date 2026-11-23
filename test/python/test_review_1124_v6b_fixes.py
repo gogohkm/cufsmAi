@@ -227,3 +227,55 @@ def test_small_labels():
     c = design_connection(dict([p for nm, _, p in cases._connections() if nm == 'screw out of scope d'][0], Pu=3.0))
     fails = [x for x in c['design_checks'] if x['verdict'] == 'fail' and x['clause'].startswith('J4')]
     assert fails and all(x.get('out_of_scope') == 'J4' for x in fails)
+
+
+ZP = dict(A=0.822, Sf=1.94, rx=3.04, ry=0.83, ro=3.17, J=0.000954, Cw=11.3, xo=0.0, I22=0.25, t=0.059, R=0.1875)
+Z8 = dict(type='Z', depth=8.0, flange_width=2.25, lip_depth=0.91, thickness=0.059, r=0.1875)
+# 호스트가 부르는 꼴 그대로: 단일 단면의 dsm 전부(Mcrd 포함) + 구간의 Lb · Cb · β 입력 (II-2A/II-2B 의 8ZS2.25x059)
+HOST_DSM = dict(Mcrl=91.0, Mcrd=101.0, Lcrd=20.8, M_Lcrl=5.1, M_Lcrd=20.8, M_sign='-')
+
+
+def _host_lap_call(**kw):
+    p = dict(member_type='flexure', design_method='ASD', Fy=55.0, Fu=70, section_type='Z', props=dict(ZP),
+             section=dict(Z8), moment_sign='-', lap_region=True, Lb=49.1, Cb=1.67, dist_M1_M2=0.0, dist_Lm=49.1,
+             dsm=dict(HOST_DSM), Mu=0.5 * 4.95 * 12, Vu=0.5 * 1.29)
+    p.update(kw)
+    return design_member(p)
+
+
+def test_stated_lap_region_ignores_single_section_F4_and_Lb_Cb_as_the_host_calls_it():
+    """계약 §6.3: 진술이 있으면 dsm 에 Mcrd 가 있어도 F4 는 not_applicable, 준 Lb · Cb 대신 Lb = 0 · Cb = 1.0.
+    Manual II-2A 가운데 지점 랩(M 4.95 kip-ft, 두 부재 → 부재당 절반), II-2B 의 부재 값: Mne/Ω = My/Ω = 1.94·55/1.67,
+    Mnℓ/Ω = 51.6 kip-in (Manual 인쇄값). (앞의 시험은 dsm 에 Mcrd 를 넣지 않아 이 결함을 놓쳤다.)"""
+    r = _host_lap_call(lap_restrained=True)
+    c = {x['id']: x for x in r['design_checks']}
+    d = c['member.flexure.distortional']
+    assert d['verdict'] == 'not_applicable' and d['restraint_source'] == {'kind': 'user_input', 'key': 'lap_restrained'}
+    assert abs(c['member.flexure.global']['capacity']['value'] - 1.94 * 55 / 1.67) <= 1e-9
+    assert abs(c['member.flexure.local']['capacity']['value'] - 51.6) <= 0.005 * 51.6
+    assert c['member.flexure.global']['verdict'] == c['member.flexure.local']['verdict'] == 'pass'
+    w = ' '.join(r['warnings'])
+    assert 'Lb = 49.1 in is not used' in w and 'Cb = 1.67 is not used' in w and 'Mcrd = 101.0' in w
+    assert r['pass'] is True and abs(r['design_strength'] - 51.6) <= 0.005 * 51.6
+
+
+def test_unstated_lap_region_mirror_cases():
+    """진술 없음: Mcrd · Lb 를 주면 그 값으로 평가, 없으면 not_evaluated(이유는 입력 이름과 Manual 인용)."""
+    r = _host_lap_call()
+    c = {x['id']: x for x in r['design_checks']}
+    assert c['member.flexure.distortional']['verdict'] in ('pass', 'fail')       # 준 Mcrd 로 평가
+    assert c['member.flexure.global']['verdict'] in ('pass', 'fail')             # 준 Lb 로 평가
+    lb = [i for s in c['member.flexure.global']['steps'] for i in s['inputs'] if i['symbol'] == 'KyLy']
+    assert lb and lb[0]['value'] == 49.1
+    n = _host_lap_call(dsm=dict(Mcrl=91.0, M_sign='-'))
+    p = {k: v for k, v in dict(member_type='flexure', design_method='ASD', Fy=55.0, Fu=70, section_type='Z',
+                                 props=dict(ZP), section=dict(Z8), moment_sign='-', lap_region=True,
+                                 dsm=dict(Mcrl=91.0, M_sign='-'), Mu=0.5 * 4.95 * 12, Vu=0.5 * 1.29).items()}
+    m = design_member(p)
+    cn = {x['id']: x for x in n['design_checks']}
+    cm = {x['id']: x for x in m['design_checks']}
+    assert cn['member.flexure.distortional']['verdict'] == 'not_evaluated'
+    assert LAP_DIST_UNSTATED in cn['member.flexure.distortional']['reason']
+    assert cm['member.flexure.global']['verdict'] == 'not_evaluated' and LAP_LTB_UNSTATED in \
+        cm['member.flexure.global']['reason']
+    assert n['pass'] is None and m['pass'] is None
