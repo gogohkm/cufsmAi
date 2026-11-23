@@ -671,6 +671,11 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
         break;
       }
       if (c === 'reportResult') { break; }
+      // 읽기 전용 대상의 거절(부호 host.readonly.* — 8f52455) — 띠가 까닭과 두 길을 이미 보인다. 받지 않은 것을 알린다
+      if (typeof d.refusal?.code === 'string' && d.refusal.code.startsWith('host.readonly')) {
+        toast(`읽기 전용 — 호스트가 받지 않았다(${c === 'analysisError' ? '해석 실행' : `칸 ${Array.isArray(d.refusal.keys) ? d.refusal.keys.length : 0}`}) · 「새 검토 대상으로」 또는 잠금 넘겨받기`, 'warning');
+        const band = $('recband'); band.classList.remove('flash'); void band.offsetWidth; band.classList.add('flash'); band.setAttribute('data-refused', d.refusal.code);
+      }
       if (c === 'analysisStarted') { setRunning(true); }
       if (['analysisComplete', 'analysisError', 'analysisInvalidated', 'resultsCleared', 'dsmResult'].includes(c)) { setRunning(false); }
       if (NOTE[c]) { state.lastChange = { at: ev.at || Date.now(), text: NOTE[c] }; }

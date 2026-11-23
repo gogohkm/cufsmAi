@@ -23,7 +23,7 @@ import { api, last, mcp, type LastEntry } from './bridge';
 import { loadRecords } from './records';
 import { loadChanges } from './changes';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
-import { finder, looseList, noteList, type Finder, type Note } from './notices';
+import { fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
 
 export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
 export type StageState = 'ok' | 'stale' | 'none' | 'run' | 'unk';
@@ -295,7 +295,8 @@ function runOf(key: string, scope: Scope, label: string, where: string, us: any,
     key, area: scope, label, where, result: si, us, src,
     overall: us?.pass === true ? true : us?.pass === false ? false : null,
     utilization: typeof si?.utilization === 'number' ? si.utilization : null,
-    governing: typeof us?.governing_check === 'string' ? us.governing_check : null,
+    // 지배 검토의 이름 — 그 id 의 name_ko(notices.js forPage)
+    governing: typeof us?.governing_check === 'string' ? String(pageOf(us)?.governing_check ?? us.governing_check) : null,
     rows, points, neTexts, notChecked: looseList(us?.not_checked, find), notApplicable, warnings, assumptions, scope: scopeNotes,
   };
 }
@@ -589,8 +590,8 @@ export function isDefault(group: 'section' | 'material' | 'conditions'): boolean
 
 export function setTheme(t: 'dark' | 'light'): void { state.theme = t; }
 
-/** 퍼린 구간 이름 — 엔진의 이름에서 「a–b ft」 만 SI 응답의 구간 끝(m)으로 바꾼다(값은 SI 응답 그대로) */
-export function regionLabel(us: any, si: any, i: number): string {
-  const a = si?.start_ft, b = si?.end_ft;
-  return String(us?.label ?? us?.id ?? `구간 ${i + 1}`).replace(/[\d.]+\s*[–-]\s*[\d.]+\s*ft/, typeof a === 'number' && typeof b === 'number' ? `${a.toFixed(2)}–${b.toFixed(2)} m` : '$&');
+export function regionLabel(us: any, _si: any, i: number): string {
+  // 구간 이름표 — 호스트의 label_* 옆 필드(host.region.* 알림)를 이 화면의 단위(m)로(notices.js — 화면은 숫자 자리를 고쳐 쓰지 않는다)
+  if (us?.label !== undefined && us?.label !== null) { return fieldText(us, 'label'); }
+  return String(us?.id ?? `구간 ${i + 1}`);
 }

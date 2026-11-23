@@ -26,7 +26,7 @@ import { memberRuns, regionLabel, rowOfKey, state, type CheckRow, type Run } fro
 import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
-import { plainText } from './notices';
+import { fieldText, pageOf } from './notices';
 import { baseOf, BY_KO, changeOf, chg, KIND_RESULT_KO, sinceBase, type Change } from './changes';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
@@ -348,10 +348,10 @@ export function tablesFor(group: Group): DTable[] {
         const v = verdictOf(r.us?.result?.pass, '판정 없음');
         const run = state.runs.find(x => x.key === r.runKey);
         const k0 = (run?.rows.find(x => x.pass === false) ?? run?.rows[0])?.key ?? r.runKey;
-        return { key: k0, cells: [esc(plainText(r.us?.label ?? '')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
-          n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), typeof res.utilization === 'number' ? ratio(res.utilization, r.us?.result?.pass === false, `purlin:regions.${i}.result.utilization`) : none(), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(r.us?.result?.governing_check ?? ''))],
-          sort: [String(r.us?.label ?? ''), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
-          tsv: [String(r.us?.label ?? ''), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };
+        return { key: k0, cells: [esc(fieldText(r.us, 'label')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
+          n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), typeof res.utilization === 'number' ? ratio(res.utilization, r.us?.result?.pass === false, `purlin:regions.${i}.result.utilization`) : none(), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(pageOf(r.us?.result)?.governing_check ?? ''))],
+          sort: [fieldText(r.us, 'label'), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
+          tsv: [fieldText(r.us, 'label'), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };
       });
       if (rg.length) { t.push({ id: 'regions', title: '구간', cols: [{ t: '구간' }, { t: '시작 m', num: true }, { t: '끝 m', num: true }, { t: 'Mu kN·m', num: true }, { t: '판정비', num: true }, { t: '판정' }, { t: '지배' }], rows: rg }); }
     }
@@ -407,7 +407,7 @@ export function tablesFor(group: Group): DTable[] {
     const ls = state.lap ? (state.lap.si.fastener_design?.limit_states ?? []) : (state.conn?.si.limit_states ?? []);
     const pre = state.lap ? 'lap:fastener_design.limit_states' : 'conn:limit_states';
     out.push({ id: 'limits', title: '한계상태 · 패스너', note: 'kN · 엔진의 Rn · φ · 설계강도', cols: [{ t: '한계상태' }, { t: 'Rn', num: true }, { t: 'φ', num: true }, { t: '설계강도', num: true }, { t: '방향' }],
-      rows: ls.map((l: any, i: number) => ({ cells: [esc(String(l.name ?? '')), n4(l.Rn, `${pre}.${i}.Rn`, 'force'), n4(l.phi, `${pre}.${i}.phi`, 'none', 3), n4(l.design_strength, `${pre}.${i}.design_strength`, 'force'), esc(String(l.direction ?? ''))],
+      rows: ls.map((l: any, i: number) => ({ cells: [esc(fieldText(l, 'name')), n4(l.Rn, `${pre}.${i}.Rn`, 'force'), n4(l.phi, `${pre}.${i}.phi`, 'none', 3), n4(l.design_strength, `${pre}.${i}.design_strength`, 'force'), esc(String(l.direction ?? ''))],
         sort: [String(l.name ?? ''), sv(l.Rn), sv(l.phi), sv(l.design_strength), String(l.direction ?? '')], tsv: [String(l.name ?? ''), String(sv(l.Rn)), String(sv(l.phi)), String(sv(l.design_strength)), String(l.direction ?? '')] })), empty: '한계상태 없음' });
     return out;
   }

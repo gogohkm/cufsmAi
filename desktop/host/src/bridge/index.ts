@@ -193,8 +193,14 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       // K3: 검증 결과는 판(case_rev)과 수만 싣는다 — 새 화면은 그것을 신호로 호스트 동작 validate_design 을 다시 읽는다(본문 전체는 싣지 않는다)
       const vd = command === 'validationResult' ? (message as { data?: { items?: unknown[]; case_rev?: unknown; by?: unknown } }).data : undefined;
       const validation = vd ? { case_rev: typeof vd.case_rev === 'number' ? vd.case_rev : null, items: Array.isArray(vd.items) ? vd.items.length : 0, by: typeof vd.by === 'string' ? vd.by : null } : undefined;
+      // 8f52455: 읽기 전용 거절은 부호로(analysisError.error_code · caseAck.rejected[].reason_code — 글로 가르지 않는다). 부호와 칸 이름만 싣는다
+      const md = (message as { data?: any }).data;
+      const rej = command === 'caseAck' && Array.isArray(md?.rejected) ? md.rejected.filter((x: any) => x && typeof x.reason_code === 'string') : [];
+      const refusal = command === 'analysisError' && typeof md?.error_code === 'string' ? { code: String(md.error_code).slice(0, 80) }
+        : rej.length ? { code: String(rej[0].reason_code).slice(0, 80), keys: rej.slice(0, 20).map((x: any) => String(x.key ?? '').slice(0, 60)) } : undefined;
       bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq,
-        ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}), ...(validation !== undefined ? { validation } : {}) });
+        ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}), ...(validation !== undefined ? { validation } : {}),
+        ...(refusal !== undefined ? { refusal } : {}) });
     }
   }));
   subs.push(hub.onDidRefuseDispose.event(info => { bus.emit('webview:refused', 'host', { id: info.id, viewType: info.viewType }); }));

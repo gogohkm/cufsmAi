@@ -14,7 +14,7 @@ import { BRANCH_OF, CASE_FIELDS, caseTag } from './caseFields';
 import { modeSel } from './center';
 import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
-import { fastenerText, finder, noteLi, noteList, plainText, reasonNote, type Note } from './notices';
+import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
 import { baseOf, byTag, BY_KO, changeOf, chg, KIND_RESULT_KO, modelTag, staleCause, type Change } from './changes';
 import { stageNow } from './center';
 
@@ -166,14 +166,14 @@ function bucklingInfo(): string {
   const r3 = (label: string, cr: string, L: string, lf: string, t?: string) => `<tr><td${tip(t)}>${label}</td><td class="r">${num(d[cr], { src: `dsm:${fam}.${cr}`, kind: k, unit: false })}</td>`
     + `<td class="r">${num(d[L], { src: `dsm:${fam}.${L}`, kind: 'length', unit: false })}</td><td class="r">${num(d[lf], { src: `dsm:${fam}.${lf}`, kind: 'none', sig: 3 })}</td></tr>`;
   const tbl = `<table class="t"><thead><tr><th></th><th class="r">${sym}cr (${k === 'force' ? 'kN' : 'kN·m'})</th><th class="r">반파장 (mm)</th><th class="r">LF</th></tr></thead><tbody>`
-    + r3('국부', 'crl', 'Lcrl', 'LF_local', us.local_basis ? `근거: ${us.local_basis}` : undefined)
-    + r3('뒤틀림', 'crd', 'Lcrd', 'LF_dist', us.dist_basis ? `근거: ${us.dist_basis}` : undefined)
+    + r3('국부', 'crl', 'Lcrl', 'LF_local', us.local_basis ? `근거: ${fieldText(us, 'local_basis')}` : undefined)
+    + r3('뒤틀림', 'crd', 'Lcrd', 'LF_dist', us.dist_basis ? `근거: ${fieldText(us, 'dist_basis')}` : undefined)
     + r3('전체', 'cre', 'Lcre', 'LF_global', us.global_is_signature_asymptote ? '유효 길이를 주지 않아 서명 곡선의 끝값(global_is_signature_asymptote)' : undefined)
     + '</tbody></table>';
   const meta = table(row_('하중 계열', esc(FAMILY_KO[fam] ?? fam), tagFsm)
     + row_(`${fam === 'P' ? 'Py' : 'My'} (기준)`, num(d.P_y, { src: `dsm:${fam}.P_y`, kind: k }), tagFsm)
     + row_('기준 응력', num(dsm.si?.fy_used, { src: 'dsm:fy_used', kind: 'stress' }), tagFsm)
-    + row_('모드 식별', esc(String(us.classification_method ?? '—')), '')
+    + row_('모드 식별', esc(us.classification_method ? fieldText(us, 'classification_method') : '—'), '')
     + row_('극소 수', num(us.n_minima, { src: `dsm:${fam}.n_minima`, kind: 'none' }), ''));
   return hd('결과 · 좌굴 해석', `좌굴 해석 · ${FAMILY_KO[fam] ?? fam}`, `<span class="verdict ok">일치</span> <span class="dim">MCP get_dsm_values 와 같은 값</span>`, '')
     + sec('탄성 좌굴', tbl, tagFsm) + selectedLength() + sec('해석', meta)
@@ -219,10 +219,10 @@ function loadInfo(): string {
   const R: number[] = Array.isArray(g.R_envelope_max) ? g.R_envelope_max : [];
   return hd(`결과 · 하중 해석${L.from === 'purlin' ? ' · 퍼린 설계의 하중 해석' : ''}`, `지배 조합 — ${String(us.governing?.combo ?? '')}`, v, '')
     + sec('조합', table(row_('설계법', esc(String(us.design_method ?? '—')), tagLa)
-      + row_('해석', esc(String(us.analysis_method ?? '—')), tagLa)
+      + row_('해석', esc(us.analysis_method ? fieldText(us, 'analysis_method') : '—'), tagLa)
       + wl.map((w, i) => row_(`wu 경간 ${i + 1}`, num(w, { src: `loads:governing.governing_span_loads_plf.${i}`, kind: 'linload' }), tagLa)).join('')), '', '엔진의 지배 조합과 그 경간 하중(kN/m)')
     + sec('지점 반력(포락 최대)', table(R.map((r, i) => row_(`지점 ${String.fromCharCode(65 + i)}`, num(r, { src: `loads:governing.R_envelope_max.${i}`, kind: 'force' }), tagLa)).join('')))
-    + sec('처짐', table(defl.map((d, i) => row_(`경간 ${d.span ?? i + 1}`, `${num(d.delta_in, { src: `loads:deflection.per_span.${i}.delta_in`, kind: 'length' })} · L/${num(d.L_over_delta, { src: `loads:deflection.per_span.${i}.L_over_delta`, kind: 'none' })}`, tagLa)).join('')), '', String(us.deflection?.basis ?? ''))
+    + sec('처짐', table(defl.map((d, i) => row_(`경간 ${d.span ?? i + 1}`, `${num(d.delta_in, { src: `loads:deflection.per_span.${i}.delta_in`, kind: 'length' })} · L/${num(d.L_over_delta, { src: `loads:deflection.per_span.${i}.L_over_delta`, kind: 'none' })}`, tagLa)).join('')), '', us.deflection?.basis ? fieldText(us.deflection, 'basis') : '')
     + resultLists(us, us)
     + ((ne => (ne.length ? sec('미검토', ul(ne)) : ''))(noteList(us, 'not_evaluated', finder(us))));
 }
@@ -366,7 +366,7 @@ function lapRatios(x: any, lap: boolean): string {
   if (!lap) { return typeof x.utilization === 'number' ? row_('패스너', ratio(x.utilization, x.pass === false, `${pre}:utilization`), '') : ''; }
   const newShape = 'fastener_utilization' in x;
   const fast = newShape ? x.fastener_utilization : x.utilization;
-  return (newShape && typeof x.utilization === 'number' ? row_('지배', `${ratio(x.utilization, x.pass === false, 'lap:utilization')} <span class="faint" data-governing>${esc(String(x.governing_check ?? ''))}</span>`, '<span class="tag drv">엔진</span>') : '')
+  return (newShape && typeof x.utilization === 'number' ? row_('지배', `${ratio(x.utilization, x.pass === false, 'lap:utilization')} <span class="faint" data-governing>${esc(String(pageOf(x)?.governing_check ?? ''))}</span>`, '<span class="tag drv">엔진</span>') : '')
     + (typeof fast === 'number' ? row_('패스너 무리', ratio(fast, fast > 1, newShape ? 'lap:fastener_utilization' : 'lap:utilization'), '') : '')
     + (typeof x.flexure_dcr === 'number' ? row_('랩 구간 휨', ratio(x.flexure_dcr, x.flexure_dcr > 1, 'lap:flexure_dcr'), '') : '');
 }
@@ -376,7 +376,7 @@ function lapSectionRows(ss: any): string {
   const v = (x: unknown, kind: Kind) => (typeof x === 'number' ? `${sigText(si(x, kind) ?? x, 4)} <span class="u">${esc(LABEL_OF[kind])}</span>` : '<span class="faint">없음</span>');
   const where = [ss.support !== null && ss.support !== undefined ? `지점 ${esc(ss.support)}` : '', Array.isArray(ss.regions) && ss.regions.length ? `랩 구간 ${esc(ss.regions.join(', '))}` : ''].filter(Boolean).join(' · ');
   return row_('랩 단면 Se · Vn', `${v(ss.Se, 'modulus')} · ${v(ss.Vn, 'force')}`, `<span class="tag drv" data-section-source>${ss.Se === null || ss.Se === undefined ? '짓지 않음' : '퍼린 결과'}</span>`)
-    + row_('Se 의 출처', `<span data-section-from>${ss.Se === null || ss.Se === undefined ? esc(plainText(ss.reason ?? '')) : esc(plainText(ss.from ?? ''))}</span>${where ? ` <span class="faint">${where}</span>` : ''}`, '');
+    + row_('Se 의 출처', `<span data-section-from>${ss.Se === null || ss.Se === undefined ? esc(fieldText(ss, 'reason')) : esc(fieldText(ss, 'from'))}</span>${where ? ` <span class="faint">${where}</span>` : ''}`, '');
 }
 
 /** 검토 상태 키(case:<key>) → 가지 */

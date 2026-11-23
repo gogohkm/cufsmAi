@@ -18,7 +18,7 @@ import { bandVar, none, num, ratio, sigText } from './format';
 import { memberSvg } from './member';
 import { BUCKLING_METHOD_KO, SOURCE_KO, STEP_KO, VERDICT_KO, sectionLabel } from './names';
 import { allRows, POINT_KO, rowOfKey, state, type CheckRow, type Run, COMBO_KO, locWords } from './store';
-import { noteLi, plainText, reasonNote, type Note } from './notices';
+import { fieldText, noteLi, readerOf, reasonNote, type Note } from './notices';
 import { inputWhy } from './changes';
 import { kindOfQuantity, LABEL, si } from './units';
 import { caseTag, ENGINE_TO_CASE } from './caseFields';
@@ -31,7 +31,7 @@ export function toggleCard(key: string): void { if (expanded.has(key)) { expande
 export function qnum(q: any, base: string, o: { unit?: boolean; sig?: number } = {}): string {
   // 끝없는 값(계약 3절 · 9.8 — 횡좌굴 없음 → Fcre = ∞): 숫자로 싣지 않고 SI 로 바꾸지도 않는다 — ∞
   if (q && typeof q === 'object' && q.unbounded === true) {
-    return `<span class="num" data-unbounded="1" data-usrc="${esc(base)}value"${tip(q.reason ? plainText(q.reason) : '끝이 없다(엔진)')}>∞</span>`;
+    return `<span class="num" data-unbounded="1" data-usrc="${esc(base)}value"${tip(q.reason ? fieldText(q, 'reason') : '끝이 없다(엔진)')}>∞</span>`;
   }
   if (!q || typeof q !== 'object' || typeof q.value !== 'number' || !Number.isFinite(q.value)) { return none('값 없음'); }
   const kind = kindOfQuantity(q.quantity);
@@ -49,22 +49,27 @@ export function verdictSpan(v: string, extra = ''): string {
   return `<span class="verdict ${x.cls === 'na' ? 'un' : x.cls}" data-verdict="${esc(v)}"${extra}>${x.text}</span>`;
 }
 
-/** 출처 하나 → 꼬리표(+ 짧은 까닭) */
-export function sourceTag(src: any): string {
+/**
+ * 출처 하나 → 꼬리표(+ 짧은 까닭). raw = 엔진의 그 출처(US — 글은 notices.js readerCheck 로: 출처 이름 kind_ko · 방법 method_ko · 표지 flags_ko · note 를
+ * 한국어 · SI 로). src 는 수를 보일 SI 사본
+ */
+export function sourceTag(src: any, raw?: any): string {
   if (!src || typeof src !== 'object') { return ''; }
   const k = String(src.kind ?? '');
-  const t = SOURCE_KO[k];
+  const rd = raw && typeof raw === 'object' ? readerOf(raw) : null;
+  const t0 = SOURCE_KO[k];
+  const t = t0 && rd?.kind_ko ? { ...t0, t: String(rd.kind_ko) } : t0;
   if (!t || k === 'step' || k === 'specification') { return ''; }
   const why: string[] = [];
   if (k === 'buckling_analysis') {
-    if (src.method) { why.push(BUCKLING_METHOD_KO[src.method] ?? String(src.method)); }
+    if (src.method) { why.push(rd?.method_ko ?? BUCKLING_METHOD_KO[src.method] ?? String(src.method)); }
     if (src.half_wavelength && typeof src.half_wavelength.value === 'number') { why.push(`L ${sigText(src.half_wavelength.value, 4)} ${unitOfQ(src.half_wavelength)}`); }
     if (src.classification) { why.push(typeof src.classification === 'string' ? src.classification : 'cFSM 분류'); }
   }
   if (k === 'check' && src.id) { why.push(String(src.id)); }
-  if ((k === 'engine_default' || k === 'user_input' || k === 'material') && src.note) { why.push(plainText(src.note)); }
+  if ((k === 'engine_default' || k === 'user_input' || k === 'material') && src.note) { why.push(rd ? String(rd.note ?? '') : fieldText(src, 'note')); }
   if (k === 'load_analysis' && src.combination) { why.push(String(src.combination)); }
-  if (src.generated) { why.push('템플릿 자동 생성'); }
+  if (src.generated) { why.push(Array.isArray(rd?.flags_ko) ? rd.flags_ko.join(' · ') : '템플릿 자동 생성'); }
   return `<span class="tag ${t.cls}"${tip(t.tip)}>${t.t}</span>${why.length ? `<span class="why2">${esc(why.join(' · '))}</span>` : ''}`;
 }
 
@@ -127,9 +132,9 @@ function stepRow(st: any, si: any, base: string, k: number): string {
   const expr = typeof st?.expr === 'string' ? st.expr : '';
   const refs: string[] = [];
   if (st?.equation) { refs.push(`식 ${esc(String(st.equation))}`); }
-  ins.forEach((q: any) => { const t = sourceTag(q?.source); if (t && !refs.includes(t)) { refs.push(t); } });
+  ins.forEach((q: any, m: number) => { const t = sourceTag(q?.source, st?.inputs?.[m]?.source); if (t && !refs.includes(t)) { refs.push(t); } });
   if (ins.some((q: any) => q?.source?.rounded_to !== undefined || q?.rounded_to !== undefined) || st?.rounded_to !== undefined) { refs.push(`<span class="why2"${tip('엔진이 반올림한 값을 이 단계에 썼다(계약 5절) — 결과는 엔진의 값 그대로')}>반올림한 입력</span>`); }
-  if (st?.note) { refs.push(`<span class="why2">${esc(plainText(st.note))}</span>`); }
+  if (st?.note) { refs.push(`<span class="why2">${esc(fieldText(st, 'note'))}</span>`); }
   // 원문 식 자체가 US 단위로 쓰인 단계(계약 3절 · 9.9 — 예 Eq. J3.3.2-1): SI 화면은 그렇다고 밝힌다
   if (st?.expr_units === 'US') { refs.push(`<span class="tag def" data-expr-units="US"${tip(String(st.units_note ?? ''))}>US 단위로 쓴 식</span><span class="why2">${esc(String(st.units_note ?? ''))}</span>`); }
   const ref = refs.length ? `<span class="ref">${refs.join(' ')}</span>` : '';
@@ -190,12 +195,12 @@ function card(r: CheckRow, n: string, sel: string): string {
       const ref = r.si?.reference;
       const rn = reasonNote(r.us);
       body = `<div class="cbody dim"><div data-reason${rn?.code ? ` data-code="${esc(rn.code)}"` : ''}>${esc(rn?.text ?? '엔진이 까닭을 적지 않았다')}</div>${highestLine(r)}`
-        + (r.us?.steps_unavailable ? `<div class="why2">계산 과정 없음 — ${esc(plainText(r.us.steps_unavailable))}</div>` : '')
+        + (r.us?.steps_unavailable ? `<div class="why2">계산 과정 없음 — ${esc(fieldText(r.us, 'steps_unavailable'))}</div>` : '')
         + (ref && typeof ref === 'object' ? `<div class="why2" data-reference>${r.us?.out_of_scope ? `참고 — 적용 범위 밖(${esc(String(r.us.out_of_scope))})` : '참고(판정에 쓰지 않음)'}: ${ref.capacity ? `설계강도 ${qnum(ref.capacity, `${r.src}reference.capacity.`)}` : ''}${typeof ref.ratio === 'number' ? ` · 비 ${sigText(ref.ratio, 3)}` : ''}</div>` : '')
         + (steps.length ? `<div class="calc">${steps.map((st, k) => stepRow(st, stepsSI[k], `${r.src}steps.${k}.`, k)).join('')}</div>` : '')
         + '</div>';
     } else if (!steps.length) {
-      body = `<div class="cbody dim">계산 과정이 없다 — ${esc(r.us?.steps_unavailable ? plainText(r.us.steps_unavailable) : '엔진이 이 항목의 단계를 내지 않았다')}. 엔진이 준 것: `
+      body = `<div class="cbody dim">계산 과정이 없다 — ${esc(r.us?.steps_unavailable ? fieldText(r.us, 'steps_unavailable') : '엔진이 이 항목의 단계를 내지 않았다')}. 엔진이 준 것: `
         + `${r.si?.demand ? `소요 ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}${r.si?.capacity ? ` · 설계강도 ${qnum(r.si.capacity, `${r.src}capacity.`)}` : ''}${typeof r.ratio === 'number' ? ` · 비 ${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}` : ''}</div>`;
     } else {
       const fin = `<div class="row" data-final><span>판정</span><span>${r.us?.ratio_form ? '원문 좌변 ' : ''}${r.si?.demand ? `${esc(String(r.si.demand.symbol ?? ''))} ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}`
@@ -263,7 +268,7 @@ function inputsTables(r: CheckRow): string {
     const id = `${q.symbol}|${sk}|${q?.source?.key ?? ''}|${q.value}`;
     if (seen.has(id)) { return; }
     seen.add(id);
-    const tr = `<tr><td>${esc(String(q.symbol ?? ''))}${q?.source?.key && q.source.key !== q.symbol ? ` <span class="faint">${esc(String(q.source.key))}</span>` : ''}</td><td class="r">${qnum(q, `${r.src}steps.${k}.inputs.${m}.`)}</td><td>${sourceTag(q.source)}${caseSourceOf(q.source)}</td></tr>`;
+    const tr = `<tr><td>${esc(String(q.symbol ?? ''))}${q?.source?.key && q.source.key !== q.symbol ? ` <span class="faint">${esc(String(q.source.key))}</span>` : ''}</td><td class="r">${qnum(q, `${r.src}steps.${k}.inputs.${m}.`)}</td><td>${sourceTag(q.source, r.us?.steps?.[k]?.inputs?.[m]?.source)}${caseSourceOf(q.source)}</td></tr>`;
     if (['section_property', 'material', 'buckling_analysis', 'check'].includes(sk)) { left.push(tr); } else { right.push(tr); }
   }));
   const loc = r.si?.location;
@@ -276,7 +281,7 @@ function inputsTables(r: CheckRow): string {
   // 랩(daca0ac): 단면 강도 Se · Vn 의 출처 — 퍼린 결과의 그 지점 랩 구간에서 지었는가, 짓지 않았으면 그 까닭(엔진은 휨 검토를 판정 없음으로)
   const ss = r.scope === 'lap' ? state.lap?.us?.section_source : null;
   if (ss && typeof ss === 'object') {
-    const txt = ss.Se === null || ss.Se === undefined ? `짓지 않음 — ${plainText(ss.reason ?? '')}` : `${plainText(ss.from ?? '')}${ss.support !== null && ss.support !== undefined ? ` · 지점 ${String(ss.support)}` : ''}${Array.isArray(ss.regions) && ss.regions.length ? ` · ${ss.regions.join(', ')}` : ''}`;
+    const txt = ss.Se === null || ss.Se === undefined ? `짓지 않음 — ${fieldText(ss, 'reason')}` : `${fieldText(ss, 'from')}${ss.support !== null && ss.support !== undefined ? ` · 지점 ${String(ss.support)}` : ''}${Array.isArray(ss.regions) && ss.regions.length ? ` · ${ss.regions.join(', ')}` : ''}`;
     right.unshift(`<tr data-section-source><td>랩 단면 Se</td><td class="r">${typeof ss.Se === "number" ? `${sigText(si(ss.Se, "modulus") ?? ss.Se, 4)} mm³` : "—"}</td><td><span class="tag drv">출처</span><span class="why2">${esc(txt)}</span></td></tr>`);
   }
   if (r.combination) {
@@ -307,7 +312,7 @@ function demandsTable(r: CheckRow): string {
     seen.add(id);
     const loc = x.si?.location?.x;
     rows.push(`<tr><td>${esc(String(d.symbol ?? ''))} <span class="faint">${esc(x.name)}</span></td><td class="r">${qnum(d, `${x.src}demand.`)}</td><td>${esc(x.combination ? COMBO_KO(x.combination) : '—')}</td>`
-      + `<td class="r">${loc && typeof loc.value === 'number' ? qnum(loc, `${x.src}location.x.`) : '—'}</td><td>${sourceTag(d.source)}</td></tr>`);
+      + `<td class="r">${loc && typeof loc.value === 'number' ? qnum(loc, `${x.src}location.x.`) : '—'}</td><td>${sourceTag(d.source, x.us?.demand?.source)}</td></tr>`);
   }
   return `<table class="t"><thead><tr><th>항목</th><th class="r">소요</th><th>조합</th><th class="r">위치</th><th>출처</th></tr></thead><tbody>${rows.join('') || `<tr><td colspan="5">${none('소요 없음', '엔진이 소요를 받지 않았다 — 강도만 냈다')}</td></tr>`}</tbody></table>`;
 }

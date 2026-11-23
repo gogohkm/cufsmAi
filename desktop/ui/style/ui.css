@@ -315,3 +315,5 @@ svg rect.cpb { cursor: default; }
 [data-chg-go] { cursor: pointer; }
 [data-chg-go]:hover { text-decoration: underline; }
 .drawer tr.grp td { color: var(--fg-dim); font-size: 11px; }
+#recband.flash { animation: recflash 1.2s ease-out 1; }
+@keyframes recflash { from { box-shadow: inset 0 0 0 2px var(--warn); } to { box-shadow: inset 0 0 0 0 transparent; } }

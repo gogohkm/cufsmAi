@@ -2267,14 +2267,23 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
         btns:[...b.querySelectorAll('[data-rec]')].map(x=>x.dataset.rec+':'+x.textContent)} : null;})()`, 30_000, '읽기 전용 띠').catch(() => null);
       if (!band) { return { ok: false, detail: `띠 없음 · project ${short(JSON.stringify((await act({ action: 'get_full_state' }))?.project), 300)}` }; }
       await shot('r17_locked_1920_dark');
+      // 사람의 칸 편집(편집 상태) — 호스트가 caseAck.rejected[].reason_code 로 거절 → 화면은 부호로 알아본다(글로 가르지 않는다)
+      await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+      await sleep(500);
+      await wv(`D.querySelector('.tab-btn[data-tab="preprocessor"]').click(); return 1;`);
+      await sleep(300);
+      await wv(`const t=D.getElementById('design-fy'); t.value='333'; t.dispatchEvent(new Event('input',{bubbles:true})); t.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+      const refused = await waitFor(`document.getElementById('recband').getAttribute('data-refused')`, 15_000, '거절의 부호').catch(() => null);
+      await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+      await sleep(300);
       // AI 의 모델 편집(MCP 의 모델 동작) — 호스트가 거절하고 모델은 그대로
       const before = await mcp.tool('get_full_state');
       const sm = await mcp.tool('set_material', { E: 210000, v: 0.3, units: 'SI' });
       const after = await mcp.tool('get_full_state');
       const same = JSON.stringify(before.material) === JSON.stringify(after.material);
       return { ok: band.reason === 'locked-by-other-writer' && /다른 작성자가 잠그고 있다/.test(band.text) && /다른 설계자/.test(band.text) && band.scope && /입력 · 모델을 고치거나 다른 모델로 해석을 돌려도 받지 않는다/.test(band.text)
-        && band.btns.includes('as-new:새 검토 대상으로') && band.btns.includes('take-lock:넘겨받기') && !!sm.error && same,
-      detail: `띠 「${short(band.text.replace(/\s+/g, ' '), 140)}」 · 단추 ${band.btns.join(', ')} · AI 의 set_material → ${short(sm.error ?? '받음', 90)} · 재료 그대로 ${same}` };
+        && band.btns.includes('as-new:새 검토 대상으로') && band.btns.includes('take-lock:넘겨받기') && !!sm.error && same && refused === 'host.readonly.case',
+      detail: `띠 「${short(band.text.replace(/\s+/g, ' '), 140)}」 · 단추 ${band.btns.join(', ')} · 사람의 칸 편집 → 거절 부호 ${refused} · AI 의 set_material → ${short(sm.error ?? '받음', 90)} · 재료 그대로 ${same}` };
     } finally {
       // 심은 잠금을 걷고 내 대상으로 돌아간다(뒤의 해석이 읽기 전용에 걸리지 않게)
       try { fs.rmSync(lockFile, { force: true }); } catch { /* 없음 */ }
