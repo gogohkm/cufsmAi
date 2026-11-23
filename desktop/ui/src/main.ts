@@ -48,6 +48,8 @@ const ui = {
   by: 'person' as 'person' | 'program' | 'focus',
   /** 그린 뒤 보기에서 깜빡일 것 · 펼칠 표의 줄 */
   after: null as null | { flash?: boolean; table?: boolean; node?: number; elem?: number },
+  /** 찾기로 고른 절점 · 요소 — 그 줄을 다시 그린 뒤에도 표시한다(호스트의 메시지가 다시 그리게 해도 사라지지 않게). 다른 것을 고르면 풀린다 */
+  mark: null as null | { key: string; node?: number; elem?: number },
 };
 const STAGE_TO: Record<Stage, [Tab, string]> = {
   sec: ['model', 'sec'], fsm: ['result', 'fsm'], load: ['result', 'load'], chk: ['result', 'chk'], conn: ['result', 'conn'], val: ['work', 'val'],
@@ -210,6 +212,15 @@ function renderShare(): void {
 function afterRender(center: HTMLElement): void {
   const a = ui.after;
   ui.after = null;
+  // 찾기로 고른 절점 · 요소의 줄 — 다시 그릴 때마다(흔들기 · 스크롤은 처음 한 번만)
+  const mk = ui.mark && ui.mark.key === ui.sel[ui.tab] ? ui.mark : null;
+  if (!mk) { ui.mark = null; }
+  else if (!a) {
+    const tb = center.querySelector(`table[data-table="${mk.node !== undefined ? 'nodes' : 'elems'}"]`);
+    const want = String(mk.node ?? mk.elem);
+    const tr = [...(tb?.querySelectorAll('tbody tr') ?? [])].find(x => x.firstElementChild?.textContent === want) as HTMLElement | undefined;
+    tr?.classList.add('on');
+  }
   if (!a) { return; }
   if (a.flash) {
     const m = center.querySelector('.loc-mark, rect.selr, table.vt tr.ck.on, rect.bd[stroke="var(--accent)"], g.sel, .sec-geo') as Element | null;
@@ -405,7 +416,7 @@ function closeFind(): void { ui.find = null; render(); }
 function goHit(h: Hit): void {
   ui.find = null;
   ui.screen = 'review';
-  if (h.extra) { ui.after = { node: h.extra.node, elem: h.extra.elem }; }
+  if (h.extra) { ui.after = { node: h.extra.node, elem: h.extra.elem }; ui.mark = { key: h.key, node: h.extra.node, elem: h.extra.elem }; }
   if (ui.sheet && hasSheet(h.key)) { ui.sheet = h.key; }
   select(h.tab, h.key);
 }

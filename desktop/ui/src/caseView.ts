@@ -86,7 +86,7 @@ export function branchKids(b: Branch): Array<{ k: string; t: string; vHtml: stri
   }
   if (b === 'ld') { return ['loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL'].map(k => kid(k, CASE_KO[k].split(' ')[0])).concat([kid('chkPatternLoading', '부분재하')]); }
   if (b === 'dc') { return [kid('designMethod', '설계법'), kid('Lb', 'Lb'), kid('Cb', 'Cb'), kid('Mux', 'Mux'), kid('Pu', 'Pu'), kid('Vu', 'Vu'), kid('wcN', '지압 길이 N')]; }
-  if (b === 'cj') { return [kid('connFastenerType', '랩 패스너'), kid('connLapLeft', '랩 좌'), kid('connLapRight', '랩 우'), kid('connNRows', '열 수'), kid('connSingleType', '단일 접합')]; }
+  if (b === 'cj') { return [kid('connFastenerType', '랩 패스너'), ...('connLapSupport' in x.inputs ? [kid('connLapSupport', '랩 지점')] : []), kid('connLapLeft', '랩 좌'), kid('connLapRight', '랩 우'), kid('connNRows', '열 수'), kid('connSingleType', '단일 접합')]; }
   return [kid('fy', '설계 Fy'), kid('fu', '설계 Fu'), kid('presteelGrade', '강종')];
 }
 

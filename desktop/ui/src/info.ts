@@ -5,14 +5,14 @@
  * `지정`(누군가 정함 — 누가인지는 R2) / `단면` · `좌굴 해석`(다른 결과에서 나옴). 엔진의 경고 · 가정 · 범위는 세 목록으로 따로 보인다.
  */
 import { esc, tip } from './dom';
-import { itemText, none, num, ratio, ratioText, unitOf, verdictOf } from './format';
+import { itemText, none, num, ratio, ratioText, sigText, unitOf, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO, VERDICT_KO } from './names';
 import { assumptionLines, isDefault, memberRuns, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
 import { demandCapacity, gaugeHtml, highestLine, qnum, ratioFormTag, unText } from './sheet';
 import { BRANCH_TITLE, caseNotes, caseReady, caseTables, type Branch } from './caseView';
 import { BRANCH_OF, CASE_FIELDS, caseTag } from './caseFields';
 import { modeSel } from './center';
-import { si, UNITS_NOTE, type Kind } from './units';
+import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
@@ -300,16 +300,38 @@ function connInfo(): string {
   return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `<span class="verdict ${v.cls}">${v.text}</span> ${typeof x.utilization === 'number' ? `<span class="big">${ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`)}</span>` : ''}`
     + (s.state === 'unk' ? ` <span class="dim">${esc(s.note)}</span>` : ''), '')
     + notice
-    + sec('판정비', table((typeof x.utilization === 'number' ? row_('패스너', ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`), '') : '')
-      + (typeof x.flexure_dcr === 'number' ? row_('랩 구간 휨', ratio(x.flexure_dcr, x.flexure_dcr > 1, 'lap:flexure_dcr'), '') : '')))
+    + sec('판정비', table(lapRatios(x, !!lap)))
     + (lap ? sec('입력과 출처', table(
       row_('랩 길이', `${num(state.lap?.si.lap_left_in, { src: 'lap:lap_left_in', kind: 'length', unit: false })} | ${num(state.lap?.si.lap_right_in, { src: 'lap:lap_right_in', kind: 'length' })}`, '<span class="tag">지정</span>')
       + row_('패스너', `${esc(String(lap.fastener_label ?? ''))} · ${num(state.lap?.si.n_total, { src: 'lap:n_total', kind: 'none', unit: false })}개`, '<span class="tag drv">엔진</span>')
       + row_('단부 거리 e · 간격 s', `${num(state.lap?.si.edge_distance, { src: 'lap:edge_distance', kind: 'length', unit: false })} · ${num(state.lap?.si.spacing, { src: 'lap:spacing', kind: 'length' })}`, '<span class="tag drv">엔진</span>')
       + row_('전달 전단 V', num(state.lap?.si.V_transfer, { src: 'lap:V_transfer', kind: 'force' }), '<span class="tag def" data-tip="기준 조항이 아닌 자체 해석(force_model)">자체 가정</span>')
-      + row_('패스너 용량', num(state.lap?.si.capacity, { src: 'lap:capacity', kind: 'force' }), '<span class="tag drv">엔진</span>')), '', '엔진 결과 그대로 — 표 서랍의 「계산 단계」에 식이 있다(US 글)') : '')
+      + row_('패스너 용량', num(state.lap?.si.capacity, { src: 'lap:capacity', kind: 'force' }), '<span class="tag drv">엔진</span>')
+      + lapSectionRows(lap.section_source)), '', '엔진 결과 그대로 — 표 서랍의 「계산 단계」에 식이 있다(US 글)') : '')
     + lists(arr(x.warnings), arr(x.assumptions), arr(x.scope_notes));
 
+}
+
+/**
+ * 판정비 줄 — 랩(733c18e 뒤): `utilization` 은 판정이 난 랩 강도 검토 가운데 가장 큰 비(지배 = governing_check), 패스너 무리의 비는
+ * `fastener_utilization`(그 키가 없는 옛 결과만 utilization 이 패스너). 단일 접합은 utilization 그대로
+ */
+function lapRatios(x: any, lap: boolean): string {
+  const pre = lap ? 'lap' : 'conn';
+  if (!lap) { return typeof x.utilization === 'number' ? row_('패스너', ratio(x.utilization, x.pass === false, `${pre}:utilization`), '') : ''; }
+  const newShape = 'fastener_utilization' in x;
+  const fast = newShape ? x.fastener_utilization : x.utilization;
+  return (newShape && typeof x.utilization === 'number' ? row_('지배', `${ratio(x.utilization, x.pass === false, 'lap:utilization')} <span class="faint" data-governing>${esc(String(x.governing_check ?? ''))}</span>`, '<span class="tag drv">엔진</span>') : '')
+    + (typeof fast === 'number' ? row_('패스너 무리', ratio(fast, fast > 1, newShape ? 'lap:fastener_utilization' : 'lap:utilization'), '') : '')
+    + (typeof x.flexure_dcr === 'number' ? row_('랩 구간 휨', ratio(x.flexure_dcr, x.flexure_dcr > 1, 'lap:flexure_dcr'), '') : '');
+}
+/** 랩 단면 강도의 출처(section_source — daca0ac): Se · Vn · 어디서(지점 · 랩 구간), 짓지 않았으면 그 까닭 그대로 */
+function lapSectionRows(ss: any): string {
+  if (!ss || typeof ss !== 'object') { return ''; }
+  const v = (x: unknown, kind: Kind) => (typeof x === 'number' ? `${sigText(si(x, kind) ?? x, 4)} <span class="u">${esc(LABEL_OF[kind])}</span>` : '<span class="faint">없음</span>');
+  const where = [ss.support !== null && ss.support !== undefined ? `지점 ${esc(ss.support)}` : '', Array.isArray(ss.regions) && ss.regions.length ? `랩 구간 ${esc(ss.regions.join(', '))}` : ''].filter(Boolean).join(' · ');
+  return row_('랩 단면 Se · Vn', `${v(ss.Se, 'modulus')} · ${v(ss.Vn, 'force')}`, `<span class="tag drv" data-section-source>${ss.Se === null || ss.Se === undefined ? '짓지 않음' : '퍼린 결과'}</span>`)
+    + row_('Se 의 출처', `<span data-section-from>${ss.Se === null || ss.Se === undefined ? esc(String(ss.reason ?? '')) : esc(String(ss.from ?? ''))}</span>${where ? ` <span class="faint">${where}</span>` : ''}`, '');
 }
 
 /** 검토 상태 키(case:<key>) → 가지 */

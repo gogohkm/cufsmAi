@@ -18,7 +18,7 @@ import { bandVar, none, num, ratio, sigText } from './format';
 import { memberSvg } from './member';
 import { BUCKLING_METHOD_KO, SOURCE_KO, STEP_KO, VERDICT_KO, sectionLabel } from './names';
 import { allRows, POINT_KO, rowOfKey, state, type CheckRow, type Run, COMBO_KO, locWords } from './store';
-import { kindOfQuantity, LABEL } from './units';
+import { kindOfQuantity, LABEL, si } from './units';
 import { caseTag, ENGINE_TO_CASE } from './caseFields';
 
 /** 펼친 덩어리(고른 것 말고 사람이 연 것) */
@@ -269,6 +269,12 @@ function inputsTables(r: CheckRow): string {
     if (loc.x && typeof loc.x.value === 'number') { parts.push(`x ${qnum(loc.x, `${r.src}location.x.`)}`); }
     const words = locWords(loc);
     right.unshift(`<tr data-loc="${esc(JSON.stringify({ support: loc.support ?? null, span: loc.span ?? null, region_support: loc.region_support ?? null, demand_basis: loc.demand_basis ?? null }))}"><td>검토 위치</td><td class="r">${parts.join(' ') || '—'}</td><td><span class="tag drv"${tip('엔진 · 호스트가 붙인 이 항목의 위치(location)')}>위치</span><span class="why2">${esc(words.join(' · '))}</span></td></tr>`);
+  }
+  // 랩(daca0ac): 단면 강도 Se · Vn 의 출처 — 퍼린 결과의 그 지점 랩 구간에서 지었는가, 짓지 않았으면 그 까닭(엔진은 휨 검토를 판정 없음으로)
+  const ss = r.scope === 'lap' ? state.lap?.us?.section_source : null;
+  if (ss && typeof ss === 'object') {
+    const txt = ss.Se === null || ss.Se === undefined ? `짓지 않음 — ${String(ss.reason ?? '')}` : `${String(ss.from ?? '')}${ss.support !== null && ss.support !== undefined ? ` · 지점 ${String(ss.support)}` : ''}${Array.isArray(ss.regions) && ss.regions.length ? ` · ${ss.regions.join(', ')}` : ''}`;
+    right.unshift(`<tr data-section-source><td>랩 단면 Se</td><td class="r">${typeof ss.Se === "number" ? `${sigText(si(ss.Se, "modulus") ?? ss.Se, 4)} mm³` : "—"}</td><td><span class="tag drv">출처</span><span class="why2">${esc(txt)}</span></td></tr>`);
   }
   if (r.combination) {
     const env = r.combination === 'envelope';
