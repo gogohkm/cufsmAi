@@ -369,6 +369,13 @@ def analyze_loads(
         'wc_reactions': wc_reactions,
         'uplift_reactions': uplift_reactions,
         'all_combos': [v['name'] for v in variants],
+        # 사람이 읽도록 반올림한 위치 키(판정은 반올림하지 않은 값 — locations[].Vu_left_unrounded 등, 계약 §6.1)
+        'display_rounding': {'decimals': {'locations[].Mu': 3, 'locations[].Vu': 3, 'locations[].Ru': 3,
+                                          'locations[].Vu_left': 3, 'locations[].Vu_right': 3,
+                                          'locations[].Mu_max': 3, 'locations[].Mu_min': 3, 'locations[].R_max': 4,
+                                          'locations[].R_min': 4, 'locations[].x_ft': 2},
+                             'note': 'display only — use locations[].Vu_left_unrounded / Vu_right_unrounded and the '
+                                     'envelope arrays for decisions'},
         'all_combos_detail': all_detail,
         'pattern_loading': pattern_info,
         'input_loads_plf': {k: round(v, 3) for k, v in (loads or {}).items()
@@ -741,6 +748,18 @@ def _class_result(vars_, units, spans, sup, laps_ps, direction, depth, pattern_o
             vs = +1 if abs(env[side][0][j]) >= abs(env[side][1][j]) else -1
             loc['V_side'] = 'left' if side == 'VL' else 'right'
             loc['combo_V'], loc['pattern_V'] = gov_src(side, j, vs)
+            # 면마다(V6b-01 뒤): 반올림하지 않은 면 전단과 그 출처 [combo_index, pattern_index, sense]
+            # (combos · envelope_source.patterns 의 자리; sense +1 = 포락 최대, −1 = 최소에서 온 크기)
+            for qk2, key in (('VL', 'left'), ('VR', 'right')):
+                hi, lo = float(env[qk2][0][j]), float(env[qk2][1][j])
+                sn = +1 if abs(hi) >= abs(lo) else -1
+                vi2, desc2 = pick(qk2, j, sn)
+                loc[f'Vu_{key}_unrounded'] = max(abs(hi), abs(lo))
+                loc[f'V_{key}_source'] = [vi2, _pid(desc2), sn]
+            m_hi, m_lo = float(env['M'][0][idx]), float(env['M'][1][idx])
+            msn = -1 if abs(m_lo) >= abs(m_hi) else +1
+            vi3, desc3 = pick('M', idx, msn)
+            loc['M_source'] = [vi3, _pid(desc3), msn]
             if loc.get('R_uplift') is not None and loc['R_uplift'] < -1e-9:
                 loc['combo_R_uplift'], loc['pattern_R_uplift'] = gov('R', j, -1)
             else:

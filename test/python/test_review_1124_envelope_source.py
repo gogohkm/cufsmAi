@@ -208,3 +208,32 @@ def test_deflection_envelope_patterns():
                 if d:
                     assert abs(d[k] - c[arr][k]) <= 1e-6 * max(1.0, abs(c[arr][k])), (c['case'], key, k)
     assert len(checked) > 100 and _solve(r, [1.0] * r['n_spans'], True)['D']
+
+
+def test_support_faces_unrounded_and_each_face_named():
+    """지점마다 왼쪽 · 오른쪽 면 전단(반올림하지 않은 값)과 그 면의 조합 · 패턴, 지점 M 의 출처 — 다시 풀어 같아야 한다.
+    끝 지점의 바깥 면(전단 0), 내다지, 랩이 붙은 지점을 지난다. 반올림한 옛 키는 그대로(표시용)."""
+    n = 0
+    for name, p in CASES:
+        r = analyze_loads(**p)
+        assert 'locations[].Vu_left' in r['display_rounding']['decimals']
+        for cname, res in _cls(r):
+            combos, pats = res['combos'], res['envelope_source']['patterns']
+            x = res['x_diagram']
+            for loc in res['locations']:
+                if 'V_left_source' not in loc:
+                    continue
+                j = loc['support'] - 1
+                for side, sym in (('left', 'VL'), ('right', 'VR')):
+                    ci, pi, sense = loc[f'V_{side}_source']
+                    s = _solve(r, _w_span(r, combos[ci], pats[pi]))
+                    want = loc[f'Vu_{side}_unrounded']
+                    assert _close(abs(s[sym][j]), want), (name, cname, loc['name'], side, s[sym][j], want)
+                    assert loc[f'Vu_{side}'] == round(want, 3)
+                    n += 1
+                k = min(range(len(x)), key=lambda i: abs(x[i] - loc['x_ft']))
+                ci, pi, sense = loc['M_source']
+                s = _solve(r, _w_span(r, combos[ci], pats[pi]))
+                env = res['M_envelope_max' if sense > 0 else 'M_envelope_min'][k]
+                assert _close(s['M'][k], env), (name, cname, loc['name'], s['M'][k], env)
+    assert n > 100, n

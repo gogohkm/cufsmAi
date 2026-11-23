@@ -171,6 +171,18 @@ envelope_source = {
 
 (옛 키 `combo` · `pattern` 은 `Mu` 의, `combo_R` · `pattern_R` · `combo_R_uplift` 는 반력의 출처 — 그대로.)
 
+**지점 위치의 면마다(2026-11-24, V6b-01 뒤 — 호스트는 그 구간 쪽 면을 쓴다):**
+
+| 키 | 뜻 |
+|---|---|
+| `Vu_left_unrounded` · `Vu_right_unrounded` | 지점 왼쪽 · 오른쪽 면 전단 포락의 크기 max(\|최대\|, \|최소\|), **반올림하지 않은 값** — 판정은 이것으로. 옛 키 `Vu_left` · `Vu_right`(소수 3자리)는 표시용으로 그대로 |
+| `V_left_source` · `V_right_source` | 그 면 값의 출처 `[combo_index, pattern_index, sense]` — `combos` · `envelope_source.patterns` 의 자리(`envelope_source` 와 같은 인코딩), `sense` +1 = 최대 포락, −1 = 최소 포락에서 온 크기 |
+| `M_source` | 지점 M(최대 · 최소 가운데 크기가 큰 쪽, 옛 `Mu` 와 같은 쪽)의 출처 `[combo_index, pattern_index, sense]` |
+
+동률 규칙은 위와 같다(허용오차 tol, 먼저 나온 조합; 끝 지점의 바깥 면처럼 모든 조합이 0 이면 첫 조합 · `'not acting'`). 시험이 모든 지점(끝 지점 · 내다지 · 랩이 붙은 지점)의 두 면과 M 을 그 조합 · 패턴으로 다시 풀어 확인한다. 크기: 6경간 랩 사례에서 약 3.1 KB(결과 전체 +3.4 KB).
+
+하중 해석 결과에 `display_rounding`(`{decimals: {'locations[].Vu_left': 3, …}, note}`)이 새로 있다 — 반올림해 실은 위치 키 목록이다.
+
 **처짐 포락(`deflection_cases[]`)** 가운데 부분재하가 든 것(L · Lr(감소) · S 와 D + 그것)에 `D_envelope_source = {"D_max": [[start, count, pattern_index], …], "D_min": […], "patterns": [{"loads": {"D": "all spans", "L": "spans 1,3 loaded"}}, …]}`. 처짐은 비계수 하중이라 조합 칸이 없다.
 
 **호스트가 쓸 것:** 검토 지점의 소요가 포락선 격자점 i 에서 왔으면 `'envelope'` 대신 `combos[ci]` + `patterns[pi]`(`_comboLabel` 과 같은 꼴). 같은 검토 지점의 M 과 V 의 출처가 다르면(아래 6.2) 그 지점은 하나의 하중 상태가 아니다.
