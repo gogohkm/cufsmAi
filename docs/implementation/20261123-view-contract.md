@@ -148,6 +148,18 @@
 - **자동 가정**(호스트): 프로젝트의 대상에서 실행을 적을 때 — (a) 그 결과 종류가 쓰는 입력(무효화 묶음: 부재 설계 → design, 하중 해석 → load, 접합 → connection 의 connection · lap 묶음; 소요강도 required 는 뺀다) 가운데 출처가 처음 값이고 표의 「손으로 정한 공학 기본값」(src page · 수)인 것을 묶음마다 한 항목(「하중: D · L · Lr … — 입력 기본값 그대로」, 칸 이름은 화면의 것), (b) 결과의 엔진 자체 가정(알림 `list: assumptions` — code 마다, 결과 종류마다) 한 항목. 원인이 사라지면 **프로그램이** 닫는다: (a) 그 묶음의 칸이 모두 정해지면(변경 줄을 적을 때 — 그 변경 id), (b) 같은 종류의 다음 실행에 그 가정이 없으면(그 실행 id). 이것이 사람의 확인 없이 풀리는 유일한 닫기다(설계 §2.6).
 - **계산서**: 프로젝트의 대상이 열려 있으면 상세 보고서 끝에 「가정 (기록 — 가정 등록부)」 절(번호 · 가정 · 상태 · 근거 · 쓴 쪽 · 사람의 확인) — `ReportDoc` 의 절 갈고리 `appendSections`. 글은 그리기가 글자로(태그가 되지 않는다).
 
+## 4h. 확인 표시 · 대안 (R4, 2026-11-24 — 도구 76 → 78)
+
+- **표시는 사람만**: 다리가 `panel.recordsPerson.review({mark: true | false, targets: [...]})` 를 사람의 길(`POST /api/person/review` — 층 3 · 4 의 열쇠와 사람의 입력)에서 부른다. 대상 `{type: 'check', key, shown}` · `{type: 'result', kind, shown}` · `{type: 'group', group, shown}` · `{type: 'change', changeId, shown: changeId}` · `{type: 'work' | 'assumption', id, shown: <그 항목의 lastSeq>}`. `shown` 은 **화면이 보인 지문** — `get_reviews` 의 `items[].fp` · `result_fps`(그 값을 그대로 돌려보낸다). 지금 것과 다르면 던진다(「다른 판을 보았다 — 다시 보고 누르기」). 한 번에 200 대상까지(「모두 확인」 은 사람이 고른 줄만). 판단 요청은 답이 있어야 확인할 수 있다.
+- **믿기**: `panel.recordsPerson.trust(writerId, true | false)` — 그 작성자 소개가 프로젝트에 있어야. 믿지 않은 작성자의 표시는 `get_reviews.not_counted` 에 「아직 믿지 않음」 으로(세지 않는다 — D5).
+- **읽기**: `get_reviews {state?, type?, limit?}` → `{reviewed, total, review_again, items[{type, key, scope, id, location?, verdict, ratio, fp, state: reviewed | review-again | unreviewed, reviewer?, at?, how?, why?, why_ko?, differences?}], result_fps, not_counted?, writers?, meaning}`. `get_case_status.reviews` · `list_cases[].reviews {reviewed, total, review_again, basis}`(닫힌 대상은 그 마지막 실행과 견준 값 — `basis: 'last runs'`). 가정 · 판단 요청의 `person_confirmed` · `blocks_issue`(D7).
+- **유효성**(D16): 지문이 같으면 확인(`how: same-fingerprint`), 다르면 확인한 실행의 사본과 견준다 — 같은 내용(1e-6, 긴 반파장 전체좌굴 값을 쓰는 항목은 1e-4)이면 확인(`same-content`), 아니면 「다시 확인」 과 까닭(`why_ko`: 값이 다름 · 지금 결과에 없음 · 결과 낡음 · 사본 없음 · 사본 손상 · 확인 뒤 바뀜)과 다른 곳(`differences[{path, reviewed, current}]`).
+- **확인의 뜻(D15)** — 확인 표시를 설명하는 화면 · 계산서마다 둔다: 「확인 표시는 이 PC 의 StCFSD 사람 화면에서 누른 기록입니다. 서명은 그 줄을 이 PC 의 StCFSD(또는 같은 사용자 권한의 프로그램)가 썼다는 것까지만 증명하며, 누가 눌렀는지를 증명하는 전자서명이 아닙니다 — 사무소의 책임 기록입니다.」(`reviews.REVIEW_MEANING_KO`, MCP 의 `meaning` 은 그 영어)
+- **대안**: `alternatives {action: list | keep | compare | open | rename | drop | undrop}` — list `{item, label, is_now, runs, max_ratio, pass, A, differs_from_now {fields, first[]}, hidden?}`, compare `{head {now, alt: {maxRatio, ng, notEvaluated, checks, A}}, rows[{key, scope, id, location, now {ratio, verdict}, alt {...}}], rows_total}`(판정이 다르거나 비 차이가 큰 줄부터, 기본 20 · `detail: 'all'`), open = 한 변경 묶음(trigger `alternatives`), 결과는 다시 돌린다. 보기 계약의 `{kind: 'record', type: 'alternative', id}`.
+- 화면은 「가장 얇은」 · 「무게」 를 짓지 않는다(D12) — 그 말은 AI 의 이유 글이다.
+
+**R4-2 · R4-3 화면(데스크톱 담당)이 따를 것:** 확인 표시 단추는 사람의 길(다리의 `/api/person/review`)로만 — MCP 중계로 보내지 않는다. `shown` 에는 그 화면이 **그린** 항목의 `fp`(get_reviews 의 값)를 넣는다(다시 읽은 값이 아니라). ✓ · ◌(풍선에 `why_ko` 와 `differences`) · 없음, 「확인 n/N」 · 「다시 확인 m」, 다른 작성자의 표시는 「이름(PC) · 아직 믿지 않음」 + 「믿기」(`person.trust` — 사람만). 확인 표시를 설명하는 곳에 D15 의 말. 가정 · 판단 요청의 「확인」 도 같은 `review`(type assumption · work, `shown` = lastSeq). 대안: 결과 › 대안 목록(라벨 · 최대 판정비 · 「지금」), 고르면 compare 의 표(열쇠마다 지금 | 대안 | 차이), 「이 대안으로」 는 open(AI 와 같은 동작 — 사람 길이 필요하면 말하라), 숨김은 drop. `recordsChanged` 의 `reviews` · `alternatives` 종류도 받는다.
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).

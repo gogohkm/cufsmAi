@@ -67,6 +67,8 @@ const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_d
   'get_case_status', 'list_projects', 'open_project', 'list_cases', 'open_case', 'new_case', 'save_case', 'list_changes',
   // R3-2: 업무 항목 · 가정 · 원자료
   'work_items', 'assumptions', 'sources',
+  // R4: 확인 표시(읽기) · 대안
+  'get_reviews', 'alternatives',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
   'check_shear_lag', 'classify_modes', 'cold_work', 'custom_section_guide', 'delete_element', 'delete_node',

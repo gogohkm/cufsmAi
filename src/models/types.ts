@@ -112,7 +112,7 @@ export interface LedgerEntry {
 export interface ViewItem {
     kind: 'check' | 'model' | 'result' | 'validation' | 'record';
     id: string;
-    /** record: 기록의 종류 — change(변경 묶음) · work(업무 항목) · assumption(가정) · source(원자료) */
+    /** record: 기록의 종류 — change(변경 묶음) · work(업무 항목) · assumption(가정) · source(원자료) · alternative(대안) */
     type?: string;
     /** check: 그 항목이 든 결과 — member · purlin · connection · lap */
     scope?: string;

@@ -35,12 +35,15 @@ import {
     caseFileFor, createProject, Declaration, findProjectByName, findProjectFor as findProjectDirFor, FOLDERS, newId, readDeclaration,
     CASE_ID_RE, DECLARATION_FILE,
 } from './project';
-import { foldRuns, lastRunByKind, RunEntry, RunKind, RUN_KINDS, runSummary, RUNS_SPEC } from './runs';
+import { foldRuns, lastRunByKind, planPrune, RunEntry, RunKind, RUN_KINDS, runSummary, RUNS_SPEC } from './runs';
 import { getBlob, putBlob } from './blobs';
 import { Assumption, ASSUMPTION_SPEC, foldAssumptions, prepareAssumption } from './assumptions';
 import { WORK_SPEC, foldWork, prepareWork, WorkItem } from './work';
 import { foldSources, listUnregistered, prepareSource, Source, SOURCE_SPEC, sourceState } from './sources';
-import { KeyUnavailableError, loadOrCreateWriter, makeWriterCard, readTrust, readWriterCard, trustSelf, TrustStore, Writer, WriterCard } from './writer';
+import { KeyUnavailableError, loadOrCreateWriter, makeWriterCard, readTrust, readWriterCard, setTrust, trustSelf, TrustStore, Writer, WriterCard } from './writer';
+import { foldReviews, MarkState, prepareReview, ReviewTarget, REVIEWS_SPEC } from './reviews';
+import { Alternative, ALTERNATIVES_SPEC, altBlobs, altRunIds, foldAlternatives, prepareAlternative } from './alternatives';
+import { blobPath } from './blobs';
 
 /** 데스크가 받는 것 — 모두 주입(시험은 임시 폴더와 가짜 시계로) */
 export interface DeskEnv {
@@ -67,6 +70,13 @@ export interface DeskEnv {
     /** `.csd` 읽기 · 새 `.csd` 쓰기(시험이 바꿔 끼운다) */
     files?: { read(abs: string, maxBytes: number): Buffer | null; writeNew(rootReal: string, abs: string, data: Buffer): void };
     pidAlive?(pid: number): boolean;
+    /**
+     * R4-1: 화면이 보낸 확인 대상 하나를 **지금 대상에서** 푼다(호스트가 — 지금 지문 · 판정 · 실행 · 사본). 화면이 보인 지문(`shown`)이
+     * 지금 것과 다르면 `{error}`(거절 — 층 5). 없으면 확인 표시를 할 수 없다.
+     */
+    resolveReview?(t: unknown): ReviewTarget | { error: string };
+    /** 사람 얼굴이 기록을 바꿨다(확인 · 믿기) — 호스트가 화면에 recordsChanged 를 보낸다 */
+    recordsChanged?(types: string[]): void;
 }
 
 export const CSD_HASH_MAX_BYTES = 256 * 1024 * 1024;
@@ -162,6 +172,10 @@ export interface PersonFace {
     setWriterName(name: string): string;
     /** 밖에서 바뀐 파일을 덮어써도 된다고(사람이 「덮어쓰기」) — external 줄을 남기고 다음 저장의 대조를 지금 파일로 */
     allowOverwrite(): { fileSha: string };
+    /** R4-1: 확인 표시 · 취소 — 화면이 고른 대상(`shown` = 화면이 보인 지문)을 호스트가 지금 대상에서 풀어 한 줄로 */
+    review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string };
+    /** R4-1: 다른 작성자 믿기 · 거두기(그 작성자 소개가 이 프로젝트에 있어야 한다) — 믿은 작성자의 확인만 센다(D5) */
+    trust(writerId: string, trust: boolean): { writerId: string; name: string; trusted: boolean };
 }
 
 export class RecordsDesk {
@@ -188,6 +202,8 @@ export class RecordsDesk {
             writerName: guard(() => this.nameOfWriter()),
             setWriterName: guard((name: string) => this.setWriterName(name)),
             allowOverwrite: guard(() => this.allowOverwrite()),
+            review: guard((req: { mark: boolean; targets: unknown[] }) => this.review(req)),
+            trust: guard((writerId: string, trust: boolean) => this.trustWriter(writerId, trust)),
         });
     }
 
@@ -251,6 +267,8 @@ export class RecordsDesk {
         if (type === 'work') { return WORK_SPEC; }
         if (type === 'assumptions') { return ASSUMPTION_SPEC; }
         if (type === 'sources') { return SOURCE_SPEC; }
+        if (type === 'reviews') { return REVIEWS_SPEC; }
+        if (type === 'alternatives') { return ALTERNATIVES_SPEC; }
         return plainSpec(type);
     }
 
@@ -700,6 +718,8 @@ export class RecordsDesk {
         };
         if (failed) { body.error = cleanHeaderText(extra.error ?? (result as any)?.error, 300) ?? ''; }
         const line = this.append('runs', { id: this.newLineId('run'), event: 'run', actor: toActor(extra.actor ?? this.ctx(), 'program'), body });
+        // R4-3: 사본 정리(대상 · 종류마다 새 것 20 + 확인 · 대안이 가리키는 것)
+        try { this.pruneCopies(); } catch { /* 다음 실행에 */ }
         return { runId: line.id, blob, blobBytes, blobStored, snapshot };
     }
 
@@ -890,6 +910,114 @@ export class RecordsDesk {
     recentRunIds(limit = 5): string[] {
         if (!this.proj || !this.cur) { return []; }
         try { return foldRuns(this.read('runs').lines).filter((r) => r.caseId === this.cur!.caseId).slice(-limit).reverse().map((r) => r.runId); } catch { return []; }
+    }
+
+    // ── 확인 표시 · 대안 · 사본 정리(R4-1 · R4-3) ─────────────────────────────
+
+    /** 확인 표시의 접은 것(세는 줄 — 사람 · 믿는 작성자) + 세지 않은 표시(믿지 않는 작성자 …) */
+    reviewMarks(): { marks: Map<string, MarkState>; uncounted: ReturnType<typeof foldReviews>['uncounted'] } {
+        if (!this.proj) { return { marks: new Map(), uncounted: [] }; }
+        try { return foldReviews(this.read('reviews').lines); } catch { return { marks: new Map(), uncounted: [] }; }
+    }
+    /** 사본 하나(이름의 해시 · 정규 글 대조) — 없음 · 손상을 가른다 */
+    blob(sha: string | null | undefined): { ok: true; value: unknown } | { ok: false; error: 'missing' | 'damaged' } {
+        if (!this.proj || !sha) { return { ok: false, error: 'missing' }; }
+        const g = getBlob(this.proj.dir, sha);
+        return g.ok ? { ok: true, value: g.value } : { ok: false, error: g.error === 'missing' ? 'missing' : 'damaged' };
+    }
+    /** 사본을 둔다(확인 때 실행 줄이 없는 결과 — 다른 PC 의 파일에서 되살린 것 …) */
+    putCopy(value: unknown): string | null {
+        const p = this.proj;
+        if (!p || p.readOnly) { return null; }
+        try { return putBlob(p.dir, value ?? null).sha256; } catch { return null; }
+    }
+    private review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string } {
+        const p = this.writableProject();
+        const c = this.cur;
+        if (!c || c.readOnly) { throw new Error('no writable case is open'); }
+        if (!req || !Array.isArray(req.targets) || req.targets.length === 0) { throw new Error('nothing to mark'); }
+        if (req.targets.length > 200) { throw new Error('at most 200 targets at a time'); }
+        if (!this.env.resolveReview) { throw new Error('review marks are not available here'); }
+        const targets: ReviewTarget[] = [];
+        for (const t of req.targets) {
+            const r = this.env.resolveReview(t);
+            if ((r as any).error) { throw new Error(String((r as any).error)); }
+            targets.push(r as ReviewTarget);
+        }
+        const w = this.writer();
+        const event = req.mark === false ? 'unmark' : 'mark';
+        const body = prepareReview(event, targets, { name: this.nameOfWriter(), writerId: w.writerId }, normalizeEngineId(this.env.engineId()));
+        const line = this.append('reviews', { id: this.newLineId('rev'), event, actor: { kind: 'person' }, body: body as any });
+        void p;
+        try { this.env.recordsChanged?.(['reviews', ...(targets.some((t) => t.type === 'assumption') ? ['assumptions'] : []), ...(targets.some((t) => t.type === 'work') ? ['work'] : [])]); } catch { /* 화면 알림은 덤 */ }
+        return { event, targets: targets.length, line: line.id };
+    }
+    private trustWriter(writerId: string, trust: boolean): { writerId: string; name: string; trusted: boolean } {
+        if (!this.proj) { throw new Error('no project is open'); }
+        if (typeof writerId !== 'string' || !/^w[a-z2-7]{20}$/.test(writerId)) { throw new Error('bad writer id'); }
+        const card = this.cards().get(writerId);
+        if (!card) { throw new Error('this project has no card of that writer'); }
+        setTrust(this.env.keyDir, card, trust !== false, this.env.now());
+        this.logs.clear();   // 다시 읽게(믿음이 바뀌었다)
+        try { this.env.recordsChanged?.(['reviews', 'work', 'assumptions', 'sources', 'alternatives', 'changes']); } catch { /* 덤 */ }
+        return { writerId, name: card.name, trusted: trust !== false };
+    }
+    /** 이 프로젝트의 다른 작성자들(소개)과 믿음 */
+    writers(): Array<{ writerId: string; name: string; host: string; trusted: boolean; self: boolean }> {
+        if (!this.proj) { return []; }
+        const t = this.trust();
+        const me = this.myWriterId();
+        return [...this.cards().values()].map((c) => ({ writerId: c.writerId, name: c.name, host: (c as any).host ?? '', trusted: !!t.writers[c.writerId], self: c.writerId === me }));
+    }
+
+    /** 대안(세는 줄) */
+    alternativeItems(): Array<Alternative & { writtenBy: string; own: boolean }> {
+        if (!this.proj) { return []; }
+        let lines: RecordLine[];
+        try { lines = this.read('alternatives').lines; } catch { return []; }
+        const me = this.myWriterId();
+        return foldAlternatives(lines).map((a) => ({ ...a, writtenBy: 'ai', own: !!me && a.writer === me }));
+    }
+    /** 대안 쓰기(행위자 = 문맥 — 표가 AI 만 허락한다) */
+    writeAlternative(event: string, args: any): { item: string; event: string } {
+        this.writableProject();
+        const prep = prepareAlternative(event, args, this.read('alternatives').lines);
+        this.append('alternatives', { id: prep.id, event: prep.event, actor: toActor(this.ctx(), 'program'), body: prep.body as any });
+        return { item: prep.id, event: prep.event };
+    }
+    /** 지금 대상 · 종류마다 마지막 실행(성공한 것) */
+    lastRuns(caseId?: string | null): Map<RunKind, RunEntry> {
+        if (!this.proj) { return new Map(); }
+        const id = caseId === undefined ? this.cur?.caseId ?? null : caseId;
+        try { return lastRunByKind(foldRuns(this.read('runs').lines).filter((r) => r.status === 'ok'), id); } catch { return new Map(); }
+    }
+
+    /**
+     * 실행 사본 정리(R4-3) — 대상 · 종류마다 새 것 20 + 확인 · 대안 · (발행)이 가리키는 실행 · 사본, 그리고 대상 줄(저장 · 열기 · 밖에서 바뀜)의
+     * 사본은 남긴다. 지운 해시는 `prune` 줄(program)에 적는다. 지운 수.
+     */
+    pruneCopies(keepPerKind?: number): number {
+        const p = this.proj;
+        if (!p || p.readOnly) { return 0; }
+        const runLines = this.read('runs').lines;
+        const runs = foldRuns(runLines);
+        const keepRuns = new Set<string>(), keepBlobs = new Set<string>();
+        for (const m of this.reviewMarks().marks.values()) {
+            const t: any = m.target;
+            if (t.runId) { keepRuns.add(t.runId); }
+            if (t.resultBlob) { keepBlobs.add(t.resultBlob); }
+        }
+        for (const a of this.alternativeItems()) { altRunIds(a).forEach((r) => keepRuns.add(r)); altBlobs(a).forEach((b) => keepBlobs.add(b)); }
+        try { for (const l of this.read('cases').lines) { if (typeof l.body?.snapshot === 'string') { keepBlobs.add(l.body.snapshot); } } } catch { return 0; }
+        const already = new Set<string>();
+        for (const l of runLines) { if (l.event === 'prune' && Array.isArray(l.body?.blobs)) { l.body.blobs.forEach((b: string) => already.add(b)); } }
+        const drop = planPrune(runs, { keepRuns, keepBlobs, alreadyPruned: already, keepPerKind });
+        if (!drop.length) { return 0; }
+        for (const sha of drop) { try { fs.unlinkSync(blobPath(p.dir, sha)); } catch { /* 이미 없음 */ } }
+        for (let i = 0; i < drop.length; i += 2000) {
+            this.append('runs', { id: this.newLineId('prn'), event: 'prune', actor: { kind: 'program' }, body: { blobs: drop.slice(i, i + 2000) } });
+        }
+        return drop.length;
     }
 
     // ── 사람만(얼굴 `person` 이 감싼다) ─────────────────────────────────

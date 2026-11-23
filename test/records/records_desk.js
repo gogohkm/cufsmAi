@@ -437,7 +437,9 @@ async function run() {
     assert.strictEqual(streams.length, 2, `two stream files (${streams.join(', ')})`);
     const all = new L.RecordLog({ rootReal: dir, projectId: desk.project.projectId, spec: rec('runs').RUNS_SPEC, host: 'test-host' })
       .read(W.readTrust(w.keyDir).store);
-    assert.strictEqual(all.lines.length, 80);
+    // R4-3: 대상 · 종류마다 새 것 20 을 넘으면 사본 정리 줄(prune, program)이 따라 붙는다
+    assert.strictEqual(all.lines.filter((l) => l.event === 'run').length, 80);
+    assert(all.lines.filter((l) => l.event === 'prune').every((l) => l.actor.kind === 'program'), 'prune lines are the program\'s');
     assert(all.lines.every((l) => l.status === 'ok'), 'every line verifies');
     assert.deepStrictEqual([desk.runsOf(a.caseId).length, desk.runsOf(b.caseId).length], [40, 40]);
     assert.deepStrictEqual(all.stats.chainBreaks, []);

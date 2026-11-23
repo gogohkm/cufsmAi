@@ -143,3 +143,28 @@ export function sources(server: McpServer, io: RecordToolIo): void {
         },
         async (args) => { const { action: op, ...rest } = args; return io.post({ ...rest, action: "sources", op }).then(io.reply); });
 }
+
+// ── R4-1 · R4-3: 확인 표시(읽기만) · 대안 ─────────────────────────────────────
+export function getReviews(server: McpServer, io: RecordToolIo): void {
+    server.tool("get_reviews",
+        "Review marks of the open case (read-only): reviewed n of N checks and review-again m, and per check of the current results its state — reviewed (by whom, when; 'same-fingerprint' or 'same-content' after a re-run), review-again (why: different values, not in the current results, result stale, copy missing / damaged, changed since) or unreviewed — plus marks on results, input groups, changes, assumptions and answered questions. A mark stays valid while the current item has the same id, verdict, clause, equations, branches and inputs and every number agrees within 1e-6 (1e-4 for long-wavelength global buckling values). Marks are made only by the person in StCFSD — there is no tool to make one, and an AI must not claim an item was reviewed unless this says so. Marks of writers not trusted on this PC are listed as not counted." + TEXT_NOTE,
+        {
+            state: z.enum(["reviewed", "review-again", "stale", "unreviewed"]).optional().describe("Filter ('stale' = review-again)"),
+            type: z.enum(["check", "result", "group", "change", "work", "assumption"]).optional(),
+            limit: z.number().int().min(1).max(200).optional().describe("Rows (default 60)"),
+        },
+        async (args) => io.post({ action: "get_reviews", ...args }).then(io.reply));
+}
+
+export function alternatives(server: McpServer, io: RecordToolIo): void {
+    server.tool("alternatives",
+        "Alternatives of the open case — a name on a set of recorded runs (a snapshot of the model and inputs plus the result copies), not a file. action list (label, max ratio, pass, section area A, how it differs from now; include_hidden), keep {label} (names the current state and its last runs — run the checks first), compare {item, detail: 'all'} (ratio and verdict per check key: alternative vs now, the largest differences first; head: max ratio, NG, not evaluated, A), open {item} (puts the alternative's model and inputs back as one change — known keys only; results are NOT restored from the copy, run the checks again), rename {item, label}, drop {item} (hide) / undrop {item}. The program does not rank alternatives — say which one is better only with the person's criteria." + TEXT_NOTE,
+        {
+            action: z.enum(["list", "keep", "compare", "open", "rename", "drop", "undrop"]),
+            item: z.string().max(12).optional().describe("Alternative id (ALT-2)"),
+            label: z.string().max(400).optional().describe("keep / rename: a short name (80 characters, e.g. 't 2.3 · lap 600')"),
+            detail: z.enum(["all"]).optional().describe("compare: every row (default the 20 that differ most)"),
+            include_hidden: z.boolean().optional(),
+        },
+        async (args) => { const { action: op, ...rest } = args; return io.post({ ...rest, action: "alternatives", op }).then(io.reply); });
+}

@@ -121,3 +121,24 @@ export function lastRunByKind(runs: RunEntry[], caseId: string | null): Map<RunK
     for (const r of runs) { if (r.caseId === caseId) { out.set(r.kind, r); } }
     return out;
 }
+
+/** 실행 사본 정리(R4-3): 대상 · 종류마다 새 것 `keepPerKind` 개 + `keepRuns`(확인 · 대안 · 발행이 가리키는 실행)는 남긴다 */
+export const PRUNE_KEEP_PER_KIND = 20;
+export function planPrune(runs: RunEntry[], opts: { keepRuns: Set<string>; keepBlobs: Set<string>; alreadyPruned: Set<string>; keepPerKind?: number }): string[] {
+    const per = opts.keepPerKind ?? PRUNE_KEEP_PER_KIND;
+    const groups = new Map<string, RunEntry[]>();
+    for (const r of runs) { const k = `${r.caseId ?? ''}|${r.kind}`; groups.set(k, [...(groups.get(k) || []), r]); }
+    const kept = new Set<string>();
+    const dropped: RunEntry[] = [];
+    for (const list of groups.values()) {
+        list.forEach((r, i) => { if (i >= list.length - per || opts.keepRuns.has(r.runId)) { kept.add(r.runId); } else { dropped.push(r); } });
+    }
+    // 남기는 실행 · 그 밖의 기록이 가리키는 해시는 지우지 않는다(사본은 내용 주소 — 같은 해시를 여러 실행이 쓴다)
+    const keep = new Set(opts.keepBlobs);
+    for (const r of runs) { if (kept.has(r.runId)) { if (r.blob) { keep.add(r.blob); } if (r.snapshot) { keep.add(r.snapshot); } } }
+    const out = new Set<string>();
+    for (const r of dropped) {
+        for (const b of [r.blob, r.snapshot]) { if (b && !keep.has(b) && !opts.alreadyPruned.has(b)) { out.add(b); } }
+    }
+    return [...out].sort();
+}
