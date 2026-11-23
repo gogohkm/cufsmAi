@@ -13,6 +13,7 @@
 import { esc, tip } from './dom';
 import { hhmm, none } from './format';
 import { state, valChanges, type ReportState, type ValItem } from './store';
+import { checkPanel, docs, draftsOf, lastIssue } from './docs';
 
 /** 지금 제품에서 점검 규칙을 고치는 중(K3-6)인가 — 끝나면 false(그러면 화면에 아무 말도 하지 않는다) */
 export const VAL_RULES_CHANGING = true;
@@ -121,7 +122,7 @@ export function reportSummary(kind: 'design' | 'buckling'): { v: string; cls: st
   return reportStale(r) ? { v: `낡음 · 판 ${r.caseRev}`, cls: 'warn' } : { v: `초안 · 판 ${r.caseRev ?? '—'}`, cls: '' };
 }
 
-const WHERE_KO: Record<string, string> = { case_folder: '열린 .csd 의 폴더', temp: '임시 폴더(열린 .csd 없음)', folder: '정해진 폴더' };
+const WHERE_KO: Record<string, string> = { case_folder: '열린 .csd 의 폴더', temp: '임시 폴더(열린 .csd 없음)', folder: '정해진 폴더', project: '프로젝트의 03_계산서(새 초안 — 덮어쓰지 않는다)' };
 
 /** 가운데 — 보고서 미리보기 */
 export function reportView(key: string): string {
@@ -153,23 +154,33 @@ export function reportInfo(key: string): string {
   const notices: string[] = Array.isArray(reply.notices) ? reply.notices.map(String) : [];
   const fail: string[] = Array.isArray(reply.checks?.fail) ? reply.checks.fail : [];
   const ne: string[] = Array.isArray(reply.checks?.not_evaluated) ? reply.checks.not_evaluated : [];
-  const head = `<div class="hd"><div class="k">${KIND_KO[kind]} · 발행 차수 없음<span class="sp"></span><span class="verdict warn"${tip('발행은 기록(R5)부터 — 사람만 한다')}>발행 불가</span></div>`
+  // R5-3: 프로젝트의 대상이면 발행 전 점검(호스트의 documents check)과 사람의 발행 길 — 아니면 이 화면이 만든 보고서만
+  const inProj = docs.loaded && kind === 'design';
+  const li = lastIssue();
+  const head = inProj
+    ? `<div class="hd"><div class="k">${KIND_KO[kind]} · ${li ? `마지막 발행 R${esc(li.revision)}` : '발행 차수 없음'}<span class="sp"></span><span class="verdict ${docs.check?.blocked === false ? 'ok' : 'warn'}" data-issue-verdict>${docs.check?.blocked === false ? '발행 가능' : '발행 불가'}</span></div>`
+      + `<div class="ttl">${KIND_KO[kind]}${state.file.name ? ` — ${esc(state.file.name)}` : ''}</div></div>`
+    : `<div class="hd"><div class="k">${KIND_KO[kind]} · 발행 차수 없음<span class="sp"></span><span class="verdict warn"${tip('발행은 프로젝트의 검토 대상에서만 — 사람만 한다')}>발행 불가</span></div>`
     + `<div class="ttl">${KIND_KO[kind]}${state.file.name ? ` — ${esc(state.file.name)}` : ''}</div></div>`;
-  const status = r && (r.html || r.reply)
+  const dr = docs.loaded ? draftsOf(kind === 'design' ? 'calc' : 'buckling')[0] : undefined;
+  const status = dr
+    ? `<span class="tag def">초안</span> <span class="why" data-draft-state="${esc(dr.state)}">${esc(dr.item)} · ${hhmm(dr.at)} 만듦${dr.state === 'stale' ? ' · <b class="warn">낡음</b>' : ' · 지금과 일치'}</span>`
+    : r && (r.html || r.reply)
     ? `<span class="tag def">초안</span> <span class="why">${hhmm(r.at)} 만듦 · 판 ${esc(r.caseRev ?? '—')}${reportStale(r) ? ' · <b class="warn">낡음</b>' : ''}</span>`
     : `<span class="faint">${r?.error ? `만들지 못함 — ${esc(r.error)}` : '만들지 않음'}</span>`;
   const fileRow = (label: string, f: unknown, extra = '') => (typeof f === 'string' ? `<tr data-file="${esc(label)}"><td>${esc(label)}</td><td class="path num">${esc(f)}${extra}</td></tr>` : '');
+  if (Array.isArray(reply.files)) { const fl = reply.files as string[]; (files as any).html = fl.find(x => /\.html?$/i.test(x)); (files as any).pdf = fl.find(x => /\.pdf$/i.test(x)); }
   return head
     + secH('', `<dl class="kv">${kv('상태', status)}${kv('대상', esc(state.file.name ?? '파일 없음'))}${kv('근거', esc(basis))}${kv('기준', `AISI S100-16 · ${esc(reply.units ?? 'SI')}`)}`
       + `${reply.verdict ? kv('판정', `<span class="verdict ${reply.verdict === 'PASS' ? 'ok' : reply.verdict === 'FAIL' ? 'ng' : 'un'}" data-report-verdict>${esc(reply.verdict === 'PASS' ? 'OK' : reply.verdict === 'FAIL' ? 'NG' : '미검토')}</span>`) : ''}</dl>`)
     + secH('쓴 곳', reply.folder || files.html || files.pdf
       ? `<p class="dim" data-report-folder="${esc(reply.folder ?? '')}">${esc(WHERE_KO[reply.folder] ?? String(reply.folder ?? ''))} — 자리 · 이름은 호스트가 정한다(화면은 경로를 주지 않는다). 이 프로그램이 쓴 파일만 덮어쓴다</p>`
-        + `<table class="t"><tbody>${fileRow('HTML', files.html)}${fileRow('PDF', files.pdf, reply.pages ? ` · ${esc(reply.pages)}쪽` : '')}</tbody></table>${reply.pdf_note ? `<p class="warn">${esc(reply.pdf_note)}</p>` : ''}`
+        + `<table class="t"><tbody>${fileRow('HTML', files.html)}${fileRow('PDF', files.pdf, reply.pages ? ` · ${esc(reply.pages)}쪽` : '')}</tbody></table>${reply.pdf_note ? `<p class="warn" data-pdf-note="${esc(String(reply.pdf_note_code ?? ''))}">${esc(reply.pdf_note_ko ?? reply.pdf_note)}</p>` : ''}${reply.folder_note ? `<p class="dim" data-folder-note>${esc(reply.folder_note_ko ?? reply.folder_note)}</p>` : ''}`
       : none('아직 쓰지 않음'))
     + (notices.length ? secH(`알림 ${notices.length}`, `<ul class="notes">${notices.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`) : '')
     + (fail.length || ne.length ? secH('통과가 아닌 검토', `<table class="t"><tbody>${fail.length ? `<tr><td><span class="dot ng"></span>NG</td><td class="num">${esc(fail.join(', '))}</td></tr>` : ''}${ne.length ? `<tr><td><span class="dot un"></span>미검토</td><td class="num">${esc(ne.join(', '))}</td></tr>` : ''}</tbody></table>`) : '')
-    + `<div class="sec publish"><span class="btn primary off" data-publish${tip('발행은 기록(R5)부터 — 사람만 한다. 발행 차수 · 묶음(PDF · .csd 사본 · 검증표 · 가정 · 검토 기록)도 그때')}>R0 발행</span>`
-    + `<span class="rv off"${tip('검토 도장(내가 확인했다)은 기록(R4)부터 — 지금은 꺼져 있다')}>검토 도장</span><span class="faint">기록(R4 · R5)부터</span></div>`;
+    + (inProj ? checkPanel()
+      : `<div class="sec publish"><span class="btn primary off" data-publish${tip('발행은 프로젝트의 검토 대상에서만 — 기록이 있어야 한다(사람만)')}>R0 발행</span><span class="faint">프로젝트 밖 — 발행 없음</span></div>`);
 }
 
 /** 문서 탭의 검증표 — 점검 목록을 문서 꼴로(같은 항목) */

@@ -6,7 +6,8 @@
  *  - `shown` 은 화면이 **그린** 때의 지문 — 그린 항목의 `fp`(items) · `result_fps` · 변경 id 를 그대로 돌려보낸다(다시 읽은 값이 아니다).
  *    지금 지문과 다르면 호스트가 거절한다 → 다시 읽고 그 까닭을 알린다.
  *  - ✓ 확인 · ◌ 다시 확인(풍선에 why_ko 와 다른 곳) · 없음 미확인. 「확인 n/N」 · 「다시 확인 m」. 다른 작성자의 표시는 세지 않는다(not_counted).
- *  - 확인의 뜻(D15)은 호스트가 준 글(`meaning`) 그대로.
+ *  - 확인의 뜻(D15)은 호스트가 준 한국어 글(`meaning_ko`) 그대로.
+ *  - 업무 항목 · 가정은 그 판의 순번(`seq`)을, 입력 묶음(템플릿 01)은 `group_fps[g]` 를 shown 으로(de93aa9).
  */
 import { mcp } from './bridge';
 import { esc, tip } from './dom';
@@ -17,13 +18,13 @@ import { state, type CheckRow } from './store';
 export interface ReviewItem {
   type: string; key?: string; scope?: string; id?: string; location?: unknown; combination?: string | null; verdict?: string | null; ratio?: number | null; fp?: string;
   state: 'reviewed' | 'review-again' | 'unreviewed'; reviewer?: string; at?: string; how?: string; why?: string; why_ko?: string;
-  differences?: Array<{ path: string; reviewed: unknown; current: unknown }>; kind?: string; change?: string; item?: string; seq?: number; group?: string;
+  differences?: Array<{ path: string; reviewed: unknown; current: unknown }>; kind?: string; change?: string; item?: string; seq?: number; last_seq?: number; group?: string;
 }
 export const rv: {
   items: ReviewItem[]; byKey: Map<string, ReviewItem>; resultFps: Record<string, string>; reviewed: number; total: number; again: number;
-  notCounted: Array<{ reviewer: string; status: string; at: string; why: string }>; writers: Array<{ name: string; host: string; trusted: boolean; writer?: string }>;
-  meaning: string; err?: string; loaded: boolean;
-} = { items: [], byKey: new Map(), resultFps: {}, reviewed: 0, total: 0, again: 0, notCounted: [], writers: [], meaning: '', loaded: false };
+  notCounted: Array<{ reviewer: string; status: string; at: string; why: string }>; writers: Array<{ name: string; host: string; trusted: boolean; writer_id?: string }>;
+  meaning: string; groupFps: Record<string, string>; err?: string; loaded: boolean;
+} = { items: [], byKey: new Map(), resultFps: {}, reviewed: 0, total: 0, again: 0, notCounted: [], writers: [], meaning: '', groupFps: {}, loaded: false };
 
 /** 위치의 정규 꼴(키 차례 무관) — 줄과 항목을 맞대는 데만 */
 function canon(v: unknown): string {
@@ -57,7 +58,8 @@ export async function loadReviews(): Promise<void> {
   rv.reviewed = Number(r.reviewed) || 0; rv.total = Number(r.total) || 0; rv.again = Number(r.review_again) || 0;
   rv.notCounted = Array.isArray(r.not_counted) ? r.not_counted : [];
   rv.writers = Array.isArray(r.writers) ? r.writers : [];
-  rv.meaning = typeof r.meaning === 'string' ? r.meaning : '';
+  rv.meaning = typeof r.meaning_ko === 'string' ? r.meaning_ko : typeof r.meaning === 'string' ? r.meaning : '';
+  rv.groupFps = r.group_fps && typeof r.group_fps === 'object' ? r.group_fps : {};
 }
 
 /** 표시가 붙은 다른 것(결과 · 변경 · 업무 · 가정) */
@@ -90,19 +92,19 @@ export function othersHtml(): string {
   const ws = rv.writers.filter(w => !w.trusted);
   if (!rv.notCounted.length && !ws.length) { return ''; }
   const rows = rv.notCounted.slice(0, 6).map(u => `<li data-not-counted>${esc(u.reviewer)} · ${esc(hhmm(u.at))} · 아직 믿지 않음</li>`).join('');
-  const btns = ws.map(w => (w.writer
-    ? `<span class="btn ghost" data-rv-trust="${esc(w.writer)}"${tip('이 작성자의 확인 표시를 센다(사람만 — 이 PC 에서)')}>${esc(w.name)} (${esc(w.host)}) 믿기</span>`
+  const btns = ws.map(w => (w.writer_id
+    ? `<span class="btn ghost" data-rv-trust="${esc(w.writer_id)}"${tip('이 작성자의 확인 표시를 센다(사람만 — 이 PC 에서)')}>${esc(w.name)} (${esc(w.host)}) 믿기</span>`
     : `<span class="btn ghost off"${tip('호스트의 get_reviews.writers 에 작성자 id 가 없다 — 믿기를 부를 수 없다(호스트에 바람)')}>${esc(w.name)} (${esc(w.host)}) · 아직 믿지 않음</span>`)).join(' ');
   return `<div class="sec"><h4${tip('다른 PC · 작성자의 확인 표시 — 믿기 전에는 세지 않는다')}>다른 작성자의 확인<span class="sp"></span></h4>${rows ? `<ul class="notes faint">${rows}</ul>` : ''}${btns}</div>`;
 }
 
 // ── 누르기 ──────────────────────────────────────────────────────────
-export interface MarkTarget { type: string; key?: string; kind?: string; changeId?: string; id?: string; shown: string | number }
+export interface MarkTarget { type: string; key?: string; kind?: string; changeId?: string; id?: string; group?: string; shown: string | number }
 /** 표시 · 풀기(사람의 길). 거절이면 그 까닭을 돌려준다 */
-export async function mark(targets: MarkTarget[], on: boolean): Promise<{ ok: boolean; why?: string }> {
+export async function mark(targets: MarkTarget[], on: boolean): Promise<{ ok: boolean; why?: string; code?: string }> {
   if (!targets.length) { return { ok: false, why: '고른 것이 없다' }; }
   const r = await person('review', { mark: on, targets });
-  if (!r.ok) { return { ok: false, why: `${r.error ?? '하지 못했다'}${r.status === 403 ? ' — 사람의 누름이 있어야 한다' : ''}` }; }
+  if (!r.ok) { return { ok: false, why: `${r.error ?? '하지 못했다'}${r.status === 403 ? ' — 사람의 누름이 있어야 한다' : ''}`, ...(r.code ? { code: r.code } : {}) }; }
   return { ok: true };
 }
 export function rowTarget(r: CheckRow): MarkTarget | null {
@@ -113,3 +115,21 @@ export async function trust(writer: string): Promise<{ ok: boolean; why?: string
   const r = await person('trust', { writer_id: writer, trust: true });
   return r.ok ? { ok: true } : { ok: false, why: r.error };
 }
+
+/** 업무 항목 · 가정의 확인 단추 — 그 판의 순번(seq)을 shown 으로. 답 없는 판단 요청은 호스트가 거절한다(host.review.no_answer) */
+export function itemMarkButton(type: 'work' | 'assumption', id: string, seq: unknown): string {
+  if (typeof seq !== 'number') { return markButton(null, '', '이 항목의 판(seq)을 아직 읽지 못했다 — 다시 읽는 중'); }
+  return markButton(markOf(type, id), `data-rv-item="${esc(type)}|${esc(id)}|${seq}"`);
+}
+/** 입력 묶음의 확인 단추(템플릿 01) — 묶음마다 shown = get_reviews.group_fps[g]. 모두 확인이면 ✓, 하나라도 다시 확인이면 ◌ */
+export function groupMarkButton(groups: string[]): string {
+  if (!rv.loaded) { return markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만'); }
+  const gs = groups.filter(g => rv.groupFps[g]);
+  if (!gs.length) { return markButton(null, '', '이 묶음의 지문이 호스트의 group_fps 에 없다'); }
+  const its = gs.map(g => rv.items.find(x => x.type === 'group' && x.group === g) ?? null);
+  const st = its.some(x => x?.state === 'review-again') ? its.find(x => x?.state === 'review-again')! : its.every(x => x?.state === 'reviewed') ? its[0] : null;
+  return markButton(st, `data-rv-groups="${esc(gs.map(g => `${g}=${rv.groupFps[g]}`).join(','))}"`);
+}
+/** 템플릿 01 의 정보 창 → 호스트의 입력 묶음 */
+export const BRANCH_GROUPS: Record<string, string[]> = { section: ['section'], material_model: ['material_model'], mem: ['member'], ld: ['loads', 'deck'],
+  dc: ['design', 'required', 'options', 'method', 'webCrippling', 'vibration'], cj: ['connection', 'lap'], mat: ['material'] };

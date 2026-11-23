@@ -197,7 +197,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       const md = (message as { data?: any }).data;
       const rej = command === 'caseAck' && Array.isArray(md?.rejected) ? md.rejected.filter((x: any) => x && typeof x.reason_code === 'string') : [];
       const refusal = command === 'analysisError' && typeof md?.error_code === 'string' ? { code: String(md.error_code).slice(0, 80) }
-        : rej.length ? { code: String(rej[0].reason_code).slice(0, 80), keys: rej.slice(0, 20).map((x: any) => String(x.key ?? '').slice(0, 60)) } : undefined;
+        : rej.length ? { code: String(rej[0].reason_code).slice(0, 80), keys: rej.slice(0, 20).map((x: any) => String(x.key ?? '').slice(0, 60)), text: String(rej[0].reason ?? '').slice(0, 300) } : undefined;
       bus.emit('host:message', 'host', { id, viewType: ch.viewType, command: typeof command === 'string' ? command : null, seq: ch.lastSeq,
         ...(focus !== undefined ? { focus } : {}), ...(discarded !== undefined ? { discarded } : {}), ...(validation !== undefined ? { validation } : {}),
         ...(refusal !== undefined ? { refusal } : {}),
@@ -221,7 +221,9 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
     pendingFile = csd && paths?.[0] ? paths[0] : undefined;
   };
   platform.onNotify = req => {
-    const m = /^Project (?:loaded|saved)(?: with notes)?(?:: (.+))?$/s.exec(req.message);
+    // b582779 부터 호스트의 열기 · 저장 알림은 한국어(「프로젝트를 열었습니다(알림 있음): …」 · 「프로젝트를 저장했습니다: <경로>」) — 옛 영어도 받는다.
+    // 알림 글로 가르는 것은 임시다(호스트에 바람: 열기 · 저장의 경로를 실은 구조 이벤트)
+    const m = /^(?:Project (?:loaded|saved)(?: with notes)?|프로젝트를 (?:열었습니다|저장했습니다)(?:\(알림 있음\))?)(?:: (.+))?$/s.exec(req.message);
     if (m && req.severity !== 'error') {
       const named = m[1] && fs.existsSync(m[1].trim()) ? m[1].trim() : undefined;
       if (named || pendingFile) { setCurrentFile(named ?? pendingFile); }
@@ -488,7 +490,14 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       const units = b?.units === 'US' ? 'US' : 'SI';
       const reply = await mcpAction({ action: 'generate_report', kind, format, report_units: units });
       if (!reply || reply.error) { sendJson(res, 200, { success: false, error: String(reply?.error ?? '보고서를 만들지 못했다'), data: { reply } }); return; }
-      const htmlFile = typeof reply.files?.html === 'string' ? reply.files.html : null;
+      // 프로젝트의 대상이면 새 초안(파일 이름은 프로젝트 기준 상대 — 03_계산서 안), 아니면 절대 경로 { html, pdf }
+      let htmlFile = typeof reply.files?.html === 'string' ? reply.files.html : null;
+      if (Array.isArray(reply.files) && reply.folder === 'project') {
+        const dir = host.recordsPerson()?.currentProject()?.dir;
+        const rel = (reply.files as unknown[]).find((f): f is string => typeof f === 'string' && /\.html?$/i.test(f));
+        const abs = dir && rel ? path.resolve(dir, rel) : null;
+        htmlFile = abs && abs.toLowerCase().startsWith(path.resolve(dir!, '03_계산서').toLowerCase() + path.sep) ? abs : null;
+      }
       let html: string | null = null;
       if (htmlFile) { try { html = fs.readFileSync(htmlFile, 'utf8'); } catch (err) { log(`[bridge] 보고서 HTML 을 읽지 못함: ${String(err)}`); } }
       const sha256 = html === null ? null : crypto.createHash('sha256').update(html, 'utf8').digest('hex');

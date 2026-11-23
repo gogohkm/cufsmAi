@@ -13,6 +13,8 @@ import { mcp } from './bridge';
 import { esc, tip } from './dom';
 import { hhmm } from './format';
 import { state } from './store';
+import { hostText } from './notices';
+import { itemMarkButton, meaningHtml } from './reviews';
 
 export interface WorkItem {
   item: string; kind: 'question' | 'report' | 'instruction'; state: string; title: string; body?: string; truncated?: boolean; scope: string;
@@ -38,10 +40,27 @@ const fill = <T>(s: ListState<T>, r: any): void => {
   s.unverified = typeof r.unverified_omitted === 'number' ? r.unverified_omitted : 0;
   s.note = typeof r.note === 'string' ? r.note : undefined;
 };
-export async function loadWork(): Promise<void> { fill(work, await mcp<any>('work_items', { op: 'list', state: 'all', limit: 100 })); work.full.clear(); }
-export async function loadAssumptions(): Promise<void> { fill(asm, await mcp<any>('assumptions', { op: 'list', include_closed: true, limit: 100 })); asm.full.clear(); }
+/**
+ * 목록 읽기의 차례 — recordsChanged 가 잇달아 오면 읽기가 겹친다. 답은 보낸 차례대로 오지 않으므로 마지막에 보낸 읽기의 답만 넣는다
+ * (먼저 보낸 읽기의 늦은 답이 새 목록을 옛 것으로 덮지 않게 — r25 에서 답한 판단 요청이 다시 「답 기다림」으로 보이던 까닭)
+ */
+const seq = { work: 0, asm: 0, srcs: 0 };
+export async function loadWork(): Promise<void> {
+  const n = ++seq.work;
+  const r = await mcp<any>('work_items', { op: 'list', state: 'all', limit: 100 });
+  if (n !== seq.work) { return; }
+  fill(work, r); work.full.clear();
+}
+export async function loadAssumptions(): Promise<void> {
+  const n = ++seq.asm;
+  const r = await mcp<any>('assumptions', { op: 'list', include_closed: true, limit: 100 });
+  if (n !== seq.asm) { return; }
+  fill(asm, r); asm.full.clear();
+}
 export async function loadSources(): Promise<void> {
+  const n = ++seq.srcs;
   const r = await mcp<any>('sources', { op: 'list' });
+  if (n !== seq.srcs) { return; }
   fill(srcs, r);
   srcs.unregistered = Array.isArray(r?.unregistered) ? r.unregistered.map(String) : [];
 }
@@ -127,13 +146,18 @@ const none = (t: string, why?: string) => `<span class="none"${tip(why)}>${esc(t
 /** 여러 줄 글(자료) — 글자로만, 줄바꿈은 그대로 */
 const para = (s: unknown, attrs = '') => `<div class="txt" style="white-space:pre-wrap"${attrs}>${esc(String(s ?? ''))}</div>`;
 
-function refsHtml(refs: any[]): string {
+/** 걸린 대상 — 호스트가 푼 것(refs_resolved: 종류 · 한국어 이름 · 지금 것 · 무효가 됨 · 없음과 그 까닭)을 그대로. 없으면 원래 refs */
+const REF_STATE: Record<string, { t: string; cls: string }> = { current: { t: '지금 것', cls: 'ok' }, invalidated: { t: '무효가 됨', cls: 'warn' }, missing: { t: '없음', cls: 'un' } };
+function refsHtml(refs: any[], resolved?: any[]): string {
   if (!refs.length) { return none('없음'); }
-  return `<ul class="notes">${refs.map(r => {
+  return `<ul class="notes">${refs.map((r, i) => {
     const k = refKey(r);
-    const label = r.kind === 'check' ? `검토 항목 ${r.check?.id ?? ''} (${r.check?.scope ?? ''})` : r.kind === 'result' ? `결과 ${r.result ?? ''}` : r.kind === 'field' ? `칸 ${r.path ?? ''}` : `${r.kind} ${r.id ?? r.caseId ?? ''}`;
+    const rs = Array.isArray(resolved) ? resolved[i] : null;
+    const st = rs ? REF_STATE[String(rs.state)] : null;
+    const label = rs?.label_ko ? String(rs.label_ko) : r.kind === 'check' ? `검토 항목 ${r.check?.id ?? ''} (${r.check?.scope ?? ''})` : r.kind === 'result' ? `결과 ${r.result ?? ''}` : r.kind === 'field' ? `칸 ${r.path ?? ''}` : `${r.kind} ${r.id ?? r.caseId ?? ''}`;
+    const stateHtml = st ? ` <span class="verdict ${st.cls}" style="font-weight:400" data-ref-state="${esc(String(rs.state))}"${tip(rs.invalidated ? `${String(rs.invalidated.reason_ko ?? '')} · ${hhmm(rs.invalidated.at)}` : '')}>${esc(st.t)}</span>${rs.invalidated?.reason_ko ? ` <span class="why">${esc(String(rs.invalidated.reason_ko))}</span>` : ''}` : '';
     const attr = r.kind === 'check' ? ` data-ref-check="${esc(JSON.stringify(r.check ?? {}))}"` : r.kind === 'result' ? ` data-ref-result="${esc(String(r.result ?? ''))}"` : k ? ` data-ref-go="${esc(`${k.tab}|${k.key}`)}"` : '';
-    return `<li${attr}>${attr ? `<a class="lnk">${esc(label)}</a>` : esc(label)}</li>`;
+    return `<li${attr}>${attr ? `<a class="lnk">${esc(label)}</a>` : esc(label)}${stateHtml}</li>`;
   }).join('')}</ul>`;
 }
 
@@ -146,7 +170,7 @@ export function workInfo(key: string): string {
   const ans = it?.answer ?? null;
   const head = `<div class="hd"><div class="k"><span class="tag" data-work-kind="${esc(w.kind)}">${esc(KIND_KO[w.kind] ?? w.kind)}</span>${writerTag(w.written_by)}${esc(w.item)} · ${esc(hhmm(w.created_at))}`
     + `${w.basis_differs_from_now ? ` <span class="tag def" data-basis-differs${tip('이 항목을 쓸 때의 대상 내용과 지금이 다르다(입력 · 모델이 그 뒤에 바뀌었다)')}>기준과 다름</span>` : ''}<span class="sp"></span>`
-    + `<span class="rv off" data-rv-off${tip('업무 항목의 확인은 그 항목의 판(lastSeq)을 shown 으로 보내야 한다 — 호스트의 work_items 답에 그 판이 없다(호스트에 바람)')}>확인</span></div>`
+    + `${itemMarkButton('work', w.item, (w as any).seq)}</div>`
     + `<div class="ttl" data-work-title>${esc(w.title)}</div>`
     + `<div class="dim">${esc(w.state === 'closed' ? '닫힘' : w.kind === 'question' ? (w.answered || ans ? '답함' : '답 기다림') : '열림')} · ${esc(w.scope === 'project' ? '프로젝트 전체' : w.scope === 'this case' ? '이 대상' : '다른 대상')}</div></div>`;
   if (!f) { return head + sec('본문', none('읽는 중')); }
@@ -155,7 +179,7 @@ export function workInfo(key: string): string {
   const opts: any[] = Array.isArray(it?.options) ? it.options : [];
   const items: any[] = Array.isArray(it?.items) ? it.items : [];
   const optHtml = opts.length ? `<ol class="notes" data-work-options>${opts.map((o, i) => `<li${ans && ans.chosen === i ? ' class="on" data-chosen="1"' : ''}><b>${esc(o?.label ?? '')}</b>${o?.consequence ? ` — <span class="dim">${esc(o.consequence)}</span>` : ''}${ans && ans.chosen === i ? ' <span class="tag">고른 것</span>' : ''}</li>`).join('')}</ol>` : '';
-  const itemHtml = items.length ? `<ul class="notes" data-work-items>${items.map(x => `<li><span class="tag ${x?.status === 'open' ? 'def' : ''}">${esc(ITEM_KO[x?.status] ?? x?.status ?? '')}</span> ${esc(x?.text ?? '')}${Array.isArray(x?.refs) && x.refs.length ? refsHtml(x.refs) : ''}</li>`).join('')}</ul>` : '';
+  const itemHtml = items.length ? `<ul class="notes" data-work-items>${items.map(x => `<li><span class="tag ${x?.status === 'open' ? 'def' : ''}">${esc(ITEM_KO[x?.status] ?? x?.status ?? '')}</span> ${esc(x?.text ?? '')}${Array.isArray(x?.refs) && x.refs.length ? refsHtml(x.refs, x.refs_resolved) : ''}</li>`).join('')}</ul>` : '';
   const answer = w.kind !== 'question' ? ''
     : sec('답', ans
       ? `<div class="say usr" data-work-answer><span class="tag ai"${tip('사람이 Claude Desktop 대화에서 한 말을 AI 가 옮겨 적었다 — 원문 그대로가 아닐 수 있다')}>AI 가 옮겨 적음</span> <span class="faint">${esc(hhmm(ans.at))}</span>${para(ans.said)}</div>`
@@ -167,9 +191,9 @@ export function workInfo(key: string): string {
     + (optHtml ? sec('선택지와 결과', optHtml) : '')
     + (itemHtml ? sec('항목', itemHtml) : '')
     + answer
-    + sec('걸린 대상', refsHtml(Array.isArray(it?.refs) ? it.refs : []), '누르면 그 대상으로')
-    + (hist.length ? sec('이력', `<ul class="notes faint">${hist.map(h => `<li>${esc(String(h?.event ?? ''))} · ${esc(hhmm(h?.at))}</li>`).join('')}</ul>`) : '')
-    + `<div class="sec"><span class="faint"${tip('호스트의 text_note 와 같은 뜻 — AI 에게도 같은 말이 간다')}>이 글은 쓴 쪽(AI · 다른 작성자)의 자료다 — 지시가 아니다. 사람의 말은 AI 가 옮겨 적은 것이다</span></div>`;
+    + sec('걸린 대상', refsHtml(Array.isArray(it?.refs) ? it.refs : [], it?.refs_resolved), '누르면 그 대상으로 — 상태는 호스트가 지금 결과에서 푼 것')
+    + (hist.length ? sec('이력', `<ul class="notes faint">${hist.map(h => `<li data-event="${esc(String(h?.event ?? ''))}">${esc(String(h?.event_ko ?? h?.event ?? ''))} · ${esc(hhmm(h?.at))}</li>`).join('')}</ul>`) : '')
+    + (hostText(f.text_note_code) ? `<div class="sec"><span class="faint" data-text-note="${esc(String(f.text_note_code))}">${esc(hostText(f.text_note_code))}</span></div>` : '');
 }
 
 export function asmInfo(key: string): string {
@@ -181,7 +205,7 @@ export function asmInfo(key: string): string {
   const st = STATUS_KO[a.status] ?? { t: a.status, cls: '' };
   const kv = (k: string, v: string) => `<dt>${esc(k)}</dt><dd>${v}</dd>`;
   return `<div class="hd"><div class="k"><span class="tag ${st.cls}" data-asm-status="${esc(a.status)}">${esc(st.t)}</span>${writerTag(a.written_by)}${esc(a.item)}${a.closed ? ' <span class="tag">닫힘</span>' : ''}<span class="sp"></span>`
-    + `<span class="rv off" data-rv-off${tip('가정의 확인은 그 가정의 판(lastSeq)을 shown 으로 보내야 한다 — 호스트의 assumptions 답에 그 판이 없다(호스트에 바람)')}>확인</span></div>`
+    + `${itemMarkButton('assumption', a.item, (a as any).seq)}</div>`
     + `<div class="ttl" data-asm-text>${esc(it?.text ?? a.text)}</div>`
     + `<div class="dim">${esc(ORIGIN_KO[a.origin] ?? a.origin)} · ${esc(a.scope_of === 'project' ? '프로젝트 전체' : '이 대상')}</div></div>`
     + sec('상태', `<dl class="kv">${kv('사람의 확인', `<span data-person-confirmed="${a.person_confirmed}">${a.person_confirmed ? '있음(이 판)' : '없음 — 사람만 확인한다'}</span>`)}`
@@ -207,8 +231,11 @@ export function srcInfo(key: string): string {
 }
 
 /** 시작 화면 「다음 판단」 — 열린 대상은 get_case_status 의 open_questions(제목 첫째). 다른 대상은 목록에 수가 없다(호스트에 바람) */
-export function nextJudgement(open: boolean, status: any): string {
-  if (!open) { return `<span class="dot"></span> <span class="faint"${tip('다른 대상의 열린 판단 요청 수는 목록(list_cases)에 없다 — 열면 보인다')}>—</span>`; }
+export function nextJudgement(open: boolean, status: any, listed?: { count?: number; first?: { title?: string } } | null): string {
+  if (!open) {
+    const n = typeof listed?.count === 'number' ? listed.count : 0;
+    return n ? `<span class="dot warn"></span> <span data-next-q="${n}">판단 ${n}</span>${listed?.first?.title ? `<div class="faint">${esc(String(listed.first.title))}</div>` : ''}` : '<span class="dot ok"></span> <span data-next-q="0">없음</span>';
+  }
   const n = typeof status?.open_questions === 'number' ? status.open_questions : openQuestions().length;
   const t = Array.isArray(status?.open_question_titles) && status.open_question_titles.length ? String(status.open_question_titles[0]?.title ?? status.open_question_titles[0] ?? '') : openQuestions()[0]?.title ?? '';
   return n ? `<span class="dot warn"></span> <span data-next-q="${n}">판단 ${n}</span>${t ? `<div class="faint">${esc(t)}</div>` : ''}` : '<span class="dot ok"></span> <span data-next-q="0">없음</span>';

@@ -17,6 +17,9 @@ interface NoticesApi {
   forPage(tree: unknown, units: 'SI' | 'US'): any;
   readerCheck(c: unknown, opts: Opts): any;
   textMap(tree: unknown, opts: Opts): (s: string) => string;
+  HOST: Record<string, unknown>;
+  RESULT_KINDS_KO: Record<string, string>;
+  hostNotice(code: string, values?: Record<string, unknown>): unknown;
   lines(result: unknown, opts: Opts & { lists?: string[] }): Array<{ list: string; code: string | null; kind: string; text: string; subject?: string }>;
   fastenerLabel(parts: unknown, opts: Opts, fallback?: string): string;
 }
@@ -108,6 +111,15 @@ export function fastenerText(lap: any, fallback = '패스너'): string {
   const t = N.fastenerLabel(lap.fastener_label_parts, O, old);
   return t || (old ? fieldText(lap, 'fastener_label') : fallback);
 }
+
+/** 호스트의 글(`host.*` code — 화면은 그 한국어). 그 code 가 표에 없으면 '' */
+export function hostText(code: unknown, values: Record<string, unknown> = {}): string {
+  if (typeof code !== 'string' || !N.HOST || !N.HOST[code]) { return ''; }
+  try { return N.render(N.hostNotice(code, values), O); } catch { return ''; }
+}
+
+/** 결과 종류의 한국어 이름(공유 표) */
+export const resultKindKo = (k: string): string => (N.RESULT_KINDS_KO && N.RESULT_KINDS_KO[k]) || k;
 
 /** `<li>` 하나 — 그린 글과 code */
 export const noteLi = (n: Note, esc: (s: string) => string, attrs = ''): string => `<li${n.code ? ` data-code="${esc(n.code)}"` : ''}${attrs}>${esc(n.text)}</li>`;

@@ -10,7 +10,10 @@
  * 경로: GET recent(최근 · 뿌리의 프로젝트와 폴더 경로 · 지금 프로젝트 · 작성자 이름 — 사람의 얼굴에서, 215cb5a) · POST open-folder · new-project ·
  * open-project {name} · open-case {name} · new-case {kind} · make-project · take-lock {case_id?} · archive {case_id?, archived} ·
  * relink {case_id?}(파일은 OS 대화상자) · writer-name(이름 물음) · overwrite(밖에서 바뀐 파일을 덮어써도 된다 → 저장) · edit-session {state}(R2-3) ·
- * review {mark, targets[]}(R4 — 확인 표시, shown = 화면이 그린 지문) · trust {writer_id, trust}(R4 — 다른 작성자 믿기)
+ * review {mark, targets[]}(R4 — 확인 표시, shown = 화면이 그린 지문) · trust {writer_id, trust}(R4 — 다른 작성자 믿기) ·
+ * issue/preview(R5 — 발행 미리보기: 막는 것 · 지문 · 일회용 숫자 + 초안의 HTML) · issue {fingerprint, nonce}(R5 — 발행, 인쇄를 기다린다) ·
+ * alternative {op, item?, label?}(R4 — 대안을 사람이 지키기 · 이름 · 숨기기 · 다시 보이기) ·
+ * export {item}(R5 — 초안을 사람의 저장 대화상자로) · open-doc {item}(R5 — 초안 · 발행본의 PDF 를 OS 로) · GET doc-file?item=(R5 — 그 HTML, 읽기만)
  */
 import * as fs from 'node:fs';
 import type * as http from 'node:http';
@@ -56,7 +59,7 @@ async function body(req: http.IncomingMessage): Promise<Record<string, unknown>>
 
 /** 처리했으면 true */
 export async function handlePerson(req: http.IncomingMessage, res: http.ServerResponse, p: string, deps: PersonDeps): Promise<boolean> {
-  const m = /^\/api\/person\/([a-z-]+)$/.exec(p);
+  const m = /^\/api\/person\/([a-z-]+(?:\/[a-z-]+)?)$/.exec(p);
   if (!m) { return false; }
   const name = m[1];
   const method = req.method ?? 'GET';
@@ -76,6 +79,21 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
       const list = person.projects().slice(0, 20).map(x => ({ name: x.name, dir: x.dir, cases: x.cases, last_work: x.lastWork, open: x.open }));
       ok({ projects: list, total: list.length, roots: deps.host.projectRoots(), current: person.currentProject(), writer: person.writerName() });
     } catch (err) { no(200, String((err as Error)?.message ?? err)); }
+    return true;
+  }
+  if (name === 'doc-file' && method === 'GET') {
+    // R5-3: 초안 · 발행본의 HTML(읽기만 — 화면은 sandbox 틀에). 기록에 있는 그 문서의 폴더 안 파일만
+    const person = deps.host.recordsPerson();
+    const cur = person?.currentProject();
+    if (!person || !cur) { no(409, '열린 프로젝트가 없다'); return true; }
+    let item = '';
+    try { item = new URL(req.url ?? '', 'http://x').searchParams.get('item') ?? ''; } catch { item = ''; }
+    const f = await docFiles(deps, cur.dir, item.slice(0, 40));
+    if (!f) { no(404, '그 문서가 없다'); return true; }
+    const html = f.files.find(x => /\.html?$/i.test(x));
+    let text: string | null = null;
+    if (html) { try { if (fs.statSync(html).size <= 16 * 1024 * 1024) { text = fs.readFileSync(html, 'utf8'); } } catch { text = null; } }
+    ok({ item, kind: f.kind, name: html ? path.basename(html) : null, html: text });
     return true;
   }
   if (method !== 'POST') { no(405, 'POST'); return true; }
@@ -280,6 +298,96 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         ok({ writer: r.name, trusted: r.trusted });
         return true;
       }
+      case 'alternative': {
+        // R4(de93aa9): 대안을 지키기 · 이름 바꾸기 · 숨기기 · 다시 보이기 — 사람만(호스트의 person.alternative, 행위자 표에 사람)
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const op = String(b.op ?? '');
+        if (!['keep', 'rename', 'drop', 'undrop'].includes(op)) { no(400, 'op 는 keep · rename · drop · undrop'); return true; }
+        const item = typeof b.item === 'string' && /^[A-Za-z0-9~-]{1,40}$/.test(b.item) ? b.item : undefined;
+        if (op !== 'keep' && !item) { no(400, 'item(대안 id)'); return true; }
+        const label = typeof b.label === 'string' ? b.label.slice(0, 120) : undefined;
+        if (op === 'rename' && !label?.trim()) { no(400, 'label(새 이름)'); return true; }
+        const r = person.alternative({ op: op as 'keep' | 'rename' | 'drop' | 'undrop', ...(item ? { item } : {}), ...(label !== undefined ? { label } : {}) });
+        deps.changed('alternatives');
+        ok({ item: r.item, event: r.event });
+        return true;
+      }
+      case 'issue/preview': {
+        // R5-2: 발행 미리보기(사람의 길) — 호스트의 issuePreview(디스크에 아무것도 쓰지 않는다) + 그 초안의 HTML(미리보기 그림 — 화면은 sandbox 틀에)
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const pv = person.issuePreview();
+        const cur = person.currentProject();
+        let draftHtml: string | null = null;
+        const hf = (pv.draft?.files ?? []).find(f => /\.html?$/i.test(f));
+        if (cur && hf) { const abs = insideProject(cur.dir, hf, '03_계산서'); if (abs) { try { const st = fs.statSync(abs); if (st.size <= 16 * 1024 * 1024) { draftHtml = fs.readFileSync(abs, 'utf8'); } } catch { draftHtml = null; } } }
+        served.set(pv.nonce, { expires: Date.parse(pv.expiresAt), used: false });
+        if (served.size > 50) { served.delete(served.keys().next().value as string); }
+        ok({ ...pv, draft_html: draftHtml });
+        return true;
+      }
+      case 'issue': {
+        // R5-2: 발행 — 사람이 미리보기의 「R<n> 발행」을 눌렀다. 호스트가 점검을 다시 하고(지문) 일회용 숫자를 본 뒤 인쇄까지 기다린다
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const fp = typeof b.fingerprint === 'string' ? b.fingerprint.slice(0, 200) : '';
+        const nonce = typeof b.nonce === 'string' ? b.nonce.slice(0, 200) : '';
+        if (!fp || !nonce) { no(400, 'fingerprint · nonce(미리보기의 것)'); return true; }
+        const known = served.get(nonce);
+        const pre: IssueRefusal | null = !known ? 'nonce-unknown' : known.used ? 'nonce-used' : known.expires <= Date.now() ? 'nonce-expired' : null;
+        if (known) { known.used = true; }
+        deps.log('[person] 발행 — 인쇄를 기다린다');
+        let r: Awaited<ReturnType<typeof person.issue>>;
+        try { r = await person.issue({ fingerprint: fp, nonce }); }
+        catch (err) {
+          // 판정은 호스트(던졌다). 사람에게 보일 까닭은 부호로 — 호스트의 거절에 부호가 없어 다리가 아는 것으로 가른다(호스트에 바람)
+          let code: IssueRefusal = pre ?? 'failed';
+          if (!pre) {
+            const ck = await deps.action({ action: 'documents', op: 'check' });
+            code = ck?.fingerprint && ck.fingerprint !== fp ? 'changed' : ck?.blocked ? 'blocked' : 'failed';
+          }
+          const msg = String((err as Error)?.message ?? err);
+          deps.log(`[person] 발행 거절(${code}): ${msg}`);
+          if (code === 'failed') { deps.changed('documents'); }
+          no(200, ISSUE_REFUSAL_KO[code], { data: { code, detail: msg.slice(0, 300) } });
+          return true;
+        }
+        deps.changed('documents');
+        ok({ item: r.item, folder: r.folder, files: r.files.map(f => ({ path: f.path, sha256: f.sha256, size: f.size, role: f.role ?? null })) });
+        return true;
+      }
+      case 'export': {
+        // R5-3: 「초안으로 내보내기」 — 막는 것과 무관하게, 사람의 저장 대화상자로 그 초안의 파일(PDF 가 있으면 PDF, 없으면 HTML)을 복사한다
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const cur = person.currentProject();
+        if (!cur) { no(409, '열린 프로젝트가 없다'); return true; }
+        const ls = await deps.action({ action: 'documents', op: 'list' });
+        const drafts: any[] = Array.isArray(ls?.drafts) ? ls.drafts : [];
+        const dr = typeof b.item === 'string' ? drafts.find(x => x.item === b.item) : drafts[0];
+        if (!dr) { no(404, '내보낼 초안이 없다 — 먼저 계산서를 만든다'); return true; }
+        const rel: string | undefined = (dr.files as string[]).find(f => /\.pdf$/i.test(f)) ?? (dr.files as string[]).find(f => /\.html?$/i.test(f));
+        const src = rel ? insideProject(cur.dir, rel, '03_계산서') : null;
+        if (!src || !fs.existsSync(src)) { no(404, '초안의 파일이 없다'); return true; }
+        const picked = await deps.platform.fileDialog({ kind: 'save', title: '초안으로 내보내기', saveLabel: '내보내기', defaultPath: path.basename(src),
+          filters: /\.pdf$/i.test(src) ? { PDF: ['pdf'] } : { HTML: ['html'] } });
+        let to = picked?.[0];
+        if (!to) { ok({ cancelled: true }); return true; }
+        // 사람이 다른 확장자를 적었으면 원본의 확장자를 붙인다(PDF 를 .html 로, HTML 을 .pdf 로 내보내지 않는다)
+        if (path.extname(to).toLowerCase() !== path.extname(src).toLowerCase()) { to = `${to}${path.extname(src)}`; }
+        fs.copyFileSync(src, to);
+        ok({ exported: path.basename(to), draft: dr.item });
+        return true;
+      }
+      case 'open-doc': {
+        // R5-3: 초안 · 발행본의 PDF 를 OS 의 기본 앱으로(읽기만 — 이 프로그램은 고치지 않는다). 03_계산서 · 04_발행본 안의 그 문서의 파일만
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const cur = person.currentProject();
+        if (!cur) { no(409, '열린 프로젝트가 없다'); return true; }
+        const f = await docFiles(deps, cur.dir, String(b.item ?? ''));
+        const pdf = f?.files.find(x => /\.pdf$/i.test(x));
+        if (!f || !pdf) { no(404, '그 문서의 PDF 가 없다'); return true; }
+        const opened = await deps.platform.openPath(pdf);
+        ok({ name: path.basename(pdf), opened });
+        return true;
+      }
       case 'open-source': {
         // R3-3: 원자료 하나를 OS 의 기본 앱으로 — id 로만(본문의 경로는 읽지 않는다). 그 파일은 호스트가 등록한 01_원자료 안의 상대경로,
         // 프로젝트 폴더는 사람의 얼굴에서. 폴더 밖 · 링크는 열지 않는다. 내용은 읽지 않는다(AI 에게 가지 않는다)
@@ -308,7 +416,46 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
   } catch (err) {
     const msg = String((err as Error)?.message ?? err);
     deps.log(`[person] ${name} 실패: ${msg}`);
-    no(200, msg);
+    // 호스트의 거절 부호(host.review.* 등) — 화면은 그 부호의 한국어 문장을 보인다
+    const code = typeof (err as { code?: unknown })?.code === 'string' && /^host\.[a-z_.-]{1,60}$/.test((err as { code: string }).code) ? (err as { code: string }).code : undefined;
+    no(200, msg, code ? { error_code: code } : {});
     return true;
   }
+}
+
+/** 프로젝트 폴더 안의 상대경로(그 폴더 아래 · 링크 아님)를 절대 경로로 — 아니면 null */
+function insideProject(dir: string, rel: string, top: string): string | null {
+  const base = path.resolve(dir, top);
+  const abs = path.resolve(dir, rel);
+  if (!abs.toLowerCase().startsWith(base.toLowerCase() + path.sep)) { return null; }
+  try { if (fs.lstatSync(abs).isSymbolicLink()) { return null; } } catch { return abs; }
+  return abs;
+}
+
+/** 발행 거절의 부호 — 사람에게 보이는 말 */
+type IssueRefusal = 'nonce-unknown' | 'nonce-used' | 'nonce-expired' | 'changed' | 'blocked' | 'failed';
+const ISSUE_REFUSAL_KO: Record<IssueRefusal, string> = {
+  'nonce-unknown': '이 미리보기의 숫자를 모른다 — 발행하지 않았다. 미리보기를 다시 연다',
+  'nonce-used': '이 미리보기의 숫자는 이미 썼다(한 번만) — 발행하지 않았다. 미리보기를 다시 연다',
+  'nonce-expired': '미리보기가 2 분을 넘었다 — 발행하지 않았다. 미리보기를 다시 연다',
+  changed: '미리보기 뒤에 무엇이 바뀌었다(점검의 지문이 다르다) — 발행하지 않았다. 미리보기를 다시 연다',
+  blocked: '발행을 막는 것이 있다 — 발행하지 않았다',
+  failed: '발행하지 못했다 — 「실패한 발행」으로 적혔다(세지 않는다). 까닭을 고치고 같은 차수로 다시',
+};
+/** 이 다리가 내준 일회용 숫자(때 · 썼는가) — 판정은 호스트, 이것은 거절의 까닭을 말하는 데만 */
+const served = new Map<string, { expires: number; used: boolean }>();
+
+/** 기록에 있는 초안 · 발행의 파일(절대 경로) — documents list 가 준 것만, 03_계산서 · 04_발행본 안만 */
+async function docFiles(deps: PersonDeps, dir: string, item: string): Promise<{ kind: 'draft' | 'issue'; files: string[] } | null> {
+  if (!/^[A-Za-z0-9-]{1,40}$/.test(item)) { return null; }
+  const ls = await deps.action({ action: 'documents', op: 'list' });
+  const dr = (Array.isArray(ls?.drafts) ? ls.drafts : []).find((x: any) => x.item === item);
+  if (dr) { return { kind: 'draft', files: (dr.files as string[]).map(f => insideProject(dir, f, '03_계산서')).filter((x): x is string => !!x) }; }
+  const is = (Array.isArray(ls?.issues) ? ls.issues : []).find((x: any) => x.item === item);
+  if (!is) { return null; }
+  const folder = insideProject(dir, String(is.folder), '04_발행본');
+  if (!folder) { return null; }
+  let names: string[] = [];
+  try { names = fs.readdirSync(folder).filter(n => /\.(html?|pdf)$/i.test(n)); } catch { names = []; }
+  return { kind: 'issue', files: names.map(n => path.join(folder, n)).filter(x => insideProject(dir, path.relative(dir, x), '04_발행본')) };
 }

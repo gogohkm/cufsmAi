@@ -55,6 +55,14 @@ export interface RecordsPersonFace {
   review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string };
   /** R4: 다른 작성자를 믿는다 / 믿지 않는다(그 작성자 소개가 프로젝트에 있어야) */
   trust(writerId: string, trust: boolean): { writerId: string; name: string; trusted: boolean };
+  /** R4(de93aa9): 대안 — 사람도 지키기 · 이름 바꾸기 · 숨기기 · 다시 보이기 */
+  alternative(req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }): { item: string; event: string };
+  /** R5-2: 발행 미리보기 — 막는 것 · 경고 · 통과 · 묶일 파일 · 차수 · 지문 · 일회용 숫자(2 분) */
+  issuePreview(): { caseId: string; caseName: string; revision: number; label: string; folder: string; blockers: Array<{ code: string; count?: number; detail?: string; text?: string; text_ko?: string }>;
+    warnings: Array<{ code: string; count?: number; detail?: string; text?: string; text_ko?: string }>; passed: string[]; draft: { item: string; kind: string; files: string[] } | null; files: string[];
+    fingerprint: string; nonce: string; expiresAt: string };
+  /** R5-2: 발행(인쇄를 기다린다) — 미리보기의 지문 · 일회용 숫자 */
+  issue(req: { fingerprint: string; nonce: string }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }>;
 }
 
 /** R2-2: 편집 상태의 시작 · 끝 · 버리기(StcfsdPanel.editSession — 사람의 길로만, MCP 문맥에서는 ok false) */

@@ -4,6 +4,7 @@
  * (「가장 얇은」 · 「무게」는 AI 의 이유 글이다, D12). 라벨은 AI 가 쓴 글(자료).
  */
 import { mcp } from './bridge';
+import { person } from './records';
 import { esc, tip } from './dom';
 import { hhmm, ratioText, sigText } from './format';
 /** 판정비 글(기록의 값 — 화면의 수 대조 data-src 를 달지 않는다) */
@@ -31,7 +32,10 @@ export async function compareOf(item: string): Promise<any> {
 }
 export const visibleAlts = (): Alt[] => alts.items.filter(a => alts.showHidden || !a.hidden);
 export async function altAction(op: 'keep' | 'open' | 'rename' | 'drop' | 'undrop', args: Record<string, unknown> = {}): Promise<any> {
-  return mcp<any>('alternatives', { op, ...args });
+  // 「이 대안으로」 는 호스트 동작(중계 — 사람의 것으로 적힌다), 지키기 · 이름 · 숨기기 · 다시 보이기는 사람만 하는 길(de93aa9 person.alternative)
+  if (op === 'open') { return mcp<any>('alternatives', { op, ...args }); }
+  const r = await person('alternative', { op, ...args });
+  return r.ok ? r.data : { error: r.error ?? '하지 못했다', code: r.code };
 }
 
 const vCls = (v: string | null | undefined) => (v === 'fail' ? 'ng' : v === 'pass' ? 'ok' : 'un');
@@ -39,8 +43,6 @@ const vKo = (v: string | null | undefined) => (v === 'fail' ? 'NG' : v === 'pass
 const cell = (x: { ratio: number | null; verdict: string | null } | null) => (!x ? '<span class="faint">없음</span>'
   : `${typeof x.ratio === 'number' ? ratio(x.ratio, x.verdict === 'fail') : '<span class="faint">—</span>'} <span class="verdict ${vCls(x.verdict)}" style="font-weight:400">${vKo(x.verdict)}</span>`);
 
-/** 지키기 · 이름 바꾸기 · 숨기기는 호스트의 행위자 표(records/policy.ts alternatives — ai 만)가 사람에게 열지 않는다 — 꺼 두고 까닭 */
-const PERSON_NO = '호스트의 기록 규칙이 대안의 지키기 · 이름 바꾸기 · 숨기기를 AI 에게만 연다(사람의 화면에서는 아직 못 한다 — 호스트에 바람). Claude 에게 말하면 AI 가 한다';
 
 /** 열쇠의 사람 글 — 범위 · 위치 · id */
 export function rowLabel(r: CmpRow): string {
@@ -88,8 +90,8 @@ export function altInfo(key: string): string {
     + `<dt>단면적 A</dt><dd>${typeof a.A === 'number' ? `${esc(sigText(si(a.A, 'area') ?? a.A, 4))} mm²` : '—'}</dd></dl></div>`
     + `<div class="sec"><h4${tip('지금 상태와 이 대안의 다른 칸(호스트 — 대안의 스냅숏과 지금)')}>지금과 다른 것<span class="sp"></span></h4>${a.copy ? `<p class="warn">사본 ${esc(a.copy === 'damaged' ? '손상' : '없음')}</p>` : d ? (d.fields ? `<ul class="notes">${d.first.map(f => `<li>${esc(f)}</li>`).join('')}${d.fields > d.first.length ? `<li class="faint">외 ${d.fields - d.first.length}</li>` : ''}</ul>` : '<span class="none">없음 — 지금과 같다</span>') : ''}</div>`
     + `<div class="sec"><div class="btns"><span class="btn${a.is_now || a.copy ? ' off' : ''}" data-alt-open="${esc(a.item)}"${tip('이 대안의 모델 · 입력을 지금 대상에 얹는다 — 변경 묶음 하나, 결과는 다시 돌린다(사본을 결과로 넣지 않는다)')}>이 대안으로</span>`
-    + `<span class="btn ghost off" data-alt-${a.hidden ? 'undrop' : 'drop'}="${esc(a.item)}"${tip(PERSON_NO)}>${a.hidden ? '다시 보이기' : '숨기기'}</span></div>`
-    + `<div class="btns"><input type="text" maxlength="80" data-alt-newlabel="${esc(a.item)}" placeholder="새 이름" value="${esc(alts.draft[a.item] ?? '')}" disabled><span class="btn ghost off" data-alt-rename="${esc(a.item)}"${tip(PERSON_NO)}>이름 바꾸기</span></div></div>`
+    + `<span class="btn ghost" data-alt-${a.hidden ? 'undrop' : 'drop'}="${esc(a.item)}"${tip(a.hidden ? '대안 목록에 다시 보인다(사람만)' : '대안 목록에서 숨긴다 — 지우지 않는다(사람만)')}>${a.hidden ? '다시 보이기' : '숨기기'}</span></div>`
+    + `<div class="btns"><input type="text" maxlength="80" data-alt-newlabel="${esc(a.item)}" placeholder="새 이름" value="${esc(alts.draft[a.item] ?? '')}"><span class="btn ghost" data-alt-rename="${esc(a.item)}"${tip('이 대안의 이름을 바꾼다(사람만)')}>이름 바꾸기</span></div></div>`
     + `<div class="sec"><span class="faint">라벨은 AI 가 쓴 글 — 자료다. 프로그램은 대안의 순위를 짓지 않는다.</span></div>`;
 }
 
@@ -100,6 +102,6 @@ export function altRootInfo(): string {
     + `<div class="sec"><h4>목록<span class="sp"></span></h4>${list.length ? `<table class="t"><tbody>${list.map(a => `<tr data-ref-go="${esc(`result|alt:${a.item}`)}"><td>${esc(a.label)}${a.is_now ? ' <span class="tag">지금</span>' : ''}</td>`
       + `<td class="r">${typeof a.max_ratio === 'number' ? ratio(a.max_ratio, a.pass === false) : '—'}</td></tr>`).join('')}</tbody></table>` : '<span class="none">없음</span>'}</div>`
     + `<div class="sec"><h4${tip('지금의 결과(실행 묶음)와 모델 · 입력에 이름을 붙여 둔다 — 나중에 견주고 되돌린다')}>지금 것을 대안으로<span class="sp"></span></h4>`
-    + `<div class="btns"><input type="text" maxlength="80" data-alt-newlabel="__keep__" placeholder="이름(예: t 2.3)" value="${esc(alts.draft.__keep__ ?? '')}" disabled><span class="btn off" data-alt-keep="__keep__"${tip(PERSON_NO)}>지키기</span></div></div>`
+    + `<div class="btns"><input type="text" maxlength="80" data-alt-newlabel="__keep__" placeholder="이름(예: t 2.3)" value="${esc(alts.draft.__keep__ ?? '')}"><span class="btn" data-alt-keep="__keep__"${tip('지금 모델 · 입력 · 결과를 이 이름의 대안으로 지킨다(사람만)')}>지키기</span></div></div>`
     + `<div class="sec"><label class="faint"><input type="checkbox" data-alt-hidden${alts.showHidden ? ' checked' : ''}> 숨긴 대안도 보이기</label></div>`;
 }

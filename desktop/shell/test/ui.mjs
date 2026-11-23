@@ -355,6 +355,13 @@ async function main() {
       const sTr = await A.page(`fetch('/api/person/trust',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({writer_id:'wabcdefghijklmnopqrst',trust:true})}).then(r=>r.status).catch(e=>'err '+e)`);
       const lRv = await A.ev('return ctx.diag.personRequests.slice(-2);');
       check('입력 없이 스크립트의 확인 표시 · 믿기 POST → 열쇠가 붙지 않아 403', sRv === 403 && sTr === 403 && lRv.every(x => x.keyed === false), `review ${sRv} · trust ${sTr} · ${JSON.stringify(lRv)}`);
+      // R5-3: 발행 미리보기 · 발행 · 초안 내보내기 · 대안(사람) — 같은 길, 입력 없이 스크립트가 보내면 403
+      const r5 = {};
+      for (const [route, body] of [['issue/preview', {}], ['issue', { fingerprint: 'x', nonce: 'y' }], ['export', {}], ['alternative', { op: 'keep', label: 'x' }]]) {
+        r5[route] = await A.page(`fetch('/api/person/${route}',{method:'POST',headers:{'Content-Type':'application/json'},body:${JSON.stringify(JSON.stringify(body))}}).then(r=>r.status).catch(e=>'err '+e)`);
+      }
+      const l5 = await A.ev('return ctx.diag.personRequests.slice(-4);');
+      check('입력 없이 스크립트의 발행 미리보기 · 발행 · 내보내기 · 대안 POST → 열쇠가 붙지 않아 403', Object.values(r5).every(x => x === 403) && l5.length === 4 && l5.every(x => x.keyed === false), `${JSON.stringify(r5)} · ${JSON.stringify(l5)}`);
       await A.ev(`ctx.win.webContents.sendInputEvent({ type: 'mouseDown', x: 5, y: 300, button: 'left', clickCount: 1 }); ctx.win.webContents.sendInputEvent({ type: 'mouseUp', x: 5, y: 300, button: 'left', clickCount: 1 }); return true;`);
       await sleep(150);
       const s2 = await personPost();

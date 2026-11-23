@@ -14,6 +14,7 @@
  * 그림 위의 수는 모두 엔진 · 호스트에서 온 값이고 `data-src` 를 단다(format.ts). 3D 모드 형상은 이 화면에 없다(README — 다리 변경이 필요).
  */
 import { isValKey, reportKindOf, reportView, valView, vtabView } from './checklist';
+import { docView } from './docs';
 import { curveSvg, type CurveMark } from './curve';
 import { esc, tip } from './dom';
 import { drawerHtml, type DTable } from './drawer';
@@ -50,7 +51,7 @@ export function groupOf(key: string): Group {
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
   if (key === 'conn' || key.startsWith('conn:')) { return 'conn'; }
   if (['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return 'doc'; }
-  if (['ask', 'rep', 'chg', 'ins', 'val', 'alt'].includes(key) || /^(chg|work|asmr|srcr|alt):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
+  if (['ask', 'rep', 'chg', 'ins', 'val', 'alt', 'pub'].includes(key) || /^(chg|work|asmr|srcr|alt|doc|iss|pubf):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
   return 'model';
 }
 
@@ -418,17 +419,21 @@ export function tablesFor(group: Group): DTable[] {
 }
 
 /** 업무 항목의 첫 걸린 대상 → 화면의 키(검토 · 결과 · 칸) */
-function workTarget(id: string): string | null {
+function workTarget(id: string): string | { gone: any } | null {
   const f = work.full.get(id);
   const refs: any[] = Array.isArray(f?.item?.refs) ? f.item.refs : [];
-  for (const r of refs) {
+  const resolved: any[] = Array.isArray(f?.item?.refs_resolved) ? f.item.refs_resolved : [];
+  for (const [i, r] of refs.entries()) {
+    // 호스트가 푼 상태(refs_resolved) — 지금 없는 검토 · 결과는 단계로 떨어지지 않고 그 이름과 까닭을 그대로 보인다
+    const rs = resolved[i];
+    if (rs && (r?.kind === 'check' || r?.kind === 'result') && rs.state && rs.state !== 'current') { return { gone: rs }; }
     if (r?.kind === 'check' && r.check) { const k = keyOfItem({ kind: 'check', id: String(r.check.id), scope: r.check.scope, ...(r.check.location ? { location: r.check.location } : {}) } as never); if (k) { return k.key; } }
     if (r?.kind === 'result' && r.result) {
       const k = keyOfItem({ kind: 'result', id: String(r.result) } as never);
       if (k) { return k.key; }
-      // 결과가 지금 없으면(낡아 지웠다) 그 단계 — 그 자리에서 낡음 · 없음을 보인다
-      const st: Record<string, string> = { lap: 'conn', connection: 'conn', member_design: 'chk', buckling_analysis: 'fsm', design_dsm: 'fsm', load_analysis: 'load' };
-      if (st[String(r.result)]) { return st[String(r.result)]; }
+      // 지금 있는 결과(호스트가 푼 상태 current)인데 고를 줄이 없으면 그 결과의 단계
+      const st: Record<string, string> = { lap: 'conn', connection: 'conn', member_design: 'chk', buckling_analysis: 'fsm', signature_ss: 'fsm', load_analysis: 'load' };
+      if (rs?.state === 'current' && st[String(r.result)]) { return st[String(r.result)]; }
     }
     const k = refKey(r);
     if (k && k.tab !== 'work') { return k.key; }
@@ -511,10 +516,17 @@ export function centerHtml(key: string, size: { w: number; h: number } = { w: 12
   if (isValKey(key)) { return { html: valView(key), cls: 'v1 docc' }; }
   if (key === 'vtab') { return { html: vtabView(key), cls: 'v1 docc' }; }
   if (reportKindOf(key)) { return { html: reportView(key), cls: 'v1 docc' }; }
+  if (key.startsWith('doc:') || key.startsWith('iss:')) { return { html: docView(key), cls: 'v1 docc' }; }
+  if (key === 'pub' || key.startsWith('pubf:')) { return { html: honest('발행', '발행본을 고르면 읽기 전용으로 보인다 — 발행은 계산서의 정보 창 「R<n> 발행」(미리보기 → 사람만)'), cls: 'v1' }; }
   if (key === 'chg' || key.startsWith('chg:')) { return changeView(key, size); }
   // R3-3: 업무 항목 — 걸린 대상(첫째)의 보기를 그대로(정보 창이 그 항목). 가정 · 원자료는 글뿐이라 가운데는 비운다
   if (key.startsWith('work:')) {
     const t = workTarget(key.slice(5));
+    if (t && typeof t === 'object') {
+      const g = t.gone;
+      return { html: `<div data-ref-gone="${esc(String(g.state))}">${honest(`${String(g.label_ko ?? '')} — ${g.state === 'invalidated' ? '무효가 됨' : '없음'}`,
+        g.invalidated?.reason_ko ? `${String(g.invalidated.reason_ko)}${g.invalidated.at ? ` · ${hhmm(g.invalidated.at)}` : ''}` : '이 업무 항목이 가리키는 것이 지금 결과에 없다 — 다시 돌리면 생긴다')}</div>`, cls: 'v1' };
+    }
     if (t && !t.startsWith('work:')) { return centerHtml(t, size); }
     return { html: honest('걸린 대상 없음', '이 업무 항목은 검토 · 결과 · 칸을 가리키지 않는다 — 정보 창에 글'), cls: 'v1' };
   }

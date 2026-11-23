@@ -111,6 +111,20 @@ table.t.vt .ratio .num { min-width: 44px; text-align: right; font-family: var(--
 /* 호스트의 물음(틀과 같은 상자) */
 #dialog-host { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); z-index: 70; }
 #dialog-host.open { display: flex; }
+/* R5-3: 발행 미리보기 — 묻는 창(#dialog-host) 아래 */
+#issue-host { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.5); z-index: 69; }
+#issue-host.open { display: flex; }
+.dialog.issue-pv { width: min(1180px, 92vw); max-width: 92vw; max-height: 88vh; display: flex; flex-direction: column; }
+.issue-pv .pv-cols { display: grid; grid-template-columns: 340px 1fr; gap: 14px; min-height: 0; flex: 1; overflow: hidden; }
+.issue-pv .pv-left { overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere; }
+.issue-pv .pv-right { display: flex; flex-direction: column; min-height: 0; }
+.issue-pv .pv-right iframe.rframe { flex: 1; min-height: 420px; width: 100%; border: 1px solid var(--line); border-radius: 3px; background: #fff; }
+.issue-pv .pv-stamp { align-self: flex-end; margin: 4px 0; padding: 2px 8px; border: 1px solid var(--ok, #3fb950); color: var(--ok, #3fb950); font-size: 12px; }
+.issue-pv .buttons { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 10px; }
+.issrows { padding-left: 0; margin: 4px 0; list-style: none; }
+.issrows li { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; }
+.issrows li .num { white-space: nowrap; }
+.btn[disabled] { opacity: .45; pointer-events: none; }
 .dialog { background: var(--bg-panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px 18px; min-width: 420px; max-width: 70vw; max-height: 80vh; overflow: auto; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
 .dialog h2 { font-size: 14px; margin: 0 0 10px; }
 .dialog .msg { white-space: pre-wrap; word-break: break-word; margin: 0 0 8px; }

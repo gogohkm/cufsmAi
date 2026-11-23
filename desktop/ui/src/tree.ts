@@ -15,6 +15,7 @@ import { glyph, itemOfRow, markOf, rv } from './reviews';
 import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
 import { fastenerText, reasonNote } from './notices';
+import { docs, draftLabel, draftsOf, issueCls, issueLabel } from './docs';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
 export const TABS: Array<[Tab, string]> = [['work', '업무'], ['model', '모델'], ['result', '결과'], ['doc', '문서']];
@@ -35,7 +36,26 @@ const STATE_V: Record<string, [string, string, string]> = {
 };
 
 /** 문서 탭 — 보고서의 상태(만들지 않음 · 초안 · 낡음) */
-function docV(kind: 'design' | 'buckling'): Partial<TNode> { const s = reportSummary(kind); return { v: s.v, vCls: s.cls }; }
+function docV(kind: 'design' | 'buckling'): Partial<TNode> {
+  // R5-3: 프로젝트의 대상이면 호스트의 documents list(초안 — 일치 · 낡음), 아니면 이 화면이 만든 보고서
+  if (docs.loaded) {
+    const ds = draftsOf(kind === 'design' ? 'calc' : 'buckling');
+    const kids = ds.map(d => n(`doc:${d.item}`, draftLabel(d), { dot: d.state === 'current' ? 'ok' : 'warn', v: d.state === 'current' ? '일치' : '낡음', vCls: d.state === 'current' ? '' : 'warn',
+      tip: `${d.files.join(' · ')}${d.state === 'stale' ? ' — 지금과 다름' : ''}` }));
+    const last = ds[0];
+    return last ? { v: last.state === 'current' ? `초안 ${last.item}` : `낡음 · ${last.item}`, vCls: last.state === 'current' ? '' : 'warn', open: true, kids } : { v: '초안 없음', vCls: 'un' };
+  }
+  const s = reportSummary(kind); return { v: s.v, vCls: s.cls };
+}
+/** 발행 — 호스트의 documents list(R<n> · 날짜 · 발행한 사람 · 그대로 / 고쳐짐 / 없어짐), 실패한 발행 */
+function pubNode(): TNode {
+  if (!docs.loaded) { return n('pub', '발행', { v: '프로젝트 밖', vCls: 'un', tip: '발행은 프로젝트의 검토 대상에서만(기록이 있어야 한다)' }); }
+  const last = docs.issues[0];
+  return n('pub', '발행', { v: last ? `R${last.revision} · ${last.state_ko}` : '아직 없음', vCls: last ? issueCls(last) : 'un', open: true,
+    tip: '발행본은 04_발행본 안 — 볼 때마다 목록 파일 · 파일의 해시를 견준다(호스트)',
+    kids: [...docs.issues.map(x => n(`iss:${x.item}`, issueLabel(x), { dot: issueCls(x), v: x.state_ko, vCls: x.state === 'same' ? '' : 'warn', tip: `${x.folder}/ · 초안 ${x.from}` })),
+      ...docs.failed.map(f => n(`pubf:${String(f.label ?? f.revision)}`, `${String(f.label ?? '')} · 실패한 발행`, { faint: true, v: hhmm(f.at), tip: '세지 않는다 — 다음 발행이 그 폴더를 옮기고 같은 차수를 쓴다' }))] });
+}
 
 /** 결과 탭의 점검 — 진행 띠와 같은 상태, 분류마다 수, 항목마다 호스트의 판정 */
 function valNode(): TNode {
@@ -194,7 +214,7 @@ export function buildTree(tab: Tab): TNode[] {
       kids: [...srcs.items.map(s => n(`srcr:${s.item}`, s.title, { dot: s.state === 'same' ? 'ok' : s.state === 'missing' ? 'ng' : 'warn', v: s.state === 'same' ? '같음' : s.state === 'changed' ? '바뀜' : s.state === 'missing' ? '없음' : '모름',
         tip: `${s.item} · ${s.file} · ${s.written_by}` })),
         ...(srcs.unregistered.length ? [n('src:unreg', `등록 안 된 파일 ${srcs.unregistered.length}`, { faint: true, tip: srcs.unregistered.slice(0, 10).join(', ') })] : [])] }),
-    n('pub', '발행', { v: '기록 없음', vCls: 'un', tip: '발행은 기록(R5)부터' }),
+    pubNode(),
   ];
 }
 

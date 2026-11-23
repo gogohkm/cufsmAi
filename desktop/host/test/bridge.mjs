@@ -924,6 +924,26 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
       detail: `AI ${ai} → ai:work ${pair}(모두 ${work.length} — 화면의 중계는 없음) · 실린 키 ${leak ? '넘침' : 'phase · tool · request_id · at'} · edit-session: MCP 토큰 ${viaMcpToken} · 열쇠 없음 ${noKey} · state 틀림 ${badState} · start ${start.json?.success} · end ${end.json?.success}` };
   });
 
+  await step('s14i R5-3 — 발행 미리보기 · 발행 · 내보내기 · 대안 · 발행본 열기는 사람의 길만(MCP 토큰 401 · 쓰기 열쇠 없음 403 · 다른 Origin 403 · 본문의 꼴) · 문서 읽기(GET doc-file)도 MCP 토큰은 401 · 중계의 documents issue 는 없다', async () => {
+    const personH = { Origin: origin, 'Sec-Fetch-Site': 'same-origin' };
+    const routes = [['issue/preview', {}], ['issue', { fingerprint: 'x', nonce: 'y' }], ['export', {}], ['alternative', { op: 'keep', label: 'x' }], ['open-doc', { item: 'D-1' }]];
+    const out = {};
+    for (const [r, b] of routes) {
+      const viaMcp = await fetch(`${origin}/api/person/${r}`, { method: 'POST', headers: { Authorization: `Bearer ${mcpToken}`, 'Content-Type': 'application/json', ...personH, Connection: 'close' }, body: JSON.stringify(b) }).then(x => x.status);
+      const noKey = (await api('POST', `/api/person/${r}`, b, personH, { key: false })).status;
+      const foreign = (await api('POST', `/api/person/${r}`, b, { Origin: 'http://127.0.0.1:1', 'Sec-Fetch-Site': 'cross-site' })).status;
+      out[r] = [viaMcp, noKey, foreign];
+    }
+    const badOp = (await api('POST', '/api/person/alternative', { op: 'delete' }, personH)).status;
+    const noNonce = (await api('POST', '/api/person/issue', { fingerprint: 'x' }, personH)).status;
+    const docMcp = await fetch(`${origin}/api/person/doc-file?item=D-1`, { headers: { Authorization: `Bearer ${mcpToken}`, Connection: 'close' } }).then(x => x.status);
+    const docBad = (await api('GET', '/api/person/doc-file?item=..%2F..%2Fx')).json;
+    const relay = (await api('POST', '/api/mcp/action', { action: 'documents', op: 'issue' })).json;
+    const layers = Object.values(out).every(([m, k, f]) => m === 401 && k === 403 && f === 403);
+    return { ok: layers && badOp === 400 && noNonce === 400 && docMcp === 401 && docBad?.success === false && /issue|발행/.test(JSON.stringify(relay)) && !!(relay?.data?.error ?? relay?.error ?? relay?.data?.reply?.error ?? JSON.stringify(relay).includes('error')),
+      detail: `${Object.entries(out).map(([r, v]) => `${r} ${v.join('/')}`).join(' · ')} · 대안 op 틀림 ${badOp} · 숫자 없음 ${noNonce} · doc-file MCP 토큰 ${docMcp} · doc-file 경로 ${docBad?.success === false ? '거절' : '받음'} · 중계 documents issue ${short(JSON.stringify(relay), 80)}` };
+  });
+
   await step('s14d derivedResultsInvalidated — MCP analyze_loads 의 바뀐 입력이 지운 부재 설계 · 랩 결과는 다시 보내기 기록에서도 빠진다(U3)', async () => {
     const loads = { member_app: 'roof-purlin', span_type: 'simple', span_ft: 20, loads: { D: 10, Lr: 20 }, design_method: 'LRFD', spacing_ft: 5, Fy: 55, Fu: 70 };
     const last = async cmds => (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?${cmds.map(c => `command=${c}`).join('&')}`)).json?.data ?? {};

@@ -14,11 +14,12 @@ import { BRANCH_OF, CASE_FIELDS, caseTag } from './caseFields';
 import { modeSel } from './center';
 import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
+import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
 import { baseOf, byTag, BY_KO, changeOf, chg, KIND_RESULT_KO, modelTag, staleCause, valText, type Change, type FieldRec } from './changes';
 import { rec } from './records';
 import { asmInfo, questionsAbout, srcInfo, workInfo } from './work';
-import { itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
+import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
 import { alts, altInfo, altRootInfo, visibleAlts } from './alts';
 import type { CheckRow } from './store';
 import { stageNow } from './center';
@@ -97,7 +98,7 @@ function sectionInfo(): string {
     + row_('스프링 · 구속', `${num(f.nsprings, { src: 'full:nsprings', kind: 'none' })} · ${num(f.nconstraints, { src: 'full:nconstraints', kind: 'none' })}`,
       f.nsprings || f.nconstraints ? T_SET : `${T_DEF}<span class="why">없음 — 데크 회전 구속을 해석에 넣지 않았다</span>`));
   const tS = def ? T_DEF : '';
-  return hd(`단면 · ${TEMPLATE_KO[tpl] ? `템플릿 ${esc(TEMPLATE_KO[tpl])}` : '템플릿 기록 없음'}`, sectionLabel(), esc([given('r') ? `r ${Number((si(p.r, 'length') ?? 0).toFixed(2))}` : '', LOADCASE_KO[f.load_case] ?? ''].filter(Boolean).join(' · ')))
+  return hd(`단면 · ${TEMPLATE_KO[tpl] ? `템플릿 ${esc(TEMPLATE_KO[tpl])}` : '템플릿 기록 없음'}`, sectionLabel(), esc([given('r') ? `r ${Number((si(p.r, 'length') ?? 0).toFixed(2))}` : '', LOADCASE_KO[f.load_case] ?? ''].filter(Boolean).join(' · ')), groupMarkButton(BRANCH_GROUPS.section))
     + sec('종류 · 치수', table(dims), tS, '템플릿 치수(바깥-바깥, r = 안쪽 반지름) — MCP get_full_state 의 section_params(K4a)')
     + sec('단면 성질', props, tagSec, `전단면 · 중심선 형상 · MCP get_section_properties 와 같은 값. ${UNITS_NOTE}`)
     + sec('항복값', yrow)
@@ -108,7 +109,7 @@ function materialInfo(): string {
   const f = state.full;
   const def = isDefault('material');
   const t = def ? T_DEF : T_SET;
-  return hd('재료', '재료')
+  return hd('재료', '재료', '', groupMarkButton(BRANCH_GROUPS.material_model))
     + sec('탄성 상수', table(row_('E', num(si(f?.material?.E, 'stress'), { src: 'full:material.E', kind: 'stress', sig: 6 }), modelTag('model.prop.E', t))
       + row_('ν', num(f?.material?.v, { src: 'full:material.v', kind: 'none', sig: 3 }), modelTag('model.prop.nu', t))
       + row_('G', num(si(f?.material?.G, 'stress'), { src: 'full:material.G', kind: 'stress', sig: 6 }), modelTag('model.prop.G', t))), '', 'MCP get_full_state 의 material · 꼬리표의 전 → 후 는 변경 기록(list_changes)')
@@ -121,7 +122,7 @@ function materialInfo(): string {
 function caseInfo(b: Branch, focus: string | null): string {
   const c = state.caseIn;
   const dirty = c?.dirty ? `<span class="verdict warn" data-dirty="1"${tip(`저장하지 않은 변경이 있다(검토 상태 판 ${c.rev}${c.dirty_since ? ` · ${c.dirty_since}` : ''})`)}>저장 안 함</span>` : '';
-  return hd(`모델 · ${BRANCH_TITLE[b]}`, BRANCH_TITLE[b], caseReady() ? `<span class="dim">검토 상태 판 ${esc(String(c.rev))}</span> ${dirty}` : none('읽는 중'), '')
+  return hd(`모델 · ${BRANCH_TITLE[b]}`, BRANCH_TITLE[b], caseReady() ? `<span class="dim">검토 상태 판 ${esc(String(c.rev))}</span> ${dirty}` : none('읽는 중'), groupMarkButton(BRANCH_GROUPS[b] ?? []))
     + caseTables(b, focus) + caseNotes();
 }
 
@@ -462,6 +463,12 @@ export function infoHtml(key: string): string {
   if (key === 'chg') { return recordInfo('변경', '누가 · 왜 · 전 → 후 는 변경 기록(R2)부터 남는다'); }
   if (isValKey(key) || key === 'vtab') { return valInfo(key === 'vtab' ? 'val' : key); }
   if (reportKindOf(key)) { return reportInfo(key); }
+  if (key.startsWith('doc:')) { return draftInfo(key) + (docs.loaded ? checkPanel() : ''); }
+  if (key.startsWith('iss:')) { return issueInfo(key); }
+  if (key === 'pub' || key.startsWith('pubf:')) {
+    const l = lastIssue();
+    return `<div class="hd"><div class="k">발행<span class="sp"></span></div><div class="ttl">${l ? `마지막 R${l.revision} — ${l.state_ko}` : '발행 없음'}</div></div>` + (docs.loaded ? checkPanel() : '');
+  }
   if (key === 'src') { return recordInfo('원자료', '원자료(도면 · 제품 자료)는 프로젝트 기록(R1)부터'); }
   if (key === 'pub') { return recordInfo('발행', '발행은 기록(R5)부터'); }
   return hd('', '고른 것 없음', '', '');

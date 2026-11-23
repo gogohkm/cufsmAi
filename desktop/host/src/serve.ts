@@ -132,6 +132,18 @@ async function main(): Promise<void> {
           err => reply({ id: m.id, ok: false, error: String((err as Error)?.message ?? err) }));
         return;
       }
+      if (m.type === 'issue-nonce-ms') {
+        // 시험만(serve — 시험 틀의 호스트): 발행 미리보기의 일회용 숫자 수명을 줄인다(2 분을 기다리지 않고 「지남」을 본다). 설치본 · 셸에는 이 길이 없다
+        const ms = Number((raw as { ms?: unknown }).ms);
+        try {
+          const desk = require(path.join(repoRoot, 'out', 'records', 'desk.js')) as { RecordsDesk?: { ISSUE_NONCE_MS: number } };
+          if (!desk.RecordsDesk || !Number.isFinite(ms) || ms < 500 || ms > 120_000) { reply({ id: m.id, ok: false, error: 'ms 500 – 120000' }); return; }
+          const was = desk.RecordsDesk.ISSUE_NONCE_MS;
+          desk.RecordsDesk.ISSUE_NONCE_MS = ms;
+          reply({ id: m.id, ok: true, result: { was, now: ms } });
+        } catch (err) { reply({ id: m.id, ok: false, error: String((err as Error)?.message ?? err) }); }
+        return;
+      }
       if (m.type === 'status') {
         reply({ id: m.id, ok: true, result: { unimplemented: host.unimplemented(), messageCounts: host.messageCounts(),
           designerAlive: host.designer.alive(), channels: bridge.channels(), mcpConfigWrites: host.mcpConfigWrites(),

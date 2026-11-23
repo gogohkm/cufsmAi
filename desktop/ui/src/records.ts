@@ -13,6 +13,8 @@ import { api, mcp } from './bridge';
 import { esc, tip } from './dom';
 import { state } from './store';
 import { nextJudgement } from './work';
+import { lastIssue, type DocIssue } from './docs';
+import { hostText } from './notices';
 
 export interface RecCase { name: string; kind: string; open: boolean; archived?: boolean; missing?: boolean; last_saved: string | null; section: string | null; steel: string | null; max_ratio: number | null; pass: boolean | null;
   /** 215cb5a: 대상 id(보관 · 넘겨받기 · 다시 잇기가 열지 않은 대상에도) · 저장에 든 결과 종류 · 작은 단면 그림(outline: true 로 부를 때) */
@@ -65,9 +67,12 @@ export async function loadRecent(force = false): Promise<void> {
 }
 
 /** 사람만 하는 일 — 다리 `/api/person/<name>`. 답의 오류는 그대로 돌려준다 */
-export async function person(name: string, body: Record<string, unknown> = {}): Promise<{ ok: boolean; data?: any; error?: string; status: number }> {
+export async function person(name: string, body: Record<string, unknown> = {}): Promise<{ ok: boolean; data?: any; error?: string; status: number; code?: string }> {
   const r = await api<any>('POST', `/api/person/${name}`, body);
-  return { ok: r.success, data: r.data, error: r.error, status: r.status };
+  // 호스트의 거절 부호(error_code — host.review.* …)가 있으면 그 한국어 문장을 오류 글로
+  const code = typeof (r as any).error_code === 'string' ? (r as any).error_code as string : undefined;
+  const ko = code ? hostText(code) : '';
+  return { ok: r.success, data: r.data, error: ko || r.error, status: r.status, ...(code ? { code } : {}) };
 }
 
 // ── 띠 ─────────────────────────────────────────────────────────────
@@ -123,8 +128,8 @@ export function startRows(): { rows: string; foot: string; inProject: boolean } 
         + `<td><div class="mini-sec dv rec-mini">${outlineSvg(c.outline) || `<span class="faint">${esc((KIND_KO[c.kind] ?? c.kind).slice(0, 2))}</span>`}</div></td>`
         + `<td><b>${esc(c.name)}</b>${c.missing ? ' <span class="tag def">파일 없음</span>' : ''}<div class="faint">${esc(p.project?.name ?? '')} · ${esc(KIND_KO[c.kind] ?? c.kind)}</div></td>`
         + `<td>${esc(c.section ?? '—')}<div class="faint">${esc(c.steel ?? '')}${c.steel ? ' · ' : ''}<span class="verdict ${v}" data-ratio>${esc(ratio)}</span></div></td>`
-        + `<td data-results="${esc((c.results ?? []).join(','))}">${progressHtml(c.results ?? [], !!c.outline || !!c.section)}</td>`
-        + `<td data-next>${nextJudgement(c.open, rec.status)}</td>`
+        + `<td data-results="${esc((c.results ?? []).join(','))}">${progressHtml(c.results ?? [], !!c.outline || !!c.section, c.open ? lastIssue() : null)}</td>`
+        + `<td data-next>${nextJudgement(c.open, rec.status, (c as any).open_questions ?? null)}</td>`
         + `<td class="r" data-last="${esc(c.last_saved ?? '')}">${esc(fmtWhen(c.last_saved))}<div class="faint">저장</div></td>`
         + `<td class="r">${c.case_id ? `<span class="btn ghost" data-rec="case-menu" data-case-id="${esc(c.case_id)}" data-name="${esc(c.name)}" data-open="${c.open ? 1 : 0}"${tip('이 대상 — 보관 · 잠금 넘겨받기 · 파일 다시 잇기(사람만)')}>⋯</span>` : ''}</td></tr>`;
     }).join('');
@@ -147,11 +152,12 @@ function writerFoot(): string {
 /** 「진행」 — 템플릿 00 의 작은 진행 띠(단면 · 좌굴 · 하중 · 검토 · 접합 · 점검). 색인의 results(저장에 든 결과 종류)에 있으면 ● — 일치 · 낡음은 그 대상을 열면 진행 띠가 말한다 */
 const RESULT_STEPS: Array<[string[], string]> = [[['__section'], '단면'], [['buckling_analysis', 'signature_ss'], '좌굴 해석'], [['load_analysis'], '하중 해석'], [['member_design'], '부재 검토'],
   [['lap', 'connection'], '접합부'], [['validation'], '점검']];
-function progressHtml(results: string[], hasSection: boolean): string {
+function progressHtml(results: string[], hasSection: boolean, issued: DocIssue | null = null): string {
   const has = (ks: string[]) => ks.some(k => (k === '__section' ? hasSection : results.includes(k)));
   const n = RESULT_STEPS.filter(([ks]) => ks[0] !== '__section' && has(ks)).length;
   return `<span class="pipe sm"${tip(`저장에 든 결과: ${RESULT_STEPS.filter(([ks]) => has(ks)).map(([, t]) => t).join(' · ') || '없음'} — 지금 입력과 맞는지는 그 대상을 열면 진행 띠가 말한다`)}>`
-    + RESULT_STEPS.map(([ks, t]) => `<span class="ps ${has(ks) ? 'ok' : 'none'}" data-step="${esc(t)}"><i></i></span>`).join('') + `</span><div class="faint">${n ? `결과 ${n}` : '결과 없음'}</div>`;
+    + RESULT_STEPS.map(([ks, t]) => `<span class="ps ${has(ks) ? 'ok' : 'none'}" data-step="${esc(t)}"><i></i></span>`).join('')
+    + `</span><div class="faint">${issued ? `<span data-issued="R${esc(issued.revision)}"${issued.state === 'same' ? '' : ' class="warn"'}>발행 R${esc(issued.revision)}${issued.state === 'same' ? '' : ` · ${esc(issued.state_ko)}`}</span>` : n ? `결과 ${n}` : '결과 없음'}</div>`;
 }
 
 /** 작은 단면 그림 — 색인의 outline {paths: [[x0, z0, x1, z1, …] 0 – 1000 정수], aspect} 를 받은 그대로 선으로(믿지 않는다: 수 · 범위만 보고 넘치면 그리지 않는다) */

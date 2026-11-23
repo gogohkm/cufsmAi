@@ -15,6 +15,8 @@ import { debounce, esc, tip } from './dom';
 import { editing, hideSide, initEdit, mountDesigner, reloadSide, setEditing, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
 import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { chg, loadChanges } from './changes';
+import { hostText } from './notices';
+import { docs as docsState, doExport, doOpen, initDocs, loadDocs, openPreview } from './docs';
 import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes } from './work';
 import { itemOfRow, loadReviews, mark as markTargets, markOf, rowTarget, rv, trust as trustWriter, type MarkTarget } from './reviews';
 import { altAction, alts, compareOf, loadAlts, visibleAlts } from './alts';
@@ -451,6 +453,8 @@ function renderFind(): void {
 }
 
 const rerender = debounce(render, 16);
+/** caseAck 의 거절 가운데 사람에게 알리는 것(다시 실은 화면 · 채우기의 메아리는 편집이 아니다 — 알리지 않는다) */
+const CASE_REFUSAL_SHOWN = new Set(['host.case.conflict', 'host.case.invalid_value', 'host.case.not_case_key', 'host.case.model_key', 'host.case.older_than_open']);
 
 // ── 고르기 · 탭 ───────────────────────────────────────────────────
 function select(tab: Tab, key: string, by: 'person' | 'program' | 'focus' = 'person'): void {
@@ -516,11 +520,17 @@ function docAction(t: HTMLElement): boolean {
   }
   const d = t.closest('[data-doc]');
   if (d) { select('doc', d.getAttribute('data-doc')!); return true; }
+  // R5-3: 발행 미리보기(사람의 길) · 초안으로 내보내기(사람의 저장 대화상자) · PDF 열기
+  if (t.closest('[data-issue-open]')) { void openPreview(); return true; }
+  const ex = t.closest('[data-doc-export]');
+  if (ex) { void doExport(ex.getAttribute('data-doc-export') || undefined); return true; }
+  const op = t.closest('[data-doc-open]');
+  if (op) { void doOpen(String(op.getAttribute('data-doc-open'))); return true; }
   return false;
 }
 
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg', 'ins'].includes(key) || key.startsWith('chg:') || key.startsWith('work:') ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg', 'ins'].includes(key) || key.startsWith('chg:') || key.startsWith('work:') ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' || /^(doc|iss|pubf):/.test(key) ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -535,7 +545,9 @@ async function doMark(targets: MarkTarget[], on: boolean): Promise<void> {
   await loadReviews();
   render();
   if (r.ok) { toast(on ? `확인 표시 ${targets.length}` : `확인 표시를 풀었다 ${targets.length}`, 'info'); return; }
-  toast(`확인하지 못했다 — 화면이 그린 판과 지금이 다르면 다시 읽었으니 다시 보고 누른다 · ${r.why ?? ''}`, 'warning');
+  // 거절의 까닭 — 호스트의 부호(host.review.*)의 한국어 문장(records.person 이 바꿔 둔다)
+  toast(`확인하지 못했다 — ${r.why ?? ''}`, 'warning');
+  if (r.code) { document.getElementById('info')?.setAttribute('data-rv-refused', r.code); }
 }
 function reviewRow(key: string): void {
   const row = rowOfKey(key).row;
@@ -556,6 +568,19 @@ function reviewClick(el: HTMLElement): boolean {
   }
   const cg = el.closest('[data-rv-change]');
   if (cg) { const id = String(cg.getAttribute('data-rv-change')); void doMark([{ type: 'change', changeId: id, shown: id }], markOf('change', id)?.state !== 'reviewed'); return true; }
+  // de93aa9: 업무 항목 · 가정(그 판의 순번) · 입력 묶음(묶음의 지문)
+  const wi = el.closest('[data-rv-item]');
+  if (wi) {
+    const [type, id, seq] = String(wi.getAttribute('data-rv-item')).split('|');
+    void doMark([{ type, id, shown: Number(seq) }], markOf(type, id)?.state !== 'reviewed');
+    return true;
+  }
+  const gr = el.closest('[data-rv-groups]');
+  if (gr) {
+    const ts = String(gr.getAttribute('data-rv-groups')).split(',').map(x => x.split('=')).filter(x => x[0] && x[1]).map(([group, fp]) => ({ type: 'group', group, shown: fp }));
+    void doMark(ts, gr.getAttribute('data-rv-state') !== 'reviewed');
+    return true;
+  }
   const tr = el.closest('[data-rv-trust]');
   if (tr) { void trustWriter(String(tr.getAttribute('data-rv-trust'))).then(async r => { await loadReviews(); render(); toast(r.ok ? '그 작성자를 믿는다 — 그 확인 표시를 센다' : `믿기를 하지 못했다 — ${r.why ?? ''}`, r.ok ? 'info' : 'warning'); }); return true; }
   return false;
@@ -744,6 +769,7 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
         const types: string[] = Array.isArray(d.records?.types) ? d.records.types : [];
         if (types.includes('reviews')) { void loadReviews().then(() => rerender()); }
         if (types.includes('alternatives')) { void loadAlts().then(() => { loadCompares(ui.sel[ui.tab]); rerender(); }); }
+        if (types.some(x => ['documents', 'reviews', 'work', 'assumptions'].includes(x))) { void loadDocs().then(() => rerender()); }
         // 고른 업무 항목 · 가정의 전부도 다시(목록을 다시 읽으면 그 전부를 비운다)
         const cur = ui.sel[ui.tab];
         void Promise.all([reloadTypes(types), types.includes('changes') ? loadChanges() : Promise.resolve()]).then(() => prefetchOpenQuestions())
@@ -753,8 +779,13 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
       if (c === 'aiActivity') { break; }
       // 읽기 전용 대상의 거절(부호 host.readonly.* — 8f52455) — 띠가 까닭과 두 길을 이미 보인다. 받지 않은 것을 알린다
       if (typeof d.refusal?.code === 'string' && d.refusal.code.startsWith('host.readonly')) {
-        toast(`읽기 전용 — 호스트가 받지 않았다(${c === 'analysisError' ? '해석 실행' : `칸 ${Array.isArray(d.refusal.keys) ? d.refusal.keys.length : 0}`}) · 「새 검토 대상으로」 또는 잠금 넘겨받기`, 'warning');
+        // 사람에게는 호스트의 한국어 까닭(caseAck.rejected[].reason — host.readonly.* 의 한국어 틀) — 없으면 그 code 의 틀
+        const why = typeof d.refusal.text === 'string' && d.refusal.text ? d.refusal.text : hostText(d.refusal.code, { reason: '', detail: '' });
+        toast(`${why || '읽기 전용 — 호스트가 받지 않았다'}${c === 'analysisError' ? ' · 해석 실행' : ` · 칸 ${Array.isArray(d.refusal.keys) ? d.refusal.keys.length : 0}`}`, 'warning');
         const band = $('recband'); band.classList.remove('flash'); void band.offsetWidth; band.classList.add('flash'); band.setAttribute('data-refused', d.refusal.code);
+      }
+      else if (typeof d.refusal?.code === 'string' && CASE_REFUSAL_SHOWN.has(d.refusal.code)) {
+        toast(`${hostText(d.refusal.code) || '호스트가 받지 않았다'} · 칸 ${Array.isArray(d.refusal.keys) ? esc(d.refusal.keys.slice(0, 3).join(', ')) : ''}`, 'warning');
       }
       if (c === 'analysisStarted') { setRunning(true); }
       if (['analysisComplete', 'analysisError', 'analysisInvalidated', 'resultsCleared', 'dsmResult'].includes(c)) { setRunning(false); }
@@ -788,6 +819,12 @@ async function claudeOp(op: 'connect' | 'disconnect'): Promise<void> {
  * 다리에 상태를 바꾸는 새 경로를 두지 않는다.
  */
 function fileOp(action: 'open' | 'save'): void {
+  // 프로젝트의 검토 대상이면 「저장」 은 그 대상 파일에(호스트 동작 save_case — 중계라 사람의 것으로 적힌다). 끼운 화면의 Save 는 늘 「다른 이름으로」 다
+  const pj = state.full?.project;
+  if (action === 'save' && pj?.inProject && pj?.case && !pj?.readOnly) {
+    void mcp<any>('save_case').then(r => { toast(r?.error ? `저장하지 못했다 — ${String(r.error)}` : `저장했다 — ${String(pj.case?.name ?? '')}`, r?.error ? 'warning' : 'info'); scheduleRefresh(); });
+    return;
+  }
   if (postToWebviews({ type: 'click', id: action === 'open' ? 'btn-file-open' : 'btn-file-save' }, 'designer')) { return; }
   toast('입력 화면이 아직 붙지 않았다 — 잠시 뒤 다시', 'warning');
 }
@@ -847,6 +884,7 @@ function boot(): void {
   installMenuClosers();
   installIdle();
   initDialogs(() => renderTitle(editing(), questionOpen()));
+  initDocs({ render: () => rerender(), toast, progress: setProgress });
   initEdit(theme, onEditChange);
   onReport(() => renderShare());
   initTitlebar($('tbar'), {
@@ -881,17 +919,21 @@ function boot(): void {
       e.stopPropagation();
       let ck: any = null; try { ck = JSON.parse(String(rc.getAttribute('data-ref-check'))); } catch { ck = null; }
       const to = ck ? keyOfItem({ kind: 'check', id: String(ck.id), scope: ck.scope, ...(ck.location ? { location: ck.location } : {}) } as Item) : null;
-      if (to) { select(to.tab, to.key); } else { toast('그 검토 항목이 지금 결과에 없다', 'warning'); }
+      if (to) { select(to.tab, to.key); } else { const s = rc.querySelector?.('[data-ref-state]'); toast(`${rc.querySelector?.('.lnk')?.textContent ?? '그 검토 항목'} — ${s?.textContent ?? '지금 결과에 없음'}${rc.querySelector?.('.why')?.textContent ? ` · ${rc.querySelector('.why')?.textContent ?? ''}` : ''}`, 'warning'); }
       return;
     }
     const rr = t.closest?.('[data-ref-result]');
     if (rr) {
       e.stopPropagation();
-      // 결과가 지금 있으면 그 자리, 없으면(낡아 지웠다) 그 결과의 단계 — 진행 띠와 같은 자리에서 낡음 · 없음을 보인다
+      // 결과가 지금 있으면 그 자리. 없으면 호스트가 푼 상태(refs_resolved — 이름 · 무효가 됨 · 까닭)를 그대로 알린다
       const id = String(rr.getAttribute('data-ref-result'));
       const to = keyOfItem({ kind: 'result', id } as Item);
-      const STAGE: Record<string, string> = { lap: 'conn', connection: 'conn', member_design: 'chk', buckling_analysis: 'fsm', design_dsm: 'fsm', signature_ss: 'fsm', load_analysis: 'load', validation: 'val' };
-      if (to) { select(to.tab, to.key); } else if (STAGE[id]) { select(STAGE[id] === 'val' ? 'work' : 'result', STAGE[id]); } else { toast('그 결과가 이 화면에 없다', 'warning'); }
+      const stEl = rr.querySelector?.('[data-ref-state]');
+      // 지금 있는 결과인데 고를 줄이 없으면(랩 · 접합 · 하중 …) 그 결과의 단계 — 호스트가 푼 상태가 「지금 것」일 때만
+      const STAGE: Record<string, string> = { lap: 'conn', connection: 'conn', member_design: 'chk', buckling_analysis: 'fsm', signature_ss: 'fsm', load_analysis: 'load' };
+      if (to) { select(to.tab, to.key); }
+      else if (stEl?.getAttribute('data-ref-state') === 'current' && STAGE[id]) { select('result', STAGE[id]); }
+      else { toast(`${rr.querySelector?.('.lnk')?.textContent ?? id} — ${stEl?.textContent ?? '지금 결과에 없음'}${rr.querySelector?.('.why')?.textContent ? ` · ${rr.querySelector('.why')?.textContent ?? ''}` : ''}`, 'warning'); }
       return;
     }
     const os2 = t.closest?.('[data-open-src]');
@@ -1108,6 +1150,8 @@ function boot(): void {
   /** 시험: 보기 보고 하나를 곧바로(모델 · 상태를 쓰지 않는다 — 호스트가 무엇을 버리고 칩이 그것을 보이는지 본다) */
   reportNow: (view: string, selection: unknown) => report(view, selection as Item | null, 'program', true),
   get pointed() { return pointedAt(); },
+  /** 시험: 문서 · 발행 상태(읽기만 — 미리보기의 일회용 숫자를 다른 길로 먼저 써 보는 시험) */
+  get docs() { return { pv: docsState.pv ? { nonce: docsState.pv.nonce, fingerprint: docsState.pv.fingerprint, expiresAt: docsState.pv.expiresAt } : null, issues: docsState.issues.length, drafts: docsState.drafts.length }; },
   checkMenu: (key: string) => checkMenu(key, '', handlers).map(x => (x === '-' ? '-' : `${x.label}|${x.kbd ?? ''}|${x.off ? 'off' : 'on'}`)),
   closeMenu,
 };

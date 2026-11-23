@@ -716,9 +716,9 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await select('model', 'sec');
     const sec = await ev(`({n:+document.querySelector('#center .sec-geo').dataset.nodes, info:document.getElementById('info').innerText})`);
     const ok = /fsm:stale/.test(s.pipe) && /chk:stale/.test(s.pipe) && /좌굴 해석\s*낡음/.test(s.tree) && /부재 검토\s*낡음/.test(s.tree) && /낡음 — 결과를 지웠다/.test(s.center)
-      && /Section template changed/.test(s.info) && s.old === 0 && sec.n === tpl2.nnodes && /립 C 200×75×20×2\.3/.test(sec.info) && (await marker()) === 1;
+      && s.info.includes(NOTICES.ledgerReason('Section template changed').text_ko) && s.old === 0 && sec.n === tpl2.nnodes && /립 C 200×75×20×2\.3/.test(sec.info) && (await marker()) === 1;
     await select('result', 'chk');
-    return { ok, detail: `${s.pipe} · 옛 결과의 수 ${s.old}개 · 그림 절점 ${sec.n} · 까닭 「Section template changed」` };
+    return { ok, detail: `${s.pipe} · 옛 결과의 수 ${s.old}개 · 그림 절점 ${sec.n} · 까닭 「${NOTICES.ledgerReason('Section template changed').text_ko}」(장부의 reason_ko)` };
   });
   if (!ran('u04')) { skipCheck('바뀐 단면의 수도 MCP 와 같다', ['u04']); } else {
     // u04 가 새 단면이 화면에 올 때까지 기다린 뒤의 화면을 잰다
@@ -1764,8 +1764,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const inf = await ev(`({folder:document.querySelector('#info [data-report-folder]')?.dataset.reportFolder, files:[...document.querySelectorAll('#info tr[data-file]')].map(t=>t.dataset.file+':'+t.querySelector('.path').textContent), pub:!!document.querySelector('#info [data-publish].off'), stamp:!!document.querySelector('#info .rv.off'), tree:document.querySelector('#tree .row[data-k="rpt"] .vl')?.textContent})`);
     const inCaseFolder = !!file && path.dirname(file).toLowerCase() === path.dirname(csd).toLowerCase();
     return { ok: fr.sandbox === '' && fr.sandboxTokens === 0 && !!diskSha && fr.sha === diskSha && fr.attrSha === diskSha && rep.folder === 'case_folder' && inCaseFolder && inf.folder === 'case_folder'
-      && inf.files.some(x => x.startsWith('HTML:') && x.includes(path.basename(file))) && inf.pub && inf.stamp && /^초안/.test(inf.tree ?? ''),
-      detail: `파일 ${path.basename(file ?? '')}(열린 .csd 의 폴더 ${inCaseFolder}) · 미리보기 sha256 ${fr.sha?.slice(0, 12)} = 파일 ${diskSha?.slice(0, 12)} · sandbox="${fr.sandbox}"(토큰 ${fr.sandboxTokens}) · ${fr.len}자 · 절 ${rep.sections?.length} · 트리 「${inf.tree}」 · 발행 · 도장 꺼짐 ${inf.pub && inf.stamp}` };
+      && inf.files.some(x => x.startsWith('HTML:') && x.includes(path.basename(file))) && inf.pub && /^초안/.test(inf.tree ?? ''),
+      detail: `파일 ${path.basename(file ?? '')}(열린 .csd 의 폴더 ${inCaseFolder}) · 미리보기 sha256 ${fr.sha?.slice(0, 12)} = 파일 ${diskSha?.slice(0, 12)} · sandbox="${fr.sandbox}"(토큰 ${fr.sandboxTokens}) · ${fr.len}자 · 절 ${rep.sections?.length} · 트리 「${inf.tree}」 · 발행 · 도장 꺼짐 ${inf.pub}` };
   });
   await step('u55 미리보기 틀은 스크립트를 돌리지 않는다 — 제품이 그린 iframe(sandbox="")에 스크립트 · onerror · 바깥 요청을 넣어도 실행 0 · 바깥 문서에 닿지 않음', null, async () => {
     const m0 = log.console.length;
@@ -2132,6 +2132,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
    *   r21 — r10 · r12(AI 의 두께 2.0 → 2.3 · 랩 결과)       r22 — r21                         r23 · r24 — r10 · r12
    *   r25 · r26 · r27 · r28 — r10 · r12(r26 의 06 알림은 r21 의 랩 결과도)
    *   r29 · r30 — r10 · r12(부재 검토를 그 단계가 돌린다)  r31 — r10 · r12                    r32 — r31(대안 셋)
+   *   r33 — r10 · r12(「R33 다른 대상」 을 만들고 돌아온다)    r34 — r10(새 대상 「R34 발행」 을 만들어 설계부터 초안까지 그 단계가 한다)
+   *   r35 — r34(막는 것 0 의 미리보기)                      r36 — r34 · r35(r35 가 새 초안으로 막는 것 0 을 남긴다)   r37 — r36(R0)
    */
   await step('r10 새 프로젝트(시작 화면) — 이름 물음 → 뿌리(문서 › StCFSD 프로젝트) 아래에 · 제목 표시줄 「프로젝트 ▾」 · 대상 수 = list_cases', 'r10_new_project', async () => {
     await ev(`${S}.start()`);
@@ -2496,17 +2498,22 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await mcp.tool('work_items', { action: 'answer', item: q.item, said: '강도 합으로 해. 근거는 Manual II-2A.', chosen: 0 });
     await waitFor(`!!document.querySelector('#info [data-work-answer]')`, 20_000, '옮겨 적은 답').catch(() => undefined);
     const v2 = await ev(`({ans:document.querySelector('#info [data-work-answer]')?.textContent ?? null, chosen:!!document.querySelector('#info [data-chosen]'), badge:document.querySelector('#ttabs [data-work-badge]')?.dataset.workBadge ?? null})`);
+    // 걸린 랩 결과 — 호스트가 푼 상태(refs_resolved)가 「지금 것」이면 그 자리(접합부), 아니면 그 이름 · 까닭의 알림(단계로 떨어지지 않는다)
+    const refSt = await ev(`document.querySelector('#info [data-ref-result] [data-ref-state]')?.dataset.refState ?? null`);
     await ev(`document.querySelector('#info [data-ref-result]')?.click()`);
     await sleep(400);
-    const went = await ev(`${S}.ui`);
+    const went0 = await ev(`${S}.ui`);
+    const refToast = await ev(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).pop() ?? ''`);
+    const went = refSt === 'current' ? went0 : { tab: went0.tab, sel: `${went0.sel}(알림 「${short(refToast, 50)}」)` };
+    const refOk = refSt === 'current' ? went0.tab === 'result' && /^conn/.test(went0.sel) : ['invalidated', 'missing'].includes(refSt) && went0.tab === 'work' && /무효가 됨|없음/.test(refToast);
     await select('work', `work:${r.item}`);
     await waitFor(`!!document.querySelector('#info [data-work-items]')`, 10_000, '보고의 항목').catch(() => undefined);
     const items = await ev(`[...document.querySelectorAll('#info [data-work-items] > li')].map(l=>l.textContent.replace(/\s+/g,' ').trim())`);
     await select('work', 'ask');
     await shot('r25_work_tree_1920_dark');
     return { ok: !q.error && !r.error && !!row && (await marker()) === t0 && badge === '1' && v1.title === '랩 패스너의 힘 분배 모델' && v1.opts === 2 && v1.none && v1.inputs === 0 && v1.by === 'ai'
-      && /AI 가 옮겨 적음/.test(v2.ans ?? '') && /강도 합으로 해/.test(v2.ans ?? '') && v2.chosen && v2.badge === null && went.tab === 'result' && /^conn/.test(went.sel) && items.length === 2 && /완료/.test(items[0]) && /미결/.test(items[1]),
-      detail: `줄 「${short(row, 50)}」(새로 고침 없음) · 배지 ${badge} → 답 뒤 ${v2.badge ?? '없음'} · 질문 「${v1.title}」 선택지 ${v1.opts} · 답 없음 ${v1.none} · 입력 칸 ${v1.inputs} · 쓴 쪽 ${v1.by} · 답 「${short(v2.ans?.replace(/\s+/g, ' '), 60)}」 · 걸린 대상 → ${went.tab}/${went.sel} · 보고 항목 ${items.join(' | ')}` };
+      && /AI 가 옮겨 적음/.test(v2.ans ?? '') && /강도 합으로 해/.test(v2.ans ?? '') && v2.chosen && v2.badge === null && refOk && items.length === 2 && /완료/.test(items[0]) && /미결/.test(items[1]),
+      detail: `줄 「${short(row, 50)}」(새로 고침 없음) · 배지 ${badge} → 답 뒤 ${v2.badge ?? '없음'} · 질문 「${v1.title}」 선택지 ${v1.opts} · 답 없음 ${v1.none} · 입력 칸 ${v1.inputs} · 쓴 쪽 ${v1.by} · 답 「${short(v2.ans?.replace(/\s+/g, ' '), 60)}」 · 걸린 대상(${refSt}) → ${went.tab}/${went.sel} · 보고 항목 ${items.join(' | ')}` };
   });
   await step('r26 06 — 그 결과를 가리키는 열린 판단 요청의 알림 「판단 요청 「제목」 · 답 기다림 →」 · 누르면 그 항목 · 시작 화면 「다음 판단」 = 열린 판단 요청(get_case_status)', 'r26_question_notice', async () => {
     const q = await mcp.tool('work_items', { action: 'add', kind: 'question', title: '접합부 볼트 지름', body: '12.7 mm 로 둘지 정해 주세요.', refs: [{ kind: 'result', result: 'lap' }] });
@@ -2628,8 +2635,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await sleep(300);
     await shot('r29_checks_mark_1920_dark');
     const it1 = (gr.items ?? []).find(x => x.type === 'check' && x.state === 'reviewed');
-    return { ok: !fr.error && g1.glyph === 'reviewed' && /확인 1\/\d+/.test(g1.chk ?? '') && !!it1 && sp === 'reviewed' && sh === 'unreviewed' && cm === 'reviewed' && (g1.meaning ?? '').length > 40 && g1.meaning === gr.meaning,
-      detail: `정보 창 확인 → 트리 ${g1.glyph} · 「${g1.chk}」 · get_reviews reviewed ${gr.reviewed}/${gr.total} · Space → ${sp} · 시트 머리 다시 누름 → ${sh} · 07 변경 → ${cm} · 뜻 「${short(g1.meaning, 50)}」(= get_reviews.meaning)` };
+    return { ok: !fr.error && g1.glyph === 'reviewed' && /확인 1\/\d+/.test(g1.chk ?? '') && !!it1 && sp === 'reviewed' && sh === 'unreviewed' && cm === 'reviewed' && (g1.meaning ?? '').length > 40 && g1.meaning === gr.meaning_ko,
+      detail: `정보 창 확인 → 트리 ${g1.glyph} · 「${g1.chk}」 · get_reviews reviewed ${gr.reviewed}/${gr.total} · Space → ${sp} · 시트 머리 다시 누름 → ${sh} · 07 변경 → ${cm} · 뜻 「${short(g1.meaning, 50)}」(= get_reviews.meaning_ko)` };
   });
   await step('r30 ⚔ 확인 표시의 막는 것 — 끼운 웹뷰 · MCP 토큰 · 쓰기 열쇠 없음 · 다른 Origin 은 표시 · 믿기를 하지 못한다(기록 바이트 그대로) · 그린 뒤 바뀐 항목(옛 지문)은 거절 → 다시 읽고 「다시 확인 ◌」 와 그 까닭', 'r30_review_refusals', async () => {
     const gr = await act2({ action: 'get_reviews' });
@@ -2666,10 +2673,10 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await sleep(400);
     const again = await ev(`({state:document.querySelector('#info .hd [data-rv-check]')?.dataset.rvState ?? null, tip:document.querySelector('#info .hd [data-rv-check]')?.getAttribute('data-tip') ?? '', glyph:document.querySelector('#tree .row.on [data-rv-state]')?.dataset.rvState ?? null})`);
     await shot('r30_review_again_1920_dark');
-    return { ok: before === mid && [401, 403].includes(d1) && e1 === 403 && f1 === 403 && [401, 403].includes(t1) && t2 === 403 && !!viaRelay?.error && now?.fp !== it.fp && stale?.json?.success === false
+    return { ok: before === mid && [401, 403].includes(d1) && e1 === 403 && f1 === 403 && [401, 403].includes(t1) && t2 === 403 && !!viaRelay?.error && now?.fp !== it.fp && stale?.json?.success === false && stale?.json?.error_code === 'host.review.shown_differs'
       && (now?.state !== 'reviewed' ? again.state === 'review-again' && /다시 확인/.test(again.tip) && again.glyph === 'review-again' : true),
       detail: `웹뷰 fetch ${a} · MCP 토큰 ${d1} · 열쇠 없음 ${e1} · Origin 다름 ${f1} · 믿기 MCP 토큰 ${t1} · 믿기 열쇠 없음 ${t2} · 중계의 review 동작 → ${short(viaRelay?.error ?? '받음', 50)} · 기록 바이트 그대로 ${before === mid}`
-        + ` · 다시 돌린 뒤 옛 지문으로 → ${stale?.status} ${short(stale?.json?.error ?? '', 70)} · 그 표시 ${now?.state}(${now?.why_ko ?? now?.how ?? ''}) → 화면 ${again.state} 「${short(again.tip, 60)}」` };
+        + ` · 다시 돌린 뒤 옛 지문으로 → ${stale?.status} ${stale?.json?.error_code}(${short(stale?.json?.error ?? '', 50)}) · 그 표시 ${now?.state}(${now?.why_ko ?? now?.how ?? ''}) → 화면 ${again.state} 「${short(again.tip, 60)}」` };
   });
   await step('r31 대안 — t 2.0 · 2.3 · 2.6 을 지키고(AI 의 alternatives keep) 결과 › 대안에 나란히: 열쇠마다의 판정비 = 그 세 번의 엔진 실행(칸마다) · 「지금」 표지', 'r31_alternatives', async () => {
     const runs = {};
@@ -2703,7 +2710,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     return { ok: !!tbl && cols.length === 3 && compared >= 6 && bad.length === 0 && now === (hostNow.length > 0),
       detail: `열 ${cols.map(c => c.label.trim()).join(' | ')} · 칸 ${compared} = 엔진 세 번의 판정비(칸마다)${bad.length ? ` · 어긋남 ${bad.slice(0, 3).join(' / ')}` : ''} · 「지금」 표지 ${now}(호스트 is_now ${hostNow.join(', ') || '없음'})` };
   });
-  await step('r32 대안 하나 — 정보 창(지금과 다른 것) · 같이 볼 것 · 대안(04) · 「이 대안으로」(변경 묶음 하나 · 결과는 다시) · 이름 바꾸기 · 숨기기(화면에서는 꺼짐 — 호스트의 행위자 표) · AI 의 숨김이 트리에서 빠진다 · 07 의 대안 줄', 'r32_alternative_open', async () => {
+  await step('r32 대안 하나 — 정보 창(지금과 다른 것) · 같이 볼 것 · 대안(04) · 「이 대안으로」(변경 묶음 하나 · 결과는 다시) · 사람의 이름 바꾸기 · 숨기기 · 다시 보이기(사람의 길 — de93aa9) · 07 의 대안 줄', 'r32_alternative_open', async () => {
     const list = (await mcp.tool('alternatives', { action: 'list' })).items ?? [];
     const a20 = list.find(a => /2\.0/.test(a.label));
     await select('result', `alt:${a20.item}`);
@@ -2718,9 +2725,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     // 이름 바꾸기 · 숨기기
     await select('result', `alt:${a20.item}`);
     await sleep(300);
-    // 이름 바꾸기 · 숨기기 · 지키기는 호스트의 행위자 표가 AI 에게만 연다 — 화면에서는 꺼짐(까닭 풍선)
-    const offs = await ev(`[...document.querySelectorAll('#info [data-alt-rename], #info [data-alt-drop]')].map(b=>b.classList.contains('off'))`);
-    const renamed = offs.length === 2 && offs.every(Boolean) ? 'off' : 'on';
+    // 이름 바꾸기 — 사람의 길(person.alternative rename). 입력 칸에 적고 누른다
+    await ev(`(()=>{const i=document.querySelector('#info [data-alt-newlabel="${a20.item}"]'); i.value='t 2.0 (얇음)'; i.dispatchEvent(new Event('input',{bubbles:true})); return 1;})()`);
+    await ev(`document.querySelector('#info [data-alt-rename]').click()`);
+    const renamed = await waitFor(`(()=>{const l=document.querySelector('#info [data-alt-label]')?.textContent; return l==='t 2.0 (얇음)'?l:null;})()`, 15_000, '이름 바꿈').catch(() => null);
+    const byRename = ((await mcp.tool('alternatives', { action: 'list' })).items ?? []).find(a => a.item === a20.item)?.label;
     // 「이 대안으로」 — 변경 묶음 하나(trigger alternatives), 모델의 t = 2.0
     const n0 = (await act2({ action: 'list_changes', limit: 1 })).total;
     await ev(`document.querySelector('#info [data-alt-open]').click()`);
@@ -2732,13 +2741,310 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await select('work', `chg:${lc.changes?.[0]?.id}`);
     await sleep(300);
     const alt07 = await ev(`[...document.querySelectorAll('#info .sec h4')].some(h=>/^대안/.test(h.textContent))`);
-    // 숨기기 — AI 의 drop 뒤 트리에서 빠진다(「숨긴 대안도 보이기」로 다시)
-    await mcp.tool('alternatives', { action: 'drop', item: a20.item });
+    // 숨기기 — 사람의 길로 숨기면 트리에서 빠진다 · 「숨긴 대안도 보이기」 → 다시 보이기
+    await select('result', `alt:${a20.item}`);
+    await sleep(300);
+    await ev(`document.querySelector('#info [data-alt-drop]').click()`);
     await waitFor(`!document.querySelector('#tree .row[data-k="alt:${a20.item}"]')`, 15_000, '숨김').catch(() => undefined);
     const hidden = await ev(`!document.querySelector('#tree .row[data-k="alt:${a20.item}"]')`);
+    await select('result', 'alt');
+    await sleep(300);
+    await ev(`(()=>{const c=document.querySelector('#info [data-alt-hidden]'); if(!c.checked){c.click();} return c.checked;})()`);
+    await waitFor(`!!document.querySelector('#tree .row[data-k="alt:${a20.item}"]')`, 10_000, '숨긴 것도 보이기').catch(() => undefined);
+    await select('result', `alt:${a20.item}`);
+    await sleep(300);
+    await ev(`document.querySelector('#info [data-alt-undrop]')?.click()`);
+    await waitFor(`!!document.querySelector('#info [data-alt-drop="${a20.item}"]')`, 15_000, '다시 보임').catch(() => undefined);
+    const lsAfter = ((await mcp.tool('alternatives', { action: 'list', include_hidden: true })).items ?? []).find(a => a.item === a20.item);
     const toasts = await ev(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(-3).join(' / ')`);
-    return { ok: inf.label === 't 2.0' && see.length >= 3 && renamed === 'off' && Math.abs(tNow - 2.0) < 1e-6 && lc.total === n0 + 1 && lc.changes?.[0]?.trigger === 'alternatives' && alt07 && hidden,
-      detail: `정보 창 「${inf.label}」 · 같이 볼 것 ${see.map(x => x.replace(/\s+/g, ' ')).join(' | ')} · 이름 바꾸기 · 숨기기 단추 ${renamed}(호스트의 행위자 표 — AI 만) · 이 대안으로 → t ${tNow} · 변경 ${n0} → ${lc.total}(${lc.changes?.[0]?.trigger}) · 07 의 대안 줄 ${alt07} · 숨김 ${hidden} · 알림 ${short(toasts, 160)}` };
+    return { ok: inf.label === 't 2.0' && see.length >= 3 && renamed === 't 2.0 (얇음)' && byRename === 't 2.0 (얇음)' && Math.abs(tNow - 2.0) < 1e-6 && lc.total === n0 + 1 && lc.changes?.[0]?.trigger === 'alternatives' && alt07 && hidden && lsAfter && !lsAfter.hidden,
+      detail: `정보 창 「${inf.label}」 · 같이 볼 것 ${see.map(x => x.replace(/\s+/g, ' ')).join(' | ')} · 화면에서 이름 바꾸기 → 「${renamed}」(호스트 목록 「${byRename}」) · 이 대안으로 → t ${tNow} · 변경 ${n0} → ${lc.total}(${lc.changes?.[0]?.trigger}) · 07 의 대안 줄 ${alt07} · 화면에서 숨김 → 트리에서 빠짐 ${hidden} · 다시 보이기 → hidden ${lsAfter?.hidden} · 알림 ${short(toasts, 160)}` };
+  });
+
+  // ── R5-3 — 문서 · 발행(템플릿 08) · 호스트의 한국어 글 ─────────────────────────────────────────────
+  const docList = () => act2({ action: 'documents', op: 'list' });
+  const docCheck = () => act2({ action: 'documents', op: 'check' });
+  const sha = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+  const ctrlS = () => ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true,bubbles:true}))`);
+  const hostKo = code => NOTICES.HOST[code]?.template_ko ?? null;
+  await step('r33 호스트의 한국어 글 — 무효의 까닭(reason_ko · reason_code) · 기록 사건(event_ko) · 걸린 대상(refs_resolved: 지금 것 · 없음 · 무효가 됨) · 자료 표지(HOST[text_note_code]) · 닫힌 대상의 「다음 판단」(list_cases.open_questions)', 'r33_korean_fields', async () => {
+    await ev(`${S}.review()`);
+    await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.3, r: 3, units: 'SI' });
+    await mcp.tool('aisi_design_flexure', flexArgsR(3.0, 3));
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '부재 검토', 60_000);
+    // 그 검토 항목을 가리키는 판단 요청(지금 것)과 지금 없는 랩 결과를 가리키는 것
+    const gr = await act2({ action: 'get_reviews' });
+    const ck = (gr.items ?? []).find(x => x.type === 'check');
+    const q = await mcp.tool('work_items', { action: 'add', kind: 'question', title: 'R33 처짐 한계', body: 'L/180 으로 볼지 정해 주세요.',
+      refs: [{ kind: 'check', check: { scope: ck.scope, id: ck.id, location: ck.location ?? null } }, { kind: 'result', result: 'lap' }] });
+    // 입력을 바꿔 부재 검토를 지운다 — 장부의 까닭(reason_ko)
+    await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.6, r: 3, units: 'SI' });
+    await settle(`s.stages.chk.state==='stale'`, '부재 검토 낡음', 30_000);
+    const inv = await ev(`(${S}.state.full.invalidated||[]).filter(e=>e.kind==='member_design').pop()`);
+    const chkNote = await ev(`${S}.state.stages.chk.note`);
+    await ev(`${S}.reload()`);
+    await select('work', `work:${q.item}`);
+    await waitFor(`!!document.querySelector('#tree .row[data-k="work:${q.item}"]') || (window.__stcfsdUi.select('work', 'work:${q.item}'), false)`, 20_000, '판단 요청 줄');
+    await waitFor(`document.querySelectorAll('#info [data-ref-state]').length>=2`, 20_000, '걸린 대상의 상태');
+    const scr = await ev(`({refs:[...document.querySelectorAll('#info [data-ref-state]')].map(e=>[e.dataset.refState, e.closest('li').querySelector('.lnk')?.textContent ?? e.closest('li').textContent]),
+      ev:[...document.querySelectorAll('#info [data-event]')].map(e=>e.textContent.split(' · ')[0]), note:document.querySelector('#info [data-text-note]')?.textContent ?? null,
+      code:document.querySelector('#info [data-text-note]')?.dataset.textNote ?? null, gone:document.querySelector('#center [data-ref-gone]')?.dataset.refGone ?? null})`);
+    const got = await act2({ action: 'work_items', op: 'get', item: q.item });
+    // 닫힌 대상의 「다음 판단」: 다른 대상에 판단 요청을 남기고 돌아온다
+    const cur = (await recNow()).cases.find(c => c.open)?.name;
+    await act2({ action: 'save_case' });
+    await act2({ action: 'new_case', name: 'R33 다른 대상', kind: 'section-only' });
+    await act2({ action: 'open_case', name: 'R33 다른 대상' });
+    await answerIfUnsaved();
+    const q2 = await mcp.tool('work_items', { action: 'add', kind: 'question', title: 'R33 다른 대상의 물음', body: '정해 주세요.' });
+    await act2({ action: 'open_case', name: cur });
+    await answerIfUnsaved();
+    await ev(`${S}.reload()`);
+    await ev(`${S}.start()`);
+    await waitFor(`!!document.querySelector('#start tr[data-name="R33 다른 대상"] [data-next-q]')`, 20_000, '시작 화면의 다음 판단');
+    const nq = await ev(`(()=>{const td=document.querySelector('#start tr[data-name="R33 다른 대상"] [data-next]'); return {n:td.querySelector('[data-next-q]').dataset.nextQ, text:td.textContent};})()`);
+    const lc = (await recNow()).cases.find(c => c.name === 'R33 다른 대상');
+    await shot('r33_start_next_1920_dark');
+    await ev(`${S}.review()`);
+    const evKo = (got.item?.history ?? []).map(h => h.event_ko);
+    return { ok: !!inv?.reason_ko && !!inv?.reason_code && chkNote.includes(inv.reason_ko) && !/[A-Za-z]{4,}/.test(inv.reason_ko)
+        && scr.refs.length === 2 && scr.refs[0][0] === 'invalidated' && ['missing', 'invalidated'].includes(scr.refs[1][0]) && !/^결과 lap/.test(scr.refs[1][1]) && scr.gone === 'invalidated'
+        && JSON.stringify(scr.ev) === JSON.stringify(evKo) && evKo.length > 0 && scr.code === got.text_note_code && scr.note === hostKo(got.text_note_code)
+        && Number(nq.n) === lc?.open_questions?.count && nq.text.includes('R33 다른 대상의 물음') && !!q2.item,
+      detail: `장부 ${inv?.reason_code} 「${inv?.reason_ko}」 → 단계의 말 「${short(chkNote, 60)}」 · 걸린 대상 ${scr.refs.map(r => `${r[1]}=${r[0]}`).join(' · ')} · 가운데 ${scr.gone}`
+        + ` · 이력 ${scr.ev.join(', ')} (= event_ko) · 자료 표지 ${scr.code} 「${short(scr.note, 40)}」 · 닫힌 대상의 다음 판단 ${nq.n}(list_cases ${lc?.open_questions?.count}) 「${short(nq.text, 40)}」` };
+  });
+  let issued = null;
+  await step('r34 R5 증거(1) — 설계(AI 의 aisi_design_flexure — 화면에 설계 단추가 없다) 뒤 화면에서: 판단 요청 · 가정 · 입력 묶음의 확인 · 모든 검토 항목(Space) · 저장(Ctrl+S) · 초안(「계산서 만들기」) → 발행 전 점검의 막는 것 0', 'r34_ready_to_issue', async () => {
+    // 새 검토 대상(시작 화면의 「단면만」 카드) — 앞 단계가 남긴 결과 · 발행 폴더가 없는 대상에서
+    await ev(`${S}.start()`);
+    await ev(`document.querySelector('#start [data-rec="new-case"][data-kind="section-only"]').click()`);
+    await dlgInput('R34 발행');
+    await answerIfUnsaved();
+    await settle(`!!s.full?.project?.case && s.full.project.case.name==='R34 발행'`, '새 대상', 60_000);
+    await ev(`${S}.review()`);
+    const steps = [];
+    // AI 가 남긴 판단 요청(사람의 답을 옮겨 적음)과 임시 가정 — 사람이 화면에서 확인할 것
+    const q = await mcp.tool('work_items', { action: 'add', kind: 'question', title: 'R34 처짐 한계', body: 'L/180 으로 볼지 정해 주세요.' });
+    await mcp.tool('work_items', { action: 'answer', item: q.item, said: 'L/180 으로 해.' });
+    const a = await mcp.tool('assumptions', { action: 'add', text: 'R34 데크가 횡지지', status: 'provisional', basis: '지붕 평면도', impact: '횡지지' });
+    // 설계 — 새 화면에는 부재 설계를 돌리는 단추가 없다. 끼운 설계 화면(F2)의 「설계 실행」 은 그 화면의 설계 꼴(앞 단계의 퍼린 설정)을 돌린다 —
+    // 시험은 AI 의 aisi_design_flexure 로 휨 검토 하나(이 걸음만 화면의 것이 아니다)
+    await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.3, r: 3, units: 'SI' });
+    const fr = await mcp.tool('aisi_design_flexure', flexArgsR(3.0, 3));
+    const runBtn = fr.error ? 'error' : 'ran';
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length) && s.stages.chk.state==='ok'`, '부재 검토', 90_000).catch(() => undefined);
+    let ck = await docCheck();
+    steps.push(`설계(${runBtn}) 뒤 막는 것 ${(ck.blockers ?? []).map(b => b.code).join(',')}`);
+    // 저장 — Ctrl+S
+    await ctrlS();
+    await waitFor(`!${S}.state.caseIn?.dirty`, 20_000, '저장').catch(() => undefined);
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    const groupsDone = [];
+    let gr = null;
+    const resolve = async () => {
+      // 판단 요청 · 가정 — 점검이 이름한 것 모두. 답 · 「확정」 은 사람이 대화에서 한 말을 AI 가 옮겨 적는다(화면에는 그 칸이 없다),
+      // 그 판의 확인은 사람이 정보 창의 「확인」 으로(seq — de93aa9)
+      const c0 = await docCheck();
+      if (!(c0.blockers ?? []).some(b => ['open-questions', 'provisional-assumptions', 'incomplete-reviews'].includes(b.code))) { return; }
+      const idsOf = code => String((c0.blockers ?? []).find(b => b.code === code)?.detail ?? '').split(', ').filter(Boolean);
+      const qIds = idsOf('open-questions'), aIds = idsOf('provisional-assumptions');
+      for (const id of qIds) {
+        const w = await act2({ action: 'work_items', op: 'get', item: id });
+        if (!w.item?.answer) { await mcp.tool('work_items', { action: 'answer', item: id, said: '그대로 해.' }); }
+      }
+      for (const id of aIds) { await mcp.tool('assumptions', { action: 'update', item: id, status: 'firm' }); }
+      await sleep(800);
+      await ev(`${S}.reload()`);
+      await sleep(1500);
+      const confirmed = [];
+      for (const [tab, key] of [...qIds.map(id => ['work', `work:${id}`]), ...aIds.map(id => ['model', `asmr:${id}`])]) {
+        await select(tab, key);
+        await waitFor(`!!document.querySelector('#info .hd [data-rv-item]') || (window.__stcfsdUi.select(${JSON.stringify(tab)}, ${JSON.stringify(key)}), false)`, 20_000, `${key} 확인 단추`);
+        if (await ev(`document.querySelector('#info .hd [data-rv-item]').dataset.rvState`) !== 'reviewed') { await ev(`document.querySelector('#info .hd [data-rv-item]').click()`); }
+        confirmed.push(await waitFor(`document.querySelector('#info .hd [data-rv-item]')?.dataset.rvState==='reviewed' ? ${JSON.stringify(key)} : null`, 15_000, `${key} 확인됨`).catch(() => `${key}?`));
+      }
+      steps.push(`화면에서 확인 ${confirmed.join(' · ')}`);
+      // 입력 묶음(템플릿 01) — 단면 · 재료의 「확인」(group_fps)
+      groupsDone.length = 0;
+      for (const key of ['sec', 'mat']) {
+        await select('model', key);
+        await waitFor(`!!document.querySelector('#info .hd [data-rv-groups]')`, 15_000, `${key} 묶음 확인 단추`).catch(() => undefined);
+        await ev(`document.querySelector('#info .hd [data-rv-groups]')?.click()`);
+        groupsDone.push(`${key}=${await waitFor(`document.querySelector('#info .hd [data-rv-groups]')?.dataset.rvState==='reviewed' ? 'reviewed' : null`, 15_000, `${key} 묶음 확인됨`).catch(() => 'no')}`);
+      }
+      steps.push(`입력 묶음 ${groupsDone.join(' · ')}`);
+      // 모든 검토 항목 — 결과 탭에서 줄을 고르고 Space
+      const keys = await ev(`${S}.state.runs.flatMap(r=>r.rows).filter(r=>r.us).map(r=>r.key)`);
+      for (const k of keys) {
+        const st = await ev(`(()=>{const r=${S}.state.runs.flatMap(r=>r.rows).find(x=>x.key===${JSON.stringify(k)}); return r ? 1 : 0;})()`);
+        if (!st) { continue; }
+        await select('result', k);
+        const cur = await ev(`document.querySelector('#info .hd [data-rv-check]')?.dataset.rvState ?? null`);
+        if (cur === 'reviewed' || cur === null) { continue; }
+        await ev(`document.getElementById('tree').focus()`);
+        await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true}))`);
+        await waitFor(`document.querySelector('#info .hd [data-rv-check]')?.dataset.rvState==='reviewed'`, 15_000, `Space ${k}`).catch(() => undefined);
+      }
+      gr = await act2({ action: 'get_reviews' });
+      steps.push(`확인 ${gr.reviewed}/${gr.total}`);
+    };
+    await resolve();
+    const makeDraft = async () => {
+      await select('doc', 'rpt');
+      await waitFor(`!!document.querySelector('#center [data-act="rpt-make"]')`, 15_000, '만들기 단추');
+      const n0 = await ev(`window.__stcfsdUi.docs.drafts`);
+      await ev(`document.querySelector('#center [data-act="rpt-make"]').click()`);
+      await waitFor(`window.__stcfsdUi.docs.drafts > ${n0} ? 1 : (window.__stcfsdUi.reload(), null)`, 120_000, '계산서 초안');
+    };
+    // 초안 — 「계산서 만들기」(호스트가 03_계산서 에 새 초안). 초안을 만들며 프로그램이 새 가정을 더하면 다시 확인하고 새 초안
+    await makeDraft();
+    if ((await docCheck()).blockers?.some(b => ['open-questions', 'provisional-assumptions', 'incomplete-reviews', 'stale-draft'].includes(b.code))) {
+      steps.push(`초안 뒤 다시 확인할 것 ${(await docCheck()).blockers.map(b => b.code).join(',')}`);
+      await resolve();
+      await makeDraft();
+    }
+    ck = await docCheck();
+    steps.push(`초안 뒤 막는 것 ${(ck.blockers ?? []).map(b => b.code).join(',') || '없음'}`);
+    await select('doc', 'rpt');
+    await waitFor(`!!document.querySelector('#info [data-issue-check]')`, 15_000, '발행 전 점검');
+    const panel = await ev(`({blocked:document.querySelector('#info [data-issue-check]').dataset.blocked, blockers:[...document.querySelectorAll('#info [data-blocker]')].map(e=>e.dataset.blocker), label:document.querySelector('#info [data-issue-open]')?.textContent})`);
+    await shot('r34_documents_1920_dark');
+    return { ok: runBtn === 'ran' && groupsDone.every(g => g.endsWith('=reviewed')) && panel.blocked === '0' && panel.blockers.length === 0 && /R0 발행/.test(panel.label ?? '') && gr?.reviewed === gr?.total && gr?.total > 0,
+      detail: `${steps.join(' · ')} · 점검 창 막는 것 ${panel.blockers.length} 「${panel.label}」` };
+  });
+  await step('r35 ⚔ 발행의 막는 것 — 끼운 웹뷰 · MCP 토큰 · 쓰기 열쇠 없음 · 다른 Origin · MCP 중계 · 도구는 미리보기도 발행도 못 한다 · 쓴 숫자 · 그 사이 바뀜 · 지난 숫자는 거절되고 화면이 까닭을 말한다 · 04_발행본에 아무것도 없다', 'r35_issue_refusals', async () => {
+    const origin = await ev('location.origin');
+    const root04 = path.join(pdir2, '04_발행본');
+    const listDirs = () => { try { return fs.readdirSync(root04, { recursive: true }).map(String).sort().join('|'); } catch { return 'none'; } };
+    const before = listDirs();
+    const wvTry = await br.frameEval(`/wv/${encodeURIComponent(designerId)}/`, `fetch(${JSON.stringify(origin)} + '/api/person/issue/preview', {method:'POST', mode:'no-cors', credentials:'include', headers:{'Content-Type':'text/plain'}, body:'{}'}).then(r=>'status '+r.status+' '+r.type).catch(e=>'blocked '+String(e).slice(0,40))`).catch(e => `eval ${String(e).slice(0, 40)}`);
+    const raw = (route, headers, b = {}) => new Promise(res => {
+      const u = new URL(route, origin);
+      const r = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: 'POST', headers: { 'Content-Type': 'application/json', ...headers } }, x => { x.resume(); x.on('end', () => res(x.statusCode)); });
+      r.on('error', () => res(-1)); r.end(JSON.stringify(b));
+    });
+    const m1 = await raw('/api/person/issue/preview', { Authorization: `Bearer ${mcpToken}` });
+    const m2 = await raw('/api/person/issue', { Authorization: `Bearer ${mcpToken}` }, { fingerprint: 'x', nonce: 'y' });
+    const k1 = await raw('/api/person/issue/preview', { Authorization: `Bearer ${token}` });
+    const k2 = await raw('/api/person/export', { Authorization: `Bearer ${token}` });
+    const o1 = await raw('/api/person/issue', { Authorization: `Bearer ${token}`, Origin: 'http://127.0.0.1:1', 'Sec-Fetch-Site': 'cross-site', 'X-StCFSD-Key': 'x' }, { fingerprint: 'x', nonce: 'y' });
+    const relay = await act2({ action: 'documents', op: 'issue' });
+    const tool = await mcp.tool('documents', { action: 'issue' }).catch(e => ({ error: String(e) }));
+    log.console.splice(0, log.console.length, ...log.console.filter(x => !/api\/person\//.test(x.text)));
+    const openPv = async () => {
+      await select('doc', 'rpt');
+      await waitFor(`!!document.querySelector('#info [data-issue-open]')`, 15_000, '발행 단추');
+      await ev(`document.querySelector('#info [data-issue-open]').click()`);
+      await waitFor(`!!window.__stcfsdUi.docs.pv && !!document.querySelector('#issue-host [data-pv="issue"]')`, 20_000, '미리보기');
+      return ev(`window.__stcfsdUi.docs.pv`);
+    };
+    const refused = () => waitFor(`document.querySelector('#issue-host [data-issue-refused]') ? {code:document.querySelector('#issue-host [data-issue-refused]').dataset.issueRefused, text:document.querySelector('#issue-host [data-issue-refused]').textContent, reopen:!!document.querySelector('#issue-host [data-pv="reopen"]')} : null`, 30_000, '거절의 까닭').catch(() => null);
+    // 쓴 숫자 — 미리보기의 숫자를 다른 길(틀린 지문)이 먼저 쓰면 화면의 「R0 발행」 은 거절, 까닭 nonce-used
+    const pv1 = await openPv();
+    const pre = await pfetch('/api/person/issue', { fingerprint: 'not-this-one', nonce: pv1.nonce });
+    await ev(`document.querySelector('#issue-host [data-pv="issue"]').click()`);
+    const used = await refused();
+    await shot('r35_issue_refused_1920_dark');
+    // 그 사이 바뀜 — 미리보기를 다시 연 뒤 AI 가 보고 하나를 남긴다(막지 않는 기록이지만 지문이 바뀐다)
+    await ev(`document.querySelector('#issue-host [data-pv="reopen"]').click()`);
+    await waitFor(`!document.querySelector('#issue-host [data-issue-refused]') && !!document.querySelector('#issue-host [data-pv="issue"]:not([disabled])')`, 20_000, '다시 연 미리보기');
+    await mcp.tool('work_items', { action: 'add', kind: 'report', title: 'R35 보고', body: '미리보기 뒤의 기록.' });
+    await sleep(800);
+    await ev(`document.querySelector('#issue-host [data-pv="issue"]').click()`);
+    const changed = await refused();
+    // 지난 숫자 — 수명을 줄여(시험 틀만 — 설치본 · 셸에는 이 길이 없다) 지나면 화면이 「미리보기 다시」
+    await serve.ipc('issue-nonce-ms', { ms: 1500 });
+    const oldNonce = await ev(`window.__stcfsdUi.docs.pv?.nonce ?? null`);
+    await ev(`document.querySelector('#issue-host [data-pv="reopen"]').click()`);
+    await waitFor(`(window.__stcfsdUi.docs.pv?.nonce ?? ${JSON.stringify(oldNonce)}) !== ${JSON.stringify(oldNonce)} ? 1 : null`, 20_000, '새 숫자');
+    const exp = await waitFor(`document.querySelector('#issue-host [data-issue-preview]')?.dataset.expired==='1' && document.querySelector('#issue-host [data-pv-expired]') ? document.querySelector('#issue-host [data-pv-expired]').textContent : null`, 15_000, '지난 미리보기').catch(() => null);
+    const lateNonce = await ev(`window.__stcfsdUi.docs.pv?.nonce ?? null`);
+    const late = lateNonce ? await pfetch('/api/person/issue', { fingerprint: 'x', nonce: lateNonce }) : null;
+    await serve.ipc('issue-nonce-ms', { ms: 120_000 });
+    await ev(`document.querySelector('#issue-host [data-pv="close"]')?.click()`);
+    const after = listDirs();
+    // 보고를 남겨 초안이 낡았다 — 화면에서 새 초안(r36 이 발행한다)
+    await select('doc', 'rpt');
+    await ev(`document.querySelector('#center [data-act="rpt-make"]').click()`);
+    await sleep(2000);
+    await waitFor(`document.querySelector('#info [data-issue-check]')?.dataset.blocked==='0' ? 1 : (window.__stcfsdUi.reload(), null)`, 120_000, '새 초안 뒤 막는 것 0').catch(() => undefined);
+    const ready = await docCheck();
+    return { ok: !/^status 200/.test(String(wvTry)) && [401, 403].includes(m1) && [401, 403].includes(m2) && k1 === 403 && k2 === 403 && o1 === 403 && !!relay?.error && !!tool?.error
+        && pre?.json?.success === false && used?.code === 'nonce-used' && /이미 썼다/.test(used?.text ?? '') && used?.reopen && changed?.code === 'changed' && /바뀌었다/.test(changed?.text ?? '')
+        && !!exp && ['nonce-expired', 'nonce-used'].includes(late?.json?.data?.code) && before === after && ready.blocked === false,
+      detail: `웹뷰 fetch ${wvTry} · MCP 토큰 미리보기 ${m1} · 발행 ${m2} · 열쇠 없음 ${k1} · 내보내기 열쇠 없음 ${k2} · Origin 다름 ${o1} · 중계 documents issue → ${short(relay?.error ?? '받음', 50)} · 도구 → ${short(tool?.error ?? '받음', 40)}`
+        + ` · 숫자를 먼저 씀 ${pre?.json?.data?.code} → 화면 ${used?.code} 「${short(used?.text, 50)}」 · 그 사이 바뀜 → ${changed?.code} 「${short(changed?.text, 40)}」 · 지남 → 「${short(exp, 40)}」 · 지난 숫자 ${late?.json?.data?.code}`
+        + ` · 04_발행본 그대로 ${before === after} · 새 초안 뒤 막는 것 ${(ready.blockers ?? []).map(b => b.code).join(',') || '없음'}` };
+  });
+  await step('r36 R5 증거(2) — 미리보기(막는 것 · 경고 · 통과 · 묶일 파일 · 차수 · 첫 쪽 · 확인의 뜻) → 「R0 발행」(사람의 길 · 보이지 않는 진짜 인쇄 · 「인쇄 중」) · 문서 탭 「R0 · 날짜 · 발행한 사람 · 그대로」 · 시작 화면 「발행 R0」', 'r36_issue_r0', async () => {
+    await select('doc', 'rpt');
+    await waitFor(`!!document.querySelector('#info [data-issue-open]')`, 15_000, '발행 단추');
+    // 미리보기 → R0 발행(사람의 길 — 인쇄를 기다린다)
+    await ev(`document.querySelector('#info [data-issue-open]').click()`);
+    await waitFor(`!!document.querySelector('#issue-host [data-issue-preview]')`, 20_000, '미리보기');
+    const meaningKo = (await act2({ action: 'get_reviews' })).meaning_ko;
+    const pv = await ev(`(()=>{const d=document.querySelector('#issue-host [data-issue-preview]'); return {label:d.dataset.label, rev:d.querySelector('[data-pv-revision]')?.textContent, files:[...d.querySelectorAll('[data-pv-files] li')].map(l=>l.textContent), frame:!!d.querySelector('iframe[sandbox=""]'), meaning:d.querySelector('[data-pv-meaning]')?.textContent ?? '', off:d.querySelector('[data-pv="issue"]')?.disabled, blockers:[...d.querySelectorAll('[data-blocker]')].map(e=>e.dataset.blocker)};})()`);
+    await shot('r36_issue_preview_1920_dark');
+    await ev(`document.querySelector('#issue-host [data-pv="issue"]').click()`);
+    const printing = await waitFor(`/인쇄 중/.test(document.querySelector('#issue-host')?.textContent ?? '') || /인쇄 중/.test(document.querySelector('.status .prog')?.textContent ?? '') ? 1 : null`, 10_000, '인쇄 중').catch(() => null);
+    await waitFor(`!document.querySelector('#issue-host [data-issue-preview]')`, 180_000, '발행 끝').catch(() => undefined);
+    const ls = await docList();
+    issued = (ls.issues ?? [])[0] ?? null;
+    await waitFor(`!!document.querySelector('#tree .row[data-k^="iss:"]')`, 20_000, '발행 줄').catch(() => undefined);
+    const row = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k^="iss:"]'); return r ? r.textContent : null;})()`);
+    const dir = issued ? path.join(pdir2, ...String(issued.folder).split('/')) : null;
+    const files = dir && fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+    const pdf = files.find(f => /\.pdf$/i.test(f));
+    const pdfHead = pdf ? fs.readFileSync(path.join(dir, pdf)).subarray(0, 5).toString('latin1') : '';
+    if (issued) { issued.dir = dir; issued.hashes = Object.fromEntries(files.map(f => [f, sha(path.join(dir, f))])); }
+    const toasts = await ev(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(-2).join(' / ')`);
+    if (issued) { await select('doc', `iss:${issued.item}`); await sleep(800); await shot('r36_issued_r0_1920_dark'); }
+    await ev(`${S}.start()`);
+    await waitFor(`!!document.querySelector('#start tr.on [data-issued]')`, 15_000, '시작 화면의 발행 R0').catch(() => undefined);
+    const startR0 = await ev(`document.querySelector('#start tr.on [data-issued]')?.textContent ?? null`);
+    await shot('r36_start_issued_1920_dark');
+    await ev(`${S}.review()`);
+    return { ok: pv.label === 'R0' && startR0 === '발행 R0' && pv.frame && pv.off === false && pv.blockers.length === 0 && pv.meaning.includes(meaningKo) && !!meaningKo
+        && !!printing && issued?.revision === 0 && issued?.state === 'same' && files.length >= 3 && pdfHead === '%PDF-' && /R0/.test(row ?? '') && /그대로/.test(row ?? ''),
+      detail: `미리보기 ${pv.label}(${pv.rev}) 파일 ${pv.files.join(', ')} · 첫 쪽 sandbox ${pv.frame} · 발행 단추 꺼짐 ${pv.off}`
+        + ` · 인쇄 중 ${!!printing} → 발행 ${issued?.item} R${issued?.revision} ${issued?.state_ko} · 폴더 ${files.join(', ')} · PDF 머리 ${pdfHead} · 트리 「${row}」 · 시작 화면 「${startR0}」 · 알림 ${short(toasts, 100)}` };
+  });
+  await step('r37 R0 뒤 — 모델을 바꿔 저장해도 R0 의 파일이 바이트까지 그대로 · 손으로 고치면 문서 탭이 「고쳐짐」 과 그 파일 · 발행본은 읽기 전용(해시 상태 띠) · 「초안으로 내보내기」 는 막는 것과 무관(저장 대화상자)', 'r37_issue_hashes', async () => {
+    if (!issued) { return { ok: false, detail: 'r36 의 발행이 없다' }; }
+    await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.6, r: 3, units: 'SI' });
+    await ctrlS();
+    await waitFor(`!${S}.state.caseIn?.dirty`, 20_000, '저장').catch(() => undefined);
+    await sleep(800);
+    const same = Object.entries(issued.hashes).every(([f, h]) => sha(path.join(issued.dir, f)) === h);
+    const l1 = (await docList()).issues?.[0];
+    const html = Object.keys(issued.hashes).find(f => /\.html$/i.test(f));
+    const p = path.join(issued.dir, html);
+    try { fs.chmodSync(p, 0o666); } catch { /* 읽기 전용이 아니면 그대로 */ }
+    fs.appendFileSync(p, '\n<!-- 손으로 고침 -->\n');
+    await ev(`${S}.reload()`);
+    await waitFor(`/고쳐짐/.test(document.querySelector('#tree .row[data-k="iss:${issued.item}"]')?.textContent ?? '')`, 20_000, '고쳐짐').catch(() => undefined);
+    const row = await ev(`document.querySelector('#tree .row[data-k="iss:${issued.item}"]')?.textContent ?? null`);
+    await select('doc', `iss:${issued.item}`);
+    await waitFor(`!!document.querySelector('#info [data-issue-files]')`, 15_000, '다른 파일').catch(() => undefined);
+    const inf = await ev(`({files:[...document.querySelectorAll('#info [data-issue-files] li')].map(l=>l.textContent), banner:document.querySelector('#center [data-issue-state]')?.textContent ?? null, frame:!!document.querySelector('#center iframe[sandbox=""][data-doc-frame]')})`);
+    const l2 = (await docList()).issues?.[0];
+    await shot('r37_issue_edited_1920_dark');
+    // 「초안으로 내보내기」 — 막는 것과 무관(모델을 바꿔 낡은 지금도), 사람의 저장 대화상자
+    const blockedNow = (await docCheck()).blocked;
+    await select('doc', 'rpt');
+    await waitFor(`!!document.querySelector('#info [data-doc-export]')`, 15_000, '내보내기');
+    const out0 = path.join(tmp, 'export', '초안 내보내기');
+    await ev(`document.querySelector('#info [data-doc-export]').click()`);
+    const fd = await waitFor(`(()=>{const d=document.querySelector('#dialog-host .dialog[data-kind="fileDialog"]'); return d ? d.querySelector('h2').textContent : null;})()`, 20_000, '저장 물음').catch(() => null);
+    const sug = fd ? await ev(`document.querySelector('#dialog-host .dialog[data-kind="fileDialog"] [data-role="value"]').value`) : '';
+    const out = out0 + path.extname(sug);
+    if (fd) { await dlgInput(out); }
+    await waitFor(`/내보냈다/.test([...document.querySelectorAll('.toast')].map(t=>t.textContent).join(' ')) ? 1 : null`, 20_000, '내보냄').catch(() => null);
+    const outHead = fs.existsSync(out) ? fs.readFileSync(out).subarray(0, 5).toString('latin1') : null;
+    return { ok: same && l1?.state === 'same' && /고쳐짐/.test(row ?? '') && l2?.state === 'edited' && inf.files.some(f => f.includes(html) && /고쳐짐/.test(f)) && /고쳐짐/.test(inf.banner ?? '') && inf.frame && blockedNow === true && !!fd && !!outHead,
+      detail: `모델을 바꿔 저장 → R0 파일 ${Object.keys(issued.hashes).length} 개 바이트 그대로 ${same}(documents ${l1?.state_ko}) · ${html} 끝에 한 줄 → 트리 「${row}」 · 정보 창 ${inf.files.join(' · ')} · 띠 「${short(inf.banner, 60)}」 · 읽기 전용 sandbox ${inf.frame} · 막는 것이 있는 지금(${blockedNow}) 「초안으로 내보내기」 → 물음 「${fd}」 → ${outHead ? `${path.basename(out)}(${outHead})` : '없음'}` };
   });
 
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });

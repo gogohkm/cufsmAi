@@ -24,6 +24,7 @@ import { loadRecords } from './records';
 import { loadChanges } from './changes';
 import { loadRecordsWork, prefetchOpenQuestions } from './work';
 import { loadReviews } from './reviews';
+import { loadDocs } from './docs';
 import { loadAlts } from './alts';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
 import { fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
@@ -384,7 +385,7 @@ export function ledgerOf(kinds: string[]): any | null {
 
 function staleNote(e: any): string {
   const act = e?.cause?.action ? ` · ${String(e.cause.action)}` : '';
-  return `입력이 바뀌어 호스트가 결과를 지웠다 — ${String(e?.reason ?? '')}${act}`;
+  return `입력이 바뀌어 호스트가 결과를 지웠다 — ${String(e?.reason_ko ?? e?.reason ?? '')}${act}`;
 }
 
 /** 진행 띠 — 결과가 지금 입력과 맞는가. 계산하지 않는다: 호스트의 `results`(남은 결과)와 무효 장부만 본다 */
@@ -428,7 +429,7 @@ function buildVal(): void {
 export function valChanges(): string[] {
   if (hostValidation()) { return []; }
   const e = ledgerOf(['validation']);
-  return e ? [`${String(e.reason ?? '입력이 바뀜')}${e.cause?.action ? ` · ${String(e.cause.action)}` : ''}`] : [];
+  return e ? [`${String(e.reason_ko ?? e.reason ?? '입력이 바뀜')}${e.cause?.action ? ` · ${String(e.cause.action)}` : ''}`] : [];
 }
 function valStage(): { state: StageState; note: string } {
   if (state.valRunning) { return { state: 'run', note: '점검 중' }; }
@@ -438,7 +439,7 @@ function valStage(): { state: StageState; note: string } {
     return { state: 'ok', note: `통과 ${c.pass ?? 0} · 주의 ${c.warn ?? 0} · 실패 ${c.fail ?? 0}${hv.by === 'ai' ? ' · AI 가 돌림' : ''}` };
   }
   const e = ledgerOf(['validation']);
-  if (e) { return { state: 'stale', note: `점검 뒤 바뀌었다 — ${String(e.reason ?? '')}` }; }
+  if (e) { return { state: 'stale', note: `점검 뒤 바뀌었다 — ${String(e.reason_ko ?? e.reason ?? '')}` }; }
   return { state: 'none', note: state.valErr ? `점검을 하지 못함 — ${state.valErr}` : '실행 안 함 — 결과 탭의 점검에서 「점검 실행」(편집 화면의 「설계 검증 실행」과 같은 길)' };
 }
 /** 「점검 실행」을 눌렀다 — 끝은 호스트의 validationResult(이벤트)가 알린다 */
@@ -446,7 +447,9 @@ export function setValRunning(on: boolean, err?: string): void { state.valRunnin
 
 /** 계산서 · 좌굴 해석 보고서를 호스트가 쓴다(다리의 /api/report — 자리 · 이름은 호스트가 정한다). format: html(미리보기) · pdf */
 export async function makeReport(kind: 'design' | 'buckling', format: 'html' | 'pdf'): Promise<void> {
-  const r = await api<any>('POST', '/api/report', { kind, format, units: 'SI' });
+  // 프로젝트에서는 만들 때마다 새 초안(D-n) — PDF 는 HTML 과 같은 초안으로(both)
+  const inProj = !!state.full?.project?.inProject;
+  const r = await api<any>('POST', '/api/report', { kind, format: inProj && format === 'pdf' ? 'both' : format, units: 'SI' });
   const prev = state.reports[kind];
   const reply = r.data?.reply;
   const caseRev = typeof reply?.case_rev === 'number' ? reply.case_rev : null;
@@ -456,7 +459,7 @@ export async function makeReport(kind: 'design' | 'buckling', format: 'html' | '
     return;
   }
   // PDF 만 쓴 답은 미리보기(앞의 HTML)를 그대로 두고 파일 · 쪽 수만 더한다(같은 판일 때)
-  if (format === 'pdf' && prev?.html && prev.caseRev === caseRev) {
+  if (format === 'pdf' && !inProj && prev?.html && prev.caseRev === caseRev) {
     state.reports[kind] = { ...prev, reply: { ...prev.reply, files: { ...(prev.reply?.files ?? {}), ...(reply?.files ?? {}) }, pages: reply?.pages ?? null, pdf_note: reply?.pdf_note }, error: undefined, pdfAt: Date.now() };
     return;
   }
@@ -508,6 +511,7 @@ async function load(): Promise<void> {
   // R4: 확인 표시는 결과 · 입력이 바뀔 때마다 유효성이 바뀐다 — 새로 고칠 때마다(지문도 그때의 것). 대안은 대상이 바뀌었을 때 · recordsChanged 에
   await loadReviews();
   await loadAltsIfCaseChanged();
+  await loadDocs();
   if (!state.initialModel) {
     const first = await last(id, ['modelLoaded'], 'first');
     state.initialModel = first?.data.modelLoaded?.message?.data ?? null;
