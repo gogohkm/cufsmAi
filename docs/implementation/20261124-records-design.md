@@ -808,3 +808,53 @@ R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 �
 돌연변이: 검증자의 14 개를 고친 코드의 같은 방어에 옮겨(패턴이 바뀌어 원래 글로는 대부분 닿지 않는다) + 새 26 개 — 결과는 아래 「돌연변이 결과」.
 
 **돌연변이 결과(2026-11-24).** ① 검증자의 스크립트 그대로(`p_mutants.js`, 원래 글로 바꾼다): 14 개 가운데 5 개는 그 글이 고친 코드에 없어 닿지 않음(M1 · M2 · M7 · M8 · M12 — 그 방어를 다시 짰다), 닿은 9 개 가운데 8 개 죽음. 남은 M6(`it.status` 낮추기)은 접기가 `ok` 줄만 받게 된 뒤 **죽은 줄**이 되어 같은 뜻의 돌연변이였다 — 그 줄(업무 · 가정 · 원자료의 같은 꼴 셋)을 지웠다. ② 같은 14 개를 고친 코드의 같은 방어에 옮긴 것 + 새 26 개(꼬리의 서명, 검증 안 된 줄의 사슬 진입, 되풀이, `stream` 검사, 정규 글 검사, CR 벗기기, 소유 표지 서명, 번호 공간, 읽기 · 쓰기의 행위자 표, 동료의 본 끝, 제목의 자리수 · 주된 칸 · 설명된 기하 · 요소→절점, 하드 링크, 열쇠의 원자적 생성, 보이지 않는 글자 · 적극 목록, 깊이 3, 판단 요청 · 가정의 사람 확인, 틈 알림, 금지 키, 심은 조각): 첫 실행에서 3 개가 살았다(검증자의 M4 를 옮긴 것 — `segmentError` 를 직접 보는 시험이 없었다, M8 을 옮긴 것 — 몸 다듬기가 가려 주었다, N3 같은 줄 파일 안의 되풀이) → 시험 셋을 더해 **40 개 모두 죽음**. 스크립트는 저장소 밖(스크래치)에 두었다.
+
+
+### 10.3 2026-11-24 — R1-2 1 걸음: 데스크(새 파일만 — 제품은 아직 부르지 않는다)
+
+결정: 7절의 14가지 그대로. 2 걸음(패널의 한 줄 훅 · `mcp/bridge.ts` 문맥 · `mcp/recordTools.ts` 의 일곱 도구 · `.csd` 의 `record` 키 · `get_full_state.project` · `desktop/host` 적재기 · 렌더 증거)은 오케스트레이터가 마일스톤을 확인한 뒤.
+
+파일: `src/records/` — `desk.ts`(데스크 `RecordsDesk`), `context.ts`(행위자 문맥), `cases.ts`(검토 대상 줄 · 접기), `runs.ts`(실행 줄 · 요약 · 접기), `blobs.ts`(사본), `locks.ts`(잠금), `caseIndex.ts`(색인 — 이름 `index.ts` 는 모듈 목록이 쓴다). 기존 모듈은 고치지 않았다(`index.ts` 의 공개 목록에도 아직 넣지 않았다 — 2 걸음이 `desk` 를 직접 들인다). 시험 `test/records/records_desk.js` · `_child_desk.js`(`run.js` 의 목록에 한 줄).
+
+**2 걸음이 부를 것**(모두 주입 — `DeskEnv {keyDir, roots(), recentProjects?(), protectedRoots?(), now(), host, pid?, version, engineId(), writerName?, currentContext?(), files?, pidAlive?()}`):
+
+| 부르는 곳 | 함수 | 답 |
+|---|---|---|
+| `_loadProjectFile` 성공 뒤 | `afterOpen(abs, bytes, {contentFp?, record?})` | `OpenOutcome {inProject, project, case, readOnly, readOnlyReason, lock, wrote[], notices[]}` |
+| `_writeProjectFile` 쓰기 앞 | `beforeSave(abs)` | `{ok: true, inProject}` · `{ok: false, reason: 'changed-outside'|'missing'|'read-only'|'hard-link'|'link', error}` — ok 가 아니면 쓰지 않는다 |
+| `_writeProjectFile` 의 `.csd` 조립 | `recordKey(abs?)` | `{caseId, projectId}` 또는 null — 최상위 `record` 키 |
+| `_writeProjectFile` 쓰기 뒤 | `afterSave(abs, bytes, {contentFp?, snapshot?})` | `{fileSha, snapshot}` 또는 null |
+| 결과를 받는 여섯 + 셋 자리 | `onRun(kind, requestText, result, {model?, caseState?, props?, caseRev?, ms?, error?, actor?})` | `{runId, blob, blobBytes, blobStored, snapshot}` 또는 null(프로젝트 · 쓸 수 있는 대상이 없으면) |
+| `getStatus()` · `get_full_state.project` | `status()` | `{inProject, project, case, note}` — 경로 없음 |
+| `get_case_status` | `caseStatus({current?: {<종류>: {resultFp, stale?}}, detail?: 'runs'})` | 결과마다 `match · differs · stale · none · other-engine` + 마지막 실행(누가 · 클라이언트 · 엔진 12자), 저장, 밖에서 바뀜, 열린 판단 요청, 임시 가정 수, 기록 상태 |
+| `list_projects` · `open_project` | `listProjects({limit, cursor})` · `openProject(name, {create})` | 이름 · 대상 수 · 마지막 작업 — 경로 없음 |
+| `list_cases` · `open_case` · `new_case` | `listCases({includeArchived})` · `openCase(name)` → `{abs, file, caseId}`(abs 는 패널만) · `newCase(name, kind, build(record) → bytes, from?)` | |
+| 닫기 · 끝 | `closeCase()` · `closeProject()` · `dispose()` | 잠금 · 줄 파일 표지를 놓는다(내 것만) |
+| 사람만(다리의 `/api/person/*` — R1-3) | `person.openFolder(abs)` · `person.createProject(root, name)` · `person.takeLock(caseId)` · `person.archive(caseId, archived)` | MCP 문맥(`ai` · `screen`) 안에서 부르면 `PersonOnlyError`(§3.5 층 6). 얼굴은 얼린 객체 |
+
+행위자 문맥 `ActorContext {kind: 'ai'|'screen'|'person'|'program'|'file'|'external', client?, requestId?, tool?, reason?, work?, source?}` — `cleanContext`(모르는 종류는 `ai`, id 꼴 밖은 버림, reason 300자 · 제어 문자 제거), `isMcpContext`, `toActor`.
+
+**실행 사본의 크기(잰 것).** II-2A(6 경간 · 38 구간 · 웹 크리플링 · 랩 진술) `design_purlin` 전체 결과: 정규 JSON **2.67 MB → gzip(6) 224 KB**(20 ms; gzip 9 도 219 KB). 그 안의 하중 해석 232 KB → 57 KB, 구간 하나 71 KB → 7 KB. 좌굴 해석 결과(곡선 · 모드 형상) 920 KB → 358 KB(수가 많아 덜 준다). **저장하는 것**: 결과 통째(정규 JSON, gzip 6, 내용 주소 — 같은 결과는 한 번), 스냅숏(모델 + 검토 입력 + 단면 성질 — 수 KB), 줄의 요약 4 KB 까지. 대상 · 종류마다 마지막 20 실행이면 퍼린 하나에 약 4.5 MB, 해석까지 약 12 MB. 남기는 수 · 정리 기간(20 · 30일 — §2.4.3)은 그대로 두고 정리(`prune`)는 아직 만들지 않았다(R1-2 2 걸음 또는 R4-3 의 대안과 함께).
+
+쓰면서 설계에서 바꾼 것 · 정한 것:
+
+- **「어디에도 쓰지 않고 열린다」의 뜻**: 프로젝트 열기 · 대상 목록 · 상태 · 발행본 열기 · 사본 읽기 · 읽기 전용으로 연 대상은 **어디에도**(프로젝트 · 선언이 가리키는 곳 · 열쇠 자리) 쓰지 않는다. 사람이 그 폴더의 대상을 열면 우리 줄(`discovered` · `opened`)과 잠금만 그 프로젝트의 `.stcfsd/` 와 열쇠 자리에 쓴다 — 믿지 않는 작성자의 대상 id 는 받지 않고 새 id 로(시험이 바이트로 본다).
+- **잠금도 서명한다**(줄 파일의 `.owner` 와 같은 까닭). 내 서명 · 같은 PC · 죽은 pid 의 잠금만 지우고 쥔다. 서명 없는 · 다른 작성자 · 다른 PC · 읽을 수 없는 잠금은 지우지도 바꾸지도 않고 읽기 전용(사람이 `person.takeLock`). 설계 §2.4.11 의 「같은 PC 에서 그 pid 가 없으면 지운다」 를 「내가 서명한 것만」 으로 좁혔다 — 심은 잠금을 지우는 것도 쓰기다.
+- **프로젝트 안의 `.csd` 가운데 `02_검토대상/` 의 것만 대상이다.** 그 밖(`03_계산서/` 등)의 `.csd` 는 읽기 전용 · 기록 없음(§2.5 는 「프로젝트 안의 `.csd` → 등록 안 됐으면 discovered」).
+- **`external`** 은 마지막 저장만이 아니라 **마지막으로 알려진 바이트**(저장 · 열기 · external 가운데 늦은 것)와 다를 때 — 저장하지 않고 두 번 연 사이에 밖에서 바뀐 것도 잡는다.
+- **`saved` 줄의 행위자는 `program`**(행위자 표 §2.6 그대로). 누가 저장했는가는 변경 줄(R2)의 몫.
+- **`screen` 문맥은 줄에서 `person`.** §2.2 의 「screen 은 쓰지 않는다」 는 읽기 · 보기 보고에 대한 것 — 새 화면의 단추로 돌린 실행은 사람의 행동이다. 2 걸음에서 다리가 그 머리를 확인한다(§3.1).
+- **실행 줄은 쓸 수 있는 대상이 열려 있을 때만**(`caseId` 가 늘 있다). 프로젝트만 열고 대상이 없는 동안의 결과는 기록하지 않는다.
+- **결과 상태에 `differs`** — 지금 결과는 있지만 기록된 마지막 실행의 지문과 다르다(예: 저장 파일에서 되살린 결과 · 기록 밖에서 만든 결과). 설계의 넷(일치 · 낡음 · 없음 · 다른 엔진)에 더했다.
+- 색인은 **저장할 때만** 쓴다. 목록은 색인의 `.csd` 해시가 맞지 않으면 `.csd` 에서 다시 지어 보이기만 한다(목록은 쓰지 않는다).
+- 사본 이름 = 값의 정규 JSON 바이트의 sha256(지문 `resultFp` 와 다르다 — 지문은 이름공간 · 시각 키를 뺀다). 읽기는 이름의 해시 · 풀린 크기(64 MB — gunzip 의 `maxOutputLength`) · 정규 글을 대조한다.
+- 작성자 소개(`.stcfsd/writers/<w>.json`)는 그 프로젝트에 첫 줄을 쓸 때 `wx` 로.
+- `listProjects` 의 「마지막 작업」 = 기록 폴더의 가장 늦은 파일 시각(접지 않는다 — 프로젝트가 많아도 싸게).
+- 보호 폴더(`protectedRoots` — 호스트의 `_projectPathError` 와 같은 목록을 넘긴다) 안의 프로젝트는 목록에 없고 열지 않으며, 그 안의 `.csd` 는 읽기 전용 · 기록 없음.
+
+정하지 못한 것(2 걸음 · 오케스트레이터):
+
+- `get_case_status` 의 「저장 안 한 변경」 · 「마지막 보고 이후 변경 수」(R2) · 「확인 n/N」(R4)은 데스크에 없다 — 패널 · 뒤 단계가 더한다.
+- `openProject` 는 저장 안 한 변경을 묻지 않는다(§3.3 의 `discard_unsaved`) — 패널이 먼저 본다.
+- 「다시 잇기」(`relink`)는 아직 없다(후보 번호 — R1-3).
+- 작성자 이름(`writerName`): 검토자 이름(`%APPDATA%\StCFSD\reviewer.json`)을 호스트가 읽어 넘길지, OS 사용자 이름인지.

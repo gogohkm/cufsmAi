@@ -22,7 +22,7 @@ function keyDirState(dir) {
   const before = keyDirState(realKeyDir);
   const tmpBefore = new Set(fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('stcfsd-rec-')));
   let pass = 0, total = 0, skipped = 0;
-  for (const name of ['records_core', 'records_log', 'records_changes', 'records_work', 'records_v7']) {
+  for (const name of ['records_core', 'records_log', 'records_changes', 'records_work', 'records_v7', 'records_desk']) {
     const r = await require(path.join(__dirname, name + '.js')).run();
     pass += r.pass; total += r.total; skipped += r.skipped;
   }
