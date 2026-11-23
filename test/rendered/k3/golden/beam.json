@@ -1219,11 +1219,11 @@
   {
    "id": "beam.mcp",
    "expect": "pin",
-   "reason": "Renderer stop: MCP reply sizes follow the Korean texts above.",
+   "reason": "Wording stop (b582779): validate_design carries text_note_code next to its English text_note and generate_report carries notices_note_code next to notices_note (the screen shows the host's Korean sentence for that code) — each reply grows by that one field (46 / 47 bytes); nothing else changes.",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 3099,
+     "bytes": 3145,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1234,6 +1234,7 @@
       "pass_notes",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "summary",
@@ -1243,7 +1244,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 3099,
+     "bytes": 3145,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1254,6 +1255,7 @@
       "pass_notes",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "summary",
@@ -1263,7 +1265,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 10911,
+     "bytes": 10957,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1272,6 +1274,7 @@
       "items",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "full",
@@ -1281,7 +1284,7 @@
     },
     "report.summary": {
      "isError": false,
-     "bytes": 1783,
+     "bytes": 1830,
      "keys": [
       "case_rev",
       "checks",
@@ -1293,6 +1296,7 @@
       "note",
       "notices",
       "notices_note",
+      "notices_note_code",
       "pages",
       "sections",
       "units",
@@ -1305,7 +1309,7 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 1693,
+     "bytes": 1740,
      "keys": [
       "case_rev",
       "checks",
@@ -1317,6 +1321,7 @@
       "note",
       "notices",
       "notices_note",
+      "notices_note_code",
       "pages",
       "sections",
       "units",
@@ -1329,7 +1334,7 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 36170,
+     "bytes": 36217,
      "keys": [
       "case_rev",
       "checks",
@@ -1341,6 +1346,7 @@
       "note",
       "notices",
       "notices_note",
+      "notices_note_code",
       "pages",
       "sections",
       "units",
@@ -1390,6 +1396,14 @@
      "from": {
       "expect": "pin",
       "reason": "K4b: MCP reply sizes follow the Korean notice texts and the report changes above."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "wording-b582779",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: MCP reply sizes follow the Korean texts above."
      },
      "date": "2026-11-24"
     }

@@ -30,6 +30,9 @@ import { printHtmlToPdf, REPORT_CSP, withCsp } from '../case/pdfPrint';
 import { makeSeal, sealParts, verifySeal } from '../case/resultSeal';
 // 경로 마디의 규칙 하나(기록 갈래와 같은 것 — 장치 이름 · 숨김 · 금지 글자 · 글 방향 글자 · 끝의 점 / 공백)
 import { segmentError } from '../records/names';
+import { localDate, localDateTime } from '../records/localTime';
+/** 지금 파일이 바뀐 사건(같은 프로세스의 다리만 — 경로가 든다) */
+export interface CaseFileEvent { event: 'opened' | 'saved' | 'closed'; path: string | null; by: 'person' | 'ai'; at: string }
 import { checkFp, checkKey, contentFp, docFp, groupFp, normalizeEngineId, resultFp as recResultFp } from '../records/fp';
 import { RecordsDesk, PersonFace } from '../records/desk';
 import { buildChange, ChangeBatcher, ChangeBody, ChangeContext } from '../records/changes';
@@ -787,11 +790,11 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._recordView(message.data);
                 break;
 
-            case 'saveProject':
+            case 'saveProject': case 'saveProjectAs':
                 // K2-3: 입력은 호스트의 검토 상태에 있다 — 화면에 묻지 않는다. 화면은 단추를 누를 때 밀린 칸 변경을 먼저 보낸다(caseEdit).
                 // K3-8: 옛 왕복(화면의 collectDesignData 회신 · 호스트의 designDataCollected)은 지웠다.
                 try {
-                    await this._saveProject();
+                    await this._saveProject(message.command === 'saveProjectAs');
                 } catch (error: any) {
                     vscode.window.showErrorMessage(`프로젝트를 저장하지 못했습니다: ${error.message || error}`);
                 }
@@ -3661,7 +3664,8 @@ export class StcfsdPanel implements McpPanelInterface {
         const qs = d.workItems().filter((w) => (w.caseId === null || w.caseId === caseId) && w.kind === 'question' && questionBlocksIssue(w, this._personConfirmedSeq('work', w.item)));
         if (qs.length) { blockers.push({ code: 'open-questions', count: qs.length, detail: qs.slice(0, 5).map((w) => w.item).join(', ') }); }
         const rc = this._reviewCounts(caseId, results);
-        if (rc.total === 0 || rc.reviewed < rc.total || rc.review_again > 0) { blockers.push({ code: 'incomplete-reviews', count: rc.total - rc.reviewed, detail: rc.total === 0 && results.has('member_design') ? 'the design result has no check lines to review — nothing can be signed off' : `reviewed ${rc.reviewed}/${rc.total}, review again ${rc.review_again}` }); }
+        if (rc.total === 0 || rc.reviewed < rc.total || rc.review_again > 0) { blockers.push({ code: 'incomplete-reviews', count: rc.total - rc.reviewed, detail: rc.total === 0 && results.has('member_design') ? 'the design result has no check lines to review — nothing can be signed off' : `reviewed ${rc.reviewed}/${rc.total}, review again ${rc.review_again}`,
+            detail_ko: rc.total === 0 && results.has('member_design') ? '설계 결과에 확인할 검토 항목이 없습니다' : `확인 ${rc.reviewed}/${rc.total} · 다시 확인 ${rc.review_again}` }); }
         const asm = d.assumptionItems().filter((a) => (a.caseId === null || a.caseId === caseId) && blocksIssue(a, this._personConfirmedSeq('assumption', a.item)));
         if (asm.length) { blockers.push({ code: 'provisional-assumptions', count: asm.length, detail: asm.slice(0, 8).map((a) => a.item).join(', ') }); }
         if (this._caseKeeper.isDirty(this._currentModelSignature())) { blockers.push({ code: 'unsaved-changes' }); }
@@ -3671,7 +3675,7 @@ export class StcfsdPanel implements McpPanelInterface {
         if (!draft) { blockers.push({ code: 'no-draft', detail: 'make a draft of the calculation report first (generate_report / 초안 만들기)' }); }
         else {
             const why = draftStaleness(draft, basis);
-            if (why.length) { blockers.push({ code: 'stale-draft', detail: `${draft.item} differs from now in ${why.join(', ')}` }); }
+            if (why.length) { blockers.push({ code: 'stale-draft', detail: `${draft.item} differs from now in ${why.join(', ')}`, detail_ko: `${draft.item} 이(가) 지금과 다릅니다 — ${why.map((w) => NOTICES.staleWhyKo(w)).join(' · ')}` }); }
         }
         const h = cs.records;
         const damage = h.broken + h.chainBreaks + h.shrunk;
@@ -3683,7 +3687,9 @@ export class StcfsdPanel implements McpPanelInterface {
         const changedSrc = [...states].filter(([, s]) => s !== 'same').map(([id, s]) => `${id} ${s}`);
         if (changedSrc.length) { warnings.push({ code: 'changed-sources', count: changedSrc.length, detail: changedSrc.join(', ') }); }
         const codes = new Set(blockers.map((b) => b.code));
-        return { blockers, warnings, passed: all.filter((c) => !codes.has(c)), draft, basis };
+        // 묶음: 계산서 html · pdf, 좌굴 해석이 지금 것이면 그 보고서, 검증표(늘) — .csd 사본 · 목록은 데스크가 더한다
+        const bundle = ['html', 'pdf', ...(this._isAnalysisCurrent() ? ['buckling-html', 'buckling-pdf'] : []), 'validation-html', 'validation-pdf'];
+        return { blockers, warnings, passed: all.filter((c) => !codes.has(c)), draft, basis, bundle };
     }
     /** 막는 것 · 경고 한 줄에 그 code 의 영어 · 한국어 문장(호스트 알림 'host.issue.<code>') */
     private static _issueText<T extends { code: string }>(x: T): T & { text?: string; text_ko?: string } {
@@ -3692,22 +3698,52 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /** D14: 초안의 ReportDoc 을 도장만 바꿔 다시 그린 최종본 — HTML(인쇄 틀) · PDF(닫힌 인쇄 길) */
-    private async _issueRender(input: { doc: unknown; kind: string; stamp: Record<string, unknown>; baseName: string }): Promise<Array<{ name: string; role: string; bytes: Buffer }>> {
+    private async _issueRender(input: { doc: unknown; kind: string; stamp: Record<string, unknown>; roles: string[] }): Promise<Array<{ role: string; bytes: Buffer }>> {
         const doc: any = JSON.parse(JSON.stringify(input.doc));
         if (!doc || doc.schema !== 'stcfsd-report/1') { throw new Error('the draft copy is not a report document'); }
         doc.meta = { ...(doc.meta || {}), stamp: input.stamp };
-        const inner = REVIEW.renderReportDoc(doc);
-        const page = input.kind === 'buckling' ? this._buildPrintableBucklingHtmlFrom(inner) : REVIEW.printableReportHtml(inner);
-        const html = Buffer.from(HTML_MARKER + '\n' + page, 'utf-8');
-        const tmp = path.join(os.tmpdir(), `stcfsd-issue-${crypto.randomBytes(8).toString('hex')}.pdf`);
-        let pdf: Buffer;
-        try {
-            const printed = await this._printHtmlToPdf(page, tmp);
-            if (!printed) { throw new Error('no PDF printer (Edge / Chrome) — not issued'); }
-            fs.appendFileSync(tmp, PDF_MARKER);
-            pdf = fs.readFileSync(tmp);
-        } finally { try { fs.unlinkSync(tmp); } catch { /* 없음 */ } }
-        return [{ name: `${input.baseName}.html`, role: 'html', bytes: html }, { name: `${input.baseName}.pdf`, role: 'pdf', bytes: pdf }];
+        const units: 'SI' | 'US' = doc.meta?.units === 'SI' ? 'SI' : 'US';
+        const out: Array<{ role: string; bytes: Buffer }> = [];
+        const want = new Set(input.roles);
+        const one = async (d: any, buckling: boolean, prefix: string) => {
+            const inner = REVIEW.renderReportDoc(d);
+            const page = buckling ? this._buildPrintableBucklingHtmlFrom(inner) : REVIEW.printableReportHtml(inner);
+            if (want.has(prefix + 'html')) { out.push({ role: prefix + 'html', bytes: Buffer.from(HTML_MARKER + '\n' + page, 'utf-8') }); }
+            if (!want.has(prefix + 'pdf')) { return; }
+            const tmp = path.join(os.tmpdir(), `stcfsd-issue-${crypto.randomBytes(8).toString('hex')}.pdf`);
+            try {
+                const printed = await this._printHtmlToPdf(page, tmp);
+                if (!printed) { throw new Error('no PDF printer (Edge / Chrome) — not issued'); }
+                fs.appendFileSync(tmp, PDF_MARKER);
+                out.push({ role: prefix + 'pdf', bytes: fs.readFileSync(tmp) });
+            } finally { try { fs.unlinkSync(tmp); } catch { /* 없음 */ } }
+        };
+        await one(doc, input.kind === 'buckling', '');
+        // 좌굴 해석 보고서 · 검증표 — 지금 상태로(발행 점검의 지문이 미리보기의 상태와 같음을 이미 확인했다), 같은 도장
+        if (want.has('buckling-html') || want.has('buckling-pdf')) {
+            if (!this._isAnalysisCurrent()) { throw new Error('the buckling analysis is not current — not issued'); }
+            await one(this._bucklingDoc({ headless: true }, units, { stamp: input.stamp }), true, 'buckling-');
+        }
+        if (want.has('validation-html') || want.has('validation-pdf')) { await one(this._validationDoc(units, input.stamp), false, 'validation-'); }
+        return out;
+    }
+
+    /** 검증표(설계 점검 — validate_design 과 같은 항목)의 ReportDoc */
+    private _validationDoc(units: 'SI' | 'US', stamp?: Record<string, unknown>): any {
+        const items = this._validationItems(this._reviewEnv(units));
+        const ST: Record<string, string> = { pass: '통과', warn: '주의', fail: '실패' };
+        const byCat = new Map<string, any[]>();
+        for (const c of items) { const k = String(c.category ?? ''); if (!byCat.has(k)) { byCat.set(k, []); } byCat.get(k)!.push(c); }
+        const blocks: any[] = [{ kind: 'para', text: `검증 항목 ${items.length} — 통과 ${items.filter((c) => c.status === 'pass').length} · 주의 ${items.filter((c) => c.status === 'warn').length} · 실패 ${items.filter((c) => c.status === 'fail').length}` }];
+        for (const [cat, list] of byCat) {
+            blocks.push({ kind: 'heading', text: cat || '—' });
+            blocks.push({ kind: 'table', head: ['판정', '검토 항목', '값', '기준', '주석'],
+                rows: list.map((c) => [ST[c.status] ?? String(c.status ?? ''), String(c.item ?? ''), String(c.value ?? ''), String(c.criterion ?? ''), String(c.note ?? '')]) });
+        }
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const d = new Date();
+        return { schema: 'stcfsd-report/1', meta: { title: 'StCFSD — 설계 검증표', date: `${localDate(d)} ${pad(d.getHours())}:${pad(d.getMinutes())}`, spec: 'AISI S100-16', units,
+            ...(stamp ? { stamp } : {}) }, verdict: null, sections: [{ id: 'validation', title: '설계 검증', blocks }] };
     }
 
     /** 초안 파일 하나 — 03_계산서 안의 새 이름(덮어쓰지 않는다: 있으면 -2, -3 …), 임시 이름에 쓰고 배타 복사 */
@@ -3740,7 +3776,7 @@ export class StcfsdPanel implements McpPanelInterface {
             const s = states.get(`check:${caseId}:${key}`);
             const loc = c.location && typeof c.location === 'object' ? Object.values(c.location as any).filter((v) => typeof v === 'string').join(' · ') : '';
             rows.push([c.item.name_ko || c.id, loc || '—', VERD[c.item.verdict] ?? String(c.item.verdict ?? ''), typeof c.item.ratio === 'number' ? c.item.ratio.toFixed(3) : '—',
-                !s ? '미확인' : s.validity.state === 'valid' ? '확인' : '다시 확인', s ? s.mark.reviewer.name || '—' : '—', s ? s.mark.at.slice(0, 10) : '—']);
+                !s ? '미확인' : s.validity.state === 'valid' ? '확인' : '다시 확인', s ? s.mark.reviewer.name || '—' : '—', s ? localDate(s.mark.at) : '—']);
         }
         const rc = this._reviewCounts(caseId, results);
         const blocks: any[] = [{ kind: 'para', text: `확인 ${rc.reviewed}/${rc.total} · 다시 확인 ${rc.review_again}` }];
@@ -3767,10 +3803,10 @@ export class StcfsdPanel implements McpPanelInterface {
                     const basis = this._documentBasis();
                     const drafts = docs.drafts.filter((x) => x.caseId === caseId).map((x) => {
                         const why = draftStaleness(x, basis);
-                        return { item: x.item, kind: x.kind, at: x.at, by: x.actor, files: x.files.map((f) => f.path), not_checked: x.stamp.notChecked,
-                            state: why.length ? 'stale' : 'current', ...(why.length ? { stale_because: why } : {}) };
+                        return { item: x.item, kind: x.kind, at: x.at, at_local: localDateTime(x.at), by: x.actor, files: x.files.map((f) => f.path), not_checked: x.stamp.notChecked,
+                            state: why.length ? 'stale' : 'current', ...(why.length ? { stale_because: why, stale_because_ko: why.map((w) => NOTICES.staleWhyKo(w)) } : {}) };
                     });
-                    const issues = d.issuesOf(caseId).map((x) => ({ item: x.item, revision: x.revision, at: x.at, issued_by: x.issuedBy.name, from: x.from, folder: x.folder,
+                    const issues = d.issuesOf(caseId).map((x) => ({ item: x.item, revision: x.revision, at: x.at, at_local: localDateTime(x.at), date: localDate(x.at), issued_by: x.issuedBy.name, from: x.from, folder: x.folder,
                         state: x.check_now.state, state_ko: x.check_now.state === 'same' ? '그대로' : x.check_now.state === 'edited' ? '고쳐짐' : '없어짐',
                         ...(x.check_now.state !== 'same' ? { files: x.check_now.files.filter((f) => f.state !== 'same'), added: x.check_now.added } : {}) }));
                     const failed = docs.failed.filter((x) => x.caseId === caseId && !x.movedTo).map((x) => ({ revision: x.revision, label: x.label, folder: x.folder, at: x.at, reason: x.reason,
@@ -3785,7 +3821,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 case 'check': {
                     const c = d.issueCheckData();
                     return { case: c.caseName, revision: c.label, folder: c.folder, blocked: c.blockers.length > 0, blockers: c.blockers, warnings: c.warnings, passed: c.passed,
-                        draft: c.draft, files: c.files, fingerprint: c.fingerprint,
+                        passed_labels: c.passed_labels, draft: c.draft, files: c.files, bundle: c.bundle, fingerprint: c.fingerprint,
                         note: 'The same check the person\'s issue preview runs. Issuing is the person\'s action in StCFSD (the preview shows these; the AI cannot issue).' };
                 }
                 case 'draft': {
@@ -4578,7 +4614,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     if (before.case && !d.status().case) {
                         detached = { case: before.case.name, unsaved_changes: this._caseKeeper.isDirty(this._currentModelSignature()),
                             note: 'The case of the previous project stays on the screen as an untitled document (not linked to its file any more, nothing discarded) — open_case opens a case of this project.' };
-                        this._casePath = null; this._caseFileOrigin = null; this._recordsRO = null;
+                        this._setCaseFile(null, null, 'closed'); this._recordsRO = null;
                         this._postCaseDirty();
                     }
                     const list = d.listCases();
@@ -4599,6 +4635,8 @@ export class StcfsdPanel implements McpPanelInterface {
                         // R2-3: 잠근 쪽(이 창의 지금 대상이 아니면) — 이름 · 호스트 · 때
                         ...(c.lock ? { locked_by: { name: c.lock.name, host: c.lock.host, since: c.lock.since, this_pc_writer: c.lock.mine } } : {}),
                         ...((() => { const qs = openQs.filter((w) => w.caseId === c.caseId); return qs.length ? { open_questions: { count: qs.length, first: { item: qs[0].item, title: [...qs[0].title].slice(0, 120).join('') } } } : {}; })()),
+                        // 시작 화면 「발행 R0」: 대상마다 마지막 발행(차수 · 지역 날짜 · 그대로 · 고쳐짐 · 없어짐)
+                        ...((() => { const li = d.lastIssueOf(c.caseId); return li ? { last_issue: { label: li.label, revision: li.revision, date: li.date, at: li.at, state: li.state } } : {}; })()),
                         // R4-1: 확인 n/N(열린 대상은 지금 결과, 닫힌 대상은 그 마지막 실행의 사본과 견준 것)
                         ...((() => { const rc = this._reviewCountsOfCase(c.caseId); return rc && rc.total ? { reviews: rc } : {}; })()) })),
                         unregistered: r.unregistered.slice(0, 50).map((u) => ({ name: u.name, maybe_conflict_copy: u.maybeConflictCopy || undefined })),
@@ -5269,6 +5307,23 @@ export class StcfsdPanel implements McpPanelInterface {
      * AI 동작의 시작 · 끝을 듣는다(같은 프로세스의 다리 · 데스크톱 로더). 사건: `{phase: 'start' | 'end', id, tool, action, client, started_at,
      * ended_at?, ms?, ok?}`. 화면에는 같은 것이 패널 메시지 `aiActivity` 로 간다. 엔진은 진행률을 내지 않는다 — 시작과 끝뿐이다.
      */
+    private _caseFileListeners = new Set<(e: CaseFileEvent) => void>();
+    /**
+     * 지금 파일이 바뀔 때(열기 · 저장 · 다른 이름으로 저장 · 놓음)의 사건 — 같은 프로세스의 다리만(경로가 든다 — MCP 답에는 넣지 않는다).
+     * 알림 글을 읽어 지금 파일을 짐작하지 않게: `{event: 'opened' | 'saved' | 'closed', path, by: 'person' | 'ai', at}`.
+     */
+    public onCaseFile(listener: (e: CaseFileEvent) => void): () => void {
+        this._caseFileListeners.add(listener);
+        return () => { this._caseFileListeners.delete(listener); };
+    }
+    /** 지금 파일(경로 — 같은 프로세스만) */
+    public caseFile(): { path: string | null; origin: 'person' | 'ai' | null } { return { path: this._casePath, origin: this._caseFileOrigin }; }
+    private _setCaseFile(p: string | null, origin: 'person' | 'ai' | null, event: CaseFileEvent['event']): void {
+        this._casePath = p; this._caseFileOrigin = origin;
+        const e: CaseFileEvent = { event, path: p, by: isMcpContext(currentActor()) ? 'ai' : 'person', at: new Date().toISOString() };
+        for (const l of [...this._caseFileListeners]) { try { l(e); } catch { /* 듣는 쪽의 오류는 막지 않는다 */ } }
+    }
+
     public onAiActivity(listener: (e: any) => void): () => void {
         this._aiListeners.add(listener);
         return () => { this._aiListeners.delete(listener); };
@@ -6056,8 +6111,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     this._postMessage('restoreDesignInputs', this._caseRestorePayload(mig, hasCase ? data : { model: data }));
                 }
                 this._caseKeeper.markSaved(this._currentModelSignature());
-                this._casePath = options.filepath;
-                this._caseFileOrigin = 'ai';
+                this._setCaseFile(options.filepath, 'ai', 'opened');
                 this._recordsAfterOpen(options.filepath, aiRaw, data, caseWarnings);
                 this._changes.rebase();
                 this._postCaseDirty();
@@ -7133,7 +7187,8 @@ ${inner}
         <button class="tab-btn" data-tab="validation">검증</button>
         <span style="flex:1"></span>
         <button id="btn-file-open" class="btn-file" title="Open .csd file">Open</button>
-        <button id="btn-file-save" class="btn-file" title="Save .csd file">Save</button>
+        <button id="btn-file-save" class="btn-file" title="Save .csd file (in a project case: save the case)">Save</button>
+        <button id="btn-file-saveas" class="btn-file" title="Save as a new .csd file">Save As</button>
     </div>
 
     <!-- 탭 내용 -->
@@ -7968,7 +8023,16 @@ ${inner}
     }
 
     /** 프로젝트 저장 (.csd) */
-    private async _saveProject(): Promise<void> {
+    private async _saveProject(as = false): Promise<void> {
+        const st = this._desk?.status();
+        if (!as && this._casePath && st?.inProject && st.case && !st.case.readOnly) {
+            const origin = this._caseFileOrigin;
+            const saved = await this._writeProjectFile(this._casePath);
+            this._caseFileOrigin = origin;
+            vscode.window.showInformationMessage(`검토 대상을 저장했습니다: ${st.case.name}`);
+            if (saved?.seal_note) { vscode.window.showWarningMessage(saved.seal_note); }
+            return;
+        }
         const uri = await vscode.window.showSaveDialog({
             filters: { 'StCFSD Section Design': ['csd'] },
             saveLabel: 'Save Project',
@@ -8103,7 +8167,7 @@ ${inner}
         fs.renameSync(tmp, fsPath);
         this._recordsAfterSave(fsPath, json);
         if (designData === undefined) { this._recordsRO = null; }
-        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._casePath = fsPath; this._caseFileOrigin = 'person'; this._discarded = null; this._postCaseDirty(); }
+        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._setCaseFile(fsPath, 'person', 'saved'); this._discarded = null; this._postCaseDirty(); }
         if (sealNote) { Object.defineProperty(projectData, 'seal_note', { value: sealNote, enumerable: false }); }
         return projectData;
     }
@@ -8280,9 +8344,8 @@ ${inner}
 
         // K2-3: 파일의 입력 → 호스트의 검토 상태(표의 키만 — 모르는 키는 버리고 알린다, V5b-01 과 같은 태도).
         const mig = migrateProject(projectData);
-        this._casePath = fsPath;
         // 사람이 연 길(대화상자 · 독립 프로그램의 열기) — AI 의 load_project 는 따로
-        this._caseFileOrigin = 'person';
+        this._setCaseFile(fsPath, 'person', 'opened');
         warnings.push(...mig.warnings);
         { const n = StcfsdPanel._loadFyNotice(this._model, mig.state.inputs.fy); if (n) { warnings.push(n); } }
         const fileUnitSystem = projectData.case?.view?.unitSystem ?? projectData.designInputs?.unitSystem;

@@ -1693,11 +1693,11 @@
   {
    "id": "purlin.mcp",
    "expect": "pin",
-   "reason": "Engine 6fa25f7: the ASD lap / member warnings read Mn/Ω (3 more bytes in the purlin report replies: summary 6063 → 6066, SI 5971 → 5974, full 142609 → 142612).",
+   "reason": "Wording stop (b582779): validate_design carries text_note_code next to its English text_note and generate_report carries notices_note_code next to notices_note (the screen shows the host's Korean sentence for that code) — each reply grows by that one field (46 / 47 bytes); nothing else changes.",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 5654,
+     "bytes": 5700,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1708,6 +1708,7 @@
       "pass_notes",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "summary",
@@ -1717,7 +1718,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 5635,
+     "bytes": 5681,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1728,6 +1729,7 @@
       "pass_notes",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "summary",
@@ -1737,7 +1739,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 15303,
+     "bytes": 15349,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1746,6 +1748,7 @@
       "items",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "full",
@@ -1755,7 +1758,7 @@
     },
     "report.summary": {
      "isError": false,
-     "bytes": 6066,
+     "bytes": 6113,
      "keys": [
       "case_rev",
       "checks",
@@ -1767,6 +1770,7 @@
       "note",
       "notices",
       "notices_note",
+      "notices_note_code",
       "pages",
       "sections",
       "units",
@@ -1779,7 +1783,7 @@
     },
     "report.si": {
      "isError": false,
-     "bytes": 5974,
+     "bytes": 6021,
      "keys": [
       "case_rev",
       "checks",
@@ -1791,6 +1795,7 @@
       "note",
       "notices",
       "notices_note",
+      "notices_note_code",
       "pages",
       "sections",
       "units",
@@ -1803,7 +1808,7 @@
     },
     "report.full": {
      "isError": false,
-     "bytes": 142612,
+     "bytes": 142659,
      "keys": [
       "case_rev",
       "checks",
@@ -1815,6 +1820,7 @@
       "note",
       "notices",
       "notices_note",
+      "notices_note_code",
       "pages",
       "sections",
       "units",
@@ -1896,6 +1902,14 @@
      "from": {
       "expect": "pin",
       "reason": "Renderer stop: MCP reply sizes follow the Korean texts above."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "wording-b582779",
+     "from": {
+      "expect": "pin",
+      "reason": "Engine 6fa25f7: the ASD lap / member warnings read Mn/Ω (3 more bytes in the purlin report replies: summary 6063 → 6066, SI 5971 → 5974, full 142609 → 142612)."
      },
      "date": "2026-11-24"
     }

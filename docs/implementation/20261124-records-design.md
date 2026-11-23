@@ -1040,3 +1040,30 @@ R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 �
 **⚔(records_issue_contract)**: 막는 것 열둘이 하나씩 생기고 풀린다. R0 을 낸 뒤 모델을 바꿔 저장해도 R0 의 세 파일이 바이트까지 그대로, 손으로 고치면 「고쳐짐」. 미리보기 뒤의 변경 · 지난 숫자 · 쓴 숫자 → 거절. 목록 파일을 쓸 때 디스크가 찬 것(시험 주입) → R1 이 「실패한 발행」(세지 않음), 다음 시도가 그 폴더를 `R1.failed-1` 로 옮기고 R1 을 낸다. AI 는 발행하지 못한다: `documents` 에 issue 를 실으면 스키마가 거절, 동작 이름 일곱을 진짜 토큰으로 직접 — 오류, 웹뷰 메시지 — 아무것도, 사람 얼굴은 MCP 문맥 안에서 던진다. 진짜 인쇄(보이지 않게)로 R0 · R1 의 PDF.
 
 **엔진의 허용차 표지(663771d, 검토 계약 §16.14)**: 확인의 비교가 기호 · 출처로 짐작하지 않고 표지를 쓴다 — 항목의 `numeric_tolerance.rel_tol`(그 항목의 모든 값), 값의 `numeric.rel_tol`(사람이 준 값이어도 정규 값 비교가 아니라 허용차), DSM 사전의 `numeric_tolerance.fsm_long_wavelength.keys`, 그 밖은 1e-6(0 근처 절대 1e-12). **호스트는 서명곡선 끝에서 읽은 `Fcre` · `Mcre` · `Pcre` 를 엔진에 보내지 않는다**(`requests.ts` 의 설계 요청에 `Fcre` 가 없다 — 엔진의 전체좌굴은 폐형식). `Fcre` 는 AI 가 MCP 도구(`aisi_design_compression` · `flexure` · `combined`)로만 줄 수 있어, 그 셋에 `Fcre_basis: 'fsm_long_wavelength'` 인자를 더했다(엔진으로 그대로).
+
+
+### 10.10 R5-3 이 바란 호스트 쪽 — 발행 묶음 · 지역 날짜 · 거절의 code (2026-11-24)
+
+**발행 묶음(템플릿 08 · T51)** — `04_발행본/<대상>/R<n>/` 에 모두 배타적으로(`wx`), 목록에 해시 · 크기 · 역할, 「그대로 · 고쳐짐 · 없어짐」 대조가 전부를 본다.
+
+| 역할 | 파일 | 무엇 |
+|---|---|---|
+| `html` · `pdf` | `<대상>.calc.R<n>.html · .pdf` | 계산서 — 초안의 ReportDoc 사본을 도장만 바꿔 다시 그린 것(D14). **가정 목록 · 검토 기록 요약은 이 안의 절**(목록의 `roles` 가 그렇게 적는다) |
+| `buckling-html` · `buckling-pdf` | `<대상>.buckling.R<n>.*` | 좌굴 해석 보고서 — 점검 때 좌굴 해석이 지금 것이면(묶음 역할이 점검 지문에 든다) |
+| `validation-html` · `validation-pdf` | `<대상>.validation.R<n>.*` | 검증표 — `validate_design` 과 같은 항목(분류 · 판정 · 값 · 기준 · 주석) |
+| `case-file` | `<대상>.R<n>.csd` | 그 계산의 `.csd` — **디스크의 저장된 바이트 그대로**(다시 직렬화하지 않는다). 점검은 「저장하지 않은 변경 없음」 과 함께 디스크의 파일이 마지막 저장 · 열기의 것(`knownSha`)이기를 요구한다(새 막는 것 `case-file-changed`), 그 해시는 점검 지문에 든다. 열면 읽기 전용 「발행본」(`issued-copy`) — 기록 없음 |
+| `manifest` | `manifest.json` | `stcfsd-issue/1` + `issuedDate`(지역 날짜) · `roles` |
+
+좌굴 보고서 · 검증표는 발행할 때 지금 상태로 그린다 — 미리보기의 지문(내용 지문 · 실행 · 묶음 · `.csd` 해시)이 같음을 이미 확인했으므로 같은 상태다. 점검 지문의 이름공간은 `stcfsd-fp/issue-check/2`.
+
+**날짜**: 사람이 읽는 날짜(발행 도장 · 검토 기록 절의 날짜 · `documents list` 의 `at_local` · `date` · `list_cases.last_issue.date` · 목록의 `issuedDate`)는 이 PC 의 지역 날짜(`records/localTime.ts`). 기록 · 목록의 순간(`at` · `issuedAt`)은 ISO 그대로. 보고서 머리의 날짜는 원래 지역 시각(`review._reportDate`).
+
+**미리보기**: `issuePreview()` 가 `stamp` 와 `stamped_doc`(초안의 ReportDoc 에 발행 도장을 얹은 것 — 화면이 `reportRender` 로 첫 쪽을 그린다), `bundle[{path, role}]`, `passed_labels[{code, text, text_ko}]`.
+
+**거절의 code**: `person.issue` 가 던지는 오류에 `.code` — `host.issue.no-case · no-preview · used · expired · changed · blocked · unknown-issue-folder · copy-missing · unavailable · case-file-changed · failed`. `person.review` 는 `host.review.*`(10.8 뒤에 더함). 모두 notices.js `HOST` 에 한국어 문장 — `notice_render_contract` 가 소스에서 code 를 찾아 문장이 있는지 본다.
+
+**한국어**: 막는 것의 `detail_ko`(stale-draft · incomplete-reviews · unknown-issue-folder · case-file-changed), 초안의 `stale_because_ko`(`NOTICES.staleWhyKo`), 통과한 점검의 이름 `host.issue.pass.<code>`. 파일을 열 때 버린 결과의 장부 줄도 `reason_code` · `reason_ko`(`host.ledger.open_*`).
+
+**그 밖**: `list_cases` 의 대상마다 `last_issue {label, revision, date, at, state}`(해시 대조는 크기 · 시각이 같으면 다시 읽지 않는다). 지금 파일의 사건 `panel.onCaseFile(e)` — `{event: opened | saved | closed, path, by, at}`(같은 프로세스만 — 경로가 든다, MCP 답에는 없다), `panel.caseFile()`. 여섯 탭 화면의 Save 는 프로젝트의 쓸 수 있는 대상이면 그 대상에 저장(`save_case` 와 같은 길), 「Save As」 단추가 따로.
+
+**시험**: `records_issue_contract` — 묶음 여덟 파일이 모두 있고 목록의 해시 · 역할과 맞음, 세 PDF 가 진짜 PDF, `.csd` 사본 = 발행 직전 디스크의 바이트, 세 보고서에 같은 발행 도장과 지역 날짜, 모델을 바꿔 저장해도 여덟 파일이 바이트까지 그대로, 사본을 열면 `issued-copy` · 기록 없음, 거절마다 code. `records_reviews` 가 지역 날짜(Asia/Seoul 의 03:38 → 그 날). K3 의 금본은 프로젝트 흐름을 고정하지 않는다 — 발행 묶음은 이 시험이 지킨다.

@@ -231,6 +231,13 @@ const RESULT = {
   // 화면의 칸 변경 거절 · 발행 점검의 code 마다 등록표의 한국어 문장
   const codes = new Set([...src.matchAll(/reason_code: '(host\.[a-z_.]+)'/g)].map((m) => m[1]));
   for (const m of src.matchAll(/code: '([a-z-]+)'/g)) { if (/^(no-|stale-|not-evaluated|ng$|open-q|incomplete|provisional|unsaved|damaged|read-only|unknown-issue|report-notices|changed-sources|edited-previous|same-as)/.test(m[1])) { codes.add('host.issue.' + m[1]); } }
+  // 사람만 하는 일의 거절(IssueRefusedError · ReviewRefusedError)과 호스트가 단 code
+  for (const m of src.matchAll(/RefusedError\([^\n]*?'(host\.[a-z_.-]+)'/g)) { codes.add(m[1]); }
+  for (const m of src.matchAll(/code: '(host\.review\.[a-z_]+)'/g)) { codes.add(m[1]); }
+  for (const m of src.matchAll(/code: '(case-file-changed)'/g)) { codes.add('host.issue.' + m[1]); }
+  for (const c of ['no-design-result', 'stale-results', 'not-evaluated', 'ng', 'open-questions', 'incomplete-reviews', 'provisional-assumptions', 'unsaved-changes', 'no-draft', 'stale-draft', 'damaged-records']) { codes.add('host.issue.pass.' + c); }
+  assert(['host.issue.expired', 'host.issue.used', 'host.issue.changed', 'host.issue.failed', 'host.review.shown_differs', 'host.issue.case-file-changed'].every((c) => codes.has(c)), 'the refusal codes are found in the source: ' + [...codes].join(' '));
+  assert.strictEqual(N.staleWhyKo('results (member_design)'), '결과(부재 설계)');
   const missing = [...codes].filter((c) => !(N.HOST[c] && N.HOST[c].template_ko));
   assert(codes.size >= 20 && !missing.length, `every host code has a Korean sentence (${codes.size}): ${JSON.stringify(missing)}`);
   // 기록의 사건 이름: 기록 모듈이 쓰는 사건마다 한국어

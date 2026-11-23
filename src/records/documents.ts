@@ -52,7 +52,7 @@ function files(raw: unknown, top: string): DocFile[] | null {
     const out: DocFile[] = [];
     for (const f of raw) {
         if (!f || !relOk(f.path, top) || typeof f.sha256 !== 'string' || !SHA_RE.test(f.sha256) || !Number.isSafeInteger(f.size) || f.size < 0) { return null; }
-        out.push({ path: f.path, sha256: f.sha256, size: f.size, ...(typeof f.role === 'string' && /^[a-z]{1,20}$/.test(f.role) ? { role: f.role } : {}) });
+        out.push({ path: f.path, sha256: f.sha256, size: f.size, ...(typeof f.role === 'string' && /^[a-z][a-z-]{0,29}$/.test(f.role) ? { role: f.role } : {}) });
     }
     return out;
 }
@@ -134,14 +134,17 @@ export function draftStaleness(d: Draft, now: { contentFp: string; engineId: str
 }
 
 /** 발행 폴더를 지금 파일과 견준다 — 목록 파일 · 파일마다 그대로 · 고쳐짐 · 없어짐, 폴더에 더해진 파일 */
-export function checkIssue(rootReal: string, issue: Issue): { state: 'same' | 'edited' | 'missing'; files: Array<{ path: string; state: 'same' | 'edited' | 'missing' }>; added: string[] } {
+export function checkIssue(rootReal: string, issue: Issue, cache?: Map<string, { size: number; mtimeMs: number; sha256: string }>): { state: 'same' | 'edited' | 'missing'; files: Array<{ path: string; state: 'same' | 'edited' | 'missing' }>; added: string[] } {
     const out: Array<{ path: string; state: 'same' | 'edited' | 'missing' }> = [];
     const look = (rel: string, sha: string) => {
         const abs = path.join(rootReal, ...rel.split('/'));
         try {
             const st = fs.lstatSync(abs);
             if (!st.isFile() || st.isSymbolicLink()) { return 'edited' as const; }
-            return hashFile(abs, ISSUE_FILE_MAX).sha256 === sha ? 'same' as const : 'edited' as const;
+            const hit = cache?.get(abs);
+            const got = hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs ? hit.sha256 : hashFile(abs, ISSUE_FILE_MAX).sha256;
+            cache?.set(abs, { size: st.size, mtimeMs: st.mtimeMs, sha256: got });
+            return got === sha ? 'same' as const : 'edited' as const;
         } catch { return 'missing' as const; }
     };
     out.push({ path: `${issue.folder}/manifest.json`, state: look(`${issue.folder}/manifest.json`, issue.manifest.sha256) });

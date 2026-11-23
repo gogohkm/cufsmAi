@@ -169,6 +169,8 @@
 
 **R5-3 화면(데스크톱 담당)이 따를 것:** 문서 탭은 `documents list` 를 그린다(초안 「일치 · 낡음」 과 까닭, 발행 줄 「R0 · 날짜 · 발행자 · 그대로 / 고쳐짐」 — 고쳐짐이면 다른 파일 목록). 「R<n> 발행」 단추는 사람의 길(`/api/person/issue/preview` → `issuePreview`, `/api/person/issue` → `issue`)로만, 미리보기 창에 막는 것(한국어 이름 — code 로 가른다) · 경고 · 통과 · 묶일 파일 · 차수 · 도장 찍힌 최종본의 첫 쪽(초안의 ReportDoc 을 그리기에 `meta.stamp = {kind: 'issued', label, reviewer, date}` 로 — 미리보기 그림) · 확인의 뜻(D15)을 보이고, 막는 것이 있으면 단추를 끈다. 2 분이 지나면 미리보기를 다시 연다. 「초안으로 내보내기」 는 막는 것과 무관하게(사람의 저장 대화상자 — R1 의 export 길). 발행본은 읽기 전용으로 연다(이미 그렇다). 발행 · 확인 단추를 MCP 중계로 보내지 않는다.
 
+**R5-3 뒤(2026-11-24, 기록 설계 §10.10):** `issuePreview` 에 `stamp` · `stamped_doc`(그 첫 쪽을 그린다) · `bundle[{path, role}]` · `passed_labels`, 막는 것의 `detail_ko`; `person.issue` · `person.review` 의 오류에 `.code`(`host.issue.*` · `host.review.*` — 한국어는 `StcfsdNotices.HOST[code].template_ko`); `documents list` 의 `at_local` · `date` · `stale_because_ko`; `list_cases` 의 `last_issue`; 지금 파일은 `panel.onCaseFile` · `panel.caseFile()`(알림 글을 읽지 않는다).
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).

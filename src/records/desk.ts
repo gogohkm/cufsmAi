@@ -23,6 +23,7 @@ import { sha256Hex } from './canonical';
 import { CaseEntry, CASES_SPEC, caseFileOk, foldCases, lastKnown } from './cases';
 import { readIndex, summarizeCsd, writeIndex, CSD_MAX_BYTES } from './caseIndex';
 import { ActorContext, isMcpContext, toActor } from './context';
+import { localDate } from './localTime';
 import { contentFp, normalizeEngineId, requestFp, resultFp } from './fp';
 import { assertNoLinks, assertSingleLink, mkdirInside, projectRelative, readBounded, realRoot, RecordsPathError, writeExclusive } from './fsx';
 import { acquireLock, LockInfo, LockResult, readLock, releaseLock, takeOver } from './locks';
@@ -85,7 +86,7 @@ export interface DeskEnv {
     /** R5: 발행 전 점검(호스트가 — 막는 것 · 경고 · 통과, 발행할 초안, 지금의 근거). 발행 미리보기 · 발행 · documents check 가 같이 쓴다 */
     issueCheck?(): IssueCheckInput | { error: string };
     /** R5-2: 초안의 ReportDoc 을 도장만 바꿔 다시 그린 최종본(HTML · PDF 바이트) — 호스트의 그리기 · 인쇄(D14) */
-    issueRender?(input: { doc: unknown; kind: DocKind; stamp: Record<string, unknown>; baseName: string }): Promise<Array<{ name: string; role: string; bytes: Buffer }>>;
+    issueRender?(input: { doc: unknown; kind: DocKind; stamp: Record<string, unknown>; roles: string[] }): Promise<Array<{ role: string; bytes: Buffer }>>;
     /** 막는 것 · 경고 한 줄에 code 의 문장(호스트의 등록표) — 미리보기 · 점검이 같은 글 */
     issueText?(x: { code: string; count?: number; detail?: string }): { code: string; count?: number; detail?: string; text?: string; text_ko?: string };
     /** 시험만(STCFSD_TEST_MODE=1): 발행의 한 걸음에서 던진다(디스크가 찬 것처럼) */
@@ -94,17 +95,34 @@ export interface DeskEnv {
 
 /** 호스트가 주는 발행 전 점검(D4) */
 export interface IssueCheckInput {
-    blockers: Array<{ code: string; count?: number; detail?: string }>;
-    warnings: Array<{ code: string; count?: number; detail?: string }>;
+    blockers: Array<{ code: string; count?: number; detail?: string; detail_ko?: string }>;
+    warnings: Array<{ code: string; count?: number; detail?: string; detail_ko?: string }>;
     passed: string[];
     draft: Draft | null;
     basis: { contentFp: string; engineId: string | null; runs: Record<string, string>; registerFp: string };
+    /** 호스트가 그릴 묶음(역할) — 계산서 html · pdf 와 함께 좌굴 해석 보고서 · 검증표(있는 것만). .csd 사본 · 목록은 데스크가 */
+    bundle?: string[];
 }
 export interface IssuePreview {
     caseId: string; caseName: string; revision: number; label: string; folder: string;
     blockers: IssueCheckInput['blockers']; warnings: IssueCheckInput['warnings']; passed: string[];
+    /** 통과한 점검의 이름(code · 영어 · 한국어) */
+    passed_labels?: Array<{ code: string; text?: string; text_ko?: string }>;
     draft: { item: string; kind: string; files: string[] } | null; files: string[]; fingerprint: string;
+    /** 묶일 파일과 그 역할(계산서의 가정 목록 · 검토 기록 요약은 계산서의 절) */
+    bundle?: Array<{ path: string; role: string }>;
 }
+/** 발행 · 미리보기를 받지 않은 까닭 — code(`host.issue.*`, 화면은 그 code 의 한국어) */
+export class IssueRefusedError extends Error {
+    constructor(message: string, readonly code: string, options?: { cause?: unknown }) { super(message, options); }
+}
+/** 묶음의 역할 → 파일 이름의 꼬리(대상 이름 · 차수 뒤) */
+const BUNDLE_NAME: Record<string, (kind: string, label: string) => string> = {
+    html: (k, l) => `.${k}.${l}.html`, pdf: (k, l) => `.${k}.${l}.pdf`,
+    'buckling-html': (_k, l) => `.buckling.${l}.html`, 'buckling-pdf': (_k, l) => `.buckling.${l}.pdf`,
+    'validation-html': (_k, l) => `.validation.${l}.html`, 'validation-pdf': (_k, l) => `.validation.${l}.pdf`,
+    'case-file': (_k, l) => `.${l}.csd`,
+};
 
 export const CSD_HASH_MAX_BYTES = 256 * 1024 * 1024;
 export const LIST_LIMIT = { default: 20, max: 100 } as const;
@@ -210,7 +228,7 @@ export interface PersonFace {
     /** R4-3: 사람의 대안 — 지금 상태를 대안으로 두기(keep) · 이름 바꾸기 · 숨기기 · 되살리기 */
     alternative(req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }): { item: string; event: string };
     /** R5-2: 발행 미리보기 — 지문 · 일회용 숫자(2 분) · 막는 것 · 경고 · 묶일 파일 · 차수 */
-    issuePreview(): IssuePreview & { nonce: string; expiresAt: string };
+    issuePreview(): IssuePreview & { nonce: string; expiresAt: string; stamp: Record<string, unknown>; stamped_doc: unknown | null };
     /** R5-2: 발행 — 미리보기의 지문과 일회용 숫자로(그 사이 무엇이 바뀌면 거절) */
     issue(req: { fingerprint: string; nonce: string }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }>;
 }
@@ -1125,7 +1143,14 @@ export class RecordsDesk {
         const p = this.proj;
         if (!p) { return []; }
         const id = caseId ?? this.cur?.caseId;
-        return this.documents().issues.filter((x) => x.caseId === id).map((x) => ({ ...x, check_now: checkIssue(p.dir, x) }));
+        return this.documents().issues.filter((x) => x.caseId === id).map((x) => ({ ...x, check_now: checkIssue(p.dir, x, this.hashCache) }));
+    }
+    private hashCache = new Map<string, { size: number; mtimeMs: number; sha256: string }>();
+    /** 대상의 마지막 발행(차수 · 날짜(지역) · 상태) — 시작 화면의 「발행 R0」 */
+    lastIssueOf(caseId: string): { label: string; revision: number; at: string; date: string; state: 'same' | 'edited' | 'missing' } | null {
+        const all = this.issuesOf(caseId);
+        const l = all[all.length - 1];
+        return l ? { label: l.item, revision: l.revision, at: l.at, date: localDate(l.at), state: l.check_now.state } : null;
     }
 
     /** 발행 전 점검의 몸(미리보기 · 발행 · documents check 가 같은 것) */
@@ -1143,7 +1168,13 @@ export class RecordsDesk {
         const abs = path.join(p.dir, ...folder.split('/'));
         if (c.readOnly || p.readOnly) { blockers.push({ code: 'read-only', detail: String(c.readOnlyReason ?? 'project') }); }
         // 기록에 없는 R<n> 폴더 — 다시 쓰지 않고 막는다(실패한 발행으로 적힌 폴더는 발행할 때 옆으로 옮긴다)
-        if (fs.existsSync(abs) && !this.failedFolderPending(folder)) { blockers.push({ code: 'unknown-issue-folder', detail: `${folder} exists but the records have no issue or failed issue for it` }); }
+        if (fs.existsSync(abs) && !this.failedFolderPending(folder)) { blockers.push({ code: 'unknown-issue-folder', detail: `${folder} exists but the records have no issue or failed issue for it`,
+            detail_ko: `${folder} 폴더가 있지만 기록에 그 발행 · 실패한 발행이 없습니다 — 그 폴더를 치우십시오` }); }
+        // .csd 사본은 저장된 바이트 그대로 — 디스크의 파일이 마지막 저장 · 열기의 것이어야
+        const csd = this.readFile(c.abs, CSD_HASH_MAX_BYTES);
+        const csdSha = csd ? sha256Hex(csd) : null;
+        if (csdSha !== c.knownSha) { blockers.push({ code: 'case-file-changed', detail: csd ? 'the case file on disk differs from the last save or open' : 'the case file is missing',
+            detail_ko: csd ? '디스크의 .csd 가 마지막 저장 · 열기의 것과 다릅니다' : '.csd 파일이 없습니다' }); }
         // 지난 발행: 고쳐짐 · 같은 내용
         const mine = this.issuesOf(c.caseId);
         const edited = mine.filter((x) => x.check_now.state !== 'same');
@@ -1151,12 +1182,17 @@ export class RecordsDesk {
         const last = mine[mine.length - 1];
         if (last && input.draft && last.from && docs.drafts.find((d) => d.item === last.from)?.docFp === input.draft.docFp) { warnings.push({ code: 'same-as-previous-issue', detail: last.item }); }
         const draft = input.draft ? { item: input.draft.item, kind: input.draft.kind, files: input.draft.files.map((x) => x.path) } : null;
-        const base = c.name;
-        const files = draft ? [`${folder}/${base}.${draft.kind}.R${revision}.html`, `${folder}/${base}.${draft.kind}.R${revision}.pdf`, `${folder}/manifest.json`] : [];
-        const fingerprint = fp('stcfsd-fp/issue-check/1', { caseId: c.caseId, revision, folder, draft: input.draft ? { item: input.draft.item, docFp: input.draft.docFp } : null,
-            basis: input.basis, blockers: blockers.map((b) => [b.code, b.count ?? null]), warnings: warnings.map((w) => [w.code, w.count ?? null]) });
+        const label = `R${revision}`;
+        const roles = [...(input.bundle ?? ['html', 'pdf']).filter((r) => BUNDLE_NAME[r] && r !== 'case-file'), 'case-file'];
+        const bundle = draft ? [...roles.map((r) => ({ path: `${folder}/${c.name}${BUNDLE_NAME[r](draft.kind, label)}`, role: r })), { path: `${folder}/manifest.json`, role: 'manifest' }] : [];
+        const files = bundle.map((b) => b.path);
+        const fingerprint = fp('stcfsd-fp/issue-check/2', { caseId: c.caseId, revision, folder, draft: input.draft ? { item: input.draft.item, docFp: input.draft.docFp } : null,
+            basis: input.basis, caseFile: csdSha, bundle: roles, blockers: blockers.map((b) => [b.code, b.count ?? null]), warnings: warnings.map((w) => [w.code, w.count ?? null]) });
         const say = this.env.issueText ?? ((x: any) => x);
-        return { caseId: c.caseId, caseName: c.name, revision, label: `R${revision}`, folder, blockers: blockers.map(say), warnings: warnings.map(say), passed: input.passed, draft, files, fingerprint, input };
+        const passedLabels = input.passed.map((code) => (this.env.issueText ? this.env.issueText({ code: 'pass.' + code }) : { code: 'pass.' + code }))
+            .map((x: any) => ({ code: String(x.code).slice(5), ...(x.text ? { text: x.text, text_ko: x.text_ko } : {}) }));
+        return { caseId: c.caseId, caseName: c.name, revision, label, folder, blockers: blockers.map(say), warnings: warnings.map(say), passed: input.passed, passed_labels: passedLabels,
+            draft, files, bundle, fingerprint, input };
     }
     /** 실패한 발행으로 적혔고 아직 옆으로 옮기지 않은 폴더인가 */
     private failedFolderPending(folder: string): boolean {
@@ -1167,36 +1203,54 @@ export class RecordsDesk {
     /** 일회용 숫자(미리보기 → 발행, 2 분, 한 번) */
     static ISSUE_NONCE_MS = 120_000;
     private nonces = new Map<string, { fingerprint: string; expires: number; used: boolean }>();
-    private issuePreview(): IssuePreview & { nonce: string; expiresAt: string } {
+    /** 발행 도장(날짜는 이 PC 의 지역 날짜 — 기록의 순간은 ISO 그대로) */
+    private issueStamp(label: string): { kind: 'issued'; label: string; reviewer: string; date: string } {
+        return { kind: 'issued', label, reviewer: this.nameOfWriter(), date: localDate(this.env.now()) };
+    }
+    private issuePreview(): IssuePreview & { nonce: string; expiresAt: string; stamp: Record<string, unknown>; stamped_doc: unknown | null } {
         const d = this.issueCheckData();
         const { input: _i, ...pv } = d; void _i;
+        const stamp = this.issueStamp(d.label);
+        let stamped: unknown | null = null;
+        if (d.input.draft) {
+            const b = this.blob(d.input.draft.doc);
+            if (b.ok && b.value && typeof b.value === 'object') { const v: any = JSON.parse(JSON.stringify(b.value)); v.meta = { ...(v.meta || {}), stamp }; stamped = v; }
+        }
         const nonce = randomBytes(16).toString('hex');
         const expires = Date.now() + RecordsDesk.ISSUE_NONCE_MS;
         for (const [k, v] of this.nonces) { if (v.expires < Date.now() || v.used) { this.nonces.delete(k); } }
         this.nonces.set(nonce, { fingerprint: d.fingerprint, expires, used: false });
-        return { ...pv, nonce, expiresAt: new Date(expires).toISOString() };
+        return { ...pv, nonce, expiresAt: new Date(expires).toISOString(), stamp, stamped_doc: stamped };
     }
     private fault(step: string): void { if (process.env.STCFSD_TEST_MODE === '1') { this.env.issueFault?.(step); } }
 
     private async issue(req: { fingerprint: string; nonce: string }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }> {
         const p = this.writableProject();
         const c = this.cur;
-        if (!c || c.readOnly) { throw new Error('no writable case is open'); }
+        if (!c || c.readOnly) { throw new IssueRefusedError('no writable case is open', 'host.issue.no-case'); }
         const n = req && typeof req.nonce === 'string' ? this.nonces.get(req.nonce) : undefined;
-        if (!n || n.used || n.expires < Date.now()) { throw new Error('the preview has expired or was already used — open the preview again'); }
+        if (!n) { throw new IssueRefusedError('the preview has expired or was already used — open the preview again', 'host.issue.no-preview'); }
+        if (n.used) { throw new IssueRefusedError('this preview was already used — open the preview again', 'host.issue.used'); }
+        if (n.expires < Date.now()) { throw new IssueRefusedError('the preview has expired — open the preview again', 'host.issue.expired'); }
         n.used = true;
         const d = this.issueCheckData();
-        if (!req || req.fingerprint !== d.fingerprint || n.fingerprint !== d.fingerprint) { throw new Error('something changed since the preview (its fingerprint is not the current one) — open the preview again'); }
-        if (d.blockers.length) { throw new Error('issuing is blocked: ' + d.blockers.map((b) => b.code).join(', ')); }
+        if (!req || req.fingerprint !== d.fingerprint || n.fingerprint !== d.fingerprint) { throw new IssueRefusedError('something changed since the preview (its fingerprint is not the current one) — open the preview again', 'host.issue.changed'); }
+        if (d.blockers.length) {
+            const unknown = d.blockers.some((b) => b.code === 'unknown-issue-folder');
+            throw new IssueRefusedError('issuing is blocked: ' + d.blockers.map((b) => b.code).join(', '), unknown ? 'host.issue.unknown-issue-folder' : 'host.issue.blocked');
+        }
         const draft = d.input.draft!;
         const docBlob = this.blob(draft.doc);
-        if (!docBlob.ok) { throw new Error(`the draft's report copy is ${docBlob.error} — make a new draft`); }
-        if (!this.env.issueRender) { throw new Error('issuing is not available here'); }
+        if (!docBlob.ok) { throw new IssueRefusedError(`the draft's report copy is ${docBlob.error} — make a new draft`, 'host.issue.copy-missing'); }
+        if (!this.env.issueRender) { throw new IssueRefusedError('issuing is not available here', 'host.issue.unavailable'); }
+        // .csd 사본: 점검이 「저장하지 않은 변경 없음」 · 디스크 = 마지막 저장을 요구했다 — 그 바이트 그대로(다시 직렬화하지 않는다)
+        const csdBytes = this.readFile(c.abs, CSD_HASH_MAX_BYTES);
+        if (!csdBytes || sha256Hex(csdBytes) !== c.knownSha) { throw new IssueRefusedError('the case file on disk is not the saved one — save and open the preview again', 'host.issue.case-file-changed'); }
         const w = this.writer();
         const folderAbs = path.join(p.dir, ...d.folder.split('/'));
         // 실패한 발행의 폴더 — 옆으로 옮기고(그 차수를 다시 쓴다, 차수를 두 번 쓰지 않는다) 그 옮김을 적는다
         if (fs.existsSync(folderAbs)) {
-            if (!this.failedFolderPending(d.folder)) { throw new Error(`${d.folder} exists but the records do not know it — not issued`); }
+            if (!this.failedFolderPending(d.folder)) { throw new IssueRefusedError(`${d.folder} exists but the records do not know it — not issued`, 'host.issue.unknown-issue-folder'); }
             let k = 1;
             while (fs.existsSync(`${folderAbs}.failed-${k}`)) { k += 1; }
             assertNoLinks(p.dir, folderAbs);
@@ -1210,17 +1264,31 @@ export class RecordsDesk {
         const written: Array<{ path: string; sha256: string; size: number; role?: string }> = [];
         try {
             this.fault('folder');
-            const stamp = { kind: 'issued', label: d.label, reviewer: this.nameOfWriter(), date: this.env.now().slice(0, 10) };
-            const rendered = await this.env.issueRender({ doc: docBlob.value, kind: draft.kind, stamp, baseName: `${c.name}.${draft.kind}.${d.label}` });
-            for (const r of rendered) {
-                if (segmentError(r.name) || r.name === 'manifest.json') { throw new Error('a file name was refused: ' + r.name); }
-                this.fault('file:' + r.name);
-                writeExclusive(p.dir, path.join(folderAbs, r.name), r.bytes);
-                written.push({ path: `${d.folder}/${r.name}`, sha256: sha256Hex(r.bytes), size: r.bytes.length, role: r.role });
+            const stamp = this.issueStamp(d.label);
+            const renderRoles = (d.bundle ?? []).map((b) => b.role).filter((r) => r !== 'case-file' && r !== 'manifest');
+            const rendered = await this.env.issueRender({ doc: docBlob.value, kind: draft.kind, stamp, roles: renderRoles });
+            const byRole = new Map(rendered.map((r) => [r.role, r.bytes]));
+            byRole.set('case-file', csdBytes);
+            for (const b of d.bundle ?? []) {
+                if (b.role === 'manifest') { continue; }
+                const bytes = byRole.get(b.role);
+                if (!bytes) { throw new Error(`the ${b.role} file of the bundle was not made`); }
+                const name = b.path.split('/').pop()!;
+                if (segmentError(name) || name === 'manifest.json') { throw new Error('a file name was refused: ' + name); }
+                this.fault('file:' + name);
+                writeExclusive(p.dir, path.join(folderAbs, name), bytes);
+                written.push({ path: b.path, sha256: sha256Hex(bytes), size: bytes.length, role: b.role });
             }
+            const issuedAt = this.env.now();
             const manifest = { schema: 'stcfsd-issue/1', project: { name: path.basename(p.dir), projectId: p.decl.projectId }, case: { caseId: c.caseId, name: c.name },
-                revision: d.revision, label: d.label, issuedAt: this.env.now(), issuedBy: { name: this.nameOfWriter(), writerId: w.writerId },
+                revision: d.revision, label: d.label, issuedAt, issuedDate: localDate(issuedAt), issuedBy: { name: this.nameOfWriter(), writerId: w.writerId },
                 engineId: normalizeEngineId(this.env.engineId()), contentFp: d.input.basis.contentFp, runs: d.input.basis.runs, from: draft.item, files: written,
+                // 역할: 계산서(html · pdf — 그 안에 가정 목록 · 검토 기록 요약 절), 좌굴 해석 보고서, 검증표, 그 계산의 .csd(저장된 바이트 — 열면 읽기 전용 「발행본」)
+                roles: { html: 'calculation report (HTML) — includes the assumptions list and the review summary as sections',
+                    pdf: 'calculation report (PDF) — includes the assumptions list and the review summary as sections',
+                    'buckling-html': 'buckling analysis report (HTML)', 'buckling-pdf': 'buckling analysis report (PDF)',
+                    'validation-html': 'validation table (HTML)', 'validation-pdf': 'validation table (PDF)',
+                    'case-file': 'the .csd of this calculation (the saved bytes — opens read-only as an issued copy)' },
                 check: { fingerprint: d.fingerprint, warnings: d.warnings.map((x) => x.code) } };
             const text = Buffer.from(JSON.stringify(manifest, null, 1) + '\n', 'utf8');
             this.fault('manifest');
@@ -1238,7 +1306,7 @@ export class RecordsDesk {
                     body: { caseId: c.caseId, revision: d.revision, folder: d.folder, reason: reason.slice(0, 300) } });
             } catch { /* 그 줄도 쓰지 못하면 폴더는 「기록에 없는 폴더」 로 남는다 — 다음 발행을 막는다 */ }
             try { this.env.recordsChanged?.(['documents']); } catch { /* 덤 */ }
-            throw new Error(`the issue failed (${reason.trim().slice(0, 200)}) — the half-made folder ${d.folder} is kept as a failed issue (not counted); fix the cause and issue again (the same revision)`, { cause: e });
+            throw new IssueRefusedError(`the issue failed (${reason.trim().slice(0, 200)}) — the half-made folder ${d.folder} is kept as a failed issue (not counted); fix the cause and issue again (the same revision)`, 'host.issue.failed', { cause: e });
         }
     }
 

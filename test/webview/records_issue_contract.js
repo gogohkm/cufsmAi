@@ -157,25 +157,32 @@ async function main() {
     {   // 미리보기는 그 막는 것과 함께 보이고, 발행은 거절 — 그 폴더를 다시 쓰지 않는다
       const pvx = face().issuePreview();
       assert(pvx.blockers.some((b) => b.code === 'unknown-issue-folder' && /기록에 없는 발행 폴더/.test(b.text_ko)) && pvx.blockers.every((b) => b.text_ko), 'the preview carries the Korean sentence per code: ' + JSON.stringify(pvx.blockers));
-      await assert.rejects(face().issue({ fingerprint: pvx.fingerprint, nonce: pvx.nonce }), /blocked: .*unknown-issue-folder/);
+      await assert.rejects(face().issue({ fingerprint: pvx.fingerprint, nonce: pvx.nonce }), (e) => /blocked: .*unknown-issue-folder/.test(e.message) && e.code === 'host.issue.unknown-issue-folder');
       assert.deepStrictEqual(fs.readdirSync(path.join(issueRoot, 'R0')), [], 'the unknown folder is not reused');
     }
     fs.rmSync(path.join(issueRoot, 'R0'), { recursive: true });
     c = await expect('unknown-issue-folder', false, 'removed');
     assert.strictEqual(c.blocked, false, 'nothing blocks now: ' + JSON.stringify(c.blockers));
     assert(c.passed.length >= 10, 'passed lists the cleared blockers: ' + c.passed);
+    assert(c.passed_labels.length === c.passed.length && c.passed_labels.every((x) => x.text_ko) && c.passed_labels.some((x) => x.code === 'ng' && x.text_ko === 'NG 없음'), 'passed labels in Korean: ' + JSON.stringify(c.passed_labels));
     notes.push(`blockers each appeared and cleared: ${[...seen].sort().join(', ')}; documents check ${sizes.check} B`);
 
     // ════ ③ ⚔ 미리보기 뒤의 변경 · 지난 숫자 ════
+    const localDay = (iso) => { const d = new Date(iso), q = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${q(d.getMonth() + 1)}-${q(d.getDate())}`; };
     let pv = face().issuePreview();
-    assert(pv.label === 'R0' && pv.blockers.length === 0 && /^[0-9a-f]{32}$/.test(pv.nonce) && pv.files.length === 3, 'preview R0: ' + JSON.stringify(pv).slice(0, 300));
+    const ROLES = ['html', 'pdf', 'buckling-html', 'buckling-pdf', 'validation-html', 'validation-pdf', 'case-file', 'manifest'];
+    assert(pv.label === 'R0' && pv.blockers.length === 0 && /^[0-9a-f]{32}$/.test(pv.nonce) && pv.files.length === 8 && JSON.stringify(pv.bundle.map((b) => b.role)) === JSON.stringify(ROLES),
+      'preview R0 — the whole bundle: ' + JSON.stringify(pv.bundle));
+    assert(pv.stamped_doc && pv.stamped_doc.meta.stamp.kind === 'issued' && pv.stamped_doc.meta.stamp.label === 'R0' && pv.stamp.date === localDay(new Date()),
+      'the preview carries the stamped doc (local date): ' + JSON.stringify(pv.stamp));
+    const rejects = async (promise, code, why) => { await assert.rejects(promise, (e) => e.code === code || (() => { throw new Error(`${why}: code ${e.code} (${e.message})`); })(), why); };
     await tool('work_items', { action: 'add', kind: 'report', title: '미리보기 뒤의 보고' });   // 근거(업무)가 바뀐다 → 초안이 낡는다
-    await assert.rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), /changed since the preview/, 'a change after the preview is refused');
+    await rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), 'host.issue.changed', 'a change after the preview is refused');
     await tool('generate_report', {});
     DESK.RecordsDesk.ISSUE_NONCE_MS = 40;
     pv = face().issuePreview();
     await sleep(80);
-    await assert.rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), /expired/, 'an expired number is refused');
+    await rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), 'host.issue.expired', 'an expired number is refused');
     DESK.RecordsDesk.ISSUE_NONCE_MS = 120000;
     // AI 는 발행하지 못한다
     const before = docsLog();
@@ -195,21 +202,37 @@ async function main() {
     assert.strictEqual(docsLog(), before, 'no issue line from any of them');
     assert(!fs.existsSync(path.join(issueRoot, 'R0')), 'no issue folder');
 
-    // ════ ② 발행 R0(진짜 인쇄) ════
+    // ════ ② 발행 R0(진짜 인쇄) — 묶음 전부 ════
+    const fileEvents = [];
+    const offFile = p.onCaseFile((e) => fileEvents.push(e));
+    // 여섯 탭 화면의 Save: 프로젝트의 대상이면 그 대상에(대화상자 없이) — 사건 'saved' 와 그 경로
+    await p.__testDispatchMessage({ command: 'saveProject' });
+    const caseAbs = p.caseFile().path;
+    assert(caseAbs && /Beam\.csd$/.test(caseAbs) && fileEvents.some((e) => e.event === 'saved' && e.path === caseAbs && e.by === 'person'), 'Save in a project case saves the case: ' + JSON.stringify(fileEvents));
     pv = face().issuePreview();
+    const csdBefore = fs.readFileSync(caseAbs);
     const iss = await face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce });
     const r0 = path.join(issueRoot, 'R0');
     const r0files = fs.readdirSync(r0).sort();
-    assert.deepStrictEqual(r0files, ['Beam.calc.R0.html', 'Beam.calc.R0.pdf', 'manifest.json'], 'R0 folder: ' + r0files);
+    const WANT = ['Beam.R0.csd', 'Beam.buckling.R0.html', 'Beam.buckling.R0.pdf', 'Beam.calc.R0.html', 'Beam.calc.R0.pdf', 'Beam.validation.R0.html', 'Beam.validation.R0.pdf', 'manifest.json'];
+    assert.deepStrictEqual(r0files, WANT, 'R0 folder: ' + r0files);
     const man = JSON.parse(fs.readFileSync(path.join(r0, 'manifest.json'), 'utf8'));
+    assert.strictEqual(man.files.length, 7, 'every file but the manifest is listed');
     for (const fl of man.files) { assert.strictEqual(crypto.createHash('sha256').update(fs.readFileSync(path.join(pdir, ...fl.path.split('/')))).digest('hex'), fl.sha256, fl.path); }
-    const pdf = fs.readFileSync(path.join(r0, 'Beam.calc.R0.pdf'));
+    assert(/assumptions list and the review summary/.test(man.roles.pdf) && man.roles['case-file'] && man.files.every((x) => man.roles[x.role]), 'manifest roles: ' + JSON.stringify(man.roles));
+    assert(fs.readFileSync(path.join(r0, 'Beam.R0.csd')).equals(csdBefore), 'the .csd copy is the saved bytes (not re-serialised)');
+    assert(man.issuedDate === localDay(man.issuedAt), 'manifest issuedDate is the local date of issuedAt');
+    for (const n of ['Beam.calc.R0.pdf', 'Beam.buckling.R0.pdf', 'Beam.validation.R0.pdf']) { assert.strictEqual(fs.readFileSync(path.join(r0, n)).slice(0, 5).toString(), '%PDF-', n + ' is a real PDF'); }
     const r0html = fs.readFileSync(path.join(r0, 'Beam.calc.R0.html'), 'utf8');
-    assert(pdf.slice(0, 5).toString() === '%PDF-' && /발행 · R0 · 검토 /.test(r0html) && !/초안 · D-/.test(r0html), 'a real PDF; the HTML is the draft re-rendered with only the stamp changed');
-    await assert.rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), /expired|already used/, 'a used number is refused');
+    assert(/발행 · R0 · 검토 /.test(r0html) && !/초안 · D-/.test(r0html) && r0html.includes('발행 · R0 · 검토 ') && r0html.includes(' · ' + localDay(man.issuedAt) + '<'), 'the HTML is the draft re-rendered with the issued stamp and the local date');
+    for (const n of ['Beam.buckling.R0.html', 'Beam.validation.R0.html']) { assert(/발행 · R0 · 검토 /.test(fs.readFileSync(path.join(r0, n), 'utf8')), n + ' carries the same stamp'); }
+    assert(/설계 검증표/.test(fs.readFileSync(path.join(r0, 'Beam.validation.R0.html'), 'utf8')), 'the validation table');
+    await rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), 'host.issue.used', 'a used number is refused');
+    const lcs = (await tool('list_cases', {})).cases.find((x) => x.name === 'Beam');
+    assert(lcs.last_issue && lcs.last_issue.label === 'R0' && lcs.last_issue.date === localDay(man.issuedAt) && lcs.last_issue.state === 'same', 'list_cases: last issue ' + JSON.stringify(lcs.last_issue));
     let dl = await tool('documents', { action: 'list' });
     sizes.list = dl.__bytes;
-    assert(dl.issues.length === 1 && dl.issues[0].item === 'R0' && dl.issues[0].state === 'same', 'documents list: R0 그대로 ' + JSON.stringify(dl.issues));
+    assert(dl.issues.length === 1 && dl.issues[0].item === 'R0' && dl.issues[0].state === 'same' && dl.issues[0].date === localDay(man.issuedAt), 'documents list: R0 그대로 ' + JSON.stringify(dl.issues));
     const snap = Object.fromEntries(r0files.map((n) => [n, fs.readFileSync(path.join(r0, n))]));
     // 모델을 바꿔 저장 → R0 그대로(바이트)
     await tool('set_section_template', { type: 'lippedc', H: 8, B: 2.5, D: 0.625, t: 0.065, r: 0.1 });
@@ -219,7 +242,7 @@ async function main() {
     fs.appendFileSync(path.join(r0, 'Beam.calc.R0.html'), '<!-- edited -->');
     dl = await tool('documents', { action: 'list' });
     assert(dl.issues[0].state === 'edited' && dl.issues[0].state_ko === '고쳐짐', 'an edited issued copy reads 고쳐짐: ' + JSON.stringify(dl.issues[0]));
-    notes.push(`issued R0: ${r0files.join(' · ')} (manifest hashes match, real PDF ${pdf.length} B, HTML = the draft with the issued stamp); byte-identical after a model change + save; edited by hand → 고쳐짐; documents list ${sizes.list} B`);
+    notes.push(`issued R0: ${r0files.join(' · ')} (manifest hashes and roles, three real PDFs, the .csd = the saved bytes, the issued stamp with the local date on all three reports); byte-identical after a model change + save; edited by hand → 고쳐짐; documents list ${sizes.list} B`);
 
     // ════ ③ 반쯤 실패 → 실패한 발행, 차수를 두 번 쓰지 않는다 ════
     await tool('set_section_template', { type: 'lippedc', H: 8, B: 2.5, D: 0.625, t: 0.059, r: 0.1 });
@@ -241,7 +264,7 @@ async function main() {
     pv = face().issuePreview();
     assert.strictEqual(pv.label, 'R1');
     S.__issueFault = (step) => { if (step === 'manifest') { const e = new Error('no space left on device'); e.code = 'ENOSPC'; throw e; } };
-    await assert.rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), /failed issue/, 'disk full halfway');
+    await assert.rejects(face().issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }), (e) => /failed issue/.test(e.message) && e.code === 'host.issue.failed', 'disk full halfway');
     S.__issueFault = null;
     const r1 = path.join(issueRoot, 'R1');
     assert(fs.existsSync(path.join(r1, 'Beam.calc.R1.html')) && !fs.existsSync(path.join(r1, 'manifest.json')), 'the half-made folder stays');
@@ -254,6 +277,14 @@ async function main() {
     assert(iss1.item === 'R1' && dl.issues.map((x) => x.item).sort().join() === 'R0,R1' && fs.existsSync(`${r1}.failed-1`) && fs.existsSync(path.join(r1, 'manifest.json')),
       'R1 issued once; the failed folder moved aside to R1.failed-1');
     notes.push('disk full at the manifest: R1 left as a failed issue (not counted), the retry moved it to R1.failed-1 and issued R1 — the revision was not consumed twice');
+    // 발행본의 .csd 사본은 읽기 전용(「발행본」)으로 열린다 — 기록에 아무것도 쓰지 않는다
+    const logBefore = docsLog();
+    const lo = p.__testLoadProjectFile(path.join(r0, 'Beam.R0.csd'));
+    const ds = p._desk.status();
+    assert(!lo.error && ds.file_read_only && ds.file_read_only.reason === 'issued-copy' && docsLog() === logBefore, 'the issued .csd opens read-only as an issued copy: ' + JSON.stringify(ds));
+    assert(fileEvents.some((e) => e.event === 'opened' && /Beam\.R0\.csd$/.test(e.path)), 'the open is a structured event');
+    offFile();
+    notes.push('the issued .csd opens read-only (issued-copy), nothing recorded; Save in a project case saves the case; file opened / saved are events with the path (in-process only)');
     notes.push('⚔ the AI cannot issue: documents carrying issue (schema), 7 action names by direct POST with the real token, page messages, the face inside ai / screen — no issue line, no folder; a change after the preview, an expired number and a used number are refused');
     void iss;
   } finally {

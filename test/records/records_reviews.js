@@ -180,6 +180,19 @@ async function run() {
     assert.strictEqual(drop2.length, 9, 'the 10 oldest minus the one a mark keeps');
     assert(!drop2.includes(runs2[2].blob) && !drop2.some((b) => runs2.slice(10).some((r) => r.blob === b)));
   });
+  // ── 사람이 읽는 날짜는 지역 날짜(R5-3: 03:38 한국 시간의 발행이 UTC 날짜로 전날이 찍혔다) ──
+  await t('local dates: an instant early in the morning in Seoul is that day, not the UTC day', () => {
+    const LT = rec('localTime');
+    const saved = process.env.TZ;
+    try {
+      process.env.TZ = 'Asia/Seoul';
+      assert.strictEqual(LT.localDate('2026-11-23T18:38:00.000Z'), '2026-11-24');
+      assert.strictEqual(LT.localDateTime('2026-11-23T18:38:00.000Z'), '2026-11-24 03:38');
+      process.env.TZ = 'UTC';
+      assert.strictEqual(LT.localDate('2026-11-23T18:38:00.000Z'), '2026-11-23');
+      assert.strictEqual(LT.localDate('not a date'), '');
+    } finally { if (saved === undefined) { delete process.env.TZ; } else { process.env.TZ = saved; } }
+  });
   return done();
 }
 module.exports = { run };

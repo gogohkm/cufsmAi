@@ -6196,6 +6196,13 @@
             vscode.postMessage({ command: 'saveProject' });
         });
     }
+    // 프로젝트의 대상이면 Save 는 그 대상에 저장한다 — 다른 이름으로 저장은 이 단추
+    const btnFileSaveAs = document.getElementById('btn-file-saveas');
+    if (btnFileSaveAs) {
+        btnFileSaveAs.addEventListener('click', () => {
+            vscode.postMessage({ command: 'saveProjectAs' });
+        });
+    }
 
     // 입력 변경 후 이전 하중/설계 결과를 최신 결과처럼 재사용하지 않는다.
     function invalidateDerivedResults(scope) {

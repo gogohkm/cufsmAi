@@ -422,6 +422,29 @@
         'host.issue.changed-sources': { kind: 'warning', template: 'Source documents changed or are missing.', template_ko: '원자료가 바뀌었거나 없어졌습니다.', params: {} },
         'host.issue.edited-previous-issue': { kind: 'warning', template: 'A previous issue was edited or is missing.', template_ko: '지난 발행본이 고쳐졌거나 없어졌습니다.', params: {} },
         'host.issue.same-as-previous-issue': { kind: 'warning', template: 'The draft is the same as the previous issue.', template_ko: '초안이 지난 발행과 같습니다.', params: {} },
+        'host.issue.case-file-changed': { kind: 'reason', template: "The case file on disk is not the saved one.", template_ko: "디스크의 .csd 가 마지막 저장의 것이 아닙니다 — 저장하십시오.", params: {} },
+        // 발행을 받지 않은 까닭(person.issue 가 던진 오류의 code)
+        'host.issue.no-case': { kind: 'reason', template: "No writable case is open.", template_ko: "쓸 수 있는 검토 대상이 열려 있지 않습니다.", params: {} },
+        'host.issue.no-preview': { kind: 'reason', template: "There is no open preview for this issue.", template_ko: "이 발행의 미리보기가 없습니다 — 미리보기를 다시 여십시오.", params: {} },
+        'host.issue.used': { kind: 'reason', template: "This preview was already used.", template_ko: "이 미리보기는 이미 쓰였습니다 — 미리보기를 다시 여십시오.", params: {} },
+        'host.issue.expired': { kind: 'reason', template: "The preview has expired.", template_ko: "미리보기의 시간(2 분)이 지났습니다 — 미리보기를 다시 여십시오.", params: {} },
+        'host.issue.changed': { kind: 'reason', template: "Something changed since the preview.", template_ko: "미리보기 뒤에 무엇이 바뀌었습니다 — 미리보기를 다시 여십시오.", params: {} },
+        'host.issue.blocked': { kind: 'reason', template: "Issuing is blocked.", template_ko: "발행을 막는 것이 있습니다.", params: {} },
+        'host.issue.copy-missing': { kind: 'reason', template: "The draft's report copy is missing or damaged.", template_ko: "초안의 보고서 사본이 없거나 손상되었습니다 — 새 초안을 만드십시오.", params: {} },
+        'host.issue.unavailable': { kind: 'reason', template: "Issuing is not available here.", template_ko: "여기서는 발행할 수 없습니다.", params: {} },
+        'host.issue.failed': { kind: 'reason', template: "The issue failed; the half-made folder is kept as a failed issue.", template_ko: "발행에 실패했습니다 — 반쯤 만든 폴더는 실패한 발행으로 남겼습니다. 까닭을 고치고 다시 발행하십시오(같은 차수).", params: {} },
+        // 발행 전 점검을 통과한 것의 이름(passed[])
+        'host.issue.pass.no-design-result': { kind: 'label', template: "A current member design result exists", template_ko: "지금 부재 설계 결과가 있음", params: {} },
+        'host.issue.pass.stale-results': { kind: 'label', template: "Results match the recorded runs", template_ko: "결과가 기록된 실행과 같음", params: {} },
+        'host.issue.pass.not-evaluated': { kind: 'label', template: "Every check was evaluated", template_ko: "모든 검토 항목을 평가함", params: {} },
+        'host.issue.pass.ng': { kind: 'label', template: "No check fails", template_ko: "NG 없음", params: {} },
+        'host.issue.pass.open-questions': { kind: 'label', template: "Questions answered and confirmed", template_ko: "판단 요청 — 답과 사람의 확인 있음", params: {} },
+        'host.issue.pass.incomplete-reviews': { kind: 'label', template: "Every check reviewed", template_ko: "모든 검토 항목 확인함", params: {} },
+        'host.issue.pass.provisional-assumptions': { kind: 'label', template: "Assumptions firm and confirmed", template_ko: "가정 — 확정 · 사람의 확인 있음", params: {} },
+        'host.issue.pass.unsaved-changes': { kind: 'label', template: "Saved", template_ko: "저장함", params: {} },
+        'host.issue.pass.no-draft': { kind: 'label', template: "A draft exists", template_ko: "초안 있음", params: {} },
+        'host.issue.pass.stale-draft': { kind: 'label', template: "The draft matches the current state", template_ko: "초안이 지금 상태와 같음", params: {} },
+        'host.issue.pass.damaged-records': { kind: 'label', template: "Records intact", template_ko: "기록 온전함", params: {} },
         // 확인 표시를 받지 않은 까닭(person.review 가 던진 오류의 code)
         'host.review.shown_differs': { kind: 'reason', template: 'the screen showed another version of this item', template_ko: '화면이 보인 것과 지금 항목이 다릅니다 — 다시 읽고 다시 확인하십시오', params: {} },
         'host.review.not_current': { kind: 'reason', template: 'this item is not in the current results', template_ko: '지금 결과에 없는 항목입니다 — 먼저 다시 돌리십시오', params: {} },
@@ -469,6 +492,10 @@
         'Edit discarded': ['edit_discarded', '편집을 버려 되돌렸습니다'],
         'The model changed after the validation': ['validation_model', '점검 뒤에 모델이 바뀌었습니다'],
         'Inputs changed after the validation': ['validation_inputs', '점검 뒤에 입력이 바뀌었습니다'],
+        // 파일을 열 때 버린 결과(봉인 · 엔진)
+        'The saved results do not match the inputs saved with them': ['open_seal_inputs', '저장된 결과가 함께 저장된 입력과 맞지 않아 버렸습니다'],
+        'The saved results were not computed by this program on this PC': ['open_seal_other', '저장된 결과가 이 PC 의 이 프로그램이 계산한 것이 아니어서 버렸습니다'],
+        'Results stored in this file were computed by another engine': ['open_engine', '파일의 결과가 다른 엔진의 것이어서 버렸습니다'],
     };
     /** 까닭 글 → {code, text, text_ko}(모르는 글은 code null · 글 그대로) */
     function ledgerReason(reason) {
@@ -481,6 +508,14 @@
         m = /^Alternative (ALT-\d+) opened$/.exec(s);
         if (m) { return { code: 'host.ledger.alternative_opened', text: s, text_ko: '대안 ' + m[1] + ' 을 열었습니다' }; }
         return { code: null, text: s, text_ko: s };
+    }
+
+    /** 초안이 낡은 까닭(documents.draftStaleness 의 글) → 한국어 */
+    function staleWhyKo(why) {
+        const s = String(why || '');
+        const m = /^results \(([a-z_]+)\)$/.exec(s);
+        if (m) { return '결과(' + (RESULT_KINDS_KO[m[1]] || m[1]) + ')'; }
+        return { 'inputs or model': '입력 · 모델', engine: '엔진', 'assumptions, work items or reviews': '가정 · 업무 항목 · 확인' }[s] || s;
     }
 
     /** 기록의 사건 이름(사람이 읽는 이력) → 한국어 */
@@ -902,7 +937,7 @@
 
     return {
         render, reason, reasonNotice, field, siblingNotice, lines, texts, fastenerLabel, localize, forReader, forPage, textMap, attachNotices,
-        readerCheck, ledgerReason, RECORD_EVENTS_KO, RESULT_KINDS_KO, SOURCE_KINDS_KO, BUCKLING_METHODS_KO, SOURCE_FLAGS_KO, i621ToSI, pyFormat, reprFloat, literalToSI, fallbackSI, STATS, HOST, hostNotice, group, attachField, withPrefix, EMPTY_FRAGMENT,
+        readerCheck, ledgerReason, staleWhyKo, RECORD_EVENTS_KO, RESULT_KINDS_KO, SOURCE_KINDS_KO, BUCKLING_METHODS_KO, SOURCE_FLAGS_KO, i621ToSI, pyFormat, reprFloat, literalToSI, fallbackSI, STATS, HOST, hostNotice, group, attachField, withPrefix, EMPTY_FRAGMENT,
         QUANTITY: Q, UNCHANGED, isDimensional, LISTS,
     };
 }));

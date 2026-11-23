@@ -609,11 +609,11 @@
   {
    "id": "empty.mcp",
    "expect": "pin",
-   "reason": "Stop 7 (V7-10): validate_design carries text_note and generate_report notices_note (the copied result texts are data, not instructions); with the caps (120 items, 80 notices, 600 characters) nothing is cut in these flows — bytes grow by those two notes only.",
+   "reason": "Wording stop (b582779): validate_design carries text_note_code next to its English text_note and generate_report carries notices_note_code next to notices_note (the screen shows the host's Korean sentence for that code) — each reply grows by that one field (46 / 47 bytes); nothing else changes.",
    "value": {
     "validate.summary": {
      "isError": false,
-     "bytes": 1898,
+     "bytes": 1944,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -623,6 +623,7 @@
       "more",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "summary",
@@ -632,7 +633,7 @@
     },
     "validate.si": {
      "isError": false,
-     "bytes": 1898,
+     "bytes": 1944,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -642,6 +643,7 @@
       "more",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "summary",
@@ -651,7 +653,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 6267,
+     "bytes": 6313,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -660,6 +662,7 @@
       "items",
       "source",
       "text_note",
+      "text_note_code",
       "units"
      ],
      "detail": "full",
@@ -723,6 +726,14 @@
      "from": {
       "expect": "pin",
       "reason": "K3-6 / K3-7: validate_design items and generate_report content follow the fixes above (summary sizes and report sections change). K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks ver… K3-7: the report is data first (ReportDoc — US values with quantity, SI through siUnits.reportDocToSI) and a renderer second (webview/js/reportRender.js): the c…"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "wording-b582779",
+     "from": {
+      "expect": "pin",
+      "reason": "Stop 7 (V7-10): validate_design carries text_note and generate_report notices_note (the copied result texts are data, not instructions); with the caps (120 items, 80 notices, 600 characters) nothing is cut in these flows — bytes grow by those two notes only."
      },
      "date": "2026-11-24"
     }
