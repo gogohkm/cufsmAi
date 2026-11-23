@@ -316,7 +316,7 @@ export interface ApplyResult {
     /** 받아들인 키(거울은 주인 키로) */
     accepted: string[];
     /** 받지 않은 키와 까닭(검사 실패 · 충돌) */
-    rejected: { key: string; reason: string }[];
+    rejected: { key: string; reason: string; reason_code?: string }[];
     /** 그 가운데 충돌(baseRev 뒤에 다른 쓰는 이가 바꾼 키) — 화면은 그 칸에 지금 상태를 다시 얹는다 */
     conflicts: string[];
 }
@@ -334,7 +334,7 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
     opts: { baseRev?: number; keepSource?: boolean } = {}): ApplyResult {
     const state = clone(state0);
     const accepted: string[] = [];
-    const rejected: { key: string; reason: string }[] = [];
+    const rejected: { key: string; reason: string; reason_code?: string }[] = [];
     const conflicts: string[] = [];
     const nextRev = state.rev + 1;
     const conflicted = (k: string): boolean => opts.baseRev !== undefined && (state.revs[k] ?? 0) > opts.baseRev && state.sources[k] !== writer;
@@ -355,17 +355,17 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
     for (const [k, v] of Object.entries(mapped)) {
         if ((SPAN_KEYS as readonly string[]).includes(k)) { continue; }
         if (k === 'unitSystem') {
-            if (v === 'US' || v === 'SI') { state.view.unitSystem = v; } else { rejected.push({ key: k, reason: `unitSystem 은 'US' · 'SI'` }); }
+            if (v === 'US' || v === 'SI') { state.view.unitSystem = v; } else { rejected.push({ key: k, reason: `unitSystem 은 'US' · 'SI'`, reason_code: 'host.case.invalid_value' }); }
             continue;
         }
         const m = DS.fieldMeta(k);
         if (m && m.owner === 'view') {
-            if (typeof v === 'boolean') { state.view.cfsm[k] = v; } else { rejected.push({ key: k, reason: `'${k}' 는 true/false 여야 한다` }); }
+            if (typeof v === 'boolean') { state.view.cfsm[k] = v; } else { rejected.push({ key: k, reason: `'${k}' 는 true/false 여야 한다`, reason_code: 'host.case.invalid_value' }); }
             continue;
         }
         const err = DS.validateValue(k, v);
-        if (err) { rejected.push({ key: k, reason: err }); continue; }
-        if (conflicted(k)) { conflicts.push(k); rejected.push({ key: k, reason: `'${k}' 은(는) 판 ${opts.baseRev} 뒤에 ${state.sources[k]} 가 바꿨다 — 덮지 않는다` }); continue; }
+        if (err) { rejected.push({ key: k, reason: err, reason_code: 'host.case.invalid_value' }); continue; }
+        if (conflicted(k)) { conflicts.push(k); rejected.push({ key: k, reason: `'${k}' 은(는) 판 ${opts.baseRev} 뒤에 ${state.sources[k]} 가 바꿨다 — 덮지 않는다`, reason_code: 'host.case.conflict' }); continue; }
         write(k, v, writer);
         const follower = k === 'fy' ? 'connFy' : (k === 'fu' ? 'connFu' : null);
         // 접합 Fy · Fu 의 따름: 지금 화면은 사람이 ① Fy · Fu(또는 소성 fy · 강종)를 고칠 때만 접합 칸에 복사한다(syncFyValue) —
@@ -387,8 +387,8 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
             errs = [];
         }
         const blocked = spanChanges.filter((k) => conflicted(k));
-        if (errs.length) { spanChanges.forEach((k) => rejected.push({ key: k, reason: errs.join(' · ') })); }
-        else if (blocked.length) { blocked.forEach((k) => { conflicts.push(k); rejected.push({ key: k, reason: `'${k}' 은(는) 판 ${opts.baseRev} 뒤에 바뀌었다 — 덮지 않는다` }); }); }
+        if (errs.length) { spanChanges.forEach((k) => rejected.push({ key: k, reason: errs.join(' · '), reason_code: 'host.case.invalid_value' })); }
+        else if (blocked.length) { blocked.forEach((k) => { conflicts.push(k); rejected.push({ key: k, reason: `'${k}' 은(는) 판 ${opts.baseRev} 뒤에 바뀌었다 — 덮지 않는다`, reason_code: 'host.case.conflict' }); }); }
         else {
             for (const k of SPAN_KEYS) {
                 if (JSON.stringify(state.spans[k]) === JSON.stringify(table[k])) { continue; }
@@ -414,11 +414,11 @@ export interface ReplaceResult extends ApplyResult {
  */
 export function replaceGroup(state0: CaseState, groupKeys: string[], args: Record<string, unknown>, writer: Source = 'ai'): ReplaceResult {
     const replaced: ReplaceResult['replaced'] = [];
-    const rejected: { key: string; reason: string }[] = [];
+    const rejected: { key: string; reason: string; reason_code?: string }[] = [];
     const changes: Record<string, unknown> = {};
     for (const k of groupKeys) {
         const m = DS.fieldMeta(k);
-        if (!m || m.owner !== 'case') { rejected.push({ key: k, reason: `'${k}' 은(는) 검토 상태의 키가 아니다` }); continue; }
+        if (!m || m.owner !== 'case') { rejected.push({ key: k, reason: `'${k}' 은(는) 검토 상태의 키가 아니다`, reason_code: 'host.case.not_case_key' }); continue; }
         changes[k] = k in args ? args[k] : null;
     }
     // 검사: 받은 값은 보통 검사, 받지 않은 것(null)은 선택 · 체크도 허용
@@ -428,7 +428,7 @@ export function replaceGroup(state0: CaseState, groupKeys: string[], args: Recor
     for (const [k, v] of Object.entries(changes)) {
         const m = DS.fieldMeta(k) as FieldMeta;
         const err = v === null && (m.kind === 'sel' || m.kind === 'chk') ? null : DS.validateValue(k, v);
-        if (err) { rejected.push({ key: k, reason: err }); continue; }
+        if (err) { rejected.push({ key: k, reason: err, reason_code: 'host.case.invalid_value' }); continue; }
         const prev = state.inputs[k];
         if (JSON.stringify(prev) === JSON.stringify(v)) { continue; }
         if (PERSON_SOURCES.includes(state.sources[k]) && prev !== null) {

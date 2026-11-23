@@ -213,5 +213,33 @@ const RESULT = {
   notes.push('fields: {k}_* · {k}_notices · mode ids → name_ko · [하중] prefix keeps the code · trace notes and source names in Korean / SI');
 }
 
+// ── 호스트의 말 — 사람에게 가는 글마다 code · 한국어(한 표) ──
+{
+  const fs = require('fs');
+  const src = ['src/webview/StcfsdPanel.ts', 'src/case/caseKeeper.ts', 'src/case/caseState.ts', 'src/records/desk.ts']
+    .map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n');
+  // 장부의 까닭: 호스트가 쓰는 글(고정 · 모양)마다 code
+  const lits = new Set();
+  for (const re of [/_invalidateAnalysisState\('([^']+)'/g, /_invalidateAnalysisState\(`([^`]+)`/g, /_ledgerAdd\([^,]+, '([^']+)'/g, /_drop[A-Za-z]+\('([^']+)'/g,
+    /reasonIn \?\? '([^']+)'/g, /'(Load inputs changed|Design inputs changed|Lap inputs changed)'/g]) {
+    for (const m of src.matchAll(re)) { lits.add(m[1].replace(/\$\{lc\}/, 'compression').replace(/\$\{item\}/, 'ALT-1')); }
+  }
+  const unc = [...lits].filter((s) => !N.ledgerReason(s).code);
+  assert(lits.size > 25 && !unc.length, `every ledger reason has a code (${lits.size}): ${JSON.stringify(unc)}`);
+  assert.strictEqual(N.ledgerReason('Inputs changed (set_case_inputs): x').code, 'host.ledger.ai_inputs');
+  assert.deepStrictEqual(N.ledgerReason('?'), { code: null, text: '?', text_ko: '?' });
+  // 화면의 칸 변경 거절 · 발행 점검의 code 마다 등록표의 한국어 문장
+  const codes = new Set([...src.matchAll(/reason_code: '(host\.[a-z_.]+)'/g)].map((m) => m[1]));
+  for (const m of src.matchAll(/code: '([a-z-]+)'/g)) { if (/^(no-|stale-|not-evaluated|ng$|open-q|incomplete|provisional|unsaved|damaged|read-only|unknown-issue|report-notices|changed-sources|edited-previous|same-as)/.test(m[1])) { codes.add('host.issue.' + m[1]); } }
+  const missing = [...codes].filter((c) => !(N.HOST[c] && N.HOST[c].template_ko));
+  assert(codes.size >= 20 && !missing.length, `every host code has a Korean sentence (${codes.size}): ${JSON.stringify(missing)}`);
+  // 기록의 사건 이름: 기록 모듈이 쓰는 사건마다 한국어
+  const rec = fs.readdirSync(path.join(ROOT, 'src', 'records')).filter((f) => f.endsWith('.ts')).map((f) => fs.readFileSync(path.join(ROOT, 'src', 'records', f), 'utf8')).join('\n');
+  const evs = new Set([...rec.matchAll(/event: '([a-z-]+)'/g)].map((m) => m[1]));
+  const noKo = [...evs].filter((e) => !N.RECORD_EVENTS_KO[e]);
+  assert(evs.size >= 8 && !noKo.length, `every record event has a Korean name (${[...evs].join(' ')}): ${JSON.stringify(noKo)}`);
+  notes.push(`host words: ${lits.size} ledger reasons · ${codes.size} reason / blocker codes · ${evs.size} record events — each with a code and Korean`);
+}
+
 console.log(`notice_render_contract: PASS (${notes.join('; ')})`);
 process.exitCode = 0;

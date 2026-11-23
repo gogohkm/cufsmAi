@@ -84,6 +84,8 @@ export interface DeskEnv {
     issueCheck?(): IssueCheckInput | { error: string };
     /** R5-2: 초안의 ReportDoc 을 도장만 바꿔 다시 그린 최종본(HTML · PDF 바이트) — 호스트의 그리기 · 인쇄(D14) */
     issueRender?(input: { doc: unknown; kind: DocKind; stamp: Record<string, unknown>; baseName: string }): Promise<Array<{ name: string; role: string; bytes: Buffer }>>;
+    /** 막는 것 · 경고 한 줄에 code 의 문장(호스트의 등록표) — 미리보기 · 점검이 같은 글 */
+    issueText?(x: { code: string; count?: number; detail?: string }): { code: string; count?: number; detail?: string; text?: string; text_ko?: string };
     /** 시험만(STCFSD_TEST_MODE=1): 발행의 한 걸음에서 던진다(디스크가 찬 것처럼) */
     issueFault?(step: string): void;
 }
@@ -1122,7 +1124,8 @@ export class RecordsDesk {
         const files = draft ? [`${folder}/${base}.${draft.kind}.R${revision}.html`, `${folder}/${base}.${draft.kind}.R${revision}.pdf`, `${folder}/manifest.json`] : [];
         const fingerprint = fp('stcfsd-fp/issue-check/1', { caseId: c.caseId, revision, folder, draft: input.draft ? { item: input.draft.item, docFp: input.draft.docFp } : null,
             basis: input.basis, blockers: blockers.map((b) => [b.code, b.count ?? null]), warnings: warnings.map((w) => [w.code, w.count ?? null]) });
-        return { caseId: c.caseId, caseName: c.name, revision, label: `R${revision}`, folder, blockers, warnings, passed: input.passed, draft, files, fingerprint, input };
+        const say = this.env.issueText ?? ((x: any) => x);
+        return { caseId: c.caseId, caseName: c.name, revision, label: `R${revision}`, folder, blockers: blockers.map(say), warnings: warnings.map(say), passed: input.passed, draft, files, fingerprint, input };
     }
     /** 실패한 발행으로 적혔고 아직 옆으로 옮기지 않은 폴더인가 */
     private failedFolderPending(folder: string): boolean {

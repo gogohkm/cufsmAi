@@ -6390,32 +6390,10 @@
         }
     }
 
-    /** 호스트의 무효화 까닭(영어, MCP 와 같은 글) → 화면 글(V4-33). 모르는 글은 그대로. */
+    /** 호스트의 무효화 까닭(영어, MCP 와 같은 글) → 화면 글(V4-33) — 표는 notices.js 의 ledgerReason 하나(새 화면과 같다). 모르는 글은 그대로 */
     function _reasonKo(reason) {
-        const s = String(reason || '');
-        const table = {
-            'project opened': '프로젝트를 열었습니다', 'model changed': '모델이 바뀌었습니다', 'Model updated': '모델이 바뀌었습니다',
-            'New analysis started': '새 해석을 시작했습니다', 'Section template changed': '단면 템플릿이 바뀌었습니다',
-            'Material changed': '재료가 바뀌었습니다', 'Boundary condition changed': '경계조건이 바뀌었습니다',
-            'Length range changed': '반파장 범위가 바뀌었습니다', 'Stress distribution changed': '응력 분포가 바뀌었습니다',
-            'Doubled section geometry changed': '요소 분할이 바뀌었습니다', 'Deck springs applied': '데크 스프링을 적용했습니다',
-            'Project loaded': '프로젝트를 열었습니다', 'Signature-curve analysis started': '서명곡선 해석을 시작했습니다',
-            'Nodal stresses changed': '절점 응력이 바뀌었습니다', 'Springs changed': '스프링이 바뀌었습니다',
-            'Constraints changed': '구속조건이 바뀌었습니다', 'Nodes replaced': '절점을 바꿨습니다', 'Elements replaced': '요소를 바꿨습니다',
-            'Node added': '절점을 더했습니다', 'Element added': '요소를 더했습니다', 'Node modified': '절점을 고쳤습니다',
-            'Node deleted': '절점을 지웠습니다', 'Element modified': '요소를 고쳤습니다', 'Element deleted': '요소를 지웠습니다',
-            'cFSM constraints changed': 'cFSM 구속이 바뀌었습니다', 'Stress distribution regenerated': '응력 분포를 다시 만들었습니다',
-            'Saved analysis is from an older or different model state. Run analysis again.': '저장된 해석이 지금 모델과 다릅니다',
-            'Load analysis inputs changed': '하중 해석의 입력이 바뀌었습니다',
-            // V8-05: 호스트 장부의 까닭(화면이 카드에 쓴다 — 지금까지 화면이 쓰던 글과 같게)
-            'Design inputs changed': '입력이 변경되었습니다', 'Load inputs changed': '하중 해석의 입력이 바뀌었습니다',
-            'Lap inputs changed': '입력이 변경되었습니다', 'Connection inputs changed': '입력이 변경되었습니다',
-            'Saved design is from a different model state': '저장된 설계가 지금 모델과 다릅니다',
-        };
-        if (table[s]) { return table[s]; }
-        const m = /^Load case changed: (.+)$/.exec(s);
-        if (/^Inputs changed \(set_case_inputs\)/.test(s)) { return 'AI 가 입력을 바꿨습니다(set_case_inputs)'; }
-        return m ? '하중 경우가 바뀌었습니다(' + m[1] + ')' : userText(s);
+        const r = _N ? _N.ledgerReason(reason) : { code: null, text_ko: String(reason || '') };
+        return r.code ? r.text_ko : userText(r.text_ko);
     }
 
     // D-4(K2-7): ④ 접합부 탭 — Lap 칸이면 'lap', 단일 접합 칸이면 'connection'(호스트의 무효 장부가 그 결과 하나만 지운다)

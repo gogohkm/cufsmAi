@@ -156,7 +156,7 @@ async function main() {
     await expect('unknown-issue-folder', true, 'an R0 folder the records do not know');
     {   // 미리보기는 그 막는 것과 함께 보이고, 발행은 거절 — 그 폴더를 다시 쓰지 않는다
       const pvx = face().issuePreview();
-      assert(pvx.blockers.some((b) => b.code === 'unknown-issue-folder'));
+      assert(pvx.blockers.some((b) => b.code === 'unknown-issue-folder' && /기록에 없는 발행 폴더/.test(b.text_ko)) && pvx.blockers.every((b) => b.text_ko), 'the preview carries the Korean sentence per code: ' + JSON.stringify(pvx.blockers));
       await assert.rejects(face().issue({ fingerprint: pvx.fingerprint, nonce: pvx.nonce }), /blocked: .*unknown-issue-folder/);
       assert.deepStrictEqual(fs.readdirSync(path.join(issueRoot, 'R0')), [], 'the unknown folder is not reused');
     }

@@ -98,6 +98,9 @@ export interface LedgerEntry {
     result_type?: string;
     /** 호스트의 까닭 글(영문 — 웹뷰의 _reasonKo 가 옮긴다) */
     reason: string;
+    /** 그 까닭의 code(`host.ledger.*` — 모르는 글은 없다) · 한국어(notices.js 의 한 표) */
+    reason_code?: string;
+    reason_ko?: string;
     /** 그 무효를 일으킨 것: 호스트 액션 이름(MCP 와 화면이 같은 이름) 또는 웹뷰 메시지 이름, 바뀐 입력 */
     cause: { action?: string; message?: string; scope?: string; inputs?: string[] };
     invalidated_at: string;

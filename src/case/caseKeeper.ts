@@ -205,12 +205,12 @@ export class CaseKeeper {
             if (d.origin === 'load-analysis' && !this.fillPending) {
                 const keys = Object.keys(raw0).filter(differs);
                 return { state: this.state, accepted: [], conflicts: keys,
-                    rejected: keys.map((key) => ({ key, reason: 'a replayed load-analysis fill (no new load analysis since the page was loaded) — not an edit' })) };
+                    rejected: keys.map((key) => ({ key, reason: 'a replayed load-analysis fill (no new load analysis since the page was loaded) — not an edit', reason_code: 'host.case.replayed_fill' })) };
             }
             if (d.origin === 'mirror' && this.reloadWindow) {
                 const keys = Object.keys(raw0).filter(differs);
                 return { state: this.state, accepted: [], conflicts: [],
-                    rejected: keys.map((key) => ({ key, reason: 'the reloaded page drew the state differently — not an edit' })) };
+                    rejected: keys.map((key) => ({ key, reason: 'the reloaded page drew the state differently — not an edit', reason_code: 'host.case.reload_echo' })) };
             }
         }
         // V7-08: 파일을 연 판(경계)보다 오래된 판을 보고 만든 화면의 변경은 키와 무관하게 받지 않는다 — 열기 전에 친 글자가
@@ -222,19 +222,19 @@ export class CaseKeeper {
                 return JSON.stringify(cur) !== JSON.stringify(raw[k]);
             });
             return { state: this.state, accepted: [], conflicts: keys,
-                rejected: keys.map((key) => ({ key, reason: `made on rev ${opts.baseRev}, before a file was opened at rev ${this.boundaryRev} — not applied` })) };
+                rejected: keys.map((key) => ({ key, reason: `made on rev ${opts.baseRev}, before a file was opened at rev ${this.boundaryRev} — not applied`, reason_code: 'host.case.older_than_open' })) };
         }
         // u33 · V7-S1: 하중 해석에서 채운 값(origin load-analysis)은 그 하중 해석보다 뒤에 사람 · AI · 파일이 쓴 키를 덮지 않는다 —
         // 다시 싣기에 다시 온 옛 loadAnalysisComplete 의 채움은 새 해석이 아니다. 하중 해석이 없으면 그런 키는 하나도 덮지 않는다.
         let changes: Record<string, unknown> = d.changes && typeof d.changes === 'object' ? d.changes : {};
-        const guarded: { key: string; reason: string }[] = [];
+        const guarded: { key: string; reason: string; reason_code?: string }[] = [];
         if (d.origin === 'load-analysis') {
             const keep: Record<string, unknown> = {};
             for (const [k, v] of Object.entries(changes)) {
                 const src = this.state.sources[k];
                 const newer = this.loadAnalysisRev === null || (this.state.revs[k] ?? 0) > this.loadAnalysisRev;
                 if ((src === 'user' || src === 'ai' || src === 'file') && newer) {
-                    guarded.push({ key: k, reason: `set by ${src} after the load analysis — the load-analysis fill does not replace it` });
+                    guarded.push({ key: k, reason: `set by ${src} after the load analysis — the load-analysis fill does not replace it`, reason_code: 'host.case.guarded_fill' });
                 } else { keep[k] = v; }
             }
             changes = keep;

@@ -11,6 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createPanel } = require('./panel_harness');
+const N = require('../../webview/js/notices.js');
 const { transpileMcp } = require('./mcp_transpile');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -88,6 +89,20 @@ async function main() {
       options: [{ label: '300 mm', consequence: 'kx 그대로' }, { label: '600 mm', consequence: 'kx 절반' }],
       refs: [{ kind: 'field', path: 'case.inputs.deckFastenerSpacing' }] });
     assert(q.ok && q.item === 'Q-1', 'question filed: ' + JSON.stringify(q));
+    // 시작 화면 「다음 판단」 · 풀린 참조 · 사건 이름 · 꼬리표 code
+    {
+      const lq = await tool('list_cases', {});
+      const row = lq.cases.find((c) => c.open);
+      assert(row.open_questions && row.open_questions.count === 1 && row.open_questions.first.item === 'Q-1' && row.open_questions.first.title === '데크 체결 간격'
+        && lq.cases.filter((c) => !c.open).every((c) => !c.open_questions), 'list_cases: open questions per case ' + JSON.stringify(row));
+      assert.strictEqual(lq.text_note_code, 'host.note.record_names');
+      const g0 = await tool('work_items', { action: 'get', item: 'Q-1' });
+      const rr = g0.item.refs_resolved;
+      assert(rr && rr.length === 1 && rr[0].kind === 'field' && rr[0].state === 'current' && rr[0].label_ko && !/deckFastenerSpacing/.test(rr[0].label_ko),
+        'field ref resolved with its page label: ' + JSON.stringify(rr));
+      assert(g0.item.history.every((h) => h.event_ko && h.event_ko !== h.event), 'history events in Korean: ' + JSON.stringify(g0.item.history));
+      assert(g0.text_note && g0.text_note_code === 'host.note.record_text' && N.HOST[g0.text_note_code].template_ko, 'text_note code: ' + g0.text_note_code);
+    }
     const rp = await tool('work_items', { action: 'add', kind: 'report', title: '하중 해석 끝', body: '경간 6 · 랩 4',
       items: [{ text: '하중 해석', status: 'done' }, { text: '데크 체결 간격', status: 'assumed', refs: [{ kind: 'work', id: 'Q-1' }] }] });
     assert.strictEqual(rp.item, 'R-1');
