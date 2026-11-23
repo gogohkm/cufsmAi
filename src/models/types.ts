@@ -88,7 +88,7 @@ export interface SectionProperties {
  * K4a: 무효가 된 결과의 장부 한 줄(호스트 StcfsdPanel). 호스트는 낡은 결과를 지운다(낡은 수를 최신으로 내지 않는다) —
  * 이 줄은 「무엇이 · 왜 · 언제 · 어떤 입력 변화로」 지워졌는지만 남긴다. 그 종류의 새 결과가 오면 줄이 지워진다.
  */
-export type LedgerKind = 'buckling_analysis' | 'design_dsm' | 'load_analysis' | 'member_design' | 'lap' | 'connection';
+export type LedgerKind = 'buckling_analysis' | 'design_dsm' | 'load_analysis' | 'member_design' | 'lap' | 'connection' | 'validation';
 
 export interface LedgerEntry {
     kind: LedgerKind;
@@ -110,7 +110,7 @@ export interface LedgerEntry {
  * 계약: docs/implementation/20261123-view-contract.md
  */
 export interface ViewItem {
-    kind: 'check' | 'model' | 'result';
+    kind: 'check' | 'model' | 'result' | 'validation';
     id: string;
     /** check: 그 항목이 든 결과 — member · purlin · connection · lap */
     scope?: string;

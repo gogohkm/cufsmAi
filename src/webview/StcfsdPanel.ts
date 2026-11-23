@@ -245,6 +245,29 @@ export class StcfsdPanel implements McpPanelInterface {
         };
     }
     private _reviewOptions: Record<string, { value: string; text: string }[]> | null = null;
+    /** V7-40(데스크톱 4): 마지막 점검의 기록(항목은 담지 않는다 — id 만) */
+    private _lastValidation: { at: string; case_rev: number; model_sig: string; counts: { total: number; pass: number; warn: number; fail: number };
+        units: 'SI' | 'US'; by: 'page' | 'ai'; ids: string[] } | null = null;
+    /** 점검을 기록하고 그 장부 줄을 지운다. AI 가 돌린 것이면 화면에도 보낸다 */
+    private _noteValidation(items: any[], units: 'SI' | 'US', by: 'page' | 'ai'): void {
+        const count = (st: string) => items.filter((i) => i.status === st).length;
+        this._lastValidation = { at: new Date().toISOString(), case_rev: this._caseKeeper.state.rev, model_sig: this._currentModelSignature(),
+            counts: { total: items.length, pass: count('pass'), warn: count('warn'), fail: count('fail') }, units, by, ids: items.map((i) => String(i.id)) };
+        this._ledgerClear('validation');
+        if (by === 'ai') { this._postMessage('validationResult', { items, unitSystem: units, case_rev: this._caseKeeper.state.rev, by: 'ai' }); }
+        this._postLedger();
+    }
+    /** 점검 뒤 입력이나 모델이 바뀌었으면 그 점검은 낡았다 — 장부로 옮긴다 */
+    private _checkValidationStale(): void {
+        const v = this._lastValidation;
+        if (!v) { return; }
+        const inputs = this._caseKeeper.state.rev !== v.case_rev, model = this._currentModelSignature() !== v.model_sig;
+        if (!inputs && !model) { return; }
+        this._lastValidation = null;
+        this._ledgerAdd('validation', inputs ? 'Inputs changed after the validation' : 'The model changed after the validation',
+            { action: inputs ? 'case edit' : 'model change' }, v.at);
+        this._postLedger();
+    }
     /** K3-5: 화면에 마지막으로 보낸 보고서 HTML(「PDF 저장」 이 그것을 인쇄한다) */
     private _lastReportHtml: string | null = null;
 
@@ -298,6 +321,7 @@ export class StcfsdPanel implements McpPanelInterface {
     private _mcpValidate(options: any): any {
         const us: 'SI' | 'US' = options?.report_units === 'SI' ? 'SI' : 'US';
         const items = this._validationItems(this._reviewEnv(us));
+        this._noteValidation(items, us, 'ai');
         const count = (st: string) => items.filter((i) => i.status === st).length;
         const counts = { total: items.length, pass: count('pass'), warn: count('warn'), fail: count('fail') };
         const full = options?.detail === 'full';
@@ -618,7 +642,9 @@ export class StcfsdPanel implements McpPanelInterface {
             case 'runValidation': {
                 // K3-3: 「설계 검증 실행」 — 호스트가 만든 항목(webview/js/review.js, MCP validate_design 과 같은 목록). 단위는 화면의 것
                 const env = this._reviewEnv(StcfsdPanel._unitOf(message.data));
-                this._postMessage('validationResult', { items: this._validationItems(env), unitSystem: env.unitSystem, case_rev: this._caseKeeper.state.rev });
+                const items = this._validationItems(env);
+                this._postMessage('validationResult', { items, unitSystem: env.unitSystem, case_rev: this._caseKeeper.state.rev, by: 'page' });
+                this._noteValidation(items, env.unitSystem, 'page');
                 break;
             }
 
@@ -888,7 +914,9 @@ export class StcfsdPanel implements McpPanelInterface {
             units: 'US',
             // K2-6: 검토 상태의 판과 저장 안 한 변경(언제부터) — get_case_inputs 가 값 · 출처
             case: { rev: this._caseKeeper.state.rev, dirty: this._caseKeeper.isDirty(this._currentModelSignature()),
-                dirty_since: this._caseKeeper.dirtySince, file: this._casePath },
+                dirty_since: this._caseKeeper.dirtySince, file: this._casePath, file_origin: this._casePath ? this._caseFileOrigin : null,
+                // 지금 저장하면 결과에 서명이 되는가(아니면 다시 열 때 결과를 되살리지 않는다) — 화면이 미리 알린다
+                ...StcfsdPanel._signingStatus() },
             section_template: m.sectionTemplate ?? null,
             section_type: m.sectionType ?? null,
             section_params: m.sectionParams && typeof m.sectionParams === 'object'
@@ -1421,7 +1449,32 @@ export class StcfsdPanel implements McpPanelInterface {
             kind, ...(extra.id ? { id: extra.id } : {}), ...(extra.result_type ? { result_type: extra.result_type } : {}),
             reason, cause: { ...cause }, invalidated_at: new Date().toISOString(), result_at: resultAt ?? null,
         });
+        this._queueDrop(kind, reason, cause);
         return true;
+    }
+
+    /**
+     * V7-40: 호스트가 결과를 지울 때마다(어떤 까닭 · 범위든) 지운 종류를 실은 알림 하나 —
+     * `derivedResultsInvalidated {kinds, scope: 'kinds', reason, cause}`. 한 동기 묶음 안의 지움은 한 메시지로 모은다.
+     * 종류 이름: buckling_analysis · design_dsm · load_analysis · member_design · connection · lap · validation(장부의 kind 와 같다).
+     * 이 화면은 scope 'kinds' 를 무시한다(그 결과는 이미 따로 알렸다) — 다시 보내는 브리지 · 둘째 화면이 「이 종류를 지워라」 로 읽는다.
+     */
+    private _dropQueue: { kinds: Set<string>; reason: string; cause: any } | null = null;
+    private _queueDrop(kind: string, reason: string, cause: any): void {
+        if (!this._dropQueue) {
+            this._dropQueue = { kinds: new Set(), reason, cause: cause ? { ...cause } : null };
+            queueMicrotask(() => {
+                const q = this._dropQueue; this._dropQueue = null;
+                if (q && q.kinds.size) { this._postMessage('derivedResultsInvalidated', { kinds: [...q.kinds], scope: 'kinds', reason: q.reason, cause: q.cause }); }
+            });
+        }
+        this._dropQueue.kinds.add(kind);
+    }
+
+    /** 지금 있는 결과의 종류(장부 이름) */
+    private _presentKinds(): string[] {
+        const st = this._resultsStatus();
+        return Object.keys(st).filter((k) => st[k] !== null && st[k] !== undefined);
     }
 
     /** 그 종류의 새 결과가 왔다 — 장부의 그 종류 줄(접합은 모든 접합 줄)을 지운다. */
@@ -1455,6 +1508,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 fy_reference: meta?.fy ?? null,
             } : null,
             design_dsm: this._preparedDesignDsm ? { at: this._preparedDesignDsmAt } : null,
+            // V7-40(데스크톱 4): 마지막 점검 — 입력 판 · 시각 · 수 · 단위 · 누가(화면 · AI). 입력이나 모델이 바뀌면 장부로
+            validation: this._lastValidation ? { at: this._lastValidation.at, case_rev: this._lastValidation.case_rev,
+                counts: { ...this._lastValidation.counts }, units: this._lastValidation.units, by: this._lastValidation.by } : null,
             load_analysis: this._lastLoadAnalysis ? { at: this._lastLoadAnalysisAt } : null,
             member_design: this._lastDesignResult ? {
                 at: this._lastDesignAt, result_type: this._designResultType(this._lastDesignResult),
@@ -1482,6 +1538,8 @@ export class StcfsdPanel implements McpPanelInterface {
         this._lastLoadAnalysisAt = new Date().toISOString();
         this._lastLoadRequest = requestKey;
         this._ledgerClear('load_analysis');
+        // u33: 이 하중 해석보다 뒤에 쓴 사람 · AI 값은 그 해석의 자동 채움이 덮지 않는다
+        this._caseKeeper.noteLoadAnalysis();
     }
 
     /** 하중 분석의 입력 열쇠(엔진 인자 + 모델에서 section 을 만들 때 쓰는 Fy · Fu). 바뀐 키 비교에 쓴다. */
@@ -1551,7 +1609,7 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     // ---------------------------------------------------------------- K4a: 보기 상태 · focus (view contract)
-    private static readonly VIEW_ITEM_KINDS = ['check', 'model', 'result'];
+    private static readonly VIEW_ITEM_KINDS = ['check', 'model', 'result', 'validation'];
     private static readonly CHECK_SCOPES = ['member', 'purlin', 'connection', 'lap'];
 
     /** 짧은 글 하나(제어 문자 없이, 길이 제한). 아니면 null. */
@@ -1616,6 +1674,11 @@ export class StcfsdPanel implements McpPanelInterface {
             const ok = StcfsdPanel.MODEL_ITEM_IDS.includes(it.id) || n(/^section\.node\.(\d+)$/, this._model.node?.length || 0)
                 || n(/^section\.element\.(\d+)$/, this._model.elem?.length || 0);
             return ok ? { kind: 'model', id: it.id } : null;
+        }
+        if (it.kind === 'validation') {
+            // V7-40(데스크톱 5): 점검 항목 id(val.*) — 마지막 점검(지금 입력의 것)에 있는 id 만
+            this._checkValidationStale();
+            return /^val\.[a-z_]+\.[a-z0-9_]+(\.\d+)?$/.test(it.id) && !!this._lastValidation?.ids.includes(it.id) ? { kind: 'validation', id: it.id } : null;
         }
         if (it.kind === 'result') {
             const regions: any[] = Array.isArray(this._lastDesignResult?.regions) ? this._lastDesignResult.regions : [];
@@ -1766,6 +1829,7 @@ export class StcfsdPanel implements McpPanelInterface {
 
     /** focus 의 대상이 지금 결과에 있는가(check 만 본다 — 그 밖은 null). 값을 풀지 않고 id 만 찾는다. */
     private _focusTargetFound(item: ViewItem): boolean | null {
+        if (item.kind === 'validation') { this._checkValidationStale(); return !!this._lastValidation?.ids.includes(item.id); }
         if (item.kind !== 'check') { return null; }
         const has = (r: any) => Array.isArray(r?.design_checks) && r.design_checks.some((c: any) => c?.id === item.id);
         const d = this._lastDesignResult;
@@ -3952,6 +4016,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 this._caseKeeper.markSaved(this._currentModelSignature());
                 this._casePath = options.filepath;
+                this._caseFileOrigin = 'ai';
                 this._postCaseDirty();
                 // V7-01: AI 가 연 파일의 결과는 되살리지 않는다(입력만) — 다시 계산은 한 번(run_case_check)
                 if (data && ['analysisResult', 'dsm', 'properties', 'loadAnalysis', 'designResult', 'preparedDesignDsm', 'lapResult'].some((k) => data[k])) {
@@ -4662,6 +4727,8 @@ ${inner}
 
     /** K2-6: 새로 고침한 화면에 모델 · 결과 · 상태를 다시(두 번째 webviewReady — D-6). 결과를 다시 보낸 뒤 상태를 맨 끝에(하중 결과의 칸 채움을 덮게). */
     private _repostToPage(): void {
+        // V7-40: 다시 싣기 — 무엇보다 먼저 지금의 참(어떤 결과가 있는지 · 무효 장부). 그 뒤의 결과 메시지는 그 참 안의 것뿐이다
+        this._postLedger();
         this._postMessage('modelLoaded', this._model);
         if (this._lastAnalysisResult && this._isAnalysisCurrent()) { this._postMessage('analysisComplete', this._lastAnalysisResult); }
         if (this._lastLoadAnalysis) { this._postMessage('loadAnalysisComplete', this._lastLoadAnalysis); }
@@ -4685,7 +4752,9 @@ ${inner}
         const dirty = this._caseKeeper.touch(sig);
         return { dirty, since: this._caseKeeper.dirtySince, rev: this._caseKeeper.state.rev,
             inputs_changed: dirty ? this._caseKeeper.changedSinceSaved() : [], model_changed: this._caseKeeper.modelChangedSinceSaved(sig),
-            file: this._casePath };
+            file: this._casePath,
+            // V7-40(데스크톱 2): 지금 파일 경로를 누가 정했나 — person(대화상자 · 사람이 이 세션에 연 · 저장한 것) · ai(load_project) · null
+            file_origin: this._casePath ? this._caseFileOrigin : null };
     }
 
     /** K2-6: 열기 직전 — 저장 안 한 변경이 있으면 그것을 적고 화면에 알린다(묻지 않는다 — 묻는 것은 화면이 정한다) */
@@ -5698,6 +5767,58 @@ ${inner}
 </html>`;
     }
 
+    /** 지금 저장하면 결과에 서명이 되는가 — {results_signed, results_signed_reason?}. 열쇠를 만들지 않는다 */
+    private static _signingStatus(): { results_signed: boolean; results_signed_reason?: string } {
+        const dir = StcfsdPanel.writerKeyDir;
+        if (!dir) { return { results_signed: false, results_signed_reason: 'no writer key folder is configured — saved results are not restored as current when reopened' }; }
+        try {
+            const key = path.join(dir, 'writer.key');
+            if (fs.existsSync(key)) {
+                const st = fs.statSync(key);
+                if (!st.isFile() || st.size === 0) { return { results_signed: false, results_signed_reason: 'the writer key file is empty or not a file — saves are unsigned until it is fixed' }; }
+            }
+            return { results_signed: true };
+        } catch (e: any) { return { results_signed: false, results_signed_reason: `the writer key folder cannot be read (${e?.code || e})` }; }
+    }
+
+    /**
+     * V7-40(데스크톱 3): 경로에 매이지 않는 복구 사본 — 지금 검토 대상을 셸이 준 경로에 .csd 로 쓴다. 지금 파일 경로 · 저장 기준 ·
+     * 그 밖의 아무것도 바꾸지 않는다. 경로는 셸이 정한 폴더(root — 프로그램의 사용자 자료 폴더) 안이어야 하고, 새 파일만('wx'),
+     * 링크를 따라가지 않는다(root 아래 마디 가운데 링크가 있으면 거절). MCP 로는 닿지 않는다: handleMcpAction 에 없고
+     * 독립 프로그램의 호스트가 같은 프로세스에서 이 메서드를 부른다.
+     */
+    public async writeRecoveryCopy(filePath: string, root: string): Promise<{ ok: true; path: string } | { ok: false; error: string }> {
+        if (typeof filePath !== 'string' || typeof root !== 'string' || !path.isAbsolute(filePath) || !path.isAbsolute(root)) {
+            return { ok: false, error: 'absolute filePath and root are required' };
+        }
+        let realRoot: string;
+        try { const st = fs.lstatSync(root); if (st.isSymbolicLink() || !st.isDirectory()) { return { ok: false, error: 'root is not a plain folder' }; } realRoot = fs.realpathSync.native(root); }
+        catch { return { ok: false, error: 'root does not exist' }; }
+        const target = path.resolve(filePath);
+        const rel = path.relative(path.resolve(root), target);
+        if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) { return { ok: false, error: 'the recovery copy must be inside root' }; }
+        if (path.extname(target).toLowerCase() !== '.csd') { return { ok: false, error: 'the recovery copy is a .csd file' }; }
+        // root 아래 마디마다: 링크 · 접합점이면 거절, 없는 폴더는 만든다
+        let cur = realRoot;
+        for (const seg of rel.split(/[\\/]+/).slice(0, -1)) {
+            const e = segmentError(seg); if (e) { return { ok: false, error: `folder name refused: ${e}` }; }
+            cur = path.join(cur, seg);
+            try { const st = fs.lstatSync(cur); if (st.isSymbolicLink() || !st.isDirectory()) { return { ok: false, error: `'${seg}' is not a plain folder` }; } }
+            catch { fs.mkdirSync(cur); }
+        }
+        const name = path.basename(target);
+        const ne = segmentError(name); if (ne) { return { ok: false, error: `file name refused: ${ne}` }; }
+        const out = path.join(cur, name);
+        const tmp = path.join(cur, `.${name}.recovery-${process.pid}-${Date.now().toString(36)}`);
+        try {
+            await this._writeProjectFile(tmp, undefined, { neutral: true });
+            fs.linkSync(tmp, out);   // 새 이름만(있으면 EEXIST) — 덮지 않는다
+        } catch (e: any) {
+            return { ok: false, error: e?.code === 'EEXIST' ? 'a file with that name exists — the recovery copy writes new files only' : `the recovery copy failed (${e?.code || e?.message || e})` };
+        } finally { try { fs.unlinkSync(tmp); } catch { /* 없음 */ } }
+        return { ok: true, path: out };
+    }
+
     /** 프로젝트 저장 (.csd) */
     private async _saveProject(designData?: any): Promise<void> {
         const uri = await vscode.window.showSaveDialog({
@@ -5728,7 +5849,7 @@ ${inner}
         return this._loadProjectFile(fsPath);
     }
 
-    private async _writeProjectFile(fsPath: string, designData?: any): Promise<any> {
+    private async _writeProjectFile(fsPath: string, designData?: any, opts: { neutral?: boolean } = {}): Promise<any> {
         const saveSignature = this._currentModelSignature();
         const wrapped = designData && typeof designData === 'object' && designData.__stcfsd_collect === 2;
         const designInputs = wrapped ? (designData.designInputs ?? null) : (designData || null);
@@ -5814,10 +5935,16 @@ ${inner}
         this._requireCurrentSignature(saveSignature, 'Project save');
 
         const json = JSON.stringify(projectData, null, 2);
+        if (opts.neutral) {
+            // 복구 사본: 새 파일만, 지금 파일 경로 · 저장 기준 · 화면에 아무것도 바꾸지 않는다
+            fs.writeFileSync(fsPath, json, { encoding: 'utf-8', flag: 'wx' });
+            if (sealNote) { Object.defineProperty(projectData, 'seal_note', { value: sealNote, enumerable: false }); }
+            return projectData;
+        }
         const tmp = `${fsPath}.tmp-${process.pid}`;
         fs.writeFileSync(tmp, json, 'utf-8');
         fs.renameSync(tmp, fsPath);
-        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._casePath = fsPath; this._postCaseDirty(); }
+        if (designData === undefined) { this._caseKeeper.markSaved(this._currentModelSignature()); this._casePath = fsPath; this._caseFileOrigin = 'person'; this._postCaseDirty(); }
         if (sealNote) { Object.defineProperty(projectData, 'seal_note', { value: sealNote, enumerable: false }); }
         return projectData;
     }
@@ -5875,6 +6002,9 @@ ${inner}
             warnings.push(`Unsaved changes were discarded by opening this file (since ${discarded.since}; ${discarded.inputs_changed.length} input(s)${discarded.model_changed ? ', model' : ''} changed)`);
         }
         // V4-01: 이전 프로젝트의 화면 결과를 먼저 모두 지운다(파일에 없는 결과가 남지 않게).
+        // V7-40: 지운 종류를 알린다(다시 보내는 브리지 · 둘째 화면)
+        for (const k of this._presentKinds()) { this._queueDrop(k, 'project opened', { action: 'open_project' }); }
+        this._lastValidation = null;
         this._lastAnalysisResult = null;
         this._lastLoadAnalysis = null;
         this._lastDesignResult = null;
@@ -5988,9 +6118,13 @@ ${inner}
         // K2-3: 파일의 입력 → 호스트의 검토 상태(표의 키만 — 모르는 키는 버리고 알린다, V5b-01 과 같은 태도).
         const mig = migrateProject(projectData);
         this._casePath = fsPath;
+        // 사람이 연 길(대화상자 · 독립 프로그램의 열기) — AI 의 load_project 는 따로
+        this._caseFileOrigin = 'person';
         warnings.push(...mig.warnings);
         const fileUnitSystem = projectData.case?.view?.unitSystem ?? projectData.designInputs?.unitSystem;
         this._caseKeeper.loadFromFile(mig.state, fileUnitSystem !== 'US' && fileUnitSystem !== 'SI');
+        // u33: 파일의 하중 해석은 파일의 입력과 함께 — 그 뒤의 사람 · AI 값은 자동 채움이 덮지 않는다
+        this._caseKeeper.noteLoadAnalysis(!!this._lastLoadAnalysis);
         this._caseKeeper.markSaved(this._currentModelSignature());
         const restorePayload = this._caseRestorePayload(mig, projectData);
         // 화면의 판을 먼저(뒤에 오는 사람의 칸 변경이 이 판 위에서 — 설계 §3.2)
@@ -6046,7 +6180,11 @@ ${inner}
     }
 
     /** K2: 저장 안 한 변경이 있는가(입력 판 · 모델 서명) — 화면 · 독립 창이 듣는다(K2-6 에서 닫기 물음) */
+    /** V7-40(데스크톱 2): 지금 파일 경로를 정한 쪽 */
+    private _caseFileOrigin: 'person' | 'ai' | null = null;
+
     private _postCaseDirty(force = true): void {
+        this._checkValidationStale();
         const dirty = this._caseKeeper.touch(this._currentModelSignature());
         if (!force && dirty === this._caseDirtySent) { return; }
         this._caseDirtySent = dirty;

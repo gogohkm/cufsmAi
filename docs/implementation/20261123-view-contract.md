@@ -8,7 +8,7 @@
 
 | 필드 | 뜻 |
 |---|---|
-| `kind` | `check` = 결과의 검토 항목 하나 · `model` = 모델의 한 부분 · `result` = 결과 전체나 그 한 부분 |
+| `kind` | `check` = 결과의 검토 항목 하나 · `model` = 모델의 한 부분 · `result` = 결과 전체나 그 한 부분 · `validation` = 마지막 점검(validate_design · 설계 검증 실행)의 항목 하나 — id 는 `val.*`(webview/js/review.js VALIDATION_IDS), 그 점검에 있는 id 만 받는다. 점검 뒤 입력 · 모델이 바뀌면 그 점검은 장부로 가고 id 도 받지 않는다(2026-11-24, V7-40 데스크톱 5) |
 | `id` | 아래 표. 영문 · 숫자와 `. _ - : [ ]` 공백만, 200자까지 |
 | `scope` | `check` 에만(필수): 그 항목이 든 결과 — `member`(aisi_design_*) · `purlin`(design_purlin) · `connection`(design_connection · aisi_design_connection) · `lap`(design_lap_connection) |
 | `location` | 선택. `check` 는 그 항목의 `design_checks[].location` 그대로 — 퍼린은 `{region, check_point}`(예: `{region: 'negative-2', check_point: 'support 2'}`). 2000자(JSON)까지, US 값 |

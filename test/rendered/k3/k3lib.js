@@ -61,6 +61,8 @@ async function runValidation(ctx) {
   await ctx.tab('validation');
   const m = ctx.mark();
   await ctx.click('#btn-run-validation');
+  // 호스트의 답(validationResult)을 기다린다 — 정해진 시간이 아니라(부하에서 300 ms 안에 오지 않은 일이 한 번 있었다)
+  await ctx.waitMsg('validationResult', m.h2w, 20000);
   await ctx.settle(300);
   const r = await ctx.eval(`(()=>{const c=document.getElementById('validation-container'); const st={'✓':'pass','!':'warn','✗':'fail'}; const out=[];
     for (const blk of c.children) { const hdr=blk.firstElementChild; if (!hdr) continue; const cat=(hdr.childNodes[0]&&hdr.childNodes[0].textContent||'').trim();

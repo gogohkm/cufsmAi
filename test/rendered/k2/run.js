@@ -457,6 +457,28 @@ async function phaseReload() {
         reason: 'K2: a page reload loses every input not yet saved (Lb 77.7 in, flexure) and the second webviewReady re-initialises the host model to the default section (lippedz 8 in → lippedc 100 mm) — the host state must survive and be pushed back' });
       g.check('reload.engine', ctx.engineSince(e0).map((r) => r.method), { expect: 'k2-change', reason: 'K2: the reload regenerates the default section in the engine' });
     });
+    // u33 (데스크톱 작성자) · V7-S1: 하중 해석 → AI 가 Lb · Cb · wcSupport 를 정함 → 다시 싣기 — 다시 온 옛 loadAnalysisComplete 의
+    // 자동 채움이 그 값을 덮지 않는다(호스트가 그 하중 해석보다 뒤에 쓴 user · ai 값은 load-analysis 쓰기로 받지 않는다)
+    await step('u33: MCP load analysis → set_case_inputs → page reload — the AI values stay', async () => {
+      await ctx.panel.handleMcpAction({ action: 'analyze_loads', ...II2A_MCP, Fy: 55, Fu: 70 });
+      await ctx.settle(800);
+      await ctx.drain();
+      const set = await ctx.panel.handleMcpAction({ action: 'set_case_inputs', inputs: { Lb: 62.99, Cb: 1.05, wcSupport: 'EOF' }, reason: 'u33' });
+      assert(!set.error, JSON.stringify(set));
+      await ctx.drain();
+      const m = ctx.mark();
+      await ctx.cdp.send('Page.reload', {});
+      await ctx.waitMsg('modelLoaded', m.h2w, 60000);
+      await ctx.settle(1500);
+      await ctx.drain();
+      const st = ctx.panel.__testGetCase().state;
+      assert.deepStrictEqual([st.inputs.Lb, st.inputs.Cb, st.inputs.wcSupport], [62.99, 1.05, 'EOF'], `host values after the reload: ${JSON.stringify([st.inputs.Lb, st.inputs.Cb, st.inputs.wcSupport])}`);
+      assert.deepStrictEqual([st.sources.Lb, st.sources.Cb, st.sources.wcSupport], ['ai', 'ai', 'ai'], 'still the AI values');
+      const page = { lb: await ctx.eval(`document.getElementById('design-Lb').value`), cb: await ctx.eval(`document.getElementById('design-Cb').value`),
+        wc: await ctx.eval(`document.getElementById('design-wc-support').value`) };
+      assert(Math.abs(parseFloat(page.lb) - (st.view && st.view.unitSystem === 'SI' ? 62.99 * 25.4 : 62.99)) < 0.01 && parseFloat(page.cb) === 1.05 && page.wc === 'EOF',
+        `the page shows the host values again: ${JSON.stringify(page)}`);
+    });
   });
 }
 

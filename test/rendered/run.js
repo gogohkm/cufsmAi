@@ -505,8 +505,12 @@ async function main() {
         const la = await mcp.call('analyze_loads', { ...gui.data, loads: { ...gui.data.loads, D: (gui.data.loads.D || 0) * 1.5 + 5 } });
         assert(!la.isError, `MCP analyze_loads: ${String(la.text).slice(0, 300)}`);
         await ctx.settle(600);
-        const inv = ctx.log.h2w.slice(m.h2w).filter((x) => x.command === 'derivedResultsInvalidated');
+        const all = ctx.log.h2w.slice(m.h2w).filter((x) => x.command === 'derivedResultsInvalidated');
+        // V7-40: 화면에 하는 알림(범위) 하나와, 다시 보내는 길을 위한 이름표(scope 'kinds' — 지운 종류) 하나
+        const inv = all.filter((x) => x.data.scope !== 'kinds');
         assert(inv.length === 1 && inv[0].data.scope === 'design', 'host tells the page what it dropped');
+        const kinds = all.filter((x) => x.data.scope === 'kinds').flatMap((x) => x.data.kinds);
+        assert(kinds.includes('member_design'), `the dropped kinds are named (${JSON.stringify(kinds)})`);
         const card = await ctx.text('#design-summary');
         const lap = await ctx.text('#connection-result');
         await ctx.shotEl('r_k4a_stale_after_mcp_loads', '#design-summary');

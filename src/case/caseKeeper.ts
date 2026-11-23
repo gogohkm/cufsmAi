@@ -76,6 +76,8 @@ export class CaseKeeper {
             case 'resultsCleared': this.clearStale('all'); break;
             case 'derivedResultsInvalidated': {
                 const sc = data && data.scope;
+                // V7-40: scope 'kinds' 는 다시 보내기 · 둘째 화면을 위한 이름표(그 결과는 호스트가 이미 지웠고 화면에는 따로 알렸다) — 거울은 그대로
+                if (sc === 'kinds') { break; }
                 this.clearStale(sc === 'load' ? 'load' : (sc === 'lap' || sc === 'connection') ? sc : 'design');
                 break;
             }
@@ -177,7 +179,23 @@ export class CaseKeeper {
         const opts: { baseRev?: number; keepSource?: boolean } = { keepSource };
         if (d.origin === 'user' && Number.isInteger(d.baseRev)) { opts.baseRev = d.baseRev; }
         const wasClean = this.state.rev === this.savedRev;
-        const r = applyChanges(this.state, d.changes || {}, writer, opts);
+        // u33 · V7-S1: 하중 해석에서 채운 값(origin load-analysis)은 그 하중 해석보다 뒤에 사람 · AI · 파일이 쓴 키를 덮지 않는다 —
+        // 다시 싣기에 다시 온 옛 loadAnalysisComplete 의 채움은 새 해석이 아니다. 하중 해석이 없으면 그런 키는 하나도 덮지 않는다.
+        let changes: Record<string, unknown> = d.changes && typeof d.changes === 'object' ? d.changes : {};
+        const guarded: { key: string; reason: string }[] = [];
+        if (d.origin === 'load-analysis') {
+            const keep: Record<string, unknown> = {};
+            for (const [k, v] of Object.entries(changes)) {
+                const src = this.state.sources[k];
+                const newer = this.loadAnalysisRev === null || (this.state.revs[k] ?? 0) > this.loadAnalysisRev;
+                if ((src === 'user' || src === 'ai' || src === 'file') && newer) {
+                    guarded.push({ key: k, reason: `set by ${src} after the load analysis — the load-analysis fill does not replace it` });
+                } else { keep[k] = v; }
+            }
+            changes = keep;
+        }
+        const r = applyChanges(this.state, changes as any, writer, opts);
+        if (guarded.length) { r.rejected.push(...guarded); r.conflicts.push(...guarded.map((g) => g.key)); }
         this.state = r.state;
         // 열기 바로 뒤 화면의 메아리(복원한 값을 화면이 다시 적어 알린 것 — origin file · 그 앞의 mirror)는 사람 · AI 의 변경이 아니다:
         // 저장 안 한 변경의 기준(savedRev)을 그만큼 옮긴다. 화면이 같은 값을 다른 글로 적어도(빈 경간 표의 처음 값 16.40 ft 등)
@@ -192,6 +210,9 @@ export class CaseKeeper {
     }
     /** 열기 뒤 화면의 복원 메아리를 기다리는 중(edit 의 주석) */
     private openEcho = false;
+    /** u33: 지금 하중 해석을 얻었을 때의 판(없으면 null) — 호스트가 하중 해석을 쥘 때 noteLoadAnalysis 로 적는다 */
+    loadAnalysisRev: number | null = null;
+    noteLoadAnalysis(present = true): void { this.loadAnalysisRev = present ? this.state.rev : null; }
 
     /**
      * 화면이 처음 떴다(caseHello {inputs, drafts}) — 처음 값이 표의 처음 값과 같은지 본다(다르면 기록 — 시험이 본다).

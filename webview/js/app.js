@@ -235,6 +235,8 @@
                 {
                     // K2-5: MCP set_case_inputs 가 접합 칸만 바꿨으면 그 결과만(D-4 와 같은 범위)
                     const sc = msg.data && msg.data.scope;
+                    // V7-40: scope 'kinds' 는 다시 보내는 길(브리지 · 둘째 화면)의 이름표 — 이 화면은 그 결과를 이미 지웠거나 따로 알림을 받았다
+                    if (sc === 'kinds') { break; }
                     clearStaleResults(sc === 'load' ? 'load' : (sc === 'lap' || sc === 'connection') ? sc : 'design', (msg.data && msg.data.reason) || 'inputs changed');
                 }
                 sendTreeUpdate();

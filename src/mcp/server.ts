@@ -727,7 +727,7 @@ server.tool("get_buckling_curve", "Buckling curve of the current analysis: rows 
 //     모델을 바꾸지 않고 창의 포커스를 가져가지 않는다. 화면이 없거나 따라가지 않아도 실패하지 않는다.
 // ============================================================
 const VIEW_ITEM = z.object({
-    kind: z.enum(['check', 'model', 'result']).describe("'check' = one design_checks item of a result; 'model' = a part of the model; 'result' = a whole result or a part of it"),
+    kind: z.enum(['check', 'model', 'result', 'validation']).describe("'check' = one design_checks item of a result; 'model' = a part of the model; 'result' = a whole result or a part of it; 'validation' = one item of the last validate_design run (id val.*)"),
     id: z.string().min(1).max(200).describe("check: the design_checks `id` (e.g. member.flexure.distortional). model: section | section.node.<n> | section.element.<n> | material | boundary_condition | lengths | springs | constraints | load_case. result: buckling_analysis | buckling_analysis.local | buckling_analysis.distortional | buckling_analysis.global | load_analysis | load_analysis.support.<n> | member_design | purlin.region.<region id> | connection | lap. Letters, digits and . _ - : [ ] only."),
     scope: z.enum(['member', 'purlin', 'connection', 'lap']).optional().describe("check only (required): which result holds it — member (aisi_design_*), purlin (design_purlin), connection (design_connection / aisi_design_connection), lap (design_lap_connection)"),
     location: z.record(z.string(), z.any()).optional().describe("check: its `location` as given in design_checks (for design_purlin {region, check_point}, e.g. {region: 'negative-2', check_point: 'support 2'}); otherwise optional context. Kept as given (US units)."),
