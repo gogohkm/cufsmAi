@@ -1115,6 +1115,28 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     return { ok: typed === '77.7' && opened?.ok === true && isY && hostY && s.preserved === null,
       detail: `입력 ${typed} → (웹뷰 내림) 호스트가 Y 를 엶(${opened?.ok}) → 다시 뜬 화면 design-fy=${s.fy} ${s.unit}(Y 의 값 ${isY}) · 호스트 fy ${host.inputs?.fy}(${host.sources?.fy}) · 옛 되살림 ${s.preserved ?? '없음'}` };
   });
+  await step('s14j V9b-08 — 끼운 페이지가 자기 통로로 보낸 editSession 메시지는 다리가 호스트에 넘기지 않는다(편집 상태의 시작 · 끝 · 버리기는 사람의 길만) — 마지막 단계(통로를 가져온다)', async () => {
+    const evs = [];
+    const ac = new AbortController();
+    const evRes = await fetch(`${origin}/api/events`, { headers: { Authorization: `Bearer ${token}` }, signal: ac.signal });
+    const evReader = evRes.body.getReader();
+    const dec = new TextDecoder();
+    let ebuf = '';
+    const pump = (async () => { try { for (;;) { const { value, done } = await evReader.read(); if (done) { break; } ebuf += dec.decode(value, { stream: true }); let i; while ((i = ebuf.indexOf('\n\n')) >= 0) { const chunk = ebuf.slice(0, i); ebuf = ebuf.slice(i + 2); const data = chunk.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim()).join('\n'); try { evs.push(JSON.parse(data)); } catch { /* */ } } } } catch { /* 끊음 */ } })();
+    const wk = (await api('GET', `/api/wv-key?id=${encodeURIComponent(designerId)}`, undefined, {}, { key: true })).json?.data?.key;
+    const ac2 = new AbortController();
+    const out = await fetch(`${wvOrigin}/api/wv/${encodeURIComponent(designerId)}/out?k=${encodeURIComponent(wk)}`, { headers: { Authorization: `Bearer ${token}` }, signal: ac2.signal });
+    const r2 = out.body.getReader();
+    let obuf = '', conn = null;
+    const until = Date.now() + 10_000;
+    while (!conn && Date.now() < until) { const { value, done } = await r2.read(); if (done) { break; } obuf += dec.decode(value, { stream: true }); const m = /"conn":"([^"]+)"/.exec(obuf); if (m) { conn = m[1]; } }
+    const post = await fetch(`${wvOrigin}/api/wv/${encodeURIComponent(designerId)}/in?conn=${encodeURIComponent(conn ?? '')}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-StCFSD-Webview-Key': wk, Connection: 'close' },
+      body: JSON.stringify([{ command: 'editSession', data: { state: 'start' } }, { command: 'editSession', data: { state: 'discard' } }]) }).then(r => r.status);
+    await sleep(600);
+    ac2.abort(); ac.abort(); await pump;
+    const refused = evs.filter(e => e.type === 'webview:refusedMessage' && e.data?.command === 'editSession').length;
+    return { ok: !!conn && post === 200 && refused === 2, detail: `통로 ${conn ? '얻음' : '없음'} · POST ${post} · 넘기지 않은 editSession ${refused}` };
+  });
 
   section('9. 밝은 · 어두운 테마');
   const contrast = () => wv(`

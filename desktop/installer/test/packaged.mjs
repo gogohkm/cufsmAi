@@ -448,6 +448,71 @@ async function main() {
       !!openedC?.ok && resC.length === 0 && dropC.length > 0 && dropC.every(e => /not computed by this program on this PC/i.test(String(e.reason))) && (stC?.nnodes ?? 0) === (j1.model?.node?.length ?? -1),
       `열기 ${openedC?.ok} · 남은 결과 ${resC.join(', ') || '없음'} · 장부 ${dropC.map(e => e.kind).join(', ')} 「${short(dropC[0]?.reason, 70)}」 · 절점 ${stC?.nnodes}`);
     await quit(C, 'C');
+    section('3b. 기록 갈래 — 설치본이 고른 프로젝트 뿌리(시험의 임시 문서 폴더 — 확인 표시가 있을 때만 받는 STCFSD_DOCUMENTS)에서 대상 · 실행 · 저장 → 다시 열기 · 한국어 알림 · 초안 · 발행(진짜 인쇄)');
+    {
+      t = Date.now();
+      const R = await launch(exe, ['--user-data', userData], env, 'R'); launched.push(R.child);
+      await until(() => R.page('!!(window.__stcfsdUi && window.__stcfsdUi.state.ready)'), 60_000);
+      const root = path.join(docs, 'StCFSD 프로젝트');
+      const where = await R.ev('return { roots: process.env.STCFSD_PROJECT_ROOTS, key: process.env.STCFSD_WRITER_KEY_DIR };');
+      check('기록의 자리 = 설치본이 정한 것 — 프로젝트 뿌리 <문서>\\StCFSD 프로젝트(시험의 임시 문서 폴더) · 열쇠 <사용자 자료>\\writer', where.roots === root && where.key === path.join(userData, 'writer') && inside(root, tmp),
+        short(where, 200));
+      fs.mkdirSync(root, { recursive: true });   // 문서 폴더 아래 뿌리 — 사람이 처음 「새 프로젝트」 할 때 화면이 만드는 것과 같다
+      const pj = await R.ev(`return ctx.host.recordsPerson().createProject(${JSON.stringify(root)}, '설치본 시험');`).catch(e => ({ error: String(e) }));
+      const pdir = path.join(root, '설치본 시험');
+      // 설치본의 MCP 서버(그 폴더의 StCFSD.exe) — AI 의 몫(대상 · 실행 · 설계 · 가정의 「확정」 을 옮겨 적기 · 초안)
+      const entryR = await R.ev('return ctx.entry;');
+      const mr = startMcp(entryR, hostileEnv(h));
+      await mr.request('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'packaged-records', version: '0' } });
+      mr.notify('notifications/initialized', {});
+      const nc = await mr.tool('new_case', { name: 'P1', kind: 'section-only' });
+      const oc = await mr.tool('open_case', { name: 'P1' });
+      const csd = path.join(pdir, '02_검토대상', 'P1.csd');
+      const logText = () => { const out = []; const walk = d => { for (const n of (fs.existsSync(d) ? fs.readdirSync(d) : [])) { const p = path.join(d, n); if (fs.statSync(p).isDirectory()) { walk(p); } else { out.push(fs.readFileSync(p, 'utf8')); } } }; walk(path.join(pdir, '.stcfsd')); return out.join('\n'); };
+      check('프로젝트를 만들고(stcfsd-project.json) 02_검토대상 의 .csd 를 연다 → 기록에 opened 줄', !pj?.error && fs.existsSync(path.join(pdir, 'stcfsd-project.json')) && fs.existsSync(csd) && !nc.isError && !oc.isError && /"event":"opened"/.test(logText()),
+        `${Date.now() - t} ms · ${short(pj?.error ?? pj?.name, 40)} · new_case ${nc.isError ? short(nc.text, 60) : 'ok'} · open_case ${oc.isError ? short(oc.text, 60) : 'ok'}`);
+      await mr.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.3, r: 3, units: 'SI' });
+      await mr.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
+      const run = await mr.tool('run_analysis', {});
+      const st1 = await R.ev('return await ctx.hostAction("get_case_status", { detail: "runs" });');
+      check('좌굴 해석 → 실행 줄(runs)', !run.isError && Array.isArray(st1?.runs) && st1.runs.length > 0 && st1?.results?.buckling_analysis?.state === 'match',
+        `실행 ${st1?.runs?.length ?? 0} · buckling_analysis ${st1?.results?.buckling_analysis?.state}`);
+      await mr.tool('save_case', {});
+      await mr.tool('new_case', { name: 'P2', kind: 'section-only' });
+      await mr.tool('open_case', { name: 'P2' });
+      await mr.tool('open_case', { name: 'P1' });
+      const st2 = await R.ev('return await ctx.hostAction("get_case_status", {});');
+      check('저장 → 다른 대상 → 다시 열기 → get_case_status: 좌굴 해석 「match」(기록한 실행과 같은 결과)', st2?.results?.buckling_analysis?.state === 'match', short(st2?.results, 160));
+      // 화면의 한국어 · SI 알림 — 묶음 안의 notices.js 가 그린다
+      await R.page(`(()=>{ window.__stcfsdUi.review(); window.__stcfsdUi.select('result', 'fsm'); return 1; })()`);
+      const info = await until(() => R.page(`(()=>{ const t = document.getElementById('info')?.innerText ?? ''; return /좌굴/.test(t) && /mm|MPa/.test(t) ? t : null; })()`), 20_000);
+      check('화면의 한국어 · SI 알림(묶음의 notices.js · 새 화면) — 정보 창에 「좌굴」 · SI 단위, undefined · [object Object] 없음', !!info && !/undefined|\[object Object\]/.test(info), short(info?.replace(/\s+/g, ' '), 120));
+      // 설계(AI) → 가정의 「확정」(AI 가 옮겨 적음) → 사람의 확인(사람의 얼굴 — 이 프로세스 안) → 저장 → 초안(AI) → 미리보기 · 발행(사람)
+      const fr = await mr.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 3, Vu: 3, Lb: 1524, design_method: 'LRFD', units: 'SI' });
+      const asms = (await R.ev('return await ctx.hostAction("assumptions", { op: "list" });'))?.items ?? [];
+      for (const a of asms.filter(x => x.blocks_issue)) { await mr.tool('assumptions', { action: 'update', item: a.item, status: 'firm' }); }
+      const asms2 = (await R.ev('return await ctx.hostAction("assumptions", { op: "list" });'))?.items ?? [];
+      const gr = await R.ev('return await ctx.hostAction("get_reviews", { limit: 200 });');
+      const targets = [...(gr?.items ?? []).filter(x => x.type === 'check' && x.fp && x.key).map(x => ({ type: 'check', key: x.key, shown: x.fp })),
+        ...asms2.filter(x => x.blocks_issue).map(x => ({ type: 'assumption', id: x.item, shown: x.seq }))];
+      const mk = await R.ev(`return ctx.host.recordsPerson().review({ mark: true, targets: ${JSON.stringify(targets)} });`).catch(e => ({ error: String(e) }));
+      await mr.tool('save_case', {});
+      const draft = await mr.tool('generate_report', { kind: 'design', format: 'html', report_units: 'SI' });
+      const ck = await R.ev('return await ctx.hostAction("documents", { op: "check" });');
+      check('설계 · 확인 · 저장 · 초안(설치본 안의 그리기) → 발행 전 점검의 막는 것 0', !fr.isError && !mk?.error && !draft.isError && ck?.blocked === false,
+        `확인 ${targets.length} · 표시 ${short(mk?.error ?? mk?.event, 40)} · 초안 ${draft.isError ? short(draft.text, 60) : short(draft.json?.draft, 20)} · 막는 것 ${(ck?.blockers ?? []).map(b => b.code).join(',') || '없음'}`);
+      t = Date.now();
+      const iss = ck?.blocked === false ? await R.ev(`const p = ctx.host.recordsPerson(); const pv = p.issuePreview(); const r = await p.issue({ fingerprint: pv.fingerprint, nonce: pv.nonce }); return { label: pv.label, folder: r.folder, files: r.files.map(f => ({ path: f.path, role: f.role })) };`, 300_000).catch(e => ({ error: String(e) })) : { error: '막는 것이 있어 발행하지 않음' };
+      const files = iss?.files ?? [];
+      const pdfs = files.filter(f => /\.pdf$/i.test(f.path)).map(f => fs.readFileSync(path.join(pdir, ...f.path.split('/'))).subarray(0, 5).toString('latin1'));
+      const csdCopy = files.find(f => f.role === 'case-file');
+      check('발행 R0 — 설치본의 보이지 않는 진짜 인쇄(PDF) · 묶음(계산서 · 검증표 · .csd 사본 · 목록 파일)', !iss?.error && iss.label === 'R0' && pdfs.length >= 2 && pdfs.every(x => x === '%PDF-') && !!csdCopy
+        && sha(path.join(pdir, ...csdCopy.path.split('/'))) === sha(csd),
+        `${Date.now() - t} ms · ${short(iss?.error, 120) ?? ''}${iss?.folder ?? ''} · 파일 ${files.map(f => f.role).join(', ')} · PDF ${pdfs.join(',')}`);
+      await R.capture?.('s5_03_records');
+      await mr.close();
+      await quit(R, 'R');
+    }
     // 제거 도우미 — 제거 프로그램이 부르는 것 그대로(그 폴더의 StCFSD.exe 를 node 로), 다만 설정 · 사용자 폴더는 가짜 · 임시
     const plainEnv = hostileEnv(h);
     const d1 = runDisconnect(exe, res, fakeClaude, userData, plainEnv);

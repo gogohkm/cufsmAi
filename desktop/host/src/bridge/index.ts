@@ -586,6 +586,10 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
           } else if (command === 'openProject' && id === designerId) {
             // V7-41: 다른 파일을 열기 전에 저장 안 한 변경을 묻는다(하나의 함수). 취소면 넘기지 않는다
             void replaceGuard('page-open').then(go => { if (go) { hub.deliver(id, msg); } else { log('[bridge] 열기 취소 — 저장 안 한 변경'); } });
+          } else if (command === 'editSession') {
+            // V9b-08: 편집 상태의 시작 · 끝 · 버리기는 사람의 길(/api/person/edit-session)로만 — 끼운 페이지의 메시지로는 넘기지 않는다
+            log(`[bridge] 끼운 페이지의 editSession 메시지를 넘기지 않음(사람의 길만)`);
+            bus.emit('webview:refusedMessage', 'bridge', { id, command: 'editSession' });
           } else {
             hub.deliver(id, msg);
           }

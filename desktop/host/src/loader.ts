@@ -60,7 +60,8 @@ export interface RecordsPersonFace {
   /** R5-2: 발행 미리보기 — 막는 것 · 경고 · 통과 · 묶일 파일 · 차수 · 지문 · 일회용 숫자(2 분) */
   issuePreview(): { caseId: string; caseName: string; revision: number; label: string; folder: string; blockers: Array<{ code: string; count?: number; detail?: string; text?: string; text_ko?: string }>;
     warnings: Array<{ code: string; count?: number; detail?: string; text?: string; text_ko?: string }>; passed: string[]; draft: { item: string; kind: string; files: string[] } | null; files: string[];
-    fingerprint: string; nonce: string; expiresAt: string };
+    fingerprint: string; nonce: string; expiresAt: string; stamp?: Record<string, unknown>; stamped_doc?: unknown | null; bundle?: Array<{ path: string; role: string }>;
+    passed_labels?: Array<{ code: string; text?: string; text_ko?: string }> };
   /** R5-2: 발행(인쇄를 기다린다) — 미리보기의 지문 · 일회용 숫자 */
   issue(req: { fingerprint: string; nonce: string }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }>;
 }

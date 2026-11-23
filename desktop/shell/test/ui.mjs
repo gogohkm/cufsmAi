@@ -367,6 +367,40 @@ async function main() {
       const s2 = await personPost();
       const l2 = await A.ev('return ctx.diag.personRequests.slice(-1)[0] ?? null;');
       check('사람의 누름(창의 입력) 뒤 2 초 안 → 열쇠가 붙는다(403 이 아니다 — 프로젝트가 없어 409 등 다리의 까닭)', s2 !== 403 && l2?.keyed === true, `${s2} · ${JSON.stringify(l2)}`);
+      // V9b-08 · S1: 끼운 페이지 안의 사람 입력은 창을 열지 않는다 — 편집 상태(F2)로 끼운 페이지를 보이고, 그 안을 누른 뒤 1 초 안에
+      // 그 페이지가 F2 를 postMessage 하고(화면이 편집 상태를 바꿔도 사람의 길은 맨 위 입력을 기다린다) · 페이지 자신의 editSession 메시지 · 화면의 POST
+      await sleep(2500);
+      await A.page(`(async()=>{document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true})); await new Promise(r=>setTimeout(r,400)); return 1;})()`);
+      const rect = await A.page(`(()=>{const f=[...document.querySelectorAll('iframe')].find(x=>x.src.includes('/wv/') && x.getBoundingClientRect().width>50); if(!f) return null; const r=f.getBoundingClientRect(); return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+Math.min(r.height/2, 200))};})()`);
+      await sleep(2500);
+      const top0 = await A.ev('return { top: ctx.diag.topInputs, ignored: ctx.diag.inputIgnored, n: ctx.diag.personRequests.length };');
+      let sv1 = { rect, reqs: [], top: null, msg: null };
+      if (rect) {
+        await A.ev(`ctx.win.webContents.sendInputEvent({ type: 'mouseDown', x: ${rect.x}, y: ${rect.y}, button: 'left', clickCount: 1 }); ctx.win.webContents.sendInputEvent({ type: 'mouseUp', x: ${rect.x}, y: ${rect.y}, button: 'left', clickCount: 1 }); return true;`);
+        await sleep(150);
+        sv1.msg = await A.ev(`const mf = ctx.win.webContents.mainFrame; const f = mf.framesInSubtree.find(x => x !== mf && x.url.includes('/wv/'));
+          return f ? await f.executeJavaScript("parent.postMessage({stcfsdBridge:1,type:'keydown',key:'F2'}, '*'); parent.postMessage({stcfsdBridge:1,type:'keydown',key:'F2'}, '*'); 'posted'", true) : 'no-frame';`);
+        await sleep(200);
+        await personPost();
+        await sleep(600);
+        sv1.reqs = await A.ev(`return ctx.diag.personRequests.slice(${top0.n});`);
+        sv1.top = await A.ev('return { top: ctx.diag.topInputs, ignored: ctx.diag.inputIgnored };');
+      }
+      await A.page(`(async()=>{ if (getComputedStyle(document.getElementById('edit')).visibility==='visible') { document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true})); } await new Promise(r=>setTimeout(r,300)); return 1;})()`);
+      check('S1 — 끼운 페이지 안의 누름 뒤 그 페이지의 F2 메시지 · 화면의 POST 는 열쇠가 붙지 않는다(맨 위 문서의 입력이 아니다)',
+        !!rect && sv1.msg === 'posted' && sv1.top?.top === top0.top && sv1.reqs.length >= 1 && sv1.reqs.every(x => x.keyed === false),
+        `끼운 페이지 ${rect ? `(${rect.x}, ${rect.y})` : '없음'} · 메시지 ${sv1.msg} · 맨 위 입력 ${top0.top} → ${sv1.top?.top} · 요청 ${JSON.stringify(sv1.reqs.map(x => `${x.path}:${x.keyed}`))}`);
+      // V9b-02: 주 프로세스의 마지막 문 — 다리를 거치지 않고 플랫폼의 openPath 에 실행 파일을 주어도 shell.openPath 에 닿지 않는다(시험은 실행하지 않는다)
+      const gd = fs.mkdtempSync(path.join(os.tmpdir(), 'v9b02-'));
+      const gf = { bat: path.join(gd, 'S-101 구조평면도.pdf.bat'), lnk: path.join(gd, 'S-102.lnk'), pdf: path.join(gd, 'ok.pdf') };
+      fs.writeFileSync(gf.bat, ['@echo off', 'exit 0', ''].join(String.fromCharCode(13, 10))); fs.writeFileSync(gf.lnk, 'L'); fs.writeFileSync(gf.pdf, '%PDF-1.4');
+      const gate = await A.ev(`const f = ${JSON.stringify(gf)}; const n0 = ctx.diag.externalOpened.length;
+        const r = [await ctx.platform.openPath(f.bat), await ctx.platform.openPath(f.lnk), await ctx.platform.openPath(f.pdf)];
+        return { r, seen: ctx.diag.externalOpened.slice(n0), log: ctx.platform.openLog.slice(-3) };`).catch(e => ({ error: String(e) }));
+      fs.rmSync(gd, { recursive: true, force: true });
+      check('V9b-02 — 플랫폼의 openPath 에 .bat · .lnk 를 주어도 껍데기의 openLocalFile(shell.openPath)에 닿지 않고, .pdf 만 닿는다(시험이라 열지 않음)',
+        !gate.error && Array.isArray(gate.seen) && gate.seen.length === 1 && /^file:ok\.pdf$/.test(gate.seen[0]) && gate.log?.filter(x => !x.passed).length === 2,
+        short(JSON.stringify(gate)));
       const s3 = await A.ev(`const mf = ctx.win.webContents.mainFrame; const f = mf.framesInSubtree.find(x => x !== mf && x.url.includes('/wv/'));
         return f ? await f.executeJavaScript("fetch(" + JSON.stringify(ctx.bridge.origin) + " + '/api/person/archive',{method:'POST',mode:'no-cors',credentials:'include',body:'{}'}).then(r=>'opaque '+r.type).catch(e=>'blocked')", true) : 'no-frame';`);
       const l3 = await A.ev('return ctx.diag.personRequests.slice(-1)[0] ?? null;');

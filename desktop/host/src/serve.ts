@@ -147,7 +147,7 @@ async function main(): Promise<void> {
       if (m.type === 'status') {
         reply({ id: m.id, ok: true, result: { unimplemented: host.unimplemented(), messageCounts: host.messageCounts(),
           designerAlive: host.designer.alive(), channels: bridge.channels(), mcpConfigWrites: host.mcpConfigWrites(),
-          questions: platform.headless.questions, notifications: platform.headless.notifications.map(n => ({ severity: n.severity, message: n.message })) } });
+          questions: platform.headless.questions, openLog: platform.openLog, notifications: platform.headless.notifications.map(n => ({ severity: n.severity, message: n.message })) } });
         return;
       }
       reply({ id: m.id, ok: false, error: `모르는 요청: ${String(m.type)}` });

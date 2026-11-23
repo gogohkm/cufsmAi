@@ -18,6 +18,7 @@
 import * as fs from 'node:fs';
 import type * as http from 'node:http';
 import * as path from 'node:path';
+import { classifyName, noLinksBelow } from './openable';
 import type { HostHandle } from '../loader';
 import type { BridgePlatform } from './platform';
 import { readBody, sendJson } from './http';
@@ -316,11 +317,19 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         // R5-2: 발행 미리보기(사람의 길) — 호스트의 issuePreview(디스크에 아무것도 쓰지 않는다) + 그 초안의 HTML(미리보기 그림 — 화면은 sandbox 틀에)
         if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
         const pv = person.issuePreview();
-        const cur = person.currentProject();
-        let draftHtml: string | null = null;
-        const hf = (pv.draft?.files ?? []).find(f => /\.html?$/i.test(f));
-        if (cur && hf) { const abs = insideProject(cur.dir, hf, '03_계산서'); if (abs) { try { const st = fs.statSync(abs); if (st.size <= 16 * 1024 * 1024) { draftHtml = fs.readFileSync(abs, 'utf8'); } } catch { draftHtml = null; } } }
-        ok({ ...pv, draft_html: draftHtml });
+        // S2: 첫 쪽은 디스크의 초안 HTML 을 쓰지 않는다(폴더에 쓰는 쪽의 CSS 가 사람이 승인하는 그림을 바꿀 수 있다) — 호스트의 stamped_doc 을
+        // 호스트가 발행 때 쓰는 그리기 · 인쇄 틀(webview/js/review.js 의 renderReportDoc · printableReportHtml)로 여기서 그린다
+        let stampedHtml: string | null = null;
+        if (pv.stamped_doc) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const R = require(path.join(String(deps.host.context.extensionPath), 'webview', 'js', 'review.js')) as { printableReportHtml(i: string): string; renderReportDoc(d: unknown): string };
+            stampedHtml = R.printableReportHtml(R.renderReportDoc(pv.stamped_doc));
+          } catch (err) { deps.log(`[person] 미리보기 첫 쪽을 그리지 못함: ${String((err as Error)?.message ?? err)}`); stampedHtml = null; }
+        }
+        const { stamped_doc: _doc, ...rest } = pv as typeof pv & { stamped_doc?: unknown };
+        void _doc;
+        ok({ ...rest, stamped_html: stampedHtml });
         return true;
       }
       case 'issue': {
@@ -346,6 +355,7 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         const drafts: any[] = Array.isArray(ls?.drafts) ? ls.drafts : [];
         const dr = typeof b.item === 'string' ? drafts.find(x => x.item === b.item) : drafts[0];
         if (!dr) { no(404, '내보낼 초안이 없다 — 먼저 계산서를 만든다'); return true; }
+        if (typeof dr.file_state === 'string' && dr.file_state !== 'same') { no(409, '디스크의 초안 파일이 기록된 해시와 다르다(고쳐짐 · 없어짐) — 내보내지 않는다. 새 초안을 만든다'); return true; }
         const rel: string | undefined = (dr.files as string[]).find(f => /\.pdf$/i.test(f)) ?? (dr.files as string[]).find(f => /\.html?$/i.test(f));
         const src = rel ? insideProject(cur.dir, rel, '03_계산서') : null;
         if (!src || !fs.existsSync(src)) { no(404, '초안의 파일이 없다'); return true; }
@@ -382,14 +392,31 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         const ls = await deps.action({ action: 'sources', op: 'list', include_others: true });
         const hit = (Array.isArray(ls?.items) ? ls.items : []).find((x: any) => x?.item === id);
         if (!hit || typeof hit.file !== 'string') { no(404, '그 원자료가 없다'); return true; }
-        const base = path.resolve(cur.dir, '01_원자료');
-        const abs = path.resolve(base, hit.file);
-        const inside = abs.toLowerCase().startsWith(base.toLowerCase() + path.sep);
-        let plain = false;
-        try { const st2 = fs.lstatSync(abs); plain = st2.isFile() && !st2.isSymbolicLink(); } catch { plain = false; }
-        if (!inside || !plain) { no(409, '원자료 폴더 안의 파일이 아니다(없음 · 링크 · 폴더 밖)'); return true; }
-        const opened = await deps.platform.openPath(abs);
-        ok({ opened, name: path.basename(abs) });
+        // V9b-02 · V9b-03: 열기는 ① 호스트가 지금 본 상태가 「같음」(등록 때의 해시 — 바뀜 · 없음 · 읽을 수 없음이면 열지 않는다),
+        // ② 경로의 모든 마디에 링크 · junction 이 없고 진짜 경로가 01_원자료 의 진짜 경로 안, ③ 진짜 마지막 확장자가 문서 형식일 때만.
+        // ③ 은 플랫폼(주 프로세스)이 진짜 경로로 다시 본다. 안 되면 「폴더에서 보기」(show-source — 아무것도 실행하지 않는다)
+        const at = sourcePath(cur.dir, hit.file);
+        const v = classifyName(at?.real ?? hit.file);
+        if (!at) { no(409, '원자료 폴더 안의 파일이 아니다(없음 · 링크 · junction · 폴더 밖) — 열지 않는다', { data: { code: 'outside', shown_as: v.shownAs } }); return true; }
+        if (hit.state !== 'same') { no(409, `등록한 뒤 파일이 ${hit.state === 'changed' ? '바뀌었다' : hit.state === 'missing' ? '없어졌다' : '읽히지 않는다'} — 열지 않는다(「폴더에서 보기」)`, { data: { code: 'not-same', state: String(hit.state ?? ''), shown_as: v.shownAs } }); return true; }
+        if (!v.openable) { no(409, `열지 않는 형식이다(${v.shownAs}${v.misleading ? ' — 이름이 다른 형식처럼 보인다' : ''}) — 「폴더에서 보기」`, { data: { code: 'type', shown_as: v.shownAs, misleading: v.misleading } }); return true; }
+        const opened = await deps.platform.openPath(at.real, at.root);
+        ok({ opened, name: path.basename(at.real) });
+        return true;
+      }
+      case 'show-source': {
+        // V9b-02: 탐색기에서 그 원자료를 고른 채 폴더를 연다 — 아무것도 실행하지 않는다. 경로는 같은 확인(01_원자료 안 · 링크 없음)
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        const id = typeof b.id === 'string' ? b.id.slice(0, 40) : '';
+        const cur = person.currentProject();
+        if (!id || !cur) { no(400, 'id(원자료) · 열린 프로젝트'); return true; }
+        const ls = await deps.action({ action: 'sources', op: 'list', include_others: true });
+        const hit = (Array.isArray(ls?.items) ? ls.items : []).find((x: any) => x?.item === id);
+        if (!hit || typeof hit.file !== 'string') { no(404, '그 원자료가 없다'); return true; }
+        const at = sourcePath(cur.dir, hit.file);
+        if (!at) { no(409, '원자료 폴더 안의 파일이 아니다(없음 · 링크 · junction · 폴더 밖)'); return true; }
+        const shown = await deps.platform.showInFolder(at.real);
+        ok({ shown, name: path.basename(at.real) });
         return true;
       }
       default:
@@ -411,7 +438,10 @@ function insideProject(dir: string, rel: string, top: string): string | null {
   const base = path.resolve(dir, top);
   const abs = path.resolve(dir, rel);
   if (!abs.toLowerCase().startsWith(base.toLowerCase() + path.sep)) { return null; }
-  try { if (fs.lstatSync(abs).isSymbolicLink()) { return null; } } catch { return abs; }
+  if (!fs.existsSync(abs)) { return abs; }
+  // V9b-03: 마지막 마디만이 아니라 top 아래의 모든 마디 — 링크 · junction 이 없고 진짜 경로가 top 의 진짜 경로 안
+  if (!noLinksBelow(base, abs)) { return null; }
+  try { if (!fs.realpathSync.native(abs).toLowerCase().startsWith(fs.realpathSync.native(base).toLowerCase() + path.sep)) { return null; } } catch { return null; }
   return abs;
 }
 
@@ -420,6 +450,8 @@ async function docFiles(deps: PersonDeps, dir: string, item: string): Promise<{ 
   if (!/^[A-Za-z0-9-]{1,40}$/.test(item)) { return null; }
   const ls = await deps.action({ action: 'documents', op: 'list' });
   const dr = (Array.isArray(ls?.drafts) ? ls.drafts : []).find((x: any) => x.item === item);
+  // S2: 디스크의 초안 파일이 기록된 해시와 다르면(호스트의 file_state) 주지 않는다
+  if (dr && typeof dr.file_state === 'string' && dr.file_state !== 'same') { return null; }
   if (dr) { return { kind: 'draft', files: (dr.files as string[]).map(f => insideProject(dir, f, '03_계산서')).filter((x): x is string => !!x) }; }
   const is = (Array.isArray(ls?.issues) ? ls.issues : []).find((x: any) => x.item === item);
   if (!is) { return null; }
@@ -430,4 +462,20 @@ async function docFiles(deps: PersonDeps, dir: string, item: string): Promise<{ 
   // 계산서(.calc.)를 먼저 — 미리보기 · 「PDF 열기」 는 계산서
   names.sort((a, b2) => Number(!/\.calc\./.test(a)) - Number(!/\.calc\./.test(b2)) || a.localeCompare(b2));
   return { kind: 'issue', files: names.map(n => path.join(folder, n)).filter(x => insideProject(dir, path.relative(dir, x), '04_발행본')) };
+}
+
+/**
+ * V9b-03: 원자료의 경로 — 01_원자료 아래의 모든 마디에 링크 · junction 이 없고, 진짜 경로(realpath)가 01_원자료 의 진짜 경로 안의 보통 파일일 때만.
+ * (호스트가 같은 확인을 한 경로를 사람의 얼굴로 주면 그것을 쓴다 — 호스트에 바람)
+ */
+function sourcePath(dir: string, rel: string): { real: string; root: string } | null {
+  const root = path.resolve(dir, '01_원자료');
+  const abs = path.resolve(root, rel);
+  if (!abs.toLowerCase().startsWith(root.toLowerCase() + path.sep)) { return null; }
+  if (!noLinksBelow(root, abs)) { return null; }
+  let real: string, rr: string;
+  try { real = fs.realpathSync.native(abs); rr = fs.realpathSync.native(root); } catch { return null; }
+  if (!real.toLowerCase().startsWith(rr.toLowerCase() + path.sep)) { return null; }
+  try { if (!fs.statSync(real).isFile()) { return null; } } catch { return null; }
+  return { real, root };
 }

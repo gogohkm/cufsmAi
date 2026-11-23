@@ -93,9 +93,25 @@ export function othersHtml(): string {
   if (!rv.notCounted.length && !ws.length) { return ''; }
   const rows = rv.notCounted.slice(0, 6).map(u => `<li data-not-counted>${esc(u.reviewer)} · ${esc(hhmm(u.at))} · 아직 믿지 않음</li>`).join('');
   const btns = ws.map(w => (w.writer_id
-    ? `<span class="btn ghost" data-rv-trust="${esc(w.writer_id)}"${tip('이 작성자의 확인 표시를 센다(사람만 — 이 PC 에서)')}>${esc(w.name)} (${esc(w.host)}) 믿기</span>`
+    ? (trustAsk === w.writer_id ? trustQuestion(w)
+      : `<span class="btn ghost" data-rv-trust-ask="${esc(w.writer_id)}"${tip('이 작성자를 믿을지 묻는다 — 이름 · 작성자 id · PC 를 보이고')}>${esc(w.name)} (${esc(w.host)}) 믿기…</span>`)
     : `<span class="btn ghost off"${tip('호스트의 get_reviews.writers 에 작성자 id 가 없다 — 믿기를 부를 수 없다(호스트에 바람)')}>${esc(w.name)} (${esc(w.host)}) · 아직 믿지 않음</span>`)).join(' ');
   return `<div class="sec"><h4${tip('다른 PC · 작성자의 확인 표시 — 믿기 전에는 세지 않는다')}>다른 작성자의 확인<span class="sp"></span></h4>${rows ? `<ul class="notes faint">${rows}</ul>` : ''}${btns}</div>`;
+}
+
+/**
+ * S5: 「믿기」 물음 — 작성자 카드의 이름은 그 작성자가 스스로 적은 것(폴더에 쓰는 쪽이 동료의 이름을 흉내 낼 수 있다). 그래서 이름 옆에
+ * 작성자 id(서명 열쇠에서 나온 것 — 줄여서)와 PC 이름을 보이고, 이름은 주장이라고 말한다. 「믿기」 는 이 물음의 단추로만
+ */
+export let trustAsk: string | null = null;
+export function askTrust(id: string | null): void { trustAsk = id; }
+const shortId = (id: string): string => (id.length > 14 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id);
+function trustQuestion(w: { name: string; host: string; writer_id?: string }): string {
+  const id = String(w.writer_id ?? '');
+  return `<div class="banner warn" data-rv-trust-question="${esc(id)}"><b>이 작성자를 믿는가?</b> 이름 「${esc(w.name)}」 은 그 작성자가 스스로 적은 것이다 — 다른 사람의 이름일 수 있다.`
+    + `<dl class="kv"><dt>작성자 id</dt><dd class="num" data-writer-id${tip(id)}>${esc(shortId(id))}</dd><dt>PC</dt><dd data-writer-host>${esc(w.host)}</dd><dt>적은 이름</dt><dd>${esc(w.name)}</dd></dl>`
+    + `<span class="faint">믿으면 이 작성자 id 의 확인 표시를 이 PC 에서 센다. 같은 이름이라도 id 가 다르면 다른 작성자다.</span><div class="btns">`
+    + `<span class="btn" data-rv-trust="${esc(id)}">믿기</span><span class="btn ghost" data-rv-trust-ask="">그만</span></div></div>`;
 }
 
 // ── 누르기 ──────────────────────────────────────────────────────────

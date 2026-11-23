@@ -12,18 +12,16 @@ import { api, mcp } from './bridge';
 import { esc, tip } from './dom';
 import { hhmm, none } from './format';
 import { hostText, resultKindKo } from './notices';
-// @ts-expect-error — 공유 그리기(UMD · 순수). 호스트가 계산서를 그리는 것과 같은 함수로 미리보기의 첫 쪽을 그린다
-import * as RRX from '../../../webview/js/reportRender.js';
 import { person, project, rec, roText } from './records';
 import { rv } from './reviews';
 
-export interface DocDraft { item: string; kind: string; at: string; at_local?: string; by: any; files: string[]; not_checked: number; state: 'current' | 'stale'; stale_because?: string[]; stale_because_ko?: string[] }
+export interface DocDraft { file_state?: 'same' | 'edited' | 'missing'; item: string; kind: string; at: string; at_local?: string; by: any; files: string[]; not_checked: number; state: 'current' | 'stale'; stale_because?: string[]; stale_because_ko?: string[] }
 export interface DocIssue { item: string; revision: number; at: string; at_local?: string; date?: string; issued_by: string; from: string; folder: string; state: 'same' | 'edited' | 'missing'; state_ko: string;
   files?: Array<{ path: string; state: string }>; added?: string[] }
 export interface IssueCheck { revision: string; folder: string; blocked: boolean; blockers: Note[]; warnings: Note[]; passed: string[]; passed_labels?: Array<{ code: string; text_ko?: string }>;
   draft: any; files: string[]; bundle?: Array<{ path: string; role: string }>; fingerprint: string }
 interface Note { code: string; count?: number; detail?: string; detail_ko?: string; text?: string; text_ko?: string }
-export interface Preview extends IssueCheck { label: string; caseName: string; nonce: string; expiresAt: string; draft_html: string | null; stamped_doc?: unknown; openedAt: number; spent?: boolean }
+export interface Preview extends IssueCheck { label: string; caseName: string; nonce: string; expiresAt: string; stamped_html?: string | null; openedAt: number; spent?: boolean }
 
 export const docs: {
   drafts: DocDraft[]; issues: DocIssue[]; failed: any[]; check: IssueCheck | null; loaded: boolean; err?: string; checkErr?: string;
@@ -58,7 +56,6 @@ export const lastIssue = (): DocIssue | null => docs.issues[0] ?? null;
 export const nextLabel = (): string => docs.check?.revision ?? (docs.issues.length ? `R${docs.issues[0].revision + 1}` : 'R0');
 
 // ── 말 ──────────────────────────────────────────────────────────────
-const RR: { renderReportDoc(doc: unknown): string } = (typeof (RRX as { renderReportDoc?: unknown }).renderReportDoc === 'function' ? RRX : (RRX as { default: unknown }).default) as { renderReportDoc(doc: unknown): string };
 /** 막는 것의 짧은 이름(템플릿 08 의 줄 — code 로 가른다. 호스트의 문장은 풍선에) */
 const SHORT: Record<string, string> = {
   'no-design-result': '부재 설계 결과', 'stale-results': '낡은 결과', 'not-evaluated': '미검토', ng: '불합격', 'open-questions': '열린 판단 요청',
@@ -139,12 +136,15 @@ export function docView(key: string): string {
   const d = isIssue ? null : docs.drafts.find(x => x.item === item);
   const x = isIssue ? docs.issues.find(i => i.item === item) : null;
   if (!d && !x) { return `<div class="dv docv">${none('그 문서가 없다', docs.err ?? '목록에 없다 — 다시 읽기')}</div>`; }
-  fetchDoc(item);
+  if (!d || !d.file_state || d.file_state === 'same') { fetchDoc(item); }
   const v = docs.view.get(item);
   const banner = x
     ? `<div class="banner ${x.state === 'same' ? '' : 'warn'}" data-issue-state="${esc(x.state)}">발행본 ${esc(`R${x.revision}`)} — 읽기 전용 · 해시 대조: <b>${esc(x.state_ko)}</b>${x.state !== 'same' && x.files?.length ? ` — ${x.files.map(f => `${esc(f.path.split('/').pop() ?? f.path)} ${f.state === 'missing' ? '없어짐' : '고쳐짐'}`).join(' · ')}` : ''}${x.added?.length ? ` · 더해진 파일 ${esc(x.added.join(', '))}` : ''}</div>`
     : `<div class="banner ${d!.state === 'current' ? '' : 'warn'}" data-draft-state="${esc(d!.state)}">초안 ${esc(d!.item)} — ${d!.state === 'current' ? '지금과 일치' : `낡음 · ${esc(staleList(d!).join(' · '))}`}${d!.not_checked ? ` · 확인 안 함 ${esc(d!.not_checked)}` : ''}</div>`;
-  const body = v?.html ? frame(v.html, item, isIssue ? '발행본' : '초안')
+  // S2: 디스크의 초안 파일이 그 초안 줄의 해시와 다르면(호스트의 file_state) 그리지 않는다 — 「고쳐짐」 · 「없어짐」
+  const draftBad = !!d && !!d.file_state && d.file_state !== 'same';
+  const body = draftBad ? `<div class="banner warn" data-draft-file="${esc(d!.file_state)}">디스크의 초안 파일이 ${d!.file_state === 'missing' ? '없어졌다' : '고쳐졌다'} — 기록된 해시와 다르다. 이 화면은 그 파일을 그리지 않는다(발행은 기록된 사본에서 다시 그린다)</div>`
+    : v?.html ? frame(v.html, item, isIssue ? '발행본' : '초안')
     : v?.err ? `<div class="ph-box" style="margin:40px auto">${none('읽지 못함', v.err)}</div>`
       : v?.html === null ? `<div class="ph-box" style="margin:40px auto">${none('HTML 없음', 'PDF 만 있다 — 정보 창의 「PDF 열기」')}</div>`
         : `<div class="ph-box" style="margin:40px auto">${none('읽는 중')}</div>`;
@@ -261,23 +261,9 @@ function renderPreview(): void {
     + `<button type="button" class="btn ghost" data-pv="close"${docs.issuing ? ' disabled' : ''}>닫기</button></div></div>`;
 }
 /**
- * 도장 찍힌 첫 쪽 — 호스트가 준 stamped_doc(초안의 ReportDoc 에 발행 도장)을 공유 그리기로. 쪽의 틀(글꼴 · 표 · 인쇄 CSP)은 초안 HTML 의 머리를
- * 그대로 쓴다(같은 printable 틀). 초안 HTML 이 없으면 그리기만.
+ * 도장 찍힌 첫 쪽 — 호스트의 stamped_doc 을 다리가 호스트의 그리기 · 인쇄 틀로 그린 것(stamped_html — 발행 때와 같은 틀). 디스크의 초안 HTML 은 쓰지 않는다(S2)
  */
-const stampedCache = new WeakMap<object, string>();
-function stampedPage(p: Preview): string | null {
-  const doc = p.stamped_doc;
-  if (!doc || typeof doc !== 'object') { return null; }
-  const hit = stampedCache.get(doc as object);
-  if (hit) { return hit; }
-  let inner = '';
-  try { inner = RR.renderReportDoc(doc); } catch { return null; }
-  const shell = p.draft_html ?? '';
-  const i = shell.search(/<body[^>]*>/i), j = shell.lastIndexOf('</body>');
-  const out = i >= 0 && j > i ? `${shell.slice(0, shell.indexOf('>', i) + 1)}${inner}${shell.slice(j)}` : `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${inner}</body></html>`;
-  stampedCache.set(doc as object, out);
-  return out;
-}
+const stampedPage = (p: Preview): string | null => (typeof p.stamped_html === 'string' && p.stamped_html ? p.stamped_html : null);
 function onPvClick(e: Event): void {
   const b = (e.target as HTMLElement).closest?.('[data-pv]');
   if (!b || (b as HTMLButtonElement).disabled) { return; }

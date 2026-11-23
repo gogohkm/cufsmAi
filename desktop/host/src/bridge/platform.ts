@@ -15,6 +15,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { vetOpen } from './openable';
 import {
   createHeadlessPlatform, type FileDialogRequest, type HeadlessPlatform, type HostPlatform,
   type InputRequest, type NotifyRequest, type PickRequest, type ProgressState,
@@ -51,8 +52,15 @@ export interface BridgePlatform extends HostPlatform {
   onDialogAnswered?: (req: FileDialogRequest, paths: string[] | undefined) => void;
   /** 호스트가 알림을 냈다 */
   onNotify?: (req: NotifyRequest) => void;
-  /** R3-3: 원자료 파일 하나를 OS 의 기본 앱으로(껍데기만 — 없으면 false). 경로는 이 프로세스 안에서만 */
-  openPath(abs: string): Promise<boolean>;
+  /**
+   * R3-3 · V9b-02: 파일 하나를 OS 의 기본 앱으로(껍데기만 — 없으면 false). 경로는 이 프로세스 안에서만.
+   * 마지막 문: 진짜 경로(realpath)의 진짜 마지막 확장자가 문서 형식이 아니면 OS 에 넘기지 않는다(openable.ts) — `root` 를 주면 그 안이어야
+   */
+  openPath(abs: string, root?: string): Promise<boolean>;
+  /** V9b-02: 탐색기에서 그 파일을 고른 채 폴더를 연다(아무것도 실행하지 않는다 — shell.showItemInFolder) */
+  showInFolder(abs: string): Promise<boolean>;
+  /** 이 프로세스가 받은 열기 · 폴더 보기 요청(시험이 「OS 에 닿았는가」를 본다 — 이름 · 판정만) */
+  readonly openLog: Array<{ op: 'open' | 'show'; name: string; passed: boolean; why?: string }>;
 }
 
 export interface BridgePlatformOptions {
@@ -65,6 +73,8 @@ export interface BridgePlatformOptions {
   openExternal?: (target: string) => Promise<boolean>;
   /** R3-3: 프로젝트의 원자료 파일 하나를 OS 의 기본 앱으로 연다(껍데기 — shell.openPath). 없으면 열지 않고 알리기만(헤드리스 · 시험) */
   openPath?: (abs: string) => Promise<boolean>;
+  /** V9b-02: 탐색기에서 보기(껍데기 — shell.showItemInFolder). 없으면 기록만 */
+  showInFolder?: (abs: string) => Promise<boolean>;
   /**
    * S3: 화면이 아직 안 붙었을 때(시작 중)의 단추 있는 알림 · modal 알림을 OS 대화상자로 묻는다.
    * 없으면 headless 처럼 곧바로 닫음(답 없음)이다.
@@ -85,6 +95,7 @@ export function createBridgePlatform(options: BridgePlatformOptions = {}): Bridg
   let seq = 0;
   const waiting = new Map<string, { q: PendingQuestion; resolve: (v: unknown) => void; validate: (v: unknown) => string | undefined }>();
   const progress = new Map<number, ProgressState>();
+  const openLog: BridgePlatform['openLog'] = [];
 
   function ask<T>(kind: QuestionKind, request: PendingQuestion['request'], validate: (v: unknown) => string | undefined,
     fallback: () => Promise<T>): Promise<T> {
@@ -199,10 +210,24 @@ export function createBridgePlatform(options: BridgePlatformOptions = {}): Bridg
       sink?.emit('platform:openExternal', { target });
       return options.openExternal ? options.openExternal(target) : headless.openExternal(target);
     },
-    openPath(abs: string) {
-      // 경로는 이 프로세스 안에서만(화면 · 이벤트에는 파일 이름만)
-      sink?.emit('platform:openPath', { name: abs.split(/[\\/]/).pop() ?? '' });
-      return options.openPath ? options.openPath(abs) : Promise.resolve(false);
+    openLog,
+    openPath(abs: string, root?: string) {
+      // 경로는 이 프로세스 안에서만(화면 · 이벤트에는 파일 이름만). 마지막 문 — 진짜 경로의 진짜 형식이 문서가 아니면 OS 에 넘기지 않는다(V9b-02)
+      const v = vetOpen(abs, root);
+      const name = (v.real ?? abs).split(/[\\/]/).pop() ?? '';
+      openLog.push({ op: 'open', name, passed: v.ok, ...(v.why ? { why: v.why } : {}) });
+      if (openLog.length > 200) { openLog.shift(); }
+      if (!v.ok || !v.real) { sink?.emit('platform:openRefused', { name, why: v.why ?? '' }); log(`[platform] 열지 않음 — ${name}: ${v.why ?? ''}`); return Promise.resolve(false); }
+      sink?.emit('platform:openPath', { name });
+      return options.openPath ? options.openPath(v.real) : Promise.resolve(false);
+    },
+    showInFolder(abs: string) {
+      // V9b-02: 탐색기에서 그 파일을 고른 채 — 아무것도 실행하지 않는다
+      const name = abs.split(/[\\/]/).pop() ?? '';
+      openLog.push({ op: 'show', name, passed: true });
+      if (openLog.length > 200) { openLog.shift(); }
+      sink?.emit('platform:showInFolder', { name });
+      return options.showInFolder ? options.showInFolder(abs) : Promise.resolve(false);
     },
     progress(state) {
       if (state.done) { progress.delete(state.id); } else { progress.set(state.id, state); }

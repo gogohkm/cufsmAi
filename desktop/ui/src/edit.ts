@@ -14,6 +14,8 @@ import { api, keyHeaders } from './bridge';
 import { bidiSafe } from './dom';
 
 let on = false;
+/** 편집 상태를 바꾼 쪽 — 맨 위 틀(F2 · 단추 · Esc)인가, 끼운 페이지의 메시지인가(V9b-08) */
+export let editSource: 'top' | 'embedded' = 'top';
 let designerSrc = '';
 let sideId: string | null = null;
 let theme: 'dark' | 'light' = 'dark';
@@ -83,9 +85,10 @@ export function initEdit(t: 'dark' | 'light', onChange: () => void): void {
       if (!id) { return; }
       withKey(id, k => { try { src.postMessage({ stcfsdBridge: 1, type: 'key', key: k }, target); } catch { /* 닫힘 */ } });
     } else if (d.type === 'keydown' && d.key === 'F2' && from.id === 'designer') {
-      onF2();
+      // V9b-08: 끼운 페이지의 메시지는 화면의 편집 상태만 바꾼다 — 사람의 길(edit-session)은 맨 위 틀의 다음 입력에서(main 의 onEditChange)
+      editSource = 'embedded'; try { onF2(); } finally { editSource = 'top'; }
     } else if (d.type === 'keydown' && d.key === 'Escape' && from.id === 'designer' && on) {
-      setEditing(false);
+      editSource = 'embedded'; try { setEditing(false); } finally { editSource = 'top'; }
     }
   });
   document.getElementById('side-close')?.addEventListener('click', () => {

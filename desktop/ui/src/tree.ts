@@ -40,8 +40,10 @@ function docV(kind: 'design' | 'buckling'): Partial<TNode> {
   // R5-3: 프로젝트의 대상이면 호스트의 documents list(초안 — 일치 · 낡음), 아니면 이 화면이 만든 보고서
   if (docs.loaded) {
     const ds = draftsOf(kind === 'design' ? 'calc' : 'buckling');
-    const kids = ds.map(d => n(`doc:${d.item}`, draftLabel(d), { dot: d.state === 'current' ? 'ok' : 'warn', v: d.state === 'current' ? '일치' : '낡음', vCls: d.state === 'current' ? '' : 'warn',
-      tip: `${d.files.join(' · ')}${d.state === 'stale' ? ' — 지금과 다름' : ''}` }));
+    // S2: 디스크의 초안 파일이 기록된 해시와 다르면 「고쳐짐」 · 「없어짐」 이 먼저(호스트의 file_state)
+    const kids = ds.map(d => { const bad = !!d.file_state && d.file_state !== 'same'; return n(`doc:${d.item}`, draftLabel(d), { dot: !bad && d.state === 'current' ? 'ok' : 'warn',
+      v: bad ? (d.file_state === 'missing' ? '없어짐' : '고쳐짐') : d.state === 'current' ? '일치' : '낡음', vCls: !bad && d.state === 'current' ? '' : 'warn',
+      tip: `${d.files.join(' · ')}${d.state === 'stale' ? ' — 지금과 다름' : ''}` }); });
     const last = ds[0];
     return last ? { v: last.state === 'current' ? `초안 ${last.item}` : `낡음 · ${last.item}`, vCls: last.state === 'current' ? '' : 'warn', open: true, kids } : { v: '초안 없음', vCls: 'un' };
   }

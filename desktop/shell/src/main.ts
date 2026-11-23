@@ -18,7 +18,8 @@
  * "취소"를 돌려주는 가짜로 바꾼다. 부모가 IPC 로 띄웠으면 주 프로세스 안에서 코드를 돌리는 제어 통로를 연다(시험만).
  * 설치본은 시험 모드 · 개발 덮어쓰기 변수를 따르지 않는다 — `<resources>/stcfsd-verification.json` 이 있는 확인용 복사본만(mode.ts, V5-13).
  */
-import { app, BrowserWindow, dialog, Menu, screen, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, screen, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { vetOpen } from '../../host/src/bridge/openable';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type * as HostApi from '../../host/src/index';
@@ -110,6 +111,8 @@ let documentsDir = '';
 /** 시험 · 진단 — 창 · 포커스 · 대화상자 기록 */
 const diag = {
   stage: 'init',
+  /** V9b-08 · S1: 맨 위 문서의 사람 입력(preload 의 IPC) 수 · 다른 곳에서 와서 세지 않은 수 */
+  topInputs: 0, inputIgnored: 0,
   focusEvents: 0, showEvents: 0, broughtToFront: 0,
   /** 물음을 알린 차례(작업 표시줄 깜빡임) — 창을 앞으로 꺼내지 않는다 */
   questionSignals: 0, flashCalls: 0,
@@ -239,10 +242,19 @@ async function openExternal(url: string): Promise<boolean> {
  * 시험에서는 열지 않고 기록만
  */
 async function openLocalFile(abs: string): Promise<boolean> {
-  diag.externalOpened.push(`file:${path.basename(abs)}`);
-  if (TEST) { log(`원자료 열기(시험이라 하지 않음): ${path.basename(abs)}`); return false; }
-  try { const err = await shell.openPath(abs); if (err) { log(`원자료 열기 실패 ${path.basename(abs)}: ${err}`, 'warn'); return false; } return true; }
-  catch (err) { log(`원자료 열기 실패 ${path.basename(abs)}: ${String(err)}`, 'warn'); return false; }
+  // V9b-02: 껍데기의 마지막 문 — 진짜 경로의 진짜 마지막 확장자가 문서 형식이 아니면 shell.openPath 에 닿지 않는다(다리의 플랫폼도 본다)
+  const v = vetOpen(abs);
+  if (!v.ok || !v.real) { diag.externalOpened.push(`refused:${path.basename(v.real ?? abs)}`); log(`원자료 열지 않음 ${path.basename(v.real ?? abs)}: ${v.why ?? ''}`, 'warn'); return false; }
+  diag.externalOpened.push(`file:${path.basename(v.real)}`);
+  if (TEST) { log(`원자료 열기(시험이라 하지 않음): ${path.basename(v.real)}`); return false; }
+  try { const err = await shell.openPath(v.real); if (err) { log(`원자료 열기 실패 ${path.basename(v.real)}: ${err}`, 'warn'); return false; } return true; }
+  catch (err) { log(`원자료 열기 실패 ${path.basename(v.real)}: ${String(err)}`, 'warn'); return false; }
+}
+/** V9b-02: 탐색기에서 그 파일을 고른 채 폴더를 연다 — 아무것도 실행하지 않는다 */
+async function showLocalFile(abs: string): Promise<boolean> {
+  diag.externalOpened.push(`show:${path.basename(abs)}`);
+  if (TEST) { log(`폴더에서 보기(시험이라 하지 않음): ${path.basename(abs)}`); return false; }
+  try { shell.showItemInFolder(abs); return true; } catch (err) { log(`폴더에서 보기 실패 ${path.basename(abs)}: ${String(err)}`, 'warn'); return false; }
 }
 
 /** 화면이 아직 붙기 전(시작 중)의 단추 있는 알림 — OS 알림 상자. VS Code 처럼 「취소」가 늘 있다 */
@@ -366,10 +378,14 @@ async function confirmUnsaved(where: UnsavedWhere): Promise<boolean> {
 }
 
 // ─── 사람의 입력(R1-3 층 4) ─────────────────────────────────────────
-/** 맨 위 틀(창)에 사람의 누름 · 키가 마지막으로 들어온 때(webContents 의 input-event — 스크립트의 click() · dispatchEvent 는 오지 않는다) */
+/**
+ * 맨 위 틀의 **자기 문서**에 사람의 누름 · 키가 마지막으로 들어온 때(V9b-08 · S1). webContents 의 input-event 는 끼운 페이지 안의 입력도 센다 —
+ * 그래서 쓰지 않는다. preload(맨 위 틀에만 돈다)가 그 문서의 capture 단계에서 isTrusted 인 pointerdown · keydown 만 IPC 로 알리고,
+ * 여기서 보낸 쪽이 그 창의 mainFrame 인지 본다. 끼운 iframe 안의 입력은 맨 위 문서로 오지 않는다(스크립트의 dispatchEvent 는 isTrusted 가 아니다)
+ */
 let lastPersonInput = 0;
 const PERSON_INPUT_MS = 2000;
-const PERSON_INPUT_TYPES = new Set(['mouseDown', 'mouseUp', 'keyDown', 'keyUp', 'rawKeyDown', 'char']);
+const PERSON_INPUT_CHANNEL = 'stcfsd:person-input';
 
 // ─── 로그오프 · 시스템 종료(V7-S3) ───────────────────────────────────
 /**
@@ -628,7 +644,13 @@ function createWindow(b: HostApi.BridgeHandle): BrowserWindow {
     clearTimeout(stateTimer); saveWindowState();
   });
   w.on('closed', () => { if (win === w) { win = undefined; } });
-  w.webContents.on('input-event', (_e, input) => { if (PERSON_INPUT_TYPES.has(String(input.type))) { lastPersonInput = Date.now(); } });
+  // V9b-08 · S1: 사람의 입력은 맨 위 틀의 자기 문서에서만(preload 의 IPC — 보낸 프레임이 이 창의 mainFrame 일 때)
+  ipcMain.removeAllListeners(PERSON_INPUT_CHANNEL);
+  ipcMain.on(PERSON_INPUT_CHANNEL, (e) => {
+    // 이 창의 맨 위 틀(mainFrame)에서 온 것만 — 끼운 iframe 에는 preload 가 없고, 다른 창 · 프레임은 세지 않는다
+    if (e.sender !== w.webContents || e.senderFrame !== w.webContents.mainFrame) { diag.inputIgnored++; return; }
+    lastPersonInput = Date.now(); diag.topInputs++;
+  });
   // V7-S3: 로그오프 · 종료 — 막지 않고 복구본을 쓴다
   w.on('query-session-end', () => { void writeRecovery('query-session-end'); });
   w.on('session-end', () => { void writeRecovery('session-end'); });
@@ -737,6 +759,7 @@ async function start(): Promise<void> {
     fileDialog: nativeFileDialog,
     openExternal,
     openPath: openLocalFile,
+    showInFolder: showLocalFile,
     notifyWithoutScreen,
   });
   // V7-01(82194ef): 결과를 봉인하는 이 PC 의 기록자 열쇠 폴더 — 프로그램의 사용자 자료 폴더 안(<userData>\writer). 시험은 --user-data 의

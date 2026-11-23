@@ -2134,6 +2134,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
    *   r29 · r30 — r10 · r12(부재 검토를 그 단계가 돌린다)  r31 — r10 · r12                    r32 — r31(대안 셋)
    *   r33 — r10 · r12(「R33 다른 대상」 을 만들고 돌아온다)    r34 — r10(새 대상 「R34 발행」 을 만들어 설계부터 초안까지 그 단계가 한다)
    *   r35 — r34(막는 것 0 의 미리보기)                      r36 — r34 · r35(r35 가 새 초안으로 막는 것 0 을 남긴다)   r37 — r36(R0)
+   *   r38 — r10 · r12(원자료 다섯을 그 단계가 둔다)          r39 — r34(그 초안)                r40 — r34(검토 줄)     r41 — 없음(끼운 페이지)
    */
   await step('r10 새 프로젝트(시작 화면) — 이름 물음 → 뿌리(문서 › StCFSD 프로젝트) 아래에 · 제목 표시줄 「프로젝트 ▾」 · 대상 수 = list_cases', 'r10_new_project', async () => {
     await ev(`${S}.start()`);
@@ -3058,6 +3059,137 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const outHead = fs.existsSync(out) ? fs.readFileSync(out).subarray(0, 5).toString('latin1') : null;
     return { ok: same && l1?.state === 'same' && /고쳐짐/.test(row ?? '') && l2?.state === 'edited' && inf.files.some(f => f.includes(html) && /고쳐짐/.test(f)) && inf.files.length === Object.keys(issued.hashes).length && inf.files.filter(f => /그대로/.test(f)).length === inf.files.length - 1 && /고쳐짐/.test(inf.banner ?? '') && inf.frame && blockedNow === true && !!fd && !!outHead,
       detail: `모델을 바꿔 저장 → R0 파일 ${Object.keys(issued.hashes).length} 개 바이트 그대로 ${same}(documents ${l1?.state_ko}) · ${html} 끝에 한 줄 → 트리 「${row}」 · 정보 창 ${inf.files.join(' · ')} · 띠 「${short(inf.banner, 60)}」 · 읽기 전용 sandbox ${inf.frame} · 막는 것이 있는 지금(${blockedNow}) 「초안으로 내보내기」 → 물음 「${fd}」 → ${outHead ? `${path.basename(out)}(${outHead})` : '없음'}` };
+  });
+  // ── V9b — 최종 검증의 보안 반쪽(원자료 열기 · 초안의 디스크 상태 · 믿기 물음 · 끼운 페이지의 편집 신호) ─────────────────
+  const openLogNow = async () => (await serve.ipc('status')).openLog ?? [];
+  await step('r38 ⚔ 원자료 「열기」(V9b-02 · 03) — 겹 확장자 .pdf.bat · .lnk 는 「실제 형식」 을 보이고 열지 않는다(OS 에 닿지 않음) · 「폴더에서 보기」 · 바뀐 원자료 · 중간 junction 도 열지 않음 · 문서만 연다', 'r38_source_open', async () => {
+    const dir = path.join(pdir2, '01_원자료');
+    fs.mkdirSync(path.join(dir, 'sub'), { recursive: true });
+    const outside = path.join(tmp, 'OUTSIDE-V9b');
+    fs.mkdirSync(outside, { recursive: true });
+    fs.writeFileSync(path.join(outside, 'a.pdf'), '%PDF-1.4 outside');
+    const files = { bat: 'S-101 구조평면도.pdf.bat', lnk: 'S-102.lnk', ok: 'S-103 ok.pdf', chg: 'S-104 chg.pdf', sub: 'sub/a.pdf' };
+    fs.writeFileSync(path.join(dir, files.bat), ['@echo off', 'exit 0', ''].join(String.fromCharCode(13, 10)));
+    fs.writeFileSync(path.join(dir, files.lnk), 'L');
+    fs.writeFileSync(path.join(dir, files.ok), '%PDF-1.4 ok');
+    fs.writeFileSync(path.join(dir, files.chg), '%PDF-1.4 chg');
+    fs.writeFileSync(path.join(dir, 'sub', 'a.pdf'), '%PDF-1.4 inside');
+    const ids = {};
+    for (const [k, f] of Object.entries(files)) {
+      const r = await mcp.tool('sources', { action: 'register', path: f, title: k === 'bat' ? 'S-101 구조평면도 (PDF)' : `원자료 ${k}`, kind: 'drawing' });
+      ids[k] = r.item;
+    }
+    // 등록한 뒤 바뀜 · 중간 폴더를 밖으로 가는 junction 으로
+    fs.appendFileSync(path.join(dir, files.chg), ' changed');
+    fs.rmSync(path.join(dir, 'sub'), { recursive: true, force: true });
+    const mk = spawnSync('cmd.exe', ['/d', '/c', 'mklink', '/J', path.join(dir, 'sub'), outside], { windowsHide: true, encoding: 'utf8' });
+    const log0 = (await openLogNow()).length;
+    const tries = {};
+    for (const k of Object.keys(files)) { const r = await pfetch('/api/person/open-source', { id: ids[k] }); tries[k] = `${r.status}:${r.json?.success ? 'ok' : (r.json?.data?.code ?? 'no')}`; }
+    // 화면: 겹 확장자 — 「실제 형식」 · 「열기」 없음 · 「폴더에서 보기」
+    await ev(`${S}.reload()`);
+    await sleep(1200);
+    await select('doc', `srcr:${ids.bat}`);
+    await waitFor(`!!document.querySelector('#info [data-src-type]')`, 15_000, '원자료 형식').catch(() => undefined);
+    const scr = await ev(`({type:document.querySelector('#info [data-src-type]')?.textContent ?? null, mis:!!document.querySelector('#info [data-src-misleading]'), open:!!document.querySelector('#info [data-open-src]'), show:!!document.querySelector('#info [data-show-src]'), title:document.querySelector('#info [data-src-title]')?.textContent})`);
+    await ev(`document.querySelector('#info [data-show-src]')?.click()`);
+    await sleep(600);
+    await shot('r38_source_bat_1920_dark');
+    // 문서(그대로)는 「열기」 — 플랫폼까지 닿는다(시험 틀은 OS 에 넘기지 않는다)
+    await select('doc', `srcr:${ids.ok}`);
+    await waitFor(`!!document.querySelector('#info [data-open-src]')`, 15_000, '열기 단추').catch(() => undefined);
+    await ev(`document.querySelector('#info [data-open-src]')?.click()`);
+    await sleep(800);
+    const chgScr = await (async () => { await select('doc', `srcr:${ids.chg}`); await sleep(400); return ev(`({open:!!document.querySelector('#info [data-open-src]'), no:document.querySelector('#info [data-no-open]')?.textContent ?? null})`); })();
+    const olog = (await openLogNow()).slice(log0);
+    const opened = olog.filter(x => x.op === 'open').map(x => `${x.name}:${x.passed}`);
+    const shown = olog.filter(x => x.op === 'show').map(x => x.name);
+    try { fs.rmSync(path.join(dir, 'sub'), { recursive: false, force: true }); } catch { /* junction */ }
+    log.console.splice(0, log.console.length, ...log.console.filter(x => !x.text.includes('/api/person/')));
+    return { ok: mk.status === 0 && /^409:type$/.test(tries.bat) && /^409:type$/.test(tries.lnk) && /^409:not-same$/.test(tries.chg) && /^409:(outside|not-same)$/.test(tries.sub) && /^200:ok$/.test(tries.ok)
+        && scr.mis && !scr.open && scr.show && /\.bat · 실행 파일/.test(scr.type ?? '') && !chgScr.open && !!chgScr.no
+        && opened.length >= 1 && opened.every(x => x === `${files.ok}:true`) && shown.length === 1 && shown[0] === files.bat,
+      detail: `사람 길 ${Object.entries(tries).map(([k, v]) => `${k} ${v}`).join(' · ')} · 화면(제목 「${scr.title}」) 「${scr.type}」 속이는 이름 ${scr.mis} · 열기 단추 ${scr.open} · 폴더에서 보기 ${scr.show}`
+        + ` · 바뀐 원자료 열기 단추 ${chgScr.open} 「${chgScr.no}」 · 플랫폼에 닿은 열기 ${JSON.stringify(opened)} · 폴더에서 보기 ${JSON.stringify(shown)} · junction ${mk.status === 0 ? '만듦' : short(mk.stderr, 40)}` };
+  });
+  await step('r39 S2 — 디스크의 초안 HTML 을 고치면 미리보기의 첫 쪽은 그 파일을 쓰지 않는다(호스트의 그리기 · 인쇄 틀) · 초안 보기는 호스트의 file_state 로 「고쳐짐」 · 그리지 않음 · 내보내기 거절', 'r39_draft_edited', async () => {
+    const ls = await docList();
+    const dr = (ls.drafts ?? [])[0];
+    const html = dr?.files?.find(f => /\.html?$/i.test(f));
+    if (!dr || !html) { return { ok: false, detail: '초안이 없다(r34)' }; }
+    const abs = path.join(pdir2, ...html.split('/'));
+    const MARK = 'S2-DISK-STYLE-MARK';
+    const page = fs.readFileSync(abs, 'utf8');
+    fs.writeFileSync(abs, page.replace('</head>', `<style>/*${MARK}*/ .pass,.fail{display:none}</style></head>`));
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    await select('doc', 'rpt');
+    await waitFor(`!!document.querySelector('#info [data-issue-open]')`, 15_000, '발행 단추');
+    await ev(`document.querySelector('#info [data-issue-open]').click()`);
+    await waitFor(`!!document.querySelector('#issue-host iframe[sandbox=""]')`, 20_000, '미리보기 첫 쪽').catch(() => undefined);
+    const pv = await ev(`(()=>{const f=document.querySelector('#issue-host iframe[sandbox=""]'); const s=f?.getAttribute('srcdoc') ?? ''; return {frame:!!f, mark:s.includes(${JSON.stringify(MARK)}), stamped:/report-stamp-issued/.test(s), csp:/Content-Security-Policy/.test(s)};})()`);
+    await ev(`document.querySelector('#issue-host [data-pv="close"]')?.click()`);
+    const ls2 = await docList();
+    const d2 = (ls2.drafts ?? []).find(x => x.item === dr.item);
+    const hostHas = typeof d2?.file_state === 'string';
+    let view = null, exp = null;
+    if (hostHas) {
+      await select('doc', `doc:${dr.item}`);
+      await sleep(800);
+      view = await ev(`({row:document.querySelector('#tree .row[data-k="doc:${dr.item}"]')?.textContent ?? null, bad:document.querySelector('#center [data-draft-file]')?.dataset.draftFile ?? null, frame:!!document.querySelector('#center iframe[data-doc-frame]')})`);
+      exp = await pfetch('/api/person/export', { item: dr.item });
+    }
+    fs.writeFileSync(abs, page);
+    return { ok: pv.frame && !pv.mark && pv.stamped && pv.csp && (!hostHas || (d2.file_state === 'edited' && /고쳐짐/.test(view?.row ?? '') && view?.bad === 'edited' && !view?.frame && exp?.json?.success === false)),
+      detail: `미리보기 첫 쪽 — 디스크 초안의 <style> 표지 ${pv.mark ? '들어감' : '없음'} · 발행 도장 ${pv.stamped} · 인쇄 틀의 CSP ${pv.csp}`
+        + (hostHas ? ` · 호스트 file_state ${d2.file_state} → 트리 「${view?.row}」 · 가운데 ${view?.bad} · 그림 ${view?.frame} · 내보내기 ${exp?.status} ${short(exp?.json?.error, 40)}` : ' · 호스트의 documents list 에 file_state 가 아직 없다 — 초안 보기의 「고쳐짐」 은 그 필드가 오면(화면 · 다리는 준비됨)') };
+  });
+  await step('r40 S5 — 「믿기」 는 물음을 거친다: 적은 이름 옆에 작성자 id(줄임) · PC 이름, 「이름은 그 작성자가 스스로 적은 것」 · 물음의 「믿기」 전에는 아무것도 보내지 않는다', 'r40_trust_question', async () => {
+    // 앞 단계(r37)가 모델을 바꿔 결과가 낡았을 수 있다 — 검토 줄이 있게 휨 검토 하나
+    await mcp.tool('aisi_design_flexure', flexArgsR(3.0, 3));
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '부재 검토', 60_000);
+    const k = await keyOf(`x=>x.scope==='member' && x.verdict!=='not_applicable'`);
+    await select('result', k);
+    await ev(`${S}.testWriters([{ writer_id: 'wabcdefghijklmnopqrstu', name: '김 동료', host: 'OTHER-PC', trusted: false }])`);
+    await waitFor(`!!document.querySelector('#info [data-rv-trust-ask]')`, 10_000, '믿기… 단추');
+    await ev(`(()=>{ if (!window.__fetchCount) { window.__fetchCount = {}; const of = window.fetch.bind(window); window.fetch = (u, o) => { const k = String(u); for (const n of ['/api/person/edit-session', '/api/person/trust']) { if (k.includes(n)) { window.__fetchCount[n] = (window.__fetchCount[n] ?? 0) + 1; } } return of(u, o); }; } return 1; })()`);
+    const before = await ev(`window.__fetchCount['/api/person/trust'] ?? 0`);
+    await ev(`document.querySelector('#info [data-rv-trust-ask]').click()`);
+    await waitFor(`!!document.querySelector('#info [data-rv-trust-question]')`, 10_000, '믿기 물음');
+    const q = await ev(`(()=>{const b=document.querySelector('#info [data-rv-trust-question]'); return {text:b.textContent, id:b.querySelector('[data-writer-id]')?.textContent, host:b.querySelector('[data-writer-host]')?.textContent, ok:!!b.querySelector('[data-rv-trust]')};})()`);
+    const after = await ev(`window.__fetchCount['/api/person/trust'] ?? 0`);
+    await shot('r40_trust_question_1920_dark');
+    await ev(`document.querySelector('#info [data-rv-trust-ask=""]')?.click()`);
+    await ev(`${S}.reload()`);
+    return { ok: q.id === 'wabcdefg…rstu' && q.host === 'OTHER-PC' && /스스로 적은 것/.test(q.text) && /김 동료/.test(q.text) && q.ok && before === after,
+      detail: `물음 「${short(q.text, 90)}」 · id ${q.id} · PC ${q.host} · 물음 전 · 뒤의 trust 요청 ${before} → ${after}` };
+  });
+  await step('r41 V9b-08 — 끼운 페이지의 F2 · Escape 메시지는 화면의 편집 상태만 바꾸고, edit-session 은 맨 위 문서의 다음 사람 입력(진짜 누름)에서 나간다', 'r41_embedded_edit', async () => {
+    await ev(`${S}.review()`);
+    await ev(`(()=>{ if (!window.__fetchCount) { window.__fetchCount = {}; const of = window.fetch.bind(window); window.fetch = (u, o) => { const k = String(u); for (const n of ['/api/person/edit-session', '/api/person/trust']) { if (k.includes(n)) { window.__fetchCount[n] = (window.__fetchCount[n] ?? 0) + 1; } } return of(u, o); }; } return 1; })()`);
+    const count = () => ev(`window.__fetchCount['/api/person/edit-session'] ?? 0`);
+    const n0 = await count();
+    await wv(`window.parent.postMessage({stcfsdBridge:1,type:'keydown',key:'F2'}, '*'); return 1;`);
+    await waitFor(`${S}.ui.editing === true`, 10_000, '편집 상태(끼운 페이지의 F2)').catch(() => undefined);
+    const on = await ev(`${S}.ui.editing`);
+    await sleep(600);
+    const n1 = await count();
+    // 맨 위 문서의 진짜 누름(CDP 입력 — isTrusted) — 화면의 빈 곳(상태 표시줄)
+    const pt = await ev(`(()=>{const r=document.getElementById('status').getBoundingClientRect(); return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2)};})()`);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+    await waitFor(`(window.__fetchCount['/api/person/edit-session'] ?? 0) > ${n1}`, 10_000, '맨 위 누름 뒤의 edit-session').catch(() => undefined);
+    const n2 = await count();
+    await wv(`window.parent.postMessage({stcfsdBridge:1,type:'keydown',key:'Escape'}, '*'); return 1;`);
+    await sleep(400);
+    const off = await ev(`${S}.ui.editing`);
+    const n3 = await count();
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+    await waitFor(`(window.__fetchCount['/api/person/edit-session'] ?? 0) > ${n3}`, 10_000, '맨 위 누름 뒤의 끝').catch(() => undefined);
+    const n4 = await count();
+    return { ok: on === true && n1 === n0 && n2 === n1 + 1 && off === false && n3 === n2 && n4 === n3 + 1,
+      detail: `끼운 페이지 F2 → 편집 ${on} · edit-session ${n0} → ${n1}(보내지 않음) · 맨 위 누름 → ${n2} · (끼운 페이지 자신의 editSession 메시지는 다리 시험 s16) · Escape → 편집 ${off} · ${n3} → 맨 위 누름 ${n4}` };
   });
 
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });

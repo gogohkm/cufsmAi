@@ -12,13 +12,13 @@ import { copyText, openDrawer, setActiveTable, sortBy, toggleDrawer, tsvOf } fro
 import { fitZoom, installZoom, restoreZoom } from './zoom';
 import { answered, enqueue, initDialogs, questionOpen, setProgress, toast } from './dialogs';
 import { debounce, esc, tip } from './dom';
-import { editing, hideSide, initEdit, mountDesigner, reloadSide, setEditing, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
+import { editing, editSource, hideSide, initEdit, mountDesigner, reloadSide, setEditing, showSide, toggleEditing, onWebviewF2, postToWebviews, setEditTheme, setWebviewOrigin } from './edit';
 import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { chg, loadChanges } from './changes';
 import { hostText } from './notices';
 import { docs as docsState, doExport, doOpen, initDocs, loadDocs, openPreview } from './docs';
 import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes } from './work';
-import { itemOfRow, loadReviews, mark as markTargets, markOf, rowTarget, rv, trust as trustWriter, type MarkTarget } from './reviews';
+import { askTrust, itemOfRow, loadReviews, mark as markTargets, markOf, rowTarget, rv, trust as trustWriter, type MarkTarget } from './reviews';
 import { altAction, alts, compareOf, loadAlts, visibleAlts } from './alts';
 import { findHtml, search, type Hit } from './find';
 import { clearPointed, following, handleFocus, idleFor, installIdle, itemOfKey, keyOfItem, lastFollowed, lastReported, onReport, pointedAt, report, setFollowing, takePointed, type FocusReq, type Item } from './follow';
@@ -68,13 +68,30 @@ const hasSheet = (key: string): boolean => !!rowOfKey(key).row?.us && !/#(ls|ne)
 
 // ── 그리기 ────────────────────────────────────────────────────────
 let wasEditing = false;
+/**
+ * V9b-08: 편집 상태의 사람 길(edit-session)은 맨 위 틀의 입력에서만 보낸다. 끼운 페이지의 F2 · Esc 메시지로 바뀐 것은 미뤄 두었다가
+ * 맨 위 문서의 다음 사람 입력(isTrusted 인 누름 · 키)에서 보낸다 — 시작하고 보내기 전에 끝났으면 둘 다 버린다
+ */
+const sessionPending: Array<'start' | 'end'> = [];
+function sessionCall(state: 'start' | 'end'): void {
+  if (editSource === 'top' && !sessionPending.length) { sendSession(state); return; }
+  if (state === 'end' && sessionPending[sessionPending.length - 1] === 'start') { sessionPending.pop(); return; }
+  sessionPending.push(state);
+}
+function sendSession(state: 'start' | 'end'): void { void person('edit-session', { state }).then(() => { if (state === 'end') { scheduleRefresh(); } }); }
+const flushSession = (e: Event): void => {
+  if (!e.isTrusted || !sessionPending.length) { return; }
+  for (const s of sessionPending.splice(0)) { sendSession(s); }
+};
+document.addEventListener('pointerdown', flushSession, true);
+document.addEventListener('keydown', flushSession, true);
 /** 편집 상태가 바뀌었다(F2 · 단추 · Esc) — 띠의 기준 판을 잡고 푼다 */
 function onEditChange(): void {
   const now = editing();
   // R2-3: 편집 상태를 열고 닫을 때 호스트에 알린다(다리의 사람 길 → editSession) — 그 사이의 사람 편집이 「사용자 변경」 묶음 하나.
   // 버리기(discarding)는 그 길이 따로 알렸다
-  if (now && !wasEditing) { beginEdit(); void person('edit-session', { state: 'start' }); }
-  if (!now && wasEditing) { endEdit(); if (!discarding) { void person('edit-session', { state: 'end' }).then(() => scheduleRefresh()); } }
+  if (now && !wasEditing) { beginEdit(); sessionCall('start'); }
+  if (!now && wasEditing) { endEdit(); if (!discarding) { sessionCall('end'); } }
   discarding = false;
   wasEditing = now;
   render();
@@ -590,8 +607,10 @@ function reviewClick(el: HTMLElement): boolean {
     void doMark(ts, gr.getAttribute('data-rv-state') !== 'reviewed');
     return true;
   }
+  const ta = el.closest('[data-rv-trust-ask]');
+  if (ta) { askTrust(ta.getAttribute('data-rv-trust-ask') || null); render(); return true; }
   const tr = el.closest('[data-rv-trust]');
-  if (tr) { void trustWriter(String(tr.getAttribute('data-rv-trust'))).then(async r => { await loadReviews(); render(); toast(r.ok ? '그 작성자를 믿는다 — 그 확인 표시를 센다' : `믿기를 하지 못했다 — ${r.why ?? ''}`, r.ok ? 'info' : 'warning'); }); return true; }
+  if (tr) { askTrust(null); void trustWriter(String(tr.getAttribute('data-rv-trust'))).then(async r => { await loadReviews(); render(); toast(r.ok ? '그 작성자를 믿는다 — 그 확인 표시를 센다' : `믿기를 하지 못했다 — ${r.why ?? ''}`, r.ok ? 'info' : 'warning'); }); return true; }
   return false;
 }
 /** 대안 단추(「이 대안으로」 · 숨기기 · 다시 보이기 · 이름 바꾸기 · 지금 것을 대안으로) */
@@ -946,6 +965,12 @@ function boot(): void {
       else { toast(`${rr.querySelector?.('.lnk')?.textContent ?? id} — ${stEl?.textContent ?? '지금 결과에 없음'}${rr.querySelector?.('.why')?.textContent ? ` · ${rr.querySelector('.why')?.textContent ?? ''}` : ''}`, 'warning'); }
       return;
     }
+    const ss2 = t.closest?.('[data-show-src]');
+    if (ss2) {
+      e.stopPropagation();
+      void person('show-source', { id: String(ss2.getAttribute('data-show-src')) }).then(r => toast(r.ok ? (r.data?.shown ? `「${r.data.name}」을(를) 탐색기에서 보인다` : `「${r.data?.name ?? ''}」 — 이 환경에서는 탐색기를 열지 않는다`) : `보이지 못했다 — ${r.error ?? ''}`, r.ok ? 'info' : 'warning'));
+      return;
+    }
     const os2 = t.closest?.('[data-open-src]');
     if (os2) {
       e.stopPropagation();
@@ -1160,6 +1185,8 @@ function boot(): void {
   /** 시험: 보기 보고 하나를 곧바로(모델 · 상태를 쓰지 않는다 — 호스트가 무엇을 버리고 칩이 그것을 보이는지 본다) */
   reportNow: (view: string, selection: unknown) => report(view, selection as Item | null, 'program', true),
   get pointed() { return pointedAt(); },
+  /** 시험: 다른 작성자의 카드를 화면에만 넣는다(기록에 쓰지 않는다 — 「믿기」 물음의 모양을 본다. 다음 다시 읽기가 지운다) */
+  testWriters: (w: Array<{ writer_id: string; name: string; host: string; trusted: boolean }>) => { rv.writers = w; render(); },
   /** 시험: 문서 · 발행 상태(읽기만 — 미리보기의 일회용 숫자를 다른 길로 먼저 써 보는 시험) */
   get docs() { return { pv: docsState.pv ? { nonce: docsState.pv.nonce, fingerprint: docsState.pv.fingerprint, expiresAt: docsState.pv.expiresAt } : null, issues: docsState.issues.length, drafts: docsState.drafts.length }; },
   checkMenu: (key: string) => checkMenu(key, '', handlers).map(x => (x === '-' ? '-' : `${x.label}|${x.kbd ?? ''}|${x.off ? 'off' : 'on'}`)),
