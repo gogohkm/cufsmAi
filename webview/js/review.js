@@ -1080,16 +1080,18 @@
                         var _lr = _lastLapResult;
                         // 패스너 전단 DCR
                         // K3-6(D4): 패스너 무리의 판정은 엔진의 lap.fastener_group(전: 랩 전체가 통과일 때만 「평가함」 으로 보아 주의)
+                        // 엔진 733c18e: 맨 위 utilization 은 랩 강도 검토의 최대 비 — 패스너 무리의 비는 fastener_utilization(옛 결과는 utilization)
+                        var _lrFast = typeof _lr.fastener_utilization === 'number' ? _lr.fastener_utilization : (_lr.governing_check === undefined ? _lr.utilization : null);
                         const _fg = _engineCheck(_lr, 'lap.fastener_group');
                         checks.push({
                             category: catG2, item: 'Lap 패스너 전단 (DCR)',
-                            status: _fg ? (_engineStatus(_fg) || 'pass') === 'pass' ? _statusFromVerdict(_v3(true), _lr.utilization) : _engineStatus(_fg)
-                                : (_lr.utilization != null ? _statusFromVerdict(_ratioVerdict(_lr.utilization, _lr.pass === true), _lr.utilization) : 'warn'),
-                            value: _lr.utilization != null
-                                ? 'DCR=' + _lr.utilization.toFixed(3) + ' (V=' + _ruv(_lr.V_transfer, 'force') + ' / Cap=' + _ruv(_lr.capacity, 'force') + ' ' + _rul('force') + ')'
+                            status: _fg ? (_engineStatus(_fg) || 'pass') === 'pass' ? _statusFromVerdict(_v3(true), _lrFast) : _engineStatus(_fg)
+                                : (_lrFast != null ? _statusFromVerdict(_ratioVerdict(_lrFast, _lr.pass === true), _lrFast) : 'warn'),
+                            value: _lrFast != null
+                                ? 'DCR=' + _lrFast.toFixed(3) + ' (V=' + _ruv(_lr.V_transfer, 'force') + ' / Cap=' + _ruv(_lr.capacity, 'force') + ' ' + _rul('force') + ')'
                                 : '미계산',
                             criterion: '패스너 전단 DCR ≤ 1.0',
-                            note: _lr.utilization > 1.0 ? '패스너 용량 부족 — 패스너 수 또는 사양을 변경하세요.' : '',
+                            note: _lrFast > 1.0 ? '패스너 용량 부족 — 패스너 수 또는 사양을 변경하세요.' : '',
                         });
                         // Lap 휨강도 DCR
                         var _lrGov = (_lr.flexure_dcr_governing != null) ? _lr.flexure_dcr_governing : _lr.flexure_dcr;

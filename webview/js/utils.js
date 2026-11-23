@@ -255,10 +255,58 @@
         };
     }
 
+    /**
+     * V8-01 — 랩 검토(Lap 접합)의 단면 강도를 퍼린 결과에서: **그 랩이 걸친 지점의 랩 구간**(kind 'lap', 그 지점) 결과에서만.
+     * 지배 구간(pickGoverningPurlinDesign)에서 가져오지 않는다 — 다른 구간의 횡비틀림 · 뒤틀림 감소를 품는다.
+     *  - 부재마다 Se = Mnℓ / Fy(그 구간의 결과 — 검토 항목 member.flexure.local 의 반올림 전 nominal — 랩 구속의 진술이 있으면 랩 안은 Fn = Fy, Mne = My 로 낸 Mnℓ). 그 지점의 랩 구간이
+     *    둘(왼쪽 · 오른쪽)이면 작은 쪽.
+     *  - Vn = 그 구간의 전단 검토의 Vn. Mnd 는 보내지 않는다(랩 도구가 진술로 뒤틀림을 다룬다 — 엔진).
+     *  - 그 구간이 비탄성 여유(Mne > My) · 냉간 가공(Fy_used > Fy)으로 낸 것이면 짓지 않는다(엔진 계약 — 그것 없는 Mnℓ 이 결과에 없다).
+ *  - 지점을 모르거나(support 없음), 그 지점의 랩 구간 결과가 없거나, 랩 구속을 밝히지 않았으면 **아무것도 짓지 않는다**
+     *    (Se · Vn null, reason — 엔진은 휨 검토를 「판정 없음」 으로 밝힌다).
+     * @param {any} purlin  퍼린 결과 묶음(regions[] — design_purlin 의 답 그대로)
+     * @param {number|null|undefined} support  랩이 걸친 지점 번호(1 부터 — 화면의 「지점 3」)
+     * @param {{stated?: boolean}} [opts]  랩 구속의 진술(lap_restrained)
+     * @returns {{Se: number|null, Vn: number|null, from: string|null, regions: string[], support: number|null, reason: string|null}}
+     */
+    function deriveLapSection(purlin, support, opts) {
+        const none = (reason) => ({ Se: null, Vn: null, from: null, regions: [], support: Number.isInteger(support) ? support : null, reason });
+        if (!purlin || !Array.isArray(purlin.regions)) { return none('no purlin design result — the lap section strength is taken only from the purlin result\'s lap region'); }
+        if (!Number.isInteger(support) || support < 1) { return none('the support the lap spans is not set (lap support number)'); }
+        if (!(opts && opts.stated)) { return none('the lap restraint is not stated — the lap section strength with Fn = Fy (Manual II-2A) is not derived'); }
+        const regs = purlin.regions.filter((g) => g && g.kind === 'lap' && Number(g.support) === support - 1 && g.result && !g.result.error);
+        if (regs.length === 0) { return none('the purlin result has no lap region at support ' + support); }
+        let Se = null, Vn = null;
+        const ids = [];
+        for (const g of regs) {
+            const r = g.result;
+            const fy = Number(r.Fy_used);
+            // 반올림 전 값(검토 항목의 nominal — 엔진 계약), 없으면 결과 필드(표시 반올림)
+            const nominalOf = (id) => {
+                const c = Array.isArray(r.design_checks) ? r.design_checks.find((x) => x && x.id === id) : null;
+                return c && c.nominal && typeof c.nominal.value === 'number' && isFinite(c.nominal.value) ? c.nominal.value : null;
+            };
+            const mnl = nominalOf('member.flexure.local') ?? Number(r.Mnl);
+            if (!(mnl > 0) || !(fy > 0)) { return none('the lap region ' + g.id + ' has no local-buckling strength (Mnl)'); }
+            // 엔진 733c18e(계약 §6.3): Se 는 비탄성 여유 · 냉간 가공 없이 낸 랩 구간의 Mnℓ / Fy. 그 결과가 둘 가운데 하나를 품으면
+            // (Mne > My — 비탄성 여유, Fy_used > Fy_original — 냉간 가공) 그 값이 결과에 없다 — 짓지 않는다(호스트는 강도를 계산하지 않는다)
+            const my = Number(r.My), mne = Number(r.Mne), fyo = Number(r.Fy_original);
+            if (my > 0 && mne > my * (1 + 1e-9)) { return none('the purlin lap region ' + g.id + ' was designed with inelastic reserve (Mne > My) — its Mnl is not the lap section strength; the result has no Mnl without the reserve'); }
+            if (fyo > 0 && fy > fyo * (1 + 1e-9)) { return none('the purlin lap region ' + g.id + ' was designed with cold work (Fy_used > Fy) — its Mnl is not the lap section strength'); }
+            const se = mnl / fy;
+            if (Se === null || se < Se) { Se = se; }
+            const vn = nominalOf('member.shear') ?? Number(r.Vn || (r.shear && r.shear.Vn));
+            if (vn > 0 && (Vn === null || vn < Vn)) { Vn = vn; }
+            ids.push(String(g.id));
+        }
+        return { Se, Vn, from: 'Mnl / Fy of the purlin lap region' + (ids.length > 1 ? 's ' : ' ') + ids.join(', ') + ' at support ' + support + ' (per member, Fn = Fy under the lap restraint statement)',
+            regions: ids, support, reason: null };
+    }
+
     return {
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
         assumptionsList, scopeNotesList, userText, USER_TERMS,
-        pickGoverningPurlinDesign,
+        pickGoverningPurlinDesign, deriveLapSection,
     };
 });

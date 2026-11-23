@@ -34,6 +34,8 @@ export class CaseKeeper {
     pageDesign: any = null;
     /** 화면의 _lastLapResult 거울 */
     pageLap: any = null;
+    /** V8-01: 화면의 _lastPurlinResult 거울(퍼린 결과 묶음 그대로 — 랩 검토의 단면 강도를 그 지점의 랩 구간에서) */
+    pagePurlin: any = null;
     /**
      * K3: 화면이 쥐는 나머지 결과의 거울(검증 · 보고서의 입력 — webview/js/review.js 의 env). 화면의 처리기와 같은 규칙으로 적고 지운다:
      * model ← modelLoaded, analysis ← analysisComplete(곡선 줄 정규화), dsm ← dsmResult, load ← loadAnalysisComplete(오류가 아니면) ·
@@ -66,12 +68,17 @@ export class CaseKeeper {
             case 'designResult':
                 if (data && data.design_positive) { v.load = data.load_analysis || v.load; }
                 this.pageDesign = data && data.design_positive ? UTILS.pickGoverningPurlinDesign(data) : data;
+                this.pagePurlin = data && data.design_positive ? data : null;
                 break;
             case 'designPurlinResult':
                 v.load = (data && data.load_analysis) || v.load;
                 this.pageDesign = UTILS.pickGoverningPurlinDesign(data);
+                this.pagePurlin = data || null;
                 break;
             case 'lapConnectionResult': this.pageLap = data; break;
+            // 다시 실은 뒤의 창은 호스트가 **새** 상태(AI · 호스트의 쓰기 — 'ai' · 'merged')를 보내면 닫힌다: 그 상태를 그리며 낸 화면의 연동은
+            // 지금까지처럼 받는다. 다시 싣기 · 충돌 때 다시 보내는 상태는 창을 닫지 않는다
+            case 'caseState': if (data && data.reason !== 'page reloaded' && data.reason !== 'conflict') { this.reloadWindow = false; } break;
             case 'analysisInvalidated': this.clearStale(data && data.invalidateLoads ? 'model' : 'analysis'); break;
             case 'resultsCleared': this.clearStale('all'); break;
             case 'derivedResultsInvalidated': {
@@ -99,6 +106,7 @@ export class CaseKeeper {
         const lvl = order.indexOf(scope) < 0 ? 0 : order.indexOf(scope);
         const has = (x: string) => lvl >= order.indexOf(x);
         this.pageDesign = null;
+        this.pagePurlin = null;
         this.pageLap = null;
         if (scope === 'load' || has('model')) { this.pageView.load = null; }
         if (scope !== 'design' && scope !== 'load') { this.pageView.analysis = null; this.pageView.dsm = null; }
@@ -182,6 +190,29 @@ export class CaseKeeper {
         // 그 판 뒤에 다른 쓰는 이(AI · 파일 …)가 바꾼 키를 옛 화면 값으로 되쓰지 않는다.
         else if (d.origin === 'mirror' && Number.isInteger(d.seenRev)) { opts.baseRev = d.seenRev; }
         const wasClean = this.state.rev === this.savedRev;
+        // 다시 실은 화면(새로 고침 · 다리의 다시 보내기)의 메아리는 편집이 아니다 — 판 · 출처 · 장부 · 무효화가 움직이지 않는다:
+        //  - 하중 해석 채우기(origin load-analysis)는 호스트가 **새** 하중 해석을 낸 뒤에만(fillPending). 그 밖(다시 보낸 옛 해석 · 파일의
+        //    해석)의 채우기는 받지 않고 충돌로 알린다(호스트가 상태를 다시 보낸다).
+        //  - 다시 실은 뒤 사람의 첫 변경(user · unit-toggle) 전까지 화면 연동(mirror)은 아무 키도 바꾸지 못한다 — 화면이 상태를 그리며 낸
+        //    차이(빈 선택을 처음 값으로 보이는 것 등)는 상태가 아니다(알리기만, 다시 보내지 않는다 — 고리가 되지 않게).
+        if (d.origin === 'user' || d.origin === 'unit-toggle') { this.reloadWindow = false; }
+        {
+            const raw0: Record<string, unknown> = d.changes && typeof d.changes === 'object' ? d.changes : {};
+            const differs = (k: string) => {
+                const cur = (['spans', 'supports', 'lapsPerSupport'] as string[]).includes(k) ? (this.state.spans as any)[k] : this.state.inputs[k];
+                return JSON.stringify(cur) !== JSON.stringify(raw0[k]);
+            };
+            if (d.origin === 'load-analysis' && !this.fillPending) {
+                const keys = Object.keys(raw0).filter(differs);
+                return { state: this.state, accepted: [], conflicts: keys,
+                    rejected: keys.map((key) => ({ key, reason: 'a replayed load-analysis fill (no new load analysis since the page was loaded) — not an edit' })) };
+            }
+            if (d.origin === 'mirror' && this.reloadWindow) {
+                const keys = Object.keys(raw0).filter(differs);
+                return { state: this.state, accepted: [], conflicts: [],
+                    rejected: keys.map((key) => ({ key, reason: 'the reloaded page drew the state differently — not an edit' })) };
+            }
+        }
         // V7-08: 파일을 연 판(경계)보다 오래된 판을 보고 만든 화면의 변경은 키와 무관하게 받지 않는다 — 열기 전에 친 글자가
         // 새로 연 파일의 값을 덮지 않는다(파일은 「다른 쓰는 이」 — 설계 §3.2). 호출자가 상태를 다시 보낸다(conflicts).
         if (opts.baseRev !== undefined && opts.baseRev < this.boundaryRev) {
@@ -231,6 +262,14 @@ export class CaseKeeper {
     /** u33: 지금 하중 해석을 얻었을 때의 판(없으면 null) — 호스트가 하중 해석을 쥘 때 noteLoadAnalysis 로 적는다 */
     loadAnalysisRev: number | null = null;
     noteLoadAnalysis(present = true): void { this.loadAnalysisRev = present ? this.state.rev : null; }
+    /** 호스트가 **새** 하중 해석을 냈다 — 그 해석의 화면 채우기만 받는다(다시 보낸 옛 해석의 채우기는 아니다) */
+    noteFreshLoadAnalysis(): void { this.noteLoadAnalysis(true); this.fillPending = true; }
+    /** 화면을 다시 실었다(두 번째 hello · 다시 보내기) — 그 뒤의 채우기 · 연동은 편집이 아니다(사람의 첫 변경까지) */
+    pageReloaded(): void { this.fillPending = false; this.reloadWindow = true; }
+    /** 새 하중 해석의 채우기를 기다린다 */
+    private fillPending = false;
+    /** 다시 실은 뒤 사람의 첫 변경 전 */
+    private reloadWindow = false;
 
     /**
      * 화면이 처음 떴다(caseHello {inputs, drafts}) — 처음 값이 표의 처음 값과 같은지 본다(다르면 기록 — 시험이 본다).
@@ -240,6 +279,7 @@ export class CaseKeeper {
         this.hellos += 1;
         if (data && data.drafts && typeof data.drafts === 'object') { this.drafts = { ...data.drafts }; }
         const again = this.hellos > 1;
+        if (again) { this.pageReloaded(); }
         if (!testMode || !data || !data.inputs) { return again; }
         const DS = require('../../webview/js/designState');
         const fresh = createCaseState();
@@ -286,6 +326,8 @@ export class CaseKeeper {
             lastDesign: pageSeen ? this.pageDesign
                 : (hostDesign && (Array.isArray(hostDesign.regions) || hostDesign.design_positive !== undefined)
                     ? UTILS.pickGoverningPurlinDesign(hostDesign) : hostDesign),
+            purlin: pageSeen ? this.pagePurlin
+                : (hostDesign && Array.isArray(hostDesign.regions) ? hostDesign : null),
         };
     }
 

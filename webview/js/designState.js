@@ -147,6 +147,8 @@
         ['connGrooveType', 'conn-groove-type', null, 'sel', _C('connection', 'complete', 'connection', { opts: ['complete', 'partial'] })],
         ['connLapLeft', 'conn-lap-left', 'length', 'num', _C('lap', 305, 'connection')],
         ['connLapRight', 'conn-lap-right', 'length', 'num', _C('lap', 305, 'connection')],
+        // V8-01: 랩이 걸친 지점(1 부터 — 「지점 3」). 퍼린 결과의 그 지점 랩 구간에서 단면 강도(Se · Vn)를 가져온다. 비면 짓지 않는다
+        ['connLapSupport', 'conn-lap-support', null, 'num', _C('lap', null, 'connection')],
         ['connMu', 'conn-Mu', 'moment', 'num', _C('lap', 0, 'connection')],
         ['connVu', 'conn-Vu', 'force', 'num', _C('lap', 0, 'connection')],
         ['connFastenerDia', 'conn-fastener-dia', 'length', 'num', _C('lap', 4.8, 'connection')],
@@ -598,12 +600,19 @@
         let maxNegMu = 0;
         let maxVu = 0;
         let negMuName = null;
+        let negMuSupport = null;
         (locations || []).forEach(function (loc) {
             if (!loc) return;
             if ((loc.name || '').indexOf('Lap end') === 0) return;
-            if (loc.Mu != null && loc.Mu < 0 && Math.abs(loc.Mu) > Math.abs(maxNegMu)) {
+            const atSupport = Number.isInteger(loc.support) && loc.support > 0;
+            const bigger = loc.Mu != null && loc.Mu < 0 && Math.abs(loc.Mu) > Math.abs(maxNegMu);
+            // V8-01: 같은 크기(경간의 「-M」 과 그 지점)면 지점의 위치를 — 랩 탭이 그 지점의 랩 길이 · 랩 구간 강도를 쓴다
+            const tieAtSupport = loc.Mu != null && loc.Mu < 0 && maxNegMu !== 0 && negMuSupport === null && atSupport
+                && Math.abs(Math.abs(loc.Mu) - Math.abs(maxNegMu)) <= 1e-9 * Math.abs(maxNegMu);
+            if (bigger || tieAtSupport) {
                 maxNegMu = loc.Mu;
                 negMuName = loc.name || null;
+                negMuSupport = atSupport ? loc.support : null;
             }
             if (loc.Vu != null && Math.abs(loc.Vu) > maxVu) maxVu = Math.abs(loc.Vu);
         });
@@ -611,6 +620,7 @@
             negMuFt: maxNegMu !== 0 ? maxNegMu : null,
             maxVu: maxVu,
             negMuName: negMuName,
+            negMuSupport: negMuSupport,
         };
     }
 

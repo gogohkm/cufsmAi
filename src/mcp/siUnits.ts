@@ -329,7 +329,7 @@ export const TEXT_UNITS_NOTE =
 
 const NONE_KEYS = [
     // 비율 · 계수 · 개수 · 색인 · 무차원
-    'utilization', 'utilization_reference', 'ratio', 'total', 'P_ratio', 'Mx_ratio', 'My_ratio',
+    'utilization', 'utilization_reference', 'fastener_utilization', 'ratio', 'total', 'P_ratio', 'Mx_ratio', 'My_ratio',
     'M_ratio', 'V_ratio', 'eq_H1_1_1', 'eq_H1_1_2', 'eq_H1_2_1', 'eq_H1_2_2', 'Cb', 'Cb_pos', 'Cmx', 'Cmy',
     'Kt', 'Ky', 'Kx', 'z_factor', 'alpha', 'alpha_x', 'alpha_y', 'beta_dist', 'lambda_v', 'lambda_l',
     'lambda_d', 'lambda_c', 'R_uplift', 'R', 'R_if_confirmed', 'R_per_span', 'uplift_R', 'step', 'thetap',

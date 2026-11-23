@@ -24,6 +24,8 @@
     let lastDsmResult = null;
     /** 설계 결과 (Report용) */
     let _lastDesignResult = null;
+    /** V8-01: 퍼린 결과 묶음 그대로(regions[]) — 랩 검토의 단면 강도를 그 지점의 랩 구간에서 */
+    let _lastPurlinResult = null;
     /** 단면 성질 (Report용) */
     let lastProps = null;
     /** 하중 분석 결과 */
@@ -199,6 +201,7 @@
                 setStatus('Running analysis...', 'running');
                 break;
             case 'analysisComplete':
+                if (msg.data && !msg.data.error) { delete _ledgerReasons.buckling_analysis; }
                 analysisResult = msg.data;
                 // curve 데이터 정규화: [[10, 0.05, ...]] → [10, 0.05, ...]
                 if (analysisResult && analysisResult.curve) {
@@ -235,11 +238,24 @@
                 {
                     // K2-5: MCP set_case_inputs 가 접합 칸만 바꿨으면 그 결과만(D-4 와 같은 범위)
                     const sc = msg.data && msg.data.scope;
-                    // V7-40: scope 'kinds' 는 다시 보내는 길(브리지 · 둘째 화면)의 이름표 — 이 화면은 그 결과를 이미 지웠거나 따로 알림을 받았다
-                    if (sc === 'kinds') { break; }
+                    // V7-40: scope 'kinds' 는 다시 보내는 길(브리지 · 둘째 화면)의 이름표 — 결과는 이미 지웠다. V8-05: 그 종류의 까닭만 장부에 적고
+                    // 결과가 없는 카드에 그 까닭을 쓴다(다시 보낸 옛 지움 알림의 까닭이 남지 않게)
+                    if (sc === 'kinds') {
+                        (Array.isArray(msg.data && msg.data.kinds) ? msg.data.kinds : []).forEach((k) => { _ledgerReasons[String(k)] = String((msg.data && msg.data.reason) || 'inputs changed'); });
+                        _showLedgerReasons();
+                        break;
+                    }
                     clearStaleResults(sc === 'load' ? 'load' : (sc === 'lap' || sc === 'connection') ? sc : 'design', (msg.data && msg.data.reason) || 'inputs changed');
                 }
                 sendTreeUpdate();
+                break;
+            case 'resultsLedger':
+                // V8-05: 호스트의 무효 장부(다시 실을 때 맨 먼저 온다) — 지워진 종류마다 까닭을 그 카드에(결과가 다시 오면 그것이 덮는다)
+                _ledgerReasons = {};
+                (Array.isArray(msg.data && msg.data.invalidated) ? msg.data.invalidated : []).forEach((e) => {
+                    if (e && typeof e.kind === 'string') { _ledgerReasons[e.kind] = String(e.reason || 'inputs changed'); }
+                });
+                _showLedgerReasons();
                 break;
             case 'resultsCleared':
                 // 호스트: 다른 프로젝트를 열기 직전 — 이전 프로젝트의 결과를 모두 지운다(V4-01).
@@ -343,6 +359,7 @@
                 sendTreeUpdate();
                 break;
             case 'lapConnectionResult':
+                if (msg.data && !msg.data.error) { delete _ledgerReasons.lap; }
                 _lastLapResult = msg.data;
                 renderLapConnectionResult(msg.data);
                 break;
@@ -350,6 +367,8 @@
                 renderConnectionResult(msg.data);
                 break;
             case 'designResult':
+                if (msg.data && !msg.data.error) { delete _ledgerReasons.member_design; }
+                _lastPurlinResult = msg.data && msg.data.design_positive ? msg.data : null;
                 if (msg.data && msg.data.design_positive) {
                     _lastLoadAnalysis = msg.data.load_analysis || _lastLoadAnalysis;
                     _lastDesignResult = _pickGoverningPurlinDesign(msg.data);
@@ -361,6 +380,8 @@
                 sendTreeUpdate();
                 break;
             case 'designPurlinResult':
+                if (msg.data && !msg.data.error) { delete _ledgerReasons.member_design; }
+                _lastPurlinResult = msg.data || null;
                 _lastLoadAnalysis = msg.data?.load_analysis || _lastLoadAnalysis;
                 _lastDesignResult = _pickGoverningPurlinDesign(msg.data);
                 renderDesignResult(_lastDesignResult);
@@ -370,6 +391,7 @@
                 captureSectionPreview();
                 break;
             case 'loadAnalysisComplete':
+                if (msg.data && !msg.data.error) { delete _ledgerReasons.load_analysis; }
                 renderLoadAnalysisResult(msg.data);
                 sendTreeUpdate();
                 break;
@@ -1107,22 +1129,16 @@
             // 과거에는 설계를 돌려도 항상 Sx 대체 경고가 떴음) → 그래도 없으면 Sx
             // V4-08: 유효단면계수를 모르면 총단면 Sx 로 대신하지 않는다 — Se 를 보내지 않아 엔진이 Lap 휨을
             // 「판정 없음」으로 두고, 화면이 그 까닭(휨 설계 검토 결과가 필요)을 보인다.
-            var haveSe = false;
-            var lpSe = undefined;
-            if (_lastDesignResult && _lastDesignResult.member_type === 'flexure') {
-                if (_lastDesignResult.Se > 0) {
-                    lpSe = _lastDesignResult.Se; haveSe = true;
-                } else if (_lastDesignResult.Mnl > 0 && _lastDesignResult.Fy_used > 0) {
-                    lpSe = _lastDesignResult.Mnl / _lastDesignResult.Fy_used; haveSe = true;
-                }
-            }
+            // V8-01: 단면 강도(Se · Vn)는 퍼린 결과의 **그 랩이 걸친 지점의 랩 구간**에서만(지배 구간이 아니다) — 호스트와 같은 함수.
+            // Mnd 는 보내지 않는다(랩 도구가 진술로 뒤틀림을 다룬다). 지점 · 랩 구간 · 진술이 없으면 짓지 않는다(휨은 판정 없음).
+            var lapSupEl = /** @type {HTMLInputElement|null} */ (document.getElementById('conn-lap-support'));
+            var lapSup = lapSupEl && lapSupEl.value !== '' ? Number(lapSupEl.value) : null;
+            var lapStated = !!(/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked);
+            var lapSec = globalThis.StcfsdUtils.deriveLapSection(_lastPurlinResult, Number.isInteger(lapSup) ? lapSup : null, { stated: lapStated });
+            var haveSe = lapSec.Se !== null;
+            var lpSe = haveSe ? lapSec.Se : undefined;
             _lapSeIsGross = !haveSe;
-            // 설계 결과가 있으면 §F4 뒤틀림(Mnd)·§H2 휨-전단(Vn) 검토 입력도 전달
-            // (미전달 시 python이 해당 한계상태를 경고로만 처리 — 과거엔 항상 미전달이었음)
-            var lpMnd = (_lastDesignResult && _lastDesignResult.Mnd > 0) ? _lastDesignResult.Mnd : undefined;
-            var lpVn = _lastDesignResult
-                ? (_lastDesignResult.Vn || (_lastDesignResult.shear && _lastDesignResult.shear.Vn) || undefined)
-                : undefined;
+            var lpVn = lapSec.Vn !== null ? lapSec.Vn : undefined;
             const data = {
                 d: reqNum('tpl-H', 'length', '단면 높이 H'),
                 t: reqNum('tpl-t', 'thickness', '두께 t'),
@@ -1141,8 +1157,7 @@
                 Se: lpSe,   // 유효 단면계수 (in³)
                 // 엔진(lap_connection.py:281)은 Se 가 없으면 Sf 로 대신한다 — Se 를 모를 때는 Sf 도 보내지 않는다(V4-08, F6 후속).
                 Sf: haveSe ? lpSx : undefined,   // 총 단면계수 (in³)
-                Mnd: lpMnd, // §F4 뒤틀림 공칭휨강도 (kip-in, 있을 때만)
-                Vn: lpVn,   // §G 공칭전단강도 (kips, 없으면 python이 §G2.1 자동산정)
+                Vn: lpVn,   // §G 공칭전단강도 — 그 지점 랩 구간의 전단 검토(kips, 없으면 python이 §G2.1 자동산정)
             };
             // 계약 §6.3: 랩 구속의 진술 — 퍼린 탭과 같은 검토 상태 키(lapRestrained, 이 칸은 거울)
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked) { data.lap_restrained = true; }
@@ -1275,10 +1290,15 @@
         var govFlexDcr = (result.flexure_dcr_governing != null) ? result.flexure_dcr_governing : result.flexure_dcr;
         let html = '<h4>Lap Splice 설계 결과</h4>';
 
-        if (_lapSeIsGross) {
+        // V8-01: Se 를 짓지 않았으면 그 까닭(호스트가 결과에 단 section_source.reason — 글로만)
+        var lapSrc = result.section_source || null;
+        if (_lapSeIsGross || (lapSrc && lapSrc.Se === null)) {
             html += '<div style="background:rgba(255,171,0,0.1);padding:6px;margin-bottom:8px;border-radius:3px;font-size:11px;color:#f90">'
                 + '유효단면계수 Se 가 없어 Lap 휨(§F3/F4/H2)은 검토하지 않았습니다 — 판정 없음. '
-                + '③좌굴해석·부재설계 탭에서 휨 설계 검토를 먼저 실행하면 Se(= Mnl/Fy) · Mnd · Vn 이 반영됩니다.</div>';
+                + 'Se · Vn 은 퍼린 결과의 <b>그 랩이 걸친 지점</b>(지점 번호 칸)의 랩 구간에서, 랩 구속의 진술이 있을 때 가져옵니다.'
+                + (lapSrc && lapSrc.reason ? '<br>까닭: ' + _esc(String(lapSrc.reason)) : '') + '</div>';
+        } else if (lapSrc && lapSrc.from) {
+            html += '<div style="font-size:11px;color:var(--vscode-descriptionForeground);margin-bottom:6px">Se 의 출처: ' + _esc(String(lapSrc.from)) + '</div>';
         }
 
         // Lap SVG 다이어그램
@@ -1292,8 +1312,11 @@
         html += '종합 판정: ' + lapV.icon + ' ' + lapV.label;
         if (result.verdict && result.verdict !== lapV.state) html += ' [' + _esc(result.verdict) + ']';
         var dcrParts = [];
-        if (result.utilization != null && isFinite(result.utilization)) {
-            dcrParts.push('패스너 DCR=' + result.utilization.toFixed(3));
+        // 엔진 733c18e: 맨 위 utilization 은 랩 강도 검토의 최대 비 — 패스너 무리의 비는 fastener_utilization(옛 결과는 utilization 이 그것)
+        var fastU = (typeof result.fastener_utilization === 'number') ? result.fastener_utilization
+            : (result.governing_check === undefined ? result.utilization : null);
+        if (fastU != null && isFinite(fastU)) {
+            dcrParts.push('패스너 DCR=' + fastU.toFixed(3));
         }
         if (govFlexDcr != null && isFinite(govFlexDcr)) {
             dcrParts.push('휨 DCR=' + govFlexDcr.toFixed(3));
@@ -5239,7 +5262,19 @@
             var helper = globalThis.StcfsdDesignState;
             var sel = helper && helper.selectLapGoverningMoment
                 ? helper.selectLapGoverningMoment(gov.locations)
-                : { negMuFt: null, maxVu: 0, negMuName: null };
+                : { negMuFt: null, maxVu: 0, negMuName: null, negMuSupport: null };
+            // V8-01: 부모멘트가 가장 큰 지점 — 랩 탭은 그 지점의 랩 길이와 그 지점 랩 구간의 강도를 쓴다(최대 길이를 지점끼리 섞지 않는다)
+            if (sel.negMuSupport != null) {
+                var elSup = document.getElementById('conn-lap-support');
+                if (elSup) elSup.value = String(sel.negMuSupport);
+                var lpAt = lps && lps[sel.negMuSupport - 1];
+                if (lpAt) {
+                    var elL2 = document.getElementById('conn-lap-left');
+                    var elR2 = document.getElementById('conn-lap-right');
+                    if (elL2 && (lpAt.left_ft || 0) > 0) elL2.value = toDisplay((lpAt.left_ft || 0) * 12, 'length').toFixed(1);
+                    if (elR2 && (lpAt.right_ft || 0) > 0) elR2.value = toDisplay((lpAt.right_ft || 0) * 12, 'length').toFixed(1);
+                }
+            }
             if (sel.negMuFt != null) {
                 var elMu = document.getElementById('conn-Mu');
                 // locations.Mu는 kip-ft, conn-Mu는 moment(kip-in) 단위 → ×12 변환 필요
@@ -6132,10 +6167,29 @@
      *   'model'    단면 · 재료 변경(호스트 invalidateLoads): 'analysis' + 'load' + 진동 · 소성
      *   'all'      다른 프로젝트 열기: 'model' + 단일 접합 결과
      */
+    /** V8-05: 호스트 장부의 까닭(종류 → 글) — 마지막 resultsLedger 와 그 뒤의 'kinds' 알림 */
+    var _ledgerReasons = {};
+    /** 장부의 까닭을 결과가 없는 카드에(그 종류의 결과가 다시 오면 그 그림이 덮는다) */
+    function _showLedgerReasons() {
+        const card = (id, kind, what) => {
+            const el = document.getElementById(id);
+            if (!el || !_ledgerReasons[kind]) { return; }
+            el.innerHTML = '<span style="color:var(--vscode-editorWarning-foreground)">결과 없음 — '
+                + _esc(_reasonKo(_ledgerReasons[kind])) + '. ' + what + '</span>';
+        };
+        if (!_lastDesignResult) { card('design-summary', 'member_design', '설계 검토를 다시 실행하세요.'); }
+        if (!_lastLoadAnalysis) { card('load-analysis-result', 'load_analysis', '하중 분석을 다시 실행하세요.'); }
+        if (!_lastLapResult) { card('connection-result', _ledgerReasons.lap ? 'lap' : 'connection', '접합부 계산을 다시 실행하세요.'); }
+        if (!analysisResult) { card('dsm-table-container', 'buckling_analysis', '해석을 다시 실행하세요.'); }
+    }
     function clearStaleResults(scope, reason) {
+        // V8-05: 그 카드의 종류가 장부에 있으면 장부의 까닭(다시 보낸 옛 알림의 까닭이 아니라)
+        const KIND_OF = { 'design-summary': 'member_design', 'load-analysis-result': 'load_analysis', 'connection-result': 'lap', 'dsm-table-container': 'buckling_analysis' };
+        let noteId = null;
         const note = (what) => '<span style="color:var(--vscode-editorWarning-foreground)">결과 없음 — '
-            + _esc(_reasonKo(reason || '입력이 바뀌었습니다')) + '. ' + what + '</span>';
-        const setHtml = (id, html) => { const el = document.getElementById(id); if (el) { el.innerHTML = html; } };
+            + _esc(_reasonKo((noteId && _ledgerReasons[KIND_OF[noteId]]) || reason || '입력이 바뀌었습니다')) + '. ' + what + '</span>';
+        const setHtml = (id, html) => { const el = document.getElementById(id); if (el) { el.innerHTML = typeof html === 'function' ? html() : html; } };
+        const noteFor = (id, what) => () => { noteId = id; const h = note(what); noteId = null; return h; };
         const clearCanvas = (id) => {
             const c = /** @type {HTMLCanvasElement|null} */ (document.getElementById(id));
             const ctx2 = c && c.getContext ? c.getContext('2d') : null;
@@ -6144,7 +6198,7 @@
         // D-4(K2-7): 접합부 탭의 칸 — 그 결과(Lap 또는 단일 접합) 카드만. 둘은 같은 칸(#connection-result)에 그려진다.
         if (scope === 'lap' || scope === 'connection') {
             if (scope === 'lap') { _lastLapResult = null; }
-            setHtml('connection-result', note('접합부 계산을 다시 실행하세요.'));
+            setHtml('connection-result', noteFor('connection-result', '접합부 계산을 다시 실행하세요.'));
             return;
         }
         const order = ['design', 'load', 'analysis', 'model', 'all'];
@@ -6155,7 +6209,8 @@
 
         // 설계(모든 scope)
         _lastDesignResult = null;
-        setHtml('design-summary', note('설계 검토를 다시 실행하세요.'));
+        _lastPurlinResult = null;
+        setHtml('design-summary', noteFor('design-summary', '설계 검토를 다시 실행하세요.'));
         setHtml('design-steps', '');
         const inter = document.getElementById('design-interaction');
         if (inter) { inter.style.display = 'none'; inter.innerHTML = ''; }
@@ -6164,7 +6219,7 @@
         // Lap 결과는 설계 결과(Se · Mnd · Vn)와 단면에 기댄다 — 함께 지운다.
         if (_lastLapResult || scope === 'all') {
             _lastLapResult = null;
-            setHtml('connection-result', note('접합부 계산을 다시 실행하세요.'));
+            setHtml('connection-result', noteFor('connection-result', '접합부 계산을 다시 실행하세요.'));
         }
         setHtml('report-container', '');
         setHtml('validation-container', '');
@@ -6172,13 +6227,13 @@
         if (badge) { badge.textContent = ''; }
         if (load) {
             _lastLoadAnalysis = null;
-            setHtml('load-analysis-result', note('하중 분석을 다시 실행하세요.'));
+            setHtml('load-analysis-result', noteFor('load-analysis-result', '하중 분석을 다시 실행하세요.'));
         }
         if (analysis) {
             analysisResult = null;
             lastDsmResult = null;
             renderAnalysisWarnings(null);
-            setHtml('dsm-table-container', note('해석을 다시 실행하세요.'));
+            setHtml('dsm-table-container', noteFor('dsm-table-container', '해석을 다시 실행하세요.'));
             ['buckling-curve-canvas', 'classify-curve-canvas', 'mode-shape-canvas'].forEach(clearCanvas);
             setHtml('classify-status', '');
         }
@@ -6305,9 +6360,14 @@
             'cFSM constraints changed': 'cFSM 구속이 바뀌었습니다', 'Stress distribution regenerated': '응력 분포를 다시 만들었습니다',
             'Saved analysis is from an older or different model state. Run analysis again.': '저장된 해석이 지금 모델과 다릅니다',
             'Load analysis inputs changed': '하중 해석의 입력이 바뀌었습니다',
+            // V8-05: 호스트 장부의 까닭(화면이 카드에 쓴다 — 지금까지 화면이 쓰던 글과 같게)
+            'Design inputs changed': '입력이 변경되었습니다', 'Load inputs changed': '하중 해석의 입력이 바뀌었습니다',
+            'Lap inputs changed': '입력이 변경되었습니다', 'Connection inputs changed': '입력이 변경되었습니다',
+            'Saved design is from a different model state': '저장된 설계가 지금 모델과 다릅니다',
         };
         if (table[s]) { return table[s]; }
         const m = /^Load case changed: (.+)$/.exec(s);
+        if (/^Inputs changed \(set_case_inputs\)/.test(s)) { return 'AI 가 입력을 바꿨습니다(set_case_inputs)'; }
         return m ? '하중 경우가 바뀌었습니다(' + m[1] + ')' : userText(s);
     }
 

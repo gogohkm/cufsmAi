@@ -107,6 +107,36 @@ async function main() {
     o = open(honest);
     dropped('no key folder on this PC', honest, /not computed by this program on this PC/);
     StcfsdPanel.writerKeyDir = KEY;
+    // V8-03(검증자의 p1b_seal_gap): 템플릿이 없는 모델의 sectionType · cornerRadius 는 엔진 요청(section.type · R_corner)에 닿는다 —
+    // 저장 뒤 그 두 칸을 고친 파일은 결과를 「지금 것」 으로 되살리지 않는다(봉인의 모델 지문 = 저장한 모델 전부)
+    {
+      const raw = path.join(OUT, 'raw-model.json');
+      await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedz', params: { H: 8, B: 2.25, D: 0.91, t: 0.059, r: 0.1875, qlip: 50 } });
+      await p.handleMcpAction({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: 55 });
+      const sv = await p.handleMcpAction({ action: 'save_project', filepath: raw });
+      assert(sv && sv.success, JSON.stringify(sv));
+      const m = JSON.parse(fs.readFileSync(raw, 'utf8'));
+      const model = m.model || m;
+      delete model.sectionTemplate; delete model.sectionParams; delete model.elementRoles; delete model.sectionEdited;
+      model.sectionType = 'Z'; model.cornerRadius = 0.1875;
+      fs.writeFileSync(raw, JSON.stringify(m));
+      assert(!p.__testLoadProjectFile(raw).error);
+      assert.strictEqual(p._model.sectionTemplate, undefined, 'a model without a template');
+      await p.handleMcpAction({ action: 'run_analysis' });
+      const dz = await p.handleMcpAction({ action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy: 55, Fu: 70, Lb: 0, Cb: 1, Mu: 60, Vu: 1,
+        wc_N: 3.5, wc_P: 2.5, wc_R: 0.1875, wc_support: 'IOF', wc_fastened: 'fastened' });
+      assert(!dz.error, dz.error);
+      const zf = path.join(OUT, 'raw-Z.csd');
+      await p.__testWriteProjectFile(zf);
+      const zs = JSON.parse(fs.readFileSync(zf, 'utf8'));
+      o = open(zf);
+      assert(o.s.design, `the honest template-less file reopens with its result (${notice(o)})`);
+      for (const [name, mut] of [['cornerRadius 0.6', (j) => { j.model.cornerRadius = 0.6; }], ['sectionType C', (j) => { j.model.sectionType = 'C'; }],
+        ['both (verifier)', (j) => { j.model.cornerRadius = 0.6; j.model.sectionType = 'C'; }], ['elementRoles added', (j) => { j.model.elementRoles = { 1: 'web' }; }]]) {
+        dropped(`V8-03 ${name}`, variant(`raw-Z-${name.replace(/\W/g, '')}.csd`, mut, zs), /do not match the model and inputs/);
+      }
+      lines.push('V8-03: a template-less model edited in sectionType / cornerRadius / elementRoles drops its results');
+    }
     // AI 가 연 .csd(load_project): 결과는 되살리지 않고 응답이 그렇다고 · 다시 계산하는 한 번을 말한다
     const lp = await p.handleMcpAction({ action: 'load_project', filepath: honest });
     assert(lp.success && (lp.warnings || []).some((x) => /not restored/.test(x) && /run_case_check/.test(x)) && !p._lastDesignResult && !p._lastAnalysisResult,

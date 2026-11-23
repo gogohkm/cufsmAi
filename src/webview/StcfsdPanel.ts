@@ -32,7 +32,7 @@ import { segmentError } from '../records/names';
 import { contentFp } from '../records/fp';
 import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, UNIT_LABEL } from '../mcp/siUnits';
 import {
-    buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts, isCalcMode,
+    buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts, isCalcMode, lapSectionFor,
 } from '../case/requests';
 
 function isTestMode(): boolean {
@@ -1583,8 +1583,8 @@ export class StcfsdPanel implements McpPanelInterface {
         this._lastLoadAnalysisAt = new Date().toISOString();
         this._lastLoadRequest = requestKey;
         this._ledgerClear('load_analysis');
-        // u33: 이 하중 해석보다 뒤에 쓴 사람 · AI 값은 그 해석의 자동 채움이 덮지 않는다
-        this._caseKeeper.noteLoadAnalysis();
+        // u33: 이 하중 해석보다 뒤에 쓴 사람 · AI 값은 그 해석의 자동 채움이 덮지 않는다. 새 해석이다 — 그 채우기만 받는다
+        this._caseKeeper.noteFreshLoadAnalysis();
     }
 
     /** 하중 분석의 입력 열쇠(엔진 인자 + 모델에서 section 을 만들 때 쓰는 Fy · Fu). 바뀐 키 비교에 쓴다. */
@@ -2902,6 +2902,31 @@ export class StcfsdPanel implements McpPanelInterface {
         return { support: null, span: null };
     }
 
+    /** V8-01: 지금 상태 · 결과로 지은 랩 단면 강도(화면 단추 · run_case_check 의 본문과 같은 것) */
+    private _lapSectionNow(): ReturnType<typeof lapSectionFor> {
+        return lapSectionFor(this._caseKeeper.state, this._caseKeeper.context(this._model, this._lastDesignResult, null));
+    }
+
+    /**
+     * V8-01: 랩 결과에 단면 강도의 출처를 단다 — `section_source {Se, Vn, from, support, regions, reason}` + 가정 한 줄.
+     * 보낸 Se 가 퍼린 결과의 그 지점 랩 구간에서 지은 것과 같으면 그 구간, 다르면 부른 쪽(AI 의 design_lap_connection)이 준 값,
+     * Se 가 없으면 「짓지 않음」 과 그 까닭(엔진은 휨 검토를 판정 없음으로 밝힌다).
+     */
+    private static _attachLapSource(result: any, request: any, sec: ReturnType<typeof lapSectionFor>): void {
+        const se = typeof request?.Se === 'number' ? request.Se : null;
+        let src: any;
+        if (se !== null && sec.Se !== null && Math.abs(se - sec.Se) <= 1e-12 * Math.max(1, se)) {
+            src = { Se: se, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: sec.from, support: sec.support, regions: sec.regions, reason: null };
+        } else if (se !== null) {
+            src = { Se: se, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: 'given by the caller (not derived from the purlin result)', support: null, regions: [], reason: null };
+        } else {
+            src = { Se: null, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: null, support: sec.support, regions: [], reason: sec.reason || 'no effective section modulus (Se) was given' };
+        }
+        result.section_source = src;
+        const line = src.Se !== null ? `랩 단면 Se = ${src.Se.toFixed(4)} in³ — ${src.from}` : `랩 단면 Se 없음 — ${src.reason} (랩 휨 검토는 판정 없음)`;
+        result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), line];
+    }
+
     /** 세 상태 판정 합치기: 불합격 하나 → false, 그 밖에 판정 없음 하나 → null, 모두 합격 → true. */
     private static _combinePass(values: Array<boolean | null | undefined>): boolean | null {
         if (values.length === 0) { return null; }
@@ -3760,6 +3785,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 // 엔진 dict 그대로(전송 키 action · units 만 뺀다) — 모르는 키는 엔진이 경고로 돌려준다.
                 const request = this._dictParams(options);
                 const result = await this._pythonBridge.call('lap_connection', request);
+                // V8-01: 랩 단면 강도(Se · Vn)의 출처를 결과에 — 퍼린 결과의 그 지점 랩 구간 · 부른 쪽이 준 값 · 없음(휨 판정 없음)
+                if (result && typeof result === 'object' && !result.error) { StcfsdPanel._attachLapSource(result, request, this._lapSectionNow()); }
                 if (result && typeof result === 'object' && !result.error) {
                     this._lastLap = { at: new Date().toISOString(), request, result };
                     this._ledgerClear('lap');
@@ -4822,6 +4849,8 @@ ${inner}
     /** K2-6: 새로 고침한 화면에 모델 · 결과 · 상태를 다시(두 번째 webviewReady — D-6). 결과를 다시 보낸 뒤 상태를 맨 끝에(하중 결과의 칸 채움을 덮게). */
     private _repostToPage(): void {
         // V7-40: 다시 싣기 — 무엇보다 먼저 지금의 참(어떤 결과가 있는지 · 무효 장부). 그 뒤의 결과 메시지는 그 참 안의 것뿐이다
+        // 다시 보내는 결과(하중 해석 …)가 부르는 화면의 채우기 · 연동은 편집이 아니다
+        this._caseKeeper.pageReloaded();
         this._postLedger();
         this._postMessage('modelLoaded', this._model);
         if (this._lastAnalysisResult && this._isAnalysisCurrent()) { this._postMessage('analysisComplete', this._lastAnalysisResult); }
@@ -5817,6 +5846,7 @@ ${inner}
                     <p class="hint" style="margin-bottom:6px">연속 경간 퍼린의 Lap 구간 패스너 개수/배치를 산정하고 용량을 검증합니다. 하중분석 실행 시 자동으로 값이 채워집니다.</p>
                     <div class="input-row"><label style="min-width:56px;text-align:right">좌측 Lap</label><input type="number" id="conn-lap-left" value="305" step="10" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">지점 좌측 겹침 길이</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">우측 Lap</label><input type="number" id="conn-lap-right" value="305" step="10" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">지점 우측 겹침 길이</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">지점</label><input type="number" id="conn-lap-support" value="" min="1" step="1" style="width:72px" title="이 랩이 걸친 지점 번호(1 부터 — 퍼린 결과의 「지점 3」). 랩의 단면 강도(Se · Vn)는 퍼린 결과의 그 지점 랩 구간에서 가져온다. 비우면 가져오지 않는다(휨은 판정 없음)."><span class="hint-inline">랩이 걸친 지점 번호 (퍼린 결과의 그 지점 랩 구간 강도)</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">지점 Mu</label><input type="number" id="conn-Mu" value="0" step="0.1" style="width:72px" data-unit="moment"><span class="hint-inline conn-unit-moment">지점 최대 부모멘트</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">지점 Vu</label><input type="number" id="conn-Vu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">지점 최대 전단력</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">패스너</label>

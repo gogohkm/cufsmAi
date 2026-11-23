@@ -8,7 +8,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { canonicalJson } from '../records/canonical';
+import { canonicalJson, fp } from '../records/canonical';
 import { caseFp, modelFp, requestFp, resultFp } from '../records/fp';
 import { KEY_FILE, KeyUnavailableError, loadOrCreateWriter, verifySig, Writer } from '../records/writer';
 import { CaseState } from './caseState';
@@ -50,6 +50,14 @@ function requestFor(field: ResultField, model: any, st: CaseState, result: any):
 
 export interface SealParts { engine_id: string; model: string; case: string; requests: Record<string, string>; results: Record<string, string> }
 
+/**
+ * V8-03: 봉인의 모델 지문은 **저장한 모델 전부**(JSON 왕복한 꼴)의 지문이다 — 모델 서명의 투영(`modelFp`)만이 아니다.
+ * 템플릿이 없는 모델의 `sectionType` · `cornerRadius`(엔진 요청의 `section.type` · `R_corner`) · `elementRoles` 처럼 서명 밖이지만
+ * 엔진 요청에 닿는 칸을 하나도 빠뜨리지 않으려고. 저장한 모델의 어느 칸을 바꿔도 결과는 「지금 것」 으로 되살아나지 않는다.
+ */
+export const SEALED_MODEL_NS = 'stcfsd-fp/sealed-model/1';
+export function sealedModelFp(model: unknown): string { return fp(SEALED_MODEL_NS, asSaved(model ?? null)); }
+
 /** 파일 내용(모델 · 검토 상태 · 결과 칸)에서 봉인할 지문들 */
 export function sealParts(engineId: string, model: any, st: CaseState, project: Record<string, any>): SealParts {
     const requests: Record<string, string> = {}, results: Record<string, string> = {};
@@ -59,7 +67,7 @@ export function sealParts(engineId: string, model: any, st: CaseState, project: 
         requests[f] = requestFp(canonicalJson(asSaved(requestFor(f, model, st, r))));
         results[f] = resultFp(asSaved(r));
     }
-    return { engine_id: engineId, model: modelFp(model), case: caseFp(st), requests, results };
+    return { engine_id: engineId, model: sealedModelFp(model), case: caseFp(st), requests, results };
 }
 
 const signedBytes = (p: SealParts, writer: string): string =>

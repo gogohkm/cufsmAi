@@ -7,6 +7,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const net = require('net');
+const dgram = require('dgram');
 const path = require('path');
 const cp = require('child_process');
 
@@ -99,6 +100,41 @@ async function t(name, fn) { try { await fn(); results.push(['ok', name]); } cat
     assert(PP.withCsp('<script>x</script>').startsWith('<meta http-equiv="Content-Security-Policy"'), 'CSP first without a DOCTYPE');
     assert(/Content-Security-Policy[^>]*default-src 'none'/.test(REVIEW.printableReportHtml('')), 'the report document carries its own CSP');
   });
+  // 3b. V8-02: 허용 목록은 토큰으로 — 따옴표 안의 > · CSS 이스케이프 · 프로토콜 없는 주소 · image-set 문자열 · svg 안의 style · 주석
+  await t('allow-list (V8-02) — quoted ">" does not end a tag; CSS escapes, //host, image-set strings, svg style, comments are removed', () => {
+    const cases = [
+      ['<details title=">" open ontoggle="document.body.append(\'JSRAN\')">x</details>', (o) => !/ontoggle/i.test(o) && /<details/.test(o)],
+      ['<div style="background:\\75rl(//127.0.0.1/x)">a</div>', (o) => !/style=/.test(o)],
+      ['<div style="background:url(//evil.example/x)">a</div>', (o) => !/style=/.test(o)],
+      ['<div style="background-image:image-set(\'x.png\' 1x)">a</div>', (o) => !/style=/.test(o)],
+      ['<div style="background-image:-webkit-image-set(&quot;//h/x&quot; 1x)">a</div>', (o) => !/style=/.test(o)],
+      ['<style>div{background:\\75rl(x)}</style><p>k</p>', (o) => !/<style/.test(o) && /<p>k/.test(o)],
+      ['<style>div{background:image-set("http://h/x" 1x)}</style>', (o) => !/<style/.test(o)],
+      ['<style>div{background://h/x}</style>', (o) => !/<style/.test(o)],
+      ['<svg><style><img src=x onerror=alert(1)></style></svg>', (o) => !/onerror/.test(o) && !/<style/.test(o)],
+      ['<!--<img src=x onerror=alert(1)>--><p>after</p>', (o) => !/onerror/.test(o) && /<p>after/.test(o)],
+      ['<p title=a>b onclick=x>t</p>', (o) => !/<p[^>]*onclick/i.test(o)],
+      ['<rect fill="url(http://h/x)" x="1"/>', (o) => !/url\(/.test(o) && /x="1"/.test(o)],
+      ['<svg xmlns="http://evil.example"><g/></svg>', (o) => !/evil/.test(o)],
+      ['<img src="data:image/svg+xml,<svg onload=alert(1)>">', (o) => !/<img/.test(o)],
+      ['<p onclick = "x" ONCLICK="y" class="ok">t</p>', (o) => /^<p class="ok">t<\/p>$/.test(o)],
+      ['<meta http-equiv="refresh" content="0;url=http://h/">', (o) => o === ''],
+      ['<![CDATA[<img src=x onerror=1>]]><p>c</p>', (o) => !/onerror/.test(o)],
+      ['<p>unterminated <div title="abc', (o) => !/<div/.test(o)],
+    ];
+    for (const [input, ok] of cases) {
+      const out = PP.sanitizeForPrint(input);
+      assert(ok(out), `${input} → ${out}`);
+    }
+    // 보고서 그리기가 만든 문서는 한 글자도 바뀌지 않는다(위 escaping 시험의 assertInert 가 같은 것을 본다)
+    const real = REVIEW.printableReportHtml(RENDER.renderReportDoc({ schema: 'stcfsd-report/1', meta: { title: 'T', units: 'US' }, verdict: null,
+      sections: [{ id: 's', title: 'S', blocks: [{ kind: 'para', text: 'p' }, { kind: 'table', head: ['a'], rows: [['1']] }] }] }));
+    assert.strictEqual(PP.sanitizeForPrint(real), real);
+  });
+  await t('print arguments (V8-02) — WebRTC: no UDP outside the (dead) proxy', () => {
+    const a = PP.printArgs('C:\\p', 'C:\\o.pdf', 'file:///C:/x.html');
+    assert(a.includes('--force-webrtc-ip-handling-policy=disable_non_proxied_udp') && a.includes('--webrtc-ip-handling-policy=disable_non_proxied_udp'));
+  });
   if (!browser) { results.push(['skip', 'real print (no Edge / Chrome)']); }
   else {
     // 4. 진짜 인쇄: 공격 문서(이스케이프와 상관없이 — 브라우저 쪽 막음을 본다). 막음을 하나씩 빼도 나머지가 혼자 서는지:
@@ -146,6 +182,35 @@ async function t(name, fn) { try { await fn(); results.push(['ok', name]); } cat
       assert.deepStrictEqual(leftovers(TMP), [], 'no printer folder left');
       results.push(['info', `browser arguments only: ${o.conns} connections; printed ${o.r.ok}; script ran ${/RANNOW/.test(o.text)}; other file embedded ${/SECRET-7Q3/.test(o.text)} (${o.ms} ms)`]);
     });
+    // 4b. V8-02: 검증자의 문서 — 막음을 하나씩 빼고(모두 · CSP 없이 · 브라우저 인자만), 루프백 TCP · UDP 듣개로
+    {
+      let udp = 0;
+      const sock = dgram.createSocket('udp4');
+      sock.on('message', () => { udp++; });
+      await new Promise((r) => sock.bind(0, '127.0.0.1', r));
+      const uport = sock.address().port;
+      const v8doc = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body><p>V8-VISIBLE</p>
+<details title=">" open ontoggle="document.body.append('JS'+'RAN');new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${uport}'}]}).createDataChannel('x')">d</details>
+<div style="background:\\75rl(//127.0.0.1:${port}/esc)">e</div><div style="background-image:image-set('http://127.0.0.1:${port}/set' 1x)">f</div>
+<div style="background:url(//127.0.0.1:${port}/pr)">g</div>
+<script>(async()=>{const pc=new RTCPeerConnection({iceServers:[{urls:'stun:127.0.0.1:${uport}'}]});pc.createDataChannel('x');await pc.setLocalDescription(await pc.createOffer());document.body.append('RTC'+'TRIED');})()</script>
+</body></html>`;
+      for (const [name, unsafe] of [['all layers', {}], ['no CSP', { noCsp: true }], ['browser arguments only', { noCsp: true, noSanitize: true }]]) {
+        await t(`real print V8-02 (${name}) — no script from a quoted ">", no request from CSS escapes · //host · image-set, no WebRTC UDP`, async () => {
+          conns = 0; udp = 0;
+          const pdf = path.join(OUT, 'v8-' + name.replace(/\W/g, '') + '.pdf');
+          const r = await PP.printHtmlToPdf(browser, v8doc, pdf, { unsafeTestOnly: unsafe, timeoutMs: 30000 });
+          await new Promise((res) => setTimeout(res, 2500));
+          const text = r.ok ? (pdfText(fs.readFileSync(pdf)).texts || []).join(String.fromCharCode(10)) : '';
+          assert(r.ok && /V8-VISIBLE/.test(text), `printed with the WebRTC flags: ${JSON.stringify(r)}`);
+          if (!unsafe.noSanitize) { assert(!/JSRAN|RTCTRIED/.test(text), 'no script ran'); }
+          assert.strictEqual(conns, 0, `TCP connections ${conns}`);
+          assert.strictEqual(udp, 0, `UDP datagrams ${udp}`);
+          results.push(['info', `V8-02 ${name}: TCP ${conns}, UDP ${udp}, script ran ${/JSRAN|RTCTRIED/.test(text)}`]);
+        });
+      }
+      sock.close();
+    }
     srv.close();
     // 5. 공격 글을 담은 보고서 — 인쇄해도 아무것도 돌지 않는다
     await t('real print — the payload report prints as text', async () => {

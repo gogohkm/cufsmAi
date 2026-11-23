@@ -12,6 +12,7 @@
 import { CaseState, InputValue } from './caseState';
 
 const DS = require('../../webview/js/designState');
+const UTILS = require('../../webview/js/utils');
 
 export interface RequestContext {
     /** 모델 칸(templateType · tplH · tplB · tplD · tplT · tplR …)의 화면 값(US) */
@@ -20,6 +21,8 @@ export interface RequestContext {
     props: { Ixx?: number; Sx?: number } | null;
     /** 화면의 _lastDesignResult — 직접 설계 결과 그대로, 퍼린이면 지배 구간(pickGoverningPurlinDesign) */
     lastDesign: any;
+    /** V8-01: 퍼린 결과 묶음 그대로(regions[] — 랩 검토의 단면 강도를 그 지점의 랩 구간에서). 퍼린이 아니면 null */
+    purlin?: any;
 }
 
 export interface BuiltRequest {
@@ -237,16 +240,12 @@ export function buildPurlinRequest(st: CaseState, ctx: RequestContext): BuiltReq
 /** 랩 접합(runLapConnection → lap_connection) — app.js btn-run-lap-design 그대로(결과에 기대는 Se · Sf · Mnd · Vn 포함) */
 export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltRequest {
     const r = new Reader(st, ctx.drafts);
-    const last = ctx.lastDesign;
     const lpSx = ctx.props ? (ctx.props.Sx || 0) : 0;
-    let haveSe = false;
-    let lpSe: number | undefined;
-    if (last && last.member_type === 'flexure') {
-        if (last.Se > 0) { lpSe = last.Se; haveSe = true; }
-        else if (last.Mnl > 0 && last.Fy_used > 0) { lpSe = last.Mnl / last.Fy_used; haveSe = true; }
-    }
-    const lpMnd = (last && last.Mnd > 0) ? last.Mnd : undefined;
-    const lpVn = last ? (last.Vn || (last.shear && last.shear.Vn) || undefined) : undefined;
+    // V8-01: 단면 강도는 퍼린 결과의 그 지점 랩 구간에서만(지배 구간이 아니다) — 화면과 같은 함수(utils.deriveLapSection)
+    const sec = lapSectionFor(st, ctx);
+    const haveSe = sec.Se !== null;
+    const lpSe = sec.Se ?? undefined;
+    const lpVn = sec.Vn ?? undefined;
     const data: any = {
         d: r.req('tplH', '단면 높이 H'),
         t: r.req('tplT', '두께 t'),
@@ -264,12 +263,18 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
         design_method: r.sel('designMethod', 'LRFD'),
         Se: lpSe,
         Sf: haveSe ? lpSx : undefined,
-        Mnd: lpMnd,
         Vn: lpVn,
     };
     // 계약 §6.3: 랩 구속의 진술 — 검토 상태의 lapRestrained(화면 칸 · MCP · 파일이 같은 키). 확인했을 때만 넣는다
     if (r.chk('lapRestrained')) { data.lap_restrained = true; }
     return { data, missing: r.missing };
+}
+
+/** V8-01: 랩 검토의 단면 강도(그 지점의 랩 구간에서) — 호스트가 결과에 출처를 적을 때도 같은 것을 부른다 */
+export function lapSectionFor(st: CaseState, ctx: RequestContext): { Se: number | null; Vn: number | null; from: string | null; regions: string[]; support: number | null; reason: string | null } {
+    const sup = st.inputs.connLapSupport;
+    const support = typeof sup === 'number' && Number.isInteger(sup) ? sup : null;
+    return UTILS.deriveLapSection(ctx.purlin ?? null, support, { stated: st.inputs.lapRestrained === true });
 }
 
 /** 단일 접합(runConnection → design_connection) — app.js btn-run-single-conn 그대로 */

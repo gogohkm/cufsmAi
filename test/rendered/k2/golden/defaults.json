@@ -5,7 +5,6 @@
   {
    "id": "controls.values",
    "expect": "pin",
-   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": [
     [
      "select-template",
@@ -650,6 +649,12 @@
      "12.0078740157"
     ],
     [
+     "conn-lap-support",
+     "tab-connection",
+     "",
+     ""
+    ],
+    [
      "conn-Mu",
      "tab-connection",
      "0",
@@ -824,6 +829,7 @@
      false
     ]
    ],
+   "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd.",
    "flipped": [
     {
      "step": "K2-5/6",
@@ -840,13 +846,20 @@
       "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — E 를 SI 화면에 203395.340148(12 자리)로"
      },
      "date": "2026-11-24"
+    },
+    {
+     "step": "S10",
+     "from": {
+      "expect": "pin",
+      "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd."
+     },
+     "date": "2026-11-24"
     }
    ]
   },
   {
    "id": "initialInputs.US",
    "expect": "pin",
-   "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd.",
    "value": {
     "unitSystem": "US",
     "analysisMethod": "DSM",
@@ -946,6 +959,7 @@
     "connGrooveType": "complete",
     "connLapLeft": 12.0078740157,
     "connLapRight": 12.0078740157,
+    "connLapSupport": null,
     "connMu": 0,
     "connVu": 0,
     "connFastenerDia": 0.188976377953,
@@ -1001,6 +1015,7 @@
      }
     ]
    },
+   "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd.",
    "flipped": [
     {
      "step": "K2-5/6",
@@ -1015,6 +1030,14 @@
      "from": {
       "expect": "pin",
       "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — US 처음 값이 정확한 값(42.78613263041172 · 3.937007874015748 …)"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "S10",
+     "from": {
+      "expect": "pin",
+      "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd."
      },
      "date": "2026-11-24"
     }

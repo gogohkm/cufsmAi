@@ -32,30 +32,148 @@ export function withCsp(html: string): string {
 }
 
 /**
- * CSP 와 따로 서는 둘째 막음: 인쇄하는 문서에 남길 수 있는 요소 · 속성의 허용 목록. 보고서 그리기(reportRender.js)와
- * 인쇄 틀(review.printableReportHtml · 좌굴 틀)이 쓰는 것만 남기고, 그 밖의 태그는 글(&lt;)로, 허용한 태그의 속성 가운데
- * 다른 자원을 가리킬 수 있는 것(on…= · href · srcdoc · xlink · javascript: · file: · http(s): · url( · @import · expression()은 지운다.
- * img 의 src 는 data:image/png;base64 만. <style> 블록 안의 url( · @import 는 블록째 지운다.
- * — CSP 를 어떻게든 넘어도(또는 CSP 가 없어도) 문서가 다른 파일 · 주소를 가리킬 자리가 없게.
+ * CSP 와 따로 서는 둘째 막음(V8-02 — 정규식이 아니라 토큰으로): 인쇄하는 문서를 HTML 의 토큰(글 · 시작 태그 · 끝 태그 · 주석 · DOCTYPE)으로
+ * 읽어 **허용 목록에 든 요소 · 속성만** 남긴다. 속성 값은 따옴표("" · '') · 따옴표 없는 꼴을 HTML 처럼 읽는다 — 따옴표 안의 `>` 가 태그를
+ * 끝내지 않는다(`<details title=">" open ontoggle=…>` 의 ontoggle 은 속성으로 읽혀 지워진다).
+ *  - 요소: 보고서 그리기(reportRender.js) · 인쇄 틀이 쓰는 것만. 그 밖의 태그는 글(&lt;)로. 주석은 지운다. DOCTYPE 은 `<!DOCTYPE html>` 만.
+ *  - 속성: 이름의 허용 목록(이벤트 · href · src · xlink · srcset · formaction … 은 목록에 없다). img 의 src 는 data:image/png;base64 만.
+ *  - CSS(`style` 속성 · `<style>` 블록): 역빗금(CSS 이스케이프 — `\75rl(`), `&`(속성의 글자 참조), `<`, `url(` · `image-set` ·
+ *    `@import` · `expression(` · `src(` · `//`(프로토콜 없는 주소)가 있으면 그 속성 · 블록을 지운다.
+ *  - 그 밖의 속성 값에 `url(` · `javascript:` · `expression(` 이 있으면 지운다. meta 는 charset="utf-8" 과 CSP 만.
+ * 허용한 태그는 **원문 그대로** 남긴다(보고서 그리기가 만든 문서는 한 글자도 바뀌지 않는다 — 시험이 본다). 속성을 지운 태그만 다시 짓는다.
  */
 const PRINT_TAGS = new Set(['html', 'head', 'meta', 'title', 'style', 'body', 'h1', 'h2', 'h3', 'h4', 'p', 'table', 'tbody', 'thead', 'tr', 'th', 'td',
     'div', 'span', 'ul', 'ol', 'li', 'b', 'i', 'em', 'strong', 'hr', 'br', 'sub', 'sup', 'small', 'dl', 'dt', 'dd', 'details', 'summary', 'pre', 'code',
-    'svg', 'g', 'line', 'circle', 'path', 'rect', 'text', 'polygon', 'polyline', 'ellipse', 'img']);
-const BAD_ATTR = /(?:^|\s)(?:on[a-z]+|href|xlink:href|srcdoc|formaction|action|background|poster|ping|srcset)\s*=|javascript:|vbscript:|file:|https?:|ftp:|url\s*\(|@import|expression\s*\(/i;
-export function sanitizeForPrint(html: string): string {
-    const noStyle = html.replace(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi, (all, css: string) => (/url\s*\(|@import|expression\s*\(|\\/i.test(css) ? '' : all));
-    return noStyle.replace(/<(\/?)([a-zA-Z][\w:-]*)([^>]*)>/g, (all, close: string, name: string, attrs: string) => {
-        const tag = name.toLowerCase();
-        if (!PRINT_TAGS.has(tag)) { return '&lt;' + all.slice(1); }
-        if (close) { return `</${tag}>`; }
-        if (tag === 'meta' && !/^\s+(?:charset="utf-8"|http-equiv="Content-Security-Policy" content="[^"]*")\s*\/?$/i.test(attrs)) { return ''; }
-        if (tag === 'img') {
-            const src = /\ssrc="(data:image\/png;base64,[A-Za-z0-9+/]+=*)"/.exec(attrs);
-            return src ? `<img src="${src[1]}">` : '';
+    'svg', 'g', 'line', 'circle', 'path', 'rect', 'text', 'polygon', 'polyline', 'ellipse', 'img', 'tspan', 'caption', 'colgroup', 'col', 'tfoot']);
+const PRINT_ATTRS = new Set(['class', 'id', 'style', 'title', 'lang', 'colspan', 'rowspan', 'width', 'height', 'viewbox', 'preserveaspectratio', 'xmlns',
+    'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'd', 'points', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-opacity',
+    'fill-opacity', 'stroke-linecap', 'stroke-linejoin', 'opacity', 'font-size', 'font-family', 'font-weight', 'font-style', 'text-anchor',
+    'dominant-baseline', 'alignment-baseline', 'transform', 'open', 'dx', 'dy', 'charset', 'http-equiv', 'content', 'src', 'span', 'align', 'valign']);
+const CSS_BAD = /[\\<&]|url\s*\(|image-set|@import|expression\s*\(|\bsrc\s*\(|\/\//i;
+const VALUE_BAD = /url\s*\(|javascript:|vbscript:|expression\s*\(/i;
+const PNG_SRC = /^data:image\/png;base64,[A-Za-z0-9+/]+=*$/;
+
+interface Attr { name: string; value: string | null }
+/** 시작 태그 하나를 `<` 자리부터 읽는다(HTML 토크나이저의 속성 규칙). 끝나지 않으면 null */
+function readStartTag(html: string, at: number): { end: number; name: string; attrs: Attr[]; selfClose: boolean } | null {
+    let i = at + 1;
+    const nm = /^[a-zA-Z][^\s/>\0]*/.exec(html.slice(i, i + 64));
+    if (!nm) { return null; }
+    const name = nm[0];
+    i += name.length;
+    const attrs: Attr[] = [];
+    let selfClose = false;
+    const ws = (c: string) => c === ' ' || c === '\t' || c === '\n' || c === '\r' || c === '\f';
+    while (i < html.length) {
+        const c = html[i];
+        if (ws(c)) { i += 1; continue; }
+        if (c === '>') { return { end: i + 1, name, attrs, selfClose }; }
+        if (c === '/') { selfClose = html[i + 1] === '>'; i += 1; continue; }
+        // 속성 이름: 공백 · / · > · = 까지(첫 글자가 = 이면 이름에 든다 — HTML 그대로)
+        let j = i + 1;
+        while (j < html.length && !ws(html[j]) && html[j] !== '/' && html[j] !== '>' && html[j] !== '=') { j += 1; }
+        const an = html.slice(i, j);
+        i = j;
+        while (i < html.length && ws(html[i])) { i += 1; }
+        if (html[i] !== '=') { attrs.push({ name: an, value: null }); continue; }
+        i += 1;
+        while (i < html.length && ws(html[i])) { i += 1; }
+        const q = html[i];
+        if (q === '"' || q === "'") {
+            const close = html.indexOf(q, i + 1);
+            if (close < 0) { return null; }
+            attrs.push({ name: an, value: html.slice(i + 1, close) });
+            i = close + 1;
+        } else {
+            let k = i;
+            while (k < html.length && !ws(html[k]) && html[k] !== '>') { k += 1; }
+            attrs.push({ name: an, value: html.slice(i, k) });
+            i = k;
         }
-        if (tag !== 'meta' && BAD_ATTR.test(attrs)) { return `<${tag}>`; }
-        return all;
-    });
+    }
+    return null;
+}
+
+const escAttr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+
+/** 시작 태그 → 남길 꼴(원문 · 다시 지은 것) 또는 지움('') */
+function cleanStartTag(raw: string, tag: string, attrs: Attr[]): string {
+    if (tag === 'meta') {
+        const m = new Map(attrs.map((a) => [a.name.toLowerCase(), a.value]));
+        if (attrs.length === 1 && String(m.get('charset')).toLowerCase() === 'utf-8') { return raw; }
+        if (attrs.length === 2 && String(m.get('http-equiv')).toLowerCase() === 'content-security-policy' && typeof m.get('content') === 'string'
+            && !/[<>]/.test(m.get('content') as string)) { return raw; }
+        return '';
+    }
+    if (tag === 'img') {
+        const src = attrs.find((a) => a.name.toLowerCase() === 'src');
+        return src && src.value !== null && PNG_SRC.test(src.value) ? `<img src="${src.value}">` : '';
+    }
+    let changed = false;
+    const keep: Attr[] = [];
+    const seen = new Set<string>();
+    for (const a of attrs) {
+        const n = a.name.toLowerCase();
+        // HTML 은 겹친 이름의 첫 것만 쓴다 — 겹친 것도 허용 목록을 지나야 원문을 남기고(뜻이 같다), 다시 지을 때는 버린다
+        if (seen.has(n)) { if (!PRINT_ATTRS.has(n) || (n === 'style' && CSS_BAD.test(a.value ?? '')) || VALUE_BAD.test(a.value ?? '')) { changed = true; } continue; }
+        seen.add(n);
+        const v = a.value ?? '';
+        let ok = PRINT_ATTRS.has(n) && n !== 'src' && n !== 'charset' && n !== 'http-equiv' && n !== 'content';
+        if (ok && n === 'style') { ok = !CSS_BAD.test(v); }
+        else if (ok && n === 'xmlns') { ok = v === 'http://www.w3.org/2000/svg'; }
+        else if (ok) { ok = !VALUE_BAD.test(v) && !(/[&\\]/.test(v) && !['title', 'class', 'id'].includes(n)); }
+        if (ok) { keep.push(a); } else { changed = true; }
+    }
+    if (!changed) { return raw; }
+    return `<${tag}${keep.map((a) => (a.value === null ? ` ${a.name.toLowerCase()}` : ` ${a.name.toLowerCase()}="${escAttr(a.value)}"`)).join('')}>`;
+}
+
+export function sanitizeForPrint(html: string): string {
+    let out = '';
+    let i = 0;
+    const n = html.length;
+    while (i < n) {
+        const lt = html.indexOf('<', i);
+        if (lt < 0) { out += html.slice(i); break; }
+        out += html.slice(i, lt);
+        i = lt;
+        if (html.startsWith('<!--', i)) {                      // 주석 — 지운다(끝: --> · --!>, 없으면 끝까지)
+            const m = /--!?>/.exec(html.slice(i + 4));
+            i = m ? i + 4 + m.index + m[0].length : n;
+            continue;
+        }
+        if (/^<!DOCTYPE html>/i.test(html.slice(i, i + 15))) { out += html.slice(i, i + 15); i += 15; continue; }
+        if (html.startsWith('<!', i) || html.startsWith('<?', i)) { // 그 밖의 선언 · CDATA · 처리 지시 — > 까지 지운다
+            const e = html.indexOf('>', i);
+            i = e < 0 ? n : e + 1;
+            continue;
+        }
+        if (html[i + 1] === '/') {                              // 끝 태그
+            const m = /^<\/([a-zA-Z][^\s/>\0]*)[^>]*>/.exec(html.slice(i));
+            if (!m) { out += '&lt;'; i += 1; continue; }
+            const tag = m[1].toLowerCase();
+            out += PRINT_TAGS.has(tag) ? `</${tag}>` : '&lt;' + m[0].slice(1);
+            i += m[0].length;
+            continue;
+        }
+        const st = readStartTag(html, i);
+        if (!st) { out += '&lt;'; i += 1; continue; }           // 태그가 아니다(또는 끝나지 않았다) — 글
+        const raw = html.slice(i, st.end);
+        const tag = st.name.toLowerCase();
+        i = st.end;
+        if (!PRINT_TAGS.has(tag)) { out += '&lt;' + raw.slice(1); continue; }
+        if (tag === 'style') {                                  // 원시 글 — </style 까지. 이상한 CSS · < 가 있으면 블록째 지운다
+            const close = html.slice(i).search(/<\/style\s*>/i);
+            const css = close < 0 ? html.slice(i) : html.slice(i, i + close);
+            const endTag = close < 0 ? '' : /^<\/style\s*>/i.exec(html.slice(i + close))![0];
+            i = close < 0 ? n : i + close + endTag.length;
+            const opened = cleanStartTag(raw, tag, st.attrs);
+            if (!CSS_BAD.test(css) && opened === raw) { out += raw + css + endTag; }
+            continue;
+        }
+        out += cleanStartTag(raw, tag, st.attrs);
+    }
+    return out;
 }
 
 /** 인쇄 브라우저의 인자(시험이 그대로 본다). profile · pdfPath · url 은 호출자가 */
@@ -68,6 +186,8 @@ export function printArgs(profile: string, pdfPath: string, url: string): string
         '--disable-client-side-phishing-detection', '--dns-prefetch-disable',
         '--host-resolver-rules=MAP * ~NOTFOUND',
         '--proxy-server=http://127.0.0.1:9', '--proxy-bypass-list=<-loopback>',
+        // V8-02: WebRTC 의 UDP 는 죽은 프록시 · 이름 풀이 규칙을 타지 않는다 — 프록시를 거치지 않는 UDP 를 끈다(프록시는 닿지 않는 곳)
+        '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--webrtc-ip-handling-policy=disable_non_proxied_udp',
         '--print-to-pdf=' + pdfPath,
         url,
     ];

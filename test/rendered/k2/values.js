@@ -64,6 +64,7 @@ const NON_DEFAULT = {
   // 접합부 탭
   connFastenerType: 'bolt', connSingleType: 'bolt', connGrooveType: 'partial',
   connLapLeft: 30, connLapRight: 42, connMu: 52.5, connVu: 0.9,   // in, in, kip-in, kips
+  connLapSupport: 3,                 // V8-01: 랩이 걸친 지점(II-2A 의 첫 안쪽 지점)
   connFastenerDia: 0.5, connNRows: 3, connEdgeDist: 1, connLapPnvs: 1.2,
   connT1: 0.059, connT2: 0.075, connD: 0.5, connN: 2,
   connFy: 50, connFu: 65,
