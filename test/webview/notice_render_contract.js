@@ -233,6 +233,8 @@ const RESULT = {
   for (const m of src.matchAll(/code: '([a-z-]+)'/g)) { if (/^(no-|stale-|not-evaluated|ng$|open-q|incomplete|provisional|unsaved|damaged|read-only|unknown-issue|report-notices|changed-sources|edited-previous|same-as)/.test(m[1])) { codes.add('host.issue.' + m[1]); } }
   // 사람만 하는 일의 거절(IssueRefusedError · ReviewRefusedError)과 호스트가 단 code
   for (const m of src.matchAll(/RefusedError\([^\n]*?'(host\.[a-z_.-]+)'/g)) { codes.add(m[1]); }
+  for (const m of src.matchAll(/RefusedError \? e\.code : '(host\.[a-z_.-]+)'/g)) { codes.add(m[1]); }
+  for (const m of src.matchAll(/hostNotice\('(host\.issue\.[a-z-]+)'/g)) { codes.add(m[1]); }
   for (const m of src.matchAll(/code: '(host\.review\.[a-z_]+)'/g)) { codes.add(m[1]); }
   for (const m of src.matchAll(/code: '(case-file-changed)'/g)) { codes.add('host.issue.' + m[1]); }
   for (const c of ['no-design-result', 'stale-results', 'not-evaluated', 'ng', 'open-questions', 'incomplete-reviews', 'provisional-assumptions', 'unsaved-changes', 'no-draft', 'stale-draft', 'damaged-records']) { codes.add('host.issue.pass.' + c); }

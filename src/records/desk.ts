@@ -86,6 +86,10 @@ export interface DeskEnv {
     /** R5: 발행 전 점검(호스트가 — 막는 것 · 경고 · 통과, 발행할 초안, 지금의 근거). 발행 미리보기 · 발행 · documents check 가 같이 쓴다 */
     issueCheck?(): IssueCheckInput | { error: string };
     /** R5-2: 초안의 ReportDoc 을 도장만 바꿔 다시 그린 최종본(HTML · PDF 바이트) — 호스트의 그리기 · 인쇄(D14) */
+    /**
+     * 발행 묶음을 그린다. **약속(V9a-01)**: 묶음의 모든 문서(데이터 · HTML)는 이 함수가 불린 그 동기 구간에서 — 첫 await 앞에서 — 짓는다
+     * (발행 점검과 같은 상태). 인쇄(PDF)만 기다린다.
+     */
     issueRender?(input: { doc: unknown; kind: DocKind; stamp: Record<string, unknown>; roles: string[] }): Promise<Array<{ role: string; bytes: Buffer }>>;
     /** 막는 것 · 경고 한 줄에 code 의 문장(호스트의 등록표) — 미리보기 · 점검이 같은 글 */
     issueText?(x: { code: string; count?: number; detail?: string }): { code: string; count?: number; detail?: string; text?: string; text_ko?: string };
@@ -1154,7 +1158,7 @@ export class RecordsDesk {
     }
 
     /** 발행 전 점검의 몸(미리보기 · 발행 · documents check 가 같은 것) */
-    issueCheckData(): IssuePreview & { input: IssueCheckInput } {
+    issueCheckData(opts: { issuingFolder?: string } = {}): IssuePreview & { input: IssueCheckInput } {
         const p = this.proj, c = this.cur;
         if (!p || !c) { throw new Error('no case of a project is open'); }
         if (!this.env.issueCheck) { throw new Error('issuing is not available here'); }
@@ -1168,7 +1172,7 @@ export class RecordsDesk {
         const abs = path.join(p.dir, ...folder.split('/'));
         if (c.readOnly || p.readOnly) { blockers.push({ code: 'read-only', detail: String(c.readOnlyReason ?? 'project') }); }
         // 기록에 없는 R<n> 폴더 — 다시 쓰지 않고 막는다(실패한 발행으로 적힌 폴더는 발행할 때 옆으로 옮긴다)
-        if (fs.existsSync(abs) && !this.failedFolderPending(folder)) { blockers.push({ code: 'unknown-issue-folder', detail: `${folder} exists but the records have no issue or failed issue for it`,
+        if (fs.existsSync(abs) && opts.issuingFolder !== folder && !this.failedFolderPending(folder)) { blockers.push({ code: 'unknown-issue-folder', detail: `${folder} exists but the records have no issue or failed issue for it`,
             detail_ko: `${folder} 폴더가 있지만 기록에 그 발행 · 실패한 발행이 없습니다 — 그 폴더를 치우십시오` }); }
         // .csd 사본은 저장된 바이트 그대로 — 디스크의 파일이 마지막 저장 · 열기의 것이어야
         const csd = this.readFile(c.abs, CSD_HASH_MAX_BYTES);
@@ -1202,6 +1206,9 @@ export class RecordsDesk {
 
     /** 일회용 숫자(미리보기 → 발행, 2 분, 한 번) */
     static ISSUE_NONCE_MS = 120_000;
+    private issuingNow: { caseId: string; label: string; since: string } | null = null;
+    /** 발행이 진행 중인가(V9a-01 — 그동안 호스트는 상태를 바꾸는 요청을 받지 않는다) */
+    issuing(): { caseId: string; label: string; since: string } | null { return this.issuingNow; }
     private nonces = new Map<string, { fingerprint: string; expires: number; used: boolean }>();
     /** 발행 도장(날짜는 이 PC 의 지역 날짜 — 기록의 순간은 ISO 그대로) */
     private issueStamp(label: string): { kind: 'issued'; label: string; reviewer: string; date: string } {
@@ -1239,6 +1246,14 @@ export class RecordsDesk {
             const unknown = d.blockers.some((b) => b.code === 'unknown-issue-folder');
             throw new IssueRefusedError('issuing is blocked: ' + d.blockers.map((b) => b.code).join(', '), unknown ? 'host.issue.unknown-issue-folder' : 'host.issue.blocked');
         }
+        if (this.issuingNow) { throw new IssueRefusedError('another issue is in progress', 'host.issue.in-progress'); }
+        // 여기서부터 끝날 때까지 「발행 중」 — 호스트는 상태를 바꾸는 요청(MCP 의 쓰기 · 실행, 화면의 편집 · 실행)을 code 와 함께 거절한다
+        this.issuingNow = { caseId: c.caseId, label: d.label, since: this.env.now() };
+        try { return await this.issueFrozen(p, c, d); } finally { this.issuingNow = null; }
+    }
+
+    /** 점검을 지난 그 상태로(같은 동기 구간에서 문서 · .csd 바이트를 잡고) 쓴다 — 쓴 뒤 목록 앞에서 다시 점검해 다르면 실패한 발행 */
+    private async issueFrozen(p: OpenProject, c: OpenCase, d: IssuePreview & { input: IssueCheckInput }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }> {
         const draft = d.input.draft!;
         const docBlob = this.blob(draft.doc);
         if (!docBlob.ok) { throw new IssueRefusedError(`the draft's report copy is ${docBlob.error} — make a new draft`, 'host.issue.copy-missing'); }
@@ -1266,7 +1281,9 @@ export class RecordsDesk {
             this.fault('folder');
             const stamp = this.issueStamp(d.label);
             const renderRoles = (d.bundle ?? []).map((b) => b.role).filter((r) => r !== 'case-file' && r !== 'manifest');
-            const rendered = await this.env.issueRender({ doc: docBlob.value, kind: draft.kind, stamp, roles: renderRoles });
+            // issueRender 는 불린 동기 구간에서 모든 문서를 짓는다(점검과 같은 상태) — 그 뒤의 await 는 인쇄뿐
+            const rendering = this.env.issueRender!({ doc: docBlob.value, kind: draft.kind, stamp, roles: renderRoles });
+            const rendered = await rendering;
             const byRole = new Map(rendered.map((r) => [r.role, r.bytes]));
             byRole.set('case-file', csdBytes);
             for (const b of d.bundle ?? []) {
@@ -1278,6 +1295,12 @@ export class RecordsDesk {
                 this.fault('file:' + name);
                 writeExclusive(p.dir, path.join(folderAbs, name), bytes);
                 written.push({ path: b.path, sha256: sha256Hex(bytes), size: bytes.length, role: b.role });
+            }
+            // 쓴 뒤 · 목록과 서명된 줄 앞에서 다시 점검 — 그 사이 무엇이 바뀌었으면(거절을 지나친 길이 있더라도) 실패한 발행으로
+            this.fault('recheck');
+            const again = this.issueCheckData({ issuingFolder: d.folder });
+            if (again.fingerprint !== d.fingerprint) {
+                throw new IssueRefusedError('the state changed while the issue was being written (its fingerprint is not the one checked) — nothing was issued', 'host.issue.changed-during');
             }
             const issuedAt = this.env.now();
             const manifest = { schema: 'stcfsd-issue/1', project: { name: path.basename(p.dir), projectId: p.decl.projectId }, case: { caseId: c.caseId, name: c.name },
@@ -1306,7 +1329,8 @@ export class RecordsDesk {
                     body: { caseId: c.caseId, revision: d.revision, folder: d.folder, reason: reason.slice(0, 300) } });
             } catch { /* 그 줄도 쓰지 못하면 폴더는 「기록에 없는 폴더」 로 남는다 — 다음 발행을 막는다 */ }
             try { this.env.recordsChanged?.(['documents']); } catch { /* 덤 */ }
-            throw new IssueRefusedError(`the issue failed (${reason.trim().slice(0, 200)}) — the half-made folder ${d.folder} is kept as a failed issue (not counted); fix the cause and issue again (the same revision)`, 'host.issue.failed', { cause: e });
+            throw new IssueRefusedError(`the issue failed (${reason.trim().slice(0, 200)}) — the half-made folder ${d.folder} is kept as a failed issue (not counted); fix the cause and issue again (the same revision)`,
+                e instanceof IssueRefusedError ? e.code : 'host.issue.failed', { cause: e });
         }
     }
 

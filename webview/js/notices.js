@@ -424,6 +424,9 @@
         'host.issue.same-as-previous-issue': { kind: 'warning', template: 'The draft is the same as the previous issue.', template_ko: '초안이 지난 발행과 같습니다.', params: {} },
         'host.issue.case-file-changed': { kind: 'reason', template: "The case file on disk is not the saved one.", template_ko: "디스크의 .csd 가 마지막 저장의 것이 아닙니다 — 저장하십시오.", params: {} },
         // 발행을 받지 않은 까닭(person.issue 가 던진 오류의 code)
+        'host.issue.in-progress': { kind: 'reason', template: 'an issue ({label}) is being written in StCFSD — state-changing requests are refused until it finishes (a few seconds); try again then',
+            template_ko: '발행({label})을 쓰는 중입니다 — 끝날 때까지(몇 초) 상태를 바꾸는 요청은 받지 않습니다. 끝난 뒤 다시 하십시오.', params: {} },
+        'host.issue.changed-during': { kind: 'reason', template: 'The state changed while the issue was being written — nothing was issued.', template_ko: '발행을 쓰는 동안 상태가 바뀌었습니다 — 발행하지 않았습니다(실패한 발행). 다시 미리보기를 여십시오.', params: {} },
         'host.issue.no-case': { kind: 'reason', template: "No writable case is open.", template_ko: "쓸 수 있는 검토 대상이 열려 있지 않습니다.", params: {} },
         'host.issue.no-preview': { kind: 'reason', template: "There is no open preview for this issue.", template_ko: "이 발행의 미리보기가 없습니다 — 미리보기를 다시 여십시오.", params: {} },
         'host.issue.used': { kind: 'reason', template: "This preview was already used.", template_ko: "이 미리보기는 이미 쓰였습니다 — 미리보기를 다시 여십시오.", params: {} },

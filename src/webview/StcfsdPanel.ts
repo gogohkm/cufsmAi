@@ -535,13 +535,17 @@ export class StcfsdPanel implements McpPanelInterface {
     /** R5-1: 초안 파일(03_계산서/ — 새 이름) · draft 줄. 답의 파일은 프로젝트 기준 상대 이름 */
     private async _writeDraft(proj: { abs: string; rel: string; caseName: string; caseId: string }, item: string, kind: string, format: string, doc: any,
         inner: string, page: string, html: string, us: 'SI' | 'US', options: any, stamp: any): Promise<any> {
-        const stem = `${safeBaseName(proj.caseName)}.${kind === 'buckling' ? 'buckling' : 'calc'}.r${this._caseKeeper.state.rev}`;
+        // S1(V9a): 근거 · 판은 내용(doc)을 지은 그 동기 구간에서 — 인쇄하는 동안 상태가 바뀌어도 초안은 그 내용의 상태를 근거로 적는다(그러면 「낡음」)
+        const basis = this._documentBasis();
+        const caseRev = this._caseKeeper.state.rev;
+        const stem = `${safeBaseName(proj.caseName)}.${kind === 'buckling' ? 'buckling' : 'calc'}.r${caseRev}`;
         const files: Array<{ path: string; sha256: string; size: number }> = [];
         const add = (name: string) => { const b = fs.readFileSync(path.join(proj.abs, name)); files.push({ path: `${proj.rel}/${name}`, sha256: crypto.createHash('sha256').update(b).digest('hex'), size: b.length }); };
         if (format !== 'pdf') { add(await StcfsdPanel._writeNewFile(proj.abs, stem, 'html', (tmp) => fs.writeFileSync(tmp, html, 'utf-8'))); }
         let pdfNote: { text: string; code: string; text_ko: string } | undefined;
         if (format !== 'html') {
             try {
+                if (isTestMode() && StcfsdPanel.__issueFault) { StcfsdPanel.__issueFault('draft-print'); }
                 add(await StcfsdPanel._writeNewFile(proj.abs, stem, 'pdf', async (tmp) => {
                     const printed = await this._printHtmlToPdf(page, tmp);
                     if (!printed) { throw new Error('no Edge/Chrome found'); }
@@ -552,12 +556,11 @@ export class StcfsdPanel implements McpPanelInterface {
         if (!files.length) { return { error: 'generate_report: no file was written' + (pdfNote ? ` — ${pdfNote.text}` : '') }; }
         const docBlob = this._desk!.putCopy(doc);
         if (!docBlob) { return { error: 'generate_report: the report copy could not be stored' }; }
-        const basis = this._documentBasis();
         this._desk!.writeDraft({ item, caseId: proj.caseId, kind: kind === 'buckling' ? 'buckling' : 'calc', files, docFp: docFp(doc), doc: docBlob, basis, stamp });
         this._recordsChanged(['documents']);
         const sections = [String(doc.meta?.title || ''), ...(doc.sections || []).map((x: any, i: number) => `${i + 1}. ${x.title}`)].filter(Boolean);
         const out: any = {
-            draft: item, files: files.map((f) => f.path), folder: 'project', kind, units: us, case_rev: this._caseKeeper.state.rev, sections,
+            draft: item, files: files.map((f) => f.path), folder: 'project', kind, units: us, case_rev: caseRev, sections,
             stamp: { kind: 'draft', label: item, not_checked: stamp?.notChecked ?? 0 },
             note: `A draft (${item}) was written into the project's ${proj.rel} folder — new files, nothing overwritten. Tell the person the file names. Issuing it is the person's action in StCFSD (documents check shows what blocks it).`,
             ...(pdfNote ? { pdf_note: pdfNote.text, pdf_note_code: pdfNote.code, pdf_note_ko: pdfNote.text_ko } : {}),
@@ -640,6 +643,16 @@ export class StcfsdPanel implements McpPanelInterface {
     /** R1-2: 편집 상태의 화면(웹뷰)의 메시지 — 사람의 문맥 안에서(그 안에서 부른 동작의 기록 줄 행위자 = person) */
     private _handleMessage(message: WebviewToExtMessage): Promise<void> {
         return runAs({ kind: 'person' }, () => {
+            // V9a-01: 발행 중 — 화면의 편집 · 실행을 받지 않고 지금 상태를 다시 보낸다(까닭은 한국어로)
+            const busy = this._desk?.issuing();
+            if (busy && StcfsdPanel.PAGE_BUSY_COMMANDS.has(String((message as any)?.command))) {
+                const n = NOTICES.hostNotice('host.issue.in-progress', { label: busy.label });
+                this._postMessage('modelLoaded', this._model);
+                this._postCaseState('issue in progress');
+                this._postMessage('issueBusy', { code: 'host.issue.in-progress', text: n.text, text_ko: n.text_ko, label: busy.label });
+                vscode.window.showWarningMessage(n.text_ko);
+                return Promise.resolve();
+            }
             const ro = this._pageModelRefusal(message);
             if (ro) {
                 // 읽기 전용 대상 — 화면의 모델 변경을 받지 않고 파일의 모델을 다시 보낸다(까닭과 함께 — 사람에게는 한국어)
@@ -3703,13 +3716,30 @@ export class StcfsdPanel implements McpPanelInterface {
         if (!doc || doc.schema !== 'stcfsd-report/1') { throw new Error('the draft copy is not a report document'); }
         doc.meta = { ...(doc.meta || {}), stamp: input.stamp };
         const units: 'SI' | 'US' = doc.meta?.units === 'SI' ? 'SI' : 'US';
-        const out: Array<{ role: string; bytes: Buffer }> = [];
         const want = new Set(input.roles);
-        const one = async (d: any, buckling: boolean, prefix: string) => {
+        // V9a-01: 묶음의 모든 문서와 쪽(HTML)을 **첫 await 앞에서** 짓는다 — 데스크가 발행 점검을 지난 그 동기 구간, 곧 점검한 상태.
+        // 그 뒤로는 인쇄만 기다린다(인쇄하는 몇 초 동안 상태가 바뀌어도 묶음의 내용은 바뀌지 않는다).
+        const pages: Array<{ prefix: string; page: string }> = [];
+        const build = (d: any, buckling: boolean, prefix: string) => {
             const inner = REVIEW.renderReportDoc(d);
-            const page = buckling ? this._buildPrintableBucklingHtmlFrom(inner) : REVIEW.printableReportHtml(inner);
+            pages.push({ prefix, page: buckling ? this._buildPrintableBucklingHtmlFrom(inner) : REVIEW.printableReportHtml(inner) });
+        };
+        build(doc, input.kind === 'buckling', '');
+        if (want.has('buckling-html') || want.has('buckling-pdf')) {
+            if (!this._isAnalysisCurrent()) { throw new Error('the buckling analysis is not current — not issued'); }
+            build(this._bucklingDoc({ headless: true }, units, { stamp: input.stamp }), true, 'buckling-');
+        }
+        if (want.has('validation-html') || want.has('validation-pdf')) { build(this._validationDoc(units, input.stamp), false, 'validation-'); }
+        return this._printIssuePages(pages, want);
+    }
+
+    /** 지어 둔 쪽들을 차례로 — HTML 은 그대로, PDF 는 닫힌 인쇄 길로(시험만: 인쇄마다 고장 · 끼어들기 갈고리) */
+    private async _printIssuePages(pages: Array<{ prefix: string; page: string }>, want: Set<string>): Promise<Array<{ role: string; bytes: Buffer }>> {
+        const out: Array<{ role: string; bytes: Buffer }> = [];
+        for (const { prefix, page } of pages) {
             if (want.has(prefix + 'html')) { out.push({ role: prefix + 'html', bytes: Buffer.from(HTML_MARKER + '\n' + page, 'utf-8') }); }
-            if (!want.has(prefix + 'pdf')) { return; }
+            if (!want.has(prefix + 'pdf')) { continue; }
+            if (isTestMode() && StcfsdPanel.__issueFault) { StcfsdPanel.__issueFault('print:' + prefix + 'pdf'); }
             const tmp = path.join(os.tmpdir(), `stcfsd-issue-${crypto.randomBytes(8).toString('hex')}.pdf`);
             try {
                 const printed = await this._printHtmlToPdf(page, tmp);
@@ -3717,14 +3747,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 fs.appendFileSync(tmp, PDF_MARKER);
                 out.push({ role: prefix + 'pdf', bytes: fs.readFileSync(tmp) });
             } finally { try { fs.unlinkSync(tmp); } catch { /* 없음 */ } }
-        };
-        await one(doc, input.kind === 'buckling', '');
-        // 좌굴 해석 보고서 · 검증표 — 지금 상태로(발행 점검의 지문이 미리보기의 상태와 같음을 이미 확인했다), 같은 도장
-        if (want.has('buckling-html') || want.has('buckling-pdf')) {
-            if (!this._isAnalysisCurrent()) { throw new Error('the buckling analysis is not current — not issued'); }
-            await one(this._bucklingDoc({ headless: true }, units, { stamp: input.stamp }), true, 'buckling-');
         }
-        if (want.has('validation-html') || want.has('validation-pdf')) { await one(this._validationDoc(units, input.stamp), false, 'validation-'); }
         return out;
     }
 
@@ -5282,6 +5305,9 @@ export class StcfsdPanel implements McpPanelInterface {
             reply = __reply && typeof __reply === 'object' ? __reply : {};
             options = rest;
         }
+        // V9a-01: 발행이 진행 중이면(점검을 지난 상태를 묶는 몇 초) 상태를 바꾸는 요청은 받지 않는다 — 읽기만 통과
+        const busy = this._issueBusyRefusal(options);
+        if (busy) { return busy; }
         // R1-2(오케스트레이터 결정): 읽기 전용으로 연 대상은 모델도 바꾸지 않는다 — 화면의 판정이 파일이 담을 수 없는 상태의 것이 되지 않게
         const roModel = StcfsdPanel.MODEL_ACTIONS.has(String(options?.action)) ? this._recordsReadOnly() : null;
         if (roModel) {
@@ -5356,6 +5382,27 @@ export class StcfsdPanel implements McpPanelInterface {
             ended_at: new Date().toISOString(), ms: Date.now() - rec.t0, ok });
     }
     /** 모델(단면 · 재료 · 경계 · 길이 · 응력 · 스프링 · 구속)을 바꾸는 MCP 동작 — 읽기 전용 대상에서 거절 */
+    /** 발행 중에도 받는 MCP 동작(읽기만 — 상태 · 결과 · 기록을 바꾸지 않는다). 기록 도구는 읽는 op 만 */
+    private static readonly READ_ACTIONS = new Set(['get_case_inputs', 'get_case_status', 'get_curve', 'get_design_check', 'get_dsm', 'get_elements', 'get_full_state',
+        'get_nodes', 'get_properties', 'get_reviews', 'get_unsaved_changes', 'get_view', 'list_cases', 'list_changes', 'list_projects', 'steel_grades', 'aisi_guide',
+        'report_view', 'focus', 'capture_section_preview']);
+    private static readonly READ_OPS: Record<string, string[]> = { documents: ['list', 'get', 'check'], work_items: ['list', 'get'], assumptions: ['list', 'get'],
+        sources: ['list', 'get'], alternatives: ['list', 'compare'] };
+    /** 발행 중이면 상태를 바꾸는 요청을 code 와 함께 거절(AI 에게 까닭) — 읽기는 통과 */
+    private _issueBusyRefusal(options: any): any | null {
+        const busy = this._desk?.issuing();
+        if (!busy) { return null; }
+        const action = String(options?.action ?? '');
+        if (StcfsdPanel.READ_ACTIONS.has(action)) { return null; }
+        const ops = StcfsdPanel.READ_OPS[action];
+        if (ops && ops.includes(String(options?.op ?? ''))) { return null; }
+        const n = NOTICES.hostNotice('host.issue.in-progress', { label: busy.label });
+        return { error: `${action || 'request'}: ${n.text}`, error_code: 'host.issue.in-progress', error_ko: n.text_ko };
+    }
+    /** 발행 중에 받지 않는 화면의 메시지(편집 · 실행 · 열기 · 저장) */
+    private static readonly PAGE_BUSY_COMMANDS = new Set(['runAnalysis', 'setStress', 'updateModel', 'invalidateDerivedResults', 'caseEdit', 'saveProject', 'saveProjectAs',
+        'openProject', 'runValidation', 'generateReport', 'generateTemplate', 'applyStress', 'classifyModes', 'runPlastic', 'runVibration', 'runLapConnection',
+        'runConnection', 'runPurlinDesign', 'runDesign', 'prepareDesignDsm', 'analyzeLoads']);
     private static readonly MODEL_ACTIONS = new Set(['generate_template', 'set_material', 'set_bc', 'set_lengths', 'set_load_case', 'set_stress',
         'doubler', 'apply_deck_springs', 'set_node_stress', 'set_springs', 'set_constraints', 'set_nodes', 'set_elements', 'add_node', 'add_element',
         'modify_node', 'delete_node', 'modify_element', 'delete_element', 'set_gbtcon']);
