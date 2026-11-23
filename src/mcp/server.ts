@@ -70,7 +70,7 @@ type HttpOutcome =
  * `withToken` = Bearer 토큰을 붙인다 — V5b-05: 아직 증명하지 않은 상대(`/hello`)에는 붙이지 않는다.
  */
 function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, payload: string | undefined,
-    timeoutMs: number, nonce: string | undefined, aiCall: boolean, withToken = true, meta?: { reason?: string }): Promise<HttpOutcome> {
+    timeoutMs: number, nonce: string | undefined, aiCall: boolean, withToken = true, meta?: ChangeMeta): Promise<HttpOutcome> {
     return new Promise((resolve) => {
         const headers: Record<string, string | number> = { 'Accept': 'application/json' };
         if (payload !== undefined) {
@@ -84,7 +84,10 @@ function httpCall(target: HostTarget, method: 'GET' | 'POST', endpoint: string, 
         }
         if (nonce !== undefined) { headers[NONCE_HEADER] = nonce; }
         // R1-2: 쓰기의 까닭은 머리로(호스트는 문맥으로만 읽는다 — 몸의 키로는 행위자를 바꾸지 못한다). 머리는 ASCII 라 퍼센트 부호화
+        // R2-2: 쓰기 도구의 까닭 · 업무 · 원자료는 머리로(호스트는 문맥으로만 읽는다 — 몸 · 질의 문자열로는 행위자 · 까닭을 바꾸지 못한다)
         if (aiCall && meta?.reason) { headers['X-StCFSD-Reason'] = encodeURIComponent(meta.reason.slice(0, 300)); }
+        if (aiCall && meta?.work) { headers['X-StCFSD-Work'] = encodeURIComponent(meta.work.slice(0, 40)); }
+        if (aiCall && meta?.source) { headers['X-StCFSD-Source'] = encodeURIComponent(meta.source.slice(0, 40)); }
         if (withToken && target.token !== undefined) { headers['Authorization'] = `Bearer ${target.token}`; }
         const req = http.request({
             hostname: BRIDGE_HOST, port: target.port, path: endpoint, method, headers,
@@ -130,13 +133,16 @@ async function verifyHost(target: HostTarget): Promise<string | null> {
  * K4b: 도구 한 번의 응답 모양(units · detail) — 도구의 콜백마다 문맥에 둔다(server.tool 을 감싼다). POST /action 의 몸에 __reply 로 실어
  * 호스트가 알림 · 이유 · 이름표를 그 단위의 한국어로 그린다(webview/js/notices.js forReader). 엔진 인자가 아니다(호스트가 뺀다).
  */
-const REPLY = new AsyncLocalStorage<{ units: 'US' | 'SI'; detail: string }>();
+/** R2-2: 쓰기 도구의 공용 인자(까닭 · 업무 항목 · 원자료) — 머리로 간다 */
+interface ChangeMeta { reason?: string; work?: string; source?: string }
+const REPLY = new AsyncLocalStorage<{ units: 'US' | 'SI'; detail: string; meta?: ChangeMeta }>();
 
-async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: any, meta?: { reason?: string }): Promise<any> {
-    const reply = REPLY.getStore();
-    if (reply && method === 'POST' && endpoint === '/action' && body && typeof body === 'object' && !Array.isArray(body)) {
-        body = { ...body, __reply: reply };
+async function bridgeRequest(method: 'GET' | 'POST', endpoint: string, body?: any, meta?: ChangeMeta): Promise<any> {
+    const store = REPLY.getStore();
+    if (store && method === 'POST' && endpoint === '/action' && body && typeof body === 'object' && !Array.isArray(body)) {
+        body = { ...body, __reply: { units: store.units, detail: store.detail } };
     }
+    if (store?.meta) { meta = { ...store.meta, ...(meta || {}) }; }
     // K1: 상태 조회 = get_status 만 GET /status 를 부른다. 재시작 뒤에는 이것만 통과한다.
     const statusRead = method === 'GET' && endpoint === '/status';
     let resolved = CONNECTION.resolve(statusRead);
@@ -211,8 +217,11 @@ type Units = 'US' | 'SI' | undefined;
 /** 도구 인자 → 브리지 본문. `units` 는 보내지 않고, SI 이면 표대로 US 로 바꾼다. 빠진 인자는 보내지 않는다. */
 function engineArgs(tool: string, args: Record<string, any>): Record<string, any> {
     // `detail` 은 MCP 응답의 모양(K4a 3a)이라 호스트 · 엔진에 보내지 않는다.
-    const { units, detail: _detail, ...rest } = args;
-    void _detail;
+    // R2-2: reason · work · source 는 머리로 간다(문맥) — 엔진에 보내지 않는다. set_case_inputs · focus 의 reason 은 그 도구의 인자이기도 하다
+    const { units, detail: _detail, work: _w, source: _s, ...rest0 } = args;
+    void _detail; void _w; void _s;
+    const rest: Record<string, any> = { ...rest0 };
+    if (tool !== 'set_case_inputs' && tool !== 'focus') { delete rest.reason; }
     for (const k of Object.keys(rest)) {
         if (rest[k] === undefined) { delete rest[k]; }
     }
@@ -782,6 +791,16 @@ NOTICES. Always report warnings, assumptions and scope_notes to the user with th
 UNITS. Engine units are US: in, in², ksi, kips, kip-in (load analysis: ft, plf, kip-ft). Tools that have a 'units' argument accept units="SI" (mm, mm², MPa, kN, kN-m; load tools m, kN/m) and then return numeric results in SI; notice texts, check reasons and fastener labels are rendered in SI too (numbers and unit words), while report text and step formulas stay in US units and are labelled so. Tools without 'units' are US only.`,
 });
 
+// R2-2: 모델 · 검토 입력을 바꾸는 도구 — 공용 인자 reason · work · source 를 받는다(변경 묶음에 실린다)
+const WRITE_TOOLS = new Set(['set_case_inputs', 'set_section_template', 'set_custom_section', 'build_section', 'set_material', 'set_load_case', 'set_stress',
+    'set_boundary_condition', 'set_lengths', 'set_node_stress', 'set_nodes', 'set_elements', 'add_node', 'add_element', 'modify_node', 'delete_node',
+    'modify_element', 'delete_element', 'double_mesh', 'set_springs', 'set_constraints', 'set_gbtcon', 'calc_deck_stiffness', 'run_analysis',
+    'aisi_design_compression', 'aisi_design_flexure', 'aisi_design_combined', 'aisi_design_tension', 'aisi_design_connection',
+    'analyze_loads', 'design_purlin', 'design_lap_connection', 'design_connection']);
+const CHANGE_REASON = z.string().max(20000).optional().describe("Why you make this change, in a sentence — kept with the change in the project's records (the first 300 characters, control characters removed). Not sent to the engine.");
+const CHANGE_WORK = z.string().max(40).optional().describe("Work item id this change belongs to (e.g. 'Q-3') — recorded with the change.");
+const CHANGE_SOURCE = z.string().max(40).optional().describe("Source document id this change follows (e.g. 'S-1') — recorded with the change.");
+
 // K4b: 모든 도구의 콜백을 응답 모양의 문맥 안에서(인자의 units · detail — 없으면 US · summary)
 {
     const original = server.tool.bind(server) as (...a: any[]) => any;
@@ -792,7 +811,18 @@ UNITS. Engine units are US: in, in², ksi, kips, kip-in (load analysis: ft, plf,
             a[k] = (args: any, extra: any) => REPLY.run({
                 units: args && args.units === 'SI' ? 'SI' : 'US',
                 detail: args && typeof args.detail === 'string' ? args.detail : 'summary',
+                ...(args && (args.reason || args.work || args.source) ? { meta: {
+                    ...(typeof args.reason === 'string' && args.reason ? { reason: args.reason } : {}),
+                    ...(typeof args.work === 'string' && args.work ? { work: args.work } : {}),
+                    ...(typeof args.source === 'string' && args.source ? { source: args.source } : {}) } } : {}),
             }, () => cb(args, extra));
+        }
+        // R2-2: 쓰기 도구에 공용 인자 reason · work · source(이미 그 이름이 있으면 그것 — set_case_inputs 의 reason)
+        const schema = a.length >= 4 ? a[2] : (a.length === 3 && typeof a[1] === 'object' ? a[1] : null);
+        if (WRITE_TOOLS.has(a[0]) && schema && typeof schema === 'object' && !Array.isArray(schema)) {
+            if (!('reason' in schema)) { schema.reason = CHANGE_REASON; }
+            if (!('work' in schema)) { schema.work = CHANGE_WORK; }
+            if (!('source' in schema)) { schema.source = CHANGE_SOURCE; }
         }
         return original(...a);
     };
@@ -889,7 +919,7 @@ server.tool("set_case_inputs",
         units: CASE_UNITS,
         reason: z.string().max(300).optional().describe("Short reason (recorded with the invalidated results)"),
     },
-    async (args) => json(await callBridgePost('/action', { action: 'set_case_inputs', ...args }))
+    async (args) => { const { work: _w, source: _s, ...rest } = args as any; void _w; void _s; return json(await callBridgePost('/action', { action: 'set_case_inputs', ...rest })); }
 );
 
 server.tool("run_case_check",
@@ -2042,6 +2072,7 @@ rec.listCases(server, REC_IO);
 rec.openCase(server, REC_IO);
 rec.newCase(server, REC_IO);
 rec.saveCase(server, REC_IO);
+rec.listChanges(server, REC_IO);
 
 // ============================================================
 // 서버 시작

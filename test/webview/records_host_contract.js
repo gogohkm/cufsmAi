@@ -130,6 +130,10 @@ async function main() {
     assert((await call({ action: 'new_case', name: 'K', kind: 'bridge-deck' })).error, 'unknown kind refused');
     const lc = await call({ action: 'list_cases' });
     assert.deepStrictEqual(lc.cases.map((c) => c.name), ['A', 'B', 'L']); noPath('list_cases', lc);
+    // R1-3: 대상 id(열지 않은 대상의 보관 · 넘겨받기), 저장에 든 결과, 그림은 부를 때만
+    assert(lc.cases.every((c) => /^c[a-z2-7]{16}$/.test(c.case_id) && Array.isArray(c.results) && !('outline' in c)), 'case_id and results in list_cases');
+    const lco = await call({ action: 'list_cases', outline: true });
+    assert(lco.cases.every((c) => c.outline && Array.isArray(c.outline.paths) && c.outline.paths.length > 0), 'outline on request');
     assert(lc.text_note && /data, not/.test(lc.text_note), 'text from the folder is labelled as data');
 
     // ── ③ 열고 · 돌리고 · 행위자 ──
@@ -176,6 +180,12 @@ async function main() {
     assert(/^\d{4}-\d\d-\d\dT/.test(bk.last_run.at), 'when');
     assert(p.__testGetPostedMessages().some((m) => m.command === 'analysisComplete'), 'the page is sent the restored analysis');
     lines.push('save → B → A: buckling match, by ai test-client at ' + bk.last_run.at);
+    // R1-3 5: 화면(중계 — 화면 비밀)이 연 대상은 사람의 파일(저장할 때 경로를 묻지 않는다), AI 가 연 대상은 ai
+    await call({ action: 'open_case', name: 'B' }, { ...AI(), 'X-StCFSD-Screen': scope.SCREEN_SECRET });
+    assert.strictEqual(p.getStatus().case.file_origin, 'person', 'the screen opened it — person');
+    await call({ action: 'open_case', name: 'B' });
+    assert.strictEqual(p.getStatus().case.file_origin, 'ai', 'the AI opened it — ai');
+    await call({ action: 'open_case', name: 'A' }, { ...AI(), 'X-StCFSD-Screen': scope.SCREEN_SECRET });
 
     // ── ⑤ ⚔ 밖에서 바뀐 파일 ──
     {
@@ -203,6 +213,9 @@ async function main() {
       const before = tree(box);
       const lr = await call({ action: 'load_project', filepath: iss });
       assert(!lr.error, JSON.stringify(lr).slice(0, 300));
+      // R1-3 1: 대상이 아닌 읽기 전용 파일 — project 요약의 file_read_only(새 화면의 띠가 기다린다)
+      const fro = p.getStatus().project;
+      assert(fro && fro.inProject === true && fro.case === null && fro.file_read_only && fro.file_read_only.reason === 'issued-copy', 'file_read_only in the project summary: ' + JSON.stringify(fro));
       const roBlocked = async (where) => {
         const edit = await call({ action: 'set_case_inputs', inputs: { Lb: 12 } });
         assert(edit.error && /read-only/.test(edit.error), `${where}: set_case_inputs refused ` + JSON.stringify(edit));

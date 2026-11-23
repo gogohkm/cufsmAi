@@ -112,6 +112,14 @@
 
 **독립 프로그램(데스크톱 담당)이 따를 것:** 새 화면이 엔진 결과의 글을 보일 때 `StcfsdNotices`(같은 파일)를 쓴다 — `render` · `lines` · `reason` · `fastenerLabel`, 단위는 화면의 단위, 말은 한국어, code 를 함께. 다리의 MCP 중계는 `__reply` 를 넘겨도 되고(그대로 호스트에 간다) 넘기지 않으면 결과는 엔진 그대로다.
 
+## 4e. 변경 묶음 · 출처 꼬리표 (R2-2)
+
+- 화면(편집 상태)이 열고 닫을 때 호스트에 알린다: 웹뷰 메시지 `{command: 'editSession', data: {state: 'start' | 'end' | 'discard'}}` 또는 다리가 사람의 길로 `panel.editSession(state)`. 그 사이의 사람 편집은 한 묶음, 밖은 조용한 2 초, AI 요청이 끼면 나뉜다.
+- `list_changes`(→ 73) — 묶음마다 누가 · 언제 · 제목(프로그램이 칸에서) · 까닭 · 업무 · 원자료 · 바뀐 칸 수 · 무효로 만든 결과, `detail: 'fields'` 면 칸마다 전 → 후. 프로젝트 밖은 `persisted: false`(이 세션만).
+- `get_case_inputs.last_change` — 입력 칸마다 마지막으로 바꾼 묶음(누가 · 언제 · 전 → 후 · 까닭), 프로젝트가 열려 있을 때만.
+- `get_status.project.file_read_only {reason, detail}` — 대상이 아닌 채로 읽기 전용으로 연 파일(발행본 …).
+- 쓰기 도구의 공용 인자 `reason` · `work` · `source` — 머리로 가고(행위자 문맥) 줄에 실린다. 화면은 쓰지 않는다(사람의 묶음에는 까닭이 없다).
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).

@@ -21,6 +21,68 @@ export interface CaseIndex {
     schema: typeof INDEX_SCHEMA; caseId: string; csdSha: string;
     memberType: string | null; section: string | null; steel: string | null; nodes: number | null; elems: number | null;
     maxRatio: number | null; pass: boolean | null; savedAt: string | null;
+    /** 그 저장에 든 결과의 종류(시작 화면의 「진행」) — RESULT_KINDS 의 부분 */
+    results: string[];
+    /** 작은 단면 그림(시작 화면의 그림) — 선 몇 줄, 각 줄은 [x0, z0, x1, z1, …] 의 0 – 1000 정수(폭 · 높이 비는 aspect = 폭/높이) */
+    outline: { paths: number[][]; aspect: number } | null;
+}
+/** 색인에 적는 결과 종류(.csd 의 칸 → 이름) */
+export const RESULT_KINDS: Array<[string, string]> = [['analysisResult', 'buckling_analysis'], ['preparedDesignDsm', 'design_dsm'],
+    ['loadAnalysis', 'load_analysis'], ['designResult', 'member_design'], ['lapResult', 'lap']];
+/** 그림의 한계 — 줄 8 개, 점 모두 96 개 */
+export const OUTLINE_MAX_PATHS = 8;
+export const OUTLINE_MAX_POINTS = 96;
+
+/** 모델의 절점 · 요소 → 작은 그림(요소를 차례로 이어 선으로, 끊기면 새 줄, 점이 많으면 고르게 덜어 낸다) */
+export function outlineOf(node: unknown, elem: unknown): { paths: number[][]; aspect: number } | null {
+    if (!Array.isArray(node) || !Array.isArray(elem) || node.length < 2 || elem.length < 1 || node.length > 5000 || elem.length > 5000) { return null; }
+    const xy = new Map<number, [number, number]>();
+    for (const n of node) {
+        if (!Array.isArray(n) || !Number.isFinite(n[0]) || !Number.isFinite(n[1]) || !Number.isFinite(n[2])) { return null; }
+        xy.set(n[0], [n[1], n[2]]);
+    }
+    const lines: Array<Array<[number, number]>> = [];
+    let cur: Array<[number, number]> = [];
+    let last: number | null = null;
+    for (const e of elem) {
+        if (!Array.isArray(e)) { return null; }
+        const a = xy.get(e[1]), b = xy.get(e[2]);
+        if (!a || !b) { return null; }
+        if (last !== e[1]) { if (cur.length > 1) { lines.push(cur); } cur = [a]; }
+        cur.push(b);
+        last = e[2];
+    }
+    if (cur.length > 1) { lines.push(cur); }
+    if (!lines.length) { return null; }
+    const pts = lines.flat();
+    const xs = pts.map((p) => p[0]), zs = pts.map((p) => p[1]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
+    const span = Math.max(x1 - x0, z1 - z0) || 1;
+    const total = pts.length;
+    const keep = Math.min(1, OUTLINE_MAX_POINTS / total);
+    const paths = lines.slice(0, OUTLINE_MAX_PATHS).map((ln) => {
+        const want = Math.max(2, Math.round(ln.length * keep));
+        const pick: Array<[number, number]> = [];
+        for (let i = 0; i < want; i += 1) { pick.push(ln[Math.round(i * (ln.length - 1) / (want - 1))]); }
+        return pick.flatMap(([x, z]) => [Math.round((x - x0) / span * 1000), Math.round((z1 - z) / span * 1000)]);
+    });
+    return { paths, aspect: Math.round(((x1 - x0) / ((z1 - z0) || span)) * 1000) / 1000 };
+}
+
+/** 읽은 그림을 믿지 않는다 — 수만 · 0 – 1000 정수 · 한계 안(그리기에만 쓴다) */
+function readOutline(o: any): { paths: number[][]; aspect: number } | null {
+    if (!o || typeof o !== 'object' || !Array.isArray(o.paths) || o.paths.length > OUTLINE_MAX_PATHS) { return null; }
+    let n = 0;
+    const paths: number[][] = [];
+    for (const p of o.paths) {
+        if (!Array.isArray(p) || p.length % 2 !== 0 || p.length < 4) { return null; }
+        n += p.length / 2;
+        if (n > OUTLINE_MAX_POINTS + OUTLINE_MAX_PATHS * 2) { return null; }
+        if (!p.every((v: unknown) => Number.isInteger(v) && (v as number) >= 0 && (v as number) <= 1000)) { return null; }
+        paths.push(p.slice());
+    }
+    const aspect = Number.isFinite(o.aspect) && o.aspect > 0 && o.aspect < 1000 ? o.aspect : 1;
+    return { paths, aspect };
 }
 
 export function indexPath(rootReal: string, caseId: string): string {
@@ -46,6 +108,8 @@ export function summarizeCsd(bytes: Buffer): Omit<CaseIndex, 'schema' | 'caseId'
         elems: Array.isArray(model.elem) ? model.elem.length : null,
         maxRatio: d ? num(d.utilization) : null,
         pass: d && typeof d.pass === 'boolean' ? d.pass : null,
+        results: RESULT_KINDS.filter(([k]) => p[k] && typeof p[k] === 'object').map(([, name]) => name),
+        outline: outlineOf(model.node, model.elem),
     };
 }
 
@@ -73,5 +137,7 @@ export function readIndex(rootReal: string, caseId: string, csdSha: string): Cas
         nodes: Number.isSafeInteger(raw.nodes) ? raw.nodes : null, elems: Number.isSafeInteger(raw.elems) ? raw.elems : null,
         maxRatio: num(raw.maxRatio), pass: typeof raw.pass === 'boolean' ? raw.pass : null,
         savedAt: typeof raw.savedAt === 'string' ? raw.savedAt.slice(0, 40) : null,
+        results: Array.isArray(raw.results) ? RESULT_KINDS.map(([, n]) => n).filter((n) => raw.results.includes(n)) : [],
+        outline: readOutline(raw.outline),
     };
 }

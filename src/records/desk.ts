@@ -26,6 +26,8 @@ import { ActorContext, isMcpContext, toActor } from './context';
 import { contentFp, normalizeEngineId, requestFp, resultFp } from './fp';
 import { assertNoLinks, assertSingleLink, mkdirInside, projectRelative, readBounded, realRoot, RecordsPathError, writeExclusive } from './fsx';
 import { acquireLock, LockInfo, LockResult, releaseLock, takeOver } from './locks';
+/** 열쇠 자리의 작성자 이름 파일 */
+export const WRITER_NAME_FILE = 'writer-name.json';
 import { DATA_DIR, ReadBudget, ReadResult, RecordLine, RecordLog, RecordType, Actor, LogSpec } from './log';
 import { checkName, cleanHeaderText, nameKey } from './names';
 import { plainSpec } from './policy';
@@ -34,7 +36,7 @@ import {
     CASE_ID_RE, DECLARATION_FILE,
 } from './project';
 import { foldRuns, lastRunByKind, RunEntry, RunKind, RUN_KINDS, runSummary, RUNS_SPEC } from './runs';
-import { putBlob } from './blobs';
+import { getBlob, putBlob } from './blobs';
 import { ASSUMPTION_SPEC, foldAssumptions } from './assumptions';
 import { WORK_SPEC, foldWork } from './work';
 import { KeyUnavailableError, loadOrCreateWriter, makeWriterCard, readTrust, readWriterCard, trustSelf, TrustStore, Writer, WriterCard } from './writer';
@@ -78,6 +80,8 @@ export interface ProjectSummary { name: string; projectId: string; readOnly: boo
 export interface OpenOutcome {
     /** 프로젝트 안의 파일인가 */
     inProject: boolean;
+    /** 밖에서 바뀌었고 마지막 저장의 사본이 있으면 그 해시(호스트가 변경 줄을 짓는다) */
+    externalFrom?: string;
     project: { name: string; projectId: string } | null;
     case: { caseId: string; name: string; file: string; kind: string } | null;
     readOnly: boolean;
@@ -104,7 +108,9 @@ export interface RunRecorded { runId: string; blob: string | null; blobBytes: nu
 export interface RecordsHealth { unverified: number; untrusted: number; broken: number; chainBreaks: number; shrunk: number; readOnly: boolean }
 export interface DeskStatus {
     inProject: boolean;
-    project: { name: string; projectId: string; readOnly: boolean } | null;
+    project: { name: string; projectId: string | null; readOnly: boolean } | null;
+    /** 대상이 아닌 채로 읽기 전용으로 연 파일(발행본 …) */
+    file_read_only?: { reason: ReadOnlyReason; detail: string };
     case: { name: string; caseId: string; kind: string; readOnly: boolean; readOnlyReason: ReadOnlyReason | null; lock: { name: string; host: string; since: string } | null } | null;
     note: string;
 }
@@ -141,6 +147,17 @@ export interface PersonFace {
     createProject(rootAbs: string, name: string): ProjectSummary;
     takeLock(caseId: string): LockInfo;
     archive(caseId: string, archived: boolean): void;
+    /** 뿌리 · 최근의 프로젝트(폴더 경로 — 사람의 화면에만. MCP 답에는 경로가 없다) */
+    projects(): Array<{ name: string; dir: string; cases: number; lastWork: string | null; open: boolean }>;
+    /** 지금 프로젝트(이름 · 폴더 경로) */
+    currentProject(): { name: string; dir: string; readOnly: boolean } | null;
+    /** 파일을 옮긴 · 이름을 바꾼 대상을 그 파일에 다시 잇는다(02_검토대상 안의 .csd — 사람이 고른 파일) */
+    relink(caseId: string, fileAbs: string): { caseId: string; file: string };
+    /** 작성자 이름(기본: OS 사용자 이름) — 잠금 · 작성자 소개 · 믿는 작성자 표에 쓰인다 */
+    writerName(): string;
+    setWriterName(name: string): string;
+    /** 밖에서 바뀐 파일을 덮어써도 된다고(사람이 「덮어쓰기」) — external 줄을 남기고 다음 저장의 대조를 지금 파일로 */
+    allowOverwrite(): { fileSha: string };
 }
 
 export class RecordsDesk {
@@ -161,19 +178,52 @@ export class RecordsDesk {
             createProject: guard((rootAbs: string, name: string) => this.createIn(rootAbs, name)),
             takeLock: guard((caseId: string) => this.takeLock(caseId)),
             archive: guard((caseId: string, archived: boolean) => this.archive(caseId, archived)),
+            projects: guard(() => this.projectList()),
+            currentProject: guard(() => (this.proj ? { name: path.basename(this.proj.dir), dir: this.proj.dir, readOnly: this.proj.readOnly } : null)),
+            relink: guard((caseId: string, fileAbs: string) => this.relink(caseId, fileAbs)),
+            writerName: guard(() => this.nameOfWriter()),
+            setWriterName: guard((name: string) => this.setWriterName(name)),
+            allowOverwrite: guard(() => this.allowOverwrite()),
         });
     }
 
     // ── 바탕 ──────────────────────────────────────────────────────────
 
     private get pid(): number { return this.env.pid ?? process.pid; }
+
+    // ── 작성자 이름(열쇠 자리의 writer-name.json — 없으면 호스트가 준 이름, 그것도 없으면 빈 글) ──
+    private writerNameCache: string | null = null;
+    private nameOfWriter(): string {
+        if (this.writerNameCache !== null) { return this.writerNameCache; }
+        let n: string | null = null;
+        try {
+            const buf = readBounded(path.join(this.env.keyDir, WRITER_NAME_FILE), 4096);
+            if (buf) { n = cleanHeaderText(JSON.parse(buf.toString('utf8')).name, 60); }
+        } catch { /* 없음 */ }
+        this.writerNameCache = n ?? cleanHeaderText(this.env.writerName ?? '', 60) ?? '';
+        return this.writerNameCache;
+    }
+    private setWriterName(name: string): string {
+        const n = cleanHeaderText(name, 60);
+        if (!n) { throw new Error('a writer name of 1 – 60 characters is required'); }
+        fs.mkdirSync(this.env.keyDir, { recursive: true });
+        const file = path.join(this.env.keyDir, WRITER_NAME_FILE);
+        const tmp = file + '.tmp-' + this.pid;
+        fs.writeFileSync(tmp, JSON.stringify({ name: n }) + '\n');
+        fs.renameSync(tmp, file);
+        this.writerNameCache = n;
+        return n;
+    }
+
+    /** 대상이 아닌 채로 읽기 전용으로 연 파일(발행본 · 02 밖의 .csd · 보호 폴더 …) — status 의 file_read_only */
+    private roFile: { reason: ReadOnlyReason; detail: string; projectName: string } | null = null;
     private ctx(): ActorContext | undefined { return this.env.currentContext?.(); }
     private readFile(abs: string, max: number): Buffer | null { return (this.env.files?.read ?? readBounded)(abs, max); }
 
     private writer(): Writer {
         if (!this.writerObj) {
             this.writerObj = loadOrCreateWriter(this.env.keyDir);
-            trustSelf(this.env.keyDir, this.writerObj, this.env.writerName ?? '', this.env.now());
+            trustSelf(this.env.keyDir, this.writerObj, this.nameOfWriter(), this.env.now());
         }
         return this.writerObj;
     }
@@ -243,7 +293,7 @@ export class RecordsDesk {
             const dir = path.join(p.dir, DATA_DIR, 'writers');
             mkdirInside(p.dir, dir);
             const file = path.join(dir, `${w.writerId}.json`);
-            try { writeExclusive(p.dir, file, JSON.stringify(makeWriterCard(w, this.env.writerName ?? '', this.env.host, this.env.now()), null, 1)); }
+            try { writeExclusive(p.dir, file, JSON.stringify(makeWriterCard(w, this.nameOfWriter(), this.env.host, this.env.now()), null, 1)); }
             catch (e: any) { if (e?.code !== 'EEXIST') { throw e; } }
             this.cardWritten = true;
         }
@@ -361,7 +411,8 @@ export class RecordsDesk {
     /** 열린 프로젝트의 검토 대상(이름 · 종류 · 색인 · 저장 · 보관)과 등록 안 된 `.csd`(충돌 사본일 수 있음) */
     listCases(opts: { includeArchived?: boolean } = {}): {
         cases: Array<{ name: string; caseId: string; kind: string; file: string; archived: boolean; lastSaved: string | null; open: boolean; missing: boolean;
-            index: { memberType: string | null; section: string | null; steel: string | null; maxRatio: number | null; pass: boolean | null } | null }>;
+            index: { memberType: string | null; section: string | null; steel: string | null; maxRatio: number | null; pass: boolean | null;
+                results: string[]; outline: { paths: number[][]; aspect: number } | null } | null }>;
         unregistered: Array<{ name: string; maybeConflictCopy: boolean }>;
     } {
         if (!this.proj) { throw new Error('no project is open'); }
@@ -380,7 +431,7 @@ export class RecordsDesk {
                 if (!buf) { missing = true; } else {
                     const sha = sha256Hex(buf);
                     const ix = readIndex(p.dir, e.caseId, sha) ?? (() => { const s = summarizeCsd(buf); return s ? { ...s, savedAt: null } : null; })();
-                    if (ix) { index = { memberType: ix.memberType, section: ix.section, steel: ix.steel, maxRatio: ix.maxRatio, pass: ix.pass }; }
+                    if (ix) { index = { memberType: ix.memberType, section: ix.section, steel: ix.steel, maxRatio: ix.maxRatio, pass: ix.pass, results: ix.results, outline: ix.outline }; }
                 }
             } catch { missing = true; }
             cases.push({ name: e.name, caseId: e.caseId, kind: e.kind, file: e.file, archived: e.archived, lastSaved: e.lastSaved?.at ?? null,
@@ -448,13 +499,19 @@ export class RecordsDesk {
      */
     afterOpen(abs: string, bytes: Buffer, info: { contentFp?: string | null; record?: unknown } = {}): OpenOutcome {
         this.closeCase();
+        this.roFile = null;
         const out: OpenOutcome = { inProject: false, project: null, case: null, readOnly: false, readOnlyReason: null, lock: null, wrote: [], notices: [] };
         const found = findProjectDirFor(abs);
         if (!found) { if (this.proj && !isInside(path.resolve(abs), this.proj.dir)) { this.closeProject(); } return out; }
         let real: string;
         try { real = realRoot(found.dir); } catch { return out; }
         out.inProject = true;
-        const ro = (reason: ReadOnlyReason, notice: string): OpenOutcome => { out.readOnly = true; out.readOnlyReason = reason; out.notices.push(notice); return out; };
+        const ro = (reason: ReadOnlyReason, notice: string): OpenOutcome => {
+            out.readOnly = true; out.readOnlyReason = reason; out.notices.push(notice);
+            // 대상이 열리지 않은 읽기 전용(잠금은 대상이 열려 그 요약이 말한다)
+            if (!this.cur) { this.roFile = { reason, detail: notice, projectName: path.basename(found.dir) }; }
+            return out;
+        };
         if (found.issued) { return ro('issued-copy', 'an issued copy — opened read-only, nothing is recorded'); }
         if (this.protectedHit(real)) { return ro('protected-folder', 'the project is inside a protected folder — opened read-only, nothing is recorded'); }
         if (!this.proj || this.proj.dir !== real) {
@@ -490,7 +547,7 @@ export class RecordsDesk {
             throw e;
         }
         const caseId = entry?.caseId ?? newId('c');
-        const lock: LockResult = acquireLock(p.dir, caseId, { writer: w, name: this.env.writerName ?? '', host: this.env.host, pid: this.pid,
+        const lock: LockResult = acquireLock(p.dir, caseId, { writer: w, name: this.nameOfWriter(), host: this.env.host, pid: this.pid,
             now: this.env.now(), pidAlive: this.env.pidAlive });
         const name = entry?.name ?? path.basename(rel).replace(/\.csd$/i, '');
         out.case = { caseId, name, file: rel, kind: entry?.kind ?? 'section-only' };
@@ -515,6 +572,8 @@ export class RecordsDesk {
             this.append('cases', { id: this.newLineId('case'), event: 'external', actor: { kind: 'program' },
                 body: { caseId, fileSha, ...(info.contentFp ? { contentFp: info.contentFp } : {}) } });
             out.wrote.push('external');
+            // R2-2: 밖에서 바뀐 것의 변경 줄 — 마지막 저장의 스냅숏(있으면)과 비교한다(호스트가)
+            if (entry?.lastSaved?.snapshot) { out.externalFrom = entry.lastSaved.snapshot; }
             out.notices.push('the file changed outside StCFSD since it was last saved or opened here');
         }
         this.cur = { caseId, name, rel, abs: path.resolve(abs), kind: out.case.kind, readOnly: false, readOnlyReason: null, lock: lock.info, lockHeld: true, knownSha: fileSha };
@@ -553,11 +612,39 @@ export class RecordsDesk {
         if (info.snapshot !== undefined) { try { snapshot = putBlob(this.proj.dir, info.snapshot).sha256; } catch { snapshot = null; } }
         // 행위자 표(§2.6): saved 는 program — 누가 저장했는가는 변경 기록(R2)의 몫
         this.append('cases', { id: this.newLineId('case'), event: 'saved', actor: { kind: 'program' },
-            body: { caseId: c.caseId, fileSha, bytes: bytes.length, ...(info.contentFp ? { contentFp: info.contentFp } : {}) } });
+            body: { caseId: c.caseId, fileSha, bytes: bytes.length, ...(info.contentFp ? { contentFp: info.contentFp } : {}), ...(snapshot ? { snapshot } : {}) } });
         c.knownSha = fileSha;
         const s = summarizeCsd(bytes);
         if (s) { try { writeIndex(this.proj.dir, c.caseId, fileSha, { ...s, savedAt: this.env.now() }); } catch { /* 색인은 다시 지을 수 있다 */ } }
         return { fileSha, snapshot };
+    }
+
+    // ── 변경 묶음 `log/changes`(R2-2) ───────────────────────────────────
+
+    /** 변경 줄 하나 — 열린 쓸 수 있는 대상의 것만(아니면 null: 호스트가 메모리에 둔다) */
+    appendChange(body: Record<string, unknown> & { caseId: string }, actor: Actor): { id: string; at: string } | null {
+        const c = this.cur, p = this.proj;
+        if (!c || c.readOnly || !p || p.readOnly || body.caseId !== c.caseId) { return null; }
+        const line = this.append('changes', { id: this.newLineId('chg'), event: 'change', actor, body });
+        return { id: line.id, at: line.at };
+    }
+
+    /** 대상의 변경 줄(세는 줄 · 검증 안 된 줄은 status 로) — 오래된 것부터 */
+    changesOf(caseId?: string | null): Array<{ id: string; at: string; actor: Actor; status: string; body: Record<string, any> }> {
+        if (!this.proj) { return []; }
+        const id = caseId === undefined ? this.cur?.caseId ?? null : caseId;
+        if (!id) { return []; }
+        let lines: RecordLine[];
+        try { lines = this.read('changes').lines; } catch { return []; }
+        return lines.filter((l) => l.event === 'change' && l.body && l.body.caseId === id)
+            .map((l) => ({ id: l.id, at: l.at, actor: l.actor, status: l.status, body: l.body }));
+    }
+
+    /** 사본(스냅숏) 하나를 읽는다 — 이 프로젝트의 것 */
+    readSnapshot(sha: string): unknown | null {
+        if (!this.proj) { return null; }
+        const g = getBlob(this.proj.dir, sha);
+        return g.ok ? g.value : null;
     }
 
     /** 대상을 놓는다(잠금 — 내 것일 때만) */
@@ -606,13 +693,20 @@ export class RecordsDesk {
     /** `getStatus()` · `get_full_state` 의 `project` 요약(덧붙이기만 — 경로 없음) */
     status(): DeskStatus {
         const p = this.proj, c = this.cur;
+        const fro = !c && this.roFile ? { file_read_only: { reason: this.roFile.reason, detail: this.roFile.detail } } : {};
+        if (!p && this.roFile) {
+            // 발행본처럼 프로젝트 안이지만 대상이 아닌 파일 — 프로젝트를 열지 않고 그 이름과 까닭만
+            return { inProject: true, project: { name: this.roFile.projectName, projectId: null, readOnly: true }, case: null, ...fro,
+                note: `read-only (${this.roFile.reason}) — nothing is recorded for this file` };
+        }
         if (!p) { return { inProject: false, project: null, case: null, note: 'outside a project — no work records are kept (make it a project to keep them)' }; }
         return {
             inProject: true,
             project: { name: path.basename(p.dir), projectId: p.decl.projectId, readOnly: p.readOnly },
             case: c ? { name: c.name, caseId: c.caseId, kind: c.kind, readOnly: c.readOnly, readOnlyReason: c.readOnlyReason,
                 lock: !c.lockHeld && c.lock ? { name: c.lock.name, host: c.lock.host, since: c.lock.at } : null } : null,
-            note: c ? (c.readOnly ? `read-only (${c.readOnlyReason})` : 'records are kept for this case') : 'a project is open — no case is open',
+            ...fro,
+            note: c ? (c.readOnly ? `read-only (${c.readOnlyReason})` : 'records are kept for this case') : (this.roFile ? `read-only (${this.roFile.reason}) — nothing is recorded for this file` : 'a project is open — no case is open'),
         };
     }
 
@@ -686,9 +780,47 @@ export class RecordsDesk {
     private takeLock(caseId: string): LockInfo {
         const p = this.proj;
         if (!p || p.readOnly) { throw new Error('no writable project is open'); }
-        const info = takeOver(p.dir, caseId, { writer: this.writer(), name: this.env.writerName ?? '', host: this.env.host, pid: this.pid, now: this.env.now() });
+        const info = takeOver(p.dir, caseId, { writer: this.writer(), name: this.nameOfWriter(), host: this.env.host, pid: this.pid, now: this.env.now() });
         if (this.cur && this.cur.caseId === caseId) { this.cur.lockHeld = true; this.cur.readOnly = false; this.cur.readOnlyReason = null; this.cur.lock = info; }
         return info;
+    }
+
+    private projectList(): Array<{ name: string; dir: string; cases: number; lastWork: string | null; open: boolean }> {
+        const all = this.projectDirs();
+        const page = this.listProjects({ limit: 100 }).projects;
+        return all.slice(0, 100).map((p, i) => ({ name: p.name, dir: p.dir, cases: page[i]?.cases ?? 0, lastWork: page[i]?.lastWork ?? null, open: !!this.proj && this.proj.dir === p.dir }));
+    }
+
+    private relink(caseId: string, fileAbs: string): { caseId: string; file: string } {
+        const p = this.proj;
+        if (!p || p.readOnly) { throw new Error('no writable project is open'); }
+        if (!CASE_ID_RE.test(caseId)) { throw new Error('bad case id'); }
+        const fold = this.casesFold();
+        const e = fold.get(caseId);
+        if (!e) { throw new Error('no such case'); }
+        const rel = projectRelative(p.dir, fileAbs);
+        if (!rel || !caseFileOk(rel)) { throw new RecordsPathError(`only a .csd in ${FOLDERS.cases}/ of this project can be linked`); }
+        assertNoLinks(p.dir, path.resolve(fileAbs));
+        assertSingleLink(fileAbs);
+        const st = fs.lstatSync(fileAbs);
+        if (!st.isFile()) { throw new RecordsPathError('not a plain file'); }
+        const other = [...fold.values()].find((c) => c.caseId !== caseId && c.file.toLowerCase() === rel.toLowerCase());
+        if (other) { throw new Error(`that file belongs to the case '${other.name}'`); }
+        this.append('cases', { id: this.newLineId('case'), event: 'relink', actor: { kind: 'person' }, body: { caseId, file: rel } });
+        return { caseId, file: rel };
+    }
+
+    private allowOverwrite(): { fileSha: string } {
+        const c = this.cur, p = this.proj;
+        if (!c || !p || c.readOnly || p.readOnly) { throw new Error('no writable case is open'); }
+        const buf = this.readFile(c.abs, CSD_HASH_MAX_BYTES);
+        if (!buf) { throw new Error('the case file is missing — save under another name'); }
+        const fileSha = sha256Hex(buf);
+        if (fileSha !== c.knownSha) {
+            this.append('cases', { id: this.newLineId('case'), event: 'external', actor: { kind: 'program' }, body: { caseId: c.caseId, fileSha } });
+            c.knownSha = fileSha;
+        }
+        return { fileSha };
     }
 
     private archive(caseId: string, archived: boolean): void {

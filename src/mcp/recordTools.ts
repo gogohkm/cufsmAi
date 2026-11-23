@@ -9,7 +9,7 @@ import { z } from "zod";
 
 export interface RecordToolIo {
     /** POST /action — `meta` 는 머리로 옮긴다(reason · work · source) */
-    post(body: Record<string, unknown>, meta?: { reason?: string }): Promise<unknown>;
+    post(body: Record<string, unknown>, meta?: { reason?: string; work?: string; source?: string }): Promise<unknown>;
     reply(r: unknown): { content: Array<{ type: "text"; text: string }>; isError?: true };
 }
 
@@ -68,4 +68,16 @@ export function saveCase(server: McpServer, io: RecordToolIo): void {
         "Save the open review case of a project to its file (save_project is for raw model files). Refused when the case is read-only or when the file was changed outside StCFSD since it was opened or saved — then nothing is written; tell the person.",
         { reason: z.string().max(300).optional().describe("Why you save (kept in the records with the save)") },
         async (args) => io.post({ action: "save_case" }, args.reason ? { reason: args.reason } : undefined).then(io.reply));
+}
+
+export function listChanges(server: McpServer, io: RecordToolIo): void {
+    server.tool("list_changes",
+        "Change bundles of a review case (newest first): who (ai with its client, person, external, program), when, the program-written title from the changed fields (e.g. '두께 t 2 → 2.3 mm'), the reason / work item / source given with the change, the number of changed fields and the results it invalidated. One MCP request = one bundle, one edit session on the screen = one bundle. Inside a project they are the project's records (persisted: true); outside a project they live in this session only (persisted: false). detail='fields' adds each field's from → to. No file paths." + DATA_NOTE,
+        { case: NAME.optional().describe("Case name in the open project (omit → the open case)"),
+          since: z.string().max(40).optional().describe("A change id (newer ones only) or an ISO time"),
+          limit: z.number().int().min(1).max(100).optional().describe("How many (default 20)"),
+          detail: z.enum(["fields"]).optional().describe("'fields' adds the changed fields with from → to"),
+          units: z.enum(["US", "SI"]).optional().describe("Units of titles and field values (default SI)") },
+        async (args) => io.post({ action: "list_changes", ...(args.case ? { case: args.case } : {}), ...(args.since ? { since: args.since } : {}),
+            ...(args.limit ? { limit: args.limit } : {}), ...(args.detail ? { detail: args.detail } : {}), units: args.units === 'US' ? 'US' : 'SI' }).then(io.reply));
 }

@@ -64,7 +64,7 @@ const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_d
   'get_case_inputs', 'set_case_inputs', 'run_case_check',
   'get_design_check',
   // R1-2: 기록 도구 일곱(이름으로만 — 경로 없음)
-  'get_case_status', 'list_projects', 'open_project', 'list_cases', 'open_case', 'new_case', 'save_case',
+  'get_case_status', 'list_projects', 'open_project', 'list_cases', 'open_case', 'new_case', 'save_case', 'list_changes',
   'aisi_design_connection', 'aisi_design_flexure', 'aisi_design_guide', 'aisi_design_tension',
   'analyze_loads', 'build_section', 'calc_deck_stiffness', 'check_block_shear', 'check_lap_length',
   'check_shear_lag', 'classify_modes', 'cold_work', 'custom_section_guide', 'delete_element', 'delete_node',
@@ -720,7 +720,8 @@ async function main() {
     assert.deepStrictEqual(tools.map((t) => t.name).sort(), [...PUBLIC_TOOLS].sort(), 'tool names are the public contract');
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     // units · detail 은 MCP 쪽 인자(단위 변환 · 응답 모양) — 호스트 · 엔진에 가지 않는다
-    const props = (name) => Object.keys(byName[name].inputSchema.properties || {}).filter((k) => k !== 'units' && k !== 'detail');
+    // R2-2: reason · work · source 는 쓰기 도구의 공용 인자 — 머리로 가고 엔진에 가지 않는다(set_case_inputs · focus 의 reason 은 그 도구의 인자)
+    const props = (name) => Object.keys(byName[name].inputSchema.properties || {}).filter((k) => k !== 'units' && k !== 'detail' && k !== 'work' && k !== 'source' && !(k === 'reason' && name !== 'set_case_inputs' && name !== 'focus'));
 
     // 2. SI 입력 표 커버리지 ------------------------------------------------------
     const isNumeric = (s) => s && (s.type === 'number' || s.type === 'integer'

@@ -48,6 +48,8 @@ function readCaseBody(event: string, b: Record<string, any>): Record<string, any
         if (event !== 'opened') {
             if (typeof b.contentFp === 'string' && FP_RE.test(b.contentFp)) { out.contentFp = b.contentFp; }
             if (event === 'saved' && Number.isSafeInteger(b.bytes) && b.bytes >= 0) { out.bytes = b.bytes; }
+            // R2-2: 저장한 모델 · 입력의 사본(밖에서 바뀐 것을 비교할 기준)
+            if (event === 'saved' && typeof b.snapshot === 'string' && SHA_RE.test(b.snapshot)) { out.snapshot = b.snapshot; }
         }
         return out;
     }
@@ -62,7 +64,7 @@ export interface CaseEntry {
     caseId: string; name: string; file: string; kind: string; archived: boolean;
     createdAt: string; createdBy: string; writer: string;
     lastOpened: { at: string; fileSha: string } | null;
-    lastSaved: { at: string; fileSha: string; contentFp: string | null; bytes: number | null; writer: string } | null;
+    lastSaved: { at: string; fileSha: string; contentFp: string | null; bytes: number | null; writer: string; snapshot?: string } | null;
     lastExternal: { at: string; fileSha: string } | null;
     /** 같은 파일을 뒤에 등록한 다른 대상 id(접힌 것) */
     aliases: string[];
@@ -88,7 +90,7 @@ export function foldCases(lines: RecordLine[]): Map<string, CaseEntry> {
         const e = byId.get(alias.get(b.caseId) ?? b.caseId);
         if (!e) { continue; }
         if (l.event === 'opened') { e.lastOpened = { at: l.at, fileSha: b.fileSha }; }
-        else if (l.event === 'saved') { e.lastSaved = { at: l.at, fileSha: b.fileSha, contentFp: b.contentFp ?? null, bytes: b.bytes ?? null, writer: l.sig.w }; }
+        else if (l.event === 'saved') { e.lastSaved = { at: l.at, fileSha: b.fileSha, contentFp: b.contentFp ?? null, bytes: b.bytes ?? null, writer: l.sig.w, ...(b.snapshot ? { snapshot: b.snapshot } : {}) }; }
         else if (l.event === 'external') { e.lastExternal = { at: l.at, fileSha: b.fileSha }; }
         else if (l.event === 'archive') { e.archived = true; }
         else if (l.event === 'unarchive') { e.archived = false; }

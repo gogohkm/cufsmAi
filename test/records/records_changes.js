@@ -89,7 +89,7 @@ async function run() {
     let state = snap({ v: 0 }, { a: 0 });
     let clock = 0;
     const out = [];
-    const b = new CH.ChangeBatcher({ snapshot: () => JSON.parse(JSON.stringify(state)), emit: (x) => out.push(x), now: () => clock, quietMs: 2000 });
+    const b = new CH.ChangeBatcher({ snapshot: () => JSON.parse(JSON.stringify(state)), emit: (x, c) => out.push(Object.defineProperty(x, "__actor", { value: c.actor.kind, enumerable: false })), now: () => clock, quietMs: 2000 });
     return { b, out, set: (v) => { state = snap({ v: v.v ?? state.model.v }, { a: v.a ?? state.case.inputs.a }); }, tick: (ms) => { clock += ms; } };
   }
   const ai = { caseId: 'cabcdefghijklmnop', actor: { kind: 'ai', request: 'r1' }, trigger: 'set_case_inputs' };

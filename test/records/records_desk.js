@@ -451,6 +451,84 @@ async function run() {
     assert.deepStrictEqual(CX.toActor({ kind: 'screen', client: 'ui' }), { kind: 'person', client: 'ui' });
     assert.deepStrictEqual(CX.toActor(undefined), { kind: 'program' });
   });
+  // ── R1-3 이 바란 것(사람의 얼굴 · 읽기 전용 파일 · 색인) ─────────────────
+  await t('R1-3: an issued copy shows as file_read_only in the status (project name, no case), nothing written', () => {
+    const w = world(); const desk = w.make();
+    desk.openProject('P', { create: true });
+    const c = desk.newCase('P1', 'roof-purlin', (r) => csd(r));
+    const dir = fs.realpathSync.native(path.join(w.root, 'P'));
+    const iss = path.join(dir, '04_발행본', 'P1', 'R0', 'P1.csd');
+    fs.mkdirSync(path.dirname(iss), { recursive: true }); fs.copyFileSync(c.abs, iss);
+    const fresh = w.make();
+    const o = fresh.afterOpen(iss, fs.readFileSync(iss));
+    assert.strictEqual(o.readOnlyReason, 'issued-copy');
+    const st = fresh.status();
+    assert.deepStrictEqual([st.inProject, st.project.name, st.project.readOnly, st.case, st.file_read_only.reason], [true, 'P', true, null, 'issued-copy']);
+    assert(/issued copy/.test(st.file_read_only.detail));
+    // 다른(보통) 파일을 열면 사라진다
+    fresh.afterOpen(c.abs, fs.readFileSync(c.abs));
+    assert.strictEqual(fresh.status().file_read_only, undefined);
+  });
+  await t('R1-3: person face — projects / current project with folder paths, writer name (default the host name, set once, kept), relink, allow overwrite; all throw in an MCP context', () => {
+    const w = world(); const desk = w.make();
+    desk.openProject('P', { create: true });
+    const c = desk.newCase('P1', 'roof-purlin', (r) => csd(r));
+    const dir = fs.realpathSync.native(path.join(w.root, 'P'));
+    const pr = desk.person.projects();
+    assert(pr.length === 1 && pr[0].name === 'P' && pr[0].dir === dir && pr[0].open === true, JSON.stringify(pr));
+    assert.deepStrictEqual(desk.person.currentProject(), { name: 'P', dir, readOnly: false });
+    assert.strictEqual(desk.person.writerName(), 'Tester');
+    assert.strictEqual(desk.person.setWriterName('  김설계  '), '김설계');
+    assert.strictEqual(w.make().person.writerName(), '김설계', 'kept in the key folder');
+    assert.throws(() => desk.person.setWriterName('   '), /writer name/);
+    // relink: 파일을 옮긴 대상을 다시 잇는다(02 안 · 다른 대상의 파일은 거절)
+    const moved = path.join(dir, '02_검토대상', 'P1 옮김.csd');
+    fs.renameSync(c.abs, moved);
+    assert.deepStrictEqual(desk.person.relink(c.caseId, moved), { caseId: c.caseId, file: '02_검토대상/P1 옮김.csd' });
+    assert.strictEqual(desk.listCases().cases.find((x) => x.caseId === c.caseId).missing, false);
+    const c2 = desk.newCase('P2', 'roof-purlin', (r) => csd(r));
+    assert.throws(() => desk.person.relink(c.caseId, c2.abs), /belongs to the case/);
+    const outside = path.join(dir, '03_계산서', 'x.csd'); fs.mkdirSync(path.dirname(outside), { recursive: true }); fs.writeFileSync(outside, csd(null));
+    assert.throws(() => desk.person.relink(c.caseId, outside), /02_검토대상/);
+    // 덮어쓰기: 밖에서 바뀐 파일 — 거절 → 사람이 허락 → 저장 대조를 지금 파일로(external 줄)
+    desk.afterOpen(moved, fs.readFileSync(moved));
+    fs.writeFileSync(moved, csd({ caseId: c.caseId, projectId: P.readDeclaration(dir).decl.projectId }, { note: 'outside' }));
+    assert.strictEqual(desk.beforeSave(moved).reason, 'changed-outside');
+    desk.person.allowOverwrite();
+    assert.strictEqual(desk.beforeSave(moved).ok, true);
+    w.ctxRef.ctx = { kind: 'screen' };
+    for (const fn of ['projects', 'currentProject', 'writerName', 'allowOverwrite']) { assert.throws(() => desk.person[fn](), /person-only/, fn); }
+    assert.throws(() => desk.person.setWriterName('AI'), /person-only/);
+    assert.throws(() => desk.person.relink(c.caseId, moved), /person-only/);
+    w.ctxRef.ctx = undefined;
+    desk.dispose();
+  });
+  await t('R1-3: the case index carries the result kinds and a small outline (numbers only, bounded) — a crafted index is cut to what can be drawn', () => {
+    const IX = rec('caseIndex');
+    const node = [], elem = [];
+    for (let i = 0; i < 300; i += 1) { node.push([i + 1, Math.cos(i / 50) * 4, Math.sin(i / 50) * 4, 1, 1, 1, 1, 0]); }
+    for (let i = 0; i < 299; i += 1) { elem.push([i + 1, i + 1, i + 2, 0.06, 100]); }
+    const s1 = IX.summarizeCsd(Buffer.from(JSON.stringify({ version: '1.4', model: { node, elem }, analysisResult: { curve: [] }, designResult: { utilization: 0.5, pass: true } })));
+    assert.deepStrictEqual(s1.results, ['buckling_analysis', 'member_design']);
+    const pts = s1.outline.paths.reduce((n, p) => n + p.length / 2, 0);
+    assert(pts <= IX.OUTLINE_MAX_POINTS + 2 && s1.outline.paths.every((p) => p.every((v) => Number.isInteger(v) && v >= 0 && v <= 1000)), 'bounded integers ' + pts);
+    assert(JSON.stringify(s1.outline).length < 1200, 'a few hundred bytes: ' + JSON.stringify(s1.outline).length);
+    const w = world(); const desk = w.make();
+    desk.openProject('P', { create: true });
+    const c = desk.newCase('P1', 'roof-purlin', (r) => csd(r));
+    const dir = fs.realpathSync.native(path.join(w.root, 'P'));
+    const sha = require('crypto').createHash('sha256').update(fs.readFileSync(c.abs)).digest('hex');
+    const ixFile = IX.indexPath(dir, c.caseId);
+    fs.mkdirSync(path.dirname(ixFile), { recursive: true });
+    for (const outline of [{ paths: [['<script>', 1, 2, 3]], aspect: 1 }, { paths: [[0, 0, 5000, 1]], aspect: 1 }, { paths: Array(50).fill([0, 0, 1, 1]), aspect: 1 },
+      { paths: [[0, 0, 1.5, 1]], aspect: 1 }, { paths: [Array(1000).fill(1)], aspect: 1 }]) {
+      fs.writeFileSync(ixFile, JSON.stringify({ schema: IX.INDEX_SCHEMA, caseId: c.caseId, csdSha: sha, results: ['buckling_analysis', 'evil'], outline }));
+      const r = IX.readIndex(dir, c.caseId, sha);
+      assert.strictEqual(r.outline, null, 'crafted outline refused: ' + JSON.stringify(outline).slice(0, 60));
+      assert.deepStrictEqual(r.results, ['buckling_analysis'], 'unknown result kinds dropped');
+    }
+    desk.dispose();
+  });
   await t('the desk never picks a user folder itself (no LOCALAPPDATA / APPDATA / homedir in desk.ts and its new modules)', () => {
     for (const f of ['desk', 'locks', 'blobs', 'cases', 'runs', 'caseIndex', 'context']) {
       const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'records', `${f}.ts`), 'utf8');

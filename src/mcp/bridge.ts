@@ -159,7 +159,9 @@ export class McpBridgeServer {
 
             // V5b-05 · `/hello` 는 토큰 없이 받는다 — 확인 전의 상대에게 MCP 서버가 토큰을 보내지 않게(증명 먼저, 인증은 그다음).
             // Origin · Host 검사는 그대로. 답은 증명(토큰을 열쇠로 한 HMAC)뿐이라 토큰도 instanceId 도 새지 않는다.
-            const hello = !!this._options && req.method === 'GET' && req.url === HELLO_ENDPOINT;
+            // R2-2: 경로만 본다 — 질의 문자열(?reason=…)은 어디에도 쓰이지 않는다(까닭 · 행위자는 머리에서만)
+            const reqPath = String(req.url ?? '').split('?')[0];
+            const hello = !!this._options && req.method === 'GET' && reqPath === HELLO_ENDPOINT;
             const rejected = checkBridgeRequest(req.method, req.headers, this._port, hello ? undefined : this._token);
             if (rejected) {
                 req.resume();
@@ -184,7 +186,7 @@ export class McpBridgeServer {
                     method: String(req.method), endpoint: String(req.url),
                 };
 
-                if (this._options && req.method === 'GET' && req.url === '/last-call') {
+                if (this._options && req.method === 'GET' && reqPath === '/last-call') {
                     result = {
                         lastAiCall: this._lastAiCall ?? null, aiCalls: this._aiCalls,
                         pid: process.pid, startedAt: this._startedAt,
@@ -192,7 +194,7 @@ export class McpBridgeServer {
                 } else if (hello) {
                     // V5-09 · 증명은 머리에. 패널에 닿지 않고 AI 호출로 세지 않는다. 토큰이 필요 없다(V5b-05).
                     result = { app: PORT_FILE_APP };
-                } else if (req.method === 'GET' && req.url === '/status') {
+                } else if (req.method === 'GET' && reqPath === '/status') {
                     if (aiCall) { this._recordAiCall(aiCall); }
                     const panel = this._getPanel();
                     if (!panel) {
@@ -200,7 +202,7 @@ export class McpBridgeServer {
                     } else {
                         result = panel.getStatus();
                     }
-                } else if (req.method === 'POST' && req.url === '/action') {
+                } else if (req.method === 'POST' && reqPath === '/action') {
                     const body = await this._readBody(req);
                     if (aiCall) {
                         this._recordAiCall(typeof body.action === 'string'

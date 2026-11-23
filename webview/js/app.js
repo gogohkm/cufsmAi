@@ -40,6 +40,8 @@
     let _lastLoadAnalysis = null;
     /** Lap 접합부 설계 결과 */
     let _lastLapResult = null;
+    /** 접합부 카드에 지금 그려진 결과(랩 · 단일 접합 — 같은 자리) — 단위를 바꾸면 다시 그린다 */
+    let _connCard = null;
     /** .csd 복원 중(연동 이벤트를 돌리는 동안 결과 무효화를 막는다) */
     let _restoringInputs = false;
 
@@ -186,6 +188,10 @@
         if (lastProps) updatePropertiesTable(lastProps);
         // (3) 하중 해석 결과가 있으면 다시 렌더링
         if (_lastLoadAnalysis) renderLoadAnalysisResult(_lastLoadAnalysis);
+        // (3b) 접합부 카드(랩 · 단일 접합)도 새 단위로 — 전에는 다음 실행까지 옛 단위였다
+        if (_connCard && _connCard.data) {
+            if (_connCard.kind === 'lap') { renderLapConnectionResult(_connCard.data); } else { renderConnectionResult(_connCard.data); }
+        }
         // (4) PLF 표시 갱신
         if (typeof updatePLF === 'function') updatePLF();
     }
@@ -369,9 +375,11 @@
             case 'lapConnectionResult':
                 if (msg.data && !msg.data.error) { delete _ledgerReasons.lap; }
                 _lastLapResult = msg.data;
+                _connCard = { kind: 'lap', data: msg.data };
                 renderLapConnectionResult(msg.data);
                 break;
             case 'connectionResult':
+                _connCard = { kind: 'connection', data: msg.data };
                 renderConnectionResult(msg.data);
                 break;
             case 'designResult':
@@ -6218,7 +6226,7 @@
         // D-4(K2-7): 접합부 탭의 칸 — 그 결과(Lap 또는 단일 접합) 카드만. 둘은 같은 칸(#connection-result)에 그려진다.
         if (scope === 'lap' || scope === 'connection') {
             if (scope === 'lap') { _lastLapResult = null; }
-            setHtml('connection-result', noteFor('connection-result', '접합부 계산을 다시 실행하세요.'));
+            _connCard = null; setHtml('connection-result', noteFor('connection-result', '접합부 계산을 다시 실행하세요.'));
             return;
         }
         const order = ['design', 'load', 'analysis', 'model', 'all'];
@@ -6239,7 +6247,7 @@
         // Lap 결과는 설계 결과(Se · Mnd · Vn)와 단면에 기댄다 — 함께 지운다.
         if (_lastLapResult || scope === 'all') {
             _lastLapResult = null;
-            setHtml('connection-result', noteFor('connection-result', '접합부 계산을 다시 실행하세요.'));
+            _connCard = null; setHtml('connection-result', noteFor('connection-result', '접합부 계산을 다시 실행하세요.'));
         }
         setHtml('report-container', '');
         setHtml('validation-container', '');

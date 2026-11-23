@@ -907,3 +907,38 @@ R1-2 가 호스트에 둘 자리(`StcfsdPanel.ts` 는 K3 담당이 놓은 뒤 �
 
 - **엔진 가정의 열쇠는 엔진의 `code`.** `assumptions.engineAssumptionNotes(resultKind, result)` — 결과 나무의 알림(`notices`, list `assumptions`)에서 `{resultKind, code, text: text_ko}` 를 뽑는다(같은 code 는 한 번). 글이 용어표 · 단위로 바뀌어도 같은 code 면 같은 가정이다(닫고 새로 열지 않는다 — `records_work` 시험). 알림이 없는 옛 결과는 code 없이(그러면 `planEngineAssumptions` 가 글의 해시). 부르는 자리(가정 장부)는 R3.
 - **읽기 전용 대상은 모델도 바꾸지 않는다.** MCP 의 모델 동작(`set_material` · `set_bc` · `set_lengths` · `set_load_case` · `set_stress` · 템플릿 · 절점 · 요소 · 스프링 · 구속 · `set_gbtcon` · 두 배 나누기 · 데크 스프링 — 20)은 까닭과 「새 대상으로(`new_case from: 'current'`) 또는 사람이 잠금을 넘겨받기」를 담은 오류. 화면의 모델 변경(`updateModel` · `generateTemplate` · `setStress` · `applyStress`)과 칸이 모델과 다른 해석 실행은 받지 않고 파일의 모델을 다시 보내며 알린다. 계산(같은 모델의 해석 · 검토)은 막지 않는다. 시험: `records_host_contract`.
+
+### 10.6 R1-3 이 바란 것(호스트 쪽) · R2-2 변경 묶음과 그 행위자
+
+**R1-3 이 바란 것**
+
+| # | 한 것 |
+|---|---|
+| 1 | 대상이 아닌 채로 읽기 전용으로 연 파일(발행본 · 02 밖의 `.csd` · 보호 폴더 …) — `status()`(→ `get_status` · `get_full_state` 의 `project`)에 `file_read_only {reason, detail}`, 프로젝트를 열지 않고 그 이름(`projectId: null`, `readOnly: true`). 보통 파일을 열면 사라진다 |
+| 2 | 사람의 얼굴 `person.projects()`(뿌리 · 최근의 이름 · **폴더 경로** · 대상 수 · 마지막 작업 · 열림) · `person.currentProject()` — 경로는 사람의 얼굴로만(MCP 답에는 여전히 없다) |
+| 3 | `list_cases` 의 대상마다 `case_id`, 저장에 든 결과 `results`(종류 이름), `outline: true` 로 부르면 그림 |
+| 4 | `person.relink(caseId, fileAbs)`(02 안의 `.csd` · 링크 아님 · 다른 대상의 파일 아님 → `relink` 줄), `person.writerName()` · `person.setWriterName(name)`(열쇠 자리의 `writer-name.json`, 없으면 호스트가 준 OS 사용자 이름 — 잠금 · 작성자 소개 · 믿는 작성자 표에 쓰인다), `person.allowOverwrite()`(밖에서 바뀐 파일 — `external` 줄을 남기고 다음 저장의 대조를 지금 파일로). 모두 `ai` · `screen` 문맥에서 던진다 |
+| 5 | `open_case` 의 파일 출처: 문맥이 `ai` 일 때만 `ai`, 화면(중계 · 웹뷰)이면 `person`(「저장」이 경로를 묻지 않는다) |
+| 6 | 색인(`index/<대상>.json`)에 `results`(그 저장의 결과 종류)와 `outline {paths, aspect}` — 요소를 차례로 이은 선(끊기면 새 줄), 줄 8 · 점 96 까지 고르게 덜어 냄, 0 – 1000 정수(약 300 – 900 B). 읽을 때 믿지 않는다: 정수 · 범위 · 줄 · 점 수가 맞지 않으면 그림 없음, 모르는 결과 이름은 버린다 |
+| 7 | 화면(웹뷰)의 접합부 카드(랩 · 단일 접합 — 같은 자리)가 단위 단추로 다시 그려진다. 지운 카드(낡음)는 되살아나지 않는다(`_connCard`). 시험 `test/rendered/connection_units.js` |
+
+**R2-2 — 끊는 곳(호스트 `StcfsdPanel`, `ChangeBatcher`)**
+
+| 끊는 곳 | 자리 |
+|---|---|
+| MCP 요청 하나 = 묶음 하나 | `handleMcpAction` 이 `_changes.run(ctx, …)` 로 감싼다(요청 전후 스냅숏 비교 — 바뀐 것이 없으면 줄이 없다). 같은 행위자의 겹친 요청은 바깥 것이 닫는다 |
+| 편집 상태(U4)의 시작 · 끝 = 사람 묶음 하나, 버리기는 묶음 없음 | `editSession('start' | 'end' | 'discard')`(공개 — 새 화면은 다리가 사람의 길로 부른다) · 웹뷰 메시지 `{command: 'editSession', data: {state}}`. MCP 문맥에서는 거절 |
+| 편집 상태 밖의 화면 편집 = 조용한 2 초 | `_handleMessage` 가 `caseEdit`(사람이 친 것) · `updateModel` · `generateTemplate` · `setStress` · `applyStress` · `runAnalysis` 를 바꾸기 **전에** `touch` — 2.05 초 타이머가 `tick` |
+| 다른 행위자가 끼면 지금 묶음을 닫는다 | `ChangeBatcher.ensure` — 편집 상태 안의 AI 요청은 사람 · AI · 사람 셋이 된다. MCP 로 묻는 것(읽기 도구)도 끼어듦이다 |
+| 파일 열기 = 기준선 | 열기 전에 `closeForSwitch`(열린 조용함 · 편집 상태를 지금 것으로 닫는다), 연 뒤 `rebase`(연 요청이 옛 파일 → 새 파일을 한 묶음으로 내지 않는다) — `_loadProjectFile` · `load_project` |
+| 밖에서 바뀐 것 | 연 파일이 마지막으로 알려진 바이트와 다르고 마지막 `saved` 줄에 스냅숏이 있으면 — 그 스냅숏과 지금을 비교한 한 줄(행위자 `external`, trigger `external`). 저장할 때 스냅숏(`{model, case}` — 사본)을 `saved` 줄에 단다 |
+
+- **문맥 → 줄**: 행위자 = `toActor(currentActor())`(다리 `ai` + `client` · 요청 id · 도구 이름, 화면 비밀 → `person`, 웹뷰 → `person`, 문맥 없음 → `program`), `reason` · `work` · `source` 는 머리에서만(`X-StCFSD-Reason` · `-Work` · `-Source`, 퍼센트 부호화). 몸의 `actor` · `kind` 키, 질의 문자열(`/action?reason=…` — 다리는 경로만 본다)은 쓰이지 않는다.
+- **쓰기 도구의 공용 인자** 33 도구(`server.ts` `WRITE_TOOLS` — 모델 · 입력을 바꾸는 것): `reason`(2만 자까지 받아 MCP 서버가 300 자로, 호스트가 제어 문자를 지운다) · `work` · `source`(id 꼴이 아니면 버린다). 엔진에 보내지 않는다. `set_case_inputs` 는 자기 `reason`(300 자 — 넘으면 도구가 거절)을 그대로 쓰고 머리로도 보낸다.
+- **어디에**: 프로젝트의 쓸 수 있는 대상이면 `log/changes`(행위자 표 그대로), 아니면 이 세션의 메모리만(500 줄, 쓰지 않는다 — `list_changes` 의 `persisted: false`).
+- **`list_changes {case?, since?, limit?(20), detail?: 'fields', units?}`(→ 73 도구)** — 최신부터 `{id, at, by {kind, client?}, trigger, title, reason?, work?, source?, fields(수), invalidated?(종류), field_changes?}`, `text_note`. 제목은 프로그램이 칸에서 짓는다(기록에는 SI, `units: 'US'` 면 칸에서 US 로 다시). 경로 없음. 잰 크기: 14 묶음 20 줄 3.4 KB, `fields` 4.2 KB(상한 8 / 24 KB).
+- **출처 꼬리표**: `get_case_inputs` 에 `last_change {키: {by, client?, at, from, to, change, reason?}}`(프로젝트가 열려 있을 때만 — 기록에서, 요청한 단위로).
+- **잰 시간**(`records_changes_contract`, 37 절점 단면 · 입력 약 130): 스냅숏 92 번 평균 0.13 ms(최대 1 ms), 비교 42 번 평균 0.5 ms(최대 3 ms). 행동마다 한 번 · 끝난 뒤 한 번이라 손대지 않았다. 스냅숏은 비교기가 보는 모델 칸(15)과 입력 · 경간 · MCP 전용 인자만 복사한다.
+- **시험**: `test/webview/records_changes_contract.js`(진짜 MCP 서버 — 포트 파일 · 토큰 · 요청 id). `records_desk` 에 R1-3 셋(읽기 전용 파일 · 사람의 얼굴 · 색인의 그림), `records_host_contract` 에 case_id · 결과 · 그림 · 파일 출처 · file_read_only.
+
+**R2-3(데스크톱 담당)이 따를 것**: 편집 상태를 열고 닫을 때 `editSession('start' | 'end' | 'discard')` 를 사람의 길로(다리가 부른다 — MCP 로는 닿지 않는다). 「업무 › 변경」은 `list_changes`(`detail: 'fields'`), 01 – 06 의 꼬리표는 `get_case_inputs.last_change`. 모델 칸의 꼬리표는 `list_changes` 의 `field_changes`(입력 키 꼬리표만 `last_change`). 사람의 얼굴에 새 함수 여섯(`projects` · `currentProject` · `relink` · `writerName` · `setWriterName` · `allowOverwrite`) — 다리의 501 셋을 이것으로. 새 화면의 MCP 중계로 연 대상은 이제 사람의 파일이다.

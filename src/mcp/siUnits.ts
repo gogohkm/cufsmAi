@@ -711,6 +711,8 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
     // K4b: 결과만 SI(수 인자는 단위가 없다 — 개수 · 색인)
     get_status: {}, get_full_state: {}, get_buckling_curve: {}, get_nodes: {}, get_elements: {}, steel_grades: {},
     run_analysis: {}, get_energy_recovery: {},
+    // R2-2: units 는 제목 · 칸 값의 단위(호스트가 그린다)
+    list_changes: {},
     design_lap_connection: {
         d: L, t: L, Fy: S, Fu: S, lap_left_in: L, lap_right_in: L, Mu_support: MOM, Vu_support: F,
         fastener_dia: L, end_distance: L, Se: 'modulus', Sf: 'modulus', Mnd: MOM, Mnd_single: MOM,
@@ -738,7 +740,7 @@ export const SI_INPUT_DIMENSIONLESS: Record<string, string[]> = {
     set_lengths: ['n'],
     set_node_stress: ['node_ids'],
     // K4b: 수 인자가 개수 · 색인뿐인 도구
-    run_analysis: ['neigs'], get_energy_recovery: ['length_index', 'mode_index'],
+    run_analysis: ['neigs'], get_energy_recovery: ['length_index', 'mode_index'], list_changes: ['limit'],
     add_element: ['nodei', 'nodej'],
     modify_node: ['node_id'],
     modify_element: ['elem_id', 'nodei', 'nodej'],

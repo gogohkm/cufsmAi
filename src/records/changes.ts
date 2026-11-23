@@ -63,7 +63,8 @@ interface OpenBatch { ctx: ChangeContext; before: Snapshot; depth: number; kind:
 
 export interface BatcherDeps {
     snapshot(): Snapshot;
-    emit(body: ChangeBody): void;
+    /** 묶음 하나(그 묶음을 연 행동의 문맥과 함께 — 행위자 · 까닭) */
+    emit(body: ChangeBody, ctx: ChangeContext): void;
     now(): number;
     quietMs?: number;
     build?: (ctx: ChangeContext, before: Snapshot, after: Snapshot) => ChangeBody | null;
@@ -80,7 +81,7 @@ export class ChangeBatcher {
         this.open = null;
         const after = this.d.snapshot();
         const body = (this.d.build ?? ((c, x, y) => buildChange(c, x, y)))(b.ctx, b.before, after);
-        if (body) { this.d.emit(body); }
+        if (body) { this.d.emit(body, b.ctx); }
     }
 
     private ensure(ctx: ChangeContext, kind: OpenBatch['kind']): OpenBatch {
@@ -143,4 +144,21 @@ export class ChangeBatcher {
 
     /** 끝낼 때 · 파일을 바꿀 때 — 열린 것을 닫는다 */
     flush(): void { if (this.open && this.open.depth === 0) { this.close(); } }
+
+    /** 지금 열린 묶음이 있는가(시험 · 상태) */
+    get pending(): 'request' | 'session' | 'quiet' | null { return this.open ? this.open.kind : null; }
+
+    /**
+     * 파일을 열었다(기준선, 설계 §2.4.4 ④) — 열린 묶음의 「전」 을 지금으로 옮긴다. 연 요청(open_case · load_project) 이 옛 파일과 새 파일의
+     * 차이를 한 묶음으로 내지 않게. 편집 상태도 새 파일 위에서 다시 시작한다
+     */
+    rebase(): void {
+        if (this.open) { this.open.before = this.d.snapshot(); this.open.lastTouch = this.d.now(); }
+    }
+
+    /** 다른 대상으로 — 묶음 밖의 열린 것(조용함 · 편집 상태)은 지금의 것으로 닫고, 편집 상태를 끝낸다 */
+    closeForSwitch(): void {
+        if (this.open && this.open.depth === 0) { this.close(); }
+        this.session = null;
+    }
 }
