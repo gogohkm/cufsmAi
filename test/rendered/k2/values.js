@@ -47,7 +47,7 @@ const NON_DEFAULT = {
   chkBetaDist: false,                // 처음 켜짐
   distM1M2: -0.5, distLm: 60,
   chkRFactor: true, rValue: '0.60',  // 연속 경간 0.60 (표 I6.2.1-1 의 한 값 — 0.70 은 두 선택지가 같은 값이라 피함)
-  chkColdWork: false,                // 처음 켜짐
+  chkColdWork: true,                 // 처음 꺼짐(2026-11-25 — 전에는 켜짐이라 false 를 썼다)
   chkInelasticReserve: true,
   // 웹 크리플링
   wcN: 3.5, wcR: 0.1875, wcP: 2,     // in, in, kips

@@ -108,7 +108,8 @@ t('defaults = the page\'s initial values exactly (SI field text → US with the 
   }
   assert.deepStrictEqual(bad, [], bad.join('\n'));
 });
-t('the 44 hard-coded engineering defaults are in the table unchanged and marked page', () => {
+// 2026-11-25: 길이 넷(KxLx · KyLy · KtLt · Lb)을 빈 칸으로, 냉간가공을 끔으로 — 손으로 정한 공학 기본값 44 → 39
+t('the 39 hard-coded engineering defaults are in the table unchanged and marked page', () => {
   const ids = INV.summary.hardCodedEngineeringDefaults.filter((id) => !id.startsWith('.'));
   for (const id of ids) {
     const r = DS.FIELDS.find((x) => x[1] === id);
@@ -116,7 +117,7 @@ t('the 44 hard-coded engineering defaults are in the table unchanged and marked 
     assert.strictEqual(r[4].src, id === 'input-steel-grade' ? 'steel' : 'page', id);
     assert.notStrictEqual(DS.defaultValue(r[0]), null, id);
   }
-  assert.strictEqual(INV.summary.hardCodedEngineeringDefaults.length, 44);
+  assert.strictEqual(INV.summary.hardCodedEngineeringDefaults.length, 39);
 });
 t('steel defaults come from the SGC400 row (295 / 400 MPa) of src/webview/steelGrades.ts', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src', 'webview', 'steelGrades.ts'), 'utf8');
@@ -173,8 +174,8 @@ t('snapshot of a page showing the defaults (US) = defaultInputs for every case /
 t('diff: changed keys only, spans and unitSystem included, no-op empty', () => {
   const a = DS.defaultInputs();
   assert.deepStrictEqual(DS.diff(a, JSON.parse(JSON.stringify(a))), {});
-  const b = { ...JSON.parse(JSON.stringify(a)), Lb: 72, chkColdWork: false, unitSystem: 'US', spans: [20, 25, 20] };
-  assert.deepStrictEqual(DS.diff(a, b), { Lb: 72, chkColdWork: false, spans: [20, 25, 20], unitSystem: 'US' });
+  const b = { ...JSON.parse(JSON.stringify(a)), Lb: 72, chkColdWork: true, unitSystem: 'US', spans: [20, 25, 20] };
+  assert.deepStrictEqual(DS.diff(a, b), { Lb: 72, chkColdWork: true, spans: [20, 25, 20], unitSystem: 'US' });
 });
 t('validateValue: unknown keys, owners, kinds, options, lists', () => {
   assert.strictEqual(DS.validateValue('Lb', 72), null);

@@ -7758,7 +7758,7 @@ ${inner}
                             <label>G<span class="hint-inline" data-unit="stress">MPa</span></label><input type="number" id="input-G" value="77911" step="1000">
                         </div>
                         <div class="input-row" style="margin-top:6px">
-                            <label><input type="checkbox" id="chk-cold-work" checked> §A3.3.2 Cold Work (냉간가공 Fya)</label>
+                            <label><input type="checkbox" id="chk-cold-work"> §A3.3.2 Cold Work (냉간가공 Fya)</label>
                             <span class="hint-inline">(코너부 강도 증가)</span>
                         </div>
                     </div>
@@ -8179,13 +8179,13 @@ ${inner}
                 <h3 id="design-lengths-title">좌굴 길이 (유효좌굴 K·L / 비지지 Lb)</h3>
                 <div class="input-row" id="design-KxLx-row">
                     <label>KxLx<span class="hint-inline" data-unit="length">mm</span></label>
-                    <input type="number" id="design-KxLx" value="3000" step="100" style="width:65px">
+                    <input type="number" id="design-KxLx" value="" step="100" style="width:65px">
                     <label>KyLy<span class="hint-inline" data-unit="length">mm</span></label>
-                    <input type="number" id="design-KyLy" value="3000" step="100" style="width:65px">
+                    <input type="number" id="design-KyLy" value="" step="100" style="width:65px">
                 </div>
                 <div class="input-row" id="design-KtLt-row">
                     <label>KtLt<span class="hint-inline" data-unit="length">mm</span></label>
-                    <input type="number" id="design-KtLt" value="3000" step="100" style="width:65px">
+                    <input type="number" id="design-KtLt" value="" step="100" style="width:65px">
                 </div>
                 <p class="hint" style="margin:6px 0 2px;font-weight:600">정모멘트 구간 (+M)</p>
                 <div class="input-row" id="design-Cb-pos-row">
@@ -8206,7 +8206,7 @@ ${inner}
                 </div>
                 <div class="input-row" id="design-Lb-row">
                     <label>Lb(-)<span class="hint-inline" data-unit="length">mm</span></label>
-                    <input type="number" id="design-Lb" value="3000" step="100" style="width:65px">
+                    <input type="number" id="design-Lb" value="" step="100" style="width:65px">
                     <span id="design-Lb-calc" style="font-size:10px;color:var(--vscode-descriptionForeground);margin-left:4px"></span>
                 </div>
 

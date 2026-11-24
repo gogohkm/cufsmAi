@@ -1449,6 +1449,8 @@ async function main() {
 
     // 9b'. K2-5: 검토 상태 도구 — 응답 크기(12 KB), SI 왕복, 받지 않는 키, 설계 도구가 바꾼 사람의 값(case_inputs_replaced)
     {
+      // 처음 값의 KxLx 는 빈 칸이다(2026-11-25) — SI 변환을 보려고 길이 하나를 먼저 넣는다
+      await call('set_case_inputs', { inputs: { KxLx: 120 }, reason: 'k2 test — 길이 하나' });
       const gi = await call('get_case_inputs', {});
       const giSI = await call('get_case_inputs', { units: 'SI' });
       assert(!gi.isError && !giSI.isError, `get_case_inputs: ${gi.data && gi.data.error}`);

@@ -734,7 +734,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   const run2 = await mcp.tool('run_analysis');
   check('AI: set_load_case(압축) → run_analysis', lc2.success && run2.success, short(run2.error ?? `길이 ${run2.lengths_analyzed}`));
   // KtLt 가 없으면 엔진은 E2 휨-비틀림을 평가하지 않는다(not_evaluated) — Pu 를 크게 주면 평가한 한계상태는 NG.
-  // 단계 B: 주지 않은 인자는 화면의 칸(KtLt 처음 값 3000 mm)으로 계산한다 — 「KtLt 없음」 은 화면의 칸을 비워서 만든다
+  // 단계 B: 주지 않은 인자는 화면의 칸으로 계산한다 — 「KtLt 없음」 은 화면의 칸을 비워서 만든다(처음 값은 빈 칸이지만 앞 걸음이 채웠을 수 있다)
   const blankKt = await mcp.tool('set_case_inputs', { inputs: { KtLt: null }, reason: '시험 — 비틀림 유효 길이 없음(미검토를 만든다)' });
   check('AI: set_case_inputs(KtLt 비움) — 화면의 비틀림 유효 길이 없음', !blankKt.error, short(blankKt.error ?? `rev ${blankKt.case_rev ?? blankKt.rev ?? ''}`));
   const compNg = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 400, units: 'SI' });

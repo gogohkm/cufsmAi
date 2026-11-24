@@ -103,7 +103,7 @@
   {
    "id": "design.engine",
    "expect": "pin",
-   "reason": "단계 A(검증 문서 4.5 — 원형관 DSM 비적용, 2026-11-24): DSM 추출 결과에 dsm_applicable 이 더해져 요청의 dsm 진단 키에 *_dsm_applicable: true 하나가 붙었다. 다른 키 · 값은 그대로(요청마다 값으로 대조).",
+   "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. 화면 단추의 휨 요청에서 시험이 넣지 않은 KxLx · KyLy · KtLt(118.11 in)가 빠지고 use_cold_work 가 false 가 된 것뿐이다(시험이 넣은 Lb 60 은 그대로).",
    "value": [
     {
      "method": "get_properties",
@@ -115,65 +115,21 @@
     },
     {
      "method": "aisi_design",
-     "params": "{\"member_type\":\"flexure\",\"design_method\":\"LRFD\",\"Fy\":42.7861326304,\"Fu\":58.0150950921,\"KxLx\":118.11023622,\"KyLy\":118.11023622,\"KtLt\":118.11023622,\"Lb\":60,\"Cb\":1,\"Cmx\":1,\"Cmy\":1,\"Pu\":0,\"Mu\":40,\"Mux\":40,\"May_strength\":0,\"Vu\":1,\"Tu\":0,\"wc_N\":3.5,\"wc_R\":0.1875,\"wc_support\":\"EOF\",\"wc_fastened\":\"fastened\",\"wc_web_config\":\"single\",\"wc_flange_condition\":\"stiffened\",\"wc_n_webs\":1,\"use_inelastic_reserve\":false,\"use_cold_work\":true,\"R\":0.1,\"t\":0.059,\"section_type\":\"C\",\"props\":{\"A\":0.8134008033716552,\"xcg\":0.6229297455999562,\"zcg\":3.9705000000000004,\"Ixx\":7.738725101709933,\"Izz\":0.6343972712287688,\"Ixz\":-4.440892098500626e-16,\"thetap\":3.581540443916258e-15,\"I11\":7.738725101709933,\"I22\":0.6343972712287688,\"Sx\":1.934681275427483,\"Sz\":0.3433684157438304,\"rx\":3.0844832157335156,\"rz\":0.8831375576466145,\"Zx\":2.2782415761368147,\"Zz\":0.5066915555151053,\"Sx_cl\":1.9490555601838386,\"Sz_cl\":0.34893991015661685,\"J\":0.0009438160655122441,\"Cw\":7.8029715149928744,\"Xs\":-1.027946351264935,\"Zs\":3.970499999999999,\"B1\":0,\"B2\":8.607127781910886,\"Sf\":1.934681275427483,\"Sxx\":1.934681275427483,\"Sy\":0.3433684157438304,\"Szz\":0.3433684157438304,\"ry\":0.8831375576466145,\"t\":0.059,\"R\":0.1},\"dsm\":{\"Mcrl\":87.04626208668843,\"Mcrd\":85.39243545290311,\"Lcrd\":22.229964825261945,\"M_My_xx\":83.39254970204428,\"M_My_zz\":14.929789276000864,\"M_A\":0.8134008033716552,\"M_Ixx\":7.738725101709933,\"M_Izz\":0.6343972712287688,\"M_load_type\":\"Mxx\",\"M_Mxxcrl\":87.04626208668843,\"M_Lcrl\":4.094915062380426,\"M_LF_local\":1.043813414959713,\"M_Mxxcrd\":85.39243545290311,\"M_Lcrd\":22.229964825261945,\"M_LF_dist\":1.023981587779775,\"M_Mxxcre\":1.546961053431724,\"M_Lcre\":1000,\"M_LF_global\":0.01855035082820836,\"M_global_is_signature_asymptote\":true,\"M_global_source\":\"signature_asymptote\",\"M_cre_signature\":1.546961053431724,\"M_Lcre_signature\":1000,\"M_n_minima\":2,\"M_classification\":\"cfsm_ordering_tiebreak\",\"M_local_detected\":true,\"M_dist_detected\":true,\"M_classification_method\":\"heuristic\",\"M_local_absence_verified\":false,\"M_dist_absence_verified\":false,\"M_local_isolated\":true,\"M_dist_isolated\":true,\"M_local_basis\":\"wavelength_order\",\"M_dist_basis\":\"wavelength_order\",\"M_single_minimum\":false,\"M_boundary_minimum\":false,\"M_LF_local_interp\":1.0398718030891703,\"M_LF_dist_interp\":1.023446653499883,\"M_stress_scale\":1,\"M_max_node_stress\":42.7861326304,\"M_reference_distribution\":\"Mxx_restrained\",\"M_reference_unsymm\":0,\"M_reference_stress_consistent\":true,\"M_reference_is_restrained\":true,\"M_classification_note\":\"cFSM classification rows are NaN for this model; wavelength order is used.\",\"M_dsm_applicable\":true,\"M_signature_curve\":true,\"M_BC\":\"S-S\",\"M_warnings\":[],\"M_assumptions\":[],\"M_scope_notes\":[\"A signature curve can show that a mode was isolated, never that a mode is absent; local_absence_verified and dist_absence_verified are always False.\"],\"fy_analysis\":42.7861326304,\"M_sign\":\"+\"},\"section\":{\"type\":\"C\",\"thickness\":0.059,\"R_corner\":0.1,\"depth\":8,\"flange_width\":2.5,\"lip_depth\":0.625,\"qlip\":90,\"family_hint\":\"C\"},\"through_fastened\":false}"
-    }
-   ],
-   "flipped": [
-    {
-     "step": "S10",
-     "from": {
-      "expect": "pin",
-      "reason": null
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "milestone-2-demand",
-     "from": {
-      "expect": "pin",
-      "reason": "Engine 733c18e (V8-04 — numeric libraries pinned to one thread; engine_id changes): FSM-derived values in the pinned requests moved — global-mode values from the signature curve at the longest length (M_Mxxcre · M_cre_signature · M_LF_global, P_Pcre · P_LF_global) by up to 1.2e-5 relative, distortional / local ≤ 3.3e-10, the analysis stress arrays ≤ 7.3e-9 (the old goldens were recorded with multi-threaded BLAS; V8-04 measured Mcre 1.07e-6 between thread counts). No shown value changed."
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "A-dsm_applicable",
-     "from": {
-      "expect": "pin",
-      "reason": "V9a-02 · contract §6.4: an empty demand field is left out of the engine request (it was sent as 0 — an unstated 0 now makes the checks that use it not evaluated); demands that were given are unchanged."
-     },
-     "date": "2026-11-24"
+     "params": "{\"member_type\":\"flexure\",\"design_method\":\"LRFD\",\"Fy\":42.7861326304,\"Fu\":58.0150950921,\"Lb\":60,\"Cb\":1,\"Cmx\":1,\"Cmy\":1,\"Pu\":0,\"Mu\":40,\"Mux\":40,\"May_strength\":0,\"Vu\":1,\"Tu\":0,\"wc_N\":3.5,\"wc_R\":0.1875,\"wc_support\":\"EOF\",\"wc_fastened\":\"fastened\",\"wc_web_config\":\"single\",\"wc_flange_condition\":\"stiffened\",\"wc_n_webs\":1,\"use_inelastic_reserve\":false,\"use_cold_work\":false,\"R\":0.1,\"t\":0.059,\"section_type\":\"C\",\"props\":{\"A\":0.8134008033716552,\"xcg\":0.6229297455999562,\"zcg\":3.9705000000000004,\"Ixx\":7.738725101709933,\"Izz\":0.6343972712287688,\"Ixz\":-4.440892098500626e-16,\"thetap\":3.581540443916258e-15,\"I11\":7.738725101709933,\"I22\":0.6343972712287688,\"Sx\":1.934681275427483,\"Sz\":0.3433684157438304,\"rx\":3.0844832157335156,\"rz\":0.8831375576466145,\"Zx\":2.2782415761368147,\"Zz\":0.5066915555151053,\"Sx_cl\":1.9490555601838386,\"Sz_cl\":0.34893991015661685,\"J\":0.0009438160655122441,\"Cw\":7.8029715149928744,\"Xs\":-1.027946351264935,\"Zs\":3.970499999999999,\"B1\":0,\"B2\":8.607127781910886,\"Sf\":1.934681275427483,\"Sxx\":1.934681275427483,\"Sy\":0.3433684157438304,\"Szz\":0.3433684157438304,\"ry\":0.8831375576466145,\"t\":0.059,\"R\":0.1},\"dsm\":{\"Mcrl\":87.04626208668843,\"Mcrd\":85.39243545290311,\"Lcrd\":22.229964825261945,\"M_My_xx\":83.39254970204428,\"M_My_zz\":14.929789276000864,\"M_A\":0.8134008033716552,\"M_Ixx\":7.738725101709933,\"M_Izz\":0.6343972712287688,\"M_load_type\":\"Mxx\",\"M_Mxxcrl\":87.04626208668843,\"M_Lcrl\":4.094915062380426,\"M_LF_local\":1.043813414959713,\"M_Mxxcrd\":85.39243545290311,\"M_Lcrd\":22.229964825261945,\"M_LF_dist\":1.023981587779775,\"M_Mxxcre\":1.546961053431724,\"M_Lcre\":1000,\"M_LF_global\":0.01855035082820836,\"M_global_is_signature_asymptote\":true,\"M_global_source\":\"signature_asymptote\",\"M_cre_signature\":1.546961053431724,\"M_Lcre_signature\":1000,\"M_n_minima\":2,\"M_classification\":\"cfsm_ordering_tiebreak\",\"M_local_detected\":true,\"M_dist_detected\":true,\"M_classification_method\":\"heuristic\",\"M_local_absence_verified\":false,\"M_dist_absence_verified\":false,\"M_local_isolated\":true,\"M_dist_isolated\":true,\"M_local_basis\":\"wavelength_order\",\"M_dist_basis\":\"wavelength_order\",\"M_single_minimum\":false,\"M_boundary_minimum\":false,\"M_LF_local_interp\":1.0398718030891703,\"M_LF_dist_interp\":1.023446653499883,\"M_stress_scale\":1,\"M_max_node_stress\":42.7861326304,\"M_reference_distribution\":\"Mxx_restrained\",\"M_reference_unsymm\":0,\"M_reference_stress_consistent\":true,\"M_reference_is_restrained\":true,\"M_classification_note\":\"cFSM classification rows are NaN for this model; wavelength order is used.\",\"M_dsm_applicable\":true,\"M_signature_curve\":true,\"M_BC\":\"S-S\",\"M_warnings\":[],\"M_assumptions\":[],\"M_scope_notes\":[\"A signature curve can show that a mode was isolated, never that a mode is absent; local_absence_verified and dist_absence_verified are always False.\"],\"fy_analysis\":42.7861326304,\"M_sign\":\"+\"},\"section\":{\"type\":\"C\",\"thickness\":0.059,\"R_corner\":0.1,\"depth\":8,\"flange_width\":2.5,\"lip_depth\":0.625,\"qlip\":90,\"family_hint\":\"C\"},\"through_fastened\":false}"
     }
    ]
   },
   {
    "id": "design.shown",
    "expect": "pin",
+   "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. 냉간가공이 꺼져 「§A3.3.2 … 냉간가공 강도증가를 적용할 수 없습니다」 경고 한 줄(과 그 머리)이 빠졌다. 그 사례는 국부 · 뒤틀림이 지배해 냉간가공이 원래 적용되지 않았으므로 수치는 같다.",
    "value": {
-    "design-summary": "종합 판정: ✗ NG 지배 검토: 휨 + 웹 크리플링\n부모멘트 구간 (-M) — Mu(-)=40.00 kip-in, Lb=60.0000 in, Cb=1\nGlobal\n80.32\nkip-in\nLocal\n70.10\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn = 58.76 kip-in (뒤틀림좌굴)\n106% ✗ NG\n정모멘트 구간 (+M) — Mu(+)=0.00 kip-in, Lb=0.0000 in, Cb=1\nGlobal\n82.78\nkip-in\nLocal\n71.53\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn(+) = 58.76 kip-in (F2.1-3 (yielding))\n검토 비 판정\nF flexure 0.681 OK\nH2 bending + shear 0.680 OK\nG5 web crippling 0.923 OK\nH3 bending + web crippling 1.063 NG\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n• H4 combined bending and torsion\n• H2-2 (shear stiffened webs)\n• weak-axis DSM flexure\n경고 (값 또는 판정에 영향)\n• §A3.3.2: Fy 응력 수준에서 국부 또는 뒤틀림좌굴이 강도를 감소시키거나 확인되지 않아 (Mnl≠Mne 또는 Mnd≠My) 냉간가공 강도증가를 적용할 수 없습니다. Virgin Fy를 사용합니다.\n가정\n• §G5/§H3: 웹 크리플링 하중으로 Vu = 1.000 kips 를 썼다 — 반력 · 집중하중(「웹 크리플링 반력 P」(③ 좌굴해석·부재설계 탭))을 주지 않음.\n• §H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).\n적용 범위 (2)",
+    "design-summary": "종합 판정: ✗ NG 지배 검토: 휨 + 웹 크리플링\n부모멘트 구간 (-M) — Mu(-)=40.00 kip-in, Lb=60.0000 in, Cb=1\nGlobal\n80.32\nkip-in\nLocal\n70.10\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn = 58.76 kip-in (뒤틀림좌굴)\n106% ✗ NG\n정모멘트 구간 (+M) — Mu(+)=0.00 kip-in, Lb=0.0000 in, Cb=1\nGlobal\n82.78\nkip-in\nLocal\n71.53\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn(+) = 58.76 kip-in (F2.1-3 (yielding))\n검토 비 판정\nF flexure 0.681 OK\nH2 bending + shear 0.680 OK\nG5 web crippling 0.923 OK\nH3 bending + web crippling 1.063 NG\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n• H4 combined bending and torsion\n• H2-2 (shear stiffened webs)\n• weak-axis DSM flexure\n가정\n• §G5/§H3: 웹 크리플링 하중으로 Vu = 1.000 kips 를 썼다 — 반력 · 집중하중(「웹 크리플링 반력 P」(③ 좌굴해석·부재설계 탭))을 주지 않음.\n• §H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).\n적용 범위 (2)",
     "design-steps": "1) 부모멘트 구간 (-M)\n1. Yield Moment (My)\nMy = Sf × Fy = 1.9347 in³ × 42.79 ksi = 82.78 kip-in\n82.78 kip-in\n2a. Fcre — Lateral-Torsional Buckling (§F2.1.1)\n§F2.1.1\nσey = π²E/(Lb/ry)² = π²×29500 ksi/(60.0 in/0.8831 in)² = 63.08 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 60.60 ksi, Fcre = ro×Ag/Sf×√(σey×σt) = 3.6082 in×0.8134 in²/1.9347 in³×√(63.08 ksi×60.60 ksi) = 93.79 ksi\n93.8 ksi\n2. Global/LTB (Mne)\n§F2.1-4 (inelastic LTB)\n0.56×42.79 ksi < Fcre=93.79 ksi < 2.78×42.79 ksi → Fn = 41.52 ksi (inelastic LTB), Mne = Sf×Fn = 1.9347 in³×41.52 ksi = 80.32 kip-in\n80.32 kip-in\n3. Local Buckling (Mnl)\n§F3.2.1-2\nMcrl = 87.05 kip-in (FSM), λl = √(Mne/Mcrl) = √(80.32 kip-in/87.05 kip-in) = 0.961 → Mnl = 70.10 kip-in\n70.10 kip-in\n4. Distortional Buckling (Mnd)\n§F4.1-2\nMcrd = 85.39 kip-in (FSM), λd = √(My/Mcrd) = √(82.78 kip-in/85.39 kip-in) = 0.985 → Mnd = 65.29 kip-in\n65.29 kip-in\n5. Nominal Strength — DSM (Mn)\n지배\nMn = min(Mne=80.32 kip-in, Mnl=70.10 kip-in, Mnd=65.29 kip-in) = 65.29 kip-in\n65.29 kip-in\n6. Final Nominal Strength (Mn)\n지배\nMn = 65.29 kip-in — Distortional Buckling\n65.29 kip-in\n7. Design Strength (LRFD)\nφMn = 0.9 × 65.29 kip-in = 58.76 kip-in\n58.76 kip-in\n8. Bending + Shear (§H2, Eq. H2-1)\n§H2-1\nMalo = 0.9×Mnℓo = 0.9×71.53 = 64.38 kip-in (§F3, Fn = Fy), Va = 3.62 kips → √((40.00/64.38)² + (1.00/3.62)²) = 0.680\n0.6801\n10. Web crippling (§G5, Table G5-2, G5-1)\n§G5-1\nPn = 1.275 kips (EOF, fastened), φw×Pn = 1.084 kips, P = 1.000 kips → P/Pa = 0.923\n0.9226\n11. Bending + web crippling (§H3, Eq. H3-1)\n§H3-1\n0.91(P/Pn) + M/Mnℓo = 0.714 + 40.00/71.53 = 1.273 > 1.197\n1.2728\n2) 정모멘트 구간 (+M)\n1. Yield Moment (My)\nMy = Sf × Fy = 82.78 kip-in (부모멘트와 동일)\n82.78 kip-in\n2. Global/LTB — Mne(+)\n§F2.1-3 (yielding)\nLb(+) = 0.0000 in, Cb(+) = 1 → Fcre(+) = 1000000 ksi, Fcre ≥ 2.78Fy → Fn = Fy (항복)\n82.78 kip-in\n3. Local Buckling — Mnl(+)\n§F3.2.1\nλl = √(Mne/Mcrl) (국부좌굴 13.6% 감소)\n71.53 kip-in\n4. Distortional Buckling — Mnd(+)\n§F4.1\nλd = √(My/Mcrd)\n65.29 kip-in\n5. Nominal Strength — DSM Mn(+)\n지배\nMn(+) = min(Mne, Mnl, Mnd) = min(82.78, 71.53, 65.29) → Distortional Buckling\n65.29 kip-in\n6. Design Strength — φMn(+)\nφMn(+) = 0.9 × 65.29 = 58.76 kip-in\n58.76 kip-in",
     "design-interaction": "Web Crippling (§G5)\nPn (web crippling) 1.28 kips\nEquation G5-1\nTable G5-2\nSection family c\n지압 하중 Vu 를 썼음 — 반력 P 칸이 비어 있음\nSupport EOF\nFastened fastened\nAssumptions -\nWarnings -\n0.91(P/Pn) 0.714\nM/Mnfo 0.559\nTotal 1.273 ≤ 1.20\n설계강도 (G5) 1.08 kips\nG5 비 P/Pa 0.923\nResult NG\nEq. H3-1",
     "dsm-table-container": "Property Value Half-wavelength Load Factor\nBending (kip-in)\nMy (해석 응력 첫 항복) 83.39\nMcrl (local) 87.05 4.0949 1.0438\nMcrd (distortional) 85.39 22.2300 1.0240\nMcre (global) 1.55 1000.0000 0.0186\nBasis: Mxx analysis (other families not applicable to this curve)\nDetected 2 minima | Min 1: L=4.0949 in, LF=1.0438 | Min 2: L=22.2300 in, LF=1.0240\nMxx — 분류: heuristic",
     "analysis-warnings": "종방향 항: 경계조건에 따라 자동 · S-S · 길이당 최대 1항\n모드 분류: cFSM 을 쓸 수 없는 모델(둥근 모서리) — DSM 극소는 곡선 모양(반파장 순서)으로 정했습니다"
-   },
-   "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
-   "flipped": [
-    {
-     "step": "K4b",
-     "from": {
-      "expect": "pin",
-      "reason": null
-     },
-     "date": "2026-11-23"
-    },
-    {
-     "step": "renderer",
-     "from": {
-      "expect": "pin",
-      "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
-     },
-     "date": "2026-11-24"
-    }
-   ]
+   }
   }
  ]
 }
