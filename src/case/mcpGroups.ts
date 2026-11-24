@@ -1,34 +1,52 @@
 /**
- * K2-5 — MCP 설계 도구의 인자 → 검토 상태(결정 1). 순수 모듈.
+ * K2-5 · 결정 D1 · D8(2026-11-24) — MCP 설계 도구의 인자 → 검토 상태. 순수 모듈.
  *
- * 설계 도구(aisi_design_* · design_purlin · analyze_loads · design_connection · design_lap_connection)는 받은 인자로만 계산하고(엔진 요청은
- * 지금 그대로), 그 뒤 **그 도구의 인자 묶음을 통째로** 상태에 쓴다: 묶음의 키 가운데 받은 것은 그 값, 받지 않은 것은 null(「AI: 주지 않음」).
- * 예외 — 재료(Fy · Fu)와 설계법, 부재 유형은 여러 묶음이 같이 쓰므로 받았을 때만 쓴다(합치기). 화면 칸이 없는 인자는 mcpOnly[도구] 에.
+ * 설계 도구(aisi_design_* · design_purlin · analyze_loads · design_connection · design_lap_connection)는 **받은 인자의 키만** 상태에
+ * 합친다(주지 않은 칸은 그대로 — K2 결정 1 의 「묶음을 통째로」 를 뒤집었다). 묶음 인자(loads · deck)는 묶음째로: 준 묶음에서 빠진 성분은
+ * 화면의 값이 아니라 「주지 않음」(null). 경간 표도 묶음째로 — 경간 · 지점 · 랩의 인자를 하나라도 받으면 그 경간 유형의 처음 표에 받은 부분.
+ * 계산은 합친 상태로 만든 화면 단추의 본문(requests.ts)에 화면 칸이 없는 인자(mcpOnly)와 계산 조건이 아닌 인자(context)를 얹어서 한다
+ * (StcfsdPanel._mcpDesign — mcpBody). 화면 칸이 없는 인자는 mcpOnly[도구] 에.
  */
-import { InputValue, SpanTable } from './caseState';
+import { CaseState, InputValue, SpanTable } from './caseState';
 
 const DS = require('../../webview/js/designState');
 
 export interface McpWrite {
     tool: string;
-    /** 통째로 쓰는 묶음(받지 않은 키는 null) */
+    /** 묶음째로 쓰는 키 — 묶음 인자(loads · deck)의 화면 칸. 준 묶음에서 빠진 성분은 null */
     group: Record<string, InputValue>;
-    /** 받았을 때만 쓰는 키 */
+    /** 받은 키(합치기) */
     merge: Record<string, InputValue>;
-    /** 경간 표(받았을 때만) */
+    /** 경간 표 — 묶음째(경간 · 지점 · 랩의 인자를 하나라도 받으면 그 경간 유형의 처음 표 + 받은 부분). 받지 않았으면 없음(화면의 표) */
     spans?: SpanTable;
-    /** 화면 칸이 없는 인자 — mcpOnly[tool] 를 이것으로 바꾼다 */
+    /** 화면 칸이 없는 인자 — mcpOnly[tool] 를 이것으로 바꾸고, 그 호출의 본문에 얹는다 */
     mcpOnly: Record<string, unknown>;
-    /** 상태에 쓰지 못한 인자와 까닭(선택지가 아님 · 수가 아님 …) */
-    skipped: { arg: string; reason: string }[];
+    /** 계산 조건이 아닌 인자(check_location · check_combination) — 그 호출의 본문에만 얹는다(상태에 남기지 않는다) */
+    context: Record<string, unknown>;
+    /** 그 호출의 본문에서 빼는 키(받은 인자가 상태의 짝을 대신할 때 — 표에 없는 R_uplift 의 경간 조건) */
+    unset: string[];
+    /** 그 호출의 본문을 만들 때 모델 칸 대신 쓰는 값(랩의 d · t → tplH · tplT) */
+    drafts: Record<string, InputValue>;
+    /** 그 도구의 본문이 읽는 검토 상태의 칸(응답의 case_inputs_used 를 고른다) */
+    reads: string[];
+    /**
+     * 상태에 쓰지 못한 인자와 까닭(선택지가 아님 · 수가 아님 …). carried = 상태에는 못 썼지만 그 호출의 본문에는 받은 그대로 간다
+     * (mcpOnly — 표에 없는 R_uplift 등). carried 가 아닌 것이 있으면 그 호출은 계산하지 않는다(화면의 값으로 바꿔 계산하지 않게).
+     */
+    skipped: { arg: string; reason: string; carried?: boolean }[];
 }
 
-/** 응답의 모양 · 위치 인자(계산 조건이 아니다) — 상태에 남기지 않는다 */
-const NOT_CONDITIONS = new Set(['action', 'units', 'detail', 'check_location', 'check_combination', 'member_type', '__tool']);
+/** 응답의 모양 인자(계산 조건이 아니다) — 상태에도 본문에도 넣지 않는다 */
+const NOT_CONDITIONS = new Set(['action', 'units', 'detail', 'member_type', '__tool']);
+/** 위치 · 조합 꼬리표 — 본문에만 얹는다 */
+const CONTEXT_ARGS = new Set(['check_location', 'check_combination']);
 
-type Mapper = (args: any, w: McpWrite) => void;
+/** 지금 상태(경간 표의 바탕 · 하중 환산의 간격) — 없으면 처음 상태처럼 */
+type Cur = Pick<CaseState, 'inputs' | 'spans'> | null | undefined;
+type Mapper = (args: any, w: McpWrite, cur: Cur) => void;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) ? v : null);
+const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
 
 function put(w: McpWrite, where: 'group' | 'merge', key: string, value: unknown, arg: string): void {
     if (value === undefined) { return; }
@@ -37,21 +55,19 @@ function put(w: McpWrite, where: 'group' | 'merge', key: string, value: unknown,
     w[where][key] = value as InputValue;
 }
 
-/** 묶음의 키를 먼저 모두 null 로(받지 않음), 그 뒤 받은 것을 얹는다 */
-function blank(w: McpWrite, keys: string[]): void { for (const k of keys) { w.group[k] = null; } }
-
-/** 인자 → 키 (같은 값). 받은 인자만 */
+/** 인자 → 키 (같은 값). 받은 인자만(합치기) */
 function direct(args: any, w: McpWrite, table: Record<string, string>, used: Set<string>): void {
     for (const [arg, key] of Object.entries(table)) {
         if (args[arg] === undefined) { continue; }
         used.add(arg);
-        put(w, 'group', key, args[arg], arg);
+        put(w, 'merge', key, args[arg], arg);
     }
 }
 
 function rest(args: any, w: McpWrite, used: Set<string>): void {
     for (const [k, v] of Object.entries(args || {})) {
         if (used.has(k) || NOT_CONDITIONS.has(k) || v === undefined) { continue; }
+        if (CONTEXT_ARGS.has(k)) { w.context[k] = v; continue; }
         w.mcpOnly[k] = v;
     }
 }
@@ -81,10 +97,15 @@ const WC: Record<string, string> = {
 };
 const USE: Record<string, string> = { use_inelastic_reserve: 'chkInelasticReserve', use_cold_work: 'chkColdWork' };
 
-/** 계약 §6.4: 「준 0 은 정말 0」 의 진술 → 검토 상태의 그 칸(화면 칸과 같은 키) — 늘 그 도구의 값으로(주지 않으면 거짓) */
+const MATERIAL_READS = ['fy', 'fu', 'designMethod'];
+const COMP_READS = ['KxLx', 'KyLy', 'KtLt', 'Pu'];
+const FLEX_READS = ['Lb', 'Cb', 'Mux', 'Vu', 'designLbPos', 'designCbPos', 'designMxPos', 'wcP', 'wcSupport', 'chkRFactor', 'rValue',
+    'chkBetaDist', 'distM1M2', 'distLm', ...Object.values(WC), ...Object.values(USE)];
+
+/** 계약 §6.4: 「준 0 은 정말 0」 의 진술 → 검토 상태의 그 칸(화면 칸과 같은 키) — 받았을 때만(합치기) */
 function zds(a: any, w: McpWrite, used: Set<string>): void {
     used.add('zero_demand_stated');
-    put(w, 'group', 'designZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated');
+    if (a.zero_demand_stated !== undefined) { put(w, 'merge', 'designZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated'); }
 }
 
 const memberFlexure: Mapper = (a, w) => {
@@ -92,16 +113,20 @@ const memberFlexure: Mapper = (a, w) => {
     zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'flexure';
-    blank(w, ['Lb', 'Cb', 'Mux', 'Vu', 'designLbPos', 'designCbPos', 'designMxPos', 'wcP', 'wcSupport', 'chkRFactor', 'rValue',
-        'chkBetaDist', 'distM1M2', 'distLm', ...Object.values(WC), ...Object.values(USE)]);
+    w.reads.push(...MATERIAL_READS, ...FLEX_READS, 'designZeroDemandStated');
     direct(a, w, { Lb: 'Lb', Cb: 'Cb', Mu: 'Mux', Vu: 'Vu', Lb_pos: 'designLbPos', Cb_pos: 'designCbPos', Mu_pos: 'designMxPos',
         wc_P: 'wcP', wc_support: 'wcSupport', dist_M1_M2: 'distM1M2', dist_Lm: 'distLm', ...WC, ...USE }, used);
-    if (a.dist_M1_M2 !== undefined || a.dist_Lm !== undefined) { w.group.chkBetaDist = true; }
+    if (a.dist_M1_M2 !== undefined || a.dist_Lm !== undefined) { w.merge.chkBetaDist = true; }
     if (a.R_uplift !== undefined) {
         used.add('R_uplift'); used.add('span_type');
         const opt = rOption(a.R_uplift, a.span_type);
-        if (opt) { w.group.chkRFactor = true; w.group.rValue = opt; }
-        else { w.skipped.push({ arg: 'R_uplift', reason: `R ${a.R_uplift} (${a.span_type ?? '경간 조건 없음'}) 은(는) 화면의 표 I6.2.1-1 선택지에 없다` }); w.mcpOnly.R_uplift = a.R_uplift; if (a.span_type !== undefined) { w.mcpOnly.span_type = a.span_type; } }
+        if (opt) { w.merge.chkRFactor = true; w.merge.rValue = opt; }
+        else {
+            w.skipped.push({ arg: 'R_uplift', reason: `R ${a.R_uplift} (${a.span_type ?? '경간 조건 없음'}) 은(는) 화면의 표 I6.2.1-1 선택지에 없다`, carried: true });
+            w.mcpOnly.R_uplift = a.R_uplift;
+            // 그 호출은 받은 R 로 — 화면의 R 선택지가 가진 경간 조건을 섞지 않는다
+            if (a.span_type !== undefined) { w.mcpOnly.span_type = a.span_type; } else { w.unset.push('span_type'); }
+        }
     }
     rest(a, w, used);
 };
@@ -111,7 +136,7 @@ const memberCompression: Mapper = (a, w) => {
     zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'compression';
-    blank(w, ['KxLx', 'KyLy', 'KtLt', 'Pu']);
+    w.reads.push(...MATERIAL_READS, ...COMP_READS, 'designZeroDemandStated');
     direct(a, w, { KxLx: 'KxLx', KyLy: 'KyLy', KtLt: 'KtLt', Pu: 'Pu' }, used);
     rest(a, w, used);
 };
@@ -121,10 +146,11 @@ const memberCombined: Mapper = (a, w) => {
     zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'combined';
-    blank(w, ['KxLx', 'KyLy', 'KtLt', 'Lb', 'Cb', 'Cmx', 'Cmy', 'chkBetaDist', 'distM1M2', 'Pu', 'Mux', 'Muy', 'MayStrength', 'Vu']);
+    // 조합의 휨 부분은 휨 설계를 그대로 부른다(엔진) — 화면 본문의 웹 크리플링 · 냉간가공 · β · 정모멘트 구간 칸도 계산에 든다
+    w.reads.push(...MATERIAL_READS, ...COMP_READS, ...FLEX_READS.filter((k) => k !== 'Vu'), 'Cmx', 'Cmy', 'Muy', 'MayStrength', 'Vu', 'designZeroDemandStated');
     direct(a, w, { KxLx: 'KxLx', KyLy: 'KyLy', KtLt: 'KtLt', Lb: 'Lb', Cb: 'Cb', Cmx: 'Cmx', Cmy: 'Cmy', dist_M1_M2: 'distM1M2',
         Pu: 'Pu', Mux: 'Mux', Muy: 'Muy', May_strength: 'MayStrength', Vu: 'Vu' }, used);
-    if (a.dist_M1_M2 !== undefined) { w.group.chkBetaDist = true; }
+    if (a.dist_M1_M2 !== undefined) { w.merge.chkBetaDist = true; }
     rest(a, w, used);
 };
 
@@ -133,46 +159,59 @@ const memberTension: Mapper = (a, w) => {
     zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'tension';
-    blank(w, ['Pu']);
+    w.reads.push(...MATERIAL_READS, 'Pu', 'designZeroDemandStated');
     direct(a, w, { Tu: 'Pu' }, used);   // 화면은 Pu 칸 하나를 인장 Tu 로도 쓴다
     rest(a, w, used);
 };
 
 const SPAN_OPTS = ['simple', 'cantilever', 'cont-2', 'cont-3', 'cont-4'];
+const LOAD_BUNDLE: Record<string, string> = { D: 'loadD', Lr: 'loadLr', S: 'loadS', Wp: 'loadWp', L: 'loadL' };
+const DECK_BUNDLE: Record<string, string> = { type: 'deckType', t_panel: 'deckTPanel', fastener_spacing: 'deckFastenerSpacing',
+    kphi_override: 'deckKphiOverride', kx_override: 'deckKxOverride', R_tested_uplift: 'deckRTested' };
+const LOAD_READS = ['spanType', 'nSpans', 'spacing', 'loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL', 'chkPatternLoading',
+    'chkLrReduced', 'spanIxIn4', ...Object.values(DECK_BUNDLE), 'bracePointsFt', 'chkI621Confirmed', 'deckInsulationIn'];
 
 function loadsLike(withDesign: boolean): Mapper {
-    return (a, w) => {
+    return (a, w, cur) => {
         const used = new Set<string>();
         material(a, w, used);
         if (a.member_app !== undefined) { used.add('member_app'); put(w, 'merge', 'memberType', a.member_app, 'member_app'); }
-        const groupKeys = ['spanType', 'nSpans', 'spacing', 'loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL', 'chkPatternLoading',
-            'chkLrReduced', 'spanIxIn4', 'deckType', 'deckTPanel', 'deckFastenerSpacing', 'deckKphiOverride', 'deckKxOverride',
-            'bracePointsFt', 'chkI621Confirmed', 'deckInsulationIn', 'deckRTested'];
-        if (withDesign) { groupKeys.push(...Object.values(WC), ...Object.values(USE), 'lapRestrained'); }
-        blank(w, groupKeys);
-        // 경간 유형 · 수
-        let n: number | null = null;
+        w.reads.push(...MATERIAL_READS, ...LOAD_READS);
+        if (withDesign) { w.reads.push(...Object.values(WC), ...Object.values(USE), 'lapRestrained'); }
+        w.reads.push('spans', 'supports', 'lapsPerSupport');
+        // 경간 유형 · 수(받지 않으면 상태의 것 — 경간 표의 모양)
+        const start = cur ? cur.inputs : DS.defaultInputs();
+        let spanType = String(start.spanType ?? 'simple');
+        let nSpans = Number(start.nSpans) || 0;
         if (typeof a.span_type === 'string') {
             used.add('span_type');
             const m = /^cont-(\d+)$/.exec(a.span_type);
-            if (SPAN_OPTS.includes(a.span_type)) { w.group.spanType = a.span_type; n = DS.spanCount(a.span_type, 0); }
-            else if (m) { w.group.spanType = 'cont-n'; w.group.nSpans = Number(m[1]); n = Number(m[1]); }
-            else { w.skipped.push({ arg: 'span_type', reason: `경간 유형 ${a.span_type} 은(는) 화면의 선택지가 아니다` }); }
+            if (SPAN_OPTS.includes(a.span_type)) { w.merge.spanType = a.span_type; spanType = a.span_type; }
+            else if (m) { w.merge.spanType = 'cont-n'; w.merge.nSpans = Number(m[1]); spanType = 'cont-n'; nSpans = Number(m[1]); }
+            else if (a.span_type === 'cont-n' && Array.isArray(a.spans_ft) && a.spans_ft.length >= 1) {
+                // 엔진의 cont-n = 경간 수는 spans_ft 의 길이 — 화면은 cont-n + 경간 수 칸
+                w.merge.spanType = 'cont-n'; w.merge.nSpans = a.spans_ft.length; spanType = 'cont-n'; nSpans = a.spans_ft.length;
+            }
+            else { w.skipped.push({ arg: 'span_type', reason: a.span_type === 'cont-n' ? "'cont-n' 은 spans_ft 와 함께여야 한다(경간 수)" : `경간 유형 ${a.span_type} 은(는) 화면의 선택지가 아니다` }); }
         }
-        const spacing = num(a.spacing_ft);
-        if (a.spacing_ft !== undefined) { used.add('spacing_ft'); put(w, 'group', 'spacing', a.spacing_ft, 'spacing_ft'); }
-        // 하중: 엔진은 선하중(plf = psf × 간격) — 화면은 면압(psf)
+        if (a.spacing_ft !== undefined) { used.add('spacing_ft'); put(w, 'merge', 'spacing', a.spacing_ft, 'spacing_ft'); }
+        // 하중: 엔진은 선하중(plf = psf × 간격) — 화면은 면압(psf). 간격은 받은 것, 없으면 화면의 것
+        const spacing = num(a.spacing_ft) ?? num(start.spacing);
         if (a.loads && typeof a.loads === 'object') {
             used.add('loads');
             const L = a.loads;
             const extra: Record<string, unknown> = {};
             if (spacing && spacing > 0) {
-                const psf = (v: unknown) => (num(v) === null ? undefined : (num(v) as number) / spacing);
-                const t: Record<string, string> = { D: 'loadD', Lr: 'loadLr', S: 'loadS', Wp: 'loadWp', L: 'loadL' };
-                for (const [k, key] of Object.entries(t)) { const v = psf(L[k]); if (v !== undefined) { put(w, 'group', key, v, `loads.${k}`); } }
-                if (num(L.W) !== null) { put(w, 'group', 'loadWu', -(L.W as number) / spacing, 'loads.W'); }
+                // 결정 D8: 묶음째로 — 준 묶음에서 빠진 성분은 화면의 값이 아니라 「주지 않음」(본문에서 0)
+                for (const [k, key] of Object.entries(LOAD_BUNDLE)) {
+                    const v = num(L[k]);
+                    if (v === null) { w.group[key] = null; } else { put(w, 'group', key, perSpacing(v, spacing), `loads.${k}`); }
+                }
+                // 화면의 Wu 는 양력의 크기(본문 W = −Wu × 간격)
+                if (num(L.W) === null) { w.group.loadWu = null; } else { put(w, 'group', 'loadWu', perSpacing(-(L.W as number), spacing), 'loads.W'); }
             } else {
-                w.skipped.push({ arg: 'loads', reason: 'spacing_ft 가 없어 선하중(plf)을 화면의 면압(psf)으로 바꿀 수 없다' });
+                // 본문은 부재 간격이 비어 어차피 막힌다(그 칸을 말한다) — 여기서는 받은 묶음을 그대로 실어 둔다
+                w.skipped.push({ arg: 'loads', reason: 'spacing_ft 가 없고 화면의 부재 간격도 비어 선하중(plf)을 화면의 면압(psf)으로 바꿀 수 없다', carried: true });
                 Object.assign(extra, L);
             }
             for (const [k, v] of Object.entries(L)) { if (!['D', 'Lr', 'S', 'W', 'Wp', 'L'].includes(k)) { extra[k] = v; } }
@@ -183,10 +222,10 @@ function loadsLike(withDesign: boolean): Mapper {
         if (a.deck && typeof a.deck === 'object') {
             used.add('deck');
             const d = a.deck;
-            const t: Record<string, string> = { type: 'deckType', t_panel: 'deckTPanel', fastener_spacing: 'deckFastenerSpacing',
-                kphi_override: 'deckKphiOverride', kx_override: 'deckKxOverride', R_tested_uplift: 'deckRTested' };
             const extra: Record<string, unknown> = {};
-            for (const [k, v] of Object.entries(d)) { if (t[k]) { put(w, 'group', t[k], v, `deck.${k}`); } else { extra[k] = v; } }
+            // 결정 D8: 묶음째로 — 준 데크 묶음에서 빠진 화면 칸은 「주지 않음」
+            for (const key of Object.values(DECK_BUNDLE)) { w.group[key] = null; }
+            for (const [k, v] of Object.entries(d)) { if (DECK_BUNDLE[k]) { put(w, 'group', DECK_BUNDLE[k], v, `deck.${k}`); } else { extra[k] = v; } }
             if (Object.keys(extra).length) { w.mcpOnly.deck = extra; }
         }
         if (withDesign) {
@@ -194,41 +233,82 @@ function loadsLike(withDesign: boolean): Mapper {
             // 계약 §6.3: lap_restrained(옛 이름 distortion_restrained 도) → 검토 상태의 lapRestrained
             if (a.lap_restrained !== undefined || a.distortion_restrained !== undefined) {
                 used.add('lap_restrained'); used.add('distortion_restrained');
-                put(w, 'group', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
+                put(w, 'merge', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
             }
         }
-        // 경간 표
-        if (Array.isArray(a.spans_ft) || Array.isArray(a.supports) || Array.isArray(a.laps_per_support)) {
-            for (const k of ['spans_ft', 'supports', 'laps_per_support', 'span_ft', 'laps']) { if (a[k] !== undefined) { used.add(k); } }
-            const st = typeof w.group.spanType === 'string' ? w.group.spanType : 'simple';
-            const count = n ?? DS.spanCount(st, Number(w.group.nSpans) || 0);
-            const table: SpanTable = DS.defaultSpanTable(st, Number(w.group.nSpans) || 0);
-            if (Array.isArray(a.spans_ft)) { table.spans = a.spans_ft.map((v: unknown) => num(v)); }
-            else if (num(a.span_ft) !== null) { table.spans = table.spans.map(() => a.span_ft); }
-            if (Array.isArray(a.supports)) { table.supports = [...a.supports]; }
-            if (Array.isArray(a.laps_per_support)) {
-                table.lapsPerSupport = table.lapsPerSupport.map((cell: { left: number | null; right: number | null }, i: number) => {
-                    const l = a.laps_per_support[i] || {};
-                    return { left: cell.left === null ? null : (num(l.left_ft) ?? 0), right: cell.right === null ? null : (num(l.right_ft) ?? 0) };
-                });
-            }
-            const errs = DS.validateSpanTable(table, st, Number(w.group.nSpans) || count);
-            if (errs.length) { w.skipped.push({ arg: 'spans_ft / supports / laps_per_support', reason: errs.join(' · ') }); }
-            else { w.spans = table; }
-        }
+        spanTable(a, w, used, spanType, nSpans);
         rest(a, w, used);
     };
 }
 
+/**
+ * 경간 표 — 묶음째로(결정 D8 · 「지금처럼 주었을 때만」): 경간 · 지점 · 랩의 인자 가운데 하나라도 받으면 표 전체를 쓴다 — 그 경간 유형의
+ * 처음 표(지점 모두 P · 캔틸레버 F N, 랩 0)에 받은 부분을 얹는다. spans_ft(또는 span_ft 를 모든 경간에) → 경간, supports → 지점,
+ * laps_per_support(또는 laps 를 모든 안쪽 지점에) → 지점별 랩. 받지 않은 부분에 화면의 지점 · 랩을 섞지 않는다(엔진의 「supports 를
+ * 주지 않으면 모두 핀」 과 같은 뜻 — 하중의 Lr 을 섞지 않는 것과 같은 까닭). 하나도 받지 않으면 화면의 표 그대로.
+ */
+function spanTable(a: any, w: McpWrite, used: Set<string>, spanType: string, nSpans: number): void {
+    const hasSpans = Array.isArray(a.spans_ft) || num(a.span_ft) !== null;
+    const hasSupports = Array.isArray(a.supports);
+    const hasLaps = Array.isArray(a.laps_per_support) || (!!a.laps && typeof a.laps === 'object' && !Array.isArray(a.laps));
+    for (const k of ['spans_ft', 'span_ft', 'supports', 'laps_per_support', 'laps']) { if (a[k] !== undefined) { used.add(k); } }
+    if (!hasSpans && !hasSupports && !hasLaps) { return; }
+    const fresh: SpanTable = DS.defaultSpanTable(spanType, nSpans);
+    const table: SpanTable = clone(fresh);
+    if (Array.isArray(a.spans_ft)) { table.spans = a.spans_ft.map((v: unknown) => num(v)); }
+    else if (num(a.span_ft) !== null) { table.spans = table.spans.map(() => a.span_ft); }
+    if (hasSupports) { table.supports = [...a.supports]; }
+    if (Array.isArray(a.laps_per_support)) {
+        table.lapsPerSupport = fresh.lapsPerSupport.map((cell: { left: number | null; right: number | null }, i: number) => {
+            const l = a.laps_per_support[i] || {};
+            return { left: cell.left === null ? null : (num(l.left_ft) ?? 0), right: cell.right === null ? null : (num(l.right_ft) ?? 0) };
+        });
+    } else if (hasLaps) {
+        // 엔진의 laps: 모든 안쪽 지점에 같은 랩(끝 지점에는 랩이 없다)
+        const n = fresh.lapsPerSupport.length - 1;
+        table.lapsPerSupport = fresh.lapsPerSupport.map((cell: { left: number | null; right: number | null }, i: number) => {
+            const inner = i > 0 && i < n;
+            return { left: cell.left === null ? null : (inner ? (num(a.laps.left_ft) ?? 0) : 0), right: cell.right === null ? null : (inner ? (num(a.laps.right_ft) ?? 0) : 0) };
+        });
+    }
+    const errs = DS.validateSpanTable(table, spanType, nSpans);
+    if (errs.length) { w.skipped.push({ arg: 'spans_ft / span_ft / supports / laps_per_support / laps', reason: errs.join(' · ') }); return; }
+    w.spans = table;
+    // 경간별 Ix 는 경간마다 한 값 — 경간 표의 것이다. 표를 묶음째 쓸 때 함께 주지 않았으면 「주지 않음」(앞 사례의 목록이 남으면
+    // 개수가 경간 수와 달라 본문이 막힌다 — 6경간의 목록이 남은 채 단순보를 부르던 다리 시험 s14d)
+    if (a.I_span_in4 === undefined) { w.group.spanIxIn4 = null; }
+}
+
+/** 한 ulp 옆의 수(0 이 아닌 유한한 수) */
+function ulpStep(x: number, dir: 1 | -1): number {
+    const f = new Float64Array([x]);
+    const u = new BigInt64Array(f.buffer);
+    u[0] += BigInt(dir * (x >= 0 ? 1 : -1));
+    return f[0];
+}
+/**
+ * 선하중(plf) → 화면의 면압(psf) = plf ÷ 간격. 화면 단추의 본문이 다시 곱하면(psf × 간격) 받은 plf 가 그대로 나오는 값을 고른다(있으면) —
+ * 15 plf ÷ 3.28 ft × 3.28 ft 가 14.999999999999998 이 되어 AI 가 준 하중과 다른 수가 엔진에 가지 않게.
+ */
+function perSpacing(plf: number, spacing: number): number {
+    const q = plf / spacing;
+    if (q * spacing === plf || q === 0 || !isFinite(q)) { return q; }
+    for (const c of [Number(q.toPrecision(15)), Number(q.toPrecision(14)), Number(q.toPrecision(13)), ulpStep(q, 1), ulpStep(q, -1)]) {
+        if (c * spacing === plf) { return c; }
+    }
+    return q;
+}
+
+const CONNECTION_FIELDS: Record<string, string> = { connection_type: 'connSingleType', t1: 'connT1', t2: 'connT2', d: 'connD', n: 'connN',
+    Fy: 'connFy', Fu: 'connFu', Pu: 'connPu', Tu: 'connTu', e: 'connE', s: 'connS', width: 'connWidth', member_case: 'connMemberCase',
+    j6_3_not_applicable: 'connJ63NotApplicable', dw: 'connDw', Pnvs: 'connPnvs', weld_length: 'connWeldL', weld_size: 'connWeldSize',
+    groove_type: 'connGrooveType', Fub: 'connFub', Fuf: 'connFuf' };
+
 const connection: Mapper = (a, w) => {
     const used = new Set<string>();
     material(a, w, used, {});   // 접합의 Fy · Fu 는 접합 칸(connFy · connFu) — 아래
-    const t: Record<string, string> = { connection_type: 'connSingleType', t1: 'connT1', t2: 'connT2', d: 'connD', n: 'connN',
-        Fy: 'connFy', Fu: 'connFu', Pu: 'connPu', Tu: 'connTu', e: 'connE', s: 'connS', width: 'connWidth', member_case: 'connMemberCase',
-        j6_3_not_applicable: 'connJ63NotApplicable', dw: 'connDw', Pnvs: 'connPnvs', weld_length: 'connWeldL', weld_size: 'connWeldSize',
-        groove_type: 'connGrooveType', Fub: 'connFub', Fuf: 'connFuf' };
-    blank(w, Object.values(t));
-    direct(a, w, t, used);
+    w.reads.push('designMethod', ...Object.values(CONNECTION_FIELDS));
+    direct(a, w, CONNECTION_FIELDS, used);
     rest(a, w, used);
 };
 
@@ -237,16 +317,19 @@ const lap: Mapper = (a, w) => {
     material(a, w, used);
     const t: Record<string, string> = { lap_left_in: 'connLapLeft', lap_right_in: 'connLapRight', Mu_support: 'connMu', Vu_support: 'connVu',
         fastener_type: 'connFastenerType', fastener_dia: 'connFastenerDia', n_rows: 'connNRows', end_distance: 'connEdgeDist', Pnvs: 'connLapPnvs' };
-    blank(w, [...Object.values(t), 'lapRestrained', 'connZeroDemandStated']);
+    w.reads.push(...MATERIAL_READS, ...Object.values(t), 'lapRestrained', 'connZeroDemandStated', 'connLapSupport');
     direct(a, w, t, used);
     // 계약 §6.3: 0 은 밝혔을 때만 — 그 진술도 검토 상태에(화면의 칸과 같은 키)
-    if (a.zero_demand_stated !== undefined) { used.add('zero_demand_stated'); put(w, 'group', 'connZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated'); }
+    if (a.zero_demand_stated !== undefined) { used.add('zero_demand_stated'); put(w, 'merge', 'connZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated'); }
     // 계약 §6.3: 랩 구속의 진술(옛 이름 distortion_restrained) — 퍼린과 같은 검토 상태 키
     if (a.lap_restrained !== undefined || a.distortion_restrained !== undefined) {
         used.add('lap_restrained'); used.add('distortion_restrained');
-        put(w, 'group', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
+        put(w, 'merge', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
     }
-    rest(a, w, used);   // d · t(단면 — 모델 칸) · Se · Sf · Mnd · Vn … 은 mcpOnly
+    // 단면 치수(d · t)는 모델 칸 — 상태에 쓰지 않고(mcpOnly) 그 호출의 본문은 받은 값으로(모델에 템플릿 치수가 없어도 막히지 않게)
+    if (num(a.d) !== null) { w.drafts.tplH = a.d; }
+    if (num(a.t) !== null) { w.drafts.tplT = a.t; }
+    rest(a, w, used);   // d · t · Se · Sf · Mnd · Vn … 은 mcpOnly
 };
 
 /** 호스트 action(+ member_type) → 그 MCP 도구의 이름과 매퍼. 상태에 쓰지 않는 action 이면 null */
@@ -269,11 +352,76 @@ export function mcpGroupFor(action: string, options: any): { tool: string; map: 
     }
 }
 
-/** MCP 도구의 인자(US) → 상태에 쓸 것 */
-export function mcpWrite(action: string, options: any): McpWrite | null {
+/** MCP 도구의 인자(US) → 상태에 합칠 것. cur = 지금 상태(경간 표의 바탕 · 하중 환산의 간격) */
+export function mcpWrite(action: string, options: any, cur?: Cur): McpWrite | null {
     const g = mcpGroupFor(action, options);
     if (!g) { return null; }
-    const w: McpWrite = { tool: g.tool, group: {}, merge: {}, mcpOnly: {}, skipped: [] };
-    g.map(options || {}, w);
+    const w: McpWrite = { tool: g.tool, group: {}, merge: {}, mcpOnly: {}, context: {}, unset: [], drafts: {}, reads: [], skipped: [] };
+    g.map(options || {}, w, cur);
+    w.reads = [...new Set(w.reads)];
     return w;
+}
+
+/** 이 호출에 받은 검토 상태의 칸(합치기 · 묶음 · 경간 표의 받은 부분) */
+export function givenKeys(w: McpWrite): Set<string> {
+    return new Set([...Object.keys(w.merge), ...Object.keys(w.group), ...Object.keys(w.spans || {})]);
+}
+
+/** 합친 상태로 만든 화면 단추의 본문 → 그 호출의 엔진 본문: 화면 칸이 없는 인자 · 위치 · 조합 꼬리표를 얹는다 */
+export function mcpBody(data: Record<string, unknown>, w: McpWrite): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...data };
+    for (const k of w.unset) { delete out[k]; }
+    const isObj = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v);
+    for (const [k, v] of Object.entries(w.mcpOnly)) {
+        // 하중 · 데크 묶음의 화면 칸이 없는 성분(R · Fss_kip …)은 묶음 안에 — 화면 칸의 성분은 상태(= 이번에 준 묶음)에서 왔다
+        out[k] = (k === 'loads' || k === 'deck') && isObj(v) && isObj(out[k]) ? { ...(out[k] as object), ...(v as object) } : v;
+    }
+    for (const [k, v] of Object.entries(w.context)) { out[k] = v; }
+    return out;
+}
+
+/** 화면 칸이 없어 화면 단추로는 다시 나오지 않는 인자의 이름(묶음 안의 것은 loads.R 꼴) */
+export function argsNotOnScreen(w: McpWrite): string[] {
+    const out: string[] = [];
+    for (const [k, v] of Object.entries(w.mcpOnly)) {
+        if ((k === 'loads' || k === 'deck') && v && typeof v === 'object' && !Array.isArray(v)) { out.push(...Object.keys(v).map((x) => `${k}.${x}`)); }
+        else { out.push(k); }
+    }
+    return out;
+}
+
+/** 화면 단추의 본문이 그 값이면 보내지 않는 칸(requests.ts — _optPos 의 0 이하, 켰을 때만 싣는 진술, 「자동」 선택) */
+const POSITIVE_ONLY = new Set(['wcLo', 'wcEdgeDistance', 'wcFastenerSpacing']);
+const TRUE_ONLY = new Set(['designZeroDemandStated', 'connZeroDemandStated', 'chkRFactor', 'lapRestrained', 'chkI621Confirmed', 'connJ63NotApplicable']);
+function notSent(k: string, v: unknown): boolean {
+    if (POSITIVE_ONLY.has(k)) { return !(typeof v === 'number' && v > 0); }
+    if (TRUE_ONLY.has(k)) { return v !== true; }
+    return k === 'wcFamily' && v === 'auto';
+}
+
+/**
+ * 결정 D1: AI 가 주지 않아 상태에서 온 값 — 그 도구의 본문이 읽는 칸 가운데 이번에 받지 않았고 비어 있지 않은 것({key, value, source}).
+ * 본문에 들지 않는 것은 뺀다(R 선택지는 체크했을 때만, β 의 M1/M2 · Lm 은 β 를 켰을 때만, 접합은 그 형식이 쓰는 칸만, notSent).
+ */
+export function inputsUsed(w: McpWrite, st: CaseState): { key: string; value: unknown; source: string }[] {
+    const given = givenKeys(w);
+    const inp = st.inputs;
+    const ct = String(inp.connSingleType || 'screw');
+    const connSkip: Record<string, boolean> = {
+        connDw: !['screw', 'paf', 'bolt'].includes(ct), connPnvs: ct !== 'screw',
+        connWeldL: !['fillet_weld', 'arc_spot', 'arc_seam', 'groove'].includes(ct), connWeldSize: !['fillet_weld', 'arc_spot', 'arc_seam', 'groove'].includes(ct),
+        connGrooveType: ct !== 'groove', connFub: !['bolt', 'screw'].includes(ct), connFuf: ct !== 'paf',
+    };
+    const out: { key: string; value: unknown; source: string }[] = [];
+    for (const k of w.reads) {
+        if (given.has(k)) { continue; }
+        if (k === 'rValue' && inp.chkRFactor !== true) { continue; }
+        if ((k === 'distM1M2' || k === 'distLm') && inp.chkBetaDist !== true) { continue; }
+        if ((w.tool === 'design_connection' || w.tool === 'aisi_design_connection') && connSkip[k]) { continue; }
+        const span = k === 'spans' || k === 'supports' || k === 'lapsPerSupport';
+        const v = span ? (st.spans as any)[k] : inp[k];
+        if (v === null || v === undefined || v === '' || notSent(k, v)) { continue; }
+        out.push({ key: k, value: clone(v), source: st.sources[k] ?? 'default' });
+    }
+    return out;
 }

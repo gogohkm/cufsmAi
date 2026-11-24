@@ -1,7 +1,7 @@
 /* global process */
 // 다시 실은 화면은 편집이 아니다 — 진짜 StcfsdPanel + 진짜 파이썬, 화면 없이(화면이 보낼 메시지를 그대로 다시 보낸다).
 //   node test/webview/reload_replay_contract.js
-// 데스크톱 작성자의 u50 · u5c 순서: MCP aisi_design_flexure(웹 크리플링 칸을 비움 — 「AI: 주지 않음」) → validate_design → 화면을 다시 실음
+// 데스크톱 작성자의 u50 · u5c 순서: MCP aisi_design_flexure(결정 D1 — 받은 칸만 쓴다, 하중 해석이 채운 웹 크리플링 칸은 그대로) → validate_design → 화면을 다시 실음
 // (두 번째 caseHello · 다시 보내기 · 다시 보낸 loadAnalysisComplete 가 부르는 채우기 · 상태를 그리며 낸 연동 메아리).
 // 그 뒤 판 · 출처 · 값 · 무효 장부 · results.validation 이 그대로여야 한다. 그리고 새 하중 해석의 채우기 · 사람의 변경은 그대로 받는다.
 'use strict';
@@ -31,10 +31,11 @@ async function main() {
     let r0 = p.__testGetCase().state.rev;
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'load-analysis', seenRev: r0, changes: { wcSupport: 'IOF', Lb: 61 } } });
     assert.deepStrictEqual([p.__testGetCase().state.inputs.wcSupport, p.__testGetCase().state.sources.wcSupport], ['IOF', 'load-analysis'], 'the fill of a new load analysis is taken');
-    // AI 의 묶음 쓰기: 웹 크리플링 칸을 비운다(「AI: 주지 않음」)
+    // AI 의 설계 도구: 받은 칸만 쓴다(결정 D1) — 하중 해석이 채운 웹 크리플링 칸은 그대로이고 계산에 쓰였다고 알린다
     const d = await p.handleMcpAction({ action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy: 55, Fu: 70, Lb: 60, Cb: 1, Mu: 40, Vu: 1 });
     assert(!d.error, d.error);
-    assert.deepStrictEqual([p.__testGetCase().state.inputs.wcSupport, p.__testGetCase().state.sources.wcSupport], [null, 'ai']);
+    assert.deepStrictEqual([p.__testGetCase().state.inputs.wcSupport, p.__testGetCase().state.sources.wcSupport], ['IOF', 'load-analysis']);
+    assert((d.case_inputs_used || []).some((u) => u.key === 'wcSupport' && u.value === 'IOF' && u.source === 'load-analysis'), 'named as used, with its source');
     const v = await p.handleMcpAction({ action: 'validate_design' });
     assert(v && v.counts, 'validated');
     const before = await snap();
@@ -50,7 +51,7 @@ async function main() {
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', changes: { wcSupport: 'EOF', wcFastened: 'fastened' } } });
     const after = await snap();
     for (const k of ['rev', 'inputs', 'sources', 'spans', 'ledger', 'validation']) { assert.deepStrictEqual(after[k], before[k], `the reload changed ${k}`); }
-    notes.push(`reload after an AI group write: rev ${after.rev}, sources, values, ledger and results.validation unchanged`);
+    notes.push(`reload after an AI design write: rev ${after.rev}, sources, values, ledger and results.validation unchanged`);
 
     // ── 사람의 변경은 받고, 그 뒤의 연동도 받는다 ──────────────────────────
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: p.__testGetCase().state.rev, changes: { Lb: 72 } } });

@@ -187,7 +187,7 @@ export interface CaseStatusData {
     records: RecordsHealth;
     runs?: Array<{ kind: RunKind; at: string; by: string; client: string | null; engine: string | null; status: string; ms: number | null }>;
     /** 이 대상의 실행 이력(새 것부터 20) — 실행마다 요약(판정 · 최대 판정비 · 지배 항목 · 단면 성질 몇 개). R2-3: 07 의 「먼저 한 것」 */
-    history?: Array<{ run: string; kind: RunKind; at: string; by: string; client: string | null; status: string;
+    history?: Array<{ run: string; no: number; auto?: true; kind: RunKind; at: string; by: string; client: string | null; status: string;
         pass: boolean | null; maxRatio: number | null; governing: { id: string; ratio: number | null; verdict: string } | null; props: Record<string, number> | null }>;
 }
 
@@ -884,10 +884,12 @@ export class RecordsDesk {
         }
         if (opts.detail === 'runs') {
             data.runs = [...last.values()].map((r) => ({ kind: r.kind, at: r.at, by: r.actor, client: r.client, engine: r.engineId ? r.engineId.slice(7, 19) : null, status: r.status, ms: r.ms }));
-            data.history = runs.filter((r) => r.caseId === caseId).slice(-20).reverse().map((r) => {
+            // 차례 번호(no)는 그 대상의 실행 전체에서 시간순으로 센다 — 새 것 20개만 내보내도 번호는 그대로. design_dsm 은 해석 뒤에 저절로 생긴 것(auto)
+            data.history = runs.filter((r) => r.caseId === caseId).map((r, i) => ({ r, no: i + 1 })).slice(-20).reverse().map(({ r, no }) => {
                 const g = r.summary?.governing?.[0] ?? null;
-                return { run: r.runId, kind: r.kind, at: r.at, by: r.actor, client: r.client, status: r.status, pass: r.summary?.pass ?? null,
-                    maxRatio: r.summary?.maxRatio ?? null, governing: g ? { id: g.id, ratio: g.ratio, verdict: g.verdict } : null, props: r.summary?.props ?? null };
+                return { run: r.runId, no, kind: r.kind, at: r.at, by: r.actor, client: r.client, status: r.status, pass: r.summary?.pass ?? null,
+                    maxRatio: r.summary?.maxRatio ?? null, governing: g ? { id: g.id, ratio: g.ratio, verdict: g.verdict } : null, props: r.summary?.props ?? null,
+                    ...(r.kind === 'design_dsm' ? { auto: true } : {}) };
             });
         }
         return data;

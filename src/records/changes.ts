@@ -5,6 +5,8 @@
  *  - MCP 요청 하나 = 묶음 하나(`run`). 같은 행위자의 겹친 요청은 바깥 것이 닫을 때 한 묶음.
  *  - 편집 상태(F2) 시작 → 끝 = 「사용자 변경」 하나(`sessionStart` · `sessionEnd`), 버리기는 묶음 없음(`sessionDiscard`).
  *  - 그 밖의 화면 변경은 조용한 시간(기본 2 초)으로(`touch` · `tick`).
+ *  - D4: 열린 묶음이 없을 때 끼운 화면의 연동(mirror · unit-toggle)만으로 바뀐 것은 행위자 `program` 의 줄 하나(호스트가 `touch` 하고 바로 `flush`) —
+ *    사람 · AI 의 묶음과 행위자가 달라 그 묶음에 들지도 그것을 닫지도 않는다(열린 묶음이 있으면 호스트는 이 길로 오지 않는다).
  *  - 사람의 묶음(편집 상태 · 조용한 시간)이 열린 동안의 요청: 바꾼 것이 없으면(읽기 — 누구의 것이든) 묶음을 그대로 둔다. 같은 행위자가
  *    바꾸면 그 묶음에 든다. 다른 행위자가 바꾸면 사람 묶음을 그 요청 직전까지로 닫고 요청 묶음을 내고, 편집 상태면 그 뒤 새 묶음으로 다시 연다
  *    (행위자가 섞인 묶음은 없다).
@@ -32,6 +34,8 @@ export interface ChangeContext {
     source?: string | null;
     /** V9b-05: 그 묶음에서 화면 연동(mirror) · 단위 바꿈(unit-toggle)으로 바뀐 것이 있었다 — 사람의 편집에 딸린 것 */
     via?: string[];
+    /** 그 묶음의 요청(MCP 동작 하나 · 화면의 실행 하나) 안에서 적힌 실행 id — 묶음이 실행보다 늦게 적혀도 그 실행에 들어간 변경이다 */
+    runs?: string[];
 }
 export interface FollowChange { path: string; from: unknown; to: unknown; by: 'load-analysis' | 'mirror' }
 export interface InvalidatedResult { kind: string; id?: string; reason: string }
@@ -39,11 +43,27 @@ export interface ChangeBody {
     caseId: string; trigger: string; reason?: string; work?: string; source?: string;
     /** V9b-05: 화면 연동 · 단위 바꿈으로 바뀐 것이 그 묶음에 있었다(via: mirror · unit-toggle) */
     via?: string[];
+    /** 같은 요청이 남긴 실행 id(있을 때만 — 옛 줄에는 없다: 읽는 쪽은 시각으로) */
+    runs?: string[];
     before: { contentFp: string; modelFp: string; caseFp: string };
     after: { contentFp: string; modelFp: string; caseFp: string };
     fields: FieldChange[]; fieldsOmitted?: number;
     follows?: FollowChange[]; invalidated?: InvalidatedResult[];
     title: string;
+}
+
+/**
+ * 읽어서 내보낼 때의 행위자(결정 D4 — 통일안 6.5). 적힌 줄은 고쳐 쓰지 않는다:
+ *  - 옛 줄의 사람 + trigger mirror · unit-toggle(끼운 화면의 연동만으로 생긴 줄) → `program`
+ *  - `screen`(새 화면의 중계) → `person`
+ *  - `external`(밖에서 바뀜) → `file` 은 `file: true` 일 때만(work_log — list_changes 는 external 그대로)
+ */
+export function shownActorKind(kind: unknown, trigger: unknown, opts: { file?: boolean } = {}): string {
+    const k = String(kind ?? '');
+    if (k === 'person' && (trigger === 'mirror' || trigger === 'unit-toggle')) { return 'program'; }
+    if (k === 'screen') { return 'person'; }
+    if (k === 'external' && opts.file) { return 'file'; }
+    return k;
 }
 
 /** 변경 줄의 몸. 다른 것이 없으면(따라 바뀐 것도) null */
@@ -68,6 +88,7 @@ export function buildChange(ctx: ChangeContext, before: Snapshot, after: Snapsho
     if (ctx.source) { if (!ID_RE.test(ctx.source)) { throw new Error('bad source id'); } body.source = ctx.source; }
     if (d.omitted) { body.fieldsOmitted = d.omitted; }
     if (ctx.via && ctx.via.length) { body.via = [...new Set(ctx.via)].filter((v) => v === 'mirror' || v === 'unit-toggle'); }
+    if (ctx.runs && ctx.runs.length) { const rs = [...new Set(ctx.runs)].filter((x) => ID_RE.test(x)).slice(-20); if (rs.length) { body.runs = rs; } }
     if (follows.length) { body.follows = follows; }
     if (opts.invalidated?.length) { body.invalidated = opts.invalidated.slice(0, 40).map((x) => ({ kind: String(x.kind).slice(0, 40), ...(x.id ? { id: String(x.id).slice(0, 80) } : {}), reason: String(x.reason).slice(0, 300) })); }
     return body;
@@ -98,7 +119,19 @@ export class ChangeBatcher {
      */
     private guests: OpenBatch[] = [];
     private session: ChangeContext | null = null;
+    /** 요청의 문맥 → 그 요청이 든 묶음(`noteRun` 이 실행 id 를 그 묶음에 싣는다 — 겹친 요청은 저마다의 문맥으로 찾는다) */
+    private owner = new WeakMap<ChangeContext, OpenBatch>();
     constructor(private readonly d: BatcherDeps) {}
+
+    /**
+     * 요청(`run` 에 준 문맥) 안에서 실행 하나가 적혔다 — 그 요청이 든 묶음의 줄에 `runs` 로 싣는다. 사람의 묶음(조용함 · 편집 상태)에 든
+     * 화면의 실행이면 그 묶음은 그 실행까지다(뒤의 편집은 새 묶음 — `touch`).
+     */
+    noteRun(ctx: ChangeContext, runId: string): void {
+        const b = this.owner.get(ctx);
+        if (!b || !runId) { return; }
+        b.ctx = { ...b.ctx, runs: [...(b.ctx.runs || []), runId] };
+    }
 
     private build(ctx: ChangeContext, before: Snapshot, after: Snapshot): ChangeBody | null {
         return (this.d.build ?? ((c, x, y) => buildChange(c, x, y)))(ctx, before, after);
@@ -204,10 +237,11 @@ export class ChangeBatcher {
         if (opts.readOnly) { return await fn(); }
         // 같은 행위자의 손님이 이미 돈다 — 그 안에서(겹친 요청)
         const mate = this.guests.find((g) => sameActor(g.ctx, ctx));
-        if (mate) { return await this.fly(mate, fn); }
+        if (mate) { this.owner.set(ctx, mate); return await this.fly(mate, fn); }
         const o = this.open;
-        if (!o) { return await this.fly(this.start(ctx, 'request'), fn); }
+        if (!o) { const t = this.start(ctx, 'request'); this.owner.set(ctx, t); return await this.fly(t, fn); }
         if (sameActor(o.ctx, ctx)) {
+            this.owner.set(ctx, o);
             // 같은 행위자의 겹친 요청 — 바깥 것이 닫을 때 한 묶음
             if (o.kind === 'request') { return await this.fly(o, fn); }
             // 사람의 묶음(조용함 · 편집 상태) 안의 같은 행위자 요청(화면 자신의 쓰기) — 그 묶음에 든다
@@ -219,6 +253,7 @@ export class ChangeBatcher {
         }
         // 다른 행위자의 요청 — 열린 묶음(도는 요청 · 사람의 묶음)을 닫지 않는다. 이 요청이 도는 동안 바뀐 것만 끝날 때 갈라 낸다
         const g: OpenBatch = { ctx, before: this.d.snapshot(), depth: 0, kind: 'request', lastTouch: this.d.now() };
+        this.owner.set(ctx, g);
         this.guests.push(g);
         return await this.fly(g, fn);
     }
@@ -272,7 +307,14 @@ export class ChangeBatcher {
      * 들고, 다른 행위자의 것이면 그 요청을 닫지 않고 손님으로 돌린 뒤 이 편집의 묶음을 연다. 편집의 동기 부분이 끝나면 `touchDone`.
      */
     touch(ctx: ChangeContext): void {
-        const o = this.open;
+        let o = this.open;
+        // 실행이 든 사람의 묶음(화면의 실행)은 그 실행까지 — 그 뒤의 편집은 새 묶음(그 실행에 들어간 것으로 읽히지 않게)
+        if (o && o.kind !== 'request' && o.depth === 0 && o.ctx.runs && o.ctx.runs.length) {
+            const sess = o.kind === 'session';
+            this.close();
+            if (sess && this.session) { this.open = { ctx: this.session, before: this.d.snapshot(), depth: 0, kind: 'session', lastTouch: this.d.now() }; }
+            o = this.open;
+        }
         if (o && o.kind === 'request') {
             if (sameActor(o.ctx, ctx)) { this.cutGuests(); return; }
             this.demote(o);

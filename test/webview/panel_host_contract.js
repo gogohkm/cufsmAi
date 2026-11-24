@@ -642,7 +642,8 @@ async function scenarioK4aLoadsAndLedger(ctx) {
   // 바뀐 입력: 바뀐 키를 장부에
   await p.handleMcpAction({ ...loads, span_ft: 22 });
   const md2 = p.getStatus().invalidated.find((e) => e.kind === 'member_design');
-  assert.deepStrictEqual(md2.cause.inputs, ['span_ft'], 'the ledger names the load input that changed');
+  // 결정 D1: MCP 의 하중 해석도 화면 단추의 본문(경간 표 spans_ft 를 함께 싣는다) — span_ft 하나가 바뀌면 두 키가 바뀐다
+  assert.deepStrictEqual(md2.cause.inputs, ['span_ft', 'spans_ft'], 'the ledger names the load input that changed');
   // GUI 경로: 메시지 한 번(전과 같다), 비교로 지우지 않는다 — 입력 변화는 화면이 알린다
   await p.handleMcpAction(flex);
   p.__testClearPostedMessages();
@@ -886,6 +887,134 @@ async function scenarioV5cPathRules(ctx) {
   }
 }
 
+// 검증 문서 4.1(ALCalc_StCFSD_검증_및_업무탭_통일안.md, S3): 둥근 모서리 립C 150×50×15×2.0 r 3 — 압축 설계 뒤 휨 해석.
+// 화면은 해석이 끝날 때 그때의 부재 종류(압축)로 설계 DSM 을 준비한다(_autoPrepareDesignDsm) — 준비된 값에는 P 만 있다.
+// 휨 설계가 그 값을 통째로 골라 Mcrl · Mcrd 없이 해석식으로 가고 「FSM 을 먼저 실행하세요」 라고 하던 것.
+// 규칙(압축 · 휨 같은 것): 하중군마다 준비된 값에 있으면 그것, 없으면 그 하중군의 현재 해석.
+async function scenarioDsmFamilyRule(ctx) {
+  const p = ctx.panel;
+  const MM = 1 / 25.4;
+  const KSI = 1 / 6.894757293168361;
+  const Fy = 345 * KSI; const Fu = 450 * KSI;
+  const codes = (r) => (r.notices || []).map((n) => n.code);
+  await p.handleMcpAction({ action: 'generate_template', section_type: 'lippedc',
+    params: { H: 150 * MM, B: 50 * MM, D: 15 * MM, t: 2 * MM, r: 3 * MM } });
+  // 앞 시나리오의 BC · 길이를 쓰지 않는다 — 서명곡선(S-S), 패널 기본 격자(1 – 1000 in, 50 점)
+  await p.handleMcpAction({ action: 'set_bc', BC: 'S-S' });
+  await p.handleMcpAction({ action: 'set_lengths', min: 1, max: 1000, n: 50 });
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: Fy });
+  await p.handleMcpAction({ action: 'run_analysis' });
+  const comp = await p.handleMcpAction({ action: 'aisi_design', member_type: 'compression', design_method: 'LRFD',
+    Fy, Fu, KxLx: 2000 * MM, KyLy: 2000 * MM, KtLt: 2000 * MM, Pu: 40 / 4.4482216152605 });
+  assert(!comp.error, comp.error);
+  assert.strictEqual(comp.dsm_basis, 'current_analysis', 'compression: the current compression analysis');
+  assert.deepStrictEqual([comp.dsm_source.Pcrl, comp.dsm_source.Pcrd].map(String), ['FSM', 'FSM'], 'compression uses FSM Pcrl · Pcrd');
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: Fy });
+  await p.handleMcpAction({ action: 'run_analysis' });
+  // 화면의 자동 준비(그때 화면의 부재 종류 = 압축)
+  await p.__testDispatchMessage({ command: 'prepareDesignDsm', data: { member_type: 'compression', Fy } });
+  const prep = ctx.posted('designDsmPrepared').pop();
+  assert(prep && prep.data && prep.data.success && prep.data.dsm.P && !prep.data.dsm.Mxx, 'prepared values hold P only');
+  const dsm = (await p.handleMcpAction({ action: 'get_dsm', load_type: 'Mxx' })).Mxx;
+  assert(dsm.crl > 0 && dsm.crd > 0, 'the bending FSM gives Mcrl · Mcrd');
+  const flexArgs = { action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy, Fu, Lb: 2000 * MM, Cb: 1.0,
+    Mu: 3 / 0.112984829027616, Vu: 5 / 4.4482216152605 };
+  const fl = await p.handleMcpAction(flexArgs);
+  assert(!fl.error, fl.error);
+  assert.strictEqual(fl.dsm_basis, 'current_analysis', `flexure: Mxx from the current bending analysis (${fl.dsm_basis})`);
+  assert.deepStrictEqual(fl.dsm_basis_by_family, { Mxx: 'current_analysis' });
+  assert.deepStrictEqual([fl.dsm_source.Mcrl, fl.dsm_source.Mcrd].map(String), ['FSM', 'FSM'], `flexure uses FSM Mcrl · Mcrd (${JSON.stringify(fl.dsm_source)})`);
+  assert(!codes(fl).includes('member.warning.mcrl_mcrd_fsm_run'), 'no 「run FSM first」 warning after an FSM analysis');
+  assert(!fl.dsm_warning, `no host DSM warning: ${fl.dsm_warning}`);
+  const step = (id, sym) => fl.design_checks.find((c) => c.id === id).steps.find((s) => s.kind === 'elastic_buckling' && s.result.symbol === sym).result.value;
+  assert(rel(step('member.flexure.local', 'Mcrl'), dsm.crl) < 1e-12 && rel(step('member.flexure.distortional', 'Mcrd'), dsm.crd) < 1e-12,
+    'the checks use the get_dsm Mcrl · Mcrd');
+  // 검증 문서 부록 A(사용자 길이 격자): Mcrl 23.78, Mcrd 16.21 kN·m — 기본 격자에서 0.5 % 안
+  const KNM = 0.112984829027616;
+  assert(rel(dsm.crl * KNM, 23.78) < 5e-3 && rel(dsm.crd * KNM, 16.21) < 5e-3, `S3 Mcrl ${dsm.crl * KNM} · Mcrd ${dsm.crd * KNM} kN·m`);
+  // F4.1-2 손계산: My = Sf Fy, Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My
+  const My = fl.design_checks.find((c) => c.id === 'member.flexure.distortional').steps[0].result.value;
+  const s = Math.sqrt(dsm.crd / My);
+  assert(rel(fl.Mnd, Math.round((1 - 0.22 * s) * s * My * 100) / 100) < 1e-12, `Mnd ${fl.Mnd} = F4.1-2 with the FSM Mcrd`);
+  // 조합: P 는 준비된 값, Mxx 는 현재 해석
+  const cb = await p.handleMcpAction({ ...flexArgs, member_type: 'combined', KxLx: 2000 * MM, KyLy: 2000 * MM, KtLt: 2000 * MM,
+    Pu: 1, Mux: flexArgs.Mu, Cmx: 1.0, Cmy: 1.0 });
+  assert(!cb.error, cb.error);
+  assert.strictEqual(cb.dsm_basis, 'prepared+current_analysis');
+  assert.deepStrictEqual(cb.dsm_basis_by_family, { P: 'prepared', Mxx: 'current_analysis' });
+  // 준비된 값에 Mxx 가 있으면 전처럼 준비된 값
+  await p.__testDispatchMessage({ command: 'prepareDesignDsm', data: { member_type: 'flexure', Fy } });
+  const fl2 = await p.handleMcpAction(flexArgs);
+  assert.strictEqual(fl2.dsm_basis, 'prepared');
+  assert.deepStrictEqual([fl2.dsm_source.Mcrl, fl2.dsm_source.Mcrd].map(String), ['FSM', 'FSM']);
+  // 해석이 압축이고 준비된 값이 없으면: 값 없음(dsm_basis none)과 정확한 까닭
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: Fy });
+  await p.handleMcpAction({ action: 'run_analysis' });
+  const fl3 = await p.handleMcpAction(flexArgs);
+  assert.strictEqual(fl3.dsm_basis, 'none');
+  assert(/does not match strong-axis bending/.test(fl3.dsm_warning || ''), `the reason names the missing bending analysis: ${fl3.dsm_warning}`);
+  console.log(`  S3 r=3: Mcrl ${(dsm.crl * KNM).toFixed(3)} · Mcrd ${(dsm.crd * KNM).toFixed(3)} kN·m, Mnd ${(fl.Mnd * KNM).toFixed(4)} kN·m`);
+}
+
+// 검증 문서 4.5(S4): 원형관 D100×2 — FSM 극소에 국부 / 뒤틀림 이름표를 붙이지 않고 DSM 값으로 내지 않는다(DSM 비적용 — 원형관 조항).
+// 설계: 뒤틀림(§E4 · §F4)은 해당 없음 — 받은 Mcrd 도 쓰지 않는다. 휨 국부는 §F3.1.1.
+async function scenarioRoundTubeNoDsm(ctx) {
+  const p = ctx.panel;
+  const MM = 1 / 25.4;
+  const Fy = 345 / 6.894757293168361; const Fu = 450 / 6.894757293168361;
+  const codes = (r) => (r.notices || []).map((n) => n.code);
+  await p.handleMcpAction({ action: 'generate_template', section_type: 'chs', params: { OD: 100 * MM, t: 2 * MM } });
+  await p.handleMcpAction({ action: 'set_bc', BC: 'S-S' });
+  await p.handleMcpAction({ action: 'set_lengths', min: 1, max: 1000, n: 50 });
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: Fy });
+  const ra = await p.handleMcpAction({ action: 'run_analysis' });
+  const P = (await p.handleMcpAction({ action: 'get_dsm', load_type: 'P' })).P;
+  for (const [tag, d] of [['run_analysis', ra.dsm_P], ['get_dsm', P]]) {
+    assert(d, `${tag}: DSM block present`);
+    assert.deepStrictEqual([d.crl, d.crd, d.Pcrl, d.Pcrd, d.LF_local, d.LF_dist], [0, 0, 0, 0, 0, 0], `${tag}: no local / distortional DSM value`);
+    assert.strictEqual(d.dsm_applicable, false);
+    assert.deepStrictEqual([d.local_basis, d.dist_basis, d.classification], ['not_applicable', 'not_applicable', 'not_applicable_round_tube']);
+    assert(d.minima.length > 0 && d.minima.every((m) => m.mode_class === null), `${tag}: minima kept without L/D labels`);
+    assert(d.crl_floor === null && d.crd_floor === null, `${tag}: no floors`);
+    assert(codes(d).includes('dsm.scope.round_tube_not_applicable'), `${tag}: 「DSM 비적용 — 원형관 조항 사용」`);
+    assert(d.cre > 0, `${tag}: the global value stays`);
+  }
+  const comp = await p.handleMcpAction({ action: 'aisi_design', member_type: 'compression', design_method: 'LRFD',
+    Fy, Fu, KxLx: 2000 * MM, KyLy: 2000 * MM, KtLt: 2000 * MM, Pu: 40 / 4.4482216152605 });
+  assert(!comp.error, comp.error);
+  const ck = (r, id) => r.design_checks.find((c) => c.id === id);
+  assert.strictEqual(ck(comp, 'member.compression.distortional').verdict, 'not_applicable', 'E4 does not apply to a round tube');
+  // A-4: 국부는 원형관 조항 §E3.1.1.1(유효면적) — DSM 의 §E3.2.1 이 아니다
+  const loc = ck(comp, 'member.compression.local');
+  assert.deepStrictEqual([loc.clause, loc.clause_variant, loc.verdict], ['E3.1.1.1', 'round_tube', 'pass'], JSON.stringify(loc).slice(0, 300));
+  assert.deepStrictEqual(loc.steps.map((s) => s.equation).filter(Boolean).slice(0, 5),
+    ['E3.1.1.1-2', 'E3.1.1.1-2', 'E3.1.1.1-3', 'E3.1.1.1-1', 'E3.1-1'], 'the steps name the round-tube equations');
+  // 손계산: D/t = 50, Ao = [0.037 / ((D/t) Fy / E) + 0.667] A ≤ A → A, Ae = A, Pnℓ = A Fn = Pne
+  const A = comp.design_checks.find((c) => c.id === 'member.compression.global').steps.find((s) => s.expr === 'Pne = Ag Fn')
+    .inputs.find((i) => i.symbol === 'A').value;
+  const ao = loc.steps.find((s) => (s.expr || '').startsWith('Ao = ')).result.value;
+  assert(rel(ao, Math.min((0.037 / (50 * Fy / 29500) + 0.667) * A, A)) < 1e-12 && ao === A, `Ao ${ao} = A ${A}`);
+  assert(rel(comp.display_unrounded.Pnl, comp.display_unrounded.Pne) < 1e-12, 'Pnℓ = Ae Fn = Pne (Ae = A)');
+  assert(!codes(comp).includes('member.warning.pcrl_pcrd_fsm_run'), 'no 「run FSM first」 warning');
+  assert(codes(comp).includes('member.scope.round_tube_dsm_not_applicable'));
+  assert.strictEqual(comp.pass, true, 'a verdict from the round-tube provisions');
+  await p.handleMcpAction({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: Fy });
+  await p.handleMcpAction({ action: 'run_analysis' });
+  // 결정 D1: 주지 않은 칸은 화면의 값 — 화면의 처음 지압 길이(89 mm)면 원형관의 §G5 가 「다루지 않음」 이라 판정이 없다. 이 시나리오는 휨만: 지압 없음(0)
+  const flArgs = { action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy, Fu, Lb: 2000 * MM, Mu: 1, wc_N: 0 };
+  const fl = await p.handleMcpAction(flArgs);
+  assert(!fl.error, fl.error);
+  assert.strictEqual(ck(fl, 'member.flexure.distortional').verdict, 'not_applicable');
+  assert.strictEqual(ck(fl, 'member.flexure.local').verdict, 'not_applicable', '§F3.1.1: D/t ≤ 0.441E/Fy');
+  assert(!codes(fl).includes('member.warning.mcrl_mcrd_fsm_run'));
+  assert.strictEqual(fl.pass, true);
+  // 호출자가 Mcrd 를 주어도 쓰지 않는다(값 · 판정 같음)
+  const fl2 = await p.handleMcpAction({ ...flArgs, dsm: { Mcrd: 10 } });
+  assert(codes(fl2).includes('member.warning.round_tube_dsm_value_not_used'));
+  assert.strictEqual(ck(fl2, 'member.flexure.distortional').verdict, 'not_applicable');
+  assert.deepStrictEqual([fl2.Mn, fl2.pass], [fl.Mn, fl.pass]);
+}
+
 async function main() {
   const t0 = Date.now();
   const ctx = await createPanel();
@@ -900,7 +1029,7 @@ async function main() {
   };
   const scenarios = [scenarioDefaultSteelAgrees, scenarioTemplateLoadCaseAndDsm, scenarioZSectionType, scenarioSignatureAndBc,
     scenarioNonSSAutoTerms, scenarioCustomLoadNotRescaled, scenarioTemplateWithoutReferenceStress,
-    scenarioMemberDesignFyConsistency,
+    scenarioMemberDesignFyConsistency, scenarioDsmFamilyRule, scenarioRoundTubeNoDsm,
     scenarioPurlinRegions, scenarioPreviewAndProjectFiles, scenarioAllowlistsAndVibration,
     scenarioK4aStatusAndRoles, scenarioK4aLoadsAndLedger, scenarioK4aConnectionLedger, scenarioK4aView,
     scenarioV5cViewReportsAreIds, scenarioV5cModelValues, scenarioV5cPathRules];

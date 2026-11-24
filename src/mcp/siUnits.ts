@@ -311,6 +311,36 @@ export function convertInputSI(params: Record<string, any>, table: Table): Recor
     return walk(params, [table], '', { dir: 'toUS', unconverted: [] });
 }
 
+/**
+ * 엔진이 표시용으로 반올림한 위쪽 값(display_rounding)을 그 반올림 전 값(display_unrounded — design_checks 와 같은 수)으로
+ * 바꾼 사본. SI 로 바꾸기 전에 쓴다 — 반올림한 US 값을 바꾸면 design_checks(반올림 전 값의 변환)와 어긋난다
+ * (예: Pn 15.68 kips → 69.748 kN, design_checks 69.728 kN — 검증 문서 4.7). US 응답에는 쓰지 않는다(표시 값 그대로).
+ * 하위 묶음(조합의 compression · flexure_x …)은 display_unrounded 안의 같은 이름 묶음으로. 바꾼 것이 있으면 used = true.
+ */
+export function withUnroundedValues(value: any): { value: any; used: boolean } {
+    let used = false;
+    const overlay = (o: any, raw: any): any => {
+        const out: any = { ...o };
+        for (const [k, r] of Object.entries(raw)) {
+            if (typeof r === 'number' && Number.isFinite(r) && typeof o[k] === 'number') { out[k] = r; used = true; }
+            else if (r && typeof r === 'object' && !Array.isArray(r) && o[k] && typeof o[k] === 'object' && !Array.isArray(o[k])) {
+                out[k] = overlay(o[k], r);
+            }
+        }
+        return out;
+    };
+    const walkU = (v: any): any => {
+        if (Array.isArray(v)) { return v.map(walkU); }
+        if (!v || typeof v !== 'object') { return v; }
+        const out: any = {};
+        for (const [k, x] of Object.entries(v)) { out[k] = k === 'display_unrounded' ? x : walkU(x); }
+        const raw = v.display_unrounded;
+        return raw && typeof raw === 'object' && !Array.isArray(raw) ? overlay(out, raw) : out;
+    };
+    const out = walkU(value);
+    return { value: out, used };
+}
+
 /** 엔진 결과(US) → SI. 모르는 수치 키의 경로를 함께 돌려준다. */
 export function convertOutputSIDeep(result: any, table: Table): { value: any; unconverted: string[] } {
     const ctx: Ctx = { dir: 'toSI', unconverted: [] };
@@ -720,7 +750,7 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
     get_status: {}, get_full_state: {}, get_buckling_curve: {}, get_nodes: {}, get_elements: {}, steel_grades: {},
     run_analysis: {}, get_energy_recovery: {},
     // R2-2: units 는 제목 · 칸 값의 단위(호스트가 그린다)
-    list_changes: {},
+    list_changes: {}, work_log: {},
     design_lap_connection: {
         d: L, t: L, Fy: S, Fu: S, lap_left_in: L, lap_right_in: L, Mu_support: MOM, Vu_support: F,
         fastener_dia: L, end_distance: L, Se: 'modulus', Sf: 'modulus', Mnd: MOM, Mnd_single: MOM,
@@ -748,7 +778,7 @@ export const SI_INPUT_DIMENSIONLESS: Record<string, string[]> = {
     set_lengths: ['n'],
     set_node_stress: ['node_ids'],
     // K4b: 수 인자가 개수 · 색인뿐인 도구
-    run_analysis: ['neigs'], get_energy_recovery: ['length_index', 'mode_index'], list_changes: ['limit'],
+    run_analysis: ['neigs'], get_energy_recovery: ['length_index', 'mode_index'], list_changes: ['limit'], work_log: ['limit'],
     add_element: ['nodei', 'nodej'],
     modify_node: ['node_id'],
     modify_element: ['elem_id', 'nodei', 'nodej'],

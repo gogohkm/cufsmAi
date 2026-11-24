@@ -1,6 +1,6 @@
 {
  "about": "K2 phase 0 golden — mcp-connection. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-23",
+ "recorded": "2026-11-24",
  "entries": [
   {
    "id": "design_connection.engine",
@@ -8,14 +8,25 @@
    "value": [
     {
      "method": "design_connection",
-     "params": "{\"connection_type\":\"screw\",\"design_method\":\"LRFD\",\"Fy\":50.0380195169222,\"Fu\":65.2669819785941,\"t1\":0.0590551181102362,\"t2\":0.0590551181102362,\"d\":0.188976377952756,\"n\":4,\"e\":0.590551181102362,\"s\":0.984251968503937,\"Pu\":2.00079959358742,\"Pnvs\":1.19148739842847}"
+     "params": "{\"connection_type\":\"screw\",\"t1\":0.0590551181102362,\"Fy\":50.0380195169222,\"Fu\":65.2669819785941,\"Pu\":2.00079959358742,\"design_method\":\"LRFD\",\"e\":0.590551181102362,\"s\":0.984251968503937,\"Pnvs\":1.19148739842847,\"t2\":0.0590551181102362,\"d\":0.188976377952756,\"n\":4}"
+    }
+   ],
+   "reason": "결정 D1 · D8(업무 탭 통일 단계 B, 2026-11-24): MCP 설계 도구는 받은 인자의 키만 검토 상태에 합치고, 합친 상태로 만든 화면 단추의 본문(+ 화면 칸이 없는 인자)으로 계산한다 — 엔진 요청에 상태의 칸이 더해지고(키 차례는 화면 본문의 것, 하중 해석의 단면은 화면이 보내는 것이라 앞의 get_properties 가 없다), 주지 않은 칸을 비우지 않는다(그래서 뒤의 화면 단추도 그 칸을 그대로 보낸다). 같이 담긴 *_dsm_applicable 은 단계 A(원형관 DSM 비적용)의 엔진 변경.",
+   "flipped": [
+    {
+     "step": "D1-D8",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
     }
    ]
   },
   {
    "id": "design_connection.inputsChanged",
    "expect": "pin",
-   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0.",
+   "reason": "결정 D1 · D8(업무 탭 통일 단계 B, 2026-11-24): MCP 설계 도구는 받은 인자의 키만 검토 상태에 합치고, 합친 상태로 만든 화면 단추의 본문(+ 화면 칸이 없는 인자)으로 계산한다 — 엔진 요청에 상태의 칸이 더해지고(키 차례는 화면 본문의 것, 하중 해석의 단면은 화면이 보내는 것이라 앞의 get_properties 가 없다), 주지 않은 칸을 비우지 않는다(그래서 뒤의 화면 단추도 그 칸을 그대로 보낸다). 같이 담긴 *_dsm_applicable 은 단계 A(원형관 DSM 비적용)의 엔진 변경.",
    "value": {
     "input-E": {
      "before": "203395.340148",
@@ -61,14 +72,6 @@
      "before": "400",
      "after": "450"
     },
-    "conn-weld-L": {
-     "before": "50",
-     "after": ""
-    },
-    "conn-weld-size": {
-     "before": "3",
-     "after": ""
-    },
     "conn-Pnvs": {
      "before": "",
      "after": "5.3"
@@ -112,6 +115,14 @@
      "from": {
       "expect": "pin",
       "reason": "K2 결함(desktop 작성자): caseState 가 모델 칸(E · ν · G · 단면 치수 · 해석 조건)을 싣지 않는다 — 옛 초안이 modelLoaded 의 새 값을 덮던 경주. 그래서 MCP design_connection 뒤 E 칸의 글을 다시 적지 않는다(전: 10 → 12 자리로 다시 적음). 값은 그대로"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "D1-D8",
+     "from": {
+      "expect": "pin",
+      "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0."
      },
      "date": "2026-11-24"
     }
@@ -220,7 +231,18 @@
    "value": [
     {
      "method": "lap_connection",
-     "params": "{\"d\":8,\"t\":0.059,\"Fy\":55,\"Fu\":70,\"lap_left_in\":30,\"lap_right_in\":42,\"Mu_support\":52.5,\"Vu_support\":0.9,\"fastener_type\":\"screw\",\"fastener_dia\":0.19,\"n_rows\":2,\"end_distance\":1,\"design_method\":\"ASD\",\"Pnvs\":1.2}"
+     "params": "{\"d\":8,\"t\":0.059,\"Fy\":55,\"Fu\":70,\"lap_left_in\":30,\"lap_right_in\":42,\"Mu_support\":52.5,\"Vu_support\":0.9,\"fastener_type\":\"screw\",\"fastener_dia\":0.19,\"n_rows\":2,\"end_distance\":1,\"Pnvs\":1.2,\"design_method\":\"ASD\"}"
+    }
+   ],
+   "reason": "결정 D1 · D8(업무 탭 통일 단계 B, 2026-11-24): MCP 설계 도구는 받은 인자의 키만 검토 상태에 합치고, 합친 상태로 만든 화면 단추의 본문(+ 화면 칸이 없는 인자)으로 계산한다 — 엔진 요청에 상태의 칸이 더해지고(키 차례는 화면 본문의 것, 하중 해석의 단면은 화면이 보내는 것이라 앞의 get_properties 가 없다), 주지 않은 칸을 비우지 않는다(그래서 뒤의 화면 단추도 그 칸을 그대로 보낸다). 같이 담긴 *_dsm_applicable 은 단계 A(원형관 DSM 비적용)의 엔진 변경.",
+   "flipped": [
+    {
+     "step": "D1-D8",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-24"
     }
    ]
   },
