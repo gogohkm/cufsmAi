@@ -59,6 +59,15 @@ export const BY_KO: Record<string, string> = { ai: 'AI', person: '사용자', pr
 const BY_TIP: Record<string, string> = {
   ai: 'AI 가 MCP 도구로 바꿨다', person: '사람이 바꿨다(편집 상태 · 화면)', program: '프로그램이 바꿨다(사람 · AI 의 요청 밖)', external: '프로그램 밖에서 파일이 바뀌었다(마지막 저장과 연 파일의 차이)',
 };
+/**
+ * 끼운 화면의 연동만으로 생긴 줄 — 호스트가 그 줄의 trigger 에 `mirror`(다른 칸을 따라 바뀜) · `unit-toggle`(단위 바꿈)을 적는다. 사람의 문맥(person)
+ * 이지만 사람이 친 것이 아니다: AI 가 값을 쓴 뒤 화면이 딸린 칸을 맞춘 것이 「사용자」 의 편집으로 읽히지 않게 이름을 가른다
+ */
+export const LINK_KO: Record<string, string> = { mirror: '화면 연동', 'unit-toggle': '단위 바꿈' };
+export const linkOf = (c: Change): string | null => (c.by.kind === 'person' && typeof c.trigger === 'string' && LINK_KO[c.trigger]) || null;
+/** 그 줄의 「누가」 글(AI · 사용자 · 프로그램 · 밖에서 · 화면 연동) */
+export const whoText = (c: Change): string => linkOf(c) ?? BY_KO[c.by.kind] ?? c.by.kind;
+export const LINK_TIP = '사람이 친 것이 아니다 — 끼운 설계 화면이 다른 칸(또는 단위)을 따라 이 칸을 맞췄다';
 export const byTag = (kind: string, extraTip = ''): string => `<span class="tag ${kind === 'ai' ? 'ai' : kind === 'external' ? 'def' : ''}" data-by="${esc(kind)}"${tip(`${BY_TIP[kind] ?? kind}${extraTip ? ` — ${extraTip}` : ''}`)}>${esc(BY_KO[kind] ?? kind)}</span>`;
 
 /** 기준점 — 마지막 실행(호스트의 남은 결과 가운데 가장 늦은 때). 그 뒤의 변경에 점 */
