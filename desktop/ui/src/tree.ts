@@ -10,7 +10,7 @@ import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './
 import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
-import { afterBase, BY_KO, chg } from './changes';
+import { afterBase, chg, LINK_TIP, linkOf, whoText } from './changes';
 import { glyph, itemOfRow, markOf, rv } from './reviews';
 import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
@@ -191,20 +191,24 @@ export function buildTree(tab: Tab): TNode[] {
     ];
   }
   if (tab === 'work') {
+    // 프로젝트 밖(파일만 열었거나 아무것도 열지 않았다) — 판단 요청 · 보고는 프로젝트의 검토 대상에만 남는다(호스트가 AI 의 work_items 를 거절한다).
+    // 「0」 이 아니라 그 까닭을 값 자리에 적는다(빈 목록이 「AI 가 아무것도 하지 않았다」 로 읽히지 않게). 변경은 프로젝트 밖에서도 이 세션 동안 보인다
+    const outside = !!f && !f.project?.inProject;
+    const outsideTip = '프로젝트 밖 — 판단 요청 · 보고는 프로젝트의 검토 대상에만 남는다(프로젝트 밖에서는 AI 가 쓸 수 없다). 시작 화면에서 프로젝트를 만들거나 「프로젝트로 만들기」. AI · 사람이 바꾼 것은 아래 「변경」 에 이 세션 동안 보인다';
     return [
       // R3-3: 업무 항목(work_items) — 판단 요청(열린 수 · 주황) · 보고 · 지시. 글은 쓴 쪽의 것(자료), 이름 옆에 쓴 쪽
-      n('ask', '판단 요청', { v: work.err ? '읽지 못함' : String(openQuestions().length || questions().length), vCls: openQuestions().length ? 'warn' : '', open: true,
+      n('ask', '판단 요청', outside ? { v: '프로젝트 밖', vCls: 'un', tip: outsideTip } : { v: work.err ? '읽지 못함' : String(openQuestions().length || questions().length), vCls: openQuestions().length ? 'warn' : '', open: true,
         tip: `AI 가 사람에게 묻는 것(work_items question) — 답은 Claude Desktop 대화에서(AI 가 옮겨 적는다). 열린 것 ${openQuestions().length}${workTail()}`,
         kids: questions().map(w => n(`work:${w.item}`, w.title, { dot: w.state === 'closed' ? undefined : w.answered ? 'ok' : 'warn', v: w.state === 'closed' ? '닫힘' : w.answered ? '답함' : '답 기다림',
           vCls: w.answered || w.state === 'closed' ? 'faint' : 'warn', tip: `${w.item} · ${w.written_by} · ${hhmm(w.created_at)}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
-      n('rep', '보고', { v: work.err ? '읽지 못함' : `${reports().length}${reports().length ? ` · ${reports().filter(w => markOf('work', w.item)?.state !== 'reviewed').length} 미확인` : ''}`, open: true, tip: `AI 의 보고(work_items report) — 항목마다 완료 · 가정 · 미결${workTail()}`,
+      n('rep', '보고', outside ? { v: '프로젝트 밖', vCls: 'un', tip: outsideTip } : { v: work.err ? '읽지 못함' : `${reports().length}${reports().length ? ` · ${reports().filter(w => markOf('work', w.item)?.state !== 'reviewed').length} 미확인` : ''}`, open: true, tip: `AI 의 보고(work_items report) — 항목마다 완료 · 가정 · 미결${workTail()}`,
         kids: reports().map(w => n(`work:${w.item}`, w.title, { v: `${w.items ? `항목 ${w.items} · ` : ''}${hhmm(w.created_at)}`, tip: `${w.item} · ${w.written_by}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
       ...(instructions().length ? [n('ins', '지시', { v: String(instructions().length), tip: '사람의 지시를 AI 가 옮겨 적은 것(work_items instruction) — 변경이 그 지시를 가리킨다',
         kids: instructions().map(w => n(`work:${w.item}`, w.title, { v: hhmm(w.created_at), tip: `${w.item} · ${w.written_by} · AI 가 옮겨 적음` })) })] : []),
-      n('chg', '변경', { v: chg.err ? '읽지 못함' : String(chg.total), vCls: chg.err ? 'un' : '', open: true,
+      n('chg', '변경', { v: chg.err ? '읽지 못함' : `${chg.total}${chg.persisted || !chg.total ? '' : ' · 이 세션만'}`, vCls: chg.err ? 'un' : '', open: true,
         tip: `누가 · 언제 · 전 → 후 — 호스트의 변경 묶음(list_changes). 사람 · AI · 프로그램 · 밖에서가 한 목록(꼬리표로 가른다). 새 것이 위, 마지막 실행 뒤의 것에 점${chg.persisted ? '' : ' · 프로젝트 밖 — 이 세션만(저장되지 않음)'}`,
-        kids: chg.list.map(c => n(`chg:${c.id}`, c.title || '(제목 없음)', { dot: afterBase(c) ? 'acc' : undefined, v: `${BY_KO[c.by.kind] ?? c.by.kind} · ${hhmm(c.at)}`,
-          tip: `${BY_KO[c.by.kind] ?? c.by.kind}${c.by.client ? ` (${c.by.client})` : ''} · ${hhmm(c.at)} · 바뀐 칸 ${c.fields}${c.invalidated?.length ? ` · 낡게 한 결과 ${c.invalidated.join(', ')}` : ''}${c.reason ? ` · 이유: ${c.reason}` : ''}` })) }),
+        kids: chg.list.map(c => n(`chg:${c.id}`, c.title || '(제목 없음)', { dot: afterBase(c) ? 'acc' : undefined, v: `${whoText(c)} · ${hhmm(c.at)}`,
+          tip: `${whoText(c)}${linkOf(c) ? ` — ${LINK_TIP}` : ''}${c.by.client ? ` (${c.by.client})` : ''} · ${hhmm(c.at)} · 바뀐 칸 ${c.fields}${c.invalidated?.length ? ` · 낡게 한 결과 ${c.invalidated.join(', ')}` : ''}${c.reason ? ` · 이유: ${c.reason}` : ''}` })) }),
     ];
   }
   return [

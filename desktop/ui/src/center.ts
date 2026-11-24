@@ -31,7 +31,7 @@ import { fieldText, pageOf } from './notices';
 import { refKey, work } from './work';
 import { alts, sideBySide, visibleAlts } from './alts';
 import { keyOfItem } from './follow';
-import { baseOf, BY_KO, changeOf, chg, KIND_RESULT_KO, sinceBase, valText, type Change } from './changes';
+import { baseOf, changeOf, chg, KIND_RESULT_KO, sinceBase, valText, whoText, type Change } from './changes';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
 export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean; mode3d: boolean }
@@ -484,7 +484,7 @@ function changeView(key: string, size: { w: number; h: number }): { html: string
   const AREA: Record<string, string> = { sectionParams: '단면', sectionTemplate: '단면', node: '단면', elem: '단면', prop: '재료', inputs: '입력', spans: '경간', mcpOnly: 'MCP 인자' };
   const areaOf = (path: string) => AREA[path.split('.')[1] ?? ''] ?? (path.startsWith('case.') ? '입력' : '모델');
   for (const x of since) {
-    const who = `${BY_KO[x.by.kind] ?? x.by.kind}`;
+    const who = whoText(x);
     const fs = x.field_changes ?? [];
     for (const f of fs) {
       const sm = f.summary;

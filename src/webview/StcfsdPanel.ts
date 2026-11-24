@@ -668,11 +668,15 @@ export class StcfsdPanel implements McpPanelInterface {
             // 끼운 화면의 메시지 채널로는 받지 않는다(이 채널로 보내는 제품이 없다: 여섯 탭 화면은 보내지 않고, VS Code 확장에는 편집 상태가 없다)
             if (cmd === 'editSession') { console.warn('[StCFSD] editSession from the page channel refused (person path only)'); return Promise.resolve(); }
             // R2-2: 화면의 편집(사람) — 편집 상태 안이면 그 묶음, 밖이면 조용한 2 초로 묶는다. 묶음의 「전」 은 바꾸기 전에 잡는다
-            if (StcfsdPanel.PAGE_EDIT_COMMANDS.has(cmd) && !(cmd === 'caseEdit' && (message as any)?.data?.origin !== 'user')) {
+            const edits = StcfsdPanel.PAGE_EDIT_COMMANDS.has(cmd) && !(cmd === 'caseEdit' && (message as any)?.data?.origin !== 'user');
+            if (edits) {
                 this._changes.touch(this._changeCtx('edit'));
                 this._armQuiet();
             }
-            return this._handleMessageInner(message);
+            const done = this._handleMessageInner(message);
+            // 그 편집의 동기 부분(칸 · 모델에 쓰기)이 끝났다 — 도는 다른 행위자의 요청(AI 의 긴 계산)은 여기서부터 센다(이 편집이 그 요청의 줄에 들지 않게)
+            if (edits) { this._changes.touchDone(); }
+            return done;
         });
     }
     /** 읽기 전용 대상에서 화면이 모델을 바꾸려 하면 그 까닭(해석 실행은 화면의 칸이 모델과 다를 때만) */
@@ -817,12 +821,20 @@ export class StcfsdPanel implements McpPanelInterface {
                     // 사람이 치는 것이 아니므로 조용한 시간을 기다리지 않는다(기다리는 동안 사람의 다음 동작(「이 대안으로」 등)이 그 묶음에 삼켜졌다)
                     const pend = this._changes.pending;
                     const ownLine = movesInput && pend === null;
-                    if (movesInput && pend !== 'request') { this._changes.touch(this._changeCtx('edit')); if (!ownLine) { this._armQuiet(); } }
+                    if (movesInput && pend !== 'request') {
+                        const linkCtx = this._changeCtx('edit');
+                        // 이 연동만의 줄은 사람이 친 것이 아니다 — 무엇으로 생긴 줄인지(mirror · unit-toggle) trigger 에 적는다. 화면이 「사용자」 와
+                        // 가른다(AI 가 값을 쓴 뒤 끼운 화면이 딸린 칸을 맞춘 것이 사람의 편집으로 읽히지 않게)
+                        if (ownLine) { linkCtx.trigger = String(origin); }
+                        this._changes.touch(linkCtx);
+                        if (!ownLine) { this._armQuiet(); }
+                    }
                     const r1 = Object.keys(echoPart).length ? this._caseKeeper.edit({ ...message.data, changes: echoPart, __keepSource: true }) : null;
                     const r2 = this._caseKeeper.edit({ ...message.data, changes: movedPart, ...(r1 ? { drafts: undefined } : {}), __keepSource: origin === 'unit-toggle' });
                     r = r1 ? { ...r2, accepted: [...r1.accepted, ...r2.accepted], rejected: [...r1.rejected, ...r2.rejected], conflicts: [...r1.conflicts, ...r2.conflicts] } : r2;
                     if (movesInput && r2.accepted.some((k) => { const m = DSk.fieldMeta(k); return !m || m.owner !== 'view'; })) { this._changes.markVia(origin as 'mirror' | 'unit-toggle'); }
                     if (ownLine) { this._changes.flush(); }
+                    else if (movesInput && pend !== 'request') { this._changes.touchDone(); }
                 } else {
                     r = this._caseKeeper.edit(linkage ? { ...message.data, __keepSource: true } : message.data);
                 }
@@ -3373,9 +3385,11 @@ export class StcfsdPanel implements McpPanelInterface {
             this._recordsChanged(['changes']);
         }
         if (!rec) {
-            // 프로젝트 밖(또는 읽기 전용) — 이 세션의 메모리에만
+            // 프로젝트 밖(또는 읽기 전용) — 이 세션의 메모리에만. 화면은 이것도 변경 목록으로 보인다(list_changes persisted: false) — 다시 읽게 알린다
+            // (요청의 끝이 아닌 때 나가는 묶음 — 조용한 2 초 뒤 · 끼어든 요청이 갈라 낸 사람의 몫 — 은 달리 알릴 길이 없다)
             this._memChanges.push({ id: `mem-${++this._memSeq}`, at: new Date().toISOString(), actor: ctx.actor, body });
             if (this._memChanges.length > 500) { this._memChanges.shift(); }
+            this._recordsChanged(['changes']);
         }
     }
 
@@ -5370,10 +5384,14 @@ export class StcfsdPanel implements McpPanelInterface {
         const act = this._aiActivityStart(String(options?.action ?? 'request'));
         // R2-2: 요청 하나 = 변경 묶음 하나(요청 전후의 스냅숏 비교 — 바뀐 것이 없으면 줄이 없다). 같은 행위자의 겹친 요청은 바깥 것이 닫을 때
         let r: any;
-        try { r = await this._changes.run(this._changeCtx(String(options?.action ?? 'request')), () => this._handleMcpActionInner(options)); }
+        // 읽기(화면의 다시 읽기 · 보기 보고 · AI 의 조회)는 묶음을 열지도 닫지도 않는다 — 요청은 겹친다: AI 의 긴 계산이 도는 동안 들어온 화면의
+        // 읽기가 그 요청의 묶음을 닫아, 계산 끝에 쓴 입력(applyMcp)이 변경 기록에서 빠졌다(업무 › 변경에 AI 의 줄이 생기지 않던 것)
+        const readOnly = StcfsdPanel._readsOnly(options);
+        try { r = await this._changes.run(this._changeCtx(String(options?.action ?? 'request')), () => this._handleMcpActionInner(options), { readOnly }); }
         catch (e) { this._aiActivityEnd(act, false); throw e; }
-        // 같은 행위자의 요청이 열린 조용한 묶음에 들면 그 묶음의 마지막 손댐이 지금이 된다 — 닫는 시계도 다시 건다(걸지 않으면 그 묶음이 닫히지 않고 남는다)
-        finally { if (this._changes.pending === 'quiet') { this._armQuiet(); } }
+        // 같은 행위자의 요청이 열린 조용한 묶음에 들면 그 묶음의 마지막 손댐이 지금이 된다 — 닫는 시계도 다시 건다(걸지 않으면 그 묶음이 닫히지 않고 남는다).
+        // 읽기는 손대지 않는다 — 시계를 다시 걸지 않는다(걸면 화면이 읽는 동안 조용한 묶음이 닫히지 않는다)
+        finally { if (!readOnly && this._changes.pending === 'quiet') { this._armQuiet(); } }
         this._aiActivityEnd(act, !(r && typeof r === 'object' && r.error));
         StcfsdPanel._noteCodes(r);
         return reply ? NOTICES.forReader(r, { units: reply.units === 'SI' ? 'SI' : 'US', detail: reply.detail }) : r;
@@ -5443,6 +5461,13 @@ export class StcfsdPanel implements McpPanelInterface {
         'report_view', 'focus', 'capture_section_preview']);
     private static readonly READ_OPS: Record<string, string[]> = { documents: ['list', 'get', 'check'], work_items: ['list', 'get'], assumptions: ['list', 'get'],
         sources: ['list', 'get'], alternatives: ['list', 'compare'] };
+    /** 모델 · 입력을 바꾸지 않는 동작(읽기 · 보기 보고)인가 — 변경 묶음을 열지도 닫지도 않는다. 모르는 동작은 아니다(묶음을 거친다 — 줄을 잃지 않는 쪽) */
+    private static _readsOnly(options: any): boolean {
+        const action = String(options?.action ?? '');
+        if (StcfsdPanel.READ_ACTIONS.has(action) || action === 'cutwp') { return true; }
+        const ops = StcfsdPanel.READ_OPS[action];
+        return !!ops && ops.includes(String(options?.op ?? ''));
+    }
     /** 발행 중이면 상태를 바꾸는 요청을 code 와 함께 거절(AI 에게 까닭) — 읽기는 통과 */
     private _issueBusyRefusal(options: any): any | null {
         const busy = this._desk?.issuing();

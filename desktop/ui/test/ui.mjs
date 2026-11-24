@@ -2309,6 +2309,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
 
   // ── R1-3 끝(215cb5a 의 호스트 것으로) ──────────────────────────────
   const act2 = (body) => api('POST', '/api/mcp/action', body).then(r => r.json);
+  /** 끼운 화면의 연동만으로 생긴 변경 줄(호스트가 trigger 에 mirror · unit-toggle 을 적는다 — 사람이 친 것이 아니다) */
+  const isLinkLine = c => c?.by?.kind === 'person' && (c.trigger === 'mirror' || c.trigger === 'unit-toggle');
   const pdir2 = path.join(projRoot, '시험 물류창고');
   await step('r18 시작 화면 — 「진행」 = list_cases 의 results · 작은 단면 그림 = 색인의 outline(받은 그대로) · 바닥 줄의 폴더 경로(사람의 얼굴) · 작성자 이름', 'r18_start_index', async () => {
     await act2({ action: 'save_case' });
@@ -2463,12 +2465,19 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await waitFor(`!!${S}.state.caseIn && Math.abs(${S}.state.caseIn.inputs.fy*6.894757-310)<0.5`, 15_000, '되돌린 fy 310').catch(() => undefined);
     const fyBack = await ev(`Math.round(${S}.state.caseIn.inputs.fy*6.894757)`);
     const after = await ev(`${S}.ui.editing`);
-    const n2 = (await act2({ action: 'list_changes', limit: 1 })).total;
+    const lc2 = await act2({ action: 'list_changes', detail: 'fields', limit: 3 });
+    const n2 = lc2.total;
+    // 버린 뒤에 묶음이 생겼으면 그것이 무엇인지(누가 · 무엇으로 · 어느 칸) 적는다
+    const after2 = (lc2.changes ?? []).slice(0, Math.max(0, n2 - lc.total));
+    // 버리기는 사람의 묶음을 남기지 않는다. 되돌린 값에 끼운 화면의 연동이 딸린 칸을 맞추면(예: Fy 가 강종의 값과 달라 강종 칸을 비움) 그것은
+    // 연동만의 줄이다(trigger mirror · unit-toggle — 화면은 「화면 연동」 으로 보인다): 사람이 친 줄로 세지 않는다
+    const typed2 = after2.filter(c => !isLinkLine(c));
+    const extra = after2.length ? ` — 버린 뒤 생긴 묶음: ${after2.map(c => `${c.by?.kind}/${c.trigger}/${(c.field_changes ?? []).map(f => `${f.path}(${short(JSON.stringify(f.from ?? null), 14)}→${short(JSON.stringify(f.to ?? null), 14)})`).join('+')}`).join(' | ')}` : '';
     await shot('r23_edit_session_1920_dark');
     // 편집 상태 한 번 = 사람의 묶음 하나(이 편집에서 늘어난 수). mid 는 호스트가 편집 중에 묶음을 먼저 닫았는지(화면의 읽기가 끼면 닫는다 — 호스트에 알림)
     return { ok: last?.by?.kind === 'person' && last?.trigger === 'edit-session' && (last.field_changes ?? []).some(f => f && /^case\.inputs\.fy$/.test(f.path)) && lc.total === n0 + 1 && mid === n0
-      && /^사용자 · .+ → 310 · \d\d:\d\d$/.test(why ?? '') && offBefore === false && after === false && fyBack === 310 && n2 === lc.total,
-      detail: `묶음 ${n0} → 편집 중 ${mid}(읽기가 묶음을 끊지 않는다) → 마치기 ${lc.total}(${last?.by?.kind} · ${last?.trigger} · 「${short(last?.title, 40)}」) · 꼬리표 「${why}」 · 333 으로 고친 뒤 버리기(켜짐 ${offBefore === false}) → fy ${fyBack} · 닫힘 ${after === false} · 묶음 ${n2}` };
+      && /^사용자 · .+ → 310 · \d\d:\d\d$/.test(why ?? '') && offBefore === false && after === false && fyBack === 310 && typed2.length === 0,
+      detail: `묶음 ${n0} → 편집 중 ${mid}(읽기가 묶음을 끊지 않는다) → 마치기 ${lc.total}(${last?.by?.kind} · ${last?.trigger} · 「${short(last?.title, 40)}」) · 꼬리표 「${why}」 · 333 으로 고친 뒤 버리기(켜짐 ${offBefore === false}) → fy ${fyBack} · 닫힘 ${after === false} · 묶음 ${n2}(사람이 친 것 ${typed2.length})${extra}` };
   });
   await step('r24 「AI 작업 중 · <도구> · 경과」 띠 — AI 의 해석이 도는 동안(0.5 초 넘게) 보이고 끝나면 사라진다 · 상태 표시줄 「AI 작업 중」', 'r24_ai_band', async () => {
     const pr = mcp.tool('run_analysis');
@@ -2479,6 +2488,45 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const gone = await ev(`document.getElementById('aibar').hidden`);
     return { ok: !!band && band.tool === 'run_analysis' && /AI 작업 중/.test(band.text) && /경과/.test(band.text) && band.status === 'AI 작업 중' && gone && !run.error,
       detail: `띠 「${short(band?.text?.replace(/\s+/g, ' '), 90)}」 · 상태 표시줄 「${band?.status}」 · 끝나면 숨김 ${gone}` };
+  });
+  await step('r24b AI 의 긴 요청(design_purlin)이 도는 동안 화면이 읽어도(다시 읽기 · 보기 보고) — 그 요청이 끝에 쓴 입력은 AI 의 변경 묶음 하나로 남는다(사라지지도, 읽기 · 사람의 줄이 되지도 않는다) · 새로 고침 없이 업무 › 변경에 · 이어진 set_case_inputs 도 AI 의 줄', 'r24b_ai_long_change', async () => {
+    await ev(`${S}.review()`);
+    await select('work', 'chg');
+    await sleep(2600);
+    const n0 = (await act2({ action: 'list_changes', limit: 1 })).total;
+    const t0 = await marker();
+    // ① 긴 요청 — 도는 동안 화면이 읽는다(화면의 다시 읽기 · 보기 보고와 같은 길: 다리의 중계 = 사람의 문맥인 호스트 읽기)
+    let fin = false, reads = 0;
+    const pr = mcp.tool('design_purlin', { ...purlinArgs, span_ft: 6.4, detail: undefined }).finally(() => { fin = true; });
+    while (!fin) {
+      await Promise.all([act2({ action: 'get_full_state' }), act2({ action: 'get_case_inputs' }), act2({ action: 'list_changes', limit: 1 }), act2({ action: 'get_properties' })]);
+      reads += 4; await sleep(40);
+    }
+    const r1 = await pr;
+    // ② 이어서 입력 하나(계산 없음) ③ 화면 단추와 같은 길로 다시 계산 둘(하중 해석이 따라 바꾼 칸은 그 요청의 AI 줄이 된다)
+    const r2 = await mcp.tool('set_case_inputs', { inputs: { fy: 300 }, units: 'SI', reason: '강종을 바꿔 본다' });
+    const r3 = await mcp.tool('run_case_check', { what: 'loads' });
+    const r4 = await mcp.tool('run_case_check', { what: 'member' });
+    await sleep(2600);
+    const lc = await act2({ action: 'list_changes', detail: 'fields', limit: 20 });
+    const fresh = (lc.changes ?? []).slice(0, Math.max(0, lc.total - n0)).reverse();
+    const sum = fresh.map(c => `${c.by?.kind}/${c.trigger}/${(c.field_changes ?? []).map(f => `${f.path.replace(/^case\./, '')}(${short(JSON.stringify(f.from ?? null), 12)}→${short(JSON.stringify(f.to ?? null), 12)})`).slice(0, 5).join('+')}`);
+    const rows = await waitFor(`(()=>{const ids=${JSON.stringify(fresh.map(c => c.id))}; const have=ids.filter(id=>document.querySelector('#tree .row[data-k="chg:'+id+'"]')); return ids.length && have.length===ids.length ? have.length : null;})()`, 15_000, '변경 줄').catch(() => 0);
+    const noReload = (await marker()) === t0;
+    // AI 가 쓴 칸(퍼린의 경간 · Fy)은 그 요청의 AI 묶음 하나에만 있다 — 화면의 읽기(사람의 문맥)의 줄에 들지 않는다.
+    // (끼운 화면의 연동이 따라 바꾼 칸은 따로 줄이 될 수 있다 — V9b-05. 그 줄은 여기서 세지 않는다)
+    const has = (c, re) => (c.field_changes ?? []).some(f => re.test(f.path));
+    const purlin = fresh.filter(c => c.trigger === 'design_purlin');
+    const sci = fresh.filter(c => c.trigger === 'set_case_inputs');
+    const readLines = fresh.filter(c => /^(get_|list_|report_view)/.test(String(c.trigger)));
+    const strayed = fresh.filter(c => c.by?.kind !== 'ai' && (has(c, /span/) || has(c, /^case\.inputs\.fy$/)));
+    const ok = !r1.error && !r2.error && !r3.error && !r4.error && reads > 0
+      && purlin.length === 1 && purlin[0].by?.kind === 'ai' && has(purlin[0], /^case\.mcpOnly\.design_purlin\.span_ft$/)
+      && sci.length === 1 && sci[0].by?.kind === 'ai' && has(sci[0], /^case\.inputs\.fy$/) && sci[0].reason === '강종을 바꿔 본다'
+      && fresh.indexOf(purlin[0]) < fresh.indexOf(sci[0]) && readLines.length === 0 && strayed.length === 0
+      && rows === fresh.length && noReload;
+    return { ok, detail: `도는 동안 화면의 읽기 ${reads}번 · 새 묶음 ${fresh.length}: ${sum.join(' | ') || '없음'} · design_purlin 의 AI 줄 ${purlin.length} · set_case_inputs 의 AI 줄 ${sci.length} · 읽기의 줄 ${readLines.length} · 사람의 줄로 넘어간 AI 의 칸 ${strayed.length}`
+      + ` · 업무 › 변경의 줄 ${rows}/${fresh.length} · 새로 고침 없음 ${noReload}${[r1, r2, r3, r4].some(r => r.error) ? ` · 오류 ${short([r1, r2, r3, r4].map(r => r.error).filter(Boolean).join(' / '), 200)}` : ''}` };
   });
 
   // ── R3-3 — 업무 항목 · 가정 · 원자료 ─────────────────────────────────
@@ -2735,11 +2783,17 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const n0 = (await act2({ action: 'list_changes', limit: 1 })).total;
     await ev(`document.querySelector('#info [data-alt-open]').click()`);
     await waitFor(`!!${S}.state.full && Math.abs(${S}.state.full.section_params.t*25.4-2.0)<1e-6`, 20_000, '대안의 두께').catch(() => undefined);
-    const lc = await act2({ action: 'list_changes', limit: 2 });
+    await sleep(600);
+    const lc = await act2({ action: 'list_changes', limit: 8 });
     const tNow = await ev(`${S}.state.full.section_params.t*25.4`);
+    // 그 누름이 만든 묶음: 「이 대안으로」 하나(trigger alternatives). 모델이 바뀐 뒤 끼운 화면이 딸린 칸을 맞춘 것은 연동만의 줄(trigger mirror)로
+    // 따로 올 수 있다 — 요청이 끝난 뒤에 닿으면 그 요청의 묶음에 들지 않는다(전에는 화면의 읽기가 묶음을 늘려 우연히 한 줄이었다)
+    const made = (lc.changes ?? []).slice(0, Math.max(0, lc.total - n0));
+    const adopted = made.filter(c => c.trigger === 'alternatives');
+    const strayAdopt = made.filter(c => c.trigger !== 'alternatives' && !isLinkLine(c));
     await select('work', 'chg');
     await sleep(300);
-    await select('work', `chg:${lc.changes?.[0]?.id}`);
+    await select('work', `chg:${adopted[0]?.id}`);
     await sleep(300);
     const alt07 = await ev(`[...document.querySelectorAll('#info .sec h4')].some(h=>/^대안/.test(h.textContent))`);
     // 숨기기 — 사람의 길로 숨기면 트리에서 빠진다 · 「숨긴 대안도 보이기」 → 다시 보이기
@@ -2758,8 +2812,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await waitFor(`!!document.querySelector('#info [data-alt-drop="${a20.item}"]')`, 15_000, '다시 보임').catch(() => undefined);
     const lsAfter = ((await mcp.tool('alternatives', { action: 'list', include_hidden: true })).items ?? []).find(a => a.item === a20.item);
     const toasts = await ev(`[...document.querySelectorAll('.toast')].map(t=>t.textContent).slice(-3).join(' / ')`);
-    return { ok: inf.label === 't 2.0' && see.length >= 3 && renamed === 't 2.0 (얇음)' && byRename === 't 2.0 (얇음)' && Math.abs(tNow - 2.0) < 1e-6 && lc.total === n0 + 1 && lc.changes?.[0]?.trigger === 'alternatives' && alt07 && hidden && lsAfter && !lsAfter.hidden,
-      detail: `정보 창 「${inf.label}」 · 같이 볼 것 ${see.map(x => x.replace(/\s+/g, ' ')).join(' | ')} · 화면에서 이름 바꾸기 → 「${renamed}」(호스트 목록 「${byRename}」) · 이 대안으로 → t ${tNow} · 변경 ${n0} → ${lc.total}(${lc.changes?.[0]?.trigger}) · 07 의 대안 줄 ${alt07} · 화면에서 숨김 → 트리에서 빠짐 ${hidden} · 다시 보이기 → hidden ${lsAfter?.hidden} · 알림 ${short(toasts, 160)}` };
+    return { ok: inf.label === 't 2.0' && see.length >= 3 && renamed === 't 2.0 (얇음)' && byRename === 't 2.0 (얇음)' && Math.abs(tNow - 2.0) < 1e-6 && adopted.length === 1 && adopted[0].by?.kind === 'person' && strayAdopt.length === 0 && alt07 && hidden && lsAfter && !lsAfter.hidden,
+      detail: `정보 창 「${inf.label}」 · 같이 볼 것 ${see.map(x => x.replace(/\s+/g, ' ')).join(' | ')} · 화면에서 이름 바꾸기 → 「${renamed}」(호스트 목록 「${byRename}」) · 이 대안으로 → t ${tNow} · 변경 ${n0} → ${lc.total}(${made.map(c => c.trigger).reverse().join(' → ') || '없음'} — 「이 대안으로」 ${adopted.length} · 그 밖의 사람 줄 ${strayAdopt.length}) · 07 의 대안 줄 ${alt07} · 화면에서 숨김 → 트리에서 빠짐 ${hidden} · 다시 보이기 → hidden ${lsAfter?.hidden} · 알림 ${short(toasts, 160)}` };
   });
 
   // ── R5-3 — 문서 · 발행(템플릿 08) · 호스트의 한국어 글 ─────────────────────────────────────────────

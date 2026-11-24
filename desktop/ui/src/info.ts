@@ -16,7 +16,7 @@ import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
-import { baseOf, byTag, BY_KO, changeOf, chg, KIND_RESULT_KO, modelTag, staleCause, valText, type Change, type FieldRec } from './changes';
+import { baseOf, byTag, changeOf, chg, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, staleCause, valText, whoText, type Change, type FieldRec } from './changes';
 import { rec } from './records';
 import { asmInfo, questionsAbout, srcInfo, workInfo } from './work';
 import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
@@ -333,7 +333,7 @@ function changeInfo(key: string): string {
   const c: Change | undefined = key.startsWith('chg:') ? changeOf(key.slice(4)) : chg.list[0];
   if (!c) { return hd('업무 · 변경', '변경', chg.err ? none('변경을 읽지 못함', chg.err) : none('변경 없음', '이 대상에 기록된 변경 묶음이 없다'), ''); }
   const RVc = rv.loaded ? markButton(markOf('change', c.id), `data-rv-change="${esc(c.id)}"`) : markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만');
-  const head = `<div class="hd"><div class="k">${byTag(c.by.kind)}변경 · ${esc(hhmm(c.at))}${c.by.client ? ` <span class="faint">${esc(c.by.client)}</span>` : ''}<span class="sp"></span>${RVc}</div>`
+  const head = `<div class="hd"><div class="k">${byTag(c.by.kind)}${linkOf(c) ? `<span class="tag def" data-link="${esc(String(c.trigger))}"${tip(LINK_TIP)}>${esc(linkOf(c)!)}</span>` : ''}변경 · ${esc(hhmm(c.at))}${c.by.client ? ` <span class="faint">${esc(c.by.client)}</span>` : ''}<span class="sp"></span>${RVc}</div>`
     + `<div class="ttl" data-chg-title${tip('제목은 프로그램이 바뀐 칸에서 지었다. 되돌리려면 Claude 에게 말한다 — 되돌리기도 새 변경으로 이 목록에 남는다')}>${esc(c.title || '(제목 없음)')}</div>`
     + (c.work ? `<div class="say usr" data-work="${esc(c.work)}"><span class="faint">업무 ${esc(c.work)}</span> 이 변경이 가리킨 업무 항목 — 지시 · 판단 요청의 글은 업무 기록(R3)부터</div>` : '')
     + `${chg.persisted ? '' : `<div class="dim" data-memory${tip('프로젝트 밖(또는 읽기 전용) — 이 세션의 메모리에만 있다')}>이 세션 · 저장되지 않음</div>`}</div>`;
@@ -375,7 +375,7 @@ function changeInfo(key: string): string {
     + sec('영향', effect + againHtml(), '', '이 묶음이 무효로 만든 결과(호스트의 장부)와 그 지금 상태(진행 띠와 같다). 「다시 확인」은 지금 확인 표시 가운데 유효하지 않은 것(호스트의 get_reviews)')
     + (visibleAlts().length ? sec('대안', `<dl class="kv">${visibleAlts().map(a => `<dt>${esc(a.label)}</dt><dd>${typeof a.max_ratio === 'number' ? ratioText(a.max_ratio, a.pass === false) : '—'}${a.is_now ? ' · 지금' : ''}</dd>`).join('')}</dl>`, '', '대안의 최대 판정비(호스트) — 순위 · 「가장 얇은」은 프로그램이 짓지 않는다(AI 의 이유 글에)') : '')
     + meaningHtml()
-    + `<div class="sec"><span class="faint">${esc(BY_KO[c.by.kind] ?? c.by.kind)} · ${esc(c.trigger ?? '')} · ${esc(c.id)}${c.record_status ? ` · 기록 ${esc(c.record_status)}` : ''}</span></div>`;
+    + `<div class="sec"><span class="faint">${esc(whoText(c))} · ${esc(c.trigger ?? '')} · ${esc(c.id)}${c.record_status ? ` · 기록 ${esc(c.record_status)}` : ''}</span></div>`;
 }
 
 function connInfo(): string {

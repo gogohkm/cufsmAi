@@ -8,6 +8,13 @@
  *  - 사람의 묶음(편집 상태 · 조용한 시간)이 열린 동안의 요청: 바꾼 것이 없으면(읽기 — 누구의 것이든) 묶음을 그대로 둔다. 같은 행위자가
  *    바꾸면 그 묶음에 든다. 다른 행위자가 바꾸면 사람 묶음을 그 요청 직전까지로 닫고 요청 묶음을 내고, 편집 상태면 그 뒤 새 묶음으로 다시 연다
  *    (행위자가 섞인 묶음은 없다).
+ *  - **요청은 겹친다**(호스트의 요청 처리는 비동기다 — AI 의 긴 계산이 도는 동안 화면의 읽기 · 보기 보고 · 사람의 편집이 들어온다):
+ *    · 읽기(`run(…, {readOnly: true})`)는 묶음을 열지도 닫지도 않는다.
+ *    · 도는 요청의 묶음은 다른 것이 닫지 못한다. 그 위에 온 다른 행위자의 요청은 **손님** — 끝날 때 그 요청이 도는 동안 바뀐 것만 갈라 낸다
+ *      (열린 묶음의 몫은 그 요청이 오기 전까지). 묶음이 하나 나가면 아직 도는 것들은 거기서부터 센다(같은 변경이 두 줄에 들지 않는다).
+ *    · 요청이 도는 동안 사람이 편집(`touch` · `sessionStart`)하면 그 요청을 손님으로 돌리고(지금까지 바뀐 것은 그 요청의 줄로) 사람의 묶음을 연다.
+ *      `touch` 한 편집의 동기 부분이 끝나면 `touchDone` — 그 편집은 도는 요청의 줄에 들지 않는다.
+ *    두 행위자가 같은 동안에 함께 바꾼 것은 스냅숏으로 가를 수 없다 — 먼저 끝난 쪽의 줄에 든다(사라지지는 않는다).
  * 시계 · 스냅숏 · 내보내기는 주입한다 — 순수하게 시험한다.
  */
 import { contentFp } from './fp';
@@ -66,6 +73,10 @@ export function buildChange(ctx: ChangeContext, before: Snapshot, after: Snapsho
     return body;
 }
 
+/**
+ * 열린 묶음 하나 — 주인(`open`)이거나 손님(`guests`: 열린 묶음 위에서 도는 다른 행위자의 요청).
+ * `before` 는 이 묶음이 가져갈 변경의 시작이다(그 앞은 이미 누군가의 줄이 되었다). `depth` 는 그 안에서 도는 요청 수.
+ */
 interface OpenBatch { ctx: ChangeContext; before: Snapshot; depth: number; kind: 'request' | 'session' | 'quiet'; lastTouch: number }
 
 export interface BatcherDeps {
@@ -77,81 +88,148 @@ export interface BatcherDeps {
     build?: (ctx: ChangeContext, before: Snapshot, after: Snapshot) => ChangeBody | null;
 }
 
+const sameActor = (a: ChangeContext, b: ChangeContext): boolean => a.actor.kind === b.actor.kind && a.caseId === b.caseId;
+
 export class ChangeBatcher {
     private open: OpenBatch | null = null;
-    /** 사람의 묶음이 열린 채로 돌고 있는 요청(겹친 요청은 그 안에서 따로 묶지 않는다) */
-    private inner = 0;
+    /**
+     * 손님 — 열린 묶음(도는 요청 · 사람의 묶음) 위에서 도는 다른 행위자의 요청(같은 행위자의 겹친 요청은 한 손님). 열린 묶음을 닫지 않고,
+     * 끝날 때 그 요청이 도는 동안 바뀐 것만 갈라 낸다. 온 차례대로. 손님의 `before` 는 열린 묶음의 `before` 보다 앞서지 않는다.
+     */
+    private guests: OpenBatch[] = [];
     private session: ChangeContext | null = null;
     constructor(private readonly d: BatcherDeps) {}
 
+    private build(ctx: ChangeContext, before: Snapshot, after: Snapshot): ChangeBody | null {
+        return (this.d.build ?? ((c, x, y) => buildChange(c, x, y)))(ctx, before, after);
+    }
+    /** 묶음이 하나 나갔다(또는 기준선이 옮겨졌다) — 아직 도는 손님은 여기서부터 센다(같은 변경이 두 줄에 들지 않게) */
+    private rebaseGuests(to: Snapshot): void { for (const g of this.guests) { g.before = to; } }
+
+    /** 열린 묶음을 지금으로 닫는다 */
     private close(): void {
         const b = this.open;
         if (!b) { return; }
         this.open = null;
         const after = this.d.snapshot();
-        const body = (this.d.build ?? ((c, x, y) => buildChange(c, x, y)))(b.ctx, b.before, after);
+        const body = this.build(b.ctx, b.before, after);
         if (body) { this.d.emit(body, b.ctx); }
+        this.rebaseGuests(after);
     }
 
-    private ensure(ctx: ChangeContext, kind: OpenBatch['kind']): OpenBatch {
-        const o = this.open;
-        if (o) {
-            const sameActor = o.ctx.actor.kind === ctx.actor.kind && o.ctx.caseId === ctx.caseId;
-            const nest = kind === 'request' && o.kind === 'request' && o.depth > 0 && sameActor;
-            const joinQuiet = kind === 'quiet' && o.kind === 'quiet' && sameActor;
-            if (!nest && !joinQuiet) { this.close(); }
+    /** 열린 것이 없을 때 새 묶음. 주인 없이 돌던 손님이 그 사이 바꾼 것은 그 손님의 줄로 먼저 낸다(새 묶음이 가져가지 않게) */
+    private start(ctx: ChangeContext, kind: OpenBatch['kind']): OpenBatch {
+        const now = this.d.snapshot();
+        if (this.guests.length) {
+            const g = this.guests[0];
+            const body = this.build(g.ctx, g.before, now);
+            if (body) { this.d.emit(body, g.ctx); }
+            this.rebaseGuests(now);
         }
-        if (!this.open) { this.open = { ctx, before: this.d.snapshot(), depth: 0, kind, lastTouch: this.d.now() }; }
+        this.open = { ctx, before: now, depth: 0, kind, lastTouch: this.d.now() };
         return this.open;
     }
 
-    /** MCP 요청 하나(또는 같은 행위자의 겹친 요청) */
-    async run<T>(ctx: ChangeContext, fn: () => T | Promise<T>): Promise<T> {
-        if (this.inner > 0) { return await fn(); }
-        const o = this.open;
-        const sameActor = !!o && o.ctx.actor.kind === ctx.actor.kind && o.ctx.caseId === ctx.caseId;
-        if (o && (o.kind === 'quiet' || o.kind === 'session') && sameActor) {
-            // 같은 행위자의 요청(화면 자신의 읽기 · 쓰기) — 그 묶음 안에서. 읽기는 아무것도 바꾸지 않고, 쓰기는 그 사람의 묶음에 든다
-            this.inner += 1;
-            try { return await fn(); } finally {
-                this.inner -= 1;
-                if (this.open === o) { o.lastTouch = this.d.now(); }
-            }
-        }
-        if (o && (o.kind === 'quiet' || o.kind === 'session') && !sameActor) {
-            // 다른 행위자의 요청 — 묻기만 했으면(바뀐 것 없음) 사람의 묶음을 그대로 둔다. 바꾼 것이 있을 때만 끼어듦:
-            // 사람 묶음을 그 요청 직전까지로 닫고, 요청 묶음을 내고, 편집 상태면 그 뒤에서 다시 연다
-            const mid = this.d.snapshot();
-            const build = this.d.build ?? ((c: ChangeContext, x: Snapshot, y: Snapshot) => buildChange(c, x, y));
-            this.inner += 1;
-            try { return await fn(); } finally {
-                this.inner -= 1;
-                const after = this.d.snapshot();
-                const reqBody = build(ctx, mid, after);
-                if (reqBody && this.open === o) {
-                    const personBody = build(o.ctx, o.before, mid);
-                    if (personBody) { this.d.emit(personBody, o.ctx); }
-                    this.d.emit(reqBody, ctx);
-                    this.open = o.kind === 'session' && this.session
-                        ? { ctx: this.session, before: after, depth: 0, kind: 'session', lastTouch: this.d.now() } : null;
-                }
-            }
-        }
-        const b = this.ensure(ctx, 'request');
-        b.depth += 1;
+    /** 요청 하나가 그 묶음(주인 · 손님) 안에서 돈다 — 마지막 요청이 끝나면 닫는다(주인) · 갈라 낸다(손님) */
+    private async fly<T>(t: OpenBatch, fn: () => T | Promise<T>): Promise<T> {
+        t.depth += 1;
         try { return await fn(); } finally {
-            b.depth -= 1;
-            if (b.depth === 0 && this.open === b) {
-                this.close();
-                if (this.session) { this.open = { ctx: this.session, before: this.d.snapshot(), depth: 0, kind: 'session', lastTouch: this.d.now() }; }
+            t.depth -= 1;
+            if (t.depth === 0) {
+                if (this.open === t) {
+                    this.close();
+                    if (this.session) { this.open = { ctx: this.session, before: this.d.snapshot(), depth: 0, kind: 'session', lastTouch: this.d.now() }; }
+                } else { this.leave(t); }
             }
         }
     }
 
+    /**
+     * 손님이 끝났다. 도는 동안 바뀐 것이 없으면(묻기만 했다) 열린 묶음은 그대로다. 있으면: 열린 묶음의 몫(그 요청이 오기 전까지)을 먼저 내고
+     * 그 요청의 줄을 낸다 — 도는 요청은 이어 가고, 편집 상태는 그 뒤 새 묶음으로 다시 열고, 조용한 묶음은 거기서 끝난다.
+     */
+    private leave(g: OpenBatch): void {
+        const i = this.guests.indexOf(g);
+        if (i < 0) { return; }
+        this.guests.splice(i, 1);
+        const after = this.d.snapshot();
+        const body = this.build(g.ctx, g.before, after);
+        if (!body) { return; }
+        const host = this.open;
+        if (host) {
+            const mine = this.build(host.ctx, host.before, g.before);
+            if (mine) { this.d.emit(mine, host.ctx); }
+        }
+        this.d.emit(body, g.ctx);
+        if (host) {
+            if (host.kind === 'request') { host.before = after; }
+            else { this.open = host.kind === 'session' && this.session ? { ctx: this.session, before: after, depth: 0, kind: 'session', lastTouch: this.d.now() } : null; }
+        }
+        this.rebaseGuests(after);
+    }
+
+    /** 도는 요청의 묶음을 손님으로 돌린다(사람이 그 사이 편집을 시작했다) — 지금까지 바뀐 것은 그 요청의 줄로 내고, 그 뒤는 끝날 때 갈린다 */
+    private demote(o: OpenBatch): void {
+        const now = this.d.snapshot();
+        const body = this.build(o.ctx, o.before, now);
+        if (body) { this.d.emit(body, o.ctx); }
+        this.open = null;
+        this.guests.push(o);
+        this.rebaseGuests(now);
+    }
+
+    /** 열린 묶음의 주인이 손대기 직전 — 도는 손님이 지금까지 바꾼 것을 그 손님의 줄로 가른다(주인의 편집이 손님의 줄에 들지 않게) */
+    private cutGuests(): void {
+        if (!this.guests.length) { return; }
+        const now = this.d.snapshot();
+        const g = this.guests[0];
+        const body = this.build(g.ctx, g.before, now);
+        if (body) {
+            const host = this.open;
+            if (host) {
+                const mine = this.build(host.ctx, host.before, g.before);
+                if (mine) { this.d.emit(mine, host.ctx); }
+                host.before = now;
+            }
+            this.d.emit(body, g.ctx);
+        }
+        this.rebaseGuests(now);
+    }
+
+    /**
+     * MCP 요청 하나(또는 같은 행위자의 겹친 요청). `readOnly` — 모델 · 입력을 바꾸지 않는 동작(읽기 · 보기 보고): 묶음을 열지도 닫지도
+     * 않는다(화면의 읽기가 도는 요청의 묶음을 끊어 그 요청이 뒤에 쓴 것이 기록에서 빠지던 것).
+     */
+    async run<T>(ctx: ChangeContext, fn: () => T | Promise<T>, opts: { readOnly?: boolean } = {}): Promise<T> {
+        if (opts.readOnly) { return await fn(); }
+        // 같은 행위자의 손님이 이미 돈다 — 그 안에서(겹친 요청)
+        const mate = this.guests.find((g) => sameActor(g.ctx, ctx));
+        if (mate) { return await this.fly(mate, fn); }
+        const o = this.open;
+        if (!o) { return await this.fly(this.start(ctx, 'request'), fn); }
+        if (sameActor(o.ctx, ctx)) {
+            // 같은 행위자의 겹친 요청 — 바깥 것이 닫을 때 한 묶음
+            if (o.kind === 'request') { return await this.fly(o, fn); }
+            // 사람의 묶음(조용함 · 편집 상태) 안의 같은 행위자 요청(화면 자신의 쓰기) — 그 묶음에 든다
+            this.cutGuests();
+            try { return await fn(); } finally {
+                if (this.open === o) { o.lastTouch = this.d.now(); }
+                this.touchDone();
+            }
+        }
+        // 다른 행위자의 요청 — 열린 묶음(도는 요청 · 사람의 묶음)을 닫지 않는다. 이 요청이 도는 동안 바뀐 것만 끝날 때 갈라 낸다
+        const g: OpenBatch = { ctx, before: this.d.snapshot(), depth: 0, kind: 'request', lastTouch: this.d.now() };
+        this.guests.push(g);
+        return await this.fly(g, fn);
+    }
+
     sessionStart(ctx: ChangeContext): void {
-        if (this.open && this.open.kind !== 'session') { this.close(); }
+        const o = this.open;
+        // 도는 요청은 닫지 않는다(닫으면 그 요청이 뒤에 쓴 것이 사람의 묶음에 든다) — 손님으로 돌린다
+        if (o && o.kind === 'request') { this.demote(o); }
+        else if (o && o.kind !== 'session') { this.close(); }
         this.session = ctx;
-        if (!this.open) { this.open = { ctx, before: this.d.snapshot(), depth: 0, kind: 'session', lastTouch: this.d.now() }; }
+        if (!this.open) { this.start(ctx, 'session'); }
     }
 
     sessionEnd(): void {
@@ -175,7 +253,7 @@ export class ChangeBatcher {
     /** 되돌린 버리기의 한 줄(적힌 것과 지금이 다를 때만) — 사람의 문맥, trigger 'edit-discard' */
     recordDiscard(ctx: ChangeContext, before: Snapshot): void {
         const after = this.d.snapshot();
-        const body = (this.d.build ?? ((c, x, y) => buildChange(c, x, y)))({ ...ctx, trigger: 'edit-discard' }, before, after);
+        const body = this.build({ ...ctx, trigger: 'edit-discard' }, before, after);
         if (body) { this.d.emit(body, ctx); }
     }
 
@@ -189,12 +267,25 @@ export class ChangeBatcher {
     /** 편집 상태인가 */
     get inSession(): boolean { return this.session !== null; }
 
-    /** 편집 상태 밖의 화면 변경 — 조용한 시간으로 묶는다 */
+    /**
+     * 화면의 편집(사람) 직전 — 편집 상태 안이면 그 묶음, 밖이면 조용한 시간으로 묶는다. 요청이 돌고 있으면: 같은 행위자의 것이면 그 묶음에
+     * 들고, 다른 행위자의 것이면 그 요청을 닫지 않고 손님으로 돌린 뒤 이 편집의 묶음을 연다. 편집의 동기 부분이 끝나면 `touchDone`.
+     */
     touch(ctx: ChangeContext): void {
-        if (this.open?.kind === 'session' && this.open.ctx.actor.kind === ctx.actor.kind) { this.open.lastTouch = this.d.now(); return; }
-        const b = this.ensure(ctx, 'quiet');
-        b.lastTouch = this.d.now();
+        const o = this.open;
+        if (o && o.kind === 'request') {
+            if (sameActor(o.ctx, ctx)) { this.cutGuests(); return; }
+            this.demote(o);
+        } else if (o && (o.kind === 'session' ? o.ctx.actor.kind === ctx.actor.kind : sameActor(o.ctx, ctx))) {
+            this.cutGuests();
+            o.lastTouch = this.d.now();
+            return;
+        } else if (o) { this.close(); }
+        this.start(ctx, 'quiet');
     }
+
+    /** `touch` 한 편집의 동기 부분이 끝났다 — 그 사이 바뀐 것은 그 편집의 것: 도는 손님은 여기서부터 센다(그 편집이 손님의 줄에 들지 않게) */
+    touchDone(): void { if (this.guests.length) { this.rebaseGuests(this.d.snapshot()); } }
 
     /** 조용한 시간이 지났으면 닫는다 */
     tick(): void {
@@ -213,7 +304,10 @@ export class ChangeBatcher {
      * 차이를 한 묶음으로 내지 않게. 편집 상태도 새 파일 위에서 다시 시작한다
      */
     rebase(): void {
-        if (this.open) { this.open.before = this.d.snapshot(); this.open.lastTouch = this.d.now(); }
+        if (!this.open && !this.guests.length) { return; }
+        const now = this.d.snapshot();
+        if (this.open) { this.open.before = now; this.open.lastTouch = this.d.now(); }
+        this.rebaseGuests(now);
     }
 
     /** 다른 대상으로 — 묶음 밖의 열린 것(조용함 · 편집 상태)은 지금의 것으로 닫고, 편집 상태를 끝낸다 */
