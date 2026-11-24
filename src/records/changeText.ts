@@ -143,9 +143,14 @@ function weight(f: FieldChange): number {
     return 1;
 }
 
+/** 제목에 칸을 다 적는 수(D6 — 넘으면 「첫 칸 · 외 n」) · 제목의 길이 한도(기록 스키마의 title 160자) */
+export const TITLE_FIELDS_MAX = 5;
+export const TITLE_MAX = 160;
+
 /**
- * 변경 하나의 제목 — 무게가 가장 큰 칸(같으면 앞의 것) + 「외 n」(V7-24 ③). n 은 나머지 칸 전부 — 템플릿 치수로 설명되는
- * 절점 · 요소 요약(`explainedBy`)만 뺀다(②). 칸이 없으면 null.
+ * 변경 하나의 제목(D6 — 통일안 6.4). 칸이 5개 이하면 칸마다 「이름 전 → 후 단위」 를 ` · ` 로 잇고, 넘으면 「첫 칸 · 외 n」.
+ * 첫 칸은 무게가 가장 큰 칸(같으면 앞의 것 — V7-24 ③), 나머지는 칸의 차례대로. 템플릿 치수로 설명되는 절점 · 요소 요약(`explainedBy`)은
+ * 세지도 적지도 않는다(②). 한도를 넘으면 끝을 줄인다. 칸이 없으면 null.
  */
 export function changeTitle(fields: FieldChange[], units: DisplayUnits = 'SI', labelOf?: LabelFn): string | null {
     if (!fields.length) { return null; }
@@ -153,6 +158,10 @@ export function changeTitle(fields: FieldChange[], units: DisplayUnits = 'SI', l
     const pool = candidates.length ? candidates : fields;
     let primary = pool[0];
     for (const f of pool) { if (weight(f) > weight(primary)) { primary = f; } }
-    const rest = fields.filter((f) => f !== primary && !f.explainedBy).length;
-    return fieldText(primary, units, labelOf) + (rest > 0 ? ` 외 ${rest}` : '');
+    const rest = candidates.filter((f) => f !== primary);
+    const parts = rest.length + 1 <= TITLE_FIELDS_MAX
+        ? [primary, ...rest].map((f) => fieldText(f, units, labelOf))
+        : [fieldText(primary, units, labelOf), `외 ${rest.length}`];
+    const t = [...parts.join(' · ')];
+    return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX - 1).join('') + '…' : t.join('');
 }

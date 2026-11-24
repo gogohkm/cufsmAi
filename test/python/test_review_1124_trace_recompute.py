@@ -158,6 +158,12 @@ F = {
     'λℓ = (Pne / Pcrl)^0.5': lambda v: sqrt(v['Pne'] / v['Pcrl']),
     'Pnℓ = Pne': lambda v: v['Pne'],
     'Pnℓ = [1 − 0.15 (Pcrl/Pne)^0.4] (Pcrl/Pne)^0.4 Pne': _dsm_l('Pne', 'Pcrl'),
+    # §E3.1.1.1 원형관(Eq. E3.1.1.1-1 · -2 · -3, Eq. E3.1-1) — (D Fy)/(t E) = (D/t) Fy / E
+    'Ao = [0.037 / ((D Fy)/(t E)) + 0.667] A ≤ A':
+        lambda v: min((0.037 / (v['D/t'] * v['Fy'] / v['E']) + 0.667) * v['A'], v['A']),
+    'R_Ae = Fy / (2 Fcre) ≤ 1.0': lambda v: min(v['Fy'] / (2 * v['Fcre']), 1.0),
+    'Ae = Ao + R_Ae (A − Ao)': lambda v: v['Ao'] + v['R_Ae'] * (v['A'] - v['Ao']),
+    'Pnℓ = Ae Fn ≤ Pne': lambda v: min(v['Ae'] * v['Fn'], v['Pne']),
     'λd = (Py / Pcrd)^0.5': lambda v: sqrt(v['Py'] / v['Pcrd']),
     'Pnd = Py': lambda v: v['Py'],
     'Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py':
@@ -494,6 +500,7 @@ _CMP = {'≤': lambda a, b: a <= b, '<': lambda a, b: a < b, '≥': lambda a, b:
 _COND = re.compile(r'^(\S+) (≤|<|≥|>) (?:([\d.]+) ?)?(\S+)?$')
 
 CONDITIONS = {
+    'D/t ≤ 0.441 E/Fy': lambda v: v['D/t'] <= 0.441 * v['E'] / v['Fy'],
     '0.0714 E/Fy < D/t ≤ 0.318 E/Fy': lambda v: 0.0714 * v['E'] / v['Fy'] < v['D/t'] <= 0.318 * v['E'] / v['Fy'],
     'D/t ≤ 0.0714 E/Fy': lambda v: v['D/t'] <= 0.0714 * v['E'] / v['Fy'],
     '0.318 E/Fy < D/t ≤ 0.441 E/Fy': lambda v: 0.318 * v['E'] / v['Fy'] < v['D/t'] <= 0.441 * v['E'] / v['Fy'],
@@ -665,6 +672,7 @@ _Q_EXACT = {
     'exponent': 'dimensionless', 's': 'length', 'm': 'count', 'n': 'count', 'members': 'count', 'rows': 'count',
     'twf/R, η': 'dimensionless', 'h': 'length', 'Lv': 'length', 'L_lap': 'length', 'Iy': 'moment_of_inertia',
     'I22': 'moment_of_inertia',
+    'R_Ae': 'dimensionless',   # §E3.1.1.1 의 R(= Fy / 2Fcre) — 모서리 반경 R(길이)과 다른 기호로
 }
 
 
@@ -731,7 +739,8 @@ def test_every_symbol_has_its_contract_quantity():
 SPEC_EQS = set("""
 1.1-4 2.3.1.2-1 2.3.1.3-1 2.3.1.3-2 2.3.1.3-3 2.3.1.3-4 2.3.1.3-5 2.3.1.3-6 2.3.1.3-7 2.3.3.2-1 2.3.3.3-1
 2.3.3.3-2 2.3.3.3-3 2.3.3.3-4 2.3.3.3-5 2.3.3.3-6 A3.3.2-1 C1.2.1.1-1 C1.2.1.1-3 C1.2.1.1-4 C1.2.1.1-5 D2-1 D3-1
-E2-1 E2-2 E2-3 E2-4 E2.1-1 E2.2-1 E2.2-3 E2.2-4 E2.2-5 E2.2-6 E3.2.1-1 E3.2.1-2 E3.2.1-3 E4.1-1 E4.1-2 E4.1-3
+E2-1 E2-2 E2-3 E2-4 E2.1-1 E2.2-1 E2.2-3 E2.2-4 E2.2-5 E2.2-6 E3.1-1 E3.1.1.1-1 E3.1.1.1-2 E3.1.1.1-3
+E3.2.1-1 E3.2.1-2 E3.2.1-3 E4.1-1 E4.1-2 E4.1-3
 E4.1-4 F2.1-1 F2.1-2 F2.1-3 F2.1-4 F2.1-5 F2.1.1-1 F2.1.1-4 F2.1.1-5 F2.1.3-1 F2.1.4-1 F2.1.4-2 F2.3-1 F2.3-2
 F2.3-3 F2.3-4 F2.4.2-1 F2.4.2-2 F2.4.2-3 F3.1-1 F3.2.1-1 F3.2.1-2 F3.2.1-3 F3.2.3-1 F4.1-1 F4.1-2 F4.1-3 F4.1-4
 F4.3-1 F4.3-3 F4.3-4 G2.1-1 G2.1-2 G2.1-3a G2.1-3b G2.1-4 G2.1-5 G2.3-1 G2.3-2 G5-1 H1.1-1 H1.1-2 H1.1-3a H1.1-3b
@@ -765,6 +774,8 @@ EXPR_LABELS = {
     'Fn = 0.658^(λc²) Fy': 'E2-2', 'Fn = (0.877 / λc²) Fy': 'E2-3', 'Pne = Ag Fn': 'E2-1',
     'Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py': 'E4.1-2', 'Pnd = Py': 'E4.1-1',
     'Pnℓ = [1 − 0.15 (Pcrl/Pne)^0.4] (Pcrl/Pne)^0.4 Pne': 'E3.2.1-2', 'Pnℓ = Pne': 'E3.2.1-1',
+    'Ao = [0.037 / ((D Fy)/(t E)) + 0.667] A ≤ A': 'E3.1.1.1-2', 'R_Ae = Fy / (2 Fcre) ≤ 1.0': 'E3.1.1.1-3',
+    'Ae = Ao + R_Ae (A − Ao)': 'E3.1.1.1-1', 'Pnℓ = Ae Fn ≤ Pne': 'E3.1-1',
     'Fn = Fy': 'F2.1-3', 'Fn = (10/9) Fy [1 − 10 Fy / (36 Fcre)]': 'F2.1-4', 'Fn = Fcre': 'F2.1-5',
     'Mne = Sf Fn ≤ My': 'F2.1-1', 'Mnd = My': 'F4.1-1', 'Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My': 'F4.1-2',
     'Mnℓ = Mne': 'F3.2.1-1', 'Mnℓ = [1 − 0.15 (Mcrl/Mne)^0.4] (Mcrl/Mne)^0.4 Mne': 'F3.2.1-2',

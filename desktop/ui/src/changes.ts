@@ -15,6 +15,7 @@ import { hhmm, sigText } from './format';
 import { fieldOf, OPTION_KO } from './caseFields';
 import { state } from './store';
 import { caseSI } from './units';
+import { rec } from './records';
 
 /** 칸 하나의 바뀜(호스트 changeText.fieldRecord) — 수는 요청한 단위(SI), unit 은 그 단위 글자, quantity 는 단위 종류 */
 export interface FieldRec {
@@ -29,6 +30,8 @@ export interface Geometry {
 export interface Change {
   id: string; at: string; by: { kind: string; client?: string }; trigger: string | null; title: string;
   reason?: string; work?: string; source?: string; fields: number; invalidated?: string[]; field_changes?: FieldRec[]; geometry?: Geometry | null; record_status?: string;
+  /** 같은 요청이 남긴 실행의 id(있을 때만 — history 의 run 과 같은 id). 있으면 그 실행의 머리줄 아래에 둔다 */
+  runs?: string[];
 }
 /** 칸 값 하나의 글(호스트가 준 수 그대로 — 유효숫자 6 에서 끝의 0 을 지운 꼴, 빈 칸은 「(빈 칸)」) */
 export function valText(v: unknown): string {
@@ -55,20 +58,112 @@ export async function loadChanges(): Promise<void> {
   chg.total = typeof r.total === 'number' ? r.total : chg.list.length;
 }
 
-export const BY_KO: Record<string, string> = { ai: 'AI', person: '사용자', program: '프로그램', external: '밖에서' };
+/** 행위자 넷(D4 · D5) — 사람 · AI · 프로그램 · 파일. 호스트의 `external`(옛 줄)은 파일로 읽는다 */
+export type Actor = 'person' | 'ai' | 'program' | 'file';
+export const BY_KO: Record<string, string> = { ai: 'AI', person: '사람', program: '프로그램', external: '파일', file: '파일' };
 const BY_TIP: Record<string, string> = {
-  ai: 'AI 가 MCP 도구로 바꿨다', person: '사람이 바꿨다(편집 상태 · 화면)', program: '프로그램이 바꿨다(사람 · AI 의 요청 밖)', external: '프로그램 밖에서 파일이 바뀌었다(마지막 저장과 연 파일의 차이)',
+  ai: 'AI 가 MCP 도구로 바꿨다', person: '사람이 바꿨다(편집 상태 · 화면)', program: '프로그램이 바꿨다(사람 · AI 의 요청 밖 — 화면 연동 · 단위 바꿈 · 기본값)',
+  file: '파일에서 왔다(열기 · 가져오기 · 프로그램 밖에서 바뀐 파일)', external: '파일에서 왔다(열기 · 가져오기 · 프로그램 밖에서 바뀐 파일)',
 };
 /**
- * 끼운 화면의 연동만으로 생긴 줄 — 호스트가 그 줄의 trigger 에 `mirror`(다른 칸을 따라 바뀜) · `unit-toggle`(단위 바꿈)을 적는다. 사람의 문맥(person)
- * 이지만 사람이 친 것이 아니다: AI 가 값을 쓴 뒤 화면이 딸린 칸을 맞춘 것이 「사용자」 의 편집으로 읽히지 않게 이름을 가른다
+ * 화면 연동만으로 생긴 줄 — 호스트가 그 줄의 trigger 에 `mirror`(다른 칸을 따라 바뀜) · `unit-toggle`(단위 바꿈) · `default`(기본값 채움)를 적는다.
+ * 옛 호스트는 by.kind 를 person 으로, 새 호스트(D4)는 program 으로 적는다 — 둘 다 「프로그램 · 화면 연동」 이다(사람이 친 것이 아니다)
  */
-export const LINK_KO: Record<string, string> = { mirror: '화면 연동', 'unit-toggle': '단위 바꿈' };
-export const linkOf = (c: Change): string | null => (c.by.kind === 'person' && typeof c.trigger === 'string' && LINK_KO[c.trigger]) || null;
-/** 그 줄의 「누가」 글(AI · 사용자 · 프로그램 · 밖에서 · 화면 연동) */
-export const whoText = (c: Change): string => linkOf(c) ?? BY_KO[c.by.kind] ?? c.by.kind;
-export const LINK_TIP = '사람이 친 것이 아니다 — 끼운 설계 화면이 다른 칸(또는 단위)을 따라 이 칸을 맞췄다';
-export const byTag = (kind: string, extraTip = ''): string => `<span class="tag ${kind === 'ai' ? 'ai' : kind === 'external' ? 'def' : ''}" data-by="${esc(kind)}"${tip(`${BY_TIP[kind] ?? kind}${extraTip ? ` — ${extraTip}` : ''}`)}>${esc(BY_KO[kind] ?? kind)}</span>`;
+export const LINK_KO: Record<string, string> = { mirror: '화면 연동', 'unit-toggle': '단위 바꿈', default: '기본값 채움' };
+export const linkOf = (c: Change): string | null => ((c.by.kind === 'person' || c.by.kind === 'program') && typeof c.trigger === 'string' && LINK_KO[c.trigger]) || null;
+/** 그 줄의 행위자(넷 가운데 하나) */
+export const actorOf = (c: Change): Actor => (linkOf(c) || c.by.kind === 'program' ? 'program' : c.by.kind === 'ai' ? 'ai' : c.by.kind === 'external' || c.by.kind === 'file' ? 'file' : 'person');
+/** 그 줄의 「누가」 글(사람 · AI · 프로그램 · 파일 · 프로그램 · 화면 연동) */
+export const whoText = (c: Change): string => (linkOf(c) ? `프로그램 · ${linkOf(c)}` : BY_KO[c.by.kind] ?? c.by.kind);
+export const LINK_TIP = '사람이 친 것이 아니다 — 설계 화면이 다른 칸(또는 단위 · 기본값)을 따라 이 칸을 맞췄다';
+const ACTOR_OF_KIND = (kind: string): Actor => (kind === 'ai' ? 'ai' : kind === 'program' ? 'program' : kind === 'external' || kind === 'file' ? 'file' : 'person');
+/** 행위자 배지 — 사람 초록 · AI 파랑 · 프로그램 회색 · 파일 보라(D5). data-by 는 호스트의 kind 그대로 */
+export const byTag = (kind: string, extraTip = '', actor: Actor = ACTOR_OF_KIND(kind)): string => `<span class="tag by-${actor}" data-by="${esc(kind)}" data-actor="${actor}"${tip(`${BY_TIP[actor] ?? kind}${extraTip ? ` — ${extraTip}` : ''}`)}>${esc(BY_KO[actor] ?? kind)}</span>`;
+/** 변경 묶음 하나의 배지(연동 줄은 프로그램) */
+export const actorTag = (c: Change, extraTip = ''): string => byTag(c.by.kind, extraTip, actorOf(c));
+
+// ── 기록 — 실행(계산 #k)으로 접기(통일안 6.2) ─────────────────────────
+/** get_case_status detail runs 의 history 한 줄. `no`(대상 안의 실행 차례) · `auto`(다른 계산이 자동으로 만든 것)는 새 호스트만 준다 */
+export interface Hist { run: string; kind: string; at: string; by?: string; client?: string | null; status?: string; pass?: boolean | null; max_ratio?: number | null; governing?: { id?: string; ratio?: number; verdict?: string } | null; props?: any; no?: number; auto?: boolean }
+export interface RunGroup { key: string; runs: Hist[]; head: Hist; verdict: Hist | null; changes: Change[] }
+export interface Timeline { hasRuns: boolean; after: Change[]; groups: RunGroup[]; before: Change[] }
+/** 실행 이력(새 것부터 20 — 호스트). 프로젝트 밖은 null */
+export function history(): Hist[] | null {
+  const h = rec.status?.history as unknown;
+  return Array.isArray(h) ? h.filter((x: any) => x && typeof x.at === 'string') : null;
+}
+/**
+ * 기록의 묶음 — 실행 하나 = 머리줄 하나(자동 실행 · 설계용 좌굴값은 빼고), 사이에 변경이 없는 잇단 실행은 한 머리줄(가장 늦은 것의 번호 · 판정).
+ * 변경은 그 앞 계산 뒤 ~ 이 계산까지의 머리줄 아래. 실행 이력이 없으면(프로젝트 밖) 기준점(basePointAt) 앞 · 뒤 둘로만
+ */
+export function timeline(): Timeline {
+  const h = history();
+  const runs = (h ?? []).filter(x => x.auto !== true && x.kind !== 'design_dsm').slice().sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  // 같은 요청이 남긴 실행이 있는 묶음(runs — 설계 도구는 계산이 먼저, 입력 확정이 뒤)은 시각이 아니라 그 실행으로 둔다
+  const linked = (c: Change): boolean => Array.isArray(c.runs) && c.runs.length > 0;
+  const timed = chg.list.filter(c => !linked(c));
+  if (!runs.length) {
+    const b = basePointAt();
+    return { hasRuns: false, after: timed.filter(c => !b || c.at > b), groups: [], before: chg.list.filter(c => linked(c) || (!!b && c.at <= b)) };
+  }
+  // 오래된 것부터 — 앞 실행 뒤에 (시각으로 놓이는) 변경이 없으면 그 머리줄에 잇는다
+  const gs: Array<{ runs: Hist[]; from: string | null }> = [];
+  let prevAt: string | null = null;
+  for (const r of runs) {
+    const between = prevAt === null ? true : timed.some(c => c.at > prevAt! && c.at <= r.at);
+    if (!gs.length || between) { gs.push({ runs: [r], from: prevAt }); } else { gs[gs.length - 1].runs.push(r); }
+    prevAt = r.at;
+  }
+  const first = runs[0].at, last = runs[runs.length - 1].at;
+  // 이력이 다 있으면(20 보다 적음 · 첫 실행이 #1) 첫 계산 앞의 묶음은 첫 계산에 들어간 것이다. 잘렸으면 「계산 기록 앞」
+  const complete = (h ?? []).length < 20 || runs[0].no === 1;
+  const groups: RunGroup[] = gs.map((g, gi) => {
+    const head = g.runs[g.runs.length - 1];
+    const lo = gi === 0 && complete ? '' : g.from, hi = g.runs[0].at;
+    const verdict = [...g.runs].reverse().find(x => typeof x.max_ratio === 'number' || typeof x.pass === 'boolean') ?? null;
+    return { key: `log:run:${String(head.run ?? head.at).replace(/[#|]/g, '')}`, runs: g.runs, head, verdict, changes: lo === null ? [] : timed.filter(c => c.at > lo && c.at <= hi) };
+  });
+  // 실행이 실린 묶음 — 그 실행(여럿이면 가장 늦은 것)의 머리줄. 자동 실행이면 그 때를 품은 머리줄, 이력에 없으면(20 보다 오래됨) 「계산 기록 앞」
+  const before = complete ? [] : timed.filter(c => c.at <= first);
+  for (const c of chg.list.filter(linked)) {
+    const r = anchorRun(c);
+    const g = r ? groups.find(x => x.runs.some(y => y.run === r.run)) ?? groups.find((x, i) => r.at <= x.runs[x.runs.length - 1].at && (i === 0 || r.at > groups[i - 1].runs[groups[i - 1].runs.length - 1].at)) : null;
+    if (g) { g.changes.push(c); } else { before.push(c); }
+  }
+  const byNew = (a: Change, b: Change) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
+  groups.forEach(g => g.changes.sort(byNew));
+  before.sort(byNew);
+  return { hasRuns: true, after: timed.filter(c => c.at > last), groups: groups.reverse(), before };
+}
+/** 묶음에 실린 실행 가운데 가장 늦은 것(이력에 있는 것만). 없으면 null */
+export function anchorRun(c: Change): Hist | null {
+  if (!Array.isArray(c.runs) || !c.runs.length) { return null; }
+  const hs = (history() ?? []).filter(x => c.runs!.includes(x.run));
+  return hs.sort((a, b) => (a.at < b.at ? 1 : -1))[0] ?? null;
+}
+/** 묶음의 판정 변화 — 실행이 실린 묶음은 「그 실행 앞의 마지막 실행 → 그 실행」, 아니면 시각으로(runsAround) */
+export function aroundOf(c: Change): { before: Hist | null; after: Hist | null; anyAfter: boolean } {
+  if (Array.isArray(c.runs) && c.runs.length) {
+    const r = anchorRun(c);
+    if (!r) { return { before: null, after: null, anyAfter: true }; }
+    const hist = history() ?? [];
+    return { before: hist.find(x => x.at < r.at && x.run !== r.run && typeof x.max_ratio === 'number') ?? null, after: typeof r.max_ratio === 'number' ? r : null, anyAfter: true };
+  }
+  return runsAround(c.at);
+}
+/** 머리줄의 이름 — 「계산 #no」, 번호가 없으면(옛 호스트) 「종류 · 시각」 */
+export const runName = (r: Hist): string => (typeof r.no === 'number' ? `계산 #${r.no}` : `${KIND_RESULT_KO[r.kind] ?? r.kind} · ${hhmm(r.at)}`);
+/** 다시 계산이 필요한 변경 — 지난 계산 뒤, 프로그램의 연동 줄은 세지 않는다 */
+export const pendingChanges = (): Change[] => timeline().after.filter(c => actorOf(c) !== 'program');
+/** 그 때 앞의 마지막 실행 · 뒤의 첫 실행(최대 판정비가 있는 것 — 호스트의 실행 이력, 새 것부터). until 이 있으면 그 앞까지 */
+export function runsAround(at: string, until?: string): { before: Hist | null; after: Hist | null; anyAfter: boolean } {
+  const hist = history() ?? [];
+  return {
+    before: hist.find(x => x.at < at && typeof x.max_ratio === 'number') ?? null,
+    after: [...hist].reverse().find(x => x.at > at && (!until || x.at < until) && typeof x.max_ratio === 'number') ?? null,
+    anyAfter: hist.some(x => x.at > at && x.auto !== true && x.kind !== 'design_dsm'),
+  };
+}
 
 /** 기준점 — 마지막 실행(호스트의 남은 결과 가운데 가장 늦은 때). 그 뒤의 변경에 점 */
 export function basePointAt(): string | null {
@@ -93,7 +188,7 @@ export function modelTag(path: string, fallback: string): string {
   const m = modelChange(path);
   if (!m) { return fallback; }
   const why = m.c.reason ? `이유: ${m.c.reason}` : '';
-  return `${byTag(m.c.by.kind, `${hhmm(m.c.at)} ${m.text}${why ? ` · ${why}` : ''} · 누르면 업무 › 변경의 그 줄${chg.persisted ? '' : ' · 이 세션 · 저장되지 않음'}`)}`
+  return `${actorTag(m.c, `${hhmm(m.c.at)} ${m.text}${why ? ` · ${why}` : ''} · 누르면 업무 › 기록의 그 줄${chg.persisted ? '' : ' · 이 세션 · 저장되지 않음'}`)}`
     + `<span class="why" data-last-change="${esc(m.c.id)}" data-chg-go="${esc(m.c.id)}">${esc(m.text)} · ${esc(hhmm(m.c.at))}</span>`;
 }
 

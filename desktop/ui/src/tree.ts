@@ -3,14 +3,14 @@
  * 가지는 호스트에 있는 것만 만든다. 호스트에 아직 없는 것(설계 입력 · 기록 · 검증)은 그 까닭을 값 자리에 적는다 — 빈칸이 아니다.
  */
 import { esc, tip } from './dom';
-import { hhmm, num, ratio, ratioText } from './format';
+import { hhmm, num, ratio, ratioText, sigText } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
 import { assumptionLines, isDefault, memberRuns, state, type CheckRow } from './store';
 import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
 import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
-import { afterBase, chg, LINK_TIP, linkOf, whoText } from './changes';
+import { actorOf, actorTag, afterBase, basePointAt, BY_KO, chg, history, KIND_RESULT_KO, LINK_TIP, linkOf, runName, aroundOf, timeline, whoText, type Change, type Hist } from './changes';
 import { glyph, itemOfRow, markOf, rv } from './reviews';
 import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
@@ -27,6 +27,10 @@ export interface TNode {
   tagHtml?: string;
   dot?: string; tip?: string; faint?: boolean; tag?: string;
   kids?: TNode[]; open?: boolean;
+  /** 이름 앞의 HTML(기록 줄의 행위자 배지) */
+  preHtml?: string;
+  /** 누르면 다른 탭의 그 줄로(`탭|키` — data-ref-go) */
+  go?: string;
 }
 
 const n = (k: string, t: string, o: Partial<TNode> = {}): TNode => ({ k, t, ...o });
@@ -190,27 +194,7 @@ export function buildTree(tab: Tab): TNode[] {
           tip: `${a.item} · ${a.written_by} · 실행 ${a.runs.join(', ')}` })) }),
     ];
   }
-  if (tab === 'work') {
-    // 프로젝트 밖(파일만 열었거나 아무것도 열지 않았다) — 판단 요청 · 보고는 프로젝트의 검토 대상에만 남는다(호스트가 AI 의 work_items 를 거절한다).
-    // 「0」 이 아니라 그 까닭을 값 자리에 적는다(빈 목록이 「AI 가 아무것도 하지 않았다」 로 읽히지 않게). 변경은 프로젝트 밖에서도 이 세션 동안 보인다
-    const outside = !!f && !f.project?.inProject;
-    const outsideTip = '프로젝트 밖 — 판단 요청 · 보고는 프로젝트의 검토 대상에만 남는다(프로젝트 밖에서는 AI 가 쓸 수 없다). 시작 화면에서 프로젝트를 만들거나 「프로젝트로 만들기」. AI · 사람이 바꾼 것은 아래 「변경」 에 이 세션 동안 보인다';
-    return [
-      // R3-3: 업무 항목(work_items) — 판단 요청(열린 수 · 주황) · 보고 · 지시. 글은 쓴 쪽의 것(자료), 이름 옆에 쓴 쪽
-      n('ask', '판단 요청', outside ? { v: '프로젝트 밖', vCls: 'un', tip: outsideTip } : { v: work.err ? '읽지 못함' : String(openQuestions().length || questions().length), vCls: openQuestions().length ? 'warn' : '', open: true,
-        tip: `AI 가 사람에게 묻는 것(work_items question) — 답은 Claude Desktop 대화에서(AI 가 옮겨 적는다). 열린 것 ${openQuestions().length}${workTail()}`,
-        kids: questions().map(w => n(`work:${w.item}`, w.title, { dot: w.state === 'closed' ? undefined : w.answered ? 'ok' : 'warn', v: w.state === 'closed' ? '닫힘' : w.answered ? '답함' : '답 기다림',
-          vCls: w.answered || w.state === 'closed' ? 'faint' : 'warn', tip: `${w.item} · ${w.written_by} · ${hhmm(w.created_at)}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
-      n('rep', '보고', outside ? { v: '프로젝트 밖', vCls: 'un', tip: outsideTip } : { v: work.err ? '읽지 못함' : `${reports().length}${reports().length ? ` · ${reports().filter(w => markOf('work', w.item)?.state !== 'reviewed').length} 미확인` : ''}`, open: true, tip: `AI 의 보고(work_items report) — 항목마다 완료 · 가정 · 미결${workTail()}`,
-        kids: reports().map(w => n(`work:${w.item}`, w.title, { v: `${w.items ? `항목 ${w.items} · ` : ''}${hhmm(w.created_at)}`, tip: `${w.item} · ${w.written_by}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
-      ...(instructions().length ? [n('ins', '지시', { v: String(instructions().length), tip: '사람의 지시를 AI 가 옮겨 적은 것(work_items instruction) — 변경이 그 지시를 가리킨다',
-        kids: instructions().map(w => n(`work:${w.item}`, w.title, { v: hhmm(w.created_at), tip: `${w.item} · ${w.written_by} · AI 가 옮겨 적음` })) })] : []),
-      n('chg', '변경', { v: chg.err ? '읽지 못함' : `${chg.total}${chg.persisted || !chg.total ? '' : ' · 이 세션만'}`, vCls: chg.err ? 'un' : '', open: true,
-        tip: `누가 · 언제 · 전 → 후 — 호스트의 변경 묶음(list_changes). 사람 · AI · 프로그램 · 밖에서가 한 목록(꼬리표로 가른다). 새 것이 위, 마지막 실행 뒤의 것에 점${chg.persisted ? '' : ' · 프로젝트 밖 — 이 세션만(저장되지 않음)'}`,
-        kids: chg.list.map(c => n(`chg:${c.id}`, c.title || '(제목 없음)', { dot: afterBase(c) ? 'acc' : undefined, v: `${whoText(c)} · ${hhmm(c.at)}`,
-          tip: `${whoText(c)}${linkOf(c) ? ` — ${LINK_TIP}` : ''}${c.by.client ? ` (${c.by.client})` : ''} · ${hhmm(c.at)} · 바뀐 칸 ${c.fields}${c.invalidated?.length ? ` · 낡게 한 결과 ${c.invalidated.join(', ')}` : ''}${c.reason ? ` · 이유: ${c.reason}` : ''}` })) }),
-    ];
-  }
+  if (tab === 'work') { return workTree(); }
   return [
     n('rpt', '계산서', { ...docV('design'), tip: '호스트가 만든 계산서(generate_report) — 열린 .csd 의 폴더 · 없으면 임시 폴더에 쓴다' }),
     n('brpt', '좌굴 해석 보고서', { ...docV('buckling'), tip: '호스트가 만든 좌굴 해석 보고서(generate_report kind buckling)' }),
@@ -222,6 +206,94 @@ export function buildTree(tab: Tab): TNode[] {
         ...(srcs.unregistered.length ? [n('src:unreg', `등록 안 된 파일 ${srcs.unregistered.length}`, { faint: true, tip: srcs.unregistered.slice(0, 10).join(', ') })] : [])] }),
     pubNode(),
   ];
+}
+
+// ── 업무 탭 — 할 일 · 기록 · 점검(통일안 6.2) ───────────────────────────
+const r3 = (v: unknown): string => (typeof v === 'number' ? sigText(v, 3) : '—');
+/** 기록 한 줄 — [행위자 배지] 제목 … 시각 [판정 변화] [✓ 확인](통일안 6.4). 판정 변화는 그 묶음 앞의 마지막 실행 → 뒤의 첫 실행(호스트의 실행 이력) */
+function chgNode(c: Change): TNode {
+  const hist = history();
+  const ar = aroundOf(c);
+  const delta = ar.after ? `${r3(ar.before?.max_ratio)}→${r3(ar.after.max_ratio)}`
+    : hist ? (ar.anyAfter ? '' : '다시 계산 필요') : basePointAt() && afterBase(c) && !c.runs?.length ? '다시 계산 필요' : '';
+  const g = rv.loaded ? glyph(markOf('change', c.id)) : '';
+  return n(`chg:${c.id}`, c.title || '(제목 없음)', {
+    preHtml: actorTag(c),
+    vHtml: `<span class="faint">${esc(hhmm(c.at))}</span>${delta ? ` <span class="${ar.after ? 'num' : 'warn'}" data-delta${tip(ar.after ? '그 묶음 앞의 마지막 실행 → 뒤의 첫 실행의 최대 판정비(호스트의 실행 이력)' : '이 묶음 뒤에 계산하지 않았다')}>${esc(delta)}</span>` : ''}${g ? ` ${g}` : ''}`,
+    tip: `${whoText(c)}${linkOf(c) ? ` — ${LINK_TIP}` : ''}${c.by.client ? ` (${c.by.client})` : ''} · ${hhmm(c.at)} · 바뀐 칸 ${c.fields}${c.invalidated?.length ? ` · 낡게 한 결과 ${c.invalidated.join(', ')}` : ''}${c.reason ? ` · 이유: ${c.reason}` : ''}`,
+  });
+}
+/** 계산 머리줄의 판정 — 「OK 0.809」(엔진의 판정 · 최대 판정비 그대로) */
+function runVerdictHtml(v: Hist | null): string {
+  if (!v) { return '<span class="vl faint">판정 없음</span>'; }
+  const t = v.pass === true ? 'OK' : v.pass === false ? 'NG' : '판정 없음';
+  const cls = v.pass === true ? 'ok' : v.pass === false ? 'ng' : 'un';
+  return `<span class="verdict ${cls}" style="font-weight:400" data-run-verdict="${v.pass === true ? 'ok' : v.pass === false ? 'ng' : 'none'}">${t}</span>${typeof v.max_ratio === 'number' ? ` <span class="num">${esc(ratioText(v.max_ratio, v.pass === false))}</span>` : ''}`;
+}
+function workTree(): TNode[] {
+  const f = state.full;
+  // 프로젝트 밖(파일만 열었거나 아무것도 열지 않았다) — 판단 요청 · 보고 · 가정은 프로젝트의 검토 대상에만 남는다(호스트가 AI 의 work_items 를 거절한다).
+  // 「0」 이 아니라 그 까닭을 값 자리에 적는다(빈 목록이 「AI 가 아무것도 하지 않았다」 로 읽히지 않게). 변경은 프로젝트 밖에서도 이 세션 동안 보인다
+  const outside = !!f && !f.project?.inProject;
+  const outsideTip = '프로젝트 밖 — 판단 요청 · 보고 · 가정은 프로젝트의 검토 대상에만 남는다(프로젝트 밖에서는 AI 가 쓸 수 없다). 시작 화면에서 프로젝트를 만들거나 「프로젝트로 만들기」. AI · 사람이 바꾼 것은 아래 「기록」 에 이 세션 동안 보인다';
+  const OUT = { v: '프로젝트 밖', vCls: 'un', tip: outsideTip };
+  // 할 일 — 사람이 처리할 것
+  const oq = openQuestions();
+  const waiting = rv.loaded ? chg.list.filter(c => actorOf(c) === 'ai' && markOf('change', c.id)?.state !== 'reviewed') : [];
+  const prov = asm.items.filter(a => !a.closed && a.status === 'provisional');
+  const nTodo = outside ? 0 : oq.length + waiting.length + prov.length;
+  const todo = n('todo', '할 일', {
+    v: outside ? '프로젝트 밖' : String(nTodo), vCls: outside ? 'un' : nTodo ? 'ng' : '', dot: nTodo ? 'ng' : undefined, open: true,
+    tip: outside ? outsideTip : '사람이 처리할 것 — 답을 기다리는 판단 요청 · AI 가 바꾼 것 가운데 확인 표시가 없는 묶음 · 확정 안 된 임시 가정',
+    kids: [
+      n('ask', '판단 요청', outside ? OUT : { v: work.err ? '읽지 못함' : String(oq.length), vCls: oq.length ? 'warn' : '', open: true,
+        tip: `AI 가 사람에게 묻는 것(work_items question) — 답은 Claude Desktop 대화에서(AI 가 옮겨 적는다). 답한 · 닫힌 것은 기록의 「지난 판단 요청」${workTail()}`,
+        kids: oq.map(w => n(`work:${w.item}`, w.title, { dot: 'warn', v: '답 기다림', vCls: 'warn', tip: `${w.item} · ${w.written_by} · ${hhmm(w.created_at)}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
+      n('todo:rv', '확인 대기', outside || !rv.loaded ? { ...OUT, ...(outside ? {} : { v: '읽는 중', tip: '확인 표시(get_reviews)를 읽는 중' }) } : { v: String(waiting.length), vCls: waiting.length ? 'warn' : '', open: true,
+        tip: 'AI 가 바꾼 묶음 가운데 사람의 확인 표시가 없는 것(호스트의 get_reviews) — 사람 · 프로그램 · 파일의 묶음은 넣지 않는다', kids: waiting.map(chgNode) }),
+      n('todo:asm', '임시 가정', outside ? OUT : { v: asm.err ? '읽지 못함' : String(prov.length), vCls: prov.length ? 'warn' : '', open: true,
+        tip: '가정 등록부(assumptions)에서 닫히지 않은 임시 가정 — 사람의 확인 전까지 발행을 막는다',
+        kids: prov.map(a => n(`asmr:${a.item}`, `${a.item} ${a.text}`, { tagHtml: `<span class="tag def">임시</span>`, v: a.written_by.startsWith('program') ? '프로그램' : a.written_by.startsWith('ai') ? 'AI' : a.written_by, tip: `${a.item} · ${a.written_by} · 발행 ${a.blocks_issue ? '막음' : '막지 않음'}` })) }),
+    ],
+  });
+  // 기록 — 시간순(새 것이 위). 실행 하나 = 접히는 머리줄, 그 아래에 그 계산에 들어간 묶음
+  const tl = timeline();
+  const pend = tl.after.filter(c => actorOf(c) !== 'program').length;
+  const based = tl.hasRuns || !!basePointAt();
+  const after = n('log:after', based ? '지난 계산 뒤' : '아직 계산 없음', { v: String(tl.after.length), vCls: pend ? 'warn' : '', open: true,
+    tip: based ? `마지막 실행 뒤의 묶음 — 다시 계산해야 하는 것 ${pend}(프로그램의 연동 줄은 세지 않는다)` : '이 대상에 실행이 없다', kids: tl.after.map(chgNode) });
+  const runNodes = tl.groups.map((g, i) => n(g.key, runName(g.head), { vHtml: runVerdictHtml(g.verdict), open: i < 3,
+    tip: `${g.runs.map(r => `${KIND_RESULT_KO[r.kind] ?? r.kind} · ${hhmm(r.at)}${r.by ? ` · ${BY_KO[r.by] ?? r.by}` : ''}`).join(' / ')} — 그 아래는 앞 계산 뒤 ~ 이 계산 앞의 묶음 ${g.changes.length}${g.verdict?.governing?.id ? ` · 지배 ${g.verdict.governing.id}` : ''}`,
+    kids: g.changes.map(chgNode) }));
+  const before = tl.before.length ? [n('log:before', tl.hasRuns ? '계산 기록 앞' : '그 앞', { v: String(tl.before.length), open: !tl.hasRuns,
+    tip: tl.hasRuns ? '실행 이력(새 것부터 20)의 가장 오래된 실행 앞의 묶음' : '지난 계산 앞의 묶음', kids: tl.before.map(chgNode) })] : [];
+  const pastQ = questions().filter(w => w.state === 'closed' || w.answered);
+  const log = n('chg', '기록', { v: chg.err ? '읽지 못함' : `${chg.total}${chg.persisted || !chg.total ? '' : ' · 이 세션만'}`, vCls: chg.err ? 'un' : '', open: true,
+    tip: `누가 · 언제 · 전 → 후 — 호스트의 변경 묶음(list_changes)을 실행(get_case_status 의 history)으로 접는다. 새 것이 위${chg.persisted ? '' : ' · 프로젝트 밖 — 이 세션만(저장되지 않음)'}`,
+    kids: [after, ...runNodes, ...before,
+      ...(instructions().length ? [n('ins', '지시', { v: String(instructions().length), tip: '사람의 지시를 AI 가 옮겨 적은 것(work_items instruction) — 변경이 그 지시를 가리킨다',
+        kids: instructions().map(w => n(`work:${w.item}`, w.title, { v: hhmm(w.created_at), tip: `${w.item} · ${w.written_by} · AI 가 옮겨 적음` })) })] : []),
+      ...(pastQ.length ? [n('ask:done', '지난 판단 요청', { v: String(pastQ.length), tip: '답한 · 닫힌 판단 요청',
+        kids: pastQ.map(w => n(`work:${w.item}`, w.title, { dot: w.state === 'closed' ? undefined : 'ok', v: w.state === 'closed' ? '닫힘' : '답함', vCls: 'faint', tip: `${w.item} · ${w.written_by} · ${hhmm(w.created_at)}` })) })] : [])] });
+  // 점검 — 지금 결과의 상태(결과 탭의 부재 검토 · 가정과 같은 수). 누르면 그 줄로
+  const runs = memberRuns();
+  const rows = runs.flatMap(r => r.rows);
+  const un = rows.filter(r => r.kind === 'ne').length;
+  const gov = runs.filter(r => typeof r.utilization === 'number').sort((a, b) => (b.utilization as number) - (a.utilization as number))[0] ?? null;
+  const chkOk = state.stages.chk.state === 'ok';
+  const nWarn = state.runs.reduce((a, r) => a + r.warnings.length, 0);
+  const nOut = runs.reduce((a, r) => a + r.notChecked.length, 0);
+  const asmV = assumptionsNode().v ?? '없음';
+  const insp = n('insp', '점검', { open: true, tip: '지금 결과의 상태 — 결과 탭 · 모델 탭의 그 줄과 같은 수', kids: [
+    n('insp:sum', '판정 요약', { go: 'result|chk', vHtml: chkOk && runs.length ? `${gov?.governing ? `지배 ${esc(gov.governing)} · ` : ''}최대 ${typeof gov?.utilization === 'number' ? ratio(gov.utilization, gov.overall === false, `${gov.src}utilization`) : '—'} · <span class="${un ? 'un' : ''}">미검토 ${un}</span>` : `<span class="vl un">${esc(STATE_V[state.stages.chk.state][0])}</span>`,
+      tip: '지배 항목 · 최대 판정비(엔진) · 미검토 수(결과 탭의 부재 검토와 같은 수) — 누르면 결과 › 부재 검토' }),
+    n('insp:warn', '엔진 알림', { go: 'result|chk', v: String(nWarn), vCls: nWarn ? 'warn' : '', tip: '엔진이 낸 경고(warnings) — 누르면 결과 › 부재 검토(정보 창의 경고)' }),
+    n('insp:asm', '가정', { go: 'model|asm', v: asmV, tip: '기본값으로 채운 입력 · 엔진이 밝힌 가정 · 가정 등록부 — 누르면 모델 › 가정' }),
+    n('insp:out', '범위 밖', { go: nOut ? 'result|chk:OUT' : 'result|chk', v: String(nOut), tip: '엔진이 이 검토의 범위 밖으로 둔 것(not_checked) — 누르면 결과 › 부재 검토의 범위 밖' }),
+    n('rep', '보고', outside ? OUT : { v: work.err ? '읽지 못함' : `${reports().length}${reports().length ? ` · ${reports().filter(w => markOf('work', w.item)?.state !== 'reviewed').length} 미확인` : ''}`, open: true, tip: `AI 의 보고(work_items report) — 한 것 · 가정한 것 · 남은 것${workTail()}`,
+      kids: reports().map(w => n(`work:${w.item}`, w.title, { v: `${w.items ? `항목 ${w.items} · ` : ''}${hhmm(w.created_at)}`, tip: `${w.item} · ${w.written_by}${w.basis_differs_from_now ? ' · 기준과 다름' : ''}` })) }),
+  ] });
+  return [todo, log, insp];
 }
 
 /** 검토 상태(K2 — get_case_inputs)의 가지 하나: 값 · 출처 꼬리표 */
@@ -262,9 +334,9 @@ export function treeHtml(nodes: TNode[], sel: string, closed: Set<string>, opene
     const v = x.vHtml !== undefined ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${x.vHtml}</span>`
       : x.v ? `<span class="vl${x.vCls ? ` ${x.vCls}` : ''}">${esc(x.v)}</span>` : '';
     const tag = x.tagHtml ?? (x.tag ? `<span class="tag def"${tip(x.tag === '자체 가정' ? '기준 조항이 아닌 자체 해석(§A1.2(c)) — 힘 분배 모델' : '아무도 정하지 않아 프로그램이 채웠다')}>${esc(x.tag)}</span>` : '');
-    let h = `<div class="row${d === 0 ? ' top' : ''}${x.k === sel ? ' on' : ''}${x.faint ? ' faint' : ''}" role="treeitem" data-k="${esc(x.k)}" style="padding-left:${8 + d * 14}px"${tip(x.tip)}>`
+    let h = `<div class="row${d === 0 ? ' top' : ''}${x.k === sel ? ' on' : ''}${x.faint ? ' faint' : ''}" role="treeitem" data-k="${esc(x.k)}"${x.go ? ` data-ref-go="${esc(x.go)}"` : ''} style="padding-left:${8 + d * 14}px"${tip(x.tip)}>`
       + `<span class="tw">${kids.length ? (open ? '▾' : '▸') : ''}</span>${x.dot ? `<span class="dot ${x.dot}"></span>` : ''}`
-      + `<span class="nm">${esc(x.t)}</span>${tag}${v}</div>`;
+      + `${x.preHtml ?? ''}<span class="nm">${esc(x.t)}</span>${tag}${v}</div>`;
     if (open) { h += kids.map(k => row(k, d + 1)).join(''); }
     return h;
   };

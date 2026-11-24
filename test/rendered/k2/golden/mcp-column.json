@@ -1,6 +1,6 @@
 {
  "about": "K2 phase 0 golden — mcp-column. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-23",
+ "recorded": "2026-11-24",
  "entries": [
   {
    "id": "set_section_template.engine",
@@ -159,6 +159,7 @@
   {
    "id": "aisi_design_compression.engine",
    "expect": "pin",
+   "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. AI 가 주지 않은 Lb(화면의 118.11 in)가 요청에서 빠지고 use_cold_work 가 false 가 된 것뿐이다.",
    "value": [
     {
      "method": "get_properties",
@@ -178,25 +179,14 @@
     },
     {
      "method": "aisi_design",
-     "params": "{\"member_type\":\"compression\",\"design_method\":\"LRFD\",\"Fy\":50,\"Fu\":65,\"KxLx\":96,\"KyLy\":48,\"KtLt\":48,\"Pu\":4,\"section_type\":\"C\",\"props\":{\"A\":0.8134008033716552,\"xcg\":0.6229297455999562,\"zcg\":3.9705000000000004,\"Ixx\":7.738725101709933,\"Izz\":0.6343972712287688,\"Ixz\":-4.440892098500626e-16,\"thetap\":3.581540443916258e-15,\"I11\":7.738725101709933,\"I22\":0.6343972712287688,\"Sx\":1.934681275427483,\"Sz\":0.3433684157438304,\"rx\":3.0844832157335156,\"rz\":0.8831375576466145,\"Zx\":2.2782415761368147,\"Zz\":0.5066915555151053,\"Sx_cl\":1.9490555601838386,\"Sz_cl\":0.34893991015661685,\"J\":0.0009438160655122441,\"Cw\":7.8029715149928744,\"Xs\":-1.027946351264935,\"Zs\":3.970499999999999,\"B1\":0,\"B2\":8.607127781910886,\"Sf\":1.934681275427483,\"Sxx\":1.934681275427483,\"Sy\":0.3433684157438304,\"Szz\":0.3433684157438304,\"ry\":0.8831375576466145,\"t\":0.059,\"R\":0.1},\"dsm\":{\"Pcrl\":6.8723728737677945,\"P_My_xx\":97.45277800919193,\"P_My_zz\":17.446995507830838,\"P_A\":0.8134008033716552,\"P_Ixx\":7.738725101709933,\"P_Izz\":0.6343972712287688,\"P_load_type\":\"P\",\"P_Pcrl\":6.8723728737677945,\"P_Lcrl\":6.250551925273973,\"P_LF_local\":0.16897875795747655,\"P_Pcrd\":0,\"P_Lcrd\":0,\"P_LF_dist\":0,\"P_Pcre\":0.18492269124077937,\"P_Lcre\":1000,\"P_LF_global\":0.004546902104700415,\"P_global_is_signature_asymptote\":true,\"P_global_source\":\"signature_asymptote\",\"P_cre_signature\":0.18492269124077937,\"P_Lcre_signature\":1000,\"P_n_minima\":1,\"P_classification\":\"single_minimum\",\"P_local_detected\":true,\"P_dist_detected\":false,\"P_classification_method\":\"heuristic\",\"P_local_absence_verified\":false,\"P_dist_absence_verified\":false,\"P_local_isolated\":false,\"P_dist_isolated\":false,\"P_local_basis\":\"single_minimum_assumed_local\",\"P_dist_basis\":\"not_isolated\",\"P_single_minimum\":true,\"P_LF_single_minimum\":0.16897875795747655,\"P_single_minimum_bound\":6.8723728737677945,\"P_single_minimum_bound_meaning\":\"lower bound of the critical load of the mode that was not isolated; use as a floor, never as the value\",\"P_Pcrd_floor\":6.8723728737677945,\"P_crd_floor\":6.8723728737677945,\"P_boundary_minimum\":false,\"P_LF_local_interp\":0.16875074517247626,\"P_stress_scale\":1,\"P_max_node_stress\":50,\"P_reference_distribution\":\"P\",\"P_reference_unsymm\":0,\"P_reference_stress_consistent\":true,\"P_reference_is_restrained\":true,\"P_classification_note\":\"cFSM classification rows are NaN for this model; wavelength order is used.\",\"P_signature_curve\":true,\"P_BC\":\"S-S\",\"P_warnings\":[],\"P_assumptions\":[\"서명곡선의 극소가 하나뿐입니다(L=6.25 in). 국부로 썼고 Pcrd 는 이 곡선에서 분리되지 않았습니다(Pcrd=0). Pcrd 는 해석식(App. 2) 등으로 정하고, 이 극소 값(LF=0.169)은 그 하한(floor)으로만 쓰십시오.\"],\"P_scope_notes\":[\"A signature curve can show that a mode was isolated, never that a mode is absent; local_absence_verified and dist_absence_verified are always False.\"],\"fy_analysis\":50},\"section\":{\"type\":\"C\",\"thickness\":0.059,\"R_corner\":0.1,\"depth\":8,\"flange_width\":2.5,\"lip_depth\":0.625,\"qlip\":90,\"family_hint\":\"C\"},\"through_fastened\":false}"
-    }
-   ],
-   "reason": "Engine 733c18e (V8-04 — numeric libraries pinned to one thread; engine_id changes): FSM-derived values in the pinned requests moved — global-mode values from the signature curve at the longest length (M_Mxxcre · M_cre_signature · M_LF_global, P_Pcre · P_LF_global) by up to 1.2e-5 relative, distortional / local ≤ 3.3e-10, the analysis stress arrays ≤ 7.3e-9 (the old goldens were recorded with multi-threaded BLAS; V8-04 measured Mcre 1.07e-6 between thread counts). No shown value changed.",
-   "flipped": [
-    {
-     "step": "S10",
-     "from": {
-      "expect": "pin",
-      "reason": null
-     },
-     "date": "2026-11-24"
+     "params": "{\"member_type\":\"compression\",\"design_method\":\"LRFD\",\"Fy\":50,\"Fu\":65,\"KxLx\":96,\"KyLy\":48,\"KtLt\":48,\"Cb\":1,\"Lb_pos\":0,\"Cb_pos\":1,\"Cmx\":1,\"Cmy\":1,\"Pu\":4,\"May_strength\":0,\"Tu\":4,\"wc_N\":3.5039370078740157,\"wc_R\":0.1889763779527559,\"wc_support\":\"EOF\",\"wc_fastened\":\"fastened\",\"wc_web_config\":\"single\",\"wc_flange_condition\":\"stiffened\",\"wc_n_webs\":1,\"use_inelastic_reserve\":false,\"use_cold_work\":false,\"dist_M1_M2\":0,\"dist_Lm\":0,\"R\":0.1,\"t\":0.059,\"section_type\":\"C\",\"props\":{\"A\":0.8134008033716552,\"xcg\":0.6229297455999562,\"zcg\":3.9705000000000004,\"Ixx\":7.738725101709933,\"Izz\":0.6343972712287688,\"Ixz\":-4.440892098500626e-16,\"thetap\":3.581540443916258e-15,\"I11\":7.738725101709933,\"I22\":0.6343972712287688,\"Sx\":1.934681275427483,\"Sz\":0.3433684157438304,\"rx\":3.0844832157335156,\"rz\":0.8831375576466145,\"Zx\":2.2782415761368147,\"Zz\":0.5066915555151053,\"Sx_cl\":1.9490555601838386,\"Sz_cl\":0.34893991015661685,\"J\":0.0009438160655122441,\"Cw\":7.8029715149928744,\"Xs\":-1.027946351264935,\"Zs\":3.970499999999999,\"B1\":0,\"B2\":8.607127781910886,\"Sf\":1.934681275427483,\"Sxx\":1.934681275427483,\"Sy\":0.3433684157438304,\"Szz\":0.3433684157438304,\"ry\":0.8831375576466145,\"t\":0.059,\"R\":0.1},\"dsm\":{\"Pcrl\":6.8723728737677945,\"P_My_xx\":97.45277800919193,\"P_My_zz\":17.446995507830838,\"P_A\":0.8134008033716552,\"P_Ixx\":7.738725101709933,\"P_Izz\":0.6343972712287688,\"P_load_type\":\"P\",\"P_Pcrl\":6.8723728737677945,\"P_Lcrl\":6.250551925273973,\"P_LF_local\":0.16897875795747655,\"P_Pcrd\":0,\"P_Lcrd\":0,\"P_LF_dist\":0,\"P_Pcre\":0.18492269124077937,\"P_Lcre\":1000,\"P_LF_global\":0.004546902104700415,\"P_global_is_signature_asymptote\":true,\"P_global_source\":\"signature_asymptote\",\"P_cre_signature\":0.18492269124077937,\"P_Lcre_signature\":1000,\"P_n_minima\":1,\"P_classification\":\"single_minimum\",\"P_local_detected\":true,\"P_dist_detected\":false,\"P_classification_method\":\"heuristic\",\"P_local_absence_verified\":false,\"P_dist_absence_verified\":false,\"P_local_isolated\":false,\"P_dist_isolated\":false,\"P_local_basis\":\"single_minimum_assumed_local\",\"P_dist_basis\":\"not_isolated\",\"P_single_minimum\":true,\"P_LF_single_minimum\":0.16897875795747655,\"P_single_minimum_bound\":6.8723728737677945,\"P_single_minimum_bound_meaning\":\"lower bound of the critical load of the mode that was not isolated; use as a floor, never as the value\",\"P_Pcrd_floor\":6.8723728737677945,\"P_crd_floor\":6.8723728737677945,\"P_boundary_minimum\":false,\"P_LF_local_interp\":0.16875074517247626,\"P_stress_scale\":1,\"P_max_node_stress\":50,\"P_reference_distribution\":\"P\",\"P_reference_unsymm\":0,\"P_reference_stress_consistent\":true,\"P_reference_is_restrained\":true,\"P_classification_note\":\"cFSM classification rows are NaN for this model; wavelength order is used.\",\"P_dsm_applicable\":true,\"P_signature_curve\":true,\"P_BC\":\"S-S\",\"P_warnings\":[],\"P_assumptions\":[\"서명곡선의 극소가 하나뿐입니다(L=6.25 in). 국부로 썼고 Pcrd 는 이 곡선에서 분리되지 않았습니다(Pcrd=0). Pcrd 는 해석식(App. 2) 등으로 정하고, 이 극소 값(LF=0.169)은 그 하한(floor)으로만 쓰십시오.\"],\"P_scope_notes\":[\"A signature curve can show that a mode was isolated, never that a mode is absent; local_absence_verified and dist_absence_verified are always False.\"],\"fy_analysis\":50},\"section\":{\"type\":\"C\",\"thickness\":0.059,\"R_corner\":0.1,\"depth\":8,\"flange_width\":2.5,\"lip_depth\":0.625,\"qlip\":90,\"family_hint\":\"C\"},\"through_fastened\":false}"
     }
    ]
   },
   {
    "id": "aisi_design_compression.inputsChanged",
    "expect": "pin",
-   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0.",
+   "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. MCP 호출 앞의 KxLx · KyLy · KtLt 칸이 3000 이 아니라 빈 칸이다(호출 뒤의 값은 그대로).",
    "value": {
     "design-fy": {
      "before": "295",
@@ -247,15 +237,15 @@
      "after": "1"
     },
     "design-KxLx": {
-     "before": "3000",
+     "before": "",
      "after": "2438.4"
     },
     "design-KyLy": {
-     "before": "3000",
+     "before": "",
      "after": "1219.2"
     },
     "design-KtLt": {
-     "before": "3000",
+     "before": "",
      "after": "1219.2"
     },
     "design-Cb": {
@@ -298,25 +288,7 @@
       "5"
      ]
     }
-   },
-   "flipped": [
-    {
-     "step": "K2-5/6",
-     "from": {
-      "expect": "k2-change",
-      "reason": "K2: a design condition set through MCP must show in the edit-state input fields (acceptance criterion 1) — member type compression, Fy 50, KxLx 96, KyLy 48, KtLt 48, Pu 4 do not reach the page"
-     },
-     "date": "2026-11-22"
-    },
-    {
-     "step": "milestone-2-demand",
-     "from": {
-      "expect": "pin",
-      "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — 압축 · Fy 50 · KxLx … (SI 글 12 자리)"
-     },
-     "date": "2026-11-24"
-    }
-   ]
+   }
   },
   {
    "id": "aisi_design_compression.shown",
@@ -428,7 +400,7 @@
   {
    "id": "gui.runDesign.engine",
    "expect": "pin",
-   "reason": "V9a-02 · contract §6.4: an empty demand field is left out of the engine request (it was sent as 0 — an unstated 0 now makes the checks that use it not evaluated); demands that were given are unchanged.",
+   "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. Lb(118.11 in)가 빠지고 use_cold_work 가 false 가 된 것뿐이다.",
    "value": [
     {
      "method": "get_properties",
@@ -440,33 +412,7 @@
     },
     {
      "method": "aisi_design",
-     "params": "{\"member_type\":\"compression\",\"design_method\":\"LRFD\",\"Fy\":50,\"Fu\":65,\"KxLx\":96,\"KyLy\":48,\"KtLt\":48,\"Lb\":118.11023622047244,\"Cb\":1,\"Lb_pos\":0,\"Cb_pos\":1,\"Cmx\":1,\"Cmy\":1,\"Pu\":4,\"May_strength\":0,\"Tu\":4,\"wc_N\":3.5039370078740157,\"wc_R\":0.1889763779527559,\"wc_support\":\"EOF\",\"wc_fastened\":\"fastened\",\"wc_web_config\":\"single\",\"wc_flange_condition\":\"stiffened\",\"wc_n_webs\":1,\"use_inelastic_reserve\":false,\"use_cold_work\":true,\"dist_M1_M2\":0,\"dist_Lm\":0,\"R\":0.1,\"t\":0.059,\"section_type\":\"C\",\"props\":{\"A\":0.8134008033716552,\"xcg\":0.6229297455999562,\"zcg\":3.9705000000000004,\"Ixx\":7.738725101709933,\"Izz\":0.6343972712287688,\"Ixz\":-4.440892098500626e-16,\"thetap\":3.581540443916258e-15,\"I11\":7.738725101709933,\"I22\":0.6343972712287688,\"Sx\":1.934681275427483,\"Sz\":0.3433684157438304,\"rx\":3.0844832157335156,\"rz\":0.8831375576466145,\"Zx\":2.2782415761368147,\"Zz\":0.5066915555151053,\"Sx_cl\":1.9490555601838386,\"Sz_cl\":0.34893991015661685,\"J\":0.0009438160655122441,\"Cw\":7.8029715149928744,\"Xs\":-1.027946351264935,\"Zs\":3.970499999999999,\"B1\":0,\"B2\":8.607127781910886,\"Sf\":1.934681275427483,\"Sxx\":1.934681275427483,\"Sy\":0.3433684157438304,\"Szz\":0.3433684157438304,\"ry\":0.8831375576466145,\"t\":0.059,\"R\":0.1},\"dsm\":{\"Pcrl\":6.8723728737677945,\"P_My_xx\":97.45277800919193,\"P_My_zz\":17.446995507830838,\"P_A\":0.8134008033716552,\"P_Ixx\":7.738725101709933,\"P_Izz\":0.6343972712287688,\"P_load_type\":\"P\",\"P_Pcrl\":6.8723728737677945,\"P_Lcrl\":6.250551925273973,\"P_LF_local\":0.16897875795747655,\"P_Pcrd\":0,\"P_Lcrd\":0,\"P_LF_dist\":0,\"P_Pcre\":0.18492269124077937,\"P_Lcre\":1000,\"P_LF_global\":0.004546902104700415,\"P_global_is_signature_asymptote\":true,\"P_global_source\":\"signature_asymptote\",\"P_cre_signature\":0.18492269124077937,\"P_Lcre_signature\":1000,\"P_n_minima\":1,\"P_classification\":\"single_minimum\",\"P_local_detected\":true,\"P_dist_detected\":false,\"P_classification_method\":\"heuristic\",\"P_local_absence_verified\":false,\"P_dist_absence_verified\":false,\"P_local_isolated\":false,\"P_dist_isolated\":false,\"P_local_basis\":\"single_minimum_assumed_local\",\"P_dist_basis\":\"not_isolated\",\"P_single_minimum\":true,\"P_LF_single_minimum\":0.16897875795747655,\"P_single_minimum_bound\":6.8723728737677945,\"P_single_minimum_bound_meaning\":\"lower bound of the critical load of the mode that was not isolated; use as a floor, never as the value\",\"P_Pcrd_floor\":6.8723728737677945,\"P_crd_floor\":6.8723728737677945,\"P_boundary_minimum\":false,\"P_LF_local_interp\":0.16875074517247626,\"P_stress_scale\":1,\"P_max_node_stress\":50,\"P_reference_distribution\":\"P\",\"P_reference_unsymm\":0,\"P_reference_stress_consistent\":true,\"P_reference_is_restrained\":true,\"P_classification_note\":\"cFSM classification rows are NaN for this model; wavelength order is used.\",\"P_signature_curve\":true,\"P_BC\":\"S-S\",\"P_warnings\":[],\"P_assumptions\":[\"서명곡선의 극소가 하나뿐입니다(L=6.25 in). 국부로 썼고 Pcrd 는 이 곡선에서 분리되지 않았습니다(Pcrd=0). Pcrd 는 해석식(App. 2) 등으로 정하고, 이 극소 값(LF=0.169)은 그 하한(floor)으로만 쓰십시오.\"],\"P_scope_notes\":[\"A signature curve can show that a mode was isolated, never that a mode is absent; local_absence_verified and dist_absence_verified are always False.\"],\"fy_analysis\":50},\"section\":{\"type\":\"C\",\"thickness\":0.059,\"R_corner\":0.1,\"depth\":8,\"flange_width\":2.5,\"lip_depth\":0.625,\"qlip\":90,\"family_hint\":\"C\"},\"through_fastened\":false}"
-    }
-   ],
-   "flipped": [
-    {
-     "step": "K2-5/6",
-     "from": {
-      "expect": "k2-change",
-      "reason": "K2: pressing the page button must use the case state — what MCP set — not the stale page fields (acceptance criterion 2) — the page runs a roof-purlin load-analysis design with the page defaults instead of the compression check MCP set"
-     },
-     "date": "2026-11-22"
-    },
-    {
-     "step": "S10",
-     "from": {
-      "expect": "pin",
-      "reason": "K2-5: 화면 단추가 검토 상태(MCP 가 정한 것)로 계산한다 — MCP 가 정한 압축 검토(전: 화면 처음 값의 지붕 퍼린 하중 해석)"
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "milestone-2-demand",
-     "from": {
-      "expect": "pin",
-      "reason": "Engine 733c18e (V8-04 — numeric libraries pinned to one thread; engine_id changes): FSM-derived values in the pinned requests moved — global-mode values from the signature curve at the longest length (M_Mxxcre · M_cre_signature · M_LF_global, P_Pcre · P_LF_global) by up to 1.2e-5 relative, distortional / local ≤ 3.3e-10, the analysis stress arrays ≤ 7.3e-9 (the old goldens were recorded with multi-threaded BLAS; V8-04 measured Mcre 1.07e-6 between thread counts). No shown value changed."
-     },
-     "date": "2026-11-24"
+     "params": "{\"member_type\":\"compression\",\"design_method\":\"LRFD\",\"Fy\":50,\"Fu\":65,\"KxLx\":96,\"KyLy\":48,\"KtLt\":48,\"Cb\":1,\"Lb_pos\":0,\"Cb_pos\":1,\"Cmx\":1,\"Cmy\":1,\"Pu\":4,\"May_strength\":0,\"Tu\":4,\"wc_N\":3.5039370078740157,\"wc_R\":0.1889763779527559,\"wc_support\":\"EOF\",\"wc_fastened\":\"fastened\",\"wc_web_config\":\"single\",\"wc_flange_condition\":\"stiffened\",\"wc_n_webs\":1,\"use_inelastic_reserve\":false,\"use_cold_work\":false,\"dist_M1_M2\":0,\"dist_Lm\":0,\"R\":0.1,\"t\":0.059,\"section_type\":\"C\",\"props\":{\"A\":0.8134008033716552,\"xcg\":0.6229297455999562,\"zcg\":3.9705000000000004,\"Ixx\":7.738725101709933,\"Izz\":0.6343972712287688,\"Ixz\":-4.440892098500626e-16,\"thetap\":3.581540443916258e-15,\"I11\":7.738725101709933,\"I22\":0.6343972712287688,\"Sx\":1.934681275427483,\"Sz\":0.3433684157438304,\"rx\":3.0844832157335156,\"rz\":0.8831375576466145,\"Zx\":2.2782415761368147,\"Zz\":0.5066915555151053,\"Sx_cl\":1.9490555601838386,\"Sz_cl\":0.34893991015661685,\"J\":0.0009438160655122441,\"Cw\":7.8029715149928744,\"Xs\":-1.027946351264935,\"Zs\":3.970499999999999,\"B1\":0,\"B2\":8.607127781910886,\"Sf\":1.934681275427483,\"Sxx\":1.934681275427483,\"Sy\":0.3433684157438304,\"Szz\":0.3433684157438304,\"ry\":0.8831375576466145,\"t\":0.059,\"R\":0.1},\"dsm\":{\"Pcrl\":6.8723728737677945,\"P_My_xx\":97.45277800919193,\"P_My_zz\":17.446995507830838,\"P_A\":0.8134008033716552,\"P_Ixx\":7.738725101709933,\"P_Izz\":0.6343972712287688,\"P_load_type\":\"P\",\"P_Pcrl\":6.8723728737677945,\"P_Lcrl\":6.250551925273973,\"P_LF_local\":0.16897875795747655,\"P_Pcrd\":0,\"P_Lcrd\":0,\"P_LF_dist\":0,\"P_Pcre\":0.18492269124077937,\"P_Lcre\":1000,\"P_LF_global\":0.004546902104700415,\"P_global_is_signature_asymptote\":true,\"P_global_source\":\"signature_asymptote\",\"P_cre_signature\":0.18492269124077937,\"P_Lcre_signature\":1000,\"P_n_minima\":1,\"P_classification\":\"single_minimum\",\"P_local_detected\":true,\"P_dist_detected\":false,\"P_classification_method\":\"heuristic\",\"P_local_absence_verified\":false,\"P_dist_absence_verified\":false,\"P_local_isolated\":false,\"P_dist_isolated\":false,\"P_local_basis\":\"single_minimum_assumed_local\",\"P_dist_basis\":\"not_isolated\",\"P_single_minimum\":true,\"P_LF_single_minimum\":0.16897875795747655,\"P_single_minimum_bound\":6.8723728737677945,\"P_single_minimum_bound_meaning\":\"lower bound of the critical load of the mode that was not isolated; use as a floor, never as the value\",\"P_Pcrd_floor\":6.8723728737677945,\"P_crd_floor\":6.8723728737677945,\"P_boundary_minimum\":false,\"P_LF_local_interp\":0.16875074517247626,\"P_stress_scale\":1,\"P_max_node_stress\":50,\"P_reference_distribution\":\"P\",\"P_reference_unsymm\":0,\"P_reference_stress_consistent\":true,\"P_reference_is_restrained\":true,\"P_classification_note\":\"cFSM classification rows are NaN for this model; wavelength order is used.\",\"P_dsm_applicable\":true,\"P_signature_curve\":true,\"P_BC\":\"S-S\",\"P_warnings\":[],\"P_assumptions\":[\"서명곡선의 극소가 하나뿐입니다(L=6.25 in). 국부로 썼고 Pcrd 는 이 곡선에서 분리되지 않았습니다(Pcrd=0). Pcrd 는 해석식(App. 2) 등으로 정하고, 이 극소 값(LF=0.169)은 그 하한(floor)으로만 쓰십시오.\"],\"P_scope_notes\":[\"A signature curve can show that a mode was isolated, never that a mode is absent; local_absence_verified and dist_absence_verified are always False.\"],\"fy_analysis\":50},\"section\":{\"type\":\"C\",\"thickness\":0.059,\"R_corner\":0.1,\"depth\":8,\"flange_width\":2.5,\"lip_depth\":0.625,\"qlip\":90,\"family_hint\":\"C\"},\"through_fastened\":false}"
     }
    ]
   },
@@ -474,35 +420,10 @@
    "id": "gui.runDesign.shown",
    "expect": "pin",
    "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
+   "accepted_from": "pin",
    "value": {
     "design-summary": "종합 판정: ✓ OK 지배 검토: 국부좌굴\nGlobal\n142.12\nkN\nLocal\n70.64\nkN\n지배\nDistort.\n85.09\nkN\nφPn = 60.05 kN (국부좌굴)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
-   },
-   "flipped": [
-    {
-     "step": "K2-5/6",
-     "from": {
-      "expect": "k2-change",
-      "reason": "K2: the card then shows a purlin result for conditions nobody set"
-     },
-     "date": "2026-11-22"
-    },
-    {
-     "step": "K4b",
-     "from": {
-      "expect": "pin",
-      "reason": "K2-5: 화면 단추가 검토 상태(MCP 가 정한 것)로 계산한다 — 압축 결과 카드"
-     },
-     "date": "2026-11-23"
-    },
-    {
-     "step": "renderer",
-     "from": {
-      "expect": "pin",
-      "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
-     },
-     "date": "2026-11-24"
-    }
-   ]
+   }
   }
  ]
 }

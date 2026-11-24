@@ -29,6 +29,24 @@ from design.checks import set_governing as _set_governing, apply_context as _app
 _PROPS_GENERATED = '_props_generated'
 # 하위 설계(압축 · 휨 · 인장)가 조합 검토에 넘기는 반올림하지 않은 설계강도(결과에는 남기지 않는다).
 _RAW_DS = '_raw_design_strength'
+# 결과 위쪽의 표시용 반올림 값(DISPLAY_ROUNDING)의 반올림 전 값 — design_checks 의 값과 같다. MCP 의 SI 응답은
+# 이 값을 바꿔 위쪽 값으로 쓴다(반올림한 US 값을 바꾸면 design_checks 와 어긋난다 — 검증 문서 4.7).
+_DISPLAY_UNROUNDED = 'display_unrounded'
+
+
+def _round_tube_dims(params: dict, props: dict) -> tuple:
+    """원형관의 바깥지름 D 와 두께 t (in) — 휨(§F2.3)과 같은 차례: section.diameter → params D → section.depth/H.
+    모르면 0."""
+    s = params.get('section', {}) or {}
+    t = props.get('t', 0) or s.get('thickness', 0) or params.get('t', 0)
+    D = s.get('diameter', 0) or params.get('D', 0) or s.get('depth', 0) or params.get('H', 0)
+    return float(D or 0), float(t or 0)
+
+
+def _unrounded_of(sub: dict, keys) -> dict:
+    """하위 결과(압축 · 휨 · 인장)의 반올림 전 값 가운데 keys 만 — 조합 결과의 성분 묶음용."""
+    raw = sub.get(_DISPLAY_UNROUNDED) or {}
+    return {k: raw[k] for k in keys if k in raw}
 # 랩 구간의 구속(계약 §6.3) — Design Manual 의 가정을 사람이 밝힌 것만 쓴다(횡비틀림 + 뒤틀림, 한 진술).
 LAP_MANUAL_ASSUMPTION = ('AISI Design Manual Examples II-1A / II-2A: "The lapped section is assumed to be sufficiently '
                          'restrained against lateral-torsional buckling and distortional buckling" (assumption (f): '
@@ -981,6 +999,18 @@ def _design_compression(params: dict) -> dict:
 
     Fcre_override = float(params.get('Fcre', 0) or 0)
 
+    # 원형관(CHS): FSM 곡선의 극소는 원통의 원주 방향 모드라 DSM 의 국부 · 뒤틀림 값이 아니다(engine.dsm 이 내지 않는다).
+    # 뒤틀림(§E4)은 연단 보강 플랜지가 있는 개단면에만 해당한다 — 받은 Pcrd 는 쓰지 않는다. 국부는 원형관 조항
+    # §E3.1.1.1(유효면적)로 — 호출자가 Pcrl 을 직접 주면 §E3.2.1 로 쓰고 그렇게 밝힌다(가정).
+    round_tube = _is_round_section(params)
+    if round_tube:
+        scope_notes_rt = [_nt('member.scope.round_tube_dsm_not_applicable')]
+        if Pcrd > 0:
+            warnings.append(_nt('member.warning.round_tube_dsm_value_not_used', items='Pcrd'))
+            Pcrd = 0.0
+    else:
+        scope_notes_rt = []
+
     # 유효좌굴길이: 빠진 길이마다 120 in 으로 두되, 그 값으로 낸 E2 결과는 판정에 쓰지 않는다.
     missing_len = [k for k in ('KxLx', 'KyLy', 'KtLt') if params.get(k) is None]
     KxLx = params.get('KxLx') if params.get('KxLx') is not None else 120
@@ -993,7 +1023,7 @@ def _design_compression(params: dict) -> dict:
         if Fcre_override <= 0:
             not_evaluated.append(_nt('member.ne.e2_e2_global_buckling_assumed', missing_len='/'.join(missing_len)))
 
-    if Pcrl == 0 and Pcrd == 0:
+    if Pcrl == 0 and Pcrd == 0 and not round_tube:
         warnings.append(
             _nt('member.warning.pcrl_pcrd_fsm_run')
         )
@@ -1095,10 +1125,40 @@ def _design_compression(params: dict) -> dict:
                 warnings.append(_nt('member.warning.pcrl_fallback_appendix', e=e))
 
     local_not_evaluated = Pcrl <= 0
+    round_local = None   # §E3.1.1.1 의 값(계산서 design_checks 용)
     if Pcrl > 0:
         local_result = compression_local(Pne, Pcrl)
         Pnl = local_result['Pnl']
         spec_sections.append('E3.2')
+        if round_tube:
+            assumptions.append(_nt('member.assumption.round_tube_given_pcrl_e3_2_1'))
+    elif round_tube:
+        # §E3.1.1.1 (D/t ≤ 0.441 E/Fy): Ao = [0.037/((D Fy)/(t E)) + 0.667] A ≤ A (Eq. E3.1.1.1-2),
+        # R = Fy/(2 Fcre) ≤ 1.0 (Eq. E3.1.1.1-3, Fcre 는 §E2 의 값 그대로), Ae = Ao + R (A − Ao) (Eq. E3.1.1.1-1),
+        # Pnℓ = Ae Fn ≤ Pne (Eq. E3.1-1, Fn 은 §E2). 한계 밖이거나 D · t 를 모르면 짓지 않고 평가하지 못함.
+        Pnl = Pne
+        _D, _t = _round_tube_dims(params, props)
+        _dt = _D / _t if _D > 0 and _t > 0 else None
+        _dt_lim = 0.441 * E / Fy
+        if e2_unavailable:
+            local_not_evaluated = False   # 검토 항목은 §E2 를 평가하지 못한 까닭으로(member_checks)
+            local_result = {'lambda_l': 0, 'equation': 'N/A (E3.1.1.1 needs Fn and Fcre from E2)'}
+        elif _dt is None:
+            local_result = {'lambda_l': 0, 'equation': 'N/A (E3.1.1.1: D or t unknown)'}
+            not_evaluated.append(_nt('member.ne.e3_1_1_1_round_tube_dims_unknown'))
+        elif _dt > _dt_lim:
+            local_result = {'lambda_l': 0, 'equation': 'N/A (E3.1.1.1: D/t > 0.441 E/Fy)'}
+            not_evaluated.append(_nt('member.ne.e3_1_1_1_round_tube_d_t_over', D_over_t=_dt, limit=_dt_lim))
+        else:
+            local_not_evaluated = False
+            _Ao = min((0.037 / (_dt * Fy / E) + 0.667) * Ag, Ag)
+            _R = min(Fy / (2.0 * Fcre), 1.0)
+            _Ae = _Ao + _R * (Ag - _Ao)
+            _Fn = global_result['Fn']
+            Pnl = min(_Ae * _Fn, Pne)
+            local_result = {'lambda_l': 0, 'equation': 'E3.1-1'}
+            round_local = {'D_over_t': _dt, 'limit': _dt_lim, 'Ao': _Ao, 'R': _R, 'Ae': _Ae, 'Fn': _Fn}
+            spec_sections.append('E3.1.1.1')
     else:
         Pnl = Pne
         local_result = {'lambda_l': 0, 'equation': 'N/A (E3 not evaluated: no Pcrl)'}
@@ -1114,7 +1174,11 @@ def _design_compression(params: dict) -> dict:
             f'λl = √(Pne/Pcrl) = √({Pne:.2f} kips/{Pcrl:.2f} kips) = {local_result["lambda_l"]:.3f} '
             f'{"≤" if local_result["lambda_l"] <= 0.776 else ">"} 0.776 → '
             f'Pnl = {Pnl:.2f} kips'
-        ) if Pcrl > 0 else f'Pcrl 없음 → E3 미평가 (Pnl = Pne = {Pnl:.2f} kips 로 표시)',
+        ) if Pcrl > 0 else (
+            f'§E3.1.1.1 원형관: D/t = {round_local["D_over_t"]:.1f} ≤ 0.441E/Fy = {round_local["limit"]:.1f}, '
+            f'Ao = {round_local["Ao"]:.4f} in², R = Fy/(2Fcre) = {round_local["R"]:.4f}, '
+            f'Ae = Ao + R(A − Ao) = {round_local["Ae"]:.4f} in² → Pnl = Ae·Fn = {Pnl:.2f} kips'
+        ) if round_local else f'Pcrl 없음 → E3 미평가 (Pnl = Pne = {Pnl:.2f} kips 로 표시)',
         'equation': local_result['equation'],
     })
 
@@ -1280,7 +1344,10 @@ def _design_compression(params: dict) -> dict:
         'spec_sections': sorted(set(spec_sections)),
         'warnings': warnings,
         'assumptions': assumptions,
-        'scope_notes': [],
+        'scope_notes': scope_notes_rt,
+        # 위의 표시용 반올림 값의 반올림 전 값(design_checks 와 같은 수) — 단위를 바꿀 때 이것으로 바꾼다(SI 응답)
+        _DISPLAY_UNROUNDED: {'Pn': Pn, 'Pne': Pne, 'Pnl': Pnl, 'Pnd': Pnd, 'Py': Py, 'phi_Pn': phi_Pn,
+                             'Pn_omega': Pn_omega, 'design_strength': design_strength},
     }
     if Pu > 0 and Pn > 0:
         result['governing_check'] = 'E axial compression'
@@ -1298,6 +1365,7 @@ def _design_compression(params: dict) -> dict:
         local_result=local_result, Pnl=Pnl, local_not_evaluated=local_not_evaluated, Py=Py, Pcrd=Pcrd,
         Pcrd_source=Pcrd_source, pcrd_an=pcrd_an, dist_applicable=dist_applicable, dist_reason=dist_reason,
         dist_result=dist_result, Pnd=Pnd, Pn=Pn, mode=mode, phi=phi, omega=omega,
+        round_tube=round_tube, round_local=round_local, E=E,
         not_evaluated=result.get('not_evaluated') or [])), {
             'Local Buckling': 'member.compression.local',
             'Distortional Buckling': 'member.compression.distortional'}.get(mode, 'member.compression.global'))
@@ -1457,7 +1525,16 @@ def _design_flexure(params: dict) -> dict:
     if Cb < 1.0 or Cb > 3.0:
         warnings.append(_nt('member.warning.f2_1_1_f2_cb_f2', Cb=Cb))
 
-    if Mcrl == 0 and Mcrd == 0:
+    # 원형관(CHS): 뒤틀림(§F4)은 연단 보강 플랜지가 있는 개단면에만 — 받은 Mcrd 는 쓰지 않는다. 국부는 §F3.1.1
+    # (D/t ≤ 0.441E/Fy 면 검토 불요). FSM 곡선의 극소는 DSM 값이 아니다(engine.dsm 이 내지 않는다).
+    if _is_round:
+        scope_notes_rt = [_nt('member.scope.round_tube_dsm_not_applicable')]
+        if Mcrd > 0:
+            warnings.append(_nt('member.warning.round_tube_dsm_value_not_used', items='Mcrd'))
+            Mcrd = 0.0
+    else:
+        scope_notes_rt = []
+    if Mcrl == 0 and Mcrd == 0 and not _is_round:
         warnings.append(
             _nt('member.warning.mcrl_mcrd_fsm_run')
         )
@@ -2157,7 +2234,10 @@ def _design_flexure(params: dict) -> dict:
         'spec_sections': sorted(set(spec_sections)),
         'warnings': warnings,
         'assumptions': assumptions,
-        'scope_notes': [],
+        'scope_notes': scope_notes_rt,
+        _DISPLAY_UNROUNDED: {'Mn': Mn, 'Mn_dsm': Mn_dsm, 'Mne': Mne, 'Mnl': Mnl, 'Mnd': Mnd, 'My': My,
+                             'Fy_used': Fy, 'Fy_original': Fy_original, 'phi_Mn': phi_Mn, 'Mn_omega': Mn_omega,
+                             'design_strength': design_strength},
     }
     if Mu > 0 and Mn > 0:
         result['governing_check'] = 'F flexure'
@@ -2776,6 +2856,10 @@ def _design_combined(params: dict) -> dict:
             'design_strength': flex_x['design_strength'],
             'controlling_mode': flex_x['controlling_mode'],
         },
+        _DISPLAY_UNROUNDED: {
+            'compression': _unrounded_of(comp, ('Pn', 'design_strength')),
+            'flexure_x': _unrounded_of(flex_x, ('Mn', 'design_strength')),
+        },
         'interaction': interaction,
         'utilization': None,
         'pass': None,
@@ -2975,6 +3059,11 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
         },
         'Maxt': round(Maxt, 2),
         'Mayt': round(Mayt, 2) if Mayt < 1e9 else None,
+        _DISPLAY_UNROUNDED: {
+            'tension': _unrounded_of(tens, ('Tn', 'design_strength')),
+            'flexure_x': _unrounded_of(flex_x, ('Mn', 'design_strength')),
+            'Maxt': Maxt, **({'Mayt': Mayt} if Mayt < 1e9 else {}),
+        },
         'interaction': interaction,
         'steps': tens.get('steps', []) + flex_x.get('steps', []),
         'spec_sections': sorted(set(tens.get('spec_sections', []) + flex_x['spec_sections'] + ['H1.1'])),
@@ -3086,6 +3175,9 @@ def _design_tension(params: dict) -> dict:
         'An_used': round(An, 4),
         'design_strength': round(design_strength, 2),
         _RAW_DS: design_strength,
+        _DISPLAY_UNROUNDED: {'Tn': Tn, 'Tn_yield': Tn_yield,
+                             **({'Tn_rupture': Tn_rupture} if Tn_rupture is not None else {}),
+                             'An_used': An, 'design_strength': design_strength},
         'controlling_mode': mode,
         'utilization': round(utilization, 4) if utilization else None,
         _UTIL_RAW: utilization if utilization else None,
@@ -3612,12 +3704,13 @@ def _auto_generate_props(params: dict) -> dict:
                 class_m = classify(prop_mat, node_m, elem, lengths, result_m.shapes,
                                    None, 'S-S', m_all)
 
+                # 단면 형식을 넘긴다 — 원형관이면 dsm 이 국부 · 뒤틀림 값을 내지 않는다(DSM 비적용).
                 dsmP = extract_dsm_values(
                     result_p.curve, node_p, elem, Fy, 'P',
-                    mode_classifications=class_p)
+                    mode_classifications=class_p, section_type=canon)
                 dsmM = extract_dsm_values(
                     result_m.curve, node_m, elem, Fy, 'Mxx',
-                    mode_classifications=class_m)
+                    mode_classifications=class_m, section_type=canon)
 
                 params['dsm'] = {
                     'Pcrl': dsmP.get('crl', 0),

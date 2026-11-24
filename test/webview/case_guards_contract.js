@@ -68,12 +68,14 @@ async function main() {
     assert(lr.warnings.some((w) => /evil_tool/.test(w)) && lr.warnings.some((w) => /pad: \d+ B is over the size limit/.test(w)) && lr.warnings.some((w) => /not an identifier/.test(w)),
       `the drops are named: ${lr.warnings.filter((w) => /mcpOnly/.test(w)).join(' | ')}`);
     assert(lr.warnings.some((w) => /reference stress is 33 ksi/.test(w)), `V7-15 loadFy notice: ${lr.warnings.join(' | ').slice(0, 400)}`);
-    // 설계 도구가 덮으면 연 파일의 값은 사람의 값으로 알린다
+    // 설계 도구가 덮으면 연 파일의 값은 사람의 값으로 알린다. 결정 D1: 주지 않은 Cb 는 덮지 않는다 — 연 파일의 값이 그대로 쓰이고 그 출처를 알린다
     await p.handleMcpAction({ action: 'run_analysis' });
     const d = await p.handleMcpAction({ action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy: 50, Fu: 65, Lb: 60, Mu: 40, Vu: 1 });
     assert(!d.error, d.error);
     const rep = (d.case_inputs_replaced || []).map((x) => `${x.key}:${x.previous}:${x.previous_source}`);
-    assert(rep.includes('Lb:123.4:file') && rep.includes('Cb:1.77:file'), `a design tool reports the file values it replaced: ${rep.join(', ')}`);
+    assert(rep.includes('Lb:123.4:file') && !rep.some((x) => x.startsWith('Cb:')), `a design tool reports the file values it replaced (Lb) and not the one it did not get (Cb): ${rep.join(', ')}`);
+    const usedCb = (d.case_inputs_used || []).find((x) => x.key === 'Cb');
+    assert(usedCb && usedCb.value === 1.77 && usedCb.source === 'file' && p.__testGetCase().state.inputs.Cb === 1.77, `the file Cb is used and named with its source: ${JSON.stringify(usedCb)}`);
     notes.push('V7-07 tags, V7-09 mcpOnly filter + note, V7-15 notice');
 
     // ── V7-08: 열기 전에 본 판의 화면 변경 ─────────────────────────────────
@@ -109,11 +111,11 @@ async function main() {
     assert(p.__testGetCase().state.sources.connFy === 'ai' && Math.abs(p.__testGetCase().state.inputs.connFy - 40) < 1e-9 && p._changeLines().lines.length === lines0, 'an echo of the AI value keeps the value (display rounding), the AI as the source, and writes no change line');
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', seenRev: p.__testGetCase().state.rev, changes: { connFy: 45 } } });
     assert.strictEqual(p.__testGetCase().state.inputs.connFy, 45, 'a mirror change on the current rev is taken');
-    // V9b-05: 그 연동은 사람의 변경 줄로(via mirror), 꼬리표는 사실대로 mirror
+    // V9b-05 · D4(업무 탭 통일): 그 연동은 프로그램의 변경 줄로(via mirror — 사람이 친 것이 아니다), 꼬리표는 사실대로 mirror
     p._changes.flush();
     const cl = p._changeLines().lines.slice(lines0);
-    assert(cl.length === 1 && cl[0].actor.kind === 'person' && JSON.stringify(cl[0].body.via) === '["mirror"]' && cl[0].body.fields.some((x) => x.path === 'case.inputs.connFy')
-      && p.__testGetCase().state.sources.connFy === 'mirror', 'the linkage change is a person line with via mirror: ' + JSON.stringify(cl.map((x) => [x.actor.kind, x.body.via, x.body.fields.map((y) => y.path)])));
+    assert(cl.length === 1 && cl[0].actor.kind === 'program' && JSON.stringify(cl[0].body.via) === '["mirror"]' && cl[0].body.fields.some((x) => x.path === 'case.inputs.connFy')
+      && p.__testGetCase().state.sources.connFy === 'mirror', 'the linkage change is a program line with via mirror: ' + JSON.stringify(cl.map((x) => [x.actor.kind, x.body.via, x.body.fields.map((y) => y.path)])));
     // 본 판이 없는 연동 · 모르는 출처 · 연 창 밖의 file 은 받지 않는다
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', changes: { connFy: 47 } } });
     ack = posted('caseAck').pop();

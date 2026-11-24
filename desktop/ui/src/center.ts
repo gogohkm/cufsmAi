@@ -31,7 +31,7 @@ import { fieldText, pageOf } from './notices';
 import { refKey, work } from './work';
 import { alts, sideBySide, visibleAlts } from './alts';
 import { keyOfItem } from './follow';
-import { baseOf, changeOf, chg, KIND_RESULT_KO, sinceBase, valText, whoText, type Change } from './changes';
+import { baseOf, changeOf, chg, KIND_RESULT_KO, sinceBase, timeline, valText, whoText, type Change } from './changes';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
 export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean; mode3d: boolean }
@@ -51,7 +51,7 @@ export function groupOf(key: string): Group {
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
   if (key === 'conn' || key.startsWith('conn:')) { return 'conn'; }
   if (['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return 'doc'; }
-  if (['ask', 'rep', 'chg', 'ins', 'val', 'alt', 'pub'].includes(key) || /^(chg|work|asmr|srcr|alt|doc|iss|pubf):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
+  if (['ask', 'rep', 'chg', 'ins', 'todo', 'insp', 'val', 'alt', 'pub'].includes(key) || /^(chg|work|asmr|srcr|alt|doc|iss|pubf|log|todo|insp|ask):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
   return 'model';
 }
 
@@ -519,6 +519,12 @@ export function centerHtml(key: string, size: { w: number; h: number } = { w: 12
   if (key.startsWith('doc:') || key.startsWith('iss:')) { return { html: docView(key), cls: 'v1 docc' }; }
   if (key === 'pub' || key.startsWith('pubf:')) { return { html: honest('발행', '발행본을 고르면 읽기 전용으로 보인다 — 발행은 계산서의 정보 창 「R<n> 발행」(미리보기 → 사람만)'), cls: 'v1' }; }
   if (key === 'chg' || key.startsWith('chg:')) { return changeView(key, size); }
+  // 기록의 묶는 줄(지난 계산 뒤 · 계산 #k · 그 앞) — 그 아래 첫 묶음의 보기
+  if (key.startsWith('log:')) {
+    const tl = timeline();
+    const cs = key === 'log:after' ? tl.after : key === 'log:before' ? tl.before : tl.groups.find(g => g.key === key)?.changes ?? [];
+    return cs[0] ? changeView(`chg:${cs[0].id}`, size) : { html: honest('묶음 없음', '이 자리에 바뀐 것이 없다'), cls: 'v1' };
+  }
   // R3-3: 업무 항목 — 걸린 대상(첫째)의 보기를 그대로(정보 창이 그 항목). 가정 · 원자료는 글뿐이라 가운데는 비운다
   if (key.startsWith('work:')) {
     const t = workTarget(key.slice(5));

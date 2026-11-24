@@ -17,7 +17,7 @@ import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { chg, loadChanges } from './changes';
 import { hostText } from './notices';
 import { docs as docsState, doExport, doOpen, initDocs, loadDocs, openPreview } from './docs';
-import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes } from './work';
+import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes, reportChangeIds, work } from './work';
 import { askTrust, itemOfRow, loadReviews, mark as markTargets, markOf, rowTarget, rv, trust as trustWriter, type MarkTarget } from './reviews';
 import { altAction, alts, compareOf, loadAlts, visibleAlts } from './alts';
 import { findHtml, search, type Hit } from './find';
@@ -556,7 +556,7 @@ function docAction(t: HTMLElement): boolean {
 }
 
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg', 'ins'].includes(key) || key.startsWith('chg:') || key.startsWith('work:') ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' || /^(doc|iss|pubf):/.test(key) ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg', 'ins', 'todo', 'insp'].includes(key) || /^(chg|work|log|todo|insp|ask):/.test(key) ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' || /^(doc|iss|pubf):/.test(key) ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -566,14 +566,29 @@ const SRC_KO: Record<string, string> = {
 
 // ── R4-2: 확인 표시(사람의 길) · R4-3: 대안 ─────────────────────────
 /** 표시 · 풀기 — 그린 지문을 그대로. 거절이면 다시 읽고 까닭을 알린다 */
-async function doMark(targets: MarkTarget[], on: boolean): Promise<void> {
+async function doMark(targets: MarkTarget[], on: boolean): Promise<boolean> {
   const r = await markTargets(targets, on);
   await loadReviews();
   render();
-  if (r.ok) { toast(on ? `확인 표시 ${targets.length}` : `확인 표시를 풀었다 ${targets.length}`, 'info'); return; }
+  if (r.ok) { toast(on ? `확인 표시 ${targets.length}` : `확인 표시를 풀었다 ${targets.length}`, 'info'); return true; }
   // 거절의 까닭 — 호스트의 부호(host.review.*)의 한국어 문장(records.person 이 바꿔 둔다)
   toast(`확인하지 못했다 — ${r.why ?? ''}`, 'warning');
   if (r.code) { document.getElementById('info')?.setAttribute('data-rv-refused', r.code); }
+  return false;
+}
+/**
+ * 통일안 6.7 — 사람이 보고를 확인하면 그 보고가 가리키는 변경 묶음도 확인한다. 묶음마다 변경의 확인과 같은 사람의 길로(하나씩 — 하나가 거절돼도 나머지는 간다).
+ * 이미 확인한 묶음은 건너뛴다. 거절된 수를 알린다
+ */
+async function markReportChanges(refIds: string[]): Promise<void> {
+  const ids = refIds.filter(id => markOf('change', id)?.state !== 'reviewed');
+  if (!ids.length) { return; }
+  let bad = 0;
+  for (const id of ids) { const r = await markTargets([{ type: 'change', changeId: id, shown: id }], true); if (!r.ok) { bad++; } }
+  await loadReviews();
+  render();
+  document.getElementById('info')?.setAttribute('data-rv-report-changes', `${ids.length - bad}/${ids.length}`);
+  toast(bad ? `보고의 변경 묶음 ${ids.length} 가운데 ${bad} 은 확인하지 못했다 — 그린 뒤 바뀌었거나 호스트가 받지 않았다` : `보고의 변경 묶음 ${ids.length} 도 확인했다`, bad ? 'warning' : 'info');
 }
 function reviewRow(key: string): void {
   const row = rowOfKey(key).row;
@@ -598,7 +613,11 @@ function reviewClick(el: HTMLElement): boolean {
   const wi = el.closest('[data-rv-item]');
   if (wi) {
     const [type, id, seq] = String(wi.getAttribute('data-rv-item')).split('|');
-    void doMark([{ type, id, shown: Number(seq) }], markOf(type, id)?.state !== 'reviewed');
+    const on = markOf(type, id)?.state !== 'reviewed';
+    const isReport = type === 'work' && work.items.find(w => w.item === id)?.kind === 'report';
+    // 보고가 가리키는 묶음은 누른 때 읽어 둔다(표시 뒤의 다시 읽기가 업무 항목의 전부를 비운다)
+    const refIds = isReport ? reportChangeIds(id) : [];
+    void doMark([{ type, id, shown: Number(seq) }], on).then(ok => (ok && on && refIds.length ? markReportChanges(refIds) : undefined));
     return true;
   }
   const gr = el.closest('[data-rv-groups]');
@@ -924,6 +943,7 @@ function boot(): void {
     find: openFind,
     follow: () => { setFollowing(!following()); render(); reportView(true); },
     caseMenu, projectMenu: (x, y) => projectMenu(x, y),
+    calc: () => { ui.screen = 'review'; ui.sheet = null; ui.closed.delete('log:after'); select('work', 'log:after'); },
   });
   initStart($('start'), { open: () => fileOp('open'), review: toReview, claude: op => { void claudeOp(op); }, rec: (act, el) => { void recAct(act, el); } });
   // R4-3: 대안 이름 칸 — 친 글을 두어 다시 그려도 지워지지 않게(정보 창은 자주 다시 그린다)

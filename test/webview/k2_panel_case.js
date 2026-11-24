@@ -187,8 +187,11 @@ async function main() {
       assert(!k.state.mcpOnly.design_lap_connection || !('distortion_restrained' in k.state.mcpOnly.design_lap_connection), 'not kept as an MCP-only argument');
       const sent = R.buildLapRequest(k.state, ctxR).data;
       assert(sent.lap_restrained === true && !('distortion_restrained' in sent), 'sent with the lap request as lap_restrained');
-      k.applyMcp(G.mcpWrite('lap_connection', lapArgs));
-      assert(!('lap_restrained' in R.buildLapRequest(k.state, ctxR).data), 'a later design_lap_connection without it clears it (decision 1)');
+      // 결정 D1(K2 결정 1 을 뒤집었다): 주지 않은 칸은 그대로 — 뒤의 design_lap_connection 이 그 진술을 주지 않으면 화면의 진술이 남는다
+      k.applyMcp(G.mcpWrite('lap_connection', lapArgs, k.state));
+      assert(R.buildLapRequest(k.state, ctxR).data.lap_restrained === true, 'a later design_lap_connection without it keeps the statement (decision D1)');
+      k.applyMcp(G.mcpWrite('lap_connection', { ...lapArgs, lap_restrained: false }, k.state));
+      assert(!('lap_restrained' in R.buildLapRequest(k.state, ctxR).data), 'lap_restrained: false clears it');
     }
   } finally {
     ctx.close();

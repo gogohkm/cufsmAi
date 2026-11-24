@@ -82,6 +82,27 @@ export function listChanges(server: McpServer, io: RecordToolIo): void {
             ...(args.limit ? { limit: args.limit } : {}), ...(args.detail ? { detail: args.detail } : {}), units: args.units === 'US' ? 'US' : 'SI' }).then(io.reply));
 }
 
+// ── 통일안 6.6(결정 D3): 공통 이름 — work_status · work_log(읽기만). show 는 server.ts(focus 와 같은 인자) ─────────────────────
+export function workStatus(server: McpServer, io: RecordToolIo): void {
+    server.tool("work_status",
+        "Start here. Everything get_case_status says, plus todo {questions (open questions for the person), unacknowledged_ai_changes (AI change bundles the person has not marked as checked), provisional_assumptions}, last_run {no, kind, at, by, verdict {status ok · ng · incomplete, ratio, governing}} and calc {state match · changed · none, changes_since_run (change bundles after the last run — the program's own linkage lines are not counted)}. Outside a project only the changes of this session are known (session_changes) and note says why. No file paths." + DATA_NOTE,
+        {},
+        async () => io.reply(await io.post({ action: "work_status" })));
+}
+
+export function workLog(server: McpServer, io: RecordToolIo): void {
+    server.tool("work_log",
+        "Change bundles and runs of the open case as one list, newest first, in the shared record shape: change {type 'change', id, at, actor {kind ai · person · program · file, client?, trigger}, reason?, work?, title (program-written from the changed fields), fields (count, or with detail='fields' [{path, label, from, to, unit, display}]), invalidated, verdict_delta {before, after} (max ratio of the last run before → the first run after; after null until one runs), ack (null, or {by, at} when the person marked it checked)}; run {type 'run', id, no (1 = the case's first run), at, actor, kind, auto (made by another calculation — design_dsm after a buckling analysis), verdict {status ok · ng · incomplete, ratio, governing} or null, changes (ids of the bundles that went into it)}. program = the screen's linkage (a field following another, e.g. Fy → connection Fy); file = the case file changed outside StCFSD. Use since = your last record id to read what the person changed in between. Outside a project only this session's changes (persisted: false), no runs. No file paths." + DATA_NOTE,
+        { since: z.string().max(40).optional().describe("A change or run id (newer entries only) or an ISO time"),
+          actor: z.enum(["ai", "person", "program", "file"]).optional().describe("Only entries of this actor"),
+          detail: z.enum(["summary", "fields"]).optional().describe("'fields' lists each change's fields with from → to (default summary: the number of fields)"),
+          limit: z.number().int().min(1).max(100).optional().describe("How many (default 20)"),
+          case: NAME.optional().describe("Case name in the open project (omit → the open case)"),
+          units: z.enum(["US", "SI"]).optional().describe("Units of titles and field values (default SI)") },
+        async (args) => io.post({ action: "work_log", ...(args.case ? { case: args.case } : {}), ...(args.since ? { since: args.since } : {}),
+            ...(args.actor ? { actor: args.actor } : {}), ...(args.limit ? { limit: args.limit } : {}), ...(args.detail === 'fields' ? { detail: 'fields' } : {}),
+            units: args.units === 'US' ? 'US' : 'SI' }).then(io.reply));
+}
 
 // ── R3-2: 업무 항목 · 가정 · 원자료(기록 설계 §2.4.5 – 2.4.7 · §3.3 · §4.4) ─────────────────────
 const REF = z.record(z.string(), z.any()).describe("A pointer: {kind: 'check', check: {scope, id, location?}} · {kind: 'field', path: 'case.inputs.Lb' | 'model.sectionParams.t'} · {kind: 'result', result: 'member_design'} · {kind: 'change' | 'assumption' | 'source' | 'work', id}");

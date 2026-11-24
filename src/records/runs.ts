@@ -100,6 +100,8 @@ export const RUNS_SPEC: LogSpec = { type: 'runs', major: 1, events: RUN_EVENTS, 
 
 export interface RunEntry {
     runId: string; at: string; caseId: string | null; kind: RunKind; actor: string; client: string | null; writer: string;
+    /** 그 실행을 부른 MCP 요청 id(있으면) — work_log 가 같은 요청의 변경 묶음을 그 실행에 붙인다 */
+    request: string | null;
     engineId: string | null; modelFp: string | null; caseFp: string | null; requestFp: string | null; resultFp: string | null;
     blob: string | null; snapshot: string | null; caseRev: number | null; ms: number | null; status: 'ok' | 'failed'; error?: string;
     summary: RunSummary | null;
@@ -108,7 +110,7 @@ export interface RunEntry {
 /** 세는 줄의 실행들(시각 차례) */
 export function foldRuns(lines: RecordLine[]): RunEntry[] {
     return lines.filter((l) => countable(l) && l.event === 'run').map((l) => ({
-        runId: l.id, at: l.at, caseId: l.body.caseId, kind: l.body.kind, actor: l.actor.kind, client: l.actor.client ?? null, writer: l.sig.w,
+        runId: l.id, at: l.at, caseId: l.body.caseId, kind: l.body.kind, actor: l.actor.kind, client: l.actor.client ?? null, request: l.actor.request ?? null, writer: l.sig.w,
         engineId: l.body.engineId, modelFp: l.body.modelFp, caseFp: l.body.caseFp, requestFp: l.body.requestFp, resultFp: l.body.resultFp,
         blob: l.body.blob, snapshot: l.body.snapshot, caseRev: l.body.caseRev, ms: l.body.ms, status: l.body.status,
         ...(l.body.error ? { error: l.body.error } : {}), summary: l.body.summary,

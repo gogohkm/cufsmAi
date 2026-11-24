@@ -136,25 +136,15 @@ export class CaseKeeper {
     }
 
     /**
-     * K2-5 결정 1: MCP 설계 도구의 인자를 상태에 쓴다 — 합칠 키(재료 · 설계법 · 부재 유형), 통째로 쓸 묶음(받지 않은 키 null), 경간 표,
-     * mcpOnly[도구]. 반환: 사람이 정했던 값 가운데 이번에 바뀐 것(그 전 값 · 출처 — 응답에 싣는다, AI 가 사람에게 알리고 되돌릴 수 있게).
+     * 결정 D1 · D8: MCP 설계 도구의 인자를 상태에 합친 모습 — 쓰지 않는다(호출자가 그 상태로 본문을 만들고, 계산이 성공한 뒤 applyMcp).
+     * 받은 키(합치기), 묶음 인자의 칸(묶음째로 — 빠진 성분 null), 경간 표의 받은 부분, mcpOnly[도구]. 경간 유형 · 수가 바뀌어 표가 맞지
+     * 않으면 처음 값(applyChanges — 화면 · set_case_inputs 와 같은 규칙). 반환: 값이 바뀐 키, 사람이 정했던 값 가운데 바뀐 것(그 전 값 · 출처).
      */
-    applyMcp(w: McpWrite): { rev: number; written: string[]; replaced: { key: string; previous: InputValue | any; previous_source: Source }[]; skipped: McpWrite['skipped'] } {
-        const before = JSON.parse(JSON.stringify(this.state)) as CaseState;
-        let st = applyChanges(this.state, w.merge, 'ai').state;
-        st = replaceGroup(st, Object.keys(w.group), w.group, 'ai').state;
-        const shapeChanged = st.inputs.spanType !== before.inputs.spanType || st.inputs.nSpans !== before.inputs.nSpans;
-        if (w.spans) {
-            st = applyChanges(st, { spans: w.spans.spans, supports: w.spans.supports, lapsPerSupport: w.spans.lapsPerSupport }, 'ai').state;
-        } else if (shapeChanged) {
-            // 경간 유형 · 수만 바뀌었다 — 화면처럼 표를 처음 값으로(buildSpanTable)
-            const DS = require('../../webview/js/designState');
-            const t = DS.defaultSpanTable(String(st.inputs.spanType), Number(st.inputs.nSpans));
-            const rev = st.rev;
-            for (const k of ['spans', 'supports', 'lapsPerSupport'] as const) {
-                if (JSON.stringify((st.spans as any)[k]) !== JSON.stringify(t[k])) { (st.spans as any)[k] = t[k]; st.sources[k] = 'ai'; st.revs[k] = rev; }
-            }
-        }
+    mergeMcp(w: McpWrite, base: CaseState = this.state): { state: CaseState; written: string[]; replaced: { key: string; previous: InputValue | any; previous_source: Source }[] } {
+        const before = JSON.parse(JSON.stringify(base)) as CaseState;
+        let st = applyChanges(base, w.merge, 'ai').state;
+        if (Object.keys(w.group).length) { st = replaceGroup(st, Object.keys(w.group), w.group, 'ai').state; }
+        if (w.spans && Object.keys(w.spans).length) { st = applyChanges(st, { ...w.spans }, 'ai').state; }
         st.mcpOnly = { ...st.mcpOnly, [w.tool]: JSON.parse(JSON.stringify(w.mcpOnly)) };
         const written: string[] = [];
         const replaced: { key: string; previous: any; previous_source: Source }[] = [];
@@ -172,8 +162,14 @@ export class CaseKeeper {
             if (person.includes(before.sources[k])) { replaced.push({ key: k, previous: (before.spans as any)[k], previous_source: before.sources[k] }); }
         }
         if (written.length && st.rev === before.rev) { st.rev = before.rev + 1; }
-        this.state = st;
-        return { rev: st.rev, written, replaced, skipped: w.skipped };
+        return { state: st, written, replaced };
+    }
+
+    /** 합친 상태를 확정한다(지금 상태에 다시 합친다 — 계산 동안 들어온 화면의 변경을 잃지 않게). 반환은 mergeMcp 와 같은 목록 */
+    applyMcp(w: McpWrite): { rev: number; written: string[]; replaced: { key: string; previous: InputValue | any; previous_source: Source }[]; skipped: McpWrite['skipped'] } {
+        const m = this.mergeMcp(w);
+        this.state = m.state;
+        return { rev: m.state.rev, written: m.written, replaced: m.replaced, skipped: w.skipped };
     }
 
     /** 저장 안 한 변경이 처음 생긴 때(없으면 null) — touch 가 고친다 */

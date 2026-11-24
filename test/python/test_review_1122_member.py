@@ -173,6 +173,19 @@ def test_manual_examples_reproduce_printed_values():
         rows += [(f'III-6 Pe1 {dm}', r['amplification']['PEx'], 391), (f'III-6 B1 {dm}', r['amplification']['alpha_x'], B1),
                  (f'III-6 Ma {dm}', r['flexure_x']['design_strength'], Ma)]
         assert r['pass'] is True and r.get('utilization_valid') is not False, ('III-6', dm, r.get('not_evaluated'))
+    # III-6 압축 (원형관 §E3.1.1.1, Pcrl 없음): Ao 2.462, R 0.133, Ae 2.465 in², Pn = Ae Fn 92.7, Pa 51.5 (ASD) kips
+    for dm, P, man in (('ASD', 22.5, 51.5), ('LRFD', 19.0, 0.85 * 92.7)):
+        r = design_member(dict(member_type='compression', design_method=dm, Fy=42.0, KxLx=120, KyLy=120, KtLt=120,
+                               Pu=P, section_type='CHS', D=8.0,
+                               props=dict(A=2.482, rx=2.794, ry=2.794, J=38.74, Cw=0.0, t=0.1),
+                               section=dict(diameter=8.0, thickness=0.1, type='CHS'), dsm={}))
+        loc = next(c for c in r['design_checks'] if c['id'] == 'member.compression.local')
+        assert (loc['clause'], loc['clause_variant'], loc['verdict']) == ('E3.1.1.1', 'round_tube', 'pass'), loc
+        assert r['pass'] is True and r['controlling_mode'] == 'Local Buckling', (dm, r.get('not_evaluated'))
+        ae = next(s for s in loc['steps'] if s.get('expr') == 'Ae = Ao + R_Ae (A − Ao)')['result']['value']
+        if dm == 'ASD':
+            rows += [('III-6 Ae', ae, 2.465), ('III-6 Pn E3.1.1.1', r['Pn'], 92.7)]
+        rows.append((f'III-6 Pa {dm}', r['design_strength'], man))
     for label, actual, manual in rows:
         _close(actual, manual, 0.007, label)
 

@@ -59,7 +59,16 @@ function checkFaces(name, r) {
     const tpl = await h.panel.handleMcpAction({ action: 'generate_template', section_type: 'lippedz', params: { H: 8, B: 2.25, D: 0.91, t: 0.059, r: 0.1875, qlip: 50 } });
     assert(!tpl.error, tpl.error);
     await h.panel.handleMcpAction({ action: 'set_lengths', min: 1, max: 1000, n: 30 });
+    // 결정 D1: 설계 도구가 주지 않은 칸은 화면의 값 — 사례마다 처음 화면에서(앞 사례의 Lr 감소 · 지압 길이 … 가 다음 사례에 들지 않게)
+    const DSj = require('../../webview/js/designState.js');
+    const freshCase = async () => {
+      const st = h.panel.__testGetCase().state;
+      const inputs = {};
+      for (const [k, src] of Object.entries(st.sources)) { if (src !== 'default' && DSj.KEYS.case.includes(k)) { inputs[k] = DSj.defaultValue(k); } }
+      if (Object.keys(inputs).length) { await h.panel.handleMcpAction({ action: 'set_case_inputs', inputs }); }
+    };
     for (const [name, args] of Object.entries(CASES)) {
+      await freshCase();
       const r = JSON.parse(JSON.stringify(await h.panel.handleMcpAction({ action: 'design_purlin', ...JSON.parse(JSON.stringify(args)) })));
       assert(!r.error, `${name}: ${r.error}`);
       const t = checkFaces(name, r);

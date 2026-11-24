@@ -279,6 +279,15 @@ REGISTRY = {
                           '랩 패스너 무리 — 블록전단파단', 'lap.fasteners'),
 }
 
+# 같은 한계상태를 단면에 따라 다른 조항으로 검토하는 id 의 갈래 — id(화면 · MCP 가 찾는 이름)는 그대로, 조항 · 식 · 이름만.
+# 항목에 clause_variant 로 갈래 이름을 싣는다.
+REGISTRY_VARIANTS = {
+    # §E3.1.1.1 원형관(D/t ≤ 0.441 E/Fy): 유효면적 Ae 로 Pnℓ = Ae Fn (Eq. E3.1-1) — DSM 의 §E3.2.1 이 아니다
+    ('member.compression.local', 'round_tube'): _r('E3.1.1.1', ('E3.1-1', 'E3.1.1.1-1', 'E3.1.1.1-2', 'E3.1.1.1-3'),
+                                                   'Local buckling (round tube, effective area)', '국부좌굴 (원형관 유효면적)',
+                                                   'member.compression'),
+}
+
 # 접합부 limit_states / not_evaluated / interaction / detailing 의 엔진 이름 → id.
 # 이름의 ' [part 2]' 꼬리는 conn.j6.*.part2 로 간다.
 _CONN_NAME_IDS = {
@@ -488,13 +497,16 @@ def make_check(cid: str, *, design_method: str | None, verdict: str, demand: dic
                ratio=None, reason: str | None = None, steps: list | None = None,
                steps_unavailable: str | None = None, location=None, combination=None,
                mirrors: dict | None = None, reference: dict | None = None, counts: bool = True,
-               trusted: bool | None = None, group: str | None = None, **extra) -> dict:
-    """등록표에서 조항 · 식 · 이름을 채운 검토 항목 하나."""
+               trusted: bool | None = None, group: str | None = None, variant: str | None = None,
+               **extra) -> dict:
+    """등록표에서 조항 · 식 · 이름을 채운 검토 항목 하나. variant 를 주면 REGISTRY_VARIANTS 의 갈래로."""
     if cid not in REGISTRY:
         raise KeyError(f'check id {cid!r} is not registered')
     if verdict not in VERDICTS:
         raise ValueError(f'unknown verdict {verdict!r}')
-    reg = REGISTRY[cid]
+    if variant is not None and (cid, variant) not in REGISTRY_VARIANTS:
+        raise KeyError(f'check id {cid!r} has no variant {variant!r}')
+    reg = REGISTRY_VARIANTS[(cid, variant)] if variant is not None else REGISTRY[cid]
     if verdict == 'not_evaluated':
         # 평가하지 못한 항목에 소요/설계강도 · 비를 지어 넣지 않는다 — 참고값은 reference 로만.
         capacity = None
@@ -532,6 +544,8 @@ def make_check(cid: str, *, design_method: str | None, verdict: str, demand: dic
         out['reference'] = reference
     if trusted is not None:
         out['trusted'] = bool(trusted)
+    if variant is not None:
+        out['clause_variant'] = variant
     for k, v in extra.items():
         if v is not None:
             out[k] = v

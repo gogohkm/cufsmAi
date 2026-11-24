@@ -1,11 +1,11 @@
 {
  "about": "K2 phase 0 golden — defaults. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-23",
+ "recorded": "2026-11-24",
  "entries": [
   {
    "id": "controls.values",
    "expect": "pin",
-   "reason": "The control table gains #chk-design-zero-demand and #chk-conn-zero-demand (rows after them shift by one), and the demand inputs' initial value is \"\" instead of \"0\". Contract §6.3 / §6.4: two new case keys state that a 0 demand really is 0 — designZeroDemandStated (#chk-design-zero-demand) and connZeroDemandStated (#chk-conn-zero-demand), false by default; the K2 non-default value table sets them true.",
+   "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. 바뀐 것은 #chk-cold-work(true → false)와 그 네 칸의 글(3000 / 118.11023622 → 빈 칸)뿐이다(값으로 대조).",
    "value": [
     [
      "select-template",
@@ -88,8 +88,8 @@
     [
      "chk-cold-work",
      "tab-preprocessor",
-     true,
-     true
+     false,
+     false
     ],
     [
      "select-member-type",
@@ -484,20 +484,20 @@
     [
      "design-KxLx",
      "tab-design",
-     "3000",
-     "118.11023622"
+     "",
+     ""
     ],
     [
      "design-KyLy",
      "tab-design",
-     "3000",
-     "118.11023622"
+     "",
+     ""
     ],
     [
      "design-KtLt",
      "tab-design",
-     "3000",
-     "118.11023622"
+     "",
+     ""
     ],
     [
      "design-Cb-pos",
@@ -520,8 +520,8 @@
     [
      "design-Lb",
      "tab-design",
-     "3000",
-     "118.11023622"
+     "",
+     ""
     ],
     [
      "chk-beta-dist",
@@ -841,46 +841,12 @@
      false,
      false
     ]
-   ],
-   "flipped": [
-    {
-     "step": "K2-5/6",
-     "from": {
-      "expect": "pin",
-      "reason": null
-     },
-     "date": "2026-11-22"
-    },
-    {
-     "step": "S6",
-     "from": {
-      "expect": "pin",
-      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — E 를 SI 화면에 203395.340148(12 자리)로"
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "S10",
-     "from": {
-      "expect": "pin",
-      "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd."
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "milestone-2-demand",
-     "from": {
-      "expect": "pin",
-      "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd."
-     },
-     "date": "2026-11-24"
-    }
    ]
   },
   {
    "id": "initialInputs.US",
    "expect": "pin",
-   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0. Contract §6.3 / §6.4: two new case keys state that a 0 demand really is 0 — designZeroDemandStated (#chk-design-zero-demand) and connZeroDemandStated (#chk-conn-zero-demand), false by default; the K2 non-default value table sets them true.",
+   "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. 바뀐 것은 KxLx · KyLy · KtLt · Lb(118.11023622 → null)와 chkColdWork(true → false)뿐이다.",
    "value": {
     "unitSystem": "US",
     "analysisMethod": "DSM",
@@ -918,10 +884,10 @@
     "lapRestrainedLap": false,
     "deckInsulationIn": null,
     "deckRTested": null,
-    "KxLx": 118.11023622,
-    "KyLy": 118.11023622,
-    "KtLt": 118.11023622,
-    "Lb": 118.11023622,
+    "KxLx": null,
+    "KyLy": null,
+    "KtLt": null,
+    "Lb": null,
     "Cb": 1,
     "designLbPos": 0,
     "designCbPos": 1,
@@ -939,7 +905,7 @@
     "distLm": 0,
     "chkRFactor": false,
     "rValue": "0",
-    "chkColdWork": true,
+    "chkColdWork": false,
     "chkInelasticReserve": false,
     "wcN": 3.50393700787,
     "wcR": 0.188976377953,
@@ -1037,41 +1003,7 @@
       "right": null
      }
     ]
-   },
-   "flipped": [
-    {
-     "step": "K2-5/6",
-     "from": {
-      "expect": "pin",
-      "reason": null
-     },
-     "date": "2026-11-22"
-    },
-    {
-     "step": "S6",
-     "from": {
-      "expect": "pin",
-      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — US 처음 값이 정확한 값(42.78613263041172 · 3.937007874015748 …)"
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "S10",
-     "from": {
-      "expect": "pin",
-      "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd."
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "milestone-2-demand",
-     "from": {
-      "expect": "pin",
-      "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd."
-     },
-     "date": "2026-11-24"
-    }
-   ]
+   }
   },
   {
    "id": "hostModel.initial",

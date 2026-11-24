@@ -30,6 +30,8 @@ export interface BuiltRequest {
     data?: any;
     /** 비어서 막힌 필수 칸 — 화면 이름(화면의 reqNum 라벨) */
     missing: string[];
+    /** 그 칸의 키(검토 상태 · 모델 칸 — MCP 의 오류가 set_case_inputs 의 키로 말한다). missing 과 같은 차례 */
+    missingKeys?: string[];
     /** 하중 본문의 형식 오류(브레이스 · 경간별 Ix) — 화면의 그 문장 */
     error?: string;
 }
@@ -39,6 +41,7 @@ export const isCalcMode = (t: unknown): boolean => CALC_MODES.includes(String(t)
 
 class Reader {
     missing: string[] = [];
+    missingKeys: string[] = [];
     constructor(private readonly st: CaseState, private readonly drafts: Record<string, InputValue>) {}
     raw(key: string): InputValue | undefined {
         const m = DS.fieldMeta(key);
@@ -49,7 +52,7 @@ class Reader {
     /** reqNum: 비면 막는다 */
     req(key: string, label: string): number {
         const v = this.raw(key);
-        if (typeof v !== 'number' || !isFinite(v)) { this.missing.push(label); return NaN; }
+        if (typeof v !== 'number' || !isFinite(v)) { this.missing.push(label); this.missingKeys.push(key); return NaN; }
         return v;
     }
     /** zeroNum: 빈 칸 = 0 */
@@ -120,7 +123,7 @@ export function buildDesignRequest(st: CaseState, ctx: RequestContext): BuiltReq
     };
     // 계약 §6.4: 「준 0 인 주 소요는 정말 0」 — 사람이 칸으로 밝혔을 때만
     if (r.chk('designZeroDemandStated')) { data.zero_demand_stated = true; }
-    return { data, missing: r.missing };
+    return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
 
 /** §I6.2.1 R: 체크하고 값을 골랐을 때만, 고른 선택지의 경간 조건과 함께(F4 V2-03) — 선택지의 정체는 표의 optSpan */
@@ -135,8 +138,15 @@ function rFactor(st: CaseState): Record<string, unknown> {
     return span ? { R_uplift: R, span_type: span } : { R_uplift: R };
 }
 
+/**
+ * 하중 해석 본문의 선택(MCP 의 길만 — 화면 단추는 쓰지 않는다): sectionOptional = 템플릿 치수 칸이 비어도(모델이 템플릿이 아닌 단면) 막지
+ * 않는다 — 단면 정보를 보내지 않고(호스트가 지금 모델에서 만든다, _analyzeLoads) 재료 Fy · Fu 를 위에 둔다. 지금까지 MCP 하중 해석이 되던 단면이
+ * 새 규칙(화면 단추와 같은 본문)에서 막히지 않게.
+ */
+export interface LoadRequestOptions { sectionOptional?: boolean }
+
 /** 하중 분석(analyzeLoads → analyze_loads) — app.js collectLoadAnalysisPayload 그대로. 자동 계산 모드가 아니면 data 없음 */
-export function buildLoadRequest(st: CaseState, ctx: RequestContext): BuiltRequest {
+export function buildLoadRequest(st: CaseState, ctx: RequestContext, opts: LoadRequestOptions = {}): BuiltRequest {
     const r = new Reader(st, ctx.drafts);
     const memberApp = r.sel('memberType', '');
     if (!isCalcMode(memberApp)) { return { missing: [] }; }
@@ -153,11 +163,13 @@ export function buildLoadRequest(st: CaseState, ctx: RequestContext): BuiltReque
     const normalizedSectionType = table[t] || 'custom';
     const isHat = normalizedSectionType === 'Hat';
     const hasLip = ['C', 'Z', 'LippedAngle'].includes(normalizedSectionType);
+    // sectionOptional: 치수 칸은 따로 읽어 막지 않는다(빈 칸이면 아래에서 단면 정보를 보내지 않는다)
+    const rs = opts.sectionOptional ? new Reader(st, ctx.drafts) : r;
     const sectionInfo: any = {
-        depth: r.req(isHat ? 'tplB' : 'tplH', isHat ? '단면 B(깊이)' : '단면 H'),
-        flange_width: r.req(isHat ? 'tplH' : 'tplB', isHat ? '단면 H(상판 폭)' : '단면 B'),
-        thickness: r.req('tplT', '단면 t'),
-        lip_depth: hasLip ? r.req('tplD', '립 D') : 0,
+        depth: rs.req(isHat ? 'tplB' : 'tplH', isHat ? '단면 B(깊이)' : '단면 H'),
+        flange_width: rs.req(isHat ? 'tplH' : 'tplB', isHat ? '단면 H(상판 폭)' : '단면 B'),
+        thickness: rs.req('tplT', '단면 t'),
+        lip_depth: hasLip ? rs.req('tplD', '립 D') : 0,
         R_corner: r.opt('tplR'),
         type: normalizedSectionType,
         Fy: r.req('fy', '설계 Fy'),
@@ -166,7 +178,7 @@ export function buildLoadRequest(st: CaseState, ctx: RequestContext): BuiltReque
     };
     const spanLens: number[] = [];
     st.spans.spans.forEach((v, i) => {
-        if (typeof v !== 'number' || !isFinite(v)) { r.missing.push('경간 ' + (i + 1) + ' 길이'); spanLens.push(NaN); return; }
+        if (typeof v !== 'number' || !isFinite(v)) { r.missing.push('경간 ' + (i + 1) + ' 길이'); r.missingKeys.push('spans'); spanLens.push(NaN); return; }
         spanLens.push(v);
     });
     const supports = [...st.spans.supports];
@@ -180,7 +192,7 @@ export function buildLoadRequest(st: CaseState, ctx: RequestContext): BuiltReque
     const maxLapLeft = interiorLaps.length > 0 ? Math.max(...interiorLaps.map((lp) => lp.left_ft || 0)) : 0;
     const maxLapRight = interiorLaps.length > 0 ? Math.max(...interiorLaps.map((lp) => lp.right_ft || 0)) : 0;
     const D = r.zero('loadD'), Lr = r.zero('loadLr'), S = r.zero('loadS'), Wu = r.zero('loadWu'), Wp = r.zero('loadWp'), L = r.zero('loadL');
-    if (r.missing.length > 0) { return { missing: r.missing }; }
+    if (r.missing.length > 0) { return { missing: r.missing, missingKeys: r.missingKeys }; }
     const opt = (k: string): number | undefined => r.opt(k);
     const data: any = {
         member_app: memberApp,
@@ -218,16 +230,21 @@ export function buildLoadRequest(st: CaseState, ctx: RequestContext): BuiltReque
         }
         data.I_span_in4 = [...ixs];
     }
+    // sectionOptional 에서 단면 정보를 보내지 않으면 호스트가 모델에서 만드는 단면에 쓸 재료 값(MCP analyze_loads 의 Fy · Fu 인자와 같은 자리)
+    if (opts.sectionOptional && data.section === undefined) {
+        data.Fy = sectionInfo.Fy;
+        if (sectionInfo.Fu !== undefined) { data.Fu = sectionInfo.Fu; }
+    }
     return { data, missing: [] };
 }
 
 /** 자동 계산 모드의 설계 검토(runPurlinDesign → design_purlin) — app.js btn-run-design 의 본문 그대로 */
-export function buildPurlinRequest(st: CaseState, ctx: RequestContext): BuiltRequest {
+export function buildPurlinRequest(st: CaseState, ctx: RequestContext, loadOpts: LoadRequestOptions = {}): BuiltRequest {
     const design = buildDesignRequest(st, ctx);
-    const loads = buildLoadRequest(st, ctx);
+    const loads = buildLoadRequest(st, ctx, loadOpts);
     if (design.missing.length) {
         // 화면은 설계 본문의 빈 필수 칸(설계 Fy)을 먼저 막는다
-        return { missing: design.missing };
+        return { missing: design.missing, missingKeys: design.missingKeys };
     }
     if (loads.error || loads.missing.length || !loads.data) { return loads; }
     const opts: any = {};
@@ -273,7 +290,7 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
     if (r.chk('lapRestrained')) { data.lap_restrained = true; }
     // 계약 §6.3: 0 은 밝혔을 때만 0(사람의 칸 · AI 의 zero_demand_stated)
     if (r.chk('connZeroDemandStated')) { data.zero_demand_stated = true; }
-    return { data, missing: r.missing };
+    return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
 
 /** V8-01: 랩 검토의 단면 강도(그 지점의 랩 구간에서) — 호스트가 결과에 출처를 적을 때도 같은 것을 부른다 */
@@ -329,7 +346,7 @@ export function buildConnectionRequest(st: CaseState, ctx: RequestContext): Buil
         const fuf = r.opt('connFuf');
         if (fuf !== undefined) { data.Fuf = fuf; }
     }
-    return { data, missing: r.missing };
+    return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
 
 /**

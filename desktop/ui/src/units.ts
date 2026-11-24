@@ -10,7 +10,7 @@
  *  - 바꾼 값은 화면에만 있다. 모델로 되돌려 보내는 길은 없다(이 화면은 모델을 쓰지 않는다).
  */
 import {
-  convertOutputSIDeep, toSI, US_TO_SI, SI_OUT_PROPS, SI_OUT_GET_DSM, SI_OUT_MEMBER, SI_OUT_PURLIN, SI_OUT_LOADS, quantityUnit, caseValueToSI, CASE_UNIT_KIND,
+  convertOutputSIDeep, withUnroundedValues, toSI, US_TO_SI, SI_OUT_PROPS, SI_OUT_GET_DSM, SI_OUT_MEMBER, SI_OUT_PURLIN, SI_OUT_LOADS, quantityUnit, caseValueToSI, CASE_UNIT_KIND,
   type UnitKey, type Table,
 } from '../../../src/mcp/siUnits';
 
@@ -30,9 +30,14 @@ export function si(v: unknown, kind: Kind): number | null {
   return kind === 'none' ? v : toSI(v, kind);
 }
 
+/**
+ * 결과 묶음 → SI. MCP 의 SI 응답과 같은 규칙: 엔진이 표시용으로 반올림한 값(display_rounding)은 반올림 전 값(display_unrounded —
+ * 퍼린의 regions[].result · 조합의 성분까지)을 바꾼다(withUnroundedValues). 표시 값으로 만든 요약(__display_rounded)은 그대로. US 표시는 바꾸지 않는다
+ */
 function deep<T>(v: T, table: Table): T {
   if (!v || typeof v !== 'object') { return v; }
-  return convertOutputSIDeep(v, table).value as T;
+  const src = (v as any).__display_rounded ? v : withUnroundedValues(v).value;
+  return convertOutputSIDeep(src, table).value as T;
 }
 
 /** MCP get_section_properties(units SI)와 같은 변환 */

@@ -18,7 +18,8 @@
     //          'model'  호스트 모델이 주인(해석 조건 · 템플릿 · E/ν/G) — 상태에 두 벌로 두지 않는다
     //          'view'   보기 설정(결과에 쓰이지 않음)
     //   group  묶음(재료 · 부재 · 하중 · 데크 · 설계 · 웹 크리플링 · 옵션 · 소성 · 진동 · 랩 · 접합 · 템플릿 · 해석)
-    //   def    처음 값 — **지금 화면의 처음 값 그대로**(손으로 정한 공학 기본값 44 개 포함, 값을 바꾸지 않는다).
+    //   def    처음 값 — **지금 화면의 처음 값 그대로**(손으로 정한 공학 기본값 39 개 포함 — 2026-11-25 에 길이 넷을 비우고
+    //          냉간가공을 꺼 44 → 39. 화면의 HTML 과 함께 바꾼다).
     //          단위 있는 수는 SI 화면에 적힌 수(화면이 SI 로 시작하므로) — US 값은 defaultValue() 가 화면과 같은 식
     //          (표시값 / 계수)으로 만든다. null = 빈 칸. model 키는 null(모델에서 온다)
     //   src    처음 값의 출처: 'page'(HTML · JS 에 적힌 값) · 'steel'(src/webview/steelGrades.ts 의 SGC400) ·
@@ -76,10 +77,12 @@
         ['deckInsulationIn', 'deck-insulation', 'length', 'num', _C('deck', null, 'load')],
         ['deckRTested', 'deck-R-tested', null, 'num', _C('deck', null, 'load')],
         // 설계 길이 · 계수 · 소요강도 (소요강도 칸은 ② 탭에 있다 — 바꾸면 하중 해석부터 낡는다: 지금 규칙)
-        ['KxLx', 'design-KxLx', 'length', 'num', _C('design', 3000, 'design')],
-        ['KyLy', 'design-KyLy', 'length', 'num', _C('design', 3000, 'design')],
-        ['KtLt', 'design-KtLt', 'length', 'num', _C('design', 3000, 'design')],
-        ['Lb', 'design-Lb', 'length', 'num', _C('design', 3000, 'design')],
+        // 유효 길이 · 비지지 길이: 사례마다 다른 값이라 처음 값은 빈 칸(2026-11-25 — 전에는 3000 mm). 비면 요청에 넣지 않는다
+        // (엔진: 그 길이가 필요한 E2 · F2 는 「평가하지 못함」 — 0 이나 다른 값으로 판정하지 않는다)
+        ['KxLx', 'design-KxLx', 'length', 'num', _C('design', null, 'design')],
+        ['KyLy', 'design-KyLy', 'length', 'num', _C('design', null, 'design')],
+        ['KtLt', 'design-KtLt', 'length', 'num', _C('design', null, 'design')],
+        ['Lb', 'design-Lb', 'length', 'num', _C('design', null, 'design')],
         ['Cb', 'design-Cb', null, 'num', _C('design', 1.0, 'design')],
         ['designLbPos', 'design-Lb-pos', 'length', 'num', _C('design', 0, 'design')],
         ['designCbPos', 'design-Cb-pos', null, 'num', _C('design', 1.0, 'design')],
@@ -102,7 +105,8 @@
         ['rValue', 'select-r-value', null, 'sel', _C('options', '0', 'design', {
             opts: ['0', '0.70', '0.65', '0.50', '0.40', '0.60', '0.70:continuous'],
             optSpan: [null, 'simple', 'simple', 'simple', 'simple', 'continuous', 'continuous'] })],
-        ['chkColdWork', 'chk-cold-work', null, 'chk', _C('options', true, 'design')],
+        // §A3.3.2 냉간가공: 강도를 올리는 선택이라 누가 켰을 때만(2026-11-25 — 전에는 켬)
+        ['chkColdWork', 'chk-cold-work', null, 'chk', _C('options', false, 'design')],
         ['chkInelasticReserve', 'chk-inelastic-reserve', null, 'chk', _C('options', false, 'design')],
         // 웹 크리플링
         ['wcN', 'design-wc-N', 'length', 'num', _C('webCrippling', 89, 'design')],

@@ -260,18 +260,18 @@ async function run() {
     const [x, y] = T.formatPair(0, -0, null, 'US');
     assert.notStrictEqual(x, y);
   });
-  await t('V7-24 ②: hand-made geometry changes are not hidden behind a template tweak ("외 n" counts them)', () => {
+  await t('V7-24 ②: hand-made geometry changes are not hidden behind a template tweak (D6: up to 5 fields are all named)', () => {
     const b = base(), a = base();
     a.model.sectionParams.r = 0.18750001; a.model.elem = a.model.elem.map((e) => [e[0], e[1], e[2], 0.04, e[4]]); a.model.node[2][2] = 10;
     const tt = title(b, a);
-    assert.match(tt, /외 2$/);
+    assert(tt.split(' · ').length === 3 && /요소/.test(tt) && /절점/.test(tt), tt);
     const regen = base(), regen2 = base();
     regen2.model.sectionParams.t = 0.07; regen2.model.elem = regen2.model.elem.map((e) => [e[0], e[1], e[2], 0.07, e[4]]); regen2.model.node[2][2] = 8.01;
     assert.strictEqual(title(regen, regen2), '두께 t 0.0566 → 0.07 in');
   });
   await t('V7-24 ③: the headline is the largest relative change (fy 50 → 80 is not hidden behind a tiny r change)', () => {
     const b = base(), a = base(); a.model.sectionParams.r = 0.18750001; a.case.inputs.fy = 80;
-    assert.strictEqual(title(b, a), 'fy 50 → 80 ksi 외 1');
+    assert.strictEqual(title(b, a), 'fy 50 → 80 ksi · 안쪽 반지름 r 0.1875 → 0.18750001 in');
   });
   await t('V7-24 ④ ⑤ ⑥: text values are quoted and cleaned; odd key names are not shown; "72" and 72 differ', () => {
     const b = base(), a = base(); a.case.mcpOnly = { aisi_design_flexure: { note: 'x‮ksi 08 → 05 yf\n외 0' } };

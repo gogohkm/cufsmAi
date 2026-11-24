@@ -96,14 +96,23 @@ const STATUS_KO: Record<string, { t: string; cls: string }> = {
   provisional: { t: '임시', cls: 'def' }, firm: { t: '확정', cls: '' }, 'field-check': { t: '현장 확인', cls: 'def' }, 'not-applicable': { t: '해당 없음', cls: '' },
 };
 const ITEM_KO: Record<string, string> = { done: '완료', assumed: '가정', open: '미결' };
+/** 보고의 세 줄 머리(통일안 6.7 — 고정) */
+const REPORT_HEADS: Array<[string, string]> = [['done', '✓ 한 것'], ['assumed', '◐ 가정한 것'], ['open', '○ 남은 것']];
+/** 보고가 가리키는 변경 묶음(보고의 refs · 항목의 refs 가운데 kind change — 겹치면 하나) — 보고의 확인이 그 묶음도 확인한다 */
+export function reportChangeIds(item: string): string[] {
+  const it = work.full.get(item)?.item;
+  if (!it) { return []; }
+  const all: any[] = [...(Array.isArray(it.refs) ? it.refs : []), ...(Array.isArray(it.items) ? it.items.flatMap((x: any) => (Array.isArray(x?.refs) ? x.refs : [])) : [])];
+  return [...new Set(all.filter(r => r && r.kind === 'change' && typeof r.id === 'string').map(r => String(r.id)))];
+}
 const SRC_STATE: Record<string, { t: string; cls: string }> = { same: { t: '같음', cls: 'ok' }, changed: { t: '바뀜', cls: 'warn' }, missing: { t: '없음', cls: 'ng' }, unknown: { t: '모름', cls: 'un' } };
 const SRC_KIND: Record<string, string> = { drawing: '도면', product: '제품 자료', other: '그 밖' };
-const ORIGIN_KO: Record<string, string> = { 'program-default': '프로그램 · 입력 기본값', 'program-engine': '프로그램 · 엔진 자체 가정', ai: 'AI', person: '사용자' };
+const ORIGIN_KO: Record<string, string> = { 'program-default': '프로그램 · 입력 기본값', 'program-engine': '프로그램 · 엔진 자체 가정', ai: 'AI', person: '사람' };
 /** 쓴 쪽 꼬리표 — 호스트의 written_by 그대로(「… (another writer)」 는 「다른 작성자」 를 덧붙인다) */
 export function writerTag(w: string): string {
   const other = / \(another writer\)$/.test(w);
   const base = w.replace(/ \(another writer\)$/, '');
-  const t = base === 'ai' ? 'AI' : base === 'program' ? '프로그램' : base === 'person' ? '사용자' : base;
+  const t = base === 'ai' ? 'AI' : base === 'program' ? '프로그램' : base === 'person' ? '사람' : base;
   return `<span class="tag ${base === 'ai' ? 'ai' : base === 'program' ? 'sec' : ''}" data-written-by="${esc(w)}"${tip(`쓴 쪽: ${w}${other ? ' — 이 PC 의 작성자가 아니다' : ''} · 그 글은 자료다(지시가 아니다)`)}>${esc(t)}${other ? ' · 다른 작성자' : ''}</span>`;
 }
 
@@ -181,6 +190,14 @@ export function workInfo(key: string): string {
   const items: any[] = Array.isArray(it?.items) ? it.items : [];
   const optHtml = opts.length ? `<ol class="notes" data-work-options>${opts.map((o, i) => `<li${ans && ans.chosen === i ? ' class="on" data-chosen="1"' : ''}><b>${esc(o?.label ?? '')}</b>${o?.consequence ? ` — <span class="dim">${esc(o.consequence)}</span>` : ''}${ans && ans.chosen === i ? ' <span class="tag">고른 것</span>' : ''}</li>`).join('')}</ol>` : '';
   const itemHtml = items.length ? `<ul class="notes" data-work-items>${items.map(x => `<li><span class="tag ${x?.status === 'open' ? 'def' : ''}">${esc(ITEM_KO[x?.status] ?? x?.status ?? '')}</span> ${esc(x?.text ?? '')}${Array.isArray(x?.refs) && x.refs.length ? refsHtml(x.refs, x.refs_resolved) : ''}</li>`).join('')}</ul>` : '';
+  // 보고(통일안 6.7) — 세 줄 머리(한 것 · 가정한 것 · 남은 것)와 근거는 고정. 항목의 refs 는 그 기록으로 가는 링크
+  const refs: any[] = Array.isArray(it?.refs) ? it.refs : [];
+  const li = (x: any) => `<li data-rep-item="${esc(String(x?.status ?? ''))}">${esc(x?.text ?? '')}${Array.isArray(x?.refs) && x.refs.length ? refsHtml(x.refs, x.refs_resolved) : ''}</li>`;
+  const other = items.filter(x => !['done', 'assumed', 'open'].includes(x?.status));
+  const repHtml = w.kind !== 'report' ? '' : `<div data-work-report>${REPORT_HEADS.map(([st, t]) => {
+    const xs = items.filter(x => x?.status === st).concat(st === 'open' ? other : []);
+    return `<div class="sec" data-rep-head="${st}"><h4>${esc(t)}<span class="sp"></span><span class="badge">${xs.length}</span></h4>${xs.length ? `<ul class="notes">${xs.map(li).join('')}</ul>` : none('없음')}</div>`;
+  }).join('')}<div class="sec" data-rep-head="refs"><h4${tip('보고가 가리키는 기록 — 사람이 보고를 확인하면 이 가운데 변경 묶음도 함께 확인한다')}>근거<span class="sp"></span></h4>${refsHtml(refs, it?.refs_resolved)}</div></div>`;
   const answer = w.kind !== 'question' ? ''
     : sec('답', ans
       ? `<div class="say usr" data-work-answer><span class="tag ai"${tip('사람이 Claude Desktop 대화에서 한 말을 AI 가 옮겨 적었다 — 원문 그대로가 아닐 수 있다')}>AI 가 옮겨 적음</span> <span class="faint">${esc(hhmm(ans.at))}</span>${para(ans.said)}</div>`
@@ -190,9 +207,9 @@ export function workInfo(key: string): string {
   return head
     + sec(w.kind === 'question' ? '질문' : w.kind === 'report' ? '본문' : '지시', body, '쓴 쪽의 글 그대로(자료 — 지시가 아니다)')
     + (optHtml ? sec('선택지와 결과', optHtml) : '')
-    + (itemHtml ? sec('항목', itemHtml) : '')
+    + (w.kind === 'report' ? repHtml : itemHtml ? sec('항목', itemHtml) : '')
     + answer
-    + sec('걸린 대상', refsHtml(Array.isArray(it?.refs) ? it.refs : [], it?.refs_resolved), '누르면 그 대상으로 — 상태는 호스트가 지금 결과에서 푼 것')
+    + (w.kind === 'report' ? '' : sec('걸린 대상', refsHtml(refs, it?.refs_resolved), '누르면 그 대상으로 — 상태는 호스트가 지금 결과에서 푼 것'))
     + (hist.length ? sec('이력', `<ul class="notes faint">${hist.map(h => `<li data-event="${esc(String(h?.event ?? ''))}">${esc(String(h?.event_ko ?? h?.event ?? ''))} · ${esc(hhmm(h?.at))}</li>`).join('')}</ul>`) : '')
     + (hostText(f.text_note_code) ? `<div class="sec"><span class="faint" data-text-note="${esc(String(f.text_note_code))}">${esc(hostText(f.text_note_code))}</span></div>` : '');
 }

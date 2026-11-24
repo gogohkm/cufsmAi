@@ -16,16 +16,15 @@ import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
-import { baseOf, byTag, changeOf, chg, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, staleCause, valText, whoText, type Change, type FieldRec } from './changes';
-import { rec } from './records';
-import { asmInfo, questionsAbout, srcInfo, workInfo } from './work';
+import { actorOf, actorTag, baseOf, changeOf, chg, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
+import { asmInfo, questionsAbout, srcInfo, srcs, work, workInfo } from './work';
 import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
 import { alts, altInfo, altRootInfo, visibleAlts } from './alts';
 import type { CheckRow } from './store';
 import { stageNow } from './center';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
-const T_SET = '<span class="tag" data-tip="누군가 정한 값. 누가 정했는지(AI · 사용자)는 변경 기록(R2)부터 보인다">지정</span>';
+const T_SET = '<span class="tag" data-tip="누군가 정한 값. 누가 정했는지(AI · 사람)는 변경 기록(R2)부터 보인다">지정</span>';
 const tagSec = '<span class="tag sec" data-tip="단면에서 나온 값">단면</span>';
 const tagFsm = '<span class="tag drv" data-tip="좌굴 해석(MCP get_dsm_values)에서 나온 값">좌굴 해석</span>';
 const tagEng = '<span class="tag drv" data-tip="엔진이 이 검토에서 쓴 값(결과에 함께 온 것)">엔진</span>';
@@ -276,7 +275,7 @@ function checksInfo(key: string): string {
     typeof r.Fy_used === 'number' ? row_('설계 Fy', num(r.Fy_used, { src: `${run.src}Fy_used`, kind: 'stress' }), tagEng) : '',
     typeof fd.Lb === 'number' ? row_('비지지 길이 Lb', num(fd.Lb, { src: `${run.src}Fcre_detail.Lb`, kind: 'length' }), tagEng) : '',
     typeof fd.Cb === 'number' ? row_('Cb', num(fd.Cb, { src: `${run.src}Fcre_detail.Cb`, kind: 'none', sig: 3 }), tagEng) : '',
-    us.dsm_source ? row_('좌굴 값의 출처', esc(Object.entries(us.dsm_source).map(([a, b]) => `${a} ${b}`).join(' · ')), us.dsm_basis === 'current_analysis' ? tagFsm : '') : '',
+    us.dsm_source || us.dsm_basis_by_family ? row_('좌굴 값의 출처', esc(Object.entries(us.dsm_source ?? {}).map(([a, b]) => `${a} ${b}`).join(' · ')), dsmBasisTag(us)) : '',
   ].join(''));
   // 한계상태 — 같은 검토 지점의 항목, 엔진의 순서 그대로
   const here = run.rows.filter(x => !row || x.point === row.point);
@@ -306,6 +305,20 @@ function checksInfo(key: string): string {
     + (row?.us && alts.items.length ? altSeeAlso(row) : '');
 }
 
+/**
+ * 좌굴 값의 출처 꼬리표 — 하중군마다의 것(dsm_basis_by_family: P · Mxx → prepared · current_analysis · none)이 있으면 그것으로,
+ * 지금 해석에서 온 하중군이 있으면 「좌굴 해석」(그 하중군을 적는다). 없으면 dsm_basis(current_analysis · prepared+current_analysis)
+ */
+const BASIS_KO: Record<string, string> = { prepared: '준비된 값', current_analysis: '지금 해석', none: '없음' };
+function dsmBasisTag(us: any): string {
+  const by = us?.dsm_basis_by_family && typeof us.dsm_basis_by_family === 'object' ? Object.entries(us.dsm_basis_by_family as Record<string, string>) : [];
+  if (by.length) {
+    const cur = by.filter(([, b]) => b === 'current_analysis').map(([f]) => f);
+    return `${cur.length ? tagFsm : ''}<span class="why" data-dsm-basis="${esc(by.map(([f, b]) => `${f}=${b}`).join(','))}">${esc(by.map(([f, b]) => `${f} ${BASIS_KO[b] ?? b}`).join(' · '))}</span>`;
+  }
+  return us?.dsm_basis === 'current_analysis' || us?.dsm_basis === 'prepared+current_analysis' ? tagFsm : '';
+}
+
 /** 같이 볼 것 · 대안 — 그 검토 열쇠의 판정비를 대안마다(호스트의 compare 그대로 — 순위를 짓지 않는다) */
 function altSeeAlso(row: CheckRow): string {
   const it = itemOfRow(row);
@@ -332,50 +345,74 @@ function staleBalloon(kinds: string[]): string {
 function changeInfo(key: string): string {
   const c: Change | undefined = key.startsWith('chg:') ? changeOf(key.slice(4)) : chg.list[0];
   if (!c) { return hd('업무 · 변경', '변경', chg.err ? none('변경을 읽지 못함', chg.err) : none('변경 없음', '이 대상에 기록된 변경 묶음이 없다'), ''); }
+  // ① 머리 — 행위자 배지 · 시각 · 제목 · [확인]
   const RVc = rv.loaded ? markButton(markOf('change', c.id), `data-rv-change="${esc(c.id)}"`) : markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만');
-  const head = `<div class="hd"><div class="k">${byTag(c.by.kind)}${linkOf(c) ? `<span class="tag def" data-link="${esc(String(c.trigger))}"${tip(LINK_TIP)}>${esc(linkOf(c)!)}</span>` : ''}변경 · ${esc(hhmm(c.at))}${c.by.client ? ` <span class="faint">${esc(c.by.client)}</span>` : ''}<span class="sp"></span>${RVc}</div>`
+  const head = `<div class="hd"><div class="k">${actorTag(c)}${linkOf(c) ? `<span class="tag def" data-link="${esc(String(c.trigger))}"${tip(LINK_TIP)}>${esc(linkOf(c)!)}</span>` : ''}변경 · ${esc(hhmm(c.at))}${c.by.client ? ` <span class="faint">${esc(c.by.client)}</span>` : ''}<span class="sp"></span>${RVc}</div>`
     + `<div class="ttl" data-chg-title${tip('제목은 프로그램이 바뀐 칸에서 지었다. 되돌리려면 Claude 에게 말한다 — 되돌리기도 새 변경으로 이 목록에 남는다')}>${esc(c.title || '(제목 없음)')}</div>`
-    + (c.work ? `<div class="say usr" data-work="${esc(c.work)}"><span class="faint">업무 ${esc(c.work)}</span> 이 변경이 가리킨 업무 항목 — 지시 · 판단 요청의 글은 업무 기록(R3)부터</div>` : '')
     + `${chg.persisted ? '' : `<div class="dim" data-memory${tip('프로젝트 밖(또는 읽기 전용) — 이 세션의 메모리에만 있다')}>이 세션 · 저장되지 않음</div>`}</div>`;
   const i = chg.list.indexOf(c);
   const prev = chg.list.slice(i + 1).find(x => x.by.kind === c.by.kind) ?? null;
-  // 실행 이력(get_case_status detail runs 의 history — 새 것부터): 그 때 앞의 마지막 실행 · 뒤의 첫 실행(판정비 · 단면 성질의 전 → 후)
-  const hist: any[] = Array.isArray(rec.status?.history) ? rec.status.history : [];
-  const around = (at: string, until?: string) => ({
-    before: hist.find(h => typeof h?.at === 'string' && h.at < at && typeof h.max_ratio === 'number') ?? null,
-    after: [...hist].reverse().find(h => typeof h?.at === 'string' && h.at > at && (!until || h.at < until) && typeof h.max_ratio === 'number') ?? null,
-  });
+  const next = i > 0 ? [...chg.list.slice(0, i)].reverse().find(x => x.by.kind === c.by.kind) ?? null : null;
   const r2 = (v: unknown) => (typeof v === 'number' ? sigText(v, 3) : '—');
-  const pr = prev ? around(prev.at, c.at) : null;
-  const ar = around(c.at);
-  const why = c.reason || c.source || prev
-    ? `<dl class="kv">${c.reason ? `<dt>이유</dt><dd data-reason-text>${esc(c.reason)}</dd>` : `<dt>이유</dt><dd class="faint">밝히지 않음</dd>`}`
-      + (c.source ? `<dt>원자료</dt><dd>${esc(c.source)}</dd>` : '')
-      + (prev ? `<dt>먼저 한 것</dt><dd><a class="lnk" data-chg-go="${esc(prev.id)}">${esc(prev.title)} · ${esc(hhmm(prev.at))}</a>${pr?.before || pr?.after ? ` <span class="why" data-prev-ratio${tip('그 변경 앞의 마지막 실행 → 뒤의 첫 실행의 최대 판정비(호스트의 실행 이력)')}>${r2(pr?.before?.max_ratio)} → ${r2(pr?.after?.max_ratio)}</span>` : ''}</dd>` : '') + '</dl>'
-    : none('밝힌 이유 없음', c.by.kind === 'person' ? '사람의 묶음에는 이유 칸이 없다' : '도구의 reason 인자를 주지 않았다');
+  const ar = aroundOf(c);
+  // ② 왜 — 이유 / 관련 업무(Q-n · I-n) / 원자료(S-n)
+  const wi = c.work ? work.items.find(w => w.item === c.work) : null;
+  const src = c.source ? srcs.items.find(s => s.item === c.source) : null;
+  const why = `<dl class="kv">${c.reason ? `<dt>이유</dt><dd data-reason-text>${esc(c.reason)}</dd>` : `<dt>이유</dt><dd class="faint"${tip(c.by.kind === 'person' ? '사람의 묶음에는 이유 칸이 없다' : '도구의 reason 인자를 주지 않았다')}>밝히지 않음</dd>`}`
+    + (c.work ? `<dt>관련 업무</dt><dd data-work="${esc(c.work)}">${wi ? `<a class="lnk" data-ref-go="${esc(`work|work:${c.work}`)}">${esc(c.work)} · ${esc(wi.title)}</a>` : `${esc(c.work)} <span class="faint">목록에 없음</span>`}</dd>` : '')
+    + (c.source ? `<dt>원자료</dt><dd>${src ? `<a class="lnk" data-ref-go="${esc(`doc|srcr:${c.source}`)}">${esc(c.source)} · ${esc(src.title)}</a>` : esc(c.source)}</dd>` : '') + '</dl>';
+  // ③ 바뀐 것 — 항목 · 이전 · 이후 · 단위(호스트의 구조) + 그 앞 · 뒤 실행이 쓴 단면 성질(실행 이력의 props, 엔진 US → 이 화면의 변환)
   const fs = c.field_changes ?? [];
-  // 바뀐 칸(호스트의 구조 — 이름 · 전 · 후 · 단위) + 그 앞 · 뒤 실행의 단면 성질(실행 이력의 props, 엔진 US → 이 화면의 변환)
   const fRow = (f: FieldRec) => (f.summary || !('from' in f || 'to' in f)
-    ? `<tr data-path="${esc(f.path)}"><td colspan="4">${esc(f.text)}</td></tr>`
-    : `<tr data-path="${esc(f.path)}"><td>${esc(f.label_ko || f.key)}</td><td class="r num dim">${esc(valText(f.from))}</td><td class="r">→</td><td class="r num" style="color:var(--mod)">${esc(valText(f.to))}${f.unit ? ` ${esc(f.unit)}` : ''}</td></tr>`);
+    ? `<tr data-path="${esc(f.path)}"><td colspan="5">${esc(f.text)}</td></tr>`
+    : `<tr data-path="${esc(f.path)}"><td>${esc(f.label_ko || f.key)}</td><td class="r num dim">${esc(valText(f.from))}</td><td class="r">→</td><td class="r num" style="color:var(--mod)">${esc(valText(f.to))}</td><td class="dim">${f.unit ? ` ${esc(f.unit)}` : ''}</td></tr>`);
   const PROP_KIND: Array<[string, Kind]> = [['A', 'area'], ['Ixx', 'inertia'], ['Izz', 'inertia'], ['Sx', 'modulus'], ['Sxx', 'modulus'], ['Sf', 'modulus'], ['J', 'inertia'], ['Cw', 'warping']];
   const pb = ar.before?.props ?? null, pa = ar.after?.props ?? null;
   const propRows = pb && pa ? PROP_KIND.filter(([k]) => typeof pb[k] === 'number' && typeof pa[k] === 'number' && pb[k] !== pa[k]).map(([k, kind]) =>
-    `<tr data-prop="${esc(k)}"><td>${esc(k)}</td><td class="r num dim">${esc(sigText(si(pb[k], kind) ?? pb[k], 4))}</td><td class="r">→</td><td class="r num">${esc(sigText(si(pa[k], kind) ?? pa[k], 4))} ${esc(LABEL_OF[kind])}</td></tr>`).join('') : '';
-  const changed = fs.length || propRows ? `<table class="t" data-chg-fields><tbody>${fs.map(fRow).join('')}${c.fields > fs.length ? `<tr><td class="faint" colspan="4">외 ${c.fields - fs.length} 칸</td></tr>` : ''}${propRows}</tbody></table>`
+    `<tr data-prop="${esc(k)}"><td>${esc(k)}</td><td class="r num dim">${esc(sigText(si(pb[k], kind) ?? pb[k], 4))}</td><td class="r">→</td><td class="r num">${esc(sigText(si(pa[k], kind) ?? pa[k], 4))}</td><td class="dim"> ${esc(LABEL_OF[kind])}</td></tr>`).join('') : '';
+  const changed = fs.length || propRows ? `<table class="t" data-chg-fields><thead><tr><th>항목</th><th class="r">이전</th><th></th><th class="r">이후</th><th>단위</th></tr></thead><tbody>${fs.map(fRow).join('')}${c.fields > fs.length ? `<tr><td class="faint" colspan="5">외 ${c.fields - fs.length} 칸</td></tr>` : ''}${propRows}</tbody></table>`
     : none(`바뀐 칸 ${c.fields}`, '칸 글이 없다');
+  // ④ 결과에 미친 영향 — 판정 이전 → 이후 · 지배 항목 · 낡게 한 결과(+ 다시 확인 · 대안)
   const inv = c.invalidated ?? [];
-  const effect = inv.length ? `<dl class="kv">${inv.map(k => { const s2 = stageNow(k); return `<dt>${esc(KIND_RESULT_KO[k] ?? k)}</dt><dd><span class="${s2.cls}" style="font-weight:400" data-effect="${esc(k)}">${esc(s2.t)}</span> <span class="why">이 변경이 낡게 함</span></dd>`; }).join('')}</dl>`
-    : none('없음', '이 묶음이 무효로 만든 결과가 없다');
+  const verdictRow = ar.before || ar.after
+    ? `<dt>최대 판정비</dt><dd data-ratio-around>${r2(ar.before?.max_ratio)} → ${r2(ar.after?.max_ratio)}${ar.after?.governing?.id ? ` <span class="why">지배 ${esc(String(ar.after.governing.id))}</span>` : ''}</dd>`
+    : history() && !ar.anyAfter ? '<dt>판정</dt><dd class="warn" data-recalc>다시 계산 필요 — 이 묶음 뒤에 계산하지 않았다</dd>' : '';
+  const invRows = inv.map(k => { const s2 = stageNow(k); return `<dt>${esc(KIND_RESULT_KO[k] ?? k)}</dt><dd><span class="${s2.cls}" style="font-weight:400" data-effect="${esc(k)}">${esc(s2.t)}</span> <span class="why">이 변경이 낡게 함</span></dd>`; }).join('');
+  const effect = verdictRow || invRows ? `<dl class="kv">${verdictRow}${invRows}</dl>` : none('없음', '이 묶음이 무효로 만든 결과가 없다');
+  // ⑤ 앞뒤 — 먼저 한 것 / 다음 것(같은 행위자)
+  const pr = prev ? (prev.runs?.length ? aroundOf(prev) : runsAround(prev.at, c.at)) : null;
+  const around = prev || next ? '<dl class="kv">'
+    + (prev ? `<dt>먼저 한 것</dt><dd><a class="lnk" data-chg-go="${esc(prev.id)}">${esc(prev.title)} · ${esc(hhmm(prev.at))}</a>${pr?.before || pr?.after ? ` <span class="why" data-prev-ratio${tip('그 변경 앞의 마지막 실행 → 뒤의 첫 실행의 최대 판정비(호스트의 실행 이력)')}>${r2(pr?.before?.max_ratio)} → ${r2(pr?.after?.max_ratio)}</span>` : ''}</dd>` : '')
+    + (next ? `<dt>다음 것</dt><dd><a class="lnk" data-chg-go="${esc(next.id)}" data-next-chg="${esc(next.id)}">${esc(next.title)} · ${esc(hhmm(next.at))}</a></dd>` : '') + '</dl>'
+    : none('없음', '같은 행위자의 앞 · 뒤 묶음이 없다');
   const b = baseOf(c);
+  // ⑥ 꼬리 — 기록 id · 한 줄(확인의 뜻)
   return head
-    + sec(c.by.kind === 'ai' ? 'AI 가 밝힌 이유' : '이유', why, '', 'AI · 사람이 준 글 — 자료로 보인다(지시가 아니다). 「먼저 한 것」은 같은 행위자의 바로 앞 변경')
+    + sec('왜', why, '', 'AI · 사람이 준 글 — 자료로 보인다(지시가 아니다). 관련 업무 · 원자료는 그 기록으로')
     + sec('바뀐 것', changed, `<span class="faint">${b ? `기준 ${esc(hhmm(b.at))}` : ''}</span>`, '바뀐 칸(호스트 — 이름 · 전 · 후, SI)과 그 앞 · 뒤 실행이 쓴 단면 성질(실행 이력). 자중은 엔진이 내지 않는다')
-    + (ar.before || ar.after ? sec('판정', `<dl class="kv"><dt>최대 판정비</dt><dd data-ratio-around>${r2(ar.before?.max_ratio)} → ${r2(ar.after?.max_ratio)}${ar.after?.governing?.id ? ` <span class="why">지배 ${esc(String(ar.after.governing.id))}</span>` : ''}</dd></dl>`, '', '이 변경 앞의 마지막 실행 → 뒤의 첫 실행(호스트의 실행 이력 — 판정비는 엔진의 것)') : '')
-    + sec('영향', effect + againHtml(), '', '이 묶음이 무효로 만든 결과(호스트의 장부)와 그 지금 상태(진행 띠와 같다). 「다시 확인」은 지금 확인 표시 가운데 유효하지 않은 것(호스트의 get_reviews)')
+    + sec('결과에 미친 영향', effect + againHtml(), '', '이 변경 앞의 마지막 실행 → 뒤의 첫 실행(호스트의 실행 이력 — 판정비는 엔진의 것) · 이 묶음이 무효로 만든 결과(호스트의 장부)와 그 지금 상태. 「다시 확인」은 지금 확인 표시 가운데 유효하지 않은 것(호스트의 get_reviews)')
     + (visibleAlts().length ? sec('대안', `<dl class="kv">${visibleAlts().map(a => `<dt>${esc(a.label)}</dt><dd>${typeof a.max_ratio === 'number' ? ratioText(a.max_ratio, a.pass === false) : '—'}${a.is_now ? ' · 지금' : ''}</dd>`).join('')}</dl>`, '', '대안의 최대 판정비(호스트) — 순위 · 「가장 얇은」은 프로그램이 짓지 않는다(AI 의 이유 글에)') : '')
-    + meaningHtml()
-    + `<div class="sec"><span class="faint">${esc(whoText(c))} · ${esc(c.trigger ?? '')} · ${esc(c.id)}${c.record_status ? ` · 기록 ${esc(c.record_status)}` : ''}</span></div>`;
+    + sec('앞뒤', around, '', '같은 행위자의 바로 앞 · 뒤 묶음')
+    + `<div class="sec"><span class="faint" data-chg-tail>${esc(whoText(c))} · ${esc(c.trigger ?? '')} · ${esc(c.id)}${c.record_status ? ` · 기록 ${esc(c.record_status)}` : ''}</span></div>`
+    + meaningHtml();
+}
+
+/** 기록의 묶는 줄 — 계산 #k(그 실행들 · 판정 · 지배 · 그 아래 묶음 수) · 지난 계산 뒤 · 그 앞. 수 · 판정은 호스트의 실행 이력 그대로 */
+function logInfo(key: string): string {
+  const tl = timeline();
+  if (key === 'log:after' || key === 'log:before') {
+    const cs = key === 'log:after' ? tl.after : tl.before;
+    const pend = cs.filter(c => actorOf(c) !== 'program').length;
+    return hd('업무 · 기록', key === 'log:after' ? '지난 계산 뒤' : '그 앞', `<span class="dim">묶음 ${cs.length}${key === 'log:after' ? ` · 다시 계산할 것 ${pend}(프로그램의 연동 줄은 세지 않는다)` : ''}</span>`, '');
+  }
+  const g = tl.groups.find(x => x.key === key);
+  if (!g) { return hd('업무 · 기록', '계산', none('그 실행이 이력에 없다', '실행 이력은 새 것부터 20'), ''); }
+  const v = g.verdict;
+  const rows = g.runs.slice().reverse().map(r => `<tr data-run="${esc(String(r.run ?? ''))}"><td>${esc(runName(r))}</td><td>${esc(KIND_RESULT_KO[r.kind] ?? r.kind)}</td><td class="dim">${esc(hhmm(r.at))}</td><td class="dim">${esc(r.by ? (r.by === 'person' ? '사람' : r.by === 'ai' ? 'AI' : r.by) : '')}</td>`
+    + `<td class="r">${r.pass === true ? 'OK' : r.pass === false ? 'NG' : ''} ${typeof r.max_ratio === 'number' ? esc(sigText(r.max_ratio, 3)) : ''}</td></tr>`).join('');
+  return hd('업무 · 기록', runName(g.head), v ? `<span class="verdict ${v.pass === true ? 'ok' : v.pass === false ? 'ng' : 'un'}">${v.pass === true ? 'OK' : v.pass === false ? 'NG' : '판정 없음'}</span>${typeof v.max_ratio === 'number' ? ` <span class="big">${esc(sigText(v.max_ratio, 3))}</span>` : ''}${v.governing?.id ? ` <span class="dim">지배 ${esc(String(v.governing.id))}</span>` : ''}` : none('판정 없음'), '')
+    + sec('실행', table(rows), '', '사이에 변경이 없는 잇단 실행은 한 머리줄(가장 늦은 것의 번호 · 판정) — 호스트의 실행 이력(get_case_status detail runs)')
+    + sec('이 계산에 들어간 묶음', g.changes.length ? `<ul class="notes">${g.changes.map(c => `<li><a class="lnk" data-chg-go="${esc(c.id)}">${esc(c.title)} · ${esc(whoText(c))} · ${esc(hhmm(c.at))}</a></li>`).join('')}</ul>` : none('없음', '앞 계산 뒤에 바뀐 것이 없다'));
 }
 
 function connInfo(): string {
@@ -458,6 +495,13 @@ export function infoHtml(key: string): string {
   if (key === 'chk' || key.startsWith('chk:') || key.startsWith('design') || key.startsWith('purlin') || key.startsWith('lap#') || key.startsWith('conn#')) { return checksInfo(key); }
   if (key === 'conn' || key.startsWith('conn:')) { return connInfo(); }
   if (key === 'alt') { return altRootInfo(); }
+  if (key.startsWith('log:')) { return logInfo(key); }
+  if (['todo', 'insp', 'ask:done'].includes(key) || /^(todo|insp):/.test(key)) {
+    const T: Record<string, [string, string]> = { todo: ['할 일', '사람이 처리할 것 — 판단 요청 · 확인 대기 · 임시 가정'], 'todo:rv': ['확인 대기', 'AI 가 바꾼 묶음 가운데 사람의 확인 표시가 없는 것 — 묶음을 고르고 「확인」'],
+      'todo:asm': ['임시 가정', '닫히지 않은 임시 가정 — 사람의 확인 전까지 발행을 막는다'], insp: ['점검', '지금 결과의 상태 — 줄을 누르면 그 탭의 줄로'], 'ask:done': ['지난 판단 요청', '답한 · 닫힌 판단 요청'] };
+    const [t, w] = T[key] ?? ['업무', '줄을 누르면 그 탭의 줄로'];
+    return hd(`업무 · ${t}`, t, `<span class="dim">${esc(w)}</span>`, '');
+  }
   if (key === 'ask') { return recordInfo('판단 요청', 'AI 의 판단 요청은 기록(R3)부터 남는다'); }
   if (key === 'rep') { return recordInfo('보고', 'AI 의 보고는 기록(R3)부터 남는다'); }
   if (key === 'chg') { return recordInfo('변경', '누가 · 왜 · 전 → 후 는 변경 기록(R2)부터 남는다'); }

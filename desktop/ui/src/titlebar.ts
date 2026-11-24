@@ -6,6 +6,7 @@
 import { bidiSafe, tip } from './dom';
 import { openMenu } from './menu';
 import { state, type Stage } from './store';
+import { actorOf, basePointAt, runName, timeline } from './changes';
 
 export interface ClaudeStatus {
   state: string; ui: string; text: string; tooltip: string; canConnect: boolean; canDisconnect: boolean; restartNeeded: boolean;
@@ -21,6 +22,8 @@ export interface TitleHandlers {
   edit(): void;
   claude(op: 'connect' | 'disconnect'): void;
   stage(st: Stage): void;
+  /** 계산 일치 칩 → 업무 › 기록의 「지난 계산 뒤」 */
+  calc(): void;
   find(): void;
   follow(): void;
 }
@@ -40,6 +43,21 @@ export function pipeHtml(small = false): string {
     return `${i && !small ? '<b>→</b>' : ''}<a class="ps ${s.state}" data-stage="${k}" data-state="${s.state}"${tip(`${name} · ${STIP[s.state]}${s.note ? ` · ${s.note}` : ''}`)}>`
       + `<i></i>${small ? '' : `<em class="lg">${name}</em><em class="sh">${short}</em>`}</a>`;
   }).join('')}</span>`;
+}
+
+/**
+ * 진행 띠 끝의 계산 일치 칩(통일안 6.2) — 마지막 실행 뒤 변경이 없으면 「계산 #k 과 일치」, 있으면 「입력 바뀜 n건 · 다시 계산」
+ * (n = 지난 계산 뒤의 묶음 — 프로그램의 연동 줄은 세지 않는다). 실행이 없으면 칩 없음. 수 · 번호는 호스트의 변경 묶음 · 실행 이력 그대로
+ */
+export function calcChipHtml(): string {
+  const tl = timeline();
+  if (!tl.hasRuns && !basePointAt()) { return ''; }
+  const name = tl.groups[0] ? runName(tl.groups[0].head) : '';
+  const k = /^계산 #/.test(name) ? `${name} 과` : '마지막 계산과';
+  const n = tl.after.filter(c => actorOf(c) !== 'program').length;
+  return n
+    ? `<a class="chip calc warn" data-calc-chip="stale" data-calc-n="${n}"${tip(`${name ? `${name} 뒤에` : '마지막 계산 뒤에'} 입력이 바뀌었다(변경 묶음 ${n} — 프로그램의 연동 줄은 세지 않는다). 누르면 업무 › 기록의 「지난 계산 뒤」`)}><em class="lg">입력 바뀜 ${n}건 · 다시 계산</em><em class="sh">바뀜 ${n}</em></a>`
+    : `<a class="chip calc ok" data-calc-chip="same"${tip('마지막 실행 뒤에 바뀐 입력이 없다(변경 묶음 기준). 누르면 업무 › 기록')}><em class="lg">${k} 일치</em><em class="sh">일치</em></a>`;
 }
 
 let root: HTMLElement;
@@ -64,6 +82,7 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
     + '<button class="cbtn claude-act" data-act="claude" hidden></button>';
   el.addEventListener('click', e => {
     const t = e.target as HTMLElement;
+    if (t.closest('[data-calc-chip]')) { h.calc(); return; }
     const ps = t.closest('[data-stage]');
     if (ps) { h.stage(ps.getAttribute('data-stage') as Stage); return; }
     const b = t.closest('[data-act]') as HTMLElement | null;
@@ -127,7 +146,7 @@ export function renderTitle(editing: boolean, pending: boolean): void {
   } else { seal.removeAttribute('data-unsigned'); }
   root.querySelector('.pick')?.setAttribute('data-tip', `${state.file.path
     ? `${state.file.path} — 검토 대상 하나 = .csd 파일 하나. 열기 · 저장` : '아직 파일로 열거나 저장하지 않았다. 열기 · 저장'}${dirty ? ' · ● 저장하지 않은 변경이 있다' : ''}`);
-  (root.querySelector('.pipe-slot') as HTMLElement).innerHTML = pipeHtml();
+  (root.querySelector('.pipe-slot') as HTMLElement).innerHTML = pipeHtml() + calcChipHtml();
   (root.querySelector('.ebadge') as HTMLElement).hidden = !editing;
   root.classList.toggle('edit', editing);
   const ed = root.querySelector('[data-act="edit"]') as HTMLElement;

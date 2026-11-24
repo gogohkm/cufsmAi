@@ -35,7 +35,31 @@ async function run() {
     const fyText = T.fieldText(d.fields[1], 'SI', label);
     assert.strictEqual(fyText, `설계 Fy ${T.formatNumber(SI.toSI(42.786, 'stress'))} → ${T.formatNumber(SI.toSI(50, 'stress'))} MPa`);
     assert.strictEqual(T.fieldText(d.fields[0], 'US', label), '비지지 길이 Lb 96 → 72 in');
-    assert.strictEqual(T.changeTitle(d.fields, 'SI', label), `비지지 길이 Lb ${T.formatNumber(96 * 25.4)} → ${T.formatNumber(72 * 25.4)} mm 외 1`);
+    // D6: 5칸 이하는 칸마다 「이름 전 → 후 단위」 를 ` · ` 로(첫 칸은 무게가 가장 큰 칸)
+    assert.strictEqual(T.changeTitle(d.fields, 'SI', label), `비지지 길이 Lb ${T.formatNumber(96 * 25.4)} → ${T.formatNumber(72 * 25.4)} mm · ${fyText}`);
+  });
+  await t('D6: title — 1 field as it is, up to 5 fields joined with " · ", more than 5 → "first · 외 n"; cut at 160 characters', () => {
+    const one = D.diffSnapshots(snap({}, { Lb: 96 }), snap({}, { Lb: 72 }), info);
+    assert.strictEqual(T.changeTitle(one.fields, 'US', label), '비지지 길이 Lb 96 → 72 in');
+    const k = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, i + 1]));
+    const k1 = (n) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, i === 2 ? 30 : i + 2]));
+    const three = D.diffSnapshots(snap({}, k(3)), snap({}, k1(3)));
+    assert.strictEqual(T.changeTitle(three.fields, 'US'), 'k2 3 → 30 · k0 1 → 2 · k1 2 → 3');
+    const five = D.diffSnapshots(snap({}, k(5)), snap({}, k1(5)));
+    assert.strictEqual(T.changeTitle(five.fields, 'US').split(' · ').length, 5);
+    const seven = D.diffSnapshots(snap({}, k(7)), snap({}, k1(7)));
+    assert.strictEqual(T.changeTitle(seven.fields, 'US'), 'k2 3 → 30 · 외 6');
+    const long = D.diffSnapshots(snap({}, { a: 'x', b: 'y', c: 'z', d: 'w' }), snap({}, { a: 'ㄱ'.repeat(60), b: 'ㄴ'.repeat(60), c: 'ㄷ'.repeat(60), d: 'ㄹ'.repeat(60) }));
+    const lt = T.changeTitle(long.fields, 'US');
+    assert([...lt].length === 160 && lt.endsWith('…'), lt);
+  });
+  await t('D4: shown actor — old person lines of the linkage (mirror · unit-toggle) read as program, external as file only for work_log', () => {
+    assert.strictEqual(CH.shownActorKind('person', 'mirror'), 'program');
+    assert.strictEqual(CH.shownActorKind('person', 'unit-toggle'), 'program');
+    assert.strictEqual(CH.shownActorKind('person', 'edit-session'), 'person');
+    assert.strictEqual(CH.shownActorKind('external', 'external'), 'external');
+    assert.strictEqual(CH.shownActorKind('external', 'external', { file: true }), 'file');
+    assert.strictEqual(CH.shownActorKind('ai', 'set_case_inputs', { file: true }), 'ai');
   });
   await t('titles state from → to only — no engineering words, no judgement', () => {
     const d = D.diffSnapshots(snap(zModel(T20), { fy: 50 }), snap({ ...zModel(T23), BC: 'C-C', loadFy: 35 }, { fy: 35 }), info);
@@ -248,6 +272,37 @@ async function run() {
     gA.open(); await req;
     x.b.sessionEnd();
     assert.deepStrictEqual(lines(x), [['person', 'edit-session', 0, 3], ['ai', 'design_purlin', 3, 9]]);
+  });
+  await t('D4: a linkage-only line is the program\'s own set (touch · flush) — it takes nothing of the person\'s set or of an AI request running as a guest', async () => {
+    const x = batcher();
+    const prog = { caseId: 'cabcdefghijklmnop', actor: { kind: 'program' }, trigger: 'mirror' };
+    const gA = gate();
+    const req = x.b.run(calc, async () => { await gA.p; x.set({ a: 9 }); });
+    await Promise.resolve();
+    x.b.touch(person); x.set({ a: 3 }); x.b.touchDone();
+    x.tick(2500); x.b.tick();                                                              // 사람의 조용한 묶음이 닫혔다
+    x.b.touch(prog); x.set({ a: 4 }); x.b.markVia('mirror'); x.b.flush();                 // 호스트: 연동만의 줄은 바로 낸다
+    assert.strictEqual(x.b.pending, null);
+    gA.open(); await req;
+    assert.deepStrictEqual(lines(x), [['person', 'edit-session', 0, 3], ['program', 'mirror', 3, 4], ['ai', 'design_purlin', 4, 9]]);
+  });
+  await t('runs: a run noted inside a request goes on that request\'s set (also for a nested / overlapping one); a person set with a run ends there', async () => {
+    const x = batcher();
+    const g = gate();
+    const outer = { ...calc }, inner = { ...ai, trigger: 'set_case_inputs' };
+    const req = x.b.run(outer, async () => { x.b.noteRun(outer, 'run-1'); await g.p; x.set({ a: 5 }); });
+    await x.b.run(inner, () => { x.b.noteRun(inner, 'run-2'); });                        // 같은 행위자의 겹친 요청 — 같은 묶음에
+    await x.b.run(screen, () => { x.b.noteRun(screen, 'run-x'); x.set({ a: 0 }); });      // 다른 행위자 — 바뀐 것이 없으니 줄 없음
+    g.open(); await req;
+    assert.deepStrictEqual(x.out.map((c) => [c.__actor, c.runs]), [['ai', ['run-1', 'run-2']]]);
+    // 화면의 실행이 사람의 조용한 묶음에 들면 그 묶음은 그 실행까지
+    const y = batcher();
+    y.b.touch(person); y.set({ a: 1 }); y.b.touchDone();
+    const runCtx = { ...person, trigger: 'aisi_design' };
+    await y.b.run(runCtx, () => { y.b.noteRun(runCtx, 'run-7'); });
+    y.b.touch(person); y.set({ a: 2 }); y.b.touchDone();
+    y.tick(2500); y.b.tick();
+    assert.deepStrictEqual(y.out.map((c) => [c.fields[0].from, c.fields[0].to, c.runs || null]), [[0, 1, ['run-7']], [1, 2, null]]);
   });
   await t('overlapping requests of the same actor fold into one set even when the first one finishes first', async () => {
     const x = batcher();

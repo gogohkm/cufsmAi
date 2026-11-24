@@ -38,8 +38,6 @@ _SHAPE_TOL = 1e-2
 _SCALE_TOL = 1e-3
 # 표본 극소와 포물선 보간 극소의 차이가 이보다 크면 격자가 성기다고 경고한다
 _GRID_TOL = 0.01
-_SCOPE_NOTE = ('A signature curve can show that a mode was isolated, never that a mode is absent; '
-               'local_absence_verified and dist_absence_verified are always False.')
 _FLOOR_NOTE = ('lower bound of the critical load of the mode that was not isolated; '
                'use as a floor, never as the value')
 
@@ -101,6 +99,8 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
               P_ref 가 구속 휨 첫 항복(Sf·Fy 와 같은 기준)이 아니면 reference_is_restrained
               =False — 이때 Pcr 을 Sf·Fy 로 만든 My 와 섞지 말 것.
           signature_curve, BC, classification_note
+          dsm_applicable: 원형관(section_type 'CHS')이면 False — 극소에 L/D 이름표 없음, crl · crd 0,
+              scope_notes 에 「DSM 비적용 — 원형관 조항 사용」
           warnings / assumptions / scope_notes (FIXES §3.1.1)
         classification_method 은 국부·뒤틀림 둘 다 cFSM 라벨로 서로 다른 극소에서
         정해졌을 때만 'cfsm_modal' 이다. 하나라도 라벨이 아니면 'cfsm_partial'
@@ -113,7 +113,7 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     # assumptions = 이 실행이 가정한 것, scope_notes = 늘 참인 범위 안내.
     warnings: list[str] = []
     assumptions: list[str] = []
-    scope_notes: list[str] = [_SCOPE_NOTE]
+    scope_notes: list[str] = [_nt('dsm.scope.signature_curve_isolation_only')]
 
     # 1) 항복 하중 계산 (지금까지와 같은 구속 휨 기준값 — 'Py','My_xx','My_zz')
     node = np.asarray(node, dtype=float)
@@ -163,9 +163,15 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     # 경계 극소로 넣는다. 긴 끝은 전체좌굴 장파장 꼬리이므로 넣지 않는다.
     minima = _find_minima(lengths, lf_vals, curve_idx) if len(points) >= 3 else []
 
+    # 원형관(CHS): AISI S100-16 은 원형관에 DSM 의 국부 · 뒤틀림 구분을 쓰지 않는다 — 원형관 조항(압축 §E3.1.1.1,
+    # 휨 §F2.3 · §F3.1.1)으로 설계하고, 뒤틀림(§E4 · §F4)은 연단 보강 플랜지가 있는 개단면에만 해당한다.
+    # 곡선의 극소는 원통의 원주 방향 모드다 — 극소에 L/D 이름표를 붙이지 않고 crl · crd 를 DSM 값으로 내지 않는다.
+    from design.global_buckling import canonical_section_name
+    round_tube = canonical_section_name(section_type) == 'CHS'
+
     # 각 극소에 cFSM 라벨 ('L', 'D', None=미분류/G·O 우세/NaN)
-    classifications_available = mode_classifications is not None
-    shape_classifier_available = mode_shapes is not None and callable(classify_fn)
+    classifications_available = mode_classifications is not None and not round_tube
+    shape_classifier_available = mode_shapes is not None and callable(classify_fn) and not round_tube
     modal_available = classifications_available or shape_classifier_available
     for mn in minima:
         if classifications_available:
@@ -188,7 +194,11 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         # cFSM 이 이 모델을 분류하지 않았다(F3: 둥근 모서리 등은 NaN) — 예정된 동작이므로 알림이 아니라 기록만.
         classification_note = 'cFSM classification rows are NaN for this model; wavelength order is used.'
 
-    if len(points) < 3:
+    if round_tube:
+        classification = 'not_applicable_round_tube'
+        local_basis = dist_basis = 'not_applicable'
+        scope_notes.append(_nt('dsm.scope.round_tube_not_applicable'))
+    elif len(points) < 3:
         classification = 'insufficient_points'
         warnings.append(_nt('dsm.warning.fewer_than_three_points'))
     elif signature_curve is False:
@@ -247,10 +257,13 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
     dist_isolated = dist_basis in ('cfsm_label', 'wavelength_order') and not single_minimum
     # 분리되지 않은 모드의 하한(floor): 같은 곡선의 극소 값. 값으로 쓰지 않는다.
     lf_lowest = min(m['load_factor'] for m in minima) * scale * P_ref if minima else None
-    crl_floor = lf_lowest if (local_min is None and signature_curve is not False) else None
-    crd_floor = lf_lowest if (dist_min is None and signature_curve is not False) else None
+    # 원형관은 국부 · 뒤틀림 값이 없다(분리되지 않은 것이 아니다) — 하한도 내지 않는다.
+    crl_floor = lf_lowest if (local_min is None and signature_curve is not False and not round_tube) else None
+    crd_floor = lf_lowest if (dist_min is None and signature_curve is not False and not round_tube) else None
 
-    if local_basis == 'cfsm_label' and dist_basis == 'cfsm_label' and not single_minimum:
+    if round_tube:
+        classification_method = 'not_applicable'
+    elif local_basis == 'cfsm_label' and dist_basis == 'cfsm_label' and not single_minimum:
         classification_method = 'cfsm_modal'
     elif local_basis == 'cfsm_label' or dist_basis == 'cfsm_label':
         classification_method = 'cfsm_partial'
@@ -441,6 +454,8 @@ def extract_dsm_values(curve: list, node: np.ndarray, elem: np.ndarray,
         'reference_is_restrained': ref['unsymm'] == 0 and ref['consistent'] is not False,
         'P_ref_restrained': ref['P_ref_restrained'],
         'classification_note': classification_note,
+        # 원형관이면 False — crl · crd 는 0(DSM 값이 아니다), 설계는 원형관 조항으로
+        'dsm_applicable': not round_tube,
 
         # 곡선 종류
         'signature_curve': signature_curve,
@@ -615,8 +630,7 @@ def _assign_two_or_more(minima: list):
     Ds = [m for m in by_len if m['mode_class'] == 'D']
     if Ls and Ds and Ds[0]['length'] < Ls[-1]['length']:
         Ls, Ds = [], []
-        notes.append(('assumption', 'cFSM 라벨이 반파장 순서와 어긋나(D 라벨 극소가 L 라벨 극소보다 짧음) '
-                                    '라벨을 쓰지 않았습니다.'))
+        notes.append(('assumption', _nt('dsm.assumption.cfsm_labels_against_wavelength_order')))
 
     if len(Ds) == 1 and Ds[0] is not shortest:
         dist = Ds[0]
@@ -624,11 +638,10 @@ def _assign_two_or_more(minima: list):
         local = min(pool, key=lf)
         basis = 'cfsm_label' if local['mode_class'] == 'L' else 'wavelength_order'
         if local['mode_class'] != 'L' and any(m['mode_class'] == 'L' for m in pool):
-            notes.append(('warning', f"L 라벨 극소보다 낮은 미분류 극소(L={local['length']:.3g} in)를 "
-                                     '국부로 썼습니다(보수 측). 모드형상을 확인하십시오.'))
+            notes.append(('warning', _nt('dsm.warning.unlabeled_below_l_label_used_as_local', length=local['length'])))
         elif local is not pool[0] and basis != 'cfsm_label':
-            notes.append(('warning', f"가장 짧은 극소가 아니라 그보다 낮은 극소(L={local['length']:.3g} in)를 "
-                                     '국부로 썼습니다(보수 측).'))
+            notes.append(('warning', _nt('dsm.warning.lower_minimum_not_shortest_used_as_local',
+                                         length=local['length'])))
         return local, basis, dist, 'cfsm_label', notes
 
     if Ls:
@@ -638,8 +651,7 @@ def _assign_two_or_more(minima: list):
             basis = 'cfsm_label'
         else:
             basis = 'wavelength_bound'
-            notes.append(('warning', f"국부를 L 라벨·미분류 극소 가운데 최저(L={local['length']:.3g} in)로 "
-                                     '썼습니다(하한, 보수 측). 모드형상을 확인하십시오.'))
+            notes.append(('warning', _nt('dsm.warning.local_lowest_of_l_and_unlabeled', length=local['length'])))
         longer = [m for m in by_len if m['length'] > local['length']]
         if not longer:
             return local, basis, None, 'not_isolated', notes
@@ -649,9 +661,7 @@ def _assign_two_or_more(minima: list):
         return shortest, 'wavelength_order', longest, 'wavelength_order', notes
     local = min(by_len[:-1], key=lf)
     dist = min(by_len[1:], key=lf)
-    notes.append(('warning', f'극소가 {len(by_len)}개라 어느 것이 국부·뒤틀림인지 반파장 순서만으로 '
-                             '정할 수 없습니다. 국부 = 가장 긴 극소를 뺀 최저, 뒤틀림 = 가장 짧은 극소를 '
-                             '뺀 최저(둘 다 하한, 보수 측)를 썼습니다 — 모드형상으로 확인하십시오.'))
+    notes.append(('warning', _nt('dsm.warning.three_or_more_minima_wavelength_bound', n=len(by_len))))
     return local, 'wavelength_bound', dist, 'wavelength_bound', notes
 
 

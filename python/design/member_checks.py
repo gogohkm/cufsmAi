@@ -58,7 +58,8 @@ def buckling_src(label, dsm, prefix, mode):
 
 def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, demand,
                    *, phi, omega, trusted=True, untrusted_reason=None, mirrors=None,
-                   phi_symbol='φ', omega_symbol='Ω', location=None, group=None, no_demand_reason=None):
+                   phi_symbol='φ', omega_symbol='Ω', location=None, group=None, no_demand_reason=None,
+                   variant=None):
     """공칭강도 단계 다음의 설계강도 · 판정 단계를 붙이고 항목을 만든다.
 
     demand: q(...) (소요강도, source 포함) 또는 None/0 — 없으면 not_evaluated(소요 없음).
@@ -76,7 +77,7 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
         return make_check(cid, design_method=dm, verdict='not_evaluated', demand=None,
                           reason=no_demand_reason or _nt('member.reason.no_required_strength_given'),
                           steps=tr.steps, reference={'capacity': cap_q, 'nominal': nom_q},
-                          location=location, group=group, mirrors=mirrors)
+                          location=location, group=group, mirrors=mirrors, variant=variant)
     r = ratio_of(dval, cap)
     if r is None:
         # 강도 0 에 소요 > 0 — 엔진은 E2/F2 를 평가하지 못한 경우가 아니면 불합격이다.
@@ -85,7 +86,7 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
                result=None, verdict=v, note=_nt('member.note.zero_design_strength'))
         return make_check(cid, design_method=dm, verdict=v, demand=demand, capacity=cap_q, nominal=nom_q,
                           factor_=fac, ratio=None, reason='zero design strength' if trusted else untrusted_reason,
-                          steps=tr.steps, location=location, group=group, mirrors=mirrors,
+                          steps=tr.steps, location=location, group=group, mirrors=mirrors, variant=variant,
                           trusted=trusted if not trusted else None)
     v = verdict_from(r, trusted=trusted)
     verdict_step(tr, demand, tr.ref(i_ds), r, v)
@@ -97,14 +98,14 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
             ref = {'capacity': cap_q, 'nominal': nom_q, 'ratio': r}
     return make_check(cid, design_method=dm, verdict=v, demand=demand, capacity=cap_q, nominal=nom_q,
                       factor_=fac, ratio=r, reason=reason, steps=tr.steps, reference=ref,
-                      location=location, group=group, mirrors=mirrors,
+                      location=location, group=group, mirrors=mirrors, variant=variant,
                       trusted=False if not trusted else None)
 
 
-def not_evaluated(cid, ctx, reason, *, steps=None, location=None, group=None, reference=None):
+def not_evaluated(cid, ctx, reason, *, steps=None, location=None, group=None, reference=None, variant=None):
     return make_check(cid, design_method=ctx['dm'], verdict='not_evaluated', reason=reason,
                       steps=steps or [], steps_unavailable=reason, location=location, group=group,
-                      reference=reference)
+                      reference=reference, variant=variant)
 
 
 def not_applicable(cid, ctx, reason, *, location=None, group=None):
@@ -379,9 +380,43 @@ def compression_checks(ctx):
                                      phi_symbol='φc', omega_symbol='Ωc',
                                      no_demand_reason=_nt('member.reason.no_required_axial_strength')))
 
-    # --- E3.2
+    # --- E3.2 (원형관이고 Pcrl 을 받지 않았으면 §E3.1.1.1)
     l_items = ne_items(ne, 'E3')
-    if ctx['local_not_evaluated']:
+    rt = ctx.get('round_tube') and not ctx['Pcrl'] > 0
+    if rt and ctx['local_not_evaluated']:
+        checks.append(not_evaluated('member.compression.local', ctx, _joined('; ', l_items) or _nt('member.reason.no_pcrl'),
+                                    variant='round_tube'))
+    elif rt and ctx['e2_unavailable']:
+        checks.append(not_evaluated('member.compression.local', ctx,
+                                    _nt('member.reason.e2_pne_e2_available_local'), variant='round_tube'))
+    elif rt:
+        rl = ctx['round_local']
+        tr = Trace()
+        dtq = q('D/t', rl['D_over_t'], 'dimensionless', src('section_property', key='D/t'))
+        E = q('E', ctx['E'], 'stress', spec())
+        tr.branch('D/t ≤ 0.441 E/Fy', True, 'E3.1.1.1-2', inputs=[dtq, E, fy])
+        i_ao = tr.add('equation', 'Ao = [0.037 / ((D Fy)/(t E)) + 0.667] A ≤ A', equation='E3.1.1.1-2',
+                      inputs=[dtq, fy, E, A], result=q('Ao', rl['Ao'], 'area'))
+        fcre = q('Fcre', ctx['Fcre'], 'stress', src('check', id='member.compression.global'))
+        i_r = tr.add('modifier', 'R_Ae = Fy / (2 Fcre) ≤ 1.0', equation='E3.1.1.1-3', inputs=[fy, fcre],
+                     result=q('R_Ae', rl['R'], 'dimensionless'))
+        i_ae = tr.add('equation', 'Ae = Ao + R_Ae (A − Ao)', equation='E3.1.1.1-1',
+                      inputs=[tr.ref(i_ao), tr.ref(i_r), A], result=q('Ae', rl['Ae'], 'area'))
+        fn = q('Fn', rl['Fn'], 'stress', src('check', id='member.compression.global'))
+        pne_in = q('Pne', ctx['Pne'], 'force', src('check', id='member.compression.global'))
+        i_n = tr.add('equation', 'Pnℓ = Ae Fn ≤ Pne', equation='E3.1-1', inputs=[tr.ref(i_ae), fn, pne_in],
+                     result=q('Pnℓ', ctx['Pnl'], 'force'))
+        reasons = list(l_items)
+        if g_items:
+            reasons.append(_nt('member.reason.e2_uses_pne_from_e2', g_items=_joined('; ', g_items)))
+        checks.append(strength_check('member.compression.local', tr, ctx, i_n, 'Pnℓ',
+                                     'φcPnℓ' if dm == 'LRFD' else 'Pnℓ/Ωc', 'force', demand, phi=phi,
+                                     omega=omega, trusted=not reasons, untrusted_reason=_joined('; ', reasons),
+                                     mirrors=mir('member.compression.local', 'Pnl'),
+                                     phi_symbol='φc', omega_symbol='Ωc',
+                                     no_demand_reason=_nt('member.reason.no_required_axial_strength'),
+                                     variant='round_tube'))
+    elif ctx['local_not_evaluated']:
         checks.append(not_evaluated('member.compression.local', ctx, _joined('; ', l_items) or _nt('member.reason.no_pcrl')))
     elif ctx['e2_unavailable']:
         checks.append(not_evaluated('member.compression.local', ctx,

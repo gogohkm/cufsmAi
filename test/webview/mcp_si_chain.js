@@ -65,6 +65,8 @@ const PUBLIC_TOOLS = ['add_element', 'add_node', 'aisi_design_combined', 'aisi_d
   'get_design_check',
   // R1-2: 기록 도구 일곱(이름으로만 — 경로 없음)
   'get_case_status', 'list_projects', 'open_project', 'list_cases', 'open_case', 'new_case', 'save_case', 'list_changes',
+  // 통일안 6.6(결정 D3): 공통 이름
+  'work_status', 'work_log', 'show',
   // R3-2: 업무 항목 · 가정 · 원자료
   'work_items', 'assumptions', 'sources',
   // R4: 확인 표시(읽기) · 대안
@@ -222,6 +224,17 @@ function at(o, p) {
 }
 
 const IGNORE_TOP = new Set(['units', 'text_units', 'units_note', 'report', 'timestamp']);
+/** US 결과의 p 칸이 표시용 반올림 값이면 그 반올림 전 값(조상 묶음의 display_unrounded 안 같은 자리) — 없으면 null */
+function unroundedFor(us, p) {
+  const segs = p.split('.');
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (segs.slice(i).some((x) => /\[/.test(x)) || segs[i - 1] === 'display_unrounded') { continue; }
+    const base = segs.slice(0, i).join('.');
+    const v = at(us, (base ? `${base}.` : '') + `display_unrounded.${segs.slice(i).join('.')}`);
+    if (typeof v === 'number' && Number.isFinite(v)) { return v; }
+  }
+  return null;
+}
 /** displayTol(p) → SI 표시 반올림의 허용(그 칸이 표시 값이면) — 그때는 SI = 바꾼 US 표시 값 ± 그 반올림 */
 const TEXT_SI = { n: 0 };
 function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
@@ -249,7 +262,10 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
       if (v === 0) { assert.strictEqual(s, 0, `${tool}: ${p} 0 → ${s}`); continue; }
       const ratio = s / v;
       const tolD = displayTol(p);
+      // 검증 문서 4.7: 표시용으로 반올림한 위쪽 값은 SI 에서 반올림 전 값(display_unrounded)의 변환 — design_checks 와 같은 수
+      const raw = unroundedFor(us, p);
       const ok = Math.abs(ratio - 1) < 1e-12 || FACTORS.some((f) => Math.abs(ratio / f - 1) < 1e-12)
+        || (raw !== null && [1, ...FACTORS].some((f) => Math.abs(s / (raw * f) - 1) < 1e-12))
         || (tolD !== null && [1, ...FACTORS].some((f) => Math.abs(s - v * f) <= tolD));
       assert(ok, `${tool}: ${p} US ${v} → SI ${s} (ratio ${ratio} is not 1 or a unit factor)`);
       if (Math.abs(ratio - 1) >= 1e-12) { converted++; }
@@ -274,7 +290,8 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
     }
   }
   for (const [p, unit] of Object.entries(spot)) {
-    const u = at(us, p);
+    // 표시용 반올림 값의 SI 는 반올림 전 값의 변환(위 unroundedFor)
+    const u = unroundedFor(us, p) ?? at(us, p);
     const s = at(siR, p);
     assert(typeof u === 'number' && Number.isFinite(u) && u !== 0, `${tool}: spot ${p} missing in US result (${u})`);
     const f = unit === 'none' ? 1 : F[unit];
@@ -642,8 +659,8 @@ function loadShapers(si) {
   const js = ts.transpileModule(src.slice(a, b) + '\n' + src.slice(ua, ub),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const json = (r) => ({ content: [{ type: 'text', text: JSON.stringify(r) }] });
-  return new Function('convertOutputSIDeep', 'TEXT_UNITS_NOTE', 'json', `${js}\nreturn { SHAPERS, unitReply };`)(
-    si.convertOutputSIDeep, si.TEXT_UNITS_NOTE, json);
+  return new Function('convertOutputSIDeep', 'withUnroundedValues', 'TEXT_UNITS_NOTE', 'json', `${js}\nreturn { SHAPERS, unitReply };`)(
+    si.convertOutputSIDeep, si.withUnroundedValues, si.TEXT_UNITS_NOTE, json);
 }
 
 function toSIArgs(args, spec) {
@@ -1004,6 +1021,15 @@ async function main() {
 
     // 단면 · 해석 (실제 패널 상태) ------------------------------------------------------
     const ok = async (tool, args) => { const x = await call(tool, args); assert(!x.isError, `${tool}: ${JSON.stringify(x.data).slice(0, 300)}`); return x.data; };
+    // 결정 D1: 설계 도구가 주지 않은 칸은 화면의 값이다 — 앞 사례가 화면에 남긴 입력이 다음 사례에 든다(화면 단추와 같다). 서로 무관한 사례는
+    // 처음 화면에서 시작하게 바뀐 칸을 처음 값으로 되돌린다(set_case_inputs — 사람이 화면에서 되돌리는 것과 같은 길)
+    const DSj = require(path.join(ROOT, 'webview', 'js', 'designState.js'));
+    const freshCase = async () => {
+      const gi = (await call('get_case_inputs', {})).data;
+      const inputs = {};
+      for (const [k, src] of Object.entries(gi.sources || {})) { if (src !== 'default' && DSj.KEYS.case.includes(k)) { inputs[k] = DSj.defaultValue(k); } }
+      if (Object.keys(inputs).length) { await ok('set_case_inputs', { inputs }); }
+    };
     await ok('set_section_template', { type: 'lippedc', H: 203.2, B: 63.5, D: 15.875, t: 1.4986, r: 4.7625, units: 'SI' });
     const nodesSI = (await ok('get_nodes', {})).nodes;
     await ok('set_section_template', { type: 'lippedc', H: 8, B: 2.5, D: 0.625, t: 0.059, r: 0.1875 });
@@ -1049,7 +1075,9 @@ async function main() {
           if (extra.check) { extra.check(a.data, b.data); }
           full = [a.data, b.data];
         } else {
-          SIZES.push({ tool: extra.label || tool, level, us: a.bytes, si: b.bytes });
+          // 예산을 넘으면 무엇이 큰지(위쪽 키의 크기) 말한다
+          const top = (d) => Object.entries(d || {}).map(([k, v]) => [k, JSON.stringify(v).length]).sort((x, y) => y[1] - x[1]).slice(0, 10).map((x) => x.join(' ')).join(', ');
+          SIZES.push({ tool: extra.label || tool, level, us: a.bytes, si: b.bytes, top: top(a.bytes >= b.bytes ? a.data : b.data) });
           (extra.checkShaped || (DESIGN_SHAPED.has(tool) ? checkDesignSummary : () => {}))(tag, level, a.data, full[0]);
         }
         results.push(`${tag}: ${n} numeric fields converted, verdict ${JSON.stringify(a.data.pass)} = ${JSON.stringify(b.data.pass)}`
@@ -1084,7 +1112,15 @@ async function main() {
     await usVsSi('aisi_design_compression', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Pu: 5 },
       { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Pu: Fo },
       { Pn: Fo, design_strength: Fo, Py: Fo, 'steps[0].value': Fo, utilization: 'none' },
-      { check: (u, s) => { assert(s.report.startsWith('[UNITS'), 'report labelled US'); assert.strictEqual(s.steps[0].unit, 'kN'); } });
+      { check: (u, s) => {
+        assert(s.report.startsWith('[UNITS'), 'report labelled US'); assert.strictEqual(s.steps[0].unit, 'kN');
+        // 검증 문서 4.7: SI 의 위쪽 Pn · 설계강도 = design_checks 의 지배 항목(반올림 전 값의 변환), US 는 표시 반올림 그대로
+        const gov = s.design_checks.find((c) => c.governs === true && c.group === 'member.compression');
+        assert(gov && Math.abs(s.Pn / gov.nominal.value - 1) < 1e-12 && Math.abs(s.design_strength / gov.capacity.value - 1) < 1e-12,
+          `SI top-level Pn ${s.Pn} / design_strength ${s.design_strength} = governing check ${gov && gov.nominal.value} / ${gov && gov.capacity.value}`);
+        assert.strictEqual(u.Pn, Math.round(u.display_unrounded.Pn * 100) / 100, 'US top-level Pn stays the display value (2 decimals)');
+        assert(s.display_values_note && !u.display_values_note, 'the SI reply says its top-level values are the unrounded ones');
+      } });
     const [tenUS] = await usVsSi('aisi_design_tension', { Fy: 50, Fu: 65, Tu: 10, An: 0.5 }, { Fy: S, Fu: S, Tu: Fo, An: A },
       { Tn: Fo, Tn_rupture: Fo, An_used: A, design_strength: Fo });
     const [dUS] = await usVsSi('get_dsm_values', { load_type: 'P', KxLx: 120, KyLy: 60, KtLt: 60 },
@@ -1179,6 +1215,9 @@ async function main() {
       assert(u.design_checks.some((c) => c.demand && c.demand.source && c.demand.source.kind === 'load_analysis'),
         'check_combination marks the demands as coming from the load analysis');
     } });
+    // 결정 D1: 앞의 휨 호출이 화면에 남긴 지압 길이 · 정모멘트 구간 · β 의 Lm 은 이 조합 사례의 입력이 아니다 — 처음 화면에서, 지압 없이
+    await freshCase();
+    await ok('set_case_inputs', { inputs: { wcN: null } });
     const [combUS] = await usVsSi('aisi_design_combined', { Fy: 50, Fu: 65, KxLx: 120, KyLy: 60, KtLt: 60, Lb: 60, Pu: 3, Mux: 30,
       Muy: 2, May_strength: 20, Vu: 1, Cmx: 0.85, Cmy: 1.0 },
     { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Lb: L, Pu: Fo, Mux: M, Muy: M, May_strength: M, Vu: Fo },
@@ -1207,7 +1246,7 @@ async function main() {
       'load_analysis.input_loads_plf.D': 'linload',
     };
     for (const [q, unit] of Object.entries(purlinSpot)) {
-      const u = at(pUS, q); const v = at(pSI, q); const f = unit === 'none' ? 1 : F[unit];
+      const u = unroundedFor(pUS, q) ?? at(pUS, q); const v = at(pSI, q); const f = unit === 'none' ? 1 : F[unit];
       assert(typeof u === 'number' && u !== 0 && Math.abs(v / (u * f) - 1) < 1e-12, `design_purlin: ${q} expected ${unit}: US ${u} SI ${v}`);
     }
     // 같은 구간의 M 은 하중 해석의 kip-ft × 12 (설계 입력 kip-in) — 단위 뜻을 엔진 값으로 확인
@@ -1364,7 +1403,11 @@ async function main() {
       supports: ['N', 'P', 'P', 'P', 'P', 'P', 'N'], laps_per_support: [null, { left_ft: 0, right_ft: 0 }, { left_ft: 2.5, right_ft: 3.5 },
         { left_ft: 1, right_ft: 1 }, { left_ft: 3.5, right_ft: 2.5 }, { left_ft: 0, right_ft: 0 }, null],
       loads: { D: 15, Lr: 100, W: -170 }, design_method: 'ASD', spacing_ft: 5, deck: { type: 'through-fastened', kphi_override: 0.3 },
-      i621_conditions_confirmed: true, Fy: 55, Fu: 70, wc_N: 3.5, wc_R: 0.1875 };
+      i621_conditions_confirmed: true, Fy: 55, Fu: 70, wc_N: 3.5, wc_R: 0.1875,
+      // 결정 D1: 주지 않으면 화면의 값 — 화면의 냉간가공 칸은 켜져 시작한다. 이 예산 사례(II-2A)는 냉간가공 없이(전과 같은 사례)
+      use_cold_work: false };
+    // 앞 사례들(0 = 없음 시험 · 패턴 하중 · 단열재)이 화면에 남긴 입력은 이 사례의 입력이 아니다 — 처음 화면에서
+    await freshCase();
     const [p38] = await usVsSi('design_purlin', P38, { ...LOAD_SI, spans_ft: 'length_ft', spacing_ft: 'length_ft', deck: { kphi_override: 'rot_stiff' },
       laps_per_support: { left_ft: 'length_ft', right_ft: 'length_ft' } }, {}, { levels: ['full', 'summary'], label: 'design_purlin 38 regions' });
     assert(p38.regions.length >= 30, `the budget case has many regions (${p38.regions.length})`);
@@ -1373,7 +1416,7 @@ async function main() {
       aisi_design_connection: 12, design_connection: 12, design_lap_connection: 16, 'design_purlin 38 regions': 40, design_purlin: 40,
       'design_purlin pattern': 40 };
     for (const z of SIZES.filter((x) => x.level === 'summary' && budget[x.tool])) {
-      assert(Math.max(z.us, z.si) <= budget[z.tool] * KB, `budget: ${z.tool} summary ${Math.max(z.us, z.si)} B > ${budget[z.tool]} KB`);
+      assert(Math.max(z.us, z.si) <= budget[z.tool] * KB, `budget: ${z.tool} summary ${Math.max(z.us, z.si)} B > ${budget[z.tool]} KB (largest keys: ${z.top})`);
     }
     results.push(`reply budgets (summary, bytes US/SI): ${SIZES.filter((x) => x.level === 'summary').map((x) => `${x.tool} ${x.us}/${x.si}`).join(', ')}`);
     // K3: validate_design · generate_report — 38 구간 퍼린 묶음 뒤(가장 큰 사례) 요약 ≤ 40 KB, 요약 규칙: full 의 통과 아닌 항목 id ·
@@ -1406,6 +1449,8 @@ async function main() {
 
     // 9b'. K2-5: 검토 상태 도구 — 응답 크기(12 KB), SI 왕복, 받지 않는 키, 설계 도구가 바꾼 사람의 값(case_inputs_replaced)
     {
+      // 처음 값의 KxLx 는 빈 칸이다(2026-11-25) — SI 변환을 보려고 길이 하나를 먼저 넣는다
+      await call('set_case_inputs', { inputs: { KxLx: 120 }, reason: 'k2 test — 길이 하나' });
       const gi = await call('get_case_inputs', {});
       const giSI = await call('get_case_inputs', { units: 'SI' });
       assert(!gi.isError && !giSI.isError, `get_case_inputs: ${gi.data && gi.data.error}`);
@@ -1424,11 +1469,13 @@ async function main() {
       const fl = await call('aisi_design_flexure', { design_method: 'LRFD', Fy: 50, Lb: 60, Mu: 30 });
       assert(!fl.isError, JSON.stringify(fl.data).slice(0, 300));
       const rp = (fl.data.case_inputs_replaced || []).map((x) => [x.key, x.previous, x.previous_source]).sort();
-      assert.deepStrictEqual(rp.filter(([k]) => k === 'Cb' || k === 'Lb'), [['Cb', 1.3, 'user'], ['Lb', 80, 'user']], 'replaced person values listed with the previous value');
+      assert.deepStrictEqual(rp.filter(([k]) => k === 'Cb' || k === 'Lb'), [['Lb', 80, 'user']], 'replaced person values listed with the previous value (Cb was not given — not replaced)');
       assert(/tell the person/.test(fl.data.case_note || ''), 'the reply tells the AI to report it');
+      const usedCb = (fl.data.case_inputs_used || []).find((x) => x.key === 'Cb');
+      assert(usedCb && usedCb.value === 1.3 && usedCb.source === 'user', `the person Cb is used and named (case_inputs_used): ${JSON.stringify(usedCb)}`);
       const after = (await call('get_case_inputs', { keys: ['Cb', 'Lb', 'Mux', 'memberType'] })).data;
-      assert.deepStrictEqual([after.inputs.Cb, after.inputs.Lb, after.inputs.Mux, after.inputs.memberType, after.sources.Lb], [null, 60, 30, 'flexure', 'ai'],
-        'decision 1: the tool group is what the tool got (Cb not given → blank)');
+      assert.deepStrictEqual([after.inputs.Cb, after.inputs.Lb, after.inputs.Mux, after.inputs.memberType, after.sources.Lb, after.sources.Cb], [1.3, 60, 30, 'flexure', 'ai', 'user'],
+        'decision D1: only the given keys are written (Cb not given → the person value stays)');
       await real.panel.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', changes: { Lb: 80 } } });
       const flSI = await call('aisi_design_flexure', { units: 'SI', design_method: 'LRFD', Fy: 345, Lb: 1524, Mu: 3.39 });
       const lbRep = (flSI.data.case_inputs_replaced || []).find((x) => x.key === 'Lb');

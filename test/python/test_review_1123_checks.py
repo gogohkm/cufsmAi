@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, 'python'))
 sys.path.insert(0, HERE)
 
 from design.checks import (  # noqa: E402
-    REGISTRY, VERDICTS, STEP_KINDS, QUANTITIES, SOURCE_KINDS, overall_verdict,
+    REGISTRY, REGISTRY_VARIANTS, VERDICTS, STEP_KINDS, QUANTITIES, SOURCE_KINDS, overall_verdict,
 )
 from design.aisi_s100 import design_member  # noqa: E402
 from design.connections import design_connection  # noqa: E402
@@ -82,7 +82,8 @@ def test_every_design_result_has_checks_and_ids_are_registered_and_unique():
                 assert cid in REGISTRY, f'{name}: unregistered id {cid}'
             assert len(ids) == len(set(ids)), f'{name}: duplicate ids {ids}'
             for c in checks:
-                reg = REGISTRY[c['id']]
+                # 조항 갈래(원형관 §E3.1.1.1 …)는 REGISTRY_VARIANTS 의 그 갈래와
+                reg = REGISTRY_VARIANTS[(c['id'], c['clause_variant'])] if c.get('clause_variant') else REGISTRY[c['id']]
                 assert (c['clause'], c['name'], c['name_ko']) == (reg['clause'], reg['name'], reg['name_ko'])
                 assert c['verdict'] in VERDICTS, (name, c['id'], c['verdict'])
         assert 'design_checks_error' not in via, name

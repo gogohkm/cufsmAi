@@ -1196,6 +1196,48 @@ REGISTRY = {
         'template_ko': '절점 응력이 없어(0) 기준 하중과의 일관성을 확인하지 못했습니다. Pcr = LF × P_ref 는 해석 응력의 최대 |σ| = fy 를 가정합니다.',
         'params': {},
     },
+    'dsm.assumption.cfsm_labels_against_wavelength_order': {
+        'kind': 'assumption',
+        'template': 'cFSM 라벨이 반파장 순서와 어긋나(D 라벨 극소가 L 라벨 극소보다 짧음) 라벨을 쓰지 않았습니다.',
+        'template_ko': 'cFSM 라벨이 반파장 순서와 어긋나(D 라벨 극소가 L 라벨 극소보다 짧음) 라벨을 쓰지 않았습니다.',
+        'params': {},
+    },
+    'dsm.warning.unlabeled_below_l_label_used_as_local': {
+        'kind': 'warning',
+        'template': 'L 라벨 극소보다 낮은 미분류 극소(L={length})를 국부로 썼습니다(보수 측). 모드형상을 확인하십시오.',
+        'template_ko': 'L 라벨 극소보다 낮은 미분류 극소(L={length})를 국부로 썼습니다(보수 측). 모드형상을 확인하십시오.',
+        'params': {'length': {'quantity': 'length', 'conv': None, 'spec': '.3g', 'unit': 'in', 'sep': ' '}},
+    },
+    'dsm.warning.lower_minimum_not_shortest_used_as_local': {
+        'kind': 'warning',
+        'template': '가장 짧은 극소가 아니라 그보다 낮은 극소(L={length})를 국부로 썼습니다(보수 측).',
+        'template_ko': '가장 짧은 극소가 아니라 그보다 낮은 극소(L={length})를 국부로 썼습니다(보수 측).',
+        'params': {'length': {'quantity': 'length', 'conv': None, 'spec': '.3g', 'unit': 'in', 'sep': ' '}},
+    },
+    'dsm.warning.local_lowest_of_l_and_unlabeled': {
+        'kind': 'warning',
+        'template': '국부를 L 라벨·미분류 극소 가운데 최저(L={length})로 썼습니다(하한, 보수 측). 모드형상을 확인하십시오.',
+        'template_ko': '국부를 L 라벨·미분류 극소 가운데 최저(L={length})로 썼습니다(하한, 보수 측). 모드형상을 확인하십시오.',
+        'params': {'length': {'quantity': 'length', 'conv': None, 'spec': '.3g', 'unit': 'in', 'sep': ' '}},
+    },
+    'dsm.warning.three_or_more_minima_wavelength_bound': {
+        'kind': 'warning',
+        'template': '극소가 {n}개라 어느 것이 국부·뒤틀림인지 반파장 순서만으로 정할 수 없습니다. 국부 = 가장 긴 극소를 뺀 최저, 뒤틀림 = 가장 짧은 극소를 뺀 최저(둘 다 하한, 보수 측)를 썼습니다 — 모드형상으로 확인하십시오.',
+        'template_ko': '극소가 {n}개라 어느 것이 국부·뒤틀림인지 반파장 순서만으로 정할 수 없습니다. 국부 = 가장 긴 극소를 뺀 최저, 뒤틀림 = 가장 짧은 극소를 뺀 최저(둘 다 하한, 보수 측)를 썼습니다 — 모드형상으로 확인하십시오.',
+        'params': {'n': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'dsm.scope.signature_curve_isolation_only': {
+        'kind': 'scope',
+        'template': 'A signature curve can show that a mode was isolated, never that a mode is absent; local_absence_verified and dist_absence_verified are always False.',
+        'template_ko': '서명곡선은 모드가 분리되었음을 보일 수 있을 뿐, 모드가 없음을 보이지는 못합니다 — local_absence_verified · dist_absence_verified 는 언제나 False 입니다.',
+        'params': {},
+    },
+    'dsm.scope.round_tube_not_applicable': {
+        'kind': 'scope',
+        'template': 'Round tube (CHS): DSM not applicable — use the round-tube provisions. AISI S100-16 does not split a round tube into local and distortional DSM modes (compression §E3.1.1.1, flexure §F2.3 · §F3.1.1; §E4 · §F4 distortional applies to open sections with edge-stiffened flanges). The minima of this curve are circumferential modes of the cylinder; no local / distortional value (crl · crd) is given.',
+        'template_ko': '원형관(CHS): DSM 비적용 — 원형관 조항 사용. AISI S100-16 은 원형관에 DSM 의 국부 · 뒤틀림 구분을 쓰지 않습니다(압축 §E3.1.1.1, 휨 §F2.3 · §F3.1.1, 뒤틀림 §E4 · §F4 는 연단 보강 플랜지가 있는 개단면만). 이 곡선의 극소는 원통의 원주 방향 모드이고, 국부 · 뒤틀림 값(crl · crd)으로 내지 않았습니다.',
+        'params': {},
+    },
     'dsm.warning.app_2_bc_pcrl_pcrd': {
         'kind': 'warning',
         'template': "BC='{BC}': 단부 조건이 S-S 가 아닌 곡선은 서명곡선이 아니므로 극소에서 Pcrl/Pcrd 를 뽑지 않았습니다. S-S 서명곡선으로 다시 해석하거나 부재 길이의 일반 경계조건 해석에서 모드를 따로 식별하십시오 (App. 2 §2.2).",
@@ -2516,6 +2558,12 @@ REGISTRY = {
         'template_ko': 'Pcrl: FSM 국부좌굴 값이 없어 Appendix 1 §1.1 Eq.1.1-4 해석적 판좌굴 공식 사용 (Fcrl={Fcrl_calc}, 지배요소={governing}, ho/bo/do={ho}/{bo}/{do} 외-외)',
         'params': {'Fcrl_calc': {'quantity': 'stress', 'conv': None, 'spec': '.2f', 'unit': 'ksi', 'sep': ' '}, 'governing': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'ho': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': None, 'sep': ''}, 'bo': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': None, 'sep': ''}, 'do': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
     },
+    'member.assumption.round_tube_given_pcrl_e3_2_1': {
+        'kind': 'assumption',
+        'template': 'Round tube (CHS): local buckling was computed by §E3.2.1 (DSM) with the given Pcrl — not by the round-tube provision §E3.1.1.1 (effective area). The Pcrl is the caller\'s value, not a minimum of the FSM curve.',
+        'template_ko': '원형관(CHS): 받은 Pcrl 로 §E3.2.1(DSM) 국부좌굴을 계산했습니다 — 원형관 조항 §E3.1.1.1(유효면적)이 아닙니다. Pcrl 은 호출자가 준 값입니다(FSM 곡선의 극소가 아님).',
+        'params': {},
+    },
     'member.assumption.section_from_template': {
         'kind': 'assumption',
         'template': '단면 성질을 입력 템플릿 치수로 생성했습니다: {auto_section}. 실제 부재 단면과 같은지 확인하십시오.',
@@ -2779,6 +2827,18 @@ REGISTRY = {
         'template': 'E2 global buckling (assumed {missing_len})',
         'template_ko': 'E2 전체좌굴 ({missing_len} 가정)',
         'params': {'missing_len': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.e3_1_1_1_round_tube_d_t_over': {
+        'kind': 'not_evaluated',
+        'template': 'E3 local buckling (§E3.1.1.1 round tube applies only for D/t ≤ 0.441 E/Fy: D/t = {D_over_t} > {limit})',
+        'template_ko': 'E3 국부좌굴 (§E3.1.1.1 원형관은 D/t ≤ 0.441 E/Fy 일 때만: D/t = {D_over_t} > {limit})',
+        'params': {'D_over_t': {'quantity': 'dimensionless', 'conv': None, 'spec': '.1f', 'unit': None, 'sep': ''}, 'limit': {'quantity': 'dimensionless', 'conv': None, 'spec': '.1f', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.e3_1_1_1_round_tube_dims_unknown': {
+        'kind': 'not_evaluated',
+        'template': 'E3 local buckling (§E3.1.1.1 round tube: the outside diameter D or the wall thickness t is not given)',
+        'template_ko': 'E3 국부좌굴 (§E3.1.1.1 원형관: 바깥지름 D 또는 두께 t 가 주어지지 않음)',
+        'params': {},
     },
     'member.ne.e3_e3_local_buckling': {
         'kind': 'not_evaluated',
@@ -3458,6 +3518,12 @@ REGISTRY = {
         'template_ko': 'H4 휨 + 비틀림 조합',
         'params': {},
     },
+    'member.scope.round_tube_dsm_not_applicable': {
+        'kind': 'scope',
+        'template': 'Round tube (CHS): DSM not applicable — round-tube provisions used. No local / distortional value (Pcrl · Pcrd, Mcrl · Mcrd) is taken from the FSM curve; flexure §F2.3 · §F3.1.1, compression local §E3.1.1.1 (effective area, Eq. E3.1-1), distortional §E4 · §F4 does not apply (open sections with edge-stiffened flanges only).',
+        'template_ko': '원형관(CHS): DSM 비적용 — 원형관 조항 사용. FSM 곡선에서 국부 · 뒤틀림 값(Pcrl · Pcrd, Mcrl · Mcrd)을 정하지 않습니다. 휨 §F2.3 · §F3.1.1, 압축 국부 §E3.1.1.1(유효면적, Eq. E3.1-1), 뒤틀림 §E4 · §F4 는 해당 없음(연단 보강 플랜지가 있는 개단면만).',
+        'params': {},
+    },
     'member.scope.not_checked_holes': {
         'kind': 'scope',
         'template': 'holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)',
@@ -3565,6 +3631,12 @@ REGISTRY = {
         'template': '§E2: 탄성 전체좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오.',
         'template_ko': '§E2: 탄성 전체좌굴응력 Fcre를 계산할 수 없습니다(Fcre=0 → Pne=0 → Pn=0). 비틀림 성질 J/Cw 또는 rx/ry/ro/xo가 누락되었을 가능성이 큽니다{cutwp_note}. 0 강도를 유효한 설계로 해석하지 마십시오.',
         'params': {'cutwp_note': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.warning.round_tube_dsm_value_not_used': {
+        'kind': 'warning',
+        'template': 'Round tube (CHS): the given {items} was not used — distortional buckling (§E4 · §F4) applies only to open sections with edge-stiffened flanges.',
+        'template_ko': '원형관(CHS): 받은 {items} 를 쓰지 않았습니다 — 뒤틀림좌굴(§E4 · §F4)은 연단 보강 플랜지가 있는 개단면에만 해당합니다.',
+        'params': {'items': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'member.warning.e3_e3_pcrl_pnl_pne': {
         'kind': 'warning',
