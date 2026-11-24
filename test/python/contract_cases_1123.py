@@ -92,6 +92,11 @@ def _member():
                                                 props=dict(A=2.482, rx=2.794, ry=2.794, J=38.7, Cw=0, t=0.1),
                                                 section=dict(type='CHS', diameter=8.0, thickness=0.1),
                                                 dsm=dict(Pcrl=1e4, Pcrd=0))))
+    # Manual III-6 (원형관 8.00 × 0.100, KL 120 in): §E3.1.1.1 Ae = 2.465 in², Pn = Ae Fn = 92.7 kips — Pcrl 없음
+    a(('compression CHS E3.1.1.1 (III-6)', dict(member_type='compression', design_method='ASD', Fy=42.0, KxLx=120,
+                                                KyLy=120, KtLt=120, Pu=22.5, section_type='CHS', D=8.0,
+                                                props=dict(A=2.482, rx=2.794, ry=2.794, J=38.74, Cw=0.0, t=0.1),
+                                                section=dict(type='CHS', diameter=8.0, thickness=0.1), dsm={})))
     a(('compression no demand', dict(member_type='compression', Fy=50.0, KxLx=120.0, KyLy=60.0, KtLt=60.0,
                                      section_type='C', props=dict(III3), section=dict(III3_SECTION),
                                      dsm=dict(Pcrl=0.75 * 21.1, Pcrd=1.11 * 21.1))))
