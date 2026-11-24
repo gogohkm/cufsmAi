@@ -222,7 +222,7 @@
       "writers": { "program": ["change"] },
       "fields": {
         "caseId": { "$ref": "#/$defs/caseId" },
-        "trigger": { "type": "string", "maxLength": 80, "description": "tool/action name, 'edit-session', 'open', 'import', 'restore-alternative', 'external'" },
+        "trigger": { "type": "string", "maxLength": 80, "description": "tool/action name, 'edit-session', 'edit' (a screen edit outside the edit state), 'mirror' / 'unit-toggle' (a line made only by the screen's linkage — not typed by the person), 'edit-discard', 'open', 'import', 'restore-alternative', 'external'" },
         "reason": { "$ref": "#/$defs/aiText", "maxLength": 300 },
         "work": { "$ref": "#/$defs/recId" },
         "source": { "$ref": "#/$defs/recId" },

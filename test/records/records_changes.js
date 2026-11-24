@@ -167,6 +167,99 @@ async function run() {
     assert.strictEqual(x.out.length, 1);
   });
 
+  // ── 겹친 요청(호스트의 요청 처리는 비동기다) ──────────────────────────
+  // 문 하나: open() 을 부를 때까지 그 요청이 멈춘다
+  const gate = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };
+  const lines = (x) => x.out.map((c) => [c.__actor, c.trigger, c.fields[0].from, c.fields[0].to]);
+  const screen = { caseId: 'cabcdefghijklmnop', actor: { kind: 'person' }, trigger: 'get_full_state' };
+  const calc = { ...ai, trigger: 'design_purlin' };
+  await t('a read during a long AI request does not close its bundle: what the request writes at its end stays one AI set', async () => {
+    const x = batcher();
+    const g = gate();
+    const req = x.b.run(calc, async () => { await g.p; x.set({ a: 5 }); });            // 계산 뒤 끝에 입력을 쓴다(applyMcp)
+    await x.b.run(screen, () => {}, { readOnly: true });                                // 화면의 다시 읽기 · 보기 보고
+    await x.b.run(ai, () => {}, { readOnly: true });                                    // AI 의 조회
+    assert.strictEqual(x.b.pending, 'request', 'the request keeps its bundle');
+    g.open(); await req;
+    assert.deepStrictEqual(lines(x), [['ai', 'design_purlin', 0, 5]]);
+    assert.strictEqual(x.b.pending, null);
+  });
+  await t('a request of another actor that changes nothing (not marked as a read) overlaps a long AI request — before or past its end: still one AI set', async () => {
+    for (const endsFirst of ['person', 'ai']) {
+      const x = batcher();
+      const gA = gate(), gP = gate();
+      const req = x.b.run(calc, async () => { await gA.p; x.set({ a: 5 }); });
+      const other = x.b.run({ ...screen, trigger: 'run_case_check' }, async () => { await gP.p; });
+      if (endsFirst === 'person') { gP.open(); await other; gA.open(); await req; } else { gA.open(); await req; gP.open(); await other; }
+      assert.deepStrictEqual(lines(x), [['ai', 'design_purlin', 0, 5]], endsFirst);
+      assert.strictEqual(x.b.pending, null);
+    }
+  });
+  await t('a person request that writes while an AI request runs is its own set; the AI request keeps what it writes afterwards (nothing twice)', async () => {
+    const x = batcher();
+    const gA = gate();
+    const req = x.b.run(calc, async () => { x.set({ a: 1 }); await gA.p; x.set({ a: 9 }); });
+    await Promise.resolve();
+    await x.b.run({ ...screen, trigger: 'alternatives' }, () => x.set({ a: 4 }));         // 「이 대안으로」 — 사람의 쓰기
+    gA.open(); await req;
+    assert.deepStrictEqual(lines(x), [['ai', 'design_purlin', 0, 1], ['person', 'alternatives', 1, 4], ['ai', 'design_purlin', 4, 9]]);
+  });
+  await t('an AI request arriving while a person request runs: the AI set is recorded and the person request closes with nothing of it', async () => {
+    const x = batcher();
+    const gP = gate();
+    const mine = x.b.run({ ...screen, trigger: 'run_case_check' }, async () => { await gP.p; });
+    await x.b.run({ ...ai, trigger: 'set_case_inputs' }, () => x.set({ a: 2 }));
+    gP.open(); await mine;
+    assert.deepStrictEqual(lines(x), [['ai', 'set_case_inputs', 0, 2]]);
+  });
+  await t('an edit on the screen while an AI request runs: the edit is the person\'s set, the request\'s later write the AI\'s (touch · touchDone)', async () => {
+    const x = batcher();
+    const gA = gate();
+    const req = x.b.run(calc, async () => { await gA.p; x.set({ a: 9 }); });
+    await Promise.resolve();
+    x.b.touch(person); x.set({ a: 3 }); x.b.touchDone();                                 // 화면은 바꾸기 전에 touch, 쓴 뒤 touchDone
+    assert.strictEqual(x.b.pending, 'quiet');
+    gA.open(); await req;
+    assert.deepStrictEqual(lines(x), [['person', 'edit-session', 0, 3], ['ai', 'design_purlin', 3, 9]]);
+    assert.strictEqual(x.b.pending, null, 'the quiet bundle ended where the AI set cut in');
+  });
+  await t('an edit session started while an AI request runs: the request is not closed — its write becomes the AI set and the session goes on', async () => {
+    const x = batcher();
+    const gA = gate();
+    const req = x.b.run(calc, async () => { x.set({ a: 1 }); await gA.p; x.set({ a: 9 }); });
+    await Promise.resolve();
+    x.b.sessionStart(person);
+    x.b.touch(person); x.set({ a: 3 }); x.b.touchDone();
+    gA.open(); await req;
+    assert.strictEqual(x.b.pending, 'session');
+    x.b.touch(person); x.set({ a: 7 }); x.b.touchDone();
+    x.b.sessionEnd();
+    assert.deepStrictEqual(lines(x), [['ai', 'design_purlin', 0, 1], ['person', 'edit-session', 1, 3], ['ai', 'design_purlin', 3, 9], ['person', 'edit-session', 9, 7]]);
+  });
+  await t('in an edit session, the person\'s edits during a long AI request stay the person\'s; a read inside the session changes nothing', async () => {
+    const x = batcher();
+    x.b.sessionStart(person);
+    const gA = gate();
+    const req = x.b.run(calc, async () => { await gA.p; x.set({ a: 9 }); });
+    await Promise.resolve();
+    x.b.touch(person); x.set({ a: 2 }); x.b.touchDone();
+    await x.b.run(screen, () => {}, { readOnly: true });
+    x.b.touch(person); x.set({ a: 3 }); x.b.touchDone();
+    gA.open(); await req;
+    x.b.sessionEnd();
+    assert.deepStrictEqual(lines(x), [['person', 'edit-session', 0, 3], ['ai', 'design_purlin', 3, 9]]);
+  });
+  await t('overlapping requests of the same actor fold into one set even when the first one finishes first', async () => {
+    const x = batcher();
+    const g1 = gate(), g2 = gate();
+    const r1 = x.b.run(calc, async () => { await g1.p; x.set({ a: 1 }); });
+    const r2 = x.b.run({ ...ai, trigger: 'set_case_inputs' }, async () => { await g2.p; x.set({ a: 2 }); });
+    g1.open(); await r1;
+    assert.strictEqual(x.out.length, 0, 'still running');
+    g2.open(); await r2;
+    assert.deepStrictEqual(lines(x), [['ai', 'design_purlin', 0, 2]]);
+  });
+
   return done();
 }
 module.exports = { run };
