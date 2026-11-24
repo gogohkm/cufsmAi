@@ -57,7 +57,8 @@ interface Attr { name: string; value: string | null }
 /** 시작 태그 하나를 `<` 자리부터 읽는다(HTML 토크나이저의 속성 규칙). 끝나지 않으면 null */
 function readStartTag(html: string, at: number): { end: number; name: string; attrs: Attr[]; selfClose: boolean } | null {
     let i = at + 1;
-    const nm = /^[a-zA-Z][^\s/>\0]*/.exec(html.slice(i, i + 64));
+    // V9b-07: 이름은 HTML 의 공백(\t \n \f \r 스페이스)까지 — JS 의 \s(\v · NBSP …)로 자르지 않는다
+    const nm = /^[a-zA-Z][^\t\n\f\r />\0]*/.exec(html.slice(i, i + 64));
     if (!nm) { return null; }
     const name = nm[0];
     i += name.length;
@@ -93,6 +94,28 @@ function readStartTag(html: string, at: number): { end: number; name: string; at
     }
     return null;
 }
+
+/**
+ * V9b-07: 원시 글 요소(RAWTEXT — style · RCDATA — title)의 끝을 HTML 처럼 찾는다: `</이름` 바로 뒤가 HTML 공백(\t \n \f \r 스페이스) ·
+ * `/` · `>` 일 때만 끝 태그(JS 의 \s 는 \v · NBSP 도 공백으로 본다 — `</style\v>` 를 끝으로 읽으면 브라우저는 style 을 이어 가 그 뒤의 글이 CSS 가 된다).
+ * 끝 태그는 다음 `>` 까지(속성이 붙어도 HTML 은 끝 태그로 읽는다). 없으면 null(문서 끝까지 원시 글).
+ */
+function rawTextEnd(html: string, from: number, name: string): { at: number; end: number } | null {
+    const lower = html.toLowerCase();
+    let k = from;
+    for (;;) {
+        k = lower.indexOf('</' + name, k);
+        if (k < 0) { return null; }
+        const c = html[k + 2 + name.length];
+        if (c === undefined || c === '\t' || c === '\n' || c === '\f' || c === '\r' || c === ' ' || c === '/' || c === '>') {
+            const gt = html.indexOf('>', k + 2 + name.length);
+            return { at: k, end: gt < 0 ? html.length : gt + 1 };
+        }
+        k += 2;
+    }
+}
+// RCDATA 안의 & 는 글자 참조로 풀린다(그대로 두면 뜻이 같다) — 태그가 될 수 있는 < 만 바꾼다
+const escText = (v: string) => v.replace(/</g, '&lt;');
 
 const escAttr = (v: string) => v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
@@ -149,7 +172,7 @@ export function sanitizeForPrint(html: string): string {
             continue;
         }
         if (html[i + 1] === '/') {                              // 끝 태그
-            const m = /^<\/([a-zA-Z][^\s/>\0]*)[^>]*>/.exec(html.slice(i));
+            const m = /^<\/([a-zA-Z][^\t\n\f\r />\0]*)[^>]*>/.exec(html.slice(i));
             if (!m) { out += '&lt;'; i += 1; continue; }
             const tag = m[1].toLowerCase();
             out += PRINT_TAGS.has(tag) ? `</${tag}>` : '&lt;' + m[0].slice(1);
@@ -162,13 +185,19 @@ export function sanitizeForPrint(html: string): string {
         const tag = st.name.toLowerCase();
         i = st.end;
         if (!PRINT_TAGS.has(tag)) { out += '&lt;' + raw.slice(1); continue; }
-        if (tag === 'style') {                                  // 원시 글 — </style 까지. 이상한 CSS · < 가 있으면 블록째 지운다
-            const close = html.slice(i).search(/<\/style\s*>/i);
-            const css = close < 0 ? html.slice(i) : html.slice(i, i + close);
-            const endTag = close < 0 ? '' : /^<\/style\s*>/i.exec(html.slice(i + close))![0];
-            i = close < 0 ? n : i + close + endTag.length;
+        if (tag === 'style') {                                  // 원시 글(RAWTEXT) — HTML 이 끝으로 읽는 </style 까지. 이상한 CSS · < 가 있으면 블록째 지운다
+            const e = rawTextEnd(html, i, 'style');
+            const css = e ? html.slice(i, e.at) : html.slice(i);
+            i = e ? e.end : n;
             const opened = cleanStartTag(raw, tag, st.attrs);
-            if (!CSS_BAD.test(css) && opened === raw) { out += raw + css + endTag; }
+            if (!CSS_BAD.test(css) && opened === raw) { out += raw + css + '</style>'; }
+            continue;
+        }
+        if (tag === 'title') {                                  // V9b-07: RCDATA — 안의 것은 모두 글(태그 · 속성으로 읽지 않는다), 다시 적을 때 이스케이프
+            const e = rawTextEnd(html, i, 'title');
+            const text = e ? html.slice(i, e.at) : html.slice(i);
+            i = e ? e.end : n;
+            out += cleanStartTag(raw, tag, st.attrs) + escText(text) + '</title>';
             continue;
         }
         out += cleanStartTag(raw, tag, st.attrs);

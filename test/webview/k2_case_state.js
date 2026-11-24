@@ -268,7 +268,7 @@ t('old 1.2 file (few keys): file keys + defaults for the rest (V4-10), fy covers
   const r = CS.migrateProject({ version: '1.2', designInputs: { unitSystem: 'US', fy: 50, Mux: 30 } });
   assert.strictEqual(r.state.inputs.fy, 50);
   assert.strictEqual(r.state.inputs.Mux, 30);
-  assert.strictEqual(r.state.inputs.designMxPos, 0);
+  assert.strictEqual(r.state.inputs.designMxPos, null, 'V9a-02 · contract §6.4: a demand the file did not give is blank (not 0)');
   assert.strictEqual(r.state.sources.designMxPos, 'default');
   const back = CS.toDesignInputs13(r.state);
   assert.strictEqual(back.fyLoad, 50);

@@ -40,12 +40,12 @@ import { foldRuns, lastRunByKind, planPrune, RunEntry, RunKind, RUN_KINDS, runSu
 import { getBlob, putBlob } from './blobs';
 import { Assumption, ASSUMPTION_SPEC, foldAssumptions, prepareAssumption } from './assumptions';
 import { WORK_SPEC, foldWork, prepareWork, WorkItem } from './work';
-import { foldSources, listUnregistered, prepareSource, Source, SOURCE_SPEC, sourceState } from './sources';
+import { foldSources, listUnregistered, prepareSource, Source, SOURCE_SPEC, sourceState, sourceToOpen } from './sources';
 import { KeyUnavailableError, loadOrCreateWriter, makeWriterCard, readTrust, readWriterCard, setTrust, trustSelf, TrustStore, Writer, WriterCard } from './writer';
 import { foldReviews, MarkState, prepareReview, ReviewTarget, REVIEWS_SPEC } from './reviews';
 import { Alternative, ALTERNATIVES_SPEC, altBlobs, altRunIds, foldAlternatives, prepareAlternative } from './alternatives';
 import { blobPath } from './blobs';
-import { checkIssue, DocKind, DOCUMENTS_SPEC, Draft, foldDocuments, Issue, nextDraftId, nextRevision, readDocBody } from './documents';
+import { checkFiles, checkIssue, DocFile, DocKind, DOCUMENTS_SPEC, Draft, foldDocuments, Issue, nextDraftId, nextRevision, readDocBody } from './documents';
 import { fp } from './canonical';
 import { randomBytes } from 'crypto';
 
@@ -165,7 +165,9 @@ export interface OnRunExtra {
 }
 export interface RunRecorded { runId: string; blob: string | null; blobBytes: number | null; blobStored: number | null; snapshot: string | null }
 
-export interface RecordsHealth { unverified: number; untrusted: number; broken: number; chainBreaks: number; shrunk: number; readOnly: boolean }
+export interface RecordsHealth { unverified: number; untrusted: number; broken: number; chainBreaks: number; shrunk: number; readOnly: boolean;
+    /** V9b-04: 믿지 않는 작성자의 줄 파일의 손상(깨진 줄 · 틈) — 보일 뿐, 발행을 막지 않는다 */
+    untrustedDamage?: number }
 export interface DeskStatus {
     inProject: boolean;
     project: { name: string; projectId: string | null; readOnly: boolean } | null;
@@ -203,6 +205,9 @@ function isInside(child: string, root: string): boolean {
 }
 
 export class PersonOnlyError extends Error {}
+/** 믿는 작성자의 손상된 줄 파일 하나 */
+export interface RecordDamage { type: RecordType; stream: string; writer: string; own: boolean; broken: number; chainBreaks: number;
+    shrunk: { expectedSeq: number; foundSeq: number } | null }
 /** 확인 표시를 받지 않은 까닭 — code(`host.review.*`, 화면은 그 code 의 한국어) */
 export class ReviewRefusedError extends Error {
     constructor(message: string, readonly code: string) { super(message); }
@@ -229,6 +234,18 @@ export interface PersonFace {
     review(req: { mark: boolean; targets: unknown[] }): { event: 'mark' | 'unmark'; targets: number; line: string };
     /** R4-1: 다른 작성자 믿기 · 거두기(그 작성자 소개가 이 프로젝트에 있어야 한다) — 믿은 작성자의 확인만 센다(D5) */
     trust(writerId: string, trust: boolean): { writerId: string; name: string; trusted: boolean };
+    /**
+     * V9b: 독립 프로그램의 「원자료 열기」 — `{path | null, name, ext, openable, state, why}`. path 는 진짜 경로가 `01_원자료/` 안 · 모든 마디에
+     * 링크 없음 · 바이트가 등록한 해시 · 형식이 OPENABLE_EXT(records/openable.ts — 호스트가 쥔 한 곳)일 때만, 아니면 null 과 code 의 why(host.source.*)
+     */
+    sourceToOpen(item: string): ReturnType<typeof sourceToOpen> & { item: string; title: string };
+    /** V9b-04: 믿는 작성자의 손상된 줄 파일들(종류 · 줄 파일 · 작성자 · 깨진 줄 · 틈 · 줄어듦) — 사람의 「격리 · 받아들임」 이 고른다 */
+    recordsDamage(): RecordDamage[];
+    /**
+     * V9b-04: 손상된 기록에서 빠져나오는 사람의 길(파일을 손으로 고치지 않고): `quarantine` = 그 줄 파일을 `.stcfsd/quarantine/` 로 옮기고
+     * 무엇을 누가 옮겼는지 서명된 줄, `accept` = 줄어든 줄 파일(백업에서 되살림)의 지금 끝을 받아들이는 서명된 줄. 믿는 작성자의 손상된 줄 파일만.
+     */
+    resolveDamage(req: { type: string; stream: string; action: 'quarantine' | 'accept' }): { type: string; stream: string; action: string; movedTo?: string; files?: number };
     /** R4-3: 사람의 대안 — 지금 상태를 대안으로 두기(keep) · 이름 바꾸기 · 숨기기 · 되살리기 */
     alternative(req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }): { item: string; event: string };
     /** R5-2: 발행 미리보기 — 지문 · 일회용 숫자(2 분) · 막는 것 · 경고 · 묶일 파일 · 차수 */
@@ -264,6 +281,9 @@ export class RecordsDesk {
             review: guard((req: { mark: boolean; targets: unknown[] }) => this.review(req)),
             trust: guard((writerId: string, trust: boolean) => this.trustWriter(writerId, trust)),
             alternative: guard((req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }) => this.personAlternative(req)),
+            recordsDamage: guard(() => this.recordsDamage()),
+            sourceToOpen: guard((item: string) => this.sourceOpen(item)),
+            resolveDamage: guard((req: { type: string; stream: string; action: 'quarantine' | 'accept' }) => this.resolveDamage(req)),
             issuePreview: guard(() => this.issuePreview()),
             issue: guard((req: { fingerprint: string; nonce: string }) => this.issue(req)),
         });
@@ -827,7 +847,10 @@ export class RecordsDesk {
                 const r = this.read(t, budget);
                 reads[t] = r;
                 health.unverified += r.stats.unverified; health.untrusted += r.stats.untrusted;
-                health.broken += r.stats.broken + r.stats.nonCanonical; health.chainBreaks += r.stats.chainBreaks.length; health.shrunk += r.stats.shrunk.length;
+                // V9b-04: 막는 손상은 믿는 작성자의 줄 파일만(믿지 않는 작성자의 줄은 세지 않으니 그 손상도 막지 않는다 — 따로 보인다)
+                health.broken += r.stats.broken + r.stats.nonCanonical - r.stats.brokenUntrusted;
+                health.chainBreaks += r.stats.chainBreaks.length - r.stats.chainBreaksUntrusted; health.shrunk += r.stats.shrunk.length;
+                health.untrustedDamage = (health.untrustedDamage ?? 0) + r.stats.brokenUntrusted + r.stats.chainBreaksUntrusted;
                 health.readOnly = health.readOnly || r.readOnly;
             } catch { health.broken += 1; }
         }
@@ -1041,6 +1064,63 @@ export class RecordsDesk {
         const me = this.myWriterId();
         return foldAlternatives(lines).map((a) => ({ ...a, writtenBy: a.by === 'person' ? 'person' : 'ai', own: !!me && a.writer === me }));
     }
+    private sourceOpen(item: string): ReturnType<typeof sourceToOpen> & { item: string; title: string } {
+        const p = this.proj;
+        const s = p ? this.sourceItems().find((x) => x.item === item) : undefined;
+        if (!p || !s) { return { path: null, name: '', ext: '', openable: false, state: 'missing', why: 'host.source.missing', item: String(item ?? '').slice(0, 12), title: '' }; }
+        return { ...sourceToOpen(p.dir, s), item: s.item, title: s.title };
+    }
+    /** V9b-04: 믿는 작성자의 손상된 줄 파일(모든 기록 종류) */
+    recordsDamage(): RecordDamage[] {
+        const p = this.proj;
+        if (!p) { return []; }
+        const out: RecordDamage[] = [];
+        const cards = this.cards();
+        const me = this.myWriterId();
+        for (const t of ['cases', 'changes', 'runs', 'work', 'assumptions', 'sources', 'reviews', 'alternatives', 'documents'] as RecordType[]) {
+            let r: ReadResult;
+            try { r = this.read(t); } catch { continue; }
+            const by = new Map<string, RecordDamage>();
+            const get = (stream: string) => {
+                let d = by.get(stream);
+                if (!d) { const w = stream.split('-')[0]; d = { type: t, stream, writer: cards.get(w)?.name ?? w, own: w === me, broken: 0, chainBreaks: 0, shrunk: null }; by.set(stream, d); }
+                return d;
+            };
+            for (const d of r.stats.damage) { if (d.trusted) { const x = get(d.stream); x.broken += d.broken; x.chainBreaks += d.chainBreaks; } }
+            for (const s of r.stats.shrunk) { get(s.stream).shrunk = { expectedSeq: s.expectedSeq, foundSeq: s.foundSeq }; }
+            out.push(...by.values());
+        }
+        return out;
+    }
+    private resolveDamage(req: { type: string; stream: string; action: 'quarantine' | 'accept' }): { type: string; stream: string; action: string; movedTo?: string; files?: number } {
+        const p = this.writableProject();
+        const type = String(req?.type ?? '') as RecordType;
+        const stream = String(req?.stream ?? '');
+        const dmg = this.recordsDamage().find((d) => d.type === type && d.stream === stream);
+        if (!dmg) { throw new Error('that record stream is not damaged (or not a trusted writer\'s) — nothing to resolve'); }
+        const log = this.log(type);
+        if (req.action === 'accept') {
+            if (!dmg.shrunk || dmg.broken || dmg.chainBreaks) { throw new Error('accept is only for a stream that is shorter than last seen and otherwise intact — quarantine a broken stream'); }
+            const r = this.read(type);
+            const s = r.stats.shrunk.find((x) => x.stream === stream)!;
+            const found = r.stats.shrunkFound[stream];
+            log.acceptSeen(stream, s.foundSeq, found ? found.hash : null);
+            this.append('cases', { id: this.newLineId('case'), event: 'accept-shrunk', actor: { kind: 'person' },
+                body: { type, streamName: stream, expectedSeq: s.expectedSeq, foundSeq: s.foundSeq } });
+            this.logs.delete(type);
+            try { this.env.recordsChanged?.(['cases', type]); } catch { /* 덤 */ }
+            return { type, stream, action: 'accept' };
+        }
+        if (req.action !== 'quarantine') { throw new Error('action must be quarantine | accept'); }
+        const stamp = this.env.now().replace(/[^0-9]/g, '').slice(0, 14);
+        const rel = `.stcfsd/quarantine/${type}/${stream}-${stamp}`;
+        const files = log.quarantineStream(stream, path.join(p.dir, ...rel.split('/')));
+        this.logs.delete(type);
+        this.append('cases', { id: this.newLineId('case'), event: 'quarantine', actor: { kind: 'person' },
+            body: { type, streamName: stream, files, movedTo: rel, damage: { broken: dmg.broken, chainBreaks: dmg.chainBreaks, shrunk: !!dmg.shrunk } } });
+        try { this.env.recordsChanged?.(['cases', type]); } catch { /* 덤 */ }
+        return { type, stream, action: 'quarantine', movedTo: rel, files: files.length };
+    }
     /** 사람의 대안(person.alternative) — 행위자 person. keep 은 호스트가 지금 실행 · 스냅숏을 짓는다 */
     private personAlternative(req: { op: 'keep' | 'rename' | 'drop' | 'undrop'; item?: string; label?: string }): { item: string; event: string } {
         this.writableProject();
@@ -1118,6 +1198,8 @@ export class RecordsDesk {
         mkdirInside(p.dir, abs);
         return { abs, rel: FOLDERS.reports, caseName: c.name, caseId: c.caseId };
     }
+    /** S2: 초안 파일들의 지금 상태(그 draft 줄의 해시와) */
+    draftFilesState(files: DocFile[]): ReturnType<typeof checkFiles> | null { return this.proj ? checkFiles(this.proj.dir, files) : null; }
     /** 문서 줄을 접은 것 */
     documents(): ReturnType<typeof foldDocuments> {
         if (!this.proj) { return { drafts: [], issues: [], failed: [] }; }
@@ -1147,9 +1229,8 @@ export class RecordsDesk {
         const p = this.proj;
         if (!p) { return []; }
         const id = caseId ?? this.cur?.caseId;
-        return this.documents().issues.filter((x) => x.caseId === id).map((x) => ({ ...x, check_now: checkIssue(p.dir, x, this.hashCache) }));
+        return this.documents().issues.filter((x) => x.caseId === id).map((x) => ({ ...x, check_now: checkIssue(p.dir, x) }));
     }
-    private hashCache = new Map<string, { size: number; mtimeMs: number; sha256: string }>();
     /** 대상의 마지막 발행(차수 · 날짜(지역) · 상태) — 시작 화면의 「발행 R0」 */
     lastIssueOf(caseId: string): { label: string; revision: number; at: string; date: string; state: 'same' | 'edited' | 'missing' } | null {
         const all = this.issuesOf(caseId);

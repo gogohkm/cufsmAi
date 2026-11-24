@@ -9,7 +9,7 @@
  * 파일을 읽거나 쓰지 않는다. VS Code 를 쓰지 않는다.
  */
 import { canonicalJson } from './canonical';
-import { CASE_UNIT_KIND, UnitKey } from '../mcp/siUnits';
+import { CASE_UNIT_KIND, SI_INPUT_TABLES, UnitKey } from '../mcp/siUnits';
 
 export interface Snapshot {
     model: any;
@@ -48,7 +48,15 @@ const MAX_INDICES = 200;
 const SECTION_PARAM_UNITS: Record<string, UnitKey> = {
     H: 'length', B: 'length', D: 'length', t: 'length', r: 'length', B1: 'length', B2: 'length', D1: 'length', D2: 'length',
     tf: 'length', tw: 'length', d: 'length', b: 'length', h: 'length',
+    // V9a-08: 원형 · 사용자 단면 · 기타 템플릿의 치수(엔진 template.py 의 params 키)
+    OD: 'length', Ds: 'length', Ws: 'length', R_inner: 'length', outer_side: 'length',
 };
+/** AI 도구만의 인자(mcpOnly)의 단위 — 그 도구의 SI 입력 표(같은 표가 MCP 의 SI 입력을 바꾼다). 모르면 단위 없음 */
+function mcpArgUnit(tool: string, arg: string): UnitKey | null {
+    const t: any = (SI_INPUT_TABLES as any)[tool];
+    const spec = t && Object.prototype.hasOwnProperty.call(t, arg) ? t[arg] : undefined;
+    return typeof spec === 'string' && spec !== 'none' ? spec as UnitKey : null;
+}
 const NODE_COLS = ['id', 'x', 'z', 'dofx', 'dofz', 'dofy', 'dofq', 'stress'];
 const ELEM_COLS = ['id', 'i', 'j', 't', 'mat'];
 
@@ -180,7 +188,7 @@ export function diffSnapshots(before: Snapshot, after: Snapshot, fieldInfo: Fiel
         for (const k of [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()) {
             if (same(a[k], b[k])) { continue; }
             if (!INPUT_KEY_RE.test(tool) || !INPUT_KEY_RE.test(k)) { oddMcp += 1; continue; }
-            push({ path: `case.mcpOnly.${tool}.${k}`, group: 'mcp', unit: null, from: a[k] ?? null, to: b[k] ?? null });
+            push({ path: `case.mcpOnly.${tool}.${k}`, group: 'mcp', unit: mcpArgUnit(tool, k), from: a[k] ?? null, to: b[k] ?? null });
         }
     }
     if (oddMcp) { push({ path: 'case.mcpOnly.(other)', group: 'mcp', unit: null, odd: oddMcp }); }

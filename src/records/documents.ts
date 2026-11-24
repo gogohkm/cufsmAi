@@ -134,17 +134,32 @@ export function draftStaleness(d: Draft, now: { contentFp: string; engineId: str
 }
 
 /** 발행 폴더를 지금 파일과 견준다 — 목록 파일 · 파일마다 그대로 · 고쳐짐 · 없어짐, 폴더에 더해진 파일 */
-export function checkIssue(rootReal: string, issue: Issue, cache?: Map<string, { size: number; mtimeMs: number; sha256: string }>): { state: 'same' | 'edited' | 'missing'; files: Array<{ path: string; state: 'same' | 'edited' | 'missing' }>; added: string[] } {
+/**
+ * S2(V9b): 초안의 파일들을 그 draft 줄의 해시와 견준다 — 그대로 · 고쳐짐 · 없어짐(화면이 고친 초안을 초안으로 그리지 않게). 볼 때마다 해시(S3 — 시각을 믿지 않는다)
+ */
+export function checkFiles(rootReal: string, files: DocFile[]): { state: 'same' | 'edited' | 'missing'; files: Array<{ path: string; state: 'same' | 'edited' | 'missing' }> } {
+    const out = files.map((f) => {
+        const abs = path.join(rootReal, ...f.path.split('/'));
+        let st: 'same' | 'edited' | 'missing';
+        try {
+            const l = fs.lstatSync(abs);
+            st = !l.isFile() || l.isSymbolicLink() ? 'edited' : hashFile(abs, ISSUE_FILE_MAX).sha256 === f.sha256 ? 'same' : 'edited';
+        } catch { st = 'missing'; }
+        return { path: f.path, state: st };
+    });
+    const state = out.some((x) => x.state === 'missing') ? 'missing' : out.some((x) => x.state === 'edited') ? 'edited' : 'same';
+    return { state, files: out };
+}
+
+/** 발행 폴더를 지금 파일과 견준다 — 볼 때마다 파일 전부를 해시한다(S3(V9b): 수정 시각을 되돌린 편집도 잡게 — 시각으로 건너뛰지 않는다) */
+export function checkIssue(rootReal: string, issue: Issue): { state: 'same' | 'edited' | 'missing'; files: Array<{ path: string; state: 'same' | 'edited' | 'missing' }>; added: string[] } {
     const out: Array<{ path: string; state: 'same' | 'edited' | 'missing' }> = [];
     const look = (rel: string, sha: string) => {
         const abs = path.join(rootReal, ...rel.split('/'));
         try {
             const st = fs.lstatSync(abs);
             if (!st.isFile() || st.isSymbolicLink()) { return 'edited' as const; }
-            const hit = cache?.get(abs);
-            const got = hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs ? hit.sha256 : hashFile(abs, ISSUE_FILE_MAX).sha256;
-            cache?.set(abs, { size: st.size, mtimeMs: st.mtimeMs, sha256: got });
-            return got === sha ? 'same' as const : 'edited' as const;
+            return hashFile(abs, ISSUE_FILE_MAX).sha256 === sha ? 'same' as const : 'edited' as const;
         } catch { return 'missing' as const; }
     };
     out.push({ path: `${issue.folder}/manifest.json`, state: look(`${issue.folder}/manifest.json`, issue.manifest.sha256) });

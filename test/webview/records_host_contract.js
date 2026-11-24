@@ -185,6 +185,8 @@ async function main() {
     assert.strictEqual(p.getStatus().case.file_origin, 'person', 'the screen opened it — person');
     await call({ action: 'open_case', name: 'B' });
     assert.strictEqual(p.getStatus().case.file_origin, 'ai', 'the AI opened it — ai');
+    // V9b-06: 프로젝트 안에서는 상태 답에 경로가 없다(검토 대상의 이름) — 같은 프로세스의 다리는 caseFile() 로
+    assert(p.getStatus().case.file === null && p.getStatus().case.case_name === 'B' && /B\.csd$/.test(p.caseFile().path), 'no path in get_status inside a project: ' + JSON.stringify(p.getStatus().case));
     await call({ action: 'open_case', name: 'A' }, { ...AI(), 'X-StCFSD-Screen': scope.SCREEN_SECRET });
 
     // ── ⑤ ⚔ 밖에서 바뀐 파일 ──

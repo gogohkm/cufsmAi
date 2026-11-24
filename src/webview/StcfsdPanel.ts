@@ -18,7 +18,7 @@ import {
     LedgerEntry, LedgerKind, ViewItem, ViewReport, FocusRecord,
 } from '../models/types';
 import { defaultSteel, mpaField, steelGradeOptionsHtml } from './steelGrades';
-import { CaseKeeper } from '../case/caseKeeper';
+import { CaseKeeper, PAGE_ORIGINS } from '../case/caseKeeper';
 // K3: 검증 · 보고서(순수 · UMD — 화면과 같은 모듈)
 const REVIEW = require('../../webview/js/review');
 import { toDesignInputs13, toCaseRecord, migrateProject, readDesignInputs, MigrateResult, applyChanges, invalidationScope } from '../case/caseState';
@@ -31,6 +31,7 @@ import { makeSeal, sealParts, verifySeal } from '../case/resultSeal';
 // 경로 마디의 규칙 하나(기록 갈래와 같은 것 — 장치 이름 · 숨김 · 금지 글자 · 글 방향 글자 · 끝의 점 / 공백)
 import { segmentError } from '../records/names';
 import { localDate, localDateTime } from '../records/localTime';
+import { isOpenableName } from '../records/openable';
 /** 지금 파일이 바뀐 사건(같은 프로세스의 다리만 — 경로가 든다) */
 export interface CaseFileEvent { event: 'opened' | 'saved' | 'closed'; path: string | null; by: 'person' | 'ai'; at: string }
 import { checkFp, checkKey, contentFp, docFp, groupFp, normalizeEngineId, resultFp as recResultFp } from '../records/fp';
@@ -663,7 +664,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 return Promise.resolve();
             }
             const cmd = (message as any)?.command;
-            if (cmd === 'editSession') { this.editSession(String((message as any)?.data?.state)); return Promise.resolve(); }
+            // V9b-08: 편집 상태의 시작 · 끝 · 버리기는 사람의 길(독립 프로그램의 /api/person/edit-session → panel.editSession)로만 —
+            // 끼운 화면의 메시지 채널로는 받지 않는다(이 채널로 보내는 제품이 없다: 여섯 탭 화면은 보내지 않고, VS Code 확장에는 편집 상태가 없다)
+            if (cmd === 'editSession') { console.warn('[StCFSD] editSession from the page channel refused (person path only)'); return Promise.resolve(); }
             // R2-2: 화면의 편집(사람) — 편집 상태 안이면 그 묶음, 밖이면 조용한 2 초로 묶는다. 묶음의 「전」 은 바꾸기 전에 잡는다
             if (StcfsdPanel.PAGE_EDIT_COMMANDS.has(cmd) && !(cmd === 'caseEdit' && (message as any)?.data?.origin !== 'user')) {
                 this._changes.touch(this._changeCtx('edit'));
@@ -777,9 +780,46 @@ export class StcfsdPanel implements McpPanelInterface {
                     this._postCaseState('conflict');
                     break;
                 }
+                // V9b-05 · V7-S1(조정 결정): ① 출처는 닫힌 집합(모르는 것은 거절). ② file 은 파일을 연 창 안의 메아리로만(창 밖은 거절).
+                // ③ mirror · unit-toggle 은 값을 바꿀 수 있다 — 화면이 본 판(seenRev)이 지금일 때만(늦은 것은 충돌로 거절하고 상태를 다시 보낸다 —
+                // keeper 의 규칙, 사람의 편집으로 적어도 그 판 확인은 붙어 있다). ④ 값을 바꾼 것은 사람의 묶음에 via 와 함께 변경 줄로,
+                // 같은 값(보이는 자리 안)은 아무것도 쓰지 않는다. 다시 실은 뒤의 연동은 keeper 가 받지 않는다(전처럼).
+                // 화면이 보낸 데이터에서 호스트만 쓰는 표지를 지운다(화면이 출처 꼬리표를 고르지 못하게)
+                if (message.data && typeof message.data === 'object' && '__keepSource' in message.data) {
+                    const { __keepSource: _ks, ...clean } = message.data as any; void _ks;
+                    message = { ...message, data: clean } as any;
+                }
+                const origin = message.data?.origin;
+                const keysIn = Object.keys(message.data?.changes || {});
+                const refuse = (code: string) => {
+                    const n = NOTICES.hostNotice(code, {});
+                    this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: keysIn.map((key) => ({ key, reason: n.text_ko, reason_code: code })), conflicts: keysIn });
+                    this._postCaseState('conflict');
+                };
+                if (!PAGE_ORIGINS.has(origin)) { refuse('host.case.bad_origin'); break; }
+                if (origin === 'file' && !this._caseKeeper.inOpenWindow) { refuse('host.case.file_outside_window'); break; }
+                // mirror · unit-toggle(창 밖): 보이는 자리 안에서 같은 칸(메아리)은 출처를 그대로, 값을 바꾸는 칸은 화면이 본 판이 지금일 때만
+                // (keeper 의 seenRev 충돌 규칙) 출처 mirror 로 — 그리고 사람의 묶음에 via 와 함께 변경 줄
+                const linkage = (origin === 'mirror' || origin === 'unit-toggle') && !this._caseKeeper.inOpenWindow && !this._caseKeeper.inReloadWindow;
+                const moved = linkage ? this._caseKeeper.nonEchoKeys(message.data?.changes) : [];
+                const DSk = require('../../webview/js/designState');
+                const movesInput = moved.some((k) => { const m = DSk.fieldMeta(k); return !m || m.owner !== 'view'; });
+                if (movesInput && !Number.isInteger(message.data?.seenRev)) { refuse('host.case.no_seen_rev'); break; }
                 // K2: 화면의 칸이 바뀌었다 — 상태에 합친다(설계 §3.2 의 충돌 규칙). 동기 처리(뒤에 오는 실행 메시지보다 먼저 끝난다).
                 const revBefore = this._caseKeeper.state.rev;
-                const r = this._caseKeeper.edit(message.data);
+                let r: ReturnType<CaseKeeper['edit']>;
+                if (linkage && moved.length) {
+                    const all = message.data.changes as Record<string, unknown>;
+                    const echoPart = Object.fromEntries(Object.entries(all).filter(([k]) => !moved.includes(k)));
+                    const movedPart = Object.fromEntries(Object.entries(all).filter(([k]) => moved.includes(k)));
+                    if (movesInput) { this._changes.touch(this._changeCtx('edit')); this._armQuiet(); }
+                    const r1 = Object.keys(echoPart).length ? this._caseKeeper.edit({ ...message.data, changes: echoPart, __keepSource: true }) : null;
+                    const r2 = this._caseKeeper.edit({ ...message.data, changes: movedPart, ...(r1 ? { drafts: undefined } : {}), __keepSource: origin === 'unit-toggle' });
+                    r = r1 ? { ...r2, accepted: [...r1.accepted, ...r2.accepted], rejected: [...r1.rejected, ...r2.rejected], conflicts: [...r1.conflicts, ...r2.conflicts] } : r2;
+                    if (movesInput && r2.accepted.some((k) => { const m = DSk.fieldMeta(k); return !m || m.owner !== 'view'; })) { this._changes.markVia(origin as 'mirror' | 'unit-toggle'); }
+                } else {
+                    r = this._caseKeeper.edit(linkage ? { ...message.data, __keepSource: true } : message.data);
+                }
                 if (message.data?.origin === 'user' && r.accepted.includes('fy') && this._loadFyAi) {
                     this._loadFyAi = false;
                     this._postMessage('caseReference', { loadFy: (this._model as any).loadFy, loadFySource: null });
@@ -1099,7 +1139,7 @@ export class StcfsdPanel implements McpPanelInterface {
             units: 'US',
             // K2-6: 검토 상태의 판과 저장 안 한 변경(언제부터) — get_case_inputs 가 값 · 출처
             case: { rev: this._caseKeeper.state.rev, dirty: this._caseKeeper.isDirty(this._currentModelSignature()),
-                dirty_since: this._caseKeeper.dirtySince, file: this._casePath, file_origin: this._casePath ? this._caseFileOrigin : null,
+                dirty_since: this._caseKeeper.dirtySince, ...this._fileForReply(), file_origin: this._casePath ? this._caseFileOrigin : null,
                 // 지금 저장하면 결과에 서명이 되는가(아니면 다시 열 때 결과를 되살리지 않는다) — 화면이 미리 알린다
                 ...StcfsdPanel._signingStatus() },
             section_template: m.sectionTemplate ?? null,
@@ -3826,7 +3866,10 @@ export class StcfsdPanel implements McpPanelInterface {
                     const basis = this._documentBasis();
                     const drafts = docs.drafts.filter((x) => x.caseId === caseId).map((x) => {
                         const why = draftStaleness(x, basis);
+                        // S2(V9b): 파일의 해시 상태(그대로 · 고쳐짐 · 없어짐) — 고친 초안을 초안으로 그리지 않게
+                        const fsNow = d.draftFilesState(x.files);
                         return { item: x.item, kind: x.kind, at: x.at, at_local: localDateTime(x.at), by: x.actor, files: x.files.map((f) => f.path), not_checked: x.stamp.notChecked,
+                            file_state: fsNow ? fsNow.state : null, ...(fsNow && fsNow.state !== 'same' ? { files_changed: fsNow.files.filter((y: { state: string }) => y.state !== 'same') } : {}),
                             state: why.length ? 'stale' : 'current', ...(why.length ? { stale_because: why, stale_because_ko: why.map((w) => NOTICES.staleWhyKo(w)) } : {}) };
                     });
                     const issues = d.issuesOf(caseId).map((x) => ({ item: x.item, revision: x.revision, at: x.at, at_local: localDateTime(x.at), date: localDate(x.at), issued_by: x.issuedBy.name, from: x.from, folder: x.folder,
@@ -4498,6 +4541,8 @@ export class StcfsdPanel implements McpPanelInterface {
         const view = (s: any, state: string | undefined) => ({
             item: s.item, title: s.title, kind: s.kind, file: s.path.split('/').slice(1).join('/'), sha12: s.sha256.slice(0, 12), size: s.size,
             state: state ?? 'unknown', written_by: StcfsdPanel._writtenBy(s), registered_at: s.at,
+            // V9b: 문서 보기로 열 수 있는 형식인가(records/openable.ts 의 한 목록 — 독립 프로그램의 「열기」 와 같은 것)
+            openable: isOpenableName(s.path),
         });
         if (action === 'list' || action === 'get') {
             const items = d.sourceItems();
@@ -5132,7 +5177,9 @@ export class StcfsdPanel implements McpPanelInterface {
                 };
                 let res: any;
                 try {
-                    res = await this._pythonBridge.call('aisi_design', { ...c.p, check_location: loc, check_combination: c.combo });
+                    // 계약 §6.4: 하중 해석이 낸 그 지점의 Mu 가 정확히 0(단순 끝 지점 · 내민 끝 · 모멘트 0 인 검토 지점)이면 그 0 은 해석의 진술이다
+                    const zeroStated = typeof c.p.Mu === 'number' && c.p.Mu === 0 ? { zero_demand_stated: true } : {};
+                    res = await this._pythonBridge.call('aisi_design', { ...c.p, ...zeroStated, check_location: loc, check_combination: c.combo });
                 } catch (e: any) {
                     res = { error: e?.message || String(e), pass: null };
                 }
@@ -6909,6 +6956,20 @@ ${inner}
         this._postCaseDirty();
     }
 
+/**
+     * V9b-06: 상태 답(get_status · get_full_state — AI 가 읽는다)에 실을 지금 파일. 프로젝트 안이면 경로 없이 검토 대상의 이름,
+     * 프로젝트 밖이면 AI 자신이 load_project / save_project 로 열거나 저장한 파일(file_origin 'ai')만 경로, 그 밖은 파일 이름만.
+     * 같은 프로세스의 다리는 panel.caseFile() · onCaseFile 로 경로를 받는다.
+     */
+    private _fileForReply(): { file: string | null; case_name?: string } {
+        const p = this._casePath;
+        if (!p) { return { file: null }; }
+        const st = this._desk?.status();
+        if (st?.inProject && st.case) { return { file: null, case_name: st.case.name }; }
+        if (st?.inProject) { return { file: path.basename(p) }; }
+        return { file: this._caseFileOrigin === 'ai' ? p : path.basename(p) };
+    }
+
     /** K2-6: 저장 안 한 변경 — 독립 창이 닫거나 다른 파일을 열기 전에 묻는다(host action get_unsaved_changes) */
     private _caseUnsaved(): any {
         const sig = this._currentModelSignature();
@@ -7497,20 +7558,21 @@ ${inner}
                 <p class="hint" style="margin-bottom:4px">자동 계산 모드: 위 "하중 분석 실행" 시 지배 조합의 Mu·Vu가 자동 입력됩니다. 직접 입력 모드: 하중조합(LRFD/ASD)으로 산정한 값을 직접 입력한 후 ③탭에서 설계 검토를 실행하세요.</p>
                 <div class="input-row">
                     <label>Pu<span class="hint-inline" data-unit="force">kN</span></label>
-                    <input type="number" id="design-P" value="0" step="1" style="width:65px" title="소요 압축강도 (계수 축력)">
+                    <input type="number" id="design-P" value="" step="1" style="width:65px" title="소요 압축강도 (계수 축력)">
                     <label>Vu<span class="hint-inline" data-unit="force">kN</span></label>
-                    <input type="number" id="design-V" value="0" step="1" style="width:65px" title="소요 전단강도 (계수 전단력)">
+                    <input type="number" id="design-V" value="" step="1" style="width:65px" title="소요 전단강도 (계수 전단력)">
                 </div>
                 <div class="input-row">
                     <label>Mu(+)<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-Mx-pos" value="0" step="0.1" style="width:65px" title="정모멘트 소요강도">
+                    <input type="number" id="design-Mx-pos" value="" step="0.1" style="width:65px" title="정모멘트 소요강도">
                     <label>Mu(-)<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-Mx" value="0" step="0.1" style="width:65px" title="부모멘트 소요강도">
+                    <input type="number" id="design-Mx" value="" step="0.1" style="width:65px" title="부모멘트 소요강도">
                 </div>
                 <div class="input-row">
                     <label>Muy<span class="hint-inline" data-unit="moment">kN-m</span></label>
-                    <input type="number" id="design-My" value="0" step="0.1" style="width:65px" title="약축 모멘트 소요강도">
+                    <input type="number" id="design-My" value="" step="0.1" style="width:65px" title="약축 모멘트 소요강도">
                 </div>
+                <div class="input-row"><label><input type="checkbox" id="chk-design-zero-demand"> 넣은 0 은 정말 0 — 다른 소요만 검토(비운 칸은 「주지 않음」, 주 소요가 없으면 판정 없음)</label></div>
                 <div class="input-row">
                     <label>May<span class="hint-inline" data-unit="moment">kN-m</span></label>
                     <input type="number" id="design-May-strength" value="0" step="0.1" style="width:65px">
@@ -7911,8 +7973,9 @@ ${inner}
                     <div class="input-row"><label style="min-width:56px;text-align:right">좌측 Lap</label><input type="number" id="conn-lap-left" value="305" step="10" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">지점 좌측 겹침 길이</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">우측 Lap</label><input type="number" id="conn-lap-right" value="305" step="10" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">지점 우측 겹침 길이</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">지점</label><input type="number" id="conn-lap-support" value="" min="1" step="1" style="width:72px" title="이 랩이 걸친 지점 번호(1 부터 — 퍼린 결과의 「지점 3」). 랩의 단면 강도(Se · Vn)는 퍼린 결과의 그 지점 랩 구간에서 가져온다. 비우면 가져오지 않는다(휨은 판정 없음)."><span class="hint-inline">랩이 걸친 지점 번호 (퍼린 결과의 그 지점 랩 구간 강도)</span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Mu</label><input type="number" id="conn-Mu" value="0" step="0.1" style="width:72px" data-unit="moment"><span class="hint-inline conn-unit-moment">지점 최대 부모멘트</span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Vu</label><input type="number" id="conn-Vu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">지점 최대 전단력</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Mu</label><input type="number" id="conn-Mu" value="" step="0.1" style="width:72px" data-unit="moment"><span class="hint-inline conn-unit-moment">지점 최대 부모멘트 — 비우면 판정 없음</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">지점 Vu</label><input type="number" id="conn-Vu" value="" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">지점 최대 전단력 — 비우면 판정 없음</span></div>
+                    <div class="input-row"><label><input type="checkbox" id="chk-conn-zero-demand"> 지점 소요 0 을 밝힘 — 0 을 넣었을 때만 「해당 없음」(없으면 0 도 판정 없음)</label></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">패스너</label>
                         <select id="conn-fastener-type" style="font-size:12px"><option value="screw" selected>Screw</option><option value="bolt">Bolt</option></select>
                         <label>d</label><input type="number" id="conn-fastener-dia" value="4.8" step="0.1" style="width:56px" data-unit="length"><span class="hint-inline conn-unit-length">패스너 직경</span>
@@ -7958,7 +8021,7 @@ ${inner}
                     <div class="input-row" id="conn-screw-row" style="display:none"><label style="min-width:56px;text-align:right">Pnvs</label><input type="number" id="conn-Pnvs" value="" placeholder="제조사 값" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">나사 공칭 전단강도(제조사·시험, §J4.3.2) — 없으면 0.5·Fub·As 는 참고값, 판정 없음</span></div>
                     <div class="input-row" id="conn-dw-row" style="display:none"><label style="min-width:56px;text-align:right">d&#39;w</label><input type="number" id="conn-dw" value="" placeholder="미입력" step="0.1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">머리·와셔 접촉 직경 (인장 Tu 가 있을 때 §J4.4.2 풀오버)</span></div>
                     <div class="input-row" id="conn-paf-row" style="display:none"><label style="min-width:56px;text-align:right">Fuf</label><input type="number" id="conn-Fuf" value="" placeholder="제조사 값" step="10" style="width:72px" data-unit="stress"><span class="hint-inline conn-unit-stress">PAF 핀 인장강도 F<sub>uh</sub>(제조사) — 없으면 120 ksi 는 참고값, 판정 없음</span></div>
-                    <div class="input-row"><label style="min-width:56px;text-align:right">Pu</label><input type="number" id="conn-Pu" value="0" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">면내 전단 소요강도</span><label>Tu</label><input type="number" id="conn-Tu" value="" placeholder="없음" step="0.1" style="width:64px" data-unit="force"><span class="hint-inline conn-unit-force">인장(뽑힘) 소요강도</span></div>
+                    <div class="input-row"><label style="min-width:56px;text-align:right">Pu</label><input type="number" id="conn-Pu" value="" step="0.1" style="width:72px" data-unit="force"><span class="hint-inline conn-unit-force">면내 전단 소요강도</span><label>Tu</label><input type="number" id="conn-Tu" value="" placeholder="없음" step="0.1" style="width:64px" data-unit="force"><span class="hint-inline conn-unit-force">인장(뽑힘) 소요강도</span></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">끝단 e</label><input type="number" id="conn-e" value="" placeholder="미입력" step="1" style="width:72px" data-unit="length"><span class="hint-inline conn-unit-length">하중방향 끝단거리(패스너 중심 → 재단 끝)</span><label>간격 s</label><input type="number" id="conn-s" value="" placeholder="미입력" step="1" style="width:64px" data-unit="length"></div>
                     <div class="input-row"><label style="min-width:56px;text-align:right">부재</label><select id="conn-member-case" style="font-size:12px"><option value="" selected>미입력 (J6.2 판정 없음)</option><option value="not_tension_member">인장재 아님 — J6.2 해당 없음</option><option value="flat_sheet">평판 (Table J6.2-1)</option><option value="flat_sheet_staggered">평판 엇갈림 배치</option><option value="angle_bolted">앵글 — 볼트·나사</option><option value="angle_welded">앵글 — 용접</option><option value="channel_bolted">채널 — 볼트·나사</option><option value="channel_welded">채널 — 용접</option><option value="all_elements">모든 요소 접합</option><option value="transverse_weld">횡방향 용접만</option></select><label>폭</label><input type="number" id="conn-width" value="" placeholder="미입력" step="1" style="width:64px" data-unit="length"><span class="hint-inline conn-unit-length">인장재 순단면 폭(J6.2)</span></div>
                     <div class="input-row"><label><input type="checkbox" id="conn-j63-na"> 블록전단 경로 없음 (J6.3 해당 없음)</label></div>

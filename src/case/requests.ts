@@ -89,14 +89,15 @@ export function buildDesignRequest(st: CaseState, ctx: RequestContext): BuiltReq
         Lb: r.opt('Lb'), Cb: r.opt('Cb'),
         Lb_pos: r.opt('designLbPos'), Cb_pos: r.opt('designCbPos'),
         Cmx: r.opt('Cmx'), Cmy: r.opt('Cmy'),
-        Pu: r.zero('Pu'),
-        Mu: r.zero('Mux'),
-        Mu_pos: r.zero('designMxPos'),
-        Mux: r.zero('Mux'),
-        Muy: r.zero('Muy'),
+        // 계약 §6.4: 비운 소요는 보내지 않는다(0 으로 채우지 않는다 — 「밝히지 않은 0」 이 된다)
+        Pu: r.opt('Pu'),
+        Mu: r.opt('Mux'),
+        Mu_pos: r.opt('designMxPos'),
+        Mux: r.opt('Mux'),
+        Muy: r.opt('Muy'),
         May_strength: r.opt('MayStrength'),
-        Vu: r.zero('Vu'),
-        Tu: r.zero('Pu'),
+        Vu: r.opt('Vu'),
+        Tu: r.opt('Pu'),
         wc_N: r.opt('wcN'),
         wc_P: r.opt('wcP'),
         wc_R: r.opt('wcR'),
@@ -117,6 +118,8 @@ export function buildDesignRequest(st: CaseState, ctx: RequestContext): BuiltReq
         t: r.opt('tplT'),
         ...rFactor(st),
     };
+    // 계약 §6.4: 「준 0 인 주 소요는 정말 0」 — 사람이 칸으로 밝혔을 때만
+    if (r.chk('designZeroDemandStated')) { data.zero_demand_stated = true; }
     return { data, missing: r.missing };
 }
 
@@ -253,8 +256,9 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
         Fu: r.req('fu', '설계 Fu'),
         lap_left_in: r.req('connLapLeft', '좌측 Lap'),
         lap_right_in: r.req('connLapRight', '우측 Lap'),
-        Mu_support: r.zero('connMu'),
-        Vu_support: r.zero('connVu'),
+        // V9a-02: 비운 칸은 보내지 않는다(0 으로 채우지 않는다) — 엔진이 그 소요를 쓰는 검토를 「판정 없음」 으로
+        Mu_support: r.opt('connMu'),
+        Vu_support: r.opt('connVu'),
         fastener_type: r.sel('connFastenerType', 'screw'),
         fastener_dia: r.req('connFastenerDia', '패스너 직경 d'),
         n_rows: r.req('connNRows', '행 수'),
@@ -267,6 +271,8 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
     };
     // 계약 §6.3: 랩 구속의 진술 — 검토 상태의 lapRestrained(화면 칸 · MCP · 파일이 같은 키). 확인했을 때만 넣는다
     if (r.chk('lapRestrained')) { data.lap_restrained = true; }
+    // 계약 §6.3: 0 은 밝혔을 때만 0(사람의 칸 · AI 의 zero_demand_stated)
+    if (r.chk('connZeroDemandStated')) { data.zero_demand_stated = true; }
     return { data, missing: r.missing };
 }
 
@@ -286,7 +292,7 @@ export function buildConnectionRequest(st: CaseState, ctx: RequestContext): Buil
         t1: r.req('connT1', 't1'),
         Fy: r.req('connFy', '접합 Fy'),
         Fu: r.req('connFu', '접합 Fu'),
-        Pu: r.zero('connPu'),
+        Pu: r.opt('connPu'),
         design_method: r.sel('designMethod', 'LRFD'),
     };
     for (const [k, key] of [['Tu', 'connTu'], ['e', 'connE'], ['s', 'connS'], ['width', 'connWidth']] as const) {

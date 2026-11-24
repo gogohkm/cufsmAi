@@ -11,6 +11,7 @@ import { canonicalJson, fp, sha256Hex } from './canonical';
 
 export const NS = {
     model: 'stcfsd-fp/model/1',
+    recordModel: 'stcfsd-fp/record-model/2',
     case: 'stcfsd-fp/case/1',
     content: 'stcfsd-fp/content/1',
     request: 'stcfsd-fp/request/1',
@@ -55,6 +56,17 @@ export function modelFp(model: any): string {
     });
 }
 
+/**
+ * S4(V9b): 기록의 모델 지문 — modelFp 의 모든 것 + 서명 밖이지만 엔진 요청에 닿는 칸(템플릿이 없는 모델의 `sectionType` · `cornerRadius`,
+ * 요소 자리 `elementRoles`). 봉인(resultSeal)은 저장한 모델 전부를 따로 지문으로 하므로(V8-03) 그 모델 지문(modelFp)은 바꾸지 않는다 —
+ * 바꾸면 이미 저장한 파일의 결과가 다시 열 때 되살아나지 않는다. 기록(내용 지문 — 초안 · 발행의 근거 · 실행 줄 · 변경 묶음 · 대안)은 이것을 쓴다.
+ */
+export function recordModelFp(model: any): string {
+    const m = model || {};
+    return fp(NS.recordModel, { model: modelFp(m), sectionType: m.sectionType ?? null, cornerRadius: m.cornerRadius ?? null,
+        elementRoles: Array.isArray(m.elementRoles) ? m.elementRoles : null });
+}
+
 /** 검토 입력의 지문 — inputs · spans · mcpOnly 만(출처 · 판 · 보기는 뺀다) */
 export function caseFp(state: { inputs?: unknown; spans?: unknown; mcpOnly?: unknown } | null | undefined): string {
     const s = state || {};
@@ -64,7 +76,7 @@ export function caseFp(state: { inputs?: unknown; spans?: unknown; mcpOnly?: unk
 export function contentFp(model: any, state: { inputs?: unknown; spans?: unknown; mcpOnly?: unknown } | null | undefined): {
     contentFp: string; modelFp: string; caseFp: string;
 } {
-    const m = modelFp(model);
+    const m = recordModelFp(model);
     const c = caseFp(state);
     return { contentFp: fp(NS.content, { modelFp: m, caseFp: c }), modelFp: m, caseFp: c };
 }

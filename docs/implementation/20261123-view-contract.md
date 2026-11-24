@@ -171,6 +171,8 @@
 
 **R5-3 뒤(2026-11-24, 기록 설계 §10.10):** `issuePreview` 에 `stamp` · `stamped_doc`(그 첫 쪽을 그린다) · `bundle[{path, role}]` · `passed_labels`, 막는 것의 `detail_ko`; `person.issue` · `person.review` 의 오류에 `.code`(`host.issue.*` · `host.review.*` — 한국어는 `StcfsdNotices.HOST[code].template_ko`); `documents list` 의 `at_local` · `date` · `stale_because_ko`; `list_cases` 의 `last_issue`; 지금 파일은 `panel.onCaseFile` · `panel.caseFile()`(알림 글을 읽지 않는다).
 
+**V9a · V9b 뒤(기록 설계 §10.11):** `person.sourceToOpen(id)` → `{path | null, name, ext, openable, state, why}`(목록은 `src/records/openable.ts`), `sources` 답의 `openable`; `documents list` 초안의 `file_state`; `person.recordsDamage()` · `person.resolveDamage(...)`; 상태 답의 `case.file` 은 프로젝트 안이면 null(`case_name`) — 경로는 `panel.caseFile()`.
+
 ## 5. 하지 않는 것
 
 - 창 · 패널을 앞으로 가져오지 않는다(`reveal` 을 부르지 않는다). 모델 · 결과 · 입력 리비전을 바꾸지 않는다(시험: `panel_host_contract` K4aView 가 모델 서명을 맞댄다).

@@ -11,15 +11,38 @@ import { RequestContext, modelDrafts } from './requests';
 
 const UTILS = require('../../webview/js/utils');
 
-/** 화면의 caseEdit.origin → 상태의 출처 */
+/** V9b-05: 화면의 caseEdit.origin — 닫힌 집합. 그 밖의 글은 받지 않는다 */
+export const PAGE_ORIGINS = new Set(['user', 'mirror', 'file', 'unit-toggle', 'load-analysis']);
+/** 화면이 지금 상태를 그려 다시 읽은 메아리일 수 있는 출처 — 상태의 값과 보이는 자리 안에서 같을 때만 그것으로 받는다 */
+export const ECHO_ORIGINS = new Set(['mirror', 'file', 'unit-toggle']);
+
+/** 화면의 caseEdit.origin → 상태의 출처(값을 바꾼 칸의 꼬리표는 사실대로 — mirror · file. 단위 바꿈은 출처를 바꾸지 않는다) */
 function writerOf(origin: unknown): { writer: Source; keepSource: boolean } {
     switch (origin) {
         case 'user': return { writer: 'user', keepSource: false };
-        case 'file': return { writer: 'file', keepSource: false };
+        case 'file': return { writer: 'file', keepSource: true };
         case 'load-analysis': return { writer: 'load-analysis', keepSource: false };
         case 'unit-toggle': return { writer: 'mirror', keepSource: true };
-        default: return { writer: 'mirror', keepSource: false };
+        default: return { writer: 'mirror', keepSource: true };
     }
+}
+
+/** 보이는 자리 안에서 같은가(화면은 지금 단위로 12 자리를 적고 다시 읽는다) — 수는 상대 1e-9, 그 밖은 글자까지 */
+function sameShown(a: unknown, b: unknown): boolean {
+    if (a === undefined) { a = null; }
+    if (b === undefined) { b = null; }
+    if (typeof a === 'number' && typeof b === 'number') {
+        if (a === b) { return true; }
+        const m = Math.max(Math.abs(a), Math.abs(b));
+        return Number.isFinite(m) && Math.abs(a - b) <= 1e-9 * m;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) { return a.length === b.length && a.every((x, i) => sameShown(x, b[i])); }
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+        const ks = new Set([...Object.keys(a as any), ...Object.keys(b as any)]);
+        for (const k of ks) { if (!sameShown((a as any)[k], (b as any)[k])) { return false; } }
+        return true;
+    }
+    return JSON.stringify(a) === JSON.stringify(b);
 }
 
 export interface ShadowRecord { what: string; same: boolean; page?: string; host?: string; at: number }
@@ -180,15 +203,34 @@ export class CaseKeeper {
         return Object.keys(this.state.revs).some((k) => this.state.revs[k] > seen && this.state.revs[k] <= before && this.state.sources[k] === 'ai');
     }
 
+    /** V9b-05: 메아리 출처의 변경 가운데 상태의 값과 보이는 자리 안에서 다른 키(그것은 사람의 편집이다) */
+    nonEchoKeys(changes: unknown): string[] {
+        const raw: Record<string, unknown> = changes && typeof changes === 'object' ? changes as any : {};
+        const DS = require('../../webview/js/designState');
+        return Object.keys(raw).filter((k) => {
+            const m = DS.fieldMeta(k);
+            const key = m && m.owner === 'mirror' ? m.mirrorOf : k;
+            const cur = (['spans', 'supports', 'lapsPerSupport'] as string[]).includes(key) ? (this.state.spans as any)[key] : this.state.inputs[key];
+            return !sameShown(cur, raw[k]);
+        });
+    }
+    /** 다시 실은 뒤 사람의 첫 변경 전인가(그동안의 화면 연동은 편집이 아니다 — 아래 edit 의 규칙) */
+    get inReloadWindow(): boolean { return this.reloadWindow; }
+    /** 파일을 연 바로 뒤 화면의 복원 메아리를 기다리는 동안(origin file · 그 앞의 mirror 의 창 — edit 의 openEcho) */
+    get inOpenWindow(): boolean { return this.openEcho; }
+
     edit(data: any): ApplyResult {
         const d = data && typeof data === 'object' ? data : {};
         if (d.drafts && typeof d.drafts === 'object') { this.drafts = { ...(this.drafts || {}), ...d.drafts }; }
-        const { writer, keepSource } = writerOf(d.origin);
+        const w0 = writerOf(d.origin);
+        const writer = w0.writer;
+        // 호스트만 주는 표지(화면의 데이터에서는 호스트가 지운다): 메아리 칸은 출처를 그대로, 값을 바꾼 연동 칸은 출처를 mirror 로
+        const keepSource = typeof d.__keepSource === 'boolean' ? d.__keepSource : w0.keepSource;
         const opts: { baseRev?: number; keepSource?: boolean } = { keepSource };
         if (d.origin === 'user' && Number.isInteger(d.baseRev)) { opts.baseRev = d.baseRev; }
         // V7-S1: 출처(origin)는 화면이 정한다 — 화면의 연동(mirror)도 그것을 만들 때 본 판(seenRev)으로 충돌 규칙을 건다:
         // 그 판 뒤에 다른 쓰는 이(AI · 파일 …)가 바꾼 키를 옛 화면 값으로 되쓰지 않는다.
-        else if (d.origin === 'mirror' && Number.isInteger(d.seenRev)) { opts.baseRev = d.seenRev; }
+        else if ((d.origin === 'mirror' || d.origin === 'unit-toggle') && Number.isInteger(d.seenRev)) { opts.baseRev = d.seenRev; }
         const wasClean = this.state.rev === this.savedRev;
         // 다시 실은 화면(새로 고침 · 다리의 다시 보내기)의 메아리는 편집이 아니다 — 판 · 출처 · 장부 · 무효화가 움직이지 않는다:
         //  - 하중 해석 채우기(origin load-analysis)는 호스트가 **새** 하중 해석을 낸 뒤에만(fillPending). 그 밖(다시 보낸 옛 해석 · 파일의

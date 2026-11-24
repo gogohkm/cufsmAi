@@ -70,6 +70,17 @@ export interface ReadStats {
     chainBreaks: Array<{ stream: string; atSeq: number; afterSeq?: number }>;
     shrunk: Array<{ stream: string; expectedSeq: number; foundSeq: number }>;
     skippedFiles: string[];
+    /**
+     * V9b-04: 믿지 않는 작성자의 줄 파일(다른 PC · 모르는 작성자 · 심은 파일)에서 나온 깨진 줄 수 — broken · nonCanonical 에도 들지만
+     * 발행을 막는 「기록 손상」 에는 세지 않는다(그 줄은 이미 세지 않는다 — 검증 못 함으로 보일 뿐)
+     */
+    brokenUntrusted: number;
+    /** 그 가운데 틈(chainBreaks 에도 든다) */
+    chainBreaksUntrusted: number;
+    /** 줄어든 줄 파일의 지금 끝(사람이 받아들일 때 본 끝으로) */
+    shrunkFound: Record<string, { seq: number; hash: string | null }>;
+    /** 손상이 있는 줄 파일마다(믿는 작성자인가 · 깨진 줄 · 틈) — 사람의 「격리」 가 고르는 목록 */
+    damage: Array<{ stream: string; trusted: boolean; broken: number; chainBreaks: number }>;
 }
 export interface ReadResult { lines: RecordLine[]; stats: ReadStats; readOnly: boolean }
 
@@ -241,6 +252,40 @@ export class RecordLog {
         this.stream = null; this.writer = null;
     }
 
+    // ── V9b-04: 사람의 길(데스크의 person.resolveDamage) — 손상된 줄 파일을 옆으로 · 줄어든 끝을 받아들임 ──
+    /** 그 줄 파일의 조각 파일들을 dest(프로젝트 안의 새 폴더)로 옮긴다 — 옮긴 파일마다 이름 · 해시 · 크기. 지금 쥔 줄 파일이면 먼저 놓는다 */
+    quarantineStream(stream: string, destAbs: string): Array<{ name: string; sha256: string; size: number }> {
+        if (!SEGMENT_RE.test(`${stream}.jsonl`)) { throw new Error('bad stream name'); }
+        if (this.stream === stream) { this.close(); }
+        const segs = this.segmentsOf(stream);
+        if (!segs.length) { throw new Error('no such record stream'); }
+        mkdirInside(this.o.rootReal, path.dirname(destAbs));
+        assertNoLinks(this.o.rootReal, path.dirname(destAbs));
+        fs.mkdirSync(destAbs);   // 배타적으로
+        const moved: Array<{ name: string; sha256: string; size: number }> = [];
+        for (const s of segs) {
+            const from = path.join(this.dir, s.name);
+            assertNoLinks(this.o.rootReal, from);
+            const buf = fs.readFileSync(from);
+            fs.renameSync(from, path.join(destAbs, s.name));
+            moved.push({ name: s.name, sha256: sha256Hex(buf), size: buf.length });
+        }
+        try { fs.unlinkSync(path.join(this.dir, `${stream}.owner`)); } catch { /* 없음 */ }
+        this.forgetSeen(stream);
+        return moved;
+    }
+    /** 본 끝 표지를 지운다(옆으로 옮긴 줄 파일 — 다시 「줄어듦」 으로 보이지 않게) */
+    forgetSeen(stream: string): void {
+        if (!this.o.keyDir) { return; }
+        try { fs.unlinkSync(path.join(fs.realpathSync.native(path.resolve(this.o.keyDir)), SEEN_DIR, seenName(this.seenKey(stream)))); } catch { /* 없음 */ }
+    }
+    /** 본 끝을 지금 끝으로(사람이 백업에서 되살린 줄어든 줄 파일을 받아들임) */
+    acceptSeen(stream: string, seq: number, hash: string | null): void {
+        if (!this.o.keyDir) { return; }
+        if (!hash || seq <= 0) { this.forgetSeen(stream); return; }
+        writeSeen(this.o.keyDir, this.seenKey(stream), { seq, hash });
+    }
+
     /** 한 줄 파일의 조각들(번호 차례) */
     private segmentsOf(stream: string, report?: string[]): Array<{ n: number; name: string }> {
         const out: Array<{ n: number; name: string }> = [];
@@ -325,7 +370,7 @@ export class RecordLog {
     read(trust: TrustStore, cards: Map<string, WriterCard> = new Map(), budget?: ReadBudget, opts: { recordSeen?: boolean } = {}): ReadResult {
         const { spec } = this.o;
         const stats: ReadStats = { broken: 0, nonCanonical: 0, oversized: 0, unknownEvent: 0, newer: 0, unverified: 0, untrusted: 0, misplaced: 0,
-            refused: 0, chainBreaks: [], shrunk: [], skippedFiles: [] };
+            refused: 0, chainBreaks: [], shrunk: [], skippedFiles: [], brokenUntrusted: 0, chainBreaksUntrusted: 0, shrunkFound: {}, damage: [] };
         const out: RecordLine[] = [];
         let ents: fs.Dirent[];
         try {
@@ -345,6 +390,7 @@ export class RecordLog {
             const card = cards.get(writerId);
             const key = trust.writers[writerId]?.publicKey ?? (card && card.writerId === writerId && verifyWriterCard(card) ? card.publicKey : null);
             const trusted = !!trust.writers[writerId];
+            const broken0 = stats.broken + stats.nonCanonical, gaps0 = stats.chainBreaks.length;
             const parsed: Parsed[] = [];
             let streamBytes = 0;
             let truncatedRead = false;
@@ -386,12 +432,17 @@ export class RecordLog {
                 line.body = body;
                 out.push(line);
             }
+            // V9b-04: 이 줄 파일의 손상 — 믿지 않는 작성자의 것은 따로 센다(막지 않는다)
+            const brokenHere = stats.broken + stats.nonCanonical - broken0, gapsHere = stats.chainBreaks.length - gaps0;
+            if (!trusted) { stats.brokenUntrusted += brokenHere; stats.chainBreaksUntrusted += gapsHere; }
+            if (brokenHere || gapsHere) { stats.damage.push({ stream, trusted, broken: brokenHere, chainBreaks: gapsHere }); }
             // 줄었나 — 믿는 작성자의 줄 파일(이 PC 의 것 포함)
             if (trusted && this.o.keyDir) {
                 const k = this.seenKey(stream);
                 const s = seen[k];
                 if (s && (walk.last.seq < s.seq || walk.hashes.get(s.seq) !== s.hash)) {
                     stats.shrunk.push({ stream, expectedSeq: s.seq, foundSeq: walk.last.seq });
+                    stats.shrunkFound[stream] = { seq: walk.last.seq, hash: walk.last.hash ?? null };
                 } else if (opts.recordSeen !== false && !truncatedRead && walk.last.hash && (!s || walk.last.seq > s.seq)) {
                     try { writeSeen(this.o.keyDir, k, { seq: walk.last.seq, hash: walk.last.hash }); } catch { /* 다음 읽기에 */ }
                 }

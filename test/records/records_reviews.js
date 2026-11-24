@@ -180,6 +180,24 @@ async function run() {
     assert.strictEqual(drop2.length, 9, 'the 10 oldest minus the one a mark keeps');
     assert(!drop2.includes(runs2[2].blob) && !drop2.some((b) => runs2.slice(10).some((r) => r.blob === b)));
   });
+  // ── V9b: 열어도 되는 형식은 진짜 마지막 확장자로(호스트가 쥔 한 목록) ──
+  await t('openable: the real last extension decides — trailing dots and spaces, double extensions, macros and executables', () => {
+    const O = rec('openable');
+    for (const [n, ok] of [['a.pdf', true], ['A.PDF', true], ['plan.dwg', true], ['x.pdf.bat', false], ['x.bat.', false], ['x.bat ', false], ['x.docm', false],
+      ['x.lnk', false], ['x.html', false], ['x.svg', false], ['x.zip', false], ['noext', false], ['x.csv', true]]) {
+      assert.strictEqual(O.isOpenableName(n), ok, n);
+    }
+  });
+  // ── S4(V9b): 기록의 모델 지문은 서명 밖이지만 엔진에 닿는 칸도 본다(봉인의 modelFp 는 그대로) ──
+  await t('S4: the records content fingerprint sees sectionType · cornerRadius · elementRoles; the seal modelFp does not change', () => {
+    const base = { node: [[1, 0, 0]], elem: [[1, 1, 2, 0.059, 100]], sectionType: 'custom', cornerRadius: 0.1, elementRoles: ['web'] };
+    const fp0 = F.contentFp(base, null).contentFp;
+    for (const [k, v] of [['sectionType', 'other'], ['cornerRadius', 0.2], ['elementRoles', ['flange']]]) {
+      const m = { ...base, [k]: v };
+      assert.notStrictEqual(F.contentFp(m, null).contentFp, fp0, k + ' changes the records fingerprint');
+      assert.strictEqual(F.modelFp(m), F.modelFp(base), k + ' leaves the seal modelFp');
+    }
+  });
   // ── 사람이 읽는 날짜는 지역 날짜(R5-3: 03:38 한국 시간의 발행이 UTC 날짜로 전날이 찍혔다) ──
   await t('local dates: an instant early in the morning in Seoul is that day, not the UTC day', () => {
     const LT = rec('localTime');

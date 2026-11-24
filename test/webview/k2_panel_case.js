@@ -32,7 +32,8 @@ async function main() {
     assert.strictEqual(st.inputs.Lb, 72);
     assert.strictEqual(st.sources.Lb, 'user');
     // 다른 쓰는 이(파일)가 Lb 를 바꾼 뒤, 그것을 보지 못한 화면 변경(baseRev 1)은 Lb 를 덮지 않는다
-    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'file', changes: { Lb: 96 } } });
+    // V9b-05: 화면의 caseEdit 는 'file' 이라 말해도 값을 바꾸면 사람의 편집이다 — 다른 쓰는 이는 호스트의 길(AI 의 set_case_inputs)로
+    await p.handleMcpAction({ action: 'set_case_inputs', inputs: { Lb: 96 } });
     p.__testClearPostedMessages();
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: 1, changes: { Lb: 80, Cb: 1.2 } } });
     ack = posted('caseAck').pop();
@@ -40,6 +41,27 @@ async function main() {
     assert(posted('caseState').length === 1, 'state pushed back to the page after a conflict');
     st = p.__testGetCase().state;
     assert.deepStrictEqual([st.inputs.Lb, st.inputs.Cb], [96, 1.2]);
+    // ── V9b-05: 출처는 닫힌 집합, 메아리 출처는 값을 바꾸지 못한다(바꾸면 사람의 편집 — 출처 user) ─────────
+    p.__testClearPostedMessages();
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'anything', changes: { Cb: 1.3 } } });
+    ack = posted('caseAck').pop();
+    assert(ack.data.rejected[0].reason_code === 'host.case.bad_origin' && p.__testGetCase().state.inputs.Cb === 1.2, 'an invented origin is refused');
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', changes: { Cb: 1.2 * (1 + 1e-13) } } });
+    st = p.__testGetCase().state;
+    assert.strictEqual(st.sources.Cb, 'user', 'a mirror echo (display rounding) keeps the source');
+    await p.handleMcpAction({ action: 'set_case_inputs', inputs: { Cb: 1.27 } });
+    assert.strictEqual(p.__testGetCase().state.sources.Cb, 'ai');
+    p.__testClearPostedMessages();
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'file', changes: { Cb: 1.4 } } });
+    st = p.__testGetCase().state;
+    ack = posted('caseAck').pop();
+    assert(st.inputs.Cb === 1.27 && st.sources.Cb === 'ai' && ack.data.rejected[0].reason_code === 'host.case.file_outside_window' && posted('caseState').length === 1,
+      'a page «file» edit outside the open window is refused, the state re-sent: ' + JSON.stringify([st.inputs.Cb, st.sources.Cb, ack.data]));
+    // V9b-08: 편집 상태는 사람의 길로만 — 화면 채널의 editSession 은 아무것도 하지 않는다
+    await p.__testDispatchMessage({ command: 'editSession', data: { state: 'start' } });
+    assert.strictEqual(p._session, null, 'editSession from the page channel is refused');
+    assert(p.editSession('start').ok && p._session, 'the person path (panel.editSession) works');
+    p.editSession('end');
 
     // ── 저장: 1.4, 상태에서 ───────────────────────────────────────────────
     const f1 = path.join(dir, 'a.csd');

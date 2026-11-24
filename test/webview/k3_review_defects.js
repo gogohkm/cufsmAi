@@ -54,6 +54,30 @@ t('D4 — lap fastener shear passed by the engine is not "not checked"', () => {
   const c = run(env({ design: flex([]), lap, load: la }));
   assert.strictEqual(item(c, 'Lap 패스너 전단').status, 'pass');
 });
+t('V9a-03 — the lap flexure item follows the engine verdicts, not flexure_checked alone', () => {
+  const la = { laps_per_support: [{ left_ft: 0, right_ft: 0 }, { left_ft: 3, right_ft: 3 }, { left_ft: 0, right_ft: 0 }], governing: { locations: [] } };
+  const mk = (local, h2) => ({ utilization: 0.7, pass: null, V_transfer: 1, capacity: 2, flexure_checked: true, flexure_dcr_governing: 0.708, phi_Mn_lap: 100,
+    design_checks: [{ id: 'lap.fastener_group', verdict: 'pass' }, { id: 'lap.flexure.local', verdict: local, name_ko: '랩 국부 휨' },
+      { id: 'lap.flexure.distortional', verdict: 'not_applicable' }, { id: 'lap.bending_shear', verdict: h2, name_ko: '휨 + 전단' }] });
+  // 진술 없음 + AI 가 준 Se: 국부 미평가 · H2 통과 0.708(옛 엔진) — 「통과」 가 아니다
+  let c = run(env({ design: flex([]), lap: mk('not_evaluated', 'pass'), load: la }));
+  assert.strictEqual(item(c, 'Lap 휨강도 DCR').status, 'warn');
+  assert(/판정 없음/.test(item(c, 'Lap 휨강도 DCR').value), 'reads 판정 없음');
+  c = run(env({ design: flex([]), lap: mk('pass', 'fail'), load: la }));
+  assert.strictEqual(item(c, 'Lap 휨강도 DCR').status, 'fail');
+  c = run(env({ design: flex([]), lap: mk('pass', 'pass'), load: la }));
+  assert.strictEqual(item(c, 'Lap 휨강도 DCR').status, 'pass');
+});
+t('V9a-07 — purlin mode: no 「Mu(+) 미입력」 when the purlin checked the positive regions; Lb(+)/Cb(+) stays; the lap region item is one member', () => {
+  const la = { laps_per_support: [{ left_ft: 0, right_ft: 0 }, { left_ft: 3, right_ft: 3 }, { left_ft: 0, right_ft: 0 }], governing: { locations: [] } };
+  const d = flex([], { purlin_mode: true, positive_region: { Lb: 0, Cb: 1, utilization: null }, design_lap: { utilization: 1.08, pass: false, design_strength: 51.4 } });
+  const c = run(env({ design: d, load: la }));
+  assert(!item(c, '이용률 — 정모멘트'), 'no 「Mu(+) 미입력」 in purlin mode');
+  assert(item(c, 'Lb(+) / Cb(+)'), 'the Lb(+)/Cb(+) item stays');
+  assert(item(c, 'Lap 구간 휨강도 (§F3, 한 부재)'), 'the lap region item says one member');
+  const c2 = run(env({ design: flex([], { positive_region: { Lb: 0, Cb: 1, utilization: null } }) }));
+  assert(/미입력/.test(item(c2, '이용률 — 정모멘트').value), 'outside purlin mode the missing Mu(+) still reads 미입력');
+});
 t('D6 — Fy consistency compares the analysis reference stress with the design Fy', () => {
   const c = run(env({ inputs: { fy: 42.79 } }));   // 모델 loadFy 50 (AI 가 정한 기준응력)
   assert.strictEqual(item(c, 'Fy 일관성').status, 'warn');

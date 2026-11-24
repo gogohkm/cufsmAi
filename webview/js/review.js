@@ -62,7 +62,7 @@
         lip_dt: { value: 60, criterion: '비보강 요소(립) d/t ≤ 60 (표 B4.1-1)', source: '표 B4.1-1', engine: 'check_dsm_limits lip d/t 60' },
         unstiff_dt_note: { value: 30, criterion: 'd/t > 30 이면 변형이 눈에 띔 (표 B4.1-1 주석 b)', source: '표 B4.1-1 주석 b' },
         corner_rt: { value: 20, criterion: '안쪽 굽힘 반경 R/t ≤ 20 (표 B4.1-1, DSM)', source: '표 B4.1-1', engine: 'check_dsm_limits corner R/t 20' },
-        fy_max: { value: 95, unit: 'ksi', source: '표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict)', engine: 'check_dsm_limits Fy < 95 (strict)' },
+        fy_max: { value: 95, unit: 'ksi', source: '표 B4.1-1(DSM 적용 한계 — 부등호 strict)', engine: 'check_dsm_limits Fy < 95 (strict)' },
         fu_fy: { value: 1.08, criterion: 'Fu/Fy ≥ 1.08 (§I6.2.1(o) — R 계수법의 조건)', source: '§I6.2.1(o)', engine: 'bracing.py i621 (o)' },
         span_i621: { value: 33, unit: 'ft', criterion: '§I6.2.1(h) R 계수법: 경간 ≤ 33 ft', source: '§I6.2.1(h)', engine: 'bracing.py i621 (h) span <= 33 ft' },
         spacing_max: { value: 8, unit: 'ft', source: '프로그램 경험값(원문 한계 없음)' },
@@ -192,6 +192,8 @@
         function _ruv(v, ut) { return fmtVal(v, ut); }
 
         function _rul(ut) { return unitLabel(ut); }
+        /** V9a-06: 화면 칸에서 읽은 수(그 단위 그대로)를 보이는 자리로 — 유효숫자 4(「379.211651124 MPa」 → 「379.2 MPa」) */
+        function _dn(v) { return typeof v === 'number' && isFinite(v) ? String(Number(v.toPrecision(4))) : String(v); }
 
         /** K3-6: 엔진 결과의 검토 항목(design_checks)에서 id 로 */
         function _engineCheck(r, id) {
@@ -319,7 +321,7 @@
             checks.push({
                 category: catB, item: '항복강도 (Fy)',
                 status: fy > 0 ? (fy < toDisplay(THRESHOLDS.fy_max.value,'stress') ? 'pass' : 'fail') : 'fail',
-                value: fy+' '+_rul('stress'),
+                value: _dn(fy)+' '+_rul('stress'),
                 criterion: 'Fy < '+_ruv(THRESHOLDS.fy_max.value,'stress')+' '+_rul('stress')+' (' + THRESHOLDS.fy_max.source + ')',
                 note: fy >= toDisplay(THRESHOLDS.fy_max.value,'stress') ? '적용 한계 초과 — ' + THRESHOLDS.fy_max.source + '.' : (fy <= 0 ? 'Fy가 지정되지 않았습니다.' : ''),
             });
@@ -335,7 +337,7 @@
             checks.push({
                 category: catB, item: '인장강도 (Fu)',
                 status: fu > 0 ? (fu > fy ? 'pass' : 'fail') : 'fail',
-                value: fu+' '+_rul('stress'),
+                value: _dn(fu)+' '+_rul('stress'),
                 criterion: 'Fu > Fy',
                 note: fu <= fy ? 'Fu는 Fy보다 커야 합니다.' : '',
             });
@@ -542,7 +544,7 @@
             checks.push({
                 category: catE, item: '분담폭 (간격)',
                 status: spacing > 0 ? (spacing <= toDisplay(THRESHOLDS.spacing_max.value,'length_ft') ? 'pass' : 'warn') : 'fail',
-                value: spacing+' '+_rul('length_ft'),
+                value: _dn(spacing)+' '+_rul('length_ft'),
                 criterion: '간격 > 0; 일반 '+_ruv(4,'length_ft')+'-'+_ruv(6,'length_ft')+' '+_rul('length_ft'),
                 note: spacing > toDisplay(8,'length_ft') ? '큰 간격 — 하중 분배를 확인하세요.' : '',
             });
@@ -550,7 +552,7 @@
             checks.push({
                 category: catE, item: '고정하중 (D)',
                 status: loadD > 0 ? 'pass' : 'warn',
-                value: loadD+' '+_rul('pressure'),
+                value: _dn(loadD)+' '+_rul('pressure'),
                 criterion: 'D > 0 예상 (자중 + 지붕재)',
                 note: loadD <= 0 ? '고정하중 없음? 자중은 포함해야 합니다. 일반: '+_ruv(5,'pressure')+'-'+_ruv(15,'pressure')+' '+_rul('pressure')+'.' : '',
             });
@@ -559,7 +561,7 @@
             checks.push({
                 category: catE, item: '중력 활하중/적설하중',
                 status: hasGravity ? 'pass' : 'warn',
-                value: [loadLr>0?'Lr='+loadLr:'',loadS>0?'S='+loadS:'',loadL>0?'L='+loadL:''].filter(Boolean).join(', ')+' '+_rul('pressure') || '없음',
+                value: [loadLr>0?'Lr='+_dn(loadLr):'',loadS>0?'S='+_dn(loadS):'',loadL>0?'L='+_dn(loadL):''].filter(Boolean).join(', ')+' '+_rul('pressure') || '없음',
                 criterion: '최소 하나의 중력 활하중 예상',
                 note: !hasGravity ? '활하중/적설하중 없음 — 맞습니까?' : '',
             });
@@ -963,19 +965,24 @@
                         note: _negLb2 <= 0 ? 'Lb=0 → 완전 구속 가정. 실제 조건을 확인하세요.' : (_negCb2 > 2.3 ? 'Cb > 2.3 — 매우 높은 값. 모멘트 다이어그램을 확인하세요.' : ''),
                     });
                 } else if (d.utilization != null) {
+                    // 계약 §6.4: 주 소요를 주지 않았으면 이용률은 평가한 것 가운데의 비일 뿐(utilization_valid: false) — 판정 없음으로, 그 까닭과
+                    const _uInvalid = d.utilization_valid === false;
                     checks.push({
                         category: catG, item: '이용률 (DCR)',
-                        status: _statusFromVerdict(_v3(d), d.utilization),
-                        value: (d.utilization*100).toFixed(1)+'% — '+_v3(d).short,
+                        status: _uInvalid ? (d.pass === false ? 'fail' : 'warn') : _statusFromVerdict(_v3(d), d.utilization),
+                        value: _uInvalid ? (d.pass === false ? (d.utilization*100).toFixed(1)+'% — '+_v3(d).short+' (소요 일부 없음)' : '판정 없음 — 주 소요를 주지 않음')
+                            : (d.utilization*100).toFixed(1)+'% — '+_v3(d).short,
                         criterion: 'DCR ≤ 100%',
                         note: d.utilization > 1.0 ? '과응력 — 설계 요구사항 미충족.' : '',
                     });
                 }
 
                 // ── 이용률: 정모멘트 ──
+                // V9a-07: 퍼린 모드는 정모멘트 구간을 퍼린 설계가 구간마다 평가했다 — 지배 구간의 positive_region 이 비었다고
+                // 「Mu(+) 미입력」 이라 하지 않는다(그 판정은 퍼린 구간 결과 · Lb(+)/Cb(+) 항목에)
                 if (d.positive_region && d.member_type === 'flexure') {
                     var _posR = d.positive_region;
-                    checks.push({
+                    if (!(d.purlin_mode === true && _posR.utilization == null)) checks.push({
                         category: catG, item: '이용률 — 정모멘트 (+M)',
                         status: _posR.utilization != null ? _statusFromVerdict(_v3(_posR), _posR.utilization) : 'warn',
                         value: _posR.utilization != null ? (_posR.utilization*100).toFixed(1)+'%' : 'Mu(+) 미입력',
@@ -1066,11 +1073,12 @@
                     // Lap 구간 휨강도 (2겹 합산)
                     var lapDesign = d.design_lap || null;
                     if (lapDesign) {
+                        // V9a-07: 퍼린의 랩 구간 결과는 **한 부재**의 설계강도(엔진이 한 부재로 이름 붙인다) — 2겹 합산은 랩 접합 검토(아래 「Lap 휨강도 DCR」)
                         checks.push({
-                            category: catG2, item: 'Lap 구간 휨강도 (§F3, 2겹)',
+                            category: catG2, item: 'Lap 구간 휨강도 (§F3, 한 부재)',
                             status: _statusFromVerdict(_v3(lapDesign), lapDesign.utilization),
                             value: (lapDesign.design_strength != null ? (_ruv(lapDesign.design_strength, 'moment') + ' ' + _rul('moment')) : '미계산') + ' — ' + _v3(lapDesign).short,
-                            criterion: '2겹 합산 φMn ≥ 지점 Mu (AISI Ex. II-2A)',
+                            criterion: '퍼린 랩 구간의 한 부재 검토(엔진의 구간 판정) — 2겹 합산 휨은 Lap 접합부 검토',
                             note: lapDesign.utilization != null ? 'DCR=' + lapDesign.utilization.toFixed(3) : '',
                         });
                     }
@@ -1114,13 +1122,21 @@
                         });
                         // Lap 휨강도 DCR
                         var _lrGov = (_lr.flexure_dcr_governing != null) ? _lr.flexure_dcr_governing : _lr.flexure_dcr;
-                        if (_lrGov != null) {
+                        // V9a-03: 이 항목의 판정은 엔진 검토 항목(국부 · 뒤틀림 · H2)의 판정을 따른다 — flexure_checked 하나로 「통과」 를 짓지 않는다.
+                        // 하나라도 불합격이면 실패, 하나라도 미평가면 주의(판정 없음), 판정이 있는 것이 모두 통과일 때만 통과
+                        const _lfx = ['lap.flexure.local', 'lap.flexure.distortional', 'lap.bending_shear'].map((id) => _engineCheck(_lr, id)).filter(Boolean);
+                        const _lfxSt = _lfx.map(_engineStatus).filter((s) => s !== null);
+                        if (_lrGov != null || _lfxSt.length) {
+                            const _st = _lfxSt.includes('fail') ? 'fail' : _lfxSt.includes('warn') ? 'warn'
+                                : _lfxSt.length ? _statusFromVerdict(_v3(true), _lrGov) : _statusFromVerdict(_ratioVerdict(_lrGov, false), _lrGov);
+                            const _ne = _lfx.filter((c) => _engineStatus(c) === 'warn');
                             checks.push({
                                 category: catG2, item: 'Lap 휨강도 DCR (2겹 §F3/F4/H2)',
-                                status: _statusFromVerdict(_ratioVerdict(_lrGov, _lr.flexure_checked === true), _lrGov),
-                                value: 'DCR=' + _lrGov.toFixed(3) + ' (φMn=' + _ruv(_lr.phi_Mn_lap, 'moment') + ' ' + _rul('moment') + ')',
+                                status: _st,
+                                value: _lrGov != null ? 'DCR=' + _lrGov.toFixed(3) + ' (φMn=' + _ruv(_lr.phi_Mn_lap, 'moment') + ' ' + _rul('moment') + ')' + (_st === 'warn' ? ' — 판정 없음' : '') : '판정 없음',
                                 criterion: '2겹 합산 휨강도 DCR ≤ 1.0',
-                                note: _lrGov > 1.0 ? 'Lap 구간 휨강도 부족 — 단면을 키우거나 Fy를 높이세요.' : '',
+                                note: _st === 'fail' ? 'Lap 구간 휨강도 부족 — 단면을 키우거나 Fy를 높이세요.'
+                                    : _ne.length ? '판정 없음 — ' + _ne.map((c) => _engineNote(c) || c.id).join('; ') : '',
                             });
                         }
                         // 종합
@@ -1682,7 +1698,7 @@
         ['val.design.lb_cb_positive', 'Lb(+) / Cb(+) (정모멘트)'],  ['val.design.interaction', '조합 검토 (§H1.2)'],
         ['val.design.dsm_warning', 'DSM 경고 #', true], ['val.design.fallback', '뒤틀림좌굴 해석적 Fallback'], ['val.design.warning', '설계 경고 #', true],
         ['val.design.dsm_extract_warning', 'DSM 추출 경고'],
-        ['val.lap.flexure', 'Lap 구간 휨강도 (§F3, 2겹)'], ['val.lap.length', 'Lap 길이 (지점 ', true], ['val.lap.fastener', 'Lap 패스너 전단 (DCR)'],
+        ['val.lap.flexure', 'Lap 구간 휨강도 (§F3, 한 부재)'], ['val.lap.length', 'Lap 길이 (지점 ', true], ['val.lap.fastener', 'Lap 패스너 전단 (DCR)'],
         ['val.lap.flexure_dcr', 'Lap 휨강도 DCR (2겹 §F3/F4/H2)'], ['val.lap.overall', 'Lap 접합부 종합 판정'], ['val.lap.run', 'Lap 접합부 설계 실행 여부'],
         ['val.consistency.fy', 'Fy 일관성 (해석 vs 설계)'], ['val.consistency.analysis_current', '해석 최신성'],
     ];

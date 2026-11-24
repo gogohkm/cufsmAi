@@ -29,7 +29,28 @@ export function caseFileOk(rel: unknown): rel is string {
     return segs.every((s) => !segmentError(s));
 }
 
+const STREAM_RE = /^w[a-z2-7]{20}(?:-[2-9])?$/;
+const LOG_TYPES = ['cases', 'changes', 'runs', 'work', 'assumptions', 'sources', 'reviews', 'alternatives', 'documents'];
 function readCaseBody(event: string, b: Record<string, any>): Record<string, any> | null {
+    // V9b-04: 대상이 아니라 기록 줄 파일에 대한 사람의 줄 — 어느 종류의 어느 줄 파일 · 옮긴 파일(이름 · 해시 · 크기) · 옮긴 곳 · 본 끝
+    if (event === 'quarantine' || event === 'accept-shrunk') {
+        if (!b || !LOG_TYPES.includes(b.type) || typeof b.streamName !== 'string' || !STREAM_RE.test(b.streamName)) { return null; }
+        const out: Record<string, any> = { type: b.type, streamName: b.streamName };
+        if (event === 'quarantine') {
+            if (!Array.isArray(b.files) || b.files.length > 1000 || typeof b.movedTo !== 'string' || b.movedTo.length > 300) { return null; }
+            out.files = [];
+            for (const f of b.files) {
+                if (!f || typeof f.name !== 'string' || f.name.length > 80 || typeof f.sha256 !== 'string' || !SHA_RE.test(f.sha256) || !Number.isSafeInteger(f.size)) { return null; }
+                out.files.push({ name: f.name, sha256: f.sha256, size: f.size });
+            }
+            out.movedTo = b.movedTo;
+            out.damage = { broken: Number(b.damage?.broken) || 0, chainBreaks: Number(b.damage?.chainBreaks) || 0, shrunk: b.damage?.shrunk === true };
+        } else {
+            if (!Number.isSafeInteger(b.expectedSeq) || !Number.isSafeInteger(b.foundSeq)) { return null; }
+            out.expectedSeq = b.expectedSeq; out.foundSeq = b.foundSeq;
+        }
+        return out;
+    }
     if (!b || typeof b.caseId !== 'string' || !CASE_ID_RE.test(b.caseId)) { return null; }
     const out: Record<string, any> = { caseId: b.caseId };
     if (event === 'create' || event === 'import' || event === 'discovered') {

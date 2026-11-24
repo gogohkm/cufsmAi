@@ -415,7 +415,7 @@
         'host.issue.unsaved-changes': { kind: 'reason', template: 'There are unsaved changes.', template_ko: '저장하지 않은 변경이 있습니다.', params: {} },
         'host.issue.no-draft': { kind: 'reason', template: 'There is no draft of the calculation report.', template_ko: '계산서 초안이 없습니다 — 초안을 만드십시오.', params: {} },
         'host.issue.stale-draft': { kind: 'reason', template: 'The draft differs from the current state.', template_ko: '초안이 지금 상태와 다릅니다 — 새 초안을 만드십시오.', params: {} },
-        'host.issue.damaged-records': { kind: 'reason', template: 'The records are damaged.', template_ko: '기록이 손상되었습니다.', params: {} },
+        'host.issue.damaged-records': { kind: 'reason', template: 'The records of a trusted writer are damaged — set the damaged stream aside (quarantine) or accept a restored shorter stream (person only).', template_ko: '믿는 작성자의 기록이 손상되었습니다 — 손상된 줄 파일을 옆으로 옮기거나(격리) 백업에서 되살린 줄어든 줄 파일을 받아들이십시오(사람만).', params: {} },
         'host.issue.read-only': { kind: 'reason', template: 'The case or project is read-only.', template_ko: '이 검토 대상 · 프로젝트는 읽기 전용입니다.', params: {} },
         'host.issue.unknown-issue-folder': { kind: 'reason', template: 'An issue folder exists that the records do not know.', template_ko: '기록에 없는 발행 폴더가 있습니다 — 그 폴더를 치우십시오.', params: {} },
         'host.issue.report-notices': { kind: 'warning', template: 'The results carry warnings.', template_ko: '결과에 경고가 있습니다.', params: {} },
@@ -465,6 +465,15 @@
         'host.case.reload_echo': { kind: 'reason', template: 'the reloaded page drew the state differently — not an edit', template_ko: '다시 실은 화면이 상태를 다르게 그렸을 뿐 — 편집이 아닙니다', params: {} },
         'host.case.older_than_open': { kind: 'reason', template: 'made before a file was opened — not applied', template_ko: '파일을 열기 전의 화면에서 만든 변경 — 넣지 않았습니다', params: {} },
         'host.case.guarded_fill': { kind: 'reason', template: 'set after the load analysis — the load-analysis fill does not replace it', template_ko: '하중 해석 뒤에 정한 값 — 하중 해석 채우기가 덮지 않습니다', params: {} },
+        // 원자료 열기(독립 프로그램)를 하지 않은 까닭
+        'host.source.outside': { kind: 'reason', template: 'the source is not inside the project source folder', template_ko: '원자료가 프로젝트의 01_원자료 안에 있지 않습니다(또는 링크를 거칩니다)', params: {} },
+        'host.source.link': { kind: 'reason', template: 'the source is not a plain file', template_ko: '원자료가 보통 파일이 아닙니다(링크 · 폴더)', params: {} },
+        'host.source.missing': { kind: 'reason', template: 'the source file is missing', template_ko: '원자료 파일이 없습니다', params: {} },
+        'host.source.changed': { kind: 'reason', template: 'the source changed since it was registered', template_ko: '등록한 뒤 원자료가 바뀌었습니다 — 다시 등록하십시오', params: {} },
+        'host.source.type': { kind: 'reason', template: 'this file type is not opened by the document viewer', template_ko: '이 종류의 파일은 문서 보기로 열지 않습니다', params: {} },
+        'host.case.file_outside_window': { kind: 'reason', template: 'a page «file» edit outside the open window — not applied', template_ko: '파일을 연 바로 뒤가 아닌 화면의 「파일」 변경 — 넣지 않았습니다', params: {} },
+        'host.case.no_seen_rev': { kind: 'reason', template: 'a page linkage edit without the revision it was made on — not applied', template_ko: '만든 판이 없는 화면 연동 변경 — 넣지 않았습니다', params: {} },
+        'host.case.bad_origin': { kind: 'reason', template: 'not a known origin of a page edit — not applied', template_ko: '알 수 없는 출처의 화면 변경 — 넣지 않았습니다', params: {} },
         'host.case.invalid_value': { kind: 'reason', template: 'the value is not valid for this field', template_ko: '이 칸에 맞지 않는 값입니다', params: {} },
         'host.case.conflict': { kind: 'reason', template: 'changed by someone else after the page read it — not overwritten', template_ko: '화면이 읽은 뒤 다른 쪽(AI · 파일)이 바꾼 칸 — 덮지 않았습니다', params: {} },
         'host.case.not_case_key': { kind: 'reason', template: 'not a field of the case state', template_ko: '검토 상태의 칸이 아닙니다', params: {} },
@@ -526,7 +535,7 @@
         add: '추가', update: '고침', close: '닫음', reopen: '다시 엶', answer: '답(AI 가 옮겨 적음)', mark: '확인 표시', unmark: '확인 취소',
         keep: '대안으로 둠', rename: '이름 바꿈', drop: '숨김', undrop: '되살림', draft: '초안', export: '내보냄', issue: '발행', 'issue-failed': '실패한 발행',
         register: '등록', change: '변경', run: '실행', prune: '사본 정리', create: '만듦', import: '가져옴', discovered: '발견', opened: '엶', saved: '저장',
-        external: '밖에서 바뀜', relink: '다시 이음', archive: '보관', unarchive: '꺼냄',
+        external: '밖에서 바뀜', relink: '다시 이음', archive: '보관', unarchive: '꺼냄', quarantine: '격리(옆으로 옮김)', 'accept-shrunk': '줄어든 기록을 받아들임',
     };
 
     /** 결과 종류 → 한국어 이름(업무 항목의 참조 · 장부) */

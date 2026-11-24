@@ -238,6 +238,11 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
     const top = p.split(/[.[]/)[0];
     if (IGNORE_TOP.has(top) && (p === top || top === 'timestamp')) { continue; }
     if (/(^|\.)report$/.test(p) && typeof v === 'string') { continue; }
+    // V9a-06 ①: §I6.2.1 의 옛 이름표 목록(US 글)은 SI 답에서 뺀다 — 그 대신 checks_omitted 와 conditions[]
+    if (/(^|\.)i621_check\.checks\[/.test(p)) {
+      assert(ls.has(p.replace(/checks\[.*$/, 'checks_omitted')), `${tool}: i621_check.checks dropped without a note`);
+      continue;
+    }
     assert(ls.has(p), `${tool}: SI result lost ${p}`);
     const s = ls.get(p);
     if (typeof v === 'number') {
@@ -303,7 +308,7 @@ const qFactor = (q) => {
 };
 const sameScaled = (us, si, f) => (us === 0 ? si === 0 : Math.abs(si / (us * f) - 1) < 1e-12);
 // quantity 가 붙지 않은 design_checks 안의 수: 키 → 계수 이름('none' = 그대로). 그 밖의 수가 나오면 실패한다.
-const DC_PLAIN = { ratio: 'none', digits: 'none', step: 'none', Cb: 'none', span: 'none', support: 'none', region_support: 'none', Lb: 'length' };
+const DC_PLAIN = { ratio: 'none', digits: 'none', sig_digits: 'none', step: 'none', Cb: 'none', span: 'none', support: 'none', region_support: 'none', Lb: 'length' };
 
 /**
  * US · SI 결과의 모든 design_checks 를 맞댄다: {value, quantity} 의 value = US × qFactor(quantity),

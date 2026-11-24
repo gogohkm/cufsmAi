@@ -67,7 +67,7 @@
   {
    "id": "analyze_loads.inputsChanged",
    "expect": "pin",
-   "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd.",
+   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0.",
    "value": {
     "design-fy": {
      "before": "295",
@@ -182,15 +182,15 @@
      "after": "1"
     },
     "design-V": {
-     "before": "0",
+     "before": "",
      "after": "7.94"
     },
     "design-Mx": {
-     "before": "0",
+     "before": "",
      "after": "6.3"
     },
     "design-Mx-pos": {
-     "before": "0",
+     "before": "",
      "after": "9.6"
     },
     "design-dist-M1M2": {
@@ -222,11 +222,11 @@
      "after": "3"
     },
     "conn-Mu": {
-     "before": "0",
+     "before": "",
      "after": "11.86"
     },
     "conn-Vu": {
-     "before": "0",
+     "before": "",
      "after": "7.94"
     },
     "conn-Fy": {
@@ -314,6 +314,14 @@
      "from": {
       "expect": "pin",
       "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — 경간 · 지점 · Lap · 하중 · 간격 · 데크 · ASD. 하중 해석이 채운 칸은 호스트가 합친 상태를 다시 보내 그대로 남는다(staleView)"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "milestone-2-demand",
+     "from": {
+      "expect": "pin",
+      "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd."
      },
      "date": "2026-11-24"
     }

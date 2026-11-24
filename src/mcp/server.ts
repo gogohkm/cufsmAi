@@ -260,6 +260,8 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
     const { value: converted, unconverted } = convertOutputSIDeep(forTable, table);
     // 퍼린 요약(표시 값): SI 로 바꾼 뒤에도 표시 자릿수로(바꾼 수의 긴 자리를 싣지 않는다)
     const value = forTable.__display_rounded ? purlinDisplaySI(converted) : converted;
+    // V9a-06 ①: §I6.2.1 의 옛 이름표 목록(i621_check.checks — 「(a) d <= 12 in.」 같은 US 글)은 SI 답에 싣지 않는다 — 조건(conditions[])이 값 · 한계를 SI 로
+    dropI621Labels(value, 0);
     const out: any = { ...sh(value), units: 'SI', text_units: 'US', units_note: TEXT_UNITS_NOTE };
     if (held !== undefined) { out.case_inputs_replaced = held; }
     if (typeof out.report === 'string') {
@@ -571,6 +573,17 @@ function purlinDisplaySI(v: any): any {
     }
     return out;
 }
+/** SI 답에서 i621_check.checks(US 단위의 옛 이름표 글 목록)를 뺀다 — 깊이 4 까지 */
+function dropI621Labels(v: any, depth: number): void {
+    if (!v || typeof v !== 'object' || depth > 4) { return; }
+    if (Array.isArray(v)) { for (const x of v) { dropI621Labels(x, depth + 1); } return; }
+    const ic = v.i621_check;
+    if (ic && typeof ic === 'object' && Array.isArray(ic.checks)) {
+        delete ic.checks;
+        ic.checks_omitted = 'the §I6.2.1 condition labels are US-unit text — conditions[] carry each value and limit in SI';
+    }
+    for (const k of Object.keys(v)) { if (k !== 'i621_check') { dropI621Labels(v[k], depth + 1); } }
+}
 function purlinDisplayValues(r: any): any {
     if (!Array.isArray(r.regions)) { return r; }
     const out: any = { ...r };
@@ -766,6 +779,8 @@ const VERDICT = "Verdict `pass`: true = every applicable limit state was evaluat
 const UNITS_MEMBER = z.enum(['US', 'SI']).optional().describe("Units of the numeric inputs and of the numeric results. 'US' (default): in, in², ksi, kips, kip-in. 'SI': mm, mm², MPa, kN, kN-m (inputs are converted exactly; results converted back). Engine text (report, formulas, warnings) stays in US units.");
 const UNITS_LOADS = z.enum(['US', 'SI']).optional().describe("Units of inputs and results. 'US' (default): spans/positions ft, line loads plf (lb/ft), section dimensions in, stresses ksi; results: moments kip-ft, shears/reactions kips, unbraced lengths and deflections in. 'SI': m, kN/m, mm, MPa; results kN-m, kN, mm. Engine text stays in US units.");
 const UNITS_GEOM = z.enum(['US', 'SI']).optional().describe("Units of the dimensional inputs: 'US' (default) in / ksi / kips / kip-in, or 'SI' mm / MPa / kN / kN-m (converted to the engine's US units). The panel model itself is stored in US units.");
+/** 계약 §6.3 · §6.4: 준 0 의 진술 — 빈칸은 「주지 않음」(판정 없음), 0 은 이것과 함께일 때만 0 */
+const ZDS = z.boolean().optional().describe("Statement that a main demand you send as 0 really is 0 (e.g. checking shear only, or a zero-moment angle call) — a statement, not an empty field. Omit a demand you were not given: a missing main demand (or a 0 without this) makes the checks that use it not evaluated and pass null, never a pass.");
 const DM = z.enum(["ASD", "LRFD"]).optional().describe("Design basis. Omit → the engine's default LRFD (echoed as result.design_method). LSD is not implemented.");
 const FY_DESIGN = z.number().positive().describe("Design (virgin) yield stress Fy — ksi, or MPa if units='SI'. Required: the tool never assumes a steel grade.");
 // K4a: 검토 항목 계약(docs/implementation/20261123-check-contract.md) — 결과의 design_checks 를 한 문장으로 알린다.
@@ -1518,6 +1533,7 @@ server.tool("aisi_design_compression",
     "AISI S100-16 Chapter E compression design (DSM) of the current section. " + MEMBER_NOTE
     + "Missing effective lengths are reported (E2 not evaluated), never assumed. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
+        zero_demand_stated: ZDS,
         design_method: DM,
         Fy: FY_DESIGN,
         Fu: z.number().positive().optional().describe("Tensile strength Fu — ksi, or MPa if units='SI' (used where a check needs it; never assumed)"),
@@ -1538,6 +1554,7 @@ server.tool("aisi_design_flexure",
     "AISI S100-16 Chapter F flexure design (DSM) of the current section, with optional §G2 shear + §H2 (give Vu), §G5 web crippling + §H3 (give wc_N, wc_R …), a separate positive-moment region (Lb_pos, Cb_pos, Mu_pos), §I6.2.1 uplift R (C/Z only) and inelastic reserve / cold work. " + MEMBER_NOTE
     + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked only when wc_N and wc_R are given and is otherwise simply absent (the GUI always sends a bearing length) — give them for any member with bearing at supports or concentrated loads. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
+        zero_demand_stated: ZDS,
         design_method: DM,
         Fy: FY_DESIGN,
         Fu: z.number().positive().optional().describe("Tensile strength Fu — ksi, or MPa (needed for §I6.2.1 (o) Fu/Fy ≥ 1.08 with R_uplift)"),
@@ -1572,6 +1589,7 @@ server.tool("aisi_design_flexure",
 server.tool("aisi_design_combined",
     "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
+        zero_demand_stated: ZDS,
         design_method: DM,
         Fy: FY_DESIGN,
         Fu: z.number().positive().optional().describe("Tensile strength Fu — ksi, or MPa (needed for tension H1.1)"),
@@ -1605,6 +1623,7 @@ server.tool("aisi_design_combined",
 server.tool("aisi_design_tension",
     "AISI S100-16 Chapter D tension design of the current section: D2 yielding (Ag·Fy) and D3 rupture (An·Fu). Without Fu the rupture check is not evaluated (Tn_rupture null, pass null). Without An the engine uses An = Ag and warns. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
+        zero_demand_stated: ZDS,
         design_method: DM,
         Fy: FY_DESIGN,
         Fu: z.number().positive().optional().describe("Tensile strength Fu — ksi, or MPa (required for D3 rupture)"),
@@ -1639,6 +1658,7 @@ const J6_PART2 = z.object({
 const CONNECTION_FIELDS = {
     connection_type: z.enum(["bolt", "screw", "fillet_weld", "arc_spot", "arc_seam", "groove", "paf"]).describe("Connection type"),
     design_method: DM,
+    zero_demand_stated: ZDS,
     Fy: z.number().positive().describe("Yield stress of the connected sheet (t1 for screws/PAF) — ksi, or MPa if units='SI'"),
     Fu: z.number().positive().describe("Tensile strength of the connected sheet — ksi, or MPa"),
     t1: z.number().positive().describe("Sheet thickness 1 — in, or mm. Screws and PAF: t1 = the sheet IN CONTACT with the head/washer; welds: see the type notes in the description."),
@@ -1976,7 +1996,8 @@ server.tool("validate_design",
 server.tool("design_lap_connection",
     "Lap splice of continuous C/Z purlins at a support: §I6.2.1(g) lap length, fastener demand and count, fastener strength (Chapter J engine, end distance incl. J6.1), lap flexure (§F, two members), distortional (§F4) and §H2. "
     + "IN-HOUSE ASSUMPTION (not a specification provision, §A1.2(c) rational analysis): the fastener demand is V_transfer = max(Mu/(d − t), Vu) shared equally by all fasteners — the result's `force_model` describes it; report it to the user as an assumption. "
-    + "Without Se (effective section modulus for Mnl) the lap flexure is not checked → pass null / verdict NOT_CHECKED — but do NOT send Sf without Se: the engine currently substitutes Sf for a missing Se (gross section, unconservative; F6 follow-up). Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. " + VERDICT + DESIGN_CHECKS + " The nested fastener_design has its own design_checks (conn.*)." + SUMMARY_NOTE,
+    + "Without Se (effective section modulus for Mnl) the lap flexure is not checked → pass null / verdict NOT_CHECKED (Sf is used only as a reference value, never in place of Se). "
+    + "Demands: omit Mu_support / Vu_support you were not given — a missing demand is NOT zero: every check that uses it is not evaluated (lap.reason.demand_not_given) and the lap cannot pass. Send 0 only with zero_demand_stated: true when the person stated the support demand is zero. Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. " + VERDICT + DESIGN_CHECKS + " The nested fastener_design has its own design_checks (conn.*)." + SUMMARY_NOTE,
     {
         d: z.number().positive().describe("Member depth — in, or mm if units='SI'"),
         t: z.number().positive().describe("Member thickness — in, or mm"),
@@ -1984,8 +2005,9 @@ server.tool("design_lap_connection",
         Fu: z.number().positive().describe("Tensile strength Fu — ksi, or MPa"),
         lap_left_in: z.number().nonnegative().describe("Lap length from the support centre to the left lap end — in, or mm"),
         lap_right_in: z.number().nonnegative().describe("Lap length from the support centre to the right lap end — in, or mm"),
-        Mu_support: z.number().describe("Required moment at the support (magnitude) — kip-in, or kN-m"),
-        Vu_support: z.number().describe("Required shear at the support — kips, or kN"),
+        Mu_support: z.number().optional().describe("Required moment at the support (magnitude) — kip-in, or kN-m. Omit when not given (not evaluated); 0 counts only with zero_demand_stated"),
+        Vu_support: z.number().optional().describe("Required shear at the support — kips, or kN. Omit when not given (not evaluated); 0 counts only with zero_demand_stated"),
+        zero_demand_stated: z.boolean().optional().describe("The person stated that the support demand is zero — only then does a 0 Mu_support / Vu_support count as zero"),
         fastener_type: z.enum(['screw', 'bolt']).describe("Fastener type"),
         fastener_dia: z.number().positive().describe("Fastener diameter — in, or mm"),
         n_rows: z.number().int().min(1).optional().describe("Number of fastener rows (omit → engine 2)"),

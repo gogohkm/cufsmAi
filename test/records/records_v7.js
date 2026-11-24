@@ -32,7 +32,8 @@ async function run() {
   function appendSigned(file, writer, fields) {
     const ls = fs.existsSync(file) ? linesOf(file) : [];
     const last = ls.length ? JSON.parse(ls[ls.length - 1]) : null;
-    const v = { at: '2026-11-24T00:00:00Z', project: PID, actor: { kind: 'ai' }, seq: last ? last.seq + 1 : 1, prev: last ? 'sha256:' + C.sha256Hex(ls[ls.length - 1]) : null, ...fields };
+    // 시각은 늘 「지금」 뒤 — 읽기는 시각 차례로 내고, 손으로 덧붙인 줄이 진짜 줄 뒤에 온다고 보는 시험(M7)이 있다(박아 둔 날짜가 지나자 차례가 뒤집혔다)
+    const v = { at: '2099-01-01T00:00:00Z', project: PID, actor: { kind: 'ai' }, seq: last ? last.seq + 1 : 1, prev: last ? 'sha256:' + C.sha256Hex(ls[ls.length - 1]) : null, ...fields };
     fs.appendFileSync(file, C.canonicalJson({ ...v, sig: { w: writer.writerId, s: writer.sign(W.signingBytes(v)) } }) + '\n');
   }
 

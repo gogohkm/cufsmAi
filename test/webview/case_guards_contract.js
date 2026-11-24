@@ -103,9 +103,28 @@ async function main() {
     ack = posted('caseAck').pop();
     assert.strictEqual(p.__testGetCase().state.inputs.connFy, 40, 'a stale mirror echo does not undo the AI write');
     assert.deepStrictEqual(ack.data.conflicts, ['connFy']);
+    // V9b-05: 같은 값(보이는 자리 안)의 메아리는 아무것도 쓰지 않는다 — 출처 · 변경 줄 그대로
+    const lines0 = p._changeLines().lines.length;
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', seenRev: p.__testGetCase().state.rev, changes: { connFy: 40 * (1 + 1e-13) } } });
+    assert(p.__testGetCase().state.sources.connFy === 'ai' && Math.abs(p.__testGetCase().state.inputs.connFy - 40) < 1e-9 && p._changeLines().lines.length === lines0, 'an echo of the AI value keeps the value (display rounding), the AI as the source, and writes no change line');
     await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', seenRev: p.__testGetCase().state.rev, changes: { connFy: 45 } } });
     assert.strictEqual(p.__testGetCase().state.inputs.connFy, 45, 'a mirror change on the current rev is taken');
-    notes.push('V7-S1 mirror on seenRev');
+    // V9b-05: 그 연동은 사람의 변경 줄로(via mirror), 꼬리표는 사실대로 mirror
+    p._changes.flush();
+    const cl = p._changeLines().lines.slice(lines0);
+    assert(cl.length === 1 && cl[0].actor.kind === 'person' && JSON.stringify(cl[0].body.via) === '["mirror"]' && cl[0].body.fields.some((x) => x.path === 'case.inputs.connFy')
+      && p.__testGetCase().state.sources.connFy === 'mirror', 'the linkage change is a person line with via mirror: ' + JSON.stringify(cl.map((x) => [x.actor.kind, x.body.via, x.body.fields.map((y) => y.path)])));
+    // 본 판이 없는 연동 · 모르는 출처 · 연 창 밖의 file 은 받지 않는다
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', changes: { connFy: 47 } } });
+    ack = posted('caseAck').pop();
+    assert(p.__testGetCase().state.inputs.connFy === 45 && ack.data.rejected[0].reason_code === 'host.case.no_seen_rev', 'a linkage edit without its revision is refused');
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'invented', seenRev: p.__testGetCase().state.rev, changes: { connFy: 47 } } });
+    ack = posted('caseAck').pop();
+    assert(p.__testGetCase().state.inputs.connFy === 45 && ack.data.rejected[0].reason_code === 'host.case.bad_origin', 'an invented origin is refused');
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'file', seenRev: p.__testGetCase().state.rev, changes: { connFy: 47 } } });
+    ack = posted('caseAck').pop();
+    assert(p.__testGetCase().state.inputs.connFy === 45 && ack.data.rejected[0].reason_code === 'host.case.file_outside_window', '«file» outside the open window is refused');
+    notes.push('V7-S1 mirror on seenRev; V9b-05 linkage = a person line with via, echoes write nothing, no seen rev · invented origin · file outside the window refused');
 
     console.log(`case_guards_contract: PASS (${notes.join('; ')})`);
   } finally {

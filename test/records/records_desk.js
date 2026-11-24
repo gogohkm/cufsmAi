@@ -1,4 +1,4 @@
-/* global require, module, process, Buffer, __dirname */
+/* global require, module, Buffer, __dirname */
 // R1-2(1 걸음) — 데스크(src/records/desk.ts): 프로젝트 · 검토 대상 · 잠금 · 색인 · 실행 이력 · 열기 · 저장 훅 · 상태 · 사람만의 얼굴.
 // 패널 없이 — 모든 것을 주입한다(임시 폴더의 뿌리 · 열쇠 자리, 가짜 시계 · 엔진 id). 진짜 %LOCALAPPDATA% · %APPDATA% 를 쓰지 않는다.
 // 적대적인 것(⚔): 꾸민 프로젝트 폴더(선언에 폴더 역할 · 절대 경로, 남의 열쇠로 서명한 줄, 해시가 틀린 사본, 심은 잠금, 미리 만든 발행 폴더)는
@@ -237,7 +237,7 @@ async function run() {
     assert.deepStrictEqual([s.results.member_design.state, s.results.load_analysis.state, s.results.lap.state, s.results.buckling_analysis.state],
       ['match', 'differs', 'stale', 'none']);
     assert.strictEqual(s.runs.length, 3);
-    assert.deepStrictEqual(s.records, { unverified: 0, untrusted: 0, broken: 0, chainBreaks: 0, shrunk: 0, readOnly: false });
+    assert.deepStrictEqual(s.records, { unverified: 0, untrusted: 0, broken: 0, chainBreaks: 0, shrunk: 0, readOnly: false, untrustedDamage: 0 });
     w.setEngine(ENGINE2);
     assert.strictEqual(desk.caseStatus({ current: { member_design: { resultFp: F.resultFp(A) } } }).results.member_design.state, 'other-engine');
     assert(!JSON.stringify(s).includes(w.base), 'no absolute path in the status');
@@ -537,6 +537,83 @@ async function run() {
       assert(!/LOCALAPPDATA|APPDATA|homedir\(|defaultKeyDir/.test(src), `${f}.ts`);
     }
     void P;
+  });
+  // ── V9b: 독립 프로그램의 「원자료 열기」 — 01_원자료 안의 진짜 경로 · 등록한 해시 · 문서 종류일 때만 경로, 아니면 code ──
+  await t('source open path: inside 01_원자료, the registered bytes and a viewer type only — otherwise a coded refusal; person-only', () => {
+    const w = world(); const desk = w.make();
+    desk.openProject('P', { create: true });
+    const dir = fs.realpathSync.native(path.join(w.root, 'P'));
+    const srcDir = path.join(dir, '01_원자료');
+    fs.writeFileSync(path.join(srcDir, 'dwg.pdf'), '%PDF-1.4 drawing');
+    fs.writeFileSync(path.join(srcDir, 'run.bat'), 'echo hi');
+    w.ctxRef.ctx = CX.cleanContext({ kind: 'ai', requestId: 'r-1', tool: 'sources' });
+    const s1 = desk.writeSource('register', { path: '01_원자료/dwg.pdf' });
+    const s2 = desk.writeSource('register', { path: '01_원자료/run.bat' });
+    assert.throws(() => desk.person.sourceToOpen(s1.item), /person-only/);
+    w.ctxRef.ctx = undefined;
+    const ok = desk.person.sourceToOpen(s1.item);
+    assert(ok.path === fs.realpathSync.native(path.join(srcDir, 'dwg.pdf')) && ok.openable === true && ok.state === 'same' && ok.why === null && ok.ext === 'pdf', 'the real path of a registered pdf: ' + JSON.stringify(ok));
+    const ex = desk.person.sourceToOpen(s2.item); assert(ex.path === null && ex.openable === false && ex.why === 'host.source.type', 'an executable type: no path, coded why ' + JSON.stringify(ex));
+    fs.appendFileSync(path.join(srcDir, 'dwg.pdf'), 'x');
+    const ch = desk.person.sourceToOpen(s1.item); assert(ch.path === null && ch.state === 'changed' && ch.why === 'host.source.changed', 'changed bytes: no path ' + JSON.stringify(ch));
+    fs.unlinkSync(path.join(srcDir, 'dwg.pdf'));
+    const mi = desk.person.sourceToOpen(s1.item); assert(mi.path === null && mi.state === 'missing' && mi.why === 'host.source.missing', 'missing ' + JSON.stringify(mi));
+    assert.strictEqual(desk.person.sourceToOpen('S-99').why, 'host.source.missing');
+  });
+  // ── V9b-04: 손상된 기록 — 믿지 않는 작성자의 것은 막지 않고, 믿는 작성자의 것은 사람이 격리 · 받아들임으로 빠져나온다 ──
+  await t('V9b-04 damaged records: an untrusted or planted stream does not block; own damage is quarantined or a restored shrink accepted by the person, with a signed line', () => {
+    const w = world(); const desk = w.make();
+    desk.openProject('P', { create: true });
+    const c = desk.newCase('P1', 'roof-purlin', (r) => csd(r));
+    desk.afterOpen(c.abs, fs.readFileSync(c.abs));
+    for (let i = 0; i < 3; i += 1) { desk.onRun('member_design', `{"i":${i}}`, { pass: true, utilization: 0.5 }); }
+    const dir = fs.realpathSync.native(path.join(w.root, 'P'));
+    const runsDir = path.join(dir, '.stcfsd', 'log', 'runs');
+    const health = () => desk.caseStatus().records;
+    assert.deepStrictEqual([health().broken, health().chainBreaks, health().shrunk], [0, 0, 0], 'clean');
+    const caseLog = () => new L.RecordLog({ rootReal: dir, projectId: desk.status().project.projectId, spec: CS.CASES_SPEC, host: 'test-host', keyDir: w.keyDir })
+      .read(W.readTrust(w.keyDir).store, new Map(), undefined, { recordSeen: false });
+    // ⚔ 한 줄짜리 쓰레기 · 서명 없는 줄 파일(모르는 작성자 이름) — 막지 않는다(따로 보인다)
+    const planted = path.join(runsDir, 'w' + 'q'.repeat(20) + '.jsonl');
+    fs.writeFileSync(planted, 'not json at all\n{"schema":"stcfsd-runs/1"}\n');
+    let h = health();
+    assert(h.broken === 0 && h.chainBreaks === 0 && h.untrustedDamage >= 1, 'a planted stream is not damage that blocks: ' + JSON.stringify(h));
+    assert.deepStrictEqual(desk.person.recordsDamage(), [], 'and is not offered for quarantine (not a trusted writer)');
+    fs.unlinkSync(planted);
+    // 자기 줄 파일의 가운데를 깬다 → 막는다 → 사람이 격리 → 풀린다, 서명된 줄과 옮긴 파일의 해시
+    const own = fs.readdirSync(runsDir).find((n) => /^w[a-z2-7]{20}\.jsonl$/.test(n));
+    const ownFile = path.join(runsDir, own);
+    const keep = fs.readFileSync(ownFile);
+    const lines = keep.toString('utf8').split('\n');
+    fs.writeFileSync(ownFile, [lines[0], '{"broken": tru', ...lines.slice(1)].join('\n'));
+    h = health();
+    assert(h.broken >= 1, 'own damage blocks: ' + JSON.stringify(h));
+    const dmg = desk.person.recordsDamage();
+    assert(dmg.length === 1 && dmg[0].type === 'runs' && dmg[0].own === true && dmg[0].broken >= 1, 'listed for the person: ' + JSON.stringify(dmg));
+    w.ctxRef.ctx = CX.cleanContext({ kind: 'ai', requestId: 'r-1', tool: 'x' });
+    assert.throws(() => desk.person.resolveDamage({ type: 'runs', stream: dmg[0].stream, action: 'quarantine' }), /person-only/, 'person-only');
+    w.ctxRef.ctx = undefined;
+    const q = desk.person.resolveDamage({ type: 'runs', stream: dmg[0].stream, action: 'quarantine' });
+    assert(q.files === 1 && /^\.stcfsd\/quarantine\/runs\//.test(q.movedTo) && fs.existsSync(path.join(dir, ...q.movedTo.split('/'), own)) && !fs.existsSync(ownFile), 'moved aside: ' + JSON.stringify(q));
+    h = health();
+    assert(h.broken === 0 && h.shrunk === 0 && h.chainBreaks === 0, 'unblocked after the quarantine: ' + JSON.stringify(h));
+    const caseLines = caseLog().lines.filter((l) => l.event === 'quarantine');
+    assert(caseLines.length === 1 && caseLines[0].actor.kind === 'person' && caseLines[0].body.files[0].sha256 === crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, ...q.movedTo.split('/'), own))).digest('hex'),
+      'a signed person line says what was set aside: ' + JSON.stringify(caseLines[0] && caseLines[0].body));
+    // 다시 쓰면 새 줄 파일 — 줄어듦으로 보이지 않는다
+    desk.onRun('member_design', '{"i":9}', { pass: true, utilization: 0.4 });
+    assert.strictEqual(health().shrunk, 0, 'the new stream is not «shrunk»');
+    // 백업에서 되살린 줄어든 자기 줄 파일 → 막는다 → 받아들임
+    const own2 = fs.readdirSync(runsDir).find((n) => /^w[a-z2-7]{20}\.jsonl$/.test(n));
+    desk.onRun('member_design', '{"i":10}', { pass: true, utilization: 0.4 });
+    const full = fs.readFileSync(path.join(runsDir, own2), 'utf8').split('\n').filter(Boolean);
+    fs.writeFileSync(path.join(runsDir, own2), full.slice(0, -1).join('\n') + '\n');
+    assert(health().shrunk >= 1, 'a restored (shorter) stream reads shrunk');
+    const d2 = desk.person.recordsDamage().find((d) => d.shrunk);
+    assert.throws(() => desk.person.resolveDamage({ type: 'cases', stream: d2.stream, action: 'accept' }), /not damaged/);
+    const a = desk.person.resolveDamage({ type: d2.type, stream: d2.stream, action: 'accept' });
+    assert(a.action === 'accept' && health().shrunk === 0, 'accepted: ' + JSON.stringify(health()));
+    assert(caseLog().lines.some((l) => l.event === 'accept-shrunk' && l.actor.kind === 'person' && l.body.expectedSeq > l.body.foundSeq), 'signed accept line');
   });
   return done();
 }

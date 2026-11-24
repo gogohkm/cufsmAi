@@ -238,6 +238,31 @@ async function main() {
     await tool('set_section_template', { type: 'lippedc', H: 8, B: 2.5, D: 0.625, t: 0.065, r: 0.1 });
     await tool('save_case', {});
     for (const [n, b] of Object.entries(snap)) { assert(fs.readFileSync(path.join(r0, n)).equals(b), `R0/${n} byte-identical after a model change and save`); }
+    // S3(V9b): 같은 크기로 고치고 수정 시각을 되돌린 발행본도 「고쳐짐」(시각으로 건너뛰지 않는다)
+    {
+      const fx = path.join(r0, 'Beam.validation.R0.html');
+      const st0 = fs.statSync(fx);
+      const b = fs.readFileSync(fx);
+      const k = b.indexOf('검증');
+      b[k + 3] = b[k + 3] ^ 1;
+      fs.writeFileSync(fx, b);
+      fs.utimesSync(fx, st0.atime, st0.mtime);
+      const dl3 = await tool('documents', { action: 'list' });
+      assert(dl3.issues[0].state === 'edited', 'an edit with the mtime restored is still 고쳐짐: ' + JSON.stringify(dl3.issues[0]));
+      b[k + 3] = b[k + 3] ^ 1;
+      fs.writeFileSync(fx, b);
+      fs.utimesSync(fx, st0.atime, st0.mtime);
+      assert.strictEqual((await tool('documents', { action: 'list' })).issues[0].state, 'same', 'restored');
+      // S2(V9b): 초안 파일도 그 draft 줄의 해시와 — 고친 초안은 「고쳐짐」
+      const dr = (await tool('documents', { action: 'list' })).drafts[0];
+      assert.strictEqual(dr.file_state, 'same');
+      const dfile = path.join(pdir, ...dr.files[0].split('/'));
+      const dkeep = fs.readFileSync(dfile);
+      fs.appendFileSync(dfile, '<!-- x -->');
+      const dr2 = (await tool('documents', { action: 'list' })).drafts.find((x) => x.item === dr.item);
+      assert(dr2.file_state === 'edited' && dr2.files_changed[0].path === dr.files[0], 'an edited draft reads edited: ' + JSON.stringify(dr2));
+      fs.writeFileSync(dfile, dkeep);
+    }
     // 손으로 고친 발행본 → 고쳐짐
     fs.appendFileSync(path.join(r0, 'Beam.calc.R0.html'), '<!-- edited -->');
     dl = await tool('documents', { action: 'list' });

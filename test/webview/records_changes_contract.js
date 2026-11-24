@@ -25,6 +25,9 @@ async function main() {
   const ctx = await createPanel();
   if (!ctx) { console.log('records_changes_contract: SKIP — no .venv python'); return; }
   const p = ctx.panel;
+  // V9b-08: 편집 상태는 사람의 길로만 — 다리가 사람의 문맥에서 panel.editSession 을 부르는 것처럼
+  const personScope = ctx.load(require('path').join('src', 'mcp', 'actorScope.ts'));
+  const session = (st) => personScope.runAs({ kind: 'person' }, () => p.editSession(st));
   const S = ctx.StcfsdPanel;
   const box = fs.mkdtempSync(path.join(os.tmpdir(), 'stcfsd_r22_'));
   const root = path.join(box, 'roots'); fs.mkdirSync(root);
@@ -109,23 +112,23 @@ async function main() {
 
     // ── 편집 상태: 사람 묶음 하나, 되돌리기도 새 묶음 ──
     let n0 = (await changes({ limit: 100 })).total;
-    await page('editSession', { state: 'start' });
+    session('start');
     await page('caseEdit', { origin: 'user', changes: { Lb: 100 } });
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.5 } });
-    await page('editSession', { state: 'end' });
+    session('end');
     lc = await changes({ limit: 100 });
     assert.strictEqual(lc.total, n0 + 1, 'one edit session = one bundle');
     assert(lc.changes[0].by.kind === 'person' && lc.changes[0].fields === 2 && lc.changes[0].trigger === 'edit-session', 'person bundle: ' + JSON.stringify(lc.changes[0]));
-    await page('editSession', { state: 'start' });
+    session('start');
     await page('caseEdit', { origin: 'user', changes: { Lb: 3000 / 25.4 } });
-    await page('editSession', { state: 'end' });
+    session('end');
     lc = await changes({ limit: 100 });
     assert(lc.total === n0 + 2 && lc.changes[0].by.kind === 'person' && lc.changes[0].fields === 1, 'the undo is a new bundle');
     notes.push('edit session: one person bundle, the undo another');
 
     // ── 다른 행위자가 끼면 닫는다 ──
     n0 = lc.total;
-    await page('editSession', { state: 'start' });
+    session('start');
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.1 } });
     // 묻기만 하는 요청(바뀐 것 없음)은 끼어듦이 아니다 — 사람의 묶음은 그대로
     await tool('get_case_inputs', { keys: ['Cb'] });
@@ -134,7 +137,7 @@ async function main() {
     assert.strictEqual((await changes({ limit: 100 })).total, n0, 'and writes no line');
     await tool('set_case_inputs', { inputs: { Cb: 1.25 } });
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.3 } });
-    await page('editSession', { state: 'end' });
+    session('end');
     lc = await changes({ limit: 100 });
     assert.deepStrictEqual(lc.changes.slice(0, 3).map((c) => c.by.kind), ['person', 'ai', 'person'], 'an AI call inside an edit session splits it: ' + JSON.stringify(lc.changes.slice(0, 3)));
     notes.push('read-only MCP requests leave the edit session open; an AI change inside it splits it (person · ai · person)');

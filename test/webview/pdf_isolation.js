@@ -121,6 +121,13 @@ async function t(name, fn) { try { await fn(); results.push(['ok', name]); } cat
       ['<meta http-equiv="refresh" content="0;url=http://h/">', (o) => o === ''],
       ['<![CDATA[<img src=x onerror=1>]]><p>c</p>', (o) => !/onerror/.test(o)],
       ['<p>unterminated <div title="abc', (o) => !/<div/.test(o)],
+      // V9b-07: RCDATA(title) — 안의 것은 글. 속성 안의 </title> 로 빠져나와 img 를 만들지 못한다
+      ['<title><b title="</title><img src=x onerror=alert(1)>">t</title><p>k</p>', (o) => !/<img/i.test(o) && /<p>k<\/p>/.test(o)],
+      ['<title>a</TITLE ><img src=x onerror=1>', (o) => !/onerror/.test(o)],
+      // V9b-07: HTML 의 공백이 아닌 \v · NBSP 는 </style 를 끝내지 않는다 — 그 뒤의 url( 는 style 안(블록째 지움)
+      ['<style>p{color:red}</style\u000b><div>u</div>{background:url(//h/x)}</style><p>z</p>', (o) => !/url\(/.test(o) && /<p>z<\/p>/.test(o)],
+      ['<style>p{color:red}</style >x{background:url(//h/x)}</style>', (o) => !/url\(/.test(o)],
+      ['<style>p{color:red}</style foo>{background:url(//h/x)}', (o) => /<style>p\{color:red\}<\/style>/.test(o) && !/<style>[^<]*url\(/.test(o)],
     ];
     for (const [input, ok] of cases) {
       const out = PP.sanitizeForPrint(input);

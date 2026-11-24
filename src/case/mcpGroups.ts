@@ -81,8 +81,15 @@ const WC: Record<string, string> = {
 };
 const USE: Record<string, string> = { use_inelastic_reserve: 'chkInelasticReserve', use_cold_work: 'chkColdWork' };
 
+/** 계약 §6.4: 「준 0 은 정말 0」 의 진술 → 검토 상태의 그 칸(화면 칸과 같은 키) — 늘 그 도구의 값으로(주지 않으면 거짓) */
+function zds(a: any, w: McpWrite, used: Set<string>): void {
+    used.add('zero_demand_stated');
+    put(w, 'group', 'designZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated');
+}
+
 const memberFlexure: Mapper = (a, w) => {
     const used = new Set<string>();
+    zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'flexure';
     blank(w, ['Lb', 'Cb', 'Mux', 'Vu', 'designLbPos', 'designCbPos', 'designMxPos', 'wcP', 'wcSupport', 'chkRFactor', 'rValue',
@@ -101,6 +108,7 @@ const memberFlexure: Mapper = (a, w) => {
 
 const memberCompression: Mapper = (a, w) => {
     const used = new Set<string>();
+    zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'compression';
     blank(w, ['KxLx', 'KyLy', 'KtLt', 'Pu']);
@@ -110,6 +118,7 @@ const memberCompression: Mapper = (a, w) => {
 
 const memberCombined: Mapper = (a, w) => {
     const used = new Set<string>();
+    zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'combined';
     blank(w, ['KxLx', 'KyLy', 'KtLt', 'Lb', 'Cb', 'Cmx', 'Cmy', 'chkBetaDist', 'distM1M2', 'Pu', 'Mux', 'Muy', 'MayStrength', 'Vu']);
@@ -121,6 +130,7 @@ const memberCombined: Mapper = (a, w) => {
 
 const memberTension: Mapper = (a, w) => {
     const used = new Set<string>();
+    zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'tension';
     blank(w, ['Pu']);
@@ -227,8 +237,10 @@ const lap: Mapper = (a, w) => {
     material(a, w, used);
     const t: Record<string, string> = { lap_left_in: 'connLapLeft', lap_right_in: 'connLapRight', Mu_support: 'connMu', Vu_support: 'connVu',
         fastener_type: 'connFastenerType', fastener_dia: 'connFastenerDia', n_rows: 'connNRows', end_distance: 'connEdgeDist', Pnvs: 'connLapPnvs' };
-    blank(w, [...Object.values(t), 'lapRestrained']);
+    blank(w, [...Object.values(t), 'lapRestrained', 'connZeroDemandStated']);
     direct(a, w, t, used);
+    // 계약 §6.3: 0 은 밝혔을 때만 — 그 진술도 검토 상태에(화면의 칸과 같은 키)
+    if (a.zero_demand_stated !== undefined) { used.add('zero_demand_stated'); put(w, 'group', 'connZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated'); }
     // 계약 §6.3: 랩 구속의 진술(옛 이름 distortion_restrained) — 퍼린과 같은 검토 상태 키
     if (a.lap_restrained !== undefined || a.distortion_restrained !== undefined) {
         used.add('lap_restrained'); used.add('distortion_restrained');

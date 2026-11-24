@@ -15,7 +15,7 @@
   {
    "id": "design_connection.inputsChanged",
    "expect": "pin",
-   "reason": "K2 결함(desktop 작성자): caseState 가 모델 칸(E · ν · G · 단면 치수 · 해석 조건)을 싣지 않는다 — 옛 초안이 modelLoaded 의 새 값을 덮던 경주. 그래서 MCP design_connection 뒤 E 칸의 글을 다시 적지 않는다(전: 10 → 12 자리로 다시 적음). 값은 그대로",
+   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0.",
    "value": {
     "input-E": {
      "before": "203395.340148",
@@ -74,7 +74,7 @@
      "after": "5.3"
     },
     "conn-Pu": {
-     "before": "0",
+     "before": "",
      "after": "8.9"
     },
     "conn-e": {
@@ -106,6 +106,14 @@
       "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — 접합 유형 · t1/t2 · d · n · Fy/Fu · Pu …(E 글은 D-5 의 12 자리)"
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "milestone-2-demand",
+     "from": {
+      "expect": "pin",
+      "reason": "K2 결함(desktop 작성자): caseState 가 모델 칸(E · ν · G · 단면 치수 · 해석 조건)을 싣지 않는다 — 옛 초안이 modelLoaded 의 새 값을 덮던 경주. 그래서 MCP design_connection 뒤 E 칸의 글을 다시 적지 않는다(전: 10 → 12 자리로 다시 적음). 값은 그대로"
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -219,7 +227,7 @@
   {
    "id": "design_lap_connection.inputsChanged",
    "expect": "pin",
-   "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — Lap 길이 · Mu/Vu · 패스너 · 행 · Pnvs · Fy/Fu",
+   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0.",
    "value": {
     "design-fy": {
      "before": "295",
@@ -258,11 +266,11 @@
      "after": "1066.8"
     },
     "conn-Mu": {
-     "before": "0",
+     "before": "",
      "after": "5.93170352395"
     },
     "conn-Vu": {
-     "before": "0",
+     "before": "",
      "after": "4.00339945373"
     },
     "conn-fastener-dia": {
@@ -294,6 +302,14 @@
       "reason": "K2: a design condition set through MCP must show in the edit-state input fields (acceptance criterion 1) — lap lengths, Mu/Vu, fastener, rows, Pnvs do not reach the page"
      },
      "date": "2026-11-22"
+    },
+    {
+     "step": "milestone-2-demand",
+     "from": {
+      "expect": "pin",
+      "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — Lap 길이 · Mu/Vu · 패스너 · 행 · Pnvs · Fy/Fu"
+     },
+     "date": "2026-11-24"
     }
    ]
   },

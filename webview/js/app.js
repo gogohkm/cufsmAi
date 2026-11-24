@@ -1168,8 +1168,9 @@
                 Fu: reqNum('design-fu', 'stress', '설계 Fu'),
                 lap_left_in: reqNum('conn-lap-left', 'length', '좌측 Lap'),
                 lap_right_in: reqNum('conn-lap-right', 'length', '우측 Lap'),
-                Mu_support: zeroNum('conn-Mu', 'moment', '지점 Mu'),
-                Vu_support: zeroNum('conn-Vu', 'force', '지점 Vu'),
+                // V9a-02: 비운 칸은 보내지 않는다(0 이 아니다 — 엔진이 그 소요를 쓰는 검토를 판정 없음으로)
+                Mu_support: _optNum('conn-Mu', 'moment'),
+                Vu_support: _optNum('conn-Vu', 'force'),
                 fastener_type: document.getElementById('conn-fastener-type')?.value || 'screw',
                 fastener_dia: reqNum('conn-fastener-dia', 'length', '패스너 직경 d'),
                 n_rows: reqNum('conn-n-rows', null, '행 수'),
@@ -1183,6 +1184,8 @@
             };
             // 계약 §6.3: 랩 구속의 진술 — 퍼린 탭과 같은 검토 상태 키(lapRestrained, 이 칸은 거울)
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked) { data.lap_restrained = true; }
+            // 계약 §6.3: 0 은 밝혔을 때만
+            if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-conn-zero-demand'))?.checked) { data.zero_demand_stated = true; }
             if (_blockIfMissing('Lap 접합부')) { return; }
             vscode.postMessage({ command: 'runLapConnection', data });
         });
@@ -1207,7 +1210,7 @@
                 t1: reqNum('conn-t1', 'thickness', 't1'),
                 Fy: reqNum('conn-Fy', 'stress', '접합 Fy'),
                 Fu: reqNum('conn-Fu', 'stress', '접합 Fu'),
-                Pu: zeroNum('conn-Pu', 'force', 'Pu'),
+                Pu: _optNum('conn-Pu', 'force'),
                 design_method: document.getElementById('select-design-method')?.value || 'LRFD',
             };
             // F6 판정 입력(엔진 인자 이름): 빈 칸은 보내지 않는다 — 엔진이 무엇이 빠졌는지 「판정 없음」으로 알린다.
@@ -4156,14 +4159,15 @@
             Cb_pos: _optNum('design-Cb-pos', null),
             Cmx: _optNum('design-Cmx', null),
             Cmy: _optNum('design-Cmy', null),
-            Pu: zeroNum('design-P', 'force', 'Pu'),
-            Mu: zeroNum('design-Mx', 'moment', 'Mu'),
-            Mu_pos: zeroNum('design-Mx-pos', 'moment', 'Mu(+)'),
-            Mux: zeroNum('design-Mx', 'moment', 'Mux'),
-            Muy: zeroNum('design-My', 'moment', 'Muy'),
+            // 계약 §6.4: 비운 소요는 보내지 않는다(0 이 아니다)
+            Pu: _optNum('design-P', 'force'),
+            Mu: _optNum('design-Mx', 'moment'),
+            Mu_pos: _optNum('design-Mx-pos', 'moment'),
+            Mux: _optNum('design-Mx', 'moment'),
+            Muy: _optNum('design-My', 'moment'),
             May_strength: _optNum('design-May-strength', 'moment'),
-            Vu: zeroNum('design-V', 'force', 'Vu'),
-            Tu: zeroNum('design-P', 'force', 'Tu'),
+            Vu: _optNum('design-V', 'force'),
+            Tu: _optNum('design-P', 'force'),
             // 웹 크리플링: 지압 길이 N 을 넣었을 때만 검토(V4-18). 반력 칸이 비면 엔진이 대신 쓰는 값을 밝힌다.
             wc_N: _optNum('design-wc-N', 'length'),
             wc_P: _optNum('design-wc-P', 'force'),
@@ -4200,6 +4204,8 @@
                 const span = opt ? opt.getAttribute('data-span') : null;
                 return span ? { R_uplift: R, span_type: span } : { R_uplift: R };
             })(),
+            // 계약 §6.4: 「준 0 은 정말 0」 — 사람이 칸으로 밝혔을 때만(호스트의 요청과 같은 자리 — 끝)
+            ...((/** @type {HTMLInputElement|null} */ (document.getElementById('chk-design-zero-demand')))?.checked ? { zero_demand_stated: true } : {}),
         };
     }
     function showDesignValidation(msg, focusId) {
@@ -5267,60 +5273,54 @@
 
     function _autoFillLapInputs(data) {
         if (!data) return false;
-        // Lap 길이: laps_per_support에서 최대값
-        var maxLapL = 0, maxLapR = 0;
         var lps = data.laps_per_support;
-        if (lps && lps.length > 0) {
-            lps.forEach(function(lp) {
-                if (!lp) return;
-                var lft = (lp.left_ft || 0) * 12;   // ft → in
-                var rft = (lp.right_ft || 0) * 12;
-                if (lft > maxLapL) maxLapL = lft;
-                if (rft > maxLapR) maxLapR = rft;
-            });
-        }
-        if (maxLapL > 0) {
-            var elL = document.getElementById('conn-lap-left');
-            if (elL) elL.value = toDisplay(maxLapL, 'length').toFixed(1);
-        }
-        if (maxLapR > 0) {
-            var elR = document.getElementById('conn-lap-right');
-            if (elR) elR.value = toDisplay(maxLapR, 'length').toFixed(1);
-        }
+        var setLen = function (id, inches) {
+            var el = document.getElementById(id);
+            if (el) { el.value = inches === null ? '' : toDisplay(inches, 'length').toFixed(1); }
+        };
         // 지점 Mu, Vu: 지점 부모멘트(Mu<0)에서 최대 절대값 — Lap 접합부에 전달
         // 선택 로직은 StcfsdDesignState.selectLapGoverningMoment 공용 순수함수
         // (§4 이슈2A 회귀 고정 — node 테스트로 잠금).
         var gov = data.governing || data.gravity;
-        if (gov && gov.locations) {
-            var helper = globalThis.StcfsdDesignState;
-            var sel = helper && helper.selectLapGoverningMoment
-                ? helper.selectLapGoverningMoment(gov.locations)
-                : { negMuFt: null, maxVu: 0, negMuName: null, negMuSupport: null };
-            // V8-01: 부모멘트가 가장 큰 지점 — 랩 탭은 그 지점의 랩 길이와 그 지점 랩 구간의 강도를 쓴다(최대 길이를 지점끼리 섞지 않는다)
-            if (sel.negMuSupport != null) {
-                var elSup = document.getElementById('conn-lap-support');
-                if (elSup) elSup.value = String(sel.negMuSupport);
-                var lpAt = lps && lps[sel.negMuSupport - 1];
-                if (lpAt) {
-                    var elL2 = document.getElementById('conn-lap-left');
-                    var elR2 = document.getElementById('conn-lap-right');
-                    if (elL2 && (lpAt.left_ft || 0) > 0) elL2.value = toDisplay((lpAt.left_ft || 0) * 12, 'length').toFixed(1);
-                    if (elR2 && (lpAt.right_ft || 0) > 0) elR2.value = toDisplay((lpAt.right_ft || 0) * 12, 'length').toFixed(1);
-                }
+        var helper = globalThis.StcfsdDesignState;
+        var sel = gov && gov.locations && helper && helper.selectLapGoverningMoment
+            ? helper.selectLapGoverningMoment(gov.locations)
+            : { negMuFt: null, maxVu: 0, negMuName: null, negMuSupport: null };
+        var filledL = 0, filledR = 0;
+        if (sel.negMuSupport != null) {
+            // V8-01 · V9a-04: 부모멘트가 가장 큰 지점이 정해지면 그 지점의 랩 길이만 — 한쪽이 0 이면 0, 그 지점에 랩이 없으면 비움
+            // (다른 지점의 길이를 남기지 않는다 — 패스너 배치 · 1.5d 조건이 그 지점의 길이로 검토되게)
+            var elSup = document.getElementById('conn-lap-support');
+            if (elSup) elSup.value = String(sel.negMuSupport);
+            var lpAt = lps && lps[sel.negMuSupport - 1];
+            if (lpAt && ((lpAt.left_ft || 0) > 0 || (lpAt.right_ft || 0) > 0)) {
+                filledL = (lpAt.left_ft || 0) * 12; filledR = (lpAt.right_ft || 0) * 12;
+                setLen('conn-lap-left', filledL); setLen('conn-lap-right', filledR);
+            } else {
+                setLen('conn-lap-left', null); setLen('conn-lap-right', null);
             }
-            if (sel.negMuFt != null) {
-                var elMu = document.getElementById('conn-Mu');
-                // locations.Mu는 kip-ft, conn-Mu는 moment(kip-in) 단위 → ×12 변환 필요
-                if (elMu) elMu.value = toDisplay(Math.abs(sel.negMuFt) * 12, 'moment').toFixed(2);
-                // 선택 근거를 타이틀로 노출 (결과 분석성)
-                if (elMu && sel.negMuName) elMu.title = '자동입력: ' + sel.negMuName + ' 부모멘트 ' + sel.negMuFt.toFixed(2) + ' kip-ft';
-            }
-            if (sel.maxVu > 0) {
-                var elVu = document.getElementById('conn-Vu');
-                if (elVu) elVu.value = toDisplay(sel.maxVu, 'force').toFixed(2);
-            }
+        } else if (lps && lps.length > 0) {
+            // 지점을 정하지 못했으면(부모멘트 없음) 옛 규칙 — 모든 지점의 최대(보수 측, 지점을 고르면 그 지점 값으로 바뀐다)
+            lps.forEach(function (lp) {
+                if (!lp) return;
+                filledL = Math.max(filledL, (lp.left_ft || 0) * 12);
+                filledR = Math.max(filledR, (lp.right_ft || 0) * 12);
+            });
+            if (filledL > 0) { setLen('conn-lap-left', filledL); }
+            if (filledR > 0) { setLen('conn-lap-right', filledR); }
         }
-        return maxLapL > 0 || maxLapR > 0;
+        if (sel.negMuFt != null) {
+            var elMu = document.getElementById('conn-Mu');
+            // locations.Mu는 kip-ft, conn-Mu는 moment(kip-in) 단위 → ×12 변환 필요
+            if (elMu) elMu.value = toDisplay(Math.abs(sel.negMuFt) * 12, 'moment').toFixed(2);
+            // 선택 근거를 타이틀로 노출 (결과 분석성)
+            if (elMu && sel.negMuName) elMu.title = '자동입력: ' + sel.negMuName + ' 부모멘트 ' + sel.negMuFt.toFixed(2) + ' kip-ft';
+        }
+        if (sel.maxVu > 0) {
+            var elVu = document.getElementById('conn-Vu');
+            if (elVu) elVu.value = toDisplay(sel.maxVu, 'force').toFixed(2);
+        }
+        return filledL > 0 || filledR > 0;
     }
 
     // Copy Report 버튼
@@ -5834,7 +5834,8 @@
             .replace(/([\d.]+)\s*in\u2074/g, (_, n) => fmtVal(parseFloat(n), 'inertia') + ' ' + unitLabel('inertia'))
             .replace(/([\d.]+)\s*in\u00B3/g, (_, n) => fmtVal(parseFloat(n), 'modulus') + ' ' + unitLabel('modulus'))
             .replace(/([\d.]+)\s*in\u00B2/g, (_, n) => fmtVal(parseFloat(n), 'area') + ' ' + unitLabel('area'))
-            .replace(/([\d.]+)\s*in\.?(?=[\s,)$])/g, (_, n) => fmtVal(parseFloat(n), 'length') + ' ' + unitLabel('length'));
+            // V9a-05: 「/」 앞 · 글 끝의 길이도(전: 문자 클래스 안의 $ 는 끝이 아니라 글자 — 「226.1 in/29.06 mm」 처럼 한 분수에 두 단위가 남았다)
+            .replace(/([\d.]+)\s*in\.?(?=[\s,)/×*]|$)/g, (_, n) => fmtVal(parseFloat(n), 'length') + ' ' + unitLabel('length'));
     }
 
     /** US 단위 문자열 → unitType 매핑 (Python step.unit → UNIT key) */
@@ -6176,7 +6177,8 @@
         _caseLast = snap;
         const { changes, draftsChanged } = _caseSplit(diff);
         if (Object.keys(changes).length > 0 || draftsChanged) {
-            const out = { origin: 'mirror', changes };
+            // V9b-05 · V7-S1: 연동이 본 판(방금 얹은 호스트의 상태) — 호스트는 그 판이 지금일 때만 값을 바꾼다
+            const out = { origin: 'mirror', changes, seenRev: _caseRev };
             if (draftsChanged) { out.drafts = _caseDrafts(snap); }
             vscode.postMessage({ command: 'caseEdit', data: out });
         }

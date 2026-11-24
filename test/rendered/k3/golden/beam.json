@@ -5,6 +5,7 @@
   {
    "id": "US.validation",
    "expect": "pin",
+   "reason": "V9a-06 ③: validation values read from the page fields are shown in display digits (4 significant — 「42.7861326304 ksi」 → 「42.79 ksi」, 「379.211651124 MPa」 → 「379.2 MPa」, 「0.999999999999 m」 → 「1 m」); the numbers behind them are unchanged. V9a-06 ②: the Fy limit row cites 「표 B4.1-1(DSM 적용 한계 — 부등호 strict)」 — the US 「Fy < 95 ksi」 is no longer in the source text (the limit itself is shown in the page units).",
    "value": [
     {
      "category": "A. 단면 입력",
@@ -66,8 +67,8 @@
      "category": "B. 재료",
      "item": "항복강도 (Fy)",
      "status": "pass",
-     "value": "42.7861326304 ksi",
-     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
+     "value": "42.79 ksi",
+     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM 적용 한계 — 부등호 strict))",
      "note": ""
     },
     {
@@ -82,7 +83,7 @@
      "category": "B. 재료",
      "item": "인장강도 (Fu)",
      "status": "pass",
-     "value": "58.0150950921 ksi",
+     "value": "58.02 ksi",
      "criterion": "Fu > Fy",
      "note": ""
     },
@@ -194,7 +195,7 @@
      "category": "E. 하중 입력",
      "item": "분담폭 (간격)",
      "status": "pass",
-     "value": "3.28083989501 ft",
+     "value": "3.281 ft",
      "criterion": "간격 > 0; 일반 4.00-6.00 ft",
      "note": ""
     },
@@ -202,7 +203,7 @@
      "category": "E. 하중 입력",
      "item": "고정하중 (D)",
      "status": "pass",
-     "value": "6.26563026995 psf",
+     "value": "6.266 psf",
      "criterion": "D > 0 예상 (자중 + 지붕재)",
      "note": ""
     },
@@ -210,7 +211,7 @@
      "category": "E. 하중 입력",
      "item": "중력 활하중/적설하중",
      "status": "pass",
-     "value": "Lr=20.8854342332, S=10.4427171166 psf",
+     "value": "Lr=20.89, S=10.44 psf",
      "criterion": "최소 하나의 중력 활하중 예상",
      "note": ""
     },
@@ -351,7 +352,6 @@
      "note": ""
     }
    ],
-   "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
    "flipped": [
     {
      "step": "K3-6",
@@ -374,6 +374,14 @@
      "from": {
       "expect": "pin",
       "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "milestone-2-wording",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
      },
      "date": "2026-11-24"
     }
@@ -650,6 +658,7 @@
   {
    "id": "SI.validation",
    "expect": "pin",
+   "reason": "V9a-06 ②: the Fy limit row cites 「표 B4.1-1(DSM 적용 한계 — 부등호 strict)」 — the US 「Fy < 95 ksi」 is no longer in the source text (the limit itself is shown in the page units). V9a-06 ③: validation values read from the page fields are shown in display digits (4 significant — 「42.7861326304 ksi」 → 「42.79 ksi」, 「379.211651124 MPa」 → 「379.2 MPa」, 「0.999999999999 m」 → 「1 m」); the numbers behind them are unchanged.",
    "value": [
     {
      "category": "A. 단면 입력",
@@ -712,7 +721,7 @@
      "item": "항복강도 (Fy)",
      "status": "pass",
      "value": "295 MPa",
-     "criterion": "Fy < 655.0 MPa (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
+     "criterion": "Fy < 655.0 MPa (표 B4.1-1(DSM 적용 한계 — 부등호 strict))",
      "note": ""
     },
     {
@@ -839,7 +848,7 @@
      "category": "E. 하중 입력",
      "item": "분담폭 (간격)",
      "status": "pass",
-     "value": "0.999999999999 m",
+     "value": "1 m",
      "criterion": "간격 > 0; 일반 1.22-1.83 m",
      "note": ""
     },
@@ -855,7 +864,7 @@
      "category": "E. 하중 입력",
      "item": "중력 활하중/적설하중",
      "status": "pass",
-     "value": "Lr=1, S=0.500000000001 kPa",
+     "value": "Lr=1, S=0.5 kPa",
      "criterion": "최소 하나의 중력 활하중 예상",
      "note": ""
     },
@@ -996,7 +1005,6 @@
      "note": ""
     }
    ],
-   "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
    "flipped": [
     {
      "step": "K3-6",
@@ -1019,6 +1027,14 @@
      "from": {
       "expect": "pin",
       "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "milestone-2-wording",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
      },
      "date": "2026-11-24"
     }
@@ -1219,7 +1235,7 @@
   {
    "id": "beam.mcp",
    "expect": "pin",
-   "reason": "Wording stop (b582779): validate_design carries text_note_code next to its English text_note and generate_report carries notices_note_code next to notices_note (the screen shows the host's Korean sentence for that code) — each reply grows by that one field (46 / 47 bytes); nothing else changes.",
+   "reason": "MCP validate_design reply sizes follow the texts above (shorter digits and source text).",
    "value": {
     "validate.summary": {
      "isError": false,
@@ -1265,7 +1281,7 @@
     },
     "validate.full": {
      "isError": false,
-     "bytes": 10957,
+     "bytes": 10910,
      "keys": [
       "analysis_current",
       "case_rev",
@@ -1406,6 +1422,14 @@
       "reason": "Renderer stop: MCP reply sizes follow the Korean texts above."
      },
      "date": "2026-11-24"
+    },
+    {
+     "step": "milestone-2-wording",
+     "from": {
+      "expect": "pin",
+      "reason": "Wording stop (b582779): validate_design carries text_note_code next to its English text_note and generate_report carries notices_note_code next to notices_note (the screen shows the host's Korean sentence for that code) — each reply grows by that one field (46 / 47 bytes); nothing else changes."
+     },
+     "date": "2026-11-24"
     }
    ]
   },
@@ -1433,6 +1457,7 @@
   {
    "id": "fail.US.validation",
    "expect": "pin",
+   "reason": "V9a-06 ③: validation values read from the page fields are shown in display digits (4 significant — 「42.7861326304 ksi」 → 「42.79 ksi」, 「379.211651124 MPa」 → 「379.2 MPa」, 「0.999999999999 m」 → 「1 m」); the numbers behind them are unchanged. V9a-06 ②: the Fy limit row cites 「표 B4.1-1(DSM 적용 한계 — 부등호 strict)」 — the US 「Fy < 95 ksi」 is no longer in the source text (the limit itself is shown in the page units).",
    "value": [
     {
      "category": "A. 단면 입력",
@@ -1494,8 +1519,8 @@
      "category": "B. 재료",
      "item": "항복강도 (Fy)",
      "status": "pass",
-     "value": "42.7861326304 ksi",
-     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
+     "value": "42.79 ksi",
+     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM 적용 한계 — 부등호 strict))",
      "note": ""
     },
     {
@@ -1510,7 +1535,7 @@
      "category": "B. 재료",
      "item": "인장강도 (Fu)",
      "status": "pass",
-     "value": "58.0150950921 ksi",
+     "value": "58.02 ksi",
      "criterion": "Fu > Fy",
      "note": ""
     },
@@ -1622,7 +1647,7 @@
      "category": "E. 하중 입력",
      "item": "분담폭 (간격)",
      "status": "pass",
-     "value": "3.28083989501 ft",
+     "value": "3.281 ft",
      "criterion": "간격 > 0; 일반 4.00-6.00 ft",
      "note": ""
     },
@@ -1630,7 +1655,7 @@
      "category": "E. 하중 입력",
      "item": "고정하중 (D)",
      "status": "pass",
-     "value": "6.26563026995 psf",
+     "value": "6.266 psf",
      "criterion": "D > 0 예상 (자중 + 지붕재)",
      "note": ""
     },
@@ -1638,7 +1663,7 @@
      "category": "E. 하중 입력",
      "item": "중력 활하중/적설하중",
      "status": "pass",
-     "value": "Lr=20.8854342332, S=10.4427171166 psf",
+     "value": "Lr=20.89, S=10.44 psf",
      "criterion": "최소 하나의 중력 활하중 예상",
      "note": ""
     },
@@ -1779,7 +1804,6 @@
      "note": ""
     }
    ],
-   "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning).",
    "flipped": [
     {
      "step": "K3-6",
@@ -1802,6 +1826,14 @@
      "from": {
       "expect": "pin",
       "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "milestone-2-wording",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
      },
      "date": "2026-11-24"
     }
@@ -2048,6 +2080,7 @@
   {
    "id": "notEvaluated.US.validation",
    "expect": "pin",
+   "reason": "V9a-06 ③: validation values read from the page fields are shown in display digits (4 significant — 「42.7861326304 ksi」 → 「42.79 ksi」, 「379.211651124 MPa」 → 「379.2 MPa」, 「0.999999999999 m」 → 「1 m」); the numbers behind them are unchanged. V9a-06 ②: the Fy limit row cites 「표 B4.1-1(DSM 적용 한계 — 부등호 strict)」 — the US 「Fy < 95 ksi」 is no longer in the source text (the limit itself is shown in the page units).",
    "value": [
     {
      "category": "A. 단면 입력",
@@ -2109,8 +2142,8 @@
      "category": "B. 재료",
      "item": "항복강도 (Fy)",
      "status": "pass",
-     "value": "42.7861326304 ksi",
-     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM: Fy < 95 ksi — 부등호 strict))",
+     "value": "42.79 ksi",
+     "criterion": "Fy < 95.0 ksi (표 B4.1-1(DSM 적용 한계 — 부등호 strict))",
      "note": ""
     },
     {
@@ -2125,7 +2158,7 @@
      "category": "B. 재료",
      "item": "인장강도 (Fu)",
      "status": "pass",
-     "value": "58.0150950921 ksi",
+     "value": "58.02 ksi",
      "criterion": "Fu > Fy",
      "note": ""
     },
@@ -2237,7 +2270,7 @@
      "category": "E. 하중 입력",
      "item": "분담폭 (간격)",
      "status": "pass",
-     "value": "3.28083989501 ft",
+     "value": "3.281 ft",
      "criterion": "간격 > 0; 일반 4.00-6.00 ft",
      "note": ""
     },
@@ -2245,7 +2278,7 @@
      "category": "E. 하중 입력",
      "item": "고정하중 (D)",
      "status": "pass",
-     "value": "6.26563026995 psf",
+     "value": "6.266 psf",
      "criterion": "D > 0 예상 (자중 + 지붕재)",
      "note": ""
     },
@@ -2253,7 +2286,7 @@
      "category": "E. 하중 입력",
      "item": "중력 활하중/적설하중",
      "status": "pass",
-     "value": "Lr=20.8854342332, S=10.4427171166 psf",
+     "value": "Lr=20.89, S=10.44 psf",
      "criterion": "최소 하나의 중력 활하중 예상",
      "note": ""
     },
@@ -2378,7 +2411,6 @@
      "note": ""
     }
    ],
-   "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\").",
    "flipped": [
     {
      "step": "K3-6",
@@ -2395,6 +2427,14 @@
       "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS)."
      },
      "date": "2026-11-23"
+    },
+    {
+     "step": "milestone-2-wording",
+     "from": {
+      "expect": "pin",
+      "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
     }
    ]
   },

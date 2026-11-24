@@ -206,7 +206,7 @@ async function main() {
 
     // ════ R2-3 ① 같은 행위자의 읽기 · 쓰기는 편집 상태를 닫지 않는다(누구의 읽기도) ════
     let n0 = (await tool('list_changes', { limit: 100 })).total;
-    await page('editSession', { state: 'start' });
+    asPerson(() => p.editSession('start'));   // V9b-08: 편집 상태는 사람의 길로만
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.31 } });
     await asPerson(() => p.handleMcpAction({ action: 'get_case_inputs', keys: ['Cb'] }));
     await asPerson(() => p.handleMcpAction({ action: 'get_status' }));
@@ -214,7 +214,7 @@ async function main() {
     assert.strictEqual(p.__testChanges().pending, 'session', 'reads by the screen (person) and by the AI leave the edit session open');
     await asPerson(() => p.handleMcpAction({ action: 'set_case_inputs', inputs: { Cmx: 0.9 } }));
     assert.strictEqual(p.__testChanges().pending, 'session', 'a write by the same person joins the session');
-    await page('editSession', { state: 'end' });
+    asPerson(() => p.editSession('end'));   // V9b-08: 편집 상태는 사람의 길로만
     let lc = await tool('list_changes', { limit: 100 });
     assert(lc.total === n0 + 1 && lc.changes[0].by.kind === 'person' && lc.changes[0].fields === 2, 'one person bundle for the session: ' + JSON.stringify(lc.changes.slice(0, 2)));
     notes.push('same-actor reads / writes stay inside the edit session; reads by anyone never close a bundle');
@@ -223,7 +223,7 @@ async function main() {
     const gi = async (keys) => (await tool('get_case_inputs', { keys })).inputs;
     const cb0 = await gi(['Cb', 'Lb', 'Cmx']);
     n0 = (await tool('list_changes', { limit: 100 })).total;
-    await page('editSession', { state: 'start' });
+    asPerson(() => p.editSession('start'));   // V9b-08: 편집 상태는 사람의 길로만
     await page('caseEdit', { origin: 'user', changes: { Cb: 1.77 } });
     await tool('set_case_inputs', { inputs: { Lb: 41 } });                 // AI 가 끼어 바꾼 칸 — 되돌리지 않는다
     await page('caseEdit', { origin: 'user', changes: { Cmx: 0.6 } });

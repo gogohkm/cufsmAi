@@ -13,6 +13,7 @@ import { countable, type LogSpec, type RecordLine, type LineStatus } from './log
 import { cleanText, hiddenCharError, segmentError } from './names';
 import { FOLDERS } from './project';
 import { hashFile, resolveInside } from './fsx';
+import { isOpenableName, realExt } from './openable';
 
 export const SOURCE_EVENTS = ['register', 'update'] as const;
 export const SOURCE_KINDS = ['drawing', 'product', 'other'] as const;
@@ -103,6 +104,39 @@ export function foldSources(lines: RecordLine[]): Source[] {
         }
     }
     return [...by.values()];
+}
+
+/** 원자료를 열지 않은 까닭(code) — 화면은 그 code 의 한국어(notices.js HOST 'host.source.*') */
+export type SourceOpenWhy = 'host.source.outside' | 'host.source.link' | 'host.source.missing' | 'host.source.changed' | 'host.source.type';
+/**
+ * V9b(독립 프로그램의 「원자료 열기」): 등록한 원자료 하나를 OS 의 문서 보기로 열어도 되는가 —
+ * 진짜 경로가 프로젝트의 `01_원자료/` 안 · 모든 마디에 링크 없음 · 바이트가 등록한 해시 · 형식이 OPENABLE_EXT(openable.ts) 안일 때만 `path`.
+ * 아니면 `path: null` 과 code 를 단 `why`. `state` 는 등록한 해시와의 비교(same · changed · missing · unreadable).
+ */
+export function sourceToOpen(rootReal: string, s: Source): { path: string | null; name: string; ext: string; openable: boolean;
+    state: 'same' | 'changed' | 'missing' | 'unreadable'; why: SourceOpenWhy | null } {
+    const name = path.posix.basename(s.path);
+    const ext = realExt(name);
+    const openable = isOpenableName(name);
+    const no = (why: SourceOpenWhy, state: 'same' | 'changed' | 'missing' | 'unreadable') => ({ path: null, name, ext, openable, state, why });
+    let abs: string;
+    try { abs = resolveInside(rootReal, s.path, { under: FOLDERS.sources }).abs; } catch { return no('host.source.outside', 'unreadable'); }
+    let real: string;
+    try {
+        const l = fs.lstatSync(abs);
+        if (!l.isFile() || l.isSymbolicLink()) { return no('host.source.link', 'unreadable'); }
+        real = fs.realpathSync.native(abs);
+    } catch { return no('host.source.missing', 'missing'); }
+    let srcRoot: string;
+    try { srcRoot = fs.realpathSync.native(path.join(rootReal, FOLDERS.sources)); } catch { return no('host.source.outside', 'unreadable'); }
+    const rel = path.relative(srcRoot, real);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) { return no('host.source.outside', 'unreadable'); }
+    let state: 'same' | 'changed' | 'unreadable';
+    try { state = hashFile(real, SOURCE_MAX_BYTES).sha256 === s.sha256 ? 'same' : 'changed'; } catch { return no('host.source.missing', 'unreadable'); }
+    if (state !== 'same') { return no('host.source.changed', state); }
+    // 진짜 경로의 이름으로 다시(등록한 이름과 다르면 — 대소문자 · 끝의 점 — 진짜 것이 이긴다)
+    if (!openable || !isOpenableName(real)) { return no('host.source.type', state); }
+    return { path: real, name, ext, openable, state, why: null };
 }
 
 /** 지금 파일과 견준 상태 */

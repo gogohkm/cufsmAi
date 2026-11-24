@@ -19,6 +19,8 @@ export const WRITE_POLICY: Record<RecordType, Policy> = {
         create: ['ai', 'person'], import: ['ai', 'person'],
         discovered: ['program'], opened: ['program'], saved: ['program'], external: ['program'],
         relink: ['person'], archive: ['person'], unarchive: ['person'],
+        // V9b-04: 손상된 기록의 사람의 길 — 줄 파일을 옆으로(격리) · 줄어든 끝을 받아들임(백업에서 되살림)
+        quarantine: ['person'], 'accept-shrunk': ['person'],
     },
     // 변경 줄의 행위자 = 그 변경을 한 쪽(호스트가 대신 쓴다)
     changes: { change: ['ai', 'person', 'program', 'file', 'external'] },

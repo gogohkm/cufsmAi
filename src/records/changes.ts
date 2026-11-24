@@ -23,11 +23,15 @@ export interface ChangeContext {
     reason?: string | null;
     work?: string | null;
     source?: string | null;
+    /** V9b-05: 그 묶음에서 화면 연동(mirror) · 단위 바꿈(unit-toggle)으로 바뀐 것이 있었다 — 사람의 편집에 딸린 것 */
+    via?: string[];
 }
 export interface FollowChange { path: string; from: unknown; to: unknown; by: 'load-analysis' | 'mirror' }
 export interface InvalidatedResult { kind: string; id?: string; reason: string }
 export interface ChangeBody {
     caseId: string; trigger: string; reason?: string; work?: string; source?: string;
+    /** V9b-05: 화면 연동 · 단위 바꿈으로 바뀐 것이 그 묶음에 있었다(via: mirror · unit-toggle) */
+    via?: string[];
     before: { contentFp: string; modelFp: string; caseFp: string };
     after: { contentFp: string; modelFp: string; caseFp: string };
     fields: FieldChange[]; fieldsOmitted?: number;
@@ -56,6 +60,7 @@ export function buildChange(ctx: ChangeContext, before: Snapshot, after: Snapsho
     if (ctx.work) { if (!ID_RE.test(ctx.work)) { throw new Error('bad work item id'); } body.work = ctx.work; }
     if (ctx.source) { if (!ID_RE.test(ctx.source)) { throw new Error('bad source id'); } body.source = ctx.source; }
     if (d.omitted) { body.fieldsOmitted = d.omitted; }
+    if (ctx.via && ctx.via.length) { body.via = [...new Set(ctx.via)].filter((v) => v === 'mirror' || v === 'unit-toggle'); }
     if (follows.length) { body.follows = follows; }
     if (opts.invalidated?.length) { body.invalidated = opts.invalidated.slice(0, 40).map((x) => ({ kind: String(x.kind).slice(0, 40), ...(x.id ? { id: String(x.id).slice(0, 80) } : {}), reason: String(x.reason).slice(0, 300) })); }
     return body;
@@ -172,6 +177,13 @@ export class ChangeBatcher {
         const after = this.d.snapshot();
         const body = (this.d.build ?? ((c, x, y) => buildChange(c, x, y)))({ ...ctx, trigger: 'edit-discard' }, before, after);
         if (body) { this.d.emit(body, ctx); }
+    }
+
+    /** V9b-05: 지금 열린 묶음에 「화면 연동 · 단위 바꿈으로 바뀐 것」 을 적는다(그 묶음의 줄에 via) */
+    markVia(via: 'mirror' | 'unit-toggle'): void {
+        const o = this.open;
+        if (!o) { return; }
+        o.ctx = { ...o.ctx, via: [...new Set([...(o.ctx.via || []), via])] };
     }
 
     /** 편집 상태인가 */
