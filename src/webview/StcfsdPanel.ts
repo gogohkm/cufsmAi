@@ -812,11 +812,17 @@ export class StcfsdPanel implements McpPanelInterface {
                     const all = message.data.changes as Record<string, unknown>;
                     const echoPart = Object.fromEntries(Object.entries(all).filter(([k]) => !moved.includes(k)));
                     const movedPart = Object.fromEntries(Object.entries(all).filter(([k]) => moved.includes(k)));
-                    if (movesInput) { this._changes.touch(this._changeCtx('edit')); this._armQuiet(); }
+                    // 그 변경 줄을 어디에 — ① 요청이 돌고 있으면 그 요청의 묶음 안에(여기서 묶음을 열면 도는 요청의 묶음이 먼저 닫혀 그 뒤의 변경이
+                    // 사람의 줄로 넘어간다) ② 사람의 묶음(조용함 · 편집 상태)이 열려 있으면 그 안에 ③ 아무것도 없으면 이 연동만의 줄을 바로 낸다 —
+                    // 사람이 치는 것이 아니므로 조용한 시간을 기다리지 않는다(기다리는 동안 사람의 다음 동작(「이 대안으로」 등)이 그 묶음에 삼켜졌다)
+                    const pend = this._changes.pending;
+                    const ownLine = movesInput && pend === null;
+                    if (movesInput && pend !== 'request') { this._changes.touch(this._changeCtx('edit')); if (!ownLine) { this._armQuiet(); } }
                     const r1 = Object.keys(echoPart).length ? this._caseKeeper.edit({ ...message.data, changes: echoPart, __keepSource: true }) : null;
                     const r2 = this._caseKeeper.edit({ ...message.data, changes: movedPart, ...(r1 ? { drafts: undefined } : {}), __keepSource: origin === 'unit-toggle' });
                     r = r1 ? { ...r2, accepted: [...r1.accepted, ...r2.accepted], rejected: [...r1.rejected, ...r2.rejected], conflicts: [...r1.conflicts, ...r2.conflicts] } : r2;
                     if (movesInput && r2.accepted.some((k) => { const m = DSk.fieldMeta(k); return !m || m.owner !== 'view'; })) { this._changes.markVia(origin as 'mirror' | 'unit-toggle'); }
+                    if (ownLine) { this._changes.flush(); }
                 } else {
                     r = this._caseKeeper.edit(linkage ? { ...message.data, __keepSource: true } : message.data);
                 }
@@ -5366,6 +5372,8 @@ export class StcfsdPanel implements McpPanelInterface {
         let r: any;
         try { r = await this._changes.run(this._changeCtx(String(options?.action ?? 'request')), () => this._handleMcpActionInner(options)); }
         catch (e) { this._aiActivityEnd(act, false); throw e; }
+        // 같은 행위자의 요청이 열린 조용한 묶음에 들면 그 묶음의 마지막 손댐이 지금이 된다 — 닫는 시계도 다시 건다(걸지 않으면 그 묶음이 닫히지 않고 남는다)
+        finally { if (this._changes.pending === 'quiet') { this._armQuiet(); } }
         this._aiActivityEnd(act, !(r && typeof r === 'object' && r.error));
         StcfsdPanel._noteCodes(r);
         return reply ? NOTICES.forReader(r, { units: reply.units === 'SI' ? 'SI' : 'US', detail: reply.detail }) : r;

@@ -1,4 +1,4 @@
-/* global process */
+/* global process, setTimeout */
 // V7 검증의 검토 상태 결함(호스트 쪽) — 진짜 StcfsdPanel + 진짜 파이썬, 화면 없이.
 //   node test/webview/case_guards_contract.js
 //  V7-06 set_case_inputs 가 덮은 사람의 값(이전 값 · 출처)을 응답에 싣는다(US · SI)
@@ -125,6 +125,26 @@ async function main() {
     ack = posted('caseAck').pop();
     assert(p.__testGetCase().state.inputs.connFy === 45 && ack.data.rejected[0].reason_code === 'host.case.file_outside_window', '«file» outside the open window is refused');
     notes.push('V7-S1 mirror on seenRev; V9b-05 linkage = a person line with via, echoes write nothing, no seen rev · invented origin · file outside the window refused');
+
+    // 그 줄은 바로 나간다 — 조용한 시간을 기다리는 사람의 묶음을 남기지 않는다. 남으면 사람의 다음 요청이 그 묶음에 들어 제 줄(제 trigger)을
+    // 잃는다(새 화면의 「이 대안으로」 가 변경 줄 없이 지나갔다 — desktop 의 r32 가 잡음)
+    const lines1 = p._changeLines().lines.length;
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', seenRev: p.__testGetCase().state.rev, changes: { connFy: 46 } } });
+    assert(p._changes.pending === null && p._changeLines().lines.length === lines1 + 1, 'a linkage change with no bundle open writes its line at once and leaves no bundle waiting: pending ' + p._changes.pending);
+    const personScope = ctx.load(path.join('src', 'mcp', 'actorScope.ts'));
+    await personScope.runAs({ kind: 'person' }, () => p.handleMcpAction({ action: 'set_case_inputs', inputs: { Cb: 1.07 } }));
+    const own = p._changeLines().lines.slice(lines1 + 1);
+    assert(own.length === 1 && own[0].actor.kind === 'person' && own[0].body.trigger === 'set_case_inputs' && !own[0].body.via,
+      "the person's next request is its own line with its own trigger: " + JSON.stringify(own.map((x) => [x.actor.kind, x.body.trigger, x.body.via])));
+    // 사람의 조용한 묶음에 든 같은 사람의 요청 뒤에도 그 묶음은 조용한 2초 뒤에 닫힌다(닫는 시계를 다시 건다)
+    await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'user', baseRev: p.__testGetCase().state.rev, changes: { Lb: 111 } } });
+    await new Promise((r) => setTimeout(r, 1200));
+    await personScope.runAs({ kind: 'person' }, () => p.handleMcpAction({ action: 'get_status' }));
+    await new Promise((r) => setTimeout(r, 1200));
+    assert.strictEqual(p._changes.pending, 'quiet', "the person's request moved the last touch of the quiet bundle");
+    await new Promise((r) => setTimeout(r, 1300));
+    assert.strictEqual(p._changes.pending, null, 'and the bundle closes 2 s after it without another touch');
+    notes.push('a linkage change with no bundle open writes its line at once; the next request of the person keeps its own line; a quiet bundle closes after a joined request');
 
     console.log(`case_guards_contract: PASS (${notes.join('; ')})`);
   } finally {

@@ -3138,6 +3138,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       await sleep(800);
       view = await ev(`({row:document.querySelector('#tree .row[data-k="doc:${dr.item}"]')?.textContent ?? null, bad:document.querySelector('#center [data-draft-file]')?.dataset.draftFile ?? null, frame:!!document.querySelector('#center iframe[data-doc-frame]')})`);
       exp = await pfetch('/api/person/export', { item: dr.item });
+      // 바라던 거절(409)이 남긴 콘솔 줄 — 이 단계의 콘솔 오류 검사에서 뺀다(r38 과 같이)
+      log.console.splice(0, log.console.length, ...log.console.filter(x => !x.text.includes('/api/person/')));
     }
     fs.writeFileSync(abs, page);
     return { ok: pv.frame && !pv.mark && pv.stamped && pv.csp && (!hostHas || (d2.file_state === 'edited' && /고쳐짐/.test(view?.row ?? '') && view?.bad === 'edited' && !view?.frame && exp?.json?.success === false)),
