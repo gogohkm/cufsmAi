@@ -74,7 +74,7 @@ export const SOURCE_KO: Record<string, { t: string; cls: string; tip: string }> 
   material: { t: '재료', cls: '', tip: '재료 강도 — 누가 정했는지는 변경 기록(R2)부터' },
   buckling_analysis: { t: '좌굴 해석', cls: 'drv', tip: '좌굴 해석 또는 그 대체(method 참조)' },
   load_analysis: { t: '하중 해석', cls: 'drv', tip: '하중 해석의 소요(그 조합)' },
-  user_input: { t: '지정', cls: '', tip: '입력으로 준 값 — 누가 정했는지(AI · 사용자)는 변경 기록(R2)부터' },
+  user_input: { t: '지정', cls: '', tip: '입력으로 준 값 — 누가 정했는지(AI · 사람)는 변경 기록(R2)부터' },
   engine_default: { t: '기본값', cls: 'def', tip: '입력이 없어 엔진이 채운 값(경고 · 가정에 밝힘)' },
   specification: { t: '기준', cls: '', tip: 'AISI S100-16 의 상수 · 계수 · 표값' },
 };

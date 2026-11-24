@@ -958,7 +958,8 @@ async function screenSteps({ br, serve, api, origin, ready, tmp, docs, used, des
     return { ok: !a1.json?.error && !lap.json?.error && !a2.json?.error && !!before.lapConnectionResult && !after.lapConnectionResult && !after.designResult && !after.designPurlinResult
       && !!after.loadAnalysisComplete && after.derivedResultsInvalidated?.message?.data?.reason === 'Load analysis inputs changed',
       detail: `앞: 랩 ${!!before.lapConnectionResult} · 뒤: 랩 ${!!after.lapConnectionResult} · 설계 ${!!after.designResult} · 퍼린 ${!!after.designPurlinResult} · 하중 ${!!after.loadAnalysisComplete}`
-        + ` · 「${after.derivedResultsInvalidated?.message?.data?.reason}」(${short(after.derivedResultsInvalidated?.message?.data?.cause, 80)})` };
+        + ` · 「${after.derivedResultsInvalidated?.message?.data?.reason}」(${short(after.derivedResultsInvalidated?.message?.data?.cause, 80)})`
+        + ` · 하중 1 ${short(a1.json?.error ?? '됨', 160)} · 랩 ${short(lap.json?.error ?? '됨', 160)} · 하중 2 ${short(a2.json?.error ?? '됨', 160)}` };
   });
 
   await step('s14e K3 — 페이지의 runValidation · generateReport 가 호스트에 가고 validationResult · reportResult 가 돌아온다 · 보고서는 기록에 남지 않고 점검은 호스트가 쥔 동안만 남는다(4b99968) · 보고서 파일은 호스트가 정한 곳(/api/report)', async () => {

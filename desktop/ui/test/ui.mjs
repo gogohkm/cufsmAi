@@ -689,9 +689,10 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   section('5. AI 를 따라간다 — 해석 · 검토 뒤 단면을 바꾸면 결과는 낡음');
   const lc = await mcp.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
   const run1 = await mcp.tool('run_analysis');
-  const flex = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Lb: 1500, Mu: 2, units: 'SI' });
+  // 단계 B: 설계 도구는 화면의 칸 + 받은 인자로 계산한다 — 화면의 처음 지압 길이(89 mm)로 웹 크리플링이 끼어 하중 없이는 미검토가 된다. 이 걸음은 휨 판정만 보므로 뺀다(wc_N 0)
+  const flex = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Lb: 1500, Mu: 2, wc_N: 0, units: 'SI' });
   check('AI: set_load_case(정휨, 295 MPa) → run_analysis → aisi_design_flexure(SI)', lc.success && run1.success && !flex.error && typeof flex.pass === 'boolean',
-    short(flex.error ?? `pass=${flex.pass} · 이용률 ${flex.utilization}`));
+    short(flex.error ?? `pass=${flex.pass} · 이용률 ${flex.utilization} · 미검토 ${JSON.stringify(flex.not_evaluated)} · 화면에서 온 값 ${JSON.stringify(flex.case_inputs_used)}`, 900));
   await step('u04a 진행 띠: 좌굴 해석 ● · 부재 검토 ● (새로 고침 없이)', null, async () => {
     await settle(`s.stages.fsm.state==='ok' && s.stages.chk.state==='ok' && s.dsm && s.runs.length>0`, '해석 · 검토 결과');
     const pipe = await ev(`[...document.querySelectorAll('#tbar .pipe .ps')].map(e=>e.dataset.stage+':'+e.dataset.state).join(' ')`);
@@ -732,10 +733,13 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   const lc2 = await mcp.tool('set_load_case', { load_case: 'compression', fy: 295, units: 'SI' });
   const run2 = await mcp.tool('run_analysis');
   check('AI: set_load_case(압축) → run_analysis', lc2.success && run2.success, short(run2.error ?? `길이 ${run2.lengths_analyzed}`));
-  // KtLt 를 주지 않으면 엔진은 E2 휨-비틀림을 평가하지 않는다(not_evaluated) — Pu 를 크게 주면 평가한 한계상태는 NG
+  // KtLt 가 없으면 엔진은 E2 휨-비틀림을 평가하지 않는다(not_evaluated) — Pu 를 크게 주면 평가한 한계상태는 NG.
+  // 단계 B: 주지 않은 인자는 화면의 칸(KtLt 처음 값 3000 mm)으로 계산한다 — 「KtLt 없음」 은 화면의 칸을 비워서 만든다
+  const blankKt = await mcp.tool('set_case_inputs', { inputs: { KtLt: null }, reason: '시험 — 비틀림 유효 길이 없음(미검토를 만든다)' });
+  check('AI: set_case_inputs(KtLt 비움) — 화면의 비틀림 유효 길이 없음', !blankKt.error, short(blankKt.error ?? `rev ${blankKt.case_rev ?? blankKt.rev ?? ''}`));
   const compNg = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 400, units: 'SI' });
   check('AI: aisi_design_compression(KtLt 없음 · Pu 400 kN) — 엔진: NG 와 미검토가 함께', compNg.pass === false && (compNg.not_evaluated ?? []).length > 0
-    && (compNg.limit_state_checks ?? []).some(x => x.pass === false), short(compNg.error ?? `pass=${compNg.pass} · ${JSON.stringify(compNg.limit_state_checks)} · 미검토 ${JSON.stringify(compNg.not_evaluated)}`, 260));
+    && (compNg.limit_state_checks ?? []).some(x => x.pass === false), short(compNg.error ?? `pass=${compNg.pass} · ${JSON.stringify(compNg.limit_state_checks)} · 미검토 ${JSON.stringify(compNg.not_evaluated)} · 화면에서 온 값 ${JSON.stringify(compNg.case_inputs_used)}`, 900));
   const verify04 = async (res, label) => {
     // 줄 = 엔진의 design_checks(검토 항목 계약) — 고정 id 로
     const dcs = res.design_checks ?? [];
@@ -777,7 +781,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   await step('u05 NG + 미검토 — 엔진의 판정 그대로(NG > 미검토 > OK), 판정비 = MCP', 'u05_checks_ng', () => verify04(compNg, 'NG'));
   const compNe = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 5, units: 'SI' });
   check('AI: aisi_design_compression(KtLt 없음 · Pu 5 kN) — 엔진: 평가한 것은 OK, 전체는 판정 없음', compNe.pass === null && (compNe.limit_state_checks ?? []).every(x => x.pass === true)
-    && (compNe.not_evaluated ?? []).length > 0, short(compNe.error ?? `pass=${compNe.pass}`));
+    && (compNe.not_evaluated ?? []).length > 0, short(compNe.error ?? `pass=${compNe.pass} · ${JSON.stringify(compNe.limit_state_checks)} · 미검토 ${JSON.stringify(compNe.not_evaluated)} · 화면에서 온 값 ${JSON.stringify(compNe.case_inputs_used)}`, 900));
   await step('u06 OK + 미검토 — 「판정 없음」(OK 로 보이지 않는다)', 'u06_checks_ne', () => verify04(compNe, '판정 없음'));
 
   section('7. 테마 · 좁은 창');
@@ -1104,7 +1108,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   // ── U3 — 계산 시트 · 우클릭 메뉴 · 찾기 · AI 따라가기 · 3D ─────────────────────────────
   section('7d. U3 — 계산 시트(= 호스트의 design_checks) · 우클릭 메뉴 · 찾기 · AI 따라가기 · 3D · 무효 장부');
   const SIU = require(path.join(repoRoot, 'out', 'mcp', 'siUnits.js'));
-  const conv = (v, t) => (v && typeof v === 'object' ? SIU.convertOutputSIDeep(v, SIU[t]).value : undefined);
+  // MCP 의 SI 응답과 같은 규칙 — 표시용으로 반올림한 값은 반올림 전 값(display_unrounded)을 바꾼다(표시 값의 요약 __display_rounded 는 그대로)
+  const conv = (v, t) => (v && typeof v === 'object' ? SIU.convertOutputSIDeep(v.__display_rounded ? v : SIU.withUnroundedValues(v).value, SIU[t]).value : undefined);
   /** 호스트가 화면에 보낸 마지막 결과(US) — 시험이 제품 표로 따로 SI 로 바꾼다(화면과 같은 「말한 변환」) */
   const hostRes = async () => {
     const q = (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=designResult&command=designPurlinResult&command=lapConnectionResult&command=connectionResult&command=loadAnalysisComplete`)).json?.data ?? {};
@@ -1183,8 +1188,10 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     return { ok: r.ok, detail: r.detail };
   });
   // 부재(휨) — 이 결과가 퍼린 결과를 대신한다(호스트의 부재 검토는 하나)
-  const flexR = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 13.56, Vu: 13.3, Lb: 1524, design_method: 'LRFD', units: 'SI' });
-  check('AI: aisi_design_flexure(SI) — 엔진: 뒤틀림 · 휨+전단 NG', !flexR.error, short(flexR.error ?? `판정 ${flexR.pass}`));
+  // 단계 B: 주지 않은 인자는 화면의 칸으로 계산한다 — 앞의 퍼린 하중 해석이 화면에 남긴 Cb 1.14 · 뒤틀림 β(distLm 4681 mm) · 냉간가공(처음 켬)이
+  // 끼면 모두 OK 가 된다(뒤틀림 0.998 · 휨+전단 0.970). 이 걸음은 부재 휨의 NG 항목을 보려는 것 — Cb 1 · β 없음(dist_Lm 0) · 냉간가공 끔을 준다
+  const flexR = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 13.56, Vu: 13.3, Lb: 1524, Cb: 1, dist_Lm: 0, use_cold_work: false, design_method: 'LRFD', units: 'SI' });
+  check('AI: aisi_design_flexure(SI) — 엔진: 뒤틀림 · 휨+전단 NG', !flexR.error, short(flexR.error ?? `판정 ${flexR.pass} · ${(flexR.design_checks ?? []).map(c => `${c.id}:${c.verdict}:${typeof c.ratio === 'number' ? c.ratio.toFixed(3) : '-'}`).join(' ')} · 미검토 ${JSON.stringify(flexR.not_evaluated)} · 화면에서 온 값 ${JSON.stringify((flexR.case_inputs_used ?? []).map(x => `${x.key}=${JSON.stringify(x.value)}(${x.source})`))}`, 2500));
   await settle(`s.runs.some(r=>r.key==='design' && r.rows.length) && !s.runs.some(r=>r.area==='purlin')`, '휨 결과');
   const hm = await hostRes();
   const flexNg = await keyOf(`x=>x.scope==='member' && x.verdict==='fail'`);
@@ -1498,8 +1505,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     return { ok: !!ref && Math.abs(Number(ref.v) - 295) < 1e-6 && ref.tag === 'ai' && srcs.length >= 1 && (!fyRow || fyRow.tag === host.sources.fy),
       detail: `기준 응력 ${ref?.v} MPa · 출처 ${ref?.tag} · 시트의 출처 ${srcs.map(x => `${x.sym}:${x.tag}`).join(' · ')}${lbRow ? '' : ''}` };
   });
-  // 사람이 편집 상태에서 정한 값을 AI 의 설계 도구가 바꾸면 — 「AI 가 바꾼 사람의 값」, 주지 않은 칸은 「AI: 주지 않음」
-  await step('u41 편집 상태의 사람 값(Cb, 출처 지정) → AI 의 aisi_design_flexure(Cb 를 주지 않음) → Cb 「AI: 주지 않음」 · 「AI 가 바꾼 사람의 값」 · 새로 고침 없이', 'u41_ai_replaced', async () => {
+  // 사람이 편집 상태에서 정한 값 — AI 의 설계 도구가 그 키를 주지 않으면 그대로(값 · 출처), 주어서 바꾸면 「AI 가 바꾼 사람의 값」(단계 B — 받은 인자의 키만 쓴다)
+  await step('u41 편집 상태의 사람 값(Cb, 출처 지정) → AI 의 aisi_design_flexure(Cb 를 주지 않음) → Cb 그대로(사람) → Cb 를 주면 「AI 가 바꾼 사람의 값」 · 출처 AI · 새로 고침 없이', 'u41_ai_replaced', async () => {
     await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
     await sleep(500);
     await wv(`D.querySelector('.tab-btn[data-tab="design"]').click(); return 1;`);
@@ -1508,14 +1515,28 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     let h = null;
     for (let i = 0; i < 40 && h?.sources?.Cb !== 'user'; i++) { h = await caseHost(); await sleep(150); }
     await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
-    const flexB = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 13.56, Vu: 13.3, Lb: 1524, design_method: 'LRFD', units: 'SI' });
+    const cbRead = () => ev(`({cb:[...document.querySelectorAll('#info tr[data-k="case:Cb"]')].map(t=>t.children[1].textContent.trim()+'|'+(t.querySelector('.tag[data-source]')||{}).dataset?.source)[0], blank:!!document.querySelector('#info tr[data-k="case:Cb"] [data-blank="ai"]'), rep:[...document.querySelectorAll('#info [data-replaced] li')].map(l=>l.dataset.key+':'+l.textContent)})`);
+    // ① Cb 를 주지 않는다 — 사람의 1.1 · 출처 그대로, 덮은 것 목록에 Cb 없음
+    const flexA = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 13.56, Vu: 13.3, Lb: 1524, design_method: 'LRFD', units: 'SI' });
+    await settle(`s.caseIn && s.caseIn.rev>=${flexA.case_rev ?? 0}`, '검토 상태의 새 판');
+    const hA = await caseHost();
+    await select('model', 'case:Cb');
+    await sleep(300);
+    const sA = await cbRead();
+    const replacedA = (flexA.case_inputs_replaced ?? []).map(x => x.key);
+    const usedCb = (flexA.case_inputs_used ?? []).find(x => x.key === 'Cb') ?? null;
+    // ② Cb 를 준다 — 사람의 값을 덮는다
+    const flexB = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Mu: 13.56, Vu: 13.3, Lb: 1524, Cb: 1.3, design_method: 'LRFD', units: 'SI' });
     await settle(`s.caseIn && s.caseIn.rev>=${flexB.case_rev}`, '검토 상태의 새 판');
     await select('model', 'case:Cb');
     await sleep(300);
-    const s = await ev(`({cb:[...document.querySelectorAll('#info tr[data-k="case:Cb"]')].map(t=>t.children[1].textContent.trim()+'|'+(t.querySelector('.tag[data-source]')||{}).dataset?.source)[0], rep:[...document.querySelectorAll('#info [data-replaced] li')].map(l=>l.dataset.key+':'+l.textContent)})`);
+    const s = await cbRead();
     const replaced = (flexB.case_inputs_replaced ?? []).map(x => x.key);
-    return { ok: h?.sources?.Cb === 'user' && replaced.includes('Cb') && /AI: 주지 않음\|ai/.test(s.cb ?? '') && s.rep.some(x => /^Cb:/.test(x)),
-      detail: `편집 상태 Cb → 호스트 ${h?.inputs?.Cb}(${h?.sources?.Cb}) · AI 응답 case_inputs_replaced ${JSON.stringify(replaced)} · 화면 「${s.cb}」 · 「AI 가 바꾼 사람의 값」 ${short(s.rep, 120)}` };
+    return { ok: h?.sources?.Cb === 'user' && !flexA.error && !flexB.error
+        && hA?.sources?.Cb === 'user' && Math.abs(Number(hA?.inputs?.Cb) - 1.1) < 1e-9 && !replacedA.includes('Cb') && /^1\.10*\|user$/.test(sA.cb ?? '') && !sA.blank && (usedCb === null || usedCb.source === 'user')
+        && replaced.includes('Cb') && /^1\.30*\|ai$/.test(s.cb ?? '') && s.rep.some(x => /^Cb:/.test(x)),
+      detail: `편집 상태 Cb → 호스트 ${h?.inputs?.Cb}(${h?.sources?.Cb}) · Cb 를 주지 않은 AI → 호스트 ${hA?.inputs?.Cb}(${hA?.sources?.Cb}) · 덮은 것 ${JSON.stringify(replacedA)} · 화면 「${sA.cb}」 · 계산에 쓴 화면 값 ${JSON.stringify(usedCb)}`
+        + ` → Cb 1.3 을 준 AI → 덮은 것 ${JSON.stringify(replaced)} · 화면 「${s.cb}」 · 「AI 가 바꾼 사람의 값」 ${short(s.rep, 120)}` };
   });
   await step('u42 편집 상태(템플릿 09) — 띠 「이번 편집 — 바뀐 것 N」 · 설계 Fy 를 고치면 뒤의 트리 · 정보 창이 곧바로 · 제목 줄 ● · 저장하면 ● 가 사라진다', 'u42_edit_state', async () => {
     await select('model', 'mat');
@@ -2135,6 +2156,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
    *   r33 — r10 · r12(「R33 다른 대상」 을 만들고 돌아온다)    r34 — r10(새 대상 「R34 발행」 을 만들어 설계부터 초안까지 그 단계가 한다)
    *   r35 — r34(막는 것 0 의 미리보기)                      r36 — r34 · r35(r35 가 새 초안으로 막는 것 0 을 남긴다)   r37 — r36(R0)
    *   r38 — r10 · r12(원자료 다섯을 그 단계가 둔다)          r39 — r34(그 초안)                r40 — r34(검토 줄)     r41 — 없음(끼운 페이지)
+   *   r42 — r10 · r12(그 단계가 변경 · 계산 · 보고를 만든다)
    */
   await step('r10 새 프로젝트(시작 화면) — 이름 물음 → 뿌리(문서 › StCFSD 프로젝트) 아래에 · 제목 표시줄 「프로젝트 ▾」 · 대상 수 = list_cases', 'r10_new_project', async () => {
     await ev(`${S}.start()`);
@@ -2309,8 +2331,13 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
 
   // ── R1-3 끝(215cb5a 의 호스트 것으로) ──────────────────────────────
   const act2 = (body) => api('POST', '/api/mcp/action', body).then(r => r.json);
-  /** 끼운 화면의 연동만으로 생긴 변경 줄(호스트가 trigger 에 mirror · unit-toggle 을 적는다 — 사람이 친 것이 아니다) */
-  const isLinkLine = c => c?.by?.kind === 'person' && (c.trigger === 'mirror' || c.trigger === 'unit-toggle');
+  /**
+   * 화면 연동만으로 생긴 변경 줄(호스트가 trigger 에 mirror · unit-toggle · default 를 적는다 — 사람이 친 것이 아니다). 옛 호스트는 by.kind person,
+   * 새 호스트(D4)는 program — 두 꼴을 모두 받는다
+   */
+  const isLinkLine = c => ['person', 'program'].includes(c?.by?.kind) && ['mirror', 'unit-toggle', 'default'].includes(c.trigger);
+  /** 화면이 그 줄에 붙일 행위자(D4 · D5) — 연동 줄 · program = 프로그램, external · file = 파일 */
+  const actorOfLine = c => (isLinkLine(c) || c?.by?.kind === 'program' ? 'program' : c?.by?.kind === 'ai' ? 'ai' : ['external', 'file'].includes(c?.by?.kind) ? 'file' : 'person');
   const pdir2 = path.join(projRoot, '시험 물류창고');
   await step('r18 시작 화면 — 「진행」 = list_cases 의 results · 작은 단면 그림 = 색인의 outline(받은 그대로) · 바닥 줄의 폴더 경로(사람의 얼굴) · 작성자 이름', 'r18_start_index', async () => {
     await act2({ action: 'save_case' });
@@ -2436,7 +2463,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       detail: `머리 「${short(v.head, 40)}」 · 제목 ${v.title} · 이유 「${v.reason}」 · 바뀐 것 「${short(wantRow, 50)}」(${v.fields.length}칸, path 로) · 칩 바뀜 ${v.chips.mod} · 추가 ${v.chips.add} · 삭제 ${v.chips.del} = geometry ${JSON.stringify(ge)} · 강조한 요소 ${v.lit}`
         + ` · 단면 성질 전 → 후 ${v.props.join(',') || '없음'} · 판정비 ${v.ratio ?? '—'} · 영향 ${v.effect.join(', ')} · 기준 「${v.base}」 서랍 ${v.drawer.length}줄 → 처음부터 ${wide.n}줄 · 06 풍선 「${short(b6.text, 80)}」 · 칩 「${short(v.share, 40)}」` };
   });
-  await step('r23 편집 상태 — F2 로 열고 닫으면 사람의 「사용자 변경」 묶음 하나(editSession) · 입력 꼬리표 「사용자 · 전 → 후 · hh:mm」 · 바뀐 것이 없으면 「버리기」가 산다(묶음 없음)', 'r23_edit_session', async () => {
+  await step('r23 편집 상태 — F2 로 열고 닫으면 사람의 변경 묶음 하나(editSession) · 입력 꼬리표 「사람 · 전 → 후 · hh:mm」 · 바뀐 것이 없으면 「버리기」가 산다(묶음 없음)', 'r23_edit_session', async () => {
     const n0 = (await act2({ action: 'list_changes', limit: 1 })).total;
     await ev(`${S}.review()`);
     await select('model', 'mat');
@@ -2470,13 +2497,13 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     // 버린 뒤에 묶음이 생겼으면 그것이 무엇인지(누가 · 무엇으로 · 어느 칸) 적는다
     const after2 = (lc2.changes ?? []).slice(0, Math.max(0, n2 - lc.total));
     // 버리기는 사람의 묶음을 남기지 않는다. 되돌린 값에 끼운 화면의 연동이 딸린 칸을 맞추면(예: Fy 가 강종의 값과 달라 강종 칸을 비움) 그것은
-    // 연동만의 줄이다(trigger mirror · unit-toggle — 화면은 「화면 연동」 으로 보인다): 사람이 친 줄로 세지 않는다
+    // 연동만의 줄이다(trigger mirror · unit-toggle — 화면은 「프로그램 · 화면 연동」 으로 보인다): 사람이 친 줄로 세지 않는다
     const typed2 = after2.filter(c => !isLinkLine(c));
     const extra = after2.length ? ` — 버린 뒤 생긴 묶음: ${after2.map(c => `${c.by?.kind}/${c.trigger}/${(c.field_changes ?? []).map(f => `${f.path}(${short(JSON.stringify(f.from ?? null), 14)}→${short(JSON.stringify(f.to ?? null), 14)})`).join('+')}`).join(' | ')}` : '';
     await shot('r23_edit_session_1920_dark');
     // 편집 상태 한 번 = 사람의 묶음 하나(이 편집에서 늘어난 수). mid 는 호스트가 편집 중에 묶음을 먼저 닫았는지(화면의 읽기가 끼면 닫는다 — 호스트에 알림)
     return { ok: last?.by?.kind === 'person' && last?.trigger === 'edit-session' && (last.field_changes ?? []).some(f => f && /^case\.inputs\.fy$/.test(f.path)) && lc.total === n0 + 1 && mid === n0
-      && /^사용자 · .+ → 310 · \d\d:\d\d$/.test(why ?? '') && offBefore === false && after === false && fyBack === 310 && typed2.length === 0,
+      && /^사람 · .+ → 310 · \d\d:\d\d$/.test(why ?? '') && offBefore === false && after === false && fyBack === 310 && typed2.length === 0,
       detail: `묶음 ${n0} → 편집 중 ${mid}(읽기가 묶음을 끊지 않는다) → 마치기 ${lc.total}(${last?.by?.kind} · ${last?.trigger} · 「${short(last?.title, 40)}」) · 꼬리표 「${why}」 · 333 으로 고친 뒤 버리기(켜짐 ${offBefore === false}) → fy ${fyBack} · 닫힘 ${after === false} · 묶음 ${n2}(사람이 친 것 ${typed2.length})${extra}` };
   });
   await step('r24 「AI 작업 중 · <도구> · 경과」 띠 — AI 의 해석이 도는 동안(0.5 초 넘게) 보이고 끝나면 사라진다 · 상태 표시줄 「AI 작업 중」', 'r24_ai_band', async () => {
@@ -2510,7 +2537,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await sleep(2600);
     const lc = await act2({ action: 'list_changes', detail: 'fields', limit: 20 });
     const fresh = (lc.changes ?? []).slice(0, Math.max(0, lc.total - n0)).reverse();
-    const sum = fresh.map(c => `${c.by?.kind}/${c.trigger}/${(c.field_changes ?? []).map(f => `${f.path.replace(/^case\./, '')}(${short(JSON.stringify(f.from ?? null), 12)}→${short(JSON.stringify(f.to ?? null), 12)})`).slice(0, 5).join('+')}`);
+    const sum = fresh.map(c => `${c.by?.kind}/${c.trigger}/${(c.field_changes ?? []).map(f => `${f.path.replace(/^case\./, '')}(${short(JSON.stringify(f.from ?? null), 12)}→${short(JSON.stringify(f.to ?? null), 12)})`).slice(0, 14).join('+')}`);
     const rows = await waitFor(`(()=>{const ids=${JSON.stringify(fresh.map(c => c.id))}; const have=ids.filter(id=>document.querySelector('#tree .row[data-k="chg:'+id+'"]')); return ids.length && have.length===ids.length ? have.length : null;})()`, 15_000, '변경 줄').catch(() => 0);
     const noReload = (await marker()) === t0;
     // AI 가 쓴 칸(퍼린의 경간 · Fy)은 그 요청의 AI 묶음 하나에만 있다 — 화면의 읽기(사람의 문맥)의 줄에 들지 않는다.
@@ -2521,7 +2548,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const readLines = fresh.filter(c => /^(get_|list_|report_view)/.test(String(c.trigger)));
     const strayed = fresh.filter(c => c.by?.kind !== 'ai' && (has(c, /span/) || has(c, /^case\.inputs\.fy$/)));
     const ok = !r1.error && !r2.error && !r3.error && !r4.error && reads > 0
-      && purlin.length === 1 && purlin[0].by?.kind === 'ai' && has(purlin[0], /^case\.mcpOnly\.design_purlin\.span_ft$/)
+      && purlin.length === 1 && purlin[0].by?.kind === 'ai' && has(purlin[0], /^case\.(spans\.spans\[\d+\]|mcpOnly\.design_purlin\.span_ft)$/)
       && sci.length === 1 && sci[0].by?.kind === 'ai' && has(sci[0], /^case\.inputs\.fy$/) && sci[0].reason === '강종을 바꿔 본다'
       && fresh.indexOf(purlin[0]) < fresh.indexOf(sci[0]) && readLines.length === 0 && strayed.length === 0
       && rows === fresh.length && noReload;
@@ -2556,12 +2583,13 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const went = refSt === 'current' ? went0 : { tab: went0.tab, sel: `${went0.sel}(알림 「${short(refToast, 50)}」)` };
     const refOk = refSt === 'current' ? went0.tab === 'result' && /^conn/.test(went0.sel) : ['invalidated', 'missing'].includes(refSt) && went0.tab === 'work' && /무효가 됨|없음/.test(refToast);
     await select('work', `work:${r.item}`);
-    await waitFor(`!!document.querySelector('#info [data-work-items]')`, 10_000, '보고의 항목').catch(() => undefined);
-    const items = await ev(`[...document.querySelectorAll('#info [data-work-items] > li')].map(l=>l.textContent.replace(/\s+/g,' ').trim())`);
+    // 보고(통일안 6.7) — 세 줄 머리(한 것 · 가정한 것 · 남은 것) · 근거. 항목은 그 상태의 머리 아래
+    await waitFor(`!!document.querySelector('#info [data-work-report]')`, 10_000, '보고의 머리').catch(() => undefined);
+    const items = await ev(`[...document.querySelectorAll('#info [data-rep-head] li[data-rep-item]')].map(l=>l.closest('[data-rep-head]').dataset.repHead+':'+l.textContent.replace(/\s+/g,' ').trim())`);
     await select('work', 'ask');
     await shot('r25_work_tree_1920_dark');
     return { ok: !q.error && !r.error && !!row && (await marker()) === t0 && badge === '1' && v1.title === '랩 패스너의 힘 분배 모델' && v1.opts === 2 && v1.none && v1.inputs === 0 && v1.by === 'ai'
-      && /AI 가 옮겨 적음/.test(v2.ans ?? '') && /강도 합으로 해/.test(v2.ans ?? '') && v2.chosen && v2.badge === null && refOk && items.length === 2 && /완료/.test(items[0]) && /미결/.test(items[1]),
+      && /AI 가 옮겨 적음/.test(v2.ans ?? '') && /강도 합으로 해/.test(v2.ans ?? '') && v2.chosen && v2.badge === null && refOk && items.length === 2 && /^done:두께 2\.3 으로/.test(items[0]) && /^open:랩 길이/.test(items[1]),
       detail: `줄 「${short(row, 50)}」(새로 고침 없음) · 배지 ${badge} → 답 뒤 ${v2.badge ?? '없음'} · 질문 「${v1.title}」 선택지 ${v1.opts} · 답 없음 ${v1.none} · 입력 칸 ${v1.inputs} · 쓴 쪽 ${v1.by} · 답 「${short(v2.ans?.replace(/\s+/g, ' '), 60)}」 · 걸린 대상(${refSt}) → ${went.tab}/${went.sel} · 보고 항목 ${items.join(' | ')}` };
   });
   await step('r26 06 — 그 결과를 가리키는 열린 판단 요청의 알림 「판단 요청 「제목」 · 답 기다림 →」 · 누르면 그 항목 · 시작 화면 「다음 판단」 = 열린 판단 요청(get_case_status)', 'r26_question_notice', async () => {
@@ -2578,6 +2606,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const st = await act2({ action: 'get_case_status' });
     await ev(`${S}.start()`);
     await sleep(600);
+    // 시작 화면은 기록(get_case_status)을 다시 읽은 뒤에 새로 그린다 — 부하에서 그 전에 읽지 않게 값이 올 때까지 기다린다
+    await waitFor(`document.querySelector('#start .rows tr.on [data-next] [data-next-q]')?.dataset.nextQ===${JSON.stringify(String(st.open_questions))}`, 15_000, '시작 화면의 다음 판단').catch(() => undefined);
     const nx = await ev(`(()=>{const r=document.querySelector('#start .rows tr.on [data-next], #start .rows tr[data-rec="open-case"] [data-next] [data-next-q]'); const c=document.querySelector('#start .rows tr.on [data-next]'); return c ? {n:c.querySelector('[data-next-q]')?.dataset.nextQ ?? null, text:c.textContent} : null;})()`);
     await shot('r26_start_next_1920_dark');
     await ev(`${S}.review()`);
@@ -2726,6 +2756,125 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       && (now?.state !== 'reviewed' ? again.state === 'review-again' && /다시 확인/.test(again.tip) && again.glyph === 'review-again' : true),
       detail: `웹뷰 fetch ${a} · MCP 토큰 ${d1} · 열쇠 없음 ${e1} · Origin 다름 ${f1} · 믿기 MCP 토큰 ${t1} · 믿기 열쇠 없음 ${t2} · 중계의 review 동작 → ${short(viaRelay?.error ?? '받음', 50)} · 기록 바이트 그대로 ${before === mid}`
         + ` · 다시 돌린 뒤 옛 지문으로 → ${stale?.status} ${stale?.json?.error_code}(${short(stale?.json?.error ?? '', 50)}) · 그 표시 ${now?.state}(${now?.why_ko ?? now?.how ?? ''}) → 화면 ${again.state} 「${short(again.tip, 60)}」` };
+  });
+  // ── 통일안 6.2 · 6.4 · 6.7 — 업무 탭(할 일 · 기록 · 점검) · 계산 일치 칩 · 보고의 세 머리와 묶음 확인 ─────────────
+  /** 트리의 줄 k 의 부모 줄들(같은 키가 두 곳 — 확인 대기 · 기록 — 에 있을 수 있다) */
+  const treeParents = k => ev(`(()=>{const rows=[...document.querySelectorAll('#tree .row')]; const pad=r=>parseFloat(r.style.paddingLeft); return rows.map((r,i)=>[r,i]).filter(([r])=>r.dataset.k===${JSON.stringify(k)}).map(([r,i])=>{for(let j=i-1;j>=0;j--){if(pad(rows[j])<pad(r)) return rows[j].dataset.k+'|'+rows[j].querySelector('.nm').textContent+'|'+(rows[j].querySelector('.vl')?.textContent??'');} return null;});})()`);
+  /** 지난 계산 뒤의 묶음 수(화면이 세는 규칙 그대로 — 호스트의 실행 이력 · 변경 묶음에서): 자동 실행 · 설계용 좌굴값을 뺀 마지막 실행 뒤, 연동 줄은 빼고 */
+  const pendingOfHost = async () => {
+    const st = await act2({ action: 'get_case_status', detail: 'runs' });
+    const hist = (st.history ?? []).filter(h => h.auto !== true && h.kind !== 'design_dsm');
+    const last = hist.map(h => h.at).sort().pop() ?? null;
+    const lc = await act2({ action: 'list_changes', limit: 50 });
+    // 같은 요청이 남긴 실행이 실린 묶음(runs — 단계 C)은 시각과 상관없이 그 실행의 것: 지난 계산 뒤에 세지 않는다(옛 호스트는 키가 없다 — 시각으로)
+    const linked = c => Array.isArray(c.runs) && c.runs.length > 0;
+    return { last, hist, n: last ? (lc.changes ?? []).filter(c => c.at > last && !linked(c) && actorOfLine(c) !== 'program').length : null, changes: lc.changes ?? [] };
+  };
+  await step('r42 업무 탭(통일안 6.2) — 할 일 · 기록 · 점검 · 계산 머리줄 아래에 그 계산에 들어간 묶음 · 행위자 배지(사람 · AI · 프로그램 · 파일) · 진행 띠 끝의 계산 일치 칩 · 보고의 세 머리와 묶음 확인', 'r42_worktab', async () => {
+    await ev(`${S}.review()`);
+    // ① AI 의 변경 → 계산 → AI 의 변경(계산 없음)
+    const c1 = await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.4, r: 3, units: 'SI', reason: 'r42 — 계산 앞의 변경' });
+    const fr = await mcp.tool('aisi_design_flexure', flexArgsR(5.0));
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '부재 검토', 60_000);
+    await sleep(2600);
+    const mid = await pendingOfHost();
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    const chip0 = await ev(`(()=>{const c=document.querySelector('#tbar [data-calc-chip]'); return c ? {state:c.dataset.calcChip, text:c.querySelector('.lg')?.textContent ?? c.textContent, short:c.querySelector('.sh')?.textContent ?? null, n:c.dataset.calcN ?? null} : null;})()`);
+    const c2 = await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.5, r: 3, units: 'SI', reason: 'r42 — 계산 뒤의 변경' });
+    await sleep(2600);
+    const after = await pendingOfHost();
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    const chip1 = await ev(`(()=>{const c=document.querySelector('#tbar [data-calc-chip]'); return c ? {state:c.dataset.calcChip, text:c.querySelector('.lg')?.textContent ?? c.textContent, short:c.querySelector('.sh')?.textContent ?? null, n:c.dataset.calcN ?? null} : null;})()`);
+    await select('work', 'chg');
+    // ② 트리의 세 묶음 · 그 아래
+    const top = await ev(`[...document.querySelectorAll('#tree .row.top')].map(r=>r.dataset.k+':'+r.querySelector('.nm').textContent)`);
+    const kidsOf = k => ev(`(()=>{const rows=[...document.querySelectorAll('#tree .row')]; const pad=r=>parseFloat(r.style.paddingLeft); const i=rows.findIndex(r=>r.dataset.k===${JSON.stringify(k)}); if(i<0) return null; const p=pad(rows[i]); const out=[]; for(let j=i+1;j<rows.length && pad(rows[j])>p;j++){ if(pad(rows[j])===p+14) out.push(rows[j].dataset.k+':'+rows[j].querySelector('.nm').textContent);} return out;})()`);
+    const todoKids = await kidsOf('todo'), logKids = await kidsOf('chg'), inspKids = await kidsOf('insp');
+    const lines = await ev(`[...document.querySelectorAll('#tree .row')].slice(0, 40).map(r=>'  '.repeat(Math.round((parseFloat(r.style.paddingLeft)-8)/14))+r.textContent.replace(/\\s+/g,' ').trim())`);
+    // 계산 앞의 변경(c1) → 「계산 …」 머리줄 아래, 계산 뒤의 변경(c2) → 「지난 계산 뒤」 아래(+ 확인 대기)
+    const lc = await act2({ action: 'list_changes', limit: 10 });
+    const id1 = (lc.changes ?? []).find(c => c.reason === 'r42 — 계산 앞의 변경')?.id, id2 = (lc.changes ?? []).find(c => c.reason === 'r42 — 계산 뒤의 변경')?.id;
+    const p1 = id1 ? await treeParents(`chg:${id1}`) : [], p2 = id2 ? await treeParents(`chg:${id2}`) : [];
+    const runHead = p1.find(x => /^log:run:/.test(x ?? '')) ?? '';
+    const lastRun = [...mid.hist].sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+    const wantHead = typeof lastRun?.no === 'number' ? `계산 #${lastRun.no}` : null;
+    // 행위자 배지 — 화면의 모든 기록 줄 = 호스트의 by.kind · trigger 의 규칙(연동 줄 · program = 프로그램)
+    const shown = await ev(`[...document.querySelectorAll('#tree .row[data-k^="chg:"]')].map(r=>[r.dataset.k.slice(4), r.querySelector('[data-actor]')?.dataset.actor ?? null, r.querySelector('[data-actor]')?.textContent ?? null])`);
+    const byId = new Map(after.changes.map(c => [c.id, c]));
+    const badActor = shown.filter(([id, a]) => byId.has(id) && a !== actorOfLine(byId.get(id)));
+    const programRows = shown.filter(([, a]) => a === 'program');
+    const words = new Set(shown.map(x => x[2]));
+    // 판정 변화 · 다시 계산 필요
+    const d1 = id1 ? await ev(`[...document.querySelectorAll('#tree .row[data-k="chg:${id1}"] [data-delta]')].map(e=>e.textContent)[0] ?? null`) : null;
+    const d2 = id2 ? await ev(`[...document.querySelectorAll('#tree .row[data-k="chg:${id2}"] [data-delta]')].map(e=>e.textContent)[0] ?? null`) : null;
+    // 점검 › 판정 요약 = 결과 탭의 부재 검토와 같은 미검토 수
+    const sum = await ev(`document.querySelector('#tree .row[data-k="insp:sum"] .vl')?.textContent ?? ''`);
+    // 실행이 실린 묶음(runs) — 그 실행(여럿이면 가장 늦은 것)의 머리줄 아래 · 지난 계산 뒤가 아님 · 판정 변화의 「후」 = 그 실행의 최대 판정비. 호스트가 키를 주지 않으면 건너뛴다
+    const histAll = (await act2({ action: 'get_case_status', detail: 'runs' })).history ?? [];
+    const linkedChk = [];
+    // 접힌 계산 머리줄(최근 셋 밖)을 모두 펼친다 — 그 아래 줄도 재려고
+    for (let i = 0; i < 25; i++) {
+      const more = await ev(`(()=>{const t=[...document.querySelectorAll('#tree .row[data-k^="log:"] .tw')].find(x=>x.textContent==='▸'); if(!t) return 0; t.click(); return 1;})()`);
+      if (!more) { break; }
+      await sleep(80);
+    }
+    for (const c of after.changes.filter(x => Array.isArray(x.runs) && x.runs.length).slice(0, 6)) {
+      const anchor = histAll.filter(h => c.runs.includes(h.run)).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+      if (!anchor) { continue; }
+      const ps = await treeParents(`chg:${c.id}`);
+      const d = await ev(`[...document.querySelectorAll('#tree .row[data-k="chg:${c.id}"] [data-delta]')].map(e=>e.textContent)[0] ?? null`);
+      const afterRatio = typeof anchor.max_ratio === 'number' ? Number(String(d ?? '').split('→')[1]) : null;
+      linkedChk.push({ id: c.id, at: c.at, run: anchor.run, runAt: anchor.at, parents: ps.map(x => (x ?? '').split('|')[0]), delta: d,
+        ok: ps.some(x => /^log:run:/.test(x ?? '')) && !ps.some(x => /^log:after\|/.test(x ?? '')) && (afterRatio === null || Math.abs(afterRatio - anchor.max_ratio) <= 0.006 * Math.max(1, Math.abs(anchor.max_ratio))) });
+    }
+    await shot('r42_worktab_tree_1920_dark');
+    // ③ 칩을 누르면 업무 › 기록의 「지난 계산 뒤」
+    await select('model', 'sec');
+    await ev(`document.querySelector('#tbar [data-calc-chip]')?.click()`);
+    await sleep(400);
+    const went = await ev(`${S}.ui`);
+    await select('result', 'chk');
+    const unRes = await ev(`document.querySelector('#tree .row[data-k="chk:UN"] .vl')?.textContent ?? null`);
+    const chkRes = await ev(`document.querySelector('#tree .row[data-k="chk"] .vl')?.textContent ?? null`);
+    // ④ 보고 — 세 머리 · 근거, 보고를 확인하면 그 refs 의 변경 묶음도
+    const rep = await mcp.tool('work_items', { action: 'add', kind: 'report', title: 'r42 보고', body: '두께를 2.5 로.',
+      items: [{ text: '두께 2.4 → 계산', status: 'done', refs: id1 ? [{ kind: 'change', id: id1 }] : [] }, { text: 'Lb 는 1524 로 둠', status: 'assumed' }, { text: '다시 계산', status: 'open' }],
+      refs: id2 ? [{ kind: 'change', id: id2 }] : [] });
+    await select('work', `work:${rep.item}`);
+    await waitFor(`!!document.querySelector('#info [data-work-report]') && !!document.querySelector('#info [data-rv-item]')`, 15_000, '보고의 머리').catch(() => undefined);
+    const heads = await ev(`[...document.querySelectorAll('#info [data-rep-head]')].map(h=>h.dataset.repHead+':'+h.querySelector('h4').firstChild.textContent.trim()+':'+h.querySelectorAll(':scope > ul > li[data-rep-item]').length)`);
+    const before = await act2({ action: 'get_reviews' });
+    const wasRv = [id1, id2].filter(Boolean).filter(id => (before.items ?? []).some(x => x.type === 'change' && x.change === id && x.state === 'reviewed'));
+    await ev(`document.querySelector('#info .hd [data-rv-item]').click()`);
+    const rc = await waitFor(`document.querySelector('#info')?.getAttribute('data-rv-report-changes') ?? null`, 20_000, '묶음 확인').catch(() => null);
+    const gr = await act2({ action: 'get_reviews' });
+    const repRv = (gr.items ?? []).find(x => x.type === 'work' && x.item === rep.item)?.state;
+    const chRv = [id1, id2].filter(Boolean).map(id => (gr.items ?? []).find(x => x.type === 'change' && x.change === id)?.state ?? 'unreviewed');
+    await shot('r42_report_1920_dark');
+    const hostNo = typeof lastRun?.no === 'number';
+    const ok = !c1.error && !fr.error && !c2.error && !rep.error && !!id1 && !!id2
+      && JSON.stringify(top) === JSON.stringify(['todo:할 일', 'chg:기록', 'insp:점검'])
+      && JSON.stringify(todoKids) === JSON.stringify(['ask:판단 요청', 'todo:rv:확인 대기', 'todo:asm:임시 가정'])
+      && logKids?.[0] === 'log:after:지난 계산 뒤' && logKids.some(k => /^log:run:/.test(k))
+      && JSON.stringify(inspKids?.slice(0, 5)) === JSON.stringify(['insp:sum:판정 요약', 'insp:warn:엔진 알림', 'insp:asm:가정', 'insp:out:범위 밖', 'rep:보고'])
+      && !!runHead && (wantHead ? runHead.split('|')[1] === wantHead : true) && /OK|NG|판정 없음/.test(runHead.split('|')[2] ?? '')
+      && p2.some(x => /^log:after\|/.test(x ?? '')) && p2.some(x => /^todo:rv\|/.test(x ?? ''))
+      && badActor.length === 0 && [...words].every(w => ['사람', 'AI', '프로그램', '파일'].includes(w)) && !words.has('사용자')
+      && /→/.test(d1 ?? '') && d2 === '다시 계산 필요'
+      && chip0?.state === (mid.n ? 'stale' : 'same') && (chip0?.state !== 'same' || /일치/.test(chip0.text)) && (!hostNo || chip0?.state !== 'same' || chip0.text.includes(wantHead))
+      && chip1?.state === 'stale' && Number(chip1.n) === after.n && chip1.text === `입력 바뀜 ${after.n}건 · 다시 계산` && chip1.short === `바뀜 ${after.n}`
+      && went.tab === 'work' && went.sel === 'log:after' && (unRes !== null ? sum.includes(`미검토 ${Number(unRes)}`) : sum === chkRes)
+      && JSON.stringify(heads) === JSON.stringify(['done:✓ 한 것:1', 'assumed:◐ 가정한 것:1', 'open:○ 남은 것:1', 'refs:근거:0'])
+      && repRv === 'reviewed' && chRv.every(s => s === 'reviewed') && (wasRv.length === 2 || /^\d+\/\d+$/.test(rc ?? ''))
+      && linkedChk.every(x => x.ok);
+    return { ok, detail: `트리 ${top.join(' · ')} | 할 일 ${todoKids?.join(', ')} | 기록 ${short(logKids?.join(', '), 120)} | 점검 ${inspKids?.join(', ')}`
+      + ` · 계산 앞의 변경 → 「${runHead}」(호스트 마지막 실행 ${lastRun?.kind} no ${lastRun?.no ?? '없음'}) · 계산 뒤의 변경 → ${p2.map(x => (x ?? '').split('|')[0]).join(', ')} · 판정 변화 ${d1} / ${d2}`
+      + ` · 배지 ${shown.length}줄 · 프로그램 ${programRows.length} · 말 ${[...words].join(',')} · 어긋남 ${badActor.length}`
+      + ` · 칩(계산 뒤) 「${chip0?.text}」(호스트 기준 ${mid.n}) → 변경 뒤 「${chip1?.text}」(호스트 기준 ${after.n}) → 누름 ${went.tab}/${went.sel} · 판정 요약 「${sum}」(결과 탭 미검토 ${unRes} · 부재 검토 「${chkRes}」)`
+      + ` · 실행이 실린 묶음 ${linkedChk.length ? linkedChk.map(x => `${x.id}(${x.at.slice(11, 19)}) → 실행 ${x.run}(${x.runAt.slice(11, 19)}) 부모 ${x.parents.join('+')} 판정 ${x.delta}${x.ok ? '' : ' ✗'}`).join(' ; ') : '없음 — 호스트가 runs 를 주지 않음(건너뜀)'}`
+      + ` · 보고 머리 ${heads.join(' | ')} · 보고 확인 ${repRv} · 묶음 ${chRv.join(',')} (${rc ?? '이미 확인'}) · 줄:\n${lines.join('\n')}` };
   });
   await step('r31 대안 — t 2.0 · 2.3 · 2.6 을 지키고(AI 의 alternatives keep) 결과 › 대안에 나란히: 열쇠마다의 판정비 = 그 세 번의 엔진 실행(칸마다) · 「지금」 표지', 'r31_alternatives', async () => {
     const runs = {};
