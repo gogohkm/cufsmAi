@@ -7,6 +7,13 @@
 
 import * as vscode from 'vscode';
 
+/** 세 상태 판정 아이콘: OK → pass, NG → error, 그 밖(판정 없음 · 빈 값) → warning. 판정 없음을 합격처럼 보이지 않는다. */
+function verdictIcon(passOrFail: string): string {
+    if (passOrFail === 'OK') { return 'pass'; }
+    if (passOrFail === 'NG') { return 'error'; }
+    return 'warning';
+}
+
 export class StcfsdTreeItem extends vscode.TreeItem {
     public sectionId?: string;
 
@@ -291,7 +298,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTr
             if (s.hasDesignResult) {
                 items.push(new StcfsdTreeItem('설계 결과', vscode.TreeItemCollapsibleState.Collapsed, {
                     sectionId: 'design-results',
-                    iconPath: new vscode.ThemeIcon(s.passOrFail === 'OK' ? 'pass' : 'error'),
+                    iconPath: new vscode.ThemeIcon(verdictIcon(s.passOrFail)),
                     description: `${s.utilization} ${s.passOrFail}`,
                 }));
             }
@@ -329,7 +336,7 @@ export class ProjectExplorerProvider implements vscode.TreeDataProvider<StcfsdTr
             if (s.designPn) items.push(this._leaf('φPn', 'focus-design-Pn',
                 'arrow-down', s.designPn));
             items.push(this._leaf('이용률 DCR', 'focus-utilization',
-                s.passOrFail === 'OK' ? 'pass' : 'error', s.utilization));
+                verdictIcon(s.passOrFail), s.utilization));
             break;
 
         // ━━━ 접합부 ━━━

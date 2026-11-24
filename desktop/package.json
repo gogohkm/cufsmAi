@@ -1,0 +1,29 @@
+{
+  "name": "stcfsd-desktop",
+  "private": true,
+  "version": "0.0.1",
+  "description": "StCFSD 독립 프로그램 — VS Code 없이 확장 호스트(out/extension.js)를 돌리는 호스트 · 화면 다리 · 새 검토 화면",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "node host/build.mjs && node ui/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p ui/tsconfig.json",
+    "headless": "node host/dist/headless.js",
+    "test": "npm run typecheck && npm run build && node host/test/smoke.mjs && node host/test/bridge.mjs && node host/test/connect.mjs && node ui/test/ui.mjs && node installer/test/unit.mjs",
+    "serve": "node host/dist/serve.js",
+    "serve:ui": "node host/dist/serve.js --ui",
+    "serve:classic": "node host/dist/serve.js --ui classic",
+    "test:bridge": "npm run build && node host/test/bridge.mjs",
+    "test:connect": "npm run build && node host/test/connect.mjs",
+    "test:ui": "npm run build && node ui/test/ui.mjs",
+    "installer": "node installer/build.mjs --all --win",
+    "test:packaged": "node installer/test/packaged.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.3.3"
+  }
+}

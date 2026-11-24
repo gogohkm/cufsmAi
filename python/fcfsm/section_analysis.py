@@ -1,8 +1,10 @@
-"""fcFSM 단면 해석
+"""fcFSM 단면 해석 자리 (SecAnal_fcFSM.m 의 이식이 아니다)
 
-원본: Ref_Source/analysis/fcFSM/SecAnal_fcFSM.m
-
-단면의 평판/곡선 요소를 식별하고 힘 기반 구속행렬을 구성한다.
+이식 대상: Ref_Source/analysis/fcFSM/SecAnal_fcFSM.m (판 단위 힘 [q] 로 C_L, J_D,
+J_GD 를 만든다). 이 모듈은 그것을 하지 않는다: 길이 100 · S-S · m=1 의 고전 cFSM
+자연기저를 돌려주고, 이웃 요소와 5° 넘게 꺾인 요소를 '곡선'으로 표시할 뿐이다
+(예리한 모서리 옆 요소도 곡선으로 잡힌다). stripmain_fcfsm 은 이제 이것을 쓰지
+않는다.
 """
 
 import math
@@ -15,7 +17,7 @@ from cfsm.base_vectors import base_column
 
 def section_analysis_fcfsm(node: np.ndarray, elem: np.ndarray,
                             prop: np.ndarray) -> dict:
-    """fcFSM 단면 해석 — 기저벡터 생성
+    """고정 길이(100)·S-S·m=1 의 고전 cFSM 자연기저 + 요소 꺾임 표시 (fcFSM 아님)
 
     Args:
         node: (nnodes, 8)

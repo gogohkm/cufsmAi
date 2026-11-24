@@ -1,4 +1,6 @@
-# Example III-3: Stiffened Z-Section - Distortional Buckling - Compression
+# Example III-3: C-Section Subject to Distortional Buckling - Compression
+
+> 2026-11-22 정정(엔진 리뷰 R2-19): 단면은 Z 가 아니라 립 C 형 스터드(362S162-54, "S" = stud)다. §7 의 총단면 값은 다른 단면(550S162-33)의 값이었으므로 AISI Manual Table I-2 · 예제 본문 값으로 바꿨다. 원 예제(Manual pp. 468-473)에는 구멍 · 순단면 계산이 없다 — 구멍 지름과 순단면 열은 출처를 확인할 수 없어 표시만 남긴다.
 
 AISI Cold-Formed Steel Design Manual 2017, Pages 466-478
 
@@ -7,7 +9,7 @@ AISI Cold-Formed Steel Design Manual 2017, Pages 466-478
 | Item | Value |
 |------|-------|
 | Member Type | Column (concentrically loaded) |
-| Section Type | Z-section with lips (362S162-54) |
+| Section Type | C-section with lips, stud (362S162-54) |
 | Design Method | ASD and LRFD |
 | Analysis Method | EWM (Sections E2, E3) + DSM distortional (Section E4) |
 | CUFSM Usage | (1) Fcrd via finite strip analysis, (2) net section properties via t=0 |
@@ -15,7 +17,7 @@ AISI Cold-Formed Steel Design Manual 2017, Pages 466-478
 
 ## 2. Section Geometry
 
-Section: 362S162-54 (Z-section with lips)
+Section: 362S162-54 (C-section with lips; inside bend radius R = 0.0849 in.)
 
 | Parameter | Symbol | Value | Unit |
 |-----------|--------|-------|------|
@@ -23,7 +25,7 @@ Section: 362S162-54 (Z-section with lips)
 | Overall flange width | B | 1.625 | in. |
 | Design thickness | t | 0.0566 | in. |
 | Lip length | d | 0.500 | in. |
-| Hole diameter | dh | 1.500 | in. |
+| Hole diameter | dh | 1.500 (원 예제에 없음 — 출처 미확인) | in. |
 
 ### Bracing Conditions
 
@@ -81,14 +83,16 @@ Section: 362S162-54 (Z-section with lips)
 
 ## 7. CUFSM Output: Net Section Properties
 
-| Property | Gross Section | Net Section (t=0 at hole) | Unit |
+| Property | Gross Section (Table I-2) | Net Section (t=0 at hole; 원 예제에 없음 — 출처 미확인) | Unit |
 |----------|--------------|--------------------------|------|
 | A | 0.422 | Anet | in.^2 |
-| Ix | 1.46 | Ix,net | in.^4 |
-| Iy | 0.111 | Iy,net | in.^4 |
-| xo | -1.13 | xo,net | in. |
-| J | 0.000130 | Jnet = 0.000110 | in.^4 |
-| Cw | 0.713 | Cw,net = 0.677 | in.^6 |
+| Ix | 0.873 | Ix,net | in.^4 |
+| Iy | 0.154 | Iy,net | in.^4 |
+| xo | -1.28 | xo,net | in. |
+| J | 0.000451 | Jnet = 0.000110 (?) | in.^4 |
+| Cw | 0.457 | Cw,net = 0.677 (?) | in.^6 |
+
+(엔진 lippedc(H=3.625, B=1.625, D=0.5, t=0.0566, r=0.0849): A 0.42165, Ix 0.87185, Iy 0.15396, xo −1.2795, J 0.00045026, Cw 0.4318 — Cw 차이는 AISI 가 Cw 를 각진 모서리 근사로 계산하기 때문.)
 
 ## 8. Comparison: Analytical vs CUFSM for Fcrd
 
@@ -138,7 +142,7 @@ Section: 362S162-54 (Z-section with lips)
 
 ## 10. Key Features for Validation
 
-- **Z-section**: Singly-symmetric, flexural-torsional buckling applicable
+- **C-section (lipped stud)**: Singly-symmetric, flexural-torsional buckling applicable
 - **CUFSM interface screenshot**: Full node/element definition visible
 - **Net section via t=0 technique**: Cw,net and Jnet values provided for validation
 - **Analytical vs CUFSM comparison**: Side-by-side Fcrd comparison validates both methods

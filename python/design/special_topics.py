@@ -8,110 +8,99 @@ L3: Flange Curling (플랜지 컬링 서비스성)
 
 import math
 
+from design.connections import (
+    OMEGA_RUPTURE, PHI_RUPTURE, block_shear_nominal, normalize_design_method,
+    normalize_member_case, rupture_factors, shear_lag_factor, MEMBER_CASES,
+)
+from design.notices import N as _nt  # noqa: E402
+
 
 def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
               Fu: float, Fy: float, design_method: str = 'LRFD',
               Usl: float = None, connection_case: str = 'generic',
-              d: float = None, s: float = None) -> dict:
-    """전단지연 계수 및 유효 순단면적 (AISI J6.2, Table J6.2-1)
+              d: float = None, s: float = None,
+              connection_type: str = None,
+              b1: float = None, b2: float = None,
+              bf: float = None, bw: float = None) -> dict:
+    """접합부 인장부재의 전단지연(J6.2, Table J6.2-1)과 인장강도(D2, D3, J6.2)
 
-    인장 부재에서 접합부가 전체 단면을 연결하지 않을 때
-    비균일 응력 분포를 반영하는 감소계수
+    Usl 식과 Table J6-1 계수는 design.connections 의 단일 구현을 쓴다.
 
     Args:
         Ag: 총단면적 (in²)
-        An_net: 순단면적 (구멍 제외) (in²)
+        An_net: 접합부 순단면적 Ant (Eq. J6.2-3; Table J6.2-1 (3)(a) 는 직접 접합 요소 면적) (in²)
         x_bar: 전단면으로부터 단면 도심까지의 거리 x̄ (in)
-        L_conn: 접합부 길이 또는 종방향 용접 길이 L (in)
-        Fu: 인장강도 (ksi)
-        Fy: 항복강도 (ksi)
-        design_method: 'LRFD' or 'ASD'
-        Usl: 직접 지정 시 Table J6.2-1을 우회하여 사용하는 전단지연 계수
-        connection_case: Table J6.2-1 분류
-            'flat_sheet'      → Eq. J6.2-4: U = 0.9 + 0.1·d/s
-            'flat_sheet_stag' → 엇모배치 평판: U = 1.0
-            'transverse_weld' → 횡방향 용접만으로 전달: U = 1.0
-            'all_elements'    → 모든 단면요소에 직접 전달: U = 1.0
-            'welded_angle'    → Eq. J6.2-5: U = 1.0 - 1.20·x̄/L ≤ 0.9, ≥ 0.4
-            'welded_channel'  → Eq. J6.2-7: U = 1.0 - 0.36·x̄/L ≤ 0.9, ≥ 0.5
-            'generic'(기본)   → 분류 미지정: 경고 후 1 - x̄/L 사용(부재별 하한 미적용)
-        d: 평판 접합부(flat_sheet)에서 공칭 볼트 직경 (in) — Eq. J6.2-4용
-        s: 평판 접합부(flat_sheet)에서 시트폭/단면 내 볼트구멍 수 (in) — Eq. J6.2-4용
+        L_conn: 접합 길이(볼트: 끝 패스너 사이) 또는 종방향 용접 길이 L (in)
+        Fu, Fy: 강도 (ksi)
+        design_method: 'LRFD' | 'ASD' (LSD 는 오류)
+        Usl: 직접 지정하면 Table J6.2-1 대신 사용
+        connection_case: Table J6.2-1 분류 (하이픈·공백·대소문자 무관)
+            'flat_sheet'(J6.2-4, d·s 필요 — 없으면 하한 0.9), 'flat_sheet_staggered'(=1.0),
+            'transverse_weld'((3)(a), =1.0), 'all_elements'((3)(b), =1.0),
+            'angle_welded'(J6.2-5), 'angle_bolted'(J6.2-6, b1·b2 필요),
+            'channel_welded'(J6.2-7), 'channel_bolted'(J6.2-8, bf·bw 필요).
+            분류가 없고 Usl 도 없으면 오류(과거의 1 − x̄/L 일반식은 기준식이 아님).
+        d, s: flat_sheet 의 볼트 공칭직경, 시트폭/단면 구멍수 (in)
+        connection_type: 'bolted'|'welded'|'screw'|'paf' — J6.2 파단의 Table J6-1 계수.
+            None 이면 표에서 가장 보수적인 행(나사·PAF: Ω=3.00, φ=0.50)을 쓴다(경고).
+        b1, b2: 앵글의 비접합·접합 다리 폭 (J6.2-6), bf, bw: 채널 비접합 플랜지·접합 웨브 폭 (J6.2-8)
 
     Returns:
-        dict: {U, Ae, Tn_yield, Tn_rupture, Tn, phi_Tn, pass, steps}
+        dict: {U, Ae, Tn_yield, Tn_rupture, Tn, phi_Tn, governing, steps, warnings, ...}
     """
+    try:
+        dm = normalize_design_method(design_method)
+    except ValueError as exc:
+        return {'error': str(exc)}
     warnings = []
-    # AISI S100-16 Table J6.2-1: shear lag factor depends on connection type.
-    # The generic 1 - x̄/L form matches none of the table equations; only used
-    # as a labeled fallback when connection_case is unknown.
-    formula_str = None
     if Usl is not None:
-        U = Usl
-    elif connection_case in ('flat_sheet_stag', 'transverse_weld', 'all_elements'):
-        # Eq. J6.2-1 table rows (2), (3)(a) transverse welds, (3)(b): U = 1.0
-        U = 1.0
-        formula_str = f'U = 1.0 (Table J6.2-1: {connection_case})'
-    elif connection_case == 'flat_sheet':
-        # Eq. J6.2-4: U = 0.9 + 0.1·d/s (flat sheet, non-staggered holes)
-        if d is not None and s is not None and s > 0:
-            U = 0.9 + 0.1 * d / s
-            formula_str = f'U = 0.9 + 0.1·d/s = 0.9 + 0.1×{d:.4f}/{s:.4f} = {min(U, 1.0):.4f} (Eq. J6.2-4)'
-        else:
-            U = 1.0
-            warnings.append(
-                "connection_case='flat_sheet' requires d (bolt diameter) and s "
-                '(sheet width / number of holes) for Eq. J6.2-4; assuming U = 1.0.'
-            )
-            formula_str = 'U = 1.0 (Eq. J6.2-4 inputs d, s missing)'
-    elif connection_case == 'welded_angle' and L_conn > 0:
-        # Eq. J6.2-5: U = 1.0 - 1.20·x̄/L ≤ 0.9, but not less than 0.4
-        U = 1.0 - 1.20 * x_bar / L_conn
-        U = min(U, 0.9)
-        U = max(U, 0.4)  # lower bound per Table J6.2-1 (3)(c)
-        formula_str = f'U = 1.0 - 1.20·x̄/L = 1.0 - 1.20×{x_bar:.3f}/{L_conn:.3f} → {U:.4f} (Eq. J6.2-5, 0.4≤U≤0.9)'
-    elif connection_case == 'welded_channel' and L_conn > 0:
-        # Eq. J6.2-7: U = 1.0 - 0.36·x̄/L ≤ 0.9, but not less than 0.5
-        U = 1.0 - 0.36 * x_bar / L_conn
-        U = min(U, 0.9)
-        U = max(U, 0.5)  # lower bound per Table J6.2-1 (3)(d)
-        formula_str = f'U = 1.0 - 0.36·x̄/L = 1.0 - 0.36×{x_bar:.3f}/{L_conn:.3f} → {U:.4f} (Eq. J6.2-7, 0.5≤U≤0.9)'
-    elif L_conn > 0:
-        # 'generic' / unknown: no Table J6.2-1 equation applies. Emit a warning
-        # and use the plain 1 - x̄/L form (member-specific floors NOT applied).
-        U = min(1.0, 1.0 - x_bar / L_conn)
-        warnings.append(
-            "connection_case='%s' is not a Table J6.2-1 case; using generic "
-            '1 - x_bar/L_conn approximation (no member-specific lower bound). '
-            'Specify connection_case or Usl per AISI Table J6.2-1.' % connection_case
-        )
-        formula_str = f'U = 1 - x̄/L = 1 - {x_bar:.3f}/{L_conn:.3f} = {U:.4f} (generic, not Table J6.2-1)'
-    else:
-        U = 1.0
-        warnings.append('L_conn <= 0; assuming Usl = 1.0.')
-        formula_str = 'U = 1.0 (L_conn <= 0)'
-
-    U = max(min(U, 1.0), 0.0)
-    if formula_str is None:
+        U = float(Usl)
         formula_str = f'U = {U:.4f} (Usl provided)'
+        usl_eq = 'Usl provided'
+    else:
+        case = normalize_member_case(connection_case)
+        if case is None:
+            return {'error': (f"connection_case '{connection_case}' is not a Table J6.2-1 case "
+                              f"({', '.join(MEMBER_CASES)}); give connection_case or Usl")}
+        sl = shear_lag_factor(case, d=d, s=s, x_bar=x_bar, L=L_conn, b1=b1, b2=b2, bf=bf, bw=bw)
+        if sl['Usl'] is None:
+            return {'error': f'Table J6.2-1: {sl["reason"]}'}
+        U = sl['Usl']
+        usl_eq = sl['equation']
+        formula_str = f"{sl['formula']} (Eq./Table {usl_eq})"
+        warnings.extend(sl['warnings'])
+        if case == 'transverse_weld':
+            warnings.append(_nt('special.warning.table_j6_2_1_j6_net'))
+    U = max(min(U, 1.0), 0.0)
 
-    # Effective net area
+    if connection_type is None:
+        phi_r, omega_r, rkey = 0.50, 3.00, 'screw/paf (most conservative)'
+        warnings.append(_nt('special.warning.j6_2_connection_type_j6_j6'))
+    else:
+        try:
+            phi_r, omega_r, rkey = rupture_factors(connection_type)
+        except ValueError as exc:
+            return {'error': str(exc)}
+
     Ae = An_net * U
+    Tn_yield = Ag * Fy          # §D2
+    Tn_rupture = Ae * Fu        # §J6.2 (Eq. J6.2-1)
+    Tn_net = An_net * Fu        # §D3 (Ae 없이 순단면)
 
-    # Tensile strength
-    Tn_yield = Ag * Fy        # §D2.1 Yielding
-    Tn_rupture = Ae * Fu      # §D3 Rupture with shear lag
-
-    if design_method == 'LRFD':
+    if dm == 'LRFD':
         design_yield = 0.90 * Tn_yield
-        design_rupture = 0.75 * Tn_rupture
+        design_rupture = phi_r * Tn_rupture
+        design_net = 0.75 * Tn_net
     else:
         design_yield = Tn_yield / 1.67
-        design_rupture = Tn_rupture / 2.00
+        design_rupture = Tn_rupture / omega_r
+        design_net = Tn_net / 2.00
 
-    phi_Tn = min(design_yield, design_rupture)
-    Tn = Tn_yield if design_yield <= design_rupture else Tn_rupture
-    governing = 'Yielding (§D2)' if design_yield <= design_rupture else 'Rupture with shear lag (§D3/J6.2)'
+    candidates = [(design_yield, Tn_yield, 'Yielding (§D2)'),
+                  (design_rupture, Tn_rupture, 'Rupture with shear lag (§J6.2)'),
+                  (design_net, Tn_net, 'Net section rupture (§D3)')]
+    phi_Tn, Tn, governing = min(candidates, key=lambda c: c[0])
+    fac = f'φ={phi_r}' if dm == 'LRFD' else f'Ω={omega_r}'
 
     return {
         'U': round(U, 4),
@@ -119,15 +108,26 @@ def shear_lag(Ag: float, An_net: float, x_bar: float, L_conn: float,
         'An_net': round(An_net, 4),
         'Tn_yield': round(Tn_yield, 3),
         'Tn_rupture': round(Tn_rupture, 3),
+        'Tn_net_rupture_D3': round(Tn_net, 3),
         'Tn': round(Tn, 3),
         'phi_Tn': round(phi_Tn, 3),
+        'design_yield': round(design_yield, 3),
+        'design_rupture': round(design_rupture, 3),
+        'design_net_rupture_D3': round(design_net, 3),
+        'rupture_phi': phi_r,
+        'rupture_omega': omega_r,
+        'rupture_factor_basis': _nt('special.label.factor_table_j6_1_kind', kind=rkey),
+        'Usl_equation': usl_eq,
+        'design_method': dm,
         'governing': governing,
         'connection_case': connection_case,
         'steps': [
             {'name': 'Shear Lag Coefficient', 'formula': formula_str},
             {'name': 'Effective Net Area', 'formula': f'Ae = An × U = {An_net:.4f} × {U:.4f} = {Ae:.4f} in²'},
-            {'name': 'Yield Strength', 'formula': f'Tn_yield = Ag × Fy = {Ag:.4f} × {Fy:.1f} = {Tn_yield:.3f} kips'},
-            {'name': 'Rupture Strength', 'formula': f'Tn_rupture = Ae × Fu = {Ae:.4f} × {Fu:.1f} = {Tn_rupture:.3f} kips'},
+            {'name': 'Yield Strength (D2)', 'formula': f'Tn_yield = Ag × Fy = {Ag:.4f} × {Fy:.1f} = {Tn_yield:.3f} kips'},
+            {'name': 'Rupture Strength (J6.2)',
+             'formula': f'Tn_rupture = Ae × Fu = {Ae:.4f} × {Fu:.1f} = {Tn_rupture:.3f} kips ({fac}, Table J6-1)'},
+            {'name': 'Net Section Rupture (D3)', 'formula': f'Tn = An × Fu = {Tn_net:.3f} kips'},
         ],
         'warnings': warnings,
     }
@@ -148,32 +148,36 @@ def block_shear(Agv: float, Anv: float, Ant: float,
         Ant: 인장면 순면적 (in²)
         Fy: 항복강도 (ksi)
         Fu: 인장강도 (ksi)
-        design_method: 'LRFD'(φRn) 또는 'ASD'(Rn/Ω) — 가용강도 산정 기준
-        connection_type: 'bolted' 또는 'welded' — Table J6-1의 φ/Ω 기본값 선택
-                         (볼트: φ=0.65/Ω=2.22, 용접: φ=0.60/Ω=2.50)
+        design_method: 'LRFD'(φRn) | 'ASD'(Rn/Ω). LSD·알 수 없는 값은 오류.
+        Ubs: 1.0 (일반), 0.5 (코핑 보 + 수직열 2개 이상)
+        connection_type: 'bolted' | 'welded' — Table J6-1 의 φ/Ω (볼트 0.65/2.22, 용접 0.60/2.50).
+            J6 머리글에 따라 나사·PAF 접합에는 블록전단을 적용하지 않는다(오류).
 
     Returns:
         dict: {Rn, phi_Rn, steps}
     """
-    # Eq. J6.3-1 / J6.3-2
-    Rn1 = 0.6 * Fy * Agv + Ubs * Fu * Ant
-    Rn2 = 0.6 * Fu * Anv + Ubs * Fu * Ant
+    try:
+        dm = normalize_design_method(design_method)
+        _, _, key = rupture_factors(connection_type)
+    except ValueError as exc:
+        return {'error': str(exc)}
+    if key in ('screw', 'paf'):
+        return {'error': 'J6: 나사·PAF 접합의 파단은 J6.1·J6.2 만 — 블록전단(J6.3)은 볼트·용접 접합에만 적용'}
 
-    Rn = min(Rn1, Rn2)
+    Rn, Rn1, Rn2 = block_shear_nominal(Fy, Fu, Agv, Anv, Ant, Ubs)
     governing = 'Shear yield + tension rupture' if Rn == Rn1 else 'Shear rupture + tension rupture'
 
-    # Table J6-1: 체결재 유형별 φ·Ω를 짝 맞춰 선택한다.
-    # (볼트 φ=0.65와 용접 Ω=2.50을 섞어 쓰면 LRFD/ASD가 서로 다른 체결재를 가정하게 된다.)
-    if str(connection_type).lower().startswith('weld'):
-        phi_default, omega_default = 0.60, 2.50   # Welds 행
-    else:
-        phi_default, omega_default = 0.65, 2.22   # Bolts 행 (기본)
+    phi_default, omega_default = PHI_RUPTURE[key], OMEGA_RUPTURE[key]
     phi = phi_factor if phi_factor is not None else phi_default
     omega = omega_factor if omega_factor is not None else omega_default
+    warnings = []
+    if phi_factor is None and omega_factor is None:
+        warnings.append(_nt('special.warning.table_j6_1_using_j6_factors_connection', key=key, phi=phi, omega=omega))
+    if (phi_factor is not None and phi_factor > phi_default) or \
+            (omega_factor is not None and omega_factor < omega_default):
+        warnings.append(_nt('special.warning.a1_2_a1_j6_k2', phi_default=phi_default, omega_default=omega_default))
 
-    # 가용강도는 φ의 truthy 여부가 아니라 design_method로 선택한다 —
-    # omega_factor만 넘긴 ASD 의도 호출이 LRFD 값(φRn)으로 계산되는 것을 방지.
-    is_asd = str(design_method).upper() == 'ASD'
+    is_asd = dm == 'ASD'
     phi_Rn = Rn / omega if is_asd else phi * Rn
 
     return {
@@ -181,10 +185,10 @@ def block_shear(Agv: float, Anv: float, Ant: float,
         'Rn1': round(Rn1, 3),
         'Rn2': round(Rn2, 3),
         'phi_Rn': round(phi_Rn, 3),
-        'design_method': 'ASD' if is_asd else 'LRFD',
+        'design_method': dm,
         'phi': phi,
         'omega': omega,
-        'connection_type': 'welded' if str(connection_type).lower().startswith('weld') else 'bolted',
+        'connection_type': 'welded' if key == 'weld' else 'bolted',
         'governing': governing,
         'Ubs': Ubs,
         'steps': [
@@ -195,11 +199,7 @@ def block_shear(Agv: float, Anv: float, Ant: float,
              'formula': (f'Rn/Ω = {Rn:.3f}/{omega} = {phi_Rn:.3f} kips' if is_asd
                          else f'φRn = {phi} × {Rn:.3f} = {phi_Rn:.3f} kips')},
         ],
-        'warnings': [] if (phi_factor is not None or omega_factor is not None) else [
-            f'Using Table J6-1 default factors for {connection_type} connection '
-            f'(phi={phi}, omega={omega}). Override phi_factor/omega_factor for '
-            'connection-specific AISI J6.3 design.'
-        ],
+        'warnings': warnings,
     }
 
 
@@ -208,112 +208,111 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
                         corner_angle: float = 90.0,
                         A_corners: float = 0,
                         A_flange: float = 0,
-                        corners_per_flange: int = 2) -> dict:
+                        corners_per_flange: int = 2,
+                        A_total: float = 0,
+                        buckling_precondition: bool = None) -> dict:
     """냉간가공 항복강도 증가 (§A3.3.2, Eq. A3.3.2-1~4)
 
-    AISI S100-16 §A3.3.2: Fya를 Fy 대신 사용 가능
-    적용 범위: Chapters D, E, F (§F2.4 제외), §H1, §I4, §I6.2
-    조건: Pn=Pne(E3), Pnd=Py(E4), Mn=Mne(F3), Mnd=My(F4) — 좌굴 미지배 시만
+    AISI S100-16 §A3.3.2: Fya 를 Fy 대신 쓸 수 있는 곳은 Chapters D, E, F (§F2.4 제외),
+    §H1, §I4, §I6.2 이고, Fy 응력 수준에서 국부·뒤틀림 좌굴 감소가 없는 단면
+    (기둥 Pnℓ=Pne·Pnd=Py, 보 Mnℓ=Mne·Mnd=My)에 한한다.
 
     Eq. A3.3.2-1의 C 정의:
-      - 압축부재: C = 전체 코너 단면적 / 전체 단면적
-      - 휨부재   : C = 제어 플랜지의 코너 단면적 / 제어 플랜지 단면적
-    따라서 A_flange(제어 플랜지 면적)가 주어지면 그에 대응하는 플랜지 코너
-    면적(기본 2개 코너)으로 나눠야 하며, 전체 단면 코너(n_corners) 면적으로
-    나누면 C가 과대평가되어 Fya가 비보수적으로 증가한다.
+      - 압축부재: C = 전체 코너 단면적 / 전체 단면적  (A_total 과 n_corners 로 산정 가능)
+      - 휨부재   : C = 제어 플랜지의 코너 단면적 / 제어 플랜지 단면적 (A_flange)
+    면적이 하나도 없으면 C 를 추정하지 않고 증가 없음(C=0)으로 둔다.
 
     Args:
-        Fyv: Virgin 항복강도 (ksi)
-        Fuv: Virgin 인장강도 (ksi)
-        R: 내부 코너 반경 (in)
-        t: 두께 (in)
-        n_corners: 전체 단면 코너 수 (C-channel=4, Z=4, Hat=4) — 압축부재 C 자동계산용
+        Fyv, Fuv: Virgin 항복/인장강도 (ksi)
+        R: 내부 코너 반경 (in), t: 두께 (in)
+        n_corners: 전체 단면 코너 수 — A_total 이 있을 때 압축부재 C 자동계산
         corner_angle: 코너 각도 (degrees, 기본 90)
-        A_corners: (제어)부위 코너부 총 단면적 (in²) — >0이고 A_flange>0이면 직접 C 계산
-        A_flange: 제어 플랜지 총 단면적 (in²) — >0이면 휨부재 C로 해석
+        A_corners: 코너부 단면적 (in²) — A_flange 또는 A_total 과 함께 직접 C 계산
+        A_flange: 제어 플랜지 총 단면적 (in²) — 휨부재 C
         corners_per_flange: 제어 플랜지 1개당 코너 수 (C/Z 플랜지 기본 2)
+        A_total: 전체 단면적 (in²) — 압축부재 C
+        buckling_precondition: 호출자가 좌굴 전제(위)를 확인했으면 True, 위배면 False,
+            확인하지 않았으면 None (단독 호출).
 
     Returns:
-        dict with Fya, Fyc, Bc, m, C, applicable, steps, warnings
+        dict: Fya, Fyc, Bc, m, C, steps, warnings 와
+            applicable          — 식(Eq. A3.3.2-2) 적용조건(Fu/Fy ≥ 1.2, R/t ≤ 7, 각도 ≤ 120°) 만족 여부
+            formula_applicable  — applicable 과 같음
+            buckling_precondition — 'met' | 'not_met' | 'not_checked'
+            fya_usable          — 식 조건과 좌굴 전제를 모두 만족하면 True, 하나라도 위배면 False,
+                                  좌굴 전제를 확인하지 않았으면 None
     """
     warnings = []
-    # 입력 유효성: 면적/형상 입력은 음수가 될 수 없다(음수 C 방지).
-    if A_corners < 0 or A_flange < 0:
-        warnings.append('A_corners/A_flange 음수 입력 → 0(미제공)으로 처리.')
+    if A_corners < 0 or A_flange < 0 or A_total < 0:
+        warnings.append(_nt('special.warning.corners_flange_total'))
         A_corners = max(A_corners, 0.0)
         A_flange = max(A_flange, 0.0)
+        A_total = max(A_total, 0.0)
     Rt = R / t if t > 0 else 0
+    if buckling_precondition is True:
+        bp = 'met'
+    elif buckling_precondition is False:
+        bp = 'not_met'
+    else:
+        bp = 'not_checked'
+        warnings.append(_nt('special.warning.a3_3_2_a3_pn_pne_pnd'))
 
-    # 적용 조건 검사
     applicable = True
     if Fuv / Fyv < 1.2:
         applicable = False
-        warnings.append(f'Fu/Fy = {Fuv/Fyv:.3f} < 1.2 — Eq. A3.3.2-2 적용 불가')
+        warnings.append(_nt('special.warning.a3_3_2_fu_fy_a3', value=Fuv/Fyv))
     if Rt > 7:
         applicable = False
-        warnings.append(f'R/t = {Rt:.2f} > 7 — Eq. A3.3.2-2 적용 불가')
+        warnings.append(_nt('special.warning.a3_3_2_a3', Rt=Rt))
     if corner_angle > 120:
         applicable = False
-        warnings.append(f'코너 각도 {corner_angle}° > 120° — Eq. A3.3.2-2 적용 불가')
+        warnings.append(_nt('special.warning.a3_3_2_a3_2', corner_angle=corner_angle))
+
+    def _usable(formula_ok):
+        if not formula_ok or bp == 'not_met':
+            return False
+        return True if bp == 'met' else None
 
     if not applicable or Rt <= 0:
         return {
             'Fya': Fyv, 'Fyc': Fyv, 'Bc': 0, 'm': 0, 'C': 0,
-            'increase_pct': 0, 'applicable': False,
+            'increase_pct': 0, 'applicable': False, 'formula_applicable': False,
+            'buckling_precondition': bp, 'fya_usable': False,
             'steps': [], 'warnings': warnings,
         }
 
-    # Eq. A3.3.2-3: Bc
     ratio = Fuv / Fyv
-    Bc = 3.69 * ratio - 0.819 * ratio ** 2 - 1.79
-    Bc = max(Bc, 0)
-
-    # Eq. A3.3.2-4: m
-    m = 0.192 * ratio - 0.068
-
-    # Eq. A3.3.2-2: Fyc = Bc × Fyv / (R/t)^m
+    Bc = max(3.69 * ratio - 0.819 * ratio ** 2 - 1.79, 0)   # Eq. A3.3.2-3
+    m = 0.192 * ratio - 0.068                              # Eq. A3.3.2-4
+    # Eq. A3.3.2-2: 코너 항복응력. 상한은 Eq. A3.3.2-1 의 Fya ≤ Fuv 뿐이다(Fyc 자체는 Fuv 를 넘을 수 있음 —
+    # Manual Example I-16: Fyc = 52.30 > Fuv = 45 ksi).
     Fyc = Bc * Fyv / (Rt ** m)
-    Fyc = min(Fyc, Fuv)  # ≤ Fuv
 
-    # 코너부 면적 비율 C (Eq. A3.3.2-1)
-    # 코너 1개당 면적 (arc 길이 × t)
     arc_length = (corner_angle * math.pi / 180) * (R + t / 2)
     A_corner_each = arc_length * t
 
     if A_corners > 0 and A_flange > 0:
-        # 직접 입력: A_corners(해당 부위 코너 면적)/A_flange(해당 부위 면적)
         C = A_corners / A_flange
+        c_note = 'C = A_corners/A_flange (입력)'
     elif A_flange > 0:
-        # 휨부재 C: 제어 플랜지 코너 면적 / 제어 플랜지 면적.
-        # A_corners 미제공 → 플랜지 코너(기본 2개) 면적으로 자동 산정.
-        # (전체 단면 코너 n_corners로 나누면 C 과대평가 → Fya 비보수적. Eq. A3.3.2-1)
-        A_flange_corners = corners_per_flange * A_corner_each
-        if A_flange_corners > 0:
-            C = A_flange_corners / A_flange
-            warnings.append(
-                f'A_corners 미제공 → 제어 플랜지 코너 {corners_per_flange}개 면적으로 '
-                'C 자동 산정(Eq. A3.3.2-1, 휨부재).'
-            )
-        else:
-            C = 0.15
-            warnings.append('코너 면적 산정 불가 → 보수적 C=0.15 사용.')
-    else:
-        # A_flange 미제공 시 보수적 추정: C = 0.15 (일반적 CFS 범위 0.05~0.30)
-        C = 0.15
+        # 휨부재: 제어 플랜지 코너 면적 / 제어 플랜지 면적 (전체 코너 수로 나누면 C 과대)
+        C = corners_per_flange * A_corner_each / A_flange
+        c_note = f'C = {corners_per_flange}×A_corner/A_flange (휨부재)'
         warnings.append(
-            'A_flange 미제공 → 보수적 C=0.15 사용. '
-            '정확한 계산을 위해 A_corners, A_flange를 제공하세요.'
-        )
+            _nt('special.warning.a3_3_2_corners_a3', corners_per_flange=corners_per_flange))
+    elif A_total > 0:
+        A_c = A_corners if A_corners > 0 else n_corners * A_corner_each
+        C = A_c / A_total
+        c_note = ('C = A_corners/A_total (압축부재)' if A_corners > 0
+                  else f'C = {n_corners}×A_corner/A_total (압축부재)')
+    else:
+        C = 0.0
+        c_note = 'C = 0 (면적 미제공 — 증가 없음)'
+        warnings.append(_nt('special.warning.flange_total'))
 
-    # 음수 방지(음수 입력은 위에서 0으로 정규화되나 방어적으로 한 번 더 하한 0)
     C = min(max(C, 0.0), 1.0)
-
-    # Eq. A3.3.2-1: Fya = C × Fyc + (1-C) × Fyf
-    # Fyf = virgin Fy (시험 미실시 시)
     Fyf = Fyv
-    Fya = C * Fyc + (1 - C) * Fyf
-    Fya = min(Fya, Fuv)  # ≤ Fuv
-
+    Fya = min(C * Fyc + (1 - C) * Fyf, Fuv)                 # Eq. A3.3.2-1 (≤ Fuv)
     increase = (Fya / Fyv - 1) * 100
 
     return {
@@ -325,13 +324,16 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
         'R_over_t': round(Rt, 2),
         'increase_pct': round(increase, 1),
         'applicable': True,
-        'excluded_sections': '§F2.4 (Inelastic Reserve)',
+        'formula_applicable': True,
+        'buckling_precondition': bp,
+        'fya_usable': _usable(True),
+        'excluded_sections': _nt('special.label.cold_work_excluded_sections'),
         'steps': [
             {'name': 'Bc (Eq. A3.3.2-3)', 'formula': f'Bc = 3.69×{ratio:.3f} - 0.819×{ratio:.3f}² - 1.79 = {Bc:.4f}'},
             {'name': 'm (Eq. A3.3.2-4)', 'formula': f'm = 0.192×{ratio:.3f} - 0.068 = {m:.4f}'},
             {'name': 'Fyc (Eq. A3.3.2-2)', 'formula': f'Fyc = Bc×Fyv/(R/t)^m = {Bc:.4f}×{Fyv}/{Rt:.2f}^{m:.4f} = {Fyc:.2f} ksi'},
-            {'name': 'C (corner ratio)', 'formula': f'C = A_corners/A_total = {C:.4f}'},
-            {'name': 'Fya (Eq. A3.3.2-1)', 'formula': f'Fya = C×Fyc + (1-C)×Fyf = {C:.4f}×{Fyc:.2f} + {1-C:.4f}×{Fyf:.2f} = {Fya:.2f} ksi (+{increase:.1f}%)'},
+            {'name': 'C (corner ratio)', 'formula': f'{c_note} = {C:.4f}'},
+            {'name': 'Fya (Eq. A3.3.2-1)', 'formula': f'Fya = C×Fyc + (1-C)×Fyf = {C:.4f}×{Fyc:.2f} + {1-C:.4f}×{Fyf:.2f} = {Fya:.2f} ksi (+{increase:.1f}%) ≤ Fuv'},
         ],
         'warnings': warnings,
     }
@@ -339,22 +341,30 @@ def cold_work_strength(Fyv: float, Fuv: float, R: float, t: float,
 
 def flange_curling(bf: float, t: float, h: float,
                    f_avg: float, E: float = 29500,
-                   allowable_cf: float = None) -> dict:
-    """플랜지 컬링 검토 (AISI L3 serviceability reference)
+                   allowable_cf: float = None,
+                   d: float = None,
+                   wf_is_half_clear_distance: bool = False) -> dict:
+    """플랜지 컬링 검토 (AISI L3 serviceability reference, Eq. L3-1)
 
     넓은 플랜지에서 압축응력에 의한 플랜지 면외 변형
 
     Args:
-        bf: 플랜지 폭 (in)
+        bf: 플랜지 폭 (in). 웨브 바깥으로 돌출한 폭 wf = bf − t 로 쓴다.
         t: 두께 (in)
-        h: 웹 높이 (in)
+        h: 보 깊이 d (in) — Eq. L3-1 의 d (웨브 높이가 아니라 단면 깊이). 이름은 과거 호환.
         f_avg: 플랜지 평균 응력 (ksi)
         E: 탄성계수 (ksi)
+        allowable_cf: 허용 컬링 (in). 없으면 판정 없이 참고값만.
+        d: 보 깊이 (in). 주면 h 대신 쓴다.
+        wf_is_half_clear_distance: 박스·U형에서 bf 로 "웨브 사이 순거리의 절반"을 넘겼으면 True
+            (그 값이 곧 wf 이므로 t 를 빼지 않는다).
 
     Returns:
         dict: {cf, allowable_cf, ok, ...}. ok=None이면 판정 불가(참고값만 제공) —
         사용성(serviceability) 참고식이므로 강도 판정과 혼동 금지.
     """
+    if d is not None:
+        h = d
     if t <= 0 or E <= 0:
         return {'cf': 0, 'limit': 0, 'ok': None, 'note': 'Invalid input',
                 'criterion_type': 'serviceability', 'serviceability_only': True}
@@ -366,8 +376,7 @@ def flange_curling(bf: float, t: float, h: float,
     #   cf = wf⁴ · f_av² / (100 · d · 0.061² · t² · E²)
     # (Verified against CFS Design Manual Example I-18: wf=1.193, d=5.698,
     #  t=0.0566, f_av=23.82 → cf≈0.000194 in.)
-    wf = bf - t  # projection of flange beyond the web (conservative; for box/U
-                 # sections pass bf = half the clear distance between webs)
+    wf = bf if wf_is_half_clear_distance else bf - t
     cf = (wf ** 4 * abs(f_avg) ** 2) / (100.0 * h * (0.061 ** 2) * t ** 2 * E ** 2) \
         if (h > 0 and abs(f_avg) > 0) else 0
 

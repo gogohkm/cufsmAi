@@ -1,9 +1,77 @@
 """ASCE/SEI 7 하중조합 엔진
 
 ASD 및 LRFD 하중조합을 자동 선별하고 적용한다.
-AISI S100-16 예제에서 사용하는 ASCE/SEI 7-10 기준 (ASCE 7 Chapter 2,
-Section 2.3.1 LRFD / Section 2.4.1 ASD).
+계수는 AISI S100-16 설계매뉴얼 예제가 쓰는 ASCE/SEI 7-10 의 기본조합이다
+(7-10 Sec. 2.3.2 LRFD / Sec. 2.4.1 ASD). 다른 판(7-16, 7-22: 적설 1.0S·0.3S·0.7S,
+지진 Ev+Eh)이나 다른 나라 기준은 들어 있지 않다.
+
+선별 규칙 (7-10 Sec. 2.3.2 / 2.4.1 "Effects of one or more loads not acting shall
+be considered"): 없는 하중은 0 으로 둔다. 조합은 지우지 않고 없는 항만 뺀다.
+줄어든 계수 집합이 같아진 조합은 하나로 합친다.
 """
+
+import re
+from design.notices import N as _nt  # noqa: E402
+
+
+LOAD_COMBINATION_EDITION = 'ASCE/SEI 7-10'
+LOAD_COMBINATION_REFERENCE = {
+    'LRFD': _nt('loads.label.combo_ref_lrfd'),
+    'ASD': _nt('loads.label.combo_ref_asd'),
+}
+
+# 조합표에 나오는 하중 기호. 이 밖의 키(예: 'Wp')는 조합 선별에 쓰지 않는다.
+LOAD_SYMBOLS = ('D', 'L', 'Lr', 'S', 'R', 'W', 'E')
+
+# 부분재하 대상 — L: ASCE 7 Sec. 4.3.3 (어느 일부 재하든), Lr: Sec. 4.3.3/4.3.3.1
+# (인접·교번 경간), S: Sec. 7.5 (전/반 재하 경우들).
+PATTERNED_LIVE_LOADS = ('L', 'Lr')
+PATTERNED_SNOW_LOADS = ('S',)
+
+
+def normalize_design_method(method) -> str:
+    """'LRFD' / 'ASD' 만 받는다. 그 밖의 값은 조용히 ASD 로 두지 않고 거절한다."""
+    m = str(method).strip().upper() if method is not None else ''
+    if m not in ('LRFD', 'ASD'):
+        raise ValueError(
+            f"Unsupported design_method {method!r}: use 'LRFD' or 'ASD' "
+            f"({LOAD_COMBINATION_EDITION} combinations). LSD (NBCC) combinations are not implemented."
+        )
+    return m
+
+
+def snow_partial_cases(n_spans: int) -> list:
+    """ASCE 7 Sec. 7.5.1 연속보 부분재하 경우 (경간별 배율 벡터).
+
+    균형하중 전경간 재하에 더해
+      1. 어느 한 외측경간 full, 나머지 half
+      2. 어느 한 외측경간 half, 나머지 full
+      3. 인접한 두 경간 full, 나머지 half (n-1 경우)
+    캔틸레버(내민) 경간도 한 경간으로 본다(Sec. 7.5.1). 같은 벡터는 한 번만 둔다.
+    """
+    n = int(n_spans)
+    cases = [(_nt('loads.label.snow_balanced'), [1.0] * n)]
+    if n < 2:
+        return cases
+    for side, k in ((_nt('loads.fragment.side_left'), 0), (_nt('loads.fragment.side_right'), n - 1)):
+        v = [0.5] * n
+        v[k] = 1.0
+        cases.append((_nt('loads.label.snow_case1', side=side), v))
+        v = [1.0] * n
+        v[k] = 0.5
+        cases.append((_nt('loads.label.snow_case2', side=side), v))
+    for k in range(n - 1):
+        v = [0.5] * n
+        v[k] = v[k + 1] = 1.0
+        cases.append((_nt('loads.label.snow_case3', s1=k + 1, s2=k + 2), v))
+    unique, seen = [], set()
+    for name, v in cases:
+        key = tuple(v)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((name, v))
+    return unique
 
 
 # ---------------------------------------------------------------------------
@@ -36,15 +104,18 @@ ASD_COMBOS = [
     *_expand_roof_alt('3: D+{r}', {'D': 1.0}, 1.0),
     # 4: D + 0.75L + 0.75(Lr or S or R)  — ASCE 7-10 Eq. 2.4-4
     *_expand_roof_alt('4: D+0.75L+0.75{r}', {'D': 1.0, 'L': 0.75}, 0.75),
+    # 5: D + (0.6W or 0.7E)  — ASCE 7-10 Eq. 2.4-5 (번호는 7-10 §2.4.1 그대로)
     ('5: D+0.6W',             {'D': 1.0, 'W': 0.6}),
-    # 6: D + 0.75L + 0.75(0.6W) + 0.75(Lr or S or R)  — ASCE 7-10 Eq. 2.4-6
-    *_expand_roof_alt('6: D+0.75L+0.75(0.6W)+0.75{r}',
+    # 6a: D + 0.75L + 0.75(0.6W) + 0.75(Lr or S or R)  — ASCE 7-10 Eq. 2.4-6a
+    *_expand_roof_alt('6a: D+0.75L+0.75(0.6W)+0.75{r}',
                       {'D': 1.0, 'L': 0.75, 'W': 0.45}, 0.75),
     ('7: 0.6D+0.6W',          {'D': 0.6, 'W': 0.6}),
-    ('8: D+0.7E',             {'D': 1.0, 'E': 0.7}),
-    ('9: D+0.75L+0.75(0.7E)+0.75S',
+    ('5: D+0.7E',             {'D': 1.0, 'E': 0.7}),
+    # 6b: D + 0.75L + 0.75(0.7E) + 0.75S  — ASCE 7-10 Eq. 2.4-6b
+    ('6b: D+0.75L+0.75(0.7E)+0.75S',
      {'D': 1.0, 'L': 0.75, 'E': 0.525, 'S': 0.75}),
-    ('10: 0.6D+0.7E',         {'D': 0.6, 'E': 0.7}),
+    # 8: 0.6D + 0.7E  — ASCE 7-10 Eq. 2.4-8
+    ('8: 0.6D+0.7E',          {'D': 0.6, 'E': 0.7}),
 ]
 
 # LRFD (Load and Resistance Factor Design) — ASCE 7 Section 2.3.1
@@ -66,32 +137,55 @@ LRFD_COMBOS = [
 ]
 
 
+_TERM_LOAD_RE = re.compile(r'(Lr|D|L|S|R|W|E)\)*$')
+
+
+def _reduced_combo_name(name: str, present: set) -> str:
+    """'4: 1.2D+1.0W+L+0.5Lr' 에서 없는 하중의 항을 뺀 이름."""
+    num, _, expr = name.partition(':')
+    kept = []
+    for term in expr.strip().split('+'):
+        m = _TERM_LOAD_RE.search(term.strip())
+        if m and m.group(1) in present:
+            kept.append(term.strip())
+    return f'{num}: ' + '+'.join(kept)
+
+
 def get_applicable_combos(loads: dict, method: str = 'LRFD') -> list:
-    """입력된 하중 종류에 따라 관련 하중조합만 필터링
+    """입력된 하중으로 평가할 하중조합 목록
+
+    없는 하중(0 또는 None)은 계수 0 으로 보고 그 항만 뺀다. 조합 자체는 지우지
+    않는다(예: L 이 없는 지붕 퍼린의 LRFD 4 → 1.2D+1.0W+0.5Lr). 줄어든 계수
+    집합이 같은 조합은 처음 것 하나로 합친다. D 는 언제나 있는 것으로 본다.
 
     Parameters
     ----------
     loads : dict
         하중값. 예: {'D': 15, 'Lr': 90, 'W': -144}
-        값이 0 또는 없으면 해당 하중 미적용.
     method : str
-        'ASD' 또는 'LRFD'
+        'ASD' 또는 'LRFD' (대소문자 무관). 그 밖의 값은 ValueError.
 
     Returns
     -------
-    list of (name, factors_dict)
+    list of (name, factors_dict) — factors 에는 있는 하중만 들어 있다.
     """
+    method = normalize_design_method(method)
     base = LRFD_COMBOS if method == 'LRFD' else ASD_COMBOS
-    present = {k for k, v in loads.items() if v is not None and v != 0}
-    # D는 항상 존재한다고 가정
+    present = {k for k, v in (loads or {}).items()
+               if k in LOAD_SYMBOLS and v is not None and v != 0}
     present.add('D')
 
     result = []
+    seen = set()
     for name, factors in base:
-        # 조합에 필요한 하중 유형이 모두 present 에 있는 경우만 포함
-        needed = set(factors.keys())
-        if needed <= present:
-            result.append((name, factors))
+        reduced = {k: f for k, f in factors.items() if k in present}
+        if not reduced:
+            continue
+        key = tuple(sorted(reduced.items()))
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append((_reduced_combo_name(name, present), reduced))
     return result
 
 
@@ -198,7 +292,7 @@ def find_controlling_combo(loads: dict, load_results: dict,
 
         d_factor = factors.get('D', 0)
         w_factor = factors.get('W', 0)
-        has_uplift_wind = loads.get('W', 0) < 0 and w_factor != 0
+        has_uplift_wind = (loads.get('W') or 0) < 0 and w_factor != 0
         combined_R = combined.get('R', [])
         has_net_uplift_R = any(r < 0 for r in combined_R) if combined_R else False
         is_uplift = bool(

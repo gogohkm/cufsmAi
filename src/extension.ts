@@ -9,14 +9,15 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 import * as fs from 'fs';
 import * as net from 'net';
 import * as http from 'http';
 import { execSync, exec, execFile } from 'child_process';
-import { PythonBridge } from './bridge/PythonBridge';
+import { PythonBridge, PythonStartupError } from './bridge/PythonBridge';
 import { StcfsdPanel } from './webview/StcfsdPanel';
 import { ProjectExplorerProvider, StcfsdTreeItem } from './webview/ProjectExplorerProvider';
-import { McpBridgeServer } from './mcp/bridge';
+import { McpBridgeServer, bridgeOptionsFromEnv } from './mcp/bridge';
 import {
     MCP_SERVER_KEY, buildServerConfig, mergeServerConfig,
     removeServerConfig, inspectRegistration, configPathsForScope,
@@ -31,25 +32,54 @@ let mcpServerPathValue = '';
 export async function activate(context: vscode.ExtensionContext) {
     console.log('StCFSD extension activating...');
     const isTestMode = process.env.STCFSD_TEST_MODE === '1';
+    // K1: STCFSD_MCP_PORT_FILE 이 있으면(독립 프로그램) 빈 포트 + 토큰 + 포트 파일. 없으면 지금 그대로(52790…, 토큰 없음).
+    const portFileOptions = bridgeOptionsFromEnv(process.env);
+    // V7-01: 결과를 봉인하는 이 PC 의 기록자 열쇠 폴더. 독립 프로그램은 STCFSD_WRITER_KEY_DIR(프로그램의 사용자 자료 폴더)로 주고,
+    // VS Code 확장은 확장의 사용자별 저장 폴더 아래 writer. 시험 모드에서는 시험이 준 것만(진짜 폴더를 쓰지 않는다).
+    const keyEnv = process.env.STCFSD_WRITER_KEY_DIR;
+    StcfsdPanel.writerKeyDir = keyEnv && path.isAbsolute(keyEnv) ? keyEnv
+        : (!isTestMode && context.globalStorageUri ? path.join(context.globalStorageUri.fsPath, 'writer') : null);
+    // R1-2: 프로젝트를 두는 뿌리 — STCFSD_PROJECT_ROOTS(절대 경로, path.delimiter 로 여럿) 또는 기본 「문서\StCFSD 프로젝트」(기록 설계 §2.1 · 구성안 결정 6).
+    // 기록의 열쇠 자리는 위의 writerKeyDir(봉인과 같은 열쇠). 시험 모드에서는 시험이 준 것만 — 진짜 문서 폴더를 보지 않는다.
+    const rootsEnv = (process.env.STCFSD_PROJECT_ROOTS || '').split(path.delimiter).map((r) => r.trim()).filter((r) => r && path.isAbsolute(r));
+    StcfsdPanel.projectRoots = rootsEnv.length > 0 ? rootsEnv : (!isTestMode ? [path.join(os.homedir(), 'Documents', 'StCFSD 프로젝트')] : []);
+    StcfsdPanel.projectRootsIsDefault = rootsEnv.length === 0 && !isTestMode;
 
     // Python 환경 자동 검사 + 설치
+    // V5-S3: 독립 프로그램(포트 파일 방식)은 묶어 넣은 Python 을 쓴다 — python.org · pip 을 권하지 않는다.
     const pythonPath = getPythonPath(context.extensionPath);
     if (!isTestMode) {
-        await checkAndInstallDependencies(context, pythonPath);
+        await checkAndInstallDependencies(context, pythonPath, !!portFileOptions);
     }
 
     pythonBridge = new PythonBridge(context.extensionPath, pythonPath);
+    // R8-17: 엔진 프로세스가 죽거나 다시 시작되면 알린다(다음 호출에서 한 번 다시 띄움).
+    pythonBridge.onStatus((kind, message) => {
+        if (kind === 'restarted') {
+            vscode.window.showInformationMessage(message);
+        } else {
+            vscode.window.showWarningMessage(message);
+        }
+    });
 
-    // MCP Bridge 시작
-    const mcpPort = await findAvailablePort(52790);
-    mcpBridge = new McpBridgeServer(() => StcfsdPanel.currentPanel || undefined, mcpPort);
+    // MCP Bridge 시작 (portFileOptions 는 위에서 — K1)
+    const mcpPort = portFileOptions ? 0 : await findAvailablePort(52790);
+    mcpBridge = new McpBridgeServer(() => StcfsdPanel.currentPanel || undefined, mcpPort, portFileOptions);
     await mcpBridge.start();
-    mcpPortValue = mcpPort;
+    mcpPortValue = mcpBridge.port;
     mcpServerPathValue = path.join(context.extensionPath, 'media', 'mcp-server.js')
         .replace(/\\/g, '/');
 
     // .mcp.json 자동 생성 (병합 기반, 기존 설정 보존)
-    setupMcpConfig(context, mcpPort);
+    // V4-19: 시험(STCFSD_TEST_MODE · VS Code 시험 실행)에서는 사용자 설정 파일(.mcp.json · ~/.claude/mcp.json …)을 쓰지 않는다.
+    // K1: 포트 파일 방식에서도 쓰지 않는다 — 그 파일들의 고정 포트 · 토큰 없는 항목으로는 이 호스트에 붙을 수 없다.
+    if (portFileOptions) {
+        console.log(`[StCFSD] port-file mode (${portFileOptions.portFile}) — MCP config files are not written`);
+    } else if (!isTestMode && context.extensionMode !== vscode.ExtensionMode.Test) {
+        setupMcpConfig(context, mcpPort);
+    } else {
+        console.log('[StCFSD] test mode — MCP config files are not written');
+    }
 
     // Step 1: 트리 프로바이더 생성
     const projectExplorer = new ProjectExplorerProvider();
@@ -154,8 +184,17 @@ export function deactivate() {
 // ============================================================
 // Python 의존성 자동 검사 + 설치
 // ============================================================
-async function checkAndInstallDependencies(
-    context: vscode.ExtensionContext, pythonPath: string
+/** V5-S3 · 독립 프로그램의 문구 — 묶어 넣은 Python(embeddable, pip 없음)이 망가졌으면 다시 설치가 답이다. */
+export const STANDALONE_PYTHON_BROKEN = (pythonPath: string) =>
+    `StCFSD: 프로그램에 들어 있는 해석 엔진(Python)을 실행할 수 없습니다 (${pythonPath}). `
+    + '백신 프로그램이 파일을 격리했거나 설치가 손상됐을 수 있습니다. StCFSD 를 다시 설치하세요.';
+export const STANDALONE_PACKAGES_BROKEN = (missing: string[]) =>
+    `StCFSD: 해석 엔진에 필요한 구성 요소(${missing.join(', ')})를 불러올 수 없습니다. `
+    + '백신 프로그램이 파일을 격리했거나 설치가 손상됐을 수 있습니다. StCFSD 를 다시 설치하세요.';
+
+// V5-S3: 시험이 부를 수 있게 내보낸다(동작은 그대로 — standalone 이 false 면 전과 같은 길).
+export async function checkAndInstallDependencies(
+    context: vscode.ExtensionContext, pythonPath: string, standalone = false
 ): Promise<void> {
     // 1) Python 존재 여부 확인
     let hasPython = false;
@@ -167,6 +206,11 @@ async function checkAndInstallDependencies(
         console.warn(`[StCFSD] Python not found at: ${pythonPath}`);
     }
 
+    if (!hasPython && standalone) {
+        // 단추 없이 알리고 기다리지 않는다 — 활성화(= MCP 다리 · 포트 파일)를 알림 상자 뒤에 세우지 않는다.
+        void vscode.window.showErrorMessage(STANDALONE_PYTHON_BROKEN(pythonPath));
+        return;
+    }
     if (!hasPython) {
         const action = await vscode.window.showWarningMessage(
             'StCFSD: Python을 찾을 수 없습니다. 해석 엔진을 사용하려면 Python 3.10+ 설치가 필요합니다.',
@@ -195,6 +239,11 @@ async function checkAndInstallDependencies(
     }
 
     console.warn(`[StCFSD] Missing packages: ${missingPackages.join(', ')}`);
+    if (standalone) {
+        // embeddable Python 에는 pip 이 없다 — 설치를 묻지 않는다.
+        void vscode.window.showErrorMessage(STANDALONE_PACKAGES_BROKEN(missingPackages));
+        return;
+    }
 
     // 3) 사용자에게 설치 여부 질문
     const install = await vscode.window.showWarningMessage(
@@ -249,10 +298,12 @@ async function ensurePythonRunning(): Promise<void> {
         try {
             await pythonBridge.start();
         } catch (err: any) {
-            vscode.window.showErrorMessage(
-                `StCFSD: Failed to start Python engine. ` +
-                `Ensure Python is installed with numpy and scipy.\n${err.message}`
-            );
+            // R8-21: selftest 가 파이썬 버전·엔진 import 를 확인한다. 그 문장을 그대로 보인다.
+            const detail = err instanceof PythonStartupError
+                ? err.message
+                : `StCFSD: Failed to start Python engine (${pythonBridge.pythonPath}). ` +
+                  `Ensure Python 3.10+ is installed with numpy and scipy.\n${err.message}`;
+            vscode.window.showErrorMessage(detail);
             throw err;
         }
     }
@@ -267,6 +318,8 @@ function _mergeIntoFile(filePath: string, key: string, config: { command: string
     if (!merged.ok) {
         throw new Error(`${filePath}: ${merged.error}`);
     }
+    // R8-22 (W2 후속 2): 내용이 같으면 쓰지 않는다 — 활성화마다 사용자 설정 파일의 mtime 을 바꾸지 않게.
+    if (!merged.changed && existing !== undefined) { return 'unchanged'; }
     const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) { fs.mkdirSync(dir, { recursive: true }); }
     fs.writeFileSync(filePath, merged.text);

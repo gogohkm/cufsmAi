@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StCFSD</title>
+<!-- 승인된 템플릿의 CSS 셋(desktop/design/assets 를 빌드가 그대로 복사) + 살아 있는 화면에 필요한 것(style/ui.css) -->
+<link rel="stylesheet" href="dist/review.css">
+<link rel="stylesheet" href="dist/app.css">
+<link rel="stylesheet" href="dist/cfsd.css">
+<link rel="stylesheet" href="style/ui.css">
+<script type="module" src="dist/main.js"></script>
+</head>
+<body>
+<!-- 새 검토 화면: 제목 표시줄(진행 띠 · 찾기 · AI 따라가기) · [트리 | 보기 | 정보 창 + 「Claude 가 보는 선택」] · 상태 표시줄. 시작 화면은 그 위에 덮는다.
+     계산 시트를 열면(U3) [레일 | 보기 | 시트] 로 바뀐다(템플릿 05). 지금의 설계 화면(탭 6개)은 #edit 의 iframe 으로 늘 붙어 있고 편집 상태(F2)에서만 보인다. -->
+<div class="win" id="win">
+  <header class="tbar" id="tbar"></header>
+  <div class="aibar" id="aibar" hidden></div>
+  <div class="strip editstrip" id="editstrip" hidden></div>
+  <div class="strip" id="opennotice" hidden></div>
+  <div class="strip recband" id="recband" hidden></div>
+  <div class="body" id="review">
+    <nav class="rail" id="rail"></nav>
+    <aside class="left" id="left"><div class="ttabs" id="ttabs"></div><div class="tree" id="tree" role="tree"></div></aside>
+    <section class="pane-view" id="center"></section>
+    <aside class="right" id="right">
+      <div class="pane pane-detail" id="info"></div>
+      <div class="share" id="share"><span class="dot un"></span><span>Claude 가 보는 선택</span><b></b></div>
+    </aside>
+    <div class="pane-sheet" id="sheet"></div>
+    <div class="aipoint" id="aipoint" hidden></div>
+    <div class="find" id="find" hidden></div>
+    <div class="pane-edit-embed" id="edit" aria-hidden="true">
+      <iframe id="designer" title="StCFSD 입력 화면(탭 6개)" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-popups"></iframe>
+      <aside id="side" hidden>
+        <div id="side-head"><span id="side-title"></span><button id="side-close" type="button" class="btn ghost" data-tip="닫기">✕</button></div>
+        <iframe id="side-frame" title="보고서" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-popups"></iframe>
+      </aside>
+    </div>
+  </div>
+  <div class="body startl" id="start" hidden></div>
+  <footer class="status" id="status"><span class="msg"></span><span class="sp"></span><span class="prog"></span><span class="toasts"></span><span class="std"></span><span class="ai"></span></footer>
+</div>
+<div id="dialog-host"></div>
+</body>
+</html>

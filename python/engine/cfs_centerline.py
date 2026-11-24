@@ -24,7 +24,7 @@ cfs_centerline.py - Cold-Formed Steel Centerline Coordinate Generator
       R_inner=0.09375,                           # 내측 코너 반경 (모든 코너 동일)
       corner_radii=None,                         # 또는 코너별 개별 반경 리스트
       n_arc=10,                                  # 코너당 호 분할 수
-      outer_side='left',                         # 외측면 방향 ('left' or 'right')
+      outer_side='left',                         # offset 방향 = 판 재료 쪽 ('left'|'right'|'auto'|구간별 목록)
       labels=None,                               # 꼭짓점별 라벨 (선택)
   )
   
@@ -78,14 +78,59 @@ def _right_normal(dx: float, dy: float) -> Tuple[float, float]:
 # Step 1: Offset — 외측 꼭짓점 → 중심선 꼭짓점
 # ============================================================
 
+def _offset_per_segment(
+    outer_corners: List[Tuple[float, float]],
+    t: float,
+    sides: List[str],
+) -> List[Tuple[float, float]]:
+    """구간별 offset 방향으로 각 변을 t/2 옮기고 이웃 offset 선의 교점을 꼭짓점으로 삼는다.
+
+    Z · hat 처럼 판의 서로 다른 면이 '외측'인 단면은 한 방향 offset 으로 만들 수 없다.
+    """
+    n = len(outer_corners)
+    if len(sides) != n - 1:
+        raise ValueError(
+            f"outer_side list length ({len(sides)}) must equal the number of "
+            f"segments ({n - 1})")
+    lines = []  # (offset 된 시작점, 단위 방향)
+    for k in range(n - 1):
+        side = sides[k]
+        if side not in ('left', 'right'):
+            raise ValueError(f"outer_side[{k}] must be 'left' or 'right', got {side!r}")
+        (x1, y1), (x2, y2) = outer_corners[k], outer_corners[k + 1]
+        dx, dy = x2 - x1, y2 - y1
+        if _vec_len(dx, dy) < 1e-12:
+            raise ValueError(f"segment {k} has zero length")
+        nx, ny = _left_normal(dx, dy) if side == 'left' else _right_normal(dx, dy)
+        ux, uy = _vec_normalize(dx, dy)
+        lines.append(((x1 + nx * t / 2, y1 + ny * t / 2), (ux, uy), (nx, ny)))
+
+    cl = [lines[0][0]]
+    for k in range(1, n - 1):
+        (p1x, p1y), (u1x, u1y), (n1x, n1y) = lines[k - 1]
+        (p2x, p2y), (u2x, u2y), (n2x, n2y) = lines[k]
+        den = u1x * u2y - u1y * u2x
+        if abs(den) < 1e-10:
+            # 평행한 이웃 변(직진 또는 되접힘): 꼭짓점을 이전 변 법선으로 옮긴다
+            x, y = outer_corners[k]
+            cl.append((x + n1x * t / 2, y + n1y * t / 2))
+            continue
+        s = ((p2x - p1x) * u2y - (p2y - p1y) * u2x) / den
+        cl.append((p1x + s * u1x, p1y + s * u1y))
+    (xe, ye) = outer_corners[-1]
+    _, _, (nxe, nye) = lines[-1]
+    cl.append((xe + nxe * t / 2, ye + nye * t / 2))
+    return cl
+
+
 def offset_to_centerline(
     outer_corners: List[Tuple[float, float]],
     t: float,
-    outer_side: str = 'left'
+    outer_side: Union[str, List[str]] = 'left'
 ) -> List[Tuple[float, float]]:
     """
     외측(바깥면) 꼭짓점 좌표를 판 두께 중심선으로 t/2 offset.
-    
+
     Parameters
     ----------
     outer_corners : list of (x, y)
@@ -93,35 +138,46 @@ def offset_to_centerline(
         첫 점과 끝 점은 자유단(lip end 등).
     t : float
         판 두께
-    outer_side : str
-        'left'  = 경로 진행방향 좌측이 외측면 (기본값)
-        'right' = 경로 진행방향 우측이 외측면
-        
+    outer_side : str or list of str
+        중심선을 옮기는 쪽 = **판 재료(두께)가 놓인 쪽**. 바깥면은 그 반대쪽이다.
+        'left'  = 판 재료가 경로 진행방향 좌측 (바깥면은 우측) (기본값)
+        'right' = 판 재료가 경로 진행방향 우측 (바깥면은 좌측)
+        list    = 구간별 값 (길이 = 점 수 − 1). Z · hat 처럼 플랜지마다
+                  바깥면이 판의 다른 면인 단면에 쓴다. 꼭짓점은 이웃
+                  offset 선의 교점이 된다.
+
     Returns
     -------
     list of (x, y) : 중심선 sharp corner 좌표
-    
+
     알고리즘 상세
     -----------
     자유단(첫/끝 점):
         해당 변의 법선 방향으로 t/2 이동
-        
+
     내부 꼭짓점:
         양쪽 변의 법선벡터의 이등분선(bisector) 방향으로 이동
         이동 거리 = t/2 / cos(반각)
-        
-        이유: 두 평면이 각도 θ로 만날 때, 
+
+        이유: 두 평면이 각도 θ로 만날 때,
         외측면에서 t/2 안쪽의 교차점은 이등분선 위에 있고
         법선 방향 거리 t/2를 유지하려면 1/cos(θ/2)를 곱해야 함
-        
+
     outer_side 결정법:
-        경로의 시작점에서 끝점까지 순서대로 따라갈 때,
-        판의 바깥면(외측)이 진행방향의 왼쪽에 있으면 'left'
-        
+        경로의 시작점에서 끝점까지 따라갈 때 판 재료(단면 안쪽)가
+        진행방향 왼쪽에 있으면 'left' (= 바깥면이 오른쪽).
+
         예시 (C-section, 하단 립→하단 플랜지→웹→상부 플랜지→상부 립):
         - 웹이 우측에 있는 일반 C: outer_side='left'
+          (하단 플랜지를 +x 로 지날 때 바깥면 −y 는 오른쪽, 재료 +y 는 왼쪽)
         - 웹이 좌측에 있는 역방향 C: outer_side='right'
+        틀린 쪽을 주면 중심선이 바깥면 밖으로 나가 단면이 t 만큼 커진다 —
+        `centerline_envelope_excess` 로 검출한다.
     """
+    if isinstance(outer_side, (list, tuple)):
+        return _offset_per_segment(outer_corners, t, list(outer_side))
+    if outer_side not in ('left', 'right'):
+        raise ValueError(f"outer_side must be 'left', 'right' or a per-segment list, got {outer_side!r}")
     sign = 1.0 if outer_side == 'left' else -1.0
     n = len(outer_corners)
     cl_corners = []
@@ -229,11 +285,16 @@ def apply_fillet(
     6) T1→T2 호를 n_arc 등분
     
     안전장치:
-    - d_tan이 인접 변 길이의 45%를 초과하면 반경 자동 축소
+    - 한 변에 걸린 두 코너의 접선 거리 합(자유단 쪽은 하나)이 그 변의 길이를
+      넘으면 ValueError — 직선부가 음수가 되는 형상은 반경을 몰래 줄이지 않고 거절한다
+      (template._snakey 와 같은 규칙).
     - θ ≈ 0° 또는 180°이면 필렛 생략
     """
     n = len(cl_corners)
     n_inner = n - 2  # 내부 코너 수
+    if int(n_arc) != n_arc or n_arc < 1:
+        raise ValueError(f"n_arc must be an integer >= 1, got {n_arc!r}")
+    n_arc = int(n_arc)
 
     # r_fillet을 리스트로 정규화
     if isinstance(r_fillet, (int, float)):
@@ -245,6 +306,31 @@ def apply_fillet(
                 f"내부 코너 수({n_inner})와 불일치"
             )
         radii = [float(r) for r in r_fillet]
+    if any(r < 0 for r in radii):
+        raise ValueError("corner radii must be >= 0")
+
+    # 코너별 접선 거리를 먼저 구해 각 변에서 직선부가 남는지 확인한다
+    tan_dists = [0.0] * n
+    for i in range(1, n - 1):
+        r = radii[i - 1]
+        if r < 1e-10:
+            continue
+        x, y = cl_corners[i]
+        u1x, u1y = _vec_normalize(cl_corners[i - 1][0] - x, cl_corners[i - 1][1] - y)
+        u2x, u2y = _vec_normalize(cl_corners[i + 1][0] - x, cl_corners[i + 1][1] - y)
+        theta = math.acos(max(-1.0, min(1.0, u1x * u2x + u1y * u2y)))
+        if theta < 0.005 or theta > math.pi - 0.005:
+            continue
+        tan_dists[i] = r / math.tan(theta / 2)
+    for k in range(n - 1):
+        (xa, ya), (xb, yb) = cl_corners[k], cl_corners[k + 1]
+        L = _vec_len(xb - xa, yb - ya)
+        need = tan_dists[k] + tan_dists[k + 1]
+        if need > L * (1 + 1e-9) + 1e-12:
+            raise ValueError(
+                f"segment {k} (centerline length {L:.4g}) is shorter than the "
+                f"corner fillets need ({need:.4g}); reduce the corner radius or "
+                f"lengthen the segment")
 
     coords = []
     seg_info = []
@@ -274,11 +360,9 @@ def apply_fillet(
 
         # 꼭짓점 → 이전점 방향
         u1x, u1y = _vec_normalize(xp - x, yp - y)
-        L1 = _vec_len(xp - x, yp - y)
 
         # 꼭짓점 → 다음점 방향
         u2x, u2y = _vec_normalize(xn - x, yn - y)
-        L2 = _vec_len(xn - x, yn - y)
 
         # 끼인각
         dot = u1x * u2x + u1y * u2y
@@ -292,16 +376,9 @@ def apply_fillet(
             seg_info.append({'type': 'degenerate', 'corner_idx': i})
             continue
 
-        # 접선점 거리
+        # 접선점 거리 (변 길이 부족은 위에서 이미 거절했다)
         tan_dist = r / math.tan(theta / 2)
-
-        # 안전장치: 인접 변 길이의 45% 초과 시 반경 축소
-        max_tan = min(L1, L2) * 0.45
-        if tan_dist > max_tan:
-            r_actual = max_tan * math.tan(theta / 2)
-            tan_dist = max_tan
-        else:
-            r_actual = r
+        r_actual = r
 
         # 접선점
         t1x = x + u1x * tan_dist
@@ -395,6 +472,133 @@ def shift_coords(
 ) -> List[Tuple[float, float]]:
     """좌표 평행이동"""
     return [(x + dx, y + dy) for x, y in coords]
+
+
+# ============================================================
+# Step 3b: 직선부 분할 — FSM 판 좌굴을 표현할 자유도
+# ============================================================
+
+def _is_arc_chord(seg_info: List[dict], k: int) -> bool:
+    a, b = seg_info[k], seg_info[k + 1]
+    return (a.get('type') == 'arc' and b.get('type') == 'arc'
+            and a.get('corner_idx') == b.get('corner_idx'))
+
+
+def subdivide_flats(
+    coords: List[Tuple[float, float]],
+    seg_info: List[dict],
+    n_flat: Optional[int] = None,
+    max_elem_len: Optional[float] = None,
+) -> Tuple[List[Tuple[float, float]], List[dict]]:
+    """호(코너) 현은 그대로 두고 직선부만 여러 요소로 나눈다.
+
+    직선부 하나를 스트립 하나로 두면 판의 국부좌굴 형상(판 폭 방향 반파)을
+    표현하지 못해 FSM 국부좌굴 하중이 크게 나온다(비보수). 템플릿은 웹 8,
+    플랜지 4, 립 2 개로 나눈다.
+
+    Parameters
+    ----------
+    n_flat : int, optional
+        모든 직선부에 같은 분할 수. 1 이면 예전(직선부당 요소 1개) 동작.
+    max_elem_len : float, optional
+        직선부 요소의 최대 길이. n_flat 과 함께 주면 n_flat 이 우선한다.
+    기본(둘 다 None): 가장 긴 직선부를 8 개로 나누는 요소 길이 L_ref 를 기준으로
+        각 직선부를 max(n_min, ceil(L / L_ref)) 개로 나눈다. n_min 은 내부
+        직선부 4, 자유단에 닿은 직선부(립)와 L_ref 보다 짧은 직선부 2 —
+        lippedc 템플릿(웹 8 · 플랜지 4 · 립 2)과 같은 밀도.
+    """
+    nseg = len(coords) - 1
+    if nseg < 1:
+        return list(coords), list(seg_info)
+    if n_flat is not None and (int(n_flat) != n_flat or n_flat < 1):
+        raise ValueError(f"n_flat must be an integer >= 1, got {n_flat!r}")
+    if max_elem_len is not None and not (max_elem_len > 0):
+        raise ValueError(f"max_elem_len must be > 0, got {max_elem_len!r}")
+
+    flat_len = {}
+    for k in range(nseg):
+        if not _is_arc_chord(seg_info, k):
+            (x1, y1), (x2, y2) = coords[k], coords[k + 1]
+            flat_len[k] = _vec_len(x2 - x1, y2 - y1)
+    if not flat_len:
+        return list(coords), list(seg_info)
+
+    L_ref = max(flat_len.values()) / 8.0
+
+    def _count(k, L):
+        if L < 1e-12:
+            return 1
+        if n_flat is not None:
+            return int(n_flat)
+        if max_elem_len is not None:
+            return max(1, math.ceil(L / max_elem_len - 1e-9))
+        at_free_end = k in (0, nseg - 1)
+        n_min = 2 if (at_free_end or L < L_ref) else 4
+        return max(n_min, math.ceil(L / L_ref - 1e-9))
+
+    new_coords = [coords[0]]
+    new_info = [seg_info[0]]
+    for k in range(nseg):
+        (x1, y1), (x2, y2) = coords[k], coords[k + 1]
+        if k in flat_len:
+            n = _count(k, flat_len[k])
+            for j in range(1, n):
+                f = j / n
+                new_coords.append((x1 + f * (x2 - x1), y1 + f * (y2 - y1)))
+                new_info.append({'type': 'flat', 'corner_idx': seg_info[k].get('corner_idx')})
+        new_coords.append(coords[k + 1])
+        new_info.append(seg_info[k + 1])
+    return new_coords, new_info
+
+
+# ============================================================
+# Step 3c: 형상 검사 — 중심선이 외측 꼭짓점 범위를 벗어나는지
+# ============================================================
+
+def centerline_envelope_excess(
+    outer_corners: List[Tuple[float, float]],
+    cl_coords: List[Tuple[float, float]],
+) -> float:
+    """중심선 좌표가 외측 꼭짓점의 bounding box 밖으로 나간 최대 거리.
+
+    외측 꼭짓점은 판의 바깥면 위에 있으므로 중심선(바깥면에서 재료 쪽으로 t/2)은
+    그 범위 안에 있어야 한다. 양수(≈ t/2 이상)이면 offset 방향이 틀렸거나
+    (outer_side) 바깥면이 플랜지마다 다른 단면(Z · hat)을 한 방향으로 offset 한 것이다.
+    """
+    xs = [p[0] for p in outer_corners]
+    ys = [p[1] for p in outer_corners]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    excess = 0.0
+    for x, y in cl_coords:
+        excess = max(excess, x0 - x, x - x1, y0 - y, y - y1)
+    return excess
+
+
+def resolve_outer_side(
+    outer_corners: List[Tuple[float, float]],
+    t: float,
+    tol_ratio: float = 0.25,
+) -> str:
+    """outer_side='auto': 중심선이 외측 꼭짓점 범위 안에 남는 한 방향을 고른다.
+
+    두 방향 모두 범위를 벗어나면 바깥면이 부분마다 판의 다른 면으로 바뀌는
+    단면(Z · hat, 되돌림 플랜지가 있는 시그마)이다. 그런 단면에서 범위 경계에
+    닿지 않는 변(Z 의 웹 등)이 판의 어느 면에 놓이는지는 꼭짓점만으로 정해지지
+    않으므로 추정하지 않고 오류를 낸다 — 구간별 outer_side 목록을 받아야 한다.
+    """
+    best = None
+    for side in ('left', 'right'):
+        cl = offset_to_centerline(outer_corners, t, side)
+        ex = centerline_envelope_excess(outer_corners, cl)
+        if best is None or ex < best[1]:
+            best = (side, ex)
+    if best[1] > tol_ratio * t:
+        raise ValueError(
+            "outer_side='auto': with either side the centerline leaves the outer-corner "
+            f"envelope (by >= {best[1]:.4g}). The outside face changes between parts "
+            "(Z, hat, return flanges): pass a per-segment outer_side list (side of the "
+            "plate material for each segment), or use the lippedz / hat template.")
+    return best[0]
 
 
 # ============================================================
@@ -543,8 +747,13 @@ def validate_section(
     outer_corners: List[Tuple[float, float]],
     t: float,
     expected_A: float = None,
+    cl_coords: Optional[List[Tuple[float, float]]] = None,
 ) -> dict:
-    """단면 좌표에 대한 종합 검증 수행."""
+    """단면 좌표에 대한 종합 검증 수행.
+
+    cl_coords 를 주면 면적 비교는 실제 중심선 모델의 면적(Σ L·t)으로 한다.
+    결과의 'status' 는 checks 가운데 가장 나쁜 값('fail' > 'warn' > 'pass').
+    """
     checks = []
 
     # 1. 최소 점 수
@@ -560,7 +769,7 @@ def validate_section(
     crossings = check_path_crossing(outer_corners)
     checks.append({
         'item': 'Path self-crossing',
-        'status': 'pass' if len(crossings) == 0 else 'warn',
+        'status': 'pass' if len(crossings) == 0 else 'fail',
         'value': f'{len(crossings)} crossings',
         'note': str(crossings) if crossings else 'No crossings detected',
     })
@@ -581,11 +790,24 @@ def validate_section(
 
     # 4. 예상 면적 비교
     if expected_A is not None:
-        ratio = est_A / expected_A if expected_A > 0 else 0
+        if cl_coords is not None and len(cl_coords) > 1:
+            cl_L = sum(_vec_len(cl_coords[i + 1][0] - cl_coords[i][0],
+                                cl_coords[i + 1][1] - cl_coords[i][1])
+                       for i in range(len(cl_coords) - 1))
+            model_A, basis = cl_L * t, 'centerline model'
+        else:
+            model_A, basis = est_A, 'outer path'
+        ratio = model_A / expected_A if expected_A > 0 else 0
+        if 0.8 <= ratio <= 1.2:
+            a_status = 'pass'
+        elif 0.7 <= ratio <= 1.3:
+            a_status = 'warn'
+        else:
+            a_status = 'fail'
         checks.append({
             'item': 'Area vs expected',
-            'status': 'pass' if 0.7 < ratio < 1.3 else 'warn',
-            'value': f'{ratio:.2f} (target {expected_A:.4f})',
+            'status': a_status,
+            'value': f'{ratio:.2f} (A={model_A:.4f} from {basis}, target {expected_A:.4f})',
             'note': 'Ratio should be 0.8~1.2. If <0.7, path is too short (missing segments?).',
         })
 
@@ -618,39 +840,33 @@ def validate_section(
         'note': 'Reversals are normal for track/sigma flanges. 0 for simple C/Z.',
     })
 
-    # 7. 립 방향 검증 (자유단이 단면 중심을 향하는지)
+    # 7. 립 방향 검증: 립 끝이 인접 플랜지 선에 대해 단면의 나머지(플랜지 다음
+    #    꼭짓점)와 같은 쪽 = 안쪽 반평면에 있는지. 꼭짓점 평균 쪽을 향하는지만 보면
+    #    플랜지 밖으로 뻗은 립도 통과한다.
     if n >= 4:
-        xs = [c[0] for c in outer_corners]
-        ys = [c[1] for c in outer_corners]
-        cx = sum(xs) / n
-        cy = sum(ys) / n
+        def _side(a, b, p):
+            return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
 
-        # 첫 자유단: P0 → P1 방향이 중심을 향하는지
-        dx0 = outer_corners[1][0] - outer_corners[0][0]
-        dy0 = outer_corners[1][1] - outer_corners[0][1]
-        dx_c0 = cx - outer_corners[0][0]
-        dy_c0 = cy - outer_corners[0][1]
-        dot0 = dx0 * dx_c0 + dy0 * dy_c0  # 양수면 중심 방향
-
-        # 끝 자유단: P[-2] → P[-1] 방향이 중심을 향하는지
-        dxN = outer_corners[-1][0] - outer_corners[-2][0]
-        dyN = outer_corners[-1][1] - outer_corners[-2][1]
-        dx_cN = cx - outer_corners[-2][0]
-        dy_cN = cy - outer_corners[-2][1]
-        dotN = dxN * dx_cN + dyN * dy_cN
-
-        lip_start_inward = dot0 > 0
-        lip_end_inward = dotN > 0
+        P = outer_corners
+        s_tip0 = _side(P[1], P[2], P[0])
+        s_rest0 = _side(P[1], P[2], P[3])
+        s_tipN = _side(P[-2], P[-3], P[-1])
+        s_restN = _side(P[-2], P[-3], P[-4])
+        lip_start_inward = s_tip0 * s_rest0 > 0
+        lip_end_inward = s_tipN * s_restN > 0
 
         if lip_start_inward and lip_end_inward:
             lip_status = 'pass'
-            lip_note = 'Both lips point toward section center (inward).'
+            lip_note = 'Both lips lie on the inner side of their flanges (inward).'
         elif lip_start_inward or lip_end_inward:
             lip_status = 'warn'
-            lip_note = f'Start lip {"inward" if lip_start_inward else "OUTWARD"}, End lip {"inward" if lip_end_inward else "OUTWARD"}. Lips should point inward (toward centroid).'
+            lip_note = (f'Start lip {"inward" if lip_start_inward else "OUTWARD"}, '
+                        f'End lip {"inward" if lip_end_inward else "OUTWARD"}. Stiffening lips '
+                        'normally turn toward the inside of their flange (ignore for hat brims).')
         else:
             lip_status = 'warn'
-            lip_note = 'Both lips point OUTWARD (away from center). Check lip directions.'
+            lip_note = ('Both end segments turn OUTWARD from their flanges. Check lip '
+                        'directions (ignore for hat brims).')
 
         checks.append({
             'item': 'Lip direction (inward check)',
@@ -659,7 +875,9 @@ def validate_section(
             'note': lip_note,
         })
 
-    return {'checks': checks, 'symmetry': sym, 'crossings': crossings}
+    statuses = [c['status'] for c in checks]
+    status = 'fail' if 'fail' in statuses else ('warn' if 'warn' in statuses else 'pass')
+    return {'checks': checks, 'symmetry': sym, 'crossings': crossings, 'status': status}
 
 
 # ============================================================
@@ -693,6 +911,12 @@ def sigma_outer_corners(
       스티프너: P4 → 우(P5) → 아래(P6) → 좌(P7)
       하부 웹: P7 → 아래(P8)
       하부 ∩형 플랜지: P8 → 우로 플랜지(P9) → 아래 되돌아감(P10) → 좌로 립(P11)
+
+    주의: 위아래가 실제로는 거울대칭이 아니며, 아래 되돌림(P9→P10)과 립(P10→P11)은
+    바깥면이 위쪽 부분과 판의 반대 면이다. 한 방향 outer_side 로는 중심선이 외측
+    꼭짓점 범위를 t/2 벗어나므로 custom 경로가 거절한다(예전에는 단면이 t 만큼
+    부풀었다). 구간별 목록(예: ['left'] * 9 + ['right'] * 2)이 필요하며, 아래
+    플랜지(P8→P9)가 판의 어느 면에 놓이는지는 원 도면으로 정해야 한다.
     """
     web_seg = (H - 2 * D - Ws) / 2.0
     if web_seg < 0:
@@ -956,16 +1180,19 @@ class ColdFormedSection:
         내측 코너 반경 (모든 코너 동일). 기본값 0.
         
     corner_radii : list of float, optional
-        코너별 개별 내측 반경. 길이 = len(outer_corners) - 2.
+        코너별 개별 **내측** 반경. 길이 = len(outer_corners) - 2.
+        중심선 반경은 r + t/2 로 계산한다(R_inner 와 같은 규약).
         R_inner와 동시 지정 시 corner_radii 우선.
         0이면 해당 코너는 sharp corner 유지.
-        
+
     n_arc : int
         코너당 호 분할 수. 기본값 10.
-        
-    outer_side : str
-        외측면 방향. 'left' 또는 'right'. 기본값 'left'.
-        
+
+    outer_side : str or list of str
+        중심선 offset 방향 = 판 재료가 놓인 쪽(바깥면의 반대쪽).
+        'left' / 'right' / 'auto' / 구간별 목록 — `offset_to_centerline` 참고.
+        'auto' 는 중심선이 외측 꼭짓점 범위 안에 남는 방향을 고른다. 기본값 'left'.
+
     labels : list of str, optional
         각 외측 꼭짓점의 설명 라벨.
         길이 = len(outer_corners).
@@ -978,7 +1205,7 @@ class ColdFormedSection:
     R_inner: float = 0.0
     corner_radii: Optional[List[float]] = None
     n_arc: int = 10
-    outer_side: str = 'left'
+    outer_side: Union[str, List[str]] = 'left'
     labels: Optional[List[str]] = None
     origin: str = 'centroid'
 
@@ -991,6 +1218,7 @@ class ColdFormedSection:
     _yc: float = field(default=0.0, init=False, repr=False)
     _total_L: float = field(default=0.0, init=False, repr=False)
     _props: dict = field(default_factory=dict, init=False, repr=False)
+    resolved_outer_side: Union[str, List[str], None] = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         self._compute()
@@ -999,15 +1227,28 @@ class ColdFormedSection:
         """전체 계산 파이프라인 실행"""
         n = len(self.outer_corners)
         n_inner = n - 2
+        if not (self.t > 0):
+            raise ValueError(f"t must be > 0, got {self.t!r}")
+        if n < 2:
+            raise ValueError("outer_corners must have at least 2 points")
 
         # Step 1: Offset
+        side = self.outer_side
+        if side == 'auto':
+            side = resolve_outer_side(self.outer_corners, self.t)
+        self.resolved_outer_side = side
         self._cl_corners = offset_to_centerline(
-            self.outer_corners, self.t, self.outer_side
+            self.outer_corners, self.t, side
         )
 
-        # 필렛 반경 결정
+        # 필렛 반경 결정 (입력은 내측 반경, 필렛은 중심선 반경 r + t/2)
         if self.corner_radii is not None:
-            r_list = self.corner_radii
+            if len(self.corner_radii) != n_inner:
+                raise ValueError(
+                    f"corner_radii length ({len(self.corner_radii)}) must equal the "
+                    f"number of inner corners ({n_inner})")
+            r_list = [float(r) + self.t / 2 if float(r) > 0 else 0.0
+                      for r in self.corner_radii]
         elif self.R_inner > 0:
             r_c = self.R_inner + self.t / 2
             r_list = [r_c] * n_inner
@@ -1152,8 +1393,9 @@ def make_c_section(
     corners = []
     labels = []
 
+    # 립은 플랜지 안쪽(+y)으로 꺾인다
     if D > 0:
-        corners.append((0, -D))
+        corners.append((0, D))
         labels.append("하단 립 끝")
 
     corners.append((0, 0))
@@ -1200,36 +1442,49 @@ def make_z_section(
                    web
                    │
                    flange(하, 우측) ─── lip(하)
+
+    Z 는 아래 플랜지의 바깥면(아랫면)과 위 플랜지의 바깥면(윗면)이 판의 서로 다른
+    면이라 한 방향 offset 으로 만들 수 없다. 구간별 outer_side 를 쓰고, 웹 선은
+    아래 굽힘의 바깥면(웹 왼쪽 면 x=0)으로 둔다. 위 플랜지 폭 B_top 은 위 굽힘의
+    바깥면(웹 오른쪽 면 x=t)에서 재므로 립 바깥면은 x = t − B_top 이다.
+    결과는 template lippedz(qlip=90) 와 같은 중심선 치수(b = B − t, h = H − t)다.
     """
     if D_top is None:
         D_top = D
 
     corners = []
     labels = []
+    sides = []
 
+    # 립은 플랜지 안쪽으로 꺾인다
     if D > 0:
-        corners.append((B_bot, -D))
+        corners.append((B_bot, D))
         labels.append("하단 립 끝")
+        sides.append('right')
 
     corners.append((B_bot, 0))
     labels.append("하단 립-플랜지")
+    sides.append('right')
 
     corners.append((0, 0))
     labels.append("하단 플랜지-웹")
+    sides.append('right')
 
     corners.append((0, H))
     labels.append("상부 웹-플랜지")
+    sides.append('left')
 
-    corners.append((-B_top, H))
+    corners.append((t - B_top, H))
     labels.append("상부 플랜지-립")
 
     if D_top > 0:
-        corners.append((-B_top, H - D_top))
+        corners.append((t - B_top, H - D_top))
         labels.append("상부 립 끝")
+        sides.append('left')
 
     return ColdFormedSection(
         outer_corners=corners, t=t, R_inner=R,
-        n_arc=n_arc, outer_side='right', labels=labels,
+        n_arc=n_arc, outer_side=sides, labels=labels,
     )
 
 
@@ -1250,6 +1505,9 @@ def make_hat_section(
         flange(하좌) ── web(좌) ── top ── web(우) ── flange(하우)
     
     하부 플랜지 각 측 폭 = (B_bot - B_top) / 2
+
+    브림의 바깥면(아랫면)과 상판의 바깥면(윗면)은 판의 서로 다른 면이므로
+    구간별 outer_side 를 쓴다(브림: 재료가 위 = 'left', 웹 · 상판: 재료가 안쪽 = 'right').
     """
     corners = [
         (-B_bot / 2, 0),           # 좌측 플랜지 끝
@@ -1266,7 +1524,8 @@ def make_hat_section(
 
     return ColdFormedSection(
         outer_corners=corners, t=t, R_inner=R,
-        n_arc=n_arc, outer_side='right', labels=labels,
+        n_arc=n_arc, outer_side=['left', 'right', 'right', 'right', 'left'],
+        labels=labels,
     )
 
 
@@ -1313,7 +1572,7 @@ def make_sigma_section(
     # 여기서는 이미지와 동일한 구조를 생성
 
     corners = [
-        (0, -D_bot),                                           # 하단 립 끝
+        (0, D_bot),                                            # 하단 립 끝 (안쪽 +y)
         (0, 0),                                                 # 하단 립-플랜지
         (B, 0),                                                 # 하단 플랜지-웹
         (B, (H - 2*sigma_transition) / 3),                     # 하부 웹-시그마
@@ -1367,7 +1626,7 @@ if __name__ == "__main__":
     print("\n--- Sigma section (이미지) ---")
     sigma = ColdFormedSection(
         outer_corners=[
-            (0.0, -1.00),
+            (0.0, 1.00),
             (0.0, 0.0),
             (2.50, 0.0),
             (2.50, 2.25),
@@ -1439,7 +1698,10 @@ if __name__ == "__main__":
         axes[1][2].set_visible(False)
         
         plt.tight_layout()
-        plt.savefig('/home/claude/cfs_sections_test.png', dpi=150)
-        print("\n✅ 검증 플롯 저장: /home/claude/cfs_sections_test.png")
+        import os
+        import tempfile
+        out_png = os.path.join(tempfile.gettempdir(), 'cfs_sections_test.png')
+        plt.savefig(out_png, dpi=150)
+        print(f"\n검증 플롯 저장: {out_png}")
     except ImportError:
         print("matplotlib 없음, 플롯 생략")

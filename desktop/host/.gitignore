@@ -1,0 +1,4 @@
+# 빌드 출력(host/build.mjs)
+dist/
+# 시험 그림 · PDF(host/test/bridge.mjs)
+test/out/

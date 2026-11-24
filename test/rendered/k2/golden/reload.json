@@ -1,0 +1,55 @@
+{
+ "about": "K2 phase 0 golden — reload. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
+ "recorded": "2026-11-22",
+ "entries": [
+  {
+   "id": "before",
+   "expect": "pin",
+   "value": {
+    "lb": "77.7",
+    "mt": "flexure",
+    "tpl": "lippedz"
+   }
+  },
+  {
+   "id": "after",
+   "expect": "pin",
+   "reason": "K2-6 · D-6 고침: 새로 고침 뒤 입력 · 모델(lippedz) 모두 남는다 — 두 번째 webviewReady 는 다시 보내기만",
+   "value": {
+    "lb": "77.7",
+    "mt": "flexure",
+    "unit": "US",
+    "tpl": "lippedz",
+    "H_in": 8
+   },
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "k2-change",
+      "reason": "K2-2 · K2-3 에서 일부 바뀜: 새로 고침 뒤 입력이 남는다(Lb 77.7 in · 휨 · US — 두 번째 caseHello 에 호스트가 상태를 다시 보낸다). 남은 것(K2-6): 두 번째 webviewReady 가 모델을 기본 단면으로 덮는다(tpl lippedc)"
+     },
+     "date": "2026-11-22"
+    }
+   ]
+  },
+  {
+   "id": "reload.engine",
+   "expect": "pin",
+   "reason": "D-6 고침: 새로 고침이 기본 단면을 다시 만들지 않는다(화면이 단면 성질만 다시 묻는다)",
+   "value": [
+    "get_properties"
+   ],
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "k2-change",
+      "reason": "K2: the reload regenerates the default section in the engine"
+     },
+     "date": "2026-11-22"
+    }
+   ]
+  }
+ ]
+}

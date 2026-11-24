@@ -58,10 +58,33 @@ export function mergeServerConfig(
     if (existing.mcpServers === null || typeof existing.mcpServers !== 'object') {
         return { ok: false, error: '기존 mcpServers가 객체가 아님 — 덮어쓰지 않았습니다' };
     }
-    const prev = JSON.stringify(existing.mcpServers[key]);
-    const next = JSON.stringify(config);
+    // R8-22: 우리 항목이 이미 같은 내용이면(키 순서 무관) 파일 글을 한 글자도 바꾸지 않는다 —
+    // 호출자가 changed=false 를 보고 쓰지 않는 것이 원칙이지만, 쓰더라도 사용자 파일의 들여쓰기 ·
+    // 줄바꿈 · 다른 서버 항목의 표기가 다시 직렬화되지 않게 원문을 그대로 돌려준다.
+    if (canonicalJson(existing.mcpServers[key]) === canonicalJson(config)) {
+        return { ok: true, changed: false, text: existingText };
+    }
     existing.mcpServers[key] = config;
-    return { ok: true, changed: prev !== next, text: JSON.stringify(existing, null, 2) };
+    return { ok: true, changed: true, text: JSON.stringify(existing, null, 2) };
+}
+
+/** 키 순서와 무관한 비교용 직렬화 */
+function canonicalJson(v: any): string {
+    if (v === undefined) { return 'undefined'; }
+    if (v === null || typeof v !== 'object') { return JSON.stringify(v); }
+    if (Array.isArray(v)) { return '[' + v.map(canonicalJson).join(',') + ']'; }
+    return '{' + Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canonicalJson(v[k])).join(',') + '}';
+}
+
+/** 쓰기 계획: 파일을 실제로 써야 하는지. 활성화 때마다 같은 내용을 다시 쓰지 않게 호출자가 쓴다. */
+export function planServerConfigWrite(
+    existingText: string | undefined,
+    key: string,
+    config: McpServerConfig
+): { ok: true; write: boolean; text: string } | { ok: false; error: string } {
+    const merged = mergeServerConfig(existingText, key, config);
+    if (!merged.ok) { return merged; }
+    return { ok: true, write: merged.changed, text: merged.text };
 }
 
 /** 기존 JSON에서 우리 서버만 제거. 다른 서버는 보존. */

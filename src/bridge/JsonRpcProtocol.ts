@@ -18,9 +18,18 @@ export class JsonRpcProtocol {
     }>();
     private _buffer = '';
     private _timeoutMs: number;
+    /** 시간 초과 알림(R8-31 · V4-02): 호스트가 엔진을 다시 시작해 그 계산을 취소할 수 있게. */
+    private _onTimeout: ((id: number, method: string) => void) | null;
+    private _methods = new Map<number, string>();
 
-    constructor(timeoutMs: number = 30000) {
+    constructor(timeoutMs: number = 30000, onTimeout?: (id: number, method: string) => void) {
         this._timeoutMs = timeoutMs;
+        this._onTimeout = onTimeout || null;
+    }
+
+    /** 요청 하나의 시간 제한(ms). */
+    get timeoutMs(): number {
+        return this._timeoutMs;
     }
 
     /** 요청 생성 (id 자동 부여) */
@@ -33,11 +42,15 @@ export class JsonRpcProtocol {
     }
 
     /** 요청 등록 — Promise 반환, 응답 수신 시 resolve */
-    registerRequest(id: number): Promise<any> {
+    registerRequest(id: number, method: string = ''): Promise<any> {
+        this._methods.set(id, method);
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
                 this._pending.delete(id);
-                reject(new Error(`JSON-RPC request ${id} timed out after ${this._timeoutMs}ms`));
+                this._methods.delete(id);
+                reject(new Error(`JSON-RPC request ${id} (${method || 'call'}) timed out after ${this._timeoutMs}ms — `
+                    + 'the Python engine was restarted to cancel it; run it again with a smaller request.'));
+                if (this._onTimeout) { this._onTimeout(id, method); }
             }, this._timeoutMs);
 
             this._pending.set(id, { resolve, reject, timer });
@@ -72,9 +85,13 @@ export class JsonRpcProtocol {
 
         clearTimeout(pending.timer);
         this._pending.delete(response.id);
+        this._methods.delete(response.id);
 
         if (response.error) {
-            pending.reject(new Error(response.error));
+            // error 는 문자열(서버 계약). error_code(INVALID_PARAMS 등)는 Error 객체에 실어 호출자가 구분한다.
+            const err: Error & { code?: string } = new Error(String(response.error));
+            if (response.error_code) { err.code = response.error_code; }
+            pending.reject(err);
         } else {
             pending.resolve(response.result);
         }

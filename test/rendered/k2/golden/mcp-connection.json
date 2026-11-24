@@ -1,0 +1,438 @@
+{
+ "about": "K2 phase 0 golden — mcp-connection. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
+ "recorded": "2026-11-23",
+ "entries": [
+  {
+   "id": "design_connection.engine",
+   "expect": "pin",
+   "value": [
+    {
+     "method": "design_connection",
+     "params": "{\"connection_type\":\"screw\",\"design_method\":\"LRFD\",\"Fy\":50.0380195169222,\"Fu\":65.2669819785941,\"t1\":0.0590551181102362,\"t2\":0.0590551181102362,\"d\":0.188976377952756,\"n\":4,\"e\":0.590551181102362,\"s\":0.984251968503937,\"Pu\":2.00079959358742,\"Pnvs\":1.19148739842847}"
+    }
+   ]
+  },
+  {
+   "id": "design_connection.inputsChanged",
+   "expect": "pin",
+   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0.",
+   "value": {
+    "input-E": {
+     "before": "203395.340148",
+     "after": "203395.3401"
+    },
+    "input-G": {
+     "before": "77910.7574128",
+     "after": "77910.75741"
+    },
+    "config-spacing": {
+     "before": "1.0",
+     "after": "1"
+    },
+    "load-Lr-psf": {
+     "before": "1.0",
+     "after": "1"
+    },
+    "load-Wu-psf": {
+     "before": "1.0",
+     "after": "1"
+    },
+    "design-Cb": {
+     "before": "1.0",
+     "after": "1"
+    },
+    "design-Cb-pos": {
+     "before": "1.0",
+     "after": "1"
+    },
+    "design-Cmx": {
+     "before": "1.00",
+     "after": "1"
+    },
+    "design-Cmy": {
+     "before": "1.00",
+     "after": "1"
+    },
+    "conn-Fy": {
+     "before": "295",
+     "after": "345"
+    },
+    "conn-Fu": {
+     "before": "400",
+     "after": "450"
+    },
+    "conn-weld-L": {
+     "before": "50",
+     "after": ""
+    },
+    "conn-weld-size": {
+     "before": "3",
+     "after": ""
+    },
+    "conn-Pnvs": {
+     "before": "",
+     "after": "5.3"
+    },
+    "conn-Pu": {
+     "before": "",
+     "after": "8.9"
+    },
+    "conn-e": {
+     "before": "",
+     "after": "15"
+    },
+    "conn-s": {
+     "before": "",
+     "after": "25"
+    },
+    ".span-tbl-len": {
+     "before": [
+      "5.00",
+      "5.00",
+      "5.00"
+     ],
+     "after": [
+      "5",
+      "5",
+      "5"
+     ]
+    }
+   },
+   "flipped": [
+    {
+     "step": "K3-5",
+     "from": {
+      "expect": "pin",
+      "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — 접합 유형 · t1/t2 · d · n · Fy/Fu · Pu …(E 글은 D-5 의 12 자리)"
+     },
+     "date": "2026-11-22"
+    },
+    {
+     "step": "milestone-2-demand",
+     "from": {
+      "expect": "pin",
+      "reason": "K2 결함(desktop 작성자): caseState 가 모델 칸(E · ν · G · 단면 치수 · 해석 조건)을 싣지 않는다 — 옛 초안이 modelLoaded 의 새 값을 덮던 경주. 그래서 MCP design_connection 뒤 E 칸의 글을 다시 적지 않는다(전: 10 → 12 자리로 다시 적음). 값은 그대로"
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  },
+  {
+   "id": "design_connection.shown",
+   "expect": "pin",
+   "value": {
+    "connection-result": "스크류 접합 (§J4) 강도 결과Screw Connection §J4Put₁=1.50t₂=1.50d=4.8 ×4Rn=21.20 kNφRn=10.60 kNDCR=0.840▶ 나사 전단공칭강도 Rn21.20 kN설계강도 (φRn)10.60 kN지배 모드나사 전단판정 근거 (전단)나사 전단 · 10.60 kN판정 근거 (인장)나사 뽑힘 (풀아웃) · 5.51 kN전단 방향 지배나사 전단 · 10.60 kN인장 방향 지배나사 뽑힘 (풀아웃) · 5.51 kN판정⚠ 판정 없음 (미검토) — 미평가 한계상태 입력 필요이용률84.0% (판정 없음)평가하지 못한 항목 (판정 없음의 원인)• Tension Rupture (J6.2) — 부재 총단면적 Ag 또는 폭 width 미입력경고 (값 또는 판정에 영향)• Pull-over (J4.4.2) 미평가: d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값• Screw Tension (J4.4.3) 미평가: Pnts(제조사·독립시험 나사 인장강도) 미입력• Tension Rupture (J6.2) 미평가: 부재 총단면적 Ag 또는 폭 width 미입력가정• J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.• J6: 판 1(t=1.50 mm, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요• J4.4.1: tc 미입력 — 나사가 t2 를 모두 관통한다고 보고 tc = t2• 인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)참고 — 이 하중 방향에는 해당하지 않는 미평가 항목: Pull-over (J4.4.2) — d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값 / Screw Tension (J4.4.3) — Pnts(제조사·독립시험 나사 인장강도) 미입력한계상태 (Limit States)모드RnφRn지배?나사 지압 · 틸팅30.4315.21나사 전단21.2010.60★나사 뽑힘 (풀아웃)11.015.51나사 머리 풀오버38.8819.44전단 파단40.8320.41상세 수식 문자열은 US 단위(kips, in, ksi) 기준으로 표기됩니다."
+   },
+   "reason": "Engine 6fa25f7: connection rows (limit_states · detailing_checks · interaction_checks) carry check_id and name_ko — the tables show the Korean names, the governing ★ is matched by id.",
+   "flipped": [
+    {
+     "step": "K4b",
+     "from": {
+      "expect": "pin",
+      "reason": null
+     },
+     "date": "2026-11-23"
+    },
+    {
+     "step": "renderer",
+     "from": {
+      "expect": "pin",
+      "reason": "K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "R2-3/R3-2",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  },
+  {
+   "id": "gui.runConnection.engine",
+   "expect": "pin",
+   "reason": "K2-5: 화면 단추가 검토 상태(MCP 가 정한 것)로 계산한다 — MCP 의 접합 입력",
+   "value": [
+    {
+     "method": "design_connection",
+     "params": "{\"connection_type\":\"screw\",\"t1\":0.0590551181102362,\"Fy\":50.0380195169222,\"Fu\":65.2669819785941,\"Pu\":2.00079959358742,\"design_method\":\"LRFD\",\"e\":0.590551181102362,\"s\":0.984251968503937,\"Pnvs\":1.19148739842847,\"t2\":0.0590551181102362,\"d\":0.188976377952756,\"n\":4}"
+    }
+   ],
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "k2-change",
+      "reason": "K2: pressing the page button must use the case state — what MCP set — not the stale page fields (acceptance criterion 2) — the page sends its own connection fields"
+     },
+     "date": "2026-11-22"
+    }
+   ]
+  },
+  {
+   "id": "gui.runConnection.shown",
+   "expect": "pin",
+   "reason": "Engine 6fa25f7: connection rows (limit_states · detailing_checks · interaction_checks) carry check_id and name_ko — the tables show the Korean names, the governing ★ is matched by id.",
+   "value": {
+    "connection-result": "스크류 접합 (§J4) 강도 결과Screw Connection §J4Put₁=1.50t₂=1.50d=4.8 ×4Rn=21.20 kNφRn=10.60 kNDCR=0.840▶ 나사 전단공칭강도 Rn21.20 kN설계강도 (φRn)10.60 kN지배 모드나사 전단판정 근거 (전단)나사 전단 · 10.60 kN판정 근거 (인장)나사 뽑힘 (풀아웃) · 5.51 kN전단 방향 지배나사 전단 · 10.60 kN인장 방향 지배나사 뽑힘 (풀아웃) · 5.51 kN판정⚠ 판정 없음 (미검토) — 미평가 한계상태 입력 필요이용률84.0% (판정 없음)평가하지 못한 항목 (판정 없음의 원인)• Tension Rupture (J6.2) — 부재 총단면적 Ag 또는 폭 width 미입력경고 (값 또는 판정에 영향)• Pull-over (J4.4.2) 미평가: d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값• Screw Tension (J4.4.3) 미평가: Pnts(제조사·독립시험 나사 인장강도) 미입력• Tension Rupture (J6.2) 미평가: 부재 총단면적 Ag 또는 폭 width 미입력가정• J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.• J6: 판 1(t=1.50 mm, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요• J4.4.1: tc 미입력 — 나사가 t2 를 모두 관통한다고 보고 tc = t2• 인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)참고 — 이 하중 방향에는 해당하지 않는 미평가 항목: Pull-over (J4.4.2) — d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값 / Screw Tension (J4.4.3) — Pnts(제조사·독립시험 나사 인장강도) 미입력한계상태 (Limit States)모드RnφRn지배?나사 지압 · 틸팅30.4315.21나사 전단21.2010.60★나사 뽑힘 (풀아웃)11.015.51나사 머리 풀오버38.8819.44전단 파단40.8320.41상세 수식 문자열은 US 단위(kips, in, ksi) 기준으로 표기됩니다."
+   },
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "k2-change",
+      "reason": "K2: the card then shows the result of the page fields, not of what MCP set"
+     },
+     "date": "2026-11-22"
+    },
+    {
+     "step": "K4b",
+     "from": {
+      "expect": "pin",
+      "reason": "K2-5: 화면 단추가 검토 상태(MCP 가 정한 것)로 계산한다 — 그 결과 카드"
+     },
+     "date": "2026-11-23"
+    },
+    {
+     "step": "renderer",
+     "from": {
+      "expect": "pin",
+      "reason": "K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "R2-3/R3-2",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  },
+  {
+   "id": "design_lap_connection.engine",
+   "expect": "pin",
+   "value": [
+    {
+     "method": "lap_connection",
+     "params": "{\"d\":8,\"t\":0.059,\"Fy\":55,\"Fu\":70,\"lap_left_in\":30,\"lap_right_in\":42,\"Mu_support\":52.5,\"Vu_support\":0.9,\"fastener_type\":\"screw\",\"fastener_dia\":0.19,\"n_rows\":2,\"end_distance\":1,\"design_method\":\"ASD\",\"Pnvs\":1.2}"
+    }
+   ]
+  },
+  {
+   "id": "design_lap_connection.inputsChanged",
+   "expect": "pin",
+   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0.",
+   "value": {
+    "design-fy": {
+     "before": "295",
+     "after": "379.211651124"
+    },
+    "design-fu": {
+     "before": "400",
+     "after": "482.633010522"
+    },
+    "select-design-method": {
+     "before": "LRFD",
+     "after": "ASD"
+    },
+    "input-steel-grade": {
+     "before": "SGC400",
+     "after": ""
+    },
+    "input-fy": {
+     "before": "295",
+     "after": "379.211651124"
+    },
+    "input-fu": {
+     "before": "400",
+     "after": "482.633010522"
+    },
+    "plastic-fy": {
+     "before": "295",
+     "after": "379.211651124"
+    },
+    "conn-lap-left": {
+     "before": "305",
+     "after": "762"
+    },
+    "conn-lap-right": {
+     "before": "305",
+     "after": "1066.8"
+    },
+    "conn-Mu": {
+     "before": "",
+     "after": "5.93170352395"
+    },
+    "conn-Vu": {
+     "before": "",
+     "after": "4.00339945373"
+    },
+    "conn-fastener-dia": {
+     "before": "4.8",
+     "after": "4.826"
+    },
+    "conn-edge-dist": {
+     "before": "",
+     "after": "25.4"
+    },
+    "conn-lap-Pnvs": {
+     "before": "",
+     "after": "5.33786593831"
+    },
+    "conn-Fy": {
+     "before": "345",
+     "after": "379.211651124"
+    },
+    "conn-Fu": {
+     "before": "450",
+     "after": "482.633010522"
+    }
+   },
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "k2-change",
+      "reason": "K2: a design condition set through MCP must show in the edit-state input fields (acceptance criterion 1) — lap lengths, Mu/Vu, fastener, rows, Pnvs do not reach the page"
+     },
+     "date": "2026-11-22"
+    },
+    {
+     "step": "milestone-2-demand",
+     "from": {
+      "expect": "pin",
+      "reason": "K2-5: MCP 설계 도구가 그 묶음을 검토 상태에 쓴다(결정 1) — 칸에 보인다 — Lap 길이 · Mu/Vu · 패스너 · 행 · Pnvs · Fy/Fu"
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  },
+  {
+   "id": "design_lap_connection.shown",
+   "expect": "pin",
+   "value": {
+    "connection-result": "Lap Splice 설계 결과유효단면계수 Se 가 없어 Lap 휨(§F3/F4/H2)은 검토하지 않았습니다 — 판정 없음. Se · Vn 은 퍼린 결과의 그 랩이 걸친 지점(지점 번호 칸)의 랩 구간에서, 랩 구속의 진술이 있을 때 가져옵니다.까닭: 퍼린 설계 결과 없음 — 랩 단면 강도는 퍼린 결과의 랩 구간에서만 가져온다Lap Splice Detail — 18 나사 #10 (2×9) [판정 없음]ELEVATIONM1M2762.0 mm1066.8 mm✓ min 1.5d=304.8 mms=88.9 mme=25.4 mmd=203.2AACUT A‒AM1M2d=203.2b=50.0t=1.50c=20.0V=29.41 kNCap=32.03 kNDCR=0.918나사 #10 d=4.8 mm종합 판정: ⚠ ⚠ 판정 없음 (미검토) (패스너 DCR=0.918)평가하지 못한 항목 (판정 없음의 원인)• Lap 휨강도(§F3/F4/H2) — 유효단면계수 Se 등 입력 부족으로 미검토경고 (값 또는 판정에 영향)• Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요.• Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.가정• 랩 단면 Se 없음 — 퍼린 설계 결과 없음 — 랩 단면 강도는 퍼린 결과의 랩 구간에서만 가져온다 (랩 휨 검토는 판정 없음)적용 범위 (1)• J6.3: J6.3 랩 패스너 무리의 블록전단은 하한으로 평가합니다: 바깥 패스너 열을 따라 부재 끝에서 패스너 무리까지(길이 e + (m − 1) s)의 두 전단면, 열 사이의 장력면은 무시(Ant = 0) — 열 간격과 웹 연단까지의 거리는 입력이 아닙니다. 그 치수를 주면 Eq. J6.3-1/-2 전체로 다듬으십시오. 볼트만: 나사 접합은 J6 이 Rn 을 J6.1 과 J6.2 에서 정합니다(J6.3 해당 없음).힘 모델: V_transfer = max(Mu/(d − t), Vu); 모든 패스너(n_rows × n_per_row)가 V_transfer 를 균등 분담한다고 보고 n = ceil(V_transfer / Pns). Mu 는 지점 모멘트 전체, d − t 는 플랜지 우력의 팔. 패스너 1개 강도 Pns 는 공유 엔진의 전단 방향 한계상태 최솟값.Lap 길이 검증✅ OK≥ 304.8 mm전달 전단력29.41 kN패스너 설계강도 (Rn/Ω)1.78 kN/ea나사 #10필요 패스너 수 (행 반올림)18 ea배치 가능 최대100 eaLap 길이 제약실제 배치18 ea2 rows × 9/row용량32.03 kN18 × 1.78패스너 간격88.9 mm단부 거리 (랩 끝 기준, 1.5d)25.4 mm패스너 한계상태 (1개당)모드RnRn/Ω지배나사 지압 · 틸팅8.172.72나사 전단5.341.78★나사 뽑힘 (풀아웃)2.970.99나사 머리 풀오버10.473.49전단 파단19.956.65★ = 전단 전달 산정에 사용된 지배 모드. 인장계 한계상태(풀아웃 J4.4.1 / 풀오버 J4.4.2)와 부재 단면검토(J6/D)는 전단 패스너 수 산정에서 제외됩니다 (양력 인장은 별도 검토).• Pull-over (J4.4.2) 미평가: d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값• Screw Tension (J4.4.3) 미평가: Pnts(제조사·독립시험 나사 인장강도) 미입력• Tension Rupture (J6.2) 미평가: 부재 총단면적 Ag 또는 폭 width 미입력단계별 계산아래 상세 수식은 US 단위(kips, in, ksi) 기준으로 표기됩니다.✅ Step 1: Lap Length Check (§I6.2.1(g), §J3 lapped-Z exception) = 30 inLap = min(좌,우) = 30.00 in ≥ 1.5d = 12.00 in• Step 2: Transfer Shear Force (in-house rational analysis, §A1.2(c) — not a spec provision) = 6.611 kipsV_transfer = max(Mu/(d-t), Vu) = max(52.50/7.941, 0.900) = max(6.611, 0.900) = 6.611 kips [사내 합리적 해석 §A1.2(c) — 기준 조항 아님]✅ Step 3: Fastener Strength (Screw #10) = 0.4 kipsPdesign = 0.400 kips/ea — 지배: Screw Shear (J4.3.2) (전단 방향: 지압·틸팅·패스너 전단·J6.1 끝단 파단(e=1.000 in); 인장 방향 J4.4·부재 J6.2/J6.3/D 제외)• Step 4: Required Fasteners (in-house uniform-share model) = 18 ean = V/Pdesign = 6.611/0.400 = 17 → 2 rows × 9/row = 18 ea✅ Step 5: Fastener Spacing & Layout = 3.5 inRequired: 18 ea, Max fit: 100 ea (Lap=30.00 in, edge=1.000 in, min s=3d=0.57 in), s = 3.50 in ≥ 0.57 in• Step 6: Edge/End Distance (§J3.2 / §J4.2) = 1 ine = 1.000 in (사용자 지정, 최소 1.5d = 0.285 in 충족) — §J6.1 끝단 파단은 이 e 로 Step 3 에서 평가✅ Step 7: Demand vs Capacity = 0.918 Capacity = 18 ea × 0.400 kips = 7.200 kips, DCR = V_transfer / Capacity = 6.611 / 7.200 = 0.918• Step 8p: Vn 자동산정 (§G2.1, 비보강 웹) = 3.71 kipsh = d-2t = 7.882 in, λv = 2.034 → G2.1 (elastic), Vn = 3.710 kips"
+   },
+   "reason": "Engine 6fa25f7: connection rows (limit_states · detailing_checks · interaction_checks) carry check_id and name_ko — the tables show the Korean names, the governing ★ is matched by id.",
+   "flipped": [
+    {
+     "step": "engine-07caad7",
+     "from": {
+      "expect": "pin",
+      "reason": "엔진 b288448(독립 검증): 모든 Lap 결과에 lap.block_shear(미평가) · scope_notes「J6.3 미평가」 — 화면이 「적용 범위 (1)」 을 보인다. 엔진 요청은 그대로"
+     },
+     "date": "2026-11-23"
+    },
+    {
+     "step": "S10",
+     "from": {
+      "expect": "pin",
+      "reason": "engine 07caad7 (V6b engine items): the J6.3 line under 「적용 범위」 changes from \"not evaluated by this lap model\" to \"evaluated as a lower bound (two shear planes along the outer fastener rows, tension plane ignored)\" — the same change appears on HEAD without the V6b-01 patch; not from this patch."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "K4b",
+     "from": {
+      "expect": "pin",
+      "reason": "V8-01 (contract §6.3, engine 733c18e): the lap check takes its section strengths only from the purlin result's lap region at the support the lap spans — Se = Mnℓ/Fy, Vn = that region's shear (unrounded nominals), never the governing region; Mnd is never sent. Without that support, a purlin result, the lap statement, or with inelastic reserve / cold work in that region nothing is derived and the lap flexure is not evaluated (the card and the result's section_source say why; the card names the source when derived). The lap card reads the fastener ratio from fastener_utilization (engine 733c18e: the top-level utilization is now the largest lap strength ratio)."
+     },
+     "date": "2026-11-23"
+    },
+    {
+     "step": "renderer",
+     "from": {
+      "expect": "pin",
+      "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "R2-3/R3-2",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning). Renderer stop: host-authored sentences are coded notices (host.* registry in webview/js/notices.js) — lap Se line, section_source from / reason, lap-section reasons, read-only refusals, purlin bundle lines and region labels — rendered in Korean and in the display units."
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  },
+  {
+   "id": "gui.runLap.engine",
+   "expect": "pin",
+   "reason": "K2-5: 화면 단추가 검토 상태(MCP 가 정한 것)로 계산한다 — MCP 의 Lap 입력(30/42 in · Mu 52.5 …)",
+   "value": [
+    {
+     "method": "lap_connection",
+     "params": "{\"d\":3.937007874015748,\"t\":0.0905511811023622,\"Fy\":55,\"Fu\":70,\"lap_left_in\":30,\"lap_right_in\":42,\"Mu_support\":52.5,\"Vu_support\":0.9,\"fastener_type\":\"screw\",\"fastener_dia\":0.19,\"n_rows\":2,\"end_distance\":1,\"Pnvs\":1.2,\"design_method\":\"ASD\"}"
+    }
+   ],
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "k2-change",
+      "reason": "K2: pressing the page button must use the case state — what MCP set — not the stale page fields (acceptance criterion 2) — the page sends its own lap fields (305 mm laps, Mu 0 …)"
+     },
+     "date": "2026-11-22"
+    }
+   ]
+  },
+  {
+   "id": "gui.runLap.shown",
+   "expect": "pin",
+   "reason": "Engine 6fa25f7: connection rows (limit_states · detailing_checks · interaction_checks) carry check_id and name_ko — the tables show the Korean names, the governing ★ is matched by id.",
+   "value": {
+    "connection-result": "Lap Splice 설계 결과유효단면계수 Se 가 없어 Lap 휨(§F3/F4/H2)은 검토하지 않았습니다 — 판정 없음. Se · Vn 은 퍼린 결과의 그 랩이 걸친 지점(지점 번호 칸)의 랩 구간에서, 랩 구속의 진술이 있을 때 가져옵니다.까닭: 퍼린 설계 결과 없음 — 랩 단면 강도는 퍼린 결과의 랩 구간에서만 가져온다Lap Splice Detail — 36 나사 #10 (2×18) [판정 없음]ELEVATIONM1M2762.0 mm1066.8 mm✓ min 1.5d=150.0 mms=41.8 mme=25.4 mmd=100.0AACUT A‒AM1M2d=100.0b=50.0t=2.30c=20.0V=60.71 kNCap=64.05 kNDCR=0.948나사 #10 d=4.8 mm종합 판정: ⚠ ⚠ 판정 없음 (미검토) (패스너 DCR=0.948)평가하지 못한 항목 (판정 없음의 원인)• Lap 휨강도(§F3/F4/H2) — 유효단면계수 Se 등 입력 부족으로 미검토경고 (값 또는 판정에 영향)• Lap 패스너 힘 분배(Step 2·4)는 기준 조항이 아닌 사내 합리적 해석(§A1.2(c))입니다 — force_model 의 한계 (a)–(e) 를 확인하세요.• Se(유효단면계수)가 미입력 — Lap 구간 휨강도 검토를 수행하지 못했습니다(판정 없음). 설계 탭에서 단면 정보를 확인하세요.가정• 랩 단면 Se 없음 — 퍼린 설계 결과 없음 — 랩 단면 강도는 퍼린 결과의 랩 구간에서만 가져온다 (랩 휨 검토는 판정 없음)적용 범위 (1)• J6.3: J6.3 랩 패스너 무리의 블록전단은 하한으로 평가합니다: 바깥 패스너 열을 따라 부재 끝에서 패스너 무리까지(길이 e + (m − 1) s)의 두 전단면, 열 사이의 장력면은 무시(Ant = 0) — 열 간격과 웹 연단까지의 거리는 입력이 아닙니다. 그 치수를 주면 Eq. J6.3-1/-2 전체로 다듬으십시오. 볼트만: 나사 접합은 J6 이 Rn 을 J6.1 과 J6.2 에서 정합니다(J6.3 해당 없음).힘 모델: V_transfer = max(Mu/(d − t), Vu); 모든 패스너(n_rows × n_per_row)가 V_transfer 를 균등 분담한다고 보고 n = ceil(V_transfer / Pns). Mu 는 지점 모멘트 전체, d − t 는 플랜지 우력의 팔. 패스너 1개 강도 Pns 는 공유 엔진의 전단 방향 한계상태 최솟값.Lap 길이 검증✅ OK≥ 150.0 mm전달 전단력60.71 kN패스너 설계강도 (Rn/Ω)1.78 kN/ea나사 #10필요 패스너 수 (행 반올림)36 ea배치 가능 최대100 eaLap 길이 제약실제 배치36 ea2 rows × 18/row용량64.05 kN36 × 1.78패스너 간격41.8 mm단부 거리 (랩 끝 기준, 1.5d)25.4 mm패스너 한계상태 (1개당)모드RnRn/Ω지배나사 지압 · 틸팅14.474.82나사 전단5.341.78★나사 뽑힘 (풀아웃)4.551.52나사 머리 풀오버16.075.36전단 파단30.6210.21★ = 전단 전달 산정에 사용된 지배 모드. 인장계 한계상태(풀아웃 J4.4.1 / 풀오버 J4.4.2)와 부재 단면검토(J6/D)는 전단 패스너 수 산정에서 제외됩니다 (양력 인장은 별도 검토).• Pull-over (J4.4.2) 미평가: d'w(머리·와셔 유효 직경) 미입력 — 2d 추정값은 참고값• Screw Tension (J4.4.3) 미평가: Pnts(제조사·독립시험 나사 인장강도) 미입력• Tension Rupture (J6.2) 미평가: 부재 총단면적 Ag 또는 폭 width 미입력단계별 계산아래 상세 수식은 US 단위(kips, in, ksi) 기준으로 표기됩니다.✅ Step 1: Lap Length Check (§I6.2.1(g), §J3 lapped-Z exception) = 30 inLap = min(좌,우) = 30.00 in ≥ 1.5d = 5.91 in• Step 2: Transfer Shear Force (in-house rational analysis, §A1.2(c) — not a spec provision) = 13.649 kipsV_transfer = max(Mu/(d-t), Vu) = max(52.50/3.846, 0.900) = max(13.649, 0.900) = 13.649 kips [사내 합리적 해석 §A1.2(c) — 기준 조항 아님]✅ Step 3: Fastener Strength (Screw #10) = 0.4 kipsPdesign = 0.400 kips/ea — 지배: Screw Shear (J4.3.2) (전단 방향: 지압·틸팅·패스너 전단·J6.1 끝단 파단(e=1.000 in); 인장 방향 J4.4·부재 J6.2/J6.3/D 제외)• Step 4: Required Fasteners (in-house uniform-share model) = 36 ean = V/Pdesign = 13.649/0.400 = 35 → 2 rows × 18/row = 36 ea✅ Step 5: Fastener Spacing & Layout = 1.65 inRequired: 36 ea, Max fit: 100 ea (Lap=30.00 in, edge=1.000 in, min s=3d=0.57 in), s = 1.65 in ≥ 0.57 in• Step 6: Edge/End Distance (§J3.2 / §J4.2) = 1 ine = 1.000 in (사용자 지정, 최소 1.5d = 0.285 in 충족) — §J6.1 끝단 파단은 이 e 로 Step 3 에서 평가✅ Step 7: Demand vs Capacity = 0.948 Capacity = 36 ea × 0.400 kips = 14.400 kips, DCR = V_transfer / Capacity = 13.649 / 14.400 = 0.948• Step 8p: Vn 자동산정 (§G2.1, 비보강 웹) = 11.223 kipsh = d-2t = 3.756 in, λv = 0.631 → G2.1 (yielding), Vn = 11.223 kips"
+   },
+   "flipped": [
+    {
+     "step": "engine-07caad7",
+     "from": {
+      "expect": "pin",
+      "reason": "K2-5: 화면 단추가 검토 상태(MCP 가 정한 것)로 계산한다 — 그 결과(36 Screw, 엔진 b288448 의 적용 범위 줄 포함)"
+     },
+     "date": "2026-11-23"
+    },
+    {
+     "step": "S10",
+     "from": {
+      "expect": "pin",
+      "reason": "engine 07caad7 (V6b engine items): the J6.3 line under 「적용 범위」 changes from \"not evaluated by this lap model\" to \"evaluated as a lower bound (two shear planes along the outer fastener rows, tension plane ignored)\" — the same change appears on HEAD without the V6b-01 patch; not from this patch."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "K4b",
+     "from": {
+      "expect": "pin",
+      "reason": "V8-01 (contract §6.3, engine 733c18e): the lap check takes its section strengths only from the purlin result's lap region at the support the lap spans — Se = Mnℓ/Fy, Vn = that region's shear (unrounded nominals), never the governing region; Mnd is never sent. Without that support, a purlin result, the lap statement, or with inelastic reserve / cold work in that region nothing is derived and the lap flexure is not evaluated (the card and the result's section_source say why; the card names the source when derived). The lap card reads the fastener ratio from fastener_utilization (engine 733c18e: the top-level utilization is now the largest lap strength ratio)."
+     },
+     "date": "2026-11-23"
+    },
+    {
+     "step": "renderer",
+     "from": {
+      "expect": "pin",
+      "reason": "K4b Korean wording (engine b880f6b, contract §16.5 / §16.9): check names name_ko and old Korean notices use the glossary's unspaced forms (적용한계, 국부좌굴, 뒤틀림좌굴, 전체좌굴, 횡비틀림좌굴 for \"항복 및 횡좌굴\", 왜곡좌굴 → 뒤틀림좌굴). K4b notices rendered instead of raw strings (webview/js/notices.js): what a person reads is Korean (text_ko / reason_ko of the engine's structured notices, the same words on the screen, in validation, in the report and in the MCP summaries) and rendered in the display units — SI screens and SI reports no longer carry US numbers inside sentences (e.g. \"Lcrd=23.9 in\" → \"607.1 mm\", \"스팬 ≤ 33 ft\" → \"10.06 m\", \"t=0.0590…\" → \"1.50 mm\"); fastener labels come from fastener_label_parts (\"Screw #10\" → \"나사 #10\")."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "R2-3/R3-2",
+     "from": {
+      "expect": "pin",
+      "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning). Renderer stop: host-authored sentences are coded notices (host.* registry in webview/js/notices.js) — lap Se line, section_source from / reason, lap-section reasons, read-only refusals, purlin bundle lines and region labels — rendered in Korean and in the display units."
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  }
+ ]
+}

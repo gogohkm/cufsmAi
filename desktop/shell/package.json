@@ -1,0 +1,25 @@
+{
+  "name": "stcfsd-shell",
+  "private": true,
+  "version": "0.0.1",
+  "description": "StCFSD 독립 프로그램의 창 — Electron 껍데기(S3). 호스트 · 화면 다리는 ../host/dist 를 쓴다",
+  "license": "UNLICENSED",
+  "productName": "StCFSD",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node build.mjs && electron .",
+    "start:ui": "node build.mjs && electron . --ui",
+    "start:classic": "node build.mjs && electron . --ui classic",
+    "test": "npm run typecheck && node build.mjs && node test/winConsole.mjs && node test/shell.mjs && node test/ui.mjs",
+    "test:unit": "node test/winConsole.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "electron": "45.2.3",
+    "electron-builder": "26.18.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.3.3"
+  }
+}

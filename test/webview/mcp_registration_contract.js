@@ -46,6 +46,23 @@ function main() {
   m = reg.mergeServerConfig(m.text, 'k', cfg);
   assert(m.ok && !m.changed, 'idempotent');
 
+  // R8-22: 같은 내용이면(키 순서 · 들여쓰기 · 줄바꿈이 달라도) 원문을 한 글자도 바꾸지 않는다
+  const userText = '{\r\n    "mcpServers": {\r\n        "other": {"command": "x"},\r\n' +
+    '        "k": {"env": {"STCFSD_MCP_PORT": "52790"}, "args": ["/x/media/mcp-server.js"], "command": "node"}\r\n' +
+    '    },\r\n    "extra": 1\r\n}\r\n';
+  m = reg.mergeServerConfig(userText, 'k', cfg);
+  assert(m.ok && !m.changed, 'reordered identical entry is unchanged');
+  assert.strictEqual(m.text, userText, 'unchanged merge returns the original bytes');
+  let plan = reg.planServerConfigWrite(userText, 'k', cfg);
+  assert(plan.ok && plan.write === false, 'no write planned when nothing changed');
+  plan = reg.planServerConfigWrite(userText, 'k', reg.buildServerConfig('/x/media/mcp-server.js', 52791));
+  assert(plan.ok && plan.write === true, 'port change → write');
+  assert.strictEqual(JSON.parse(plan.text).mcpServers.k.env.STCFSD_MCP_PORT, '52791');
+  assert.strictEqual(JSON.parse(plan.text).extra, 1, 'other keys kept');
+  plan = reg.planServerConfigWrite(undefined, 'k', cfg);
+  assert(plan.ok && plan.write === true, 'missing file → write');
+  assert(!reg.planServerConfigWrite('{oops', 'k', cfg).ok, 'broken JSON → no write');
+
   // 깨진 JSON은 덮어쓰지 않음
   m = reg.mergeServerConfig('{oops', 'k', cfg);
   assert(!m.ok, 'broken JSON rejected');

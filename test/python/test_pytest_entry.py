@@ -10,6 +10,7 @@ import pytest
 
 import test_unittest_collection as existing
 import test_regression_0926 as reg0926
+from review_suites import iter_review_tests
 
 
 def _collect():
@@ -21,6 +22,9 @@ def _collect():
         if name.startswith('test_') and callable(getattr(reg0926, name)):
             cases.append(pytest.param(reg0926, name,
                                       id=f'test_regression_0926.{name}'))
+    # 리뷰 회귀 스위트 (test_review_*.py 자동 수집)
+    for module, name in iter_review_tests():
+        cases.append(pytest.param(module, name, id=f'{module.__name__}.{name}'))
     return cases
 
 

@@ -68,18 +68,7 @@ def constr_xz_y(m_node, m_elem):
         if int(m_node[i, 4]) > 1:
             # Select two non-parallel meta-elements
             elem1_signed = int(m_node[i, 5])  # 1-based, signed
-            j = 6
-            # Find a non-parallel element
-            while j < m_node.shape[1] and int(m_node[i, j]) != 0:
-                elem_candidate = int(m_node[i, j])
-                angle_diff = m_el_dat[abs(elem_candidate) - 1, 2] - m_el_dat[abs(elem1_signed) - 1, 2]
-                if abs(math.sin(angle_diff)) > 1e-10:
-                    break
-                j += 1
-            if j >= m_node.shape[1] or int(m_node[i, j]) == 0:
-                k += 1
-                continue
-            elem2_signed = int(m_node[i, j])
+            elem2_signed = _non_parallel_meta_elem(m_node, m_el_dat, i)
 
             # Define main nodes (mnode1, mnode2, mnode3) -- all 0-based indices
             mnode2 = i
@@ -112,9 +101,6 @@ def constr_xz_y(m_node, m_elem):
                 cos2 = -cos2
 
             det = math.sin(alfa2 - alfa1)
-            if abs(det) < 1e-15:
-                k += 1
-                continue
 
             # Form Rx, Rz matrices
             Rx[k, mnode1] = sin2 * r1 / det
@@ -128,6 +114,29 @@ def constr_xz_y(m_node, m_elem):
             k += 1
 
     return Rx, Rz
+
+
+def _non_parallel_meta_elem(m_node, m_el_dat, i):
+    """Signed number of the first meta-element at main node i not parallel to the
+    first one (MATLAB constr_xz_y.m / constr_yu_yd.m while-loop).
+
+    MATLAB runs past the end of the list and stops with an index error when every
+    meta-element is parallel; that only happens when a straight-through node was
+    misclassified as a corner, so raise instead of leaving zero constraint rows.
+    """
+    from .node_utils import COLLINEAR_SIN_TOL
+    elem1 = abs(int(m_node[i, 5]))
+    j = 6
+    while j < m_node.shape[1] and int(m_node[i, j]) != 0:
+        cand = int(m_node[i, j])
+        angle_diff = m_el_dat[abs(cand) - 1, 2] - m_el_dat[elem1 - 1, 2]
+        if abs(math.sin(angle_diff)) > COLLINEAR_SIN_TOL:
+            return cand
+        j += 1
+    raise ValueError(
+        f"cFSM: main node {i + 1} at ({m_node[i, 1]:g}, {m_node[i, 2]:g}) is a corner "
+        "whose meta-elements are all parallel -- the corner/sub-node classification "
+        "is inconsistent with the geometry")
 
 
 def constr_planar_xz(node, elem, prop, node_prop, DOFperm, m, a, BC):
@@ -353,17 +362,7 @@ def constr_yu_yd(m_node, m_elem):
     for i in range(nmno):
         if int(m_node[i, 4]) > 2:
             # Select two non-parallel meta-elements (elem1, elem2)
-            elem1_signed = int(m_node[i, 5])
-            j = 6
-            while j < m_node.shape[1] and int(m_node[i, j]) != 0:
-                elem_candidate = int(m_node[i, j])
-                angle_diff = m_el_dat[abs(elem_candidate) - 1, 2] - m_el_dat[abs(elem1_signed) - 1, 2]
-                if abs(math.sin(angle_diff)) > 1e-10:
-                    break
-                j += 1
-            if j >= m_node.shape[1] or int(m_node[i, j]) == 0:
-                continue
-            elem2_signed = int(m_node[i, j])
+            elem2_signed = _non_parallel_meta_elem(m_node, m_el_dat, i)
 
             # Set far nodes of adjacent unselected elements to undefinite
             nadj = int(m_node[i, 4])
@@ -387,16 +386,7 @@ def constr_yu_yd(m_node, m_elem):
     for i in range(nmno):
         if int(m_node[i, 4]) > 2:
             elem1_signed = int(m_node[i, 5])
-            j = 6
-            while j < m_node.shape[1] and int(m_node[i, j]) != 0:
-                elem_candidate = int(m_node[i, j])
-                angle_diff = m_el_dat[abs(elem_candidate) - 1, 2] - m_el_dat[abs(elem1_signed) - 1, 2]
-                if abs(math.sin(angle_diff)) > 1e-10:
-                    break
-                j += 1
-            if j >= m_node.shape[1] or int(m_node[i, j]) == 0:
-                continue
-            elem2_signed = int(m_node[i, j])
+            elem2_signed = _non_parallel_meta_elem(m_node, m_el_dat, i)
 
             # Define main nodes
             mnode2 = i  # 0-based
@@ -429,8 +419,6 @@ def constr_yu_yd(m_node, m_elem):
                 cos2 = -cos2
 
             det = math.sin(alfa2 - alfa1)
-            if abs(det) < 1e-15:
-                continue
 
             r = np.array([[r1, -r1, 0],
                           [0, r2, -r2]])

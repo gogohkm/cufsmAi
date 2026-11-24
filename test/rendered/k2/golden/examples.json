@@ -1,0 +1,408 @@
+{
+ "about": "K2 phase 0 golden — examples. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
+ "recorded": "2026-11-23",
+ "entries": [
+  {
+   "id": "Example/test.csd.SI.saved",
+   "expect": "pin",
+   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0. Contract §6.3 / §6.4: two new case keys state that a 0 demand really is 0 — designZeroDemandStated (#chk-design-zero-demand) and connZeroDemandStated (#chk-conn-zero-demand), false by default; the K2 non-default value table sets them true.",
+   "value": {
+    "unitSystem": "SI",
+    "analysisMethod": "DSM",
+    "fy": 42.78613263041172,
+    "fu": 58.01509509208369,
+    "designMethod": "LRFD",
+    "memberType": "roof-purlin",
+    "presteelGrade": "SGC400",
+    "fyLoad": 42.78613263041172,
+    "fuPre": 58.01509509208369,
+    "inputE": 29500,
+    "inputG": 11346.15,
+    "inputV": 0.3,
+    "plasticFy": 42.78613263041172,
+    "spanType": "cont-3",
+    "nSpans": 5,
+    "spacing": 3.280839895013123,
+    "loadD": 6.2656302699450395,
+    "loadLr": 20.885434233150132,
+    "loadS": 10.442717116575066,
+    "loadWu": 20.885434233150132,
+    "loadWp": 0,
+    "loadL": 0,
+    "chkPatternLoading": true,
+    "chkLrReduced": false,
+    "spanIxIn4": null,
+    "deckType": "none",
+    "deckTPanel": 0.01968503937007874,
+    "deckFastenerSpacing": 11.811023622047244,
+    "deckKphiOverride": null,
+    "deckKxOverride": null,
+    "bracePointsFt": null,
+    "chkI621Confirmed": false,
+    "lapRestrained": false,
+    "lapRestrainedLap": false,
+    "deckInsulationIn": null,
+    "deckRTested": null,
+    "KxLx": 118.11023622047244,
+    "KyLy": 118.11023622047244,
+    "KtLt": 118.11023622047244,
+    "Lb": 118.11023622047244,
+    "Cb": 1,
+    "designLbPos": 0,
+    "designCbPos": 1,
+    "Cmx": 1,
+    "Cmy": 1,
+    "Pu": null,
+    "Vu": null,
+    "Mux": null,
+    "designMxPos": null,
+    "Muy": null,
+    "designZeroDemandStated": false,
+    "MayStrength": 0,
+    "chkBetaDist": true,
+    "distM1M2": 0,
+    "distLm": 0,
+    "chkRFactor": false,
+    "rValue": "0",
+    "chkColdWork": true,
+    "chkInelasticReserve": false,
+    "wcN": 3.5039370078740157,
+    "wcR": 0.1889763779527559,
+    "wcP": null,
+    "wcSupport": "EOF",
+    "wcFastened": "fastened",
+    "wcWebConfig": "single",
+    "wcFamily": "auto",
+    "wcFlangeCondition": "stiffened",
+    "wcLo": 0,
+    "wcEdgeDistance": 0,
+    "wcNWebs": 1,
+    "wcFastenerSpacing": 0,
+    "templateType": "",
+    "tplH": 3.937007874015748,
+    "tplB": 1.968503937007874,
+    "tplD": 0.7874015748031497,
+    "tplT": 0.0905511811023622,
+    "tplR": 0.15748031496062992,
+    "tplQlip": 90,
+    "analysisBC": "S-S",
+    "analysisLoadCase": "custom",
+    "analysisNeigs": 20,
+    "analysisLenMin": 1,
+    "analysisLenMax": 1000,
+    "analysisLenN": 50,
+    "analysisLoadPUs": null,
+    "analysisLoadMxxUs": null,
+    "analysisLoadMzzUs": null,
+    "chkCfsmEnable": true,
+    "chkCfsmG": true,
+    "chkCfsmD": true,
+    "chkCfsmL": true,
+    "chkCfsmO": true,
+    "vibRho": null,
+    "vibLengths": null,
+    "connFastenerType": "screw",
+    "connSingleType": "screw",
+    "connGrooveType": "complete",
+    "connLapLeft": 12.007874015748031,
+    "connLapRight": 12.007874015748031,
+    "connLapSupport": null,
+    "connMu": null,
+    "connVu": null,
+    "connZeroDemandStated": false,
+    "connFastenerDia": 0.1889763779527559,
+    "connNRows": 2,
+    "connEdgeDist": null,
+    "connLapPnvs": null,
+    "connT1": 0.05905511811023623,
+    "connT2": 0.05905511811023623,
+    "connD": 0.1889763779527559,
+    "connN": 4,
+    "connFy": 42.78613263041172,
+    "connFu": 58.01509509208369,
+    "connWeldL": 1.968503937007874,
+    "connWeldSize": 0.11811023622047245,
+    "connFub": null,
+    "connFuf": null,
+    "connPnvs": null,
+    "connDw": null,
+    "connPu": null,
+    "connTu": null,
+    "connE": null,
+    "connS": null,
+    "connMemberCase": "",
+    "connWidth": null,
+    "connJ63NotApplicable": false,
+    "spans": [
+     16.404199475065617,
+     16.404199475065617,
+     16.404199475065617
+    ],
+    "supports": [
+     "P",
+     "P",
+     "P",
+     "P"
+    ],
+    "lapsPerSupport": [
+     {
+      "left": null,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": null
+     }
+    ]
+   },
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-9 고침(K2-3): 파일을 열 때의 연동이 β 의 Lm 칸에 Lb 를 넣지 않는다 — distLm 0(파일 · 처음 값 그대로). 전: 118.11 in(Lb)"
+     },
+     "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — E 29500 그대로(전 29499.999992970508)"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "S10",
+     "from": {
+      "expect": "pin",
+      "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "milestone-2-demand",
+     "from": {
+      "expect": "pin",
+      "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd."
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  },
+  {
+   "id": "Example/test.csd.SI.resaveDiff",
+   "expect": "pin",
+   "value": {}
+  },
+  {
+   "id": "Example/test.csd.US.saved",
+   "expect": "pin",
+   "reason": "V9a-02 · contract §6.3 / §6.4 (engines 5df4464 · 3e7ce43): a demand that was not given is not zero — the demand fields (Pu · Vu · Mux · Muy · Mu(+) · lap Mu / Vu · connection Pu) start blank (null in the state, empty on the page) instead of 0. Contract §6.3 / §6.4: two new case keys state that a 0 demand really is 0 — designZeroDemandStated (#chk-design-zero-demand) and connZeroDemandStated (#chk-conn-zero-demand), false by default; the K2 non-default value table sets them true.",
+   "value": {
+    "unitSystem": "US",
+    "analysisMethod": "DSM",
+    "fy": 42.78613263041172,
+    "fu": 58.01509509208369,
+    "designMethod": "LRFD",
+    "memberType": "roof-purlin",
+    "presteelGrade": "SGC400",
+    "fyLoad": 42.78613263041172,
+    "fuPre": 58.01509509208369,
+    "inputE": 29500,
+    "inputG": 11346.15,
+    "inputV": 0.3,
+    "plasticFy": 42.78613263041172,
+    "spanType": "cont-3",
+    "nSpans": 5,
+    "spacing": 3.280839895013123,
+    "loadD": 6.2656302699450395,
+    "loadLr": 20.885434233150132,
+    "loadS": 10.442717116575066,
+    "loadWu": 20.885434233150132,
+    "loadWp": 0,
+    "loadL": 0,
+    "chkPatternLoading": true,
+    "chkLrReduced": false,
+    "spanIxIn4": null,
+    "deckType": "none",
+    "deckTPanel": 0.01968503937007874,
+    "deckFastenerSpacing": 11.811023622047244,
+    "deckKphiOverride": null,
+    "deckKxOverride": null,
+    "bracePointsFt": null,
+    "chkI621Confirmed": false,
+    "lapRestrained": false,
+    "lapRestrainedLap": false,
+    "deckInsulationIn": null,
+    "deckRTested": null,
+    "KxLx": 118.11023622047244,
+    "KyLy": 118.11023622047244,
+    "KtLt": 118.11023622047244,
+    "Lb": 118.11023622047244,
+    "Cb": 1,
+    "designLbPos": 0,
+    "designCbPos": 1,
+    "Cmx": 1,
+    "Cmy": 1,
+    "Pu": null,
+    "Vu": null,
+    "Mux": null,
+    "designMxPos": null,
+    "Muy": null,
+    "designZeroDemandStated": false,
+    "MayStrength": 0,
+    "chkBetaDist": true,
+    "distM1M2": 0,
+    "distLm": 0,
+    "chkRFactor": false,
+    "rValue": "0",
+    "chkColdWork": true,
+    "chkInelasticReserve": false,
+    "wcN": 3.5039370078740157,
+    "wcR": 0.1889763779527559,
+    "wcP": null,
+    "wcSupport": "EOF",
+    "wcFastened": "fastened",
+    "wcWebConfig": "single",
+    "wcFamily": "auto",
+    "wcFlangeCondition": "stiffened",
+    "wcLo": 0,
+    "wcEdgeDistance": 0,
+    "wcNWebs": 1,
+    "wcFastenerSpacing": 0,
+    "templateType": "",
+    "tplH": 3.937007874015748,
+    "tplB": 1.968503937007874,
+    "tplD": 0.7874015748031497,
+    "tplT": 0.0905511811023622,
+    "tplR": 0.15748031496062992,
+    "tplQlip": 90,
+    "analysisBC": "S-S",
+    "analysisLoadCase": "custom",
+    "analysisNeigs": 20,
+    "analysisLenMin": 1,
+    "analysisLenMax": 1000,
+    "analysisLenN": 50,
+    "analysisLoadPUs": null,
+    "analysisLoadMxxUs": null,
+    "analysisLoadMzzUs": null,
+    "chkCfsmEnable": true,
+    "chkCfsmG": true,
+    "chkCfsmD": true,
+    "chkCfsmL": true,
+    "chkCfsmO": true,
+    "vibRho": null,
+    "vibLengths": null,
+    "connFastenerType": "screw",
+    "connSingleType": "screw",
+    "connGrooveType": "complete",
+    "connLapLeft": 12.007874015748031,
+    "connLapRight": 12.007874015748031,
+    "connLapSupport": null,
+    "connMu": null,
+    "connVu": null,
+    "connZeroDemandStated": false,
+    "connFastenerDia": 0.1889763779527559,
+    "connNRows": 2,
+    "connEdgeDist": null,
+    "connLapPnvs": null,
+    "connT1": 0.05905511811023623,
+    "connT2": 0.05905511811023623,
+    "connD": 0.1889763779527559,
+    "connN": 4,
+    "connFy": 42.78613263041172,
+    "connFu": 58.01509509208369,
+    "connWeldL": 1.968503937007874,
+    "connWeldSize": 0.11811023622047245,
+    "connFub": null,
+    "connFuf": null,
+    "connPnvs": null,
+    "connDw": null,
+    "connPu": null,
+    "connTu": null,
+    "connE": null,
+    "connS": null,
+    "connMemberCase": "",
+    "connWidth": null,
+    "connJ63NotApplicable": false,
+    "spans": [
+     16.4,
+     16.4,
+     16.4
+    ],
+    "supports": [
+     "P",
+     "P",
+     "P",
+     "P"
+    ],
+    "lapsPerSupport": [
+     {
+      "left": null,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": 0
+     },
+     {
+      "left": 0,
+      "right": null
+     }
+    ]
+   },
+   "flipped": [
+    {
+     "step": "K2-5/6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-9 고침(K2-3): 위와 같음 — US 화면에서도 distLm 0. 그 밖의 값(US 화면의 12 자리 표시값)은 전과 바이트까지 같다"
+     },
+     "date": "2026-11-22"
+    },
+    {
+     "step": "S6",
+     "from": {
+      "expect": "pin",
+      "reason": "D-5: 화면 반올림이 값으로 되먹지 않는다 — 프로그램이 적은 칸은 정확한 US 값을 쥔다(12 자리 글은 보기만) — Fy 정확한 값"
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "S10",
+     "from": {
+      "expect": "pin",
+      "reason": "Stop 6 (contract §6.3, engine 7f4f6c5): one new case key lapRestrained (unset by default) — the statement that the lapped members are restrained within the lap (AISI Manual II-2A assumptions (a)–(c)); one checkbox on the purlin tab and its mirror on the lap tab, saved in .csd."
+     },
+     "date": "2026-11-24"
+    },
+    {
+     "step": "milestone-2-demand",
+     "from": {
+      "expect": "pin",
+      "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd."
+     },
+     "date": "2026-11-24"
+    }
+   ]
+  },
+  {
+   "id": "Example/test.csd.US.resaveDiff",
+   "expect": "pin",
+   "value": {}
+  }
+ ]
+}

@@ -223,12 +223,13 @@ def test_i621_uplift_r():
 
     all_pass = True
 
+    # R7-04: 조건 (i)-(n) 은 입력으로 확인할 수 없어 사용자 확인(system_confirmed)이 있어야 R 을 준다.
     # Z-section, continuous span → R = 0.70
     z_result = check_i621_conditions(
         section={'depth': 8.0, 'flange_width': 2.25, 'thickness': 0.070,
                  'lip_depth': 0.91, 'R_corner': 0.1875, 'type': 'Z'},
         Fy=55, Fu=70, span_ft=25, span_type='continuous',
-        lap_length_in=2.5*12,
+        lap_length_in=2.5*12, system_confirmed=True,
     )
     all_pass &= approx(z_result['R'] or 0, 0.70, label='Z-section continuous R')
     all_pass &= approx(1 if z_result['all_pass'] else 0, 1, label='Z-section all_pass')
@@ -238,7 +239,7 @@ def test_i621_uplift_r():
         section={'depth': 9.0, 'flange_width': 2.5, 'thickness': 0.059,
                  'lip_depth': 0.773, 'R_corner': 0.1875, 'type': 'C'},
         Fy=55, Fu=70, span_ft=25, span_type='continuous',
-        lap_length_in=1.25*12,
+        lap_length_in=1.25*12, system_confirmed=True,
     )
     all_pass &= approx(c_result['R'] or 0, 0.60, label='C-section continuous R')
 
@@ -246,7 +247,7 @@ def test_i621_uplift_r():
     simple = check_i621_conditions(
         section={'depth': 6.0, 'flange_width': 2.0, 'thickness': 0.059,
                  'lip_depth': 0.5, 'R_corner': 0.1875, 'type': 'C'},
-        Fy=55, Fu=70, span_ft=20, span_type='simple',
+        Fy=55, Fu=70, span_ft=20, span_type='simple', system_confirmed=True,
     )
     if simple['all_pass']:
         all_pass &= approx(simple['R'], 0.70, label='C simple d<=6.5 R')
@@ -255,7 +256,7 @@ def test_i621_uplift_r():
     deep_c = check_i621_conditions(
         section={'depth': 10.0, 'flange_width': 3.0, 'thickness': 0.070,
                  'lip_depth': 0.8, 'R_corner': 0.1875, 'type': 'C'},
-        Fy=55, Fu=70, span_ft=25, span_type='simple',
+        Fy=55, Fu=70, span_ft=25, span_type='simple', system_confirmed=True,
     )
     if deep_c['all_pass']:
         all_pass &= approx(deep_c['R'], 0.40, label='C simple d>8.5 R')
@@ -321,7 +322,9 @@ def test_analyze_loads_integration():
         loads={'D': 15, 'Lr': 100},
         design_method='ASD',
         laps={'left_ft': 1.0, 'right_ft': 2.5},
-        deck={'type': 'through-fastened', 't_panel': 0.018, 'fastener_spacing': 12},
+        # R7-04: R 은 I6.2.1 (i)-(n) 사용자 확인이 있을 때만 준다 (이전에는 확인 없이 0.70).
+        deck={'type': 'through-fastened', 't_panel': 0.018, 'fastener_spacing': 12,
+              'i621_conditions_confirmed': True},
         section={'depth': 8.0, 'flange_width': 2.25, 'thickness': 0.070,
                  'lip_depth': 0.91, 'R_corner': 0.1875, 'type': 'Z', 'Fy': 55, 'Fu': 70},
     )
@@ -431,27 +434,20 @@ def test_connection_bolt():
 
     all_pass = True
 
+    # R6-20: 과거 입력은 무시되는 키 't' 를 넘기고 >0 만 확인했다 — Manual IV-9 실제 입력·인쇄값으로 대조.
     result = design_connection({
-        'connection_type': 'bolt',
-        't': 0.105,
-        'd': 0.5,
-        'Fub': 45,
-        'n': 2,
-        'Fu': 45,
-        'Fy': 33,
-        'design_method': 'ASD',
+        'connection_type': 'bolt', 't1': 0.105, 't2': 0.105, 'd': 0.5, 'n': 2,
+        'e': 1.0, 's': 2.0, 'g': 2.0, 'width': 4.0, 'member_case': 'flat_sheet',
+        'bolt_grade': 'A307', 'mf': 1.0, 'Fu': 45, 'Fy': 33, 'design_method': 'ASD',
     })
-
-    if 'error' in result:
-        print(f'  SKIP: {result["error"]}')
-        return True
-
-    Rn = result.get('Rn', 0)
-    ds = result.get('design_strength', 0)
-    gov = result.get('governing_mode', '')
-    all_pass &= approx(1 if Rn > 0 else 0, 1, label=f'Rn={Rn:.2f} > 0')
-    all_pass &= approx(1 if ds > 0 else 0, 1, label=f'design_strength={ds:.2f} > 0')
-    all_pass &= approx(1 if gov else 0, 1, label=f'governing={gov}')
+    ds = {ls['name']: ls['design_strength'] for ls in result['limit_states']}
+    all_pass &= approx(ds['Shear Rupture (J6.1)'], 3.67, label='IV-9 J6.1 ASD (Manual 3.67)')
+    all_pass &= approx(ds['Tension Rupture (J6.2)'], 5.68, label='IV-9 J6.2 ASD (Manual 5.68)')
+    all_pass &= approx(ds['Block Shear (J6.3)'], 4.91, label='IV-9 J6.3 ASD (Manual 4.91)')
+    all_pass &= approx(ds['Bearing (J3.3.1)'], 5.67, label='IV-9 bearing ASD (Manual 5.67)')
+    all_pass &= approx(ds['Bolt Shear (J3.4)'], 5.29, label='IV-9 bolt shear ASD (Manual 5.29)')
+    all_pass &= approx(1 if result['governing_mode'] == 'Shear Rupture (J6.1)' else 0, 1,
+                       label='IV-9 governs J6.1')
     return all_pass
 
 
@@ -460,6 +456,7 @@ def test_shear_lag_design_strength_split():
     print('\n=== TEST: Shear Lag Design Strength Split ===')
     from design.special_topics import shear_lag
 
+    # R5-20/R5-21: 과거 시험은 일반식 1−x̄/L 과 D3 계수(0.75)를 잠갔다 — Table J6.2-1(J6.2-5)·Table J6-1 로 바로잡음.
     result = shear_lag(
         Ag=1.0,
         An_net=0.5,
@@ -468,16 +465,18 @@ def test_shear_lag_design_strength_split():
         Fu=65,
         Fy=50,
         design_method='LRFD',
+        connection_case='welded_angle',
+        connection_type='welded',
     )
 
     all_pass = True
-    expected_u = 1.0 - 0.25 / 2.0
+    expected_u = min(1.0 - 1.20 * 0.25 / 2.0, 0.9)   # Eq. J6.2-5
     expected_ae = 0.5 * expected_u
     expected_rupture = expected_ae * 65.0
-    expected_design = 0.75 * expected_rupture
-    all_pass &= approx(result['U'], expected_u, label='U')
+    expected_design = 0.60 * expected_rupture        # Table J6-1 welds φ=0.60
+    all_pass &= approx(result['U'], expected_u, label='U (Eq. J6.2-5)')
     all_pass &= approx(result['Ae'], expected_ae, label='Ae')
-    all_pass &= approx(result['phi_Tn'], expected_design, label='phi_Tn uses D3 factor')
+    all_pass &= approx(result['phi_Tn'], expected_design, label='phi_Tn uses Table J6-1 weld factor')
     all_pass &= approx(1 if 'Rupture' in result['governing'] else 0, 1, label='Rupture governs')
     return all_pass
 
@@ -658,8 +657,9 @@ def test_web_crippling_overhang_eq_g52():
     all_pass &= approx(result.get('Pn', 0), 2.95, tol=0.03, label='Pnc overhang strength')
     all_pass &= approx(1 if result.get('Pn_interior_cap', 0) > result.get('Pn', 0) else 0, 1,
                         label='interior cap larger than Pnc')
-    all_pass &= approx(1 if not result.get('h3_applicable', True) else 0, 1,
-                        label='H3 disabled for overhang')
+    # V2-02(2026-11-22): §H3(a) 는 돌출(G5-2)에도 해당 — Pnc 로 평가해야 하므로 '해당함, 여기서 미평가'.
+    all_pass &= approx(1 if result.get('h3_applies') is True and result.get('h3_evaluated') is False else 0, 1,
+                        label='H3 applies to overhang (Pnc), not evaluated here')
     return all_pass
 
 
@@ -730,9 +730,13 @@ def test_web_crippling_built_up_i_table_g51():
 
     all_pass = True
     all_pass &= approx(1 if result.get('table') == 'G5-1' else 0, 1, label='uses Table G5-1')
-    all_pass &= approx(result.get('Pn', 0), expected, tol=0.02, label='built-up I ETF Pn')
-    all_pass &= approx(1 if not result.get('h3_applicable', True) else 0, 1, label='H3 disabled for built-up I')
-    all_pass &= approx(1 if any('Table G5-1 directly' in msg for msg in result.get('assumptions', [])) else 0, 1,
+    # R5-14(2026-11-22): Table G5-1 은 "per web"(표 제목, Commentary G5) — 두 채널 I 는 웨브 2개를 곱한다.
+    all_pass &= approx(result.get('Pn_per_web', 0), expected, tol=0.02, label='built-up I ETF Pn per web')
+    all_pass &= approx(result.get('Pn', 0), 2.0 * expected, tol=0.02, label='built-up I ETF Pn (2 webs)')
+    # V2-02(2026-11-22): §H3(b) Eq. H3-2 가 맞댄 I 에 해당한다.
+    all_pass &= approx(1 if result.get('h3_applies') is True and result.get('h3_equation') == 'H3-2' else 0, 1,
+                        label='H3-2 applies to built-up I')
+    all_pass &= approx(1 if any('Table G5-1 is per web' in msg for msg in result.get('assumptions', [])) else 0, 1,
                         label='built-up assumption recorded')
     return all_pass
 
@@ -751,7 +755,8 @@ def test_web_crippling_built_up_i_unsupported_unstiffened_two_flange():
 
     all_pass = True
     all_pass &= approx(1 if 'error' in result else 0, 1, label='returns unsupported-row error')
-    all_pass &= approx(1 if any('unstiffened two-flange rows are not implemented' in msg for msg in result.get('warnings', [])) else 0, 1,
+    # R5-10/R5-13(2026-11-22): 원문에 없는 행이므로 "미구현"이 아니라 "Table G5-1 이 다루지 않음".
+    all_pass &= approx(1 if any('Table G5-1 does not tabulate' in msg for msg in result.get('warnings', [])) else 0, 1,
                         label='unsupported-row warning returned')
     return all_pass
 
@@ -960,19 +965,16 @@ def test_multi_bolt_c_factor():
 
     Rn1 = [ls for ls in r1['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
     Rn3 = [ls for ls in r3['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
-    # 3볼트 강도는 1볼트 × 3이 아님 (e/d ≠ s/d이면)
-    all_pass &= approx(
-        1 if Rn1 > 0 and Rn3 > 0 else 0,
-        1,
-        label=f'bearing strengths: 1-bolt Rn={Rn1:.3f}, 3-bolt Rn={Rn3:.3f}',
-    )
-    # e=1.5, d=0.5 → C_end=3.0; s=2.0, d=0.5 → C_int=3.0 (이 경우 동일)
-    # 다른 e/s로 확인
+    # R6-24: "끝단/내부 C 분리" 기능은 없다 — Table J3.3.1-1 의 C 는 d/t 만의 함수이므로
+    # 볼트당 지압은 e·s 와 무관하고 n 에 비례한다 (끝단 인열은 J6.1 이 맡는다).
+    # d/t = 0.5/0.059 = 8.47 < 10 → C = 3.0, mf = 0.75 (표준공·와셔 미지정 최소값)
+    expected_1 = 3.0 * 0.75 * 0.5 * 0.059 * 65
+    all_pass &= approx(Rn1, expected_1, label='1-bolt bearing C=3.0, mf=0.75')
+    all_pass &= approx(Rn3, 3 * expected_1, label='3-bolt bearing = 3 × 1-bolt')
     r3b = bolt_connection(t1=0.059, t2=0.059, d=0.5, Fy=50, Fu=65, Fub=120,
                            e=0.75, s=2.0, n=3)
     Rn3b = [ls for ls in r3b['limit_states'] if ls['name'].startswith('Bearing')][0]['Rn']
-    # e/d=1.5 (C_end=1.5), s/d=4.0 (C_int=3.0) → 끝단 < 내부
-    all_pass &= approx(1 if Rn3b > 0 else 0, 1, label=f'3-bolt(small e) Rn={Rn3b:.3f} > 0')
+    all_pass &= approx(Rn3b, 3 * expected_1, label='bearing independent of e')
 
     return all_pass
 
@@ -1064,11 +1066,14 @@ def test_arc_seam_formula_terms():
     tear = [ls for ls in result['limit_states'] if ls['name'].startswith('Sheet Tear')][0]
 
     all_pass = True
+    # R6-04: 과거 기대값은 0.96·d (틀림)를 잠갔다 — Eq. J2.3.2.1-2 는 0.96·da, da = d − t, L ≤ 3d.
+    L_eff = min(L, 3 * d)
     de = min(max(0.7 * d - 1.5 * t, 0.0), 0.55 * d)
-    expected_weld = 0.75 * 60 * (L * de + math.pi / 4 * de ** 2)
-    expected_tear = 2.5 * t * 65 * (0.25 * L + 0.96 * d)
-    all_pass &= approx(weld['Rn'], expected_weld, label='J2.2.2 seam weld term L*de')
-    all_pass &= approx(tear['Rn'], expected_tear, label='J2.2.2 sheet tear term 0.96da')
+    expected_weld = 0.75 * 60 * (L_eff * de + math.pi / 4 * de ** 2)
+    expected_tear = 2.5 * t * 65 * (0.25 * L_eff + 0.96 * (d - t))
+    all_pass &= approx(weld['Rn'], expected_weld, label='J2.3.2.1-1 seam weld term L*de (L<=3d)')
+    all_pass &= approx(tear['Rn'], expected_tear, label='J2.3.2.1-2 sheet tear term 0.96da')
+    all_pass &= approx(tear['omega'], 2.55, label='J2.3.2.1 Omega = 2.55')
     return all_pass
 
 
@@ -1077,9 +1082,10 @@ def test_paf_limit_state_mapping():
     print('\n=== TEST: PAF Limit-State Mapping (F-018) ===')
     from design.connections import paf_connection
 
+    # R6-15: 과거 입력(t2=0.08, ds=0.20)은 J5.3.2 적용한계(t2/t1 ≥ 2, t2 ≥ 1/8, ds ≤ 0.177) 밖이었다.
     t1 = 0.06
-    t2 = 0.08
-    d = 0.2
+    t2 = 0.25
+    d = 0.177
     Fu = 65
     n = 2
 
@@ -1136,8 +1142,10 @@ def test_bolt_shear_tension_interaction_j34():
     all_pass &= approx(1 if st2['equation'].startswith('J3.4-2') else 0, 1, label='ASD eq J3.4-2')
 
     # J6.2 net-section tension rupture & J6.3 block shear evaluate when member geometry given
+    # R6-12: J6.2 는 Table J6.2-1 분류(member_case)가 있어야 평가한다.
     r3 = bolt_connection(t1=0.1, t2=0.1, d=d, Fy=50, Fu=65, Fub=120, n=n,
-                         bolt_grade='A325', e=1.0, width=3.0, g=1.5)
+                         bolt_grade='A325', e=1.0, width=3.0, g=1.5,
+                         j6_geometry={'member_case': 'flat_sheet'})
     names = [ls['name'] for ls in r3['limit_states']]
     all_pass &= approx(1 if any('J6.2' in x for x in names) else 0, 1, label='J6.2 tension rupture present')
     all_pass &= approx(1 if any('J6.3' in x for x in names) else 0, 1, label='J6.3 block shear present')
@@ -1341,8 +1349,11 @@ def test_flexure_design_passes_built_up_i_and_edge_distance():
     all_pass &= approx(1 if wc.get('table') == 'G5-1' else 0, 1, label='design path uses G5-1')
     all_pass &= approx(1 if wc.get('section_family') == 'built_up_i' else 0, 1, label='passes built_up_i family')
     all_pass &= approx(wc.get('edge_distance', 0), 12.0, tol=0.001, label='passes edge distance')
-    all_pass &= approx(1 if not wc.get('h3_applicable', True) else 0, 1, label='H3 marked not applicable')
-    all_pass &= approx(1 if result.get('h3_interaction') is None else 0, 1, label='no H3 interaction result')
+    # V2-02(2026-11-22): §H3(b) 가 해당하므로 H3 를 건너뛴 채 합격시키면 안 된다 — 평가했거나 판정이 None.
+    all_pass &= approx(1 if wc.get('h3_applies') is True and wc.get('h3_equation') == 'H3-2' else 0, 1,
+                        label='H3-2 applies to built-up I')
+    all_pass &= approx(1 if (result.get('h3_interaction') is not None or result.get('pass') is None) else 0, 1,
+                        label='H3 evaluated or verdict withheld')
     return all_pass
 
 
@@ -1557,12 +1568,19 @@ def test_dsm_uses_modal_classification_before_wavelength_heuristic():
         mode_classifications=classifications,
     )
     all_pass = True
-    all_pass &= approx(1 if result.get('classification_method') == 'cfsm_modal' else 0, 1,
-                        label='classification method is cfsm_modal')
+    # R5-01(2026-11-22): 극소 하나의 라벨로 다른 모드의 부재를 확정하면 안 된다 — 'cfsm_modal' 금지, 국부는 같은 극소의 하한값.
+    all_pass &= approx(1 if not str(result.get('classification_method')).startswith('cfsm_modal') else 0, 1,
+                        label='single minimum never reported as cfsm_modal')
     all_pass &= approx(1 if result.get('dist_detected') else 0, 1,
                         label='distortional minimum detected')
-    all_pass &= approx(1 if not result.get('local_detected') else 0, 1,
-                        label='D-dominant minimum not mislabeled local')
+    all_pass &= approx(result.get('Pcrd', 0), 1.0 * result.get('Py', 0), tol=1e-6,
+                        label='D-labelled minimum routed to Pcrd')
+    all_pass &= approx(1 if result.get('local_absence_verified') is False else 0, 1,
+                        label='local absence not verified')
+    # V2-04(2026-11-22): 극소 하나는 한 모드만 분리한다 — 국부는 미분리(0), 그 값은 하한(crl_floor)으로만.
+    all_pass &= approx(result.get('Pcrl', 0), 0.0, label='local not isolated by a D-labelled single minimum')
+    all_pass &= approx(result.get('crl_floor', 0), 1.0 * result.get('Py', 0), tol=1e-6,
+                        label='single minimum reported as the local floor')
     return all_pass
 
 
@@ -1574,11 +1592,19 @@ def test_purlin_uplift_r_and_governing_wiring_contract():
         panel = f.read()
     with open(os.path.join(root, 'webview', 'js', 'app.js'), encoding='utf-8') as f:
         app = f.read()
+    # K2-2: 퍼린의 지배 구간 고르기는 화면과 호스트가 같이 쓰는 순수 함수로 옮겨졌다(utils.js).
+    with open(os.path.join(root, 'webview', 'js', 'utils.js'), encoding='utf-8') as f:
+        app += f.read()
     all_pass = True
-    all_pass &= approx(1 if 'R_uplift: upliftR' in panel else 0, 1, label='uplift design receives R')
-    all_pass &= approx(1 if 'Vu: upliftVu' in panel else 0, 1, label='uplift design receives Vu')
-    all_pass &= approx(1 if "['양력', data.design_uplift]" in app else 0, 1,
-                        label='uplift included in governing candidates')
+    # W3: 구간별 설계 — R 은 엔진이 §I6.2.1 적격이라 한 양력 구간에만(V3 T5–T6), Vu 는 구간 포락선에서.
+    all_pass &= approx(1 if 'r.i621_region_eligible === true && upliftR != null' in panel else 0, 1,
+                        label='uplift R only on I6.2.1-eligible regions')
+    all_pass &= approx(1 if 'params.R_uplift = rg.R;' in panel else 0, 1, label='uplift design receives R')
+    all_pass &= approx(1 if 'Vu: vA * share' in panel and 'Vu: pV.V * share' in panel else 0, 1,
+                        label='region designs receive the paired envelope Vu')
+    all_pass &= approx(1 if "['양력', data.design_uplift]" in app or "kind === 'uplift'" in app
+                        or 'data.regions' in app else 0, 1,
+                        label='uplift regions included in governing candidates')
     return all_pass
 
 
@@ -1604,7 +1630,8 @@ def test_unsupported_sections_require_rational_global_buckling_input():
     blocked = design_member(base)
     supplied = design_member({**base, 'Fcre': 100.0})
     verified_no_dist = design_member({
-        **base, 'section_type': 'hat', 'Fcre': 100.0,
+        # 검증 V2-09: hat 의 립은 hat_lip_depth 로만 받는다(브림·d_lip 는 립이 아님) — 립 있는 hat 로 시험.
+        **base, 'section_type': 'hat', 'Fcre': 100.0, 'hat_lip_depth': 0.5,
         'dsm': {
             'Mcrl': 100.0, 'Mcrd': 0.0, 'My': 100.0,
             'classification_method': 'cfsm_modal',
@@ -1621,8 +1648,12 @@ def test_unsupported_sections_require_rational_global_buckling_input():
                         label='rational-analysis warning surfaced')
     all_pass &= approx(1 if supplied.get('Mn', 0) > 0 else 0, 1,
                         label='explicit rational Fcre is accepted')
-    all_pass &= approx(1 if not verified_no_dist.get('distortional_not_evaluated') else 0, 1,
-                        label='verified absence of distortional mode is accepted')
+    # 리뷰 1122(R5-01/§4.1): cfsm_modal + dist_detected=False 는 "분리되지 않음"일 뿐 부재 확인이
+    # 아니다. 립(d_lip=0.5)이 있는 단면이므로 Mcrd 없이 F4 는 미평가 → 판정 없음이 맞다.
+    all_pass &= approx(1 if verified_no_dist.get('distortional_not_evaluated') else 0, 1,
+                        label='cfsm_modal label alone does not verify absence of distortional mode')
+    all_pass &= approx(1 if verified_no_dist.get('pass') is None else 0, 1,
+                        label='unevaluated F4 blocks a pass verdict')
     return all_pass
 
 

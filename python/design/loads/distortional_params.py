@@ -2,9 +2,17 @@
 
 C-단면/Z-단면의 플랜지+립 기하 성질과
 왜곡좌굴 탄성/기하학적 회전강성을 계산한다.
+
+기하 계약 (Table 2.3.1.3-1 주, Eq. 2.3.1.3-4):
+  ho = 웹 외-외 깊이 (out-to-out web depth)
+  b  = 중심선 플랜지 폭 = bo − t   (bo = 플랜지 외-외 폭)
+  d  = 중심선 립 높이   = do − t/2 (do = 립 외-외 높이)
+평탄폭(코너 제외 폭)을 넘기면 b·d·ho 가 작아져 Fcrd 가 달라진다 — 호출자가
+외-외 치수에서 위 식으로 만들어 넘겨야 한다.
 """
 
 import math
+from design.notices import N as _nt  # noqa: E402
 
 E_STEEL = 29500.0  # ksi
 G_STEEL = 11300.0  # ksi — AISI S100-16 §A3.1 published shear modulus (77,900 MPa)
@@ -16,17 +24,20 @@ def calc_flange_properties(b: float, d: float, t: float,
                            section_type: str = 'C') -> dict:
     """Table 2.3.1.3-1: 플랜지+립 기하 성질
 
+    표의 두 열은 단면 종류가 아니라 립 방향이다(수직립 / 경사립). 경사립 식은
+    θ = 90° 에서 수직립 식과 같아지므로, C 단면이라도 θ ≠ 90° 이면 경사립 식을 쓴다.
+
     Parameters
     ----------
     b : 중심선 플랜지폭 = bo - t (in.)
     d : 중심선 립높이 = do - t/2 (in.)
     t : 두께 (in.)
-    theta : 립 각도 (deg), C-section = 90°
-    section_type : 'C' or 'Z'
+    theta : 립 각도 (deg), 수직립 = 90°
+    section_type : 'C' or 'Z' (결과의 'section_type' 에 기록; 식 선택에는 θ 만 쓴다)
 
     Returns
     -------
-    dict with Af, Jf, Cwf, Ixf, Iyf, Ixyf, xof, hxf, yof
+    dict with Af, Jf, Cwf, Ixf, Iyf, Ixyf, xof, hxf, yof, section_type, theta
     """
     cos_th = math.cos(math.radians(theta))
     sin_th = math.sin(math.radians(theta))
@@ -36,14 +47,14 @@ def calc_flange_properties(b: float, d: float, t: float,
     Jf = (b * t ** 3 + d * t ** 3) / 3.0
     Cwf = 0.0
 
-    if section_type.upper() == 'C':
+    if abs(theta - 90.0) < 1e-9:
         Ixf = t * (t ** 2 * b ** 2 + 4 * b * d ** 3 + t ** 2 * b * d + d ** 4) / (12 * bd)
         Iyf = t * (b ** 4 + 4 * d * b ** 3) / (12 * bd)
         Ixyf = t * b ** 2 * d ** 2 / (4 * bd)
         xof = b ** 2 / (2 * bd)
         hxf = -(b ** 2 + 2 * d * b) / (2 * bd)
         yof = -d ** 2 / (2 * bd)
-    else:  # Z-section
+    else:  # 경사립 (Table 2.3.1.3-1 inclined-lip column)
         Ixf = t * (t ** 2 * b ** 2 + 4 * b * d ** 3 - 4 * b * d ** 3 * cos_th ** 2
                     + t ** 2 * b * d + d ** 4 - d ** 4 * cos_th ** 2) / (12 * bd)
         Iyf = t * (b ** 4 + 4 * d * b ** 3 + 6 * d ** 2 * b ** 2 * cos_th
@@ -57,6 +68,7 @@ def calc_flange_properties(b: float, d: float, t: float,
         'Af': Af, 'Jf': Jf, 'Cwf': Cwf,
         'Ixf': Ixf, 'Iyf': Iyf, 'Ixyf': Ixyf,
         'xof': xof, 'hxf': hxf, 'yof': yof,
+        'section_type': str(section_type).upper(), 'theta': theta,
     }
 
 
@@ -97,7 +109,9 @@ def calc_Lcrd(ho: float, t: float, fp: dict,
         inner = (coeff * math.pi ** 4 * ho * (1 - mu ** 2) / t ** 3) * (term1 - term2)
 
     if inner <= 0:
-        return 20.0
+        # 기하 입력이 틀렸다는 뜻이다 — 임의의 길이로 채우면 Fcrd 가 근거를 잃는다.
+        raise ValueError('Distortional half-wavelength Lcrd could not be computed '
+                         '(non-positive term; check ho, b, d, t).')
 
     Lcrd = inner ** 0.25
     return Lcrd
@@ -195,7 +209,7 @@ def calc_Fcrd(fp: dict, ho: float, t: float,
     Parameters
     ----------
     fp : 플랜지 성질 (from calc_flange_properties)
-    ho : 웹 외-외 깊이 (in.)
+    ho : 웹 외-외 깊이 (in.) — 평탄폭이 아니다 (모듈 docstring 의 기하 계약)
     t : 두께 (in.)
     kphi_external : 외부 회전강성 (패널/브레이싱), kip-in./rad/in.
     beta : 모멘트 구배 보정 (1.0~1.3)
@@ -222,7 +236,11 @@ def calc_Fcrd(fp: dict, ho: float, t: float,
     else:
         Fcrd = beta_eff * (stiff['k_phi_fe'] + stiff['k_phi_we'] + kphi_external) / denom
 
+    notes = []
+    if not is_flexure and str(fp.get('section_type', '')).upper().startswith('Z'):
+        notes.append(_nt('loads.assumption.appendix_analytical_compression_fcrd'))
     return {
+        'notes': notes,
         'Fcrd': Fcrd,
         'Lcrd': round(Lcrd, 1),
         'L_used': round(L, 1),
@@ -232,4 +250,8 @@ def calc_Fcrd(fp: dict, ho: float, t: float,
         'k_tilde_phi_fg': round(stiff['k_tilde_phi_fg'], 5),
         'k_tilde_phi_wg': round(stiff['k_tilde_phi_wg'], 5),
         'kphi_external': kphi_external,
+        # 계산서(design_checks)용 — 반올림하지 않은 값(위 키들은 표시용 반올림)
+        'trace': {'Lcrd': Lcrd, 'L': L, 'Lm': Lm, 'stiff': dict(stiff), 'fp': dict(fp), 'E': E, 'G': G,
+                  'mu': mu, 'beta': beta_eff, 'kphi_external': kphi_external, 'xi_web': xi_web,
+                  'flexure': is_flexure},
     }

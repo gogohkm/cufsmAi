@@ -265,7 +265,10 @@ def Kglobal_transv(node, elem, prop, m, a, BC):
         matnum = int(elem[i, 4])
         row = np.where(prop[:, 0] == matnum)[0]
         if len(row) == 0:
-            row = [0]
+            # MATLAB create_Ks.m / Kglobal_transv.m use find(); no silent fallback
+            raise ValueError(
+                f"Element {int(elem[i, 0])} references undefined material "
+                f"{matnum}; available: {prop[:, 0].astype(int).tolist()}")
         row = row[0]
         Ex = prop[row, 1]
         Ey = prop[row, 2]
@@ -588,7 +591,10 @@ def create_Ks(m, node, elem, elprop_arr, prop, a, BC):
         matnum = int(elem[i, 4])
         row = np.where(prop[:, 0] == matnum)[0]
         if len(row) == 0:
-            row = [0]
+            # MATLAB create_Ks.m / Kglobal_transv.m use find(); no silent fallback
+            raise ValueError(
+                f"Element {int(elem[i, 0])} references undefined material "
+                f"{matnum}; available: {prop[:, 0].astype(int).tolist()}")
         row = row[0]
         Ex = prop[row, 1]
         Ey = prop[row, 2]

@@ -25,6 +25,8 @@ node_modules/**
 설계탭수정필요.md
 작업내용01.md
 작업중생성문서들/**
+docs/**
+desktop/**
 package-lock.json
 requirements.txt
 stcfsd-*.vsix

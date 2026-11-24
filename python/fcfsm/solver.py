@@ -1,165 +1,87 @@
-"""fcFSM (Force-based Constrained Finite Strip Method) 해석
+"""fcFSM 자리 — 아직 MATLAB fcFSM 의 이식이 아니다
 
 참조: 프로젝트개요.md §5.3 힘 기반 구속 FSM
-원본: Ref_Source/analysis/fcFSM/stripmain_fcFSM.m
+원본(이식 대상, 미이식): Ref_Source/analysis/fcFSM/stripmain_fcFSM.m, SecAnal_fcFSM.m
 
-기존 cFSM의 운동학적 접근 대신 힘 평형을 기반으로 모드를 분해한다.
-곡선 모서리를 가진 단면도 지원.
+지금 이 함수가 하는 일:
+  1. 구속 없는 보통 FSM 고유치 해석 (곡선·모드형상은 stripmain 과 같다)
+  2. 모드 분류는 고전 cFSM(`cfsm.classify`, 길이·BC·m 마다 기저)으로 한다.
+     고전 cFSM 이 다루지 못하는 둥근 모서리·폐단면·가지 단면은 NaN 이다.
+
+MATLAB fcFSM 은 판 단위 힘 [q] 로 J_GD, C_L = null(J_GD'), C_D = inv(K)·J_GD·J_D,
+C_G = inv(K)·J_GD·J_G 를 각 길이의 K 로 만들고 변형에너지 비로 분류한다. 둥근
+모서리(cornerStrips)를 다루는 것이 fcFSM 의 목적인데, 그 부분은 여기 없다.
+결과의 'is_fcfsm' 은 언제나 False 이고 'method' 가 실제 계산을 밝힌다.
 """
 
 import numpy as np
-from scipy.linalg import eig
 
-from engine.element import klocal, kglocal
-from engine.transform import trans
-from engine.assembly import assemble
-from engine.properties import elemprop
-from engine.fsm_solver import _get_free_dofs
-from fcfsm.section_analysis import section_analysis_fcfsm
-
-from scipy import sparse
+FCFSM_METHOD = 'fsm_eigen+classical_cfsm_classification'
+FCFSM_WARNING = ('fcFSM is not implemented: the curve is an unconstrained FSM solution '
+                 'and the G/D/L/O split comes from classical cFSM, which is not valid for '
+                 'rounded corners (left unclassified there). Do not report it as fcFSM.')
 
 
 def stripmain_fcfsm(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
                     lengths: np.ndarray, BC: str, m_all: list,
                     neigs: int = 10) -> dict:
-    """fcFSM 좌굴 해석 + 모드 분류
+    """보통 FSM 좌굴 해석 + 고전 cFSM 분류 (fcFSM 아님 — 모듈 설명 참조)
 
     Returns:
         dict: {
             'curve': list[np.ndarray],
             'shapes': list[np.ndarray],
-            'classification': list[np.ndarray],  # [%G, %D, %L, %O]
+            'classification': list[np.ndarray],  # [%G, %D, %L, %O], NaN = 미분류
+            'method': FCFSM_METHOD, 'is_fcfsm': False,
+            'classification_status': cfsm.classify 의 상태 요약,
+            'warnings', 'assumptions', 'scope_notes': [str] (FIXES §3.1.1 — 'fcFSM 미구현'
+            은 scope_notes), 'diagnostics', 'success',
         }
     """
-    nnodes = node.shape[0]
-    nelems = elem.shape[0]
-    elprop = elemprop(node, elem)
+    # 고유치 해석은 보통 FSM 과 같은 문제(구속 · 스프링 없음)이므로 engine 의 stripmain
+    # 을 그대로 쓴다 — dense 색인 조립 + 대칭 정부호 eigh (F1 R1-04). 예전의 lil 조립
+    # + 전 고유치 QZ 사본과 고유치는 반올림 안에서 같고, 모드형상은 stripmain 처럼
+    # 최대 성분 +1 로 정규화된다(예전: |최대| = 1, 부호 임의).
+    from engine.fsm_solver import stripmain
+    from models.data import GBTConfig
+    res = stripmain(prop, node, elem, np.asarray(lengths, dtype=float), np.array([]),
+                    np.array([]), GBTConfig(), BC, m_all, neigs)
+    curve_list = list(res.curve)
+    shapes_list = list(res.shapes)
+    m_used = res.m_all if res.m_all else m_all
+    diagnostics = [{
+        # 입력과 상관없이 늘 참 → scope note (FIXES §3.1.1)
+        'severity': 'info', 'category': 'scope', 'code': 'FCFSM_NOT_IMPLEMENTED',
+        'length_index': None, 'length': None, 'message': FCFSM_WARNING,
+    }] + list(res.diagnostics)
 
-    curve_list = []
-    shapes_list = []
-    clas_list = []
-    diagnostics = []
-
-    # fcFSM 단면 해석 — 구속행렬 생성
-    sec_data = section_analysis_fcfsm(node, elem, prop)
-
-    for l_idx in range(len(lengths)):
-        a = lengths[l_idx]
-        m_a = m_all[l_idx]
-        totalm = len(m_a)
-        ndof = 4 * nnodes * totalm
-
-        K = sparse.lil_matrix((ndof, ndof))
-        Kg = sparse.lil_matrix((ndof, ndof))
-
-        for e in range(nelems):
-            ni = int(elem[e, 1])
-            nj = int(elem[e, 2])
-            t = elem[e, 3]
-            matnum = int(elem[e, 4])
-
-            mat_idx = np.where(prop[:, 0] == matnum)[0]
-            if len(mat_idx) == 0:
-                # fail-fast like MATLAB stripmain.m find(); no silent fallback to material 0
-                raise ValueError(
-                    f'Element {e}: material number {matnum} not found in prop '
-                    f'(available: {prop[:, 0].tolist()})')
-            mat_idx = mat_idx[0]
-            Ex, Ey = prop[mat_idx, 1], prop[mat_idx, 2]
-            vx, vy = prop[mat_idx, 3], prop[mat_idx, 4]
-            G = prop[mat_idx, 5]
-
-            b = elprop[e, 1]
-            alpha = elprop[e, 2]
-            # kglocal expects longitudinal stress resultant (stress × thickness),
-            # identical to the conventional FSM solver.
-            Ty1 = node[ni - 1, 7] * t
-            Ty2 = node[nj - 1, 7] * t
-
-            k_loc = klocal(Ex, Ey, vx, vy, G, t, a, b, BC, m_a)
-            kg_loc = kglocal(a, b, Ty1, Ty2, BC, m_a)
-            k_glob, kg_glob = trans(alpha, k_loc, kg_loc, m_a)
-            K, Kg = assemble(K, Kg, k_glob, kg_glob, ni, nj, nnodes, m_a)
-
-        # DOF 구속
-        free_dofs = _get_free_dofs(node, nnodes, totalm)
-        Kff = K.tocsr()[free_dofs, :][:, free_dofs].toarray()
-        Kgff = Kg.tocsr()[free_dofs, :][:, free_dofs].toarray()
-        Kgff_sym = (Kgff + Kgff.T) / 2.0
-
-        if len(free_dofs) == 0:
-            diagnostics.append({
-                'severity': 'error', 'code': 'NO_FREE_DOF',
-                'length_index': l_idx, 'length': float(a),
-                'message': 'No free degrees of freedom remain after constraints.',
-            })
-            lf = np.array([0.0])
-            modes = np.zeros((0, 1))
-        else:
-            try:
-                eigenvalues, eigenvectors = eig(Kff, Kgff_sym)
-                # tolerance-based real-positive-finite filter (cf. engine.fsm_solver / stripmain.m:364):
-                # keep modes with sub-1e-5 imaginary roundoff, reject inf from singular Kg
-                valid = np.where(
-                    (np.abs(np.imag(eigenvalues)) < 1e-5)
-                    & (np.real(eigenvalues) > 0)
-                    & np.isfinite(np.real(eigenvalues)))[0]
-                lf = np.real(eigenvalues[valid])
-                modes = np.real(eigenvectors[:, valid])
-                sort_idx = np.argsort(lf)
-                lf = lf[sort_idx[:neigs]]
-                modes = modes[:, sort_idx[:neigs]]
-                if len(lf) == 0:
-                    diagnostics.append({
-                        'severity': 'error', 'code': 'NO_POSITIVE_EIGENVALUE',
-                        'length_index': l_idx, 'length': float(a),
-                        'message': 'The eigensolver returned no finite positive real eigenvalue.',
-                    })
-                    lf = np.array([0.0])
-                    modes = np.zeros((len(free_dofs), 1))
-            except Exception as exc:
-                diagnostics.append({
-                    'severity': 'error', 'code': 'EIGENSOLVE_FAILED',
-                    'length_index': l_idx, 'length': float(a),
-                    'message': f'{type(exc).__name__}: {exc}',
-                })
-                lf = np.array([0.0])
-                modes = np.zeros((len(free_dofs), 1))
-
-        # 곡선
-        n_modes = len(lf)
-        curve_row = np.zeros(n_modes + 1)
-        curve_row[0] = a
-        curve_row[1:] = lf
-        curve_list.append(curve_row.reshape(1, -1))
-
-        # 모드형상 복원
-        full_modes = np.zeros((ndof, n_modes))
-        for m_idx in range(n_modes):
-            mv = modes[:, m_idx]
-            max_val = np.max(np.abs(mv))
-            if max_val > 0:
-                mv /= max_val
-            full_modes[free_dofs, m_idx] = mv
-        shapes_list.append(full_modes)
-
-        # fcFSM 분류 (힘 기반)
-        clas_modes = _classify_fcfsm(full_modes, sec_data, nnodes, totalm)
-        clas_list.append(clas_modes)
+    from cfsm.classify import classify
+    clas = classify(prop, node, elem, lengths, shapes_list, None, BC, m_used)
+    clas_list = list(clas)
+    diagnostics.extend(clas.diagnostics)
 
     return {
         'curve': curve_list,
         'shapes': shapes_list,
         'classification': clas_list,
+        'method': FCFSM_METHOD,
+        'is_fcfsm': False,
+        'classification_status': clas.summary(),
+        'warnings': [d['message'] for d in res.diagnostics
+                     if d.get('severity') in ('warning', 'error')] + list(clas.warnings),
+        'assumptions': list(clas.assumptions),
+        'scope_notes': [FCFSM_WARNING] + list(clas.scope_notes),
         'diagnostics': diagnostics,
-        'success': not diagnostics,
+        'success': not any(d.get('severity') == 'error' for d in diagnostics),
     }
 
 
 def _classify_fcfsm(modes: np.ndarray, sec_data: dict,
                      nnodes: int, totalm: int) -> np.ndarray:
-    """fcFSM 힘 기반 모드 분류
+    """옛 분류(쓰지 않음): 길이 100 · S-S · m=1 고정의 cFSM 자연기저 최소제곱.
+
+    길이·경계조건과 무관한 기저라 fcFSM 도 고전 cFSM 도 아니다. 분해에 실패하면
+    NaN 을 돌려준다.
 
     Returns:
         (n_modes, 4) — [%G, %D, %L, %O]
@@ -169,7 +91,7 @@ def _classify_fcfsm(modes: np.ndarray, sec_data: dict,
 
     b_v = sec_data.get('basis', None)
     if b_v is None or b_v.size == 0:
-        clas[:, :] = 25.0  # 분류 불가 시 균등 분배
+        clas[:, :] = np.nan
         return clas
 
     ngm = sec_data.get('ngm', 4)
@@ -198,12 +120,13 @@ def _classify_fcfsm(modes: np.ndarray, sec_data: dict,
                 cl_l += np.sum(np.abs(coeffs[ngm+ndm:ngm+ndm+nlm])**2)
                 cl_o += np.sum(np.abs(coeffs[ngm+ndm+nlm:])**2)
             except Exception:
-                pass  # classification coefficient solve failed
+                cl_g = cl_d = cl_l = cl_o = np.nan
+                break
 
         total = cl_g + cl_d + cl_l + cl_o
-        if total > 1e-15:
+        if np.isfinite(total) and total > 0.0:
             clas[m_idx] = np.array([cl_g, cl_d, cl_l, cl_o]) / total * 100
         else:
-            clas[m_idx] = [25, 25, 25, 25]
+            clas[m_idx] = np.nan
 
     return clas

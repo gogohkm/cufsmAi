@@ -34,15 +34,28 @@ class GBTConfig:
     dist: np.ndarray = field(default_factory=lambda: np.array([]))
     local: np.ndarray = field(default_factory=lambda: np.array([]))
     other: np.ndarray = field(default_factory=lambda: np.array([]))
+    # 기본값은 CUFSM 과 같다(Ref_Source/helpers/loader.m:134-146, examples/batchcufsm5.m:169):
+    # 축하중 모달 기저(orth=2) · 벡터 노름(norm=1). 예전 orth=1 · norm=0(비직교 자연기저,
+    # 노름 없음)은 분류 기여율이 기저 척도에 좌우됐다. 선택 벡터가 비어 있으면 구속
+    # 해석은 꺼진 채다(is_active) — 이 값들은 분류와 켜진 cFSM 에만 쓰인다.
     ospace: int = 1   # 직교 공간 옵션 (1-4)
-    orth: int = 1     # 직교화 방법 (1-3)
+    orth: int = 2     # 직교화 방법 (1-3)
     couple: int = 1   # 결합/비결합 기저 (1-2)
-    norm: int = 0     # 정규화 방법 (0-3)
+    norm: int = 1     # 정규화 방법 (0-3)
 
     def is_active(self) -> bool:
-        """cFSM 모드 분류가 활성화되어 있는지 확인"""
-        return (len(self.glob) > 0 or len(self.dist) > 0 or
-                len(self.local) > 0 or len(self.other) > 0)
+        """cFSM 모드 구속이 켜져 있는지 확인
+
+        MATLAB stripmain.m 처럼 선택 벡터의 합이 0 보다 클 때만 켠다. CUFSM .mat 은
+        구속을 쓰지 않을 때도 glob=[0 0 0 0] 같은 0 벡터를 저장하므로 길이만 보면
+        모든 자유도를 막아 해석이 NO_FREE_DOF 로 실패한다.
+        """
+        def _on(v) -> bool:
+            a = np.asarray(v, dtype=float).ravel()
+            return a.size > 0 and float(np.nansum(a)) > 0
+
+        return (_on(self.glob) or _on(self.dist) or
+                _on(self.local) or _on(self.other))
 
     def to_dict(self) -> dict:
         return {
@@ -64,9 +77,9 @@ class GBTConfig:
             local=np.array(d.get('local', [])),
             other=np.array(d.get('other', [])),
             ospace=d.get('ospace', 1),
-            orth=d.get('orth', 1),
+            orth=d.get('orth', 2),
             couple=d.get('couple', 1),
-            norm=d.get('norm', 0),
+            norm=d.get('norm', 1),
         )
 
 
@@ -116,13 +129,23 @@ class CufsmModel:
 
     @classmethod
     def from_dict(cls, d: dict) -> CufsmModel:
-        """JSON 딕셔너리에서 모델 생성"""
+        """JSON 딕셔너리에서 모델 생성
+
+        node 는 (n, 8), elem 은 (m, 5) 여야 한다 — 모양이 틀리면 해석 깊숙한 곳에서
+        엉뚱한 열을 읽기 전에 여기서 거절한다.
+        """
         springs_data = d.get('springs', [])
         constraints_data = d.get('constraints', [])
+        node = np.array(d['node'], dtype=float)
+        elem = np.array(d['elem'], dtype=float)
+        if node.size > 0 and (node.ndim != 2 or node.shape[1] != 8):
+            raise ValueError(f"node must be an (n, 8) array, got shape {node.shape}")
+        if elem.size > 0 and (elem.ndim != 2 or elem.shape[1] != 5):
+            raise ValueError(f"elem must be an (m, 5) array, got shape {elem.shape}")
         return cls(
             prop=np.array(d['prop'], dtype=float),
-            node=np.array(d['node'], dtype=float),
-            elem=np.array(d['elem'], dtype=float),
+            node=node,
+            elem=elem,
             lengths=np.array(d['lengths'], dtype=float),
             springs=np.array(springs_data, dtype=float) if len(springs_data) > 0 else np.array([]),
             constraints=np.array(constraints_data, dtype=float) if len(constraints_data) > 0 else np.array([]),
@@ -170,6 +193,8 @@ class CufsmResult:
     curve: list = field(default_factory=list)    # list[np.ndarray]
     shapes: list = field(default_factory=list)   # list[np.ndarray]
     diagnostics: list = field(default_factory=list)  # 길이별 해석 실패/경고
+    # stripmain 이 msort 로 정리해 실제로 쓴 종방향 항(길이별). shapes 의 DOF 배치가 이 순서다.
+    m_all: list = field(default_factory=list)    # list[np.ndarray]
 
     def to_dict(self) -> dict:
         """JSON 직렬화 — curve + shapes 포함"""
@@ -185,6 +210,7 @@ class CufsmResult:
             'shapes': shapes_list,
             'n_lengths': len(self.curve),
             'diagnostics': self.diagnostics,
+            'm_all': [np.asarray(m, dtype=float).reshape(-1).tolist() for m in (self.m_all or [])],
             'success': not any(d.get('severity') == 'error' for d in self.diagnostics),
         }
 
@@ -205,7 +231,18 @@ class CufsmResult:
         curve = [np.array(c) for c in d.get('curve', [])]
         shapes = [np.array(s) for s in d.get('shapes', [])]
         return cls(curve=curve, shapes=shapes,
-                   diagnostics=list(d.get('diagnostics', [])))
+                   diagnostics=list(d.get('diagnostics', [])),
+                   m_all=[np.array(m, dtype=float) for m in d.get('m_all', [])])
+
+
+def _ndarray_to_json(obj: np.ndarray) -> Any:
+    """ndarray → list. 실수 배열의 NaN/Inf 는 스칼라와 같이 null 로 낸다.
+
+    0.0 으로 바꾸면 '계산하지 못함'(예: 분류 실패 행)이 '0 결과'로 읽힌다.
+    """
+    if obj.dtype.kind == 'f' and not np.all(np.isfinite(obj)):
+        return SafeJsonEncoder._sanitize(obj.tolist())
+    return obj.tolist()
 
 
 def _json_serializer(obj: Any) -> Any:
@@ -214,8 +251,7 @@ def _json_serializer(obj: Any) -> Any:
     if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
         return None
     if isinstance(obj, np.ndarray):
-        cleaned = np.where(np.isfinite(obj), obj, 0.0) if obj.dtype.kind == 'f' else obj
-        return cleaned.tolist()
+        return _ndarray_to_json(obj)
     if isinstance(obj, np.integer):
         return int(obj)
     if isinstance(obj, np.floating):
@@ -249,8 +285,7 @@ class SafeJsonEncoder(json.JSONEncoder):
         elif isinstance(obj, (list, tuple)):
             return [SafeJsonEncoder._sanitize(v) for v in obj]
         elif isinstance(obj, np.ndarray):
-            cleaned = np.where(np.isfinite(obj), obj, 0.0) if obj.dtype.kind == 'f' else obj
-            return cleaned.tolist()
+            return _ndarray_to_json(obj)
         elif isinstance(obj, np.floating):
             val = float(obj)
             return None if (math.isnan(val) or math.isinf(val)) else val

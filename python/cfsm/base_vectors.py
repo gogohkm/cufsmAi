@@ -15,6 +15,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from engine.properties import elemprop
+from design.notices import N as _nt  # noqa: E402
 
 
 def _cutwp_prop2(coord, ends):
@@ -34,26 +35,7 @@ def _cutwp_prop2(coord, ends):
     nele = ends.shape[0]
     nnode_total = coord.shape[0]
 
-    # Classify section type: count 2-element joints
-    # Build adjacency
-    node_list = []
-    for i in range(nele):
-        node_list.append(int(ends[i, 0]))
-        node_list.append(int(ends[i, 1]))
-
-    unique_nodes = set(node_list)
-    j_count = 0  # number of 2-element joints
-    for n in unique_nodes:
-        cnt = node_list.count(n)
-        if cnt == 2:
-            j_count += 1
-
-    if j_count == nele:
-        section = 'close'
-    elif j_count == nele - 1:
-        section = 'open'
-    else:
-        section = 'open'  # multi-branched treated as open
+    topo = _cutwp_topology(coord, ends)
 
     # Element properties
     t = np.zeros(nele)
@@ -121,84 +103,32 @@ def _cutwp_prop2(coord, ends):
     I1 = np.sum((yd**2 / 12 + ym**2) * L * t)
     I2 = np.sum((xd**2 / 12 + xm**2) * L * t)
 
-    if section == 'close':
-        # Closed section
-        p = np.zeros(nele)
-        for i in range(nele):
-            sn = int(ends[i, 0]) - 1
-            fn = int(ends[i, 1]) - 1
-            p[i] = ((coord[sn, 0] - xc) * (coord[fn, 1] - yc) -
-                     (coord[fn, 0] - xc) * (coord[sn, 1] - yc)) / L[i]
-        J = 4 * np.sum(p * L / 2)**2 / np.sum(L / t)
-        xs = np.nan
-        ys = np.nan
-        Cw = np.nan
-        B1_val = np.nan
-        B2_val = np.nan
-        wn = np.full(nnode_total, np.nan)
-        return A, xc, yc, Ix, Iy, Ixy, theta, I1, I2, J, xs, ys, Cw, B1_val, B2_val, wn
+    # Torsion constant. A cell carries the Bredt shear flow, J = 4*Ae^2/sum(L/t)
+    # (MATLAB cutwp_prop2.m after its element re-ordering block); open branches
+    # attached to the cell add their own b*t^3/3.
+    cell = topo['cycle_elems']
+    if cell:
+        on_cell = np.zeros(nele, dtype=bool)
+        on_cell[cell] = True
+        J = (4 * topo['cell_area']**2 / np.sum(L[on_cell] / t[on_cell])
+             + np.sum(L[~on_cell] * t[~on_cell]**3) / 3)
+    else:
+        J = np.sum(L * t**3) / 3
 
-    # Open section
-    J = np.sum(L * t**3) / 3
-
-    # Shear center calculation
-    w = np.zeros((nnode_total, 2))   # col0: visited flag (node# 1-based), col1: warping
-    w[int(ends[0, 0]) - 1, 0] = ends[0, 0]  # mark first start node as visited
-
+    # Shear center from the sectorial products of the Saint-Venant warping function
+    # about the centroid. Along a cell the warping carries the Bredt circulation
+    # term, so the same formulas give the shear center of closed and cell-plus-branch
+    # sections (Trefftz definition) -- MATLAB returns NaN there.
+    w = _sectorial(coord, ends, L, t, topo, xc, yc)
     Iwx = 0.0
     Iwy = 0.0
-
-    # Build element list we can iterate through
-    ends_work = ends.copy()
-    for j_iter in range(nele):
-        # Find next processable element
-        found = False
-        for i in range(nele):
-            sn_1b = int(ends_work[i, 0])
-            fn_1b = int(ends_work[i, 1])
-            if sn_1b == 0 and fn_1b == 0:
-                continue
-            sn_visited = w[sn_1b - 1, 0] != 0
-            fn_visited = w[fn_1b - 1, 0] != 0
-            if (sn_visited and fn_visited) or (not sn_visited and not fn_visited):
-                continue
-            # One end visited, one not
-            found = True
-            break
-        if not found:
-            # Try to find any unprocessed element with at least one end visited
-            for i in range(nele):
-                sn_1b = int(ends_work[i, 0])
-                fn_1b = int(ends_work[i, 1])
-                if sn_1b == 0 and fn_1b == 0:
-                    continue
-                found = True
-                break
-            if not found:
-                break
-
-        sn_1b = int(ends_work[i, 0])
-        fn_1b = int(ends_work[i, 1])
-        sn = sn_1b - 1
-        fn = fn_1b - 1
-        p = ((coord[sn, 0] - xc) * (coord[fn, 1] - yc) -
-             (coord[fn, 0] - xc) * (coord[sn, 1] - yc)) / L[i]
-
-        if w[sn, 0] == 0:
-            w[sn, 0] = sn_1b
-            w[sn, 1] = w[fn, 1] - p * L[i]
-        elif w[fn, 0] == 0:
-            w[fn, 0] = fn_1b
-            w[fn, 1] = w[sn, 1] + p * L[i]
-
-        Iwx += (1/3 * (w[sn, 1] * (coord[sn, 0] - xc) + w[fn, 1] * (coord[fn, 0] - xc)) +
-                1/6 * (w[sn, 1] * (coord[fn, 0] - xc) + w[fn, 1] * (coord[sn, 0] - xc))) * t[i] * L[i]
-        Iwy += (1/3 * (w[sn, 1] * (coord[sn, 1] - yc) + w[fn, 1] * (coord[fn, 1] - yc)) +
-                1/6 * (w[sn, 1] * (coord[fn, 1] - yc) + w[fn, 1] * (coord[sn, 1] - yc))) * t[i] * L[i]
-
-        # Mark element as processed
-        ends_work[i, 0] = 0
-        ends_work[i, 1] = 0
+    for i in range(nele):
+        sn = int(ends[i, 0]) - 1
+        fn = int(ends[i, 1]) - 1
+        Iwx += (1/3 * (w[sn] * (coord[sn, 0] - xc) + w[fn] * (coord[fn, 0] - xc)) +
+                1/6 * (w[sn] * (coord[fn, 0] - xc) + w[fn] * (coord[sn, 0] - xc))) * t[i] * L[i]
+        Iwy += (1/3 * (w[sn] * (coord[sn, 1] - yc) + w[fn] * (coord[fn, 1] - yc)) +
+                1/6 * (w[sn] * (coord[fn, 1] - yc) + w[fn] * (coord[sn, 1] - yc))) * t[i] * L[i]
 
     denom = Ix * Iy - Ixy**2
     if abs(denom) > 1e-20:
@@ -214,61 +144,22 @@ def _cutwp_prop2(coord, ends):
         ys = 0.0
 
     # Unit warping (with respect to shear center)
-    wo = np.zeros((nnode_total, 2))
-    wo[int(ends[0, 0]) - 1, 0] = ends[0, 0]
+    wo = _sectorial(coord, ends, L, t, topo, xs, ys)
     wno = 0.0
-    Cw = 0.0
-
-    ends_work2 = ends.copy()
-    for j_iter in range(nele):
-        found = False
-        for i in range(nele):
-            sn_1b = int(ends_work2[i, 0])
-            fn_1b = int(ends_work2[i, 1])
-            if sn_1b == 0 and fn_1b == 0:
-                continue
-            sn_visited = wo[sn_1b - 1, 0] != 0
-            fn_visited = wo[fn_1b - 1, 0] != 0
-            if (sn_visited and fn_visited) or (not sn_visited and not fn_visited):
-                continue
-            found = True
-            break
-        if not found:
-            for i in range(nele):
-                sn_1b = int(ends_work2[i, 0])
-                fn_1b = int(ends_work2[i, 1])
-                if sn_1b == 0 and fn_1b == 0:
-                    continue
-                found = True
-                break
-            if not found:
-                break
-
-        sn_1b = int(ends_work2[i, 0])
-        fn_1b = int(ends_work2[i, 1])
-        sn = sn_1b - 1
-        fn = fn_1b - 1
-        po = ((coord[sn, 0] - xs) * (coord[fn, 1] - ys) -
-              (coord[fn, 0] - xs) * (coord[sn, 1] - ys)) / L[i]
-
-        if wo[sn, 0] == 0:
-            wo[sn, 0] = sn_1b
-            wo[sn, 1] = wo[fn, 1] - po * L[i]
-        elif wo[fn, 0] == 0:
-            wo[fn, 0] = fn_1b
-            wo[fn, 1] = wo[sn, 1] + po * L[i]
-
-        wno += 1 / (2 * A) * (wo[sn, 1] + wo[fn, 1]) * t[i] * L[i]
-        ends_work2[i, 0] = 0
-        ends_work2[i, 1] = 0
-
-    wn = wno - wo[:, 1]
+    for i in range(nele):
+        sn = int(ends[i, 0]) - 1
+        fn = int(ends[i, 1]) - 1
+        wno += 1 / (2 * A) * (wo[sn] + wo[fn]) * t[i] * L[i]
+    wn = wno - wo
 
     # Warping constant
+    Cw = 0.0
     for i in range(nele):
         sn = int(ends[i, 0]) - 1
         fn = int(ends[i, 1]) - 1
         Cw += 1/3 * (wn[sn]**2 + wn[sn] * wn[fn] + wn[fn]**2) * t[i] * L[i]
+    if topo['cycle_elems'] and abs(Cw) < 1e-12 * A * (Ix + Iy):
+        Cw = 0.0  # round-off for doubly symmetric cells (square tube, CHS)
 
     # Shear center in principal coordinates
     s12 = rot @ np.array([xs - xc, ys - yc])
@@ -297,6 +188,171 @@ def _cutwp_prop2(coord, ends):
         B2_val = 0.0
 
     return A, xc, yc, Ix, Iy, Ixy, theta, I1, I2, J, xs, ys, Cw, B1_val, B2_val, wn
+
+
+def cutwp_section_type(coord, ends):
+    """'open', 'close' (single cell) or 'arbitrary' (single cell with open branches).
+
+    Raises ValueError for disconnected models, multi-cell sections and invalid
+    elements, exactly as :func:`_cutwp_prop2` does.
+    """
+    return _cutwp_topology(coord, ends)['section']
+
+
+def _cutwp_topology(coord, ends):
+    """Connectivity of the cutwp model.
+
+    MATLAB cutwp_prop2.m counts 2-element joints and treats everything that is not
+    a single cell as 'open' (its 'arbitrary' branch is commented out). That reads a
+    cell with a lip as an open section (J 1/1600 of the right value) and returns
+    plausible numbers for a disconnected model. The cycle structure is found
+    explicitly here instead.
+    """
+    nele = ends.shape[0]
+    nnode_total = coord.shape[0]
+    if nele == 0:
+        raise ValueError('cutwp: the model has no elements')
+
+    adj = {}
+    for i in range(nele):
+        sn = int(ends[i, 0]) - 1
+        fn = int(ends[i, 1]) - 1
+        if not (0 <= sn < nnode_total and 0 <= fn < nnode_total):
+            raise ValueError(
+                f'cutwp: element {i + 1} references nodes {int(ends[i, 0])}-'
+                f'{int(ends[i, 1])} outside 1..{nnode_total}')
+        if sn == fn or math.hypot(coord[fn, 0] - coord[sn, 0],
+                                  coord[fn, 1] - coord[sn, 1]) == 0.0:
+            raise ValueError(f'cutwp: element {i + 1} has zero length')
+        if not ends[i, 2] > 0:
+            raise ValueError(
+                f'cutwp: element {i + 1} has non-positive thickness {ends[i, 2]}')
+        adj.setdefault(sn, []).append((fn, i))
+        adj.setdefault(fn, []).append((sn, i))
+
+    # connectivity
+    start = int(ends[0, 0]) - 1
+    seen = {start}
+    stack = [start]
+    while stack:
+        u = stack.pop()
+        for v, _ in adj[u]:
+            if v not in seen:
+                seen.add(v)
+                stack.append(v)
+    if len(seen) != len(adj):
+        nparts = 1
+        rest = set(adj) - seen
+        while rest:
+            stack = [rest.pop()]
+            while stack:
+                u = stack.pop()
+                for v, _ in adj[u]:
+                    if v in rest:
+                        rest.discard(v)
+                        stack.append(v)
+            nparts += 1
+        raise ValueError(
+            f'cutwp: the model is disconnected ({nparts} separate parts); section '
+            'properties are defined for one connected cross-section')
+
+    ncycles = nele - len(adj) + 1
+    if ncycles > 1:
+        raise ValueError(
+            f'cutwp: multi-cell closed sections ({ncycles} independent cells) are not '
+            'supported -- J, shear center and Cw need a multi-cell shear-flow solution')
+
+    cycle_nodes = []
+    cycle_elems = []
+    cell_area = 0.0
+    if ncycles == 1:
+        # strip open branches leaf by leaf; what remains is the cell
+        deg = {u: len(v) for u, v in adj.items()}
+        alive_e = np.ones(nele, dtype=bool)
+        leaves = [u for u, d in deg.items() if d == 1]
+        while leaves:
+            u = leaves.pop()
+            if deg[u] != 1:
+                continue
+            for v, e in adj[u]:
+                if alive_e[e]:
+                    alive_e[e] = False
+                    deg[u] -= 1
+                    deg[v] -= 1
+                    if deg[v] == 1:
+                        leaves.append(v)
+        # walk the cell in order (by element id, so two parallel elements also work)
+        e0 = int(np.flatnonzero(alive_e)[0])
+        n0 = int(ends[e0, 0]) - 1
+        u, e_cur = n0, e0
+        while True:
+            sn = int(ends[e_cur, 0]) - 1
+            fn = int(ends[e_cur, 1]) - 1
+            v = fn if sn == u else sn
+            cycle_nodes.append(u)
+            cycle_elems.append(e_cur)
+            if v == n0:
+                break
+            nxt = [e for _, e in adj[v] if alive_e[e] and e != e_cur]
+            u, e_cur = v, nxt[0]
+        # signed area enclosed by the walk (shoelace)
+        for k, u in enumerate(cycle_nodes):
+            v = cycle_nodes[(k + 1) % len(cycle_nodes)]
+            cell_area += (coord[u, 0] * coord[v, 1] - coord[v, 0] * coord[u, 1]) / 2
+        section = 'close' if len(cycle_elems) == nele else 'arbitrary'
+    else:
+        section = 'open'
+
+    return {'section': section, 'adj': adj, 'start': start,
+            'cycle_nodes': cycle_nodes, 'cycle_elems': cycle_elems,
+            'cell_area': cell_area}
+
+
+def _sectorial(coord, ends, L, t, topo, px, py):
+    """Saint-Venant warping function at the nodes for pole (px, py).
+
+    Open parts: d(omega) = rho ds. Along a cell: d(omega) = (rho - psi/t) ds with
+    psi = 2*Ae/sum(L/t), so omega is single valued around the cell whatever the
+    element numbering or direction.
+    """
+    w = np.zeros(coord.shape[0])
+
+    def cross(u, v):
+        return ((coord[u, 0] - px) * (coord[v, 1] - py) -
+                (coord[v, 0] - px) * (coord[u, 1] - py))
+
+    done_e = np.zeros(ends.shape[0], dtype=bool)
+    visited = set()
+    cyc_n = topo['cycle_nodes']
+    if cyc_n:
+        cyc_e = topo['cycle_elems']
+        psi = 2 * topo['cell_area'] / np.sum(L[cyc_e] / t[cyc_e])
+        for k, e in enumerate(cyc_e):
+            u = cyc_n[k]
+            v = cyc_n[(k + 1) % len(cyc_n)]
+            if k < len(cyc_e) - 1:
+                w[v] = w[u] + cross(u, v) - psi * L[e] / t[e]
+            done_e[e] = True
+            visited.add(u)
+        queue = list(cyc_n)
+    else:
+        visited.add(topo['start'])
+        queue = [topo['start']]
+
+    adj = topo['adj']
+    head = 0
+    while head < len(queue):
+        u = queue[head]
+        head += 1
+        for v, e in adj[u]:
+            if done_e[e]:
+                continue
+            done_e[e] = True
+            if v not in visited:
+                w[v] = w[u] + cross(u, v)
+                visited.add(v)
+                queue.append(v)
+    return w
 
 
 def yDOFs(node, elem, m_node, nmno, ndm, Ryd, Rud):
@@ -403,7 +459,14 @@ def yDOFs(node, elem, m_node, nmno, ndm, Ryd, Rud):
 
         jjunk4 = la.null_space(jjunk3.T)
 
-        if jjunk4.shape[1] >= ndm:
+        if jjunk4.shape[1] > ndm:
+            # MATLAB yDOFs.m:101 assigns jjunk4*V into exactly ndm columns and stops
+            # with a size mismatch otherwise; keeping the first ndm vectors would
+            # pick an arbitrary part of the distortional space.
+            raise np.linalg.LinAlgError(
+                f"distortional null-space provides {jjunk4.shape[1]} vectors but "
+                f"{ndm} distortional mode(s) are expected -- check section geometry")
+        if jjunk4.shape[1] == ndm:
             junk3 = jjunk4.T @ Ryd @ jjunk4
             try:
                 eigvals, V = la.eigh(junk3)
@@ -411,12 +474,7 @@ def yDOFs(node, elem, m_node, nmno, ndm, Ryd, Rud):
                 eigvals, V = np.linalg.eigh(junk3)
 
             # Append distortional DOFs
-            dy_dist = jjunk4 @ V
-            # Take only ndm columns
-            if dy_dist.shape[1] >= ndm:
-                dy = np.hstack([dy, dy_dist[:, :ndm]])
-            else:
-                dy = np.hstack([dy, dy_dist])
+            dy = np.hstack([dy, jjunk4 @ V])
         else:
             # MATLAB yDOFs.m:101 (dy(:,(ngm+1):(ngm+ndm))=jjunk4*V) requires the
             # distortional null-space jjunk4 to supply exactly ndm independent
@@ -641,8 +699,18 @@ def base_column(node, elem, prop, a, BC, m_a):
         b_v_l: block diagonal base vectors
         ngm, ndm, nlm: mode counts
     """
-    from .node_utils import base_properties
+    from .node_utils import base_properties, check_cfsm_model
     from .constraints import mode_constr
+
+    # GBT base vectors exist only for one connected open section (MATLAB
+    # base_column.m: "the cross-section must not be closed"). Without this check a
+    # closed section fails deep inside null_space with "array must not contain infs
+    # or NaNs". Rounded and branched sections still get base vectors here; modal
+    # *classification* refuses them separately (cfsm.classify).
+    chk = check_cfsm_model(node, elem)
+    if not chk['supported'] and chk['code'] not in ('ROUNDED_CORNER', 'BRANCHED_SECTION'):
+        raise ValueError(f"cFSM base vectors: {chk['message']} "
+                         "(cFSM supports open sections only)")
 
     # Set stress to 1.0 for axial modes
     node_work = node.copy()
@@ -689,7 +757,12 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
     Ported from base_update.m
 
     Args:
-        ospace: O-space option (1-4)
+        ospace: O-space option. The numbering differs between the two branches,
+            exactly as in MATLAB base_update.m:
+              couple=1: 1 = ST basis, 2 = null(GDL') w.r.t. K, 3 = w.r.t. Kg,
+                        4 = null(GDL') in vector sense
+              couple=2: 1, 2 = ST basis (2 only triggers the orthogonalization),
+                        3 = w.r.t. K, 4 = w.r.t. Kg, 5 = vector sense
         normal: normalization option (0-3)
         b_v_l: natural base vectors
         a: member length
@@ -701,7 +774,11 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
         orth: 1=natural, 2=modal(axial), 3=modal(load)
 
     Returns:
-        b_v: updated base vectors
+        b_v: updated base vectors. Whole G/D/L/O spaces do not depend on orth or
+        normal, but the individual columns do: with orth=1 column k of a space is
+        the k-th natural mode (G: axial, bending 1, bending 2, warping); with
+        orth=2/3 it is the k-th lowest mode of that space. A selection vector
+        that picks individual modes therefore means a different mode per basis.
     """
     from .stiffness import create_Ks
 
@@ -816,19 +893,26 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
             b_v[r0:r1, r0:r1] = b_v_m
 
     else:
-        # Coupled basis
+        # Coupled basis.
+        # Columns the options below do not touch keep the natural basis: MATLAB
+        # base_update.m starts from zeros and never fills b_v for orth=1 with
+        # ospace=1, which made the coupled natural basis a zero matrix.
+        b_v = b_v_l.copy()
         K = None
         Kg = None
-        if normal in (2, 3) or ospace in (2, 3) or orth in (2, 3):
+        # O-space numbering of the coupled branch is MATLAB's (base_update.m:247-270):
+        # 1/2 natural ST O-space, 3 = K, 4 = Kg, 5 = vector null space -- one higher
+        # than the uncoupled branch. Kept as is so CUFSM models saved with couple=2
+        # solve with the same O-space.
+        orth_block = orth in (2, 3) or ospace in (2, 3, 4)
+        if normal in (2, 3) or orth in (2, 3) or orth_block or ospace in (3, 4):
             elprop_arr = elemprop(node, elem)
             node_work = node.copy()
             if orth in (1, 2):
                 node_work[:, 7] = 1.0
 
-            # Build full multi-m stiffness matrices
-            # This uses the main program's klocal/kglocal/trans/assemble
-            # which handle multiple m terms. For the single-m functions we have,
-            # we build block-diagonal K, Kg.
+            # Block-diagonal K, Kg: the single-m element matrices are used, so the
+            # m-p coupling terms of non S-S end conditions are not included here.
             K = np.zeros((4 * nnodes * totalm, 4 * nnodes * totalm))
             Kg = np.zeros((4 * nnodes * totalm, 4 * nnodes * totalm))
 
@@ -839,7 +923,7 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
                 K[r0:r1, r0:r1] = K_m
                 Kg[r0:r1, r0:r1] = Kg_m
 
-        if orth in (2, 3) or ospace in (2, 3, 4):
+        if orth_block or ospace == 5:
             dofindex = np.zeros((4, 2), dtype=int)
             dofindex[0] = [0, ngm - 1]
             dofindex[1] = [ngm, ngm + ndm - 1]
@@ -865,25 +949,21 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
                 b_v_L[:, ml * nlm:(ml + 1) * nlm] = b_v_m_block[:, dofindex[2, 0]:dofindex[2, 1] + 1]
                 b_v_O[:, ml * nom:(ml + 1) * nom] = b_v_m_block[:, dofindex[3, 0]:dofindex[3, 1] + 1]
 
-            # Define O-space
-            if ospace == 3 and K is not None:
+            # Define O-space (null space of GDL) -- MATLAB numbering 3 K, 4 Kg, 5 vector
+            if ospace in (3, 4, 5):
                 A_null = la.null_space(b_v_GDL.T)
-                try:
+                if ospace == 3:
                     b_v_O = np.linalg.solve(K, A_null)
-                except Exception:
-                    b_v_O = A_null
-                for ml in range(totalm):
-                    b_v[ml * ndof_m + dofindex[3, 0]:ml * ndof_m + dofindex[3, 1] + 1,
-                        :] = b_v_O[ml * ndof_m:(ml + 1) * ndof_m, ml * nom:(ml + 1) * nom].T
-            elif ospace == 4 and Kg is not None:
-                A_null = la.null_space(b_v_GDL.T)
-                try:
+                elif ospace == 4:
                     b_v_O = np.linalg.solve(Kg, A_null)
-                except Exception:
+                else:
                     b_v_O = A_null
-            elif ospace == 5:
-                A_null = la.null_space(b_v_GDL.T)
-                b_v_O = A_null
+                # MATLAB base_update.m:251-253 assigns columns of b_v (the Python port
+                # assigned rows, which failed for more than one m term)
+                for ml in range(totalm):
+                    c0 = ml * ndof_m + dofindex[3, 0]
+                    c1 = ml * ndof_m + dofindex[3, 1] + 1
+                    b_v[:, c0:c1] = b_v_O[:, ml * nom:(ml + 1) * nom]
 
             # Orthogonalization
             if K is not None and Kg is not None:
@@ -900,13 +980,9 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
                         try:
                             eigvals, V = la.eigh(Ksub, Kgsub)
                         except la.LinAlgError:
-                            try:
-                                eigvals, V = la.eig(Ksub, Kgsub)
-                                eigvals = np.real(eigvals)
-                                V = np.real(V)
-                            except Exception:
-                                V = np.eye(Bsub.shape[1])
-                                eigvals = np.ones(Bsub.shape[1])
+                            eigvals, V = la.eig(Ksub, Kgsub)
+                            eigvals = np.real(eigvals)
+                            V = np.real(V)
 
                         idx_sort = np.argsort(np.real(eigvals))
                         V = np.real(V[:, idx_sort])
@@ -949,10 +1025,69 @@ def base_update(ospace, normal, b_v_l, a, m_a, node, elem, prop,
     return b_v
 
 
+def constrained_selection_notes(GBTcon, prop=None):
+    """Caveats that belong with a cFSM-constrained solution for this selection.
+
+    Returns a list of diagnostics {'severity', 'category', 'code', 'message', ...};
+    'category' is the FIXES §3.1.1 list the message belongs to ('warning' /
+    'assumption'):
+      CFSM_PURE_G_NOT_PCRE (warning): only global modes are selected. The cFSM G
+        space enforces zero transverse membrane strain, so with E1 = E/(1-nu^2)
+        the pure-G load factor is 1/(1-nu^2) (~1.099 for steel) above the
+        classical Euler / flexural-torsional value and above the unconstrained
+        FSM curve; used as Pcre it is unconservative by that amount.
+      CFSM_INDIVIDUAL_MODES_BASIS_DEPENDENT (info): some class vector selects only
+        part of its modes. Which physical mode an index means depends on orth
+        (and couple/ospace): natural basis (orth=1) G2 = bending about axis 1,
+        modal basis (orth=2) G2 = second lowest G mode. The settings used are
+        returned so the result can be reproduced.
+    """
+    def vec(name):
+        v = GBTcon.get(name, []) if isinstance(GBTcon, dict) else getattr(GBTcon, name, [])
+        return np.ravel(np.asarray(v if v is not None else [], dtype=float))
+
+    def opt(name, default):
+        if isinstance(GBTcon, dict):
+            return GBTcon.get(name, default)
+        return getattr(GBTcon, name, default)
+
+    notes = []
+    if GBTcon is None:
+        return notes
+    sel = {k: vec(k) for k in ('glob', 'dist', 'local', 'other')}
+    on = {k: float(np.sum(v == 1)) for k, v in sel.items()}
+    if sum(on.values()) == 0:
+        return notes
+    settings = {k: opt(k, None) for k in ('ospace', 'orth', 'couple', 'norm')}
+    if on['glob'] > 0 and on['dist'] == on['local'] == on['other'] == 0:
+        factor = 1.0 / (1.0 - 0.3**2)
+        if prop is not None and np.size(prop) >= 6:
+            pr = np.atleast_2d(np.asarray(prop, dtype=float))
+            factor = 1.0 / (1.0 - float(pr[0, 3]) * float(pr[0, 4]))
+        notes.append({
+            'severity': 'warning', 'category': 'warning', 'code': 'CFSM_PURE_G_NOT_PCRE',
+            'factor': factor,
+            'message': (_nt('base_vectors.warning.pure_global_cfsm_solution', factor=factor)),
+        })
+    partial = [k for k, v in sel.items() if v.size and 0 < on[k] < v.size]
+    if partial:
+        notes.append({
+            'severity': 'info', 'category': 'assumption',
+            'code': 'CFSM_INDIVIDUAL_MODES_BASIS_DEPENDENT',
+            'classes': partial, 'settings': settings,
+            'message': (_nt('base_vectors.warning.individual_modes_selected_mode', partial=", ".join(partial), orth=settings["orth"], couple=settings["couple"], ospace=settings["ospace"])),
+        })
+    return notes
+
+
 def mode_select(b_v, ngm, ndm, nlm, if_g, if_d, if_l, if_o, ndof_m, m_a):
     """Select required base vectors for mode decomposition.
 
     Ported from mode_select.m
+
+    Selecting a whole class (all ones) gives a space that does not depend on the
+    basis options; selecting individual indices does (see base_update and
+    constrained_selection_notes, which also carries the pure-G caveat).
 
     Args:
         b_v: base vectors
@@ -970,6 +1105,19 @@ def mode_select(b_v, ngm, ndm, nlm, if_g, if_d, if_l, if_o, ndof_m, m_a):
     totalm = len(m_a)
     nom = ndof_m - ngm - ndm - nlm
     nmo = 0
+
+    # MATLAB mode_select.m indexes if_g(1:ngm) ... if_o(1:nom); a vector of the
+    # wrong length means the selection was made for another cross-section.
+    for name, arr, n_req in (('glob', if_g, ngm), ('dist', if_d, ndm),
+                             ('local', if_l, nlm), ('other', if_o, nom)):
+        n_got = int(np.size(arr))
+        if n_got != n_req:
+            raise ValueError(
+                f"cFSM mode selection: {name} must have length {n_req} for this "
+                f"cross-section (got {n_got}); counts are ngm={ngm}, ndm={ndm}, "
+                f"nlm={nlm}, nom={nom}")
+    if_g, if_d, if_l, if_o = (np.ravel(np.asarray(v, dtype=float))
+                              for v in (if_g, if_d, if_l, if_o))
 
     # Count selected modes
     for arr in [if_g, if_d, if_l, if_o]:

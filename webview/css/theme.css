@@ -421,6 +421,29 @@ tr:hover {
     color: var(--vscode-inputValidation-errorForeground, #f44);
 }
 
+/* 빈 필수 칸 안내(V4-32): 칸 이름을 누르면 그 탭으로 가서 칸을 강조 */
+.missing-box a.missing-link {
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+}
+.input-missing {
+    outline: 2px solid var(--vscode-inputValidation-errorBorder, #f44);
+    outline-offset: 1px;
+}
+
+/* 정보만 있는 안내 상자(V4-34): 경고 색이 아닌 중립 색 */
+.info-box {
+    margin-top: 8px;
+    padding: 6px 10px;
+    font-size: 11px;
+    line-height: 1.5;
+    border-radius: 2px;
+    border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+    background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.08));
+    color: var(--vscode-descriptionForeground, #999);
+}
+
 /* === 결과 경고 배지 (0926 P1-2 — 미평가/기본값 경고) === */
 .warn-badge {
     display: inline-block;

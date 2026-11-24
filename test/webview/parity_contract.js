@@ -29,6 +29,12 @@ function main() {
   assert(appJs.includes("case 'vibrationResult'"), 'app.js must render vibrationResult');
   assert(appJs.includes('function renderVibrationResult'), 'app.js must define renderer');
 
+  // K4a: 설계 웹뷰가 보는 탭을 알린다(view contract) — 호스트가 받는다. 웹뷰는 focus 를 따라가지 않는다고 밝힌다.
+  assert(/function switchTab\(tabId, by\)[\s\S]{0,900}command: 'viewReport'/.test(appJs), 'app.js switchTab reports the active tab (viewReport)');
+  assert(/screen: 'designer'[\s\S]{0,200}follows_focus: false/.test(appJs), 'designer view report says it does not follow focus');
+  assert(panelTs.includes("case 'viewReport'"), 'panel must handle viewReport');
+  assert(serverTs.includes('server.tool("get_view"') && serverTs.includes('server.tool("focus"'), 'MCP must expose get_view and focus');
+
   console.log('parity_contract: PASS');
 }
 

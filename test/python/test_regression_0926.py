@@ -102,6 +102,7 @@ def test_j6_bolt_full():
         'Fy': 35.53, 'Fu': 58.02, 't1': 0.1, 't2': 0.1,
         'd': 0.5, 'Fub': 120, 'n': 2, 'e': 1.5,
         'Ag': 2.0, 'width': 4.0, 'g': 2.0,
+        'member_case': 'flat_sheet',  # R6-12: J6.2 는 Table J6.2-1 분류가 필요
     })
     names = _ls_names(r)
     ok = True
@@ -122,6 +123,7 @@ def test_j6_screw_paf_rupture_no_block():
             'connection_type': ctype, 'design_method': 'LRFD',
             'Fy': 35.53, 'Fu': 58.02, 't1': 0.06, 't2': 0.06,
             'd': d, 'n': 2, 'e': 1.0, 'Ag': 1.0, 'width': 3.0,
+            'member_case': 'flat_sheet',  # R6-12: J6.2 는 Table J6.2-1 분류가 필요
         })
         names = _ls_names(r)
         ok &= check('Shear Rupture (J6.1)' in names, f'{ctype} J6.1 present')
@@ -155,10 +157,12 @@ def test_lb_default_warning():
     """휨 Lb 미지정 시 120in 기본값 경고"""
     print('\n=== TEST: Lb default warning ===')
     from design.aisi_s100 import _design_flexure
-    r = _design_flexure({'Fy': 35.53, 'props': {'A': 1.0, 'Sf': 1.0}})
+    # 리뷰 1122(R4-12): ry/ro/J/Cw 가 없는 props 는 이제 오류 — LTB 에 필요한 성질을 준다.
+    props = {'A': 1.0, 'Sf': 1.0, 'rx': 2.0, 'ry': 0.8, 'J': 0.001, 'Cw': 1.0, 'xo': 0.9}
+    r = _design_flexure({'Fy': 35.53, 'props': dict(props)})
     w = ' '.join(r.get('warnings', []))
     ok = check('Lb defaulted to 120 in' in w, 'Lb default warning present')
-    r2 = _design_flexure({'Fy': 35.53, 'Lb': 60.0, 'props': {'A': 1.0, 'Sf': 1.0}})
+    r2 = _design_flexure({'Fy': 35.53, 'Lb': 60.0, 'props': dict(props)})
     w2 = ' '.join(r2.get('warnings', []))
     ok &= check('Lb defaulted' not in w2, 'no Lb warning when specified')
     return ok
@@ -168,10 +172,13 @@ def test_kl_default_warning():
     """압축 KL 미지정 시 120in 기본값 경고"""
     print('\n=== TEST: KL default warning ===')
     from design.aisi_s100 import _design_compression
-    r = _design_compression({'Fy': 35.53, 'props': {'A': 1.0}})
+    # 리뷰 1122(R4-12): rx/ry/J/Cw 가 없는 props 는 이제 오류, 길이는 하나씩 빠져도 경고한다.
+    props = {'A': 1.0, 'Sf': 1.0, 'rx': 2.0, 'ry': 0.8, 'J': 0.001, 'Cw': 1.0, 'xo': 0.9}
+    r = _design_compression({'Fy': 35.53, 'props': dict(props)})
     w = ' '.join(r.get('warnings', []))
     ok = check('Effective length defaulted' in w, 'KL default warning present')
-    r2 = _design_compression({'Fy': 35.53, 'KxLx': 60.0, 'props': {'A': 1.0}})
+    r2 = _design_compression({'Fy': 35.53, 'KxLx': 60.0, 'KyLy': 60.0, 'KtLt': 60.0,
+                              'props': dict(props)})
     w2 = ' '.join(r2.get('warnings', []))
     ok &= check('Effective length defaulted' not in w2, 'no KL warning when specified')
     return ok
@@ -242,11 +249,13 @@ def test_design_not_evaluated_flags():
     print('\n=== TEST: design not-evaluated flags ===')
     from design.aisi_s100 import _design_compression, _design_flexure
     ok = True
-    rc = _design_compression({'Fy': 35.53, 'props': {'A': 1.0}})
+    # 리뷰 1122(R4-12): 필수 성질을 주고, 값이 없을 때의 출처는 'FSM' 이 아니라 'none' 이다.
+    props = {'A': 1.0, 'Sf': 1.0, 'rx': 2.0, 'ry': 0.8, 'J': 0.001, 'Cw': 1.0, 'xo': 0.9}
+    rc = _design_compression({'Fy': 35.53, 'props': dict(props)})
     ok &= check(rc.get('local_not_evaluated') is True, 'compression local flag')
     ok &= check(rc.get('distortional_not_evaluated') is True, 'compression distortional flag')
-    ok &= check(rc.get('dsm_source') == {'Pcrl': 'FSM', 'Pcrd': 'FSM'}, 'compression dsm_source keys')
-    rf = _design_flexure({'Fy': 35.53, 'props': {'A': 1.0, 'Sf': 1.0}})
+    ok &= check(set(rc.get('dsm_source', {}).keys()) == {'Pcrl', 'Pcrd'}, 'compression dsm_source keys')
+    rf = _design_flexure({'Fy': 35.53, 'props': dict(props)})
     ok &= check(rf.get('local_not_evaluated') is True, 'flexure local flag')
     ok &= check(rf.get('distortional_not_evaluated') is True, 'flexure distortional flag')
     ok &= check(set(rf.get('dsm_source', {}).keys()) == {'Mcrl', 'Mcrd'}, 'flexure dsm_source keys')
@@ -286,11 +295,12 @@ def test_fe_lap_golden():
     si = min(range(len(x)), key=lambda i: abs(x[i] - 25.0))
     mi = min(range(len(x)), key=lambda i: abs(x[i] - 12.5))
     ok = True
-    ok &= check(approx(r.M[si], -8.800698, 1e-4), f'support M golden ({r.M[si]:.4f})')
-    ok &= check(approx(r.M[mi], 3.412151, 1e-4), f'midspan M golden ({r.M[mi]:.4f})')
+    # R7-18: 이전 골든값(−8.8007/3.4122/0.99439)은 랩이 요소 하나만큼 늘어난 max() 규칙의 값 — 정확해로 바로잡음.
+    ok &= check(approx(r.M[si], -8.633352, 1e-4), f'support M golden ({r.M[si]:.4f})')
+    ok &= check(approx(r.M[mi], 3.495824, 1e-4), f'midspan M golden ({r.M[mi]:.4f})')
     ok &= check(approx(sum(float(v) for v in r.R), 5.0, 1e-3), 'equilibrium R=5kips')
     ok &= check(abs(r.D[si]) < 1e-6, 'zero deflection at support')
-    ok &= check(approx(r.D[mi], 0.99439, 1e-3), f'midspan D golden ({r.D[mi]:.5f})')
+    ok &= check(approx(r.D[mi], 1.023264, 1e-3), f'midspan D golden ({r.D[mi]:.5f})')
     # 랩 효과: 무랩 대비 지점 부모멘트 증가·경간 처짐 감소
     r0 = analyze_beam_fe(laps_per_support=None, I_lap_ratio=1.0, **kw)
     x0 = r0.x
@@ -353,10 +363,12 @@ def test_combined_propagates_sub_warnings():
     """조합 설계: 하위 압축/휨 경고·미평가 플래그·Cm 경고 전파"""
     print('\n=== TEST: combined warning propagation ===')
     from design.aisi_s100 import _design_combined
-    r = _design_combined({'Fy': 35.53, 'Pu': 1.0, 'Mux': 5.0,
-                          'props': {'A': 1.0, 'Sf': 1.0}})
+    # 리뷰 1122(R4-12): rx/ry/J/Cw 없는 props 는 이제 오류 — 필요한 성질을 준다.
+    props = {'A': 1.0, 'Sf': 1.0, 'rx': 2.0, 'ry': 0.8, 'J': 0.001, 'Cw': 1.0, 'xo': 0.9}
+    r = _design_combined({'Fy': 35.53, 'Pu': 1.0, 'Mux': 5.0, 'props': dict(props)})
     ok = True
-    w = ' '.join(r.get('warnings', []))
+    # FIXES §3.1.1(검증 V2-10): 기본값 Cm=1.0 은 가정이므로 assumptions 에 있다.
+    w = ' '.join(r.get('warnings', []) + r.get('assumptions', []))
     ok &= check('Cmx' in w and 'Cmy' in w, 'Cm default warnings')
     ok &= check(r.get('local_not_evaluated') is True, 'local flag propagated')
     ok &= check(r.get('distortional_not_evaluated') is True, 'dist flag propagated')
@@ -364,7 +376,7 @@ def test_combined_propagates_sub_warnings():
                 'dsm_source propagated')
     # 명시 Cm 입력 시 경고 없음
     r2 = _design_combined({'Fy': 35.53, 'Pu': 1.0, 'Mux': 5.0, 'Cmx': 0.9, 'Cmy': 0.9,
-                           'props': {'A': 1.0, 'Sf': 1.0}})
+                           'props': dict(props)})
     w2 = ' '.join(r2.get('warnings', []))
     ok &= check('Cmx 미지정' not in w2 and 'Cmy 미지정' not in w2, 'no Cm warning when given')
     return ok
@@ -452,7 +464,9 @@ def test_dsm_monotone_and_boundary():
     # 평탄 시작 단조 증가: 내부 극소·경계 삽입 모두 없음 → monotone, 곡선 최소값 채택
     curve2 = _dsm_curve([(1, 2.0), (2, 2.0), (3, 3.0), (4, 4.0), (5, 5.0)])
     r2 = extract_dsm_values(curve2, node, elem, fy=50.0, load_type='P')
-    ok &= check(r2['classification'] == 'monotone', 'monotone label')
+    # R5-05/R5-06(2026-11-22): 평탄 시작 곡선의 최소는 격자 하한의 경계 극소이므로 'monotone' 이 아니라 경계 플래그가 붙은 단일 극소다.
+    ok &= check(r2['classification'] == 'single_minimum' and r2['boundary_minimum'] is True,
+                'flat-start curve is a flagged boundary minimum')
     ok &= check(abs(r2['Lcrl'] - 1.0) < 1e-9, 'monotone takes curve minimum')
     return ok
 
@@ -570,7 +584,8 @@ def test_connection_not_checked_verdict():
     full = design_connection({'connection_type': 'bolt', 't1': 0.06,
                               't2': 0.06, 'd': 0.25, 'n': 2, 'Fy': 50,
                               'Fu': 65, 'Fub': 120, 'Pu': 1, 'e': 0.75,
-                              's': 1.0, 'Ag': 1.0, 'width': 4.0, 'g': 2.0})
+                              's': 1.0, 'Ag': 1.0, 'width': 4.0, 'g': 2.0,
+                              'member_case': 'flat_sheet'})  # R6-12: J6.2 분류 필요
     ok &= check(full.get('j6_verified') is True, 'full inputs verified')
     ok &= check(full.get('pass') is True, 'full inputs overall pass')
     ok &= check(full.get('verdict') == 'PASS', 'verdict PASS')

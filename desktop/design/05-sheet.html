@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>05 계산 시트 — StCFSD 독립 프로그램 템플릿</title>
+<link rel="stylesheet" href="assets/review.css">
+<link rel="stylesheet" href="assets/app.css">
+<link rel="stylesheet" href="assets/cfsd.css">
+<style>
+  .sheet .cols > div > table.t th { position: static; }
+  .sheet .lsgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; align-items: start; }
+  .sheet .lsgrid .card { margin-bottom: 0; }
+  .sheet .card.on { box-shadow: 0 0 0 2px var(--accent); }
+  .calc .row { grid-template-columns: 62px 1fr; }
+  .sheet table.t td, .sheet table.t th { padding: 4px 6px; }
+  .why2 { color: var(--text-faint); font-size: 11px; }
+</style>
+</head>
+<body>
+
+<!-- 같은 선택(부모멘트 구간 · 뒤틀림 좌굴)에서 계산 시트를 열었다. 보기는 좁아지고 시트가 옆에 선다. 엔진이 남긴 단계(식 번호 · 대입 · 결과)를 그대로 편다 -->
+<div id="page" data-layout="sheet" data-tab="result" data-sel="k01" data-share="부재 검토 「부모멘트 구간 · 뒤틀림 좌굴」 · 3.1 뒤틀림"
+     data-status="계산 시트 · 부모멘트 구간 · 뒤틀림 좌굴 · 3.1 뒤틀림 좌굴 · 식 F4.1-2 · 하중 해석 10:33 · 좌굴 해석 10:14">
+
+  <section class="pane-view stack">
+    <div class="dv" data-draw="member" data-opt='{"w":660,"rows":["beam","band","M"],"sel":[6.6,8.01],"selLabel":"x = 6.60 m","dims":false}'>
+      <div class="hud tl"><span class="vsel"><span class="on">부재</span><span class="on">판정비</span><span class="on">모드 형상</span></span></div>
+    </div>
+    <div class="dv" data-draw="section" data-opt='{"w":660,"h":440,"s":1.5,"cx":330,"cy":222,"mode":"dist","rot180":true}'>
+      <div class="hud tl"><span class="cap">부휨 M− · 뒤틀림 · 620 mm</span></div>
+      <div class="hud tr"><span class="chip">3D</span></div>
+    </div>
+  </section>
+
+  <div class="pane-sheet">
+    <article class="sheet">
+      <div class="hd">
+        <div>
+          <h2>부모멘트 구간 · 뒤틀림 좌굴 — 계산 시트</h2>
+          <div class="dim" style="margin-top:3px">퍼린 P1 · Z-200×75×20×2.3 · SGC400 · AISI S100-16 LRFD · DSM · 하중 해석 10:33 · 좌굴 해석 10:14</div>
+        </div>
+        <span class="sp"></span>
+        <div style="text-align:right">
+          <div><span class="verdict ok">OK</span> <span class="num" style="font-size:20px">0.87</span></div>
+          <div class="dim"><span class="eg">예시</span> · <span class="rv" data-tip="내가 확인했다는 표시. 사람만 켠다. 입력이나 결과가 바뀌면 다시 꺼진다">미확인</span></div>
+        </div>
+      </div>
+      <div class="btns" style="margin-top:12px">
+        <span class="btn ghost">← 지점 B · 휨+웹 크리플링</span><span class="btn ghost">정모멘트 구간 · 뒤틀림 →</span>
+        <span style="flex:1"></span><a class="btn ghost" href="04-checks.html">시트 닫기 ✕</a>
+      </div>
+
+      <h3>1. 부재와 가정</h3>
+      <div class="cols">
+        <div>
+          <table class="t">
+            <tr><th colspan="3">단면과 좌굴</th></tr>
+            <tr><td>단면계수 Sf (전단면)</td><td class="num">51.8 ×10³ mm³</td><td><span class="tag sec">단면</span></td></tr>
+            <tr><td>항복강도 Fy</td><td class="num">245 MPa</td><td><span class="tag ai">AI</span> <span class="why2">SGC400</span></td></tr>
+            <tr><td>My = Sf · Fy</td><td class="num">12.69 kN·m</td><td><span class="tag sec">단면</span></td></tr>
+            <tr><td>Mcrd / My · Lcrd</td><td class="num">0.85 · 620 mm</td><td><span class="tag drv">좌굴 해석</span> <span class="why2">cFSM 분류</span></td></tr>
+            <tr><td>경계조건 · 스프링</td><td class="num">S-S · 0</td><td><span class="tag def">기본값</span></td></tr>
+          </table>
+        </div>
+        <div>
+          <table class="t">
+            <tr><th colspan="3">설계 가정과 출처</th></tr>
+            <tr><td>검토 위치</td><td class="num">x 6.60 m</td><td><span class="tag drv">하중 해석</span> <span class="why2">B 우측 랩 끝</span></td></tr>
+            <tr><td>압축 플랜지 kφ</td><td class="num">0</td><td><span class="tag drv">하중 해석</span> <span class="why2">아래 플랜지</span></td></tr>
+            <tr><td>Lb · Cb</td><td class="num">2.01 m · 1.94</td><td><span class="tag drv">하중 해석</span> <span class="why2">변곡점–지점</span></td></tr>
+            <tr><td>β 모멘트 구배</td><td class="num">1.00</td><td><span class="tag def">기본값</span> <span class="why2">Lm 빈칸</span></td></tr>
+            <tr><td>냉간가공 강도 증가</td><td>안 씀</td><td><span class="why2">§A3.3.2 · 좌굴 지배</span></td></tr>
+          </table>
+        </div>
+      </div>
+
+      <h3>2. 소요강도</h3>
+      <div class="cols">
+        <div>
+          <table class="t">
+            <thead><tr><th>항목</th><th class="r">소요</th><th>조합</th><th class="r">위치</th></tr></thead>
+            <tbody>
+              <tr><td>휨 Mu (위 인장)</td><td class="r num">7.28 kN·m</td><td>조합 2</td><td class="r num">6.60 m</td></tr>
+              <tr><td>전단 Vu</td><td class="r num">7.30 kN</td><td>조합 2</td><td class="r num">6.60 m</td></tr>
+              <tr><td class="dim">참고 · 지점 B Mu</td><td class="r num dim">12.20 kN·m</td><td class="dim">조합 2</td><td class="r num dim">6.00 m</td></tr>
+            </tbody>
+          </table>
+          <div class="note">조합 2 = 1.2D + 1.6Lr + 0.5W↓ · wu 3.04 kN/m · 지점 B 는 2겹이라 이 검토의 위치가 아니다</div>
+        </div>
+        <div class="dvbox dv" data-draw="member" data-opt='{"w":560,"rows":["M"],"sel":[6.6,8.01],"mini":true}'></div>
+      </div>
+
+      <h3>3. 한계상태별 계산</h3>
+      <div class="card gov on">
+        <header><span class="dot ok"></span><h5 data-tip="누르면 보기에 검토 위치가 표시된다">3.1 뒤틀림 좌굴 — DSM</h5><span class="tag">§F4.1 · 식 F4.1-2, F4.1-3</span><span class="sp"></span><span class="num">0.87</span></header>
+        <div class="cbody calc">
+          <div class="row"><span>항복</span><span>My = Sf · Fy = 51.8×10³ × 245 = <b>12.69</b> kN·m</span></div>
+          <div class="row"><span>탄성</span><span>Mcrd = 0.85 × 12.69 = <b>10.79</b> kN·m<span class="ref">좌굴 해석 · 620 mm · D 86%</span></span></div>
+          <div class="row"><span>세장비</span><span>λd = √(My / Mcrd) = √(12.69 / 10.79) = <b>1.085</b> &gt; 0.673<span class="ref">식 F4.1-3</span></span></div>
+          <div class="row"><span>식</span><span>Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 · My<span class="ref">식 F4.1-2</span></span></div>
+          <div class="row"><span>대입</span><span>Mnd = [1 − 0.22 × 0.922] × 0.922 × 12.69 = <b>9.33</b> kN·m</span></div>
+          <div class="row"><span>보정</span><span>β = 1.00 — Lm · M1/M2 빈칸, 보정 없음 <span class="tag def" style="font-family:var(--font)">기본값</span></span></div>
+          <div class="row"><span>설계강도</span><span>φd Mnd = 0.90 × 9.33 = <b>8.40</b> kN·m</span></div>
+          <div class="row"><span>판정</span><span>Mu / φd Mnd = 7.28 / 8.40 = <b>0.87</b> ≤ 1.0 → <span class="ok">OK</span></span></div>
+        </div>
+      </div>
+
+      <div class="lsgrid" style="margin-top:8px">
+        <div class="card"><header><span class="dot ok"></span><h5>3.2 휨 + 전단</h5><span class="tag">§H2 · 식 H2-1</span><span class="sp"></span><span class="dim num">M 0.64 · V 0.15</span><span class="num">0.66</span><span class="faint">▸</span></header></div>
+        <div class="card"><header><span class="dot ok"></span><h5>3.3 국부 좌굴</h5><span class="tag">§F3.2 · 식 F3.2-2</span><span class="sp"></span><span class="dim num">7.28 / 11.33</span><span class="num">0.64</span><span class="faint">▸</span></header></div>
+        <div class="card"><header><span class="dot ok"></span><h5>3.4 횡좌굴</h5><span class="tag">§F2.1 · Lb 2.01 · Cb 1.94</span><span class="sp"></span><span class="dim num">7.28 / 11.42</span><span class="num">0.64</span><span class="faint">▸</span></header></div>
+      </div>
+      <div class="card un" style="margin-top:8px">
+        <header><span class="dot un"></span><h5>3.5 랩 구간 휨 (2겹)</h5><span class="tag">§I6.2.1 관련</span><span class="sp"></span><span class="verdict un">미검토 — 까닭</span></header>
+        <div class="cbody dim">엔진이 2겹 단면의 유효단면계수 Se 를 계산하지 않는다. 접합부 검토는 Se 대신 전단면 Sx 로 0.54 를 냈다 <span class="tag def">기본값</span> — 이 시트에는 넣지 않았다.</div>
+      </div>
+    </article>
+  </div>
+</div>
+
+<script src="assets/shell.js"></script>
+</body>
+</html>

@@ -8,6 +8,7 @@
 import math
 
 import numpy as np
+from design.notices import N as _nt  # noqa: E402
 
 
 def doubler(node: np.ndarray, elem: np.ndarray) -> tuple:
@@ -216,7 +217,7 @@ def master_slave(master: int, slave_nodes: list,
         node: (nnodes, 8)
 
     Returns:
-        constraints: (3*n_slaves, 5) [node_e, dof_e, coeff, node_k, dof_k]
+        constraints: (5*n_slaves, 5) [node_e, dof_e, coeff, node_k, dof_k]
     """
     xm = node[master - 1, 1]
     zm = node[master - 1, 2]
@@ -234,34 +235,38 @@ def master_slave(master: int, slave_nodes: list,
         uq = -r * math.sin(theta)  # = -(zs - zm)
         wq = r * math.cos(theta)   # = (xs - xm)
 
-        # u_slave = u_master + uq * theta_master
-        rows.append([sn, 1, 1.0, master, 1])   # u: coeff=1 on u_master
-        rows.append([sn, 1, uq, master, 4])    # u: coeff=uq on theta_master
-        # v_slave = v_master (axial DOF, dof=2)
-        rows.append([sn, 2, 1.0, master, 2])   # v: coeff=1 on v_master
-        # w_slave = w_master + wq * theta_master
-        rows.append([sn, 3, 1.0, master, 3])   # w: coeff=1 on w_master
-        rows.append([sn, 3, wq, master, 4])     # w: coeff=wq on theta_master
-        # theta_slave = theta_master
-        rows.append([sn, 4, 1.0, master, 4])   # theta: coeff=1
+        # CUFSM DOF 코드: 1 = x(u), 2 = z(w), 3 = y(v), 4 = θ (stripmain.m:14).
+        # master_slave.m:21-25 처럼 u, w, θ 만 묶고 v(종방향)는 묶지 않는다.
+        # 두 항 구속식(u_s = uq·θ_m + u_m)은 같은 dof_e 의 두 행으로 쓴다
+        # (constr_user 가 같은 소거 DOF 의 행을 누적한다).
+        rows.append([sn, 1, 1.0, master, 1])   # u_s ← u_m
+        rows.append([sn, 1, uq, master, 4])    # u_s ← uq·θ_m
+        rows.append([sn, 2, 1.0, master, 2])   # w_s ← w_m
+        rows.append([sn, 2, wq, master, 4])    # w_s ← wq·θ_m
+        rows.append([sn, 4, 1.0, master, 4])   # θ_s ← θ_m
 
     return np.array(rows) if rows else np.array([]).reshape(0, 5)
 
 
 def signature_ss(prop: np.ndarray, node: np.ndarray,
-                 elem: np.ndarray, neigs: int = 10) -> dict:
+                 elem: np.ndarray, neigs: int = 10, GBTcon=None) -> dict:
     """시그니처 곡선 계산 (S-S 경계조건)
+
+    원본: Ref_Source/helpers/signature_ss.m — 길이는 최소 요소폭 … 1000 × 최대
+    요소폭의 로그 간격 100 개, 길이마다 m = [1].
 
     Args:
         prop, node, elem: 모델 데이터
         neigs: 고유치 수
+        GBTcon: cFSM 모드 구속 (기본: 없음)
 
     Returns:
-        dict: {'curve': list, 'shapes': list, 'lengths': np.ndarray}
+        dict: {'curve': list, 'shapes': list, 'lengths': np.ndarray,
+               'diagnostics': list}
     """
     from .properties import elemprop
     from .fsm_solver import stripmain
-    from ..models.data import GBTConfig
+    from models.data import GBTConfig
 
     ep = elemprop(node, elem)
     widths = ep[:, 1]
@@ -272,20 +277,255 @@ def signature_ss(prop: np.ndarray, node: np.ndarray,
     m_all = [np.array([1.0]) for _ in lengths]
 
     result = stripmain(prop, node, elem, lengths, np.array([]), np.array([]),
-                       GBTConfig(), 'S-S', m_all, neigs)
+                       GBTcon if GBTcon is not None else GBTConfig(),
+                       'S-S', m_all, neigs)
 
     return {
         'curve': result.curve,
         'shapes': result.shapes,
         'lengths': lengths,
+        'diagnostics': result.diagnostics,
     }
 
 
-def firstyield(node: np.ndarray, elem: np.ndarray, fy: float) -> dict:
-    """초기 항복 응력 계산
+def _first_load_factors(sig: dict) -> np.ndarray:
+    """서명 곡선의 길이별 1차 하중계수. 실패한 길이는 NaN (극소로 잡히지 않게)."""
+    failed = {d.get('length_index') for d in sig.get('diagnostics', [])
+              if d.get('severity') == 'error'}
+    out = np.full(len(sig['lengths']), np.nan)
+    for i, row in enumerate(sig['curve']):
+        r = np.asarray(row, dtype=float).reshape(-1)
+        if i not in failed and len(r) > 1 and r[1] > 0:
+            out[i] = r[1]
+    return out
+
+
+def _curve_minima(lengths: np.ndarray, lf: np.ndarray) -> list:
+    """m_recommend.m 의 극소 판정: load2 < load1 and load2 <= load3."""
+    wl = []
+    for xx in range(len(lf) - 2):
+        load1, load2, load3 = lf[xx], lf[xx + 1], lf[xx + 2]
+        if load2 < load1 and load2 <= load3:
+            wl.append(float(lengths[xx + 1]))
+    return wl
+
+
+_LCR_CACHE = {}
+_LCR_CACHE_MAX = 16
+
+
+def characteristic_half_wavelengths(prop: np.ndarray, node: np.ndarray,
+                                    elem: np.ndarray) -> dict:
+    """국부 · 뒤틀림 좌굴의 특성 반파장 Lcrl, Lcrd (m_recommend.m 의 앞부분)
+
+    S-S 서명 곡선의 극소가 꼭 두 개면 작은 쪽이 Lcrl, 큰 쪽이 Lcrd. 아니면
+    MATLAB 처럼 cFSM 국부 전용 · 뒤틀림 전용 서명 곡선의 첫 극소를 쓴다.
+
+    MATLAB 과 다른 점
+      - m_recommend.m 의 cFSM 분기는 두 루프가 극소 카운터 cr 를 같이 써서 국부
+        극소가 있으면 wl_dist(1) 이 0 이 된다(Lcrd = 0 → 무한대 항). 여기서는 각
+        곡선의 첫 극소를 그대로 쓴다.
+      - 고전 cFSM 이 성립하지 않는 모델(cfsm.node_utils.check_cfsm_model: 둥근
+        모서리 · 닫힌 · 가지 단면 등)에서는 cFSM 분기를 쓰지 않는다. G/D/L 공간이
+        물리적 모드가 아니어서 반파장이 엉뚱해진다(둥근 립 C 의 Lcrd 5.3 vs 27).
+      - 두 극소로 정하지 못한 경우(cFSM 분기 · 대체)에는 서명 곡선의 모든 극소를
+        'extra_lengths' 로 더해 그 근처 항도 넣는다. 항을 더하는 쪽은 고유치를
+        낮추거나 그대로 둘 뿐이므로 MATLAB 결과보다 비안전측이 될 수 없다.
+      - 극소가 하나도 없으면(예리한 앵글 · 티 압축: 곡선이 단조 감소 — 가장 긴
+        반파장의 모드가 가장 낮다) 오류 대신 Lcrl = Lcrd = None, 항 1..7 (m_recommend
+        의 ceil(a/Lcr) <= 4 묶음)과 경고를 낸다.
+
+    같은 (prop, node, elem) 에 대한 결과는 작은 캐시에 둔다(서버와 stripmain
+    진단이 같은 모델로 두 번 부르는 경우).
 
     Returns:
-        dict: {'Py': float, 'Mxx_y': float, 'Mzz_y': float}
+        dict: {'Lcrl', 'Lcrd', 'method': 'signature' | 'cfsm' | 'signature_fallback'
+               | 'no_minimum', 'minima': list, 'extra_lengths': list,
+               'cfsm_check': None | 코드, 'warnings': list}
+    """
+    import copy
+
+    prop = np.asarray(prop, dtype=float)
+    node = np.asarray(node, dtype=float)
+    elem = np.asarray(elem, dtype=float)
+    key = tuple((a.shape, a.tobytes()) for a in (prop, node, elem))
+    hit = _LCR_CACHE.get(key)
+    if hit is not None:
+        return copy.deepcopy(hit)
+    out = _characteristic_half_wavelengths(prop, node, elem)
+    if len(_LCR_CACHE) >= _LCR_CACHE_MAX:
+        _LCR_CACHE.pop(next(iter(_LCR_CACHE)))
+    _LCR_CACHE[key] = copy.deepcopy(out)
+    return out
+
+
+def _characteristic_half_wavelengths(prop, node, elem) -> dict:
+    sig = signature_ss(prop, node, elem, neigs=1)
+    lengths = sig['lengths']
+    wl = _curve_minima(lengths, _first_load_factors(sig))
+    warnings = []
+    if len(wl) == 2:
+        return {'Lcrl': wl[0], 'Lcrd': wl[1], 'method': 'signature',
+                'minima': wl, 'extra_lengths': [], 'cfsm_check': None,
+                'warnings': warnings}
+
+    try:
+        from cfsm.node_utils import check_cfsm_model
+        chk = check_cfsm_model(node, elem)
+    except Exception as exc:
+        chk = {'supported': False, 'code': 'CHECK_FAILED',
+               'message': _nt('fsm_solver.warning.exception', exc_type=type(exc).__name__, exc=exc)}
+
+    Lcrl = Lcrd = None
+    if chk.get('supported'):
+        try:
+            from cfsm.node_utils import base_properties
+            from models.data import GBTConfig
+
+            nnodes = node.shape[0]
+            bp = base_properties(node, elem)
+            ndm, nlm = int(bp[7]), int(bp[8])
+            ngm = 4
+            nom = 2 * (nnodes - 1)
+            if nlm > 0:
+                gl = GBTConfig(glob=np.zeros(ngm), dist=np.zeros(ndm),
+                               local=np.ones(nlm), other=np.zeros(nom),
+                               ospace=1, couple=1, orth=1, norm=0)
+                s_l = signature_ss(prop, node, elem, neigs=1, GBTcon=gl)
+                wl_l = _curve_minima(lengths, _first_load_factors(s_l))
+                if wl_l:
+                    Lcrl = wl_l[0]
+            if ndm > 0:
+                gd = GBTConfig(glob=np.zeros(ngm), dist=np.ones(ndm),
+                               local=np.zeros(nlm), other=np.zeros(nom),
+                               ospace=1, couple=1, orth=1, norm=0)
+                s_d = signature_ss(prop, node, elem, neigs=1, GBTcon=gd)
+                wl_d = _curve_minima(lengths, _first_load_factors(s_d))
+                if wl_d:
+                    Lcrd = wl_d[0]
+        except Exception as exc:
+            warnings.append(_nt('fsm.warning.cfsm_signature_curves_failed', exc_type=type(exc).__name__, exc=exc))
+    else:
+        warnings.append(
+            _nt('fsm.warning.classical_cfsm_does_apply', code=chk.get("code")))
+
+    if Lcrl is not None and Lcrd is not None:
+        return {'Lcrl': float(Lcrl), 'Lcrd': float(Lcrd), 'method': 'cfsm',
+                'minima': wl, 'extra_lengths': list(wl), 'cfsm_check': None,
+                'warnings': warnings}
+
+    found = [n for n, v in (('Lcrl', Lcrl), ('Lcrd', Lcrd)) if v is not None]
+    if Lcrl is None and wl:
+        Lcrl = wl[0]
+    if Lcrd is None and wl:
+        Lcrd = wl[-1]
+    if Lcrl is None and Lcrd is None:
+        warnings.append(
+            _nt('fsm.warning.no_interior_minimum_on'))
+        return {'Lcrl': None, 'Lcrd': None, 'method': 'no_minimum', 'minima': wl,
+                'extra_lengths': [], 'cfsm_check': chk.get('code'),
+                'warnings': warnings}
+    if Lcrl is None:
+        Lcrl = Lcrd
+    if Lcrd is None:
+        Lcrd = Lcrl
+    warnings.append(
+        _nt('fsm.warning.taken_from_plain_signature', text=_nt('fsm.fragment.from_cfsm_curves', found=' and '.join(found)) if found else '', value=[round(x, 4) for x in wl], Lcrl=Lcrl, Lcrd=Lcrd))
+    return {'Lcrl': float(Lcrl), 'Lcrd': float(Lcrd), 'method': 'signature_fallback',
+            'minima': wl, 'extra_lengths': list(wl), 'cfsm_check': chk.get('code'),
+            'warnings': warnings}
+
+
+# 권장 항에 언제나 넣는 전체좌굴용 낮은 항 (MATLAB 은 1, 2, 3 — recommended_terms 참고)
+GLOBAL_TERMS = tuple(range(1, 8))
+M_RECOMMEND_RULE = (
+    'terms ceil(a/Lcr)-3..+3 (or 1..7 when ceil(a/Lcr) <= 4) for Lcrl, Lcrd and any '
+    'extra signature minima, plus global terms 1..7 (CUFSM m_recommend.m uses 1..3)')
+
+
+def recommended_terms(a: float, Lcrl, Lcrd, extra=()) -> np.ndarray:
+    """길이 a 에 권장하는 종방향 항 (m_recommend.m:89-107)
+
+    ceil(a/Lcr) > 4 이면 ceil(a/Lcr)-3 … +3, 아니면 1..7 을 Lcrl · Lcrd 각각에
+    대해 모으고 전체좌굴용 낮은 항 GLOBAL_TERMS(1..7)를 더해 정렬한다. Lcr 가
+    None 이면(극소 없음) 1..7. extra 의 반파장마다 같은 묶음을 더한다.
+
+    MATLAB 과 다른 점 (둘 다 항을 더하기만 하므로 MATLAB 보다 비안전측이 될 수 없다)
+      - m_recommend.m:101 의 마지막 항 ceil(a/Lcrl)+3 은 ceil(a/Lcrd)+3 의 오타로
+        보고 Lcrd 를 쓴다. MATLAB 쪽 항은 국부 묶음에 이미 들어 있어 빠질 뿐이다.
+      - 의도한 변경: MATLAB 은 낮은 항으로 1, 2, 3 만 넣는다(m_recommend.m:105).
+        S-S 가 아닌 BC 의 전체좌굴은 낮은 항에 천천히 수렴하므로 1..7 을 늘 넣는다.
+        정사각관 4×4×0.1, L=400 의 오일러 닫힌 해 대비: S-C 1.127 → 1.063,
+        C-C 1.034 → 1.017, C-G 1.026 → 1.012, C-F 1.007 → 1.006. 비용은 대략
+        항 수의 세제곱(립 C 14 → 18 항이면 약 2 배).
+      - 그래도 긴 길이의 전체좌굴 값은 급수 절단 때문에 수 % 높게(비안전측) 남는다.
+        S-S 가 아닌 곡선의 긴 길이 값을 Pcre · Mcre 로 쓰지 않는다 — 설계 경로는
+        전체좌굴을 닫힌 해(AISI S100 E2 · F2)에서 구한다.
+    """
+    terms = []
+    for Lcr in (Lcrl, Lcrd, *extra):
+        c = None if Lcr is None else math.ceil(a / Lcr)
+        if c is not None and c > 4:
+            terms.extend(range(c - 3, c + 4))
+        else:
+            terms.extend(range(1, 8))
+    terms.extend(GLOBAL_TERMS)
+    return np.unique(np.array(terms, dtype=float))
+
+
+def terms_from_half_wavelengths(a: float, lcr: dict) -> np.ndarray:
+    """characteristic_half_wavelengths 결과로 길이 a 의 권장 항."""
+    return recommended_terms(a, lcr['Lcrl'], lcr['Lcrd'], lcr.get('extra_lengths', ()))
+
+
+def m_recommend_details(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
+                        lengths) -> dict:
+    """m_recommend 와 같지만 Lcrl · Lcrd · 판정 방법 · 경고를 함께 돌려준다.
+
+    결과 dict 를 그대로 stripmain(..., half_wavelengths=결과) 에 넘기면
+    항 부족 진단이 서명 곡선을 다시 풀지 않는다.
+
+    Returns:
+        dict: {'m_all': list[np.ndarray], 'Lcrl', 'Lcrd', 'method', 'minima',
+               'extra_lengths', 'cfsm_check', 'warnings', 'global_terms', 'rule'}
+    """
+    lcr = characteristic_half_wavelengths(prop, node, elem)
+    lengths = np.atleast_1d(np.asarray(lengths, dtype=float))
+    m_all = msort([terms_from_half_wavelengths(a, lcr) for a in lengths])
+    return {'m_all': m_all, **lcr, 'global_terms': list(GLOBAL_TERMS),
+            'rule': M_RECOMMEND_RULE}
+
+
+def m_recommend(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
+                lengths) -> list:
+    """권장 종방향 항 (원본: Ref_Source/helpers/m_recommend.m, Z. Li 2010)
+
+    S-S 서명 곡선(node 의 응력 분포 그대로)에서 국부 · 뒤틀림 특성 반파장을
+    찾아 길이마다 권장 m 항을 만든다. S-S 가 아닌 경계조건의 해석에 쓴다.
+    전체좌굴용 낮은 항은 MATLAB 의 1..3 대신 1..7 이다(recommended_terms 참고).
+    이 항으로도 S-S 가 아닌 곡선의 긴 길이 값에는 수 % 의 급수 절단 오차가 높은
+    쪽으로 남으므로 Pcre · Mcre 로 쓰지 않는다(설계 경로는 닫힌 해를 쓴다).
+
+    Args:
+        prop, node, elem: 모델 (node[:,7] 의 응력 분포를 쓴다)
+        lengths: 물리 부재 길이 배열
+
+    Returns:
+        m_all: list[np.ndarray] — 길이마다 정렬된 양의 정수 항
+    """
+    return m_recommend_details(prop, node, elem, lengths)['m_all']
+
+
+def firstyield(node: np.ndarray, elem: np.ndarray, fy: float,
+               unsymm: int = 0) -> dict:
+    """초기 항복 하중 (yieldMP 래퍼)
+
+    MATLAB firstyield.m(PMM 공간의 βy)과 이름만 같고 기능은 yieldMP 다.
+    unsymm=0 은 Ixz 를 0 으로 두는 yieldMP 기본값이다. Z형강처럼 Ixz ≠ 0 인
+    단면의 Mxx_y · Mzz_y 는 unsymm=1 로 구해야 휨 응력장(stresgen unsymm=1)과 맞는다.
+
+    Returns:
+        dict: {'Py', 'Mxx_y', 'Mzz_y', 'M11_y', 'M22_y'}
     """
     from .properties import grosprop
     from .stress import yieldMP
@@ -294,7 +534,8 @@ def firstyield(node: np.ndarray, elem: np.ndarray, fy: float) -> dict:
     return yieldMP(node, fy,
                    props['A'], props['xcg'], props['zcg'],
                    props['Ixx'], props['Izz'], props['Ixz'],
-                   props['thetap'], props['I11'], props['I22'])
+                   props['thetap'], props['I11'], props['I22'],
+                   unsymm=unsymm)
 
 
 def energy_recovery(prop: np.ndarray, node: np.ndarray, elem: np.ndarray,
