@@ -2060,6 +2060,18 @@ REGISTRY = {
                        '기준. 엔진은 ASCE 7 의 하중을 바꾸지 않음. 1.7.1 (2) 의 활하중계수 0.5 와 F · T · H 항은 쓰지 않음.',
         'params': {},
     },
+    'loads.scope.seismic_single_effect': {
+        'kind': 'scope',
+        'template': 'Seismic load E is combined as one load effect exactly as entered ({standard}: {combos}). The '
+                    'engine does not separate the vertical (Ev) and horizontal (Eh) parts, so the combinations whose '
+                    'vertical part acts against gravity are not formed with a reversed Ev — enter E for the adverse '
+                    'direction and check the counteracting case separately.',
+        'template_ko': '지진하중 E 는 넣은 값 하나의 하중효과로 조합함({standard}: {combos}). 엔진은 연직(Ev) · 수평(Eh) '
+                       '성분을 가르지 않으므로, 연직 성분이 중력과 반대로 작용하는 조합을 Ev 의 부호를 뒤집어 만들지 않음 — '
+                       '불리한 방향의 E 를 넣고, 상쇄하는 경우는 따로 검토하십시오.',
+        'params': {'standard': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''},
+                   'combos': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'loads.scope.combination_standard_scope': {
         'kind': 'scope',
         'template': 'The load-combination standard ({standard}) changes only the factored combinations. Unfactored '

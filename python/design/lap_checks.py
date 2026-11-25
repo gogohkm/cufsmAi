@@ -110,9 +110,10 @@ def build(ck: dict) -> list:
     dem = q('n', ck['n_total'], 'count', src('check', id='lap.fastener_group'))
     cap = q('n_fit', ck['n_max_total'], 'count', spec())
     r = ck['n_total'] / ck['n_max_total'] if ck['n_max_total'] > 0 and ck['n_total'] > 0 else None
-    v = 'pass' if fits else ('not_evaluated' if ck['pns_assumed'] else 'fail')
+    # Pns 가 가정값이면 n 도 가정값 — 들어가도 · 넘쳐도 판정이 아니다(가정값 규칙, FIXES §3.1 · 검토 2차 R2-3)
+    v = 'not_evaluated' if ck['pns_assumed'] else ('pass' if fits else 'fail')
     why = 'from an assumed Pns' if v == 'not_evaluated' else None
-    if not ck['pns_assumed'] and not ck.get('force_confirmed'):
+    if not ck.get('force_confirmed') and not ck['pns_assumed']:
         # R2: 필요 개수 n 은 모델 A(고르게 나눔)의 수 — 다른 분배는 더 많이 요구한다. 들어가지 않으면 불합격 그대로.
         if fits:
             v, why = 'not_evaluated', _nt('lap.reason.force_model_not_confirmed')

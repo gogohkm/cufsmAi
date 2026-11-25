@@ -630,6 +630,8 @@ def design_lap_connection(params: dict) -> dict:
                                                        ('Mn_lap', Mn_lap), ('phi_Mn_lap', phi_Mn_lap))
                               if v is not None},
         'pass': overall_pass,
+        # 판정이 없으면 위 utilization 은 판정의 비가 아니다 — 부재 설계와 같은 표지(검토 2차 R2-6)
+        **({'utilization_valid': False} if overall_pass is None else {}),
         'verdict': verdict,
         'design_method': design_method,
         'force_model': dict(FORCE_MODEL, confirmed=force_confirmed,

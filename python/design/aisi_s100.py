@@ -399,13 +399,17 @@ def _lift_unrounded(result: dict) -> None:
         result[_DISPLAY_UNROUNDED] = top
 
 
-def _length_assumed_item(item: dict, fail_check_id: str | None) -> None:
+def _length_assumed_item(item: dict, fail_check_id: str | None, bound_ratio=None) -> None:
     """요약 항목(limit_state_checks 의 'E axial compression' · 'F flexure' · H1.2)이 빈 길이를 엔진의 기본 길이로 둔
     강도에서 나왔다(E-1): 비는 참고값으로 남기고 판정이 아님을 밝힌다. 길이와 상관없는 한계상태로 넘으면 불합격 그대로."""
     from design.notices import text_ko
     item['length_assumed'] = True
+    # 가정한 길이로 낸 비는 reference 아래에만 — 불합격이면 ratio 는 그 상한의 비(검토 2차 R2-1)
+    item['reference'] = {'ratio': item.get('ratio')}
     if fail_check_id:
         item['pass'] = False
+        if bound_ratio is not None:
+            item['ratio'] = round(float(bound_ratio), 4)
         n = _nt('member.reason.fails_on_length_independent_mode', check=fail_check_id)
     else:
         item['pass'] = None
@@ -671,6 +675,9 @@ def design_member(params: dict) -> dict:
             }
         return {'error': f"Unrecognized design_method '{dm}'. Use 'LRFD' or 'ASD'."}
     params = {**params, 'design_method': dm_norm}
+    # 길이 키가 null 로 오면 빈 칸이다 — 모든 부재 경로에서 「주지 않음」과 같게(검토 R2-4: Lb=None 이 휨에서 TypeError).
+    params = {k: v for k, v in params.items()
+              if not (k in ('KxLx', 'KyLy', 'KtLt', 'Lb', 'Lb_pos', 'L') and v is None)}
 
     member_type = params.get('member_type', 'compression')
 
@@ -1355,15 +1362,34 @@ def _design_compression(params: dict) -> dict:
     # 해당 없으면 Py — Pn ≤ Pnd 는 어느 길이에서나 참)로 넘을 때만 불합격, 아니면 판정 없음.
     length_assumed = bool(missing_len) and Fcre_override <= 0
     length_fail_mode = None
-    if Pn <= 0:
+    length_bound = None
+    length_bounds_ck = {}
+    if length_assumed:
+        # 길이와 상관없는 상한(검토 2차 R2-1): 가장 유리한 전체좌굴(Fcre → ∞: Fn = Fy, Pne = Py)에서의 엔진 강도.
+        # Pnℓ 은 Pne 에 대해 늘어나므로(Eq. E3.2.1-1/-2) Pnℓ(Pne = Py) 가 상한, Pnd 는 길이와 상관없다.
+        # Pn = min(Pne, Pnℓ, Pnd) ≤ min(Py, Pnℓ(Py), Pnd) — 넘으면 어느 길이에서나 넘는다.
+        _cands = [(Py, 'member.compression.global', 'yield: Pne <= Py at any length')]
+        length_bounds_ck['global'] = {'symbol': 'Py', 'value': Py, 'text': 'Pne <= Py = Ag Fy at any length'}
+        if Pcrl > 0:
+            _pnl_ub = compression_local(Py, Pcrl)['Pnl']
+            _cands.append((_pnl_ub, 'member.compression.local', 'local buckling at Pne = Py'))
+            length_bounds_ck['local'] = {'symbol': 'Pnℓ(Pne=Py)', 'value': _pnl_ub,
+                                         'text': 'local buckling with Pne = Py (Pnℓ grows with Pne)'}
+        if Pcrd > 0:
+            _cands.append((Pnd, 'member.compression.distortional', 'distortional buckling (no length)'))
+        _nub, _cid, _txt = min(_cands, key=lambda c: c[0])
+        _cub = phi * _nub if design_method == 'LRFD' else _nub / omega
+        length_bound = {'Pn': _nub, 'design_strength': _cub, 'governing_check': _cid, 'limit_state': _txt,
+                        'ratio': (Pu / _cub) if Pu > 0 and _cub > 0 else None,
+                        'note': 'least engine strength at the most favourable length (Pne = Py); a demand above '
+                                'its design strength fails at every length'}
+    if Pu > 0 and length_assumed and length_bound and Pu > length_bound['design_strength']:
+        pass_flag = False
+        length_fail_mode = length_bound['governing_check'] + ': ' + length_bound['limit_state']
+    elif Pn <= 0:
         pass_flag = None if e2_unavailable else False
     elif Pu > 0 and length_assumed:
-        _cap_d = phi * Pnd if design_method == 'LRFD' else Pnd / omega
-        if Pcrd > 0 and Pu > _cap_d:
-            pass_flag = False
-            length_fail_mode = 'member.compression.distortional'
-        else:
-            pass_flag = None
+        pass_flag = None        # 상한으로도 넘지 않음 — 가정 길이의 비는 참고값
     elif Pu > 0:
         pass_flag = utilization <= 1.0
     else:
@@ -1405,9 +1431,12 @@ def _design_compression(params: dict) -> dict:
         result['limit_state_checks'] = [{
             'name': 'E axial compression', 'ratio': round(utilization, 4), 'pass': pass_flag}]
         if length_assumed:
-            _length_assumed_item(result['limit_state_checks'][0], length_fail_mode)
+            _length_assumed_item(result['limit_state_checks'][0], length_fail_mode,
+                                 (length_bound or {}).get('ratio'))
     if length_assumed:
         result['length_assumed'] = True
+        if length_bound:
+            result['length_independent_bound'] = length_bound
     for item in not_evaluated:
         _mark_not_evaluated(result, item)
     _finalize_verdict(result)
@@ -1420,6 +1449,7 @@ def _design_compression(params: dict) -> dict:
         local_result=local_result, Pnl=Pnl, local_not_evaluated=local_not_evaluated, Py=Py, Pcrd=Pcrd,
         Pcrd_source=Pcrd_source, pcrd_an=pcrd_an, dist_applicable=dist_applicable, dist_reason=dist_reason,
         dist_result=dist_result, Pnd=Pnd, Pn=Pn, mode=mode, phi=phi, omega=omega,
+        length_bounds=length_bounds_ck,
         round_tube=round_tube, round_local=round_local, E=E,
         not_evaluated=result.get('not_evaluated') or [])), {
             'Local Buckling': 'member.compression.local',
@@ -1617,7 +1647,7 @@ def _design_flexure(params: dict) -> dict:
     elif dist_excluded:
         dist_applicable, dist_reason = False, 'excluded by supplied assumption'
 
-    def _calc_flexure_state(Fy_eval: float, allow_ir: bool) -> dict:
+    def _calc_flexure_state(Fy_eval: float, allow_ir: bool, Lb_eval: float | None = None) -> dict:
         state_warnings = []
         fcre_raw = {}      # 계산서(design_checks)용 — 계산에 쓴 반올림 전 값
         Mcrl_an = Mcrd_an = beta_inputs = None
@@ -1637,7 +1667,8 @@ def _design_flexure(params: dict) -> dict:
             fcre_detail_state = {'equation': 'F2.3', 'round_hss': True}
         else:
             Fcre, fcre_detail_state = compute_beam_Fcre_detail(
-                props, Cb, Lb, section_type=section_type, Fy=Fy_eval, _raw=fcre_raw)
+                props, Cb, Lb if Lb_eval is None else Lb_eval, section_type=section_type, Fy=Fy_eval,
+                _raw=fcre_raw)
         # §F2.3 round-HSS는 section_type/D_over_t/E를 받아 직접 Mne 곡선을 산정한다.
         global_result = beam_global_strength(
             Fy_eval, Fcre, Sf_eff, Zf=Zf, use_inelastic_reserve=allow_ir,
@@ -1851,6 +1882,7 @@ def _design_flexure(params: dict) -> dict:
         return {'error': f"§F2: {state['Fcre_detail'].get('error')}", 'member_type': 'flexure'}
     # §G2/§G5/§H3 는 냉간가공 증가를 쓰지 않는다(§A3.3.2) — virgin 상태를 보관한다.
     state_virgin = state
+    _fya_candidate = None      # 냉간가공 Fya — 길이와 상관없는 상한에 쓴다(가정 길이에서 버려져도)
     if params.get('use_cold_work', False):
         from design.special_topics import cold_work_strength
         R = props.get('R', 0) or params.get('R', 0) or params.get('r', 0)
@@ -1875,6 +1907,9 @@ def _design_flexure(params: dict) -> dict:
             if _cw_formula_ok is None:
                 _cw_formula_ok = cold_work_info.get(
                     'applicable', cold_work_info.get('formula_applicable', False))
+            if _cw_formula_ok and not use_ir and (cold_work_info.get('Fya') or 0) > Fy_original:
+                _fya_candidate = float((cold_work_info.get('display_unrounded') or {}).get('Fya',
+                                                                                         cold_work_info['Fya']))
 
             if use_ir:
                 warnings.append(_nt('member.warning.a3_3_2_a3_cold_work_fya'))
@@ -2253,15 +2288,41 @@ def _design_flexure(params: dict) -> dict:
     if R_uplift is not None and R_uplift > 0:
         lb_assumed = False
     length_fail_mode = None
-    if Mn <= 0:
+    length_bound = None
+    length_bounds_ck = {}
+    if lb_assumed:
+        # 길이와 상관없는 상한(검토 2차 R2-1): 엔진 자신의 강도를 가장 유리한 길이 Lb = 0(횡비틀림 없음 — 랩 구간의
+        # 상한과 같은 규약)에서 다시 계산한다. 비탄성 여유(§F2.4 · §F3.2.3 · §F4.3)를 켰으면 그 값까지, 냉간가공을
+        # 청했으면 Fya 로도 계산해 큰 쪽을 상한으로 둔다. Mnd 를 평가하지 못했으면(Mcrd 없음) 그 자리표는 쓰지 않는다.
+        _states = [_calc_flexure_state(Fy_original, use_ir, Lb_eval=0.0)]
+        if _fya_candidate:
+            _states.append(_calc_flexure_state(_fya_candidate, False, Lb_eval=0.0))
+        _mne_ub = max(st_['Mne'] for st_ in _states)
+        _mnl_ub = max(st_['Mnl'] for st_ in _states)
+
+        def _mn_of(st_):
+            vals = [(st_['Mne'], 'member.flexure.global', 'yield / inelastic reserve at Lb = 0'),
+                    (st_['Mnl'], 'member.flexure.local', 'local buckling at Mne(Lb = 0)')]
+            if not st_['dist_missing'] and dist_applicable:
+                vals.append((st_['Mnd'], 'member.flexure.distortional', 'distortional buckling (no Lb)'))
+            return min(vals, key=lambda c: c[0])
+        _nub, _cid, _txt = max((_mn_of(st_) for st_ in _states), key=lambda c: c[0])
+        _cub = phi * _nub if design_method == 'LRFD' else _nub / omega
+        length_bound = {'Mn': _nub, 'design_strength': _cub, 'governing_check': _cid, 'limit_state': _txt,
+                        'ratio': (Mu / _cub) if Mu > 0 and _cub > 0 else None,
+                        'note': 'least engine strength at the most favourable length (Lb = 0); a demand above its '
+                                'design strength fails at every length'}
+        length_bounds_ck = {
+            'global': {'symbol': 'Mne(Lb=0)', 'value': _mne_ub, 'text': 'Mne at Lb = 0 (no lateral-torsional buckling)'},
+            'local': {'symbol': 'Mnℓ(Lb=0)', 'value': _mnl_ub, 'text': 'local buckling with Mne at Lb = 0'},
+        }
+    if Mu > 0 and lb_assumed and length_bound and Mu > length_bound['design_strength']:
+        pass_flag = False
+        length_fail_mode = length_bound['governing_check'] + ': ' + length_bound['limit_state']
+    elif Mn <= 0:
         pass_flag = None if f2_unavailable else False
     elif Mu > 0 and lb_assumed:
-        _cap_d = phi * Mnd if design_method == 'LRFD' else Mnd / omega
-        if state['Mcrd'] > 0 and Mnd > 0 and Mu > _cap_d:
-            pass_flag = False
-            length_fail_mode = 'member.flexure.distortional'
-        else:
-            pass_flag = None
+        pass_flag = None        # 상한으로도 넘지 않음 — 가정 길이의 비는 참고값
     elif Mu > 0:
         pass_flag = utilization <= 1.0
     else:
@@ -2313,9 +2374,12 @@ def _design_flexure(params: dict) -> dict:
         result['limit_state_checks'] = [{
             'name': 'F flexure', 'ratio': round(utilization, 4), 'pass': pass_flag}]
         if lb_assumed:
-            _length_assumed_item(result['limit_state_checks'][0], length_fail_mode)
+            _length_assumed_item(result['limit_state_checks'][0], length_fail_mode,
+                                 (length_bound or {}).get('ratio'))
     if lb_assumed:
         result['length_assumed'] = True
+        if length_bound:
+            result['length_independent_bound'] = length_bound
     for item in not_evaluated:
         _mark_not_evaluated(result, item)
 
@@ -2326,7 +2390,7 @@ def _design_flexure(params: dict) -> dict:
               D_over_t=D_over_t, E=E, is_round=_is_round, dist_applicable=dist_applicable,
               dist_reason=dist_reason, dist_stated=bool(lap_region and dist_excluded), f2_unavailable=f2_unavailable, R_uplift=R_uplift, Mn=Mn, mode=mode,
               phi=phi, omega=omega, lap_stated=bool(lap_stated), h_web=geom.get('h_web'), t_web=geom.get('t'),
-              lb_assumed=lb_assumed,
+              lb_assumed=lb_assumed, length_bounds=length_bounds_ck,
               i621_row=(_i621_row_text(section_type, _out_to_out_dims(geom)[0], params.get('span_type'))
                         if R_uplift is not None and R_uplift > 0 else None))
 
@@ -2764,6 +2828,17 @@ def _check_i621_limits(params: dict, geom: dict, Fy: float, Fu: float, R_uplift:
 # 조합 하중
 # ============================================================
 
+_ASSUMED_LENGTH_NE = ('member.ne.e2_e2_global_buckling_assumed', 'member.ne.f2_f2_lateral_torsional_buckling_4')
+
+
+def _drop_unused_length_items(sub: dict, demand) -> dict:
+    """그 성분의 소요가 0 이면 가정한 길이의 미평가 항목(E2 · F2 의 120 in)을 뺀 사본 — 그 강도는 조합식에 들지 않는다."""
+    if demand and demand > 0:
+        return sub
+    keep = [x for x in (sub.get('not_evaluated') or []) if getattr(x, 'code', None) not in _ASSUMED_LENGTH_NE]
+    return dict(sub, not_evaluated=keep)
+
+
 def _merge_sub_verdicts(result: dict, subs: list, main_names: tuple) -> None:
     """하위 설계의 별도 한계상태(H2·H3·G5·정모멘트 구간)와 미평가 항목을 조합 결과에 합친다.
 
@@ -2968,23 +3043,20 @@ def _design_combined(params: dict) -> dict:
     # E-1: Pa · Max · B1 가운데 하나라도 빈 길이를 엔진의 기본 길이로 둔 값이면 H1.2 의 비는 판정 근거가 아니다.
     # 길이와 상관없는 상한(Pa ≤ Pnd 의 설계강도, §F4 가 있으면 Max ≤ Mnd 의 설계강도, B1 ≥ 1, (P)L/1000 ≥ 0)으로
     # 계산한 하한 비가 1 을 넘을 때만 불합격 — 어느 길이에서나 넘는다.
+    # 가정한 길이의 강도는 그 항의 소요가 있을 때만 H1.2 를 막는다(검토 2차 R2-2): Mux = 0 이면 Max 는 식에 들지 않는다.
     _b1x_assumed = Pu > 0 and Mux > 0 and params.get('KxLx') is None
     _b1y_assumed = Pu > 0 and (Muy > 0 or not angle_exempt) and params.get('KyLy') is None
-    h12_length_assumed = bool(comp.get('length_assumed') or flex_x.get('length_assumed')
-                              or _b1x_assumed or _b1y_assumed)
+    _comp_blocks = bool(comp.get('length_assumed')) and Pu > 0
+    _flex_blocks = bool(flex_x.get('length_assumed')) and Mux > 0
+    h12_length_assumed = bool(_comp_blocks or _flex_blocks or _b1x_assumed or _b1y_assumed)
     h12_bound = None
-    if h12_length_assumed and not _component_unavailable:
-        def _cap(nominal, kind):
-            return nominal * PHI[kind] if design_method == 'LRFD' else nominal / OMEGA[kind]
-        comp_u = comp.get(_DISPLAY_UNROUNDED) or {}
-        flex_u = flex_x.get(_DISPLAY_UNROUNDED) or {}
-        Pa_ub = _cap(comp_u.get('Pnd', comp['Pnd']), 'compression') if comp.get('length_assumed') else Pa
-        if not flex_x.get('length_assumed'):
-            Max_ub = Max
-        elif flex_x.get('distortional_applicable') and not flex_x.get('distortional_not_evaluated'):
-            Max_ub = _cap(flex_u.get('Mnd', flex_x['Mnd']), 'flexure')
-        else:
-            Max_ub = None      # 길이와 상관없는 휨 상한이 없다 — 그 항은 0 으로(하한)
+    if h12_length_assumed:
+        # 상한: 각 성분 결과의 length_independent_bound(가장 유리한 길이에서의 엔진 강도 — 압축 Pne = Py,
+        # 휨 Lb = 0), 막히지 않은 성분은 그 강도 그대로. B1 = 1, (P)L/1000 = 0.
+        _clb = comp.get('length_independent_bound') or {}
+        _flb = flex_x.get('length_independent_bound') or {}
+        Pa_ub = _clb.get('design_strength') if _comp_blocks else Pa
+        Max_ub = _flb.get('design_strength') if _flex_blocks else Max
         mx_lb = Mux if _b1x_assumed else Mux_amp
         my_lb = Muy if _b1y_assumed else (Muy_amp if not angle_l1000_note else Muy_amp_no_ecc)
         h12_bound = ((Pu / Pa_ub if Pa_ub and Pa_ub > 0 else 0.0)
@@ -2993,9 +3065,10 @@ def _design_combined(params: dict) -> dict:
         result['interaction_length_bound'] = {
             'total': round(h12_bound, 4), 'total_unrounded': h12_bound,
             'Pa_upper': Pa_ub, 'Max_upper': Max_ub,
-            'note': 'lower bound of the H1.2 ratio over every length (Pa <= design Pnd, Max <= design Mnd when '
+            'note': 'lower bound of the H1.2 ratio over every length (Pa, Max <= their length_independent_bound, '
                     'F4 is evaluated, B1 >= 1) — decides only when it exceeds 1'}
-    if _component_unavailable:
+    _h12_bound_fails = h12_bound is not None and h12_bound > 1.0
+    if _component_unavailable and not _h12_bound_fails:
         interaction['pass'] = None      # 성분 강도를 평가하지 못함 — 요약도 판정 없음(비는 참고값)
         _merge_governing_check(result, {**interaction, 'pass': None}, 'H1.2 axial + bending')
         _mark_not_evaluated(result, _nt('member.ne.h1_2_h1_axial_bending_component'))
@@ -3008,7 +3081,8 @@ def _design_combined(params: dict) -> dict:
         interaction['length_assumed'] = True
         _merge_governing_check(result, {**interaction, 'pass': False if h12_fails else None}, 'H1.2 axial + bending')
         _length_assumed_item(result['limit_state_checks'][-1],
-                             'member.axial_bending (length-independent lower bound)' if h12_fails else None)
+                             'member.axial_bending: H1.2 with Pa, Max at their length-independent bounds, B1 = 1'
+                             if h12_fails else None, h12_bound if h12_fails else None)
         if not h12_fails:
             _mark_not_evaluated(result, _nt('member.ne.h1_2_assumed_length'))
     else:
@@ -3071,7 +3145,9 @@ def _design_combined(params: dict) -> dict:
     if not angle_exempt:
         comp_for_merge = dict(comp, not_evaluated=[x for x in (comp.get('not_evaluated') or [])
                                                    if not str(x).startswith('H1.2 angle')])
-    _merge_sub_verdicts(result, [('[압축]', comp_for_merge), ('[휨x]', flex_x)],
+    # 소요가 없는 성분의 「가정한 길이」 미평가는 조합 판정에 옮기지 않는다(검토 2차 R2-2) — 그 강도는 식에 없다.
+    comp_for_merge = _drop_unused_length_items(comp_for_merge, Pu)
+    _merge_sub_verdicts(result, [('[압축]', comp_for_merge), ('[휨x]', _drop_unused_length_items(flex_x, Mux))],
                         ('E axial compression', 'F flexure'))
     _finalize_verdict(result)
     # 검토 항목: 성분(압축 · 휨x 와 그 G2/H2/G5/H3/정모멘트) + §H1.2 상호작용
@@ -3086,7 +3162,7 @@ def _design_combined(params: dict) -> dict:
         Cmy=Cmy, angle=angle_trace,
         Pa_id=_governing_check_id(comp.get('design_checks') or [], 'member.compression', Pa),
         Max_id=_governing_check_id(flex_x.get('design_checks') or [], 'member.flexure', Max),
-        component_unavailable=_component_unavailable,
+        component_unavailable=_component_unavailable and not _h12_bound_fails,
         length_assumed=h12_length_assumed, length_bound=h12_bound))
     result['design_checks'] = (_mc.remap_mirrors(comp_checks, 'compression')
                                + _mc.remap_mirrors(flex_x.get('design_checks', []), 'flexure_x') + [h12])
@@ -3204,12 +3280,11 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
     }
     # E-1: Max 가 빈 Lb 의 기본값에서 나왔으면 Eq. H1.1-2 의 비는 참고값 — Eq. H1.1-1(인장 플랜지 항복)은 길이와
     # 상관없어 그대로 판정한다. H1.1-2 는 길이와 상관없는 상한(Max ≤ §F4 Mnd 의 설계강도)의 하한 비가 넘을 때만 불합격.
-    r12_length_assumed = bool(flex_x.get('length_assumed'))
+    r12_length_assumed = bool(flex_x.get('length_assumed')) and Mux > 0     # Mux = 0 이면 Max 는 식에 없다
     r12_bound = None
     if r12_length_assumed:
-        if flex_x.get('distortional_applicable') and not flex_x.get('distortional_not_evaluated'):
-            _mnd = (flex_x.get(_DISPLAY_UNROUNDED) or {}).get('Mnd', flex_x['Mnd'])
-            _max_ub = _mnd * phi_b if design_method == 'LRFD' else _mnd / omega_b
+        _max_ub = (flex_x.get('length_independent_bound') or {}).get('design_strength')
+        if _max_ub:
             r12_bound = _ratio(Mux, _max_ub) + _ratio(Muy, May) - _ratio(T_abs, Ta)
         r12_fails = r12_bound is not None and r12_bound > 1.0
         result['length_assumed'] = True
@@ -3232,7 +3307,7 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
     for key in ('shear', 'shear_interaction', 'web_crippling', 'h3_interaction', 'positive_region'):
         if flex_x.get(key) is not None:
             result[key] = flex_x[key]
-    _merge_sub_verdicts(result, [('[인장]', tens), ('[휨x]', flex_x)],
+    _merge_sub_verdicts(result, [('[인장]', tens), ('[휨x]', _drop_unused_length_items(flex_x, Mux))],
                         ('D tension', 'F flexure'))
     _finalize_verdict(result)
     h11 = _mc.tension_bending_checks(dict(

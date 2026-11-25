@@ -59,12 +59,14 @@ def buckling_src(label, dsm, prefix, mode):
 def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, demand,
                    *, phi, omega, trusted=True, untrusted_reason=None, mirrors=None,
                    phi_symbol='φ', omega_symbol='Ω', location=None, group=None, no_demand_reason=None,
-                   variant=None, assumed_length=False):
+                   variant=None, assumed_length=False, length_bound=None):
     """공칭강도 단계 다음의 설계강도 · 판정 단계를 붙이고 항목을 만든다.
 
     demand: q(...) (소요강도, source 포함) 또는 None/0 — 없으면 not_evaluated(소요 없음).
     assumed_length: 강도가 엔진이 둔 길이(빈 KxLx · KyLy · KtLt · Lb 의 120 in)에서 나왔다 — 그 길이는 유리한 쪽도
-    불리한 쪽도 아니므로 넘어도 불합격이 아니다. 판정은 언제나 not_evaluated, 수는 reference 로만(E-1).
+    불리한 쪽도 아니므로 넘어도 불합격이 아니다. 판정은 not_evaluated, 수는 reference 로만(E-1).
+    length_bound: (기호, 공칭값, 글) — 같은 한계상태를 가장 유리한 길이(전체좌굴 없음: Pne = Py, Mne = Lb = 0 의 값)로
+    계산한 상한. 소요가 그 상한의 설계강도도 넘으면 어느 길이에서나 넘는다 — fail, 비는 그 상한의 비(검토 2차 R2-1).
     """
     if assumed_length:
         trusted = False
@@ -94,6 +96,23 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
                           factor_=fac, ratio=None, reason='zero design strength' if trusted else untrusted_reason,
                           steps=tr.steps, location=location, group=group, mirrors=mirrors, variant=variant,
                           trusted=trusted if not trusted else None)
+    if assumed_length and length_bound is not None and length_bound[1] is not None and length_bound[1] > 0:
+        b_sym, b_nom, b_txt = length_bound
+        b_cap = phi * b_nom if dm == 'LRFD' else b_nom / omega
+        r_b = ratio_of(dval, b_cap)
+        if r_b is not None and r_b > 1.0:
+            # 가정한 길이의 단계는 참고로 두고, 길이와 상관없는 상한으로 판정한다.
+            i_b = tr.add('equation', f'{b_sym} = {nom_symbol} at the most favourable length ({b_txt})',
+                         inputs=[], result=q(b_sym, b_nom, quantity))
+            i_bd = design_strength_step(tr, dm, tr.ref(i_b, b_sym), phi, omega, b_cap, f'{cap_symbol},max',
+                                        quantity, phi_symbol=phi_symbol, omega_symbol=omega_symbol)
+            verdict_step(tr, demand, tr.ref(i_bd), r_b, 'fail')
+            return make_check(cid, design_method=dm, verdict='fail', demand=demand,
+                              capacity=q(f'{cap_symbol},max', b_cap, quantity), nominal=q(b_sym, b_nom, quantity),
+                              factor_=fac, ratio=r_b, steps=tr.steps,
+                              reason=_nt('member.reason.fails_on_length_independent_mode', check=f'{cid}: {b_txt}'),
+                              reference={'capacity': cap_q, 'nominal': nom_q, 'ratio': r},
+                              location=location, group=group, variant=variant, trusted=False)
     v = 'not_evaluated' if assumed_length else verdict_from(r, trusted=trusted)
     verdict_step(tr, demand, tr.ref(i_ds), r, v)
     reason = None
@@ -106,6 +125,31 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
                       factor_=fac, ratio=r, reason=reason, steps=tr.steps, reference=ref,
                       location=location, group=group, mirrors=mirrors, variant=variant,
                       trusted=False if not trusted else None)
+
+
+def bound_fail(cid, ctx, demand, bound, *, phi, omega, cap_symbol, quantity, phi_symbol='φ', omega_symbol='Ω'):
+    """강도를 이 길이에서 얻지 못했지만(가정 길이 · 전체좌굴 미구현) 가장 유리한 길이의 상한으로도 넘는 경우의 불합격
+    항목(검토 2차 R2-1). 넘지 않으면 None — 호출자가 not_evaluated 를 그대로 둔다."""
+    if not bound or not demand or not demand.get('value') or demand['value'] <= 0:
+        return None
+    b_sym, b_nom, b_txt = bound
+    if not b_nom or b_nom <= 0:
+        return None
+    dm = ctx['dm']
+    b_cap = phi * b_nom if dm == 'LRFD' else b_nom / omega
+    r_b = ratio_of(demand['value'], b_cap)
+    if r_b is None or r_b <= 1.0:
+        return None
+    tr = Trace()
+    i_b = tr.add('equation', f'{b_sym} ({b_txt})', inputs=[], result=q(b_sym, b_nom, quantity))
+    i_bd = design_strength_step(tr, dm, tr.ref(i_b, b_sym), phi, omega, b_cap, f'{cap_symbol},max', quantity,
+                                phi_symbol=phi_symbol, omega_symbol=omega_symbol)
+    verdict_step(tr, demand, tr.ref(i_bd), r_b, 'fail')
+    return make_check(cid, design_method=dm, verdict='fail', demand=demand,
+                      capacity=q(f'{cap_symbol},max', b_cap, quantity), nominal=q(b_sym, b_nom, quantity),
+                      factor_=factor(dm, phi, omega, phi_symbol, omega_symbol), ratio=r_b, steps=tr.steps,
+                      reason=_nt('member.reason.fails_on_length_independent_mode', check=f'{cid}: {b_txt}'),
+                      trusted=False)
 
 
 def not_evaluated(cid, ctx, reason, *, steps=None, location=None, group=None, reference=None, variant=None):
@@ -362,14 +406,22 @@ def compression_checks(ctx):
     # --- E2
     # 빈 길이를 엔진의 기본 길이로 둔 Pne(와 그것을 쓰는 Pnℓ)는 판정에 쓰지 않는다 — 넘어도 불합격이 아니다(E-1).
     len_assumed = bool(ctx['missing_len']) and not ctx['Fcre_override'] > 0
+    _bounds = ctx.get('length_bounds') or {}
+
+    def _lb(mode):
+        b = _bounds.get(mode)
+        return (b['symbol'], b['value'], b['text']) if b else None
     g_items = ne_items(ne, 'E2')
     gr = ctx['global_result']
     tr = Trace()
     i_fcre = _column_fcre_steps(tr, ctx)
     if ctx['e2_unavailable'] or i_fcre is None:
-        checks.append(not_evaluated('member.compression.global', ctx,
-                                    _joined('; ', g_items) or _nt('member.reason.e2_e2_global_buckling_stress'),
-                                    steps=tr.steps))
+        checks.append((len_assumed and bound_fail('member.compression.global', ctx, demand, _lb('global'), phi=phi,
+                                                  omega=omega, cap_symbol='φcPne' if dm == 'LRFD' else 'Pne/Ωc',
+                                                  quantity='force', phi_symbol='φc', omega_symbol='Ωc'))
+                      or not_evaluated('member.compression.global', ctx,
+                                       _joined('; ', g_items) or _nt('member.reason.e2_e2_global_buckling_stress'),
+                                       steps=tr.steps))
         g_trusted = False
     else:
         i_l = tr.add('slenderness', 'λc = (Fy / Fcre)^0.5', equation='E2-4', inputs=[fy, tr.ref(i_fcre)],
@@ -387,7 +439,7 @@ def compression_checks(ctx):
                                      mirrors=mir('member.compression.global', 'Pne'),
                                      phi_symbol='φc', omega_symbol='Ωc',
                                      no_demand_reason=_nt('member.reason.no_required_axial_strength'),
-                                     assumed_length=len_assumed))
+                                     assumed_length=len_assumed, length_bound=_lb('global')))
 
     # --- E3.2 (원형관이고 Pcrl 을 받지 않았으면 §E3.1.1.1)
     l_items = ne_items(ne, 'E3')
@@ -424,12 +476,15 @@ def compression_checks(ctx):
                                      mirrors=mir('member.compression.local', 'Pnl'),
                                      phi_symbol='φc', omega_symbol='Ωc',
                                      no_demand_reason=_nt('member.reason.no_required_axial_strength'),
-                                     variant='round_tube', assumed_length=len_assumed))
+                                     variant='round_tube', assumed_length=len_assumed, length_bound=_lb('local')))
     elif ctx['local_not_evaluated']:
         checks.append(not_evaluated('member.compression.local', ctx, _joined('; ', l_items) or _nt('member.reason.no_pcrl')))
     elif ctx['e2_unavailable']:
-        checks.append(not_evaluated('member.compression.local', ctx,
-                                    _nt('member.reason.e2_pne_e2_available_local')))
+        checks.append((len_assumed and bound_fail('member.compression.local', ctx, demand, _lb('local'), phi=phi,
+                                                  omega=omega, cap_symbol='φcPnℓ' if dm == 'LRFD' else 'Pnℓ/Ωc',
+                                                  quantity='force', phi_symbol='φc', omega_symbol='Ωc'))
+                      or not_evaluated('member.compression.local', ctx,
+                                       _nt('member.reason.e2_pne_e2_available_local')))
     else:
         tr = Trace()
         lr = ctx['local_result']
@@ -460,7 +515,7 @@ def compression_checks(ctx):
                                      mirrors=mir('member.compression.local', 'Pnl'),
                                      phi_symbol='φc', omega_symbol='Ωc',
                                      no_demand_reason=_nt('member.reason.no_required_axial_strength'),
-                                     assumed_length=len_assumed))
+                                     assumed_length=len_assumed, length_bound=_lb('local')))
 
     # --- E4
     d_items = ne_items(ne, 'E4')
@@ -669,6 +724,11 @@ def flexure_checks(ctx):
     # 빈 Lb 를 엔진의 기본 길이로 둔 Mne(와 그것을 쓰는 Mnℓ)는 판정에 쓰지 않는다(E-1). 랩 구간의 Lb = 0 상한은 다르다 —
     # 그것은 가장 유리한 길이라 넘으면 진짜 불합격이다(_lb_lap_upper_bound).
     lb_assumed = bool(ctx.get('lb_assumed'))
+    _fb = ctx.get('length_bounds') or {}
+
+    def _lbf(mode):
+        b = _fb.get(mode)
+        return (b['symbol'], b['value'], b['text']) if b else None
     g_items = ne_items(ne, 'F2')
     l_items = ne_items(ne, 'F3')
     d_items = ne_items(ne, 'F4')
@@ -694,15 +754,19 @@ def flexure_checks(ctx):
     tr = Trace()
     i_mne = _mne_steps(tr, ctx, st, ctx['Lb'], ctx['Cb'], Lb_src, Cb_src)
     if i_mne is None or ctx['f2_unavailable']:
-        checks.append(not_evaluated('member.flexure.global', ctx,
-                                    _joined('; ', g_items) or _nt('member.reason.f2_f2_strength_available'), steps=tr.steps))
+        checks.append((lb_assumed and bound_fail('member.flexure.global', ctx, demand, _lbf('global'), phi=phi,
+                                                 omega=omega, cap_symbol='φbMne' if dm == 'LRFD' else 'Mne/Ωb',
+                                                 quantity='moment', phi_symbol=sym_phi, omega_symbol=sym_om))
+                      or not_evaluated('member.flexure.global', ctx,
+                                       _joined('; ', g_items) or _nt('member.reason.f2_f2_strength_available'),
+                                       steps=tr.steps))
     else:
         checks.append(strength_check('member.flexure.global', tr, ctx, i_mne, 'Mne',
                                      'φbMne' if dm == 'LRFD' else 'Mne/Ωb', 'moment', demand, phi=phi, omega=omega,
                                      trusted=not g_items, untrusted_reason=_joined('; ', g_items),
                                      mirrors=mir('member.flexure.global', 'Mne'),
                                      phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem,
-                                     assumed_length=lb_assumed))
+                                     assumed_length=lb_assumed, length_bound=_lbf('global')))
     g_bad = bool(g_items) or ctx['f2_unavailable']
 
     # --- F3.2
@@ -713,8 +777,11 @@ def flexure_checks(ctx):
     elif st['local_missing']:
         checks.append(not_evaluated('member.flexure.local', ctx, _joined('; ', l_items) or _nt('member.reason.no_mcrl')))
     elif ctx['f2_unavailable'] or i_mne is None:
-        checks.append(not_evaluated('member.flexure.local', ctx,
-                                    _nt('member.reason.f2_mne_f2_available_local')))
+        checks.append((lb_assumed and bound_fail('member.flexure.local', ctx, demand, _lbf('local'), phi=phi,
+                                                 omega=omega, cap_symbol='φbMnℓ' if dm == 'LRFD' else 'Mnℓ/Ωb',
+                                                 quantity='moment', phi_symbol=sym_phi, omega_symbol=sym_om))
+                      or not_evaluated('member.flexure.local', ctx,
+                                       _nt('member.reason.f2_mne_f2_available_local')))
     else:
         tr = Trace()
         i_cr = _mcrl_steps(tr, ctx, st, Sf)
@@ -749,7 +816,7 @@ def flexure_checks(ctx):
                                      trusted=not reasons, untrusted_reason=_joined('; ', reasons),
                                      mirrors=mir('member.flexure.local', 'Mnl'),
                                      phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem,
-                                     assumed_length=lb_assumed))
+                                     assumed_length=lb_assumed, length_bound=_lbf('local')))
 
     # --- F4
     dr = st['dist_result']
@@ -1334,7 +1401,7 @@ def axial_bending_check(ctx):
         ins += [q('May', ctx['May'], 'moment', src('user_input', key='May_strength'))]
         expr += f' + {my_sym}/May'
     i_x = tr.add('equation', expr, equation='H1.2-1', inputs=ins, result=q('H1.2', raw['total'], 'dimensionless'))
-    if ctx.get('length_assumed') and not ctx['component_unavailable']:
+    if ctx.get('length_assumed') and not ctx['component_unavailable']:   # (호출자: 하한이 넘으면 unavailable 을 끈다)
         # E-1: Pa · Max · B1 이 빈 길이의 기본값에서 나왔다 — 비는 참고값. 길이와 상관없는 하한 비가 넘으면 불합격.
         bound = ctx.get('length_bound')
         fails = bound is not None and bound > 1.0

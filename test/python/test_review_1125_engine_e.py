@@ -297,3 +297,109 @@ def test_display_unrounded_nested_groups_mirror_the_shown_values():
             'design_connection.limit_states', 'lap.Pns', 'loads.locations'}
     assert want <= seen, want - seen
     assert total > 1000
+
+
+# ---------------------------------------------------------------- 검토 2차(R2-1 … R2-6)
+def _dsm_local(Pne, Pcrl):
+    lam = math.sqrt(Pne / Pcrl)
+    if lam <= 0.776:
+        return Pne
+    r = (Pcrl / Pne) ** 0.4
+    return (1 - 0.15 * r) * r * Pne
+
+
+def test_R2_1_local_bound_at_pne_py_fails_for_any_length():
+    """Pcrl 2.0, Pcrd 40, Pu 9, 길이 빈 칸: Pnℓ(Pne = Py = 21.1) = 7.741, φ 6.580 < 9 → 어느 길이에서나 불합격.
+    요약 항목의 ratio 는 그 상한의 비(9 / 6.580 = 1.368), 가정 길이의 비는 reference 아래."""
+    Py = 0.422 * 50.0
+    pnl = _dsm_local(Py, 2.0)
+    r = design_member(dict(BASE, member_type='compression', Pu=9.0, dsm=dict(Pcrl=2.0, Pcrd=40.0)))
+    assert r['pass'] is False
+    loc = _c(r, 'member.compression.local')
+    assert loc['verdict'] == 'fail' and abs(loc['ratio'] - 9.0 / (0.85 * pnl)) < 1e-9
+    item = r['limit_state_checks'][0]
+    assert item['pass'] is False and abs(item['ratio'] - round(9.0 / (0.85 * pnl), 4)) < 1e-12
+    assert item['reference']['ratio'] > 3.0 and 'local buckling at Pne = Py' in item['reason']
+    b = r['length_independent_bound']
+    assert abs(b['Pn'] - pnl) < 1e-9 and b['governing_check'] == 'member.compression.local'
+    a = design_member(dict(BASE, member_type='compression', Pu=6.0, design_method='ASD',
+                           dsm=dict(Pcrl=2.0, Pcrd=40.0)))
+    assert a['pass'] is False and abs(_c(a, 'member.compression.local')['ratio'] - 6.0 / (pnl / 1.80)) < 1e-9
+
+
+def test_R2_1_flexure_local_and_yield_bounds():
+    """Mcrl 4, Mcrd 60, Mu 15: φMnℓ(Mne = My = 25) = 0.9 × 11.146 = 10.03 < 15 → 불합격.
+    Mcrd 없음 · F4 해당 없음, Mu 30 > φMy = 22.5 → 불합격(전에는 None)."""
+    My = 0.5 * 50.0
+    mnl = _dsm_local(My, 4.0)
+    r = design_member(dict(BASE, member_type='flexure', Mu=15.0, dsm=dict(Mcrl=4.0, Mcrd=60.0)))
+    assert r['pass'] is False and abs(_c(r, 'member.flexure.local')['ratio'] - 15.0 / (0.9 * mnl)) < 1e-9
+    for extra in ({}, {'distortional_not_applicable': True}):
+        f = design_member(dict(BASE, member_type='flexure', Mu=30.0, dsm=dict(Mcrl=60.0, Mcrd=0.0), **extra))
+        assert f['pass'] is False and _c(f, 'member.flexure.global')['verdict'] == 'fail', extra
+        yld = round(30.0 / (0.9 * My), 4)
+        if extra:
+            assert abs(f['limit_state_checks'][0]['ratio'] - yld) < 1e-12
+        else:   # Mcrd 0 → 부록 2 해석식 Mnd 가 상한을 더 낮춘다(min 이 지배)
+            assert f['limit_state_checks'][0]['ratio'] >= yld
+
+
+def test_R2_1_yield_bound_without_distortional_and_unavailable_e2():
+    """Pcrd 없음(또는 해당 없음 · E2 를 못 구한 hat)에서도 Pu > φPy = 0.85 × 21.1 = 17.935 이면 불합격."""
+    for st, extra in (('C', {}), ('C', {'distortional_not_applicable': True}), ('hat', {})):
+        p = dict(design_method='LRFD', Fy=50.0, section_type=st, props=dict(III3), member_type='compression',
+                 Pu=25.0, dsm=dict(Pcrl=15.8, Pcrd=0.0), **extra)
+        r = design_member(p)
+        g = _c(r, 'member.compression.global')
+        assert r['pass'] is False and g['verdict'] == 'fail' and abs(g['ratio'] - 25.0 / (0.85 * 0.422 * 50)) < 1e-9
+
+
+def test_R2_1_h12_uses_the_same_bounds():
+    """조합: Pu 8 > φPnℓ(Py) 6.580 이면 H1.2 하한도 넘는다(Pa ≤ 그 값)."""
+    r = design_member(dict(BASE, member_type='combined', Pu=8.0, Mux=2.0,
+                           dsm=dict(Pcrl=2.0, Pcrd=40.0, Mcrl=60, Mcrd=60)))
+    pnl = _dsm_local(0.422 * 50.0, 2.0)
+    assert r['pass'] is False and _c(r, 'member.axial_bending')['verdict'] == 'fail'
+    assert abs(r['interaction_length_bound']['Pa_upper'] - 0.85 * pnl) < 1e-9
+
+
+def test_R2_2_unused_assumed_strength_does_not_block():
+    """KL 전부 줌, Mux = 0, Muy 만, Lb 빈 칸: Max 는 H1.2 에 들지 않는다 — 판정(0.396 통과). 인장 조합도 같다."""
+    p = dict(BASE, member_type='combined', KxLx=60, KyLy=60, KtLt=60, Mux=0.0, Muy=0.5, May_strength=5.0)
+    r = design_member(dict(p, Pu=2.0))
+    h = _c(r, 'member.axial_bending')
+    assert h['verdict'] == 'pass' and abs(h['ratio'] - 0.3965) < 1e-4 and r['pass'] is True
+    t = design_member(dict(p, Pu=-2.0))
+    assert _c(t, 'member.tension_bending.buckling')['verdict'] == 'pass' and t['pass'] is True
+
+
+def test_R2_3_lap_count_never_passes_without_the_statement():
+    p = dict(_LAP, fastener_type='screw', fastener_dia=0.19)
+    for conf in (False, True):
+        r = design_lap_connection(dict(p, lap_force_model_confirmed=conf))
+        assert _c(r, 'lap.fastener_count')['verdict'] == 'not_evaluated', conf   # 나사 Pns 가정값 · 진술 없음
+
+
+def test_R2_4_null_lengths_mean_blank():
+    r = design_member(dict(BASE, member_type='flexure', Mu=5.0, Lb=None))
+    assert 'error' not in r and r['length_assumed'] is True and r['pass'] is None
+    c = design_member(dict(BASE, member_type='combined', Pu=1.0, Mux=1.0, KxLx=None, KyLy=None, KtLt=None, Lb=None))
+    assert 'error' not in c and c['pass'] is None
+
+
+def test_R2_5_seismic_single_effect_is_stated():
+    for st in LOAD_COMBINATION_STANDARDS:
+        r = analyze_loads('floor-joist', 'simple', 20.0, {'D': 10, 'L': 40, 'E': 5}, load_combination_standard=st)
+        notes = [n for n in r['scope_notes'] if getattr(n, 'code', None) == 'loads.scope.seismic_single_effect']
+        assert len(notes) == 1, st
+    r = analyze_loads('floor-joist', 'simple', 20.0, {'D': 10, 'L': 40, 'E': 5}, load_combination_standard='asce7_22')
+    assert '0.9D − Ev + Eh' in str(r['scope_notes'][-2]) or any('0.9D − Ev + Eh' in str(n) for n in r['scope_notes'])
+    assert not any(getattr(n, 'code', None) == 'loads.scope.seismic_single_effect'
+                   for n in analyze_loads('floor-joist', 'simple', 20.0, {'D': 10, 'L': 40})['scope_notes'])
+
+
+def test_R2_6_lap_without_verdict_marks_utilization_invalid():
+    un = design_lap_connection(dict(_LAP))
+    assert un['pass'] is None and un['utilization_valid'] is False
+    ok = design_lap_connection(dict(_LAP, lap_force_model_confirmed=True))
+    assert ok['pass'] is True and 'utilization_valid' not in ok

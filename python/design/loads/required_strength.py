@@ -345,6 +345,12 @@ def analyze_loads(
     if 'S' in patterned:
         assumptions.append(_nt('loads.assumption.snow_partial_loading_sec'))
     scope_notes.append(_nt('loads.scope.member_self_weight_added'))
+    if present.get('E'):
+        # 지진 E 는 한 값의 하중효과로 조합한다(검토 2차 R2-5) — 7-22 의 7 · 10 은 −Ev 를 쓴다(Sec. 2.3.6 · 2.4.5)
+        scope_notes.append(_nt('loads.scope.seismic_single_effect', standard=std_table['edition'],
+                               combos={'asce7_10': '0.9D + 1.0E (LRFD 7), 0.6D + 0.7E (ASD 8)',
+                                       'asce7_22': '7: 0.9D − Ev + Eh, 10: 0.6D − 0.7Ev + 0.7Eh',
+                                       'kds_41_12_00': '(1.7-7) 0.9D + 1.0E, (1.7-15) 0.6D + 0.7E'}[combo_std]))
     if combo_std != 'asce7_10':
         # 처음 값(asce7_10)의 결과는 지금과 바이트로 같게 둔다 — 고른 때만 밝힌다(결정 R4)
         assumptions.append(std_table['load_definition'])
