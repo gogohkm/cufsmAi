@@ -568,6 +568,18 @@ function shapeDesign(scope: string): Shaper {
             out.check_lines = dc.map((c) => checkLine(c, false, !inner));
         }
         headlineCaveat(out, out.governing_checks);
+        // 엔진(2026-11-25 둘째 판): 빈 길이의 맨 위 utilization 은 가정한 길이의 수(utilization_valid false) — 판정비가 아니다. 길이와 상관없는
+        // 하한으로 NG 이면 그 하한의 비 · 항목이 판정비 · 지배(length_independent_bound)
+        if (!inner && r.length_assumed === true && r.utilization_valid === false) {
+            const b = r.length_independent_bound && typeof r.length_independent_bound === 'object' ? r.length_independent_bound : null;
+            const ib = r.interaction_length_bound && typeof r.interaction_length_bound === 'object' ? r.interaction_length_bound : null;
+            const ibt = ib ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
+            const bound = b && typeof b.ratio === 'number' ? { id: b.governing_check_id ?? b.governing_check ?? 'length_independent_bound', ratio: b.ratio, key: 'length_independent_bound' }
+                : typeof ibt === 'number' && ibt > 1 ? { id: 'member.axial_bending', ratio: ibt, key: 'interaction_length_bound' } : null;
+            out.utilization_note = r.pass === false && bound
+                ? `utilization comes from an assumed length and is not the verdict ratio — the result FAILS at every length on the length-independent bound: ${bound.id} ratio ${Number(bound.ratio.toFixed(4))} (${bound.key}); report that ratio`
+                : 'utilization comes from an assumed length (a length is blank) — it is not a verdict ratio; report the result as not evaluated for the length-dependent checks';
+        }
         // 하위 결과(web_crippling · shear · 조합의 compression … · fastener_design)의 알림 — 하나도 버리지 않는다.
         const others = otherNotices(r, out);
         if (others.length > 0) { out.notices_elsewhere = others; }
@@ -1037,7 +1049,7 @@ server.tool("set_case_inputs",
 );
 
 server.tool("run_case_check",
-    "Compute the check the screen's button would run, from the case inputs on the screen (no input changes): what='member' runs the member design (a load-analysis member type — roof-purlin, floor-joist, wall-girt, wall-stud — runs the purlin chain like design_purlin, otherwise aisi_design_<member type>), 'loads' the load analysis, 'connection' the single connection, 'lap' the lap splice. Blank required inputs are named in the error — set them with set_case_inputs or ask the person. For what='member', the member check prepares the S-S signature-curve FSM buckling values it uses (design Fy, the engine's design half-wavelength grid) when they are not current — dropped, stale or never prepared — exactly as the screen's button and aisi_design_* do; the load-analysis member types solve their own signature curves in the purlin chain. 'analytical' comes only from the fallback (round tube, failed preparation). The buckling-analysis view itself (curves, mode shapes, get_dsm_values of the model's load case) comes back only with run_analysis. The reply has the same shape as the corresponding design tool (summary by default, detail as there) plus case_check {what, tool, rev, buckling_values (member only: source fsm-prepared-now | fsm-current | fsm-in-check | mixed | analytical | not-needed, load_cases, note)}." + SUMMARY_NOTE,
+    "Compute the check the screen's button would run, from the case inputs on the screen (no input changes): what='member' runs the member design (a load-analysis member type — roof-purlin, floor-joist, wall-girt, wall-stud — runs the purlin chain like design_purlin, otherwise aisi_design_<member type>), 'loads' the load analysis, 'connection' the single connection, 'lap' the lap splice. Blank required inputs are named in the error — set them with set_case_inputs or ask the person. For what='member', the member check prepares the S-S signature-curve FSM buckling values it uses (design Fy, the engine's design half-wavelength grid) when they are not current — dropped, stale or never prepared — exactly as the screen's button and aisi_design_* do; the load-analysis member types solve their own signature curves in the purlin chain. 'analytical' comes only from the fallback (round tube, failed preparation). The buckling-analysis view itself (curves, mode shapes, get_dsm_values of the model's load case) comes back only with run_analysis. The reply has the same shape as the corresponding design tool (summary by default, detail as there) plus case_check {what, tool, rev, buckling_values (member only: source fsm-prepared-now | fsm-current | fsm-in-check | analysis-fallback | mixed | analytical | not-needed, load_cases, note)}. analysis-fallback = preparing the design signature-curve values failed and the on-screen buckling analysis (its own lengths and boundary condition) supplied them — report it with dsm_warning. Design buckling values are never cFSM-constrained (a model GBTcon constrains only the analysis view)." + SUMMARY_NOTE,
     {
         what: z.enum(['member', 'loads', 'connection', 'lap']).describe("Which check: member | loads | connection | lap"),
         detail: DETAIL_DESIGN,

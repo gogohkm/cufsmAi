@@ -5387,7 +5387,9 @@
         const mt = data.member_type || '';
         const mode = data.controlling_mode || '';
         const dm = data.design_method || 'LRFD';
-        const util = data.utilization;
+        // 엔진(2026-11-25 둘째 판): 빈 길이에서 길이와 상관없는 하한이 넘은 NG 는 그 하한의 비가 판정비(맨 위 utilization 은 가정한 길이의 수)
+        const _lbf = _U && typeof _U.lengthBoundFailure === 'function' ? _U.lengthBoundFailure(data) : null;
+        const util = _lbf ? _lbf.ratio : data.utilization;
         // 3상태 판정: utils.js 공통 verdictOf (true=OK, false=NG, null·미완료=판정 없음).
         // 게이지 색도 판정을 따른다 — 판정 없음이면 이용률이 낮아도 녹색이 아니다.
         const verdictOf = _v3;

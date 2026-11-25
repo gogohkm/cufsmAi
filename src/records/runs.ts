@@ -75,8 +75,36 @@ export function runSummary(result: any, props?: any): RunSummary {
             }
         }
     }
+    // 엔진(2026-11-25 둘째 판): 빈 길이에서 길이와 상관없는 하한(가장 유리한 길이의 엔진 강도)이 넘은 NG — 그 하한의 비와 그 항목이 판정비 · 지배다
+    // (그 항목이 가정한 길이의 검토로 trusted false 여도 — 하한은 길이와 상관없다). 다른 넘은 항목은 그 뒤에
+    const bound = lengthBoundFailure(result);
+    if (bound) {
+        if (s.maxRatio === null || bound.ratio > s.maxRatio) { s.maxRatio = bound.ratio; }
+        if (bound.id) {
+            s.governing = [{ id: bound.id, ratio: bound.ratio, verdict: 'fail' }, ...s.governing.filter((g) => g.id !== bound.id)].slice(0, 12);
+        }
+    }
     while (s.governing.length > 0 && Buffer.byteLength(canonicalJson(s), 'utf8') > SUMMARY_MAX_BYTES) { s.governing.pop(); }
     return s;
+}
+
+/** 길이와 상관없는 하한으로 NG 인 결과(빈 길이 — webview/js/utils.js lengthBoundFailure 와 같은 규칙). 아니면 null */
+export function lengthBoundFailure(result: any): { ratio: number; id: string | null } | null {
+    if (!result || typeof result !== 'object' || result.pass !== false || result.utilization_valid !== false) { return null; }
+    const b = result.length_independent_bound;
+    const ratio = b && typeof b === 'object' ? num(b.ratio) : null;
+    if (ratio !== null) {
+        const raw = b.governing_check_id ?? b.governing_check;
+        return { ratio, id: typeof raw === 'string' && ID_RE.test(raw) ? raw : null };
+    }
+    // 조합(H1.2): Pa · Max 를 그 하한으로 둔 H1.2 의 하한 비(interaction_length_bound)가 1 을 넘으면 — 항목 member.axial_bending
+    const ib = result.interaction_length_bound;
+    const t = ib && typeof ib === 'object' ? (num(ib.total_unrounded) ?? num(ib.total)) : null;
+    if (t !== null && t > 1) {
+        const has = Array.isArray(result.design_checks) && result.design_checks.some((c: any) => c && c.id === 'member.axial_bending');
+        return { ratio: t, id: has ? 'member.axial_bending' : null };
+    }
+    return null;
 }
 
 /**

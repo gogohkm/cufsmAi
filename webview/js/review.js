@@ -956,7 +956,9 @@
 
                 // ── 이용률: 부모멘트 ──
                 if (d.utilization != null && d.member_type === 'flexure') {
-                    var _negUtil = d.utilization;
+                    // 엔진(2026-11-25 둘째 판): 길이와 상관없는 하한으로 NG 이면 그 하한의 비(맨 위 utilization 은 가정한 길이의 수)
+                    var _negLbf = typeof UTILS.lengthBoundFailure === 'function' ? UTILS.lengthBoundFailure(d) : null;
+                    var _negUtil = _negLbf ? _negLbf.ratio : d.utilization;
                     // K3-6(D15): 퍼린 묶음이면 지배 부모멘트 구간이 쓴 Ly · Cb(칸의 Lb · Cb 가 아니다)
                     var _negReg = d.purlin_mode && d.design_negative && d.design_negative.region ? d.design_negative.region : null;
                     var _negLb2 = _negReg ? Number(_negReg.Ly_in) : fromDisplay(getNum('design-Lb', 0), 'length');
@@ -983,10 +985,13 @@
                     const _uInvalid = d.utilization_valid === false;
                     // 엔진 E-1: 빈 길이를 가정해 낸 비(length_assumed) — 판정이 아니다(참고 비). 그래도 넘으면(길이와 상관없는 한계상태) NG
                     const _lenAssumed = d.length_assumed === true;
+                    // 엔진(2026-11-25 둘째 판): 길이와 상관없는 하한으로 NG 이면 그 하한의 비(맨 위 utilization 은 가정한 길이의 수)
+                    const _lbf = typeof UTILS.lengthBoundFailure === 'function' ? UTILS.lengthBoundFailure(d) : null;
+                    const _failU = _lbf ? _lbf.ratio : d.utilization;
                     checks.push({
                         category: catG, item: '이용률 (DCR)',
                         status: _uInvalid ? (d.pass === false ? 'fail' : 'warn') : _statusFromVerdict(_v3(d), d.utilization),
-                        value: _uInvalid ? (d.pass === false ? (d.utilization*100).toFixed(1)+'% — '+_v3(d).short+(_lenAssumed ? ' (길이를 주지 않음 — 길이와 상관없는 한계상태가 넘음)' : ' (소요 일부 없음)')
+                        value: _uInvalid ? (d.pass === false ? (_failU*100).toFixed(1)+'% — '+_v3(d).short+(_lenAssumed ? ' (길이를 주지 않음 — 길이와 상관없는 한계상태가 넘음' + (_lbf && _lbf.governing_check ? ': ' + _lbf.governing_check : '') + ')' : ' (소요 일부 없음)')
                             : (_lenAssumed ? '판정 없음 — 길이를 주지 않음 (가정한 길이의 참고 비 ' + (d.utilization*100).toFixed(1) + '%)' : '판정 없음 — 주 소요를 주지 않음'))
                             : (d.utilization*100).toFixed(1)+'% — '+_v3(d).short,
                         criterion: 'DCR ≤ 100%',
@@ -1584,6 +1589,8 @@
 
         /** 엔진 E-1: 결과의 맨 위 비가 빈 길이를 가정해 낸 참고 비인가(판정이 아님 — 길이와 상관없는 NG 이면 아니다) */
         function _lengthAssumedRef(d) { return !!d && d.length_assumed === true && !(d.pass === false) && typeof d.utilization === 'number'; }
+        /** 엔진(2026-11-25 둘째 판): 길이와 상관없는 하한으로 NG 인 결과(빈 길이) — 판정비 · 지배는 그 하한의 것(맨 위 utilization 은 가정한 길이의 수) */
+        function _lengthBound(d) { return typeof UTILS.lengthBoundFailure === 'function' ? UTILS.lengthBoundFailure(d) : null; }
 
         function _docSummary(d, la) {
             const blocks = [];
@@ -1591,11 +1598,15 @@
             const govCombo = (d.purlin_governing && d.purlin_governing.combo) || ((la && (la.governing || la.gravity)) || {}).combo || '';
             // 엔진 E-1: 빈 길이를 가정해 낸 비는 판정비 · 지배가 아니다(참고 비로만)
             const lenRef = _lengthAssumedRef(d);
+            const lenBound = _lengthBound(d);
             blocks.push({ kind: 'table', head: ['항목', '값'], rows: [
                 ['설계 기준', 'AISI S100-16'], ['부재 유형', d.member_type || ''], ['설계 방법', d.design_method || ''],
                 ['종합 판정 (엔진)', { text: _VTXT[k], tone: _tone(k) }],
-                ['이용률 (엔진)', lenRef ? '— (판정 아님 — 가정한 길이의 참고 비 ' + Number(d.utilization).toFixed(3) + ')' : RQ(d.utilization, 'dimensionless', { digits: 3 })],
-                ['지배 파괴 모드 (엔진)', lenRef ? '' : (d.controlling_mode || '')], ['지배 검토 (엔진)', lenRef ? '' : (d.governing_check || '')],
+                ['이용률 (엔진)', lenRef ? '— (판정 아님 — 가정한 길이의 참고 비 ' + Number(d.utilization).toFixed(3) + ')'
+                    : lenBound ? Number(lenBound.ratio).toFixed(3) + ' (길이와 상관없는 하한 — 길이를 주지 않음, 가정한 길이의 참고 비 ' + Number(d.utilization).toFixed(3) + ')'
+                        : RQ(d.utilization, 'dimensionless', { digits: 3 })],
+                ['지배 파괴 모드 (엔진)', lenRef ? '' : lenBound ? (lenBound.limit_state || '') : (d.controlling_mode || '')],
+                ['지배 검토 (엔진)', lenRef ? '' : lenBound ? (lenBound.governing_check || '') : (d.governing_check || '')],
                 ['지배 구간', d.purlin_governing ? (d.purlin_governing.label || '') : ''], ['지배 하중조합', govCombo],
                 ['참조 조항', (d.spec_sections || []).join(', ')],
             ].filter((r) => r[1] !== '') });
@@ -1648,8 +1659,8 @@
                 meta: { title: 'StCFSD — 냉간성형강 설계 보고서', date: _reportDate(), spec: 'AISI S100-16', method: '직접강도법 (DSM)', units: 'US',
                     design_method: d ? (d.design_method || '') : '', member_type: d ? (d.member_type || '') : '',
                     stamp: o.stamp && typeof o.stamp === 'object' ? o.stamp : null },
-                verdict: d ? { state: _verdictKey(d), utilization: _lengthAssumedRef(d) ? null : RQ(d.utilization, 'dimensionless', { digits: 3 }),
-                    governing: _lengthAssumedRef(d) ? '' : (d.governing_check || d.controlling_mode || '') } : null,
+                verdict: d ? { state: _verdictKey(d), utilization: _lengthAssumedRef(d) ? null : RQ(_lengthBound(d) ? _lengthBound(d).ratio : d.utilization, 'dimensionless', { digits: 3 }),
+                    governing: _lengthAssumedRef(d) ? '' : _lengthBound(d) ? (_lengthBound(d).governing_check || '') : (d.governing_check || d.controlling_mode || '') } : null,
                 sections,
             };
         }

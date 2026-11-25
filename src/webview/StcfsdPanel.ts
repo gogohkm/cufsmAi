@@ -1015,7 +1015,12 @@ export class StcfsdPanel implements McpPanelInterface {
 
             case 'prepareDesignDsm':
                 try {
-                    const prepResult = await this._pageAction({ action: 'prepare_design_dsm', ...message.data });
+                    // 결정 R11 · 검증 2026-11-25 의 3: 설계 Fy 는 호스트의 값(검토 상태)이 참이다 — 화면이 단위를 오가며 되돌려 보낸 수
+                    // (50 ksi → 49.99999999993936)로 준비하면 부재 검토가 맞추는 서명과 달라 두 번 푼다. 화면이 알린 적 없는 옛 화면만 그 수를 쓴다
+                    const prepData: any = { ...(message.data || {}) };
+                    const hostFy = this._caseKeeper.drafts !== null ? this._caseKeeper.state.inputs.fy : undefined;
+                    if (typeof hostFy === 'number' && Number.isFinite(hostFy) && hostFy > 0) { delete prepData.fy; prepData.Fy = hostFy; }
+                    const prepResult = await this._pageAction({ action: 'prepare_design_dsm', ...prepData });
                     this._postMessage('designDsmPrepared', prepResult);
                 } catch (e: any) {
                     this._postMessage('designDsmPrepared', { error: e.message || String(e) });
@@ -1253,9 +1258,11 @@ export class StcfsdPanel implements McpPanelInterface {
 
     /**
      * 설계용 DSM 값(prepare_design_dsm · 부재 검토가 그 자리에서 준비하는 것)의 서명 — 그 값을 푸는 데 들어가는 것만(결정 R8):
-     * 단면(절점 좌표 · 자유도 · 요소 · 두께), 재료(prop — E · ν · G), 스프링 · 구속 · cFSM 구속(GBTcon — 해석에 든다), 설계 Fy, 격자 규칙.
+     * 단면(절점 좌표 · 자유도 · 요소 · 두께), 재료(prop — E · ν · G), 스프링 · 구속(물리 모델 — 해석에 든다), 설계 Fy, 격자 규칙.
      * 보기용 해석 조건(길이 · BC · 종방향 항 · 고유치 수 · 하중 경우 · 절점 응력)은 넣지 않는다 — 설계 준비는 엔진의 설계 격자
      * (design_signature_lengths) · S-S · m = [1] · 고유치 10 으로 스스로 정하므로 그것을 바꿔도 설계값이 낡지 않는다.
+     * cFSM 모드 구속(GBTcon)도 넣지 않는다 — 설계 준비는 언제나 구속하지 않은 보통의 서명곡선으로 푼다(_signatureDsm, 검증 2026-11-25 의 1:
+     * 구속한 값이 「지금 것」 으로 부재 검토에 들어 Mcrd 가 7 % 높았다). 구속은 좌굴 해석 보기만의 것.
      */
     private _currentDesignDsmSignature(fy?: number): string {
         const m: any = this._model as any;
@@ -1266,10 +1273,31 @@ export class StcfsdPanel implements McpPanelInterface {
             elem: m.elem || [],
             springs: m.springs ?? [],
             constraints: m.constraints ?? [],
-            GBTcon: m.GBTcon ?? {},
             section: this._sectionTypeForEngine(m) === 'CHS' ? 'CHS' : null,
             fy: Number(fy ?? this._getAnalysisFy()),
         });
+    }
+    /** 설계용 DSM 값의 서명을 파일에 적는 꼴(서명 글 전체는 모델을 다 담아 길다 — sha256) */
+    private static _designDsmSigHash(sig: string): string {
+        return 'sha256:' + crypto.createHash('sha256').update(sig, 'utf8').digest('hex');
+    }
+    /**
+     * 모델에 cFSM 모드 구속이 켜져 있는가 — 엔진 GBTConfig.is_active 와 같은 규칙(선택 벡터 glob · dist · local · other 가운데 합이 0 보다 큰 것이
+     * 하나라도 있다. CUFSM 파일은 쓰지 않을 때도 0 벡터를 저장한다).
+     */
+    private static _modeConstraintActive(model: any): boolean {
+        const g = model?.GBTcon;
+        if (!g || typeof g !== 'object') { return false; }
+        const on = (v: any) => Array.isArray(v) && v.reduce((s: number, x: any) => s + (Number.isFinite(Number(x)) ? Number(x) : 0), 0) > 0;
+        return on(g.glob) || on(g.dist) || on(g.local) || on(g.other);
+    }
+    /** 엔진 결과의 목록(list) 끝에 호스트 알림 하나 — 글은 목록에, 알림은 notices 의 끝에(목록 안의 차례가 맞는다 — notices.lines) */
+    private static _appendHostNotice(result: any, list: string, code: string, values: Record<string, unknown> = {}): void {
+        const n = NOTICES.hostNotice(code, values, list);
+        const arr = Array.isArray(result[list]) ? result[list] : [];
+        if (arr.includes(n.text)) { return; }
+        result[list] = [...arr, n.text];
+        if (Array.isArray(result.notices)) { result.notices = [...result.notices, n]; }
     }
     /** 설계 준비의 격자 표지(준비된 값 · 파일에 — 이 표지가 없는 옛 준비 값은 보기용 격자로 푼 것이라 되살리지 않는다) */
     private static readonly DESIGN_GRID_SOURCE = 'engine design_signature_lengths (S-S, m = 1, neigs 10)';
@@ -1698,11 +1726,14 @@ export class StcfsdPanel implements McpPanelInterface {
      * 설계용 DSM: 단면을 설계 하중 family 의 응력으로 두고 S-S 서명곡선(m = 1)을 푼 뒤 추출한다.
      * 엔진의 자동 경로(aisi_s100._auto_generate_props)와 같은 규약 — GUI · MCP · 퍼린이 같은 값을 쓴다.
      * 표시 해석 결과와 모델은 바꾸지 않는다. springs 를 주면 그 스프링으로(퍼린 정모멘트 데크 구속).
+     * cFSM 모드 구속(GBTcon)은 사본에서 뺀다 — 설계값은 언제나 구속하지 않은 서명곡선에서(엔진의 자동 경로도 GBTConfig() 기본 — 구속 없음).
+     * 물리 모델(스프링 · 절점 구속 constraints)은 그대로 해석에 든다.
      */
     private async _signatureDsm(baseModel: any, loadCase: string, fy: number, family: 'P' | 'Mxx',
         opts?: { springs?: number[][] }): Promise<{ dsm: any; analysis: any; classification_status: any; warnings: string[];
             classificationNote?: string }> {
         const temp = this._cloneModel(baseModel);
+        delete temp.GBTcon;
         await this._setLoadCaseOnModel(temp, loadCase, fy);
         // 결정 R8: 반파장은 엔진의 설계 격자(0.05 D … 100 D, 10 배마다 30 점) — 모델의 보기용 길이 · BC · 고유치 수와 상관없이
         const grid = await this._designSignatureGrid(temp.node);
@@ -1809,9 +1840,9 @@ export class StcfsdPanel implements McpPanelInterface {
         this._updateTreeView();
     }
 
-    /** 보기용 해석 조건만 바꾸는 원인(결정 R8 — 설계용 DSM 값은 그대로 둔다) */
+    /** 보기용 해석 조건만 바꾸는 원인(결정 R8 — 설계용 DSM 값은 그대로 둔다). cFSM 모드 구속도 보기만의 것(설계 준비는 구속하지 않는다) */
     private static readonly VIEW_ONLY_ANALYSIS_CAUSES = new Set(['run_analysis', 'signature_ss', 'set_bc', 'set_lengths', 'set_load_case',
-        'set_stress', 'set_node_stress', 'applyStress']);
+        'set_stress', 'set_node_stress', 'applyStress', 'set_gbtcon']);
 
     /** 부재 설계(퍼린 묶음 포함) · 랩 결과를 지우고 장부에 남긴다. 무엇이라도 지웠으면 true. */
     private _dropDesignResults(reason: string, cause: LedgerEntry['cause']): boolean {
@@ -1952,12 +1983,21 @@ export class StcfsdPanel implements McpPanelInterface {
         return JSON.stringify(o);
     }
 
-    /** 두 입력 열쇠의 다른 최상위 키 */
+    /**
+     * 두 입력 열쇠의 다른 최상위 키. 검증 2026-11-25 의 5: 맨 위의 Fy · Fu 가 없으면 section 의 것(analyze_loads 의 본문은 단면 묶음에
+     * 싣고, 퍼린 사슬은 맨 위에도 싣는다 — 같은 하중 요청이 Fy · Fu 의 자리만 달라 「바뀜」 으로 세어 퍼린 결과를 지웠다). 열쇠 자체는 그대로(실행 줄의 요청)
+     */
     private static _changedKeys(a: string | null, b: string): string[] {
         let pa: any = {};
         let pb: any = {};
         try { pa = a ? JSON.parse(a) : {}; } catch { pa = {}; }
         try { pb = JSON.parse(b); } catch { pb = {}; }
+        for (const o of [pa, pb]) {
+            if (!o || typeof o !== 'object') { continue; }
+            for (const k of ['Fy', 'Fu']) {
+                if (o[k] === undefined && o.section && typeof o.section === 'object' && o.section[k] !== undefined) { o[k] = o.section[k]; }
+            }
+        }
         const keys = new Set([...Object.keys(pa), ...Object.keys(pb)]);
         return [...keys].filter((k) => JSON.stringify(pa[k]) !== JSON.stringify(pb[k])).sort();
     }
@@ -2732,7 +2772,14 @@ export class StcfsdPanel implements McpPanelInterface {
         let mSign: '+' | '-' = '+';
         const fromCurrent: string[] = [];
         const prepFail = prep?.error ? `Preparing the S-S signature-curve FSM values failed (${StcfsdPanel._capText(prep.error)}). ` : '';
-        if (rest.length > 0 && !this._isAnalysisCurrent()) {
+        // 검증 2026-11-25 의 1: 지금 해석이 cFSM 모드 구속으로 푼 것이면(모델의 GBTcon — 해석의 서명에 든다) 설계의 대체로 쓰지 않는다 —
+        // 구속한 좌굴값은 모드를 빼서 높게(비안전측) 나온다
+        const constrainedView = rest.length > 0 && this._isAnalysisCurrent() && StcfsdPanel._modeConstraintActive(this._model);
+        if (constrainedView) {
+            dsmWarning = prepFail + `No FSM buckling values for ${rest.map((f) => f === 'P' ? 'compression' : 'strong-axis bending').join(' / ')}: `
+                + 'the current buckling analysis is constrained by the model\'s cFSM mode constraint (GBTcon) and is not used for design — '
+                + 'the analytical formulas are used for it where they exist.';
+        } else if (rest.length > 0 && !this._isAnalysisCurrent()) {
             if (fromPrepared.length === 0) {
                 dsmWarning = prepFail + (roundTube
                     ? 'Round tube (CHS): no DSM buckling values are prepared — the round-tube provisions apply.'
@@ -2759,6 +2806,11 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (fromCurrent.length > 0) { fyUsed = dsm.fy_used; }
                 if (missingFamilies.length > 0) {
                     dsmWarning = prepFail + `Current analysis load case does not match ${missingFamilies.join(' / ')} DSM extraction — the analytical formulas are used for it where they exist.`;
+                } else if (prepFail && fromCurrent.length > 0) {
+                    // 검증 2026-11-25 의 2: 준비가 실패했으면 언제나 그렇게 말한다(대체가 값을 채웠어도) — 그 값은 설계 서명곡선이 아니다
+                    const meta = this._lastAnalysisResult?._meta || {};
+                    dsmWarning = prepFail + `The ${fromCurrent.map((f) => f === 'P' ? 'compression' : 'strong-axis bending').join(' / ')} values came from the current buckling analysis instead `
+                        + `(${lc || 'its load case'}, its own half-wavelengths and boundary condition ${meta.BC || this._model.BC || '?'}) — not from the design S-S signature curve.`;
                 }
             } catch (e: any) {
                 dsmWarning = prepFail + `DSM extraction failed: ${e.message || String(e)}`;
@@ -2809,6 +2861,10 @@ export class StcfsdPanel implements McpPanelInterface {
             if (dsmWarning) { result.dsm_warning = dsmWarning; }
             result.dsm_basis = dsmBasis;
             if (needs.length > 0) { result.dsm_basis_by_family = dsmBasisByFamily; }
+            // 검증 2026-11-25 의 1: 모델에 모드 구속이 켜져 있으면 — 보기는 구속, 설계값은 아니다(가정 한 줄, 알림 목록에도 같은 자리에)
+            if (fromPrepared.length > 0 && StcfsdPanel._modeConstraintActive(this._model)) {
+                StcfsdPanel._appendHostNotice(result, 'assumptions', 'host.design.dsm_unconstrained');
+            }
             if (hostWarnings.length > 0) {
                 result.host_warnings = hostWarnings;
                 result.warnings = [...(Array.isArray(result.warnings) ? result.warnings : []), ...hostWarnings];
@@ -5778,6 +5834,8 @@ export class StcfsdPanel implements McpPanelInterface {
             }
         }
         assumptions.push(H('host.purlin.vu_envelope'));
+        // 검증 2026-11-25 의 1: 서명곡선은 구속하지 않고 풀었다(_signatureDsm) — 모델의 모드 구속은 보기만의 것
+        if (StcfsdPanel._modeConstraintActive(baseModel)) { assumptions.push(H('host.design.dsm_unconstrained')); }
         // 「[하중] …」 — 하중 해석의 알림에 머리를 단 것(계약 §16.2 prefix · prefix_ko): code 를 지킨다
         const loadNotices: any[] = Array.isArray(loadResult.notices) ? loadResult.notices : [];
         const loadPrefixed = (list: string, t: string): string => {
@@ -6629,9 +6687,9 @@ export class StcfsdPanel implements McpPanelInterface {
                     // (invalidateDerivedResults 'load': 부재 설계 · 랩)와 같은 범위. 같은 입력을 다시 돌리면 지우지 않는다.
                     // 화면 경로는 칸이 바뀔 때 화면이 이미 알렸으므로 여기서 다시 판단하지 않는다(확장의 동작 그대로).
                     const key = this._loadRequestKey(options);
-                    if (!fromPage && key !== this._lastLoadRequest) {
-                        const changed = this._lastLoadRequest === null ? ['(no previous load analysis)']
-                            : StcfsdPanel._changedKeys(this._lastLoadRequest, key);
+                    const changed = this._lastLoadRequest === null ? ['(no previous load analysis)']
+                        : key === this._lastLoadRequest ? [] : StcfsdPanel._changedKeys(this._lastLoadRequest, key);
+                    if (!fromPage && changed.length > 0) {
                         this._derivedInputRevision++;
                         if (this._dropDesignResults('Load analysis inputs changed', { action: 'analyze_loads', inputs: changed })) {
                             this._postLedger();
@@ -7911,15 +7969,26 @@ ${inner}
             return { source: 'analytical', note: `Elastic buckling values (Pcrl/Pcrd, Mcrl/Mcrd) came from the analytical formulas: ${analytical}` + failNote };
         }
         const preparedNow = prep?.prepared === true && fsm.some((f) => by[f] === 'prepared');
+        // 검증 2026-11-25 의 2: 준비가 실패했는데 지금 해석이 값을 채웠다 — 「지금 것」 이 아니라 대체(그 해석의 길이 · 경계조건)
+        const fallback = families.filter((f) => by[f] === 'current_analysis');
+        if (prep?.error && fallback.length > 0 && fsm.length === families.length) {
+            const meta = this._lastAnalysisResult?._meta || {};
+            return { source: 'analysis-fallback', load_cases: loadCases, by_family: Object.fromEntries(families.map((f) => [f, by[f] ?? 'none'])),
+                note: `Preparing the S-S signature-curve FSM values failed (${StcfsdPanel._capText(prep.error)}) — the ${fallback.map((f) => f === 'P' ? 'compression' : 'strong-axis bending').join(' / ')} `
+                    + `values came from the buckling analysis on the screen instead (its own half-wavelengths, boundary condition ${meta.BC || this._model.BC || '?'} and reference stress), `
+                    + 'not from the design signature curve. Fix the cause and run the check again.' };
+        }
         if (fsm.length < families.length) {
             const rest = families.filter((f) => !fsm.includes(f)).map((f) => f === 'P' ? 'compression' : 'strong-axis bending');
             return { source: 'mixed', load_cases: loadCases, by_family: Object.fromEntries(families.map((f) => [f, by[f] ?? 'none'])),
                 note: `FSM values for ${loadCases.join(', ')}; ${rest.join(' / ')} from the analytical formulas.` + failNote };
         }
+        const constrained = StcfsdPanel._modeConstraintActive(this._model)
+            ? ' The model\'s cFSM mode constraint (GBTcon) constrains only the buckling-analysis view — these design values are from the unconstrained signature curve.' : '';
         return { source: preparedNow ? 'fsm-prepared-now' : 'fsm-current', load_cases: loadCases,
-            note: preparedNow
+            note: (preparedNow
                 ? 'S-S signature-curve FSM analyses with the design Fy (the engine\'s design half-wavelength grid) were prepared for this check — the member check always uses them.'
-                : 'FSM buckling values that are current for this model and design Fy were used.' };
+                : 'FSM buckling values that are current for this model and design Fy were used.') + constrained };
     }
 
     /** K2: 상태 전체를 화면에(칸에 얹는다 — 복원과 같은 길). */
@@ -8992,8 +9061,11 @@ ${inner}
                 projectData.dsm = { error: `DSM extraction failed at save: ${e?.message || e}` };
             }
         }
-        if (this._preparedDesignDsm && this._preparedDesignDsmSig) {
-            projectData.preparedDesignDsm = this._preparedDesignDsm;
+        // 검증 2026-11-25 의 4: 준비된 값은 그 서명과 함께 — 지금 모델 · 그 설계 Fy 의 서명과 같을 때만 쓴다(같지 않은 값을 「지금 것」 으로 남기지 않는다).
+        // 서명(sha256)은 값 안에(봉인이 값과 함께 지킨다). 열 때 그 파일의 모델로 다시 계산한 서명과 같아야 되살린다
+        if (this._preparedDesignDsm && this._preparedDesignDsmSig
+            && this._preparedDesignDsmSig === this._currentDesignDsmSignature(Number(this._preparedDesignDsm.fy_analysis))) {
+            projectData.preparedDesignDsm = { ...this._preparedDesignDsm, design_signature: StcfsdPanel._designDsmSigHash(this._preparedDesignDsmSig) };
         }
 
         // 단면 성질
@@ -9203,13 +9275,26 @@ ${inner}
         // 옛 파일(설계 Fy 기록 fy_analysis 없음)의 준비 DSM 은 어떤 Fy 로 만든 것인지 몰라 쓰지 않는다. 결정 R8: 설계 격자 표지가 없는 것
         // (모델의 보기용 격자로 푼 옛 값)도 되살리지 않는다 — 다음 부재 검토가 그 자리에서 다시 준비한다
         const preparedOnGrid = !!prepared && prepared.signature_grid?.source === StcfsdPanel.DESIGN_GRID_SOURCE;
+        // 검증 2026-11-25 의 4: 저장할 때 적은 서명(design_signature)이 이 파일의 모델 · 그 설계 Fy 로 지금 계산한 서명과 같아야 되살린다.
+        // 서명이 없는 파일(a722762 까지의 저장)은 되살리지 않는다 — 그때의 저장은 서명을 맞대지 않았고, 모델의 cFSM 모드 구속으로 푼 값일 수
+        // 있다(그 판은 구속을 사본에 넣었다). 다음 부재 검토가 그 자리에서 다시 준비한다
+        const openedSig = preparedOnGrid && Number(prepared.fy_analysis) > 0 ? this._currentDesignDsmSignature(Number(prepared.fy_analysis)) : '';
+        const sigMatches = !!openedSig && typeof prepared.design_signature === 'string'
+            && prepared.design_signature === StcfsdPanel._designDsmSigHash(openedSig);
         if (prepared && !preparedOnGrid) {
             this._ledgerAdd('design_dsm', 'Saved design DSM values were prepared on the display grid of the model — prepared again at the next member check.',
                 { action: 'open_project' }, projectData.timestamp ?? null);
+        } else if (prepared && !sigMatches) {
+            this._ledgerAdd('design_dsm', typeof prepared.design_signature === 'string'
+                ? 'Saved design DSM values do not match the opened model and design Fy — prepared again at the next member check.'
+                : 'Saved design DSM values carry no signature (saved by an older build) — prepared again at the next member check.',
+            { action: 'open_project' }, projectData.timestamp ?? null);
         }
-        if (prepared && preparedOnGrid && Number(prepared.fy_analysis) > 0) {
-            this._preparedDesignDsm = prepared;
-            this._preparedDesignDsmSig = this._currentDesignDsmSignature(Number(prepared.fy_analysis));
+        if (prepared && preparedOnGrid && sigMatches) {
+            const { design_signature: _ds, ...values } = prepared;
+            void _ds;
+            this._preparedDesignDsm = values;
+            this._preparedDesignDsmSig = openedSig;
             this._preparedDesignDsmAt = projectData.timestamp ?? null;
         } else {
             this._preparedDesignDsm = null;

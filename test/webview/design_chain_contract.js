@@ -173,6 +173,20 @@ async function main() {
     const rv = p.__testReview('US');
     assert(/판정 아님 — 가정한 길이의 참고 비/.test(rv.reportHtml) && rv.reportDoc.verdict.utilization === null, 'report: reference ratio, no utilization');
     notes.push(`A5: KtLt blank → summary item pass null reference_only (${ax.ratio}), run max_ratio null, validation 「${dcr.value}」`);
+    // 엔진 둘째 판: 길이와 상관없는 하한이 넘는 NG — 판정비 · 지배는 그 하한의 것(맨 위 utilization 은 가정한 길이의 수)
+    const bf = await tool('aisi_design_compression', { Fy: 50, Pu: 60, KxLx: 100, KyLy: 100 });
+    const lib = bf.length_independent_bound;
+    assert(bf.pass === false && lib && lib.ratio > 1 && bf.utilization_valid === false && bf.utilization !== lib.ratio, 'bound failure ' + JSON.stringify({ p: bf.pass, u: bf.utilization, lib }));
+    assert(/FAILS at every length/.test(bf.utilization_note || '') && bf.utilization_note.includes(lib.governing_check_id || lib.governing_check), 'summary note names the bound ' + bf.utilization_note);
+    const lastB = (await history())[0];
+    assert(lastB.kind === 'member_design' && lastB.max_ratio === lib.ratio && (lastB.governing || {}).id === (lib.governing_check_id || lib.governing_check),
+      'the run: the bound ratio and its check ' + JSON.stringify(lastB));
+    const valB = ok(await ai({ action: 'validate_design' }), 'validate bound');
+    const dcrB = (valB.items || valB.validation || []).find((c) => c.item === '이용률 (DCR)');
+    assert(dcrB && dcrB.status === 'fail' && dcrB.value.startsWith((lib.ratio * 100).toFixed(1) + '%'), 'validation shows the bound ratio ' + JSON.stringify(dcrB));
+    const rvB = p.__testReview('US');
+    assert(rvB.reportDoc.verdict.utilization.value === lib.ratio && rvB.reportDoc.verdict.governing === (lib.governing_check_id || lib.governing_check), 'report verdict: bound ratio ' + JSON.stringify(rvB.reportDoc.verdict));
+    notes.push(`A5b: Pu 60 with KtLt blank → NG on the bound ${lib.governing_check_id || lib.governing_check} ${lib.ratio.toFixed(3)} (run · validation · report · MCP note), not the assumed ${bf.utilization}`);
 
     // ── A4: 하중조합의 기준 ──
     ok(await ai({ action: 'new_case', name: 'P', kind: 'roof-purlin' }), 'new_case P');
@@ -214,6 +228,12 @@ async function main() {
     assert(fg0 && (fg0.verdict === 'not_evaluated' || fg0.verdict === 'fail'), 'fastener group not a pass without the statement ' + JSON.stringify(fg0));
     if (fg0.verdict === 'not_evaluated') { assert(/force_model_not_confirmed/.test(JSON.stringify(lap0)), 'reason named'); }
     assert(lap0.pass !== true, 'lap cannot pass without the statement');
+    if (lap0.pass === null) {
+      // 엔진 둘째 판: 판정 없는 랩은 utilization_valid false — 실행의 최대 판정비 · 지배가 없다(부재와 같게)
+      const lapRun = (await history())[0];
+      assert(lap0.utilization_valid === false && lapRun.kind === 'lap' && lapRun.max_ratio === null && !lapRun.governing,
+        'a lap result without a verdict has no max_ratio / governing ' + JSON.stringify({ uv: lap0.utilization_valid, run: lapRun }));
+    }
     // 새 알림이 요약(한국어 글 + code)과 보고서에
     const fmw = JSON.stringify(lap0).match(/"code":"lap\.warning\.force_model_not_confirmed","text":"([^"]+)"/);
     assert(fmw, 'summary names lap.warning.force_model_not_confirmed with its text');

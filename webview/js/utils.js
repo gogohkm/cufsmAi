@@ -390,10 +390,31 @@
         return { value: walkU(value), used };
     }
 
+    /**
+     * 엔진(2026-11-25 둘째 판): 빈 길이의 결과가 길이와 상관없는 하한(length_independent_bound — 가장 유리한 길이의 엔진 강도)으로 NG 이면
+     * 그 판정비는 그 하한의 비다 — 맨 위 utilization 은 가정한 길이의 수(utilization_valid false)라 판정비가 아니다. 그런 결과가 아니면 null.
+     * 반환 { ratio, governing_check, limit_state }
+     */
+    function lengthBoundFailure(d) {
+        if (!d || typeof d !== 'object' || d.pass !== false || d.utilization_valid !== false) { return null; }
+        const b = d.length_independent_bound;
+        if (b && typeof b === 'object' && typeof b.ratio === 'number' && isFinite(b.ratio)) {
+            return { ratio: b.ratio, governing_check: b.governing_check_id || b.governing_check || null, limit_state: b.limit_state || null };
+        }
+        // 조합(H1.2): Pa · Max 를 그 하한으로 둔 H1.2 의 하한 비(interaction_length_bound)가 1 을 넘으면 — 항목 member.axial_bending
+        const ib = d.interaction_length_bound;
+        const t = ib && typeof ib === 'object' ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
+        if (typeof t === 'number' && isFinite(t) && t > 1) {
+            const has = Array.isArray(d.design_checks) && d.design_checks.some((c) => c && c.id === 'member.axial_bending');
+            return { ratio: t, governing_check: has ? 'member.axial_bending' : null, limit_state: 'H1.2 (Pa, Max at their length-independent bounds, B1 = 1)' };
+        }
+        return null;
+    }
+
     return {
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
         assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason, purlinLists,
-        pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues,
+        pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues, lengthBoundFailure,
     };
 });
