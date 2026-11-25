@@ -37,6 +37,10 @@ export const CASE_KO: Record<string, string> = {
   designZeroDemandStated: '소요 0 진술', connZeroDemandStated: '지점 소요 0 진술',
   // daca0ac — 랩 탭의 「지점」(하중 해석의 자동 채움은 부모멘트가 가장 큰 지점과 그 지점의 랩 길이)
   connLapSupport: '랩 지점',
+  // R4(2026-11-25) — 하중조합의 기준(없으면 asce7_10 — 지금까지의 결과 그대로). 도구의 load_combination_standard
+  loadComboStandard: '하중조합 기준',
+  // R2(2026-11-25) — 랩 패스너의 힘 분배(모델 A — 모든 패스너가 고르게)로 판정함을 사람이 밝힘. 없으면 패스너 무리 · 개수는 판정 없음(그 분배로도 넘으면 NG). 도구의 lap_force_model_confirmed
+  lapForceModelConfirmed: '힘 분배 모델 확인',
   memberType: '부재 유형', spanType: '스팬 형식', nSpans: '스팬 수', spacing: '간격',
   loadD: 'D 고정', loadLr: 'Lr 지붕 활', loadS: 'S 적설', loadWu: 'W↑ 양압', loadWp: 'W↓ 정압', loadL: 'L 활하중',
   chkPatternLoading: '활하중 부분재하', chkLrReduced: '지붕 활하중 감소', spanIxIn4: '경간별 Ix',
@@ -59,6 +63,7 @@ export const CASE_KO: Record<string, string> = {
 export const OPTION_KO: Record<string, string> = {
   'roof-purlin': '지붕 퍼린', 'floor-joist': '바닥 장선', 'wall-girt': '벽 거트', 'wall-stud': '벽 스터드', flexure: '휨 부재', compression: '압축 부재', combined: '조합 부재', tension: '인장 부재',
   simple: '단순', 'cont-2': '2연속', 'cont-3': '3연속', 'cont-4': '4연속', 'cont-5': '5연속', cantilever: '캔틸레버',
+  asce7_10: 'ASCE 7-10', asce7_22: 'ASCE 7-22', kds_41_12_00: 'KDS 41 12 00',
   'through-fastened': '관통 체결', 'standing-seam': '스탠딩심', none: '없음', bolt: '볼트', screw: '나사', LRFD: 'LRFD', ASD: 'ASD',
 };
 

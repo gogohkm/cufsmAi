@@ -85,12 +85,12 @@ export function branchKids(b: Branch): Array<{ k: string; t: string; vHtml: stri
       ...('lap_restrained' in x.inputs ? [kid('lap_restrained', '랩 구속 진술')] : []),
     ];
   }
-  if (b === 'ld') { return ['loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL'].map(k => kid(k, CASE_KO[k].split(' ')[0])).concat([kid('chkPatternLoading', '부분재하')]); }
+  if (b === 'ld') { return ['loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL'].map(k => kid(k, CASE_KO[k].split(' ')[0])).concat([kid('chkPatternLoading', '부분재하')], 'loadComboStandard' in x.inputs ? [kid('loadComboStandard', '조합 기준')] : []); }
   // 소요 칸은 빈 채로 시작한다(0 이 아니다 — 비면 「빈칸」). 「0 이 맞다」 진술은 호스트의 상태에 있으면 보인다(zero_demand_stated)
   const has = (k: string) => k in x.inputs;
   if (b === 'dc') { return [kid('designMethod', '설계법'), kid('Lb', 'Lb'), kid('Cb', 'Cb'), kid('Mux', 'Mux'), kid('Pu', 'Pu'), kid('Vu', 'Vu'), ...(has('designZeroDemandStated') ? [kid('designZeroDemandStated')] : []), kid('wcN', '지압 길이 N')]; }
   if (b === 'cj') {
-    return [kid('connFastenerType', '랩 패스너'), ...(has('connLapSupport') ? [kid('connLapSupport', '랩 지점')] : []), kid('connLapLeft', '랩 좌'), kid('connLapRight', '랩 우'), kid('connNRows', '열 수'),
+    return [kid('connFastenerType', '랩 패스너'), ...(has('connLapSupport') ? [kid('connLapSupport', '랩 지점')] : []), kid('connLapLeft', '랩 좌'), kid('connLapRight', '랩 우'), kid('connNRows', '열 수'), ...(has('lapForceModelConfirmed') ? [kid('lapForceModelConfirmed')] : []),
       ...(has('connMu') ? [kid('connMu')] : []), ...(has('connVu') ? [kid('connVu')] : []), ...(has('connZeroDemandStated') ? [kid('connZeroDemandStated')] : []), kid('connSingleType', '단일 접합')];
   }
   return [kid('fy', '설계 Fy'), kid('fu', '설계 Fu'), kid('presteelGrade', '강종')];

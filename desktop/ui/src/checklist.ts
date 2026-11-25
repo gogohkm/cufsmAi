@@ -143,6 +143,9 @@ export function reportView(key: string): string {
   return `<div class="dv docv" data-docview="report" data-kind="${kind}">${bar}${err}${stale}${thumbs}${frame}</div>`;
 }
 
+/** 보고서 알림의 종류(호스트의 kind — 엔진 목록 이름) → 화면 말 */
+const NOTICE_KIND_KO: Record<string, string> = { warning: '경고', warnings: '경고', dsm_warnings: '경고', assumption: '가정', assumptions: '가정', scope: '범위', scope_notes: '범위', not_evaluated: '미검토' };
+
 /** 정보 창 — 보고서 */
 export function reportInfo(key: string): string {
   const kind = reportKindOf(key)!;
@@ -152,11 +155,14 @@ export function reportInfo(key: string): string {
   const res = state.full?.results ?? {};
   const basis = [['buckling_analysis', '좌굴'], ['load_analysis', '하중'], ['member_design', '검토'], ['lap', '랩'], ['connection', '접합부']]
     .filter(([k]) => res[k]?.at).map(([k, t]) => `${t} ${hhmm(res[k].at)}`).join(' · ') || '결과 없음';
-  // 호스트의 보고서 답(generate_report)의 notices 는 옛 글(엔진의 US 문자열 — 부호 없음)이다. 같은 결과 나무 안의 알림을 글로 찾아 그 알림으로
-  // 그린다(notices.js 의 textMap — 한국어 · SI, 보기 계약 4d). 찾지 못한 글은 notices.js 가 그 안의 US 상수만 바꾼다(D1 — u60b 가 찾은 「Vu = 2.001 kips」)
+  // 호스트의 보고서 답(generate_report)의 notices 는 {kind, code, text}(H-B — 글은 호스트가 답의 단위로 그린 한국어, code null = 부호 없는 엔진 글)다.
+  // 그 글을 그대로 보이고 code 를 단다. 옛 답(글만 — 엔진의 US 문자열)은 같은 결과 나무 안의 알림을 글로 찾아 그 알림으로 그린다(notices.js 의
+  // textMap — 한국어 · SI, 보기 계약 4d). 찾지 못한 글은 notices.js 가 그 안의 US 상수만 바꾼다(D1 — u60b 가 찾은 「Vu = 2.001 kips」)
   const tree = { runs: state.runs.map(x => x.us), lap: state.lap?.us ?? null, conn: state.conn?.us ?? null, loads: state.loads?.us ?? null };
   const find = finder(tree);
-  const notices: string[] = Array.isArray(reply.notices) ? reply.notices.map((t: unknown) => find(String(t)).text) : [];
+  const notices: Array<{ text: string; code: string | null; kind: string | null }> = (Array.isArray(reply.notices) ? reply.notices : []).map((t: any) => (t && typeof t === 'object'
+    ? { text: String(t.text ?? ''), code: typeof t.code === 'string' ? t.code : null, kind: typeof t.kind === 'string' ? t.kind : null }
+    : { ...find(String(t)), kind: null })).filter((n: { text: string }) => n.text);
   const fail: string[] = Array.isArray(reply.checks?.fail) ? reply.checks.fail : [];
   const ne: string[] = Array.isArray(reply.checks?.not_evaluated) ? reply.checks.not_evaluated : [];
   // R5-3: 프로젝트의 대상이면 발행 전 점검(호스트의 documents check)과 사람의 발행 길 — 아니면 이 화면이 만든 보고서만
@@ -182,7 +188,7 @@ export function reportInfo(key: string): string {
       ? `<p class="dim" data-report-folder="${esc(reply.folder ?? '')}">${esc(WHERE_KO[reply.folder] ?? String(reply.folder ?? ''))} — 자리 · 이름은 호스트가 정한다(화면은 경로를 주지 않는다). 이 프로그램이 쓴 파일만 덮어쓴다</p>`
         + `<table class="t"><tbody>${fileRow('HTML', files.html)}${fileRow('PDF', files.pdf, reply.pages ? ` · ${esc(reply.pages)}쪽` : '')}</tbody></table>${reply.pdf_note ? `<p class="warn" data-pdf-note="${esc(String(reply.pdf_note_code ?? ''))}">${esc(reply.pdf_note_ko ?? reply.pdf_note)}</p>` : ''}${reply.folder_note ? `<p class="dim" data-folder-note>${esc(reply.folder_note_ko ?? reply.folder_note)}</p>` : ''}`
       : none('아직 쓰지 않음'))
-    + (notices.length ? secH(`알림 ${notices.length}`, `<ul class="notes">${notices.map(t => `<li>${esc(t)}</li>`).join('')}</ul>`) : '')
+    + (notices.length ? secH(`알림 ${notices.length}${typeof reply.notices_more === 'number' && reply.notices_more > 0 ? ` · 그 밖 ${reply.notices_more}` : ''}`, `<ul class="notes">${notices.map(t => `<li${t.code ? ` data-code="${esc(t.code)}"` : ''}${t.kind ? ` data-kind="${esc(t.kind)}"` : ''}>${t.kind && NOTICE_KIND_KO[t.kind] ? `<span class="faint">${NOTICE_KIND_KO[t.kind]}</span> ` : ''}${esc(t.text)}</li>`).join('')}</ul>`) : '')
     + (fail.length || ne.length ? secH('통과가 아닌 검토', `<table class="t"><tbody>${fail.length ? `<tr><td><span class="dot ng"></span>NG</td><td class="num">${esc(fail.join(', '))}</td></tr>` : ''}${ne.length ? `<tr><td><span class="dot un"></span>미검토</td><td class="num">${esc(ne.join(', '))}</td></tr>` : ''}</tbody></table>`) : '')
     + (inProj ? checkPanel()
       : `<div class="sec publish"><span class="btn primary off" data-publish${tip('발행은 프로젝트의 검토 대상에서만 — 기록이 있어야 한다(사람만)')}>R0 발행</span><span class="faint">프로젝트 밖 — 발행 없음</span></div>`);

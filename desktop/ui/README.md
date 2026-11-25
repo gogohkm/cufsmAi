@@ -150,6 +150,10 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 - 경고(`warnings`) · 가정(`assumptions`) · 범위(`scope_notes`)는 세 목록으로 따로. 하위 묶음(`shear` · `positive_region` …)의 것은 `[shear] …` 처럼 앞에 이름을 붙여 같은 목록에 둔다. `dsm_warning` 은 `[DSM] …` 으로 경고에.
 - 판정비 글자: 소수 3 자리, NG 는 올림 · 그 밖은 내림(1.0004 NG 가 「1.000」, 0.99996 OK 가 「1.000」으로 보이지 않게 — StAnal 과 같은 규칙).
 - 결과가 없으면 「결과 없음」 · 「아직 평가 안 함」, 지워졌으면 「낡음 — 결과를 지웠다」. 빈칸 · 0 · 옛 수를 적지 않는다.
+- 결과의 이용률이 판정비가 아닐 때(엔진의 `utilization_valid: false` · 결과의 `pass: null` · 가정한 길이 `length_assumed: true`)는 머리 비 자리에 「판정 없음」(풍선 = 그 까닭 — 가정한 길이, 또는 엔진이 평가하지 못한 항목의 이름 · 이유). 가정한 길이의 이용률은 「참고 r」(`data-ratio-ref`, 판정비 `data-ratio` 가 아니다)로만 — NG 여도(format.utilShown · notices.utilHtml).
+- 랩 패스너의 힘 분배(R2): 「자체 가정」 꼬리표가 엔진의 `force_model.confirmed` 를 따라 「자체 가정 · 확인함」 / 「자체 가정 · 확인 안 함」. 밝히지 않았으면 패스너 무리의 비는 「참고」, 패스너 무리 · 개수는 엔진대로 미검토(까닭 `lap.reason.force_model_not_confirmed`), 랩 전체는 「판정 없음」. 칸은 모델 › 접합부 「힘 분배 모델 확인」(`lapForceModelConfirmed`).
+- 하중조합의 기준(R4): 하중 해석의 정보 창 「조합」 · 트리 「조합 기준」 = 결과의 `load_combination_standard.edition`(key 가 없으면 고르지 않은 처음 값). 칸은 모델 › 하중 「조합 기준」(`loadComboStandard`).
+- 좌굴 값의 출처(R1): 부재 검토는 호스트가 그 안에서 설계 Fy 의 S-S 서명곡선 FSM 값을 준비한다(`dsm_basis_by_family: prepared`). 「해석식 좌굴값」 꼬리표는 호스트가 `none` 이라고 한 대체(준비 실패)에서만 — 원형관은 엔진이 DSM 비적용을 범위 알림으로 밝혀 꼬리표를 달지 않는다.
 
 ## U4 — 검토 상태(K2) · 편집 상태 · 저장 안 함
 

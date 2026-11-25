@@ -3,7 +3,7 @@
  * 가지는 호스트에 있는 것만 만든다. 호스트에 아직 없는 것(설계 입력 · 기록 · 검증)은 그 까닭을 값 자리에 적는다 — 빈칸이 아니다.
  */
 import { esc, tip } from './dom';
-import { hhmm, noVerdictRatio, num, ratio, ratioText, sigText, utilInvalid, utilShown } from './format';
+import { hhmm, lengthAssumed, num, ratio, ratioText, sigText } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
 import { assumptionLines, isDefault, memberRuns, noFsmRuns, state, type CheckRow, type NoFsm } from './store';
 import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
@@ -14,7 +14,7 @@ import { actorOf, actorTag, afterBase, basePointAt, BY_KO, chg, groupName, histo
 import { glyph, itemOfRow, markOf, rv } from './reviews';
 import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
-import { fastenerText, reasonNote } from './notices';
+import { comboStandard, comboStandardTip, fastenerText, forceModelTag, reasonNote, utilHtml } from './notices';
 import { docs, draftLabel, draftsOf, issueCls, issueLabel } from './docs';
 import { dmg } from './damage';
 
@@ -38,14 +38,15 @@ const n = (k: string, t: string, o: Partial<TNode> = {}): TNode => ({ k, t, ...o
 
 /**
  * E5 — FSM 없이 계산한 부재 검토의 표시(결과 › 부재 검토 · 업무 › 점검 › 판정 요약 · 정보 창). 호스트가 결과에 적은 하중군의 출처(dsm_basis_by_family)가
- * none 인 것만(store.noFsmOf). 없으면 ''
+ * none 인 것만(store.noFsmOf). 없으면 ''. 결정 R1(2026-11-25) 뒤로 호스트는 부재 검토 안에서 설계 Fy 의 S-S 서명곡선 FSM 값을 늘 준비한다 —
+ * none 은 그 준비가 안 된 대체(준비 실패)에서만 난다(원형관은 엔진이 DSM 비적용을 밝혀 이 표시를 내지 않는다)
  */
 export function noFsmTag(nf: NoFsm | null = noFsmRuns()[0]?.nf ?? null): string {
   if (!nf) { return ''; }
   const label = nf.analytic ? '해석식 좌굴값' : 'FSM 좌굴값 없음';
   const t = nf.analytic
-    ? `FSM 좌굴 해석 없이 해석식의 ${nf.syms} 로 계산했다(${nf.fams.join(' · ')} — 호스트의 dsm_basis_by_family: none${nf.sources ? ` · 엔진이 쓴 값: ${nf.sources}` : ''}) — 좌굴 해석을 돌린 뒤 다시 계산하면 FSM 값으로`
-    : `FSM 좌굴 해석 없이 계산했다 — 엔진이 ${nf.syms} 를 정하지 못했다(${nf.sources}). 좌굴 해석을 돌린 뒤 다시 계산하면 FSM 값으로`;
+    ? `호스트가 이 검토의 S-S 서명곡선 FSM 값을 준비하지 못해 해석식의 ${nf.syms} 로 계산했다(${nf.fams.join(' · ')} — 호스트의 dsm_basis_by_family: none${nf.sources ? ` · 엔진이 쓴 값: ${nf.sources}` : ''}). 까닭은 경고의 [DSM] 줄`
+    : `호스트가 이 검토의 S-S 서명곡선 FSM 값을 준비하지 못했고 엔진도 ${nf.syms} 를 정하지 못했다(${nf.sources}). 까닭은 경고의 [DSM] 줄`;
   return `<span class="tag warn" data-no-fsm="${esc(nf.fams.join(','))}" data-no-fsm-kind="${nf.analytic ? 'analytic' : 'none'}"${tip(t)}>${label}</span>`;
 }
 
@@ -175,6 +176,7 @@ export function buildTree(tab: Tab): TNode[] {
         crit('fsm:l', '국부', 'crl', 'Lcrl'), crit('fsm:d', '뒤틀림', 'crd', 'Lcrd'), crit('fsm:g', '전체', 'cre', 'Lcre'),
       ] : undefined }),
       stageNode('load', '하중 해석', 'load', state.loads ? { v: '결과 있음', vCls: 'ok', dot: 'ok', kids: [
+        ...((c) => (c ? [n('load:std', '조합 기준', { v: c.edition, tip: comboStandardTip(c) })] : []))(comboStandard(state.loads.us)),
         n('load:gov', '지배 조합', { v: String(state.loads.us.governing?.combo ?? '') }),
         n('load:loc', '위치', { v: String((state.loads.us.governing?.locations ?? []).length) }),
         n('load:def', '처짐', { vHtml: (state.loads.si.deflection?.per_span ?? []).map((d: any, i: number) => `L/${num(d.L_over_delta, { src: `loads:deflection.per_span.${i}.L_over_delta`, kind: 'none' })}`).join(' · ') || '<span class="vl un">없음</span>' }),
@@ -195,11 +197,11 @@ export function buildTree(tab: Tab): TNode[] {
         ] : undefined,
       }),
       stageNode('conn', '접합부 검토', 'conn', state.lap || state.conn ? { kids: [
-        ...(state.lap ? [n('conn:lap', `랩 · ${fastenerText(state.lap.us)}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tag: state.lap.us.force_model?.specification_provision === false ? '자체 가정' : undefined,
-          vHtml: utilShown(state.lap.us) !== null ? ratio(state.lap.us.utilization, state.lap.us.pass === false, 'lap:utilization') : utilInvalid(state.lap.us) ? noVerdictRatio() : undefined,
+        ...(state.lap ? [n('conn:lap', `랩 · ${fastenerText(state.lap.us)}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tagHtml: forceModelTag(state.lap.us, true) || undefined,
+          vHtml: utilHtml(state.lap.us, state.lap.us.utilization, 'lap:utilization') || undefined,
           kids: (state.runs.find(r => r.key === 'lap')?.rows ?? []).filter(passFilter).map(rowNode) })] : []),
         ...(state.conn ? [n('conn:one', `단일 접합 · ${String(state.runs.find(r => r.key === 'conn')?.where.replace(/^접합 · /, '') ?? state.conn.us.connection_type ?? '')}`, { dot: state.conn.us.pass === true ? 'ok' : state.conn.us.pass === false ? 'ng' : 'un',
-          vHtml: utilShown(state.conn.us) !== null ? ratio(state.conn.us.utilization, state.conn.us.pass === false, 'conn:utilization') : utilInvalid(state.conn.us) ? noVerdictRatio() : undefined,
+          vHtml: utilHtml(state.conn.us, state.conn.us.utilization, 'conn:utilization') || undefined,
           kids: (state.runs.find(r => r.key === 'conn')?.rows ?? []).filter(passFilter).map(rowNode) })] : []),
       ] } : {}),
       valNode(),
@@ -305,7 +307,7 @@ function workTree(): TNode[] {
   const nOut = runs.reduce((a, r) => a + r.notChecked.length, 0);
   const asmV = assumptionsNode().v ?? '없음';
   const insp = n('insp', '점검', { open: true, tip: '지금 결과의 상태 — 결과 탭 · 모델 탭의 그 줄과 같은 수', kids: [
-    n('insp:sum', '판정 요약', { go: 'result|chk', vHtml: chkOk && runs.length ? `${gov?.governing ? `지배 ${esc(gov.governing)} · ` : ''}최대 ${typeof gov?.utilization === 'number' ? ratio(gov.utilization, gov.overall === false, `${gov.src}utilization`) : runs.some(r => r.utilInvalid) ? noVerdictRatio() : '—'} · <span class="${un ? 'un' : ''}">미검토 ${un}</span>` : `<span class="vl un">${esc(STATE_V[state.stages.chk.state][0])}</span>`,
+    n('insp:sum', '판정 요약', { go: 'result|chk', vHtml: chkOk && runs.length ? `${gov?.governing ? `지배 ${esc(gov.governing)} · ` : ''}최대 ${typeof gov?.utilization === 'number' ? ratio(gov.utilization, gov.overall === false, `${gov.src}utilization`) : ((inv) => (inv ? utilHtml(inv.us, inv.result?.utilization, `${inv.src}utilization`, '—') : '—'))(runs.find(r => r.utilInvalid || lengthAssumed(r.us)))} · <span class="${un ? 'un' : ''}">미검토 ${un}</span>` : `<span class="vl un">${esc(STATE_V[state.stages.chk.state][0])}</span>`,
       ...(chkOk && noFsmRuns().length ? { tagHtml: noFsmTag() } : {}),
       tip: '지배 항목 · 최대 판정비(엔진) · 미검토 수(결과 탭의 부재 검토와 같은 수) — 누르면 결과 › 부재 검토' }),
     n('insp:warn', '엔진 알림', { go: 'result|chk', v: String(nWarn), vCls: nWarn ? 'warn' : '', tip: '엔진이 낸 경고(warnings) — 누르면 결과 › 부재 검토(정보 창의 경고)' }),

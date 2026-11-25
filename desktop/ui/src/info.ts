@@ -5,7 +5,7 @@
  * `지정`(누군가 정함 — 누가인지는 R2) / `단면` · `좌굴 해석`(다른 결과에서 나옴). 엔진의 경고 · 가정 · 범위는 세 목록으로 따로 보인다.
  */
 import { esc, tip } from './dom';
-import { hhmm, none, noVerdictRatio, num, ratio, ratioText, sigText, unitOf, utilInvalid, utilShown, verdictOf } from './format';
+import { hhmm, lengthAssumed, none, num, ratio, ratioText, refRatio, sigText, unitOf, utilInvalid, utilShown, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO, VERDICT_KO } from './names';
 import { assumptionLines, isDefault, memberRuns, noFsmOf, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
 import { noFsmTag } from './tree';
@@ -17,7 +17,7 @@ import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { damageInfo } from './damage';
-import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
+import { fastenerText, fieldText, finder, FORCE_MODEL_WHY, noVerdictWhy, comboStandard, comboStandardTip, forceModelConfirmed, forceModelTag, noteLi, noteList, pageOf, reasonNote, unconfirmedModel, utilHtml, type Note } from './notices';
 import { actorOf, actorTag, baseOf, changeOf, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
 import { asmInfo, questionsAbout, srcInfo, srcs, work, workInfo } from './work';
 import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
@@ -226,6 +226,7 @@ function loadInfo(): string {
   const R: number[] = Array.isArray(g.R_envelope_max) ? g.R_envelope_max : [];
   return hd(`결과 · 하중 해석${L.from === 'purlin' ? ' · 퍼린 설계의 하중 해석' : ''}`, `지배 조합 — ${String(us.governing?.combo ?? '')}`, v, resultMark('load_analysis'))
     + sec('조합', table(row_('설계법', esc(String(us.design_method ?? '—')), tagLa)
+      + ((c) => (c ? row_('하중조합 기준', `<span data-combo-std="${esc(c.key ?? '')}"${tip(comboStandardTip(c))}>${esc(c.edition || '—')}</span>`, `${tagLa}${c.key ? '' : '<span class="why">처음 값</span>'}`) : ''))(comboStandard(us))
       + row_('해석', esc(us.analysis_method ? fieldText(us, 'analysis_method') : '—'), tagLa)
       + wl.map((w, i) => row_(`wu 경간 ${i + 1}`, num(w, { src: `loads:governing.governing_span_loads_plf.${i}`, kind: 'linload' }), tagLa)).join('')), '', '엔진의 지배 조합과 그 경간 하중(kN/m)')
     + sec('지점 반력(포락 최대)', table(R.map((r, i) => row_(`지점 ${String.fromCharCode(65 + i)}`, num(r, { src: `loads:governing.R_envelope_max.${i}`, kind: 'force' }), tagLa)).join('')))
@@ -255,7 +256,7 @@ function checksInfo(key: string): string {
   const dcLine = row && row.si?.demand && row.si?.capacity && typeof row.si.demand.value === 'number' && typeof row.si.capacity.value === 'number'
     ? `${esc(String(row.si.demand.symbol ?? ''))} ${qnum(row.si.demand, `${row.src}demand.`, { sig: 3 })} / ${esc(String(row.si.capacity.symbol ?? ''))} ${qnum(row.si.capacity, `${row.src}capacity.`, { sig: 3 })}`
     : '';
-  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}utilization`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : run.utilInvalid ? noVerdictRatio() : none('판정비 없음')}</span>`
+  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}utilization`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : utilHtml(run.us, run.result?.utilization, `${run.src}utilization`, none('판정비 없음'))}</span>`
     + ` <span class="dim">${dcLine}${row?.clause ? ` · §${esc(row.clause)}` : ''}${row ? ratioFormTag(row) : ''}</span></div>`
     + (row && (row.kind === 'ne' || row.kind === 'na') ? ((rn => `<div class="dim" data-reason${rn?.code ? ` data-code="${esc(rn.code)}"` : ''}>${esc(rn?.text ?? '')}</div>`)(reasonNote(row.us))) : '')
     + (row ? highestLine(row) : '')
@@ -297,7 +298,7 @@ function checksInfo(key: string): string {
     : markButton(rvIt, `data-rv-check="${esc(row.key)}"`);
   // E5: FSM 없이 계산했으면(호스트의 dsm_basis_by_family) 머리 아래에 눈에 띄게
   const nf = noFsmOf(run);
-  const nfNotice = nf ? `<div class="notice" data-no-fsm-notice>${noFsmTag(nf)} 이 검토는 FSM 좌굴 해석 없이 계산했다 — ${esc(nf.analytic ? `해석식의 ${nf.syms} 를 썼다` : `엔진이 ${nf.syms} 를 정하지 못했다`)}. 좌굴 해석을 돌린 뒤 다시 계산하면 FSM 값으로</div>` : '';
+  const nfNotice = nf ? `<div class="notice" data-no-fsm-notice>${noFsmTag(nf)} 이 검토는 FSM 좌굴값 없이 계산했다 — 호스트가 설계 Fy 의 S-S 서명곡선 FSM 값을 준비하지 못했다(까닭은 경고의 [DSM] 줄). ${esc(nf.analytic ? `해석식의 ${nf.syms} 를 썼다` : `엔진이 ${nf.syms} 를 정하지 못했다`)}</div>` : '';
   return `<div class="hd"><div class="k">${kHead}<span class="sp"></span>${rvBtn}</div><div class="ttl">${esc(row ? `${row.where} · ${row.name}` : run.label)}</div>${head}</div>`
     + nfNotice
     + sec('설계 가정', used, '', '이 판정에 엔진이 쓴 값. 입력의 출처는 모델 탭의 부재 · 하중 · 설계 조건(검토 상태) — 사람별 기록은 R2 부터')
@@ -315,7 +316,7 @@ function checksInfo(key: string): string {
  * 좌굴 값의 출처 꼬리표 — 하중군마다의 것(dsm_basis_by_family: P · Mxx → prepared · current_analysis · none)이 있으면 그것으로,
  * 지금 해석에서 온 하중군이 있으면 「좌굴 해석」(그 하중군을 적는다). 없으면 dsm_basis(current_analysis · prepared+current_analysis)
  */
-const BASIS_KO: Record<string, string> = { prepared: '준비된 값', current_analysis: '지금 해석', none: '없음' };
+const BASIS_KO: Record<string, string> = { prepared: '서명곡선 FSM(설계 Fy)', current_analysis: '지금 해석', none: '없음' };
 function dsmBasisTag(us: any): string {
   const by = us?.dsm_basis_by_family && typeof us.dsm_basis_by_family === 'object' ? Object.entries(us.dsm_basis_by_family as Record<string, string>) : [];
   if (by.length) {
@@ -434,8 +435,9 @@ function connInfo(): string {
   }
   const v = verdictOf(x.pass, '판정 없음');
   const fm = x.force_model;
-  const notice = qNotice + (fm && fm.specification_provision === false ? `<div class="notice"><b>자체 가정</b> 패스너 힘 분배는 기준 조항이 아닌 자체 해석이다<span class="dim">${esc(String(fm.clause ?? ''))}</span></div>` : '');
-  return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `${s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} ` : ''}<span class="verdict ${v.cls}">${v.text}</span> ${utilShown(x) !== null ? `<span class="big">${ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`)}</span>` : utilInvalid(x) ? `<span class="big">${noVerdictRatio()}</span>` : ''}`
+  const fmc = forceModelConfirmed(x);
+  const notice = qNotice + (fm && fm.specification_provision === false ? `<div class="notice" data-force-model-notice="${fmc === true ? 'confirmed' : fmc === false ? 'unconfirmed' : 'unknown'}"><b>자체 가정</b> 패스너 힘 분배는 기준 조항이 아닌 자체 해석이다${fmc === true ? ' — 사람이 그 모델(모든 패스너가 고르게)로 판정한다고 밝혔다' : fmc === false ? ' — 사람이 그 모델로 판정한다고 밝히지 않았다: 패스너 무리 · 개수는 그 모델로도 넘을 때만 NG, 아니면 평가하지 못함(판정 없음)' : ''}<span class="dim">${esc(String(fm.clause ?? ''))}</span></div>` : '');
+  return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `${s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} ` : ''}<span class="verdict ${v.cls}"${x.pass === null || x.pass === undefined ? tip(noVerdictWhy(x)) : ''}>${v.text}</span> ${((h) => (h ? `<span class="big">${h}</span>` : ''))(x.pass === null || x.pass === undefined ? (lengthAssumed(x) && typeof x.utilization === 'number' ? refRatio(x.utilization) : '') : utilHtml(x, x.utilization, `${lap ? 'lap' : 'conn'}:utilization`))}`
     + (s.state === 'unk' ? ` <span class="dim">${esc(s.note)}</span>` : ''), '')
     + notice
     + sec('판정비', table(lapRatios(x, !!lap)))
@@ -443,7 +445,7 @@ function connInfo(): string {
       row_('랩 길이', `${num(state.lap?.si.lap_left_in, { src: 'lap:lap_left_in', kind: 'length', unit: false })} | ${num(state.lap?.si.lap_right_in, { src: 'lap:lap_right_in', kind: 'length' })}`, '<span class="tag">지정</span>')
       + row_('패스너', `${esc(fastenerText(lap, ''))} · ${num(state.lap?.si.n_total, { src: 'lap:n_total', kind: 'none', unit: false })}개`, '<span class="tag drv">엔진</span>')
       + row_('단부 거리 e · 간격 s', `${num(state.lap?.si.edge_distance, { src: 'lap:edge_distance', kind: 'length', unit: false })} · ${num(state.lap?.si.spacing, { src: 'lap:spacing', kind: 'length' })}`, '<span class="tag drv">엔진</span>')
-      + row_('전달 전단 V', num(state.lap?.si.V_transfer, { src: 'lap:V_transfer', kind: 'force' }), '<span class="tag def" data-tip="기준 조항이 아닌 자체 해석(force_model)">자체 가정</span>')
+      + row_('전달 전단 V', num(state.lap?.si.V_transfer, { src: 'lap:V_transfer', kind: 'force' }), forceModelTag(lap) || '<span class="tag def" data-tip="기준 조항이 아닌 자체 해석(force_model)">자체 가정</span>')
       + row_('패스너 용량', num(state.lap?.si.capacity, { src: 'lap:capacity', kind: 'force' }), '<span class="tag drv">엔진</span>')
       + lapSectionRows(lap.section_source)), '', '엔진 결과 그대로 — 표 서랍의 「계산 단계」에 식이 있다(US 글)') : '')
     + resultLists(x, x);
@@ -456,11 +458,11 @@ function connInfo(): string {
  */
 function lapRatios(x: any, lap: boolean): string {
   const pre = lap ? 'lap' : 'conn';
-  if (!lap) { return utilShown(x) !== null ? row_('패스너', ratio(x.utilization, x.pass === false, `${pre}:utilization`), '') : utilInvalid(x) ? row_('패스너', noVerdictRatio(), '') : ''; }
+  if (!lap) { return ((h) => (h ? row_('패스너', h, '') : ''))(utilHtml(x, x.utilization, `${pre}:utilization`)); }
   const newShape = 'fastener_utilization' in x;
   const fast = newShape ? x.fastener_utilization : x.utilization;
-  return (newShape && utilInvalid(x) ? row_('지배', noVerdictRatio(), '<span class="tag drv">엔진</span>') : '') + (newShape && utilShown(x) !== null ? row_('지배', `${ratio(x.utilization, x.pass === false, 'lap:utilization')} <span class="faint" data-governing>${esc(String(pageOf(x)?.governing_check ?? ''))}</span>`, '<span class="tag drv">엔진</span>') : '')
-    + (typeof fast === 'number' ? row_('패스너 무리', ratio(fast, fast > 1, newShape ? 'lap:fastener_utilization' : 'lap:utilization'), '') : '')
+  return (newShape && utilInvalid(x) ? row_('지배', utilHtml(x, x.utilization, 'lap:utilization'), '<span class="tag drv">엔진</span>') : '') + (newShape && utilShown(x) !== null ? row_('지배', `${ratio(x.utilization, x.pass === false, 'lap:utilization')} <span class="faint" data-governing>${esc(String(pageOf(x)?.governing_check ?? ''))}</span>`, '<span class="tag drv">엔진</span>') : '')
+    + (typeof fast === 'number' ? row_('패스너 무리', unconfirmedModel(x) && !(fast > 1) ? refRatio(fast, FORCE_MODEL_WHY) : ratio(fast, fast > 1, newShape ? 'lap:fastener_utilization' : 'lap:utilization'), unconfirmedModel(x) ? forceModelTag(x) : '') : '')
     + (typeof x.flexure_dcr === 'number' ? row_('랩 구간 휨', ratio(x.flexure_dcr, x.flexure_dcr > 1, 'lap:flexure_dcr'), '') : '');
 }
 /** 랩 단면 강도의 출처(section_source — daca0ac): Se · Vn · 어디서(지점 · 랩 구간), 짓지 않았으면 그 까닭 그대로 */

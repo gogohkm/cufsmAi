@@ -19,7 +19,7 @@ import { damageView } from './damage';
 import { curveSvg, type CurveMark } from './curve';
 import { esc, tip } from './dom';
 import { drawerHtml, type DTable } from './drawer';
-import { bandVar, hhmm, none, noVerdictRatio, num, ratio, sigText, tnum, tnumX, utilShown, verdictOf } from './format';
+import { bandVar, hhmm, none, num, ratio, sigText, tnum, tnumX, verdictOf } from './format';
 import { connSvg, lapFasteners, lapSvg } from './lap';
 import { memberSvg, type PointBar, type Region, type Row } from './member';
 import { FAMILY_KO } from './names';
@@ -28,7 +28,7 @@ import { memberRuns, regionLabel, rowOfKey, state, type CheckRow, type Run } fro
 import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
-import { fieldText, pageOf } from './notices';
+import { fieldText, pageOf, utilHtml } from './notices';
 import { refKey, work } from './work';
 import { alts, sideBySide, visibleAlts } from './alts';
 import { keyOfItem } from './follow';
@@ -354,7 +354,7 @@ export function tablesFor(group: Group): DTable[] {
         const run = state.runs.find(x => x.key === r.runKey);
         const k0 = (run?.rows.find(x => x.pass === false) ?? run?.rows[0])?.key ?? r.runKey;
         return { key: k0, cells: [esc(fieldText(r.us, 'label')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
-          n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), utilShown(r.us?.result, res.utilization) !== null ? ratio(res.utilization, r.us?.result?.pass === false, `purlin:regions.${i}.result.utilization`) : r.us?.result?.utilization_valid === false ? noVerdictRatio() : none(), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(pageOf(r.us?.result)?.governing_check ?? ''))],
+          n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), utilHtml(r.us?.result, res.utilization, `purlin:regions.${i}.result.utilization`, none()), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(pageOf(r.us?.result)?.governing_check ?? ''))],
           sort: [fieldText(r.us, 'label'), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
           tsv: [fieldText(r.us, 'label'), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };
       });

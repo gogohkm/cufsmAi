@@ -35,7 +35,7 @@ const portFile = path.join(userData, 'mcp', 'stcfsd-mcp-port');
 
 const results = [];
 const started = Date.now();
-/** --only=<절 id,…> — 「1b」 또는 「1c」(둘은 한 묶음 — 1c 가 1b 의 도우미를 쓴다) · 「1d」 · 「2b」 가운데 준 것만 돈다(1 · 2 · 3 은 늘 — 띄우기 · 끝내기 · 저장소 확인) */
+/** --only=<절 id,…> — 「1b」 또는 「1c」(둘은 한 묶음 — 1c 가 1b 의 도우미를 쓴다) · 「1d」 · 「1e」(기록 손상) · 「2b」 가운데 준 것만 돈다(1 · 2 · 3 은 늘 — 띄우기 · 끝내기 · 저장소 확인) */
 const ONLY = (process.argv.find(a => a.startsWith('--only=')) ?? '').slice(7).split(',').map(x => x.trim()).filter(Boolean);
 const want = id => !ONLY.length || ONLY.includes(id);
 function check(name, ok, detail = '') {
@@ -406,6 +406,86 @@ async function main() {
       const l3 = await A.ev('return ctx.diag.personRequests.slice(-1)[0] ?? null;');
       const n3 = await A.ev('return ctx.diag.personRequests.length;');
       check('끼운 웹뷰(다른 출처)의 fetch — 열쇠가 붙지 않는다(보내지지 않았거나 열쇠 없이)', JSON.stringify(l3) === JSON.stringify(l2) || l3?.keyed === false, `${s3} · 요청 기록 ${n3} · ${JSON.stringify(l3)}`);
+    }
+
+    if (want('1e')) {
+      // D2: 기록 손상(V9b-04 · D1)을 창에서 푼다 — 「격리」 는 사람의 길(/api/person/damage/resolve)이라 맨 위 틀의 진짜 입력 뒤에만 열쇠가 붙고,
+      // 다리의 물음은 창 안(화면의 #dialog-host — OS 대화상자가 아니다)에 뜬다. 창은 내내 보이지 않고 포커스를 받지 않는다
+      section('1e. 기록 손상 — 창의 사람 누름 → 화면 안의 물음(취소 · 격리) · 스크립트의 누름은 열쇠 없음(403) · 창은 보이지 않음');
+      const pageQ = () => until(() => A.page(`(()=>{const d=document.querySelector('#dialog-host .dialog'); return d && d.querySelector('[data-item="격리"]') ? d.textContent.replace(/\\s+/g,' ') : null;})()`), 15_000);
+      const lastDmg = () => until(() => A.page(`(()=>{const v=document.getElementById('info')?.dataset.dmgLast; return v ? v : null;})()`), 20_000);
+      const clearDmg = () => A.page(`(()=>{document.getElementById('info')?.removeAttribute('data-dmg-last'); return 1;})()`);
+      // 준비(사람 길 밖 — 주 프로세스 · 호스트 동작): 지금 파일을 저장하고(저장 안 한 변경 물음이 끼지 않게) 프로젝트 · 대상 · 업무 줄 하나
+      await hostAction({ action: 'save_project', filepath: path.join(tmp, '1e 앞 저장.csd') });
+      const root = await A.ev('return ctx.host.projectRoots()[0] ?? null;');
+      if (root) { fs.mkdirSync(root, { recursive: true }); }
+      const pj = root ? await A.ev(`return ctx.host.recordsPerson().createProject(${JSON.stringify(root)}, '창 손상 시험');`).catch(e => ({ error: String(e) })) : { error: '프로젝트 뿌리 없음' };
+      const nc = await hostAction({ action: 'new_case', name: '손상 대상', kind: 'section-only' });
+      const oc = await hostAction({ action: 'open_case', name: '손상 대상' });
+      const wi = await hostAction({ action: 'work_items', op: 'add', kind: 'report', title: '창 손상 시험', body: '시험용 보고' });
+      const pdir = await A.ev('return ctx.host.recordsPerson().currentProject()?.dir ?? null;');
+      const logDir = pdir ? path.join(pdir, '.stcfsd', 'log', 'work') : '';
+      const workF = logDir && fs.existsSync(logDir) ? fs.readdirSync(logDir).filter(f => /^w[a-z2-7]{20}(-[2-9])?\.jsonl$/.test(f)).map(f => path.join(logDir, f))[0] ?? null : null;
+      check('1e 준비 — 프로젝트 · 대상 · 업무 줄 파일(주 프로세스 · 호스트 동작)', !pj?.error && !nc?.error && !oc?.error && !wi?.error && !!workF,
+        short(`${pj?.error ?? pj?.name} · ${nc?.error ?? nc?.created} · ${oc?.error ?? oc?.opened} · ${wi?.error ?? wi?.item} · ${workF ? path.basename(workF) : '줄 파일 없음'}`, 300));
+      if (workF) {
+        fs.appendFileSync(workF, 'D2-not-a-record-line\n');
+        await A.page('window.__stcfsdUi.reload(); 1');
+        const band = await until(() => A.page(`document.querySelector('#recband [data-band="damage"]') ? document.querySelector('#recband').textContent : null`), 30_000);
+        await A.page(`(()=>{document.querySelector('#recband [data-rec="damage"]')?.click(); return 1;})()`);
+        const key = `work/${path.basename(workF, '.jsonl')}`;
+        const row = await until(() => A.page(`document.querySelector('#center tr[data-dmg="${key}"] [data-dmg-act="quarantine"]') ? 1 : null`), 20_000);
+        const os0 = await A.ev('return ctx.diag.osDialogs.length;');
+        const n0 = await A.ev('return ctx.diag.personRequests.length;');
+        // ① 스크립트의 누름(사람의 입력 없음) — 열쇠가 붙지 않아 403, 물음 없음 · 파일 그대로
+        await sleep(2500);
+        await clearDmg();
+        await A.page(`(()=>{document.querySelector('#center tr[data-dmg="${key}"] [data-dmg-act="quarantine"]').click(); return 1;})()`);
+        const r1 = await lastDmg();
+        const kept1 = fs.existsSync(workF);
+        const q1 = await A.page(`!!document.querySelector('#dialog-host .dialog')`);
+        const req1 = await A.ev(`return ctx.diag.personRequests.slice(${n0});`);
+        // ② 창의 진짜 누름(sendInputEvent — 창을 보이지 않은 채) → 화면 안의 물음 → 「취소」 = 그대로
+        const press = async () => {
+          const rc = await A.page(`(()=>{const b=document.querySelector('#center tr[data-dmg="${key}"] [data-dmg-act="quarantine"]'); if(!b) return null; b.scrollIntoView({block:'center'}); const r=b.getBoundingClientRect(); return {x:Math.round(r.left+r.width/2), y:Math.round(r.top+r.height/2)};})()`);
+          if (!rc) { return null; }
+          await A.ev(`ctx.win.webContents.sendInputEvent({ type: 'mouseDown', x: ${rc.x}, y: ${rc.y}, button: 'left', clickCount: 1 }); ctx.win.webContents.sendInputEvent({ type: 'mouseUp', x: ${rc.x}, y: ${rc.y}, button: 'left', clickCount: 1 }); return true;`);
+          return rc;
+        };
+        const answer = async item => {
+          const q = await pageQ();
+          await A.page(`(()=>{const b=document.querySelector('#dialog-host [data-item="${item}"]'); if(b){b.click(); return 1;} return 0;})()`);
+          return q;
+        };
+        await clearDmg();
+        const n1 = await A.ev('return ctx.diag.personRequests.length;');
+        const rc2 = await press();
+        const q2 = await answer('취소');
+        const r2 = await lastDmg();
+        const still = fs.existsSync(workF);
+        const req2 = await A.ev(`return ctx.diag.personRequests.slice(${n1});`);
+        // ③ 다시 누름 → 「격리」 = .stcfsd/quarantine/work/ 로 옮긴다 · 띠가 걷힌다
+        await clearDmg();
+        await sleep(400);
+        const rc3 = await press();
+        const q3 = await answer('격리');
+        const r3 = await lastDmg();
+        const qDir = path.join(pdir, '.stcfsd', 'quarantine', 'work');
+        const moved = fs.existsSync(qDir) ? fs.readdirSync(qDir) : [];
+        await A.page('window.__stcfsdUi.reload(); 1');
+        const gone = await until(() => A.page(`document.querySelector('#recband [data-band="damage"]') ? null : 1`), 20_000);
+        const os1 = await A.ev('return ctx.diag.osDialogs.length;');
+        const sf = await A.ev('return { visible: ctx.win.isVisible(), focused: ctx.win.isFocused(), show: ctx.diag.showEvents, focus: ctx.diag.focusEvents };');
+        await A.capture('u1e_damage_window');
+        const dmgReq = rs => rs.filter(x => x.path === '/api/person/damage/resolve');
+        check('1e 기록 손상 — 띠 「기록 손상」 → 손상 보기 · 스크립트의 누름은 열쇠 없음(403 → 「refused」, 물음 없음, 파일 그대로)',
+          /기록 손상/.test(band ?? '') && !!row && r1 === 'quarantine:refused' && !q1 && dmgReq(req1).length === 1 && dmgReq(req1).every(x => x.keyed === false) && kept1,
+          `띠 「${short((band ?? '').replace(/\s+/g, ' '), 60)}」 · 줄 ${key} · 스크립트 누름 → ${r1} · 물음 ${q1} · 파일 그대로 ${kept1} · 요청 ${JSON.stringify(dmgReq(req1))}`);
+        check('1e 기록 손상 — 창의 사람 누름 → 화면 안의 물음(OS 대화상자 아님) · 「취소」 = 그대로 · 「격리」 = quarantine/ 로 옮김 · 띠가 걷힘 · 창은 보이지 않고 포커스 없음',
+          !!rc2 && /격리|옆으로/.test(q2 ?? '') && r2 === 'quarantine:cancelled' && still && dmgReq(req2).length === 1 && dmgReq(req2)[0].keyed === true
+            && !!rc3 && !!q3 && r3 === 'quarantine:done' && !fs.existsSync(workF) && moved.length >= 1 && !!gone && os1 === os0 && !sf.visible && !sf.focused && sf.show === 0 && sf.focus === 0,
+          `물음 「${short((q2 ?? '').replace(/\s+/g, ' '), 60)}」 · 취소 → ${r2}(파일 그대로 ${still}, 열쇠 ${dmgReq(req2).map(x => x.keyed).join(',')}) · 격리 → ${r3}(옮긴 곳 ${moved.join(',')}) · 띠 걷힘 ${!!gone} · OS 대화상자 ${os1 - os0} · ${JSON.stringify(sf)}`);
+      }
     }
 
     section('2. 끝내기 — 창 닫기 · 「저장 안 함」');

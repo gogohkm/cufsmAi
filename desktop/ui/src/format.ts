@@ -102,14 +102,28 @@ export function ratio(r: number | null | undefined, ng: boolean, src: string): s
  */
 export function utilShown(x: any, u: unknown = x?.utilization): number | null {
   if (typeof u !== 'number' || !Number.isFinite(u)) { return null; }
-  if (x && typeof x === 'object' && x.utilization_valid === false && x.pass !== false) { return null; }
+  // E-1: 엔진이 가정한 길이(빈 KxLx · KyLy · KtLt · Lb 의 기본값)로 낸 결과의 이용률은 그 길이의 비다 — NG 여도 판정비로 적지 않는다(참고만, refRatio)
+  if (lengthAssumed(x)) { return null; }
+  if (x && typeof x === 'object' && x.pass !== false && (x.utilization_valid === false || x.pass === null)) { return null; }
   return u;
 }
-/** 이용률이 판정비가 아니다(utilization_valid: false · NG 아님) — 그 자리에 보이는 글 */
-export function noVerdictRatio(why = '엔진이 utilization_valid: false 를 달았다 — 주 소요를 주지 않았거나 평가하지 못한 한계상태가 있어 이 비는 판정비가 아니다'): string {
-  return `<span class="un" data-util-invalid${tip(why)}>판정 없음</span>`;
+/** 이용률이 판정비가 아니다(utilization_valid: false · 전체 판정 없음 · 가정한 길이 — NG 아님) — 그 자리에 보이는 글. ref 가 있으면 그 수를 「참고」로 옆에 */
+export function noVerdictRatio(why = '엔진이 utilization_valid: false 를 달았다 — 주 소요를 주지 않았거나 평가하지 못한 한계상태가 있어 이 비는 판정비가 아니다', ref: number | null = null): string {
+  return `<span class="un" data-util-invalid${tip(why)}>판정 없음</span>${typeof ref === 'number' && Number.isFinite(ref) ? ` ${refRatio(ref, why)}` : ''}`;
 }
-export const utilInvalid = (x: any): boolean => !!x && typeof x === 'object' && x.utilization_valid === false && x.pass !== false;
+/**
+ * 전체 판정이 없다(NG 아님) — 이용률은 판정비가 아니다: 엔진의 utilization_valid: false, 결과의 pass 가 null(랩 · 접합의 「판정 없음」 —
+ * 힘 분배 모델을 밝히지 않음 등), 가정한 길이(length_assumed)
+ */
+export const utilInvalid = (x: any): boolean => !!x && typeof x === 'object' && x.pass !== false
+  && (x.utilization_valid === false || x.pass === null || x.length_assumed === true);
+/** 결과가 엔진이 가정한 길이에서 나왔다(E-1 — `length_assumed: true`) */
+export const lengthAssumed = (x: any): boolean => !!x && typeof x === 'object' && x.length_assumed === true;
+export const LENGTH_ASSUMED_WHY = '엔진이 가정한 길이(빈 KxLx · KyLy · KtLt · Lb 를 엔진의 기본값으로 둠)로 낸 비다 — 참고값이며 합격도 불합격도 아니다(판정비가 아니다). 길이를 주면 판정';
+/** 참고 비 — 판정비가 아닌 수(가정한 길이 · 판정 없음). data-ratio 를 달지 않는다(판정비로 세지 않게) — 값은 data-ratio-ref */
+export function refRatio(r: number, why = LENGTH_ASSUMED_WHY): string {
+  return `<span class="faint" data-ratio-ref="${r}"${tip(why)}>참고 ${ratioText(r, r > 1)}</span>`;
+}
 
 /** 엔진 판정(pass) → 글자 · 모양. true OK · false NG · 그 밖(null · 없음) 판정 없음/미검토 */
 export function verdictOf(pass: unknown, unLabel = '미검토'): { text: string; cls: 'ok' | 'ng' | 'un' } {
