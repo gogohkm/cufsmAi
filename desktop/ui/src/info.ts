@@ -7,7 +7,8 @@
 import { esc, tip } from './dom';
 import { hhmm, none, num, ratio, ratioText, sigText, unitOf, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO, VERDICT_KO } from './names';
-import { assumptionLines, isDefault, memberRuns, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
+import { assumptionLines, isDefault, memberRuns, noFsmOf, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
+import { noFsmTag } from './tree';
 import { demandCapacity, gaugeHtml, highestLine, qnum, ratioFormTag, unText } from './sheet';
 import { BRANCH_TITLE, caseNotes, caseReady, caseTables, type Branch } from './caseView';
 import { BRANCH_OF, CASE_FIELDS, caseTag } from './caseFields';
@@ -16,7 +17,7 @@ import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
-import { actorOf, actorTag, baseOf, changeOf, chg, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
+import { actorOf, actorTag, baseOf, changeOf, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
 import { asmInfo, questionsAbout, srcInfo, srcs, work, workInfo } from './work';
 import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
 import { alts, altInfo, altRootInfo, visibleAlts } from './alts';
@@ -275,7 +276,7 @@ function checksInfo(key: string): string {
     typeof r.Fy_used === 'number' ? row_('설계 Fy', num(r.Fy_used, { src: `${run.src}Fy_used`, kind: 'stress' }), tagEng) : '',
     typeof fd.Lb === 'number' ? row_('비지지 길이 Lb', num(fd.Lb, { src: `${run.src}Fcre_detail.Lb`, kind: 'length' }), tagEng) : '',
     typeof fd.Cb === 'number' ? row_('Cb', num(fd.Cb, { src: `${run.src}Fcre_detail.Cb`, kind: 'none', sig: 3 }), tagEng) : '',
-    us.dsm_source || us.dsm_basis_by_family ? row_('좌굴 값의 출처', esc(Object.entries(us.dsm_source ?? {}).map(([a, b]) => `${a} ${b}`).join(' · ')), dsmBasisTag(us)) : '',
+    us.dsm_source || us.dsm_basis_by_family ? row_('좌굴 값의 출처', esc(Object.entries(us.dsm_source ?? {}).map(([a, b]) => `${a} ${b && typeof b === 'object' ? Object.entries(b).map(([c, d]) => `${c} ${d}`).join(' · ') : b}`).join(' · ')), dsmBasisTag(us) + noFsmTag(noFsmOf(run))) : '',
   ].join(''));
   // 한계상태 — 같은 검토 지점의 항목, 엔진의 순서 그대로
   const here = run.rows.filter(x => !row || x.point === row.point);
@@ -293,7 +294,11 @@ function checksInfo(key: string): string {
   const rvIt = row && rv.loaded ? itemOfRow(row) : null;
   const rvBtn = !row?.us ? RV : !rv.loaded ? markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만 — 이 파일은 프로젝트 밖이다') : !rvIt ? markButton(null, '', '이 줄의 항목이 확인 목록(get_reviews)에 없다')
     : markButton(rvIt, `data-rv-check="${esc(row.key)}"`);
+  // E5: FSM 없이 계산했으면(호스트의 dsm_basis_by_family) 머리 아래에 눈에 띄게
+  const nf = noFsmOf(run);
+  const nfNotice = nf ? `<div class="notice" data-no-fsm-notice>${noFsmTag(nf)} 이 검토는 FSM 좌굴 해석 없이 계산했다 — ${esc(nf.analytic ? `해석식의 ${nf.syms} 를 썼다` : `엔진이 ${nf.syms} 를 정하지 못했다`)}. 좌굴 해석을 돌린 뒤 다시 계산하면 FSM 값으로</div>` : '';
   return `<div class="hd"><div class="k">${kHead}<span class="sp"></span>${rvBtn}</div><div class="ttl">${esc(row ? `${row.where} · ${row.name}` : run.label)}</div>${head}</div>`
+    + nfNotice
     + sec('설계 가정', used, '', '이 판정에 엔진이 쓴 값. 입력의 출처는 모델 탭의 부재 · 하중 · 설계 조건(검토 상태) — 사람별 기록은 R2 부터')
     + sec(row?.pointName ? '한계상태 · 이 위치' : '한계상태 · 이 검토', ls, sheetLink)
     + (run.neTexts.length ? sec('엔진의 미검토 글', ul(run.neTexts), '', '엔진 결과의 not_evaluated 알림(검토 항목과 같은 것을 글로)') : '')
@@ -410,9 +415,9 @@ function logInfo(key: string): string {
   const v = g.verdict;
   const rows = g.runs.slice().reverse().map(r => `<tr data-run="${esc(String(r.run ?? ''))}"><td>${esc(runName(r))}</td><td>${esc(KIND_RESULT_KO[r.kind] ?? r.kind)}</td><td class="dim">${esc(hhmm(r.at))}</td><td class="dim">${esc(r.by ? (r.by === 'person' ? '사람' : r.by === 'ai' ? 'AI' : r.by) : '')}</td>`
     + `<td class="r">${r.pass === true ? 'OK' : r.pass === false ? 'NG' : ''} ${typeof r.max_ratio === 'number' ? esc(sigText(r.max_ratio, 3)) : ''}</td></tr>`).join('');
-  return hd('업무 · 기록', runName(g.head), v ? `<span class="verdict ${v.pass === true ? 'ok' : v.pass === false ? 'ng' : 'un'}">${v.pass === true ? 'OK' : v.pass === false ? 'NG' : '판정 없음'}</span>${typeof v.max_ratio === 'number' ? ` <span class="big">${esc(sigText(v.max_ratio, 3))}</span>` : ''}${v.governing?.id ? ` <span class="dim">지배 ${esc(String(v.governing.id))}</span>` : ''}` : none('판정 없음'), '')
-    + sec('실행', table(rows), '', '사이에 변경이 없는 잇단 실행은 한 머리줄(가장 늦은 것의 번호 · 판정) — 호스트의 실행 이력(get_case_status detail runs)')
-    + sec('이 계산에 들어간 묶음', g.changes.length ? `<ul class="notes">${g.changes.map(c => `<li><a class="lnk" data-chg-go="${esc(c.id)}">${esc(c.title)} · ${esc(whoText(c))} · ${esc(hhmm(c.at))}</a></li>`).join('')}</ul>` : none('없음', '앞 계산 뒤에 바뀐 것이 없다'));
+  return hd('업무 · 기록', groupName(g), v ? `<span class="verdict ${v.pass === true ? 'ok' : v.pass === false ? 'ng' : 'un'}">${v.pass === true ? 'OK' : v.pass === false ? 'NG' : '판정 없음'}</span>${typeof v.max_ratio === 'number' ? ` <span class="big">${esc(sigText(v.max_ratio, 3))}</span>` : ''}${v.governing?.id ? ` <span class="dim">지배 ${esc(String(v.governing.id))}</span>` : ''}` : none('판정 없음'), '')
+    + sec('실행', table(rows), '', '실행 하나 = 머리줄 하나(잇단 실행을 접지 않는다) — 호스트의 실행 이력(get_case_status detail runs)')
+    + sec('이 계산에 들어간 묶음', g.changes.length ? `<ul class="notes">${g.changes.map(c => `<li><a class="lnk" data-chg-go="${esc(c.id)}">${esc(c.title)} · ${esc(whoText(c))} · ${esc(hhmm(c.at))}</a></li>`).join('')}</ul>` : none('입력 변경 없음', '앞 계산 뒤에 바뀐 입력이 없다'), '', '이 계산에 처음 들어간 묶음 — MCP work_log 의 연결과 같다(다시 계산해도 뒤 계산으로 옮겨 가지 않는다)');
 }
 
 function connInfo(): string {

@@ -346,6 +346,46 @@ function buildRuns(): Run[] {
 /** 부재 검토(부재 · 퍼린)의 실행만 — 접합은 접합부 가지에 */
 export const memberRuns = (): Run[] => state.runs.filter(r => r.area === 'member' || r.area === 'purlin');
 
+/**
+ * E5 — 부재 검토가 FSM 없이(해석식 좌굴값으로) 계산됐는가. 호스트가 결과에 적은 하중군마다의 출처(dsm_basis_by_family: P · Mxx →
+ * prepared · current_analysis · none)에서 none 인 하중군만 — 화면이 짐작하지 않는다. 그 키가 없으면(인장 — 하중군 없음 · 퍼린 · 옛 결과) ·
+ * 엔진이 DSM 비적용이라 밝혔으면(원형관 — member.scope.round_tube_dsm_not_applicable) null.
+ * none 이어도 엔진의 출처(dsm_source)가 모두 「없음」 이면 해석식도 아니다(FSM 좌굴값 없음)
+ */
+const DSM_NA_CODE = 'member.scope.round_tube_dsm_not_applicable';
+const FAM_KEYS: Record<string, { syms: string; keys: string[]; sub: string }> = {
+  P: { syms: 'Pcrℓ · Pcrd', keys: ['Pcrl', 'Pcrd'], sub: 'compression' },
+  Mxx: { syms: 'Mcrℓ · Mcrd', keys: ['Mcrl', 'Mcrd'], sub: 'flexure_x' },
+};
+export interface NoFsm { fams: string[]; syms: string; sources: string; analytic: boolean }
+export function noFsmOf(r: Run | undefined): NoFsm | null {
+  const us = r?.us;
+  const by = us?.dsm_basis_by_family;
+  if (!us || !by || typeof by !== 'object' || Array.isArray(by)) { return null; }
+  const na = r!.scope.some(n => n.code === DSM_NA_CODE)
+    || (Array.isArray(us.notices) && us.notices.some((n: any) => n && typeof n === 'object' && n.code === DSM_NA_CODE));
+  if (na) { return null; }
+  const fams = Object.entries(by as Record<string, unknown>).filter(([, b]) => b === 'none').map(([f]) => f);
+  if (!fams.length) { return null; }
+  // 엔진이 그 하중군의 국부 · 뒤틀림 값을 어디서 얻었는지(그대로 — 압축 · 휨은 { Pcrl, Pcrd } · { Mcrl, Mcrd }, 조합은 { compression, flexure_x })
+  const ds = us.dsm_source && typeof us.dsm_source === 'object' ? us.dsm_source : {};
+  const vals: Array<[string, string]> = [];
+  for (const f of fams) {
+    const fk = FAM_KEYS[f];
+    if (!fk) { continue; }
+    const src = ds[fk.sub] && typeof ds[fk.sub] === 'object' ? ds[fk.sub] : ds;
+    for (const k of fk.keys) { if (typeof src[k] === 'string' && src[k]) { vals.push([k, src[k]]); } }
+  }
+  const isNone = (v: string) => /^(none|없음)$/i.test(v.trim());
+  return {
+    fams, syms: fams.map(f => FAM_KEYS[f]?.syms ?? f).join(' · '),
+    sources: vals.map(([k, v]) => `${k} ${v}`).join(' · '),
+    analytic: !vals.length || vals.some(([, v]) => !isNone(v)),
+  };
+}
+/** 지금 부재 검토 가운데 FSM 없이 계산된 것(E5 — 결과 › 부재 검토 · 업무 › 점검의 표시) */
+export const noFsmRuns = (): Array<{ run: Run; nf: NoFsm }> => memberRuns().map(run => ({ run, nf: noFsmOf(run) })).filter((x): x is { run: Run; nf: NoFsm } => !!x.nf);
+
 /** 모든 검토 항목(엔진 순서 — 실행 차례대로) */
 export const allRows = (): CheckRow[] => state.runs.flatMap(r => r.rows);
 

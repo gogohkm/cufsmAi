@@ -85,6 +85,7 @@ export const actorTag = (c: Change, extraTip = ''): string => byTag(c.by.kind, e
 // ── 기록 — 실행(계산 #k)으로 접기(통일안 6.2) ─────────────────────────
 /** get_case_status detail runs 의 history 한 줄. `no`(대상 안의 실행 차례) · `auto`(다른 계산이 자동으로 만든 것)는 새 호스트만 준다 */
 export interface Hist { run: string; kind: string; at: string; by?: string; client?: string | null; status?: string; pass?: boolean | null; max_ratio?: number | null; governing?: { id?: string; ratio?: number; verdict?: string } | null; props?: any; no?: number; auto?: boolean }
+/** 기록의 머리줄 하나 = 실행 하나(E6 — 접지 않는다). runs 는 늘 [head](옛 모양을 쓰는 곳을 위해 둔다). changes 가 비면 「입력 변경 없음」 */
 export interface RunGroup { key: string; runs: Hist[]; head: Hist; verdict: Hist | null; changes: Change[] }
 export interface Timeline { hasRuns: boolean; after: Change[]; groups: RunGroup[]; before: Change[] }
 /** 실행 이력(새 것부터 20 — 호스트). 프로젝트 밖은 null */
@@ -92,13 +93,20 @@ export function history(): Hist[] | null {
   const h = rec.status?.history as unknown;
   return Array.isArray(h) ? h.filter((x: any) => x && typeof x.at === 'string') : null;
 }
+/** 머리줄이 되는 실행 — 자동 실행 · 설계용 좌굴값(design_dsm)은 머리줄이 아니다 */
+const shownRun = (x: Hist): boolean => x.auto !== true && x.kind !== 'design_dsm';
+const byAt = (a: Hist, b: Hist): number => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
 /**
- * 기록의 묶음 — 실행 하나 = 머리줄 하나(자동 실행 · 설계용 좌굴값은 빼고), 사이에 변경이 없는 잇단 실행은 한 머리줄(가장 늦은 것의 번호 · 판정).
- * 변경은 그 앞 계산 뒤 ~ 이 계산까지의 머리줄 아래. 실행 이력이 없으면(프로젝트 밖) 기준점(basePointAt) 앞 · 뒤 둘로만
+ * 기록의 묶음(E6) — 실행 하나 = 머리줄 하나(자동 실행 · 설계용 좌굴값은 빼고), 잇단 실행을 접지 않는다. 묶음은 그것이 처음 들어간 실행의 머리줄 아래 —
+ * 호스트의 work_log(StcfsdPanel._workTimeline)와 같은 연결: 실행이 실린 묶음(runs)은 그 가운데 첫 실행, 시각으로 놓이는 묶음은 그 뒤의 첫 실행
+ * (같은 때면 실행이 먼저 — 그 묶음은 다음 실행). 첫 실행이 머리줄이 아닌 실행(자동 · 설계용 좌굴값)이면 그 때를 품은 머리줄(그 뒤의 첫 머리줄).
+ * 그래서 다시 계산해도 묶음이 최신 계산 아래로 옮겨 가지 않는다. 묶음이 없는 실행은 「계산 #n (입력 변경 없음)」 한 줄.
+ * 실행 이력이 없으면(프로젝트 밖) 기준점(basePointAt) 앞 · 뒤 둘로만
  */
 export function timeline(): Timeline {
   const h = history();
-  const runs = (h ?? []).filter(x => x.auto !== true && x.kind !== 'design_dsm').slice().sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  const all = (h ?? []).slice().sort(byAt);
+  const runs = all.filter(shownRun);
   // 같은 요청이 남긴 실행이 있는 묶음(runs — 설계 도구는 계산이 먼저, 입력 확정이 뒤)은 시각이 아니라 그 실행으로 둔다
   const linked = (c: Change): boolean => Array.isArray(c.runs) && c.runs.length > 0;
   const timed = chg.list.filter(c => !linked(c));
@@ -106,53 +114,61 @@ export function timeline(): Timeline {
     const b = basePointAt();
     return { hasRuns: false, after: timed.filter(c => !b || c.at > b), groups: [], before: chg.list.filter(c => linked(c) || (!!b && c.at <= b)) };
   }
-  // 오래된 것부터 — 앞 실행 뒤에 (시각으로 놓이는) 변경이 없으면 그 머리줄에 잇는다
-  const gs: Array<{ runs: Hist[]; from: string | null }> = [];
-  let prevAt: string | null = null;
-  for (const r of runs) {
-    const between = prevAt === null ? true : timed.some(c => c.at > prevAt! && c.at <= r.at);
-    if (!gs.length || between) { gs.push({ runs: [r], from: prevAt }); } else { gs[gs.length - 1].runs.push(r); }
-    prevAt = r.at;
-  }
   const first = runs[0].at, last = runs[runs.length - 1].at;
   // 이력이 다 있으면(20 보다 적음 · 첫 실행이 #1) 첫 계산 앞의 묶음은 첫 계산에 들어간 것이다. 잘렸으면 「계산 기록 앞」
-  const complete = (h ?? []).length < 20 || runs[0].no === 1;
-  const groups: RunGroup[] = gs.map((g, gi) => {
-    const head = g.runs[g.runs.length - 1];
-    const lo = gi === 0 && complete ? '' : g.from, hi = g.runs[0].at;
-    const verdict = [...g.runs].reverse().find(x => typeof x.max_ratio === 'number' || typeof x.pass === 'boolean') ?? null;
-    return { key: `log:run:${String(head.run ?? head.at).replace(/[#|]/g, '')}`, runs: g.runs, head, verdict, changes: lo === null ? [] : timed.filter(c => c.at > lo && c.at <= hi) };
+  const complete = (h ?? []).length < 20 || all[0]?.no === 1 || runs[0].no === 1;
+  // 오래된 것부터 — 실행 r 의 묶음 = 앞 머리줄의 때 ≤ at < r 의 때(호스트와 같이 같은 때면 실행이 먼저)
+  const groups: RunGroup[] = runs.map((r, i) => {
+    const lo = i === 0 ? (complete ? '' : null) : runs[i - 1].at;
+    const verdict = typeof r.max_ratio === 'number' || typeof r.pass === 'boolean' ? r : null;
+    return { key: `log:run:${String(r.run ?? r.at).replace(/[#|]/g, '')}`, runs: [r], head: r, verdict, changes: lo === null ? [] : timed.filter(c => c.at >= lo && c.at < r.at) };
   });
-  // 실행이 실린 묶음 — 그 실행(여럿이면 가장 늦은 것)의 머리줄. 자동 실행이면 그 때를 품은 머리줄, 이력에 없으면(20 보다 오래됨) 「계산 기록 앞」
-  const before = complete ? [] : timed.filter(c => c.at <= first);
+  const before = complete ? [] : timed.filter(c => c.at < first);
+  const after = timed.filter(c => c.at >= last);
+  // 실행이 실린 묶음 — 그 첫 실행의 머리줄. 머리줄이 아닌 실행이면 그 때를 품은 머리줄(그 뒤의 첫 것 — 없으면 지난 계산 뒤), 이력에 없으면(20 보다 오래됨) 「계산 기록 앞」
   for (const c of chg.list.filter(linked)) {
     const r = anchorRun(c);
-    const g = r ? groups.find(x => x.runs.some(y => y.run === r.run)) ?? groups.find((x, i) => r.at <= x.runs[x.runs.length - 1].at && (i === 0 || r.at > groups[i - 1].runs[groups[i - 1].runs.length - 1].at)) : null;
-    if (g) { g.changes.push(c); } else { before.push(c); }
+    const g = r ? groups.find(x => x.head.run === r.run) ?? groups.find(x => x.head.at >= r.at) ?? null : null;
+    if (g) { g.changes.push(c); } else if (r) { after.push(c); } else { before.push(c); }
   }
   const byNew = (a: Change, b: Change) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0);
   groups.forEach(g => g.changes.sort(byNew));
   before.sort(byNew);
-  return { hasRuns: true, after: timed.filter(c => c.at > last), groups: groups.reverse(), before };
+  after.sort(byNew);
+  return { hasRuns: true, after, groups: groups.reverse(), before };
 }
-/** 묶음에 실린 실행 가운데 가장 늦은 것(이력에 있는 것만). 없으면 null */
+/** 묶음에 실린 실행(이력에 있는 것만) — 오래된 것부터 */
+function ownRuns(c: Change): Hist[] {
+  if (!Array.isArray(c.runs) || !c.runs.length) { return []; }
+  return (history() ?? []).filter(x => c.runs!.includes(x.run)).sort(byAt);
+}
+/** 묶음이 처음 들어간 실행 — 실린 실행 가운데 첫 것(호스트 work_log 의 연결과 같다). 없으면 null */
 export function anchorRun(c: Change): Hist | null {
-  if (!Array.isArray(c.runs) || !c.runs.length) { return null; }
-  const hs = (history() ?? []).filter(x => c.runs!.includes(x.run));
-  return hs.sort((a, b) => (a.at < b.at ? 1 : -1))[0] ?? null;
+  return ownRuns(c)[0] ?? null;
 }
-/** 묶음의 판정 변화 — 실행이 실린 묶음은 「그 실행 앞의 마지막 실행 → 그 실행」, 아니면 시각으로(runsAround) */
+/**
+ * 묶음의 판정 변화 — 실행이 실린 묶음은 「그 실행 앞의 마지막 판정 실행 → 실린 실행 가운데 첫 판정 실행(없으면 그 뒤의 첫 판정 실행)」
+ * (호스트 work_log 의 verdict_delta 와 같은 쪽), 아니면 시각으로(runsAround)
+ */
 export function aroundOf(c: Change): { before: Hist | null; after: Hist | null; anyAfter: boolean } {
   if (Array.isArray(c.runs) && c.runs.length) {
-    const r = anchorRun(c);
+    const own = ownRuns(c);
+    const r = own[0];
     if (!r) { return { before: null, after: null, anyAfter: true }; }
     const hist = history() ?? [];
-    return { before: hist.find(x => x.at < r.at && x.run !== r.run && typeof x.max_ratio === 'number') ?? null, after: typeof r.max_ratio === 'number' ? r : null, anyAfter: true };
+    const rated = (x: Hist) => typeof x.max_ratio === 'number';
+    return {
+      before: hist.find(x => x.at < r.at && !c.runs!.includes(x.run) && rated(x)) ?? null,
+      after: own.find(rated) ?? [...hist].reverse().find(x => x.at > r.at && rated(x)) ?? null,
+      anyAfter: true,
+    };
   }
   return runsAround(c.at);
 }
 /** 머리줄의 이름 — 「계산 #no」, 번호가 없으면(옛 호스트) 「종류 · 시각」 */
 export const runName = (r: Hist): string => (typeof r.no === 'number' ? `계산 #${r.no}` : `${KIND_RESULT_KO[r.kind] ?? r.kind} · ${hhmm(r.at)}`);
+/** 기록 머리줄의 이름 — 묶음이 없는 실행은 「계산 #n (입력 변경 없음)」 */
+export const groupName = (g: RunGroup): string => `${runName(g.head)}${g.changes.length ? '' : ' (입력 변경 없음)'}`;
 /** 다시 계산이 필요한 변경 — 지난 계산 뒤, 프로그램의 연동 줄은 세지 않는다 */
 export const pendingChanges = (): Change[] => timeline().after.filter(c => actorOf(c) !== 'program');
 /** 그 때 앞의 마지막 실행 · 뒤의 첫 실행(최대 판정비가 있는 것 — 호스트의 실행 이력, 새 것부터). until 이 있으면 그 앞까지 */

@@ -2,7 +2,8 @@
    템플릿은 안내 띠(32px)가 있는 정지 화면이라 창 높이 · 단추 · 빈 값 · 편집 상태의 끼운 화면 · 물음 상자 · 밝은 테마의 그림 색이 없다. */
 
 /* 창 — 안내 띠가 없다. 960px 창에서도 가로 스크롤이 생기지 않게 */
-.win { height: 100vh; min-height: 560px; min-width: 900px; position: relative; }
+/* 셸의 최소 창 폭은 900 이지만 화면 배율에 따라 내용은 약 800 CSS px 까지 좁아진다 — 그 폭에서도 가로 스크롤이 없게(E11) */
+.win { height: 100vh; min-height: 560px; min-width: 780px; position: relative; }
 .win > .body { position: relative; }
 #start { position: absolute; top: 37px; bottom: 24px; left: 0; right: 0; z-index: 6; }
 #review.behind { visibility: hidden; }
@@ -273,6 +274,11 @@ svg rect.cpb { cursor: default; }
 .tag.by-ai { border-color: var(--accent); color: var(--accent); }
 .tag.by-program { border-color: var(--text-faint); color: var(--text-dim); }
 .tag.by-file { border-color: var(--slot); color: var(--slot); }
+/* E5 — FSM 없이(해석식 좌굴값으로) 계산한 부재 검토 */
+.tag.warn { border-color: var(--warn); color: var(--warn); }
+.notice[data-no-fsm-notice] .tag { margin-right: 6px; }
+/* 판정 요약 줄은 값이 길다(지배 · 최대 · 미검토) — 이름이 표시에 밀려 사라지지 않게 */
+.tree .row[data-k="insp:sum"] .nm { flex: none; }
 .tree .row .tag[data-actor] { margin: 0 5px 0 0; }
 /* 진행 띠 끝의 계산 일치 칩 */
 .pipe-slot { display: inline-flex; align-items: center; gap: 8px; }
@@ -283,6 +289,17 @@ svg rect.cpb { cursor: default; }
 .chip.calc .sh { display: none; }
 .chip.calc { min-width: 0; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
 .pipe-slot { min-width: 0; flex-shrink: 1; }
+/* E11 — 제목 표시줄이 넘치면(titlebar.fitTitle 이 잰다) 차례로 줄인다: fit1 짧은 이름 → fit2 진행 띠는 점(● ◐ ○)만, 이름은 풍선 → fit3 파일 이름 줄임표.
+   진행 띠 칸은 넘친 글을 잘라 단추 · 연결 상태 위에 겹쳐 그리지 않는다(마지막 안전판) */
+.pipe-slot { overflow: hidden; }
+.tbar.fit1 .pipe .ps .lg, .tbar.fit1 .chip.calc .lg { display: none; }
+.tbar.fit1 .pipe .ps .sh, .tbar.fit1 .chip.calc .sh { display: inline; }
+.tbar.fit1 .pipe { gap: 4px; padding: 3px 8px; }
+.tbar.fit1 .pipe-slot { gap: 4px; }
+.tbar.fit2 .pipe .ps em, .tbar.fit2 .pipe .ps .sh, .tbar.fit2 .pipe b { display: none; }
+.tbar.fit2 .pipe { gap: 5px; padding: 3px 7px; }
+.tbar.fit3 .flabel { display: none; }
+.tbar.fit3 .fname { display: inline-block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 /* 좁은 창 — 진행 띠처럼 칩도 짧은 글(「일치」 · 「바뀜 n」) */
 @media (max-width: 1100px) {
   .chip.calc .lg { display: none; }

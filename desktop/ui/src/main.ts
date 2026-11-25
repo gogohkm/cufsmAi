@@ -30,7 +30,7 @@ import { initStart, renderStart } from './start';
 import { makeReport, refresh, rowOfKey, setRunning, setValRunning, state, type Stage } from './store';
 import { bandHtml, KIND_KO, loadRecent, person, rec } from './records';
 import { flashTip, installTips } from './tips';
-import { claudeDone, claudeStatus, initTitlebar, renderClaude, renderFollow, renderTitle, type ClaudeStatus } from './titlebar';
+import { claudeDone, claudeStatus, fitTitle, initTitlebar, renderClaude, renderFollow, renderTitle, type ClaudeStatus } from './titlebar';
 import { buildTree, findNode, keysUnder, setTreeFilter, TABS, treeFilter, treeHtml, type Tab } from './tree';
 import { UNITS_NOTE } from './units';
 import { mount3d } from './v3d';
@@ -134,27 +134,67 @@ function openDrop(): { key: string; why: string; kinds: string[] } | null {
   const why = OPEN_WHY.find(([re]) => re.test(String(last.reason)))![1];
   return { key: `${String(last.invalidated_at ?? '')}|${String(last.reason)}`, why, kinds };
 }
+const DROP_KO: Record<string, string> = { buckling_analysis: '좌굴 해석', load_analysis: '하중 해석', member_design: '부재 검토', design_dsm: '설계용 좌굴값', lap: '랩 접합', connection: '단일 접합' };
+/**
+ * [다시 계산]의 차례(E4) — 버린 것을 차례로: 좌굴 해석(버렸으면 — run_analysis, MCP 도구와 같은 호스트 동작) → 부재 검토(run_case_check member —
+ * 호스트가 그 검토가 쓰는 설계용 좌굴값을 함께 만든다) → 랩 · 단일 접합(버렸으면). 부재 검토는 늘 한다(지금까지와 같이)
+ */
+type RecStep = { key: string; name: string; action: string; params: Record<string, unknown> };
+function recomputePlan(kinds: string[]): RecStep[] {
+  const out: RecStep[] = [];
+  if (kinds.includes('buckling_analysis')) { out.push({ key: 'buckling_analysis', name: '좌굴 해석', action: 'run_analysis', params: {} }); }
+  out.push({ key: 'member_design', name: '부재 검토', action: 'run_case_check', params: { what: 'member' } });
+  if (kinds.includes('lap')) { out.push({ key: 'lap', name: '랩 접합', action: 'run_case_check', params: { what: 'lap' } }); }
+  if (kinds.includes('connection')) { out.push({ key: 'connection', name: '단일 접합', action: 'run_case_check', params: { what: 'connection' } }); }
+  return out;
+}
+let recomputeNow = '';
 function renderOpenNotice(): void {
   const el = $('opennotice');
   const d = openDrop();
   el.hidden = !d || d.key === noticeDismissed;
   if (!d || el.hidden) { return; }
-  const KO: Record<string, string> = { buckling_analysis: '좌굴 해석', load_analysis: '하중 해석', member_design: '부재 검토', design_dsm: '설계용 좌굴값', lap: '랩 접합', connection: '단일 접합' };
-  el.innerHTML = `<b data-open-notice>입력만 열었습니다 — ${esc(d.why)}</b><span class="faint">버린 결과: ${esc(d.kinds.map(k => KO[k] ?? k).join(' · '))}</span><span class="sp"></span>`
-    + `<span class="btn${recomputing ? ' off' : ''}" data-act="recompute"${tip('화면의 입력으로 부재 검토를 다시 돌린다(run_case_check — 화면의 「설계 검토 실행」과 같은 요청). Claude 에게 「다시 계산해」라고 해도 된다')}>${recomputing ? '계산 중…' : '다시 계산'}</span>`
+  const plan = recomputePlan(d.kinds).map(s => s.name).join(' → ');
+  el.innerHTML = `<b data-open-notice>입력만 열었습니다 — ${esc(d.why)}</b><span class="faint">버린 결과: ${esc(d.kinds.map(k => DROP_KO[k] ?? k).join(' · '))}</span><span class="sp"></span>`
+    + `<span class="btn${recomputing ? ' off' : ''}" data-act="recompute" data-plan="${esc(plan)}"${tip(`버린 것을 화면의 입력으로 차례로 다시 돌린다 — ${plan}. 좌굴 해석은 run_analysis(화면의 「해석 실행」), 부재 검토는 run_case_check(화면의 「설계 검토 실행」과 같은 요청 — 그 검토가 쓰는 설계용 좌굴값도 함께). 한 단계가 안 되어도 나머지는 해 본다. Claude 에게 「다시 계산해」라고 해도 된다`)}>${recomputing ? `${esc(recomputeNow || '계산')} 중…` : '다시 계산'}</span>`
     + `<span class="btn ghost" data-act="notice-close"${tip('이 알림을 닫는다(까닭은 결과 탭의 낡음에 남는다)')}>닫기</span>`;
+}
+/** run_case_check 의 답이 밝힌 좌굴값의 출처(호스트가 적으면 — 이름이 달라도 받는다). 없으면 '' */
+function bucklingUsed(r: any): string {
+  const cc = r?.case_check;
+  const b = cc?.buckling_values ?? cc?.bucklingValues ?? cc?.buckling ?? null;
+  const src = typeof b === 'string' ? b : typeof b?.source === 'string' ? b.source : typeof b?.kind === 'string' ? b.kind : '';
+  if (!src) { return ''; }
+  if (/prepared[-_ ]?now|re-?prepared/i.test(src)) { return 'FSM 좌굴값을 다시 준비해 썼다'; }
+  if (/^fsm/i.test(src)) { return 'FSM 좌굴값을 썼다'; }
+  if (/analytic/i.test(src)) { return '해석식 좌굴값으로 계산했다(FSM 값 없음)'; }
+  return `좌굴값: ${src}`;
 }
 async function recompute(): Promise<void> {
   if (recomputing) { return; }
+  const d = openDrop();
   recomputing = true;
   render();
-  const d = openDrop();
-  const r = await mcp<any>('run_case_check', { what: 'member' });
-  let err = r?.error ? String(r.error) : '';
-  if (!err && d?.kinds.includes('lap')) { const l = await mcp<any>('run_case_check', { what: 'lap' }); if (l?.error) { err = `랩: ${String(l.error)}`; } }
+  const done: string[] = [];
+  const failed: string[] = [];
+  let used = '';
+  // 한 단계가 안 되어도 다음 단계는 해 본다 — 무엇을 했고 무엇을 못 했는지 그대로 알린다
+  for (const s of recomputePlan(d?.kinds ?? [])) {
+    recomputeNow = s.name;
+    renderOpenNotice();
+    const r = await mcp<any>(s.action, s.params);
+    const err = r?.error ? String(r.error) : r?.success === false ? String(r?.message ?? '실패') : '';
+    if (err) { failed.push(`${s.name}(${err})`); continue; }
+    done.push(s.name);
+    if (s.key === 'member_design') { used = bucklingUsed(r); }
+  }
   recomputing = false;
-  if (err) { toast(`다시 계산하지 못했다 — ${err}. Claude 에게 「다시 계산해」라고 해도 된다`, 'warning'); }
-  else if (d) { noticeDismissed = d.key; toast('화면의 입력으로 다시 계산했다(부재 검토)', 'info'); }
+  recomputeNow = '';
+  const fsmFailed = failed.some(f => f.startsWith('좌굴 해석(')) && done.includes('부재 검토');
+  const usedTxt = used ? ` · ${used}` : fsmFailed ? ' · 부재 검토는 새 좌굴 해석 없이 계산했다(결과 › 부재 검토의 좌굴 값의 출처)' : '';
+  if (failed.length) {
+    toast(`다시 계산 — 한 것: ${done.length ? done.join(' → ') : '없음'} · 하지 못한 것: ${failed.join(' · ')}${usedTxt}. Claude 에게 「다시 계산해」라고 해도 된다`, 'warning');
+  } else if (d) { noticeDismissed = d.key; toast(`화면의 입력으로 다시 계산했다 — ${done.join(' → ')}${usedTxt}`, 'info'); }
   scheduleRefresh();
   render();
 }
@@ -268,6 +308,7 @@ function render(): void {
   renderFollow(following(), !!pointedAt());
   $('start').hidden = ui.screen !== 'start';
   $('tbar').classList.toggle('onstart', ui.screen === 'start');
+  fitTitle();
   $('review').classList.toggle('behind', ui.screen === 'start');
   if (ui.screen === 'start') {
     renderStart($('start'), claudeStatus());

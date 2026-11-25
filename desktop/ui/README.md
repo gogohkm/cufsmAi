@@ -138,6 +138,8 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 
 다른 파일을 열면(`resultsCleared`) 낡음이 아니라 ○. 「이번 세션에 본 것」은 `sessionStorage` 에 둔다(새로 고침해도 남는다, 없어도 화면은 돈다 — 그때는 지워진 결과가 ○ 로 보인다). 실행 중(파란 점)은 `analysisStarted` 부터 `analysisComplete` · `dsmResult` · `analysisError` 까지.
 
+좁은 창(E11): 제목 표시줄이 넘치면(`titlebar.fitTitle` 이 잰다 — 이름 · Claude 상태 글에 따라 넘치는 폭이 다르다) 차례로 줄인다 — 진행 띠 · 계산 일치 칩의 짧은 이름 → 진행 띠는 점(● ◐ ○)만(이름은 풍선) → 파일 이름 줄임표. 진행 띠 칸은 넘친 글을 잘라 단추 · 연결 상태 위에 그리지 않는다. 내용 폭 약 800 CSS px(셸의 최소 창 900 · 화면 배율)까지 가로 스크롤이 없다.
+
 ### 판정
 
 엔진의 `pass` · `limit_state_checks` · `not_evaluated` · `not_checked` 를 그 차례대로 옮긴다. 화면이 판정을 만들지 않는다.
@@ -163,7 +165,7 @@ TypeScript, 프레임워크 없음(StAnal 과 같은 결정). 다리의 CSP(`scr
 
 보기 보고(b60e62d — 보기 계약 2절): 화면은 id · 어휘만 보낸다 — 보기 `start` · `sheet` · `<트리 탭>/<무리>:<보기>`, 검토 항목의 위치는 퍼린의 `{region, check_point}` · 엔진의 `{segment}` 만(x · 지점 번호 등 수는 보내지 않는다), focus 답의 `note` 는 코드(`followed` · `not_in_results` · `follow_off` · `editing` · `busy`). 「Claude 가 보는 선택」 칩은 호스트가 받아 적은 것 — 호스트가 버린 칸(`dropped`)은 빼고 「호스트가 버림: …」 이라고 보인다(`data-dropped`). 퍼린 검토 지점(보기 계약 4a): 「검토 위치」에 지점 n · 경간 n(1 부터, 호스트가 채운 그대로) · 구간의 지점 · 소요 근거, 조합이 `'envelope'` 이면 「포락선」(어느 조합인지 모름), 시트의 「설계 가정과 출처」 끝에 그 지점 자신의 경고 · 가정 · 범위 · 검토 안 함.
 
-보기 계약 kind `validation`(4b99968): 점검 항목을 고르면 `{kind: 'validation', id: 'val.*'}` 을 알리고, AI 의 `focus` 가 그 kind 면 그 항목으로(마지막 점검에 있을 때). 글 방향 제어 문자(LRM · RLM · LRE – RLO · LRI – PDI · ALM)는 화면의 모든 글(파일 이름 · 알림 · 엔진 글 · 풍선)에서 U+FFFD 로 — 호스트의 그리기(`reportRender.esc`)와 같은 규칙. 파일의 결과를 버리고 연 때(봉인 · 엔진 — 장부의 `open_project`) 제목 표시줄 아래 「입력만 열었습니다 — 까닭」 띠와 「다시 계산」(run_case_check member · 랩이 버려졌으면 lap), 지금 저장하면 서명이 붙지 않으면 「결과 서명 안 됨」. 랩 구간 구속 진술(`lap_restrained`)이 검토 상태에 생기면 부재 · 접합부 가지에 출처와 함께.
+보기 계약 kind `validation`(4b99968): 점검 항목을 고르면 `{kind: 'validation', id: 'val.*'}` 을 알리고, AI 의 `focus` 가 그 kind 면 그 항목으로(마지막 점검에 있을 때). 글 방향 제어 문자(LRM · RLM · LRE – RLO · LRI – PDI · ALM)는 화면의 모든 글(파일 이름 · 알림 · 엔진 글 · 풍선)에서 U+FFFD 로 — 호스트의 그리기(`reportRender.esc`)와 같은 규칙. 파일의 결과를 버리고 연 때(봉인 · 엔진 — 장부의 `open_project`) 제목 표시줄 아래 「입력만 열었습니다 — 까닭」 띠와 「다시 계산」(버린 차례대로 — 좌굴 해석이 버려졌으면 run_analysis → run_case_check member → 랩 · 단일 접합이 버려졌으면 lap · connection. 한 단계가 안 되어도 나머지는 하고 알림에 한 것 · 못 한 것을 적는다), 지금 저장하면 서명이 붙지 않으면 「결과 서명 안 됨」. 랩 구간 구속 진술(`lap_restrained`)이 검토 상태에 생기면 부재 · 접합부 가지에 출처와 함께.
 
 엔진 계약(b288448)의 표시: 무리의 지배가 미검토(`governs_basis: 'not_evaluated'`)면 덩어리 머리 「지배 — 미검토」 · 「미검토 (참고 판정비 r)」, 「평가한 최대: 이름 비」 줄을 따로(머리 비로 쓰지 않는다 — 정보 창도). `out_of_scope` 는 「참고 — 적용 범위 밖」. `ratio_form` 은 「원문 좌변 소요 ≤ 강도, 견줄 비 r」 + 「비의 꼴」 꼬리표. `unbounded` 는 「∞」(바꾸지 않는다). `expr_units: 'US'` 단계는 「US 단위로 쓴 식」 + `units_note`. 랩의 `lap.block_shear`(미검토 · 판정에 안 듦)와 범위 글, Mnd 없는 랩의 뒤틀림 미검토는 엔진이 내는 대로.
 

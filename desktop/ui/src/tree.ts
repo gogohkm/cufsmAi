@@ -5,12 +5,12 @@
 import { esc, tip } from './dom';
 import { hhmm, num, ratio, ratioText, sigText } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
-import { assumptionLines, isDefault, memberRuns, state, type CheckRow } from './store';
+import { assumptionLines, isDefault, memberRuns, noFsmRuns, state, type CheckRow, type NoFsm } from './store';
 import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
 import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
-import { actorOf, actorTag, afterBase, basePointAt, BY_KO, chg, history, KIND_RESULT_KO, LINK_TIP, linkOf, runName, aroundOf, timeline, whoText, type Change, type Hist } from './changes';
+import { actorOf, actorTag, afterBase, basePointAt, BY_KO, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, aroundOf, timeline, whoText, type Change, type Hist } from './changes';
 import { glyph, itemOfRow, markOf, rv } from './reviews';
 import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
@@ -34,6 +34,19 @@ export interface TNode {
 }
 
 const n = (k: string, t: string, o: Partial<TNode> = {}): TNode => ({ k, t, ...o });
+
+/**
+ * E5 — FSM 없이 계산한 부재 검토의 표시(결과 › 부재 검토 · 업무 › 점검 › 판정 요약 · 정보 창). 호스트가 결과에 적은 하중군의 출처(dsm_basis_by_family)가
+ * none 인 것만(store.noFsmOf). 없으면 ''
+ */
+export function noFsmTag(nf: NoFsm | null = noFsmRuns()[0]?.nf ?? null): string {
+  if (!nf) { return ''; }
+  const label = nf.analytic ? '해석식 좌굴값' : 'FSM 좌굴값 없음';
+  const t = nf.analytic
+    ? `FSM 좌굴 해석 없이 해석식의 ${nf.syms} 로 계산했다(${nf.fams.join(' · ')} — 호스트의 dsm_basis_by_family: none${nf.sources ? ` · 엔진이 쓴 값: ${nf.sources}` : ''}) — 좌굴 해석을 돌린 뒤 다시 계산하면 FSM 값으로`
+    : `FSM 좌굴 해석 없이 계산했다 — 엔진이 ${nf.syms} 를 정하지 못했다(${nf.sources}). 좌굴 해석을 돌린 뒤 다시 계산하면 FSM 값으로`;
+  return `<span class="tag warn" data-no-fsm="${esc(nf.fams.join(','))}" data-no-fsm-kind="${nf.analytic ? 'analytic' : 'none'}"${tip(t)}>${label}</span>`;
+}
 
 const STATE_V: Record<string, [string, string, string]> = {
   ok: ['일치', 'ok', 'ok'], stale: ['낡음', 'warn', 'warn'], none: ['결과 없음', 'un', ''], run: ['해석 중', 'acc', 'acc'], unk: ['결과 있음', '', ''],
@@ -169,6 +182,7 @@ export function buildTree(tab: Tab): TNode[] {
         v: chkStage.state === 'ok' ? `NG ${ng.length} · 미검토 ${un.length} · OK ${ok.length}${rv.loaded ? ` · 확인 ${rv.reviewed}/${rv.total}${rv.again ? ` · 다시 확인 ${rv.again}` : ''}` : ''}` : STATE_V[chkStage.state][0],
         vCls: chkStage.state === 'ok' ? (ng.length ? 'ng' : un.length ? 'un' : 'ok') : STATE_V[chkStage.state][1],
         dot: chkStage.state === 'stale' ? 'warn' : undefined, tip: chkStage.state === 'ok' ? '판정 차례: NG > 미검토 > OK. 미검토는 합격이 아니다' : chkStage.note,
+        ...(chkStage.state === 'ok' && noFsmRuns().length ? { tagHtml: noFsmTag() } : {}),
         open: true,
         kids: chkStage.state === 'ok' ? [
           ...(treeFilter ? [n('chk:filter', `이 위치만 — ${treeFilter.label}`, { v: '풀기', vCls: 'acc', tip: '「이 위치만 보기」를 풀고 모든 항목으로(Esc)' })] : []),
@@ -262,9 +276,12 @@ function workTree(): TNode[] {
   const based = tl.hasRuns || !!basePointAt();
   const after = n('log:after', based ? '지난 계산 뒤' : '아직 계산 없음', { v: String(tl.after.length), vCls: pend ? 'warn' : '', open: true,
     tip: based ? `마지막 실행 뒤의 묶음 — 다시 계산해야 하는 것 ${pend}(프로그램의 연동 줄은 세지 않는다)` : '이 대상에 실행이 없다', kids: tl.after.map(chgNode) });
-  const runNodes = tl.groups.map((g, i) => n(g.key, runName(g.head), { vHtml: runVerdictHtml(g.verdict), open: i < 3,
-    tip: `${g.runs.map(r => `${KIND_RESULT_KO[r.kind] ?? r.kind} · ${hhmm(r.at)}${r.by ? ` · ${BY_KO[r.by] ?? r.by}` : ''}`).join(' / ')} — 그 아래는 앞 계산 뒤 ~ 이 계산 앞의 묶음 ${g.changes.length}${g.verdict?.governing?.id ? ` · 지배 ${g.verdict.governing.id}` : ''}`,
-    kids: g.changes.map(chgNode) }));
+  // 실행 하나 = 머리줄 하나(E6). 묶음이 없는 실행은 아래 줄 없는 한 줄 「계산 #n (입력 변경 없음)」
+  // 펼쳐 두는 것 — 묶음이 있는 머리줄 가운데 새 것 셋(묶음 없는 머리줄은 아래 줄이 없다 — 그것이 최근 묶음을 접어 버리지 않게)
+  const openKeys = new Set(tl.groups.filter(g => g.changes.length).slice(0, 3).map(g => g.key));
+  const runNodes = tl.groups.map(g => n(g.key, groupName(g), { vHtml: runVerdictHtml(g.verdict), open: openKeys.has(g.key),
+    tip: `${KIND_RESULT_KO[g.head.kind] ?? g.head.kind} · ${hhmm(g.head.at)}${g.head.by ? ` · ${BY_KO[g.head.by] ?? g.head.by}` : ''} — ${g.changes.length ? `그 아래는 이 계산에 처음 들어간 묶음 ${g.changes.length}(앞 계산 뒤 ~ 이 계산 앞)` : '앞 계산 뒤에 바뀐 입력이 없다'}${g.verdict?.governing?.id ? ` · 지배 ${g.verdict.governing.id}` : ''}`,
+    kids: g.changes.length ? g.changes.map(chgNode) : undefined }));
   const before = tl.before.length ? [n('log:before', tl.hasRuns ? '계산 기록 앞' : '그 앞', { v: String(tl.before.length), open: !tl.hasRuns,
     tip: tl.hasRuns ? '실행 이력(새 것부터 20)의 가장 오래된 실행 앞의 묶음' : '지난 계산 앞의 묶음', kids: tl.before.map(chgNode) })] : [];
   const pastQ = questions().filter(w => w.state === 'closed' || w.answered);
@@ -286,6 +303,7 @@ function workTree(): TNode[] {
   const asmV = assumptionsNode().v ?? '없음';
   const insp = n('insp', '점검', { open: true, tip: '지금 결과의 상태 — 결과 탭 · 모델 탭의 그 줄과 같은 수', kids: [
     n('insp:sum', '판정 요약', { go: 'result|chk', vHtml: chkOk && runs.length ? `${gov?.governing ? `지배 ${esc(gov.governing)} · ` : ''}최대 ${typeof gov?.utilization === 'number' ? ratio(gov.utilization, gov.overall === false, `${gov.src}utilization`) : '—'} · <span class="${un ? 'un' : ''}">미검토 ${un}</span>` : `<span class="vl un">${esc(STATE_V[state.stages.chk.state][0])}</span>`,
+      ...(chkOk && noFsmRuns().length ? { tagHtml: noFsmTag() } : {}),
       tip: '지배 항목 · 최대 판정비(엔진) · 미검토 수(결과 탭의 부재 검토와 같은 수) — 누르면 결과 › 부재 검토' }),
     n('insp:warn', '엔진 알림', { go: 'result|chk', v: String(nWarn), vCls: nWarn ? 'warn' : '', tip: '엔진이 낸 경고(warnings) — 누르면 결과 › 부재 검토(정보 창의 경고)' }),
     n('insp:asm', '가정', { go: 'model|asm', v: asmV, tip: '기본값으로 채운 입력 · 엔진이 밝힌 가정 · 가정 등록부 — 누르면 모델 › 가정' }),

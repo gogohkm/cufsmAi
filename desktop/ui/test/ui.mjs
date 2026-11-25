@@ -604,6 +604,37 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     classes: (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=analysisComplete`)).json?.data?.analysisComplete?.message?.data?.classifications,
   });
   const marker = () => ev('window.__noReload');
+  /**
+   * N-5(E11) — 창 폭마다 제목 표시줄: 진행 띠의 단계 · 계산 일치 칩(왼쪽)이 찾기 · AI 따라가기 · 편집 · 연결 상태 · 연결 단추(오른쪽)와 겹치는가(경계 상자),
+   * 진행 띠 칸 밖으로 밀려 잘린 단계가 있는가, 가로 스크롤 · 제목 줄 넘침. 이름이 숨으면(점만) 단계마다 풍선에 이름이 있는가
+   */
+  const titleLayout = () => ev(`(()=>{const tb=document.getElementById('tbar'); const vis=e=>{const r=e.getBoundingClientRect(); return r.width>0 && r.height>0 && getComputedStyle(e).visibility!=='hidden';};
+    const box=e=>{const r=e.getBoundingClientRect(); return {l:r.left,r:r.right,t:r.top,b:r.bottom};};
+    const left=[...tb.querySelectorAll('.pipe-slot .ps, .pipe-slot .chip')].filter(vis).map(e=>({k:e.dataset.stage||'칩', ...box(e)}));
+    const right=[...tb.querySelectorAll('.tb, .conn, .cbtn')].filter(vis).map(e=>({k:e.dataset.act||e.className.split(' ')[0], ...box(e)}));
+    const slot=tb.querySelector('.pipe-slot').getBoundingClientRect();
+    const hits=[]; for(const a of left){ for(const b of right){ if(Math.min(a.r,b.r)-Math.max(a.l,b.l)>0.5 && Math.min(a.b,b.b)-Math.max(a.t,b.t)>0.5) hits.push(a.k+'×'+b.k); } }
+    const clipped=left.filter(a=>a.r>slot.right+0.5 || a.l<slot.left-0.5).map(a=>a.k);
+    const shown=e=>e && getComputedStyle(e).display!=='none';
+    const ps=tb.querySelector('.pipe .ps');
+    const names=shown(ps?.querySelector('em.lg')) ? '긴 이름' : shown(ps?.querySelector('em.sh')) ? '짧은 이름' : '점만';
+    const tips=[...tb.querySelectorAll('.pipe .ps')].map(p=>p.dataset.tip||'');
+    const cw0=document.documentElement.clientWidth; const wide=[...document.querySelectorAll('body *')].filter(e=>{const r=e.getBoundingClientRect(); return r.width>0 && r.right>cw0+1 && getComputedStyle(e).position!=='fixed';}).slice(0,6).map(e=>(e.id?'#'+e.id:e.tagName.toLowerCase()+(e.className&&typeof e.className==='string'?'.'+e.className.split(' ')[0]:''))+':'+Math.round(e.getBoundingClientRect().right));
+    return {wide, w:innerWidth, sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth, over:tb.scrollWidth-tb.clientWidth, hits, clipped, names,
+      fit:[...tb.classList].filter(c=>/^fit/.test(c)).join(',')||'-', nLeft:left.length, nRight:right.length, tipsOk:tips.length===6 && tips.every(t=>/^(단면|좌굴 해석|하중 해석|부재 검토|접합부|점검) · /.test(t))};})()`);
+  const narrowTitle = async (widths, shotPrefix) => {
+    const rows = [];
+    for (const w of widths) {
+      W = w; H = 900;
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+      await sleep(350);
+      const s = await titleLayout();
+      if (shotPrefix && (w === 800 || w === 1180)) { await shot(`${shotPrefix}_title_${w}_dark`); }
+      rows.push({ ...s, ok: s.sw <= s.cw && s.over <= 1 && s.hits.length === 0 && s.clipped.length === 0 && s.tipsOk && s.nLeft >= 6 });
+    }
+    return { ok: rows.every(r => r.ok),
+      detail: rows.map(r => `${r.w}px: ${r.names}(${r.fit}) · 겹침 ${r.hits.join(',') || '없음'} · 잘림 ${r.clipped.join(',') || '없음'} · 스크롤 ${r.sw}/${r.cw} · 넘침 ${r.over} · 오른쪽 ${r.nRight}${r.sw > r.cw ? ` · 넘친 것 ${r.wide.join(',')}` : ''}${r.tipsOk ? '' : ' · 풍선 이름 없음'}${r.ok ? '' : ' ✗'}`).join(' | ') };
+  };
 
   section('3. 시작 화면(템플릿 00) → .csd 열기');
   await cdp.send('Page.navigate', { url: ready.uiUrl });
@@ -827,6 +858,13 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await select('model', 'sec');
     const s = await ev(`({sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth})`);
     return { ok: s.sw <= s.cw, detail: `scrollWidth ${s.sw} / ${s.cw}` };
+  });
+  await step('u10n N-5 좁은 창(800 · 900 · 960 · 1100 · 1180 · 1280 · 1440) — 진행 띠 · 칩이 단추 · 연결 상태와 겹치지 않고 잘리지 않음 · 가로 스크롤 없음, 넘치면 점만(이름은 풍선)', null, async () => {
+    await select('result', await firstKey('design') ?? 'chk');
+    const out = await narrowTitle([800, 900, 960, 1100, 1180, 1280, 1440], 'u10n');
+    W = 960; H = 900;
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    return out;
   });
   W = 1920; H = 1080;
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
@@ -1977,7 +2015,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await settle(`s.file.path===${JSON.stringify(base)}`, '원래 상태(서명된 사본)');
     return { ok: !!o?.ok && !hasRaw && t.fname.includes('\uFFFD'), detail: `제목 표시줄 「${t.fname}」 · 상태 줄에 날 글자 ${hasRaw}` };
   });
-  await step('u5f 결과 봉인(82194ef) — 저장 → 다시 열기 = 결과가 돌아온다(서명) · 입력을 고친 파일 = 「입력만 열었습니다 — …」 띠와 「다시 계산」 하나 → 결과가 다시', 'u5f_seal', async () => {
+  await step('u5f 결과 봉인(82194ef) — 저장 → 다시 열기 = 결과가 돌아온다(서명) · 입력을 고친 파일 = 「입력만 열었습니다 — …」 띠와 「다시 계산」 하나 → 버린 차례대로(좌굴 해석 → 부재 검토) 결과가 다시 · FSM 값으로', 'u5f_seal', async () => {
     const A = path.join(tmp, 'u5f-sealed.csd');
     // 앞 단계의 입력 변경이 부재 검토를 지웠다 — 저장 전에 화면의 입력으로 한 번 돌린다(그 결과가 봉인되어 돌아오는지 본다)
     const rc = await mcp.tool('run_case_check', { what: 'member' });
@@ -2001,15 +2039,36 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await shot('u5f_open_notice_1920_dark');
     const f2 = await mcp.tool('get_full_state');
     const res2 = Object.keys(f2?.results ?? {}).filter(k => f2.results[k]);
+    // E4: [다시 계산]의 차례 = 버린 것(좌굴 해석이 버려졌으면 그것부터) — 단추의 data-plan · 풍선
+    const plan = await ev(`document.querySelector('#opennotice [data-act="recompute"]').dataset.plan ?? ''`);
+    const droppedFsm = /버린 결과:[^]*좌굴 해석/.test(note);
+    await ev(`(()=>{window.__u5fToasts=[]; const h=document.querySelector('.status .toasts'); new MutationObserver(()=>{for(const t of h.querySelectorAll('.toast')){const x=t.dataset.tip||t.textContent; if(!window.__u5fToasts.includes(x)) window.__u5fToasts.push(x);}}).observe(h,{childList:true,subtree:true,characterData:true}); return 1;})()`);
     await ev(`document.querySelector('#opennotice [data-act="recompute"]').click()`);
-    await waitFor(`document.getElementById('opennotice').hidden`, 120_000, '다시 계산 뒤 띠가 사라짐');
+    await waitFor(`document.getElementById('opennotice').hidden`, 180_000, '다시 계산 뒤 띠가 사라짐');
+    await sleep(300);
+    const toasts = await ev(`window.__u5fToasts`);
+    const done = toasts.find(t => /다시 계산했다 —/.test(t)) ?? toasts.join(' / ');
     const f3 = await mcp.tool('get_full_state');
+    // E5: 다시 계산한 부재 검토의 좌굴값 출처(호스트의 dsm_basis_by_family) — FSM 을 다시 만들었으면 none 이 없다 · 화면의 「해석식 좌굴값」 표시는 그 키 그대로
+    await settle(`s.stages.chk.state==='ok'`, '부재 검토', 30_000).catch(() => undefined);
+    await sleep(600);
+    const dr = await hostMsg('designResult');
+    const basis = dr?.dsm_basis_by_family ?? null;
+    const hostNone = !!basis && Object.values(basis).includes('none');
+    await select('result', 'chk');
+    const tagShown = await ev(`!!document.querySelector('#tree .row[data-k="chk"] [data-no-fsm]')`);
     // 뒤의 단계가 결과를 쓴다 — 서명된 사본(결과가 되살아난다)으로 돌아간다
     await serve.ipc('open', { file: A }, 60_000);
     await settle(`s.file.path===${JSON.stringify(A)}`, '서명된 사본');
     return { ok: sv?.ok && !!jA.resultsSeal && f1?.case?.results_signed === true && res1.includes('member_design') && res2.filter(k => k !== 'validation').length === 0
-      && /입력만 열었습니다 — 파일의 결과가 함께 저장된 모델 · 입력과 맞지 않습니다/.test(note) && !!f3?.results?.member_design,
-      detail: `run_case_check ${rc?.error ? rc.error : '성공'} · 저장(봉인 ${!!jA.resultsSeal}) → 다시 열기: 결과 ${res1.join(', ')} · 서명 ${f1?.case?.results_signed} → 입력을 고친 파일: 결과 ${res2.join(', ') || '없음'} · 「${short(note, 80)}」 → 다시 계산: 부재 검토 ${!!f3?.results?.member_design}` };
+      && /입력만 열었습니다 — 파일의 결과가 함께 저장된 모델 · 입력과 맞지 않습니다/.test(note) && !!f3?.results?.member_design
+      // E4: 좌굴 해석을 버렸으면 그것부터 다시 — 단추의 차례 · 알림 글 · 호스트의 결과
+      && (droppedFsm ? /^좌굴 해석 → 부재 검토/.test(plan) && /다시 계산했다 — 좌굴 해석 → 부재 검토/.test(done) && !!f3?.results?.buckling_analysis : /^부재 검토/.test(plan) && /다시 계산했다 — 부재 검토/.test(done))
+      // E5: 좌굴 해석을 다시 했으면 부재 검토는 FSM 값으로 · 화면의 표시 = 호스트의 키
+      // (퍼린 결과처럼 dsm_basis_by_family 가 없는 결과는 호스트가 run_case_check 의 답에 밝힌 출처 — 알림 글의 「FSM 좌굴값」)
+      && (!droppedFsm || (basis ? !hostNone : /FSM 좌굴값/.test(done))) && tagShown === hostNone,
+      detail: `run_case_check ${rc?.error ? rc.error : '성공'} · 저장(봉인 ${!!jA.resultsSeal}) → 다시 열기: 결과 ${res1.join(', ')} · 서명 ${f1?.case?.results_signed} → 입력을 고친 파일: 결과 ${res2.join(', ') || '없음'} · 「${short(note, 80)}」`
+        + ` → 다시 계산(차례 「${plan}」): 「${short(done, 160)}」 · 좌굴 해석 ${!!f3?.results?.buckling_analysis} · 부재 검토 ${!!f3?.results?.member_design} · 좌굴값 출처 ${JSON.stringify(basis)} · 화면의 해석식 표시 ${tagShown}` };
   });
   await step('u5g 지금 저장하면 결과에 서명이 붙지 않으면(열쇠 파일이 비었음) — 저장 단추 옆에 조용히 「결과 서명 안 됨」(까닭은 풍선) · 고치면 사라진다', 'u5g_unsigned', async () => {
     const key = path.join(tmp, 'userData', 'writer', 'writer.key');
@@ -2157,6 +2216,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
    *   r35 — r34(막는 것 0 의 미리보기)                      r36 — r34 · r35(r35 가 새 초안으로 막는 것 0 을 남긴다)   r37 — r36(R0)
    *   r38 — r10 · r12(원자료 다섯을 그 단계가 둔다)          r39 — r34(그 초안)                r40 — r34(검토 줄)     r41 — 없음(끼운 페이지)
    *   r42 — r10 · r12(그 단계가 변경 · 계산 · 보고를 만든다)
+   *   r43 — r10 · r12(새 대상 「R43 해석식」 을 만들고 돌아온다)   r44 · r45 — r10 · r12
    */
   await step('r10 새 프로젝트(시작 화면) — 이름 물음 → 뿌리(문서 › StCFSD 프로젝트) 아래에 · 제목 표시줄 「프로젝트 ▾」 · 대상 수 = list_cases', 'r10_new_project', async () => {
     await ev(`${S}.start()`);
@@ -2506,15 +2566,21 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       && /^사람 · .+ → 310 · \d\d:\d\d$/.test(why ?? '') && offBefore === false && after === false && fyBack === 310 && typed2.length === 0,
       detail: `묶음 ${n0} → 편집 중 ${mid}(읽기가 묶음을 끊지 않는다) → 마치기 ${lc.total}(${last?.by?.kind} · ${last?.trigger} · 「${short(last?.title, 40)}」) · 꼬리표 「${why}」 · 333 으로 고친 뒤 버리기(켜짐 ${offBefore === false}) → fy ${fyBack} · 닫힘 ${after === false} · 묶음 ${n2}(사람이 친 것 ${typed2.length})${extra}` };
   });
-  await step('r24 「AI 작업 중 · <도구> · 경과」 띠 — AI 의 해석이 도는 동안(0.5 초 넘게) 보이고 끝나면 사라진다 · 상태 표시줄 「AI 작업 중」', 'r24_ai_band', async () => {
-    const pr = mcp.tool('run_analysis');
+  await step('r24 「AI 작업 중 · <도구> · 경과」 띠 — AI 의 긴 요청이 도는 동안(0.5 초 넘게) 보이고 끝나면 사라진다 · 상태 표시줄 「AI 작업 중」', 'r24_ai_band', async () => {
+    // 띠는 0.5 초를 넘긴 요청에만 뜬다. 새 대상은 프로그램의 처음 모델(가벼운 립 C — E7)이라 좌굴 해석 하나는 0.25 – 0.5 초에 끝난다 —
+    // 길이를 늘린 해석(반파장 400 개)으로 전제를 만든다. 요청이 0.8 초보다 짧았으면 띠의 탓이 아니라 전제의 탓으로 적는다
+    const N = 150;
+    const sl = await mcp.tool('set_lengths', { min: 10, max: 10000, n: N, units: 'SI' });
+    const t0 = Date.now();
+    let ms = 0;
+    const pr = mcp.tool('run_analysis').finally(() => { ms = Date.now() - t0; });
     const band = await waitFor(`(()=>{const b=document.getElementById('aibar'); return b && !b.hidden ? {tool:b.querySelector('[data-ai-tool]')?.dataset.aiTool, text:b.textContent, status:document.querySelector('#status .ai').textContent} : null;})()`, 20_000, 'AI 작업 중 띠').catch(() => null);
     await shot('r24_ai_band_1920_dark');
     const run = await pr;
     await waitFor(`document.getElementById('aibar').hidden`, 15_000, '띠가 사라짐').catch(() => undefined);
     const gone = await ev(`document.getElementById('aibar').hidden`);
-    return { ok: !!band && band.tool === 'run_analysis' && /AI 작업 중/.test(band.text) && /경과/.test(band.text) && band.status === 'AI 작업 중' && gone && !run.error,
-      detail: `띠 「${short(band?.text?.replace(/\s+/g, ' '), 90)}」 · 상태 표시줄 「${band?.status}」 · 끝나면 숨김 ${gone}` };
+    return { ok: !sl?.error && ms >= 800 && !!band && band.tool === 'run_analysis' && /AI 작업 중/.test(band.text) && /경과/.test(band.text) && band.status === 'AI 작업 중' && gone && !run.error,
+      detail: `해석 ${ms} ms(반파장 ${N}${ms < 800 ? ' — 전제(0.8 초 이상)가 서지 않았다' : ''}${sl?.error ? ` · set_lengths: ${short(String(sl.error), 80)}` : ''}) · 띠 「${short(band?.text?.replace(/\s+/g, ' '), 90)}」 · 상태 표시줄 「${band?.status}」 · 끝나면 숨김 ${gone}` };
   });
   await step('r24b AI 의 긴 요청(design_purlin)이 도는 동안 화면이 읽어도(다시 읽기 · 보기 보고) — 그 요청이 끝에 쓴 입력은 AI 의 변경 묶음 하나로 남는다(사라지지도, 읽기 · 사람의 줄이 되지도 않는다) · 새로 고침 없이 업무 › 변경에 · 이어진 set_case_inputs 도 AI 의 줄', 'r24b_ai_long_change', async () => {
     await ev(`${S}.review()`);
@@ -2811,7 +2877,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const d2 = id2 ? await ev(`[...document.querySelectorAll('#tree .row[data-k="chg:${id2}"] [data-delta]')].map(e=>e.textContent)[0] ?? null`) : null;
     // 점검 › 판정 요약 = 결과 탭의 부재 검토와 같은 미검토 수
     const sum = await ev(`document.querySelector('#tree .row[data-k="insp:sum"] .vl')?.textContent ?? ''`);
-    // 실행이 실린 묶음(runs) — 그 실행(여럿이면 가장 늦은 것)의 머리줄 아래 · 지난 계산 뒤가 아님 · 판정 변화의 「후」 = 그 실행의 최대 판정비. 호스트가 키를 주지 않으면 건너뛴다
+    // 실행이 실린 묶음(runs) — 그 실행(여럿이면 첫 것 — E6 · work_log 와 같은 연결)의 머리줄 아래 · 지난 계산 뒤가 아님 · 판정 변화의 「후」 = 실린 실행 가운데 첫 판정 실행의 최대 판정비. 호스트가 키를 주지 않으면 건너뛴다
     const histAll = (await act2({ action: 'get_case_status', detail: 'runs' })).history ?? [];
     const linkedChk = [];
     // 접힌 계산 머리줄(최근 셋 밖)을 모두 펼친다 — 그 아래 줄도 재려고
@@ -2821,13 +2887,15 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       await sleep(80);
     }
     for (const c of after.changes.filter(x => Array.isArray(x.runs) && x.runs.length).slice(0, 6)) {
-      const anchor = histAll.filter(h => c.runs.includes(h.run)).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+      const own = histAll.filter(h => c.runs.includes(h.run)).sort((a, b) => (a.at < b.at ? -1 : 1));
+      const anchor = own[0];
       if (!anchor) { continue; }
+      const rated = own.find(h => typeof h.max_ratio === 'number');
       const ps = await treeParents(`chg:${c.id}`);
       const d = await ev(`[...document.querySelectorAll('#tree .row[data-k="chg:${c.id}"] [data-delta]')].map(e=>e.textContent)[0] ?? null`);
-      const afterRatio = typeof anchor.max_ratio === 'number' ? Number(String(d ?? '').split('→')[1]) : null;
+      const afterRatio = rated ? Number(String(d ?? '').split('→')[1]) : null;
       linkedChk.push({ id: c.id, at: c.at, run: anchor.run, runAt: anchor.at, parents: ps.map(x => (x ?? '').split('|')[0]), delta: d,
-        ok: ps.some(x => /^log:run:/.test(x ?? '')) && !ps.some(x => /^log:after\|/.test(x ?? '')) && (afterRatio === null || Math.abs(afterRatio - anchor.max_ratio) <= 0.006 * Math.max(1, Math.abs(anchor.max_ratio))) });
+        ok: ps.some(x => /^log:run:/.test(x ?? '')) && !ps.some(x => /^log:after\|/.test(x ?? '')) && (afterRatio === null || Math.abs(afterRatio - rated.max_ratio) <= 0.006 * Math.max(1, Math.abs(rated.max_ratio))) });
     }
     await shot('r42_worktab_tree_1920_dark');
     // ③ 칩을 누르면 업무 › 기록의 「지난 계산 뒤」
@@ -3395,6 +3463,122 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const n4 = await count();
     return { ok: on === true && n1 === n0 && n2 === n1 + 1 && off === false && n3 === n2 && n4 === n3 + 1,
       detail: `끼운 페이지 F2 → 편집 ${on} · edit-session ${n0} → ${n1}(보내지 않음) · 맨 위 누름 → ${n2} · (끼운 페이지 자신의 editSession 메시지는 다리 시험 s16) · Escape → 편집 ${off} · ${n3} → 맨 위 누름 ${n4}` };
+  });
+
+  /*
+   * r43 · r44 · r45 — 재테스트 반영(20261125-retest-fixes-worklog — E5 · E6 · E11). 기대는 앞 단계: r10 · r12(열린 프로젝트의 대상).
+   * r43 은 새 대상 「R43 해석식」 을 만들어 그 안에서 하고 앞 대상으로 돌아온다
+   */
+  await step('r43 E5 — FSM 을 돌린 적 없는 대상의 휨 검토 = 해석식 좌굴값(호스트의 dsm_basis_by_family: none) → 결과 › 부재 검토 · 업무 › 점검 › 판정 요약 · 정보 창에 「해석식 좌굴값」, 좌굴 해석 뒤 다시 검토하면 사라진다', 'r43_no_fsm', async () => {
+    const cur = (await recNow()).cases.find(c => c.open)?.name;
+    await act2({ action: 'save_case' });
+    await act2({ action: 'new_case', name: 'R43 해석식', kind: 'section-only' });
+    await act2({ action: 'open_case', name: 'R43 해석식' });
+    await answerIfUnsaved();
+    await settle(`!!s.full?.project?.case && s.full.project.case.name==='R43 해석식'`, '새 대상', 60_000);
+    await ev(`${S}.review()`);
+    const look = async () => {
+      await settle(`s.runs.some(r=>r.key==='design' && r.rows.length) && s.stages.chk.state==='ok'`, '부재 검토', 90_000).catch(() => undefined);
+      await sleep(800);
+      const dr = await hostMsg('designResult');
+      await select('result', 'chk');
+      const res = await ev(`(()=>{const t=document.querySelector('#tree .row[data-k="chk"] [data-no-fsm]'); return t ? {text:t.textContent, fams:t.dataset.noFsm, kind:t.dataset.noFsmKind, tip:t.dataset.tip} : null;})()`);
+      const notice = await ev(`!!document.querySelector('#info [data-no-fsm-notice]')`);
+      await select('work', 'insp:sum');
+      const wk = await ev(`document.querySelector('#tree .row[data-k="insp:sum"] [data-no-fsm]')?.textContent ?? null`);
+      return { basis: dr?.dsm_basis_by_family ?? null, src: dr?.dsm_source ?? null, res, notice, wk };
+    };
+    await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.3, r: 3, units: 'SI', reason: 'r43 — FSM 없는 단면' });
+    const f1 = await mcp.tool('aisi_design_flexure', flexArgsR(3.0, 3));
+    const a = await look();
+    await shot('r43_no_fsm_tag_1920_dark');
+    const lc = await mcp.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
+    const run = await mcp.tool('run_analysis');
+    await settle(`s.stages.fsm.state==='ok'`, '좌굴 해석', 120_000).catch(() => undefined);
+    const f2 = await mcp.tool('aisi_design_flexure', flexArgsR(3.0, 3));
+    const b = await look();
+    await act2({ action: 'save_case' });
+    if (cur) { await act2({ action: 'open_case', name: cur }); await answerIfUnsaved(); await settle(`s.full?.project?.case?.name===${JSON.stringify(cur)}`, '앞 대상', 60_000).catch(() => undefined); }
+    const noneA = a.basis?.Mxx === 'none', noneB = b.basis && Object.values(b.basis).includes('none');
+    return { ok: !f1.error && !f2.error && lc.success && run.success && noneA && a.res?.text === '해석식 좌굴값' && a.res.fams === 'Mxx' && /FSM 좌굴 해석 없이 해석식의 Mcrℓ · Mcrd/.test(a.res.tip ?? '')
+        && a.notice && a.wk === '해석식 좌굴값' && !!b.basis && !noneB && !b.res && !b.notice && b.wk === null,
+      detail: `FSM 없음: 출처 ${JSON.stringify(a.basis)} · 엔진 ${JSON.stringify(a.src)} → 결과 「${a.res?.text ?? '없음'}」(${a.res?.fams ?? ''}) · 정보 창 알림 ${a.notice} · 판정 요약 「${a.wk ?? '없음'}」 | 정휨 해석 뒤: 출처 ${JSON.stringify(b.basis)} → 결과 「${b.res?.text ?? '없음'}」 · 알림 ${b.notice} · 판정 요약 「${b.wk ?? '없음'}」 · 앞 대상 ${cur}${f1.error ? ` · ${short(f1.error, 80)}` : ''}${f2.error ? ` · ${short(f2.error, 80)}` : ''}` };
+  });
+  await step('r44 E6 — 기록: 실행 하나 = 머리줄 하나(접지 않는다) · 묶음은 그것이 처음 들어간 계산 아래(다시 계산해도 옮겨 가지 않는다 — MCP work_log 의 연결과 같다) · 묶음 없는 실행은 「계산 #n (입력 변경 없음)」', 'r44_log_runs', async () => {
+    await ev(`${S}.review()`);
+    const c1 = await mcp.tool('set_section_template', { type: 'lippedc', H: 153, B: 65, D: 20, t: 2.6, r: 3, units: 'SI', reason: 'r44 — 첫 계산에 들어갈 변경' });
+    const fA = await mcp.tool('aisi_design_flexure', flexArgsR(5.0));
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '부재 검토', 60_000);
+    await sleep(2600);
+    const id1 = ((await act2({ action: 'list_changes', limit: 10 })).changes ?? []).find(c => c.reason === 'r44 — 첫 계산에 들어갈 변경')?.id;
+    const openAll = async () => {
+      await ev(`${S}.reload()`);
+      await sleep(1500);
+      await select('work', 'chg');
+      for (let i = 0; i < 30; i++) {
+        const more = await ev(`(()=>{const t=[...document.querySelectorAll('#tree .row[data-k^="log:"] .tw')].find(x=>x.textContent==='▸'); if(!t) return 0; t.click(); return 1;})()`);
+        if (!more) { break; }
+        await sleep(80);
+      }
+    };
+    await openAll();
+    const p0 = id1 ? (await treeParents(`chg:${id1}`)).find(x => /^log:/.test(x ?? '')) ?? '' : '';
+    // 다시 계산 둘(입력은 그대로) — 그 묶음이 뒤 계산으로 옮겨 가지 않는다
+    const rc1 = await mcp.tool('run_case_check', { what: 'member' });
+    const rc2 = await mcp.tool('run_case_check', { what: 'member' });
+    await sleep(2600);
+    await openAll();
+    const p1 = id1 ? (await treeParents(`chg:${id1}`)).find(x => /^log:/.test(x ?? '')) ?? '' : '';
+    const hist = ((await act2({ action: 'get_case_status', detail: 'runs' })).history ?? []).slice().sort((a, b) => (a.at < b.at ? -1 : 1));
+    const shownH = hist.filter(h => h.auto !== true && h.kind !== 'design_dsm');
+    const heads = await ev(`(()=>{const rows=[...document.querySelectorAll('#tree .row')]; const pad=r=>parseFloat(r.style.paddingLeft); return rows.map((r,i)=>[r,i]).filter(([r])=>/^log:run:/.test(r.dataset.k)).map(([r,i])=>{let kids=0; for(let j=i+1;j<rows.length && pad(rows[j])>pad(r);j++){kids++;} return {k:r.dataset.k, name:r.querySelector('.nm').textContent, kids, tw:r.querySelector('.tw').textContent, v:r.querySelector('.vl')?.textContent ?? ''};});})()`);
+    // ① 머리줄 = 머리줄이 되는 실행 하나하나(번호 · 키)
+    const wantKeys = shownH.map(h => `log:run:${String(h.run).replace(/[#|]/g, '')}`);
+    const sameSet = heads.length === wantKeys.length && wantKeys.every(k => heads.some(x => x.k === k));
+    const namesOk = heads.every(x => { const h = shownH.find(y => `log:run:${String(y.run).replace(/[#|]/g, '')}` === x.k); return !!h && (typeof h.no !== 'number' || x.name.startsWith(`계산 #${h.no}`)); });
+    const emptyOk = heads.every(x => (x.kids === 0) === / \(입력 변경 없음\)$/.test(x.name) && (x.kids > 0 || x.tw === ''));
+    // ② 그 묶음의 머리줄 = 그것 뒤의 첫 계산(이 단계의 휨 검토) — 다시 계산 전 · 뒤 같다
+    const c1At = id1 ? ((await act2({ action: 'list_changes', limit: 20 })).changes ?? []).find(c => c.id === id1)?.at : null;
+    const runA = c1At ? shownH.find(h => h.at > c1At) : null;
+    const keyA = runA ? `log:run:${String(runA.run).replace(/[#|]/g, '')}` : '';
+    // ③ 호스트 work_log 의 연결 — 실행 줄의 changes(그 실행에 들어간 묶음)마다 화면의 머리줄이 그 실행(머리줄이 아닌 실행이면 그 뒤의 첫 머리줄)
+    const wl = await act2({ action: 'work_log', limit: 100 });
+    const mism = [];
+    let compared = 0;
+    // 실행 이력이 잘렸으면(20) 가장 오래된 머리줄 앞의 묶음은 「계산 기록 앞」 — 화면이 그 앞 실행을 모른다(그 실행은 대조에서 뺀다)
+    const complete = hist.length < 20 || hist[0]?.no === 1;
+    for (const e of (wl.entries ?? []).filter(x => x.type === 'run' && Array.isArray(x.changes))) {
+      const h = hist.find(y => y.run === e.id);
+      if (!h || (!complete && h.at <= (shownH[0]?.at ?? ''))) { continue; }
+      const head = h.auto !== true && h.kind !== 'design_dsm' ? h : shownH.find(y => y.at >= h.at);
+      if (!head) { continue; }
+      const want = `log:run:${String(head.run).replace(/[#|]/g, '')}`;
+      for (const cid of e.changes) {
+        const ps = await treeParents(`chg:${cid}`);
+        if (!ps.length) { continue; }
+        compared += 1;
+        if (!ps.some(x => (x ?? '').split('|')[0] === want)) { mism.push(`${cid}→${ps.map(x => (x ?? '').split('|')[0]).join('+')} (work_log ${e.no})`); }
+      }
+    }
+    await select('work', keyA || 'chg');
+    await shot('r44_log_runs_1920_dark');
+    const lastHead = heads.find(x => x.k === `log:run:${String(shownH[shownH.length - 1]?.run).replace(/[#|]/g, '')}`);
+    return { ok: !c1.error && !fA.error && !rc1.error && !rc2.error && !!id1 && !!keyA && p0.split('|')[0] === keyA && p1.split('|')[0] === keyA && p1.split('|')[1] === `계산 #${runA.no}`
+        && sameSet && namesOk && emptyOk && mism.length === 0 && compared > 0 && !!lastHead && / \(입력 변경 없음\)$/.test(lastHead.name) && /OK|NG|판정 없음/.test(lastHead.v),
+      detail: `묶음 ${id1} → 다시 계산 전 「${p0}」 · 뒤 「${p1}」(기대 ${keyA} 계산 #${runA?.no}) · 머리줄 ${heads.length} = 실행 ${shownH.length} ${sameSet} · 번호 ${namesOk} · 「입력 변경 없음」 ${emptyOk}`
+        + ` · work_log 대조 ${compared}줄 어긋남 ${mism.length}${mism.length ? ` (${mism.slice(0, 4).join(' ; ')})` : ''} · 마지막 「${lastHead?.name}」 ${lastHead?.v ?? ''}`
+        + ` · 머리줄: ${heads.slice(0, 8).map(x => `${x.name}[${x.kids}]`).join(', ')}${rc1.error ? ` · ${short(rc1.error, 80)}` : ''}` };
+  });
+  await step('r45 N-5 — 프로젝트의 대상(프로젝트 · 대상 이름 · 칩 「입력 바뀜 n건」)에서 좁은 창: 진행 띠 · 칩이 단추 · 연결 상태와 겹치지 않음 · 가로 스크롤 없음', null, async () => {
+    await mcp.tool('set_case_inputs', { inputs: { Cb: 1.07 }, units: 'SI', reason: 'r45 — 칩이 「입력 바뀜」 이 되게' });
+    await sleep(2600);
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    await select('work', 'chg');
+    const out = await narrowTitle([800, 900, 960, 1100, 1180, 1280, 1440, 1920], 'r45');
+    W = 1920; H = 1080;
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    return out;
   });
 
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });

@@ -522,8 +522,10 @@ export function centerHtml(key: string, size: { w: number; h: number } = { w: 12
   // 기록의 묶는 줄(지난 계산 뒤 · 계산 #k · 그 앞) — 그 아래 첫 묶음의 보기
   if (key.startsWith('log:')) {
     const tl = timeline();
-    const cs = key === 'log:after' ? tl.after : key === 'log:before' ? tl.before : tl.groups.find(g => g.key === key)?.changes ?? [];
-    return cs[0] ? changeView(`chg:${cs[0].id}`, size) : { html: honest('묶음 없음', '이 자리에 바뀐 것이 없다'), cls: 'v1' };
+    const g = key.startsWith('log:run:') ? tl.groups.find(x => x.key === key) : undefined;
+    const cs = key === 'log:after' ? tl.after : key === 'log:before' ? tl.before : g?.changes ?? [];
+    return cs[0] ? changeView(`chg:${cs[0].id}`, size)
+      : { html: g ? honest('입력 변경 없음', '앞 계산 뒤에 바뀐 입력이 없다 — 이 계산에 처음 들어간 묶음이 없다') : honest('묶음 없음', '이 자리에 바뀐 것이 없다'), cls: 'v1' };
   }
   // R3-3: 업무 항목 — 걸린 대상(첫째)의 보기를 그대로(정보 창이 그 항목). 가정 · 원자료는 글뿐이라 가운데는 비운다
   if (key.startsWith('work:')) {
