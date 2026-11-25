@@ -41,6 +41,24 @@ if (absent.length) {
   process.exit(1);
 }
 
+// 깨끗한 체크아웃(마일스톤 3 — 2026-11-25): `npm ci` 는 Electron 의 실행 파일을 받지 않는다(Electron 45 에는 postinstall 이 없고, 처음 띄울 때
+// 받는다). electron-builder 설정의 electronDist 가 그 폴더라 없으면 「The specified electronDist does not exist」 로 멈춘다 — 없으면 여기서 받는다.
+const electronDir = path.join(shellDir, 'node_modules', 'electron');
+if (!fs.existsSync(path.join(electronDir, 'dist'))) {
+  const install = path.join(electronDir, 'install.js');
+  if (!fs.existsSync(install)) {
+    process.stderr.write(`Electron 이 없다: ${path.relative(here, electronDir)}\n→ cd desktop/shell && npm ci\n`);
+    process.exit(1);
+  }
+  say('▶ Electron 실행 파일이 없다 — 받는다(node_modules/electron/install.js)');
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(process.execPath, [install], { cwd: electronDir, stdio: 'inherit', windowsHide: true });
+  if (r.status !== 0 || !fs.existsSync(path.join(electronDir, 'dist'))) {
+    process.stderr.write('Electron 실행 파일을 받지 못했다(네트워크 · 프록시를 확인) — desktop/shell 에서 `node node_modules/electron/install.js`\n');
+    process.exit(1);
+  }
+}
+
 // electron-builder 는 디버그 기록을 켜야 만든 NSIS 스크립트를 builder-debug.yml 에 남긴다 — 제거 단계(customUnInstall)가
 // 정말 들어갔는지 보려고 켠다(V5-05). 그 기록에서 스크립트를 꺼내 build/dist/nsis-script.nsi 로 둔다.
 if (!/electron-builder/.test(process.env.DEBUG ?? '')) { process.env.DEBUG = 'electron-builder'; }

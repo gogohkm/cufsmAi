@@ -40,7 +40,7 @@ async function main() {
     ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { H: 8, B: 2.5, D: 0.625, t: 0.059, r: 0.1 } }), 'template');
     // ── E7: from current = 지금 모델 + memberType = kind; from 없음 = 처음 모델 ──
     const nc1 = ok(await ai({ action: 'new_case', name: 'Z', kind: 'section-only', from: 'current' }), 'new_case Z');
-    const nc2 = ok(await ai({ action: 'new_case', name: 'P', kind: 'roof-purlin', from: 'current' }), 'new_case P');
+    ok(await ai({ action: 'new_case', name: 'P', kind: 'roof-purlin', from: 'current' }), 'new_case P');
     const nc3 = ok(await ai({ action: 'new_case', name: 'N', kind: 'wall-girt' }), 'new_case N');
     assert(nc1.from === 'current' && nc3.from === 'initial' && /initial model/.test(nc3.contents) && /member type wall-girt/.test(nc3.contents), JSON.stringify([nc1, nc3]));
     const pdir = fs.realpathSync.native(path.join(root, 'RT'));

@@ -269,8 +269,6 @@ export class CaseKeeper {
                 if (merged !== v) { dropped = true; out[k] = merged; continue; }
             }
             out[k] = v;
-            continue;
-            out[k] = raw[k];
         }
         return dropped ? out : changes;
     }

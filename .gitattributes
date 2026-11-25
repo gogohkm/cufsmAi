@@ -1,5 +1,8 @@
-# Auto detect text files and perform LF normalization:
-* text=auto
+# Auto detect text files and perform LF normalization. Text files are LF in every checkout
+# (마일스톤 3 — 2026-11-25): with core.autocrlf=true a clean Windows clone had CRLF sources, so a
+# build there rewrote the tracked bundles' source maps and staged 42 of 140 installer files with
+# different bytes than a build on an LF checkout. The engine id already ignores line endings.
+* text=auto eol=lf
 
 # R8-20: the MCP bundle is diffed byte for byte against a Linux rebuild in CI
 # (.github/workflows/ci.yml, job mcp-parity). Keep the bundle exactly as webpack wrote it
