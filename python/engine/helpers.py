@@ -288,6 +288,38 @@ def signature_ss(prop: np.ndarray, node: np.ndarray,
     }
 
 
+# 설계용 서명곡선의 반파장 격자(결정 R8, 2026-11-25) — 엔진이 정하는 하나의 규칙. 모델의 보기용 격자와 따로다.
+# 측정(작업 E-5): 날카로운 · 둥근 모서리 립 C(3.625 · 8 · 9 in)와 립 Z(8 in), P · Mxx 의 국부 · 뒤틀림 극소가
+# 같은 범위 1200점 기준값과 0.11 % 안에서 같다(옛 1 – 1000 in 60점은 0.49 % 까지, 12점 10 – 200 in 은 64 % 까지).
+DESIGN_SIGNATURE_PER_DECADE = 30
+DESIGN_SIGNATURE_RANGE = (0.05, 100.0)    # × D (단면 중심선의 가장 큰 폭)
+
+
+def design_signature_lengths(node, elem=None) -> dict:
+    """설계용 DSM 값(Pcrl · Pcrd · Mcrl · Mcrd 의 극소)을 뽑을 S-S 서명곡선의 반파장 (in).
+
+    D = 절점 좌표(중심선)의 x · z 범위 가운데 큰 것. 길이는 0.05 D … 100 D 의 로그 간격, 10 배마다 30 점
+    (그래서 점 수는 단면과 상관없이 같다). 모델의 보기용 길이 · 단부 조건과 상관없다.
+
+    Returns: {'lengths': ndarray, 'D': float, 'per_decade', 'range_factor', 'rule'}
+    """
+    nd = np.asarray(node, dtype=float)
+    if nd.ndim != 2 or nd.shape[0] < 2 or nd.shape[1] < 3:
+        raise ValueError('design_signature_lengths: node must be an (n, 8) array with at least two nodes')
+    D = float(max(np.ptp(nd[:, 1]), np.ptp(nd[:, 2])))
+    if not (D > 0 and np.isfinite(D)):
+        raise ValueError('design_signature_lengths: the section has no extent (all nodes coincide)')
+    lo, hi = DESIGN_SIGNATURE_RANGE
+    n = int(np.ceil(DESIGN_SIGNATURE_PER_DECADE * np.log10(hi / lo))) + 1
+    lengths = np.logspace(np.log10(lo * D), np.log10(hi * D), n)
+    return {
+        'lengths': lengths, 'D': D, 'per_decade': DESIGN_SIGNATURE_PER_DECADE, 'range_factor': [lo, hi],
+        'rule': (f'design signature curve (S-S, m = 1): {n} log-spaced half-wavelengths from {lo:g} D to {hi:g} D, '
+                 f'{DESIGN_SIGNATURE_PER_DECADE} per decade, D = largest centreline extent of the section '
+                 f'({D:.4g} in) — independent of the model lengths'),
+    }
+
+
 def _first_load_factors(sig: dict) -> np.ndarray:
     """서명 곡선의 길이별 1차 하중계수. 실패한 길이는 NaN (극소로 잡히지 않게)."""
     failed = {d.get('length_index') for d in sig.get('diagnostics', [])

@@ -1646,6 +1646,23 @@ REGISTRY = {
         'template_ko': '열마다 패스너 1개 (또는 랩 길이 없음) — 간격이 해당하지 않음',
         'params': {},
     },
+    'lap.reason.force_model_not_confirmed': {
+        'kind': 'reason',
+        'template': 'self-made fastener-force distribution (model A: every fastener shares max(Mu/(d − t), Vu) equally; '
+                    'the specification gives no formula) — reference only; set lap_force_model_confirmed = true to '
+                    'accept that assumption and get a verdict',
+        'template_ko': '자체 가정한 패스너 힘 분배(모델 A: 모든 패스너가 max(Mu/(d − t), Vu) 를 고르게 나눔 — 기준에 식이 '
+                       '없음) — 참고값; 그 가정을 받아들여 판정을 받으려면 lap_force_model_confirmed = true',
+        'params': {},
+    },
+    'lap.reason.fails_under_most_favourable_distribution': {
+        'kind': 'reason',
+        'template': 'fails even under model A (every fastener sharing equally — the most favourable distribution '
+                    'considered), so it fails for any distribution; lap_force_model_confirmed not needed for this',
+        'template_ko': '모델 A(모든 패스너가 고르게 나눔 — 견준 분배 가운데 가장 유리한 것)로도 넘으므로 어느 분배에서나 '
+                       '넘음; 이 판정에는 lap_force_model_confirmed 가 필요 없음',
+        'params': {},
+    },
     'lap.reason.pns_from_assumed_limit': {
         'kind': 'reason',
         'template': 'Pns is from an assumed limit state ({pns_mode}) — reference only',
@@ -1674,6 +1691,25 @@ REGISTRY = {
         'kind': 'scope',
         'template': 'J6.3 block shear of the lap fastener group is evaluated as a lower bound: the two shear planes along the outer fastener rows, from the member end over the fastener group (length e + (m − 1) s), with the tension plane between the rows ignored (Ant = 0) — the row gauge and the distance to the web edge are not inputs. Refine with the full Eq. J6.3-1/-2 when those dimensions are given. Bolts only: for screw connections J6 takes Rn from J6.1 and J6.2 (J6.3 does not apply).',
         'template_ko': 'J6.3 랩 패스너 무리의 블록전단은 하한으로 평가합니다: 바깥 패스너 열을 따라 부재 끝에서 패스너 무리까지(길이 e + (m − 1) s)의 두 전단면, 열 사이의 장력면은 무시(Ant = 0) — 열 간격과 웹 연단까지의 거리는 입력이 아닙니다. 그 치수를 주면 Eq. J6.3-1/-2 전체로 다듬으십시오. 볼트만: 나사 접합은 J6 이 Rn 을 J6.1 과 J6.2 에서 정합니다(J6.3 해당 없음).',
+        'params': {},
+    },
+    'lap.warning.force_model_not_confirmed': {
+        'kind': 'warning',
+        'template': 'Lap fastener-force distribution not confirmed: the fastener-group check (and the fastener count it '
+                    'needs) is not evaluated — model A (equal sharing of max(Mu/(d − t), Vu)) is a self-made '
+                    'assumption. Set lap_force_model_confirmed = true to accept it and get a verdict.',
+        'template_ko': '랩 패스너 힘 분배를 확인하지 않음: 패스너 무리 검토(와 그것이 정한 패스너 수)는 평가하지 못함 — '
+                       '모델 A(max(Mu/(d − t), Vu) 를 고르게 나눔)는 자체 가정. 그 가정을 받아들여 판정을 받으려면 '
+                       'lap_force_model_confirmed = true 를 주십시오.',
+        'params': {},
+    },
+    'lap.assumption.force_model_confirmed': {
+        'kind': 'assumption',
+        'template': 'lap_force_model_confirmed = true (user statement): the fastener-group verdict uses model A — every '
+                    'fastener shares max(Mu/(d − t), Vu) equally (§A1.2(c) rational analysis, not a specification '
+                    'provision).',
+        'template_ko': 'lap_force_model_confirmed = true (사용자 진술): 패스너 무리의 판정은 모델 A — 모든 패스너가 '
+                       'max(Mu/(d − t), Vu) 를 고르게 나눔(§A1.2(c) 합리적 해석, 기준 조항 아님).',
         'params': {},
     },
     'lap.warning.a1_2_lap_step_a1_force': {
@@ -1975,6 +2011,63 @@ REGISTRY = {
         'template': 'ASCE/SEI 7-10 Sec. 2.3.2 basic combinations (strength design)',
         'template_ko': 'ASCE/SEI 7-10 Sec. 2.3.2 기본 하중조합 (강도설계)',
         'params': {},
+    },
+    'loads.label.combo_ref_lrfd_asce7_22': {
+        'kind': 'label',
+        'template': 'ASCE/SEI 7-22 Sec. 2.3.1 basic combinations 1a–5a and Sec. 2.3.6 seismic combinations 6–7 '
+                    '(strength design)',
+        'template_ko': 'ASCE/SEI 7-22 Sec. 2.3.1 기본 하중조합 1a–5a 와 Sec. 2.3.6 지진 하중조합 6–7 (강도설계)',
+        'params': {},
+    },
+    'loads.label.combo_ref_asd_asce7_22': {
+        'kind': 'label',
+        'template': 'ASCE/SEI 7-22 Sec. 2.4.1 basic combinations 1a–7a and Sec. 2.4.5 seismic combinations 8–10 '
+                    '(allowable stress design)',
+        'template_ko': 'ASCE/SEI 7-22 Sec. 2.4.1 기본 하중조합 1a–7a 와 Sec. 2.4.5 지진 하중조합 8–10 (허용응력설계)',
+        'params': {},
+    },
+    'loads.label.combo_ref_lrfd_kds': {
+        'kind': 'label',
+        'template': 'KDS 41 12 00:2022 Sec. 1.7.1 Eqs. (1.7-1)–(1.7-7) (strength design)',
+        'template_ko': 'KDS 41 12 00:2022 1.7.1 식(1.7-1)–(1.7-7) (강도설계법)',
+        'params': {},
+    },
+    'loads.label.combo_ref_asd_kds': {
+        'kind': 'label',
+        'template': 'KDS 41 12 00:2022 Sec. 1.7.2 Eqs. (1.7-8)–(1.7-15) (allowable stress design)',
+        'template_ko': 'KDS 41 12 00:2022 1.7.2 식(1.7-8)–(1.7-15) (허용응력설계법)',
+        'params': {},
+    },
+    'loads.assumption.load_definition_asce7_22': {
+        'kind': 'assumption',
+        'template': 'Load combinations of ASCE/SEI 7-22: the entered loads must be ASCE 7-22 loads — in particular S '
+                    'from Chapter 7 (risk-targeted ground snow; the snow factors 1.0 / 0.3 / 0.7 are meant for it) '
+                    'and W, E at the 7-22 strength level. The engine does not convert loads defined by another '
+                    'edition; the fluid, lateral-earth, self-straining, flood, ice and tornado terms are not combined.',
+        'template_ko': 'ASCE/SEI 7-22 하중조합: 넣은 하중은 ASCE 7-22 의 하중이어야 함 — 특히 S 는 7장(위험도 기반 '
+                       '지상적설하중; 적설 계수 1.0 · 0.3 · 0.7 은 그 값을 전제), W · E 는 7-22 의 강도 수준. 엔진은 다른 '
+                       '판의 하중을 바꾸지 않음. 유체 · 토압 · 자체변형 · 홍수 · 착빙 · 토네이도 항은 조합하지 않음.',
+        'params': {},
+    },
+    'loads.assumption.load_definition_kds': {
+        'kind': 'assumption',
+        'template': 'Load combinations of KDS 41 12 00:2022: the entered loads must be KDS 41 12 00 loads — W is the '
+                    'strength-level wind load of Sec. 5 (500-year return period, factor 1.0; the allowable stress '
+                    'combinations use 0.65W per Sec. 5.1.3), S, L, Lr, E per the same standard. The engine does not '
+                    'convert ASCE 7 loads; the live-load factor 0.5 of 1.7.1 (2) and the F, T, H terms are not used.',
+        'template_ko': 'KDS 41 12 00:2022 하중조합: 넣은 하중은 KDS 41 12 00 의 하중이어야 함 — W 는 5장의 강도설계용 '
+                       '풍하중(재현기간 500년, 계수 1.0; 허용응력 하중조합은 5.1.3 에 따라 0.65W), S · L · Lr · E 도 같은 '
+                       '기준. 엔진은 ASCE 7 의 하중을 바꾸지 않음. 1.7.1 (2) 의 활하중계수 0.5 와 F · T · H 항은 쓰지 않음.',
+        'params': {},
+    },
+    'loads.scope.combination_standard_scope': {
+        'kind': 'scope',
+        'template': 'The load-combination standard ({standard}) changes only the factored combinations. Unfactored '
+                    'service deflections, the partial (pattern) loading rules (ASCE 7 Secs. 4.3.3 / 7.5.1) and the '
+                    'member checks are the same for every selection.',
+        'template_ko': '하중조합 기준({standard})은 계수 하중조합만 바꿈. 비계수 사용하중 처짐, 부분재하 규칙(ASCE 7 '
+                       'Sec. 4.3.3 · 7.5.1), 부재 검토는 어느 선택에서나 같음.',
+        'params': {'standard': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}},
     },
     'loads.label.deck_braces_top_flange': {
         'kind': 'label',
@@ -2972,6 +3065,18 @@ REGISTRY = {
         'template_ko': 'H1.2 축력 + 휨 (성분 강도 미평가)',
         'params': {},
     },
+    'member.ne.h1_2_assumed_length': {
+        'kind': 'not_evaluated',
+        'template': 'H1.2 axial + bending (Pa / Max / B1 from an assumed length — give KxLx, KyLy, KtLt and Lb)',
+        'template_ko': 'H1.2 축력 + 휨 (Pa · Max · B1 이 가정한 길이에서 나옴 — KxLx · KyLy · KtLt · Lb 를 주십시오)',
+        'params': {},
+    },
+    'member.ne.h1_1_2_assumed_length': {
+        'kind': 'not_evaluated',
+        'template': 'H1.1-2 tension + bending (Max from an assumed Lb — give Lb)',
+        'template_ko': 'H1.1-2 인장 + 휨 (Max 가 가정한 Lb 에서 나옴 — Lb 를 주십시오)',
+        'params': {},
+    },
     'member.ne.h3_h3_bending_web_crippling': {
         'kind': 'not_evaluated',
         'template': 'H3 bending + web crippling (no bearing load wc_P or Vu)',
@@ -3229,6 +3334,20 @@ REGISTRY = {
         'template': 'component strength (Pn or Mn) not evaluated',
         'template_ko': '성분 강도(Pn 또는 Mn) 미평가',
         'params': {},
+    },
+    'member.reason.assumed_length_reference_only': {
+        'kind': 'reason',
+        'template': 'computed from an assumed length (a blank KxLx / KyLy / KtLt / Lb is taken as the engine default) '
+                    '— reference only, neither pass nor fail; give the length to get a verdict',
+        'template_ko': '가정한 길이로 계산(빈 KxLx · KyLy · KtLt · Lb 를 엔진의 기본값으로 둠) — 참고값이며 합격도 불합격도 '
+                       '아님; 길이를 주면 판정',
+        'params': {},
+    },
+    'member.reason.fails_on_length_independent_mode': {
+        'kind': 'reason',
+        'template': 'fails on a limit state that does not depend on the length ({check}) — the verdict holds for any length',
+        'template_ko': '길이와 상관없는 한계상태({check})로 넘음 — 어느 길이에서나 성립하는 판정',
+        'params': {'check': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}},
     },
     'member.reason.d3_fu_given_rupture_d3': {
         'kind': 'reason',

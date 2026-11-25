@@ -185,6 +185,9 @@ def calc_Cb(M_max: float, M_A: float, M_B: float, M_C: float,
             'MA': round(M_A, 4),
             'MB': round(M_B, 4),
             'MC': round(M_C, 4),
+            # 반올림 전 값(SI 변환용 — 설계 결과의 display_unrounded 와 같은 뜻)
+            'display_unrounded': {'Cb': float(Cb), 'Mmax': float(M_max), 'MA': float(M_A), 'MB': float(M_B),
+                                  'MC': float(M_C)},
         }
     return Cb
 

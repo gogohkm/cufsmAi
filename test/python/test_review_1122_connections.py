@@ -750,8 +750,9 @@ def test_V3_08_lap_short_end_distance_fails():
 def test_V3_09_lap_length_is_condition_not_strength():
     """V3-09: 랩 < 1.5d 는 R 계수법·J3 슬롯 예외의 적용 조건 — 경고만, 강도 판정은 그대로."""
     # 2026-11-24 V6-07: Mnd 가 없으면 랩 뒤틀림은 미평가다 — 이 시험의 대상(랩 길이)만 보려고 구속을 밝힌다.
+    # 2026-11-25 R2: 패스너 무리의 판정(모델 A)은 사람이 그 분배를 밝혔을 때만 — 이 시험은 랩 길이만 보므로 밝힌다.
     r = design_lap_connection(dict(_LAP, lap_left_in=10, lap_right_in=10, end_distance=2.0, Se=3.0,
-                                   distortion_restrained=True))
+                                   distortion_restrained=True, lap_force_model_confirmed=True))
     assert r['lap_ok'] is False
     assert r['pass'] is True
     assert any('R 계수법' in w for w in r['warnings'])
@@ -815,7 +816,10 @@ def test_V4_08_lap_gross_sf_is_not_a_flexure_basis():
     _close(se['flexure_dcr'], 120 / (0.90 * 2 * 3.0 * 55), rel=1e-3)
     # 2026-11-24 V6-07: Mnd 가 없으면 랩 뒤틀림은 미평가(판정 None) — 구속을 밝히면 판정이 선다.
     assert se['pass'] is None
-    assert design_lap_connection(dict(_LAP, end_distance=2.0, Se=3.0, distortion_restrained=True))['pass'] is True
+    # 2026-11-25 R2: 패스너 무리의 판정은 분배 모델을 밝혔을 때만(밝히지 않으면 None)
+    assert design_lap_connection(dict(_LAP, end_distance=2.0, Se=3.0, distortion_restrained=True))['pass'] is None
+    assert design_lap_connection(dict(_LAP, end_distance=2.0, Se=3.0, distortion_restrained=True,
+                                      lap_force_model_confirmed=True))['pass'] is True
     # Sf 가 함께 있어도 판정 근거는 Se
     both = design_lap_connection(dict(_LAP, end_distance=2.0, Se=3.0, Sf=9.9))
     _close(both['flexure_dcr'], se['flexure_dcr'], rel=1e-9)

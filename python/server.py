@@ -603,6 +603,22 @@ def _m_signature_ss(params):
     return out
 
 
+def _m_design_signature_lengths(params):
+    """설계용 DSM 준비의 S-S 서명곡선 반파장(결정 R8) — 엔진의 자동 경로(aisi_s100)와 같은 규칙.
+    호스트의 설계 준비(prepare_design_dsm · 퍼린)는 이 길이로 S-S, m = [1] 을 푼다(모델의 보기용 격자가 아니라)."""
+    from engine.helpers import design_signature_lengths
+    if params.get('node') is None:
+        raise RpcError('design_signature_lengths: missing required parameter(s): node')
+    try:
+        node = np.asarray(params['node'], dtype=float)
+        out = design_signature_lengths(node)
+    except (TypeError, ValueError) as e:
+        raise RpcError(f'design_signature_lengths: {e}') from e
+    return {'lengths': out['lengths'].tolist(), 'D': out['D'], 'per_decade': out['per_decade'],
+            'range_factor': out['range_factor'], 'BC': 'S-S', 'm_all': 'one term m = [1] per length',
+            'rule': out['rule']}
+
+
 def _m_dsm(params):
     node, elem = _node_elem(params, 'dsm')
     _require(params, 'dsm', 'curve', 'fy')
@@ -771,6 +787,7 @@ METHODS = {
     'load_project': _m_load_project,
     'doubler': _m_doubler,
     'signature_ss': _m_signature_ss,
+    'design_signature_lengths': _m_design_signature_lengths,
     'dsm': _m_dsm,
     'cutwp': _m_cutwp,
     'energy_recovery': _m_energy_recovery,

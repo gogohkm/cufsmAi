@@ -16,6 +16,7 @@ from design.loads.load_combinations import (
     find_controlling_combo, get_applicable_combos, normalize_design_method,
     snow_partial_cases, LOAD_COMBINATION_EDITION, LOAD_COMBINATION_REFERENCE,
     PATTERNED_LIVE_LOADS, PATTERNED_SNOW_LOADS,
+    normalize_load_combination_standard, STANDARD_TABLES, LOAD_COMBINATION_STANDARDS,
 )
 from design.loads.beam_analysis import (
     analyze_simple_beam, analyze_continuous_beam_general, analyze_beam_fe,
@@ -63,6 +64,7 @@ def analyze_loads(
     insulation_in: float = None,
     lr_reduced: bool = False,
     I_span_in4: list = None,
+    load_combination_standard: str = None,
 ) -> dict:
     """통합 하중 분석
 
@@ -95,6 +97,9 @@ def analyze_loads(
     brace_points_ft : 이산 브레이스 위치 (ft). deck['brace_points_ft'] 로도 줄 수 있다
     i621_conditions_confirmed : I6.2.1 (i)–(n) 사용자 확인 (deck 안의 같은 키로도 줄 수 있다)
     insulation_in : 단열재 두께 (in.), 단순보 R 보정 (deck 안으로도 가능)
+    load_combination_standard : 하중조합 기준 'asce7_10'(처음 값 — 지금까지의 결과 그대로) · 'asce7_22' ·
+            'kds_41_12_00'. 그 밖의 값은 허용값을 밝히는 ValueError. 넣은 하중이 그 기준의 하중 정의를 따른다고 본다
+            (엔진은 바꾸지 않는다 — assumptions 에 밝힌다). 처짐(비계수) · 부분재하 규칙은 바꾸지 않는다
 
     Returns
     -------
@@ -111,6 +116,8 @@ def analyze_loads(
     scope_notes = list(NOT_EVALUATED_ALWAYS)
 
     method = normalize_design_method(design_method)
+    combo_std = normalize_load_combination_standard(load_combination_standard)
+    std_table = STANDARD_TABLES[combo_std]
     if member_app not in MEMBER_APPS:
         raise ValueError(f'Unknown member_app {member_app!r}: use one of {MEMBER_APPS}.')
 
@@ -176,7 +183,7 @@ def analyze_loads(
     patterned, pattern_why = _pattern_keys(bool(lr_reduced), present, n_spans, bool(pattern_loading))
     snow_cases = snow_partial_cases(n_spans) if 'S' in patterned else [(_nt('loads.label.snow_balanced'), [1.0] * n_spans)]
     pattern_on = patterned  # 부분재하할 하중 키 집합 (아래 함수들은 이 집합으로 하중별 방식을 정한다)
-    variants = _build_variants(present, Wp_plf, method)
+    variants = _build_variants(present, Wp_plf, method, combo_std)
     for var in variants:
         var['env'] = _variant_envelope(var, units, pattern_on, snow_cases)
 
@@ -306,6 +313,9 @@ def analyze_loads(
     all_detail = []
     for v in variants:
         env = v['env']
+        _mp, _mn = float(env['M'][0].max()), float(env['M'][1].min())
+        _vv = float(max(env['V'][0].max(), -env['V'][1].min()))
+        _rr = float(max(np.abs(env['R'][0]).max(), np.abs(env['R'][1]).max()))
         all_detail.append({
             'name': v['name'], 'factors': v['factors'],
             'max_pos_M': round(float(env['M'][0].max()), 3),
@@ -317,6 +327,9 @@ def analyze_loads(
             'governs_gravity': bool(gravity_result and v['name'] == gravity_result['combo']),
             'governs_uplift': bool(uplift_result and v['name'] == uplift_result['combo']),
             'governs_overall': bool(governing_result and v['name'] == governing_result['combo']),
+            # 위 max_* 의 반올림 전 값(SI 변환용)
+            'display_unrounded': {'max_pos_M': _mp, 'max_neg_M': _mn, 'max_abs_M': max(_mp, -_mn),
+                                  'max_abs_V': _vv, 'max_R': _rr},
         })
 
     pattern_info = {
@@ -332,16 +345,26 @@ def analyze_loads(
     if 'S' in patterned:
         assumptions.append(_nt('loads.assumption.snow_partial_loading_sec'))
     scope_notes.append(_nt('loads.scope.member_self_weight_added'))
+    if combo_std != 'asce7_10':
+        # 처음 값(asce7_10)의 결과는 지금과 바이트로 같게 둔다 — 고른 때만 밝힌다(결정 R4)
+        assumptions.append(std_table['load_definition'])
+        scope_notes.append(_nt('loads.scope.combination_standard_scope', standard=std_table['edition']))
 
-    return _attach_notices({
+    return _attach_notices(_mirror_unrounded({
         'member_app': member_app,
         'span_type': span_type,
         'n_spans': n_spans,
         'design_method': method,
-        'load_combination_standard': {
+        'load_combination_standard': ({
             'edition': LOAD_COMBINATION_EDITION,
             'reference': LOAD_COMBINATION_REFERENCE[method],
-        },
+        } if combo_std == 'asce7_10' and load_combination_standard is None else {
+            'edition': std_table['edition'],
+            'reference': std_table['reference'][method],
+            'key': combo_std,
+            'allowed': list(LOAD_COMBINATION_STANDARDS),
+            'unchanged_by_selection': ['deflection', 'deflection_cases', 'pattern_loading'],
+        }),
         'analysis_method': _nt('loads.label.method_fe') if use_fe else _nt('loads.label.method_three_moment'),
         'governing': governing_result,
         'gravity': gravity_result,
@@ -379,7 +402,49 @@ def analyze_loads(
         'assumptions': assumptions,
         'scope_notes': scope_notes,
         'not_evaluated': not_evaluated,
-    })
+    }, deck_info))
+
+
+def _mirror_unrounded(result, deck_info=None):
+    """표시용으로 반올림한 기록마다 같은 자리의 반올림 전 값을 display_unrounded 로 덧붙인다(SI 변환용 — 설계
+    결과와 같은 이름 · 같은 뜻). 값은 이미 있는 `unrounded` 하위 묶음 · `*_unrounded` 키 · 데크 강성에서 온다.
+    옛 키 · 값은 바꾸지 않는다. 같은 객체가 두 자리에 있어도 결과는 같다."""
+    deck_raw = (deck_info or {}).get('display_unrounded') or {}
+
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool) and np.isfinite(v)
+
+    def walk(o):
+        if isinstance(o, list):
+            for x in o:
+                walk(x)
+            return
+        if not isinstance(o, dict):
+            return
+        du = {}
+        u = o.get('unrounded')
+        if isinstance(u, dict):
+            for k, v in u.items():
+                if num(v) and num(o.get(k)):
+                    du[k] = float(v)
+            for alias, src_key in (('Ly', 'Ly_in'), ('Lt', 'Lt_in')):
+                if num(o.get(alias)) and num(u.get(src_key)) and o.get(alias) == o.get(src_key):
+                    du[alias] = float(u[src_key])
+        for k, v in o.items():
+            if k.endswith('_unrounded') and num(v) and num(o.get(k[:-len('_unrounded')])):
+                du[k[:-len('_unrounded')]] = float(v)
+        for k, dec in (('kphi', 4), ('kx', 3)):      # _calc_deck_info 의 반올림 자리
+            if (num(o.get(k)) and num(deck_raw.get(k)) and o.get(k) != deck_raw[k]
+                    and abs(o[k] - round(deck_raw[k], dec)) < 1e-12):
+                du[k] = float(deck_raw[k])
+        if du:
+            prev = o.get('display_unrounded') if isinstance(o.get('display_unrounded'), dict) else {}
+            o['display_unrounded'] = {**du, **prev}
+        for k, v in o.items():
+            if k not in ('display_unrounded', 'unrounded'):
+                walk(v)
+    walk(result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -498,16 +563,16 @@ def _unit_responses(spans, sup, laps_ps, Ixx, E_ksi, use_fe, npts, I_span_in4=No
     return out
 
 
-def _build_variants(present, Wp_plf, method):
+def _build_variants(present, Wp_plf, method, standard=None):
     """조합 × 풍하중 방향. W 슬롯은 부압 W, 정압 Wp 두 가지."""
     variants = []
-    for name, factors in get_applicable_combos(present, method):
+    for name, factors in get_applicable_combos(present, method, standard):
         w = {k: present.get(k, 0.0) for k in factors}
         variants.append(_variant(name, factors, w))
     if Wp_plf > 0:
         wp_loads = dict(present)
         wp_loads['W'] = Wp_plf
-        for name, factors in get_applicable_combos(wp_loads, method):
+        for name, factors in get_applicable_combos(wp_loads, method, standard):
             if 'W' not in factors:
                 continue
             w = {k: wp_loads.get(k, 0.0) for k in factors}
@@ -1137,6 +1202,7 @@ def _calc_deck_info(deck: dict, section: dict = None,
     return {
         'kphi': round(kphi, 4),
         'kx': round(kx, 3),
+        'display_unrounded': {'kphi': float(kphi), 'kx': float(kx)},
         'type': dtype,
         'kphi_method': kphi_method,
         'kx_method': kx_method,

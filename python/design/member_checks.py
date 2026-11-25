@@ -59,11 +59,17 @@ def buckling_src(label, dsm, prefix, mode):
 def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, demand,
                    *, phi, omega, trusted=True, untrusted_reason=None, mirrors=None,
                    phi_symbol='φ', omega_symbol='Ω', location=None, group=None, no_demand_reason=None,
-                   variant=None):
+                   variant=None, assumed_length=False):
     """공칭강도 단계 다음의 설계강도 · 판정 단계를 붙이고 항목을 만든다.
 
     demand: q(...) (소요강도, source 포함) 또는 None/0 — 없으면 not_evaluated(소요 없음).
+    assumed_length: 강도가 엔진이 둔 길이(빈 KxLx · KyLy · KtLt · Lb 의 120 in)에서 나왔다 — 그 길이는 유리한 쪽도
+    불리한 쪽도 아니므로 넘어도 불합격이 아니다. 판정은 언제나 not_evaluated, 수는 reference 로만(E-1).
     """
+    if assumed_length:
+        trusted = False
+        untrusted_reason = _joined('; ', [r for r in (untrusted_reason, _nt('member.reason.assumed_length_reference_only'))
+                                         if r])
     dm = ctx['dm']
     nom = tr.steps[nominal_idx]['result']['value']
     cap = phi * nom if dm == 'LRFD' else nom / omega
@@ -81,14 +87,14 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
     r = ratio_of(dval, cap)
     if r is None:
         # 강도 0 에 소요 > 0 — 엔진은 E2/F2 를 평가하지 못한 경우가 아니면 불합격이다.
-        v = 'fail' if trusted else 'not_evaluated'
+        v = 'fail' if trusted and not assumed_length else 'not_evaluated'
         tr.add('verdict', f'{demand["symbol"]} / {cap_symbol}', inputs=[demand, tr.ref(i_ds)],
                result=None, verdict=v, note=_nt('member.note.zero_design_strength'))
         return make_check(cid, design_method=dm, verdict=v, demand=demand, capacity=cap_q, nominal=nom_q,
                           factor_=fac, ratio=None, reason='zero design strength' if trusted else untrusted_reason,
                           steps=tr.steps, location=location, group=group, mirrors=mirrors, variant=variant,
                           trusted=trusted if not trusted else None)
-    v = verdict_from(r, trusted=trusted)
+    v = 'not_evaluated' if assumed_length else verdict_from(r, trusted=trusted)
     verdict_step(tr, demand, tr.ref(i_ds), r, v)
     reason = None
     ref = None
@@ -354,6 +360,8 @@ def compression_checks(ctx):
         return m
 
     # --- E2
+    # 빈 길이를 엔진의 기본 길이로 둔 Pne(와 그것을 쓰는 Pnℓ)는 판정에 쓰지 않는다 — 넘어도 불합격이 아니다(E-1).
+    len_assumed = bool(ctx['missing_len']) and not ctx['Fcre_override'] > 0
     g_items = ne_items(ne, 'E2')
     gr = ctx['global_result']
     tr = Trace()
@@ -378,7 +386,8 @@ def compression_checks(ctx):
                                      trusted=g_trusted, untrusted_reason=_joined('; ', g_items),
                                      mirrors=mir('member.compression.global', 'Pne'),
                                      phi_symbol='φc', omega_symbol='Ωc',
-                                     no_demand_reason=_nt('member.reason.no_required_axial_strength')))
+                                     no_demand_reason=_nt('member.reason.no_required_axial_strength'),
+                                     assumed_length=len_assumed))
 
     # --- E3.2 (원형관이고 Pcrl 을 받지 않았으면 §E3.1.1.1)
     l_items = ne_items(ne, 'E3')
@@ -415,7 +424,7 @@ def compression_checks(ctx):
                                      mirrors=mir('member.compression.local', 'Pnl'),
                                      phi_symbol='φc', omega_symbol='Ωc',
                                      no_demand_reason=_nt('member.reason.no_required_axial_strength'),
-                                     variant='round_tube'))
+                                     variant='round_tube', assumed_length=len_assumed))
     elif ctx['local_not_evaluated']:
         checks.append(not_evaluated('member.compression.local', ctx, _joined('; ', l_items) or _nt('member.reason.no_pcrl')))
     elif ctx['e2_unavailable']:
@@ -450,7 +459,8 @@ def compression_checks(ctx):
                                      omega=omega, trusted=not reasons, untrusted_reason=_joined('; ', reasons),
                                      mirrors=mir('member.compression.local', 'Pnl'),
                                      phi_symbol='φc', omega_symbol='Ωc',
-                                     no_demand_reason=_nt('member.reason.no_required_axial_strength')))
+                                     no_demand_reason=_nt('member.reason.no_required_axial_strength'),
+                                     assumed_length=len_assumed))
 
     # --- E4
     d_items = ne_items(ne, 'E4')
@@ -656,6 +666,9 @@ def flexure_checks(ctx):
         return m or None
 
     replaced = _nt('member.reason.i6_2_1_replaced_i6_mn_mn')
+    # 빈 Lb 를 엔진의 기본 길이로 둔 Mne(와 그것을 쓰는 Mnℓ)는 판정에 쓰지 않는다(E-1). 랩 구간의 Lb = 0 상한은 다르다 —
+    # 그것은 가장 유리한 길이라 넘으면 진짜 불합격이다(_lb_lap_upper_bound).
+    lb_assumed = bool(ctx.get('lb_assumed'))
     g_items = ne_items(ne, 'F2')
     l_items = ne_items(ne, 'F3')
     d_items = ne_items(ne, 'F4')
@@ -688,7 +701,8 @@ def flexure_checks(ctx):
                                      'φbMne' if dm == 'LRFD' else 'Mne/Ωb', 'moment', demand, phi=phi, omega=omega,
                                      trusted=not g_items, untrusted_reason=_joined('; ', g_items),
                                      mirrors=mir('member.flexure.global', 'Mne'),
-                                     phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem))
+                                     phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem,
+                                     assumed_length=lb_assumed))
     g_bad = bool(g_items) or ctx['f2_unavailable']
 
     # --- F3.2
@@ -734,7 +748,8 @@ def flexure_checks(ctx):
                                      'φbMnℓ' if dm == 'LRFD' else 'Mnℓ/Ωb', 'moment', demand, phi=phi, omega=omega,
                                      trusted=not reasons, untrusted_reason=_joined('; ', reasons),
                                      mirrors=mir('member.flexure.local', 'Mnl'),
-                                     phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem))
+                                     phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem,
+                                     assumed_length=lb_assumed))
 
     # --- F4
     dr = st['dist_result']
@@ -1319,6 +1334,25 @@ def axial_bending_check(ctx):
         ins += [q('May', ctx['May'], 'moment', src('user_input', key='May_strength'))]
         expr += f' + {my_sym}/May'
     i_x = tr.add('equation', expr, equation='H1.2-1', inputs=ins, result=q('H1.2', raw['total'], 'dimensionless'))
+    if ctx.get('length_assumed') and not ctx['component_unavailable']:
+        # E-1: Pa · Max · B1 이 빈 길이의 기본값에서 나왔다 — 비는 참고값. 길이와 상관없는 하한 비가 넘으면 불합격.
+        bound = ctx.get('length_bound')
+        fails = bound is not None and bound > 1.0
+        if bound is not None:
+            i_b = tr.add('equation', 'H1.2,min = P / (design Pnd) + Mx / (design Mnd) + My / May  '
+                                     '(length-independent upper strengths, B1 = 1 — the least ratio at any length)',
+                         equation='H1.2-1', inputs=[P], result=q('H1.2,min', bound, 'dimensionless'))
+            tr.add('verdict', 'H1.2,min ≤ 1.0', inputs=[tr.ref(i_b), q('limit', 1.0, 'dimensionless', spec())],
+                   result=q('ratio', bound, 'dimensionless'), verdict='fail' if fails else 'not_evaluated')
+        if fails:
+            return make_check('member.axial_bending', design_method=dm, verdict='fail',
+                              demand=q('H1.2,min', bound, 'dimensionless'), capacity=q('limit', 1.0, 'dimensionless'),
+                              ratio=bound, steps=tr.steps, trusted=False,
+                              reason=_nt('member.reason.fails_on_length_independent_mode',
+                                         check='H1.2 with Pa <= design Pnd, Max <= design Mnd, B1 = 1'),
+                              reference={'ratio': raw['total']})
+        return not_evaluated('member.axial_bending', ctx, _nt('member.reason.assumed_length_reference_only'),
+                             steps=tr.steps, reference={'ratio': raw['total']})
     tr.add('verdict', 'H1.2 ≤ 1.0', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
            result=q('ratio', raw['total'], 'dimensionless'),
            verdict='pass' if ctx['interaction']['pass'] else 'fail')
@@ -1367,6 +1401,26 @@ def tension_bending_checks(ctx):
             else:
                 ins, expr = [mx, mxa, T, Ta], 'Mx/Max − T/Ta  (no weak-axis moment)'
         i_x = tr.add('equation', expr, equation=eq, inputs=ins, result=q(eq, val, 'dimensionless'))
+        if eq == 'H1.1-2' and ctx.get('r12_length_assumed'):
+            # E-1: Max 가 빈 Lb 의 기본값에서 나왔다 — 비는 참고값. 길이와 상관없는 하한(Max ≤ 설계 Mnd)이 넘으면 불합격.
+            bound = ctx.get('r12_bound')
+            fails = bound is not None and bound > 1.0
+            if bound is not None:
+                i_b = tr.add('equation', 'H1.1-2,min = Mx / (design Mnd) + My / May − T / Ta  '
+                                         '(length-independent upper flexural strength — the least ratio at any length)',
+                             equation='H1.1-2', inputs=[mx, T, Ta], result=q('H1.1-2,min', bound, 'dimensionless'))
+                tr.add('verdict', 'H1.1-2,min ≤ 1.0', inputs=[tr.ref(i_b), q('limit', 1.0, 'dimensionless', spec())],
+                       result=q('ratio', bound, 'dimensionless'), verdict='fail' if fails else 'not_evaluated')
+            if fails:
+                out.append(make_check(cid, design_method=dm, verdict='fail', demand=q('H1.1-2,min', bound, 'dimensionless'),
+                                      capacity=q('limit', 1.0, 'dimensionless'), ratio=bound, steps=tr.steps,
+                                      trusted=False, reference={'ratio': val},
+                                      reason=_nt('member.reason.fails_on_length_independent_mode',
+                                                 check='H1.1-2 with Max <= design Mnd')))
+            else:
+                out.append(not_evaluated(cid, ctx, _nt('member.reason.assumed_length_reference_only'),
+                                         steps=tr.steps, reference={'ratio': val}))
+            continue
         v = 'fail' if val > 1.0 else 'pass'
         tr.add('verdict', f'{eq} ≤ 1.0', inputs=[tr.ref(i_x), q('limit', 1.0, 'dimensionless', spec())],
                result=q('ratio', val, 'dimensionless'), verdict=v)

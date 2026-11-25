@@ -66,7 +66,7 @@ def _bs_hand(p, m, s, V, dm):
 def test_lap_block_shear_lower_bound_is_evaluated_and_counts():
     a = dict(d=8.0, t=0.059, Fy=55, Fu=70, lap_left_in=12, lap_right_in=12, Mu_support=120.0, Vu_support=4.0,
              fastener_type='bolt', fastener_dia=0.5, n_rows=2, end_distance=2.0, Se=3.0, distortion_restrained=True,
-             design_method='LRFD')
+             design_method='LRFD', lap_force_model_confirmed=True)   # 2026-11-25 R2: 무리 비를 견주려고 분배를 밝힌다
     b = dict(a, lap_left_in=6, lap_right_in=6, Mu_support=60.0, Vu_support=2.0, end_distance=1.0, design_method='ASD')
     for p, want in ((a, 0.597), (b, 0.942)):
         r = design_lap_connection(p)
@@ -131,7 +131,8 @@ def test_lap_tool_same_statement_and_alias():
     # 2026-11-24 V9a-03: H2 도 Mn,lap = 2SeFy 를 쓰므로 진술 없이는 판정하지 않는다(불합격은 그대로)
     assert _check(un, 'lap.bending_shear')['verdict'] == 'not_evaluated'
     for key in ('lap_restrained', 'distortion_restrained'):
-        st = design_lap_connection(dict(L, **{key: True}))
+        # 2026-11-25 R2: 패스너 무리의 판정은 분배 모델을 밝혔을 때만 — 이 시험은 랩 구속 진술만 보므로 밝힌다
+        st = design_lap_connection(dict(L, **{key: True}, lap_force_model_confirmed=True))
         assert _check(st, 'lap.flexure.local')['verdict'] == 'pass'
         assert _check(st, 'lap.flexure.distortional')['restraint_source']['key'] == 'lap_restrained'
         assert st['pass'] is True, key

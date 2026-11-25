@@ -549,6 +549,8 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
             'Sf': round(Sf, 4), 'Iy': round(Iy, 4), 'J': J, 'E': E, 'G': G,
             'Lu': round(Lu, 4) if Lu else 0.0, 'Fcre': round(Fcre, 2),
             'equation': eq,
+            # 반올림 전 값(SI 변환용 — aisi_s100 의 display_unrounded 와 같은 뜻)
+            'display_unrounded': {'Ag': Ag, 'Sf': Sf, 'Iy': Iy, 'Lu': Lu if Lu else 0.0, 'Fcre': Fcre},
         }
 
     # 완전 횡구속이면 단면 종류와 무관하게 LTB가 지배하지 않는다. 그 외 단면은
@@ -626,4 +628,6 @@ def compute_beam_Fcre_detail(props: dict, Cb: float, Lb: float,
         'sigma_ey': round(sigma_ey, 2), 'sigma_t': round(sigma_t, 2),
         'z_factor': z_factor, 'Fcre': round(Fcre, 2),
         'equation': 'F2.1.1' if z_factor == 1.0 else 'F2.1.3',
+        'display_unrounded': {'ro': ro, 'Ag': Ag, 'Sf': Sf, 'ry': ry, 'xo': xo, 'sigma_ey': sigma_ey,
+                              'sigma_t': sigma_t, 'Fcre': Fcre},
     }

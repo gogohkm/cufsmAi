@@ -66,7 +66,8 @@ def test_V8_01_unstated_lap_tool_matches_the_unstated_region():
 
 
 def test_V8_01_top_level_utilization_is_the_governing_lap_strength_ratio():
-    r = design_lap_connection(dict(LAP, Se=0.2311, lap_restrained=True))
+    # 2026-11-25 R2: 패스너 무리의 비(0.9025)를 판정으로 보려면 분배 모델을 밝힌다
+    r = design_lap_connection(dict(LAP, Se=0.2311, lap_restrained=True, lap_force_model_confirmed=True))
     ev = [c for c in r['design_checks'] if c['id'] in LAP_STRENGTH_CHECKS and c['verdict'] in ('pass', 'fail')]
     gov = max(ev, key=lambda c: c['ratio'])
     assert r['utilization'] == round(gov['ratio'], 4) and r['governing_check'] == gov['id']
@@ -243,9 +244,13 @@ def test_V9a_02_a_lap_needs_its_demands():
     assert _c(none, 'lap.flexure.local')['reason_code'] == 'lap.reason.demand_not_given' and none['pass'] is not True
     only_mu = _lapd(Mu_support=100.0)                                     # 전에는 0.972 로 통과
     assert _c(only_mu, 'lap.bending_shear')['verdict'] == 'not_evaluated' and only_mu['pass'] is not True
-    both = _lapd(Mu_support=100.0, Vu_support=1.78)                       # 둘 다 주면 전과 같다 — 판정이 난다
+    # 둘 다 주면 전과 같다 — 판정이 난다. 2026-11-25 R2: 패스너 무리는 분배 모델(A)을 밝혔을 때 판정
+    # (밝히지 않으면 A 로 넘을 때만 불합격 — 여기서는 판정 없음)
+    both = _lapd(Mu_support=100.0, Vu_support=1.78, lap_force_model_confirmed=True)
     assert _c(both, 'lap.bending_shear')['verdict'] in ('pass', 'fail') and both['pass'] in (True, False)
     assert _c(both, 'lap.fastener_group')['verdict'] in ('pass', 'fail')
+    unconfirmed = _lapd(Mu_support=100.0, Vu_support=1.78)
+    assert _c(unconfirmed, 'lap.fastener_group')['verdict'] == 'not_evaluated' and unconfirmed['pass'] is None
     zero = _lapd(Mu_support=0.0, Vu_support=1.0)                          # 밝히지 않은 0 — 믿을 수 없음
     assert _c(zero, 'lap.flexure.local')['reason_code'] == 'lap.reason.zero_demand_not_stated' and zero['pass'] is not True
     stated = _lapd(Mu_support=0.0, Vu_support=1.0, zero_demand_stated=True)

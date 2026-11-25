@@ -735,6 +735,12 @@ def _web_crippling_detail(h, t, R, N, Fy, theta=90, support='EOF', fastened='fas
         'formula': f'{solved["formula"]} = {solved["Pn"]:.3f} kips [{case["table"]}]',
         'spec_sections': ['G5'],
     }
+    # 위 표시용 반올림 값의 반올림 전 값(SI 변환용 — aisi_s100 의 display_unrounded 와 같은 뜻)
+    _unr = {'Pn': solved['Pn'], 'Pn_per_web': solved['Pn_per_web'], 'phi_Pn': solved['phi'] * solved['Pn'],
+            'Pa': solved['Pn'] / solved['omega'] if solved['omega'] > 0 else None,
+            'Lo': float(Lo or 0.0) if Lo is not None else None, 'edge_distance': case.get('edge_distance'),
+            'Pn_interior_cap': solved.get('Pn_interior_cap')}
+    result['display_unrounded'] = {k: float(v) for k, v in _unr.items() if v is not None}
     if violations:
         # 표의 적용 한계 밖에서는 Eq. G5-1 계수가 보정되지 않았다 — 판정에 쓰지 않도록 오류로 올린다.
         result['error'] = (f'Outside the Table {case["table"]} applicability limits: '

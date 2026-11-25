@@ -46,7 +46,7 @@ TESTED_METHODS = {
     'signature_ss', 'dsm', 'cutwp', 'energy_recovery', 'aisi_design', 'aisi_guide',
     'steel_grades', 'web_crippling', 'analyze_loads', 'calc_deck_stiffness',
     'lap_connection', 'check_lap_length', 'shear_lag', 'block_shear', 'cold_work',
-    'flange_curling', 'design_connection',
+    'flange_curling', 'design_connection', 'design_signature_lengths',
 }
 
 
@@ -706,6 +706,25 @@ def test_F1_signature_ss_rpc_returns_diagnostics():
     assert len(sig['lengths']) == len(sig['curve']) == len(sig['shapes'])
     assert isinstance(sig['diagnostics'], list) and 'success' in sig
     assert any('springs' in w for w in sig['warnings'])
+
+
+def test_E5_design_signature_lengths_rpc():
+    """2026-11-25 R8: 설계용 서명곡선 격자는 엔진의 한 규칙 — 0.05 D … 100 D 의 로그 간격 10 배마다 30 점(101 점),
+    D = 중심선 범위의 큰 쪽. 엔진의 자동 경로(_auto_generate_props)가 같은 함수를 쓴다. node 가 없으면 오류."""
+    import math
+    s = _srv()
+    node, elem = _section(r=0.0, stress=50.0)
+    out = s.call('design_signature_lengths', {'node': node, 'elem': elem})
+    xs = [r[1] for r in node]
+    zs = [r[2] for r in node]
+    D = max(max(xs) - min(xs), max(zs) - min(zs))
+    L = out['lengths']
+    assert len(L) == 101 and abs(out['D'] - D) < 1e-12 and out['BC'] == 'S-S'
+    assert abs(L[0] - 0.05 * D) < 1e-9 * D and abs(L[-1] - 100 * D) < 1e-9 * D
+    ratio = [math.log10(b / a) for a, b in zip(L, L[1:])]
+    assert max(ratio) - min(ratio) < 1e-9 and abs(1 / ratio[0] - 30.3) < 0.1   # log10(2000)/100 → 30.3 점/10 배
+    e = s.error('design_signature_lengths', {})
+    assert 'node' in e['error']
 
 
 # ----------------------------------------------------------------- F5 후속: dsm

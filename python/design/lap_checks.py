@@ -77,11 +77,15 @@ def build(ck: dict) -> list:
         if ck['pns_assumed']:
             v, why = 'not_evaluated', _nt('lap.reason.pns_from_assumed_limit', pns_mode=ck['pns_mode'])
         elif not ck['capacity_ok']:
-            v, why = 'fail', None
+            # R2: 모델 A 로도 넘으면 어느 분배에서나 넘는다 — 확인 없이도 불합격
+            v, why = 'fail', (None if ck.get('force_confirmed') else
+                              _nt('lap.reason.fails_under_most_favourable_distribution'))
         elif ck['fastener_unverified']:
             v = 'not_evaluated'
             why = _nt('lap.reason.fastener_strength_verified', items=_joined('; ', (
                 _prefixed(f"{x['name']} — ", x['reason'], _name_ko_prefix(x['name'], ' — ')) for x in ck['fastener_unverified'])))
+        elif not ck.get('force_confirmed'):
+            v, why = 'not_evaluated', _nt('lap.reason.force_model_not_confirmed')
         else:
             v, why = 'pass', None
         tr.add('verdict', 'V_transfer / capacity ≤ 1', inputs=[tr.ref(i_v), tr.ref(i_c)],
@@ -107,9 +111,16 @@ def build(ck: dict) -> list:
     cap = q('n_fit', ck['n_max_total'], 'count', spec())
     r = ck['n_total'] / ck['n_max_total'] if ck['n_max_total'] > 0 and ck['n_total'] > 0 else None
     v = 'pass' if fits else ('not_evaluated' if ck['pns_assumed'] else 'fail')
+    why = 'from an assumed Pns' if v == 'not_evaluated' else None
+    if not ck['pns_assumed'] and not ck.get('force_confirmed'):
+        # R2: 필요 개수 n 은 모델 A(고르게 나눔)의 수 — 다른 분배는 더 많이 요구한다. 들어가지 않으면 불합격 그대로.
+        if fits:
+            v, why = 'not_evaluated', _nt('lap.reason.force_model_not_confirmed')
+        else:
+            why = _nt('lap.reason.fails_under_most_favourable_distribution')
     tr.add('verdict', 'n ≤ n_fit', inputs=[dem, cap], result=q('ratio', r, 'dimensionless'), verdict=v)
     checks.append(make_check('lap.fastener_count', design_method=dm, verdict=v, demand=dem, capacity=cap, ratio=r,
-                             steps=tr.steps, reason='from an assumed Pns' if v == 'not_evaluated' else None,
+                             steps=tr.steps, reason=why,
                              reference={'ratio': r} if v == 'not_evaluated' else None))
 
     # --- 간격
