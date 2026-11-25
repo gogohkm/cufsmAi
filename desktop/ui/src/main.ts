@@ -166,9 +166,14 @@ function bucklingUsed(r: any): string {
   const b = cc?.buckling_values ?? cc?.bucklingValues ?? cc?.buckling ?? null;
   const src = typeof b === 'string' ? b : typeof b?.source === 'string' ? b.source : typeof b?.kind === 'string' ? b.kind : '';
   if (!src) { return ''; }
+  // 호스트 2차: analysis-fallback = 설계용 서명곡선 값을 준비하지 못해 지금 좌굴 해석(그 해석의 반파장 · 경계조건)이 채웠다 — 결과의 [DSM] 경고가 그 까닭
+  if (/^analysis[-_ ]?fallback$/i.test(src)) { return '설계용 서명곡선 값을 준비하지 못해 지금 좌굴 해석의 값을 썼다 — 결과의 [DSM] 경고'; }
+  if (/^mixed$/i.test(src)) { return '일부 하중군만 FSM 값, 나머지는 해석식 좌굴값으로 계산했다 — 결과의 [DSM] 경고'; }
+  if (/^not[-_ ]?needed$/i.test(src)) { return '좌굴값이 필요 없는 검토(인장)'; }
+  if (/^fsm[-_ ]?in[-_ ]?check$/i.test(src)) { return '퍼린 검토가 스스로 S-S 서명곡선을 풀어 FSM 좌굴값을 썼다'; }
   if (/prepared[-_ ]?now|re-?prepared/i.test(src)) { return 'FSM 좌굴값을 다시 준비해 썼다'; }
   if (/^fsm/i.test(src)) { return 'FSM 좌굴값을 썼다'; }
-  if (/analytic/i.test(src)) { return '해석식 좌굴값으로 계산했다(FSM 값 없음)'; }
+  if (/analytic/i.test(src)) { return '해석식 좌굴값으로 계산했다(FSM 값을 준비하지 못함 · 원형관) — 결과의 [DSM] 경고'; }
   return `좌굴값: ${src}`;
 }
 async function recompute(): Promise<void> {
@@ -1269,6 +1274,8 @@ function boot(): void {
   report: (kind: 'design' | 'buckling', format: 'html' | 'pdf') => doReport(kind, format),
   /** 시험: 보기 보고 하나를 곧바로(모델 · 상태를 쓰지 않는다 — 호스트가 무엇을 버리고 칩이 그것을 보이는지 본다) */
   reportNow: (view: string, selection: unknown) => report(view, selection as Item | null, 'program', true),
+  /** 시험: run_case_check 의 답 → 「다시 계산」 알림의 좌굴값 글(같은 함수 — 호스트의 buckling_values.source 마다) */
+  bucklingUsedText: (r: unknown) => bucklingUsed(r),
   get pointed() { return pointedAt(); },
   /** 시험: 다른 작성자의 카드를 화면에만 넣는다(기록에 쓰지 않는다 — 「믿기」 물음의 모양을 본다. 다음 다시 읽기가 지운다) */
   testWriters: (w: Array<{ writer_id: string; name: string; host: string; trusted: boolean }>) => { rv.writers = w; render(); },

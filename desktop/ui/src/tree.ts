@@ -14,7 +14,7 @@ import { actorOf, actorTag, afterBase, basePointAt, BY_KO, chg, groupName, histo
 import { glyph, itemOfRow, markOf, rv } from './reviews';
 import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
-import { comboStandard, comboStandardTip, fastenerText, forceModelTag, reasonNote, utilHtml } from './notices';
+import { comboStandard, comboStandardTip, fastenerText, forceModelTag, lengthBoundHtml, reasonNote, utilHtml } from './notices';
 import { docs, draftLabel, draftsOf, issueCls, issueLabel } from './docs';
 import { dmg } from './damage';
 
@@ -307,7 +307,7 @@ function workTree(): TNode[] {
   const nOut = runs.reduce((a, r) => a + r.notChecked.length, 0);
   const asmV = assumptionsNode().v ?? '없음';
   const insp = n('insp', '점검', { open: true, tip: '지금 결과의 상태 — 결과 탭 · 모델 탭의 그 줄과 같은 수', kids: [
-    n('insp:sum', '판정 요약', { go: 'result|chk', vHtml: chkOk && runs.length ? `${gov?.governing ? `지배 ${esc(gov.governing)} · ` : ''}최대 ${typeof gov?.utilization === 'number' ? ratio(gov.utilization, gov.overall === false, `${gov.src}utilization`) : ((inv) => (inv ? utilHtml(inv.us, inv.result?.utilization, `${inv.src}utilization`, '—') : '—'))(runs.find(r => r.utilInvalid || lengthAssumed(r.us)))} · <span class="${un ? 'un' : ''}">미검토 ${un}</span>` : `<span class="vl un">${esc(STATE_V[state.stages.chk.state][0])}</span>`,
+    n('insp:sum', '판정 요약', { go: 'result|chk', vHtml: chkOk && runs.length ? `${gov?.governing ? `지배 ${esc(gov.governing)} · ` : ''}최대 ${typeof gov?.utilization === 'number' ? (gov.bound ? lengthBoundHtml(gov.us, gov.bound, `${gov.src}${gov.utilPath}`, gov.utilRef) : ratio(gov.utilization, gov.overall === false, `${gov.src}utilization`)) : ((inv) => (inv ? utilHtml(inv.us, inv.result?.utilization, `${inv.src}utilization`, '—') : '—'))(runs.find(r => r.utilInvalid || lengthAssumed(r.us)))} · <span class="${un ? 'un' : ''}">미검토 ${un}</span>` : `<span class="vl un">${esc(STATE_V[state.stages.chk.state][0])}</span>`,
       ...(chkOk && noFsmRuns().length ? { tagHtml: noFsmTag() } : {}),
       tip: '지배 항목 · 최대 판정비(엔진) · 미검토 수(결과 탭의 부재 검토와 같은 수) — 누르면 결과 › 부재 검토' }),
     n('insp:warn', '엔진 알림', { go: 'result|chk', v: String(nWarn), vCls: nWarn ? 'warn' : '', tip: '엔진이 낸 경고(warnings) — 누르면 결과 › 부재 검토(정보 창의 경고)' }),

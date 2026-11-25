@@ -17,7 +17,7 @@ import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { damageInfo } from './damage';
-import { fastenerText, fieldText, finder, FORCE_MODEL_WHY, noVerdictWhy, comboStandard, comboStandardTip, forceModelConfirmed, forceModelTag, noteLi, noteList, pageOf, reasonNote, unconfirmedModel, utilHtml, type Note } from './notices';
+import { fastenerText, fieldText, finder, FORCE_MODEL_WHY, lengthBoundHtml, noVerdictWhy, comboStandard, comboStandardTip, forceModelConfirmed, forceModelTag, noteLi, noteList, pageOf, reasonNote, unconfirmedModel, utilHtml, type Note } from './notices';
 import { actorOf, actorTag, baseOf, changeOf, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
 import { asmInfo, questionsAbout, srcInfo, srcs, work, workInfo } from './work';
 import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
@@ -256,10 +256,12 @@ function checksInfo(key: string): string {
   const dcLine = row && row.si?.demand && row.si?.capacity && typeof row.si.demand.value === 'number' && typeof row.si.capacity.value === 'number'
     ? `${esc(String(row.si.demand.symbol ?? ''))} ${qnum(row.si.demand, `${row.src}demand.`, { sig: 3 })} / ${esc(String(row.si.capacity.symbol ?? ''))} ${qnum(row.si.capacity, `${row.src}capacity.`, { sig: 3 })}`
     : '';
-  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}utilization`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : utilHtml(run.us, run.result?.utilization, `${run.src}utilization`, none('판정비 없음'))}</span>`
+  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}${run.utilPath}`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : utilHtml(run.us, run.result?.utilization, `${run.src}utilization`, none('판정비 없음'))}</span>`
     + ` <span class="dim">${dcLine}${row?.clause ? ` · §${esc(row.clause)}` : ''}${row ? ratioFormTag(row) : ''}</span></div>`
     + (row && (row.kind === 'ne' || row.kind === 'na') ? ((rn => `<div class="dim" data-reason${rn?.code ? ` data-code="${esc(rn.code)}"` : ''}>${esc(rn?.text ?? '')}</div>`)(reasonNote(row.us))) : '')
     + (row ? highestLine(row) : '')
+    // 엔진 2차: 가정한 길이의 결과가 길이와 상관없는 하한으로 NG — 검토 전체의 판정비 · 한계상태는 그 하한, 가정한 길이의 이용률은 참고
+    + (run.bound ? `<div class="dim" data-run-bound="${esc(run.bound.check ?? '')}">검토 전체 NG — 어느 길이에서나 넘는다: ${lengthBoundHtml(run.us, run.bound, `${run.src}${run.utilPath}`, run.utilRef)}</div>` : '')
     + (typeof focusRatio === 'number' ? gaugeHtml(focusRatio, ng) : '');
   const areaKo = run.area === 'lap' ? '접합부 검토 · 랩' : run.area === 'connection' ? '접합부 검토' : '부재 검토';
   const kHead = `${areaKo} · ${esc(row ? row.where : run.where)} · 검토 전체 <span class="verdict ${ov.cls}" style="font-weight:400"${tip('엔진의 전체 판정(pass): NG 가 하나라도 있으면 NG, 평가 못 한 것이 있으면 판정 없음, 모두 만족이면 OK')}>${ov.text}</span>`;
@@ -321,7 +323,10 @@ function dsmBasisTag(us: any): string {
   const by = us?.dsm_basis_by_family && typeof us.dsm_basis_by_family === 'object' ? Object.entries(us.dsm_basis_by_family as Record<string, string>) : [];
   if (by.length) {
     const cur = by.filter(([, b]) => b === 'current_analysis').map(([f]) => f);
-    return `${cur.length ? tagFsm : ''}<span class="why" data-dsm-basis="${esc(by.map(([f, b]) => `${f}=${b}`).join(','))}">${esc(by.map(([f, b]) => `${f} ${BASIS_KO[b] ?? b}`).join(' · '))}</span>`;
+    // 호스트 2차: 지금 해석의 값을 썼는데 [DSM] 경고가 있으면 — 설계용 서명곡선 값을 준비하지 못해 그 해석(그 반파장 · 경계조건)이 채운 것이다. 경고의 빛깔로
+    const fell = cur.length > 0 && typeof us?.dsm_warning === 'string' && !!us.dsm_warning;
+    const t = fell ? `설계용 S-S 서명곡선 FSM 값을 준비하지 못해 ${cur.join(' · ')} 는 지금 좌굴 해석(그 해석의 반파장 · 경계조건)의 값을 썼다 — 까닭은 경고의 [DSM] 줄` : '';
+    return `${cur.length ? tagFsm : ''}<span class="why${fell ? ' warn' : ''}" data-dsm-basis="${esc(by.map(([f, b]) => `${f}=${b}`).join(','))}"${fell ? ' data-dsm-fallback="1"' : ''}${tip(t)}>${esc(by.map(([f, b]) => `${f} ${BASIS_KO[b] ?? b}`).join(' · '))}${fell ? ' — 준비 실패' : ''}</span>`;
   }
   return us?.dsm_basis === 'current_analysis' || us?.dsm_basis === 'prepared+current_analysis' ? tagFsm : '';
 }

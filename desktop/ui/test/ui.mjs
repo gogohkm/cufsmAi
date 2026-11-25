@@ -840,6 +840,54 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
         + ` · 빈 소요 ${blanks.join(', ') || '없음'} → ${blanks.map(k => `${k} 트리 「${dc[k]?.tree}」 정보 「${dc[k]?.info}」`).join(' · ')} · 진술 칸 ${dc.stated ? `「${dc.stated.label}」 ${dc.stated.val}` : '호스트 상태에 없음'}` };
   });
 
+  // 엔진 2차(d10d5aa) · D3: 비틀림 길이 KtLt 를 비운 압축(엔진이 기본 길이로 둔다 — KxLx · KyLy 는 MCP 도구에 꼭 줘야 한다) — 큰 Pu 는 길이와 상관없는 하한(가장 유리한 길이의 강도)으로도 넘어 NG(pass false · length_assumed ·
+  // length_independent_bound). 화면: 검토 전체의 판정비 · 한계상태 = 그 하한, 가정한 길이의 이용률은 「참고」. 작은 Pu 는 그대로 「판정 없음」.
+  // 작은 Pu 는 u06 과 같은 부름이라 끝의 상태가 앞과 같다(뒤 단계가 그 결과를 쓴다)
+  await step('u06c D3 — 길이(KtLt)를 비운 압축이 길이와 상관없는 하한으로 NG: 트리 · 정보 창 · 업무 › 판정 요약 = NG 와 하한의 비 · 한계상태, 가정한 길이의 이용률은 「참고」 · 넘지 않으면 「판정 없음」', 'u06c_length_bound', async () => {
+    const bl = await mcp.tool('set_case_inputs', { inputs: { KtLt: null }, reason: '시험 — 비틀림 유효 길이를 비움(엔진의 기본 길이)' });
+    const ng = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 400, units: 'SI' });
+    const lb = ng.length_independent_bound ?? null;
+    const lbCheck = lb ? (lb.governing_check_id ?? lb.governing_check ?? null) : null;
+    await settle(`s.runs[0] && s.runs[0].us && s.runs[0].us.pass===false && s.runs[0].us.length_assumed===true && !!s.runs[0].bound`, '하한 NG 결과', 30_000).catch(() => undefined);
+    const run = await ev(`(()=>{const r=${S}.state.runs[0]; return r ? {util:r.utilization, path:r.utilPath, ref:r.utilRef, gov:r.governing, check:r.bound?.check ?? null, inv:r.utilInvalid} : null;})()`);
+    await select('work', 'insp:sum');
+    await sleep(300);
+    const sum = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="insp:sum"]'); if(!r) return null; const n=r.querySelector('[data-ratio]');
+      return {text:r.querySelector('.vl')?.textContent ?? '', v:n ? +n.dataset.v : null, src:n?.dataset.src ?? null, ng:n?.dataset.ratio ?? null, bound:r.querySelector('[data-length-bound]')?.dataset.lengthBound ?? null,
+        ref:r.querySelector('[data-ratio-ref]')?.dataset.ratioRef ?? null, inv:!!r.querySelector('[data-util-invalid]')};})()`);
+    await select('result', 'chk');
+    await sleep(300);
+    const tree = await ev(`({chk:document.querySelector('#tree .row[data-k="chk"] .vl')?.textContent ?? '', ngRows:[...document.querySelectorAll('#tree .row[data-k^="design#"]')].filter(r=>r.querySelector('.dot.ng')).map(r=>r.dataset.k)})`);
+    const info = await ev(`(()=>{const b=document.querySelector('#info [data-run-bound]'); const n=b?.querySelector('[data-ratio]');
+      return {head:document.querySelector('#info .hd')?.textContent.replace(/\\s+/g,' ') ?? '', bound:b?.dataset.runBound ?? null, v:n ? +n.dataset.v : null, ref:b?.querySelector('[data-ratio-ref]')?.dataset.ratioRef ?? null, text:b?.textContent ?? ''};})()`);
+    await shot('u06c_length_bound_1920_dark');
+    // 넘지 않는 작은 Pu — 판정 없음(하한으로 넘지 않음 · 판정비 없음). u06 과 같은 부름이라 뒤 단계의 상태도 그대로
+    const ne = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 5, units: 'SI' });
+    await settle(`s.runs[0] && s.runs[0].us && s.runs[0].us.pass===null && s.runs[0].us.length_assumed===true`, '판정 없음 결과', 30_000).catch(() => undefined);
+    await select('work', 'insp:sum');
+    await sleep(300);
+    const sum2 = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="insp:sum"]'); return r ? {text:r.querySelector('.vl')?.textContent ?? '', ratio:!!r.querySelector('[data-ratio]'), bound:!!r.querySelector('[data-length-bound]'), inv:!!r.querySelector('[data-util-invalid]')} : null;})()`);
+    const near = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+    const engOk = !bl.error && !ng.error && ng.pass === false && ng.length_assumed === true && ng.utilization_valid === false && typeof lb?.ratio === 'number' && lb.ratio > 1 && !!lbCheck;
+    const runOk = !!run && near(run.util, lb?.ratio) && run.path === 'length_independent_bound.ratio' && near(run.ref, ng.utilization) && run.check === lbCheck && run.inv === false;
+    const sumOk = !!sum && near(sum.v, lb?.ratio) && sum.ng === 'ng' && sum.src === 'design:length_independent_bound.ratio' && sum.bound === lbCheck && near(+sum.ref, ng.utilization) && !sum.inv;
+    const treeOk = /^NG [1-9]/.test(tree.chk) && tree.ngRows.includes(`design#${lbCheck}`);
+    const infoOk = /검토 전체 NG/.test(info.head) && info.bound === lbCheck && near(info.v, lb?.ratio) && near(+info.ref, ng.utilization) && /참고/.test(info.text);
+    const neOk = !ne.error && ne.pass === null && ne.length_assumed === true && !!sum2 && sum2.inv && !sum2.ratio && !sum2.bound && /판정 없음/.test(sum2.text);
+    return { ok: engOk && runOk && sumOk && treeOk && infoOk && neOk,
+      detail: `${bl.error ? `set_case_inputs ${short(bl.error, 200)} · ` : ""}${ng.error ? `압축 ${short(ng.error, 300)} · ` : ""}엔진 pass ${ng.pass} · length_assumed ${ng.length_assumed} · utilization ${ng.utilization}(valid ${ng.utilization_valid}) · 하한 ${lbCheck} 비 ${lb?.ratio} 「${short(lb?.limit_state, 50)}」 ${engOk}`
+        + ` | 실행 판정비 ${run?.util} @${run?.path} · 참고 ${run?.ref} · 지배 「${run?.gov}」 ${runOk} | 판정 요약 「${short(sum?.text, 70)}」(하한 ${sum?.bound} · src ${sum?.src}) ${sumOk}`
+        + ` | 트리 「${tree.chk}」 NG 줄 ${tree.ngRows.join(',')} ${treeOk} | 정보 창 「${short(info.text, 80)}」 ${infoOk} | 작은 Pu: pass ${ne.pass} · 하한 ${JSON.stringify(ne.length_independent_bound?.ratio ?? null)} → 「${short(sum2?.text, 50)}」 ${neOk}` };
+  });
+  // 호스트 2차 · D3: run_case_check 의 좌굴값 출처(buckling_values.source)마다 「다시 계산」 알림의 글 — 같은 함수(화면의 bucklingUsed)를 불러 본다(준비 실패는 정직하게 만들 수 없다)
+  await step('u06d D3 — 좌굴값 출처의 글(analysis-fallback · mixed · analytical · fsm-prepared-now · fsm-in-check · not-needed) — 영어 그대로 보이지 않는다', null, async () => {
+    const srcs = ['analysis-fallback', 'mixed', 'analytical', 'fsm-prepared-now', 'fsm-current', 'fsm-in-check', 'not-needed'];
+    const out = {};
+    for (const s of srcs) { out[s] = await ev(`${S}.bucklingUsedText({case_check:{buckling_values:{source:${JSON.stringify(s)}}}})`); }
+    const ok = srcs.every(s => typeof out[s] === 'string' && out[s] && !out[s].includes(s) && /[가-힣]/.test(out[s])) && /준비하지 못해 지금 좌굴 해석의 값/.test(out['analysis-fallback']) && /\[DSM\]/.test(out['analysis-fallback']);
+    return { ok, detail: srcs.map(s => `${s} → 「${out[s]}」`).join(' · ') };
+  });
+
   section('7. 테마 · 좁은 창');
   const contrast = () => ev(`(()=>{const lum=c=>{const m=c.match(/[\\d.]+/g).map(Number); const f=v=>{v/=255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);}; return 0.2126*f(m[0])+0.7152*f(m[1])+0.0722*f(m[2]);};
     const bg=e=>{for(let x=e;x;x=x.parentElement){const b=getComputedStyle(x).backgroundColor; const m=b.match(/[\\d.]+/g); if(m&&(m.length<4||+m[3]>0.5)) return b;} return getComputedStyle(document.body).backgroundColor;};
@@ -3555,7 +3603,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
    * r43 · r44 · r45 — 재테스트 반영(20261125-retest-fixes-worklog — E5 · E6 · E11). 기대는 앞 단계: r10 · r12(열린 프로젝트의 대상).
    * r43 은 새 대상 「R43 해석식」 을 만들어 그 안에서 하고 앞 대상으로 돌아온다
    */
-  await step('r43 E5 · R1 — FSM 을 돌린 적 없는 대상의 휨 검토 = 호스트가 그 검토 안에서 S-S 서명곡선 FSM 값을 준비한다(dsm_basis_by_family: prepared · designDsmPrepared in_check) → 「해석식 좌굴값」 표시 없음 · 좌굴 값의 출처 「서명곡선 FSM」. 대체(원형관 — DSM 비적용): 엔진의 범위 알림이 말하고 표시 없음', 'r43_no_fsm', async () => {
+  await step('r43 E5 · R1 · D3 — FSM 을 돌린 적 없는 대상의 휨 검토 = 호스트가 그 검토 안에서 S-S 서명곡선 FSM 값을 준비한다(dsm_basis_by_family: prepared · designDsmPrepared in_check) → 「해석식 좌굴값」 표시 없음 · 좌굴 값의 출처 「서명곡선 FSM」 · 모드 구속이 켜져 있으면 호스트의 가정 「구속하지 않은 서명곡선」. 대체(원형관 — DSM 비적용): 엔진의 범위 알림이 말하고 표시 없음', 'r43_no_fsm', async () => {
     const cur = (await recNow()).cases.find(c => c.open)?.name;
     await act2({ action: 'save_case' });
     await act2({ action: 'new_case', name: 'R43 해석식', kind: 'section-only' });
@@ -3582,6 +3630,17 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const f1 = await mcp.tool('aisi_design_flexure', flexArgsR(3.0, 3));
     const a = await look('flexure');
     await shot('r43_no_fsm_tag_1920_dark');
+    // ①b 호스트 2차: 모델에 cFSM 모드 구속(GBTcon)이 켜져 있으면 설계값은 구속하지 않은 서명곡선 — 결과의 가정 host.design.dsm_unconstrained(호스트의 글)가
+    // 정보 창의 가정 · 모델 › 가정에 보인다. 끝에 구속을 끈다
+    const DSM_UNC = 'host.design.dsm_unconstrained';
+    const g1 = await mcp.tool('set_gbtcon', { glob: [1, 1, 1, 1] });
+    const f1b = await mcp.tool('aisi_design_flexure', flexArgsR(3.1, 3));
+    await settle(`s.runs.some(r=>r.key==='design' && (r.assumptions||[]).some(n=>n.code===${JSON.stringify(DSM_UNC)}))`, '모드 구속의 가정', 60_000).catch(() => undefined);
+    await select('result', 'chk');
+    const uncInfo = await ev(`document.querySelector('#info li[data-code="${DSM_UNC}"]')?.textContent ?? null`);
+    await select('model', 'asm');
+    const uncAsm = await ev(`[...document.querySelectorAll('#tree .row[data-k^="asm:design"]')].map(r=>r.textContent).find(t=>/구속/.test(t)) ?? null`);
+    const g0 = await mcp.tool('set_gbtcon', { glob: [0, 0, 0, 0] });
     // ② 대체 — 원형관(CHS): 호스트는 DSM 값을 준비하지 않고(dsm_basis_by_family: none) 엔진이 DSM 비적용을 범위 알림으로 밝힌다 — 화면은 「해석식 좌굴값」 을 달지 않는다
     const tube = await mcp.tool('set_section_template', { type: 'chs', OD: 114.3, t: 3.2, units: 'SI', reason: 'r43 — 원형관(DSM 비적용)' });
     const c2 = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, Fu: 400, KxLx: 3000, KyLy: 3000, KtLt: 3000, Pu: 20, design_method: 'LRFD', units: 'SI' });
@@ -3590,9 +3649,10 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     if (cur) { await act2({ action: 'open_case', name: cur }); await answerIfUnsaved(); await settle(`s.full?.project?.case?.name===${JSON.stringify(cur)}`, '앞 대상', 60_000).catch(() => undefined); }
     const NA = 'member.scope.round_tube_dsm_not_applicable';
     const okA = !f1.error && a.basis?.Mxx === 'prepared' && a.inCheck && !a.res && !a.notice && a.wk === null && a.basisShown === 'Mxx=prepared';
+    const okU = !g1.error && !g0.error && !f1b.error && !!uncInfo && /[가-힣]/.test(uncInfo) && !!uncAsm;
     const okB = !tube.error && !c2.error && b.basis?.P === 'none' && !b.res && !b.notice && b.wk === null && b.scopeCodes.includes(NA);
-    return { ok: okA && okB,
-      detail: `FSM 을 돌린 적 없음: 출처 ${JSON.stringify(a.basis)} · designDsmPrepared in_check ${a.inCheck}(${JSON.stringify(a.prepFams)}) · 엔진 ${JSON.stringify(a.src)} → 표시 「${a.res?.text ?? '없음'}」 · 정보 창 알림 ${a.notice} · 좌굴 값의 출처 ${a.basisShown} · 판정 요약 「${a.wk ?? '없음'}」`
+    return { ok: okA && okU && okB,
+      detail: `모드 구속: 정보 창의 가정 「${short(uncInfo, 60)}」 · 모델 › 가정 「${short(uncAsm, 60)}」${g1.error ? ` · set_gbtcon ${short(g1.error, 80)}` : ''}${f1b.error ? ` · ${short(f1b.error, 80)}` : ''} ${okU} | FSM 을 돌린 적 없음: 출처 ${JSON.stringify(a.basis)} · designDsmPrepared in_check ${a.inCheck}(${JSON.stringify(a.prepFams)}) · 엔진 ${JSON.stringify(a.src)} → 표시 「${a.res?.text ?? '없음'}」 · 정보 창 알림 ${a.notice} · 좌굴 값의 출처 ${a.basisShown} · 판정 요약 「${a.wk ?? '없음'}」`
         + ` | 원형관(대체): 출처 ${JSON.stringify(b.basis)} · 엔진 ${JSON.stringify(b.src)} → 표시 「${b.res?.text ?? '없음'}」 · 알림 ${b.notice} · 범위 알림 ${b.scopeCodes.includes(NA) ? NA : `없음(${b.scopeCodes.slice(0, 6).join(', ')})`} · 앞 대상 ${cur}${f1.error ? ` · ${short(f1.error, 80)}` : ''}${tube.error ? ` · ${short(tube.error, 80)}` : ''}${c2.error ? ` · ${short(c2.error, 80)}` : ''}` };
   });
   await step('r44 E6 — 기록: 실행 하나 = 머리줄 하나(접지 않는다) · 묶음은 그것이 처음 들어간 계산 아래(다시 계산해도 옮겨 가지 않는다 — MCP work_log 의 연결과 같다) · 묶음 없는 실행은 「계산 #n (입력 변경 없음)」', 'r44_log_runs', async () => {

@@ -125,6 +125,33 @@ export function refRatio(r: number, why = LENGTH_ASSUMED_WHY): string {
   return `<span class="faint" data-ratio-ref="${r}"${tip(why)}>참고 ${ratioText(r, r > 1)}</span>`;
 }
 
+/**
+ * 엔진 2차(2026-11-25): 길이를 비워 가정한 길이로 낸 결과라도, 어느 길이에서나 넘는 하한(가장 유리한 길이의 강도)으로 넘으면 NG 다.
+ * 그때 판정비 · 지배는 그 하한의 비 · 항목이고, 맨 위 utilization(가정한 길이의 수)은 참고값이다. 규칙은 제품의 webview/js/utils.js
+ * `lengthBoundFailure` 와 같다(그대로 옮김 — 부르지 않는다): pass false · utilization_valid false 이고 length_independent_bound.ratio 가 있으면 그것
+ * (항목 governing_check_id | governing_check · limit_state), 조합은 interaction_length_bound 의 total(_unrounded)이 1 을 넘으면 그것(항목
+ * member.axial_bending — design_checks 에 있을 때). `path` 는 그 비가 결과 안에 있는 자리(data-src 꼬리)
+ */
+export interface LengthBound { ratio: number; check: string | null; limitState: string | null; path: string }
+export function lengthBoundFailure(d: any): LengthBound | null {
+  if (!d || typeof d !== 'object' || d.pass !== false || d.utilization_valid !== false) { return null; }
+  const b = d.length_independent_bound;
+  if (b && typeof b === 'object' && typeof b.ratio === 'number' && Number.isFinite(b.ratio)) {
+    return { ratio: b.ratio, check: b.governing_check_id || b.governing_check || null, limitState: b.limit_state || null, path: 'length_independent_bound.ratio' };
+  }
+  const ib = d.interaction_length_bound;
+  const unr = ib && typeof ib === 'object' && typeof ib.total_unrounded === 'number';
+  const t = ib && typeof ib === 'object' ? (unr ? ib.total_unrounded : ib.total) : null;
+  if (typeof t === 'number' && Number.isFinite(t) && t > 1) {
+    const has = Array.isArray(d.design_checks) && d.design_checks.some((c: any) => c && c.id === 'member.axial_bending');
+    return { ratio: t, check: has ? 'member.axial_bending' : null, limitState: 'H1.2 (Pa, Max at their length-independent bounds, B1 = 1)',
+      path: unr ? 'interaction_length_bound.total_unrounded' : 'interaction_length_bound.total' };
+  }
+  return null;
+}
+export const LENGTH_BOUND_WHY = '길이를 비워 가정한 길이로 낸 결과이지만, 길이와 상관없는 하한(가장 유리한 길이의 강도)으로도 넘는다 — 어느 길이에서나 NG 다. '
+  + '판정비는 그 하한의 비(엔진의 length_independent_bound · interaction_length_bound), 가정한 길이로 낸 이용률은 참고';
+
 /** 엔진 판정(pass) → 글자 · 모양. true OK · false NG · 그 밖(null · 없음) 판정 없음/미검토 */
 export function verdictOf(pass: unknown, unLabel = '미검토'): { text: string; cls: 'ok' | 'ng' | 'un' } {
   if (pass === true) { return { text: 'OK', cls: 'ok' }; }

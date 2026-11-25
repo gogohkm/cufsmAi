@@ -9,8 +9,8 @@
  */
 // @ts-expect-error — UMD(CommonJS) 모듈, 형 정보 없음
 import * as NX from '../../../webview/js/notices.js';
-import { tip } from './dom';
-import { lengthAssumed, LENGTH_ASSUMED_WHY, noVerdictRatio, ratio, refRatio, utilInvalid, utilShown } from './format';
+import { esc, tip } from './dom';
+import { LENGTH_BOUND_WHY, lengthBoundFailure, type LengthBound, lengthAssumed, LENGTH_ASSUMED_WHY, noVerdictRatio, ratio, refRatio, utilInvalid, utilShown } from './format';
 
 interface NoticesApi {
   render(n: unknown, opts: Opts): string;
@@ -126,12 +126,31 @@ export function noVerdictWhy(x: any): string {
  * 판정은 엔진의 pass 그대로(화면이 짓지 않는다)
  */
 export function utilHtml(x: any, u: unknown, src: string, fallback = ''): string {
+  const lb = lengthBoundFailure(x);
+  if (lb) { return lengthBoundHtml(x, lb, src.replace(/utilization$/, lb.path), typeof u === 'number' && Number.isFinite(u) ? u : null); }
   const shown = utilShown(x, u);
   if (shown !== null) { return ratio(shown, x?.pass === false, src); }
   const ref = lengthAssumed(x) && typeof u === 'number' && Number.isFinite(u) ? u : null;
   if (utilInvalid(x)) { return noVerdictRatio(noVerdictWhy(x), ref); }
   if (ref !== null) { return refRatio(ref); }
   return fallback;
+}
+
+/** 길이와 상관없는 하한의 항목 이름(그 id 의 name_ko — 엔진의 design_checks). 없으면 id 그대로 */
+export function boundCheckName(x: any, lb: LengthBound): string {
+  const c = (Array.isArray(x?.design_checks) ? x.design_checks : []).find((d: any) => d && d.id === lb.check);
+  return String(c?.name_ko ?? c?.name ?? lb.check ?? '길이와 상관없는 하한');
+}
+export const ASSUMED_REF_WHY = '가정한 길이(빈 길이를 엔진의 기본값으로 둠)로 낸 이용률 — 참고값. 판정은 길이와 상관없는 하한으로 났다';
+/**
+ * 하한으로 NG 인 결과의 머리 비 — 하한의 비(NG 판정비) · 그 한계상태 · 가정한 길이의 이용률은 「참고」(utils.js lengthBoundFailure 와 같은 뜻).
+ * src = 하한 비의 data-src, ref = 가정한 길이의 이용률(보일 수)
+ */
+export function lengthBoundHtml(x: any, lb: LengthBound, src: string, ref: number | null): string {
+  const nm = boundCheckName(x, lb);
+  const why = `${LENGTH_BOUND_WHY} — 한계상태 ${nm}${lb.limitState ? ` (${lb.limitState})` : ''}`;
+  return `${ratio(lb.ratio, true, src)} <span class="why" data-length-bound="${esc(lb.check ?? '')}"${tip(why)}>하한 · ${esc(nm)}</span>`
+    + (ref !== null ? ` ${refRatio(ref, ASSUMED_REF_WHY)}` : '');
 }
 
 /**

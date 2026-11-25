@@ -20,7 +20,7 @@
  * 제품 표로 통째로 SI 로 바꾼 것(quantity 로) — 줄은 그 자리를 가리키기만 한다.
  */
 import { api, last, mcp, type LastEntry } from './bridge';
-import { utilInvalid, utilShown } from './format';
+import { lengthAssumed, lengthBoundFailure, utilInvalid, utilShown, type LengthBound } from './format';
 import { loadRecords } from './records';
 import { loadChanges } from './changes';
 import { loadRecordsWork, prefetchOpenQuestions } from './work';
@@ -29,7 +29,7 @@ import { loadDocs } from './docs';
 import { loadDamage } from './damage';
 import { loadAlts } from './alts';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
-import { fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
+import { boundCheckName, fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
 
 export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
 export type StageState = 'ok' | 'stale' | 'none' | 'run' | 'unk';
@@ -102,6 +102,12 @@ export interface Run {
   utilization: number | null;
   /** 엔진이 utilization_valid: false 를 달았고 NG 가 아니다 — 이용률은 판정비가 아니다(「판정 없음」) */
   utilInvalid: boolean;
+  /** 엔진 2차: 가정한 길이의 결과가 길이와 상관없는 하한으로 NG — 그때 utilization · governing 은 그 하한의 비 · 항목(format.lengthBoundFailure) */
+  bound: LengthBound | null;
+  /** utilization 이 결과 안에 있는 자리(data-src 꼬리) — 보통 'utilization', 하한이면 length_independent_bound.ratio 등 */
+  utilPath: string;
+  /** 가정한 길이로 낸 이용률(참고값 — 판정비가 아니다). 가정한 길이가 아니면 null */
+  utilRef: number | null;
   governing: string | null;
   rows: CheckRow[];
   /** 퍼린 구간의 검토 지점 */
@@ -298,15 +304,19 @@ function runOf(key: string, scope: Scope, label: string, where: string, us: any,
     if (v && typeof v === 'object' && !Array.isArray(v) && !['region', 'force_model', 'request'].includes(k)) { collect(v, `[${k}] `); }
   }
   const notApplicable: string[] = [];
+  const bound = lengthBoundFailure(us);
   if (!rows.some(r => r.kind === 'na') && us?.distortional_applicable === false) { notApplicable.push('뒤틀림좌굴(§F4 · §E4)'); }
   return {
     key, area: scope, label, where, result: si, us, src,
     overall: us?.pass === true ? true : us?.pass === false ? false : null,
     // 계약 §6.4: utilization_valid: false(NG 아님)면 판정비가 아니다 — 수를 두지 않고 utilInvalid 로(화면은 「판정 없음」)
-    utilization: utilShown(us, si?.utilization),
+    // 엔진 2차: 가정한 길이의 결과가 하한으로 NG 면 판정비 · 지배는 그 하한의 비 · 항목(호스트의 실행 요약 · max_ratio 와 같은 규칙)
+    utilization: bound ? bound.ratio : utilShown(us, si?.utilization),
     utilInvalid: utilInvalid(us),
+    bound, utilPath: bound ? bound.path : 'utilization',
+    utilRef: lengthAssumed(us) && typeof si?.utilization === 'number' ? si.utilization : null,
     // 지배 검토의 이름 — 그 id 의 name_ko(notices.js forPage)
-    governing: typeof us?.governing_check === 'string' ? String(pageOf(us)?.governing_check ?? us.governing_check) : null,
+    governing: bound ? boundCheckName(us, bound) : typeof us?.governing_check === 'string' ? String(pageOf(us)?.governing_check ?? us.governing_check) : null,
     rows, points, neTexts, notChecked: looseList(us?.not_checked, find), notApplicable, warnings, assumptions, scope: scopeNotes,
   };
 }
