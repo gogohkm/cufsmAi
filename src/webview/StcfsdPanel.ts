@@ -381,14 +381,37 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /**
-     * V7-15: AI 가 set_load_case 로 정한 기준응력(model.loadFy)의 「AI 지정」 표지는 파일에 없다 — 다시 열면 화면의 「해석 실행」 은 ① Fy 를 쓴다.
-     * 파일의 loadFy 가 ① Fy 와 다르면 그 사실을 알린다(말없이 적용이 멈추지 않게).
+     * E3: 버린 결과를 다시 만드는 길(열 때의 안내) — run_case_check {what:'member'} 는 부재 검토와 그것이 쓰는 FSM 좌굴값(버렸거나 낡았으면
+     * 다시 준비)을, 좌굴 해석의 보기(곡선 · 모드 · 모델 하중 경우의 get_dsm_values)는 run_analysis 가 되살린다.
+     */
+    static readonly RERUN_GUIDE = ' To recompute: run_case_check {what: \'member\'} re-runs the member check and re-prepares the FSM buckling values it uses '
+        + '(the dropped ones — S-S signature curves with the design Fy); the buckling-analysis view itself (curves, mode shapes, get_dsm_values of the model\'s load case) '
+        + 'comes back with run_analysis; run_case_check {what: \'loads\' | \'lap\' | \'connection\'} re-runs those.';
+
+    /**
+     * V7-15: 옛 파일(E8 앞 — 「AI 지정」 표지 referenceStress 가 없다)의 loadFy 가 ① Fy 와 다르면 그 사실을 알린다 — 그 파일을 다시 열면
+     * 화면의 「해석 실행」 은 ① Fy 를 쓴다(말없이 적용이 멈추지 않게). 표지를 되살린 파일은 부르지 않는다(그 선택은 파일에 있다).
      */
     private static _loadFyNotice(model: any, fy: unknown): string | null {
         const lf = Number(model?.loadFy);
         const f = Number(fy);
         if (!(lf > 0) || !(f > 0) || Math.abs(lf - f) <= 1e-9 * Math.max(1, f)) { return null; }
-        return `The model's reference stress is ${lf} ksi but the material Fy is ${f} ksi — an earlier set_load_case chose it; the choice is not kept in the file, so the screen's analysis run now uses Fy (${f} ksi). Set the load case again to use ${lf} ksi.`;
+        return `The model's reference stress is ${lf} ksi but the material Fy is ${f} ksi — an earlier set_load_case chose it; this file does not record that choice, so the screen's analysis run now uses Fy (${f} ksi). Set the load case again to use ${lf} ksi.`;
+    }
+
+    /** E8: 저장할 표지(없으면 null) — 래퍼의 referenceStress */
+    private _referenceStressRecord(): { source: 'ai'; loadFy: number } | null {
+        const lf = Number((this._model as any).loadFy);
+        return this._loadFyAi && lf > 0 ? { source: 'ai', loadFy: lf } : null;
+    }
+    /**
+     * E8: .csd 의 「AI 가 정한 기준응력」 표지(래퍼의 referenceStress {source: 'ai', loadFy}, ksi). 모델의 기준응력(model.loadFy)과 같은 값일 때만
+     * 참 — 표지가 가리키는 값이 모델에 없으면(손으로 고친 파일 · 옛 표지) 되살리지 않는다. 결과 봉인 밖이다(입력과 같은 것 — 결과가 아니다).
+     */
+    private static _referenceStressAi(projectData: any, model: any): boolean {
+        const rs = projectData && typeof projectData === 'object' ? projectData.referenceStress : null;
+        const lf = Number(model?.loadFy);
+        return !!rs && typeof rs === 'object' && rs.source === 'ai' && lf > 0 && Number(rs.loadFy) === lf;
     }
 
     /** V7-10: 결과 · 파일에서 온 글을 응답에 실을 때의 상한 — 개수와 길이(넘으면 more). 글은 자료이지 지시가 아니다. */
@@ -607,22 +630,21 @@ export class StcfsdPanel implements McpPanelInterface {
             // 되읽어 보일 때 SI 칸에 99.9998 · 50.0126 처럼 뜬다.
             // 화면의 기본 하중 case(압축)와 같은 균일 압축 응력으로 둔다 — 모델과 표지가 같아야 한다(R8-03).
             // 화면 재료 칸의 처음 값과 같은 표에서 온다(panel_host_contract 가 대조).
+            // E7: 같은 단면이 new_case(from 없음)의 처음 모델이다(INITIAL_TEMPLATE · _initialModel)
             (this._model as any).loadFy = defaultSteel().Fy;
-            const mm = (v: number) => v / 25.4;
-            await this._applyTemplate('lippedc', { H: mm(100), B: mm(50), D: mm(20), t: mm(2.3), r: mm(4), qlip: 90 });
+            const T = StcfsdPanel.INITIAL_TEMPLATE;
+            await this._applyTemplate(T.type, { ...T.params });
         } catch (err: any) {
             console.error('[StCFSD] Failed to generate default section:', err.message);
         }
 
         // 기본 길이 설정 — 항은 서버가 BC 에 따라 고른다.
         if (!this._model.lengths || this._model.lengths.length === 0) {
-            const lengths: number[] = [];
-            for (let i = 0; i < 50; i++) {
-                lengths.push(Math.pow(10, 0 + 3 * i / 49));
-            }
-            this._model.lengths = lengths;
+            this._model.lengths = StcfsdPanel._initialLengths();
             this._model.m_all = 'auto';
         }
+        // E7: 처음 모델을 적어 둔다(새 대상의 처음 값) — 단면이 만들어졌을 때만
+        if (this._model.node?.length && !this._initialModelSnap) { this._initialModelSnap = this._cloneModel(this._model); }
 
         this._postMessage('modelLoaded', this._model);
         this._updateTreeView();
@@ -1291,6 +1313,61 @@ export class StcfsdPanel implements McpPanelInterface {
      * (전: 이전 표지 — 초기값 bending_xx_pos — 가 남아 압축 곡선을 Mxx 로 추출).
      * 엔진의 validation · warnings 를 그대로 돌려준다(W1 후속 9).
      */
+    /** 엔진의 템플릿 단면(generate_section 의 답)을 모델에 얹는다 — _applyTemplate 과 처음 모델(E7)이 같이 쓴다. 결과는 지우지 않는다 */
+    private _templateOnto(model: any, sectionType: string, params: any, result: any): { warnings: string[]; roles?: string[]; fy: number } {
+        const warnings: string[] = Array.isArray(result.warnings) ? [...result.warnings] : [];
+        const prevMaxStress = Math.max(0, ...(model.node || []).map((n: number[]) => Math.abs(Number(n?.[7]) || 0)));
+        model.node = result.node;
+        model.elem = result.elem;
+        // K4a: 템플릿 단면의 요소 자리(엔진 element_roles, 요소 순서). 손으로 만든 단면(custom · custom_builder)은 엔진이
+        // 주지 않는다 — 짐작하지 않고 비운다. 요소 수와 맞지 않으면 쓰지 않는다.
+        const roles = Array.isArray(result.element_roles) && result.element_roles.length === result.elem?.length
+            && result.element_roles.every((r: any) => typeof r === 'string') ? [...result.element_roles] : undefined;
+        if (roles) { model.elementRoles = roles; } else { delete model.elementRoles; }
+        delete model.sectionEdited;
+        model.sectionTemplate = sectionType;
+        model.sectionType = this._normalizeSectionType(sectionType);
+        model.sectionParams = { ...(params || {}) };
+        model.cornerRadius = params?.r ?? 0;
+        // 기준응력: 지금 모델의 것(loadFy) → 이전 응력의 최대 |응력|(custom 실하중 뒤). 둘 다 없으면 강종을
+        // 짐작하지 않는다(전: 기본 강종 35.53 ksi 를 넣었다 — Py · My 가 그 강재로 나왔다) — 응력 0 으로 두고
+        // set_load_case 의 fy 를 요구한다(_analyzeModel 이 응력 없는 해석을 거절한다).
+        let fy = Number(model.loadFy);
+        if (!(fy > 0)) { fy = prevMaxStress; }
+        for (const n of model.node) { n[7] = fy > 0 ? fy : 0; }
+        if (fy > 0) {
+            model.loadFy = fy;
+        } else {
+            delete model.loadFy;
+            warnings.push('Reference stress for the template stress distribution is not set (no previous stress) — '
+                + 'call set_load_case with fy before run_analysis; no steel grade is assumed.');
+        }
+        model.loadCase = 'compression';
+        return { warnings, roles, fy };
+    }
+
+    /** 프로그램의 처음 단면(화면 기본값과 같은 것 — H=100mm, B=50mm, D=20mm, t=2.3mm, r=4mm, 립 90°, 기본 강종 Fy) */
+    private static readonly INITIAL_TEMPLATE = { type: 'lippedc', params: { H: 100 / 25.4, B: 50 / 25.4, D: 20 / 25.4, t: 2.3 / 25.4, r: 4 / 25.4, qlip: 90 } } as const;
+    /** 처음 길이(1 – 1000, 로그 50 개 — 항은 서버가 BC 에 따라 고른다) */
+    private static _initialLengths(): number[] {
+        const lengths: number[] = [];
+        for (let i = 0; i < 50; i++) { lengths.push(Math.pow(10, 0 + 3 * i / 49)); }
+        return lengths;
+    }
+    /** E7: 처음 모델(새 패널이 시작하는 것)의 사본 — 처음 뜰 때 적어 둔 것, 없으면(화면이 아직 없다) 같은 길로 지금 만든다 */
+    private _initialModelSnap: StcfsdModel | null = null;
+    private async _initialModel(): Promise<StcfsdModel> {
+        if (this._initialModelSnap) { return this._cloneModel(this._initialModelSnap); }
+        const m: any = createDefaultModel();
+        m.loadFy = defaultSteel().Fy;
+        const T = StcfsdPanel.INITIAL_TEMPLATE;
+        const result = await this._pythonBridge.call('generate_section', { section_type: T.type, params: { ...T.params } });
+        if (!result?.node) { throw new Error('the initial section could not be generated'); }
+        this._templateOnto(m, T.type, { ...T.params }, result);
+        if (!m.lengths || m.lengths.length === 0) { m.lengths = StcfsdPanel._initialLengths(); m.m_all = 'auto'; }
+        return m;
+    }
+
     private async _applyTemplate(sectionType: string, params: any): Promise<any> {
         const result = await this._pythonBridge.call('generate_section', {
             section_type: sectionType,
@@ -1299,34 +1376,7 @@ export class StcfsdPanel implements McpPanelInterface {
         if (!result?.node) {
             return { error: 'generate_section returned no nodes', ...(result || {}) };
         }
-        const warnings: string[] = Array.isArray(result.warnings) ? [...result.warnings] : [];
-        const prevMaxStress = Math.max(0, ...(this._model.node || []).map((n: number[]) => Math.abs(Number(n?.[7]) || 0)));
-        this._model.node = result.node;
-        this._model.elem = result.elem;
-        // K4a: 템플릿 단면의 요소 자리(엔진 element_roles, 요소 순서). 손으로 만든 단면(custom · custom_builder)은 엔진이
-        // 주지 않는다 — 짐작하지 않고 비운다. 요소 수와 맞지 않으면 쓰지 않는다.
-        const roles = Array.isArray(result.element_roles) && result.element_roles.length === result.elem?.length
-            && result.element_roles.every((r: any) => typeof r === 'string') ? [...result.element_roles] : undefined;
-        if (roles) { (this._model as any).elementRoles = roles; } else { delete (this._model as any).elementRoles; }
-        delete (this._model as any).sectionEdited;
-        (this._model as any).sectionTemplate = sectionType;
-        (this._model as any).sectionType = this._normalizeSectionType(sectionType);
-        (this._model as any).sectionParams = { ...(params || {}) };
-        (this._model as any).cornerRadius = params?.r ?? 0;
-        // 기준응력: 지금 모델의 것(loadFy) → 이전 응력의 최대 |응력|(custom 실하중 뒤). 둘 다 없으면 강종을
-        // 짐작하지 않는다(전: 기본 강종 35.53 ksi 를 넣었다 — Py · My 가 그 강재로 나왔다) — 응력 0 으로 두고
-        // set_load_case 의 fy 를 요구한다(_analyzeModel 이 응력 없는 해석을 거절한다).
-        let fy = Number((this._model as any).loadFy);
-        if (!(fy > 0)) { fy = prevMaxStress; }
-        for (const n of this._model.node) { n[7] = fy > 0 ? fy : 0; }
-        if (fy > 0) {
-            (this._model as any).loadFy = fy;
-        } else {
-            delete (this._model as any).loadFy;
-            warnings.push('Reference stress for the template stress distribution is not set (no previous stress) — '
-                + 'call set_load_case with fy before run_analysis; no steel grade is assumed.');
-        }
-        (this._model as any).loadCase = 'compression';
+        const { warnings, roles, fy } = this._templateOnto(this._model, sectionType, params, result);
         this._invalidateAnalysisState('Section template changed', true, { action: 'generate_template' });
         return {
             success: true,
@@ -3326,6 +3376,8 @@ export class StcfsdPanel implements McpPanelInterface {
      * 행위자는 그 해석을 부른 쪽이다(통일안 6.5 · 결정 D4 — AI 의 run_analysis 뒤면 ai). 이 세션에 해석이 없으면 지금의 문맥 그대로
      */
     private _analysisActor: ActorContext | null = null;
+    /** E9: 호스트가 스스로 준비하는 design_dsm 을 일으킨 쪽(run_case_check 를 부른 쪽) — 그 안에서는 _analysisActor 보다 앞선다 */
+    private readonly _dsmCause = new AsyncLocalStorage<ActorContext>();
     /** 지금 요청의 변경 묶음 문맥(handleMcpAction 이 연다) — 그 안에서 적힌 실행 id 를 그 묶음에 */
     private readonly _reqCtx = new AsyncLocalStorage<ChangeContext>();
     /**
@@ -3333,6 +3385,15 @@ export class StcfsdPanel implements McpPanelInterface {
      * 합치기 전의 상태를 담지 않게(요청마다 — 다른 요청 · 변경 묶음의 스냅숏은 지금 상태 그대로)
      */
     private readonly _calcCase = new AsyncLocalStorage<CaseState>();
+    /**
+     * E9: 다른 대상을 열었다 — 앞 대상의 해석을 부른 쪽을 잇지 않는다. 연 쪽(open_case · load_project 의 AI → ai, 화면에서 연 것 → person)이
+     * 열 때 되살린 해석 뒤 화면이 저절로 준비하는 design_dsm 의 행위자다. 문맥이 없으면(VS Code 의 열기 대화상자 밖) 비운다 — 그때는 지금의 문맥
+     */
+    private _noteOpener(): void {
+        const a = currentActor();
+        this._analysisActor = a ? { kind: a.kind, ...(a.client ? { client: a.client } : {}) } : null;
+    }
+
     private _recordRun(kind: RunKind, request: unknown, result: unknown): void {
         if (kind === 'buckling_analysis' || kind === 'signature_ss') {
             const a = currentActor();
@@ -3342,7 +3403,9 @@ export class StcfsdPanel implements McpPanelInterface {
         if (!d || !d.status().case) { return; }
         try {
             const props = (request && typeof request === 'object' && (request as any).props) || (result && typeof result === 'object' && (result as any).props) || undefined;
-            const actor = kind === 'design_dsm' && this._analysisActor ? { actor: { ...this._analysisActor, tool: 'prepare_design_dsm' } } : {};
+            // E9: 자동 design_dsm 의 행위자 = 일으킨 쪽 — run_case_check 를 부른 쪽 → 해석을 부른 쪽 · 대상을 연 쪽(_analysisActor) → 지금의 문맥
+            const dsmBy = kind === 'design_dsm' ? (this._dsmCause.getStore() ?? this._analysisActor) : null;
+            const actor = dsmBy ? { actor: { ...dsmBy, tool: 'prepare_design_dsm' } } : {};
             const cs = this._calcCase.getStore() ?? this._caseKeeper.state;
             const rec = d.onRun(kind, typeof request === 'string' ? request : JSON.stringify(request ?? null), result,
                 { model: this._model, caseState: cs, caseRev: cs.rev, ...(props ? { props } : {}), ...actor });
@@ -3369,8 +3432,11 @@ export class StcfsdPanel implements McpPanelInterface {
     // 편집 상태 밖의 화면 편집은 조용한 2 초, 파일을 열면 기준선(rebase), 밖에서 바뀐 것은 external 한 줄. 다른 행위자가 끼면 지금 묶음을 닫는다.
     // 프로젝트의 쓸 수 있는 대상이면 log/changes 에, 아니면 이 세션의 메모리에만(쓰지 않는다).
     // ════════════════════════════════════════════════════════════════════
-    /** 화면의 메시지 가운데 값 · 모델을 바꾸는 것 */
-    private static readonly PAGE_EDIT_COMMANDS = new Set(['caseEdit', 'updateModel', 'generateTemplate', 'setStress', 'applyStress', 'runAnalysis']);
+    /**
+     * 화면의 메시지 가운데 값 · 모델을 바꾸는 것. invalidateDerivedResults(N-7a): 화면은 칸의 change 를 탭에서 먼저(결과 지움) · 문서에서 나중에
+     * (caseEdit) 받는다 — 지움이 묶음보다 먼저 장부에 적혀 사람 묶음의 invalidated 가 비었다. 지움도 그 편집의 묶음을 연다
+     */
+    private static readonly PAGE_EDIT_COMMANDS = new Set(['caseEdit', 'invalidateDerivedResults', 'updateModel', 'generateTemplate', 'setStress', 'applyStress', 'runAnalysis']);
     /** 스냅숏에 넣는 모델 칸(비교기 differ.ts 가 보는 것만) */
     private static readonly SNAP_MODEL_KEYS = ['sectionTemplate', 'sectionParams', 'sectionEdited', 'node', 'elem', 'prop', 'BC', 'neigs', 'loadCase',
         'loadFy', 'lengths', 'm_all', 'springs', 'constraints', 'GBTcon'];
@@ -5013,9 +5079,14 @@ export class StcfsdPanel implements McpPanelInterface {
                         return { error: `new_case: kind must be roof-purlin, wall-girt, floor-joist, wall-stud or section-only (got '${kind.slice(0, 40)}')` };
                     }
                     const fromCurrent = options?.from === 'current';
-                    const created = d.newCase(String(options?.name ?? ''), kind, (record) => this._newCaseBytes(kind, fromCurrent, record),
+                    // E7: from 이 없으면 프로그램의 처음 모델 + 처음 입력, from 'current' 면 지금 모델 + 지금 입력. 부재 종류가 부재 유형이면 두 길 모두 memberType = kind
+                    const model = fromCurrent ? this._cloneModel(this._model) : await this._initialModel();
+                    const created = d.newCase(String(options?.name ?? ''), kind, (record) => this._newCaseBytes(kind, fromCurrent, model, record),
                         fromCurrent ? this._newCaseSource() : undefined);
-                    return { created: created.name, kind, from: fromCurrent ? 'current' : 'initial values',
+                    return { created: created.name, kind, from: fromCurrent ? 'current' : 'initial',
+                        contents: fromCurrent
+                            ? `a copy of the current model and inputs${kind !== 'section-only' ? `, member type ${kind}` : ''}`
+                            : `the program's initial model (default section and steel) and initial inputs${kind !== 'section-only' ? `, member type ${kind}` : ''}`,
                         note: 'The case file was made in the project; it is not opened — open_case {name} opens it.' };
                 }
                 case 'save_case': {
@@ -5083,18 +5154,24 @@ export class StcfsdPanel implements McpPanelInterface {
         };
     }
 
-    /** new_case 의 .csd 바이트 — 결과 없이(새 대상은 다시 돌린다). 모델은 지금 것, 입력은 지금 것(from current) 또는 처음 값 + 부재 유형 */
-    private _newCaseBytes(kind: string, fromCurrent: boolean, record: { caseId: string; projectId: string }): string {
+    /**
+     * new_case 의 .csd 바이트 — 결과 없이(새 대상은 다시 돌린다). E7: from current 면 지금 모델 · 지금 입력(AI 가 정한 기준응력의 표지도),
+     * 아니면 처음 모델 · 처음 입력. 부재 종류가 부재 유형(section-only 가 아님)이면 두 길 모두 memberType = kind
+     */
+    private _newCaseBytes(kind: string, fromCurrent: boolean, model: StcfsdModel, record: { caseId: string; projectId: string }): string {
         const DSm = require('../../webview/js/designState');
         const st = fromCurrent ? JSON.parse(JSON.stringify(this._caseKeeper.state)) : createCaseState();
-        if (!fromCurrent && kind !== 'section-only' && DSm.fieldMeta('memberType') && !DSm.validateValue('memberType', kind)) { st.inputs.memberType = kind; }
-        const drafts = this._caseKeeper.drafts || modelDrafts(this._model);
+        if (kind !== 'section-only' && DSm.fieldMeta('memberType') && !DSm.validateValue('memberType', kind)) { st.inputs.memberType = kind; }
+        // 모델 칸의 초안: 지금 모델이면 화면이 쥔 것, 처음 모델이면 그 모델에서(앞 대상의 단면 치수를 싣지 않는다)
+        const drafts = fromCurrent ? (this._caseKeeper.drafts || modelDrafts(model)) : modelDrafts(model);
+        const rs = fromCurrent ? this._referenceStressRecord() : null;
         return JSON.stringify({ version: '1.4', format: 'cufsm-section-design', timestamp: new Date().toISOString(),
             resultsEngine: { results_format: StcfsdPanel.RESULTS_FORMAT, protocol_version: this._pythonBridge.selftest?.protocol_version ?? null,
                 python: this._pythonBridge.selftest?.python ?? null, engine_id: this._engineId() },
-            model: this._cloneModel(this._model), derivedStateSignature: this._currentModelSignature(),
+            model: this._cloneModel(model), derivedStateSignature: this._modelSignature(model),
             analysisResult: null, loadAnalysis: null, designResult: null,
-            case: toCaseRecord(st), designInputs: toDesignInputs13(st, drafts), lapResult: null, record }, null, 2);
+            case: toCaseRecord(st), designInputs: toDesignInputs13(st, drafts), lapResult: null, record,
+            ...(rs ? { referenceStress: rs } : {}) }, null, 2);
     }
 
     /** new_case {from: 'current'} 의 원본 — 이름(줄기)과 디스크의 sha256(있으면) */
@@ -6135,6 +6212,20 @@ export class StcfsdPanel implements McpPanelInterface {
                 if (!(Number(fy) > 0)) {
                     return { error: 'prepare_design_dsm needs the design Fy (ksi) to build the reference stress distribution.' };
                 }
+                // E2: 지금 것이 이미 있으면(서명이 같고 필요한 계열이 다 있다) 다시 풀지도 실행 줄을 남기지도 않는다 —
+                // 화면은 해석 뒤마다 · 파일을 열 때마다 준비를 보낸다(실행 줄이 쌓이던 것, N-7b)
+                {
+                    const cur = this._preparedDesignDsm;
+                    if (cur && this._preparedDsmMatchesCurrent(Number(fy)) && requiredFamilies.every((f) => cur[f])) {
+                        this._ledgerClear('design_dsm');
+                        const cases = requiredFamilies.map((f) => StcfsdPanel._dsmLoadCaseOf(f));
+                        return {
+                            success: true, reused: true, member_type: memberType, load_cases: cases, dsm: cur,
+                            warnings: Array.isArray(cur.warnings) ? cur.warnings : [],
+                            message: `The prepared S-S signature-curve FSM values for ${cases.join(', ')} are current for this model and design Fy — reused without recomputing.`,
+                        };
+                    }
+                }
 
                 const baseModel = this._cloneModel(this._model as any);
                 const preparedSignature = this._currentDesignDsmSignature(fy);
@@ -6558,13 +6649,28 @@ export class StcfsdPanel implements McpPanelInterface {
                 this._changes.closeForSwitch(); this._session = null;
                 const discarded = this._caseDiscardNotice('load_project', options?.report_units === 'SI' ? 'SI' : 'US');
                 this._model = { ...this._model, ...check.model };
-                this._loadFyAi = false;
+                // E8: 파일의 「AI 지정」 표지(.csd 래퍼) — 화면의 열기와 같은 규칙
+                this._loadFyAi = StcfsdPanel._referenceStressAi(data && data.model ? data : null, this._model);
+                this._noteOpener();
                 for (const k of ['elementRoles', 'sectionEdited']) {
                     if (!(k in (check.model as any))) { delete (this._model as any)[k]; }
                 }
                 // K4a: 다른 모델의 단일 접합 결과는 이 모델의 것이 아니다 — 함께 지우고 장부에 남긴다.
                 if (this._dropConnection('Project loaded', { action: 'load_project' })) { this._postLedger(); }
                 this._invalidateAnalysisState('Project loaded', true, { action: 'load_project' });
+                // N-3(E1): 장부는 연 파일의 것 — 앞 모델의 줄을 잇지 않고(화면의 열기와 같다), 파일에 있었지만 되살리지 않는 결과를 적는다
+                // (그래야 run_case_check 가 「FSM 좌굴값이 있었다」 를 알고 다시 준비한다)
+                this._ledger.clear();
+                if (data && data.model) {
+                    for (const [kind, k] of [['buckling_analysis', 'analysisResult'], ['load_analysis', 'loadAnalysis'], ['member_design', 'designResult'],
+                        ['design_dsm', 'preparedDesignDsm'], ['lap', 'lapResult']] as Array<[LedgerKind, string]>) {
+                        if (data[k]) {
+                            this._ledgerAdd(kind, 'load_project opens inputs and the model only — the results stored in the file were not restored',
+                                { action: 'load_project' }, data.timestamp ?? null, kind === 'member_design' ? { result_type: this._designResultType(data[k]) } : {});
+                        }
+                    }
+                }
+                this._postLedger();
                 this._postMessage('modelLoaded', this._model);
                 this._updateTreeView();
                 // K2-6 · V7-04: 검토 상태 — 화면의 열기(_loadProjectFile)와 같은 규칙. .csd 면 파일의 입력(표의 키만), 입력 기록이 없는
@@ -6574,7 +6680,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     const hasCase = !!(data && data.model && (data.case || data.designInputs));
                     const mig = migrateProject(hasCase ? data : {});
                     caseWarnings.push(...mig.warnings);
-                    { const n = StcfsdPanel._loadFyNotice(this._model, mig.state.inputs.fy); if (n) { caseWarnings.push(n); } }
+                    if (!this._loadFyAi) { const n = StcfsdPanel._loadFyNotice(this._model, mig.state.inputs.fy); if (n) { caseWarnings.push(n); } }
                     if (!hasCase) { caseWarnings.push('This file has no saved case inputs — every input was reset to its initial value (as when the person opens it).'); }
                     const fu = hasCase ? (data.case?.view?.unitSystem ?? data.designInputs?.unitSystem) : undefined;
                     this._caseKeeper.loadFromFile(mig.state, fu !== 'US' && fu !== 'SI', mig.recordedSources);
@@ -6590,7 +6696,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 // V7-01: AI 가 연 파일의 결과는 되살리지 않는다(입력만) — 다시 계산은 한 번(run_case_check)
                 if (data && ['analysisResult', 'dsm', 'properties', 'loadAnalysis', 'designResult', 'preparedDesignDsm', 'lapResult'].some((k) => data[k])) {
                     caseWarnings.push('The results stored in this file were not restored — load_project opens inputs and the model only; '
-                        + 'nothing from those results is shown, validated or reported. Recompute here with one call: run_case_check.');
+                        + 'nothing from those results is shown, validated or reported.' + StcfsdPanel.RERUN_GUIDE);
                 }
                 return { success: true, filepath: options.filepath, warnings: [...check.warnings, ...caseWarnings],
                     ...(discarded ? { discarded_unsaved_changes: discarded } : {}) };
@@ -7546,7 +7652,7 @@ ${inner}
     /** K2-5: run_case_check {what} — 화면 단추와 같은 길(상태로 만든 본문). 상태에 쓰지 않는다. */
     private async _caseRunCheck(options: any): Promise<any> {
         const what = String(options?.what || '');
-        const mt = this._caseKeeper.state.inputs.memberType;
+        const mt = String(this._caseKeeper.state.inputs.memberType ?? '');
         let build: (st: any, ctx: any) => BuiltRequest;
         let action: string;
         let tool: string;
@@ -7562,12 +7668,81 @@ ${inner}
         const h = this._caseRequest(build, await this._caseHostProps());
         if (h.error) { return { error: h.error }; }
         if (h.missing.length || !h.data) { return { error: `run_case_check ${what}: inputs are blank — ${h.missing.join(', ')}. Set them with set_case_inputs (or ask the person).` }; }
+        // N-3(E1): 이 대상에 FSM 좌굴값이 있었는데 지금 것이 아니면(열 때 버림 · 변경으로 낡음) 설계용 좌굴값을 먼저 다시 준비한다
+        const prep = what === 'member' ? await this._caseEnsureDesignDsm(mt, h.data.Fy) : null;
         const result = await this._pageAction({ action, ...h.data });
         if (result && typeof result === 'object' && !Array.isArray(result)) {
+            const bv = what === 'member' && !result.error ? this._caseBucklingValues(mt, result, prep) : null;
             return { ...result, case_check: { what, tool, rev: this._caseKeeper.state.rev,
-                note: 'Computed from the inputs shown on the screen (the same request as the screen button).' } };
+                note: 'Computed from the inputs shown on the screen (the same request as the screen button).',
+                ...(bv ? { buckling_values: bv } : {}) } };
         }
         return result;
+    }
+
+    /** 부재 유형이 쓰는 DSM 하중 계열(화면의 자동 준비와 같다 — 자동 계산 모드는 휨, 인장은 없음) */
+    private static _dsmFamiliesOf(memberType: string): Array<'P' | 'Mxx'> {
+        if (memberType === 'tension') { return []; }
+        if (memberType === 'compression') { return ['P']; }
+        if (memberType === 'combined') { return ['P', 'Mxx']; }
+        return ['Mxx'];
+    }
+    private static _dsmLoadCaseOf(family: 'P' | 'Mxx'): string { return family === 'P' ? 'compression' : 'bending_xx_pos'; }
+
+    /**
+     * N-3(E1): run_case_check {what:'member'} 이 부재 검토 앞에 — 설계용 좌굴값이 지금 것이 아니고(없음 · 서명이 다름 · 필요한 계열이 없음),
+     * 이 대상에 FSM 좌굴값이 있었으면(준비된 값 · 해석 결과가 있거나, 장부에 design_dsm · buckling_analysis 가 버려짐 · 낡음으로 있다)
+     * prepare_design_dsm 과 같은 것을 돌린다(설계 Fy — 본문의 Fy, ksi). 그 실행의 행위자는 run_case_check 를 부른 쪽(E9).
+     * FSM 이 한 번도 없던 대상은 돌리지 않는다(해석식 + 가정 표시 — 화면의 「설계 검토 실행」 과 같다). 실패해도 검토는 막지 않는다 — 까닭을 돌려준다.
+     */
+    private async _caseEnsureDesignDsm(memberType: string, fy: unknown): Promise<{ prepared: boolean; error?: string; skipped?: string } | null> {
+        const families = StcfsdPanel._dsmFamiliesOf(memberType);
+        if (!families.length || !(Number(fy) > 0)) { return null; }
+        const cur = this._preparedDesignDsm;
+        if (cur && this._preparedDsmMatchesCurrent(Number(fy)) && families.every((f) => cur[f])) { return null; }
+        const hadFsm = !!cur || !!this._lastAnalysisResult
+            || [...this._ledger.values()].some((e) => e.kind === 'design_dsm' || e.kind === 'buckling_analysis');
+        if (!hadFsm) { return { prepared: false, skipped: 'no-fsm' }; }
+        const a = currentActor();
+        const cause: ActorContext = a ? { kind: a.kind, ...(a.client ? { client: a.client } : {}) } : { kind: 'program' };
+        try {
+            const r = await this._dsmCause.run(cause, () => this._pageAction({ action: 'prepare_design_dsm',
+                member_type: isCalcMode(memberType) ? 'flexure' : memberType, Fy: Number(fy) }));
+            if (!r || r.error) { return { prepared: false, error: String(r?.error ?? 'no result') }; }
+            // 끼운 화면의 상태 줄 · 설계 탭 띠(화면이 해석 뒤 준비했을 때와 같은 알림)
+            this._postMessage('designDsmPrepared', r);
+            return { prepared: r.reused !== true };
+        } catch (e: any) {
+            return { prepared: false, error: String(e?.message || e) };
+        }
+    }
+
+    /** N-3(E1): run_case_check 의 답 — 부재 검토가 쓴 좌굴값이 무엇이었나(수는 싣지 않는다 — 수는 결과의 dsm 에) */
+    private _caseBucklingValues(memberType: string, result: any, prep: { prepared: boolean; error?: string; skipped?: string } | null): any {
+        const families = StcfsdPanel._dsmFamiliesOf(memberType);
+        const failNote = prep?.error ? ` Preparing the FSM buckling values failed (${StcfsdPanel._capText(prep.error)}).` : '';
+        if (isCalcMode(memberType)) {
+            return { source: 'fsm-in-check', load_cases: ['bending_xx_pos', 'bending_xx_neg'],
+                note: 'The purlin chain solves its own S-S signature-curve FSM analyses (positive and negative bending) with the design Fy.' + failNote };
+        }
+        if (!families.length) { return { source: 'not-needed', note: 'A tension member uses no buckling values.' }; }
+        const by: Record<string, string> = result?.dsm_basis_by_family && typeof result.dsm_basis_by_family === 'object' ? result.dsm_basis_by_family : {};
+        const fsm = families.filter((f) => by[f] === 'prepared' || by[f] === 'current_analysis');
+        const loadCases = fsm.map((f) => by[f] === 'current_analysis' ? String(this._lastAnalysisResult?._meta?.load_type ?? StcfsdPanel._dsmLoadCaseOf(f)) : StcfsdPanel._dsmLoadCaseOf(f));
+        const analytical = 'no FSM buckling analysis exists for this case — run_analysis (after set_load_case for the member\'s load family) followed by run_case_check gives FSM-based values.';
+        if (fsm.length === 0) {
+            return { source: 'analytical', note: `Elastic buckling values (Pcrl/Pcrd, Mcrl/Mcrd) came from the analytical formulas: ${analytical}` + failNote };
+        }
+        const preparedNow = prep?.prepared === true && fsm.some((f) => by[f] === 'prepared');
+        if (fsm.length < families.length) {
+            const rest = families.filter((f) => !fsm.includes(f)).map((f) => f === 'P' ? 'compression' : 'strong-axis bending');
+            return { source: 'mixed', load_cases: loadCases, by_family: Object.fromEntries(families.map((f) => [f, by[f] ?? 'none'])),
+                note: `FSM values for ${loadCases.join(', ')}; ${rest.join(' / ')} from the analytical formulas.` + failNote };
+        }
+        return { source: preparedNow ? 'fsm-prepared-now' : 'fsm-current', load_cases: loadCases,
+            note: preparedNow
+                ? 'The earlier FSM buckling values were dropped or stale — S-S signature-curve FSM analyses with the design Fy were prepared again before this check.'
+                : 'FSM buckling values that are current for this model and design Fy were used.' };
     }
 
     /** K2: 상태 전체를 화면에(칸에 얹는다 — 복원과 같은 길). */
@@ -8613,6 +8788,8 @@ ${inner}
             designInputs: designInputsOut,
             lapResult: lapOut,
         };
+        // E8: AI 가 set_load_case 로 정한 기준응력(사람이 ① Fy 를 고치기 전) — 다시 열어도 화면의 「해석 실행」 이 그 값으로
+        { const rs = this._referenceStressRecord(); if (rs) { projectData.referenceStress = rs; } }
         // R1-2: 프로젝트의 대상이면 최상위 record 키(대상 id · 프로젝트 id) — 프로젝트 밖이면 없다(.csd 의 모양 그대로)
         { const rk = opts.neutral ? null : this._records?.recordKey(fsPath); if (rk) { projectData.record = rk; } }
 
@@ -8773,7 +8950,7 @@ ${inner}
                 sealParts(fileEngineId, projectData.model, migrateProject(projectData).state, projectData))
             : null;
         const resultsCurrent = engineCurrent && (!seal || seal.ok);
-        const RERUN = ' Inputs were kept and every result was dropped — nothing from them is shown, validated or reported. Run the checks again here (one call: run_case_check).';
+        const RERUN = ' Inputs were kept and every result was dropped — nothing from them is shown, validated or reported.' + StcfsdPanel.RERUN_GUIDE;
         if (!resultsCurrent && hadResults) {
             if (seal && !seal.ok) {
                 warnings.push(seal.cause === 'inputs_differ'
@@ -8806,7 +8983,9 @@ ${inner}
             'elementRoles', 'sectionEdited']) {
             if (!(k in (check.model as any))) { delete merged[k]; }
         }
-        this._loadFyAi = false;
+        // E8: AI 가 정한 기준응력의 표지 — 파일에 있고(referenceStress) 그 값이 모델의 기준응력과 같을 때만 되살린다
+        this._loadFyAi = StcfsdPanel._referenceStressAi(projectData, merged);
+        this._noteOpener();
         this._model = merged;
         this._postMessage('modelLoaded', this._model);
         this._updateTreeView();
@@ -8852,7 +9031,7 @@ ${inner}
         // 사람이 연 길(대화상자 · 독립 프로그램의 열기) — AI 의 load_project 는 따로
         this._setCaseFile(fsPath, 'person', 'opened');
         warnings.push(...mig.warnings);
-        { const n = StcfsdPanel._loadFyNotice(this._model, mig.state.inputs.fy); if (n) { warnings.push(n); } }
+        if (!this._loadFyAi) { const n = StcfsdPanel._loadFyNotice(this._model, mig.state.inputs.fy); if (n) { warnings.push(n); } }
         const fileUnitSystem = projectData.case?.view?.unitSystem ?? projectData.designInputs?.unitSystem;
         this._caseKeeper.loadFromFile(mig.state, fileUnitSystem !== 'US' && fileUnitSystem !== 'SI', mig.recordedSources);
         // u33: 파일의 하중 해석은 파일의 입력과 함께 — 그 뒤의 사람 · AI 값은 자동 채움이 덮지 않는다

@@ -56,10 +56,10 @@ export function openCase(server: McpServer, io: RecordToolIo): void {
 
 export function newCase(server: McpServer, io: RecordToolIo): void {
     server.tool("new_case",
-        "Make a new review case file in the open project (not opened — open_case opens it). from='current' copies the current model and inputs, otherwise the current model with initial inputs and the member type of kind. No results are copied. An existing name is an error.",
+        "Make a new review case file in the open project (not opened — open_case opens it). Without from: the program's initial model (the default section and steel a fresh StCFSD starts with) and initial inputs — nothing of the open case is carried over. from='current': a copy of the current model (section, material, reference stress, analysis conditions) and the current inputs. In both, a member kind (not section-only) sets the member type to kind. No results are copied. An existing name is an error.",
         { name: NAME.describe("Case name — 1–60 characters, no path characters"),
-          kind: z.enum(["roof-purlin", "wall-girt", "floor-joist", "wall-stud", "section-only"]).describe("Member kind of the case"),
-          from: z.enum(["current"]).optional().describe("'current': copy the current model and inputs") },
+          kind: z.enum(["roof-purlin", "wall-girt", "floor-joist", "wall-stud", "section-only"]).describe("Member kind of the case (a member kind also sets the case's member type)"),
+          from: z.enum(["current"]).optional().describe("'current': copy the current model and inputs; omit for the program's initial model and inputs") },
         async (args) => io.post({ action: "new_case", name: args.name, kind: args.kind, ...(args.from ? { from: args.from } : {}) }).then(io.reply));
 }
 

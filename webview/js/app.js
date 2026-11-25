@@ -276,6 +276,9 @@
             case 'resultsCleared':
                 // 호스트: 다른 프로젝트를 열기 직전 — 이전 프로젝트의 결과를 모두 지운다(V4-01).
                 clearStaleResults('all', (msg.data && msg.data.reason) || 'project opened');
+                // N-4: 앞 대상의 상태 줄(「설계용 FSM 준비 완료: …」 등) · 설계 탭 띠의 덮어쓴 글을 비운다 — 처음 화면과 같게
+                setStatus('', '');
+                updateDesignDsmStatus();
                 sendTreeUpdate();
                 break;
             case 'propertiesResult':
