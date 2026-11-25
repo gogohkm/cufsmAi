@@ -1,6 +1,6 @@
 {
  "about": "K2 phase 0 golden — gui-connection. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-23",
+ "recorded": "2026-11-25",
  "entries": [
   {
    "id": "screw.engine",
@@ -60,9 +60,9 @@
    "id": "bolt.shown",
    "expect": "pin",
    "value": {
-    "connection-result": "볼트 접합 (§J3) 강도 결과\nBolt Connection §J3\nPu\nt₁=2.30\nt₂=2.30\nd=12.0 ×2\nRn=41.07 kN\nφRn=26.70 kN\nDCR=0.374\n▶ 전단 파단\n공칭강도 Rn 41.07 kN\n설계강도 (φRn) 26.70 kN\n지배 모드 전단 파단\n판정 근거 (전단) 전단 파단 · 26.70 kN\n판정 근거 (인장) 볼트 인장 · 47.41 kN\n전단 방향 지배 전단 파단 · 26.70 kN\n인장 방향 지배 볼트 인장 · 47.41 kN\n판정 ⚠ 판정 없음 (미검토) — 미평가 한계상태 입력 필요\n이용률 37.5% (판정 없음)\n평가하지 못한 항목 (판정 없음의 원인)\n• Tension Rupture (J6.2) — 부재 총단면적 Ag 또는 폭 width 미입력\n• Block Shear (J6.3) — 게이지 g(하중직각 패스너 간격) 미입력\n경고 (값 또는 판정에 영향)\n• Table J3.3.1-2 mf=0.75 (단전단/이중전단 바깥 판, 표준공, 와셔 없음 또는 한쪽(와셔·전단면 미지정 시 최소값))\n• Sheet Pull-over at Bolt Head (App. A J3.4) 미평가: 볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력\n• Tension Rupture (J6.2) 미평가: 부재 총단면적 Ag 또는 폭 width 미입력\n• Block Shear (J6.3) 미평가: 게이지 g(하중직각 패스너 간격) 미입력\n가정\n• J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.\n• J6: 판 1(t=2.30 mm, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요\n• J3.3.1: 지압은 얇은 판(t_min, Fu 하나)으로 검토 — 두 판 Fu 가 같으면 C·t 가 t 에 따라 증가하므로 얇은 판이 지배한다(Table J3.3.1-1). 판 강도가 다르면 낮은 Fu 를 넣으세요.\n• J3: hole_type 미입력 — 표준공(Table J3-1) 가정. 과대·슬롯 구멍이면 C·mf 가 작아 비보수\n• 인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)\n참고 — 이 하중 방향에는 해당하지 않는 미평가 항목: Sheet Pull-over at Bolt Head (App. A J3.4) — 볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력\n한계상태 (Limit States)\n모드 Rn φRn 지배?\n볼트 지압 49.68 29.81\n볼트 전단 37.46 28.09\n볼트 인장 63.21 47.41\n전단 파단 41.07 26.70 ★\n상세 수식 문자열은 US 단위(kips, in, ksi) 기준으로 표기됩니다."
+    "connection-result": "볼트 접합 (§J3) 강도 결과\nBolt Connection §J3\nPu\nt₁=2.30\nt₂=2.30\nd=12.0 ×2\nRn=41.08 kN\nφRn=26.70 kN\nDCR=0.374\n▶ 전단 파단\n공칭강도 Rn 41.08 kN\n설계강도 (φRn) 26.70 kN\n지배 모드 전단 파단\n판정 근거 (전단) 전단 파단 · 26.70 kN\n판정 근거 (인장) 볼트 인장 · 47.41 kN\n전단 방향 지배 전단 파단 · 26.70 kN\n인장 방향 지배 볼트 인장 · 47.41 kN\n판정 ⚠ 판정 없음 (미검토) — 미평가 한계상태 입력 필요\n이용률 37.5% (판정 없음)\n평가하지 못한 항목 (판정 없음의 원인)\n• Tension Rupture (J6.2) — 부재 총단면적 Ag 또는 폭 width 미입력\n• Block Shear (J6.3) — 게이지 g(하중직각 패스너 간격) 미입력\n경고 (값 또는 판정에 영향)\n• Table J3.3.1-2 mf=0.75 (단전단/이중전단 바깥 판, 표준공, 와셔 없음 또는 한쪽(와셔·전단면 미지정 시 최소값))\n• Sheet Pull-over at Bolt Head (App. A J3.4) 미평가: 볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력\n• Tension Rupture (J6.2) 미평가: 부재 총단면적 Ag 또는 폭 width 미입력\n• Block Shear (J6.3) 미평가: 게이지 g(하중직각 패스너 간격) 미입력\n가정\n• J1: 접합부 편심은 고려하지 않음(동심 하중 가정). 편심이 있으면 별도 검토.\n• J6: 판 1(t=2.30 mm, 입력한 e·폭·Fu) 하나만 검토 — 다른 판의 끝단 거리·폭이 더 작거나 강도가 낮으면 j6_part2 로 그 판도 검토하세요\n• J3.3.1: 지압은 얇은 판(t_min, Fu 하나)으로 검토 — 두 판 Fu 가 같으면 C·t 가 t 에 따라 증가하므로 얇은 판이 지배한다(Table J3.3.1-1). 판 강도가 다르면 낮은 Fu 를 넣으세요.\n• J3: hole_type 미입력 — 표준공(Table J3-1) 가정. 과대·슬롯 구멍이면 C·mf 가 작아 비보수\n• 인장 소요강도 미입력 — 인장·조합 한계상태는 판정에 쓰지 않음 (상향 인장이 있으면 Tu 를 입력)\n참고 — 이 하중 방향에는 해당하지 않는 미평가 항목: Sheet Pull-over at Bolt Head (App. A J3.4) — 볼트 인장 시 머리·너트·와셔에서 판 풀오버를 검토해야 하나 기준식이 없음 — dw(머리·와셔 접촉 직경, A1.2(c) 대체식) 또는 Pnov_bolt 미입력\n한계상태 (Limit States)\n모드 Rn φRn 지배?\n볼트 지압 49.68 29.81\n볼트 전단 37.46 28.09\n볼트 인장 63.21 47.41\n전단 파단 41.08 26.70 ★\n상세 수식 문자열은 US 단위(kips, in, ksi) 기준으로 표기됩니다."
    },
-   "reason": "Engine 6fa25f7: connection rows (limit_states · detailing_checks · interaction_checks) carry check_id and name_ko — the tables show the Korean names, the governing ★ is matched by id.",
+   "reason": "2026-11-25 남은 작업 H-A: 엔진 단계 E — 엔진 자신의 설계 서명곡선 격자 · 하중 해석(구간 Ly · Cb)의 값이 조금 움직였고(강도 0.09 % 안), 랩 패스너 무리는 힘 분배를 밝히지 않으면 판정 없음(패스너 DCR 줄이 빠짐)",
    "flipped": [
     {
      "step": "K4b",
@@ -87,6 +87,14 @@
       "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
      },
      "date": "2026-11-24"
+    },
+    {
+     "step": "H-A",
+     "from": {
+      "expect": "pin",
+      "reason": "Engine 6fa25f7: connection rows (limit_states · detailing_checks · interaction_checks) carry check_id and name_ko — the tables show the Korean names, the governing ★ is matched by id."
+     },
+     "date": "2026-11-25"
     }
    ]
   },

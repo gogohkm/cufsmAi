@@ -18,7 +18,7 @@
     //          'model'  호스트 모델이 주인(해석 조건 · 템플릿 · E/ν/G) — 상태에 두 벌로 두지 않는다
     //          'view'   보기 설정(결과에 쓰이지 않음)
     //   group  묶음(재료 · 부재 · 하중 · 데크 · 설계 · 웹 크리플링 · 옵션 · 소성 · 진동 · 랩 · 접합 · 템플릿 · 해석)
-    //   def    처음 값 — **지금 화면의 처음 값 그대로**(손으로 정한 공학 기본값 39 개 포함 — 2026-11-25 에 길이 넷을 비우고
+    //   def    처음 값 — **지금 화면의 처음 값 그대로**(손으로 정한 공학 기본값 40 개 포함 — 하중조합 기준 asce7_10 이 더해졌다(결정 R4). 2026-11-25 에 길이 넷을 비우고
     //          냉간가공을 꺼 44 → 39. 화면의 HTML 과 함께 바꾼다).
     //          단위 있는 수는 SI 화면에 적힌 수(화면이 SI 로 시작하므로) — US 값은 defaultValue() 가 화면과 같은 식
     //          (표시값 / 계수)으로 만든다. null = 빈 칸. model 키는 null(모델에서 온다)
@@ -62,6 +62,8 @@
         ['loadL', 'load-L-psf', 'pressure', 'num', _C('loads', 0, 'load')],
         ['chkPatternLoading', 'chk-pattern-loading', null, 'chk', _C('loads', true, 'load')],
         ['chkLrReduced', 'chk-lr-reduced', null, 'chk', _C('loads', false, 'load')],
+        // 결정 R4: 하중조합의 기준(처음 값 ASCE 7-10 — 지금까지의 결과 그대로). 처음 값이면 요청에 넣지 않는다(load_combination_standard)
+        ['loadComboStandard', 'select-load-combo-standard', null, 'sel', _C('loads', 'asce7_10', 'load', { opts: ['asce7_10', 'asce7_22', 'kds_41_12_00'] })],
         ['spanIxIn4', 'span-Ix-list', 'inertia', 'list', _C('loads', null, 'load')],
         // 데크 · 가새 · §I6.2.1
         ['deckType', 'select-deck-type', null, 'sel', _C('deck', 'none', 'load', { opts: ['through-fastened', 'standing-seam', 'none'] })],
@@ -160,6 +162,8 @@
         ['connMu', 'conn-Mu', 'moment', 'num', _C('lap', null, 'connection')],
         ['connVu', 'conn-Vu', 'force', 'num', _C('lap', null, 'connection')],
         ['connZeroDemandStated', 'chk-conn-zero-demand', null, 'chk', _C('lap', false, 'connection')],
+        // 결정 R2: 랩 패스너 힘 분배(모든 패스너가 고르게 — 자체 가정)로 판정함을 사람이 밝힌다. 밝혔을 때만 넣는다(lap_force_model_confirmed)
+        ['lapForceModelConfirmed', 'chk-lap-force-model-confirmed', null, 'chk', _C('lap', false, 'connection')],
         ['connFastenerDia', 'conn-fastener-dia', 'length', 'num', _C('lap', 4.8, 'connection')],
         ['connNRows', 'conn-n-rows', null, 'num', _C('lap', 2, 'connection')],
         ['connEdgeDist', 'conn-edge-dist', 'length', 'num', _C('lap', null, 'connection')],
@@ -633,10 +637,80 @@
         };
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // B1(2026-11-25): 「화면이 적는 자리에서 같은가」 — 호스트의 메아리 규칙(caseKeeper)과 K2 불변식(그림자 대조 · 상태 = 칸)이 쓰는 한 함수.
+    // 화면은 단위 있는 칸에 표시 단위의 유효 숫자 12 자리를 적는다(_applyValues · restoreDesignInputs · app.js refreshUnits · stressField 의
+    // String(Number(x.toPrecision(12)))). 쉼표 목록은 상태를 얹을 때(_applyValues) 6 자리. 그 자리에서 같은 두 수는 같은 수로 본다 —
+    // 그보다 큰 차이 · 형의 차이 · 빠진 · 남는 키(strict)는 다르다.
+    // ─────────────────────────────────────────────────────────────────────────
+    const SHOWN_DIGITS = 12;
+    const SHOWN_DIGITS_LIST = 6;
+    /** US 내부값 → 그 단위계의 화면 글(화면의 toDisplay 와 같은 식) */
+    function shownText(v, unit, sys, digits) {
+        const f = unit && sys === 'SI' ? UNIT_FACTORS[unit] : undefined;
+        return String(Number((typeof f === 'number' ? v * f : v).toPrecision(digits || SHOWN_DIGITS)));
+    }
+    const _ANY_UNIT = [null].concat(Object.keys(UNIT_FACTORS));
+    /**
+     * 두 값이 화면이 적는 자리에서 같은가. opts: unit — 단위 종류(null = 단위 없음, undefined = 모름: 엔진 본문처럼 키의 단위를 모를 때는
+     * US 글 또는 어느 단위 계수의 SI 글에서 같으면 같다), systems — 견줄 단위계(기본 둘 다), digits — 자리(기본 12),
+     * strict — 빠진 키와 null 을 가르고 키의 차례도 본다(불변식 · 대조. 메아리 규칙은 빈 칸 = null 로 본다).
+     */
+    function shownSame(a, b, opts) {
+        const o = opts || {};
+        const systems = o.systems || ['SI', 'US'];
+        const digits = o.digits || SHOWN_DIGITS;
+        if (!o.strict) { if (a === undefined) { a = null; } if (b === undefined) { b = null; } }
+        if (typeof a === 'number' && typeof b === 'number') {
+            if (a === b) { return true; }
+            if (!isFinite(a) || !isFinite(b)) { return false; }
+            if (o.unit !== undefined) { return systems.some((s) => shownText(a, o.unit, s, digits) === shownText(b, o.unit, s, digits)); }
+            // 단위를 모르는 키(엔진 본문): 한쪽이 어느 단위계 · 단위의 화면 글을 다시 읽은 수(그 자리의 격자 위)일 때만, 그 단위로 견준다 —
+            // 화면이 적는 자리의 한 칸 차이(12 째 자리의 1)가 다른 단위의 격자에서 우연히 같아 보이는 것을 받지 않는다
+            const onGrid = (v, u, s) => {
+                const f = u && s === 'SI' ? UNIT_FACTORS[u] : 1;
+                return Number((v * f).toPrecision(digits)) / f === v;
+            };
+            return _ANY_UNIT.some((u) => systems.some((s) => (u !== null || s === 'US') && (onGrid(a, u, s) || onGrid(b, u, s))
+                && shownText(a, u, s, digits) === shownText(b, u, s, digits)));
+        }
+        if (Array.isArray(a) || Array.isArray(b)) {
+            return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => shownSame(x, b[i], o));
+        }
+        if (a && b && typeof a === 'object' && typeof b === 'object') {
+            const ka = Object.keys(a), kb = Object.keys(b);
+            // strict: 키의 차례까지(엔진에 가는 글의 차례 — 바이트 규칙이 잡던 것)
+            if (o.strict && ka.join('\u0000') !== kb.join('\u0000')) { return false; }
+            const ks = new Set(ka.concat(kb));
+            for (const k of ks) { if (!shownSame(a[k], b[k], o)) { return false; } }
+            return true;
+        }
+        return JSON.stringify(a) === JSON.stringify(b);
+    }
+    /**
+     * 입력 묶음(collectDesignInputs 의 모양 — 표의 키 · 경간 표 · unitSystem) 두 개의 키 가운데 화면이 적는 자리에서 다른 것.
+     * 단위는 표(FIELDS)에서, 경간 · 랩 길이는 length_ft, 목록은 6 자리. 빠진 · 남는 키도 다르다.
+     */
+    function shownDiffKeys(a, b) {
+        const ks = Array.from(new Set(Object.keys(a || {}).concat(Object.keys(b || {}))));
+        return ks.filter((k) => {
+            if (!(k in (a || {})) || !(k in (b || {}))) { return true; }
+            const m = fieldMeta(k);
+            const unit = _SPAN_KEYS.includes(k) ? (k === 'supports' ? null : 'length_ft') : (m ? m.unit || null : null);
+            const digits = m && m.kind === 'list' ? SHOWN_DIGITS_LIST : SHOWN_DIGITS;
+            return !shownSame(a[k], b[k], { unit, digits, strict: true });
+        });
+    }
+
     return {
         FIELDS,
         UNIT_FIELDS,
         VIEW_ONLY_CONTROLS,
+        SHOWN_DIGITS,
+        SHOWN_DIGITS_LIST,
+        shownText,
+        shownSame,
+        shownDiffKeys,
         invalidatesResults,
         collectDesignInputs,
         restoreDesignInputs,

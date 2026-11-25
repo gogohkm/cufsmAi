@@ -235,6 +235,16 @@ function unroundedFor(us, p) {
   }
   return null;
 }
+/**
+ * B3: 줄인 응답(detail checks · summary)은 display_unrounded 묶음을 뺄 수 있다(엔진이 중첩 묶음까지 실은 뒤 SMALL_BLOCK 을 넘는다) —
+ * 그때는 같은 도구의 full US 결과에서 같은 자리의 반올림 전 값을 찾는다(그 자리의 표시 값이 같을 때만).
+ */
+let RAW_FULL_US = null;
+function unroundedOf(us, p) {
+  const own = unroundedFor(us, p);
+  if (own !== null || !RAW_FULL_US) { return own; }
+  return at(RAW_FULL_US, p) === at(us, p) ? unroundedFor(RAW_FULL_US, p) : null;
+}
 /** displayTol(p) → SI 표시 반올림의 허용(그 칸이 표시 값이면) — 그때는 SI = 바꾼 US 표시 값 ± 그 반올림 */
 const TEXT_SI = { n: 0 };
 function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
@@ -259,11 +269,16 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
     assert(ls.has(p), `${tool}: SI result lost ${p}`);
     const s = ls.get(p);
     if (typeof v === 'number') {
-      if (v === 0) { assert.strictEqual(s, 0, `${tool}: ${p} 0 → ${s}`); continue; }
+      if (v === 0) {
+        // B3: 표시 반올림이 0 으로 만든 값(하중 해석 기록의 3.9e-14 등)의 SI 는 그 반올림 전 값의 변환 — 그 밖의 0 은 0
+        const raw0 = unroundedOf(us, p);
+        if (raw0 !== null && raw0 !== 0) { assert([1, ...FACTORS].some((f) => Math.abs(s / (raw0 * f) - 1) < 1e-12), `${tool}: ${p} 0 (raw ${raw0}) → ${s}`); continue; }
+        assert.strictEqual(s, 0, `${tool}: ${p} 0 → ${s}`); continue;
+      }
       const ratio = s / v;
       const tolD = displayTol(p);
       // 검증 문서 4.7: 표시용으로 반올림한 위쪽 값은 SI 에서 반올림 전 값(display_unrounded)의 변환 — design_checks 와 같은 수
-      const raw = unroundedFor(us, p);
+      const raw = unroundedOf(us, p);
       const ok = Math.abs(ratio - 1) < 1e-12 || FACTORS.some((f) => Math.abs(ratio / f - 1) < 1e-12)
         || (raw !== null && [1, ...FACTORS].some((f) => Math.abs(s / (raw * f) - 1) < 1e-12))
         || (tolD !== null && [1, ...FACTORS].some((f) => Math.abs(s - v * f) <= tolD));
@@ -451,7 +466,7 @@ function checkDesignSummary(tag, level, s, fullRaw) {
       assert(/force_model\.description \/ known_limitations text/.test(s.more) && /detail:'checks'/.test(s.more), `${tag}: more says where the force model text is`);
       continue;
     }
-    assert.deepStrictEqual(s[k], full[k], `${tag} keeps ${k} in full`);
+    assert.deepStrictEqual(s[k], noRaw(full[k]), `${tag} keeps ${k} in full`);
   }
   if (full.display_rounding) { assert.strictEqual(s.display_rounding.note, full.display_rounding.note, `${tag}: display rounding note`); }
   assert(/get_design_check/.test(s.more) && /detail:'full'/.test(s.more), `${tag}: more says where the rest is`);
@@ -483,7 +498,7 @@ function checkDesignSummary(tag, level, s, fullRaw) {
   if (full.fastener_design) {
     const fd = s.fastener_design;
     assert.deepStrictEqual(fd.pass, full.fastener_design.pass, `${tag}: fastener verdict`);
-    for (const k of NOTICES) { if (k in full.fastener_design) { assert.deepStrictEqual(fd[k], full.fastener_design[k], `${tag}.fastener_design keeps ${k}`); } }
+    for (const k of NOTICES) { if (k in full.fastener_design) { assert.deepStrictEqual(fd[k], noRaw(full.fastener_design[k]), `${tag}.fastener_design keeps ${k}`); } }
     // V6-10: 패스너 줄은 모두 남는다 — 위 목록으로 옮겨 실린 id(part_of fastener_design)만 거기서 한 번
     const moved = new Set(dc.filter((c) => c.part_of === 'fastener_design').map((c) => c.id));
     const fdIds = (level === 'summary' ? fd.check_lines : fd.design_checks).map((c) => c.id);
@@ -493,6 +508,9 @@ function checkDesignSummary(tag, level, s, fullRaw) {
   }
 }
 
+// B3: 줄인 응답(summary · checks)은 display_unrounded 사본을 싣지 않는다(SI 는 그 값으로 이미 바꿨다) — 맞댈 때 full 에서도 뺀다
+const noRaw = (v) => (Array.isArray(v) ? v.map(noRaw) : (v && typeof v === 'object'
+  ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== 'display_unrounded').map(([k, x]) => [k, noRaw(x)])) : v));
 // 엔진 e42adf1: 요약은 표시 값 — 하중 해석 기록의 반올림 전 값(unrounded · *_unrounded)은 빼고, 구간 줄의 수는 display_rounding 의 규칙.
 // 요약은 그 규칙으로 바꾼 full 과 맞댄다(같은 것끼리); checks · full 은 반올림 전 값 그대로.
 const stripUnrounded = (v) => (Array.isArray(v) ? v.map(stripUnrounded) : (v && typeof v === 'object'
@@ -511,7 +529,7 @@ function checkPurlinSummary(tag, level, s, full) {
   assert.deepStrictEqual(s.governing, full.governing, `${tag}: governing region`);
   const disp = level === 'summary';
   for (const k of ['warnings', 'assumptions', 'not_evaluated', 'load_not_evaluated', 'wc_reactions', 'uplift_reactions', 'i621_check']) {
-    const want = k === 'i621_check' && disp ? i621Compact(stripUnrounded(full[k])) : (disp ? stripUnrounded(full[k]) : full[k]);
+    const want = k === 'i621_check' && disp ? i621Compact(stripUnrounded(full[k])) : (disp ? stripUnrounded(full[k]) : noRaw(full[k]));
     assert.deepStrictEqual(s[k], want, `${tag} keeps ${k}`);
   }
   // K4b: 요약의 §I6.2.1 은 조건마다 id · 판정 · 값 · 한계(이름표 목록 checks 와 이름표 글은 detail 'checks')
@@ -1069,7 +1087,9 @@ async function main() {
           const k = m && (m[1] || m[2]);
           return k ? 0.5 * 10 ** -SI_DEC[k] + 1e-9 : null;
         } : undefined;
+        RAW_FULL_US = level && level !== 'full' && full ? full[0] : null;
         const n = comparePhysical(tag, a.data, b.data, level === undefined || level === 'full' ? spot : {}, displayTol);
+        RAW_FULL_US = null;
         const dcs = checkDesignChecks(tag, a.data, b.data, QTY_SEEN);
         if (level === undefined || level === 'full') {
           if (extra.check) { extra.check(a.data, b.data); }
@@ -1188,8 +1208,10 @@ async function main() {
       { 'auto_params.negative_region.Ly_in': L, 'auto_params.negative_region.M_max_abs': 'moment_ft',
         'input_loads_plf.D': 'linload', 'deflection.Ixx': 'inertia' });
     const loc = ldUS.gravity.locations.findIndex((l) => typeof l.Mu === 'number' && l.Mu !== 0 && l.x_ft > 0);
-    assert(Math.abs(ldSI.gravity.locations[loc].Mu / (ldUS.gravity.locations[loc].Mu * F.moment_ft) - 1) < 1e-12, 'loads Mu kip-ft → kN-m');
-    assert(Math.abs(ldSI.gravity.locations[loc].x_ft / (ldUS.gravity.locations[loc].x_ft * 0.3048) - 1) < 1e-12, 'loads x ft → m');
+    // B3: 하중 해석 기록의 SI 는 그 기록의 반올림 전 값(display_unrounded)에서 — 없으면 표시 값에서
+    const locU = ldUS.gravity.locations[loc], rawOf = (k) => (locU.display_unrounded && typeof locU.display_unrounded[k] === 'number' ? locU.display_unrounded[k] : locU[k]);
+    assert(Math.abs(ldSI.gravity.locations[loc].Mu / (rawOf('Mu') * F.moment_ft) - 1) < 1e-12, 'loads Mu kip-ft → kN-m');
+    assert(Math.abs(ldSI.gravity.locations[loc].x_ft / (rawOf('x_ft') * 0.3048) - 1) < 1e-12, 'loads x ft → m');
 
     // 휨 계열: 휨 해석으로 바꾼다
     await ok('set_load_case', { load_case: 'bending_xx_pos', fy: 50 });
@@ -1413,7 +1435,8 @@ async function main() {
     assert(p38.regions.length >= 30, `the budget case has many regions (${p38.regions.length})`);
     checkPurlinStations('design_purlin 38 regions', p38);
     const budget = { aisi_design_compression: 12, aisi_design_flexure: 12, aisi_design_combined: 12, aisi_design_tension: 12,
-      aisi_design_connection: 12, design_connection: 12, design_lap_connection: 16, 'design_purlin 38 regions': 40, design_purlin: 40,
+      // 랩 18 KB: 결정 R2(2026-11-25) — 힘 분배를 밝히지 않은 랩은 패스너 무리가 판정 없음이 되어 그 까닭 · 경고 · 머리 주의가 더해진다(16.5 KB)
+      aisi_design_connection: 12, design_connection: 12, design_lap_connection: 18, 'design_purlin 38 regions': 40, design_purlin: 40,
       'design_purlin pattern': 40 };
     for (const z of SIZES.filter((x) => x.level === 'summary' && budget[x.tool])) {
       assert(Math.max(z.us, z.si) <= budget[z.tool] * KB, `budget: ${z.tool} summary ${Math.max(z.us, z.si)} B > ${budget[z.tool]} KB (largest keys: ${z.top})`);
@@ -1438,8 +1461,15 @@ async function main() {
         assert(typeof rf.data.html === 'string' && !('html' in rs.data), 'generate_report: detail full adds the HTML');
         assert.deepStrictEqual(rs.data.notices, rf.data.notices, `generate_report ${u}: the summary carries every notice of the full reply`);
         assert.deepStrictEqual(rs.data.checks, rf.data.checks, `generate_report ${u}: the summary carries every failing / not-evaluated check id`);
-        const fullNotices = new Set(rf.data.notices);
-        assert(rs.data.notices.every((t) => fullNotices.has(t)) && rs.data.notices.length === fullNotices.size, 'notices are distinct');
+        // B5: 알림은 다른 응답의 알림 목록과 같은 꼴 {kind, code, text} — 수는 답의 단위(SI 답에 kips · ksi 가 남지 않는다)
+        assert(rs.data.notices.every((n) => n && typeof n.kind === 'string' && typeof n.text === 'string' && n.text && (n.code === null || typeof n.code === 'string')),
+          `generate_report ${u}: notice items {kind, code, text}: ${JSON.stringify(rs.data.notices.slice(0, 3))}`);
+        if (u === 'SI') {
+          const us = rs.data.notices.filter((n) => n.code && /\bkips?\b|\bksi\b|kip-in|kip-ft/.test(n.text));
+          assert.deepStrictEqual(us, [], 'generate_report SI: coded notices are rendered in SI');
+        }
+        const fullNotices = new Set(rf.data.notices.map((n) => n.text));
+        assert(rs.data.notices.every((n) => fullNotices.has(n.text)) && rs.data.notices.length === fullNotices.size, 'notices are distinct');
         assert(rs.bytes <= 40 * KB, `budget: generate_report (38-region purlin) summary ${rs.bytes} B > 40 KB`);
         sizes.push(`${u} validate ${vs.bytes}/${vf.bytes} B, report ${rs.bytes}/${rf.bytes} B`);
       }
@@ -1509,7 +1539,8 @@ async function main() {
     const SH = loadShapers(si);
     const toolOf = { aisi_design: 'aisi_design_flexure', design_connection: 'design_connection', lap_connection: 'design_lap_connection' };
     // 랩 16 KB — 결과마다 같은 force_model 의 설명 · 한계 (a)–(e) 는 요약에서 code + 한 줄 제목(글 전체는 detail:'checks')
-    const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 16 };
+    // 랩 18 KB — 위 budget 의 까닭(결정 R2: 힘 분배를 밝히지 않으면 패스너 무리의 판정 없음 · 까닭 · 경고)
+    const limitOf = { aisi_design: 12, design_connection: 12, lap_connection: 18 };
     const largest = {};
     let nCases = 0; let nUnb = 0;
     // K4b: 호스트가 하듯 먼저 읽는 꼴(forReader — 알림 · 이유를 그 단위의 한국어로)로 바꾼 뒤 모양을 줄인다

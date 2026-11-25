@@ -217,6 +217,9 @@ export function buildLoadRequest(st: CaseState, ctx: RequestContext, opts: LoadR
         lr_reduced: r.chk('chkLrReduced'),
     };
     if (r.chk('chkI621Confirmed')) { data.i621_conditions_confirmed = true; }
+    // 결정 R4: 하중조합의 기준 — 처음 값(asce7_10)이 아닐 때만(처음 값의 본문은 바이트까지 그대로)
+    const lcs = r.sel('loadComboStandard', 'asce7_10');
+    if (lcs !== 'asce7_10') { data.load_combination_standard = lcs; }
     const ins = opt('deckInsulationIn');
     if (ins !== undefined) { data.insulation_in = ins; }
     const rt = opt('deckRTested');
@@ -290,6 +293,8 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
     if (r.chk('lapRestrained')) { data.lap_restrained = true; }
     // 계약 §6.3: 0 은 밝혔을 때만 0(사람의 칸 · AI 의 zero_demand_stated)
     if (r.chk('connZeroDemandStated')) { data.zero_demand_stated = true; }
+    // 결정 R2: 패스너 힘 분배(모든 패스너가 고르게 — 자체 가정)로 판정함을 사람이 밝혔을 때만(없음 = 밝히지 않음 → 패스너 무리는 판정 없음)
+    if (r.chk('lapForceModelConfirmed')) { data.lap_force_model_confirmed = true; }
     return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
 

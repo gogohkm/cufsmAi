@@ -106,7 +106,8 @@ export function summarizeCsd(bytes: Buffer): Omit<CaseIndex, 'schema' | 'caseId'
         steel: cleanHeaderText(inputs.presteelGrade, 40),
         nodes: Array.isArray(model.node) ? model.node.length : null,
         elems: Array.isArray(model.elem) ? model.elem.length : null,
-        maxRatio: d ? num(d.utilization) : null,
+        // 판정이 아닌 비(가정한 길이 · 빠진 주 소요)는 색인의 최대 판정비가 아니다(runs.noVerdictUtilization)
+        maxRatio: d && !(d.length_assumed === true || d.utilization_valid === false) ? num(d.utilization) : null,
         pass: d && typeof d.pass === 'boolean' ? d.pass : null,
         results: RESULT_KINDS.filter(([k]) => p[k] && typeof p[k] === 'object').map(([, name]) => name),
         outline: outlineOf(model.node, model.elem),

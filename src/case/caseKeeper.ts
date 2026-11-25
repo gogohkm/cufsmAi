@@ -3,7 +3,7 @@
  * 순수(vscode 없음) — StcfsdPanel 이 메시지를 넘긴다. 설계: docs/implementation/20261123-k2-design.md §3 · §4.
  *
  * 화면 쪽 거울이 필요한 까닭: 지금 화면의 엔진 본문은 화면이 쥔 것(모델 칸의 초안, lastProps, 화면이 고른 퍼린 지배 구간)에도 기댄다.
- * 호스트가 같은 본문을 만들려면(바이트까지 — §4.3) 같은 것을 알아야 한다. 화면이 받는 메시지를 호스트가 보낼 때 같이 적는다.
+ * 호스트가 같은 본문을 만들려면(§4.3 — B1 뒤로는 수가 화면이 적는 자리에서 같으면 같다: compare) 같은 것을 알아야 한다. 화면이 받는 메시지를 호스트가 보낼 때 같이 적는다.
  */
 import { CaseState, InputValue, Source, applyChanges, createCaseState, ApplyResult, replaceGroup } from './caseState';
 import { McpWrite } from './mcpGroups';
@@ -27,22 +27,17 @@ function writerOf(origin: unknown): { writer: Source; keepSource: boolean } {
     }
 }
 
-/** 보이는 자리 안에서 같은가(화면은 지금 단위로 12 자리를 적고 다시 읽는다) — 수는 상대 1e-9, 그 밖은 글자까지 */
-function sameShown(a: unknown, b: unknown): boolean {
-    if (a === undefined) { a = null; }
-    if (b === undefined) { b = null; }
-    if (typeof a === 'number' && typeof b === 'number') {
-        if (a === b) { return true; }
-        const m = Math.max(Math.abs(a), Math.abs(b));
-        return Number.isFinite(m) && Math.abs(a - b) <= 1e-9 * m;
-    }
-    if (Array.isArray(a) && Array.isArray(b)) { return a.length === b.length && a.every((x, i) => sameShown(x, b[i])); }
-    if (a && b && typeof a === 'object' && typeof b === 'object') {
-        const ks = new Set([...Object.keys(a as any), ...Object.keys(b as any)]);
-        for (const k of ks) { if (!sameShown((a as any)[k], (b as any)[k])) { return false; } }
-        return true;
-    }
-    return JSON.stringify(a) === JSON.stringify(b);
+/**
+ * B1: 「화면이 적는 자리에서 같은가」 는 한 함수 — webview/js/designState.js 의 shownSame(12 자리 · 목록 6 자리, 그 까닭은 그 머리말).
+ * K2 불변식(compare · 시험의 상태 = 칸)도 같은 함수를 쓴다. 화면이 지금 상태를 그린 칸을 다시 읽어 알린 수(단위를 오간 왕복의 마지막 자리 —
+ * 「Fy 295 → 294.9999999999998 MPa」)는 새 값이 아니다.
+ */
+const DSJ = require('../../webview/js/designState');
+const SHOWN_DIGITS: number = DSJ.SHOWN_DIGITS;
+const SHOWN_DIGITS_LIST: number = DSJ.SHOWN_DIGITS_LIST;
+const SPAN_KEY_LIST = ['spans', 'supports', 'lapsPerSupport'];
+function sameShown(a: unknown, b: unknown, unit: string | null, systems: string[], digits: number): boolean {
+    return DSJ.shownSame(a, b, { unit, systems, digits });
 }
 
 export interface ShadowRecord { what: string; same: boolean; page?: string; host?: string; at: number }
@@ -200,15 +195,84 @@ export class CaseKeeper {
     }
 
     /** V9b-05: 메아리 출처의 변경 가운데 상태의 값과 보이는 자리 안에서 다른 키(그것은 사람의 편집이다) */
-    nonEchoKeys(changes: unknown): string[] {
+    nonEchoKeys(changes: unknown, origin?: unknown): string[] {
         const raw: Record<string, unknown> = changes && typeof changes === 'object' ? changes as any : {};
+        return Object.keys(raw).filter((k) => !this.shownSameAsState(k, raw, origin));
+    }
+
+    /**
+     * B1: 화면이 알린 키 k 의 값이 지금 상태의 값과 화면이 적는 자리(SHOWN_DIGITS — 목록은 메아리 출처에서 SHOWN_DIGITS_LIST)에서 같은가.
+     * 단위계는 화면의 지금 것(이 변경이 unitSystem 을 함께 알리면 그것, 아니면 상태의 것) — 단위 바꿈(unit-toggle)은 앞 · 뒤 둘 다
+     * (칸의 글이 앞 단위계의 12 자리에서 바뀌어 왔다). 단위 없는 키(선택 · 체크 · 글)는 글자까지 — unitSystem · 보기 설정은 늘 「다르다」(그대로 둔다).
+     */
+    private shownSameAsState(k: string, raw: Record<string, unknown>, origin: unknown): boolean {
+        const c = this.shownCtx(k, raw, origin);
+        return c !== null && sameShown(c.cur, raw[k], c.unit, c.systems, c.digits);
+    }
+    /** 키 k 를 견줄 것 — 지금 값 · 단위 · 단위계 · 자리(unitSystem · 보기 설정은 null — 견주지 않는다) */
+    private shownCtx(k: string, raw: Record<string, unknown>, origin: unknown): { cur: unknown; unit: string | null; systems: string[]; digits: number } | null {
+        if (k === 'unitSystem') { return null; }
         const DS = require('../../webview/js/designState');
-        return Object.keys(raw).filter((k) => {
+        const m = DS.fieldMeta(k);
+        if (m && m.owner === 'view') { return null; }
+        const key = m && m.owner === 'mirror' ? m.mirrorOf : k;
+        const isSpan = SPAN_KEY_LIST.includes(key);
+        const cur = isSpan ? (this.state.spans as any)[key] : this.state.inputs[key];
+        const unit: string | null = isSpan ? (key === 'supports' ? null : 'length_ft') : (m && m.unit) || null;
+        const sys = raw.unitSystem === 'US' || raw.unitSystem === 'SI' ? String(raw.unitSystem) : this.state.view.unitSystem;
+        const systems = origin === 'unit-toggle' ? ['SI', 'US'] : [sys];
+        const digits = m && m.kind === 'list' && ECHO_ORIGINS.has(String(origin)) ? SHOWN_DIGITS_LIST : SHOWN_DIGITS;
+        return { cur, unit, systems, digits };
+    }
+    /** 표의 칸마다: 지금 값과 보이는 자리에서 같은 칸은 지금 값, 다른 칸은 받은 값(모양 — 길이 · 키 — 이 다르면 받은 그대로). 바뀐 것이 없으면 v 그대로 */
+    private keepShownCells(k: string, v: unknown, raw: Record<string, unknown>, origin: unknown): unknown {
+        const c = this.shownCtx(k, raw, origin);
+        if (!c) { return v; }
+        let changed = false;
+        const merge = (cur: unknown, x: unknown): unknown => {
+            if (typeof cur === 'number' && typeof x === 'number') {
+                if (cur !== x && sameShown(cur, x, c.unit, c.systems, c.digits)) { changed = true; return cur; }
+                return x;
+            }
+            if (Array.isArray(cur) && Array.isArray(x) && cur.length === x.length) { return x.map((e, i) => merge(cur[i], e)); }
+            if (cur && x && typeof cur === 'object' && typeof x === 'object' && !Array.isArray(cur) && !Array.isArray(x)) {
+                const o: Record<string, unknown> = {};
+                for (const kk of Object.keys(x as any)) { o[kk] = kk in (cur as any) ? merge((cur as any)[kk], (x as any)[kk]) : (x as any)[kk]; }
+                return o;
+            }
+            return x;
+        };
+        const out = merge(c.cur, v);
+        return changed ? out : v;
+    }
+
+    /**
+     * B1: 화면이 알린 변경에서 「지금 값과 화면이 적는 자리에서 같은」 수를 뺀다(모든 출처 — 사람이 볼 수 있는 자리 너머의 차이는 화면이
+     * 상태를 그리고 다시 읽은 왕복의 꼬리다). 그 키는 상태 · 출처 · 판 · 기록을 바꾸지 않는다. 거울 칸은 그 주인이 같은 변경에 있으면
+     * 뺀다(applyChanges 도 그때 거울을 쓰지 않는다 — 주인을 뺀 뒤 거울이 주인을 대신 쓰지 않게). 다른 수는 받은 그대로 둔다.
+     */
+    private dropShownSame(changes: unknown, origin: unknown): unknown {
+        if (!changes || typeof changes !== 'object') { return changes; }
+        const raw = changes as Record<string, unknown>;
+        const DS = require('../../webview/js/designState');
+        const out: Record<string, unknown> = {};
+        let dropped = false;
+        for (const k of Object.keys(raw)) {
             const m = DS.fieldMeta(k);
-            const key = m && m.owner === 'mirror' ? m.mirrorOf : k;
-            const cur = (['spans', 'supports', 'lapsPerSupport'] as string[]).includes(key) ? (this.state.spans as any)[key] : this.state.inputs[key];
-            return !sameShown(cur, raw[k]);
-        });
+            const echo = (m && m.owner === 'mirror' && (m.mirrorOf in raw)) || this.shownSameAsState(k, raw, origin);
+            // 수 · 수의 표만(선택 · 체크 · 글 · 빈 칸은 전처럼 — 같은 값이면 applyChanges 가 아무것도 쓰지 않는다)
+            const v = raw[k];
+            if (echo && (typeof v === 'number' || (v !== null && typeof v === 'object'))) { dropped = true; continue; }
+            // 표(경간 · 랩 길이 · 쉼표 목록)의 한 칸만 바뀌었으면 — 바뀌지 않은 칸은 지금 값 그대로(왕복의 꼬리를 함께 쓰지 않게), 바뀐 칸은 받은 그대로
+            if (v !== null && typeof v === 'object') {
+                const merged = this.keepShownCells(k, v, raw, origin);
+                if (merged !== v) { dropped = true; out[k] = merged; continue; }
+            }
+            out[k] = v;
+            continue;
+            out[k] = raw[k];
+        }
+        return dropped ? out : changes;
     }
     /** 다시 실은 뒤 사람의 첫 변경 전인가(그동안의 화면 연동은 편집이 아니다 — 아래 edit 의 규칙) */
     get inReloadWindow(): boolean { return this.reloadWindow; }
@@ -216,8 +280,11 @@ export class CaseKeeper {
     get inOpenWindow(): boolean { return this.openEcho; }
 
     edit(data: any): ApplyResult {
-        const d = data && typeof data === 'object' ? data : {};
-        if (d.drafts && typeof d.drafts === 'object') { this.drafts = { ...(this.drafts || {}), ...d.drafts }; }
+        const d0 = data && typeof data === 'object' ? data : {};
+        if (d0.drafts && typeof d0.drafts === 'object') { this.drafts = { ...(this.drafts || {}), ...d0.drafts }; }
+        // B1: 지금 값과 화면이 적는 자리에서 같은 수는 새 값이 아니다 — 어느 출처든 상태 · 출처 · 판 · 기록에 닿지 않게 먼저 뺀다
+        const kept = this.dropShownSame(d0.changes, d0.origin);
+        const d = kept === d0.changes ? d0 : { ...d0, changes: kept };
         const w0 = writerOf(d.origin);
         const writer = w0.writer;
         // 호스트만 주는 표지(화면의 데이터에서는 호스트가 지운다): 메아리 칸은 출처를 그대로, 값을 바꾼 연동 칸은 출처를 mirror 로
@@ -369,11 +436,32 @@ export class CaseKeeper {
         };
     }
 
-    /** 시험 모드: 화면이 보낸 본문과 호스트가 상태로 만든 본문을 맞대 적는다 */
+    /**
+     * 본문의 키 가운데 쉼표 목록 칸에서 온 것(src/case/requests.ts 의 조립 — 바꾸면 같이): 화면은 상태를 그 칸에 6 자리로 적는다(designState
+     * SHOWN_DIGITS_LIST) — 그 키는 그 칸의 단위 · 6 자리로 견준다. 나머지 키는 단위를 모른다(shownSame 의 unit undefined).
+     */
+    static readonly BODY_LIST_KEYS: Record<string, string> = { I_span_in4: 'spanIxIn4', brace_points_ft: 'bracePointsFt' };
+    static sameBody(pg: any, ho: any): boolean {
+        const obj = (x: any) => x && typeof x === 'object' && !Array.isArray(x);
+        if (!obj(pg) || !obj(ho)) { return DSJ.shownSame(pg, ho, { strict: true }); }
+        const kp = Object.keys(pg), kh = Object.keys(ho);
+        if (kp.join('\u0000') !== kh.join('\u0000')) { return false; }
+        return kp.every((k) => {
+            const lk = CaseKeeper.BODY_LIST_KEYS[k];
+            const m = lk ? DSJ.fieldMeta(lk) : null;
+            return DSJ.shownSame(pg[k], ho[k], m ? { unit: m.unit || null, digits: SHOWN_DIGITS_LIST, strict: true } : { strict: true });
+        });
+    }
+
+    /**
+     * 시험 모드: 화면이 보낸 본문과 호스트가 상태로 만든 본문을 맞대 적는다. 불변식(B1, 2026-11-25): 엔진 본문은 호스트의 상태(정확한 값)로
+     * 만들고, 화면의 칸은 그 값을 화면이 적는 자리로 보인다 — 그래서 같음 = designState.shownSame(strict: 빠진 · 남는 키, 형이 다르면 다르다;
+     * 수는 화면이 적는 12 자리에서 — 본문의 키는 단위를 모르므로 US 글 또는 어느 단위 계수의 SI 글에서). 그보다 큰 차이는 다르다.
+     */
     compare(what: string, pageData: any, hostData: any): boolean {
         const p = JSON.stringify(pageData === undefined ? null : pageData);
         const h = JSON.stringify(hostData === undefined ? null : hostData);
-        const same = p === h;
+        const same = p === h || CaseKeeper.sameBody(JSON.parse(p), JSON.parse(h));
         this.shadow.push(same ? { what, same, at: Date.now() } : { what, same, page: p, host: h, at: Date.now() });
         if (this.shadow.length > 200) { this.shadow.shift(); }
         return same;

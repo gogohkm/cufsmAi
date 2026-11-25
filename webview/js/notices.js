@@ -262,18 +262,28 @@
         const ko = !(opts && opts.lang === 'en');
         if (n === null || n === undefined) { return ''; }
         if (typeof n === 'string') { return units === 'SI' ? fallbackSI(n, 'text') : n; }
-        const prefix = ko ? (n.prefix_ko !== undefined ? n.prefix_ko : n.prefix) : n.prefix;
+        // B2(2026-11-25): 한국어가 등록되지 않은 알림(text_ko · template_ko · prefix_ko 가 null · 빈 글)은 엔진이 보낸 글(영어)로 — 빈 글을 그리지 않는다
+        const str = (x) => typeof x === 'string' && x !== '';
+        const prefix = ko ? (str(n.prefix_ko) ? n.prefix_ko : n.prefix) : n.prefix;
         if (n.kind === 'group' && Array.isArray(n.parts)) {
-            return (prefix || '') + n.parts.map((p) => render(p, { units, lang: ko ? 'ko' : 'en' })).join(typeof n.sep === 'string' ? n.sep : '; ');
+            const g = (prefix || '') + n.parts.map((p) => render(p, { units, lang: ko ? 'ko' : 'en' })).filter((s) => s !== '').join(typeof n.sep === 'string' ? n.sep : '; ');
+            return g !== '' ? g : lastResort(n, units);
         }
-        const template = ko ? (n.template_ko !== undefined ? n.template_ko : n.template) : n.template;
+        const template = ko ? (str(n.template_ko) ? n.template_ko : n.template) : n.template;
         if (typeof template !== 'string') {
-            const raw = ko ? (n.text_ko !== undefined ? n.text_ko : n.text) : n.text;
-            return render(typeof raw === 'string' ? raw : '', { units });
+            const raw = ko ? (str(n.text_ko) ? n.text_ko : n.text) : n.text;
+            const s = render(typeof raw === 'string' ? raw : '', { units });
+            return s !== '' ? s : lastResort(n, units);
         }
-        const want = ko ? n.text_ko : n.text;
+        const want = ko ? (str(n.text_ko) ? n.text_ko : (template === n.template ? n.text : n.text_ko)) : n.text;
         const body = typeof want === 'string' && typeof prefix === 'string' && want.startsWith(prefix) ? want.slice(prefix.length) : want;
-        return (prefix || '') + fillMatching(template, n.params, units, ko ? 'ko' : 'en', body, n.code);
+        const s = (prefix || '') + fillMatching(template, n.params, units, ko ? 'ko' : 'en', body, n.code);
+        return s !== '' ? s : lastResort(n, units);
+    }
+    /** 글이 하나도 없는 알림 — 엔진의 영어 글, 그것도 없으면 그 code(빈 글머리를 그리지 않게) */
+    function lastResort(n, units) {
+        if (typeof n.text === 'string' && n.text !== '') { return units === 'SI' ? fallbackSI(n.text, 'text') : n.text; }
+        return typeof n.code === 'string' && n.code ? n.code : '';
     }
 
     // ── 글 하나에 붙는 필드(엔진 §16.10 – 16.11 · 호스트) ────────────────────────────────────────
@@ -485,6 +495,8 @@
     const LEDGER_REASONS = {
         'project opened': ['project_opened', '프로젝트를 열었습니다'], 'model changed': ['model_changed', '모델이 바뀌었습니다'],
         'Model updated': ['model_changed', '모델이 바뀌었습니다'], 'New analysis started': ['new_analysis', '새 해석을 시작했습니다'],
+        'load_project opens inputs and the model only — the results stored in the file were not restored': ['load_project_inputs_only', 'load_project 는 입력과 모델만 엽니다 — 파일에 저장된 결과는 되살리지 않았습니다'],
+        'Saved design DSM values were prepared on the display grid of the model — prepared again at the next member check.': ['design_dsm_old_grid', '저장된 설계용 좌굴값은 모델의 보기용 격자로 푼 것입니다 — 다음 부재 검토가 다시 준비합니다'],
         'Section template changed': ['section_template', '단면 템플릿이 바뀌었습니다'], 'Material changed': ['material', '재료가 바뀌었습니다'],
         'Boundary condition changed': ['boundary', '경계조건이 바뀌었습니다'], 'Length range changed': ['lengths', '반파장 범위가 바뀌었습니다'],
         'Stress distribution changed': ['stress', '응력 분포가 바뀌었습니다'], 'Doubled section geometry changed': ['doubled', '요소 분할이 바뀌었습니다'],
@@ -517,6 +529,8 @@
         let m = /^Load case changed: (.+)$/.exec(s);
         if (m) { return { code: 'host.ledger.load_case', text: s, text_ko: '하중 경우가 바뀌었습니다(' + m[1] + ')' }; }
         if (/^Inputs changed \(set_case_inputs\)/.test(s)) { return { code: 'host.ledger.ai_inputs', text: s, text_ko: 'AI 가 입력을 바꿨습니다(set_case_inputs)' }; }
+        m = /^Inputs changed by ([a-z_]+)$/.exec(s);
+        if (m) { return { code: 'host.ledger.ai_tool_inputs', text: s, text_ko: 'AI 의 ' + m[1] + ' 가 이 결과의 입력을 바꿨습니다' }; }
         m = /^Alternative (ALT-\d+) opened$/.exec(s);
         if (m) { return { code: 'host.ledger.alternative_opened', text: s, text_ko: '대안 ' + m[1] + ' 을 열었습니다' }; }
         return { code: null, text: s, text_ko: s };

@@ -52,8 +52,12 @@ async function withSession(name, fn) {
 
 /**
  * K2 불변식(구현 단계마다): ① 호스트의 검토 상태(+ 초안) = 화면의 칸(collectDesignInputs) ② 그림자 대조 — 화면이 보낸 엔진 본문 =
- * 호스트가 상태로 만든 본문(바이트까지) ③ 화면의 처음 값 = 표의 처음 값. 어긋나면 caseProblems 에 — 실행이 실패한다.
+ * 호스트가 상태로 만든 본문 ③ 화면의 처음 값 = 표의 처음 값. 어긋나면 caseProblems 에 — 실행이 실패한다.
+ * B1(2026-11-25): 엔진 본문은 호스트의 상태(정확한 값)로 만들고, 화면의 칸은 그 값을 화면이 적는 자리(표시 단위 12 자리 · 목록 6 자리)로
+ * 보인다. 그래서 ① ② 의 「=」 는 바이트가 아니라 그 자리에서의 같음 — 호스트 · 메아리 규칙과 같은 한 함수(designState.shownSame ·
+ * shownDiffKeys). 그보다 큰 차이 · 형의 차이 · 빠진 · 남는 키는 여전히 어긋남이다.
  */
+const DSJ = require('../../../webview/js/designState.js');
 const caseProblems = [];
 async function caseInvariant(ctx, name) {
   if (typeof ctx.panel.__testGetCase !== 'function') { return; }
@@ -63,7 +67,7 @@ async function caseInvariant(ctx, name) {
   const page = await ctx.eval(`(()=>{const ds=globalThis.StcfsdDesignState; const si=document.getElementById('btn-unit-SI').classList.contains('active');
     return ds.collectDesignInputs({document, fromDisplay:(v,u)=> si ? ds.siToUs(v,u) : v, getUnitSystem:()=> si?'SI':'US'});})()`);
   const host = c.designInputs;
-  const diff = Object.keys(page).filter((k) => JSON.stringify(page[k]) !== JSON.stringify(host[k]));
+  const diff = DSJ.shownDiffKeys(page, host);
   if (diff.length) { caseProblems.push(`${name}: host state ≠ page fields: ${diff.map((k) => `${k} host ${JSON.stringify(host[k])} page ${JSON.stringify(page[k])}`).join('; ').slice(0, 900)}`); }
   for (const x of c.shadow.filter((y) => !y.same)) {
     // 다른 키만 보인다(요청이 길다)

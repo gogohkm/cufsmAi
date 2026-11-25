@@ -266,7 +266,13 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
         }
         return out;
     };
-    const sh = (v: any) => (shape && !v.error ? shape(v, (detail as Detail) || 'summary') : v);
+    // B3: 줄인 응답(summary · checks)에는 display_unrounded 사본을 싣지 않는다 — SI 는 이미 그 값으로 바꿨고(위 withUnroundedValues 는 결과 전체에),
+    // US 는 표시 값이 답이다. 엔진이 묶음 · 목록 항목마다 사본을 단 뒤(2026-11-25) 랩 요약이 16 KB 를 넘었다. detail 'full' 은 그대로
+    const sh = (v: any) => {
+        if (!shape || v.error) { return v; }
+        const d = (detail as Detail) || 'summary';
+        return d === 'full' ? shape(v, d) : dropUnrounded(shape(v, d));
+    };
     if (units !== 'SI' || !table) { return json(done({ ...sh(r), units: 'US' })); }
     const held = r.__case_replaced;
     const heldUsed = r.__case_used;
@@ -315,9 +321,17 @@ async function postTool(tool: string, action: string, args: Record<string, any>,
 // ============================================================
 type Detail = 'summary' | 'checks' | 'full';
 type Shaper = (v: any, detail: Detail) => any;
+/** 나무에서 display_unrounded 를 뺀 사본(줄인 응답 — unitReply 의 sh) */
+function dropUnrounded(v: any): any {
+    if (Array.isArray(v)) { return v.map(dropUnrounded); }
+    if (!v || typeof v !== 'object') { return v; }
+    const out: any = {};
+    for (const [k, x] of Object.entries(v)) { if (k !== 'display_unrounded') { out[k] = dropUnrounded(x); } }
+    return out;
+}
 
 /** 요약에도 늘 그대로 싣는 키 — 판정과 함께 보고해야 하는 글 · 판정의 뜻 · 단위 안내 · 반력. */
-const KEEP_ALWAYS = new Set(['case_rev', 'case_inputs_written', 'case_inputs_replaced', '__case_replaced', 'case_inputs_not_written', 'case_note',
+const KEEP_ALWAYS = new Set(['case_rev', 'case_results_invalidated', 'case_inputs_written', 'case_inputs_replaced', '__case_replaced', 'case_inputs_not_written', 'case_note',
     'case_inputs_used', '__case_used', 'case_inputs_used_note', 'case_args_not_on_screen',
     'case_check', 'warnings', 'assumptions', 'scope_notes', 'not_evaluated', 'not_checked', 'host_warnings',
     'dsm_warning', 'dsm_warnings', 'dsm_error', 'load_not_evaluated', 'notes', 'error', 'force_model', 'spec_sections',
@@ -535,6 +549,18 @@ function shapeDesign(scope: string): Shaper {
             out.fastener_design = fd;
         }
         out.governing_checks = dc.filter((c) => c && c.governs === true).map(checkHead);
+        // 엔진의 한계상태 요약(limit_state_checks): 빈 길이를 가정해 낸 항목은 pass null · reference_only — 판정이 아니라 참고 비임을 줄마다
+        // 밝힌다(통과로도, 빠진 것으로도 보이지 않게). 크기와 상관없이 늘 싣는다(작다)
+        if (!inner && Array.isArray(r.limit_state_checks) && r.limit_state_checks.length > 0) {
+            out.limit_state_checks = r.limit_state_checks.map((c: any) => (c && typeof c === 'object' ? {
+                name: c.name ?? null, ratio: c.ratio ?? null, pass: c.pass ?? null,
+                ...(c.length_assumed ? { length_assumed: true } : {}),
+                ...(c.reference_only ? { reference_only: true, verdict_note: 'NOT EVALUATED — the ratio comes from an assumed length (reference only, not a pass or a fail)' } : {}),
+                ...(c.reason ? { reason: c.reason } : {}), ...(c.reason_code ? { reason_code: c.reason_code } : {}),
+            } : c));
+            const oi = omitted.indexOf('limit_state_checks');
+            if (oi >= 0) { omitted.splice(oi, 1); }
+        }
         if (detail === 'checks') {
             out.design_checks = dc.map((c) => { const { steps: _s, ...x } = c || {}; void _s; return x; });
         } else {
@@ -844,9 +870,9 @@ TRANSPORT. The tools drive a running StCFSD through a local bridge: either the s
 
 WORKFLOW.
 1 Section: set_section_template (or build_section / set_custom_section, then get_section_preview to check the shape) → get_section_properties.
-2 Buckling: set_material → set_load_case (compression for P, bending_xx_pos/neg for Mxx) → set_boundary_condition → set_lengths → run_analysis → get_dsm_values (elastic Pcrl/Pcrd/Mcrl/Mcrd). Read run_analysis warnings and discarded_lengths.
+2 Buckling view: set_material → set_load_case (compression for P, bending_xx_pos/neg for Mxx) → set_boundary_condition → set_lengths → run_analysis → get_dsm_values (elastic Pcrl/Pcrd/Mcrl/Mcrd of that view). Read run_analysis warnings and discarded_lengths. The member check does not need it (step 4).
 3 Loads (purlins, joists, girts, studs): analyze_loads → required strengths and unbraced regions; design_purlin runs the whole purlin chain.
-4 Member check on the current section: aisi_design_compression / aisi_design_flexure / aisi_design_combined / aisi_design_tension (needs a current analysis of the matching load family).
+4 Member check on the current section: aisi_design_compression / aisi_design_flexure / aisi_design_combined / aisi_design_tension. It always uses S-S signature-curve FSM buckling values solved with the design Fy on the engine's design half-wavelength grid, and prepares them itself when they are not current (no run_analysis needed; the model's display lengths, BC and number of eigenvalues do not enter them). Only a round tube (DSM labels do not apply) or a failed preparation falls back to the current analysis of that family, then to the analytical formulas — dsm_basis_by_family and dsm_warning say so.
 5 Connections: aisi_design_connection or design_connection, design_lap_connection, check_lap_length, check_shear_lag, check_block_shear.
 6 validate_design → the checklist the screen shows (설계 검증, ~70 items: id, status pass/warn/fail, value, criterion, note). generate_report → the calculation report written as HTML + PDF next to the open .csd (or in the temp folder) — the reply gives the file paths; tell the person where it is.
 
@@ -1011,7 +1037,7 @@ server.tool("set_case_inputs",
 );
 
 server.tool("run_case_check",
-    "Compute the check the screen's button would run, from the case inputs on the screen (no input changes): what='member' runs the member design (a load-analysis member type — roof-purlin, floor-joist, wall-girt, wall-stud — runs the purlin chain like design_purlin, otherwise aisi_design_<member type>), 'loads' the load analysis, 'connection' the single connection, 'lap' the lap splice. Blank required inputs are named in the error — set them with set_case_inputs or ask the person. For what='member', when this case had FSM buckling values that were dropped (file opened with another engine or not sealed on this PC) or became stale, the check first prepares them again (S-S signature-curve FSM with the design Fy — as the screen does after an analysis); a case that never had an FSM analysis is designed with the analytical buckling formulas. The buckling-analysis view itself (curves, mode shapes, get_dsm_values of the model's load case) comes back only with run_analysis. The reply has the same shape as the corresponding design tool (summary by default, detail as there) plus case_check {what, tool, rev, buckling_values (member only: source fsm-prepared-now | fsm-current | fsm-in-check | mixed | analytical | not-needed, load_cases, note)}." + SUMMARY_NOTE,
+    "Compute the check the screen's button would run, from the case inputs on the screen (no input changes): what='member' runs the member design (a load-analysis member type — roof-purlin, floor-joist, wall-girt, wall-stud — runs the purlin chain like design_purlin, otherwise aisi_design_<member type>), 'loads' the load analysis, 'connection' the single connection, 'lap' the lap splice. Blank required inputs are named in the error — set them with set_case_inputs or ask the person. For what='member', the member check prepares the S-S signature-curve FSM buckling values it uses (design Fy, the engine's design half-wavelength grid) when they are not current — dropped, stale or never prepared — exactly as the screen's button and aisi_design_* do; the load-analysis member types solve their own signature curves in the purlin chain. 'analytical' comes only from the fallback (round tube, failed preparation). The buckling-analysis view itself (curves, mode shapes, get_dsm_values of the model's load case) comes back only with run_analysis. The reply has the same shape as the corresponding design tool (summary by default, detail as there) plus case_check {what, tool, rev, buckling_values (member only: source fsm-prepared-now | fsm-current | fsm-in-check | mixed | analytical | not-needed, load_cases, note)}." + SUMMARY_NOTE,
     {
         what: z.enum(['member', 'loads', 'connection', 'lap']).describe("Which check: member | loads | connection | lap"),
         detail: DETAIL_DESIGN,
@@ -1529,7 +1555,7 @@ server.tool("get_energy_recovery", "Element-wise strain energy (membrane vs bend
 // ============================================================
 // AISI S100-16 부재 설계 도구 (현재 단면 · 현재 해석)
 // ============================================================
-const MEMBER_NOTE = "Uses the current section's properties and the DSM values of the current (or prepared) analysis; the design Fy is applied by the engine (Py = Ag·Fy, My = Sf·Fy). Analytical substitutes (App. 2 Pcrd/Mcrd, template-generated properties, conservative fallbacks) are listed in assumptions; report them." + CASE_MERGE_NOTE;
+const MEMBER_NOTE = "Uses the current section's properties and S-S signature-curve FSM buckling values for the member's load families (compression P, bending Mxx) solved with the design Fy on the engine's design half-wavelength grid — prepared on the spot when they are not current, so no run_analysis is needed (dsm_basis_by_family: 'prepared'; only a round tube or a failed preparation falls back to the current analysis, then to analytical formulas, and dsm_warning says why). The design Fy is applied by the engine (Py = Ag·Fy, My = Sf·Fy). A blank length (KxLx / KyLy / KtLt / Lb) gives no verdict for the checks that need it: the engine's ratio from its assumed length is reference only (limit_state_checks item pass null, reference_only, reason) and never a pass or a fail — report it as not evaluated. Analytical substitutes (App. 2 Pcrd/Mcrd, template-generated properties, conservative fallbacks) are listed in assumptions; report them." + CASE_MERGE_NOTE;
 
 const PURLIN_WC = {
     wc_N: z.number().nonnegative().optional().describe("§G5 bearing length N at the supports — in, or mm if units='SI'. With a bend radius (wc_R or the screen's) it enables web crippling + §H3 at every support. Omit → the screen's bearing length (the screen starts with one); 0 = no bearing length — web crippling not checked (the engine treats 0 like an omitted value)."),
@@ -1929,6 +1955,7 @@ const LOAD_FIELDS = {
     brace_points_ft: z.array(z.number().nonnegative()).optional().describe("Discrete lateral brace positions from the left end — ft, or m"),
     i621_conditions_confirmed: z.boolean().optional().describe("The USER's confirmation of §I6.2.1 conditions (i)–(n), which this tool cannot verify from its inputs: both flanges braced laterally at the supports; steel panels Fy ≥ 50 ksi, t ≥ 0.018 in, rib depth ≥ 1-1/8 in, ribs ≤ 12 in o.c., attached to prevent relative movement; glass-fibre blanket insulation 0–6 in; ≥ No. 12 self-drilling screws (or 3/16 in rivets with 1/2 in washers); no stand-off screws; fasteners ≤ 12 in o.c. near the flange centre at a high rib. ASK THE USER — never set it on your own. Uplift R is returned only for a through-fastened deck with a known section and this flag true; report it as a user-confirmed assumption."),
     insulation_in: z.number().nonnegative().optional().describe("Insulation thickness for the simple-span R correction — in, or mm"),
+    load_combination_standard: z.enum(['asce7_10', 'asce7_22', 'kds_41_12_00']).optional().describe("Standard of the load combinations (names and factors follow that standard's numbering): 'asce7_10' ASCE/SEI 7-10 §2.3.2 / §2.4.1 (the screen's initial choice — the results as before), 'asce7_22' ASCE/SEI 7-22 §2.3.1 / §2.4.1, 'kds_41_12_00' KDS 41 12 00:2022 §1.7. The loads you enter must follow THAT standard's load definitions (e.g. strength-level wind of ASCE 7-22 / KDS) — the result's notices and load_combination_standard {edition, reference, key} say which applies; tell the person. ASCE 7-16 is not available (its tables are not verified). Omit → the screen's choice (case input loadComboStandard)."),
     lr_reduced: z.boolean().optional().describe("The roof live load Lr was REDUCED below 20 psf per ASCE 7 §4.8.2 — only then Lr is pattern-loaded (§4.3.3.1). Omit → the screen's check box (initially off: Lr on all spans)."),
     I_span_in4: z.array(z.number().positive()).optional().describe("Strong-axis Ix of the member in EACH span (one per span; laps use the sum of the two members) — in⁴, or mm⁴ if units='SI'. It belongs to the span table (a bundle): omit it in a call that gives spans / supports / laps → the screen's list is cleared and one Ix is used for all spans (the engine states the effect in assumptions; it can change tight checks by about 2 %)."),
 };
@@ -2034,7 +2061,8 @@ server.tool("design_lap_connection",
     + "IN-HOUSE ASSUMPTION (not a specification provision, §A1.2(c) rational analysis): the fastener demand is V_transfer = max(Mu/(d − t), Vu) shared equally by all fasteners — the result's `force_model` describes it; report it to the user as an assumption. "
     + "Without Se (effective section modulus for Mnl — given, or taken as the screen does from the current purlin result at the lap's support) the lap flexure is not checked → pass null / verdict NOT_CHECKED (Sf is used only as a reference value, never in place of Se). "
     + "Demands: a support demand that is blank on the screen and not given is NOT zero: every check that uses it is not evaluated (lap.reason.demand_not_given) and the lap cannot pass — omit Mu_support / Vu_support you were not given and blank a screen value that does not apply (set_case_inputs {connMu: null}). Send 0 only with zero_demand_stated: true when the person stated the support demand is zero. Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. "
-    + "The lap fields of the screen (lap lengths, Mu / Vu at the support, fastener type / diameter, rows, end distance, Pnvs, lap restraint, zero-demand statement) and Fy / Fu are case inputs; d and t come from the model when the call does not give them, and the other arguments count for this call only." + CASE_MERGE_NOTE + VERDICT + DESIGN_CHECKS + " The nested fastener_design has its own design_checks (conn.*)." + SUMMARY_NOTE,
+    + "Verdict of the fastener group (lap.fastener_group, lap.fastener_count): only when the person stated the force model (lap_force_model_confirmed) — otherwise not evaluated, or fail when even that most favourable distribution fails. "
+    + "The lap fields of the screen (lap lengths, Mu / Vu at the support, fastener type / diameter, rows, end distance, Pnvs, lap restraint, zero-demand statement, force-model statement) and Fy / Fu are case inputs; d and t come from the model when the call does not give them, and the other arguments count for this call only." + CASE_MERGE_NOTE + VERDICT + DESIGN_CHECKS + " The nested fastener_design has its own design_checks (conn.*)." + SUMMARY_NOTE,
     {
         d: z.number().positive().describe("Member depth — in, or mm if units='SI'"),
         t: z.number().positive().describe("Member thickness — in, or mm"),
@@ -2064,6 +2092,7 @@ server.tool("design_lap_connection",
         mf: z.number().positive().optional().describe("Bolts: bearing modification factor mf (Table J3.3.1-2; omit → the minimum for the hole type, stated in assumptions)"),
         lap_restrained: z.boolean().optional().describe("The PERSON's statement that the lapped portion is sufficiently restrained against lateral-torsional and distortional buckling (AISI Design Manual Examples II-1A / II-2A assumption). ASK THE USER — never set it on your own. Not stated (here or on the screen) → the lap flexure (Mnℓ = Se·Fy) and, without Mnd, the distortional check are not evaluated and the lap has no verdict unless a check fails. Kept with the review (the screen's 「랩 구속 확인」, the same value as the purlin tab); omit → the screen's statement, false clears it."),
         distortion_restrained: z.boolean().optional().describe("Old name of lap_restrained (same meaning)"),
+        lap_force_model_confirmed: z.boolean().optional().describe("The PERSON's statement that the fastener forces are judged with the in-house distribution model (V_transfer shared EQUALLY by all fasteners) — a self-made assumption, the specification has no formula for lap fastener forces (Commentary J3). ASK THE USER — never set it on your own. true → lap.fastener_group / lap.fastener_count get their verdict from that model. Not stated (here or on the screen — case input lapForceModelConfirmed) → those two checks are NOT EVALUATED (lap.reason.force_model_not_confirmed) unless the model already fails (then fail: it fails under the most favourable distribution); the top-level utilization then leaves the fastener group out."),
         ...CHECK_CONTEXT,
         detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,

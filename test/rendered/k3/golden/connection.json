@@ -1,6 +1,6 @@
 {
  "about": "K3 phase 0 golden — connection. Recorded from the current code; 'k3-change' entries are the behaviour K3 is meant to change, 'defect' entries are findings.",
- "recorded": "2026-11-23",
+ "recorded": "2026-11-25",
  "entries": [
   {
    "id": "SI.validation",
@@ -214,24 +214,6 @@
      "value": "해석 기준응력 295.0, 설계 Fy 295.0 MPa",
      "criterion": "좌굴 해석의 기준응력과 설계 Fy 가 같으면 DSM 값을 그대로 쓴다",
      "note": ""
-    }
-   ],
-   "flipped": [
-    {
-     "step": "K3-6",
-     "from": {
-      "expect": "k3-change",
-      "reason": "K3: the single-connection result is not looked at by any validation item (only the lap result is)"
-     },
-     "date": "2026-11-24"
-    },
-    {
-     "step": "milestone-2-wording",
-     "from": {
-      "expect": "pin",
-      "reason": "K3-6: validation items fixed one by one (k3_review_defects.js, each failing on the old module): engine design_checks verdict wins (D1, D4), cold work not applied = caution with the engine reason (D2), purlin chains run their own analyses (D3), unbounded Fcre = ∞ (D5), items that could not fail made real or removed — wind, φ constants, braced positive region, positive LTB, all-Mn-equal (D6, D16), span limit 33 ft §I6.2.1(h) (D7), SI stresses in values (D10), deflection LL alone vs TL (D13), one half-wavelength rule (D14), purlin region Ly/Cb (D15), Table B4.1-1 limits from spec and engine with an engine B4 row (D17), lengths from the model, not the display units (D19); threshold table with clauses (review.THRESHOLDS)."
-     },
-     "date": "2026-11-24"
     }
    ]
   },

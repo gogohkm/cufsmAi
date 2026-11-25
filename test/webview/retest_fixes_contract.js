@@ -1,7 +1,7 @@
 /* global process, setTimeout */
 // 재테스트 반영(2026-11-25, 단계 H — docs/implementation/20261125-retest-fixes-worklog.md 결정 E1–E3 · E7 · E8 · E9 · E10). 진짜 패널 · 파이썬.
 //  N-3(E1) 다른 엔진으로 버린 대상을 열고 run_case_check member → 설계용 FSM 좌굴값을 다시 준비해 그것으로(앞과 같은 판정비), 그 design_dsm 실행의
-//          행위자 = run_case_check 를 부른 쪽. FSM 이 한 번도 없던 대상은 해석식 + 안내(run_analysis → run_case_check)
+//          행위자 = run_case_check 를 부른 쪽. FSM 이 한 번도 없던 대상도 그 자리에서 FSM 값(결정 R1 — 2026-11-25 남은 작업 H-A 가 바꿨다)
 //  E2     같은 서명 · 계열이 다 있으면 prepare_design_dsm 은 다시 풀지 않는다(reused, 실행 줄 없음)
 //  E3     열 때의 안내가 run_case_check(부재 검토 + FSM 좌굴값) · run_analysis(해석의 보기)를 말한다
 //  E7     new_case: from 없음 → 처음 모델 + 처음 입력, from current → 지금 것. 부재 종류가 부재 유형이면 둘 다 memberType = kind
@@ -88,15 +88,16 @@ async function main() {
     assert.strictEqual((await history()).filter((x) => x.kind === 'design_dsm').length, h.filter((x) => x.kind === 'design_dsm').length, 'no further design_dsm');
     notes.push('E2: a second prepare is reused (no run line), the next check says fsm-current');
 
-    // ── N-3: FSM 이 한 번도 없던 대상 N ──
+    // ── 결정 R1(2026-11-25 남은 작업 H-A — E1 의 「FSM 이 없던 대상은 해석식」 을 뒤집었다): FSM 이 한 번도 없던 대상 N 도 FSM 값으로 ──
     ok(await ai({ action: 'open_case', name: 'N' }), 'open N');
     ok(await ai({ action: 'set_case_inputs', inputs: { memberType: 'flexure', fy: 50, Lb: 60, Cb: 1, Mux: 20 } }), 'inputs N');
     const rn = ok(await ai({ action: 'run_case_check', what: 'member' }), 'run_case_check N');
     const bn = rn.case_check.buckling_values;
-    assert(bn.source === 'analytical' && /no FSM buckling analysis exists for this case/.test(bn.note) && /run_analysis .* followed by run_case_check/.test(bn.note) && rn.dsm_basis === 'none',
-      'never had FSM: analytical with the note ' + JSON.stringify(bn));
-    assert(!(await history()).some((x) => x.kind === 'design_dsm'), 'no design_dsm run for a case without FSM');
-    notes.push('N-3: a case without FSM stays analytical with the note');
+    assert(bn.source === 'fsm-prepared-now' && rn.dsm_basis === 'prepared' && rn.dsm_basis_by_family.Mxx === 'prepared' && !rn.dsm_warning,
+      'never had FSM: the check prepares the FSM values itself (R1) ' + JSON.stringify(bn));
+    const nDsm = (await history()).filter((x) => x.kind === 'design_dsm');
+    assert(nDsm.length === 1 && nDsm[0].by === 'ai', 'one design_dsm run, by the caller: ' + JSON.stringify(nDsm));
+    notes.push('R1: a case without FSM is checked with FSM values prepared on the spot (design_dsm by ai)');
 
     // ── N-7b: AI 가 연 대상의 화면 준비 = ai, 사람이 연 대상 = person ──
     ok(await ai({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: 50 }), 'N load case');
@@ -106,7 +107,8 @@ async function main() {
     await page('runAnalysis', { stressOpts: { type: 'pure_bending', fy: 50 }, loadCase: 'bending_xx_pos' });   // 사람의 해석(P)
     await person({ action: 'open_case', name: 'Z' });
     ok(await ai({ action: 'open_case', name: 'N' }), 'open N by ai');   // 저장된 해석이 되살아난다(설계용 값은 없다)
-    await page('prepareDesignDsm', { member_type: 'flexure', Fy: 50 });   // 화면이 되살린 해석 뒤 저절로
+    // 지금 것이 있으면(E2 · R8 — 설계값이 보기용 해석에 기대지 않아 저장 · 열기를 지난다) 실행이 없다 — Fy 를 바꿔 새로 준비하게
+    await page('prepareDesignDsm', { member_type: 'flexure', Fy: 47 });   // 화면이 되살린 해석 뒤 저절로
     h = await history();
     assert(h[0].kind === 'design_dsm' && h[0].by === 'ai', 'the auto design_dsm after an AI open is by ai (not the person of the previous case): ' + JSON.stringify(h[0]));
     await person({ action: 'open_case', name: 'Z' });

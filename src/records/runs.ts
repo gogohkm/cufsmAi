@@ -47,7 +47,11 @@ export function runSummary(result: any, props?: any): RunSummary {
     }
     if (!result || typeof result !== 'object') { return s; }
     s.pass = typeof result.pass === 'boolean' ? result.pass : null;
-    s.maxRatio = num(result.utilization);
+    // 판정이 아닌 결과의 비(엔진이 가정한 길이 — length_assumed, 주 소요가 빠짐 — utilization_valid false)는 최대 판정비도 지배 항목도 아니다
+    // (화면은 호스트의 값 그대로 「판정 없음」 을 보인다). 그런 결과가 NG(pass false — 평가한 한계상태가 넘는다)이면 넘은 항목(fail)의 비 · 그 항목만
+    const noVerdictRatio = noVerdictUtilization(result);
+    const failOnly = noVerdictRatio && result.pass === false;
+    s.maxRatio = noVerdictRatio ? null : num(result.utilization);
     const checks: any[] = [];
     const collect = (r: any) => { if (r && Array.isArray(r.design_checks)) { checks.push(...r.design_checks); } };
     collect(result);
@@ -61,8 +65,9 @@ export function runSummary(result: any, props?: any): RunSummary {
         if (v === 'pass') { s.counts.pass += 1; } else if (v === 'fail') { s.counts.fail += 1; }
         else if (v === 'not_evaluated') { s.counts.not_evaluated += 1; } else { s.counts.other += 1; }
         const r = num(c.ratio);
-        if (r !== null && (s.maxRatio === null || r > s.maxRatio) && result.utilization === undefined) { s.maxRatio = r; }
-        if (c.governs === true && s.governing.length < 12) {
+        const counted = noVerdictRatio ? (failOnly && v === 'fail' && c.trusted !== false) : result.utilization === undefined;
+        if (r !== null && counted && (s.maxRatio === null || r > s.maxRatio)) { s.maxRatio = r; }
+        if (((c.governs === true && !noVerdictRatio) || (failOnly && v === 'fail' && c.trusted !== false)) && s.governing.length < 12) {
             const id = typeof c.id === 'string' && ID_RE.test(c.id) ? c.id : null;
             if (id) {
                 const loc = c.location && typeof c.location === 'object' ? cleanHeaderText([c.location.region, c.location.check_point].filter(Boolean).join(' '), 60) : null;
@@ -72,6 +77,14 @@ export function runSummary(result: any, props?: any): RunSummary {
     }
     while (s.governing.length > 0 && Buffer.byteLength(canonicalJson(s), 'utf8') > SUMMARY_MAX_BYTES) { s.governing.pop(); }
     return s;
+}
+
+/**
+ * 결과의 맨 위 판정비가 판정이 아닌가 — 엔진이 빈 길이를 가정해 낸 것(length_assumed) 또는 주 소요가 빠져 평가한 것 가운데의 비일 뿐인 것
+ * (utilization_valid false). 그 결과의 최대 판정비 · 지배 항목으로 쓰지 않는다(결정 R1 뒤의 엔진 E-1 · 계약 §6.4).
+ */
+export function noVerdictUtilization(result: any): boolean {
+    return !!result && typeof result === 'object' && (result.length_assumed === true || result.utilization_valid === false);
 }
 
 function readRunBody(event: string, b: Record<string, any>): Record<string, any> | null {

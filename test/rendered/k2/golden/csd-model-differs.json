@@ -1,13 +1,13 @@
 {
  "about": "K2 phase 0 golden — csd-model-differs. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-23",
+ "recorded": "2026-11-25",
  "entries": [
   {
    "id": "modelDiffers.US.diff",
    "expect": "pin",
-   "reason": "Contract §6.3 / §6.4: two new case keys state that a 0 demand really is 0 — designZeroDemandStated (#chk-design-zero-demand) and connZeroDemandStated (#chk-conn-zero-demand), false by default; the K2 non-default value table sets them true.",
+   "reason": "2026-11-25 남은 작업 H-A: 결정 R1 · R8 — 설계용 DSM 값은 엔진의 설계 격자(design_signature_lengths: 0.05 D – 100 D 의 101 점, S-S, m = 1, neigs 10)로 준비하고 부재 검토가 그 자리에서 준비한다. 요청 차례에 design_signature_lengths 가 들고 준비 해석의 길이가 바뀌어 Pcrl · Pcrd · Mcrl · Mcrd(와 Se 등 그 값의 강도 · 표시)가 0.2 % 안에서 움직였다. 보기용 조건만 바뀌면 준비된 값을 다시 써서(dsm 줄이 빠짐), 자동 계산 넷에서는 화면이 해석 뒤 준비하지 않아(get_properties · analyze 줄이 빠짐) 호출 차례가 달라졌다",
    "value": {
-    "exactCount": 113,
+    "exactCount": 115,
     "changed": {
      "analysisBC": {
       "kind": "changed",
@@ -124,6 +124,14 @@
       "reason": "V8-01: new case key connLapSupport (the support the lap spans — lap tab field \"지점\", blank by default). The load-analysis autofill now sets the support with the largest negative moment (the support location on a tie with the span \"-M\" entries) and that support's own lap lengths (left 30 in / 762 mm at support 3 instead of the maximum over all supports). Saved in .csd."
      },
      "date": "2026-11-24"
+    },
+    {
+     "step": "H-A",
+     "from": {
+      "expect": "pin",
+      "reason": "Contract §6.3 / §6.4: two new case keys state that a 0 demand really is 0 — designZeroDemandStated (#chk-design-zero-demand) and connZeroDemandStated (#chk-conn-zero-demand), false by default; the K2 non-default value table sets them true."
+     },
+     "date": "2026-11-25"
     }
    ]
   }

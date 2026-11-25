@@ -169,7 +169,7 @@ const LOAD_BUNDLE: Record<string, string> = { D: 'loadD', Lr: 'loadLr', S: 'load
 const DECK_BUNDLE: Record<string, string> = { type: 'deckType', t_panel: 'deckTPanel', fastener_spacing: 'deckFastenerSpacing',
     kphi_override: 'deckKphiOverride', kx_override: 'deckKxOverride', R_tested_uplift: 'deckRTested' };
 const LOAD_READS = ['spanType', 'nSpans', 'spacing', 'loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL', 'chkPatternLoading',
-    'chkLrReduced', 'spanIxIn4', ...Object.values(DECK_BUNDLE), 'bracePointsFt', 'chkI621Confirmed', 'deckInsulationIn'];
+    'chkLrReduced', 'spanIxIn4', ...Object.values(DECK_BUNDLE), 'bracePointsFt', 'chkI621Confirmed', 'deckInsulationIn', 'loadComboStandard'];
 
 function loadsLike(withDesign: boolean): Mapper {
     return (a, w, cur) => {
@@ -218,7 +218,8 @@ function loadsLike(withDesign: boolean): Mapper {
             if (Object.keys(extra).length) { w.mcpOnly.loads = extra; }
         }
         direct(a, w, { pattern_loading: 'chkPatternLoading', lr_reduced: 'chkLrReduced', I_span_in4: 'spanIxIn4',
-            brace_points_ft: 'bracePointsFt', i621_conditions_confirmed: 'chkI621Confirmed', insulation_in: 'deckInsulationIn' }, used);
+            brace_points_ft: 'bracePointsFt', i621_conditions_confirmed: 'chkI621Confirmed', insulation_in: 'deckInsulationIn',
+            load_combination_standard: 'loadComboStandard' }, used);
         if (a.deck && typeof a.deck === 'object') {
             used.add('deck');
             const d = a.deck;
@@ -317,10 +318,12 @@ const lap: Mapper = (a, w) => {
     material(a, w, used);
     const t: Record<string, string> = { lap_left_in: 'connLapLeft', lap_right_in: 'connLapRight', Mu_support: 'connMu', Vu_support: 'connVu',
         fastener_type: 'connFastenerType', fastener_dia: 'connFastenerDia', n_rows: 'connNRows', end_distance: 'connEdgeDist', Pnvs: 'connLapPnvs' };
-    w.reads.push(...MATERIAL_READS, ...Object.values(t), 'lapRestrained', 'connZeroDemandStated', 'connLapSupport');
+    w.reads.push(...MATERIAL_READS, ...Object.values(t), 'lapRestrained', 'connZeroDemandStated', 'connLapSupport', 'lapForceModelConfirmed');
     direct(a, w, t, used);
     // 계약 §6.3: 0 은 밝혔을 때만 — 그 진술도 검토 상태에(화면의 칸과 같은 키)
     if (a.zero_demand_stated !== undefined) { used.add('zero_demand_stated'); put(w, 'merge', 'connZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated'); }
+    // 결정 R2: 패스너 힘 분배(모든 패스너가 고르게)로 판정한다는 사람의 진술 — 검토 상태의 그 칸(화면 칸과 같은 키)
+    if (a.lap_force_model_confirmed !== undefined) { used.add('lap_force_model_confirmed'); put(w, 'merge', 'lapForceModelConfirmed', a.lap_force_model_confirmed === true, 'lap_force_model_confirmed'); }
     // 계약 §6.3: 랩 구속의 진술(옛 이름 distortion_restrained) — 퍼린과 같은 검토 상태 키
     if (a.lap_restrained !== undefined || a.distortion_restrained !== undefined) {
         used.add('lap_restrained'); used.add('distortion_restrained');
@@ -392,10 +395,12 @@ export function argsNotOnScreen(w: McpWrite): string[] {
 
 /** 화면 단추의 본문이 그 값이면 보내지 않는 칸(requests.ts — _optPos 의 0 이하, 켰을 때만 싣는 진술, 「자동」 선택) */
 const POSITIVE_ONLY = new Set(['wcLo', 'wcEdgeDistance', 'wcFastenerSpacing']);
-const TRUE_ONLY = new Set(['designZeroDemandStated', 'connZeroDemandStated', 'chkRFactor', 'lapRestrained', 'chkI621Confirmed', 'connJ63NotApplicable']);
+const TRUE_ONLY = new Set(['designZeroDemandStated', 'connZeroDemandStated', 'chkRFactor', 'lapRestrained', 'chkI621Confirmed', 'connJ63NotApplicable',
+    'lapForceModelConfirmed']);
 function notSent(k: string, v: unknown): boolean {
     if (POSITIVE_ONLY.has(k)) { return !(typeof v === 'number' && v > 0); }
     if (TRUE_ONLY.has(k)) { return v !== true; }
+    if (k === 'loadComboStandard') { return v === 'asce7_10'; }
     return k === 'wcFamily' && v === 'auto';
 }
 
