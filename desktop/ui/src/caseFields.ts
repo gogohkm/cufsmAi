@@ -32,7 +32,9 @@ export const GROUP_KO: Record<string, string> = {
 export const CASE_KO: Record<string, string> = {
   fy: '설계 Fy', fu: '설계 Fu', presteelGrade: '강종', designMethod: '설계법',
   // 17ad004 다음 — 랩 구간의 구속 진술(없으면 엔진이 퍼린의 랩 구간 · 랩 검토를 「검토 안 함」으로 낸다)
-  lap_restrained: '랩 구간 구속 진술',
+  lap_restrained: '랩 구간 구속 진술', lapRestrained: '랩 구간 구속 진술',
+  // V9a-02 · 계약 §6.3: 「넣은 0 은 정말 0」 진술 — 없으면 0 · 빈 칸의 주 소요는 「주지 않음」(판정 없음). 도구의 zero_demand_stated
+  designZeroDemandStated: '소요 0 진술', connZeroDemandStated: '지점 소요 0 진술',
   // daca0ac — 랩 탭의 「지점」(하중 해석의 자동 채움은 부모멘트가 가장 큰 지점과 그 지점의 랩 길이)
   connLapSupport: '랩 지점',
   memberType: '부재 유형', spanType: '스팬 형식', nSpans: '스팬 수', spacing: '간격',

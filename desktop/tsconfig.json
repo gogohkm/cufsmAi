@@ -11,7 +11,7 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "noEmit": true,
-    "rootDir": "."
+    "rootDir": ".."
   },
   "include": ["host/src/**/*"]
 }

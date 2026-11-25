@@ -95,6 +95,22 @@ export function ratio(r: number | null | undefined, ng: boolean, src: string): s
   return `<span class="num" data-v="${r}" data-src="${esc(src)}" data-u="none" data-x="0" data-ratio="${ng ? 'ng' : 'ok'}">${ratioText(r, ng)}</span>`;
 }
 
+/**
+ * 엔진의 이용률(utilization)을 판정비로 보여도 되는가 — 엔진이 `utilization_valid: false` 를 달면(주 소요를 주지 않음 · 평가하지 못한 한계상태가 있음,
+ * 계약 §6.4) 그 수는 평가한 것 가운데의 비일 뿐이다: 판정 없음으로 읽는다(수를 보이지 않는다). NG(pass false)면 그 비가 NG 의 근거라 그대로.
+ * `x` 는 엔진의 결과(US — utilization_valid · pass 가 있는 것), `u` 는 보일 수(SI 로 바꾼 것일 수 있다)
+ */
+export function utilShown(x: any, u: unknown = x?.utilization): number | null {
+  if (typeof u !== 'number' || !Number.isFinite(u)) { return null; }
+  if (x && typeof x === 'object' && x.utilization_valid === false && x.pass !== false) { return null; }
+  return u;
+}
+/** 이용률이 판정비가 아니다(utilization_valid: false · NG 아님) — 그 자리에 보이는 글 */
+export function noVerdictRatio(why = '엔진이 utilization_valid: false 를 달았다 — 주 소요를 주지 않았거나 평가하지 못한 한계상태가 있어 이 비는 판정비가 아니다'): string {
+  return `<span class="un" data-util-invalid${tip(why)}>판정 없음</span>`;
+}
+export const utilInvalid = (x: any): boolean => !!x && typeof x === 'object' && x.utilization_valid === false && x.pass !== false;
+
 /** 엔진 판정(pass) → 글자 · 모양. true OK · false NG · 그 밖(null · 없음) 판정 없음/미검토 */
 export function verdictOf(pass: unknown, unLabel = '미검토'): { text: string; cls: 'ok' | 'ng' | 'un' } {
   if (pass === true) { return { text: 'OK', cls: 'ok' }; }

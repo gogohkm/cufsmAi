@@ -64,7 +64,18 @@ export interface RecordsPersonFace {
     passed_labels?: Array<{ code: string; text?: string; text_ko?: string }> };
   /** R5-2: 발행(인쇄를 기다린다) — 미리보기의 지문 · 일회용 숫자 */
   issue(req: { fingerprint: string; nonce: string }): Promise<{ item: string; folder: string; files: Array<{ path: string; sha256: string; size: number; role?: string }>; manifest: string }>;
+  /**
+   * V9b(bc8c194): 원자료 「열기」 — 호스트가 확인한 경로. path 는 진짜 경로가 01_원자료 안 · 모든 마디에 링크 없음 · 등록한 해시와 같음 ·
+   * 형식이 문서(src/records/openable.ts)일 때만, 아니면 null 과 why(host.source.outside · link · missing · changed · type)
+   */
+  sourceToOpen(item: string): { path: string | null; name: string; ext: string; openable: boolean; state: 'same' | 'changed' | 'missing' | 'unreadable'; why: string | null; item: string; title: string };
+  /** V9b-04: 믿는 작성자의 손상된 줄 파일(종류 · 줄 파일 · 작성자 · 내 것 · 깨진 줄 · 틈 · 줄어듦) */
+  recordsDamage(): RecordDamageRow[];
+  /** V9b-04: 손상에서 빠져나오기 — quarantine(옆으로 옮김 · 서명된 줄) · accept(백업에서 되살린 줄어든 줄 파일의 지금 끝을 받아들임) */
+  resolveDamage(req: { type: string; stream: string; action: 'quarantine' | 'accept' }): { type: string; stream: string; action: string; movedTo?: string; files?: number };
 }
+/** 손상된 줄 파일 하나(src/records/desk.ts RecordDamage) */
+export interface RecordDamageRow { type: string; stream: string; writer: string; own: boolean; broken: number; chainBreaks: number; shrunk: { expectedSeq: number; foundSeq: number } | null }
 
 /** R2-2: 편집 상태의 시작 · 끝 · 버리기(StcfsdPanel.editSession — 사람의 길로만, MCP 문맥에서는 ok false) */
 export type EditSessionState = 'start' | 'end' | 'discard';

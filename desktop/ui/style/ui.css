@@ -74,6 +74,11 @@ button.btn:disabled { opacity: .45; }
 .drawer table.t th { top: 31px; }
 .vsel span.off { color: var(--text-faint); opacity: .6; }
 .dv .hud .chip[data-opt] { cursor: default; }
+/* D1 — 업무 › 변경의 보기: 칩(왼쪽 묶음)과 「비교 기준 ▾ · 전체 맞춤」(오른쪽 묶음)을 한 틀에. 좁으면(800 px) 오른쪽 묶음이 다음 줄로 — 겹치지 않는다.
+   빈 자리는 누름을 그림으로 흘린다(끌기 · 확대가 그대로) */
+.dv .hud.top2 { top: 8px; left: 8px; right: 8px; flex-wrap: wrap; justify-content: space-between; row-gap: 6px; pointer-events: none; }
+.dv .hud.top2 > .grp { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; pointer-events: auto; min-width: 0; }
+.dv .hud.top2 > .grp.r { margin-left: auto; }
 
 /* 판정비 표(템플릿 04 의 한계상태 표를 가운데로 넓힌 것) */
 .vt-wrap { overflow: auto; background: var(--bg-panel); }

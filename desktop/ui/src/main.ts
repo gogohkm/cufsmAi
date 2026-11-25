@@ -17,6 +17,7 @@ import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { chg, loadChanges } from './changes';
 import { hostText } from './notices';
 import { docs as docsState, doExport, doOpen, initDocs, loadDocs, openPreview } from './docs';
+import { dmg, loadDamage, resolveDamage } from './damage';
 import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes, reportChangeIds, work } from './work';
 import { askTrust, itemOfRow, loadReviews, mark as markTargets, markOf, rowTarget, rv, trust as trustWriter, type MarkTarget } from './reviews';
 import { altAction, alts, compareOf, loadAlts, visibleAlts } from './alts';
@@ -204,7 +205,8 @@ function renderBand(): void {
   const el = $('recband');
   const b = bandHtml();
   el.hidden = !b;
-  if (b) { el.innerHTML = b.html; el.setAttribute('data-kind', b.kind); }
+  // 띠가 없으면 글도 비운다(숨긴 띠에 앞 글 · 단추가 남지 않게 — D1)
+  if (b) { el.innerHTML = b.html; el.setAttribute('data-kind', b.kind); } else if (el.innerHTML) { el.innerHTML = ''; el.removeAttribute('data-kind'); }
 }
 /** 사람만 하는 일 · 대상을 바꾸는 일 — 다리의 /api/person/*. 답의 까닭을 그대로 알린다 */
 async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
@@ -258,6 +260,8 @@ async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
     case 'save-as': fileOp('saveas'); return;
     case 'dismiss': rec.outsideDismissed = `${state.full?.project?.case?.name ?? ''}|${rec.status?.saved_at ?? ''}`; render(); return;
     case 'overwrite': r = await person('overwrite'); break;
+    // V9b-04 · D1: 띠의 「손상 보기」 → 문서 탭의 「기록 손상」(목록 · 격리 · 받아들이기)
+    case 'damage': goDamage(); return;
     default: return;
   }
   if (!r) { return; }
@@ -275,6 +279,21 @@ async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
   if (pendingMake && r.ok && r.data?.project && ['open-project', 'open-folder', 'new-project'].includes(act)) { pendingMake = false; await recAct('make-project-now'); }
 }
 let pendingMake = false;
+/** 기록 손상의 자리(문서 탭 「기록 손상」) — 목록을 다시 읽고 간다 */
+function goDamage(): void {
+  ui.screen = 'review';
+  void loadDamage(!!state.full?.project?.inProject).then(() => { select('doc', 'dmg'); });
+}
+/** 「격리」 · 「받아들이기」 — 다리가 묻는다. 끝나면 목록 · 문서 점검을 다시 읽는다 */
+async function damageAct(el: HTMLElement): Promise<void> {
+  const action = el.getAttribute('data-dmg-act') === 'accept' ? 'accept' : 'quarantine';
+  const r = await resolveDamage(String(el.getAttribute('data-dmg-type') ?? ''), String(el.getAttribute('data-dmg-stream') ?? ''), action);
+  if (!r.cancelled) { toast(r.text, r.ok ? 'info' : 'warning'); }
+  await loadDamage(!!state.full?.project?.inProject);
+  await loadDocs();
+  document.getElementById('info')?.setAttribute('data-dmg-last', `${action}:${r.ok ? (r.cancelled ? 'cancelled' : 'done') : 'refused'}`);
+  render();
+}
 async function projectMenu(x: number, y: number, title = '프로젝트'): Promise<void> {
   await loadRecent();
   const cur = state.full?.project?.project?.name;
@@ -597,7 +616,7 @@ function docAction(t: HTMLElement): boolean {
 }
 
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg', 'ins', 'todo', 'insp'].includes(key) || /^(chg|work|log|todo|insp|ask):/.test(key) ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' || /^(doc|iss|pubf):/.test(key) ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg', 'ins', 'todo', 'insp'].includes(key) || /^(chg|work|log|todo|insp|ask):/.test(key) ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' || /^(doc|iss|pubf):/.test(key) ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub', 'dmg'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -858,6 +877,8 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
         if (types.includes('reviews')) { void loadReviews().then(() => rerender()); }
         if (types.includes('alternatives')) { void loadAlts().then(() => { loadCompares(ui.sel[ui.tab]); rerender(); }); }
         if (types.some(x => ['documents', 'reviews', 'work', 'assumptions'].includes(x))) { void loadDocs().then(() => rerender()); }
+        // 기록 손상(V9b-04) — 어느 종류의 줄 파일이든 바뀌면 다시(격리 · 받아들이기는 cases 와 그 종류를 말한다)
+        if (types.length) { void loadDamage(!!state.full?.project?.inProject).then(() => rerender()); }
         // 고른 업무 항목 · 가정의 전부도 다시(목록을 다시 읽으면 그 전부를 비운다)
         const cur = ui.sel[ui.tab];
         void Promise.all([reloadTypes(types), types.includes('changes') ? loadChanges() : Promise.resolve()]).then(() => prefetchOpenQuestions())
@@ -973,7 +994,7 @@ function boot(): void {
   installMenuClosers();
   installIdle();
   initDialogs(() => renderTitle(editing(), questionOpen()));
-  initDocs({ render: () => rerender(), toast, progress: setProgress });
+  initDocs({ render: () => rerender(), toast, progress: setProgress, goDamage: () => goDamage() });
   initEdit(theme, onEditChange);
   onReport(() => renderShare());
   initTitlebar($('tbar'), {
@@ -1026,6 +1047,9 @@ function boot(): void {
       else { toast(`${rr.querySelector?.('.lnk')?.textContent ?? id} — ${stEl?.textContent ?? '지금 결과에 없음'}${rr.querySelector?.('.why')?.textContent ? ` · ${rr.querySelector('.why')?.textContent ?? ''}` : ''}`, 'warning'); }
       return;
     }
+    // V9b-04 · D1: 기록 손상의 「격리」 · 「받아들이기」(사람의 길 — 다리가 묻는다)
+    const da = t.closest?.('[data-dmg-act]') as HTMLElement | null;
+    if (da) { e.stopPropagation(); if (!da.classList.contains('off') && !dmg.busy) { void damageAct(da); } return; }
     const ss2 = t.closest?.('[data-show-src]');
     if (ss2) {
       e.stopPropagation();

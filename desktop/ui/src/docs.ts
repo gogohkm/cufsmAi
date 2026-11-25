@@ -32,7 +32,10 @@ export const docs: {
 let rerender: () => void = () => undefined;
 let notify: (text: string, level?: 'info' | 'warning') => void = () => undefined;
 let progress: (p: { id: string; title?: string; message?: string; done?: boolean }) => void = () => undefined;
-export function initDocs(o: { render: () => void; toast: typeof notify; progress: typeof progress }): void { rerender = o.render; notify = o.toast; progress = o.progress; }
+let goDamage: () => void = () => undefined;
+export function initDocs(o: { render: () => void; toast: typeof notify; progress: typeof progress; goDamage?: () => void }): void {
+  rerender = o.render; notify = o.toast; progress = o.progress; if (o.goDamage) { goDamage = o.goDamage; }
+}
 
 let docsSeq = 0;
 /** 프로젝트의 대상일 때만 — 목록과 점검 */
@@ -86,9 +89,12 @@ function noteValue(n: Note): string {
   }
 }
 const noteText = (n: Note): string => n.text_ko || hostText(`host.issue.${n.code}`) || SHORT[n.code] || n.code;
-function noteRows(list: Note[], dot: string, attr: string): string {
-  // 템플릿 08: 짧은 이름 + 값, 호스트의 문장(text_ko)은 풍선 — 이름이 없는 code 는 문장 그대로
-  return list.map(n => `<li ${attr}="${esc(n.code)}"${tip(noteText(n))}><span class="dot ${dot}"></span> <span>${esc(SHORT[n.code] ?? noteText(n))}</span><span class="sp"></span><span class="num faint">${esc(noteValue(n))}</span></li>`).join('');
+function noteRows(list: Note[], dot: string, attr: string, inPreview = false): string {
+  // 템플릿 08: 짧은 이름 + 값, 호스트의 문장(text_ko)은 풍선 — 이름이 없는 code 는 문장 그대로.
+  // V9b-04 · D1: 「기록 손상」 은 그것을 푸는 자리로 이끈다(문서 탭 「기록 손상」 — 격리 · 받아들이기). 미리보기에서는 미리보기를 닫고 간다
+  const go = (n: Note): string => (n.code !== 'damaged-records' ? ''
+    : inPreview ? ` <a class="lnk" data-pv="damage">손상 보기 →</a>` : ` <a class="lnk" data-ref-go="doc|dmg" data-dmg-go>손상 보기 →</a>`);
+  return list.map(n => `<li ${attr}="${esc(n.code)}"${tip(noteText(n))}><span class="dot ${dot}"></span> <span>${esc(SHORT[n.code] ?? noteText(n))}</span>${go(n)}<span class="sp"></span><span class="num faint">${esc(noteValue(n))}</span></li>`).join('');
 }
 /** 통과한 점검의 이름 — 호스트의 passed_labels(text_ko) */
 function passedNames(c: IssueCheck): string[] {
@@ -245,7 +251,7 @@ function renderPreview(): void {
   h.innerHTML = `<div class="dialog issue-pv" role="dialog" aria-modal="true" data-issue-preview data-label="${esc(p.label)}" data-expired="${expired ? 1 : 0}">`
     + `<h2>${esc(p.label)} 발행 — ${esc(p.caseName)}</h2>${err}`
     + `<div class="pv-cols"><div class="pv-left">`
-    + `<div class="sec"><h4>발행을 막는 것 ${p.blockers.length}<span class="sp"></span><span class="faint">통과 ${p.passed.length}</span></h4>${blocked ? `<ul class="issrows">${noteRows(p.blockers, 'ng', 'data-blocker')}</ul>` : '<p class="dim" data-no-blockers>없음</p>'}</div>`
+    + `<div class="sec"><h4>발행을 막는 것 ${p.blockers.length}<span class="sp"></span><span class="faint">통과 ${p.passed.length}</span></h4>${blocked ? `<ul class="issrows">${noteRows(p.blockers, 'ng', 'data-blocker', true)}</ul>` : '<p class="dim" data-no-blockers>없음</p>'}</div>`
     + (p.warnings.length ? `<div class="sec"><h4>경고 ${p.warnings.length}</h4><ul class="issrows">${noteRows(p.warnings, 'warn', 'data-warning')}</ul></div>` : '')
     + `<div class="sec"><h4>통과 ${p.passed.length}</h4><p class="faint" data-pv-passed>${esc(passedNames(p).join(' · ') || '없음')}</p></div>`
     + `<div class="sec"><h4>차수 · 폴더</h4><p><b data-pv-revision>${esc(p.label)}</b> · <span class="num">${esc(p.folder)}/</span></p></div>`
@@ -269,6 +275,7 @@ function onPvClick(e: Event): void {
   if (!b || (b as HTMLButtonElement).disabled) { return; }
   const what = b.getAttribute('data-pv');
   if (what === 'close') { closePreview(); return; }
+  if (what === 'damage') { closePreview(); goDamage(); return; }
   if (what === 'reopen') { void openPreview(); return; }
   if (what === 'issue') { void doIssue(); }
 }

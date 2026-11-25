@@ -24,6 +24,8 @@ export interface UnsavedCtx {
   ask(where: UnsavedWhere, q: { message: string; detail: string; items: string[] }): Promise<UnsavedAnswer>;
   /** 이번 세션에 사람이 스스로 정한 지금 파일(대화상자 · 자기 손의 열기 · 저장). 없으면 undefined */
   personFile(): string | undefined;
+  /** 호스트가 쥔 지금 파일의 경로(panel.caseFile() — 같은 프로세스의 사람 얼굴). 없으면 get_unsaved_changes.file 을 쓴다 */
+  caseFile?(): string | null;
   /** 저장 자리를 묻는다(사람이 「저장」을 고른 뒤). 취소면 undefined */
   askSavePath(defaultName: string): Promise<string | undefined>;
   /** 호스트의 저장 길로 그 파일에 쓴다 */
@@ -77,14 +79,25 @@ async function run(ctx: UnsavedCtx, where: UnsavedWhere): Promise<UnsavedResult>
     const nIn = Array.isArray(u.inputs_changed) ? u.inputs_changed.length : 0;
     const what = [nIn ? `검토 입력 ${nIn}칸` : '', u.model_changed ? '모델' : ''].filter(Boolean).join(' · ') || '입력';
     message = `저장하지 않은 변경(${what})이 있습니다 — ${WHERE_KO[where]} 저장할까요?`;
-    detail = u.file ? `파일: ${u.file}` : '아직 파일로 저장한 적이 없습니다.';
+    detail = fileOf(ctx, u) ? `파일: ${fileOf(ctx, u)}` : '아직 파일로 저장한 적이 없습니다.';
   }
   const answer = await ctx.ask(where, { message, detail, items: UNSAVED_ITEMS });
   ctx.log?.(`저장 안 한 변경 — ${where}: ${answer}${failed ? ' (상태를 읽지 못함)' : ''}`);
   if (answer === 'cancel') { return { proceed: false, how: 'asked', answer, failed }; }
   if (answer === 'discard') { return { proceed: true, how: 'asked', answer, failed }; }
-  const s = await saveSafely(ctx, failed ? null : (u.file ?? null), failed ? null : (u.file_origin ?? undefined));
+  const s = await saveSafely(ctx, failed ? null : fileOf(ctx, u), failed ? null : (u.file_origin ?? undefined));
   return { proceed: s.ok, how: 'asked', answer, failed, saved: s.file, note: s.note };
+}
+
+/**
+ * 지금 파일의 경로 — 호스트가 같은 프로세스에 주는 사람의 얼굴(panel.caseFile())이 먼저. 호스트의 답(get_unsaved_changes.file)은 그것이 없을 때만
+ * (V9b-06 · D1: 호스트는 AI 가 읽는 상태 답에 프로젝트 안의 경로를 싣지 않는다 — 화면 · 다리는 답에서 경로를 읽지 않는다)
+ */
+function fileOf(ctx: UnsavedCtx, u: any): string | null {
+  let f: string | null = null;
+  try { f = ctx.caseFile?.() ?? null; } catch { f = null; }
+  if (f) { return f; }
+  return typeof u?.file === 'string' && u.file ? u.file : null;
 }
 
 /** 「저장」의 자리 — 사람이 정한 그 `.csd`(이 프로그램이 쓴 것)만 묻지 않고, 그 밖은 묻는다 */

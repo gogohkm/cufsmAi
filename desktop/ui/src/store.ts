@@ -20,11 +20,13 @@
  * 제품 표로 통째로 SI 로 바꾼 것(quantity 로) — 줄은 그 자리를 가리키기만 한다.
  */
 import { api, last, mcp, type LastEntry } from './bridge';
+import { utilInvalid, utilShown } from './format';
 import { loadRecords } from './records';
 import { loadChanges } from './changes';
 import { loadRecordsWork, prefetchOpenQuestions } from './work';
 import { loadReviews } from './reviews';
 import { loadDocs } from './docs';
+import { loadDamage } from './damage';
 import { loadAlts } from './alts';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
 import { fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
@@ -98,6 +100,8 @@ export interface Run {
   src: string;          // data-src 앞부분(이 결과의 뿌리 — `design:` · `purlin:regions.0.result.` 처럼 뒤에 경로를 바로 붙인다)
   overall: boolean | null;
   utilization: number | null;
+  /** 엔진이 utilization_valid: false 를 달았고 NG 가 아니다 — 이용률은 판정비가 아니다(「판정 없음」) */
+  utilInvalid: boolean;
   governing: string | null;
   rows: CheckRow[];
   /** 퍼린 구간의 검토 지점 */
@@ -298,7 +302,9 @@ function runOf(key: string, scope: Scope, label: string, where: string, us: any,
   return {
     key, area: scope, label, where, result: si, us, src,
     overall: us?.pass === true ? true : us?.pass === false ? false : null,
-    utilization: typeof si?.utilization === 'number' ? si.utilization : null,
+    // 계약 §6.4: utilization_valid: false(NG 아님)면 판정비가 아니다 — 수를 두지 않고 utilInvalid 로(화면은 「판정 없음」)
+    utilization: utilShown(us, si?.utilization),
+    utilInvalid: utilInvalid(us),
     // 지배 검토의 이름 — 그 id 의 name_ko(notices.js forPage)
     governing: typeof us?.governing_check === 'string' ? String(pageOf(us)?.governing_check ?? us.governing_check) : null,
     rows, points, neTexts, notChecked: looseList(us?.not_checked, find), notApplicable, warnings, assumptions, scope: scopeNotes,
@@ -552,6 +558,8 @@ async function load(): Promise<void> {
   await loadReviews();
   await loadAltsIfCaseChanged();
   await loadDocs();
+  // V9b-04 · D1: 믿는 작성자의 손상된 줄 파일(다리의 사람 얼굴) — 띠 · 문서 탭의 「기록 손상」
+  await loadDamage(!!state.full?.project?.inProject);
   if (!state.initialModel) {
     const first = await last(id, ['modelLoaded'], 'first');
     state.initialModel = first?.data.modelLoaded?.message?.data ?? null;

@@ -13,7 +13,9 @@
  * review {mark, targets[]}(R4 — 확인 표시, shown = 화면이 그린 지문) · trust {writer_id, trust}(R4 — 다른 작성자 믿기) ·
  * issue/preview(R5 — 발행 미리보기: 막는 것 · 지문 · 일회용 숫자 + 초안의 HTML) · issue {fingerprint, nonce}(R5 — 발행, 인쇄를 기다린다) ·
  * alternative {op, item?, label?}(R4 — 대안을 사람이 지키기 · 이름 · 숨기기 · 다시 보이기) ·
- * export {item}(R5 — 초안을 사람의 저장 대화상자로) · open-doc {item}(R5 — 초안 · 발행본의 PDF 를 OS 로) · GET doc-file?item=(R5 — 그 HTML, 읽기만)
+ * export {item}(R5 — 초안을 사람의 저장 대화상자로) · open-doc {item}(R5 — 초안 · 발행본의 PDF 를 OS 로) · GET doc-file?item=(R5 — 그 HTML, 읽기만) ·
+ * open-source {id}(원자료 — 호스트가 확인한 경로 sourceToOpen 만) · show-source {id}(탐색기에서 보기) ·
+ * GET damage(V9b-04 — 믿는 작성자의 손상된 줄 파일, 호스트 recordsDamage) · damage/resolve {type, stream, action: quarantine | accept}(묻고 → 호스트 resolveDamage)
  */
 import * as fs from 'node:fs';
 import type * as http from 'node:http';
@@ -26,6 +28,9 @@ import { readBody, sendJson } from './http';
 export const PERSON_BODY_LIMIT = 4 * 1024;
 const KINDS = ['roof-purlin', 'wall-girt', 'floor-joist', 'wall-stud', 'section-only'] as const;
 const KIND_KO: Record<string, string> = { 'roof-purlin': '지붕 퍼린', 'wall-girt': '벽 거트', 'floor-joist': '바닥 장선', 'wall-stud': '스터드', 'section-only': '단면만' };
+/** 기록의 종류(src/records — 호스트 recordsDamage 가 보는 아홉) */
+const DAMAGE_TYPES = ['cases', 'changes', 'runs', 'work', 'assumptions', 'sources', 'reviews', 'alternatives', 'documents'] as const;
+const DAMAGE_TYPE_KO: Record<string, string> = { cases: '대상', changes: '변경', runs: '실행', work: '업무', assumptions: '가정', sources: '원자료', reviews: '확인', alternatives: '대안', documents: '문서' };
 
 export interface PersonDeps {
   host: HostHandle;
@@ -95,6 +100,20 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
     let text: string | null = null;
     if (html) { try { if (fs.statSync(html).size <= 16 * 1024 * 1024) { text = fs.readFileSync(html, 'utf8'); } } catch { text = null; } }
     ok({ item, kind: f.kind, name: html ? path.basename(html) : null, html: text, files: f.files.map(x => path.basename(x)) });
+    return true;
+  }
+  if (name === 'damage' && method === 'GET') {
+    // V9b-04(호스트 bc8c194): 믿는 작성자의 손상된 줄 파일 — 사람의 얼굴(recordsDamage)에서. 경로는 싣지 않는다(종류 · 줄 파일 이름 · 작성자 이름 · 수만)
+    const person = deps.host.recordsPerson();
+    if (!person || !person.currentProject()) { ok({ items: [], project: false }); return true; }
+    try {
+      const items = person.recordsDamage().slice(0, 200).map(d => ({ type: String(d.type), stream: String(d.stream), writer: String(d.writer ?? ''), own: d.own === true,
+        broken: Number(d.broken) || 0, chain_breaks: Number(d.chainBreaks) || 0,
+        shrunk: d.shrunk ? { expected_seq: Number(d.shrunk.expectedSeq) || 0, found_seq: Number(d.shrunk.foundSeq) || 0 } : null,
+        // 받아들임은 줄어들기만 하고 그 밖에는 온전한 줄 파일에만(호스트의 규칙 — 깨진 줄 · 틈이 있으면 격리만)
+        can_accept: !!d.shrunk && !d.broken && !d.chainBreaks }));
+      ok({ items, project: true });
+    } catch (err) { no(200, String((err as Error)?.message ?? err)); }
     return true;
   }
   if (method !== 'POST') { no(405, 'POST'); return true; }
@@ -389,19 +408,53 @@ export async function handlePerson(req: http.IncomingMessage, res: http.ServerRe
         if (!id) { no(400, 'id(원자료)'); return true; }
         const cur = person.currentProject();
         if (!cur) { no(409, '열린 프로젝트가 없다'); return true; }
-        const ls = await deps.action({ action: 'sources', op: 'list', include_others: true });
-        const hit = (Array.isArray(ls?.items) ? ls.items : []).find((x: any) => x?.item === id);
-        if (!hit || typeof hit.file !== 'string') { no(404, '그 원자료가 없다'); return true; }
-        // V9b-02 · V9b-03: 열기는 ① 호스트가 지금 본 상태가 「같음」(등록 때의 해시 — 바뀜 · 없음 · 읽을 수 없음이면 열지 않는다),
-        // ② 경로의 모든 마디에 링크 · junction 이 없고 진짜 경로가 01_원자료 의 진짜 경로 안, ③ 진짜 마지막 확장자가 문서 형식일 때만.
-        // ③ 은 플랫폼(주 프로세스)이 진짜 경로로 다시 본다. 안 되면 「폴더에서 보기」(show-source — 아무것도 실행하지 않는다)
-        const at = sourcePath(cur.dir, hit.file);
-        const v = classifyName(at?.real ?? hit.file);
-        if (!at) { no(409, '원자료 폴더 안의 파일이 아니다(없음 · 링크 · junction · 폴더 밖) — 열지 않는다', { data: { code: 'outside', shown_as: v.shownAs } }); return true; }
-        if (hit.state !== 'same') { no(409, `등록한 뒤 파일이 ${hit.state === 'changed' ? '바뀌었다' : hit.state === 'missing' ? '없어졌다' : '읽히지 않는다'} — 열지 않는다(「폴더에서 보기」)`, { data: { code: 'not-same', state: String(hit.state ?? ''), shown_as: v.shownAs } }); return true; }
-        if (!v.openable) { no(409, `열지 않는 형식이다(${v.shownAs}${v.misleading ? ' — 이름이 다른 형식처럼 보인다' : ''}) — 「폴더에서 보기」`, { data: { code: 'type', shown_as: v.shownAs, misleading: v.misleading } }); return true; }
-        const opened = await deps.platform.openPath(at.real, at.root);
-        ok({ opened, name: path.basename(at.real) });
+        // D1(호스트 bc8c194): 여는 경로는 **호스트가 확인한 것**(person.sourceToOpen — ① 진짜 경로가 01_원자료 안 · 모든 마디에 링크 · junction 없음,
+        // ② 바이트가 등록한 해시와 같음, ③ 진짜 마지막 확장자가 문서 형식(src/records/openable.ts)일 때만 path). 다리는 경로를 짓지 않는다.
+        // 플랫폼(주 프로세스 · 껍데기)은 그 진짜 경로를 다시 본다(vetOpen — 01_원자료 의 진짜 경로 안 · 문서 형식). 안 되면 「폴더에서 보기」
+        const so = person.sourceToOpen(id);
+        const v = classifyName(so.name || id);
+        if (!so.path && !so.name) { no(404, '그 원자료가 없다', { error_code: 'host.source.missing' }); return true; }
+        if (!so.path) {
+          const why = typeof so.why === 'string' ? so.why : 'host.source.missing';
+          const code = why === 'host.source.type' ? 'type' : why === 'host.source.changed' || why === 'host.source.missing' ? 'not-same' : 'outside';
+          const msg = code === 'type' ? `열지 않는 형식이다(${v.shownAs}${v.misleading ? ' — 이름이 다른 형식처럼 보인다' : ''}) — 「폴더에서 보기」`
+            : code === 'not-same' ? `등록한 뒤 파일이 ${so.state === 'changed' ? '바뀌었다' : so.state === 'missing' ? '없어졌다' : '읽히지 않는다'} — 열지 않는다(「폴더에서 보기」)`
+              : '원자료 폴더 안의 보통 파일이 아니다(링크 · junction · 폴더 밖) — 열지 않는다';
+          no(409, msg, { error_code: why, data: { code, why, state: so.state, shown_as: v.shownAs, misleading: v.misleading } });
+          return true;
+        }
+        const opened = await deps.platform.openPath(so.path, path.join(cur.dir, '01_원자료'));
+        ok({ opened, name: path.basename(so.path) });
+        return true;
+      }
+      case 'damage/resolve': {
+        // V9b-04: 기록 손상을 사람이 푼다 — 대상은 호스트가 지금 손상으로 아는 줄 파일만(종류 · 줄 파일 이름 — 경로가 아니다).
+        // quarantine = 그 줄 파일을 .stcfsd/quarantine/ 로 옮기고 서명된 줄 하나 · accept = 백업에서 되살린 줄어든 줄 파일의 지금 끝을 받아들인다.
+        // 실행 전에 사람에게 묻는다(플랫폼의 모달 — 창은 OS 대화상자). 파일을 손으로 고치는 길은 열지 않는다
+        // 본문의 꼴을 먼저(400) — 그다음 호스트의 얼굴 · 프로젝트(409)
+        const type = String(b.type ?? '');
+        const stream = String(b.stream ?? '');
+        const action = String(b.action ?? '');
+        if (!(DAMAGE_TYPES as readonly string[]).includes(type)) { no(400, `type 은 ${DAMAGE_TYPES.join(' · ')}`); return true; }
+        if (!/^w[a-z2-7]{20}(?:-[2-9])?$/.test(stream)) { no(400, 'stream(줄 파일 이름)'); return true; }
+        if (action !== 'quarantine' && action !== 'accept') { no(400, 'action 은 quarantine · accept'); return true; }
+        if (!person) { no(409, '기록을 쓸 수 없다(열쇠 자리가 없다)'); return true; }
+        if (!person.currentProject()) { no(409, '열린 프로젝트가 없다'); return true; }
+        const d = person.recordsDamage().find(x => x.type === type && x.stream === stream);
+        if (!d) { no(409, '그 줄 파일은 지금 손상으로 보이지 않는다 — 목록을 다시 읽는다', { data: { code: 'not-damaged' } }); return true; }
+        if (action === 'accept' && (!d.shrunk || d.broken || d.chainBreaks)) { no(409, '받아들임은 줄어들기만 하고 온전한 줄 파일에만 — 깨진 줄 · 틈이 있으면 격리한다', { data: { code: 'not-acceptable' } }); return true; }
+        const what = `${DAMAGE_TYPE_KO[type] ?? type} 기록 · ${d.writer || stream}${d.own ? '(이 PC 의 작성자)' : ''} · 줄 파일 ${stream}`;
+        const label = action === 'quarantine' ? '격리' : '받아들이기';
+        const yes = await deps.platform.notify({ severity: 'warning', modal: true, items: [label, '취소'],
+          message: action === 'quarantine' ? `손상된 ${what} 을(를) 옆으로 옮길까요(격리)?` : `줄어든 ${what} 의 지금 끝을 받아들일까요?`,
+          detail: action === 'quarantine'
+            ? `그 줄 파일을 프로젝트의 .stcfsd/quarantine/ 로 옮깁니다(지우지 않습니다). 그 줄 파일의 기록은 이 프로젝트의 기록에서 빠지고, 누가 언제 옮겼는지 서명된 한 줄이 남습니다. 깨진 줄 ${d.broken} · 틈 ${d.chainBreaks}${d.shrunk ? ` · 줄어듦 ${d.shrunk.expectedSeq} → ${d.shrunk.foundSeq}` : ''}.`
+            : `백업에서 되살려 줄어든 줄 파일입니다(마지막으로 본 순번 ${d.shrunk?.expectedSeq ?? '?'} → 지금 ${d.shrunk?.foundSeq ?? '?'}). 받아들이면 빠진 ${Math.max(0, (d.shrunk?.expectedSeq ?? 0) - (d.shrunk?.foundSeq ?? 0))}줄은 기록에서 없는 것으로 보고, 받아들였다는 서명된 한 줄이 남습니다.` });
+        if (yes !== label) { ok({ cancelled: true }); return true; }
+        const r = person.resolveDamage({ type, stream, action });
+        deps.log(`[person] 기록 손상 ${action}: ${type}/${stream}`);
+        deps.changed('records');
+        ok({ type: r.type, stream: r.stream, action: r.action, ...(r.movedTo ? { moved_to: r.movedTo } : {}), ...(typeof r.files === 'number' ? { files: r.files } : {}) });
         return true;
       }
       case 'show-source': {
@@ -466,7 +519,7 @@ async function docFiles(deps: PersonDeps, dir: string, item: string): Promise<{ 
 
 /**
  * V9b-03: 원자료의 경로 — 01_원자료 아래의 모든 마디에 링크 · junction 이 없고, 진짜 경로(realpath)가 01_원자료 의 진짜 경로 안의 보통 파일일 때만.
- * (호스트가 같은 확인을 한 경로를 사람의 얼굴로 주면 그것을 쓴다 — 호스트에 바람)
+ * 「폴더에서 보기」(show-source — 아무것도 실행하지 않는다)만 쓴다. 「열기」는 호스트의 sourceToOpen 경로만(그것은 열 수 없는 형식에 경로를 주지 않는다)
  */
 function sourcePath(dir: string, rel: string): { real: string; root: string } | null {
   const root = path.resolve(dir, '01_원자료');

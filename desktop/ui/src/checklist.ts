@@ -14,6 +14,7 @@ import { esc, tip } from './dom';
 import { hhmm, none } from './format';
 import { state, valChanges, type ReportState, type ValItem } from './store';
 import { checkPanel, docs, draftsOf, lastIssue } from './docs';
+import { finder } from './notices';
 
 /** 지금 제품에서 점검 규칙을 고치는 중(K3-6)인가 — 끝나면 false(그러면 화면에 아무 말도 하지 않는다) */
 export const VAL_RULES_CHANGING = true;
@@ -151,7 +152,11 @@ export function reportInfo(key: string): string {
   const res = state.full?.results ?? {};
   const basis = [['buckling_analysis', '좌굴'], ['load_analysis', '하중'], ['member_design', '검토'], ['lap', '랩'], ['connection', '접합부']]
     .filter(([k]) => res[k]?.at).map(([k, t]) => `${t} ${hhmm(res[k].at)}`).join(' · ') || '결과 없음';
-  const notices: string[] = Array.isArray(reply.notices) ? reply.notices.map(String) : [];
+  // 호스트의 보고서 답(generate_report)의 notices 는 옛 글(엔진의 US 문자열 — 부호 없음)이다. 같은 결과 나무 안의 알림을 글로 찾아 그 알림으로
+  // 그린다(notices.js 의 textMap — 한국어 · SI, 보기 계약 4d). 찾지 못한 글은 notices.js 가 그 안의 US 상수만 바꾼다(D1 — u60b 가 찾은 「Vu = 2.001 kips」)
+  const tree = { runs: state.runs.map(x => x.us), lap: state.lap?.us ?? null, conn: state.conn?.us ?? null, loads: state.loads?.us ?? null };
+  const find = finder(tree);
+  const notices: string[] = Array.isArray(reply.notices) ? reply.notices.map((t: unknown) => find(String(t)).text) : [];
   const fail: string[] = Array.isArray(reply.checks?.fail) ? reply.checks.fail : [];
   const ne: string[] = Array.isArray(reply.checks?.not_evaluated) ? reply.checks.not_evaluated : [];
   // R5-3: 프로젝트의 대상이면 발행 전 점검(호스트의 documents check)과 사람의 발행 길 — 아니면 이 화면이 만든 보고서만

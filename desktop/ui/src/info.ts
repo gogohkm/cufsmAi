@@ -5,7 +5,7 @@
  * `지정`(누군가 정함 — 누가인지는 R2) / `단면` · `좌굴 해석`(다른 결과에서 나옴). 엔진의 경고 · 가정 · 범위는 세 목록으로 따로 보인다.
  */
 import { esc, tip } from './dom';
-import { hhmm, none, num, ratio, ratioText, sigText, unitOf, verdictOf } from './format';
+import { hhmm, none, noVerdictRatio, num, ratio, ratioText, sigText, unitOf, utilInvalid, utilShown, verdictOf } from './format';
 import { BC_KO, dimNames, FAMILY_KO, LOADCASE_KO, sectionLabel, TEMPLATE_KO, TYPE_KO, VERDICT_KO } from './names';
 import { assumptionLines, isDefault, memberRuns, noFsmOf, POINT_KO, regionLabel, rowOfKey, state, COMBO_KO, locWords } from './store';
 import { noFsmTag } from './tree';
@@ -16,6 +16,7 @@ import { modeSel } from './center';
 import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
+import { damageInfo } from './damage';
 import { fastenerText, fieldText, finder, noteLi, noteList, pageOf, reasonNote, type Note } from './notices';
 import { actorOf, actorTag, baseOf, changeOf, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
 import { asmInfo, questionsAbout, srcInfo, srcs, work, workInfo } from './work';
@@ -254,7 +255,7 @@ function checksInfo(key: string): string {
   const dcLine = row && row.si?.demand && row.si?.capacity && typeof row.si.demand.value === 'number' && typeof row.si.capacity.value === 'number'
     ? `${esc(String(row.si.demand.symbol ?? ''))} ${qnum(row.si.demand, `${row.src}demand.`, { sig: 3 })} / ${esc(String(row.si.capacity.symbol ?? ''))} ${qnum(row.si.capacity, `${row.src}capacity.`, { sig: 3 })}`
     : '';
-  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}utilization`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : none('판정비 없음')}</span>`
+  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}utilization`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : run.utilInvalid ? noVerdictRatio() : none('판정비 없음')}</span>`
     + ` <span class="dim">${dcLine}${row?.clause ? ` · §${esc(row.clause)}` : ''}${row ? ratioFormTag(row) : ''}</span></div>`
     + (row && (row.kind === 'ne' || row.kind === 'na') ? ((rn => `<div class="dim" data-reason${rn?.code ? ` data-code="${esc(rn.code)}"` : ''}>${esc(rn?.text ?? '')}</div>`)(reasonNote(row.us))) : '')
     + (row ? highestLine(row) : '')
@@ -434,7 +435,7 @@ function connInfo(): string {
   const v = verdictOf(x.pass, '판정 없음');
   const fm = x.force_model;
   const notice = qNotice + (fm && fm.specification_provision === false ? `<div class="notice"><b>자체 가정</b> 패스너 힘 분배는 기준 조항이 아닌 자체 해석이다<span class="dim">${esc(String(fm.clause ?? ''))}</span></div>` : '');
-  return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `${s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} ` : ''}<span class="verdict ${v.cls}">${v.text}</span> ${typeof x.utilization === 'number' ? `<span class="big">${ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`)}</span>` : ''}`
+  return hd('결과 · 접합부 검토', lap ? '랩 접합' : '단일 접합', `${s.state === 'stale' ? `${staleBalloon(['lap', 'connection'])} ` : ''}<span class="verdict ${v.cls}">${v.text}</span> ${utilShown(x) !== null ? `<span class="big">${ratio(x.utilization, x.pass === false, `${lap ? 'lap' : 'conn'}:utilization`)}</span>` : utilInvalid(x) ? `<span class="big">${noVerdictRatio()}</span>` : ''}`
     + (s.state === 'unk' ? ` <span class="dim">${esc(s.note)}</span>` : ''), '')
     + notice
     + sec('판정비', table(lapRatios(x, !!lap)))
@@ -455,10 +456,10 @@ function connInfo(): string {
  */
 function lapRatios(x: any, lap: boolean): string {
   const pre = lap ? 'lap' : 'conn';
-  if (!lap) { return typeof x.utilization === 'number' ? row_('패스너', ratio(x.utilization, x.pass === false, `${pre}:utilization`), '') : ''; }
+  if (!lap) { return utilShown(x) !== null ? row_('패스너', ratio(x.utilization, x.pass === false, `${pre}:utilization`), '') : utilInvalid(x) ? row_('패스너', noVerdictRatio(), '') : ''; }
   const newShape = 'fastener_utilization' in x;
   const fast = newShape ? x.fastener_utilization : x.utilization;
-  return (newShape && typeof x.utilization === 'number' ? row_('지배', `${ratio(x.utilization, x.pass === false, 'lap:utilization')} <span class="faint" data-governing>${esc(String(pageOf(x)?.governing_check ?? ''))}</span>`, '<span class="tag drv">엔진</span>') : '')
+  return (newShape && utilInvalid(x) ? row_('지배', noVerdictRatio(), '<span class="tag drv">엔진</span>') : '') + (newShape && utilShown(x) !== null ? row_('지배', `${ratio(x.utilization, x.pass === false, 'lap:utilization')} <span class="faint" data-governing>${esc(String(pageOf(x)?.governing_check ?? ''))}</span>`, '<span class="tag drv">엔진</span>') : '')
     + (typeof fast === 'number' ? row_('패스너 무리', ratio(fast, fast > 1, newShape ? 'lap:fastener_utilization' : 'lap:utilization'), '') : '')
     + (typeof x.flexure_dcr === 'number' ? row_('랩 구간 휨', ratio(x.flexure_dcr, x.flexure_dcr > 1, 'lap:flexure_dcr'), '') : '');
 }
@@ -514,6 +515,7 @@ export function infoHtml(key: string): string {
   if (reportKindOf(key)) { return reportInfo(key); }
   if (key.startsWith('doc:')) { return draftInfo(key) + (docs.loaded ? checkPanel() : ''); }
   if (key.startsWith('iss:')) { return issueInfo(key); }
+  if (key === 'dmg') { return damageInfo(); }
   if (key === 'pub' || key.startsWith('pubf:')) {
     const l = lastIssue();
     return `<div class="hd"><div class="k">발행<span class="sp"></span></div><div class="ttl">${l ? `마지막 R${l.revision} — ${l.state_ko}` : '발행 없음'}</div></div>` + (docs.loaded ? checkPanel() : '');

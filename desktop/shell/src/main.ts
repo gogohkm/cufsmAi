@@ -238,11 +238,12 @@ async function openExternal(url: string): Promise<boolean> {
 }
 
 /**
- * R3-3: 프로젝트의 원자료 파일을 OS 의 기본 앱으로 연다 — 다리가 원자료 폴더 안의 파일임을 확인한 경로만 온다. 내용은 읽지 않는다(AI 에게 가지 않는다).
- * 시험에서는 열지 않고 기록만
+ * R3-3: 프로젝트의 원자료 파일을 OS 의 기본 앱으로 연다 — 호스트가 확인한 경로(person.sourceToOpen — 01_원자료 안 · 링크 없음 · 등록한 해시 ·
+ * 문서 형식)만 다리를 거쳐 온다. 내용은 읽지 않는다(AI 에게 가지 않는다). 시험에서는 열지 않고 기록만
  */
 async function openLocalFile(abs: string): Promise<boolean> {
-  // V9b-02: 껍데기의 마지막 문 — 진짜 경로의 진짜 마지막 확장자가 문서 형식이 아니면 shell.openPath 에 닿지 않는다(다리의 플랫폼도 본다)
+  // V9b-02 · D1: 껍데기에 남은 것은 진짜 경로의 다시 보기뿐 — 그 진짜 경로의 진짜 마지막 확장자가 문서 형식(호스트가 쥔 목록 src/records/openable.ts)이
+  // 아니면 shell.openPath 에 닿지 않는다(다리의 플랫폼도 01_원자료 의 진짜 경로 안인지 본다)
   const v = vetOpen(abs);
   if (!v.ok || !v.real) { diag.externalOpened.push(`refused:${path.basename(v.real ?? abs)}`); log(`원자료 열지 않음 ${path.basename(v.real ?? abs)}: ${v.why ?? ''}`, 'warn'); return false; }
   diag.externalOpened.push(`file:${path.basename(v.real)}`);
@@ -366,6 +367,7 @@ async function confirmUnsaved(where: UnsavedWhere): Promise<boolean> {
       return picked === q.items[0] ? 'save' : picked === q.items[1] ? 'discard' : 'cancel';
     },
     personFile: () => bridge?.personFile(),
+    caseFile: () => host?.caseFile() ?? null,
     askSavePath,
     saveProject: async file => { const r = await host!.saveProject(file); if (r.ok) { bridge?.setCurrentFile(r.file); } return r; },
     flush: where === 'close' ? async () => { flushed = await flushDesigner(); } : undefined,
