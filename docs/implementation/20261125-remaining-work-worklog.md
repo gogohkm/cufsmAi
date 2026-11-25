@@ -47,7 +47,7 @@
 | C | CI — 맞춘 lockfile(R5b) | — | 할 것 없음 — 이미 추적되고 있다(`39bf9f8`), `npm ci --dry-run` 통과. 작업문서 8.1 의 5b 가 낡은 줄이었다 |
 | E2 · H-C | 검증이 찾은 것 고치기 — 엔진(길이와 상관없는 하한을 다 본다 · H1.2 의 지나친 막음 · 랩 패스너 수 · `Lb: None` · 지진 부호의 고지 · 랩의 `utilization_valid`), 호스트(cFSM 구속이 설계 좌굴값에 새는 것 · 준비 실패의 표시 · 화면의 자동 준비가 쓰는 Fy · 저장된 좌굴값의 서명) | `python/**` / `src/**` · `webview/**` · `test/**` | 끝(`d10d5aa` · `884caf6` · 화면 `a6ef020`) |
 | M | 마일스톤 — 닿는 시험 전부 한 번(파이썬 전체 · 호스트 계약 · 고정값 · 데스크톱 전체), 인수인계 4.2 의 재확인, 설치 파일 · 포장본 | — | 끝 — 모두 통과, 설치 파일 2026-11-25 17:02 |
-| M3 | 마일스톤 3 — 깨끗한 체크아웃에서 설치 파일 · 포장본 시험 | 따로 받은 폴더 | 진행 중 |
+| M3 | 마일스톤 3 — 깨끗한 체크아웃에서 설치 파일 · 포장본 시험 | 따로 받은 폴더 | 끝 — 설치 파일 · 포장본 59/59, 찾은 것을 고치고 다시 확인(`0ac65b3` · `c3d1892`) |
 
 ---
 
@@ -169,14 +169,30 @@ D2 가 더 찾은 엔진의 둘(랩이 판정 없이도 판정비를 싣는다 �
 | k2(`npm run test:k2`) | 21/21 단계, 고정값 불일치 0 |
 | 데스크톱(`cd desktop && npm test`) — 형 검사 · 빌드 · 연기 53/53 · 다리 94/94 · 연결 28/28 · 화면 371/371 · 설치 파일 단위 11/11 | 통과 |
 | 껍데기(`cd desktop/shell && npm test`) — 19/19 · 53/53 · 47/47 | 통과 |
-| 설치 파일(`npm run installer`) | `desktop/installer/build/dist/StCFSD-Setup-0.1.1-x64.exe` — 2026-11-25 17:02, 147.8 MiB(이 PC 에만) |
+| 설치 파일(`npm run installer`) | `desktop/installer/build/dist/StCFSD-Setup-0.1.1-x64.exe` — 2026-11-25 17:02, 147.8 MiB(이 PC 에만). M3 의 수정 뒤 `0ac65b3` 의 내용으로 다시 만들었다 — **17:25**, 포장본 59/59 |
 | 포장본(`npm run test:packaged`) | 59/59 |
 
 인수인계 4.2 의 재확인(P0 발행 경합 · P1 랩 · 부재 · 접합의 주된 소요 · P1 원자료 열기)은 위 실행에 들어 있다 — `records_issue_race_contract` · `lap_statement_contract`(호스트 계약 묶음), 파이썬 전체, 화면의 r38, 껍데기의 1d.
 
-### M3 — 깨끗한 체크아웃(진행 중)
+### M3 — 깨끗한 체크아웃(끝)
 
-(끝나면 적는다)
+**첫 실행(에이전트 — `a6ef020` 을 `C:\Coding_Works\_m3_stcfsd` 에 받아).** 설치 파일이 만들어지고 포장본 59/59. 손으로 돌아간 곳 하나와 찾은 것:
+
+| # | 찾은 것 | 한 일 |
+|---|---|---|
+| A | `npm ci` 는 Electron 의 실행 파일을 받지 않는다(Electron 45 에는 postinstall 이 없다) — `npm run installer` 가 「electronDist does not exist」 로 멈춘다. 이 PC 는 한 번 띄운 적이 있어 드러나지 않았다 | `installer/build.mjs` 가 없으면 `install.js` 로 받는다 |
+| B | `npm run test:quick` 이 린트에서 멈춘다 — 닿지 않는 줄(`caseKeeper.ts`) · 쓰지 않는 변수(`retest_fixes_contract.js`) | 고침 |
+| C | 문서대로 `npm run build` 를 하면 추적 중인 `media/viewer3d*`(낡은 번들)와 `mcp-server.js.map` 이 바뀐다 | 번들을 지금 것으로. 소스맵은 LF 소스에서 다시 만들어 커밋 — 작업 폴더의 소스가 CRLF 였을 때 만든 것이 커밋되어 있었다(CI 의 mcp-parity 도 같은 까닭으로 걸린다) |
+| D | 포장본 시험이 Bandizip(`bz.exe`)을 쓴다 — 준비 문서에 없다 | 인수인계 2.1 에 |
+| E | 인수인계 2.2 의 「`npm ci` 가 실패하면 `npm install`」 은 낡았다(`npm ci` 가 된다) | 고침 |
+| G | 설치 파일에 들어가는 140 파일 가운데 42 가 줄끝만 달랐다(체크아웃이 `core.autocrlf` 를 따라 CRLF) — 기능은 같지만 PC 마다 바이트가 다르다. 엔진 지문은 줄끝을 무시한다(`server.py` 의 `engine_id_of`) | `.gitattributes` 를 `* text=auto eol=lf` 로 |
+| H | `npm audit --omit=dev`: 루트 9건(MCP SDK 를 거쳐 오는 `proxy-addr` 치명 1 — express 는 번들에 없다, 번들에 드는 `zod 4.3.6` · `@modelcontextprotocol/sdk 1.29.0` 은 높음), 껍데기 6건(electron-builder — 빌드 때만) | 하지 않았다(판 올림은 동작이 바뀔 수 있다 — 4절) |
+
+판: node 22.20.0 · npm 11.7.0 · 묶는 Python 3.13.14 + numpy 2.4.4 + scipy 1.17.1 · Electron 45.2.3 · electron-builder 26.18.0. 사용자 프로필의 저장소에서 온 것: Electron 의 zip(`%LOCALAPPDATA%\electron\Cache`), NSIS · 7zip(`%LOCALAPPDATA%\electron-builder\Cache`), npm · pip. 환경 변수는 쓰지 않았다.
+
+**다시 확인(오케스트레이터).** ① `0ac65b3` 을 새로 받아(`_m3b_stcfsd`): Electron 의 `dist` 가 없는 채로 `npm run installer` → 스스로 받고 설치 파일 → 포장본 59/59(손댄 곳 없음). 빌드 뒤 `mcp-server.js.map` 하나가 바뀐 채였다 → 소스맵을 다시 만들어 커밋(`c3d1892`). ② `c3d1892` 를 새로 받아(`_m3c_stcfsd`): `npm ci` → `npm run build` 뒤 `git status` 가 비어 있다, `npm run test:quick` 통과. 받은 폴더 셋은 모두 지웠다.
+
+**줄끝.** `.gitattributes` 를 바꾼 뒤 작업 폴더의 사본 134개(색인은 LF, 사본은 CRLF 이던 것)를 LF 로 다시 받았다 — 색인의 내용은 그대로다(파일마다 줄끝 말고 차이가 없음을 본 뒤). 그 뒤 파이썬 508 · 호스트 계약 묶음 · 기록 · `test:quick` 을 다시 돌려 통과.
 ---
 
 ## 4. 남은 것
@@ -205,3 +221,5 @@ D2 가 더 찾은 엔진의 둘(랩이 판정 없이도 판정비를 싣는다 �
 - 화면 값과 호스트 값을 맞대는 검사(R11): 12번째 자리의 1 은 그 값이 다른 단위의 눈금에 우연히 앉으면 지나갈 수 있다(11번째 자리부터는 늘 걸린다).
 - 퍼린 38구간 요약의 크기는 시험의 기준(40 KB)까지 여유가 거의 없다(그대로).
 - 독립 검증은 진짜 웹뷰와 둥근 모서리 단면에서의 격자 정확도를 보지 못했다.
+- `npm audit` 의 의존성 경고(M3 의 H) — MCP SDK · zod 의 판 올림은 도구의 동작이 바뀔 수 있어 따로 본다.
+- `Ref_Source/` · `Example/` · 뿌리의 설정 파일 등 280개는 작업 폴더의 사본이 아직 CRLF 다(색인은 LF — 다음에 받을 때 LF 가 된다. 빌드에 들어가지 않는다).
