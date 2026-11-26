@@ -25,7 +25,8 @@ export interface AsmItem {
   item: string; text: string; truncated?: boolean; status: string; closed: boolean; origin: string; written_by: string; scope_of: string;
   person_confirmed: boolean; blocks_issue: boolean; sources?: string[];
 }
-export interface SrcItem { item: string; title: string; kind: string; file: string; sha12: string; size: number; state: string; written_by: string; registered_at: string }
+/** 원자료 한 줄 — openable 은 호스트가 쥔 한 목록(src/records/openable.ts)으로 본 「문서 보기로 열 수 있는 형식」(bc8c194) */
+export interface SrcItem { item: string; title: string; kind: string; file: string; sha12: string; size: number; state: string; written_by: string; registered_at: string; openable?: boolean }
 
 interface ListState<T> { items: T[]; err?: string; othersOmitted: number; unverified: number; note?: string }
 export const work: ListState<WorkItem> & { full: Map<string, any> } = { items: [], othersOmitted: 0, unverified: 0, full: new Map() };
@@ -241,16 +242,18 @@ export function srcInfo(key: string): string {
   const s = srcs.items.find(x => x.item === id);
   if (!s) { return `<div class="hd"><div class="ttl">원자료</div></div>${none(srcs.err ? `읽지 못함 — ${srcs.err}` : '그 원자료가 없다')}`; }
   const st = SRC_STATE[s.state] ?? SRC_STATE.unknown;
-  // V9b-02: 형식은 진짜 마지막 확장자로(이름만으로 보이기 — 여는 결정은 주 프로세스가 진짜 경로로 다시 한다). 바뀐 원자료는 열지 않는다
+  // V9b-02 · D1: 열 수 있는 형식인가는 호스트의 답(sources 의 openable — 호스트가 쥔 한 목록). 그 답이 없으면 열지 않는다.
+  // 「실제 형식」 글은 이름으로 보이기만(classifyName — 진짜 마지막 확장자). 여는 결정은 다리가 호스트의 sourceToOpen 경로로, 껍데기가 진짜 경로로 다시 한다
   const fv = classifyName(s.file);
-  const canOpen = fv.openable && s.state === 'same';
+  const hostOpenable = s.openable === true;
+  const canOpen = hostOpenable && s.state === 'same';
   return `<div class="hd"><div class="k">원자료 · ${esc(SRC_KIND[s.kind] ?? s.kind)}${writerTag(s.written_by)}${esc(s.item)}<span class="sp"></span><span class="verdict ${st.cls}" data-src-state="${esc(s.state)}">${esc(st.t)}</span></div>`
     + `<div class="ttl" data-src-title>${esc(s.title)}</div><div class="dim" data-src-file>${esc(s.file)}</div>`
-    + `<div class="${fv.openable ? 'faint' : 'warn'}" data-src-type="${esc(fv.kind)}"${fv.misleading ? ' data-src-misleading' : ''}>실제 형식 ${esc(fv.shownAs)}${fv.misleading ? ' — 이름이 다른 형식처럼 보인다(진짜 형식은 마지막 확장자)' : ''}</div></div>`
+    + `<div class="${hostOpenable ? 'faint' : 'warn'}" data-src-openable="${hostOpenable ? 1 : 0}" data-src-type="${esc(fv.kind)}"${fv.misleading ? ' data-src-misleading' : ''}>실제 형식 ${esc(fv.shownAs)}${fv.misleading ? ' — 이름이 다른 형식처럼 보인다(진짜 형식은 마지막 확장자)' : ''}</div></div>`
     + sec('파일', `<dl class="kv"><dt>해시</dt><dd class="num">${esc(s.sha12)}…</dd><dt>크기</dt><dd class="num">${esc(String(s.size))} B</dd><dt>등록</dt><dd>${esc(hhmm(s.registered_at))}</dd></dl>`
       + `<div class="btns">${canOpen ? `<span class="btn" data-open-src="${esc(s.item)}"${tip('OS 의 기본 앱으로 연다 — 문서 형식이고 등록한 해시와 같을 때만(사람의 화면에서만). 내용은 AI 에게 가지 않는다')}>열기</span>` : ''}`
       + `<span class="btn ghost" data-show-src="${esc(s.item)}"${tip('탐색기에서 이 파일을 고른 채 폴더를 연다 — 아무것도 실행하지 않는다')}>폴더에서 보기</span>`
-      + `${canOpen ? '' : `<span class="faint" data-no-open>${esc(!fv.openable ? '이 형식은 열지 않는다' : '등록한 뒤 바뀐 · 없는 · 읽을 수 없는 원자료는 열지 않는다')}</span>`}</div>`,
+      + `${canOpen ? '' : `<span class="faint" data-no-open>${esc(!hostOpenable ? '이 형식은 열지 않는다' : '등록한 뒤 바뀐 · 없는 · 읽을 수 없는 원자료는 열지 않는다')}</span>`}</div>`,
     '이름 · 해시 앞 12 · 크기 · 상태(같음 · 바뀜 · 없음)만 — 프로그램은 내용을 읽지 않는다(AI 에게 주지 않는다)');
 }
 

@@ -17,6 +17,7 @@ import { beginEdit, editChanges, editStripHtml, endEdit } from './editstrip';
 import { chg, loadChanges } from './changes';
 import { hostText } from './notices';
 import { docs as docsState, doExport, doOpen, initDocs, loadDocs, openPreview } from './docs';
+import { dmg, loadDamage, resolveDamage } from './damage';
 import { fetchFull, openQuestions, prefetchOpenQuestions, reloadTypes, reportChangeIds, work } from './work';
 import { askTrust, itemOfRow, loadReviews, mark as markTargets, markOf, rowTarget, rv, trust as trustWriter, type MarkTarget } from './reviews';
 import { altAction, alts, compareOf, loadAlts, visibleAlts } from './alts';
@@ -30,7 +31,7 @@ import { initStart, renderStart } from './start';
 import { makeReport, refresh, rowOfKey, setRunning, setValRunning, state, type Stage } from './store';
 import { bandHtml, KIND_KO, loadRecent, person, rec } from './records';
 import { flashTip, installTips } from './tips';
-import { claudeDone, claudeStatus, initTitlebar, renderClaude, renderFollow, renderTitle, type ClaudeStatus } from './titlebar';
+import { claudeDone, claudeStatus, fitTitle, initTitlebar, renderClaude, renderFollow, renderTitle, type ClaudeStatus } from './titlebar';
 import { buildTree, findNode, keysUnder, setTreeFilter, TABS, treeFilter, treeHtml, type Tab } from './tree';
 import { UNITS_NOTE } from './units';
 import { mount3d } from './v3d';
@@ -134,27 +135,72 @@ function openDrop(): { key: string; why: string; kinds: string[] } | null {
   const why = OPEN_WHY.find(([re]) => re.test(String(last.reason)))![1];
   return { key: `${String(last.invalidated_at ?? '')}|${String(last.reason)}`, why, kinds };
 }
+const DROP_KO: Record<string, string> = { buckling_analysis: '좌굴 해석', load_analysis: '하중 해석', member_design: '부재 검토', design_dsm: '설계용 좌굴값', lap: '랩 접합', connection: '단일 접합' };
+/**
+ * [다시 계산]의 차례(E4) — 버린 것을 차례로: 좌굴 해석(버렸으면 — run_analysis, MCP 도구와 같은 호스트 동작) → 부재 검토(run_case_check member —
+ * 호스트가 그 검토가 쓰는 설계용 좌굴값을 함께 만든다) → 랩 · 단일 접합(버렸으면). 부재 검토는 늘 한다(지금까지와 같이)
+ */
+type RecStep = { key: string; name: string; action: string; params: Record<string, unknown> };
+function recomputePlan(kinds: string[]): RecStep[] {
+  const out: RecStep[] = [];
+  if (kinds.includes('buckling_analysis')) { out.push({ key: 'buckling_analysis', name: '좌굴 해석', action: 'run_analysis', params: {} }); }
+  out.push({ key: 'member_design', name: '부재 검토', action: 'run_case_check', params: { what: 'member' } });
+  if (kinds.includes('lap')) { out.push({ key: 'lap', name: '랩 접합', action: 'run_case_check', params: { what: 'lap' } }); }
+  if (kinds.includes('connection')) { out.push({ key: 'connection', name: '단일 접합', action: 'run_case_check', params: { what: 'connection' } }); }
+  return out;
+}
+let recomputeNow = '';
 function renderOpenNotice(): void {
   const el = $('opennotice');
   const d = openDrop();
   el.hidden = !d || d.key === noticeDismissed;
   if (!d || el.hidden) { return; }
-  const KO: Record<string, string> = { buckling_analysis: '좌굴 해석', load_analysis: '하중 해석', member_design: '부재 검토', design_dsm: '설계용 좌굴값', lap: '랩 접합', connection: '단일 접합' };
-  el.innerHTML = `<b data-open-notice>입력만 열었습니다 — ${esc(d.why)}</b><span class="faint">버린 결과: ${esc(d.kinds.map(k => KO[k] ?? k).join(' · '))}</span><span class="sp"></span>`
-    + `<span class="btn${recomputing ? ' off' : ''}" data-act="recompute"${tip('화면의 입력으로 부재 검토를 다시 돌린다(run_case_check — 화면의 「설계 검토 실행」과 같은 요청). Claude 에게 「다시 계산해」라고 해도 된다')}>${recomputing ? '계산 중…' : '다시 계산'}</span>`
+  const plan = recomputePlan(d.kinds).map(s => s.name).join(' → ');
+  el.innerHTML = `<b data-open-notice>입력만 열었습니다 — ${esc(d.why)}</b><span class="faint">버린 결과: ${esc(d.kinds.map(k => DROP_KO[k] ?? k).join(' · '))}</span><span class="sp"></span>`
+    + `<span class="btn${recomputing ? ' off' : ''}" data-act="recompute" data-plan="${esc(plan)}"${tip(`버린 것을 화면의 입력으로 차례로 다시 돌린다 — ${plan}. 좌굴 해석은 run_analysis(화면의 「해석 실행」), 부재 검토는 run_case_check(화면의 「설계 검토 실행」과 같은 요청 — 그 검토가 쓰는 설계용 좌굴값도 함께). 한 단계가 안 되어도 나머지는 해 본다. Claude 에게 「다시 계산해」라고 해도 된다`)}>${recomputing ? `${esc(recomputeNow || '계산')} 중…` : '다시 계산'}</span>`
     + `<span class="btn ghost" data-act="notice-close"${tip('이 알림을 닫는다(까닭은 결과 탭의 낡음에 남는다)')}>닫기</span>`;
+}
+/** run_case_check 의 답이 밝힌 좌굴값의 출처(호스트가 적으면 — 이름이 달라도 받는다). 없으면 '' */
+function bucklingUsed(r: any): string {
+  const cc = r?.case_check;
+  const b = cc?.buckling_values ?? cc?.bucklingValues ?? cc?.buckling ?? null;
+  const src = typeof b === 'string' ? b : typeof b?.source === 'string' ? b.source : typeof b?.kind === 'string' ? b.kind : '';
+  if (!src) { return ''; }
+  // 호스트 2차: analysis-fallback = 설계용 서명곡선 값을 준비하지 못해 지금 좌굴 해석(그 해석의 반파장 · 경계조건)이 채웠다 — 결과의 [DSM] 경고가 그 까닭
+  if (/^analysis[-_ ]?fallback$/i.test(src)) { return '설계용 서명곡선 값을 준비하지 못해 지금 좌굴 해석의 값을 썼다 — 결과의 [DSM] 경고'; }
+  if (/^mixed$/i.test(src)) { return '일부 하중군만 FSM 값, 나머지는 해석식 좌굴값으로 계산했다 — 결과의 [DSM] 경고'; }
+  if (/^not[-_ ]?needed$/i.test(src)) { return '좌굴값이 필요 없는 검토(인장)'; }
+  if (/^fsm[-_ ]?in[-_ ]?check$/i.test(src)) { return '퍼린 검토가 스스로 S-S 서명곡선을 풀어 FSM 좌굴값을 썼다'; }
+  if (/prepared[-_ ]?now|re-?prepared/i.test(src)) { return 'FSM 좌굴값을 다시 준비해 썼다'; }
+  if (/^fsm/i.test(src)) { return 'FSM 좌굴값을 썼다'; }
+  if (/analytic/i.test(src)) { return '해석식 좌굴값으로 계산했다(FSM 값을 준비하지 못함 · 원형관) — 결과의 [DSM] 경고'; }
+  return `좌굴값: ${src}`;
 }
 async function recompute(): Promise<void> {
   if (recomputing) { return; }
+  const d = openDrop();
   recomputing = true;
   render();
-  const d = openDrop();
-  const r = await mcp<any>('run_case_check', { what: 'member' });
-  let err = r?.error ? String(r.error) : '';
-  if (!err && d?.kinds.includes('lap')) { const l = await mcp<any>('run_case_check', { what: 'lap' }); if (l?.error) { err = `랩: ${String(l.error)}`; } }
+  const done: string[] = [];
+  const failed: string[] = [];
+  let used = '';
+  // 한 단계가 안 되어도 다음 단계는 해 본다 — 무엇을 했고 무엇을 못 했는지 그대로 알린다
+  for (const s of recomputePlan(d?.kinds ?? [])) {
+    recomputeNow = s.name;
+    renderOpenNotice();
+    const r = await mcp<any>(s.action, s.params);
+    const err = r?.error ? String(r.error) : r?.success === false ? String(r?.message ?? '실패') : '';
+    if (err) { failed.push(`${s.name}(${err})`); continue; }
+    done.push(s.name);
+    if (s.key === 'member_design') { used = bucklingUsed(r); }
+  }
   recomputing = false;
-  if (err) { toast(`다시 계산하지 못했다 — ${err}. Claude 에게 「다시 계산해」라고 해도 된다`, 'warning'); }
-  else if (d) { noticeDismissed = d.key; toast('화면의 입력으로 다시 계산했다(부재 검토)', 'info'); }
+  recomputeNow = '';
+  const fsmFailed = failed.some(f => f.startsWith('좌굴 해석(')) && done.includes('부재 검토');
+  const usedTxt = used ? ` · ${used}` : fsmFailed ? ' · 부재 검토는 새 좌굴 해석 없이 계산했다(결과 › 부재 검토의 좌굴 값의 출처)' : '';
+  if (failed.length) {
+    toast(`다시 계산 — 한 것: ${done.length ? done.join(' → ') : '없음'} · 하지 못한 것: ${failed.join(' · ')}${usedTxt}. Claude 에게 「다시 계산해」라고 해도 된다`, 'warning');
+  } else if (d) { noticeDismissed = d.key; toast(`화면의 입력으로 다시 계산했다 — ${done.join(' → ')}${usedTxt}`, 'info'); }
   scheduleRefresh();
   render();
 }
@@ -164,7 +210,8 @@ function renderBand(): void {
   const el = $('recband');
   const b = bandHtml();
   el.hidden = !b;
-  if (b) { el.innerHTML = b.html; el.setAttribute('data-kind', b.kind); }
+  // 띠가 없으면 글도 비운다(숨긴 띠에 앞 글 · 단추가 남지 않게 — D1)
+  if (b) { el.innerHTML = b.html; el.setAttribute('data-kind', b.kind); } else if (el.innerHTML) { el.innerHTML = ''; el.removeAttribute('data-kind'); }
 }
 /** 사람만 하는 일 · 대상을 바꾸는 일 — 다리의 /api/person/*. 답의 까닭을 그대로 알린다 */
 async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
@@ -218,6 +265,8 @@ async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
     case 'save-as': fileOp('saveas'); return;
     case 'dismiss': rec.outsideDismissed = `${state.full?.project?.case?.name ?? ''}|${rec.status?.saved_at ?? ''}`; render(); return;
     case 'overwrite': r = await person('overwrite'); break;
+    // V9b-04 · D1: 띠의 「손상 보기」 → 문서 탭의 「기록 손상」(목록 · 격리 · 받아들이기)
+    case 'damage': goDamage(); return;
     default: return;
   }
   if (!r) { return; }
@@ -235,6 +284,21 @@ async function recAct(act: string, el?: HTMLElement | null): Promise<void> {
   if (pendingMake && r.ok && r.data?.project && ['open-project', 'open-folder', 'new-project'].includes(act)) { pendingMake = false; await recAct('make-project-now'); }
 }
 let pendingMake = false;
+/** 기록 손상의 자리(문서 탭 「기록 손상」) — 목록을 다시 읽고 간다 */
+function goDamage(): void {
+  ui.screen = 'review';
+  void loadDamage(!!state.full?.project?.inProject).then(() => { select('doc', 'dmg'); });
+}
+/** 「격리」 · 「받아들이기」 — 다리가 묻는다. 끝나면 목록 · 문서 점검을 다시 읽는다 */
+async function damageAct(el: HTMLElement): Promise<void> {
+  const action = el.getAttribute('data-dmg-act') === 'accept' ? 'accept' : 'quarantine';
+  const r = await resolveDamage(String(el.getAttribute('data-dmg-type') ?? ''), String(el.getAttribute('data-dmg-stream') ?? ''), action);
+  if (!r.cancelled) { toast(r.text, r.ok ? 'info' : 'warning'); }
+  await loadDamage(!!state.full?.project?.inProject);
+  await loadDocs();
+  document.getElementById('info')?.setAttribute('data-dmg-last', `${action}:${r.ok ? (r.cancelled ? 'cancelled' : 'done') : 'refused'}`);
+  render();
+}
 async function projectMenu(x: number, y: number, title = '프로젝트'): Promise<void> {
   await loadRecent();
   const cur = state.full?.project?.project?.name;
@@ -268,6 +332,7 @@ function render(): void {
   renderFollow(following(), !!pointedAt());
   $('start').hidden = ui.screen !== 'start';
   $('tbar').classList.toggle('onstart', ui.screen === 'start');
+  fitTitle();
   $('review').classList.toggle('behind', ui.screen === 'start');
   if (ui.screen === 'start') {
     renderStart($('start'), claudeStatus());
@@ -556,7 +621,7 @@ function docAction(t: HTMLElement): boolean {
 }
 
 const tabOfKey = (key: string): Tab => (['sec', 'sdim', 'snode', 'selem', 'sspr', 'scon', 'mat', 'mE', 'mNu', 'mG', 'mFy', 'cond', 'cBC', 'cLc', 'cLen', 'cStr', 'mem', 'ld', 'dc', 'cj', 'asm'].includes(key) || key.startsWith('dc:') || key.startsWith('asm:') ? 'model'
-  : ['ask', 'rep', 'chg', 'ins', 'todo', 'insp'].includes(key) || /^(chg|work|log|todo|insp|ask):/.test(key) ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' || /^(doc|iss|pubf):/.test(key) ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key) ? 'doc' : 'result');
+  : ['ask', 'rep', 'chg', 'ins', 'todo', 'insp'].includes(key) || /^(chg|work|log|todo|insp|ask):/.test(key) ? 'work' : key.startsWith('alt:') ? 'result' : key.startsWith('asmr:') || key === 'asm:reg' ? 'model' : key.startsWith('srcr:') || key === 'src:unreg' || /^(doc|iss|pubf):/.test(key) ? 'doc' : ['rpt', 'brpt', 'vtab', 'src', 'pub', 'dmg'].includes(key) ? 'doc' : 'result');
 
 const SRC_KO: Record<string, string> = {
   props: 'MCP get_section_properties', cutwp: 'MCP get_cutwp', dsm: 'MCP get_dsm_values', full: 'MCP get_full_state', nodes: 'MCP get_nodes', elems: 'MCP get_elements',
@@ -817,6 +882,8 @@ function onEvent(ev: { type: string; data: any; at: number }): void {
         if (types.includes('reviews')) { void loadReviews().then(() => rerender()); }
         if (types.includes('alternatives')) { void loadAlts().then(() => { loadCompares(ui.sel[ui.tab]); rerender(); }); }
         if (types.some(x => ['documents', 'reviews', 'work', 'assumptions'].includes(x))) { void loadDocs().then(() => rerender()); }
+        // 기록 손상(V9b-04) — 어느 종류의 줄 파일이든 바뀌면 다시(격리 · 받아들이기는 cases 와 그 종류를 말한다)
+        if (types.length) { void loadDamage(!!state.full?.project?.inProject).then(() => rerender()); }
         // 고른 업무 항목 · 가정의 전부도 다시(목록을 다시 읽으면 그 전부를 비운다)
         const cur = ui.sel[ui.tab];
         void Promise.all([reloadTypes(types), types.includes('changes') ? loadChanges() : Promise.resolve()]).then(() => prefetchOpenQuestions())
@@ -932,7 +999,7 @@ function boot(): void {
   installMenuClosers();
   installIdle();
   initDialogs(() => renderTitle(editing(), questionOpen()));
-  initDocs({ render: () => rerender(), toast, progress: setProgress });
+  initDocs({ render: () => rerender(), toast, progress: setProgress, goDamage: () => goDamage() });
   initEdit(theme, onEditChange);
   onReport(() => renderShare());
   initTitlebar($('tbar'), {
@@ -985,6 +1052,9 @@ function boot(): void {
       else { toast(`${rr.querySelector?.('.lnk')?.textContent ?? id} — ${stEl?.textContent ?? '지금 결과에 없음'}${rr.querySelector?.('.why')?.textContent ? ` · ${rr.querySelector('.why')?.textContent ?? ''}` : ''}`, 'warning'); }
       return;
     }
+    // V9b-04 · D1: 기록 손상의 「격리」 · 「받아들이기」(사람의 길 — 다리가 묻는다)
+    const da = t.closest?.('[data-dmg-act]') as HTMLElement | null;
+    if (da) { e.stopPropagation(); if (!da.classList.contains('off') && !dmg.busy) { void damageAct(da); } return; }
     const ss2 = t.closest?.('[data-show-src]');
     if (ss2) {
       e.stopPropagation();
@@ -1204,6 +1274,8 @@ function boot(): void {
   report: (kind: 'design' | 'buckling', format: 'html' | 'pdf') => doReport(kind, format),
   /** 시험: 보기 보고 하나를 곧바로(모델 · 상태를 쓰지 않는다 — 호스트가 무엇을 버리고 칩이 그것을 보이는지 본다) */
   reportNow: (view: string, selection: unknown) => report(view, selection as Item | null, 'program', true),
+  /** 시험: run_case_check 의 답 → 「다시 계산」 알림의 좌굴값 글(같은 함수 — 호스트의 buckling_values.source 마다) */
+  bucklingUsedText: (r: unknown) => bucklingUsed(r),
   get pointed() { return pointedAt(); },
   /** 시험: 다른 작성자의 카드를 화면에만 넣는다(기록에 쓰지 않는다 — 「믿기」 물음의 모양을 본다. 다음 다시 읽기가 지운다) */
   testWriters: (w: Array<{ writer_id: string; name: string; host: string; trusted: boolean }>) => { rv.writers = w; render(); },

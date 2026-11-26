@@ -1,9 +1,10 @@
 """ASCE/SEI 7 하중조합 엔진
 
 ASD 및 LRFD 하중조합을 자동 선별하고 적용한다.
-계수는 AISI S100-16 설계매뉴얼 예제가 쓰는 ASCE/SEI 7-10 의 기본조합이다
-(7-10 Sec. 2.3.2 LRFD / Sec. 2.4.1 ASD). 다른 판(7-16, 7-22: 적설 1.0S·0.3S·0.7S,
-지진 Ev+Eh)이나 다른 나라 기준은 들어 있지 않다.
+처음 값(asce7_10)의 계수는 AISI S100-16 설계매뉴얼 예제가 쓰는 ASCE/SEI 7-10 의 기본조합이다
+(7-10 Sec. 2.3.2 LRFD / Sec. 2.4.1 ASD). 고를 수 있는 것(결정 R4): ASCE/SEI 7-22(Sec. 2.3.1 · 2.3.6 ·
+2.4.1 · 2.4.5 — 적설 1.0S · 0.3S · 0.7S), KDS 41 12 00:2022(1.7.1 · 1.7.2 — 허용응력 풍하중 0.65W).
+ASCE/SEI 7-16 은 조합표를 원문으로 확인하지 못해 넣지 않았다. LSD(NBCC) 조합은 없다.
 
 선별 규칙 (7-10 Sec. 2.3.2 / 2.4.1 "Effects of one or more loads not acting shall
 be considered"): 없는 하중은 0 으로 둔다. 조합은 지우지 않고 없는 항만 뺀다.
@@ -19,6 +20,30 @@ LOAD_COMBINATION_REFERENCE = {
     'LRFD': _nt('loads.label.combo_ref_lrfd'),
     'ASD': _nt('loads.label.combo_ref_asd'),
 }
+
+# 하중조합 기준(결정 R4, 2026-11-25). 처음 값 asce7_10 — 지금까지의 결과 그대로.
+DEFAULT_LOAD_COMBINATION_STANDARD = 'asce7_10'
+LOAD_COMBINATION_STANDARDS = ('asce7_10', 'asce7_22', 'kds_41_12_00')
+# 고를 수 있게 요청받았지만 조합표를 이 판에서 원문으로 확인하지 못해 넣지 않은 것 — 지어내지 않는다.
+_UNVERIFIED_STANDARDS = {
+    'asce7_16': 'the ASCE/SEI 7-16 Sec. 2.3.1 / 2.3.6 / 2.4.1 / 2.4.5 tables could not be checked against the '
+                'standard for this build, so they are not implemented',
+}
+
+
+def normalize_load_combination_standard(value) -> str:
+    """하중조합 기준 키. None · 빈 값은 처음 값(asce7_10). 모르는 값은 허용값을 밝히는 ValueError."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return DEFAULT_LOAD_COMBINATION_STANDARD
+    key = str(value).strip().lower().replace('-', '_').replace(' ', '_')
+    if key in LOAD_COMBINATION_STANDARDS:
+        return key
+    allowed = ', '.join(repr(k) for k in LOAD_COMBINATION_STANDARDS)
+    if key in _UNVERIFIED_STANDARDS:
+        raise ValueError(f'load_combination_standard {value!r} is not available: '
+                         f'{_UNVERIFIED_STANDARDS[key]}. Allowed values: {allowed}.')
+    raise ValueError(f'Unknown load_combination_standard {value!r}. Allowed values: {allowed} '
+                     f'(default {DEFAULT_LOAD_COMBINATION_STANDARD!r}).')
 
 # 조합표에 나오는 하중 기호. 이 밖의 키(예: 'Wp')는 조합 선별에 쓰지 않는다.
 LOAD_SYMBOLS = ('D', 'L', 'Lr', 'S', 'R', 'W', 'E')
@@ -137,6 +162,105 @@ LRFD_COMBOS = [
 ]
 
 
+def _expand_alt(template_name, base_factors, alt_factors):
+    """(Lr 또는 S 또는 R) 무리를 하중마다 다른 계수로 전개한다(ASCE 7-22: 0.5Lr 또는 0.3S 또는 0.5R).
+
+    template_name 안의 '{t}' 를 그 항의 글(계수 + 기호, 계수 1 이면 기호만)로 바꾼다.
+    """
+    rows = []
+    for r in _ROOF_ALT:
+        f = alt_factors[r]
+        factors = dict(base_factors)
+        factors[r] = f
+        txt = r if f == 1.0 else f'{f:g}{r}'
+        rows.append((template_name.format(t=txt), factors))
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# ASCE/SEI 7-22 — Sec. 2.3.1 (1a–5a), 2.3.6 (6, 7), 2.4.1 (1a–7a), 2.4.5 (8–10).
+# 출처: asce7-loads-design 스킬 data/Chapter_02_Combinations_of_Loads.md (스킬의 원본 대조 범위 안의 쪽).
+# W_T(토네이도) · F · H · 홍수 · 착빙 항은 엔진의 하중에 없어 넣지 않는다. E 는 사용자가 준 지진하중 효과 하나
+# (Ev + Eh 를 하중 방향으로 합한 값)로 쓴다 — 7-10 과 같다. 예외 1(L 계수 0.5)은 쓰지 않는다(보수측).
+# ---------------------------------------------------------------------------
+_LR22_COMPANION = {'Lr': 0.5, 'S': 0.3, 'R': 0.5}
+_LR22_PRINCIPAL = {'Lr': 1.6, 'S': 1.0, 'R': 1.6}
+LRFD_COMBOS_ASCE7_22 = [
+    ('1a: 1.4D',                    {'D': 1.4}),
+    ('2a: 1.2D+1.6L',               {'D': 1.2, 'L': 1.6}),
+    *_expand_alt('2a: 1.2D+1.6L+{t}', {'D': 1.2, 'L': 1.6}, _LR22_COMPANION),
+    *_expand_alt('3a: 1.2D+{t}', {'D': 1.2}, _LR22_PRINCIPAL),
+    *_expand_alt('3a: 1.2D+{t}+L', {'D': 1.2, 'L': 1.0}, _LR22_PRINCIPAL),
+    *_expand_alt('3a: 1.2D+{t}+0.5W', {'D': 1.2, 'W': 0.5}, _LR22_PRINCIPAL),
+    *_expand_alt('4a: 1.2D+1.0W+L+{t}', {'D': 1.2, 'W': 1.0, 'L': 1.0}, _LR22_COMPANION),
+    ('5a: 0.9D+1.0W',               {'D': 0.9, 'W': 1.0}),
+    ('6: 1.2D+1.0E+L+0.15S',        {'D': 1.2, 'E': 1.0, 'L': 1.0, 'S': 0.15}),
+    ('7: 0.9D+1.0E',                {'D': 0.9, 'E': 1.0}),
+]
+_ASD22_ALT = {'Lr': 1.0, 'S': 0.7, 'R': 1.0}
+_ASD22_ALT_075 = {'Lr': 0.75, 'S': 0.525, 'R': 0.75}      # 0.75(Lr 또는 0.7S 또는 R)
+ASD_COMBOS_ASCE7_22 = [
+    ('1a: D',                       {'D': 1.0}),
+    ('2a: D+L',                     {'D': 1.0, 'L': 1.0}),
+    *_expand_alt('3a: D+{t}', {'D': 1.0}, _ASD22_ALT),
+    *_expand_alt('4a: D+0.75L+{t}', {'D': 1.0, 'L': 0.75}, _ASD22_ALT_075),
+    ('5a: D+0.6W',                  {'D': 1.0, 'W': 0.6}),
+    *_expand_alt('6a: D+0.75L+0.75(0.6W)+{t}', {'D': 1.0, 'L': 0.75, 'W': 0.45}, _ASD22_ALT_075),
+    ('7a: 0.6D+0.6W',               {'D': 0.6, 'W': 0.6}),
+    ('8: D+0.7E',                   {'D': 1.0, 'E': 0.7}),
+    ('9: D+0.525E+0.75L+0.1S',      {'D': 1.0, 'E': 0.525, 'L': 0.75, 'S': 0.1}),
+    ('10: 0.6D+0.7E',               {'D': 0.6, 'E': 0.7}),
+]
+
+# ---------------------------------------------------------------------------
+# KDS 41 12 00:2022 — 1.7.1 식(1.7-1)–(1.7-7), 1.7.2 식(1.7-8)–(1.7-15).
+# 출처: kds-structural-design 스킬 data/standards/KDS_41_12_00.md 와 원본 PDF 13 · 14쪽(렌더해 대조).
+# F · T · H 항은 엔진의 하중에 없어 넣지 않는다. 1.7.1 (2) 의 L 계수 0.5 는 쓰지 않는다(보수측).
+# ---------------------------------------------------------------------------
+_KDS_ALT_05 = {'Lr': 0.5, 'S': 0.5, 'R': 0.5}
+_KDS_ALT_16 = {'Lr': 1.6, 'S': 1.6, 'R': 1.6}
+_KDS_ALT_10 = {'Lr': 1.0, 'S': 1.0, 'R': 1.0}
+_KDS_ALT_075 = {'Lr': 0.75, 'S': 0.75, 'R': 0.75}
+LRFD_COMBOS_KDS = [
+    ('1.7-1: 1.4D',                 {'D': 1.4}),
+    ('1.7-2: 1.2D+1.6L',            {'D': 1.2, 'L': 1.6}),
+    *_expand_alt('1.7-2: 1.2D+1.6L+{t}', {'D': 1.2, 'L': 1.6}, _KDS_ALT_05),
+    *_expand_alt('1.7-3: 1.2D+{t}', {'D': 1.2}, _KDS_ALT_16),
+    *_expand_alt('1.7-3: 1.2D+{t}+1.0L', {'D': 1.2, 'L': 1.0}, _KDS_ALT_16),
+    *_expand_alt('1.7-3: 1.2D+{t}+0.5W', {'D': 1.2, 'W': 0.5}, _KDS_ALT_16),
+    *_expand_alt('1.7-4: 1.2D+1.0W+1.0L+{t}', {'D': 1.2, 'W': 1.0, 'L': 1.0}, _KDS_ALT_05),
+    ('1.7-5: 1.2D+1.0E+1.0L+0.2S',  {'D': 1.2, 'E': 1.0, 'L': 1.0, 'S': 0.2}),
+    ('1.7-6: 0.9D+1.0W',            {'D': 0.9, 'W': 1.0}),
+    ('1.7-7: 0.9D+1.0E',            {'D': 0.9, 'E': 1.0}),
+]
+ASD_COMBOS_KDS = [
+    ('1.7-8: D',                    {'D': 1.0}),
+    ('1.7-9: D+L',                  {'D': 1.0, 'L': 1.0}),
+    *_expand_alt('1.7-10: D+{t}', {'D': 1.0}, _KDS_ALT_10),
+    *_expand_alt('1.7-11: D+0.75L+{t}', {'D': 1.0, 'L': 0.75}, _KDS_ALT_075),
+    ('1.7-12: D+0.65W',             {'D': 1.0, 'W': 0.65}),
+    ('1.7-12: D+0.7E',              {'D': 1.0, 'E': 0.7}),
+    *_expand_alt('1.7-13: D+0.75(0.65W)+0.75L+{t}', {'D': 1.0, 'W': 0.4875, 'L': 0.75}, _KDS_ALT_075),
+    *_expand_alt('1.7-13: D+0.75(0.7E)+0.75L+{t}', {'D': 1.0, 'E': 0.525, 'L': 0.75}, _KDS_ALT_075),
+    ('1.7-14: 0.6D+0.65W',          {'D': 0.6, 'W': 0.65}),
+    ('1.7-15: 0.6D+0.7E',           {'D': 0.6, 'E': 0.7}),
+]
+
+# 기준별 조합표 · 판 · 근거 글 · 넣은 하중의 정의를 밝히는 알림
+STANDARD_TABLES = {
+    'asce7_10': {'edition': LOAD_COMBINATION_EDITION, 'LRFD': LRFD_COMBOS, 'ASD': ASD_COMBOS,
+                 'reference': LOAD_COMBINATION_REFERENCE, 'load_definition': None},
+    'asce7_22': {'edition': 'ASCE/SEI 7-22', 'LRFD': LRFD_COMBOS_ASCE7_22, 'ASD': ASD_COMBOS_ASCE7_22,
+                 'reference': {'LRFD': _nt('loads.label.combo_ref_lrfd_asce7_22'),
+                               'ASD': _nt('loads.label.combo_ref_asd_asce7_22')},
+                 'load_definition': _nt('loads.assumption.load_definition_asce7_22')},
+    'kds_41_12_00': {'edition': 'KDS 41 12 00:2022', 'LRFD': LRFD_COMBOS_KDS, 'ASD': ASD_COMBOS_KDS,
+                     'reference': {'LRFD': _nt('loads.label.combo_ref_lrfd_kds'),
+                                   'ASD': _nt('loads.label.combo_ref_asd_kds')},
+                     'load_definition': _nt('loads.assumption.load_definition_kds')},
+}
+
+
 _TERM_LOAD_RE = re.compile(r'(Lr|D|L|S|R|W|E)\)*$')
 
 
@@ -151,7 +275,7 @@ def _reduced_combo_name(name: str, present: set) -> str:
     return f'{num}: ' + '+'.join(kept)
 
 
-def get_applicable_combos(loads: dict, method: str = 'LRFD') -> list:
+def get_applicable_combos(loads: dict, method: str = 'LRFD', standard: str = None) -> list:
     """입력된 하중으로 평가할 하중조합 목록
 
     없는 하중(0 또는 None)은 계수 0 으로 보고 그 항만 뺀다. 조합 자체는 지우지
@@ -164,13 +288,15 @@ def get_applicable_combos(loads: dict, method: str = 'LRFD') -> list:
         하중값. 예: {'D': 15, 'Lr': 90, 'W': -144}
     method : str
         'ASD' 또는 'LRFD' (대소문자 무관). 그 밖의 값은 ValueError.
+    standard : str
+        하중조합 기준 — LOAD_COMBINATION_STANDARDS 가운데 하나(None 이면 처음 값 'asce7_10').
 
     Returns
     -------
     list of (name, factors_dict) — factors 에는 있는 하중만 들어 있다.
     """
     method = normalize_design_method(method)
-    base = LRFD_COMBOS if method == 'LRFD' else ASD_COMBOS
+    base = STANDARD_TABLES[normalize_load_combination_standard(standard)][method]
     present = {k for k, v in (loads or {}).items()
                if k in LOAD_SYMBOLS and v is not None and v != 0}
     present.add('D')
@@ -252,7 +378,7 @@ def apply_combination(factors: dict, load_results: dict) -> dict:
 
 
 def find_controlling_combo(loads: dict, load_results: dict,
-                           method: str = 'LRFD') -> dict:
+                           method: str = 'LRFD', standard: str = None) -> dict:
     """모든 적용 가능한 하중조합을 적용하여 지배 조합을 결정
 
     Returns
@@ -263,7 +389,7 @@ def find_controlling_combo(loads: dict, load_results: dict,
         'all': list of (name, combined)
         'all_detail': list of dicts — 모든 조합의 상세 결과
     """
-    combos = get_applicable_combos(loads, method)
+    combos = get_applicable_combos(loads, method, standard)
 
     all_results = []
     for name, factors in combos:

@@ -359,10 +359,62 @@
         return { Se, Vn, from: fromN ? fromN.text : 'lap_section', from_notice: fromN, regions: ids, support, reason: null };
     }
 
+    /**
+     * B2(2026-11-25): 엔진이 표시용으로 반올림한 값(display_rounding)을 그 반올림 전 값(display_unrounded — design_checks 와 같은 수)으로
+     * 바꾼 사본 — src/mcp/siUnits.ts 의 withUnroundedValues 와 같은 규칙(MCP 의 SI 응답 · 새 화면의 units.ts 가 쓰는 것). SI 로 바꾸기
+     * 전에만 쓴다(반올림한 US 값을 바꾸면 design_checks 와 0.03 % 어긋난다). 하위 묶음(shear · positive_region · 조합의 compression …)은
+     * display_unrounded 안의 같은 이름 묶음으로, 배열의 원소(퍼린 regions[].result)는 제 display_unrounded 로. 표시 값으로 만든
+     * 요약(__display_rounded)은 그대로. 반환 { value, used }.
+     */
+    function withUnroundedValues(value) {
+        let used = false;
+        const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+        const overlay = (o, raw) => {
+            const out = Object.assign({}, o);
+            for (const k of Object.keys(raw)) {
+                const r = raw[k];
+                if (typeof r === 'number' && isFinite(r) && typeof o[k] === 'number') { out[k] = r; used = true; }
+                else if (isObj(r) && isObj(o[k])) { out[k] = overlay(o[k], r); }
+            }
+            return out;
+        };
+        const walkU = (v) => {
+            if (Array.isArray(v)) { return v.map(walkU); }
+            if (!v || typeof v !== 'object') { return v; }
+            const out = {};
+            for (const k of Object.keys(v)) { out[k] = k === 'display_unrounded' ? v[k] : walkU(v[k]); }
+            const raw = v.display_unrounded;
+            return isObj(raw) ? overlay(out, raw) : out;
+        };
+        if (value && typeof value === 'object' && value.__display_rounded) { return { value, used: false }; }
+        return { value: walkU(value), used };
+    }
+
+    /**
+     * 엔진(2026-11-25 둘째 판): 빈 길이의 결과가 길이와 상관없는 하한(length_independent_bound — 가장 유리한 길이의 엔진 강도)으로 NG 이면
+     * 그 판정비는 그 하한의 비다 — 맨 위 utilization 은 가정한 길이의 수(utilization_valid false)라 판정비가 아니다. 그런 결과가 아니면 null.
+     * 반환 { ratio, governing_check, limit_state }
+     */
+    function lengthBoundFailure(d) {
+        if (!d || typeof d !== 'object' || d.pass !== false || d.utilization_valid !== false) { return null; }
+        const b = d.length_independent_bound;
+        if (b && typeof b === 'object' && typeof b.ratio === 'number' && isFinite(b.ratio)) {
+            return { ratio: b.ratio, governing_check: b.governing_check_id || b.governing_check || null, limit_state: b.limit_state || null };
+        }
+        // 조합(H1.2): Pa · Max 를 그 하한으로 둔 H1.2 의 하한 비(interaction_length_bound)가 1 을 넘으면 — 항목 member.axial_bending
+        const ib = d.interaction_length_bound;
+        const t = ib && typeof ib === 'object' ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
+        if (typeof t === 'number' && isFinite(t) && t > 1) {
+            const has = Array.isArray(d.design_checks) && d.design_checks.some((c) => c && c.id === 'member.axial_bending');
+            return { ratio: t, governing_check: has ? 'member.axial_bending' : null, limit_state: 'H1.2 (Pa, Max at their length-independent bounds, B1 = 1)' };
+        }
+        return null;
+    }
+
     return {
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
         assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason, purlinLists,
-        pickGoverningPurlinDesign, deriveLapSection,
+        pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues, lengthBoundFailure,
     };
 });

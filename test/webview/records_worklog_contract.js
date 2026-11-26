@@ -65,6 +65,17 @@ async function main() {
     // ── 프로젝트 · 대상 ──
     await tool('open_project', { name: 'WL', create: true });
     await tool('new_case', { name: 'C', kind: 'section-only', from: 'current' });
+    // B4(2026-11-25): new_case 가 부재 종류로 정한 부재 유형의 출처 = 대상을 만든 이(AI 의 도구 → ai, 사람의 길 → user)
+    {
+      await tool('new_case', { name: 'G', kind: 'wall-girt' });
+      await p.handleMcpAction({ action: 'new_case', name: 'J', kind: 'floor-joist' });
+      const files = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, e.name); if (e.isDirectory()) { walk(q); } else if (/\.csd$/.test(e.name)) { files.push(q); } } }; walk(root);
+      const rec = (n) => { const f = files.find((x) => path.basename(x).startsWith(n)); assert(f, `case file ${n}: ${files.map((x) => path.basename(x))}`); return JSON.parse(fs.readFileSync(f, 'utf8')).case; };
+      const g = rec('G'), j = rec('J');
+      assert(g.inputs.memberType === 'wall-girt' && g.sources.memberType === 'ai', 'AI new_case: member type source ai ' + JSON.stringify([g.inputs.memberType, g.sources.memberType]));
+      assert(j.inputs.memberType === 'floor-joist' && j.sources.memberType === 'user', 'person new_case: member type source user ' + JSON.stringify([j.inputs.memberType, j.sources.memberType]));
+      notes.push(`new_case member type source: ai (tool) · user (person path)`);
+    }
     await tool('open_case', { name: 'C' });
     // 끼운 화면이 연 파일의 값을 다시 적어 알린 메아리(origin file) — 여는 창이 닫힌다(그 뒤의 연동이 값을 바꾼다)
     await page('caseEdit', { origin: 'file', changes: {} });
@@ -100,8 +111,12 @@ async function main() {
     const snapRun = p._desk.readSnapshot(runRec.snapshot);
     assert(snapRun && snapRun.case.inputs.Lb === 60 && snapRun.case.inputs.fy === 55, 'the run copy has the merged Lb 60 · Fy 55: ' + JSON.stringify(snapRun && { Lb: snapRun.case.inputs.Lb, fy: snapRun.case.inputs.fy }));
     assert.strictEqual(runRec.caseFp, FP.contentFp(p._model, p.__testGetCase().state).caseFp, 'the run caseFp = the case after the call');
-    assert.deepStrictEqual(aiLine.runs, [memberRun.run], 'the AI bundle knows the run of its request');
-    assert.deepStrictEqual(prog.runs, [memberRun.run], 'and so does the split program line');
+    // 결정 R1(2026-11-25 H-A): 그 요청의 부재 검토가 설계용 FSM 값(Fy 55)을 그 자리에서 준비했다 — 그 design_dsm 실행도 같은 묶음에
+    const prepRun = cs.history.find((h) => h.kind === 'design_dsm' && h.no === memberRun.no - 1);
+    const reqRuns = prepRun ? [prepRun.run, memberRun.run] : [memberRun.run];
+    assert(prepRun && prepRun.by === 'ai', 'the prepare run of this request, by ai: ' + JSON.stringify(cs.history.slice(0, 3)));
+    assert.deepStrictEqual(aiLine.runs, reqRuns, 'the AI bundle knows the runs of its request (prepare + member check)');
+    assert.deepStrictEqual(prog.runs, reqRuns, 'and so does the split program line');
     notes.push(`AI design call: 「${aiLine.title}」 by ai + 「${prog.title}」 by program, runs → ${memberRun.run.slice(0, 12)}…`);
 
     // ③ work_status: 계산 직후 = match
@@ -110,6 +125,9 @@ async function main() {
     assert(ws.last_run.kind === 'member_design' && ws.last_run.by === 'ai' && ws.last_run.no === memberRun.no && ['ok', 'ng', 'incomplete'].includes(ws.last_run.verdict.status), JSON.stringify(ws.last_run));
     assert(ws.todo.unacknowledged_ai_changes >= 2 && typeof ws.todo.questions === 'number' && typeof ws.todo.provisional_assumptions === 'number', JSON.stringify(ws.todo));
     assert(ws.case.name === 'C' && 'results' in ws && 'records' in ws, 'everything of get_case_status is there');
+    // B4: 종류별 일치 — 부재 검토 · 좌굴 해석 둘 다 지금 것
+    assert(ws.calc_by_kind && ws.calc_by_kind.member_design.state === 'current' && ws.calc_by_kind.member_design.changes === 0
+      && ws.calc_by_kind.buckling_analysis.state === 'current', 'calc_by_kind right after the design call: ' + JSON.stringify(ws.calc_by_kind));
     show('work_status', ws);
 
     // work_log summary · fields
@@ -138,6 +156,10 @@ async function main() {
     await tool('set_case_inputs', { inputs: { Lb: 70 } });
     ws = await tool('work_status', {});
     assert(ws.calc.state === 'changed' && ws.calc.changes_since_run === 1, JSON.stringify(ws.calc));
+    // B4: Lb 는 부재 검토만 낡게 한다 — 좌굴 해석은 지금 것(work_status 하나로 가린다)
+    assert(ws.calc_by_kind.member_design.state === 'stale' && typeof ws.calc_by_kind.member_design.why === 'string' && ws.calc_by_kind.member_design.changes >= 1
+      && ws.calc_by_kind.buckling_analysis.state === 'current', 'calc_by_kind after Lb: ' + JSON.stringify(ws.calc_by_kind));
+    notes.push(`calc_by_kind after Lb: ${JSON.stringify(ws.calc_by_kind)}`);
     // 연동만의 줄은 세지 않는다
     await page('caseEdit', { origin: 'mirror', seenRev: p.__testGetCase().state.rev, changes: { connFy: 40 } });
     ws = await tool('work_status', {});

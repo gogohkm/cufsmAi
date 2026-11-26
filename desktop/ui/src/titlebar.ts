@@ -62,6 +62,26 @@ export function calcChipHtml(): string {
 
 let root: HTMLElement;
 let h: TitleHandlers;
+
+/**
+ * E11 — 좁은 창: 제목 표시줄이 넘치면(진행 띠 칸이 제 몫보다 넓다 · 칩이 잘렸다 · 줄이 넘친다 — 잰다) 차례로 줄인다.
+ * fit1 진행 띠 · 칩의 짧은 이름 → fit2 진행 띠는 점(● ◐ ○)만(이름은 풍선) → fit3 「검토 대상」 글을 빼고 파일 이름을 줄임표로.
+ * 이름 · 창 폭 · Claude 상태 글에 따라 넘치는 폭이 달라 고정 폭(@media)이 아니라 잰다
+ */
+const FIT = ['fit1', 'fit2', 'fit3'];
+export function fitTitle(): void {
+  if (!root) { return; }
+  root.classList.remove(...FIT);
+  const slot = root.querySelector('.pipe-slot') as HTMLElement | null;
+  const chip = root.querySelector('.chip.calc') as HTMLElement | null;
+  const over = (): boolean => root.scrollWidth > root.clientWidth + 1
+    || (!!slot && slot.offsetParent !== null && slot.scrollWidth > slot.clientWidth + 1)
+    || (!!chip && chip.offsetParent !== null && chip.scrollWidth > chip.clientWidth + 1);
+  for (const c of FIT) {
+    if (!over()) { break; }
+    root.classList.add(c);
+  }
+}
 let claudeBusy = false;
 let claude: ClaudeStatus | null = null;
 
@@ -80,6 +100,7 @@ export function initTitlebar(el: HTMLElement, handlers: TitleHandlers): void {
     + `<button class="tb" data-act="edit"${tip('지금의 입력 화면(6탭)을 연다. 다시 누르면 닫힌다  F2')}>편집 F2</button>`
     + '<span class="conn"><span class="dot un"></span><span class="ct">Claude 연결 확인 중</span></span>'
     + '<button class="cbtn claude-act" data-act="claude" hidden></button>';
+  window.addEventListener('resize', () => fitTitle());
   el.addEventListener('click', e => {
     const t = e.target as HTMLElement;
     if (t.closest('[data-calc-chip]')) { h.calc(); return; }
@@ -156,6 +177,7 @@ export function renderTitle(editing: boolean, pending: boolean): void {
   ed.textContent = editing ? '편집 마치기 F2' : '편집 F2';
   const name = state.file.name;
   document.title = `${pending ? '● 응답 필요 — ' : ''}${name ? `${name}${dirty ? ' ●' : ''}${editing ? ' · 편집' : ''} — ` : ''}StCFSD`;
+  fitTitle();
 }
 
 /** S4 와 같은 상태 글 · 단추(`/api/claude/status`) */
@@ -166,7 +188,7 @@ export function renderClaude(s: ClaudeStatus | null): void {
   const dot = c.querySelector('.dot') as HTMLElement;
   const ct = c.querySelector('.ct') as HTMLElement;
   const b = root.querySelector('.claude-act') as HTMLElement;
-  if (!s) { ct.textContent = 'Claude 상태 모름'; dot.className = 'dot un'; b.hidden = true; return; }
+  if (!s) { ct.textContent = 'Claude 상태 모름'; dot.className = 'dot un'; b.hidden = true; fitTitle(); return; }
   ct.textContent = s.text;
   c.setAttribute('data-tip', s.tooltip || '대화는 Claude Desktop 에서 한다');
   c.setAttribute('data-ui', s.ui);
@@ -180,6 +202,7 @@ export function renderClaude(s: ClaudeStatus | null): void {
   } else { b.hidden = true; }
   b.classList.toggle('off', claudeBusy || (b.getAttribute('data-op') === ''));
   (b as HTMLButtonElement).disabled = claudeBusy || b.getAttribute('data-op') === '';
+  fitTitle();
 }
 
 export function claudeStatus(): ClaudeStatus | null { return claude; }

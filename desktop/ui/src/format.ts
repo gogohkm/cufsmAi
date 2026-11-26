@@ -95,6 +95,63 @@ export function ratio(r: number | null | undefined, ng: boolean, src: string): s
   return `<span class="num" data-v="${r}" data-src="${esc(src)}" data-u="none" data-x="0" data-ratio="${ng ? 'ng' : 'ok'}">${ratioText(r, ng)}</span>`;
 }
 
+/**
+ * 엔진의 이용률(utilization)을 판정비로 보여도 되는가 — 엔진이 `utilization_valid: false` 를 달면(주 소요를 주지 않음 · 평가하지 못한 한계상태가 있음,
+ * 계약 §6.4) 그 수는 평가한 것 가운데의 비일 뿐이다: 판정 없음으로 읽는다(수를 보이지 않는다). NG(pass false)면 그 비가 NG 의 근거라 그대로.
+ * `x` 는 엔진의 결과(US — utilization_valid · pass 가 있는 것), `u` 는 보일 수(SI 로 바꾼 것일 수 있다)
+ */
+export function utilShown(x: any, u: unknown = x?.utilization): number | null {
+  if (typeof u !== 'number' || !Number.isFinite(u)) { return null; }
+  // E-1: 엔진이 가정한 길이(빈 KxLx · KyLy · KtLt · Lb 의 기본값)로 낸 결과의 이용률은 그 길이의 비다 — NG 여도 판정비로 적지 않는다(참고만, refRatio)
+  if (lengthAssumed(x)) { return null; }
+  if (x && typeof x === 'object' && x.pass !== false && (x.utilization_valid === false || x.pass === null)) { return null; }
+  return u;
+}
+/** 이용률이 판정비가 아니다(utilization_valid: false · 전체 판정 없음 · 가정한 길이 — NG 아님) — 그 자리에 보이는 글. ref 가 있으면 그 수를 「참고」로 옆에 */
+export function noVerdictRatio(why = '엔진이 utilization_valid: false 를 달았다 — 주 소요를 주지 않았거나 평가하지 못한 한계상태가 있어 이 비는 판정비가 아니다', ref: number | null = null): string {
+  return `<span class="un" data-util-invalid${tip(why)}>판정 없음</span>${typeof ref === 'number' && Number.isFinite(ref) ? ` ${refRatio(ref, why)}` : ''}`;
+}
+/**
+ * 전체 판정이 없다(NG 아님) — 이용률은 판정비가 아니다: 엔진의 utilization_valid: false, 결과의 pass 가 null(랩 · 접합의 「판정 없음」 —
+ * 힘 분배 모델을 밝히지 않음 등), 가정한 길이(length_assumed)
+ */
+export const utilInvalid = (x: any): boolean => !!x && typeof x === 'object' && x.pass !== false
+  && (x.utilization_valid === false || x.pass === null || x.length_assumed === true);
+/** 결과가 엔진이 가정한 길이에서 나왔다(E-1 — `length_assumed: true`) */
+export const lengthAssumed = (x: any): boolean => !!x && typeof x === 'object' && x.length_assumed === true;
+export const LENGTH_ASSUMED_WHY = '엔진이 가정한 길이(빈 KxLx · KyLy · KtLt · Lb 를 엔진의 기본값으로 둠)로 낸 비다 — 참고값이며 합격도 불합격도 아니다(판정비가 아니다). 길이를 주면 판정';
+/** 참고 비 — 판정비가 아닌 수(가정한 길이 · 판정 없음). data-ratio 를 달지 않는다(판정비로 세지 않게) — 값은 data-ratio-ref */
+export function refRatio(r: number, why = LENGTH_ASSUMED_WHY): string {
+  return `<span class="faint" data-ratio-ref="${r}"${tip(why)}>참고 ${ratioText(r, r > 1)}</span>`;
+}
+
+/**
+ * 엔진 2차(2026-11-25): 길이를 비워 가정한 길이로 낸 결과라도, 어느 길이에서나 넘는 하한(가장 유리한 길이의 강도)으로 넘으면 NG 다.
+ * 그때 판정비 · 지배는 그 하한의 비 · 항목이고, 맨 위 utilization(가정한 길이의 수)은 참고값이다. 규칙은 제품의 webview/js/utils.js
+ * `lengthBoundFailure` 와 같다(그대로 옮김 — 부르지 않는다): pass false · utilization_valid false 이고 length_independent_bound.ratio 가 있으면 그것
+ * (항목 governing_check_id | governing_check · limit_state), 조합은 interaction_length_bound 의 total(_unrounded)이 1 을 넘으면 그것(항목
+ * member.axial_bending — design_checks 에 있을 때). `path` 는 그 비가 결과 안에 있는 자리(data-src 꼬리)
+ */
+export interface LengthBound { ratio: number; check: string | null; limitState: string | null; path: string }
+export function lengthBoundFailure(d: any): LengthBound | null {
+  if (!d || typeof d !== 'object' || d.pass !== false || d.utilization_valid !== false) { return null; }
+  const b = d.length_independent_bound;
+  if (b && typeof b === 'object' && typeof b.ratio === 'number' && Number.isFinite(b.ratio)) {
+    return { ratio: b.ratio, check: b.governing_check_id || b.governing_check || null, limitState: b.limit_state || null, path: 'length_independent_bound.ratio' };
+  }
+  const ib = d.interaction_length_bound;
+  const unr = ib && typeof ib === 'object' && typeof ib.total_unrounded === 'number';
+  const t = ib && typeof ib === 'object' ? (unr ? ib.total_unrounded : ib.total) : null;
+  if (typeof t === 'number' && Number.isFinite(t) && t > 1) {
+    const has = Array.isArray(d.design_checks) && d.design_checks.some((c: any) => c && c.id === 'member.axial_bending');
+    return { ratio: t, check: has ? 'member.axial_bending' : null, limitState: 'H1.2 (Pa, Max at their length-independent bounds, B1 = 1)',
+      path: unr ? 'interaction_length_bound.total_unrounded' : 'interaction_length_bound.total' };
+  }
+  return null;
+}
+export const LENGTH_BOUND_WHY = '길이를 비워 가정한 길이로 낸 결과이지만, 길이와 상관없는 하한(가장 유리한 길이의 강도)으로도 넘는다 — 어느 길이에서나 NG 다. '
+  + '판정비는 그 하한의 비(엔진의 length_independent_bound · interaction_length_bound), 가정한 길이로 낸 이용률은 참고';
+
 /** 엔진 판정(pass) → 글자 · 모양. true OK · false NG · 그 밖(null · 없음) 판정 없음/미검토 */
 export function verdictOf(pass: unknown, unLabel = '미검토'): { text: string; cls: 'ok' | 'ng' | 'un' } {
   if (pass === true) { return { text: 'OK', cls: 'ok' }; }

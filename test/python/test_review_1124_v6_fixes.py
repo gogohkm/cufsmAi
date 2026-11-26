@@ -134,7 +134,8 @@ def test_V6_07_lap_distortion_is_not_assumed():
     r = design_lap_connection(_lap())
     d = _check(r, 'lap.flexure.distortional')
     assert d['verdict'] == 'not_evaluated' and d['counts'] is True and r['pass'] is None
-    s = design_lap_connection(_lap(distortion_restrained=True))
+    # 2026-11-25 R2: 패스너 무리의 판정은 힘 분배 모델(A)을 밝혔을 때만 — 이 시험은 뒤틀림만 보므로 밝힌다.
+    s = design_lap_connection(_lap(distortion_restrained=True, lap_force_model_confirmed=True))
     d2 = _check(s, 'lap.flexure.distortional')
     assert d2['verdict'] == 'not_applicable' and d2['restraint_source']['kind'] == 'user_input'
     assert s['pass'] is True

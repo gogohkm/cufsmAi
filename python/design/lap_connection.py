@@ -53,6 +53,9 @@ def design_lap_connection(params: dict) -> dict:
             lap_restrained: True 면 사람이 Design Manual II-1A / II-2A 의 가정('겹친 부분은 횡비틀림 · 뒤틀림 좌굴에
                 충분히 구속됨')을 밝힘 — 랩 휨 Mnℓ = Se·Fy(횡비틀림 없음)와 §F4 해당 없음(Mnd 가 없을 때)이 그
                 가정에 선다. 없으면 그 두 검토는 미평가(판정 None). distortion_restrained 는 같은 뜻의 옛 이름(별칭)
+            lap_force_model_confirmed: True 면 사람이 패스너 힘 분배 모델 A(모든 패스너가 max(Mu/(d−t), Vu) 를 고르게
+                나눔 — 자체 가정)를 받아들임 — 패스너 무리 용량 · 필요 개수의 판정을 낸다. 없거나 False 면 A 로도 넘을
+                때만 불합격, 아니면 그 두 검토는 판정 없음(수는 참고값). 결정 R2(2026-11-25)
         }
 
     Returns:
@@ -535,7 +538,18 @@ def design_lap_connection(params: dict) -> dict:
             warnings.append(_nt('lap.warning.j6_3_lap_j6' + _precise(ratio_bs, 1.0, '.2f'), ratio_bs=ratio_bs))
     elif bs['applies']:
         block_ok = None if Pns <= 0 or n_total_actual <= 0 else True
-    layout = [capacity_ok, spacing_ok, n_total <= n_max_total, block_ok]
+    # R2(2026-11-25): 모델 A(모든 패스너가 고르게)로 낸 패스너 무리 용량 · 필요 개수의 판정은 사람이 그 가정을 밝혔을 때만
+    # (lap_force_model_confirmed = true). 밝히지 않았으면 A 로도 넘으면 불합격(견준 분배 가운데 가장 유리한 것), 아니면
+    # 판정 없음. 블록 전단(J6.3)은 무리 전체가 전체 전달력을 받는 검토라 분배와 상관없다 — 그대로.
+    fits = n_total <= n_max_total
+    force_confirmed = params.get('lap_force_model_confirmed') is True
+    cap_part, fit_part = capacity_ok, fits
+    if not force_confirmed:
+        cap_part = False if not capacity_ok else None
+        fit_part = False if not fits else None
+        if (cap_part is None or fit_part is None) and not pns_assumed and Pns > 0:
+            warnings.append(_nt('lap.warning.force_model_not_confirmed'))
+    layout = [cap_part, spacing_ok, fit_part, block_ok]
     if pns_assumed:
         # 가정값 강도로 정한 수·용량·배치는 FAIL/PASS 를 내지 않는다 (FIXES §3.1)
         layout = [None if p is False else p for p in layout]
@@ -557,7 +571,8 @@ def design_lap_connection(params: dict) -> dict:
                n_per_row=n_per_row, n_total=n_total, n_rows=n_rows, n_max_per_row=n_max_per_row,
                n_max_total=n_max_total, n_total_actual=n_total_actual, spacing=spacing, min_spacing=min_spacing,
                spacing_ok=spacing_ok, edge_dist=edge_dist, capacity=capacity, utilization=utilization,
-               capacity_ok=capacity_ok, Se=Se, Sf_only=Sf_only, flex=_flex, block=bs)
+               capacity_ok=capacity_ok, Se=Se, Sf_only=Sf_only, flex=_flex, block=bs,
+               force_confirmed=force_confirmed)
     lap_design_checks = _build_lap_checks(_ck)
     from design.lap_checks import apply_missing_demands as _apply_missing_demands
     lap_design_checks = _apply_missing_demands(lap_design_checks, demand_missing, demand_zero_unstated,
@@ -609,10 +624,21 @@ def design_lap_connection(params: dict) -> dict:
                                   if flexure_reference_dcr is not None else None),
         'Mn_lap': round(Mn_lap, 2),
         'phi_Mn_lap': round(phi_Mn_lap, 2),
+        # 위 표시용 반올림 값의 반올림 전 값(SI 변환용 — 부재 설계의 display_unrounded 와 같은 뜻).
+        # 패스너 결과(fastener_design)는 제 안에 같은 키를 갖는다.
+        'display_unrounded': {k: float(v) for k, v in (('Pns', Pns), ('Vn_used', Vn_in if Vn_in else None),
+                                                       ('Mn_lap', Mn_lap), ('phi_Mn_lap', phi_Mn_lap))
+                              if v is not None},
         'pass': overall_pass,
+        # 판정이 없으면 위 utilization 은 판정의 비가 아니다 — 부재 설계와 같은 표지(검토 2차 R2-6)
+        **({'utilization_valid': False} if overall_pass is None else {}),
         'verdict': verdict,
         'design_method': design_method,
-        'force_model': dict(FORCE_MODEL),
+        'force_model': dict(FORCE_MODEL, confirmed=force_confirmed,
+                            confirmation_input='lap_force_model_confirmed',
+                            verdict_rule=('model_A_confirmed' if force_confirmed else
+                                          'fail_if_model_A_exceeds_else_not_evaluated')),
+        'lap_force_model_confirmed': force_confirmed,
         'fastener_design': conn_result,
         'lap_ok': lap_ok,
         'lap_length_role': _nt('lap.label.lap_length_role'),
@@ -627,7 +653,8 @@ def design_lap_connection(params: dict) -> dict:
         'lap_right_in': lap_right,
         'design_checks': lap_design_checks,
         'scope_notes': [_prefixed('J6.3: ', LAP_BLOCK_SHEAR_NOTE)],
-        'assumptions': [LAP_BLOCK_SHEAR_ASSUMPTION] if bs.get('Pnr') is not None else [],
+        'assumptions': ([LAP_BLOCK_SHEAR_ASSUMPTION] if bs.get('Pnr') is not None else [])
+                       + ([_nt('lap.assumption.force_model_confirmed')] if force_confirmed else []),
         'display_rounding': _display_rounding('lap'),
     })
 

@@ -109,7 +109,7 @@ t('defaults = the page\'s initial values exactly (SI field text → US with the 
   assert.deepStrictEqual(bad, [], bad.join('\n'));
 });
 // 2026-11-25: 길이 넷(KxLx · KyLy · KtLt · Lb)을 빈 칸으로, 냉간가공을 끔으로 — 손으로 정한 공학 기본값 44 → 39
-t('the 39 hard-coded engineering defaults are in the table unchanged and marked page', () => {
+t('the 40 hard-coded engineering defaults are in the table unchanged and marked page (39 + the load-combination standard ASCE 7-10, decision R4)', () => {
   const ids = INV.summary.hardCodedEngineeringDefaults.filter((id) => !id.startsWith('.'));
   for (const id of ids) {
     const r = DS.FIELDS.find((x) => x[1] === id);
@@ -117,7 +117,7 @@ t('the 39 hard-coded engineering defaults are in the table unchanged and marked 
     assert.strictEqual(r[4].src, id === 'input-steel-grade' ? 'steel' : 'page', id);
     assert.notStrictEqual(DS.defaultValue(r[0]), null, id);
   }
-  assert.strictEqual(INV.summary.hardCodedEngineeringDefaults.length, 39);
+  assert.strictEqual(INV.summary.hardCodedEngineeringDefaults.length, 40);
 });
 t('steel defaults come from the SGC400 row (295 / 400 MPa) of src/webview/steelGrades.ts', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src', 'webview', 'steelGrades.ts'), 'utf8');

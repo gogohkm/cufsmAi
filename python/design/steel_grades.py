@@ -23,9 +23,13 @@ KSI_TO_MPA = 4.4482216152605 * 1000 / (25.4 * 25.4)   # 6.894757293168361
 DEFAULT_GRADE = 'SGC400'
 
 # KS D 3506 구조용(KDS 41 30 30 표 3.2-2): 옛 명칭 → 현행 명칭. Fy · Fu 는 현행 표의 한 행이다.
-_KS_NAME_NOTE = ('KS D 3506 structural grades, former name = current name (KDS 41 30 30 Table 3.2-2): '
+# 값의 출처(2026-11-25 다시 확인): 현행 이름의 Fy/Fu 는 KDS 41 30 30:2022 표 3.2-2, 옛 이름(JIS G 3302 와 같은
+# 이름)의 항복점/인장강도 하한은 JIS G 3302 표(일본제철 카탈로그 U023en 'Mechanical Properties (JIS Standards)'
+# 의 인용) — 두 표의 값이 짝마다 같다. KS D 3506 옛 판의 원문은 보지 못했다.
+_KS_NAME_NOTE = ('KS D 3506 structural grades, former name = current name with the same minimum Fy/Fu: '
                  'SGC340 = SGC245Y (245/340 MPa), SGC400 = SGC295Y (295/400), SGC440 = SGC335Y (335/440), '
-                 'SGC490 = SGC365Y (365/490), SGC570 = SGC560Y. Confirm Fy and Fu against the mill certificate.')
+                 'SGC490 = SGC365Y (365/490), SGC570 = SGC560Y (560/570). Current-name values: KDS 41 30 30 '
+                 'Table 3.2-2; former-name values: JIS G 3302. Confirm Fy and Fu against the mill certificate.')
 
 
 def _ks_d3506(Fy_MPa: float, Fu_MPa: float) -> dict:

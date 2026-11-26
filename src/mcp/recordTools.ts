@@ -56,10 +56,10 @@ export function openCase(server: McpServer, io: RecordToolIo): void {
 
 export function newCase(server: McpServer, io: RecordToolIo): void {
     server.tool("new_case",
-        "Make a new review case file in the open project (not opened — open_case opens it). from='current' copies the current model and inputs, otherwise the current model with initial inputs and the member type of kind. No results are copied. An existing name is an error.",
+        "Make a new review case file in the open project (not opened — open_case opens it). Without from: the program's initial model (the default section and steel a fresh StCFSD starts with) and initial inputs — nothing of the open case is carried over. from='current': a copy of the current model (section, material, reference stress, analysis conditions) and the current inputs. In both, a member kind (not section-only) sets the member type to kind. No results are copied. An existing name is an error.",
         { name: NAME.describe("Case name — 1–60 characters, no path characters"),
-          kind: z.enum(["roof-purlin", "wall-girt", "floor-joist", "wall-stud", "section-only"]).describe("Member kind of the case"),
-          from: z.enum(["current"]).optional().describe("'current': copy the current model and inputs") },
+          kind: z.enum(["roof-purlin", "wall-girt", "floor-joist", "wall-stud", "section-only"]).describe("Member kind of the case (a member kind also sets the case's member type)"),
+          from: z.enum(["current"]).optional().describe("'current': copy the current model and inputs; omit for the program's initial model and inputs") },
         async (args) => io.post({ action: "new_case", name: args.name, kind: args.kind, ...(args.from ? { from: args.from } : {}) }).then(io.reply));
 }
 
@@ -85,7 +85,7 @@ export function listChanges(server: McpServer, io: RecordToolIo): void {
 // ── 통일안 6.6(결정 D3): 공통 이름 — work_status · work_log(읽기만). show 는 server.ts(focus 와 같은 인자) ─────────────────────
 export function workStatus(server: McpServer, io: RecordToolIo): void {
     server.tool("work_status",
-        "Start here. Everything get_case_status says, plus todo {questions (open questions for the person), unacknowledged_ai_changes (AI change bundles the person has not marked as checked), provisional_assumptions}, last_run {no, kind, at, by, verdict {status ok · ng · incomplete, ratio, governing}} and calc {state match · changed · none, changes_since_run (change bundles after the last run — the program's own linkage lines are not counted)}. Outside a project only the changes of this session are known (session_changes) and note says why. No file paths." + DATA_NOTE,
+        "Start here. Everything get_case_status says, plus todo {questions (open questions for the person), unacknowledged_ai_changes (AI change bundles the person has not marked as checked), provisional_assumptions}, last_run {no, kind, at, by, verdict {status ok · ng · incomplete, ratio, governing}} and calc {state match · changed · none, changes_since_run (change bundles after the last run — the program's own linkage lines are not counted)}. calc is kind-agnostic (the last run of any kind); calc_by_kind {<result kind>: {state current · stale · differs · other-engine · none, changes (bundles after the last run of that kind), why? (why it is stale — the invalidation reason, why_code)}} tells which result is current. Outside a project only the changes of this session are known (session_changes) and note says why. No file paths." + DATA_NOTE,
         {},
         async () => io.reply(await io.post({ action: "work_status" })));
 }

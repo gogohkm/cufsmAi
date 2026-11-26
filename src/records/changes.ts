@@ -111,6 +111,19 @@ export interface BatcherDeps {
 
 const sameActor = (a: ChangeContext, b: ChangeContext): boolean => a.actor.kind === b.actor.kind && a.caseId === b.caseId;
 
+/**
+ * 묶음 문맥에 칸을 더한 새 문맥 — 호스트가 붙인 열거되지 않는 표지(`__t0` — 묶음이 열린 때, 그 뒤의 무효를 그 묶음에 싣는다)를 잇는다.
+ * N-7a: 펼침(`{...ctx}`)이 그 표지를 떨어뜨려 실행이 든 사람 묶음의 `invalidated` 가 비었다
+ */
+function extendCtx(ctx: ChangeContext, patch: Partial<ChangeContext>): ChangeContext {
+    const out: ChangeContext = { ...ctx, ...patch };
+    for (const k of Object.getOwnPropertyNames(ctx)) {
+        const d = Object.getOwnPropertyDescriptor(ctx, k);
+        if (d && !d.enumerable && !(k in patch)) { Object.defineProperty(out, k, d); }
+    }
+    return out;
+}
+
 export class ChangeBatcher {
     private open: OpenBatch | null = null;
     /**
@@ -130,7 +143,7 @@ export class ChangeBatcher {
     noteRun(ctx: ChangeContext, runId: string): void {
         const b = this.owner.get(ctx);
         if (!b || !runId) { return; }
-        b.ctx = { ...b.ctx, runs: [...(b.ctx.runs || []), runId] };
+        b.ctx = extendCtx(b.ctx, { runs: [...(b.ctx.runs || []), runId] });
     }
 
     private build(ctx: ChangeContext, before: Snapshot, after: Snapshot): ChangeBody | null {
@@ -296,7 +309,7 @@ export class ChangeBatcher {
     markVia(via: 'mirror' | 'unit-toggle'): void {
         const o = this.open;
         if (!o) { return; }
-        o.ctx = { ...o.ctx, via: [...new Set([...(o.ctx.via || []), via])] };
+        o.ctx = extendCtx(o.ctx, { via: [...new Set([...(o.ctx.via || []), via])] });
     }
 
     /** 편집 상태인가 */

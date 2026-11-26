@@ -23,6 +23,7 @@ const NON_DEFAULT = {
   loadD: 3, loadLr: 20, loadS: 25, loadWu: 34, loadWp: 10, loadL: 40,
   chkPatternLoading: false,          // 처음 켜짐
   chkLrReduced: true,
+  loadComboStandard: 'kds_41_12_00',   // 결정 R4 — 처음은 asce7_10
   spanIxIn4: [9.18, 7.76, 7.76, 9.18],     // in⁴ — 경간 4개(II-2A 의 0.059 / 0.070 부재 Ix)
   // 데크 · 가새 · §I6.2.1
   deckType: 'through-fastened',
@@ -33,6 +34,7 @@ const NON_DEFAULT = {
   bracePointsFt: [6.25, 12.5],
   chkI621Confirmed: true,
   designZeroDemandStated: true, connZeroDemandStated: true,   // 계약 §6.3 · §6.4 「준 0 은 정말 0」 의 진술
+  lapForceModelConfirmed: true,      // 결정 R2 — 랩 패스너 힘 분배(모든 패스너가 고르게)로 판정함을 밝힘
   lapRestrained: true, lapRestrainedLap: true,   // 계약 §6.3 랩 구속의 진술(랩 탭 칸은 거울)
   deckInsulationIn: 3,               // in
   deckRTested: 0.6,

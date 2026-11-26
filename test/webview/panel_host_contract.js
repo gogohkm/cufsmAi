@@ -904,56 +904,64 @@ async function scenarioDsmFamilyRule(ctx) {
   await p.handleMcpAction({ action: 'set_lengths', min: 1, max: 1000, n: 50 });
   await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: Fy });
   await p.handleMcpAction({ action: 'run_analysis' });
+  // 결정 R1(2026-11-25 남은 작업 H-A): 부재 검토는 언제나 그 자리에서 준비한 설계 Fy 의 S-S 서명곡선 FSM 값(엔진의 설계 격자)으로 —
+  // 지금 해석의 하중군 · 화면의 자동 준비와 상관없이. 대체(지금 해석 → 해석식)는 준비할 수 없을 때만(아래 끝에서 준비를 실패시켜 본다)
   const comp = await p.handleMcpAction({ action: 'aisi_design', member_type: 'compression', design_method: 'LRFD',
     Fy, Fu, KxLx: 2000 * MM, KyLy: 2000 * MM, KtLt: 2000 * MM, Pu: 40 / 4.4482216152605 });
   assert(!comp.error, comp.error);
-  assert.strictEqual(comp.dsm_basis, 'current_analysis', 'compression: the current compression analysis');
+  assert.strictEqual(comp.dsm_basis, 'prepared', 'compression: the prepared S-S signature values');
   assert.deepStrictEqual([comp.dsm_source.Pcrl, comp.dsm_source.Pcrd].map(String), ['FSM', 'FSM'], 'compression uses FSM Pcrl · Pcrd');
   await p.handleMcpAction({ action: 'set_load_case', load_case: 'bending_xx_pos', fy: Fy });
   await p.handleMcpAction({ action: 'run_analysis' });
-  // 화면의 자동 준비(그때 화면의 부재 종류 = 압축)
+  // 화면의 자동 준비(그때 화면의 부재 종류 = 압축) — 준비된 값은 서명이 같아 그대로(R8: 해석이 바꾸지 않는다)
   await p.__testDispatchMessage({ command: 'prepareDesignDsm', data: { member_type: 'compression', Fy } });
   const prep = ctx.posted('designDsmPrepared').pop();
-  assert(prep && prep.data && prep.data.success && prep.data.dsm.P && !prep.data.dsm.Mxx, 'prepared values hold P only');
+  assert(prep && prep.data && prep.data.success && prep.data.dsm.P && prep.data.reused === true, 'prepared P is kept through the analysis and reused');
   const dsm = (await p.handleMcpAction({ action: 'get_dsm', load_type: 'Mxx' })).Mxx;
-  assert(dsm.crl > 0 && dsm.crd > 0, 'the bending FSM gives Mcrl · Mcrd');
+  assert(dsm.crl > 0 && dsm.crd > 0, 'the bending FSM view gives Mcrl · Mcrd');
   const flexArgs = { action: 'aisi_design', member_type: 'flexure', design_method: 'LRFD', Fy, Fu, Lb: 2000 * MM, Cb: 1.0,
     Mu: 3 / 0.112984829027616, Vu: 5 / 4.4482216152605 };
   const fl = await p.handleMcpAction(flexArgs);
   assert(!fl.error, fl.error);
-  assert.strictEqual(fl.dsm_basis, 'current_analysis', `flexure: Mxx from the current bending analysis (${fl.dsm_basis})`);
-  assert.deepStrictEqual(fl.dsm_basis_by_family, { Mxx: 'current_analysis' });
+  assert.strictEqual(fl.dsm_basis, 'prepared', `flexure: Mxx prepared on the spot (${fl.dsm_basis})`);
+  assert.deepStrictEqual(fl.dsm_basis_by_family, { Mxx: 'prepared' });
   assert.deepStrictEqual([fl.dsm_source.Mcrl, fl.dsm_source.Mcrd].map(String), ['FSM', 'FSM'], `flexure uses FSM Mcrl · Mcrd (${JSON.stringify(fl.dsm_source)})`);
-  assert(!codes(fl).includes('member.warning.mcrl_mcrd_fsm_run'), 'no 「run FSM first」 warning after an FSM analysis');
+  assert(!codes(fl).includes('member.warning.mcrl_mcrd_fsm_run'), 'no 「run FSM first」 warning');
   assert(!fl.dsm_warning, `no host DSM warning: ${fl.dsm_warning}`);
+  const prepM = p._preparedDesignDsm.Mxx;
+  assert(p._preparedDesignDsm.P && prepM, 'the prepared values now hold P and Mxx (the missing family was added)');
   const step = (id, sym) => fl.design_checks.find((c) => c.id === id).steps.find((s) => s.kind === 'elastic_buckling' && s.result.symbol === sym).result.value;
-  assert(rel(step('member.flexure.local', 'Mcrl'), dsm.crl) < 1e-12 && rel(step('member.flexure.distortional', 'Mcrd'), dsm.crd) < 1e-12,
-    'the checks use the get_dsm Mcrl · Mcrd');
-  // 검증 문서 부록 A(사용자 길이 격자): Mcrl 23.78, Mcrd 16.21 kN·m — 기본 격자에서 0.5 % 안
+  assert(rel(step('member.flexure.local', 'Mcrl'), prepM.crl) < 1e-12 && rel(step('member.flexure.distortional', 'Mcrd'), prepM.crd) < 1e-12,
+    'the checks use the prepared Mcrl · Mcrd');
+  // 검증 문서 부록 A(사용자 길이 격자): Mcrl 23.78, Mcrd 16.21 kN·m — 설계 격자에서 0.5 % 안, 보기용 해석(기본 격자)과도 0.5 % 안
   const KNM = 0.112984829027616;
-  assert(rel(dsm.crl * KNM, 23.78) < 5e-3 && rel(dsm.crd * KNM, 16.21) < 5e-3, `S3 Mcrl ${dsm.crl * KNM} · Mcrd ${dsm.crd * KNM} kN·m`);
+  assert(rel(prepM.crl * KNM, 23.78) < 5e-3 && rel(prepM.crd * KNM, 16.21) < 5e-3, `S3 Mcrl ${prepM.crl * KNM} · Mcrd ${prepM.crd * KNM} kN·m`);
+  assert(rel(prepM.crl, dsm.crl) < 5e-3 && rel(prepM.crd, dsm.crd) < 5e-3, 'design grid ≈ display grid');
   // F4.1-2 손계산: My = Sf Fy, Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My
   const My = fl.design_checks.find((c) => c.id === 'member.flexure.distortional').steps[0].result.value;
-  const s = Math.sqrt(dsm.crd / My);
+  const s = Math.sqrt(prepM.crd / My);
   assert(rel(fl.Mnd, Math.round((1 - 0.22 * s) * s * My * 100) / 100) < 1e-12, `Mnd ${fl.Mnd} = F4.1-2 with the FSM Mcrd`);
-  // 조합: P 는 준비된 값, Mxx 는 현재 해석
+  // 조합: 두 하중군 다 준비된 값
   const cb = await p.handleMcpAction({ ...flexArgs, member_type: 'combined', KxLx: 2000 * MM, KyLy: 2000 * MM, KtLt: 2000 * MM,
     Pu: 1, Mux: flexArgs.Mu, Cmx: 1.0, Cmy: 1.0 });
   assert(!cb.error, cb.error);
-  assert.strictEqual(cb.dsm_basis, 'prepared+current_analysis');
-  assert.deepStrictEqual(cb.dsm_basis_by_family, { P: 'prepared', Mxx: 'current_analysis' });
-  // 준비된 값에 Mxx 가 있으면 전처럼 준비된 값
-  await p.__testDispatchMessage({ command: 'prepareDesignDsm', data: { member_type: 'flexure', Fy } });
-  const fl2 = await p.handleMcpAction(flexArgs);
-  assert.strictEqual(fl2.dsm_basis, 'prepared');
-  assert.deepStrictEqual([fl2.dsm_source.Mcrl, fl2.dsm_source.Mcrd].map(String), ['FSM', 'FSM']);
-  // 해석이 압축이고 준비된 값이 없으면: 값 없음(dsm_basis none)과 정확한 까닭
-  await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: Fy });
-  await p.handleMcpAction({ action: 'run_analysis' });
-  const fl3 = await p.handleMcpAction(flexArgs);
-  assert.strictEqual(fl3.dsm_basis, 'none');
-  assert(/does not match strong-axis bending/.test(fl3.dsm_warning || ''), `the reason names the missing bending analysis: ${fl3.dsm_warning}`);
-  console.log(`  S3 r=3: Mcrl ${(dsm.crl * KNM).toFixed(3)} · Mcrd ${(dsm.crd * KNM).toFixed(3)} kN·m, Mnd ${(fl.Mnd * KNM).toFixed(4)} kN·m`);
+  assert.strictEqual(cb.dsm_basis, 'prepared');
+  assert.deepStrictEqual(cb.dsm_basis_by_family, { P: 'prepared', Mxx: 'prepared' });
+  // 대체(준비를 할 수 없을 때만): 하중군마다 지금 해석 → 없으면 값 없음(dsm_basis none)과 정확한 까닭
+  const realPrepare = p._prepareDesignDsm;
+  p._prepareDesignDsm = async () => { throw new Error('test: preparation unavailable'); };
+  try {
+    p._preparedDesignDsm = null; p._preparedDesignDsmSig = '';
+    const fb = await p.handleMcpAction(flexArgs);
+    assert.strictEqual(fb.dsm_basis, 'current_analysis', 'fallback: the current bending analysis');
+    await p.handleMcpAction({ action: 'set_load_case', load_case: 'compression', fy: Fy });
+    await p.handleMcpAction({ action: 'run_analysis' });
+    const fl3 = await p.handleMcpAction(flexArgs);
+    assert.strictEqual(fl3.dsm_basis, 'none');
+    assert(/Preparing the S-S signature-curve FSM values failed \(test: preparation unavailable\)/.test(fl3.dsm_warning || '') && /does not match strong-axis bending/.test(fl3.dsm_warning || ''),
+      `the reason names the failed preparation and the missing bending analysis: ${fl3.dsm_warning}`);
+  } finally { p._prepareDesignDsm = realPrepare; }
+  console.log(`  S3 r=3: Mcrl ${(prepM.crl * KNM).toFixed(3)} · Mcrd ${(prepM.crd * KNM).toFixed(3)} kN·m, Mnd ${(fl.Mnd * KNM).toFixed(4)} kN·m`);
 }
 
 // 검증 문서 4.5(S4): 원형관 D100×2 — FSM 극소에 국부 / 뒤틀림 이름표를 붙이지 않고 DSM 값으로 내지 않는다(DSM 비적용 — 원형관 조항).

@@ -44,11 +44,22 @@ export function fieldLabel(path: string, labelOf?: LabelFn): string {
     return path;
 }
 
-/** 수 하나의 글 — 유효숫자 `digits`(기본 6) 자리, 끝의 0 지움 */
-export function formatNumber(v: number, digits = 6): string {
+/**
+ * 수 하나의 글 — 유효숫자 `digits`(기본 6) 자리, 끝의 0 지움. E10(N-7c): 정수부가 1000 이상이면 세 자리마다 쉼표(「2,000」 — ALCalc 와 같다).
+ * 소수부 · 지수 꼴(1e+21 · 1e-7)에는 넣지 않는다. 칸의 수(값)에만 쓴다 — 개수(「절점 12 → 14개」) · 번호(경간 2)는 이 함수를 지나지 않는다.
+ */
+export function formatNumber(v: number, digits = 6, group = true): string {
     if (!Number.isFinite(v)) { return String(v); }
     if (v === 0) { return '0'; }
-    return String(Number(v.toPrecision(Math.min(Math.max(digits, 1), 17))));
+    const s = String(Number(v.toPrecision(Math.min(Math.max(digits, 1), 17))));
+    return group ? groupThousands(s) : s;
+}
+
+/** 「-12345.678」 → 「-12,345.678」(정수부만, 4 자리 이상일 때). 지수 꼴 · 수가 아닌 글은 그대로 */
+export function groupThousands(s: string): string {
+    const m = /^(-?)(\d+)(\.\d+)?$/.exec(s);
+    if (!m || m[2].length < 4) { return s; }
+    return m[1] + m[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (m[3] ?? '');
 }
 
 /** 글 값 — 제어 · 글 방향 · 줄바꿈 글자를 지우고, 화살표를 바꾸고, 「」 로 감싼다(값이 제목의 꼴을 흉내 내지 못하게 — V7-24 ④ · ⑥) */
@@ -59,13 +70,13 @@ function quoteText(v: string): string {
     return `「${t}」`;
 }
 
-/** 값 하나의 글(표시 단위로). 수는 `digits` 자리 */
-export function formatValue(v: unknown, unit: UnitKey | null, units: DisplayUnits, digits = 6): string {
+/** 값 하나의 글(표시 단위로). 수는 `digits` 자리 — 쉼표로 잇는 짧은 수 목록 안에서는 천 단위 쉼표를 넣지 않는다(「1,000, 2,000」 처럼 읽히지 않게) */
+export function formatValue(v: unknown, unit: UnitKey | null, units: DisplayUnits, digits = 6, group = true): string {
     if (v === null || v === undefined || v === '') { return '(빈 칸)'; }
     if (typeof v === 'boolean') { return v ? '켬' : '끔'; }
-    if (typeof v === 'number') { return formatNumber(unit && units === 'SI' ? toSI(v, unit) : v, digits); }
+    if (typeof v === 'number') { return formatNumber(unit && units === 'SI' ? toSI(v, unit) : v, digits, group); }
     if (Array.isArray(v)) {
-        if (v.length <= 4 && v.every((x) => typeof x === 'number' || x === null)) { return v.map((x) => formatValue(x, unit, units, digits)).join(', '); }
+        if (v.length <= 4 && v.every((x) => typeof x === 'number' || x === null)) { return v.map((x) => formatValue(x, unit, units, digits, false)).join(', '); }
         return `${v.length}개`;
     }
     if (typeof v === 'string') { return quoteText(v); }

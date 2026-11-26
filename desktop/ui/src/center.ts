@@ -15,6 +15,7 @@
  */
 import { isValKey, reportKindOf, reportView, valView, vtabView } from './checklist';
 import { docView } from './docs';
+import { damageView } from './damage';
 import { curveSvg, type CurveMark } from './curve';
 import { esc, tip } from './dom';
 import { drawerHtml, type DTable } from './drawer';
@@ -27,7 +28,7 @@ import { memberRuns, regionLabel, rowOfKey, state, type CheckRow, type Run } fro
 import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
-import { fieldText, pageOf } from './notices';
+import { fieldText, pageOf, utilHtml } from './notices';
 import { refKey, work } from './work';
 import { alts, sideBySide, visibleAlts } from './alts';
 import { keyOfItem } from './follow';
@@ -51,7 +52,7 @@ export function groupOf(key: string): Group {
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
   if (key === 'conn' || key.startsWith('conn:')) { return 'conn'; }
   if (['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return 'doc'; }
-  if (['ask', 'rep', 'chg', 'ins', 'todo', 'insp', 'val', 'alt', 'pub'].includes(key) || /^(chg|work|asmr|srcr|alt|doc|iss|pubf|log|todo|insp|ask):/.test(key) || key === 'asm:reg' || key === 'src:unreg') { return 'other'; }
+  if (['ask', 'rep', 'chg', 'ins', 'todo', 'insp', 'val', 'alt', 'pub'].includes(key) || /^(chg|work|asmr|srcr|alt|doc|iss|pubf|log|todo|insp|ask):/.test(key) || key === 'asm:reg' || key === 'src:unreg' || key === 'dmg') { return 'other'; }
   return 'model';
 }
 
@@ -353,7 +354,7 @@ export function tablesFor(group: Group): DTable[] {
         const run = state.runs.find(x => x.key === r.runKey);
         const k0 = (run?.rows.find(x => x.pass === false) ?? run?.rows[0])?.key ?? r.runKey;
         return { key: k0, cells: [esc(fieldText(r.us, 'label')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
-          n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), typeof res.utilization === 'number' ? ratio(res.utilization, r.us?.result?.pass === false, `purlin:regions.${i}.result.utilization`) : none(), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(pageOf(r.us?.result)?.governing_check ?? ''))],
+          n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), utilHtml(r.us?.result, res.utilization, `purlin:regions.${i}.result.utilization`, none()), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(pageOf(r.us?.result)?.governing_check ?? ''))],
           sort: [fieldText(r.us, 'label'), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
           tsv: [fieldText(r.us, 'label'), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };
       });
@@ -474,11 +475,12 @@ function changeView(key: string, size: { w: number; h: number }): { html: string
   const nMod = el ? el.changed : c.fields, nAdd = el ? el.added : 0, nDel = el ? el.removed : 0;
   const what = el ? '요소' : '칸';
   const view = `<div class="dv" data-draw="section" data-zoom="section" data-chg-view="${esc(c.id)}">${svg}`
-    + `<div class="hud tl"><span class="chip" data-chg-mod="${nMod}"${tip(`이 변경이 바꾼 ${what}(호스트 ${el ? 'geometry' : 'fields'})${g?.explained_by_dimensions ? ' — 템플릿 치수의 변경으로 다시 만든 절점 · 요소' : ''}`)}><i class="key" style="background:var(--mod)"></i>바뀜 ${nMod}</span>`
+    // D1(800 px): 칩(왼쪽 묶음)과 「비교 기준 ▾ · 전체 맞춤」(오른쪽 묶음)을 한 줄 틀(hud top2)에 — 좁으면 묶음이 줄을 바꿔 겹치지 않는다
+    + `<div class="hud top2" data-chg-hud><div class="grp l" data-chg-chips><span class="chip" data-chg-mod="${nMod}"${tip(`이 변경이 바꾼 ${what}(호스트 ${el ? 'geometry' : 'fields'})${g?.explained_by_dimensions ? ' — 템플릿 치수의 변경으로 다시 만든 절점 · 요소' : ''}`)}><i class="key" style="background:var(--mod)"></i>바뀜 ${nMod}</span>`
     + `<span class="chip" data-chg-add="${nAdd}"><i class="key" style="background:var(--add)"></i>추가 ${nAdd}</span>`
     + `<span class="chip" data-chg-del="${nDel}"><i class="key" style="background:var(--del)"></i>삭제 ${nDel}</span>`
     + (inv.length ? `<span class="chip"${tip('기준 뒤의 묶음들이 무효로 만든 결과(호스트의 장부)')}><i class="key" style="background:var(--warn)"></i>낡게 한 결과 ${inv.length}</span>` : '') + '</div>'
-    + `<div class="hud tr"><span class="chip" data-chg-base="${esc(c.id)}"${tip('비교 기준 — 이 때 뒤의 묶음을 지금까지 모아 서랍에 보인다(앞 변경을 고른다)')}>비교 기준 · ${b ? esc(hhmm(b.at)) : '처음'} ▾</span>${fitBtn('section')}</div>`
+    + `<div class="grp r" data-chg-right><span class="chip" data-chg-base="${esc(c.id)}"${tip('비교 기준 — 이 때 뒤의 묶음을 지금까지 모아 서랍에 보인다(앞 변경을 고른다)')}>비교 기준 · ${b ? esc(hhmm(b.at)) : '처음'} ▾</span>${fitBtn('section')}</div></div>`
     + `<div class="hud bl"><span class="cap">지금 모델 · 절점 ${state.nodes.length} · 요소 ${state.elems.length}${el ? ` · 색 = 이 변경이 건드린 요소` : ''}</span></div></div>`;
   const rows: DTable['rows'] = [];
   const AREA: Record<string, string> = { sectionParams: '단면', sectionTemplate: '단면', node: '단면', elem: '단면', prop: '재료', inputs: '입력', spans: '경간', mcpOnly: 'MCP 인자' };
@@ -517,13 +519,16 @@ export function centerHtml(key: string, size: { w: number; h: number } = { w: 12
   if (key === 'vtab') { return { html: vtabView(key), cls: 'v1 docc' }; }
   if (reportKindOf(key)) { return { html: reportView(key), cls: 'v1 docc' }; }
   if (key.startsWith('doc:') || key.startsWith('iss:')) { return { html: docView(key), cls: 'v1 docc' }; }
+  if (key === 'dmg') { return { html: damageView(), cls: 'v1 docc' }; }
   if (key === 'pub' || key.startsWith('pubf:')) { return { html: honest('발행', '발행본을 고르면 읽기 전용으로 보인다 — 발행은 계산서의 정보 창 「R<n> 발행」(미리보기 → 사람만)'), cls: 'v1' }; }
   if (key === 'chg' || key.startsWith('chg:')) { return changeView(key, size); }
   // 기록의 묶는 줄(지난 계산 뒤 · 계산 #k · 그 앞) — 그 아래 첫 묶음의 보기
   if (key.startsWith('log:')) {
     const tl = timeline();
-    const cs = key === 'log:after' ? tl.after : key === 'log:before' ? tl.before : tl.groups.find(g => g.key === key)?.changes ?? [];
-    return cs[0] ? changeView(`chg:${cs[0].id}`, size) : { html: honest('묶음 없음', '이 자리에 바뀐 것이 없다'), cls: 'v1' };
+    const g = key.startsWith('log:run:') ? tl.groups.find(x => x.key === key) : undefined;
+    const cs = key === 'log:after' ? tl.after : key === 'log:before' ? tl.before : g?.changes ?? [];
+    return cs[0] ? changeView(`chg:${cs[0].id}`, size)
+      : { html: g ? honest('입력 변경 없음', '앞 계산 뒤에 바뀐 입력이 없다 — 이 계산에 처음 들어간 묶음이 없다') : honest('묶음 없음', '이 자리에 바뀐 것이 없다'), cls: 'v1' };
   }
   // R3-3: 업무 항목 — 걸린 대상(첫째)의 보기를 그대로(정보 창이 그 항목). 가정 · 원자료는 글뿐이라 가운데는 비운다
   if (key.startsWith('work:')) {

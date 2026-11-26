@@ -22,7 +22,13 @@
     const _assumpList = (r) => _U.assumptionsList(r, _uo());
     const _scopeList = (r) => _U.scopeNotesList(r, _uo());
     /** K4b: 결과의 글 필드(모드 · 방법 · 이름표 · 출처) · 알림 사전 · 모드 이름(id → name_ko)을 한국어 · 화면 단위로(목록 · 알림은 도우미가) */
-    const _fp = (r) => (_N && r && typeof r === 'object' && !Array.isArray(r) ? _N.forPage(r, _unitSystem) : r);
+    // B2: SI 화면의 결과 수는 엔진의 반올림 전 값(display_unrounded)에서 바꾼다 — MCP 의 SI 응답 · 새 화면과 같은 규칙(utils.withUnroundedValues).
+    // US 화면은 엔진의 표시 값 그대로
+    const _fp = (r) => {
+        if (!_N || !r || typeof r !== 'object' || Array.isArray(r)) { return r; }
+        const src = _unitSystem === 'SI' && _U && typeof _U.withUnroundedValues === 'function' ? _U.withUnroundedValues(r).value : r;
+        return _N.forPage(src, _unitSystem);
+    };
     /** 랩 패스너 이름표 — fastener_label_parts(물리량)를 화면 단위로 */
     const _fastenerLabel = (r) => (r && _N ? _N.fastenerLabel(r.fastener_label_parts, { units: _unitSystem, lang: 'ko' }, r.fastener_label) : (r && r.fastener_label) || '');
 
@@ -276,6 +282,9 @@
             case 'resultsCleared':
                 // 호스트: 다른 프로젝트를 열기 직전 — 이전 프로젝트의 결과를 모두 지운다(V4-01).
                 clearStaleResults('all', (msg.data && msg.data.reason) || 'project opened');
+                // N-4: 앞 대상의 상태 줄(「설계용 FSM 준비 완료: …」 등) · 설계 탭 띠의 덮어쓴 글을 비운다 — 처음 화면과 같게
+                setStatus('', '');
+                updateDesignDsmStatus();
                 sendTreeUpdate();
                 break;
             case 'propertiesResult':
@@ -418,8 +427,9 @@
                     setStatus('설계용 FSM 준비 실패: ' + msg.data.error, 'error');
                 } else {
                     const preparedCases = (msg.data?.load_cases || []).join(', ');
-                    setStatus('설계용 FSM 준비 완료: ' + preparedCases, 'success');
-                    updateDesignDsmStatus('✓ 좌굴해석 연동 + 설계용 좌굴값 준비 완료 (' + preparedCases + ') — 설계 검토 실행 가능', true);
+                    if (msg.data?.not_needed) { break; }
+                    if (!msg.data?.in_check) { setStatus('설계용 FSM 준비 완료: ' + preparedCases, 'success'); }
+                    updateDesignDsmStatus('✓ 설계용 좌굴값 준비 완료 (' + preparedCases + ') — 설계 Fy 의 S-S 서명곡선(엔진의 설계 격자), 부재 검토가 이 값을 씁니다', true);
                 }
                 break;
             }
@@ -451,7 +461,7 @@
     window.addEventListener('message', event => {
         const c = event.data && event.data.command;
         if (!c || c === 'caseAck' || c === 'caseState') { return; }
-        // 복원 뒤에는 칸 전부를 — 화면은 복원한 값을 지금 단위로 적고(12 자리) 다시 읽는다. 호스트의 상태가 화면이 보낼 값과 바이트까지 같게.
+        // 복원 뒤에는 칸 전부를 — 화면은 복원한 값을 지금 단위로 적고(12 자리) 다시 읽는다. 호스트의 상태가 화면이 보낼 값과 화면이 적는 자리에서 같게(호스트는 그 자리에서 같은 수를 새 값으로 받지 않는다 — designState.shownSame).
         if (c === 'restoreDesignInputs' && _caseLast) { _caseLast = {}; }
         _caseReport(c === 'restoreDesignInputs' ? 'file'
             : (c === 'loadAnalysisComplete' || c === 'designPurlinResult') ? 'load-analysis' : 'mirror');
@@ -538,8 +548,9 @@
         (구 "설계용 FSM 해석 준비" 버튼 기능을 해석 실행에 통합) */
     function _autoPrepareDesignDsm() {
         const rawT = document.getElementById('select-member-type')?.value || 'flexure';
-        const mt = isCalcMode(rawT) ? 'flexure' : rawT;
-        if (mt === 'tension') { return; }  // 인장 부재는 DSM 좌굴값 불필요
+        // 인장 부재는 DSM 좌굴값 불필요, 자동 계산 넷(퍼린 · 장선 · 거트 · 스터드)은 퍼린 사슬이 자기 서명곡선을 푼다(결정 R1)
+        if (rawT === 'tension' || isCalcMode(rawT)) { return; }
+        const mt = rawT;
         vscode.postMessage({
             command: 'prepareDesignDsm',
             data: {
@@ -1186,6 +1197,8 @@
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked) { data.lap_restrained = true; }
             // 계약 §6.3: 0 은 밝혔을 때만
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-conn-zero-demand'))?.checked) { data.zero_demand_stated = true; }
+            // 결정 R2: 패스너 힘 분배(모든 패스너가 고르게)로 판정함을 밝혔을 때만
+            if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-force-model-confirmed'))?.checked) { data.lap_force_model_confirmed = true; }
             if (_blockIfMissing('Lap 접합부')) { return; }
             vscode.postMessage({ command: 'runLapConnection', data });
         });
@@ -3758,7 +3771,8 @@
     // --- Spec tooltip data ---
     const SPEC_TIPS = {
         'E2': 'Flexural / Torsional / Flexural-Torsional Buckling',
-        'E3.2': 'DSM Local Buckling — λℓ = √(Pne/Pcrl)',
+        'E3.1.1.1': 'Local Buckling of Cylindrical Tubular Members — Ae = Ao + R(A − Ao), D/t ≤ 0.441 E/Fy',
+        'E3.2':'DSM Local Buckling — λℓ = √(Pne/Pcrl)',
         'E3.2.1': 'DSM Local Buckling Compression Strength',
         'E4': 'DSM Distortional Buckling — λd = √(Py/Pcrd)',
         'E4.1': 'DSM Distortional Buckling Compression Strength',
@@ -3833,14 +3847,14 @@
         const P = lastDsmResult && lastDsmResult.P;
         const M = lastDsmResult && lastDsmResult.Mxx;
         if (P || M) {
-            let t = '✓ 좌굴해석(①~③) 결과 연동됨 — ';
+            let t = '좌굴 해석(①~③ · 보기용) 결과 — ';
             if (P) t += 'P: Pcrl=' + _ruv(P.crl, 'force') + '/Pcrd=' + _ruv(P.crd, 'force') + ' ' + _rul('force');
             if (P && M) t += ' · ';
             if (M) t += 'Mxx: Mcrl=' + _ruv(M.crl, 'moment') + '/Mcrd=' + _ruv(M.crd, 'moment') + ' ' + _rul('moment');
             el.textContent = t;
             el.style.borderColor = '#4caf50';
         } else {
-            el.textContent = 'FSM 좌굴값 없음 — 아래 "A. 좌굴해석" 섹션에서 해석을 실행하세요 (설계용 좌굴값 자동 준비).';
+            el.textContent = '설계용 FSM 좌굴값은 「설계 검토 실행」 때 설계 Fy 의 S-S 서명곡선으로 준비합니다 — 좌굴 해석은 곡선 · 모드 보기용입니다.';
             el.style.borderColor = 'var(--vscode-panel-border)';
         }
     }
@@ -4516,6 +4530,9 @@
             };
             const i621El = /** @type {HTMLInputElement|null} */ (document.getElementById('chk-i621-confirmed'));
             if (i621El && i621El.checked) { data.i621_conditions_confirmed = true; }
+            // 결정 R4: 하중조합의 기준 — 처음 값(ASCE 7-10)이 아닐 때만(처음 값의 본문은 그대로)
+            const lcsEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('select-load-combo-standard'));
+            if (lcsEl && lcsEl.value && lcsEl.value !== 'asce7_10') { data.load_combination_standard = lcsEl.value; }
             const insIn = _optNum('deck-insulation', 'length');   // D-5: 칸이 쥔 정확한 값
             if (insIn !== undefined) { data.insulation_in = insIn; }
             const rtEl = /** @type {HTMLInputElement|null} */ (document.getElementById('deck-R-tested'));
@@ -4975,8 +4992,12 @@
                     + (pat.length ? ' — 부분재하한 하중 ' + _esc(pat.join(', ')) : ' — 부분재하한 하중 없음')
                     + (why ? ' (' + _esc(why) + ')' : '') + '</div>';
             }
-            if (data.load_combination_standard && data.load_combination_standard.reference) {
-                html += '<div class="hint">하중조합: ' + _esc(String(data.load_combination_standard.reference)) + '</div>';
+            // 결정 R4: 쓴 하중조합의 기준(key 가 없는 결과 = ASCE 7-10 — 고르기 전의 결과)
+            if (data.load_combination_standard && typeof data.load_combination_standard === 'object') {
+                const lcs = data.load_combination_standard;
+                const ed = lcs.edition || (lcs.key ? String(lcs.key) : 'ASCE/SEI 7-10');
+                const ref = lcs.reference_ko || lcs.reference || '';
+                html += '<div class="hint">하중조합 기준: ' + _esc(ed + (lcs.key ? '' : ' (처음 값)')) + (ref ? ' — ' + _esc(String(ref)) : '') + '</div>';
             }
             const lw = _warnList(data), la = _assumpList(data), ln = _notEvalList(data);
             if (lw.length) { html += '<div class="validation-box" style="font-size:11px">' + lw.map(w => '⚠ ' + _esc(w)).join('<br>') + '</div>'; }
@@ -5366,7 +5387,9 @@
         const mt = data.member_type || '';
         const mode = data.controlling_mode || '';
         const dm = data.design_method || 'LRFD';
-        const util = data.utilization;
+        // 엔진(2026-11-25 둘째 판): 빈 길이에서 길이와 상관없는 하한이 넘은 NG 는 그 하한의 비가 판정비(맨 위 utilization 은 가정한 길이의 수)
+        const _lbf = _U && typeof _U.lengthBoundFailure === 'function' ? _U.lengthBoundFailure(data) : null;
+        const util = _lbf ? _lbf.ratio : data.utilization;
         // 3상태 판정: utils.js 공통 verdictOf (true=OK, false=NG, null·미완료=판정 없음).
         // 게이지 색도 판정을 따른다 — 판정 없음이면 이용률이 낮아도 녹색이 아니다.
         const verdictOf = _v3;
@@ -5416,10 +5439,18 @@
         if (mt === 'compression' || mt === 'flexure') {
             // 부모멘트(또는 단일 구간) 구간 라벨
             if (mt === 'flexure' && data.positive_region && !data.purlin_mode) {
-                var _negLb = fromDisplay(getNum('design-Lb', 0), 'length');
-                var _negCb = getNum('design-Cb', 1.0);
-                var _negMu = fromDisplay(getNum('design-Mx', 0), 'moment');
-                summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:2px;color:#4fc3f7">부모멘트 구간 (-M) — Mu(-)=' + fmtVal(_negMu, 'moment') + ' ' + unitLabel('moment') + ', Lb=' + fmtVal(_negLb, 'length') + ' ' + unitLabel('length') + ', Cb=' + _negCb + '</div>';
+                // B2: 머리의 Mu · Lb · Cb 는 그 결과가 쓴 값(지금 칸이 아니다 — 칸을 비우거나 고친 뒤에도 결과의 것). 결과에 없으면 수를 적지 않는다.
+                // 빈 길이를 엔진이 가정한 결과(length_assumed)의 Lb 는 가정한 값이라고 적는다
+                const _fd = data.Fcre_detail && typeof data.Fcre_detail === 'object' ? data.Fcre_detail : null;
+                const _negDc = (Array.isArray(data.design_checks) ? data.design_checks : [])
+                    .find(c => c && c.group === 'member.flexure' && c.demand && typeof c.demand.value === 'number');
+                const _hp = [];
+                if (_negDc) { _hp.push('Mu(-)=' + fmtVal(_negDc.demand.value, 'moment') + ' ' + unitLabel('moment')); }
+                if (_fd && typeof _fd.Lb === 'number') {
+                    _hp.push('Lb=' + fmtVal(_fd.Lb, 'length') + ' ' + unitLabel('length') + (data.length_assumed ? ' (빈 칸 — 엔진이 가정한 길이, 판정 아님)' : ''));
+                }
+                if (_fd && typeof _fd.Cb === 'number') { _hp.push('Cb=' + _fd.Cb); }
+                summaryHtml += '<div style="font-weight:600;font-size:11px;margin-bottom:2px;color:#4fc3f7">부모멘트 구간 (-M)' + (_hp.length ? ' — ' + _hp.join(', ') : '') + '</div>';
             }
             const isC = mt === 'compression';
             const vals = isC
@@ -5574,8 +5605,11 @@
             summaryHtml += '<table class="props-table" style="font-size:11px;margin:6px 0"><tr><th>검토</th><th>비</th><th>판정</th></tr>';
             data.limit_state_checks.forEach(c => {
                 const cv = _v3(c && typeof c === 'object' ? c : null);
-                summaryHtml += '<tr><td>' + _esc(c && c.name) + '</td><td>'
-                    + (c && typeof c.ratio === 'number' ? c.ratio.toFixed(3) : '—') + '</td><td style="color:' + cv.color + '">' + cv.short + '</td></tr>';
+                // 엔진 E-1: 빈 길이를 가정해 낸 항목(reference_only)은 판정이 아니다 — 비는 참고값, 까닭을 함께
+                const refOnly = !!(c && c.reference_only);
+                const why = c && c.length_assumed ? (c.reason_ko || (typeof c.reason === 'string' ? c.reason : '')) : '';
+                summaryHtml += '<tr><td>' + _esc(c && c.name) + (why ? '<div class="hint">' + _esc(why) + '</div>' : '') + '</td><td>'
+                    + (c && typeof c.ratio === 'number' ? c.ratio.toFixed(3) + (refOnly ? ' (참고)' : '') : '—') + '</td><td style="color:' + cv.color + '">' + cv.short + '</td></tr>';
             });
             summaryHtml += '</table>';
         }

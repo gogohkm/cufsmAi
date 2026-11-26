@@ -1185,6 +1185,8 @@ def extract_max_deflection_per_span(
             'L_ft': L,
             'L_over_delta': round(L_eff * 12.0 / max_abs, 0) if max_abs > 1e-6 else float('inf'),
             'L_ratio_basis': _nt('loads.label.l_ratio_cantilever') if cant else 'L',
+            # 위 표시용 반올림 값의 반올림 전 값(SI 변환용 — 설계 결과의 display_unrounded 와 같은 뜻)
+            'display_unrounded': {'x_ft': float(max_x), 'delta_in': float(max_d), 'abs_delta_in': float(max_abs)},
         })
         x_offset += L
     return results

@@ -315,6 +315,21 @@ async function run() {
     assert.deepStrictEqual(lines(x), [['ai', 'design_purlin', 0, 2]]);
   });
 
+  await t('E10 (N-7c): thousands separators in titles and field texts — integer part ≥ 1000 only, never in decimals, exponents or short number lists; structured from/to stay numbers', () => {
+    assert.strictEqual(T.formatNumber(2000), '2,000');
+    assert.strictEqual(T.formatNumber(-1234.5), '-1,234.5');
+    assert.strictEqual(T.formatNumber(-1234567.5), '-1,234,570', 'six significant digits, then grouped');
+    assert.strictEqual(T.formatNumber(999.5), '999.5');
+    assert.strictEqual(T.formatNumber(0.00012345), '0.00012345');
+    assert.strictEqual(T.formatNumber(2.5e21), '2.5e+21');
+    assert.strictEqual(T.groupThousands('1234.5678'), '1,234.5678');
+    const d = D.diffSnapshots(snap(zModel(T20), { Lb: 2000 / 25.4 }), snap(zModel(T20), { Lb: 1800 / 25.4 }), info);
+    assert.strictEqual(T.changeTitle(d.fields, 'SI', label), '비지지 길이 Lb 2,000 → 1,800 mm');
+    const fr = T.fieldRecord(d.fields[0], 'SI', label);
+    assert(fr.text === '비지지 길이 Lb 2,000 → 1,800 mm' && Math.abs(fr.from - 2000) < 1e-9 && Math.abs(fr.to - 1800) < 1e-9, JSON.stringify(fr));
+    assert.strictEqual(T.formatValue([1000, 2500], null, 'US'), '1000, 2500', 'a short list joined by commas is not grouped');
+  });
+
   return done();
 }
 module.exports = { run };

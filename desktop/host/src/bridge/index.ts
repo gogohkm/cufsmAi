@@ -338,6 +338,7 @@ export async function startBridge(host: HostHandle, options: StartBridgeOptions)
       return picked === q.items[0] ? 'save' : picked === q.items[1] ? 'discard' : 'cancel';
     },
     personFile: () => currentFile,
+    caseFile: () => host.caseFile(),
     askSavePath: async (defaultName: string) => (await platform.fileDialog({ kind: 'save', title: '검토 대상 저장', saveLabel: '저장',
       defaultPath: path.join(currentFile ? path.dirname(currentFile) : process.cwd(), defaultName), filters: { 'StCFSD 검토 대상': ['csd'] } }))?.[0],
     saveProject: async (file: string) => { const r = await host.saveProject(file); if (r.ok) { setCurrentFile(r.file); } return r; },

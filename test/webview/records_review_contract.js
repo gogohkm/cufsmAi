@@ -238,9 +238,18 @@ async function main() {
     // ════ ④-2 is_now = 지금 상태와 지킨 스냅숏만 — 화면의 거울 메아리(끝자리)가 keep 앞이든 뒤든 같은 답 · A · 사람의 대안 ════
     await design(0.065);
     const FP = ctx.load(path.join('src', 'records', 'fp.ts'));
-    const echo = async () => {   // 화면이 지금 단위로 적고 다시 읽은 값(끝자리만 다름) — origin mirror
+    // B1(2026-11-25): 화면의 메아리(지금 값과 화면이 적는 12 자리에서 같은 수)는 이제 상태에 닿지 않는다 — 내용 지문이 그대로다
+    {
+      const fp0 = FP.contentFp(p._model, p.__testGetCase().state).contentFp;
+      const fy0 = p.__testGetCase().state.inputs.fy;
+      await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', seenRev: p.__testGetCase().state.rev, changes: { fy: fy0 * (1 + 2e-15) } } });   // 왕복의 꼬리(마지막 한두 비트)
+      assert(p.__testGetCase().state.inputs.fy === fy0 && FP.contentFp(p._model, p.__testGetCase().state).contentFp === fp0, 'a page echo leaves the state and the content fingerprint unchanged');
+    }
+    // 끝자리만 다른 값은 아직 생긴다 — AI 가 SI 로 다시 준 값(MPa → ksi 의 변환이 마지막 자리에서 다르다). is_now 의 허용(상대 1e-9)이 그것을 「지금」 으로 본다
+    const echo = async () => {
       const fy = p.__testGetCase().state.inputs.fy;
-      await p.__testDispatchMessage({ command: 'caseEdit', data: { origin: 'mirror', changes: { fy: fy * (1 + 3e-13) } } });
+      const r = await tool('set_case_inputs', { inputs: { fy: fy * (1 + 3e-13) }, reason: 'the same Fy given again (last digits differ)' });
+      assert(r.accepted.includes('fy'), 'a last-digit difference from the AI is written: ' + JSON.stringify(r).slice(0, 200));
     };
     let flips = 0;
     const same = [];
@@ -257,7 +266,7 @@ async function main() {
       const nowItems = (await tool('alternatives', { action: 'list' })).items.filter((x) => x.is_now).map((x) => x.item);
       assert(same.every((x) => nowItems.includes(x)) && !nowItems.includes(k1.item), `round ${i}: list is_now ${JSON.stringify(nowItems)}`);
     }
-    assert(flips >= 5, `the echo after keep moved the content fingerprint in ${flips} rounds (the old rule would have said 「not now」 there)`);
+    assert(flips >= 5, `the last-digit write after keep moved the content fingerprint in ${flips} rounds (a byte rule would have said 「not now」 there)`);
     const l0 = (await tool('alternatives', { action: 'list' })).items;
     const a1 = l0.find((x) => x.item === k1.item);
     assert(typeof a1.A === 'number' && a1.A < l0.find((x) => x.item === same[0]).A && a1.A_unit === 'in²', 'A from the snapshot section (t 0.059 < t 0.065): ' + JSON.stringify(a1));

@@ -82,7 +82,9 @@ async function runAnalysisGui(ctx) {
   const m = ctx.mark();
   await ctx.click('#btn-run-analysis');
   await ctx.waitMsg('analysisComplete', m.h2w, 300000);
-  await ctx.waitMsg('designDsmPrepared', m.h2w, 300000).catch(() => {});
+  // 화면은 직접 입력의 부재 종류(압축 · 휨 · 조합)에서만 해석 뒤 설계용 좌굴값을 준비한다 — 자동 계산 넷 · 인장은 준비하지 않는다(결정 R1)
+  const mt = await ctx.eval(`(document.getElementById('select-member-type') || {}).value || ''`);
+  if (['compression', 'flexure', 'combined'].includes(mt)) { await ctx.waitMsg('designDsmPrepared', m.h2w, 300000).catch(() => {}); }
   await ctx.settle(300);
 }
 

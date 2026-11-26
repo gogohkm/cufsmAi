@@ -20,14 +20,16 @@
  * 제품 표로 통째로 SI 로 바꾼 것(quantity 로) — 줄은 그 자리를 가리키기만 한다.
  */
 import { api, last, mcp, type LastEntry } from './bridge';
+import { lengthAssumed, lengthBoundFailure, utilInvalid, utilShown, type LengthBound } from './format';
 import { loadRecords } from './records';
 import { loadChanges } from './changes';
 import { loadRecordsWork, prefetchOpenQuestions } from './work';
 import { loadReviews } from './reviews';
 import { loadDocs } from './docs';
+import { loadDamage } from './damage';
 import { loadAlts } from './alts';
 import { connSI, cutwpSI, dsmSI, loadsSI, memberSI, mmToM, propsSI, purlinSI } from './units';
-import { fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
+import { boundCheckName, fieldText, finder, looseList, noteList, pageOf, type Finder, type Note } from './notices';
 
 export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
 export type StageState = 'ok' | 'stale' | 'none' | 'run' | 'unk';
@@ -98,6 +100,14 @@ export interface Run {
   src: string;          // data-src 앞부분(이 결과의 뿌리 — `design:` · `purlin:regions.0.result.` 처럼 뒤에 경로를 바로 붙인다)
   overall: boolean | null;
   utilization: number | null;
+  /** 엔진이 utilization_valid: false 를 달았고 NG 가 아니다 — 이용률은 판정비가 아니다(「판정 없음」) */
+  utilInvalid: boolean;
+  /** 엔진 2차: 가정한 길이의 결과가 길이와 상관없는 하한으로 NG — 그때 utilization · governing 은 그 하한의 비 · 항목(format.lengthBoundFailure) */
+  bound: LengthBound | null;
+  /** utilization 이 결과 안에 있는 자리(data-src 꼬리) — 보통 'utilization', 하한이면 length_independent_bound.ratio 등 */
+  utilPath: string;
+  /** 가정한 길이로 낸 이용률(참고값 — 판정비가 아니다). 가정한 길이가 아니면 null */
+  utilRef: number | null;
   governing: string | null;
   rows: CheckRow[];
   /** 퍼린 구간의 검토 지점 */
@@ -294,13 +304,19 @@ function runOf(key: string, scope: Scope, label: string, where: string, us: any,
     if (v && typeof v === 'object' && !Array.isArray(v) && !['region', 'force_model', 'request'].includes(k)) { collect(v, `[${k}] `); }
   }
   const notApplicable: string[] = [];
+  const bound = lengthBoundFailure(us);
   if (!rows.some(r => r.kind === 'na') && us?.distortional_applicable === false) { notApplicable.push('뒤틀림좌굴(§F4 · §E4)'); }
   return {
     key, area: scope, label, where, result: si, us, src,
     overall: us?.pass === true ? true : us?.pass === false ? false : null,
-    utilization: typeof si?.utilization === 'number' ? si.utilization : null,
+    // 계약 §6.4: utilization_valid: false(NG 아님)면 판정비가 아니다 — 수를 두지 않고 utilInvalid 로(화면은 「판정 없음」)
+    // 엔진 2차: 가정한 길이의 결과가 하한으로 NG 면 판정비 · 지배는 그 하한의 비 · 항목(호스트의 실행 요약 · max_ratio 와 같은 규칙)
+    utilization: bound ? bound.ratio : utilShown(us, si?.utilization),
+    utilInvalid: utilInvalid(us),
+    bound, utilPath: bound ? bound.path : 'utilization',
+    utilRef: lengthAssumed(us) && typeof si?.utilization === 'number' ? si.utilization : null,
     // 지배 검토의 이름 — 그 id 의 name_ko(notices.js forPage)
-    governing: typeof us?.governing_check === 'string' ? String(pageOf(us)?.governing_check ?? us.governing_check) : null,
+    governing: bound ? boundCheckName(us, bound) : typeof us?.governing_check === 'string' ? String(pageOf(us)?.governing_check ?? us.governing_check) : null,
     rows, points, neTexts, notChecked: looseList(us?.not_checked, find), notApplicable, warnings, assumptions, scope: scopeNotes,
   };
 }
@@ -345,6 +361,46 @@ function buildRuns(): Run[] {
 
 /** 부재 검토(부재 · 퍼린)의 실행만 — 접합은 접합부 가지에 */
 export const memberRuns = (): Run[] => state.runs.filter(r => r.area === 'member' || r.area === 'purlin');
+
+/**
+ * E5 — 부재 검토가 FSM 없이(해석식 좌굴값으로) 계산됐는가. 호스트가 결과에 적은 하중군마다의 출처(dsm_basis_by_family: P · Mxx →
+ * prepared · current_analysis · none)에서 none 인 하중군만 — 화면이 짐작하지 않는다. 그 키가 없으면(인장 — 하중군 없음 · 퍼린 · 옛 결과) ·
+ * 엔진이 DSM 비적용이라 밝혔으면(원형관 — member.scope.round_tube_dsm_not_applicable) null.
+ * none 이어도 엔진의 출처(dsm_source)가 모두 「없음」 이면 해석식도 아니다(FSM 좌굴값 없음)
+ */
+const DSM_NA_CODE = 'member.scope.round_tube_dsm_not_applicable';
+const FAM_KEYS: Record<string, { syms: string; keys: string[]; sub: string }> = {
+  P: { syms: 'Pcrℓ · Pcrd', keys: ['Pcrl', 'Pcrd'], sub: 'compression' },
+  Mxx: { syms: 'Mcrℓ · Mcrd', keys: ['Mcrl', 'Mcrd'], sub: 'flexure_x' },
+};
+export interface NoFsm { fams: string[]; syms: string; sources: string; analytic: boolean }
+export function noFsmOf(r: Run | undefined): NoFsm | null {
+  const us = r?.us;
+  const by = us?.dsm_basis_by_family;
+  if (!us || !by || typeof by !== 'object' || Array.isArray(by)) { return null; }
+  const na = r!.scope.some(n => n.code === DSM_NA_CODE)
+    || (Array.isArray(us.notices) && us.notices.some((n: any) => n && typeof n === 'object' && n.code === DSM_NA_CODE));
+  if (na) { return null; }
+  const fams = Object.entries(by as Record<string, unknown>).filter(([, b]) => b === 'none').map(([f]) => f);
+  if (!fams.length) { return null; }
+  // 엔진이 그 하중군의 국부 · 뒤틀림 값을 어디서 얻었는지(그대로 — 압축 · 휨은 { Pcrl, Pcrd } · { Mcrl, Mcrd }, 조합은 { compression, flexure_x })
+  const ds = us.dsm_source && typeof us.dsm_source === 'object' ? us.dsm_source : {};
+  const vals: Array<[string, string]> = [];
+  for (const f of fams) {
+    const fk = FAM_KEYS[f];
+    if (!fk) { continue; }
+    const src = ds[fk.sub] && typeof ds[fk.sub] === 'object' ? ds[fk.sub] : ds;
+    for (const k of fk.keys) { if (typeof src[k] === 'string' && src[k]) { vals.push([k, src[k]]); } }
+  }
+  const isNone = (v: string) => /^(none|없음)$/i.test(v.trim());
+  return {
+    fams, syms: fams.map(f => FAM_KEYS[f]?.syms ?? f).join(' · '),
+    sources: vals.map(([k, v]) => `${k} ${v}`).join(' · '),
+    analytic: !vals.length || vals.some(([, v]) => !isNone(v)),
+  };
+}
+/** 지금 부재 검토 가운데 FSM 없이 계산된 것(E5 — 결과 › 부재 검토 · 업무 › 점검의 표시) */
+export const noFsmRuns = (): Array<{ run: Run; nf: NoFsm }> => memberRuns().map(run => ({ run, nf: noFsmOf(run) })).filter((x): x is { run: Run; nf: NoFsm } => !!x.nf);
 
 /** 모든 검토 항목(엔진 순서 — 실행 차례대로) */
 export const allRows = (): CheckRow[] => state.runs.flatMap(r => r.rows);
@@ -512,6 +568,8 @@ async function load(): Promise<void> {
   await loadReviews();
   await loadAltsIfCaseChanged();
   await loadDocs();
+  // V9b-04 · D1: 믿는 작성자의 손상된 줄 파일(다리의 사람 얼굴) — 띠 · 문서 탭의 「기록 손상」
+  await loadDamage(!!state.full?.project?.inProject);
   if (!state.initialModel) {
     const first = await last(id, ['modelLoaded'], 'first');
     state.initialModel = first?.data.modelLoaded?.message?.data ?? null;

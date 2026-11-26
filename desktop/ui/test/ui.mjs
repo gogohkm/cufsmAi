@@ -604,6 +604,37 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     classes: (await api('GET', `/api/wv/${encodeURIComponent(designerId)}/last?command=analysisComplete`)).json?.data?.analysisComplete?.message?.data?.classifications,
   });
   const marker = () => ev('window.__noReload');
+  /**
+   * N-5(E11) — 창 폭마다 제목 표시줄: 진행 띠의 단계 · 계산 일치 칩(왼쪽)이 찾기 · AI 따라가기 · 편집 · 연결 상태 · 연결 단추(오른쪽)와 겹치는가(경계 상자),
+   * 진행 띠 칸 밖으로 밀려 잘린 단계가 있는가, 가로 스크롤 · 제목 줄 넘침. 이름이 숨으면(점만) 단계마다 풍선에 이름이 있는가
+   */
+  const titleLayout = () => ev(`(()=>{const tb=document.getElementById('tbar'); const vis=e=>{const r=e.getBoundingClientRect(); return r.width>0 && r.height>0 && getComputedStyle(e).visibility!=='hidden';};
+    const box=e=>{const r=e.getBoundingClientRect(); return {l:r.left,r:r.right,t:r.top,b:r.bottom};};
+    const left=[...tb.querySelectorAll('.pipe-slot .ps, .pipe-slot .chip')].filter(vis).map(e=>({k:e.dataset.stage||'칩', ...box(e)}));
+    const right=[...tb.querySelectorAll('.tb, .conn, .cbtn')].filter(vis).map(e=>({k:e.dataset.act||e.className.split(' ')[0], ...box(e)}));
+    const slot=tb.querySelector('.pipe-slot').getBoundingClientRect();
+    const hits=[]; for(const a of left){ for(const b of right){ if(Math.min(a.r,b.r)-Math.max(a.l,b.l)>0.5 && Math.min(a.b,b.b)-Math.max(a.t,b.t)>0.5) hits.push(a.k+'×'+b.k); } }
+    const clipped=left.filter(a=>a.r>slot.right+0.5 || a.l<slot.left-0.5).map(a=>a.k);
+    const shown=e=>e && getComputedStyle(e).display!=='none';
+    const ps=tb.querySelector('.pipe .ps');
+    const names=shown(ps?.querySelector('em.lg')) ? '긴 이름' : shown(ps?.querySelector('em.sh')) ? '짧은 이름' : '점만';
+    const tips=[...tb.querySelectorAll('.pipe .ps')].map(p=>p.dataset.tip||'');
+    const cw0=document.documentElement.clientWidth; const wide=[...document.querySelectorAll('body *')].filter(e=>{const r=e.getBoundingClientRect(); return r.width>0 && r.right>cw0+1 && getComputedStyle(e).position!=='fixed';}).slice(0,6).map(e=>(e.id?'#'+e.id:e.tagName.toLowerCase()+(e.className&&typeof e.className==='string'?'.'+e.className.split(' ')[0]:''))+':'+Math.round(e.getBoundingClientRect().right));
+    return {wide, w:innerWidth, sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth, over:tb.scrollWidth-tb.clientWidth, hits, clipped, names,
+      fit:[...tb.classList].filter(c=>/^fit/.test(c)).join(',')||'-', nLeft:left.length, nRight:right.length, tipsOk:tips.length===6 && tips.every(t=>/^(단면|좌굴 해석|하중 해석|부재 검토|접합부|점검) · /.test(t))};})()`);
+  const narrowTitle = async (widths, shotPrefix) => {
+    const rows = [];
+    for (const w of widths) {
+      W = w; H = 900;
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+      await sleep(350);
+      const s = await titleLayout();
+      if (shotPrefix && (w === 800 || w === 1180)) { await shot(`${shotPrefix}_title_${w}_dark`); }
+      rows.push({ ...s, ok: s.sw <= s.cw && s.over <= 1 && s.hits.length === 0 && s.clipped.length === 0 && s.tipsOk && s.nLeft >= 6 });
+    }
+    return { ok: rows.every(r => r.ok),
+      detail: rows.map(r => `${r.w}px: ${r.names}(${r.fit}) · 겹침 ${r.hits.join(',') || '없음'} · 잘림 ${r.clipped.join(',') || '없음'} · 스크롤 ${r.sw}/${r.cw} · 넘침 ${r.over} · 오른쪽 ${r.nRight}${r.sw > r.cw ? ` · 넘친 것 ${r.wide.join(',')}` : ''}${r.tipsOk ? '' : ' · 풍선 이름 없음'}${r.ok ? '' : ' ✗'}`).join(' | ') };
+  };
 
   section('3. 시작 화면(템플릿 00) → .csd 열기');
   await cdp.send('Page.navigate', { url: ready.uiUrl });
@@ -780,9 +811,82 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   };
   await step('u05 NG + 미검토 — 엔진의 판정 그대로(NG > 미검토 > OK), 판정비 = MCP', 'u05_checks_ng', () => verify04(compNg, 'NG'));
   const compNe = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 5, units: 'SI' });
-  check('AI: aisi_design_compression(KtLt 없음 · Pu 5 kN) — 엔진: 평가한 것은 OK, 전체는 판정 없음', compNe.pass === null && (compNe.limit_state_checks ?? []).every(x => x.pass === true)
-    && (compNe.not_evaluated ?? []).length > 0, short(compNe.error ?? `pass=${compNe.pass} · ${JSON.stringify(compNe.limit_state_checks)} · 미검토 ${JSON.stringify(compNe.not_evaluated)} · 화면에서 온 값 ${JSON.stringify(compNe.case_inputs_used)}`, 900));
+  // E-1(2026-11-25): 빈 KtLt 는 엔진의 기본 길이로 둔다 — 그 길이로 낸 요약 항목(E axial compression)은 참고값(pass null · reference_only · length_assumed),
+  // 결과도 length_assumed. 평가한 것 가운데 불합격이 없고 전체는 판정 없음
+  check('AI: aisi_design_compression(KtLt 없음 · Pu 5 kN) — 엔진: 가정한 길이의 요약 항목은 참고값(판정 없음 · reference_only), 불합격 없음, 전체는 판정 없음', compNe.pass === null && compNe.length_assumed === true
+    && (compNe.limit_state_checks ?? []).every(x => x.pass === true || (x.pass === null && x.reference_only === true && x.length_assumed === true))
+    && (compNe.limit_state_checks ?? []).some(x => x.reference_only === true) && (compNe.not_evaluated ?? []).length > 0, short(compNe.error ?? `pass=${compNe.pass} · ${JSON.stringify(compNe.limit_state_checks)} · 미검토 ${JSON.stringify(compNe.not_evaluated)} · 화면에서 온 값 ${JSON.stringify(compNe.case_inputs_used)}`, 900));
   await step('u06 OK + 미검토 — 「판정 없음」(OK 로 보이지 않는다)', 'u06_checks_ne', () => verify04(compNe, '판정 없음'));
+  const caseHostU = async () => (await api('POST', '/api/mcp/action', { action: 'get_case_inputs' })).json;
+  await step('u06b D1 — 엔진의 utilization_valid: false 는 「판정 없음」(판정비 · OK 로 보이지 않는다) · 빈 소요 칸은 「빈칸」(0 으로 그리지 않는다) · 「0 이 맞다」 진술 칸의 이름', 'u06b_util_invalid', async () => {
+    const us = await ev(`(()=>{const r=${S}.state.runs[0]; return r ? {valid:r.us?.utilization_valid ?? null, pass:r.us?.pass ?? null, util:r.us?.utilization ?? null, len:r.us?.length_assumed===true, inv:r.utilInvalid, shown:r.utilization} : null;})()`);
+    await select('work', 'insp:sum');
+    await sleep(300);
+    const sum = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="insp:sum"]'); return r ? {text:r.querySelector('.vl')?.textContent ?? r.textContent, inv:!!r.querySelector('[data-util-invalid]'), why:r.querySelector('[data-util-invalid]')?.dataset.tip ?? '', ref:r.querySelector('[data-ratio-ref]')?.dataset.ratioRef ?? null, ratio:!!r.querySelector('[data-ratio]')} : null;})()`);
+    // 빈 소요 칸(호스트의 값이 null) — 모델 › 설계 조건의 트리 · 정보 창이 「빈칸」(0 이 아니다)
+    const host = await caseHostU();
+    const blanks = ['Mux', 'Pu', 'Vu'].filter(k => host.inputs?.[k] === null);
+    await select('model', 'dc');
+    await sleep(300);
+    const dc = await ev(`(()=>{const out={}; for (const k of ${JSON.stringify(['Mux', 'Pu', 'Vu'])}) { const r=document.querySelector('#tree .row[data-k="case:'+k+'"]'); const t=document.querySelector('#info tr[data-k="case:'+k+'"]'); out[k]={tree:r?.querySelector('.vl')?.textContent ?? r?.textContent ?? null, info:t?.children[1]?.textContent.trim() ?? null}; }
+      const st=document.querySelector('#info tr[data-k="case:designZeroDemandStated"]'); out.stated = st ? {label:st.children[0].textContent.trim(), val:st.children[1].textContent.trim()} : null; return out;})()`);
+    const blankOk = blanks.every(k => /빈칸|주지 않음/.test(dc[k]?.tree ?? '') && /빈칸|주지 않음/.test(dc[k]?.info ?? '') && !/^0(\.0+)?\b/.test((dc[k]?.info ?? '').trim()));
+    const statedOk = !('designZeroDemandStated' in (host.inputs ?? {})) || (dc.stated?.label === '소요 0 진술' && /켬|끔/.test(dc.stated?.val ?? ''));
+    const invOk = us && us.valid === false && us.pass !== false ? (us.inv === true && us.shown === null && !!sum?.inv && !sum?.ratio && /판정 없음/.test(sum?.text ?? '')) : true;
+    // E-1: 가정한 길이의 결과 — 「판정 없음」 의 까닭이 그 길이이고, 이용률은 「참고」 로만(판정비 data-ratio 가 아니다)
+    const lenOk = !us?.len || (/가정한 길이/.test(sum?.why ?? '') && (us.util === null || (sum?.ref !== null && Math.abs(+sum.ref - us.util) < 1e-6 * Math.max(1, Math.abs(us.util)))));
+    return { ok: !!us && us.valid === false && invOk && lenOk && blanks.length >= 1 && blankOk && statedOk,
+      detail: `엔진 utilization_valid ${us?.valid} · pass ${us?.pass} · 가정한 길이 ${us?.len} · 이용률 ${us?.util} → 화면 판정비 ${us?.shown} · 판정 요약 「${short(sum?.text, 60)}」(판정 없음 ${sum?.inv} · 판정비 ${sum?.ratio} · 참고 ${sum?.ref} · 까닭 「${short(sum?.why, 50)}」 ${lenOk})`
+        + ` · 빈 소요 ${blanks.join(', ') || '없음'} → ${blanks.map(k => `${k} 트리 「${dc[k]?.tree}」 정보 「${dc[k]?.info}」`).join(' · ')} · 진술 칸 ${dc.stated ? `「${dc.stated.label}」 ${dc.stated.val}` : '호스트 상태에 없음'}` };
+  });
+
+  // 엔진 2차(d10d5aa) · D3: 비틀림 길이 KtLt 를 비운 압축(엔진이 기본 길이로 둔다 — KxLx · KyLy 는 MCP 도구에 꼭 줘야 한다) — 큰 Pu 는 길이와 상관없는 하한(가장 유리한 길이의 강도)으로도 넘어 NG(pass false · length_assumed ·
+  // length_independent_bound). 화면: 검토 전체의 판정비 · 한계상태 = 그 하한, 가정한 길이의 이용률은 「참고」. 작은 Pu 는 그대로 「판정 없음」.
+  // 작은 Pu 는 u06 과 같은 부름이라 끝의 상태가 앞과 같다(뒤 단계가 그 결과를 쓴다)
+  await step('u06c D3 — 길이(KtLt)를 비운 압축이 길이와 상관없는 하한으로 NG: 트리 · 정보 창 · 업무 › 판정 요약 = NG 와 하한의 비 · 한계상태, 가정한 길이의 이용률은 「참고」 · 넘지 않으면 「판정 없음」', 'u06c_length_bound', async () => {
+    const bl = await mcp.tool('set_case_inputs', { inputs: { KtLt: null }, reason: '시험 — 비틀림 유효 길이를 비움(엔진의 기본 길이)' });
+    const ng = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 400, units: 'SI' });
+    const lb = ng.length_independent_bound ?? null;
+    const lbCheck = lb ? (lb.governing_check_id ?? lb.governing_check ?? null) : null;
+    await settle(`s.runs[0] && s.runs[0].us && s.runs[0].us.pass===false && s.runs[0].us.length_assumed===true && !!s.runs[0].bound`, '하한 NG 결과', 30_000).catch(() => undefined);
+    const run = await ev(`(()=>{const r=${S}.state.runs[0]; return r ? {util:r.utilization, path:r.utilPath, ref:r.utilRef, gov:r.governing, check:r.bound?.check ?? null, inv:r.utilInvalid} : null;})()`);
+    await select('work', 'insp:sum');
+    await sleep(300);
+    const sum = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="insp:sum"]'); if(!r) return null; const n=r.querySelector('[data-ratio]');
+      return {text:r.querySelector('.vl')?.textContent ?? '', v:n ? +n.dataset.v : null, src:n?.dataset.src ?? null, ng:n?.dataset.ratio ?? null, bound:r.querySelector('[data-length-bound]')?.dataset.lengthBound ?? null,
+        ref:r.querySelector('[data-ratio-ref]')?.dataset.ratioRef ?? null, inv:!!r.querySelector('[data-util-invalid]')};})()`);
+    await select('result', 'chk');
+    await sleep(300);
+    const tree = await ev(`({chk:document.querySelector('#tree .row[data-k="chk"] .vl')?.textContent ?? '', ngRows:[...document.querySelectorAll('#tree .row[data-k^="design#"]')].filter(r=>r.querySelector('.dot.ng')).map(r=>r.dataset.k)})`);
+    const info = await ev(`(()=>{const b=document.querySelector('#info [data-run-bound]'); const n=b?.querySelector('[data-ratio]');
+      return {head:document.querySelector('#info .hd')?.textContent.replace(/\\s+/g,' ') ?? '', bound:b?.dataset.runBound ?? null, v:n ? +n.dataset.v : null, ref:b?.querySelector('[data-ratio-ref]')?.dataset.ratioRef ?? null, text:b?.textContent ?? ''};})()`);
+    await shot('u06c_length_bound_1920_dark');
+    // 넘지 않는 작은 Pu — 판정 없음(하한으로 넘지 않음 · 판정비 없음). u06 과 같은 부름이라 뒤 단계의 상태도 그대로
+    const ne = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, KxLx: 3000, KyLy: 3000, Pu: 5, units: 'SI' });
+    await settle(`s.runs[0] && s.runs[0].us && s.runs[0].us.pass===null && s.runs[0].us.length_assumed===true`, '판정 없음 결과', 30_000).catch(() => undefined);
+    await select('work', 'insp:sum');
+    await sleep(300);
+    const sum2 = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="insp:sum"]'); return r ? {text:r.querySelector('.vl')?.textContent ?? '', ratio:!!r.querySelector('[data-ratio]'), bound:!!r.querySelector('[data-length-bound]'), inv:!!r.querySelector('[data-util-invalid]')} : null;})()`);
+    const near = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+    const engOk = !bl.error && !ng.error && ng.pass === false && ng.length_assumed === true && ng.utilization_valid === false && typeof lb?.ratio === 'number' && lb.ratio > 1 && !!lbCheck;
+    const runOk = !!run && near(run.util, lb?.ratio) && run.path === 'length_independent_bound.ratio' && near(run.ref, ng.utilization) && run.check === lbCheck && run.inv === false;
+    const sumOk = !!sum && near(sum.v, lb?.ratio) && sum.ng === 'ng' && sum.src === 'design:length_independent_bound.ratio' && sum.bound === lbCheck && near(+sum.ref, ng.utilization) && !sum.inv;
+    const treeOk = /^NG [1-9]/.test(tree.chk) && tree.ngRows.includes(`design#${lbCheck}`);
+    const infoOk = /검토 전체 NG/.test(info.head) && info.bound === lbCheck && near(info.v, lb?.ratio) && near(+info.ref, ng.utilization) && /참고/.test(info.text);
+    const neOk = !ne.error && ne.pass === null && ne.length_assumed === true && !!sum2 && sum2.inv && !sum2.ratio && !sum2.bound && /판정 없음/.test(sum2.text);
+    return { ok: engOk && runOk && sumOk && treeOk && infoOk && neOk,
+      detail: `${bl.error ? `set_case_inputs ${short(bl.error, 200)} · ` : ""}${ng.error ? `압축 ${short(ng.error, 300)} · ` : ""}엔진 pass ${ng.pass} · length_assumed ${ng.length_assumed} · utilization ${ng.utilization}(valid ${ng.utilization_valid}) · 하한 ${lbCheck} 비 ${lb?.ratio} 「${short(lb?.limit_state, 50)}」 ${engOk}`
+        + ` | 실행 판정비 ${run?.util} @${run?.path} · 참고 ${run?.ref} · 지배 「${run?.gov}」 ${runOk} | 판정 요약 「${short(sum?.text, 70)}」(하한 ${sum?.bound} · src ${sum?.src}) ${sumOk}`
+        + ` | 트리 「${tree.chk}」 NG 줄 ${tree.ngRows.join(',')} ${treeOk} | 정보 창 「${short(info.text, 80)}」 ${infoOk} | 작은 Pu: pass ${ne.pass} · 하한 ${JSON.stringify(ne.length_independent_bound?.ratio ?? null)} → 「${short(sum2?.text, 50)}」 ${neOk}` };
+  });
+  // 호스트 2차 · D3: run_case_check 의 좌굴값 출처(buckling_values.source)마다 「다시 계산」 알림의 글 — 같은 함수(화면의 bucklingUsed)를 불러 본다(준비 실패는 정직하게 만들 수 없다)
+  await step('u06d D3 — 좌굴값 출처의 글(analysis-fallback · mixed · analytical · fsm-prepared-now · fsm-in-check · not-needed) — 영어 그대로 보이지 않는다', null, async () => {
+    const srcs = ['analysis-fallback', 'mixed', 'analytical', 'fsm-prepared-now', 'fsm-current', 'fsm-in-check', 'not-needed'];
+    const out = {};
+    for (const s of srcs) { out[s] = await ev(`${S}.bucklingUsedText({case_check:{buckling_values:{source:${JSON.stringify(s)}}}})`); }
+    const ok = srcs.every(s => typeof out[s] === 'string' && out[s] && !out[s].includes(s) && /[가-힣]/.test(out[s])) && /준비하지 못해 지금 좌굴 해석의 값/.test(out['analysis-fallback']) && /\[DSM\]/.test(out['analysis-fallback']);
+    return { ok, detail: srcs.map(s => `${s} → 「${out[s]}」`).join(' · ') };
+  });
 
   section('7. 테마 · 좁은 창');
   const contrast = () => ev(`(()=>{const lum=c=>{const m=c.match(/[\\d.]+/g).map(Number); const f=v=>{v/=255; return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);}; return 0.2126*f(m[0])+0.7152*f(m[1])+0.0722*f(m[2]);};
@@ -827,6 +931,13 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await select('model', 'sec');
     const s = await ev(`({sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth})`);
     return { ok: s.sw <= s.cw, detail: `scrollWidth ${s.sw} / ${s.cw}` };
+  });
+  await step('u10n N-5 좁은 창(800 · 900 · 960 · 1100 · 1180 · 1280 · 1440) — 진행 띠 · 칩이 단추 · 연결 상태와 겹치지 않고 잘리지 않음 · 가로 스크롤 없음, 넘치면 점만(이름은 풍선)', null, async () => {
+    await select('result', await firstKey('design') ?? 'chk');
+    const out = await narrowTitle([800, 900, 960, 1100, 1180, 1280, 1440], 'u10n');
+    W = 960; H = 900;
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    return out;
   });
   W = 1920; H = 1080;
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
@@ -1455,18 +1566,29 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const v1 = await viewNow();
     const r1 = await ev(`${S}.reported`);
     const locKeys = Object.keys(v1.current?.selection?.location ?? {});
-    await ev(`${S}.reportNow('result/no-such-group:nothing', {kind:'check', id:'member.no.such.check', scope:'member'})`);
-    await waitFor(`(${S}.reported?.dropped||[]).length>0`, 10_000, '버린 것');
-    const r2 = await ev(`${S}.reported`);
-    const chip = await ev(`({text:document.querySelector('#share b').textContent, dropped:document.getElementById('share').dataset.dropped, item:document.getElementById('share').dataset.item})`);
-    const v2 = await viewNow();
+    // 어휘 밖 보고(시험의 「program」 보고) — 호스트가 버리고 get_view 에 null 을 둔다. 그 답 뒤에 화면이 다시 그리면(호스트 이벤트 · 기록 다시 읽기)
+    // 화면은 지금 보이는 고른 것을 다시 알린다(0.4 초 모아서) — 맞는 동작이다. u43a 가 전체 실행에서만 붉던 까닭: 그 다시 알림이 get_view 앞에 끼었다(이벤트가 많아
+    // 다시 그리기가 빨리 온다). 그래서 get_view 가 null 이 아니면 0.9 초 뒤 화면이 다른 보고를 보냈는지 본다 — 보냈으면 끼어든 것이라 다시(세 번까지),
+    // 보내지 않았는데 null 이 아니면 호스트가 버린 것을 남긴 것이다(실패)
+    const BOGUS = 'result/no-such-group:nothing';
+    let r2 = null, chip = null, v2 = null, quiet = false, tries = 0;
+    for (; tries < 3 && !quiet; tries++) {
+      await ev(`${S}.reportNow(${JSON.stringify(BOGUS)}, {kind:'check', id:'member.no.such.check', scope:'member'})`);
+      await waitFor(`${S}.reported?.sent?.view===${JSON.stringify(BOGUS)} && (${S}.reported?.dropped||[]).length>0`, 10_000, '버린 것');
+      r2 = await ev(`${S}.reported`);
+      chip = await ev(`({text:document.querySelector('#share b').textContent, dropped:document.getElementById('share').dataset.dropped, item:document.getElementById('share').dataset.item})`);
+      v2 = await viewNow();
+      if (v2.current?.view === null && v2.current?.selection === null) { quiet = true; break; }
+      await sleep(900);
+      if ((await ev(`${S}.reported?.sent?.view`)) === BOGUS) { quiet = true; break; }
+    }
     await shot('u43a_dropped_chip_1920_dark');
     await select('result', k);
     await sleep(1200);
     return { ok: v1.current?.selection?.id && locKeys.length >= 1 && locKeys.every(x => ['region', 'check_point'].includes(x)) && r1.dropped.length === 0
       && r2.dropped.includes('view') && r2.dropped.includes('selection') && r2.view === null && r2.selection === null && /호스트가 버림/.test(chip.text) && chip.item === 'null'
-      && v2.current?.view === null && v2.current?.selection === null,
-      detail: `고른 것 ${v1.current?.selection?.id} · 위치 ${JSON.stringify(v1.current?.selection?.location)} · 버린 것 ${JSON.stringify(r1.dropped)} → 어휘 밖 보고: 버린 것 ${JSON.stringify(r2.dropped)} · 칩 「${short(chip.text, 70)}」 · get_view view ${v2.current?.view} selection ${v2.current?.selection}` };
+      && quiet && v2.current?.view === null && v2.current?.selection === null,
+      detail: `고른 것 ${v1.current?.selection?.id} · 위치 ${JSON.stringify(v1.current?.selection?.location)} · 버린 것 ${JSON.stringify(r1.dropped)} → 어휘 밖 보고: 버린 것 ${JSON.stringify(r2.dropped)} · 칩 「${short(chip.text, 70)}」 · get_view view ${v2.current?.view} selection ${v2.current?.selection}${tries > 0 ? ` · 화면의 다시 알림이 끼어 ${tries + 1} 번째에 읽음` : ''}${quiet ? '' : ' · 조용한 때를 얻지 못함'}` };
   });
   await step('u43b 퍼린 검토 지점 — 지점 · 경간(1 부터) · 구간의 지점 · 소요 근거 = 호스트, 조합 envelope 은 「포락선」, 시트의 가정 칸 = 그 지점 자신의 알림', 'u43b_point', async () => {
     const pts = [];
@@ -1784,9 +1906,14 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const diskSha = disk ? crypto.createHash('sha256').update(disk, 'utf8').digest('hex') : null;
     const inf = await ev(`({folder:document.querySelector('#info [data-report-folder]')?.dataset.reportFolder, files:[...document.querySelectorAll('#info tr[data-file]')].map(t=>t.dataset.file+':'+t.querySelector('.path').textContent), pub:!!document.querySelector('#info [data-publish].off'), stamp:!!document.querySelector('#info .rv.off'), tree:document.querySelector('#tree .row[data-k="rpt"] .vl')?.textContent})`);
     const inCaseFolder = !!file && path.dirname(file).toLowerCase() === path.dirname(csd).toLowerCase();
+    // H-B: 답의 notices = {kind, code, text}(글은 호스트가 답의 단위로 그린 한국어) — 화면의 「알림」 줄 = 그 글 그대로 · code 를 단다
+    const want = (rep.notices ?? []).filter(n => n && typeof n === 'object' && n.text);
+    const shownN = await ev(`[...document.querySelectorAll('#info .sec')].filter(s=>/^알림/.test(s.querySelector('h4')?.textContent?.trim() ?? '')).flatMap(s=>[...s.querySelectorAll('li')].map(l=>({code:l.dataset.code ?? null, text:l.textContent})))`);
+    const noticesOk = (rep.notices ?? []).every(n => n && typeof n === 'object' && 'text' in n && 'code' in n && 'kind' in n) && shownN.length === want.length
+      && want.every((n, i) => shownN[i].text.endsWith(n.text) && (shownN[i].code ?? null) === (n.code ?? null));
     return { ok: fr.sandbox === '' && fr.sandboxTokens === 0 && !!diskSha && fr.sha === diskSha && fr.attrSha === diskSha && rep.folder === 'case_folder' && inCaseFolder && inf.folder === 'case_folder'
-      && inf.files.some(x => x.startsWith('HTML:') && x.includes(path.basename(file))) && inf.pub && /^초안/.test(inf.tree ?? ''),
-      detail: `파일 ${path.basename(file ?? '')}(열린 .csd 의 폴더 ${inCaseFolder}) · 미리보기 sha256 ${fr.sha?.slice(0, 12)} = 파일 ${diskSha?.slice(0, 12)} · sandbox="${fr.sandbox}"(토큰 ${fr.sandboxTokens}) · ${fr.len}자 · 절 ${rep.sections?.length} · 트리 「${inf.tree}」 · 발행 · 도장 꺼짐 ${inf.pub}` };
+      && inf.files.some(x => x.startsWith('HTML:') && x.includes(path.basename(file))) && inf.pub && /^초안/.test(inf.tree ?? '') && noticesOk,
+      detail: `알림 ${shownN.length}/${want.length}(code ${shownN.filter(x => x.code).length}) ${noticesOk} · 파일 ${path.basename(file ?? '')}(열린 .csd 의 폴더 ${inCaseFolder}) · 미리보기 sha256 ${fr.sha?.slice(0, 12)} = 파일 ${diskSha?.slice(0, 12)} · sandbox="${fr.sandbox}"(토큰 ${fr.sandboxTokens}) · ${fr.len}자 · 절 ${rep.sections?.length} · 트리 「${inf.tree}」 · 발행 · 도장 꺼짐 ${inf.pub}` };
   });
   await step('u55 미리보기 틀은 스크립트를 돌리지 않는다 — 제품이 그린 iframe(sandbox="")에 스크립트 · onerror · 바깥 요청을 넣어도 실행 0 · 바깥 문서에 닿지 않음', null, async () => {
     const m0 = log.console.length;
@@ -1861,6 +1988,26 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const coded = seen.filter(x => x.code).length;
     return { ok: seen.length > 0 && usLeft.length === 0 && coded > 0,
       detail: `글 ${seen.length}줄 · code ${coded} · SI 글의 US 수 ${usLeft.length}${usLeft.length ? ` 「${short(usLeft[0].t, 80)}」` : ''} · 한국어가 아닌 글 ${english.length}${english.length ? ` — ${english.join(' | ')}` : ''}` };
+  });
+  await step('u60b D1(V9a-06 ①) — 관통 체결 퍼린(§I6.2.1) 뒤 화면 나무(모델 · 결과 · 업무 · 문서)와 하중 해석 · 가정 · 부재 검토의 정보 창에 US 수 없음', null, async () => {
+    const seen = [];
+    const grab = async (tab, key, where) => {
+      await select(tab, key);
+      await sleep(350);
+      const t = await ev(`({tree:document.getElementById('tree').innerText, info:document.getElementById('info').innerText})`);
+      for (const [part, text] of Object.entries(t)) { for (const line of String(text ?? '').split('\n')) { if (line.trim()) { seen.push({ where: `${where}/${part}`, t: line.trim() }); } } }
+    };
+    await grab('model', 'asm', '모델 › 가정');
+    await grab('model', 'dc', '모델 › 설계 조건');
+    await grab('model', 'ld', '모델 › 하중');
+    await grab('result', 'load', '결과 › 하중 해석');
+    await grab('result', 'chk', '결과 › 부재 검토');
+    await grab('work', 'insp', '업무 › 점검');
+    await grab('doc', 'rpt', '문서');
+    const us = seen.filter(x => US_NUM.test(x.t));
+    const i621 = seen.filter(x => /I6\.2\.1/.test(x.t));
+    return { ok: seen.length > 50 && us.length === 0,
+      detail: `글 ${seen.length}줄 · §I6.2.1 줄 ${i621.length}${i621.length ? ` 예 「${short(i621[0].t, 70)}」` : ''} · US 수 ${us.length}${us.length ? ` — ${us.slice(0, 4).map(x => `${x.where}: 「${short(x.t, 80)}」`).join(' | ')}` : ''}` };
   });
   await step('u5a V7-43 — 편집 중에 AI 만 바꾸면 「이번 편집 — 바뀐 것 0」, AI 가 바꾼 값은 오른쪽에 「AI」 칩으로 따로 · 사람이 고친 것만 왼쪽', 'u5a_edit_ai_chips', async () => {
     await select('model', 'dc');
@@ -1977,7 +2124,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await settle(`s.file.path===${JSON.stringify(base)}`, '원래 상태(서명된 사본)');
     return { ok: !!o?.ok && !hasRaw && t.fname.includes('\uFFFD'), detail: `제목 표시줄 「${t.fname}」 · 상태 줄에 날 글자 ${hasRaw}` };
   });
-  await step('u5f 결과 봉인(82194ef) — 저장 → 다시 열기 = 결과가 돌아온다(서명) · 입력을 고친 파일 = 「입력만 열었습니다 — …」 띠와 「다시 계산」 하나 → 결과가 다시', 'u5f_seal', async () => {
+  await step('u5f 결과 봉인(82194ef) — 저장 → 다시 열기 = 결과가 돌아온다(서명) · 입력을 고친 파일 = 「입력만 열었습니다 — …」 띠와 「다시 계산」 하나 → 버린 차례대로(좌굴 해석 → 부재 검토) 결과가 다시 · FSM 값으로', 'u5f_seal', async () => {
     const A = path.join(tmp, 'u5f-sealed.csd');
     // 앞 단계의 입력 변경이 부재 검토를 지웠다 — 저장 전에 화면의 입력으로 한 번 돌린다(그 결과가 봉인되어 돌아오는지 본다)
     const rc = await mcp.tool('run_case_check', { what: 'member' });
@@ -2001,15 +2148,36 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     await shot('u5f_open_notice_1920_dark');
     const f2 = await mcp.tool('get_full_state');
     const res2 = Object.keys(f2?.results ?? {}).filter(k => f2.results[k]);
+    // E4: [다시 계산]의 차례 = 버린 것(좌굴 해석이 버려졌으면 그것부터) — 단추의 data-plan · 풍선
+    const plan = await ev(`document.querySelector('#opennotice [data-act="recompute"]').dataset.plan ?? ''`);
+    const droppedFsm = /버린 결과:[^]*좌굴 해석/.test(note);
+    await ev(`(()=>{window.__u5fToasts=[]; const h=document.querySelector('.status .toasts'); new MutationObserver(()=>{for(const t of h.querySelectorAll('.toast')){const x=t.dataset.tip||t.textContent; if(!window.__u5fToasts.includes(x)) window.__u5fToasts.push(x);}}).observe(h,{childList:true,subtree:true,characterData:true}); return 1;})()`);
     await ev(`document.querySelector('#opennotice [data-act="recompute"]').click()`);
-    await waitFor(`document.getElementById('opennotice').hidden`, 120_000, '다시 계산 뒤 띠가 사라짐');
+    await waitFor(`document.getElementById('opennotice').hidden`, 180_000, '다시 계산 뒤 띠가 사라짐');
+    await sleep(300);
+    const toasts = await ev(`window.__u5fToasts`);
+    const done = toasts.find(t => /다시 계산했다 —/.test(t)) ?? toasts.join(' / ');
     const f3 = await mcp.tool('get_full_state');
+    // E5: 다시 계산한 부재 검토의 좌굴값 출처(호스트의 dsm_basis_by_family) — FSM 을 다시 만들었으면 none 이 없다 · 화면의 「해석식 좌굴값」 표시는 그 키 그대로
+    await settle(`s.stages.chk.state==='ok'`, '부재 검토', 30_000).catch(() => undefined);
+    await sleep(600);
+    const dr = await hostMsg('designResult');
+    const basis = dr?.dsm_basis_by_family ?? null;
+    const hostNone = !!basis && Object.values(basis).includes('none');
+    await select('result', 'chk');
+    const tagShown = await ev(`!!document.querySelector('#tree .row[data-k="chk"] [data-no-fsm]')`);
     // 뒤의 단계가 결과를 쓴다 — 서명된 사본(결과가 되살아난다)으로 돌아간다
     await serve.ipc('open', { file: A }, 60_000);
     await settle(`s.file.path===${JSON.stringify(A)}`, '서명된 사본');
     return { ok: sv?.ok && !!jA.resultsSeal && f1?.case?.results_signed === true && res1.includes('member_design') && res2.filter(k => k !== 'validation').length === 0
-      && /입력만 열었습니다 — 파일의 결과가 함께 저장된 모델 · 입력과 맞지 않습니다/.test(note) && !!f3?.results?.member_design,
-      detail: `run_case_check ${rc?.error ? rc.error : '성공'} · 저장(봉인 ${!!jA.resultsSeal}) → 다시 열기: 결과 ${res1.join(', ')} · 서명 ${f1?.case?.results_signed} → 입력을 고친 파일: 결과 ${res2.join(', ') || '없음'} · 「${short(note, 80)}」 → 다시 계산: 부재 검토 ${!!f3?.results?.member_design}` };
+      && /입력만 열었습니다 — 파일의 결과가 함께 저장된 모델 · 입력과 맞지 않습니다/.test(note) && !!f3?.results?.member_design
+      // E4: 좌굴 해석을 버렸으면 그것부터 다시 — 단추의 차례 · 알림 글 · 호스트의 결과
+      && (droppedFsm ? /^좌굴 해석 → 부재 검토/.test(plan) && /다시 계산했다 — 좌굴 해석 → 부재 검토/.test(done) && !!f3?.results?.buckling_analysis : /^부재 검토/.test(plan) && /다시 계산했다 — 부재 검토/.test(done))
+      // E5: 좌굴 해석을 다시 했으면 부재 검토는 FSM 값으로 · 화면의 표시 = 호스트의 키
+      // (퍼린 결과처럼 dsm_basis_by_family 가 없는 결과는 호스트가 run_case_check 의 답에 밝힌 출처 — 알림 글의 「FSM 좌굴값」)
+      && (!droppedFsm || (basis ? !hostNone : /FSM 좌굴값/.test(done))) && tagShown === hostNone,
+      detail: `run_case_check ${rc?.error ? rc.error : '성공'} · 저장(봉인 ${!!jA.resultsSeal}) → 다시 열기: 결과 ${res1.join(', ')} · 서명 ${f1?.case?.results_signed} → 입력을 고친 파일: 결과 ${res2.join(', ') || '없음'} · 「${short(note, 80)}」`
+        + ` → 다시 계산(차례 「${plan}」): 「${short(done, 160)}」 · 좌굴 해석 ${!!f3?.results?.buckling_analysis} · 부재 검토 ${!!f3?.results?.member_design} · 좌굴값 출처 ${JSON.stringify(basis)} · 화면의 해석식 표시 ${tagShown}` };
   });
   await step('u5g 지금 저장하면 결과에 서명이 붙지 않으면(열쇠 파일이 비었음) — 저장 단추 옆에 조용히 「결과 서명 안 됨」(까닭은 풍선) · 고치면 사라진다', 'u5g_unsigned', async () => {
     const key = path.join(tmp, 'userData', 'writer', 'writer.key');
@@ -2157,6 +2325,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
    *   r35 — r34(막는 것 0 의 미리보기)                      r36 — r34 · r35(r35 가 새 초안으로 막는 것 0 을 남긴다)   r37 — r36(R0)
    *   r38 — r10 · r12(원자료 다섯을 그 단계가 둔다)          r39 — r34(그 초안)                r40 — r34(검토 줄)     r41 — 없음(끼운 페이지)
    *   r42 — r10 · r12(그 단계가 변경 · 계산 · 보고를 만든다)
+   *   r43 — r10 · r12(새 대상 「R43 해석식」 을 만들고 돌아온다)   r44 · r45 — r10 · r12
+   *   r46 — r10 · r12(새 대상 「R46 다른 대상」 을 만들고 돌아온다)   r47 — r10 · r12 · r38(원자료 줄 파일 — 일부러 망가뜨린다, 맨 끝)
    */
   await step('r10 새 프로젝트(시작 화면) — 이름 물음 → 뿌리(문서 › StCFSD 프로젝트) 아래에 · 제목 표시줄 「프로젝트 ▾」 · 대상 수 = list_cases', 'r10_new_project', async () => {
     await ev(`${S}.start()`);
@@ -2506,15 +2676,21 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       && /^사람 · .+ → 310 · \d\d:\d\d$/.test(why ?? '') && offBefore === false && after === false && fyBack === 310 && typed2.length === 0,
       detail: `묶음 ${n0} → 편집 중 ${mid}(읽기가 묶음을 끊지 않는다) → 마치기 ${lc.total}(${last?.by?.kind} · ${last?.trigger} · 「${short(last?.title, 40)}」) · 꼬리표 「${why}」 · 333 으로 고친 뒤 버리기(켜짐 ${offBefore === false}) → fy ${fyBack} · 닫힘 ${after === false} · 묶음 ${n2}(사람이 친 것 ${typed2.length})${extra}` };
   });
-  await step('r24 「AI 작업 중 · <도구> · 경과」 띠 — AI 의 해석이 도는 동안(0.5 초 넘게) 보이고 끝나면 사라진다 · 상태 표시줄 「AI 작업 중」', 'r24_ai_band', async () => {
-    const pr = mcp.tool('run_analysis');
+  await step('r24 「AI 작업 중 · <도구> · 경과」 띠 — AI 의 긴 요청이 도는 동안(0.5 초 넘게) 보이고 끝나면 사라진다 · 상태 표시줄 「AI 작업 중」', 'r24_ai_band', async () => {
+    // 띠는 0.5 초를 넘긴 요청에만 뜬다. 새 대상은 프로그램의 처음 모델(가벼운 립 C — E7)이라 좌굴 해석 하나는 0.25 – 0.5 초에 끝난다 —
+    // 길이를 늘린 해석(반파장 400 개)으로 전제를 만든다. 요청이 0.8 초보다 짧았으면 띠의 탓이 아니라 전제의 탓으로 적는다
+    const N = 150;
+    const sl = await mcp.tool('set_lengths', { min: 10, max: 10000, n: N, units: 'SI' });
+    const t0 = Date.now();
+    let ms = 0;
+    const pr = mcp.tool('run_analysis').finally(() => { ms = Date.now() - t0; });
     const band = await waitFor(`(()=>{const b=document.getElementById('aibar'); return b && !b.hidden ? {tool:b.querySelector('[data-ai-tool]')?.dataset.aiTool, text:b.textContent, status:document.querySelector('#status .ai').textContent} : null;})()`, 20_000, 'AI 작업 중 띠').catch(() => null);
     await shot('r24_ai_band_1920_dark');
     const run = await pr;
     await waitFor(`document.getElementById('aibar').hidden`, 15_000, '띠가 사라짐').catch(() => undefined);
     const gone = await ev(`document.getElementById('aibar').hidden`);
-    return { ok: !!band && band.tool === 'run_analysis' && /AI 작업 중/.test(band.text) && /경과/.test(band.text) && band.status === 'AI 작업 중' && gone && !run.error,
-      detail: `띠 「${short(band?.text?.replace(/\s+/g, ' '), 90)}」 · 상태 표시줄 「${band?.status}」 · 끝나면 숨김 ${gone}` };
+    return { ok: !sl?.error && ms >= 800 && !!band && band.tool === 'run_analysis' && /AI 작업 중/.test(band.text) && /경과/.test(band.text) && band.status === 'AI 작업 중' && gone && !run.error,
+      detail: `해석 ${ms} ms(반파장 ${N}${ms < 800 ? ' — 전제(0.8 초 이상)가 서지 않았다' : ''}${sl?.error ? ` · set_lengths: ${short(String(sl.error), 80)}` : ''}) · 띠 「${short(band?.text?.replace(/\s+/g, ' '), 90)}」 · 상태 표시줄 「${band?.status}」 · 끝나면 숨김 ${gone}` };
   });
   await step('r24b AI 의 긴 요청(design_purlin)이 도는 동안 화면이 읽어도(다시 읽기 · 보기 보고) — 그 요청이 끝에 쓴 입력은 AI 의 변경 묶음 하나로 남는다(사라지지도, 읽기 · 사람의 줄이 되지도 않는다) · 새로 고침 없이 업무 › 변경에 · 이어진 set_case_inputs 도 AI 의 줄', 'r24b_ai_long_change', async () => {
     await ev(`${S}.review()`);
@@ -2811,7 +2987,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const d2 = id2 ? await ev(`[...document.querySelectorAll('#tree .row[data-k="chg:${id2}"] [data-delta]')].map(e=>e.textContent)[0] ?? null`) : null;
     // 점검 › 판정 요약 = 결과 탭의 부재 검토와 같은 미검토 수
     const sum = await ev(`document.querySelector('#tree .row[data-k="insp:sum"] .vl')?.textContent ?? ''`);
-    // 실행이 실린 묶음(runs) — 그 실행(여럿이면 가장 늦은 것)의 머리줄 아래 · 지난 계산 뒤가 아님 · 판정 변화의 「후」 = 그 실행의 최대 판정비. 호스트가 키를 주지 않으면 건너뛴다
+    // 실행이 실린 묶음(runs) — 그 실행(여럿이면 첫 것 — E6 · work_log 와 같은 연결)의 머리줄 아래 · 지난 계산 뒤가 아님 · 판정 변화의 「후」 = 실린 실행 가운데 첫 판정 실행의 최대 판정비. 호스트가 키를 주지 않으면 건너뛴다
     const histAll = (await act2({ action: 'get_case_status', detail: 'runs' })).history ?? [];
     const linkedChk = [];
     // 접힌 계산 머리줄(최근 셋 밖)을 모두 펼친다 — 그 아래 줄도 재려고
@@ -2821,13 +2997,15 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       await sleep(80);
     }
     for (const c of after.changes.filter(x => Array.isArray(x.runs) && x.runs.length).slice(0, 6)) {
-      const anchor = histAll.filter(h => c.runs.includes(h.run)).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+      const own = histAll.filter(h => c.runs.includes(h.run)).sort((a, b) => (a.at < b.at ? -1 : 1));
+      const anchor = own[0];
       if (!anchor) { continue; }
+      const rated = own.find(h => typeof h.max_ratio === 'number');
       const ps = await treeParents(`chg:${c.id}`);
       const d = await ev(`[...document.querySelectorAll('#tree .row[data-k="chg:${c.id}"] [data-delta]')].map(e=>e.textContent)[0] ?? null`);
-      const afterRatio = typeof anchor.max_ratio === 'number' ? Number(String(d ?? '').split('→')[1]) : null;
+      const afterRatio = rated ? Number(String(d ?? '').split('→')[1]) : null;
       linkedChk.push({ id: c.id, at: c.at, run: anchor.run, runAt: anchor.at, parents: ps.map(x => (x ?? '').split('|')[0]), delta: d,
-        ok: ps.some(x => /^log:run:/.test(x ?? '')) && !ps.some(x => /^log:after\|/.test(x ?? '')) && (afterRatio === null || Math.abs(afterRatio - anchor.max_ratio) <= 0.006 * Math.max(1, Math.abs(anchor.max_ratio))) });
+        ok: ps.some(x => /^log:run:/.test(x ?? '')) && !ps.some(x => /^log:after\|/.test(x ?? '')) && (afterRatio === null || Math.abs(afterRatio - rated.max_ratio) <= 0.006 * Math.max(1, Math.abs(rated.max_ratio))) });
     }
     await shot('r42_worktab_tree_1920_dark');
     // ③ 칩을 누르면 업무 › 기록의 「지난 계산 뒤」
@@ -3288,13 +3466,17 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const mk = spawnSync('cmd.exe', ['/d', '/c', 'mklink', '/J', path.join(dir, 'sub'), outside], { windowsHide: true, encoding: 'utf8' });
     const log0 = (await openLogNow()).length;
     const tries = {};
-    for (const k of Object.keys(files)) { const r = await pfetch('/api/person/open-source', { id: ids[k] }); tries[k] = `${r.status}:${r.json?.success ? 'ok' : (r.json?.data?.code ?? 'no')}`; }
+    const whys = {};
+    for (const k of Object.keys(files)) { const r = await pfetch('/api/person/open-source', { id: ids[k] }); tries[k] = `${r.status}:${r.json?.success ? 'ok' : (r.json?.data?.code ?? 'no')}`; whys[k] = r.json?.error_code ?? null; }
+    // D1: 다리의 거절 까닭은 호스트의 sourceToOpen 의 why(host.source.*) — 화면이 그 부호의 한국어를 보인다. 화면의 「열기」 단추는 호스트 sources 의 openable
+    const hostSrc = await mcp.tool('sources', { action: 'list' });
+    const hostOpenable = Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, (hostSrc.items ?? []).find(x => x.item === id)?.openable]));
     // 화면: 겹 확장자 — 「실제 형식」 · 「열기」 없음 · 「폴더에서 보기」
     await ev(`${S}.reload()`);
     await sleep(1200);
     await select('doc', `srcr:${ids.bat}`);
     await waitFor(`!!document.querySelector('#info [data-src-type]')`, 15_000, '원자료 형식').catch(() => undefined);
-    const scr = await ev(`({type:document.querySelector('#info [data-src-type]')?.textContent ?? null, mis:!!document.querySelector('#info [data-src-misleading]'), open:!!document.querySelector('#info [data-open-src]'), show:!!document.querySelector('#info [data-show-src]'), title:document.querySelector('#info [data-src-title]')?.textContent})`);
+    const scr = await ev(`({type:document.querySelector('#info [data-src-type]')?.textContent ?? null, mis:!!document.querySelector('#info [data-src-misleading]'), open:!!document.querySelector('#info [data-open-src]'), show:!!document.querySelector('#info [data-show-src]'), title:document.querySelector('#info [data-src-title]')?.textContent, hostOpen:document.querySelector('#info [data-src-openable]')?.dataset.srcOpenable ?? null})`);
     await ev(`document.querySelector('#info [data-show-src]')?.click()`);
     await sleep(600);
     await shot('r38_source_bat_1920_dark');
@@ -3311,11 +3493,13 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     log.console.splice(0, log.console.length, ...log.console.filter(x => !x.text.includes('/api/person/')));
     return { ok: mk.status === 0 && /^409:type$/.test(tries.bat) && /^409:type$/.test(tries.lnk) && /^409:not-same$/.test(tries.chg) && /^409:(outside|not-same)$/.test(tries.sub) && /^200:ok$/.test(tries.ok)
         && scr.mis && !scr.open && scr.show && /\.bat · 실행 파일/.test(scr.type ?? '') && !chgScr.open && !!chgScr.no
-        && opened.length >= 1 && opened.every(x => x === `${files.ok}:true`) && shown.length === 1 && shown[0] === files.bat,
-      detail: `사람 길 ${Object.entries(tries).map(([k, v]) => `${k} ${v}`).join(' · ')} · 화면(제목 「${scr.title}」) 「${scr.type}」 속이는 이름 ${scr.mis} · 열기 단추 ${scr.open} · 폴더에서 보기 ${scr.show}`
+        && opened.length >= 1 && opened.every(x => x === `${files.ok}:true`) && shown.length === 1 && shown[0] === files.bat
+        && whys.bat === 'host.source.type' && whys.lnk === 'host.source.type' && whys.chg === 'host.source.changed' && /^host\.source\.(outside|link|changed|missing)$/.test(whys.sub ?? '') && whys.ok === null
+        && hostOpenable.bat === false && hostOpenable.lnk === false && hostOpenable.ok === true && scr.hostOpen === '0',
+      detail: `사람 길 ${Object.entries(tries).map(([k, v]) => `${k} ${v}`).join(' · ')} · 호스트의 까닭 ${Object.entries(whys).map(([k, v]) => `${k} ${v}`).join(' · ')} · 호스트 openable ${JSON.stringify(hostOpenable)} · 화면(제목 「${scr.title}」) 「${scr.type}」 속이는 이름 ${scr.mis} · 열기 단추 ${scr.open} · 폴더에서 보기 ${scr.show}`
         + ` · 바뀐 원자료 열기 단추 ${chgScr.open} 「${chgScr.no}」 · 플랫폼에 닿은 열기 ${JSON.stringify(opened)} · 폴더에서 보기 ${JSON.stringify(shown)} · junction ${mk.status === 0 ? '만듦' : short(mk.stderr, 40)}` };
   });
-  await step('r39 S2 — 디스크의 초안 HTML 을 고치면 미리보기의 첫 쪽은 그 파일을 쓰지 않는다(호스트의 그리기 · 인쇄 틀) · 초안 보기는 호스트의 file_state 로 「고쳐짐」 · 그리지 않음 · 내보내기 거절', 'r39_draft_edited', async () => {
+  await step('r39 S2 — 디스크의 초안 HTML 을 고치면 미리보기의 첫 쪽은 그 파일을 쓰지 않는다(호스트의 그리기 · 인쇄 틀) · 초안 보기는 호스트의 file_state 로 「고쳐짐」 · 「없어짐」 · 그리지 않음 · 내보내기 거절', 'r39_draft_edited', async () => {
     const ls = await docList();
     const dr = (ls.drafts ?? [])[0];
     const html = dr?.files?.find(f => /\.html?$/i.test(f));
@@ -3344,10 +3528,28 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       // 바라던 거절(409)이 남긴 콘솔 줄 — 이 단계의 콘솔 오류 검사에서 뺀다(r38 과 같이)
       log.console.splice(0, log.console.length, ...log.console.filter(x => !x.text.includes('/api/person/')));
     }
+    // D1(인수인계 4.1 의 5): 초안 파일이 없어지면 호스트의 file_state 「missing」 → 트리 「없어짐」 · 가운데 그리지 않음
+    let gone = null, d3 = null;
+    if (hostHas) {
+      const aside = `${abs}.D1-aside`;
+      fs.renameSync(abs, aside);
+      try {
+        await ev(`${S}.reload()`);
+        await sleep(1500);
+        d3 = ((await docList()).drafts ?? []).find(x => x.item === dr.item) ?? null;
+        await select('doc', `doc:${dr.item}`);
+        await sleep(800);
+        gone = await ev(`({row:document.querySelector('#tree .row[data-k="doc:${dr.item}"]')?.textContent ?? null, bad:document.querySelector('#center [data-draft-file]')?.dataset.draftFile ?? null, frame:!!document.querySelector('#center iframe[data-doc-frame]')})`);
+      } finally { fs.renameSync(aside, abs); }
+    }
     fs.writeFileSync(abs, page);
-    return { ok: pv.frame && !pv.mark && pv.stamped && pv.csp && (!hostHas || (d2.file_state === 'edited' && /고쳐짐/.test(view?.row ?? '') && view?.bad === 'edited' && !view?.frame && exp?.json?.success === false)),
+    await ev(`${S}.reload()`);
+    await sleep(1000);
+    return { ok: pv.frame && !pv.mark && pv.stamped && pv.csp && (!hostHas || (d2.file_state === 'edited' && /고쳐짐/.test(view?.row ?? '') && view?.bad === 'edited' && !view?.frame && exp?.json?.success === false
+        && d3?.file_state === 'missing' && /없어짐/.test(gone?.row ?? '') && gone?.bad === 'missing' && !gone?.frame)),
       detail: `미리보기 첫 쪽 — 디스크 초안의 <style> 표지 ${pv.mark ? '들어감' : '없음'} · 발행 도장 ${pv.stamped} · 인쇄 틀의 CSP ${pv.csp}`
-        + (hostHas ? ` · 호스트 file_state ${d2.file_state} → 트리 「${view?.row}」 · 가운데 ${view?.bad} · 그림 ${view?.frame} · 내보내기 ${exp?.status} ${short(exp?.json?.error, 40)}` : ' · 호스트의 documents list 에 file_state 가 아직 없다 — 초안 보기의 「고쳐짐」 은 그 필드가 오면(화면 · 다리는 준비됨)') };
+        + (hostHas ? ` · 호스트 file_state ${d2.file_state} → 트리 「${view?.row}」 · 가운데 ${view?.bad} · 그림 ${view?.frame} · 내보내기 ${exp?.status} ${short(exp?.json?.error, 40)}`
+          + ` · 파일을 치우면 file_state ${d3?.file_state} → 트리 「${gone?.row}」 · 가운데 ${gone?.bad} · 그림 ${gone?.frame}` : ' · 호스트의 documents list 에 file_state 가 아직 없다 — 초안 보기의 「고쳐짐」 은 그 필드가 오면(화면 · 다리는 준비됨)') };
   });
   await step('r40 S5 — 「믿기」 는 물음을 거친다: 적은 이름 옆에 작성자 id(줄임) · PC 이름, 「이름은 그 작성자가 스스로 적은 것」 · 물음의 「믿기」 전에는 아무것도 보내지 않는다', 'r40_trust_question', async () => {
     // 앞 단계(r37)가 모델을 바꿔 결과가 낡았을 수 있다 — 검토 줄이 있게 휨 검토 하나
@@ -3395,6 +3597,260 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const n4 = await count();
     return { ok: on === true && n1 === n0 && n2 === n1 + 1 && off === false && n3 === n2 && n4 === n3 + 1,
       detail: `끼운 페이지 F2 → 편집 ${on} · edit-session ${n0} → ${n1}(보내지 않음) · 맨 위 누름 → ${n2} · (끼운 페이지 자신의 editSession 메시지는 다리 시험 s16) · Escape → 편집 ${off} · ${n3} → 맨 위 누름 ${n4}` };
+  });
+
+  /*
+   * r43 · r44 · r45 — 재테스트 반영(20261125-retest-fixes-worklog — E5 · E6 · E11). 기대는 앞 단계: r10 · r12(열린 프로젝트의 대상).
+   * r43 은 새 대상 「R43 해석식」 을 만들어 그 안에서 하고 앞 대상으로 돌아온다
+   */
+  await step('r43 E5 · R1 · D3 — FSM 을 돌린 적 없는 대상의 휨 검토 = 호스트가 그 검토 안에서 S-S 서명곡선 FSM 값을 준비한다(dsm_basis_by_family: prepared · designDsmPrepared in_check) → 「해석식 좌굴값」 표시 없음 · 좌굴 값의 출처 「서명곡선 FSM」 · 모드 구속이 켜져 있으면 호스트의 가정 「구속하지 않은 서명곡선」. 대체(원형관 — DSM 비적용): 엔진의 범위 알림이 말하고 표시 없음', 'r43_no_fsm', async () => {
+    const cur = (await recNow()).cases.find(c => c.open)?.name;
+    await act2({ action: 'save_case' });
+    await act2({ action: 'new_case', name: 'R43 해석식', kind: 'section-only' });
+    await act2({ action: 'open_case', name: 'R43 해석식' });
+    await answerIfUnsaved();
+    await settle(`!!s.full?.project?.case && s.full.project.case.name==='R43 해석식'`, '새 대상', 60_000);
+    await ev(`${S}.review()`);
+    const look = async (want) => {
+      await settle(`s.runs.some(r=>r.key==='design' && r.rows.length && r.us?.member_type===${JSON.stringify(want)}) && s.stages.chk.state==='ok'`, '부재 검토', 90_000).catch(() => undefined);
+      await sleep(800);
+      const dr = await hostMsg('designResult');
+      const prep = await hostMsg('designDsmPrepared');
+      await select('result', 'chk');
+      const res = await ev(`(()=>{const t=document.querySelector('#tree .row[data-k="chk"] [data-no-fsm]'); return t ? {text:t.textContent, fams:t.dataset.noFsm, kind:t.dataset.noFsmKind, tip:t.dataset.tip} : null;})()`);
+      const notice = await ev(`!!document.querySelector('#info [data-no-fsm-notice]')`);
+      const basisShown = await ev(`document.querySelector('#info [data-dsm-basis]')?.dataset.dsmBasis ?? null`);
+      const scopeCodes = await ev(`[...document.querySelectorAll('#info li[data-code]')].map(l=>l.dataset.code)`);
+      await select('work', 'insp:sum');
+      const wk = await ev(`document.querySelector('#tree .row[data-k="insp:sum"] [data-no-fsm]')?.textContent ?? null`);
+      return { basis: dr?.dsm_basis_by_family ?? null, src: dr?.dsm_source ?? null, inCheck: prep?.in_check === true, prepFams: prep?.load_cases ?? null, res, notice, wk, basisShown, scopeCodes };
+    };
+    // ① 좌굴 해석을 돌린 적 없는 단면 — 결정 R1: 부재 검토가 그 자리에서 설계 Fy 의 서명곡선 FSM 값을 준비한다(대체가 아니다)
+    await mcp.tool('set_section_template', { type: 'lippedc', H: 150, B: 65, D: 20, t: 2.3, r: 3, units: 'SI', reason: 'r43 — FSM 을 돌린 적 없는 단면' });
+    const f1 = await mcp.tool('aisi_design_flexure', flexArgsR(3.0, 3));
+    const a = await look('flexure');
+    await shot('r43_no_fsm_tag_1920_dark');
+    // ①b 호스트 2차: 모델에 cFSM 모드 구속(GBTcon)이 켜져 있으면 설계값은 구속하지 않은 서명곡선 — 결과의 가정 host.design.dsm_unconstrained(호스트의 글)가
+    // 정보 창의 가정 · 모델 › 가정에 보인다. 끝에 구속을 끈다
+    const DSM_UNC = 'host.design.dsm_unconstrained';
+    const g1 = await mcp.tool('set_gbtcon', { glob: [1, 1, 1, 1] });
+    const f1b = await mcp.tool('aisi_design_flexure', flexArgsR(3.1, 3));
+    await settle(`s.runs.some(r=>r.key==='design' && (r.assumptions||[]).some(n=>n.code===${JSON.stringify(DSM_UNC)}))`, '모드 구속의 가정', 60_000).catch(() => undefined);
+    await select('result', 'chk');
+    const uncInfo = await ev(`document.querySelector('#info li[data-code="${DSM_UNC}"]')?.textContent ?? null`);
+    await select('model', 'asm');
+    const uncAsm = await ev(`[...document.querySelectorAll('#tree .row[data-k^="asm:design"]')].map(r=>r.textContent).find(t=>/구속/.test(t)) ?? null`);
+    const g0 = await mcp.tool('set_gbtcon', { glob: [0, 0, 0, 0] });
+    // ② 대체 — 원형관(CHS): 호스트는 DSM 값을 준비하지 않고(dsm_basis_by_family: none) 엔진이 DSM 비적용을 범위 알림으로 밝힌다 — 화면은 「해석식 좌굴값」 을 달지 않는다
+    const tube = await mcp.tool('set_section_template', { type: 'chs', OD: 114.3, t: 3.2, units: 'SI', reason: 'r43 — 원형관(DSM 비적용)' });
+    const c2 = await mcp.tool('aisi_design_compression', { detail: 'full', Fy: 295, Fu: 400, KxLx: 3000, KyLy: 3000, KtLt: 3000, Pu: 20, design_method: 'LRFD', units: 'SI' });
+    const b = await look('compression');
+    await act2({ action: 'save_case' });
+    if (cur) { await act2({ action: 'open_case', name: cur }); await answerIfUnsaved(); await settle(`s.full?.project?.case?.name===${JSON.stringify(cur)}`, '앞 대상', 60_000).catch(() => undefined); }
+    const NA = 'member.scope.round_tube_dsm_not_applicable';
+    const okA = !f1.error && a.basis?.Mxx === 'prepared' && a.inCheck && !a.res && !a.notice && a.wk === null && a.basisShown === 'Mxx=prepared';
+    const okU = !g1.error && !g0.error && !f1b.error && !!uncInfo && /[가-힣]/.test(uncInfo) && !!uncAsm;
+    const okB = !tube.error && !c2.error && b.basis?.P === 'none' && !b.res && !b.notice && b.wk === null && b.scopeCodes.includes(NA);
+    return { ok: okA && okU && okB,
+      detail: `모드 구속: 정보 창의 가정 「${short(uncInfo, 60)}」 · 모델 › 가정 「${short(uncAsm, 60)}」${g1.error ? ` · set_gbtcon ${short(g1.error, 80)}` : ''}${f1b.error ? ` · ${short(f1b.error, 80)}` : ''} ${okU} | FSM 을 돌린 적 없음: 출처 ${JSON.stringify(a.basis)} · designDsmPrepared in_check ${a.inCheck}(${JSON.stringify(a.prepFams)}) · 엔진 ${JSON.stringify(a.src)} → 표시 「${a.res?.text ?? '없음'}」 · 정보 창 알림 ${a.notice} · 좌굴 값의 출처 ${a.basisShown} · 판정 요약 「${a.wk ?? '없음'}」`
+        + ` | 원형관(대체): 출처 ${JSON.stringify(b.basis)} · 엔진 ${JSON.stringify(b.src)} → 표시 「${b.res?.text ?? '없음'}」 · 알림 ${b.notice} · 범위 알림 ${b.scopeCodes.includes(NA) ? NA : `없음(${b.scopeCodes.slice(0, 6).join(', ')})`} · 앞 대상 ${cur}${f1.error ? ` · ${short(f1.error, 80)}` : ''}${tube.error ? ` · ${short(tube.error, 80)}` : ''}${c2.error ? ` · ${short(c2.error, 80)}` : ''}` };
+  });
+  await step('r44 E6 — 기록: 실행 하나 = 머리줄 하나(접지 않는다) · 묶음은 그것이 처음 들어간 계산 아래(다시 계산해도 옮겨 가지 않는다 — MCP work_log 의 연결과 같다) · 묶음 없는 실행은 「계산 #n (입력 변경 없음)」', 'r44_log_runs', async () => {
+    await ev(`${S}.review()`);
+    const c1 = await mcp.tool('set_section_template', { type: 'lippedc', H: 153, B: 65, D: 20, t: 2.6, r: 3, units: 'SI', reason: 'r44 — 첫 계산에 들어갈 변경' });
+    const fA = await mcp.tool('aisi_design_flexure', flexArgsR(5.0));
+    await settle(`s.runs.some(r=>r.key==='design' && r.rows.length)`, '부재 검토', 60_000);
+    await sleep(2600);
+    const id1 = ((await act2({ action: 'list_changes', limit: 10 })).changes ?? []).find(c => c.reason === 'r44 — 첫 계산에 들어갈 변경')?.id;
+    const openAll = async () => {
+      await ev(`${S}.reload()`);
+      await sleep(1500);
+      await select('work', 'chg');
+      for (let i = 0; i < 30; i++) {
+        const more = await ev(`(()=>{const t=[...document.querySelectorAll('#tree .row[data-k^="log:"] .tw')].find(x=>x.textContent==='▸'); if(!t) return 0; t.click(); return 1;})()`);
+        if (!more) { break; }
+        await sleep(80);
+      }
+    };
+    await openAll();
+    const p0 = id1 ? (await treeParents(`chg:${id1}`)).find(x => /^log:/.test(x ?? '')) ?? '' : '';
+    // 다시 계산 둘(입력은 그대로) — 그 묶음이 뒤 계산으로 옮겨 가지 않는다
+    const rc1 = await mcp.tool('run_case_check', { what: 'member' });
+    const rc2 = await mcp.tool('run_case_check', { what: 'member' });
+    await sleep(2600);
+    await openAll();
+    const p1 = id1 ? (await treeParents(`chg:${id1}`)).find(x => /^log:/.test(x ?? '')) ?? '' : '';
+    const hist = ((await act2({ action: 'get_case_status', detail: 'runs' })).history ?? []).slice().sort((a, b) => (a.at < b.at ? -1 : 1));
+    const shownH = hist.filter(h => h.auto !== true && h.kind !== 'design_dsm');
+    const heads = await ev(`(()=>{const rows=[...document.querySelectorAll('#tree .row')]; const pad=r=>parseFloat(r.style.paddingLeft); return rows.map((r,i)=>[r,i]).filter(([r])=>/^log:run:/.test(r.dataset.k)).map(([r,i])=>{let kids=0; for(let j=i+1;j<rows.length && pad(rows[j])>pad(r);j++){kids++;} return {k:r.dataset.k, name:r.querySelector('.nm').textContent, kids, tw:r.querySelector('.tw').textContent, v:r.querySelector('.vl')?.textContent ?? ''};});})()`);
+    // ① 머리줄 = 머리줄이 되는 실행 하나하나(번호 · 키)
+    const wantKeys = shownH.map(h => `log:run:${String(h.run).replace(/[#|]/g, '')}`);
+    const sameSet = heads.length === wantKeys.length && wantKeys.every(k => heads.some(x => x.k === k));
+    const namesOk = heads.every(x => { const h = shownH.find(y => `log:run:${String(y.run).replace(/[#|]/g, '')}` === x.k); return !!h && (typeof h.no !== 'number' || x.name.startsWith(`계산 #${h.no}`)); });
+    const emptyOk = heads.every(x => (x.kids === 0) === / \(입력 변경 없음\)$/.test(x.name) && (x.kids > 0 || x.tw === ''));
+    // ② 그 묶음의 머리줄 = 그것 뒤의 첫 계산(이 단계의 휨 검토) — 다시 계산 전 · 뒤 같다
+    const c1At = id1 ? ((await act2({ action: 'list_changes', limit: 20 })).changes ?? []).find(c => c.id === id1)?.at : null;
+    const runA = c1At ? shownH.find(h => h.at > c1At) : null;
+    const keyA = runA ? `log:run:${String(runA.run).replace(/[#|]/g, '')}` : '';
+    // ③ 호스트 work_log 의 연결 — 실행 줄의 changes(그 실행에 들어간 묶음)마다 화면의 머리줄이 그 실행(머리줄이 아닌 실행이면 그 뒤의 첫 머리줄)
+    const wl = await act2({ action: 'work_log', limit: 100 });
+    const mism = [];
+    let compared = 0;
+    // 실행 이력이 잘렸으면(20) 가장 오래된 머리줄 앞의 묶음은 「계산 기록 앞」 — 화면이 그 앞 실행을 모른다(그 실행은 대조에서 뺀다)
+    const complete = hist.length < 20 || hist[0]?.no === 1;
+    for (const e of (wl.entries ?? []).filter(x => x.type === 'run' && Array.isArray(x.changes))) {
+      const h = hist.find(y => y.run === e.id);
+      if (!h || (!complete && h.at <= (shownH[0]?.at ?? ''))) { continue; }
+      const head = h.auto !== true && h.kind !== 'design_dsm' ? h : shownH.find(y => y.at >= h.at);
+      if (!head) { continue; }
+      const want = `log:run:${String(head.run).replace(/[#|]/g, '')}`;
+      for (const cid of e.changes) {
+        const ps = await treeParents(`chg:${cid}`);
+        if (!ps.length) { continue; }
+        compared += 1;
+        if (!ps.some(x => (x ?? '').split('|')[0] === want)) { mism.push(`${cid}→${ps.map(x => (x ?? '').split('|')[0]).join('+')} (work_log ${e.no})`); }
+      }
+    }
+    await select('work', keyA || 'chg');
+    await shot('r44_log_runs_1920_dark');
+    const lastHead = heads.find(x => x.k === `log:run:${String(shownH[shownH.length - 1]?.run).replace(/[#|]/g, '')}`);
+    return { ok: !c1.error && !fA.error && !rc1.error && !rc2.error && !!id1 && !!keyA && p0.split('|')[0] === keyA && p1.split('|')[0] === keyA && p1.split('|')[1] === `계산 #${runA.no}`
+        && sameSet && namesOk && emptyOk && mism.length === 0 && compared > 0 && !!lastHead && / \(입력 변경 없음\)$/.test(lastHead.name) && /OK|NG|판정 없음/.test(lastHead.v),
+      detail: `묶음 ${id1} → 다시 계산 전 「${p0}」 · 뒤 「${p1}」(기대 ${keyA} 계산 #${runA?.no}) · 머리줄 ${heads.length} = 실행 ${shownH.length} ${sameSet} · 번호 ${namesOk} · 「입력 변경 없음」 ${emptyOk}`
+        + ` · work_log 대조 ${compared}줄 어긋남 ${mism.length}${mism.length ? ` (${mism.slice(0, 4).join(' ; ')})` : ''} · 마지막 「${lastHead?.name}」 ${lastHead?.v ?? ''}`
+        + ` · 머리줄: ${heads.slice(0, 8).map(x => `${x.name}[${x.kids}]`).join(', ')}${rc1.error ? ` · ${short(rc1.error, 80)}` : ''}` };
+  });
+  await step('r45 N-5 — 프로젝트의 대상(프로젝트 · 대상 이름 · 칩 「입력 바뀜 n건」)에서 좁은 창: 진행 띠 · 칩이 단추 · 연결 상태와 겹치지 않음 · 가로 스크롤 없음 · 업무 › 변경의 「바뀐 값」 칩이 「비교 기준」과 겹치지 않음(D1)', null, async () => {
+    await mcp.tool('set_case_inputs', { inputs: { Cb: 1.07 }, units: 'SI', reason: 'r45 — 칩이 「입력 바뀜」 이 되게' });
+    await sleep(2600);
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    await select('work', 'chg');
+    const out = await narrowTitle([800, 900, 960, 1100, 1180, 1280, 1440, 1920], 'r45');
+    // D1: 업무 › 변경 — 「바뀐 값」 보기의 칩(바뀜 · 추가 · 삭제 · 낡게 한 결과)이 「비교 기준 ▾ · 전체 맞춤」과 겹치지 않는다(경계 상자) · 보기 칸 밖으로 나가지 않는다 · 가로 스크롤 없음
+    const hud = [];
+    for (const w of [800, 900, 960, 1100, 1920]) {
+      W = w; H = 900;
+      await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+      await sleep(450);
+      const s = await ev(`(()=>{const v=document.querySelector('#center [data-chg-view]'); if(!v) return null; const vis=e=>{const r=e.getBoundingClientRect(); return r.width>0&&r.height>0;};
+        const box=e=>{const r=e.getBoundingClientRect(); return {l:r.left,r:r.right,t:r.top,b:r.bottom};};
+        const left=[...v.querySelectorAll('[data-chg-chips] .chip')].filter(vis).map(e=>({k:e.textContent.trim(), ...box(e)}));
+        const right=[...v.querySelectorAll('[data-chg-right] .chip, [data-chg-right] .btn')].filter(vis).map(e=>({k:e.textContent.trim(), ...box(e)}));
+        const hits=[]; for(const a of left){ for(const b of right){ if(Math.min(a.r,b.r)-Math.max(a.l,b.l)>0.5 && Math.min(a.b,b.b)-Math.max(a.t,b.t)>0.5) hits.push(a.k+' × '+b.k); } }
+        const vb=v.getBoundingClientRect(); const out=[...left, ...right].filter(a=>a.r>vb.right+0.5 || a.l<vb.left-0.5).map(a=>a.k);
+        return {w:innerWidth, nL:left.length, nR:right.length, hits, out, vw:Math.round(vb.width), sw:document.documentElement.scrollWidth, cw:document.documentElement.clientWidth};})()`);
+      if (w === 800) { await shot('r45_chg_hud_800_dark'); }
+      hud.push(s ? { ...s, ok: s.nL >= 3 && s.nR >= 2 && s.hits.length === 0 && s.out.length === 0 && s.sw <= s.cw } : { w, ok: false });
+    }
+    W = 1920; H = 1080;
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    const hudOk = hud.every(x => x.ok);
+    return { ok: out.ok && hudOk, detail: `${out.detail} || 바뀐 값 보기: ${hud.map(x => `${x.w}px 칩 ${x.nL ?? '?'} | ${x.nR ?? '?'} · 겹침 ${x.hits?.join(',') || '없음'} · 칸 밖 ${x.out?.join(',') || '없음'} · 보기 ${x.vw} · 스크롤 ${x.sw}/${x.cw}${x.ok ? '' : ' ✗'}`).join(' | ')}` };
+  });
+  /*
+   * r46 · r47 — r10 · r12 에 기댄다(그 프로젝트 · 대상). r47 은 기록 줄 파일을 일부러 망가뜨리고 푼다 — 맨 끝에 둔다(r46 은 그 앞)
+   */
+  await step('r46 N-4 — 다른 대상을 열면 끼운 설계 화면(편집 상태 F2)의 상태 줄 · 설계 탭 띠에 앞 대상의 「설계용 FSM 준비 완료 …」 가 남지 않는다', 'r46_n4_status', async () => {
+    const cur = (await recNow()).cases.find(c => c.open)?.name;
+    await ev(`${S}.review()`);
+    // 앞 대상(A): 좌굴 해석 → 끼운 페이지가 설계용 좌굴값을 스스로 준비하고 상태 줄에 「설계용 FSM 준비 완료: …」
+    const lc = await mcp.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
+    const run = await mcp.tool('run_analysis');
+    await settle(`s.stages.fsm.state==='ok'`, '좌굴 해석', 120_000).catch(() => undefined);
+    const a = await waitWv(`const s=D.getElementById('analysis-status'); return s && /설계용 FSM 준비 완료/.test(s.textContent) ? {st:s.textContent, dsm:D.getElementById('design-dsm-status')?.textContent ?? ''} : null;`, 60_000, '설계용 FSM 준비 완료').catch(() => null);
+    // 다른 대상(B)을 연다 — 결과가 없는 새 대상
+    await act2({ action: 'save_case' });
+    const nb = await act2({ action: 'new_case', name: 'R46 다른 대상', kind: 'section-only' });
+    const ob = await act2({ action: 'open_case', name: 'R46 다른 대상' });
+    await answerIfUnsaved();
+    await settle(`!!s.full?.project?.case && s.full.project.case.name==='R46 다른 대상'`, '다른 대상', 60_000).catch(() => undefined);
+    await sleep(1500);
+    // 편집 상태(F2) — 사람이 보는 끼운 페이지
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(800);
+    await wv(`D.querySelector('.tab-btn[data-tab="design"]')?.click(); return 1;`).catch(() => undefined);
+    await sleep(500);
+    const b = await wv(`return {st:D.getElementById('analysis-status')?.textContent ?? null, dsm:D.getElementById('design-dsm-status')?.textContent ?? null};`).catch(e => ({ err: String(e) }));
+    const shown = await ev(`(()=>{const f=document.querySelector('#edit iframe, iframe[data-designer], .edit iframe'); const r=f?f.getBoundingClientRect():null; return r ? Math.round(r.width) : 0;})()`).catch(() => 0);
+    await shot('r46_n4_other_case_edit_1920_dark');
+    await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`);
+    await sleep(400);
+    // 앞 대상으로 돌아간다(뒤 단계가 그 대상을 쓴다)
+    if (cur) { await act2({ action: 'open_case', name: cur }); await answerIfUnsaved(); await settle(`s.full?.project?.case?.name===${JSON.stringify(cur)}`, '앞 대상', 60_000).catch(() => undefined); }
+    const leftA = (t) => /설계용 FSM 준비 완료/.test(t ?? '') || (!!a && !!a.st && (t ?? '').includes(a.st.replace(/^.*?:\s*/, '').trim()) && /준비 완료/.test(t ?? ''));
+    return { ok: lc.success !== false && !run.error && !!a && !nb?.error && !ob?.error && typeof b?.st === 'string' && typeof b?.dsm === 'string' && !leftA(b.st) && !/준비 완료|결과 연동됨/.test(b.dsm),
+      detail: `대상 A(${cur}) 해석 뒤 상태 줄 「${short(a?.st, 70)}」 · 설계 탭 띠 「${short(a?.dsm, 60)}」 → 대상 B 를 열고 F2: 상태 줄 「${short(b?.st, 70)}」 · 설계 탭 띠 「${short(b?.dsm, 70)}」${b?.err ? ` · ${short(b.err, 80)}` : ''} · 끼운 화면 폭 ${shown}`
+        + `${nb?.error ? ` · new_case ${short(nb.error, 60)}` : ''}${ob?.error ? ` · open_case ${short(ob.error, 60)}` : ''}` };
+  });
+  await step('r47 ⚔ V9b-04 기록 손상 — 깨진 · 줄어든 줄 파일 → 띠 「기록 손상」 · 발행 전 점검(정보 창 · 미리보기)의 「기록 손상」 이 그 자리로 · 문서 탭 목록 · 「격리」는 묻는다(취소면 그대로) · 줄어든 것은 「받아들이기」 · 풀면 띠와 막는 것이 사라진다', 'r47_damage', async () => {
+    const logDir = t => path.join(pdir2, '.stcfsd', 'log', t);
+    const streamFile = t => { try { return fs.readdirSync(logDir(t)).filter(f => /^w[a-z2-7]{20}(-[2-9])?\.jsonl$/.test(f)).map(f => path.join(logDir(t), f))[0] ?? null; } catch { return null; } };
+    // 깨뜨릴 줄 파일 — 이 실행에서 생긴 것 가운데(업무 · 대안 · 확인 · 변경 차례). 대상 기록(cases)은 건드리지 않는다
+    // 이 실행이 업무 줄을 하나도 만들지 않았으면(--only) 보고 하나로 만든다
+    if (!['work', 'alternatives', 'reviews', 'changes'].some(t => !!streamFile(t))) { await mcp.tool('work_items', { action: 'add', kind: 'report', title: 'r47 — 기록 손상 시험', body: '시험용 보고' }); }
+    const brokeType = ['work', 'alternatives', 'reviews', 'changes'].find(t => !!streamFile(t)) ?? 'work';
+    const workF = streamFile(brokeType), srcF = streamFile('sources');
+    if (!workF || !srcF) { return { ok: false, detail: `줄 파일이 없다 — ${brokeType} ${workF} · sources ${srcF}(r10 · r12 · r38 이 만든다)` }; }
+    // 깨진 줄(work) · 줄어든 줄 파일(sources — 마지막 줄을 뗀다: 본 끝보다 짧고 나머지는 온전하다)
+    fs.appendFileSync(workF, 'D1-not-a-record-line\n');
+    const lines = fs.readFileSync(srcF, 'utf8').split('\n').filter(Boolean);
+    fs.writeFileSync(srcF, `${lines.slice(0, -1).join('\n')}\n`);
+    await ev(`${S}.reload()`);
+    await waitFor(`!!document.querySelector('#recband [data-band="damage"]')`, 30_000, '띠 「기록 손상」').catch(() => undefined);
+    const band = await ev(`document.querySelector('#recband')?.textContent ?? ''`);
+    const list0 = (await api('GET', '/api/person/damage')).json?.data?.items ?? [];
+    const ck0 = await act2({ action: 'documents', op: 'check' });
+    // 발행 전 점검(정보 창) — 「기록 손상」 줄에 「손상 보기 →」
+    await select('doc', 'rpt');
+    await waitFor(`!!document.querySelector('#info [data-blocker="damaged-records"]')`, 15_000, '막는 것 「기록 손상」').catch(() => undefined);
+    const blockLink = await ev(`!!document.querySelector('#info [data-blocker="damaged-records"] [data-dmg-go]')`);
+    // 미리보기 — 막는 것의 「손상 보기 →」 를 누르면 미리보기를 닫고 그 자리로
+    await ev(`document.querySelector('#info [data-issue-open]')?.click()`);
+    await waitFor(`!!document.querySelector('#issue-host [data-pv="damage"]')`, 20_000, '미리보기의 「손상 보기」').catch(() => undefined);
+    const pvLink = await ev(`!!document.querySelector('#issue-host [data-pv="damage"]')`);
+    await ev(`document.querySelector('#issue-host [data-pv="damage"]')?.click()`);
+    await waitFor(`!!document.querySelector('#center [data-damage-view]') && !document.querySelector('#issue-host.open')`, 15_000, '기록 손상 보기').catch(() => undefined);
+    const view0 = await ev(`({rows:[...document.querySelectorAll('#center tr[data-dmg]')].map(r=>({k:r.dataset.dmg, what:r.querySelector('[data-dmg-what]')?.textContent, acts:[...r.querySelectorAll('[data-dmg-act]')].map(b=>b.dataset.dmgAct)})), sel:document.querySelector('#tree .row.on')?.dataset.k ?? null, count:document.querySelector('#info [data-dmg-count]')?.dataset.dmgCount ?? null})`);
+    await shot('r47_damage_1920_dark');
+    const workKey = `${brokeType}/${path.basename(workF, '.jsonl')}`, srcKey = `sources/${path.basename(srcF, '.jsonl')}`;
+    const clickAct = (key, act) => ev(`(()=>{const b=document.querySelector('#center tr[data-dmg="${key}"] [data-dmg-act="${act}"]'); if(b){b.click(); return 1;} return 0;})()`);
+    const answer = async (item, act) => {
+      await waitFor(`!!document.querySelector('#dialog-host [data-item="${item}"]')`, 15_000, `물음 「${item}」`);
+      const q = await ev(`document.querySelector('#dialog-host .dialog')?.textContent ?? ''`);
+      await ev(`document.querySelector('#dialog-host [data-item="${item}"]').click()`);
+      await waitFor(`(document.getElementById('info')?.dataset.dmgLast ?? '').startsWith('${act}:')`, 20_000, '풀기의 답');
+      const last = await ev(`document.getElementById('info').dataset.dmgLast`);
+      await ev(`document.getElementById('info').removeAttribute('data-dmg-last')`);
+      return { q, last };
+    };
+    // 격리 — 묻는다: 취소면 아무것도 하지 않는다
+    await clickAct(workKey, 'quarantine');
+    const c1 = await answer('취소', 'quarantine');
+    const stillThere = fs.existsSync(workF);
+    await clickAct(workKey, 'quarantine');
+    const c2 = await answer('격리', 'quarantine');
+    const qDir = path.join(pdir2, '.stcfsd', 'quarantine', brokeType);
+    const moved = fs.existsSync(qDir) ? fs.readdirSync(qDir) : [];
+    // 받아들이기 — 줄어든 줄 파일
+    await clickAct(srcKey, 'accept');
+    const c3 = await answer('받아들이기', 'accept');
+    await sleep(800);
+    await ev(`${S}.reload()`);
+    await sleep(1500);
+    const list1 = (await api('GET', '/api/person/damage')).json?.data?.items ?? [];
+    const ck1 = await act2({ action: 'documents', op: 'check' });
+    const after = await ev(`({band:!!document.querySelector('#recband [data-band="damage"]'), node:!!document.querySelector('#tree .row[data-k="dmg"]')})`);
+    const evs = ((await act2({ action: 'list_changes', limit: 5 })).changes ?? []).length;  // 대상 기록이 읽히는가(격리 뒤에도)
+    const blocked = c => (c?.blockers ?? []).some(b => b.code === 'damaged-records');
+    const w0 = view0.rows.find(r => r.k === workKey), s0 = view0.rows.find(r => r.k === srcKey);
+    return { ok: /기록 손상/.test(band) && list0.length >= 2 && blocked(ck0) && blockLink && pvLink && view0.sel === 'dmg' && !!w0 && !!s0 && w0.acts.join() === 'quarantine' && s0.acts.includes('accept')
+        && c1.last === 'quarantine:cancelled' && stillThere && /격리|옆으로/.test(c1.q) && c2.last === 'quarantine:done' && !fs.existsSync(workF) && moved.length >= 1
+        && c3.last === 'accept:done' && list1.length === 0 && !blocked(ck1) && !after.band && !after.node && evs >= 0,
+      detail: `띠 「${short(band.replace(/\s+/g, ' '), 70)}」 · 다리의 목록 ${list0.length}(${list0.map(d => `${d.type} ${d.broken}/${d.chain_breaks}/${d.shrunk ? `${d.shrunk.expected_seq}→${d.shrunk.found_seq}` : '-'} 받아들임 ${d.can_accept}`).join(' · ')})`
+        + ` · 점검의 막는 것 「기록 손상」 ${blocked(ck0)} · 정보 창 링크 ${blockLink} · 미리보기 링크 ${pvLink} → 고른 것 ${view0.sel} · 줄 ${view0.rows.map(r => `${r.k.split('/')[0]}[${r.acts.join('+')}] ${r.what}`).join(' · ')}`
+        + ` · 격리 물음 「${short(c1.q.replace(/\s+/g, ' '), 60)}」 취소 → ${c1.last}(파일 그대로 ${stillThere}) · 격리 → ${c2.last}(옮긴 곳 ${moved.join(',')}) · 받아들이기 → ${c3.last}`
+        + ` · 뒤: 목록 ${list1.length} · 막는 것 「기록 손상」 ${blocked(ck1)} · 띠 ${after.band} · 트리 줄 ${after.node}` };
   });
 
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });

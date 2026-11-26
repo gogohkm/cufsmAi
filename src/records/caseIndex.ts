@@ -11,6 +11,7 @@ import { assertSingleLink, mkdirInside, readBounded, writeAtomic } from './fsx';
 import { DATA_DIR } from './log';
 import { cleanHeaderText } from './names';
 import { CASE_ID_RE } from './project';
+import { lengthBoundFailure } from './runs';
 
 export const INDEX_DIR = 'index';
 export const INDEX_SCHEMA = 'stcfsd-index/1';
@@ -106,7 +107,10 @@ export function summarizeCsd(bytes: Buffer): Omit<CaseIndex, 'schema' | 'caseId'
         steel: cleanHeaderText(inputs.presteelGrade, 40),
         nodes: Array.isArray(model.node) ? model.node.length : null,
         elems: Array.isArray(model.elem) ? model.elem.length : null,
-        maxRatio: d ? num(d.utilization) : null,
+        // 판정이 아닌 비(가정한 길이 · 빠진 주 소요)는 색인의 최대 판정비가 아니다(runs.noVerdictUtilization)
+        // 길이와 상관없는 하한으로 NG(빈 길이)이면 그 하한의 비(runs.lengthBoundFailure)
+        maxRatio: d && lengthBoundFailure(d) ? lengthBoundFailure(d)!.ratio
+            : d && !(d.length_assumed === true || d.utilization_valid === false) ? num(d.utilization) : null,
         pass: d && typeof d.pass === 'boolean' ? d.pass : null,
         results: RESULT_KINDS.filter(([k]) => p[k] && typeof p[k] === 'object').map(([, name]) => name),
         outline: outlineOf(model.node, model.elem),

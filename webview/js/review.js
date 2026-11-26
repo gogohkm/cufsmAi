@@ -91,7 +91,13 @@
         const _koCheck = (c) => (NOTICES ? NOTICES.readerCheck(c, _uo) : c);
         const model = env.model || null;
         // K4b: 결과의 글 필드 · 알림 사전 · 모드 이름을 한국어 · 보이는 단위로(목록 · 알림 · 검토 항목은 그대로 — 아래 도우미가 그린다)
-        const _fp = (r) => (NOTICES && r && typeof r === 'object' && !Array.isArray(r) ? NOTICES.forPage(r, env.unitSystem === 'US' ? 'US' : 'SI') : r);
+        // B2(2026-11-25): SI 의 수는 엔진의 반올림 전 값(display_unrounded)에서 바꾼다 — 화면의 결과 카드 · MCP 의 SI 응답과 같은 규칙
+        // (UTILS.withUnroundedValues). US 는 엔진의 표시 값 그대로
+        const _fp = (r) => {
+            if (!NOTICES || !r || typeof r !== 'object' || Array.isArray(r)) { return r; }
+            const si = env.unitSystem !== 'US';
+            return NOTICES.forPage(si && typeof UTILS.withUnroundedValues === 'function' ? UTILS.withUnroundedValues(r).value : r, si ? 'SI' : 'US');
+        };
         const analysisResult = _fp(env.analysisResult) || null;
         const lastDsmResult = _fp(env.lastDsmResult) || null;
         const lastProps = env.lastProps || null;
@@ -427,21 +433,25 @@
                 lcOK = false;
                 lcNote = '압축 부재인데 휨 Load Case가 선택됨 — 압축(Compression)으로 변경하세요.';
             }
+            // 결정 R1: 부재 검토가 스스로 준비한 설계용 FSM 값(설계 Fy 의 S-S 서명곡선)으로 계산했으면 보기용 해석의 하중 경우 · 실행과 상관없다
+            const designFsm = !!(d && d.dsm_basis_by_family && typeof d.dsm_basis_by_family === 'object'
+                && Object.keys(d.dsm_basis_by_family).length > 0 && Object.values(d.dsm_basis_by_family).every((v) => v === 'prepared'));
             checks.push({
                 category: catC, item: 'Load Case 적합성',
                 // K3-6(D3): 퍼린 묶음 설계는 하중 경우를 스스로 정해 정 · 부모멘트 서명곡선을 돌린다 — 화면의 해석 칸과 견주지 않는다
-                status: (d && d.purlin_mode === true) ? 'pass' : (lcOK ? 'pass' : 'warn'),
-                value: (d && d.purlin_mode === true) ? '퍼린 설계가 정 · 부모멘트로 따로 해석' : loadCase,
+                status: (d && d.purlin_mode === true) || designFsm ? 'pass' : (lcOK ? 'pass' : 'warn'),
+                value: (d && d.purlin_mode === true) ? '퍼린 설계가 정 · 부모멘트로 따로 해석' : (designFsm ? '부재 검토가 설계용 서명곡선을 따로 해석' : loadCase),
                 criterion: '설계 부재유형과 해석 Load Case가 일치해야 함',
-                note: (d && d.purlin_mode === true) ? '' : lcNote,
+                note: (d && d.purlin_mode === true) || designFsm ? '' : lcNote,
             });
 
             checks.push({
                 category: catC, item: '해석 실행 여부',
-                status: (analysisResult && analysisResult.curve) || (d && d.purlin_mode === true) ? 'pass' : 'fail',
-                value: analysisResult && analysisResult.curve ? analysisResult.curve.length + ' 점' : ((d && d.purlin_mode === true) ? '퍼린 설계의 서명곡선(정 · 부모멘트)' : '미실행'),
+                status: (analysisResult && analysisResult.curve) || (d && d.purlin_mode === true) || designFsm ? 'pass' : 'fail',
+                value: analysisResult && analysisResult.curve ? analysisResult.curve.length + ' 점' : ((d && d.purlin_mode === true) ? '퍼린 설계의 서명곡선(정 · 부모멘트)'
+                    : (designFsm ? '부재 검토의 설계용 서명곡선(S-S · 설계 Fy)' : '미실행')),
                 criterion: '설계 전 FSM 좌굴해석 완료 필요',
-                note: !analysisResult && !(d && d.purlin_mode === true) ? '③좌굴해석·부재설계 탭의 "A. 좌굴해석"에서 해석을 실행하세요.' : '',
+                note: !analysisResult && !(d && d.purlin_mode === true) && !designFsm ? '③좌굴해석·부재설계 탭의 "A. 좌굴해석"에서 해석을 실행하세요.' : '',
             });
 
             const dP = dsm ? dsm.P : null;
@@ -449,10 +459,11 @@
 
             checks.push({
                 category: catC, item: 'DSM 값 추출',
-                status: dP || dM || (d && d.purlin_mode === true) ? 'pass' : 'fail',
-                value: dP ? 'Pcrl='+_rv(dP.crl)+', Pcrd='+_rv(dP.crd) : ((d && d.purlin_mode === true) ? '퍼린 설계의 DSM(정 · 부모멘트)' : '미추출'),
+                status: dP || dM || (d && d.purlin_mode === true) || designFsm ? 'pass' : 'fail',
+                value: dP ? 'Pcrl='+_rv(dP.crl)+', Pcrd='+_rv(dP.crd) : ((d && d.purlin_mode === true) ? '퍼린 설계의 DSM(정 · 부모멘트)'
+                    : (designFsm ? '부재 검토의 설계용 DSM(S-S 서명곡선 · 설계 Fy)' : '미추출')),
                 criterion: 'Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함',
-                note: !dP && !dM && !(d && d.purlin_mode === true) ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : '',
+                note: !dP && !dM && !(d && d.purlin_mode === true) && !designFsm ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : '',
             });
 
             if (dM) {
@@ -945,17 +956,22 @@
 
                 // ── 이용률: 부모멘트 ──
                 if (d.utilization != null && d.member_type === 'flexure') {
-                    var _negUtil = d.utilization;
+                    // 엔진(2026-11-25 둘째 판): 길이와 상관없는 하한으로 NG 이면 그 하한의 비(맨 위 utilization 은 가정한 길이의 수)
+                    var _negLbf = typeof UTILS.lengthBoundFailure === 'function' ? UTILS.lengthBoundFailure(d) : null;
+                    var _negUtil = _negLbf ? _negLbf.ratio : d.utilization;
                     // K3-6(D15): 퍼린 묶음이면 지배 부모멘트 구간이 쓴 Ly · Cb(칸의 Lb · Cb 가 아니다)
                     var _negReg = d.purlin_mode && d.design_negative && d.design_negative.region ? d.design_negative.region : null;
                     var _negLb2 = _negReg ? Number(_negReg.Ly_in) : fromDisplay(getNum('design-Lb', 0), 'length');
                     var _negCb2 = _negReg ? Number(_negReg.Cb) : getNum('design-Cb', 1.0);
+                    // 엔진 E-1: 빈 Lb 를 가정해 낸 비(length_assumed)는 판정이 아니다 — 참고 비로만, 판정 없음
+                    const _negAssumed = d.length_assumed === true && !(d.pass === false);
                     checks.push({
                         category: catG, item: '이용률 — 부모멘트 (-M)',
-                        status: _statusFromVerdict(_checkVerdict(d, 'F flexure', _negUtil), _negUtil),
-                        value: (_negUtil*100).toFixed(1)+'%',
+                        status: _negAssumed ? 'warn' : _statusFromVerdict(_checkVerdict(d, 'F flexure', _negUtil), _negUtil),
+                        value: _negAssumed ? '판정 없음 — 비지지 길이를 주지 않음 (가정한 길이의 참고 비 ' + (_negUtil*100).toFixed(1) + '%)' : (_negUtil*100).toFixed(1)+'%',
                         criterion: 'Mu(-) / φMn(-) ≤ 1.0',
-                        note: _negUtil > 1.0 ? '부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요.' : '',
+                        note: _negAssumed ? '길이(Lb)를 넣고 다시 검토하세요 — 가정한 길이의 비는 통과도 불합격도 아닙니다.'
+                            : (_negUtil > 1.0 ? '부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요.' : ''),
                     });
                     checks.push({
                         category: catG, item: 'Lb(-) / Cb(-) (부모멘트)',
@@ -967,13 +983,19 @@
                 } else if (d.utilization != null) {
                     // 계약 §6.4: 주 소요를 주지 않았으면 이용률은 평가한 것 가운데의 비일 뿐(utilization_valid: false) — 판정 없음으로, 그 까닭과
                     const _uInvalid = d.utilization_valid === false;
+                    // 엔진 E-1: 빈 길이를 가정해 낸 비(length_assumed) — 판정이 아니다(참고 비). 그래도 넘으면(길이와 상관없는 한계상태) NG
+                    const _lenAssumed = d.length_assumed === true;
+                    // 엔진(2026-11-25 둘째 판): 길이와 상관없는 하한으로 NG 이면 그 하한의 비(맨 위 utilization 은 가정한 길이의 수)
+                    const _lbf = typeof UTILS.lengthBoundFailure === 'function' ? UTILS.lengthBoundFailure(d) : null;
+                    const _failU = _lbf ? _lbf.ratio : d.utilization;
                     checks.push({
                         category: catG, item: '이용률 (DCR)',
                         status: _uInvalid ? (d.pass === false ? 'fail' : 'warn') : _statusFromVerdict(_v3(d), d.utilization),
-                        value: _uInvalid ? (d.pass === false ? (d.utilization*100).toFixed(1)+'% — '+_v3(d).short+' (소요 일부 없음)' : '판정 없음 — 주 소요를 주지 않음')
+                        value: _uInvalid ? (d.pass === false ? (_failU*100).toFixed(1)+'% — '+_v3(d).short+(_lenAssumed ? ' (길이를 주지 않음 — 길이와 상관없는 한계상태가 넘음' + (_lbf && _lbf.governing_check ? ': ' + _lbf.governing_check : '') + ')' : ' (소요 일부 없음)')
+                            : (_lenAssumed ? '판정 없음 — 길이를 주지 않음 (가정한 길이의 참고 비 ' + (d.utilization*100).toFixed(1) + '%)' : '판정 없음 — 주 소요를 주지 않음'))
                             : (d.utilization*100).toFixed(1)+'% — '+_v3(d).short,
                         criterion: 'DCR ≤ 100%',
-                        note: d.utilization > 1.0 ? '과응력 — 설계 요구사항 미충족.' : '',
+                        note: d.utilization > 1.0 && !(_lenAssumed && !(d.pass === false)) ? '과응력 — 설계 요구사항 미충족.' : '',
                     });
                 }
 
@@ -1315,7 +1337,7 @@
 
         function _docDsm() {
             const blocks = [];
-            if (!lastDsmResult) { return [{ kind: 'para', text: '(DSM 결과 없음 — FSM 해석을 먼저 실행하세요)' }]; }
+            if (!lastDsmResult) { return [{ kind: 'para', text: '(좌굴 해석(보기용)의 DSM 결과 없음 — 부재 검토는 설계 Fy 의 S-S 서명곡선 FSM 값을 스스로 준비합니다)' }]; }
             const dP = lastDsmResult.P || {}, dM = lastDsmResult.Mxx || {};
             const LF = (v) => RQ(v, 'dimensionless', { digits: 4 });
             const row = (lab, v, q, L, lf) => [lab, RQ(v, q), L === undefined ? '' : RQ(L, 'length'), lf === undefined ? '' : LF(lf)];
@@ -1409,6 +1431,13 @@
 
         function _docLoadAnalysis(la) {
             const blocks = [];
+            // 결정 R4: 하중조합의 기준(결과의 load_combination_standard — key 가 없으면 ASCE 7-10, 엔진이 고르기 전의 결과)
+            const lcs = la.load_combination_standard;
+            if (lcs && typeof lcs === 'object') {
+                const ed = lcs.edition || (lcs.key ? String(lcs.key) : 'ASCE/SEI 7-10');
+                const ref = lcs.reference_ko || lcs.reference || '';
+                blocks.push({ kind: 'para', text: '하중조합 기준: ' + ed + (lcs.key ? '' : ' (처음 값)') + (ref ? ' — ' + ref : '') });
+            }
             const gov = la.governing || la.gravity;
             if (Array.isArray(la.spans_ft) && la.spans_ft.length) {
                 blocks.push({ kind: 'beam', spans: RS(la.spans_ft, 'length_ft'), supports: (la.supports || []).map(String),
@@ -1552,19 +1581,32 @@
                 blocks.push(..._checkBlocks(d));
             }
             if (_lastLapResult && Array.isArray(_lastLapResult.design_checks)) {
-                blocks.push({ kind: 'heading', text: '랩 접합 (§J · 2겹 휨)' }, ..._checkBlocks(_lastLapResult));
+                // 결정 R2: 랩의 알림(힘 분배를 밝히지 않음 · 그 가정 · 판정 없음의 까닭)도 함께
+                blocks.push({ kind: 'heading', text: '랩 접합 (§J · 2겹 휨)' }, ..._checkBlocks(_lastLapResult), ..._noticeBlocks(_lastLapResult));
             }
             return blocks;
         }
+
+        /** 엔진 E-1: 결과의 맨 위 비가 빈 길이를 가정해 낸 참고 비인가(판정이 아님 — 길이와 상관없는 NG 이면 아니다) */
+        function _lengthAssumedRef(d) { return !!d && d.length_assumed === true && !(d.pass === false) && typeof d.utilization === 'number'; }
+        /** 엔진(2026-11-25 둘째 판): 길이와 상관없는 하한으로 NG 인 결과(빈 길이) — 판정비 · 지배는 그 하한의 것(맨 위 utilization 은 가정한 길이의 수) */
+        function _lengthBound(d) { return typeof UTILS.lengthBoundFailure === 'function' ? UTILS.lengthBoundFailure(d) : null; }
 
         function _docSummary(d, la) {
             const blocks = [];
             const k = _verdictKey(d);
             const govCombo = (d.purlin_governing && d.purlin_governing.combo) || ((la && (la.governing || la.gravity)) || {}).combo || '';
+            // 엔진 E-1: 빈 길이를 가정해 낸 비는 판정비 · 지배가 아니다(참고 비로만)
+            const lenRef = _lengthAssumedRef(d);
+            const lenBound = _lengthBound(d);
             blocks.push({ kind: 'table', head: ['항목', '값'], rows: [
                 ['설계 기준', 'AISI S100-16'], ['부재 유형', d.member_type || ''], ['설계 방법', d.design_method || ''],
-                ['종합 판정 (엔진)', { text: _VTXT[k], tone: _tone(k) }], ['이용률 (엔진)', RQ(d.utilization, 'dimensionless', { digits: 3 })],
-                ['지배 파괴 모드 (엔진)', d.controlling_mode || ''], ['지배 검토 (엔진)', d.governing_check || ''],
+                ['종합 판정 (엔진)', { text: _VTXT[k], tone: _tone(k) }],
+                ['이용률 (엔진)', lenRef ? '— (판정 아님 — 가정한 길이의 참고 비 ' + Number(d.utilization).toFixed(3) + ')'
+                    : lenBound ? Number(lenBound.ratio).toFixed(3) + ' (길이와 상관없는 하한 — 길이를 주지 않음, 가정한 길이의 참고 비 ' + Number(d.utilization).toFixed(3) + ')'
+                        : RQ(d.utilization, 'dimensionless', { digits: 3 })],
+                ['지배 파괴 모드 (엔진)', lenRef ? '' : lenBound ? (lenBound.limit_state || '') : (d.controlling_mode || '')],
+                ['지배 검토 (엔진)', lenRef ? '' : lenBound ? (lenBound.governing_check || '') : (d.governing_check || '')],
                 ['지배 구간', d.purlin_governing ? (d.purlin_governing.label || '') : ''], ['지배 하중조합', govCombo],
                 ['참조 조항', (d.spec_sections || []).join(', ')],
             ].filter((r) => r[1] !== '') });
@@ -1580,7 +1622,9 @@
             }
             const _pl = UTILS.purlinLists(d, _uo);
             blocks.push(..._noticeBlocks(d, { ne: _pl.ne, warn: (d.dsm_warnings || []).concat(_pl.warn), asm: _pl.asm }));
-            if (k === 'not_evaluated') {
+            if (k === 'not_evaluated' && lenRef) {
+                blocks.push({ kind: 'para', tone: 'ne', text: '판정 없음: 유효 길이 · 비지지 길이를 주지 않아 엔진이 가정한 길이로 낸 비는 참고값입니다(통과도 불합격도 아님). 길이를 넣고 다시 검토하십시오.' });
+            } else if (k === 'not_evaluated') {
                 blocks.push({ kind: 'para', tone: 'ne', text: d.utilization == null ? '판정 없음: 소요값이 없어 판정하지 않았습니다(강도 조회).'
                     : '판정 없음: 미평가 한계상태가 있어 전체 적합을 확정할 수 없습니다. 위 항목을 해소할 입력을 추가한 뒤 다시 검토하십시오.' });
             }
@@ -1601,6 +1645,9 @@
                 const mt = { compression: '압축 (Chapter E)', flexure: '휨 (Chapter F)', combined: '조합 (Chapters E+F+H)', tension: '인장 (Chapter D)', connection: '접합 (Chapter J)' }[d.member_type || ''] || (d.member_type || '');
                 sections.push({ id: 'calculation', title: '설계 계산 — ' + mt + ' (엔진 검토 항목)', blocks: _docDesignCalc(d) });
                 sections.push({ id: 'summary', title: '설계 요약', blocks: _docSummary(d, la) });
+            } else if (_lastLapResult && !_lastLapResult.error && Array.isArray(_lastLapResult.design_checks)) {
+                // 부재 검토 없이 랩만 검토했을 때도 보고서에 그 결과 · 알림
+                sections.push({ id: 'lap', title: '랩 접합 (§J · 2겹 휨)', blocks: [..._checkBlocks(_lastLapResult), ..._noticeBlocks(_lastLapResult)] });
             }
             (Array.isArray(o.appendSections) ? o.appendSections : []).forEach((s, i) => {
                 if (!s || typeof s !== 'object') { return; }
@@ -1612,7 +1659,8 @@
                 meta: { title: 'StCFSD — 냉간성형강 설계 보고서', date: _reportDate(), spec: 'AISI S100-16', method: '직접강도법 (DSM)', units: 'US',
                     design_method: d ? (d.design_method || '') : '', member_type: d ? (d.member_type || '') : '',
                     stamp: o.stamp && typeof o.stamp === 'object' ? o.stamp : null },
-                verdict: d ? { state: _verdictKey(d), utilization: RQ(d.utilization, 'dimensionless', { digits: 3 }), governing: d.governing_check || d.controlling_mode || '' } : null,
+                verdict: d ? { state: _verdictKey(d), utilization: _lengthAssumedRef(d) ? null : RQ(_lengthBound(d) ? _lengthBound(d).ratio : d.utilization, 'dimensionless', { digits: 3 }),
+                    governing: _lengthAssumedRef(d) ? '' : _lengthBound(d) ? (_lengthBound(d).governing_check || '') : (d.governing_check || d.controlling_mode || '') } : null,
                 sections,
             };
         }

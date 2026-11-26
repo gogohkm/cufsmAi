@@ -337,7 +337,7 @@ async function main() {
   // "unsupported-nonsymmetric") — 정직한 결과다. 여기서는 설계가 돌고 FSM 의 국부 · 뒤틀림 값을 쓰는지 본다.
   check('aisi_design(압축) — 부재 설계가 FSM 값으로 돈다', !member.error && Array.isArray(member.steps) && member.steps.length > 0
     && Number(member.Py) > 0 && Number(member.Pnd) > 0 && member.dsm_source?.Pcrl === 'FSM',
-    member.error ?? `${Date.now() - t} ms · Py ${member.Py} · Pnd ${member.Pnd} · Pn ${member.Pn} · 지배 ${member.controlling_mode} · pass=${member.pass}`);
+    member.error ?? `${Date.now() - t} ms · Py ${member.Py} · Pnd ${member.Pnd} · Pn ${member.Pn} · 지배 ${member.controlling_mode} · pass=${member.pass} · 무효로 한 결과 ${JSON.stringify(member.case_results_invalidated ?? null)}`);
   await panelAlive('해석 · 설계 뒤');
 
   const saved1 = path.join(tmp, 'saved', 'smoke-1.csd');
@@ -346,9 +346,12 @@ async function main() {
   const save1 = await cli.ipc('save', { file: saved1 });
   const j1 = fs.existsSync(saved1) ? JSON.parse(fs.readFileSync(saved1, 'utf8')) : undefined;
   check('저장 — 저장 대화상자를 headless 가 답한다', save1.ok && !!j1, `${Date.now() - t} ms · ${short(save1.message, 100)}`);
-  check('저장본(v1.4)에 모델 · 검토 상태(case) · 하중 해석 · 설계 결과가 있다', j1?.version === '1.4' && j1?.model?.node?.length === 21
-    && j1?.case?.schema === 'stcfsd-case/1' && !!j1?.loadAnalysis && !!j1?.designResult,
-    j1 ? `v${j1.version} · 절점 ${j1.model?.node?.length} · case ${j1.case?.schema} rev ${j1.case?.rev} · loadAnalysis ${!!j1.loadAnalysis} · designResult ${!!j1.designResult}` : '파일 없음');
+  // H-A(2026-11-25): 설계 도구는 그 입력이 바꾼 검토 상태(여기서는 부재 유형 압축)에 맞지 않는 결과를 무효로 한다(답의 case_results_invalidated) —
+  // 퍼린의 하중 해석이 그렇게 지워졌으면 저장본에 하중 해석이 없는 것이 맞다
+  const laDropped = (member.case_results_invalidated ?? []).includes('load_analysis');
+  check('저장본(v1.4)에 모델 · 검토 상태(case) · 설계 결과가 있고, 하중 해석은 설계 도구가 무효로 하지 않았을 때만 있다', j1?.version === '1.4' && j1?.model?.node?.length === 21
+    && j1?.case?.schema === 'stcfsd-case/1' && !!j1?.loadAnalysis === !laDropped && !!j1?.designResult,
+    j1 ? `v${j1.version} · 절점 ${j1.model?.node?.length} · case ${j1.case?.schema} rev ${j1.case?.rev} · loadAnalysis ${!!j1.loadAnalysis}(설계 도구가 무효로 함 ${laDropped}) · designResult ${!!j1.designResult}` : '파일 없음');
   // K2: 입력은 호스트의 검토 상태 — 화면 없이 저장해도 MCP 가 정한 입력(출처 ai)이 그대로 들어간다. 예전의 「새로 모으지 못했다」 주의는 없다.
   const aiKeys = Object.entries(j1?.case?.sources ?? {}).filter(([, v]) => v === 'ai').map(([k]) => k);
   check('화면 없는 저장에도 MCP 가 정한 입력(출처 ai)이 저장본의 case 에 있다 — 저장 주의는 없다', aiKeys.length >= 3 && !/저장 주의/.test(cli.stderr()) && !('inputsNotice' in save1),

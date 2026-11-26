@@ -769,6 +769,13 @@ def _finish(connection_type: str, limit_states: list, not_evaluated: list,
             detailing_checks: list = None, assumptions: list = None) -> dict:
     """설계강도·방향별 지배 모드·결과 dict 조립."""
     # 계산서(design_checks) 재료는 결과 키에 남기지 않고 따로 둔다(옛 키 · 값은 그대로).
+    # 상호작용 항목의 반올림 전 값(SI 변환용 display_unrounded — 부재 설계와 같은 뜻). _raw 는 아래에서 빠진다.
+    for ic in (interaction_checks or []):
+        _r = ic.get('_raw') or {}
+        _u = {k: float(_r[k]) for k in ('value', 'limit') if isinstance(_r.get(k), (int, float))
+              and math.isfinite(_r[k]) and isinstance(ic.get(k), (int, float))}
+        if _u:
+            ic['display_unrounded'] = _u
     check_data = {
         'traces': [item.pop('_trace', None) for item in limit_states],
         'Rn_raw': [item['Rn'] for item in limit_states],
@@ -784,6 +791,8 @@ def _finish(connection_type: str, limit_states: list, not_evaluated: list,
         ds_raw[id(item)] = _available(Rn, item['phi'], item['omega'], design_method)
         item['design_strength'] = round(ds_raw[id(item)], 3)
         item['Rn'] = round(Rn, 3)
+        # 반올림 전 값(SI 변환용) — 판정은 이 값으로 한다(위 키는 표시용 소수 3자리)
+        item['display_unrounded'] = {'design_strength': ds_raw[id(item)], 'Rn': Rn}
     check_data['ds_raw'] = [ds_raw[id(item)] for item in limit_states]
 
     def _raw(x):
@@ -831,10 +840,23 @@ def _finish(connection_type: str, limit_states: list, not_evaluated: list,
         'j6_verified': not any(x['category'] == 'rupture' for x in not_evaluated),
         'warnings': list(warnings),
     }
+    _du = {}
+    for key, it in (('design_strength', primary), ('shear_design_strength', gov_s),
+                    ('tension_design_strength', gov_t), ('shear_verified_design_strength', vgov_s),
+                    ('tension_verified_design_strength', vgov_t)):
+        if it is not None:
+            _du[key] = ds_raw[id(it)]
+    if primary is not None:
+        _du['Rn'] = primary['display_unrounded']['Rn']
+    result['display_unrounded'] = _du
     for x in not_evaluated:
         result['warnings'].append(_nt('conn.warning.limit_state_not_evaluated', name=x['name'], reason=x['reason']))
     if extra:
+        extra = dict(extra)
+        _xdu = extra.pop('display_unrounded', None)
         result.update(extra)
+        if _xdu:
+            result['display_unrounded'].update(_xdu)
     # 소요를 모르는 단계의 검토 항목(직접 호출용). design_connection 이 소요로 다시 만든다.
     from design.connection_checks import build as _build_checks
     result['design_checks'] = _build_checks(result, check_data, 0.0, 0.0)
@@ -845,6 +867,7 @@ def _finish(connection_type: str, limit_states: list, not_evaluated: list,
 def _detail(name: str, provided: float, required: float, clause: str) -> dict:
     return {'name': name, 'provided': round(provided, 4), 'required': round(required, 4),
             'pass': provided >= required - 1e-9, 'clause': clause,
+            'display_unrounded': {'provided': float(provided), 'required': float(required)},
             '_raw': {'provided': provided, 'required': required}}
 
 
@@ -1181,6 +1204,8 @@ def bolt_connection(t1: float, t2: float, d: float,
             'Fnt': round(Fnt, 2), 'Fnv': round(Fnv, 2), 'Fnt_reduced': round(Fnt_red, 3),
             'Pnt_prime': round(Pnt_prime, 3), 'available_tension': round(avail_T, 3),
             'ratio': round(ratio, 4), 'pass': ratio <= 1.0, 'equation': eq,
+            'display_unrounded': {'V_required': V_req, 'T_required': Tu, 'fv': fv, 'Fnt': Fnt, 'Fnv': Fnv,
+                                  'Fnt_reduced': Fnt_red, 'Pnt_prime': Pnt_prime, 'available_tension': avail_T},
         }
         if st_warn:
             shear_tension['warnings'] = st_warn
@@ -2648,7 +2673,8 @@ def arc_seam_weld_connection(t1: float, t2: float,
     not_eval.append(_ne('면외 인장', 'tension', _nt('conn.reason.arc_seam_no_tension'), 'fastener'))
     return _finish('arc_seam', limit_states, not_eval, warnings, dm,
                    ['J2.3.1', 'J2.3.2.1', 'J2.3.2.2', 'J6.1', 'J6.2', 'J6.3'],
-                   {'joint': jt, 'L_effective': round(L_eff, 4)}, None, detailing, assumptions)
+                   {'joint': jt, 'L_effective': round(L_eff, 4),
+                    'display_unrounded': {'L_effective': float(L_eff)}}, None, detailing, assumptions)
 
 
 # ============================================================
@@ -3274,6 +3300,8 @@ def design_connection(params: dict) -> dict:
         result['governing_mode'] = gov['name']
         result['design_strength'] = gov['design_strength']
         result['Rn'] = gov['Rn']
+        if isinstance(gov.get('display_unrounded'), dict):
+            result.setdefault('display_unrounded', {}).update(gov['display_unrounded'])
 
     # 판정은 가정값 없이 평가한 한계상태(verified)로만 한다. 가정값 한계상태가 더 작으면 그 항목은
     # not_evaluated 에 있으므로 PASS 가 되지 않고, FAIL 은 제대로 평가한 한계상태에서만 나온다.
@@ -3286,7 +3314,8 @@ def design_connection(params: dict) -> dict:
             cap_raw = gov_raw.get('shear_verified') or cap
             checks.append({'name': f"전단(면내) — {result['shear_verified_governing_mode']}",
                            'demand': round(V, 4), 'capacity': cap, 'ratio': round(V / cap_raw, 4),
-                           'pass': V <= cap_raw + 1e-9})
+                           'pass': V <= cap_raw + 1e-9,
+                           'display_unrounded': {'demand': float(V), 'capacity': float(cap_raw)}})
         else:
             result['not_evaluated'].append(_ne('전단(면내) 강도', 'shear',
                                                _nt('conn.reason.no_verified_shear_limit_state'), 'scope'))
@@ -3296,7 +3325,8 @@ def design_connection(params: dict) -> dict:
             cap_raw = gov_raw.get('tension_verified') or cap
             checks.append({'name': f"인장(축방향) — {result['tension_verified_governing_mode']}",
                            'demand': round(T, 4), 'capacity': cap, 'ratio': round(T / cap_raw, 4),
-                           'pass': T <= cap_raw + 1e-9})
+                           'pass': T <= cap_raw + 1e-9,
+                           'display_unrounded': {'demand': float(T), 'capacity': float(cap_raw)}})
         elif not any(x['direction'] == 'tension' for x in result['not_evaluated']):
             result['not_evaluated'].append(_ne('인장(축방향) 강도', 'tension', _nt('conn.reason.no_evaluated_tension_limit_state'), 'scope'))
     ref = []
@@ -3306,12 +3336,20 @@ def design_connection(params: dict) -> dict:
             ref.append(dem / (gov_raw.get(rkey) or c))
     result['utilization_reference'] = round(max(ref), 4) if ref else None
     for ic in result.get('interaction_checks', []):
-        checks.append({'name': ic['name'], 'demand': ic['value'], 'capacity': ic['limit'],
-                       'ratio': ic['ratio'], 'pass': ic['pass']})
+        _icu = ic.get('display_unrounded') or {}
+        _ck = {'name': ic['name'], 'demand': ic['value'], 'capacity': ic['limit'],
+               'ratio': ic['ratio'], 'pass': ic['pass']}
+        if 'value' in _icu and 'limit' in _icu:
+            _ck['display_unrounded'] = {'demand': _icu['value'], 'capacity': _icu['limit']}
+        checks.append(_ck)
     for dc in result.get('detailing_checks', []):
         if not dc['pass']:
-            checks.append({'name': dc['name'], 'demand': dc['required'], 'capacity': dc['provided'],
-                           'ratio': None, 'pass': False})
+            _dcu = dc.get('display_unrounded') or {}
+            _ck = {'name': dc['name'], 'demand': dc['required'], 'capacity': dc['provided'],
+                   'ratio': None, 'pass': False}
+            if 'required' in _dcu and 'provided' in _dcu:
+                _ck['display_unrounded'] = {'demand': _dcu['required'], 'capacity': _dcu['provided']}
+            checks.append(_ck)
 
     shear_rel = V > 0 or T == 0
     relevant = [x for x in result['not_evaluated']
@@ -3350,7 +3388,8 @@ def design_connection(params: dict) -> dict:
         result['pass'] = True
     result['verdict'] = ('PASS' if result['pass'] is True
                          else ('FAIL' if result['pass'] is False else 'NOT_CHECKED'))
-    result['demands'] = {'Vu': round(V, 4), 'Tu': round(T, 4), 'force_direction': force_dir}
+    result['demands'] = {'Vu': round(V, 4), 'Tu': round(T, 4), 'force_direction': force_dir,
+                         'display_unrounded': {'Vu': float(V), 'Tu': float(T)}}
     result['member_type'] = 'connection'
     result['design_method'] = design_method
     from design.connection_checks import build as _build_checks

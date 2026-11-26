@@ -14,6 +14,7 @@ import { esc, tip } from './dom';
 import { state } from './store';
 import { nextJudgement } from './work';
 import { hostText } from './notices';
+import { damageBand } from './damage';
 
 export interface RecCase { name: string; kind: string; open: boolean; archived?: boolean; missing?: boolean; last_saved: string | null; section: string | null; steel: string | null; max_ratio: number | null; pass: boolean | null;
   /** 215cb5a: 대상 id(보관 · 넘겨받기 · 다시 잇기가 열지 않은 대상에도) · 저장에 든 결과 종류 · 작은 단면 그림(outline: true 로 부를 때) */
@@ -95,6 +96,9 @@ export function bandHtml(): { kind: string; html: string } | null {
       + `<span class="btn" data-rec="as-new"${tip('지금 값을 이 프로젝트의 새 검토 대상으로 복사해 거기서 고친다(이 파일은 그대로)')}>새 검토 대상으로</span>`
       + (c.lock ? `<span class="btn ghost" data-rec="take-lock"${tip('다른 곳의 잠금을 넘겨받는다 — 그쪽의 저장은 거절된다(묻는다)')}>넘겨받기</span>` : '') };
   }
+  // V9b-04 · D1: 기록 손상(믿는 작성자의 줄 파일) — 풀 때까지 발행이 막힌다. 「손상 보기」 → 문서 탭의 「기록 손상」
+  const dband = damageBand();
+  if (dband) { return dband; }
   const st = rec.status;
   const key = `${c?.name ?? ''}|${st?.saved_at ?? ''}`;
   if (c && st?.changed_outside_since_save && rec.outsideDismissed !== key) {
