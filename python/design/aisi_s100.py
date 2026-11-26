@@ -1097,8 +1097,8 @@ def _not_checked_provisions(params: dict, member_type: str) -> list:
             items.append(_nt('member.scope.not_checked_f2_1_2_ltb_this_shape'))
         if canon not in ('RHS', 'CHS', 'Z', 'I') and not _mwt.torsion_given(params):   # EB: 입력이 있으면 §H4 평가
             items.append(_nt('member.scope.not_checked_h4_bending_torsion'))
-        if not params.get('transverse_stiffeners'):
-            items.append(_nt('member.scope.not_checked_h2_2_stiffened_webs'))
+        if not params.get('transverse_stiffeners') and (_mwt.web_inputs(params) or {}).get('stiffeners') is None:
+            items.append(_nt('member.scope.not_checked_h2_2_stiffened_webs'))     # 보강재 입력이 있으면 Eq. H2-2 를 평가했다
         items.append(_nt('member.scope.not_checked_weak_axis_dsm_flexure'))
         if not (params.get('wc_N') or 0) > 0 and canon not in ('RHS', 'CHS', 'ANGLE', 'TEE'):
             items.append(_nt('member.scope.not_checked_g5_h3_no_bearing_length'))

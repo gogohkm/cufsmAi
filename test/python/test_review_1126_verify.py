@@ -381,7 +381,8 @@ def test_new_results_keep_the_result_contract():
                  hole_depth=1.5),
             dict(section_type='lippedc', H=4.0, B=2.0, D=0.6, t=0.1017, R=0.15, Fy=50.0, design_method='LRFD',
                  member_type='flexure', Mu=20.0, Lb=0.0, torsion_f_bending=-10.0, torsion_f_torsion=-3.0,
-                 use_inelastic_reserve=True)]
+                 use_inelastic_reserve=True),
+            dict(C9, torsion_eccentricity=1.05, torsion_span=300.0, torsion_load='uniform', torsion_support='simple')]
     errors, codes, stats = [], set(), {'results': 0, 'notices': 0, 'reasons': 0}
     for i, p in enumerate(reqs):
         r = cases.run_case('aisi_design', p)
@@ -410,3 +411,60 @@ def test_new_results_keep_the_result_contract():
     assert not errors, errors[:10]
     assert {FAILS, 'member.assumption.holes_single_hole', 'member.assumption.c1_pe1_holes_average',
             'member.assumption.h4_first_yield', 'member.reason.holes_edge_stiffened'} <= codes, codes
+
+
+# ------------------------------------------------------------------ 뒤 요청(호스트): 범위 진술 · §H4 의 위치 물리량 · 손으로 그린 단면
+def _codes_of(notes):
+    return [getattr(n, 'code', None) for n in notes or []]
+
+
+def test_scope_notes_are_true_for_the_result_they_are_on():
+    from test_review_1126_shear_torsion import II10_MEMBER
+    r = run(**II10_MEMBER)                                        # §G6 적용(Rc 0.986) · §G3 적용
+    assert _codes_of(r['web_crippling']['scope_notes']) == ['shear.scope.g6_web_with_holes']
+    assert 'shear.scope.g5_web_without_holes' not in _codes_of(r['scope_notes'])
+    assert _codes_of(r['shear']['scope_notes']) == ['shear.scope.g3_web_with_holes']
+    r = run(**dict(II10_MEMBER, hole_within_bearing=True))       # §G6 평가하지 못함
+    assert _codes_of(r['web_crippling']['scope_notes']) == ['shear.scope.g6_not_evaluated_with_holes']
+    r = run(**C4L, Vu=1.0)                                        # §G3 평가하지 못함
+    assert _codes_of(r['shear']['scope_notes']) == ['shear.scope.g3_not_evaluated_with_holes']
+    # 구멍이 없으면 옛 글 그대로
+    r = run(**{k: v for k, v in II10_MEMBER.items() if not k.startswith('hole_')})
+    assert _codes_of(r['web_crippling']['scope_notes']) == ['shear.scope.g5_web_without_holes']
+    assert _codes_of(r['shear']['scope_notes']) == ['shear.scope.g2_1_web_without_holes']
+    # 보강재를 입력했으면 「H2-2 (보강 웹) 검토하지 않음」 을 not_checked 에 두지 않는다
+    st = dict(stiffener_spacing=3.0, stiffener_kind='pair', stiffener_Is=1.0, stiffener_area=1.0, stiffener_Fy=50.0)
+    r = run(**dict(C9, Mu=10.0, Vu=1.0), **st)
+    assert 'member.scope.not_checked_h2_2_stiffened_webs' not in _codes_of(r['not_checked'])
+    r = run(**dict(C9, Mu=10.0, Vu=1.0))
+    assert 'member.scope.not_checked_h2_2_stiffened_webs' in _codes_of(r['not_checked'])
+
+
+def test_h4_location_and_step_values_carry_quantities():
+    from design.checks import QUANTITIES
+    r = run(**C9, torsion_eccentricity=1.05, torsion_span=300.0, torsion_load='uniform', torsion_support='simple')
+    c = checks(r)['member.bending_torsion']
+    loc = c['location']
+    assert loc['z'] == 150.0 and loc['node'] == 14                                       # 옛 맨 수 그대로
+    assert loc['z_q'] == {'symbol': 'z', 'value': 150.0, 'quantity': 'length'}
+    assert loc['node_q']['value'] == 14 and loc['node_q']['quantity'] == 'count'
+    st = [s for s in c['steps'] if 'theta_pp_per_in2' in s][0]
+    assert st['z_q']['quantity'] == 'length' and st['node_q']['quantity'] == 'count'
+    assert st['theta_pp_q']['quantity'] == 'per_area' and 'per_area' in QUANTITIES
+    assert st['theta_pp_q']['value'] == st['theta_pp_per_in2']
+    du = r['display_unrounded']['torsion']
+    assert du['y'] == 150.0 and du['theta_pp'] == st['theta_pp_per_in2']
+    assert r['torsion']['location_q']['theta_pp']['quantity'] == 'per_area'
+    assert abs(r['torsion']['theta_pp'] / du['theta_pp'] - 1) < 1e-5
+
+
+def test_custom_section_with_holes_says_what_to_do():
+    g = _auto_generate_props(dict(C, member_type='flexure'))
+    p = dict(section_type='custom', Fy=33.0, design_method='LRFD', member_type='flexure', Mu=5.0, Lb=0.0,
+             props=g['props'], node=g['node'], elem=g['elem'], hole_shape='circular', hole_depth=1.0)
+    r = design_member(dict(p))
+    codes = _codes_of(r['holes']['reasons'])
+    assert codes == ['member.reason.holes_custom_section_no_web'], codes
+    assert 'template' in str(r['holes']['reasons'][0])
+    r = design_member(dict(p, section_type='sigma'))                 # 이름 있는 다른 형상은 옛 까닭 그대로
+    assert _codes_of(r['holes']['reasons']) == ['member.reason.holes_section_not_covered']

@@ -4901,6 +4901,24 @@ REGISTRY = {
         'template_ko': '(I,avg / Ag)^0.5 — I,avg 는 부록 2 표 2.3.2-1 의 값(구멍이 있는 부재)',
         'params': {},
     },
+    'shear.scope.g6_not_evaluated_with_holes': {
+        'kind': 'scope',
+        'template': '§G5 web crippling — a web hole was entered but §G6 (web crippling of C-section webs with holes) could not be evaluated (see the reason); the strength without holes is only an upper bound and decides only a failure',
+        'template_ko': '§G5 웹 크리플링 — 웹 구멍을 입력했지만 §G6 (구멍이 있는 C 단면 웹의 웹 크리플링)은 평가하지 못함(까닭 참조); 구멍 없는 강도는 상한일 뿐이고 불합격만 가린다',
+        'params': {},
+    },
+    'shear.scope.g3_not_evaluated_with_holes': {
+        'kind': 'scope',
+        'template': '§G2 shear — a web hole was entered but §G3 (shear of C-section webs with holes) could not be evaluated (see the reason); the strength without holes is only an upper bound and decides only a failure',
+        'template_ko': '§G2 전단 — 웹 구멍을 입력했지만 §G3 (구멍이 있는 C 단면 웹의 전단)은 평가하지 못함(까닭 참조); 구멍 없는 강도는 상한일 뿐이고 불합격만 가린다',
+        'params': {},
+    },
+    'member.reason.holes_custom_section_no_web': {
+        'kind': 'reason',
+        'template': 'hand-drawn section ({section_type}) without element roles: the program cannot tell which element is the web, so the hole cannot be placed — build the section from a C, Z or track template (lipped C, lipped Z, track) to evaluate the hole provisions',
+        'template_ko': '손으로 그린 단면({section_type}) — 요소 자리가 없어 어느 요소가 웹인지 프로그램이 알 수 없고 구멍을 놓을 수 없음 — 구멍 조항을 평가하려면 C · Z · 트랙 템플릿(립 C · 립 Z · 트랙)으로 단면을 만드십시오',
+        'params': {'section_type': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'member.ne.design_check_not_evaluated': {
         'kind': 'not_evaluated',
         'template': 'design check {check} — not evaluated: {why}',

@@ -567,6 +567,10 @@ def evaluate(params: dict, families, *, section_type: str, Ag: float, Sf: float 
     for fam in families:
         hc[fam] = {'evaluated': True, 'reasons': []}
     if section_type not in SUPPORTED_SECTIONS:
+        from design.global_buckling import CANONICAL_SECTION_NAMES
+        if section_type not in CANONICAL_SECTION_NAMES and not params.get('element_roles'):
+            # 손으로 그린 단면(custom · 모르는 형식): 할 수 있는 일을 말한다 — 웹을 가려낼 수 없다, 템플릿 단면이 필요하다
+            return _fail(hc, _nt('member.reason.holes_custom_section_no_web', section_type=section_type or 'custom'))
         return _fail(hc, _nt('member.reason.holes_section_not_covered', section_type=section_type))
     if hole['edge_stiffened']:
         return _fail(hc, _nt('member.reason.holes_edge_stiffened'))

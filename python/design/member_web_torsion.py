@@ -307,6 +307,8 @@ def flexure_g6(result: dict, wc: dict, wc_detail: dict | None, params: dict, geo
         du['Pa'] = pn / wc['omega']
     wc[A._DISPLAY_UNROUNDED] = du
     note = _nt('shear.scope.g6_web_with_holes')
+    # 웹 크리플링 묶음의 범위 진술: §G6 을 적용했다(옛 「§G5 구멍 없는 웹 · §G6 평가하지 않음」 은 이 결과에 거짓 — 2026-11-26)
+    wc['scope_notes'] = [note]
     if note not in result.setdefault('scope_notes', []):
         result['scope_notes'].append(note)
     result['spec_sections'].append('G6')
@@ -317,7 +319,8 @@ def g6_not_evaluated(result: dict, wc: dict, why) -> None:
     """§G6 를 평가하지 못함 — G5 · H3 판정 없음(구멍 없는 Pn 은 보수측이 아니라 참고값도 싣지 않는다)."""
     from design import aisi_s100 as A
     result['web_crippling'] = {k: v for k, v in wc.items() if k not in ('Pn', 'phi_Pn', 'Pa', 'Pn_per_web')}
-    result['web_crippling'].update(Pn=None, evaluated=False, reason=why)
+    result['web_crippling'].update(Pn=None, evaluated=False, reason=why,
+                                   scope_notes=[_nt('shear.scope.g6_not_evaluated_with_holes')])
     result['web_crippling'].pop(A._DISPLAY_UNROUNDED, None)
     A._mark_not_evaluated(result, _nt('member.ne.g5_g6_web_crippling_why', why=why),
                           _nt('shear.warning.g6_not_evaluated', why=why))
@@ -495,6 +498,13 @@ def flexure_torsion(result: dict, ck: dict, params: dict, geom: dict, *, Mu, Mnf
                      at_web_flange_junction=rr['at_junction'], e=rr['e'], L=rr['L'], load=rr['load'],
                      a=round(rr['a'], 3), J=rr['J'], Cw=rr['Cw'], omega_n=round(rr['omega_n'], 4))
         du.update(y=rr['y'], a=rr['a'], omega_n=rr['omega_n'])
+        # 지배 자리의 θ'' (1/in², 하중이 Mu 일 때 — Mu 가 없으면 단위 하중) — 2026-11-26 추가: SI 로 바꿀 수 있게 값 · 물리량
+        _scale = (Mu / rr['Mmax_unit']) if Mu and Mu > 0 else 1.0
+        _tpp = rr['phi_pp'] * _scale
+        block['theta_pp'] = float(f'{_tpp:.6g}')
+        du.update(theta_pp=_tpp)
+        block['location_q'] = {'z': q('z', rr['y'], 'length'), 'node': q('node', rr['node'] + 1, 'count'),
+                               'theta_pp': q("θ''", _tpp, 'per_area')}
         for k in ('f_bending', 'f_torsion', 'f_bending_max', 'f_combined'):
             if rr.get(k + '_at_Mu') is not None:
                 block[k] = round(rr[k + '_at_Mu'], 3)
@@ -725,13 +735,16 @@ def _h4_check(ctx, h4):
         scale = (h4['Mu'] / rr['Mmax_unit']) if h4['Mu'] and h4['Mu'] > 0 else 1.0
         wn = q('ωn', rr['omega_n'], 'area', src('section_property', key='omega_n'))
         fb = q('f_bending', rr.get('f_bending_at_Mu', rr['f_bending']), 'stress', src('section_property', key='Ixx'))
-        # θ'' (1/in², 하중이 Mu 일 때) 는 물리량 어휘에 없어 단계의 값이 아니라 꼬리표(theta_pp_per_in2)로 싣는다
+        # θ'' (1/in², 하중이 Mu 일 때): 옛 꼬리표 theta_pp_per_in2 (맨 수) 와 theta_pp_q (물리량 per_area)
         i_ft = tr.add('equation', ("f_torsion = −E ωn θ''(z), θ'' from DG 9 Case 4 (uniform torque e·w)"
                                    if rr['load'] == 'uniform' else
                                    "f_torsion = −E ωn θ''(z), θ'' from DG 9 Case 3 (torque e·P at mid-span)"),
                       inputs=[wn, e, L, tr.ref(i_a)],
                       result=q('f_torsion', rr.get('f_torsion_at_Mu', rr['f_torsion']), 'stress'),
-                      node=rr['node'] + 1, z=rr['y'], theta_pp_per_in2=rr['phi_pp'] * scale)
+                      node=rr['node'] + 1, z=rr['y'], theta_pp_per_in2=rr['phi_pp'] * scale,
+                      # 같은 값의 {symbol, value, quantity} 꼴(2026-11-26 추가 — 화면이 SI 로 바꿀 수 있게; 옛 맨 수 키는 그대로)
+                      node_q=q('node', rr['node'] + 1, 'count'), z_q=q('z', rr['y'], 'length'),
+                      theta_pp_q=q("θ''", rr['phi_pp'] * scale, 'per_area'))
         fbm = q('f_bending_max', rr.get('f_bending_max_at_Mu', rr['f_bending_max']), 'stress',
                 src('section_property', key='Ixx'))
         ins = [fbm, fb, tr.ref(i_ft)]
@@ -751,7 +764,8 @@ def _h4_check(ctx, h4):
                           reference={'capacity': q(cap_sym, h4['cap'], 'moment')})
     v = verdict_from(h4['ratio'])
     verdict_step(tr, dem, tr.ref(i_ds), h4['ratio'], v)
-    loc = {'z': rr['y'], 'node': rr['node'] + 1} if h4['route'] == 'computed' else None
+    loc = ({'z': rr['y'], 'node': rr['node'] + 1, 'z_q': q('z', rr['y'], 'length'),
+            'node_q': q('node', rr['node'] + 1, 'count')} if h4['route'] == 'computed' else None)
     return make_check('member.bending_torsion', design_method=dm, verdict=v, demand=dem,
                       capacity=q(cap_sym, h4['cap'], 'moment'), nominal=q('Mn,H4', h4['Mn_h4'], 'moment'),
                       factor_=factor(dm, ctx['phi'], ctx['omega'], 'φb', 'Ωb'), ratio=h4['ratio'], steps=tr.steps,

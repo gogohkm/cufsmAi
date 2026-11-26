@@ -1103,10 +1103,12 @@ def shear_web_strength(h: float, t: float, Fy: float, *, E: float = E_STEEL, sti
         g3 = g3_reduction(h, t, holes, section_canon)
         out['g3'] = g3
         out['assumptions'].extend(g3['limits'].get('assumptions') or [])
-        out['scope_notes'].append(_nt('shear.scope.g3_web_with_holes'))
         if g3['evaluated']:
+            out['scope_notes'].append(_nt('shear.scope.g3_web_with_holes'))
             out['qs'] = g3['qs']
         else:
+            # 범위 진술은 그 결과에 참이어야 한다 — §G3 을 적용하지 않았다(2026-11-26)
+            out['scope_notes'].append(_nt('shear.scope.g3_not_evaluated_with_holes'))
             reasons.append(g3['reason'])
             out['reference'] = None
     if reasons:
@@ -1211,7 +1213,7 @@ def _web_crippling_holes(h, t, R, N, Fy, theta, support, fastened, section_type,
                 'Pn': None, 'g6': g6, 'warnings': list(res.get('warnings') or []) + [
                     _nt('shear.warning.g6_not_evaluated', why=g6['reason'])],
                 'assumptions': list(res.get('assumptions') or []) + notes,
-                'scope_notes': [scope], 'spec_sections': ['G5', 'G6']}, None
+                'scope_notes': [_nt('shear.scope.g6_not_evaluated_with_holes')], 'spec_sections': ['G5', 'G6']}, None
     Rc = g6['Rc']
     pn0 = det['Pn_final']
     pn = Rc * pn0
