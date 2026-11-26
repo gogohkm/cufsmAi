@@ -157,7 +157,9 @@ async function main() {
       await ctx.drain();
       f = await fields();
       await ctx.shotEl('rs1_opened_245_file', '#input-steel-grade');
-      assert(f.fy === '245' && f.designFy === '245' && f.plasticFy === '245' && f.connFy === '245' && f.disp === 'Fy: 245 MPa',
+      // 기준응력은 위에서 MCP set_load_case 가 정했다 — 그 표지가 파일에 남으므로(.csd 의 referenceStress, 2026-11-25 의 E8)
+      // 다시 열면 화면은 「Fy: 245 MPa」 가 아니라 「기준응력 245 MPa (AI 지정 …)」 로 보인다. 값은 어느 쪽이든 245.
+      assert(f.fy === '245' && f.designFy === '245' && f.plasticFy === '245' && f.connFy === '245' && /^기준응력 245 MPa \(AI 지정/.test(f.disp),
         `a file saved with 245 opens with 245 (${JSON.stringify(f)})`);
       assert(f.fu === '400' && f.designFu === '400', 'Fu 400 kept');
       assert(Math.abs(ctx.panel._model.loadFy * KSI_MPA - 245) < 1e-9, 'host reference stress from the file (245 MPa)');

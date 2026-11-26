@@ -5485,7 +5485,8 @@
                 + (why ? '<div class="hint">' + _esc(userText(why)) + '</div>' : '');
         };
         const val = (v, u) => (typeof v === 'number' ? fmtVal(v, u) + ' ' + unitLabel(u) : '—');
-        const row = (k, v) => '<tr><td>' + k + '</td><td>' + v + '</td></tr>';
+        // props-table 의 마지막 칸은 30px(단면 속성 표의 단위 칸) — 이 묶음의 값 칸은 글이 길어 그 폭을 쓰지 않는다(렌더 시험 web_options W1 · W2)
+        const row = (k, v) => '<tr><td>' + k + '</td><td style="width:auto;white-space:normal;font-size:11px;color:var(--vscode-foreground)">' + v + '</td></tr>';
         const box = (title, rows) => '<div class="web-option-block" style="margin:6px 0;padding:4px 6px;border-left:3px solid var(--vscode-panel-border)">'
             + '<b style="font-size:12px">' + title + '</b><table class="props-table" style="font-size:11px;margin-top:2px">' + rows + '</table></div>';
         let h = '';
@@ -5648,7 +5649,12 @@
                         : fmtVal(rg.Mu, 'moment')) + '</td>'
                     + '<td>' + (rr && !rr.error ? fmtVal(rr.design_strength, 'moment') : '—') + '</td>'
                     + '<td>' + (typeof rg.beta_dist === 'number' ? rg.beta_dist.toFixed(3) : '—') + '</td>'
-                    + '<td>' + (rr && typeof rr.utilization === 'number' ? (rr.utilization * 100).toFixed(1) + '%' : '—') + '</td>'
+                    // 2026-11-26: 구간 결과도 같은 규칙(utils.lengthBoundFailure) — 구멍 없는 강도로도 넘은 구간은 그 상한의 비(＊)
+                    + '<td>' + (() => {
+                        const _rb = rr && _U && typeof _U.lengthBoundFailure === 'function' ? _U.lengthBoundFailure(rr) : null;
+                        if (_rb) { return '<span title="' + _esc(_U.boundFailureText(_rb) + (_rb.governing_check ? ' — ' + _rb.governing_check : '')) + '">' + (_rb.ratio * 100).toFixed(1) + '%＊</span>'; }
+                        return rr && typeof rr.utilization === 'number' ? (rr.utilization * 100).toFixed(1) + '%' : '—';
+                    })() + '</td>'
                     + '<td style="color:' + rv.color + '">' + (rr && rr.error ? '오류: ' + _esc(rr.error) : rv.short) + '</td></tr>';
             });
             summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: Ly ' + unitLabel('length') + ', Mu·설계강도 ' + unitLabel('moment') + '. 굵은 행 = 지배 구간. 랩 구간은 두 부재가 M · V 를 반씩 진다는 가정(아래 가정)으로 부재당 Mu 와 한 부재 강도를 비교. β = §2.3.3.3 뒤틀림 모멘트 구배 계수(하중 분석의 구간 M1/M2 · Ly).</div>';
@@ -5841,7 +5847,8 @@
                 const refOnly = !!(c && c.reference_only);
                 // 2026-11-26: 구멍 없는 강도로도 넘은 항목(fails_without_holes)도 그 까닭을
                 const why = c && (c.length_assumed || c.fails_without_holes) ? (c.reason_ko || (typeof c.reason === 'string' ? c.reason : '')) : '';
-                summaryHtml += '<tr><td>' + _esc(c && c.name) + (why ? '<div class="hint">' + _esc(why) + '</div>' : '') + '</td><td>'
+                // 까닭(긴 글)은 줄을 바꾼다 — 첫 칸은 nowrap 이라 그대로면 비 · 판정 칸이 화면 밖으로 밀린다(렌더 시험 web_options W2)
+                summaryHtml += '<tr><td' + (why ? ' style="white-space:normal"' : '') + '>' + _esc(c && c.name) + (why ? '<div class="hint" style="white-space:normal">' + _esc(why) + '</div>' : '') + '</td><td>'
                     + (c && typeof c.ratio === 'number' ? c.ratio.toFixed(3) + (refOnly ? ' (참고)' : '') : '—') + '</td><td style="color:' + cv.color + '">' + cv.short + '</td></tr>';
             });
             summaryHtml += '</table>';
