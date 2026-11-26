@@ -14,8 +14,18 @@ _WC_SCOPE_NOTE = _nt('shear.scope.g5_web_without_holes')
 def shear_strength(h: float, t: float, Fy: float,
                    E: float = E_STEEL, kv: float = 5.34,
                    web_holes: bool = False,
-                   transverse_stiffeners: bool = False) -> dict:
+                   transverse_stiffeners: bool = False,
+                   stiffener_spacing: float | None = None, stiffener_kind: str | None = None,
+                   stiffener_Is: float | None = None, stiffener_area: float | None = None,
+                   stiffener_Fy: float | None = None,
+                   hole_shape: str | None = None, hole_depth: float | None = None, hole_length: float | None = None,
+                   hole_spacing: float | None = None, hole_corner_radius: float | None = None,
+                   hole_web_offset: float | None = None, section_type: str | None = None) -> dict:
     """웹 전단 강도 (§G2.1, 횡보강재 없음)
+
+    2026-11-26 EB: stiffener_* (§G2.2 · §G2.3(b) · §G4.1) 나 hole_* (§G3) 를 주면 shear_web_strength 의 결과
+    (같은 옛 키 + evaluated · curve · kv · qs · g3 · g4 · reason · reference). 평가하지 못하면 'error' 와 Vn None.
+    §G3 은 C 단면 웹만 — section_type 을 주어야 한다(없으면 평가하지 않음). 아래 옛 설명은 새 입력이 없을 때의 것.
 
     범위 한정: 본 함수는 §G2.1 (구멍·횡보강재 없는 웹)만 구현한다. 횡보강재가 있는
     웹에 대한 §G2.2 곡선(λv≤0.776에서 Vn=Vy)과 §G2.3(b) Eq. G2.3-3/4 의 kv
@@ -28,13 +38,21 @@ def shear_strength(h: float, t: float, Fy: float,
         t: 웹 두께 (in)
         Fy: 항복강도 (ksi)
         kv: 전단좌굴 계수 (기본 5.34, §G2.3(a) 비보강 웹)
-        web_holes: 웹에 구멍이 있으면 True (§G3 미구현 → error)
+        web_holes: 웹에 구멍이 있으면 True — 구멍 자료(hole_*)가 없으면 error (§G3 은 hole_* 로 평가)
         transverse_stiffeners: 횡보강재가 있으면 True (§G2.2 미구현 → §G2.1 로 보수 계산, 경고)
     """
+    _new = {k: v for k, v in dict(
+        stiffener_spacing=stiffener_spacing, stiffener_kind=stiffener_kind, stiffener_Is=stiffener_Is,
+        stiffener_area=stiffener_area, stiffener_Fy=stiffener_Fy, hole_shape=hole_shape, hole_depth=hole_depth,
+        hole_length=hole_length, hole_spacing=hole_spacing, hole_corner_radius=hole_corner_radius,
+        hole_web_offset=hole_web_offset).items() if v is not None}
+    if _new and h > 0 and t > 0 and Fy > 0:
+        return _shear_strength_eb(h, t, Fy, E, transverse_stiffeners, _new, section_type)
     if web_holes:
         return {
-            'error': '§G3 shear strength of webs with holes is not implemented; '
-                     'the qs reduction cannot be applied, so no shear strength is reported.',
+            'error': '§G3 shear strength of webs with holes: the hole data (hole_shape, hole_depth, hole_length, '
+                     'hole_spacing, hole_corner_radius, section_type) were not given, so the qs reduction cannot be '
+                     'applied and no shear strength is reported.',
             'warnings': ['§G3 (webs with holes) not evaluated.'],
             'assumptions': [],
             'scope_notes': [_SHEAR_SCOPE_NOTE],
@@ -613,7 +631,12 @@ def web_crippling(h: float, t: float, R: float, N: float,
                   bearing_case: str | None = None,
                   support_fastener_spacing: float | None = None,
                   d: float | None = None,
-                  web_holes: bool = False) -> dict:
+                  web_holes: bool = False,
+                  hole_shape: str | None = None, hole_depth: float | None = None,
+                  hole_length: float | None = None, hole_spacing: float | None = None,
+                  hole_end_distance: float | None = None, hole_corner_radius: float | None = None,
+                  hole_web_offset: float | None = None, hole_bearing_distance: float | None = None,
+                  hole_within_bearing: bool | None = None) -> dict:
     """웹 크리플링 강도 (§G5, Eq. G5-1 / Eq. G5-2)
 
     (공개 서명은 그대로 — 계산서용 상세가 필요한 호출자는 _web_crippling_detail 을 쓴다.)
@@ -641,7 +664,11 @@ def web_crippling(h: float, t: float, R: float, N: float,
         support_fastener_spacing: For multi-web deck note (>18 in → unfastened)
         d: 단면 바깥 깊이 (in) — Table G5-2 fastened ITF 의 d ≥ 4.5 in 검사용.
            없으면 h + 2(R + t) 로 추정한다.
-        web_holes: 웹에 구멍이 있으면 True (§G6 미구현 → error)
+        web_holes: 웹에 구멍이 있으면 True — 구멍 자료(hole_*)가 없으면 error(강도를 내지 않음)
+        hole_*: §G6 (2026-11-26 EB) — hole_shape ('circular' | 'noncircular'), hole_depth dh, hole_length Lh,
+            hole_spacing (중심 간격), hole_end_distance (부재 끝 → 구멍 가장자리 순거리, ≥ d), hole_corner_radius,
+            hole_web_offset (웹 중앙 → 구멍 중심, 기본 0), hole_bearing_distance x (구멍 → 지압 가장자리),
+            hole_within_bearing (참이면 지압 보강재가 필요 — 평가하지 않음). 주면 Pn = Rc·Pn(G5).
 
     Returns:
         dict: {Pn, phi, omega, equation, ..., within_limits, limit_violations}.
@@ -652,18 +679,28 @@ def web_crippling(h: float, t: float, R: float, N: float,
         h, t, R, N, Fy, theta=theta, support=support, fastened=fastened, section_type=section_type,
         section_family=section_family, flange_condition=flange_condition, Lo=Lo,
         edge_distance=edge_distance, n_webs=n_webs, web_config=web_config, bearing_case=bearing_case,
-        support_fastener_spacing=support_fastener_spacing, d=d, web_holes=web_holes)[0]
+        support_fastener_spacing=support_fastener_spacing, d=d, web_holes=web_holes,
+        holes={k: v for k, v in dict(hole_shape=hole_shape, hole_depth=hole_depth, hole_length=hole_length,
+                                     hole_spacing=hole_spacing, hole_end_distance=hole_end_distance,
+                                     hole_corner_radius=hole_corner_radius, hole_web_offset=hole_web_offset,
+                                     hole_bearing_distance=hole_bearing_distance,
+                                     hole_within_bearing=hole_within_bearing).items() if v is not None} or None)[0]
 
 
 def _web_crippling_detail(h, t, R, N, Fy, theta=90, support='EOF', fastened='fastened',
                           section_type='C', section_family=None, flange_condition=None, Lo=None,
                           edge_distance=None, n_webs=None, web_config='single', bearing_case=None,
-                          support_fastener_spacing=None, d=None, web_holes=False) -> tuple:
+                          support_fastener_spacing=None, d=None, web_holes=False, holes=None) -> tuple:
     """web_crippling 의 본체 — (결과, 계산서용 상세). 상세: 표 행 계수 · 식의 항 · α · 상한."""
+    if holes:
+        return _web_crippling_holes(h, t, R, N, Fy, theta, support, fastened, section_type, section_family,
+                                    flange_condition, Lo, edge_distance, n_webs, web_config, bearing_case,
+                                    support_fastener_spacing, d, holes)
     if web_holes:
         return {
-            'error': '§G6 web crippling of webs with holes is not implemented; the Rc reduction '
-                     'cannot be applied, so no web crippling strength is reported.',
+            'error': '§G6 web crippling of webs with holes: the hole data (hole_shape, hole_depth, hole_spacing, '
+                     'hole_end_distance, hole_bearing_distance, ...) were not given, so the Rc reduction cannot be '
+                     'applied and no web crippling strength is reported.',
             'not_covered': True,
             'Pn': None,
             'warnings': ['§G6 (webs with holes) not evaluated.'],
@@ -749,3 +786,421 @@ def _web_crippling_detail(h, t, R, N, Fy, theta=90, support='EOF', fastened='fas
     detail = {'row': case.get('row'), 'terms': solved.get('terms'), 'alpha': solved.get('alpha'),
               'Pn_interior_cap': solved.get('Pn_interior_cap'), 'Pn_final': solved['Pn']}
     return result, detail
+
+
+# ============================================================
+# §G2.2 · §G2.3(b) · §G4 횡방향 웹 보강재, §G3 · §G6 구멍이 있는 C 단면 웹 — 2026-11-26 EB
+# 원문: 스킬 data/specification/Chapter_G_Shear.md §G2.2 · §G2.3 · §G3 · §G4.1 · §G4.2 · §G6,
+# 예제: Design Manual Example II-10 (C-Section With Openings — §G3 qs, §G6 Rc).
+# ============================================================
+
+from design.notices import joined as _joined  # noqa: E402
+
+# 입력 이름(부재 설계 params 와 단독 도구가 같은 이름을 쓴다). 구멍 이름은 EA 단계(§E · §F 구멍)와 같은 머리 hole_.
+HOLE_KEYS = ('hole_shape', 'hole_depth', 'hole_length', 'hole_spacing', 'hole_end_distance',
+             'hole_corner_radius', 'hole_web_offset', 'hole_bearing_distance', 'hole_within_bearing')
+STIFFENER_KEYS = ('stiffener_spacing', 'stiffener_kind', 'stiffener_Is', 'stiffener_area', 'stiffener_Fy')
+
+# §G4.1 Eq. G4.1-2 의 D: "1.0 for stiffeners furnished in pairs, 1.8 for single-angle stiffeners,
+# 2.4 for single-plate stiffeners"
+STIFFENER_D = {'pair': 1.0, 'single_angle': 1.8, 'single_plate': 2.4}
+# §G4.2: "stiffeners that do not meet the requirements of Section G4.1, such as stamped or rolled-in stiffeners"
+_NONCONFORMING_KINDS = ('nonconforming', 'stamped', 'rolled_in', 'rolledin')
+
+# §G3 · §G6 는 C 단면 웹만(원문 제목 "C-Section Webs With Holes"; §G6 은 Eq. G5-1 + Table G5-2)
+_HOLE_C_SECTIONS = ('C', 'TRACK')
+
+
+def _given(v) -> bool:
+    return v is not None and not (isinstance(v, str) and v.strip() == '')
+
+
+def hole_inputs(src: dict) -> dict | None:
+    """구멍 입력(hole_* · web_holes) — 하나도 없으면 None(구멍 입력 없음 → 옛 결과 그대로)."""
+    got = {k: src.get(k) for k in HOLE_KEYS if _given(src.get(k))}
+    if not got and not src.get('web_holes'):
+        return None
+    return got
+
+
+def stiffener_inputs(src: dict) -> dict | None:
+    """보강재 입력(stiffener_* · transverse_stiffeners) — 하나도 없으면 None."""
+    got = {k: src.get(k) for k in STIFFENER_KEYS if _given(src.get(k))}
+    if not got and not src.get('transverse_stiffeners'):
+        return None
+    return got
+
+
+def _norm_shape(raw) -> str | None:
+    s = str(raw or '').strip().lower().replace('-', '').replace('_', '').replace(' ', '')
+    if s in ('circular', 'circle', 'round'):
+        return 'circular'
+    if s in ('noncircular', 'rectangular', 'slotted', 'oval', 'diamond'):
+        return 'noncircular'
+    return None
+
+
+def _num_or_none(v):
+    try:
+        return float(v) if _given(v) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _hole_geometry(holes: dict) -> dict:
+    """dh · Lh · 모양. 원형은 Lh = dh(지름)."""
+    shape = _norm_shape(holes.get('hole_shape')) if _given(holes.get('hole_shape')) else None
+    dh = _num_or_none(holes.get('hole_depth'))
+    Lh = _num_or_none(holes.get('hole_length'))
+    if shape == 'circular' and dh is not None:
+        Lh = dh
+    return {'shape': shape, 'shape_raw': holes.get('hole_shape'), 'dh': dh, 'Lh': Lh,
+            'spacing': _num_or_none(holes.get('hole_spacing')),
+            'end_distance': _num_or_none(holes.get('hole_end_distance')),
+            'corner_radius': _num_or_none(holes.get('hole_corner_radius')),
+            # EA 의 입력 계약: hole_web_offset = 웹 중앙 → 구멍 중심(주지 않으면 0 = 가운데)
+            'offset': _num_or_none(holes.get('hole_web_offset')),
+            'offset_given': _given(holes.get('hole_web_offset')),
+            'x': _num_or_none(holes.get('hole_bearing_distance')),
+            'within_bearing': holes.get('hole_within_bearing')}
+
+
+def hole_limits(clause: str, h: float, t: float, holes: dict, *, d: float | None = None,
+                section_canon: str | None = None) -> dict:
+    """§G3 (a)–(h) · §G6 (a)–(i) 적용 한계. 돌려주는 dict: geometry, items[{item, key, ok, value, limit}],
+    missing[], reason(알림 — 한계 밖 · 자료 없음의 까닭을 이은 것), ok."""
+    g = _hole_geometry(holes)
+    missing, items, why = [], [], []
+    if section_canon is not None and section_canon not in _HOLE_C_SECTIONS:
+        why.append(_nt('shear.reason.holes_section_not_c', clause=clause, section=section_canon))
+    if g['shape_raw'] is None:
+        missing.append('hole_shape')
+    elif g['shape'] is None:
+        why.append(_nt('shear.reason.holes_shape_unknown', clause=clause, shape=str(g['shape_raw'])))
+    if g['dh'] is None:
+        missing.append('hole_depth')
+    if g['shape'] == 'noncircular' and g['Lh'] is None:
+        missing.append('hole_length')
+    if g['spacing'] is None:
+        missing.append('hole_spacing')
+    if g['shape'] == 'noncircular' and g['corner_radius'] is None:
+        missing.append('hole_corner_radius')
+    g6 = clause == 'G6'
+    if g6 and g['end_distance'] is None:
+        missing.append('hole_end_distance')
+    # 항목 글자: §G3 (a)–(h), §G6 은 (e) 끝 거리가 끼어 (a)–(i)
+    keys = ['dh_h', 'h_t', 'center', 'clear'] + (['end'] if g6 else []) + ['radius', 'noncirc', 'circ', 'min']
+    L = dict(zip(keys, 'abcdefghi'))
+    if missing:
+        why.append(_nt('shear.reason.holes_input_missing', clause=clause, names=', '.join(missing)))
+    notes = [] if g['offset_given'] else [_nt('shear.assumption.hole_offset_defaulted', clause=clause)]
+    if missing or g['shape'] is None:
+        return {'geometry': g, 'items': items, 'missing': missing, 'reason': _joined('; ', why), 'ok': False,
+                'assumptions': notes}
+
+    def rec(key, ok, n, value=None, limit=None):
+        items.append({'item': L[key], 'key': key, 'ok': bool(ok), 'value': value, 'limit': limit})
+        if not ok:
+            why.append(n)
+    dh, Lh = g['dh'], g['Lh']
+    rec('dh_h', dh / h <= 0.7, _nt('shear.reason.holes_dh_over_h', clause=clause, item=L['dh_h'], ratio=dh / h,
+                                    limit=0.7), dh / h, 0.7)
+    rec('h_t', h / t <= 200.0, _nt('shear.reason.holes_h_over_t', clause=clause, item=L['h_t'], ratio=h / t,
+                                    limit=200.0), h / t, 200.0)
+    off = g['offset'] or 0.0
+    rec('center', abs(off) <= 1e-9, _nt('shear.reason.holes_not_centered', clause=clause, item=L['center'], offset=off),
+        off, 0.0)
+    clear = g['spacing'] - Lh
+    rec('clear', clear >= 18.0, _nt('shear.reason.holes_clear_spacing', clause=clause, item=L['clear'], clear=clear,
+                                    limit=18.0), clear, 18.0)
+    if g6:
+        if d is None or not d > 0:
+            why.append(_nt('shear.reason.holes_input_missing', clause=clause, names='d'))
+        else:
+            rec('end', g['end_distance'] >= d, _nt('shear.reason.holes_end_distance', x=g['end_distance'], d=d),
+                g['end_distance'], d)
+    if g['shape'] == 'noncircular':
+        rec('radius', g['corner_radius'] >= 2.0 * t,
+            _nt('shear.reason.holes_corner_radius', clause=clause, item=L['radius'], r=g['corner_radius'],
+                limit=2.0 * t), g['corner_radius'], 2.0 * t)
+        rec('noncirc', dh <= 2.5 and Lh <= 4.5,
+            _nt('shear.reason.holes_noncircular_size', clause=clause, item=L['noncirc'], dh=dh, dh_max=2.5, lh=Lh,
+                lh_max=4.5), dh, 2.5)
+    else:
+        rec('circ', dh <= 6.0, _nt('shear.reason.holes_circular_size', clause=clause, item=L['circ'], dh=dh,
+                                   limit=6.0), dh, 6.0)
+    rec('min', dh > 9.0 / 16.0, _nt('shear.reason.holes_min_depth', clause=clause, item=L['min'], dh=dh,
+                                    limit=9.0 / 16.0), dh, 9.0 / 16.0)
+    return {'geometry': g, 'items': items, 'missing': [], 'reason': _joined('; ', why) if why else None,
+            'ok': not why, 'assumptions': notes}
+
+
+def g3_reduction(h: float, t: float, holes: dict, section_canon: str | None) -> dict:
+    """§G3 qs (Eq. G3-1 – G3-3) — 한계 밖이면 evaluated False 와 까닭. 예제 II-10: Vn = qs·Vn(G2)."""
+    lim = hole_limits('G3', h, t, holes, section_canon=section_canon)
+    out = {'clause': 'G3', 'limits': lim, 'qs': None, 'c': None, 'c_over_t': None, 'evaluated': False,
+           'reason': lim['reason']}
+    if not lim['ok']:
+        return out
+    g = lim['geometry']
+    circ = g['shape'] == 'circular'
+    c = h / 2.0 - g['dh'] / (2.83 if circ else 2.0)       # Eq. G3-2 (원형) / G3-3 (원형 아님)
+    ct = c / t
+    out.update(c=c, c_over_t=ct, c_equation='G3-2' if circ else 'G3-3')
+    if ct >= 54.0:
+        out.update(qs=1.0, qs_equation='c/t ≥ 54', evaluated=True, reason=None)
+    elif ct >= 5.0:
+        out.update(qs=c / (54.0 * t), qs_equation='G3-1', evaluated=True, reason=None)    # Eq. G3-1
+    else:
+        # 원문은 c/t ≥ 54 와 5 ≤ c/t < 54 만 준다 — c/t < 5 는 정하지 않았다
+        out['reason'] = _nt('shear.reason.g3_c_over_t_below_5', ratio=ct, limit=5.0)
+    return out
+
+
+def _kv_stiffened(a_over_h: float) -> tuple:
+    """§G2.3(b) Eq. G2.3-3 / G2.3-4 (= Eq. G4.1-5 / G4.1-6)."""
+    if a_over_h <= 1.0:
+        return 4.00 + 5.34 / a_over_h ** 2, 'G2.3-3'
+    return 5.34 + 4.00 / a_over_h ** 2, 'G2.3-4'
+
+
+def g4_conformance(h: float, t: float, Fy_web: float, stiff: dict, E: float = E_STEEL) -> dict:
+    """§G4.1 요건 — 간격 a/h ≤ [260/(h/t)]² 및 3.0, Is ≥ Is,min (Eq. G4.1-1), Ast ≥ Eq. G4.1-2.
+
+    conforming: True(모두 맞음) / False(하나라도 못 맞춤 또는 §G4.2 의 종류 → g4_2) / None(자료가 모자람).
+    """
+    a = _num_or_none(stiff.get('stiffener_spacing'))
+    kind_raw = stiff.get('stiffener_kind')
+    kind = str(kind_raw or '').strip().lower().replace('-', '_').replace(' ', '_') if _given(kind_raw) else None
+    Is = _num_or_none(stiff.get('stiffener_Is'))
+    As = _num_or_none(stiff.get('stiffener_area'))
+    Fys = _num_or_none(stiff.get('stiffener_Fy'))
+    out = {'a': a, 'kind': kind, 'Is': Is, 'As': As, 'Fy_st': Fys, 'Fy_web': Fy_web, 'h': h, 't': t,
+           'conforming': None, 'reason': None, 'missing': [], 'g4_2': False}
+    if kind is not None and kind not in STIFFENER_D:
+        out.update(conforming=False, g4_2=True,
+                   reason=_nt('shear.reason.stiffener_nonconforming_kind', kind=str(kind_raw)))
+        return out
+    missing = [k for k, v in (('stiffener_spacing', a), ('stiffener_kind', kind), ('stiffener_Is', Is),
+                              ('stiffener_area', As), ('stiffener_Fy', Fys)) if v is None]
+    out['missing'] = missing
+    why = []
+    if a is not None and a > 0 and h > 0 and t > 0 and Fy_web > 0:
+        ah = a / h
+        lim = min((260.0 / (h / t)) ** 2, 3.0)
+        kv, kv_eq = _kv_stiffened(ah)
+        Ismin_raw = 5.0 * h * t ** 3 * (h / a - 0.7 * a / h)           # Eq. G4.1-1
+        floor = (h / 50.0) ** 4
+        Ismin = max(Ismin_raw, floor)
+        X = E * kv / (Fy_web * (h / t) ** 2)
+        Cv1 = 1.53 * X                                                  # Eq. G4.1-3 (when Cv ≤ 0.8)
+        if Cv1 <= 0.8:
+            Cv, cv_eq = Cv1, 'G4.1-3'
+        else:
+            Cv, cv_eq = 1.11 / (h / t) * math.sqrt(E * kv / Fy_web), 'G4.1-4'   # Eq. G4.1-4 (when Cv > 0.8)
+        out.update(a_over_h=ah, a_over_h_limit=lim, spacing_ok=ah <= lim, kv=kv,
+                   kv_equation='G4.1-5' if kv_eq == 'G2.3-3' else 'G4.1-6', Is_min=Ismin, Is_min_raw=Ismin_raw,
+                   Is_floor=floor, Cv=Cv, Cv_equation=cv_eq)
+        if not ah <= lim:
+            why.append(_nt('shear.reason.stiffener_spacing_limit', ratio=ah, limit=lim))
+        if Is is not None and Is < Ismin:
+            why.append(_nt('shear.reason.stiffener_is_short', Is=Is, Ismin=Ismin))
+        if kind is not None and Fys is not None and Fys > 0:
+            Y = Fy_web / Fys
+            D = STIFFENER_D[kind]
+            bracket = ah - ah ** 2 / (ah + math.sqrt(1.0 + ah ** 2))
+            Ast = (1.0 - Cv) / 2.0 * bracket * Y * D * h * t           # Eq. G4.1-2
+            out.update(Y=Y, D=D, Ast_min=Ast, bracket=bracket)
+            if As is not None and As < Ast:
+                why.append(_nt('shear.reason.stiffener_area_short', As=As, Amin=Ast))
+    if why:
+        out.update(conforming=False, g4_2=True, reason=_joined('; ', why))
+    elif missing:
+        out['reason'] = _nt('shear.reason.stiffener_input_missing', names=', '.join(missing))
+    else:
+        out['conforming'] = True
+    return out
+
+
+def _g2_terms(h, t, Fy, E, kv):
+    Vy = 0.60 * Fy * h * t                                                       # Eq. G2.1-5
+    Vcr = (math.pi ** 2 * E * kv) / (12 * (1 - 0.3 ** 2)) * (t / h) ** 2 * h * t  # Eq. G2.3-1, G2.3-2
+    lam = math.sqrt(Vy / Vcr) if Vcr > 0 else float('inf')                       # Eq. G2.1-4
+    return Vy, Vcr, lam
+
+
+def _g21_curve(Vy, Vcr, lam):
+    if lam <= 0.815:
+        return Vy, 'G2.1 (yielding)', 'G2.1-1'
+    if lam <= 1.227:
+        return 0.815 * math.sqrt(Vcr * Vy), 'G2.1 (inelastic)', 'G2.1-2a'
+    return Vcr, 'G2.1 (elastic)', 'G2.1-3a'
+
+
+def _g22_curve(Vy, Vcr, lam):
+    if lam <= 0.776:
+        return Vy, 'G2.2 (yielding)', 'G2.2-1'                                   # Eq. G2.2-1
+    r = (Vcr / Vy) ** 0.4
+    return (1.0 - 0.15 * r) * r * Vy, 'G2.2 (tension field)', 'G2.2-2'          # Eq. G2.2-2
+
+
+def shear_web_strength(h: float, t: float, Fy: float, *, E: float = E_STEEL, stiffeners: dict | None = None,
+                       holes: dict | None = None, section_canon: str | None = None) -> dict:
+    """§G2 의 웹 하나 전단 강도 — 보강재(§G2.2 · §G2.3(b), §G4.1) · 구멍(§G3) 입력이 있을 때.
+
+    evaluated False 면 Vn 은 None 이고 reason 이 까닭이다. 보강재 자료가 없거나 §G4.1 을 못 맞추면
+    §G2.1(kv = 5.34, 보강 없는 웹) 값을 보수측 참고값(reference)으로만 싣는다 — 판정에 쓰지 않는다.
+    구멍(§G3)을 평가하지 못하면 참고값을 싣지 않는다(구멍 없는 값은 보수측이 아니다).
+    """
+    Vy0, Vcr0, lam0 = _g2_terms(h, t, Fy, E, 5.34)
+    Vn0, eq0, eqn0 = _g21_curve(Vy0, Vcr0, lam0)
+    out = {'Vy': Vy0, 'Vcr': Vcr0, 'lambda_v': lam0, 'kv': 5.34, 'kv_equation': 'G2.3(a)', 'curve': 'G2.1',
+           'Vn_g2': Vn0, 'equation': eq0, 'equation_id': eqn0, 'qs': None, 'g3': None, 'g4': None,
+           'evaluated': True, 'reason': None, 'reference': None, 'warnings': [], 'assumptions': [],
+           'scope_notes': [], 'stiffened': stiffeners is not None, 'holes': holes is not None}
+    reasons = []
+    if stiffeners is not None:
+        g4 = g4_conformance(h, t, Fy, stiffeners, E)
+        out['g4'] = g4
+        out['scope_notes'].append(_nt('shear.scope.g2_stiffened_web'))
+        if g4['conforming']:
+            ah = g4['a_over_h']
+            kv, kv_eq = _kv_stiffened(ah)
+            Vy, Vcr, lam = _g2_terms(h, t, Fy, E, kv)
+            if ah <= 2.0:
+                Vn, eq, eqn = _g22_curve(Vy, Vcr, lam)
+                curve = 'G2.2'
+            else:
+                # §G2.2: "spacing not exceeding twice the web depth" — 넘으면 §G2.1 에 §G2.3(b) 의 kv (G2.1 의 kv 는
+                # "determined in accordance with Section G2.3"; Commentary G2.1: 보강재가 있든 없든 적용)
+                Vn, eq, eqn = _g21_curve(Vy, Vcr, lam)
+                curve = 'G2.1'
+                out['assumptions'].append(_nt('shear.assumption.g2_2_spacing_over_2h', ratio=ah))
+            out.update(Vy=Vy, Vcr=Vcr, lambda_v=lam, kv=kv, kv_equation=kv_eq, curve=curve, Vn_g2=Vn,
+                       equation=eq, equation_id=eqn)
+        else:
+            reasons.append(g4['reason'])
+            if g4.get('g4_2'):
+                reasons.append(_nt('shear.reason.stiffener_g4_2'))
+            out['reference'] = {'Vn': Vn0, 'basis': 'G2.1 kv = 5.34', 'conservative': True}
+            out['warnings'].append(_nt('shear.warning.g2_1_conservative_reference'))
+    if holes is not None:
+        g3 = g3_reduction(h, t, holes, section_canon)
+        out['g3'] = g3
+        out['assumptions'].extend(g3['limits'].get('assumptions') or [])
+        out['scope_notes'].append(_nt('shear.scope.g3_web_with_holes'))
+        if g3['evaluated']:
+            out['qs'] = g3['qs']
+        else:
+            reasons.append(g3['reason'])
+            out['reference'] = None
+    if reasons:
+        out.update(evaluated=False, reason=_joined('; ', [r for r in reasons if r is not None]), Vn=None)
+        return out
+    out['Vn'] = out['Vn_g2'] * (out['qs'] if out['qs'] is not None else 1.0)
+    return out
+
+
+def g6_reduction(wc: dict, h: float, t: float, N: float, d: float | None, holes: dict) -> dict:
+    """§G6 Rc — Eq. G6-1(끝 1-플랜지) · Eq. G6-2(내부 1-플랜지), Eq. G5-1 + Table G5-2 일 때만. 예제 II-10.
+
+    "Where a web hole is within the bearing length, a bearing stiffener shall be used." — 구멍이 지압 길이 안이면
+    평가하지 않는다(§F5 지압 보강재는 이 도구가 평가하지 않는다).
+    """
+    out = {'clause': 'G6', 'Rc': None, 'evaluated': False, 'reason': None, 'limits': None, 'equation': None}
+    covered = (wc.get('section_family') == 'c' and wc.get('table') == 'G5-2' and wc.get('equation') == 'G5-1'
+               and wc.get('support') in ('EOF', 'IOF'))
+    if not covered:
+        out['reason'] = _nt('shear.reason.g6_not_covered_case',
+                            case=f"{wc.get('section_family')}, {wc.get('support')}, Eq. {wc.get('equation')}")
+        return out
+    g = _hole_geometry(holes)
+    if g['within_bearing'] is True or (g['x'] is not None and g['x'] < 0):
+        out['reason'] = _nt('shear.reason.g6_hole_within_bearing')
+        return out
+    lim = hole_limits('G6', h, t, holes, d=d)
+    out['limits'] = lim
+    why = [lim['reason']] if lim['reason'] is not None else []
+    if g['x'] is None:
+        why.append(_nt('shear.reason.holes_input_missing', clause='G6', names='hole_bearing_distance'))
+    eof = wc.get('support') == 'EOF'
+    Nmin = 1.0 if eof else 3.0                       # 원문: Eq. G6-1 아래 "N ≥ 1 in.", Eq. G6-2 아래 "N ≥ 3 in."
+    out['N_min'] = Nmin
+    if N < Nmin:
+        why.append(_nt('shear.reason.g6_min_bearing', N=N, limit=Nmin, eq='G6-1' if eof else 'G6-2'))
+    if why:
+        out['reason'] = _joined('; ', why)
+        return out
+    dh, x = g['dh'], g['x']
+    if eof:
+        raw = 1.01 - 0.325 * dh / h + 0.083 * x / h       # Eq. G6-1
+        eq = 'G6-1'
+    else:
+        raw = 0.90 - 0.047 * dh / h + 0.053 * x / h       # Eq. G6-2
+        eq = 'G6-2'
+    out.update(Rc=min(raw, 1.0), Rc_raw=raw, equation=eq, evaluated=True, dh=dh, x=x, N=N, h=h)
+    return out
+
+
+def _shear_strength_eb(h, t, Fy, E, transverse_stiffeners, new: dict, section_type) -> dict:
+    """shear_strength 의 새 입력 길 — 옛 키(Vn · Vy · Vcr · lambda_v · equation · warnings · assumptions · scope_notes) 유지."""
+    from design.global_buckling import canonical_section_name
+    st = stiffener_inputs({**new, 'transverse_stiffeners': transverse_stiffeners})
+    ho = hole_inputs(new)
+    canon = canonical_section_name(section_type) if section_type else None
+    sr = shear_web_strength(h, t, Fy, E=E, stiffeners=st, holes=ho, section_canon=canon)
+    if ho is not None and canon is None:
+        n = _nt('shear.reason.holes_section_not_c', clause='G3', section='(section_type not given)')
+        sr.update(evaluated=False, Vn=None, reference=None, reason=_joined('; ', [r for r in (sr['reason'], n) if r]))
+    out = {'Vn': sr['Vn'], 'Vy': sr['Vy'], 'Vcr': sr['Vcr'], 'lambda_v': sr['lambda_v'], 'equation': sr['equation'],
+           'kv': sr['kv'], 'kv_equation': sr['kv_equation'], 'curve': sr['curve'], 'qs': sr['qs'],
+           'evaluated': sr['evaluated'], 'reason': sr['reason'], 'reference': sr['reference'],
+           'g3': sr['g3'], 'g4': sr['g4'], 'warnings': list(sr['warnings']), 'assumptions': list(sr['assumptions']),
+           'scope_notes': list(sr['scope_notes']), 'spec_sections': ['G2'] + (['G3'] if ho is not None else [])
+           + (['G4'] if st is not None else [])}
+    if not sr['evaluated']:
+        out['error'] = f"Shear strength not evaluated: {sr['reason']}"
+        if ho is not None:
+            out['warnings'].append(_nt('shear.warning.g3_not_evaluated', why=sr['reason']))
+    return out
+
+
+def _web_crippling_holes(h, t, R, N, Fy, theta, support, fastened, section_type, section_family, flange_condition,
+                         Lo, edge_distance, n_webs, web_config, bearing_case, support_fastener_spacing, d, holes):
+    """§G6 — §G5 의 결과에 Rc 를 곱한다(단독 도구). 평가하지 못하면 error 와 Pn None(구멍 없는 값은 보수측이 아니다)."""
+    res, det = _web_crippling_detail(h, t, R, N, Fy, theta=theta, support=support, fastened=fastened,
+                                     section_type=section_type, section_family=section_family,
+                                     flange_condition=flange_condition, Lo=Lo, edge_distance=edge_distance,
+                                     n_webs=n_webs, web_config=web_config, bearing_case=bearing_case,
+                                     support_fastener_spacing=support_fastener_spacing, d=d)
+    if 'error' in res:
+        return res, det
+    dd = d if (d is not None and d > 0) else h + 2.0 * (R + t)
+    g6 = g6_reduction(res, h, t, N, dd, holes)
+    scope = _nt('shear.scope.g6_web_with_holes')
+    notes = list(((g6.get('limits') or {}).get('assumptions') or []))
+    if d is None or not d > 0:
+        notes.append(_nt('member.assumption.g6_depth_estimated', d=dd))
+    if not g6['evaluated']:
+        return {'error': f"§G6 web crippling of webs with holes not evaluated: {g6['reason']}", 'not_covered': True,
+                'Pn': None, 'g6': g6, 'warnings': list(res.get('warnings') or []) + [
+                    _nt('shear.warning.g6_not_evaluated', why=g6['reason'])],
+                'assumptions': list(res.get('assumptions') or []) + notes,
+                'scope_notes': [scope], 'spec_sections': ['G5', 'G6']}, None
+    Rc = g6['Rc']
+    pn0 = det['Pn_final']
+    pn = Rc * pn0
+    out = dict(res)
+    out.update(Pn=round(pn, 3), Pn_per_web=round(Rc * det['terms']['Pn_per_web'], 3) if det.get('terms') else out['Pn_per_web'],
+               Pn_without_holes=round(pn0, 3), Rc=round(Rc, 4), g6=g6,
+               phi_Pn=round(res['phi'] * pn, 3), Pa=round(pn / res['omega'], 3) if res['omega'] > 0 else None,
+               formula=res['formula'] + f"; §G6 Eq. {g6['equation']}: Rc = {Rc:.4f} → Pn = {pn:.3f} kips",
+               scope_notes=[scope], spec_sections=['G5', 'G6'],
+               assumptions=list(res.get('assumptions') or []) + notes)
+    du = dict(res.get('display_unrounded') or {})
+    du.update(Pn=pn, Pn_without_holes=pn0, Rc=Rc, phi_Pn=res['phi'] * pn)
+    if res['omega'] > 0:
+        du['Pa'] = pn / res['omega']
+    out['display_unrounded'] = du
+    det = dict(det, g6=dict(g6, Pn_g5=pn0), Pn_final=pn)
+    return out, det

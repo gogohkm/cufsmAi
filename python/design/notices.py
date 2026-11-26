@@ -411,6 +411,8 @@ _GOV_GROUP = {
     'G5 web crippling': 'member.web_crippling', 'H2 bending + shear': 'member.bending_shear',
     'H3 bending + web crippling': 'member.bending_web_crippling', 'H1.2 axial + bending': 'member.axial_bending',
     'F positive region': 'member.flexure_positive', 'H1.1-1 tension + bending': 'member.tension_bending',
+    # EB(2026-11-26)
+    'H4 bending + torsion': 'member.bending_torsion', 'G4.1 transverse web stiffeners': 'member.web_stiffeners',
 }
 _MODES = {
     'Local Buckling': ('member.label.mode_local', 'local'),

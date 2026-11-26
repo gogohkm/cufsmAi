@@ -47,6 +47,7 @@ TESTED_METHODS = {
     'steel_grades', 'web_crippling', 'analyze_loads', 'calc_deck_stiffness',
     'lap_connection', 'check_lap_length', 'shear_lag', 'block_shear', 'cold_work',
     'flange_curling', 'design_connection', 'design_signature_lengths',
+    'hole_elastic_buckling',      # 2026-11-26 EA — 구멍이 있는 부재의 탄성 좌굴값(test_E6_hole_elastic_buckling_rpc)
 }
 
 
@@ -725,6 +726,27 @@ def test_E5_design_signature_lengths_rpc():
     assert max(ratio) - min(ratio) < 1e-9 and abs(1 / ratio[0] - 30.3) < 0.1   # log10(2000)/100 → 30.3 점/10 배
     e = s.error('design_signature_lengths', {})
     assert 'node' in e['error']
+
+
+
+def test_E6_hole_elastic_buckling_rpc():
+    """2026-11-26 EA: 구멍(웹 천공)의 탄성 좌굴값 — 단면 모델 + hole_* → 순단면 성질, 순단면 국부 FSM(반파장 ≤ Lh),
+    웹 두께 tr 의 뒤틀림 FSM. 부재 검토와 같은 함수(design.holes). 형식 오류는 RPC 오류, 웹을 모르면 평가하지 못함."""
+    s = _srv()
+    sec = s.call('generate_section', {'section_type': 'lippedc',
+                                      'params': {'H': 5.5, 'B': 1.625, 'D': 0.5, 't': 0.0346, 'r': 0.0764}})
+    req = {'node': sec['node'], 'elem': sec['elem'], 'element_roles': sec['element_roles'], 'Fy': 33.0,
+           'section_type': 'C', 'hole_shape': 'noncircular', 'hole_depth': 1.5, 'hole_length': 4.5,
+           'hole_spacing': 24.0, 'families': ['M']}
+    out = s.call('hole_elastic_buckling', req)
+    assert out['evaluated'] is True and out['flexure_evaluated'] is True
+    assert abs(out['Anet'] - (out['A_gross_model'] - 1.5 * 0.0346)) < 1e-6        # 띠 하나(dh t)를 뺀다
+    assert abs(out['Mcrl_h'] / 9.60 - 1) < 0.03 and out['Lcrl_h_M'] < 4.5            # Manual II-14: 9.60 kip-in
+    assert abs(out['Mcrd_h'] / 20.5 - 1) < 0.03                                       # Manual II-14: 20.5 kip-in
+    bad = s.call('hole_elastic_buckling', {**req, 'element_roles': None})
+    assert bad['evaluated'] is False and bad['reasons']
+    e = s.error('hole_elastic_buckling', {**req, 'hole_shape': 'triangle'})
+    assert 'hole_shape' in e['error']
 
 
 # ----------------------------------------------------------------- F5 후속: dsm

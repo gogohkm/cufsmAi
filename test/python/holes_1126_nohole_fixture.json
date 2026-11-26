@@ -1,0 +1,122 @@
+{
+ "comb": {
+  "checks": {
+   "member.applicability.b4": [
+    "pass",
+    null
+   ],
+   "member.axial_bending": [
+    "pass",
+    1.0
+   ],
+   "member.compression.distortional": [
+    "pass",
+    5.2321582221319005
+   ],
+   "member.compression.global": [
+    "pass",
+    6.547678640332301
+   ],
+   "member.compression.local": [
+    "pass",
+    3.4985957040077365
+   ],
+   "member.flexure.distortional": [
+    "pass",
+    13.556611471924988
+   ],
+   "member.flexure.global": [
+    "pass",
+    15.091821388665192
+   ],
+   "member.flexure.local": [
+    "pass",
+    13.026847666776568
+   ]
+  },
+  "interaction": 0.6782,
+  "pass": true,
+  "utilization": 0.6782
+ },
+ "comp": {
+  "Pn": 4.115994945891455,
+  "Pnd": 6.155480261331648,
+  "Pne": 7.7031513415674135,
+  "Pnl": 4.115994945891455,
+  "checks": {
+   "member.applicability.b4": [
+    "pass",
+    null
+   ],
+   "member.compression.distortional": [
+    "pass",
+    5.2321582221319005
+   ],
+   "member.compression.global": [
+    "pass",
+    6.547678640332301
+   ],
+   "member.compression.local": [
+    "pass",
+    3.4985957040077365
+   ]
+  },
+  "design_strength": 3.4985957040077365,
+  "pass": true,
+  "utilization": 0.5717
+ },
+ "comp_blank": {
+  "Pn": 1.7110869470553796,
+  "Pnd": 6.155480261331648,
+  "Pne": 2.008067055287774,
+  "Pnl": 1.7110869470553796,
+  "checks": {
+   "member.applicability.b4": [
+    "pass",
+    null
+   ],
+   "member.compression.distortional": [
+    "pass",
+    5.2321582221319005
+   ],
+   "member.compression.global": [
+    "not_evaluated",
+    null
+   ],
+   "member.compression.local": [
+    "not_evaluated",
+    null
+   ]
+  },
+  "design_strength": 1.4544239049970726,
+  "pass": null,
+  "utilization": 1.3751
+ },
+ "flex": {
+  "Mn": 14.474275185307297,
+  "Mnd": 15.062901635472208,
+  "Mne": 16.768690431850214,
+  "Mnl": 14.474275185307297,
+  "checks": {
+   "member.applicability.b4": [
+    "pass",
+    null
+   ],
+   "member.flexure.distortional": [
+    "pass",
+    13.556611471924988
+   ],
+   "member.flexure.global": [
+    "pass",
+    15.091821388665192
+   ],
+   "member.flexure.local": [
+    "pass",
+    13.026847666776568
+   ]
+  },
+  "design_strength": 13.026847666776568,
+  "pass": true,
+  "utilization": 0.7676
+ }
+}

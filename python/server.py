@@ -619,6 +619,16 @@ def _m_design_signature_lengths(params):
             'rule': out['rule']}
 
 
+def _m_hole_elastic_buckling(params):
+    """구멍이 있는 부재의 탄성 좌굴값(부록 2 · 해설 §2.2.6, 이 프로그램의 FSM) — design.holes.elastic_buckling.
+    부재 검토(aisi_design)는 같은 모델과 hole_* 입력으로 같은 값을 스스로 구한다(호스트는 보이기만)."""
+    from design.holes import elastic_buckling
+    try:
+        return elastic_buckling(dict(params))
+    except ValueError as e:
+        raise RpcError(str(e)) from e
+
+
 def _m_dsm(params):
     node, elem = _node_elem(params, 'dsm')
     _require(params, 'dsm', 'curve', 'fy')
@@ -788,6 +798,7 @@ METHODS = {
     'doubler': _m_doubler,
     'signature_ss': _m_signature_ss,
     'design_signature_lengths': _m_design_signature_lengths,
+    'hole_elastic_buckling': _m_hole_elastic_buckling,
     'dsm': _m_dsm,
     'cutwp': _m_cutwp,
     'energy_recovery': _m_energy_recovery,
