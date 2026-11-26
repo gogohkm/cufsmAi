@@ -239,6 +239,28 @@ const MCP_MAP = {
   'design-wc-edge-distance': ['aisi_design_flexure.wc_edge_distance', 'design_purlin.wc_edge_distance', 'get_web_crippling.edge_distance'],
   'design-wc-nwebs': ['aisi_design_flexure.wc_n_webs', 'design_purlin.wc_n_webs', 'get_web_crippling.n_webs'],
   'design-wc-fastener-spacing': ['aisi_design_flexure.wc_support_fastener_spacing', 'design_purlin.wc_support_fastener_spacing', 'get_web_crippling.support_fastener_spacing'],
+  // 결정 T7(2026-11-26): 웹 구멍 · 횡방향 웹 보강재 · §H4
+  ...(() => {
+    const all = ['aisi_design_flexure', 'aisi_design_combined', 'design_purlin'];
+    const m = {};
+    for (const [id, arg, comp, wc] of [['select-hole-shape', 'hole_shape', true, true], ['design-hole-dh', 'hole_depth', true, true], ['design-hole-Lh', 'hole_length', true, true],
+      ['design-hole-spacing', 'hole_spacing', true, true], ['design-hole-web-offset', 'hole_web_offset', true, true], ['design-hole-end-distance', 'hole_end_distance', false, true],
+      ['design-hole-corner-radius', 'hole_corner_radius', false, true], ['chk-hole-edge-stiffened', 'hole_edge_stiffened', false, false],
+      ['design-hole-bearing-distance', 'hole_bearing_distance', false, true], ['chk-hole-within-bearing', 'hole_within_bearing', false, true]]) {
+      m[id] = [...all.map((t) => `${t}.${arg}`), ...(comp ? [`aisi_design_compression.${arg}`] : []), ...(wc ? [`get_web_crippling.${arg}`] : [])];
+    }
+    for (const [id, arg] of [['select-stiffener-mode', 'transverse_stiffeners'], ['design-stiffener-spacing', 'stiffener_spacing'], ['select-stiffener-kind', 'stiffener_kind'],
+      ['design-stiffener-Is', 'stiffener_Is'], ['design-stiffener-area', 'stiffener_area'], ['design-stiffener-Fy', 'stiffener_Fy']]) {
+      m[id] = all.map((t) => `${t}.${arg}`);
+    }
+    m['select-torsion-mode'] = ['(gate) aisi_design_flexure.torsion_f_bending', '(gate) aisi_design_flexure.torsion_eccentricity'];
+    for (const [id, arg] of [['design-torsion-fb', 'torsion_f_bending'], ['design-torsion-ft', 'torsion_f_torsion'], ['design-torsion-fbmax', 'torsion_f_bending_max'],
+      ['chk-torsion-at-junction', 'torsion_at_web_flange_junction'], ['design-torsion-e', 'torsion_eccentricity'], ['design-torsion-span', 'torsion_span'],
+      ['select-torsion-load', 'torsion_load'], ['select-torsion-support', 'torsion_support']]) {
+      m[id] = ['aisi_design_flexure', 'aisi_design_combined'].map((t) => `${t}.${arg}`);
+    }
+    return m;
+  })(),
   'select-template': ['set_section_template.type'], 'tpl-H': ['set_section_template.H', 'design_lap_connection.d'], 'tpl-B': ['set_section_template.B'],
   'tpl-D': ['set_section_template.D'], 'tpl-t': ['set_section_template.t', 'design_lap_connection.t', 'get_web_crippling.t'], 'tpl-r': ['set_section_template.r'], 'tpl-qlip': ['set_section_template.qlip'],
   'select-bc': ['set_boundary_condition.BC'],

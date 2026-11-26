@@ -1,6 +1,6 @@
 {
  "about": "K2 phase 0 golden — gui-beam. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-25",
+ "recorded": "2026-11-26",
  "entries": [
   {
    "id": "template.engine",
@@ -152,9 +152,9 @@
   {
    "id": "design.shown",
    "expect": "pin",
-   "reason": "2026-11-25 남은 작업 H-A: 결정 R1 · R8 — 설계용 DSM 값은 엔진의 설계 격자(design_signature_lengths: 0.05 D – 100 D 의 101 점, S-S, m = 1, neigs 10)로 준비하고 부재 검토가 그 자리에서 준비한다. 요청 차례에 design_signature_lengths 가 들고 준비 해석의 길이가 바뀌어 Pcrl · Pcrd · Mcrl · Mcrd(와 Se 등 그 값의 강도 · 표시)가 0.2 % 안에서 움직였다. 보기용 조건만 바뀌면 준비된 값을 다시 써서(dsm 줄이 빠짐), 자동 계산 넷에서는 화면이 해석 뒤 준비하지 않아(get_properties · analyze 줄이 빠짐) 호출 차례가 달라졌다",
+   "reason": "2026-11-26 엔진 단계 EA · EB(1ec6c4f): 범위 고지 「holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)」 가 「holes (G3/G6)」(휨) 로 바뀌고 압축에서는 빠졌다 — 구멍의 압축 · 휨은 이제 구현되어 「구멍을 입력하지 않았다」 는 적용 범위 줄로 옮겼다. 수 · 판정은 그대로",
    "value": {
-    "design-summary": "종합 판정: ✗ NG 지배 검토: 휨 + 웹 크리플링\n부모멘트 구간 (-M) — Mu(-)=40.00 kip-in, Lb=60.0000 in, Cb=1\nGlobal\n80.32\nkip-in\nLocal\n70.03\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn = 58.76 kip-in (뒤틀림좌굴)\n106% ✗ NG\n정모멘트 구간 (+M) — Mu(+)=0.00 kip-in, Lb=0.0000 in, Cb=1\nGlobal\n82.78\nkip-in\nLocal\n71.46\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn(+) = 58.76 kip-in (F2.1-3 (yielding))\n검토 비 판정\nF flexure 0.681 OK\nH2 bending + shear 0.681 OK\nG5 web crippling 0.923 OK\nH3 bending + web crippling 1.064 NG\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n• H4 combined bending and torsion\n• H2-2 (shear stiffened webs)\n• weak-axis DSM flexure\n가정\n• §G5/§H3: 웹 크리플링 하중으로 Vu = 1.000 kips 를 썼다 — 반력 · 집중하중(「웹 크리플링 반력 P」(③ 좌굴해석·부재설계 탭))을 주지 않음.\n• §H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).\n적용 범위 (2)",
+    "design-summary": "종합 판정: ✗ NG 지배 검토: 휨 + 웹 크리플링\n부모멘트 구간 (-M) — Mu(-)=40.00 kip-in, Lb=60.0000 in, Cb=1\nGlobal\n80.32\nkip-in\nLocal\n70.03\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn = 58.76 kip-in (뒤틀림좌굴)\n106% ✗ NG\n정모멘트 구간 (+M) — Mu(+)=0.00 kip-in, Lb=0.0000 in, Cb=1\nGlobal\n82.78\nkip-in\nLocal\n71.46\nkip-in\nDistort.\n65.29\nkip-in\n지배\nφMn(+) = 58.76 kip-in (F2.1-3 (yielding))\n검토 비 판정\nF flexure 0.681 OK\nH2 bending + shear 0.681 OK\nG5 web crippling 0.923 OK\nH3 bending + web crippling 1.064 NG\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (G3/G6)\n• H4 combined bending and torsion\n• H2-2 (shear stiffened webs)\n• weak-axis DSM flexure\n가정\n• §G5/§H3: 웹 크리플링 하중으로 Vu = 1.000 kips 를 썼다 — 반력 · 집중하중(「웹 크리플링 반력 P」(③ 좌굴해석·부재설계 탭))을 주지 않음.\n• §H3: 반력 위치 모멘트(wc_M)가 없어 부재 최대 Mu 를 M̄ 으로 사용했습니다(보수측).\n적용 범위 (2)",
     "design-steps": "1) 부모멘트 구간 (-M)\n1. Yield Moment (My)\nMy = Sf × Fy = 1.9347 in³ × 42.79 ksi = 82.78 kip-in\n82.78 kip-in\n2a. Fcre — Lateral-Torsional Buckling (§F2.1.1)\n§F2.1.1\nσey = π²E/(Lb/ry)² = π²×29500 ksi/(60.0 in/0.8831 in)² = 63.08 ksi, σt = (GJ + π²ECw/Lb²)/(Ag×ro²) = 60.60 ksi, Fcre = ro×Ag/Sf×√(σey×σt) = 3.6082 in×0.8134 in²/1.9347 in³×√(63.08 ksi×60.60 ksi) = 93.79 ksi\n93.8 ksi\n2. Global/LTB (Mne)\n§F2.1-4 (inelastic LTB)\n0.56×42.79 ksi < Fcre=93.79 ksi < 2.78×42.79 ksi → Fn = 41.52 ksi (inelastic LTB), Mne = Sf×Fn = 1.9347 in³×41.52 ksi = 80.32 kip-in\n80.32 kip-in\n3. Local Buckling (Mnl)\n§F3.2.1-2\nMcrl = 86.78 kip-in (FSM), λl = √(Mne/Mcrl) = √(80.32 kip-in/86.78 kip-in) = 0.962 → Mnl = 70.03 kip-in\n70.03 kip-in\n4. Distortional Buckling (Mnd)\n§F4.1-2\nMcrd = 85.41 kip-in (FSM), λd = √(My/Mcrd) = √(82.78 kip-in/85.41 kip-in) = 0.984 → Mnd = 65.29 kip-in\n65.29 kip-in\n5. Nominal Strength — DSM (Mn)\n지배\nMn = min(Mne=80.32 kip-in, Mnl=70.03 kip-in, Mnd=65.29 kip-in) = 65.29 kip-in\n65.29 kip-in\n6. Final Nominal Strength (Mn)\n지배\nMn = 65.29 kip-in — Distortional Buckling\n65.29 kip-in\n7. Design Strength (LRFD)\nφMn = 0.9 × 65.29 kip-in = 58.76 kip-in\n58.76 kip-in\n8. Bending + Shear (§H2, Eq. H2-1)\n§H2-1\nMalo = 0.9×Mnℓo = 0.9×71.46 = 64.32 kip-in (§F3, Fn = Fy), Va = 3.62 kips → √((40.00/64.32)² + (1.00/3.62)²) = 0.681\n0.6806\n10. Web crippling (§G5, Table G5-2, G5-1)\n§G5-1\nPn = 1.275 kips (EOF, fastened), φw×Pn = 1.084 kips, P = 1.000 kips → P/Pa = 0.923\n0.9226\n11. Bending + web crippling (§H3, Eq. H3-1)\n§H3-1\n0.91(P/Pn) + M/Mnℓo = 0.714 + 40.00/71.46 = 1.273 > 1.197\n1.2734\n2) 정모멘트 구간 (+M)\n1. Yield Moment (My)\nMy = Sf × Fy = 82.78 kip-in (부모멘트와 동일)\n82.78 kip-in\n2. Global/LTB — Mne(+)\n§F2.1-3 (yielding)\nLb(+) = 0.0000 in, Cb(+) = 1 → Fcre(+) = 1000000 ksi, Fcre ≥ 2.78Fy → Fn = Fy (항복)\n82.78 kip-in\n3. Local Buckling — Mnl(+)\n§F3.2.1\nλl = √(Mne/Mcrl) (국부좌굴 13.7% 감소)\n71.46 kip-in\n4. Distortional Buckling — Mnd(+)\n§F4.1\nλd = √(My/Mcrd)\n65.29 kip-in\n5. Nominal Strength — DSM Mn(+)\n지배\nMn(+) = min(Mne, Mnl, Mnd) = min(82.78, 71.46, 65.29) → Distortional Buckling\n65.29 kip-in\n6. Design Strength — φMn(+)\nφMn(+) = 0.9 × 65.29 = 58.76 kip-in\n58.76 kip-in",
     "design-interaction": "Web Crippling (§G5)\nPn (web crippling) 1.28 kips\nEquation G5-1\nTable G5-2\nSection family c\n지압 하중 Vu 를 썼음 — 반력 P 칸이 비어 있음\nSupport EOF\nFastened fastened\nAssumptions -\nWarnings -\n0.91(P/Pn) 0.714\nM/Mnfo 0.560\nTotal 1.273 ≤ 1.20\n설계강도 (G5) 1.08 kips\nG5 비 P/Pa 0.923\nResult NG\nEq. H3-1",
     "dsm-table-container": "Property Value Half-wavelength Load Factor\nBending (kip-in)\nMy (해석 응력 첫 항복) 83.39\nMcrl (local) 87.05 4.0949 1.0438\nMcrd (distortional) 85.39 22.2300 1.0240\nMcre (global) 1.55 1000.0000 0.0186\nBasis: Mxx analysis (other families not applicable to this curve)\nDetected 2 minima | Min 1: L=4.0949 in, LF=1.0438 | Min 2: L=22.2300 in, LF=1.0240\nMxx — 분류: heuristic",
@@ -168,6 +168,14 @@
       "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. 냉간가공이 꺼져 「§A3.3.2 … 냉간가공 강도증가를 적용할 수 없습니다」 경고 한 줄(과 그 머리)이 빠졌다. 그 사례는 국부 · 뒤틀림이 지배해 냉간가공이 원래 적용되지 않았으므로 수치는 같다."
      },
      "date": "2026-11-25"
+    },
+    {
+     "step": "H(구멍 · 보강재 · 비틀림)",
+     "from": {
+      "expect": "pin",
+      "reason": "2026-11-25 남은 작업 H-A: 결정 R1 · R8 — 설계용 DSM 값은 엔진의 설계 격자(design_signature_lengths: 0.05 D – 100 D 의 101 점, S-S, m = 1, neigs 10)로 준비하고 부재 검토가 그 자리에서 준비한다. 요청 차례에 design_signature_lengths 가 들고 준비 해석의 길이가 바뀌어 Pcrl · Pcrd · Mcrl · Mcrd(와 Se 등 그 값의 강도 · 표시)가 0.2 % 안에서 움직였다. 보기용 조건만 바뀌면 준비된 값을 다시 써서(dsm 줄이 빠짐), 자동 계산 넷에서는 화면이 해석 뒤 준비하지 않아(get_properties · analyze 줄이 빠짐) 호출 차례가 달라졌다"
+     },
+     "date": "2026-11-26"
     }
    ]
   }

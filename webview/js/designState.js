@@ -123,6 +123,36 @@
         ['wcEdgeDistance', 'design-wc-edge-distance', 'length', 'num', _C('webCrippling', 0, 'design')],
         ['wcNWebs', 'design-wc-nwebs', null, 'num', _C('webCrippling', 1, 'design')],
         ['wcFastenerSpacing', 'design-wc-fastener-spacing', 'length', 'num', _C('webCrippling', 0, 'design')],
+        // 2026-11-26 결정 T7: 웹 구멍(천공) · 횡방향 웹 보강재 · 비틀림(§H4) — 설계 탭의 접이 구역 셋. 처음 값은 모두 「없음」.
+        // 「없음」 인 구역은 요청에 아무것도 넣지 않는다(memberWebOptions — 화면 본문과 호스트 본문이 같은 함수). 수 칸은 비면 넣지 않는다(0 이 아니다).
+        // 구멍(§E2.5 · §E3.2.2 · §E4.2 · §F2.2 · §F3.2.2 · §F4.2 · §G3 · §G6)
+        ['holeShape', 'select-hole-shape', null, 'sel', _C('holes', 'none', 'design', { opts: ['none', 'circular', 'noncircular'] })],
+        ['holeDepth', 'design-hole-dh', 'length', 'num', _C('holes', null, 'design')],
+        ['holeLength', 'design-hole-Lh', 'length', 'num', _C('holes', null, 'design')],
+        ['holeSpacing', 'design-hole-spacing', 'length', 'num', _C('holes', null, 'design')],
+        ['holeEndDistance', 'design-hole-end-distance', 'length', 'num', _C('holes', null, 'design')],
+        ['holeWebOffset', 'design-hole-web-offset', 'length', 'num', _C('holes', null, 'design')],
+        ['holeCornerRadius', 'design-hole-corner-radius', 'length', 'num', _C('holes', null, 'design')],
+        ['holeEdgeStiffened', 'chk-hole-edge-stiffened', null, 'chk', _C('holes', false, 'design')],
+        ['holeBearingDistance', 'design-hole-bearing-distance', 'length', 'num', _C('holes', null, 'design')],
+        ['holeWithinBearing', 'chk-hole-within-bearing', null, 'chk', _C('holes', false, 'design')],
+        // 횡방향 웹 보강재(§G2.2 · §G2.3(b) · §G4.1 · §H2-2). 종류 '' = 고르지 않음(보내지 않는다), nonconforming = §G4.2(평가하지 못함)
+        ['stiffenerMode', 'select-stiffener-mode', null, 'sel', _C('stiffeners', 'none', 'design', { opts: ['none', 'present'] })],
+        ['stiffenerSpacing', 'design-stiffener-spacing', 'length', 'num', _C('stiffeners', null, 'design')],
+        ['stiffenerKind', 'select-stiffener-kind', null, 'sel', _C('stiffeners', '', 'design', { opts: ['', 'pair', 'single_angle', 'single_plate', 'nonconforming'] })],
+        ['stiffenerIs', 'design-stiffener-Is', 'inertia', 'num', _C('stiffeners', null, 'design')],
+        ['stiffenerArea', 'design-stiffener-area', 'area', 'num', _C('stiffeners', null, 'design')],
+        ['stiffenerFy', 'design-stiffener-Fy', 'stress', 'num', _C('stiffeners', null, 'design')],
+        // 휨 + 비틀림(§H4) — 직접 입력의 휨 · 조합에만(결정 T6). direct = 길 ①(그 점의 응력), eccentric = 길 ②(편심 하중 · 단순 지지 한 경간)
+        ['torsionMode', 'select-torsion-mode', null, 'sel', _C('torsion', 'none', 'design', { opts: ['none', 'direct', 'eccentric'] })],
+        ['torsionFBending', 'design-torsion-fb', 'stress', 'num', _C('torsion', null, 'design')],
+        ['torsionFTorsion', 'design-torsion-ft', 'stress', 'num', _C('torsion', null, 'design')],
+        ['torsionFBendingMax', 'design-torsion-fbmax', 'stress', 'num', _C('torsion', null, 'design')],
+        ['torsionAtJunction', 'chk-torsion-at-junction', null, 'chk', _C('torsion', false, 'design')],
+        ['torsionEccentricity', 'design-torsion-e', 'length', 'num', _C('torsion', null, 'design')],
+        ['torsionSpan', 'design-torsion-span', 'length', 'num', _C('torsion', null, 'design')],
+        ['torsionLoad', 'select-torsion-load', null, 'sel', _C('torsion', '', 'design', { opts: ['', 'uniform', 'midspan_point'] })],
+        ['torsionSupport', 'select-torsion-support', null, 'sel', _C('torsion', '', 'design', { opts: ['', 'simple'] })],
         // 템플릿 (모델 — 「생성」 때 모델로, 모델이 오면 칸이 따라온다)
         ['templateType', 'select-template', null, 'sel', _M('template', 'design')],
         ['tplH', 'tpl-H', 'length', 'num', _M('template', 'design')],
@@ -603,6 +633,76 @@
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2026-11-26 결정 T7 — 웹 구멍 · 횡방향 웹 보강재 · §H4 비틀림의 엔진 키. 화면 본문(app.js collectDesignRunPayload · 퍼린 단추)과
+    // 호스트 본문(src/case/requests.ts buildDesignRequest · buildPurlinRequest)이 이 한 함수로 만든다(바이트까지 같게).
+    //   get(key)  그 칸의 US 값(빈 칸 null, 선택 · 체크는 그 값)
+    //   scope     'compression' · 'flexure' · 'combined'(직접 입력 설계) · 'purlin'(자동 계산 넷의 구간 검토 — 구멍 · 보강재만, §H4 는
+    //             아니다: 결정 T6). 그 밖(인장 · 접합)은 아무것도 넣지 않는다(엔진: 인장의 구멍은 쓰지 않는다).
+    // 「없음」 인 구역은 아무것도 넣지 않는다 → 처음 값의 본문은 바이트까지 그대로(결정 T4). 빈 수 칸은 넣지 않는다(0 이 아니다) —
+    // 빠진 자료는 엔진이 「평가하지 못함」 과 까닭으로 답한다(보강재 자료 · 간격 · 모서리 반지름 · 지압 거리 · §H4 의 응력 …).
+    // 반환 { data, missing: [{ key, id, unit, label }] } — missing 은 구멍 모양을 골랐는데 빈 dh(비원형이면 Lh 도): 엔진은 그때 결과 전체를
+    // 오류(holes: … is required)로 답하므로 화면 · 호스트가 빈 필수 칸으로 막는다(설계 Fy 와 같은 규칙).
+    // 압축은 §E 의 구멍 키만(모서리 반지름 · 단부 거리 · 지압 거리는 §G3 · §G6 만 읽는다).
+    // ─────────────────────────────────────────────────────────────────────────
+    const WEB_OPTION_SCOPES = ['compression', 'flexure', 'combined', 'purlin'];
+    function memberWebOptions(get, scope) {
+        const data = {};
+        const missing = [];
+        if (!WEB_OPTION_SCOPES.includes(scope)) { return { data, missing }; }
+        const num = (k) => { const v = get(k); return typeof v === 'number' && isFinite(v) ? v : undefined; };
+        const put = (eng, k) => { const v = num(k); if (v !== undefined) { data[eng] = v; } };
+        const need = (eng, k, label) => {
+            const v = num(k);
+            if (v === undefined) { const m = fieldMeta(k); missing.push({ key: k, id: m.id, unit: m.unit, label }); return; }
+            data[eng] = v;
+        };
+        const sel = (k) => { const v = get(k); return typeof v === 'string' ? v : ''; };
+        const shape = sel('holeShape');
+        if (shape === 'circular' || shape === 'noncircular') {
+            const g = scope !== 'compression';      // §G3 · §G6 의 키(휨 · 조합 · 퍼린 구간)
+            data.hole_shape = shape;
+            need('hole_depth', 'holeDepth', '구멍 깊이 dh');
+            // 원형은 Lh = dh(엔진의 규칙) — 칸은 쓰지 않는다(화면도 막아 둔다)
+            if (shape === 'noncircular') { need('hole_length', 'holeLength', '구멍 길이 Lh'); }
+            put('hole_spacing', 'holeSpacing');
+            if (g) { put('hole_end_distance', 'holeEndDistance'); }
+            put('hole_web_offset', 'holeWebOffset');
+            if (g && shape === 'noncircular') { put('hole_corner_radius', 'holeCornerRadius'); }
+            if (get('holeEdgeStiffened') === true) { data.hole_edge_stiffened = true; }
+            if (g) {
+                put('hole_bearing_distance', 'holeBearingDistance');
+                if (get('holeWithinBearing') === true) { data.hole_within_bearing = true; }
+            }
+        }
+        if (scope !== 'compression' && sel('stiffenerMode') === 'present') {
+            data.transverse_stiffeners = true;
+            put('stiffener_spacing', 'stiffenerSpacing');
+            const kind = sel('stiffenerKind');
+            if (kind) { data.stiffener_kind = kind; }
+            put('stiffener_Is', 'stiffenerIs');
+            put('stiffener_area', 'stiffenerArea');
+            put('stiffener_Fy', 'stiffenerFy');
+        }
+        const route = sel('torsionMode');
+        if ((scope === 'flexure' || scope === 'combined') && route === 'direct') {
+            put('torsion_f_bending', 'torsionFBending');
+            put('torsion_f_torsion', 'torsionFTorsion');
+            put('torsion_f_bending_max', 'torsionFBendingMax');
+            if (get('torsionAtJunction') === true) { data.torsion_at_web_flange_junction = true; }
+            // 응력 칸이 모두 비면 아무것도 가지 않는다 — 엔진은 「비틀림 입력 없음」 의 범위 고지(§H4 를 검토하지 않음)를 낸다.
+            // 하나만 있으면 엔진이 빠진 쪽을 밝혀 「평가하지 못함」(member.reason.h4_input_missing)
+        } else if ((scope === 'flexure' || scope === 'combined') && route === 'eccentric') {
+            put('torsion_eccentricity', 'torsionEccentricity');
+            put('torsion_span', 'torsionSpan');
+            const ld = sel('torsionLoad');
+            if (ld) { data.torsion_load = ld; }
+            const sp = sel('torsionSupport');
+            if (sp) { data.torsion_support = sp; }
+        }
+        return { data, missing };
+    }
+
     // Lap 접합부 지배값 선택 (순수함수 — app.js _autoFillLapInputs와 node 테스트 공용).
     // locations[].Mu는 kip-ft. 'Lap end' 위치와 정모멘트(Mu>0)를 제외하고
     // 지점 부모멘트(Mu<0) 중 최대 |Mu|를 선택한다(§4 이슈2A 회귀 고정).
@@ -715,6 +815,8 @@
         collectDesignInputs,
         restoreDesignInputs,
         selectLapGoverningMoment,
+        memberWebOptions,
+        WEB_OPTION_SCOPES,
         // K2-7(D-5): 정확한 값 · 결정 1: 주지 않음
         setShown,
         exactOf,

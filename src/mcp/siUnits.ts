@@ -37,6 +37,7 @@ export const US_TO_SI = {
     spring_disc: KIP_KN / IN_M,                 // 이산 스프링 kip/in → kN/m
     rot_spring_disc: KIP_KN * IN_M,             // 이산 회전 스프링 kip·in/rad → kN·m/rad
     force_per_length: KIP_KN / IN_M,            // 단위 길이당 힘 kip/in → kN/m (검토 항목 계약의 quantity)
+    per_area: 1 / (IN_MM * IN_MM),              // 결정 T7: §H4 길 ② 의 θ'' (rad/in² → rad/mm², 엔진 steps[].theta_pp_per_in2)
 };
 
 export type UnitKey = keyof typeof US_TO_SI;
@@ -65,6 +66,7 @@ export const UNIT_LABEL: Record<UnitKey, { SI: string; US: string }> = {
     spring_disc: { SI: 'kN/m', US: 'kip/in' },
     rot_spring_disc: { SI: 'kN-m/rad', US: 'kip-in/rad' },
     force_per_length: { SI: 'kN/m', US: 'kip/in' },
+    per_area: { SI: '1/mm^2', US: '1/in^2' },
 };
 
 /**
@@ -390,8 +392,15 @@ const DESIGN_CHECK: Table = {
     mirrors: { '*': { digits: 'none' } },
     steps: {
         rounded_to: (_v: any, step: any) => quantityUnit(step?.result?.quantity) ?? 'none',
+        // 결정 T7: §H4 길 ② 의 단계 — 지배 절점(번호), 경간의 위치 z(in), θ''(rad/in²). 엔진이 quantity 없이 싣는 수
+        node: 'none', z: 'length', theta_pp_per_in2: 'per_area',
     },
+    // 결정 T7: §H4 길 ② 의 위치(경간의 z · 지배 절점)
+    location: { z: 'length', node: 'none' },
 };
+
+/** 결정 T7: §G3 · §G6 의 한계 항목(items[].value · limit) — dh/h · h/t 는 비, 나머지(치우침 · 순간격 · 단부 거리 · 반지름 · dh)는 길이 */
+const HOLE_LIMIT_ITEM: SpecFn = (_v: any, item: any) => (item && (item.key === 'dh_h' || item.key === 'h_t') ? 'none' : 'length');
 
 /** 부재 설계(design_member) · 단면 성질 · cutwp · DSM 의 공통 키. */
 const MEMBER_KEYS: Table = {
@@ -450,7 +459,41 @@ const MEMBER_KEYS: Table = {
         limit: (_v: any, parent: any) => (String(parent?.name || '').startsWith('Bolt tension') ? 'force' : 'none'),
     },
     demands: { '*': 'force' },
-    web_crippling: { P: 'force', load: 'force', Pn_interior_cap: 'force' },
+    web_crippling: {
+        P: 'force', load: 'force', Pn_interior_cap: 'force', Pn_without_holes: 'force', Rc: 'none',
+        // 결정 T7: §G6 의 Rc 와 그 한계 (a)–(i) — 한계 항목의 값은 항목에 따라 비(dh/h · h/t) 또는 길이
+        g6: {
+            Rc: 'none', Rc_raw: 'none', dh: 'length', x: 'length', N: 'length', h: 'length', N_min: 'length', Pn_g5: 'force',
+            limits: {
+                geometry: { dh: 'length', Lh: 'length', spacing: 'length', end_distance: 'length', corner_radius: 'length', offset: 'length', x: 'length' },
+                items: { value: HOLE_LIMIT_ITEM, limit: HOLE_LIMIT_ITEM },
+            },
+        },
+    },
+    // 결정 T7: 구멍이 있는 부재(design.holes.summary) — 순단면 성질 · 구멍의 탄성값 · 순단면 강도. 접미 _P 압축 · _M 휨
+    holes: {
+        dh: 'length', Lh: 'length', s: 'length', end_distance: 'length', web_offset: 'length',
+        Anet: 'area', Sfnet: 'modulus', Ixx_net: 'inertia', Izz_net: 'inertia', J_net: 'inertia', Cw_net: 'warping', xo_net: 'length',
+        A_gross_model: 'area', Sf_gross_model: 'modulus', h_web: 'length',
+        Pcrl_h: 'force', Pcrd_h: 'force', Mcrl_h: 'moment', Mcrd_h: 'moment',
+        Lcrl_h_P: 'length', Lcrl_h_M: 'length', Lcrd_P: 'length', Lcrd_M: 'length', tr_P: 'length', tr_M: 'length',
+        Pynet: 'force', Mynet: 'moment', Fy: 'stress',
+    },
+    Pynet: 'force', Mynet: 'moment',
+    // 결정 T7: §H4 휨 + 비틀림(design.member_web_torsion) — 길 ② 의 위치(y · 절점 좌표) · 편심 · 경간 · 비틀림 상수, 그 점의 응력
+    torsion: {
+        R: 'none', R_raw: 'none', y: 'length', node: 'none', node_xz: 'length', e: 'length', L: 'length', a: 'length',
+        J: 'inertia', Cw: 'warping', omega_n: 'area', f_bending: 'stress', f_torsion: 'stress', f_bending_max: 'stress',
+        f_combined: 'stress', rotation_mid: 'none', design_strength: 'moment',
+    },
+    // 결정 T7: §G4.1 횡방향 웹 보강재의 요건
+    web_stiffeners: {
+        a: 'length', Is: 'inertia', As: 'area', Fy_st: 'stress', Fy_web: 'stress', h: 'length', t: 'length',
+        a_over_h: 'none', a_over_h_limit: 'none', kv: 'none', Is_min: 'inertia', Is_min_raw: 'inertia', Is_floor: 'inertia',
+        Cv: 'none', Y: 'none', D: 'none', Ast_min: 'area', bracket: 'none',
+    },
+    // 결정 T7: 전단의 새 칸(§G3 의 c · c/t · qs)
+    shear: { c: 'length', c_over_t: 'none', qs: 'none' },
     h3_interaction: { P_term: 'none', M_term: 'none', limit: 'none' },
     // 엔진이 US 라벨과 함께 내는 조건표 — 값은 라벨의 US 단위 그대로 둔다
     conditions: 'keepUS',
@@ -686,6 +729,12 @@ const SPRING_COLUMNS: ColumnSpec = {
     },
 };
 
+/** 결정 T7(2026-11-26): 웹 구멍(§E2.5 · §F2.2 · §G3 · §G6) · 횡방향 웹 보강재(§G4.1) · §H4 의 수 인자. 압축은 §E 의 것만 */
+const HOLE_INPUT_E: Table = { hole_depth: L, hole_length: L, hole_spacing: L, hole_web_offset: L };
+const HOLE_INPUT: Table = { ...HOLE_INPUT_E, hole_end_distance: L, hole_corner_radius: L, hole_bearing_distance: L };
+const STIFFENER_INPUT: Table = { stiffener_spacing: L, stiffener_Is: 'inertia', stiffener_area: AR, stiffener_Fy: S };
+const TORSION_INPUT: Table = { torsion_f_bending: S, torsion_f_torsion: S, torsion_f_bending_max: S, torsion_eccentricity: L, torsion_span: L };
+
 export const SI_INPUT_TABLES: Record<string, Table> = {
     // K2-5: 검토 상태 도구 — 값의 단위는 키마다 다르고(designState FIELDS) 호스트가 CASE_UNIT_KIND 로 바꾼다. 이 표로는 바꾸지 않는다.
     get_case_inputs: {}, set_case_inputs: {}, run_case_check: {},
@@ -713,26 +762,26 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
     run_plastic_surface: { fy: S },
     run_vibration: { rho: 'density', lengths: L },
     set_springs: { springs: SPRING_COLUMNS },
-    aisi_design_compression: { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Pu: F, Fcre: S },
+    aisi_design_compression: { Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Pu: F, Fcre: S, ...HOLE_INPUT_E },
     aisi_design_flexure: {
         Fy: S, Fu: S, Lb: L, Lb_pos: L, Mu: MOM, Mu_pos: MOM, Vu: F, Fcre: S, kphi: 'rot_stiff',
         dist_Lm: L, wc_N: L, wc_R: L, wc_overhang: L, wc_edge_distance: L, wc_support_fastener_spacing: L,
-        wc_P: F, wc_M: MOM,
+        wc_P: F, wc_M: MOM, ...HOLE_INPUT, ...STIFFENER_INPUT, ...TORSION_INPUT,
     },
     aisi_design_combined: {
         Fy: S, Fu: S, KxLx: L, KyLy: L, KtLt: L, Lb: L, L: L, Pu: F, Vu: F,
-        Mux: MOM, Muy: MOM, May_strength: MOM, Fcre: S, dist_Lm: L,
+        Mux: MOM, Muy: MOM, May_strength: MOM, Fcre: S, dist_Lm: L, ...HOLE_INPUT, ...STIFFENER_INPUT, ...TORSION_INPUT,
     },
     aisi_design_tension: { Fy: S, Fu: S, Tu: F, An: AR },
     aisi_design_connection: CONNECTION_INPUT,
     design_connection: CONNECTION_INPUT,
     get_web_crippling: {
-        h: L, t: L, R: L, N: L, Fy: S, Lo: L, edge_distance: L, support_fastener_spacing: L, d: L,
+        h: L, t: L, R: L, N: L, Fy: S, Lo: L, edge_distance: L, support_fastener_spacing: L, d: L, ...HOLE_INPUT,
     },
     analyze_loads: { ...LOADS_INPUT, Fy: S, Fu: S },
     design_purlin: {
         ...LOADS_INPUT, Fy: S, Fu: S,
-        wc_N: L, wc_R: L, wc_overhang: L, wc_edge_distance: L, wc_support_fastener_spacing: L,
+        wc_N: L, wc_R: L, wc_overhang: L, wc_edge_distance: L, wc_support_fastener_spacing: L, ...HOLE_INPUT, ...STIFFENER_INPUT,
     },
     calc_deck_stiffness: {
         t_panel: L, t_purlin: L, fastener_spacing: L, flange_width: L, k_per_fastener: 'spring_disc', E: S,

@@ -1,10 +1,10 @@
 {
- "generated": "2026-11-23",
+ "generated": "2026-11-26",
  "by": "test/rendered/k3/inventory.js",
  "summary": {
   "validation": {
-   "pushSites": 68,
-   "function": "review.js 227–1196",
+   "pushSites": 69,
+   "function": "review.js 251–1252",
    "byCategory": {
     "A. 단면 입력": 7,
     "B. 재료": 3,
@@ -12,17 +12,17 @@
     "D. 단면 성질": 3,
     "E. 하중 입력": 4,
     "F. 하중 분석": 13,
-    "G. 설계 결과": 21,
+    "G. 설계 결과": 22,
     "G2. Lap 접합부": 6,
     "H. 일관성": 2
    },
    "byEngineRelation": {
-    "engine": 25,
+    "engine": 26,
     "page": 32,
     "dup": 11
    },
    "byDestination": {
-    "host": 65,
+    "host": 66,
     "engine": 3
    },
    "hardCodedThresholds": {
@@ -38,19 +38,19 @@
   },
   "observed": {
    "available": true,
-   "observed": 527,
+   "observed": 520,
    "flows": {
     "empty.SI": 26,
     "empty.US": 26,
     "column.SI": 32,
     "column.US": 32,
-    "beam.US": 43,
-    "beam.SI": 43,
-    "beam.fail.US": 43,
-    "beam.notEvaluated.US": 41,
-    "purlin.US": 55,
-    "purlin.SI": 55,
-    "purlin.uplift.US": 53,
+    "beam.US": 42,
+    "beam.SI": 42,
+    "beam.fail.US": 42,
+    "beam.notEvaluated.US": 40,
+    "purlin.US": 54,
+    "purlin.SI": 54,
+    "purlin.uplift.US": 52,
     "connection.SI": 26,
     "connection.US": 26,
     "connection.afterMcpLap.US": 26
@@ -63,15 +63,17 @@
     "V-F-38 처짐 검토",
     "V-F-39 처짐 검토",
     "V-G-46 §A3.3.2 ↔ §F2.4.2 배타 관계",
-    "V-G-57 조합 검토 (§H1.2)",
-    "V-G-58 DSM 경고 #(i1)",
-    "V-G-60 DSM 추출 경고"
+    "V-G-52 item",
+    "V-G-58 조합 검토 (§H1.2)",
+    "V-G-59 DSM 경고 #(i1)",
+    "V-G-60 isFallback ? 뒤틀림좌굴 해석적 Fallback : 설계 경고 #(i1)",
+    "V-G-61 DSM 추출 경고"
    ]
   }
  },
  "validation": [
   {
-   "line": 248,
+   "line": 272,
    "category": "A. 단면 입력",
    "item": "표 B4.1-1 적용 한계 (엔진)",
    "status": "_b4.verdict === 'not_evaluated' ? 'warn' : (_b4.verdict === 'fail' ? 'fail' : 'pass')",
@@ -98,7 +100,7 @@
    "id": "V-A-01"
   },
   {
-   "line": 257,
+   "line": 281,
    "category": "A. 단면 입력",
    "item": "단면 정의",
    "status": "(model && model.node && model.node.length > 0) ? 'pass' : 'fail'",
@@ -123,7 +125,7 @@
    "id": "V-A-02"
   },
   {
-   "line": 265,
+   "line": 289,
    "category": "A. 단면 입력",
    "item": "두께 (t)",
    "status": "t > 0 ? (t >= toDisplay(THRESHOLDS.t_min.value,'thickness') && t <= toDisplay(THRESHOLDS.t_max.value,'thickness') ? 'pass' : 'warn') : 'fail'",
@@ -155,7 +157,7 @@
    "id": "V-A-03"
   },
   {
-   "line": 277,
+   "line": 301,
    "category": "A. 단면 입력",
    "item": "웹 w/t 비",
    "status": "wt_web <= THRESHOLDS.web_note_b.value ? 'pass' : (wt_web <= _webLim.value ? 'warn' : 'fail')",
@@ -197,7 +199,7 @@
    "id": "V-A-04"
   },
   {
-   "line": 287,
+   "line": 311,
    "category": "A. 단면 입력",
    "item": "플랜지 b/t 비",
    "status": "bt_fl <= THRESHOLDS.flange_bt.value ? 'pass' : 'fail'",
@@ -235,7 +237,7 @@
    "id": "V-A-05"
   },
   {
-   "line": 297,
+   "line": 321,
    "category": "A. 단면 입력",
    "item": "립 d/t 비",
    "status": "dt_lip <= THRESHOLDS.unstiff_dt_note.value ? 'pass' : (dt_lip <= THRESHOLDS.lip_dt.value ? 'warn' : 'fail')",
@@ -272,7 +274,7 @@
    "id": "V-A-06"
   },
   {
-   "line": 307,
+   "line": 331,
    "category": "A. 단면 입력",
    "item": "코너 R/t 비",
    "status": "Rt <= THRESHOLDS.corner_rt.value ? 'pass' : 'fail'",
@@ -308,7 +310,7 @@
    "id": "V-A-07"
   },
   {
-   "line": 321,
+   "line": 345,
    "category": "B. 재료",
    "item": "항복강도 (Fy)",
    "status": "fy > 0 ? (fy < toDisplay(THRESHOLDS.fy_max.value,'stress') ? 'pass' : 'fail') : 'fail'",
@@ -342,7 +344,7 @@
    "id": "V-B-08"
   },
   {
-   "line": 329,
+   "line": 353,
    "category": "B. 재료",
    "item": "Fu/Fy 비",
    "status": "fy > 0 && fu > 0 ? (fu/fy >= THRESHOLDS.fu_fy.value ? 'pass' : 'warn') : 'fail'",
@@ -378,7 +380,7 @@
    "id": "V-B-09"
   },
   {
-   "line": 337,
+   "line": 361,
    "category": "B. 재료",
    "item": "인장강도 (Fu)",
    "status": "fu > 0 ? (fu > fy ? 'pass' : 'fail') : 'fail'",
@@ -409,7 +411,7 @@
    "id": "V-B-10"
   },
   {
-   "line": 364,
+   "line": 388,
    "category": "C. 좌굴 해석",
    "item": "반파장 최솟값",
    "status": "!_lenKnown ? 'fail' : (localOK ? 'pass' : 'warn')",
@@ -444,7 +446,7 @@
    "id": "V-C-11"
   },
   {
-   "line": 380,
+   "line": 404,
    "category": "C. 좌굴 해석",
    "item": "반파장 최댓값",
    "status": "globalOK ? (lenMax >= refLen * THRESHOLDS.len_max_factor.value ? 'pass' : 'warn') : 'fail'",
@@ -480,7 +482,7 @@
    "id": "V-C-12"
   },
   {
-   "line": 389,
+   "line": 413,
    "category": "C. 좌굴 해석",
    "item": "반파장 개수",
    "status": "!_lenKnown ? 'fail' : (lenN >= THRESHOLDS.len_count.value ? 'pass' : 'warn')",
@@ -509,7 +511,7 @@
    "id": "V-C-13"
   },
   {
-   "line": 409,
+   "line": 433,
    "category": "C. 좌굴 해석",
    "item": "경계조건 (BC)",
    "status": "",
@@ -533,14 +535,14 @@
    "id": "V-C-14"
   },
   {
-   "line": 430,
+   "line": 457,
    "category": "C. 좌굴 해석",
    "item": "Load Case 적합성",
    "status": "",
    "outcomes": [],
    "guards": [],
    "criterion": "설계 부재유형과 해석 Load Case가 일치해야 함",
-   "note": "(d && d.purlin_mode === true) ? '' : lcNote",
+   "note": "(d && d.purlin_mode === true) || designFsm ? '' : lcNote",
    "dom": [
     "select-load-case"
    ],
@@ -548,6 +550,7 @@
     "analysisLoadCase"
    ],
    "fields": [
+    "d.dsm_basis_by_family",
     "d.purlin_mode"
    ],
    "numbers": [],
@@ -560,21 +563,22 @@
    "id": "V-C-15"
   },
   {
-   "line": 439,
+   "line": 466,
    "category": "C. 좌굴 해석",
    "item": "해석 실행 여부",
-   "status": "(analysisResult && analysisResult.curve) || (d && d.purlin_mode === true) ? 'pass' : 'fail'",
+   "status": "(analysisResult && analysisResult.curve) || (d && d.purlin_mode === true) || designFsm ? 'pass' : 'fail'",
    "outcomes": [
     "pass",
     "fail"
    ],
    "guards": [],
    "criterion": "설계 전 FSM 좌굴해석 완료 필요",
-   "note": "!analysisResult && !(d && d.purlin_mode === true) ? '③좌굴해석·부재설계 탭의 \"A. 좌굴해석\"에서 해석을 실행하세요.' : ''",
+   "note": "!analysisResult && !(d && d.purlin_mode === true) && !designFsm ? '③좌굴해석·부재설계 탭의 \"A. 좌굴해석\"에서 해석을 실행하세요.' : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
     "analysisResult.curve",
+    "d.dsm_basis_by_family",
     "d.purlin_mode"
    ],
    "numbers": [],
@@ -586,20 +590,21 @@
    "id": "V-C-16"
   },
   {
-   "line": 450,
+   "line": 478,
    "category": "C. 좌굴 해석",
    "item": "DSM 값 추출",
-   "status": "dP || dM || (d && d.purlin_mode === true) ? 'pass' : 'fail'",
+   "status": "dP || dM || (d && d.purlin_mode === true) || designFsm ? 'pass' : 'fail'",
    "outcomes": [
     "pass",
     "fail"
    ],
    "guards": [],
    "criterion": "Pcrl, Pcrd, Mcrl, Mcrd가 시그니처 곡선에서 식별되어야 함",
-   "note": "!dP && !dM && !(d && d.purlin_mode === true) ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : ''",
+   "note": "!dP && !dM && !(d && d.purlin_mode === true) && !designFsm ? '해석을 먼저 실행하세요 — DSM 값은 자동 추출됩니다.' : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
+    "d.dsm_basis_by_family",
     "d.purlin_mode",
     "dP.crd",
     "dP.crl",
@@ -615,7 +620,7 @@
    "id": "V-C-17"
   },
   {
-   "line": 459,
+   "line": 488,
    "category": "C. 좌굴 해석",
    "item": "Mcrl 식별 (국부좌굴)",
    "status": "dM.crl > 0 ? 'pass' : 'warn'",
@@ -645,7 +650,7 @@
    "id": "V-C-18"
   },
   {
-   "line": 478,
+   "line": 507,
    "category": "C. 좌굴 해석",
    "item": "Mcrd 식별 (뒤틀림좌굴)",
    "status": "hasFsmMcrd ? 'pass' : (canFallback ? 'warn' : 'warn')",
@@ -685,7 +690,7 @@
    "id": "V-C-19"
   },
   {
-   "line": 494,
+   "line": 523,
    "category": "D. 단면 성질",
    "item": "성질 계산 여부",
    "status": "p ? 'pass' : 'fail'",
@@ -714,7 +719,7 @@
    "id": "V-D-20"
   },
   {
-   "line": 503,
+   "line": 532,
    "category": "D. 단면 성질",
    "item": "단면계수 Sx",
    "status": "p.Sx > 0 ? 'pass' : 'fail'",
@@ -745,7 +750,7 @@
    "id": "V-D-21"
   },
   {
-   "line": 510,
+   "line": 539,
    "category": "D. 단면 성질",
    "item": "회전반경 rx, rz",
    "status": "p.rx > 0 && p.rz > 0 ? 'pass' : 'warn'",
@@ -777,7 +782,7 @@
    "id": "V-D-22"
   },
   {
-   "line": 535,
+   "line": 564,
    "category": "E. 하중 입력",
    "item": "스팬 길이",
    "status": "",
@@ -804,7 +809,7 @@
    "id": "V-E-23"
   },
   {
-   "line": 544,
+   "line": 573,
    "category": "E. 하중 입력",
    "item": "분담폭 (간격)",
    "status": "spacing > 0 ? (spacing <= toDisplay(THRESHOLDS.spacing_max.value,'length_ft') ? 'pass' : 'warn') : 'fail'",
@@ -836,7 +841,7 @@
    "id": "V-E-24"
   },
   {
-   "line": 552,
+   "line": 581,
    "category": "E. 하중 입력",
    "item": "고정하중 (D)",
    "status": "loadD > 0 ? 'pass' : 'warn'",
@@ -868,7 +873,7 @@
    "id": "V-E-25"
   },
   {
-   "line": 561,
+   "line": 590,
    "category": "E. 하중 입력",
    "item": "중력 활하중/적설하중",
    "status": "hasGravity ? 'pass' : 'warn'",
@@ -899,7 +904,7 @@
    "id": "V-E-26"
   },
   {
-   "line": 576,
+   "line": 605,
    "category": "F. 하중 분석",
    "item": "하중 분석 실행 여부",
    "status": "la ? 'pass' : 'fail'",
@@ -925,7 +930,7 @@
    "id": "V-F-27"
   },
   {
-   "line": 587,
+   "line": 616,
    "category": "F. 하중 분석",
    "item": "최대 Mu",
    "status": "maxMu > 0 ? 'pass' : 'warn'",
@@ -954,7 +959,7 @@
    "id": "V-F-28"
   },
   {
-   "line": 595,
+   "line": 624,
    "category": "F. 하중 분석",
    "item": "전단력 (Vu)",
    "status": "hasVu ? 'pass' : 'warn'",
@@ -983,7 +988,7 @@
    "id": "V-F-29"
   },
   {
-   "line": 608,
+   "line": 637,
    "category": "F. 하중 분석",
    "item": "비지지 길이 Ly (부모멘트)",
    "status": "negRegion.Ly_in > 0 ? 'pass' : 'warn'",
@@ -1014,7 +1019,7 @@
    "id": "V-F-30"
   },
   {
-   "line": 615,
+   "line": 644,
    "category": "F. 하중 분석",
    "item": "모멘트 구배 Cb",
    "status": "negRegion.Cb >= 1.0 ? 'pass' : 'warn'",
@@ -1049,7 +1054,7 @@
    "id": "V-F-31"
   },
   {
-   "line": 624,
+   "line": 653,
    "category": "F. 하중 분석",
    "item": "양력 R 계수 (§I6.2.1)",
    "status": "ap.uplift_R > 0 ? 'pass' : 'warn'",
@@ -1080,7 +1085,7 @@
    "id": "V-F-32"
   },
   {
-   "line": 634,
+   "line": 663,
    "category": "F. 하중 분석",
    "item": "양력 R 계수 (§I6.2.1)",
    "status": "'warn'",
@@ -1111,7 +1116,7 @@
    "id": "V-F-33"
   },
   {
-   "line": 649,
+   "line": 678,
    "category": "F. 하중 분석",
    "item": "비지지 길이 Ly(+) (정모멘트)",
    "status": "posR.Ly_in > 0 ? 'pass' : 'warn'",
@@ -1141,7 +1146,7 @@
    "id": "V-F-34"
   },
   {
-   "line": 656,
+   "line": 685,
    "category": "F. 하중 분석",
    "item": "모멘트 구배 Cb(+)",
    "status": "posR.Cb >= 1.0 ? 'pass' : 'warn'",
@@ -1174,7 +1179,7 @@
    "id": "V-F-35"
   },
   {
-   "line": 678,
+   "line": 707,
    "category": "F. 하중 분석",
    "item": "Lap 끝단 Mu 추출",
    "status": "hasLapEnd ? 'pass' : 'warn'",
@@ -1204,7 +1209,7 @@
    "id": "V-F-36"
   },
   {
-   "line": 709,
+   "line": 738,
    "category": "F. 하중 분석",
    "item": "처짐 — 스팬(idx1)(L/δ)",
    "itemExpr": "'처짐 — 스팬 '+(idx+1)+' (L/δ)'",
@@ -1249,7 +1254,7 @@
    "id": "V-F-37"
   },
   {
-   "line": 719,
+   "line": 748,
    "category": "F. 하중 분석",
    "item": "처짐 검토",
    "status": "'fail'",
@@ -1275,7 +1280,7 @@
    "id": "V-F-38"
   },
   {
-   "line": 727,
+   "line": 756,
    "category": "F. 하중 분석",
    "item": "처짐 검토",
    "status": "'warn'",
@@ -1301,7 +1306,7 @@
    "id": "V-F-39"
   },
   {
-   "line": 741,
+   "line": 770,
    "category": "G. 설계 결과",
    "item": "설계 검토 실행 여부",
    "status": "d ? 'pass' : 'fail'",
@@ -1327,7 +1332,7 @@
    "id": "V-G-40"
   },
   {
-   "line": 753,
+   "line": 782,
    "category": "G. 설계 결과",
    "item": "종합 판정 (엔진)",
    "status": "_statusFromVerdict(_dv, d.utilization)",
@@ -1360,7 +1365,7 @@
    "id": "V-G-41"
   },
   {
-   "line": 775,
+   "line": 804,
    "category": "G. 설계 결과",
    "item": "Mne vs My",
    "status": "_es !== undefined ? _es : (d.Mne != null && d.My != null ? (d.Mne <= mneLimit * 1.01 ? 'pass' : 'warn') : 'fail')",
@@ -1399,7 +1404,7 @@
    "id": "V-G-42"
   },
   {
-   "line": 787,
+   "line": 816,
    "category": "G. 설계 결과",
    "item": "§F2.4.2 Inelastic Reserve",
    "status": "irApplied ? 'pass' : (hasZf ? 'warn' : 'warn')",
@@ -1437,7 +1442,7 @@
    "id": "V-G-43"
   },
   {
-   "line": 807,
+   "line": 836,
    "category": "G. 설계 결과",
    "item": "§I6.2.1 R-factor (양력)",
    "status": "",
@@ -1467,7 +1472,7 @@
    "id": "V-G-44"
   },
   {
-   "line": 850,
+   "line": 879,
    "category": "G. 설계 결과",
    "item": "§A3.3.2 Cold Work (냉간가공)",
    "status": "cwStatus",
@@ -1504,7 +1509,7 @@
    "id": "V-G-45"
   },
   {
-   "line": 860,
+   "line": 889,
    "category": "G. 설계 결과",
    "item": "§A3.3.2 ↔ §F2.4.2 배타 관계",
    "status": "'warn'",
@@ -1538,7 +1543,7 @@
    "id": "V-G-46"
   },
   {
-   "line": 876,
+   "line": 905,
    "category": "G. 설계 결과",
    "item": "Mnl vs Mne (국부좌굴 감소)",
    "status": "_es !== undefined ? _es : (d.Mnl != null ? 'pass' : 'fail')",
@@ -1571,7 +1576,7 @@
    "id": "V-G-47"
   },
   {
-   "line": 890,
+   "line": 919,
    "category": "G. 설계 결과",
    "item": "Mnd vs My (뒤틀림좌굴 감소)",
    "status": "_es !== undefined ? _es : (d.Mnd != null ? 'pass' : 'fail')",
@@ -1604,7 +1609,7 @@
    "id": "V-G-48"
   },
   {
-   "line": 904,
+   "line": 933,
    "category": "G. 설계 결과",
    "item": "정모멘트 φMn(+)",
    "status": "prV.phi_Mn > 0 ? 'pass' : 'warn'",
@@ -1641,7 +1646,7 @@
    "id": "V-G-49"
   },
   {
-   "line": 921,
+   "line": 950,
    "category": "G. 설계 결과",
    "item": "Pnl vs Pne (국부좌굴 감소)",
    "status": "_es !== undefined ? _es : (d.Pnl != null ? 'pass' : 'fail')",
@@ -1674,7 +1679,7 @@
    "id": "V-G-50"
   },
   {
-   "line": 935,
+   "line": 964,
    "category": "G. 설계 결과",
    "item": "Pnd vs Py (뒤틀림좌굴 감소)",
    "status": "_es !== undefined ? _es : (d.Pnd != null ? 'pass' : 'fail')",
@@ -1707,10 +1712,37 @@
    "id": "V-G-51"
   },
   {
-   "line": 953,
+   "line": 982,
+   "category": "G. 설계 결과",
+   "item": "item",
+   "itemExpr": "item",
+   "status": "_es",
+   "outcomes": [],
+   "guards": [
+    "for (const [id, item, criterion, valueOf, onlyVariant] of WEB_OPTION_CHECKS)",
+    "if (d && !d.error)"
+   ],
+   "criterion": "'§' + (_ec.clause || '') + ' — ' + criterion",
+   "note": "_engineNote(_ec)",
+   "dom": [],
+   "stateKeys": [],
+   "fields": [
+    "d.error"
+   ],
+   "numbers": [],
+   "annotation": {
+    "eng": "engine",
+    "ref": "member.applicability.holes · member.shear (clause variant) · member.web_stiffeners · member.web_crippling (web_holes) · member.bending_torsion",
+    "to": "host",
+    "checks": "the engine verdict of each check (not evaluated → warn, not applicable → no item); value = DCR or the verdict + the hole / stiffener / torsion basis"
+   },
+   "id": "V-G-52"
+  },
+  {
+   "line": 1002,
    "category": "G. 설계 결과",
    "item": "이용률 — 부모멘트 (-M)",
-   "status": "_statusFromVerdict(_checkVerdict(d, 'F flexure', _negUtil), _negUtil)",
+   "status": "_negAssumed ? 'warn' : _statusFromVerdict(_checkVerdict(d, 'F flexure', _negUtil), _negUtil)",
    "outcomes": [
     "pass",
     "warn",
@@ -1722,12 +1754,14 @@
     "if (d && !d.error)"
    ],
    "criterion": "Mu(-) / φMn(-) ≤ 1.0",
-   "note": "_negUtil > 1.0 ? '부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요.' : ''",
+   "note": "_negAssumed ? '길이(Lb)를 넣고 다시 검토하세요 — 가정한 길이의 비는 통과도 불합격도 아닙니다.' : (_negUtil > 1.0 ? '부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요.' : '')",
    "dom": [],
    "stateKeys": [],
    "fields": [
     "d.error",
+    "d.length_assumed",
     "d.member_type",
+    "d.pass",
     "d.utilization"
    ],
    "numbers": [],
@@ -1737,10 +1771,10 @@
     "to": "host",
     "checks": "F flexure verdict and ratio"
    },
-   "id": "V-G-52"
+   "id": "V-G-53"
   },
   {
-   "line": 960,
+   "line": 1010,
    "category": "G. 설계 결과",
    "item": "Lb(-) / Cb(-) (부모멘트)",
    "status": "_negLb2 > 0 ? 'pass' : 'warn'",
@@ -1779,10 +1813,10 @@
     ],
     "defect": "reads the current fields, not the Lb/Cb the result used (purlin regions have their own) — stale after an edit"
    },
-   "id": "V-G-53"
+   "id": "V-G-54"
   },
   {
-   "line": 970,
+   "line": 1025,
    "category": "G. 설계 결과",
    "item": "이용률 (DCR)",
    "status": "_uInvalid ? (d.pass === false ? 'fail' : 'warn') : _statusFromVerdict(_v3(d), d.utilization)",
@@ -1797,11 +1831,12 @@
     "if (d && !d.error)"
    ],
    "criterion": "DCR ≤ 100%",
-   "note": "d.utilization > 1.0 ? '과응력 — 설계 요구사항 미충족.' : ''",
+   "note": "d.utilization > 1.0 && !(_lenAssumed && !(d.pass === false)) ? '과응력 — 설계 요구사항 미충족.' : ''",
    "dom": [],
    "stateKeys": [],
    "fields": [
     "d.error",
+    "d.length_assumed",
     "d.pass",
     "d.utilization",
     "d.utilization_valid"
@@ -1813,10 +1848,10 @@
     "to": "host",
     "checks": "engine verdict with utilization"
    },
-   "id": "V-G-54"
+   "id": "V-G-55"
   },
   {
-   "line": 985,
+   "line": 1041,
    "category": "G. 설계 결과",
    "item": "이용률 — 정모멘트 (+M)",
    "status": "_posR.utilization != null ? _statusFromVerdict(_v3(_posR), _posR.utilization) : 'warn'",
@@ -1847,10 +1882,10 @@
     "to": "host",
     "checks": "positive region verdict; no Mu(+) → warn"
    },
-   "id": "V-G-55"
+   "id": "V-G-56"
   },
   {
-   "line": 997,
+   "line": 1053,
    "category": "G. 설계 결과",
    "item": "Lb(+) / Cb(+) (정모멘트)",
    "status": "",
@@ -1877,10 +1912,10 @@
     "to": "host",
     "checks": "K3-6: the engine positive-region verdict (no 2.78·Fy re-check); an unbounded Fcre prints ∞ (D5)"
    },
-   "id": "V-G-56"
+   "id": "V-G-57"
   },
   {
-   "line": 1012,
+   "line": 1068,
    "category": "G. 설계 결과",
    "item": "조합 검토 (§H1.2)",
    "status": "_statusFromVerdict(_v3(d.interaction), d.interaction.total)",
@@ -1909,10 +1944,10 @@
     "to": "host",
     "checks": "interaction verdict"
    },
-   "id": "V-G-57"
+   "id": "V-G-58"
   },
   {
-   "line": 1025,
+   "line": 1081,
    "category": "G. 설계 결과",
    "item": "DSM 경고 #(i1)",
    "itemExpr": "'DSM 경고 #'+(i+1)",
@@ -1940,10 +1975,10 @@
     "to": "host",
     "checks": "each engine DSM warning → warn"
    },
-   "id": "V-G-58"
+   "id": "V-G-59"
   },
   {
-   "line": 1041,
+   "line": 1097,
    "category": "G. 설계 결과",
    "item": "isFallback ? 뒤틀림좌굴 해석적 Fallback : 설계 경고 #(i1)",
    "itemExpr": "isFallback ? '뒤틀림좌굴 해석적 Fallback' : '설계 경고 #'+(i+1)",
@@ -1971,10 +2006,10 @@
     "to": "host",
     "checks": "each engine warning → warn (\"뒤틀림좌굴 해석적 Fallback\" when it names §2.3.3.3 / §2.3.1.3; positive-region NG warnings skipped)"
    },
-   "id": "V-G-59"
+   "id": "V-G-60"
   },
   {
-   "line": 1053,
+   "line": 1109,
    "category": "G. 설계 결과",
    "item": "DSM 추출 경고",
    "status": "'warn'",
@@ -2000,10 +2035,10 @@
     "to": "host",
     "checks": "warn"
    },
-   "id": "V-G-60"
+   "id": "V-G-61"
   },
   {
-   "line": 1077,
+   "line": 1133,
    "category": "G2. Lap 접합부",
    "item": "Lap 구간 휨강도 (§F3, 한 부재)",
    "status": "_statusFromVerdict(_v3(lapDesign), lapDesign.utilization)",
@@ -2036,10 +2071,10 @@
     "to": "host",
     "checks": "design_lap verdict (one member — the purlin lap region; V9a-07)"
    },
-   "id": "V-G2-61"
+   "id": "V-G2-62"
   },
   {
-   "line": 1095,
+   "line": 1151,
    "category": "G2. Lap 접합부",
    "item": "Lap 길이 (지점(idx1)) §I6.2.1(g)",
    "itemExpr": "'Lap 길이 (지점 ' + (idx + 1) + ') §I6.2.1(g)'",
@@ -2079,10 +2114,10 @@
     ],
     "defect": "uses the template H field and the load-analysis laps, not the lap check of the lap result"
    },
-   "id": "V-G2-62"
+   "id": "V-G2-63"
   },
   {
-   "line": 1113,
+   "line": 1169,
    "category": "G2. Lap 접합부",
    "item": "Lap 패스너 전단 (DCR)",
    "status": "_fg ? (_engineStatus(_fg) || 'pass') === 'pass' ? _statusFromVerdict(_v3(true), _lrFast) : _engineStatus(_fg) : (_lrFast != null ? _statusFromVerdict(_ratioVerdict(_lrFast, _lr.pass === true), _lrFast) : 'warn')",
@@ -2118,10 +2153,10 @@
     "to": "host",
     "checks": "K3-6 (D4): the engine lap.fastener_group verdict (was \"not checked\" unless the whole lap passed)"
    },
-   "id": "V-G2-63"
+   "id": "V-G2-64"
   },
   {
-   "line": 1133,
+   "line": 1189,
    "category": "G2. Lap 접합부",
    "item": "Lap 휨강도 DCR (2겹 §F3/F4/H2)",
    "status": "_st",
@@ -2151,10 +2186,10 @@
     "to": "host",
     "checks": "the verdicts of lap.flexure.local / lap.flexure.distortional / lap.bending_shear (V9a-03 — not flexure_checked alone); value flexure_dcr_governing"
    },
-   "id": "V-G2-64"
+   "id": "V-G2-65"
   },
   {
-   "line": 1143,
+   "line": 1199,
    "category": "G2. Lap 접합부",
    "item": "Lap 접합부 종합 판정",
    "status": "_statusFromVerdict(_v3(_lr), null)",
@@ -2184,10 +2219,10 @@
     "to": "host",
     "checks": "lap three-state verdict"
    },
-   "id": "V-G2-65"
+   "id": "V-G2-66"
   },
   {
-   "line": 1154,
+   "line": 1210,
    "category": "G2. Lap 접합부",
    "item": "Lap 접합부 설계 실행 여부",
    "status": "'fail'",
@@ -2213,10 +2248,10 @@
     "to": "host",
     "checks": "laps + flexure result but no lap result → fail"
    },
-   "id": "V-G2-66"
+   "id": "V-G2-67"
   },
   {
-   "line": 1175,
+   "line": 1231,
    "category": "H. 일관성",
    "item": "Fy 일관성 (해석 vs 설계)",
    "status": "_fyOk ? 'pass' : 'warn'",
@@ -2247,10 +2282,10 @@
     "to": "host",
     "checks": "K3-6 (D6): the analysis reference stress (model loadFy) against the design Fy, in US units — warn when they differ"
    },
-   "id": "V-H-67"
+   "id": "V-H-68"
   },
   {
-   "line": 1186,
+   "line": 1242,
    "category": "H. 일관성",
    "item": "해석 최신성",
    "status": "env.analysisCurrent === false ? 'fail' : 'pass'",
@@ -2279,14 +2314,14 @@
     "to": "host",
     "checks": "K3-6 (D6): fail when the host says the analysis is stale (was always pass)"
    },
-   "id": "V-H-68"
+   "id": "V-H-69"
   }
  ],
  "report": [
   {
    "name": "buildReportDoc",
-   "line": 1591,
-   "lines": 28,
+   "line": 1762,
+   "lines": 32,
    "heads": [],
    "dom": [],
    "stateKeys": [],
@@ -2304,12 +2339,14 @@
     "_docDesignInput",
     "_docLoadAnalysis",
     "_docDesignCalc",
-    "_docSummary"
+    "_docSummary",
+    "_checkBlocks",
+    "_noticeBlocks"
    ]
   },
   {
    "name": "_docSection",
-   "line": 1286,
+   "line": 1342,
    "lines": 29,
    "heads": [],
    "dom": [],
@@ -2338,7 +2375,7 @@
   },
   {
    "name": "_docDsm",
-   "line": 1316,
+   "line": 1372,
    "lines": 21,
    "heads": [],
    "dom": [],
@@ -2371,7 +2408,7 @@
   },
   {
    "name": "_docBuckling",
-   "line": 1338,
+   "line": 1394,
    "lines": 20,
    "heads": [],
    "dom": [],
@@ -2386,8 +2423,8 @@
   },
   {
    "name": "_docDesignInput",
-   "line": 1359,
-   "lines": 50,
+   "line": 1415,
+   "lines": 80,
    "heads": [],
    "dom": [
     ".span-tbl-lapl",
@@ -2404,8 +2441,8 @@
   },
   {
    "name": "_docLoadAnalysis",
-   "line": 1410,
-   "lines": 92,
+   "line": 1497,
+   "lines": 99,
    "heads": [],
    "dom": [],
    "stateKeys": [],
@@ -2436,6 +2473,7 @@
     "la.gravity",
     "la.input_loads_plf",
     "la.laps_per_support",
+    "la.load_combination_standard",
     "la.spans_ft",
     "la.supports",
     "la.uplift",
@@ -2449,7 +2487,7 @@
   },
   {
    "name": "_checkBlocks",
-   "line": 1504,
+   "line": 1598,
    "lines": 5,
    "heads": [],
    "dom": [],
@@ -2460,7 +2498,7 @@
   },
   {
    "name": "_noticeBlocks",
-   "line": 1509,
+   "line": 1603,
    "lines": 10,
    "heads": [],
    "dom": [],
@@ -2471,8 +2509,8 @@
   },
   {
    "name": "_docDesignCalc",
-   "line": 1520,
-   "lines": 39,
+   "line": 1676,
+   "lines": 40,
    "heads": [],
    "dom": [],
    "stateKeys": [],
@@ -2492,13 +2530,15 @@
    ],
    "derived": [],
    "calls": [
-    "_checkBlocks"
+    "_checkBlocks",
+    "_docWebOptions",
+    "_noticeBlocks"
    ]
   },
   {
    "name": "_docSummary",
-   "line": 1560,
-   "lines": 29,
+   "line": 1722,
+   "lines": 38,
    "heads": [],
    "dom": [],
    "stateKeys": [],
@@ -2530,7 +2570,7 @@
   },
   {
    "name": "buildBucklingDoc",
-   "line": 1621,
+   "line": 1796,
    "lines": 27,
    "heads": [],
    "dom": [],

@@ -102,13 +102,65 @@ const COMP_READS = ['KxLx', 'KyLy', 'KtLt', 'Pu'];
 const FLEX_READS = ['Lb', 'Cb', 'Mux', 'Vu', 'designLbPos', 'designCbPos', 'designMxPos', 'wcP', 'wcSupport', 'chkRFactor', 'rValue',
     'chkBetaDist', 'distM1M2', 'distLm', ...Object.values(WC), ...Object.values(USE)];
 
+// 결정 T7(2026-11-26): 웹 구멍 · 횡방향 웹 보강재 · §H4 — 엔진 인자 → 검토 상태의 칸(화면 칸과 같은 키). 계산은 그 칸으로 만든 화면 단추의
+// 본문(designState.memberWebOptions)이다 — 구역이 「없음」 이면 칸에 써도 본문에 가지 않으므로, 인자가 그 구역을 연다(아래 webArgs).
+const HOLE_ARGS: Record<string, string> = { hole_depth: 'holeDepth', hole_length: 'holeLength', hole_spacing: 'holeSpacing',
+    hole_end_distance: 'holeEndDistance', hole_web_offset: 'holeWebOffset', hole_corner_radius: 'holeCornerRadius',
+    hole_edge_stiffened: 'holeEdgeStiffened', hole_bearing_distance: 'holeBearingDistance', hole_within_bearing: 'holeWithinBearing' };
+const STIFFENER_ARGS: Record<string, string> = { stiffener_spacing: 'stiffenerSpacing', stiffener_kind: 'stiffenerKind',
+    stiffener_Is: 'stiffenerIs', stiffener_area: 'stiffenerArea', stiffener_Fy: 'stiffenerFy' };
+const TORSION_DIRECT_ARGS: Record<string, string> = { torsion_f_bending: 'torsionFBending', torsion_f_torsion: 'torsionFTorsion',
+    torsion_f_bending_max: 'torsionFBendingMax', torsion_at_web_flange_junction: 'torsionAtJunction' };
+const TORSION_ECCENTRIC_ARGS: Record<string, string> = { torsion_eccentricity: 'torsionEccentricity', torsion_span: 'torsionSpan',
+    torsion_load: 'torsionLoad', torsion_support: 'torsionSupport' };
+const HOLE_READS = ['holeShape', ...Object.values(HOLE_ARGS)];
+const STIFFENER_READS = ['stiffenerMode', ...Object.values(STIFFENER_ARGS)];
+const TORSION_READS = ['torsionMode', ...Object.values(TORSION_DIRECT_ARGS), ...Object.values(TORSION_ECCENTRIC_ARGS)];
+
+/**
+ * 결정 T7: 구멍 · 보강재 · §H4 의 인자(받은 것만 — 합치기). parts: 그 도구가 받는 구역.
+ * - hole_shape('none' | 'circular' | 'noncircular') → holeShape. 다른 hole_* 만 받았는데 화면의 구역이 「없음」 이면 계산하지 않는다
+ *   (어느 모양인지 모른다 — 엔진도 hole_shape 없는 구멍 입력을 오류로 답한다).
+ * - transverse_stiffeners → stiffenerMode(true 있음 · false 없음). stiffener_* 를 받으면(transverse_stiffeners: false 가 아니면) 「있음」 —
+ *   엔진도 보강재 자료를 받으면 보강재가 있는 웹으로 본다.
+ * - torsion_f_* → torsionMode 'direct', 그것 없이 torsion_eccentricity · span · load · support → 'eccentric'(둘 다 받으면 직접 — 엔진의 규칙).
+ */
+function webArgs(a: any, w: McpWrite, used: Set<string>, cur: Cur, parts: { holes?: boolean; stiffeners?: boolean; torsion?: boolean }): void {
+    const given = (t: Record<string, string>) => Object.keys(t).filter((k) => a[k] !== undefined);
+    if (parts.holes) {
+        w.reads.push(...HOLE_READS);
+        if (a.hole_shape !== undefined) { used.add('hole_shape'); put(w, 'merge', 'holeShape', a.hole_shape, 'hole_shape'); }
+        const hs = given(HOLE_ARGS);
+        direct(a, w, HOLE_ARGS, used);
+        const shapeNow = a.hole_shape !== undefined ? a.hole_shape : (cur ? cur.inputs.holeShape : 'none');
+        if (hs.length && !(shapeNow === 'circular' || shapeNow === 'noncircular')) {
+            w.skipped.push({ arg: hs.join(', '), reason: "구멍 모양(hole_shape 'circular' · 'noncircular')을 함께 주어야 한다 — 화면의 「웹 구멍」 구역이 「없음」 이라 그 값으로는 구멍을 계산하지 않는다" });
+        }
+    }
+    if (parts.stiffeners) {
+        w.reads.push(...STIFFENER_READS);
+        const ss = given(STIFFENER_ARGS);
+        direct(a, w, STIFFENER_ARGS, used);
+        if (a.transverse_stiffeners !== undefined) {
+            used.add('transverse_stiffeners');
+            put(w, 'merge', 'stiffenerMode', a.transverse_stiffeners === true ? 'present' : 'none', 'transverse_stiffeners');
+        } else if (ss.length) { w.merge.stiffenerMode = 'present'; }
+    }
+    if (parts.torsion) {
+        w.reads.push(...TORSION_READS);
+        const da = given(TORSION_DIRECT_ARGS), ea = given(TORSION_ECCENTRIC_ARGS);
+        direct(a, w, { ...TORSION_DIRECT_ARGS, ...TORSION_ECCENTRIC_ARGS }, used);
+        if (da.length) { w.merge.torsionMode = 'direct'; } else if (ea.length) { w.merge.torsionMode = 'eccentric'; }
+    }
+}
+
 /** 계약 §6.4: 「준 0 은 정말 0」 의 진술 → 검토 상태의 그 칸(화면 칸과 같은 키) — 받았을 때만(합치기) */
 function zds(a: any, w: McpWrite, used: Set<string>): void {
     used.add('zero_demand_stated');
     if (a.zero_demand_stated !== undefined) { put(w, 'merge', 'designZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated'); }
 }
 
-const memberFlexure: Mapper = (a, w) => {
+const memberFlexure: Mapper = (a, w, cur) => {
     const used = new Set<string>();
     zds(a, w, used);
     material(a, w, used);
@@ -128,20 +180,22 @@ const memberFlexure: Mapper = (a, w) => {
             if (a.span_type !== undefined) { w.mcpOnly.span_type = a.span_type; } else { w.unset.push('span_type'); }
         }
     }
+    webArgs(a, w, used, cur, { holes: true, stiffeners: true, torsion: true });
     rest(a, w, used);
 };
 
-const memberCompression: Mapper = (a, w) => {
+const memberCompression: Mapper = (a, w, cur) => {
     const used = new Set<string>();
     zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'compression';
     w.reads.push(...MATERIAL_READS, ...COMP_READS, 'designZeroDemandStated');
     direct(a, w, { KxLx: 'KxLx', KyLy: 'KyLy', KtLt: 'KtLt', Pu: 'Pu' }, used);
+    webArgs(a, w, used, cur, { holes: true });
     rest(a, w, used);
 };
 
-const memberCombined: Mapper = (a, w) => {
+const memberCombined: Mapper = (a, w, cur) => {
     const used = new Set<string>();
     zds(a, w, used);
     material(a, w, used);
@@ -151,6 +205,7 @@ const memberCombined: Mapper = (a, w) => {
     direct(a, w, { KxLx: 'KxLx', KyLy: 'KyLy', KtLt: 'KtLt', Lb: 'Lb', Cb: 'Cb', Cmx: 'Cmx', Cmy: 'Cmy', dist_M1_M2: 'distM1M2',
         Pu: 'Pu', Mux: 'Mux', Muy: 'Muy', May_strength: 'MayStrength', Vu: 'Vu' }, used);
     if (a.dist_M1_M2 !== undefined) { w.merge.chkBetaDist = true; }
+    webArgs(a, w, used, cur, { holes: true, stiffeners: true, torsion: true });
     rest(a, w, used);
 };
 
@@ -236,6 +291,8 @@ function loadsLike(withDesign: boolean): Mapper {
                 used.add('lap_restrained'); used.add('distortion_restrained');
                 put(w, 'merge', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
             }
+            // 결정 T6 · T7: 구간 검토의 구멍 · 횡방향 웹 보강재(§H4 는 자동 계산 넷에 쓰지 않는다)
+            webArgs(a, w, used, cur, { holes: true, stiffeners: true });
         }
         spanTable(a, w, used, spanType, nSpans);
         rest(a, w, used);
@@ -396,12 +453,31 @@ export function argsNotOnScreen(w: McpWrite): string[] {
 /** 화면 단추의 본문이 그 값이면 보내지 않는 칸(requests.ts — _optPos 의 0 이하, 켰을 때만 싣는 진술, 「자동」 선택) */
 const POSITIVE_ONLY = new Set(['wcLo', 'wcEdgeDistance', 'wcFastenerSpacing']);
 const TRUE_ONLY = new Set(['designZeroDemandStated', 'connZeroDemandStated', 'chkRFactor', 'lapRestrained', 'chkI621Confirmed', 'connJ63NotApplicable',
-    'lapForceModelConfirmed']);
+    'lapForceModelConfirmed', 'holeEdgeStiffened', 'holeWithinBearing', 'torsionAtJunction']);
 function notSent(k: string, v: unknown): boolean {
     if (POSITIVE_ONLY.has(k)) { return !(typeof v === 'number' && v > 0); }
     if (TRUE_ONLY.has(k)) { return v !== true; }
     if (k === 'loadComboStandard') { return v === 'asce7_10'; }
+    // 결정 T7: 「없음」 인 구역의 고르기
+    if (k === 'holeShape' || k === 'stiffenerMode' || k === 'torsionMode') { return v === 'none'; }
     return k === 'wcFamily' && v === 'auto';
+}
+/** 결정 T7: 그 구역이 「없음」 이거나 고른 길이 아니라 본문에 가지 않는 칸(case_inputs_used 에서 뺀다 — 본문의 규칙은 designState.memberWebOptions) */
+function webFieldIdle(k: string, inp: Record<string, InputValue>): boolean {
+    const g = DS.fieldMeta(k)?.group;
+    if (g === 'holes') {
+        if (k === 'holeShape') { return false; }
+        // 원형은 Lh = dh · 모서리 반지름 없음(본문에 가지 않는다)
+        if (inp.holeShape === 'circular') { return k === 'holeLength' || k === 'holeCornerRadius'; }
+        return inp.holeShape !== 'noncircular';
+    }
+    if (g === 'stiffeners') { return k !== 'stiffenerMode' && inp.stiffenerMode !== 'present'; }
+    if (g === 'torsion') {
+        if (k === 'torsionMode') { return false; }
+        if (Object.values(TORSION_DIRECT_ARGS).includes(k)) { return inp.torsionMode !== 'direct'; }
+        return inp.torsionMode !== 'eccentric';
+    }
+    return false;
 }
 
 /**
@@ -423,6 +499,9 @@ export function inputsUsed(w: McpWrite, st: CaseState): { key: string; value: un
         if (k === 'rValue' && inp.chkRFactor !== true) { continue; }
         if ((k === 'distM1M2' || k === 'distLm') && inp.chkBetaDist !== true) { continue; }
         if ((w.tool === 'design_connection' || w.tool === 'aisi_design_connection') && connSkip[k]) { continue; }
+        if (webFieldIdle(k, inp)) { continue; }
+        // 압축의 구멍은 §E 의 키만(§G3 · §G6 의 칸은 본문에 가지 않는다)
+        if (w.tool === 'aisi_design_compression' && ['holeEndDistance', 'holeCornerRadius', 'holeBearingDistance', 'holeWithinBearing'].includes(k)) { continue; }
         const span = k === 'spans' || k === 'supports' || k === 'lapsPerSupport';
         const v = span ? (st.spans as any)[k] : inp[k];
         if (v === null || v === undefined || v === '' || notSent(k, v)) { continue; }

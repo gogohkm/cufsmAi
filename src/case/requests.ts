@@ -123,8 +123,17 @@ export function buildDesignRequest(st: CaseState, ctx: RequestContext): BuiltReq
     };
     // 계약 §6.4: 「준 0 인 주 소요는 정말 0」 — 사람이 칸으로 밝혔을 때만
     if (r.chk('designZeroDemandStated')) { data.zero_demand_stated = true; }
+    // 2026-11-26 결정 T7: 웹 구멍 · 횡방향 웹 보강재 · §H4 — 「없음」 이 아닌 구역의 엔진 키만(화면과 같은 함수, 처음 값의 본문은 그대로).
+    // 자동 계산 넷은 구간 검토에 구멍 · 보강재만(buildPurlinRequest 가 옮긴다 — 결정 T6). 단면 모델(node · elem · element_roles …)은
+    // 호스트가 엔진에 보내기 직전에 붙인다(StcfsdPanel._designMember · _designPurlin — 모델은 검토 상태가 아니다)
+    const web = DS.memberWebOptions((k: string) => r.raw(k), isCalcMode(rawMemberType) ? 'purlin' : memberType);
+    Object.assign(data, web.data);
+    for (const m of web.missing) { r.missing.push(m.label); r.missingKeys.push(m.key); }
     return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
+
+/** 결정 T7 · T6: 자동 계산 넷의 구간 검토에 옮기는 구멍 · 보강재 키(memberWebOptions 의 'purlin' 범위) */
+export const isWebOptionKey = (k: string): boolean => k.startsWith('hole_') || k.startsWith('stiffener_') || k === 'transverse_stiffeners';
 
 /** §I6.2.1 R: 체크하고 값을 골랐을 때만, 고른 선택지의 경간 조건과 함께(F4 V2-03) — 선택지의 정체는 표의 optSpan */
 function rFactor(st: CaseState): Record<string, unknown> {
@@ -257,6 +266,8 @@ export function buildPurlinRequest(st: CaseState, ctx: RequestContext, loadOpts:
     }
     // 계약 §6.3: 사람이 밝힌 랩 구속(확인했을 때만 — 없음 = 밝히지 않음)
     if (new Reader(st, ctx.drafts).chk('lapRestrained')) { opts.lap_restrained = true; }
+    // 결정 T6 · T7: 구멍 · 횡방향 웹 보강재는 구간 검토에 그대로(§H4 는 자동 계산 넷에 쓰지 않는다 — 'purlin' 범위가 넣지 않는다)
+    for (const [k, v] of Object.entries(design.data)) { if (isWebOptionKey(k)) { opts[k] = v; } }
     return { data: { ...loads.data, ...opts, Fy: design.data.Fy, Fu: design.data.Fu }, missing: [] };
 }
 

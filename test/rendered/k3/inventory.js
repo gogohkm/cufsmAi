@@ -195,6 +195,9 @@ const NOTE = {
   '뒤틀림좌굴 해석적 Fallback': { eng: 'engine', ref: 'warnings (§2.3.3.3 / §2.3.1.3)', to: 'host', checks: 'fallback warning → warn' },
   'isFallback': { eng: 'engine', ref: 'warnings', to: 'host', checks: 'each engine warning → warn ("뒤틀림좌굴 해석적 Fallback" when it names §2.3.3.3 / §2.3.1.3; positive-region NG warnings skipped)' },
   'DSM 추출 경고': { eng: 'engine', ref: 'dsm_warning', to: 'host', checks: 'warn' },
+  // 결정 T7(2026-11-26): WEB_OPTION_CHECKS 의 다섯 항목(웹 구멍 적용 범위 · 전단(보강 · 구멍) · §G4.1 · §G6 · §H4) — 그 입력이 있을 때만
+  'item': { eng: 'engine', ref: 'member.applicability.holes · member.shear (clause variant) · member.web_stiffeners · member.web_crippling (web_holes) · member.bending_torsion', to: 'host',
+    checks: 'the engine verdict of each check (not evaluated → warn, not applicable → no item); value = DCR or the verdict + the hole / stiffener / torsion basis' },
   'Lap 구간 휨강도 (§F3, 한 부재)': { eng: 'engine', ref: 'design.design_lap', to: 'host', checks: 'design_lap verdict (one member — the purlin lap region; V9a-07)' },
   'Lap 길이 (지점': { eng: 'dup', ref: 'lap.length_condition (lap result)', to: 'engine', checks: 'min(left, right lap) ≥ 1.5·H (template field)', hc: ['1.5·d'], defect: 'uses the template H field and the load-analysis laps, not the lap check of the lap result' },
   'Lap 패스너 전단 (DCR)': { eng: 'engine', ref: 'lap.fastener_group', to: 'host', checks: 'K3-6 (D4): the engine lap.fastener_group verdict (was "not checked" unless the whole lap passed)' },

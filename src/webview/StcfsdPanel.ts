@@ -2852,6 +2852,8 @@ export class StcfsdPanel implements McpPanelInterface {
             dsm: { ...dsmValues, ...(input.dsm || {}) },
             section: { ...sectionInfo, ...(input.section || {}) },
             through_fastened: input.through_fastened ?? hasDeckSprings,
+            // 결정 T7: 구멍(순단면 · 구멍 자리의 FSM)과 §H4(단면의 뒤틀림 응력 · 대칭)는 단면 모델이 필요하다 — 그 입력이 있을 때만 붙인다
+            ...StcfsdPanel._sectionModelFor(input, this._model, (this._model as any).springs),
         };
 
         const result = await this._pythonBridge.call('aisi_design', designParams);
@@ -2877,13 +2879,34 @@ export class StcfsdPanel implements McpPanelInterface {
     }
 
     /**
+     * 결정 T7: 구멍(hole_*) · §H4(torsion_*) 입력이 있을 때 엔진에 함께 보내는 단면 모델 — 절점 · 요소, 요소 자리(템플릿으로 만든 단면만.
+     * 직접 그린 · 고친 단면에는 없다 → 엔진이 「웹을 가려낼 수 없음」 으로 그 조항을 평가하지 못한다), 재료(prop — 설계용 좌굴값을 푼 그 재료),
+     * 스프링(설계용 좌굴값을 스프링과 함께 풀었으면 같은 스프링). 엔진은 구멍의 탄성값을 이 모델과 받은 총단면 dsm(P_Lcrd · M_Lcrd)에서
+     * 스스로 구한다 — 준비된 총단면 좌굴값은 구멍에 기대지 않는다. 그 입력이 없으면 아무것도 붙이지 않는다(처음 값의 본문은 그대로).
+     */
+    private static _sectionModelFor(input: any, model: any, springs: unknown): Record<string, unknown> {
+        const given = Object.keys(input || {}).some((k) => (k.startsWith('hole_') || k.startsWith('torsion_')) && input[k] !== undefined && input[k] !== null);
+        const m = model || {};
+        if (!given || !Array.isArray(m.node) || m.node.length === 0 || !Array.isArray(m.elem) || m.elem.length === 0) { return {}; }
+        const copy = (v: unknown) => JSON.parse(JSON.stringify(v));
+        const out: Record<string, unknown> = { node: copy(m.node), elem: copy(m.elem) };
+        if (Array.isArray(m.elementRoles) && m.elementRoles.length === m.elem.length) { out.element_roles = [...m.elementRoles]; }
+        if (Array.isArray(m.prop) && m.prop.length > 0) { out.prop = copy(m.prop); }
+        if (Array.isArray(springs) && springs.length > 0) { out.springs = copy(springs); }
+        return out;
+    }
+
+    /**
      * 키워드 엔진 함수의 인자 allowlist — 파이썬 함수의 인자 이름 그대로(W2 의 MCP 스키마와 같은 이름).
      * 여기 없는 키는 오류로 돌려준다(오타가 기본값으로 조용히 바뀌지 않게). 값은 바꾸지 않고 넘긴다.
      */
     private static readonly KW_ALLOWLISTS: Record<string, string[]> = {
         web_crippling: ['h', 't', 'R', 'N', 'Fy', 'theta', 'support', 'fastened', 'section_type',
             'section_family', 'flange_condition', 'Lo', 'edge_distance', 'n_webs', 'web_config',
-            'bearing_case', 'support_fastener_spacing', 'd', 'web_holes'],
+            'bearing_case', 'support_fastener_spacing', 'd', 'web_holes',
+            // 결정 T7: §G6 구멍이 있는 C 단면 웹(엔진 web_crippling 의 인자 그대로)
+            'hole_shape', 'hole_depth', 'hole_length', 'hole_spacing', 'hole_end_distance', 'hole_corner_radius',
+            'hole_web_offset', 'hole_bearing_distance', 'hole_within_bearing'],
         calc_deck_stiffness: ['t_panel', 't_purlin', 'fastener_spacing', 'flange_width', 'k_per_fastener',
             'E', 'b_fastener', 'c_fastener', 'Fss_kip', 'D_screw_in', 'Fu1_ksi', 'Fu2_ksi',
             'kphi_override', 'kx_override'],
@@ -3194,6 +3217,10 @@ export class StcfsdPanel implements McpPanelInterface {
         'use_inelastic_reserve', 'use_cold_work', 'wc_N', 'wc_R', 'wc_fastened', 'wc_web_config',
         'wc_section_family', 'wc_flange_condition', 'wc_overhang', 'wc_edge_distance', 'wc_n_webs',
         'wc_support_fastener_spacing', 'wc_section_type',
+        // 결정 T6 · T7: 구멍(§F2.2 · §F3.2.2 · §F4.2 · §G3 · §G6)과 횡방향 웹 보강재(§G2.2 · §G4.1)는 구간 검토에 그대로(§H4 는 아니다)
+        'hole_shape', 'hole_depth', 'hole_length', 'hole_spacing', 'hole_end_distance', 'hole_web_offset', 'hole_corner_radius',
+        'hole_edge_stiffened', 'hole_bearing_distance', 'hole_within_bearing',
+        'transverse_stiffeners', 'stiffener_spacing', 'stiffener_kind', 'stiffener_Is', 'stiffener_area', 'stiffener_Fy',
     ];
 
     /**
@@ -5485,7 +5512,10 @@ export class StcfsdPanel implements McpPanelInterface {
             section: geom.section,
             section_type: sectionType,
             ...nonWc,
+            // 결정 T6 · T7: 구멍이 있으면 단면 모델(절점 · 요소 · 요소 자리 · 재료) — 스프링은 구간마다 그 구간의 좌굴값을 푼 것(아래)
+            ...StcfsdPanel._sectionModelFor(nonWc, baseModel, null),
         };
+        const holesGiven = 'node' in baseDesign;
 
         const gravity = loadResult.gravity || loadResult.governing || null;
         const uplift = loadResult.uplift || null;
@@ -5672,6 +5702,8 @@ export class StcfsdPanel implements McpPanelInterface {
             const dsm = this._dsmForDesign(null, rg.dsm, fy, sign);
             const share = rg.lap ? 0.5 : 1.0;
             const params: any = { ...baseDesign, dsm, moment_sign: sign };
+            // 결정 T7: 구멍 자리의 FSM 은 그 구간의 총단면 좌굴값과 같은 스프링으로(정모멘트 = 데크 스프링, 부모멘트 = 없음)
+            if (holesGiven && rg.dsm === dsmPos && posSprings.length > 0) { params.springs = posSprings.map((r) => [...r]); }
             if (rg.lap) {
                 // 랩: 두 부재 강도의 합(매뉴얼 II-2A 가정 (a)–(c)) — 같은 뜻으로 각 부재가 M·V 의 절반을 진다.
                 // 계약 §6.3: 랩 안의 횡비틀림 · 뒤틀림 구속은 사람이 밝힌다 — 호스트는 Lb · Cb · distortional_not_applicable · Mcrd 를 정하지 않고
@@ -8718,6 +8750,142 @@ ${inner}
                     <p class="hint" style="font-size:10px;margin-top:4px">
                         Lo ≤ 1.5h 인 EOF C/Z만 G5-2 overhang으로 계산합니다. eITF는 C/Z의 ITF에서 끝단 연장거리(≥1.5h/2.5h) 검증에 사용합니다. hat/multi-web은 per-web 강도를 nweb로 합산합니다.
                     </p>
+                </div>
+
+                <!-- 결정 T7(2026-11-26): 웹 구멍 · 횡방향 웹 보강재 · 비틀림(§H4) — 처음은 「없음」(요청에 아무것도 넣지 않는다, designState.memberWebOptions) -->
+                <div id="design-holes-section">
+                <h3 class="collapsible" id="sec-holes" data-expanded="false" title="구멍이 있는 부재: §E2.5 · §E3.2.2 · §E4.2(압축), §F2.2 · §F3.2.2 · §F4.2(휨), 부록 2 의 탄성 좌굴, §G3(전단) · §G6(웹 크리플링)"><span class="collapse-icon">▸</span> 웹 구멍(천공) <span class="hint-inline" id="sec-holes-state" style="font-weight:normal">없음</span></h3>
+                <div id="sec-holes-body" style="display:none">
+                    <div class="input-row">
+                        <label title="웹에 같은 구멍이 일정한 간격으로 있다 — 부록 2 §2.3 · §G3 · §G6">구멍</label>
+                        <select id="select-hole-shape" style="width:170px">
+                            <option value="none" selected>없음</option>
+                            <option value="circular">원형</option>
+                            <option value="noncircular">비원형(슬롯 · 사각)</option>
+                        </select>
+                    </div>
+                    <div id="design-hole-fields" style="display:none">
+                        <div class="input-row">
+                            <label title="웹을 가로지르는 구멍 치수 dh(원형은 지름) — 부록 2 §2.3, §G3(a) dh/h ≤ 0.7">dh<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-hole-dh" value="" step="1" style="width:65px">
+                            <label title="부재 방향 구멍 길이 Lh — 원형은 dh 와 같다(칸을 쓰지 않는다). §G3(g) 비원형 Lh ≤ 4.5 in">Lh<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-hole-Lh" value="" step="1" style="width:65px">
+                        </div>
+                        <div class="input-row">
+                            <label title="구멍 중심 간격 s(부재 방향) — Lh 보다 커야 한다. §G3(d) · §G6(d) 순간격 s − Lh ≥ 18 in, 부록 2 §2.3.2.3 s ≥ Lcrd(낱낱의 구멍)">중심 간격 s<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-hole-spacing" value="" step="10" style="width:65px">
+                            <label title="웹 중심에서 구멍 중심까지(모델 z 가 커지는 쪽 +) — 비우면 0(가운데). 가운데가 아닌 구멍은 §G3(c) · §G6(c) 밖이고 부록 2 의 대칭 단면 식이 맞지 않는다">치우침<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-hole-web-offset" value="" step="1" style="width:60px">
+                        </div>
+                        <div class="input-row" id="design-hole-g-row">
+                            <label title="부재 끝에서 가장 가까운 구멍 가장자리까지의 순거리 — §G6(e) ≥ d">단부 거리<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-hole-end-distance" value="" step="10" style="width:65px">
+                            <span id="design-hole-radius-wrap"><label title="비원형 구멍 모서리의 반지름 — §G3(e) · §G6(f) ≥ 2t">모서리 r<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-hole-corner-radius" value="" step="0.5" style="width:60px"></span>
+                        </div>
+                        <div class="input-row" title="구멍 가장자리를 립 · 칼라로 보강한 구멍 — 부록 2 · §G3 · §G6 의 식이 다루지 않는다(평가하지 못함)">
+                            <label><input type="checkbox" id="chk-hole-edge-stiffened"> 구멍 가장자리를 보강했다</label>
+                        </div>
+                        <div id="design-hole-g6-rows">
+                            <p class="hint" style="margin:4px 0 2px;font-weight:600">§G6 구멍이 있는 웹의 웹 크리플링</p>
+                            <div class="input-row">
+                                <label title="구멍 가장자리에서 지압 가장자리까지의 거리 x — Eq. G6-1(끝 1-플랜지) · G6-2(안 1-플랜지)">지압까지 x<span class="hint-inline" data-unit="length">mm</span></label>
+                                <input type="number" id="design-hole-bearing-distance" value="" step="10" style="width:65px">
+                            </div>
+                            <div class="input-row" title="§G6: 구멍이 지압 길이 안에 있으면 지압 보강재를 써야 한다 — 이 프로그램은 지압 보강재를 검토하지 않는다">
+                                <label><input type="checkbox" id="chk-hole-within-bearing"> 구멍이 지압 길이 안에 있다</label>
+                            </div>
+                        </div>
+                        <p class="hint" style="margin:2px 0 4px">규정의 한계 밖(구멍 크기 · 간격 · 위치, C · Z · 트랙이 아닌 단면, 직접 그린 단면처럼 웹을 가려낼 수 없는 단면)은 그 조항이 「평가하지 못함」 과 까닭으로 나온다.</p>
+                    </div>
+                </div>
+                </div>
+
+                <div id="design-stiffeners-section">
+                <h3 class="collapsible" id="sec-stiffeners" data-expanded="false" title="횡방향 웹 보강재: §G2.2 · §G2.3(b) 보강된 웹의 전단, §G4.1 보강재 요건, §H2 의 보강된 웹 식(Eq. H2-2)"><span class="collapse-icon">▸</span> 횡방향 웹 보강재 <span class="hint-inline" id="sec-stiffeners-state" style="font-weight:normal">없음</span></h3>
+                <div id="sec-stiffeners-body" style="display:none">
+                    <div class="input-row">
+                        <label title="웹에 횡방향 보강재가 있다 — §G2.2 · §G4.1">보강재</label>
+                        <select id="select-stiffener-mode" style="width:100px">
+                            <option value="none" selected>없음</option>
+                            <option value="present">있음</option>
+                        </select>
+                    </div>
+                    <div id="design-stiffener-fields" style="display:none">
+                        <div class="input-row">
+                            <label title="보강재 간격 a — §G4.1: a/h ≤ [260/(h/t)]² 이고 ≤ 3.0. a ≤ 2h 이면 §G2.2(인장장), 넘으면 §G2.1 에 §G2.3(b) 의 kv">간격 a<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-stiffener-spacing" value="" step="10" style="width:65px">
+                            <label title="Eq. G4.1-2 의 D: 쌍 1.0 · 한쪽 ㄱ형강 1.8 · 한쪽 판 2.4. §G4.2 의 보강재(프레스 · 압연 등)는 평가하지 못한다">종류</label>
+                            <select id="select-stiffener-kind" style="width:130px">
+                                <option value="" selected>고르지 않음</option>
+                                <option value="pair">쌍</option>
+                                <option value="single_angle">한쪽 ㄱ형강</option>
+                                <option value="single_plate">한쪽 판</option>
+                                <option value="nonconforming">§G4.2 (프레스 · 압연 등)</option>
+                            </select>
+                        </div>
+                        <div class="input-row">
+                            <label title="웹 판 기준 보강재의 단면2차모멘트 Is — Eq. G4.1-1 의 Is,min 과 견준다">Is<span class="hint-inline" data-unit="inertia">mm⁴</span></label>
+                            <input type="number" id="design-stiffener-Is" value="" step="100" style="width:72px">
+                            <label title="보강재 단면적 Ast — Eq. G4.1-2 의 최소 면적과 견준다">단면적<span class="hint-inline" data-unit="area">mm²</span></label>
+                            <input type="number" id="design-stiffener-area" value="" step="10" style="width:65px">
+                            <label title="보강재 항복강도 Fys — Eq. G4.1-2 의 Y = Fy(웹) / Fys. 처음 값 없음">Fy<span class="hint-inline" data-unit="stress">MPa</span></label>
+                            <input type="number" id="design-stiffener-Fy" value="" step="1" style="width:60px">
+                        </div>
+                        <p class="hint" style="margin:2px 0 4px">보강재 자료가 없으면 보강된 웹의 전단은 평가하지 못한다 — 보강하지 않은 웹(§G2.1)의 값은 참고로만 보인다.</p>
+                    </div>
+                </div>
+                </div>
+
+                <div id="design-torsion-section">
+                <h3 class="collapsible" id="sec-torsion" data-expanded="false" title="§H4 휨 + 비틀림: 전단중심을 지나지 않는 하중 — Mn = R Mnℓo(Eq. H4-1)"><span class="collapse-icon">▸</span> 비틀림(§H4) <span class="hint-inline" id="sec-torsion-state" style="font-weight:normal">없음</span></h3>
+                <div id="sec-torsion-body" style="display:none">
+                    <div class="input-row">
+                        <label title="§H4 의 감소계수 R = 그 점의 휨 응력 / (휨 + 뒤틀림 응력)">비틀림</label>
+                        <select id="select-torsion-mode" style="width:150px">
+                            <option value="none" selected>없음</option>
+                            <option value="direct">응력을 직접</option>
+                            <option value="eccentric">편심 하중으로</option>
+                        </select>
+                    </div>
+                    <div id="design-torsion-direct" style="display:none">
+                        <div class="input-row">
+                            <label title="R 을 정하는 점(압축 플랜지 쪽의 가장 큰 합성 응력 자리)의 휨 응력 — 부호 있음">휨 응력 fb<span class="hint-inline" data-unit="stress">MPa</span></label>
+                            <input type="number" id="design-torsion-fb" value="" step="1" style="width:60px">
+                            <label title="같은 점의 비틀림 뒤틀림(warping) 수직응력 — 부호 있음">뒤틀림 fw<span class="hint-inline" data-unit="stress">MPa</span></label>
+                            <input type="number" id="design-torsion-ft" value="" step="1" style="width:60px">
+                        </div>
+                        <div class="input-row">
+                            <label title="단면의 가장 큰 휨 응력(fb 와 같은 쪽) — 비우면 fb 를 쓴다(엔진이 가정으로 밝힌다)">최대 휨 응력<span class="hint-inline" data-unit="stress">MPa</span></label>
+                            <input type="number" id="design-torsion-fbmax" value="" step="1" style="width:60px">
+                        </div>
+                        <div class="input-row" title="§H4: 가장자리 보강 C 단면에서 그 점이 웹–플랜지 이음이면 R 을 15 % 올릴 수 있다">
+                            <label><input type="checkbox" id="chk-torsion-at-junction"> 그 점이 웹–플랜지 이음이다 (15 % 증가)</label>
+                        </div>
+                    </div>
+                    <div id="design-torsion-eccentric" style="display:none">
+                        <div class="input-row">
+                            <label title="전단중심에서 하중 작용선까지의 거리 e — + 는 도심 쪽">편심 e<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-torsion-e" value="" step="1" style="width:60px">
+                            <label title="비틀림을 받는 한 경간의 길이 L">경간 L<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-torsion-span" value="" step="100" style="width:68px">
+                        </div>
+                        <div class="input-row">
+                            <label title="편심 하중의 모양">하중</label>
+                            <select id="select-torsion-load" style="width:100px">
+                                <option value="" selected>고르지 않음</option>
+                                <option value="uniform">등분포</option>
+                                <option value="midspan_point">중앙 집중</option>
+                            </select>
+                            <label title="닫힌 식은 양 끝이 비틀림에 단순 지지(비틀림 고정 · 뒴 자유)인 한 경간만 — 다른 지지는 「응력을 직접」 으로">비틀림 지지</label>
+                            <select id="select-torsion-support" style="width:110px">
+                                <option value="" selected>고르지 않음</option>
+                                <option value="simple">양 끝 단순</option>
+                            </select>
+                        </div>
+                        <p class="hint" style="margin:2px 0 4px">편심 하중의 길은 지금 단면 모델로 비틀림 응력을 푼다(x 축에 대칭인 단면만 — 아니면 「평가하지 못함」).</p>
+                    </div>
+                </div>
                 </div>
 
                 <div class="section-group" style="margin-top:10px; padding:6px 8px; border:1px solid var(--vscode-panel-border); border-radius:3px;">

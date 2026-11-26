@@ -1,6 +1,6 @@
 {
  "about": "K2 phase 0 golden — mcp-column. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-25",
+ "recorded": "2026-11-26",
  "entries": [
   {
    "id": "set_section_template.engine",
@@ -308,9 +308,9 @@
    "id": "aisi_design_compression.shown",
    "expect": "pin",
    "value": {
-    "design-summary": "종합 판정: ✓ OK 지배 검토: 국부좌굴\nGlobal\n142.13\nkN\nLocal\n70.60\nkN\n지배\nDistort.\n85.08\nkN\nφPn = 60.01 kN (국부좌굴)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
+    "design-summary": "종합 판정: ✓ OK 지배 검토: 국부좌굴\nGlobal\n142.13\nkN\nLocal\n70.60\nkN\n지배\nDistort.\n85.08\nkN\nφPn = 60.01 kN (국부좌굴)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
    },
-   "reason": "2026-11-25 남은 작업 H-A: 결정 R1 · R8 — 설계용 DSM 값은 엔진의 설계 격자(design_signature_lengths: 0.05 D – 100 D 의 101 점, S-S, m = 1, neigs 10)로 준비하고 부재 검토가 그 자리에서 준비한다. 요청 차례에 design_signature_lengths 가 들고 준비 해석의 길이가 바뀌어 Pcrl · Pcrd · Mcrl · Mcrd(와 Se 등 그 값의 강도 · 표시)가 0.2 % 안에서 움직였다. 보기용 조건만 바뀌면 준비된 값을 다시 써서(dsm 줄이 빠짐), 자동 계산 넷에서는 화면이 해석 뒤 준비하지 않아(get_properties · analyze 줄이 빠짐) 호출 차례가 달라졌다",
+   "reason": "2026-11-26 엔진 단계 EA · EB(1ec6c4f): 범위 고지 「holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)」 가 「holes (G3/G6)」(휨) 로 바뀌고 압축에서는 빠졌다 — 구멍의 압축 · 휨은 이제 구현되어 「구멍을 입력하지 않았다」 는 적용 범위 줄로 옮겼다. 수 · 판정은 그대로",
    "flipped": [
     {
      "step": "K4b",
@@ -335,6 +335,14 @@
       "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
      },
      "date": "2026-11-25"
+    },
+    {
+     "step": "H(구멍 · 보강재 · 비틀림)",
+     "from": {
+      "expect": "pin",
+      "reason": "2026-11-25 남은 작업 H-A: 결정 R1 · R8 — 설계용 DSM 값은 엔진의 설계 격자(design_signature_lengths: 0.05 D – 100 D 의 101 점, S-S, m = 1, neigs 10)로 준비하고 부재 검토가 그 자리에서 준비한다. 요청 차례에 design_signature_lengths 가 들고 준비 해석의 길이가 바뀌어 Pcrl · Pcrd · Mcrl · Mcrd(와 Se 등 그 값의 강도 · 표시)가 0.2 % 안에서 움직였다. 보기용 조건만 바뀌면 준비된 값을 다시 써서(dsm 줄이 빠짐), 자동 계산 넷에서는 화면이 해석 뒤 준비하지 않아(get_properties · analyze 줄이 빠짐) 호출 차례가 달라졌다"
+     },
+     "date": "2026-11-26"
     }
    ]
   },
@@ -439,9 +447,9 @@
   {
    "id": "gui.runDesign.shown",
    "expect": "pin",
-   "reason": "2026-11-25 남은 작업 H-A: 결정 R1 · R8 — 설계용 DSM 값은 엔진의 설계 격자(design_signature_lengths: 0.05 D – 100 D 의 101 점, S-S, m = 1, neigs 10)로 준비하고 부재 검토가 그 자리에서 준비한다. 요청 차례에 design_signature_lengths 가 들고 준비 해석의 길이가 바뀌어 Pcrl · Pcrd · Mcrl · Mcrd(와 Se 등 그 값의 강도 · 표시)가 0.2 % 안에서 움직였다. 보기용 조건만 바뀌면 준비된 값을 다시 써서(dsm 줄이 빠짐), 자동 계산 넷에서는 화면이 해석 뒤 준비하지 않아(get_properties · analyze 줄이 빠짐) 호출 차례가 달라졌다",
+   "reason": "2026-11-26 엔진 단계 EA · EB(1ec6c4f): 범위 고지 「holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)」 가 「holes (G3/G6)」(휨) 로 바뀌고 압축에서는 빠졌다 — 구멍의 압축 · 휨은 이제 구현되어 「구멍을 입력하지 않았다」 는 적용 범위 줄로 옮겼다. 수 · 판정은 그대로",
    "value": {
-    "design-summary": "종합 판정: ✓ OK 지배 검토: 국부좌굴\nGlobal\n142.13\nkN\nLocal\n70.60\nkN\n지배\nDistort.\n85.08\nkN\nφPn = 60.01 kN (국부좌굴)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n검토하지 않은 항목 — 해당하면 별도 검토\n• holes (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
+    "design-summary": "종합 판정: ✓ OK 지배 검토: 국부좌굴\nGlobal\n142.13\nkN\nLocal\n70.60\nkN\n지배\nDistort.\n85.08\nkN\nφPn = 60.01 kN (국부좌굴)\n30% ✓ OK\n검토 비 판정\nE axial compression 0.296 OK\n가정\n• Pcrd: FSM 뒤틀림 값이 없어 Appendix 2 §2.3.1.3 해석적 공식 사용 (Fcrd=125.1 MPa, Lcrd=607.1 mm)\n적용 범위 (1)"
    },
    "flipped": [
     {
@@ -451,6 +459,14 @@
       "reason": "Renderer stop: newly coded engine texts consumed (engine 8479b02 · e852630, contract §16.10–16.11) — governing check / controlling mode / connection governing mode shown by the name_ko of their ids, {k}_code / _ko fields and {k}_notices maps (pattern labels, load-combination basis), const params; the engine also moved the cantilever I6.2.1 sentence into the load analysis assumptions and gave the deck its notices (its old one-line warning is the scope note, not shown again as a warning)."
      },
      "date": "2026-11-25"
+    },
+    {
+     "step": "H(구멍 · 보강재 · 비틀림)",
+     "from": {
+      "expect": "pin",
+      "reason": "2026-11-25 남은 작업 H-A: 결정 R1 · R8 — 설계용 DSM 값은 엔진의 설계 격자(design_signature_lengths: 0.05 D – 100 D 의 101 점, S-S, m = 1, neigs 10)로 준비하고 부재 검토가 그 자리에서 준비한다. 요청 차례에 design_signature_lengths 가 들고 준비 해석의 길이가 바뀌어 Pcrl · Pcrd · Mcrl · Mcrd(와 Se 등 그 값의 강도 · 표시)가 0.2 % 안에서 움직였다. 보기용 조건만 바뀌면 준비된 값을 다시 써서(dsm 줄이 빠짐), 자동 계산 넷에서는 화면이 해석 뒤 준비하지 않아(get_properties · analyze 줄이 빠짐) 호출 차례가 달라졌다"
+     },
+     "date": "2026-11-26"
     }
    ]
   }

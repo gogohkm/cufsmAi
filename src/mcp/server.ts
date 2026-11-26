@@ -521,6 +521,50 @@ function moreNote(scope: string, omitted: string[], detail: Detail): string {
         + `or detail:'full' (the whole result as before), or get_design_check {scope:'${scope}', id} for one check with its calculation steps.`;
 }
 
+/**
+ * 결정 T7: 구멍 · 횡방향 웹 보강재 · §H4 · 전단의 곡선 · §G6 의 Rc — 그 묶음이 요약에서 빠질 때(잎이 SMALL_BLOCK 보다 많다) 근거만 작게.
+ * 까닭의 글은 not_evaluated · 검토 줄의 reason 에 이미 있다 — 여기에는 code 만(두 번 싣지 않는다). 전체는 detail 'checks' · 'full'.
+ */
+function webBasis(r: any, out: any, omitted: string[]): void {
+    const pick = (o: any, keys: string[]): any => {
+        const x: any = {};
+        for (const k of keys) { if (o[k] !== undefined && o[k] !== null) { x[k] = o[k]; } }
+        return x;
+    };
+    const codes = (o: any): string[] => (Array.isArray(o?.notices) ? [...new Set<string>(o.notices.map((n: any) => n?.code).filter((c: any) => typeof c === 'string'))] : []);
+    const swap = (key: string, name: string, block: any) => {
+        const i = omitted.indexOf(key);
+        if (i < 0) { return; }
+        omitted.splice(i, 1, `${key} (the basis is in ${name})`);
+        out[name] = block;
+    };
+    const h = r.holes;
+    if (h && typeof h === 'object') {
+        const rc = codes(h);
+        swap('holes', 'holes_basis', { ...pick(h, ['shape', 'dh', 'Lh', 's', 'web_offset', 'evaluated', 'compression_evaluated', 'flexure_evaluated',
+            'Anet', 'Sfnet', 'Pcrl_h', 'Pcrd_h', 'Mcrl_h', 'Mcrd_h', 'Pynet', 'Mynet']), ...(rc.length ? { reason_codes: rc } : {}) });
+    }
+    const t = r.torsion;
+    if (t && typeof t === 'object') {
+        swap('torsion', 'torsion_basis', { ...pick(t, ['route', 'evaluated', 'applicable', 'R', 'R_raw', 'increased_15pct', 'at_web_flange_junction',
+            'Mn', 'design_strength', 'Mu', 'ratio', 'pass', 'node', 'y', 'f_bending', 'f_torsion', 'reason_code']) });
+    }
+    const s = r.web_stiffeners;
+    if (s && typeof s === 'object') {
+        swap('web_stiffeners', 'web_stiffeners_basis', pick(s, ['conforming', 'g4_2', 'kind', 'a', 'a_over_h', 'a_over_h_limit', 'Is', 'Is_min', 'As',
+            'Ast_min', 'Fy_st', 'ratio', 'missing', 'reason_code']));
+    }
+    const v = r.shear;
+    if (v && typeof v === 'object' && ('curve' in v || 'evaluated' in v)) {
+        swap('shear', 'shear_basis', pick(v, ['evaluated', 'reference_only', 'curve', 'kv', 'kv_equation', 'qs', 'c', 'Vn', 'design_strength', 'reason_code']));
+    }
+    const w = r.web_crippling;
+    if (w && typeof w === 'object' && (w.Rc !== undefined || w.g6)) {
+        swap('web_crippling', 'web_crippling_basis', { ...pick(w, ['evaluated', 'Rc', 'Pn_without_holes', 'Pn', 'design_strength', 'ratio', 'reason_code']),
+            ...(w.g6 && typeof w.g6 === 'object' ? { g6_equation: w.g6.equation ?? null, g6_evaluated: w.g6.evaluated ?? null } : {}) });
+    }
+}
+
 /** 부재 · 접합 · 랩 결과의 요약. 랩의 fastener_design(접합 결과)도 같은 규칙으로. */
 function shapeDesign(scope: string): Shaper {
     const shape = (r: any, detail: Detail, inner = false): any => {
@@ -561,6 +605,7 @@ function shapeDesign(scope: string): Shaper {
             const oi = omitted.indexOf('limit_state_checks');
             if (oi >= 0) { omitted.splice(oi, 1); }
         }
+        if (!inner) { webBasis(r, out, omitted); }
         if (detail === 'checks') {
             out.design_checks = dc.map((c) => { const { steps: _s, ...x } = c || {}; void _s; return x; });
         } else {
@@ -1600,9 +1645,47 @@ const WC_FIELDS = {
     wc_M: z.number().nonnegative().optional().describe("§H3 moment at the reaction — kip-in, or kN-m (omit → Mu, conservative, with a warning)"),
 };
 
+// 결정 T7(2026-11-26): 웹 구멍(천공) · 횡방향 웹 보강재 · 휨 + 비틀림(§H4) — 화면 「설계」 탭의 접이 구역 셋과 같은 검토 상태 칸
+// (holeShape … · stiffenerMode … · torsionMode …). 받은 것만 상태에 쓰고, 계산은 화면 단추의 본문(구역이 「없음」 이면 그 키를 보내지 않는다)
+const HOLE_DESC_TAIL = " Holes outside the specification limits, off-centre or edge-stiffened holes, sections other than C / Z / track (§G3 / §G6: C and track only) and sections whose web cannot be identified (hand-drawn or edited sections) come back NOT EVALUATED with the reason (holes.reasons, design_checks member.applicability.holes) — report them; the gross-section values are never used for a verdict then.";
+const HOLE_FIELDS_E = {
+    hole_shape: z.enum(['none', 'circular', 'noncircular']).optional().describe("Web holes (perforations) equally spaced along the member: 'circular' or 'noncircular' (slotted / rectangular). Enables §E2.5 · §E3.2.2 · §E4.2 (compression) and §F2.2 · §F3.2.2 · §F4.2 (flexure) with the Appendix 2 elastic buckling of the member with holes (net section at the hole, web thickness tr, length-weighted properties), and in flexure §G3 shear and §G6 web crippling. 'none' clears the screen's hole section. Omit → the screen's choice (case input holeShape, initially 'none'); other hole_* arguments need a shape (given here or on the screen)." + HOLE_DESC_TAIL),
+    hole_depth: z.number().positive().optional().describe("dh — hole dimension across the web (the diameter of a circular hole) — in, or mm if units='SI'. Required with a hole shape (blank → the call is refused, naming it)."),
+    hole_length: z.number().positive().optional().describe("Lh — hole length along the member — in, or mm. Required for a noncircular hole; a circular hole uses Lh = dh (the value is not sent)."),
+    hole_spacing: z.number().positive().optional().describe("s — centre-to-centre hole spacing along the member (> Lh) — in, or mm. Omit → the screen's (blank there → not sent; the engine names it)."),
+    hole_web_offset: z.number().optional().describe("Offset of the hole centre from mid-depth of the web (+ toward larger model z) — in, or mm. Blank / omitted = 0 (centred). An off-centre hole is not evaluated."),
+};
+const HOLE_FIELDS = {
+    ...HOLE_FIELDS_E,
+    hole_end_distance: z.number().nonnegative().optional().describe("§G6(e): clear distance from the member end to the nearest hole edge (≥ d) — in, or mm"),
+    hole_corner_radius: z.number().nonnegative().optional().describe("Corner radius of a noncircular hole (§G3(e) · §G6(f) ≥ 2t; without it those clauses are not evaluated) — in, or mm"),
+    hole_edge_stiffened: z.boolean().optional().describe("The hole edges are stiffened (lip / collar) — not covered by Appendix 2 / §G3 / §G6: not evaluated"),
+    hole_bearing_distance: z.number().optional().describe("§G6: x, distance from the hole edge to the edge of bearing (Eq. G6-1 / G6-2; < 0 = the hole is within the bearing) — in, or mm"),
+    hole_within_bearing: z.boolean().optional().describe("§G6: a hole lies within the bearing length — a bearing stiffener is required, so web crippling (and §H3) is not evaluated"),
+};
+const STIFFENER_FIELDS = {
+    transverse_stiffeners: z.boolean().optional().describe("The web has transverse stiffeners: §G2.2 (a ≤ 2h, tension field) / §G2.1 with the §G2.3(b) kv, §G4.1 stiffener requirements (check member.web_stiffeners) and §H2 Eq. H2-2. Without the stiffener data (stiffener_*) the stiffened-web shear, §H2 and §G4.1 are NOT EVALUATED — the §G2.1 value (kv = 5.34) is shown as a conservative reference only. false clears the screen's stiffener section; giving stiffener_* sets it. Omit → the screen's (case input stiffenerMode, initially none)."),
+    stiffener_spacing: z.number().positive().optional().describe("a — stiffener spacing (§G4.1: a/h ≤ [260/(h/t)]² and ≤ 3.0) — in, or mm"),
+    stiffener_kind: z.enum(['pair', 'single_angle', 'single_plate', 'nonconforming']).optional().describe("Stiffener type for D of Eq. G4.1-2: 'pair' 1.0, 'single_angle' 1.8, 'single_plate' 2.4; 'nonconforming' = §G4.2 stiffeners (stamped, rolled-in) — not evaluated"),
+    stiffener_Is: z.number().positive().optional().describe("Is — moment of inertia of the stiffener about the web (Eq. G4.1-1) — in⁴, or mm⁴"),
+    stiffener_area: z.number().positive().optional().describe("Ast — stiffener area (Eq. G4.1-2) — in², or mm²"),
+    stiffener_Fy: z.number().positive().optional().describe("Fys — yield stress of the stiffener (Eq. G4.1-2, Y = Fy web / Fys) — ksi, or MPa. Required, no default"),
+};
+const TORSION_FIELDS = {
+    torsion_f_bending: z.number().optional().describe("§H4 route (a): bending normal stress at the point that governs R (largest combined compressive stress) — signed, same convention as torsion_f_torsion — ksi, or MPa. Route (a) wins when both routes are given."),
+    torsion_f_torsion: z.number().optional().describe("§H4 route (a): torsional warping normal stress at that point — signed — ksi, or MPa"),
+    torsion_f_bending_max: z.number().optional().describe("§H4 route (a): maximum bending stress of the section on the same side — ksi, or MPa (omit → torsion_f_bending, stated as an assumption)"),
+    torsion_at_web_flange_junction: z.boolean().optional().describe("§H4 route (a): the point is at the web–flange junction of an edge-stiffened C — permits the 15 % increase of R"),
+    torsion_eccentricity: z.number().optional().describe("§H4 route (b): eccentricity e of the load from the shear centre (+ toward the centroid) — in, or mm. Route (b) solves the warping stresses on the current section model (sections symmetric about x only)."),
+    torsion_span: z.number().positive().optional().describe("§H4 route (b): span L of the torsionally simply supported member — in, or mm"),
+    torsion_load: z.enum(['uniform', 'midspan_point']).optional().describe("§H4 route (b): load shape — 'uniform' or 'midspan_point'"),
+    torsion_support: z.enum(['simple']).optional().describe("§H4 route (b): torsional support at both ends — only 'simple' (twist prevented, warping free); for any other support give the stresses (route (a))"),
+};
+const WEB_OPTIONS_NOTE = " Web holes (hole_*), transverse web stiffeners (transverse_stiffeners, stiffener_*) and §H4 bending + torsion (torsion_* — route (a) the stresses at the governing point, route (b) an eccentric load on one torsionally simply supported span) are the screen's three sections (initially none — then nothing is sent and the results are as without them): checks member.applicability.holes, member.web_stiffeners (G4.1), member.bending_torsion (H4), and the result blocks holes, web_stiffeners, torsion. Without torsion input §H4 is not checked (scope note).";
+
 server.tool("aisi_design_compression",
     "AISI S100-16 Chapter E compression design (DSM) of the current section. " + MEMBER_NOTE
-    + "Effective lengths blank on the screen and not given are reported (E2 not evaluated), never assumed. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
+    + "Effective lengths blank on the screen and not given are reported (E2 not evaluated), never assumed. Web holes (hole_*, the screen's 「웹 구멍」 section) give §E2.5 · §E3.2.2 · §E4.2 (check member.applicability.holes, result block holes, Pynet)." + HOLE_DESC_TAIL + " " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         zero_demand_stated: ZDS,
         design_method: DM,
@@ -1614,6 +1697,7 @@ server.tool("aisi_design_compression",
         Pu: z.number().optional().describe("Required axial strength (compression) — kips, or kN. Omit → the screen's Pu; blank there → capacity only."),
         Fcre: z.number().positive().optional().describe("Elastic global buckling stress from a rational analysis (sections without closed-form E2) — ksi, or MPa"),
         Fcre_basis: z.enum(['fsm_long_wavelength']).optional().describe("Only with Fcre: 'fsm_long_wavelength' when Fcre was read at the long-wavelength end of an FSM signature curve — the engine then flags it (and what derives from it) for comparison at 1e-4 instead of 1e-6 (check contract §16.14)"),
+        ...HOLE_FIELDS_E,
         ...CHECK_CONTEXT,
         detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
@@ -1623,7 +1707,7 @@ server.tool("aisi_design_compression",
 
 server.tool("aisi_design_flexure",
     "AISI S100-16 Chapter F flexure design (DSM) of the current section, with optional §G2 shear + §H2 (give Vu), §G5 web crippling + §H3 (give wc_N, wc_R …), a separate positive-moment region (Lb_pos, Cb_pos, Mu_pos), §I6.2.1 uplift R (C/Z only) and inelastic reserve / cold work. " + MEMBER_NOTE
-    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked when a bearing length and bend radius are there (wc_N / wc_R, or the screen's values — the screen starts with a bearing length) and is otherwise simply absent; give them for any member with bearing at supports or concentrated loads, or blank the screen's with set_case_inputs {wcN: null} (or wc_N: 0) when there is no bearing. The screen's β (distortional moment gradient), cold-work and inelastic-reserve choices apply unless you pass them. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
+    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked when a bearing length and bend radius are there (wc_N / wc_R, or the screen's values — the screen starts with a bearing length) and is otherwise simply absent; give them for any member with bearing at supports or concentrated loads, or blank the screen's with set_case_inputs {wcN: null} (or wc_N: 0) when there is no bearing. The screen's β (distortional moment gradient), cold-work and inelastic-reserve choices apply unless you pass them." + WEB_OPTIONS_NOTE + HOLE_DESC_TAIL + " " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         zero_demand_stated: ZDS,
         design_method: DM,
@@ -1642,7 +1726,9 @@ server.tool("aisi_design_flexure",
         span_type: z.enum(['simple', 'continuous']).optional().describe("With R_uplift: span condition for Table I6.2.1-1 (omit → the condition of the screen option R matches, else the smaller of the two table values is used for the check)"),
         moment_sign: z.enum(['+', '-']).optional().describe("Sign of the bending moment (+ = top flange in compression). Needed for sections not symmetric about x (hat, angle, tee); omit → sign of Mu"),
         shear_n_webs: z.number().int().min(1).optional().describe("Number of webs resisting shear (§G2; omit → inferred from the section)"),
-        transverse_stiffeners: z.boolean().optional().describe("Web has transverse stiffeners (§G2.2 is not implemented: the engine computes §G2.1, conservative, and warns)"),
+        ...STIFFENER_FIELDS,
+        ...HOLE_FIELDS,
+        ...TORSION_FIELDS,
         use_inelastic_reserve: z.boolean().optional().describe("Allow §F2.4.2/§F3.2.3 inelastic reserve where permitted (omit → the screen's check box, initially off)"),
         use_cold_work: z.boolean().optional().describe("Allow §A3.3.2 cold-work strength increase where permitted (omit → the screen's check box — it starts unchecked; pass true to use it)"),
         dist_M1_M2: z.number().min(-1).max(1).optional().describe("Moment ratio M1/M2 for the distortional β factor (+ reverse curvature, − single curvature). Giving it (or dist_Lm) turns the screen's β on; omit → the screen's values when β is on there"),
@@ -1658,7 +1744,7 @@ server.tool("aisi_design_flexure",
 );
 
 server.tool("aisi_design_combined",
-    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. The bending part is the flexure check of the screen's inputs, so the screen's web crippling (§G5/§H3 when a bearing length is there), positive-moment region, β, cold-work and R choices apply too (set_case_inputs changes them). " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
+    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. The bending part is the flexure check of the screen's inputs, so the screen's web crippling (§G5/§H3 when a bearing length is there), positive-moment region, β, cold-work and R choices apply too (set_case_inputs changes them)." + WEB_OPTIONS_NOTE + " §H4 with weak-axis bending (Muy > 0) is not evaluated. " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         zero_demand_stated: ZDS,
         design_method: DM,
@@ -1683,7 +1769,9 @@ server.tool("aisi_design_combined",
         Fcre_basis: z.enum(['fsm_long_wavelength']).optional().describe("Only with Fcre: 'fsm_long_wavelength' when Fcre was read at the long-wavelength end of an FSM signature curve — the engine then flags it (and what derives from it) for comparison at 1e-4 instead of 1e-6 (check contract §16.14)"),
         moment_sign: z.enum(['+', '-']).optional().describe("Sign of Mux (+ = top flange in compression) for sections not symmetric about x; omit → sign of Mux"),
         shear_n_webs: z.number().int().min(1).optional().describe("Number of webs resisting shear (omit → inferred)"),
-        transverse_stiffeners: z.boolean().optional().describe("Web has transverse stiffeners (§G2.2 not implemented → §G2.1, conservative, with a warning)"),
+        ...STIFFENER_FIELDS,
+        ...HOLE_FIELDS,
+        ...TORSION_FIELDS,
         ...CHECK_CONTEXT,
         detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
@@ -1881,7 +1969,7 @@ server.tool("aisi_design_guide", "AISI S100-16 design workflow guide for the AI 
 );
 
 server.tool("get_web_crippling",
-    "AISI S100-16 §G5 web crippling of one web (standalone): G5-1 built-up I (Pn is the total for both webs), G5-2 C (incl. overhang), G5-3 Z, G5-4 hat, G5-5 multi-web deck. Out-of-range or not-covered cases return `error` with Pn null (no verdict), plus within_limits / limit_violations / not_covered (e.g. fastened two-flange unstiffened cases). A fastened, unstiffened-flange one-flange case uses the unfastened row as a stated conservative substitute (row_used, assumptions). h3_applies / h3_equation say whether §H3 bending interaction applies; h3_evaluated=false means it was NOT computed here — use aisi_design_flexure with wc_* inputs for the combined check. All engine inputs are explicit — nothing is filled in.",
+    "AISI S100-16 §G5 web crippling of one web (standalone): G5-1 built-up I (Pn is the total for both webs), G5-2 C (incl. overhang), G5-3 Z, G5-4 hat, G5-5 multi-web deck. Out-of-range or not-covered cases return `error` with Pn null (no verdict), plus within_limits / limit_violations / not_covered (e.g. fastened two-flange unstiffened cases). A fastened, unstiffened-flange one-flange case uses the unfastened row as a stated conservative substitute (row_used, assumptions). h3_applies / h3_equation say whether §H3 bending interaction applies; h3_evaluated=false means it was NOT computed here — use aisi_design_flexure with wc_* inputs for the combined check. With hole_* (C-section web with holes) §G6 multiplies Pn by Rc (Rc, Pn_without_holes, g6 with its limits (a)–(i)); outside §G6 → error with Pn null. All engine inputs are explicit — nothing is filled in.",
     {
         h: z.number().positive().describe("Flat depth of the web between fillets — in, or mm if units='SI'"),
         t: z.number().positive().describe("Web thickness — in, or mm"),
@@ -1901,7 +1989,16 @@ server.tool("get_web_crippling",
         bearing_case: z.enum(["end_bearing", "interior_bearing", "overhang_bearing"]).optional().describe("Explicit bearing-case override"),
         support_fastener_spacing: z.number().positive().optional().describe("Multi-web deck support fastener spacing — in, or mm (> 18 in = unfastened)"),
         d: z.number().positive().optional().describe("Out-to-out member depth (used by checks that need it) — in, or mm"),
-        web_holes: z.boolean().optional().describe("Web has holes (§G5 tables do not cover them → reported)"),
+        web_holes: z.boolean().optional().describe("Web has holes but no hole data is given (§G5 tables do not cover them → reported). Give hole_* for §G6 instead"),
+        hole_shape: z.enum(['circular', 'noncircular']).optional().describe("§G6 web crippling of a C-section web with holes: hole shape (with hole_depth, hole_length for noncircular, hole_spacing, hole_end_distance, hole_corner_radius for noncircular, hole_bearing_distance). §G6 covers only Eq. G5-1 + Table G5-2 C sections, EOF / IOF; outside its limits → error with Pn null (the value without holes is not conservative)"),
+        hole_depth: z.number().positive().optional().describe("§G6: dh — hole depth across the web — in, or mm"),
+        hole_length: z.number().positive().optional().describe("§G6: Lh — hole length along the member (circular: = dh) — in, or mm"),
+        hole_spacing: z.number().positive().optional().describe("§G6: centre-to-centre spacing — in, or mm"),
+        hole_end_distance: z.number().nonnegative().optional().describe("§G6(e): member end to the nearest hole edge — in, or mm"),
+        hole_corner_radius: z.number().nonnegative().optional().describe("§G6(f): corner radius of a noncircular hole — in, or mm"),
+        hole_web_offset: z.number().optional().describe("§G6(c): offset of the hole centre from mid-depth (omit = 0) — in, or mm"),
+        hole_bearing_distance: z.number().optional().describe("§G6: x, hole edge to edge of bearing (Eq. G6-1 / G6-2) — in, or mm"),
+        hole_within_bearing: z.boolean().optional().describe("§G6: a hole lies within the bearing length → not evaluated (a bearing stiffener is required)"),
         units: UNITS_MEMBER,
     },
     async (args) => postTool('get_web_crippling', 'web_crippling', args, SI_OUT_MEMBER)
@@ -2012,7 +2109,8 @@ server.tool("design_purlin",
     + "Each region carries its own Ly, Cb, distortional moment-gradient β (from the region's end moments, beta_dist) and members (2 inside laps: per-member Mu and strength). "
     + "Web crippling (§G5 with §H3) is checked at each support from the analysed reactions, with EOF/IOF from the support position, when a bearing length and web bend radius are there (wc_N / wc_R, or the screen's values — the screen starts with a bearing length); without them (or wc_N 0) it is not evaluated. "
     + "Inputs you leave out are the screen's (loads, deck and the span table are taken whole — see their arguments); the reply's case_inputs_used names those it used. "
-    + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. " + VERDICT
+    + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. "
+    + "Web holes (hole_*) and transverse web stiffeners (transverse_stiffeners, stiffener_*) — the screen's sections — apply to every region check (§F2.2 · §F3.2.2 · §F4.2 · §G3 · §G6 · §G2.2 · §G4.1); lap regions and §I6.2.1 uplift regions with holes are NOT EVALUATED by the engine (no provision covers them) — report it. §H4 bending + torsion is not applied to the load-analysis members." + HOLE_DESC_TAIL + " " + VERDICT
     + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions)."
     + " The default reply is a summary: overall verdict, one line per region (range, kind, governing check point and check, ratio, verdict, failing / not-evaluated / governing check ids of all its check points), the governing region's governing checks, reactions, deck and §I6.2.1 data, and every notice text of the bundle — top-level lists plus notices_elsewhere [{kind, text, where: region ids | 'all regions' | load_analysis …}]; each check point's combination is the load combination (and pattern) that produced its demand, or 'envelope' when the load analysis cannot tell; detail:'checks' adds every check point of every region with its checks, detail:'full' returns the whole bundle as before (several MB for many regions), get_design_check one check with its steps.",
     {
@@ -2030,6 +2128,9 @@ server.tool("design_purlin",
         use_cold_work: z.boolean().optional().describe("Allow §A3.3.2 cold-work increase in the region designs where permitted (omit → the screen's check box — it starts unchecked; pass true to use it)"),
         lap_restrained: z.boolean().optional().describe("The PERSON's statement that the lapped portions are sufficiently restrained against lateral-torsional and distortional buckling (AISI Design Manual Examples II-1A / II-2A assumption). ASK THE USER — never set it on your own. true → the lap regions use Lb = 0 and F4 is not applicable (stated in assumptions); not stated (here or on the screen) → the lap regions' F2 and F4 are not evaluated and the purlin has no verdict unless a check fails. Kept with the review (the screen's 「랩 구간의 구속 확인」); omit → the screen's statement, false clears it."),
         distortion_restrained: z.boolean().optional().describe("Old name of lap_restrained (same meaning)"),
+        // 결정 T6 · T7: 구간 검토의 구멍 · 횡방향 웹 보강재(§H4 는 하중 해석이 비틀림을 풀지 않아 받지 않는다)
+        ...HOLE_FIELDS,
+        ...STIFFENER_FIELDS,
         detail: DETAIL_DESIGN,
         units: UNITS_LOADS,
     },
