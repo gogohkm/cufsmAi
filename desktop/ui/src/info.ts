@@ -17,13 +17,14 @@ import { LABEL as LABEL_OF, si, UNITS_NOTE, type Kind } from './units';
 import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { damageInfo } from './damage';
-import { fastenerText, fieldText, finder, FORCE_MODEL_WHY, lengthBoundHtml, noVerdictWhy, comboStandard, comboStandardTip, forceModelConfirmed, forceModelTag, noteLi, noteList, pageOf, reasonNote, unconfirmedModel, utilHtml, type Note } from './notices';
+import { checkRatioHtml, fastenerText, fieldText, finder, FORCE_MODEL_WHY, lengthBoundHtml, noVerdictWhy, comboStandard, comboStandardTip, forceModelConfirmed, forceModelTag, noteLi, noteList, pageOf, reasonNote, unconfirmedModel, utilHtml, type Note } from './notices';
 import { actorOf, actorTag, baseOf, changeOf, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
 import { asmInfo, questionsAbout, srcInfo, srcs, work, workInfo } from './work';
 import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
 import { alts, altInfo, altRootInfo, visibleAlts } from './alts';
 import type { CheckRow } from './store';
 import { stageNow } from './center';
+import { webOptionBlocks } from './webopts';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
 const T_SET = '<span class="tag" data-tip="누군가 정한 값. 누가 정했는지(AI · 사람)는 변경 기록(R2)부터 보인다">지정</span>';
@@ -256,12 +257,12 @@ function checksInfo(key: string): string {
   const dcLine = row && row.si?.demand && row.si?.capacity && typeof row.si.demand.value === 'number' && typeof row.si.capacity.value === 'number'
     ? `${esc(String(row.si.demand.symbol ?? ''))} ${qnum(row.si.demand, `${row.src}demand.`, { sig: 3 })} / ${esc(String(row.si.capacity.symbol ?? ''))} ${qnum(row.si.capacity, `${row.src}capacity.`, { sig: 3 })}`
     : '';
-  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? ratio(focusRatio, ng, row ? `${row.src}ratio` : `${run.src}${run.utilPath}`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : utilHtml(run.us, run.result?.utilization, `${run.src}utilization`, none('판정비 없음'))}</span>`
+  const head = `<div><span class="verdict ${vv.cls === 'na' ? 'un' : vv.cls}" data-verdict="${esc(row?.verdict ?? '')}">${vv.text}</span> <span class="big">${typeof focusRatio === 'number' ? checkRatioHtml(row?.us, focusRatio, ng, row ? `${row.src}ratio` : `${run.src}${run.utilPath}`) : row && row.kind !== 'ls' ? `<span class="un-head" data-un-head>${esc(unText(row))}</span>` : utilHtml(run.us, run.result?.utilization, `${run.src}utilization`, none('판정비 없음'))}</span>`
     + ` <span class="dim">${dcLine}${row?.clause ? ` · §${esc(row.clause)}` : ''}${row ? ratioFormTag(row) : ''}</span></div>`
     + (row && (row.kind === 'ne' || row.kind === 'na') ? ((rn => `<div class="dim" data-reason${rn?.code ? ` data-code="${esc(rn.code)}"` : ''}>${esc(rn?.text ?? '')}</div>`)(reasonNote(row.us))) : '')
     + (row ? highestLine(row) : '')
     // 엔진 2차: 가정한 길이의 결과가 길이와 상관없는 하한으로 NG — 검토 전체의 판정비 · 한계상태는 그 하한, 가정한 길이의 이용률은 참고
-    + (run.bound ? `<div class="dim" data-run-bound="${esc(run.bound.check ?? '')}">검토 전체 NG — 어느 길이에서나 넘는다: ${lengthBoundHtml(run.us, run.bound, `${run.src}${run.utilPath}`, run.utilRef)}</div>` : '')
+    + (run.bound ? `<div class="dim" data-run-bound="${esc(run.bound.check ?? '')}" data-bound-kind="${run.bound.kind ?? 'length'}">${run.bound.kind === 'holes' ? '검토 전체 NG — 구멍 조항을 평가하지 못했지만 구멍 없는 강도로도 넘는다' : '검토 전체 NG — 어느 길이에서나 넘는다'}: ${lengthBoundHtml(run.us, run.bound, `${run.src}${run.utilPath}`, run.utilRef)}</div>` : '')
     + (typeof focusRatio === 'number' ? gaugeHtml(focusRatio, ng) : '');
   const areaKo = run.area === 'lap' ? '접합부 검토 · 랩' : run.area === 'connection' ? '접합부 검토' : '부재 검토';
   const kHead = `${areaKo} · ${esc(row ? row.where : run.where)} · 검토 전체 <span class="verdict ${ov.cls}" style="font-weight:400"${tip('엔진의 전체 판정(pass): NG 가 하나라도 있으면 NG, 평가 못 한 것이 있으면 판정 없음, 모두 만족이면 OK')}>${ov.text}</span>`;
@@ -287,11 +288,11 @@ function checksInfo(key: string): string {
   const lsRows = here.map(x => {
     const v = VERDICT_KO[x.verdict] ?? VERDICT_KO.not_evaluated;
     return `<tr${x.key === row?.key ? ' class="on"' : ''} data-k="${esc(x.key)}" data-id="${esc(x.id)}"><td><span class="dot ${v.cls === 'na' ? '' : v.cls}"></span> ${esc(x.name)} <span class="faint">§${esc(x.clause)}</span></td>`
-      + `<td class="r dc">${demandCapacity(x)}</td><td class="r">${typeof x.ratio === 'number' ? ratio(x.ratio, x.verdict === 'fail', `${x.src}ratio`) : '<span class="faint">—</span>'}</td>`
+      + `<td class="r dc">${demandCapacity(x)}</td><td class="r">${typeof x.ratio === 'number' ? checkRatioHtml(x.us, x.ratio, x.verdict === 'fail', `${x.src}ratio`, true) : '<span class="faint">—</span>'}</td>`
       + `<td class="r verdict ${v.cls === 'na' ? 'un' : v.cls}" style="font-weight:400">${v.text}</td></tr>`;
   }).join('')
     + run.notApplicable.map(t => `<tr class="na"><td><span class="dot"></span> ${esc(t)}</td><td></td><td class="r faint">—</td><td class="r faint">해당 없음</td></tr>`).join('');
-  const ls = lsRows ? `<table class="t"><thead><tr><th></th><th class="r">소요 / 설계강도</th><th class="r">판정비</th><th class="r">판정</th></tr></thead><tbody>${lsRows}</tbody></table>`
+  const ls = lsRows ? `<table class="t ls"><thead><tr><th></th><th class="r">소요 / 설계강도</th><th class="r">판정비</th><th class="r">판정</th></tr></thead><tbody>${lsRows}</tbody></table>`
     : none('평가한 한계상태 없음', '소요강도를 주지 않으면 엔진은 강도만 내고 판정비를 내지 않는다');
   const out = run.notChecked.length ? ul(run.notChecked, 'notes faint') : none('없음');
   const sheetLink = row && row.us ? `<a class="lnk" data-sheet="${esc(row.key)}"${tip('이 검토 항목의 계산 시트(Enter · 두 번 누르기)')}>계산 시트 →</a>` : '';
@@ -304,6 +305,8 @@ function checksInfo(key: string): string {
   return `<div class="hd"><div class="k">${kHead}<span class="sp"></span>${rvBtn}</div><div class="ttl">${esc(row ? `${row.where} · ${row.name}` : run.label)}</div>${head}</div>`
     + nfNotice
     + sec('설계 가정', used, '', '이 판정에 엔진이 쓴 값. 입력의 출처는 모델 탭의 부재 · 하중 · 설계 조건(검토 상태) — 사람별 기록은 R2 부터')
+    // 결정 T7: 웹 구멍 · 전단 곡선 · Rc · 보강재 §G4.1 · §H4 — 결과에 그 묶음이 있을 때만(고른 항목에 닿는 것)
+    + (run.area === 'member' || run.area === 'purlin' ? webOptionBlocks(run, rw ? row : undefined) : '')
     + sec(row?.pointName ? '한계상태 · 이 위치' : '한계상태 · 이 검토', ls, sheetLink)
     + (run.neTexts.length ? sec('엔진의 미검토 글', ul(run.neTexts), '', '엔진 결과의 not_evaluated 알림(검토 항목과 같은 것을 글로)') : '')
     + sec('범위 밖', out, '', '엔진이 이 검토에서 하지 않은 것(not_checked) — 판정에 들어가지 않는다. 미검토(not_evaluated)와 다르다')

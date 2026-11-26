@@ -18,7 +18,7 @@ import { bandVar, none, num, ratio, sigText } from './format';
 import { memberSvg } from './member';
 import { BUCKLING_METHOD_KO, SOURCE_KO, STEP_KO, VERDICT_KO, sectionLabel } from './names';
 import { allRows, POINT_KO, rowOfKey, state, type CheckRow, type Run, COMBO_KO, locWords } from './store';
-import { fieldText, noteLi, readerOf, reasonNote, type Note } from './notices';
+import { checkRatioHtml, fieldText, noteLi, readerOf, reasonNote, untrustedTag, type Note } from './notices';
 import { itemOfRow, markButton, rv } from './reviews';
 import { inputWhy } from './changes';
 import { kindOfQuantity, LABEL, si } from './units';
@@ -186,7 +186,7 @@ function card(r: CheckRow, n: string, sel: string): string {
   const stepsSI: any[] = Array.isArray(r.si?.steps) ? r.si.steps : steps;
   const cls = `card${r.governs ? ' gov' : ''}${r.key === sel ? ' on' : ''}${un ? ' un' : ''}`;
   const right = un ? `<span class="verdict un">${unText(r)}</span>`
-    : `${dcShort(r)}${typeof r.ratio === 'number' ? ratio(r.ratio, v === 'fail', `${r.src}ratio`) : '<span class="faint">비 없음</span>'}${ratioFormTag(r)}`;
+    : `${dcShort(r)}${typeof r.ratio === 'number' ? checkRatioHtml(r.us, r.ratio, v === 'fail', `${r.src}ratio`, true) : '<span class="faint">비 없음</span>'}${ratioFormTag(r)}`;
   const head = `<header data-card-head="${esc(r.key)}"${tip(`${r.id}${r.governs ? ' · 무리의 지배 항목(governs)' : ''}${r.counts ? '' : ' · 판정에 들지 않는다(counts: false)'}`)}>`
     + `<span class="dot ${dot}"></span><h5>${esc(n)} ${esc(r.name)}</h5>${clauseChip(r)}${r.governs ? `<span class="tag drv" data-governs-basis="${esc(String(r.us?.governs_basis ?? ''))}"${tip(governsTip(r))}>${r.us?.governs_basis === 'not_evaluated' ? '지배 — 미검토' : '지배'}</span>` : ''}`
     + `${r.counts ? '' : '<span class="tag"' + tip('적용 조건 — 판정에 들지 않는다') + '>조건</span>'}<span class="sp"></span>${right}<span class="faint">${open ? '▾' : '▸'}</span></header>`;
@@ -202,11 +202,11 @@ function card(r: CheckRow, n: string, sel: string): string {
         + '</div>';
     } else if (!steps.length) {
       body = `<div class="cbody dim">계산 과정이 없다 — ${esc(r.us?.steps_unavailable ? fieldText(r.us, 'steps_unavailable') : '엔진이 이 항목의 단계를 내지 않았다')}. 엔진이 준 것: `
-        + `${r.si?.demand ? `소요 ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}${r.si?.capacity ? ` · 설계강도 ${qnum(r.si.capacity, `${r.src}capacity.`)}` : ''}${typeof r.ratio === 'number' ? ` · 비 ${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}` : ''}</div>`;
+        + `${r.si?.demand ? `소요 ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}${r.si?.capacity ? ` · 설계강도 ${qnum(r.si.capacity, `${r.src}capacity.`)}` : ''}${typeof r.ratio === 'number' ? ` · 비 ${checkRatioHtml(r.us, r.ratio, v === 'fail', `${r.src}ratio`)}` : ''}</div>`;
     } else {
       const fin = `<div class="row" data-final><span>판정</span><span>${r.us?.ratio_form ? '원문 좌변 ' : ''}${r.si?.demand ? `${esc(String(r.si.demand.symbol ?? ''))} ${qnum(r.si.demand, `${r.src}demand.`)}` : ''}`
         + `${r.si?.capacity ? `${r.us?.ratio_form ? ' ≤ ' : ' / '}${esc(String(r.si.capacity.symbol ?? ''))} ${qnum(r.si.capacity, `${r.src}capacity.`)}` : ''}${typeof r.ratio === 'number' ? `${r.us?.ratio_form ? ', 견줄 비 ' : ' = '}<b>${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}</b>${ratioFormTag(r)}` : ''} → ${verdictSpan(v)}`
-        + `${((rn) => (rn ? ` <span class="why2" data-reason${rn.code ? ` data-code="${esc(rn.code)}"` : ''}>${esc(rn.text)}</span>` : ''))(reasonNote(r.us))}${r.us?.trusted === false ? ' <span class="tag def"' + tip('엔진이 이 값을 판정에 믿지 않는다(trusted: false)') + '>믿지 않는 값</span>' : ''}</span></div>`;
+        + `${((rn) => (rn ? ` <span class="why2" data-reason${rn.code ? ` data-code="${esc(rn.code)}"` : ''}>${esc(rn.text)}</span>` : ''))(reasonNote(r.us))}${untrustedTag(r.us)}</span></div>`;
       // 판정 단계가 있으면 그것이 판정 줄이다 — 없을 때만 항목의 소요 / 설계강도 · 판정으로 맺는다
       const hasVerdictStep = steps.some(st => st?.kind === 'verdict');
       body = `<div class="cbody calc" data-steps="${steps.length}">${steps.map((st, k) => stepRow(st, stepsSI[k], `${r.src}steps.${k}.`, k)).join('')}${hasVerdictStep ? '' : fin}</div>`;
@@ -351,7 +351,7 @@ export function sheetHtml(key: string, w = 900): string {
   const sibs = siblings(r);
   const cards = sibs.map((x, i) => card(x, `3.${i + 1}`, key)).join('');
   const v = r.verdict;
-  const big = typeof r.ratio === 'number' ? `<span class="num" style="font-size:20px">${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}</span>` : '';
+  const big = typeof r.ratio === 'number' ? `<span class="num" style="font-size:20px">${ratio(r.ratio, v === 'fail', `${r.src}ratio`)}</span>${untrustedTag(r.us)}` : '';
   return `<article class="sheet" data-sheet-key="${esc(key)}">`
     + `<div class="hd"><div><h2>${esc(r.where)} · ${esc(r.name)} — 계산 시트</h2><div class="dim" style="margin-top:3px">${esc(sub)}</div></div><span class="sp"></span>`
     + `<div style="text-align:right"><div>${verdictSpan(v)} ${big}</div><div class="dim">${rv.loaded && itemOfRow(r) ? markButton(itemOfRow(r), `data-rv-check="${esc(r.key)}"`) : markButton(null, '', '확인 표시는 프로젝트의 검토 대상에서만')}</div></div></div>`

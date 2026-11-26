@@ -6,7 +6,7 @@
  * 출처: `sources[key]` — 기본값 · 지정 · AI · 파일 · 하중 해석 · 연동(화면이 다른 칸을 따라 채움). AI 가 그 도구의 묶음에서 주지 않은 칸은 값이 null 이고
  * 출처가 ai — 「AI: 주지 않음」. 그 밖의 null 은 「빈칸」(입력 없음 — 지어낸 값을 쓰지 않는다).
  */
-import { BRANCH_OF, CASE_FIELDS, CASE_KO, CASE_SOURCE, caseTag, fieldOf, GROUP_KO, OPTION_KO } from './caseFields';
+import { BRANCH_OF, CASE_FIELDS, CASE_KO, CASE_SOURCE, caseTag, fieldOf, GROUP_KO, OPTION_KO, optionKo, WEB_SECTIONS, webSectionKeys, webSectionOff } from './caseFields';
 const CASE_SOURCE_KO = (s: string): string => CASE_SOURCE[s]?.t ?? s;
 import { esc, tip } from './dom';
 import { none, num, sigText } from './format';
@@ -22,9 +22,17 @@ const srcOf = (key: string): string | undefined => ci()?.sources?.[key];
 export const blankByAi = (key: string): boolean => ci()?.inputs?.[key] === null && srcOf(key) === 'ai';
 
 /** 값 하나(SI) — 수 · 선택지 · 체크 · 목록. null 이면 「AI: 주지 않음」 또는 「빈칸」 */
-export function caseValue(key: string, o: { unit?: boolean; sig?: number } = {}): string {
+export function caseValue(key: string, o: { unit?: boolean; sig?: number; short?: boolean } = {}): string {
   const f = fieldOf(key);
   const raw = ci()?.inputs?.[key];
+  // 결정 T7: 구멍 모양을 골랐는데 중심 간격이 비었으면 구멍 하나(엔진: hole_spacing 없음 = 이웃 구멍이 없는 구멍 하나 — 가정으로 밝힌다)
+  if (key === 'holeSpacing' && (raw === null || raw === undefined || raw === '') && !webSectionOff('holeShape', ci()?.inputs?.holeShape)) {
+    return `<span class="dim" data-single-hole="1"${tip(`중심 간격을 ${blankByAi(key) ? 'AI 가 주지 않았다' : '비웠다'} — 엔진은 이웃 구멍이 없는 구멍 하나로 계산한다(그 가정을 결과에 밝힌다)`)}>구멍 하나</span>`;
+  }
+  // 선택지의 '' 는 「고르지 않음」(편집 화면의 첫 보기 — 값이 아니다)
+  if (raw === '' && f?.type === 'sel' && f.opts?.includes('')) {
+    return `<span class="none" data-ckey="${esc(key)}" data-text=""${tip('편집 화면에서 「고르지 않음」 — 그 값을 엔진에 보내지 않는다')}>${esc(optionKo(key, '') ?? '고르지 않음')}</span>`;
+  }
   if (raw === null || raw === undefined || raw === '') {
     return blankByAi(key) ? `<span class="none" data-blank="ai"${tip('AI 가 이 도구의 입력 묶음에서 주지 않았다 — 빈칸(엔진이 그 칸 없이 계산했다)')}>AI: 주지 않음</span>` : none('빈칸', '입력 없음');
   }
@@ -32,7 +40,8 @@ export function caseValue(key: string, o: { unit?: boolean; sig?: number } = {})
   if (f?.type === 'chk' || typeof raw === 'boolean') { return `<span data-ckey="${esc(key)}" data-bool="${raw ? 1 : 0}">${raw ? '켬' : '끔'}</span>`; }
   if (f?.type === 'sel' || typeof raw === 'string') {
     const s = String(raw);
-    return `<span data-ckey="${esc(key)}" data-text="${esc(s)}">${esc(OPTION_KO[s] ? `${OPTION_KO[s]} · ${s}` : s)}</span>`;
+    const ko = optionKo(key, s);
+    return `<span data-ckey="${esc(key)}" data-text="${esc(s)}">${esc(ko ? (o.short ? ko : `${ko} · ${s}`) : s)}</span>`;
   }
   const { v, kind } = caseSI(raw, f?.kind ?? null);
   if (Array.isArray(v)) {
@@ -64,12 +73,27 @@ export function branchSummary(b: Branch): string {
   return String(I.presteelGrade ?? '');
 }
 
-/** 트리 아이(키 · 이름 · 값 · 출처) */
-export function branchKids(b: Branch): Array<{ k: string; t: string; vHtml: string; src?: string }> {
+/** 트리 아이(키 · 이름 · 값 · 출처) — 구역(웹 구멍 · 보강재 · 비틀림)은 그 아래 칸을 kids 로 */
+export interface CaseKid { k: string; t: string; vHtml: string; src?: string; kids?: CaseKid[]; tip?: string }
+/**
+ * 결정 T7 — 설계 조건 아래의 구역 셋. 줄 하나 = 머리 칸(구멍 · 보강재 · 비틀림 — 그 출처 꼬리표), 「없음」 이면 아이 없이 「없음」 한 줄,
+ * 고르면 편집 화면이 보이는 칸(webSectionKeys)이 아이로
+ */
+export function webSectionKids(): CaseKid[] {
+  const x = ci();
+  if (!x?.inputs) { return []; }
+  return WEB_SECTIONS.filter(s => s.mode in x.inputs).map(s => {
+    const keys = webSectionKeys(s.group, x.inputs);
+    return { k: `case:${s.mode}`, t: GROUP_KO[s.group], vHtml: caseValue(s.mode, { short: true }), src: srcOf(s.mode),
+      tip: keys.length ? `편집 화면 설계 탭의 「${GROUP_KO[s.group]}」 — 보이는 칸 ${keys.length}` : `편집 화면 설계 탭의 「${GROUP_KO[s.group]}」 — 없음(엔진에 아무것도 보내지 않는다)`,
+      kids: keys.length ? keys.map(k => ({ k: `case:${k}`, t: LABEL_FALLBACK(k), vHtml: caseValue(k), src: srcOf(k) })) : undefined };
+  });
+}
+export function branchKids(b: Branch): CaseKid[] {
   const x = ci();
   if (!x?.inputs) { return []; }
   const S = x.spans ?? {};
-  const kid = (key: string, label = LABEL_FALLBACK(key)) => ({ k: `case:${key}`, t: label, vHtml: caseValue(key), src: srcOf(key) });
+  const kid = (key: string, label = LABEL_FALLBACK(key)): CaseKid => ({ k: `case:${key}`, t: label, vHtml: caseValue(key), src: srcOf(key) });
   if (b === 'mem') {
     const spans: unknown[] = Array.isArray(S.spans) ? S.spans : [];
     const laps: Array<{ left: unknown; right: unknown }> = Array.isArray(S.lapsPerSupport) ? S.lapsPerSupport : [];
@@ -88,7 +112,7 @@ export function branchKids(b: Branch): Array<{ k: string; t: string; vHtml: stri
   if (b === 'ld') { return ['loadD', 'loadLr', 'loadS', 'loadWu', 'loadWp', 'loadL'].map(k => kid(k, CASE_KO[k].split(' ')[0])).concat([kid('chkPatternLoading', '부분재하')], 'loadComboStandard' in x.inputs ? [kid('loadComboStandard', '조합 기준')] : []); }
   // 소요 칸은 빈 채로 시작한다(0 이 아니다 — 비면 「빈칸」). 「0 이 맞다」 진술은 호스트의 상태에 있으면 보인다(zero_demand_stated)
   const has = (k: string) => k in x.inputs;
-  if (b === 'dc') { return [kid('designMethod', '설계법'), kid('Lb', 'Lb'), kid('Cb', 'Cb'), kid('Mux', 'Mux'), kid('Pu', 'Pu'), kid('Vu', 'Vu'), ...(has('designZeroDemandStated') ? [kid('designZeroDemandStated')] : []), kid('wcN', '지압 길이 N')]; }
+  if (b === 'dc') { return [kid('designMethod', '설계법'), kid('Lb', 'Lb'), kid('Cb', 'Cb'), kid('Mux', 'Mux'), kid('Pu', 'Pu'), kid('Vu', 'Vu'), ...(has('designZeroDemandStated') ? [kid('designZeroDemandStated')] : []), kid('wcN', '지압 길이 N'), ...webSectionKids()]; }
   if (b === 'cj') {
     return [kid('connFastenerType', '랩 패스너'), ...(has('connLapSupport') ? [kid('connLapSupport', '랩 지점')] : []), kid('connLapLeft', '랩 좌'), kid('connLapRight', '랩 우'), kid('connNRows', '열 수'), ...(has('lapForceModelConfirmed') ? [kid('lapForceModelConfirmed')] : []),
       ...(has('connMu') ? [kid('connMu')] : []), ...(has('connVu') ? [kid('connVu')] : []), ...(has('connZeroDemandStated') ? [kid('connZeroDemandStated')] : []), kid('connSingleType', '단일 접합')];
@@ -97,7 +121,7 @@ export function branchKids(b: Branch): Array<{ k: string; t: string; vHtml: stri
 }
 
 const BRANCH_GROUPS: Record<Branch, string[]> = {
-  mem: ['member', 'deck'], ld: ['loads'], dc: ['method', 'design', 'required', 'options', 'webCrippling'], cj: ['lap', 'connection'], mat: ['material'],
+  mem: ['member', 'deck'], ld: ['loads'], dc: ['method', 'design', 'required', 'options', 'webCrippling', 'holes', 'stiffeners', 'torsion'], cj: ['lap', 'connection'], mat: ['material'],
 };
 export const BRANCH_TITLE: Record<Branch, string> = { mem: '부재', ld: '하중', dc: '설계 조건', cj: '접합부', mat: '재료 · 설계 강도' };
 void BRANCH_OF;
@@ -124,9 +148,12 @@ export function caseTables(b: Branch, focus: string | null): string {
     html += `<div class="sec"><h4${tip('없으면 엔진이 퍼린의 랩 구간과 랩 검토를 「검토 안 함 — 진술 없음」으로 낸다')}>랩 구간</h4><table class="t" data-table="case-lapRestraint"><tbody>${row('lap_restrained')}</tbody></table></div>`;
   }
   for (const g of BRANCH_GROUPS[b]) {
-    const keys = CASE_FIELDS.filter(f => f.group === g).map(f => f.key);
+    let keys = CASE_FIELDS.filter(f => f.group === g).map(f => f.key);
+    // 결정 T7 — 구역 셋은 머리 칸과 지금 보이는 칸만(「없음」 이면 머리 칸 한 줄)
+    const ws = WEB_SECTIONS.find(s => s.group === g);
+    if (ws) { keys = keys.includes(ws.mode) ? [ws.mode, ...webSectionKeys(g, x.inputs)] : []; }
     if (!keys.length) { continue; }
-    html += `<div class="sec"><h4>${esc(GROUP_KO[g] ?? g)}</h4><table class="t" data-table="case-${esc(g)}"><tbody>${keys.map(row).join('')}</tbody></table></div>`;
+    html += `<div class="sec"${ws ? ` data-web-section="${esc(g)}"` : ''}><h4${ws ? tip('편집 화면 설계 탭의 접이 구역 — 「없음」 이면 엔진에 아무것도 보내지 않는다(결정 T7)') : ''}>${esc(GROUP_KO[g] ?? g)}</h4><table class="t" data-table="case-${esc(g)}"><tbody>${keys.map(row).join('')}</tbody></table></div>`;
   }
   return html;
 }
@@ -138,7 +165,7 @@ export function caseNotes(): string {
   const rp = state.caseReplaced;
   const show = (k: string, v: unknown): string => {
     if (v === null || v === undefined || v === '') { return '빈칸'; }
-    if (typeof v !== 'number' && !Array.isArray(v)) { return String(OPTION_KO[String(v)] ?? v); }
+    if (typeof v !== 'number' && !Array.isArray(v)) { return String(optionKo(k, String(v)) ?? v); }
     const { v: sv, kind } = caseSI(v, fieldOf(k)?.kind ?? null);
     return `${Array.isArray(sv) ? sv.join(', ') : sigText(Number(sv), 4)}${kind !== 'none' ? ` ${unitLabel(kind)}` : ''}`;
   };

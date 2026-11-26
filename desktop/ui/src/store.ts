@@ -20,7 +20,7 @@
  * 제품 표로 통째로 SI 로 바꾼 것(quantity 로) — 줄은 그 자리를 가리키기만 한다.
  */
 import { api, last, mcp, type LastEntry } from './bridge';
-import { lengthAssumed, lengthBoundFailure, utilInvalid, utilShown, type LengthBound } from './format';
+import { lengthAssumed, resultBound, utilInvalid, utilShown, type LengthBound } from './format';
 import { loadRecords } from './records';
 import { loadChanges } from './changes';
 import { loadRecordsWork, prefetchOpenQuestions } from './work';
@@ -304,7 +304,7 @@ function runOf(key: string, scope: Scope, label: string, where: string, us: any,
     if (v && typeof v === 'object' && !Array.isArray(v) && !['region', 'force_model', 'request'].includes(k)) { collect(v, `[${k}] `); }
   }
   const notApplicable: string[] = [];
-  const bound = lengthBoundFailure(us);
+  const bound = resultBound(us);
   if (!rows.some(r => r.kind === 'na') && us?.distortional_applicable === false) { notApplicable.push('뒤틀림좌굴(§F4 · §E4)'); }
   return {
     key, area: scope, label, where, result: si, us, src,

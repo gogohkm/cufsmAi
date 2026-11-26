@@ -148,4 +148,4 @@ export function groupMarkButton(groups: string[]): string {
 }
 /** 템플릿 01 의 정보 창 → 호스트의 입력 묶음 */
 export const BRANCH_GROUPS: Record<string, string[]> = { section: ['section'], material_model: ['material_model'], mem: ['member'], ld: ['loads', 'deck'],
-  dc: ['design', 'required', 'options', 'method', 'webCrippling', 'vibration'], cj: ['connection', 'lap'], mat: ['material'] };
+  dc: ['design', 'required', 'options', 'method', 'webCrippling', 'holes', 'stiffeners', 'torsion', 'vibration'], cj: ['connection', 'lap'], mat: ['material'] };

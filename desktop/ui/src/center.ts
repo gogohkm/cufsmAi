@@ -28,7 +28,7 @@ import { memberRuns, regionLabel, rowOfKey, state, type CheckRow, type Run } fro
 import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
-import { fieldText, pageOf, utilHtml } from './notices';
+import { checkRatioHtml, fieldText, pageOf, utilHtml } from './notices';
 import { refKey, work } from './work';
 import { alts, sideBySide, visibleAlts } from './alts';
 import { keyOfItem } from './follow';
@@ -280,7 +280,7 @@ function checkRow(r: CheckRow, sel: string): string {
   const v = verdictOf(r.pass);
   const ng = r.pass === false;
   const bar = r.kind === 'ls' && typeof r.ratio === 'number'
-    ? `<div class="ratio"><div class="track"><div class="fill" style="width:${Math.min(100, r.ratio * 100).toFixed(1)}%;background:${bandVar(r.ratio, ng)}"></div></div>${ratio(r.ratio, ng, `${r.src}ratio`)}</div>`
+    ? `<div class="ratio"><div class="track"><div class="fill" style="width:${Math.min(100, r.ratio * 100).toFixed(1)}%;background:${bandVar(r.ratio, ng)}"></div></div>${checkRatioHtml(r.us, r.ratio, ng, `${r.src}ratio`, true)}</div>`
     : `<div class="ratio"><div class="track un"></div><span class="faint">${r.kind === 'na' ? '해당 없음' : r.kind === 'ls' ? '비 없음' : esc(unText(r))}</span></div>`;
   const vt = r.kind === 'ne' ? '미검토' : r.kind === 'na' ? '해당 없음' : v.text;
   return `<tr class="ck${r.key === sel ? ' on' : ''}${r.kind === 'na' ? ' na' : ''}" data-k="${esc(r.key)}" data-id="${esc(r.id)}" data-verdict="${r.kind === 'ne' ? 'ne' : r.kind === 'na' ? 'na' : v.cls}"><td><span class="dot ${r.kind === 'na' ? '' : v.cls}"></span></td><td>${esc(r.where)}</td>`
@@ -344,7 +344,7 @@ export function tablesFor(group: Group): DTable[] {
       const rows = memberRuns().flatMap((run: Run) => run.rows.map(r => {
         const v = verdictOf(r.pass);
         const vt = r.kind === 'ne' ? '미검토' : r.kind === 'na' ? '해당 없음' : v.text;
-        return { key: r.key, cells: [esc(r.where), esc(r.name), esc(r.clause), demandCapacity(r), typeof r.ratio === 'number' ? ratio(r.ratio, r.pass === false, `${r.src}ratio`) : '<span class="faint">—</span>', `<span class="verdict ${r.kind === 'na' ? 'un' : v.cls}">${vt}</span>`, `<span class="faint">${esc(r.id)}</span>`],
+        return { key: r.key, cells: [esc(r.where), esc(r.name), esc(r.clause), demandCapacity(r), typeof r.ratio === 'number' ? checkRatioHtml(r.us, r.ratio, r.pass === false, `${r.src}ratio`, true) : '<span class="faint">—</span>', `<span class="verdict ${r.kind === 'na' ? 'un' : v.cls}">${vt}</span>`, `<span class="faint">${esc(r.id)}</span>`],
           sort: [r.where, r.name, r.clause, typeof r.si?.capacity?.value === 'number' ? r.si.capacity.value : -1, r.ratio ?? -1, vt, r.id], tsv: [r.where, r.name, r.clause, String(r.si?.demand?.value ?? ''), String(r.si?.capacity?.value ?? ''), String(r.ratio ?? ''), vt, r.id] };
       }));
       t.push({ id: 'checks', title: '판정비', cols: [{ t: '위치' }, { t: '한계상태' }, { t: '조항' }, { t: '소요 / 설계강도', num: true }, { t: '판정비', num: true }, { t: '판정' }, { t: 'id' }], rows, empty: '부재 검토 결과 없음' });
