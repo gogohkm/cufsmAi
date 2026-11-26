@@ -129,6 +129,8 @@ export function buildDesignRequest(st: CaseState, ctx: RequestContext): BuiltReq
     const web = DS.memberWebOptions((k: string) => r.raw(k), isCalcMode(rawMemberType) ? 'purlin' : memberType);
     Object.assign(data, web.data);
     for (const m of web.missing) { r.missing.push(m.label); r.missingKeys.push(m.key); }
+    // 칸의 규칙에 맞지 않는 값(0 이하 · 음수 — 상태는 받지 않으므로 옛 파일 · 초안에서만): 보내지 않고 막는다(빈 필수 칸과 같은 길, 까닭을 이름에)
+    for (const m of web.invalid || []) { r.missing.push(`${m.label} (${DS.webOptionRuleText(m.rule)})`); r.missingKeys.push(m.key); }
     return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
 

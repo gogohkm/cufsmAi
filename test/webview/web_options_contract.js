@@ -31,8 +31,26 @@ function pureChecks() {
   const get = (o) => (k) => (k in o ? o[k] : DS.defaultValue(k));
   // 처음 값: 아무것도 없다
   for (const s of ['compression', 'flexure', 'combined', 'purlin', 'tension']) {
-    assert.deepStrictEqual(DS.memberWebOptions(get({}), s), { data: {}, missing: [] }, `defaults send nothing (${s})`);
+    assert.deepStrictEqual(DS.memberWebOptions(get({}), s), { data: {}, missing: [], invalid: [] }, `defaults send nothing (${s})`);
   }
+  // H2 후속: 칸의 규칙(validateValue — 엔진의 값 규칙과 같다) — 0 이하 · 음수는 상태가 받지 않고, 화면 · 호스트 본문은 보내지 않고 막는다
+  for (const [k, bad, good] of [['stiffenerFy', -50, 50], ['stiffenerFy', 0, 36], ['stiffenerIs', 0, 0.05], ['stiffenerArea', -1, 0.5], ['stiffenerSpacing', 0, 10],
+    ['holeDepth', 0, 1.5], ['holeLength', -4.5, 4.5], ['holeSpacing', 0, 24], ['torsionSpan', -1, 300], ['holeEndDistance', -1, 0], ['holeCornerRadius', -0.1, 0]]) {
+    assert(/0 (보다 커야|이상이어야)/.test(DS.validateValue(k, bad) || ''), `${k} = ${bad} rejected: ${DS.validateValue(k, bad)}`);
+    assert.strictEqual(DS.validateValue(k, good), null, `${k} = ${good} accepted`);
+  }
+  assert.strictEqual(DS.validateValue('holeWebOffset', -0.3), null, 'the hole offset may be negative');
+  assert.strictEqual(DS.validateValue('torsionEccentricity', -1.05), null, 'the eccentricity may be negative');
+  const inv = DS.memberWebOptions(get({ stiffenerMode: 'present', stiffenerSpacing: 10, stiffenerKind: 'pair', stiffenerIs: 0.05, stiffenerArea: 0.5, stiffenerFy: -50 }), 'flexure');
+  assert(!('stiffener_Fy' in inv.data) && inv.invalid.length === 1 && inv.invalid[0].key === 'stiffenerFy' && inv.invalid[0].label === '보강재 Fy'
+    && inv.invalid[0].rule === 'positive' && inv.missing.length === 0, 'invalid stiffener Fy: not sent, named ' + JSON.stringify(inv));
+  const invDh = DS.memberWebOptions(get({ holeShape: 'circular', holeDepth: 0 }), 'compression');
+  assert(invDh.invalid.length === 1 && invDh.missing.length === 0 && !('hole_depth' in invDh.data), 'dh = 0: invalid, not reported as blank too');
+  // 엔진의 잘못된 입력 오류 → 사람이 읽는 글(어느 구역 · 칸 · 무엇이)
+  const U = require(path.join(ROOT, 'webview', 'js', 'utils.js'));
+  const et = U.inputErrorText('stiffeners: stiffener_Fy must be > 0 (ksi), got -1');
+  assert(/횡방향 웹 보강재/.test(et) && /「보강재 Fy」/.test(et) && /0 보다 큰 수여야/.test(et), 'input error text ' + et);
+  assert.strictEqual(U.inputErrorText('No section defined.'), null, 'other errors are left to the caller');
   const holes = { holeShape: 'noncircular', holeDepth: 1.5, holeLength: 4.5, holeSpacing: null, holeCornerRadius: 0.25, holeEndDistance: 9.75,
     holeBearingDistance: 7.25, holeWebOffset: null, holeWithinBearing: false, holeEdgeStiffened: false };
   const f = DS.memberWebOptions(get(holes), 'flexure');
@@ -208,7 +226,8 @@ async function main() {
     const xap = check(x.data, 'member.applicability.holes');
     assert(xap && xap.verdict === 'not_evaluated' && x.data.pass !== true, 'not evaluated ' + JSON.stringify(xap && xap.verdict));
     const codes = (x.data.holes.notices || []).map((n) => n.code);
-    assert(codes.includes('member.reason.holes_web_not_identified') || codes.includes('member.reason.holes_section_not_covered'), 'reason: web not identified / section not covered ' + codes);
+    // 엔진 H2 후속: 요소 자리가 없는 직접 그린 단면은 그 까닭(템플릿으로 만들라는 글)
+    assert(codes.includes('member.reason.holes_custom_section_no_web'), 'reason: hand-drawn section without element roles ' + codes);
     const xi = (await valItems()).find((c) => c.item === '웹 구멍 적용 범위 (부록 2)');
     assert(xi && xi.status === 'warn' && /판정 없음/.test(xi.note), 'validation: no verdict with the reason ' + JSON.stringify(xi));
     notes.push(`W2: hand-drawn section → ${codes.join(', ')}; validation ${xi.status}`);
@@ -303,8 +322,23 @@ async function main() {
     assert(sum.data.holes_basis && sum.data.torsion_basis && sum.data.shear_basis && sum.data.web_crippling_basis, 'summary carries the bases ' + Object.keys(sum.data).join(','));
     assert(lines(sum.data, 'member.bending_torsion') && lines(sum.data, 'member.applicability.holes'), 'summary check lines');
     const topKeys = (d) => Object.entries(d || {}).map(([k, v]) => [k, JSON.stringify(v).length]).sort((a, b) => b[1] - a[1]).slice(0, 12).map((x) => x.join(' ')).join(', ');
-    // 예산(mcp_si_chain 의 단일 부재 12 KB): 구멍(§G3 · §G6 포함) 한 사례 · §H4 한 사례. 셋을 한꺼번에 준 사례는 크기만 적는다(알림 글이 셋의 합)
+    // 엔진 H2 후속: §H4 의 위치 · θ'' 는 물리량(location_q · steps 의 *_q) — SI 로 바뀐다(per_area 1/in² → 1/mm²), 모르는 수가 없다
+    const lq = si.data.torsion.location_q, lqU = us.data.torsion.location_q;
+    assert(lq && near(lq.z.value, lqU.z.value * 25.4) && lq.node.value === lqU.node.value && near(lq.theta_pp.value, lqU.theta_pp.value / 645.16),
+      'torsion location_q in SI ' + JSON.stringify({ lq, lqU }));
+    assert(near(si.data.torsion.theta_pp, (U.torsion && U.torsion.theta_pp !== undefined ? U.torsion.theta_pp : us.data.torsion.theta_pp) / 645.16), 'torsion.theta_pp 1/mm²');
+    assert(!sum.data.si_unconverted, 'summary: no unconverted key ' + JSON.stringify(sum.data.si_unconverted));
+    // 요약의 근거 묶음은 지배 머리 · 검토 줄에 있는 것을 다시 싣지 않는다(크기)
+    assert(!('Mn' in sum.data.torsion_basis) && !('ratio' in sum.data.torsion_basis) && sum.data.torsion_basis.R > 0, 'torsion basis without repeated values ' + JSON.stringify(sum.data.torsion_basis));
+    const gT = (sum.data.governing_checks || []).find((g) => g.id === 'member.bending_torsion');
+    // 머리의 위치는 전체 결과의 위치 그대로(mcp_si_chain 의 계약) — 맨 수와 물리량이 같은 값(SI)
+    assert(!gT || (gT.location && near(gT.location.z, gT.location.z_q.value) && gT.location.node === gT.location.node_q.value), 'head location: z = z_q (SI) ' + JSON.stringify(gT && gT.location));
+    const gH = (sum.data.governing_checks || []).find((g) => g.id === 'member.flexure.local');
+    assert(gH && !('location' in gH) && !('combination' in gH), 'head without a location / combination omits them (null)');
+    assert(!(sum.data.check_lines || []).some((l) => l.governs && 'governs_basis' in l), 'governing lines: governs_basis is in the head');
+    // 예산(mcp_si_chain 의 단일 부재 12 KB): 구멍(§G3 · §G6 포함) · §H4 · 셋을 한꺼번에
     const allIn = sum.bytes;
+    assert(allIn <= 12 * KB, `all three summary ${allIn} B within 12 KB (largest: ${topKeys(sum.data)})`);
     const { torsion_eccentricity: _te, torsion_span: _ts, torsion_load: _tl, torsion_support: _tsu, ...holeOnly } = siArgs;
     void _te; void _ts; void _tl; void _tsu;
     ok(await ai({ action: 'set_case_inputs', inputs: { torsionMode: 'none' } }), 'torsion off for the budget');
@@ -348,6 +382,127 @@ async function main() {
     const prs = await tool('design_purlin', { ...loadArgs });
     assert(prs.bytes <= 40 * KB, `purlin summary ${prs.bytes} B within 40 KB`);
     notes.push(`W5: ${regCalls.length} region checks with holes + stiffeners + model (${withSprings.length} with deck springs), lap holes ${lapReg ? 'not evaluated' : 'n/a'}; summary ${prs.bytes} B`);
+    const prh = await tool('design_purlin', { ...loadArgs, hole_shape: 'circular', hole_depth: 1.5, hole_spacing: 30 });
+    assert(prh.bytes <= 40 * KB, `purlin summary with holes ${prh.bytes} B within 40 KB`);
+    notes.push(`W5b: purlin summary with holes ${prh.bytes} B`);
+
+    // ── W7: 확실한 불합격(구멍 조항을 평가하지 못했지만 구멍 없는 강도의 상한으로도 넘음 — 엔진 8f9126e) ──
+    // 화면 단추와 MCP 가 같은 본문 · 같은 결과, 읽는 곳(실행 요약 · 검증 목록 · 보고서 · MCP 요약)이 같은 비 · 같은 검토(utils · runs · server 의 같은 규칙)
+    const RUNS = ctx.load(path.join('src', 'records', 'runs.ts'));
+    const UT = require(path.join(ROOT, 'webview', 'js', 'utils.js'));
+    const history = async () => (await ai({ action: 'get_case_status', detail: 'runs' })).history || [];
+    const agree = (res, what) => {
+      const ub = UT.lengthBoundFailure(res), rb = RUNS.lengthBoundFailure(res);
+      assert(ub && rb && ub.basis === 'holes' && rb.basis === 'holes' && ub.ratio === rb.ratio && ub.governing_check === rb.id && ub.source === rb.source && ub.ratio > 1,
+        `${what}: page and host rules agree ` + JSON.stringify({ ub, rb }));
+      const gc = check(res, ub.governing_check);
+      assert(gc && gc.verdict === 'fail' && gc.trusted === false && gc.reason_code === 'member.reason.fails_without_holes' && gc.ratio === ub.ratio,
+        `${what}: the governing check is the bound fail ` + JSON.stringify(gc && { v: gc.verdict, t: gc.trusted, r: gc.ratio }));
+      return ub;
+    };
+    ok(await ai({ action: 'new_case', name: 'F', kind: 'section-only' }), 'new_case F');
+    ok(await ai({ action: 'open_case', name: 'F' }), 'open F');
+    ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { H: 5.5, B: 1.625, D: 0.5, t: 0.0346, r: 0.0764 } }), 'template F');
+    ok(await ai({ action: 'set_case_inputs', inputs: { memberType: 'flexure', designMethod: 'LRFD', fy: 33, fu: 45, Lb: 0.0001, Cb: 1, Mux: 40, Vu: null, wcN: null,
+      holeShape: 'noncircular', holeDepth: 1.5, holeLength: 4.5, holeSpacing: 24, holeEdgeStiffened: true } }), 'certain-failure inputs');
+    const f1 = await pressDesign();
+    const b1 = agree(f1.res, 'screen');
+    assert(f1.res.pass === false && f1.res.holes_strength_bound && f1.res.holes_strength_bound.ratio === b1.ratio && b1.source === 'holes_strength_bound', 'screen: NG on holes_strength_bound');
+    const runF = (await history())[0];
+    assert(runF.kind === 'member_design' && runF.max_ratio === b1.ratio && (runF.governing || {}).id === b1.governing_check, 'run summary: bound ratio + check ' + JSON.stringify(runF));
+    const itemsF = await valItems();
+    const negF = itemsF.find((c) => c.item === '이용률 — 부모멘트 (-M)');
+    assert(negF && negF.status === 'fail' && negF.value.startsWith((b1.ratio * 100).toFixed(1) + '%') && /구멍 없는 강도로도 넘음/.test(negF.value), 'validation DCR item ' + JSON.stringify(negF));
+    const lclF = itemsF.find((c) => c.item === '웹 구멍 적용 범위 (부록 2)');
+    assert(lclF && lclF.status === 'warn', 'validation: holes applicability not evaluated ' + JSON.stringify(lclF));
+    const rvF = p.__testReview('US');
+    assert(rvF.reportDoc.verdict.state === 'fail' && rvF.reportDoc.verdict.utilization.value === b1.ratio && rvF.reportDoc.verdict.governing === b1.governing_check,
+      'report verdict: the bound ratio and check ' + JSON.stringify(rvF.reportDoc.verdict));
+    assert(/구멍 없는 강도로도 넘음/.test(rvF.reportHtml) && /구멍 없는 강도의 상한/.test(rvF.reportHtml) && !/믿지 않는 값/.test(rvF.reportHtml), 'report: the bound text, not 「믿지 않는 값」');
+    // MCP: 같은 입력(인자로) — 같은 본문 · 같은 결과, 요약의 utilization_note 가 그 비 · 검토(server.boundFailure)
+    ok(await ai({ action: 'set_case_inputs', inputs: { holeShape: 'none', holeDepth: null, holeLength: null, holeSpacing: null, holeEdgeStiffened: false } }), 'clear F holes');
+    engine.length = 0;
+    const fm = await tool('aisi_design_flexure', { Fy: 33, Lb: 0.0001, Mu: 40, hole_shape: 'noncircular', hole_depth: 1.5, hole_length: 4.5, hole_spacing: 24, hole_edge_stiffened: true, detail: 'full' });
+    assert.deepStrictEqual(sent('aisi_design').pop().params, f1.eng, 'certain failure: MCP engine body = screen engine body');
+    assert.deepStrictEqual(agree(fm.data, 'MCP'), b1, 'MCP result: the same bound');
+    const fs1 = await tool('aisi_design_flexure', { Fy: 33, Lb: 0.0001, Mu: 40 });
+    const note = String(fs1.data.utilization_note || '');
+    assert(fs1.data.pass === false && note.includes('FAILS even on the strength without holes') && note.includes(b1.governing_check) && note.includes(String(Number(b1.ratio.toFixed(4)))),
+      'MCP summary note names the bound ' + note);
+    assert(fs1.data.holes_strength_bound && fs1.data.holes_strength_bound.ratio === b1.ratio && !('note' in fs1.data.holes_strength_bound), 'summary: compact holes_strength_bound');
+    const hd = (fs1.data.governing_checks || []).find((g) => g.id === b1.governing_check);
+    assert(hd && hd.verdict === 'fail' && hd.trusted === false && hd.reason_code === 'member.reason.fails_without_holes', 'summary head: fail, trusted false, its reason code');
+    const runM = (await history())[0];
+    assert(runM.max_ratio === b1.ratio && (runM.governing || {}).id === b1.governing_check, 'MCP run summary: the same bound');
+    // SI: 새 묶음(holes_strength_bound)에 모르는 수가 없다
+    const fsi = await tool('aisi_design_flexure', { Fy: 33 * 6.894757293168361, Lb: 0.00254, Mu: 40 * 0.1129848290276167, units: 'SI', detail: 'full' });
+    assert(!fsi.data.si_unconverted && near(fsi.data.holes_strength_bound.Mn, fm.data.holes_strength_bound.Mn * 0.1129848290276167)
+      && near(fsi.data.holes_strength_bound.checks['member.flexure.local'].value, fm.data.holes_strength_bound.checks['member.flexure.local'].value * 0.1129848290276167),
+      'SI holes_strength_bound ' + JSON.stringify(fsi.data.si_unconverted || []));
+    notes.push(`W7a: flexure, edge-stiffened holes, Mu 40 → NG on holes_strength_bound ${b1.governing_check} ${b1.ratio.toFixed(3)} — screen = MCP body, run · validation · report · MCP note agree`);
+    // 전단(§G3 한계 밖) · 웹 크리플링(지압 안의 구멍) · 조합 — 세 사본(utils · runs · MCP 요약)이 같은 검토 · 비
+    ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { H: 4, B: 1.625, D: 0.5, t: 0.0713, r: 0.1069 } }), 'C4');
+    ok(await ai({ action: 'set_case_inputs', inputs: { designMethod: 'ASD', fy: 50, fu: 65, Mux: 5 } }), 'C4 inputs');
+    const C4H = { Fy: 50, Lb: 0.0001, Mu: 5, hole_shape: 'noncircular', hole_depth: 1.5, hole_length: 4.6, hole_spacing: 24, hole_corner_radius: 0.25, hole_edge_stiffened: false };
+    for (const [what, extra, src] of [['shear §G3(f)', { Vu: 8 }, 'shear.bound_without_holes'],
+      ['web crippling within bearing', { hole_length: 4.5, Vu: 0.5, wc_N: 5, wc_R: 0.1069, wc_support: 'IOF', wc_M: 5, wc_P: 10, hole_end_distance: 9.75, hole_bearing_distance: 7.25, hole_within_bearing: true }, 'web_crippling.bound_without_holes']]) {
+      const full = await tool('aisi_design_flexure', { ...C4H, ...extra, detail: 'full' });
+      const bb = agree(full.data, what);
+      assert.strictEqual(bb.source, src, `${what}: source`);
+      const sm = await tool('aisi_design_flexure', { ...C4H, ...extra });
+      assert(String(sm.data.utilization_note || '').includes(bb.governing_check) && String(sm.data.utilization_note).includes(src), `${what}: MCP note ` + sm.data.utilization_note);
+      assert((await history())[0].max_ratio === bb.ratio, `${what}: run max_ratio`);
+      notes.push(`W7b ${what}: ${bb.governing_check} ${bb.ratio.toFixed(3)} (${src})`);
+    }
+    ok(await ai({ action: 'set_case_inputs', inputs: { holeWithinBearing: false, holeBearingDistance: null, holeEndDistance: null, wcN: null, wcP: null, Vu: null } }), 'C4 reset');
+    ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { H: 5.5, B: 1.625, D: 0.5, t: 0.0346, r: 0.0764 } }), 'template for combined');
+    const cb = await tool('aisi_design_combined', { Fy: 33, design_method: 'LRFD', KxLx: 96, KyLy: 48, KtLt: 48, Lb: 48, Pu: 3, Mux: 8, hole_shape: 'noncircular', hole_depth: 1.5, hole_length: 4.5,
+      hole_spacing: 24, hole_edge_stiffened: true, detail: 'full' });
+    const bc = agree(cb.data, 'combined');
+    assert(bc.source === 'interaction_holes_bound' && bc.governing_check === 'member.axial_bending', 'combined: H1.2 on the bound');
+    notes.push(`W7c combined: ${bc.governing_check} ${bc.ratio.toFixed(3)} (interaction_holes_bound)`);
+
+    // ── W8: 잘못된 입력 — 오류가 사람(화면 글)과 AI(도구 오류)에 가고, 검토 상태 · 앞 결과는 그대로 ──
+    ok(await ai({ action: 'new_case', name: 'E', kind: 'section-only' }), 'new_case E');
+    ok(await ai({ action: 'open_case', name: 'E' }), 'open E');
+    ok(await ai({ action: 'generate_template', section_type: 'lippedc', params: { H: 8, B: 2.5, D: 0.625, t: 0.059, r: 0.1875 } }), 'C8 E');
+    ok(await ai({ action: 'set_case_inputs', inputs: { memberType: 'flexure', designMethod: 'LRFD', fy: 50, fu: 65, Lb: 0.0001, Mux: 20, Vu: 2, wcN: null } }), 'E inputs');
+    await tool('aisi_design_flexure', { Fy: 50, Lb: 0.0001, Mu: 20, Vu: 2, stiffener_spacing: 10, stiffener_kind: 'pair', stiffener_Is: 0.05, stiffener_area: 0.5, stiffener_Fy: 50 });
+    const st0 = JSON.parse(JSON.stringify(p.__testGetCase().state));
+    const last0 = p._lastDesignResult;
+    // ① 보강재 Fy ≤ 0: MCP 인자 · 상태 쓰기 모두 받지 않는다(엔진에 가지 않는다), 상태 그대로
+    engine.length = 0;
+    const badFy = await call('aisi_design_flexure', { Fy: 50, Lb: 0.0001, Mu: 20, Vu: 2, stiffener_Fy: -50 });
+    assert(badFy.isError || (badFy.data && badFy.data.error), 'stiffener_Fy -50: a tool error ' + badFy.text.slice(0, 200));
+    assert(/stiffener_Fy/.test(badFy.text) && sent('aisi_design').length === 0, 'the error names stiffener_Fy and nothing reached the engine ' + badFy.text.slice(0, 300));
+    const sciBad = await ai({ action: 'set_case_inputs', inputs: { stiffenerFy: 0 } });
+    assert(sciBad.rejected && sciBad.rejected.some((x) => x.key === 'stiffenerFy' && /0 보다 커야/.test(x.reason)), 'set_case_inputs stiffenerFy 0 rejected ' + JSON.stringify(sciBad.rejected));
+    assert.deepStrictEqual(p.__testGetCase().state.inputs, st0.inputs, 'case inputs unchanged after the refused values');
+    assert.strictEqual(p._lastDesignResult, last0, 'the last result is kept (it still matches the case state)');
+    // ② 칸의 규칙은 맞지만 엔진이 오류로 답하는 값(간격 ≤ Lh — 두 칸의 관계): 도구 오류 'holes: …', 상태에 쓰지 않음, 앞 결과 그대로, 화면에 그 글
+    p.__testClearPostedMessages();
+    engine.length = 0;
+    const badS = await call('aisi_design_flexure', { Fy: 50, Lb: 0.0001, Mu: 20, Vu: 2, hole_shape: 'noncircular', hole_depth: 1.5, hole_length: 4.5, hole_spacing: 3 });
+    assert((badS.isError || (badS.data && badS.data.error)) && /holes: hole_spacing/.test(badS.text), 'engine error reaches the AI ' + badS.text.slice(0, 300));
+    assert(sent('aisi_design').length === 1, 'the engine was asked once');
+    const stE = p.__testGetCase().state;
+    assert(stE.inputs.holeShape === 'none' && stE.inputs.holeSpacing === null && stE.rev === st0.rev, 'case state not written on the engine error ' + JSON.stringify({ s: stE.inputs.holeShape, sp: stE.inputs.holeSpacing, rev: stE.rev, rev0: st0.rev }));
+    assert.strictEqual(p._lastDesignResult, last0, 'host keeps the last good result (the case state did not change)');
+    const postedE = ctx.posted('designResult').pop();
+    assert(postedE && postedE.data && /^holes:/.test(postedE.data.error), 'the page gets the error result (it shows it and clears the old cards) ' + JSON.stringify(postedE && postedE.data).slice(0, 200));
+    const shown = UT.inputErrorText(postedE.data.error);
+    assert(/웹 구멍\(천공\)/.test(shown) && /「웹 구멍 중심 간격 s」/.test(shown), 'page text names the section and the field: ' + shown);
+    notes.push(`W8: stiffener_Fy -50 → tool error before the engine, set_case_inputs 0 rejected, state unchanged; hole_spacing ≤ Lh → engine 'holes:' error, state rev ${stE.rev} unchanged; page: 「${shown.slice(0, 70)}…」`);
+
+    // ── W9: 구멍 하나(간격 없음) ──
+    const one = await tool('aisi_design_compression', { Fy: 50, KxLx: 96, KyLy: 48, KtLt: 48, Pu: 1, hole_shape: 'circular', hole_depth: 1.5, detail: 'full' });
+    assert(one.data.holes.single_hole === true && one.data.holes.s === null && (one.data.notices || []).some((n) => n.code === 'member.assumption.holes_single_hole'), 'single hole result');
+    assert(p.__testGetCase().state.inputs.holeSpacing === null, 'no spacing written');
+    const oneS = await tool('aisi_design_compression', { Fy: 50, KxLx: 96, KyLy: 48, KtLt: 48, Pu: 1, hole_shape: 'circular', hole_depth: 1.5 });
+    assert(oneS.data.holes_basis && oneS.data.holes_basis.single_hole === true, 'summary holes_basis.single_hole');
+    const rvO = p.__testReview('SI');
+    assert(/비지지 길이마다 구멍 하나/.test(rvO.reportHtml), 'report: single hole in the input table and the holes section');
+    notes.push('W9: blank spacing → holes.single_hole, assumption holes_single_hole, summary · report say so');
   } finally {
     try { await client.close(); } catch { /* */ }
     try { await bridge.stop(); } catch { /* */ }

@@ -439,6 +439,7 @@
             case 'caseAck':
                 // K2: 호스트가 받아들인 판. 받지 않은 키(충돌 · 검사)는 호스트가 caseState 로 다시 보낸다.
                 if (msg.data && Number.isInteger(msg.data.rev)) { _caseRev = msg.data.rev; }
+                if (msg.data && Array.isArray(msg.data.rejected) && msg.data.rejected.length) { _showRejectedEdits(msg.data.rejected); }
                 break;
             case 'caseState':
                 _caseApplyState(msg.data);
@@ -4289,7 +4290,40 @@
         const ins = ds.collectDesignInputs({ document, fromDisplay, getUnitSystem: () => _unitSystem });
         const out = ds.memberWebOptions((k) => (k in ins ? ins[k] : null), scope);
         out.missing.forEach((m) => { _missingInputs.push(_missEntry(m.id, m.label)); });
+        // 2026-11-26: 칸의 규칙(designState.validateValue — 호스트 · MCP 와 같은 규칙)에 맞지 않는 값(0 이하 · 음수)은 보내지 않고 막는다
+        (out.invalid || []).forEach((m) => { _webInvalid.push({ ..._missEntry(m.id, m.label), rule: ds.webOptionRuleText(m.rule) }); });
         return out.data;
+    }
+    /** @type {Array<{label: string, el: HTMLElement|null, tab: string|null, rule: string}>} */
+    let _webInvalid = [];
+    /** 맞지 않는 값이 있으면 막고 어느 칸 · 무엇이 틀렸는지(상태줄 · 설계 검증 상자 · 칸 강조) */
+    function _blockIfInvalid(what) {
+        const bad = _webInvalid; _webInvalid = [];
+        if (bad.length === 0) { return false; }
+        const msg = what + ': 입력 값이 맞지 않습니다 — ' + bad.map((m) => _missLabel(m) + ' ' + m.rule).join(', ');
+        setStatus(msg, 'error');
+        showDesignValidation(msg);
+        bad.forEach((m) => { if (m.el) { m.el.classList.add('input-missing'); m.el.title = m.label + ' ' + m.rule; } });
+        return true;
+    }
+    /**
+     * 2026-11-26: 호스트가 칸의 값을 받지 않았다(caseAck.rejected — 규칙에 맞지 않는 값 host.case.invalid_value) — 그 칸을 강조하고 까닭을
+     * 상태줄에. 화면의 칸은 그대로 둔다(사람이 고친다) — 실행은 _blockIfInvalid 가 막는다.
+     */
+    function _showRejectedEdits(rejected) {
+        const ds = globalThis.StcfsdDesignState;
+        if (!Array.isArray(rejected) || !ds || typeof ds.fieldMeta !== 'function') { return; }
+        const shown = [];
+        rejected.forEach((r) => {
+            if (!r || r.reason_code !== 'host.case.invalid_value') { return; }
+            const m = ds.fieldMeta(r.key);
+            if (!m || !(m.min === 'positive' || m.min === 'nonnegative')) { return; }
+            const el = document.getElementById(m.id);
+            const lab = (ds.WEB_OPTION_LABELS && ds.WEB_OPTION_LABELS[r.key]) || r.key;
+            if (el) { el.classList.add('input-missing'); el.title = lab + ' ' + ds.webOptionRuleText(m.min); }
+            shown.push(lab + ' ' + ds.webOptionRuleText(m.min));
+        });
+        if (shown.length) { setStatus('입력 값이 맞지 않습니다 — ' + shown.join(', ') + ' (이 값은 검토 상태에 쓰지 않았습니다)', 'error'); }
     }
     function showDesignValidation(msg, focusId) {
         const box = document.getElementById('design-validation');
@@ -4309,9 +4343,11 @@
     if (btnDesign) {
         btnDesign.addEventListener('click', () => {
             clearDesignValidation();
+            _webInvalid = [];
             const data = collectDesignRunPayload();
             if (!data) { return; }
-            if (_blockIfMissing('설계 검토')) { return; }
+            if (_blockIfMissing('설계 검토')) { _webInvalid = []; return; }
+            if (_blockIfInvalid('설계 검토')) { return; }
 
             // P2: §H1.2 약축 — Muy>0인데 May_strength 미입력 시 Python 에러 전에 차단
             if (data.member_type === 'combined' && data.Muy > 0 && !(data.May_strength > 0)) {
@@ -5441,9 +5477,11 @@
         const verdictTxt = (c) => {
             if (!c) { return ''; }
             const v = c.verdict === 'pass' ? _v3(true) : c.verdict === 'fail' ? _v3(false) : _v3(null);
-            const why = c.verdict === 'not_evaluated' || c.verdict === 'not_applicable' ? _U.checkReason(c, _uo()) : null;
+            // 2026-11-26: 구멍 없는 강도의 상한으로 낸 불합격(trusted false) — 평가한 비가 아니라 그 상한의 비라고, 까닭과 함께
+            const fwh = _U && typeof _U.failsWithoutHoles === 'function' && _U.failsWithoutHoles(c);
+            const why = c.verdict === 'not_evaluated' || c.verdict === 'not_applicable' || fwh ? _U.checkReason(c, _uo()) : null;
             return '<span style="color:' + v.color + '">' + (c.verdict === 'not_applicable' ? '해당 없음' : v.short) + '</span>'
-                + (typeof c.ratio === 'number' ? ' (비 ' + c.ratio.toFixed(3) + ')' : '')
+                + (typeof c.ratio === 'number' ? (fwh ? ' (구멍 없는 강도로 낸 비 ' + c.ratio.toFixed(3) + ')' : ' (비 ' + c.ratio.toFixed(3) + ')') : '')
                 + (why ? '<div class="hint">' + _esc(userText(why)) + '</div>' : '');
         };
         const val = (v, u) => (typeof v === 'number' ? fmtVal(v, u) + ' ' + unitLabel(u) : '—');
@@ -5453,8 +5491,9 @@
         let h = '';
         const ho = data.holes && typeof data.holes === 'object' ? data.holes : null;
         if (ho) {
+            // 엔진 8f9126e: 간격을 주지 않으면 구멍 하나(비지지 길이마다 — holes.single_hole, s 는 null)
             let r = row('구멍', (ho.shape === 'circular' ? '원형' : '비원형') + ' — dh ' + val(ho.dh, 'length') + ', Lh ' + val(ho.Lh, 'length')
-                + ', s ' + val(ho.s, 'length') + (ho.web_offset ? ', 치우침 ' + val(ho.web_offset, 'length') : ''));
+                + (ho.single_hole ? ', 간격 없음 — 비지지 길이마다 구멍 하나' : ', s ' + val(ho.s, 'length')) + (ho.web_offset ? ', 치우침 ' + val(ho.web_offset, 'length') : ''));
             if (ho.Anet != null || ho.Sfnet != null) { r += row('순단면 (구멍 자리)', 'Anet ' + val(ho.Anet, 'area') + ', Sfnet ' + val(ho.Sfnet, 'modulus')); }
             const el = [];
             if (ho.Pcrl_h != null) { el.push('Pcrℓ,h ' + val(ho.Pcrl_h, 'force')); }
@@ -5475,6 +5514,12 @@
                 + (why.length ? why.map(s => '<div class="hint">' + _esc(s) + '</div>').join('') : ''));
             const ap = chk('member.applicability.holes');
             if (ap) { r += row('적용 범위', verdictTxt(ap)); }
+            // 엔진 8f9126e: 구멍 조항을 평가하지 못했지만 구멍 없는 강도의 상한으로도 넘은 검토 — 불합격은 그 상한에 선다
+            const fw = dc.filter(c => _U && typeof _U.failsWithoutHoles === 'function' && _U.failsWithoutHoles(c));
+            if (fw.length) {
+                r += row('판정', '<span style="color:' + _v3(false).color + '">' + _v3(false).short + '</span> — ' + _esc(_U.boundFailureText({ basis: 'holes' }))
+                    + '<div class="hint">' + fw.map(c => _esc(c.name_ko || c.id) + ' (' + _esc(c.id) + ') 비 ' + (typeof c.ratio === 'number' ? c.ratio.toFixed(3) : '—')).join('<br>') + '</div>');
+            }
             h += box('웹 구멍 — 부록 2 · 구멍이 있는 부재', r);
         }
         const sh = data.shear && typeof data.shear === 'object' && ('curve' in data.shear || 'evaluated' in data.shear) ? data.shear : null;
@@ -5483,6 +5528,15 @@
             r += row('kv', typeof sh.kv === 'number' ? sh.kv.toFixed(3) + (sh.kv_equation ? ' (' + _esc(String(sh.kv_equation)) + ')' : '') : '—');
             if (sh.qs != null) { r += row('qs (§G3)', Number(sh.qs).toFixed(3) + (sh.c != null ? ', c ' + val(sh.c, 'length') : '')); }
             if (sh.reference_only) { r += row('참고값', 'Vn ' + val(sh.Vn, 'force') + ' — 보강하지 않은 웹(§G2.1), 판정에 쓰지 않음'); }
+            const bw = sh.bound_without_holes && typeof sh.bound_without_holes === 'object' ? sh.bound_without_holes : null;
+            if (bw) {
+                r += row('구멍 없는 웹의 강도 (§G3 상한)', 'Vn ≤ ' + val(bw.Vn, 'force') + ', 설계강도 ≤ ' + val(bw.design_strength, 'force')
+                    + (bw.fails ? ' — 소요가 넘음(구멍이 있어도 불합격)' : ' — 소요가 넘지 않음(§G3 을 평가하지 못해 판정 없음)')
+                    + (bw.h2_fails ? '; §H2 도 넘음' : ''));
+            }
+            // 엔진 H2 후속: 그 전단 묶음의 범위 글은 평가한 것과 맞다(§G3 적용 · 평가하지 못함 · 보강된 웹)
+            const scp = _scopeList(sh);
+            if (scp.length) { r += row('적용 범위', scp.map(s => '<div class="hint">' + _esc(s) + '</div>').join('')); }
             const sc = chk('member.shear');
             if (sc) { r += row('전단 판정', verdictTxt(sc)); }
             h += box('전단 — ' + (sc && sc.clause ? '§' + _esc(sc.clause) : '§G2'), r);
@@ -5533,8 +5587,18 @@
 
         // 에러 처리
         if (data.error) {
-            summaryEl.innerHTML = `<p style="color:var(--vscode-errorForeground)">${_esc(_engineErrorText(data.error))}</p>`;
+            // 2026-11-26: 구멍 · 보강재 · 비틀림 입력의 잘못된 값(엔진 'holes: …' · 'stiffeners: …' · 'torsion: …')은 어느 구역 · 칸 · 무엇이 틀렸는지
+            const _ie = _U && typeof _U.inputErrorText === 'function' ? _U.inputErrorText(data.error) : null;
+            summaryEl.innerHTML = `<p style="color:var(--vscode-errorForeground)">${_esc(_ie || _engineErrorText(data.error))}</p>`
+                + (_ie ? '<p class="hint">결과가 없습니다 — 그 칸을 고친 뒤 다시 실행하세요. 앞의 결과는 지금 입력의 결과가 아니라 지웠습니다.</p>' : '');
             stepsEl.innerHTML = '';
+            // 앞 결과의 조합 · 웹 크리플링 카드와 참조 조항을 남기지 않는다(지금 입력의 결과가 아니다)
+            if (interTitle) { interTitle.style.display = 'none'; }
+            if (interEl) { interEl.style.display = 'none'; interEl.innerHTML = ''; }
+            if (refEl) { refEl.innerHTML = ''; }
+            _lastReport = '';
+            if (btnCopyReport) { btnCopyReport.style.display = 'none'; }
+            if (_ie) { setStatus(_ie, 'error'); }
             return;
         }
 
@@ -5646,6 +5710,14 @@
             summaryHtml += '<b style="color:#4fc3f7">' + designLabel + ' = ' + (designVal != null ? fmtVal(designVal, uType) : '-') + ' ' + unit + '</b>';
             summaryHtml += ' <span style="color:var(--vscode-descriptionForeground)">(' + mode + ')</span>';
             summaryHtml += '</div>';
+            // 2026-11-26: 구멍 조항을 평가하지 못한 결과 — 위 카드는 구멍 없는 계산(판정에 쓰지 않는 참고값)
+            if (data.holes_evaluated === false) {
+                const _hb = data.holes_strength_bound && typeof data.holes_strength_bound === 'object' ? data.holes_strength_bound : null;
+                const _hbv = _hb ? (isC ? _hb.Pn : _hb.Mn) : null;
+                summaryHtml += '<div class="hint" style="font-size:11px;color:#ff9800">구멍 조항을 평가하지 못함 — 위 강도는 구멍 없는 계산(참고, 판정에 쓰지 않음)'
+                    + (typeof _hbv === 'number' ? '. 구멍이 있는 강도의 상한(구멍 없는 강도): ' + (isC ? 'Pn' : 'Mn') + ' ≤ ' + fmtVal(_hbv, uType) + ' ' + unit
+                        + ', 설계강도 ≤ ' + fmtVal(_hb.design_strength, uType) + ' ' + unit : '') + '</div>';
+            }
         } else if (mt === 'tension') {
             const fU = unitLabel('force');
             summaryHtml += '<table style="width:100%;font-size:12px">';
@@ -5700,6 +5772,11 @@
             summaryHtml += '<div class="utilization-fill ' + cls + '" style="width:' + Math.min(pct, 100) + '%"></div>';
             summaryHtml += '<span class="utilization-label">' + pct + '% ' + verdictOf(data).label + '</span>';
             summaryHtml += '</div>';
+            // 2026-11-26: 구멍 없는 강도의 상한으로 낸 확실한 불합격 — 그 비 · 검토 · 까닭(utils.lengthBoundFailure 의 basis 'holes')
+            if (_lbf && _lbf.basis === 'holes') {
+                summaryHtml += '<div class="hint" style="font-size:11px;color:var(--vscode-errorForeground)">NG — ' + _esc(_U.boundFailureText(_lbf))
+                    + (_lbf.governing_check ? ' (지배: ' + _esc(_lbf.governing_check) + ', 비 ' + _lbf.ratio.toFixed(3) + ')' : '') + '</div>';
+            }
         }
 
         // ── 정모멘트 구간: 부모멘트와 동일한 양식 (강도 카드 + 이용률 바) ──
@@ -5762,7 +5839,8 @@
                 const cv = _v3(c && typeof c === 'object' ? c : null);
                 // 엔진 E-1: 빈 길이를 가정해 낸 항목(reference_only)은 판정이 아니다 — 비는 참고값, 까닭을 함께
                 const refOnly = !!(c && c.reference_only);
-                const why = c && c.length_assumed ? (c.reason_ko || (typeof c.reason === 'string' ? c.reason : '')) : '';
+                // 2026-11-26: 구멍 없는 강도로도 넘은 항목(fails_without_holes)도 그 까닭을
+                const why = c && (c.length_assumed || c.fails_without_holes) ? (c.reason_ko || (typeof c.reason === 'string' ? c.reason : '')) : '';
                 summaryHtml += '<tr><td>' + _esc(c && c.name) + (why ? '<div class="hint">' + _esc(why) + '</div>' : '') + '</td><td>'
                     + (c && typeof c.ratio === 'number' ? c.ratio.toFixed(3) + (refOnly ? ' (참고)' : '') : '—') + '</td><td style="color:' + cv.color + '">' + cv.short + '</td></tr>';
             });
@@ -5961,6 +6039,10 @@
                     ${typeof wc.Rc === 'number' ? _summaryRow('§G6 Rc (구멍)', wc.Rc.toFixed(4) + (wc.g6 && wc.g6.equation ? ' — Eq. ' + _esc(wc.g6.equation) : ''), '') : ''}
                     ${wc.Pn_without_holes != null ? _summaryRow('Pn (구멍 없음, §G5)', wc.Pn_without_holes, _rul('force'), '', 'force') : ''}
                     ${wc.evaluated === false ? _summaryRow('§G6', '평가하지 못함' + (wc.reason ? ' — ' + _esc(userText(typeof wc.reason === 'string' ? wc.reason : (wc.reason_ko || ''))) : ''), '', '#ff9800') : ''}
+                    ${(wc.g6 || wc.bound_without_holes || wc.evaluated === false) && _scopeList(wc).length ? _summaryRow('적용 범위', _scopeList(wc).map(s => _esc(s)).join('; '), '') : ''}
+                    ${wc.bound_without_holes && typeof wc.bound_without_holes === 'object' ? _summaryRow('Pn 구멍 없음 (§G6 상한)', fmtVal(wc.bound_without_holes.Pn, 'force') + ' ' + _rul('force')
+                        + (wc.bound_without_holes.fails ? ' — P 가 넘음(구멍이 있어도 불합격)' : ' — P 가 넘지 않음(판정 없음)') + (wc.bound_without_holes.h3_fails ? '; §H3 도 넘음' : ''), '',
+                        wc.bound_without_holes.fails || wc.bound_without_holes.h3_fails ? _v3(false).color : '#ff9800') : ''}
                     ${_summaryRow('Equation', wc.equation || '-', '')}
                     ${_summaryRow('Table', wc.table || '-', '')}
                     ${_summaryRow('Section family', wc.section_family || wc.section_type || '-', '')}

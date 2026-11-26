@@ -57,6 +57,7 @@ const F = {
   force: KIP, stress: KIP * 1000 / 645.16, moment: KIP * 0.0254, moment_ft: KIP * 0.3048,
   length_ft: 0.3048, linload: KIP / 1000 / 0.3048, density: KIP * 1000 / 0.0254 ** 4,
   rot_stiff: KIP, lat_stiff: KIP / 0.0254 ** 2, spring_disc: KIP / 0.0254, pressure: KIP / 1000 / 0.3048 ** 2,
+  per_area: 1 / 645.16,   // 엔진 H2 후속(2026-11-26): §H4 의 θ'' (1/in² → 1/mm²)
 };
 const FACTORS = Object.values(F);
 
@@ -321,7 +322,7 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
 const ENGINE_UNIT_F = {
   'kip': 'force', 'kip-in': 'moment', 'ksi': 'stress', 'in': 'length', 'in^2': 'area', 'in^3': 'modulus',
   'in^4': 'inertia', 'in^6': 'warping', 'kip/in': 'spring_disc', 'kip-in/rad/in': 'rot_stiff', '-': 'none', 'deg': 'none',
-  'kip*s^2/in^4': 'density', 'psf': 'pressure',
+  'kip*s^2/in^4': 'density', 'psf': 'pressure', '1/in^2': 'per_area',
 };
 /** 엔진 소스에서 읽은 quantity → F 이름 (main 에서 채운다) */
 const QUNIT = {};

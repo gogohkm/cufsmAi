@@ -237,7 +237,14 @@
             if (!c) { return ''; }
             const nm = c.name_ko || c.name || c.id;
             if (c.verdict === 'pass') { return '엔진: ' + nm + ' — 통과'; }
-            if (c.verdict === 'fail') { return '엔진: ' + nm + ' — 불합격'; }
+            if (c.verdict === 'fail') {
+                // 2026-11-26: 구멍 없는 강도의 상한으로 낸 불합격(trusted false) — 그 까닭을 함께(평가한 비가 아니다)
+                if (typeof UTILS.failsWithoutHoles === 'function' && UTILS.failsWithoutHoles(c)) {
+                    const why = UTILS.checkReason(c, _uo);
+                    return '엔진: ' + nm + ' — 불합격 (' + UTILS.boundFailureText({ basis: 'holes' }) + ')' + (why ? ' — ' + why : '');
+                }
+                return '엔진: ' + nm + ' — 불합격';
+            }
             const why = UTILS.checkReason(c, _uo);
             return '엔진: ' + nm + ' — 판정 없음' + (why ? ' (' + why + ')' : '');
         }
@@ -982,6 +989,7 @@
                     checks.push({
                         category: catG, item: item, status: _es,
                         value: (typeof _ec.ratio === 'number' ? 'DCR ' + _ec.ratio.toFixed(3)
+                            + (typeof UTILS.failsWithoutHoles === 'function' && UTILS.failsWithoutHoles(_ec) ? ' (구멍 없는 강도의 상한으로 낸 비 — 구멍이 있어도 넘음)' : '')
                             : ({ not_evaluated: '판정 없음', pass: '통과', fail: '불합격' }[_ec.verdict] || '—')) + (valueOf ? valueOf(d) : ''),
                         criterion: '§' + (_ec.clause || '') + ' — ' + criterion,
                         note: _engineNote(_ec),
@@ -1002,7 +1010,8 @@
                     checks.push({
                         category: catG, item: '이용률 — 부모멘트 (-M)',
                         status: _negAssumed ? 'warn' : _statusFromVerdict(_checkVerdict(d, 'F flexure', _negUtil), _negUtil),
-                        value: _negAssumed ? '판정 없음 — 비지지 길이를 주지 않음 (가정한 길이의 참고 비 ' + (_negUtil*100).toFixed(1) + '%)' : (_negUtil*100).toFixed(1)+'%',
+                        value: _negAssumed ? '판정 없음 — 비지지 길이를 주지 않음 (가정한 길이의 참고 비 ' + (_negUtil*100).toFixed(1) + '%)' : (_negUtil*100).toFixed(1)+'%'
+                            + (_negLbf && _negLbf.basis === 'holes' ? ' — ' + UTILS.boundFailureText(_negLbf) + (_negLbf.governing_check ? ' (' + _negLbf.governing_check + ')' : '') : ''),
                         criterion: 'Mu(-) / φMn(-) ≤ 1.0',
                         note: _negAssumed ? '길이(Lb)를 넣고 다시 검토하세요 — 가정한 길이의 비는 통과도 불합격도 아닙니다.'
                             : (_negUtil > 1.0 ? '부모멘트 구간 과응력 — 단면을 키우거나 Lb(-)를 줄이세요.' : ''),
@@ -1025,7 +1034,9 @@
                     checks.push({
                         category: catG, item: '이용률 (DCR)',
                         status: _uInvalid ? (d.pass === false ? 'fail' : 'warn') : _statusFromVerdict(_v3(d), d.utilization),
-                        value: _uInvalid ? (d.pass === false ? (_failU*100).toFixed(1)+'% — '+_v3(d).short+(_lenAssumed ? ' (길이를 주지 않음 — 길이와 상관없는 한계상태가 넘음' + (_lbf && _lbf.governing_check ? ': ' + _lbf.governing_check : '') + ')' : ' (소요 일부 없음)')
+                        value: _uInvalid ? (d.pass === false ? (_failU*100).toFixed(1)+'% — '+_v3(d).short+(_lbf && _lbf.basis === 'holes'
+                            ? ' (' + UTILS.boundFailureText(_lbf) + (_lbf.governing_check ? ': ' + _lbf.governing_check : '') + ')'
+                            : _lenAssumed ? ' (길이를 주지 않음 — 길이와 상관없는 한계상태가 넘음' + (_lbf && _lbf.governing_check ? ': ' + _lbf.governing_check : '') + ')' : ' (소요 일부 없음)')
                             : (_lenAssumed ? '판정 없음 — 길이를 주지 않음 (가정한 길이의 참고 비 ' + (d.utilization*100).toFixed(1) + '%)' : '판정 없음 — 주 소요를 주지 않음'))
                             : (d.utilization*100).toFixed(1)+'% — '+_v3(d).short,
                         criterion: 'DCR ≤ 100%',
@@ -1466,7 +1477,8 @@
             if (hs === 'circular' || hs === 'noncircular') {
                 const rows2 = [['모양', _selText('select-hole-shape')], ['dh', RQ(_exact('design-hole-dh', L), L)]];
                 if (hs === 'noncircular') { rows2.push(['Lh', RQ(_exact('design-hole-Lh', L), L)], ['모서리 반지름 r', RQ(_exact('design-hole-corner-radius', L), L)]); }
-                rows2.push(['중심 간격 s', RQ(_exact('design-hole-spacing', L), L)], ['웹 중심에서의 치우침 (비우면 0)', RQ(_exact('design-hole-web-offset', L), L)],
+                const _hsp = _exact('design-hole-spacing', L);
+                rows2.push(['중심 간격 s', _hsp == null || (typeof _hsp === 'number' && !isFinite(_hsp)) ? '— (비움: 비지지 길이마다 구멍 하나)' : RQ(_hsp, L)], ['웹 중심에서의 치우침 (비우면 0)', RQ(_exact('design-hole-web-offset', L), L)],
                     ['단부 거리 (§G6(e))', RQ(_exact('design-hole-end-distance', L), L)], ['구멍 가장자리에서 지압 가장자리까지 x (§G6)', RQ(_exact('design-hole-bearing-distance', L), L)],
                     ['구멍 가장자리 보강', _chk('chk-hole-edge-stiffened') ? '있음' : '없음'], ['구멍이 지압 길이 안 (§G6)', _chk('chk-hole-within-bearing') ? '예' : '아니오']);
                 blocks.push({ kind: 'heading', text: '웹 구멍 (부록 2 · §E2.5 · §F2.2 · §G3 · §G6)' }, { kind: 'table', head: ['항목', '값'], rows: rows2 });
@@ -1620,8 +1632,10 @@
             const L = 'length', DL = 'dimensionless';
             const h = r.holes && typeof r.holes === 'object' ? r.holes : null;
             if (h) {
+                // 엔진 8f9126e: 간격을 주지 않으면 구멍 하나(holes.single_hole — s 는 null)
                 const rows = [['모양', h.shape === 'circular' ? '원형' : '비원형'], ['dh (웹을 가로지르는 치수)', RQ(h.dh, L)], ['Lh (부재 방향 길이)', RQ(h.Lh, L)],
-                    ['s (중심 간격)', RQ(h.s, L)]];
+                    ['s (중심 간격)', h.single_hole ? '주지 않음 — 비지지 길이마다 구멍 하나' : RQ(h.s, L)]];
+                if (h.props_mismatch) { rows.push(['단면 성질', '받은 단면 성질이 구멍 계산의 모델과 1 % 넘게 다름 — 구멍 조항을 평가하지 못함']); }
                 if (h.web_offset) { rows.push(['웹 중심에서의 치우침', RQ(h.web_offset, L)]); }
                 if (h.Anet != null) { rows.push(['Anet (구멍 자리의 순단면적)', RQ(h.Anet, 'area')], ['Sfnet (순단면계수)', RQ(h.Sfnet, 'section_modulus')]); }
                 [['Pcrl_h', 'Pcrℓ,h (순단면 국부, 반파장 ≤ Lh)', 'force'], ['Pcrd_h', 'Pcrd,h (웹 두께 tr, Lcrd)', 'force'],
@@ -1634,6 +1648,22 @@
                 out.push({ kind: 'heading', text: '웹 구멍 — 부록 2 의 탄성 좌굴 · 순단면' }, { kind: 'table', head: ['항목', '값'], rows });
                 const why = NOTICES ? NOTICES.lines(h, { units: _uo.units, lang: 'ko', lists: ['reasons'] }).map((l) => UTILS.userText(l.text)) : _strs(h.reasons);
                 if (why.length) { out.push({ kind: 'list', tone: 'ne', title: '구멍의 조항을 평가하지 못한 까닭', items: _uniq(why) }); }
+            }
+            // 엔진 8f9126e: 구멍 조항을 평가하지 못했지만 구멍 없는 강도의 상한으로도 넘은 검토(확실한 불합격) — 그 상한
+            const fw = (Array.isArray(r.design_checks) ? r.design_checks : []).filter((c) => typeof UTILS.failsWithoutHoles === 'function' && UTILS.failsWithoutHoles(c));
+            if (fw.length) {
+                const hb = r.holes_strength_bound && typeof r.holes_strength_bound === 'object' ? r.holes_strength_bound : null;
+                const bw = r.shear && r.shear.bound_without_holes, ww = r.web_crippling && r.web_crippling.bound_without_holes;
+                const rows = fw.map((c) => [c.name_ko || c.id, c.id, c.capacity ? RQ(c.capacity.value, c.capacity.quantity) : '—', RQ(c.ratio, DL, { digits: 3 }), { text: '불합격', tone: 'ng' }]);
+                out.push({ kind: 'heading', text: '구멍 없는 강도로도 넘음 (구멍 조항을 평가하지 못함)' },
+                    { kind: 'para', tone: 'ng', text: UTILS.boundFailureText({ basis: 'holes' }) + ' — 설계강도는 구멍 없는 강도의 상한(구멍이 있는 강도는 이보다 작거나 같다).' },
+                    { kind: 'table', head: ['항목', 'id', '설계강도 (상한)', '비', '판정'], rows });
+                const up = [];
+                if (hb) { up.push([hb.Pn !== undefined ? 'Pn ≤ (구멍 없는 상한)' : 'Mn ≤ (구멍 없는 상한)', hb.Pn !== undefined ? RQ(hb.Pn, 'force') : RQ(hb.Mn, 'moment')]); }
+                if (bw && typeof bw === 'object') { up.push(['Vn ≤ (§G3 상한, 구멍 없는 웹)', RQ(bw.Vn, 'force')]); }
+                if (ww && typeof ww === 'object') { up.push(['Pn ≤ (§G6 상한, 구멍 없는 웹 크리플링)', RQ(ww.Pn, 'force')]); }
+                if (r.interaction_holes_bound && typeof r.interaction_holes_bound === 'object') { up.push(['§H1.2 비 ≥ (구멍 없는 상한으로)', RQ(r.interaction_holes_bound.total_unrounded != null ? r.interaction_holes_bound.total_unrounded : r.interaction_holes_bound.total, DL, { digits: 3 })]); }
+                if (up.length) { out.push({ kind: 'table', head: ['상한', '값'], rows: up }); }
             }
             const s = r.shear && typeof r.shear === 'object' && ('curve' in r.shear || 'evaluated' in r.shear) ? r.shear : null;
             if (s) {
@@ -1730,6 +1760,7 @@
                 ['설계 기준', 'AISI S100-16'], ['부재 유형', d.member_type || ''], ['설계 방법', d.design_method || ''],
                 ['종합 판정 (엔진)', { text: _VTXT[k], tone: _tone(k) }],
                 ['이용률 (엔진)', lenRef ? '— (판정 아님 — 가정한 길이의 참고 비 ' + Number(d.utilization).toFixed(3) + ')'
+                    : lenBound && lenBound.basis === 'holes' ? Number(lenBound.ratio).toFixed(3) + ' (' + UTILS.boundFailureText(lenBound) + ')'
                     : lenBound ? Number(lenBound.ratio).toFixed(3) + ' (길이와 상관없는 하한 — 길이를 주지 않음, 가정한 길이의 참고 비 ' + Number(d.utilization).toFixed(3) + ')'
                         : RQ(d.utilization, 'dimensionless', { digits: 3 })],
                 ['지배 파괴 모드 (엔진)', lenRef ? '' : lenBound ? (lenBound.limit_state || '') : (d.controlling_mode || '')],
@@ -1751,6 +1782,11 @@
             blocks.push(..._noticeBlocks(d, { ne: _pl.ne, warn: (d.dsm_warnings || []).concat(_pl.warn), asm: _pl.asm }));
             if (k === 'not_evaluated' && lenRef) {
                 blocks.push({ kind: 'para', tone: 'ne', text: '판정 없음: 유효 길이 · 비지지 길이를 주지 않아 엔진이 가정한 길이로 낸 비는 참고값입니다(통과도 불합격도 아님). 길이를 넣고 다시 검토하십시오.' });
+            } else if (k === 'fail' && lenBound && lenBound.basis === 'holes') {
+                // 2026-11-26: 구멍 조항을 평가하지 못한 확실한 불합격 — 어느 조항을 못 봤고 무엇으로 불합격인지
+                blocks.push({ kind: 'para', tone: 'ng', text: '불합격: ' + UTILS.boundFailureText(lenBound) + ' — ' + (lenBound.limit_state || '')
+                    + (lenBound.governing_check ? ' (' + lenBound.governing_check + ', 비 ' + Number(lenBound.ratio).toFixed(3) + ')' : '')
+                    + '. 평가하지 못한 조항은 위 「평가하지 못한 항목」 에 있습니다.' });
             } else if (k === 'not_evaluated') {
                 blocks.push({ kind: 'para', tone: 'ne', text: d.utilization == null ? '판정 없음: 소요값이 없어 판정하지 않았습니다(강도 조회).'
                     : '판정 없음: 미평가 한계상태가 있어 전체 적합을 확정할 수 없습니다. 위 항목을 해소할 입력을 추가한 뒤 다시 검토하십시오.' });

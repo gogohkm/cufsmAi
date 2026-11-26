@@ -117,6 +117,9 @@
         ['hole_web_offset', '웹 구멍 치우침', '③ 좌굴해석·부재설계'],
         ['hole_corner_radius', '웹 구멍 모서리 r', '③ 좌굴해석·부재설계'],
         ['hole_bearing_distance', '웹 구멍 지압까지 x', '③ 좌굴해석·부재설계'],
+        ['hole_edge_stiffened', '웹 구멍 가장자리 보강', '③ 좌굴해석·부재설계'],
+        ['hole_within_bearing', '웹 구멍이 지압 길이 안', '③ 좌굴해석·부재설계'],
+        ['transverse_stiffeners', '횡방향 웹 보강재', '③ 좌굴해석·부재설계'],
         ['stiffener_spacing', '보강재 간격 a', '③ 좌굴해석·부재설계'],
         ['stiffener_kind', '보강재 종류', '③ 좌굴해석·부재설계'],
         ['stiffener_Is', '보강재 Is', '③ 좌굴해석·부재설계'],
@@ -129,6 +132,7 @@
         ['torsion_span', '비틀림 경간 L', '③ 좌굴해석·부재설계'],
         ['torsion_load', '비틀림 하중', '③ 좌굴해석·부재설계'],
         ['torsion_support', '비틀림 지지', '③ 좌굴해석·부재설계'],
+        ['torsion_at_web_flange_junction', '비틀림 웹–플랜지 이음', '③ 좌굴해석·부재설계'],
         ['confirm_large', '「그래도 실행」 단추', null],
     ];
     const _TERM_RE = new RegExp('\\b(' + USER_TERMS.map(t => t[0]).join('|') + ')(\\s*=\\s*(True|False|true|false))?\\b', 'g');
@@ -141,6 +145,27 @@
             if (!eq) { return lab; }
             return lab + (/^t/i.test(val) ? ' 켬' : ' 끔');
         });
+    }
+
+    /**
+     * 2026-11-26(엔진 8f9126e — 독립 검증 5): 구멍 · 보강재 · 비틀림 입력의 잘못된 값에 엔진이 내는 오류
+     * ('holes: …' · 'stiffeners: …' · 'torsion: …' — 그 입력의 이름으로 시작) → 사람이 읽는 글: 어느 구역 · 어느 칸 · 무엇이 틀렸는지.
+     * 그런 오류가 아니면 null(부르는 쪽이 지금처럼 그린다). 수는 엔진의 단위(US) 그대로 — 그렇다고 적는다.
+     */
+    const _INPUT_ERR_GROUPS = { holes: '웹 구멍(천공)', stiffeners: '횡방향 웹 보강재', torsion: '비틀림(§H4)' };
+    function inputErrorText(err) {
+        const m = /^(holes|stiffeners|torsion):\s*([\s\S]*)$/.exec(String(err || ''));
+        if (!m) { return null; }
+        let s = m[2]
+            .replace(/\bmust be > 0\b/g, '— 0 보다 큰 수여야 합니다')
+            .replace(/\bmust be >= 0\b/g, '— 0 이상이어야 합니다')
+            .replace(/\bmust be a number\b/g, '— 수여야 합니다')
+            .replace(/\bmust be finite\b/g, '— 유한한 수여야 합니다')
+            .replace(/\bmust be true or false\b/g, '— 켬 · 끔이어야 합니다')
+            .replace(/\bmust be text\b/g, '— 글이어야 합니다')
+            .replace(/\bis required\b/g, '— 비어 있습니다(필요)')
+            .replace(/,\s*got\s+(.+)$/, ' (받은 값 $1 — 엔진 단위 US)');
+        return '입력 오류 — 「' + _INPUT_ERR_GROUPS[m[1]] + '」 구역: ' + userText(s);
     }
 
     function _itemText(item) {
@@ -416,20 +441,73 @@
      * 그 판정비는 그 하한의 비다 — 맨 위 utilization 은 가정한 길이의 수(utilization_valid false)라 판정비가 아니다. 그런 결과가 아니면 null.
      * 반환 { ratio, governing_check, limit_state }
      */
+    //
+    // 2026-11-26(엔진 8f9126e — 독립 검증 2): 같은 규칙에 「구멍 없는 강도로도 넘음」 — 구멍 조항을 평가하지 못했지만 구멍은 강도를 낮추기만
+    // 하므로 구멍 없는 강도의 상한(holes_strength_bound · shear.bound_without_holes · web_crippling.bound_without_holes ·
+    // interaction_holes_bound)을 소요가 넘으면 불합격이다. 그 검토는 trusted false · 까닭 member.reason.fails_without_holes 인 fail —
+    // 판정비는 그 상한의 비, 지배는 그 검토. 하한이 둘 이상이면 비가 가장 큰 것. 반환에 basis 'length' | 'holes' · source(엔진 키).
+    // src/records/runs.ts lengthBoundFailure 와 같은 규칙(시험 web_options_contract 가 맞댄다).
+    const FAILS_WITHOUT_HOLES = 'member.reason.fails_without_holes';
+    /** 구멍 없는 강도의 상한으로 낸 확실한 불합격 검토(trusted false 이지만 판정이다) */
+    function failsWithoutHoles(c) { return !!c && typeof c === 'object' && c.verdict === 'fail' && c.reason_code === FAILS_WITHOUT_HOLES; }
+    /** 확실한 불합격의 까닭(화면 · 검증 · 보고서가 같은 글) */
+    function boundFailureText(b) {
+        if (!b) { return ''; }
+        return b.basis === 'holes' ? '구멍 없는 강도로도 넘음 — 구멍 조항은 평가하지 못했지만 구멍은 강도를 낮추기만 하므로 불합격'
+            : '길이와 상관없는 하한으로도 넘음 — 길이를 주지 않았지만 어느 길이에서도 불합격';
+    }
+    function holesBoundCandidates(d) {
+        const out = [];
+        const dc = Array.isArray(d.design_checks) ? d.design_checks : [];
+        const fin = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+        const add = (id, blockRatio, limitState, source) => {
+            const c = dc.find((x) => x && x.id === id) || null;
+            const r = c && failsWithoutHoles(c) && fin(c.ratio) !== null ? c.ratio : fin(blockRatio);
+            if (r !== null && r > 1) { out.push({ ratio: r, governing_check: c ? id : null, limit_state: limitState, basis: 'holes', source }); }
+        };
+        const hb = d.holes_strength_bound;
+        if (hb && typeof hb === 'object') {
+            const fam = hb.Pn !== undefined ? 'E axial compression' : 'F flexure';
+            const ids = Object.keys(hb.checks && typeof hb.checks === 'object' ? hb.checks : {}).filter((k) => k !== 'member.flexure.positive_region');
+            // 지배: 상한의 검토 가운데 비가 가장 큰 것(구멍 없는 상한의 국부 — 엔진의 Pn · Mn = min(그 셋))
+            const fails = dc.filter((c) => failsWithoutHoles(c) && ids.includes(c.id) && fin(c.ratio) !== null).sort((a, b) => b.ratio - a.ratio);
+            if (fails.length) { add(fails[0].id, hb.ratio, fam + ' (strength without holes)', 'holes_strength_bound'); }
+            else if (fin(hb.ratio) !== null && hb.ratio > 1) { out.push({ ratio: hb.ratio, governing_check: null, limit_state: fam + ' (strength without holes)', basis: 'holes', source: 'holes_strength_bound' }); }
+            if (fin(hb.ratio_positive) !== null) { add('member.flexure.positive_region', hb.ratio_positive, 'F positive region (strength without holes)', 'holes_strength_bound'); }
+        }
+        const sb = d.shear && typeof d.shear === 'object' ? d.shear.bound_without_holes : null;
+        if (sb && typeof sb === 'object') {
+            if (sb.fails === true) { add('member.shear', sb.ratio, 'G2 shear (strength without holes)', 'shear.bound_without_holes'); }
+            if (sb.h2_fails === true) { add('member.bending_shear', sb.h2_total, 'H2 bending + shear (strength without holes)', 'shear.bound_without_holes'); }
+        }
+        const wb = d.web_crippling && typeof d.web_crippling === 'object' ? d.web_crippling.bound_without_holes : null;
+        if (wb && typeof wb === 'object') {
+            if (wb.fails === true) { add('member.web_crippling', wb.ratio, 'G5 web crippling (strength without holes)', 'web_crippling.bound_without_holes'); }
+            if (wb.h3_fails === true) { add('member.bending_web_crippling', wb.h3_ratio, 'H3 bending + web crippling (strength without holes)', 'web_crippling.bound_without_holes'); }
+        }
+        const ih = d.interaction_holes_bound;
+        if (ih && typeof ih === 'object') {
+            add('member.axial_bending', fin(ih.total_unrounded) !== null ? ih.total_unrounded : ih.total, 'H1.2 axial + bending (strength without holes)', 'interaction_holes_bound');
+        }
+        return out;
+    }
     function lengthBoundFailure(d) {
         if (!d || typeof d !== 'object' || d.pass !== false || d.utilization_valid !== false) { return null; }
+        let best = null;
         const b = d.length_independent_bound;
         if (b && typeof b === 'object' && typeof b.ratio === 'number' && isFinite(b.ratio)) {
-            return { ratio: b.ratio, governing_check: b.governing_check_id || b.governing_check || null, limit_state: b.limit_state || null };
+            best = { ratio: b.ratio, governing_check: b.governing_check_id || b.governing_check || null, limit_state: b.limit_state || null, basis: 'length', source: 'length_independent_bound' };
+        } else {
+            // 조합(H1.2): Pa · Max 를 그 하한으로 둔 H1.2 의 하한 비(interaction_length_bound)가 1 을 넘으면 — 항목 member.axial_bending
+            const ib = d.interaction_length_bound;
+            const t = ib && typeof ib === 'object' ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
+            if (typeof t === 'number' && isFinite(t) && t > 1) {
+                const has = Array.isArray(d.design_checks) && d.design_checks.some((c) => c && c.id === 'member.axial_bending');
+                best = { ratio: t, governing_check: has ? 'member.axial_bending' : null, limit_state: 'H1.2 (Pa, Max at their length-independent bounds, B1 = 1)', basis: 'length', source: 'interaction_length_bound' };
+            }
         }
-        // 조합(H1.2): Pa · Max 를 그 하한으로 둔 H1.2 의 하한 비(interaction_length_bound)가 1 을 넘으면 — 항목 member.axial_bending
-        const ib = d.interaction_length_bound;
-        const t = ib && typeof ib === 'object' ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
-        if (typeof t === 'number' && isFinite(t) && t > 1) {
-            const has = Array.isArray(d.design_checks) && d.design_checks.some((c) => c && c.id === 'member.axial_bending');
-            return { ratio: t, governing_check: has ? 'member.axial_bending' : null, limit_state: 'H1.2 (Pa, Max at their length-independent bounds, B1 = 1)' };
-        }
-        return null;
+        for (const c of holesBoundCandidates(d)) { if (!best || c.ratio > best.ratio) { best = c; } }
+        return best;
     }
 
     return {
@@ -437,5 +515,6 @@
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
         assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason, purlinLists,
         pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues, lengthBoundFailure,
+        boundFailure: lengthBoundFailure, failsWithoutHoles, boundFailureText, FAILS_WITHOUT_HOLES, inputErrorText,
     };
 });

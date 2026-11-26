@@ -42,6 +42,8 @@
         mass_density: { f: KIP_KN * 1000 / Math.pow(IN_M, 4), si: 'kg/m³', d: 0 },
         // §3.2 (K4d): 1 psf = 0.0478803 kPa
         pressure: { f: KIP_KN / 1000 / (FT_M * FT_M), si: 'kPa', d: 3 },
+        // 엔진 H2 후속(2026-11-26): §H4 의 θ'' — 1/in² → 1/mm² (src/mcp/siUnits.ts per_area)
+        per_area: { f: 1 / (IN_MM * IN_MM), si: '1/mm²', d: 10 },
         // 호스트만(하중 해석 좌표 · 구간 이름표): ft → m, plf → kN/m, kip-ft → kN-m
         length_ft: { f: FT_M, si: 'm', d: 2, fixed: true },   // 좌표 · 범위 — 자리를 늘리지 않는다(「0.32–6.07 m」)
         linload: { f: KIP_KN / 1000 / FT_M, si: 'kN/m', d: 3 },

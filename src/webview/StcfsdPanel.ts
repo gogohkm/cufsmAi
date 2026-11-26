@@ -8772,8 +8772,8 @@ ${inner}
                             <input type="number" id="design-hole-Lh" value="" step="1" style="width:65px">
                         </div>
                         <div class="input-row">
-                            <label title="구멍 중심 간격 s(부재 방향) — Lh 보다 커야 한다. §G3(d) · §G6(d) 순간격 s − Lh ≥ 18 in, 부록 2 §2.3.2.3 s ≥ Lcrd(낱낱의 구멍)">중심 간격 s<span class="hint-inline" data-unit="length">mm</span></label>
-                            <input type="number" id="design-hole-spacing" value="" step="10" style="width:65px">
+                            <label title="구멍 중심 간격 s(부재 방향) — Lh 보다 커야 한다. §G3(d) · §G6(d) 순간격 s − Lh ≥ 18 in, 부록 2 §2.3.2.3 s ≥ Lcrd(낱낱의 구멍). 비우면 구멍 하나 — 비지지 길이마다 구멍 하나로 본다(엔진의 가정으로 적힌다)">중심 간격 s<span class="hint-inline" data-unit="length">mm</span></label>
+                            <input type="number" id="design-hole-spacing" value="" step="10" min="0" placeholder="비우면 구멍 하나" style="width:65px">
                             <label title="웹 중심에서 구멍 중심까지(모델 z 가 커지는 쪽 +) — 비우면 0(가운데). 가운데가 아닌 구멍은 §G3(c) · §G6(c) 밖이고 부록 2 의 대칭 단면 식이 맞지 않는다">치우침<span class="hint-inline" data-unit="length">mm</span></label>
                             <input type="number" id="design-hole-web-offset" value="" step="1" style="width:60px">
                         </div>

@@ -77,8 +77,11 @@ export function runSummary(result: any, props?: any): RunSummary {
     }
     // 엔진(2026-11-25 둘째 판): 빈 길이에서 길이와 상관없는 하한(가장 유리한 길이의 엔진 강도)이 넘은 NG — 그 하한의 비와 그 항목이 판정비 · 지배다
     // (그 항목이 가정한 길이의 검토로 trusted false 여도 — 하한은 길이와 상관없다). 다른 넘은 항목은 그 뒤에
-    const bound = lengthBoundFailure(result);
-    if (bound) {
+    // 2026-11-26: 같은 규칙에 「구멍 없는 강도로도 넘음」(구멍 조항을 평가하지 못한 확실한 불합격). 퍼린 묶음은 구간의 결과마다
+    const bounds = [lengthBoundFailure(result), ...(Array.isArray(result.regions) ? result.regions.map((g: any) => lengthBoundFailure(g?.result)) : [])]
+        .filter((b): b is NonNullable<ReturnType<typeof lengthBoundFailure>> => b !== null)
+        .sort((a, b) => a.ratio - b.ratio);
+    for (const bound of bounds) {
         if (s.maxRatio === null || bound.ratio > s.maxRatio) { s.maxRatio = bound.ratio; }
         if (bound.id) {
             s.governing = [{ id: bound.id, ratio: bound.ratio, verdict: 'fail' }, ...s.governing.filter((g) => g.id !== bound.id)].slice(0, 12);
@@ -88,23 +91,71 @@ export function runSummary(result: any, props?: any): RunSummary {
     return s;
 }
 
-/** 길이와 상관없는 하한으로 NG 인 결과(빈 길이 — webview/js/utils.js lengthBoundFailure 와 같은 규칙). 아니면 null */
-export function lengthBoundFailure(result: any): { ratio: number; id: string | null } | null {
+export const FAILS_WITHOUT_HOLES = 'member.reason.fails_without_holes';
+/** 구멍 없는 강도의 상한으로 낸 확실한 불합격 검토(trusted false 이지만 판정이다) */
+export function failsWithoutHoles(c: any): boolean {
+    return !!c && typeof c === 'object' && c.verdict === 'fail' && c.reason_code === FAILS_WITHOUT_HOLES;
+}
+export interface BoundFailure { ratio: number; id: string | null; basis: 'length' | 'holes'; source: string }
+
+/** 구멍 조항을 평가하지 못했지만 구멍 없는 강도의 상한을 넘은 것(webview/js/utils.js holesBoundCandidates 와 같은 규칙) */
+function holesBoundCandidates(result: any): BoundFailure[] {
+    const out: BoundFailure[] = [];
+    const dc: any[] = Array.isArray(result.design_checks) ? result.design_checks : [];
+    const add = (id: string, blockRatio: unknown, source: string) => {
+        const c = dc.find((x) => x && x.id === id) || null;
+        const r = c && failsWithoutHoles(c) && num(c.ratio) !== null ? num(c.ratio) : num(blockRatio);
+        if (r !== null && r > 1) { out.push({ ratio: r, id: c && ID_RE.test(id) ? id : null, basis: 'holes', source }); }
+    };
+    const hb = result.holes_strength_bound;
+    if (hb && typeof hb === 'object') {
+        const ids = Object.keys(hb.checks && typeof hb.checks === 'object' ? hb.checks : {}).filter((k) => k !== 'member.flexure.positive_region');
+        const fails = dc.filter((c) => failsWithoutHoles(c) && ids.includes(c.id) && num(c.ratio) !== null).sort((a, b) => b.ratio - a.ratio);
+        if (fails.length) { add(fails[0].id, hb.ratio, 'holes_strength_bound'); }
+        else { const r = num(hb.ratio); if (r !== null && r > 1) { out.push({ ratio: r, id: null, basis: 'holes', source: 'holes_strength_bound' }); } }
+        if (num(hb.ratio_positive) !== null) { add('member.flexure.positive_region', hb.ratio_positive, 'holes_strength_bound'); }
+    }
+    const sb = result.shear && typeof result.shear === 'object' ? result.shear.bound_without_holes : null;
+    if (sb && typeof sb === 'object') {
+        if (sb.fails === true) { add('member.shear', sb.ratio, 'shear.bound_without_holes'); }
+        if (sb.h2_fails === true) { add('member.bending_shear', sb.h2_total, 'shear.bound_without_holes'); }
+    }
+    const wb = result.web_crippling && typeof result.web_crippling === 'object' ? result.web_crippling.bound_without_holes : null;
+    if (wb && typeof wb === 'object') {
+        if (wb.fails === true) { add('member.web_crippling', wb.ratio, 'web_crippling.bound_without_holes'); }
+        if (wb.h3_fails === true) { add('member.bending_web_crippling', wb.h3_ratio, 'web_crippling.bound_without_holes'); }
+    }
+    const ih = result.interaction_holes_bound;
+    if (ih && typeof ih === 'object') { add('member.axial_bending', num(ih.total_unrounded) ?? ih.total, 'interaction_holes_bound'); }
+    return out;
+}
+
+/**
+ * 판정비가 하한의 비인 NG 결과(webview/js/utils.js lengthBoundFailure 와 같은 규칙) — 아니면 null.
+ * ① 빈 길이: 길이와 상관없는 하한(length_independent_bound · 조합의 interaction_length_bound)
+ * ② 2026-11-26: 구멍 조항을 평가하지 못했지만 구멍 없는 강도의 상한으로도 넘음(holes_strength_bound · shear / web_crippling 의
+ *    bound_without_holes · interaction_holes_bound — 그 검토는 trusted false · member.reason.fails_without_holes 의 fail)
+ * 둘 이상이면 비가 가장 큰 것.
+ */
+export function lengthBoundFailure(result: any): BoundFailure | null {
     if (!result || typeof result !== 'object' || result.pass !== false || result.utilization_valid !== false) { return null; }
+    let best: BoundFailure | null = null;
     const b = result.length_independent_bound;
     const ratio = b && typeof b === 'object' ? num(b.ratio) : null;
     if (ratio !== null) {
         const raw = b.governing_check_id ?? b.governing_check;
-        return { ratio, id: typeof raw === 'string' && ID_RE.test(raw) ? raw : null };
+        best = { ratio, id: typeof raw === 'string' && ID_RE.test(raw) ? raw : null, basis: 'length', source: 'length_independent_bound' };
+    } else {
+        // 조합(H1.2): Pa · Max 를 그 하한으로 둔 H1.2 의 하한 비(interaction_length_bound)가 1 을 넘으면 — 항목 member.axial_bending
+        const ib = result.interaction_length_bound;
+        const t = ib && typeof ib === 'object' ? (num(ib.total_unrounded) ?? num(ib.total)) : null;
+        if (t !== null && t > 1) {
+            const has = Array.isArray(result.design_checks) && result.design_checks.some((c: any) => c && c.id === 'member.axial_bending');
+            best = { ratio: t, id: has ? 'member.axial_bending' : null, basis: 'length', source: 'interaction_length_bound' };
+        }
     }
-    // 조합(H1.2): Pa · Max 를 그 하한으로 둔 H1.2 의 하한 비(interaction_length_bound)가 1 을 넘으면 — 항목 member.axial_bending
-    const ib = result.interaction_length_bound;
-    const t = ib && typeof ib === 'object' ? (num(ib.total_unrounded) ?? num(ib.total)) : null;
-    if (t !== null && t > 1) {
-        const has = Array.isArray(result.design_checks) && result.design_checks.some((c: any) => c && c.id === 'member.axial_bending');
-        return { ratio: t, id: has ? 'member.axial_bending' : null };
-    }
-    return null;
+    for (const c of holesBoundCandidates(result)) { if (!best || c.ratio > best.ratio) { best = c; } }
+    return best;
 }
 
 /**

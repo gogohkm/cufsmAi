@@ -89,6 +89,7 @@ export const QUANTITY_UNITS: Record<string, UnitKey | 'none'> = {
     rotational_stiffness: 'rot_stiff',
     mass_density: 'density',      // K4c — kip·s²/in⁴ → kg/m³
     pressure: 'pressure',         // K4d — psf → kPa
+    per_area: 'per_area',         // 엔진 H2 후속(2026-11-26): §H4 의 θ'' (1/in² → 1/mm²)
     dimensionless: 'none',
     angle: 'none',
     count: 'none',
@@ -461,6 +462,8 @@ const MEMBER_KEYS: Table = {
     demands: { '*': 'force' },
     web_crippling: {
         P: 'force', load: 'force', Pn_interior_cap: 'force', Pn_without_holes: 'force', Rc: 'none',
+        // 엔진 8f9126e: §G6 을 평가하지 못했을 때 구멍 없는 웹 크리플링 강도(상한) — 넘으면 확실한 불합격
+        bound_without_holes: { Pn: 'force', design_strength: 'force', P: 'force', ratio: 'none', h3_total: 'none', h3_limit: 'none', h3_ratio: 'none' },
         // 결정 T7: §G6 의 Rc 와 그 한계 (a)–(i) — 한계 항목의 값은 항목에 따라 비(dh/h · h/t) 또는 길이
         g6: {
             Rc: 'none', Rc_raw: 'none', dh: 'length', x: 'length', N: 'length', h: 'length', N_min: 'length', Pn_g5: 'force',
@@ -485,6 +488,8 @@ const MEMBER_KEYS: Table = {
         R: 'none', R_raw: 'none', y: 'length', node: 'none', node_xz: 'length', e: 'length', L: 'length', a: 'length',
         J: 'inertia', Cw: 'warping', omega_n: 'area', f_bending: 'stress', f_torsion: 'stress', f_bending_max: 'stress',
         f_combined: 'stress', rotation_mid: 'none', design_strength: 'moment',
+        // 엔진 H2 후속: θ'' (rad/in² — 하중이 Mu 일 때). location_q 의 {symbol, value, quantity} 는 quantity 로 바꾼다
+        theta_pp: 'per_area',
     },
     // 결정 T7: §G4.1 횡방향 웹 보강재의 요건
     web_stiffeners: {
@@ -493,7 +498,15 @@ const MEMBER_KEYS: Table = {
         Cv: 'none', Y: 'none', D: 'none', Ast_min: 'area', bracket: 'none',
     },
     // 결정 T7: 전단의 새 칸(§G3 의 c · c/t · qs)
-    shear: { c: 'length', c_over_t: 'none', qs: 'none' },
+    shear: { c: 'length', c_over_t: 'none', qs: 'none',
+        // 엔진 8f9126e: §G3 을 평가하지 못했을 때 구멍 없는 웹의 전단 강도(상한) — 넘으면 확실한 불합격
+        bound_without_holes: { Vn: 'force', Vn_per_web: 'force', design_strength: 'force', ratio: 'none', h2_total: 'none', Malo: 'moment' } },
+    // 엔진 8f9126e: 구멍 조항을 평가하지 못했을 때 구멍 없는 강도의 상한(압축 Pn · 휨 Mn). checks.<검토 id>.value 는 그 기호(P… · M…)로
+    holes_strength_bound: {
+        ratio_positive: 'none',
+        checks: { '*': { value: (_v: any, parent: any) => (/^P/.test(String(parent?.symbol || '')) ? 'force' : 'moment') } },
+    },
+    interaction_holes_bound: { total_unrounded: 'none', Pa_upper: 'force', Max_upper: 'moment' },
     h3_interaction: { P_term: 'none', M_term: 'none', limit: 'none' },
     // 엔진이 US 라벨과 함께 내는 조건표 — 값은 라벨의 US 단위 그대로 둔다
     conditions: 'keepUS',

@@ -358,7 +358,9 @@ function checkHead(c: any): any {
         id: c.id, clause: c.clause ?? null, name_ko: c.name_ko ?? c.name ?? null,
         demand: q(c.demand), nominal: q(c.nominal),
         factor: c.factor && typeof c.factor === 'object' ? { symbol: c.factor.symbol, value: c.factor.value, kind: c.factor.kind } : c.factor ?? null,
-        capacity: q(c.capacity), ratio: c.ratio ?? null, verdict: c.verdict, location: c.location ?? null, combination: c.combination ?? null,
+        capacity: q(c.capacity), ratio: c.ratio ?? null, verdict: c.verdict,
+        // H2 후속(크기): 위치 · 조합은 있을 때만(없으면 null 과 같다)
+        ...(c.location != null ? { location: c.location } : {}), ...(c.combination != null ? { combination: c.combination } : {}),
     };
     if (c.reason) { head.reason = c.reason; }
     if (c.reason_code) { head.reason_code = c.reason_code; }
@@ -387,7 +389,8 @@ function checkLine(c: any, withValues = false, headHasReason = false): any {
         if (c.demand) { line.demand = { symbol: c.demand.symbol, value: c.demand.value, quantity: c.demand.quantity }; }
         if (c.capacity) { line.capacity = { symbol: c.capacity.symbol, value: c.capacity.value, quantity: c.capacity.quantity }; }
     }
-    if (c.governs === true && c.governs_basis) { line.governs_basis = c.governs_basis; }
+    // H2 후속(크기): 지배 항목의 governs_basis 는 머리(governing_checks)에 — 머리가 없는 안쪽 결과의 줄에만
+    if (c.governs === true && c.governs_basis && !headHasReason) { line.governs_basis = c.governs_basis; }
     // K4b: 지배 항목의 까닭은 governing_checks 의 머리에 있다 — 줄에는 그 밖의 항목만(한국어 글이 길어 두 번 싣지 않는다)
     if (c.reason && !(c.governs === true && headHasReason)) { line.reason = c.reason; }
     if (c.reason_code && !(c.governs === true && headHasReason)) { line.reason_code = c.reason_code; }
@@ -522,6 +525,50 @@ function moreNote(scope: string, omitted: string[], detail: Detail): string {
 }
 
 /**
+ * 판정비가 하한의 비인 NG 결과 — src/records/runs.ts lengthBoundFailure · webview/js/utils.js 와 같은 규칙의 사본(MCP 서버는 그 모듈을
+ * 싣지 않는다 — 시험 web_options_contract · design_chain_contract 가 셋을 맞댄다). ① 빈 길이의 길이와 상관없는 하한 ② 구멍 조항을
+ * 평가하지 못했지만 구멍 없는 강도의 상한으로도 넘음(검토는 trusted false · member.reason.fails_without_holes 의 fail). 비가 큰 것.
+ */
+function boundFailure(r: any): { ratio: number; id: string | null; basis: 'length' | 'holes'; source: string } | null {
+    if (!r || typeof r !== 'object' || r.pass !== false || r.utilization_valid !== false) { return null; }
+    const fin = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    let best: { ratio: number; id: string | null; basis: 'length' | 'holes'; source: string } | null = null;
+    const b = r.length_independent_bound && typeof r.length_independent_bound === 'object' ? r.length_independent_bound : null;
+    const ib = r.interaction_length_bound && typeof r.interaction_length_bound === 'object' ? r.interaction_length_bound : null;
+    const ibt = ib ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
+    if (b && typeof b.ratio === 'number') { best = { id: b.governing_check_id ?? b.governing_check ?? null, ratio: b.ratio, basis: 'length', source: 'length_independent_bound' }; }
+    else if (typeof ibt === 'number' && ibt > 1) { best = { id: 'member.axial_bending', ratio: ibt, basis: 'length', source: 'interaction_length_bound' }; }
+    const dc: any[] = Array.isArray(r.design_checks) ? r.design_checks : [];
+    const fwh = (c: any) => !!c && c.verdict === 'fail' && c.reason_code === 'member.reason.fails_without_holes';
+    const add = (id: string, blockRatio: unknown, source: string) => {
+        const c = dc.find((x) => x && x.id === id) || null;
+        const ratio = c && fwh(c) && fin(c.ratio) !== null ? fin(c.ratio) : fin(blockRatio);
+        if (ratio !== null && ratio > 1 && (!best || ratio > best.ratio)) { best = { ratio, id: c ? id : null, basis: 'holes', source }; }
+    };
+    const hb = r.holes_strength_bound;
+    if (hb && typeof hb === 'object') {
+        const ids = Object.keys(hb.checks && typeof hb.checks === 'object' ? hb.checks : {}).filter((k) => k !== 'member.flexure.positive_region');
+        const fails = dc.filter((c) => fwh(c) && ids.includes(c.id) && fin(c.ratio) !== null).sort((x, y) => y.ratio - x.ratio);
+        if (fails.length) { add(fails[0].id, hb.ratio, 'holes_strength_bound'); }
+        else { const x = fin(hb.ratio); if (x !== null && x > 1 && (!best || x > best.ratio)) { best = { ratio: x, id: null, basis: 'holes', source: 'holes_strength_bound' }; } }
+        if (fin(hb.ratio_positive) !== null) { add('member.flexure.positive_region', hb.ratio_positive, 'holes_strength_bound'); }
+    }
+    const sb = r.shear && typeof r.shear === 'object' ? r.shear.bound_without_holes : null;
+    if (sb && typeof sb === 'object') {
+        if (sb.fails === true) { add('member.shear', sb.ratio, 'shear.bound_without_holes'); }
+        if (sb.h2_fails === true) { add('member.bending_shear', sb.h2_total, 'shear.bound_without_holes'); }
+    }
+    const wb = r.web_crippling && typeof r.web_crippling === 'object' ? r.web_crippling.bound_without_holes : null;
+    if (wb && typeof wb === 'object') {
+        if (wb.fails === true) { add('member.web_crippling', wb.ratio, 'web_crippling.bound_without_holes'); }
+        if (wb.h3_fails === true) { add('member.bending_web_crippling', wb.h3_ratio, 'web_crippling.bound_without_holes'); }
+    }
+    const ih = r.interaction_holes_bound;
+    if (ih && typeof ih === 'object') { add('member.axial_bending', fin(ih.total_unrounded) ?? ih.total, 'interaction_holes_bound'); }
+    return best;
+}
+
+/**
  * 결정 T7: 구멍 · 횡방향 웹 보강재 · §H4 · 전단의 곡선 · §G6 의 Rc — 그 묶음이 요약에서 빠질 때(잎이 SMALL_BLOCK 보다 많다) 근거만 작게.
  * 까닭의 글은 not_evaluated · 검토 줄의 reason 에 이미 있다 — 여기에는 code 만(두 번 싣지 않는다). 전체는 detail 'checks' · 'full'.
  */
@@ -532,36 +579,80 @@ function webBasis(r: any, out: any, omitted: string[]): void {
         return x;
     };
     const codes = (o: any): string[] => (Array.isArray(o?.notices) ? [...new Set<string>(o.notices.map((n: any) => n?.code).filter((c: any) => typeof c === 'string'))] : []);
+    const swapped: string[] = [];
     const swap = (key: string, name: string, block: any) => {
         const i = omitted.indexOf(key);
         if (i < 0) { return; }
-        omitted.splice(i, 1, `${key} (the basis is in ${name})`);
+        omitted.splice(i, 1);
+        swapped.push(key);
         out[name] = block;
     };
+    // H2 후속(크기 — 단일 부재 12 KB): 근거 묶음에는 검토 줄(check_lines · design_checks — 비 · 판정)과 지배 머리(governing_checks —
+    // 소요 · 공칭 · 설계강도 · 위치)에 이미 있는 것을 다시 싣지 않는다. 지배하지 않는 검토의 값은 남긴다(줄에는 비 · 판정뿐이다)
+    const dc: any[] = Array.isArray(r.design_checks) ? r.design_checks : [];
+    const chk = (id: string) => dc.find((c) => c && c.id === id) || null;
+    const gov = (id: string) => { const c = chk(id); return !!c && c.governs === true && (c.verdict === 'pass' || c.verdict === 'fail'); };
+    const without = (o: any, keys: string[]): any => { const x = { ...o }; for (const k of keys) { delete x[k]; } return x; };
     const h = r.holes;
     if (h && typeof h === 'object') {
         const rc = codes(h);
-        swap('holes', 'holes_basis', { ...pick(h, ['shape', 'dh', 'Lh', 's', 'web_offset', 'evaluated', 'compression_evaluated', 'flexure_evaluated',
-            'Anet', 'Sfnet', 'Pcrl_h', 'Pcrd_h', 'Mcrl_h', 'Mcrd_h', 'Pynet', 'Mynet']), ...(rc.length ? { reason_codes: rc } : {}) });
+        // Pynet · Mynet 이 맨 위에 같은 값으로 있으면 다시 싣지 않는다
+        const topSame = ['Pynet', 'Mynet'].filter((k) => typeof h[k] === 'number' && out[k] === h[k]);
+        swap('holes', 'holes_basis', { ...without(pick(h, ['shape', 'dh', 'Lh', 's', 'single_hole', 'web_offset', 'evaluated', 'props_mismatch', 'compression_evaluated', 'flexure_evaluated',
+            'Anet', 'Sfnet', 'Pcrl_h', 'Pcrd_h', 'Mcrl_h', 'Mcrd_h', 'Pynet', 'Mynet']), topSame), ...(rc.length ? { reason_codes: rc } : {}) });
+    }
+    // 구멍 없는 강도의 상한(구멍 조항을 평가하지 못했을 때 — 확실한 불합격의 근거): 값만. 늘 같은 설명 글(note · checks[].text)은 detail 'checks'
+    const hb = r.holes_strength_bound;
+    if (hb && typeof hb === 'object') {
+        const compact = { ...pick(hb, ['Pn', 'Mn', 'design_strength', 'ratio', 'ratio_positive']),
+            ...(hb.checks && typeof hb.checks === 'object' ? { checks: Object.fromEntries(Object.entries(hb.checks).map(([id, c]: [string, any]) => [id, c && typeof c === 'object' ? c.value : c])) } : {}) };
+        const i = omitted.indexOf('holes_strength_bound');
+        if (i >= 0) { omitted.splice(i, 1, 'holes_strength_bound.note / checks[].text'); } else { omitted.push('holes_strength_bound.note / checks[].text'); }
+        out.holes_strength_bound = compact;
+    }
+    const ih = r.interaction_holes_bound;
+    if (ih && typeof ih === 'object' && out.interaction_holes_bound && typeof out.interaction_holes_bound === 'object' && 'note' in out.interaction_holes_bound) {
+        out.interaction_holes_bound = without(out.interaction_holes_bound, ['note']);
+        omitted.push('interaction_holes_bound.note');
     }
     const t = r.torsion;
     if (t && typeof t === 'object') {
-        swap('torsion', 'torsion_basis', { ...pick(t, ['route', 'evaluated', 'applicable', 'R', 'R_raw', 'increased_15pct', 'at_web_flange_junction',
-            'Mn', 'design_strength', 'Mu', 'ratio', 'pass', 'node', 'y', 'f_bending', 'f_torsion', 'reason_code']) });
+        const tg = gov('member.bending_torsion');
+        swap('torsion', 'torsion_basis', without(pick(t, ['route', 'evaluated', 'applicable', 'R', 'R_raw', 'increased_15pct', 'at_web_flange_junction',
+            'Mn', 'design_strength', 'Mu', 'ratio', 'pass', 'node', 'y', 'f_bending', 'f_torsion', 'reason_code']),
+        [...(chk('member.bending_torsion') ? ['ratio', 'pass'] : []), ...(tg ? ['Mn', 'design_strength', 'Mu', 'node', 'y'] : [])]));
     }
     const s = r.web_stiffeners;
     if (s && typeof s === 'object') {
-        swap('web_stiffeners', 'web_stiffeners_basis', pick(s, ['conforming', 'g4_2', 'kind', 'a', 'a_over_h', 'a_over_h_limit', 'Is', 'Is_min', 'As',
-            'Ast_min', 'Fy_st', 'ratio', 'missing', 'reason_code']));
+        swap('web_stiffeners', 'web_stiffeners_basis', without(pick(s, ['conforming', 'g4_2', 'kind', 'a', 'a_over_h', 'a_over_h_limit', 'Is', 'Is_min', 'As',
+            'Ast_min', 'Fy_st', 'ratio', 'missing', 'reason_code']), chk('member.web_stiffeners') ? ['ratio'] : []));
     }
+    const boundFlags = (b: any, keys: string[]) => (b && typeof b === 'object' ? { bound_without_holes: pick(b, keys) } : {});
     const v = r.shear;
     if (v && typeof v === 'object' && ('curve' in v || 'evaluated' in v)) {
-        swap('shear', 'shear_basis', pick(v, ['evaluated', 'reference_only', 'curve', 'kv', 'kv_equation', 'qs', 'c', 'Vn', 'design_strength', 'reason_code']));
+        // 확실한 불합격(구멍 없는 강도로도 넘음)이면 그 검토가 지배 머리에 상한의 설계강도 · 비로 있다 — 여기에는 넘었는지만
+        swap('shear', 'shear_basis', { ...without(pick(v, ['evaluated', 'reference_only', 'curve', 'kv', 'kv_equation', 'qs', 'c', 'Vn', 'design_strength', 'reason_code']),
+            [...(gov('member.shear') && v.evaluated !== false ? ['Vn', 'design_strength'] : []), ...(v.reference_only === false ? ['reference_only'] : [])]), ...boundFlags(v.bound_without_holes, ['fails', 'h2_fails', 'Vn', 'design_strength']) });
     }
     const w = r.web_crippling;
-    if (w && typeof w === 'object' && (w.Rc !== undefined || w.g6)) {
-        swap('web_crippling', 'web_crippling_basis', { ...pick(w, ['evaluated', 'Rc', 'Pn_without_holes', 'Pn', 'design_strength', 'ratio', 'reason_code']),
-            ...(w.g6 && typeof w.g6 === 'object' ? { g6_equation: w.g6.equation ?? null, g6_evaluated: w.g6.evaluated ?? null } : {}) });
+    if (w && typeof w === 'object' && (w.Rc !== undefined || w.g6 || w.bound_without_holes)) {
+        swap('web_crippling', 'web_crippling_basis', { ...without(pick(w, ['evaluated', 'Rc', 'Pn_without_holes', 'Pn', 'design_strength', 'ratio', 'reason_code']),
+            [...(chk('member.web_crippling') ? ['ratio'] : []), ...(gov('member.web_crippling') && w.evaluated !== false ? ['Pn', 'design_strength'] : [])]),
+            ...(w.g6 && typeof w.g6 === 'object' ? { g6_equation: w.g6.equation ?? null, g6_evaluated: w.g6.evaluated ?? null } : {}),
+            ...boundFlags(w.bound_without_holes, ['fails', 'h3_fails', 'Pn', 'design_strength']) });
+    }
+    if (swapped.length) {
+        omitted.push(`${swapped.join(', ')} (basis: *_basis)`);
+        // §H2 · §H3 의 합(total · 한계 · 판정 · 식)은 그 검토가 지배 머리에 있으면 거기에(소요 = 합, 설계강도 = 한계, equation_used) — 여기에는 항만
+        const dedupe = (key: string, id: string, keys: string[]) => {
+            if (!out[key] || typeof out[key] !== 'object' || !(Array.isArray(out.governing_checks) && out.governing_checks.some((g: any) => g && g.id === id))) { return; }
+            out[key] = without(out[key], keys);
+            deduped = true;
+        };
+        let deduped = false;
+        dedupe('shear_interaction', 'member.bending_shear', ['total', 'pass', 'equation']);
+        dedupe('h3_interaction', 'member.bending_web_crippling', ['total', 'limit', 'pass', 'equation', 'design_method']);
+        if (deduped) { omitted.push('H2 / H3 totals (in governing_checks)'); }
     }
 }
 
@@ -615,14 +706,15 @@ function shapeDesign(scope: string): Shaper {
         headlineCaveat(out, out.governing_checks);
         // 엔진(2026-11-25 둘째 판): 빈 길이의 맨 위 utilization 은 가정한 길이의 수(utilization_valid false) — 판정비가 아니다. 길이와 상관없는
         // 하한으로 NG 이면 그 하한의 비 · 항목이 판정비 · 지배(length_independent_bound)
-        if (!inner && r.length_assumed === true && r.utilization_valid === false) {
-            const b = r.length_independent_bound && typeof r.length_independent_bound === 'object' ? r.length_independent_bound : null;
-            const ib = r.interaction_length_bound && typeof r.interaction_length_bound === 'object' ? r.interaction_length_bound : null;
-            const ibt = ib ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
-            const bound = b && typeof b.ratio === 'number' ? { id: b.governing_check_id ?? b.governing_check ?? 'length_independent_bound', ratio: b.ratio, key: 'length_independent_bound' }
-                : typeof ibt === 'number' && ibt > 1 ? { id: 'member.axial_bending', ratio: ibt, key: 'interaction_length_bound' } : null;
+        // 2026-11-26: 같은 규칙에 「구멍 없는 강도로도 넘음」(구멍 조항을 평가하지 못한 확실한 불합격 — src/records/runs.ts lengthBoundFailure)
+        const bound = !inner ? boundFailure(r) : null;
+        if (!inner && bound && bound.basis === 'holes') {
+            out.utilization_note = `utilization is not the verdict ratio (some hole provisions could not be evaluated) — the result FAILS even on the strength `
+                + `without holes (holes can only lower it): ${bound.id ?? bound.source} ratio ${Number(bound.ratio.toFixed(4))} (${bound.source}); report that ratio `
+                + 'as a fail and say which hole provisions were not evaluated (not_evaluated)';
+        } else if (!inner && r.length_assumed === true && r.utilization_valid === false) {
             out.utilization_note = r.pass === false && bound
-                ? `utilization comes from an assumed length and is not the verdict ratio — the result FAILS at every length on the length-independent bound: ${bound.id} ratio ${Number(bound.ratio.toFixed(4))} (${bound.key}); report that ratio`
+                ? `utilization comes from an assumed length and is not the verdict ratio — the result FAILS at every length on the length-independent bound: ${bound.id ?? bound.source} ratio ${Number(bound.ratio.toFixed(4))} (${bound.source}); report that ratio`
                 : 'utilization comes from an assumed length (a length is blank) — it is not a verdict ratio; report the result as not evaluated for the length-dependent checks';
         }
         // 하위 결과(web_crippling · shear · 조합의 compression … · fastener_design)의 알림 — 하나도 버리지 않는다.
@@ -1647,12 +1739,12 @@ const WC_FIELDS = {
 
 // 결정 T7(2026-11-26): 웹 구멍(천공) · 횡방향 웹 보강재 · 휨 + 비틀림(§H4) — 화면 「설계」 탭의 접이 구역 셋과 같은 검토 상태 칸
 // (holeShape … · stiffenerMode … · torsionMode …). 받은 것만 상태에 쓰고, 계산은 화면 단추의 본문(구역이 「없음」 이면 그 키를 보내지 않는다)
-const HOLE_DESC_TAIL = " Holes outside the specification limits, off-centre or edge-stiffened holes, sections other than C / Z / track (§G3 / §G6: C and track only) and sections whose web cannot be identified (hand-drawn or edited sections) come back NOT EVALUATED with the reason (holes.reasons, design_checks member.applicability.holes) — report them; the gross-section values are never used for a verdict then.";
+const HOLE_DESC_TAIL = " Holes outside the specification limits, off-centre or edge-stiffened holes, sections other than C / Z / track (§G3 / §G6: C and track only) and sections whose web cannot be identified (hand-drawn or edited sections) come back NOT EVALUATED with the reason (holes.reasons, design_checks member.applicability.holes) — report them; the gross-section values are never used for a pass then. Holes only lower these strengths: when the demand exceeds the guaranteed strength without holes the check FAILS anyway (verdict fail, trusted false, reason_code member.reason.fails_without_holes; holes_strength_bound · shear / web_crippling .bound_without_holes · interaction_holes_bound; utilization_note names the ratio) — report it as a fail standing on the strength without holes. Invalid hole_* / stiffener_* / torsion_* values come back as an error naming the input ('holes: …', 'stiffeners: …', 'torsion: …') and nothing is written to the case.";
 const HOLE_FIELDS_E = {
     hole_shape: z.enum(['none', 'circular', 'noncircular']).optional().describe("Web holes (perforations) equally spaced along the member: 'circular' or 'noncircular' (slotted / rectangular). Enables §E2.5 · §E3.2.2 · §E4.2 (compression) and §F2.2 · §F3.2.2 · §F4.2 (flexure) with the Appendix 2 elastic buckling of the member with holes (net section at the hole, web thickness tr, length-weighted properties), and in flexure §G3 shear and §G6 web crippling. 'none' clears the screen's hole section. Omit → the screen's choice (case input holeShape, initially 'none'); other hole_* arguments need a shape (given here or on the screen)." + HOLE_DESC_TAIL),
     hole_depth: z.number().positive().optional().describe("dh — hole dimension across the web (the diameter of a circular hole) — in, or mm if units='SI'. Required with a hole shape (blank → the call is refused, naming it)."),
     hole_length: z.number().positive().optional().describe("Lh — hole length along the member — in, or mm. Required for a noncircular hole; a circular hole uses Lh = dh (the value is not sent)."),
-    hole_spacing: z.number().positive().optional().describe("s — centre-to-centre hole spacing along the member (> Lh) — in, or mm. Omit → the screen's (blank there → not sent; the engine names it)."),
+    hole_spacing: z.number().positive().optional().describe("s — centre-to-centre hole spacing along the member (> Lh) — in, or mm. Omit → the screen's; blank there → not sent = ONE hole in each unbraced length (holes.single_hole true, assumption member.assumption.holes_single_hole)."),
     hole_web_offset: z.number().optional().describe("Offset of the hole centre from mid-depth of the web (+ toward larger model z) — in, or mm. Blank / omitted = 0 (centred). An off-centre hole is not evaluated."),
 };
 const HOLE_FIELDS = {
