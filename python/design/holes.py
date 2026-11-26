@@ -82,12 +82,74 @@ def _num(params, key, *, positive=True, required=True):
     return v
 
 
+def norm_shape(raw) -> str | None:
+    """hole_shape 의 별칭 → 'circular' | 'noncircular' | None(모름). §G3 · §G6 (design.shear) 도 이것을 쓴다."""
+    if raw is None or isinstance(raw, bool):
+        return None
+    return _SHAPE_ALIASES.get(str(raw).strip().lower().replace('-', '').replace('_', '').replace(' ', ''))
+
+
+def _given_value(v) -> bool:
+    return v is not None and not (isinstance(v, str) and v.strip() == '')
+
+
+# 값의 꼴(있을 때만 본다 — 있어야 하는지는 각 조항이 본다): 키 → (양수만, 0 허용)
+_NUM_RULES = {'hole_depth': 'positive', 'hole_length': 'positive', 'hole_spacing': 'positive',
+              'hole_end_distance': 'nonnegative', 'hole_corner_radius': 'nonnegative',
+              'hole_web_offset': 'finite', 'hole_bearing_distance': 'finite'}
+_BOOL_KEYS = ('hole_edge_stiffened', 'hole_within_bearing')
+
+
+def validate_values(params: dict) -> None:
+    """준 hole_* 값의 꼴 — 수가 아님 · 무한 · 범위 밖 · 원형의 Lh ≠ dh · s ≤ Lh 이면 ValueError(그 입력의 이름).
+    부재 검토(§E · §F 의 parse)와 §G3 · §G6 (design.shear) 이 같은 규칙으로 읽는다(빈 값은 주지 않은 것)."""
+    vals = {}
+    for key, rule in _NUM_RULES.items():
+        v = params.get(key)
+        if not _given_value(v):
+            continue
+        if isinstance(v, bool):
+            raise ValueError(f'{key} must be a number (in), got {v!r}')
+        try:
+            x = float(v)
+        except (TypeError, ValueError):
+            raise ValueError(f'{key} must be a number (in), got {v!r}')
+        if not math.isfinite(x):
+            raise ValueError(f'{key} must be finite (in), got {v!r}')
+        if rule == 'positive' and x <= 0:
+            raise ValueError(f'{key} must be > 0 (in), got {v!r}')
+        if rule == 'nonnegative' and x < 0:
+            raise ValueError(f'{key} must be >= 0 (in), got {v!r}')
+        vals[key] = x
+    for key in _BOOL_KEYS:
+        v = params.get(key)
+        if v is not None and not isinstance(v, bool):
+            raise ValueError(f'{key} must be true or false, got {v!r}')
+    shape = params.get('hole_shape')
+    if _given_value(shape) and norm_shape(shape) not in HOLE_SHAPES:
+        raise ValueError("hole_shape must be 'circular' or 'noncircular' (aliases: circle, round; rectangular, "
+                         f"slotted, oval, diamond), got {shape!r}")
+    dh, Lh, s = vals.get('hole_depth'), vals.get('hole_length'), vals.get('hole_spacing')
+    if norm_shape(shape) == 'circular' and dh is not None and Lh is not None and abs(Lh - dh) > 1e-9 * max(dh, 1.0):
+        raise ValueError(f'circular hole: hole_length ({Lh}) must equal hole_depth (the diameter, {dh}) '
+                         'or be left out')
+    L_eff = Lh if Lh is not None else (dh if norm_shape(shape) == 'circular' else None)
+    if s is not None and L_eff is not None and s <= L_eff:
+        raise ValueError(f'hole_spacing (centre-to-centre, {s}) must be larger than hole_length ({L_eff}) — '
+                         'overlapping holes are not discrete holes')
+
+
 def parse(params: dict) -> dict:
-    """정규화한 구멍 입력. 형식이 틀리면 ValueError(짐작해 채우지 않는다)."""
+    """정규화한 구멍 입력. 형식이 틀리면 ValueError(짐작해 채우지 않는다). 값의 꼴은 validate_values 와 같은 규칙.
+
+    hole_spacing 은 주지 않아도 된다(2026-11-26 독립 검증 7): 이웃 구멍이 없는 구멍 하나 — s = ∞ 로 둔다. 부록 2
+    표 2.3.2-1 의 Lnet ("Length of holes or net section regions") 은 비지지 길이마다 구멍 하나(Lnet = Lh — 한 길이가
+    가질 수 있는 가장 많은 수, 어느 비지지 길이에 구멍이 있는지 모르므로 모든 길이에), 뒤틀림의 s ≥ Lcrd 는 맞는다."""
     shape = params.get('hole_shape')
     if shape is None:
         raise ValueError("hole_shape is required when a hole is described ('circular' or 'noncircular')")
-    shape = _SHAPE_ALIASES.get(str(shape).strip().lower().replace('-', '').replace('_', '').replace(' ', ''))
+    validate_values(params)
+    shape = norm_shape(shape)
     if shape not in HOLE_SHAPES:
         raise ValueError("hole_shape must be 'circular' or 'noncircular' (aliases: circle, round; rectangular, "
                          f"slotted, oval, diamond), got {params.get('hole_shape')!r}")
@@ -101,8 +163,10 @@ def parse(params: dict) -> dict:
                              'or be left out')
     elif Lh is None:
         raise ValueError('hole_length (Lh, along the member) is required for a noncircular hole')
-    s = _num(params, 'hole_spacing')
-    if s <= Lh:
+    s = _num(params, 'hole_spacing', required=False)
+    if s is None:
+        s = math.inf                    # 이웃 구멍 없음(구멍 하나)
+    elif s <= Lh:
         raise ValueError(f'hole_spacing (centre-to-centre, {s}) must be larger than hole_length ({Lh}) — '
                          'overlapping holes are not discrete holes')
     end = _num(params, 'hole_end_distance', positive=False, required=False)
@@ -120,7 +184,7 @@ def parse(params: dict) -> dict:
     if st is not None and not isinstance(st, bool):
         raise ValueError(f'hole_edge_stiffened must be true or false, got {st!r}')
     return {'shape': shape, 'dh': dh, 'Lh': Lh, 's': s, 'end_distance': end, 'web_offset': off,
-            'edge_stiffened': bool(st)}
+            'edge_stiffened': bool(st), 'single_hole': not math.isfinite(s)}
 
 
 # ---------------------------------------------------------------- 웹 · 순단면 모델
@@ -467,6 +531,25 @@ def _fail(hc, reason, fam=None):
     return hc
 
 
+# 받은 성질과 모델의 성질의 허용 차(상대) — 이 프로그램의 템플릿(둥근 모서리 포함)은 성질과 순단면을 같은 모델에서
+# 내므로 차가 0 이다(lippedc 5.5 · 9 · 4 in, lippedz 8 in, track 6 in 에서 잼). 1 % 는 성질을 유효숫자 세 자리로
+# 반올림해 준 값(최대 0.5 %)과 설계 매뉴얼 표의 값(550S162-33: A 0.327 대 모델 0.32686, 0.04 %)을 받아 주고, 다른 단면
+# · 다른 모델의 성질(예: Sf 를 5 % 줄인 값)은 거른다.
+PROPS_REL_TOL = 0.01
+
+
+def props_mismatch(A_given, Sf_given, A_model, Sf_model) -> list:
+    """받은 A · Sf 가 모델의 값과 PROPS_REL_TOL 넘게 다르면 그 까닭 알림들. Sf 를 받지 않았으면 A 만 본다."""
+    out = []
+    tol_pct = PROPS_REL_TOL * 100.0
+    if A_given and A_model and abs(A_given / A_model - 1.0) > PROPS_REL_TOL:
+        out.append(_nt('member.reason.holes_props_mismatch_area', A=float(A_given), A_model=float(A_model), tol=tol_pct))
+    if Sf_given and Sf_model and abs(Sf_given / Sf_model - 1.0) > PROPS_REL_TOL:
+        out.append(_nt('member.reason.holes_props_mismatch_sf', Sf=float(Sf_given), Sf_model=float(Sf_model),
+                       tol=tol_pct))
+    return out
+
+
 def family_ok(hc, fam) -> bool:
     return bool(hc) and bool((hc.get(fam) or {}).get('evaluated'))
 
@@ -516,6 +599,14 @@ def evaluate(params: dict, families, *, section_type: str, Ag: float, Sf: float 
               Anet=nt['A'], Sfnet=nt['Sf'], A_model=g['A'], Sf_model=g['Sf'])
     if hc['Sf'] is None:
         hc['Sf'] = g['Sf']
+    # 받은 총단면 성질(Ag · Sf — 강도식이 쓴다)이 순단면을 낸 모델의 것인가(2026-11-26 독립 검증 6). 아니면 Anet/Ag ·
+    # Sfnet/Sf 가 섞인 두 단면의 비가 된다(Mynet > My 도) — 구멍 조항을 평가하지 않는다.
+    mism = props_mismatch(hc['Ag'], Sf, g['A'], g['Sf'])
+    if mism:
+        hc['props_mismatch'] = True
+        for n in mism:
+            _fail(hc, n)
+        return hc
     dsm = dsm or {}
     for fam in families:
         out = hc[fam]
@@ -619,8 +710,14 @@ def summary(hc: dict) -> dict:
     """결과에 싣는 묶음(holes) — 입력, 평가 여부(하중군마다), 순단면 성질과 구멍의 탄성값 · 순단면 강도.
     숫자 키는 한 층(display_unrounded 가 맨 위로 옮겨진다). 하중군 접미: _P (압축), _M (휨)."""
     h = hc['hole']
-    out = {'shape': h['shape'], 'dh': h['dh'], 'Lh': h['Lh'], 's': h['s'], 'end_distance': h['end_distance'],
-           'web_offset': h['web_offset'], 'edge_stiffened': h['edge_stiffened'], 'evaluated': bool(hc['evaluated'])}
+    single = bool(h.get('single_hole'))
+    out = {'shape': h['shape'], 'dh': h['dh'], 'Lh': h['Lh'], 's': None if single else h['s'],
+           'end_distance': h['end_distance'], 'web_offset': h['web_offset'], 'edge_stiffened': h['edge_stiffened'],
+           'evaluated': bool(hc['evaluated'])}
+    if single:
+        out['single_hole'] = True            # hole_spacing 을 주지 않음 — 이웃 구멍 없는 구멍 하나(s 는 None)
+    if hc.get('props_mismatch'):
+        out['props_mismatch'] = True
     for fam, key in (('P', 'compression_evaluated'), ('M', 'flexure_evaluated')):
         if fam in hc.get('families', []):
             out[key] = bool(hc[fam].get('evaluated'))

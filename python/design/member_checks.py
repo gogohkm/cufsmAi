@@ -127,9 +127,11 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
                       trusted=False if not trusted else None)
 
 
-def bound_fail(cid, ctx, demand, bound, *, phi, omega, cap_symbol, quantity, phi_symbol='φ', omega_symbol='Ω'):
+def bound_fail(cid, ctx, demand, bound, *, phi, omega, cap_symbol, quantity, phi_symbol='φ', omega_symbol='Ω',
+               reason=None, variant=None, location=None, reference=None):
     """강도를 이 길이에서 얻지 못했지만(가정 길이 · 전체좌굴 미구현) 가장 유리한 길이의 상한으로도 넘는 경우의 불합격
-    항목(검토 2차 R2-1). 넘지 않으면 None — 호출자가 not_evaluated 를 그대로 둔다."""
+    항목(검토 2차 R2-1). 넘지 않으면 None — 호출자가 not_evaluated 를 그대로 둔다.
+    reason 을 주면 그 까닭(2026-11-26: 구멍을 평가하지 못했지만 구멍 없는 상한으로도 넘음 — member.reason.fails_without_holes)."""
     if not bound or not demand or not demand.get('value') or demand['value'] <= 0:
         return None
     b_sym, b_nom, b_txt = bound
@@ -148,8 +150,9 @@ def bound_fail(cid, ctx, demand, bound, *, phi, omega, cap_symbol, quantity, phi
     return make_check(cid, design_method=dm, verdict='fail', demand=demand,
                       capacity=q(f'{cap_symbol},max', b_cap, quantity), nominal=q(b_sym, b_nom, quantity),
                       factor_=factor(dm, phi, omega, phi_symbol, omega_symbol), ratio=r_b, steps=tr.steps,
-                      reason=_nt('member.reason.fails_on_length_independent_mode', check=f'{cid}: {b_txt}'),
-                      trusted=False)
+                      reason=reason if reason is not None else _nt('member.reason.fails_on_length_independent_mode',
+                                                                   check=f'{cid}: {b_txt}'),
+                      trusted=False, variant=variant, location=location, reference=reference)
 
 
 def not_evaluated(cid, ctx, reason, *, steps=None, location=None, group=None, reference=None, variant=None):
@@ -403,10 +406,15 @@ def _holes_count_steps(tr, ctx, L_q, tag, fr):
     """비지지 길이 L 안의 구멍 수와 순단면 길이 — 표 2.3.2-1 의 Lnet (Manual III-4 의 n)."""
     hole = ctx['hole']['hole']
     lh = _h_in('hole_length', hole['Lh'])
-    s = _h_in('hole_spacing', hole['s'])
     Ls = L_q['symbol']
-    i_n = tr.add('equation', f'n,{tag} = floor(({Ls} − Lh)/s) + 1  (holes in {Ls}; 1 when {Ls} ≤ Lh)',
-                 equation='Table 2.3.2-1', inputs=[L_q, lh, s], result=q(f'n,{tag}', fr['n'], 'count'))
+    if hole.get('single_hole'):
+        # hole_spacing 을 주지 않음 — 이웃 구멍 없는 구멍 하나: 비지지 길이마다 구멍 하나(가정에 밝힌다)
+        i_n = tr.add('equation', f'n,{tag} = 1  (a single hole — hole_spacing not given: one hole in {Ls})',
+                     equation='Table 2.3.2-1', inputs=[L_q, lh], result=q(f'n,{tag}', fr['n'], 'count'))
+    else:
+        s = _h_in('hole_spacing', hole['s'])
+        i_n = tr.add('equation', f'n,{tag} = floor(({Ls} − Lh)/s) + 1  (holes in {Ls}; 1 when {Ls} ≤ Lh)',
+                     equation='Table 2.3.2-1', inputs=[L_q, lh, s], result=q(f'n,{tag}', fr['n'], 'count'))
     return tr.add('equation', f'Lnet,{tag} = min(n,{tag} Lh, {Ls})', equation='Table 2.3.2-1',
                   inputs=[tr.ref(i_n), lh, L_q], result=q(f'Lnet,{tag}', fr['Lnet'], 'length'))
 
@@ -706,8 +714,12 @@ def holes_applicability_check(dm, hc, member_type):
                                                                             else ' (bending)')))
             tr.branch('Lh < Lcrd', True, '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1',
                       inputs=[_h_in('hole_length', h['Lh']), lc])
-            tr.branch('s ≥ Lcrd  (one hole per distortional half-wavelength)', True,
-                      '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1', inputs=[_h_in('hole_spacing', h['s']), lc])
+            if h.get('single_hole'):
+                tr.branch('a single hole (hole_spacing not given) — one hole per distortional half-wavelength', True,
+                          '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1', inputs=[lc], descriptive=True)
+            else:
+                tr.branch('s ≥ Lcrd  (one hole per distortional half-wavelength)', True,
+                          '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1', inputs=[_h_in('hole_spacing', h['s']), lc])
     if not hc['evaluated']:
         return make_check('member.applicability.holes', design_method=dm, verdict='not_evaluated',
                           reason=_joined('; ', hc.get('reasons') or []), steps=tr.steps, variant=variant)
@@ -1265,11 +1277,20 @@ def flexure_checks_all(ck):
     g5 = ne_items(ne, 'G5')
     if ck.get('wc'):
         checks.append(web_crippling_check(ck, {**ck['wc'], 'ne_items': g5}))
+    elif ck.get('wc_bound'):
+        # §G6 미평가 — 구멍 없는 Pn(G5)으로 낸 검토: 넘으면 불합격, 아니면 판정 없음(2026-11-26 독립 검증 2)
+        checks.append(holes_bound_verdict(web_crippling_check(ck, {**ck['wc_bound'], 'ne_items': []}),
+                                          'member.web_crippling: P > web crippling strength without holes',
+                                          ck['wc_bound']['why'], keep_reference=False))
     elif g5:
         checks.append(not_evaluated('member.web_crippling', ck, _joined('; ', g5)))
     h3 = ne_items(ne, 'H3')
     if ck.get('h3'):
         checks.append(h3_check(ck, ck['h3']))
+    elif ck.get('h3_bound'):
+        checks.append(holes_bound_verdict(h3_check(ck, ck['h3_bound']),
+                                          'member.bending_web_crippling: H3 with the web crippling strength '
+                                          'without holes', ck['h3_bound']['why'], keep_reference=False))
     elif h3:
         checks.append(not_evaluated('member.bending_web_crippling', ck, _joined('; ', h3)))
     # EB(2026-11-26): §G2.2 · §G3 전단 · §H2(보강 웹) · §G4.1 보강재 · §H4 — 입력이 없으면 빈 목록
@@ -1755,9 +1776,15 @@ def _b1_steps(tr, ctx, axis, P):
     L_key, r_key = ('KxLx', 'rx') if axis == 'x' else ('KyLy', 'ry')
     Lq = q(L_key, ctx[L_key], 'length', src('user_input', key=L_key) if p.get(L_key) is not None
            else src('engine_default', key=L_key, note=_nt('member.note.length_default')))
+    if ctx.get('pe1_holes'):
+        # 구멍(2026-11-26 독립 검증 4): r = (I,avg / Ag)^0.5 — 부록 2 표 2.3.2-1 의 길이 가중 평균(가정에 밝힌다)
+        r_src = src('section_property', key=f'{r_key},avg',
+                    note=_nt('member.note.pe1_holes_average'))
+    else:
+        r_src = _sec(r_key, ctx)
     i_pe = tr.add('elastic_buckling', f'Pe1{axis} = {PI}² E A / ({L_key} / {r_key})²', equation='C1.2.1.1-5',
                   inputs=[q('E', ctx['E'], 'stress', spec()), q('A', ctx['Ag'], 'area', _sec('A', ctx)), Lq,
-                          q(r_key, ctx[r_key], 'length', _sec(r_key, ctx))],
+                          q(r_key, ctx[r_key], 'length', r_src)],
                   result=q(f'Pe1{axis}', ctx['PEx' if axis == 'x' else 'PEy'], 'force'))
     cm = _cm_step(tr, ctx, axis)
     return tr.add('modifier', f'B1{axis} = Cm{axis} / (1 − α P / Pe1{axis}) ≥ 1.0', equation='C1.2.1.1-3',
@@ -1823,6 +1850,20 @@ def axial_bending_check(ctx):
         ins += [q('May', ctx['May'], 'moment', src('user_input', key='May_strength'))]
         expr += f' + {my_sym}/May'
     i_x = tr.add('equation', expr, equation='H1.2-1', inputs=ins, result=q('H1.2', raw['total'], 'dimensionless'))
+    if ctx.get('holes_bound') is not None:
+        # 구멍 조항을 평가하지 못한 성분 — 그 구멍 없는 상한으로 낸 하한 비가 1 을 넘는다(2026-11-26 독립 검증 2)
+        hb = ctx['holes_bound']
+        i_b = tr.add('equation', 'H1.2,min = P / Pa,max + Mx / Max,max + My / May  (Pa,max, Max,max: upper bounds of '
+                                 'the strengths with holes; B1 of the gross section or 1 — the least ratio with holes)',
+                     equation='H1.2-1', inputs=[P], result=q('H1.2,min', hb, 'dimensionless'))
+        tr.add('verdict', 'H1.2,min ≤ 1.0', inputs=[tr.ref(i_b), q('limit', 1.0, 'dimensionless', spec())],
+               result=q('ratio', hb, 'dimensionless'), verdict='fail')
+        return make_check('member.axial_bending', design_method=dm, verdict='fail',
+                          demand=q('H1.2,min', hb, 'dimensionless'), capacity=q('limit', 1.0, 'dimensionless'),
+                          ratio=hb, steps=tr.steps, trusted=False,
+                          reason=_nt('member.reason.fails_without_holes', check='member.axial_bending: H1.2 with '
+                                     'the component strengths without holes', why='hole provisions not evaluated'),
+                          reference={'ratio': raw['total']})
     if ctx.get('length_assumed') and not ctx['component_unavailable']:   # (호출자: 하한이 넘으면 unavailable 을 끈다)
         # E-1: Pa · Max · B1 이 빈 길이의 기본값에서 나왔다 — 비는 참고값. 길이와 상관없는 하한 비가 넘으면 불합격.
         bound = ctx.get('length_bound')
@@ -1959,6 +2000,23 @@ def remap_mirrors(checks: list, sub: str) -> list:
             c['reason'] = _joined(' — ', [c['reason'], _nt('member.reason.no_demand_in_combined_check')])
         out.append(c)
     return out
+
+
+def holes_bound_verdict(check: dict, label: str, why, keep_reference: bool = True) -> dict:
+    """구멍 조항을 평가하지 못해 구멍 없는 강도(구멍은 이 강도를 낮추기만 한다 — 상한)로 낸 항목(2026-11-26 독립 검증 2):
+    불합격이면 그대로 불합격(까닭: 구멍 없는 강도로도 넘음, 신뢰 표시 False — 비는 그 상한의 비), 합격이면 판정 없음.
+    keep_reference False 면 판정 없음의 reference 를 비운다(§G3 · §G6: 구멍 없는 값은 보수측 참고값이 아니라는 옛 계약 —
+    단계는 남는다). mirrors 는 뺀다(결과의 묶음은 구멍 없는 값을 강도로 싣지 않는다)."""
+    if check.get('verdict') == 'fail':
+        c = dict(check, reason=_nt('member.reason.fails_without_holes', check=label, why=why), trusted=False)
+        c.pop('mirrors', None)
+        return c
+    if check.get('verdict') == 'pass':
+        c = demote_to_not_evaluated(check, why)
+        if not keep_reference:
+            c['reference'] = None
+        return c
+    return check
 
 
 def demote_to_not_evaluated(check: dict, reason: str) -> dict:

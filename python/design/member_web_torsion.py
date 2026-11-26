@@ -10,6 +10,8 @@
 계산식 · 한계 · 원문 인용은 design/shear.py · design/torsion.py 에 있다.
 """
 
+import math
+
 from design.shear import (shear_web_strength, stiffener_inputs, hole_inputs, g6_reduction)
 from design.notices import N as _nt, joined as _joined
 from design.checks import (Trace, q, src, spec, make_check, ratio_of, verdict_from, verdict_step,
@@ -39,6 +41,53 @@ def web_inputs(params: dict) -> dict | None:
 
 def torsion_given(params: dict) -> bool:
     return any(_given(params.get(k)) for k in TORSION_KEYS)
+
+
+# ================================================================ 입력의 꼴(2026-11-26 독립 검증 1 · 5)
+# 준 값이 수가 아니거나 · 무한 · NaN · 범위 밖이면 그 입력의 이름을 단 오류 — 예외도, NaN 비 · NaN 판정도 내지 않는다.
+# 보강재의 간격 · Is · 면적 · 항복응력이 0 이하면 §G4.1 을 「맞춤」 으로 두지 않고(독립 검증 1: Fy = 0 이 Eq. G4.1-2 를
+# 건너뛰어 맞춤이 되었다) 잘못된 입력으로 돌려준다.
+_STIFFENER_POSITIVE = ('stiffener_spacing', 'stiffener_Is', 'stiffener_area', 'stiffener_Fy')
+_TORSION_FINITE = ('torsion_f_bending', 'torsion_f_torsion', 'torsion_f_bending_max', 'torsion_eccentricity')
+_TORSION_TEXT = ('torsion_load', 'torsion_support')
+
+
+def _number(key, v, *, positive=False, unit=''):
+    u = f' ({unit})' if unit else ''
+    if isinstance(v, bool):
+        raise ValueError(f'{key} must be a number{u}, got {v!r}')
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f'{key} must be a number{u}, got {v!r}')
+    if not math.isfinite(x):
+        raise ValueError(f'{key} must be finite{u}, got {v!r}')
+    if positive and not x > 0:
+        raise ValueError(f'{key} must be > 0{u}, got {v!r}')
+    return x
+
+
+def validate_inputs(params: dict) -> None:
+    """stiffener_* · torsion_* 의 꼴 — 틀리면 ValueError(입력 이름으로 시작하는 글). hole_* 는 design.holes.validate_values."""
+    units = {'stiffener_spacing': 'in', 'stiffener_Is': 'in^4', 'stiffener_area': 'in^2', 'stiffener_Fy': 'ksi'}
+    for k in _STIFFENER_POSITIVE:
+        if _given(params.get(k)):
+            _number(k, params[k], positive=True, unit=units[k])
+    kind = params.get('stiffener_kind')
+    if _given(kind) and not isinstance(kind, str):
+        raise ValueError(f"stiffener_kind must be text ('pair', 'single_angle', 'single_plate' or a §G4.2 kind), "
+                         f"got {kind!r}")
+    for k in _TORSION_FINITE:
+        if _given(params.get(k)):
+            _number(k, params[k], unit='ksi' if k.startswith('torsion_f_') else 'in')
+    if _given(params.get('torsion_span')):
+        _number('torsion_span', params['torsion_span'], positive=True, unit='in')
+    for k in _TORSION_TEXT:
+        if _given(params.get(k)) and not isinstance(params[k], str):
+            raise ValueError(f'{k} must be text, got {params[k]!r}')
+    j = params.get('torsion_at_web_flange_junction')
+    if j is not None and not isinstance(j, bool):
+        raise ValueError(f'torsion_at_web_flange_junction must be true or false, got {j!r}')
 
 
 # ================================================================ §G2 · §G3 · §G4 · §H2 (부재)
@@ -91,11 +140,13 @@ def flexure_shear(result: dict, ck: dict, params: dict, geom: dict, *, Fy_v, E, 
         A._mark_not_evaluated(result, _nt('member.ne.g2_h2_shear_why', why=sr['reason']))
         result['spec_sections'].extend(['G2', 'H2'] + (['G3'] if web['holes'] is not None else [])
                                        + (['G4'] if stiffened else []))
+        _shear_holes_bound(result, data, params, h=h, t=t, Fy_v=Fy_v, E=E, canon=canon, Mu=Mu, Mnfo_v=Mnfo_v,
+                           Mnd_v=Mnd_v, phi=phi, omega=omega, design_method=design_method)
         return True
     Vn = Vn_web * n_webs
     Va = phi_v * Vn if design_method == 'LRFD' else Vn / omega_v
     # §H2: Maℓo = §F3 (Fn = Fy) — 보강재가 있으면 (b) F3 와 F4 가운데 작은 값(원문 (b)(1)(2)). 참고값의 길도 옛 규칙 그대로.
-    Mnlo = min(Mnfo_v, Mnd_v) if stiffened else Mnfo_v
+    Mnlo = _h2_mnlo(params, stiffened, Mnfo_v, Mnd_v)
     Malo = phi * Mnlo if design_method == 'LRFD' else Mnlo / omega
     h2_raw = {}
     if stiffened:
@@ -129,6 +180,65 @@ def flexure_shear(result: dict, ck: dict, params: dict, geom: dict, *, Fy_v, E, 
         A._merge_governing_check(result, {'total': si['total'], 'pass': None}, 'H2 bending + shear')
         A._mark_not_evaluated(result, _nt('member.ne.g2_h2_shear_why', why=sr['reason']))
     return True
+
+
+def _h2_mnlo(params, stiffened, Mnfo_v, Mnd_v):
+    """§H2 의 Mnℓo. 보강된 웹은 min(F3, F4). 휨의 구멍 조항을 평가하지 못해 구멍 없는 값으로 다시 낸 계산(_HOLE_BOUND)
+    에서는 F3 만 — 구멍 없는 F4 는 구멍의 F4 의 상한이 아니다(뒤틀림의 Mcrd 는 구멍으로 줄어든다는 보장이 식에 없다),
+    F3 (Mne = My, Mcrℓ = min(구멍 없음, 순단면) ≤ 구멍 없음, ≤ Mynet)는 상한이다."""
+    from design import aisi_s100 as A
+    if not stiffened:
+        return Mnfo_v
+    if params.get(A._HOLE_BOUND) is not None:
+        return Mnfo_v
+    return min(Mnfo_v, Mnd_v)
+
+
+def _shear_holes_bound(result, data, params, *, h, t, Fy_v, E, canon, Mu, Mnfo_v, Mnd_v, phi, omega,
+                       design_method):
+    """§G3 을 평가하지 못한 구멍(한계 밖 · 단면 · 가장자리 보강 …): 구멍 없는 웹의 전단 강도(qs ≤ 1 — 구멍은 낮추기만
+    한다)로 소요가 넘는지 본다(2026-11-26 독립 검증 2). 넘으면 불합격(그 까닭), 아니면 지금처럼 판정 없음.
+    보강재가 §G4.1 을 맞추지 못했거나 자료가 모자라면(보강된 웹의 강도를 모른다) 하지 않는다."""
+    from design import aisi_s100 as A
+    from design.interaction import combined_bending_shear, combined_bending_shear_stiffened
+    sr, web, g4 = data['sr'], data['web'], data['g4']
+    g3 = sr.get('g3')
+    if web['holes'] is None or g3 is None or g3.get('evaluated'):
+        return
+    stiffened = web['stiffeners'] is not None
+    if stiffened and not (g4 and g4.get('conforming')):
+        return
+    Vu = data['Vu']
+    if not Vu > 0:
+        return
+    sr0 = shear_web_strength(h, t, Fy_v, E=E, stiffeners=web['stiffeners'], holes=None, section_canon=canon)
+    if not sr0['evaluated'] or not (sr0.get('Vn') or 0) > 0:
+        return
+    why = g3['reason']
+    n_webs, phi_v, omega_v = data['n_webs'], data['phi_v'], data['omega_v']
+    Vn = sr0['Vn'] * n_webs
+    Va = phi_v * Vn if design_method == 'LRFD' else Vn / omega_v
+    Mnlo = _h2_mnlo(params, stiffened, Mnfo_v, Mnd_v)
+    Malo = phi * Mnlo if design_method == 'LRFD' else Mnlo / omega
+    h2_raw = {}
+    si = (combined_bending_shear_stiffened if stiffened else combined_bending_shear)(Mu, Malo, Vu, Va, _raw=h2_raw)
+    si['Malo'] = round(Malo, 2)
+    si['Mnlo'] = round(Mnlo, 2)
+    v_ratio = Vu / Va
+    shear_fails = v_ratio > 1.0
+    h2_fails = si['pass'] is False
+    data.update(Vn_web=sr0['Vn'], Vn=Vn, Va=Va, Mnlo=Mnlo, Malo=Malo, shear_int=si, h2_raw=h2_raw, kv=sr0['kv'],
+                sr_bound=sr0, bound_why=why, shear_fails=shear_fails, h2_fails=h2_fails)
+    result['shear']['bound_without_holes'] = {
+        'Vn': round(Vn, 2), 'Vn_per_web': round(sr0['Vn'], 2), 'design_strength': round(Va, 2),
+        'ratio': round(v_ratio, 4), 'fails': shear_fails, 'h2_total': round(h2_raw['total'], 4), 'h2_fails': h2_fails,
+        'h2_equation': si['equation'], 'Malo': round(Malo, 2),
+        'basis': 'shear strength of the web without holes (Section G2; G3 multiplies it by qs <= 1) — '
+                 'decides only when the demand exceeds it'}
+    if shear_fails:
+        A._merge_governing_check(result, {'total': v_ratio, 'pass': False}, 'G2 shear (strength without holes)')
+    if h2_fails:
+        A._merge_governing_check(result, {'total': h2_raw['total'], 'pass': False}, 'H2 bending + shear')
 
 
 def _g4_block(g4: dict) -> dict:
@@ -213,6 +323,53 @@ def g6_not_evaluated(result: dict, wc: dict, why) -> None:
                           _nt('shear.warning.g6_not_evaluated', why=why))
     A._mark_not_evaluated(result, _nt('member.ne.h3_web_crippling_why', why=why))
     result['spec_sections'].extend(['G5', 'G6'])
+
+
+def g6_holes_bound(result: dict, ck: dict, wc: dict, wc_detail, params: dict, *, h, t, N, R, Fy, Mu, Mnfo,
+                   design_method, web_config, why) -> None:
+    """§G6 을 평가하지 못한 구멍(지압 길이 안 · 한계 밖 · 다루지 않는 경우 …): 구멍 없는 웹 크리플링 강도 Pn(G5)
+    (§G6 의 Rc ≤ 1 — 구멍은 낮추기만 한다)으로 P 가 넘거나 §H3 이 넘는지(2026-11-26 독립 검증 2). 넘으면 불합격,
+    아니면 판정 없음 그대로. §H3 의 Mnℓo 는 이 휨 계산의 값(구멍을 평가했으면 구멍의 값, 아니면 구멍 없는 값 — 상한)."""
+    from design import aisi_s100 as A
+    from design.interaction import combined_bending_web_crippling
+    if abs(params.get('wc_P') or 0) > 0:
+        P, P_source = abs(params['wc_P']), 'wc_P'
+    elif abs(params.get('Vu') or 0) > 0:
+        P, P_source = abs(params['Vu']), 'Vu'
+    else:
+        return
+    Pn0 = wc_detail['Pn_final'] if wc_detail else (wc.get(A._DISPLAY_UNROUNDED) or {}).get('Pn', wc.get('Pn'))
+    phi_w, om_w = wc.get('phi'), wc.get('omega')
+    if not (Pn0 and Pn0 > 0 and phi_w and om_w):
+        return
+    Pa0 = phi_w * Pn0 if design_method == 'LRFD' else Pn0 / om_w
+    r = P / Pa0
+    fails = r > 1.0
+    M = abs(params.get('wc_M')) if params.get('wc_M') is not None else Mu
+    cfg = web_config
+    fam = str(wc.get('section_family') or '').lower()
+    if fam == 'built_up_i' and cfg != 'nested_z':
+        cfg = 'multi_web'
+    elif fam == 'hat':
+        cfg = 'single'
+    h3_raw = {}
+    h3 = combined_bending_web_crippling(P, Pn0, M, Mnfo, web_config=cfg, design_method=design_method,
+                                        h_over_t=h / t, N_over_t=N / t, Fy_ksi=Fy, R_over_t=R / t, _raw=h3_raw)
+    h3_ratio = h3_raw['total'] / h3_raw['limit'] if h3_raw.get('limit', 0) > 0 else None
+    h3_fails = h3.get('pass') is False
+    ck['wc_bound'] = dict(wc=wc, detail=wc_detail, h=h, t=t, Fy=Fy, Pn=Pn0, Pa=Pa0, P=P, P_source=P_source, why=why)
+    ck['h3_bound'] = dict(h3=h3, raw=h3_raw, P=P, P_source=P_source, Pn=Pn0, M=M,
+                          M_given=params.get('wc_M') is not None, Mnlo=Mnfo, why=why)
+    result['web_crippling']['bound_without_holes'] = {
+        'Pn': round(Pn0, 3), 'design_strength': round(Pa0, 3), 'P': round(P, 3), 'ratio': round(r, 4),
+        'fails': fails, 'h3_total': round(h3_raw['total'], 4), 'h3_limit': round(h3_raw['limit'], 4),
+        'h3_ratio': round(h3_ratio, 4) if h3_ratio is not None else None, 'h3_fails': h3_fails,
+        'basis': 'web crippling strength without holes (Section G5; G6 multiplies it by Rc <= 1) — '
+                 'decides only when the demand exceeds it'}
+    if fails:
+        A._merge_governing_check(result, {'total': r, 'pass': False}, 'G5 web crippling')
+    if h3_fails and h3_ratio is not None:
+        A._merge_governing_check(result, {'total': h3_ratio, 'pass': False}, 'H3 bending + web crippling')
 
 
 # ================================================================ §H4
@@ -315,6 +472,9 @@ def flexure_torsion(result: dict, ck: dict, params: dict, geom: dict, *, Mu, Mnf
     if rr.get('increased') and rr['R'] > 0:
         result.setdefault('assumptions', []).append(_nt('member.assumption.h4_15pct'))
     R = data['R']
+    if not (isinstance(R, (int, float)) and math.isfinite(R) and math.isfinite(data['demand'])):
+        # 입력은 design_member 가 먼저 거른다 — 그래도 수가 아닌 R · 소요가 나오면 판정을 내지 않는다(NaN 비 없음)
+        return _ne(_nt('member.reason.h4_model_unusable', why='non-finite R or demand'))
     Mn_h4 = R * Mnfo_v
     cap = R * Malo
     demand = data['demand']
@@ -392,6 +552,9 @@ def _shear_checks(ctx, sh):
         why = sr['reason']
         return [_ne_check('member.shear', ctx, why, variant=variant),
                 _ne_check('member.bending_shear', ctx, why)]
+    bound = sh.get('sr_bound') is not None      # §G3 미평가 — 구멍 없는 웹의 강도(상한)로 낸 단계(독립 검증 2)
+    if bound:
+        sr = sh['sr_bound']
     tr = Trace()
     h = q('h', sh['h'], 'length', src('section_property', key='h_web'))
     t = q('t', sh['t'], 'length', src('section_property', key='t'))
@@ -474,6 +637,13 @@ def _shear_checks(ctx, sh):
                   Malo=sh['Malo'], Mu=sh['Mu'], stiffened=sh['stiffened'], shear_int=sh['shear_int'],
                   h2_raw=sh['h2_raw'])
     _g2_old, (h2,) = shear_checks(ctx, legacy)
+    if bound:
+        from design.member_checks import holes_bound_verdict
+        why = sh['bound_why']
+        return [holes_bound_verdict(g2, 'member.shear: Vu > design shear strength of the web without holes', why,
+                                    keep_reference=False),
+                holes_bound_verdict(h2, 'member.bending_shear: H2 with the shear strength of the web without holes',
+                                    why, keep_reference=False)]
     if use_ref or (sh['stiffened'] and not sh['conforming']):
         h2 = demote_to_not_evaluated(h2, sr['reason'])
     return [g2, h2]

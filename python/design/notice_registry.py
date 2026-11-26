@@ -4882,4 +4882,71 @@ REGISTRY = {
         'template_ko': 'Table J6.2-1 (3)(a): An_net 에 직접 접합된 요소의 면적을 넣어야 함',
         'params': {},
     },
+    # ---- 2026-11-26 독립 검증의 고침(구멍 · 보강재 · 비틀림) ----
+    'member.reason.fails_without_holes': {
+        'kind': 'reason',
+        'template': 'fails even on the strength without holes ({check}) — the hole provisions could not be evaluated ({why}); holes can only lower this strength, so the member fails with the holes as well',
+        'template_ko': '구멍이 없는 강도로도 넘음 ({check}) — 구멍 조항은 평가하지 못했지만({why}) 구멍은 이 강도를 낮추기만 하므로 구멍이 있어도 불합격',
+        'params': {'check': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}, 'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.stiffener_input_invalid': {
+        'kind': 'reason',
+        'template': '§G4.1: stiffener input not valid ({names} must be finite numbers > 0) — conformance of the transverse web stiffeners cannot be shown',
+        'template_ko': '§G4.1: 보강재 입력이 바르지 않음 ({names} 는 0 보다 큰 유한한 수여야 함) — 횡방향 웹 보강재가 §G4.1 을 맞추는지 보일 수 없음',
+        'params': {'names': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.note.pe1_holes_average': {
+        'kind': 'note',
+        'template': '(I,avg / Ag)^0.5 with I,avg from Appendix 2 Table 2.3.2-1 (member with holes)',
+        'template_ko': '(I,avg / Ag)^0.5 — I,avg 는 부록 2 표 2.3.2-1 의 값(구멍이 있는 부재)',
+        'params': {},
+    },
+    'member.ne.design_check_not_evaluated': {
+        'kind': 'not_evaluated',
+        'template': 'design check {check} — not evaluated: {why}',
+        'template_ko': '검토 항목 {check} — 평가하지 못함: {why}',
+        'params': {'check': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}, 'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.holes_props_mismatch_area': {
+        'kind': 'reason',
+        'template': 'the supplied section properties do not belong to the section model used for the hole calculation: A = {A} given, {A_model} from the model (tolerance {tol} %) — the net-section values (Anet, Sfnet) would not match the gross values',
+        'template_ko': '받은 단면 성질이 구멍 계산에 쓰는 단면 모델의 것이 아님: A = {A} (받은 값), {A_model} (모델) (허용 {tol} %) — 순단면 값(Anet · Sfnet)이 총단면 값과 맞지 않는다',
+        'params': {'A': {'quantity': 'area', 'conv': None, 'spec': '.5g', 'unit': 'in^2', 'sep': ' '}, 'A_model': {'quantity': 'area', 'conv': None, 'spec': '.5g', 'unit': 'in^2', 'sep': ' '}, 'tol': {'quantity': 'dimensionless', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.holes_props_mismatch_sf': {
+        'kind': 'reason',
+        'template': 'the supplied section properties do not belong to the section model used for the hole calculation: Sf = {Sf} given, {Sf_model} from the model (tolerance {tol} %) — Mynet = Sfnet Fy would not match My = Sf Fy',
+        'template_ko': '받은 단면 성질이 구멍 계산에 쓰는 단면 모델의 것이 아님: Sf = {Sf} (받은 값), {Sf_model} (모델) (허용 {tol} %) — Mynet = Sfnet Fy 가 My = Sf Fy 와 맞지 않는다',
+        'params': {'Sf': {'quantity': 'section_modulus', 'conv': None, 'spec': '.5g', 'unit': 'in^3', 'sep': ' '}, 'Sf_model': {'quantity': 'section_modulus', 'conv': None, 'spec': '.5g', 'unit': 'in^3', 'sep': ' '}, 'tol': {'quantity': 'dimensionless', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.holes_edge_stiffened': {
+        'kind': 'reason',
+        'template': '§{clause}: edge-stiffened (flanged) holes — the text of §{clause} and its limits give no provision for holes with stiffened edges',
+        'template_ko': '§{clause}: 가장자리를 보강한(플랜지 붙은) 구멍 — §{clause} 의 글과 한계는 가장자리를 보강한 구멍을 다루지 않는다',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.assumption.holes_single_hole': {
+        'kind': 'assumption',
+        'template': 'hole_spacing not given — a single hole with no neighbouring hole: one hole in each unbraced length for the Appendix 2 Table 2.3.2-1 averages (Lnet = Lh, the most a length can hold), and the one-hole-per-distortional-half-wavelength condition (s ≥ Lcrd) taken as satisfied',
+        'template_ko': 'hole_spacing 미입력 — 이웃 구멍이 없는 구멍 하나: 부록 2 표 2.3.2-1 의 가중 평균에는 비지지 길이마다 구멍 하나(Lnet = Lh, 한 길이에 들 수 있는 가장 많은 수), 뒤틀림 반파장에 구멍 하나의 조건(s ≥ Lcrd)은 맞는 것으로 봄',
+        'params': {},
+    },
+    'shear.assumption.holes_single_hole': {
+        'kind': 'assumption',
+        'template': '§{clause}: hole_spacing not given — a single hole with no neighbouring hole; the clear-distance limit (≥ {limit}) is taken as satisfied',
+        'template_ko': '§{clause}: hole_spacing 미입력 — 이웃 구멍이 없는 구멍 하나; 구멍 사이 순거리 한계(≥ {limit})는 맞는 것으로 봄',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'limit': {'quantity': 'length', 'conv': None, 'spec': 'g', 'unit': 'in', 'sep': ' ', 'const': 18.0, 'text': '18'}},
+    },
+    'member.assumption.h4_first_yield': {
+        'kind': 'assumption',
+        'template': '§H4: R multiplies the §F3 strength with Fn = Fy (Mne = My) at first yield — the §F3.2.3 inelastic reserve is not included (R is a ratio of elastic stresses; Design Manual Example II-11 applies it to the first-yield strength): Mnℓo = {Mnlo} instead of {Mnlo_ir}',
+        'template_ko': '§H4: R 은 Fn = Fy (Mne = My) 의 §F3 첫 항복 강도에 곱한다 — §F3.2.3 비탄성 여유는 넣지 않는다(R 은 탄성 응력의 비; 설계 매뉴얼 예제 II-11 은 첫 항복 강도에 쓴다): Mnℓo = {Mnlo} ({Mnlo_ir} 대신)',
+        'params': {'Mnlo': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': 'kip-in', 'sep': ' '}, 'Mnlo_ir': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': 'kip-in', 'sep': ' '}},
+    },
+    'member.assumption.c1_pe1_holes_average': {
+        'kind': 'assumption',
+        'template': '§C1.2.1.1 Pe1 of the member with holes: flexural stiffness from the Appendix 2 Table 2.3.2-1 length-weighted averages Ix,avg = {Ix} (over KxLx) and Iy,avg = {Iy} (over KyLy)',
+        'template_ko': '§C1.2.1.1 구멍이 있는 부재의 Pe1: 휨 강성은 부록 2 표 2.3.2-1 의 길이 가중 평균 Ix,avg = {Ix} (KxLx 에서), Iy,avg = {Iy} (KyLy 에서)',
+        'params': {'Ix': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '}, 'Iy': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '}},
+    },
 }

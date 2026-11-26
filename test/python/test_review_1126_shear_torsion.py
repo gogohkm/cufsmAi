@@ -125,11 +125,13 @@ def test_member_holes_outside_limits_not_evaluated():
     assert sh['verdict'] == 'not_evaluated' and not sh.get('reference')
     assert 'shear.reason.holes_noncircular_size' in codes(sh['reason'])
     assert _check(r, 'member.bending_shear')['verdict'] == 'not_evaluated' and r['pass'] is not True
-    # §G6: 구멍이 지압 길이 안 → G5 · H3 미평가
+    # §G6: 구멍이 지압 길이 안 → G5 미평가. §H3 은 구멍 없는 Pn(상한)으로도 1.053 > 1 → 불합격
+    # (2026-11-26 독립 검증 2 로 바뀐 기대: 옛 기대는 미평가 — §G6 을 평가한 경우도 §H3 1.056 으로 불합격이다)
     r = design_member(dict(II10_MEMBER, hole_within_bearing=True))
     assert _check(r, 'member.web_crippling')['verdict'] == 'not_evaluated'
-    assert _check(r, 'member.bending_web_crippling')['verdict'] == 'not_evaluated'
-    assert r['web_crippling']['Pn'] is None and r['pass'] is not True
+    h3 = _check(r, 'member.bending_web_crippling')
+    assert h3['verdict'] == 'fail' and h3['reason'].code == 'member.reason.fails_without_holes'
+    assert r['web_crippling']['Pn'] is None and r['pass'] is False
     # Z 단면은 §G3 · §G6 밖
     z = dict(no_wc, section_type='lippedz', H=8.0, B=2.25, D=0.91, t=0.059, R=0.1875)
     r = design_member(z)
@@ -195,7 +197,8 @@ def test_g3_dh_h_and_h_t_and_c_t_and_section():
     assert not r['evaluated'] and r['reason'].parts[0].code == 'shear.reason.holes_section_not_c'
     # 자료가 모자라면 평가하지 않고 무엇이 없는지 말한다
     r = g3_reduction(II10_H, II10_T, dict(hole_shape='noncircular', hole_depth=1.5), 'C')
-    assert not r['evaluated'] and set(r['limits']['missing']) == {'hole_length', 'hole_spacing', 'hole_corner_radius'}
+    # (2026-11-26 독립 검증 7 로 바뀐 기대: hole_spacing 은 주지 않아도 된다 — 이웃 구멍 없는 구멍 하나)
+    assert not r['evaluated'] and set(r['limits']['missing']) == {'hole_length', 'hole_corner_radius'}
 
 
 def test_g6_limits_and_cases():

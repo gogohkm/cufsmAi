@@ -298,13 +298,19 @@ def test_spacing_below_lcrd_and_hole_longer_than_lcrd():
     assert 'member.reason.holes_lh_not_below_lcrd' in _codes(r) and r['pass'] is None
 
 
-def test_not_evaluated_never_gives_a_verdict_from_gross_values():
-    """구멍 조항을 평가하지 못하면 구멍 없는 값으로 불합격도 내지 않는다 — 소요가 강도의 몇 배라도 판정 없음."""
+def test_not_evaluated_never_gives_a_pass_from_gross_values_but_a_certain_failure_stands():
+    """구멍 조항을 평가하지 못하면 구멍 없는 값으로 합격을 내지 않는다. 2026-11-26 독립 검증 2 로 바뀐 기대: 소요가 구멍
+    없는 상한(구멍은 강도를 낮추기만 한다 — 식이 보장하는 상한)의 설계강도를 넘으면 구멍이 있어도 넘는다 → 불합격(그 까닭).
+    옛 기대(소요가 강도의 몇 배라도 판정 없음)는 확실한 불합격을 감추었다."""
     r = run(**SEC, member_type='flexure', Mu=500.0, Lb=0.0, **{**HOLE, 'hole_spacing': 10.0})
+    assert r['pass'] is False and all(checks(r)[k]['verdict'] == 'fail' for k in FLEX)
+    assert all(checks(r)[k]['reason_code'] == 'member.reason.fails_without_holes' for k in FLEX)
+    assert r['holes_strength_bound']['ratio'] > 1.0
+    r = run(**SEC, member_type='flexure', Mu=2.0, Lb=0.0, **{**HOLE, 'hole_spacing': 10.0})
     assert r['pass'] is None and all(checks(r)[k]['verdict'] == 'not_evaluated' for k in FLEX)
     assert all((checks(r)[k].get('reference') or {}).get('capacity') for k in FLEX)       # 참고값은 남는다
     r = run(**SEC, member_type='compression', Pu=500.0, **{**HOLE, 'hole_edge_stiffened': True})
-    assert r['pass'] is None and 'length_independent_bound' not in r
+    assert r['pass'] is False and 'length_independent_bound' not in r and 'holes_strength_bound' in r
 
 
 def test_input_errors():
@@ -378,11 +384,16 @@ def test_combined_member_uses_the_hole_strengths():
     c = checks(comb)
     assert c['member.compression.local']['clause'] == 'E3.2.2' and c['member.flexure.global']['clause'] == 'F2.2'
     assert c['member.axial_bending']['verdict'] == 'pass'
-    # 구멍 조항을 평가하지 못한 조합 — §H1.2 도 판정 없음
+    # 구멍 조항을 평가하지 못한 조합 — §H1.2 는 판정 없음. 다만 구멍 없는 상한으로도 넘으면 불합격(2026-11-26 독립
+    # 검증 2 로 바뀐 기대: 옛 시험은 Pu = 50 · Mux = 500 (강도의 몇 배)도 판정 없음으로 두었다)
     bad = run(**SEC, member_type='combined', Pu=50.0, Mux=500.0, KxLx=96.0, KyLy=48.0, KtLt=48.0, Lb=48.0,
               **{**HOLE, 'hole_edge_stiffened': True})
     cb = checks(bad)
-    assert cb['member.axial_bending']['verdict'] == 'not_evaluated' and bad['pass'] is None
+    assert cb['member.axial_bending']['verdict'] == 'fail' and bad['pass'] is False
+    assert cb['member.axial_bending']['reason_code'] == 'member.reason.fails_without_holes'
+    small = run(**SEC, member_type='combined', Pu=0.5, Mux=2.0, KxLx=96.0, KyLy=48.0, KtLt=48.0, Lb=48.0,
+                **{**HOLE, 'hole_edge_stiffened': True})
+    assert checks(small)['member.axial_bending']['verdict'] == 'not_evaluated' and small['pass'] is None
 
 
 def test_blank_lengths_with_holes_use_the_most_favourable_length():
