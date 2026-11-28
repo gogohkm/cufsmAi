@@ -50,9 +50,17 @@ def build(ck: dict) -> list:
     mu = q('Mu', ck['Mu'], 'moment', demand_source(p, 'Mu_support'))
     vu = q('Vu', ck['Vu'], 'force', demand_source(p, 'Vu_support'))
     if ck['Mu'] > 0 and ck['d_lever'] > 0:
-        i_arm = tr.add('equation', 'arm = d − t', inputs=[q('d', ck['d'], 'length', src('user_input', key='d')),
-                                                         q('t', ck['t'], 'length', src('user_input', key='t'))],
-                       result=q('arm', ck['d_lever'], 'length'))
+        if ck.get('two') is None:
+            i_arm = tr.add('equation', 'arm = d − t', inputs=[q('d', ck['d'], 'length', src('user_input', key='d')),
+                                                             q('t', ck['t'], 'length', src('user_input', key='t'))],
+                           result=q('arm', ck['d_lever'], 'length'))
+        else:
+            # 결정 S5: 두 부재 가운데 불리한 팔(작은 d − t)
+            sfx = '' if ck['arm_member'] == 1 else '_2'
+            i_arm = tr.add('equation', 'arm = min(d − t, d_2 − t_2)  (unfavourable member, decision S5)',
+                           inputs=[q('d', ck['arm_d'], 'length', src('user_input', key='d' + sfx)),
+                                   q('t', ck['arm_t'], 'length', src('user_input', key='t' + sfx))],
+                           result=q('arm', ck['d_lever'], 'length'), governing_member=ck['arm_member'])
         i_vf = tr.add('demand', 'V_flange = Mu / arm  (in-house rational model, §A1.2(c))', inputs=[mu, tr.ref(i_arm)],
                       result=q('V_flange', ck['Mu'] / ck['d_lever'], 'force'))
         i_v = tr.add('demand', 'V_transfer = max(V_flange, Vu)', inputs=[tr.ref(i_vf), vu],
@@ -161,13 +169,29 @@ def build(ck: dict) -> list:
         if fx.get('local'):
             lo = fx['local']
             tr = Trace()
-            i_m = tr.add('equation', 'Mnℓ = Se Fy  (one member; laterally braced in the lap)', equation='F3.1-1',
-                         inputs=[q('Se', ck['Se'], 'section_modulus', src('user_input', key='Se')),
-                                 q('Fy', ck['Fy'], 'stress', src('material', key='Fy'))],
-                         result=q('Mnℓ', lo['Mnl_single'], 'moment'))
-            i_l = tr.add('equation', 'Mn,lap = 2 Mnℓ  (two lapped members, Manual II-2A assumption)',
-                         inputs=[tr.ref(i_m), q('members', lo['n_members'], 'count', spec())],
-                         result=q('Mn,lap', lo['Mn_lap'], 'moment'))
+            if lo.get('two') is None:
+                i_m = tr.add('equation', 'Mnℓ = Se Fy  (one member; laterally braced in the lap)', equation='F3.1-1',
+                             inputs=[q('Se', ck['Se'], 'section_modulus', src('user_input', key='Se')),
+                                     q('Fy', ck['Fy'], 'stress', src('material', key='Fy'))],
+                             result=q('Mnℓ', lo['Mnl_single'], 'moment'))
+                i_l = tr.add('equation', 'Mn,lap = 2 Mnℓ  (two lapped members, Manual II-2A assumption)',
+                             inputs=[tr.ref(i_m), q('members', lo['n_members'], 'count', spec())],
+                             result=q('Mn,lap', lo['Mn_lap'], 'moment'))
+            else:
+                tw = lo['two']
+                i_m = tr.add('equation', 'Mnℓ,1 = Se Fy  (member 1; laterally braced in the lap)', equation='F3.1-1',
+                             inputs=[q('Se', tw['Se'][0], 'section_modulus', src('user_input', key='Se')),
+                                     q('Fy', ck['Fy'], 'stress', src('material', key='Fy'))],
+                             result=q('Mnℓ,1', tw['Mnl'][0], 'moment'))
+                i_m2 = tr.add('equation', 'Mnℓ,2 = Se_2 Fy  (member 2)', equation='F3.1-1',
+                              inputs=[q('Se_2', tw['Se'][1], 'section_modulus', src('user_input', key='Se_2')),
+                                      q('Fy', ck['Fy'], 'stress', src('material', key='Fy'))],
+                              result=q('Mnℓ,2', tw['Mnl'][1], 'moment'))
+                i_l = tr.add('equation', 'Mn,lap = min(Mnℓ,1 / s1, Mnℓ,2 / s2),  s_i = I_i / (I_1 + I_2)  '
+                             '(stiffness share, decision S3 — design assumption)',
+                             inputs=[tr.ref(i_m), q('s1', tw['shares'][0], 'dimensionless', _share_src(ck)),
+                                     tr.ref(i_m2), q('s2', tw['shares'][1], 'dimensionless', _share_src(ck))],
+                             result=q('Mn,lap', lo['Mn_lap'], 'moment'), governing_member=tw['governing_member'])
             i_d = design_strength_step(tr, dm, tr.ref(i_l), phi_b, om_b, lo['phi_Mn_lap'],
                                        'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb', 'moment',
                                        phi_symbol='φb', omega_symbol='Ωb')
@@ -181,8 +205,14 @@ def build(ck: dict) -> list:
             if not fx.get('ltb_unstated'):
                 tr.steps[i_m]['assumption_source'] = src('user_input', key='lap_restrained',
                                                          note=_nt('lap.note.fn_fy_lapped_section'))
+            two_extra = {} if lo.get('two') is None else {
+                'governing_member': lo['two']['governing_member'], 'share_basis': 'stiffness_Ix',
+                'reference_sum_of_strengths': {'capacity': q('φbMn,sum' if dm == 'LRFD' else 'Mn,sum/Ωb',
+                                                             lo['two']['phi_Mn_sum'], 'moment'),
+                                               'ratio': lo['two']['dcr_sum'],
+                                               'basis': _nt('lap.label.sum_of_strengths_reference')}}
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict=v, demand=mu,
-                                     reason=(LAP_LTB_UNSTATED_TOOL if unstated else None),
+                                     reason=(LAP_LTB_UNSTATED_TOOL if unstated else None), **two_extra,
                                      reference=({'capacity': q('φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb',
                                                                lo['phi_Mn_lap'], 'moment'), 'ratio': lo['dcr']}
                                                 if unstated else None),
@@ -199,13 +229,23 @@ def build(ck: dict) -> list:
                 ref = {'capacity': q('φbMn,ref', rf['phi_ref'], 'moment'), 'ratio': rf['dcr'],
                        'basis': _nt('lap.label.gross_sf_reference')}
             checks.append(make_check('lap.flexure.local', design_method=dm, verdict='not_evaluated',
-                                     reason=_nt('lap.reason.se_effective_section_modulus'), reference=ref))
+                                     reason=fx.get('two_missing') or _nt('lap.reason.se_effective_section_modulus'),
+                                     reference=ref))
         if fx.get('dist'):
             ds = fx['dist']
             tr = Trace()
-            i_l = tr.add('equation', 'Mnd,lap = 2 Mnd', inputs=[q('Mnd', ds['Mnd_single'], 'moment',
-                                                                  src('user_input', key='Mnd'))],
-                         result=q('Mnd,lap', ds['Mnd_lap'], 'moment'))
+            dtw = fx.get('dist_two')
+            if dtw is None:
+                i_l = tr.add('equation', 'Mnd,lap = 2 Mnd', inputs=[q('Mnd', ds['Mnd_single'], 'moment',
+                                                                      src('user_input', key='Mnd'))],
+                             result=q('Mnd,lap', ds['Mnd_lap'], 'moment'))
+            else:
+                i_l = tr.add('equation', 'Mnd,lap = min(Mnd,1 / s1, Mnd,2 / s2)  (stiffness share, decision S3)',
+                             inputs=[q('Mnd', dtw['Mnd'][0], 'moment', src('user_input', key='Mnd')),
+                                     q('s1', dtw['shares'][0], 'dimensionless', _share_src(ck)),
+                                     q('Mnd_2', dtw['Mnd'][1], 'moment', src('user_input', key='Mnd_2')),
+                                     q('s2', dtw['shares'][1], 'dimensionless', _share_src(ck))],
+                             result=q('Mnd,lap', ds['Mnd_lap'], 'moment'), governing_member=dtw['governing_member'])
             i_d = design_strength_step(tr, dm, tr.ref(i_l), phi_b, om_b, ds['phi_Mnd_lap'],
                                        'φbMnd,lap' if dm == 'LRFD' else 'Mnd,lap/Ωb', 'moment',
                                        phi_symbol='φb', omega_symbol='Ωb')
@@ -223,25 +263,38 @@ def build(ck: dict) -> list:
                                      restraint_source=src('user_input', key='lap_restrained')))
         elif fx.get('local'):
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
-                                     reason=LAP_DIST_UNSTATED))
+                                     reason=fx.get('dist_missing_reason') or LAP_DIST_UNSTATED))
         else:
             checks.append(make_check('lap.flexure.distortional', design_method=dm, verdict='not_evaluated',
-                                     reason=_nt('lap.reason.lap_flexure_evaluated_no')))
+                                     reason=fx.get('two_missing') or _nt('lap.reason.lap_flexure_evaluated_no')))
         if fx.get('h2'):
             h = fx['h2']
             tr = Trace()
             vn = q('Vn', h['Vn'], 'force', src('specification', note=_nt('lap.note.g2_1_g2_one_web_computed'))
                    if h['vn_auto'] else src('user_input', key='Vn'))
             # 두 겹 부재의 전단강도 합 — ×2 를 기호에 숨기지 않고 단계로(V6-05)
-            i_vl = tr.add('equation', 'Vn,lap = 2 Vn  (two lapped members)',
-                          inputs=[vn, q('members', 2, 'count', spec())], result=q('Vn,lap', 2 * h['Vn'], 'force'))
+            htw = h.get('two')
+            if htw is None:
+                i_vl = tr.add('equation', 'Vn,lap = 2 Vn  (two lapped members)',
+                              inputs=[vn, q('members', 2, 'count', spec())], result=q('Vn,lap', 2 * h['Vn'], 'force'))
+            else:
+                g = htw['governing_member'] - 1
+                if g == 1:
+                    vn = q('Vn_2', h['Vn'], 'force', src('specification', note=_nt('lap.note.g2_1_g2_one_web_computed'))
+                           if h['vn_auto'] else src('user_input', key='Vn_2'))
+                i_vl = tr.add('equation', f'Vn,lap = Vn,{g + 1} / s{g + 1}  (member {g + 1} carries s{g + 1} Vu, '
+                              'decision S3)',
+                              inputs=[vn, q(f's{g + 1}', htw['shares'][g], 'dimensionless', _share_src(ck))],
+                              result=q('Vn,lap', h['Vn'] / htw['shares'][g], 'force'),
+                              governing_member=htw['governing_member'])
             v_sym = 'φvVn,lap' if dm == 'LRFD' else 'Vn,lap/Ωv'
             m_sym = 'φbMn,lap' if dm == 'LRFD' else 'Mn,lap/Ωb'
             i_v = design_strength_step(tr, dm, tr.ref(i_vl), 0.95, 1.60, h['phi_Vn_lap'], v_sym, 'force',
                                        phi_symbol='φv', omega_symbol='Ωv')
             lo = fx['local']
             i_x = tr.add('equation', f'[(Mu / {m_sym})² + (Vu / {v_sym})²]^0.5', equation='H2-1',
-                         inputs=[mu, q(m_sym, lo['phi_Mn_lap'], 'moment', src('check', id='lap.flexure.local')),
+                         inputs=[mu, q(m_sym, h.get('phi_Mn_lap', lo['phi_Mn_lap']), 'moment',
+                                       src('check', id='lap.flexure.local')),
                                  vu, tr.ref(i_v)], result=q('H2', h['mv'], 'dimensionless'))
             v = 'pass' if h['ok'] else 'fail'
             unstated_h2 = fx.get('ltb_unstated') and v == 'pass'     # V9a-03: 국부 휨과 같은 규칙
@@ -259,7 +312,8 @@ def build(ck: dict) -> list:
                                          ratio=h['mv'], steps=tr.steps,
                                          mirrors={'ratio': {'path': 'flexure_dcr_governing', 'digits': 4}}
                                          if h['mv'] >= max(lo['dcr'], (fx.get('dist') or {}).get('dcr') or 0)
-                                         else None))
+                                         else None,
+                                         **({} if htw is None else {'governing_member': htw['governing_member']})))
         elif fx.get('h2_missing'):
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
                                      reason=_nt('lap.reason.section_shear_strength_vn')))
@@ -268,7 +322,7 @@ def build(ck: dict) -> list:
                                      reason=_nt('lap.reason.no_support_shear_vu')))
         else:
             checks.append(make_check('lap.bending_shear', design_method=dm, verdict='not_evaluated',
-                                     reason=_nt('lap.reason.lap_flexure_evaluated_no')))
+                                     reason=fx.get('two_missing') or _nt('lap.reason.lap_flexure_evaluated_no')))
 
     set_governing(checks)
     apply_context(checks, p)
@@ -281,6 +335,13 @@ _NEEDS = {
     'lap.block_shear': ('Mu_support', 'Vu_support'), 'lap.flexure.local': ('Mu_support',),
     'lap.flexure.distortional': ('Mu_support',), 'lap.bending_shear': ('Mu_support', 'Vu_support'),
 }
+
+
+def _share_src(ck):
+    tw = ck.get('two') or {}
+    if tw.get('Ixx') and tw.get('Ixx_2'):
+        return src('user_input', key='Ixx, Ixx_2', note=_nt('lap.note.share_from_ixx'))
+    return src('specification', note=_nt('lap.note.share_same_members'))
 
 
 def apply_missing_demands(checks, missing, zero_unstated, demand_positive=True):
@@ -329,7 +390,8 @@ def _block_shear(ck):
         return make_check('lap.block_shear', design_method=dm, verdict='not_evaluated',
                           reason=_nt('lap.reason.no_fastener_layout_fastener'))
     tr = Trace()
-    t = q('t', ck['t'], 'length', src('user_input', key='t'))
+    t = (q('t', ck['t'], 'length', src('user_input', key='t')) if ck.get('two') is None else
+         q('t', ck['t_block'], 'length', src('user_input', key='min(t, t_2)', note=_nt('lap.note.thinner_sheet'))))
     i_L = tr.add('equation', 'Lv = e + (m − 1) s  (shear-plane length: member end to the last fastener of a row)',
                  equation='J6.3',
                  inputs=[q('e', ck['edge_dist'], 'length', src('user_input', key='end_distance')

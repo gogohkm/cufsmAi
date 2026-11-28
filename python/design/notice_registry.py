@@ -1514,6 +1514,91 @@ REGISTRY = {
         'template_ko': '§I6.2.1 R 계수법과 §J3 겹친 Z 구멍 예외의 적용 조건 (강도 검토가 아니며 pass 에 들지 않음)',
         'params': {},
     },
+    'lap.note.thinner_sheet': {
+        'kind': 'note',
+        'template': 'thinner of the two lapped members (decision S5)',
+        'template_ko': '겹친 두 부재 가운데 얇은 쪽 (결정 S5)',
+        'params': {},
+    },
+    'lap.note.share_from_ixx': {
+        'kind': 'note',
+        'template': 'stiffness share s_i = I_i / (I_1 + I_2) from Ixx and Ixx_2 (decision S3)',
+        'template_ko': '강성 몫 s_i = I_i / (I_1 + I_2), Ixx · Ixx_2 에서 (결정 S3)',
+        'params': {},
+    },
+    'lap.note.share_same_members': {
+        'kind': 'note',
+        'template': 'two equal members — each carries one half',
+        'template_ko': '같은 두 부재 — 각각 절반',
+        'params': {},
+    },
+    'lap.label.sum_of_strengths_reference': {
+        'kind': 'label',
+        'template': 'reference — sum of the strengths of the lapped members (Design Manual II-1A / II-2A, assumption (c))',
+        'template_ko': '참고 — 겹친 부재 강도의 합 (설계 매뉴얼 II-1A / II-2A, 가정 (c))',
+        'params': {},
+    },
+    'lap.assumption.two_members': {
+        'kind': 'assumption',
+        'template': 'Two lapped members (inputs ending in _2): the fastener strength is the smaller of the two '
+                    'orientations (either sheet on the screw-head side), so the thinner sheet governs bearing and '
+                    'tilting; the couple lever arm is the smaller d − t of the two members; block shear uses the '
+                    'thinner sheet; each member carries its stiffness share of the lap moment and shear, '
+                    'M_i = Mu · I_i / (I_1 + I_2) — design assumptions (decisions S3, S5), not Specification '
+                    'provisions. The Design Manual sum of strengths is given for reference.',
+        'template_ko': '겹친 두 부재(_2 로 끝나는 입력): 패스너 강도는 두 놓임(어느 판이 나사 머리 쪽인지) 가운데 작은 '
+                       '값 — 얇은 판이 지압 · 틸팅을 정함; 우력의 팔은 두 부재의 d − t 가운데 작은 값; 블록전단은 얇은 '
+                       '판; 각 부재가 랩의 모멘트 · 전단의 강성 몫 M_i = Mu · I_i / (I_1 + I_2) 를 짐 — 기준 조항이 아닌 '
+                       '설계 가정(결정 S3, S5). 설계 매뉴얼의 강도의 합은 참고로.',
+        'params': {},
+    },
+    'lap.assumption.member2_taken_equal': {
+        'kind': 'assumption',
+        'template': 'Second member values not given were taken equal to member 1: {keys}.',
+        'template_ko': '주지 않은 두 번째 부재의 값은 부재 1 과 같다고 봄: {keys}.',
+        'params': {'keys': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.reason.member2_value_missing': {
+        'kind': 'reason',
+        'template': 'the two lapped members differ and {key} (member 2) is not given',
+        'template_ko': '겹친 두 부재가 다르고 {key}(부재 2)가 없음',
+        'params': {'key': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.reason.lap_shares_need_ixx': {
+        'kind': 'reason',
+        'template': 'the two lapped members differ and Ixx, Ixx_2 are not given — no stiffness shares (decision S3)',
+        'template_ko': '겹친 두 부재가 다르고 Ixx · Ixx_2 가 없음 — 강성 몫 없음 (결정 S3)',
+        'params': {},
+    },
+    'lap.reason.depth_mismatch': {
+        'kind': 'reason',
+        'template': 'the two lapped members have different depths (d = {d}, d_2 = {d_2}); the lap checks assume '
+                    'lapped members of the same depth (Design Manual II-1A / II-2A) — not evaluated (decision S4)',
+        'template_ko': '겹친 두 부재의 깊이가 다름(d = {d}, d_2 = {d_2}); 랩 검토는 깊이가 같은 겹친 부재를 전제함'
+                       '(설계 매뉴얼 II-1A / II-2A) — 평가하지 않음 (결정 S4)',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_2': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'lap.warning.depth_mismatch': {
+        'kind': 'warning',
+        'template': 'Lap of members with different depths (d = {d}, d_2 = {d_2}): every lap check is not evaluated '
+                    '(decision S4).',
+        'template_ko': '깊이가 다른 부재의 랩(d = {d}, d_2 = {d_2}): 모든 랩 검토를 평가하지 않음 (결정 S4).',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_2': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'lap.warning.member2_value_missing': {
+        'kind': 'warning',
+        'template': 'Two different lapped members: {key} (member 2) not given — that check is not evaluated.',
+        'template_ko': '서로 다른 두 겹친 부재: {key}(부재 2)가 없음 — 그 검토는 평가하지 않음.',
+        'params': {'key': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.warning.two_member_flexure_not_evaluated': {
+        'kind': 'warning',
+        'template': 'Lap flexure and H2 not evaluated: {reason}.',
+        'template_ko': '랩 휨 · H2 를 평가하지 않음: {reason}.',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'lap.note.e_min_1_5d': {
         'kind': 'note',
         'template': '1.5d minimum',
@@ -1950,6 +2035,98 @@ REGISTRY = {
         'kind': 'assumption',
         'template': 'Per-span member Ix used (I_span_in4); Ix within a lap = sum of the two members (Design Manual assumption b).',
         'template_ko': '경간별 부재 Ix 사용 (I_span_in4); 랩 안의 Ix = 두 부재의 합 (Design Manual 가정 b).',
+        'params': {},
+    },
+    'loads.assumption.span_sections_per_span': {
+        'kind': 'assumption',
+        'template': 'Per-span sections (span_sections): member Ix, deck stiffness (kphi, kx), the §I6.2.1 conditions and '
+                    'the uplift R are taken per span from that span\'s section (auto_params.*_by_span; regions carry '
+                    'span / spans). The single keys auto_params.deck and deflection.Ixx describe the first span\'s '
+                    'section (or the given section); auto_params.i621_check is the governing span\'s check and '
+                    'uplift_R the smallest per-span R (none unless every span qualifies).',
+        'template_ko': '경간마다의 단면(span_sections): 부재 Ix, 데크 강성(kphi, kx), §I6.2.1 조건과 양력 R 을 경간마다 '
+                       '그 경간의 단면으로 봄(auto_params.*_by_span; 구간마다 span / spans). 단일 키 auto_params.deck · '
+                       'deflection.Ixx 는 첫 경간의 단면(또는 준 section), auto_params.i621_check 는 지배 경간의 검토, '
+                       'uplift_R 은 경간 R 의 최솟값(모든 경간이 조건을 만족할 때만).',
+        'params': {},
+    },
+    'loads.assumption.lap_stiffness_share': {
+        'kind': 'assumption',
+        'template': 'Lap of two different members: each member is checked with its stiffness share of the lap '
+                    'moment and shear, M_i = M · I_i / (I_1 + I_2) (V in the same ratio) — a design assumption, not a '
+                    'Specification provision. The Design Manual (Examples II-1A / II-2A, assumption (c)) takes the lap '
+                    'strength as the sum of the strengths of the lapped members; that basis is given for reference '
+                    '(reference_basis = sum_of_strengths).',
+        'template_ko': '서로 다른 두 부재의 랩: 각 부재를 랩의 모멘트 · 전단의 강성 몫으로 따로 검토함 — '
+                       'M_i = M · I_i / (I_1 + I_2) (V 도 같은 비). 기준 조항이 아닌 설계 가정. 설계 매뉴얼(예제 II-1A / '
+                       'II-2A, 가정 (c))은 랩의 강도를 겹친 부재 강도의 합으로 봄 — 그 값은 참고로(reference_basis = '
+                       'sum_of_strengths).',
+        'params': {},
+    },
+    'loads.warning.span_ix_differs_from_section': {
+        'kind': 'warning',
+        'template': 'Span {span}: the given I_span_in4 = {I_given} differs from the Ixx of its section {section_id} '
+                    '({I_section}) by {pct} % — the given value is used in the analysis.',
+        'template_ko': '경간 {span}: 넣은 I_span_in4 = {I_given} 가 그 경간 단면 {section_id} 의 Ixx({I_section})와 '
+                       '{pct} % 다름 — 해석에는 넣은 값을 씀.',
+        'params': {'span': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'I_given': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '},
+                   'section_id': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'I_section': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '},
+                   'pct': {'quantity': 'dimensionless', 'conv': None, 'spec': '+.1f', 'unit': None, 'sep': ''}},
+    },
+    'loads.warning.section_change_without_lap': {
+        'kind': 'warning',
+        'template': 'Support {support}: the sections of the two spans differ ({left} | {right}) but there is no lap '
+                    '— the analysis changes the section at the support centreline; that joint (splice) needs its own '
+                    'design.',
+        'template_ko': '지점 {support}: 두 경간의 단면이 다름({left} | {right}) — 그런데 랩이 없음. 해석은 지점 중심에서 '
+                       '단면을 바꿈; 그 이음은 따로 설계해야 함.',
+        'params': {'support': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'left': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'right': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.warning.lap_depth_mismatch': {
+        'kind': 'warning',
+        'template': 'Lap at support {support}: the two lapped members have different depths ({d_left} | {d_right}) — '
+                    'the Design Manual lap assumptions are for lapped members of the same depth; the lap regions there '
+                    'are marked lap_evaluable = false.',
+        'template_ko': '지점 {support} 의 랩: 겹친 두 부재의 깊이가 다름({d_left} | {d_right}) — 설계 매뉴얼의 랩 가정은 '
+                       '깊이가 같은 겹친 부재의 것; 그 랩 구간은 lap_evaluable = false 로 표시함.',
+        'params': {'support': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'd_left': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_right': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'loads.warning.lap_shares_need_ixx': {
+        'kind': 'warning',
+        'template': 'Lap at support {support}: the two members differ and their Ixx is not given — the stiffness '
+                    'shares cannot be formed (share_by_stiffness = null, lap_evaluable = false).',
+        'template_ko': '지점 {support} 의 랩: 두 부재가 다르고 Ixx 가 없음 — 강성 몫을 만들 수 없음 '
+                       '(share_by_stiffness = null, lap_evaluable = false).',
+        'params': {'support': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.warning.i621_r_some_spans_only': {
+        'kind': 'warning',
+        'template': 'Per-span sections: the §I6.2.1 conditions are met with the sections of span(s) {spans} but not '
+                    'of span(s) {others} — auto_params.uplift_R is none; uplift_R_by_span gives R span by span.',
+        'template_ko': '경간마다의 단면: §I6.2.1 조건은 경간 {spans} 의 단면으로는 만족, 경간 {others} 의 단면으로는 '
+                       '불만족 — auto_params.uplift_R 은 없음; 경간마다의 R 은 uplift_R_by_span.',
+        'params': {'spans': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'others': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.reason.lap_depth_mismatch': {
+        'kind': 'reason',
+        'template': 'the two lapped members have different depths ({d_left} | {d_right}); the lap assumptions '
+                    '(Design Manual II-1A / II-2A) are for members of the same depth — not evaluated (decision S4)',
+        'template_ko': '겹친 두 부재의 깊이가 다름({d_left} | {d_right}); 랩 가정(설계 매뉴얼 II-1A / II-2A)은 깊이가 '
+                       '같은 부재의 것 — 평가하지 않음(결정 S4)',
+        'params': {'d_left': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_right': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'loads.reason.lap_shares_need_ixx': {
+        'kind': 'reason',
+        'template': 'the two lapped members differ and their Ixx is not given — no stiffness shares',
+        'template_ko': '겹친 두 부재가 다르고 Ixx 가 없음 — 강성 몫 없음',
         'params': {},
     },
     'loads.assumption.section_ixx_given_lap': {
