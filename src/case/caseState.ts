@@ -29,6 +29,19 @@ export interface SpanTable {
     spans: (number | null)[];                                        // ft
     supports: string[];                                              // P · R · F · N
     lapsPerSupport: { left: number | null; right: number | null }[]; // ft, 칸이 없는 쪽은 null
+    /** 2026-11-28 결정 S1: 경간마다 단면 id('S1' = 모델, 'S2' … = sections). 처음 값 모두 'S1' */
+    spanSections: string[];
+}
+
+/**
+ * 결정 S1 · S2: 단면 목록의 추가 단면(S2 …) — 모델과 같은 템플릿 종류의 치수(US in, 템플릿 칸과 같은 이름). S1(모델)은 두지 않는다.
+ * 빈 치수는 null(본문을 만들 때 막는다).
+ */
+export interface SectionDef {
+    id: string;
+    name: string | null;
+    template: string;
+    params: Record<string, number | null>;
 }
 
 export interface CaseView {
@@ -42,6 +55,8 @@ export interface CaseState {
     units: 'US';
     inputs: Record<string, InputValue>;
     spans: SpanTable;
+    /** 결정 S1: 단면 목록의 S2 … (S1 = 모델). 출처 · 판은 sources.sections · revs.sections */
+    sections: SectionDef[];
     sources: Record<string, Source>;
     revs: Record<string, number>;
     /** 화면 칸이 없는 MCP 인자 — 도구 이름 → 인자(K2-5 부터 쓴다) */
@@ -52,8 +67,10 @@ export interface CaseState {
 /** .csd 1.4 의 `case` */
 export interface CaseRecord {
     schema: string; units: 'US'; rev: number;
-    inputs: Record<string, InputValue>; spans: SpanTable; sources: Record<string, Source>;
+    inputs: Record<string, InputValue>; spans: SpanTable | Omit<SpanTable, 'spanSections'>; sources: Record<string, Source>;
     mcpOnly: Record<string, Record<string, unknown>>; view: CaseView;
+    /** 결정 S1: 추가 단면이 있을 때만(없으면 키가 없다 — 이 기능이 없던 파일과 같은 바이트) */
+    sections?: SectionDef[];
 }
 
 /** designState.js 가 내보내는 것 가운데 이 모듈이 쓰는 것 */
@@ -66,13 +83,20 @@ interface DesignStateModule {
     spanCount(spanType: string, nSpans: number): number;
     matchOption(key: string, value: unknown): string | null;
     validateValue(key: string, value: unknown, opts?: { owners?: Owner[] }): string | null;
-    validateSpanTable(t: SpanTable, spanType: string, nSpans: number): string[];
+    validateSpanTable(t: SpanTable, spanType: string, nSpans: number, ids?: string[]): string[];
+    validateSections(list: unknown): string[];
+    normalizeSection(s: unknown): SectionDef;
+    sectionIds(list: unknown): string[];
+    sectionsAreDefault(spanSections: unknown, sections: unknown): boolean;
     invalidationScope(keys: string[]): { scope: Invalidation; analysisAtRun: boolean };
 }
 
-const SPAN_KEYS = ['spans', 'supports', 'lapsPerSupport'] as const;
+const SPAN_KEYS = ['spans', 'supports', 'lapsPerSupport', 'spanSections'] as const;
+/** 결정 S1: 경간 표 · 단면 목록의 키(출처 · 판이 있는 표 밖의 키) */
+export const SPAN_TABLE_KEYS: readonly string[] = SPAN_KEYS;
+export const SECTIONS_KEY = 'sections';
 /** 옛 파일에 있을 수 있는, 표 밖의 키(읽을 때 경고하지 않는다) */
-const KNOWN_EXTRA = new Set(['unitSystem', 'analysisMethod', 'analysisLoadP', 'analysisLoadMxx', 'analysisLoadMzz', ...SPAN_KEYS]);
+const KNOWN_EXTRA = new Set(['unitSystem', 'analysisMethod', 'analysisLoadP', 'analysisLoadMxx', 'analysisLoadMzz', ...SPAN_KEYS, 'sections']);
 /** 사람이 정한 값(무엇을 덮었는지 알릴 대상 — 결정 1 의 덧붙임) */
 const PERSON_SOURCES: Source[] = ['user', 'file', 'load-analysis'];
 
@@ -91,9 +115,18 @@ export function createCaseState(): CaseState {
     for (const k of DS.KEYS.case) { inputs[k] = clone(DS.defaultValue(k) as InputValue); sources[k] = 'default'; revs[k] = 0; }
     const spans = DS.defaultSpanTable(String(inputs.spanType), Number(inputs.nSpans));
     for (const k of SPAN_KEYS) { sources[k] = 'default'; revs[k] = 0; }
+    sources.sections = 'default'; revs.sections = 0;
     const cfsm: Record<string, boolean> = {};
     for (const k of DS.KEYS.view) { cfsm[k] = DS.defaultValue(k) as boolean; }
-    return { schema: CASE_SCHEMA, rev: 0, units: 'US', inputs, spans, sources, revs, mcpOnly: {}, view: { unitSystem: 'SI', cfsm } };
+    return { schema: CASE_SCHEMA, rev: 0, units: 'US', inputs, spans, sections: [], sources, revs, mcpOnly: {}, view: { unitSystem: 'SI', cfsm } };
+}
+
+/** 결정 S1: 단면 목록 → 상태의 꼴(검사한 뒤). 맞지 않으면 null 과 까닭 */
+export function readSections(raw: unknown): { sections: SectionDef[] | null; errors: string[] } {
+    if (raw === undefined || raw === null) { return { sections: [], errors: [] }; }
+    const errors = DS.validateSections(raw);
+    if (errors.length) { return { sections: null, errors }; }
+    return { sections: (raw as unknown[]).map((s) => DS.normalizeSection(s)), errors: [] };
 }
 
 // ── 이전 판(1.0 – 1.3)과 1.4 ────────────────────────────────────────────────
@@ -217,6 +250,18 @@ export function readDesignInputs(di: Record<string, unknown> | null | undefined)
         });
         state.sources.lapsPerSupport = 'file';
     }
+    // 결정 S1: 단면 목록 · 경간의 단면(이 빌드의 1.3 모양이 적은 것 — 옛 파일에는 없다: 모두 S1)
+    if (di.sections !== undefined) {
+        const rs = readSections(di.sections);
+        if (rs.sections) { state.sections = rs.sections; if (rs.sections.length) { state.sources.sections = 'file'; } }
+        else { warnings.push(...rs.errors.map((e) => `단면 목록: ${e} — 버린다(모든 경간 S1)`)); }
+    }
+    if (Array.isArray(di.spanSections)) {
+        const cand = { ...table, spanSections: (di.spanSections as unknown[]).map((x) => (typeof x === 'string' ? x : 'S1')) };
+        const errs = DS.validateSpanTable(cand, String(state.inputs.spanType), Number(state.inputs.nSpans), DS.sectionIds(state.sections));
+        if (errs.length) { warnings.push(...errs.map((e) => `경간의 단면: ${e} — 모든 경간 S1`)); }
+        else { table.spanSections = cand.spanSections; if (cand.spanSections.some((x) => x !== 'S1')) { state.sources.spanSections = 'file'; } }
+    }
     state.spans = table;
     if (di.unitSystem === 'US' || di.unitSystem === 'SI') { state.view.unitSystem = di.unitSystem; }
     return { state, warnings, modelDrafts };
@@ -245,12 +290,34 @@ export function readCaseRecord(rec: unknown): { state: CaseState; warnings: stri
             recordedSources[k] = src;
         }
     }
+    // 결정 S1: 단면 목록(없으면 S1 만 — 이 기능이 없던 파일). 맞지 않으면 버리고 알린다(경간은 모두 S1)
+    if (r.sections !== undefined) {
+        const rs = readSections(r.sections);
+        if (rs.sections) {
+            state.sections = rs.sections;
+            const s = (r.sources || {}).sections;
+            state.sources.sections = rs.sections.length ? (isSource(s) && s !== 'default' ? s : 'file') : 'default';
+        } else { warnings.push(...rs.errors.map((e) => `case 단면 목록: ${e} — 버린다(모든 경간 S1)`)); }
+    }
     if (r.spans) {
-        const errs = DS.validateSpanTable(r.spans, String(state.inputs.spanType), Number(state.inputs.nSpans));
+        // 옛 파일(경간의 단면 칸이 없다)은 모두 S1
+        const n = Array.isArray((r.spans as any).spans) ? (r.spans as any).spans.length : 0;
+        const given = (r.spans as any).spanSections;
+        const cand: SpanTable = { ...(clone(r.spans) as any), spanSections: Array.isArray(given) ? clone(given) : Array.from({ length: n }, () => 'S1') };
+        let errs = DS.validateSpanTable(cand, String(state.inputs.spanType), Number(state.inputs.nSpans), DS.sectionIds(state.sections));
+        if (errs.length && Array.isArray(given) && DS.validateSpanTable({ ...cand, spanSections: undefined } as any, String(state.inputs.spanType), Number(state.inputs.nSpans)).length === 0) {
+            // 경간의 단면만 맞지 않다(목록에 없는 id) — 표는 읽고 경간은 S1 로(알린다)
+            warnings.push(...errs.map((e) => `case 경간의 단면: ${e} — 모든 경간 S1`));
+            cand.spanSections = Array.from({ length: n }, () => 'S1');
+            errs = [];
+        }
         if (errs.length) { warnings.push(...errs.map((e) => `case 경간 표: ${e} — 처음 값`)); }
         else {
-            state.spans = clone(r.spans);
-            for (const k of SPAN_KEYS) { const s = (r.sources || {})[k]; state.sources[k] = isSource(s) ? s : 'file'; }
+            state.spans = cand;
+            for (const k of SPAN_KEYS) {
+                const s = (r.sources || {})[k];
+                state.sources[k] = k === 'spanSections' && !Array.isArray(given) ? 'default' : (isSource(s) ? s : 'file');
+            }
         }
     }
     state.mcpOnly = sanitizeMcpOnly(r.mcpOnly, warnings);
@@ -286,8 +353,19 @@ export function migrateProject(projectData: unknown): MigrateResult {
 
 /** 상태 → .csd 1.4 의 `case` */
 export function toCaseRecord(state: CaseState): CaseRecord {
-    return clone({ schema: state.schema, units: state.units, rev: state.rev, inputs: state.inputs, spans: state.spans,
-        sources: state.sources, mcpOnly: state.mcpOnly, view: state.view });
+    // 결정 S1: 모든 경간이 S1 이고 추가 단면이 없으면 그 키들을 적지 않는다 — 이 기능이 없던 파일과 바이트까지 같다(읽을 때 모두 S1)
+    const plain = sectionsDefault(state);
+    const { spanSections: _ss, ...spansOld } = state.spans;
+    void _ss;
+    const sources: Record<string, Source> = { ...state.sources };
+    if (plain) { delete sources.spanSections; delete sources.sections; }
+    return clone({ schema: state.schema, units: state.units, rev: state.rev, inputs: state.inputs, spans: plain ? spansOld : state.spans,
+        sources, mcpOnly: state.mcpOnly, view: state.view, ...(plain ? {} : { sections: state.sections }) });
+}
+
+/** 결정 S1: 모든 경간이 S1 이고 추가 단면이 없나 */
+export function sectionsDefault(state: Pick<CaseState, 'spans' | 'sections'>): boolean {
+    return DS.sectionsAreDefault(state.spans?.spanSections, state.sections);
 }
 
 /**
@@ -306,6 +384,11 @@ export function toDesignInputs13(state: CaseState, modelInputs?: Record<string, 
     out.spans = clone(state.spans.spans);
     out.supports = clone(state.spans.supports);
     out.lapsPerSupport = clone(state.spans.lapsPerSupport);
+    // 결정 S1: 쓸 때만(없으면 화면 · 옛 빌드가 모두 S1 로 읽는다 — 처음 값의 바이트는 그대로)
+    if (!sectionsDefault(state)) {
+        out.spanSections = clone(state.spans.spanSections);
+        out.sections = clone(state.sections);
+    }
     return out;
 }
 
@@ -353,7 +436,7 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
         if (!accepted.includes(k)) { accepted.push(k); }
     };
     for (const [k, v] of Object.entries(mapped)) {
-        if ((SPAN_KEYS as readonly string[]).includes(k)) { continue; }
+        if ((SPAN_KEYS as readonly string[]).includes(k) || k === SECTIONS_KEY) { continue; }
         if (k === 'unitSystem') {
             if (v === 'US' || v === 'SI') { state.view.unitSystem = v; } else { rejected.push({ key: k, reason: `unitSystem 은 'US' · 'SI'`, reason_code: 'host.case.invalid_value' }); }
             continue;
@@ -372,15 +455,47 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
         // 파일을 열 때는 복사하지 않는다. 그래서 사람 · AI 의 쓰기에만 따른다(화면의 caseEdit 는 접합 칸을 함께 보내므로 같은 값).
         if (follower && (writer === 'user' || writer === 'ai') && accepted.includes(k) && !(follower in mapped)) { write(follower, v, 'mirror'); }
     }
+    // 결정 S1: 단면 목록(통째로 — 받은 목록이 새 목록). 검사 · 충돌은 다른 키와 같다
+    let sectionsNext: SectionDef[] = state.sections;
+    let sectionsChanged = false;
+    if (SECTIONS_KEY in mapped) {
+        const rs = readSections(mapped[SECTIONS_KEY]);
+        if (!rs.sections) { rejected.push({ key: SECTIONS_KEY, reason: rs.errors.join(' · '), reason_code: 'host.case.invalid_value' }); }
+        else if (JSON.stringify(rs.sections) !== JSON.stringify(state.sections)) {
+            if (conflicted(SECTIONS_KEY)) { conflicts.push(SECTIONS_KEY); rejected.push({ key: SECTIONS_KEY, reason: `'sections' 은(는) 판 ${opts.baseRev} 뒤에 ${state.sources.sections} 가 바꿨다 — 덮지 않는다`, reason_code: 'host.case.conflict' }); }
+            else { sectionsNext = rs.sections; sectionsChanged = true; }
+        }
+    }
+    const ids = DS.sectionIds(sectionsNext);
+    /** 결정 S1 의 규칙: 목록에 없는 단면(지운 단면)을 쓰던 경간은 S1 로 */
+    const fallBack = (t: SpanTable): SpanTable => ({ ...t, spanSections: (t.spanSections || t.spans.map(() => 'S1')).map((x) => (ids.includes(x) ? x : 'S1')) });
     const spanChanges = (SPAN_KEYS as readonly string[]).filter((k) => k in mapped);
     const tableShapeChanged = accepted.includes('spanType') || accepted.includes('nSpans');
-    if (spanChanges.length || tableShapeChanged) {
+    let spansWritten = false;
+    const commitTable = (table: SpanTable, given: string[]): void => {
+        for (const k of SPAN_KEYS) {
+            if (JSON.stringify(state.spans[k]) === JSON.stringify(table[k])) { continue; }
+            (state.spans as unknown as Record<string, unknown>)[k] = clone(table[k]);
+            // 경간의 단면이 지운 단면 · 다시 만든 표 때문에 S1 로 돌아갔으면: 모두 S1 이면 처음 값, 아니면 그 변경을 낸 쓰는 이
+            state.sources[k] = given.includes(k) ? writer
+                : (k === 'spanSections' && sectionsChanged && table.spanSections.some((x) => x !== 'S1') ? writer : 'default');
+            state.revs[k] = nextRev;
+            accepted.push(k);
+        }
+        spansWritten = true;
+    };
+    if (spanChanges.length || tableShapeChanged || sectionsChanged) {
         const cand: SpanTable = clone(state.spans);
         if ('spans' in mapped) { cand.spans = mapped.spans as SpanTable['spans']; }
         if ('supports' in mapped) { cand.supports = mapped.supports as SpanTable['supports']; }
         if ('lapsPerSupport' in mapped) { cand.lapsPerSupport = mapped.lapsPerSupport as SpanTable['lapsPerSupport']; }
-        let table = cand;
-        let errs = DS.validateSpanTable(table, String(state.inputs.spanType), Number(state.inputs.nSpans));
+        if ('spanSections' in mapped) { cand.spanSections = mapped.spanSections as SpanTable['spanSections']; }
+        // 경간 수가 바뀌었는데 경간의 단면을 받지 않았다 — 모두 S1(결정 S1 의 규칙: 경간 수가 바뀌면 처음 값)
+        else if (!Array.isArray(cand.spanSections) || (Array.isArray(cand.spans) && cand.spanSections.length !== cand.spans.length)) {
+            cand.spanSections = (Array.isArray(cand.spans) ? cand.spans : []).map(() => 'S1');
+        }
+        let table = 'spanSections' in mapped ? cand : fallBack(cand);
+        let errs = DS.validateSpanTable(table, String(state.inputs.spanType), Number(state.inputs.nSpans), ids);
         if (errs.length && tableShapeChanged && !spanChanges.length) {
             // 경간 유형 · 수만 바뀌었다 — 화면처럼 표를 처음 값으로 다시 만든다(buildSpanTable)
             table = DS.defaultSpanTable(String(state.inputs.spanType), Number(state.inputs.nSpans));
@@ -389,15 +504,18 @@ export function applyChanges(state0: CaseState, changes: Record<string, unknown>
         const blocked = spanChanges.filter((k) => conflicted(k));
         if (errs.length) { spanChanges.forEach((k) => rejected.push({ key: k, reason: errs.join(' · '), reason_code: 'host.case.invalid_value' })); }
         else if (blocked.length) { blocked.forEach((k) => { conflicts.push(k); rejected.push({ key: k, reason: `'${k}' 은(는) 판 ${opts.baseRev} 뒤에 바뀌었다 — 덮지 않는다`, reason_code: 'host.case.conflict' }); }); }
-        else {
-            for (const k of SPAN_KEYS) {
-                if (JSON.stringify(state.spans[k]) === JSON.stringify(table[k])) { continue; }
-                (state.spans as unknown as Record<string, unknown>)[k] = clone(table[k]);
-                state.sources[k] = spanChanges.includes(k) ? writer : 'default';
-                state.revs[k] = nextRev;
-                accepted.push(k);
-            }
+        else { commitTable(table, spanChanges); }
+    }
+    if (sectionsChanged) {
+        // 받지 않은 경간 표라도 지운 단면을 쓰던 경간은 S1 로(받은 경간의 단면에 없는 id 가 있어 그 표를 받지 않았으면 지금 표에서)
+        if (!spansWritten) {
+            const t = fallBack(state.spans);
+            if (JSON.stringify(t.spanSections) !== JSON.stringify(state.spans.spanSections)) { commitTable(t, []); }
         }
+        state.sections = clone(sectionsNext);
+        state.sources.sections = sectionsNext.length ? writer : 'default';
+        state.revs.sections = nextRev;
+        accepted.push(SECTIONS_KEY);
     }
     if (accepted.length) { state.rev = nextRev; }
     return { state, accepted, rejected, conflicts };

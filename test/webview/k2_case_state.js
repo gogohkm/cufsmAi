@@ -131,8 +131,9 @@ t('steel defaults come from the SGC400 row (295 / 400 MPa) of src/webview/steelG
 t('span table defaults = buildSpanTable (cont-3: 5 m spans, P supports, laps 0, no outer lap cells)', () => {
   const d = DS.defaultSpanTable('cont-3', 5);
   const s = DS.siToUs(5, 'length_ft');
+  // 2026-11-28 결정 S1: 경간마다 단면 — 처음 값은 모든 경간 S1(모델)
   assert.deepStrictEqual(d, { spans: [s, s, s], supports: ['P', 'P', 'P', 'P'],
-    lapsPerSupport: [{ left: null, right: 0 }, { left: 0, right: 0 }, { left: 0, right: 0 }, { left: 0, right: null }] });
+    lapsPerSupport: [{ left: null, right: 0 }, { left: 0, right: 0 }, { left: 0, right: 0 }, { left: 0, right: null }], spanSections: ['S1', 'S1', 'S1'] });
   assert.strictEqual(String(invById.get('.span-tbl-len').default.SI), '5.00');
   assert.deepStrictEqual(DS.defaultSpanTable('cantilever', 1).supports, ['F', 'N']);
   assert.deepStrictEqual(DS.defaultSpanTable('simple', 1).lapsPerSupport, [{ left: null, right: null }, { left: null, right: null }]);
@@ -229,7 +230,10 @@ t('pinned 1.3 files (every input non-default, US and SI): state → 1.3 shape gi
   // US: 상태의 값 = 시험이 넣은 「처음 값과 다른」 값 그대로
   const st = roundTrip13(gval('csd-roundtrip', 'consistent.US.saved')).r.state;
   for (const k of DS.KEYS.case) { assert.deepStrictEqual(st.inputs[k], V.NON_DEFAULT[k], k); }
-  assert.deepStrictEqual(st.spans, V.SPAN_TABLE);
+  // 결정 S1: 옛 1.3 파일에는 경간의 단면이 없다 — 모든 경간 S1
+  const { spanSections, ...spansOld } = st.spans;
+  assert.deepStrictEqual(spansOld, V.SPAN_TABLE);
+  assert.deepStrictEqual(spanSections, V.SPAN_TABLE.spans.map(() => 'S1'));
 });
 t('pinned purlin save (II-2A after load analysis + lap) round-trips', () => {
   const saved = gval('gui-purlin', 'save.designInputs');

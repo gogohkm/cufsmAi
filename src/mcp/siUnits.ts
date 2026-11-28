@@ -140,6 +140,19 @@ export function caseValueToSI(v: any, kind: string | null): any {
     if (Array.isArray(v)) { return v.map((x) => (typeof x === 'number' && isFinite(x) ? toSI(x, u) : x)); }
     return v;
 }
+/** 2026-11-28 결정 S1: 단면 목록(검토 상태의 sections — [{id, name, template, params}]) US ↔ SI — 치수마다 그 단위(H · B · D · t · r 길이, 립 각도는 그대로) */
+const SECTION_PARAM_KIND: Record<string, UnitKey | null> = { H: 'length', B: 'length', D: 'length', t: 'length', r: 'length', qlip: null };
+function sectionsConv(list: any, f: (v: number, u: UnitKey) => number): any {
+    if (!Array.isArray(list)) { return list; }
+    return list.map((s: any) => {
+        if (!s || typeof s !== 'object' || !s.params || typeof s.params !== 'object') { return s; }
+        const params: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(s.params)) { const u = SECTION_PARAM_KIND[k]; params[k] = u && typeof v === 'number' && isFinite(v) ? f(v, u) : v; }
+        return { ...s, params };
+    });
+}
+export function caseSectionsToSI(list: any): any { return sectionsConv(list, toSI); }
+export function caseSectionsToUS(list: any): any { return sectionsConv(list, toUS); }
 /** 검토 상태의 값 SI → US(입력) */
 export function caseValueToUS(v: any, kind: string | null): any {
     const u = kind ? CASE_UNIT_KIND[kind] : undefined;
@@ -379,6 +392,9 @@ const NONE_KEYS = [
     'neigs_requested', 'neigs_actual', 'nnodes', 'nelems', 'region_support', 'Ct', 'Cv', 'kv', 'mf', 'interaction_value',
     'LF_dist', 'LF_dist_interp', 'LF_global', 'LF_local', 'LF_local_interp', 'LF_single_minimum',
     'curve_length', 'lengths_analyzed', 'm_terms_max', 'n_minima_found',
+    // 2026-11-28 결정 S1 – S4: 경간마다 단면 — 경간 · 지점 번호, 강성의 몫, 지배 부재의 차례
+    'member_share', 'governing_member', 'share', 'shares', 'share_by_stiffness', 'lap_support', 'continuous_member_span', 'ending_member_span',
+    'crosses_support', 'source_index', 'i621_check_span', 'uplift_R_by_span', 'R_own_span',
 ];
 
 /**
@@ -555,7 +571,7 @@ export const SI_OUT_LOADS: Table = {
         'max_abs_V', 'Pu'].map((k) => [k, 'force' as const])),
     ...Object.fromEntries(['x_ft', 'overhang_ft', 'L_ft', 'start_ft', 'end_ft', 'x_M_max_ft', 'x_diagram',
         'inflection_points_ft', 'inflection_points_min_envelope_ft', 'inflection_points_ft_unrounded', 'inflection_points_min_envelope_ft_unrounded', 'lap_ends_ft', 'supports_ft',
-        'spans_ft', 'left_ft', 'right_ft', 'span_ft', 'brace_points_ft', 'spacing_ft'].map((k) => [k, 'length_ft' as const])),
+        'spans_ft', 'left_ft', 'right_ft', 'span_ft', 'brace_points_ft', 'spacing_ft', 'lap_end_ft'].map((k) => [k, 'length_ft' as const])),
     ...Object.fromEntries(['Lt_in', 'Ly_in', 'Lt', 'Ly', 'delta_in', 'abs_delta_in', 'D_diagram',
         'D_envelope_max', 'D_envelope_min', 'insulation_in'].map((k) => [k, 'length' as const])),
     governing_span_loads_plf: 'linload', input_loads_plf: 'linload', strong_axis_loads_plf: 'linload',
@@ -564,6 +580,9 @@ export const SI_OUT_LOADS: Table = {
     R: 'none', uplift_R: 'none', R_tested_uplift: 'none', R_tested_gravity: 'none',
     // 하중 해석의 단면 · 데크 블록은 부재 설계 키(in · ksi)
     kx_detail: { Ka: 'spring_disc', Ke: 'spring_disc', inputs: { D_screw_in: 'length', Fss_kip: 'force', Fu1_ksi: 'stress', Fu2_ksi: 'stress', t_panel: 'length', t_purlin: 'length' } },
+    // 2026-11-28 결정 S1: 경간마다 단면(span_map · 랩의 두 부재 · 하중 해석에 쓴 단면)
+    Ixx_section: 'inertia', Ixx_used: 'inertia', Ixx_members: 'inertia', depths: 'length',
+    span_sections_used: { sections: { Ixx: 'inertia', params: { H: 'length', B: 'length', D: 'length', t: 'length', r: 'length', qlip: 'none' } } },
 };
 
 /** 데크 강성(calc_deck_stiffness). */
@@ -633,10 +652,15 @@ const PURLIN_REGION_RESULT: Table = {
     supports_checked: { Pu: 'force', support: 'none' },
 };
 /** 퍼린 구간: 위치는 ft(하중 해석 좌표), Ly 는 in, Mu · Vu 는 설계 입력(kip-in · kips). */
+/** 결정 S3: 랩의 두 부재 · 단면이 바뀌는 구간의 단면마다 한 줄 — 그 부재의 몫의 M · V(kip-in · kips), 휨 설계강도(kip-in) */
+const PURLIN_MEMBER_LINE: Table = { span: 'none', share: 'none', utilization: 'none', Mu: 'moment', Vu: 'force', design_strength: 'moment', Ixx: 'inertia',
+    depth: 'length', thickness: 'length' };
 const PURLIN_REGION: Table = {
     ...SI_OUT_MEMBER,
     start_ft: 'length_ft', end_ft: 'length_ft', x_M_max_ft: 'length_ft', Ly_in: 'length',
     span: 'none', support: 'none', Mu: 'moment', Vu: 'force', members: 'none',
+    lap_members: PURLIN_MEMBER_LINE, sections_checked: PURLIN_MEMBER_LINE,
+    reference_sum_of_strengths: { Mu: 'moment', design_strengths: 'moment', design_strength_sum: 'moment', ratio: 'none', label_params: { '*': 'none' } },
     result: PURLIN_REGION_RESULT,
 };
 const PURLIN_GOVERNING: Table = { ...PURLIN_REGION_RESULT, region: PURLIN_REGION };
@@ -651,6 +675,19 @@ export const SI_OUT_PURLIN: Table = {
     design_uplift: PURLIN_GOVERNING,
     i621_check: SI_OUT_LOADS, wc_reactions: SI_OUT_LOADS, uplift_reactions: SI_OUT_LOADS,
     props: SI_OUT_PROPS, cutwp: SI_OUT_PROPS, deck: SI_OUT_DECK,
+    // 2026-11-28 결정 S1 · S8: 단면마다의 블록(치수 · 성질 · 좌굴값 · 데크 강성 · 서명곡선)과 경간 → 단면
+    span_sections: 'none',
+    sections: {
+        params: SECTION_PARAMS, props: SI_OUT_PROPS,
+        geometry: { qlip: 'none', top_width: 'length', hat_depth: 'length', brim: 'length', diameter: 'length', depth: 'length', flange_width: 'length',
+            thickness: 'length', lip_depth: 'length', R_corner: 'length' },
+        dsm_pos: SI_OUT_DSM_M, dsm_neg: SI_OUT_DSM_M,
+        dsm_pos_by_deck: { dsm: SI_OUT_DSM_M, spans: 'none', kphi: 'rot_stiff', kx: 'lat_stiff' },
+        deck: { span: 'none', kphi: 'rot_stiff', kx: 'lat_stiff' },
+        curves: { '*': { lengths: 'length', load_factors: 'none', fy_reference: 'stress', spans: 'none' } },
+        spans: 'none',
+    },
+    span_map: SI_OUT_LOADS,
     ...SI_OUT_MEMBER,
 };
 
@@ -721,6 +758,8 @@ const LOADS_INPUT: Table = {
     laps: { left_ft: 'length_ft', right_ft: 'length_ft' },
     laps_per_support: { left_ft: 'length_ft', right_ft: 'length_ft' },
     E: S, insulation_in: L, I_span_in4: 'inertia',
+    // 2026-11-28 결정 S1: 단면 목록의 치수(템플릿 칸의 뜻 — mm), 립 각도는 도
+    sections: { H: L, B: L, D: L, t: L, r: L, qlip: 'none' },
     section: {
         depth: L, flange_width: L, thickness: L, lip_depth: L, R_corner: L, Fy: S, Fu: S,
         Ixx: 'inertia', E: S, qlip: 'none', I_span_in4: 'inertia',
@@ -832,7 +871,7 @@ export const SI_INPUT_TABLES: Record<string, Table> = {
 /** SI 에서도 바꾸지 않는 수치 인자(무차원 · 개수 · 색인 · 각도). */
 export const SI_INPUT_DIMENSIONLESS: Record<string, string[]> = {
     // K2-5: 단위는 호스트가 키마다(CASE_UNIT_KIND) — 표 변환을 하지 않는다는 뜻으로 여기 둔다
-    set_case_inputs: ['inputs', 'spans.spans', 'spans.lapsPerSupport.left', 'spans.lapsPerSupport.right'],
+    set_case_inputs: ['inputs', 'spans.spans', 'spans.lapsPerSupport.left', 'spans.lapsPerSupport.right', 'sections.params'],
     set_section_template: ['qlip', 'nseg', 'n_elem'],
     set_custom_section: ['n_arc', 'n_flat'],
     build_section: ['n_arc', 'n_flat'],

@@ -15,7 +15,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import {
     convertInputSI, convertOutputSIDeep, withUnroundedValues, TEXT_UNITS_NOTE, SI_INPUT_TABLES,
     SI_OUT_MEMBER, SI_OUT_PROPS, SI_OUT_LOADS, SI_OUT_DECK, SI_OUT_VIBRATION, SI_OUT_GET_DSM,
-    SI_OUT_PURLIN, SI_OUT_DESIGN_CHECK, caseValueToSI,
+    SI_OUT_PURLIN, SI_OUT_DESIGN_CHECK, caseValueToSI, caseSectionsToSI,
     SI_OUT_STATUS, SI_OUT_CURVE, SI_OUT_NODES, SI_OUT_ELEMENTS, SI_OUT_STEEL, SI_OUT_ENERGY, SI_OUT_RUN_ANALYSIS,
     type Table,
 } from "./siUnits";
@@ -242,7 +242,7 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
     // K2-5 · 결정 D1: 설계 도구가 검토 상태에서 바꾼 사람의 값(case_inputs_replaced)과 주지 않아 상태에서 온 값(case_inputs_used) —
     // 키마다 단위 종류가 있다(SI 면 그것으로 바꾸고, 표 변환에서는 뺀다)
     // 지점별 랩({left, right} 의 목록)도 바꾼다. case_inputs_used 는 작게 — 항목마다 units 를 싣지 않는다(응답의 units 가 그것)
-    const toSIList = (v: any, kind: string): any => (Array.isArray(v) && v.some((x) => x && typeof x === 'object')
+    const toSIList = (v: any, kind: string): any => (kind === 'section_list' ? caseSectionsToSI(v) : Array.isArray(v) && v.some((x) => x && typeof x === 'object')
         ? v.map((x) => (x && typeof x === 'object' ? { ...x, left: caseValueToSI(x.left ?? null, kind), right: caseValueToSI(x.right ?? null, kind) } : x))
         : caseValueToSI(v, kind));
     const CASE_LISTS: [string, string, string, boolean][] = [['case_inputs_replaced', '__case_replaced', 'previous', true], ['case_inputs_used', '__case_used', 'value', false]];
@@ -805,7 +805,7 @@ function shapePurlin(r: any, detail: Detail): any {
     if (detail === 'full' || !r || typeof r !== 'object' || !Array.isArray(r.regions)) { return r; }
     const omitted: string[] = [];
     const skip = new Set(['regions', 'design_positive', 'design_negative', 'design_lap', 'design_uplift', 'load_analysis',
-        'dsm_positive', 'dsm_negative', 'props', 'cutwp']);
+        'dsm_positive', 'dsm_negative', 'props', 'cutwp', 'sections', 'span_map']);
     const out = topLevel(r, skip, omitted);
     for (const k of ['props', 'cutwp']) { if (k in r) { omitted.push(k); } }
     // K4b: §I6.2.1 조건 — 요약에는 id · 판정 · 값 · 한계만(엔진이 조건마다 limits · 단위 · as_length 를 더해 이름표 목록 checks 와 같은 것을
@@ -837,6 +837,13 @@ function shapePurlin(r: any, detail: Detail): any {
         const neGov = ids(pts, (c) => c.governs === true && c.governs_basis === 'not_evaluated');
         if (neGov.length > 0) { line.governs_not_evaluated = neGov; }
         if (res.error) { line.error = res.error; }
+        // 2026-11-28 결정 S1 – S4: 경간마다 단면 — 그 구간을 판정한 단면, 랩의 두 부재(몫 · 비 · 판정), 단면이 바뀌는 구간의 단면마다, 강도의 합(참고)
+        if (g.section_id !== undefined) { line.section_id = g.section_id; }
+        const memberLine = (m: any) => ({ section_id: m.section_id, share: typeof m.share === 'number' ? roundTo(m.share, 4) : m.share, ratio: m.utilization ?? null, pass: m.pass ?? null });
+        if (Array.isArray(g.lap_members)) { line.lap_members = g.lap_members.map(memberLine); if (g.governing_member) { line.governing_member = g.governing_member; } }
+        if (Array.isArray(g.sections_checked)) { line.sections_checked = g.sections_checked.map(memberLine); }
+        if (g.reference_sum_of_strengths && g.reference_sum_of_strengths.ratio != null) { line.reference_sum_of_strengths_ratio = g.reference_sum_of_strengths.ratio; }
+        if (g.lap_evaluable === false) { line.lap_evaluable = false; }
         if (detail === 'checks') {
             line.checks = pts.map((pt) => ({
                 check_point: pt.check_point, location: pt.location, combination: pt.combination, Mu: pt.Mu, Vu: pt.Vu,
@@ -868,9 +875,22 @@ function shapePurlin(r: any, detail: Detail): any {
     if (others.length > 0) { out.notices_elsewhere = others; }
     out.governing_by_kind = Object.fromEntries(['positive', 'negative', 'lap', 'uplift'].map((k) =>
         [k, r[`design_${k}`]?.region?.id ?? null]));
-    for (const k of ['dsm_positive', 'dsm_negative']) {
+    // 결정 S1: 경간마다 단면이면 단면마다의 좌굴값이 sections[] 에 — 맨 위 dsm_positive · dsm_negative(S1 의 것)는 요약에 다시 싣지 않는다
+    for (const k of Array.isArray(r.sections) ? [] : ['dsm_positive', 'dsm_negative']) {
         if (r[k] && typeof r[k] === 'object') { out[k] = topLevel(r[k], new Set(), omitted, `${k}.`); }
     }
+    if (Array.isArray(r.sections)) { omitted.push("dsm_positive / dsm_negative (the model's values — sections[].dsm_pos / dsm_neg carry Mcrl · Lcrl · Mcrd · Lcrd of every section; detail:'full')"); }
+    // 결정 S1 · S8: 단면마다 — 치수 · 주요 성질 · 좌굴값(Mcrl · Mcrd · 반파장) · 데크 강성 · 경간. 서명곡선 · 성질 전부는 detail:'full'
+    if (Array.isArray(r.sections)) {
+        const dsmLine = (d: any) => (d && typeof d === 'object' ? { Mcrl: d.Mxxcrl ?? null, Lcrl: d.Lcrl ?? null, Mcrd: d.Mxxcrd ?? null, Lcrd: d.Lcrd ?? null } : null);
+        out.sections = r.sections.map((x: any) => ({ id: x.id, name: x.name ?? null, template: x.template ?? null, params: x.params ?? null, source: x.source, spans: x.spans,
+            props: x.props ? { A: x.props.A ?? null, Ixx: x.props.Ixx ?? null, Sf: x.props.Sf ?? null } : null,
+            dsm_pos: dsmLine(x.dsm_pos), dsm_neg: dsmLine(x.dsm_neg),
+            // 데크 강성: 경간마다 같으면 한 번
+            deck: Array.isArray(x.deck) && x.deck.every((d: any) => d.kphi === x.deck[0].kphi && d.kx === x.deck[0].kx) && x.deck.length ? { kphi: x.deck[0].kphi, kx: x.deck[0].kx } : x.deck }));
+        omitted.push("sections[].curves (each section's S-S signature curves), sections[].props in full and sections[].geometry (detail:'full')");
+    }
+    if (r.span_map) { omitted.push("span_map (the per-span section map of the load analysis — detail:'full')"); }
     if (r.load_analysis && typeof r.load_analysis === 'object') {
         const la = r.load_analysis;
         out.load_analysis = {
@@ -1155,7 +1175,7 @@ const VIEW_ITEM = z.object({
 const CASE_UNITS = z.enum(['US', 'SI']).optional().describe("'US' (default): in, ft (spans, spacing, brace points, laps), ksi, kips, kip-in, psf, in⁴. 'SI': mm, m, MPa, kN, kN-m, kPa, mm⁴.");
 
 server.tool("get_case_inputs",
-    "The design / load / connection inputs of the open review as shown on the StCFSD screen (the case state): inputs {key: value} (null = blank / not given), spans {spans, supports, lapsPerSupport}, unit_of {key: unit}, sources {key: default | user | ai | file | load-analysis | mirror}, model_inputs (section template / dimensions, E · ν · G, analysis conditions — read only here, they belong to the model), mcp_only (design-tool arguments that have no screen field, by tool), rev (case revision) and dirty (unsaved changes, dirty_since). Keys are the .csd keys (e.g. Lb, Cb, Mux, wcN, spacing, loadD, connT1). Reading changes nothing.",
+    "The design / load / connection inputs of the open review as shown on the StCFSD screen (the case state): inputs {key: value} (null = blank / not given), spans {spans, supports, lapsPerSupport, spanSections (the section of each span: 'S1' = the current model, 'S2' … = the section list)}, sections (the section list S2 … — {id, name, template, params {H, B, D, t, r, qlip}} in the reply's units; empty = every span uses the model), unit_of {key: unit}, sources {key: default | user | ai | file | load-analysis | mirror}, model_inputs (section template / dimensions, E · ν · G, analysis conditions — read only here, they belong to the model), mcp_only (design-tool arguments that have no screen field, by tool), rev (case revision) and dirty (unsaved changes, dirty_since). Keys are the .csd keys (e.g. Lb, Cb, Mux, wcN, spacing, loadD, connT1). Reading changes nothing.",
     {
         keys: z.array(z.string().min(1).max(64)).max(200).optional().describe("Only these keys (omit = all)"),
         units: CASE_UNITS,
@@ -1173,7 +1193,15 @@ server.tool("set_case_inputs",
             supports: z.array(z.enum(['P', 'R', 'F', 'N'])).max(51).optional().describe("Support types, one per support (spans + 1)"),
             lapsPerSupport: z.array(z.object({ left: z.number().nullable(), right: z.number().nullable() })).max(51).optional()
                 .describe("Lap length each side of each support — ft, or m if units='SI'; null where the table has no cell (first support's left, last support's right, simple spans)"),
+            spanSections: z.array(z.string().max(4)).max(50).optional()
+                .describe("Section of each span: 'S1' = the current model, 'S2' … = an id of the section list (sections). One per span; every span 'S1' = one section everywhere (the engine request is the one without this feature)."),
         }).optional().describe("The span table (checked against spanType / nSpans)"),
+        sections: z.array(z.object({
+            id: z.string().regex(/^S([2-9]|[1-9][0-9])$/).describe("'S2' … 'S99' (S1 is the current model — not listed)"),
+            name: z.string().max(40).nullable().optional(),
+            template: z.string().max(20).describe("The model's template type (set_section_template) — the section list takes that type only"),
+            params: z.record(z.string(), z.number().nullable()).describe("Template dimensions {H, B, D, t, r, qlip} — in (mm if units='SI'), qlip in degrees; null = blank"),
+        })).max(20).optional().describe("The whole section list S2 … (written whole: the list you pass replaces the case's list; spans that used a removed section go back to S1). Same template type as the model; a hand-drawn / edited model cannot have one."),
         units: CASE_UNITS,
         reason: z.string().max(20000).optional().describe("Short reason — recorded with the invalidated results and with the change (the first 300 characters, control characters removed; same rule as every write tool)"),
     },
@@ -2158,7 +2186,19 @@ const LOAD_FIELDS = {
     insulation_in: z.number().nonnegative().optional().describe("Insulation thickness for the simple-span R correction — in, or mm"),
     load_combination_standard: z.enum(['asce7_10', 'asce7_22', 'kds_41_12_00']).optional().describe("Standard of the load combinations (names and factors follow that standard's numbering): 'asce7_10' ASCE/SEI 7-10 §2.3.2 / §2.4.1 (the screen's initial choice — the results as before), 'asce7_22' ASCE/SEI 7-22 §2.3.1 / §2.4.1, 'kds_41_12_00' KDS 41 12 00:2022 §1.7. The loads you enter must follow THAT standard's load definitions (e.g. strength-level wind of ASCE 7-22 / KDS) — the result's notices and load_combination_standard {edition, reference, key} say which applies; tell the person. ASCE 7-16 is not available (its tables are not verified). Omit → the screen's choice (case input loadComboStandard)."),
     lr_reduced: z.boolean().optional().describe("The roof live load Lr was REDUCED below 20 psf per ASCE 7 §4.8.2 — only then Lr is pattern-loaded (§4.3.3.1). Omit → the screen's check box (initially off: Lr on all spans)."),
-    I_span_in4: z.array(z.number().positive()).optional().describe("Strong-axis Ix of the member in EACH span (one per span; laps use the sum of the two members) — in⁴, or mm⁴ if units='SI'. It belongs to the span table (a bundle): omit it in a call that gives spans / supports / laps → the screen's list is cleared and one Ix is used for all spans (the engine states the effect in assumptions; it can change tight checks by about 2 %)."),
+    I_span_in4: z.array(z.number().positive()).optional().describe("Strong-axis Ix of the member in EACH span (one per span; laps use the sum of the two members) — in⁴, or mm⁴ if units='SI'. It belongs to the span table (a bundle): omit it in a call that gives spans / supports / laps → the screen's list is cleared and one Ix is used for all spans (the engine states the effect in assumptions; it can change tight checks by about 2 %). With span_sections the Ix of each span comes from its section — a hand-typed I_span_in4 still wins and the engine warns where it differs from the section's Ix by more than 1 %."),
+    // 2026-11-28 결정 S1 – S4: 경간마다 다른 단면
+    sections: z.array(z.object({
+        id: z.string().regex(/^S([2-9]|[1-9][0-9])$/).optional().describe("'S2' … 'S99' (omit → the next free number from S2)"),
+        name: z.string().max(40).optional().describe("Short name, e.g. '9CS2.5x059'"),
+        H: z.number().positive().optional().describe("Template H — in, or mm (the meaning of set_section_template: depth; hat top width)"),
+        B: z.number().positive().optional().describe("Template B — in, or mm (flange width; hat depth)"),
+        D: z.number().nonnegative().optional().describe("Template D — in, or mm (lip; hat brim)"),
+        t: z.number().positive().optional().describe("Thickness — in, or mm"),
+        r: z.number().nonnegative().optional().describe("Inside corner radius — in, or mm"),
+        qlip: z.number().gt(0).max(180).optional().describe("Lip angle — degrees"),
+    }).passthrough()).max(20).optional().describe("Additional sections S2 … of the section list (S1 = the CURRENT MODEL — not listed): the template dimensions of the same template type as the model (set_section_template). Taken whole — the list you pass replaces the case's list (spans that used a removed section go back to S1). A hand-drawn / edited model cannot have a section list. Each section gets its own properties, deck stiffness (kφ, kx), §I6.2.1 R and S-S signature-curve buckling values."),
+    span_sections: z.array(z.string().max(4)).max(50).optional().describe("Section of EACH span: 'S1' = the current model, 'S2' … from sections (or the case's list), e.g. ['S1','S2','S2','S1'] for thicker end spans. Taken whole; it belongs to the span table — a call that gives spans / supports / laps without span_sections puts every span back to S1. Each region is checked with the section of the span holding its maximum moment; a lap joining two sections shares M and V by stiffness, M_i = M · I_i / (I_1 + I_2), checks each member with its own section (the region verdict is the governing member's; the Design Manual's sum of strengths is reported as a reference only) and is NOT EVALUATED when the two depths differ; a region crossing a support where the section changes without a lap is checked with each of those sections (governing one decides). Omit → the screen's assignment."),
 };
 
 const LOADS_SECTION_STRENGTH = {
@@ -2203,7 +2243,7 @@ server.tool("design_purlin",
     + "Inputs you leave out are the screen's (loads, deck and the span table are taken whole — see their arguments); the reply's case_inputs_used names those it used. "
     + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. "
     + "Web holes (hole_*) and transverse web stiffeners (transverse_stiffeners, stiffener_*) — the screen's sections — apply to every region check (§F2.2 · §F3.2.2 · §F4.2 · §G3 · §G6 · §G2.2 · §G4.1); lap regions and §I6.2.1 uplift regions with holes are NOT EVALUATED by the engine (no provision covers them) — report it. §H4 bending + torsion is not applied to the load-analysis members." + HOLE_DESC_TAIL + " " + VERDICT
-    + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions)."
+    + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions); with span_sections they are each member's stiffness share (lap_members[] lists both members' lines, governing_member, reference_sum_of_strengths). With span_sections every region carries section_id, the reply has span_sections (one id per span) and sections [{id, name, template, params, props, dsm_pos, dsm_neg, deck, spans}] (the signature curves only with detail:'full')."
     + " The default reply is a summary: overall verdict, one line per region (range, kind, governing check point and check, ratio, verdict, failing / not-evaluated / governing check ids of all its check points), the governing region's governing checks, reactions, deck and §I6.2.1 data, and every notice text of the bundle — top-level lists plus notices_elsewhere [{kind, text, where: region ids | 'all regions' | load_analysis …}]; each check point's combination is the load combination (and pattern) that produced its demand, or 'envelope' when the load analysis cannot tell; detail:'checks' adds every check point of every region with its checks, detail:'full' returns the whole bundle as before (several MB for many regions), get_design_check one check with its steps.",
     {
         ...LOAD_FIELDS,

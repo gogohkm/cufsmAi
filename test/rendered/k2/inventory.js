@@ -287,6 +287,8 @@ const MCP_MAP = {
   '.span-tbl-sup': ['design_purlin.supports', 'analyze_loads.supports'],
   '.span-tbl-lapl': ['design_purlin.laps_per_support', 'analyze_loads.laps_per_support', 'design_purlin.laps.left_ft'],
   '.span-tbl-lapr': ['design_purlin.laps_per_support', 'analyze_loads.laps_per_support', 'design_purlin.laps.right_ft'],
+  // 2026-11-28 결정 S1: 경간의 단면(단면 목록의 치수 칸은 S2 를 더할 때만 생긴다 — 처음 화면에는 없다)
+  '.span-tbl-sec': ['design_purlin.span_sections', 'analyze_loads.span_sections'],
 };
 
 // ── 화면 단위 처리 ──────────────────────────────────────────────────────────
@@ -356,14 +358,14 @@ async function main() {
   const items = rows.map(({ c, id }) => {
     const f = fields.get(c.id);
     const isSpan = !c.id;
-    const unit = f ? f.unit : (isSpan && c.cls !== 'span-tbl-sup' ? 'length_ft' : null);
+    const unit = f ? f.unit : (isSpan && c.cls !== 'span-tbl-sup' && c.cls !== 'span-tbl-sec' ? 'length_ft' : null);
     const kind = f ? f.kind : (c.tag === 'select' ? 'sel' : (c.type === 'checkbox' ? 'chk' : 'num'));
     const src = c.id ? htmlSourceLine(c.id) : null;
     const refs = c.id ? appRefs(c.id) : appRefs(c.cls, true);
     const keys = c.id ? payloadKeys(c.id) : [];
     // 처음 값과 그 출처
     let defaultSource;
-    if (isSpan) { defaultSource = 'page JS (buildSpanTable: span 5 m, support P, laps 0; count from select-span-type)'; }
+    if (isSpan) { defaultSource = c.cls === 'span-tbl-sec' ? 'page JS (buildSpanTable: every span S1 — the model; options from the section list)' : 'page JS (buildSpanTable: span 5 m, support P, laps 0; count from select-span-type)'; }
     else if (MIRRORS[c.id]) { defaultSource = `mirror of ${MIRRORS[c.id]}`; }
     else if (MODEL_SYNCED.has(c.id)) { defaultSource = 'host model (createDefaultModel / _initializeWithDefaultSection) — overwritten from the model on every modelLoaded'; }
     else if (src && /\$\{steel/.test(src.text)) { defaultSource = 'steel-grade table (src/webview/steelGrades.ts, SGC400)'; }
@@ -375,7 +377,8 @@ async function main() {
     // 손으로 정한 공학 기본값: 화면 HTML · JS 에 적힌 값으로, 비어 있지 않고 「없음」의 뜻(0 · none · auto · 빈 선택 · 꺼진 체크)이 아닌 것
     const v0 = c.type === 'checkbox' ? c.valueUS : String(c.valueUS);
     const noneLike = c.type === 'checkbox' ? v0 === false : (v0 === '' || /^0(.0+)?$/.test(v0) || ['none', 'auto'].includes(v0));
-    const hardCoded = /^page (HTML|JS)/.test(defaultSource) && !UI_ONLY.has(c.id) && !noneLike;
+    // 2026-11-28: 경간의 단면 칸의 처음 값 S1 은 공학 기본값이 아니라 「모델」 이다(「없음」 과 같은 뜻 — 새 단면을 고르지 않음)
+    const hardCoded = /^page (HTML|JS)/.test(defaultSource) && !UI_ONLY.has(c.id) && !noneLike && c.cls !== 'span-tbl-sec';
     const zeroAsNone = /^page (HTML|JS)/.test(defaultSource) && !UI_ONLY.has(c.id) && noneLike && v0 !== '' && v0 !== false;
     const mcpArgs = MCP_MAP[c.id || `.${c.cls}`];
     if (mcpArgs === undefined) { problems.push(`no MCP mapping row for ${id}`); }
@@ -401,10 +404,10 @@ async function main() {
     const dependsOn = DEPENDS.filter(([d, what]) => d !== c.id && c.id && what.includes(c.id)).map(([d]) => d);
     return {
       id, tab: c.tab, group: c.group, label: c.label || null, control: c.tag === 'select' ? 'select' : (c.type || c.tag),
-      csdKey: f ? f.key : (isSpan ? { 'span-tbl-len': 'spans', 'span-tbl-sup': 'supports', 'span-tbl-lapl': 'lapsPerSupport[].left', 'span-tbl-lapr': 'lapsPerSupport[].right' }[c.cls] : null),
+      csdKey: f ? f.key : (isSpan ? { 'span-tbl-len': 'spans', 'span-tbl-sup': 'supports', 'span-tbl-lapl': 'lapsPerSupport[].left', 'span-tbl-lapr': 'lapsPerSupport[].right', 'span-tbl-sec': 'spanSections' }[c.cls] : null),
       savedInCsd13: !!f || isSpan,
       kind, unit, unitDisplay: unit ? (UNIT_LABEL[unit] || unit) : null,
-      unitHandling: unit ? (kind === 'list' ? 'designState UNIT_FIELDS (list: each number converted in refreshUnits)' : 'designState UNIT_FIELDS → refreshUnits (12 digits) · .csd stores US') : (isSpan ? 'refreshUnits converts span-table inputs (length_ft)' : 'none'),
+      unitHandling: unit ? (kind === 'list' ? 'designState UNIT_FIELDS (list: each number converted in refreshUnits)' : 'designState UNIT_FIELDS → refreshUnits (12 digits) · .csd stores US') : (isSpan && c.cls !== 'span-tbl-sec' ? 'refreshUnits converts span-table inputs (length_ft)' : 'none'),
       default: { SI: c.valueSI, US: c.valueUS, html: c.htmlValue ?? c.htmlChecked, source: defaultSource, hardCodedEngineeringDefault: hardCoded, zeroOrNoneDefault: zeroAsNone,
         htmlLine: src ? src.line : null },
       options: c.options ? c.options.map((o) => o.value + (o.span ? `[${o.span}]` : '')) : null,

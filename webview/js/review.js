@@ -725,6 +725,68 @@
                 }
             }
 
+            // ── 2026-11-28 결정 S1 – S7: 경간마다 단면 — 경간 → 단면, 단면마다 데크 강성 · 좌굴값, 경간마다 §I6.2.1 R, 랩의 두 부재 ──
+            {
+                const pd = _lastDesignResult && Array.isArray(_lastDesignResult.purlin_sections) ? _lastDesignResult : null;
+                const apS = la && la.auto_params ? la.auto_params : null;
+                const smap = apS && apS.span_map && Array.isArray(apS.span_map.spans) ? apS.span_map.spans : null;
+                if (pd || smap) {
+                    const ids = pd && Array.isArray(pd.purlin_span_sections) ? pd.purlin_span_sections : (smap ? smap.map((x) => x.section_id) : []);
+                    checks.push({
+                        category: catF, item: '경간마다 단면',
+                        status: 'pass',
+                        value: ids.map((id, i) => (i + 1) + ': ' + id).join(', '),
+                        criterion: '구간마다 그 구간의 최대 모멘트가 놓인 경간의 단면(같은 템플릿 종류) — 결정 S1',
+                        note: '경간의 Ix · 데크 강성 · §I6.2.1 R · 좌굴값은 그 단면의 것. 랩은 강성의 비로 두 부재를 따로 검토, 춤이 다른 랩은 평가하지 않음.',
+                    });
+                    (pd ? pd.purlin_sections : []).forEach((sec) => {
+                        const dk = Array.isArray(sec.deck) ? sec.deck : [];
+                        const kphis = Array.from(new Set(dk.map((d) => d.kphi))), kxs = Array.from(new Set(dk.map((d) => d.kx)));
+                        if (dk.length) {
+                            checks.push({
+                                category: catF, item: '데크 강성 — 단면 ' + sec.id,
+                                status: 'pass',
+                                value: 'kφ ' + kphis.map((v) => _ruv(v, 'rotStiff')).join(' · ') + ' ' + _rul('rotStiff') + ', kx ' + kxs.map((v) => _ruv(v, 'latStiff')).join(' · ') + ' ' + _rul('latStiff'),
+                                criterion: '경간 ' + (sec.spans || []).map((j) => j + 1).join(', ') + ' — 그 단면의 t · B 로 (Design Manual II-1C 방식)',
+                                note: kphis.length > 1 || kxs.length > 1 ? '같은 단면이라도 경간마다 데크 강성이 달라 정모멘트 좌굴값을 그 강성마다 풀었습니다.' : '',
+                            });
+                        }
+                        const dp = sec.dsm_pos || {}, dn = sec.dsm_neg || {};
+                        const okD = Number(dp.Mxxcrl) > 0 && Number(dp.Mxxcrd) > 0 && Number(dn.Mxxcrl) > 0 && Number(dn.Mxxcrd) > 0;
+                        checks.push({
+                            category: catF, item: 'DSM 좌굴값 — 단면 ' + sec.id,
+                            status: okD ? 'pass' : 'warn',
+                            value: '+M Mcrl ' + _ruv(dp.Mxxcrl, 'moment') + ' · Mcrd ' + _ruv(dp.Mxxcrd, 'moment') + ', −M Mcrl ' + _ruv(dn.Mxxcrl, 'moment') + ' · Mcrd ' + _ruv(dn.Mxxcrd, 'moment') + ' ' + _rul('moment'),
+                            criterion: 'S-S 서명곡선(설계 Fy) — 그 단면 · 그 경간의 데크 스프링',
+                            note: okD ? '' : '국부 · 뒤틀림 좌굴값의 일부를 찾지 못함 — 엔진이 해석식 또는 「평가하지 못함」 으로.',
+                        });
+                    });
+                    const rBy = apS && Array.isArray(apS.uplift_R_by_span) ? apS.uplift_R_by_span : null;
+                    if (rBy && la.uplift) {
+                        const some = rBy.some((v) => v != null), all = rBy.every((v) => v != null);
+                        checks.push({
+                            category: catF, item: '양력 R 계수 — 경간마다 (§I6.2.1)',
+                            status: all ? 'pass' : 'warn',
+                            value: rBy.map((v, i) => (i + 1) + ': ' + (v == null ? '—' : v)).join(', '),
+                            criterion: '경간마다 그 단면의 조건 (a)–(o) — 만족하는 경간에서만 R',
+                            note: all ? '' : (some ? 'R 이 없는 경간의 양력 하부압축 구간은 Ly 로 횡비틀림(F2) 검토.' : '어느 경간에도 R 을 쓰지 않음.'),
+                        });
+                    }
+                    const laps = pd && Array.isArray(pd.purlin_regions) ? pd.purlin_regions.filter((g) => g && (g.kind === 'lap' || Array.isArray(g.lap_members))) : [];
+                    const mism = laps.filter((g) => g.lap_evaluable === false);
+                    const two = laps.filter((g) => Array.isArray(g.lap_members) && g.lap_members.length === 2 && g.lap_members[0].section_id !== g.lap_members[1].section_id);
+                    if (laps.length) {
+                        checks.push({
+                            category: catF, item: '랩 — 두 부재 (강성의 몫)',
+                            status: mism.length ? 'warn' : 'pass',
+                            value: two.length ? two.slice(0, 4).map((g) => _koText(g.label || g.id) + ': ' + g.lap_members.map((m) => m.section_id + ' ' + (Number(m.share) * 100).toFixed(1) + '%').join(' | ')).join('; ') : '같은 단면끼리(절반씩)',
+                            criterion: 'M_i = M · I_i / (I_1 + I_2) — 부재마다 그 단면으로, 지배 부재가 판정(결정 S3). 설계 매뉴얼의 강도의 합은 참고',
+                            note: mism.length ? '춤이 다른 두 부재의 랩 ' + mism.length + ' 구간은 평가하지 못함(결정 S4).' : '',
+                        });
+                    }
+                }
+            }
+
             // ── 처짐 검증 (건축 기준의 사용성 한계 — AISI S100 에는 수가 없다: THRESHOLDS.deflection_*) ──
             // K3-6(D13): 활하중 한계는 활하중만의 처짐(엔진 deflection_cases 의 L · Lr · S · R 단독)에, 전체하중 한계는 사용하중 합계
             // (엔진 deflection — D + 활하중)에. 전: 전체하중 한계를 적기만 하고 활하중 한계를 합계 처짐에 댔다.
@@ -1702,6 +1764,51 @@
             }
             return out;
         }
+        /**
+         * 2026-11-28 결정 S1 – S4 · S8: 경간마다 단면 — 경간 → 단면, 단면 목록(치수 · 성질), 단면마다 좌굴값 · 데크 강성, 랩의 두 부재(몫 · 비)와
+         * 설계 매뉴얼의 강도의 합(참고), 랩의 규칙 문장.
+         */
+        function _docSpanSections(d) {
+            const out = [];
+            const secs = d.purlin_sections || [];
+            const ids = Array.isArray(d.purlin_span_sections) ? d.purlin_span_sections : [];
+            const P = (s, k) => (s && s.params && typeof s.params[k] === 'number' ? s.params[k] : null);
+            out.push({ kind: 'heading', text: '경간마다 단면' },
+                { kind: 'table', head: ['경간', '단면'], rows: ids.map((id, i) => [RQ(i + 1, 'count'), id]) },
+                { kind: 'table', head: ['단면', '이름', '템플릿', 'H', 'B', 'D', 't', 'r', 'A', 'Ixx', 'Sf', '경간'], rows: secs.map((s) => [s.id, s.name || (s.source === 'model' ? '모델' : ''),
+                    s.template || '', RQ(P(s, 'H'), 'length'), RQ(P(s, 'B'), 'length'), RQ(P(s, 'D'), 'length'), RQ(P(s, 't'), 'length', { digits: { US: 4, SI: 2 } }), RQ(P(s, 'r'), 'length'),
+                    RQ(s.props && s.props.A, 'area'), RQ(s.props && s.props.Ixx, 'moment_of_inertia'), RQ(s.props && s.props.Sf, 'section_modulus'),
+                    (s.spans || []).map((j) => j + 1).join(', ')]) },
+                { kind: 'table', head: ['단면', '+M Mcrl', 'Lcrl', '+M Mcrd', 'Lcrd', '-M Mcrl', '-M Mcrd', 'kφ', 'kx'], rows: secs.map((s) => {
+                    const p = s.dsm_pos || {}, n = s.dsm_neg || {}, dk = (s.deck || [])[0] || {};
+                    return [s.id, RQ(p.Mxxcrl, 'moment'), RQ(p.Lcrl, 'length'), RQ(p.Mxxcrd, 'moment'), RQ(p.Lcrd, 'length'), RQ(n.Mxxcrl, 'moment'), RQ(n.Mxxcrd, 'moment'),
+                        RQ(dk.kphi, 'rotational_stiffness'), RQ(dk.kx, 'lat_stiff')];
+                }) });
+            const laps = (d.purlin_regions || []).filter((g) => g && Array.isArray(g.lap_members));
+            if (laps.length) {
+                const rows = [];
+                laps.forEach((g) => {
+                    g.lap_members.forEach((m, i) => rows.push([i === 0 ? (g.label || g.id || '') : '', '부재 ' + (i + 1) + ' (경간 ' + (Number(m.span) + 1) + ')', m.section_id,
+                        RQ(m.share, 'dimensionless', { digits: 4 }), RQ(m.Mu, 'moment'), RQ(m.design_strength, 'moment'), RQ(m.utilization, 'dimensionless', { digits: 3 }),
+                        { text: _VTXT[m.pass === true ? 'pass' : (m.pass === false ? 'fail' : 'not_evaluated')], tone: _tone(m.pass === true ? 'pass' : (m.pass === false ? 'fail' : 'not_evaluated')) }]));
+                    const ref = g.reference_sum_of_strengths;
+                    if (ref && ref.ratio != null) {
+                        rows.push(['', '참고: 강도의 합 (매뉴얼 가정 (c))', '', '', RQ(ref.Mu, 'moment'), RQ(ref.design_strength_sum, 'moment'), RQ(ref.ratio, 'dimensionless', { digits: 3 }), '참고(판정 아님)']);
+                    } else if (g.lap_evaluable === false) {
+                        rows.push(['', '평가하지 못함 — 두 부재의 춤이 다름 (결정 S4)', '', '', '', '', '', { text: _VTXT.not_evaluated, tone: _tone('not_evaluated') }]);
+                    }
+                });
+                out.push({ kind: 'heading', text: '랩 구간 — 두 부재' }, { kind: 'table', head: ['구간', '부재', '단면', '몫', 'Mu (몫)', '설계강도', '이용률', '판정'], rows });
+            }
+            out.push({ kind: 'list', title: '경간마다 단면의 규칙', items: [
+                '구간마다 그 구간의 최대 모멘트가 놓인 경간의 단면으로 검토합니다(같은 템플릿 종류 — 결정 S1 · S2).',
+                '랩: 겹친 두 부재가 강성의 비로 M · V 를 나눕니다 — M_i = M · I_i / (I_1 + I_2). 부재마다 그 단면으로 검토하고 지배 부재가 판정합니다(결정 S3 — 기준 조항이 아닌 설계 가정).',
+                '설계 매뉴얼 II-1A / II-2A 의 가정 (c)(겹친 두 부재 강도의 합)로 본 비는 참고로만 적습니다.',
+                '춤이 다른 두 부재의 랩은 평가하지 않습니다(결정 S4). 랩 없이 단면이 바뀌는 지점을 지나는 구간은 그 단면마다 검토해 지배하는 것으로 판정합니다.',
+                '경간의 Ix · 데크 강성(kφ · kx) · §I6.2.1 R · 좌굴값은 그 경간 단면의 것입니다(「경간별 Ix」 를 직접 넣었으면 그 값 — 단면과 1 % 넘게 다르면 알림).',
+            ] });
+            return out;
+        }
         const PURLIN_PARTS = [['design_negative', '부모멘트 구간'], ['design_positive', '정모멘트 구간'], ['design_lap', '랩 구간'], ['design_uplift', '양력 구간']];
         function _docDesignCalc(d) {
             const blocks = [];
@@ -1726,13 +1833,18 @@
                     blocks.push(...(_checkBlocks(g)), ..._docWebOptions(g));
                 });
                 if (Array.isArray(d.purlin_regions)) {
-                    blocks.push({ kind: 'heading', text: '모든 구간' }, { kind: 'table', head: ['구간', '종류', 'Ly', 'Cb', '이용률', '판정', '지배 검토'],
+                    // 2026-11-28 결정 S1: 경간마다 단면이면 구간을 판정한 단면의 열
+                    const ms = Array.isArray(d.purlin_sections);
+                    blocks.push({ kind: 'heading', text: '모든 구간' }, { kind: 'table', head: ['구간', '종류', ...(ms ? ['단면'] : []), 'Ly', 'Cb', '이용률', '판정', '지배 검토'],
                         rows: d.purlin_regions.map((rg) => {
                             const rr = rg && rg.result;
                             const k = rr && !rr.error ? _verdictKey(rr) : 'not_evaluated';
-                            return [rg.label || rg.id || '', rg.kind || '', RQ(rg.Ly_in, 'length'), RQ(rg.Cb, 'dimensionless', { digits: 2 }),
+                            const sec = !ms ? [] : [Array.isArray(rg.lap_members) ? rg.lap_members.map((m) => m.section_id).join(' | ') + (rg.lap_evaluable === false ? ' (춤 다름)' : '')
+                                : Array.isArray(rg.sections_checked) ? rg.sections_checked.map((m) => m.section_id).join(' · ') : (rg.section_id || '—')];
+                            return [rg.label || rg.id || '', rg.kind || '', ...sec, RQ(rg.Ly_in, 'length'), RQ(rg.Cb, 'dimensionless', { digits: 2 }),
                                 RQ(rr && rr.utilization, 'dimensionless', { digits: 3 }), { text: rr && rr.error ? '오류: ' + rr.error : _VTXT[k], tone: _tone(k) }, (rr && rr.governing_check) || ''];
                         }) });
+                    if (ms) { blocks.push(..._docSpanSections(d)); }
                 }
             } else {
                 blocks.push(..._checkBlocks(d), ..._docWebOptions(d));
@@ -1898,6 +2010,10 @@
         ['val.load_analysis.cb_positive', '모멘트 구배 Cb(+)'], 
         ['val.load_analysis.lap_end_mu', 'Lap 끝단 Mu 추출'], ['val.load_analysis.deflection_span', '처짐 — 스팬 ', true],
         ['val.load_analysis.deflection', '처짐 검토'],
+        // 2026-11-28 결정 S1 – S7: 경간마다 단면(단면 id 의 번호가 뒤에 — 「.2」 = S2)
+        ['val.load_analysis.span_sections', '경간마다 단면'], ['val.load_analysis.deck_section', '데크 강성 — 단면 S', true],
+        ['val.load_analysis.dsm_section', 'DSM 좌굴값 — 단면 S', true], ['val.load_analysis.uplift_r_span', '양력 R 계수 — 경간마다 (§I6.2.1)'],
+        ['val.load_analysis.lap_members', '랩 — 두 부재 (강성의 몫)'],
         ['val.design.run', '설계 검토 실행 여부'], ['val.design.overall', '종합 판정 (엔진)'], ['val.design.mne_my', 'Mne vs My'],
         ['val.design.inelastic_reserve', '§F2.4.2 Inelastic Reserve'], ['val.design.uplift_r', '§I6.2.1 R-factor (양력)'],
         ['val.design.cold_work', '§A3.3.2 Cold Work (냉간가공)'], ['val.design.cold_work_ir', '§A3.3.2 ↔ §F2.4.2 배타 관계'],

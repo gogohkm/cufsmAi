@@ -68,9 +68,15 @@ export function recordModelFp(model: any): string {
 }
 
 /** 검토 입력의 지문 — inputs · spans · mcpOnly 만(출처 · 판 · 보기는 뺀다) */
-export function caseFp(state: { inputs?: unknown; spans?: unknown; mcpOnly?: unknown } | null | undefined): string {
+export function caseFp(state: { inputs?: unknown; spans?: unknown; mcpOnly?: unknown; sections?: unknown } | null | undefined): string {
     const s = state || {};
-    return fp(NS.case, { inputs: s.inputs ?? {}, spans: s.spans ?? null, mcpOnly: s.mcpOnly ?? {} });
+    // 2026-11-28 결정 S1: 경간의 단면 · 단면 목록은 쓸 때만 지문에 든다 — 모든 경간 S1 · 빈 목록이면 이 기능이 없던 때와 같은 지문
+    // (기록에 남은 지문 · 봉인이 그대로 맞는다)
+    const sp: any = s.spans && typeof s.spans === 'object' ? s.spans : null;
+    const allS1 = !sp || !Array.isArray(sp.spanSections) || sp.spanSections.every((x: unknown) => x === 'S1');
+    const secs = Array.isArray(s.sections) && s.sections.length ? s.sections : null;
+    const spans = sp && allS1 && 'spanSections' in sp ? (({ spanSections: _x, ...rest }) => rest)(sp) : (s.spans ?? null);
+    return fp(NS.case, { inputs: s.inputs ?? {}, spans, mcpOnly: s.mcpOnly ?? {}, ...(secs || !allS1 ? { sections: secs ?? [] } : {}) });
 }
 
 export function contentFp(model: any, state: { inputs?: unknown; spans?: unknown; mcpOnly?: unknown } | null | undefined): {

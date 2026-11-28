@@ -131,6 +131,11 @@
         document.querySelectorAll('.span-tbl-len, .span-tbl-lapl, .span-tbl-lapr').forEach(el => {
             inputUnitMap.push([null, 'length_ft', el]);
         });
+        // 2026-11-28 결정 S1: 단면 목록의 치수 칸(립 각도는 단위 없음)
+        document.querySelectorAll('.sec-p[data-u]').forEach(el => {
+            const ut = el.getAttribute('data-u');
+            if (ut && UNIT[ut]) { inputUnitMap.push([null, ut, el]); }
+        });
 
         if (oldSys && oldSys !== _unitSystem) {
             inputUnitMap.forEach(([id, ut, directEl]) => {
@@ -159,6 +164,10 @@
                     return isFinite(v) ? String(Number((v / oldFactor * newFactor).toPrecision(12))) : tok;
                 }).join(', ');
             });
+            // 2026-11-28 결정 S1: 단면 목록의 S1 줄 · Ix 칸도 새 단위로(치수 칸은 위에서 바꿨다 — 그 정확한 값으로 다시 그린다)
+            if (typeof renderSectionList === 'function' && globalThis.StcfsdDesignState && document.getElementById('sec-list-tbody')) {
+                renderSectionList(globalThis.StcfsdDesignState.collectSections(document, fromDisplay));
+            }
         }
 
         // (1) 모든 data-unit 속성을 가진 라벨 텍스트 갱신
@@ -217,7 +226,14 @@
                 _syncAnalysisWidgetsFromModel(model);
                 renderPreprocessor();
                 renderStressPreview();
+                // 2026-11-28 결정 S1 · S2: 단면 목록의 S1 줄(모델) · 템플릿이 맞는지 — 칸의 지금 값(사람이 친 것)을 다시 그린다
+                if (typeof renderSectionList === 'function') { renderSectionList(_secDs() ? _secDs().collectSections(document, fromDisplay) : []); }
                 sendTreeUpdate();
+                break;
+            case 'sectionListInfo':
+                // 결정 S1: 호스트가 구한 단면마다의 성질(Ix — 템플릿 치수로 만든 단면)
+                _sectionInfo = (msg.data && msg.data.info) || {};
+                if (typeof _updateSectionIx === 'function') { _updateSectionIx(); }
                 break;
             case 'analysisStarted':
                 setStatus('Running analysis...', 'running');
@@ -289,6 +305,7 @@
                 break;
             case 'propertiesResult':
                 renderProperties(msg.data);
+                if (typeof _updateSectionIx === 'function') { _updateSectionIx(); }
                 sendTreeUpdate();
                 break;
             case 'propertiesError':
@@ -1168,6 +1185,8 @@
             var lapSupEl = /** @type {HTMLInputElement|null} */ (document.getElementById('conn-lap-support'));
             var lapSup = lapSupEl && lapSupEl.value !== '' ? Number(lapSupEl.value) : null;
             var lapStated = !!(/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked);
+            // 2026-11-28 결정 S1: 경간마다 단면인 퍼린 결과에서 지점을 비우면 그 결과의 지배 랩(호스트 requests.ts lapSectionFor 와 같은 규칙)
+            if (!Number.isInteger(lapSup)) { var _gls = globalThis.StcfsdUtils.governingLapSupport(_lastPurlinResult); if (_gls !== null) { lapSup = _gls; } }
             var lapSec = globalThis.StcfsdUtils.deriveLapSection(_lastPurlinResult, Number.isInteger(lapSup) ? lapSup : null, { stated: lapStated });
             var haveSe = lapSec.Se !== null;
             var lpSe = haveSe ? lapSec.Se : undefined;
@@ -1200,6 +1219,8 @@
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-conn-zero-demand'))?.checked) { data.zero_demand_stated = true; }
             // 결정 R2: 패스너 힘 분배(모든 패스너가 고르게)로 판정함을 밝혔을 때만
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-force-model-confirmed'))?.checked) { data.lap_force_model_confirmed = true; }
+            // 결정 S1 · S5: 그 랩이 두 단면을 이으면 두 부재(호스트 본문과 같은 함수)
+            globalThis.StcfsdUtils.applyLapTwoMembers(data, globalThis.StcfsdUtils.lapTwoMembers(_lastPurlinResult, Number.isInteger(lapSup) ? lapSup : null, { stated: lapStated }));
             if (_blockIfMissing('Lap 접합부')) { return; }
             vscode.postMessage({ command: 'runLapConnection', data });
         });
@@ -4041,9 +4062,17 @@
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }
+                // 2026-11-28 결정 S1: 지점 i 오른쪽 경간의 단면(처음 값 S1 — 모델). 선택지는 단면 목록(_spanSectionOptions)
+                if (i < n) {
+                    html += '<td style="padding:2px 3px"><select class="span-tbl-sec" data-idx="' + i + '" style="width:100%;font-size:10px;padding:2px 2px" title="' + _esc(SPAN_SECTION_TIP) + '">'
+                        + _spanSectionOptions('S1') + '</select></td>';
+                } else {
+                    html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
+                }
                 html += '</tr>';
             }
             tbody.innerHTML = html;
+            _refreshSpanSectionSelects();
 
             // 캔틸레버 기본 지점조건 설정 (F-N)
             if (st === 'cantilever') {
@@ -4057,6 +4086,143 @@
         const nInput = document.getElementById('config-n-spans');
         if (nInput) nInput.style.display = (st === 'cont-n') ? 'inline-block' : 'none';
     }
+
+    // ============================================================
+    // 2026-11-28 결정 S1 – S4: 경간마다 다른 퍼린 단면 — 「단면 목록」(S1 = 모델, S2 … = 같은 템플릿의 치수)과 경간 표의 「단면」 칸.
+    // 칸은 검토 상태의 sections · spanSections(designState.collectSections · collectDesignInputs) — 바뀌면 다른 칸처럼 caseEdit 로.
+    // 본문은 designState.spanSectionsPayload(호스트와 같은 함수) — 모든 경간 S1 이면 본문에 아무것도 없다.
+    // ============================================================
+    var SPAN_SECTION_TIP = '이 경간의 단면 — S1 = 지금 모델, S2 … = 단면 목록. 경간의 Ix · 데크 강성 · §I6.2.1 R 은 그 단면에서. '
+        + '랩은 두 부재가 강성의 비로 M · V 를 나눠 부재마다 검토(설계 매뉴얼의 강도의 합은 참고), 춤이 다른 두 부재의 랩은 평가하지 않습니다. '
+        + '「경간별 Ix」 를 직접 넣으면 그 값을 쓰고 단면의 Ix 와 1 % 넘게 다르면 알립니다.';
+    /** @type {Record<string, any>} 호스트가 알린 단면마다의 성질 {S2: {Ixx, A, error}} */
+    var _sectionInfo = {};
+    function _secDs() { return globalThis.StcfsdDesignState; }
+    /** 모델이 단면 목록을 쓸 수 있는 템플릿 단면인가 — {tpl, why} */
+    function _sectionListTemplate() {
+        const ds = _secDs();
+        const m = model;
+        if (!m || !Array.isArray(m.node) || m.node.length === 0) { return { tpl: null, why: '단면이 없습니다 — 먼저 ① 탭에서 템플릿으로 단면을 만드십시오.' }; }
+        if (m.sectionEdited) { return { tpl: null, why: '단면을 손으로 고쳤습니다 — 단면 목록은 템플릿으로 만든 단면에서만 씁니다(모든 경간 S1).' }; }
+        const t = m.sectionTemplate;
+        if (!t || !ds || !ds.SECTION_TEMPLATE_PARAMS[t]) {
+            return { tpl: null, why: t === 'chs' ? '원형관은 단면 목록을 쓰지 않습니다(모든 경간 S1).' : '직접 그린 단면 — 단면 목록은 템플릿으로 만든 단면에서만 씁니다(모든 경간 S1).' };
+        }
+        return { tpl: t, why: null };
+    }
+    /** 경간 칸의 선택지(S1 과 단면 목록의 id) */
+    function _spanSectionOptions(value) {
+        const ds = _secDs();
+        const ids = ds ? ds.sectionIds(ds.collectSections(document, fromDisplay)) : ['S1'];
+        return ids.map((id) => '<option value="' + _esc(id) + '"' + (id === value ? ' selected' : '') + '>' + _esc(id) + '</option>').join('');
+    }
+    /** 단면 목록이 바뀐 뒤 경간 칸의 선택지를 다시(그 단면이 없어진 경간은 S1 — 호스트의 규칙과 같다) */
+    function _refreshSpanSectionSelects() {
+        const T = _sectionListTemplate();
+        const ds = _secDs();
+        const ids = ds ? ds.sectionIds(ds.collectSections(document, fromDisplay)) : ['S1'];
+        document.querySelectorAll('.span-tbl-sec').forEach((el) => {
+            const sel = /** @type {HTMLSelectElement} */ (el);
+            const cur = ids.includes(sel.value) ? sel.value : 'S1';
+            sel.innerHTML = _spanSectionOptions(cur);
+            sel.value = cur;
+            // 템플릿 단면이 아니면 S1 만(이미 다른 단면이면 S1 로 되돌릴 수 있게 열어 둔다)
+            sel.disabled = !T.tpl && cur === 'S1' && ids.length === 1;
+            sel.title = T.tpl ? SPAN_SECTION_TIP : T.why;
+        });
+    }
+    /** 단면 하나의 치수 칸 글(그 단위의 12 자리) */
+    function _secShown(v, unit) { return v == null || !isFinite(v) ? '' : String(Number((unit ? toDisplay(v, unit) : v).toPrecision(12))); }
+    /**
+     * 단면 목록을 그린다 — S1(모델 — 읽기만)과 S2 …(치수 칸 · 이름 · 지우기). 칸에는 정확한 US 값을 함께(designState.setShown — 반올림이 값으로 새지 않게).
+     * list = 상태의 꼴 [{id, name, template, params}] (US).
+     */
+    function renderSectionList(list) {
+        const ds = _secDs();
+        const tbody = document.getElementById('sec-list-tbody');
+        if (!ds || !tbody) { return; }
+        const rows = Array.isArray(list) ? list : [];
+        const T = _sectionListTemplate();
+        const keys = ['H', 'B', 'D', 't', 'r', 'qlip'];
+        const sp = (model && model.sectionParams) || {};
+        let html = '<tr class="sec-row-s1"><td style="padding:2px 4px;font-weight:600">S1</td><td style="padding:2px 4px" class="hint">모델' + (model && model.sectionTemplate ? ' (' + _esc(model.sectionTemplate) + ')' : '') + '</td>';
+        keys.forEach((k) => {
+            const u = ds.SECTION_PARAM_UNITS[k];
+            const used = T.tpl ? ds.SECTION_TEMPLATE_PARAMS[T.tpl].includes(k) : (sp[k] !== undefined);
+            html += '<td style="padding:2px 4px;text-align:right">' + (used && typeof sp[k] === 'number' ? _esc(_secShown(sp[k], u)) : '—') + '</td>';
+        });
+        html += '<td class="sec-ix" data-sec-id="S1" style="padding:2px 4px;text-align:right">—</td><td></td></tr>';
+        rows.forEach((s) => {
+            const tplKeys = ds.SECTION_TEMPLATE_PARAMS[s.template] || [];
+            const bad = T.tpl && s.template !== T.tpl ? '템플릿 ' + s.template + ' — 모델(' + T.tpl + ')과 달라 쓸 수 없습니다(지우십시오)' : (!T.tpl ? T.why : '');
+            html += '<tr class="sec-row" data-sec-id="' + _esc(s.id) + '" data-template="' + _esc(s.template || '') + '"' + (bad ? ' style="background:rgba(255,152,0,0.12)" title="' + _esc(bad) + '"' : '') + '>'
+                + '<td style="padding:2px 4px;font-weight:600">' + _esc(s.id) + '</td>'
+                + '<td style="padding:2px 3px"><input type="text" class="sec-name" maxlength="40" style="width:100%;font-size:10px;padding:2px 3px" placeholder="이름" title="단면의 이름(보고서 · 기록에 — 판정에는 쓰지 않는다)"></td>';
+            keys.forEach((k) => {
+                if (!tplKeys.includes(k)) { html += '<td style="padding:1px;color:#666;text-align:center">—</td>'; return; }
+                const u = ds.SECTION_PARAM_UNITS[k];
+                html += '<td style="padding:2px 3px"><input type="number" class="sec-p" data-p="' + k + '"' + (u ? ' data-u="' + u + '"' : '') + ' step="any" style="width:100%;font-size:10px;padding:2px 3px;text-align:right" title="'
+                    + _esc((ds.SECTION_PARAM_LABELS[k] || k) + (k === 'H' || k === 'B' || k === 't' ? ' — 꼭 넣어야 합니다(0 보다 큰 수)' : ' — 비우면 엔진이 그 템플릿의 규칙대로')) + '"></td>';
+            });
+            html += '<td class="sec-ix" data-sec-id="' + _esc(s.id) + '" style="padding:2px 4px;text-align:right">—</td>'
+                + '<td><button class="sec-del btn-small" data-sec-id="' + _esc(s.id) + '" title="이 단면을 지웁니다 — 이 단면을 쓰던 경간은 S1(모델)로 돌아갑니다" style="font-size:10px;padding:0 5px">✕</button></td></tr>';
+        });
+        tbody.innerHTML = html;
+        rows.forEach((s) => {
+            const row = tbody.querySelector('.sec-row[data-sec-id="' + s.id + '"]');
+            if (!row) { return; }
+            const nm = /** @type {HTMLInputElement|null} */ (row.querySelector('.sec-name'));
+            if (nm) { nm.value = s.name || ''; }
+            Object.keys(s.params || {}).forEach((k) => {
+                const el = row.querySelector('.sec-p[data-p="' + k + '"]');
+                const v = s.params[k];
+                const u = ds.SECTION_PARAM_UNITS[k];
+                if (el) { ds.setShown(el, _secShown(v, u), typeof v === 'number' && u ? v : undefined); }
+            });
+        });
+        const addBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-sec-add'));
+        if (addBtn) { addBtn.disabled = !T.tpl || rows.length >= ds.MAX_SECTIONS; addBtn.title = T.tpl ? '모델과 같은 템플릿(' + T.tpl + ')의 단면을 하나 더 — 처음 치수는 모델의 것' : T.why; }
+        const why = document.getElementById('sec-list-reason');
+        if (why) { why.textContent = T.why || ''; why.style.display = T.why ? 'block' : 'none'; }
+        _refreshSpanSectionSelects();
+        _updateSectionIx();
+    }
+    /** 단면마다의 Ix 칸 — S1 은 화면의 단면 성질, S2 … 는 호스트가 알린 것(sectionListInfo) */
+    function _updateSectionIx() {
+        document.querySelectorAll('.sec-ix[data-sec-id]').forEach((el) => {
+            const id = el.getAttribute('data-sec-id');
+            const inf = id === 'S1' ? (lastProps ? { Ixx: lastProps.Ixx } : null) : (_sectionInfo || {})[id];
+            if (inf && inf.error) { el.textContent = '⚠'; el.setAttribute('title', String(inf.error)); return; }
+            el.textContent = inf && typeof inf.Ixx === 'number' ? fmtVal(inf.Ixx, 'inertia') : '—';
+            el.setAttribute('title', 'Ix (' + unitLabel('inertia') + ') — ' + (id === 'S1' ? '지금 모델의 단면 성질' : '이 치수로 만든 단면의 성질(호스트가 구함)'));
+        });
+    }
+    const btnSecAdd = document.getElementById('btn-sec-add');
+    if (btnSecAdd) {
+        btnSecAdd.addEventListener('click', () => {
+            const ds = _secDs();
+            const T = _sectionListTemplate();
+            if (!ds || !T.tpl) { setStatus(T.why || '단면 목록을 쓸 수 없습니다', 'warn'); return; }
+            const list = ds.collectSections(document, fromDisplay);
+            const id = ds.nextSectionId(list);
+            if (!id || list.length >= ds.MAX_SECTIONS) { return; }
+            const sp = (model && model.sectionParams) || {};
+            const params = {};
+            ds.SECTION_TEMPLATE_PARAMS[T.tpl].forEach((k) => { params[k] = typeof sp[k] === 'number' && isFinite(sp[k]) ? sp[k] : null; });
+            list.push({ id, name: null, template: T.tpl, params });
+            renderSectionList(list);
+            _caseReport('user');
+        });
+    }
+    document.addEventListener('click', (ev) => {
+        const t = /** @type {HTMLElement|null} */ (ev.target);
+        const del = t && t.closest ? t.closest('.sec-del') : null;
+        if (!del) { return; }
+        const ds = _secDs();
+        const id = del.getAttribute('data-sec-id');
+        renderSectionList(ds.collectSections(document, fromDisplay).filter((x) => x.id !== id));
+        _caseReport('user');
+    });
 
     if (selSpanType) {
         selSpanType.addEventListener('change', buildSpanTable);
@@ -4654,6 +4820,17 @@
                     return { error: '「경간별 Ix」(② 하중계산 탭) 개수(' + ixs.length + ')가 경간 수(' + spanLens.length + ')와 다릅니다.' };
                 }
                 data.I_span_in4 = ixs;
+            }
+            // 2026-11-28 결정 S1 · S2: 경간마다 단면 — 호스트 본문과 같은 함수(designState.spanSectionsPayload). 모든 경간 S1 이면 아무것도 넣지 않는다
+            {
+                const ds = globalThis.StcfsdDesignState;
+                const ss = [];
+                document.querySelectorAll('.span-tbl-sec').forEach((el) => { ss.push(/** @type {HTMLSelectElement} */ (el).value || 'S1'); });
+                const tplEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('select-template'));
+                const pl = ds.spanSectionsPayload(ss, ds.collectSections(document, fromDisplay), tplEl ? tplEl.value : '');
+                if (pl.error) { return { error: pl.error }; }
+                if (pl.missing.length) { return { error: '단면 목록의 빈 칸: ' + pl.missing.map((m) => m.label).join(', ') + ' — 넣은 뒤 다시 실행하세요.' }; }
+                if (pl.data) { data.span_sections = pl.data.span_sections; data.sections = pl.data.sections; }
             }
             return data;
     }
@@ -5635,16 +5812,29 @@
         // 퍼린 구간별 결과 (host design_purlin) — 구간마다 aisi_design 한 번
         if (data.purlin_mode && Array.isArray(data.purlin_regions) && data.purlin_regions.length > 0) {
             const _dsLbl = dm === 'LRFD' ? 'φMn' : 'Mn/Ω';
-            summaryHtml += '<table class="props-table" style="font-size:11px;margin-bottom:6px"><tr><th>구간</th><th>Ly</th><th>Cb</th><th>Mu</th><th>' + _dsLbl + ' (부재당)</th><th>β</th><th>이용률</th><th>판정</th></tr>';
+            // 2026-11-28 결정 S1 – S4: 경간마다 단면이면 「단면」 열 — 랩은 두 부재(단면 · 강성의 몫), 단면이 바뀌는 구간은 검토한 단면들
+            const _ms = Array.isArray(data.purlin_sections);
+            summaryHtml += '<table class="props-table" id="purlin-region-table" style="font-size:11px;margin-bottom:6px"><tr><th>구간</th>' + (_ms ? '<th>단면</th>' : '') + '<th>Ly</th><th>Cb</th><th>Mu</th><th>' + _dsLbl + ' (부재당)</th><th>β</th><th>이용률</th><th>판정</th></tr>';
             data.purlin_regions.forEach(rg => {
                 const rr = rg && rg.result ? rg.result : null;
                 const rv = _v3(rr);
                 const isGov = data.purlin_governing && rg.id != null && data.purlin_governing.id === rg.id;
+                const lm = _ms && Array.isArray(rg.lap_members) ? rg.lap_members : null;
+                const secCell = !_ms ? '' : '<td class="purlin-sec-cell"' + (rg.reference_sum_of_strengths && rg.reference_sum_of_strengths.ratio != null
+                    ? ' title="' + _esc('참고(설계 매뉴얼 가정 (c) — 두 부재 강도의 합): ' + (rg.reference_sum_of_strengths.ratio * 100).toFixed(1) + '% — 판정이 아님') + '"' : '') + '>'
+                    + (lm ? lm.map((m, i) => _esc(m.section_id) + ' ' + (Number(m.share) * 100).toFixed(1) + '%' + (rg.governing_member === i + 1 ? '＊' : '')).join(' | ')
+                        + (rg.lap_evaluable === false ? '<br><span class="hint">춤이 달라 평가하지 못함</span>' : '')
+                        + (rg.reference_sum_of_strengths && rg.reference_sum_of_strengths.ratio != null ? '<br><span class="hint">합 ' + (rg.reference_sum_of_strengths.ratio * 100).toFixed(1) + '% (참고)</span>' : '')
+                    : Array.isArray(rg.sections_checked) ? rg.sections_checked.map((m) => _esc(m.section_id)).join(' · ') + '<br><span class="hint">단면마다 검토</span>'
+                    : _esc(rg.section_id || '—')) + '</td>';
                 summaryHtml += '<tr' + (isGov ? ' style="font-weight:700;background:rgba(79,195,247,0.1)"' : '') + '>'
                     + '<td>' + _esc(_regionLabel(rg.label || rg.kind || '')) + (rg.R_uplift != null ? ' (R=' + rg.R_uplift + ')' : '') + '</td>'
+                    + secCell
                     + '<td>' + (rg.Ly_in != null ? fmtVal(rg.Ly_in, 'length') : '—') + '</td>'
                     + '<td>' + (rg.Cb != null ? Number(rg.Cb).toFixed(2) : '—') + '</td>'
-                    + '<td>' + (rg.members === 2
+                    + '<td>' + (lm
+                        ? lm.map((m) => fmtVal(m.Mu, 'moment') + ' ' + _esc(m.section_id)).join('<br>') + '<br><span class="hint">합 ' + fmtVal(rg.Mu, 'moment') + '</span>'
+                        : rg.members === 2
                         ? fmtVal(rg.Mu / 2, 'moment') + ' /부재<br><span class="hint">합 ' + fmtVal(rg.Mu, 'moment') + '</span>'
                         : fmtVal(rg.Mu, 'moment')) + '</td>'
                     + '<td>' + (rr && !rr.error ? fmtVal(rr.design_strength, 'moment') : '—') + '</td>'
@@ -5657,7 +5847,28 @@
                     })() + '</td>'
                     + '<td style="color:' + rv.color + '">' + (rr && rr.error ? '오류: ' + _esc(rr.error) : rv.short) + '</td></tr>';
             });
-            summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: Ly ' + unitLabel('length') + ', Mu·설계강도 ' + unitLabel('moment') + '. 굵은 행 = 지배 구간. 랩 구간은 두 부재가 M · V 를 반씩 진다는 가정(아래 가정)으로 부재당 Mu 와 한 부재 강도를 비교. β = §2.3.3.3 뒤틀림 모멘트 구배 계수(하중 분석의 구간 M1/M2 · Ly).</div>';
+            summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: Ly ' + unitLabel('length') + ', Mu·설계강도 ' + unitLabel('moment') + '. 굵은 행 = 지배 구간. '
+                + (_ms ? '랩 구간은 두 부재가 강성의 비로 M · V 를 나눠(단면 열의 %) 부재마다 그 단면으로 검토 — ＊ = 지배 부재, 「합」 은 설계 매뉴얼의 강도의 합(참고). 춤이 다른 랩은 평가하지 못함.'
+                    : '랩 구간은 두 부재가 M · V 를 반씩 진다는 가정(아래 가정)으로 부재당 Mu 와 한 부재 강도를 비교.')
+                + ' β = §2.3.3.3 뒤틀림 모멘트 구배 계수(하중 분석의 구간 M1/M2 · Ly).</div>';
+            // 결정 S1 · S8: 단면마다의 성질 · 좌굴값(서명곡선은 검토 화면에서 단면을 골라 본다)
+            if (_ms) {
+                const ids = Array.isArray(data.purlin_span_sections) ? data.purlin_span_sections : [];
+                summaryHtml += '<div style="font-weight:600;font-size:11px;margin:4px 0 2px">경간마다 단면: ' + ids.map((id, i) => (i + 1) + ' ' + _esc(id)).join(' · ') + '</div>'
+                    + '<table class="props-table" id="purlin-sections-table" style="font-size:11px;margin-bottom:6px"><tr><th>단면</th><th>경간</th><th>t</th><th>Ix</th><th>Sf</th><th>+M Mcrl</th><th>+M Mcrd</th><th>−M Mcrl</th><th>−M Mcrd</th><th>kφ</th></tr>';
+                data.purlin_sections.forEach((x) => {
+                    const p = x.dsm_pos || {}, n = x.dsm_neg || {}, dk = (x.deck || [])[0] || {};
+                    const t = x.params && typeof x.params.t === 'number' ? x.params.t : null;
+                    const f = (v, u) => (typeof v === 'number' && isFinite(v) ? fmtVal(v, u) : '—');
+                    summaryHtml += '<tr><td>' + _esc(x.id) + (x.name ? ' <span class="hint">' + _esc(x.name) + '</span>' : (x.source === 'model' ? ' <span class="hint">모델</span>' : '')) + '</td>'
+                        + '<td>' + (x.spans || []).map((j) => j + 1).join(', ') + '</td><td>' + f(t, 'thickness') + '</td>'
+                        + '<td>' + f(x.props && x.props.Ixx, 'inertia') + '</td><td>' + f(x.props && x.props.Sf, 'modulus') + '</td>'
+                        + '<td>' + f(p.Mxxcrl, 'moment') + '</td><td>' + f(p.Mxxcrd, 'moment') + '</td><td>' + f(n.Mxxcrl, 'moment') + '</td><td>' + f(n.Mxxcrd, 'moment') + '</td>'
+                        + '<td>' + f(dk.kphi, 'rotStiff') + '</td></tr>';
+                });
+                summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: t ' + unitLabel('thickness') + ', Ix ' + unitLabel('inertia') + ', Sf ' + unitLabel('modulus')
+                    + ', Mcr ' + unitLabel('moment') + ', kφ ' + unitLabel('rotStiff') + '. 좌굴값은 그 단면의 S-S 서명곡선(설계 Fy · 그 경간의 데크 스프링).</div>';
+            }
         }
 
         // Strength comparison cards for compression/flexure
@@ -6336,6 +6547,8 @@
                 else if (sys === 'SI' && _unitSystem !== 'SI') switchToSI();
             },
             afterRestore: _fireRestoredInputUpdates,
+            // 결정 S1: 단면 목록(경간 표의 선택지가 그것을 쓴다 — 표보다 먼저)
+            renderSections: renderSectionList,
             // V4-10: 복원 전에 모든 칸을 처음 값으로 — 파일에 없는 칸이 이전 프로젝트 값을 지니지 않게.
             initialInputs: _initialInputs,
         }, data);

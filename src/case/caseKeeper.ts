@@ -35,7 +35,14 @@ function writerOf(origin: unknown): { writer: Source; keepSource: boolean } {
 const DSJ = require('../../webview/js/designState');
 const SHOWN_DIGITS: number = DSJ.SHOWN_DIGITS;
 const SHOWN_DIGITS_LIST: number = DSJ.SHOWN_DIGITS_LIST;
-const SPAN_KEY_LIST = ['spans', 'supports', 'lapsPerSupport'];
+// 결정 S1: 경간 표의 넷째 칸(경간의 단면)도 표의 키. 단면 목록(sections)은 표 밖의 한 키
+const SPAN_KEY_LIST = ['spans', 'supports', 'lapsPerSupport', 'spanSections'];
+/** 상태에서 키 k 의 지금 값(입력 · 경간 표 · 단면 목록) */
+function curOf(st: CaseState, k: string): unknown {
+    if (SPAN_KEY_LIST.includes(k)) { return (st.spans as any)[k]; }
+    if (k === 'sections') { return st.sections; }
+    return st.inputs[k];
+}
 function sameShown(a: unknown, b: unknown, unit: string | null, systems: string[], digits: number): boolean {
     return DSJ.shownSame(a, b, { unit, systems, digits });
 }
@@ -139,7 +146,10 @@ export class CaseKeeper {
         const before = JSON.parse(JSON.stringify(base)) as CaseState;
         let st = applyChanges(base, w.merge, 'ai').state;
         if (Object.keys(w.group).length) { st = replaceGroup(st, Object.keys(w.group), w.group, 'ai').state; }
+        // 결정 S1: 단면 목록 · 경간의 단면 — 묶음째로(받은 것이 새 값). 단면 목록이 먼저(경간 표 · 경간의 단면이 그 id 를 쓴다)
+        if (w.sections !== undefined) { st = applyChanges(st, { sections: w.sections }, 'ai').state; }
         if (w.spans && Object.keys(w.spans).length) { st = applyChanges(st, { ...w.spans }, 'ai').state; }
+        if (w.spanSections !== undefined) { st = applyChanges(st, { spanSections: w.spanSections }, 'ai').state; }
         st.mcpOnly = { ...st.mcpOnly, [w.tool]: JSON.parse(JSON.stringify(w.mcpOnly)) };
         const written: string[] = [];
         const replaced: { key: string; previous: any; previous_source: Source }[] = [];
@@ -151,10 +161,10 @@ export class CaseKeeper {
                 replaced.push({ key: k, previous: before.inputs[k], previous_source: before.sources[k] });
             }
         }
-        for (const k of ['spans', 'supports', 'lapsPerSupport'] as const) {
-            if (JSON.stringify((st.spans as any)[k]) === JSON.stringify((before.spans as any)[k])) { continue; }
+        for (const k of [...SPAN_KEY_LIST, 'sections']) {
+            if (JSON.stringify(curOf(st, k)) === JSON.stringify(curOf(before, k))) { continue; }
             written.push(k);
-            if (person.includes(before.sources[k])) { replaced.push({ key: k, previous: (before.spans as any)[k], previous_source: before.sources[k] }); }
+            if (person.includes(before.sources[k])) { replaced.push({ key: k, previous: curOf(before, k), previous_source: before.sources[k] }); }
         }
         if (written.length && st.rev === before.rev) { st.rev = before.rev + 1; }
         return { state: st, written, replaced };
@@ -207,6 +217,8 @@ export class CaseKeeper {
      */
     private shownSameAsState(k: string, raw: Record<string, unknown>, origin: unknown): boolean {
         const c = this.shownCtx(k, raw, origin);
+        // 결정 S1: 단면 목록은 치수마다 그 단위로(designState.sectionsShownSame)
+        if (c !== null && k === 'sections') { return DSJ.sectionsShownSame(c.cur, raw[k], { systems: c.systems, digits: c.digits }); }
         return c !== null && sameShown(c.cur, raw[k], c.unit, c.systems, c.digits);
     }
     /** 키 k 를 견줄 것 — 지금 값 · 단위 · 단위계 · 자리(unitSystem · 보기 설정은 null — 견주지 않는다) */
@@ -217,8 +229,8 @@ export class CaseKeeper {
         if (m && m.owner === 'view') { return null; }
         const key = m && m.owner === 'mirror' ? m.mirrorOf : k;
         const isSpan = SPAN_KEY_LIST.includes(key);
-        const cur = isSpan ? (this.state.spans as any)[key] : this.state.inputs[key];
-        const unit: string | null = isSpan ? (key === 'supports' ? null : 'length_ft') : (m && m.unit) || null;
+        const cur = curOf(this.state, key);
+        const unit: string | null = isSpan ? (key === 'supports' || key === 'spanSections' ? null : 'length_ft') : (m && m.unit) || null;
         const sys = raw.unitSystem === 'US' || raw.unitSystem === 'SI' ? String(raw.unitSystem) : this.state.view.unitSystem;
         const systems = origin === 'unit-toggle' ? ['SI', 'US'] : [sys];
         const digits = m && m.kind === 'list' && ECHO_ORIGINS.has(String(origin)) ? SHOWN_DIGITS_LIST : SHOWN_DIGITS;
@@ -229,6 +241,23 @@ export class CaseKeeper {
         const c = this.shownCtx(k, raw, origin);
         if (!c) { return v; }
         let changed = false;
+        if (k === 'sections') {
+            // 결정 S1: 단면마다(id 가 같은 것), 치수마다 그 단위로 — 보이는 자리에서 같은 치수는 지금 값
+            if (!Array.isArray(c.cur) || !Array.isArray(v)) { return v; }
+            const units: Record<string, string | null> = DSJ.SECTION_PARAM_UNITS;
+            const out = v.map((s: any) => {
+                const old = (c.cur as any[]).find((x) => x && s && x.id === s.id && x.template === s.template);
+                if (!old || !s || !s.params || !old.params) { return s; }
+                const params: Record<string, unknown> = {};
+                for (const [p, x] of Object.entries(s.params)) {
+                    const o = old.params[p];
+                    if (typeof o === 'number' && typeof x === 'number' && o !== x && sameShown(o, x, units[p] ?? null, c.systems, c.digits)) { params[p] = o; changed = true; }
+                    else { params[p] = x; }
+                }
+                return { ...s, params };
+            });
+            return changed ? out : v;
+        }
         const merge = (cur: unknown, x: unknown): unknown => {
             if (typeof cur === 'number' && typeof x === 'number') {
                 if (cur !== x && sameShown(cur, x, c.unit, c.systems, c.digits)) { changed = true; return cur; }
@@ -301,10 +330,7 @@ export class CaseKeeper {
         if (d.origin === 'user' || d.origin === 'unit-toggle') { this.reloadWindow = false; }
         {
             const raw0: Record<string, unknown> = d.changes && typeof d.changes === 'object' ? d.changes : {};
-            const differs = (k: string) => {
-                const cur = (['spans', 'supports', 'lapsPerSupport'] as string[]).includes(k) ? (this.state.spans as any)[k] : this.state.inputs[k];
-                return JSON.stringify(cur) !== JSON.stringify(raw0[k]);
-            };
+            const differs = (k: string) => JSON.stringify(curOf(this.state, k)) !== JSON.stringify(raw0[k]);
             if (d.origin === 'load-analysis' && !this.fillPending) {
                 const keys = Object.keys(raw0).filter(differs);
                 return { state: this.state, accepted: [], conflicts: keys,
@@ -320,10 +346,7 @@ export class CaseKeeper {
         // 새로 연 파일의 값을 덮지 않는다(파일은 「다른 쓰는 이」 — 설계 §3.2). 호출자가 상태를 다시 보낸다(conflicts).
         if (opts.baseRev !== undefined && opts.baseRev < this.boundaryRev) {
             const raw: Record<string, unknown> = d.changes && typeof d.changes === 'object' ? d.changes : {};
-            const keys = Object.keys(raw).filter((k) => {
-                const cur = (['spans', 'supports', 'lapsPerSupport'] as string[]).includes(k) ? (this.state.spans as any)[k] : this.state.inputs[k];
-                return JSON.stringify(cur) !== JSON.stringify(raw[k]);
-            });
+            const keys = Object.keys(raw).filter((k) => JSON.stringify(curOf(this.state, k)) !== JSON.stringify(raw[k]));
             return { state: this.state, accepted: [], conflicts: keys,
                 rejected: keys.map((key) => ({ key, reason: `made on rev ${opts.baseRev}, before a file was opened at rev ${this.boundaryRev} — not applied`, reason_code: 'host.case.older_than_open' })) };
         }
@@ -390,9 +413,12 @@ export class CaseKeeper {
         for (const k of DS.KEYS.case) {
             if (JSON.stringify(fresh.inputs[k]) !== JSON.stringify(data.inputs[k])) { bad.push(`${k}: table ${JSON.stringify(fresh.inputs[k])} ≠ page ${JSON.stringify(data.inputs[k])}`); }
         }
-        for (const k of ['spans', 'supports', 'lapsPerSupport'] as const) {
+        for (const k of SPAN_KEY_LIST) {
+            // 옛 화면(경간의 단면 칸이 없다)은 그 키를 알리지 않는다
+            if (k === 'spanSections' && !(k in data.inputs)) { continue; }
             if (JSON.stringify((fresh.spans as any)[k]) !== JSON.stringify(data.inputs[k])) { bad.push(`${k}`); }
         }
+        if ('sections' in data.inputs && JSON.stringify(fresh.sections) !== JSON.stringify(data.inputs.sections)) { bad.push('sections'); }
         this.helloMismatch = bad;
         return again;
     }

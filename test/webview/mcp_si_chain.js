@@ -873,7 +873,8 @@ async function main() {
       for (const [tool, names] of Object.entries(sigs)) {
         if (tool.startsWith('_')) { continue; }
         // analyze_loads 의 Fy · Fu 는 호스트가 모델에서 section 을 만들 때만 쓰는 호스트 인자(엔진에 직접 가지 않음)
-        const hostArgs = tool === 'analyze_loads' ? ['Fy', 'Fu'] : [];
+        // 2026-11-28 결정 S1: sections(단면 목록의 치수)는 호스트가 단면마다 엔진의 span_sections(경간마다 단면 — Ixx 포함)로 바꾼다
+        const hostArgs = tool === 'analyze_loads' ? ['Fy', 'Fu', 'sections'] : [];
         for (const k of props(tool)) { assert(names.includes(k) || hostArgs.includes(k), `${tool}.${k} is not a parameter of the engine function`); }
       }
       for (const tool of ['aisi_design_connection', 'design_connection']) {

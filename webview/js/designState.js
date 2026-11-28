@@ -312,6 +312,103 @@
         return m ? parseInt(m[1], 10) : 1;
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2026-11-28 결정 S1 · S2: 경간마다 다른 퍼린 단면. 검토 대상의 「단면 목록」 — S1 은 늘 모델(두 벌로 두지 않는다), S2 … 는 모델과 같은
+    // 템플릿 종류의 치수(US in — 템플릿 칸과 같은 이름 H · B · D · t · r · qlip). 경간 표의 spanSections 가 경간마다 그 단면의 id(처음 값 'S1').
+    // 모든 경간이 S1 이면 엔진 본문 · 파일은 이 기능이 없던 때와 바이트까지 같다(requests.ts · caseState.toCaseRecord).
+    // ─────────────────────────────────────────────────────────────────────────
+    /** 템플릿마다 단면 목록이 적는 치수(그 종류의 템플릿 칸 — app.js 「생성」 이 보내는 것). 원형관(chs)은 단면 목록을 쓰지 않는다 */
+    const SECTION_TEMPLATE_PARAMS = {
+        lippedc: ['H', 'B', 'D', 't', 'r', 'qlip'], lippedz: ['H', 'B', 'D', 't', 'r', 'qlip'], lipped_angle: ['H', 'B', 'D', 't', 'r', 'qlip'],
+        hat: ['H', 'B', 'D', 't', 'r'], track: ['H', 'B', 't', 'r'], rhs: ['H', 'B', 't', 'r'], angle: ['H', 'B', 't', 'r'],
+        isect: ['H', 'B', 't', 'r'], tee: ['H', 'B', 't', 'r'],
+    };
+    /** 치수의 단위 종류(템플릿 칸과 같다 — tpl-H · tpl-t · tpl-r · tpl-qlip)와 화면 이름 */
+    const SECTION_PARAM_UNITS = { H: 'length', B: 'length', D: 'length', t: 'thickness', r: 'radius', qlip: null };
+    const SECTION_PARAM_LABELS = { H: 'H', B: 'B', D: 'D', t: '두께 t', r: '모서리 r', qlip: '립 각도' };
+    const SECTION_ID_RE = /^S([2-9]|[1-9][0-9])$/;
+    const MAX_SECTIONS = 20;
+    /** 다음 단면 id(S2 부터 비어 있는 첫 번호) */
+    function nextSectionId(list) {
+        const used = new Set((Array.isArray(list) ? list : []).map((s) => s && s.id));
+        for (let n = 2; n < 100; n++) { if (!used.has('S' + n)) { return 'S' + n; } }
+        return null;
+    }
+    /** 단면 목록의 id(S1 은 늘 있다 — 모델) */
+    function sectionIds(list) { return ['S1'].concat((Array.isArray(list) ? list : []).map((s) => s && s.id).filter(Boolean)); }
+    /**
+     * 단면 목록 검사(값의 꼴만 — 템플릿이 모델과 맞는지는 본문을 만들 때: requests.ts). 반환: 까닭 목록.
+     * 빈 치수(null)는 받는다(빈 필수 칸처럼 본문을 만들 때 막는다). H · B · t > 0, D · r ≥ 0, 립 각도 0 < q ≤ 180.
+     */
+    function validateSections(list) {
+        const errs = [];
+        if (!Array.isArray(list)) { return ['단면 목록은 배열이어야 한다']; }
+        if (list.length > MAX_SECTIONS) { errs.push(`단면은 ${MAX_SECTIONS} 개까지(S1 밖)`); }
+        const seen = new Set();
+        list.forEach((s, i) => {
+            const at = `단면 목록 [${i}]`;
+            if (!s || typeof s !== 'object' || Array.isArray(s)) { errs.push(`${at}: 객체여야 한다`); return; }
+            if (typeof s.id !== 'string' || !SECTION_ID_RE.test(s.id)) { errs.push(`${at}: id 는 'S2' … 'S99' (받은 값 ${JSON.stringify(s.id)})`); }
+            else if (seen.has(s.id)) { errs.push(`${at}: id ${s.id} 가 겹친다`); }
+            seen.add(s.id);
+            if (s.name !== undefined && s.name !== null && (typeof s.name !== 'string' || s.name.length > 40)) { errs.push(`${at}: 이름은 40 자까지의 글`); }
+            const keys = SECTION_TEMPLATE_PARAMS[s.template];
+            if (!keys) { errs.push(`${at}: 템플릿 ${JSON.stringify(s.template)} 은(는) 단면 목록에 쓸 수 없다(가능: ${Object.keys(SECTION_TEMPLATE_PARAMS).join(', ')})`); return; }
+            const p = s.params;
+            if (!p || typeof p !== 'object' || Array.isArray(p)) { errs.push(`${at}: params 는 치수 객체`); return; }
+            for (const k of Object.keys(p)) {
+                if (!keys.includes(k)) { errs.push(`${at}: ${s.template} 의 치수가 아니다: ${k}`); continue; }
+                const v = p[k];
+                if (v === null) { continue; }
+                if (!(typeof v === 'number' && isFinite(v))) { errs.push(`${s.id || at} ${k}: 수여야 한다`); continue; }
+                if ((k === 'H' || k === 'B' || k === 't') && !(v > 0)) { errs.push(`${s.id || at} ${k}: 0 보다 커야 한다 (받은 값 ${v})`); }
+                if ((k === 'D' || k === 'r') && v < 0) { errs.push(`${s.id || at} ${k}: 0 이상이어야 한다 (받은 값 ${v})`); }
+                if (k === 'qlip' && !(v > 0 && v <= 180)) { errs.push(`${s.id || at} 립 각도: 0 < q ≤ 180 (받은 값 ${v})`); }
+            }
+        });
+        return errs;
+    }
+    /**
+     * 결정 S1 · S2: 하중 해석 · 퍼린 본문의 span_sections(경간마다 id) · sections(쓰는 단면 S2 … 의 id · 이름 · 템플릿 · 치수 — 빈 치수는 빼고).
+     * 화면 본문(app.js collectLoadAnalysisPayload)과 호스트 본문(src/case/requests.ts buildLoadRequest)이 이 한 함수로 만든다.
+     * 모든 경간이 S1 이면 data 없음(본문은 이 기능이 없던 때와 바이트까지 같다). 막는 것: 템플릿 단면이 아닌 모델(templateType 이 목록에 쓸 수
+     * 없는 종류 · 빈 글), 템플릿이 다른 단면, 목록에 없는 id(error), 빈 H · B · t (missing — 「단면 S2 두께 t」).
+     * 반환 { data?: {span_sections, sections}, missing: [{id, param, label}], error? }
+     */
+    function spanSectionsPayload(spanSections, sections, templateType) {
+        const ids = Array.isArray(spanSections) ? spanSections : [];
+        if (!ids.some((x) => x !== 'S1')) { return { missing: [] }; }
+        const tpl = typeof templateType === 'string' && SECTION_TEMPLATE_PARAMS[templateType] ? templateType : null;
+        if (!tpl) {
+            return { missing: [], error: '경간마다 단면을 쓰려면 지금 단면이 템플릿으로 만든 단면이어야 합니다(직접 그린 · 고친 단면 · 원형관은 단면 목록을 쓸 수 없음) — 모든 경간을 S1 로 두거나 템플릿으로 단면을 만드십시오.' };
+        }
+        const list = Array.isArray(sections) ? sections : [];
+        const used = Array.from(new Set(ids.filter((x) => x !== 'S1')));
+        const out = [];
+        const missing = [];
+        for (const id of used) {
+            const d = list.find((x) => x && x.id === id);
+            if (!d) { return { missing: [], error: '경간의 단면 ' + id + ' 이(가) 단면 목록에 없습니다.' }; }
+            if (d.template !== tpl) {
+                return { missing: [], error: '단면 ' + id + ' 의 템플릿(' + d.template + ')이 지금 단면(' + tpl + ')과 다릅니다 — 단면 목록은 같은 템플릿 종류만 쓸 수 있습니다(그 단면을 지우거나 치수를 다시 넣으십시오).' };
+            }
+            const params = {};
+            Object.keys(d.params || {}).forEach((k) => { const v = d.params[k]; if (typeof v === 'number' && isFinite(v)) { params[k] = v; } });
+            ['H', 'B', 't'].forEach((k) => { if (!(k in params)) { missing.push({ id, param: k, label: '단면 ' + id + ' ' + (SECTION_PARAM_LABELS[k] || k) }); } });
+            const o = { id };
+            if (d.name) { o.name = d.name; }
+            o.template = d.template;
+            o.params = params;
+            out.push(o);
+        }
+        if (missing.length) { return { missing }; }
+        return { data: { span_sections: ids.slice(), sections: out }, missing: [] };
+    }
+    /** 모든 경간이 S1 이고 추가 단면이 없나(그때 본문 · 파일은 이 기능이 없던 때와 같다) */
+    function sectionsAreDefault(spanSections, sections) {
+        return (!Array.isArray(spanSections) || spanSections.every((x) => x === 'S1')) && (!Array.isArray(sections) || sections.length === 0);
+    }
+
     /**
      * 경간 표의 처음 값 — 화면 buildSpanTable 과 같은 규칙(경간 5 m, 지점 P(캔틸레버 F · N), 랩 0, 단순 · 캔틸레버는 랩 칸 없음).
      * 값은 collectDesignInputs 의 모양(ft, 없는 칸은 null). 화면은 경간 칸을 그때의 단위로 소수 둘째 자리까지 적으므로
@@ -322,13 +419,14 @@
         const isSimple = spanType === 'simple' || spanType === 'cantilever';
         // 화면: toDisplay(5.0 / 0.3048, 'length_ft').toFixed(2) — SI '5.00' → 5 / 0.3048 ft, US '16.40' → 16.4 ft
         const span = unitSystem === 'US' ? Number((5.0 / UNIT_FACTORS.length_ft).toFixed(2)) : siToUs(Number((5.0).toFixed(2)), 'length_ft');
-        const spans = [], supports = [], lapsPerSupport = [];
+        const spans = [], supports = [], lapsPerSupport = [], spanSections = [];
         for (let i = 0; i <= n; i++) {
-            if (i < n) { spans.push(span); }
+            if (i < n) { spans.push(span); spanSections.push('S1'); }
             supports.push(spanType === 'cantilever' ? (i === 0 ? 'F' : 'N') : 'P');
             lapsPerSupport.push({ left: (i > 0 && !isSimple) ? 0 : null, right: (i < n && !isSimple) ? 0 : null });
         }
-        return { spans, supports, lapsPerSupport };
+        // 결정 S1: 경간의 단면(처음 값 모두 S1 — 모델)
+        return { spans, supports, lapsPerSupport, spanSections };
     }
 
     /**
@@ -339,21 +437,23 @@
         const out = { unitSystem: 'SI', analysisMethod: 'DSM' };
         for (const [key] of FIELDS) { out[key] = defaultValue(key); }
         Object.assign(out, defaultSpanTable(out.spanType, out.nSpans));
+        out.sections = [];
         return out;
     }
 
     /** 화면의 지금 입력(= collectDesignInputs — K2 의 이름). */
     function snapshot(deps) { return collectDesignInputs(deps); }
 
-    const _SPAN_KEYS = ['spans', 'supports', 'lapsPerSupport'];
+    // 결정 S1: spanSections(경간마다 단면 id)는 경간 표의 넷째 칸, sections(단면 목록 S2 …)는 표 밖의 한 키 — 둘 다 하중 해석부터 낡힌다
+    const _SPAN_KEYS = ['spans', 'supports', 'lapsPerSupport', 'spanSections'];
     /**
-     * 두 입력 묶음의 다른 키 → { key: 새 값 }. 표의 키 · 경간 표 셋 · unitSystem 을 본다(analysisMethod 는 늘 'DSM').
+     * 두 입력 묶음의 다른 키 → { key: 새 값 }. 표의 키 · 경간 표 넷 · 단면 목록 · unitSystem 을 본다(analysisMethod 는 늘 'DSM').
      * 값은 JSON 으로 비교한다(배열 · 랩 객체 포함, NaN 은 null 로 본다 — 화면의 목록 칸 규칙).
      */
     function diff(last, now) {
         const a = last || {}, b = now || {};
         const out = {};
-        const keys = FIELDS.map((r) => r[0]).concat(_SPAN_KEYS, ['unitSystem']);
+        const keys = FIELDS.map((r) => r[0]).concat(_SPAN_KEYS, ['sections', 'unitSystem']);
         for (const k of keys) {
             if (!(k in b)) { continue; }
             if (JSON.stringify(a[k] === undefined ? null : a[k]) !== JSON.stringify(b[k] === undefined ? null : b[k])) { out[k] = b[k]; }
@@ -399,8 +499,12 @@
         return `'${key}' 의 종류 ${m.kind} 를 검사할 수 없다`;
     }
 
-    /** 경간 표 검사(경간 수 = spanType · nSpans 로 정해지는 수, 지점 P · R · F · N, 랩 { left, right }). 반환: 까닭 목록 */
-    function validateSpanTable(t, spanType, nSpans) {
+    /**
+     * 경간 표 검사(경간 수 = spanType · nSpans 로 정해지는 수, 지점 P · R · F · N, 랩 { left, right }, 경간의 단면 id). 반환: 까닭 목록.
+     * ids: 쓸 수 있는 단면 id(sectionIds — S1 과 단면 목록). 주지 않으면 id 의 꼴만 본다. spanSections 가 없는 표(옛 파일 · 옛 화면)는
+     * 받는다 — 읽는 쪽(caseState)이 모두 S1 로 채운다.
+     */
+    function validateSpanTable(t, spanType, nSpans, ids) {
         const errs = [];
         const n = spanCount(spanType, nSpans);
         if (!t || !Array.isArray(t.spans) || t.spans.length !== n) { errs.push(`경간 길이는 ${n} 개여야 한다`); }
@@ -410,6 +514,13 @@
         if (!t || !Array.isArray(t.lapsPerSupport) || t.lapsPerSupport.length !== n + 1) { errs.push(`지점별 랩은 ${n + 1} 개여야 한다`); }
         else if (!t.lapsPerSupport.every((l) => l && ['left', 'right'].every((s) => l[s] === null || (typeof l[s] === 'number' && isFinite(l[s]))))) {
             errs.push('지점별 랩은 { left, right } (ft 또는 null)');
+        }
+        if (t && t.spanSections !== undefined) {
+            if (!Array.isArray(t.spanSections) || t.spanSections.length !== n) { errs.push(`경간의 단면은 ${n} 개여야 한다`); }
+            else {
+                const bad = t.spanSections.filter((x) => typeof x !== 'string' || !(x === 'S1' || SECTION_ID_RE.test(x)) || (Array.isArray(ids) && !ids.includes(x)));
+                if (bad.length) { errs.push(`경간의 단면 ${bad.map((x) => JSON.stringify(x)).join(', ')} 은(는) 단면 목록에 없다(가능: ${(Array.isArray(ids) ? ids : ['S1', 'S2', '…']).join(', ')})`); }
+            }
         }
         return errs;
     }
@@ -421,7 +532,7 @@
         let atRun = false;
         for (const k of keys || []) {
             const m = fieldMeta(k);
-            let inv = m ? m.inv : (_SPAN_KEYS.includes(k) ? 'load' : 'none');
+            let inv = m ? m.inv : ((_SPAN_KEYS.includes(k) || k === 'sections') ? 'load' : 'none');
             if (inv === 'analysis-at-run') { atRun = true; inv = 'none'; }
             if (rank[inv] > rank[best]) { best = inv; }
         }
@@ -525,7 +636,38 @@
         data.spans = spanLens;
         data.supports = sups;
         data.lapsPerSupport = laps;
+        // 결정 S1: 경간마다 단면(칸이 없거나 고르지 않았으면 S1 — 모델)과 단면 목록(S2 …)
+        const secEls = document.querySelectorAll('.span-tbl-sec');
+        data.spanSections = spanLens.map((_, i) => { const el = secEls[i]; return el && el.value ? String(el.value) : 'S1'; });
+        data.sections = collectSections(document, fromDisplay);
         return data;
+    }
+
+    /** 화면의 단면 목록(.sec-row — S1 줄은 모델이라 읽지 않는다) → 상태의 꼴 [{id, name, template, params}] (US) */
+    function collectSections(document, fromDisplay) {
+        const out = [];
+        if (!document || typeof document.querySelectorAll !== 'function') { return out; }
+        document.querySelectorAll('.sec-row[data-sec-id]').forEach((row) => {
+            const id = row.getAttribute('data-sec-id');
+            if (!id || id === 'S1') { return; }
+            const template = row.getAttribute('data-template') || '';
+            const params = {};
+            (SECTION_TEMPLATE_PARAMS[template] || []).forEach((k) => {
+                const el = row.querySelector('.sec-p[data-p="' + k + '"]');
+                params[k] = el ? readUs(el, SECTION_PARAM_UNITS[k], fromDisplay) : null;
+            });
+            const nameEl = row.querySelector('.sec-name');
+            const nm = nameEl ? String(nameEl.value == null ? '' : nameEl.value).trim() : '';
+            out.push({ id, name: nm ? nm.slice(0, 40) : null, template, params });
+        });
+        return out;
+    }
+    /** 단면 하나를 상태의 꼴로(키 차례 id · name · template · params, 치수는 그 템플릿의 차례 — 없는 치수는 null) */
+    function normalizeSection(s) {
+        const keys = SECTION_TEMPLATE_PARAMS[s && s.template] || Object.keys((s && s.params) || {});
+        const params = {};
+        keys.forEach((k) => { const v = s && s.params ? s.params[k] : undefined; params[k] = typeof v === 'number' && isFinite(v) ? v : null; });
+        return { id: s ? s.id : null, name: s && typeof s.name === 'string' && s.name.trim() ? s.name.trim().slice(0, 40) : null, template: s ? s.template : null, params };
     }
 
     function _applyValues(deps, data) {
@@ -580,6 +722,9 @@
                 if (lap && 'right' in lap) show(rEl, lap.right);
             });
         }
+        // 결정 S1: 경간의 단면 — 없으면(옛 파일 · 처음 값) 모두 S1
+        const ss = Array.isArray(data.spanSections) ? data.spanSections : null;
+        document.querySelectorAll('.span-tbl-sec').forEach((el, i) => { el.value = ss && typeof ss[i] === 'string' ? ss[i] : 'S1'; });
     }
 
     /**
@@ -626,6 +771,10 @@
             if (fyEl) { updateAnalysisFyDisplay(fyEl.value); }
         }
 
+        // 결정 S1: 단면 목록을 먼저 그린다(경간 표의 단면 고르기 칸이 그 목록을 선택지로 쓴다). 없으면 빈 목록(S1 만)
+        if (typeof deps.renderSections === 'function') {
+            deps.renderSections(Array.isArray(data.sections) ? data.sections : []);
+        }
         if (typeof buildSpanTable === 'function') {
             // buildSpanTable 은 동기 함수다 — 표가 이미 만들어졌으므로 곧바로 채운다(전: 100 ms 타이머).
             buildSpanTable();
@@ -817,10 +966,30 @@
      * 입력 묶음(collectDesignInputs 의 모양 — 표의 키 · 경간 표 · unitSystem) 두 개의 키 가운데 화면이 적는 자리에서 다른 것.
      * 단위는 표(FIELDS)에서, 경간 · 랩 길이는 length_ft, 목록은 6 자리. 빠진 · 남는 키도 다르다.
      */
+    /**
+     * 결정 S1: 단면 목록 두 벌이 화면이 적는 자리에서 같은가 — 치수마다 그 단위(SECTION_PARAM_UNITS)로, id · 이름 · 템플릿은 글자까지.
+     * 차례 · 개수가 다르면 다르다. opts 는 shownSame 의 것(unit 은 쓰지 않는다).
+     */
+    function sectionsShownSame(a, b, opts) {
+        const o = opts || {};
+        if (!Array.isArray(a) || !Array.isArray(b)) { return JSON.stringify(a == null ? null : a) === JSON.stringify(b == null ? null : b); }
+        if (a.length !== b.length) { return false; }
+        return a.every((x, i) => {
+            const y = b[i];
+            if (!x || !y || typeof x !== 'object' || typeof y !== 'object') { return JSON.stringify(x) === JSON.stringify(y); }
+            if (x.id !== y.id || (x.name ?? null) !== (y.name ?? null) || x.template !== y.template) { return false; }
+            const px = x.params || {}, py = y.params || {};
+            const ks = Array.from(new Set(Object.keys(px).concat(Object.keys(py))));
+            if (o.strict && Object.keys(px).join('\u0000') !== Object.keys(py).join('\u0000')) { return false; }
+            return ks.every((k) => shownSame(px[k], py[k], Object.assign({}, o, { unit: SECTION_PARAM_UNITS[k] === undefined ? null : SECTION_PARAM_UNITS[k] })));
+        });
+    }
     function shownDiffKeys(a, b) {
         const ks = Array.from(new Set(Object.keys(a || {}).concat(Object.keys(b || {}))));
         return ks.filter((k) => {
             if (!(k in (a || {})) || !(k in (b || {}))) { return true; }
+            if (k === 'sections') { return !sectionsShownSame(a[k], b[k], { strict: true }); }
+            if (k === 'spanSections') { return JSON.stringify(a[k]) !== JSON.stringify(b[k]); }
             const m = fieldMeta(k);
             const unit = _SPAN_KEYS.includes(k) ? (k === 'supports' ? null : 'length_ft') : (m ? m.unit || null : null);
             const digits = m && m.kind === 'list' ? SHOWN_DIGITS_LIST : SHOWN_DIGITS;
@@ -837,6 +1006,20 @@
         shownText,
         shownSame,
         shownDiffKeys,
+        sectionsShownSame,
+        // 2026-11-28 결정 S1 · S2: 경간마다 다른 단면
+        SECTION_TEMPLATE_PARAMS,
+        SECTION_PARAM_UNITS,
+        SECTION_PARAM_LABELS,
+        SECTION_ID_RE,
+        MAX_SECTIONS,
+        nextSectionId,
+        sectionIds,
+        validateSections,
+        sectionsAreDefault,
+        spanSectionsPayload,
+        normalizeSection,
+        collectSections,
         invalidatesResults,
         collectDesignInputs,
         restoreDesignInputs,

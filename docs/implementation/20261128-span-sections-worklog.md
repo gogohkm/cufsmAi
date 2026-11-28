@@ -38,17 +38,60 @@
 
 | 단계 | 내용 | 닿는 곳 | 상태 |
 |---|---|---|---|
-| E | 엔진 — 하중 해석의 경간별 단면(데크 강성 · §I6.2.1 · 양압 R · Ix), 구간 기록에 경간, 랩 접합의 두 부재 | `python/**` | 진행 중 |
-| H | 호스트 — 검토 상태의 단면 목록 · 경간의 단면, 편집 화면의 칸, 퍼린 사슬(단면마다 성질 · 좌굴값, 구간마다 그 단면, 랩의 몫), MCP 인자, 읽는 곳, 파일 · 기록, 고정값 | `src/**`, `webview/**`, `test/**` | E 뒤 |
-| D | 데스크톱 — 단면 목록 · 경간의 단면 보기, 구간의 단면 표시, 단면을 골라 보는 좌굴값 · 곡선, 시험 | `desktop/**` | H 뒤 |
-| V | 독립 검증 — 구간과 단면의 짝, 랩의 몫, 경간별 데크 강성 · R, 매뉴얼 예제 | 읽기만 | H 뒤 |
+| E | 엔진 — 하중 해석의 경간별 단면(데크 강성 · §I6.2.1 · 양압 R · Ix), 구간 기록에 경간, 랩 접합의 두 부재 | `python/**` | 끝(`11e0fb2`) |
+| H | 호스트 — 검토 상태의 단면 목록 · 경간의 단면, 편집 화면의 칸, 퍼린 사슬(단면마다 성질 · 좌굴값, 구간마다 그 단면, 랩의 몫), MCP 인자, 읽는 곳, 파일 · 기록, 고정값 | `src/**`, `webview/**`, `test/**` | 끝 |
+| D | 데스크톱 — 단면 목록 · 경간의 단면 보기, 구간의 단면 표시, 단면을 골라 보는 좌굴값 · 곡선, 시험 | `desktop/**` | 진행 중 |
+| V | 독립 검증 — 구간과 단면의 짝, 랩의 몫, 경간별 데크 강성 · R, 매뉴얼 예제 | 읽기만 | 진행 중 |
 | M | 마일스톤 — 닿는 시험 전부 한 번(`test:rendered` 포함), 설치 파일 · 포장본 | — | |
 
 ---
 
 ## 4. 단계별 기록
 
-(단계가 끝나면 적는다)
+### E — 엔진(끝, 커밋 `11e0fb2`)
+
+**하중 해석의 `span_sections`.** 경간마다 단면 하나(지금의 `section` 과 같은 꼴 + `id`). 없으면 결과는 바이트까지 그대로, 모든 경간이 같은 단면이면 한 단면의 결과와 같다(시험). Ix 는 그 단면에서 — `I_span_in4` 를 따로 주면 그 값을 쓰고 1 % 넘게 다른 경간마다 경고. 데크 강성(`deck_by_span`) · §I6.2.1 의 조건과 양압 R(`i621_by_span` · `uplift_R_by_span`)은 경간마다. 단부 지점의 웹 크리플링 경우는 그 지점의 깊은 쪽 부재로. E 는 첫 단면의 것(재료는 모든 경간이 같다고 본다).
+
+**구간의 경간.** `span_sections` 를 준 때만 구간 기록에 `span`(그 구간의 최대 모멘트가 있는 경간) · `spans` · `crosses_support` 가 붙는다(없으면 「모든 경간이 S1」). 랩 구간에는 두 부재(`lap_members` — 단면 · Ix · 춤 · 두께 · 몫 · 이어지는 쪽 / 끝나는 쪽), `share_by_stiffness`(반올림 전 I_i/(I_1 + I_2)), `depth_mismatch` · `lap_evaluable`. `span_map`(경간 · 랩의 자리와 단면). 양압의 상부 압축 구간을 호스트가 자르던 그대로 자른 `uplift_bracing.positive_pieces`.
+
+**랩 접합 · 랩 길이의 둘째 부재**(`t_2` · `d_2` · `Se_2` · `Sf_2` · `Mnd_2` · `Vn_2` · `h_web_2` · `Ixx_2`). 패스너는 두 판의 차례를 둘 다 보고 작은 Pns, 우력의 팔은 d − t 가운데 작은 것, 블록전단은 얇은 판, 랩의 휨은 강성비의 몫으로 부재마다(Mn,lap = min(Mnℓ,i / s_i) — 강도의 합은 `flexure_reference_sum_of_strengths` 로 참고), H2 는 부재마다. 춤이 다르면 모든 검토가 「평가하지 못함」. 둘째 부재의 값이 없으면 지금과 같다.
+
+**설계 매뉴얼이 겹친 부재에 대해 말하는 것**(에이전트가 II-1A · II-1C · II-2A 를 열어 봄): (a) 겹친 부분은 완전 연속으로 이어졌다 (b) 전단 · 모멘트 그림은 단면이 변하는 연속 부재의 것이고 겹친 부분의 Ix 는 두 부재 Ix 의 합 (c) **겹친 부분의 강도는 두 부재 강도의 합.** 두 예제 모두 경간마다 부재가 다르다(II-1A: 단부 9CS2.5x070 · 내부 x059, Ix 12.2 / 10.3. II-2A: 8ZS2.25x070 · x059, Ix 9.18 / 7.76). 첫 내부 지점의 랩에서 매뉴얼은 다른 두 부재의 강도를 그대로 더한다 — II-1A: φMnℓ = 0.90·(11.3 + 8.66) = 18.0 kip-ft(Mu 12.0), φVn = 0.95·(5.76 + 3.44) = 8.74 kips. **결정 S3 는 이와 다르다**(강성비로 나눠 부재마다 — 같은 랩에서 얇은 쪽 0.705, 강도의 합으로는 0.667): 사용자가 고른 안전측의 규칙이고, 강도의 합은 참고로 같이 낸다. 데크 강성도 매뉴얼(II-1C)은 얇은 쪽 하나로 한 번 계산하고 「안전측의 근사」 라고 한다 — 결정 S7 은 경간마다(두꺼운 단부 경간의 kφ 0.1417 대 0.1126 kip-in/rad/in).
+
+**맞대 본 값**(매뉴얼 → 엔진, kip-ft · kips). II-1A(1.2D + 1.6Lr): 단부 경간 +M 7.36 → 7.355, 첫 내부 지점 12.0 → 12.033, 내부 경간 +M 3.16 → 3.171, 가운데 지점 7.16 → 7.165, 반력 1.54 · 4.74 · 3.66 → 1.544 · 4.726 · 3.661, 양압(0.9D + 1.0W) −5.93 → −5.925 · −2.56 → −2.554(R 0.60). II-2A(D + Lr, 1 ft 내민 끝): +M 5.11 → 5.106, 첫 내부 지점 8.75 → 8.751, 가운데 지점 4.95 → 4.950, 반력 1.21 · 3.37 · 2.58 → 1.205 · 3.375 · 2.571, 양압 −4.13 → −4.129(R 0.70). 랩 접합(0.070 / 0.059 판, 지압이 지배하게): Pns 0.918 kip(두꺼운 판이 머리 쪽) 대 1.004(반대) · 1.187(0.070 둘). 랩의 휨: 강성비로 227.1 kip-in(둘째 부재가 지배), 강도의 합으로 239.8.
+
+**시험.** 파이썬 전체 598 통과(오케스트레이터가 직접 — 새 12, `test_review_1128_span_sections.py` · 앞 커밋의 결과를 담은 기준 10 사례). 고친 기대값 없음.
+
+### H — 호스트(끝)
+
+**상태.** `CaseState.sections` 에 S2 부터(`{id, name, template, params {H, B, D, t, r, qlip}}`, US 인치). S1 은 저장하지 않는다 — 언제나 모델이다. 경간의 단면은 경간 표의 넷째 키 `spans.spanSections`(처음 값은 모두 `'S1'`). 출처 · 판은 `spanSections` · `sections` 로 따로. 함께 쓰는 규칙은 `designState.js`(`validateSections` · `validateSpanTable(…, ids)` · `spanSectionsPayload` · `collectSections` · `sectionsShownSame`). 두 키가 바뀌면 하중 해석부터 아래가 무효.
+
+**파일.** `case.spans.spanSections` · `case.sections` 는 처음 값이 아닐 때만 적는다 — 처음 값의 파일 · `caseFp` · 결과 봉인은 앞과 바이트까지 같고, 옛 파일은 모든 경간이 S1 로 열린다.
+
+**편집 화면.** 경간 표에 경간마다 고르는 칸(`.span-tbl-sec`), 그 아래 「단면 목록」(`#sec-list-block` · `#btn-sec-add` · 행 `.sec-row[data-sec-id]` 에 치수 칸 `.sec-p[data-p]` · 이름 · 지우기 · 계산된 Ix).
+
+**정한 규칙.**
+- 지운 단면을 쓰던 경간은 S1 로(변경 묶음에 보인다). 경간 수 · 경간 종류가 바뀌면 모든 경간이 S1(단면 목록은 남는다).
+- 템플릿 종류가 바뀌었거나 저장된 단면이 모델과 맞지 않으면 그 단면은 남기되 막는다 — 행을 표시하고, 실행하면 그 단면을 이름으로 든 오류. 말없이 버리지 않는다.
+- 직접 그린 · 고친 · 원형관 모델이면 추가 단추가 까닭과 함께 꺼지고, `set_case_inputs` 는 `sections` 를 거절한다(`host.case.sections_need_template`).
+- 랩 없이 단면이 바뀌는 지점을 넘는 구간은 닿는 단면마다 그 구간의 소요 강도 전부로 검토 — 불합격이 이기고, 그다음 평가하지 못함(`host.purlin.section_change_rule`).
+- 랩 접합 도구가 보는 랩은 `connLapSupport`. 비었고 마지막 퍼린 결과에 경간별 단면이 있으면 그 결과의 지배 랩을 쓰고 결과에 그렇게 적는다.
+
+**사슬.** 쓰이는 단면마다 모델의 사본 + `generate_section` 으로 모델을 만들어 성질 · 형상(절점 / 요소로 기억). 서명곡선은 (단면 모델의 서명, 하중, Fy, 스프링)으로 기억 — 부모멘트는 단면마다 하나, 정모멘트는 (단면, 그 경간의 데크 강성)마다 하나. 하중 해석에 `span_sections`(S1 은 본문의 `section`, 나머지도 같은 함수 `loadSectionFromParams` 로 — S1 과 치수가 같은 S2 는 같은 엔진 단면). `I_span_in4` 는 사람이 넣은 때만. 양압의 R 은 그 구간의 `uplift_R`, 조각은 `positive_pieces`. 경간이 없는 구간, 부재나 몫이 없는 랩, 춤이 다른 랩은 「평가하지 못함」 — 합격이 아니다.
+
+**랩.** 부재마다 `share_i·M` · `share_i·V` 를 그 부재의 단면으로 검토, 지배 부재가 구간의 판정과 판정비. II-1A 의 둘째 지점 왼쪽 랩: 몫 0.5418(S1, x070) · 0.4582(S2, x059), 부재의 판정비 0.7426 · 0.8607 → S2 가 지배. 강도의 합(매뉴얼의 가정 (c), 참고): 144.42 / (111.81 + 84.23) = 0.7367. 두 부재가 같으면 몫이 정확히 0.5 이고 모든 구간의 판정비 · 판정 · 강도가 한 단면의 실행과 같다(시험).
+
+**결과의 새 키**(경간별 단면을 쓴 때만). 맨 위 `span_sections` · `span_map` · `sections[]`(`{id, name, template, params, source, spans, props, geometry, dsm_pos, dsm_neg, dsm_pos_by_deck?, deck[], curves{pos, neg, pos_by_deck?}}`). 구간에 `section_id` 와 엔진의 경간 키, 랩 구간에 `lap_members[]`(단면 · 경간 · 역할 · 몫 · 판정 · 판정비 · 지배 검토 · Mu · Vu · 설계 강도) · `governing_member` · `share_basis` · `reference_sum_of_strengths`, 넘는 구간에 `sections_checked[]` · `section_rule`, 평가하지 못한 구간에 `not_evaluated_reason`.
+
+**MCP.** `design_purlin` · `analyze_loads` 에 `sections: [{id?, name?, H, B, D, t, r, qlip}]`(부른 쪽의 단위) · `span_sections: ['S1','S2',…]`. `sections` 는 통째로, `span_sections` 도 통째로 — 경간 표를 주면서 `span_sections` 를 안 주면 모든 경간이 S1(`I_span_in4` 와 같은 묶음 규칙). `set_case_inputs` 는 `spans.spanSections` 와 `sections` 전체를, `get_case_inputs` 는 둘 다(SI 면 mm). 요약 답의 구간 줄에 `section_id` · 간추린 `lap_members` / `sections_checked` · `governing_member` · `reference_sum_of_strengths_ratio`, `sections[]` 는 곡선 · 형상 없이. 크기(32 구간의 II-1A, SI): `run_case_check` 요약 39,384 B(예산 40 KB — 한 단면일 때 37,547 B), `get_case_inputs` 12,070 B(12 KB). **여유가 얇다 — 검증에서 본다.**
+
+**알림.** `host.purlin.sections_per_span` · `lap_two_members_stiffness` · `lap_stiffness_share` · `section_change_rule` · `region_not_evaluated` · `i621_r_some_spans` · `sum_of_strengths_reference` · `host.lap.two_sections` · `host.lap.governing_support`. 검증 항목 `val.load_analysis.span_sections` · `deck_section.N` · `dsm_section.N` · `uplift_r_span` · `lap_members`.
+
+**고정값 · 시험.** k2 는 `defaults.json` 만(새 칸과 처음 입력의 `spanSections` / `sections` — 까닭을 적어 뒤집음), k3 는 바뀐 것 없음. 목록 문서(k2 · k3) 다시 만듦. 고친 시험: `design_prepare_contract`(부모멘트 면을 글이 아니라 값으로) · `k2_case_state` · `mcp_si_chain` · 두 `inventory.js`. 새 시험: `test/webview/span_sections_contract.js`(`test:webview` 에) · `test/rendered/span_sections.js`(`test:rendered` 에). 에이전트의 마지막 실행: `test:quick` · `test:webview` 의 모든 스크립트 · 기록 155 · `test:rendered` 15 + 11 + 3 · `test:k2` 21/21 · `test:k3` 불일치 0. 오케스트레이터가 다시 본 것: `test:quick` · 새 계약 시험 · 제어 문자 / CRLF 없음.
+
+**하지 않은 것.** 랩 도구에 `Mnd_2` · `h_web_2` 는 보내지 않는다(첫째 부재의 것도 지금 보내지 않는다). 서명곡선의 기억은 메모리뿐(파일을 열면 단면마다 다시 푼다). `get_full_state` 와 보기 계약에 단면 목록이 없다. 좁은 왼쪽 단에서 단면 목록 표가 옆으로 밀린다. `I_span_in4` 를 사람이 넣으면 랩의 몫은 넣은 값에서(엔진을 따른다).
+
+(뒤 단계는 끝나면 적는다)
 
 ---
 

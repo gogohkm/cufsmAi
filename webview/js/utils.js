@@ -354,7 +354,88 @@
             uplift_R: data.uplift_R,
             deck: data.deck || null,
             span_type: data.span_type || '',
+            // 2026-11-28 결정 S1: 경간마다 단면이면 단면마다의 블록 · 경간 → 단면(없으면 키가 없다 — 지금까지의 꼴)
+            ...(Array.isArray(data.sections) ? { purlin_sections: data.sections, purlin_span_sections: Array.isArray(data.span_sections) ? data.span_sections : null } : {}),
         };
+    }
+
+    /**
+     * 2026-11-28 결정 S1: 경간마다 단면인 퍼린 결과에서 랩 지점을 정하지 않았을 때의 지배 랩(불합격 → 큰 이용률, 판정 없음은 뒤) — 1 부터의 지점 번호.
+     * 경간마다 단면이 아닌 결과 · 랩 구간이 없으면 null(지금까지처럼 지점을 정해야 한다).
+     */
+    function governingLapSupport(purlin) {
+        if (!purlin || !Array.isArray(purlin.regions) || !Array.isArray(purlin.span_sections)) { return null; }
+        const laps = purlin.regions.filter((g) => g && g.kind === 'lap' && Number.isInteger(Number(g.support)) && g.result);
+        if (!laps.length) { return null; }
+        const u = (g) => (typeof g.result.utilization === 'number' && isFinite(g.result.utilization) ? g.result.utilization : -1);
+        const fail = laps.filter((g) => g.result.pass === false);
+        const pool = (fail.length ? fail : laps).slice().sort((a, b) => u(b) - u(a));
+        return Number(pool[0].support) + 1;
+    }
+
+    /**
+     * 2026-11-28 결정 S1 · S5: 랩 접합 도구의 두 부재 — 경간마다 단면인 퍼린 결과의 그 지점 랩 구간(lap_members)에서. 화면 본문(app.js 랩 단추)과
+     * 호스트 본문(src/case/requests.ts buildLapRequest)이 이 한 함수를 쓴다. 경간마다 단면이 아니면 null(지금까지의 본문 그대로).
+     * 부재 1 = 왼쪽 경간의 부재, 부재 2 = 오른쪽. 부재마다 d · t(그 단면의 템플릿 치수 — hat 은 B 가 깊이), Se · Vn(그 부재 결과의 lap_section —
+     * 랩 구속을 밝혔을 때만), Sf(그 단면의 Sx), Ixx(하중 해석이 몫에 쓴 Ix). allS1 = 두 부재가 모두 모델(S1) — 그때 본문은 지금까지와 같다.
+     * @returns {{support: number, defaulted: boolean, allS1: boolean, same: boolean, depth_mismatch: boolean, members: any[], regions: string[]}|null}
+     */
+    function lapTwoMembers(purlin, support, opts) {
+        if (!purlin || !Array.isArray(purlin.regions) || !Array.isArray(purlin.span_sections) || !Array.isArray(purlin.sections)) { return null; }
+        let sup = Number.isInteger(support) && support >= 1 ? support : null;
+        let defaulted = false;
+        if (sup === null) { sup = governingLapSupport(purlin); defaulted = sup !== null; }
+        if (sup === null) { return null; }
+        const regs = purlin.regions.filter((g) => g && g.kind === 'lap' && Number(g.support) === sup - 1);
+        const withMembers = regs.filter((g) => Array.isArray(g.lap_members) && g.lap_members.length === 2);
+        if (!withMembers.length) { return null; }
+        const stated = !!(opts && opts.stated);
+        const secOf = (id) => purlin.sections.find((x) => x && x.id === id) || null;
+        const members = [0, 1].map((i) => {
+            const m0 = withMembers[0].lap_members[i];
+            const sec = secOf(m0.section_id);
+            const p = (sec && sec.params) || {};
+            const hat = sec && sec.template === 'hat';
+            const num = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+            // Se · Vn: 그 지점의 랩 구간(왼쪽 · 오른쪽)마다의 그 부재 — 작은 쪽(지금까지의 규칙과 같다). 진술이 없으면 짓지 않는다
+            let Se = null, Vn = null;
+            if (stated) {
+                for (const g of withMembers) {
+                    const ls = g.lap_members[i] && g.lap_members[i].lap_section;
+                    if (!ls || ls.available === false) { Se = null; Vn = null; break; }
+                    const se = ls.Se && Number(ls.Se.value), vn = ls.Vn && Number(ls.Vn.value);
+                    if (se > 0 && (Se === null || se < Se)) { Se = se; }
+                    if (vn > 0 && (Vn === null || vn < Vn)) { Vn = vn; }
+                }
+            }
+            return { section_id: m0.section_id, span: m0.span, d: num(hat ? p.B : p.H), t: num(p.t), Se, Vn,
+                Sf: sec && sec.props && num(sec.props.Sf !== undefined ? sec.props.Sf : sec.props.Sx), Ixx: num(m0.Ixx) };
+        });
+        const allS1 = members.every((m) => m.section_id === 'S1');
+        const same = members[0].section_id === members[1].section_id;
+        const dm = members[0].d !== null && members[1].d !== null && Math.abs(members[0].d - members[1].d) > 1e-6 * Math.max(members[0].d, members[1].d);
+        return { support: sup, defaulted, allS1, same, depth_mismatch: dm, members, regions: withMembers.map((g) => String(g.id)) };
+    }
+
+    /**
+     * 결정 S1 · S5: 랩 본문에 두 부재를 얹는다(lapTwoMembers 의 답 — null 이거나 두 부재가 모두 S1 이면 본문을 바꾸지 않는다).
+     * 부재 1 의 d · t · Se · Sf · Vn 을 그 단면의 것으로, 두 단면이 다르면 부재 2 의 키(t_2 · d_2 · Se_2 · Sf_2 · Vn_2)와 Ixx · Ixx_2(엔진 lap_connection —
+     * 패스너는 두 방향 가운데 작은 것, 팔은 작은 쪽, 휨은 강성비의 몫, 춤이 다르면 평가하지 않음). 없는 값은 넣지 않는다(엔진이 「평가하지 못함」 으로).
+     */
+    function applyLapTwoMembers(data, two) {
+        if (!data || !two || two.allS1) { return data; }
+        const a = two.members[0], b = two.members[1];
+        const put = (k, v) => { if (typeof v === 'number' && isFinite(v)) { data[k] = v; } else { delete data[k]; } };
+        if (a.d !== null) { data.d = a.d; }
+        if (a.t !== null) { data.t = a.t; }
+        put('Se', a.Se);
+        put('Sf', a.Se !== null ? a.Sf : null);
+        put('Vn', a.Vn);
+        if (!two.same) {
+            put('t_2', b.t); put('d_2', b.d); put('Se_2', b.Se); put('Sf_2', b.Se !== null ? b.Sf : null); put('Vn_2', b.Vn);
+            put('Ixx', a.Ixx); put('Ixx_2', b.Ixx);
+        }
+        return data;
     }
 
     /**
@@ -514,7 +595,7 @@
         fmt, logspace, convexHull,
         verdictOf, combineVerdicts, notEvaluatedList, warningsList, ratioWithVerdict,
         assumptionsList, scopeNotesList, userText, USER_TERMS, checkReason, purlinLists,
-        pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues, lengthBoundFailure,
+        pickGoverningPurlinDesign, deriveLapSection, withUnroundedValues, lengthBoundFailure, governingLapSupport, lapTwoMembers, applyLapTwoMembers,
         boundFailure: lengthBoundFailure, failsWithoutHoles, boundFailureText, FAILS_WITHOUT_HOLES, inputErrorText,
     };
 });

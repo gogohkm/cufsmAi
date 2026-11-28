@@ -58,14 +58,23 @@ import type { CaseState } from '../case/caseState';
 import { currentActor, runAs } from '../mcp/actorScope';
 // K4b: 엔진 알림의 경계(화면 · 검증 · 보고서 · MCP 가 같은 함수로) — webview/js/notices.js
 const NOTICES = require('../../webview/js/notices');
-import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, UNIT_LABEL } from '../mcp/siUnits';
+import { CASE_UNIT_KIND, caseValueToSI, caseValueToUS, caseSectionsToSI, caseSectionsToUS, UNIT_LABEL } from '../mcp/siUnits';
 import {
     buildDesignRequest, buildLoadRequest, buildPurlinRequest, buildLapRequest, buildConnectionRequest, BuiltRequest, modelDrafts, isCalcMode, lapSectionFor,
+    loadSectionFromParams, sectionListTemplate,
 } from '../case/requests';
 
 function isTestMode(): boolean {
     return process.env.STCFSD_TEST_MODE === '1';
 }
+
+/** 2026-11-28 결정 S1 · S2: 경간마다 단면 — 쓰는 단면 하나(S1 = 모델, S2 … = 같은 템플릿의 치수) */
+interface SpanSection {
+    id: string; name: string | null; template: string; params: Record<string, any>; source: 'model' | 'template';
+    model: any; props?: any; cutwp?: any; propWarnings?: string[]; geom?: { section: any; flats: any; warnings: string[] };
+}
+/** 경간의 단면(ids[i] = 경간 i 의 id)과 쓰는 단면들 */
+interface SpanPlan { ids: string[]; list: SpanSection[] }
 
 export class StcfsdPanel implements McpPanelInterface {
     public static readonly viewType = 'stcfsd.designer';
@@ -248,8 +257,10 @@ export class StcfsdPanel implements McpPanelInterface {
             throw new Error('Test hooks are only available when STCFSD_TEST_MODE=1');
         }
         const k = this._caseKeeper;
+        // 결정 S1: 화면의 칸(collectDesignInputs)은 경간의 단면 · 단면 목록을 늘 모은다 — 불변식(상태 = 칸)의 짝도 늘 싣는다
+        // (1.3 모양 · 파일은 쓸 때만 적는다 — toDesignInputs13)
         return JSON.parse(JSON.stringify({ state: k.state, drafts: k.drafts, shadow: k.shadow, helloMismatch: k.helloMismatch,
-            designInputs: toDesignInputs13(k.state, k.drafts || {}) }));
+            designInputs: { ...toDesignInputs13(k.state, k.drafts || {}), spanSections: k.state.spans.spanSections, sections: k.state.sections } }));
     }
 
     /**
@@ -887,6 +898,7 @@ export class StcfsdPanel implements McpPanelInterface {
                     this._postMessage('caseReference', { loadFy: (this._model as any).loadFy, loadFySource: null });
                 }
                 this._postMessage('caseAck', { rev: this._caseKeeper.state.rev, rejected: r.rejected, conflicts: r.conflicts });
+                if (r.accepted.includes('sections')) { this._scheduleSectionInfo(); }
                 if (r.conflicts.length > 0) { this._postCaseState('conflict'); }
                 // 화면이 이 변경을 만든 뒤 AI 가 쓴 것을 담은 caseState 가 그 칸을 덮었을 수 있다 — 합친 상태를 다시 보낸다
                 else if (r.accepted.length > 0 && this._caseKeeper.staleView(message.data?.seenRev, revBefore)) { this._postCaseState('merged'); }
@@ -1977,7 +1989,8 @@ export class StcfsdPanel implements McpPanelInterface {
     /** 하중 분석의 입력 열쇠(엔진 인자 + 모델에서 section 을 만들 때 쓰는 Fy · Fu). 바뀐 키 비교에 쓴다. */
     private _loadRequestKey(options: any): string {
         const o: any = {};
-        for (const k of [...StcfsdPanel.ANALYZE_LOADS_ARGS, 'Fy', 'Fu']) {
+        // 결정 S1: 경간마다 단면(있을 때만 — 없으면 열쇠는 전과 같다)
+        for (const k of [...StcfsdPanel.ANALYZE_LOADS_ARGS, 'Fy', 'Fu', 'span_sections', 'sections']) {
             if (options?.[k] !== undefined) { o[k] = options[k]; }
         }
         return JSON.stringify(o);
@@ -3233,6 +3246,12 @@ export class StcfsdPanel implements McpPanelInterface {
         for (const k of StcfsdPanel.ANALYZE_LOADS_ARGS) {
             if (options?.[k] !== undefined) { params[k] = options[k]; }
         }
+        // 2026-11-28 결정 S1 · S2: 본문의 span_sections(경간마다 id) · sections(치수) → 엔진의 span_sections(경간마다 단면 — Ixx 는 그 단면의 성질).
+        // 퍼린 사슬은 단면을 먼저 풀어 넘긴다(__plan). 모든 경간 S1 · 없음 → 보내지 않는다(본문 · 결과가 이 기능이 없던 때와 같다)
+        delete params.span_sections;
+        const plan: SpanPlan | { error: string } | null = options?.__plan !== undefined ? options.__plan : await this._spanSectionPlan(options, this._model);
+        if (plan && 'error' in plan) { return { error: plan.error }; }
+        if (plan) { params.span_sections = this._engineSpanSections(plan, options); }
         if (!params.section && this._model.node?.length) {
             const geom = this._designSectionGeometry(this._model);
             const s: any = { ...geom.section };
@@ -3261,7 +3280,142 @@ export class StcfsdPanel implements McpPanelInterface {
         if (fromModel && result && typeof result === 'object' && !result.error) {
             result.section_source = 'current model (template dimensions + grosprop Ixx)';
         }
+        // 결정 S1: 하중 해석에 쓴 단면(id · 이름 · 치수 · Ixx — 곡선 · 모델은 싣지 않는다)
+        if (plan && result && typeof result === 'object' && !result.error) {
+            result.span_sections_used = { span_sections: [...plan.ids], sections: plan.list.map((x) => ({ id: x.id, name: x.name, template: x.template,
+                params: { ...x.params }, source: x.source, Ixx: x.props?.Ixx ?? null })) };
+        }
         return result;
+    }
+
+    // ---------------------------------------------------------------- 2026-11-28 결정 S1 – S4: 경간마다 다른 단면
+    /**
+     * 결정 S1: 화면의 단면 목록에 단면마다의 Ix(그 치수로 만든 단면의 성질) — `sectionListInfo {info: {S2: {Ixx, A} | {error}}}`.
+     * 목록이 있을 때만(없으면 아무 계산도 하지 않는다), 잇단 변경은 한 번으로. 모델이 템플릿 단면이 아니면 까닭만
+     */
+    private _sectionInfoTimer: ReturnType<typeof setTimeout> | null = null;
+    private _sectionInfoSeq = 0;
+    private _scheduleSectionInfo(): void {
+        if (this._sectionInfoTimer) { clearTimeout(this._sectionInfoTimer); }
+        this._sectionInfoTimer = setTimeout(() => { this._sectionInfoTimer = null; void this._postSectionInfo(); }, 30);
+    }
+    private async _postSectionInfo(): Promise<void> {
+        const seq = ++this._sectionInfoSeq;
+        const list = JSON.parse(JSON.stringify(this._caseKeeper.state.sections || []));
+        const tpl = this._modelSectionTemplate();
+        const info: Record<string, any> = {};
+        for (const x of list) {
+            if (!tpl) { info[x.id] = { error: 'the current section is not a template section' }; continue; }
+            if (x.template !== tpl) { info[x.id] = { error: `template ${x.template} ≠ model ${tpl}` }; continue; }
+            const params: Record<string, number> = {};
+            for (const [k, v] of Object.entries(x.params || {})) { if (typeof v === 'number' && Number.isFinite(v)) { params[k] = v; } }
+            try {
+                const m = await this._sectionModelFromTemplate(this._cloneModel(this._model as any), tpl, params);
+                if (m?.error) { info[x.id] = { error: String(m.error) }; continue; }
+                const pr = await this._sectionProps(m);
+                info[x.id] = { Ixx: pr.props?.Ixx ?? null, A: pr.props?.A ?? null };
+            } catch (e: any) { info[x.id] = { error: String(e?.message || e) }; }
+        }
+        if (seq !== this._sectionInfoSeq) { return; }
+        this._postMessage('sectionListInfo', { info, template: tpl });
+    }
+    /** 결정 S1 · S2: 모델이 단면 목록을 쓸 수 있는 템플릿 단면이면 그 템플릿 이름(직접 그린 · 고친 단면 · 원형관 → null) */
+    private _modelSectionTemplate(model: any = this._model): string | null {
+        const m = model as any;
+        if (!m || m.sectionEdited || typeof m.sectionTemplate !== 'string') { return null; }
+        return sectionListTemplate(m.sectionTemplate);
+    }
+
+    /** 템플릿 단면 모델(같은 템플릿의 치수) — 모델의 사본에 얹는다(재료 · 스프링 · 구속 · 경계는 모델의 것). 치수마다 한 번 */
+    private _sectionModelMemo = new Map<string, any>();
+    private async _sectionModelFromTemplate(baseModel: any, template: string, params: Record<string, number>): Promise<any> {
+        const key = JSON.stringify({ template, params, prop: baseModel.prop || [], springs: baseModel.springs ?? [], constraints: baseModel.constraints ?? [], loadFy: baseModel.loadFy ?? null });
+        const hit = this._sectionModelMemo.get(key);
+        if (hit) { return this._cloneModel(hit); }
+        let result: any;
+        try { result = await this._pythonBridge.call('generate_section', { section_type: template, params: { ...params } }); }
+        catch (e: any) { return { error: String(e?.message || e) }; }
+        if (!result?.node) { return { error: result?.error || 'generate_section returned no nodes' }; }
+        const m: any = this._cloneModel(baseModel);
+        this._templateOnto(m, template, { ...params }, result);
+        if (this._sectionModelMemo.size > 24) { this._sectionModelMemo.clear(); }
+        this._sectionModelMemo.set(key, this._cloneModel(m));
+        return m;
+    }
+
+    /** 설계용 단면 성질(_designProps) — 절점 · 요소마다 한 번(경간의 단면이 바뀌지 않으면 다시 풀지 않는다) */
+    private _sectionPropsMemo = new Map<string, any>();
+    private async _sectionProps(model: any): Promise<{ props: any; cutwp: any; warnings: string[] }> {
+        const key = JSON.stringify({ node: model.node, elem: model.elem });
+        const hit = this._sectionPropsMemo.get(key);
+        if (hit) { return JSON.parse(JSON.stringify(hit)); }
+        const r = await this._designProps(model.node, model.elem);
+        if (this._sectionPropsMemo.size > 24) { this._sectionPropsMemo.clear(); }
+        this._sectionPropsMemo.set(key, JSON.parse(JSON.stringify(r)));
+        return r;
+    }
+
+    /**
+     * 결정 S1 · S2: 본문의 span_sections(경간마다 id) · sections([{id, name?, template, params}]) → 쓰는 단면마다 모델 · 성질 · 치수.
+     * 없거나 모든 경간이 S1 이면 null(이 기능이 없던 길). 막는 것(오류 — 판정을 내지 않는다): 템플릿 단면이 아닌 모델, 목록에 없는 id, 템플릿이 다른 단면,
+     * 엔진이 만들 수 없는 치수(generate_section 의 오류), 성질(Ixx)을 구하지 못한 단면.
+     */
+    private async _spanSectionPlan(options: any, baseModel: any): Promise<SpanPlan | { error: string } | null> {
+        const ids = options?.span_sections;
+        if (ids === undefined || ids === null) { return null; }
+        if (!Array.isArray(ids) || !ids.every((x: unknown) => typeof x === 'string')) { return { error: 'span_sections must be a list of section ids, one per span (S1 = the current model).' }; }
+        if (ids.every((x: string) => x === 'S1')) { return null; }
+        const tpl = this._modelSectionTemplate(baseModel);
+        if (!tpl) {
+            return { error: 'Per-span sections need a template section: the current section is hand-drawn / edited (or a round tube) — set every span to S1, or make the section with a template (set_section_template).' };
+        }
+        const defs: any[] = Array.isArray(options?.sections) ? options.sections : [];
+        const list: SpanSection[] = [];
+        for (const id of Array.from(new Set(ids as string[]))) {
+            if (id === 'S1') {
+                list.push({ id: 'S1', name: null, template: tpl, params: { ...(baseModel.sectionParams || {}) }, source: 'model', model: baseModel });
+                continue;
+            }
+            const d = defs.find((x) => x && x.id === id);
+            if (!d) { return { error: `span_sections: section ${id} is not in the section list (sections).` }; }
+            if (d.template && d.template !== tpl) {
+                return { error: `Section ${id} is a '${d.template}' section — the current model is '${tpl}'; the section list takes the model's template type only.` };
+            }
+            const params: Record<string, number> = {};
+            for (const [k, v] of Object.entries(d.params || {})) { if (typeof v === 'number' && Number.isFinite(v)) { params[k] = v; } }
+            const model = await this._sectionModelFromTemplate(baseModel, tpl, params);
+            if (model?.error) { return { error: `Section ${id} (${tpl}) cannot be made from its dimensions: ${model.error}` }; }
+            list.push({ id, name: typeof d.name === 'string' && d.name ? d.name : null, template: tpl, params, source: 'template', model });
+        }
+        list.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
+        for (const x of list) {
+            const pr = await this._sectionProps(x.model);
+            x.props = pr.props; x.cutwp = pr.cutwp; x.propWarnings = pr.warnings;
+            x.geom = this._designSectionGeometry(x.model);
+            if (!(Number(pr.props?.Ixx) > 0)) { return { error: `Section ${x.id}: its strong-axis Ixx could not be computed — the per-span stiffness needs it.` }; }
+        }
+        return { ids: [...ids], list };
+    }
+
+    /**
+     * 결정 S1 · S6: 엔진의 span_sections — 경간마다 그 단면(analyze_loads 의 section 과 같은 꼴, requests.ts loadSectionFromParams — S1 은 본문의
+     * section 그대로(같은 치수의 S2 와 같은 단면이 되게 한 함수), Ixx 는 단면의 성질(「경간별 Ix」 를 사람이 넣었으면 엔진이 그 값을 쓰고 다르면 알린다).
+     */
+    private _engineSpanSections(plan: SpanPlan, options: any): any[] {
+        const fy = options?.Fy ?? options?.section?.Fy;
+        const fu = options?.Fu ?? options?.section?.Fu;
+        const byId = new Map<string, any>();
+        for (const x of plan.list) {
+            let d: any;
+            if (x.id === 'S1' && options?.section && typeof options.section === 'object') {
+                d = { ...options.section };
+                if (!(Number(d.Ixx) > 0)) { d.Ixx = x.props.Ixx; }
+            } else {
+                d = loadSectionFromParams(x.template, x.params, fy, fu, x.props.Ixx);
+            }
+            byId.set(x.id, { ...d, id: x.id });
+        }
+        return plan.ids.map((id) => ({ ...byId.get(id) }));
     }
 
     /**
@@ -3446,9 +3600,31 @@ export class StcfsdPanel implements McpPanelInterface {
             reasonN = sn.reason_notice ?? NOTICES.hostNotice('host.lap.no_se');
             src = { Se: null, Vn: typeof request?.Vn === 'number' ? request.Vn : null, from: null, support: sec.support, regions: [], reason: reasonN.text };
         }
+        // 2026-11-28 결정 S1 · S5: 두 단면을 잇는 랩 — 부재마다의 단면 · 강도(퍼린 결과의 그 부재), 지점을 정하지 않았으면 지배 랩
+        const two = sn.two && !sn.two.allS1 ? sn.two : null;
+        if (two) {
+            fromN = NOTICES.hostNotice('host.lap.two_sections', { support: two.support, s1: two.members[0].section_id, s2: two.members[1].section_id });
+            src = { ...src, from: fromN.text, support: two.support, regions: two.regions, reason: null,
+                members: two.members.map((m: any) => ({ section_id: m.section_id, span: m.span, d: m.d, t: m.t, Se: m.Se, Vn: m.Vn, Sf: m.Sf, Ixx: m.Ixx })),
+                same_members: two.same, depth_mismatch: two.depth_mismatch };
+            reasonN = null;
+            delete src.reason_code;
+        }
         if (fromN) { NOTICES.attachField(src, 'from', fromN); }
         if (reasonN) { NOTICES.attachField(src, 'reason', reasonN); }
+        if (sn.support_defaulted && (two || src.Se !== null)) { src.support_defaulted = true; }
         result.section_source = src;
+        if (two) {
+            const n2 = NOTICES.hostNotice('host.lap.two_sections', { support: two.support, s1: two.members[0].section_id, s2: two.members[1].section_id }, 'assumptions');
+            result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), n2.text];
+            result.notices = [...(Array.isArray(result.notices) ? result.notices : []), n2];
+        }
+        if (sn.support_defaulted && (two || src.Se !== null)) {
+            const nd = NOTICES.hostNotice('host.lap.governing_support', { support: two ? two.support : src.support }, 'assumptions');
+            result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), nd.text];
+            result.notices = [...(Array.isArray(result.notices) ? result.notices : []), nd];
+        }
+        if (two) { return; }
         const lineN = src.Se !== null ? NOTICES.hostNotice('host.lap.se_from', { Se: src.Se, from: fromN ?? { code: null, text: String(src.from ?? ''), text_ko: String(src.from ?? '') } }, 'assumptions')
             : NOTICES.hostNotice('host.lap.se_none', { why: reasonN }, 'assumptions');
         result.assumptions = [...(Array.isArray(result.assumptions) ? result.assumptions : []), lineN.text];
@@ -3661,7 +3837,9 @@ export class StcfsdPanel implements McpPanelInterface {
         const model: any = {};
         for (const k of StcfsdPanel.SNAP_MODEL_KEYS) { if (m[k] !== undefined) { model[k] = m[k]; } }
         const st: any = this._caseKeeper.state;
-        const snap = JSON.parse(JSON.stringify({ model, case: { inputs: st.inputs, spans: st.spans, mcpOnly: st.mcpOnly ?? {} } }));
+        // 결정 S1: 단면 목록은 쓸 때만(빈 목록이면 이 기능이 없던 스냅숏과 같다 — 경간의 단면은 기록 쪽이 없으면 모두 S1 로 본다)
+        const snap = JSON.parse(JSON.stringify({ model, case: { inputs: st.inputs, spans: st.spans, mcpOnly: st.mcpOnly ?? {},
+            ...(Array.isArray(st.sections) && st.sections.length ? { sections: st.sections } : {}) } }));
         const ms = Date.now() - t0;
         const c = this._changeCost;
         c.snapshots += 1; c.snapMs += ms; c.snapMax = Math.max(c.snapMax, ms);
@@ -5464,9 +5642,14 @@ export class StcfsdPanel implements McpPanelInterface {
         const warnings: string[] = [];
         const assumptions: string[] = [];
         const notEvaluated: string[] = [];
+        // 2026-11-28 결정 S1 · S2: 경간마다 단면(본문의 span_sections · sections) — 단면마다 모델 · 성질을 먼저(하중 해석이 그 Ixx 를 쓴다).
+        // 없거나 모든 경간이 S1 이면 null — 아래는 이 기능이 없던 길 그대로(본문 · 결과가 바이트까지 같다)
+        const planR = await this._spanSectionPlan(options, baseModel);
+        if (planR && 'error' in planR) { return { error: planR.error }; }
+        const multi: SpanPlan | null = planR;
 
         // 1. 하중 분석
-        const loadResult = await this._analyzeLoads({ ...options, Fy: fy, Fu: fu });
+        const loadResult = await this._analyzeLoads({ ...options, Fy: fy, Fu: fu, __plan: multi });
         if (!loadResult || loadResult.error) {
             return { error: `Load analysis failed: ${loadResult?.error || 'no result'}`, load_analysis: loadResult };
         }
@@ -5476,23 +5659,6 @@ export class StcfsdPanel implements McpPanelInterface {
         const roundedFallbacks = new Set<string>();
         const un = (rec: any, key: string, where: string): number => StcfsdPanel._un(rec, key, roundedFallbacks, where);
 
-        // 2. 서명곡선 DSM (정·부모멘트) — 설계 Fy 로 응력을 만든다
-        const posSprings = this._deckSpringsForFlange(baseModel, deckInfo.kphi || 0, deckInfo.kx || 0, 'top');
-        const pos = await this._signatureDsm(baseModel, 'bending_xx_pos', fy, 'Mxx', { springs: posSprings });
-        const neg = await this._signatureDsm(baseModel, 'bending_xx_neg', fy, 'Mxx', { springs: [] });
-        const dsmPos = pos.dsm;
-        const dsmNeg = neg.dsm;
-        warnings.push(...pos.warnings, ...neg.warnings);
-        for (const note of [pos.classificationNote, neg.classificationNote]) {
-            if (note && !assumptions.includes(note)) { assumptions.push(note); }
-        }
-
-        // 3. 단면 성질 · 치수
-        const { props, cutwp, warnings: propWarnings } = await this._designProps(baseModel.node, baseModel.elem);
-        warnings.push(...propWarnings);
-        const geom = this._designSectionGeometry(baseModel);
-        warnings.push(...geom.warnings);
-        const sectionType = geom.section.type;
         // 계약 §6.3: 사람이 밝힌 랩 구속(design_purlin · 화면 · 파일 — 같은 검토 상태 키)
         const lapStated = options?.lap_restrained === true || options?.distortion_restrained === true;
         const memberOpts: any = {};
@@ -5504,18 +5670,89 @@ export class StcfsdPanel implements McpPanelInterface {
         for (const [k, v] of Object.entries(memberOpts)) {
             if (k.startsWith('wc_')) { wcOpts[k] = v; } else { nonWc[k] = v; }
         }
-        const baseDesign = {
+        /** 단면 하나의 설계 문맥 — 성질 · 치수 · 구간 검토의 바탕 본문 · 좌굴값(부모멘트 하나, 정모멘트는 데크 강성마다) */
+        type PosGroup = { key: string; kphi: number; kx: number; springs: number[][]; dsm: any; sig: any; spans: number[] };
+        type SecCtx = { id: string; name: string | null; template: string | null; params: any; source: 'model' | 'template';
+            model: any; props: any; cutwp: any; geom: any; baseDesign: any; holesGiven: boolean; dsmNeg: any; negSig: any;
+            pos: Map<string, PosGroup>; spans: number[] };
+        const mkBase = (model: any, props: any, geom: any) => ({
             member_type: 'flexure',
             design_method: options?.design_method,
             Fy: fy, Fu: fu,
             props: { ...props, ...geom.flats },
             section: geom.section,
-            section_type: sectionType,
+            section_type: geom.section.type,
             ...nonWc,
             // 결정 T6 · T7: 구멍이 있으면 단면 모델(절점 · 요소 · 요소 자리 · 재료) — 스프링은 구간마다 그 구간의 좌굴값을 푼 것(아래)
-            ...StcfsdPanel._sectionModelFor(nonWc, baseModel, null),
+            ...StcfsdPanel._sectionModelFor(nonWc, model, null),
+        });
+        const ctxs = new Map<string, SecCtx>();
+        let s1Props: any; let s1Cutwp: any;
+        if (!multi) {
+            // 2. 서명곡선 DSM (정·부모멘트) — 설계 Fy 로 응력을 만든다
+            const posSprings = this._deckSpringsForFlange(baseModel, deckInfo.kphi || 0, deckInfo.kx || 0, 'top');
+            const pos = await this._signatureDsm(baseModel, 'bending_xx_pos', fy, 'Mxx', { springs: posSprings });
+            const neg = await this._signatureDsm(baseModel, 'bending_xx_neg', fy, 'Mxx', { springs: [] });
+            warnings.push(...pos.warnings, ...neg.warnings);
+            for (const note of [pos.classificationNote, neg.classificationNote]) {
+                if (note && !assumptions.includes(note)) { assumptions.push(note); }
+            }
+            // 3. 단면 성질 · 치수
+            const { props, cutwp, warnings: propWarnings } = await this._designProps(baseModel.node, baseModel.elem);
+            warnings.push(...propWarnings);
+            const geom = this._designSectionGeometry(baseModel);
+            warnings.push(...geom.warnings);
+            const baseDesign = mkBase(baseModel, props, geom);
+            s1Props = props; s1Cutwp = cutwp;
+            ctxs.set('S1', { id: 'S1', name: null, template: null, params: null, source: 'model', model: baseModel, props, cutwp, geom, baseDesign,
+                holesGiven: 'node' in baseDesign, dsmNeg: neg.dsm, negSig: neg,
+                pos: new Map([['*', { key: '*', kphi: deckInfo.kphi || 0, kx: deckInfo.kx || 0, springs: posSprings, dsm: pos.dsm, sig: pos, spans: [] }]]), spans: [] });
+        } else {
+            // 결정 S1 · S7: 단면마다 — 부모멘트(스프링 없음) 좌굴값 하나, 정모멘트는 그 단면을 쓰는 경간의 데크 강성마다(deck_by_span) 하나.
+            // 단면 · 스프링 · Fy 가 같으면 다시 풀지 않는다(_purlinSignature)
+            const deckBy: any[] = Array.isArray(ap.deck_by_span) ? ap.deck_by_span : [];
+            for (const x of multi.list) {
+                const tag = x.id === 'S1' ? '' : `[${x.id}] `;
+                const spansOf = multi.ids.map((id, i) => (id === x.id ? i : -1)).filter((i) => i >= 0);
+                const pos = new Map<string, PosGroup>();
+                for (const i of spansOf) {
+                    const d = deckBy.find((g) => g && g.span === i) || deckBy[i] || deckInfo;
+                    const kphi = Number(d?.kphi) || 0, kx = Number(d?.kx) || 0;
+                    const key = `${kphi}|${kx}`;
+                    const g = pos.get(key);
+                    if (g) { g.spans.push(i); continue; }
+                    const springs = this._deckSpringsForFlange(x.model, kphi, kx, 'top');
+                    const sig = await this._purlinSignature(x.model, 'bending_xx_pos', fy, springs);
+                    warnings.push(...sig.warnings.map((w: string) => tag + w));
+                    if (sig.classificationNote && !assumptions.includes(sig.classificationNote)) { assumptions.push(sig.classificationNote); }
+                    pos.set(key, { key, kphi, kx, springs, dsm: sig.dsm, sig, spans: [i] });
+                }
+                const neg = await this._purlinSignature(x.model, 'bending_xx_neg', fy, []);
+                warnings.push(...neg.warnings.map((w: string) => tag + w));
+                if (neg.classificationNote && !assumptions.includes(neg.classificationNote)) { assumptions.push(neg.classificationNote); }
+                warnings.push(...(x.propWarnings || []).map((w) => tag + w), ...(x.geom?.warnings || []).map((w) => tag + w));
+                const baseDesign = mkBase(x.model, x.props, x.geom);
+                ctxs.set(x.id, { id: x.id, name: x.name, template: x.template, params: x.params, source: x.source, model: x.model, props: x.props,
+                    cutwp: x.cutwp, geom: x.geom, baseDesign, holesGiven: 'node' in baseDesign, dsmNeg: neg.dsm, negSig: neg, pos, spans: spansOf });
+            }
+            // 맨 위의 props · cutwp 는 지금처럼 모델(S1)의 것
+            const s1 = ctxs.get('S1');
+            if (s1) { s1Props = s1.props; s1Cutwp = s1.cutwp; }
+            else { const pr = await this._sectionProps(baseModel); s1Props = pr.props; s1Cutwp = pr.cutwp; }
+        }
+        const S1 = ctxs.get('S1') as SecCtx;
+        /** 정모멘트(상부 압축) 좌굴값의 묶음 — 단면 · 그 경간의 데크 강성 */
+        const posGroupOf = (sec: SecCtx, span: number | null): PosGroup => {
+            if (!multi) { return sec.pos.get('*') as PosGroup; }
+            for (const g of sec.pos.values()) { if (span !== null && g.spans.includes(span)) { return g; } }
+            return [...sec.pos.values()][0];
         };
-        const holesGiven = 'node' in baseDesign;
+        // 단일 단면 길의 값(지금까지의 이름 — 결과의 dsm_positive · dsm_negative)
+        const firstSec = multi ? (ctxs.get(multi.ids[0]) as SecCtx) : S1;
+        const dsmPos = (multi ? (S1 ?? firstSec) : S1).pos.values().next().value!.dsm;
+        const dsmNeg = (multi ? (S1 ?? firstSec) : S1).dsmNeg;
+        const props = s1Props;
+        const cutwp = s1Cutwp;
 
         const gravity = loadResult.gravity || loadResult.governing || null;
         const uplift = loadResult.uplift || null;
@@ -5529,7 +5766,7 @@ export class StcfsdPanel implements McpPanelInterface {
         const i621Span = st0 === 'simple' ? 'simple' : (st0.startsWith('cont') ? 'continuous' : undefined);
 
         type Region = {
-            id: string; kind: string; label: string; env: any; dsm: any; lap?: boolean;
+            id: string; kind: string; label: string; env: any; neg: boolean; lap?: boolean;
             src: any; R?: number | null; flangeTop: boolean; labelNotice?: any;
         };
         // 호스트가 쓰는 글은 알림(host.* — webview/js/notices.js HOST): 목록의 글 → 그 알림(마지막에 결과의 notices 로)
@@ -5542,7 +5779,7 @@ export class StcfsdPanel implements McpPanelInterface {
         const regions: Region[] = [];
         // V4-26: id 는 목록마다가 아니라 이름(idTag)마다 이어 센다 — 같은 kind 를 여러 목록에서 부를 때 겹치지 않게.
         const idCount = new Map<string, number>();
-        const addRegions = (list: any[], kind: string, env: any, dsm: any, labelFn: (r: any) => any,
+        const addRegions = (list: any[], kind: string, env: any, neg: boolean, labelFn: (r: any) => any,
             extra?: (r: any) => Partial<Region>, idTag: string = kind) => {
             (Array.isArray(list) ? list : []).forEach((r: any) => {
                 if (!(Number(r?.M_max_abs) > 1e-9)) { return; }
@@ -5551,7 +5788,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 const ln = labelFn(r);
                 regions.push({
                     // 이름표는 호스트 알림 — label 은 한국어(US), 옆 필드가 단위 · 말을 바꿔 그린다
-                    id: `${idTag}-${n}`, kind, label: ln.text_ko, labelNotice: ln, env, dsm, src: r,
+                    id: `${idTag}-${n}`, kind, label: ln.text_ko, labelNotice: ln, env, neg, src: r,
                     flangeTop: r?.flange === 'top', ...(extra ? extra(r) : {}),
                 });
             });
@@ -5561,54 +5798,79 @@ export class StcfsdPanel implements McpPanelInterface {
         const supLabel = (r: any) => NOTICES.hostNotice('host.region.support', { n: Number(r.support) + 1,
             side: r.side === 'left' ? NOTICES.hostNotice('host.region.side_left') : r.side === 'right' ? NOTICES.hostNotice('host.region.side_right') : NOTICES.EMPTY_FRAGMENT });
         const L = (code: string, r: any, extra: Record<string, unknown> = {}) => NOTICES.hostNotice(code, { ...xs(r), ...extra });
-        addRegions(unbraced.positive_regions, 'positive', gravity, dsmPos, (r) => L('host.region.positive', r));
-        addRegions(ap.negative_regions, 'negative', gravity, dsmNeg,
+        addRegions(unbraced.positive_regions, 'positive', gravity, false, (r) => L('host.region.positive', r));
+        addRegions(ap.negative_regions, 'negative', gravity, true,
             (r) => L(r.cantilever ? 'host.region.cantilever' : 'host.region.negative', r,
                 { at: r.support != null ? NOTICES.hostNotice('host.region.at_support', { support: supLabel(r) }) : NOTICES.EMPTY_FRAGMENT }));
-        addRegions(ap.lap_regions, 'lap', gravity, dsmNeg,
+        addRegions(ap.lap_regions, 'lap', gravity, true,
             (r) => L('host.region.lap', r, { support: supLabel(r) }), () => ({ lap: true }));
         if (uplift && ub) {
-            addRegions(ub.negative_regions, 'uplift', uplift, dsmNeg,
+            // 결정 S7: 경간마다 단면이면 양력 R 은 그 구간의 경간 단면의 것(엔진 uplift_R — 조건을 만족하는 경간에서만)
+            addRegions(ub.negative_regions, 'uplift', uplift, true,
                 (r) => L('host.region.uplift', r),
-                (r) => ({ R: (r.i621_region_eligible === true && upliftR != null) ? upliftR : null }));
+                (r) => ({ R: multi && 'uplift_R' in r ? (r.i621_region_eligible === true && r.uplift_R != null ? r.uplift_R : null)
+                    : ((r.i621_region_eligible === true && upliftR != null) ? upliftR : null) }));
             // 양력의 지점부(상부 압축, 데크 지지) 구간은 엔진이 랩 끝에서 나누지 않는다 — 중력 해석의 랩 구간으로
             // 잘라 랩 안은 두 부재, 밖은 한 부재로 본다. 각 조각의 M 은 양력 포락선의 그 조각 최대 |M|.
+            // 결정 S1: 경간마다 단면이면 엔진이 같은 규칙으로 자른 조각(uplift_bracing.positive_pieces — 경간 · 랩 부재가 붙은 것)을 쓴다
             const lapZones: Array<[number, number]> = (Array.isArray(ap.lap_regions) ? ap.lap_regions : [])
                 .map((z: any) => [un(z, 'start_ft', 'lap_regions'), un(z, 'end_ft', 'lap_regions')] as [number, number])
                 .filter((z: [number, number]) => Number.isFinite(z[0]) && Number.isFinite(z[1]) && z[1] > z[0])
                 .sort((a: [number, number], b: [number, number]) => a[0] - b[0]);
             const pieces: any[] = [];
-            for (const r of (Array.isArray(ub.unbraced?.positive_regions) ? ub.unbraced.positive_regions : [])) {
-                const a0 = un(r, 'start_ft', 'uplift_bracing.unbraced.positive_regions'), a1 = un(r, 'end_ft', 'uplift_bracing.unbraced.positive_regions');
-                const cuts = [a0, a1];
-                for (const [z0, z1] of lapZones) {
-                    if (z0 > a0 && z0 < a1) { cuts.push(z0); }
-                    if (z1 > a0 && z1 < a1) { cuts.push(z1); }
+            const srcRegions: any[] = Array.isArray(ub.unbraced?.positive_regions) ? ub.unbraced.positive_regions : [];
+            const piece = (r: any, s0: number, s1: number, inLap: boolean, tags: any) => {
+                const mid = (s0 + s1) / 2;
+                const segPts = this._envelopeScan(uplift, s0, s1, '+');
+                const top = segPts.length > 0 ? segPts.reduce((p, q) => (q.M > p.M ? q : p)) : undefined;
+                // 조각의 경계 · M 은 포락선(반올림 없음)에서 — 판정 값(unrounded)도 그 값, Ly · Cb 는 원래 구간의 반올림 전 값
+                pieces.push({ ...r, ...tags, start_ft: s0, end_ft: s1, M_max_abs: top ? top.M : 0,
+                    x_M_max_ft: top ? top.x : mid, __lap: inLap,
+                    Ly_in: inLap ? 0 : r.Ly_in, Cb: inLap ? 1.0 : r.Cb,
+                    unrounded: { ...(r.unrounded || {}), start_ft: s0, end_ft: s1, M_max_abs: top ? top.M : 0, x_M_max_ft: top ? top.x : mid,
+                        Ly_in: inLap ? 0 : un(r, 'Ly_in', 'uplift_bracing.unbraced.positive_regions'),
+                        Cb: inLap ? 1.0 : un(r, 'Cb', 'uplift_bracing.unbraced.positive_regions') } });
+            };
+            if (multi && Array.isArray(ub.positive_pieces)) {
+                for (const pc of ub.positive_pieces) {
+                    const r = srcRegions[Number(pc?.source_index)];
+                    if (!r || !(Number(pc.end_ft) - Number(pc.start_ft) >= 1e-6)) { continue; }
+                    const { source_index: _si, start_ft: _a, end_ft: _b, in_lap: _il, ...tags } = pc;
+                    void _si; void _a; void _b; void _il;
+                    piece(r, Number(pc.start_ft), Number(pc.end_ft), pc.in_lap === true, tags);
                 }
-                const xs = Array.from(new Set(cuts)).sort((p, q) => p - q);
-                for (let k = 0; k + 1 < xs.length; k++) {
-                    const s0 = xs[k], s1 = xs[k + 1];
-                    if (s1 - s0 < 1e-6) { continue; }
-                    const mid = (s0 + s1) / 2;
-                    const inLap = lapZones.some(([z0, z1]) => mid > z0 && mid < z1);
-                    const segPts = this._envelopeScan(uplift, s0, s1, '+');
-                    const top = segPts.length > 0 ? segPts.reduce((p, q) => (q.M > p.M ? q : p)) : undefined;
-                    // 조각의 경계 · M 은 포락선(반올림 없음)에서 — 판정 값(unrounded)도 그 값, Ly · Cb 는 원래 구간의 반올림 전 값
-                    pieces.push({ ...r, start_ft: s0, end_ft: s1, M_max_abs: top ? top.M : 0,
-                        x_M_max_ft: top ? top.x : mid, __lap: inLap,
-                        Ly_in: inLap ? 0 : r.Ly_in, Cb: inLap ? 1.0 : r.Cb,
-                        unrounded: { ...(r.unrounded || {}), start_ft: s0, end_ft: s1, M_max_abs: top ? top.M : 0, x_M_max_ft: top ? top.x : mid,
-                            Ly_in: inLap ? 0 : un(r, 'Ly_in', 'uplift_bracing.unbraced.positive_regions'),
-                            Cb: inLap ? 1.0 : un(r, 'Cb', 'uplift_bracing.unbraced.positive_regions') } });
+            } else {
+                for (const r of srcRegions) {
+                    const a0 = un(r, 'start_ft', 'uplift_bracing.unbraced.positive_regions'), a1 = un(r, 'end_ft', 'uplift_bracing.unbraced.positive_regions');
+                    const cuts = [a0, a1];
+                    for (const [z0, z1] of lapZones) {
+                        if (z0 > a0 && z0 < a1) { cuts.push(z0); }
+                        if (z1 > a0 && z1 < a1) { cuts.push(z1); }
+                    }
+                    const xs = Array.from(new Set(cuts)).sort((p, q) => p - q);
+                    for (let k = 0; k + 1 < xs.length; k++) {
+                        const s0 = xs[k], s1 = xs[k + 1];
+                        if (s1 - s0 < 1e-6) { continue; }
+                        const mid = (s0 + s1) / 2;
+                        const inLap = lapZones.some(([z0, z1]) => mid > z0 && mid < z1);
+                        piece(r, s0, s1, inLap, {});
+                    }
                 }
             }
-            addRegions(pieces.filter((r) => !r.__lap), 'uplift_support', uplift, dsmPos,
+            addRegions(pieces.filter((r) => !r.__lap), 'uplift_support', uplift, false,
                 (r) => L('host.region.uplift_support', r));
-            addRegions(pieces.filter((r) => r.__lap), 'uplift_support', uplift, dsmPos,
+            addRegions(pieces.filter((r) => r.__lap), 'uplift_support', uplift, false,
                 (r) => L('host.region.uplift_support_lap', r), () => ({ lap: true }), 'uplift_support_lap');
-            addRegions(ub.lap_regions, 'uplift_support', uplift, dsmPos,
+            addRegions(ub.lap_regions, 'uplift_support', uplift, false,
                 (r) => L('host.region.uplift_lap', r, { support: supLabel(r) }), () => ({ lap: true }), 'uplift_lap');
-            if (upliftR == null) {
+            const rBy: any[] | null = multi && Array.isArray(ap.uplift_R_by_span) ? ap.uplift_R_by_span : null;
+            const realSpans = multi && Array.isArray(ap.span_map?.spans) && Array.isArray(ap.i621_by_span)
+                ? ap.i621_by_span.filter((b: any) => b && b.real_span !== false).map((b: any) => Number(b.span)) : null;
+            const noR = rBy && realSpans ? realSpans.filter((i: number) => rBy[i] == null) : [];
+            if (rBy && realSpans && noR.length > 0 && noR.length < realSpans.length) {
+                // 결정 S7: 조건을 만족하는 단면의 경간에서만 R — 나머지 경간을 밝힌다(1 부터)
+                warnings.push(H('host.purlin.i621_r_some_spans', { spans: noR.map((i: number) => i + 1).join(', ') }));
+            } else if (upliftR == null && !(rBy && rBy.some((v) => v != null))) {
                 // 까닭은 엔진의 §I6.2.1 이유(그 블록의 알림, 계약 §16.10) — 이은 글로
                 const ic = ap.i621_check;
                 const rs = Array.isArray(ic?.reasons) ? ic.reasons : [];
@@ -5649,7 +5911,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 }
                 const supLoc = locs.find((l) => l?.support === wc.support && l?.R_bearing !== undefined);
                 // 지점 M: 위치 항목의 Mu(끝 지점은 null 일 수 있음 → 포락선), V: 지점 양쪽 전단 중 큰 값(V3 T3).
-                const envAt = this._envelopeAt(gravity, x, host.dsm === dsmNeg ? '-' : '+');
+                const envAt = this._envelopeAt(gravity, x, host.neg ? '-' : '+');
                 const mAt = supLoc && Number.isFinite(supLoc.Mu) ? Math.abs(un(supLoc, 'Mu', 'locations')) * 12
                     : (envAt ? envAt.M * 12 : undefined);
                 // V6b-01: 지점 면의 전단 — 지점이 구간 안이면 큰 면, 구간 끝이면 그 구간 쪽 면(위치 항목의 Vu_left · Vu_right)
@@ -5660,7 +5922,7 @@ export class StcfsdPanel implements McpPanelInterface {
                 // V6-08: 지점 위치 항목의 값이면 그 항목의 조합 · 패턴, 포락선이면 그 판단은 아래(_demandCombination)
                 const fromLoc = !!supLoc && Number.isFinite(supLoc.Mu);
                 // K3-6: 지점의 M · V · 반력 출처 — 위치 항목(combo · combo_V · combo_R)이 있으면 그것, 포락선 값이면 envelope_source
-                const envSrc = StcfsdPanel._pointSources(gravity, envAt?.i, host.dsm === dsmNeg ? '-' : '+');
+                const envSrc = StcfsdPanel._pointSources(gravity, envAt?.i, host.neg ? '-' : '+');
                 const srcM = fromLoc ? StcfsdPanel._comboLabel(supLoc.combo, supLoc.pattern) : envSrc.m;
                 const gridIsFace = !!(faceAt && !faceAt.unrounded && envAt && Math.abs(envAt.V - faceAt.V) <= 5e-4);
                 const srcV = gridIsFace ? envSrc.v : faceAt ? (faceAt.combo ?? `envelope (지점 ${wc.support} ${faceAt.side === 'left' ? '왼쪽' : '오른쪽'} 면 — 하중 해석이 그 면의 조합을 주지 않음)`) : envSrc.v;
@@ -5671,11 +5933,44 @@ export class StcfsdPanel implements McpPanelInterface {
             }
         }
 
+        /**
+         * 결정 S1 · S3 · S4: 구간을 검토할 부재(단면 · 몫). 단일 단면 길: 모델 하나(랩은 두 부재가 절반씩 — 지금까지 그대로).
+         * 경간마다 단면: 랩 = 엔진의 두 부재(lap_members — 단면 · 강성의 몫 · 경간), 춤이 다르면(lap_evaluable false) 평가하지 못함.
+         * 랩이 아닌 구간 = 그 구간에 있는 경간(spans)의 단면 — 둘 이상이면(랩 없이 단면이 바뀌는 지점을 지난다) 그 단면마다 구간 전체의 소요로
+         * 검토하고 지배하는 것(약한 단면이 주지 않을 합격을 내지 않는다). 경간을 모르면 평가하지 못함.
+         */
+        type Member = { sec: SecCtx; share: number; span: number | null; role?: string };
+        const membersOf = (rg: Region): { list: Member[]; why?: any; rule?: 'lap' | 'crosses_section_change' } => {
+            if (!multi) { return { list: [{ sec: S1, share: rg.lap ? 0.5 : 1.0, span: null }] }; }
+            const r = rg.src || {};
+            if (rg.lap) {
+                if (r.lap_evaluable === false) {
+                    return { list: [], why: NOTICES.siblingNotice(r, 'not_evaluable_reason')
+                        || { code: null, kind: 'reason', text: String(r.not_evaluable_reason ?? 'lap not evaluable'), text_ko: String(r.not_evaluable_reason ?? '랩을 평가할 수 없음') } };
+                }
+                const lm: any[] = Array.isArray(r.lap_members) ? r.lap_members : [];
+                if (lm.length !== 2 || lm.some((m) => !ctxs.has(String(m?.section_id)))) { return { list: [], why: NOTICES.hostNotice('host.purlin.lap_members_unknown') }; }
+                if (lm.some((m) => !(Number(m.share) > 0))) {
+                    return { list: [], why: NOTICES.siblingNotice(r, 'not_evaluable_reason') || NOTICES.hostNotice('host.purlin.lap_members_unknown') };
+                }
+                return { list: lm.map((m) => ({ sec: ctxs.get(String(m.section_id)) as SecCtx, share: Number(m.share), span: Number.isInteger(m.span) ? m.span : null, role: m.role })), rule: 'lap' };
+            }
+            const spans: number[] = Array.isArray(r.spans) && r.spans.length ? r.spans.filter((j: any) => Number.isInteger(j)) : (Number.isInteger(r.span) ? [r.span] : []);
+            if (!spans.length || spans.some((j) => !multi.ids[j])) { return { list: [], why: NOTICES.hostNotice('host.purlin.region_span_unknown') }; }
+            // 그 구간의 최대 모멘트가 놓인 경간(span)의 단면을 먼저
+            const order = Number.isInteger(r.span) && spans.includes(r.span) ? [r.span, ...spans.filter((j) => j !== r.span)] : spans;
+            const seen = new Map<string, number>();
+            for (const j of order) { const id = multi.ids[j]; if (!seen.has(id)) { seen.set(id, j); } }
+            const list = [...seen.entries()].map(([id, j]) => ({ sec: ctxs.get(id) as SecCtx, share: 1.0, span: j }));
+            return { list, ...(list.length > 1 ? { rule: 'crosses_section_change' as const } : {}) };
+        };
+
         // 5. 구간마다 설계. 휨-전단(H2)은 같은 단면의 M · V 짝으로 본다:
         //   (A) 구간 최대 M(엔진 M_max_abs) + 그 위치의 V, (B) 구간 최대 V + 그 위치의 M,
         //   (C) 구간 안 지점마다 지점 M + 지점 양쪽 V 중 큰 값 + 웹 크리플링(wc_P · wc_M · 지점 형식).
         const out: any[] = [];
         const regionNotices = new Map<string, Region[]>();
+        const sectionRuleRegions: Array<{ rg: Region; ids: string[] }> = [];
         for (const rg of regions) {
             const r = rg.src;
             const x0 = un(r, 'start_ft', rg.kind), x1 = un(r, 'end_ft', rg.kind);
@@ -5683,7 +5978,7 @@ export class StcfsdPanel implements McpPanelInterface {
             const Mu = Mmax * 12;   // kip-ft → kip-in
             const xMaxU = r.x_M_max_ft != null ? un(r, 'x_M_max_ft', rg.kind) : null;
             // 하부 플랜지 압축 구간(부모멘트 · 랩 · 양력 하부압축)은 −Mxx 곡선, 상부 압축은 +Mxx(V2-06).
-            const sign: '+' | '-' = rg.dsm === dsmNeg ? '-' : '+';
+            const sign: '+' | '-' = rg.neg ? '-' : '+';
             // V6b-01: 지점 위 격자점의 V 는 그 지점 면의 값으로 바꾼다(_supportFace) — M_max · V_max 지점이 지점 위일 때
             const onFace = <T extends { x: number; V: number }>(p: T | undefined): (T & { faceCombo?: string | null; face?: string }) | undefined => {
                 if (!p) { return p; }
@@ -5699,135 +5994,209 @@ export class StcfsdPanel implements McpPanelInterface {
             const vSrcOf = (p: any, fallback: string | null): string | null => (p && p.face
                 ? (p.faceCombo ?? `envelope (${p.face} — 하중 해석이 그 면의 조합을 주지 않음)`) : fallback);
             const pV = pts.length > 0 ? pts.reduce((a, b) => (b.V > a.V ? b : a)) : undefined;
-            const dsm = this._dsmForDesign(null, rg.dsm, fy, sign);
-            const share = rg.lap ? 0.5 : 1.0;
-            const params: any = { ...baseDesign, dsm, moment_sign: sign };
-            // 결정 T7: 구멍 자리의 FSM 은 그 구간의 총단면 좌굴값과 같은 스프링으로(정모멘트 = 데크 스프링, 부모멘트 = 없음)
-            if (holesGiven && rg.dsm === dsmPos && posSprings.length > 0) { params.springs = posSprings.map((r) => [...r]); }
-            if (rg.lap) {
-                // 랩: 두 부재 강도의 합(매뉴얼 II-2A 가정 (a)–(c)) — 같은 뜻으로 각 부재가 M·V 의 절반을 진다.
-                // 계약 §6.3: 랩 안의 횡비틀림 · 뒤틀림 구속은 사람이 밝힌다 — 호스트는 Lb · Cb · distortional_not_applicable · Mcrd 를 정하지 않고
-                // lap_region 과 그 진술(lap_restrained — 옛 이름 distortion_restrained)을 그대로 넘긴다. 엔진이 가정을 쓰거나 판정 없음으로 밝힌다.
-                params.lap_region = true;
-                if (lapStated) { params.lap_restrained = true; }
-            } else {
-                // V4-20: 엔진이 구간의 Ly 를 주지 않으면 0(완전 구속)으로 채우지 않는다 — Lb 를 보내지 않아 엔진이
-                // 횡비틀림을 「판정 없음」으로 밝힌다. Cb 가 없으면 보내지 않는다(엔진 1.0 + 알림).
-                const ly = un(r, 'Ly_in', rg.kind);
-                if (Number.isFinite(ly)) { params.Lb = ly; }
-                const cb = un(r, 'Cb', rg.kind);
-                if (Number.isFinite(cb)) { params.Cb = cb; }
-                if (r.cantilever) { params.cantilever = true; }
-                // V4-03: §2.3.3.3 β — 구간 끝 모멘트 M1/M2(작은 쪽/큰 쪽, 단일곡률 −, 역곡률 +)와 Lm = 구간 Ly.
-                const m1 = un(r, 'M1', rg.kind), m2 = un(r, 'M2', rg.kind);
-                if (Number.isFinite(m1) && Number.isFinite(m2) && ly > 0) {
-                    const small = Math.abs(m1) <= Math.abs(m2) ? m1 : m2;
-                    const large = Math.abs(m1) <= Math.abs(m2) ? m2 : m1;
-                    if (Math.abs(large) > 1e-12) {
-                        params.dist_M1_M2 = -(small / large);
-                        params.dist_Lm = ly;
+            const mem = membersOf(rg);
+            const sups = supportsAt.get(rg.id) || [];
+            if (mem.list.length === 0) {
+                // 결정 S4 · 판정을 지어내지 않는다: 그 구간은 평가하지 못함(엔진 · 호스트의 까닭)
+                const why = mem.why || NOTICES.hostNotice('host.purlin.region_span_unknown');
+                const line = H('host.purlin.region_not_evaluated', { region: rg.labelNotice, why });
+                notEvaluated.push(line);
+                out.push({
+                    ...StcfsdPanel._labelFields(rg.labelNotice),
+                    id: rg.id, kind: rg.kind, label: rg.label, span: r.span ?? null, support: r.support ?? null,
+                    side: r.side ?? null, start_ft: r.start_ft, end_ft: r.end_ft,
+                    Ly_in: rg.lap ? (lapStated ? 0 : null) : r.Ly_in, Cb: rg.lap ? (lapStated ? 1.0 : null) : r.Cb,
+                    Mu, Vu: pV ? pV.V : null, members: rg.lap ? 2 : 1, R_uplift: rg.R ?? null,
+                    combo: rg.env?.combo ?? null, beta_dist: null, i621_region_eligible: r.i621_region_eligible,
+                    section_id: null, ...StcfsdPanel._spanKeysOf(r, multi),
+                    ...(rg.lap && Array.isArray(r.lap_members) ? { lap_members: r.lap_members.map((m: any) => ({ section_id: m.section_id ?? null, span: m.span ?? null,
+                        role: m.role ?? null, share: m.share ?? null, depth: m.depth ?? null, thickness: m.thickness ?? null, pass: null, utilization: null })) } : {}),
+                    not_evaluated_reason: NOTICES.render(why, { lang: 'en' }), ...NOTICES.attachField({}, 'not_evaluated_reason', why),
+                    result: { pass: null, utilization: null, not_evaluated: [line], checks: [], design_checks: [] },
+                });
+                continue;
+            }
+            /** 단면 하나(한 부재)의 검토 — 지점마다의 엔진 호출, 대표 결과 · 판정(지금까지의 구간 검토 그대로) */
+            const checkMember = async (m: Member): Promise<{ result: any; results: any[]; regionPass: boolean | null; notEvalRegion: string[] }> => {
+                const sec = m.sec;
+                const share = m.share;
+                const pg = posGroupOf(sec, m.span);
+                const dsm = this._dsmForDesign(null, rg.neg ? sec.dsmNeg : pg.dsm, fy, sign);
+                const params: any = { ...sec.baseDesign, dsm, moment_sign: sign };
+                // 결정 T7: 구멍 자리의 FSM 은 그 구간의 총단면 좌굴값과 같은 스프링으로(정모멘트 = 데크 스프링, 부모멘트 = 없음)
+                if (sec.holesGiven && !rg.neg && pg.springs.length > 0) { params.springs = pg.springs.map((r) => [...r]); }
+                if (rg.lap) {
+                    // 랩: 두 부재 강도의 합(매뉴얼 II-2A 가정 (a)–(c)) — 같은 뜻으로 각 부재가 M·V 의 절반을 진다(경간마다 단면이면 강성의 몫 — 결정 S3).
+                    // 계약 §6.3: 랩 안의 횡비틀림 · 뒤틀림 구속은 사람이 밝힌다 — 호스트는 Lb · Cb · distortional_not_applicable · Mcrd 를 정하지 않고
+                    // lap_region 과 그 진술(lap_restrained — 옛 이름 distortion_restrained)을 그대로 넘긴다. 엔진이 가정을 쓰거나 판정 없음으로 밝힌다.
+                    params.lap_region = true;
+                    if (lapStated) { params.lap_restrained = true; }
+                } else {
+                    // V4-20: 엔진이 구간의 Ly 를 주지 않으면 0(완전 구속)으로 채우지 않는다 — Lb 를 보내지 않아 엔진이
+                    // 횡비틀림을 「판정 없음」으로 밝힌다. Cb 가 없으면 보내지 않는다(엔진 1.0 + 알림).
+                    const ly = un(r, 'Ly_in', rg.kind);
+                    if (Number.isFinite(ly)) { params.Lb = ly; }
+                    const cb = un(r, 'Cb', rg.kind);
+                    if (Number.isFinite(cb)) { params.Cb = cb; }
+                    if (r.cantilever) { params.cantilever = true; }
+                    // V4-03: §2.3.3.3 β — 구간 끝 모멘트 M1/M2(작은 쪽/큰 쪽, 단일곡률 −, 역곡률 +)와 Lm = 구간 Ly.
+                    const m1 = un(r, 'M1', rg.kind), m2 = un(r, 'M2', rg.kind);
+                    if (Number.isFinite(m1) && Number.isFinite(m2) && ly > 0) {
+                        const small = Math.abs(m1) <= Math.abs(m2) ? m1 : m2;
+                        const large = Math.abs(m1) <= Math.abs(m2) ? m2 : m1;
+                        if (Math.abs(large) > 1e-12) {
+                            params.dist_M1_M2 = -(small / large);
+                            params.dist_Lm = ly;
+                        }
                     }
                 }
-            }
-            if (rg.R != null) {
-                params.R_uplift = rg.R;
-                // F4 V2-03: R 을 Table I6.2.1-1 과 맞춰 보려면 경간 조건이 필요하다.
-                if (i621Span) { params.span_type = i621Span; }
-            }
-            // K4a: x_ft = 그 검토 지점의 위치(하중 분석 좌표, 왼쪽 끝부터 ft). 검토 항목의 location 에 실린다.
-            // V6-08: combo = 그 지점 소요의 조합(지배 조합의 도표와 같은 값일 때만 그 이름, 아니면 'envelope').
-            const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any; combo: string;
-                basis: 'combination' | 'envelope'; mixed: string | null }> = [];
-            const vA = atMmax ? atMmax.V : (pV ? pV.V : undefined);
-            const xMmax = xMaxU !== null && Number.isFinite(xMaxU) ? xMaxU : (atMmax ? atMmax.x : null);
-            const sA = StcfsdPanel._pointSources(rg.env, atMmax ? atMmax.i : pV?.i, sign);
-            calls.push({ tag: 'M_max', x_ft: xMmax,
-                ...StcfsdPanel._pairLabel(sA.m, vA !== undefined ? vSrcOf(atMmax ?? pV, sA.v) : null, null,
-                    () => StcfsdPanel._demandCombination(rg.env, atMmax?.i, Mmax, vA, sign)),
-                p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
-            if (pV && atMmax && Math.abs(pV.x - atMmax.x) > 1e-6 && pV.V > (vA ?? 0) + 1e-9) {
-                const sB = StcfsdPanel._pointSources(rg.env, pV.i, sign);
-                calls.push({ tag: 'V_max', x_ft: pV.x,
-                    ...StcfsdPanel._pairLabel(sB.m, vSrcOf(pV, sB.v), null, () => StcfsdPanel._demandCombination(rg.env, pV.i, pV.M, pV.V, sign)),
-                    p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
-            }
-            const sups = supportsAt.get(rg.id) || [];
-            for (const s of sups) {
-                if (s.M_kipin === undefined) {
-                    // V4-20: 지점 M 을 모르면 0 으로 채워 검토하지 않는다.
-                    notEvaluated.push(`§G5 · H3 — 지점 ${s.support} (${s.name}): 지점 모멘트를 하중 분석에서 얻지 못함`);
-                    continue;
+                if (rg.R != null) {
+                    params.R_uplift = rg.R;
+                    // F4 V2-03: R 을 Table I6.2.1-1 과 맞춰 보려면 경간 조건이 필요하다.
+                    if (i621Span) { params.span_type = i621Span; }
                 }
-                calls.push({ tag: `support ${s.support}`, x_ft: Number.isFinite(Number(s.x_ft)) ? Number(s.x_ft) : null,
-                    support: s.support ?? null,
-                    ...StcfsdPanel._pairLabel(s.__src?.m ?? null, s.__src?.v ?? null, s.__src?.r ?? null,
-                        () => s.__combo ?? StcfsdPanel._demandCombination(rg.env, s.__envI, s.M_kipin / 12, s.V_kips, sign)), p: {
-                    ...params, ...wcOpts,
-                    Mu: s.M_kipin * share,
-                    ...(s.V_kips !== undefined ? { Vu: s.V_kips * share } : {}),
-                    wc_P: s.__Pu, wc_support: s.case,
-                    ...(s.M_kipin !== undefined ? { wc_M: s.M_kipin } : {}),
-                } });
-            }
-            const results: any[] = [];
-            // K4a: 검토 지점마다 위치 · 조합 꼬리표(엔진 check_location · check_combination — 값을 바꾸지 않고 그 지점의
-            // design_checks 모든 항목에 붙는다). x 는 검토 항목 계약의 quantity 꼴(in) — SI 변환이 quantity 로 바꾼다.
-            for (const c of calls) {
-                // V6-12: support · span 은 1 부터, x 의 자리에서(지점 위 → support, 경간 안 → span). region_support = 그 구간의 지점.
-                const ss = StcfsdPanel._supportSpanAt(supportsFt, c.x_ft);
-                const loc: any = {
-                    region: rg.id, region_kind: rg.kind, check_point: c.tag,
-                    span: ss.span, support: ss.support,
-                    ...((rg.kind === 'negative' || rg.kind === 'lap' || rg.id.startsWith('uplift_lap')) && r.support != null
-                        && Number.isInteger(Number(r.support)) ? { region_support: Number(r.support) + 1 } : {}),
-                    x: c.x_ft !== null && Number.isFinite(c.x_ft) ? { symbol: 'x', value: c.x_ft * 12, quantity: 'length' } : null,
-                    demand_basis: c.basis,
-                };
-                let res: any;
-                try {
-                    // 계약 §6.4: 하중 해석이 낸 그 지점의 Mu 가 정확히 0(단순 끝 지점 · 내민 끝 · 모멘트 0 인 검토 지점)이면 그 0 은 해석의 진술이다
-                    const zeroStated = typeof c.p.Mu === 'number' && c.p.Mu === 0 ? { zero_demand_stated: true } : {};
-                    res = await this._pythonBridge.call('aisi_design', { ...c.p, ...zeroStated, check_location: loc, check_combination: c.combo });
-                } catch (e: any) {
-                    res = { error: e?.message || String(e), pass: null };
+                // K4a: x_ft = 그 검토 지점의 위치(하중 분석 좌표, 왼쪽 끝부터 ft). 검토 항목의 location 에 실린다.
+                // V6-08: combo = 그 지점 소요의 조합(지배 조합의 도표와 같은 값일 때만 그 이름, 아니면 'envelope').
+                const calls: Array<{ tag: string; p: any; x_ft: number | null; support?: any; combo: string;
+                    basis: 'combination' | 'envelope'; mixed: string | null }> = [];
+                const vA = atMmax ? atMmax.V : (pV ? pV.V : undefined);
+                const xMmax = xMaxU !== null && Number.isFinite(xMaxU) ? xMaxU : (atMmax ? atMmax.x : null);
+                const sA = StcfsdPanel._pointSources(rg.env, atMmax ? atMmax.i : pV?.i, sign);
+                calls.push({ tag: 'M_max', x_ft: xMmax,
+                    ...StcfsdPanel._pairLabel(sA.m, vA !== undefined ? vSrcOf(atMmax ?? pV, sA.v) : null, null,
+                        () => StcfsdPanel._demandCombination(rg.env, atMmax?.i, Mmax, vA, sign)),
+                    p: { ...params, Mu: Mu * share, ...(vA !== undefined ? { Vu: vA * share } : {}) } });
+                if (pV && atMmax && Math.abs(pV.x - atMmax.x) > 1e-6 && pV.V > (vA ?? 0) + 1e-9) {
+                    const sB = StcfsdPanel._pointSources(rg.env, pV.i, sign);
+                    calls.push({ tag: 'V_max', x_ft: pV.x,
+                        ...StcfsdPanel._pairLabel(sB.m, vSrcOf(pV, sB.v), null, () => StcfsdPanel._demandCombination(rg.env, pV.i, pV.M, pV.V, sign)),
+                        p: { ...params, Mu: pV.M * 12 * share, Vu: pV.V * share } });
                 }
-                // K3-6(계약 §6.2): M · V(· P)가 다른 조합에서 왔으면 그 지점의 가정 한 줄(소요는 그대로)
-                if (c.mixed && res && typeof res === 'object' && !res.error) {
-                    res.assumptions = [...(Array.isArray(res.assumptions) ? res.assumptions : []), c.mixed];
+                for (const s of sups) {
+                    if (s.M_kipin === undefined) {
+                        // V4-20: 지점 M 을 모르면 0 으로 채워 검토하지 않는다.
+                        const t = `§G5 · H3 — 지점 ${s.support} (${s.name}): 지점 모멘트를 하중 분석에서 얻지 못함`;
+                        // 단일 단면 길은 지금까지처럼 줄마다, 부재가 둘이면 한 번만
+                        if (!multi || !notEvaluated.includes(t)) { notEvaluated.push(t); }
+                        continue;
+                    }
+                    calls.push({ tag: `support ${s.support}`, x_ft: Number.isFinite(Number(s.x_ft)) ? Number(s.x_ft) : null,
+                        support: s.support ?? null,
+                        ...StcfsdPanel._pairLabel(s.__src?.m ?? null, s.__src?.v ?? null, s.__src?.r ?? null,
+                            () => s.__combo ?? StcfsdPanel._demandCombination(rg.env, s.__envI, s.M_kipin / 12, s.V_kips, sign)), p: {
+                        ...params, ...wcOpts,
+                        Mu: s.M_kipin * share,
+                        ...(s.V_kips !== undefined ? { Vu: s.V_kips * share } : {}),
+                        wc_P: s.__Pu, wc_support: s.case,
+                        ...(s.M_kipin !== undefined ? { wc_M: s.M_kipin } : {}),
+                    } });
                 }
-                results.push({ ...res, check_point: c.tag, Mu_checked: c.p.Mu, Vu_checked: c.p.Vu ?? null,
-                    __location: loc, __combination: c.combo });
+                const results: any[] = [];
+                // K4a: 검토 지점마다 위치 · 조합 꼬리표(엔진 check_location · check_combination — 값을 바꾸지 않고 그 지점의
+                // design_checks 모든 항목에 붙는다). x 는 검토 항목 계약의 quantity 꼴(in) — SI 변환이 quantity 로 바꾼다.
+                for (const c of calls) {
+                    // V6-12: support · span 은 1 부터, x 의 자리에서(지점 위 → support, 경간 안 → span). region_support = 그 구간의 지점.
+                    const ss = StcfsdPanel._supportSpanAt(supportsFt, c.x_ft);
+                    const loc: any = {
+                        region: rg.id, region_kind: rg.kind, check_point: c.tag,
+                        span: ss.span, support: ss.support,
+                        ...((rg.kind === 'negative' || rg.kind === 'lap' || rg.id.startsWith('uplift_lap')) && r.support != null
+                            && Number.isInteger(Number(r.support)) ? { region_support: Number(r.support) + 1 } : {}),
+                        x: c.x_ft !== null && Number.isFinite(c.x_ft) ? { symbol: 'x', value: c.x_ft * 12, quantity: 'length' } : null,
+                        demand_basis: c.basis,
+                        // 결정 S1: 경간마다 단면이면 그 지점을 검토한 단면(랩이면 그 부재)
+                        ...(multi ? { section_id: sec.id, ...(mem.rule === 'lap' ? { member_share: share } : {}) } : {}),
+                    };
+                    let res: any;
+                    try {
+                        // 계약 §6.4: 하중 해석이 낸 그 지점의 Mu 가 정확히 0(단순 끝 지점 · 내민 끝 · 모멘트 0 인 검토 지점)이면 그 0 은 해석의 진술이다
+                        const zeroStated = typeof c.p.Mu === 'number' && c.p.Mu === 0 ? { zero_demand_stated: true } : {};
+                        res = await this._pythonBridge.call('aisi_design', { ...c.p, ...zeroStated, check_location: loc, check_combination: c.combo });
+                    } catch (e: any) {
+                        res = { error: e?.message || String(e), pass: null };
+                    }
+                    // K3-6(계약 §6.2): M · V(· P)가 다른 조합에서 왔으면 그 지점의 가정 한 줄(소요는 그대로)
+                    if (c.mixed && res && typeof res === 'object' && !res.error) {
+                        res.assumptions = [...(Array.isArray(res.assumptions) ? res.assumptions : []), c.mixed];
+                    }
+                    results.push({ ...res, check_point: c.tag, Mu_checked: c.p.Mu, Vu_checked: c.p.Vu ?? null,
+                        __location: loc, __combination: c.combo });
+                }
+                // 구간 대표 결과: 불합격 중 최대 이용률 → 최대 이용률
+                const pick = [...results].sort((a, b) => {
+                    const fa = a?.pass === false ? 1 : 0, fb = b?.pass === false ? 1 : 0;
+                    if (fa !== fb) { return fb - fa; }
+                    return (Number(b?.utilization) || 0) - (Number(a?.utilization) || 0);
+                })[0];
+                const regionPass = StcfsdPanel._combinePass(results.map((x) => (x?.error ? null : x?.pass)));
+                const notEvalRegion = Array.from(new Set(results.flatMap((x) => Array.isArray(x?.not_evaluated) ? x.not_evaluated : [])
+                    .map((it: any) => (typeof it === 'string' ? it : JSON.stringify(it)))));
+                // K4a: 구간 결과는 그대로(대표 지점의 결과 — 그 design_checks 도 대표 지점의 것). 검토 지점마다의 요약(checks[j])에
+                // 그 지점의 위치 · 조합 · design_checks 를 덧붙인다 — 화면이 구간 안 어디서 어느 검토가 지배하는지 보이게.
+                // 지배 지점 · 판정 · 이용률은 바꾸지 않는다(위의 pick · regionPass 그대로).
+                const lapNoteN = rg.lap ? (multi
+                    ? NOTICES.hostNotice('host.purlin.lap_stiffness_share')
+                    : NOTICES.hostNotice('host.purlin.lap_half_demand')) : null;
+                const { __location: _pl, __combination: _pc, ...pickClean } = pick || {};
+                void _pl; void _pc;
+                const result = { ...pickClean, pass: regionPass, not_evaluated: notEvalRegion,
+                    checks: results.map((x) => ({ check_point: x.check_point, Mu: x.Mu_checked, Vu: x.Vu_checked,
+                        utilization: x.utilization ?? null, pass: x.error ? null : x.pass, governing_check: x.governing_check,
+                        error: x.error,
+                        location: x.__location, combination: x.__combination,
+                        design_checks: Array.isArray(x.design_checks) ? x.design_checks : [],
+                        // V6-02: 그 지점 결과의 알림(대표 지점이 아니어도) — 판정에 붙는 가정 · 범위를 버리지 않는다.
+                        ...Object.fromEntries(['warnings', 'assumptions', 'scope_notes', 'not_checked']
+                            .filter((k) => Array.isArray(x[k]) && x[k].length > 0).map((k) => [k, x[k]])),
+                        ...(lapNoteN ? NOTICES.attachField({}, 'host_assumption', lapNoteN) : {}) })) };
+                if (sups.length > 0) {
+                    (result as any).supports_checked = sups.map((s) => ({ support: s.support, name: s.name, case: s.case, Pu: s.Pu }));
+                }
+                return { result, results, regionPass, notEvalRegion };
+            };
+            // 부재마다(같은 단면 · 같은 몫 · 같은 데크 강성이면 한 번)
+            const done = new Map<string, Awaited<ReturnType<typeof checkMember>>>();
+            const perMember: Array<{ m: Member; r: Awaited<ReturnType<typeof checkMember>> }> = [];
+            for (const m of mem.list) {
+                const key = `${m.sec.id}|${m.share}|${rg.neg ? '-' : posGroupOf(m.sec, m.span).key}`;
+                let rr = done.get(key);
+                if (!rr) { rr = await checkMember(m); done.set(key, rr); }
+                perMember.push({ m, r: rr });
             }
-            // 구간 대표 결과: 불합격 중 최대 이용률 → 최대 이용률
-            const pick = [...results].sort((a, b) => {
-                const fa = a?.pass === false ? 1 : 0, fb = b?.pass === false ? 1 : 0;
+            // 지배 부재: 불합격 → 판정 없음이 아님 → 큰 이용률(구간 대표 결과의 규칙과 같다)
+            const gov = [...perMember].sort((a, b) => {
+                const fa = a.r.regionPass === false ? 1 : 0, fb = b.r.regionPass === false ? 1 : 0;
                 if (fa !== fb) { return fb - fa; }
-                return (Number(b?.utilization) || 0) - (Number(a?.utilization) || 0);
+                return (Number(b.r.result?.utilization) || 0) - (Number(a.r.result?.utilization) || 0);
             })[0];
-            const regionPass = StcfsdPanel._combinePass(results.map((x) => (x?.error ? null : x?.pass)));
-            const notEvalRegion = Array.from(new Set(results.flatMap((x) => Array.isArray(x?.not_evaluated) ? x.not_evaluated : [])
-                .map((it: any) => (typeof it === 'string' ? it : JSON.stringify(it)))));
-            // K4a: 구간 결과는 그대로(대표 지점의 결과 — 그 design_checks 도 대표 지점의 것). 검토 지점마다의 요약(checks[j])에
-            // 그 지점의 위치 · 조합 · design_checks 를 덧붙인다 — 화면이 구간 안 어디서 어느 검토가 지배하는지 보이게.
-            // 지배 지점 · 판정 · 이용률은 바꾸지 않는다(위의 pick · regionPass 그대로).
-            const lapNoteN = rg.lap ? NOTICES.hostNotice('host.purlin.lap_half_demand') : null;
-            const lapNote = lapNoteN ? lapNoteN.text : undefined;
-            const { __location: _pl, __combination: _pc, ...pickClean } = pick || {};
-            void _pl; void _pc;
-            const result = { ...pickClean, pass: regionPass, not_evaluated: notEvalRegion,
-                checks: results.map((x) => ({ check_point: x.check_point, Mu: x.Mu_checked, Vu: x.Vu_checked,
-                    utilization: x.utilization ?? null, pass: x.error ? null : x.pass, governing_check: x.governing_check,
-                    error: x.error,
-                    location: x.__location, combination: x.__combination,
-                    design_checks: Array.isArray(x.design_checks) ? x.design_checks : [],
-                    // V6-02: 그 지점 결과의 알림(대표 지점이 아니어도) — 판정에 붙는 가정 · 범위를 버리지 않는다.
-                    ...Object.fromEntries(['warnings', 'assumptions', 'scope_notes', 'not_checked']
-                        .filter((k) => Array.isArray(x[k]) && x[k].length > 0).map((k) => [k, x[k]])),
-                    ...(lapNoteN ? NOTICES.attachField({}, 'host_assumption', lapNoteN) : {}) })) };
-            void lapNote;
-            if (sups.length > 0) {
-                result.supports_checked = sups.map((s) => ({ support: s.support, name: s.name, case: s.case, Pu: s.Pu }));
-            }
+            const allResults = perMember.flatMap((x) => x.r.results);
+            const regionPass = StcfsdPanel._combinePass(perMember.map((x) => x.r.regionPass));
+            const notEvalRegion = Array.from(new Set(perMember.flatMap((x) => x.r.notEvalRegion)));
+            const result: any = perMember.length === 1 ? gov.r.result : { ...gov.r.result, pass: regionPass, not_evaluated: notEvalRegion };
+            const multiLines = multi ? (() => {
+                const engM = (x: { m: Member }) => (Array.isArray(rg.src?.lap_members) ? rg.src.lap_members.find((mm: any) => mm && mm.span === x.m.span) : null);
+                const line = (x: { m: Member; r: any }) => ({ section_id: x.m.sec.id, span: x.m.span, ...(x.m.role ? { role: x.m.role } : {}), share: x.m.share,
+                    pass: x.r.regionPass, utilization: x.r.result?.utilization ?? null, governing_check: x.r.result?.governing_check ?? null,
+                    check_point: x.r.result?.check_point ?? null, Mu: Mu * x.m.share, Vu: pV ? pV.V * x.m.share : null,
+                    design_strength: StcfsdPanel._flexureStrength(x.r.results.find((y: any) => y.check_point === 'M_max')),
+                    // 랩 접합 도구(utils.lapTwoMembers)가 그 부재의 단면 강도 · Ix 를 여기서(Ixx = 하중 해석이 몫에 쓴 값)
+                    ...(mem.rule === 'lap' ? { Ixx: engM(x)?.Ixx ?? null, ...(x.r.result?.lap_section ? { lap_section: x.r.result.lap_section } : {}) } : {}) });
+                if (mem.rule === 'lap') {
+                    const ls = perMember.map(line);
+                    // 참고만: 설계 매뉴얼의 가정 (c) — 두 부재 강도의 합(M / (Ma1 + Ma2)) — 판정이 아니다
+                    const ma = ls.map((x) => x.design_strength);
+                    const sum = ma.every((v) => typeof v === 'number' && v > 0) ? (ma as number[]).reduce((p, q) => p + q, 0) : null;
+                    const ref: any = { basis: 'sum_of_strengths', Mu, design_strengths: ma, design_strength_sum: sum, ratio: sum ? Mu / sum : null };
+                    if (ref.ratio !== null) { Object.assign(ref, NOTICES.attachField({}, 'label', NOTICES.hostNotice('host.purlin.sum_of_strengths_reference', { ratio: ref.ratio }))); }
+                    return { lap_members: ls, governing_member: ls.indexOf(ls.find((x) => x.section_id === gov.m.sec.id && x.share === gov.m.share)!) + 1,
+                        share_basis: rg.src?.share_basis ?? 'stiffness_Ix', reference_sum_of_strengths: ref };
+                }
+                if (mem.rule === 'crosses_section_change') {
+                    sectionRuleRegions.push({ rg, ids: perMember.map((x) => x.m.sec.id) });
+                    return { sections_checked: perMember.map(line), section_rule: 'crosses_section_change' };
+                }
+                return {};
+            })() : {};
             out.push({
                 ...StcfsdPanel._labelFields(rg.labelNotice),
                 id: rg.id, kind: rg.kind, label: rg.label, span: r.span ?? null, support: r.support ?? null,
@@ -5840,6 +6209,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 combo: rg.env?.combo ?? null,
                 beta_dist: typeof result?.beta_dist === 'number' ? result.beta_dist : null,
                 i621_region_eligible: r.i621_region_eligible,
+                // 결정 S1: 경간마다 단면이면 그 구간을 판정한 단면(랩 · 단면이 바뀌는 구간은 지배 부재의 것)과 부재마다의 줄
+                ...(multi ? { section_id: gov.m.sec.id, ...StcfsdPanel._spanKeysOf(r, multi), ...multiLines } : {}),
                 result,
             });
             // 같은 글은 구간마다 되풀이하지 않는다 — 글 하나에 그 구간들의 이름(아래에서 한 줄로)
@@ -5848,8 +6219,8 @@ export class StcfsdPanel implements McpPanelInterface {
                 regs.push(rg);
                 regionNotices.set(item, regs);
             }
-            if (results.some((x) => x?.error)) {
-                notEvaluated.push(H('host.purlin.region_error', { region: rg.labelNotice, errors: results.filter((x) => x?.error).map((x) => x.error).join('; ') }));
+            if (allResults.some((x) => x?.error)) {
+                notEvaluated.push(H('host.purlin.region_error', { region: rg.labelNotice, errors: allResults.filter((x) => x?.error).map((x) => x.error).join('; ') }));
             }
         }
         // 구간마다의 같은 알림은 한 줄 — 「[구간 이름표 · …] 글」(그 글은 엔진의 알림 — 구간 결과의 notices 에서)
@@ -5858,12 +6229,16 @@ export class StcfsdPanel implements McpPanelInterface {
             notEvaluated.push(H('host.purlin.region_note', { regions: NOTICES.group(regs.map((rg) => rg.labelNotice), ' · '), item: eng || { code: null, kind: 'not_evaluated', text: item, text_ko: item } }));
         }
         if (regions.some((rg) => rg.lap)) {
-            assumptions.push(H('host.purlin.lap_two_members'));
+            assumptions.push(H(multi ? 'host.purlin.lap_two_members_stiffness' : 'host.purlin.lap_two_members'));
             if (lapStated) {
                 assumptions.push(H('host.purlin.lap_stated'));
             } else {
                 notEvaluated.push(H('host.purlin.lap_not_stated'));
             }
+        }
+        if (multi) {
+            assumptions.push(H('host.purlin.sections_per_span', { map: multi.ids.map((id, i) => `${i + 1}: ${id}`).join(', ') }));
+            for (const x of sectionRuleRegions) { assumptions.push(H('host.purlin.section_change_rule', { region: x.rg.labelNotice, sections: x.ids.join(' | ') })); }
         }
         assumptions.push(H('host.purlin.vu_envelope'));
         // 검증 2026-11-25 의 1: 서명곡선은 구속하지 않고 풀었다(_signatureDsm) — 모델의 모드 구속은 보기만의 것
@@ -5906,7 +6281,7 @@ export class StcfsdPanel implements McpPanelInterface {
         };
         const utils = out.map((o) => Number(o.result?.utilization)).filter((v) => Number.isFinite(v));
 
-        const result = {
+        const result: any = {
             load_analysis: loadResult,
             dsm_positive: dsmPos,
             dsm_negative: dsmNeg,
@@ -5917,7 +6292,8 @@ export class StcfsdPanel implements McpPanelInterface {
             design_uplift: governingOf(['uplift', 'uplift_support']),
             pass,
             utilization: utils.length > 0 ? Math.max(...utils) : null,
-            governing: governing ? { id: governing.id, kind: governing.kind, label: governing.label, combo: governing.combo } : null,
+            governing: governing ? { id: governing.id, kind: governing.kind, label: governing.label, combo: governing.combo,
+                ...(multi ? { section_id: governing.section_id ?? null } : {}) } : null,
             not_evaluated: notEvaluated,
             load_not_evaluated: loadNotEvaluated,
             warnings,
@@ -5933,14 +6309,76 @@ export class StcfsdPanel implements McpPanelInterface {
             deck: deckInfo,
             span_type: options?.span_type ?? null,
         };
+        if (multi) {
+            // 결정 S1 · S8: 단면마다의 블록(검토 화면이 단면을 골라 본다 — 성질 · 좌굴값 · 서명곡선. 곡선은 MCP 요약에 싣지 않는다)과 경간 → 단면
+            result.span_sections = [...multi.ids];
+            result.sections = [...ctxs.values()].map((c) => StcfsdPanel._sectionBlock(c, ap, fy));
+            if (ap.span_map) { result.span_map = ap.span_map; }
+        }
         // K4b · 호스트 글: 목록(warnings · assumptions · not_evaluated · load_not_evaluated)의 글마다 알림 — 호스트가 지은 것, 엔진의 것(구간 · 하중 해석 · 서명곡선)
-        NOTICES.attachNotices(result, [loadResult, out.map((o) => o.result), dsmPos, dsmNeg], hostMade);
+        NOTICES.attachNotices(result, [loadResult, out.map((o) => o.result), ...[...ctxs.values()].flatMap((c) => [...[...c.pos.values()].map((g) => g.dsm), c.dsmNeg])], hostMade);
         this._requireCurrentSignature(baseSignature, 'Purlin design');
         this._requireDerivedRevision(purlinInputRevision, 'Purlin design');
         this._storeLoadAnalysis(loadResult, this._loadRequestKey({ ...options, Fy: fy, Fu: fu }));
         // F02: 퍼린 패킷은 member 설계가 아니므로 입력 서명을 비운다.
         this._storeDesignResult(result, null);
         return result;
+    }
+
+    /** 결정 S1: 구간 기록의 경간 키(엔진 — 0 부터, 경간마다 단면일 때만 있다) */
+    private static _spanKeysOf(r: any, multi: SpanPlan | null): Record<string, unknown> {
+        if (!multi || !r) { return {}; }
+        const out: Record<string, unknown> = {};
+        for (const k of ['spans', 'crosses_support', 'lap_support', 'lap_side', 'continuous_member_span', 'ending_member_span',
+            'share_by_stiffness', 'same_section', 'depth_mismatch', 'lap_evaluable']) {
+            if (r[k] !== undefined) { out[k] = r[k]; }
+        }
+        return out;
+    }
+
+    /** 휨 강도(설계강도 φMn 또는 Mn/Ω — 반올림 전) — 결과에 없으면 null */
+    private static _flexureStrength(res: any): number | null {
+        if (!res || typeof res !== 'object' || res.error) { return null; }
+        const u = res.display_unrounded && typeof res.display_unrounded === 'object' ? res.display_unrounded : {};
+        const v = Number.isFinite(u.design_strength) ? u.design_strength : res.design_strength;
+        return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+    }
+
+    /** 결정 S1 · S8: 단면 하나의 결과 블록 — 성질 · 치수 · 좌굴값(정 · 부, 반파장) · 서명곡선(반파장 · 하중계수 — 요약에는 싣지 않는다) · 데크 강성 · 경간 */
+    private static _sectionBlock(c: any, ap: any, fy: number): any {
+        const curve = (sig: any) => {
+            const rows: any[] = Array.isArray(sig?.analysis?.curve) ? sig.analysis.curve : [];
+            const flat = rows.map((row: any) => (Array.isArray(row) && row.length === 1 && Array.isArray(row[0]) ? row[0] : row));
+            const lengths: number[] = [], factors: number[] = [];
+            for (const row of flat) { if (Array.isArray(row) && row.length >= 2 && Number.isFinite(Number(row[0]))) { lengths.push(Number(row[0])); factors.push(Number(row[1])); } }
+            return { lengths, load_factors: factors, fy_reference: fy };
+        };
+        const dsmVals = (d: any) => (d && typeof d === 'object' ? Object.fromEntries(Object.entries(d).filter(([k, v]) =>
+            v === null || typeof v !== 'object' || ['warnings', 'assumptions'].includes(k))) : null);
+        const groups = [...c.pos.values()];
+        const deck = (Array.isArray(ap?.deck_by_span) ? ap.deck_by_span : []).filter((d: any) => d && c.spans.includes(d.span))
+            .map((d: any) => ({ span: d.span, kphi: d.kphi ?? null, kx: d.kx ?? null }));
+        return {
+            id: c.id, name: c.name ?? null, template: c.template ?? null, params: c.params ?? null, source: c.source, spans: [...c.spans],
+            props: c.props, geometry: c.geom?.section ?? null,
+            dsm_pos: dsmVals(groups[0]?.dsm), dsm_neg: dsmVals(c.dsmNeg),
+            ...(groups.length > 1 ? { dsm_pos_by_deck: groups.map((g) => ({ spans: [...g.spans], kphi: g.kphi, kx: g.kx, dsm: dsmVals(g.dsm) })) } : {}),
+            deck,
+            curves: { pos: curve(groups[0]?.sig), neg: curve(c.negSig),
+                ...(groups.length > 1 ? { pos_by_deck: groups.map((g) => ({ spans: [...g.spans], ...curve(g.sig) })) } : {}) },
+        };
+    }
+
+    /** 결정 S1: 퍼린 사슬의 서명곡선(단면 · 하중 경우 · Fy · 스프링마다 한 번 — 경간의 단면이 바뀌지 않으면 다시 풀지 않는다) */
+    private _purlinSigMemo = new Map<string, any>();
+    private async _purlinSignature(model: any, loadCase: string, fy: number, springs: number[][]): Promise<any> {
+        const key = JSON.stringify({ m: this._modelSignature(model), loadCase, fy, springs });
+        const hit = this._purlinSigMemo.get(key);
+        if (hit) { return hit; }
+        const sig = await this._signatureDsm(model, loadCase, fy, 'Mxx', { springs });
+        if (this._purlinSigMemo.size > 48) { this._purlinSigMemo.clear(); }
+        this._purlinSigMemo.set(key, sig);
+        return sig;
     }
 
     /** MCP: 액션 처리 — Bridge에서 직접 호출 */
@@ -6115,7 +6553,7 @@ export class StcfsdPanel implements McpPanelInterface {
      */
     private async _mcpDesign(options: any): Promise<any> {
         const k = this._caseKeeper;
-        const w = mcpWrite(options.action, options, k.state) as McpWrite;
+        const w = mcpWrite(options.action, options, k.state, { template: this._modelSectionTemplate() }) as McpWrite;
         const run = StcfsdPanel.MCP_DESIGN_RUN[w.tool];
         // 상태에 쓰지 못한 인자가 있으면 계산하지 않는다 — 그 칸은 화면의 값이 되어 AI 가 준 조건과 다른 것을 계산하게 된다
         const lost = w.skipped.filter((s) => !s.carried);
@@ -6181,7 +6619,9 @@ export class StcfsdPanel implements McpPanelInterface {
     /** 검토 상태 키의 단위 종류(응답의 SI 변환 — server.ts unitReply) */
     private static _caseUnitKind(key: string): string | null {
         if (key === 'spans' || key === 'lapsPerSupport') { return 'length_ft'; }
-        if (key === 'supports') { return null; }
+        if (key === 'supports' || key === 'spanSections') { return null; }
+        // 결정 S1: 단면 목록 — 치수마다 그 단위(server.ts 가 caseSectionsToSI 로)
+        if (key === 'sections') { return 'section_list'; }
         const m = require('../../webview/js/designState').fieldMeta(key);
         return m ? (m.owner === 'mirror' ? require('../../webview/js/designState').fieldMeta(m.mirrorOf)?.unit ?? null : m.unit) : null;
     }
@@ -7637,6 +8077,8 @@ ${inner}
         // 결정 3(K2-5): 기준응력을 AI 가 정했는지는 모델 밖(엔진 요청 · 서명 · 파일에 들지 않게)에 두고 화면에만 붙여 보낸다
         if (command === 'modelLoaded' && data && typeof data === 'object' && this._loadFyAi) { data = { ...data, loadFySource: 'ai' }; }
         this._caseKeeper.onPosted(command, data);
+        // 2026-11-28 결정 S1: 상태 · 모델을 화면에 다시 보낼 때 단면 목록의 성질(Ix)도 — 목록이 있을 때만
+        if ((command === 'caseState' || command === 'modelLoaded' || command === 'restoreDesignInputs') && this._caseKeeper.state.sections.length) { this._scheduleSectionInfo(); }
         if (isTestMode()) {
             this._testPostedMessages.push(JSON.parse(JSON.stringify({ command, data })));
             if (this._testPostedMessages.length > 100) {
@@ -7711,12 +8153,16 @@ ${inner}
         const inputs: Record<string, any> = {};
         let truncated = 0;
         let spans: any;
+        let sectionsBack: any;
         for (const key of u.inputs_changed as string[]) {
-            if (key === 'spans' || key === 'supports' || key === 'lapsPerSupport') {
+            if (key === 'spans' || key === 'supports' || key === 'lapsPerSupport' || key === 'spanSections') {
                 spans = { spans: conv(k.state.spans.spans, 'length_ft'), supports: k.state.spans.supports,
-                    lapsPerSupport: k.state.spans.lapsPerSupport.map((l: any) => ({ left: conv(l.left, 'length_ft'), right: conv(l.right, 'length_ft') })) };
+                    lapsPerSupport: k.state.spans.lapsPerSupport.map((l: any) => ({ left: conv(l.left, 'length_ft'), right: conv(l.right, 'length_ft') })),
+                    spanSections: [...k.state.spans.spanSections] };
                 continue;
             }
+            // 결정 S1: 단면 목록(통째로 — set_case_inputs 의 sections 로 되돌린다)
+            if (key === 'sections') { sectionsBack = si ? caseSectionsToSI(k.state.sections) : JSON.parse(JSON.stringify(k.state.sections)); continue; }
             if (!(key in k.state.inputs)) { continue; }
             const m = DSm.fieldMeta(key) || {};
             const value = conv(k.state.inputs[key], m.unit || null);
@@ -7724,7 +8170,7 @@ ${inner}
             values.push({ key, value, source: k.state.sources[key] ?? null });
             inputs[key] = value;
         }
-        const restore = { tool: 'set_case_inputs', arguments: { units: si ? 'SI' : 'US', inputs, ...(spans ? { spans } : {}),
+        const restore = { tool: 'set_case_inputs', arguments: { units: si ? 'SI' : 'US', inputs, ...(spans ? { spans } : {}), ...(sectionsBack !== undefined ? { sections: sectionsBack } : {}),
             reason: 'restore the unsaved values discarded by ' + by } };
         this._discarded = { at: new Date().toISOString(), by, restore };
         const notice = { since: u.since, inputs_changed: u.inputs_changed, model_changed: u.model_changed, file: u.file, by,
@@ -7761,8 +8207,11 @@ ${inner}
         const spans = (!want || want.has('spans')) ? {
             spans: out('spans', k.state.spans.spans, 'length_ft'), supports: k.state.spans.supports,
             lapsPerSupport: k.state.spans.lapsPerSupport.map((l) => ({ left: out('lap', l.left, 'length_ft'), right: out('lap', l.right, 'length_ft') })),
+            // 결정 S1: 경간마다 단면(S1 = 지금 모델)
+            spanSections: [...k.state.spans.spanSections],
             unit: label('length_ft'),
         } : undefined;
+        const sections = (!want || want.has('sections')) ? (si ? caseSectionsToSI(k.state.sections) : JSON.parse(JSON.stringify(k.state.sections))) : undefined;
         const drafts = k.drafts || modelDrafts(this._model);
         const model: any = {};
         for (const key of DSm.KEYS.model) {
@@ -7783,7 +8232,9 @@ ${inner}
         }
         return {
             rev: k.state.rev, dirty: k.isDirty(this._currentModelSignature()), dirty_since: k.dirtySince, units: si ? 'SI' : 'US',
-            inputs, spans, unit_of: units, sources,
+            inputs, spans, ...(sections !== undefined ? { sections, sections_unit: si ? 'mm (qlip °)' : 'in (qlip °)',
+                sections_note: "Section list S2 … (S1 = the model); spans.spanSections = each span's section." } : {}),
+            unit_of: units, sources,
             ...(lastChange ? { last_change: lastChange, last_change_note: 'last_change: for each input the last recorded change of this case (who, when, from → to, reason) — from the project records.' } : {}),
             model_inputs: model,
             model_note: 'model_inputs (section template / dimensions, E · ν · G, analysis conditions) are owned by the model — change them with set_section_template, set_material, set_boundary_condition, set_lengths, set_load_case, run_analysis.',
@@ -7824,6 +8275,20 @@ ${inner}
                     left: si ? caseValueToUS(l?.left ?? null, 'length_ft') : (l?.left ?? null),
                     right: si ? caseValueToUS(l?.right ?? null, 'length_ft') : (l?.right ?? null) })) : sp.lapsPerSupport;
             }
+            if (sp.spanSections !== undefined) { changes.spanSections = sp.spanSections; }
+        }
+        // 결정 S1 · S2: 단면 목록(통째로) — 모델과 같은 템플릿 종류만(직접 그린 · 고친 모델은 받지 않는다)
+        if (options?.sections !== undefined) {
+            const tpl = this._modelSectionTemplate();
+            const list = Array.isArray(options.sections) ? options.sections : null;
+            const bad = list ? list.filter((x: any) => !x || x.template !== tpl).map((x: any) => String(x?.id ?? '?')) : [];
+            if (list && list.length && !tpl) {
+                rejected.push({ key: 'sections', reason: 'the current section is not a template section (hand-drawn / edited, or a round tube) — it cannot have a section list; every span uses S1', reason_code: 'host.case.sections_need_template' });
+            } else if (bad.length) {
+                rejected.push({ key: 'sections', reason: `section(s) ${bad.join(', ')}: the template must be the model's ('${tpl}')`, reason_code: 'host.case.sections_template' });
+            } else {
+                changes.sections = si ? caseSectionsToUS(options.sections) : options.sections;
+            }
         }
         const before = this._caseKeeper.state;
         const r = applyChanges(this._caseKeeper.state, changes, 'ai');
@@ -7832,14 +8297,14 @@ ${inner}
         // V7-06: 설계 도구처럼 — 덮은 사람의 값(사람 · 연 파일 · 하중 해석이 정한 것)과 그 출처를 응답에(되돌릴 수 있게)
         const replaced: any[] = [];
         for (const key of r.accepted) {
-            const span = key === 'spans' || key === 'supports' || key === 'lapsPerSupport';
-            const prev = span ? (before.spans as any)[key] : before.inputs[key];
+            const span = key === 'spans' || key === 'supports' || key === 'lapsPerSupport' || key === 'spanSections';
+            const prev = key === 'sections' ? before.sections : span ? (before.spans as any)[key] : before.inputs[key];
             const src = before.sources[key];
             if (!['user', 'file', 'load-analysis'].includes(src) || prev === null || prev === undefined) { continue; }
             const m = DSm.fieldMeta(key);
-            const kind = span ? (key === 'supports' ? null : 'length_ft') : (m ? m.unit : null);
+            const kind = key === 'sections' ? 'section_list' : span ? (key === 'supports' || key === 'spanSections' ? null : 'length_ft') : (m ? m.unit : null);
             const toOut = (v: any) => (si && kind ? caseValueToSI(v, kind) : v);
-            const previous = key === 'lapsPerSupport' && Array.isArray(prev)
+            const previous = key === 'sections' ? (si ? caseSectionsToSI(prev) : prev) : key === 'lapsPerSupport' && Array.isArray(prev)
                 ? prev.map((l: any) => ({ left: toOut(l?.left ?? null), right: toOut(l?.right ?? null) })) : toOut(prev);
             replaced.push({ key, previous, previous_source: src, unit_kind: kind, units: si ? 'SI' : 'US' });
         }
@@ -8303,13 +8768,40 @@ ${inner}
                                     <th style="padding:3px 4px;width:70px">스팬(<span data-unit="length_ft">m</span>)</th>
                                     <th style="padding:3px 4px;width:60px">랩L(<span data-unit="length_ft">m</span>)</th>
                                     <th style="padding:3px 4px;width:60px">랩R(<span data-unit="length_ft">m</span>)</th>
+                                    <th style="padding:3px 4px;width:46px" title="그 지점 오른쪽 경간의 단면 — S1 = 지금 모델, S2 … = 아래 「단면 목록」">단면</th>
                                 </tr>
                             </thead>
                             <tbody id="span-config-tbody">
                                 <!-- JS에서 동적 생성 -->
                             </tbody>
                         </table>
-                        <p class="hint" style="font-size:9px;margin-top:2px">지점: P=핀, R=롤러, F=고정단, N=자유단. 랩=지점 양측 겹침 길이.</p>
+                        <p class="hint" style="font-size:9px;margin-top:2px">지점: P=핀, R=롤러, F=고정단, N=자유단. 랩=지점 양측 겹침 길이. 단면=그 지점 오른쪽 경간의 단면.</p>
+                    </div>
+                    <!-- 2026-11-28 결정 S1 – S4: 단면 목록(S1 = 모델, S2 … = 같은 템플릿의 치수) — 경간 표의 「단면」 칸이 고른다 -->
+                    <div id="sec-list-block" style="margin-top:6px;overflow-x:auto">
+                        <div class="input-row" style="justify-content:space-between">
+                            <label title="경간마다 다른 단면(예: 끝 경간만 두껍게). S1 은 지금 모델, S2 … 는 모델과 같은 템플릿 종류의 치수입니다. 경간마다 Ix · 데크 강성(kφ · kx) · §I6.2.1 R · 좌굴값이 그 단면의 것이 됩니다. 랩은 두 부재가 강성의 비로 M · V 를 나눠 부재마다 검토하고(설계 매뉴얼의 강도의 합은 참고), 춤이 다른 두 부재의 랩은 평가하지 않습니다. 「경간별 Ix」 를 직접 넣으면 그 값이 쓰이고 단면의 Ix 와 1 % 넘게 다르면 알립니다.">단면 목록 <span class="hint-inline" style="font-weight:normal">(경간마다 단면)</span></label>
+                            <button id="btn-sec-add" class="btn-small" style="font-size:10px;padding:1px 6px">+ 단면 추가</button>
+                        </div>
+                        <p id="sec-list-reason" class="hint" style="display:none;font-size:9px;margin:2px 0"></p>
+                        <table id="sec-list-table" style="width:100%;font-size:10px;border-collapse:collapse;border:1px solid var(--vscode-panel-border)">
+                            <thead>
+                                <tr style="background:var(--vscode-editor-selectionBackground)">
+                                    <th style="padding:3px 4px;width:28px">id</th>
+                                    <th style="padding:3px 4px">이름</th>
+                                    <th style="padding:3px 4px">H(<span data-unit="length">mm</span>)</th>
+                                    <th style="padding:3px 4px">B(<span data-unit="length">mm</span>)</th>
+                                    <th style="padding:3px 4px">D(<span data-unit="length">mm</span>)</th>
+                                    <th style="padding:3px 4px">t(<span data-unit="thickness">mm</span>)</th>
+                                    <th style="padding:3px 4px">r(<span data-unit="radius">mm</span>)</th>
+                                    <th style="padding:3px 4px">립°</th>
+                                    <th style="padding:3px 4px">Ix(<span data-unit="inertia">mm⁴</span>)</th>
+                                    <th style="padding:3px 4px;width:22px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="sec-list-tbody"></tbody>
+                        </table>
+                        <p class="hint" style="font-size:9px;margin-top:2px">같은 템플릿 종류만 · 지운 단면을 쓰던 경간은 S1 로 · 경간 수 · 경간 유형을 바꾸면 모든 경간 S1.</p>
                     </div>
                 </div>
 
@@ -8399,7 +8891,7 @@ ${inner}
                     </div>
                     <div class="input-row">
                         <label>경간별 Ix<span class="hint-inline" data-unit="inertia">mm⁴</span></label>
-                        <input type="text" id="span-Ix-list" value="" placeholder="비우면 모든 경간 같은 Ix" style="width:170px" title="경간 수만큼 쉼표로 (끝·안 부재 두께가 다를 때)">
+                        <input type="text" id="span-Ix-list" value="" placeholder="비우면 모든 경간 같은 Ix" style="width:170px" title="경간 수만큼 쉼표로 (끝·안 부재 두께가 다를 때). 경간마다 단면(단면 목록)을 고르면 Ix 는 그 단면에서 — 여기 직접 넣은 값이 이기고, 단면의 Ix 와 1 % 넘게 다르면 알립니다.">
                     </div>
                 </div>
 

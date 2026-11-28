@@ -168,25 +168,19 @@ export function buildLoadRequest(st: CaseState, ctx: RequestContext, opts: LoadR
         spanType = 'cont-' + n;
     }
     const secType = r.raw('templateType');
-    const t = String(secType || '').toLowerCase();
-    const table: Record<string, string> = { lippedc: 'C', lippedz: 'Z', track: 'Track', hat: 'Hat', rhs: 'RHS', chs: 'CHS',
-        isect: 'I', tee: 'Tee', angle: 'Angle', lipped_angle: 'LippedAngle' };
-    const normalizedSectionType = table[t] || 'custom';
+    const normalizedSectionType = loadSectionType(secType);
     const isHat = normalizedSectionType === 'Hat';
     const hasLip = ['C', 'Z', 'LippedAngle'].includes(normalizedSectionType);
     // sectionOptional: 치수 칸은 따로 읽어 막지 않는다(빈 칸이면 아래에서 단면 정보를 보내지 않는다)
     const rs = opts.sectionOptional ? new Reader(st, ctx.drafts) : r;
-    const sectionInfo: any = {
-        depth: rs.req(isHat ? 'tplB' : 'tplH', isHat ? '단면 B(깊이)' : '단면 H'),
-        flange_width: rs.req(isHat ? 'tplH' : 'tplB', isHat ? '단면 H(상판 폭)' : '단면 B'),
-        thickness: rs.req('tplT', '단면 t'),
-        lip_depth: hasLip ? rs.req('tplD', '립 D') : 0,
-        R_corner: r.opt('tplR'),
-        type: normalizedSectionType,
-        Fy: r.req('fy', '설계 Fy'),
-        Fu: r.opt('fu'),
-        Ixx: ctx.props ? ctx.props.Ixx : undefined,
-    };
+    // 읽는 차례(빈 칸의 이름 차례)는 전과 같다 — 깊이 · 폭 · t · 립 · r · Fy · Fu. 꼴은 결정 S1 의 경간 단면과 한 함수(loadSectionDict)
+    const depthV = rs.req(isHat ? 'tplB' : 'tplH', isHat ? '단면 B(깊이)' : '단면 H');
+    const widthV = rs.req(isHat ? 'tplH' : 'tplB', isHat ? '단면 H(상판 폭)' : '단면 B');
+    const tV = rs.req('tplT', '단면 t');
+    const lipV = hasLip ? rs.req('tplD', '립 D') : 0;
+    const rV = r.opt('tplR');
+    const sectionInfo: any = loadSectionDict(normalizedSectionType, depthV, widthV, tV, lipV, rV,
+        r.req('fy', '설계 Fy'), r.opt('fu'), ctx.props ? ctx.props.Ixx : undefined);
     const spanLens: number[] = [];
     st.spans.spans.forEach((v, i) => {
         if (typeof v !== 'number' || !isFinite(v)) { r.missing.push('경간 ' + (i + 1) + ' 길이'); r.missingKeys.push('spans'); spanLens.push(NaN); return; }
@@ -244,12 +238,61 @@ export function buildLoadRequest(st: CaseState, ctx: RequestContext, opts: LoadR
         }
         data.I_span_in4 = [...ixs];
     }
+    // 2026-11-28 결정 S1 · S2: 경간마다 단면 — S1 이 아닌 경간이 있을 때만(모든 경간 S1 이면 본문은 이 기능이 없던 때와 바이트까지 같다).
+    // 본문은 단면의 id 와 치수(호스트가 _analyzeLoads 에서 단면마다 엔진의 단면(Ixx 포함)으로 바꾼다 — 화면은 S2 의 Ixx 를 모른다)
+    const ss = spanSectionsBody(st, ctx);
+    if (ss.error) { return { missing: [], error: ss.error }; }
+    if (ss.missing.length) { return { missing: ss.missing, missingKeys: ss.missing.map(() => 'sections') }; }
+    if (ss.data) { data.span_sections = ss.data.span_sections; data.sections = ss.data.sections; }
     // sectionOptional 에서 단면 정보를 보내지 않으면 호스트가 모델에서 만드는 단면에 쓸 재료 값(MCP analyze_loads 의 Fy · Fu 인자와 같은 자리)
     if (opts.sectionOptional && data.section === undefined) {
         data.Fy = sectionInfo.Fy;
         if (sectionInfo.Fu !== undefined) { data.Fu = sectionInfo.Fu; }
     }
     return { data, missing: [] };
+}
+
+/** 템플릿 이름 → 하중 해석 단면의 type(app.js collectLoadAnalysisPayload 와 같은 표) */
+export function loadSectionType(templateType: unknown): string {
+    const t = String(templateType || '').toLowerCase();
+    const table: Record<string, string> = { lippedc: 'C', lippedz: 'Z', track: 'Track', hat: 'Hat', rhs: 'RHS', chs: 'CHS',
+        isect: 'I', tee: 'Tee', angle: 'Angle', lipped_angle: 'LippedAngle' };
+    return table[t] || 'custom';
+}
+
+/**
+ * 하중 해석의 단면 한 벌(analyze_loads 의 section · span_sections[i] 의 꼴) — 키 차례가 엔진 본문의 차례다. 결정 S1: 모델(S1)의 단면과
+ * 단면 목록의 단면(S2 …)이 이 한 함수로 만든다(같은 치수면 같은 단면 — 엔진의 같은 단면 판단 · 데크 강성이 같다).
+ */
+export function loadSectionDict(type: string, depth: number, flangeWidth: number, thickness: number, lipDepth: number,
+    rCorner: number | undefined, Fy: number, Fu: number | undefined, Ixx: number | undefined): any {
+    return { depth, flange_width: flangeWidth, thickness, lip_depth: lipDepth, R_corner: rCorner, type, Fy, Fu, Ixx };
+}
+
+/** 결정 S1: 템플릿 치수(H · B · D · t · r — 템플릿 칸의 뜻) → 하중 해석의 단면(loadSectionDict). hat 은 H = 상판 폭 · B = 깊이 */
+export function loadSectionFromParams(templateType: string, p: Record<string, number | null | undefined>, Fy: number, Fu: number | undefined, Ixx: number | undefined): any {
+    const type = loadSectionType(templateType);
+    const isHat = type === 'Hat';
+    const hasLip = ['C', 'Z', 'LippedAngle'].includes(type);
+    const n = (v: unknown): number | undefined => (typeof v === 'number' && isFinite(v) ? v : undefined);
+    return loadSectionDict(type, (isHat ? n(p.B) : n(p.H)) as number, (isHat ? n(p.H) : n(p.B)) as number, n(p.t) as number,
+        hasLip ? (n(p.D) as number) : 0, n(p.r), Fy, Fu, Ixx);
+}
+
+/** 결정 S1 · S2: 단면 목록이 쓸 수 있는 템플릿인가(모델 · 초안의 템플릿 종류) */
+export function sectionListTemplate(templateType: unknown): string | null {
+    const t = typeof templateType === 'string' ? templateType : '';
+    return t && DS.SECTION_TEMPLATE_PARAMS[t] ? t : null;
+}
+
+/**
+ * 결정 S1 · S2: 하중 해석 · 퍼린 본문의 span_sections(경간마다 id) · sections(쓰는 단면 S2 … 의 id · 이름 · 템플릿 · 치수 — 빈 치수는 빼고).
+ * 모든 경간이 S1 이면 data 없음. 막는 것: 템플릿 단면이 아닌 모델(초안의 템플릿이 없다 · 목록에 쓸 수 없는 종류), 템플릿이 다른 단면,
+ * 목록에 없는 id, 빈 H · B · t (missing — 「단면 S2 두께 t」).
+ */
+export function spanSectionsBody(st: CaseState, ctx: RequestContext): { data?: { span_sections: string[]; sections: any[] }; missing: string[]; error?: string } {
+    const r = DS.spanSectionsPayload(st.spans.spanSections, st.sections, ctx.drafts.templateType);
+    return { ...(r.data ? { data: r.data } : {}), missing: (r.missing || []).map((m: any) => m.label), ...(r.error ? { error: r.error } : {}) };
 }
 
 /** 자동 계산 모드의 설계 검토(runPurlinDesign → design_purlin) — app.js btn-run-design 의 본문 그대로 */
@@ -308,14 +351,24 @@ export function buildLapRequest(st: CaseState, ctx: RequestContext): BuiltReques
     if (r.chk('connZeroDemandStated')) { data.zero_demand_stated = true; }
     // 결정 R2: 패스너 힘 분배(모든 패스너가 고르게 — 자체 가정)로 판정함을 사람이 밝혔을 때만(없음 = 밝히지 않음 → 패스너 무리는 판정 없음)
     if (r.chk('lapForceModelConfirmed')) { data.lap_force_model_confirmed = true; }
+    // 2026-11-28 결정 S1 · S5: 경간마다 단면인 퍼린 결과의 그 지점 랩이 두 단면을 이으면 두 부재(부재 1 = 왼쪽 경간, 부재 2 = 오른쪽) — 화면과 같은 함수.
+    // 두 부재가 모두 S1 이면 본문은 지금까지와 같다
+    UTILS.applyLapTwoMembers(data, sec.two ?? null);
     return { data, missing: r.missing, missingKeys: r.missingKeys };
 }
 
 /** V8-01: 랩 검토의 단면 강도(그 지점의 랩 구간에서) — 호스트가 결과에 출처를 적을 때도 같은 것을 부른다 */
-export function lapSectionFor(st: CaseState, ctx: RequestContext): { Se: number | null; Vn: number | null; from: string | null; regions: string[]; support: number | null; reason: string | null } {
+export function lapSectionFor(st: CaseState, ctx: RequestContext): { Se: number | null; Vn: number | null; from: string | null; regions: string[]; support: number | null; reason: string | null;
+    support_defaulted?: boolean; two?: any } {
     const sup = st.inputs.connLapSupport;
-    const support = typeof sup === 'number' && Number.isInteger(sup) ? sup : null;
-    return UTILS.deriveLapSection(ctx.purlin ?? null, support, { stated: st.inputs.lapRestrained === true });
+    let support = typeof sup === 'number' && Number.isInteger(sup) ? sup : null;
+    // 결정 S1: 경간마다 단면인 퍼린 결과에서 지점을 정하지 않았으면 그 결과의 지배 랩(그 밖의 결과는 지금까지처럼 지점이 있어야 한다)
+    let defaulted = false;
+    if (support === null) { const g = UTILS.governingLapSupport(ctx.purlin ?? null); if (g !== null) { support = g; defaulted = true; } }
+    const stated = st.inputs.lapRestrained === true;
+    const r = UTILS.deriveLapSection(ctx.purlin ?? null, support, { stated });
+    const two = UTILS.lapTwoMembers(ctx.purlin ?? null, support, { stated });
+    return { ...r, ...(defaulted ? { support_defaulted: true } : {}), ...(two ? { two } : {}) };
 }
 
 /** 단일 접합(runConnection → design_connection) — app.js btn-run-single-conn 그대로 */

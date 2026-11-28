@@ -7,7 +7,7 @@
  * 계산은 합친 상태로 만든 화면 단추의 본문(requests.ts)에 화면 칸이 없는 인자(mcpOnly)와 계산 조건이 아닌 인자(context)를 얹어서 한다
  * (StcfsdPanel._mcpDesign — mcpBody). 화면 칸이 없는 인자는 mcpOnly[도구] 에.
  */
-import { CaseState, InputValue, SpanTable } from './caseState';
+import { CaseState, InputValue, SectionDef, SpanTable } from './caseState';
 
 const DS = require('../../webview/js/designState');
 
@@ -19,6 +19,10 @@ export interface McpWrite {
     merge: Record<string, InputValue>;
     /** 경간 표 — 묶음째(경간 · 지점 · 랩의 인자를 하나라도 받으면 그 경간 유형의 처음 표 + 받은 부분). 받지 않았으면 없음(화면의 표) */
     spans?: SpanTable;
+    /** 결정 S1: 단면 목록(S2 …) — 받으면 통째로(받은 목록이 새 목록) */
+    sections?: SectionDef[];
+    /** 결정 S1: 경간의 단면 — span_sections 만 받았을 때(경간 표를 함께 받으면 그 표의 spanSections) */
+    spanSections?: string[];
     /** 화면 칸이 없는 인자 — mcpOnly[tool] 를 이것으로 바꾸고, 그 호출의 본문에 얹는다 */
     mcpOnly: Record<string, unknown>;
     /** 계산 조건이 아닌 인자(check_location · check_combination) — 그 호출의 본문에만 얹는다(상태에 남기지 않는다) */
@@ -42,8 +46,10 @@ const NOT_CONDITIONS = new Set(['action', 'units', 'detail', 'member_type', '__t
 const CONTEXT_ARGS = new Set(['check_location', 'check_combination']);
 
 /** 지금 상태(경간 표의 바탕 · 하중 환산의 간격) — 없으면 처음 상태처럼 */
-type Cur = Pick<CaseState, 'inputs' | 'spans'> | null | undefined;
-type Mapper = (args: any, w: McpWrite, cur: Cur) => void;
+type Cur = (Pick<CaseState, 'inputs' | 'spans'> & { sections?: SectionDef[] }) | null | undefined;
+/** 결정 S1: 단면 목록의 템플릿(지금 모델의 것 — 모델이 템플릿 단면이 아니면 null) */
+export interface McpWriteContext { template?: string | null }
+type Mapper = (args: any, w: McpWrite, cur: Cur, mctx?: McpWriteContext) => void;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) ? v : null);
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -227,7 +233,7 @@ const LOAD_READS = ['spanType', 'nSpans', 'spacing', 'loadD', 'loadLr', 'loadS',
     'chkLrReduced', 'spanIxIn4', ...Object.values(DECK_BUNDLE), 'bracePointsFt', 'chkI621Confirmed', 'deckInsulationIn', 'loadComboStandard'];
 
 function loadsLike(withDesign: boolean): Mapper {
-    return (a, w, cur) => {
+    return (a, w, cur, mctx) => {
         const used = new Set<string>();
         material(a, w, used);
         if (a.member_app !== undefined) { used.add('member_app'); put(w, 'merge', 'memberType', a.member_app, 'member_app'); }
@@ -295,8 +301,63 @@ function loadsLike(withDesign: boolean): Mapper {
             webArgs(a, w, used, cur, { holes: true, stiffeners: true });
         }
         spanTable(a, w, used, spanType, nSpans);
+        sectionArgs(a, w, used, cur, mctx, spanType, nSpans);
         rest(a, w, used);
     };
+}
+
+/** 결정 S1 의 MCP 단면 치수 이름(그 호출의 단위 — 서버가 US 로 바꾼 뒤) */
+const SECTION_ARG_KEYS = ['H', 'B', 'D', 't', 'r', 'qlip'];
+/**
+ * 결정 S1 · S2: sections [{id?, name?, H, B, D, t, r, qlip}] (S1 = 지금 모델 — 목록에 넣지 않는다) 와 span_sections ['S1', 'S2', …] (경간마다 하나).
+ * 둘 다 묶음째로 — 받은 sections 가 새 목록(id 를 주지 않은 단면은 S2 부터 비어 있는 번호), 받은 span_sections 가 경간의 단면 전부.
+ * 경간 표를 묶음째 쓰면서 span_sections 를 주지 않으면 모든 경간 S1(그 표의 처음 값 — 경간별 Ix 와 같은 규칙). 모델이 템플릿 단면이 아니면 받지 않는다.
+ */
+function sectionArgs(a: any, w: McpWrite, used: Set<string>, cur: Cur, mctx: McpWriteContext | undefined, spanType: string, nSpans: number): void {
+    w.reads.push('spanSections', 'sections');
+    for (const k of ['sections', 'span_sections']) { if (a[k] !== undefined) { used.add(k); } }
+    let list: SectionDef[] | undefined;
+    if (a.sections !== undefined) {
+        const tpl = mctx?.template ?? null;
+        if (!tpl || !DS.SECTION_TEMPLATE_PARAMS[tpl]) {
+            w.skipped.push({ arg: 'sections', reason: tpl
+                ? `the current section template '${tpl}' cannot have a section list (only ${Object.keys(DS.SECTION_TEMPLATE_PARAMS).join(', ')})`
+                : 'the current section is not a template section (hand-drawn / edited) — a section list needs a template section (set_section_template); every span uses S1' });
+        } else if (!Array.isArray(a.sections)) {
+            w.skipped.push({ arg: 'sections', reason: 'sections must be an array of {id?, name?, H, B, D, t, r, qlip}' });
+        } else {
+            const raw: any[] = a.sections;
+            const keys: string[] = DS.SECTION_TEMPLATE_PARAMS[tpl];
+            const out: any[] = [];
+            const bad: string[] = [];
+            for (const s of raw) {
+                if (!s || typeof s !== 'object' || Array.isArray(s)) { bad.push('each section is an object'); continue; }
+                const extra = Object.keys(s).filter((k) => !['id', 'name', ...SECTION_ARG_KEYS].includes(k));
+                if (extra.length) { bad.push(`unknown section key(s) ${extra.join(', ')} (allowed: id, name, ${SECTION_ARG_KEYS.join(', ')})`); }
+                const unused = SECTION_ARG_KEYS.filter((k) => s[k] !== undefined && !keys.includes(k));
+                if (unused.length) { bad.push(`${unused.join(', ')} not used by the '${tpl}' template (it takes ${keys.join(', ')})`); }
+                const params: Record<string, number | null> = {};
+                for (const k of keys) { params[k] = s[k] === undefined ? null : s[k]; }
+                out.push({ id: s.id, name: s.name ?? null, template: tpl, params });
+            }
+            // id 없는 단면: S2 부터 비어 있는 번호(받은 id 를 먼저 뺀다)
+            for (const s of out) { if (s.id === undefined || s.id === null) { s.id = DS.nextSectionId(out.filter((x) => x.id)); } }
+            const errs = [...bad, ...DS.validateSections(out)];
+            if (errs.length) { w.skipped.push({ arg: 'sections', reason: errs.join(' · ') }); }
+            else { list = out.map((x) => DS.normalizeSection(x)); w.sections = list; }
+        }
+    }
+    if (a.span_sections !== undefined) {
+        const ids = DS.sectionIds(list ?? cur?.sections ?? []);
+        const n = w.spans ? w.spans.spans.length : (cur ? cur.spans.spans.length : DS.spanCount(spanType, nSpans));
+        const v = a.span_sections;
+        const errs = !Array.isArray(v) ? ['span_sections must be an array of section ids, one per span']
+            : DS.validateSpanTable({ spans: Array.from({ length: n }, () => 0), supports: Array.from({ length: n + 1 }, () => 'P'),
+                lapsPerSupport: Array.from({ length: n + 1 }, () => ({ left: null, right: null })), spanSections: v }, 'cont-n', n, ids);
+        if (errs.length) { w.skipped.push({ arg: 'span_sections', reason: errs.join(' · ') }); }
+        else if (w.spans) { w.spans = { ...w.spans, spanSections: [...v] }; }
+        else { w.spanSections = [...v]; }
+    }
 }
 
 /**
@@ -413,18 +474,19 @@ export function mcpGroupFor(action: string, options: any): { tool: string; map: 
 }
 
 /** MCP 도구의 인자(US) → 상태에 합칠 것. cur = 지금 상태(경간 표의 바탕 · 하중 환산의 간격) */
-export function mcpWrite(action: string, options: any, cur?: Cur): McpWrite | null {
+export function mcpWrite(action: string, options: any, cur?: Cur, mctx?: McpWriteContext): McpWrite | null {
     const g = mcpGroupFor(action, options);
     if (!g) { return null; }
     const w: McpWrite = { tool: g.tool, group: {}, merge: {}, mcpOnly: {}, context: {}, unset: [], drafts: {}, reads: [], skipped: [] };
-    g.map(options || {}, w, cur);
+    g.map(options || {}, w, cur, mctx);
     w.reads = [...new Set(w.reads)];
     return w;
 }
 
 /** 이 호출에 받은 검토 상태의 칸(합치기 · 묶음 · 경간 표의 받은 부분) */
 export function givenKeys(w: McpWrite): Set<string> {
-    return new Set([...Object.keys(w.merge), ...Object.keys(w.group), ...Object.keys(w.spans || {})]);
+    return new Set([...Object.keys(w.merge), ...Object.keys(w.group), ...Object.keys(w.spans || {}),
+        ...(w.sections !== undefined ? ['sections'] : []), ...(w.spanSections !== undefined ? ['spanSections'] : [])]);
 }
 
 /** 합친 상태로 만든 화면 단추의 본문 → 그 호출의 엔진 본문: 화면 칸이 없는 인자 · 위치 · 조합 꼬리표를 얹는다 */
@@ -502,9 +564,11 @@ export function inputsUsed(w: McpWrite, st: CaseState): { key: string; value: un
         if (webFieldIdle(k, inp)) { continue; }
         // 압축의 구멍은 §E 의 키만(§G3 · §G6 의 칸은 본문에 가지 않는다)
         if (w.tool === 'aisi_design_compression' && ['holeEndDistance', 'holeCornerRadius', 'holeBearingDistance', 'holeWithinBearing'].includes(k)) { continue; }
-        const span = k === 'spans' || k === 'supports' || k === 'lapsPerSupport';
-        const v = span ? (st.spans as any)[k] : inp[k];
+        const span = k === 'spans' || k === 'supports' || k === 'lapsPerSupport' || k === 'spanSections';
+        const v = k === 'sections' ? st.sections : span ? (st.spans as any)[k] : inp[k];
         if (v === null || v === undefined || v === '' || notSent(k, v)) { continue; }
+        // 결정 S1: 모든 경간 S1 · 빈 단면 목록은 본문에 가지 않는다
+        if ((k === 'spanSections' || k === 'sections') && DS.sectionsAreDefault(st.spans.spanSections, st.sections)) { continue; }
         out.push({ key: k, value: clone(v), source: st.sources[k] ?? 'default' });
     }
     return out;
