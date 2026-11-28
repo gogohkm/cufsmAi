@@ -665,7 +665,9 @@ const PURLIN_REGION: Table = {
     lap_members: PURLIN_MEMBER_LINE, sections_checked: PURLIN_MEMBER_LINE,
     // 결정 S3′: 랩의 강도의 합(판정)과 강성의 몫으로 본 값(참고)
     sum_of_strengths: { Mu: 'moment', design_strengths: 'moment', design_strength_sum: 'moment', flexure_ratio: 'none', Vu: 'force',
-        shear_strengths: 'force', shear_strength_sum: 'force', shear_ratio: 'none', shares_M: 'none', shares_V: 'none', label_params: { '*': 'none' } },
+        shear_strengths: 'force', shear_strength_sum: 'force', shear_ratio: 'none', shares_M: 'none', shares_V: 'none', label_params: { '*': 'none' },
+        bending_shear_ratio: 'none', governing: { ratio: 'none' }, evaluated: 'none', not_evaluated: 'none' },
+    lap_items_not_evaluated: 'none',
     reference_stiffness_share: { shares: 'none', ratio: 'none', governing_member: 'none', members: { share: 'none', utilization: 'none' }, label_params: { '*': 'none' } },
     result: PURLIN_REGION_RESULT,
 };

@@ -5393,9 +5393,11 @@
             if (ap.deck) {
                 html += 'Deck: k&phi;=' + _ruv(ap.deck.kphi, 'rotStiff') + ' ' + _rul('rotStiff') +
                     ', kx=' + _ruv(ap.deck.kx, 'latStiff') + ' ' + _rul('latStiff')
-                    // 결정 S7′: 경간마다 단면이면 데크 강성은 한 번 — 그 값을 준 단면(kφ 가 가장 작은 단면, 설계 매뉴얼 II-1C)
-                    + (ap.deck_basis && ap.deck_basis.section_id && Array.isArray(ap.deck_basis.by_section) && ap.deck_basis.by_section.length > 1
-                        ? ' <span class="hint">(모든 경간 — 단면 ' + _esc(ap.deck_basis.section_id) + ' 의 값, kφ 가 가장 작은 단면)</span>' : '') + '<br>';
+                    // 결정 S7′ · F2 의 2: 경간마다 단면이면 데크 강성은 한 번 — 가장 작은 kφ 와 가장 작은 kx 를 따로(값마다 그 단면, 설계 매뉴얼 II-1C)
+                    + (ap.deck_basis && ap.deck_basis.kphi_section_id && Array.isArray(ap.deck_basis.by_section) && ap.deck_basis.by_section.length > 1
+                        ? ' <span class="hint">(모든 경간 — ' + (ap.deck_basis.kphi_section_id === ap.deck_basis.kx_section_id
+                            ? '단면 ' + _esc(ap.deck_basis.kphi_section_id) + ' 의 값, kφ · kx 가 가장 작은 단면'
+                            : 'kφ 는 단면 ' + _esc(ap.deck_basis.kphi_section_id) + ', kx 는 단면 ' + _esc(ap.deck_basis.kx_section_id) + ' 의 값 — 가장 작은 값을 따로') + ')</span>' : '') + '<br>';
                 // V4-34: 경고(warnings)만 경고 색. 가정은 보통 글, 범위 안내(scope_notes — 「예비설계 추정」 등)는 접힌 글.
                 _deckNotes(ap.deck).warnings.forEach(w => {
                     html += '<span style="color:var(--vscode-editorWarning-foreground)">⚠ ' + _esc(userText(w)) + '</span><br>';
@@ -5837,13 +5839,15 @@
                 const rv = _v3(rr);
                 const isGov = data.purlin_governing && rg.id != null && data.purlin_governing.id === rg.id;
                 const lm = _ms && Array.isArray(rg.lap_members) ? rg.lap_members : null;
-                const _sos = rg.sum_of_strengths && typeof rg.sum_of_strengths.flexure_ratio === 'number' ? rg.sum_of_strengths : null;
+                const _sos = rg.sum_of_strengths && typeof rg.sum_of_strengths === 'object' ? rg.sum_of_strengths : null;
+                const _pc = (v) => (typeof v === 'number' ? (v * 100).toFixed(1) + '%' : '평가하지 못함');
                 const _rst = rg.reference_stiffness_share && typeof rg.reference_stiffness_share.ratio === 'number' ? rg.reference_stiffness_share : null;
                 const secCell = !_ms ? '' : '<td class="purlin-sec-cell"' + (_rst
                     ? ' title="' + _esc('참고(강성의 몫 I_i / (I_1 + I_2) 로 부재마다 본 값): 지배 부재 ' + (_rst.ratio * 100).toFixed(1) + '% — 판정이 아님') + '"' : '') + '>'
                     + (lm ? lm.map((m, i) => _esc(m.section_id) + (typeof m.share === 'number' ? ' ' + (m.share * 100).toFixed(1) + '%' : '') + (rg.governing_member === i + 1 ? '＊' : '')).join(' | ')
                         + (rg.lap_evaluable === false ? '<br><span class="hint">춤이 달라 평가하지 못함</span>' : '')
-                        + (_sos ? '<br><span class="hint">강도의 합: 휨 ' + (_sos.flexure_ratio * 100).toFixed(1) + '%' + (typeof _sos.shear_ratio === 'number' ? ' · 전단 ' + (_sos.shear_ratio * 100).toFixed(1) + '%' : '') + '</span>' : '')
+                        + (_sos ? '<br><span class="hint">강도의 합: 휨 ' + _pc(_sos.flexure_ratio) + (_sos.Vu != null ? ' · 전단 ' + _pc(_sos.shear_ratio) : '')
+                            + (typeof _sos.bending_shear_ratio === 'number' ? ' · §H2 ' + (_sos.bending_shear_ratio * 100).toFixed(1) + '%' : '') + '</span>' : '')
                         + (_rst ? '<br><span class="hint">강성의 몫 ' + (_rst.ratio * 100).toFixed(1) + '% (참고)</span>' : '')
                     : Array.isArray(rg.sections_checked) ? rg.sections_checked.map((m) => _esc(m.section_id)).join(' · ') + '<br><span class="hint">단면마다 검토</span>'
                     : _esc(rg.section_id || '—')) + '</td>';
@@ -5857,7 +5861,11 @@
                         : rg.members === 2
                         ? fmtVal(rg.Mu / 2, 'moment') + ' /부재<br><span class="hint">합 ' + fmtVal(rg.Mu, 'moment') + '</span>'
                         : fmtVal(rg.Mu, 'moment')) + '</td>'
-                    + '<td>' + (rr && !rr.error ? fmtVal(rr.design_strength, 'moment') : '—') + '</td>'
+                    // 검증 F2 의 6: 서로 다른 두 단면의 랩은 한 부재의 강도가 아니라 두 부재 설계 강도의 합(항 · Σ) — 같은 두 부재 · 한 단면은 그대로
+                    + '<td>' + (lm && _sos && lm.length === 2 && rg.lap_evaluable !== false && lm[0].section_id !== lm[1].section_id && Array.isArray(_sos.design_strengths)
+                        ? _sos.design_strengths.map((v, i) => (typeof v === 'number' ? fmtVal(v, 'moment') : '—') + ' ' + _esc(lm[i].section_id)).join('<br>')
+                            + '<br><span class="hint">Σ ' + (typeof _sos.design_strength_sum === 'number' ? fmtVal(_sos.design_strength_sum, 'moment') : '—') + '</span>'
+                        : rr && !rr.error ? fmtVal(rr.design_strength, 'moment') : '—') + '</td>'
                     + '<td>' + (typeof rg.beta_dist === 'number' ? rg.beta_dist.toFixed(3) : '—') + '</td>'
                     // 2026-11-26: 구간 결과도 같은 규칙(utils.lengthBoundFailure) — 구멍 없는 강도로도 넘은 구간은 그 상한의 비(＊)
                     + '<td>' + (() => {
@@ -5887,7 +5895,7 @@
                         + '<td>' + f(dk.kphi, 'rotStiff') + '</td></tr>';
                 });
                 summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: t ' + unitLabel('thickness') + ', Ix ' + unitLabel('inertia') + ', Sf ' + unitLabel('modulus')
-                    + ', Mcr ' + unitLabel('moment') + ', kφ ' + unitLabel('rotStiff') + '. 좌굴값은 그 단면의 S-S 서명곡선(설계 Fy). 데크 강성은 모든 경간에 한 값 — 쓰이는 단면 가운데 kφ 가 가장 작은 단면으로 한 번(설계 매뉴얼 II-1C).</div>';
+                    + ', Mcr ' + unitLabel('moment') + ', kφ ' + unitLabel('rotStiff') + '. 좌굴값은 그 단면의 S-S 서명곡선(설계 Fy). 데크 강성은 모든 경간에 한 값 — 쓰이는 단면 가운데 가장 작은 kφ 와 가장 작은 kx 를 따로 골라 한 번(설계 매뉴얼 II-1C).</div>';
             }
         }
 

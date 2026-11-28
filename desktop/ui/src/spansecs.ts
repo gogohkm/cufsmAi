@@ -151,7 +151,14 @@ export function regionSecBlock(rg: { us: any; si: any } | undefined, ri: number)
   }
   const lap = Array.isArray(us.lap_members);
   const depth = lap && us.depth_mismatch === true ? `<div class="notice" data-depth-mismatch${tip('결정 S4 — 설계 매뉴얼의 가정은 같은 춤의 겹친 부재다')}>두 부재의 춤이 다르다 — 이 랩 구간은 평가하지 않는다(판정 없음 · 합격이 아니다)</div>` : '';
-  const body = lap ? (ne ? '' : lapSumRows(us, s, pre)) + lapMembersTable(us, s, pre, ne) + (ne ? '' : stiffRef(us, s, pre)) : sectionsCheckedTable(us, s, pre);
+  // 검증 2026-11-28 F2 의 1: 한 쪽 강도만 아는 랩 — 아는 쪽의 강도의 합 줄(불합격이면 구간이 불합격)과 평가하지 못한 항목 · 까닭
+  if (!ne && lap && Array.isArray(us.lap_items_not_evaluated) && us.lap_items_not_evaluated.length) {
+    rows.push(row_('평가하지 못한 항목', `<span class="un" data-lap-items-ne="${esc(us.lap_items_not_evaluated.join(','))}">${us.lap_items_not_evaluated.map((k: string) => esc(LAP_ITEM_KO[k] ?? k)).join(' · ')}</span>`
+      + (typeof us.not_evaluated_reason === 'string' ? ` <span class="faint" data-ne-reason${us.not_evaluated_reason_code ? ` data-code="${esc(us.not_evaluated_reason_code)}"` : ''}>— ${esc(fieldText(us, 'not_evaluated_reason'))}</span>` : ''),
+    `<span class="why"${tip('불합격이 평가하지 못한 항목을 이긴다 — 아는 쪽이 넘으면 구간은 불합격, 아니면 판정 없음(합격이 아니다)')}>${us.result?.pass === false ? '불합격이 이긴다' : '판정 없음'}</span>`));
+  }
+  const hasSum = !!(us.sum_of_strengths && typeof us.sum_of_strengths === 'object');
+  const body = lap ? (ne && !hasSum ? '' : lapSumRows(us, s, pre)) + lapMembersTable(us, s, pre, ne) + (ne ? '' : stiffRef(us, s, pre)) : sectionsCheckedTable(us, s, pre);
   return sec(lap ? '단면 · 랩의 두 부재' : '단면 — 경간마다', table(rows.join('')) + depth + body, '',
     '경간마다 다른 퍼린 단면(결정 S1 · S3′ · S4) — 호스트의 퍼린 결과 그대로', ` data-region-sec="${esc(String(us.id ?? ri))}"`);
 }
@@ -208,6 +215,8 @@ function sectionsCheckedTable(us: any, s: any, pre: string): string {
 }
 
 const SUM_BASIS = '두 부재 강도의 합 — 설계 매뉴얼 II-1A · II-2A 의 가정';
+/** F2 의 1: 랩의 평가하지 못한 항목(호스트 lap_items_not_evaluated) */
+const LAP_ITEM_KO: Record<string, string> = { flexure: '휨', shear: '전단(§G2)', bending_shear: '휨 + 전단(§H2)' };
 /**
  * 결정 S3′ — 랩 구간의 판정 줄: 휨 Mu / Σ φMn · 전단 Vu / Σ φVn(부재마다의 강도와 함께), 구간의 지배 판정비 · 판정(결과 그대로).
  * 구간의 판정이 OK · NG 일 때만 판정비로, 판정 없음이면 참고 비(합격이 아니다). 평가하지 못한 랩은 부르지 않는다(까닭만)
@@ -222,16 +231,26 @@ function lapSumRows(us: any, s: any, pre: string): string {
     : decided ? ratio(v, v > 1, src) : refRatio(v, '구간의 판정이 없다(평가하지 못한 항목이 있다) — 이 비는 판정비가 아니고 합격도 아니다'));
   const q = (v: unknown, src: string, kind: Kind) => (typeof v === 'number' && Number.isFinite(v) ? num(v, { src, kind, sig: 4 }) : '<span class="faint">—</span>');
   const parts = (xs: unknown, k: string, kind: Kind) => (Array.isArray(xs) ? xs.map((_x, j) => n4(ss[k]?.[j], `${p}${k}.${j}`, kind)).join(' + ') : '');
-  const fl = `Mu ${q(ss.Mu, `${p}Mu`, 'moment')} / Σ φMn (${parts(sum.design_strengths, 'design_strengths', 'moment')} = ${q(ss.design_strength_sum, `${p}design_strength_sum`, 'moment')}) = ${r(sum.flexure_ratio, `${p}flexure_ratio`)}`;
+  // F2 의 1: 한 쪽 강도만 알면 모르는 쪽은 「평가하지 못함」(판정비 없음 — 합격으로 그리지 않는다)
+  const neItem = (k: string) => `<span class="un" data-sum-ne="${k}"${tip('부재 하나의 설계강도를 얻지 못해 두 부재 강도의 합을 만들 수 없다 — 평가하지 못함(합격이 아니다)')}>평가하지 못함</span>`;
+  const neList: string[] = Array.isArray(sum.not_evaluated) ? sum.not_evaluated : [];
+  const fl = typeof sum.flexure_ratio !== 'number' && neList.includes('flexure')
+    ? `Mu ${q(ss.Mu, `${p}Mu`, 'moment')} / Σ φMn (${parts(sum.design_strengths, 'design_strengths', 'moment')}) — ${neItem('flexure')}`
+    : `Mu ${q(ss.Mu, `${p}Mu`, 'moment')} / Σ φMn (${parts(sum.design_strengths, 'design_strengths', 'moment')} = ${q(ss.design_strength_sum, `${p}design_strength_sum`, 'moment')}) = ${r(sum.flexure_ratio, `${p}flexure_ratio`)}`;
   const sh = Array.isArray(sum.shear_strengths) && typeof sum.Vu === 'number'
-    ? `Vu ${q(ss.Vu, `${p}Vu`, 'force')} / Σ φVn (${parts(sum.shear_strengths, 'shear_strengths', 'force')} = ${q(ss.shear_strength_sum, `${p}shear_strength_sum`, 'force')}) = ${r(sum.shear_ratio, `${p}shear_ratio`)}`
+    ? (typeof sum.shear_ratio !== 'number' && neList.includes('shear')
+      ? `Vu ${q(ss.Vu, `${p}Vu`, 'force')} / Σ φVn (${parts(sum.shear_strengths, 'shear_strengths', 'force')}) — ${neItem('shear')}`
+      : `Vu ${q(ss.Vu, `${p}Vu`, 'force')} / Σ φVn (${parts(sum.shear_strengths, 'shear_strengths', 'force')} = ${q(ss.shear_strength_sum, `${p}shear_strength_sum`, 'force')}) = ${r(sum.shear_ratio, `${p}shear_ratio`)}`)
     : '<span class="faint">소요 전단 없음 — 전단은 검토하지 않았다</span>';
+  const h2 = neList.includes('bending_shear') ? neItem('bending_shear')
+    : typeof sum.bending_shear_ratio === 'number' ? `${r(sum.bending_shear_ratio, `${p}bending_shear_ratio`)} <span class="faint">두 부재 값 가운데 큰 것</span>` : '<span class="faint">—</span>';
   const v = vText(us.result?.pass);
   const gv = `${r(us.result?.utilization, `${pre}result.utilization`)} <span class="verdict ${v.cls}" style="font-weight:400" data-sum-verdict="${us.result?.pass === true ? 'ok' : us.result?.pass === false ? 'ng' : 'none'}">${v.text}</span>`
     + (us.result?.governing_check ? ` <span class="faint">${esc(String(pageOf(us.result)?.governing_check ?? us.result.governing_check))}</span>` : '');
   return table(row_('휨', `<span data-sum-flexure>${fl}</span>`, '<span class="tag drv">강도의 합</span>')
     + row_('전단', `<span data-sum-shear>${sh}</span>`, '<span class="tag drv">강도의 합</span>')
-    + row_('구간', `<span data-sum-gov>${gv}</span>`, `<span class="why"${tip('§H2(휨 + 전단)도 강도의 몫으로 부재마다 엔진이 검토 — 구간의 판정비는 두 부재 가운데 큰 것')}>지배</span>`), ' data-lap-sum')
+    + row_('휨 + 전단 §H2', `<span data-sum-h2>${h2}</span>`, `<span class="why"${tip('§H2 는 강도의 몫으로 본 두 부재의 값 가운데 큰 것 — 부재마다 지배 휨강도가 §H2 가 쓰는 강도(Malo)이면 합한 강도로 본 값과 같고, 다른 휨 한계상태가 지배하면 조금 크다(안전측)')}>엔진 · 부재마다</span>`)
+    + row_('구간',`<span data-sum-gov>${gv}</span>`, `<span class="why"${tip('§H2(휨 + 전단)도 강도의 몫으로 부재마다 엔진이 검토 — 구간의 판정비는 두 부재 가운데 큰 것')}>지배</span>`), ' data-lap-sum')
     + `<div class="dim" data-strength-basis="${esc(String(us.strength_basis ?? sum.basis ?? ''))}"${tip(`결정 S3′(${SUM_BASIS}) — 각 부재가 제 강도의 비만큼 M · V 를 진다고 보고 엔진이 부재마다 검토한다(판정비 = 강도의 합으로 본 값). 두 단면이 같으면 몫이 절반씩`)}>${esc(fieldText(sum, 'label') || SUM_BASIS)}</div>`;
 }
 
@@ -295,12 +314,21 @@ export function psecInfo(key: string): string {
 function deckBlock(us: any, s: any, pre: string): string {
   const du = us.deck_used, ds = s.deck_used ?? du;
   if (!du || typeof du !== 'object' || (typeof du.kphi !== 'number' && typeof du.kx !== 'number')) { return ''; }
-  const kv = (o: any, p: string) => `kφ ${num(o?.kphi, { src: `${p}.kphi`, kind: 'rot_stiff', sig: 4 })} · kx ${num(o?.kx, { src: `${p}.kx`, kind: 'lat_stiff', sig: 4 })}`;
+  // 검증 2026-11-28 F2 의 2: kφ 와 kx 는 따로 가장 작은 값 — 값마다 그 단면(같으면 한 단면)
+  const kphiId = du.kphi_section_id != null ? String(du.kphi_section_id) : '';
+  const kxId = du.kx_section_id != null ? String(du.kx_section_id) : '';
+  const oneSec = kphiId !== '' && kphiId === kxId;
+  const kv = (o: any, p: string, ids = false) => `kφ ${num(o?.kphi, { src: `${p}.kphi`, kind: 'rot_stiff', sig: 4 })}${ids && !oneSec && kphiId ? ` <span class="faint" data-deck-kphi-sec="${esc(kphiId)}">(${esc(kphiId)})</span>` : ''}`
+    + ` · kx ${num(o?.kx, { src: `${p}.kx`, kind: 'lat_stiff', sig: 4 })}${ids && !oneSec && kxId ? ` <span class="faint" data-deck-kx-sec="${esc(kxId)}">(${esc(kxId)})</span>` : ''}`;
   const own = us.deck_own, os = s.deck_own ?? own;
   const differs = own && typeof own === 'object' && (own.kphi !== du.kphi || own.kx !== du.kx);
+  const tag = oneSec ? `${esc(kphiId)} 의 값` : kphiId || kxId ? `kφ ${esc(kphiId || '—')} · kx ${esc(kxId || '—')}` : '데크';
+  const rule = oneSec ? `한 번 계산 — kφ · kx 가 가장 작은 단면(${esc(kphiId)})의 값을 모든 경간에`
+    : kphiId || kxId ? `한 번 계산 — 가장 작은 kφ(단면 ${esc(kphiId || '—')})와 가장 작은 kx(단면 ${esc(kxId || '—')})를 따로 모든 경간에`
+      : '한 번 계산 — 가장 작은 kφ 와 가장 작은 kx 를 따로 모든 경간에';
   return sec('데크 강성', table(
-    row_('쓴 값', `<span data-deck-used="${esc(String(du.section_id ?? ''))}">${kv(ds, `${pre}deck_used`)}</span>`, `<span class="tag drv">${du.section_id ? `${esc(String(du.section_id))} 의 값` : '데크'}</span>`)
-    + row_('규칙', `<span data-deck-rule${tip('설계 매뉴얼 II-1C 의 「안전측의 근사」 — 두께만 다르면 얇은 쪽. 모든 경간의 정모멘트 곡선이 이 한 값으로')}>한 번 계산 — kφ 가 가장 작은 단면${du.section_id ? `(${esc(String(du.section_id))})` : ''}의 값을 모든 경간에</span>`, '')
+    row_('쓴 값', `<span data-deck-used="${esc(oneSec ? kphiId : [kphiId, kxId].filter(Boolean).join(','))}">${kv(ds, `${pre}deck_used`, true)}</span>`, `<span class="tag drv">${tag}</span>`)
+    + row_('규칙', `<span data-deck-rule${tip('설계 매뉴얼 II-1C 의 「안전측의 근사」 — 두께만 다르면 얇은 쪽. kφ 와 kx 를 따로 가장 작은 값으로 골라 어느 경간도 제 단면의 값보다 큰 데크 강성을 받지 않는다. 모든 경간의 정모멘트 곡선이 이 한 값으로')}>${rule}</span>`, '')
     + (differs ? row_('이 단면의 값', `<span class="faint" data-deck-own${tip('참고 — 이 단면의 t · B 로 계산한 값. 쓰지 않았다')}>${kv(os, `${pre}deck_own`)} · 참고 — 쓰지 않음</span>`, '') : '')),
   '', '결정 S7′ — 데크 강성 하나(호스트의 퍼린 결과 그대로)', ' data-psec-deck');
 }

@@ -108,8 +108,9 @@ def analyze_loads(
               - 경간별 Ix = 그 경간 단면의 Ixx (I_span_in4 를 따로 주면 그 값을 쓰고, 단면의 Ixx 와 1 % 넘게 다른
                 경간마다 경고 — 결정 S6). 모든 단면의 Ixx 가 같으면 Ix 하나(오늘과 같은 길).
               - §I6.2.1 조건과 양력 R 을 경간마다 그 단면으로(결정 S7) — auto_params.i621_by_span, uplift_R_by_span.
-              - 데크 kφ · kx 는 한 번(결정 S7′ — 쓰이는 단면 가운데 kφ 가 가장 작은 단면, 설계 매뉴얼 II-1C 의 안전측 근사):
-                auto_params.deck 가 그 값, auto_params.deck_basis {rule, section_id, by_section(단면마다 — 참고)}.
+              - 데크 kφ · kx 는 한 번(결정 S7′ — 쓰이는 단면 가운데 가장 작은 kφ 와 가장 작은 kx 를 따로, 설계 매뉴얼 II-1C 의
+                안전측 근사): auto_params.deck 가 그 값, auto_params.deck_basis {rule, kphi_section_id, kx_section_id,
+                by_section(단면마다 — 참고)}. 데크 강성을 계산하지 못하는 단면이 있으면 ValueError.
               - 구간 기록마다 span · spans(0 부터), 랩 구간은 두 부재 · 강성 몫(참고 — 판정은 두 부재 강도의 합, 결정 S3′).
               - section 을 주지 않으면 section = span_sections[0] (옛 단일 키 — deck, i621_check, deflection.Ixx — 의 단면).
             없으면 결과는 오늘과 바이트까지 같다. 모든 경간에 같은 단면이면 옛 키의 값은 section 하나와 같다.
@@ -261,8 +262,9 @@ def analyze_loads(
     if span_secs is not None:
         auto_params['deck_basis'] = deck_basis
         if secs_differ and deck_type != 'none':
-            assumptions.append(_nt('loads.assumption.deck_once_smallest_kphi', section_id=deck_basis['section_id'],
-                                   kphi=float((deck_info.get('display_unrounded') or {}).get('kphi', deck_info['kphi']))))
+            assumptions.append(_nt('loads.assumption.deck_once_smallest_kphi', kphi_section=deck_basis['kphi_section_id'],
+                                   kphi=float((deck_info.get('display_unrounded') or {}).get('kphi', deck_info['kphi'])),
+                                   kx_section=deck_basis['kx_section_id']))
         geo = span_geometry(spans, laps_ps if has_laps else None, sup)
         I_used = list(I_span_in4) if I_span_in4 is not None else list(sec_I)
     x_list = units['x'].tolist()
@@ -1420,9 +1422,13 @@ def _span_keys(g: dict) -> dict:
 
 
 def _deck_once(deck, span_secs, E):
-    """결정 S7′: 데크 강성 한 번 — 쓰이는 단면(나온 차례)마다 _calc_deck_info, 그 가운데 kφ 가 가장 작은 단면(같으면 kx 가
-    작은 쪽, 그다음 앞의 단면)의 결과 전부를 모든 경간에. 반환: (그 데크 결과, deck_basis {rule, section_id, by_section}).
-    by_section 은 단면마다의 값(참고 — 해석에 쓰지 않음)."""
+    """결정 S7′(검증 2026-11-28 F2 의 2 로 고침): 데크 강성 한 번 — 쓰이는 단면(나온 차례)마다 _calc_deck_info, 그 가운데
+    가장 작은 kφ 와 가장 작은 kx 를 **따로** 골라(kφ: 같으면 kx 가 작은 쪽, 그다음 앞의 단면 / kx: 같으면 kφ 가 작은 쪽, 그다음
+    앞의 단면) 모든 경간에 — 어느 단면도 제 단면의 값보다 큰 데크 값을 받지 않는다(kφ 가 가장 작은 단면이 플랜지가 좁은 두꺼운
+    부재라 kx 가 클 수 있다). 설계 매뉴얼 II-1C(두께만 다른 두 부재 — 얇은 쪽)에서는 두 값이 같은 단면에서 온다.
+    반환: (그 데크 결과, deck_basis {rule, kphi_section_id, kx_section_id, by_section}). by_section 은 단면마다의 값(참고).
+    데크 강성을 계산하지 못하는 단면(두께 · 플랜지 폭이 없음)이 있으면 ValueError — 그 단면의 0 이 말없이 모든 경간의 값이 되거나
+    그 단면을 건너뛰지 않는다(시험값 kphi_override · kx_override 를 주면 계산하지 않으므로 그대로 쓴다)."""
     rows = []
     infos = {}
     for i, s in enumerate(span_secs):
@@ -1431,21 +1437,44 @@ def _deck_once(deck, span_secs, E):
             next(r for r in rows if r['section_id'] == sid)['spans'].append(i)
             continue
         di = _calc_deck_info(deck, s, E=E)
+        missing = [k for k in ('kphi', 'kx') if di.get(f'{k}_method') == 'not_computed_missing_section']
+        if missing:
+            need = 'thickness and flange_width' if 'kphi' in missing else 'thickness'
+            raise ValueError(f'span_sections: the deck stiffness ({", ".join(missing)}) of section {sid} cannot be '
+                             f'computed — its {need} is not given. Give every section\'s purlin thickness and '
+                             f'flange width (or the deck kphi_override / kx_override from tests).')
         infos[sid] = di
         rows.append({'section_id': sid, 'spans': [i], 'kphi': di['kphi'], 'kx': di['kx'],
                      'kphi_method': di['kphi_method'], 'kx_method': di['kx_method']})
 
     def raw(di, k):
         return float((di.get('display_unrounded') or {}).get(k, di.get(k) or 0.0))
-    pick = min(range(len(rows)), key=lambda j: (raw(infos[rows[j]['section_id']], 'kphi'),
-                                               raw(infos[rows[j]['section_id']], 'kx'), j))
-    sid = rows[pick]['section_id']
+
+    def val(j, k):
+        return raw(infos[rows[j]['section_id']], k)
+    pk = min(range(len(rows)), key=lambda j: (val(j, 'kphi'), val(j, 'kx'), j))
+    px = min(range(len(rows)), key=lambda j: (val(j, 'kx'), val(j, 'kphi'), j))
+    sid_phi, sid_x = rows[pk]['section_id'], rows[px]['section_id']
     for j, r in enumerate(rows):
-        r['adopted'] = j == pick
-    return infos[sid], {'rule': 'once_smallest_kphi', 'section_id': sid,
-                        'reference': 'Design Manual Example II-1C — computed once with the thinner purlin '
-                                     '(conservative approximation)',
-                        'by_section': rows}
+        r['adopted_kphi'] = j == pk
+        r['adopted_kx'] = j == px
+    info = infos[sid_phi]
+    if sid_x != sid_phi:
+        ix = infos[sid_x]
+        info = dict(info)
+        info['kx'] = ix['kx']
+        info['kx_method'] = ix['kx_method']
+        info['display_unrounded'] = {**(info.get('display_unrounded') or {}),
+                                     'kx': (ix.get('display_unrounded') or {}).get('kx', ix['kx'])}
+        # 두 단면의 알림(같은 글은 한 번) — kx 의 가정(패스너 전단강도 등)은 kx 를 준 단면의 것
+        for k in ('warnings', 'assumptions', 'scope_notes'):
+            info[k] = list(info.get(k) or []) + [x for x in (ix.get(k) or []) if x not in (info.get(k) or [])]
+        info['notes'] = info['warnings'] + info['assumptions'] + info['scope_notes']
+    return info, {'rule': 'once_smallest_kphi_and_kx', 'kphi_section_id': sid_phi, 'kx_section_id': sid_x,
+                  'reference': 'Design Manual Example II-1C — computed once with the thinner purlin '
+                               '(conservative approximation); the smallest kphi and the smallest kx of the '
+                               'sections in use are taken separately',
+                  'by_section': rows}
 
 
 def _lap_shares(span_secs, I_used, a, b):

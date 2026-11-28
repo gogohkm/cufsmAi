@@ -737,18 +737,21 @@
                         status: 'pass',
                         value: ids.map((id, i) => (i + 1) + ': ' + id).join(', '),
                         criterion: '구간마다 그 구간의 최대 모멘트가 놓인 경간의 단면(같은 템플릿 종류) — 결정 S1',
-                        note: '경간의 Ix · §I6.2.1 R · 좌굴값은 그 단면의 것, 데크 강성은 한 번(kφ 가 가장 작은 단면). 랩은 두 부재 강도의 합으로 검토, 춤이 다른 랩은 평가하지 않음.',
+                        note: '경간의 Ix · §I6.2.1 R · 좌굴값은 그 단면의 것, 데크 강성은 한 번(가장 작은 kφ · kx 를 따로). 랩은 두 부재 강도의 합으로 검토, 춤이 다른 랩은 평가하지 않음.',
                     });
-                    // 결정 S7′: 데크 강성은 한 번 — 쓰이는 단면 가운데 kφ 가 가장 작은 단면의 값을 모든 경간에(설계 매뉴얼 II-1C 의 안전측 근사)
+                    // 결정 S7′ · 검증 F2 의 2: 데크 강성은 한 번 — 쓰이는 단면 가운데 가장 작은 kφ 와 가장 작은 kx 를 따로 모든 경간에(설계 매뉴얼 II-1C 의 안전측 근사)
                     const dB = apS && apS.deck_basis && Array.isArray(apS.deck_basis.by_section) ? apS.deck_basis : null;
                     if (dB && apS.deck && apS.deck.type && apS.deck.type !== 'none') {
-                        const own = dB.by_section.filter((r) => r && !r.adopted);
+                        const sameSec = dB.kphi_section_id === dB.kx_section_id;
+                        const own = dB.by_section.filter((r) => r && !(r.adopted_kphi && r.adopted_kx));
                         checks.push({
-                            category: catF, item: '데크 강성 — 한 번 (kφ 가 가장 작은 단면)',
+                            category: catF, item: '데크 강성 — 한 번 (가장 작은 kφ · kx)',
                             status: 'pass',
-                            value: '단면 ' + dB.section_id + ': kφ ' + _ruv(apS.deck.kphi, 'rotStiff') + ' ' + _rul('rotStiff') + ', kx ' + _ruv(apS.deck.kx, 'latStiff') + ' ' + _rul('latStiff') + ' — 모든 경간',
-                            criterion: '쓰이는 단면 가운데 kφ 가 가장 작은 단면으로 한 번 계산(두께만 다르면 얇은 쪽 — 설계 매뉴얼 II-1C 의 안전측 근사, 결정 S7′)',
-                            note: own.length ? '참고(쓰지 않음): ' + own.map((r) => r.section_id + ' kφ ' + _ruv(r.kphi, 'rotStiff')).join(' · ') + ' ' + _rul('rotStiff') : '',
+                            value: (sameSec ? '단면 ' + dB.kphi_section_id + ': ' : '')
+                                + 'kφ ' + _ruv(apS.deck.kphi, 'rotStiff') + ' ' + _rul('rotStiff') + (sameSec ? '' : ' (단면 ' + dB.kphi_section_id + ')')
+                                + ', kx ' + _ruv(apS.deck.kx, 'latStiff') + ' ' + _rul('latStiff') + (sameSec ? '' : ' (단면 ' + dB.kx_section_id + ')') + ' — 모든 경간',
+                            criterion: '쓰이는 단면 가운데 가장 작은 kφ 와 가장 작은 kx 를 따로 골라 한 번(어느 경간도 제 단면의 값보다 큰 데크 강성을 받지 않음 — 두께만 다르면 얇은 쪽, 설계 매뉴얼 II-1C 의 안전측 근사, 결정 S7′)',
+                            note: own.length ? '참고(그 단면 자신의 값): ' + own.map((r) => r.section_id + ' kφ ' + _ruv(r.kphi, 'rotStiff') + ' · kx ' + _ruv(r.kx, 'latStiff')).join('; ') : '',
                         });
                     }
                     (pd ? pd.purlin_sections : []).forEach((sec) => {
@@ -787,8 +790,15 @@
                         const lapFail = laps.some((g) => (g.result && g.result.pass === false) || (Array.isArray(g.lap_members) && g.lap_members.some((m) => m && m.pass === false)));
                         const lapNe = laps.filter((g) => !(g.result && (g.result.pass === true || g.result.pass === false))
                             || (Array.isArray(g.lap_members) && g.lap_members.some((m) => m && m.pass !== true && m.pass !== false)));
-                        const sosTxt = (g) => (g.sum_of_strengths && typeof g.sum_of_strengths.flexure_ratio === 'number'
-                            ? ' — 강도의 합 ' + (g.sum_of_strengths.flexure_ratio * 100).toFixed(1) + '%' : '');
+                        // F2 의 4: 휨 · 전단의 비와 구간의 판정비(지배 검토) — 한 성분만 보이지 않는다
+                        const pc = (v) => (typeof v === 'number' ? (v * 100).toFixed(1) + '%' : '평가하지 못함');
+                        const sosTxt = (g) => {
+                            const s = g.sum_of_strengths;
+                            if (!s || typeof s !== 'object') { return ''; }
+                            const rp = g.result ? g.result.pass : null;
+                            return ' — 강도의 합: 휨 ' + pc(s.flexure_ratio) + (s.Vu != null ? ' · 전단 ' + pc(s.shear_ratio) : '')
+                                + ', 구간 ' + (rp === true || rp === false ? pc(g.result.utilization) + (g.result.governing_check ? ' (' + g.result.governing_check + ')' : '') : '판정 없음');
+                        };
                         checks.push({
                             category: catF, item: '랩 — 두 부재 (강도의 합)',
                             status: lapFail ? 'fail' : ((mism.length || lapNe.length) ? 'warn' : 'pass'),
@@ -1217,7 +1227,28 @@
 
                     // Lap 구간 휨강도 (2겹 합산)
                     var lapDesign = d.design_lap || null;
-                    if (lapDesign) {
+                    // 검증 2026-11-28 F2 의 6: 서로 다른 두 단면의 랩(경간마다 단면)이면 한 부재의 강도가 아니라 두 부재 설계 강도의 합 — Σ 와 그 항, 휨 · 전단의 비와 구간의 지배 검토
+                    var lapRg = lapDesign && lapDesign.region ? lapDesign.region : null;
+                    var lapSos = lapRg && lapRg.sum_of_strengths && Array.isArray(lapRg.lap_members) && lapRg.lap_members.length === 2
+                        && lapRg.lap_members[0].section_id !== lapRg.lap_members[1].section_id ? lapRg.sum_of_strengths : null;
+                    if (lapSos) {
+                        var _sq = function (v, q) { return typeof v === 'number' && isFinite(v) ? _ruv(v, q) : '—'; };
+                        var _sr = function (v) { return typeof v === 'number' && isFinite(v) ? v.toFixed(3) : '평가하지 못함'; };
+                        var _ids = lapRg.lap_members.map(function (m) { return m.section_id; });
+                        var _parts = function (xs, q) { return (Array.isArray(xs) ? xs : []).map(function (v, i) { return _ids[i] + ' ' + _sq(v, q); }).join(' + '); };
+                        var _gv = lapSos.governing || {};
+                        checks.push({
+                            category: catG2, item: 'Lap 구간 휨강도 (§F3, 두 부재 강도의 합)',
+                            status: _statusFromVerdict(_v3(lapDesign), lapDesign.utilization),
+                            value: 'Σ 휨 설계 강도 ' + _parts(lapSos.design_strengths, 'moment') + ' = ' + _sq(lapSos.design_strength_sum, 'moment') + ' ' + _rul('moment')
+                                + (lapSos.Vu != null ? '; Σ 전단 설계 강도 ' + _parts(lapSos.shear_strengths, 'force') + ' = ' + _sq(lapSos.shear_strength_sum, 'force') + ' ' + _rul('force') : '')
+                                + ' — ' + _v3(lapDesign).short,
+                            criterion: '두 부재 설계 강도의 합(설계 매뉴얼 II-1A / II-2A 의 가정 (c)) — 휨: 소요 / Σ ≤ 1, 전단: 소요 / Σ ≤ 1, §H2 도 합한 강도로(부재마다 강도의 몫 — 큰 값). 2겹 랩 접합 검토는 Lap 접합부 검토',
+                            note: '휨 ' + _sr(lapSos.flexure_ratio) + (lapSos.Vu != null ? ' · 전단 ' + _sr(lapSos.shear_ratio) : ' · 전단 소요 없음')
+                                + (typeof lapSos.bending_shear_ratio === 'number' ? ' · §H2 ' + lapSos.bending_shear_ratio.toFixed(3) : '')
+                                + ' — 구간: ' + (_gv.pass === true || _gv.pass === false ? (_gv.check || '') + ' ' + (typeof _gv.ratio === 'number' ? 'DCR=' + _gv.ratio.toFixed(3) : '') : '판정 없음(평가하지 못한 항목 — 합격이 아님)'),
+                        });
+                    } else if (lapDesign) {
                         // V9a-07: 퍼린의 랩 구간 결과는 **한 부재**의 설계강도(엔진이 한 부재로 이름 붙인다) — 2겹 합산은 랩 접합 검토(아래 「Lap 휨강도 DCR」)
                         checks.push({
                             category: catG2, item: 'Lap 구간 휨강도 (§F3, 한 부재)',
@@ -1810,9 +1841,17 @@
                         RQ(m.share, 'dimensionless', { digits: 4 }), RQ(m.share_V, 'dimensionless', { digits: 4 }), RQ(m.Mu, 'moment'), RQ(m.design_strength, 'moment'),
                         RQ(m.shear_strength, 'force'), RQ(m.utilization, 'dimensionless', { digits: 3 }), vt(m.pass)]));
                     const sos = g.sum_of_strengths;
-                    if (sos && sos.flexure_ratio != null) {
-                        rows.push(['', '강도의 합 (설계 매뉴얼 가정 (c)) — 판정', '', '', '', RQ(sos.Mu, 'moment'), RQ(sos.design_strength_sum, 'moment'), RQ(sos.shear_strength_sum, 'force'),
-                            RQ(sos.flexure_ratio, 'dimensionless', { digits: 3 }), vt(g.result ? g.result.pass : null)]);
+                    if (sos && typeof sos === 'object') {
+                        // 검증 F2 의 4: 휨 · 전단의 비와 구간의 지배 검토 · 판정비를 모두 — 한 성분을 「판정」 이라 부르지 않는다
+                        const rr = (v, need) => (typeof v === 'number' ? RQ(v, 'dimensionless', { digits: 3 }) : (need ? '평가하지 못함' : '소요 전단 없음'));
+                        const gv = sos.governing || {};
+                        const decided = g.result && (g.result.pass === true || g.result.pass === false);
+                        rows.push(['', '강도의 합 (설계 매뉴얼 가정 (c)) — 휨: 소요 / Σ 설계 강도', '', '', '', RQ(sos.Mu, 'moment'), RQ(sos.design_strength_sum, 'moment'), '',
+                            rr(sos.flexure_ratio, true), '']);
+                        rows.push(['', '강도의 합 — 전단: 소요 / Σ 설계 강도', '', '', '', '', '', RQ(sos.shear_strength_sum, 'force'), rr(sos.shear_ratio, sos.Vu != null), '']);
+                        rows.push(['', '구간 — 지배 검토' + (decided && gv.check ? ': ' + gv.check : ' (판정 없음 — 평가하지 못한 항목)')
+                            + (typeof sos.bending_shear_ratio === 'number' ? ' · §H2 ' + sos.bending_shear_ratio.toFixed(3) : ''), '', '', '', '', '', '',
+                            decided && typeof gv.ratio === 'number' ? RQ(gv.ratio, 'dimensionless', { digits: 3 }) : '', vt(g.result ? g.result.pass : null)]);
                     } else if (g.lap_evaluable === false) {
                         rows.push(['', '평가하지 못함 — 두 부재의 춤이 다름 (결정 S4)', '', '', '', '', '', '', '', vt(null)]);
                     } else if (g.result && g.result.pass !== true && g.result.pass !== false) {
@@ -1829,10 +1868,14 @@
             out.push({ kind: 'list', title: '경간마다 단면의 규칙', items: [
                 '구간마다 그 구간의 최대 모멘트가 놓인 경간의 단면으로 검토합니다(같은 템플릿 종류 — 결정 S1 · S2).',
                 '랩: 겹친 두 부재 강도의 합으로 검토합니다(설계 매뉴얼 II-1A / II-2A 의 가정 (c)) — Mu ≤ φMn,1 + φMn,2, Vu ≤ φVn,1 + φVn,2, §H2 도 합한 강도로. 각 부재가 강도의 몫(M 몫 = φMn,i / Σ φMn, V 몫 = φVn,i / Σ φVn)을 그 단면으로 검토해 두 부재의 휨 · 전단 비가 강도의 합으로 본 비와 같습니다(결정 S3′).',
-                '강성의 몫 I_i / (I_1 + I_2) 로 부재마다 본 비는 참고로만 적습니다(판정이 아님). 부재의 설계강도를 얻지 못한 랩은 평가하지 못함입니다.',
+                '§H2(휨 + 전단)는 그 강도의 몫으로 본 두 부재의 값 가운데 큰 것입니다 — 부재마다 지배 휨강도가 §H2 가 쓰는 강도(Malo — 예: 랩의 구속을 밝힌 때의 국부좌굴)이면 합한 강도로 본 §H2 와 같고, 다른 휨 한계상태가 부재를 지배하면(예: 랩의 구속을 밝히지 않음) 그보다 조금 큽니다(안전측).',
+                '강성의 몫 I_i / (I_1 + I_2) 로 부재마다 본 비는 참고로만 적습니다(판정이 아님). 한 종류(휨 또는 전단)의 부재 설계강도만 얻지 못하면 다른 종류는 강도의 합으로 판정하고(불합격이면 구간이 불합격) 나머지와 §H2 는 평가하지 못함, 두 합 모두 만들 수 없으면 그 랩은 평가하지 못함입니다.',
                 '춤이 다른 두 부재의 랩은 평가하지 않습니다(결정 S4). 랩 없이 단면이 바뀌는 지점을 지나는 구간은 그 단면마다 검토해 지배하는 것으로 판정합니다.',
                 '경간의 Ix · §I6.2.1 R · 좌굴값은 그 경간 단면의 것입니다(「경간별 Ix」 를 직접 넣었으면 그 값 — 단면과 1 % 넘게 다르면 알림).',
-                '데크 강성(kφ · kx)은 한 번 계산해 모든 경간에 씁니다 — 쓰이는 단면 가운데 kφ 가 가장 작은 단면의 값(두께만 다르면 얇은 쪽, 설계 매뉴얼 II-1C 의 안전측 근사 — 결정 S7′). 단면마다 자신의 kφ 는 참고로 적습니다.',
+                '데크 강성(kφ · kx)은 한 번 계산해 모든 경간에 씁니다 — 쓰이는 단면 가운데 가장 작은 kφ 와 가장 작은 kx 를 따로 골라(어느 경간도 제 단면의 값보다 큰 데크 강성을 받지 않음; 두께만 다르면 얇은 쪽, 설계 매뉴얼 II-1C 의 안전측 근사 — 결정 S7′)' + (() => {
+                    const du = (secs[0] && secs[0].deck_used) || {};
+                    return du.kphi_section_id ? ' 이 결과: kφ 는 단면 ' + du.kphi_section_id + ', kx 는 단면 ' + du.kx_section_id + ' 의 값.' : '.';
+                })() + ' 단면마다 자신의 kφ 는 참고로 적습니다.',
             ] });
             return out;
         }
@@ -2039,7 +2082,7 @@
         ['val.load_analysis.deflection', '처짐 검토'],
         // 2026-11-28 결정 S1 – S7: 경간마다 단면(단면 id 의 번호가 뒤에 — 「.2」 = S2)
         // 2026-11-28 오후 결정 S3′ · S7′: 데크 강성은 한 번(단면마다의 deck_section.N 대신 deck_once), 랩은 강도의 합
-        ['val.load_analysis.span_sections', '경간마다 단면'], ['val.load_analysis.deck_once', '데크 강성 — 한 번 (kφ 가 가장 작은 단면)'],
+        ['val.load_analysis.span_sections', '경간마다 단면'], ['val.load_analysis.deck_once', '데크 강성 — 한 번 (가장 작은 kφ · kx)'],
         ['val.load_analysis.dsm_section', 'DSM 좌굴값 — 단면 S', true], ['val.load_analysis.uplift_r_span', '양력 R 계수 — 경간마다 (§I6.2.1)'],
         ['val.load_analysis.lap_members', '랩 — 두 부재 (강도의 합)'],
         ['val.design.run', '설계 검토 실행 여부'], ['val.design.overall', '종합 판정 (엔진)'], ['val.design.mne_my', 'Mne vs My'],
@@ -2057,7 +2100,7 @@
         ['val.design.bending_torsion', '휨 + 비틀림 (§H4)'],
         ['val.design.dsm_warning', 'DSM 경고 #', true], ['val.design.fallback', '뒤틀림좌굴 해석적 Fallback'], ['val.design.warning', '설계 경고 #', true],
         ['val.design.dsm_extract_warning', 'DSM 추출 경고'],
-        ['val.lap.flexure', 'Lap 구간 휨강도 (§F3, 한 부재)'], ['val.lap.length', 'Lap 길이 (지점 ', true], ['val.lap.fastener', 'Lap 패스너 전단 (DCR)'],
+        ['val.lap.flexure', 'Lap 구간 휨강도 (§F3, 한 부재)'], ['val.lap.flexure_sum', 'Lap 구간 휨강도 (§F3, 두 부재 강도의 합)'], ['val.lap.length', 'Lap 길이 (지점 ', true], ['val.lap.fastener', 'Lap 패스너 전단 (DCR)'],
         ['val.lap.flexure_dcr', 'Lap 휨강도 DCR (2겹 §F3/F4/H2)'], ['val.lap.overall', 'Lap 접합부 종합 판정'], ['val.lap.run', 'Lap 접합부 설계 실행 여부'],
         ['val.consistency.fy', 'Fy 일관성 (해석 vs 설계)'], ['val.consistency.analysis_current', '해석 최신성'],
     ];

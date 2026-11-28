@@ -4207,7 +4207,8 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const want = ['Mu', 'design_strengths.0', 'design_strengths.1', 'design_strength_sum', 'flexure_ratio', 'Vu', 'shear_strengths.0', 'shear_strengths.1', 'shear_strength_sum', 'shear_ratio', 'result.utilization'];
     const sumOk = lapR?.strength_basis === 'sum_of_strengths' && relClose(s.fl, sum.flexure_ratio) && relClose(s.sh, sum.shear_ratio) && relClose(s.gv, lapR.result.utilization)
       && s.gvV === (lapR.result.pass === true ? 'ok' : lapR.result.pass === false ? 'ng' : 'none') && want.every(k => s.parts.includes(k.startsWith('result.') ? k : `sum_of_strengths.${k}`))
-      && s.basisKey === 'sum_of_strengths' && /두 부재 강도의 합/.test(s.basis) && /II-1A/.test(s.basis) && !s.old
+      // 검증 F2 의 4: 이름표는 휨 · 전단의 비와 구간의 지배 검토를 모두(「판정」 이라 부르는 한 성분이 없다)
+      && s.basisKey === 'sum_of_strengths' && /두 부재 (설계 )?강도의 합/.test(s.basis) && /II-1A/.test(s.basis) && /휨: .*전단: .*구간: /.test(s.basis) && !/— 판정\./.test(s.basis) && !s.old
       && s.shares.every(([a, b], j) => a.endsWith(`lap_members.${j}.share`) && b.endsWith(`lap_members.${j}.share_V`)) && s.strengths.every(x => x.includes('design_strength') && x.includes('shear_strength'));
     const rm = lapR?.reference_stiffness_share?.members ?? [];
     const refOk = /참고 — 판정에 쓰지 않음/.test(s.ref) && /강성/.test(s.ref) && s.refV.length === rm.length && rm.length === 2 && rm.every((x, j) => relClose(s.refV[j], x.utilization)) && !s.refIsRatio;
@@ -4217,7 +4218,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
         + ` · 강도의 합: 휨 ${s.fl} (호스트 ${sum.flexure_ratio}) · 전단 ${s.sh} (${sum.shear_ratio}) · 구간 ${s.gv} ${s.gvV} (${lapR?.result?.utilization} ${lapR?.result?.pass}) · 근거 「${short(s.basis, 60)}」 ${sumOk}`
         + ` · 참고 「${short(s.ref, 60)}」 = ${s.refV.join(' | ')} (호스트 ${rm.map(x => x.utilization).join(' | ')}) 판정비 아님 ${!s.refIsRatio} ${refOk} · 꼬리표 ${tags.join(',')} ${tagOk} · 정모멘트 S2 줄 「${short(posRow, 60)}」 · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
   });
-  await step('s04 퍼린 단면(결과 탭) — 단면마다 성질 · 좌굴값(정 · 부 하나씩) · 쓴 데크 강성 한 값(kφ 가 가장 작은 단면의 것 — 결정 S7′)과 이 단면의 값(다를 때 참고)(정보 창), 가운데 = 그 단면의 서명곡선: 단면 고르기 S1 → S2 · 곡선 고르기 +M → −M(둘만)이 그림을 바꾼다(점 수 = 엔진), 수 = MCP(SI)', 's04_section_picker', async () => {
+  await step('s04 퍼린 단면(결과 탭) — 단면마다 성질 · 좌굴값(정 · 부 하나씩) · 쓴 데크 강성 한 값(가장 작은 kφ 와 가장 작은 kx 를 따로 — 결정 S7′ · F2)과 이 단면의 값(다를 때 참고)(정보 창), 가운데 = 그 단면의 서명곡선: 단면 고르기 S1 → S2 · 곡선 고르기 +M → −M(둘만)이 그림을 바꾼다(점 수 = 엔진), 수 = MCP(SI)', 's04_section_picker', async () => {
     const secs = sTwo?.sections ?? [];
     await select('result', 'psec:S1');
     await sleep(300);
@@ -4241,9 +4242,11 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const S1 = secs.find(x => x.id === 'S1'), S2 = secs.find(x => x.id === 'S2');
     // 결정 S7′: 쓴 값은 단면마다 같은 한 값(어느 단면의 것인지), 이 단면의 값은 다를 때만 — 호스트의 deck_used · deck_own 그대로
     const differs = (x) => !!x?.deck_own && (x.deck_own.kphi !== x.deck_used?.kphi || x.deck_own.kx !== x.deck_used?.kx);
-    const deckOk = [[d1, S1], [d2, S2]].every(([d, x]) => d.used === String(x?.deck_used?.section_id) && /한 번 계산/.test(d.rule) && /kφ 가 가장 작은 단면/.test(d.rule) && d.own === differs(x)
+    // 검증 F2 의 2: kφ · kx 는 따로 가장 작은 값(값마다 그 단면 — II-1A 는 둘 다 얇은 S2)
+    const deckOk = [[d1, S1], [d2, S2]].every(([d, x]) => d.used === String(x?.deck_used?.kphi_section_id) && x?.deck_used?.kphi_section_id === x?.deck_used?.kx_section_id
+      && /한 번 계산/.test(d.rule) && /kφ · kx 가 가장 작은 단면/.test(d.rule) && d.rule.includes(String(x?.deck_used?.kphi_section_id)) && d.own === differs(x)
       && ['deck_used.kphi', 'deck_used.kx'].every(k => d.srcs.includes(k)) && (!d.own || ['deck_own.kphi', 'deck_own.kx'].every(k => d.srcs.includes(k))) && JSON.stringify(d.dsm) === '["pos","neg"]')
-      && S1?.deck_used?.section_id === S2?.deck_used?.section_id && S1.deck_used.kphi === S2.deck_used.kphi && differs(S1) !== differs(S2);
+      && S1?.deck_used?.kphi_section_id === S2?.deck_used?.kphi_section_id && S1?.deck_used?.kx_section_id === S2?.deck_used?.kx_section_id && S1.deck_used.kphi === S2.deck_used.kphi && differs(S1) !== differs(S2);
     const ok = JSON.stringify(tree) === JSON.stringify(secs.map(x => `psec:${x.id}`)) && a && a.id === 'S1' && a.c === 'pos' && a.pts === S1.curves.pos.lengths.length && a.cp === a.pts && a.pick === 0 && a.mk.length >= 1 && JSON.stringify(a.on) === '["S1"]'
       && JSON.stringify(a.curves) === '["pos","neg"]' && JSON.stringify(Object.keys(S1.curves).sort()) === '["neg","pos"]'
       && b && b.id === 'S2' && b.pts === S2.curves.pos.lengths.length && sel.tree === 'psec:S2' && sel.title === 'S2' && deckOk

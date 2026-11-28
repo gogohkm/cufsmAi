@@ -199,3 +199,20 @@
 **정모멘트 좌굴값(II-1A).** S1(x070): 혼자(자신의 kφ 0.1417) Mcrl 141.40 · Mcrd 196.94 → 경간별 단면(0.1126) 141.32 · 191.52 kip-in. S2(x059)는 자신의 kφ 그대로 — Mcrl 84.90 · Mcrd 140.22.
 
 **시험(에이전트의 마지막 실행).** 파이썬 전체 598 통과(1128 시험의 기대값을 새 규칙 · 매뉴얼의 수로 고침 — 기준 파일은 그대로 통과). `test:quick` · `span_sections_contract`(P2: 같은 두 부재 몫 0.5 · 두 번째 검토 없음, P3: 0.7367 · 강성 참고 0.7426 | 0.8607 · 데크 0.1126, 새 P3c: 부재 강도가 없으면 평가하지 못함) · lap_* 셋 · mcp_* 넷 · notice_render · `build:mcp` + parity · `test:rendered` 15 + 11 + 3 · k3 목록 `--check` 통과. 고정값(k2 · k3)은 뒤집은 것 없음(한 단면 길은 그대로 — k2 · k3 전체 실행은 하지 않음).
+
+### F2 — 독립 검증이 찾은 여섯(끝, 커밋 전)
+
+| # | 무엇이 틀렸나(재현) | 고친 것 | 시험 |
+|---|---|---|---|
+| 1 | 한 부재의 전단강도가 없으면 휨이 강도의 합으로 넘어도 랩 전체가 판정 없음(II-1A, Lr 160, S2 의 shear 를 지움: Mu 244.26 / Σ 196.04 = 1.246 인데 pass null) | 판정할 수 있는 것은 판정 — 두 휨강도를 알면 휨을 합으로(넘으면 구간 불합격), 두 전단강도를 알면 전단을 합으로. 모르는 쪽 · §H2 의 엔진 판정은 쓰지 않고 그 검토 항목을 평가하지 못함(까닭)으로, 불합격이 없으면 구간은 판정 없음. 둘 다 모르면 앞과 같다. 결과 `lap_items_not_evaluated` · `sum_of_strengths.evaluated / not_evaluated`, 알림 `host.purlin.lap_items_not_evaluated`(StcfsdPanel `lapPartial` · `partialOut`) | contract P3c(휨강도 없음 → 전단만 판정, 판정 없음) · P3d(전단강도 없음 · Lr 160 → 불합격 1.246, 전단 · §H2 평가하지 못함) |
+| 2 | 데크 kx 를 kφ 가 가장 작은 단면에서 — 그 단면이 플랜지가 좁은 두꺼운 부재면 kx 가 커 다른 경간에 제 값보다 큰 kx(S1 t 0.059 B 2.5: kx 1.388, S2 t 0.080 B 1.75: kx 1.829 → S1 의 정모멘트 Mcrd 140.22 → 142.18, +1.4 %) | 엔진 `_deck_once`: 가장 작은 kφ 와 가장 작은 kx 를 따로 — `deck_basis {rule: 'once_smallest_kphi_and_kx', kphi_section_id, kx_section_id, by_section[].adopted_kphi / adopted_kx}`(`section_id` · `adopted` 없앰). 데크를 계산하지 못하는 단면(두께 · 플랜지 폭 없음)은 ValueError(호스트는 늘 두 치수를 보내 닿지 않는다). 호스트 `deck_used {kphi, kx, kphi_section_id, kx_section_id}`, MCP 짧은 줄 · 설명, 점검 「데크 강성 — 한 번 (가장 작은 kφ · kx)」, 계산서 · 앱 글, 알림 `deck_once_smallest_kphi`(매개변수 kphi_section · kphi · kx_section), 데스크톱 「데크 강성」 | 파이썬 2 새 시험(따로 고름 · 치수 없는 단면은 오류), contract P3e(호스트 길: kφ S2 · kx S1, S1 Mcrd 192.81 ≤ 혼자 196.94). 재현 스크립트: S1 Mcrd+ 142.18 → 140.06(≤ 140.22) |
+| 3 | 랩의 전단강도 합이 표시 반올림 값(5.47 + 3.27 = 8.74) — 엔진의 반올림 전 값은 `display_unrounded.shear.design_strength` | `_shearStrength` 가 그 자리를 읽는다. II-1A lap-1: 5.4677 + 3.2655 = 8.7332, 전단 비 0.28677 → 0.28700, V 몫 0.6259 / 0.3741 → 0.6261 / 0.3739, 부재 §H2 0.7906 | 0.7907 → 0.7906 | 0.7906. 휨강도는 이미 반올림 전 | contract P3(그 수, 엔진 부재의 전단 비 = Vu / Σ) |
+| 4 | 이름표가 휨 비를 「판정」 이라 부름(0.737 — 지배는 §H2 0.791) | `host.purlin.sum_of_strengths`: 휨 · 전단의 비와 구간의 지배 검토 · 판정비(한 쪽만 알면 「평가하지 못함」), 「설계 강도」(방법에 매이지 않음). `sum_of_strengths.bending_shear_ratio` · `governing {check, check_id, ratio, pass}`. 계산서의 랩 표는 휨 · 전단 · 구간(지배 검토 · §H2) 세 줄, 점검 「랩 — 두 부재」 의 값도 셋 | contract P3(글) · 데스크톱 s03 |
+| 5 | §H2 를 큰 부재 비로 보는 것을 말하지 않음 | 규칙 그대로. `host.purlin.lap_two_members_sum` 과 계산서 규칙 문장에 「강도의 몫으로 본 두 부재의 §H2 가운데 큰 값 — 지배 휨강도가 Malo 이면 합한 강도의 값과 같고, 다른 휨 한계상태가 지배하면(랩 구속을 밝히지 않음) 조금 크다」 | — |
+| 6 | 점검 「Lap 구간 휨강도 (§F3, 한 부재)」 · 앱 요약이 두 단면의 랩에도 한 부재의 강도 | 서로 다른 두 단면의 랩이면 점검 「Lap 구간 휨강도 (§F3, 두 부재 강도의 합)」(`val.lap.flexure_sum` — Σ 와 그 항, 휨 · 전단 · §H2 · 구간), 앱 요약의 강도 칸은 부재마다 + Σ. 한 단면 · 같은 두 부재는 그대로(옛 항목 이름) | k3 목록에 새 항목, `--check` |
+
+**데스크톱.** `spansecs.ts`: 「데크 강성」 은 값마다 그 단면(같으면 한 단면), 랩의 합 줄에 §H2 줄 · 「평가하지 못함」(한 쪽 강도만 알 때) · 「평가하지 못한 항목」 줄(불합격이면 「불합격이 이긴다」). `info.ts`: 두 단면 랩의 「랩 단면 Se · Vn」 은 부재마다. `ui.mjs` s03(이름표) · s04(데크 단면 id) 고침. 데스크톱은 `out/`(루트 `npm run compile`)의 호스트를 싣는다 — 첫 실행은 옛 `out/` 이라 s04 가 실패, compile 뒤 s01 – s07 60/60. 한 쪽 강도만 아는 랩의 화면(불합격 줄 · 평가하지 못한 항목)은 데스크톱 시험이 직접 띄우지 않는다(엔진 답을 고칠 길이 없다 — 호스트 계약 P3c · P3d 가 그 데이터를 본다).
+
+**시험.** 파이썬 전체 600(새 2). `span_sections_contract` 통과(P3 의 수 · 글, P3c · P3d · P3e 새로). 렌더 `span_sections.js` R2 의 정규식이 지배 부재 표시(＊)를 받게(F2 의 3 뒤로 II-1A 두 부재의 §H2 가 0.7906 으로 같아 S1 이 지배). k3 목록 다시 만듦. 고정값(k2 · k3)은 뒤집은 것 없음.
+
+**결과 모양의 바뀜.** 하중 해석 `deck_basis`(위 2), 퍼린 결과 `sections[].deck_used`, 랩 구간 `sum_of_strengths.{bending_shear_ratio, governing, evaluated?, not_evaluated?}` · `lap_items_not_evaluated?`, 한 쪽 강도만 아는 랩의 부재 줄 `share` / `share_V` null · 쓰지 않은 검토 항목 `not_evaluated`. 단면 하나 · 같은 두 부재의 길은 그대로(기준 파일 · P1 · P2).

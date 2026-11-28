@@ -110,8 +110,9 @@ def test_same_section_every_span_equals_single_section():
         assert C.canon(_strip(per)) == C.canon(one), name
         ap = per['auto_params']
         db = ap['deck_basis']                       # 결정 S7′: 단면 하나 — 그 단면의 데크 값 그대로
-        assert db['section_id'] == 'S1' and [r['section_id'] for r in db['by_section']] == ['S1'], name
-        assert db['by_section'][0]['spans'] == list(range(n)) and db['by_section'][0]['adopted'] is True, name
+        assert db['kphi_section_id'] == db['kx_section_id'] == 'S1' and [r['section_id'] for r in db['by_section']] == ['S1'], name
+        assert db['by_section'][0]['spans'] == list(range(n)) and db['by_section'][0]['adopted_kphi'] is True, name
+        assert db['by_section'][0]['adopted_kx'] is True, name
         assert (db['by_section'][0]['kphi'], db['by_section'][0]['kx']) == (ap['deck']['kphi'], ap['deck']['kx']), name
         assert ap['uplift_R_by_span'] is not None and 'span_map' in ap, name
         if 'i621_by_span' in ap:
@@ -145,9 +146,11 @@ def test_two_sections_per_span_stiffness_deck_and_regions():
     k = {t: calc_rotational_stiffness(t_panel=0.019, t_purlin=t, fastener_spacing=12, flange_width=2.5, E=29500.0)
          for t in (0.070, 0.059)}
     db = ap['deck_basis']
-    assert db['rule'] == 'once_smallest_kphi' and db['section_id'] == 'S2'
-    assert [(r['section_id'], r['spans'], r['adopted']) for r in db['by_section']] == [('S1', [0, 3], False),
-                                                                                       ('S2', [1, 2], True)]
+    # F2 의 2: kφ 와 kx 를 따로 가장 작은 값 — 두께만 다른 두 부재(매뉴얼의 경우)는 둘 다 얇은 쪽(S2)
+    assert db['rule'] == 'once_smallest_kphi_and_kx' and db['kphi_section_id'] == db['kx_section_id'] == 'S2'
+    assert 'section_id' not in db
+    assert [(r['section_id'], r['spans'], r['adopted_kphi'], r['adopted_kx']) for r in db['by_section']] == [
+        ('S1', [0, 3], False, False), ('S2', [1, 2], True, True)]
     assert [r['kphi'] for r in db['by_section']] == [round(k[0.070], 4), round(k[0.059], 4)] == [0.1417, 0.1126]
     d2 = _calc_deck_info(dict(C.DECK_TF), dict(C.SEC_C059, id='S2'))             # 모든 데크 값이 그 한 단면에서
     keys = ('kphi', 'kx', 'kphi_method', 'kx_method', 'display_unrounded', 'type')
@@ -187,6 +190,59 @@ def test_two_sections_per_span_stiffness_deck_and_regions():
     assert len(laps) == 6 and laps[0]['share_by_stiffness'][0] == 12.2 / 22.5
     assert 'loads.assumption.lap_sum_of_strengths' in _codes(r, 'assumptions')
     assert 'loads.assumption.span_sections_per_span' in _codes(r, 'assumptions')
+
+
+def test_deck_once_smallest_kphi_and_kx_taken_separately():
+    """검증 2026-11-28 F2 의 2: kφ 가 가장 작은 단면이 플랜지가 좁은 두꺼운 부재라 kx 가 크면(S1 t 0.059 B 2.5 → kφ 0.1126 · kx
+    1.388, S2 t 0.080 B 1.75 → kφ 0.1116 · kx 1.829) 옛 규칙은 S2 의 kx 1.829 를 S1 경간에도 주었다(S1 의 정모멘트 Mcrd 140.22 →
+    142.18 kip-in, +1.4 % — 안전측이 아님). 이제 가장 작은 kφ(S2)와 가장 작은 kx(S1)를 따로 — 어느 단면도 제 값보다 큰 데크 값을 받지 않는다."""
+    kw = dict(C.load_cases()[0][1])
+    kw.pop('section')
+    a = dict(C.SEC_C059, id='S1')
+    b = dict(C.SEC_C059, id='S2', thickness=0.080, flange_width=1.75)
+    r = analyze_loads(**kw, span_sections=[a, b, b, a])
+    ap = r['auto_params']
+    db = ap['deck_basis']
+    own = {x['section_id']: x for x in db['by_section']}
+    da, dbb = _calc_deck_info(dict(C.DECK_TF), a), _calc_deck_info(dict(C.DECK_TF), b)
+    assert (own['S1']['kphi'], own['S1']['kx']) == (da['kphi'], da['kx']) == (0.1126, 1.388)
+    assert (own['S2']['kphi'], own['S2']['kx']) == (dbb['kphi'], dbb['kx']) == (0.1116, 1.829)
+    assert db['rule'] == 'once_smallest_kphi_and_kx' and (db['kphi_section_id'], db['kx_section_id']) == ('S2', 'S1')
+    assert [(x['adopted_kphi'], x['adopted_kx']) for x in db['by_section']] == [(False, True), (True, False)]
+    deck = ap['deck']
+    assert (deck['kphi'], deck['kx']) == (0.1116, 1.388)
+    assert deck['display_unrounded'] == {'kphi': dbb['display_unrounded']['kphi'], 'kx': da['display_unrounded']['kx']}
+    assert (deck['kphi_method'], deck['kx_method']) == (dbb['kphi_method'], da['kx_method'])
+    # 어느 단면도 제 값보다 큰 데크 값을 받지 않는다
+    assert all(deck['kphi'] <= x['kphi'] and deck['kx'] <= x['kx'] for x in db['by_section'])
+    assert ap['positive_region']['kphi'] == 0.1116
+    n = next(x for x in r['assumptions'] if getattr(x, 'code', None) == 'loads.assumption.deck_once_smallest_kphi')
+    assert 'kphi 0.1116 kip-in/rad/in from section S2, kx from section S1' in str(n), str(n)
+    # 두께만 다른 매뉴얼의 경우는 한 단면(위 시험) — 같은 단면이면 그 단면의 데크 결과 그대로
+    same = analyze_loads(**kw, span_sections=[a, a, a, a])['auto_params']
+    assert same['deck_basis']['kphi_section_id'] == same['deck_basis']['kx_section_id'] == 'S1'
+
+
+def test_deck_once_section_without_dims_is_an_error():
+    """F2 의 2: 데크 강성을 계산하지 못하는 단면(두께 · 플랜지 폭 없음)은 말없이 0(모든 경간의 값)이 되거나 건너뛰지 않는다 — 오류와 까닭.
+    시험값(kphi_override · kx_override)을 주면 계산하지 않으므로 그대로."""
+    kw = dict(C.load_cases()[0][1])
+    kw.pop('section')
+    a = dict(C.SEC_C070, id='S1')
+    b = {k: v for k, v in C.SEC_C059.items() if k != 'flange_width'}
+    b['id'] = 'S2'
+    try:
+        analyze_loads(**kw, span_sections=[a, b, b, a])
+    except ValueError as e:
+        assert 'section S2' in str(e) and 'flange width' in str(e), str(e)
+    else:
+        raise AssertionError('a section without flange width must not give a deck stiffness of 0 silently')
+    kw2 = dict(kw, deck=dict(C.DECK_TF, kphi_override=0.1, kx_override=1.0))
+    r = analyze_loads(**kw2, span_sections=[a, b, b, a])
+    assert (r['auto_params']['deck']['kphi'], r['auto_params']['deck']['kx']) == (0.1, 1.0)
+    # 데크 없음: 데크 값이 없으니 그대로
+    r0 = analyze_loads(**dict(kw, deck={'type': 'none'}), span_sections=[a, b, b, a])
+    assert r0['auto_params']['deck']['kphi'] == 0
 
 
 def test_two_sections_i621_per_span():

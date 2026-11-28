@@ -2040,18 +2040,21 @@ REGISTRY = {
     },
     'loads.assumption.deck_once_smallest_kphi': {
         'kind': 'assumption',
-        'template': 'Per-span sections: the deck stiffness is computed once and used for every span — with section '
-                    '{section_id}, the section in use that gives the smallest kphi ({kphi}); all deck values '
-                    '(auto_params.deck) come from that section. The Design Manual (Example II-1C) computes it once with '
-                    'the thinner purlin as a conservative approximation. Each section\'s own value is listed for '
+        'template': 'Per-span sections: the deck stiffness is computed once and used for every span — the smallest '
+                    'kphi and the smallest kx of the sections in use, taken separately so that no span gets a deck '
+                    'stiffness above its own section\'s: kphi {kphi} from section {kphi_section}, kx from section '
+                    '{kx_section} (auto_params.deck, deck_basis). The Design Manual (Example II-1C) computes it once '
+                    'with the thinner purlin as a conservative approximation. Each section\'s own value is listed for '
                     'information only (auto_params.deck_basis.by_section).',
-        'template_ko': '경간마다의 단면: 데크 강성은 한 번 계산해 모든 경간에 씀 — 쓰이는 단면 가운데 kphi 가 가장 작은 '
-                       '단면 {section_id} 의 값({kphi}); 데크의 모든 값(auto_params.deck)이 그 단면에서. 설계 매뉴얼'
+        'template_ko': '경간마다의 단면: 데크 강성은 한 번 계산해 모든 경간에 씀 — 쓰이는 단면 가운데 가장 작은 kphi 와 '
+                       '가장 작은 kx 를 따로 골라 어느 경간도 제 단면의 값보다 큰 데크 강성을 받지 않게: kphi {kphi} 는 '
+                       '단면 {kphi_section}, kx 는 단면 {kx_section} 의 값(auto_params.deck · deck_basis). 설계 매뉴얼'
                        '(예제 II-1C)은 얇은 퍼린으로 한 번 계산하고 안전측의 근사라고 함. 단면마다의 값은 참고로만'
                        '(auto_params.deck_basis.by_section).',
-        'params': {'section_id': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+        'params': {'kphi_section': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
                    'kphi': {'quantity': 'rotational_stiffness', 'conv': None, 'spec': '.4g', 'unit': 'kip-in/rad/in',
-                            'sep': ' '}},
+                            'sep': ' '},
+                   'kx_section': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
     },
     'loads.assumption.lap_sum_of_strengths': {
         'kind': 'assumption',

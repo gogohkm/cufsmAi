@@ -484,7 +484,13 @@ function lapSectionRows(ss: any): string {
   if (!ss || typeof ss !== 'object') { return ''; }
   const v = (x: unknown, kind: Kind) => (typeof x === 'number' ? `${sigText(si(x, kind) ?? x, 4)} <span class="u">${esc(LABEL_OF[kind])}</span>` : '<span class="faint">없음</span>');
   const where = [ss.support !== null && ss.support !== undefined ? `지점 ${esc(ss.support)}` : '', Array.isArray(ss.regions) && ss.regions.length ? `랩 구간 ${esc(ss.regions.join(', '))}` : ''].filter(Boolean).join(' · ');
-  return row_('랩 단면 Se · Vn', `${v(ss.Se, 'modulus')} · ${v(ss.Vn, 'force')}`, `<span class="tag drv" data-section-source>${ss.Se === null || ss.Se === undefined ? '짓지 않음' : '퍼린 결과'}</span>`)
+  // 검증 2026-11-28 F2: 서로 다른 두 단면의 랩이면 부재마다의 Se · Vn(부재 1 의 것만 보이지 않는다 — 아래 「랩 — 두 부재」 에 표)
+  const ms: any[] = Array.isArray(ss.members) && ss.members.length === 2 && ss.same_members !== true ? ss.members : [];
+  const seRow = ms.length
+    ? ms.map((m: any, j: number) => row_(`랩 단면 Se · Vn — 부재 ${j + 1} (${esc(String(m?.section_id ?? '—'))})`, `<span data-section-source-member="${j + 1}">${v(m?.Se, 'modulus')} · ${v(m?.Vn, 'force')}</span>`,
+      j === 0 ? `<span class="tag drv" data-section-source>${m?.Se === null || m?.Se === undefined ? '짓지 않음' : '퍼린 결과'}</span>` : '')).join('')
+    : row_('랩 단면 Se · Vn', `${v(ss.Se, 'modulus')} · ${v(ss.Vn, 'force')}`, `<span class="tag drv" data-section-source>${ss.Se === null || ss.Se === undefined ? '짓지 않음' : '퍼린 결과'}</span>`);
+  return seRow
     + row_('Se 의 출처', `<span data-section-from>${ss.Se === null || ss.Se === undefined ? esc(fieldText(ss, 'reason')) : esc(fieldText(ss, 'from'))}</span>${where ? ` <span class="faint">${where}</span>` : ''}`, '');
 }
 

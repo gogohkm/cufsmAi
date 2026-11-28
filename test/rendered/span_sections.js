@@ -108,7 +108,8 @@ async function main() {
       assert(/단면/.test(card) && /경간마다 단면/.test(card), 'section column and heading');
       const rows = await ctx.eval(`[...document.querySelectorAll('#purlin-region-table tr')].slice(1).map(tr=>tr.cells[1] ? tr.cells[1].innerText : '')`);
       assert(rows.length === pr.regions.length, 'one row per region');
-      assert(rows.some((t) => /S1 \d+\.\d% \| S2 \d+\.\d%/.test(t)), 'a lap row shows both members: ' + rows.filter((t) => /\|/.test(t)).slice(0, 2));
+      // ＊ = 지배 부재(F2 의 3 뒤로 II-1A 의 두 부재 §H2 가 같아 S1 이 지배일 수 있다)
+      assert(rows.some((t) => /S1 \d+\.\d%＊? \| S2 \d+\.\d%/.test(t)),'a lap row shows both members: ' + rows.filter((t) => /\|/.test(t)).slice(0, 2));
       assert(rows.some((t) => /^S2$/.test(t.trim())), 'an interior-span region on S2');
       const secRows = await ctx.eval(`document.querySelectorAll('#purlin-sections-table tr').length`);
       assert.strictEqual(secRows, 3, 'per-section table (header + S1 + S2)');
