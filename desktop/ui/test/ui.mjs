@@ -4240,7 +4240,9 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       gov:[...document.querySelectorAll('#info [data-member-gov]')].map(e=>e.dataset.memberGov), ref:!!document.querySelector('#info [data-lap-sum-ref] [data-ratio-ref]'),
       codes:[...document.querySelectorAll('#info [data-code]')].map(e=>({code:e.dataset.code, text:e.textContent})), raw:/host\\.(purlin|lap)\\./.test(document.getElementById('review').innerText)})`);
     const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('lap:lap_members') || x.src.startsWith('lap:flexure_reference')), { lapSI: L });
-    const lapCodes = ['host.lap.two_sections', 'host.lap.governing_support'].every(c => li.codes.some(x => x.code === c && /랩/.test(x.text) && !x.text.includes(c)));
+    // 「어느 랩」: 모든 랩을 견줬으면 governing_support, 평가하지 못한 랩 · 넣지 않은 양력 랩이 있으면 governing_support_partial(이 사례는 양력이 있다)
+    const lapCode = (codes) => codes.some(c => li.codes.some(x => x.code === c && /랩/.test(x.text) && !x.text.includes(c)));
+    const lapCodes = lapCode(['host.lap.two_sections']) && lapCode(['host.lap.governing_support', 'host.lap.governing_support_partial']);
     const lapOk = !sl.error && !lap.error && L?.lap_two_members === true && L?.section_source?.support_defaulted === true && li.block && JSON.stringify(li.rows) === JSON.stringify(L.section_source.members.map(m => m.section_id))
       && li.auto === String(L.section_source.support) && li.gov.length >= 3 && lapCodes && !li.raw;
     return { ok: notesOk && valOk && lapOk && n.bad.length === 0 && (n.bySrc.lap ?? 0) >= 8,
