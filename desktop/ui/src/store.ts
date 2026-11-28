@@ -35,7 +35,9 @@ export type Stage = 'sec' | 'fsm' | 'load' | 'chk' | 'conn' | 'val';
 export type StageState = 'ok' | 'stale' | 'none' | 'run' | 'unk';
 
 export const CMDS = ['modelLoaded', 'dsmResult', 'designResult', 'designPurlinResult', 'loadAnalysisComplete',
-  'lapConnectionResult', 'connectionResult', 'analysisInvalidated', 'resultsCleared', 'restoreDesignInputs', 'analysisError', 'classifyResult', 'validationResult'];
+  'lapConnectionResult', 'connectionResult', 'analysisInvalidated', 'resultsCleared', 'restoreDesignInputs', 'analysisError', 'classifyResult', 'validationResult',
+  // 2026-11-28 결정 S1: 단면 목록의 단면마다 Ix(호스트가 그 치수로 만든 단면의 성질 — 편집 화면의 「단면 목록」 과 같은 메시지)
+  'sectionListInfo'];
 
 /**
  * 좌굴 해석의 곡선 · 모드 형상 · 모드 분류(U2). 곡선은 MCP get_buckling_curve(`get_curve`), 모드 형상 · 분류는 호스트가 설계 패널에
@@ -149,6 +151,11 @@ export interface State {
   loads: { us: any; si: any; from: 'loads' | 'purlin' } | null;
   /** 퍼린 설계의 구간(엔진 순서) — us · si */
   regions: Array<{ us: any; si: any; runKey: string }>;
+  /**
+   * 2026-11-28 결정 S1 · S8: 경간마다 단면을 쓴 퍼린 결과의 단면 블록(`sections[]` — 성질 · 좌굴값 · 데크 강성 · 서명곡선)과 경간 → 단면(`span_sections`).
+   * 경간마다 단면이 아니면(모든 경간이 S1) null — 그때 화면은 앞과 같다
+   */
+  psec: { us: any[]; si: any[]; spanSections: string[] } | null;
   lap: { us: any; si: any } | null;
   conn: { us: any; si: any } | null;
   /** 시험 · 진단 — 마지막 다시 그리기의 시간(ms) */
@@ -195,7 +202,7 @@ export const state: State = {
     chk: { state: 'none', note: '' }, conn: { state: 'none', note: '' }, val: { state: 'none', note: '' },
   },
   running: { fsm: false }, lastChange: null,
-  analysis: null, loads: null, regions: [], lap: null, conn: null, renderMs: 0, caseIn: null, caseReplaced: [], val: null, valRunning: false, reports: {},
+  analysis: null, loads: null, regions: [], psec: null, lap: null, conn: null, renderMs: 0, caseIn: null, caseReplaced: [], val: null, valRunning: false, reports: {},
 };
 
 const MEMBER_KO: Record<string, string> = { flexure: '휨 부재', compression: '압축 부재', combined: '조합 부재', tension: '인장 부재', connection: '접합' };
@@ -216,6 +223,9 @@ export function locWords(loc: any): string[] {
     n(loc.span) !== null ? `경간 ${loc.span}` : '',
     n(loc.region_support) !== null ? `구간의 지점 ${loc.region_support}` : '',
     loc.demand_basis === 'envelope' ? '소요 = 포락선' : loc.demand_basis === 'combination' ? '소요 = 지배 조합의 도표' : '',
+    // 2026-11-28 결정 S1 · S3: 경간마다 단면이면 그 지점을 검토한 단면, 랩이면 그 부재의 몫(강성의 비 — 소요는 그 몫)
+    typeof loc.section_id === 'string' ? `단면 ${loc.section_id}` : '',
+    n(loc.member_share) !== null ? `몫 ${(loc.member_share * 100).toFixed(1)} %` : '',
   ].filter(Boolean);
 }
 const POINT_KO = (p: string): string => (p === 'M_max' ? 'M 최대' : p === 'V_max' ? 'V 최대' : /^support\s+/.test(p) ? `지점 ${p.replace(/^support\s+/, '')}` : p);
@@ -339,10 +349,13 @@ function buildRuns(): Run[] {
     const si = purlinSI(p);
     const regions = Array.isArray(p.regions) ? p.regions : [];
     const findP = finder(p);
+    // 2026-11-28 결정 S1: 경간마다 단면이면 구간 이름 뒤에 그 구간을 판정한 단면(랩은 두 부재 「S1|S2」, 단면이 바뀌는 구간은 「S1·S2」)
+    const multi = Array.isArray(p.span_sections) && Array.isArray(p.sections);
     regions.forEach((rg: any, i: number) => {
       if (!rg?.result) { return; }
       // 엔진의 구간 이름은 ft 로 적혀 있다 — 화면은 m 이므로 그 숫자 자리만 SI 값으로 바꿔 적는다(값은 엔진의 start_ft · end_ft)
-      const lab = regionLabel(rg, si.regions?.[i], i);
+      const tag = multi ? regionSecTag(rg) : '';
+      const lab = `${regionLabel(rg, si.regions?.[i], i)}${tag ? ` · ${tag}` : ''}`;
       runs.push(runOf(`purlin:${i}`, 'purlin', `퍼린 구간 · ${lab}`, lab, rg.result, si.regions?.[i]?.result, `purlin:regions.${i}.result.`, findP));
     });
     // 퍼린 묶음 전체의 미검토 · 경고 · 가정(구간에 붙지 않은 것)
@@ -629,7 +642,9 @@ async function load(): Promise<void> {
   if (pr && typeof pr === 'object' && !pr.error && Array.isArray(pr.regions)) {
     const prSI = purlinSI(pr);
     state.regions = pr.regions.map((r: any, i: number) => ({ us: r, si: prSI.regions?.[i], runKey: `purlin:${i}` }));
-  } else { state.regions = []; }
+    state.psec = Array.isArray(pr.sections) && pr.sections.length && Array.isArray(pr.span_sections)
+      ? { us: pr.sections, si: Array.isArray(prSI.sections) ? prSI.sections : pr.sections, spanSections: pr.span_sections.map(String) } : null;
+  } else { state.regions = []; state.psec = null; }
   const lap = known('lap') ? state.msgs.lapConnectionResult?.message?.data : null;
   state.lap = lap && typeof lap === 'object' && !lap.error ? { us: lap, si: connSI(lap) } : null;
   const cn = known('connection') ? state.msgs.connectionResult?.message?.data : null;
@@ -660,6 +675,18 @@ export function isDefault(group: 'section' | 'material' | 'conditions'): boolean
 }
 
 export function setTheme(t: 'dark' | 'light'): void { state.theme = t; }
+
+/**
+ * 2026-11-28 결정 S1 · S3: 구간의 단면 꼬리표 — 랩은 두 부재(`lap_members` 의 차례 「S1|S2」), 랩 없이 단면이 바뀌는 지점을 지나는 구간은 검토한 단면마다
+ * (`sections_checked` 「S1·S2」), 그 밖은 판정한 단면(`section_id`). 경간을 몰라 평가하지 못한 구간(section_id null)은 ''
+ */
+export function regionSecTag(rg: any): string {
+  if (!rg || typeof rg !== 'object') { return ''; }
+  const ids = (xs: unknown): string[] => (Array.isArray(xs) ? xs.map((m: any) => (typeof m?.section_id === 'string' ? m.section_id : '?')) : []);
+  if (Array.isArray(rg.lap_members) && rg.lap_members.length) { return ids(rg.lap_members).join('|'); }
+  if (Array.isArray(rg.sections_checked) && rg.sections_checked.length) { return ids(rg.sections_checked).join('·'); }
+  return typeof rg.section_id === 'string' ? rg.section_id : '';
+}
 
 export function regionLabel(us: any, _si: any, i: number): string {
   // 구간 이름표 — 호스트의 label_* 옆 필드(host.region.* 알림)를 이 화면의 단위(m)로(notices.js — 화면은 숫자 자리를 고쳐 쓰지 않는다)

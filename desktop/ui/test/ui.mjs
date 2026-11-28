@@ -328,8 +328,12 @@ function expectedOf(src, u, ctx) {
         return typeof v === 'number' ? caseValueToSI(v, CASE_KIND.get(parts[1]) ?? null) : undefined;
       }
       if (parts[0] === 'spans') { const v = at(ctx.caseUS?.spans, parts.slice(1).join('.')); return typeof v === 'number' ? v * US_TO_SI.length_ft : undefined; }
+      // 2026-11-28 결정 S1: 단면 목록(sections.<i>.params.<k> — US in, 립 각도는 °)
+      if (parts[0] === 'sections' && parts[2] === 'params') { const v = ctx.caseUS?.sections?.[Number(parts[1])]?.params?.[parts[3]]; return typeof v === 'number' ? (parts[3] === 'qlip' ? v : v * US_TO_SI.length) : undefined; }
       return undefined;
     }
+    // 2026-11-28 결정 S1: 호스트가 단면 목록의 단면마다 보낸 Ix(sectionListInfo) — 시험은 퍼린 결과(MCP SI)의 그 단면 성질과 맞댄다
+    case 'secinfo': { const [id, k] = p.split('.'); return ctx.secinfo?.[id]?.[k]; }
     default: return undefined;
   }
 }
@@ -4089,6 +4093,203 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       && tr.shape === '원형' && tr.shapeTag === 'user' && Math.abs(Number(tr.dh) - 50) < 1e-6 && tr.dhTag === 'user';
     return { ok, detail: `없는 DOM id ${present.join(',') || '없음'} · 구역 표시 ${shown.join('/')} · 제목 ${titles.join(' | ')} · 열면 ${bodyOpen} · 칸 ${before} → 원형 고르면 ${after.fields} · 「${after.state}」 · Lh 막힘 ${after.lh}`
       + ` · 호스트 holeShape ${h?.inputs?.holeShape}(${h?.sources?.holeShape}) · dh ${dhSI} mm(${h?.sources?.holeDepth}) → 검토 화면 트리 「${tr.shape}」[${tr.shapeTag}] · dh ${tr.dh}[${tr.dhTag}]` };
+  });
+
+  // ── 2026-11-28 결정 S1 – S8 — 경간마다 다른 퍼린 단면(설계 매뉴얼 II-1A 의 두 단면): 입력 · 구간의 단면 · 랩의 두 부재 · 단면마다의 곡선 · 춤이 다른 랩 · 변경의 글 ─────────
+  // s 단계는 앞 단계에 기대지 않는다 — 깨끗한 사본(프로젝트 밖)을 열고 9CS2.5x070 템플릿부터. 단계끼리는 차례대로(s01 → s07)
+  section('7i. 결정 S1 – S8 — 경간마다 다른 퍼린 단면');
+  const S_STEPS = ['s01', 's02', 's03', 's04', 's05', 's06', 's07'];
+  const C070 = { H: 9, B: 2.5, D: 0.8, t: 0.070, r: 0.1875, qlip: 90 };
+  const C059 = { H: 9, B: 2.5, D: 0.773, t: 0.059, r: 0.1875, qlip: 90 };
+  const II1A = { member_app: 'roof-purlin', span_type: 'cont-4', span_ft: 25, spans_ft: [25, 25, 25, 25], spacing_ft: 5, loads: { D: 15, Lr: 90, W: -144 }, design_method: 'LRFD',
+    laps_per_support: [null, { left_ft: 2.0, right_ft: 2.75 }, { left_ft: 1.25, right_ft: 1.25 }, { left_ft: 2.75, right_ft: 2.0 }, null],
+    deck: { type: 'through-fastened', t_panel: 0.019, fastener_spacing: 12 }, i621_conditions_confirmed: true, Fy: 55, Fu: 70, wc_N: 3.5, wc_R: 0.1875,
+    lap_restrained: true, use_cold_work: false };
+  /** 퍼린의 MCP SI 결과(run_case_check — 호스트가 검토 상태로 다시 돌린 것, MCP 가 SI 로 바꾼 것) — 화면이 그 결과(같은 구간 수 · 단면 블록)를 읽을 때까지 */
+  const sRun = async () => {
+    const r = await mcp.tool('run_case_check', { what: 'member', units: 'SI', detail: 'full' });
+    const pr = r?.result ?? r;
+    const nSec = Array.isArray(pr?.sections) ? pr.sections.length : 0;
+    await settle(`s.regions.length===${(pr?.regions ?? []).length} && ${nSec ? `!!s.psec && s.psec.us.length===${nSec}` : '!s.psec'}`, '퍼린 결과', 120_000).catch(() => undefined);
+    await sleep(400);
+    return pr;
+  };
+  if (S_STEPS.some(ran)) {
+    const scsd = path.join(tmp, 's-span-sections.csd');
+    fs.copyFileSync(path.join(repoRoot, 'Example', 'test.csd'), scsd);
+    const op = serve.ipc('open', { file: scsd }, 90_000);
+    await answerIfUnsaved();
+    await op;
+    await settle(`s.file.path===${JSON.stringify(scsd)}`, '깨끗한 사본');
+    const st = await mcp.tool('set_section_template', { type: 'lippedc', ...C070 });
+    const p0 = await mcp.tool('design_purlin', { ...II1A });
+    check('AI: 깨끗한 사본 · 9CS2.5x070 템플릿 · design_purlin(II-1A, 단면 하나)', !!st.success && !p0.error && (p0.regions ?? []).length > 10, short(st.error ?? p0.error ?? `구간 ${p0.regions?.length}`));
+  }
+  let sOne = null, sTwo = null;
+  /** 가운데 표 서랍의 「구간」 표(접혀 있으면 펼친다) — 머리 칸 · 단면 꼬리표 칸 */
+  const sRegionsTable = async () => {
+    await ev(`(()=>{const d=document.querySelector('#center .drawer.closed [data-drawer="toggle"]'); if(d){d.click();} return 1;})()`);
+    await sleep(200);
+    await ev(`document.querySelector('#center [data-dtab="regions"]')?.click()`);
+    await sleep(250);
+    return ev(`({head:[...document.querySelectorAll('#center table[data-table="regions"] thead th')].map(h=>h.textContent.trim()), tags:[...document.querySelectorAll('#center table[data-table="regions"] [data-region-tag]')].map(e=>e.textContent)})`);
+  };
+  await step('s01 처음 값(모든 경간 S1 · 목록 없음) — 화면이 앞과 같다: 부재 가지에 「단면」 · 「단면 목록」 없음, 경간 표 5 열 · 단면 목록 표 없음, 구간 이름에 단면 꼬리표 없음, 구간 표 7 열, 「퍼린 단면」 가지 없음', 's01_default_unchanged', async () => {
+    sOne = await sRun();
+    await select('model', 'mem');
+    const m = await ev(`({rows:[...document.querySelectorAll('#tree .row[data-k^="case:"]')].map(r=>r.dataset.k), cols:document.querySelectorAll('#info table[data-table="case-spans"] thead th').length,
+      list:!!document.querySelector('#info [data-sec-list]'), cell:document.querySelectorAll('#info [data-span-sec]').length})`);
+    const k0 = await firstKey('purlin:0');
+    await select('result', k0);
+    const r = await ev(`({psec:!!document.querySelector('#tree .row[data-k="psec"]'), tagged:${S}.state.runs.filter(x=>x.area==='purlin' && / · S\\d/.test(x.label)).length, block:!!document.querySelector('#info [data-region-sec]'), psecState:${S}.state.psec})`);
+    const rt = await sRegionsTable();
+    const cols = rt.head.length;
+    const ok = !sOne.error && !sOne.sections && !m.rows.some(k => /^case:(spanSections|sections)/.test(k)) && m.cols === 5 && !m.list && m.cell === 0
+      && !r.psec && r.tagged === 0 && !r.block && r.psecState === null && cols === 7 && rt.tags.length === 0;
+    return { ok, detail: `엔진 ${sOne.error ? short(sOne.error) : `구간 ${sOne.regions?.length} · sections ${!!sOne.sections}`} · 부재 가지 ${m.rows.filter(k => /^case:(spans|supports|laps|spacing|deckType|memberType)/.test(k)).join(',')} · 경간 표 ${m.cols} 열 · 단면 목록 ${m.list} · 단면 칸 ${m.cell}`
+      + ` · 「퍼린 단면」 ${r.psec} · 꼬리표 붙은 구간 ${r.tagged} · 구간 블록 ${r.block} · 서랍 열 ${cols}` };
+  });
+  await step('s02 S2(9CS2.5x059)를 경간 2 · 3 에 — 모델 › 부재: 「단면」 S1 · S2 · S2 · S1 · 「단면 목록」(S1 = 모델 읽기만 · S2 의 치수 mm · Ix = 호스트), 경간 표의 「단면」 칸 · 출처 꼬리표, 수 = get_case_inputs · MCP', 's02_inputs_tree', async () => {
+    const pr = await mcp.tool('design_purlin', { ...II1A, sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }], span_sections: ['S1', 'S2', 'S2', 'S1'] });
+    sTwo = await sRun();
+    await settle(`s.caseIn && (s.caseIn.sections||[]).length===1 && s.msgs.sectionListInfo && s.msgs.sectionListInfo.message.data.info.S2`, '단면 목록 · Ix', 30_000).catch(() => undefined);
+    await select('model', 'mem');
+    await sleep(300);
+    const host = await caseHost();
+    const t = await ev(`(()=>{const row=k=>document.querySelector('#tree .row[data-k="'+k+'"]');
+      return {ss:row('case:spanSections')?.querySelector('[data-span-sections]')?.dataset.spanSections ?? null, ssName:row('case:spanSections')?.querySelector('.nm')?.textContent ?? null, ssTag:row('case:spanSections')?.querySelector('.tag[data-source]')?.dataset.source ?? null,
+        list:row('case:sections')?.querySelector('.nm')?.textContent ?? null, s2:!!row('case:sections.S2'), s2t:row('case:sections.S2')?.querySelector('.nm')?.textContent ?? ''};})()`);
+    const info = await ev(`({head:[...document.querySelectorAll('#info table[data-table="case-spans"] thead th')].map(h=>h.textContent.trim()), cells:[...document.querySelectorAll('#info [data-span-sec]')].map(e=>e.textContent),
+      rows:[...document.querySelectorAll('#info [data-sec-list] tr[data-sec-row]')].map(r=>r.dataset.secRow), s1:document.querySelector('#info [data-sec-row="S1"]')?.textContent ?? '', err:document.querySelectorAll('#info [data-sec-error]').length,
+      ix2:document.querySelector('#info [data-sec-row="S2"] [data-src="secinfo:S2.Ixx"]')?.dataset.v ?? null})`);
+    const secSI = Object.fromEntries((sTwo?.sections ?? []).map(x => [x.id, x]));
+    const n = compareNumbers((await numbers('#info')).filter(x => /^(case:sections|secinfo:|props:Ixx|full:section_params)/.test(x.src)), { ...(await mcpNow()), caseUS: host, secinfo: { S2: { Ixx: secSI.S2?.props?.Ixx } } });
+    const hostOk = JSON.stringify(host.spans?.spanSections) === '["S1","S2","S2","S1"]' && host.sections?.[0]?.id === 'S2' && Math.abs(host.sections[0].params.t - 0.059) < 1e-12;
+    const treeOk = t.ss === 'S1,S2,S2,S1' && t.ssName === '단면' && t.ssTag === host.sources.spanSections && t.list === '단면 목록' && t.s2 && /^S2 · 9CS2\.5x059/.test(t.s2t);
+    const infoOk = info.head.includes('단면') && JSON.stringify(info.cells.slice(0, 4)) === '["S1","S2","S2","S1"]' && JSON.stringify(info.rows) === '["S1","S2"]' && /모델/.test(info.s1) && /읽기만/.test(info.s1) && info.err === 0 && info.ix2 !== null;
+    return { ok: !pr.error && hostOk && treeOk && infoOk && n.bad.length === 0 && (n.bySrc.case ?? 0) >= 5 && (n.bySrc.secinfo ?? 0) === 1 && (n.bySrc.props ?? 0) === 1,
+      detail: `${pr.error ? `design_purlin ${short(pr.error)} · ` : ''}호스트 ${JSON.stringify(host.spans?.spanSections)} · S2 t ${host.sections?.[0]?.params?.t} ${hostOk} | 트리 「${t.ssName}」 ${t.ss} [${t.ssTag}] · 「${t.list}」 · 「${t.s2t}」 ${treeOk}`
+        + ` | 정보 창 열 ${info.head.join('/')} · 칸 ${info.cells.join(',')} · 목록 ${info.rows.join(',')} · Ix(S2) ${info.ix2} ${infoOk} | 수 ${n.compared}개 = get_case_inputs · MCP(${JSON.stringify(n.bySrc)})${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s03 퍼린 결과 — 구간마다 단면 꼬리표(트리 · 구간 표), 랩(S1|S2)의 두 부재 줄(단면 · 경간 · 역할 · 몫 · Mu · Vu · 판정비 · 판정)과 지배 부재 표시, 몫의 근거, 강도의 합은 「참고 — 판정에 쓰지 않음」(판정비가 아니다), 수 = MCP(SI)', 's03_regions_lap_members', async () => {
+    const regs = sTwo?.regions ?? [];
+    const li = regs.findIndex(g => Array.isArray(g.lap_members) && g.lap_members.length === 2 && g.lap_members[0].section_id !== g.lap_members[1].section_id && g.result?.pass !== null);
+    const pi = regs.findIndex(g => g.kind === 'positive' && g.section_id === 'S2');
+    const lapR = regs[li];
+    const k = await firstKey(`purlin:${li}`);
+    await select('result', k);
+    await sleep(300);
+    const s = await ev(`(()=>{const b=document.querySelector('#info [data-region-sec]'); const ms=[...(b?.querySelectorAll('tr[data-lap-member]')??[])];
+      return {block:!!b, members:ms.map(r=>({i:+r.dataset.lapMember, gov:r.dataset.gov==='1', sec:r.children[1].textContent.trim().split(' ')[0], span:r.children[2].textContent.trim(), role:r.children[3].dataset.role ?? '', roleTip:r.children[3].dataset.tip ?? '', v:r.querySelector('[data-member-verdict]')?.dataset.memberVerdict})),
+        basis:b?.querySelector('[data-share-basis]')?.textContent ?? '', ref:b?.querySelector('[data-sum-ref]')?.textContent ?? '', refV:b?.querySelector('[data-sum-ref] [data-ratio-ref]')?.dataset.ratioRef ?? null, refIsRatio:!!b?.querySelector('[data-sum-ref] [data-ratio]'),
+        label:${S}.state.runs.find(x=>x.key==='purlin:${li}')?.label ?? '', loc:document.querySelector('#info')?.innerText.includes('단면 ')};})()`);
+    const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
+    const tags = await ev(`${S}.state.runs.filter(x=>x.area==='purlin' && x.key!=='purlin').map(x=>x.label.split(' · ').pop())`);
+    const wantTags = regs.filter(g => g.result).map(g => (Array.isArray(g.lap_members) && g.lap_members.length ? g.lap_members.map(m => m.section_id).join('|') : Array.isArray(g.sections_checked) ? g.sections_checked.map(m => m.section_id).join('·') : g.section_id));
+    const drawer = (await sRegionsTable()).tags;
+    const pos = await firstKey(`purlin:${pi}`);
+    const posRow = await ev(`[...document.querySelectorAll('#tree .row[data-k^="purlin:${pi}#"]')].map(r=>r.querySelector('.nm')?.textContent ?? '')[0] ?? ''`);
+    const m = lapR?.lap_members ?? [];
+    const gov = (lapR?.governing_member ?? 0) - 1;
+    const memOk = s.members.length === 2 && s.members.every((x, j) => x.sec === m[j].section_id && x.span === String(m[j].span + 1) && x.gov === (j === gov) && x.v === (m[j].pass === true ? 'ok' : m[j].pass === false ? 'ng' : 'none'))
+      && s.members.every((x, j) => x.role === String(m[j].role ?? '')) && s.members.some(x => /이어지는 부재/.test(x.roleTip)) && s.members.some(x => /랩 끝에서 끝나는 부재/.test(x.roleTip));
+    const refOk = /참고 — 판정에 쓰지 않음/.test(s.ref) && s.refV !== null && relClose(Number(s.refV), lapR.reference_sum_of_strengths.ratio) && !s.refIsRatio;
+    const tagOk = JSON.stringify(tags) === JSON.stringify(wantTags) && JSON.stringify(drawer) === JSON.stringify(regs.map(g => (Array.isArray(g.lap_members) && g.lap_members.length ? g.lap_members.map(x => x.section_id).join('|') : Array.isArray(g.sections_checked) ? g.sections_checked.map(x => x.section_id).join('·') : g.section_id || '—')));
+    return { ok: li >= 0 && pi >= 0 && !!pos && s.block && memOk && /강성\(Ix\)의 비/.test(s.basis) && refOk && tagOk && / · S2 · /.test(posRow) && n.bad.length === 0 && (n.bySrc.purlin ?? 0) >= 10,
+      detail: `랩 구간 ${lapR?.id}(${s.label}) · 부재 ${s.members.map(x => `${x.i}:${x.sec}/경간 ${x.span}/${x.role}/${x.v}${x.gov ? '★' : ''}`).join(' | ')} ${memOk} · 몫 「${short(s.basis, 50)}」`
+        + ` · 참고 「${short(s.ref, 80)}」 = ${s.refV} (엔진 ${lapR?.reference_sum_of_strengths?.ratio}) 판정비 아님 ${!s.refIsRatio} ${refOk} · 꼬리표 ${tags.join(',')} ${tagOk} · 정모멘트 S2 줄 「${short(posRow, 60)}」 · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s04 퍼린 단면(결과 탭) — 단면마다 성질 · 좌굴값(정 · 부) · 데크 강성(정보 창), 가운데 = 그 단면의 서명곡선: 단면 고르기 S1 → S2 · 곡선 고르기 +M → −M 이 그림을 바꾼다(점 수 = 엔진), 수 = MCP(SI)', 's04_section_picker', async () => {
+    const secs = sTwo?.sections ?? [];
+    await select('result', 'psec:S1');
+    await sleep(300);
+    const cv = () => ev(`(()=>{const d=document.querySelector('#center [data-draw="psec-curve"]'); return d ? {id:d.dataset.psec, c:d.dataset.psecCurveOn, pts:+d.dataset.points, cp:d.querySelectorAll('circle.cp').length, mk:[...d.querySelectorAll('g.mn')].map(g=>g.dataset.k), pick:d.querySelectorAll('[data-pick]').length,
+      on:[...d.querySelectorAll('[data-psec-pick].on')].map(e=>e.dataset.psecPick)} : null;})()`);
+    const a = await cv();
+    const tree = await ev(`[...document.querySelectorAll('#tree .row[data-k^="psec:"]')].map(r=>r.dataset.k)`);
+    await ev(`document.querySelector('#center [data-psec-pick="S2"]').click()`);
+    await sleep(400);
+    const b = await cv();
+    const sel = await ev(`({tree:document.querySelector('#tree .row.on')?.dataset.k ?? null, title:document.querySelector('#info [data-psec-title]')?.dataset.psecTitle ?? null, dsm:[...document.querySelectorAll('#info [data-psec-dsm]')].map(e=>e.dataset.psecDsm)})`);
+    await ev(`document.querySelector('#center [data-psec-curve="neg"]').click()`);
+    await sleep(400);
+    const c = await cv();
+    const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
+    const S1 = secs.find(x => x.id === 'S1'), S2 = secs.find(x => x.id === 'S2');
+    const ok = JSON.stringify(tree) === JSON.stringify(secs.map(x => `psec:${x.id}`)) && a && a.id === 'S1' && a.c === 'pos' && a.pts === S1.curves.pos.lengths.length && a.cp === a.pts && a.pick === 0 && a.mk.length >= 1 && JSON.stringify(a.on) === '["S1"]'
+      && b && b.id === 'S2' && b.pts === S2.curves.pos.lengths.length && sel.tree === 'psec:S2' && sel.title === 'S2' && sel.dsm.includes('pos') && sel.dsm.includes('neg')
+      && c && c.id === 'S2' && c.c === 'neg' && c.pts === S2.curves.neg.lengths.length && n.bad.length === 0 && (n.bySrc.purlin ?? 0) >= 8;
+    return { ok, detail: `트리 ${tree.join(',')} · S1 +M ${a?.pts}점(엔진 ${S1?.curves?.pos?.lengths?.length}) 극소 ${a?.mk?.join('/')} · 고르기 칸 ${a?.pick} → S2 ${b?.id} ${b?.pts}점 · 트리 ${sel.tree} · 정보 창 ${sel.title} (${sel.dsm.join(',')})`
+      + ` → −M ${c?.c} ${c?.pts}점(엔진 ${S2?.curves?.neg?.lengths?.length}) · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s05 알림 · 점검 · 랩 접합 — 새 알림(경간마다 단면 · 랩 강성의 몫 · 강도의 합 참고)이 한국어로(code 는 data-code), 점검의 val.load_analysis.span_sections · deck_section.2 · dsm_section.2 · lap_members, 랩 접합(지점을 정하지 않음 → 지배 랩)의 두 부재 · 「어느 랩」', 's05_notices_lap', async () => {
+    const asm = await ev(`${S}.state.runs.flatMap(r=>[...r.assumptions, ...r.warnings, ...r.neTexts]).concat(${S}.state.runs.flatMap(r=>r.rows.filter(x=>x.noteCode).map(x=>({code:x.noteCode,text:x.name}))))`);
+    const has = (code, re) => asm.some(x => x.code === code && re.test(x.text) && !x.text.includes(code));
+    const notesOk = has('host.purlin.sections_per_span', /경간마다 단면/) && has('host.purlin.lap_two_members_stiffness', /강성의 비/);
+    const v = await hVal();
+    const vIds = ['val.load_analysis.span_sections', 'val.load_analysis.deck_section.2', 'val.load_analysis.dsm_section.2', 'val.load_analysis.lap_members'];
+    const vText = await ev(`[...document.querySelectorAll('#center table.valt tr.vr')].filter(t=>${JSON.stringify(vIds)}.includes(t.dataset.id)).map(t=>t.textContent)`);
+    const valOk = vIds.every(id => v.state.includes(id) && v.table.includes(id)) && vText.length === vIds.length && vText.every(t => /단면|랩/.test(t) && !/val\.load_analysis/.test(t));
+    const sl = await mcp.tool('set_case_inputs', { inputs: { connLapLeft: 24, connLapRight: 33, connMu: 144, connVu: 2.5, connFastenerDia: 0.19, connNRows: 2, connLapPnvs: 1.2, connEdgeDist: 0.5, connLapSupport: null }, reason: '시험 — 랩 접합(지점 비움)' });
+    const lap = await mcp.tool('run_case_check', { what: 'lap', units: 'SI', detail: 'full' });
+    const L = lap?.result ?? lap;
+    await settle(`!!s.lap && s.lap.us.lap_two_members===true`, '랩 결과', 60_000).catch(() => undefined);
+    await select('result', 'conn:lap');
+    await sleep(300);
+    const li = await ev(`({block:!!document.querySelector('#info [data-lap-two-block]'), rows:[...document.querySelectorAll('#info tr[data-lap-two]')].map(r=>r.children[1].textContent.trim()), auto:document.querySelector('#info [data-lap-auto]')?.dataset.lapAuto ?? null,
+      gov:[...document.querySelectorAll('#info [data-member-gov]')].map(e=>e.dataset.memberGov), ref:!!document.querySelector('#info [data-lap-sum-ref] [data-ratio-ref]'),
+      codes:[...document.querySelectorAll('#info [data-code]')].map(e=>({code:e.dataset.code, text:e.textContent})), raw:/host\\.(purlin|lap)\\./.test(document.getElementById('review').innerText)})`);
+    const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('lap:lap_members') || x.src.startsWith('lap:flexure_reference')), { lapSI: L });
+    const lapCodes = ['host.lap.two_sections', 'host.lap.governing_support'].every(c => li.codes.some(x => x.code === c && /랩/.test(x.text) && !x.text.includes(c)));
+    const lapOk = !sl.error && !lap.error && L?.lap_two_members === true && L?.section_source?.support_defaulted === true && li.block && JSON.stringify(li.rows) === JSON.stringify(L.section_source.members.map(m => m.section_id))
+      && li.auto === String(L.section_source.support) && li.gov.length >= 3 && lapCodes && !li.raw;
+    return { ok: notesOk && valOk && lapOk && n.bad.length === 0 && (n.bySrc.lap ?? 0) >= 8,
+      detail: `알림 ${notesOk} (${asm.filter(x => /^host\.(purlin|lap)\./.test(x.code ?? '')).map(x => x.code.split('.').pop()).join(',')}) · 점검 ${valOk} (${vText.map(t => short(t, 24)).join(' | ')})`
+        + ` | 랩 ${lap.error ? short(lap.error) : `두 부재 ${L?.lap_two_members} · 지점 ${L?.section_source?.support} 자동 ${L?.section_source?.support_defaulted}`} → 정보 창 ${li.rows.join('|')} · 어느 랩 ${li.auto} · 정한 부재 ${li.gov.join(',')} · 참고 ${li.ref} · 알림 code ${lapCodes} · 날 code 없음 ${!li.raw} ${lapOk}`
+        + ` · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s06 춤이 다른 S2(H 10 in) — 그 랩 구간은 「평가하지 못함」(합격으로 그리지 않는다: 트리 미검토 · 띠 빗금 · 부재 줄 판정 없음 · 까닭 한국어), 구간 알림 host.purlin.region_not_evaluated, 전체는 OK 가 아니다', 's06_depth_mismatch', async () => {
+    const sc = await mcp.tool('set_case_inputs', { inputs: {}, sections: [{ id: 'S2', name: null, template: 'lippedc', params: { ...C059, H: 10 } }], reason: '시험 — 춤이 다른 S2' });
+    const deep = await sRun();
+    const regs = deep?.regions ?? [];
+    const mis = regs.map((g, i) => [g, i]).filter(([g]) => g.kind === 'lap' && g.lap_evaluable === false);
+    const [g0, i0] = mis[0] ?? [null, -1];
+    await select('result', await firstKey(`purlin:${i0}`));
+    await sleep(300);
+    const s = await ev(`(()=>{const b=document.querySelector('#info [data-region-sec]');
+      return {ne:b?.querySelector('[data-region-ne]')?.dataset.regionNe ?? null, reason:b?.querySelector('[data-ne-reason]')?.textContent ?? '', depth:!!b?.querySelector('[data-depth-mismatch]'), mv:[...(b?.querySelectorAll('[data-member-verdict]')??[])].map(e=>e.dataset.memberVerdict),
+        ratio:b?.querySelectorAll('[data-ratio]').length ?? -1, okRows:[...document.querySelectorAll('#tree .row[data-k^="purlin:${i0}#"] .dot.ok')].length, unRows:[...document.querySelectorAll('#tree .row[data-k^="purlin:${i0}#"] .dot.un')].length,
+        band:[...document.querySelectorAll('#center rect.bd')].filter(e=>${JSON.stringify(mis.map(([, i]) => `purlin:${i}`))}.includes(e.dataset.run)).map(e=>e.dataset.pass)};})()`);
+    const top = await ev(`(${S}.state.runs.find(r=>r.key==='purlin')?.rows ?? []).filter(x=>x.noteCode==='host.purlin.region_not_evaluated').map(x=>x.name)`);
+    const ok = !sc.error && mis.length >= 2 && g0.result.pass === null && deep.pass !== true && s.ne === 'loads.reason.lap_depth_mismatch' && /춤|깊이/.test(s.reason) && !/loads\.reason/.test(s.reason) && s.depth
+      && s.mv.length === 2 && s.mv.every(x => x === 'none') && s.ratio === 0 && s.okRows === 0 && s.unRows >= 1 && s.band.length === mis.length && s.band.every(x => x === 'un')
+      && top.length >= 1 && top.every(t => /평가하지 못함/.test(t));
+    return { ok, detail: `${sc.error ? `set_case_inputs ${short(sc.error)} · ` : ''}엔진: 평가하지 못한 랩 ${mis.length} · 전체 ${deep.pass} → 정보 창 ${s.ne} 「${short(s.reason, 60)}」 · 춤 다름 ${s.depth} · 부재 ${s.mv.join(',')} · 판정비 ${s.ratio}`
+      + ` · 트리 OK ${s.okRows} · 미검토 ${s.unRows} · 띠 ${s.band.join(',')} · 구간 알림 ${top.length} 「${short(top[0], 60)}」` };
+  });
+  await step('s07 변경의 글 — 경간의 단면 · 단면 목록의 바뀜이 날 키 · JSON 이 아니라 「경간 2 단면」 S1 → S2 · 「단면 S2 추가」 · 「단면 S2 H」 mm(업무 › 기록의 정보 창 · 가운데 표)', 's07_change_labels', async () => {
+    const lst = (await mcp.tool('list_changes', { detail: 'fields', limit: 40 }))?.changes ?? [];
+    /** 그 칸이 든 가장 늦은 묶음을 고르고 정보 창(바뀐 것) · 가운데 표의 그 칸 줄 */
+    const rowOf = async (path, pred = () => true) => {
+      const c = lst.find(x => (x.field_changes ?? []).some(f => f.path === path && pred(f)));
+      if (!c) { return { c: null, info: null, center: null }; }
+      await select('work', `chg:${c.id}`);
+      await sleep(300);
+      // 표 서랍은 펼침 · 접힘을 기억한다(앞 단계가 바꿨을 수 있다) — 접혀 있으면 펼친다
+      await ev(`(()=>{const d=document.querySelector('#center .drawer.closed [data-drawer="toggle"]'); if(d){d.click();} return 1;})()`);
+      await sleep(250);
+      const q = JSON.stringify(path);
+      const r = await ev(`(()=>{const t=e=>e ? e.textContent.replace(/\\s+/g,' ').trim() : null; return {info:t([...document.querySelectorAll('#info [data-chg-fields] tr[data-path]')].find(r=>r.dataset.path===${q})),
+        center:t([...document.querySelectorAll('#center [data-path]')].find(e=>e.dataset.path===${q})?.closest('tr')), all:[...document.querySelectorAll('#info [data-chg-fields] tr, #center table[data-table="chg"] tr')].map(t)};})()`);
+      return { c, ...r };
+    };
+    const sp = await rowOf('case.spans.spanSections[1]', f => f.to === 'S2');
+    const add = await rowOf('case.sections[S2]', f => f.to === 'S2');
+    const h = await rowOf('case.sections[S2].params.H');
+    const noRaw = [sp, add, h].every(x => (x.all ?? []).every(t => !/case\.|\[object|\{"/.test(t ?? '')));
+    const ok = /^경간 2 단면\s*S1\s*→\s*S2/.test(sp.info ?? '') && /단면 S2 추가/.test(add.info ?? '') && !/빈 칸/.test(add.info ?? '') && /^단면 S2 H\s*228\.6\s*→\s*254\s*mm/.test(h.info ?? '')
+      && /단면 목록/.test(add.center ?? '') && /단면 S2 추가/.test(add.center ?? '') && /경간/.test(sp.center ?? '') && noRaw;
+    return { ok, detail: `묶음 ${sp.c?.id ?? '없음'} · ${add.c?.id ?? '없음'} · ${h.c?.id ?? '없음'} → 「${sp.info}」 · 「${add.info}」 · 「${h.info}」 · 가운데 「${short(add.center, 60)}」 · 「${short(sp.center, 60)}」 · 날 키 없음 ${noRaw}` };
   });
 
   const inDom = await ev(`document.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)})`)

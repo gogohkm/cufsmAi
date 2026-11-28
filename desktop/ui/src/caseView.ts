@@ -13,6 +13,7 @@ import { none, num, sigText } from './format';
 import { state } from './store';
 import { caseSI, si, type Kind } from './units';
 import { inputWhy } from './changes';
+import { caseSecKids, sectionListTable, spanSecCell } from './spansecs';
 
 export type Branch = 'mem' | 'ld' | 'dc' | 'cj' | 'mat';
 
@@ -104,6 +105,8 @@ export function branchKids(b: Branch): CaseKid[] {
       { k: 'case:spans', t: '스팬', vHtml: spans.length ? spans.map((v, i) => spanNum(v, `spans.${i}`)).join(' · ') + ' <span class="u">m</span>' : none('없음'), src: srcOf('spans') },
       { k: 'case:supports', t: '지점', vHtml: esc(String((S.supports ?? []).length)), src: srcOf('supports') },
       { k: 'case:laps', t: '랩', vHtml: lapN ? `${lapN} · ${spanNum(firstLap!.left, `lapsPerSupport.${laps.indexOf(firstLap!)}.left`)}/${spanNum(firstLap!.right, `lapsPerSupport.${laps.indexOf(firstLap!)}.right`)} <span class="u">m</span>` : '0', src: srcOf('lapsPerSupport') },
+      // 2026-11-28 결정 S1: 경간의 단면 · 단면 목록(처음 값 — 모든 경간 S1 · 목록 없음 — 이면 없다)
+      ...caseSecKids(),
       kid('spacing', '간격'), kid('deckType', '데크'),
       // 랩 구간의 구속 진술 — 호스트의 검토 상태에 생기면(출처와 함께) 보인다
       ...('lap_restrained' in x.inputs ? [kid('lap_restrained', '랩 구속 진술')] : []),
@@ -137,11 +140,15 @@ export function caseTables(b: Branch, focus: string | null): string {
     const spans: unknown[] = Array.isArray(S.spans) ? S.spans : [];
     const sup: string[] = Array.isArray(S.supports) ? S.supports : [];
     const laps: Array<{ left: unknown; right: unknown }> = Array.isArray(S.lapsPerSupport) ? S.lapsPerSupport : [];
+    // 2026-11-28 결정 S1: 경간마다 단면이면(처음 값이 아니면) 그 경간의 줄에 「단면」 칸 — 처음 값이면 null(표가 앞과 같다)
+    const secOn = spanSecCell(0) !== null;
     const rows = sup.map((s, i) => `<tr data-k="case:supports"><td>${String.fromCharCode(65 + i)}</td><td>${esc(s)}</td><td class="r">${i < spans.length ? spanNum(spans[i], `spans.${i}`) : '<span class="faint">—</span>'}</td>`
+      + (secOn ? `<td>${i < spans.length ? spanSecCell(i) : '<span class="faint">—</span>'}</td>` : '')
       + `<td class="r">${laps[i]?.left === null || laps[i]?.left === undefined ? '<span class="faint">—</span>' : spanNum(laps[i].left, `lapsPerSupport.${i}.left`)}</td>`
       + `<td class="r">${laps[i]?.right === null || laps[i]?.right === undefined ? '<span class="faint">—</span>' : spanNum(laps[i].right, `lapsPerSupport.${i}.right`)}</td></tr>`).join('');
-    html += `<div class="sec"><h4${tip('검토 상태의 경간 표(m) — spans · supports · lapsPerSupport')}>경간 · 지점 · 랩<span class="sp"></span>${caseTag(srcOf('spans'))}</h4>`
-      + `<table class="t etab" data-table="case-spans"><thead><tr><th>지점</th><th>조건</th><th class="r">스팬 m</th><th class="r">랩 좌 m</th><th class="r">랩 우 m</th></tr></thead><tbody>${rows || `<tr><td colspan="5">${none('없음')}</td></tr>`}</tbody></table></div>`;
+    html += `<div class="sec"><h4${tip(`검토 상태의 경간 표(m) — spans · supports · lapsPerSupport${secOn ? ' · spanSections(그 지점의 오른쪽 경간의 단면)' : ''}`)}>경간 · 지점 · 랩<span class="sp"></span>${caseTag(srcOf('spans'))}</h4>`
+      + `<table class="t etab" data-table="case-spans"><thead><tr><th>지점</th><th>조건</th><th class="r">스팬 m</th>${secOn ? `<th${tip('그 경간의 단면(S1 = 모델)')}>단면</th>` : ''}<th class="r">랩 좌 m</th><th class="r">랩 우 m</th></tr></thead><tbody>${rows || `<tr><td colspan="${secOn ? 6 : 5}">${none('없음')}</td></tr>`}</tbody></table></div>`
+      + sectionListTable();
   }
   // 표(designState FIELDS)에 아직 없는데 호스트의 상태에 있는 랩 구간 구속 진술 — 부재 · 접합부 가지에 따로(표에 생기면 그 묶음에서)
   if ((b === 'mem' || b === 'cj') && 'lap_restrained' in x.inputs && !CASE_FIELDS.some(f => f.key === 'lap_restrained')) {

@@ -16,6 +16,7 @@ import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
 import { checkRatioHtml, comboStandard, comboStandardTip, fastenerText, forceModelTag, lengthBoundHtml, reasonNote, utilHtml } from './notices';
 import { docs, draftLabel, draftsOf, issueCls, issueLabel } from './docs';
+import { psecKids } from './spansecs';
 import { dmg } from './damage';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
@@ -196,6 +197,10 @@ export function buildTree(tab: Tab): TNode[] {
           ...(out.length ? [n('chk:OUT', '범위 밖', { v: String(out.length), faint: true, tip: '엔진이 이 검토의 범위 밖으로 둔 것(구현 안 됨 · 입력 없음) — 판정에 들어가지 않는다' })] : []),
         ] : undefined,
       }),
+      // 2026-11-28 결정 S8: 경간마다 단면을 쓴 퍼린 결과의 단면마다(성질 · 좌굴값 · 서명곡선) — 그런 결과일 때만
+      ...(state.psec && chkStage.state === 'ok' ? [n('psec', '퍼린 단면', { v: String(state.psec.us.length), open: true,
+        tip: '경간마다 단면 — 단면마다의 성질 · 좌굴값(정 · 부) · 데크 강성 · 서명곡선(퍼린 결과의 단면 블록). 해석 탭의 좌굴 해석은 S1(모델)의 것',
+        kids: psecKids().map(x => n(x.k, x.t, { v: x.v, tip: x.tip })) })] : []),
       stageNode('conn', '접합부 검토', 'conn', state.lap || state.conn ? { kids: [
         ...(state.lap ? [n('conn:lap', `랩 · ${fastenerText(state.lap.us)}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tagHtml: forceModelTag(state.lap.us, true) || undefined,
           vHtml: utilHtml(state.lap.us, state.lap.us.utilization, 'lap:utilization') || undefined,

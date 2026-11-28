@@ -18,13 +18,14 @@ import { isValKey, reportInfo, reportKindOf, valInfo } from './checklist';
 import { checkPanel, docs, draftInfo, issueInfo, lastIssue } from './docs';
 import { damageInfo } from './damage';
 import { checkRatioHtml, fastenerText, fieldText, finder, FORCE_MODEL_WHY, lengthBoundHtml, noVerdictWhy, comboStandard, comboStandardTip, forceModelConfirmed, forceModelTag, noteLi, noteList, pageOf, reasonNote, unconfirmedModel, utilHtml, type Note } from './notices';
-import { actorOf, actorTag, baseOf, changeOf, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, type Change, type FieldRec } from './changes';
+import { actorOf, actorTag, baseOf, changeOf, chg, groupName, history, KIND_RESULT_KO, LINK_TIP, linkOf, modelTag, runName, aroundOf, runsAround, staleCause, timeline, valText, whoText, wholeSection, type Change, type FieldRec } from './changes';
 import { asmInfo, questionsAbout, srcInfo, srcs, work, workInfo } from './work';
 import { BRANCH_GROUPS, groupMarkButton, itemOfRow, markButton, markOf, markTip, meaningHtml, othersHtml, rv } from './reviews';
 import { alts, altInfo, altRootInfo, visibleAlts } from './alts';
 import type { CheckRow } from './store';
 import { stageNow } from './center';
 import { webOptionBlocks } from './webopts';
+import { lapTwoBlock, psecInfo, regionSecBlock } from './spansecs';
 
 const T_DEF = '<span class="tag def" data-tip="아무도 정하지 않아 프로그램이 채웠다">기본값</span>';
 const T_SET = '<span class="tag" data-tip="누군가 정한 값. 누가 정했는지(AI · 사람)는 변경 기록(R2)부터 보인다">지정</span>';
@@ -305,6 +306,9 @@ function checksInfo(key: string): string {
   return `<div class="hd"><div class="k">${kHead}<span class="sp"></span>${rvBtn}</div><div class="ttl">${esc(row ? `${row.where} · ${row.name}` : run.label)}</div>${head}</div>`
     + nfNotice
     + sec('설계 가정', used, '', '이 판정에 엔진이 쓴 값. 입력의 출처는 모델 탭의 부재 · 하중 · 설계 조건(검토 상태) — 사람별 기록은 R2 부터')
+    // 2026-11-28 결정 S1 · S3 · S4: 경간마다 단면이면 그 구간의 단면 · 랩의 두 부재 · 평가하지 못한 까닭
+    + (rg ? regionSecBlock(rg, ri) : '')
+    + (run.area === 'lap' && state.lap ? lapTwoBlock(state.lap.us, state.lap.si) : '')
     // 결정 T7: 웹 구멍 · 전단 곡선 · Rc · 보강재 §G4.1 · §H4 — 결과에 그 묶음이 있을 때만(고른 항목에 닿는 것)
     + (run.area === 'member' || run.area === 'purlin' ? webOptionBlocks(run, rw ? row : undefined) : '')
     + sec(row?.pointName ? '한계상태 · 이 위치' : '한계상태 · 이 검토', ls, sheetLink)
@@ -378,7 +382,7 @@ function changeInfo(key: string): string {
     + (c.source ? `<dt>원자료</dt><dd>${src ? `<a class="lnk" data-ref-go="${esc(`doc|srcr:${c.source}`)}">${esc(c.source)} · ${esc(src.title)}</a>` : esc(c.source)}</dd>` : '') + '</dl>';
   // ③ 바뀐 것 — 항목 · 이전 · 이후 · 단위(호스트의 구조) + 그 앞 · 뒤 실행이 쓴 단면 성질(실행 이력의 props, 엔진 US → 이 화면의 변환)
   const fs = c.field_changes ?? [];
-  const fRow = (f: FieldRec) => (f.summary || !('from' in f || 'to' in f)
+  const fRow = (f: FieldRec) => (f.summary || wholeSection(f) || !('from' in f || 'to' in f)
     ? `<tr data-path="${esc(f.path)}"><td colspan="5">${esc(f.text)}</td></tr>`
     : `<tr data-path="${esc(f.path)}"><td>${esc(f.label_ko || f.key)}</td><td class="r num dim">${esc(valText(f.from))}</td><td class="r">→</td><td class="r num" style="color:var(--mod)">${esc(valText(f.to))}</td><td class="dim">${f.unit ? ` ${esc(f.unit)}` : ''}</td></tr>`);
   const PROP_KIND: Array<[string, Kind]> = [['A', 'area'], ['Ixx', 'inertia'], ['Izz', 'inertia'], ['Sx', 'modulus'], ['Sxx', 'modulus'], ['Sf', 'modulus'], ['J', 'inertia'], ['Cw', 'warping']];
@@ -456,6 +460,8 @@ function connInfo(): string {
       + row_('전달 전단 V', num(state.lap?.si.V_transfer, { src: 'lap:V_transfer', kind: 'force' }), forceModelTag(lap) || '<span class="tag def" data-tip="기준 조항이 아닌 자체 해석(force_model)">자체 가정</span>')
       + row_('패스너 용량', num(state.lap?.si.capacity, { src: 'lap:capacity', kind: 'force' }), '<span class="tag drv">엔진</span>')
       + lapSectionRows(lap.section_source)), '', '엔진 결과 그대로 — 표 서랍의 「계산 단계」에 식이 있다(US 글)') : '')
+    // 2026-11-28 결정 S1 · S5: 두 단면을 잇는 랩 · 어느 랩(지배 랩을 골랐으면)
+    + (lap && state.lap ? lapTwoBlock(state.lap.us, state.lap.si) : '')
     + resultLists(x, x);
 
 }
@@ -485,7 +491,8 @@ function lapSectionRows(ss: any): string {
 /** 검토 상태 키(case:<key>) → 가지 */
 function branchOfCaseKey(k: string): Branch {
   const key = k.slice(5);
-  if (['spans', 'supports', 'laps'].includes(key)) { return 'mem'; }
+  // 2026-11-28 결정 S1: 경간의 단면 · 단면 목록(case:sections.S2 …)은 부재 가지
+  if (['spans', 'supports', 'laps', 'spanSections', 'sections'].includes(key) || key.startsWith('sections.')) { return 'mem'; }
   const g = CASE_FIELDS.find(f => f.key === key)?.group ?? '';
   return (BRANCH_OF[g] && BRANCH_OF[g] !== 'other' ? BRANCH_OF[g] : 'dc') as Branch;
 }
@@ -510,6 +517,8 @@ export function infoHtml(key: string): string {
   if (key === 'load' || key.startsWith('load:')) { return loadInfo(); }
   if (key === 'chk' || key.startsWith('chk:') || key.startsWith('design') || key.startsWith('purlin') || key.startsWith('lap#') || key.startsWith('conn#')) { return checksInfo(key); }
   if (key === 'conn' || key.startsWith('conn:')) { return connInfo(); }
+  // 2026-11-28 결정 S8: 퍼린 결과의 단면마다(성질 · 좌굴값 · 데크 강성)
+  if (key === 'psec' || key.startsWith('psec:')) { return psecInfo(key); }
   if (key === 'alt') { return altRootInfo(); }
   if (key.startsWith('log:')) { return logInfo(key); }
   if (['todo', 'insp', 'ask:done'].includes(key) || /^(todo|insp):/.test(key)) {
