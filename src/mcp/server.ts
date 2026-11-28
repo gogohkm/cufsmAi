@@ -15,7 +15,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import {
     convertInputSI, convertOutputSIDeep, withUnroundedValues, TEXT_UNITS_NOTE, SI_INPUT_TABLES,
     SI_OUT_MEMBER, SI_OUT_PROPS, SI_OUT_LOADS, SI_OUT_DECK, SI_OUT_VIBRATION, SI_OUT_GET_DSM,
-    SI_OUT_PURLIN, SI_OUT_DESIGN_CHECK, caseValueToSI,
+    SI_OUT_PURLIN, SI_OUT_DESIGN_CHECK, caseValueToSI, caseSectionsToSI,
     SI_OUT_STATUS, SI_OUT_CURVE, SI_OUT_NODES, SI_OUT_ELEMENTS, SI_OUT_STEEL, SI_OUT_ENERGY, SI_OUT_RUN_ANALYSIS,
     type Table,
 } from "./siUnits";
@@ -242,7 +242,7 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
     // K2-5 · 결정 D1: 설계 도구가 검토 상태에서 바꾼 사람의 값(case_inputs_replaced)과 주지 않아 상태에서 온 값(case_inputs_used) —
     // 키마다 단위 종류가 있다(SI 면 그것으로 바꾸고, 표 변환에서는 뺀다)
     // 지점별 랩({left, right} 의 목록)도 바꾼다. case_inputs_used 는 작게 — 항목마다 units 를 싣지 않는다(응답의 units 가 그것)
-    const toSIList = (v: any, kind: string): any => (Array.isArray(v) && v.some((x) => x && typeof x === 'object')
+    const toSIList = (v: any, kind: string): any => (kind === 'section_list' ? caseSectionsToSI(v) : Array.isArray(v) && v.some((x) => x && typeof x === 'object')
         ? v.map((x) => (x && typeof x === 'object' ? { ...x, left: caseValueToSI(x.left ?? null, kind), right: caseValueToSI(x.right ?? null, kind) } : x))
         : caseValueToSI(v, kind));
     const CASE_LISTS: [string, string, string, boolean][] = [['case_inputs_replaced', '__case_replaced', 'previous', true], ['case_inputs_used', '__case_used', 'value', false]];
@@ -273,7 +273,9 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
         const d = (detail as Detail) || 'summary';
         return d === 'full' ? shape(v, d) : dropUnrounded(shape(v, d));
     };
-    if (units !== 'SI' || !table) { return json(done({ ...sh(r), units: 'US' })); }
+    // 검증 2026-11-28 의 6(b): 퍼린 요약의 예산 — 넘을 때만 정해진 차례로 줄인다(budgetPurlinSummary)
+    const budget = (o: any, src: any) => (shape === shapePurlin && (detail || 'summary') === 'summary' && !o?.error ? budgetPurlinSummary(o, src) : o);
+    if (units !== 'SI' || !table) { return json(budget(done({ ...sh(r), units: 'US' }), r)); }
     const held = r.__case_replaced;
     const heldUsed = r.__case_used;
     const { __case_replaced: _h, __case_used: _hu, ...forTable } = r;
@@ -303,7 +305,7 @@ function unitReply(r: any, units: Units, table: Table | null, shape?: Shaper, de
         out.si_unconverted_note = 'These numeric fields have no known unit in the conversion table and were left '
             + 'exactly as the engine returned them (US). Do not read them as SI.';
     }
-    return json(out);
+    return json(budget(out, value));
 }
 
 async function postTool(tool: string, action: string, args: Record<string, any>,
@@ -358,7 +360,9 @@ function checkHead(c: any): any {
         id: c.id, clause: c.clause ?? null, name_ko: c.name_ko ?? c.name ?? null,
         demand: q(c.demand), nominal: q(c.nominal),
         factor: c.factor && typeof c.factor === 'object' ? { symbol: c.factor.symbol, value: c.factor.value, kind: c.factor.kind } : c.factor ?? null,
-        capacity: q(c.capacity), ratio: c.ratio ?? null, verdict: c.verdict, location: c.location ?? null, combination: c.combination ?? null,
+        capacity: q(c.capacity), ratio: c.ratio ?? null, verdict: c.verdict,
+        // H2 후속(크기): 위치 · 조합은 있을 때만(없으면 null 과 같다)
+        ...(c.location != null ? { location: c.location } : {}), ...(c.combination != null ? { combination: c.combination } : {}),
     };
     if (c.reason) { head.reason = c.reason; }
     if (c.reason_code) { head.reason_code = c.reason_code; }
@@ -387,7 +391,8 @@ function checkLine(c: any, withValues = false, headHasReason = false): any {
         if (c.demand) { line.demand = { symbol: c.demand.symbol, value: c.demand.value, quantity: c.demand.quantity }; }
         if (c.capacity) { line.capacity = { symbol: c.capacity.symbol, value: c.capacity.value, quantity: c.capacity.quantity }; }
     }
-    if (c.governs === true && c.governs_basis) { line.governs_basis = c.governs_basis; }
+    // H2 후속(크기): 지배 항목의 governs_basis 는 머리(governing_checks)에 — 머리가 없는 안쪽 결과의 줄에만
+    if (c.governs === true && c.governs_basis && !headHasReason) { line.governs_basis = c.governs_basis; }
     // K4b: 지배 항목의 까닭은 governing_checks 의 머리에 있다 — 줄에는 그 밖의 항목만(한국어 글이 길어 두 번 싣지 않는다)
     if (c.reason && !(c.governs === true && headHasReason)) { line.reason = c.reason; }
     if (c.reason_code && !(c.governs === true && headHasReason)) { line.reason_code = c.reason_code; }
@@ -521,6 +526,138 @@ function moreNote(scope: string, omitted: string[], detail: Detail): string {
         + `or detail:'full' (the whole result as before), or get_design_check {scope:'${scope}', id} for one check with its calculation steps.`;
 }
 
+/**
+ * 판정비가 하한의 비인 NG 결과 — src/records/runs.ts lengthBoundFailure · webview/js/utils.js 와 같은 규칙의 사본(MCP 서버는 그 모듈을
+ * 싣지 않는다 — 시험 web_options_contract · design_chain_contract 가 셋을 맞댄다). ① 빈 길이의 길이와 상관없는 하한 ② 구멍 조항을
+ * 평가하지 못했지만 구멍 없는 강도의 상한으로도 넘음(검토는 trusted false · member.reason.fails_without_holes 의 fail). 비가 큰 것.
+ */
+function boundFailure(r: any): { ratio: number; id: string | null; basis: 'length' | 'holes'; source: string } | null {
+    if (!r || typeof r !== 'object' || r.pass !== false || r.utilization_valid !== false) { return null; }
+    const fin = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    let best: { ratio: number; id: string | null; basis: 'length' | 'holes'; source: string } | null = null;
+    const b = r.length_independent_bound && typeof r.length_independent_bound === 'object' ? r.length_independent_bound : null;
+    const ib = r.interaction_length_bound && typeof r.interaction_length_bound === 'object' ? r.interaction_length_bound : null;
+    const ibt = ib ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
+    if (b && typeof b.ratio === 'number') { best = { id: b.governing_check_id ?? b.governing_check ?? null, ratio: b.ratio, basis: 'length', source: 'length_independent_bound' }; }
+    else if (typeof ibt === 'number' && ibt > 1) { best = { id: 'member.axial_bending', ratio: ibt, basis: 'length', source: 'interaction_length_bound' }; }
+    const dc: any[] = Array.isArray(r.design_checks) ? r.design_checks : [];
+    const fwh = (c: any) => !!c && c.verdict === 'fail' && c.reason_code === 'member.reason.fails_without_holes';
+    const add = (id: string, blockRatio: unknown, source: string) => {
+        const c = dc.find((x) => x && x.id === id) || null;
+        const ratio = c && fwh(c) && fin(c.ratio) !== null ? fin(c.ratio) : fin(blockRatio);
+        if (ratio !== null && ratio > 1 && (!best || ratio > best.ratio)) { best = { ratio, id: c ? id : null, basis: 'holes', source }; }
+    };
+    const hb = r.holes_strength_bound;
+    if (hb && typeof hb === 'object') {
+        const ids = Object.keys(hb.checks && typeof hb.checks === 'object' ? hb.checks : {}).filter((k) => k !== 'member.flexure.positive_region');
+        const fails = dc.filter((c) => fwh(c) && ids.includes(c.id) && fin(c.ratio) !== null).sort((x, y) => y.ratio - x.ratio);
+        if (fails.length) { add(fails[0].id, hb.ratio, 'holes_strength_bound'); }
+        else { const x = fin(hb.ratio); if (x !== null && x > 1 && (!best || x > best.ratio)) { best = { ratio: x, id: null, basis: 'holes', source: 'holes_strength_bound' }; } }
+        if (fin(hb.ratio_positive) !== null) { add('member.flexure.positive_region', hb.ratio_positive, 'holes_strength_bound'); }
+    }
+    const sb = r.shear && typeof r.shear === 'object' ? r.shear.bound_without_holes : null;
+    if (sb && typeof sb === 'object') {
+        if (sb.fails === true) { add('member.shear', sb.ratio, 'shear.bound_without_holes'); }
+        if (sb.h2_fails === true) { add('member.bending_shear', sb.h2_total, 'shear.bound_without_holes'); }
+    }
+    const wb = r.web_crippling && typeof r.web_crippling === 'object' ? r.web_crippling.bound_without_holes : null;
+    if (wb && typeof wb === 'object') {
+        if (wb.fails === true) { add('member.web_crippling', wb.ratio, 'web_crippling.bound_without_holes'); }
+        if (wb.h3_fails === true) { add('member.bending_web_crippling', wb.h3_ratio, 'web_crippling.bound_without_holes'); }
+    }
+    const ih = r.interaction_holes_bound;
+    if (ih && typeof ih === 'object') { add('member.axial_bending', fin(ih.total_unrounded) ?? ih.total, 'interaction_holes_bound'); }
+    return best;
+}
+
+/**
+ * 결정 T7: 구멍 · 횡방향 웹 보강재 · §H4 · 전단의 곡선 · §G6 의 Rc — 그 묶음이 요약에서 빠질 때(잎이 SMALL_BLOCK 보다 많다) 근거만 작게.
+ * 까닭의 글은 not_evaluated · 검토 줄의 reason 에 이미 있다 — 여기에는 code 만(두 번 싣지 않는다). 전체는 detail 'checks' · 'full'.
+ */
+function webBasis(r: any, out: any, omitted: string[]): void {
+    const pick = (o: any, keys: string[]): any => {
+        const x: any = {};
+        for (const k of keys) { if (o[k] !== undefined && o[k] !== null) { x[k] = o[k]; } }
+        return x;
+    };
+    const codes = (o: any): string[] => (Array.isArray(o?.notices) ? [...new Set<string>(o.notices.map((n: any) => n?.code).filter((c: any) => typeof c === 'string'))] : []);
+    const swapped: string[] = [];
+    const swap = (key: string, name: string, block: any) => {
+        const i = omitted.indexOf(key);
+        if (i < 0) { return; }
+        omitted.splice(i, 1);
+        swapped.push(key);
+        out[name] = block;
+    };
+    // H2 후속(크기 — 단일 부재 12 KB): 근거 묶음에는 검토 줄(check_lines · design_checks — 비 · 판정)과 지배 머리(governing_checks —
+    // 소요 · 공칭 · 설계강도 · 위치)에 이미 있는 것을 다시 싣지 않는다. 지배하지 않는 검토의 값은 남긴다(줄에는 비 · 판정뿐이다)
+    const dc: any[] = Array.isArray(r.design_checks) ? r.design_checks : [];
+    const chk = (id: string) => dc.find((c) => c && c.id === id) || null;
+    const gov = (id: string) => { const c = chk(id); return !!c && c.governs === true && (c.verdict === 'pass' || c.verdict === 'fail'); };
+    const without = (o: any, keys: string[]): any => { const x = { ...o }; for (const k of keys) { delete x[k]; } return x; };
+    const h = r.holes;
+    if (h && typeof h === 'object') {
+        const rc = codes(h);
+        // Pynet · Mynet 이 맨 위에 같은 값으로 있으면 다시 싣지 않는다
+        const topSame = ['Pynet', 'Mynet'].filter((k) => typeof h[k] === 'number' && out[k] === h[k]);
+        swap('holes', 'holes_basis', { ...without(pick(h, ['shape', 'dh', 'Lh', 's', 'single_hole', 'web_offset', 'evaluated', 'props_mismatch', 'compression_evaluated', 'flexure_evaluated',
+            'Anet', 'Sfnet', 'Pcrl_h', 'Pcrd_h', 'Mcrl_h', 'Mcrd_h', 'Pynet', 'Mynet']), topSame), ...(rc.length ? { reason_codes: rc } : {}) });
+    }
+    // 구멍 없는 강도의 상한(구멍 조항을 평가하지 못했을 때 — 확실한 불합격의 근거): 값만. 늘 같은 설명 글(note · checks[].text)은 detail 'checks'
+    const hb = r.holes_strength_bound;
+    if (hb && typeof hb === 'object') {
+        const compact = { ...pick(hb, ['Pn', 'Mn', 'design_strength', 'ratio', 'ratio_positive']),
+            ...(hb.checks && typeof hb.checks === 'object' ? { checks: Object.fromEntries(Object.entries(hb.checks).map(([id, c]: [string, any]) => [id, c && typeof c === 'object' ? c.value : c])) } : {}) };
+        const i = omitted.indexOf('holes_strength_bound');
+        if (i >= 0) { omitted.splice(i, 1, 'holes_strength_bound.note / checks[].text'); } else { omitted.push('holes_strength_bound.note / checks[].text'); }
+        out.holes_strength_bound = compact;
+    }
+    const ih = r.interaction_holes_bound;
+    if (ih && typeof ih === 'object' && out.interaction_holes_bound && typeof out.interaction_holes_bound === 'object' && 'note' in out.interaction_holes_bound) {
+        out.interaction_holes_bound = without(out.interaction_holes_bound, ['note']);
+        omitted.push('interaction_holes_bound.note');
+    }
+    const t = r.torsion;
+    if (t && typeof t === 'object') {
+        const tg = gov('member.bending_torsion');
+        swap('torsion', 'torsion_basis', without(pick(t, ['route', 'evaluated', 'applicable', 'R', 'R_raw', 'increased_15pct', 'at_web_flange_junction',
+            'Mn', 'design_strength', 'Mu', 'ratio', 'pass', 'node', 'y', 'f_bending', 'f_torsion', 'reason_code']),
+        [...(chk('member.bending_torsion') ? ['ratio', 'pass'] : []), ...(tg ? ['Mn', 'design_strength', 'Mu', 'node', 'y'] : [])]));
+    }
+    const s = r.web_stiffeners;
+    if (s && typeof s === 'object') {
+        swap('web_stiffeners', 'web_stiffeners_basis', without(pick(s, ['conforming', 'g4_2', 'kind', 'a', 'a_over_h', 'a_over_h_limit', 'Is', 'Is_min', 'As',
+            'Ast_min', 'Fy_st', 'ratio', 'missing', 'reason_code']), chk('member.web_stiffeners') ? ['ratio'] : []));
+    }
+    const boundFlags = (b: any, keys: string[]) => (b && typeof b === 'object' ? { bound_without_holes: pick(b, keys) } : {});
+    const v = r.shear;
+    if (v && typeof v === 'object' && ('curve' in v || 'evaluated' in v)) {
+        // 확실한 불합격(구멍 없는 강도로도 넘음)이면 그 검토가 지배 머리에 상한의 설계강도 · 비로 있다 — 여기에는 넘었는지만
+        swap('shear', 'shear_basis', { ...without(pick(v, ['evaluated', 'reference_only', 'curve', 'kv', 'kv_equation', 'qs', 'c', 'Vn', 'design_strength', 'reason_code']),
+            [...(gov('member.shear') && v.evaluated !== false ? ['Vn', 'design_strength'] : []), ...(v.reference_only === false ? ['reference_only'] : [])]), ...boundFlags(v.bound_without_holes, ['fails', 'h2_fails', 'Vn', 'design_strength']) });
+    }
+    const w = r.web_crippling;
+    if (w && typeof w === 'object' && (w.Rc !== undefined || w.g6 || w.bound_without_holes)) {
+        swap('web_crippling', 'web_crippling_basis', { ...without(pick(w, ['evaluated', 'Rc', 'Pn_without_holes', 'Pn', 'design_strength', 'ratio', 'reason_code']),
+            [...(chk('member.web_crippling') ? ['ratio'] : []), ...(gov('member.web_crippling') && w.evaluated !== false ? ['Pn', 'design_strength'] : [])]),
+            ...(w.g6 && typeof w.g6 === 'object' ? { g6_equation: w.g6.equation ?? null, g6_evaluated: w.g6.evaluated ?? null } : {}),
+            ...boundFlags(w.bound_without_holes, ['fails', 'h3_fails', 'Pn', 'design_strength']) });
+    }
+    if (swapped.length) {
+        omitted.push(`${swapped.join(', ')} (basis: *_basis)`);
+        // §H2 · §H3 의 합(total · 한계 · 판정 · 식)은 그 검토가 지배 머리에 있으면 거기에(소요 = 합, 설계강도 = 한계, equation_used) — 여기에는 항만
+        const dedupe = (key: string, id: string, keys: string[]) => {
+            if (!out[key] || typeof out[key] !== 'object' || !(Array.isArray(out.governing_checks) && out.governing_checks.some((g: any) => g && g.id === id))) { return; }
+            out[key] = without(out[key], keys);
+            deduped = true;
+        };
+        let deduped = false;
+        dedupe('shear_interaction', 'member.bending_shear', ['total', 'pass', 'equation']);
+        dedupe('h3_interaction', 'member.bending_web_crippling', ['total', 'limit', 'pass', 'equation', 'design_method']);
+        if (deduped) { omitted.push('H2 / H3 totals (in governing_checks)'); }
+    }
+}
+
 /** 부재 · 접합 · 랩 결과의 요약. 랩의 fastener_design(접합 결과)도 같은 규칙으로. */
 function shapeDesign(scope: string): Shaper {
     const shape = (r: any, detail: Detail, inner = false): any => {
@@ -561,6 +698,7 @@ function shapeDesign(scope: string): Shaper {
             const oi = omitted.indexOf('limit_state_checks');
             if (oi >= 0) { omitted.splice(oi, 1); }
         }
+        if (!inner) { webBasis(r, out, omitted); }
         if (detail === 'checks') {
             out.design_checks = dc.map((c) => { const { steps: _s, ...x } = c || {}; void _s; return x; });
         } else {
@@ -570,14 +708,15 @@ function shapeDesign(scope: string): Shaper {
         headlineCaveat(out, out.governing_checks);
         // 엔진(2026-11-25 둘째 판): 빈 길이의 맨 위 utilization 은 가정한 길이의 수(utilization_valid false) — 판정비가 아니다. 길이와 상관없는
         // 하한으로 NG 이면 그 하한의 비 · 항목이 판정비 · 지배(length_independent_bound)
-        if (!inner && r.length_assumed === true && r.utilization_valid === false) {
-            const b = r.length_independent_bound && typeof r.length_independent_bound === 'object' ? r.length_independent_bound : null;
-            const ib = r.interaction_length_bound && typeof r.interaction_length_bound === 'object' ? r.interaction_length_bound : null;
-            const ibt = ib ? (typeof ib.total_unrounded === 'number' ? ib.total_unrounded : ib.total) : null;
-            const bound = b && typeof b.ratio === 'number' ? { id: b.governing_check_id ?? b.governing_check ?? 'length_independent_bound', ratio: b.ratio, key: 'length_independent_bound' }
-                : typeof ibt === 'number' && ibt > 1 ? { id: 'member.axial_bending', ratio: ibt, key: 'interaction_length_bound' } : null;
+        // 2026-11-26: 같은 규칙에 「구멍 없는 강도로도 넘음」(구멍 조항을 평가하지 못한 확실한 불합격 — src/records/runs.ts lengthBoundFailure)
+        const bound = !inner ? boundFailure(r) : null;
+        if (!inner && bound && bound.basis === 'holes') {
+            out.utilization_note = `utilization is not the verdict ratio (some hole provisions could not be evaluated) — the result FAILS even on the strength `
+                + `without holes (holes can only lower it): ${bound.id ?? bound.source} ratio ${Number(bound.ratio.toFixed(4))} (${bound.source}); report that ratio `
+                + 'as a fail and say which hole provisions were not evaluated (not_evaluated)';
+        } else if (!inner && r.length_assumed === true && r.utilization_valid === false) {
             out.utilization_note = r.pass === false && bound
-                ? `utilization comes from an assumed length and is not the verdict ratio — the result FAILS at every length on the length-independent bound: ${bound.id} ratio ${Number(bound.ratio.toFixed(4))} (${bound.key}); report that ratio`
+                ? `utilization comes from an assumed length and is not the verdict ratio — the result FAILS at every length on the length-independent bound: ${bound.id ?? bound.source} ratio ${Number(bound.ratio.toFixed(4))} (${bound.source}); report that ratio`
                 : 'utilization comes from an assumed length (a length is blank) — it is not a verdict ratio; report the result as not evaluated for the length-dependent checks';
         }
         // 하위 결과(web_crippling · shear · 조합의 compression … · fastener_design)의 알림 — 하나도 버리지 않는다.
@@ -668,9 +807,11 @@ function shapePurlin(r: any, detail: Detail): any {
     if (detail === 'full' || !r || typeof r !== 'object' || !Array.isArray(r.regions)) { return r; }
     const omitted: string[] = [];
     const skip = new Set(['regions', 'design_positive', 'design_negative', 'design_lap', 'design_uplift', 'load_analysis',
-        'dsm_positive', 'dsm_negative', 'props', 'cutwp']);
+        'dsm_positive', 'dsm_negative', 'props', 'cutwp', 'sections', 'span_map']);
     const out = topLevel(r, skip, omitted);
-    for (const k of ['props', 'cutwp']) { if (k in r) { omitted.push(k); } }
+    // 검증 2026-11-28 의 7: 경간마다 단면이면 맨 위 단면 값(props · cutwp · dsm_*)은 top_level_section_id 의 단면 하나의 것
+    const topId = typeof r.top_level_section_id === 'string' ? r.top_level_section_id : null;
+    for (const k of ['props', 'cutwp']) { if (k in r) { omitted.push(topId ? `${k} (of section ${topId})` : k); } }
     // K4b: §I6.2.1 조건 — 요약에는 id · 판정 · 값 · 한계만(엔진이 조건마다 limits · 단위 · as_length 를 더해 이름표 목록 checks 와 같은 것을
     // 두 번 싣게 됐다 — 38 구간 요약이 예산을 넘은 까닭). 이름표 글은 detail 'checks' · 'full' 에.
     if (detail === 'summary' && out.i621_check && typeof out.i621_check === 'object' && Array.isArray(out.i621_check.conditions)) {
@@ -700,6 +841,22 @@ function shapePurlin(r: any, detail: Detail): any {
         const neGov = ids(pts, (c) => c.governs === true && c.governs_basis === 'not_evaluated');
         if (neGov.length > 0) { line.governs_not_evaluated = neGov; }
         if (res.error) { line.error = res.error; }
+        // 2026-11-28 결정 S1 · S3′ · S4: 경간마다 단면 — 그 구간을 판정한 단면, 랩의 두 부재(강도의 몫 · 비 · 판정), 단면이 바뀌는 구간의 단면마다,
+        // 랩의 강도의 합(판정 — 휨 · 전단 비)과 강성의 몫으로 본 비(참고)
+        if (g.section_id !== undefined) { line.section_id = g.section_id; }
+        const r4 = (v: any) => (typeof v === 'number' ? roundTo(v, 4) : v ?? null);
+        const memberLine = (m: any) => ({ section_id: m.section_id, share: r4(m.share),
+            ...(m.share_V !== undefined && m.share_V !== m.share ? { share_V: r4(m.share_V) } : {}), ratio: m.utilization ?? null, pass: m.pass ?? null });
+        if (Array.isArray(g.lap_members)) { line.lap_members = g.lap_members.map(memberLine); if (g.governing_member) { line.governing_member = g.governing_member; } }
+        if (Array.isArray(g.sections_checked)) { line.sections_checked = g.sections_checked.map(memberLine); }
+        if (g.sum_of_strengths && typeof g.sum_of_strengths === 'object') {
+            // F2 의 4: 휨 · 전단의 비와 §H2 의 비(구간의 지배 검토 · 판정비는 줄의 governing_check · ratio), 한 쪽 강도만 알면 평가하지 못한 항목
+            line.sum_of_strengths = { flexure_ratio: g.sum_of_strengths.flexure_ratio ?? null, shear_ratio: g.sum_of_strengths.shear_ratio ?? null,
+                bending_shear_ratio: g.sum_of_strengths.bending_shear_ratio ?? null,
+                ...(Array.isArray(g.sum_of_strengths.not_evaluated) ? { not_evaluated: g.sum_of_strengths.not_evaluated } : {}) };
+        }
+        if (g.reference_stiffness_share && g.reference_stiffness_share.ratio != null) { line.reference_stiffness_share_ratio = g.reference_stiffness_share.ratio; }
+        if (g.lap_evaluable === false) { line.lap_evaluable = false; }
         if (detail === 'checks') {
             line.checks = pts.map((pt) => ({
                 check_point: pt.check_point, location: pt.location, combination: pt.combination, Mu: pt.Mu, Vu: pt.Vu,
@@ -731,9 +888,22 @@ function shapePurlin(r: any, detail: Detail): any {
     if (others.length > 0) { out.notices_elsewhere = others; }
     out.governing_by_kind = Object.fromEntries(['positive', 'negative', 'lap', 'uplift'].map((k) =>
         [k, r[`design_${k}`]?.region?.id ?? null]));
-    for (const k of ['dsm_positive', 'dsm_negative']) {
+    // 결정 S1: 경간마다 단면이면 단면마다의 좌굴값이 sections[] 에 — 맨 위 dsm_positive · dsm_negative(S1 의 것)는 요약에 다시 싣지 않는다
+    for (const k of Array.isArray(r.sections) ? [] : ['dsm_positive', 'dsm_negative']) {
         if (r[k] && typeof r[k] === 'object') { out[k] = topLevel(r[k], new Set(), omitted, `${k}.`); }
     }
+    if (Array.isArray(r.sections)) { omitted.push(`dsm_positive / dsm_negative (the values of section ${topId ?? 'S1'} — top_level_section_id; sections[].dsm_pos / dsm_neg carry Mcrl · Lcrl · Mcrd · Lcrd of every section; detail:'full')`); }
+    // 결정 S1 · S8: 단면마다 — 치수 · 주요 성질 · 좌굴값(Mcrl · Mcrd · 반파장) · 데크 강성 · 경간. 서명곡선 · 성질 전부는 detail:'full'
+    if (Array.isArray(r.sections)) {
+        const dsmLine = (d: any) => (d && typeof d === 'object' ? { Mcrl: d.Mxxcrl ?? null, Lcrl: d.Lcrl ?? null, Mcrd: d.Mxxcrd ?? null, Lcrd: d.Lcrd ?? null } : null);
+        out.sections = r.sections.map((x: any) => ({ id: x.id, name: x.name ?? null, template: x.template ?? null, params: x.params ?? null, source: x.source, spans: x.spans,
+            props: x.props ? { A: x.props.A ?? null, Ixx: x.props.Ixx ?? null, Sf: x.props.Sf ?? null } : null,
+            dsm_pos: dsmLine(x.dsm_pos), dsm_neg: dsmLine(x.dsm_neg),
+            // 결정 S7′: 정모멘트 좌굴값에 쓴 데크 강성(모든 단면에 한 값 — 그 값을 준 단면 section_id)과 그 단면 자신의 값(참고)
+            deck_used: x.deck_used ?? null, deck_own: x.deck_own ?? null }));
+        omitted.push("sections[].curves (each section's S-S signature curves), sections[].props in full and sections[].geometry (detail:'full')");
+    }
+    if (r.span_map) { omitted.push("span_map (the per-span section map of the load analysis — detail:'full')"); }
     if (r.load_analysis && typeof r.load_analysis === 'object') {
         const la = r.load_analysis;
         out.load_analysis = {
@@ -755,6 +925,36 @@ function shapePurlin(r: any, detail: Detail): any {
         + "get_design_check {scope:'purlin', id, location:{region, check_point}} returns one check with its calculation steps."
         + (displayNote ? ' ' + displayNote : '');
     return out;
+}
+
+/**
+ * 검증 2026-11-28 의 6(b): 퍼린 요약의 예산(40 KiB). 넘으면 정해진 차례로 줄인다 — 합격이고 지배하지 않는 구간(전체 지배 · 종류마다의 지배가 아닌)의
+ * 줄을 가장 작은 꼴 {id, kind, span(s), section_id, ratio, pass} 로. 불합격 · 평가하지 못한 구간 · 지배 구간 · 경고 · 가정 · 범위 · 평가하지 못함의 글은
+ * 손대지 않는다. 무엇을 줄였고 어디서 얻는지 more 에. 그래도 넘으면 더 자르지 않고 more 에 그렇게 적는다. 예산 안이면 바이트 하나 바꾸지 않는다.
+ */
+const PURLIN_SUMMARY_BUDGET = 40 * 1024;
+function budgetPurlinSummary(out: any, src: any): any {
+    const size = (o: any) => Buffer.byteLength(JSON.stringify(o));
+    if (!out || typeof out !== 'object' || !Array.isArray(out.regions) || size(out) <= PURLIN_SUMMARY_BUDGET) { return out; }
+    const gov = new Set<string>([out.governing?.id, ...Object.values(out.governing_by_kind || {})].filter((x): x is string => typeof x === 'string'));
+    const srcRegions: any[] = Array.isArray(src?.regions) ? src.regions : [];
+    const short: string[] = [];
+    const regions = out.regions.map((g: any) => {
+        if (!g || typeof g !== 'object' || g.pass !== true || gov.has(g.id) || g.error
+            || (Array.isArray(g.not_evaluated) && g.not_evaluated.length) || (Array.isArray(g.failing) && g.failing.length) || g.governs_not_evaluated) { return g; }
+        const s = srcRegions.find((x) => x && x.id === g.id) || {};
+        short.push(String(g.id));
+        return { id: g.id, kind: g.kind, ...(s.span !== undefined ? { span: s.span } : {}), ...(Array.isArray(s.spans) ? { spans: s.spans } : {}),
+            ...(g.section_id !== undefined ? { section_id: g.section_id } : {}), ratio: g.ratio ?? null, pass: g.pass };
+    });
+    if (!short.length) {
+        return { ...out, more: `${out.more} The summary is ${size(out)} B, over the ${PURLIN_SUMMARY_BUDGET} B budget, and has no passing non-governing region line to shorten — nothing was cut; use detail:'checks' or get_design_check for the parts you need.` };
+    }
+    const res = { ...out, regions };
+    res.more = `${out.more} Over the ${PURLIN_SUMMARY_BUDGET} B summary budget: the lines of the passing, non-governing regions ${short.join(', ')} were shortened to {id, kind, span(s), section_id, ratio, pass} (fail, not-evaluated and governing regions and every warning / assumption / scope / not-evaluated text are kept) — their bounds, demands, Ly, Cb, check points, governing check and lap members are in detail:'checks' (every region) or get_design_check {scope:'purlin', id, location:{region}}.`;
+    const n = size(res);
+    if (n > PURLIN_SUMMARY_BUDGET) { res.more += ` Still ${n} B after that (over the budget) — nothing else was cut.`; }
+    return res;
 }
 
 /** 큰 수 배열(도표 · 포락선 · 모드 형상 · 곡면 점)을 뺀다. keep 의 키는 그대로. 뺀 경로는 omitted 로. */
@@ -797,9 +997,56 @@ function shapeData(keep: string[], note: string): Shaper {
 
 const shapeLoadsArrays = shapeData([], 'Every named location (supports, lap ends, maxima, inflection points) with its Mu / Vu / reactions, the reaction envelopes per support, the unbraced regions (auto_params) and the deflections per span are kept.');
 
+/**
+ * 검증 2026-11-28 의 6(a): 경간마다 단면의 하중 해석 — 요약에는 경간마다 짧은 줄(auto_params.i621_by_span: 경간 · 단면 · R, R 이 없는 경간은
+ * 맞지 않는 조건의 id · deck_basis.by_section: 단면 · 경간 · kφ · kx — 참고). 맞지 않는 조건의 글은 한 번(i621_failed_conditions). 경간마다의 §I6.2.1 검토 전부 ·
+ * 데크 블록 전부는 detail:'full'. 경간마다 단면이 아니면(그 키가 없다) 아무것도 바꾸지 않는다.
+ */
+function compactSpanBlocks(out: any): void {
+    const ap = out.auto_params;
+    if (!ap || typeof ap !== 'object') { return; }
+    const done: string[] = [];
+    if (Array.isArray(ap.i621_by_span)) {
+        const texts: Record<string, string> = {};
+        const reasons: string[] = [];
+        ap.i621_by_span = ap.i621_by_span.map((b: any) => {
+            if (!b || typeof b !== 'object') { return b; }
+            const row: any = { span: b.span, section_id: b.section_id ?? null, R: b.R ?? null };
+            if (b.real_span === false) { row.real_span = false; }
+            if ((b.R === null || b.R === undefined) && b.real_span !== false) {
+                const conds: any[] = Array.isArray(b.check?.conditions) ? b.check.conditions : [];
+                const bad = conds.filter((c) => c && c.status !== 'pass' && c.status !== 'not_applicable' && c.status !== 'na');
+                if (bad.length) {
+                    row.failing = bad.map((c) => c.id);
+                    for (const c of bad) { if (texts[c.id] === undefined) { texts[c.id] = typeof c.label === 'string' ? c.label : String(c.id); } }
+                } else if (Array.isArray(b.check?.reasons)) {
+                    for (const t of b.check.reasons) { const s = typeof t === 'string' ? t : (t && typeof t.text === 'string' ? t.text : JSON.stringify(t)); if (!reasons.includes(s)) { reasons.push(s); } }
+                    row.failing = [];
+                }
+            }
+            return row;
+        });
+        if (Object.keys(texts).length) { ap.i621_failed_conditions = texts; }
+        if (reasons.length) { ap.i621_reasons = reasons; }
+        done.push('auto_params.i621_by_span (each span: span, section_id, R; a span without R lists its failing condition ids — their texts once in i621_failed_conditions)');
+    }
+    if (ap.deck_basis && typeof ap.deck_basis === 'object' && Array.isArray(ap.deck_basis.by_section)) {
+        // 결정 S7′ · F2 의 2: 데크 강성은 한 번(auto_params.deck — 가장 작은 kφ · 가장 작은 kx 를 따로, deck_basis.kphi_section_id · kx_section_id) — 단면마다의 값(참고)은 짧은 줄로
+        ap.deck_basis = { ...ap.deck_basis, by_section: ap.deck_basis.by_section.map((d: any) => (d && typeof d === 'object'
+            ? { section_id: d.section_id ?? null, spans: d.spans ?? null, kphi: d.kphi ?? null, kx: d.kx ?? null, adopted_kphi: d.adopted_kphi === true, adopted_kx: d.adopted_kx === true } : d)) };
+        done.push('auto_params.deck_basis.by_section (each section: section_id, spans, kphi, kx, adopted_kphi, adopted_kx — information only; the deck used for every span is auto_params.deck: the smallest kphi and the smallest kx, taken separately — deck_basis.kphi_section_id, kx_section_id)');
+    }
+    if (done.length) {
+        const note = `Shortened per span: ${done.join('; ')}. Each span's full §I6.2.1 check and each section's deck methods are in detail:'full'.`;
+        out.detail = 'summary';
+        out.more = typeof out.more === 'string' && out.more ? `${out.more} ${note}` : note;
+    }
+}
+
 /** 하중 해석의 요약: 긴 수 배열을 빼고, 지배 조합(governing)이 중력 · 양력 결과와 같으면 그 이름만. */
 function shapeLoads(r: any, detail: Detail): any {
     const out = shapeLoadsArrays(r, detail);
+    if (detail !== 'full' && out && typeof out === 'object') { compactSpanBlocks(out); }
     if (detail === 'full' || !out || typeof out !== 'object' || !out.governing) { return out; }
     for (const k of ['gravity', 'uplift']) {
         if (out[k] && JSON.stringify(out[k]) === JSON.stringify(out.governing)) {
@@ -1018,7 +1265,7 @@ const VIEW_ITEM = z.object({
 const CASE_UNITS = z.enum(['US', 'SI']).optional().describe("'US' (default): in, ft (spans, spacing, brace points, laps), ksi, kips, kip-in, psf, in⁴. 'SI': mm, m, MPa, kN, kN-m, kPa, mm⁴.");
 
 server.tool("get_case_inputs",
-    "The design / load / connection inputs of the open review as shown on the StCFSD screen (the case state): inputs {key: value} (null = blank / not given), spans {spans, supports, lapsPerSupport}, unit_of {key: unit}, sources {key: default | user | ai | file | load-analysis | mirror}, model_inputs (section template / dimensions, E · ν · G, analysis conditions — read only here, they belong to the model), mcp_only (design-tool arguments that have no screen field, by tool), rev (case revision) and dirty (unsaved changes, dirty_since). Keys are the .csd keys (e.g. Lb, Cb, Mux, wcN, spacing, loadD, connT1). Reading changes nothing.",
+    "The design / load / connection inputs of the open review as shown on the StCFSD screen (the case state): inputs {key: value} (null = blank / not given), spans {spans, supports, lapsPerSupport, spanSections (the section of each span: 'S1' = the current model, 'S2' … = the section list)}, sections (the section list S2 … — {id, name, template, params {H, B, D, t, r, qlip}} in the reply's units; empty = every span uses the model), unit_of {key: unit}, sources {key: default | user | ai | file | load-analysis | mirror}, model_inputs (section template / dimensions, E · ν · G, analysis conditions — read only here, they belong to the model), mcp_only (design-tool arguments that have no screen field, by tool), rev (case revision) and dirty (unsaved changes, dirty_since). Keys are the .csd keys (e.g. Lb, Cb, Mux, wcN, spacing, loadD, connT1). Reading changes nothing.",
     {
         keys: z.array(z.string().min(1).max(64)).max(200).optional().describe("Only these keys (omit = all)"),
         units: CASE_UNITS,
@@ -1036,7 +1283,15 @@ server.tool("set_case_inputs",
             supports: z.array(z.enum(['P', 'R', 'F', 'N'])).max(51).optional().describe("Support types, one per support (spans + 1)"),
             lapsPerSupport: z.array(z.object({ left: z.number().nullable(), right: z.number().nullable() })).max(51).optional()
                 .describe("Lap length each side of each support — ft, or m if units='SI'; null where the table has no cell (first support's left, last support's right, simple spans)"),
+            spanSections: z.array(z.string().max(4)).max(50).optional()
+                .describe("Section of each span: 'S1' = the current model, 'S2' … = an id of the section list (sections). One per span; every span 'S1' = one section everywhere (the engine request is the one without this feature)."),
         }).optional().describe("The span table (checked against spanType / nSpans)"),
+        sections: z.array(z.object({
+            id: z.string().regex(/^S([2-9]|[1-9][0-9])$/).describe("'S2' … 'S99' (S1 is the current model — not listed)"),
+            name: z.string().max(40).nullable().optional(),
+            template: z.string().max(20).describe("The model's template type (set_section_template) — the section list takes that type only"),
+            params: z.record(z.string(), z.number().nullable()).describe("Template dimensions {H, B, D, t, r, qlip} — in (mm if units='SI'), qlip in degrees; a dimension left out (or null) takes S1's (the model's) value — stored and stated in the reply's assumptions; refused if S1 has none"),
+        })).max(20).optional().describe("The whole section list S2 … (written whole: the list you pass replaces the case's list; spans that used a removed section go back to S1). Same template type as the model; a hand-drawn / edited model cannot have one."),
         units: CASE_UNITS,
         reason: z.string().max(20000).optional().describe("Short reason — recorded with the invalidated results and with the change (the first 300 characters, control characters removed; same rule as every write tool)"),
     },
@@ -1600,9 +1855,47 @@ const WC_FIELDS = {
     wc_M: z.number().nonnegative().optional().describe("§H3 moment at the reaction — kip-in, or kN-m (omit → Mu, conservative, with a warning)"),
 };
 
+// 결정 T7(2026-11-26): 웹 구멍(천공) · 횡방향 웹 보강재 · 휨 + 비틀림(§H4) — 화면 「설계」 탭의 접이 구역 셋과 같은 검토 상태 칸
+// (holeShape … · stiffenerMode … · torsionMode …). 받은 것만 상태에 쓰고, 계산은 화면 단추의 본문(구역이 「없음」 이면 그 키를 보내지 않는다)
+const HOLE_DESC_TAIL = " Holes outside the specification limits, off-centre or edge-stiffened holes, sections other than C / Z / track (§G3 / §G6: C and track only) and sections whose web cannot be identified (hand-drawn or edited sections) come back NOT EVALUATED with the reason (holes.reasons, design_checks member.applicability.holes) — report them; the gross-section values are never used for a pass then. Holes only lower these strengths: when the demand exceeds the guaranteed strength without holes the check FAILS anyway (verdict fail, trusted false, reason_code member.reason.fails_without_holes; holes_strength_bound · shear / web_crippling .bound_without_holes · interaction_holes_bound; utilization_note names the ratio) — report it as a fail standing on the strength without holes. Invalid hole_* / stiffener_* / torsion_* values come back as an error naming the input ('holes: …', 'stiffeners: …', 'torsion: …') and nothing is written to the case.";
+const HOLE_FIELDS_E = {
+    hole_shape: z.enum(['none', 'circular', 'noncircular']).optional().describe("Web holes (perforations) equally spaced along the member: 'circular' or 'noncircular' (slotted / rectangular). Enables §E2.5 · §E3.2.2 · §E4.2 (compression) and §F2.2 · §F3.2.2 · §F4.2 (flexure) with the Appendix 2 elastic buckling of the member with holes (net section at the hole, web thickness tr, length-weighted properties), and in flexure §G3 shear and §G6 web crippling. 'none' clears the screen's hole section. Omit → the screen's choice (case input holeShape, initially 'none'); other hole_* arguments need a shape (given here or on the screen)." + HOLE_DESC_TAIL),
+    hole_depth: z.number().positive().optional().describe("dh — hole dimension across the web (the diameter of a circular hole) — in, or mm if units='SI'. Required with a hole shape (blank → the call is refused, naming it)."),
+    hole_length: z.number().positive().optional().describe("Lh — hole length along the member — in, or mm. Required for a noncircular hole; a circular hole uses Lh = dh (the value is not sent)."),
+    hole_spacing: z.number().positive().optional().describe("s — centre-to-centre hole spacing along the member (> Lh) — in, or mm. Omit → the screen's; blank there → not sent = ONE hole in each unbraced length (holes.single_hole true, assumption member.assumption.holes_single_hole)."),
+    hole_web_offset: z.number().optional().describe("Offset of the hole centre from mid-depth of the web (+ toward larger model z) — in, or mm. Blank / omitted = 0 (centred). An off-centre hole is not evaluated."),
+};
+const HOLE_FIELDS = {
+    ...HOLE_FIELDS_E,
+    hole_end_distance: z.number().nonnegative().optional().describe("§G6(e): clear distance from the member end to the nearest hole edge (≥ d) — in, or mm"),
+    hole_corner_radius: z.number().nonnegative().optional().describe("Corner radius of a noncircular hole (§G3(e) · §G6(f) ≥ 2t; without it those clauses are not evaluated) — in, or mm"),
+    hole_edge_stiffened: z.boolean().optional().describe("The hole edges are stiffened (lip / collar) — not covered by Appendix 2 / §G3 / §G6: not evaluated"),
+    hole_bearing_distance: z.number().optional().describe("§G6: x, distance from the hole edge to the edge of bearing (Eq. G6-1 / G6-2; < 0 = the hole is within the bearing) — in, or mm"),
+    hole_within_bearing: z.boolean().optional().describe("§G6: a hole lies within the bearing length — a bearing stiffener is required, so web crippling (and §H3) is not evaluated"),
+};
+const STIFFENER_FIELDS = {
+    transverse_stiffeners: z.boolean().optional().describe("The web has transverse stiffeners: §G2.2 (a ≤ 2h, tension field) / §G2.1 with the §G2.3(b) kv, §G4.1 stiffener requirements (check member.web_stiffeners) and §H2 Eq. H2-2. Without the stiffener data (stiffener_*) the stiffened-web shear, §H2 and §G4.1 are NOT EVALUATED — the §G2.1 value (kv = 5.34) is shown as a conservative reference only. false clears the screen's stiffener section; giving stiffener_* sets it. Omit → the screen's (case input stiffenerMode, initially none)."),
+    stiffener_spacing: z.number().positive().optional().describe("a — stiffener spacing (§G4.1: a/h ≤ [260/(h/t)]² and ≤ 3.0) — in, or mm"),
+    stiffener_kind: z.enum(['pair', 'single_angle', 'single_plate', 'nonconforming']).optional().describe("Stiffener type for D of Eq. G4.1-2: 'pair' 1.0, 'single_angle' 1.8, 'single_plate' 2.4; 'nonconforming' = §G4.2 stiffeners (stamped, rolled-in) — not evaluated"),
+    stiffener_Is: z.number().positive().optional().describe("Is — moment of inertia of the stiffener about the web (Eq. G4.1-1) — in⁴, or mm⁴"),
+    stiffener_area: z.number().positive().optional().describe("Ast — stiffener area (Eq. G4.1-2) — in², or mm²"),
+    stiffener_Fy: z.number().positive().optional().describe("Fys — yield stress of the stiffener (Eq. G4.1-2, Y = Fy web / Fys) — ksi, or MPa. Required, no default"),
+};
+const TORSION_FIELDS = {
+    torsion_f_bending: z.number().optional().describe("§H4 route (a): bending normal stress at the point that governs R (largest combined compressive stress) — signed, same convention as torsion_f_torsion — ksi, or MPa. Route (a) wins when both routes are given."),
+    torsion_f_torsion: z.number().optional().describe("§H4 route (a): torsional warping normal stress at that point — signed — ksi, or MPa"),
+    torsion_f_bending_max: z.number().optional().describe("§H4 route (a): maximum bending stress of the section on the same side — ksi, or MPa (omit → torsion_f_bending, stated as an assumption)"),
+    torsion_at_web_flange_junction: z.boolean().optional().describe("§H4 route (a): the point is at the web–flange junction of an edge-stiffened C — permits the 15 % increase of R"),
+    torsion_eccentricity: z.number().optional().describe("§H4 route (b): eccentricity e of the load from the shear centre (+ toward the centroid) — in, or mm. Route (b) solves the warping stresses on the current section model (sections symmetric about x only)."),
+    torsion_span: z.number().positive().optional().describe("§H4 route (b): span L of the torsionally simply supported member — in, or mm"),
+    torsion_load: z.enum(['uniform', 'midspan_point']).optional().describe("§H4 route (b): load shape — 'uniform' or 'midspan_point'"),
+    torsion_support: z.enum(['simple']).optional().describe("§H4 route (b): torsional support at both ends — only 'simple' (twist prevented, warping free); for any other support give the stresses (route (a))"),
+};
+const WEB_OPTIONS_NOTE = " Web holes (hole_*), transverse web stiffeners (transverse_stiffeners, stiffener_*) and §H4 bending + torsion (torsion_* — route (a) the stresses at the governing point, route (b) an eccentric load on one torsionally simply supported span) are the screen's three sections (initially none — then nothing is sent and the results are as without them): checks member.applicability.holes, member.web_stiffeners (G4.1), member.bending_torsion (H4), and the result blocks holes, web_stiffeners, torsion. Without torsion input §H4 is not checked (scope note).";
+
 server.tool("aisi_design_compression",
     "AISI S100-16 Chapter E compression design (DSM) of the current section. " + MEMBER_NOTE
-    + "Effective lengths blank on the screen and not given are reported (E2 not evaluated), never assumed. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
+    + "Effective lengths blank on the screen and not given are reported (E2 not evaluated), never assumed. Web holes (hole_*, the screen's 「웹 구멍」 section) give §E2.5 · §E3.2.2 · §E4.2 (check member.applicability.holes, result block holes, Pynet)." + HOLE_DESC_TAIL + " " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         zero_demand_stated: ZDS,
         design_method: DM,
@@ -1614,6 +1907,7 @@ server.tool("aisi_design_compression",
         Pu: z.number().optional().describe("Required axial strength (compression) — kips, or kN. Omit → the screen's Pu; blank there → capacity only."),
         Fcre: z.number().positive().optional().describe("Elastic global buckling stress from a rational analysis (sections without closed-form E2) — ksi, or MPa"),
         Fcre_basis: z.enum(['fsm_long_wavelength']).optional().describe("Only with Fcre: 'fsm_long_wavelength' when Fcre was read at the long-wavelength end of an FSM signature curve — the engine then flags it (and what derives from it) for comparison at 1e-4 instead of 1e-6 (check contract §16.14)"),
+        ...HOLE_FIELDS_E,
         ...CHECK_CONTEXT,
         detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
@@ -1623,7 +1917,7 @@ server.tool("aisi_design_compression",
 
 server.tool("aisi_design_flexure",
     "AISI S100-16 Chapter F flexure design (DSM) of the current section, with optional §G2 shear + §H2 (give Vu), §G5 web crippling + §H3 (give wc_N, wc_R …), a separate positive-moment region (Lb_pos, Cb_pos, Mu_pos), §I6.2.1 uplift R (C/Z only) and inelastic reserve / cold work. " + MEMBER_NOTE
-    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked when a bearing length and bend radius are there (wc_N / wc_R, or the screen's values — the screen starts with a bearing length) and is otherwise simply absent; give them for any member with bearing at supports or concentrated loads, or blank the screen's with set_case_inputs {wcN: null} (or wc_N: 0) when there is no bearing. The screen's β (distortional moment gradient), cold-work and inelastic-reserve choices apply unless you pass them. " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
+    + "Checks without their inputs are listed as not evaluated, EXCEPT web crippling: §G5/§H3 is checked when a bearing length and bend radius are there (wc_N / wc_R, or the screen's values — the screen starts with a bearing length) and is otherwise simply absent; give them for any member with bearing at supports or concentrated loads, or blank the screen's with set_case_inputs {wcN: null} (or wc_N: 0) when there is no bearing. The screen's β (distortional moment gradient), cold-work and inelastic-reserve choices apply unless you pass them." + WEB_OPTIONS_NOTE + HOLE_DESC_TAIL + " " + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         zero_demand_stated: ZDS,
         design_method: DM,
@@ -1642,7 +1936,9 @@ server.tool("aisi_design_flexure",
         span_type: z.enum(['simple', 'continuous']).optional().describe("With R_uplift: span condition for Table I6.2.1-1 (omit → the condition of the screen option R matches, else the smaller of the two table values is used for the check)"),
         moment_sign: z.enum(['+', '-']).optional().describe("Sign of the bending moment (+ = top flange in compression). Needed for sections not symmetric about x (hat, angle, tee); omit → sign of Mu"),
         shear_n_webs: z.number().int().min(1).optional().describe("Number of webs resisting shear (§G2; omit → inferred from the section)"),
-        transverse_stiffeners: z.boolean().optional().describe("Web has transverse stiffeners (§G2.2 is not implemented: the engine computes §G2.1, conservative, and warns)"),
+        ...STIFFENER_FIELDS,
+        ...HOLE_FIELDS,
+        ...TORSION_FIELDS,
         use_inelastic_reserve: z.boolean().optional().describe("Allow §F2.4.2/§F3.2.3 inelastic reserve where permitted (omit → the screen's check box, initially off)"),
         use_cold_work: z.boolean().optional().describe("Allow §A3.3.2 cold-work strength increase where permitted (omit → the screen's check box — it starts unchecked; pass true to use it)"),
         dist_M1_M2: z.number().min(-1).max(1).optional().describe("Moment ratio M1/M2 for the distortional β factor (+ reverse curvature, − single curvature). Giving it (or dist_Lm) turns the screen's β on; omit → the screen's values when β is on there"),
@@ -1658,7 +1954,7 @@ server.tool("aisi_design_flexure",
 );
 
 server.tool("aisi_design_combined",
-    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. The bending part is the flexure check of the screen's inputs, so the screen's web crippling (§G5/§H3 when a bearing length is there), positive-moment region, β, cold-work and R choices apply too (set_case_inputs changes them). " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
+    "AISI S100-16 §H1 combined axial + bending (+ §H2 shear) of the current section, with §C1 moment amplification. Pu > 0 = compression (H1.2), Pu < 0 = tension (H1.1). Weak-axis strength is not derived automatically: give May_strength when Muy > 0 — and for angles (not exempt by L/1000) even when Muy = 0. The bending part is the flexure check of the screen's inputs, so the screen's web crippling (§G5/§H3 when a bearing length is there), positive-moment region, β, cold-work and R choices apply too (set_case_inputs changes them)." + WEB_OPTIONS_NOTE + " §H4 with weak-axis bending (Muy > 0) is not evaluated. " + MEMBER_NOTE + VERDICT + DESIGN_CHECKS + SUMMARY_NOTE,
     {
         zero_demand_stated: ZDS,
         design_method: DM,
@@ -1683,7 +1979,9 @@ server.tool("aisi_design_combined",
         Fcre_basis: z.enum(['fsm_long_wavelength']).optional().describe("Only with Fcre: 'fsm_long_wavelength' when Fcre was read at the long-wavelength end of an FSM signature curve — the engine then flags it (and what derives from it) for comparison at 1e-4 instead of 1e-6 (check contract §16.14)"),
         moment_sign: z.enum(['+', '-']).optional().describe("Sign of Mux (+ = top flange in compression) for sections not symmetric about x; omit → sign of Mux"),
         shear_n_webs: z.number().int().min(1).optional().describe("Number of webs resisting shear (omit → inferred)"),
-        transverse_stiffeners: z.boolean().optional().describe("Web has transverse stiffeners (§G2.2 not implemented → §G2.1, conservative, with a warning)"),
+        ...STIFFENER_FIELDS,
+        ...HOLE_FIELDS,
+        ...TORSION_FIELDS,
         ...CHECK_CONTEXT,
         detail: DETAIL_DESIGN,
         units: UNITS_MEMBER,
@@ -1881,7 +2179,7 @@ server.tool("aisi_design_guide", "AISI S100-16 design workflow guide for the AI 
 );
 
 server.tool("get_web_crippling",
-    "AISI S100-16 §G5 web crippling of one web (standalone): G5-1 built-up I (Pn is the total for both webs), G5-2 C (incl. overhang), G5-3 Z, G5-4 hat, G5-5 multi-web deck. Out-of-range or not-covered cases return `error` with Pn null (no verdict), plus within_limits / limit_violations / not_covered (e.g. fastened two-flange unstiffened cases). A fastened, unstiffened-flange one-flange case uses the unfastened row as a stated conservative substitute (row_used, assumptions). h3_applies / h3_equation say whether §H3 bending interaction applies; h3_evaluated=false means it was NOT computed here — use aisi_design_flexure with wc_* inputs for the combined check. All engine inputs are explicit — nothing is filled in.",
+    "AISI S100-16 §G5 web crippling of one web (standalone): G5-1 built-up I (Pn is the total for both webs), G5-2 C (incl. overhang), G5-3 Z, G5-4 hat, G5-5 multi-web deck. Out-of-range or not-covered cases return `error` with Pn null (no verdict), plus within_limits / limit_violations / not_covered (e.g. fastened two-flange unstiffened cases). A fastened, unstiffened-flange one-flange case uses the unfastened row as a stated conservative substitute (row_used, assumptions). h3_applies / h3_equation say whether §H3 bending interaction applies; h3_evaluated=false means it was NOT computed here — use aisi_design_flexure with wc_* inputs for the combined check. With hole_* (C-section web with holes) §G6 multiplies Pn by Rc (Rc, Pn_without_holes, g6 with its limits (a)–(i)); outside §G6 → error with Pn null. All engine inputs are explicit — nothing is filled in.",
     {
         h: z.number().positive().describe("Flat depth of the web between fillets — in, or mm if units='SI'"),
         t: z.number().positive().describe("Web thickness — in, or mm"),
@@ -1901,7 +2199,16 @@ server.tool("get_web_crippling",
         bearing_case: z.enum(["end_bearing", "interior_bearing", "overhang_bearing"]).optional().describe("Explicit bearing-case override"),
         support_fastener_spacing: z.number().positive().optional().describe("Multi-web deck support fastener spacing — in, or mm (> 18 in = unfastened)"),
         d: z.number().positive().optional().describe("Out-to-out member depth (used by checks that need it) — in, or mm"),
-        web_holes: z.boolean().optional().describe("Web has holes (§G5 tables do not cover them → reported)"),
+        web_holes: z.boolean().optional().describe("Web has holes but no hole data is given (§G5 tables do not cover them → reported). Give hole_* for §G6 instead"),
+        hole_shape: z.enum(['circular', 'noncircular']).optional().describe("§G6 web crippling of a C-section web with holes: hole shape (with hole_depth, hole_length for noncircular, hole_spacing, hole_end_distance, hole_corner_radius for noncircular, hole_bearing_distance). §G6 covers only Eq. G5-1 + Table G5-2 C sections, EOF / IOF; outside its limits → error with Pn null (the value without holes is not conservative)"),
+        hole_depth: z.number().positive().optional().describe("§G6: dh — hole depth across the web — in, or mm"),
+        hole_length: z.number().positive().optional().describe("§G6: Lh — hole length along the member (circular: = dh) — in, or mm"),
+        hole_spacing: z.number().positive().optional().describe("§G6: centre-to-centre spacing — in, or mm"),
+        hole_end_distance: z.number().nonnegative().optional().describe("§G6(e): member end to the nearest hole edge — in, or mm"),
+        hole_corner_radius: z.number().nonnegative().optional().describe("§G6(f): corner radius of a noncircular hole — in, or mm"),
+        hole_web_offset: z.number().optional().describe("§G6(c): offset of the hole centre from mid-depth (omit = 0) — in, or mm"),
+        hole_bearing_distance: z.number().optional().describe("§G6: x, hole edge to edge of bearing (Eq. G6-1 / G6-2) — in, or mm"),
+        hole_within_bearing: z.boolean().optional().describe("§G6: a hole lies within the bearing length → not evaluated (a bearing stiffener is required)"),
         units: UNITS_MEMBER,
     },
     async (args) => postTool('get_web_crippling', 'web_crippling', args, SI_OUT_MEMBER)
@@ -1969,7 +2276,19 @@ const LOAD_FIELDS = {
     insulation_in: z.number().nonnegative().optional().describe("Insulation thickness for the simple-span R correction — in, or mm"),
     load_combination_standard: z.enum(['asce7_10', 'asce7_22', 'kds_41_12_00']).optional().describe("Standard of the load combinations (names and factors follow that standard's numbering): 'asce7_10' ASCE/SEI 7-10 §2.3.2 / §2.4.1 (the screen's initial choice — the results as before), 'asce7_22' ASCE/SEI 7-22 §2.3.1 / §2.4.1, 'kds_41_12_00' KDS 41 12 00:2022 §1.7. The loads you enter must follow THAT standard's load definitions (e.g. strength-level wind of ASCE 7-22 / KDS) — the result's notices and load_combination_standard {edition, reference, key} say which applies; tell the person. ASCE 7-16 is not available (its tables are not verified). Omit → the screen's choice (case input loadComboStandard)."),
     lr_reduced: z.boolean().optional().describe("The roof live load Lr was REDUCED below 20 psf per ASCE 7 §4.8.2 — only then Lr is pattern-loaded (§4.3.3.1). Omit → the screen's check box (initially off: Lr on all spans)."),
-    I_span_in4: z.array(z.number().positive()).optional().describe("Strong-axis Ix of the member in EACH span (one per span; laps use the sum of the two members) — in⁴, or mm⁴ if units='SI'. It belongs to the span table (a bundle): omit it in a call that gives spans / supports / laps → the screen's list is cleared and one Ix is used for all spans (the engine states the effect in assumptions; it can change tight checks by about 2 %)."),
+    I_span_in4: z.array(z.number().positive()).optional().describe("Strong-axis Ix of the member in EACH span (one per span; laps use the sum of the two members) — in⁴, or mm⁴ if units='SI'. It belongs to the span table (a bundle): omit it in a call that gives spans / supports / laps → the screen's list is cleared and one Ix is used for all spans (the engine states the effect in assumptions; it can change tight checks by about 2 %). With span_sections the Ix of each span comes from its section — a hand-typed I_span_in4 still wins and the engine warns where it differs from the section's Ix by more than 1 %."),
+    // 2026-11-28 결정 S1 – S4: 경간마다 다른 단면
+    sections: z.array(z.object({
+        id: z.string().regex(/^S([2-9]|[1-9][0-9])$/).optional().describe("'S2' … 'S99' (omit → the next free number from S2)"),
+        name: z.string().max(40).optional().describe("Short name, e.g. '9CS2.5x059'"),
+        H: z.number().positive().optional().describe("Template H — in, or mm (the meaning of set_section_template: depth; hat top width)"),
+        B: z.number().positive().optional().describe("Template B — in, or mm (flange width; hat depth)"),
+        D: z.number().nonnegative().optional().describe("Template D — in, or mm (lip; hat brim)"),
+        t: z.number().positive().optional().describe("Thickness — in, or mm"),
+        r: z.number().nonnegative().optional().describe("Inside corner radius — in, or mm"),
+        qlip: z.number().gt(0).max(180).optional().describe("Lip angle — degrees"),
+    }).passthrough()).max(20).optional().describe("Additional sections S2 … of the section list (S1 = the CURRENT MODEL — not listed): the template dimensions of the same template type as the model (set_section_template). Taken whole — the list you pass replaces the case's list (spans that used a removed section go back to S1). A hand-drawn / edited model cannot have a section list. A dimension you leave out takes S1's (the model's) value — stored with the section and stated in assumptions (e.g. [{t: 0.085}] = S1 but thicker); if S1 has no value for it the call is refused, naming the section and the dimension. Each section gets its own properties, §I6.2.1 R and S-S signature-curve buckling values; the deck stiffness (kφ, kx) is computed once for every span with the section in use that gives the smallest kφ (Design Manual II-1C, conservative approximation)."),
+    span_sections: z.array(z.string().max(4)).max(50).optional().describe("Section of EACH span: 'S1' = the current model, 'S2' … from sections (or the case's list), e.g. ['S1','S2','S2','S1'] for thicker end spans. Taken whole; it belongs to the span table — a call that gives spans / supports / laps without span_sections puts every span back to S1 (the reply's assumptions say so when the case has a section list). Each region is checked with the section of the span holding its maximum moment; a lap joining two sections is checked against the sum of the two members' strengths (Design Manual II-1A / II-2A assumption (c): Mu ≤ φMn,1 + φMn,2, Vu ≤ φVn,1 + φVn,2, §H2 with the summed strengths — each member carries the strength share of M and V and is checked with its own section; the stiffness shares I_i / (I_1 + I_2) are a reference only), is NOT EVALUATED when a member's strength is not available, and is NOT EVALUATED when the two depths differ; the deck stiffness is computed once for every span (the section in use with the smallest kφ); a region crossing a support where the section changes without a lap is checked with each of those sections (governing one decides), and web crippling (§G5) / §H3 at such a support with each section bearing there (support_sections_checked). Omit → the screen's assignment."),
 };
 
 const LOADS_SECTION_STRENGTH = {
@@ -2012,8 +2331,9 @@ server.tool("design_purlin",
     + "Each region carries its own Ly, Cb, distortional moment-gradient β (from the region's end moments, beta_dist) and members (2 inside laps: per-member Mu and strength). "
     + "Web crippling (§G5 with §H3) is checked at each support from the analysed reactions, with EOF/IOF from the support position, when a bearing length and web bend radius are there (wc_N / wc_R, or the screen's values — the screen starts with a bearing length); without them (or wc_N 0) it is not evaluated. "
     + "Inputs you leave out are the screen's (loads, deck and the span table are taken whole — see their arguments); the reply's case_inputs_used names those it used. "
-    + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. " + VERDICT
-    + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions)."
+    + "The result bundles the load analysis, the DSM values and every region's design with its own pass — report every region's verdict and the host assumptions / not-evaluated lists; null = no verdict. Same function and result as the GUI purlin design. "
+    + "Web holes (hole_*) and transverse web stiffeners (transverse_stiffeners, stiffener_*) — the screen's sections — apply to every region check (§F2.2 · §F3.2.2 · §F4.2 · §G3 · §G6 · §G2.2 · §G4.1); lap regions and §I6.2.1 uplift regions with holes are NOT EVALUATED by the engine (no provision covers them) — report it. §H4 bending + torsion is not applied to the load-analysis members." + HOLE_DESC_TAIL + " " + VERDICT
+    + " Each regions[i].result carries the design_checks of its governing check point, and regions[i].result.checks[j] (one per check point evaluated in the region: M_max, V_max, support n) carries `location` {region, region_kind, check_point, span, support, x = {symbol, value, quantity: 'length'} measured from the left end}, `combination` and that point's own `design_checks` (same contract as aisi_design_flexure: stable ids, clause, demand / capacity {symbol, value, quantity}, ratio, verdict, steps; quantities in the reply's units). In lap regions those demands are half of the region Mu · Vu (each of the two members — a host assumption, stated in host_assumption and assumptions); with span_sections they are each member's strength share — M · φMn,i / Σ φMn and V · φVn,i / Σ φVn, so the lap verdict is the sum of the two members' strengths (lap_members[] lists both members' lines with share, share_V, share_stiffness, design_strength, shear_strength; sum_of_strengths {flexure_ratio, shear_ratio, bending_shear_ratio, governing, …; when only one kind of member strength is known, that kind is checked by the sum — a fail there fails the region — and not_evaluated lists the rest}; reference_stiffness_share — reference only, not the verdict). With span_sections every region carries section_id, the reply has span_sections (one id per span) and sections [{id, name, template, params, props, dsm_pos, dsm_neg, deck_used, deck_own, spans}] (deck_used = the one deck stiffness every positive curve used — the smallest kphi and the smallest kx of the sections in use, taken separately; kphi_section_id / kx_section_id name the section of each value — deck_own = that section's own value for information; the signature curves only with detail:'full')."
     + " The default reply is a summary: overall verdict, one line per region (range, kind, governing check point and check, ratio, verdict, failing / not-evaluated / governing check ids of all its check points), the governing region's governing checks, reactions, deck and §I6.2.1 data, and every notice text of the bundle — top-level lists plus notices_elsewhere [{kind, text, where: region ids | 'all regions' | load_analysis …}]; each check point's combination is the load combination (and pattern) that produced its demand, or 'envelope' when the load analysis cannot tell; detail:'checks' adds every check point of every region with its checks, detail:'full' returns the whole bundle as before (several MB for many regions), get_design_check one check with its steps.",
     {
         ...LOAD_FIELDS,
@@ -2030,6 +2350,9 @@ server.tool("design_purlin",
         use_cold_work: z.boolean().optional().describe("Allow §A3.3.2 cold-work increase in the region designs where permitted (omit → the screen's check box — it starts unchecked; pass true to use it)"),
         lap_restrained: z.boolean().optional().describe("The PERSON's statement that the lapped portions are sufficiently restrained against lateral-torsional and distortional buckling (AISI Design Manual Examples II-1A / II-2A assumption). ASK THE USER — never set it on your own. true → the lap regions use Lb = 0 and F4 is not applicable (stated in assumptions); not stated (here or on the screen) → the lap regions' F2 and F4 are not evaluated and the purlin has no verdict unless a check fails. Kept with the review (the screen's 「랩 구간의 구속 확인」); omit → the screen's statement, false clears it."),
         distortion_restrained: z.boolean().optional().describe("Old name of lap_restrained (same meaning)"),
+        // 결정 T6 · T7: 구간 검토의 구멍 · 횡방향 웹 보강재(§H4 는 하중 해석이 비틀림을 풀지 않아 받지 않는다)
+        ...HOLE_FIELDS,
+        ...STIFFENER_FIELDS,
         detail: DETAIL_DESIGN,
         units: UNITS_LOADS,
     },
@@ -2069,7 +2392,7 @@ server.tool("validate_design",
 // CONNECTION DESIGN
 // ============================================================
 server.tool("design_lap_connection",
-    "Lap splice of continuous C/Z purlins at a support: §I6.2.1(g) lap length, fastener demand and count, fastener strength (Chapter J engine, end distance incl. J6.1), lap flexure (§F, two members), distortional (§F4) and §H2. "
+    "Lap splice of continuous C/Z purlins at a support: §I6.2.1(g) lap length, fastener demand and count, fastener strength (Chapter J engine, end distance incl. J6.1), lap flexure (§F, two members), distortional (§F4) and §H2. With per-span sections the two lapped members can differ (the screen sends the second member's t_2 · d_2 · Se_2 · Ixx_2 …): lap flexure, distortional and §H2 then use the sum of the two members' strengths (Design Manual II-1A / II-2A assumption (c) — strength_basis), the stiffness shares are a reference only (flexure_reference_stiffness_share); the thinner sheet governs the fasteners and block shear. "
     + "IN-HOUSE ASSUMPTION (not a specification provision, §A1.2(c) rational analysis): the fastener demand is V_transfer = max(Mu/(d − t), Vu) shared equally by all fasteners — the result's `force_model` describes it; report it to the user as an assumption. "
     + "Without Se (effective section modulus for Mnl — given, or taken as the screen does from the current purlin result at the lap's support) the lap flexure is not checked → pass null / verdict NOT_CHECKED (Sf is used only as a reference value, never in place of Se). "
     + "Demands: a support demand that is blank on the screen and not given is NOT zero: every check that uses it is not evaluated (lap.reason.demand_not_given) and the lap cannot pass — omit Mu_support / Vu_support you were not given and blank a screen value that does not apply (set_case_inputs {connMu: null}). Send 0 only with zero_demand_stated: true when the person stated the support demand is zero. Screws need Pnvs; bolts without Fub/bolt_grade are taken as A307. "

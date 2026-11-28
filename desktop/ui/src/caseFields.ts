@@ -21,12 +21,46 @@ export const fieldOf = (key: string): CaseField | undefined => CASE_FIELDS.find(
 /** 묶음 → 트리 가지(템플릿 01 의 부재 · 하중 · 설계 조건 · 접합부) */
 export const BRANCH_OF: Record<string, 'mem' | 'ld' | 'dc' | 'cj' | 'mat' | 'other'> = {
   member: 'mem', deck: 'mem', loads: 'ld', material: 'mat', method: 'dc', design: 'dc', required: 'dc', options: 'dc', webCrippling: 'dc',
+  holes: 'dc', stiffeners: 'dc', torsion: 'dc',
   lap: 'cj', connection: 'cj', vibration: 'other',
 };
 export const GROUP_KO: Record<string, string> = {
   member: '부재 구성', deck: '데크 · 가새', loads: '사용하중 · 면압', material: '재료', method: '설계법', design: '설계 길이 · 계수', required: '소요강도',
   options: '보정 · 선택', webCrippling: '웹 크리플링', lap: '랩 접합', connection: '단일 접합', vibration: '진동',
+  // 결정 T7(2026-11-26) — 편집 화면 설계 탭의 접이 구역 셋(그 이름 그대로)
+  holes: '웹 구멍(천공)', stiffeners: '횡방향 웹 보강재', torsion: '비틀림(§H4)',
 };
+
+/**
+ * 결정 T7 — 웹 구멍 · 횡방향 웹 보강재 · 비틀림(§H4)의 구역. 머리 칸(고르는 칸)이 「없음」 이면 그 구역은 한 줄 「없음」 이고,
+ * 고르면 편집 화면이 보이는 칸만(webview/js/app.js updateWebOptionRows · designState.memberWebOptions 와 같은 규칙 — 원형 구멍은 Lh · 모서리 r 을
+ * 쓰지 않는다, 압축 · 인장 부재는 §G3 · §G6 의 칸을 쓰지 않는다, 비틀림은 고른 길의 칸만). 화면은 값을 고치지 않는다 — 보이는 칸을 고를 뿐이다
+ */
+export const WEB_SECTIONS: Array<{ group: 'holes' | 'stiffeners' | 'torsion'; mode: string }> = [
+  { group: 'holes', mode: 'holeShape' }, { group: 'stiffeners', mode: 'stiffenerMode' }, { group: 'torsion', mode: 'torsionMode' },
+];
+/** 그 구역의 머리 칸 값이 「없음」(또는 비었다)인가 */
+export const webSectionOff = (mode: string, v: unknown): boolean => v === null || v === undefined || v === '' || v === 'none';
+/** 그 구역에서 지금 보이는 칸(머리 칸 다음) — inputs = get_case_inputs.inputs */
+export function webSectionKeys(group: string, inputs: Record<string, unknown>): string[] {
+  if (group === 'holes') {
+    const shape = inputs.holeShape;
+    if (webSectionOff('holeShape', shape)) { return []; }
+    const g = !['compression', 'tension'].includes(String(inputs.memberType ?? ''));     // §G3 · §G6 의 칸(휨 · 조합 · 자동 계산 넷)
+    const nc = shape === 'noncircular';
+    return ['holeDepth', ...(nc ? ['holeLength'] : []), 'holeSpacing', 'holeWebOffset', ...(g ? ['holeEndDistance'] : []), ...(g && nc ? ['holeCornerRadius'] : []),
+      'holeEdgeStiffened', ...(g ? ['holeBearingDistance', 'holeWithinBearing'] : [])];
+  }
+  if (group === 'stiffeners') {
+    return webSectionOff('stiffenerMode', inputs.stiffenerMode) ? [] : ['stiffenerSpacing', 'stiffenerKind', 'stiffenerIs', 'stiffenerArea', 'stiffenerFy'];
+  }
+  if (group === 'torsion') {
+    const m = inputs.torsionMode;
+    return m === 'direct' ? ['torsionFBending', 'torsionFTorsion', 'torsionFBendingMax', 'torsionAtJunction']
+      : m === 'eccentric' ? ['torsionEccentricity', 'torsionSpan', 'torsionLoad', 'torsionSupport'] : [];
+  }
+  return [];
+}
 
 /** 칸의 한국어 이름(설계 화면 칸의 이름을 줄인 것) */
 export const CASE_KO: Record<string, string> = {
@@ -57,7 +91,28 @@ export const CASE_KO: Record<string, string> = {
   connSingleType: '접합 종류', connGrooveType: '그루브 종류', connT1: 't1', connT2: 't2', connD: '지름 d', connN: '개수 n', connFy: '판 Fy', connFu: '판 Fu',
   connWeldL: '용접 길이', connWeldSize: '용접 치수', connFub: '볼트 Fub', connFuf: 'Fuf', connPnvs: 'Pnvs', connDw: 'dw', connPu: 'Pu', connTu: 'Tu', connE: '끝 거리 e',
   connS: '간격 s', connMemberCase: '판 종류', connWidth: '판 폭', connJ63NotApplicable: 'J6.3 해당 없음',
+  // 결정 T7 — 편집 화면(StcfsdPanel 설계 탭)의 칸 이름 그대로. 보강재의 Fy 만 「보강재 Fy」(설계 Fy 와 가르려고)
+  holeShape: '구멍', holeDepth: 'dh', holeLength: 'Lh', holeSpacing: '중심 간격 s', holeWebOffset: '치우침', holeEndDistance: '단부 거리',
+  holeCornerRadius: '모서리 r', holeEdgeStiffened: '구멍 가장자리를 보강했다', holeBearingDistance: '지압까지 x', holeWithinBearing: '구멍이 지압 길이 안에 있다',
+  stiffenerMode: '보강재', stiffenerSpacing: '간격 a', stiffenerKind: '종류', stiffenerIs: 'Is', stiffenerArea: '단면적', stiffenerFy: '보강재 Fy',
+  torsionMode: '비틀림', torsionFBending: '휨 응력 fb', torsionFTorsion: '뒤틀림 fw', torsionFBendingMax: '최대 휨 응력', torsionAtJunction: '그 점이 웹–플랜지 이음이다 (15 % 증가)',
+  torsionEccentricity: '편심 e', torsionSpan: '경간 L', torsionLoad: '하중', torsionSupport: '비틀림 지지',
 };
+
+/**
+ * 칸마다의 선택지 글(같은 값이 칸마다 다른 말일 때 — 비틀림 지지의 simple 은 「양 끝 단순」, 스팬 형식의 simple 은 「단순」).
+ * 편집 화면의 <option> 글 그대로. '' 는 「고르지 않음」
+ */
+export const OPTION_KO_BY_KEY: Record<string, Record<string, string>> = {
+  holeShape: { none: '없음', circular: '원형', noncircular: '비원형(슬롯 · 사각)' },
+  stiffenerMode: { none: '없음', present: '있음' },
+  stiffenerKind: { '': '고르지 않음', pair: '쌍', single_angle: '한쪽 ㄱ형강', single_plate: '한쪽 판', nonconforming: '§G4.2 (프레스 · 압연 등)' },
+  torsionMode: { none: '없음', direct: '응력을 직접', eccentric: '편심 하중으로' },
+  torsionLoad: { '': '고르지 않음', uniform: '등분포', midspan_point: '중앙 집중' },
+  torsionSupport: { '': '고르지 않음', simple: '양 끝 단순' },
+};
+/** 그 칸의 선택지 값 → 화면 글(칸의 표가 먼저, 없으면 공통 표). 모르면 null */
+export const optionKo = (key: string, v: string): string | null => OPTION_KO_BY_KEY[key]?.[v] ?? OPTION_KO[v] ?? null;
 
 /** 선택지 값 → 화면 글(값 그대로를 옆에 함께 — 템플릿의 「지붕 퍼린 · roof-purlin」) */
 export const OPTION_KO: Record<string, string> = {
@@ -89,4 +144,10 @@ export function caseTag(src: string | undefined, blankByAi = false): string {
 export const ENGINE_TO_CASE: Record<string, string> = {
   Fy: 'fy', Fu: 'fu', Lb: 'Lb', Cb: 'Cb', KxLx: 'KxLx', KyLy: 'KyLy', KtLt: 'KtLt', Pu: 'Pu', Vu: 'Vu', Mu: 'Mux', Mx: 'Mux', My: 'Muy', Cmx: 'Cmx', Cmy: 'Cmy',
   wc_N: 'wcN', wc_R: 'wcR', wc_P: 'wcP', dist_Lm: 'distLm', R_uplift: 'rValue',
+  // 결정 T7 — 엔진 인자(designState.memberWebOptions 가 보내는 이름)
+  hole_shape: 'holeShape', hole_depth: 'holeDepth', hole_length: 'holeLength', hole_spacing: 'holeSpacing', hole_end_distance: 'holeEndDistance',
+  hole_web_offset: 'holeWebOffset', hole_corner_radius: 'holeCornerRadius', hole_bearing_distance: 'holeBearingDistance',
+  stiffener_spacing: 'stiffenerSpacing', stiffener_kind: 'stiffenerKind', stiffener_Is: 'stiffenerIs', stiffener_area: 'stiffenerArea', stiffener_Fy: 'stiffenerFy',
+  torsion_f_bending: 'torsionFBending', torsion_f_torsion: 'torsionFTorsion', torsion_f_bending_max: 'torsionFBendingMax',
+  torsion_eccentricity: 'torsionEccentricity', torsion_span: 'torsionSpan', torsion_load: 'torsionLoad', torsion_support: 'torsionSupport',
 };

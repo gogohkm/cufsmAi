@@ -35,6 +35,7 @@ import { claudeDone, claudeStatus, fitTitle, initTitlebar, renderClaude, renderF
 import { buildTree, findNode, keysUnder, setTreeFilter, TABS, treeFilter, treeHtml, type Tab } from './tree';
 import { UNITS_NOTE } from './units';
 import { mount3d } from './v3d';
+import { psecSel } from './spansecs';
 
 const params = new URLSearchParams(location.search);
 const themeParam = params.get('theme');
@@ -1131,6 +1132,11 @@ function boot(): void {
     }
     const fit = t.closest('[data-fit]');
     if (fit) { fitZoom(fit.getAttribute('data-fit')!, $('center')); return; }
+    // 2026-11-28 결정 S8 · S7′: 퍼린 단면 보기 — 단면 고르기(그 단면의 줄로) · 곡선 고르기(정 · 부)
+    const ps = t.closest('[data-psec-pick]');
+    if (ps) { select('result', `psec:${ps.getAttribute('data-psec-pick')}`); return; }
+    const pc = t.closest('[data-psec-curve]');
+    if (pc) { psecSel.curve = pc.getAttribute('data-psec-curve') ?? 'pos'; render(); return; }
     const pick = t.closest('[data-pick]');
     if (pick) {
       const p = pick.getAttribute('data-pick')!;

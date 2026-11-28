@@ -13,7 +13,7 @@ import { CASE_UNIT_KIND, SI_INPUT_TABLES, UnitKey } from '../mcp/siUnits';
 
 export interface Snapshot {
     model: any;
-    case: { inputs?: Record<string, unknown>; spans?: any; mcpOnly?: Record<string, Record<string, unknown>> } | null;
+    case: { inputs?: Record<string, unknown>; spans?: any; mcpOnly?: Record<string, Record<string, unknown>>; sections?: any[] } | null;
 }
 export interface FieldInfo { group: string; unit: string | null }
 export type FieldInfoFn = (key: string) => FieldInfo | null;
@@ -179,6 +179,29 @@ export function diffSnapshots(before: Snapshot, after: Snapshot, fieldInfo: Fiel
         for (const side of ['left', 'right'] as const) {
             const a = la0[i]?.[side] ?? null, b = la1[i]?.[side] ?? null;
             if (!same(a, b)) { push({ path: `case.spans.lapsPerSupport[${i}].${side}`, group: 'member', unit: 'length_ft', from: a, to: b }); }
+        }
+    }
+    // 2026-11-28 결정 S1: 경간의 단면(없는 기록 · 이 기능이 없던 상태는 모두 S1)과 단면 목록(S2 …) — 추가 · 삭제 · 치수마다
+    const SEC_ID = /^S[1-9][0-9]?$/;
+    const ss0: unknown[] = Array.isArray(s0.spanSections) ? s0.spanSections : sp0.map(() => 'S1');
+    const ss1: unknown[] = Array.isArray(s1.spanSections) ? s1.spanSections : sp1.map(() => 'S1');
+    // 없는 자리(경간 수가 바뀐 쪽)도 S1 — 단면 목록이 없는 처음 길의 기록은 이 기능 전과 같은 필드만 낸다(경간 수를 바꿔도 「경간 n 단면」 이 생기지 않는다)
+    for (let i = 0; i < Math.max(ss0.length, ss1.length); i += 1) {
+        const a = ss0[i] ?? 'S1', b = ss1[i] ?? 'S1';
+        if (!same(a, b)) { push({ path: `case.spans.spanSections[${i}]`, group: 'member', unit: null, from: a, to: b }); }
+    }
+    const se0: any[] = Array.isArray(c0.sections) ? c0.sections : [], se1: any[] = Array.isArray(c1.sections) ? c1.sections : [];
+    const secIds = [...new Set([...se0, ...se1].map((x) => x && x.id).filter((x) => typeof x === 'string' && SEC_ID.test(x)))];
+    for (const id of secIds) {
+        const a = se0.find((x) => x && x.id === id), b = se1.find((x) => x && x.id === id);
+        if (!a || !b) { push({ path: `case.sections[${id}]`, group: 'member', unit: null, from: a ? id : null, to: b ? id : null }); continue; }
+        for (const k of ['name', 'template'] as const) {
+            if (!same(a[k] ?? null, b[k] ?? null)) { push({ path: `case.sections[${id}].${k}`, group: 'member', unit: null, from: a[k] ?? null, to: b[k] ?? null }); }
+        }
+        const pa = a.params || {}, pb = b.params || {};
+        for (const k of [...new Set([...Object.keys(pa), ...Object.keys(pb)])]) {
+            if (same(pa[k] ?? null, pb[k] ?? null) || !INPUT_KEY_RE.test(k)) { continue; }
+            push({ path: `case.sections[${id}].params.${k}`, group: 'member', unit: k === 'qlip' ? null : 'length', from: pa[k] ?? null, to: pb[k] ?? null });
         }
     }
     const mo0 = c0.mcpOnly || {}, mo1 = c1.mcpOnly || {};

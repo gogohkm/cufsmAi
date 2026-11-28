@@ -607,7 +607,9 @@ def extract_critical_locations_envelope(
             if first_real == last_real:
                 name = 'End support (left)' if j == 0 else 'End support (right)'
             overhang = (xs[j] - xs[0]) if j == first_real else (xs[-1] - xs[j])
-            if overhang > 1e-9 and member_depth_in and overhang * 12.0 > 1.5 * member_depth_in:
+            # member_depth_in 은 수 하나 또는 지점마다의 목록(경간마다 단면이 다를 때 — 그 지점 양쪽 부재 깊이의 큰 값)
+            d_j = member_depth_in[j] if isinstance(member_depth_in, (list, tuple)) else member_depth_in
+            if overhang > 1e-9 and d_j and overhang * 12.0 > 1.5 * d_j:
                 wc_case = 'IOF'
             else:
                 wc_case = 'EOF'
@@ -643,7 +645,7 @@ def extract_critical_locations_envelope(
         }
         if overhang > 1e-9:
             loc['overhang_ft'] = round(overhang, 3)
-            if not member_depth_in:
+            if not (member_depth_in[j] if isinstance(member_depth_in, (list, tuple)) else member_depth_in):
                 loc['wc_case_note'] = ('Member depth unknown: support with overhang taken as '
                                        'end (EOF) loading.')
         locations.append(loc)

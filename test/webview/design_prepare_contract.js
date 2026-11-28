@@ -39,11 +39,12 @@ function main() {
     'purlin design must reject results when the model changes during analysis');
 
   // 양력은 하부 플랜지 압축/무스프링 곡선(dsmNeg)을 사용하고, R 은 §I6.2.1 적격 구간에만 준다(W3 · V3 T5–T7).
-  assert(panelTs.includes("addRegions(ub.negative_regions, 'uplift', uplift, dsmNeg,"),
+  // 2026-11-28 결정 S1: 구간마다 단면이 다를 수 있어 addRegions 는 곡선 대신 부모멘트 쪽인가(neg = true → 그 구간 단면의 dsmNeg)를 받는다
+  assert(panelTs.includes("addRegions(ub.negative_regions, 'uplift', uplift, true,") && panelTs.includes('rg.neg ? sec.dsmNeg : pg.dsm'),
     'uplift regions must use the reverse-bending unbraced DSM curve (dsmNeg)');
   assert(panelTs.includes('r.i621_region_eligible === true && upliftR != null'),
     'R_uplift only where the engine marks the region I6.2.1-eligible');
-  assert(!/addRegions\(ub\.negative_regions[^\n]*dsmPos/.test(panelTs),
+  assert(!/addRegions\(ub\.negative_regions[^\n]*(dsmPos|uplift, false,)/.test(panelTs),
     'uplift bottom-flange regions must not reuse the deck-braced positive-moment DSM curve');
 
   // 데크 시험 강성 override와 입력 변경 무효화가 UI/저장 계약에 모두 포함된다.

@@ -2760,10 +2760,10 @@
   {
    "code": "member.scope.h4_torsion_not_implemented",
    "params": [],
-   "template": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.",
-   "template_ko": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.",
-   "text": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.",
-   "text_ko": "§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다."
+   "template": "§H4: 비틀림 입력이 없어 비틀림 감소계수 R(Eq. H4-1)을 적용하지 않았습니다 — 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 입력(torsion_*)을 주십시오.",
+   "template_ko": "§H4: 비틀림 입력이 없어 비틀림 감소계수 R(Eq. H4-1)을 적용하지 않았습니다 — 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 입력(torsion_*)을 주십시오.",
+   "text": "§H4: 비틀림 입력이 없어 비틀림 감소계수 R(Eq. H4-1)을 적용하지 않았습니다 — 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 입력(torsion_*)을 주십시오.",
+   "text_ko": "§H4: 비틀림 입력이 없어 비틀림 감소계수 R(Eq. H4-1)을 적용하지 않았습니다 — 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 입력(torsion_*)을 주십시오."
   },
   {
    "code": "member.scope.not_checked_c1_b2_sway",
@@ -3378,10 +3378,10 @@
   {
    "code": "shear.warning.g2_2_g2_webs_transverse_stiffeners",
    "params": [],
-   "template": "§G2.2 (webs with transverse stiffeners) is not implemented; the §G2.1 curve is used with the given kv, which is conservative relative to §G2.2.",
-   "template_ko": "§G2.2 (횡방향 보강재가 있는 웹)는 구현되지 않음 — 준 kv 로 §G2.1 곡선을 씀(§G2.2 보다 보수측).",
-   "text": "§G2.2 (webs with transverse stiffeners) is not implemented; the §G2.1 curve is used with the given kv, which is conservative relative to §G2.2.",
-   "text_ko": "§G2.2 (횡방향 보강재가 있는 웹)는 구현되지 않음 — 준 kv 로 §G2.1 곡선을 씀(§G2.2 보다 보수측)."
+   "template": "§G2.1 curve used with the given kv; §G2.2 (webs with transverse stiffeners) needs the stiffener data (stiffener_*) showing §G4.1 conformance and is not applied here — conservative relative to §G2.2.",
+   "template_ko": "준 kv 로 §G2.1 곡선을 씀 — §G2.2 (횡방향 보강재가 있는 웹)는 §G4.1 을 맞추는 보강재 자료(stiffener_*)가 있어야 하므로 여기서는 쓰지 않음(§G2.2 보다 보수측).",
+   "text": "§G2.1 curve used with the given kv; §G2.2 (webs with transverse stiffeners) needs the stiffener data (stiffener_*) showing §G4.1 conformance and is not applied here — conservative relative to §G2.2.",
+   "text_ko": "준 kv 로 §G2.1 곡선을 씀 — §G2.2 (횡방향 보강재가 있는 웹)는 §G4.1 을 맞추는 보강재 자료(stiffener_*)가 있어야 하므로 여기서는 쓰지 않음(§G2.2 보다 보수측)."
   },
   {
    "code": "shear.warning.h3_web_config_multi_web",

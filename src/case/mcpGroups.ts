@@ -7,7 +7,7 @@
  * 계산은 합친 상태로 만든 화면 단추의 본문(requests.ts)에 화면 칸이 없는 인자(mcpOnly)와 계산 조건이 아닌 인자(context)를 얹어서 한다
  * (StcfsdPanel._mcpDesign — mcpBody). 화면 칸이 없는 인자는 mcpOnly[도구] 에.
  */
-import { CaseState, InputValue, SpanTable } from './caseState';
+import { CaseState, InputValue, SectionDef, SpanTable } from './caseState';
 
 const DS = require('../../webview/js/designState');
 
@@ -19,6 +19,14 @@ export interface McpWrite {
     merge: Record<string, InputValue>;
     /** 경간 표 — 묶음째(경간 · 지점 · 랩의 인자를 하나라도 받으면 그 경간 유형의 처음 표 + 받은 부분). 받지 않았으면 없음(화면의 표) */
     spans?: SpanTable;
+    /** 결정 S1: 단면 목록(S2 …) — 받으면 통째로(받은 목록이 새 목록) */
+    sections?: SectionDef[];
+    /** 결정 S1: 경간의 단면 — span_sections 만 받았을 때(경간 표를 함께 받으면 그 표의 spanSections) */
+    spanSections?: string[];
+    /** 검증 2026-11-28 의 2: 주지 않아 S1 의 값으로 채운 치수(단면마다 — 답의 알림) */
+    sectionsFilled?: Array<{ id: string | null; dims: Record<string, number> }>;
+    /** 검증 2026-11-28 의 4: 경간 표를 span_sections 없이 받아 모든 경간을 S1 로 둠(단면 목록이 있을 때 — 답의 알림) */
+    spanSectionsReset?: boolean;
     /** 화면 칸이 없는 인자 — mcpOnly[tool] 를 이것으로 바꾸고, 그 호출의 본문에 얹는다 */
     mcpOnly: Record<string, unknown>;
     /** 계산 조건이 아닌 인자(check_location · check_combination) — 그 호출의 본문에만 얹는다(상태에 남기지 않는다) */
@@ -42,8 +50,10 @@ const NOT_CONDITIONS = new Set(['action', 'units', 'detail', 'member_type', '__t
 const CONTEXT_ARGS = new Set(['check_location', 'check_combination']);
 
 /** 지금 상태(경간 표의 바탕 · 하중 환산의 간격) — 없으면 처음 상태처럼 */
-type Cur = Pick<CaseState, 'inputs' | 'spans'> | null | undefined;
-type Mapper = (args: any, w: McpWrite, cur: Cur) => void;
+type Cur = (Pick<CaseState, 'inputs' | 'spans'> & { sections?: SectionDef[] }) | null | undefined;
+/** 결정 S1: 단면 목록의 템플릿(지금 모델의 것 — 모델이 템플릿 단면이 아니면 null) */
+export interface McpWriteContext { template?: string | null; /** 검증 2026-11-28 의 2: S1(모델)의 템플릿 치수 — 주지 않은 치수를 채운다 */ params?: Record<string, unknown> | null }
+type Mapper = (args: any, w: McpWrite, cur: Cur, mctx?: McpWriteContext) => void;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) ? v : null);
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v));
@@ -102,13 +112,65 @@ const COMP_READS = ['KxLx', 'KyLy', 'KtLt', 'Pu'];
 const FLEX_READS = ['Lb', 'Cb', 'Mux', 'Vu', 'designLbPos', 'designCbPos', 'designMxPos', 'wcP', 'wcSupport', 'chkRFactor', 'rValue',
     'chkBetaDist', 'distM1M2', 'distLm', ...Object.values(WC), ...Object.values(USE)];
 
+// 결정 T7(2026-11-26): 웹 구멍 · 횡방향 웹 보강재 · §H4 — 엔진 인자 → 검토 상태의 칸(화면 칸과 같은 키). 계산은 그 칸으로 만든 화면 단추의
+// 본문(designState.memberWebOptions)이다 — 구역이 「없음」 이면 칸에 써도 본문에 가지 않으므로, 인자가 그 구역을 연다(아래 webArgs).
+const HOLE_ARGS: Record<string, string> = { hole_depth: 'holeDepth', hole_length: 'holeLength', hole_spacing: 'holeSpacing',
+    hole_end_distance: 'holeEndDistance', hole_web_offset: 'holeWebOffset', hole_corner_radius: 'holeCornerRadius',
+    hole_edge_stiffened: 'holeEdgeStiffened', hole_bearing_distance: 'holeBearingDistance', hole_within_bearing: 'holeWithinBearing' };
+const STIFFENER_ARGS: Record<string, string> = { stiffener_spacing: 'stiffenerSpacing', stiffener_kind: 'stiffenerKind',
+    stiffener_Is: 'stiffenerIs', stiffener_area: 'stiffenerArea', stiffener_Fy: 'stiffenerFy' };
+const TORSION_DIRECT_ARGS: Record<string, string> = { torsion_f_bending: 'torsionFBending', torsion_f_torsion: 'torsionFTorsion',
+    torsion_f_bending_max: 'torsionFBendingMax', torsion_at_web_flange_junction: 'torsionAtJunction' };
+const TORSION_ECCENTRIC_ARGS: Record<string, string> = { torsion_eccentricity: 'torsionEccentricity', torsion_span: 'torsionSpan',
+    torsion_load: 'torsionLoad', torsion_support: 'torsionSupport' };
+const HOLE_READS = ['holeShape', ...Object.values(HOLE_ARGS)];
+const STIFFENER_READS = ['stiffenerMode', ...Object.values(STIFFENER_ARGS)];
+const TORSION_READS = ['torsionMode', ...Object.values(TORSION_DIRECT_ARGS), ...Object.values(TORSION_ECCENTRIC_ARGS)];
+
+/**
+ * 결정 T7: 구멍 · 보강재 · §H4 의 인자(받은 것만 — 합치기). parts: 그 도구가 받는 구역.
+ * - hole_shape('none' | 'circular' | 'noncircular') → holeShape. 다른 hole_* 만 받았는데 화면의 구역이 「없음」 이면 계산하지 않는다
+ *   (어느 모양인지 모른다 — 엔진도 hole_shape 없는 구멍 입력을 오류로 답한다).
+ * - transverse_stiffeners → stiffenerMode(true 있음 · false 없음). stiffener_* 를 받으면(transverse_stiffeners: false 가 아니면) 「있음」 —
+ *   엔진도 보강재 자료를 받으면 보강재가 있는 웹으로 본다.
+ * - torsion_f_* → torsionMode 'direct', 그것 없이 torsion_eccentricity · span · load · support → 'eccentric'(둘 다 받으면 직접 — 엔진의 규칙).
+ */
+function webArgs(a: any, w: McpWrite, used: Set<string>, cur: Cur, parts: { holes?: boolean; stiffeners?: boolean; torsion?: boolean }): void {
+    const given = (t: Record<string, string>) => Object.keys(t).filter((k) => a[k] !== undefined);
+    if (parts.holes) {
+        w.reads.push(...HOLE_READS);
+        if (a.hole_shape !== undefined) { used.add('hole_shape'); put(w, 'merge', 'holeShape', a.hole_shape, 'hole_shape'); }
+        const hs = given(HOLE_ARGS);
+        direct(a, w, HOLE_ARGS, used);
+        const shapeNow = a.hole_shape !== undefined ? a.hole_shape : (cur ? cur.inputs.holeShape : 'none');
+        if (hs.length && !(shapeNow === 'circular' || shapeNow === 'noncircular')) {
+            w.skipped.push({ arg: hs.join(', '), reason: "구멍 모양(hole_shape 'circular' · 'noncircular')을 함께 주어야 한다 — 화면의 「웹 구멍」 구역이 「없음」 이라 그 값으로는 구멍을 계산하지 않는다" });
+        }
+    }
+    if (parts.stiffeners) {
+        w.reads.push(...STIFFENER_READS);
+        const ss = given(STIFFENER_ARGS);
+        direct(a, w, STIFFENER_ARGS, used);
+        if (a.transverse_stiffeners !== undefined) {
+            used.add('transverse_stiffeners');
+            put(w, 'merge', 'stiffenerMode', a.transverse_stiffeners === true ? 'present' : 'none', 'transverse_stiffeners');
+        } else if (ss.length) { w.merge.stiffenerMode = 'present'; }
+    }
+    if (parts.torsion) {
+        w.reads.push(...TORSION_READS);
+        const da = given(TORSION_DIRECT_ARGS), ea = given(TORSION_ECCENTRIC_ARGS);
+        direct(a, w, { ...TORSION_DIRECT_ARGS, ...TORSION_ECCENTRIC_ARGS }, used);
+        if (da.length) { w.merge.torsionMode = 'direct'; } else if (ea.length) { w.merge.torsionMode = 'eccentric'; }
+    }
+}
+
 /** 계약 §6.4: 「준 0 은 정말 0」 의 진술 → 검토 상태의 그 칸(화면 칸과 같은 키) — 받았을 때만(합치기) */
 function zds(a: any, w: McpWrite, used: Set<string>): void {
     used.add('zero_demand_stated');
     if (a.zero_demand_stated !== undefined) { put(w, 'merge', 'designZeroDemandStated', a.zero_demand_stated === true, 'zero_demand_stated'); }
 }
 
-const memberFlexure: Mapper = (a, w) => {
+const memberFlexure: Mapper = (a, w, cur) => {
     const used = new Set<string>();
     zds(a, w, used);
     material(a, w, used);
@@ -128,20 +190,22 @@ const memberFlexure: Mapper = (a, w) => {
             if (a.span_type !== undefined) { w.mcpOnly.span_type = a.span_type; } else { w.unset.push('span_type'); }
         }
     }
+    webArgs(a, w, used, cur, { holes: true, stiffeners: true, torsion: true });
     rest(a, w, used);
 };
 
-const memberCompression: Mapper = (a, w) => {
+const memberCompression: Mapper = (a, w, cur) => {
     const used = new Set<string>();
     zds(a, w, used);
     material(a, w, used);
     w.merge.memberType = 'compression';
     w.reads.push(...MATERIAL_READS, ...COMP_READS, 'designZeroDemandStated');
     direct(a, w, { KxLx: 'KxLx', KyLy: 'KyLy', KtLt: 'KtLt', Pu: 'Pu' }, used);
+    webArgs(a, w, used, cur, { holes: true });
     rest(a, w, used);
 };
 
-const memberCombined: Mapper = (a, w) => {
+const memberCombined: Mapper = (a, w, cur) => {
     const used = new Set<string>();
     zds(a, w, used);
     material(a, w, used);
@@ -151,6 +215,7 @@ const memberCombined: Mapper = (a, w) => {
     direct(a, w, { KxLx: 'KxLx', KyLy: 'KyLy', KtLt: 'KtLt', Lb: 'Lb', Cb: 'Cb', Cmx: 'Cmx', Cmy: 'Cmy', dist_M1_M2: 'distM1M2',
         Pu: 'Pu', Mux: 'Mux', Muy: 'Muy', May_strength: 'MayStrength', Vu: 'Vu' }, used);
     if (a.dist_M1_M2 !== undefined) { w.merge.chkBetaDist = true; }
+    webArgs(a, w, used, cur, { holes: true, stiffeners: true, torsion: true });
     rest(a, w, used);
 };
 
@@ -172,7 +237,7 @@ const LOAD_READS = ['spanType', 'nSpans', 'spacing', 'loadD', 'loadLr', 'loadS',
     'chkLrReduced', 'spanIxIn4', ...Object.values(DECK_BUNDLE), 'bracePointsFt', 'chkI621Confirmed', 'deckInsulationIn', 'loadComboStandard'];
 
 function loadsLike(withDesign: boolean): Mapper {
-    return (a, w, cur) => {
+    return (a, w, cur, mctx) => {
         const used = new Set<string>();
         material(a, w, used);
         if (a.member_app !== undefined) { used.add('member_app'); put(w, 'merge', 'memberType', a.member_app, 'member_app'); }
@@ -236,10 +301,75 @@ function loadsLike(withDesign: boolean): Mapper {
                 used.add('lap_restrained'); used.add('distortion_restrained');
                 put(w, 'merge', 'lapRestrained', (a.lap_restrained ?? a.distortion_restrained) === true, 'lap_restrained');
             }
+            // 결정 T6 · T7: 구간 검토의 구멍 · 횡방향 웹 보강재(§H4 는 자동 계산 넷에 쓰지 않는다)
+            webArgs(a, w, used, cur, { holes: true, stiffeners: true });
         }
         spanTable(a, w, used, spanType, nSpans);
+        sectionArgs(a, w, used, cur, mctx, spanType, nSpans);
         rest(a, w, used);
     };
+}
+
+/** 결정 S1 의 MCP 단면 치수 이름(그 호출의 단위 — 서버가 US 로 바꾼 뒤) */
+const SECTION_ARG_KEYS = ['H', 'B', 'D', 't', 'r', 'qlip'];
+/**
+ * 결정 S1 · S2: sections [{id?, name?, H, B, D, t, r, qlip}] (S1 = 지금 모델 — 목록에 넣지 않는다) 와 span_sections ['S1', 'S2', …] (경간마다 하나).
+ * 둘 다 묶음째로 — 받은 sections 가 새 목록(id 를 주지 않은 단면은 S2 부터 비어 있는 번호), 받은 span_sections 가 경간의 단면 전부.
+ * 경간 표를 묶음째 쓰면서 span_sections 를 주지 않으면 모든 경간 S1(그 표의 처음 값 — 경간별 Ix 와 같은 규칙). 모델이 템플릿 단면이 아니면 받지 않는다.
+ */
+function sectionArgs(a: any, w: McpWrite, used: Set<string>, cur: Cur, mctx: McpWriteContext | undefined, spanType: string, nSpans: number): void {
+    w.reads.push('spanSections', 'sections');
+    for (const k of ['sections', 'span_sections']) { if (a[k] !== undefined) { used.add(k); } }
+    let list: SectionDef[] | undefined;
+    if (a.sections !== undefined) {
+        const tpl = mctx?.template ?? null;
+        if (!tpl || !DS.SECTION_TEMPLATE_PARAMS[tpl]) {
+            w.skipped.push({ arg: 'sections', reason: tpl
+                ? `the current section template '${tpl}' cannot have a section list (only ${Object.keys(DS.SECTION_TEMPLATE_PARAMS).join(', ')})`
+                : 'the current section is not a template section (hand-drawn / edited) — a section list needs a template section (set_section_template); every span uses S1' });
+        } else if (!Array.isArray(a.sections)) {
+            w.skipped.push({ arg: 'sections', reason: 'sections must be an array of {id?, name?, H, B, D, t, r, qlip}' });
+        } else {
+            const raw: any[] = a.sections;
+            const keys: string[] = DS.SECTION_TEMPLATE_PARAMS[tpl];
+            const out: any[] = [];
+            const bad: string[] = [];
+            for (const s of raw) {
+                if (!s || typeof s !== 'object' || Array.isArray(s)) { bad.push('each section is an object'); continue; }
+                const extra = Object.keys(s).filter((k) => !['id', 'name', ...SECTION_ARG_KEYS].includes(k));
+                if (extra.length) { bad.push(`unknown section key(s) ${extra.join(', ')} (allowed: id, name, ${SECTION_ARG_KEYS.join(', ')})`); }
+                const unused = SECTION_ARG_KEYS.filter((k) => s[k] !== undefined && !keys.includes(k));
+                if (unused.length) { bad.push(`${unused.join(', ')} not used by the '${tpl}' template (it takes ${keys.join(', ')})`); }
+                const params: Record<string, number | null> = {};
+                for (const k of keys) { params[k] = s[k] === undefined ? null : s[k]; }
+                out.push({ id: s.id, name: s.name ?? null, template: tpl, params });
+            }
+            // id 없는 단면: S2 부터 비어 있는 번호(받은 id 를 먼저 뺀다)
+            for (const s of out) { if (s.id === undefined || s.id === null) { s.id = DS.nextSectionId(out.filter((x) => x.id)); } }
+            // 검증 2026-11-28 의 2: 주지 않은 치수는 S1(모델의 템플릿 치수)의 값 — 채운 그대로 상태에 적고 답에 알린다. S1 에도 없으면 오류
+            const fill = DS.fillSectionDims(out, mctx?.params ?? null);
+            const errs = [...bad, ...fill.errors, ...DS.validateSections(fill.list)];
+            if (errs.length) { w.skipped.push({ arg: 'sections', reason: errs.join(' · ') }); }
+            else {
+                list = fill.list.map((x: any) => DS.normalizeSection(x));
+                w.sections = list;
+                if (fill.filled.length) { w.sectionsFilled = fill.filled; }
+            }
+        }
+    }
+    // 검증 2026-11-28 의 4: 경간 표를 묶음째 쓰면서 span_sections 를 주지 않으면 모든 경간 S1(묶음의 규칙 — 그대로) — 단면 목록이 있으면 그렇게 했다고 알린다
+    if (w.spans && a.span_sections === undefined && (list ?? cur?.sections ?? []).length > 0) { w.spanSectionsReset = true; }
+    if (a.span_sections !== undefined) {
+        const ids = DS.sectionIds(list ?? cur?.sections ?? []);
+        const n = w.spans ? w.spans.spans.length : (cur ? cur.spans.spans.length : DS.spanCount(spanType, nSpans));
+        const v = a.span_sections;
+        const errs = !Array.isArray(v) ? ['span_sections must be an array of section ids, one per span']
+            : DS.validateSpanTable({ spans: Array.from({ length: n }, () => 0), supports: Array.from({ length: n + 1 }, () => 'P'),
+                lapsPerSupport: Array.from({ length: n + 1 }, () => ({ left: null, right: null })), spanSections: v }, 'cont-n', n, ids);
+        if (errs.length) { w.skipped.push({ arg: 'span_sections', reason: errs.join(' · ') }); }
+        else if (w.spans) { w.spans = { ...w.spans, spanSections: [...v] }; }
+        else { w.spanSections = [...v]; }
+    }
 }
 
 /**
@@ -356,18 +486,19 @@ export function mcpGroupFor(action: string, options: any): { tool: string; map: 
 }
 
 /** MCP 도구의 인자(US) → 상태에 합칠 것. cur = 지금 상태(경간 표의 바탕 · 하중 환산의 간격) */
-export function mcpWrite(action: string, options: any, cur?: Cur): McpWrite | null {
+export function mcpWrite(action: string, options: any, cur?: Cur, mctx?: McpWriteContext): McpWrite | null {
     const g = mcpGroupFor(action, options);
     if (!g) { return null; }
     const w: McpWrite = { tool: g.tool, group: {}, merge: {}, mcpOnly: {}, context: {}, unset: [], drafts: {}, reads: [], skipped: [] };
-    g.map(options || {}, w, cur);
+    g.map(options || {}, w, cur, mctx);
     w.reads = [...new Set(w.reads)];
     return w;
 }
 
 /** 이 호출에 받은 검토 상태의 칸(합치기 · 묶음 · 경간 표의 받은 부분) */
 export function givenKeys(w: McpWrite): Set<string> {
-    return new Set([...Object.keys(w.merge), ...Object.keys(w.group), ...Object.keys(w.spans || {})]);
+    return new Set([...Object.keys(w.merge), ...Object.keys(w.group), ...Object.keys(w.spans || {}),
+        ...(w.sections !== undefined ? ['sections'] : []), ...(w.spanSections !== undefined ? ['spanSections'] : [])]);
 }
 
 /** 합친 상태로 만든 화면 단추의 본문 → 그 호출의 엔진 본문: 화면 칸이 없는 인자 · 위치 · 조합 꼬리표를 얹는다 */
@@ -396,12 +527,31 @@ export function argsNotOnScreen(w: McpWrite): string[] {
 /** 화면 단추의 본문이 그 값이면 보내지 않는 칸(requests.ts — _optPos 의 0 이하, 켰을 때만 싣는 진술, 「자동」 선택) */
 const POSITIVE_ONLY = new Set(['wcLo', 'wcEdgeDistance', 'wcFastenerSpacing']);
 const TRUE_ONLY = new Set(['designZeroDemandStated', 'connZeroDemandStated', 'chkRFactor', 'lapRestrained', 'chkI621Confirmed', 'connJ63NotApplicable',
-    'lapForceModelConfirmed']);
+    'lapForceModelConfirmed', 'holeEdgeStiffened', 'holeWithinBearing', 'torsionAtJunction']);
 function notSent(k: string, v: unknown): boolean {
     if (POSITIVE_ONLY.has(k)) { return !(typeof v === 'number' && v > 0); }
     if (TRUE_ONLY.has(k)) { return v !== true; }
     if (k === 'loadComboStandard') { return v === 'asce7_10'; }
+    // 결정 T7: 「없음」 인 구역의 고르기
+    if (k === 'holeShape' || k === 'stiffenerMode' || k === 'torsionMode') { return v === 'none'; }
     return k === 'wcFamily' && v === 'auto';
+}
+/** 결정 T7: 그 구역이 「없음」 이거나 고른 길이 아니라 본문에 가지 않는 칸(case_inputs_used 에서 뺀다 — 본문의 규칙은 designState.memberWebOptions) */
+function webFieldIdle(k: string, inp: Record<string, InputValue>): boolean {
+    const g = DS.fieldMeta(k)?.group;
+    if (g === 'holes') {
+        if (k === 'holeShape') { return false; }
+        // 원형은 Lh = dh · 모서리 반지름 없음(본문에 가지 않는다)
+        if (inp.holeShape === 'circular') { return k === 'holeLength' || k === 'holeCornerRadius'; }
+        return inp.holeShape !== 'noncircular';
+    }
+    if (g === 'stiffeners') { return k !== 'stiffenerMode' && inp.stiffenerMode !== 'present'; }
+    if (g === 'torsion') {
+        if (k === 'torsionMode') { return false; }
+        if (Object.values(TORSION_DIRECT_ARGS).includes(k)) { return inp.torsionMode !== 'direct'; }
+        return inp.torsionMode !== 'eccentric';
+    }
+    return false;
 }
 
 /**
@@ -423,9 +573,14 @@ export function inputsUsed(w: McpWrite, st: CaseState): { key: string; value: un
         if (k === 'rValue' && inp.chkRFactor !== true) { continue; }
         if ((k === 'distM1M2' || k === 'distLm') && inp.chkBetaDist !== true) { continue; }
         if ((w.tool === 'design_connection' || w.tool === 'aisi_design_connection') && connSkip[k]) { continue; }
-        const span = k === 'spans' || k === 'supports' || k === 'lapsPerSupport';
-        const v = span ? (st.spans as any)[k] : inp[k];
+        if (webFieldIdle(k, inp)) { continue; }
+        // 압축의 구멍은 §E 의 키만(§G3 · §G6 의 칸은 본문에 가지 않는다)
+        if (w.tool === 'aisi_design_compression' && ['holeEndDistance', 'holeCornerRadius', 'holeBearingDistance', 'holeWithinBearing'].includes(k)) { continue; }
+        const span = k === 'spans' || k === 'supports' || k === 'lapsPerSupport' || k === 'spanSections';
+        const v = k === 'sections' ? st.sections : span ? (st.spans as any)[k] : inp[k];
         if (v === null || v === undefined || v === '' || notSent(k, v)) { continue; }
+        // 결정 S1: 모든 경간 S1 · 빈 단면 목록은 본문에 가지 않는다
+        if ((k === 'spanSections' || k === 'sections') && DS.sectionsAreDefault(st.spans.spanSections, st.sections)) { continue; }
         out.push({ key: k, value: clone(v), source: st.sources[k] ?? 'default' });
     }
     return out;

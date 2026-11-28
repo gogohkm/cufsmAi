@@ -621,6 +621,103 @@ def determine_unbraced_lengths(
 
 
 # ---------------------------------------------------------------------------
+# 구간이 놓인 경간(2026-11-28 경간마다 다른 단면)
+# ---------------------------------------------------------------------------
+
+def span_geometry(spans: list, laps_per_support: list = None, supports: list = None) -> dict:
+    """경간 · 랩의 자리(ft, 왼쪽 끝부터). 랩 지점 j 의 왼쪽 랩 [x_j − left, x_j] 에서는 경간 j(0 부터 — 지점 j 의
+    오른쪽 경간)의 부재가 그 랩 끝(x_j − left)에서 끝나고 경간 j−1 의 부재가 지점을 지나 x_j + right 까지 간다.
+    오른쪽 랩은 그 거꾸로. 모든 번호는 0 부터."""
+    n = len(spans)
+    xs = [0.0]
+    for s in spans:
+        xs.append(xs[-1] + float(s))
+    sup = [s[0].upper() if s else 'P' for s in supports] if supports else ['P'] * (n + 1)
+    laps = []
+    for j in range(1, n):
+        lp = (laps_per_support[j] if laps_per_support and j < len(laps_per_support) else None) or {}
+        lL = float(lp.get('left_ft', 0) or 0)
+        lR = float(lp.get('right_ft', 0) or 0)
+        if lL <= 0 and lR <= 0:
+            continue
+        laps.append({'support': j, 'x_ft': xs[j], 'left_ft': lL, 'right_ft': lR,
+                     'start_ft': xs[j] - lL, 'end_ft': xs[j] + lR, 'spans': [j - 1, j]})
+    return {'supports_ft': xs, 'supports': sup, 'laps': laps,
+            'spans': [{'span': i, 'start_ft': xs[i], 'end_ft': xs[i + 1]} for i in range(n)]}
+
+
+def interval_spans(geo: dict, a: float, b: float, x_ref: float = None, eps: float = 1e-6) -> dict:
+    """[a, b] 가 놓인 경간 — 'span'(x_ref 의 경간, x_ref 가 없으면 가운데), 'spans'(길이 > eps 로 겹친 경간, 차례로),
+    'crosses_support'(구간 안에 든 안쪽 지점), 'lap_portions'(구간 안의 랩 조각과 그 두 부재의 경간)."""
+    xs = geo['supports_ft']
+    n = len(xs) - 1
+    lo, hi = min(a, b), max(a, b)
+    over = [i for i in range(n) if min(hi, xs[i + 1]) - max(lo, xs[i]) > eps]
+    xr = 0.5 * (lo + hi) if x_ref is None else float(x_ref)
+    xr = min(max(xr, lo), hi)
+    cand = [i for i in (over or range(n)) if xs[i] - eps <= xr <= xs[i + 1] + eps]
+    if not cand:
+        cand = [min(range(n), key=lambda i: min(abs(xr - xs[i]), abs(xr - xs[i + 1])))]
+    if not over:
+        over = [cand[0]]
+    portions = []
+    for lp in geo['laps']:
+        p, q = max(lo, lp['start_ft']), min(hi, lp['end_ft'])
+        if q - p > eps:
+            portions.append({'support': lp['support'], 'start_ft': p, 'end_ft': q, 'spans': list(lp['spans'])})
+    return {'span': cand[0], 'spans': over,
+            'crosses_support': [j for j in range(1, n) if lo + eps < xs[j] < hi - eps],
+            'lap_portions': portions}
+
+
+def lap_region_members(geo: dict, a: float, b: float) -> dict:
+    """랩 구간 [a, b] 의 지점 · 쪽과 겹친 두 부재. role: 'continuous'(지점을 지나 이어짐) · 'ends_at_lap_end'
+    (이 랩 쪽의 끝 = 그 부재의 끝). 랩 밖이면 None."""
+    mid = 0.5 * (a + b)
+    for lp in geo['laps']:
+        if lp['start_ft'] - 1e-6 <= a and b <= lp['end_ft'] + 1e-6 and lp['start_ft'] < mid < lp['end_ft']:
+            j = lp['support']
+            left = mid < lp['x_ft']
+            m_l = {'span': j - 1, 'end_ft': lp['end_ft'], 'role': 'continuous' if left else 'ends_at_lap_end'}
+            m_r = {'span': j, 'start_ft': lp['start_ft'], 'role': 'ends_at_lap_end' if left else 'continuous'}
+            return {'lap_support': j, 'lap_side': 'left' if left else 'right',
+                    'lap_end_ft': lp['start_ft'] if left else lp['end_ft'],
+                    'continuous_member_span': j - 1 if left else j,
+                    'ending_member_span': j if left else j - 1,
+                    'members': [m_l, m_r]}
+    return None
+
+
+def tag_region_spans(ub: dict, geo: dict) -> None:
+    """determine_unbraced_lengths 의 구간마다 경간 키를 단다(제자리, 키를 더하기만 — 옛 키 · 값은 그대로).
+    span: 그 구간의 M_max 자리(x_M_max_ft)가 놓인 경간(0 부터), spans: 그 구간에 있는 부재의 경간 — 랩 구간이면
+    겹친 두 부재 [왼쪽 경간, 오른쪽 경간], 아니면 구간이 겹친 경간. 옛 키 'support' 는 가장 가까운 지점(0 부터)."""
+    def unr(r, k):
+        u = r.get('unrounded') or {}
+        return float(u.get(k, r.get(k)))
+
+    for key in ('positive_regions', 'negative_regions', 'lap_regions'):
+        for r in ub.get(key) or []:
+            a, b = unr(r, 'start_ft'), unr(r, 'end_ft')
+            xm = (r.get('unrounded') or {}).get('x_M_max_ft', r.get('x_M_max_ft'))
+            info = interval_spans(geo, a, b, xm)
+            r['span'] = info['span']
+            r['spans'] = info['spans']
+            r['crosses_support'] = info['crosses_support']
+            lm = lap_region_members(geo, a, b) if key == 'lap_regions' else None
+            if lm is not None:
+                r['spans'] = [lm['members'][0]['span'], lm['members'][1]['span']]
+                r['lap_support'] = lm['lap_support']
+                r['lap_side'] = lm['lap_side']
+                r['lap_end_ft'] = lm['lap_end_ft']
+                r['continuous_member_span'] = lm['continuous_member_span']
+                r['ending_member_span'] = lm['ending_member_span']
+                r['lap_members'] = lm['members']
+            else:
+                r['lap_portions'] = info['lap_portions']
+
+
+# ---------------------------------------------------------------------------
 # 양력 감소계수 R (Section I6.2.1)
 # ---------------------------------------------------------------------------
 
@@ -690,6 +787,7 @@ def check_i621_conditions(
     deck: dict = None,
     system_confirmed: bool = None,
     insulation_in: float = None,
+    lap_depths_in: list = None,
 ) -> dict:
     """Section I6.2.1 양력 감소계수 R 적용조건 검증 (through-fastened 전용)
 
@@ -709,6 +807,8 @@ def check_i621_conditions(
     deck : {'type', 't_panel', 'fastener_spacing', 'insulation_in'}
     system_confirmed : (i) – (n) 사용자 확인
     insulation_in : 단열재 두께 t_i (in.) — 단순보 r = 1 − 0.01 t_i (Eq. I6.2.1-2)
+    lap_depths_in : lap_lengths_in 과 같은 길이 — 랩마다 (g) 의 d (in.). 경간마다 단면이 다를 때 그 지점에서 겹친
+            두 부재의 깊이 중 큰 값을 준다(2026-11-28). None 이면 section 의 depth 하나(지금까지 그대로)
 
     Returns
     -------
@@ -781,8 +881,14 @@ def check_i621_conditions(
     laps = [float(v) for v in (lap_lengths_in or []) if v is not None]
     if lap_length_in is not None and not laps:
         laps = [float(lap_length_in)]
+    lap_d = None
+    if lap_depths_in is not None and laps and len(lap_depths_in) == len(laps):
+        lap_d = [float(v) if v else d for v in lap_depths_in]
     if continuous:
-        if laps:
+        if laps and lap_d is not None:
+            add('(g)', _nt('loads.label.i621_g'),
+                pf(all(lv >= 1.5 * dv for lv, dv in zip(laps, lap_d))), round(min(laps), 2))
+        elif laps:
             add('(g)', _nt('loads.label.i621_g'),
                 pf(min(laps) >= 1.5 * d), round(min(laps), 2))
         else:

@@ -6,7 +6,7 @@
  * 차이는 호스트의 검토 상태(get_case_inputs) 두 판의 같은 키를 견주는 것이다 — 편집 상태의 설계 화면이 칸을 고치면 호스트의 상태가 바뀌고
  * (K2 caseEdit) 이 화면은 다시 읽는다. 값은 화면의 단위(SI)로 보이기만 한다(units.caseSI).
  */
-import { CASE_FIELDS, CASE_KO, OPTION_KO } from './caseFields';
+import { CASE_FIELDS, CASE_KO, optionKo } from './caseFields';
 import { esc, tip } from './dom';
 import { sigText } from './format';
 import { state } from './store';
@@ -24,7 +24,7 @@ export function endEdit(): void { base = null; }
 const show = (key: string, v: unknown): string => {
   if (v === null || v === undefined || v === '') { return '빈칸'; }
   if (typeof v === 'boolean') { return v ? '켬' : '끔'; }
-  if (typeof v === 'string') { return OPTION_KO[v] ?? v; }
+  if (typeof v === 'string') { return optionKo(key, v) ?? v; }
   const f = CASE_FIELDS.find(x => x.key === key);
   const { v: sv, kind } = caseSI(v, f?.kind ?? null);
   const u = LABEL[kind] ? ` ${LABEL[kind]}` : '';

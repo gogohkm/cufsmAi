@@ -57,6 +57,7 @@ const F = {
   force: KIP, stress: KIP * 1000 / 645.16, moment: KIP * 0.0254, moment_ft: KIP * 0.3048,
   length_ft: 0.3048, linload: KIP / 1000 / 0.3048, density: KIP * 1000 / 0.0254 ** 4,
   rot_stiff: KIP, lat_stiff: KIP / 0.0254 ** 2, spring_disc: KIP / 0.0254, pressure: KIP / 1000 / 0.3048 ** 2,
+  per_area: 1 / 645.16,   // 엔진 H2 후속(2026-11-26): §H4 의 θ'' (1/in² → 1/mm²)
 };
 const FACTORS = Object.values(F);
 
@@ -321,7 +322,7 @@ function comparePhysical(tool, us, siR, spot, displayTol = () => null) {
 const ENGINE_UNIT_F = {
   'kip': 'force', 'kip-in': 'moment', 'ksi': 'stress', 'in': 'length', 'in^2': 'area', 'in^3': 'modulus',
   'in^4': 'inertia', 'in^6': 'warping', 'kip/in': 'spring_disc', 'kip-in/rad/in': 'rot_stiff', '-': 'none', 'deg': 'none',
-  'kip*s^2/in^4': 'density', 'psf': 'pressure',
+  'kip*s^2/in^4': 'density', 'psf': 'pressure', '1/in^2': 'per_area',
 };
 /** 엔진 소스에서 읽은 quantity → F 이름 (main 에서 채운다) */
 const QUNIT = {};
@@ -835,6 +836,16 @@ async function main() {
     const lapStmtKeys = lapStmt ? [...lapStmt[1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]) : [];
     engineKeys.aisi_design.push(...lapStmtKeys);
     engineKeys.lap_connection.push(...lapStmtKeys);
+    // 결정 T7(2026-11-26): 구멍 · 횡방향 웹 보강재 · §H4 의 입력은 그 모듈의 키 표(holes.HOLE_KEYS · shear.HOLE_KEYS · STIFFENER_KEYS ·
+    // member_web_torsion.TORSION_KEYS)로 읽는다 — design_member 의 params 에서
+    const tupleKeys = (file, name) => {
+      const src = fs.readFileSync(path.join(ROOT, 'python', 'design', file), 'utf8');
+      const m = src.match(new RegExp(`^${name} = \\(([^)]*)\\)`, 'm'));
+      assert(m, `${file} ${name} not found`);
+      return [...m[1].matchAll(/'([A-Za-z_0-9]+)'/g)].map((x) => x[1]);
+    };
+    engineKeys.aisi_design.push(...tupleKeys('holes.py', 'HOLE_KEYS'), ...tupleKeys('shear.py', 'HOLE_KEYS'), ...tupleKeys('shear.py', 'STIFFENER_KEYS'),
+      ...tupleKeys('member_web_torsion.py', 'TORSION_KEYS'));
     engineKeys.aisi_guide = ['query_type'];
     // K4a: 엔진이 모든 설계 dict 에서 받는 꼬리표(design.checks.CONTEXT_KEYS — 접합은 _KNOWN_KEYS 밖에서 따로 받는다)
     const checksSrc = fs.readFileSync(path.join(ROOT, 'python', 'design', 'checks.py'), 'utf8');
@@ -862,7 +873,8 @@ async function main() {
       for (const [tool, names] of Object.entries(sigs)) {
         if (tool.startsWith('_')) { continue; }
         // analyze_loads 의 Fy · Fu 는 호스트가 모델에서 section 을 만들 때만 쓰는 호스트 인자(엔진에 직접 가지 않음)
-        const hostArgs = tool === 'analyze_loads' ? ['Fy', 'Fu'] : [];
+        // 2026-11-28 결정 S1: sections(단면 목록의 치수)는 호스트가 단면마다 엔진의 span_sections(경간마다 단면 — Ixx 포함)로 바꾼다
+        const hostArgs = tool === 'analyze_loads' ? ['Fy', 'Fu', 'sections'] : [];
         for (const k of props(tool)) { assert(names.includes(k) || hostArgs.includes(k), `${tool}.${k} is not a parameter of the engine function`); }
       }
       for (const tool of ['aisi_design_connection', 'design_connection']) {
@@ -1360,6 +1372,9 @@ async function main() {
     const ssBase = { ...loadBase, deck: { type: 'standing-seam', R_tested_uplift: 0.6, R_tested_gravity: 0.6 } };
     const flexBase = { member_type: 'flexure', Fy: 50, Fu: 65, Lb: 60, Mu: 50, Vu: 2, wc_N: 3.5, wc_R: 0.1875,
       wc_support: 'EOF', wc_overhang: 1, wc_edge_distance: 2, wc_support_fastener_spacing: 12, wc_n_webs: 1 };
+    // 결정 T7: 구멍 · 보강재의 인자(> 0) — 부재 설계의 휨 본문에 그 구역을 연 바탕으로
+    const holeBase = { ...flexBase, hole_shape: 'noncircular', hole_depth: 1.5, hole_length: 4.5, hole_spacing: 30, hole_corner_radius: 0.25 };
+    const stiffBase = { ...flexBase, transverse_stiffeners: true, stiffener_spacing: 10, stiffener_kind: 'pair', stiffener_Is: 0.05, stiffener_area: 0.5, stiffener_Fy: 50 };
     const probes = [];
     for (const [k, ps] of Object.entries(purlinSchema.properties)) {
       if (ps.type === 'object') {
@@ -1382,6 +1397,8 @@ async function main() {
       if (keys.length === 1 && keys[0] === 'Fu') { continue; } // 강도: 0 은 「없음」 이 아니다(엔진이 I6.2.1 (o) 에서 미확인으로)
       let base; let action;
       if (keys[0].startsWith('wc_')) { base = flexBase; action = 'aisi_design'; }
+      else if (keys[0].startsWith('hole_')) { base = holeBase; action = 'aisi_design'; }
+      else if (keys[0].startsWith('stiffener_')) { base = stiffBase; action = 'aisi_design'; }
       else if (keys[0] === 'deck' && keys[1].startsWith('R_tested')) { base = ssBase; action = 'analyze_loads'; }
       else if (keys[0] === 'deck' && keys[1].endsWith('_override')) { base = overrideBase; action = 'analyze_loads'; }
       else if (keys.length === 1 && keys[0] === 'E') { base = eBase; action = 'analyze_loads'; }
@@ -1397,6 +1414,9 @@ async function main() {
         zeroGaps.push(`${keys.join('.')}: the engine treats 0 as "not given" but the schema refuses 0`);
       }
     }
+    // 구멍 · 보강재의 구역을 처음(없음)으로 — 뒤의 사례에 들지 않게(화면에서 되돌리는 것과 같은 길)
+    await real.panel.handleMcpAction({ action: 'set_case_inputs', inputs: { holeShape: 'none', holeDepth: null, holeLength: null, holeSpacing: null, holeCornerRadius: null,
+      stiffenerMode: 'none', stiffenerSpacing: null, stiffenerKind: '', stiffenerIs: null, stiffenerArea: null, stiffenerFy: null } });
     assert(probed >= 4, `zero probe exercised ${probed} bounded optional fields (inert: ${inert.join(', ')})`);
     assert.deepStrictEqual(zeroGaps, [], `V4-31 schema bounds:\n  ${zeroGaps.join('\n  ')}`);
     results.push(`design_purlin/analyze_loads bound probe: ${probed} bounded optional fields exercised, 0 ≡ absent for none; not exercised by these inputs: ${inert.join(', ') || '-'}`);

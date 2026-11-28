@@ -1514,6 +1514,77 @@ REGISTRY = {
         'template_ko': '§I6.2.1 R 계수법과 §J3 겹친 Z 구멍 예외의 적용 조건 (강도 검토가 아니며 pass 에 들지 않음)',
         'params': {},
     },
+    'lap.note.thinner_sheet': {
+        'kind': 'note',
+        'template': 'thinner of the two lapped members (decision S5)',
+        'template_ko': '겹친 두 부재 가운데 얇은 쪽 (결정 S5)',
+        'params': {},
+    },
+    'lap.label.stiffness_share_reference': {
+        'kind': 'label',
+        'template': 'reference only — each member checked for its stiffness share I_i / (I_1 + I_2) of the lap moment '
+                    'and shear (not the verdict: the lap strength is the sum of the two members\' strengths)',
+        'template_ko': '참고만 — 각 부재가 랩의 모멘트 · 전단의 강성 몫 I_i / (I_1 + I_2) 를 진다고 본 값(판정이 아님: '
+                       '랩의 강도는 두 부재 강도의 합)',
+        'params': {},
+    },
+    'lap.assumption.two_members': {
+        'kind': 'assumption',
+        'template': 'Two lapped members (inputs ending in _2): the lap flexural strength, the distortional strength '
+                    'and the shear strength in §H2 are the sums of the two members\' strengths (Design Manual '
+                    'II-1A / II-2A assumption (c), decision S3′); the fastener strength is the smaller of the two '
+                    'orientations (either sheet on the screw-head side), so the thinner sheet governs bearing and '
+                    'tilting; the couple lever arm is the smaller d − t of the two members; block shear uses the '
+                    'thinner sheet (decision S5 — design assumptions, not Specification provisions). The stiffness '
+                    'shares I_i / (I_1 + I_2) are given for reference only.',
+        'template_ko': '겹친 두 부재(_2 로 끝나는 입력): 랩의 휨강도 · 뒤틀림 강도와 §H2 의 전단강도는 두 부재 강도의 합'
+                       '(설계 매뉴얼 II-1A / II-2A 의 가정 (c), 결정 S3′); 패스너 강도는 두 놓임(어느 판이 나사 머리 '
+                       '쪽인지) 가운데 작은 값 — 얇은 판이 지압 · 틸팅을 정함; 우력의 팔은 두 부재의 d − t 가운데 작은 '
+                       '값; 블록전단은 얇은 판(결정 S5 — 기준 조항이 아닌 설계 가정). 강성 몫 I_i / (I_1 + I_2) 는 '
+                       '참고로만.',
+        'params': {},
+    },
+    'lap.assumption.member2_taken_equal': {
+        'kind': 'assumption',
+        'template': 'Second member values not given were taken equal to member 1: {keys}.',
+        'template_ko': '주지 않은 두 번째 부재의 값은 부재 1 과 같다고 봄: {keys}.',
+        'params': {'keys': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.reason.member2_value_missing': {
+        'kind': 'reason',
+        'template': 'the two lapped members differ and {key} (member 2) is not given',
+        'template_ko': '겹친 두 부재가 다르고 {key}(부재 2)가 없음',
+        'params': {'key': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.reason.depth_mismatch': {
+        'kind': 'reason',
+        'template': 'the two lapped members have different depths (d = {d}, d_2 = {d_2}); the lap checks assume '
+                    'lapped members of the same depth (Design Manual II-1A / II-2A) — not evaluated (decision S4)',
+        'template_ko': '겹친 두 부재의 깊이가 다름(d = {d}, d_2 = {d_2}); 랩 검토는 깊이가 같은 겹친 부재를 전제함'
+                       '(설계 매뉴얼 II-1A / II-2A) — 평가하지 않음 (결정 S4)',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_2': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'lap.warning.depth_mismatch': {
+        'kind': 'warning',
+        'template': 'Lap of members with different depths (d = {d}, d_2 = {d_2}): every lap check is not evaluated '
+                    '(decision S4).',
+        'template_ko': '깊이가 다른 부재의 랩(d = {d}, d_2 = {d_2}): 모든 랩 검토를 평가하지 않음 (결정 S4).',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_2': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'lap.warning.member2_value_missing': {
+        'kind': 'warning',
+        'template': 'Two different lapped members: {key} (member 2) not given — that check is not evaluated.',
+        'template_ko': '서로 다른 두 겹친 부재: {key}(부재 2)가 없음 — 그 검토는 평가하지 않음.',
+        'params': {'key': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'lap.warning.two_member_flexure_not_evaluated': {
+        'kind': 'warning',
+        'template': 'Lap flexure and H2 (sum of the two members\' strengths) not evaluated: {reason}.',
+        'template_ko': '랩 휨 · H2(두 부재 강도의 합)를 평가하지 않음: {reason}.',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
     'lap.note.e_min_1_5d': {
         'kind': 'note',
         'template': '1.5d minimum',
@@ -1951,6 +2022,113 @@ REGISTRY = {
         'template': 'Per-span member Ix used (I_span_in4); Ix within a lap = sum of the two members (Design Manual assumption b).',
         'template_ko': '경간별 부재 Ix 사용 (I_span_in4); 랩 안의 Ix = 두 부재의 합 (Design Manual 가정 b).',
         'params': {},
+    },
+    'loads.assumption.span_sections_per_span': {
+        'kind': 'assumption',
+        'template': 'Per-span sections (span_sections): member Ix, the §I6.2.1 conditions and the uplift R are taken '
+                    'per span from that span\'s section (auto_params.i621_by_span, uplift_R_by_span; regions carry '
+                    'span / spans); the deck stiffness is computed once for every span (auto_params.deck, '
+                    'deck_basis). deflection.Ixx describes the first span\'s section (or the given section); '
+                    'auto_params.i621_check is the governing span\'s check and uplift_R the smallest per-span R (none '
+                    'unless every span qualifies).',
+        'template_ko': '경간마다의 단면(span_sections): 부재 Ix, §I6.2.1 조건과 양력 R 을 경간마다 그 경간의 단면으로 봄'
+                       '(auto_params.i621_by_span · uplift_R_by_span; 구간마다 span / spans). 데크 강성은 한 번 계산해 '
+                       '모든 경간에(auto_params.deck · deck_basis). deflection.Ixx 는 첫 경간의 단면(또는 준 section), '
+                       'auto_params.i621_check 는 지배 경간의 검토, uplift_R 은 경간 R 의 최솟값(모든 경간이 조건을 '
+                       '만족할 때만).',
+        'params': {},
+    },
+    'loads.assumption.deck_once_smallest_kphi': {
+        'kind': 'assumption',
+        'template': 'Per-span sections: the deck stiffness is computed once and used for every span — the smallest '
+                    'kphi and the smallest kx of the sections in use, taken separately so that no span gets a deck '
+                    'stiffness above its own section\'s: kphi {kphi} from section {kphi_section}, kx from section '
+                    '{kx_section} (auto_params.deck, deck_basis). The Design Manual (Example II-1C) computes it once '
+                    'with the thinner purlin as a conservative approximation. Each section\'s own value is listed for '
+                    'information only (auto_params.deck_basis.by_section).',
+        'template_ko': '경간마다의 단면: 데크 강성은 한 번 계산해 모든 경간에 씀 — 쓰이는 단면 가운데 가장 작은 kphi 와 '
+                       '가장 작은 kx 를 따로 골라 어느 경간도 제 단면의 값보다 큰 데크 강성을 받지 않게: kphi {kphi} 는 '
+                       '단면 {kphi_section}, kx 는 단면 {kx_section} 의 값(auto_params.deck · deck_basis). 설계 매뉴얼'
+                       '(예제 II-1C)은 얇은 퍼린으로 한 번 계산하고 안전측의 근사라고 함. 단면마다의 값은 참고로만'
+                       '(auto_params.deck_basis.by_section).',
+        'params': {'kphi_section': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'kphi': {'quantity': 'rotational_stiffness', 'conv': None, 'spec': '.4g', 'unit': 'kip-in/rad/in',
+                            'sep': ' '},
+                   'kx_section': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.assumption.lap_sum_of_strengths': {
+        'kind': 'assumption',
+        'template': 'Lap of two different members: the lap region is checked against the sum of the two members\' '
+                    'strengths (Design Manual Examples II-1A / II-2A, assumption (c); strength_basis = '
+                    'sum_of_strengths). The stiffness shares I_i / (I_1 + I_2) of each lap region '
+                    '(share_by_stiffness, lap_members[].stiffness_share) are for reference only '
+                    '(reference_basis = stiffness_share).',
+        'template_ko': '서로 다른 두 부재의 랩: 랩 구간을 두 부재 강도의 합으로 검토함(설계 매뉴얼 예제 II-1A / II-2A 의 '
+                       '가정 (c); strength_basis = sum_of_strengths). 랩 구간마다의 강성 몫 I_i / (I_1 + I_2)'
+                       '(share_by_stiffness, lap_members[].stiffness_share)는 참고로만(reference_basis = '
+                       'stiffness_share).',
+        'params': {},
+    },
+    'loads.warning.span_ix_differs_from_section': {
+        'kind': 'warning',
+        'template': 'Span {span}: the given I_span_in4 = {I_given} differs from the Ixx of its section {section_id} '
+                    '({I_section}) by {pct} % — the given value is used in the analysis.',
+        'template_ko': '경간 {span}: 넣은 I_span_in4 = {I_given} 가 그 경간 단면 {section_id} 의 Ixx({I_section})와 '
+                       '{pct} % 다름 — 해석에는 넣은 값을 씀.',
+        'params': {'span': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'I_given': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '},
+                   'section_id': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'I_section': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '},
+                   'pct': {'quantity': 'dimensionless', 'conv': None, 'spec': '+.1f', 'unit': None, 'sep': ''}},
+    },
+    'loads.warning.section_change_without_lap': {
+        'kind': 'warning',
+        'template': 'Support {support}: the sections of the two spans differ ({left} | {right}) but there is no lap '
+                    '— the analysis changes the section at the support centreline; that joint (splice) needs its own '
+                    'design.',
+        'template_ko': '지점 {support}: 두 경간의 단면이 다름({left} | {right}) — 그런데 랩이 없음. 해석은 지점 중심에서 '
+                       '단면을 바꿈; 그 이음은 따로 설계해야 함.',
+        'params': {'support': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'left': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'right': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.warning.lap_depth_mismatch': {
+        'kind': 'warning',
+        'template': 'Lap at support {support}: the two lapped members have different depths ({d_left} | {d_right}) — '
+                    'the Design Manual lap assumptions are for lapped members of the same depth; the lap regions there '
+                    'are marked lap_evaluable = false.',
+        'template_ko': '지점 {support} 의 랩: 겹친 두 부재의 깊이가 다름({d_left} | {d_right}) — 설계 매뉴얼의 랩 가정은 '
+                       '깊이가 같은 겹친 부재의 것; 그 랩 구간은 lap_evaluable = false 로 표시함.',
+        'params': {'support': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'd_left': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_right': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'loads.warning.lap_shares_need_ixx': {
+        'kind': 'warning',
+        'template': 'Lap at support {support}: the two members differ and their Ixx is not given — the reference '
+                    'stiffness shares cannot be formed (share_by_stiffness = null; the lap strength is the sum of the '
+                    'two members\' strengths and does not need them).',
+        'template_ko': '지점 {support} 의 랩: 두 부재가 다르고 Ixx 가 없음 — 참고값인 강성 몫을 만들 수 없음 '
+                       '(share_by_stiffness = null; 랩의 강도는 두 부재 강도의 합이라 그 몫이 필요 없음).',
+        'params': {'support': {'quantity': 'count', 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.warning.i621_r_some_spans_only': {
+        'kind': 'warning',
+        'template': 'Per-span sections: the §I6.2.1 conditions are met with the sections of span(s) {spans} but not '
+                    'of span(s) {others} — auto_params.uplift_R is none; uplift_R_by_span gives R span by span.',
+        'template_ko': '경간마다의 단면: §I6.2.1 조건은 경간 {spans} 의 단면으로는 만족, 경간 {others} 의 단면으로는 '
+                       '불만족 — auto_params.uplift_R 은 없음; 경간마다의 R 은 uplift_R_by_span.',
+        'params': {'spans': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''},
+                   'others': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'loads.reason.lap_depth_mismatch': {
+        'kind': 'reason',
+        'template': 'the two lapped members have different depths ({d_left} | {d_right}); the lap assumptions '
+                    '(Design Manual II-1A / II-2A) are for members of the same depth — not evaluated (decision S4)',
+        'template_ko': '겹친 두 부재의 깊이가 다름({d_left} | {d_right}); 랩 가정(설계 매뉴얼 II-1A / II-2A)은 깊이가 '
+                       '같은 부재의 것 — 평가하지 않음(결정 S4)',
+        'params': {'d_left': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '},
+                   'd_right': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
     },
     'loads.assumption.section_ixx_given_lap': {
         'kind': 'assumption',
@@ -3603,8 +3781,8 @@ REGISTRY = {
     },
     'member.scope.h4_torsion_not_implemented': {
         'kind': 'scope',
-        'template': '§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.',
-        'template_ko': '§H4 미구현: 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 감소계수 R(Eq. H4-1)을 별도로 적용해야 합니다.',
+        'template': '§H4: 비틀림 입력이 없어 비틀림 감소계수 R(Eq. H4-1)을 적용하지 않았습니다 — 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 입력(torsion_*)을 주십시오.',
+        'template_ko': '§H4: 비틀림 입력이 없어 비틀림 감소계수 R(Eq. H4-1)을 적용하지 않았습니다 — 하중이 전단중심을 지나지 않으면(예: 플랜지 재하 C/트랙/hat) 비틀림 입력(torsion_*)을 주십시오.',
         'params': {},
     },
     'member.scope.not_checked_c1_b2_sway': {
@@ -3661,6 +3839,206 @@ REGISTRY = {
         'template_ko': '구멍 (E2.5/E3.2.2/E4.2, F2.2/F3.2.2/F4.2, G3/G6)',
         'params': {},
     },
+    # ---- 구멍이 있는 부재 §E2.5 · §E3.2.2 · §E4.2 · §F2.2 · §F3.2.2 · §F4.2 (EA, 2026-11-26) — design/holes.py ----
+    'member.scope.holes_not_entered': {
+        'kind': 'scope',
+        'template': '구멍을 입력하지 않았습니다 — 구멍 없는 부재로 계산했습니다(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2).',
+        'template_ko': '구멍을 입력하지 않았습니다 — 구멍 없는 부재로 계산했습니다(§E2.5/§E3.2.2/§E4.2, §F2.2/§F3.2.2/§F4.2).',
+        'params': {},
+    },
+    'member.scope.not_checked_holes_g3_g6': {
+        'kind': 'scope',
+        'template': 'holes (G3/G6)',
+        'template_ko': '구멍 (G3/G6)',
+        'params': {},
+    },
+    'member.ne.e2_5_holes': {
+        'kind': 'not_evaluated',
+        'template': 'E2.5 global buckling of a member with holes (Appendix 2 §2.3.2.1) — not evaluated: {reason}',
+        'template_ko': 'E2.5 구멍이 있는 부재의 전체좌굴 (부록 2 §2.3.2.1) — 평가하지 못함: {reason}',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.e3_2_2_holes': {
+        'kind': 'not_evaluated',
+        'template': 'E3.2.2 local buckling of a member with holes (Appendix 2 §2.3.2.2, Pnℓ ≤ Pynet) — not evaluated: {reason}',
+        'template_ko': 'E3.2.2 구멍이 있는 부재의 국부좌굴 (부록 2 §2.3.2.2, Pnℓ ≤ Pynet) — 평가하지 못함: {reason}',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.e4_2_holes': {
+        'kind': 'not_evaluated',
+        'template': 'E4.2 distortional buckling of a member with holes (Appendix 2 §2.3.2.3) — not evaluated: {reason}',
+        'template_ko': 'E4.2 구멍이 있는 부재의 뒤틀림좌굴 (부록 2 §2.3.2.3) — 평가하지 못함: {reason}',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.f2_2_holes': {
+        'kind': 'not_evaluated',
+        'template': 'F2.2 lateral-torsional buckling of a beam with holes (Appendix 2 §2.3.4.1) — not evaluated: {reason}',
+        'template_ko': 'F2.2 구멍이 있는 보의 횡비틀림좌굴 (부록 2 §2.3.4.1) — 평가하지 못함: {reason}',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.f3_2_2_holes': {
+        'kind': 'not_evaluated',
+        'template': 'F3.2.2 local buckling of a beam with holes (Appendix 2 §2.3.4.2, Mnℓ ≤ Mynet) — not evaluated: {reason}',
+        'template_ko': 'F3.2.2 구멍이 있는 보의 국부좌굴 (부록 2 §2.3.4.2, Mnℓ ≤ Mynet) — 평가하지 못함: {reason}',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.f4_2_holes': {
+        'kind': 'not_evaluated',
+        'template': 'F4.2 distortional buckling of a beam with holes (Appendix 2 §2.3.4.3) — not evaluated: {reason}',
+        'template_ko': 'F4.2 구멍이 있는 보의 뒤틀림좌굴 (부록 2 §2.3.4.3) — 평가하지 못함: {reason}',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.positive_region_holes': {
+        'kind': 'not_evaluated',
+        'template': 'F positive region of a beam with holes (§F2.2/§F3.2.2/§F4.2) — not evaluated: {reason}',
+        'template_ko': 'F 정모멘트 구간, 구멍이 있는 보 (§F2.2/§F3.2.2/§F4.2) — 평가하지 못함: {reason}',
+        'params': {'reason': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.holes_section_not_covered': {
+        'kind': 'reason',
+        'template': 'section type {section_type}: this program removes the hole from the single web of a C-, Z- or track section (Commentary E3.2.2/F3.2.2: the DSM provisions for holes were calibrated on lipped C-sections with discrete web holes) — other shapes are not covered',
+        'template_ko': '단면 형식 {section_type}: 이 프로그램은 C · Z · 트랙 단면의 웹 하나에서 구멍을 뺀다(해설 E3.2.2 · F3.2.2: 구멍의 DSM 조항은 낱낱의 웹 구멍이 있는 립 C 단면으로 보정됨) — 다른 형상은 다루지 않음',
+        'params': {'section_type': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.holes_edge_stiffened': {
+        'kind': 'reason',
+        'template': 'edge-stiffened (flanged) holes: Commentary Appendix 2 §2.2.6 — the finite-strip methods apply to flat-punched unstiffened holes; flanged or stiffened holes need a shell finite element model',
+        'template_ko': '가장자리를 보강한(플랜지 붙은) 구멍: 해설 부록 2 §2.2.6 — 유한스트립 방법은 평평하게 뚫은 보강 없는 구멍에만 쓴다; 플랜지 · 보강 구멍은 쉘 유한요소 모델이 필요',
+        'params': {},
+    },
+    'member.reason.holes_model_missing': {
+        'kind': 'reason',
+        'template': 'the section model (node, elem, element_roles) was not given — the elastic buckling values with holes (Appendix 2) are computed from it',
+        'template_ko': '단면 모델(node · elem · element_roles)을 받지 않음 — 구멍의 영향을 넣은 탄성 좌굴값(부록 2)은 그 모델로 계산한다',
+        'params': {},
+    },
+    'member.reason.holes_web_not_identified': {
+        'kind': 'reason',
+        'template': 'the web cannot be identified in the section model (no element roles, or the elements with the role web are not one straight plate) — the hole cannot be placed',
+        'template_ko': '단면 모델에서 웹을 가려낼 수 없음(요소 자리가 없거나 자리가 web 인 요소가 곧은 판 하나가 아님) — 구멍을 놓을 수 없음',
+        'params': {},
+    },
+    'member.reason.holes_outside_web': {
+        'kind': 'reason',
+        'template': 'the hole (depth dh = {dh}, centre {offset} from mid-depth) does not fit in the flat web (flat depth {h})',
+        'template_ko': '구멍(깊이 dh = {dh}, 중심이 웹 중앙에서 {offset})이 웹의 평판부(평판 깊이 {h}) 안에 들지 않음',
+        'params': {'dh': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}, 'offset': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}, 'h': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.reason.holes_fsm_failed': {
+        'kind': 'reason',
+        'template': 'the elastic buckling analysis with holes failed: {error}',
+        'template_ko': '구멍을 넣은 탄성 좌굴 해석이 실패함: {error}',
+        'params': {'error': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.holes_net_local_boundary': {
+        'kind': 'reason',
+        'template': 'the net-section local buckling minimum lies at the shortest half-wavelength analysed ({L}) — the true minimum may be shorter',
+        'template_ko': '순단면 국부좌굴의 극소가 해석한 가장 짧은 반파장({L})에 있음 — 참 극소는 더 짧을 수 있음',
+        'params': {'L': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.reason.holes_no_gross_lcrd': {
+        'kind': 'reason',
+        'template': 'the distortional half-wavelength Lcrd of the gross section was not found (Eq. 2.3.2.3-1 needs it)',
+        'template_ko': '총단면의 뒤틀림좌굴 반파장 Lcrd 를 찾지 못함(Eq. 2.3.2.3-1 에 필요)',
+        'params': {},
+    },
+    'member.reason.holes_lh_not_below_lcrd': {
+        'kind': 'reason',
+        'template': 'hole length Lh = {Lh} is not shorter than the distortional half-wavelength Lcrd = {Lcrd} — Eq. 2.3.2.3-1 (tr = t (1 − Lh/Lcrd)^(1/3)) gives no web',
+        'template_ko': '구멍 길이 Lh = {Lh} 가 뒤틀림좌굴 반파장 Lcrd = {Lcrd} 보다 짧지 않음 — Eq. 2.3.2.3-1 (tr = t (1 − Lh/Lcrd)^(1/3)) 의 웹이 남지 않음',
+        'params': {'Lh': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}, 'Lcrd': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.reason.holes_spacing_below_lcrd': {
+        'kind': 'reason',
+        'template': 'hole spacing s = {s} is shorter than the distortional half-wavelength Lcrd = {Lcrd}: more than one hole within a half-wave — Eq. 2.3.2.3-1 takes one hole length per Lcrd (discrete holes); the patterned-hole reduction (Eq. 2.3.2.3-2) is not implemented',
+        'template_ko': '구멍 간격 s = {s} 가 뒤틀림좌굴 반파장 Lcrd = {Lcrd} 보다 짧음: 한 반파장에 구멍이 둘 이상 — Eq. 2.3.2.3-1 은 Lcrd 하나에 구멍 길이 하나(낱낱의 구멍); 패턴 구멍의 감소(Eq. 2.3.2.3-2)는 구현하지 않음',
+        'params': {'s': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}, 'Lcrd': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.reason.holes_offset_unsymmetric': {
+        'kind': 'reason',
+        'template': 'the hole centre is {offset} off the mid-depth of the web: the net section is no longer symmetric (yo,net ≠ 0) — Appendix 2 §2.3.2.1.4 / the non-symmetric global buckling with holes is not implemented',
+        'template_ko': '구멍 중심이 웹 중앙에서 {offset} 벗어남: 순단면이 대칭이 아님(yo,net ≠ 0) — 부록 2 §2.3.2.1.4 의 비대칭 구멍 전체좌굴은 구현하지 않음',
+        'params': {'offset': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.reason.holes_i621_not_covered': {
+        'kind': 'reason',
+        'template': '§I6.2.1 (uplift R factor) gives no provisions for members with holes — the R-factor strength with holes is not evaluated',
+        'template_ko': '§I6.2.1 (양력 R 계수)에는 구멍이 있는 부재의 조항이 없음 — 구멍이 있는 R 계수 강도는 평가하지 않음',
+        'params': {},
+    },
+    'member.reason.holes_lap_region_not_covered': {
+        'kind': 'reason',
+        'template': 'lap region: the lapped-section strength (Manual II-1A / II-2A assumption) is not given for members with holes',
+        'template_ko': '랩 구간: 겹친 단면의 강도(Manual II-1A / II-2A 의 가정)는 구멍이 있는 부재에 대해 주어지지 않음',
+        'params': {},
+    },
+    'member.assumption.holes_average_symmetric': {
+        'kind': 'assumption',
+        'template': 'Appendix 2 Table 2.3.2-1 (holes symmetric about mid-length): the holes at spacing s = {s} are taken as uniformly spaced and symmetric about the mid-length of each unbraced length (Commentary 2.3.2.1.2); holes in an unbraced length L: n = floor((L − Lh)/s) + 1 (the most that fit), Lnet = n Lh, Lg = L − Lnet',
+        'template_ko': '부록 2 표 2.3.2-1 (구멍이 길이 중앙에 대칭): 간격 s = {s} 의 구멍을 고르게 놓이고 각 비지지 길이의 중앙에 대칭인 것으로 본다(해설 2.3.2.1.2); 비지지 길이 L 안의 구멍 수 n = floor((L − Lh)/s) + 1 (들 수 있는 가장 많은 수), Lnet = n Lh, Lg = L − Lnet',
+        'params': {'s': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.assumption.holes_net_section': {
+        'kind': 'assumption',
+        'template': 'net section at a hole: the web strip of depth dh = {dh} (centre {offset} from mid-depth of the flat web) has zero thickness — modelled as 1e-6 t with the connectivity kept, as CUFSM does (Manual II-14, III-4); Anet, Sfnet, Inet, Jnet, xo,net and Cw,net come from that model',
+        'template_ko': '구멍 자리 순단면: 깊이 dh = {dh} (중심이 웹 평판부 중앙에서 {offset}) 의 웹 띠를 두께 0 으로 — CUFSM 처럼 연결은 두고 1e-6 t 로(Manual II-14 · III-4); Anet · Sfnet · Inet · Jnet · xo,net · Cw,net 은 그 모델의 값',
+        'params': {'dh': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}, 'offset': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.assumption.holes_local_fsm': {
+        'kind': 'assumption',
+        'template': 'local buckling with holes: Pcrℓ = min(Pcrℓnh, Pcrℓh) (Commentary Eq. C-2.2.6-1); Pcrℓh (Mcrℓh) from a finite-strip analysis of the net section with the hole strip removed, half-wavelengths up to Lh = {Lh} only, the same reference load on the net section; the curve is read without a cFSM restraint, as Manual II-14 does',
+        'template_ko': '구멍이 있는 국부좌굴: Pcrℓ = min(Pcrℓnh, Pcrℓh) (해설 Eq. C-2.2.6-1); Pcrℓh (Mcrℓh) 는 구멍 띠를 지운 순단면의 유한스트립 해석에서, 반파장 Lh = {Lh} 까지만, 순단면에 같은 기준 하중; 곡선은 cFSM 구속 없이 읽는다(Manual II-14 처럼)',
+        'params': {'Lh': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.assumption.holes_dist_fsm': {
+        'kind': 'assumption',
+        'template': 'distortional buckling with holes: web thickness tr = t (1 − Lh/Lcrd)^(1/3) over the full web depth (Eq. 2.3.2.3-1 / 2.3.4.3-1, Commentary C-2.2.6-2), one finite-strip analysis at Lcrd = {Lcrd} of the gross section; the reference load is applied to the section with web thickness tr (Manual II-14)',
+        'template_ko': '구멍이 있는 뒤틀림좌굴: 웹 전체 깊이의 두께를 tr = t (1 − Lh/Lcrd)^(1/3) 로(Eq. 2.3.2.3-1 / 2.3.4.3-1, 해설 C-2.2.6-2), 총단면의 Lcrd = {Lcrd} 한 길이에서 유한스트립 해석; 기준 하중은 웹 두께 tr 의 단면에 준다(Manual II-14)',
+        'params': {'Lcrd': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.assumption.holes_dist_analytic': {
+        'kind': 'assumption',
+        'template': 'distortional buckling with holes: Appendix 2 §2.3.2.3 / §2.3.4.3 — t replaced by tr = t (1 − Lh/Lcrd)^(1/3) in the web rotational stiffness terms of the analytical solution, Lcrd = {Lcrd} of the gross section',
+        'template_ko': '구멍이 있는 뒤틀림좌굴: 부록 2 §2.3.2.3 / §2.3.4.3 — 해석식의 웹 회전강성 항의 t 를 tr = t (1 − Lh/Lcrd)^(1/3) 로, 총단면의 Lcrd = {Lcrd}',
+        'params': {'Lcrd': {'quantity': 'length', 'conv': None, 'spec': '.4g', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.assumption.holes_fcre_given': {
+        'kind': 'assumption',
+        'template': 'Fcre was given: it is taken to include the influence of holes (§E2.5/§F2.2 — Appendix 2)',
+        'template_ko': 'Fcre 를 받음: 구멍의 영향을 넣은 값으로 본다(§E2.5/§F2.2 — 부록 2)',
+        'params': {},
+    },
+    'member.warning.holes_inelastic_reserve_not_used': {
+        'kind': 'warning',
+        'template': 'use_inelastic_reserve: §F2.4, §F3.2.3 and §F4.3 give no provisions for members with holes — the strength with holes is computed to first yield (§F2.1, §F3.2.2, §F4.2)',
+        'template_ko': 'use_inelastic_reserve: §F2.4 · §F3.2.3 · §F4.3 에는 구멍이 있는 부재의 조항이 없음 — 구멍이 있는 강도는 첫 항복까지로 계산(§F2.1 · §F3.2.2 · §F4.2)',
+        'params': {},
+    },
+    'member.warning.holes_not_used_tension': {
+        'kind': 'warning',
+        'template': 'hole_* inputs are not used by the tension design — Chapter D uses the net area An (give An)',
+        'template_ko': 'hole_* 입력은 인장 설계에 쓰지 않음 — D 장은 순단면적 An 을 쓴다(An 을 주십시오)',
+        'params': {},
+    },
+    'member.label.src_holes_local': {
+        'kind': 'label',
+        'template': '{source}; with holes: min(gross, net section at a hole)',
+        'template_ko': '{source}; 구멍: min(총단면, 구멍 자리 순단면)',
+        'params': {'source': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.label.src_holes_dist_fsm': {
+        'kind': 'label',
+        'template': 'FSM with holes (web thickness tr at Lcrd)',
+        'template_ko': 'FSM, 구멍 (Lcrd 에서 웹 두께 tr)',
+        'params': {},
+    },
+    'member.label.src_holes_dist_analytic': {
+        'kind': 'label',
+        'template': 'Appendix 2 §{clause} with holes (tr)',
+        'template_ko': '부록 2 §{clause}, 구멍 (tr)',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    # ---- 구멍이 있는 부재 끝 ----
     'member.scope.not_checked_weak_axis_dsm_flexure': {
         'kind': 'scope',
         'template': 'weak-axis DSM flexure',
@@ -4213,10 +4591,323 @@ REGISTRY = {
         'template_ko': '§G5 구멍이 없는 웹. §G6 (구멍이 있는 C 단면 웹의 웹 크리플링)은 평가하지 않음.',
         'params': {},
     },
+    # ---- 2026-11-26 EB: §G2.2 · §G2.3(b) · §G3 · §G4 · §G6 · §H2(보강 웹) · §H4 (한 덩어리)
+    'shear.reason.holes_section_not_c': {
+        'kind': 'reason',
+        'template': '§{clause} applies to C-section webs only; section type {section} is not covered',
+        'template_ko': '§{clause} 는 C 단면 웹에만 적용됩니다 — 단면 {section} 은 다루지 않음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'section': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.holes_shape_unknown': {
+        'kind': 'reason',
+        'template': "§{clause}: hole_shape '{shape}' is not recognised (circular or non-circular)",
+        'template_ko': "§{clause}: hole_shape '{shape}' 를 알 수 없음 (circular 또는 non-circular)",
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'shape': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.holes_input_missing': {
+        'kind': 'reason',
+        'template': '§{clause}: hole data not given ({names}) — the applicability limits cannot be checked',
+        'template_ko': '§{clause}: 구멍 자료 미입력 ({names}) — 적용한계를 확인할 수 없음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'names': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.assumption.hole_offset_defaulted': {
+        'kind': 'assumption',
+        'template': '§{clause}(c): hole_web_offset not given — the hole is taken as centred at mid-depth of the web (shared hole input: offset 0).',
+        'template_ko': '§{clause}(c): hole_web_offset 미입력 — 구멍을 웹 깊이 중앙에 있다고 봄 (구멍 입력의 기본값: 0).',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.holes_dh_over_h': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): dh/h = {ratio} exceeds {limit}',
+        'template_ko': '§{clause}({item}): dh/h = {ratio} 가 {limit} 를 넘음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'ratio': {'quantity': 'dimensionless', 'conv': None, 'spec': '.3f', 'unit': None, 'sep': ''}, 'limit': {'quantity': 'dimensionless', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.holes_h_over_t': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): h/t = {ratio} exceeds {limit}',
+        'template_ko': '§{clause}({item}): h/t = {ratio} 가 {limit} 를 넘음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'ratio': {'quantity': 'dimensionless', 'conv': None, 'spec': '.1f', 'unit': None, 'sep': ''}, 'limit': {'quantity': 'dimensionless', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.holes_not_centered': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): the holes are not centred at mid-depth of the web (hole_web_offset = {offset})',
+        'template_ko': '§{clause}({item}): 구멍이 웹 깊이 중앙에 있지 않음 (hole_web_offset = {offset})',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'offset': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
+    },
+    'shear.reason.holes_clear_spacing': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): clear distance between holes {clear} is less than {limit}',
+        'template_ko': '§{clause}({item}): 구멍 사이 순간격 {clear} 이 {limit} 보다 작음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'clear': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'limit': {'quantity': 'length', 'conv': None, 'spec': 'g', 'unit': 'in', 'sep': ' '}},
+    },
+    'shear.reason.holes_end_distance': {
+        'kind': 'reason',
+        'template': '§G6(e): distance from the member end to the edge of the hole {x} is less than d = {d}',
+        'template_ko': '§G6(e): 부재 끝에서 구멍 가장자리까지의 거리 {x} 가 d = {d} 보다 작음',
+        'params': {'x': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'd': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
+    },
+    'shear.reason.holes_corner_radius': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): corner radius of the non-circular hole {r} is less than 2t = {limit}',
+        'template_ko': '§{clause}({item}): 원형이 아닌 구멍의 모서리 반경 {r} 이 2t = {limit} 보다 작음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'r': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'limit': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
+    },
+    'shear.reason.holes_noncircular_size': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): non-circular hole outside dh ≤ {dh_max} and Lh ≤ {lh_max} (dh = {dh}, Lh = {lh})',
+        'template_ko': '§{clause}({item}): 원형이 아닌 구멍이 dh ≤ {dh_max}, Lh ≤ {lh_max} 밖 (dh = {dh}, Lh = {lh})',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'dh_max': {'quantity': 'length', 'conv': None, 'spec': 'g', 'unit': 'in', 'sep': ' '}, 'lh_max': {'quantity': 'length', 'conv': None, 'spec': 'g', 'unit': 'in', 'sep': ' '}, 'dh': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'lh': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
+    },
+    'shear.reason.holes_circular_size': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): circular hole diameter {dh} exceeds {limit}',
+        'template_ko': '§{clause}({item}): 원형 구멍 지름 {dh} 이 {limit} 를 넘음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'dh': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'limit': {'quantity': 'length', 'conv': None, 'spec': 'g', 'unit': 'in', 'sep': ' '}},
+    },
+    'shear.reason.holes_min_depth': {
+        'kind': 'reason',
+        'template': '§{clause}({item}): dh = {dh} is not greater than {limit}',
+        'template_ko': '§{clause}({item}): dh = {dh} 가 {limit} 보다 크지 않음',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'item': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'dh': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'limit': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
+    },
+    'shear.reason.g3_c_over_t_below_5': {
+        'kind': 'reason',
+        'template': '§G3: c/t = {ratio} is below {limit}; Eq. G3-1 gives qs only for c/t ≥ 5 (and qs = 1 for c/t ≥ 54)',
+        'template_ko': '§G3: c/t = {ratio} 가 {limit} 보다 작음 — Eq. G3-1 은 c/t ≥ 5 에서만 qs 를 줌 (c/t ≥ 54 이면 qs = 1)',
+        'params': {'ratio': {'quantity': 'dimensionless', 'conv': None, 'spec': '.2f', 'unit': None, 'sep': ''}, 'limit': {'quantity': 'dimensionless', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.g6_not_covered_case': {
+        'kind': 'reason',
+        'template': '§G6 gives Rc only for end and interior one-flange reactions of C-sections (Eq. G5-1 with Table G5-2); this case ({case}) is not covered',
+        'template_ko': '§G6 은 C 단면의 끝 · 내부 1-플랜지 반력(Eq. G5-1, Table G5-2)에만 Rc 를 줌 — 이 경우({case})는 다루지 않음',
+        'params': {'case': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.g6_hole_within_bearing': {
+        'kind': 'reason',
+        'template': '§G6: a web hole is within the bearing length — a bearing stiffener shall be used (§F5 bearing stiffeners are not evaluated by this tool)',
+        'template_ko': '§G6: 웹 구멍이 지압 길이 안에 있음 — 지압 보강재를 써야 함 (§F5 지압 보강재는 이 도구가 평가하지 않음)',
+        'params': {},
+    },
+    'shear.reason.g6_min_bearing': {
+        'kind': 'reason',
+        'template': '§G6: bearing length N = {N} is less than {limit} required with Eq. {eq}',
+        'template_ko': '§G6: 지압 길이 N = {N} 이 Eq. {eq} 에 필요한 {limit} 보다 작음',
+        'params': {'N': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'limit': {'quantity': 'length', 'conv': None, 'spec': 'g', 'unit': 'in', 'sep': ' '}, 'eq': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.stiffener_input_missing': {
+        'kind': 'reason',
+        'template': '§G4.1: stiffener data not given ({names}) — conformance of the transverse web stiffeners cannot be shown, so the §G2.2 / §G2.3(b) stiffened-web shear is not evaluated',
+        'template_ko': '§G4.1: 보강재 자료 미입력 ({names}) — 횡방향 웹 보강재가 §G4.1 을 맞추는지 보일 수 없어 §G2.2 / §G2.3(b) 보강 웹 전단은 미평가',
+        'params': {'names': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.stiffener_nonconforming_kind': {
+        'kind': 'reason',
+        'template': "§G4.2: stiffener kind '{kind}' is not a conforming attached stiffener of §G4.1 (pair, single_angle, single_plate)",
+        'template_ko': "§G4.2: 보강재 종류 '{kind}' 는 §G4.1 의 붙인 보강재(pair, single_angle, single_plate)가 아님",
+        'params': {'kind': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.stiffener_spacing_limit': {
+        'kind': 'reason',
+        'template': '§G4.1: a/h = {ratio} exceeds {limit} (the lesser of [260/(h/t)]² and 3.0)',
+        'template_ko': '§G4.1: a/h = {ratio} 가 {limit} 를 넘음 ([260/(h/t)]² 와 3.0 가운데 작은 값)',
+        'params': {'ratio': {'quantity': 'dimensionless', 'conv': None, 'spec': '.3f', 'unit': None, 'sep': ''}, 'limit': {'quantity': 'dimensionless', 'conv': None, 'spec': '.3f', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.stiffener_is_short': {
+        'kind': 'reason',
+        'template': '§G4.1: Is = {Is} is less than Is,min = {Ismin} (Eq. G4.1-1)',
+        'template_ko': '§G4.1: Is = {Is} 가 Is,min = {Ismin} 보다 작음 (Eq. G4.1-1)',
+        'params': {'Is': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '}, 'Ismin': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '}},
+    },
+    'shear.reason.stiffener_area_short': {
+        'kind': 'reason',
+        'template': '§G4.1: stiffener gross area {As} is less than the required {Amin} (Eq. G4.1-2)',
+        'template_ko': '§G4.1: 보강재 총단면적 {As} 이 필요한 {Amin} 보다 작음 (Eq. G4.1-2)',
+        'params': {'As': {'quantity': 'area', 'conv': None, 'spec': '.4g', 'unit': 'in^2', 'sep': ' '}, 'Amin': {'quantity': 'area', 'conv': None, 'spec': '.4g', 'unit': 'in^2', 'sep': ' '}},
+    },
+    'shear.reason.stiffener_g4_2': {
+        'kind': 'reason',
+        'template': '§G4.2: transverse web stiffeners that do not meet §G4.1 — the available strength shall be determined by tests (§K2) or rational engineering analysis (§A1.2(c)); stiffened-web shear and §H2 are not evaluated',
+        'template_ko': '§G4.2: §G4.1 을 맞추지 못한 횡방향 웹 보강재 — 가용강도는 시험(§K2)이나 합리적 해석(§A1.2(c))으로 정해야 함; 보강 웹 전단과 §H2 는 미평가',
+        'params': {},
+    },
+    'shear.warning.g2_1_conservative_reference': {
+        'kind': 'warning',
+        'template': '§G2.2 / §G2.3(b) stiffened-web shear not evaluated; the §G2.1 value with kv = 5.34 (unreinforced web) is shown as a conservative reference only, not as a verdict.',
+        'template_ko': '§G2.2 / §G2.3(b) 보강 웹 전단은 미평가 — §G2.1(kv = 5.34, 보강하지 않은 웹)의 값을 보수측 참고값으로만 보이고 판정에 쓰지 않음.',
+        'params': {},
+    },
+    'shear.assumption.g2_2_spacing_over_2h': {
+        'kind': 'assumption',
+        'template': '§G2.2 is permitted only for stiffener spacing not exceeding twice the web depth (a/h = {ratio} > 2): §G2.1 is used with kv from §G2.3(b) (Commentary G2.1: those provisions apply to webs with or without transverse stiffeners).',
+        'template_ko': '§G2.2 는 보강재 간격이 웹 깊이의 두 배 이하일 때만 쓸 수 있음(a/h = {ratio} > 2): §G2.3(b) 의 kv 로 §G2.1 을 씀 (해설 G2.1: 그 조항은 횡방향 보강재가 있든 없든 적용).',
+        'params': {'ratio': {'quantity': 'dimensionless', 'conv': None, 'spec': '.3f', 'unit': None, 'sep': ''}},
+    },
+    'shear.scope.g2_stiffened_web': {
+        'kind': 'scope',
+        'template': '§G2.2 / §G2.3(b) web with transverse stiffeners: conforming stiffeners per §G4.1 (spacing, Is, Ast); nonconforming stiffeners (§G4.2) are not evaluated.',
+        'template_ko': '§G2.2 / §G2.3(b) 횡방향 보강재가 있는 웹: §G4.1 에 맞는 보강재(간격 · Is · Ast); 맞지 않는 보강재(§G4.2)는 미평가.',
+        'params': {},
+    },
+    'shear.scope.g3_web_with_holes': {
+        'kind': 'scope',
+        'template': '§G3 C-section web with holes: Vn of §G2 multiplied by qs (Eq. G3-1 – G3-3) within limits (a)–(h); hole taken at the section of the given Vu.',
+        'template_ko': '§G3 구멍이 있는 C 단면 웹: §G2 의 Vn 에 qs (Eq. G3-1 – G3-3) 를 곱함, 한계 (a)–(h) 안에서; 구멍은 준 Vu 의 단면에 있다고 봄.',
+        'params': {},
+    },
+    'shear.scope.g6_web_with_holes': {
+        'kind': 'scope',
+        'template': '§G6 web crippling of a C-section web with holes: Pn of §G5 multiplied by Rc (Eq. G6-1 end, Eq. G6-2 interior one-flange) within limits (a)–(i).',
+        'template_ko': '§G6 구멍이 있는 C 단면 웹의 웹 크리플링: §G5 의 Pn 에 Rc (Eq. G6-1 끝, Eq. G6-2 내부 1-플랜지) 를 곱함, 한계 (a)–(i) 안에서.',
+        'params': {},
+    },
+    'shear.warning.g3_not_evaluated': {
+        'kind': 'warning',
+        'template': '§G3 (web with holes) not evaluated: {why}',
+        'template_ko': '§G3 (구멍이 있는 웹) 미평가: {why}',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.warning.g6_not_evaluated': {
+        'kind': 'warning',
+        'template': '§G6 (web with holes) not evaluated: {why}',
+        'template_ko': '§G6 (구멍이 있는 웹) 미평가: {why}',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.g2_h2_shear_why': {
+        'kind': 'not_evaluated',
+        'template': 'G2/H2 shear: {why}',
+        'template_ko': 'G2/H2 전단: {why}',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.g5_g6_web_crippling_why': {
+        'kind': 'not_evaluated',
+        'template': 'G5/G6 web crippling: {why}',
+        'template_ko': 'G5/G6 웹 크리플링: {why}',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.h3_web_crippling_why': {
+        'kind': 'not_evaluated',
+        'template': 'H3 bending + web crippling: {why}',
+        'template_ko': 'H3 휨 + 웹 크리플링: {why}',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.g4_stiffeners_why': {
+        'kind': 'not_evaluated',
+        'template': 'G4.1 transverse web stiffeners: {why}',
+        'template_ko': 'G4.1 횡방향 웹 보강재: {why}',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.h4_bending_torsion_why': {
+        'kind': 'not_evaluated',
+        'template': 'H4 bending + torsion: {why}',
+        'template_ko': 'H4 휨 + 비틀림: {why}',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.assumption.holes_at_demand_section': {
+        'kind': 'assumption',
+        'template': '§G3 / §H2: the web hole is taken at the section of the given Vu and Mu (conservative when the hole is elsewhere).',
+        'template_ko': '§G3 / §H2: 웹 구멍이 준 Vu · Mu 의 단면에 있다고 봄 (구멍이 다른 곳이면 보수측).',
+        'params': {},
+    },
+    'member.assumption.g6_depth_estimated': {
+        'kind': 'assumption',
+        'template': '§G6(e): section depth d = {d} estimated as h + 2(R + t) (section depth not given).',
+        'template_ko': '§G6(e): 단면 깊이 d = {d} 를 h + 2(R + t) 로 추정 (단면 깊이 미입력).',
+        'params': {'d': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.reason.h4_section_not_symmetric': {
+        'kind': 'reason',
+        'template': '§H4: Eq. H4-1 is limited to singly- or doubly-symmetric sections bent about an axis of symmetry; for this section ({section}) the torsional effect requires rational engineering analysis',
+        'template_ko': '§H4: Eq. H4-1 은 대칭축에 대해 휘는 일축 · 이축 대칭 단면에 한정 — 이 단면({section})의 비틀림 영향은 합리적 해석이 필요',
+        'params': {'section': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.h4_biaxial': {
+        'kind': 'reason',
+        'template': '§H4: Eq. H4-1 does not apply to biaxial bending (Muy = {Muy}); rational engineering analysis is required',
+        'template_ko': '§H4: Eq. H4-1 은 이축 휨에 적용하지 않음 (Muy = {Muy}) — 합리적 해석이 필요',
+        'params': {'Muy': {'quantity': 'moment', 'conv': None, 'spec': '.3f', 'unit': 'kip-in', 'sep': ' '}},
+    },
+    'member.reason.h4_i621_used': {
+        'kind': 'reason',
+        'template': '§H4: the provisions of this section shall not apply if the provisions of Sections I6.2.1 and I6.2.2 are used (R_uplift given)',
+        'template_ko': '§H4: §I6.2.1 · §I6.2.2 를 쓰면 이 조항은 적용하지 않음 (R_uplift 입력)',
+        'params': {},
+    },
+    'member.reason.h4_input_missing': {
+        'kind': 'reason',
+        'template': '§H4: torsion input not given ({names})',
+        'template_ko': '§H4: 비틀림 입력 미입력 ({names})',
+        'params': {'names': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.h4_route_a_only': {
+        'kind': 'reason',
+        'template': "§H4: the warping stress is computed only for a single span with torsionally simple ends (torsion_support 'simple': twist prevented, warping free); for '{support}' give the stresses at the governing point directly (torsion_f_bending, torsion_f_torsion)",
+        'template_ko': "§H4: 뒤틀림 응력은 양 끝이 비틀림 단순 지지(torsion_support 'simple': 회전 구속 · 뒤틀림 자유)인 한 경간에서만 계산함 — '{support}' 이면 지배 자리의 응력을 직접 주십시오 (torsion_f_bending, torsion_f_torsion)",
+        'params': {'support': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.h4_load_unknown': {
+        'kind': 'reason',
+        'template': "§H4: torsion_load '{load}' is not recognised (uniform or midspan_point)",
+        'template_ko': "§H4: torsion_load '{load}' 를 알 수 없음 (uniform 또는 midspan_point)",
+        'params': {'load': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.h4_no_section_model': {
+        'kind': 'reason',
+        'template': '§H4: the warping stresses need the section model (node, elem) — not given; give the stresses directly (torsion_f_bending, torsion_f_torsion)',
+        'template_ko': '§H4: 뒤틀림 응력에는 단면 모델(node, elem)이 필요한데 미입력 — 응력을 직접 주십시오 (torsion_f_bending, torsion_f_torsion)',
+        'params': {},
+    },
+    'member.reason.h4_model_unusable': {
+        'kind': 'reason',
+        'template': '§H4: the warping stresses cannot be computed from this section model ({why})',
+        'template_ko': '§H4: 이 단면 모델로는 뒤틀림 응력을 계산할 수 없음 ({why})',
+        'params': {'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.h4_stress_sides': {
+        'kind': 'reason',
+        'template': '§H4: f_bending_max ({fbmax}) and f_bending ({fb}) must be on the same side of the neutral axis (same sign)',
+        'template_ko': '§H4: f_bending_max ({fbmax}) 와 f_bending ({fb}) 은 중립축의 같은 쪽(같은 부호)이어야 함',
+        'params': {'fbmax': {'quantity': 'stress', 'conv': None, 'spec': '.3f', 'unit': 'ksi', 'sep': ' '}, 'fb': {'quantity': 'stress', 'conv': None, 'spec': '.3f', 'unit': 'ksi', 'sep': ' '}},
+    },
+    'member.reason.h4_zero_combined': {
+        'kind': 'reason',
+        'template': '§H4: the combined stress or the extreme-fibre bending stress is zero — R cannot be formed',
+        'template_ko': '§H4: 합응력이나 극단 섬유 휨 응력이 0 — R 을 만들 수 없음',
+        'params': {},
+    },
+    'member.assumption.h4_fbmax_defaulted': {
+        'kind': 'assumption',
+        'template': '§H4: torsion_f_bending_max not given — taken equal to torsion_f_bending (the point is taken at the extreme fibre; this gives the lower R).',
+        'template_ko': '§H4: torsion_f_bending_max 미입력 — torsion_f_bending 과 같게 둠 (그 자리를 극단 섬유로 봄; R 이 작아지는 쪽).',
+        'params': {},
+    },
+    'member.assumption.h4_computed_route': {
+        'kind': 'assumption',
+        'template': '§H4 (computed): single span L = {L} with twist prevented and warping free at both ends, {load} load whose line is e = {e} from the shear centre (+ toward the centroid); DG 9 Cases 3 / 4 as in Design Manual Example II-11; stresses from the midline section model with full unreduced properties; Mu is taken as the mid-span moment of that load.',
+        'template_ko': '§H4 (계산): 경간 L = {L}, 양 끝 회전 구속 · 뒤틀림 자유, {load} 하중의 하중선이 전단중심에서 e = {e} (도심 쪽 +); Design Manual 예제 II-11 의 DG 9 Case 3 / 4; 감소하지 않은 전단면 성질의 중심선 단면 모델로 응력; Mu 는 그 하중의 경간 중앙 모멘트로 봄.',
+        'params': {'L': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}, 'load': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'e': {'quantity': 'length', 'conv': None, 'spec': '.3f', 'unit': 'in', 'sep': ' '}},
+    },
+    'member.assumption.h4_15pct': {
+        'kind': 'assumption',
+        'template': '§H4: the maximum combined stress is at the web–flange junction of a C-section with edge-stiffened flanges — R increased by 15 percent (R ≤ 1.0).',
+        'template_ko': '§H4: 최대 합응력이 연단 보강 플랜지 C 단면의 웹-플랜지 이음에 있음 — R 을 15 % 올림 (R ≤ 1.0).',
+        'params': {},
+    },
+    'member.assumption.h4_junction_unknown': {
+        'kind': 'assumption',
+        'template': '§H4: the web–flange junction cannot be identified in the section model (no element roles) — the 15 percent increase is not applied.',
+        'template_ko': '§H4: 단면 모델에서 웹-플랜지 이음을 가려낼 수 없음 (요소 자리 없음) — 15 % 증가를 쓰지 않음.',
+        'params': {},
+    },
+    'member.assumption.h4_direct_ignores_computed': {
+        'kind': 'assumption',
+        'template': '§H4: the stresses were given directly — torsion_eccentricity / torsion_span / torsion_load are not used.',
+        'template_ko': '§H4: 응력을 직접 주었으므로 torsion_eccentricity · torsion_span · torsion_load 는 쓰지 않음.',
+        'params': {},
+    },
     'shear.warning.g2_2_g2_webs_transverse_stiffeners': {
         'kind': 'warning',
-        'template': '§G2.2 (webs with transverse stiffeners) is not implemented; the §G2.1 curve is used with the given kv, which is conservative relative to §G2.2.',
-        'template_ko': '§G2.2 (횡방향 보강재가 있는 웹)는 구현되지 않음 — 준 kv 로 §G2.1 곡선을 씀(§G2.2 보다 보수측).',
+        'template': '§G2.1 curve used with the given kv; §G2.2 (webs with transverse stiffeners) needs the stiffener data (stiffener_*) showing §G4.1 conformance and is not applied here — conservative relative to §G2.2.',
+        'template_ko': '준 kv 로 §G2.1 곡선을 씀 — §G2.2 (횡방향 보강재가 있는 웹)는 §G4.1 을 맞추는 보강재 자료(stiffener_*)가 있어야 하므로 여기서는 쓰지 않음(§G2.2 보다 보수측).',
         'params': {},
     },
     'shear.warning.g5_explicit_overhang_bearing_was': {
@@ -4368,5 +5059,90 @@ REGISTRY = {
         'template': 'Table J6.2-1 (3)(a): An_net 에 직접 접합된 요소의 면적을 넣어야 함',
         'template_ko': 'Table J6.2-1 (3)(a): An_net 에 직접 접합된 요소의 면적을 넣어야 함',
         'params': {},
+    },
+    # ---- 2026-11-26 독립 검증의 고침(구멍 · 보강재 · 비틀림) ----
+    'member.reason.fails_without_holes': {
+        'kind': 'reason',
+        'template': 'fails even on the strength without holes ({check}) — the hole provisions could not be evaluated ({why}); holes can only lower this strength, so the member fails with the holes as well',
+        'template_ko': '구멍이 없는 강도로도 넘음 ({check}) — 구멍 조항은 평가하지 못했지만({why}) 구멍은 이 강도를 낮추기만 하므로 구멍이 있어도 불합격',
+        'params': {'check': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}, 'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.stiffener_input_invalid': {
+        'kind': 'reason',
+        'template': '§G4.1: stiffener input not valid ({names} must be finite numbers > 0) — conformance of the transverse web stiffeners cannot be shown',
+        'template_ko': '§G4.1: 보강재 입력이 바르지 않음 ({names} 는 0 보다 큰 유한한 수여야 함) — 횡방향 웹 보강재가 §G4.1 을 맞추는지 보일 수 없음',
+        'params': {'names': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.note.pe1_holes_average': {
+        'kind': 'note',
+        'template': '(I,avg / Ag)^0.5 with I,avg from Appendix 2 Table 2.3.2-1 (member with holes)',
+        'template_ko': '(I,avg / Ag)^0.5 — I,avg 는 부록 2 표 2.3.2-1 의 값(구멍이 있는 부재)',
+        'params': {},
+    },
+    'shear.scope.g6_not_evaluated_with_holes': {
+        'kind': 'scope',
+        'template': '§G5 web crippling — a web hole was entered but §G6 (web crippling of C-section webs with holes) could not be evaluated (see the reason); the strength without holes is only an upper bound and decides only a failure',
+        'template_ko': '§G5 웹 크리플링 — 웹 구멍을 입력했지만 §G6 (구멍이 있는 C 단면 웹의 웹 크리플링)은 평가하지 못함(까닭 참조); 구멍 없는 강도는 상한일 뿐이고 불합격만 가린다',
+        'params': {},
+    },
+    'shear.scope.g3_not_evaluated_with_holes': {
+        'kind': 'scope',
+        'template': '§G2 shear — a web hole was entered but §G3 (shear of C-section webs with holes) could not be evaluated (see the reason); the strength without holes is only an upper bound and decides only a failure',
+        'template_ko': '§G2 전단 — 웹 구멍을 입력했지만 §G3 (구멍이 있는 C 단면 웹의 전단)은 평가하지 못함(까닭 참조); 구멍 없는 강도는 상한일 뿐이고 불합격만 가린다',
+        'params': {},
+    },
+    'member.reason.holes_custom_section_no_web': {
+        'kind': 'reason',
+        'template': 'hand-drawn section ({section_type}) without element roles: the program cannot tell which element is the web, so the hole cannot be placed — build the section from a C, Z or track template (lipped C, lipped Z, track) to evaluate the hole provisions',
+        'template_ko': '손으로 그린 단면({section_type}) — 요소 자리가 없어 어느 요소가 웹인지 프로그램이 알 수 없고 구멍을 놓을 수 없음 — 구멍 조항을 평가하려면 C · Z · 트랙 템플릿(립 C · 립 Z · 트랙)으로 단면을 만드십시오',
+        'params': {'section_type': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.ne.design_check_not_evaluated': {
+        'kind': 'not_evaluated',
+        'template': 'design check {check} — not evaluated: {why}',
+        'template_ko': '검토 항목 {check} — 평가하지 못함: {why}',
+        'params': {'check': {'quantity': None, 'conv': 's', 'spec': '', 'unit': None, 'sep': ''}, 'why': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.holes_props_mismatch_area': {
+        'kind': 'reason',
+        'template': 'the supplied section properties do not belong to the section model used for the hole calculation: A = {A} given, {A_model} from the model (tolerance {tol} %) — the net-section values (Anet, Sfnet) would not match the gross values',
+        'template_ko': '받은 단면 성질이 구멍 계산에 쓰는 단면 모델의 것이 아님: A = {A} (받은 값), {A_model} (모델) (허용 {tol} %) — 순단면 값(Anet · Sfnet)이 총단면 값과 맞지 않는다',
+        'params': {'A': {'quantity': 'area', 'conv': None, 'spec': '.5g', 'unit': 'in^2', 'sep': ' '}, 'A_model': {'quantity': 'area', 'conv': None, 'spec': '.5g', 'unit': 'in^2', 'sep': ' '}, 'tol': {'quantity': 'dimensionless', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+    },
+    'member.reason.holes_props_mismatch_sf': {
+        'kind': 'reason',
+        'template': 'the supplied section properties do not belong to the section model used for the hole calculation: Sf = {Sf} given, {Sf_model} from the model (tolerance {tol} %) — Mynet = Sfnet Fy would not match My = Sf Fy',
+        'template_ko': '받은 단면 성질이 구멍 계산에 쓰는 단면 모델의 것이 아님: Sf = {Sf} (받은 값), {Sf_model} (모델) (허용 {tol} %) — Mynet = Sfnet Fy 가 My = Sf Fy 와 맞지 않는다',
+        'params': {'Sf': {'quantity': 'section_modulus', 'conv': None, 'spec': '.5g', 'unit': 'in^3', 'sep': ' '}, 'Sf_model': {'quantity': 'section_modulus', 'conv': None, 'spec': '.5g', 'unit': 'in^3', 'sep': ' '}, 'tol': {'quantity': 'dimensionless', 'conv': None, 'spec': 'g', 'unit': None, 'sep': ''}},
+    },
+    'shear.reason.holes_edge_stiffened': {
+        'kind': 'reason',
+        'template': '§{clause}: edge-stiffened (flanged) holes — the text of §{clause} and its limits give no provision for holes with stiffened edges',
+        'template_ko': '§{clause}: 가장자리를 보강한(플랜지 붙은) 구멍 — §{clause} 의 글과 한계는 가장자리를 보강한 구멍을 다루지 않는다',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}},
+    },
+    'member.assumption.holes_single_hole': {
+        'kind': 'assumption',
+        'template': 'hole_spacing not given — a single hole with no neighbouring hole: one hole in each unbraced length for the Appendix 2 Table 2.3.2-1 averages (Lnet = Lh, the most a length can hold), and the one-hole-per-distortional-half-wavelength condition (s ≥ Lcrd) taken as satisfied',
+        'template_ko': 'hole_spacing 미입력 — 이웃 구멍이 없는 구멍 하나: 부록 2 표 2.3.2-1 의 가중 평균에는 비지지 길이마다 구멍 하나(Lnet = Lh, 한 길이에 들 수 있는 가장 많은 수), 뒤틀림 반파장에 구멍 하나의 조건(s ≥ Lcrd)은 맞는 것으로 봄',
+        'params': {},
+    },
+    'shear.assumption.holes_single_hole': {
+        'kind': 'assumption',
+        'template': '§{clause}: hole_spacing not given — a single hole with no neighbouring hole; the clear-distance limit (≥ {limit}) is taken as satisfied',
+        'template_ko': '§{clause}: hole_spacing 미입력 — 이웃 구멍이 없는 구멍 하나; 구멍 사이 순거리 한계(≥ {limit})는 맞는 것으로 봄',
+        'params': {'clause': {'quantity': None, 'conv': None, 'spec': '', 'unit': None, 'sep': ''}, 'limit': {'quantity': 'length', 'conv': None, 'spec': 'g', 'unit': 'in', 'sep': ' ', 'const': 18.0, 'text': '18'}},
+    },
+    'member.assumption.h4_first_yield': {
+        'kind': 'assumption',
+        'template': '§H4: R multiplies the §F3 strength with Fn = Fy (Mne = My) at first yield — the §F3.2.3 inelastic reserve is not included (R is a ratio of elastic stresses; Design Manual Example II-11 applies it to the first-yield strength): Mnℓo = {Mnlo} instead of {Mnlo_ir}',
+        'template_ko': '§H4: R 은 Fn = Fy (Mne = My) 의 §F3 첫 항복 강도에 곱한다 — §F3.2.3 비탄성 여유는 넣지 않는다(R 은 탄성 응력의 비; 설계 매뉴얼 예제 II-11 은 첫 항복 강도에 쓴다): Mnℓo = {Mnlo} ({Mnlo_ir} 대신)',
+        'params': {'Mnlo': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': 'kip-in', 'sep': ' '}, 'Mnlo_ir': {'quantity': 'moment', 'conv': None, 'spec': '.2f', 'unit': 'kip-in', 'sep': ' '}},
+    },
+    'member.assumption.c1_pe1_holes_average': {
+        'kind': 'assumption',
+        'template': '§C1.2.1.1 Pe1 of the member with holes: flexural stiffness from the Appendix 2 Table 2.3.2-1 length-weighted averages Ix,avg = {Ix} (over KxLx) and Iy,avg = {Iy} (over KyLy)',
+        'template_ko': '§C1.2.1.1 구멍이 있는 부재의 Pe1: 휨 강성은 부록 2 표 2.3.2-1 의 길이 가중 평균 Ix,avg = {Ix} (KxLx 에서), Iy,avg = {Iy} (KyLy 에서)',
+        'params': {'Ix': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '}, 'Iy': {'quantity': 'moment_of_inertia', 'conv': None, 'spec': '.4g', 'unit': 'in^4', 'sep': ' '}},
     },
 }

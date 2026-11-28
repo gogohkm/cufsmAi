@@ -37,6 +37,14 @@ export function fieldLabel(path: string, labelOf?: LabelFn): string {
     if (m) { return `지점 ${Number(m[1]) + 1}`; }
     m = /^case\.spans\.lapsPerSupport\[(\d+)\]\.(left|right)$/.exec(path);
     if (m) { return `지점 ${Number(m[1]) + 1} 랩 ${m[2] === 'left' ? '왼쪽' : '오른쪽'}`; }
+    // 2026-11-28 결정 S1: 경간의 단면 · 단면 목록
+    m = /^case\.spans\.spanSections\[(\d+)\]$/.exec(path);
+    if (m) { return `경간 ${Number(m[1]) + 1} 단면`; }
+    m = /^case\.sections\[(S\d+)\](?:\.(name|template|params\.(.+)))?$/.exec(path);
+    if (m) {
+        const P: Record<string, string> = { H: 'H', B: 'B', D: 'D', t: '두께 t', r: '모서리 r', qlip: '립 각도' };
+        return `단면 ${m[1]}${m[2] === 'name' ? ' 이름' : m[2] === 'template' ? ' 템플릿' : m[3] ? ' ' + (P[m[3]] ?? m[3]) : ''}`;
+    }
     m = /^case\.inputs\.(.+)$/.exec(path);
     if (m) { return m[1]; }
     m = /^case\.mcpOnly\.([^.]+)\.(.+)$/.exec(path);
@@ -108,6 +116,12 @@ export function fieldText(f: FieldChange, units: DisplayUnits, labelOf?: LabelFn
     const label = fieldLabel(f.path, labelOf);
     if (f.odd !== undefined) { return `${label}(이름 꼴 밖) ${f.odd}개 바뀜`; }
     if (f.summary) { return summaryText(label, f.summary); }
+    // 결정 S1: 단면 id 는 꼴이 정해진 글(S1 · S2 …) — 따옴표 없이(「경간 2 단면 S1 → S2」), 단면의 추가 · 삭제는 그 말로
+    const SID = /^S[1-9][0-9]?$/;
+    if (/^case\.sections\[S\d+\]$/.test(f.path)) { return `${label} ${f.from == null ? '추가' : '삭제'}`; }
+    if (/^case\.spans\.spanSections\[\d+\]$/.test(f.path) && typeof f.from === 'string' && typeof f.to === 'string' && SID.test(f.from) && SID.test(f.to)) {
+        return `${label} ${f.from} → ${f.to}`;
+    }
     const u = unitLabel(f.unit, units);
     const [a, b] = formatPair(f.from, f.to, f.unit, units);
     return `${label} ${a} → ${b}${u && typeof f.to === 'number' ? ` ${u}` : ''}`;

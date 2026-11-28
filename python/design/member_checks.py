@@ -127,9 +127,11 @@ def strength_check(cid, tr, ctx, nominal_idx, nom_symbol, cap_symbol, quantity, 
                       trusted=False if not trusted else None)
 
 
-def bound_fail(cid, ctx, demand, bound, *, phi, omega, cap_symbol, quantity, phi_symbol='φ', omega_symbol='Ω'):
+def bound_fail(cid, ctx, demand, bound, *, phi, omega, cap_symbol, quantity, phi_symbol='φ', omega_symbol='Ω',
+               reason=None, variant=None, location=None, reference=None):
     """강도를 이 길이에서 얻지 못했지만(가정 길이 · 전체좌굴 미구현) 가장 유리한 길이의 상한으로도 넘는 경우의 불합격
-    항목(검토 2차 R2-1). 넘지 않으면 None — 호출자가 not_evaluated 를 그대로 둔다."""
+    항목(검토 2차 R2-1). 넘지 않으면 None — 호출자가 not_evaluated 를 그대로 둔다.
+    reason 을 주면 그 까닭(2026-11-26: 구멍을 평가하지 못했지만 구멍 없는 상한으로도 넘음 — member.reason.fails_without_holes)."""
     if not bound or not demand or not demand.get('value') or demand['value'] <= 0:
         return None
     b_sym, b_nom, b_txt = bound
@@ -148,8 +150,9 @@ def bound_fail(cid, ctx, demand, bound, *, phi, omega, cap_symbol, quantity, phi
     return make_check(cid, design_method=dm, verdict='fail', demand=demand,
                       capacity=q(f'{cap_symbol},max', b_cap, quantity), nominal=q(b_sym, b_nom, quantity),
                       factor_=factor(dm, phi, omega, phi_symbol, omega_symbol), ratio=r_b, steps=tr.steps,
-                      reason=_nt('member.reason.fails_on_length_independent_mode', check=f'{cid}: {b_txt}'),
-                      trusted=False)
+                      reason=reason if reason is not None else _nt('member.reason.fails_on_length_independent_mode',
+                                                                   check=f'{cid}: {b_txt}'),
+                      trusted=False, variant=variant, location=location, reference=reference)
 
 
 def not_evaluated(cid, ctx, reason, *, steps=None, location=None, group=None, reference=None, variant=None):
@@ -382,6 +385,348 @@ def _analytic_crit_steps(tr, an, ctx, sym, base_sym, area_sym, area_val, area_q,
     return i_p
 
 
+# ---------------------------------------------------------------- 구멍이 있는 부재 (EA, 2026-11-26 — design/holes.py)
+# §E2.5 · §E3.2.2 · §E4.2 · §F2.2 · §F3.2.2 · §F4.2 와 부록 2 §2.3.2 · §2.3.4 의 계산 과정. 값은 엔진이 쓴 그 값.
+
+def _h_in(key, value, quantity='length'):
+    return q({'hole_depth': 'dh', 'hole_length': 'Lh', 'hole_spacing': 's', 'hole_web_offset': 'e_h'}[key], value,
+             quantity, src('user_input', key=key))
+
+
+def _h_net(sym, value, quantity, key):
+    return q(sym, value, quantity, src('section_property', key=key,
+                                       basis='net section at a hole (hole strip thickness 0, CUFSM practice)'))
+
+
+def _h_gross(sym, value, quantity, key, ctx):
+    return q(sym, value, quantity, _sec(key, ctx))
+
+
+def _holes_count_steps(tr, ctx, L_q, tag, fr):
+    """비지지 길이 L 안의 구멍 수와 순단면 길이 — 표 2.3.2-1 의 Lnet (Manual III-4 의 n)."""
+    hole = ctx['hole']['hole']
+    lh = _h_in('hole_length', hole['Lh'])
+    Ls = L_q['symbol']
+    if hole.get('single_hole'):
+        # hole_spacing 을 주지 않음 — 이웃 구멍 없는 구멍 하나: 비지지 길이마다 구멍 하나(가정에 밝힌다)
+        i_n = tr.add('equation', f'n,{tag} = 1  (a single hole — hole_spacing not given: one hole in {Ls})',
+                     equation='Table 2.3.2-1', inputs=[L_q, lh], result=q(f'n,{tag}', fr['n'], 'count'))
+    else:
+        s = _h_in('hole_spacing', hole['s'])
+        i_n = tr.add('equation', f'n,{tag} = floor(({Ls} − Lh)/s) + 1  (holes in {Ls}; 1 when {Ls} ≤ Lh)',
+                     equation='Table 2.3.2-1', inputs=[L_q, lh, s], result=q(f'n,{tag}', fr['n'], 'count'))
+    return tr.add('equation', f'Lnet,{tag} = min(n,{tag} Lh, {Ls})', equation='Table 2.3.2-1',
+                  inputs=[tr.ref(i_n), lh, L_q], result=q(f'Lnet,{tag}', fr['Lnet'], 'length'))
+
+
+def _holes_avg_step(tr, sym, g_q, n_q, L_q, i_lnet, tag, value, quantity):
+    Ls = L_q['symbol']
+    return tr.add('equation', f'{sym},avg = [{g_q["symbol"]} ({Ls} − Lnet,{tag}) + {n_q["symbol"]} Lnet,{tag}] / {Ls}',
+                  equation='Table 2.3.2-1', inputs=[g_q, n_q, L_q, tr.ref(i_lnet)],
+                  result=q(f'{sym},avg', value, quantity))
+
+
+def _column_fcre_steps_holes(tr, ctx):
+    """§E2.5 · 부록 2 §2.3.2.1: 가중 평균 성질(표 2.3.2-1) → σex · σey · σt · β → Fcre. 돌려주는 값: Fcre 단계."""
+    p = ctx['params']
+    fr, av = ctx['Fcre_result'], ctx['hole_avg']['trace']
+    tc = fr.get('trace')
+    if not tc or not fr.get('Fcre'):
+        return None
+    hc = ctx['hole']
+    g, nt = hc['gross'], hc['net']
+    miss = ctx['missing_len']
+    E = q('E', tc['E'], 'stress', spec())
+    G = q('G', tc['G'], 'stress', spec())
+    Ag = q('Ag', tc['Ag'], 'area', _sec('A', ctx))
+    L = {k: q(k, tc[k], 'length', _len_src(k, p, k in miss)) for k in ('KxLx', 'KyLy', 'KtLt')}
+    ps = tc['branch'] == 'point_symmetric'      # §2.3.2.1.3 은 σex 를 쓰지 않는다
+    ln = {tag: _holes_count_steps(tr, ctx, L[k], tag, av[f'f{tag}'])
+          for tag, k in (('x', 'KxLx'), ('y', 'KyLy'), ('t', 'KtLt')) if not (ps and tag == 'x')}
+    i_ix = None if ps else _holes_avg_step(tr, 'Ix', _h_gross('Ix,g', g['Ixx'], 'moment_of_inertia', 'Ixx', ctx),
+                                           _h_net('Ix,net', nt['Ixx'], 'moment_of_inertia', 'Ixx,net'), L['KxLx'],
+                                           ln['x'], 'x', av['Ix_avg'], 'moment_of_inertia')
+    if ps:
+        i_iy = _holes_avg_step(tr, 'I22', _h_gross('I22,g', g['I22'], 'moment_of_inertia', 'I22', ctx),
+                               _h_net('I22,net', nt['I22'], 'moment_of_inertia', 'I22,net'), L['KyLy'], ln['y'], 'y',
+                               av['I22_avg'], 'moment_of_inertia')
+    else:
+        i_iy = _holes_avg_step(tr, 'Iy', _h_gross('Iy,g', g['Izz'], 'moment_of_inertia', 'Izz', ctx),
+                               _h_net('Iy,net', nt['Izz'], 'moment_of_inertia', 'Izz,net'), L['KyLy'], ln['y'], 'y',
+                               av['Iy_avg'], 'moment_of_inertia')
+    i_j = _holes_avg_step(tr, 'J', _h_gross('Jg', g['J'], 'torsion_constant', 'J', ctx),
+                          _h_net('Jnet', nt['J'], 'torsion_constant', 'J,net'), L['KtLt'], ln['t'], 't',
+                          av['J_avg'], 'torsion_constant')
+    i_xo = _holes_avg_step(tr, 'xo', _h_gross('xo,g', g['xo'], 'length', 'xo', ctx),
+                           _h_net('xo,net', nt['xo'], 'length', 'xo,net'), L['KtLt'], ln['t'], 't', av['xo_avg'],
+                           'length')
+    i_a = _holes_avg_step(tr, 'A', _h_gross('A,g', g['A'], 'area', 'A', ctx), _h_net('Anet', nt['A'], 'area', 'A,net'),
+                          L['KtLt'], ln['t'], 't', av['A_avg'], 'area')
+    i_ixt = _holes_avg_step(tr, 'Ix,t', _h_gross('Ix,g', g['Ixx'], 'moment_of_inertia', 'Ixx', ctx),
+                            _h_net('Ix,net', nt['Ixx'], 'moment_of_inertia', 'Ixx,net'), L['KtLt'], ln['t'], 't',
+                            av['Ix_avg_t'], 'moment_of_inertia')
+    i_iyt = _holes_avg_step(tr, 'Iy,t', _h_gross('Iy,g', g['Izz'], 'moment_of_inertia', 'Izz', ctx),
+                            _h_net('Iy,net', nt['Izz'], 'moment_of_inertia', 'Izz,net'), L['KtLt'], ln['t'], 't',
+                            av['Iy_avg_t'], 'moment_of_inertia')
+    i_ro = tr.add('equation', 'ro,avg = [xo,avg² + (Ix,t,avg + Iy,t,avg) / A,avg]^0.5', equation='Table 2.3.2-1',
+                  inputs=[tr.ref(i_xo), tr.ref(i_ixt), tr.ref(i_iyt), tr.ref(i_a)], result=q('ro,avg', av['ro_avg'],
+                                                                                           'length'))
+    cw = _h_net('Cw,net', av['Cw_net'], 'warping_constant', 'Cw,net')
+    i_t = tr.add('elastic_buckling', f'σt = [G J,avg + {PI}² E Cw,net / (KtLt)²] / (Ag ro,avg²)',
+                 equation='2.3.2.1.2-3', inputs=[G, tr.ref(i_j), E, cw, L['KtLt'], Ag, tr.ref(i_ro)],
+                 result=q('σt', fr['sigma_t'], 'stress'))
+    if ps:
+        i_em = tr.add('elastic_buckling', f'σe,min = {PI}² E I22,avg / [Ag (KyLy)²]', equation='2.3.2.1.1-1',
+                      inputs=[E, tr.ref(i_iy), Ag, L['KyLy']], result=q('σe,min', tc['sigma_e_minor'], 'stress'))
+        return tr.add('elastic_buckling', 'Fcre = min(σt, σe,min)  (point-symmetric, §2.3.2.1.3)',
+                      equation='2.3.2.1-1', inputs=[tr.ref(i_t), tr.ref(i_em)],
+                      result=q('Fcre', fr['Fcre'], 'stress'), buckling_type=fr.get('buckling_type'))
+    i_ex = tr.add('elastic_buckling', f'σex = {PI}² E Ix,avg / [Ag (KxLx)²]', equation='2.3.2.1.2-2',
+                  inputs=[E, tr.ref(i_ix), Ag, L['KxLx']], result=q('σex', fr['sigma_ex'], 'stress'))
+    i_ey = tr.add('elastic_buckling', f'σey = {PI}² E Iy,avg / [Ag (KyLy)²]', equation='2.3.2.1.1-1',
+                  inputs=[E, tr.ref(i_iy), Ag, L['KyLy']], result=q('σey', fr['sigma_ey'], 'stress'))
+    if tc['branch'] == 'singly_symmetric':
+        i_b = tr.add('equation', 'β = 1 − (xo,avg / ro,avg)²', equation='2.3.2.1.2-4',
+                     inputs=[tr.ref(i_xo), tr.ref(i_ro)], result=q('β', tc['beta'], 'dimensionless'))
+        i_ft = tr.add('elastic_buckling', 'Fcre,ft = [(σex + σt) − ((σex + σt)² − 4 β σex σt)^0.5] / (2 β)',
+                      equation='2.3.2.1.2-1', inputs=[tr.ref(i_ex), tr.ref(i_t), tr.ref(i_b)],
+                      result=q('Fcre,ft', tc['Fcre_ft'], 'stress'))
+        return tr.add('elastic_buckling', 'Fcre = min(σey, Fcre,ft)', equation='2.3.2.1-1',
+                      inputs=[tr.ref(i_ey), tr.ref(i_ft)], result=q('Fcre', fr['Fcre'], 'stress'),
+                      buckling_type=fr.get('buckling_type'))
+    return tr.add('elastic_buckling', 'Fcre = min(σex, σey, σt)', equation='2.3.2.1-1',
+                  inputs=[tr.ref(i_ex), tr.ref(i_ey), tr.ref(i_t)], result=q('Fcre', fr['Fcre'], 'stress'),
+                  buckling_type=fr.get('buckling_type'))
+
+
+def _beam_fcre_steps_holes(tr, ctx, raw, Lb, Cb, Lb_src, Cb_src, Fsym):
+    """§F2.2 · 부록 2 §2.3.4.1.1 / §2.3.4.1.2: Lb 안의 가중 평균 성질 → σey · σt → Fcre."""
+    av = raw['holes_avg']
+    hc = ctx['hole']
+    g, nt = hc['gross'], hc['net']
+    E = q('E', raw.get('E'), 'stress', spec())
+    G = q('G', raw.get('G'), 'stress', spec())
+    Ag = q('Ag', raw['Ag'], 'area', _sec('A', ctx))
+    Sf = q('Sf', raw.get('Sf'), 'section_modulus', _sec('Sf', ctx))
+    lb = q('Lb', Lb, 'length', Lb_src)
+    i_ln = _holes_count_steps(tr, ctx, lb, 'b', av['f'])
+    i_iy = _holes_avg_step(tr, 'Iy', _h_gross('Iy,g', g['Izz'], 'moment_of_inertia', 'Izz', ctx),
+                           _h_net('Iy,net', nt['Izz'], 'moment_of_inertia', 'Izz,net'), lb, i_ln, 'b', av['Iy_avg'],
+                           'moment_of_inertia')
+    i_ix = _holes_avg_step(tr, 'Ix', _h_gross('Ix,g', g['Ixx'], 'moment_of_inertia', 'Ixx', ctx),
+                           _h_net('Ix,net', nt['Ixx'], 'moment_of_inertia', 'Ixx,net'), lb, i_ln, 'b', av['Ix_avg'],
+                           'moment_of_inertia')
+    i_j = _holes_avg_step(tr, 'J', _h_gross('Jg', g['J'], 'torsion_constant', 'J', ctx),
+                          _h_net('Jnet', nt['J'], 'torsion_constant', 'J,net'), lb, i_ln, 'b', av['J_avg'],
+                          'torsion_constant')
+    i_xo = _holes_avg_step(tr, 'xo', _h_gross('xo,g', g['xo'], 'length', 'xo', ctx),
+                           _h_net('xo,net', nt['xo'], 'length', 'xo,net'), lb, i_ln, 'b', av['xo_avg'], 'length')
+    i_a = _holes_avg_step(tr, 'A', _h_gross('A,g', g['A'], 'area', 'A', ctx), _h_net('Anet', nt['A'], 'area', 'A,net'),
+                          lb, i_ln, 'b', av['A_avg'], 'area')
+    i_ro = tr.add('equation', 'ro,avg = [xo,avg² + (Ix,avg + Iy,avg) / A,avg]^0.5', equation='Table 2.3.2-1',
+                  inputs=[tr.ref(i_xo), tr.ref(i_ix), tr.ref(i_iy), tr.ref(i_a)], result=q('ro,avg', av['ro_avg'],
+                                                                                         'length'))
+    ly = q('KyLy', raw['Ky'] * raw['Ly'], 'length', Lb_src)
+    lt = q('KtLt', raw['Kt'] * raw['Lt'], 'length', Lb_src)
+    i_ey = tr.add('elastic_buckling', f'σey = {PI}² E Iy,avg / [Ag (KyLy)²]', equation='2.3.2.1.4-3',
+                  inputs=[E, tr.ref(i_iy), Ag, ly], result=q('σey', raw['sigma_ey'], 'stress'))
+    cw = _h_net('Cw,net', av['Cw_net'], 'warping_constant', 'Cw,net')
+    i_t = tr.add('elastic_buckling', f'σt = [G J,avg + {PI}² E Cw,net / (KtLt)²] / (Ag ro,avg²)',
+                 equation='2.3.2.1.4-4', inputs=[G, tr.ref(i_j), E, cw, lt, Ag, tr.ref(i_ro)],
+                 result=q('σt', raw['sigma_t'], 'stress'))
+    cb = q('Cb', Cb, 'dimensionless', Cb_src)
+    z = raw['z_factor'] != 1.0
+    return tr.add('elastic_buckling', (f'{Fsym} = Cb ro,avg Ag / (2 Sf) (σey σt)^0.5' if z
+                                       else f'{Fsym} = Cb ro,avg Ag / Sf (σey σt)^0.5'),
+                  equation='2.3.4.1.2-1' if z else '2.3.4.1.1-1',
+                  inputs=[cb, tr.ref(i_ro), Ag, Sf, tr.ref(i_ey), tr.ref(i_t)], result=q(Fsym, raw['Fcre'], 'stress'))
+
+
+def _holes_local_crit_steps(tr, i_nh, ctx, fam, sym, value, quantity):
+    """해설 Eq. C-2.2.6-1: Pcrℓ = min(Pcrℓnh, Pcrℓh) — Pcrℓh 는 순단면 FSM(반파장 ≤ Lh)의 하중계수 × 기준 하중."""
+    hc = ctx['hole']
+    det = hc[fam]['crl_h_detail']
+    lam = q('λh', det['LF'], 'dimensionless', src('buckling_analysis', method='fsm_minimum',
+                                                   label='net-section FSM, half-wavelengths ≤ Lh',
+                                                   half_wavelength=q('L', det['L'], 'length')))
+    ref = q(f'{sym[0]}_ref,net', det['ref'], quantity,
+            src('buckling_analysis', key='reference load on the net section', basis=det['ref_basis']))
+    i_h = tr.add('elastic_buckling', f'{sym},h = λh {sym[0]}_ref,net  (net section, half-wavelengths ≤ Lh)',
+                 equation='C-2.2.6-1', inputs=[lam, ref, _h_in('hole_length', hc['hole']['Lh'])],
+                 result=q(f'{sym},h', hc[fam]['crl_h'], quantity))
+    return tr.add('elastic_buckling', f'{sym} = min({sym},nh, {sym},h)', equation='C-2.2.6-1',
+                  inputs=[tr.ref(i_nh, f'{sym},nh'), tr.ref(i_h)], result=q(sym, value, quantity))
+
+
+def _holes_cap_step(tr, i_pre, ctx, nsym, ysym, area_sym, area_val, area_q, fy, value, quantity, eq_y, eq_cap):
+    """Eq. E3.2.2-1/-2 · F3.2.2-1/-2: Pnℓ ≤ Pynet = Anet Fy, Mnℓ ≤ Mynet = Sfnet Fy."""
+    i_y = tr.add('yield', f'{ysym} = {area_sym} Fy', equation=eq_y,
+                 inputs=[_h_net(area_sym, area_val, area_q, area_sym), fy],
+                 result=q(ysym, area_val * fy['value'], quantity))
+    return tr.add('equation', f'{nsym} = min({nsym},0, {ysym})', equation=eq_cap,
+                  inputs=[tr.ref(i_pre, f'{nsym},0'), tr.ref(i_y)], result=q(nsym, value, quantity))
+
+
+def _holes_dist_crit_steps(tr, ctx, fam, sym, quantity, area_q):
+    """구멍이 있는 뒤틀림 임계값: tr = t (1 − Lh/Lcrd)^(1/3) (Eq. 2.3.2.3-1 / 2.3.4.3-1) — FSM(Lcrd 한 길이) 또는 해석식."""
+    hc = ctx['hole']
+    d = hc[fam]['crd_h_detail']
+    eq_tr = '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1'
+    lcrd_src = (src('buckling_analysis', method='fsm_minimum', key='Lcrd', label='gross section, design signature curve')
+                if d.get('method') == 'fsm' else
+                src('buckling_analysis', method='analytic', key='Lcrd',
+                    label='gross section, Eq. 2.3.1.3-7' if fam == 'P' else 'gross section, Eq. 2.3.3.3-4'))
+    i_L = tr.add('elastic_buckling', 'Lcrd (gross section, distortional half-wavelength)',
+                 inputs=[q('Lcrd', d['Lcrd'], 'length', lcrd_src)], result=q('Lcrd', d['Lcrd'], 'length'))
+    t_q = q('t', d['t'], 'length', src('section_property', key='t (web)'))
+    i_tr = tr.add('modifier', 'tr = t (1 − Lh/Lcrd)^(1/3)', equation=eq_tr,
+                  inputs=[t_q, _h_in('hole_length', hc['hole']['Lh']), tr.ref(i_L)], result=q('tr', d['tr'], 'length'))
+    if d.get('method') == 'fsm':
+        lf = q('LF', d['LF'], 'dimensionless', src('buckling_analysis', method='fsm_minimum',
+                                                   label='FSM at Lcrd with web thickness tr',
+                                                   half_wavelength=q('L', d['Lcrd'], 'length')))
+        ref = q(f'{sym[0]}_ref,r', d['ref'], quantity,
+                src('buckling_analysis', key='reference load on the section with web thickness tr',
+                    basis=d['ref_basis']))
+        return tr.add('elastic_buckling', f'{sym} = LF {sym[0]}_ref,r  (FSM at Lcrd, web thickness tr)',
+                      equation='C-2.2.6-2', inputs=[lf, ref, tr.ref(i_tr), tr.ref(i_L)],
+                      result=q(sym, d['value'], quantity))
+    st, flex = d['stiff'], d['flexure']
+    E = q('E', ctx.get('E', 29500.0), 'stress', spec())
+    mu = q('μ', 0.3, 'dimensionless', spec())
+    an = ctx.get('pcrd_an') if fam == 'P' else (ctx['state'].get('Mcrd_an'))
+    ho = _sp_dim('ho', an['ho'])
+    tt = tr.ref(i_tr, 't')
+    L = tr.ref(i_L, 'L')
+    i_fe = tr.add('elastic_buckling', 'kφfe (flange term, thickness t — unchanged by the hole)',
+                  inputs=[q('kφfe', st['k_phi_fe'], 'rotational_stiffness', src('buckling_analysis', method='analytic',
+                                                                               label='Eq. 2.3.1.3-3'))],
+                  result=q('kφfe', st['k_phi_fe'], 'rotational_stiffness'))
+    i_fg = tr.add('elastic_buckling', 'k̃φfg (flange term, thickness t — unchanged by the hole)',
+                  inputs=[q('k̃φfg', st['k_tilde_phi_fg'], 'area', src('buckling_analysis', method='analytic',
+                                                                         label='Eq. 2.3.1.3-5'))],
+                  result=q('k̃φfg', st['k_tilde_phi_fg'], 'area'))
+    if flex:
+        i_we = tr.add('elastic_buckling', 'kφwe = E t³/(12(1−μ²)) [3/ho + (π/L)² 19 ho/60 + (π/L)⁴ ho³/240]',
+                      equation='2.3.3.3-5', inputs=[E, tt, ho, mu, L],
+                      result=q('kφwe', st['k_phi_we'], 'rotational_stiffness'))
+        i_wg = tr.add('elastic_buckling',
+                      'k̃φwg = ho t π²/13440 {[45360(1−ξweb) + 62160](L/ho)² + 448π² + (ho/L)² [53 + 3(1−ξweb)] π⁴}'
+                      ' / [π⁴ + 28π² (L/ho)² + 420 (L/ho)⁴]', equation='2.3.3.3-6',
+                      inputs=[ho, tt, L, q('ξweb', 2, 'dimensionless', spec())],
+                      result=q('k̃φwg', st['k_tilde_phi_wg'], 'area'))
+        i_f = tr.add('elastic_buckling',
+                     'Fcrd = β (kφfe + kφwe + kφ) / (k̃φfg + k̃φwg)  (β = 1 here; the moment-gradient β is applied to Mcrd)',
+                     equation='2.3.3.3-2', inputs=[q('β', 1.0, 'dimensionless', spec()), tr.ref(i_fe), tr.ref(i_we),
+                                                    q('kφ', d['kphi'], 'rotational_stiffness', src('user_input', key='kphi')),
+                                                    tr.ref(i_fg), tr.ref(i_wg)],
+                     result=q('Fcrd', d['F'], 'stress'))
+        return tr.add('equation', 'Mcrd = Fcrd Sf', equation='2.3.3.3-1',
+                      inputs=[tr.ref(i_f), area_q], result=q(sym, d['value'], quantity))
+    i_we = tr.add('elastic_buckling', 'kφwe = E t³ / [6 ho (1 − μ²)]', equation='2.3.1.3-4', inputs=[E, tt, ho, mu],
+                  result=q('kφwe', st['k_phi_we'], 'rotational_stiffness'))
+    i_wg = tr.add('elastic_buckling', 'k̃φwg = (π/L)² t ho³ / 60', equation='2.3.1.3-6', inputs=[L, tt, ho],
+                  result=q('k̃φwg', st['k_tilde_phi_wg'], 'area'))
+    i_f = tr.add('elastic_buckling', 'Fcrd = (kφfe + kφwe + kφ) / (k̃φfg + k̃φwg)', equation='2.3.1.3-2',
+                 inputs=[tr.ref(i_fe), tr.ref(i_we), q('kφ', d['kphi'], 'rotational_stiffness', spec()),
+                         tr.ref(i_fg), tr.ref(i_wg)], result=q('Fcrd', d['F'], 'stress'))
+    return tr.add('equation', 'Pcrd = Fcrd A', equation='2.3.1.3-1', inputs=[tr.ref(i_f), area_q],
+                  result=q(sym, d['value'], quantity))
+
+
+def _holes_dist_strength_steps(tr, ctx, fam, i_y, i_cr, dr, nominal, fy):
+    """§E4.2 (Eq. E4.2-1 … -8) · §F4.2 (Eq. F4.2-1 … -6) — λd ≤ λd2 이면 순단면 전이, 아니면 §E4.1 / §F4.1."""
+    hc = ctx['hole']
+    P = fam == 'P'
+    ys, yn, crs = ('Py', 'Pynet', 'Pcrd') if P else ('My', 'Mynet', 'Mcrd')
+    qty = 'force' if P else 'moment'
+    area_sym = 'Anet' if P else 'Sfnet'
+    area_val = hc['Anet'] if P else hc['Sfnet']
+    i_yn = tr.add('yield', f'{yn} = {area_sym} Fy', equation='E4.2-8' if P else 'F3.2.2-2',
+                  inputs=[_h_net(area_sym, area_val, 'area' if P else 'section_modulus', area_sym), fy],
+                  result=q(yn, dr[yn], qty))
+    i_l = tr.add('slenderness', f'λd = ({ys} / {crs})^0.5', equation='E4.2-3' if P else 'F4.2-3',
+                 inputs=[tr.ref(i_y), tr.ref(i_cr)], result=q('λd', dr['lambda_d'], 'dimensionless'))
+    if P:
+        i_1 = tr.add('slenderness', 'λd1 = 0.561 (Pynet / Py)', equation='E4.2-4', inputs=[tr.ref(i_yn), tr.ref(i_y)],
+                     result=q('λd1', dr['lambda_d1'], 'dimensionless'))
+        i_2 = tr.add('slenderness', 'λd2 = 0.561 [14.0 (Py / Pynet)^0.4 − 13.0]', equation='E4.2-5',
+                     inputs=[tr.ref(i_y), tr.ref(i_yn)], result=q('λd2', dr['lambda_d2'], 'dimensionless'))
+    else:
+        i_1 = tr.add('slenderness', 'λd1 = 0.673 (Mynet / My)^3', equation='F4.2-4', inputs=[tr.ref(i_yn), tr.ref(i_y)],
+                     result=q('λd1', dr['lambda_d1'], 'dimensionless'))
+        i_2 = tr.add('slenderness', 'λd2 = 0.673 [1.7 (My / Mynet)^2.7 − 0.7]', equation='F4.2-5',
+                     inputs=[tr.ref(i_y), tr.ref(i_yn)], result=q('λd2', dr['lambda_d2'], 'dimensionless'))
+    eq = dr['equation']
+    in_e42 = eq in ('E4.2-1', 'E4.2-2', 'F4.2-1', 'F4.2-2')
+    tr.branch('λd ≤ λd2', in_e42, eq, inputs=[tr.ref(i_l), tr.ref(i_2)])
+    sym_n = 'Pnd' if P else 'Mnd'
+    if in_e42:
+        tr.branch('λd ≤ λd1', eq in ('E4.2-1', 'F4.2-1'), eq, inputs=[tr.ref(i_l), tr.ref(i_1)])
+        if eq in ('E4.2-1', 'F4.2-1'):
+            return tr.add('equation', f'{sym_n} = {yn}', equation=eq, inputs=[tr.ref(i_yn)],
+                          result=q(sym_n, nominal, qty))
+        if P:
+            i_d2 = tr.add('equation', 'Pd2 = [1 − 0.25 (1/λd2)^1.2] (1/λd2)^1.2 Py', equation='E4.2-6',
+                          inputs=[tr.ref(i_2), tr.ref(i_y)], result=q('Pd2', dr['Pd2'], qty))
+            return tr.add('equation', 'Pnd = Pynet − [(Pynet − Pd2)/(λd2 − λd1)] (λd − λd1)', equation='E4.2-2',
+                          inputs=[tr.ref(i_yn), tr.ref(i_d2), tr.ref(i_2), tr.ref(i_1), tr.ref(i_l)],
+                          result=q(sym_n, nominal, qty))
+        i_d2 = tr.add('equation', 'Md2 = [1 − 0.22 (1/λd2)] (1/λd2) My', equation='F4.2-6',
+                      inputs=[tr.ref(i_2), tr.ref(i_y)], result=q('Md2', dr['Md2'], qty))
+        return tr.add('equation', ('Mnd = min{Mynet − [(Mynet − Md2)/(λd2 − λd1)] (λd − λd1), '
+                                   '[1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My}'), equation='F4.2-2',
+                      inputs=[tr.ref(i_yn), tr.ref(i_d2), tr.ref(i_2), tr.ref(i_1), tr.ref(i_l), tr.ref(i_cr),
+                              tr.ref(i_y)], result=q(sym_n, nominal, qty))
+    # λd > λd2 → §E4.1 / §F4.1 (λd2 ≥ 0.561 / 0.673 이므로 Eq. E4.1-2 / F4.1-2)
+    if P:
+        return tr.add('equation', 'Pnd = [1 − 0.25 (Pcrd/Py)^0.6] (Pcrd/Py)^0.6 Py', equation=eq,
+                      inputs=[tr.ref(i_y), tr.ref(i_cr), tr.ref(i_1)], result=q(sym_n, nominal, qty))
+    return tr.add('equation', 'Mnd = [1 − 0.22 (Mcrd/My)^0.5] (Mcrd/My)^0.5 My', equation=eq,
+                  inputs=[tr.ref(i_y), tr.ref(i_cr), tr.ref(i_1)], result=q(sym_n, nominal, qty))
+
+
+def holes_applicability_check(dm, hc, member_type):
+    """구멍 조항(부록 2 의 방법)의 적용범위 — 단면 형식(웹 하나), 구멍이 웹 평판부 안, 보강 없는 구멍, 뒤틀림의
+    Lh < Lcrd · s ≥ Lcrd. 안이면 판정에 들지 않는 pass, 밖이면 not_evaluated(그 까닭)."""
+    from design.holes import SUPPORTED_SECTIONS
+    variant = 'flexure' if member_type == 'flexure' else None
+    h = hc['hole']
+    tr = Trace()
+    st = hc['section_type']
+    tr.branch(f'section type {st} ∈ C, Z, track (one web; Commentary E3.2.2/F3.2.2)', st in SUPPORTED_SECTIONS, None,
+              inputs=[], descriptive=True)
+    tr.branch('hole not edge-stiffened (Commentary App. 2 §2.2.6)', not h['edge_stiffened'], None,
+              inputs=[], descriptive=True)
+    if hc.get('h_web'):
+        hq = q('h', hc['h_web'], 'length', src('section_property', key='flat web depth (model)'))
+        i_ext = tr.add('equation', 'e_max = dh/2 + |e_h|  (hole edge from mid-depth)',
+                       inputs=[_h_in('hole_depth', h['dh']), _h_in('hole_web_offset', h['web_offset'])],
+                       result=q('e_max', h['dh'] / 2 + abs(h['web_offset']), 'length'))
+        i_hh = tr.add('equation', 'h/2', inputs=[hq], result=q('h/2', hc['h_web'] / 2, 'length'))
+        tr.branch('e_max < h/2  (hole inside the flat web)', True, None, inputs=[tr.ref(i_ext), tr.ref(i_hh)])
+    for fam in ('P', 'M'):
+        f = hc.get(fam) or {}
+        d = f.get('crd_h_detail')
+        if d:
+            lc = q('Lcrd', d['Lcrd'], 'length', src('buckling_analysis', key='Lcrd',
+                                                   label='gross section' + (' (compression)' if fam == 'P'
+                                                                            else ' (bending)')))
+            tr.branch('Lh < Lcrd', True, '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1',
+                      inputs=[_h_in('hole_length', h['Lh']), lc])
+            if h.get('single_hole'):
+                tr.branch('a single hole (hole_spacing not given) — one hole per distortional half-wavelength', True,
+                          '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1', inputs=[lc], descriptive=True)
+            else:
+                tr.branch('s ≥ Lcrd  (one hole per distortional half-wavelength)', True,
+                          '2.3.2.3-1' if fam == 'P' else '2.3.4.3-1', inputs=[_h_in('hole_spacing', h['s']), lc])
+    if not hc['evaluated']:
+        return make_check('member.applicability.holes', design_method=dm, verdict='not_evaluated',
+                          reason=_joined('; ', hc.get('reasons') or []), steps=tr.steps, variant=variant)
+    return make_check('member.applicability.holes', design_method=dm, verdict='pass', steps=tr.steps, counts=False,
+                      steps_unavailable=_nt('member.reason.b4_only_listed_limits_checked'), variant=variant)
+
+
 def compression_checks(ctx):
     """§E2 · §E3.2 · §E4 의 모드별 검토."""
     dm, p = ctx['dm'], ctx['params']
@@ -414,7 +759,8 @@ def compression_checks(ctx):
     g_items = ne_items(ne, 'E2')
     gr = ctx['global_result']
     tr = Trace()
-    i_fcre = _column_fcre_steps(tr, ctx)
+    hv = 'holes' if ctx.get('hole') is not None else None      # 구멍: 같은 id, 조항 §E2.5 · §E3.2.2 · §E4.2
+    i_fcre = _column_fcre_steps_holes(tr, ctx) if ctx.get('hole_avg') else _column_fcre_steps(tr, ctx)
     if ctx['e2_unavailable'] or i_fcre is None:
         checks.append((len_assumed and bound_fail('member.compression.global', ctx, demand, _lb('global'), phi=phi,
                                                   omega=omega, cap_symbol='φcPne' if dm == 'LRFD' else 'Pne/Ωc',
@@ -439,7 +785,7 @@ def compression_checks(ctx):
                                      mirrors=mir('member.compression.global', 'Pne'),
                                      phi_symbol='φc', omega_symbol='Ωc',
                                      no_demand_reason=_nt('member.reason.no_required_axial_strength'),
-                                     assumed_length=len_assumed, length_bound=_lb('global')))
+                                     assumed_length=len_assumed, length_bound=_lb('global'), variant=hv))
 
     # --- E3.2 (원형관이고 Pcrl 을 받지 않았으면 §E3.1.1.1)
     l_items = ne_items(ne, 'E3')
@@ -493,10 +839,13 @@ def compression_checks(ctx):
             i_cr = _analytic_crit_steps(tr, an, ctx, 'Pcrl', 'Fcrl', 'A', ctx['Ag'], A, '1.1-4',
                                         ctx['diag']['bound'], 'P_')
         else:
+            _pnh = ctx['Pcrl_nh'] if hv else ctx['Pcrl']
             i_cr = tr.add('elastic_buckling', 'Pcrl (elastic local buckling load)',
-                          inputs=[q('Pcrl', ctx['Pcrl'], 'force',
+                          inputs=[q('Pcrl', _pnh, 'force',
                                     buckling_src(ctx['Pcrl_source'], ctx['dsm'], 'P_', 'local'))],
-                          result=q('Pcrl', ctx['Pcrl'], 'force'))
+                          result=q('Pcrl', _pnh, 'force'))
+        if hv:
+            i_cr = _holes_local_crit_steps(tr, i_cr, ctx, 'P', 'Pcrl', ctx['Pcrl'], 'force')
         pne_in = q('Pne', ctx['Pne'], 'force', src('check' if not g_items else 'check',
                                                    id='member.compression.global'))
         i_l = tr.add('slenderness', 'λℓ = (Pne / Pcrl)^0.5', equation='E3.2.1-3',
@@ -505,7 +854,11 @@ def compression_checks(ctx):
         tr.branch('λℓ ≤ 0.776', holds, lr['equation'], inputs=[tr.ref(i_l)])
         i_n = tr.add('equation', 'Pnℓ = Pne' if holds else
                      'Pnℓ = [1 − 0.15 (Pcrl/Pne)^0.4] (Pcrl/Pne)^0.4 Pne',
-                     equation=lr['equation'], inputs=[pne_in, tr.ref(i_cr)], result=q('Pnℓ', ctx['Pnl'], 'force'))
+                     equation=lr['equation'], inputs=[pne_in, tr.ref(i_cr)],
+                     result=q('Pnℓ,0' if hv else 'Pnℓ', lr['Pnl_E321'] if hv else ctx['Pnl'], 'force'))
+        if hv:
+            i_n = _holes_cap_step(tr, i_n, ctx, 'Pnℓ', 'Pynet', 'Anet', ctx['hole']['Anet'], 'area', fy, ctx['Pnl'],
+                                  'force', 'E3.2.2-2', 'E3.2.2-1')
         reasons = list(l_items)
         if g_items:
             reasons.append(_nt('member.reason.e2_uses_pne_from_e2', g_items=_joined('; ', g_items)))
@@ -515,11 +868,24 @@ def compression_checks(ctx):
                                      mirrors=mir('member.compression.local', 'Pnl'),
                                      phi_symbol='φc', omega_symbol='Ωc',
                                      no_demand_reason=_nt('member.reason.no_required_axial_strength'),
-                                     assumed_length=len_assumed, length_bound=_lb('local')))
+                                     assumed_length=len_assumed, length_bound=_lb('local'), variant=hv))
 
     # --- E4
     d_items = ne_items(ne, 'E4')
-    if ctx['Pcrd'] > 0:
+    if ctx['Pcrd'] > 0 and ctx.get('hole_dist') is not None:
+        # §E4.2: 구멍의 Pcrd(tr) → 순단면 전이
+        tr = Trace()
+        i_py = tr.add('yield', 'Py = Ag Fy', equation='E4.2-7', inputs=[A, fy], result=q('Py', ctx['Py'], 'force'))
+        i_cr = _holes_dist_crit_steps(tr, ctx, 'P', 'Pcrd', 'force', A)
+        i_n = _holes_dist_strength_steps(tr, ctx, 'P', i_py, i_cr, ctx['dist_result'], ctx['Pnd'], fy)
+        checks.append(strength_check('member.compression.distortional', tr, ctx, i_n, 'Pnd',
+                                     'φcPnd' if dm == 'LRFD' else 'Pnd/Ωc', 'force', demand, phi=phi, omega=omega,
+                                     trusted=not d_items, untrusted_reason=_joined('; ', d_items),
+                                     mirrors=mir('member.compression.distortional', 'Pnd'),
+                                     phi_symbol='φc', omega_symbol='Ωc',
+                                     no_demand_reason=_nt('member.reason.no_required_axial_strength'),
+                                     variant='holes'))
+    elif ctx['Pcrd'] > 0:
         tr = Trace()
         dr = ctx['dist_result']
         i_py = tr.add('yield', 'Py = Ag Fy', equation='E4.1-4', inputs=[A, fy], result=q('Py', ctx['Py'], 'force'))
@@ -601,6 +967,8 @@ def _beam_fcre_steps(tr, ctx, st, Lb, Cb, Lb_src, Cb_src, sym_suffix=''):
                       result=q(Fsym, raw['Fcre'], 'stress'))
     if br != 'open':
         return None
+    if raw.get('holes_avg') and ctx.get('hole') is not None:
+        return _beam_fcre_steps_holes(tr, ctx, raw, Lb, Cb, Lb_src, Cb_src, Fsym)
     A = q('A', raw['Ag'], 'area', _sec('A', ctx))
     ry = q('ry', raw['ry'], 'length', _sec('ry', ctx))
     ly = q('KyLy', raw['Ky'] * raw['Ly'], 'length', Lb_src)
@@ -732,6 +1100,7 @@ def flexure_checks(ctx):
     g_items = ne_items(ne, 'F2')
     l_items = ne_items(ne, 'F3')
     d_items = ne_items(ne, 'F4')
+    hv = 'holes' if st.get('holes_on') else None       # 구멍: 같은 id, 조항 §F2.2 · §F3.2.2 · §F4.2
 
     if i621:
         # §I6.2.1 이 F2 · F4 (와 F3 의 Mne 경로)를 대신한다 — 엔진이 미평가로 올린 것만 미평가로.
@@ -766,7 +1135,7 @@ def flexure_checks(ctx):
                                      trusted=not g_items, untrusted_reason=_joined('; ', g_items),
                                      mirrors=mir('member.flexure.global', 'Mne'),
                                      phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem,
-                                     assumed_length=lb_assumed, length_bound=_lbf('global')))
+                                     assumed_length=lb_assumed, length_bound=_lbf('global'), variant=hv))
     g_bad = bool(g_items) or ctx['f2_unavailable']
 
     # --- F3.2
@@ -807,7 +1176,11 @@ def flexure_checks(ctx):
             tr.branch('λℓ ≤ 0.776', holds, lr['equation'], inputs=[tr.ref(i_l)])
             i_n = tr.add('equation', 'Mnℓ = Mne' if holds else
                          'Mnℓ = [1 − 0.15 (Mcrl/Mne)^0.4] (Mcrl/Mne)^0.4 Mne',
-                         equation=lr['equation'], inputs=[mne_in, tr.ref(i_cr)], result=q('Mnℓ', st['Mnl'], 'moment'))
+                         equation=lr['equation'], inputs=[mne_in, tr.ref(i_cr)],
+                         result=q('Mnℓ,0' if hv else 'Mnℓ', lr['Mnl_F321'] if hv else st['Mnl'], 'moment'))
+            if hv:
+                i_n = _holes_cap_step(tr, i_n, ctx, 'Mnℓ', 'Mynet', 'Sfnet', ctx['hole']['Sfnet'], 'section_modulus',
+                                      _fy_input(tr, ctx, st), st['Mnl'], 'moment', 'F3.2.2-2', 'F3.2.2-1')
         reasons = list(l_items)
         if g_bad:
             reasons.append(_nt('member.reason.f2_uses_mne_from_f2', g_items=_joined('; ', g_items)))
@@ -816,11 +1189,33 @@ def flexure_checks(ctx):
                                      trusted=not reasons, untrusted_reason=_joined('; ', reasons),
                                      mirrors=mir('member.flexure.local', 'Mnl'),
                                      phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem,
-                                     assumed_length=lb_assumed, length_bound=_lbf('local')))
+                                     assumed_length=lb_assumed, length_bound=_lbf('local'), variant=hv))
 
     # --- F4
     dr = st['dist_result']
-    if st['Mcrd'] > 0:
+    if st['Mcrd'] > 0 and st.get('hole_dist') is not None:
+        # §F4.2: 구멍의 Mcrd(tr, 있으면 β) → 순단면 전이
+        tr = Trace()
+        fy = _fy_input(tr, ctx, st)
+        i_my = tr.add('yield', 'My = Sf Fy', equation='F4.1-4', inputs=[Sf, fy], result=q('My', st['My'], 'moment'))
+        i_cr = _holes_dist_crit_steps(tr, ctx, 'M', 'Mcrd', 'moment', Sf)
+        bi = st.get('beta_inputs')
+        if bi and st['beta_dist'] > 1.0:
+            i_b = tr.add('modifier', 'β = 1 + 0.4 (L/Lm)^0.7 (1 + M1/M2)^0.7, 1.0 ≤ β ≤ 1.3', equation='2.3.3.3-3',
+                         inputs=[q('L', bi['L'], 'length', src('buckling_analysis', key='Lcrd', basis=bi['L_basis'])),
+                                 q('Lm', bi['Lm'], 'length', src('user_input', key='dist_Lm')),
+                                 q('M1/M2', bi['M1_M2'], 'dimensionless', src('user_input', key='dist_M1_M2'))],
+                         result=q('β', st['beta_dist'], 'dimensionless'))
+            i_cr = tr.add('modifier', 'Mcrd = β Mcrd', equation='2.3.3.3-3', inputs=[tr.ref(i_b), tr.ref(i_cr)],
+                          result=q('Mcrd', st['Mcrd'], 'moment'))
+        i_n = _holes_dist_strength_steps(tr, ctx, 'M', i_my, i_cr, dr, st['Mnd'], fy)
+        checks.append(strength_check('member.flexure.distortional', tr, ctx, i_n, 'Mnd',
+                                     'φbMnd' if dm == 'LRFD' else 'Mnd/Ωb', 'moment', demand, phi=phi, omega=omega,
+                                     trusted=not d_items, untrusted_reason=_joined('; ', d_items),
+                                     mirrors=mir('member.flexure.distortional', 'Mnd'),
+                                     phi_symbol=sym_phi, omega_symbol=sym_om, no_demand_reason=no_dem,
+                                     variant='holes'))
+    elif st['Mcrd'] > 0:
         tr = Trace()
         fy = _fy_input(tr, ctx, st)
         i_my = tr.add('yield', 'My = Sf Fy', equation='F4.1-4', inputs=[Sf, fy], result=q('My', st['My'], 'moment'))
@@ -868,7 +1263,9 @@ def flexure_checks_all(ck):
     from design.checks import set_governing
     ne = ck['not_evaluated_all']
     checks = flexure_checks(ck)
-    if ck.get('shear'):
+    if ck.get('shear_eb') is not None:
+        pass      # EB(2026-11-26): 보강 · 구멍이 있는 웹의 전단 · §H2 는 아래 flexure_eb_checks 가 만든다
+    elif ck.get('shear'):
         g2, h2 = shear_checks(ck, ck['shear'])
         checks += g2 + h2
     elif ne_items(ne, 'G2/H2'):
@@ -880,13 +1277,25 @@ def flexure_checks_all(ck):
     g5 = ne_items(ne, 'G5')
     if ck.get('wc'):
         checks.append(web_crippling_check(ck, {**ck['wc'], 'ne_items': g5}))
+    elif ck.get('wc_bound'):
+        # §G6 미평가 — 구멍 없는 Pn(G5)으로 낸 검토: 넘으면 불합격, 아니면 판정 없음(2026-11-26 독립 검증 2)
+        checks.append(holes_bound_verdict(web_crippling_check(ck, {**ck['wc_bound'], 'ne_items': []}),
+                                          'member.web_crippling: P > web crippling strength without holes',
+                                          ck['wc_bound']['why'], keep_reference=False))
     elif g5:
         checks.append(not_evaluated('member.web_crippling', ck, _joined('; ', g5)))
     h3 = ne_items(ne, 'H3')
     if ck.get('h3'):
         checks.append(h3_check(ck, ck['h3']))
+    elif ck.get('h3_bound'):
+        checks.append(holes_bound_verdict(h3_check(ck, ck['h3_bound']),
+                                          'member.bending_web_crippling: H3 with the web crippling strength '
+                                          'without holes', ck['h3_bound']['why'], keep_reference=False))
     elif h3:
         checks.append(not_evaluated('member.bending_web_crippling', ck, _joined('; ', h3)))
+    # EB(2026-11-26): §G2.2 · §G3 전단 · §H2(보강 웹) · §G4.1 보강재 · §H4 — 입력이 없으면 빈 목록
+    from design.member_web_torsion import flexure_eb_checks
+    checks += flexure_eb_checks(ck)
     i621 = ck['R_uplift'] is not None and ck['R_uplift'] > 0
     gov = ('member.flexure.uplift_r' if i621 else
            {'Local Buckling': 'member.flexure.local',
@@ -966,13 +1375,20 @@ def lap_section_block(ctx):
 
 def _mcrl_steps(tr, ctx, st, Sf):
     an = st.get('Mcrl_an')
+    holes = bool(st.get('holes_on')) and ctx.get('hole') is not None
     if an:
-        return _analytic_crit_steps(tr, an, ctx, 'Mcrl', 'Fcrl', 'Sf', st['Sf_eff'], Sf,
-                                    '1.1-4', ctx['diag']['bound'], 'M_')
-    return tr.add('elastic_buckling', 'Mcrl (elastic local buckling moment)',
-                  inputs=[q('Mcrl', st['Mcrl'], 'moment',
-                            buckling_src(st['Mcrl_source'], ctx['dsm'], 'M_', 'local'))],
-                  result=q('Mcrl', st['Mcrl'], 'moment'))
+        i = _analytic_crit_steps(tr, an, ctx, 'Mcrl', 'Fcrl', 'Sf', st['Sf_eff'], Sf,
+                                 '1.1-4', ctx['diag']['bound'], 'M_')
+    else:
+        val = st['Mcrl_nh'] if holes else st['Mcrl']
+        i = tr.add('elastic_buckling', 'Mcrl (elastic local buckling moment)',
+                   inputs=[q('Mcrl', val, 'moment',
+                             buckling_src(st['Mcrl_source_gross'] if holes else st['Mcrl_source'], ctx['dsm'], 'M_',
+                                          'local'))],
+                   result=q('Mcrl', val, 'moment'))
+    if holes:
+        i = _holes_local_crit_steps(tr, i, ctx, 'M', 'Mcrl', st['Mcrl'], 'moment')
+    return i
 
 
 def _mcrd_steps(tr, ctx, st, Sf, use_base=False):
@@ -1154,6 +1570,18 @@ def web_crippling_check(ctx, wc):
                        inputs=[tr.ref(i), q('α', det['alpha'], 'dimensionless', spec()),
                                q('Pn,IOF', det.get('Pn_interior_cap'), 'force', spec())],
                        result=q('Pnc', det['Pn_final'], 'force'))
+        g6 = det.get('g6')
+        if g6 is not None:
+            # EB(2026-11-26) §G6: Rc (Eq. G6-1 끝 / G6-2 내부 1-플랜지) × Pn(G5)
+            ins6 = [q('dh', g6['dh'], 'length', src('user_input', key='hole_depth')),
+                    q('h', wc['h'], 'length', src('section_property', key='h_web')),
+                    q('x', g6['x'], 'length', src('user_input', key='hole_bearing_distance'))]
+            expr6 = ('Rc = 1.01 − 0.325 dh/h + 0.083 x/h ≤ 1.0' if g6['equation'] == 'G6-1'
+                     else 'Rc = 0.90 − 0.047 dh/h + 0.053 x/h ≤ 1.0')
+            i_rc = tr.add('equation', expr6, equation=g6['equation'], inputs=ins6,
+                          result=q('Rc', g6['Rc'], 'dimensionless'))
+            i = tr.add('modifier', 'Pn = Rc Pn(G5)', equation=g6['equation'], inputs=[tr.ref(i_rc), tr.ref(i)],
+                       result=q('Pn', det['Pn_final'], 'force'))
     else:
         i = tr.add('equation', 'Pn (Eq. G5-1)', equation=w.get('equation'),
                    inputs=[q('Pn', wc['Pn'], 'force', src('specification', table=w.get('table')))],
@@ -1173,6 +1601,7 @@ def web_crippling_check(ctx, wc):
                       capacity=q('φwPn' if dm == 'LRFD' else 'Pn/Ωw', wc['Pa'], 'force'),
                       nominal=q('Pn', wc['Pn'], 'force'), factor_=factor(dm, phi_w, om_w, 'φw', 'Ωw'), ratio=r,
                       reason=_joined('; ', items) or None, steps=tr.steps, trusted=False if items else None,
+                      variant='web_holes' if det.get('g6') is not None else None,
                       reference={'capacity': q('Pa', wc['Pa'], 'force'), 'ratio': r} if v == 'not_evaluated' else None,
                       mirrors={'nominal': _mirror('web_crippling.Pn', 2),
                                'capacity': _mirror('web_crippling.design_strength', 3),
@@ -1233,10 +1662,23 @@ def positive_region_check(ctx, pr):
                      result=q('λℓ', lr['lambda_l'], 'dimensionless'))
         holds = lr['equation'] == 'F3.2.1-1'
         tr.branch('λℓ ≤ 0.776', holds, lr['equation'], inputs=[tr.ref(i_l)])
-        i_list.append(tr.add('equation', 'Mnℓ = Mne' if holds else 'Mnℓ = [1 − 0.15 (Mcrl/Mne)^0.4] (Mcrl/Mne)^0.4 Mne',
-                             equation=lr['equation'], inputs=[tr.ref(i_mne), tr.ref(i_cr)],
-                             result=q('Mnℓ', pr['Mnl'], 'moment')))
-    if pr['dist'] is not None:
+        _pcap = pr.get('hole') is not None and 'Mnl_F321' in lr
+        i_pl = tr.add('equation', 'Mnℓ = Mne' if holds else 'Mnℓ = [1 − 0.15 (Mcrl/Mne)^0.4] (Mcrl/Mne)^0.4 Mne',
+                      equation=lr['equation'], inputs=[tr.ref(i_mne), tr.ref(i_cr)],
+                      result=q('Mnℓ,0' if _pcap else 'Mnℓ', lr['Mnl_F321'] if _pcap else pr['Mnl'], 'moment'))
+        if _pcap:
+            i_pl = _holes_cap_step(tr, i_pl, ctx, 'Mnℓ', 'Mynet', 'Sfnet', pr['hole']['Sfnet'], 'section_modulus', fy,
+                                   pr['Mnl'], 'moment', 'F3.2.2-2', 'F3.2.2-1')
+        i_list.append(i_pl)
+    if pr['dist'] is not None and pr.get('hole_dist') is not None:
+        i_my = tr.add('yield', 'My = Sf Fy', equation='F4.1-4', inputs=[Sf, fy], result=q('My', pr['Sf'] * pr['Fy'],
+                                                                                         'moment'))
+        i_cr = tr.add('elastic_buckling', 'Mcrd (β = 1 in the positive region)',
+                      inputs=[q('Mcrd', pr['Mcrd'], 'moment', buckling_src(str(ctx['state']['Mcrd_source']).split(' [β=')[0],
+                                                                          ctx['dsm'], 'M_', 'distortional'))],
+                      result=q('Mcrd', pr['Mcrd'], 'moment'))
+        i_list.append(_holes_dist_strength_steps(tr, ctx, 'M', i_my, i_cr, pr['dist'], pr['Mnd'], fy))
+    elif pr['dist'] is not None:
         i_my = tr.add('yield', 'My = Sf Fy', equation='F4.1-4', inputs=[Sf, fy], result=q('My', pr['Sf'] * pr['Fy'],
                                                                                          'moment'))
         i_cr = tr.add('elastic_buckling', 'Mcrd (β = 1 in the positive region)',
@@ -1262,7 +1704,8 @@ def positive_region_check(ctx, pr):
                        mirrors={'nominal': _mirror('positive_region.Mn', 2),
                                 'capacity': _mirror('positive_region.phi_Mn', 2),
                                 'ratio': _mirror('positive_region.utilization', 4)},
-                       phi_symbol='φb', omega_symbol='Ωb', location=loc)
+                       phi_symbol='φb', omega_symbol='Ωb', location=loc,
+                       variant='holes' if pr.get('hole') is not None else None)
     return c
 
 
@@ -1333,9 +1776,15 @@ def _b1_steps(tr, ctx, axis, P):
     L_key, r_key = ('KxLx', 'rx') if axis == 'x' else ('KyLy', 'ry')
     Lq = q(L_key, ctx[L_key], 'length', src('user_input', key=L_key) if p.get(L_key) is not None
            else src('engine_default', key=L_key, note=_nt('member.note.length_default')))
+    if ctx.get('pe1_holes'):
+        # 구멍(2026-11-26 독립 검증 4): r = (I,avg / Ag)^0.5 — 부록 2 표 2.3.2-1 의 길이 가중 평균(가정에 밝힌다)
+        r_src = src('section_property', key=f'{r_key},avg',
+                    note=_nt('member.note.pe1_holes_average'))
+    else:
+        r_src = _sec(r_key, ctx)
     i_pe = tr.add('elastic_buckling', f'Pe1{axis} = {PI}² E A / ({L_key} / {r_key})²', equation='C1.2.1.1-5',
                   inputs=[q('E', ctx['E'], 'stress', spec()), q('A', ctx['Ag'], 'area', _sec('A', ctx)), Lq,
-                          q(r_key, ctx[r_key], 'length', _sec(r_key, ctx))],
+                          q(r_key, ctx[r_key], 'length', r_src)],
                   result=q(f'Pe1{axis}', ctx['PEx' if axis == 'x' else 'PEy'], 'force'))
     cm = _cm_step(tr, ctx, axis)
     return tr.add('modifier', f'B1{axis} = Cm{axis} / (1 − α P / Pe1{axis}) ≥ 1.0', equation='C1.2.1.1-3',
@@ -1401,6 +1850,20 @@ def axial_bending_check(ctx):
         ins += [q('May', ctx['May'], 'moment', src('user_input', key='May_strength'))]
         expr += f' + {my_sym}/May'
     i_x = tr.add('equation', expr, equation='H1.2-1', inputs=ins, result=q('H1.2', raw['total'], 'dimensionless'))
+    if ctx.get('holes_bound') is not None:
+        # 구멍 조항을 평가하지 못한 성분 — 그 구멍 없는 상한으로 낸 하한 비가 1 을 넘는다(2026-11-26 독립 검증 2)
+        hb = ctx['holes_bound']
+        i_b = tr.add('equation', 'H1.2,min = P / Pa,max + Mx / Max,max + My / May  (Pa,max, Max,max: upper bounds of '
+                                 'the strengths with holes; B1 of the gross section or 1 — the least ratio with holes)',
+                     equation='H1.2-1', inputs=[P], result=q('H1.2,min', hb, 'dimensionless'))
+        tr.add('verdict', 'H1.2,min ≤ 1.0', inputs=[tr.ref(i_b), q('limit', 1.0, 'dimensionless', spec())],
+               result=q('ratio', hb, 'dimensionless'), verdict='fail')
+        return make_check('member.axial_bending', design_method=dm, verdict='fail',
+                          demand=q('H1.2,min', hb, 'dimensionless'), capacity=q('limit', 1.0, 'dimensionless'),
+                          ratio=hb, steps=tr.steps, trusted=False,
+                          reason=_nt('member.reason.fails_without_holes', check='member.axial_bending: H1.2 with '
+                                     'the component strengths without holes', why='hole provisions not evaluated'),
+                          reference={'ratio': raw['total']})
     if ctx.get('length_assumed') and not ctx['component_unavailable']:   # (호출자: 하한이 넘으면 unavailable 을 끈다)
         # E-1: Pa · Max · B1 이 빈 길이의 기본값에서 나왔다 — 비는 참고값. 길이와 상관없는 하한 비가 넘으면 불합격.
         bound = ctx.get('length_bound')
@@ -1506,7 +1969,8 @@ _SUB_FIELDS = {
     'tension': {'design_strength': 'tension.design_strength', 'Tn': 'tension.Tn'},
 }
 # 조합 결과로 그대로 복사되는 하위 키(경로가 같다)
-_COPIED_PREFIXES = ('shear.', 'shear_interaction.', 'web_crippling.', 'h3_interaction.', 'positive_region.')
+_COPIED_PREFIXES = ('shear.', 'shear_interaction.', 'web_crippling.', 'h3_interaction.', 'positive_region.',
+                    'torsion.', 'web_stiffeners.')
 
 
 def remap_mirrors(checks: list, sub: str) -> list:
@@ -1536,6 +2000,23 @@ def remap_mirrors(checks: list, sub: str) -> list:
             c['reason'] = _joined(' — ', [c['reason'], _nt('member.reason.no_demand_in_combined_check')])
         out.append(c)
     return out
+
+
+def holes_bound_verdict(check: dict, label: str, why, keep_reference: bool = True) -> dict:
+    """구멍 조항을 평가하지 못해 구멍 없는 강도(구멍은 이 강도를 낮추기만 한다 — 상한)로 낸 항목(2026-11-26 독립 검증 2):
+    불합격이면 그대로 불합격(까닭: 구멍 없는 강도로도 넘음, 신뢰 표시 False — 비는 그 상한의 비), 합격이면 판정 없음.
+    keep_reference False 면 판정 없음의 reference 를 비운다(§G3 · §G6: 구멍 없는 값은 보수측 참고값이 아니라는 옛 계약 —
+    단계는 남는다). mirrors 는 뺀다(결과의 묶음은 구멍 없는 값을 강도로 싣지 않는다)."""
+    if check.get('verdict') == 'fail':
+        c = dict(check, reason=_nt('member.reason.fails_without_holes', check=label, why=why), trusted=False)
+        c.pop('mirrors', None)
+        return c
+    if check.get('verdict') == 'pass':
+        c = demote_to_not_evaluated(check, why)
+        if not keep_reference:
+            c['reference'] = None
+        return c
+    return check
 
 
 def demote_to_not_evaluated(check: dict, reason: str) -> dict:

@@ -41,9 +41,14 @@ export function valText(v: unknown): string {
   if (Array.isArray(v)) { return v.length <= 4 ? v.map(valText).join(', ') : `${v.length}개`; }
   return String(v);
 }
+/**
+ * 2026-11-28 결정 S1: 단면 목록의 단면 하나를 더하거나 지운 칸(`case.sections[S2]` — 전 · 후 값은 단면 id 이거나 null)은 전 → 후 가 아니라
+ * 호스트의 글(「단면 S2 추가」 · 「단면 S2 삭제」)로 읽는다
+ */
+export const wholeSection = (f: FieldRec): boolean => /^case\.sections\[S\d+\]$/.test(String(f?.path ?? ''));
 /** 칸 하나 → 「전 → 후 단위」(요약 칸 · 이름 꼴 밖은 호스트의 글) */
 export function fromTo(f: FieldRec): string {
-  if (f.summary || f.odd !== undefined || !('from' in f || 'to' in f)) { return f.text; }
+  if (f.summary || f.odd !== undefined || wholeSection(f) || !('from' in f || 'to' in f)) { return f.text; }
   return `${valText(f.from)} → ${valText(f.to)}${f.unit && typeof f.to === 'number' ? ` ${f.unit}` : ''}`;
 }
 export const chg: { list: Change[]; persisted: boolean; total: number; err?: string; base: string | null; baseFor: string | null } = { list: [], persisted: false, total: 0, base: null, baseFor: null };

@@ -320,6 +320,31 @@ def design_signature_lengths(node, elem=None) -> dict:
     }
 
 
+def hole_local_lengths(node, Lh: float) -> dict:
+    """구멍 자리 순단면의 국부좌굴 반파장 (in) — 설계 서명곡선과 같은 간격(10 배마다 30 점), 끝은 구멍 길이 Lh.
+
+    Commentary Appendix 2 §2.2.6 (Moen and Schafer 2009c): 순단면의 FSM 은 구멍 길이보다 짧은 반파장만 본다 —
+    Lh < Lcrℓh 이면 Lh 에서의 값, Lh ≥ Lcrℓh 이면 곡선의 극소. 그래서 격자는 0.05 D(설계 격자의 아래 끝) … Lh 이고
+    Lh 를 꼭 넣는다. Lh 가 0.05 D 이하면 Lh/10 … Lh.
+
+    Returns: {'lengths': ndarray, 'D': float, 'per_decade', 'rule'}
+    """
+    nd = np.asarray(node, dtype=float)
+    D = float(max(np.ptp(nd[:, 1]), np.ptp(nd[:, 2])))
+    Lh = float(Lh)
+    if not (Lh > 0 and np.isfinite(Lh)) or not (D > 0):
+        raise ValueError('hole_local_lengths: Lh and the section extent must be > 0')
+    lo = DESIGN_SIGNATURE_RANGE[0] * D
+    if lo >= Lh:
+        lo = Lh / 10.0
+    n = max(int(np.ceil(DESIGN_SIGNATURE_PER_DECADE * np.log10(Lh / lo))) + 1, 2)
+    lengths = np.logspace(np.log10(lo), np.log10(Lh), n)
+    lengths[-1] = Lh
+    return {'lengths': lengths, 'D': D, 'per_decade': DESIGN_SIGNATURE_PER_DECADE,
+            'rule': (f'net-section local curve (S-S, m = 1): {n} log-spaced half-wavelengths from {lo:.4g} in to '
+                     f'the hole length Lh = {Lh:.4g} in, {DESIGN_SIGNATURE_PER_DECADE} per decade')}
+
+
 def _first_load_factors(sig: dict) -> np.ndarray:
     """서명 곡선의 길이별 1차 하중계수. 실패한 길이는 NaN (극소로 잡히지 않게)."""
     failed = {d.get('length_index') for d in sig.get('diagnostics', [])

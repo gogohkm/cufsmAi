@@ -39,6 +39,7 @@
         rotational_stiffness: { US: 'kip-in/rad/in', SI: 'kN-m/rad/m', d: [4, 4] },
         lat_stiff: { US: 'kip/in/in', SI: 'kN/m/m', d: [4, 1] },
         pressure: { US: 'psf', SI: 'kPa', d: [1, 3] },
+        per_area: { US: '1/in²', SI: '1/mm²', d: [8, 10] },
         linload: { US: 'plf', SI: 'kN/m', d: [1, 3] },
         dimensionless: { US: '', SI: '', d: [3, 3] },
         angle: { US: '°', SI: '°', d: [1, 1] },
@@ -236,7 +237,10 @@
         const notes = [];
         if (c.reason) { notes.push(['까닭', c.reason]); }
         if (c.out_of_scope) { notes.push(['적용범위 밖', c.out_of_scope + ' — 계산한 값은 참고']); }
-        if (c.trusted === false) { notes.push(['믿지 않는 값', '엔진이 판정에 쓰지 않은 값']); }
+        // 2026-11-26: 구멍 없는 강도의 상한으로 낸 불합격(trusted false 이지만 판정이다 — member.reason.fails_without_holes)
+        if (c.trusted === false && c.verdict === 'fail' && c.reason_code === 'member.reason.fails_without_holes') {
+            notes.push(['구멍 없는 강도의 상한', '소요 · 설계강도 · 비는 구멍 없는 강도의 상한의 것 — 구멍 조항은 평가하지 못했지만 구멍은 강도를 낮추기만 하므로 불합격']);
+        } else if (c.trusted === false) { notes.push(['믿지 않는 값', '엔진이 판정에 쓰지 않은 값']); }
         if (c.reference && typeof c.reference === 'object') {
             const r = c.reference;
             notes.push(['참고(판정에 쓰지 않음)', [r.capacity ? '설계강도 ' + qtext(r.capacity, units) : '', r.nominal ? '공칭 ' + qtext(r.nominal, units) : '',

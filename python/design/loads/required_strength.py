@@ -27,6 +27,7 @@ from design.loads.beam_analysis import (
 from design.loads.bracing import (
     calc_rotational_stiffness, lateral_stiffness_detail,
     determine_unbraced_lengths, check_i621_conditions,
+    span_geometry, tag_region_spans, interval_spans, lap_region_members,
 )
 from design.notices import N as _nt, attach as _attach_notices, joined as _joined  # noqa: E402
 
@@ -65,6 +66,7 @@ def analyze_loads(
     lr_reduced: bool = False,
     I_span_in4: list = None,
     load_combination_standard: str = None,
+    span_sections: list = None,
 ) -> dict:
     """통합 하중 분석
 
@@ -100,6 +102,18 @@ def analyze_loads(
     load_combination_standard : 하중조합 기준 'asce7_10'(처음 값 — 지금까지의 결과 그대로) · 'asce7_22' ·
             'kds_41_12_00'. 그 밖의 값은 허용값을 밝히는 ValueError. 넣은 하중이 그 기준의 하중 정의를 따른다고 본다
             (엔진은 바꾸지 않는다 — assumptions 에 밝힌다). 처짐(비계수) · 부분재하 규칙은 바꾸지 않는다
+    span_sections : 경간마다의 단면(2026-11-28) — 경간 수만큼의 dict, 각각 section 과 같은 꼴(type, depth,
+            flange_width, thickness, lip_depth, R_corner, Ixx, Fy, Fu …)에 호출자가 정한 'id'(예: 'S1'; 없으면 같은
+            단면끼리 'S1', 'S2' … 를 붙인다). 주면:
+              - 경간별 Ix = 그 경간 단면의 Ixx (I_span_in4 를 따로 주면 그 값을 쓰고, 단면의 Ixx 와 1 % 넘게 다른
+                경간마다 경고 — 결정 S6). 모든 단면의 Ixx 가 같으면 Ix 하나(오늘과 같은 길).
+              - §I6.2.1 조건과 양력 R 을 경간마다 그 단면으로(결정 S7) — auto_params.i621_by_span, uplift_R_by_span.
+              - 데크 kφ · kx 는 한 번(결정 S7′ — 쓰이는 단면 가운데 가장 작은 kφ 와 가장 작은 kx 를 따로, 설계 매뉴얼 II-1C 의
+                안전측 근사): auto_params.deck 가 그 값, auto_params.deck_basis {rule, kphi_section_id, kx_section_id,
+                by_section(단면마다 — 참고)}. 데크 강성을 계산하지 못하는 단면이 있으면 ValueError.
+              - 구간 기록마다 span · spans(0 부터), 랩 구간은 두 부재 · 강성 몫(참고 — 판정은 두 부재 강도의 합, 결정 S3′).
+              - section 을 주지 않으면 section = span_sections[0] (옛 단일 키 — deck, i621_check, deflection.Ixx — 의 단면).
+            없으면 결과는 오늘과 바이트까지 같다. 모든 경간에 같은 단면이면 옛 키의 값은 section 하나와 같다.
 
     Returns
     -------
@@ -123,6 +137,11 @@ def analyze_loads(
 
     n_spans, spans, sup = _resolve_geometry(span_type, span_ft, spans_ft, supports)
     laps_ps = _resolve_laps(laps, laps_per_support, n_spans, sup, warnings)
+    # 경간마다의 단면(2026-11-28). 옛 단일 키는 section(없으면 첫 경간의 단면)으로 낸다.
+    span_secs = _resolve_span_sections(span_sections, n_spans, section)
+    secs_differ = bool(span_secs) and any(not _same_section(s, span_secs[0]) for s in span_secs[1:])
+    if span_secs is not None and not section:
+        section = {k: v for k, v in span_secs[0].items() if k != 'id'}
     has_laps = n_spans > 1 and any(lp for lp in laps_ps)
     if has_laps and laps_per_support is None:
         assumptions.append(_nt('loads.assumption.lap_lengths_given_as'))
@@ -161,10 +180,28 @@ def analyze_loads(
         Ixx = section.get('Ixx') or section.get('Ix') or None
     if I_span_in4 is None and section:
         I_span_in4 = section.get('I_span_in4')
+    I_span_given = I_span_in4 is not None
+    sec_I = None
+    if span_secs is not None:
+        sec_I = [_sec_ixx(s) for s in span_secs]
+        if not I_span_given and any(v is not None for v in sec_I):
+            if any(v is None for v in sec_I):
+                raise ValueError('span_sections: give Ixx for every span section (or I_span_in4), not for some only.')
+            if max(sec_I) - min(sec_I) > 1e-12 * max(sec_I):
+                I_span_in4 = list(sec_I)     # 경간마다 그 단면의 Ix (결정 S6). 모두 같으면 Ix 하나 — 오늘의 길
+            if Ixx is None:
+                Ixx = sec_I[0]
     if I_span_in4 is not None:
         I_span_in4 = [float(v) for v in I_span_in4]
         if len(I_span_in4) != n_spans or min(I_span_in4) <= 0:
             raise ValueError(f'I_span_in4 needs {n_spans} positive values (one per span).')
+        if I_span_given and sec_I is not None:
+            # 결정 S6: 사람이 넣은 경간별 Ix 를 쓰되, 그 경간 단면의 Ixx 와 1 % 넘게 다르면 알린다
+            for i, (vg, vs) in enumerate(zip(I_span_in4, sec_I)):
+                if vs and abs(vg - vs) > 0.01 * abs(vs):
+                    warnings.append(_nt('loads.warning.span_ix_differs_from_section', span=i + 1,
+                                        I_given=vg, section_id=span_secs[i]['id'], I_section=vs,
+                                        pct=100.0 * (vg - vs) / vs))
         if Ixx is None:
             Ixx = min(I_span_in4)
         assumptions.append(_nt('loads.assumption.per_span_member_ix'))
@@ -191,6 +228,14 @@ def analyze_loads(
     up_vars = [v for v in variants if v['is_uplift']]
 
     depth = section.get('depth') if section else None
+    if secs_differ:
+        # 끝 지점의 내민 판정(EOF/IOF)에 지점마다 그 양쪽 부재 깊이의 큰 값(1.5 d 를 넘기 어렵게 — 보수측)
+        dl = [s.get('depth') for s in span_secs]
+        if len(set(dl)) > 1:
+            depth = [max([v for v in (dl[j - 1] if j > 0 else None, dl[j] if j < n_spans else None) if v] or [0])
+                     or None for j in range(n_spans + 1)]
+        else:
+            depth = dl[0]
     gravity_result = _class_result(grav_vars, units, spans, sup, laps_ps, 'gravity', depth,
                                    pattern_on, snow_cases)
     uplift_result = _class_result(up_vars, units, spans, sup, laps_ps, 'uplift', depth,
@@ -199,20 +244,41 @@ def analyze_loads(
                                      pattern_on, snow_cases)
 
     # ── 데크 강성 ──
-    deck_info = _calc_deck_info(deck, section, E=E)
+    deck_basis = None
+    if span_secs is None:
+        deck_info = _calc_deck_info(deck, section, E=E)
+    else:
+        # 결정 S7′(2026-11-28 오후): 데크 강성은 한 번 계산해 모든 경간에 — 쓰이는 단면 가운데 kφ 가 가장 작은 단면의 값
+        # (설계 매뉴얼 II-1C: 얇은 퍼린으로 한 번, 「안전측의 근사」). 데크의 모든 값이 그 한 단면에서. 단면마다의 값은 참고
+        deck_info, deck_basis = _deck_once(deck, span_secs, E)
     warnings.extend(deck_info.get('warnings', []))
     assumptions.extend(deck_info.get('assumptions', []))
     scope_notes.extend(deck_info.get('scope_notes', []))
 
     # ── 비지지 영역 ──
     auto_params = {'deck': deck_info}
+    geo = None
+    I_used = None
+    if span_secs is not None:
+        auto_params['deck_basis'] = deck_basis
+        if secs_differ and deck_type != 'none':
+            assumptions.append(_nt('loads.assumption.deck_once_smallest_kphi', kphi_section=deck_basis['kphi_section_id'],
+                                   kphi=float((deck_info.get('display_unrounded') or {}).get('kphi', deck_info['kphi'])),
+                                   kx_section=deck_basis['kx_section_id']))
+        geo = span_geometry(spans, laps_ps if has_laps else None, sup)
+        I_used = list(I_span_in4) if I_span_in4 is not None else list(sec_I)
     x_list = units['x'].tolist()
+    ub = None
     if gravity_result:
         ub = determine_unbraced_lengths(
             gravity_result['M_envelope_max'], x_list, spans, None,
             laps_per_support=laps_ps, deck_type=deck_type,
             M_min_diagram=gravity_result['M_envelope_min'], supports=sup,
             brace_points_ft=brace_points_ft, envelope_members=_members(grav_vars))
+        if geo is not None:
+            tag_region_spans(ub, geo)
+            for r in ub['lap_regions']:
+                _lap_member_sections(r, span_secs, I_used)
         auto_params['unbraced'] = ub
         assumptions.extend(a for a in ub['assumptions'] if a not in assumptions)
         auto_params['positive_region'] = _positive_gov(ub, deck_type, deck_info)
@@ -232,6 +298,10 @@ def analyze_loads(
         for r in ubu['negative_regions']:
             r['i621_region_eligible'] = (not r['cantilever']
                                          and not r.get('zone_contains_interior_support'))
+        if geo is not None:
+            tag_region_spans(ubu, geo)
+            for r in ubu['lap_regions']:
+                _lap_member_sections(r, span_secs, I_used)
         uneg = ubu['negative_regions']
         ugov = _negative_gov(uneg, ubu, sup, spans)
         auto_params['uplift_bracing'] = {
@@ -241,14 +311,19 @@ def analyze_loads(
             'lap_regions': ubu['lap_regions'],
             'unbraced': ubu,
         }
+        if geo is not None:
+            auto_params['uplift_bracing']['positive_pieces'] = _uplift_positive_pieces(
+                ubu, ub['lap_regions'] if ub else [], geo, span_secs, I_used)
         assumptions.extend(a for a in ubu['assumptions'] if a not in assumptions)
 
     # ── 양력 R (I6.2.1 through-fastened / I6.2.2 standing seam) ──
     uplift_R = None
     R_basis = None
+    R_by_span = None
     if deck_type == 'through-fastened':
         if section:
             lap_in = []
+            lap_d = []
             if has_laps:
                 # (g) 는 내부 지점의 랩이다 — 내민(N)이 있으면 첫·마지막 실제 지점은 끝 지점이다.
                 real_j = [j for j in range(n_spans + 1) if sup[j] != 'N']
@@ -257,12 +332,32 @@ def analyze_loads(
                         continue
                     lp = laps_ps[j] or {}
                     lap_in += [(lp.get('left_ft', 0) or 0) * 12.0, (lp.get('right_ft', 0) or 0) * 12.0]
+                    if span_secs is not None:
+                        dj = max([v for v in (span_secs[j - 1].get('depth'), span_secs[j].get('depth')) if v] or [0])
+                        lap_d += [dj, dj]
             i621 = check_i621_conditions(
                 section=section, Fy=section.get('Fy'), Fu=section.get('Fu'),
                 span_ft=max(spans), span_type='continuous' if n_spans > 1 else 'simple',
                 lap_lengths_in=lap_in or None, spans_ft=spans, supports=sup, deck=deck,
                 system_confirmed=bool(i621_conditions_confirmed), insulation_in=insulation_in,
             )
+            if span_secs is not None:
+                # 결정 S7: §I6.2.1 조건 · R 을 경간마다 그 경간의 단면으로 — R 은 오늘의 규칙(경간 R 의 최솟값,
+                # Table I6.2.1-1)을 그 단면으로 본 값. (g) 는 랩마다 겹친 두 부재 깊이의 큰 값과 견준다.
+                by_span, gi = _i621_by_span(span_secs, section, spans, sup, deck, lap_in, lap_d,
+                                            bool(i621_conditions_confirmed), insulation_in, secs_differ)
+                auto_params['i621_by_span'] = by_span
+                R_by_span = [b['R'] for b in by_span]
+                real = [b for b in by_span if b['real_span']]
+                if secs_differ:
+                    i621 = by_span[gi]['check']
+                    i621 = dict(i621, R=(min(b['R'] for b in real) if real and all(b['R'] is not None for b in real)
+                                         else None))
+                    auto_params['i621_check_span'] = gi
+                    some = [b['span'] + 1 for b in real if b['R'] is not None]
+                    if i621['R'] is None and some and uplift_result:
+                        warnings.append(_nt('loads.warning.i621_r_some_spans_only', spans=', '.join(map(str, some)),
+                                            others=', '.join(str(b['span'] + 1) for b in real if b['R'] is None)))
             auto_params['i621_check'] = i621
             uplift_R = i621.get('R')
             R_basis = _nt('loads.label.r_basis_table_i6_2_1') if uplift_R is not None else None
@@ -289,6 +384,30 @@ def analyze_loads(
             assumptions.append(_nt('loads.assumption.app_a_standing_seam_roof_without'))
     auto_params['uplift_R'] = uplift_R
     auto_params['uplift_R_basis'] = R_basis
+    if span_secs is not None:
+        if R_by_span is None:
+            # 시험값 R(§I6.2.2)과 R 없음은 경간과 상관없다 — 경간마다 같은 값
+            R_by_span = [uplift_R if not (sup[i] == 'N' or sup[i + 1] == 'N') else None for i in range(n_spans)]
+        auto_params['uplift_R_by_span'] = R_by_span
+        for r in (auto_params.get('uplift_bracing') or {}).get('negative_regions') or []:
+            # 구간의 R = 그 구간이 놓인 경간의 R (§I6.2.1 이 쓰이는 구간만 — i621_region_eligible)
+            r['uplift_R'] = R_by_span[r['span']] if r.get('i621_region_eligible') else None
+        auto_params['span_map'] = _span_map(geo, span_secs, I_used, sec_I)
+        if secs_differ:
+            assumptions.append(_nt('loads.assumption.span_sections_per_span'))
+            for j in range(1, n_spans):
+                if sup[j] != 'N' and not laps_ps[j] and not _same_section(span_secs[j - 1], span_secs[j]):
+                    warnings.append(_nt('loads.warning.section_change_without_lap', support=j + 1,
+                                        left=span_secs[j - 1]['id'], right=span_secs[j]['id']))
+            shared = [lp for lp in auto_params['span_map']['laps'] if not lp['same_section']]
+            if shared:
+                assumptions.append(_nt('loads.assumption.lap_sum_of_strengths'))
+            for lp in auto_params['span_map']['laps']:
+                if lp['depth_mismatch']:
+                    warnings.append(_nt('loads.warning.lap_depth_mismatch', support=lp['support'] + 1,
+                                        d_left=lp['depths'][0], d_right=lp['depths'][1]))
+                if lp['stiffness_shares'] is None:
+                    warnings.append(_nt('loads.warning.lap_shares_need_ixx', support=lp['support'] + 1))
 
     # ── 반력 ──
     wc_reactions = _extract_wc_reactions(gravity_result, spans)
@@ -307,6 +426,9 @@ def analyze_loads(
     # ── 처짐 (사용하중) ──
     deflection_result, deflection_cases = _deflections(
         units, present, Wp_plf, spans, sup, pattern_on, snow_cases, E_fe, Ixx)
+    if span_secs is not None and deflection_result:
+        # 처짐은 경간마다의 강성(FE, 랩 = 두 부재의 합)으로 이미 풀었다 — 'Ixx' 는 옛 키(첫 단면), 여기 경간별 값
+        deflection_result['I_span_in4'] = I_used
     if Ixx is None:
         warnings.append(_nt('loads.warning.section_ixx_given_deflections'))
 
@@ -894,6 +1016,7 @@ def _positive_gov(ub, deck_type, deck_info):
         'regions': [{k: r[k] for k in ('start_ft', 'end_ft', 'Ly_in', 'Cb', 'M_max_abs', 'cantilever', 'unrounded')}
                     for r in regs],
         'unrounded': g.get('unrounded'),
+        **_span_keys(g),
     }
 
 
@@ -914,6 +1037,7 @@ def _negative_gov(regs, ub, sup, spans):
         if 'i621_region_eligible' in g:
             out['i621_region_eligible'] = g['i621_region_eligible']
         out['unrounded'] = g.get('unrounded')
+        out.update(_span_keys(g))
         return out
     # 하부 플랜지 압축이 없으면 가장 긴 브레이스 간격 (보수측 대표값)
     pts = sorted(set([x for j, x in enumerate(ub['supports_ft']) if sup[j] != 'N']
@@ -1239,6 +1363,247 @@ def _extract_wc_reactions(gravity_result: dict, spans: list) -> list:
                 'support': loc.get('support'),
             })
     return wc
+
+
+# ---------------------------------------------------------------------------
+# 경간마다 다른 단면 (2026-11-28, 결정 S1–S10)
+# ---------------------------------------------------------------------------
+
+def _resolve_span_sections(span_sections, n_spans, section):
+    """경간 수만큼의 단면 dict(복사본). 'id' 가 없으면 같은 단면끼리 'S1', 'S2' … (나온 차례). Fy · Fu 가 없는 단면은
+    section(없으면 첫 경간의 단면)의 값을 쓴다(재료는 하나 — 결정 S1 의 같은 템플릿). None 이면 None."""
+    if span_sections is None:
+        return None
+    if not isinstance(span_sections, (list, tuple)) or len(span_sections) != n_spans:
+        raise ValueError(f'span_sections needs {n_spans} section objects (one per span).')
+    out = []
+    for i, s in enumerate(span_sections):
+        if not isinstance(s, dict):
+            raise ValueError(f'span_sections[{i}] must be an object like section.')
+        out.append(dict(s))
+    mat = section or out[0]          # 재료의 출처: section, 없으면 첫 경간의 단면
+    for d in out:
+        for k in ('Fy', 'Fu'):
+            if d.get(k) is None and mat.get(k) is not None:
+                d[k] = mat[k]
+    seen = []
+    for d in out:
+        if d.get('id') is None:
+            for prev in seen:
+                if _same_section(prev, d):
+                    d['id'] = prev['id']
+                    break
+            else:
+                n = 1
+                used = {str(x.get('id')) for x in out if x.get('id') is not None}
+                while f'S{n}' in used:
+                    n += 1
+                d['id'] = f'S{n}'
+        else:
+            d['id'] = str(d['id'])
+        seen.append(d)
+    return out
+
+
+def _same_section(a: dict, b: dict) -> bool:
+    """'id' 를 뺀 모든 키가 같은가(단면 치수 · 성질 · 재료)."""
+    ka = {k: v for k, v in (a or {}).items() if k != 'id'}
+    kb = {k: v for k, v in (b or {}).items() if k != 'id'}
+    return ka == kb
+
+
+def _sec_ixx(s: dict):
+    v = (s or {}).get('Ixx') or (s or {}).get('Ix')
+    return float(v) if v else None
+
+
+def _span_keys(g: dict) -> dict:
+    return {k: g[k] for k in ('span', 'spans') if k in g}
+
+
+def _deck_once(deck, span_secs, E):
+    """결정 S7′(검증 2026-11-28 F2 의 2 로 고침): 데크 강성 한 번 — 쓰이는 단면(나온 차례)마다 _calc_deck_info, 그 가운데
+    가장 작은 kφ 와 가장 작은 kx 를 **따로** 골라(kφ: 같으면 kx 가 작은 쪽, 그다음 앞의 단면 / kx: 같으면 kφ 가 작은 쪽, 그다음
+    앞의 단면) 모든 경간에 — 어느 단면도 제 단면의 값보다 큰 데크 값을 받지 않는다(kφ 가 가장 작은 단면이 플랜지가 좁은 두꺼운
+    부재라 kx 가 클 수 있다). 설계 매뉴얼 II-1C(두께만 다른 두 부재 — 얇은 쪽)에서는 두 값이 같은 단면에서 온다.
+    반환: (그 데크 결과, deck_basis {rule, kphi_section_id, kx_section_id, by_section}). by_section 은 단면마다의 값(참고).
+    데크 강성을 계산하지 못하는 단면(두께 · 플랜지 폭이 없음)이 있으면 ValueError — 그 단면의 0 이 말없이 모든 경간의 값이 되거나
+    그 단면을 건너뛰지 않는다(시험값 kphi_override · kx_override 를 주면 계산하지 않으므로 그대로 쓴다)."""
+    rows = []
+    infos = {}
+    for i, s in enumerate(span_secs):
+        sid = s['id']
+        if sid in infos:
+            next(r for r in rows if r['section_id'] == sid)['spans'].append(i)
+            continue
+        di = _calc_deck_info(deck, s, E=E)
+        missing = [k for k in ('kphi', 'kx') if di.get(f'{k}_method') == 'not_computed_missing_section']
+        if missing:
+            need = 'thickness and flange_width' if 'kphi' in missing else 'thickness'
+            raise ValueError(f'span_sections: the deck stiffness ({", ".join(missing)}) of section {sid} cannot be '
+                             f'computed — its {need} is not given. Give every section\'s purlin thickness and '
+                             f'flange width (or the deck kphi_override / kx_override from tests).')
+        infos[sid] = di
+        rows.append({'section_id': sid, 'spans': [i], 'kphi': di['kphi'], 'kx': di['kx'],
+                     'kphi_method': di['kphi_method'], 'kx_method': di['kx_method']})
+
+    def raw(di, k):
+        return float((di.get('display_unrounded') or {}).get(k, di.get(k) or 0.0))
+
+    def val(j, k):
+        return raw(infos[rows[j]['section_id']], k)
+    pk = min(range(len(rows)), key=lambda j: (val(j, 'kphi'), val(j, 'kx'), j))
+    px = min(range(len(rows)), key=lambda j: (val(j, 'kx'), val(j, 'kphi'), j))
+    sid_phi, sid_x = rows[pk]['section_id'], rows[px]['section_id']
+    for j, r in enumerate(rows):
+        r['adopted_kphi'] = j == pk
+        r['adopted_kx'] = j == px
+    info = infos[sid_phi]
+    if sid_x != sid_phi:
+        ix = infos[sid_x]
+        info = dict(info)
+        info['kx'] = ix['kx']
+        info['kx_method'] = ix['kx_method']
+        info['display_unrounded'] = {**(info.get('display_unrounded') or {}),
+                                     'kx': (ix.get('display_unrounded') or {}).get('kx', ix['kx'])}
+        # 두 단면의 알림(같은 글은 한 번) — kx 의 가정(패스너 전단강도 등)은 kx 를 준 단면의 것
+        for k in ('warnings', 'assumptions', 'scope_notes'):
+            info[k] = list(info.get(k) or []) + [x for x in (ix.get(k) or []) if x not in (info.get(k) or [])]
+        info['notes'] = info['warnings'] + info['assumptions'] + info['scope_notes']
+    return info, {'rule': 'once_smallest_kphi_and_kx', 'kphi_section_id': sid_phi, 'kx_section_id': sid_x,
+                  'reference': 'Design Manual Example II-1C — computed once with the thinner purlin '
+                               '(conservative approximation); the smallest kphi and the smallest kx of the '
+                               'sections in use are taken separately',
+                  'by_section': rows}
+
+
+def _lap_shares(span_secs, I_used, a, b):
+    """랩의 두 부재(경간 a, b)의 강성 몫 [s_a, s_b] (반올림 없음) — 참고값(결정 S3′: 랩의 강도는 두 부재 강도의 합).
+    I 는 해석에 쓴 경간별 Ix(I_span_in4 또는 단면의 Ixx). Ix 가 없고 두 단면이 같으면 [0.5, 0.5], 아니면 None."""
+    Ia = I_used[a] if I_used else None
+    Ib = I_used[b] if I_used else None
+    if Ia and Ib:
+        return [Ia / (Ia + Ib), Ib / (Ia + Ib)], Ia, Ib
+    if _same_section(span_secs[a], span_secs[b]):
+        return [0.5, 0.5], Ia, Ib
+    return None, Ia, Ib
+
+
+def _lap_member_sections(r: dict, span_secs, I_used) -> None:
+    """랩 구간 기록(tag_region_spans 가 lap_members 를 단 것)에 두 부재의 단면 · Ix · 강성 몫(참고)을 단다.
+    결정 S3′: 랩의 판정은 두 부재 강도의 합(strength_basis) — 강도는 부재 검토가 내므로 여기에는 그 근거만."""
+    mem = r.get('lap_members')
+    if not mem:
+        return
+    a, b = mem[0]['span'], mem[1]['span']
+    shares, Ia, Ib = _lap_shares(span_secs, I_used, a, b)
+    for m, s, I, k in ((mem[0], span_secs[a], Ia, 0), (mem[1], span_secs[b], Ib, 1)):
+        m['section_id'] = s['id']
+        m['Ixx'] = I
+        m['depth'] = s.get('depth')
+        m['thickness'] = s.get('thickness')
+        m['stiffness_share'] = shares[k] if shares else None
+    da, db = span_secs[a].get('depth'), span_secs[b].get('depth')
+    mismatch = bool(da and db and abs(float(da) - float(db)) > 1e-6 * max(float(da), float(db)))
+    r['Ixx_members'] = [Ia, Ib]
+    r['share_by_stiffness'] = shares
+    r['strength_basis'] = 'sum_of_strengths'    # Design Manual II-1A · II-2A 가정 (c) — 결정 S3′
+    r['reference_basis'] = 'stiffness_share'    # 강성 몫 I_i / (I_1 + I_2) — 참고값(판정에 쓰지 않음)
+    r['same_section'] = _same_section(span_secs[a], span_secs[b])
+    r['depth_mismatch'] = mismatch
+    r['lap_evaluable'] = not mismatch
+    if mismatch:
+        r['not_evaluable_reason'] = _nt('loads.reason.lap_depth_mismatch', d_left=float(da), d_right=float(db))
+
+
+def _uplift_positive_pieces(ubu, lap_regions, geo, span_secs, I_used):
+    """양력의 상부 압축(데크 지지) 구간을 중력 해석의 랩 구간 끝에서 자른 조각 — 호스트가 _designPurlin 에서
+    자르는 것과 같은 규칙(구간 안쪽에 든 lap_regions 의 start_ft · end_ft, 반올림 전 값에서; 1e-6 ft 보다 짧은 조각은
+    버림). 조각마다 기하만(M 은 호스트가 포락선에서): source_index(ubu.positive_regions 의 자리), start_ft, end_ft,
+    in_lap, span, spans, crosses_support, 랩 안이면 lap_support · lap_side · lap_members · share_by_stiffness."""
+    def unr(r, k):
+        u = r.get('unrounded') or {}
+        return float(u.get(k, r.get(k)))
+
+    zones = sorted((unr(z, 'start_ft'), unr(z, 'end_ft')) for z in lap_regions
+                   if unr(z, 'end_ft') > unr(z, 'start_ft'))
+    out = []
+    for si, r in enumerate(ubu.get('positive_regions') or []):
+        a0, a1 = unr(r, 'start_ft'), unr(r, 'end_ft')
+        cuts = [a0, a1]
+        for z0, z1 in zones:
+            if a0 < z0 < a1:
+                cuts.append(z0)
+            if a0 < z1 < a1:
+                cuts.append(z1)
+        xs = sorted(set(cuts))
+        for s0, s1 in zip(xs[:-1], xs[1:]):
+            if s1 - s0 < 1e-6:
+                continue
+            mid = 0.5 * (s0 + s1)
+            in_lap = any(z0 < mid < z1 for z0, z1 in zones)
+            info = interval_spans(geo, s0, s1)
+            p = {'source_index': si, 'start_ft': s0, 'end_ft': s1, 'in_lap': in_lap,
+                 'span': info['span'], 'spans': info['spans'], 'crosses_support': info['crosses_support']}
+            lm = lap_region_members(geo, s0, s1) if in_lap else None
+            if lm is not None:
+                p['spans'] = [lm['members'][0]['span'], lm['members'][1]['span']]
+                p['lap_support'] = lm['lap_support']
+                p['lap_side'] = lm['lap_side']
+                p['continuous_member_span'] = lm['continuous_member_span']
+                p['ending_member_span'] = lm['ending_member_span']
+                p['lap_members'] = lm['members']
+                _lap_member_sections(p, span_secs, I_used)
+            out.append(p)
+    return out
+
+
+def _i621_by_span(span_secs, section, spans, sup, deck, lap_in, lap_d, confirmed, insulation_in, secs_differ):
+    """§I6.2.1 을 경간마다 그 경간의 단면으로. 반환: (기록 목록, 옛 i621_check 로 낼 경간). 기록: span, section_id,
+    real_span, R(그 단면으로 본 오늘의 규칙 — 경간 R 의 최솟값, 내민 경간은 None), R_own_span(그 경간의
+    R_per_span), all_pass, check(검토 전체). (g) 는 sections 가 다를 때만 랩마다의 d(겹친 두 부재 깊이의 큰 값)로."""
+    n = len(spans)
+    rows = []
+    for i, s in enumerate(span_secs):
+        res = check_i621_conditions(
+            section=s, Fy=s.get('Fy', (section or {}).get('Fy')), Fu=s.get('Fu', (section or {}).get('Fu')),
+            span_ft=max(spans), span_type='continuous' if n > 1 else 'simple',
+            lap_lengths_in=lap_in or None, spans_ft=spans, supports=sup, deck=deck,
+            system_confirmed=confirmed, insulation_in=insulation_in,
+            lap_depths_in=(lap_d if (secs_differ and lap_in) else None))
+        real = not (sup[i] == 'N' or sup[i + 1] == 'N')
+        rows.append({'span': i, 'section_id': s['id'], 'real_span': real,
+                     'R': res.get('R') if real else None,
+                     'R_own_span': res['R_per_span'][i] if res.get('all_pass') else None,
+                     'all_pass': res['all_pass'], 'check': res})
+    real_rows = [r for r in rows if r['real_span']] or rows
+    fail = [r for r in real_rows if r['R'] is None]
+    gi = fail[0]['span'] if fail else min(real_rows, key=lambda r: (r['R'], r['span']))['span']
+    return rows, gi
+
+
+def _span_map(geo, span_secs, I_used, sec_I):
+    """경간 · 랩의 자리와 그 단면(호스트가 자른 조각의 경간을 찾을 때 — 가운데 x 가 놓인 경간, 랩 안이면 그 랩의
+    두 부재). 모든 번호는 0 부터, 길이는 ft."""
+    laps = []
+    for lp in geo['laps']:
+        a, b = lp['spans']
+        shares, Ia, Ib = _lap_shares(span_secs, I_used, a, b)
+        da, db = span_secs[a].get('depth'), span_secs[b].get('depth')
+        laps.append({**lp, 'section_ids': [span_secs[a]['id'], span_secs[b]['id']], 'Ixx_members': [Ia, Ib],
+                     'stiffness_shares': shares, 'depths': [da, db], 'same_section': _same_section(span_secs[a], span_secs[b]),
+                     'depth_mismatch': bool(da and db and abs(float(da) - float(db)) > 1e-6 * max(float(da), float(db)))})
+    return {
+        'supports_ft': geo['supports_ft'],
+        'spans': [{**sp, 'section_id': span_secs[sp['span']]['id'],
+                   'Ixx_section': sec_I[sp['span']] if sec_I else None,
+                   'Ixx_used': I_used[sp['span']] if I_used else None,
+                   'depth': span_secs[sp['span']].get('depth'),
+                   'thickness': span_secs[sp['span']].get('thickness')} for sp in geo['spans']],
+        'laps': laps,
+        'rule': 'span of x: the span whose [start_ft, end_ft] holds x (a support x belongs to both neighbours); '
+                'inside laps[k] (start_ft < x < end_ft) both members laps[k].spans are present. Indices are 0-based.',
+    }
 
 
 __all__ = ['analyze_loads', 'find_controlling_combo']

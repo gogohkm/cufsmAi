@@ -21,7 +21,9 @@ export { US_TO_SI };
 export const LABEL: Record<Kind, string> = {
   length: 'mm', area: 'mm²', modulus: 'mm³', inertia: 'mm⁴', warping: 'mm⁶', stress: 'MPa', force: 'kN',
   moment: 'kN·m', moment_ft: 'kN·m', length_ft: 'm', linload: 'kN/m', pressure: 'kPa', density: 'kg/m³',
-  rot_stiff: 'kN·m/rad/m', lat_stiff: 'kN/m/m', force_per_length: 'kN/m', spring_disc: 'kN/m', rot_spring_disc: 'kN·m/rad', none: '',
+  rot_stiff: 'kN·m/rad/m', lat_stiff: 'kN/m/m', force_per_length: 'kN/m', spring_disc: 'kN/m', rot_spring_disc: 'kN·m/rad',
+  // 결정 T7: §H4 길 ② 의 θ''(rad/mm²) — 제품 표의 per_area
+  per_area: '1/mm²', none: '',
 };
 
 /** US 한 값 → SI(곱셈만). 수가 아니면 그대로 null */

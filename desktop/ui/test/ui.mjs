@@ -328,8 +328,12 @@ function expectedOf(src, u, ctx) {
         return typeof v === 'number' ? caseValueToSI(v, CASE_KIND.get(parts[1]) ?? null) : undefined;
       }
       if (parts[0] === 'spans') { const v = at(ctx.caseUS?.spans, parts.slice(1).join('.')); return typeof v === 'number' ? v * US_TO_SI.length_ft : undefined; }
+      // 2026-11-28 결정 S1: 단면 목록(sections.<i>.params.<k> — US in, 립 각도는 °)
+      if (parts[0] === 'sections' && parts[2] === 'params') { const v = ctx.caseUS?.sections?.[Number(parts[1])]?.params?.[parts[3]]; return typeof v === 'number' ? (parts[3] === 'qlip' ? v : v * US_TO_SI.length) : undefined; }
       return undefined;
     }
+    // 2026-11-28 결정 S1: 호스트가 단면 목록의 단면마다 보낸 Ix(sectionListInfo) — 시험은 퍼린 결과(MCP SI)의 그 단면 성질과 맞댄다
+    case 'secinfo': { const [id, k] = p.split('.'); return ctx.secinfo?.[id]?.[k]; }
     default: return undefined;
   }
 }
@@ -3856,6 +3860,490 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
   await mcp.tool('set_boundary_condition', { BC: 'S-S' });
   await mcp.tool('run_analysis');
   await settle(`s.stages.fsm.state==='ok'`, '다시 해석', 120_000);
+
+  // ── 결정 T7(2026-11-26) — 웹 구멍 · 횡방향 웹 보강재 · 비틀림(§H4): 검토 상태의 칸 · 결과의 새 검토 · 구멍 없는 강도로 넘는 불합격 · 편집 화면 ─────────
+  // h 단계는 앞 단계에 기대지 않는다 — 깨끗한 사본을 열고(프로젝트 밖) 립 C 200 · 정휨 해석부터. 단계끼리는 차례대로(h01 → h08 — 앞 단계의 입력을 다음이 덮는다)
+  section('7h. 결정 T7 — 웹 구멍 · 횡방향 웹 보강재 · 비틀림(§H4)');
+  const H_STEPS = ['h01', 'h02', 'h03', 'h04', 'h05', 'h06', 'h07', 'h08'];
+  if (H_STEPS.some(ran)) {
+    const hcsd = path.join(tmp, 'h-web-options.csd');
+    fs.copyFileSync(path.join(repoRoot, 'Example', 'test.csd'), hcsd);
+    const op = serve.ipc('open', { file: hcsd }, 90_000);
+    await answerIfUnsaved();
+    await op;
+    await settle(`s.file.path===${JSON.stringify(hcsd)}`, '깨끗한 사본');
+    const ht = await mcp.tool('set_section_template', { type: 'lippedc', ...params2, units: 'SI' });
+    const hl = await mcp.tool('set_load_case', { load_case: 'bending_xx_pos', fy: 295, units: 'SI' });
+    const ha = await mcp.tool('run_analysis');
+    check('AI: 깨끗한 사본 · 립 C 200×75×20×2.3 · 정휨 295 MPa · run_analysis', !!ht.success && !!hl.success && !!ha.success, short(ht.error ?? hl.error ?? ha.error ?? `절점 ${ht.nnodes}`));
+    await settle(`s.stages.fsm.state==='ok'`, '해석', 120_000);
+  }
+  /** 휨 검토(직접 입력) — 구멍 · 보강재 · 비틀림 인자를 더해. 화면의 부재 검토가 그 결과(같은 pass · 항목 수)를 읽을 때까지 */
+  const hFlex = async (extra) => {
+    const r = await mcp.tool('aisi_design_flexure', { detail: 'full', Fy: 295, Fu: 400, Lb: 1500, Cb: 1.0, wc_N: 0, design_method: 'LRFD', units: 'SI', ...extra });
+    if (!r.error) {
+      await settle(`s.runs.some(x=>x.key==='design' && x.us && x.us.pass===${JSON.stringify(r.pass ?? null)} && x.rows.length===${(r.design_checks ?? []).length})`, '휨 결과', 60_000).catch(() => undefined);
+      await sleep(300);
+    }
+    return r;
+  };
+  const hChk = (r, id) => (r.design_checks ?? []).find(c => c.id === id) ?? null;
+  /** 정보 창의 수 = MCP 의 SI 결과(design:…) — 고른 검토 항목의 정보 창 */
+  const hInfoNums = async (r) => compareNumbers(await numbers('#info'), { designSI: r });
+  /** 점검(validate_design — 화면의 「점검 실행」 = 끼운 화면의 「설계 검증 실행」)의 항목 id */
+  const hVal = async () => {
+    await ev(`${S}.validate()`);
+    await settle(`!!s.val && !s.valRunning`, '점검', 60_000).catch(() => undefined);
+    await sleep(300);
+    await select('result', 'val');
+    await sleep(300);
+    return ev(`({state:(${S}.state.val?.items ?? []).map(i=>i.id), table:[...document.querySelectorAll('#center table.valt tr.vr')].map(t=>t.dataset.id)})`);
+  };
+  const hClear = () => mcp.tool('set_case_inputs', { inputs: { holeShape: 'none', holeDepth: null, holeLength: null, holeSpacing: null, holeEdgeStiffened: false, stiffenerMode: 'none', stiffenerSpacing: null, stiffenerKind: '', stiffenerIs: null, stiffenerArea: null, stiffenerFy: null, torsionMode: 'none', torsionFBending: null, torsionFTorsion: null, torsionFBendingMax: null }, reason: '시험 — 구역 셋을 처음 값으로' });
+
+  await step('h01 원형 웹 구멍(평가함) — 휨 검토의 §F2.2 · §F3.2.2 · §F4.2(clause_variant holes)가 트리 · 정보 창에, 「웹 구멍」 묶음(순단면 · Mynet · 구멍의 탄성값)의 수 = MCP · 점검에 val.design.holes', 'h01_holes_evaluated', async () => {
+    const r = await hFlex({ Mu: 2, hole_shape: 'circular', hole_depth: 60, hole_spacing: 600 });
+    const loc = hChk(r, 'member.flexure.local');
+    await select('result', 'design#member.flexure.local');
+    await sleep(300);
+    const s = await ev(`({tipL:document.querySelector('#tree .row[data-k="design#member.flexure.local"]')?.dataset.tip ?? '', tipG:document.querySelector('#tree .row[data-k="design#member.flexure.global"]')?.dataset.tip ?? '',
+      block:!!document.querySelector('#info [data-web-block="holes"]'), ev:document.querySelector('#info [data-holes-evaluated]')?.dataset.holesEvaluated ?? null,
+      mynet:document.querySelector('#info [data-src="design:Mynet"]')?.dataset.v ?? null, el:!!document.querySelector('#info [data-hole-elastic]'), head:document.querySelector('#info .hd')?.textContent.replace(/\\s+/g,' ') ?? '',
+      untrusted:document.querySelectorAll('#tree [data-untrusted], #info [data-untrusted]').length})`);
+    const n = await hInfoNums(r);
+    const engOk = !r.error && r.holes?.evaluated === true && loc?.clause === 'F3.2.2' && loc?.clause_variant === 'holes' && typeof r.Mynet === 'number' && hChk(r, 'member.flexure.global')?.clause === 'F2.2';
+    const v = await hVal();
+    const valOk = v.state.includes('val.design.holes') && v.table.includes('val.design.holes');
+    await select('result', 'design#member.flexure.local');
+    return { ok: engOk && /§F3\.2\.2/.test(s.tipL) && /§F2\.2/.test(s.tipG) && s.block && s.ev === '1' && Math.abs(Number(s.mynet) - r.Mynet) <= 1e-9 * Math.max(1, Math.abs(r.Mynet)) && s.el && /F3\.2\.2/.test(s.head) && s.untrusted === 0
+        && n.bad.length === 0 && (n.bySrc.design ?? 0) >= 8 && valOk,
+      detail: `${r.error ? `오류 ${short(r.error, 200)} · ` : ''}엔진 holes.evaluated ${r.holes?.evaluated} · 국부 §${loc?.clause} (${loc?.clause_variant}) · Mynet ${r.Mynet} kN·m → 트리 풍선 「${s.tipL}」 · 정보 창 묶음 ${s.block} · 평가 ${s.ev} · Mynet ${s.mynet} · 탄성값 ${s.el}`
+        + ` · 수 ${n.compared}개 = MCP(design ${n.bySrc.design ?? 0})${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''} · 점검 val.design.holes ${valOk}` };
+  });
+  await step('h02 한계 밖의 구멍(가장자리 보강) · 작은 소요 — 구멍 조항은 미검토(까닭), 머리 · 판정 요약은 「판정 없음」(판정비 · 하한 표시 없음)', 'h02_holes_not_evaluated', async () => {
+    const r = await hFlex({ Mu: 1, hole_shape: 'circular', hole_depth: 60, hole_spacing: 600, hole_edge_stiffened: true });
+    const loc = hChk(r, 'member.flexure.local');
+    await select('result', 'design#member.flexure.local');
+    await sleep(300);
+    const s = await ev(`({verdict:document.querySelector('#info .hd [data-verdict]')?.dataset.verdict ?? null, reason:document.querySelector('#info .hd [data-reason]')?.textContent ?? '',
+      ratioRow:!!document.querySelector('#tree .row[data-k="design#member.flexure.local"] [data-ratio]'), holeWhy:[...document.querySelectorAll('#info [data-hole-reason]')].map(e=>e.dataset.code),
+      bound:document.querySelectorAll('[data-holes-bound]').length})`);
+    await select('work', 'insp:sum');
+    await sleep(300);
+    const sum = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="insp:sum"]'); return r ? {text:r.querySelector('.vl')?.textContent ?? '', inv:!!r.querySelector('[data-util-invalid]'), why:r.querySelector('[data-util-invalid]')?.dataset.tip ?? '', ratio:!!r.querySelector('[data-ratio]'), bound:!!r.querySelector('[data-holes-bound]')} : null;})()`);
+    const engOk = !r.error && r.pass === null && r.holes_evaluated === false && loc?.verdict === 'not_evaluated' && (r.holes?.reasons ?? []).length > 0;
+    const reasonKo = engReason(loc) ?? '';
+    return { ok: engOk && s.verdict === 'not_evaluated' && !!reasonKo && s.reason.length > 0 && s.reason.slice(0, 12) === reasonKo.slice(0, 12) && !s.ratioRow && s.holeWhy.includes('member.reason.holes_edge_stiffened') && s.bound === 0
+        && !!sum && sum.inv && !sum.ratio && !sum.bound && /판정 없음/.test(sum.text) && /가장자리를 보강한/.test(sum.why),
+      detail: `${r.error ? `오류 ${short(r.error, 200)} · ` : ''}엔진 pass ${r.pass} · holes_evaluated ${r.holes_evaluated} · 국부 ${loc?.verdict} · 하한 비 ${r.holes_strength_bound?.ratio} → 정보 창 ${s.verdict} 「${short(s.reason, 70)}」 · 구멍 까닭 ${s.holeWhy.join(',')} · 트리 판정비 ${s.ratioRow}`
+        + ` · 판정 요약 「${short(sum?.text, 50)}」(판정 없음 ${sum?.inv} · 판정비 ${sum?.ratio} · 하한 ${sum?.bound}) · 까닭 「${short(sum?.why, 60)}」` };
+  });
+  await step('h03 한계 밖의 구멍 · 큰 소요 — 구멍 없는 강도로도 넘음: NG 와 그 하한의 비 · 「구멍 없는 강도로도 넘음」 꼬리표(풍선 = 평가하지 못한 조항과 까닭), 검토 줄의 비도 꼬리표와 함께(평가한 판정비로 그리지 않는다)', 'h03_holes_bound_ng', async () => {
+    const r = await hFlex({ Mu: 30, hole_shape: 'circular', hole_depth: 60, hole_spacing: 600, hole_edge_stiffened: true });
+    const hb = r.holes_strength_bound ?? null;
+    const untrusted = (r.design_checks ?? []).filter(c => c.trusted === false && c.verdict === 'fail').map(c => c.id);
+    await settle(`s.runs[0] && s.runs[0].bound && s.runs[0].bound.kind==='holes'`, '구멍 없는 강도의 하한', 20_000).catch(() => undefined);
+    const run = await ev(`(()=>{const r=${S}.state.runs.find(x=>x.key==='design'); return r ? {util:r.utilization, path:r.utilPath, kind:r.bound?.kind ?? null, check:r.bound?.check ?? null} : null;})()`);
+    await select('work', 'insp:sum');
+    await sleep(300);
+    const sum = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="insp:sum"]'); if(!r) return null; const n=r.querySelector('[data-ratio]'); const b=r.querySelector('[data-holes-bound]');
+      return {text:r.querySelector('.vl')?.textContent ?? '', v:n ? +n.dataset.v : null, src:n?.dataset.src ?? null, ng:n?.dataset.ratio ?? null, bound:b?.dataset.holesBound ?? null, tip:b?.dataset.tip ?? '', inv:!!r.querySelector('[data-util-invalid]')};})()`);
+    await select('result', 'chk');
+    await sleep(300);
+    const tree = await ev(`({chk:document.querySelector('#tree .row[data-k="chk"] .vl')?.textContent ?? '', tagged:[...document.querySelectorAll('#tree .row[data-k^="design#"]')].filter(r=>r.querySelector('[data-untrusted]')).map(r=>r.dataset.k.slice(7)),
+      bare:[...document.querySelectorAll('#tree .row[data-k^="design#"]')].filter(r=>r.querySelector('[data-ratio]') && !r.querySelector('[data-untrusted]') && r.querySelector('.dot.ng')).map(r=>r.dataset.k)})`);
+    const info = await ev(`(()=>{const b=document.querySelector('#info [data-run-bound]'); const n=b?.querySelector('[data-ratio]');
+      return {kind:b?.dataset.boundKind ?? null, v:n ? +n.dataset.v : null, text:b?.textContent ?? '', head:document.querySelector('#info .hd')?.textContent.replace(/\\s+/g,' ') ?? ''};})()`);
+    await shot('h03_holes_bound_tree_1920_dark');
+    const near = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b));
+    const engOk = !r.error && r.pass === false && r.holes_evaluated === false && typeof hb?.ratio === 'number' && hb.ratio > 1 && untrusted.length >= 1
+      && untrusted.every(id => hChk(r, id)?.reason_code === 'member.reason.fails_without_holes');
+    // 판정비 = 그 하한으로 불합격이 된 검토의 비(제품 utils.js holesBoundCandidates — 상한의 검토 가운데 비가 가장 큰 것)
+    const gi = (r.design_checks ?? []).findIndex(c => c.id === run?.check);
+    const want = gi >= 0 ? r.design_checks[gi].ratio : null;
+    const maxFail = Math.max(...untrusted.map(id => hChk(r, id)?.ratio ?? 0));
+    const runOk = !!run && run.kind === 'holes' && near(run.util, want) && near(want, maxFail) && run.path === `design_checks.${gi}.ratio` && untrusted.includes(run.check) && want <= hb.ratio + 1e-9;
+    const sumOk = !!sum && near(sum.v, want) && sum.ng === 'ng' && sum.src === `design:design_checks.${gi}.ratio` && untrusted.includes(sum.bound) && /구멍 없는 강도로도 넘음/.test(sum.text) && /가장자리를 보강한/.test(sum.tip) && !sum.inv;
+    const treeOk = /^NG [1-9]/.test(tree.chk) && untrusted.every(id => tree.tagged.includes(id)) && tree.bare.length === 0;
+    const infoOk = info.kind === 'holes' && near(info.v, want) && /검토 전체 NG/.test(info.head) && /구멍 없는 강도로도 넘는다/.test(info.text);
+    return { ok: engOk && runOk && sumOk && treeOk && infoOk,
+      detail: `${r.error ? `오류 ${short(r.error, 200)} · ` : ''}엔진 pass ${r.pass} · 하한 비 ${hb?.ratio} · 믿지 않는 불합격 ${untrusted.join(',')} ${engOk} | 실행 ${run?.util} @${run?.path} (${run?.kind} · ${run?.check}) ${runOk}`
+        + ` | 판정 요약 「${short(sum?.text, 70)}」 src ${sum?.src} · 풍선 「${short(sum?.tip, 60)}」 ${sumOk} | 트리 「${tree.chk}」 꼬리표 ${tree.tagged.join(',')} · 꼬리표 없는 NG 비 ${tree.bare.join(',') || '없음'} ${treeOk} | 정보 창 「${short(info.text, 80)}」 ${infoOk}` };
+  });
+  await step('h04 횡방향 웹 보강재 · 자료 없음 — member.web_stiffeners 「평가하지 못함」(주지 않은 자료 · 까닭), 전단은 §G2.1 참고값(판정에 쓰지 않음), 전체 「판정 없음」', 'h04_stiffeners_missing', async () => {
+    const r = await hFlex({ Mu: 2, Vu: 10, hole_shape: 'none', transverse_stiffeners: true, stiffener_spacing: 300 });
+    const ws = hChk(r, 'member.web_stiffeners');
+    await select('result', 'design#member.web_stiffeners');
+    await sleep(300);
+    const s = await ev(`({verdict:document.querySelector('#info .hd [data-verdict]')?.dataset.verdict ?? null, block:!!document.querySelector('#info [data-web-block="web_stiffeners"]'),
+      missing:document.querySelector('#info [data-stiffener-missing]')?.dataset.stiffenerMissing ?? null, wv:document.querySelector('#info [data-web-verdict="member.web_stiffeners"]')?.textContent ?? '',
+      ref:!!document.querySelector('#info [data-shear-reference]'), inTree:!!document.querySelector('#tree .row[data-k="design#member.web_stiffeners"] .dot.un'),
+      head:document.querySelector('#info .hd')?.textContent.replace(/\\s+/g,' ') ?? ''})`);
+    const n = await hInfoNums(r);
+    const engOk = !r.error && r.pass === null && ws?.verdict === 'not_evaluated' && ws?.reason_code === 'shear.reason.stiffener_input_missing' && r.shear?.reference_only === true;
+    return { ok: engOk && s.verdict === 'not_evaluated' && s.block && s.missing === (r.web_stiffeners?.missing ?? []).join(',') && /평가하지 못함/.test(s.wv) && s.ref && s.inTree && /검토 전체 판정 없음/.test(s.head) && n.bad.length === 0,
+      detail: `${r.error ? `오류 ${short(r.error, 200)} · ` : ''}엔진 pass ${r.pass} · §G4.1 ${ws?.verdict} (${ws?.reason_code}) · 전단 참고 ${r.shear?.reference_only} → 정보 창 ${s.verdict} · 주지 않은 자료 ${s.missing} · 「${short(s.wv, 50)}」 · 참고값 ${s.ref} · 트리 미검토 ${s.inTree}`
+        + ` · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('h05 횡방향 웹 보강재 · §G4.1 을 채움 — 전단 §G2.2(stiffened_web): 정보 창의 곡선 · kv = 엔진, 보강재 요건(Is · Ast), member.web_stiffeners OK · 점검에 val.design.web_stiffeners · shear_web', 'h05_stiffeners_conforming', async () => {
+    const r = await hFlex({ Mu: 2, Vu: 10, transverse_stiffeners: true, stiffener_spacing: 300, stiffener_kind: 'single_plate', stiffener_Is: 100000, stiffener_area: 100, stiffener_Fy: 345 });
+    const sc = hChk(r, 'member.shear'), ws = hChk(r, 'member.web_stiffeners');
+    await select('result', 'design#member.shear');
+    await sleep(300);
+    const s = await ev(`({curve:document.querySelector('#info [data-shear-curve]')?.dataset.shearCurve ?? null, kv:document.querySelector('#info [data-src="design:shear.kv"]')?.dataset.v ?? null,
+      head:document.querySelector('#info .hd')?.textContent.replace(/\\s+/g,' ') ?? '', st:document.querySelector('#info [data-stiffener-conforming]')?.dataset.stiffenerConforming ?? null,
+      tip:document.querySelector('#tree .row[data-k="design#member.shear"]')?.dataset.tip ?? ''})`);
+    const n = await hInfoNums(r);
+    const engOk = !r.error && sc?.clause === 'G2.2' && sc?.clause_variant === 'stiffened_web' && r.shear?.curve === 'G2.2' && ws?.verdict === 'pass' && r.web_stiffeners?.conforming === true;
+    const v = await hVal();
+    const valOk = ['val.design.web_stiffeners', 'val.design.shear_web'].every(id => v.state.includes(id) && v.table.includes(id));
+    return { ok: engOk && s.curve === 'G2.2' && Math.abs(Number(s.kv) - r.shear.kv) < 1e-9 * Math.max(1, r.shear.kv) && /§G2\.2/.test(s.head) && /§G2\.2/.test(s.tip) && s.st === '1' && n.bad.length === 0 && (n.bySrc.design ?? 0) >= 8 && valOk,
+      detail: `${r.error ? `오류 ${short(r.error, 200)} · ` : ''}엔진 전단 §${sc?.clause} (${sc?.clause_variant}) · 곡선 ${r.shear?.curve} · kv ${r.shear?.kv} · §G4.1 ${ws?.verdict} → 정보 창 곡선 ${s.curve} · kv ${s.kv} · 보강재 맞음 ${s.st} · 트리 풍선 「${s.tip}」`
+        + ` · 수 ${n.compared}개 = MCP(design ${n.bySrc.design ?? 0})${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''} · 점검 ${valOk} (${v.state.filter(x => /^val\.design\.(holes|shear_web|web_stiffeners|web_crippling_holes|bending_torsion)$/.test(x ?? '')).join(',')})` };
+  });
+  await step('h06 비틀림 · 응력을 직접(§H4) — member.bending_torsion 이 트리에, 정보 창의 「휨 + 비틀림 §H4」(R · Mn = R·Mnℓo · 그 점의 응력)의 수 = MCP · 점검에 val.design.bending_torsion', 'h06_torsion_direct', async () => {
+    await mcp.tool('set_case_inputs', { inputs: { stiffenerMode: 'none' }, reason: '시험 — 보강재 없음' });
+    const r = await hFlex({ Mu: 2, torsion_f_bending: -40, torsion_f_torsion: -10 });
+    const hc = hChk(r, 'member.bending_torsion');
+    await select('result', 'design#member.bending_torsion');
+    await sleep(300);
+    const s = await ev(`({block:!!document.querySelector('#info [data-web-block="torsion"]'), R:document.querySelector('#info [data-src="design:torsion.R"]')?.dataset.v ?? null,
+      stress:!!document.querySelector('#info [data-torsion-stress]'), head:document.querySelector('#info .hd')?.textContent.replace(/\\s+/g,' ') ?? '', inTree:!!document.querySelector('#tree .row[data-k="design#member.bending_torsion"]')})`);
+    const n = await hInfoNums(r);
+    const engOk = !r.error && hc?.clause === 'H4' && r.torsion?.evaluated === true && typeof r.torsion?.R === 'number';
+    const v = await hVal();
+    const valOk = v.state.includes('val.design.bending_torsion') && v.table.includes('val.design.bending_torsion');
+    return { ok: engOk && s.block && Math.abs(Number(s.R) - r.torsion.R) < 1e-9 && s.stress && /§H4/.test(s.head) && s.inTree && n.bad.length === 0 && (n.bySrc.design ?? 0) >= 6 && valOk,
+      detail: `${r.error ? `오류 ${short(r.error, 200)} · ` : ''}엔진 §${hc?.clause} ${hc?.verdict} · R ${r.torsion?.R}(15 % ${r.torsion?.increased_15pct}) · Mn ${r.torsion?.Mn} → 정보 창 R ${s.R} · 응력 ${s.stress} · 트리 ${s.inTree}`
+        + ` · 수 ${n.compared}개 = MCP(design ${n.bySrc.design ?? 0})${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''} · 점검 val.design.bending_torsion ${valOk}` };
+  });
+  await step('h07 모델 › 설계 조건의 구역 셋 — 「웹 구멍(천공)」 원형 · 빈 중심 간격 = 「구멍 하나」 · 빈 수 = 「빈칸」, 「횡방향 웹 보강재」 · 「비틀림(§H4)」 은 「없음」 한 줄(아래 칸 없음) · 출처 꼬리표 = 호스트 · 수 = get_case_inputs(SI)', 'h07_case_tree', async () => {
+    await hClear();
+    const sc = await mcp.tool('set_case_inputs', { inputs: { holeShape: 'circular', holeDepth: 60, holeSpacing: null }, units: 'SI', reason: '시험 — 원형 구멍 하나' });
+    await settle(`s.caseIn && s.caseIn.inputs.holeShape==='circular' && s.caseIn.inputs.holeSpacing===null && s.caseIn.inputs.stiffenerMode==='none'`, '검토 상태', 20_000).catch(() => undefined);
+    await select('model', 'dc');
+    await sleep(300);
+    const host = await caseHost();
+    const t = await ev(`(()=>{const row=k=>document.querySelector('#tree .row[data-k="case:'+k+'"]');
+      const kidsOf=k=>{const r=row(k); if(!r) return null; const pad=parseFloat(r.style.paddingLeft); const out=[]; for(let x=r.nextElementSibling; x && parseFloat(x.style.paddingLeft)>pad; x=x.nextElementSibling){ out.push(x.dataset.k.slice(5)); } return out;};
+      const v=k=>row(k)?.querySelector('.vl')?.textContent ?? null; const tag=k=>row(k)?.querySelector('.tag[data-source]')?.dataset.source ?? null; const nm=k=>row(k)?.querySelector('.nm')?.textContent ?? null;
+      return {holes:{name:nm('holeShape'), v:v('holeShape'), tag:tag('holeShape'), kids:kidsOf('holeShape')}, st:{name:nm('stiffenerMode'), v:v('stiffenerMode'), tag:tag('stiffenerMode'), kids:kidsOf('stiffenerMode')},
+        to:{name:nm('torsionMode'), v:v('torsionMode'), tag:tag('torsionMode'), kids:kidsOf('torsionMode')}, single:!!row('holeSpacing')?.querySelector('[data-single-hole]'), offset:v('holeWebOffset'), depthTag:tag('holeDepth')};})()`);
+    const info = await ev(`({holes:[...document.querySelectorAll('#info [data-web-section="holes"] tr[data-k]')].map(r=>r.dataset.k.slice(5)), st:[...document.querySelectorAll('#info [data-web-section="stiffeners"] tr[data-k]')].map(r=>r.dataset.k.slice(5)),
+      to:[...document.querySelectorAll('#info [data-web-section="torsion"] tr[data-k]')].map(r=>r.dataset.k.slice(5)), heads:[...document.querySelectorAll('#info [data-web-section] h4')].map(h=>h.textContent.trim()),
+      stTxt:document.querySelector('#info [data-web-section="stiffeners"] tr[data-k="case:stiffenerMode"] td.r')?.textContent.trim() ?? ''})`);
+    const r = compareNumbers(await numbers('#info'), { caseUS: host });
+    // 편집 화면의 규칙(원형은 Lh · 모서리 r 없음, 압축 · 인장 부재는 §G3 · §G6 칸 없음). 빈 수 칸은 「빈칸」(AI 가 비웠으면 「AI: 주지 않음」 — 앞 규칙 그대로)
+    const g6 = !['compression', 'tension'].includes(String(host.inputs.memberType));
+    const wantHoles = ['holeDepth', 'holeSpacing', 'holeWebOffset', ...(g6 ? ['holeEndDistance'] : []), 'holeEdgeStiffened', ...(g6 ? ['holeBearingDistance', 'holeWithinBearing'] : [])];
+    const wantOffset = host.inputs.holeWebOffset === null && host.sources.holeWebOffset === 'ai' ? 'AI: 주지 않음' : '빈칸';
+    const treeOk = t.holes.name === '웹 구멍(천공)' && t.holes.v === '원형' && JSON.stringify(t.holes.kids) === JSON.stringify(wantHoles) && t.single && t.offset === wantOffset
+      && t.st.name === '횡방향 웹 보강재' && t.st.v === '없음' && t.st.kids.length === 0 && t.to.name === '비틀림(§H4)' && t.to.v === '없음' && t.to.kids.length === 0
+      && t.holes.tag === host.sources.holeShape && t.st.tag === host.sources.stiffenerMode && t.depthTag === host.sources.holeDepth;
+    const infoOk = JSON.stringify(info.holes) === JSON.stringify(['holeShape', ...wantHoles]) && JSON.stringify(info.st) === '["stiffenerMode"]' && JSON.stringify(info.to) === '["torsionMode"]'
+      && JSON.stringify(info.heads) === JSON.stringify(['웹 구멍(천공)', '횡방향 웹 보강재', '비틀림(§H4)']) && /^없음/.test(info.stTxt);
+    // 「없음」 으로 되돌리면 한 줄
+    await mcp.tool('set_case_inputs', { inputs: { holeShape: 'none' }, reason: '시험 — 구멍 없음' });
+    await settle(`s.caseIn && s.caseIn.inputs.holeShape==='none'`, '구멍 없음', 20_000).catch(() => undefined);
+    await sleep(300);
+    const off = await ev(`(()=>{const r=document.querySelector('#tree .row[data-k="case:holeShape"]'); const n=r?.nextElementSibling; return {v:r?.querySelector('.vl')?.textContent ?? null, next:n && parseFloat(n.style.paddingLeft)>parseFloat(r.style.paddingLeft) ? n.dataset.k : null};})()`);
+    return { ok: !sc.error && treeOk && infoOk && r.bad.length === 0 && (r.bySrc.case ?? 0) >= 1 && off.v === '없음' && off.next === null,
+      detail: `${sc.error ? `set_case_inputs ${short(sc.error, 200)} · ` : ''}트리 「${t.holes.name}」 ${t.holes.v} [${t.holes.tag}] 아래 ${t.holes.kids?.join(',')} · 구멍 하나 ${t.single} · 치우침 「${t.offset}」 · 「${t.st.name}」 ${t.st.v} 아래 ${t.st.kids?.length} · 「${t.to.name}」 ${t.to.v} 아래 ${t.to.kids?.length} ${treeOk}`
+        + ` | 정보 창 ${info.heads.join(' · ')} · 줄 ${info.holes.length}/${info.st.length}/${info.to.length} 「${info.stTxt}」 ${infoOk} | 수 ${r.bySrc.case ?? 0}개 = get_case_inputs${r.bad.length ? ` · 어긋남 ${r.bad.slice(0, 3).join(' / ')}` : ''} | 없음으로 → 「${off.v}」 · 아래 줄 ${off.next}` };
+  });
+  await step('h08 편집 상태(F2) — 끼운 설계 화면의 「웹 구멍(천공)」 · 「횡방향 웹 보강재」 · 「비틀림(§H4)」(DOM id), 구역을 열고 구멍 모양을 고르면 칸이 보이고 dh 가 호스트에 간다(출처 지정) → 검토 화면의 트리가 따라온다', 'h08_edit_sections', async () => {
+    const editOn = async (on) => { if ((await ev(`${S}.ui.editing`)) !== on) { await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'F2',bubbles:true}))`); await sleep(500); } };
+    await editOn(true);
+    await wv(`D.querySelector('.tab-btn[data-tab="design"]').click(); return 1;`);
+    await sleep(400);
+    // 구역은 직접 입력의 휨 · 조합에서 보인다(압축이면 보강재 · 비틀림이 숨는다) — 부재 유형을 휨으로
+    await wv(`const m=D.getElementById('select-member-type'); if(m && m.value!=='flexure'){ m.value='flexure'; m.dispatchEvent(new Event('change',{bubbles:true})); } return 1;`);
+    await sleep(400);
+    const ids = ['design-holes-section', 'sec-holes', 'select-hole-shape', 'design-hole-dh', 'design-hole-Lh', 'design-hole-spacing', 'chk-hole-edge-stiffened', 'design-stiffeners-section', 'sec-stiffeners', 'select-stiffener-mode', 'design-stiffener-spacing', 'select-stiffener-kind', 'design-stiffener-Is', 'design-stiffener-area', 'design-stiffener-Fy',
+      'design-torsion-section', 'sec-torsion', 'select-torsion-mode', 'design-torsion-fb', 'design-torsion-ft', 'design-torsion-e', 'select-torsion-load', 'select-torsion-support'];
+    const present = await wv(`return ${JSON.stringify(ids)}.filter(id=>!D.getElementById(id));`);
+    const shown = await wv(`return ['design-holes-section','design-stiffeners-section','design-torsion-section'].map(id=>getComputedStyle(D.getElementById(id)).display);`);
+    const titles = await wv(`return ['sec-holes','sec-stiffeners','sec-torsion'].map(id=>D.getElementById(id).textContent.replace(/[▸▾]/g,'').replace(/\\s+/g,' ').trim());`);
+    await wv(`D.getElementById('sec-holes').click(); return 1;`);
+    await sleep(250);
+    const bodyOpen = await wv(`return getComputedStyle(D.getElementById('sec-holes-body')).display;`);
+    const before = await wv(`return getComputedStyle(D.getElementById('design-hole-fields')).display;`);
+    await wv(`const e=D.getElementById('select-hole-shape'); e.value='circular'; e.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+    await sleep(250);
+    const after = await wv(`return {fields:getComputedStyle(D.getElementById('design-hole-fields')).display, state:D.getElementById('sec-holes-state').textContent, lh:D.getElementById('design-hole-Lh').disabled};`);
+    await wv(`const e=D.getElementById('design-hole-dh'); e.value='50'; e.dispatchEvent(new Event('input',{bubbles:true})); e.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+    let h = null;
+    for (let i = 0; i < 60 && !(h?.sources?.holeDepth === 'user' && h?.inputs?.holeShape === 'circular'); i++) { h = await caseHost(); await sleep(150); }
+    const dhSI = typeof h?.inputs?.holeDepth === 'number' ? caseValueToSI(h.inputs.holeDepth, CASE_KIND.get('holeDepth')) : null;
+    await shot('h08_edit_sections_1920_dark');
+    await editOn(false);
+    await settle(`s.caseIn && s.caseIn.sources.holeDepth==='user'`, '화면의 검토 상태', 15_000).catch(() => undefined);
+    await select('model', 'dc');
+    await sleep(300);
+    const tr = await ev(`({shape:document.querySelector('#tree .row[data-k="case:holeShape"] .vl')?.textContent ?? null, shapeTag:document.querySelector('#tree .row[data-k="case:holeShape"] .tag[data-source]')?.dataset.source ?? null,
+      dh:document.querySelector('#tree .row[data-k="case:holeDepth"] [data-v]')?.dataset.v ?? null, dhTag:document.querySelector('#tree .row[data-k="case:holeDepth"] .tag[data-source]')?.dataset.source ?? null})`);
+    // 되돌린다 — 구멍 없음(사람의 칸으로)
+    await editOn(true);
+    await wv(`const e=D.getElementById('select-hole-shape'); e.value='none'; e.dispatchEvent(new Event('change',{bubbles:true})); return 1;`);
+    await sleep(300);
+    await editOn(false);
+    const ok = present.length === 0 && shown.every(d => d !== 'none') && JSON.stringify(titles.map(x => x.replace(/\s*없음$/, ''))) === JSON.stringify(['웹 구멍(천공)', '횡방향 웹 보강재', '비틀림(§H4)'])
+      && bodyOpen !== 'none' && before === 'none' && after.fields !== 'none' && after.state === '원형' && after.lh === true
+      && h?.inputs?.holeShape === 'circular' && h?.sources?.holeShape === 'user' && h?.sources?.holeDepth === 'user' && Math.abs((dhSI ?? NaN) - 50) < 1e-6
+      && tr.shape === '원형' && tr.shapeTag === 'user' && Math.abs(Number(tr.dh) - 50) < 1e-6 && tr.dhTag === 'user';
+    return { ok, detail: `없는 DOM id ${present.join(',') || '없음'} · 구역 표시 ${shown.join('/')} · 제목 ${titles.join(' | ')} · 열면 ${bodyOpen} · 칸 ${before} → 원형 고르면 ${after.fields} · 「${after.state}」 · Lh 막힘 ${after.lh}`
+      + ` · 호스트 holeShape ${h?.inputs?.holeShape}(${h?.sources?.holeShape}) · dh ${dhSI} mm(${h?.sources?.holeDepth}) → 검토 화면 트리 「${tr.shape}」[${tr.shapeTag}] · dh ${tr.dh}[${tr.dhTag}]` };
+  });
+
+  // ── 2026-11-28 결정 S1 – S8 — 경간마다 다른 퍼린 단면(설계 매뉴얼 II-1A 의 두 단면): 입력 · 구간의 단면 · 랩의 두 부재 · 단면마다의 곡선 · 춤이 다른 랩 · 변경의 글 ─────────
+  // s 단계는 앞 단계에 기대지 않는다 — 깨끗한 사본(프로젝트 밖)을 열고 9CS2.5x070 템플릿부터. 단계끼리는 차례대로(s01 → s07)
+  section('7i. 결정 S1 – S8 — 경간마다 다른 퍼린 단면');
+  const S_STEPS = ['s01', 's02', 's03', 's04', 's05', 's06', 's07'];
+  const C070 = { H: 9, B: 2.5, D: 0.8, t: 0.070, r: 0.1875, qlip: 90 };
+  const C059 = { H: 9, B: 2.5, D: 0.773, t: 0.059, r: 0.1875, qlip: 90 };
+  const II1A = { member_app: 'roof-purlin', span_type: 'cont-4', span_ft: 25, spans_ft: [25, 25, 25, 25], spacing_ft: 5, loads: { D: 15, Lr: 90, W: -144 }, design_method: 'LRFD',
+    laps_per_support: [null, { left_ft: 2.0, right_ft: 2.75 }, { left_ft: 1.25, right_ft: 1.25 }, { left_ft: 2.75, right_ft: 2.0 }, null],
+    deck: { type: 'through-fastened', t_panel: 0.019, fastener_spacing: 12 }, i621_conditions_confirmed: true, Fy: 55, Fu: 70, wc_N: 3.5, wc_R: 0.1875,
+    lap_restrained: true, use_cold_work: false };
+  /** 퍼린의 MCP SI 결과(run_case_check — 호스트가 검토 상태로 다시 돌린 것, MCP 가 SI 로 바꾼 것) — 화면이 그 결과(같은 구간 수 · 단면 블록)를 읽을 때까지 */
+  const sRun = async () => {
+    const r = await mcp.tool('run_case_check', { what: 'member', units: 'SI', detail: 'full' });
+    const pr = r?.result ?? r;
+    const nSec = Array.isArray(pr?.sections) ? pr.sections.length : 0;
+    await settle(`s.regions.length===${(pr?.regions ?? []).length} && ${nSec ? `!!s.psec && s.psec.us.length===${nSec}` : '!s.psec'}`, '퍼린 결과', 120_000).catch(() => undefined);
+    await sleep(400);
+    return pr;
+  };
+  if (S_STEPS.some(ran)) {
+    const scsd = path.join(tmp, 's-span-sections.csd');
+    fs.copyFileSync(path.join(repoRoot, 'Example', 'test.csd'), scsd);
+    const op = serve.ipc('open', { file: scsd }, 90_000);
+    await answerIfUnsaved();
+    await op;
+    await settle(`s.file.path===${JSON.stringify(scsd)}`, '깨끗한 사본');
+    const st = await mcp.tool('set_section_template', { type: 'lippedc', ...C070 });
+    const p0 = await mcp.tool('design_purlin', { ...II1A });
+    check('AI: 깨끗한 사본 · 9CS2.5x070 템플릿 · design_purlin(II-1A, 단면 하나)', !!st.success && !p0.error && (p0.regions ?? []).length > 10, short(st.error ?? p0.error ?? `구간 ${p0.regions?.length}`));
+  }
+  let sOne = null, sTwo = null;
+  /** 가운데 표 서랍의 「구간」 표(접혀 있으면 펼친다) — 머리 칸 · 단면 꼬리표 칸 */
+  const sRegionsTable = async () => {
+    await ev(`(()=>{const d=document.querySelector('#center .drawer.closed [data-drawer="toggle"]'); if(d){d.click();} return 1;})()`);
+    await sleep(200);
+    await ev(`document.querySelector('#center [data-dtab="regions"]')?.click()`);
+    await sleep(250);
+    return ev(`({head:[...document.querySelectorAll('#center table[data-table="regions"] thead th')].map(h=>h.textContent.trim()), tags:[...document.querySelectorAll('#center table[data-table="regions"] [data-region-tag]')].map(e=>e.textContent)})`);
+  };
+  await step('s01 처음 값(모든 경간 S1 · 목록 없음) — 화면이 앞과 같다: 부재 가지에 「단면」 · 「단면 목록」 없음, 경간 표 5 열 · 단면 목록 표 없음, 구간 이름에 단면 꼬리표 없음, 구간 표 7 열, 「퍼린 단면」 가지 없음', 's01_default_unchanged', async () => {
+    sOne = await sRun();
+    await select('model', 'mem');
+    const m = await ev(`({rows:[...document.querySelectorAll('#tree .row[data-k^="case:"]')].map(r=>r.dataset.k), cols:document.querySelectorAll('#info table[data-table="case-spans"] thead th').length,
+      list:!!document.querySelector('#info [data-sec-list]'), cell:document.querySelectorAll('#info [data-span-sec]').length})`);
+    const k0 = await firstKey('purlin:0');
+    await select('result', k0);
+    const r = await ev(`({psec:!!document.querySelector('#tree .row[data-k="psec"]'), tagged:${S}.state.runs.filter(x=>x.area==='purlin' && / · S\\d/.test(x.label)).length, block:!!document.querySelector('#info [data-region-sec]'), psecState:${S}.state.psec})`);
+    const rt = await sRegionsTable();
+    const cols = rt.head.length;
+    const ok = !sOne.error && !sOne.sections && !m.rows.some(k => /^case:(spanSections|sections)/.test(k)) && m.cols === 5 && !m.list && m.cell === 0
+      && !r.psec && r.tagged === 0 && !r.block && r.psecState === null && cols === 7 && rt.tags.length === 0;
+    return { ok, detail: `엔진 ${sOne.error ? short(sOne.error) : `구간 ${sOne.regions?.length} · sections ${!!sOne.sections}`} · 부재 가지 ${m.rows.filter(k => /^case:(spans|supports|laps|spacing|deckType|memberType)/.test(k)).join(',')} · 경간 표 ${m.cols} 열 · 단면 목록 ${m.list} · 단면 칸 ${m.cell}`
+      + ` · 「퍼린 단면」 ${r.psec} · 꼬리표 붙은 구간 ${r.tagged} · 구간 블록 ${r.block} · 서랍 열 ${cols}` };
+  });
+  await step('s02 S2(9CS2.5x059)를 경간 2 · 3 에 — 모델 › 부재: 「단면」 S1 · S2 · S2 · S1 · 「단면 목록」(S1 = 모델 읽기만 · S2 의 치수 mm · Ix = 호스트), 경간 표의 「단면」 칸 · 출처 꼬리표, 수 = get_case_inputs · MCP', 's02_inputs_tree', async () => {
+    const pr = await mcp.tool('design_purlin', { ...II1A, sections: [{ id: 'S2', name: '9CS2.5x059', ...C059 }], span_sections: ['S1', 'S2', 'S2', 'S1'] });
+    sTwo = await sRun();
+    await settle(`s.caseIn && (s.caseIn.sections||[]).length===1 && s.msgs.sectionListInfo && s.msgs.sectionListInfo.message.data.info.S2`, '단면 목록 · Ix', 30_000).catch(() => undefined);
+    await select('model', 'mem');
+    await sleep(300);
+    const host = await caseHost();
+    const t = await ev(`(()=>{const row=k=>document.querySelector('#tree .row[data-k="'+k+'"]');
+      return {ss:row('case:spanSections')?.querySelector('[data-span-sections]')?.dataset.spanSections ?? null, ssName:row('case:spanSections')?.querySelector('.nm')?.textContent ?? null, ssTag:row('case:spanSections')?.querySelector('.tag[data-source]')?.dataset.source ?? null,
+        list:row('case:sections')?.querySelector('.nm')?.textContent ?? null, s2:!!row('case:sections.S2'), s2t:row('case:sections.S2')?.querySelector('.nm')?.textContent ?? ''};})()`);
+    const info = await ev(`({head:[...document.querySelectorAll('#info table[data-table="case-spans"] thead th')].map(h=>h.textContent.trim()), cells:[...document.querySelectorAll('#info [data-span-sec]')].map(e=>e.textContent),
+      rows:[...document.querySelectorAll('#info [data-sec-list] tr[data-sec-row]')].map(r=>r.dataset.secRow), s1:document.querySelector('#info [data-sec-row="S1"]')?.textContent ?? '', err:document.querySelectorAll('#info [data-sec-error]').length,
+      ix2:document.querySelector('#info [data-sec-row="S2"] [data-src="secinfo:S2.Ixx"]')?.dataset.v ?? null})`);
+    const secSI = Object.fromEntries((sTwo?.sections ?? []).map(x => [x.id, x]));
+    const n = compareNumbers((await numbers('#info')).filter(x => /^(case:sections|secinfo:|props:Ixx|full:section_params)/.test(x.src)), { ...(await mcpNow()), caseUS: host, secinfo: { S2: { Ixx: secSI.S2?.props?.Ixx } } });
+    const hostOk = JSON.stringify(host.spans?.spanSections) === '["S1","S2","S2","S1"]' && host.sections?.[0]?.id === 'S2' && Math.abs(host.sections[0].params.t - 0.059) < 1e-12;
+    const treeOk = t.ss === 'S1,S2,S2,S1' && t.ssName === '단면' && t.ssTag === host.sources.spanSections && t.list === '단면 목록' && t.s2 && /^S2 · 9CS2\.5x059/.test(t.s2t);
+    const infoOk = info.head.includes('단면') && JSON.stringify(info.cells.slice(0, 4)) === '["S1","S2","S2","S1"]' && JSON.stringify(info.rows) === '["S1","S2"]' && /모델/.test(info.s1) && /읽기만/.test(info.s1) && info.err === 0 && info.ix2 !== null;
+    return { ok: !pr.error && hostOk && treeOk && infoOk && n.bad.length === 0 && (n.bySrc.case ?? 0) >= 5 && (n.bySrc.secinfo ?? 0) === 1 && (n.bySrc.props ?? 0) === 1,
+      detail: `${pr.error ? `design_purlin ${short(pr.error)} · ` : ''}호스트 ${JSON.stringify(host.spans?.spanSections)} · S2 t ${host.sections?.[0]?.params?.t} ${hostOk} | 트리 「${t.ssName}」 ${t.ss} [${t.ssTag}] · 「${t.list}」 · 「${t.s2t}」 ${treeOk}`
+        + ` | 정보 창 열 ${info.head.join('/')} · 칸 ${info.cells.join(',')} · 목록 ${info.rows.join(',')} · Ix(S2) ${info.ix2} ${infoOk} | 수 ${n.compared}개 = get_case_inputs · MCP(${JSON.stringify(n.bySrc)})${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s03 퍼린 결과 — 구간마다 단면 꼬리표(트리 · 구간 표), 랩(S1|S2)의 판정 = 두 부재 강도의 합(휨 Mu / Σ φMn · 전단 Vu / Σ φVn · 구간의 판정비 · 판정), 두 부재 줄(단면 · 경간 · 역할 · φMn · φVn · M 몫 · V 몫 · 판정비 · 판정)과 지배 부재, 근거의 글, 강성의 몫은 「참고 — 판정에 쓰지 않음」(판정비가 아니다), 수 = MCP(SI)', 's03_regions_lap_members', async () => {
+    const regs = sTwo?.regions ?? [];
+    const li = regs.findIndex(g => Array.isArray(g.lap_members) && g.lap_members.length === 2 && g.lap_members[0].section_id !== g.lap_members[1].section_id && g.result?.pass !== null);
+    const pi = regs.findIndex(g => g.kind === 'positive' && g.section_id === 'S2');
+    const lapR = regs[li];
+    const k = await firstKey(`purlin:${li}`);
+    await select('result', k);
+    await sleep(300);
+    // 랩의 두 부재 — 부재가 열(정보 창이 좁다): 머리 칸 th[data-lap-member] · 칸마다 data-m(부재) · data-f(무엇)
+    const s = await ev(`(()=>{const b=document.querySelector('#info [data-region-sec]'); const ms=[...(b?.querySelectorAll('th[data-lap-member]')??[])];
+      const c=(j,f)=>b.querySelector('[data-m="'+j+'"][data-f="'+f+'"]');
+      return {block:!!b, members:ms.map(h=>{const j=+h.dataset.lapMember; return {i:j, gov:h.dataset.gov==='1', sec:c(j,'sec')?.textContent.trim() ?? '', span:c(j,'span')?.textContent.trim() ?? '', role:c(j,'role')?.dataset.role ?? '', roleTip:c(j,'role')?.dataset.tip ?? '', v:c(j,'verdict')?.dataset.memberVerdict};}),
+        shares:ms.map(h=>{const j=+h.dataset.lapMember; return [c(j,'shareM')?.querySelector('[data-share-m] [data-src]')?.dataset.src ?? '', c(j,'shareV')?.querySelector('[data-share-v] [data-src]')?.dataset.src ?? ''];}),
+        strengths:ms.map(h=>[...b.querySelectorAll('[data-m="'+h.dataset.lapMember+'"] [data-src]')].map(e=>e.dataset.src.split('.').pop())),
+        fl:+(b?.querySelector('[data-lap-sum] [data-sum-flexure] [data-ratio]')?.dataset.v ?? NaN), sh:+(b?.querySelector('[data-lap-sum] [data-sum-shear] [data-ratio]')?.dataset.v ?? NaN),
+        gv:+(b?.querySelector('[data-lap-sum] [data-sum-gov] [data-ratio]')?.dataset.v ?? NaN), gvV:b?.querySelector('[data-sum-verdict]')?.dataset.sumVerdict ?? null,
+        parts:[...(b?.querySelectorAll('[data-lap-sum] [data-src]')??[])].map(e=>e.dataset.src.replace(/^purlin:regions\\.\\d+\\./,'')),
+        basis:b?.querySelector('[data-strength-basis]')?.textContent ?? '', basisKey:b?.querySelector('[data-strength-basis]')?.dataset.strengthBasis ?? '',
+        ref:b?.querySelector('[data-stiff-ref]')?.textContent ?? '', refV:[...(b?.querySelectorAll('[data-stiff-ref] [data-ratio-ref]')??[])].map(e=>+e.dataset.ratioRef),
+        refIsRatio:!!b?.querySelector('[data-stiff-ref] [data-ratio]') || !!b?.querySelector('[data-stiff-ref] .verdict'), old:!!b?.querySelector('[data-share-basis], [data-sum-ref]'),
+        label:${S}.state.runs.find(x=>x.key==='purlin:${li}')?.label ?? '', loc:document.querySelector('#info')?.innerText.includes('단면 ')};})()`);
+    const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
+    const tags = await ev(`${S}.state.runs.filter(x=>x.area==='purlin' && x.key!=='purlin').map(x=>x.label.split(' · ').pop())`);
+    const wantTags = regs.filter(g => g.result).map(g => (Array.isArray(g.lap_members) && g.lap_members.length ? g.lap_members.map(m => m.section_id).join('|') : Array.isArray(g.sections_checked) ? g.sections_checked.map(m => m.section_id).join('·') : g.section_id));
+    const drawer = (await sRegionsTable()).tags;
+    const pos = await firstKey(`purlin:${pi}`);
+    const posRow = await ev(`[...document.querySelectorAll('#tree .row[data-k^="purlin:${pi}#"]')].map(r=>r.querySelector('.nm')?.textContent ?? '')[0] ?? ''`);
+    const m = lapR?.lap_members ?? [];
+    const gov = (lapR?.governing_member ?? 0) - 1;
+    const memOk = s.members.length === 2 && s.members.every((x, j) => x.sec === m[j].section_id && x.span === String(m[j].span + 1) && x.gov === (j === gov) && x.v === (m[j].pass === true ? 'ok' : m[j].pass === false ? 'ng' : 'none'))
+      && s.members.every((x, j) => x.role === String(m[j].role ?? '')) && s.members.some(x => /이어지는 부재/.test(x.roleTip)) && s.members.some(x => /랩 끝에서 끝나는 부재/.test(x.roleTip));
+    // 결정 S3′: 판정 = 두 부재 강도의 합 — 휨 · 전단의 비 · 구간의 판정비 · 판정이 호스트의 것, 두 몫(M · V)과 두 강도(φMn · φVn)가 부재마다(수는 아래 MCP 와 견줌)
+    const sum = lapR?.sum_of_strengths ?? {};
+    const want = ['Mu', 'design_strengths.0', 'design_strengths.1', 'design_strength_sum', 'flexure_ratio', 'Vu', 'shear_strengths.0', 'shear_strengths.1', 'shear_strength_sum', 'shear_ratio', 'result.utilization'];
+    const sumOk = lapR?.strength_basis === 'sum_of_strengths' && relClose(s.fl, sum.flexure_ratio) && relClose(s.sh, sum.shear_ratio) && relClose(s.gv, lapR.result.utilization)
+      && s.gvV === (lapR.result.pass === true ? 'ok' : lapR.result.pass === false ? 'ng' : 'none') && want.every(k => s.parts.includes(k.startsWith('result.') ? k : `sum_of_strengths.${k}`))
+      // 검증 F2 의 4: 이름표는 휨 · 전단의 비와 구간의 지배 검토를 모두(「판정」 이라 부르는 한 성분이 없다)
+      && s.basisKey === 'sum_of_strengths' && /두 부재 (설계 )?강도의 합/.test(s.basis) && /II-1A/.test(s.basis) && /휨: .*전단: .*구간: /.test(s.basis) && !/— 판정\./.test(s.basis) && !s.old
+      && s.shares.every(([a, b], j) => a.endsWith(`lap_members.${j}.share`) && b.endsWith(`lap_members.${j}.share_V`)) && s.strengths.every(x => x.includes('design_strength') && x.includes('shear_strength'));
+    const rm = lapR?.reference_stiffness_share?.members ?? [];
+    const refOk = /참고 — 판정에 쓰지 않음/.test(s.ref) && /강성/.test(s.ref) && s.refV.length === rm.length && rm.length === 2 && rm.every((x, j) => relClose(s.refV[j], x.utilization)) && !s.refIsRatio;
+    const tagOk = JSON.stringify(tags) === JSON.stringify(wantTags) && JSON.stringify(drawer) === JSON.stringify(regs.map(g => (Array.isArray(g.lap_members) && g.lap_members.length ? g.lap_members.map(x => x.section_id).join('|') : Array.isArray(g.sections_checked) ? g.sections_checked.map(x => x.section_id).join('·') : g.section_id || '—')));
+    return { ok: li >= 0 && pi >= 0 && !!pos && s.block && memOk && sumOk && refOk && tagOk && / · S2 · /.test(posRow) && n.bad.length === 0 && (n.bySrc.purlin ?? 0) >= 20,
+      detail: `랩 구간 ${lapR?.id}(${s.label}) · 부재 ${s.members.map(x => `${x.i}:${x.sec}/경간 ${x.span}/${x.role}/${x.v}${x.gov ? '★' : ''}`).join(' | ')} ${memOk}`
+        + ` · 강도의 합: 휨 ${s.fl} (호스트 ${sum.flexure_ratio}) · 전단 ${s.sh} (${sum.shear_ratio}) · 구간 ${s.gv} ${s.gvV} (${lapR?.result?.utilization} ${lapR?.result?.pass}) · 근거 「${short(s.basis, 60)}」 ${sumOk}`
+        + ` · 참고 「${short(s.ref, 60)}」 = ${s.refV.join(' | ')} (호스트 ${rm.map(x => x.utilization).join(' | ')}) 판정비 아님 ${!s.refIsRatio} ${refOk} · 꼬리표 ${tags.join(',')} ${tagOk} · 정모멘트 S2 줄 「${short(posRow, 60)}」 · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s04 퍼린 단면(결과 탭) — 단면마다 성질 · 좌굴값(정 · 부 하나씩) · 쓴 데크 강성 한 값(가장 작은 kφ 와 가장 작은 kx 를 따로 — 결정 S7′ · F2)과 이 단면의 값(다를 때 참고)(정보 창), 가운데 = 그 단면의 서명곡선: 단면 고르기 S1 → S2 · 곡선 고르기 +M → −M(둘만)이 그림을 바꾼다(점 수 = 엔진), 수 = MCP(SI)', 's04_section_picker', async () => {
+    const secs = sTwo?.sections ?? [];
+    await select('result', 'psec:S1');
+    await sleep(300);
+    const cv = () => ev(`(()=>{const d=document.querySelector('#center [data-draw="psec-curve"]'); return d ? {id:d.dataset.psec, c:d.dataset.psecCurveOn, pts:+d.dataset.points, cp:d.querySelectorAll('circle.cp').length, mk:[...d.querySelectorAll('g.mn')].map(g=>g.dataset.k), pick:d.querySelectorAll('[data-pick]').length,
+      on:[...d.querySelectorAll('[data-psec-pick].on')].map(e=>e.dataset.psecPick), curves:[...d.querySelectorAll('[data-psec-curve]')].map(e=>e.dataset.psecCurve)} : null;})()`);
+    const deckOf = () => ev(`(()=>{const b=document.querySelector('#info [data-psec-deck]'); return {used:b?.querySelector('[data-deck-used]')?.dataset.deckUsed ?? null, rule:b?.querySelector('[data-deck-rule]')?.textContent ?? '', own:!!b?.querySelector('[data-deck-own]'),
+      srcs:[...(b?.querySelectorAll('[data-src]')??[])].map(e=>e.dataset.src.replace(/^purlin:sections\\.\\d+\\./,'')), dsm:[...document.querySelectorAll('#info [data-psec-dsm]')].map(e=>e.dataset.psecDsm)};})()`);
+    const a = await cv();
+    const d1 = await deckOf();
+    const n1 = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
+    const tree = await ev(`[...document.querySelectorAll('#tree .row[data-k^="psec:"]')].map(r=>r.dataset.k)`);
+    await ev(`document.querySelector('#center [data-psec-pick="S2"]').click()`);
+    await sleep(400);
+    const b = await cv();
+    const sel = await ev(`({tree:document.querySelector('#tree .row.on')?.dataset.k ?? null, title:document.querySelector('#info [data-psec-title]')?.dataset.psecTitle ?? null})`);
+    const d2 = await deckOf();
+    await ev(`document.querySelector('#center [data-psec-curve="neg"]').click()`);
+    await sleep(400);
+    const c = await cv();
+    const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
+    const S1 = secs.find(x => x.id === 'S1'), S2 = secs.find(x => x.id === 'S2');
+    // 결정 S7′: 쓴 값은 단면마다 같은 한 값(어느 단면의 것인지), 이 단면의 값은 다를 때만 — 호스트의 deck_used · deck_own 그대로
+    const differs = (x) => !!x?.deck_own && (x.deck_own.kphi !== x.deck_used?.kphi || x.deck_own.kx !== x.deck_used?.kx);
+    // 검증 F2 의 2: kφ · kx 는 따로 가장 작은 값(값마다 그 단면 — II-1A 는 둘 다 얇은 S2)
+    const deckOk = [[d1, S1], [d2, S2]].every(([d, x]) => d.used === String(x?.deck_used?.kphi_section_id) && x?.deck_used?.kphi_section_id === x?.deck_used?.kx_section_id
+      && /한 번 계산/.test(d.rule) && /kφ · kx 가 가장 작은 단면/.test(d.rule) && d.rule.includes(String(x?.deck_used?.kphi_section_id)) && d.own === differs(x)
+      && ['deck_used.kphi', 'deck_used.kx'].every(k => d.srcs.includes(k)) && (!d.own || ['deck_own.kphi', 'deck_own.kx'].every(k => d.srcs.includes(k))) && JSON.stringify(d.dsm) === '["pos","neg"]')
+      && S1?.deck_used?.kphi_section_id === S2?.deck_used?.kphi_section_id && S1?.deck_used?.kx_section_id === S2?.deck_used?.kx_section_id && S1.deck_used.kphi === S2.deck_used.kphi && differs(S1) !== differs(S2);
+    const ok = JSON.stringify(tree) === JSON.stringify(secs.map(x => `psec:${x.id}`)) && a && a.id === 'S1' && a.c === 'pos' && a.pts === S1.curves.pos.lengths.length && a.cp === a.pts && a.pick === 0 && a.mk.length >= 1 && JSON.stringify(a.on) === '["S1"]'
+      && JSON.stringify(a.curves) === '["pos","neg"]' && JSON.stringify(Object.keys(S1.curves).sort()) === '["neg","pos"]'
+      && b && b.id === 'S2' && b.pts === S2.curves.pos.lengths.length && sel.tree === 'psec:S2' && sel.title === 'S2' && deckOk
+      && c && c.id === 'S2' && c.c === 'neg' && c.pts === S2.curves.neg.lengths.length && n1.bad.length === 0 && n.bad.length === 0 && (n1.bySrc.purlin ?? 0) >= 12 && (n.bySrc.purlin ?? 0) >= 8;
+    return { ok, detail: `트리 ${tree.join(',')} · S1 +M ${a?.pts}점(엔진 ${S1?.curves?.pos?.lengths?.length}) 극소 ${a?.mk?.join('/')} · 곡선 ${a?.curves?.join(',')} · 고르기 칸 ${a?.pick}`
+      + ` · 데크 S1: 쓴 값 ${d1.used} 의 것 · 이 단면의 값 ${d1.own} (호스트 kφ ${S1?.deck_used?.kphi} / 자신 ${S1?.deck_own?.kphi}) · S2: ${d2.used} · ${d2.own} · 「${short(d1.rule, 50)}」 ${deckOk}`
+      + ` → S2 ${b?.id} ${b?.pts}점 · 트리 ${sel.tree} · 정보 창 ${sel.title} (${d2.dsm.join(',')}) → −M ${c?.c} ${c?.pts}점(엔진 ${S2?.curves?.neg?.lengths?.length}) · 수 ${n1.compared} + ${n.compared}개 = MCP${[...n1.bad, ...n.bad].length ? ` · 어긋남 ${[...n1.bad, ...n.bad].slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s05 알림 · 점검 · 랩 접합 — 새 알림(경간마다 단면 · 랩은 두 부재 강도의 합)이 한국어로(code 는 data-code), 점검의 val.load_analysis.span_sections · deck_once(데크 강성 한 번) · dsm_section.2 · lap_members(강도의 합), 랩 접합(지점을 정하지 않음 → 지배 랩)의 두 부재(Mnℓ · Vn) · 휨 = Mnℓ,1 + Mnℓ,2 · 강도의 합이 정한 검토 · 강성의 몫은 참고 · 「어느 랩」', 's05_notices_lap', async () => {
+    const asm = await ev(`${S}.state.runs.flatMap(r=>[...r.assumptions, ...r.warnings, ...r.neTexts]).concat(${S}.state.runs.flatMap(r=>r.rows.filter(x=>x.noteCode).map(x=>({code:x.noteCode,text:x.name}))))`);
+    const has = (code, re) => asm.some(x => x.code === code && re.test(x.text) && !x.text.includes(code));
+    const gone = ['host.purlin.lap_two_members_stiffness', 'host.purlin.lap_stiffness_share', 'host.purlin.sum_of_strengths_reference'];
+    const notesOk = has('host.purlin.sections_per_span', /경간마다 단면/) && has('host.purlin.lap_two_members_sum', /두 부재 강도의 합/) && !asm.some(x => gone.includes(x.code));
+    const v = await hVal();
+    const vIds = ['val.load_analysis.span_sections', 'val.load_analysis.deck_once', 'val.load_analysis.dsm_section.2', 'val.load_analysis.lap_members'];
+    const vRows = Object.fromEntries(await ev(`[...document.querySelectorAll('#center table.valt tr.vr')].filter(t=>${JSON.stringify(vIds)}.includes(t.dataset.id)).map(t=>[t.dataset.id, t.textContent])`));
+    const vText = vIds.map(id => vRows[id] ?? '');
+    const valOk = vIds.every(id => v.state.includes(id) && v.table.includes(id)) && vText.every(t => /단면|랩/.test(t) && !/val\.load_analysis/.test(t))
+      && /데크 강성/.test(vRows['val.load_analysis.deck_once'] ?? '') && /한 번/.test(vRows['val.load_analysis.deck_once'] ?? '') && /강도의 합/.test(vRows['val.load_analysis.lap_members'] ?? '')
+      && !v.state.some(id => /^val\.load_analysis\.deck_section\./.test(id));
+    const sl = await mcp.tool('set_case_inputs', { inputs: { connLapLeft: 24, connLapRight: 33, connMu: 144, connVu: 2.5, connFastenerDia: 0.19, connNRows: 2, connLapPnvs: 1.2, connEdgeDist: 0.5, connLapSupport: null }, reason: '시험 — 랩 접합(지점 비움)' });
+    const lap = await mcp.tool('run_case_check', { what: 'lap', units: 'SI', detail: 'full' });
+    const L = lap?.result ?? lap;
+    await settle(`!!s.lap && s.lap.us.lap_two_members===true`, '랩 결과', 60_000).catch(() => undefined);
+    await select('result', 'conn:lap');
+    await sleep(300);
+    const li = await ev(`({block:!!document.querySelector('#info [data-lap-two-block]'), rows:[...document.querySelectorAll('#info [data-lap-two-block] th[data-lap-two]')].map(h=>document.querySelector('#info [data-lap-two-block] [data-m="'+h.dataset.lapTwo+'"][data-f="sec"]')?.textContent.trim() ?? ''), auto:document.querySelector('#info [data-lap-auto]')?.dataset.lapAuto ?? null,
+      mem:[...document.querySelectorAll('#info [data-lap-two-block] th[data-lap-two]')].map(h=>[...document.querySelectorAll('#info [data-lap-two-block] [data-m="'+h.dataset.lapTwo+'"] [data-src]')].map(e=>e.dataset.src.split('.').pop())),
+      gov:[...document.querySelectorAll('#info [data-member-gov]')].map(e=>e.dataset.memberGov), bySum:[...document.querySelectorAll('#info [data-member-gov][data-by-sum]')].map(e=>e.dataset.memberGov),
+      sum:document.querySelector('#info [data-lap-two-block] [data-lap-sum]')?.textContent ?? '', sumSrc:[...document.querySelectorAll('#info [data-lap-two-block] [data-lap-sum] [data-src]')].map(e=>e.dataset.src),
+      ref:document.querySelector('#info [data-lap-stiff-ref]')?.textContent ?? '', refV:[...document.querySelectorAll('#info [data-lap-stiff-ref] [data-ratio-ref]')].map(e=>+e.dataset.ratioRef),
+      refIsRatio:!!document.querySelector('#info [data-lap-stiff-ref] [data-ratio]'), old:!!document.querySelector('#info [data-lap-sum-ref], #info [data-share-basis]'),
+      codes:[...document.querySelectorAll('#info [data-code]')].map(e=>({code:e.dataset.code, text:e.textContent})), raw:/host\\.(purlin|lap)\\./.test(document.getElementById('review').innerText)})`);
+    const n = compareNumbers((await numbers('#info')).filter(x => /^lap:(lap_members|flexure_reference|Mn_lap|phi_Mn_lap)/.test(x.src)), { lapSI: L });
+    // 「어느 랩」: 모든 랩을 견줬으면 governing_support, 평가하지 못한 랩 · 넣지 않은 양력 랩이 있으면 governing_support_partial(이 사례는 양력이 있다)
+    const lapCode = (codes) => codes.some(c => li.codes.some(x => x.code === c && /랩/.test(x.text) && !x.text.includes(c)));
+    const lapCodes = lapCode(['host.lap.two_sections']) && lapCode(['host.lap.governing_support', 'host.lap.governing_support_partial']);
+    // 결정 S3′: 강도의 합이 정한 검토(member_governing 의 'sum') = 화면의 「두 부재 강도의 합」 표시, 강성의 몫은 참고(호스트의 dcr · §H2 의 참고 비)
+    const mg = L?.member_governing ?? {};
+    const wantSum = Object.keys(mg).filter(k => mg[k] === 'sum');
+    const bsRef = (L?.design_checks ?? []).find(c => c.id === 'lap.bending_shear')?.reference_stiffness_share?.ratio;
+    const sumOk = L?.strength_basis === 'sum_of_strengths' && wantSum.length >= 2 && JSON.stringify([...li.bySum].sort()) === JSON.stringify([...wantSum].sort()) && /Mnℓ,1 \+ Mnℓ,2/.test(li.sum) && /두 부재 강도의 합/.test(li.sum)
+      && ['lap:Mn_lap', 'lap:phi_Mn_lap'].every(k => li.sumSrc.includes(k)) && li.mem.length === 2 && li.mem.every(x => x.includes('Mnl') && x.includes('Vn')) && !li.old;
+    const refOk = /참고 — 판정에 쓰지 않음/.test(li.ref) && /강성/.test(li.ref) && !li.refIsRatio && li.refV.length === (typeof bsRef === 'number' ? 2 : 1)
+      && relClose(li.refV[0], L.flexure_reference_stiffness_share.dcr) && (typeof bsRef !== 'number' || relClose(li.refV[1], bsRef));
+    const lapOk = !sl.error && !lap.error && L?.lap_two_members === true && L?.section_source?.support_defaulted === true && li.block && JSON.stringify(li.rows) === JSON.stringify(L.section_source.members.map(m => m.section_id))
+      && li.auto === String(L.section_source.support) && li.gov.length >= 3 && lapCodes && !li.raw;
+    return { ok: notesOk && valOk && lapOk && sumOk && refOk && n.bad.length === 0 && (n.bySrc.lap ?? 0) >= 12,
+      detail: `알림 ${notesOk} (${asm.filter(x => /^host\.(purlin|lap)\./.test(x.code ?? '')).map(x => x.code.split('.').pop()).join(',')}) · 점검 ${valOk} (${vText.map(t => short(t, 30)).join(' | ')})`
+        + ` | 랩 ${lap.error ? short(lap.error) : `두 부재 ${L?.lap_two_members} · 지점 ${L?.section_source?.support} 자동 ${L?.section_source?.support_defaulted}`} → 정보 창 ${li.rows.join('|')} · 어느 랩 ${li.auto} · 정한 것 ${li.gov.join(',')} (합 ${li.bySum.join(',')} — 호스트 ${wantSum.join(',')})`
+        + ` · 휨 「${short(li.sum, 60)}」 ${sumOk} · 참고 ${li.refV.join(' | ')} (호스트 ${L?.flexure_reference_stiffness_share?.dcr} | ${bsRef}) 판정비 아님 ${!li.refIsRatio} ${refOk} · 알림 code ${lapCodes} · 날 code 없음 ${!li.raw} ${lapOk}`
+        + ` · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+  });
+  await step('s06 춤이 다른 S2(H 10 in) — 그 랩 구간은 「평가하지 못함」(합격으로 그리지 않는다: 트리 미검토 · 띠 빗금 · 부재 줄 판정 없음 · 까닭 한국어), 구간 알림 host.purlin.region_not_evaluated, 전체는 OK 가 아니다', 's06_depth_mismatch', async () => {
+    const sc = await mcp.tool('set_case_inputs', { inputs: {}, sections: [{ id: 'S2', name: null, template: 'lippedc', params: { ...C059, H: 10 } }], reason: '시험 — 춤이 다른 S2' });
+    const deep = await sRun();
+    const regs = deep?.regions ?? [];
+    const mis = regs.map((g, i) => [g, i]).filter(([g]) => g.kind === 'lap' && g.lap_evaluable === false);
+    const [g0, i0] = mis[0] ?? [null, -1];
+    await select('result', await firstKey(`purlin:${i0}`));
+    await sleep(300);
+    const s = await ev(`(()=>{const b=document.querySelector('#info [data-region-sec]');
+      return {ne:b?.querySelector('[data-region-ne]')?.dataset.regionNe ?? null, reason:b?.querySelector('[data-ne-reason]')?.textContent ?? '', depth:!!b?.querySelector('[data-depth-mismatch]'), mv:[...(b?.querySelectorAll('[data-member-verdict]')??[])].map(e=>e.dataset.memberVerdict),
+        ratio:b?.querySelectorAll('[data-ratio]').length ?? -1, okRows:[...document.querySelectorAll('#tree .row[data-k^="purlin:${i0}#"] .dot.ok')].length, unRows:[...document.querySelectorAll('#tree .row[data-k^="purlin:${i0}#"] .dot.un')].length,
+        band:[...document.querySelectorAll('#center rect.bd')].filter(e=>${JSON.stringify(mis.map(([, i]) => `purlin:${i}`))}.includes(e.dataset.run)).map(e=>e.dataset.pass)};})()`);
+    const top = await ev(`(${S}.state.runs.find(r=>r.key==='purlin')?.rows ?? []).filter(x=>x.noteCode==='host.purlin.region_not_evaluated').map(x=>x.name)`);
+    const ok = !sc.error && mis.length >= 2 && g0.result.pass === null && deep.pass !== true && s.ne === 'loads.reason.lap_depth_mismatch' && /춤|깊이/.test(s.reason) && !/loads\.reason/.test(s.reason) && s.depth
+      && s.mv.length === 2 && s.mv.every(x => x === 'none') && s.ratio === 0 && s.okRows === 0 && s.unRows >= 1 && s.band.length === mis.length && s.band.every(x => x === 'un')
+      && top.length >= 1 && top.every(t => /평가하지 못함/.test(t));
+    return { ok, detail: `${sc.error ? `set_case_inputs ${short(sc.error)} · ` : ''}엔진: 평가하지 못한 랩 ${mis.length} · 전체 ${deep.pass} → 정보 창 ${s.ne} 「${short(s.reason, 60)}」 · 춤 다름 ${s.depth} · 부재 ${s.mv.join(',')} · 판정비 ${s.ratio}`
+      + ` · 트리 OK ${s.okRows} · 미검토 ${s.unRows} · 띠 ${s.band.join(',')} · 구간 알림 ${top.length} 「${short(top[0], 60)}」` };
+  });
+  await step('s07 변경의 글 — 경간의 단면 · 단면 목록의 바뀜이 날 키 · JSON 이 아니라 「경간 2 단면」 S1 → S2 · 「단면 S2 추가」 · 「단면 S2 H」 mm(업무 › 기록의 정보 창 · 가운데 표)', 's07_change_labels', async () => {
+    const lst = (await mcp.tool('list_changes', { detail: 'fields', limit: 40 }))?.changes ?? [];
+    /** 그 칸이 든 가장 늦은 묶음을 고르고 정보 창(바뀐 것) · 가운데 표의 그 칸 줄 */
+    const rowOf = async (path, pred = () => true) => {
+      const c = lst.find(x => (x.field_changes ?? []).some(f => f.path === path && pred(f)));
+      if (!c) { return { c: null, info: null, center: null }; }
+      await select('work', `chg:${c.id}`);
+      await sleep(300);
+      // 표 서랍은 펼침 · 접힘을 기억한다(앞 단계가 바꿨을 수 있다) — 접혀 있으면 펼친다
+      await ev(`(()=>{const d=document.querySelector('#center .drawer.closed [data-drawer="toggle"]'); if(d){d.click();} return 1;})()`);
+      await sleep(250);
+      const q = JSON.stringify(path);
+      const r = await ev(`(()=>{const t=e=>e ? e.textContent.replace(/\\s+/g,' ').trim() : null; return {info:t([...document.querySelectorAll('#info [data-chg-fields] tr[data-path]')].find(r=>r.dataset.path===${q})),
+        center:t([...document.querySelectorAll('#center [data-path]')].find(e=>e.dataset.path===${q})?.closest('tr')), all:[...document.querySelectorAll('#info [data-chg-fields] tr, #center table[data-table="chg"] tr')].map(t)};})()`);
+      return { c, ...r };
+    };
+    const sp = await rowOf('case.spans.spanSections[1]', f => f.to === 'S2');
+    const add = await rowOf('case.sections[S2]', f => f.to === 'S2');
+    const h = await rowOf('case.sections[S2].params.H');
+    const noRaw = [sp, add, h].every(x => (x.all ?? []).every(t => !/case\.|\[object|\{"/.test(t ?? '')));
+    const ok = /^경간 2 단면\s*S1\s*→\s*S2/.test(sp.info ?? '') && /단면 S2 추가/.test(add.info ?? '') && !/빈 칸/.test(add.info ?? '') && /^단면 S2 H\s*228\.6\s*→\s*254\s*mm/.test(h.info ?? '')
+      && /단면 목록/.test(add.center ?? '') && /단면 S2 추가/.test(add.center ?? '') && /경간/.test(sp.center ?? '') && noRaw;
+    return { ok, detail: `묶음 ${sp.c?.id ?? '없음'} · ${add.c?.id ?? '없음'} · ${h.c?.id ?? '없음'} → 「${sp.info}」 · 「${add.info}」 · 「${h.info}」 · 가운데 「${short(add.center, 60)}」 · 「${short(sp.center, 60)}」 · 날 키 없음 ${noRaw}` };
+  });
+
   const inDom = await ev(`document.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)})`)
     || await wv(`return D.documentElement.outerHTML.includes(${JSON.stringify(mcpToken)});`);
   check('MCP 토큰이 화면 DOM(새 화면 · 끼운 웹뷰)에 없다', inDom === false);

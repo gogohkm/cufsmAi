@@ -24,15 +24,16 @@ import { connSvg, lapFasteners, lapSvg } from './lap';
 import { memberSvg, type PointBar, type Region, type Row } from './member';
 import { FAMILY_KO } from './names';
 import { sectionSvg } from './section';
-import { memberRuns, regionLabel, rowOfKey, state, type CheckRow, type Run } from './store';
+import { memberRuns, regionLabel, regionSecTag, rowOfKey, state, type CheckRow, type Run } from './store';
 import { demandCapacity, unText } from './sheet';
 import { ROLE_KO } from './names';
 import { si } from './units';
-import { fieldText, pageOf, utilHtml } from './notices';
+import { checkRatioHtml, fieldText, pageOf, utilHtml } from './notices';
 import { refKey, work } from './work';
 import { alts, sideBySide, visibleAlts } from './alts';
 import { keyOfItem } from './follow';
-import { baseOf, changeOf, chg, KIND_RESULT_KO, sinceBase, timeline, valText, whoText, type Change } from './changes';
+import { baseOf, changeOf, chg, KIND_RESULT_KO, sinceBase, timeline, valText, whoText, wholeSection, type Change } from './changes';
+import { psecOn, psecView } from './spansecs';
 
 export type V = 'section' | 'mode' | 'curve' | 'member' | 'verdict' | 'lap' | 'doc';
 export interface CenterOpts { labels: boolean; elems: boolean; dims: boolean; axes: boolean; stress: boolean; higher: boolean; M: boolean; V: boolean; D: boolean; force: boolean; modeNodes: boolean; mode3d: boolean }
@@ -48,7 +49,8 @@ export function groupOf(key: string): Group {
   if (isValKey(key)) { return 'other'; }
   if (key.startsWith('lap#') || key.startsWith('conn#')) { return 'conn'; }
   if (key === 'chk' || key.startsWith('chk:') || key.includes('#') || key === 'dc' || key.startsWith('dc:')) { return 'chk'; }
-  if (key === 'fsm' || key.startsWith('fsm:')) { return 'fsm'; }
+  // 2026-11-28 결정 S8: 퍼린 결과의 단면마다 — 그 단면의 서명곡선(보기 어휘로는 좌굴 곡선)
+  if (key === 'fsm' || key.startsWith('fsm:') || key === 'psec' || key.startsWith('psec:')) { return 'fsm'; }
   if (key === 'load' || key.startsWith('load:')) { return 'load'; }
   if (key === 'conn' || key.startsWith('conn:')) { return 'conn'; }
   if (['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return 'doc'; }
@@ -70,6 +72,7 @@ function defaultViews(g: Group): V[] {
 export function setViews(key: string, views: V[]): void { override = { group: groupOf(key), views }; }
 export function viewsFor(key: string): V[] {
   if (isValKey(key) || ['rpt', 'brpt', 'vtab', 'src', 'pub'].includes(key)) { return ['doc']; }
+  if (key === 'psec' || key.startsWith('psec:')) { return ['curve']; }
   const g = groupOf(key);
   if (override && override.group !== g) { override = null; }
   return override?.views ?? defaultViews(g);
@@ -280,7 +283,7 @@ function checkRow(r: CheckRow, sel: string): string {
   const v = verdictOf(r.pass);
   const ng = r.pass === false;
   const bar = r.kind === 'ls' && typeof r.ratio === 'number'
-    ? `<div class="ratio"><div class="track"><div class="fill" style="width:${Math.min(100, r.ratio * 100).toFixed(1)}%;background:${bandVar(r.ratio, ng)}"></div></div>${ratio(r.ratio, ng, `${r.src}ratio`)}</div>`
+    ? `<div class="ratio"><div class="track"><div class="fill" style="width:${Math.min(100, r.ratio * 100).toFixed(1)}%;background:${bandVar(r.ratio, ng)}"></div></div>${checkRatioHtml(r.us, r.ratio, ng, `${r.src}ratio`, true)}</div>`
     : `<div class="ratio"><div class="track un"></div><span class="faint">${r.kind === 'na' ? '해당 없음' : r.kind === 'ls' ? '비 없음' : esc(unText(r))}</span></div>`;
   const vt = r.kind === 'ne' ? '미검토' : r.kind === 'na' ? '해당 없음' : v.text;
   return `<tr class="ck${r.key === sel ? ' on' : ''}${r.kind === 'na' ? ' na' : ''}" data-k="${esc(r.key)}" data-id="${esc(r.id)}" data-verdict="${r.kind === 'ne' ? 'ne' : r.kind === 'na' ? 'na' : v.cls}"><td><span class="dot ${r.kind === 'na' ? '' : v.cls}"></span></td><td>${esc(r.where)}</td>`
@@ -344,7 +347,7 @@ export function tablesFor(group: Group): DTable[] {
       const rows = memberRuns().flatMap((run: Run) => run.rows.map(r => {
         const v = verdictOf(r.pass);
         const vt = r.kind === 'ne' ? '미검토' : r.kind === 'na' ? '해당 없음' : v.text;
-        return { key: r.key, cells: [esc(r.where), esc(r.name), esc(r.clause), demandCapacity(r), typeof r.ratio === 'number' ? ratio(r.ratio, r.pass === false, `${r.src}ratio`) : '<span class="faint">—</span>', `<span class="verdict ${r.kind === 'na' ? 'un' : v.cls}">${vt}</span>`, `<span class="faint">${esc(r.id)}</span>`],
+        return { key: r.key, cells: [esc(r.where), esc(r.name), esc(r.clause), demandCapacity(r), typeof r.ratio === 'number' ? checkRatioHtml(r.us, r.ratio, r.pass === false, `${r.src}ratio`, true) : '<span class="faint">—</span>', `<span class="verdict ${r.kind === 'na' ? 'un' : v.cls}">${vt}</span>`, `<span class="faint">${esc(r.id)}</span>`],
           sort: [r.where, r.name, r.clause, typeof r.si?.capacity?.value === 'number' ? r.si.capacity.value : -1, r.ratio ?? -1, vt, r.id], tsv: [r.where, r.name, r.clause, String(r.si?.demand?.value ?? ''), String(r.si?.capacity?.value ?? ''), String(r.ratio ?? ''), vt, r.id] };
       }));
       t.push({ id: 'checks', title: '판정비', cols: [{ t: '위치' }, { t: '한계상태' }, { t: '조항' }, { t: '소요 / 설계강도', num: true }, { t: '판정비', num: true }, { t: '판정' }, { t: 'id' }], rows, empty: '부재 검토 결과 없음' });
@@ -353,12 +356,13 @@ export function tablesFor(group: Group): DTable[] {
         const v = verdictOf(r.us?.result?.pass, '판정 없음');
         const run = state.runs.find(x => x.key === r.runKey);
         const k0 = (run?.rows.find(x => x.pass === false) ?? run?.rows[0])?.key ?? r.runKey;
-        return { key: k0, cells: [esc(fieldText(r.us, 'label')), n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
+        const secCell = psecOn() ? [`<span data-region-tag>${esc(regionSecTag(r.us) || '—')}</span>`] : [];
+        return { key: k0, cells: [esc(fieldText(r.us, 'label')), ...secCell, n4(r.si?.start_ft, `purlin:regions.${i}.start_ft`, 'length_ft', 4), n4(r.si?.end_ft, `purlin:regions.${i}.end_ft`, 'length_ft', 4),
           n4(r.si?.Mu, `purlin:regions.${i}.Mu`, 'moment', 4), utilHtml(r.us?.result, res.utilization, `purlin:regions.${i}.result.utilization`, none()), `<span class="verdict ${v.cls}">${v.text}</span>`, esc(String(pageOf(r.us?.result)?.governing_check ?? ''))],
-          sort: [fieldText(r.us, 'label'), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
-          tsv: [fieldText(r.us, 'label'), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };
+          sort: [fieldText(r.us, 'label'), ...(psecOn() ? [regionSecTag(r.us)] : []), sv(r.si?.start_ft), sv(r.si?.end_ft), sv(r.si?.Mu), sv(res.utilization), v.text, String(r.us?.result?.governing_check ?? '')],
+          tsv: [fieldText(r.us, 'label'), ...(psecOn() ? [regionSecTag(r.us)] : []), String(sv(r.si?.start_ft)), String(sv(r.si?.end_ft)), String(sv(r.si?.Mu)), String(sv(res.utilization)), v.text, String(r.us?.result?.governing_check ?? '')] };
       });
-      if (rg.length) { t.push({ id: 'regions', title: '구간', cols: [{ t: '구간' }, { t: '시작 m', num: true }, { t: '끝 m', num: true }, { t: 'Mu kN·m', num: true }, { t: '판정비', num: true }, { t: '판정' }, { t: '지배' }], rows: rg }); }
+      if (rg.length) { t.push({ id: 'regions', title: '구간', cols: [{ t: '구간' }, ...(psecOn() ? [{ t: '단면' }] : []), { t: '시작 m', num: true }, { t: '끝 m', num: true }, { t: 'Mu kN·m', num: true }, { t: '판정비', num: true }, { t: '판정' }, { t: '지배' }], rows: rg }); }
     }
     const an = state.analysis;
     if (an) {
@@ -484,14 +488,16 @@ function changeView(key: string, size: { w: number; h: number }): { html: string
     + `<div class="hud bl"><span class="cap">지금 모델 · 절점 ${state.nodes.length} · 요소 ${state.elems.length}${el ? ` · 색 = 이 변경이 건드린 요소` : ''}</span></div></div>`;
   const rows: DTable['rows'] = [];
   const AREA: Record<string, string> = { sectionParams: '단면', sectionTemplate: '단면', node: '단면', elem: '단면', prop: '재료', inputs: '입력', spans: '경간', mcpOnly: 'MCP 인자' };
-  const areaOf = (path: string) => AREA[path.split('.')[1] ?? ''] ?? (path.startsWith('case.') ? '입력' : '모델');
+  // 2026-11-28 결정 S1: case.sections[S2]… 는 「단면 목록」
+  const areaOf = (path: string) => (/^case\.sections\[/.test(path) ? '단면 목록' : AREA[path.split('.')[1] ?? ''] ?? (path.startsWith('case.') ? '입력' : '모델'));
   for (const x of since) {
     const who = whoText(x);
     const fs = x.field_changes ?? [];
     for (const f of fs) {
       const sm = f.summary;
-      const was = sm ? `${sm.count.from}개` : 'from' in f || 'to' in f ? `${valText(f.from)}${f.unit && typeof f.from === 'number' ? ` ${f.unit}` : ''}` : '';
-      const now = sm ? `${sm.count.to}개 · 바뀜 ${sm.changed}${sm.added ? ` · 더함 ${sm.added}` : ''}${sm.removed ? ` · 뺌 ${sm.removed}` : ''}` : 'from' in f || 'to' in f ? `${valText(f.to)}${f.unit && typeof f.to === 'number' ? ` ${f.unit}` : ''}` : f.text;
+      const whole = wholeSection(f);
+      const was = whole ? '' : sm ? `${sm.count.from}개` : 'from' in f || 'to' in f ? `${valText(f.from)}${f.unit && typeof f.from === 'number' ? ` ${f.unit}` : ''}` : '';
+      const now = whole ? f.text : sm ? `${sm.count.to}개 · 바뀜 ${sm.changed}${sm.added ? ` · 더함 ${sm.added}` : ''}${sm.removed ? ` · 뺌 ${sm.removed}` : ''}` : 'from' in f || 'to' in f ? `${valText(f.to)}${f.unit && typeof f.to === 'number' ? ` ${f.unit}` : ''}` : f.text;
       rows.push({ key: `chg:${x.id}`, cells: [`${esc(hhmm(x.at))} <span class="faint" data-by="${esc(x.by.kind)}">${esc(who)}</span>`, esc(areaOf(f.path)), `<span data-path="${esc(f.path)}">${esc(f.label_ko || f.key)}</span>`,
         `<span class="dim">${esc(was)}</span>`, `<span style="color:var(--mod)">${esc(now)}</span>`],
       sort: [x.at, areaOf(f.path), f.label_ko || f.key, was, now], tsv: [`${hhmm(x.at)} ${who}`, areaOf(f.path), f.label_ko || f.key, was, now] });
@@ -520,6 +526,8 @@ export function centerHtml(key: string, size: { w: number; h: number } = { w: 12
   if (reportKindOf(key)) { return { html: reportView(key), cls: 'v1 docc' }; }
   if (key.startsWith('doc:') || key.startsWith('iss:')) { return { html: docView(key), cls: 'v1 docc' }; }
   if (key === 'dmg') { return { html: damageView(), cls: 'v1 docc' }; }
+  // 2026-11-28 결정 S8: 고른 단면의 서명곡선(해석 탭의 좌굴 해석은 S1 — 섞지 않는다)
+  if (key === 'psec' || key.startsWith('psec:')) { return { html: psecView(key, size), cls: 'v1' }; }
   if (key === 'pub' || key.startsWith('pubf:')) { return { html: honest('발행', '발행본을 고르면 읽기 전용으로 보인다 — 발행은 계산서의 정보 창 「R<n> 발행」(미리보기 → 사람만)'), cls: 'v1' }; }
   if (key === 'chg' || key.startsWith('chg:')) { return changeView(key, size); }
   // 기록의 묶는 줄(지난 계산 뒤 · 계산 #k · 그 앞) — 그 아래 첫 묶음의 보기

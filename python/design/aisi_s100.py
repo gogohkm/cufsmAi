@@ -9,7 +9,9 @@ import math
 from design.dsm_strength import (
     compression_local, compression_distortional,
     flexure_local, flexure_distortional,
+    compression_distortional_holes, flexure_distortional_holes,
 )
+from design import holes as _holes
 from design.global_buckling import (
     column_global_strength, beam_global_strength,
     compute_column_Fcre, compute_beam_Fcre, compute_beam_Fcre_detail,  # noqa: F401 (옛 이름 유지)
@@ -19,6 +21,8 @@ from design.interaction import (
     combined_axial_bending, combined_bending_shear, combined_bending_shear_stiffened,
 )
 from design.shear import shear_strength, web_crippling, _web_crippling_detail  # noqa: F401
+from design.shear import hole_inputs as _hole_inputs   # EB(2026-11-26): §G3 · §G6 의 구멍 입력
+from design import member_web_torsion as _mwt          # EB(2026-11-26): §G2.2 · §G3 · §G4 · §G6 · §H2(보강) · §H4
 from design.connections import design_connection
 from design.steel_grades import E, STEEL_GRADES
 from design import member_checks as _mc
@@ -27,8 +31,16 @@ from design.checks import set_governing as _set_governing, apply_context as _app
 
 # 템플릿으로 단면 성질을 만든 실행의 내부 표지(입력이 아님) — 계산서 출처 'generated' 에만 쓴다.
 _PROPS_GENERATED = '_props_generated'
+# 템플릿으로 만든 단면의 요소 자리(웹 · 플랜지 · 모서리) — §H4 의 웹-플랜지 이음을 가려내는 데만 쓴다(EB, 입력이 아님).
+_ELEMENT_ROLES = '_element_roles'
 # 하위 설계(압축 · 휨 · 인장)가 조합 검토에 넘기는 반올림하지 않은 설계강도(결과에는 남기지 않는다).
 _RAW_DS = '_raw_design_strength'
+# 구멍(§E2.5 · §E3.2.2 · §E4.2 · §F2.2 · §F3.2.2 · §F4.2)의 계산 묶음(design.holes.evaluate) — 내부 키, 입력이 아님
+_HOLE_CTX = '_hole_ctx'
+# 구멍 조항을 평가하지 못해 구멍 없는 계산을 다시 할 때 그 구멍 묶음(상한 계산용 — 2026-11-26 독립 검증 2). 내부 키
+_HOLE_BOUND = '_hole_bound_ctx'
+# 그 계산이 낸 구멍 없는 상한(내부 — _holes_not_evaluated 가 읽고 결과의 holes_strength_bound 로 옮긴다)
+_HOLE_BOUND_RAW = '_hole_bound_raw'
 # 결과 위쪽의 표시용 반올림 값(DISPLAY_ROUNDING)의 반올림 전 값 — design_checks 의 값과 같다. MCP 의 SI 응답은
 # 이 값을 바꿔 위쪽 값으로 쓴다(반올림한 US 값을 바꾸면 design_checks 와 어긋난다 — 검증 문서 4.7).
 _DISPLAY_UNROUNDED = 'display_unrounded'
@@ -270,7 +282,8 @@ _MAIN_DEMAND = {
     'combined': (('Pu',), ('Mux', 'Muy')),
 }
 # 그 주 소요 없이는 판정할 수 없는 검토(id, '.' 으로 끝나면 접두). 정모멘트 구간(Mu_pos)은 Mu 를 쓰지 않는다.
-_BENDING_NEEDS = ('member.flexure.', 'member.bending_shear', 'member.bending_web_crippling')
+_BENDING_NEEDS = ('member.flexure.', 'member.bending_shear', 'member.bending_web_crippling',
+                  'member.bending_torsion')
 _NEEDS_MAIN = {
     'Mu': _BENDING_NEEDS,
     'Mux': _BENDING_NEEDS + ('member.axial_bending', 'member.tension_bending.'),
@@ -720,6 +733,28 @@ def design_member(params: dict) -> dict:
             return {'error': f"Section generation failed: {params.get('_auto_error', 'A=0')}",
                     'member_type': member_type}
 
+    # 구멍(§E2.5 · §E3.2.2 · §E4.2 · §F2.2 · §F3.2.2 · §F4.2, 부록 2): hole_* 입력이 없으면 아무것도 하지 않는다(결정 T4).
+    # 있으면 단면 모델(node · elem · element_roles)로 구멍의 탄성 좌굴값 · 순단면 성질을 한 번 구해 하위 설계에 넘긴다.
+    hole_ctx = None
+    # 2026-11-26 독립 검증 1 · 5: 새 입력(stiffener_* · torsion_* · hole_*)의 꼴 — 틀리면 그 이름을 단 오류(예외 · NaN 판정 없음)
+    if member_type in ('flexure', 'combined'):
+        try:
+            _mwt.validate_inputs(params)
+        except ValueError as e:
+            grp = 'torsion' if str(e).startswith('torsion') else 'stiffeners'
+            return {'error': f'{grp}: {e}', 'member_type': member_type}
+        if _holes.given(params):
+            try:
+                _holes.validate_values(params)
+            except ValueError as e:
+                return {'error': f'holes: {e}', 'member_type': member_type}
+    if _holes.given(params) and member_type in ('compression', 'flexure', 'combined'):
+        try:
+            hole_ctx = _hole_context(params, member_type)
+        except ValueError as e:
+            return {'error': f'holes: {e}', 'member_type': member_type}
+        params = {**params, _HOLE_CTX: hole_ctx}
+
     if member_type == 'compression':
         result = _design_compression(params)
     elif member_type == 'flexure':
@@ -775,9 +810,18 @@ def design_member(params: dict) -> dict:
                           bool(result.get('b4_limits_exceeded')), params.get(_PROPS_GENERATED))
         checks.append(b4)
         _set_governing([b4])
+    if hole_ctx is not None:
+        result['holes'] = _holes.summary(hole_ctx)
+        hc_check = _mc.holes_applicability_check(params['design_method'], hole_ctx, member_type)
+        checks.append(hc_check)
+        _set_governing([c for c in checks if c['group'] == hc_check['group']])
+    elif member_type == 'tension' and _holes.given(params):
+        result['warnings'].append(_nt('member.warning.holes_not_used_tension'))
     _main_demand_rule(result, params, member_type, checks)
     _zero_demand_not_applicable(checks)
     _apply_context(checks, params)
+    if _holes.given(params) or _mwt.web_inputs(params) is not None or _mwt.torsion_given(params):
+        _unevaluated_checks_rule(result, checks)
     # 옛 계산서 단계(steps[])의 1e6 ksi 는 '횡좌굴 없음(∞)'의 표지다 — 값은 화면 비교용으로 두고 옆에 표시(V6-16).
     for st in result.get('steps') or []:
         if isinstance(st, dict) and st.get('value') == _FCRE_INF:
@@ -790,6 +834,18 @@ def design_member(params: dict) -> dict:
     result['report'] = generate_report(result, params)
     _attach_notices(result)
     return result
+
+
+def _unevaluated_checks_rule(result: dict, checks: list) -> None:
+    """판정 규칙을 검토 항목에도(2026-11-26 독립 검증 1): 해당하는(판정에 드는, counts) 검토가 「평가하지 못함」 이면 결과는
+    합격이 아니다 — 불합격은 그대로 이긴다. 구멍 · 보강재 · 비틀림 입력이 있을 때만 본다(입력이 없으면 옛 결과 그대로).
+    (그 검토의 까닭이 결과의 not_evaluated 에 없었다 — 예: §G4.1 의 비를 낼 수 없는데 맞춤으로 둔 보강재)"""
+    if result.get('pass') is not True:
+        return
+    for c in checks:
+        if c.get('verdict') == 'not_evaluated' and c.get('counts', True):
+            _mark_not_evaluated(result, _nt('member.ne.design_check_not_evaluated', check=c['id'],
+                                            why=c.get('reason') or 'no reason given'))
 
 
 def _missing_template_dims(params: dict) -> list:
@@ -816,21 +872,233 @@ def _missing_template_dims(params: dict) -> list:
     return missing
 
 
+def _hole_context(params: dict, member_type: str) -> dict:
+    """구멍의 탄성 좌굴값 · 순단면 성질(design.holes.evaluate) — 압축은 P, 휨은 M, 조합은 둘 다. 형식 오류는 ValueError."""
+    fams = {'compression': ('P',), 'flexure': ('M',), 'combined': ('P', 'M')}[member_type]
+    props = params.get('props') or {}
+    Sf = float(props.get('Sf', 0) or props.get('Sxx', 0) or props.get('Sx', 0) or 0)
+    hc = _holes.evaluate(params, fams, section_type=_canonical_section_type(params),
+                         Ag=float(props.get('A', 0) or 0), Sf=Sf or None, Fy=float(params['Fy']),
+                         dsm=params.get('dsm') or {}, moment_sign=_moment_sign(params))
+    if 'M' in fams and (params.get('R_uplift') or 0) > 0:
+        _holes._fail(hc, _nt('member.reason.holes_i621_not_covered'), 'M')
+    if 'M' in fams and params.get('lap_region') is True:
+        _holes._fail(hc, _nt('member.reason.holes_lap_region_not_covered'), 'M')
+    return hc
+
+
+def _holes_average_note(hole: dict):
+    """표 2.3.2-1 의 가중 평균 가정 — 구멍 하나(hole_spacing 없음)면 그 가정(2026-11-26 독립 검증 7)."""
+    if hole['hole'].get('single_hole'):
+        return _nt('member.assumption.holes_single_hole')
+    return _nt('member.assumption.holes_average_symmetric', s=hole['hole']['s'])
+
+
+# ---- 구멍 조항을 평가하지 못했을 때의 상한(2026-11-26 독립 검증 2) ----
+# 구멍은 이 강도들을 낮추기만 한다 — 다만 「구멍 없는 강도」 전부가 식으로 보장되는 상한은 아니다. 상한으로 쓰는 것은
+# 구현한 식이 구멍의 값 ≤ 상한을 보장하는 것만:
+#   · 전체(§E2.5 · §F2.2): Fn ≤ Fy 이므로 Pne ≤ Py, Mne ≤ My (구멍이면 비탄성 여유를 쓰지 않는다). 구멍 없는 Pne · Mne
+#     자체는 상한이 아니다 — 표 2.3.2-1 의 비틀림 · 휨비틀림 항(Cw,net · xo,avg · ro,avg)은 구멍으로 줄어든다는 보장이
+#     식에 없다(σt 의 분모 ro,avg² 가 줄 수 있다). Fcre 를 사람이 주었으면 구멍이 있어도 같은 Fcre — 그 Pne · Mne.
+#   · 국부(§E3.2.2 · §F3.2.2): Pnℓ = min(Pnℓ(Pne, Pcrℓ), Pynet), Pcrℓ = min(Pcrℓnh, Pcrℓh) ≤ Pcrℓnh, Pnℓ 은 Pne · Pcrℓ 에
+#     대해 늘어나는 식 → Pnℓ ≤ min(Pnℓ(Pne,max, Pcrℓnh), Pynet ≤ Py).
+#   · 뒤틀림(§E4.2 · §F4.2): Pnd ≤ Py · Mnd ≤ My 뿐(줄인 웹 두께의 Pcrd · Mcrd 는 기준 하중도 바뀌어 구멍 없는 값보다 작다는
+#     보장이 없고, Eq. E4.2-2 는 Pynet 을 0.6 % 까지 넘을 수 있다 — Pd2 > Pynet 인 Pynet/Py 가 있다).
+#   · 부재 강도 Pn · Mn = min(위) — 사실상 국부의 상한.
+def _holes_bound_net(hb: dict, attr: str):
+    if hb.get('props_mismatch') or hb.get(attr) is None:
+        return None
+    return float(hb[attr])
+
+
+def _holes_bound_compression(hb, *, Py, Pcrl, Pne, Fcre_given, Fy, round_tube, phi, omega, design_method, Pu):
+    Anet = _holes_bound_net(hb, 'Anet')
+    Pynet_b = min(Anet * Fy, Py) if Anet else Py
+    Pne_b = Pne if Fcre_given else Py
+    if Pcrl > 0 and not round_tube:
+        Pnl_b = min(compression_local(Pne_b, Pcrl)['Pnl'], Pynet_b, Pne_b)
+    else:
+        Pnl_b = min(Pne_b, Pynet_b)
+    Pnd_b = Py
+    Pn_b = min(Pne_b, Pnl_b, Pnd_b)
+    ds = phi * Pn_b if design_method == 'LRFD' else Pn_b / omega
+    _nl = min(Pne_b, Pynet_b, Pnd_b)                 # 국부의 Pcrℓ 을 믿지 못할 때(그 검토가 판정 없음)의 상한
+    ds_nl = phi * _nl if design_method == 'LRFD' else _nl / omega
+    return {
+        'family': 'P', 'Pn': Pn_b, 'design_strength': ds, 'ratio': (Pu / ds) if Pu and Pu > 0 and ds > 0 else None,
+        'ratio_no_local': (Pu / ds_nl) if Pu and Pu > 0 and ds_nl > 0 else None,
+        'Pn_no_local': _nl, 'design_strength_no_local': ds_nl,
+        'phi': phi, 'omega': omega, 'quantity': 'force', 'cap_symbol': 'φcPn' if design_method == 'LRFD' else 'Pn/Ωc',
+        'checks': {
+            'member.compression.global': ('Pne,max', Pne_b, 'Pne <= Py (Fn <= Fy)' if not Fcre_given
+                                          else 'Pne from the given Fcre (the same with holes)'),
+            'member.compression.local': ('Pnℓ,max', Pnl_b, 'Pnℓ <= min(Pnℓ(Pne,max, Pcrℓ without holes), Pynet)'),
+            'member.compression.distortional': ('Pnd,max', Pnd_b, 'Pnd <= Py (Eq. E4.2-1, -2 and E4.1)'),
+        },
+        'note': 'upper bound of the strength with holes from the formulas that guarantee it (Pne <= Py, '
+                'Pnℓ <= Pnℓ(Pne,max, Pcrℓ,nh) and <= Pynet, Pnd <= Py) — a demand above its design strength fails '
+                'with the holes as well'}
+
+
+def _holes_bound_flexure(hb, *, state, Fy, Fya, Sf, Zf, Fcre_given, is_round, D_over_t, section_type, phi, omega,
+                         design_method, Mu, Mu_pos):
+    Fy_b = max(Fy, Fya or 0.0)            # 냉간가공 Fya 를 쓸 수 있었으면 그 쪽도(큰 쪽이 상한)
+    My_b = Sf * Fy_b
+    Sfnet = _holes_bound_net(hb, 'Sfnet')
+    Mynet_b = min(Sfnet, Sf) * Fy_b if Sfnet else My_b
+    Fcre_b = Fcre_given if Fcre_given else (0.0 if is_round else _FCRE_INF)
+    Mne_b = beam_global_strength(Fy_b, Fcre_b, Sf, Zf=Zf, use_inelastic_reserve=False, section_type=section_type,
+                                 D_over_t=D_over_t, E=E)['Mne']
+    Mcrl = state.get('Mcrl') or 0.0
+    if Mcrl > 0 and not state.get('skip_round_local'):
+        Mnl_b = min(flexure_local(Mne_b, Mcrl)['Mnl'], Mynet_b, Mne_b)
+    else:
+        Mnl_b = min(Mne_b, Mynet_b)
+    Mnd_b = Mne_b if is_round else My_b
+    Mn_b = min(Mne_b, Mnl_b, Mnd_b)
+    ds = phi * Mn_b if design_method == 'LRFD' else Mn_b / omega
+    _nl = min(Mne_b, Mynet_b, Mnd_b)                 # 국부의 Mcrℓ 을 믿지 못할 때(그 검토가 판정 없음)의 상한
+    ds_nl = phi * _nl if design_method == 'LRFD' else _nl / omega
+    return {
+        'family': 'M', 'Mn': Mn_b, 'design_strength': ds, 'ratio': (Mu / ds) if Mu and Mu > 0 and ds > 0 else None,
+        'ratio_positive': (Mu_pos / ds) if Mu_pos and Mu_pos > 0 and ds > 0 else None,
+        'ratio_no_local': (Mu / ds_nl) if Mu and Mu > 0 and ds_nl > 0 else None,
+        'ratio_positive_no_local': (Mu_pos / ds_nl) if Mu_pos and Mu_pos > 0 and ds_nl > 0 else None,
+        'Mn_no_local': _nl, 'design_strength_no_local': ds_nl,
+        'phi': phi, 'omega': omega, 'quantity': 'moment', 'cap_symbol': 'φbMn' if design_method == 'LRFD' else 'Mn/Ωb',
+        'checks': {
+            'member.flexure.global': ('Mne,max', Mne_b, 'Mne <= My (Fn <= Fy, no inelastic reserve with holes)'
+                                      if not Fcre_given else 'Mne from the given Fcre (the same with holes)'),
+            'member.flexure.local': ('Mnℓ,max', Mnl_b, 'Mnℓ <= min(Mnℓ(Mne,max, Mcrℓ without holes), Mynet)'),
+            'member.flexure.distortional': ('Mnd,max', Mnd_b, 'Mnd <= My (Eq. F4.2-1, -2 and F4.1)'),
+            'member.flexure.positive_region': ('Mn(+),max', Mn_b, 'Mn(+) <= min(Mne,max, Mnℓ,max, Mnd,max)'),
+        },
+        'note': 'upper bound of the strength with holes from the formulas that guarantee it (Mne <= My, '
+                'Mnℓ <= Mnℓ(Mne,max, Mcrℓ,nh) and <= Mynet, Mnd <= My) — a demand above its design strength fails '
+                'with the holes as well'}
+
+
+def _holes_not_evaluated(result: dict, hc: dict, fam: str, dist_applicable: bool) -> dict:
+    """구멍 조항을 평가하지 못한 하중군: 결과는 구멍 없는 계산(참고값)이고 그 한계상태들은 판정이 없다(결정 T3).
+    압축이면 §E2.5 · §E3.2.2 · §E4.2, 휨이면 §F2.2 · §F3.2.2 · §F4.2 (와 그 강도를 쓰는 정모멘트 구간 · §H2 · §H3)을
+    not_evaluated 로 — 다만(2026-11-26 독립 검증 2) 구멍은 이 강도들을 낮추기만 하므로, 소요가 구멍 없는 상한
+    (_holes_bound_* — 식이 보장하는 것만)의 설계강도를 넘으면 구멍이 있어도 넘는다: 그 항목은 불합격(까닭
+    member.reason.fails_without_holes, 비 = 소요 / 상한의 설계강도). §H2 · §H3 은 구멍 없는 Mnℓo(상한)로 낸 비가
+    한계를 넘으면 불합격 그대로. 길이가 빈 때의 하한(length_independent_bound)과 같은 규칙이다."""
+    from design.notices import text_ko
+    reason = _joined('; ', (hc.get(fam) or {}).get('reasons') or hc.get('reasons') or [])
+    bound = result.pop(_HOLE_BOUND_RAW, None)
+    if fam == 'P':
+        items = [_nt('member.ne.e2_5_holes', reason=reason), _nt('member.ne.e3_2_2_holes', reason=reason)]
+        if dist_applicable:
+            items.append(_nt('member.ne.e4_2_holes', reason=reason))
+        prefixes = ('member.compression.',)
+        names = ('E axial compression',)
+        main_name, demand_ratio = 'E axial compression', (bound or {}).get('ratio')
+    else:
+        items = [_nt('member.ne.f2_2_holes', reason=reason), _nt('member.ne.f3_2_2_holes', reason=reason)]
+        if dist_applicable:
+            items.append(_nt('member.ne.f4_2_holes', reason=reason))
+        if result.get('positive_region'):
+            items.append(_nt('member.ne.positive_region_holes', reason=reason))
+        prefixes = ('member.flexure.', 'member.bending_shear', 'member.bending_web_crippling')
+        names = ('F flexure', 'F positive region', 'H2 bending + shear', 'H3 bending + web crippling')
+        main_name, demand_ratio = 'F flexure', (bound or {}).get('ratio')
+    for it in items:
+        _mark_not_evaluated(result, it)
+    why = _joined('; ', items)
+    # 구멍 없는 계산의 국부 검토가 판정 없음(FSM 진단 · Pcrℓ 없음 …)이면 그 Pcrℓ · Mcrℓ 로 낸 상한도 쓰지 않는다
+    _lid = 'member.compression.local' if fam == 'P' else 'member.flexure.local'
+    if bound is not None and any(c['id'] == _lid and c['verdict'] not in ('pass', 'fail')
+                                 for c in result.get('design_checks') or []):
+        bound = dict(bound, ratio=bound.get('ratio_no_local'), design_strength=bound['design_strength_no_local'],
+                     **{('Pn' if fam == 'P' else 'Mn'): bound['Pn_no_local' if fam == 'P' else 'Mn_no_local']},
+                     ratio_positive=bound.get('ratio_positive_no_local', bound.get('ratio_positive')),
+                     checks={k: v for k, v in bound['checks'].items() if k != _lid})
+        if 'member.flexure.positive_region' in bound['checks']:
+            bound['checks']['member.flexure.positive_region'] = (
+                'Mn(+),max', bound['Mn_no_local'], 'Mn(+) <= min(Mne,max, Mynet, Mnd,max)')
+        demand_ratio = bound['ratio']
+    groups = set()
+    from design.checks import REGISTRY_VARIANTS
+    for i, c in enumerate(result.get('design_checks') or []):
+        if not (any(c['id'].startswith(p) for p in prefixes) and c['verdict'] in ('pass', 'fail')):
+            continue
+        new = None
+        b = (bound or {}).get('checks', {}).get(c['id'])
+        if b is not None:
+            b_sym, b_nom, b_txt = b
+            new = _mc.bound_fail(
+                c['id'], {'dm': result.get('design_method') or 'LRFD'}, c.get('demand'), b,
+                phi=bound['phi'], omega=bound['omega'], cap_symbol=bound['cap_symbol'], quantity=bound['quantity'],
+                reason=_nt('member.reason.fails_without_holes', check=f"{c['id']}: {b_txt}", why=reason),
+                variant='holes' if (c['id'], 'holes') in REGISTRY_VARIANTS else None, location=c.get('location'),
+                reference={'capacity': c.get('capacity'), 'nominal': c.get('nominal'), 'ratio': c.get('ratio')})
+        elif c['id'] in ('member.bending_shear', 'member.bending_web_crippling') and c['verdict'] == 'fail':
+            # §H2 · §H3 은 구멍 없는 Mnℓo(Mne = My, Mcrℓ 구멍 없음 — 구멍의 Mnℓo 의 상한)로 냈다 — 넘으면 확실
+            new = _mc.holes_bound_verdict(c, f"{c['id']}: with Mnℓo of the section without holes", reason)
+        result['design_checks'][i] = new if new is not None else _mc.demote_to_not_evaluated(c, why)
+        groups.add(c['group'])
+    for g in groups:
+        _set_governing([c for c in result['design_checks'] if c['group'] == g])
+    for item in result.get('limit_state_checks') or []:
+        if item.get('name') not in names or item.get('pass') is None:
+            continue
+        nm = item['name']
+        if nm == main_name:
+            certain, r_b = demand_ratio is not None and demand_ratio > 1.0, demand_ratio
+        elif nm == 'F positive region':
+            r_b = (bound or {}).get('ratio_positive')
+            certain = r_b is not None and r_b > 1.0
+        else:
+            certain, r_b = item['pass'] is False, None      # §H2 · §H3: 구멍 없는 Mnℓo 는 상한
+        item['reference'] = {**(item.get('reference') or {}), 'ratio': item.get('ratio'), 'pass': item['pass']}
+        if certain:
+            n = _nt('member.reason.fails_without_holes', check=nm, why=reason)
+            item['pass'] = False
+            if r_b is not None:
+                item['ratio'] = round(float(r_b), 4)
+            item['fails_without_holes'] = True
+        else:
+            n = items[0]
+            item['pass'] = None
+        item['reason'], item['reason_code'], item['reason_ko'] = n, n.code, text_ko(n)
+    result.pop('length_independent_bound', None)
+    for k in ('shear_interaction', 'h3_interaction'):
+        if isinstance(result.get(k), dict) and fam == 'M' and result[k].get('pass') is True:
+            result[k] = dict(result[k], pass_reference=True, **{'pass': None})
+    if isinstance(result.get('positive_region'), dict) and fam == 'M':
+        rp = (bound or {}).get('ratio_positive')
+        result['positive_region'] = dict(result['positive_region'], pass_reference=result['positive_region'].get('pass'),
+                                         **{'pass': False if rp is not None and rp > 1.0 else None})
+    if bound is not None:
+        pub = {k: bound[k] for k in ('Pn', 'Mn', 'design_strength', 'ratio', 'ratio_positive', 'note') if k in bound}
+        pub['checks'] = {cid: {'symbol': sym, 'value': val, 'text': txt} for cid, (sym, val, txt) in
+                         bound['checks'].items()}
+        result['holes_strength_bound'] = pub
+    result['pass'] = False if any(it.get('pass') is False for it in (result.get('limit_state_checks') or [])) else None
+    result['holes_evaluated'] = False
+    _finalize_verdict(result)
+    return result
+
+
 def _not_checked_provisions(params: dict, member_type: str) -> list:
     """이 도구가 구현하지 않은 조항 중 이 부재에 해당할 수 있는 것."""
     canon = _canonical_section_type(params)
     items = []
-    if member_type in ('compression', 'flexure', 'combined'):
-        items.append(_nt('member.scope.not_checked_holes'))
+    # 구멍의 압축 · 휨(§E2.5 … §F4.2)은 구현됨 — 남은 것은 웹 전단 · 웹 크리플링의 구멍(§G3/§G6, 다른 작업)
+    # EB(2026-11-26): §G3 · §G6 는 구멍 입력이 있으면 평가한다 — 남는 것은 구멍을 입력하지 않은 경우뿐
+    if member_type in ('flexure', 'combined') and _hole_inputs(params) is None:
+        items.append(_nt('member.scope.not_checked_holes_g3_g6'))
     if member_type in ('compression', 'combined') and canon == 'RHS':
         items.append(_nt('member.scope.not_checked_e2_1_1_closed_box_rr'))
     if member_type in ('flexure', 'combined'):
         if canon in ('ANGLE', 'LIPPEDANGLE', 'HAT', 'TEE'):
             items.append(_nt('member.scope.not_checked_f2_1_2_ltb_this_shape'))
-        if canon not in ('RHS', 'CHS', 'Z', 'I'):
+        if canon not in ('RHS', 'CHS', 'Z', 'I') and not _mwt.torsion_given(params):   # EB: 입력이 있으면 §H4 평가
             items.append(_nt('member.scope.not_checked_h4_bending_torsion'))
-        if not params.get('transverse_stiffeners'):
-            items.append(_nt('member.scope.not_checked_h2_2_stiffened_webs'))
+        if not params.get('transverse_stiffeners') and (_mwt.web_inputs(params) or {}).get('stiffeners') is None:
+            items.append(_nt('member.scope.not_checked_h2_2_stiffened_webs'))     # 보강재 입력이 있으면 Eq. H2-2 를 평가했다
         items.append(_nt('member.scope.not_checked_weak_axis_dsm_flexure'))
         if not (params.get('wc_N') or 0) > 0 and canon not in ('RHS', 'CHS', 'ANGLE', 'TEE'):
             items.append(_nt('member.scope.not_checked_g5_h3_no_bearing_length'))
@@ -850,11 +1118,12 @@ def _not_implemented_warnings(result: dict, params: dict, member_type: str) -> N
         if msg not in w:
             w.append(msg)
 
-    if member_type in ('compression', 'flexure', 'combined'):
-        _add(_nt('member.scope.e2_5_e2_e3_e4_f2'))
+    if member_type in ('compression', 'flexure', 'combined') and not _holes.given(params):
+        _add(_nt('member.scope.holes_not_entered'))
     if member_type in ('compression', 'combined') and canon == 'RHS':
         _add(_nt('member.scope.e2_1_1_e2_kl_l0_rr'))
-    if member_type in ('flexure', 'combined') and canon not in ('RHS', 'CHS', 'Z', 'I'):
+    if member_type in ('flexure', 'combined') and canon not in ('RHS', 'CHS', 'Z', 'I') \
+            and not _mwt.torsion_given(params):       # EB: 비틀림 입력이 있으면 §H4 를 평가했다
         _add(_nt('member.scope.h4_torsion_not_implemented'))
     if member_type == 'combined':
         _add(_nt('member.scope.c1_c1_b2'))
@@ -1009,8 +1278,19 @@ def check_dsm_limits(params: dict, member_type: str = None, _items: list | None 
 # 압축 부재 설계
 # ============================================================
 
+def _compression_holes_ne(params: dict, hole: dict) -> dict:
+    """구멍을 평가하지 못한 압축: 구멍 없는 계산을 참고값으로 두고 §E2.5 · §E3.2.2 · §E4.2 를 판정 없음으로."""
+    res = _design_compression({**{k: v for k, v in params.items() if k != _HOLE_CTX}, _HOLE_BOUND: hole})
+    if 'error' in res:
+        return res
+    return _holes_not_evaluated(res, hole, 'P', bool(res.get('distortional_applicable')))
+
+
 def _design_compression(params: dict) -> dict:
-    """DSM 압축 부재 설계 (§E2, §E3.2, §E4)"""
+    """DSM 압축 부재 설계 (§E2, §E3.2, §E4; 구멍이 있으면 §E2.5, §E3.2.2, §E4.2)"""
+    hole = params.get(_HOLE_CTX)
+    if hole is not None and not _holes.family_ok(hole, 'P'):
+        return _compression_holes_ne(params, hole)
     Fy = params['Fy']   # design_member 가 Fy > 0 을 확인한다 — 기본 강종으로 채우지 않는다
     design_method = params.get('design_method', 'LRFD')
     Pu = params.get('Pu', 0)
@@ -1091,13 +1371,25 @@ def _design_compression(params: dict) -> dict:
         'formula': f'Py = Ag×Fy = {Ag:.4f} in²×{Fy:.2f} ksi = {Py:.2f} kips',
     })
 
-    # Step 2: 전체좌굴 (E2)
+    # Step 2: 전체좌굴 (E2). 구멍이 있으면 §E2.5 — 부록 2 표 2.3.2-1 의 가중 평균 성질로 Eq. 2.3.2.1.1-1 · 2.3.2.1.2-1~-4
+    # (Z 는 §2.3.2.1.3) — compute_column_Fcre 의 식에 그 성질을 넣는다(design.holes.column_average_props).
+    hole_avg = None
     if Fcre_override > 0:
         Fcre_result = {
             'Fcre': Fcre_override,
             'buckling_type': 'user/rational analysis',
             'equation': 'User-supplied elastic buckling stress',
         }
+        if hole is not None:
+            assumptions.append(_nt('member.assumption.holes_fcre_given'))
+    elif hole is not None:
+        hole_avg = _holes.column_average_props(hole, KxLx, KyLy, KtLt)
+        Fcre_result = compute_column_Fcre(hole_avg['props'], Fy, KxLx, KyLy, KtLt)
+        assumptions.append(_holes_average_note(hole))
+        assumptions.append(_nt('member.assumption.holes_net_section', dh=hole['hole']['dh'],
+                               offset=hole['hole']['web_offset']))
+        if Fcre_result.get('missing'):
+            return {'error': f"§E2.5: {Fcre_result.get('error')}", 'member_type': 'compression'}
     else:
         Fcre_result = compute_column_Fcre(props, Fy, KxLx, KyLy, KtLt)
         if Fcre_result.get('missing'):
@@ -1171,12 +1463,28 @@ def _design_compression(params: dict) -> dict:
             except Exception as e:
                 warnings.append(_nt('member.warning.pcrl_fallback_appendix', e=e))
 
+    # §E3.2.2: Pcrℓ 는 구멍의 영향을 넣은 값 — Pcrℓ = min(Pcrℓnh, Pcrℓh) (해설 Eq. C-2.2.6-1, 부록 2 §2.3.2.2),
+    # Pnℓ ≤ Pynet = Anet Fy (Eq. E3.2.2-1, -2). FSM 진단(격자 하한 극소 등)은 총단면 값의 출처로 본다.
+    _pcrl_fsm = (Pcrl_source == 'FSM')
+    Pcrl_nh = Pcrl
+    # Eq. E3.2.2-2 — Pynet ≤ Py (Anet ≤ Ag; 독립 검증 6: 받은 Ag 와 모델의 Anet 이 섞여도 넘지 않게)
+    Pynet = min(hole['Anet'] * Fy, Ag * Fy) if hole is not None else None
+    if hole is not None:
+        hole['Pynet'] = Pynet
+        assumptions.append(_nt('member.assumption.holes_local_fsm', Lh=hole['hole']['Lh']))
+        if Pcrl > 0:
+            Pcrl = min(Pcrl_nh, hole['P']['crl_h'])
+            Pcrl_source = _nt('member.label.src_holes_local', source=Pcrl_source)
     local_not_evaluated = Pcrl <= 0
     round_local = None   # §E3.1.1.1 의 값(계산서 design_checks 용)
     if Pcrl > 0:
         local_result = compression_local(Pne, Pcrl)
         Pnl = local_result['Pnl']
         spec_sections.append('E3.2')
+        if hole is not None:
+            local_result = dict(local_result, Pnl_E321=Pnl, Pynet=Pynet, capped=Pynet < Pnl)
+            Pnl = min(Pnl, Pynet)
+            spec_sections.append('E3.2.2')
         if round_tube:
             assumptions.append(_nt('member.assumption.round_tube_given_pcrl_e3_2_1'))
     elif round_tube:
@@ -1228,6 +1536,9 @@ def _design_compression(params: dict) -> dict:
         ) if round_local else f'Pcrl 없음 → E3 미평가 (Pnl = Pne = {Pnl:.2f} kips 로 표시)',
         'equation': local_result['equation'],
     })
+    if hole is not None and Pcrl > 0:
+        steps[-1]['formula'] += (f' [§E3.2.2: Pcrl = min(Pcrl,nh = {Pcrl_nh:.2f}, Pcrl,h = {hole["P"]["crl_h"]:.2f}) kips, '
+                                 f'Pnl ≤ Pynet = Anet·Fy = {Pynet:.2f} kips]')
 
     # Step 4: 왜곡좌굴 (E4) — 연단 보강 플랜지가 있는 개단면만 해당한다.
     dist_applicable, dist_reason = _distortional_applicability(geom)
@@ -1267,9 +1578,30 @@ def _design_compression(params: dict) -> dict:
             except Exception as e:
                 warnings.append(_nt('member.warning.pcrd_fallback_appendix', e=e))
 
+    # §E4.2: Pcrd 는 구멍의 영향을 넣은 값 — 총단면 값이 FSM 이면 Lcrd 에서 웹 두께 tr 로 다시 푼 FSM, 부록 2 해석식이면
+    # 그 식(§2.3.2.3)에 tr. 평가하지 못하면(Lh ≥ Lcrd, s < Lcrd …) 이 하중군의 구멍 조항 전체가 판정 없음.
+    _pcrd_fsm = (Pcrd_source == 'FSM')
+    Pcrd_nh, hole_dist = Pcrd, None
+    if hole is not None and dist_applicable and Pcrd > 0:
+        if pcrd_an:
+            hole_dist = _holes.distortional_from_analytic(
+                hole, 'P', dict(pcrd_an, sec_type='Z' if _canonical_section_type(params) == 'Z' else 'C'))
+            _hd_label = _nt('member.label.src_holes_dist_analytic', clause='2.3.2.3')
+        else:
+            hole_dist = _holes.distortional_fsm(hole, 'P', params)
+            _hd_label = _nt('member.label.src_holes_dist_fsm')
+        if hole_dist is None:
+            return _compression_holes_ne(params, hole)
+        Pcrd, Pcrd_source = hole_dist['value'], _hd_label
+        assumptions.append(_nt('member.assumption.holes_dist_analytic', Lcrd=hole_dist['Lcrd']) if pcrd_an
+                           else _nt('member.assumption.holes_dist_fsm', Lcrd=hole_dist['Lcrd']))
     if Pcrd > 0:
         # 해당하지 않는 단면이라도 값이 주어지면 쓴다(감소만 할 수 있으므로 보수측 — Manual II-4B).
-        dist_result = compression_distortional(Py, Pcrd)
+        if hole_dist is not None:
+            dist_result = compression_distortional_holes(Py, Pynet, Pcrd)
+            spec_sections.append('E4.2')
+        else:
+            dist_result = compression_distortional(Py, Pcrd)
         Pnd = dist_result['Pnd']
         spec_sections.append('E4')
     elif not dist_applicable:
@@ -1298,7 +1630,7 @@ def _design_compression(params: dict) -> dict:
     })
 
     _apply_fsm_diagnostics(diag, warnings, not_evaluated, 'P',
-                           local_from_fsm=(Pcrl_source == 'FSM'), dist_from_fsm=(Pcrd_source == 'FSM'),
+                           local_from_fsm=_pcrl_fsm, dist_from_fsm=_pcrd_fsm,
                            local_name=_nt('member.ne.e3_e3_local_buckling'), dist_name=_nt('member.ne.e4_e4_distortional_buckling'),
                            assumptions=assumptions)
 
@@ -1372,6 +1704,8 @@ def _design_compression(params: dict) -> dict:
         length_bounds_ck['global'] = {'symbol': 'Py', 'value': Py, 'text': 'Pne <= Py = Ag Fy at any length'}
         if Pcrl > 0:
             _pnl_ub = compression_local(Py, Pcrl)['Pnl']
+            if hole is not None:
+                _pnl_ub = min(_pnl_ub, Pynet)        # Eq. E3.2.2-1 은 어느 길이에서나
             _cands.append((_pnl_ub, 'member.compression.local', 'local buckling at Pne = Py'))
             length_bounds_ck['local'] = {'symbol': 'Pnℓ(Pne=Py)', 'value': _pnl_ub,
                                          'text': 'local buckling with Pne = Py (Pnℓ grows with Pne)'}
@@ -1395,6 +1729,11 @@ def _design_compression(params: dict) -> dict:
     else:
         pass_flag = None
 
+    _hb_raw = None
+    if params.get(_HOLE_BOUND) is not None:
+        _hb_raw = _holes_bound_compression(params[_HOLE_BOUND], Py=Py, Pcrl=Pcrl, Pne=Pne,
+                                           Fcre_given=Fcre_override > 0, Fy=Fy, round_tube=bool(round_tube),
+                                           phi=phi, omega=omega, design_method=design_method, Pu=Pu)
     result = {
         'member_type': 'compression',
         'method': 'DSM',
@@ -1437,6 +1776,13 @@ def _design_compression(params: dict) -> dict:
         result['length_assumed'] = True
         if length_bound:
             result['length_independent_bound'] = length_bound
+    if hole is not None:
+        # 구멍(§E3.2.2 · §E4.2)의 순단면 항복 — 덧붙인 필드(구멍 입력이 있을 때만)
+        result['Pynet'] = round(Pynet, 2)
+        result[_DISPLAY_UNROUNDED]['Pynet'] = Pynet
+        result['holes_evaluated'] = True
+    if _hb_raw is not None:
+        result[_HOLE_BOUND_RAW] = _hb_raw
     for item in not_evaluated:
         _mark_not_evaluated(result, item)
     _finalize_verdict(result)
@@ -1451,6 +1797,7 @@ def _design_compression(params: dict) -> dict:
         dist_result=dist_result, Pnd=Pnd, Pn=Pn, mode=mode, phi=phi, omega=omega,
         length_bounds=length_bounds_ck,
         round_tube=round_tube, round_local=round_local, E=E,
+        hole=hole, hole_avg=hole_avg, Pcrl_nh=Pcrl_nh, Pynet=Pynet, Pcrd_nh=Pcrd_nh, hole_dist=hole_dist,
         not_evaluated=result.get('not_evaluated') or [])), {
             'Local Buckling': 'member.compression.local',
             'Distortional Buckling': 'member.compression.distortional'}.get(mode, 'member.compression.global'))
@@ -1508,8 +1855,19 @@ def _add_notes(result: dict, warnings, assumptions, tag: str) -> None:
             result[key].append(msg)
 
 
+def _flexure_holes_ne(params: dict, hole: dict) -> dict:
+    """구멍을 평가하지 못한 휨: 구멍 없는 계산을 참고값으로 두고 §F2.2 · §F3.2.2 · §F4.2 를 판정 없음으로."""
+    res = _design_flexure({**{k: v for k, v in params.items() if k != _HOLE_CTX}, _HOLE_BOUND: hole})
+    if 'error' in res:
+        return res
+    return _holes_not_evaluated(res, hole, 'M', bool(res.get('distortional_applicable')))
+
+
 def _design_flexure(params: dict) -> dict:
-    """DSM 휨 부재 설계 (§F2, §F3.2, §F4)"""
+    """DSM 휨 부재 설계 (§F2, §F3.2, §F4; 구멍이 있으면 §F2.2, §F3.2.2, §F4.2)"""
+    hole = params.get(_HOLE_CTX)
+    if hole is not None and not _holes.family_ok(hole, 'M'):
+        return _flexure_holes_ne(params, hole)
     Fy = params['Fy']   # design_member 가 Fy > 0 을 확인한다
     Fu = params.get('Fu')   # §A3.3.2 냉간가공에만 쓴다 — 없으면 그 경로가 오류(기본 강종 Fu 를 짓지 않는다)
     if params.get('use_cold_work', False) and not (Fu is not None and Fu > 0):
@@ -1583,6 +1941,18 @@ def _design_flexure(params: dict) -> dict:
     Zf = props.get('Zx', 0) or props.get('Zf', 0)
     use_ir = params.get('use_inelastic_reserve', False)
     Fcre_override = float(params.get('Fcre', 0) or 0)
+    if hole is not None:
+        # §F2.4 · §F3.2.3 · §F4.3 에는 구멍이 있는 부재의 조항이 없다 — 구멍이 있으면 첫 항복까지(허용 조항을 쓰지 않음)
+        if use_ir:
+            warnings.append(_nt('member.warning.holes_inelastic_reserve_not_used'))
+            use_ir = False
+        if Fcre_override > 0:
+            assumptions.append(_nt('member.assumption.holes_fcre_given'))
+        else:
+            assumptions.append(_holes_average_note(hole))
+        assumptions.append(_nt('member.assumption.holes_net_section', dh=hole['hole']['dh'],
+                               offset=hole['hole']['web_offset']))
+        assumptions.append(_nt('member.assumption.holes_local_fsm', Lh=hole['hole']['Lh']))
 
     # §F2.3 round-HSS 분기용 D/t 산정 (원형관일 때만; 그 외 None).
     # 외경 D는 section.diameter 또는 params['D'](템플릿 CHS의 외경)이며 두께 t로 나눈다.
@@ -1666,8 +2036,15 @@ def _design_flexure(params: dict) -> dict:
             Fcre = 0.0
             fcre_detail_state = {'equation': 'F2.3', 'round_hss': True}
         else:
+            # §F2.2: 구멍이 있으면 부록 2 §2.3.4.1.1 / §2.3.4.1.2 — 가중 평균 성질(표 2.3.2-1, Lb 안의 구멍 수)로
+            _Lb_s = Lb if Lb_eval is None else Lb_eval
+            _bprops = props
+            if hole is not None and _Lb_s > 0:
+                _bavg = _holes.beam_average_props(hole, _Lb_s)
+                _bprops = _bavg['props']
+                fcre_raw['holes_avg'] = _bavg['trace']
             Fcre, fcre_detail_state = compute_beam_Fcre_detail(
-                props, Cb, Lb if Lb_eval is None else Lb_eval, section_type=section_type, Fy=Fy_eval,
+                _bprops, Cb, _Lb_s, section_type=section_type, Fy=Fy_eval,
                 _raw=fcre_raw)
         # §F2.3 round-HSS는 section_type/D_over_t/E를 받아 직접 Mne 곡선을 산정한다.
         global_result = beam_global_strength(
@@ -1706,6 +2083,14 @@ def _design_flexure(params: dict) -> dict:
                 except Exception as e:
                     state_warnings.append(_nt('member.warning.mcrl_fallback_appendix', e=e))
 
+        # §F3.2.2: Mcrℓ 는 구멍의 영향을 넣은 값 — min(Mcrℓnh, Mcrℓh) (해설 C-2.2.6-1, 부록 2 §2.3.4.2), Mnℓ ≤ Mynet
+        _mcrl_src_gross = Mcrl_source
+        Mcrl_nh = Mcrl_eff
+        Mynet = min(hole['Sfnet'], Sf_eff) * Fy_eval if hole is not None else None   # Eq. F3.2.2-2, ≤ My
+        if hole is not None and Mcrl_eff > 0:
+            Mcrl_eff = min(Mcrl_nh, hole['M']['crl_h'])
+            Mcrl_source = _nt('member.label.src_holes_local', source=Mcrl_source)
+
         # §F2.4.2-3: 부재 소성모멘트 Mp = Zf×Fy (탄성 임계값과 달리 Fy/Fya에 비례)
         Mp = Zf * Fy_eval if Zf > 0 else 0.0
 
@@ -1740,6 +2125,9 @@ def _design_flexure(params: dict) -> dict:
                             'equation': 'F3.2.3-1 (local inelastic reserve)',
                             'Cyl': Cyl,
                         }
+            if hole is not None:
+                local_result = dict(local_result, Mnl_F321=Mnl, Mynet=Mynet, capped=Mynet < Mnl)
+                Mnl = min(Mnl, Mynet)                     # Eq. F3.2.2-1
         else:
             local_missing = True
             local_result = {'lambda_l': 0, 'equation': 'N/A (F3 not evaluated: no Mcrl)'}
@@ -1783,6 +2171,22 @@ def _design_flexure(params: dict) -> dict:
                 except Exception as e:
                     state_warnings.append(_nt('member.warning.mcrd_fallback_appendix', e=e))
 
+        # §F4.2: Mcrd 는 구멍의 영향을 넣은 값 — 총단면 값이 FSM 이면 Lcrd 에서 웹 두께 tr 로 다시 푼 FSM, 해석식이면
+        # 부록 2 §2.3.4.3 (Eqs. 2.3.3.3-5 · -6 의 t → tr). 평가하지 못하면 hole['M'] 이 판정 없음이 된다(아래에서 다시 계산).
+        _mcrd_src_gross = Mcrd_source
+        Mcrd_nh, hole_dist = Mcrd_eff, None
+        if hole is not None and dist_applicable and Mcrd_eff > 0 and not _is_round:
+            if Mcrd_an:
+                hole_dist = _holes.distortional_from_analytic(
+                    hole, 'M', dict(Mcrd_an, sec_type='Z' if section_type == 'Z' else 'C'),
+                    kphi=float(params.get('kphi', 0) or 0))
+                _hd_label = _nt('member.label.src_holes_dist_analytic', clause='2.3.4.3')
+            else:
+                hole_dist = _holes.distortional_fsm(hole, 'M', params, _moment_sign(params))
+                _hd_label = _nt('member.label.src_holes_dist_fsm')
+            if hole_dist is not None:
+                Mcrd_eff, Mcrd_source = hole_dist['value'], _hd_label
+
         # 정모멘트 구간 등 다른 곡률을 위한 β 미적용 기준 Mcrd 보존 (positive-region용)
         Mcrd_base = Mcrd_eff
 
@@ -1806,7 +2210,8 @@ def _design_flexure(params: dict) -> dict:
 
         if Mcrd_eff > 0:
             # 해당하지 않는 단면이라도 값이 주어지면 쓴다(감소만 할 수 있으므로 보수측 — Manual II-4B).
-            dist_result = flexure_distortional(My, Mcrd_eff)
+            dist_result = (flexure_distortional_holes(My, Mynet, Mcrd_eff) if hole_dist is not None
+                           else flexure_distortional(My, Mcrd_eff))
             Mnd = dist_result['Mnd']
             # §F4.3 왜곡 비탄성 예비강도: λd=√(My/Mcrd)≤0.673 일 때.
             if allow_ir and Mp > My and My > 0:
@@ -1848,6 +2253,11 @@ def _design_flexure(params: dict) -> dict:
                     Mnfo = max(Mnfo, Mnfo_ir)
         else:
             Mnfo = My
+        if hole is not None:
+            # §F3.2.2: Mnℓ(Fn = Fy 의 Mnℓo 도) ≤ Mynet — §H2 · §H3 · §I6.2.1 이 쓰는 국부좌굴 강도
+            if Mnfo_detail is not None:
+                Mnfo_detail = dict(Mnfo_detail, Mnl_F321=Mnfo, Mynet=Mynet, capped=Mynet < Mnfo)
+            Mnfo = min(Mnfo, Mynet)
         return {
             'Fy': Fy_eval,
             'My': My,
@@ -1875,6 +2285,9 @@ def _design_flexure(params: dict) -> dict:
             # 계산서(design_checks) 용 — 위 계산이 쓴 값 그대로
             'Fcre_raw': fcre_raw, 'Mcrl_an': Mcrl_an, 'Mcrd_an': Mcrd_an, 'beta_inputs': beta_inputs,
             'Mnfo_detail': Mnfo_detail,
+            # 구멍(§F2.2 · §F3.2.2 · §F4.2) — 없으면 holes_on False 이고 나머지는 총단면 그대로
+            'holes_on': hole is not None, 'Mynet': Mynet, 'Mcrl_nh': Mcrl_nh, 'Mcrd_nh': Mcrd_nh,
+            'Mcrl_source_gross': _mcrl_src_gross, 'Mcrd_source_gross': _mcrd_src_gross, 'hole_dist': hole_dist,
         }
 
     state = _calc_flexure_state(Fy_original, use_ir)
@@ -1939,6 +2352,19 @@ def _design_flexure(params: dict) -> dict:
                 warnings.extend(cold_work_info.get('warnings', []))
                 cold_work_info = None
 
+    if hole is not None and not _holes.family_ok(hole, 'M'):
+        # 뒤틀림의 구멍 값을 낼 수 없었다(Lh ≥ Lcrd, s < Lcrd …) — §F2.2 … §F4.2 는 판정 없음, 값은 구멍 없는 계산
+        return _flexure_holes_ne(params, hole)
+    if state.get('hole_dist') is not None:
+        _hdm = state['hole_dist'].get('method')
+        _hdl = state['hole_dist']['Lcrd']
+        assumptions.append(_nt('member.assumption.holes_dist_analytic', Lcrd=_hdl) if _hdm == 'analytic'
+                           else _nt('member.assumption.holes_dist_fsm', Lcrd=_hdl))
+    if hole is not None:
+        hole['Mynet'] = state['Mynet']
+        spec_sections.append('F3.2.2')
+        if state.get('hole_dist') is not None:
+            spec_sections.append('F4.2')
     for _w in state['warnings']:
         if _w not in warnings:
             warnings.append(_w)
@@ -2104,12 +2530,12 @@ def _design_flexure(params: dict) -> dict:
         warnings.append(_nt('member.warning.f2_f2_fcre_mne_cw'))
         f2_unavailable = True
 
-    if Mcrl_source.startswith('§App.1'):
+    if str(state['Mcrl_source_gross']).startswith('§App.1'):
         assumptions.append(_nt('member.assumption.mcrl_fsm_appendix'))
     local_not_evaluated = bool(state['local_missing'])
     _apply_fsm_diagnostics(diag, warnings, not_evaluated, 'M',
-                           local_from_fsm=(Mcrl_source == 'FSM' and not state['skip_round_local']),
-                           dist_from_fsm=str(Mcrd_source).startswith('FSM'),
+                           local_from_fsm=(state['Mcrl_source_gross'] == 'FSM' and not state['skip_round_local']),
+                           dist_from_fsm=str(state['Mcrd_source_gross']).startswith('FSM'),
                            local_name=_nt('member.ne.f3_f3_local_buckling'), dist_name=_nt('member.ne.f4_f4_distortional_buckling'),
                            assumptions=assumptions)
     # 휨 부호: DSM 값(Mcrl·Mcrd)과 Sf 는 한 부호(기본 +Mxx)의 값이다. 굽힘축에 대칭이 아닌
@@ -2142,7 +2568,7 @@ def _design_flexure(params: dict) -> dict:
         'equation': local_result['equation'],
     })
 
-    if Mcrd_source.startswith('§2.3.3.3'):
+    if str(state['Mcrd_source_gross']).startswith('§2.3.3.3'):
         assumptions.append(_nt('member.assumption.mcrd_fsm_appendix'))
     distortional_not_evaluated = bool(state['dist_missing'])
     if distortional_not_evaluated:
@@ -2328,6 +2754,13 @@ def _design_flexure(params: dict) -> dict:
     else:
         pass_flag = None
 
+    _hb_raw = None
+    if params.get(_HOLE_BOUND) is not None:
+        _hb_raw = _holes_bound_flexure(params[_HOLE_BOUND], state=state, Fy=Fy_original, Fya=_fya_candidate, Sf=Sf,
+                                       Zf=Zf, Fcre_given=Fcre_override if Fcre_override > 0 else None,
+                                       is_round=_is_round, D_over_t=D_over_t, section_type=section_type, phi=phi,
+                                       omega=omega, design_method=design_method, Mu=Mu,
+                                       Mu_pos=abs(params.get('Mu_pos', 0) or 0))
     result = {
         'member_type': 'flexure',
         'method': 'DSM',
@@ -2380,6 +2813,13 @@ def _design_flexure(params: dict) -> dict:
         result['length_assumed'] = True
         if length_bound:
             result['length_independent_bound'] = length_bound
+    if hole is not None:
+        # 구멍(§F3.2.2 · §F4.2)의 순단면 첫 항복 모멘트 Mynet = Sfnet Fy — 덧붙인 필드(구멍 입력이 있을 때만)
+        result['Mynet'] = round(state['Mynet'], 2)
+        result[_DISPLAY_UNROUNDED]['Mynet'] = state['Mynet']
+        result['holes_evaluated'] = True
+    if _hb_raw is not None:
+        result[_HOLE_BOUND_RAW] = _hb_raw
     for item in not_evaluated:
         _mark_not_evaluated(result, item)
 
@@ -2392,7 +2832,8 @@ def _design_flexure(params: dict) -> dict:
               phi=phi, omega=omega, lap_stated=bool(lap_stated), h_web=geom.get('h_web'), t_web=geom.get('t'),
               lb_assumed=lb_assumed, length_bounds=length_bounds_ck,
               i621_row=(_i621_row_text(section_type, _out_to_out_dims(geom)[0], params.get('span_type'))
-                        if R_uplift is not None and R_uplift > 0 else None))
+                        if R_uplift is not None and R_uplift > 0 else None),
+              hole=hole)
 
     # §G2/§G5/§H2/§H3 는 virgin Fy·virgin 상태를 쓴다(§A3.3.2 적용 장 제한).
     Fy_v = Fy_original
@@ -2401,7 +2842,12 @@ def _design_flexure(params: dict) -> dict:
     # §G2 + §H2 전단 및 휨-전단 상호작용. UI는 flexure에도 Vu를 전달하므로
     # member_type='combined'에만 두면 순수 휨 설계 경로에서 전단 한계상태가 누락된다.
     Vu = abs(params.get('Vu', 0) or 0)
-    if Vu > 0:
+    # EB(2026-11-26): 보강재(stiffener_* · transverse_stiffeners) · 구멍(hole_*) 입력이 있으면 그 길이
+    # §G2.2 · §G2.3(b) · §G3 · §G4 · §H2 를 다 한다(design/member_web_torsion.py). 입력이 없으면 아래 옛 길 그대로.
+    eb_shear = Vu > 0 and _mwt.flexure_shear(
+        result, ck, params, geom, Fy_v=Fy_v, E=E, Mu=Mu, Mnfo_v=Mnfo_v, Mnd_v=state_virgin['Mnd'], phi=phi,
+        omega=omega, design_method=design_method, section_type=section_type)
+    if Vu > 0 and not eb_shear:
         h_shear = geom['h_web']
         t_shear = geom['t']
         if h_shear > 0 and t_shear > 0:
@@ -2465,6 +2911,19 @@ def _design_flexure(params: dict) -> dict:
                 result, _nt('member.ne.g2_g2_h2_shear'),
                 _nt('member.warning.g2_vu_web_flat_depth'))
 
+    # EB(2026-11-26): §H4 휨 + 비틀림 — torsion_* 입력이 있을 때만(없으면 아무것도 바꾸지 않는다)
+    # §H4 의 강도는 "Section F3 with Fn = Fy or Mne = My" — 첫 항복의 §F3.2.1(+ 구멍이면 ≤ Mynet). §F3.2.3 비탄성 여유는
+    # 넣지 않는다(독립 검증 3: R 은 탄성 응력의 비, 설계 매뉴얼 예제 II-11 은 첫 항복 강도 "Section F3.1 with Fn = Fy" 에 곱한다).
+    _mfd = state_virgin.get('Mnfo_detail')
+    Mnlo_h4 = _mfd['Mnl'] if _mfd is not None else state_virgin['My']
+    if state_virgin.get('Mynet') is not None:
+        Mnlo_h4 = min(Mnlo_h4, state_virgin['Mynet'])
+    if _mwt.torsion_given(params) and Mnlo_h4 < Mnfo_v - 1e-9 * max(Mnfo_v, 1.0):
+        result.setdefault('assumptions', []).append(_nt('member.assumption.h4_first_yield', Mnlo=Mnlo_h4,
+                                                        Mnlo_ir=Mnfo_v))
+    _mwt.flexure_torsion(result, ck, params, geom, Mu=Mu, Mnfo_v=min(Mnlo_h4, Mnfo_v), phi=phi, omega=omega,
+                         design_method=design_method)
+
     # ── 정모멘트 구간 별도 검토 ──
     Lb_pos = params.get('Lb_pos', 0)
     Cb_pos = params.get('Cb_pos', 1.0)
@@ -2477,7 +2936,13 @@ def _design_flexure(params: dict) -> dict:
         if _is_round:
             Fcre_pos = 0.0
         else:
-            Fcre_pos = compute_beam_Fcre_detail(props, Cb_pos, Lb_pos, section_type=section_type, Fy=Fy,
+            _pprops = props
+            if hole is not None and Lb_pos > 0:
+                # §F2.2: 정모멘트 구간도 그 Lb_pos 안의 구멍 수로 가중 평균(부록 2 §2.3.4.1)
+                _pavg = _holes.beam_average_props(hole, Lb_pos)
+                _pprops = _pavg['props']
+                pos_raw['holes_avg'] = _pavg['trace']
+            Fcre_pos = compute_beam_Fcre_detail(_pprops, Cb_pos, Lb_pos, section_type=section_type, Fy=Fy,
                                                 _raw=pos_raw)[0]
         global_pos = beam_global_strength(
             Fy, Fcre_pos, Sf, section_type=section_type, D_over_t=D_over_t, E=E)
@@ -2494,6 +2959,10 @@ def _design_flexure(params: dict) -> dict:
         elif Mcrl > 0:
             local_pos = flexure_local(Mne_pos, Mcrl)
             Mnl_pos = local_pos['Mnl']
+            if hole is not None:                    # Eq. F3.2.2-1
+                _mynet_pos = min(hole['Sfnet'], Sf) * Fy
+                local_pos = dict(local_pos, Mnl_F321=Mnl_pos, Mynet=_mynet_pos, capped=_mynet_pos < Mnl_pos)
+                Mnl_pos = min(Mnl_pos, _mynet_pos)
         else:
             Mnl_pos = Mne_pos
 
@@ -2506,7 +2975,8 @@ def _design_flexure(params: dict) -> dict:
             # round HSS: 왜곡좌굴 미적용 → Mnd_pos=Mne_pos (§F2.3 Mne 보존).
             Mnd_pos = Mne_pos
         elif Mcrd_pos > 0:
-            dist_pos = flexure_distortional(Sf * Fy, Mcrd_pos)
+            dist_pos = (flexure_distortional_holes(Sf * Fy, min(hole['Sfnet'], Sf) * Fy, Mcrd_pos)
+                        if state.get('hole_dist') is not None else flexure_distortional(Sf * Fy, Mcrd_pos))
             Mnd_pos = dist_pos['Mnd']
         else:
             Mnd_pos = Sf * Fy
@@ -2554,7 +3024,8 @@ def _design_flexure(params: dict) -> dict:
             ck['positive'] = dict(raw=pos_raw, Fcre=Fcre_pos, global_=global_pos, Sf=Sf, Fy=Fy, Mne=Mne_pos,
                                   Lb=Lb_pos, Cb=Cb_pos, local=local_pos, Mcrl=Mcrl, Mnl=Mnl_pos, dist=dist_pos,
                                   Mcrd=Mcrd_pos, Mnd=Mnd_pos, Mn=Mn_pos, phi_Mn=phi_Mn_pos, Mu_pos=Mu_pos,
-                                  pass_pos=pass_pos, skip_local=_skip_round_local_pos)
+                                  pass_pos=pass_pos, skip_local=_skip_round_local_pos,
+                                  hole=hole, hole_dist=state.get('hole_dist'))
             result['steps'].append({
                 'step': 9, 'name': f'Positive-moment region (Lb_pos = {Lb_pos:.1f} in, Cb = {Cb_pos:.2f})',
                 'value': round(phi_Mn_pos, 2), 'unit': 'kip-in',
@@ -2613,6 +3084,14 @@ def _design_flexure(params: dict) -> dict:
                 result['web_crippling'] = wc
                 _mark_not_evaluated(result, _nt('member.ne.g5_g5_web_crippling'),
                                     _nt('member.warning.g5_g5_web_crippling_could', error=wc["error"]))
+                return _attach_flexure_checks(result, ck)
+            # EB(2026-11-26): §G6 구멍이 있는 C 단면 웹 — Rc 를 G5 의 Pn 에 곱한다(제자리). 평가하지 못하면 G5 · H3 판정 없음.
+            g6_why = _mwt.flexure_g6(result, wc, wc_detail, params, geom, h=h, t=t, N=wc_N)
+            if g6_why is not None:
+                _mwt.g6_not_evaluated(result, wc, g6_why)
+                # 독립 검증 2: 구멍 없는 Pn(Rc ≤ 1 — 구멍은 낮추기만 한다)으로도 넘으면 불합격(G5 · H3), 아니면 판정 없음
+                _mwt.g6_holes_bound(result, ck, wc, wc_detail, params, h=h, t=t, N=wc_N, R=wc_R, Fy=Fy_v, Mu=Mu,
+                                    Mnfo=Mnfo_v, design_method=design_method, web_config=wc_web_config, why=g6_why)
                 return _attach_flexure_checks(result, ck)
             # 판정 · H3 는 반올림하지 않은 Pn 으로(wc['Pn'] 은 표시용 소수 3자리).
             Pn_wc = wc_detail['Pn_final'] if wc_detail else wc['Pn']
@@ -2947,6 +3426,15 @@ def _design_combined(params: dict) -> dict:
     # corresponding load combination (passed in unmodified, so applying 1.60
     # here is the single place the ASD destabilizing-ratio amplifier is applied).
     c1_alpha = 1.60 if design_method == 'ASD' else 1.00
+    # 구멍(2026-11-26 독립 검증 4): Pe1 = π² kf/(K1 L)², kf = 굽힘 평면의 휨 강성 — 구멍의 탄성 좌굴은 부록 2 표 2.3.2-1 의
+    # 길이 가중 평균 Ix,avg · Iy,avg(§2.3.2.1.1 의 σe = π² E Iavg/(Ag (KL)²) 와 같은 성질). 구멍 조항을 평가한 압축일 때만 —
+    # 못 했으면 총단면(구멍의 Pe1 ≤ 총단면의 Pe1 이라 B1 은 작은 쪽, 불합격의 하한 판정에만 쓰인다).
+    _hc = params.get(_HOLE_CTX)
+    pe1_holes = None
+    if Pu > 0 and Ag > 0 and _hc is not None and _holes.family_ok(_hc, 'P') and comp.get('holes_evaluated'):
+        _av = _holes.column_average_props(_hc, KxLx, KyLy, params.get('KtLt', 120))['trace']
+        rx, ry = math.sqrt(_av['Ix_avg'] / Ag), math.sqrt(_av['Iy_avg'] / Ag)
+        pe1_holes = {'Ix_avg': _av['Ix_avg'], 'Iy_avg': _av['Iy_avg'], 'rx': rx, 'ry': ry}
     if Pu > 0 and rx > 0 and Ag > 0:
         PEx = math.pi ** 2 * E * Ag / (KxLx / rx) ** 2
         alpha_x = Cmx / max(1 - c1_alpha * Pu / PEx, 0.01)
@@ -3028,9 +3516,11 @@ def _design_combined(params: dict) -> dict:
         'scope_notes': list(dict.fromkeys(comp.get('scope_notes', []) + flex_x.get('scope_notes', []))),
     }
     # 성분 강도(Pn 또는 Mn)를 평가하지 못해 0 이면 상호작용 비는 판정 근거가 아니다.
+    # 구멍 조항을 평가하지 못한 성분(holes_evaluated False)의 강도는 구멍 없는 참고값이다 — 상호작용도 판정 근거가 아니다.
+    _holes_blocked = comp.get('holes_evaluated') is False or flex_x.get('holes_evaluated') is False
     _component_unavailable = (
         (comp['Pn'] <= 0 and comp.get('pass') is None)
-        or (flex_x['Mn'] <= 0 and flex_x.get('pass') is None))
+        or (flex_x['Mn'] <= 0 and flex_x.get('pass') is None) or _holes_blocked)
     result['steps'].append({
         'step': 12, 'name': 'Axial + bending interaction (§H1.2, Eq. H1.2-1, §C1 B1)',
         'value': interaction['total'], 'unit': '',
@@ -3067,8 +3557,42 @@ def _design_combined(params: dict) -> dict:
             'Pa_upper': Pa_ub, 'Max_upper': Max_ub,
             'note': 'lower bound of the H1.2 ratio over every length (Pa, Max <= their length_independent_bound, '
                     'F4 is evaluated, B1 >= 1) — decides only when it exceeds 1'}
-    _h12_bound_fails = h12_bound is not None and h12_bound > 1.0
-    if _component_unavailable and not _h12_bound_fails:
+    _h12_bound_fails = h12_bound is not None and h12_bound > 1.0 and not _holes_blocked
+    # 독립 검증 2: 구멍 조항을 평가하지 못한 성분은 그 구멍 없는 상한(holes_strength_bound — 식이 보장하는 것)으로, 빈 길이의
+    # 성분은 길이와 상관없는 상한으로, B1 은 총단면 Pe1(구멍의 B1 이상이 아니다 — 작은 쪽) 또는 빈 길이면 1 — 그 비는
+    # 구멍이 있는 §H1.2 비의 하한이다. 1 을 넘으면 구멍이 있어도 넘는다.
+    h12_holes = None
+    if _holes_blocked:
+        _chb = comp.get('holes_strength_bound') if comp.get('holes_evaluated') is False else None
+        _fhb = flex_x.get('holes_strength_bound') if flex_x.get('holes_evaluated') is False else None
+        _clb = comp.get('length_independent_bound') or {}
+        _flb = flex_x.get('length_independent_bound') or {}
+        Pa_hb = (_chb or {}).get('design_strength') if comp.get('holes_evaluated') is False else (
+            _clb.get('design_strength') if _comp_blocks else Pa)
+        Max_hb = (_fhb or {}).get('design_strength') if flex_x.get('holes_evaluated') is False else (
+            _flb.get('design_strength') if _flex_blocks else Max)
+        if (not Pu > 0 or (Pa_hb and Pa_hb > 0)) and (not Mux > 0 or (Max_hb and Max_hb > 0)):
+            mx_hb = Mux if _b1x_assumed else Mux_amp
+            my_hb = Muy if _b1y_assumed else (Muy_amp if not angle_l1000_note else Muy_amp_no_ecc)
+            h12_holes = ((Pu / Pa_hb if Pu > 0 else 0.0) + (mx_hb / Max_hb if Mux > 0 else 0.0)
+                         + (my_hb / May if flex_y else 0.0))
+            result['interaction_holes_bound'] = {
+                'total': round(h12_holes, 4), 'total_unrounded': h12_holes, 'Pa_upper': Pa_hb, 'Max_upper': Max_hb,
+                'note': 'lower bound of the H1.2 ratio with holes (the components whose hole provisions were not '
+                        'evaluated at their upper bound without holes) — decides only when it exceeds 1'}
+    _h12_holes_fails = h12_holes is not None and h12_holes > 1.0
+    if _h12_holes_fails:
+        interaction['pass'] = False
+        _merge_governing_check(result, {**interaction, 'total': h12_holes, 'pass': False}, 'H1.2 axial + bending')
+        from design.notices import text_ko as _tko
+        _n_h = _nt('member.reason.fails_without_holes', check='H1.2 axial + bending',
+                   why=_joined('; ', [x for x in (comp.get('not_evaluated') or []) + (flex_x.get('not_evaluated') or [])
+                                      if getattr(x, 'code', '').endswith('_holes')] or ['hole provisions']))
+        _it = result['limit_state_checks'][-1]
+        _it.update(ratio=round(h12_holes, 4), reference={'ratio': interaction.get('total')}, fails_without_holes=True,
+                   reason=_n_h, reason_code=_n_h.code, reason_ko=_tko(_n_h))
+        _mark_not_evaluated(result, _nt('member.ne.h1_2_h1_axial_bending_component'))
+    elif _component_unavailable and not _h12_bound_fails:
         interaction['pass'] = None      # 성분 강도를 평가하지 못함 — 요약도 판정 없음(비는 참고값)
         _merge_governing_check(result, {**interaction, 'pass': None}, 'H1.2 axial + bending')
         _mark_not_evaluated(result, _nt('member.ne.h1_2_h1_axial_bending_component'))
@@ -3087,6 +3611,9 @@ def _design_combined(params: dict) -> dict:
             _mark_not_evaluated(result, _nt('member.ne.h1_2_assumed_length'))
     else:
         _merge_governing_check(result, interaction, 'H1.2 axial + bending')
+    if pe1_holes is not None:
+        result['assumptions'].append(_nt('member.assumption.c1_pe1_holes_average', Ix=pe1_holes['Ix_avg'],
+                                         Iy=pe1_holes['Iy_avg']))
     if angle_trace and not angle_trace['L_given']:
         result['assumptions'].append(result_notes_angle)
     if angle_l1000_note:
@@ -3136,7 +3663,8 @@ def _design_combined(params: dict) -> dict:
 
     # _design_flexure가 같은 부재에 대해 수행한 G2/H2, G5/H3, 정모멘트 구간 결과와
     # 하위 설계의 미평가 항목을 조합부재 최상위 판정에 병합한다.
-    for key in ('shear', 'shear_interaction', 'web_crippling', 'h3_interaction', 'positive_region'):
+    for key in ('shear', 'shear_interaction', 'web_crippling', 'h3_interaction', 'positive_region',
+                'torsion', 'web_stiffeners'):   # EB: §H4 · §G4.1 묶음도
         if flex_x.get(key) is not None:
             result[key] = flex_x[key]
     # 압축 단독 경로의 '§H1.2 앵글 (P)L/1000 미평가'는 이 조합 검토가 바로 그 검토를 한 것이므로
@@ -3163,6 +3691,7 @@ def _design_combined(params: dict) -> dict:
         Pa_id=_governing_check_id(comp.get('design_checks') or [], 'member.compression', Pa),
         Max_id=_governing_check_id(flex_x.get('design_checks') or [], 'member.flexure', Max),
         component_unavailable=_component_unavailable and not _h12_bound_fails,
+        holes_bound=h12_holes if _h12_holes_fails else None, pe1_holes=pe1_holes,
         length_assumed=h12_length_assumed, length_bound=h12_bound))
     result['design_checks'] = (_mc.remap_mirrors(comp_checks, 'compression')
                                + _mc.remap_mirrors(flex_x.get('design_checks', []), 'flexure_x') + [h12])
@@ -3304,7 +3833,8 @@ def _design_combined_tension(params: dict, T_abs: float) -> dict:
             _mark_not_evaluated(result, _nt('member.ne.h1_1_2_assumed_length'))
     else:
         _merge_governing_check(result, interaction, f'{governing} tension + bending')
-    for key in ('shear', 'shear_interaction', 'web_crippling', 'h3_interaction', 'positive_region'):
+    for key in ('shear', 'shear_interaction', 'web_crippling', 'h3_interaction', 'positive_region',
+                'torsion', 'web_stiffeners'):   # EB: §H4 · §G4.1 묶음도
         if flex_x.get(key) is not None:
             result[key] = flex_x[key]
     _merge_sub_verdicts(result, [('[인장]', tens), ('[휨x]', _drop_unused_length_items(flex_x, Mux))],
@@ -3977,6 +4507,11 @@ def _auto_generate_props(params: dict) -> dict:
         params['props'] = props
         params['node'] = node.tolist()
         params['elem'] = elem.tolist()
+        if sec.get('element_roles'):
+            # 요소 자리(웹 · 플랜지 …) — 구멍(design.holes)이 웹을 가려낸다. 구멍 입력이 없으면 쓰지 않는다.
+            params['element_roles'] = list(sec['element_roles'])
+        if sec.get('element_roles'):
+            params[_ELEMENT_ROLES] = list(sec['element_roles'])     # EB §H4 의 웹-플랜지 이음
 
     except Exception as e:
         params['_auto_error'] = str(e)

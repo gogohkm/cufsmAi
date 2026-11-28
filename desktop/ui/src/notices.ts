@@ -10,7 +10,7 @@
 // @ts-expect-error — UMD(CommonJS) 모듈, 형 정보 없음
 import * as NX from '../../../webview/js/notices.js';
 import { esc, tip } from './dom';
-import { LENGTH_BOUND_WHY, lengthBoundFailure, type LengthBound, lengthAssumed, LENGTH_ASSUMED_WHY, noVerdictRatio, ratio, refRatio, utilInvalid, utilShown } from './format';
+import { FAILS_WITHOUT_HOLES, HOLES_BOUND_WHY, LENGTH_BOUND_WHY, resultBound, type LengthBound, lengthAssumed, LENGTH_ASSUMED_WHY, noVerdictRatio, ratio, refRatio, utilInvalid, utilShown } from './format';
 
 interface NoticesApi {
   render(n: unknown, opts: Opts): string;
@@ -126,7 +126,7 @@ export function noVerdictWhy(x: any): string {
  * 판정은 엔진의 pass 그대로(화면이 짓지 않는다)
  */
 export function utilHtml(x: any, u: unknown, src: string, fallback = ''): string {
-  const lb = lengthBoundFailure(x);
+  const lb = resultBound(x);
   if (lb) { return lengthBoundHtml(x, lb, src.replace(/utilization$/, lb.path), typeof u === 'number' && Number.isFinite(u) ? u : null); }
   const shown = utilShown(x, u);
   if (shown !== null) { return ratio(shown, x?.pass === false, src); }
@@ -141,13 +141,48 @@ export function boundCheckName(x: any, lb: LengthBound): string {
   const c = (Array.isArray(x?.design_checks) ? x.design_checks : []).find((d: any) => d && d.id === lb.check);
   return String(c?.name_ko ?? c?.name ?? lb.check ?? '길이와 상관없는 하한');
 }
-export const ASSUMED_REF_WHY = '가정한 길이(빈 길이를 엔진의 기본값으로 둠)로 낸 이용률 — 참고값. 판정은 길이와 상관없는 하한으로 났다';
+/** 구멍 없는 강도의 하한으로 NG 인 결과 — 그 검토의 이유(엔진의 member.reason.fails_without_holes: 평가하지 못한 조항과 그 까닭, 한국어 · SI) */
+export function holesBoundReason(x: any, lb: LengthBound): string {
+  const all = [...(Array.isArray(x?.design_checks) ? x.design_checks : []), ...(Array.isArray(x?.checks) ? x.checks.flatMap((p: any) => p?.design_checks ?? []) : [])];
+  const c = all.find((d: any) => d && d.id === lb.check && d.reason_code === FAILS_WITHOUT_HOLES) ?? all.find((d: any) => d && d.reason_code === FAILS_WITHOUT_HOLES);
+  return reasonNote(c)?.text ?? '';
+}
+/**
+ * 검토 항목 하나가 엔진이 믿지 않는 값인가(trusted: false) — 구멍 조항을 평가하지 못했지만 구멍 없는 상한으로 넘은 불합격(fails_without_holes)이
+ * 그것이다. 그 비는 평가한 판정비가 아니다: 비 옆에 꼬리표 · 풍선(그 이유)을 단다. 아니면 ''
+ */
+export function untrustedTag(check: any, compact = false): string {
+  if (!check || typeof check !== 'object' || check.trusted !== false) { return ''; }
+  const holes = check.reason_code === FAILS_WITHOUT_HOLES;
+  const why = holes ? `${HOLES_BOUND_WHY}${(r => (r ? ` — ${r.text}` : ''))(reasonNote(check))}` : `엔진이 이 값을 판정에 믿지 않는다(trusted: false)${(r => (r ? ` — ${r.text}` : ''))(reasonNote(check))}`;
+  const label = holes ? (compact ? '구멍 없이' : '구멍 없는 강도로도 넘음') : '믿지 않는 값';
+  return ` <span class="tag warn" data-untrusted="${esc(String(check.reason_code ?? 'untrusted'))}"${tip(why)}>${label}</span>`;
+}
+/** 검토 항목의 판정비 — 엔진이 믿지 않는 값이면 꼬리표를 함께(평가한 판정비와 같은 모양으로 그리지 않는다) */
+export function checkRatioHtml(check: any, r: number | null | undefined, ng: boolean, src: string, compact = false): string {
+  return `${ratio(r, ng, src)}${untrustedTag(check, compact)}`;
+}
+/** 구멍 묶음(holes)의 까닭 목록(reasons — 평가하지 못한 까닭, 한국어 · SI) */
+export function holeReasons(ho: any): Note[] {
+  if (!ho || typeof ho !== 'object') { return []; }
+  if (isNotices(ho.notices)) {
+    return N.lines(ho, { ...O, lists: ['reasons'] }).map(l => ({ text: l.text, code: l.code ?? null })).filter(n => n.text);
+  }
+  const f = finder(ho);
+  return looseList(ho.reasons, f);
+}
+export const ASSUMED_REF_WHY ='가정한 길이(빈 길이를 엔진의 기본값으로 둠)로 낸 이용률 — 참고값. 판정은 길이와 상관없는 하한으로 났다';
 /**
  * 하한으로 NG 인 결과의 머리 비 — 하한의 비(NG 판정비) · 그 한계상태 · 가정한 길이의 이용률은 「참고」(utils.js lengthBoundFailure 와 같은 뜻).
  * src = 하한 비의 data-src, ref = 가정한 길이의 이용률(보일 수)
  */
 export function lengthBoundHtml(x: any, lb: LengthBound, src: string, ref: number | null): string {
   const nm = boundCheckName(x, lb);
+  if (lb.kind === 'holes') {
+    const why = `${HOLES_BOUND_WHY} — 한계상태 ${nm}${lb.limitState ? ` (${lb.limitState})` : ''}${(t => (t ? ` — ${t}` : ''))(holesBoundReason(x, lb))}`;
+    return `${ratio(lb.ratio, true, src)} <span class="why" data-holes-bound="${esc(lb.check ?? '')}"${tip(why)}>구멍 없는 강도로도 넘음 · ${esc(nm)}</span>`
+      + (ref !== null ? ` ${refRatio(ref, ASSUMED_REF_WHY)}` : '');
+  }
   const why = `${LENGTH_BOUND_WHY} — 한계상태 ${nm}${lb.limitState ? ` (${lb.limitState})` : ''}`;
   return `${ratio(lb.ratio, true, src)} <span class="why" data-length-bound="${esc(lb.check ?? '')}"${tip(why)}>하한 · ${esc(nm)}</span>`
     + (ref !== null ? ` ${refRatio(ref, ASSUMED_REF_WHY)}` : '');

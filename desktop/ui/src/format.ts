@@ -132,7 +132,11 @@ export function refRatio(r: number, why = LENGTH_ASSUMED_WHY): string {
  * (항목 governing_check_id | governing_check · limit_state), 조합은 interaction_length_bound 의 total(_unrounded)이 1 을 넘으면 그것(항목
  * member.axial_bending — design_checks 에 있을 때). `path` 는 그 비가 결과 안에 있는 자리(data-src 꼬리)
  */
-export interface LengthBound { ratio: number; check: string | null; limitState: string | null; path: string }
+export interface LengthBound {
+  ratio: number; check: string | null; limitState: string | null; path: string;
+  /** 'length' = 길이와 상관없는 하한(빈 길이), 'holes' = 구멍 조항을 평가하지 못했지만 구멍 없는 강도(상한)로도 넘음. 없으면 'length' */
+  kind?: 'length' | 'holes';
+}
 export function lengthBoundFailure(d: any): LengthBound | null {
   if (!d || typeof d !== 'object' || d.pass !== false || d.utilization_valid !== false) { return null; }
   const b = d.length_independent_bound;
@@ -149,6 +153,64 @@ export function lengthBoundFailure(d: any): LengthBound | null {
   }
   return null;
 }
+/**
+ * 엔진(8f9126e — 2026-11-26 독립 검증 2): 구멍 조항(§E2.5 · §E3.2.2 · §E4.2 · §F2.2 · §F3.2.2 · §F4.2 · §G3 · §G6 · §H1.2)을 평가하지 못했어도,
+ * 구멍은 강도를 낮추기만 하므로 소요가 구멍 없는 강도(식이 보장하는 상한)를 넘으면 구멍이 있어도 넘는다 — 그 검토는 fail · trusted: false ·
+ * reason_code member.reason.fails_without_holes. 그 상한: holes_strength_bound(압축 · 휨), shear.bound_without_holes(fails · h2_fails),
+ * web_crippling.bound_without_holes(fails · h3_fails), interaction_holes_bound(total > 1).
+ * 규칙은 제품의 webview/js/utils.js `holesBoundCandidates` · `lengthBoundFailure` 그대로 옮김(부르지 않는다): 후보마다 그 검토가 그 까닭의 불합격이면
+ * 그 검토의 비(design_checks.<i>.ratio), 아니면 그 묶음의 비 — 1 을 넘는 것만. holes_strength_bound 의 지배는 상한의 검토(정모멘트 구간 빼고)
+ * 가운데 비가 가장 큰 불합격. 빈 길이의 하한과 함께 가장 큰 비(resultBound). 넘지 않으면 null(그대로 「판정 없음」)
+ */
+export const FAILS_WITHOUT_HOLES = 'member.reason.fails_without_holes';
+const failsWithoutHoles = (c: any): boolean => !!c && typeof c === 'object' && c.verdict === 'fail' && c.reason_code === FAILS_WITHOUT_HOLES;
+export function holesBoundCandidates(d: any): LengthBound[] {
+  const out: LengthBound[] = [];
+  if (!d || typeof d !== 'object') { return out; }
+  const dc: any[] = Array.isArray(d.design_checks) ? d.design_checks : [];
+  const fin = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const add = (id: string, blockRatio: unknown, blockPath: string, limitState: string): void => {
+    const i = dc.findIndex(x => x && x.id === id);
+    const c = i >= 0 ? dc[i] : null;
+    const fromCheck = !!c && failsWithoutHoles(c) && fin(c.ratio) !== null;
+    const r = fromCheck ? c.ratio : fin(blockRatio);
+    if (r !== null && r > 1) { out.push({ ratio: r, check: c ? id : null, limitState, path: fromCheck ? `design_checks.${i}.ratio` : blockPath, kind: 'holes' }); }
+  };
+  const hb = d.holes_strength_bound;
+  if (hb && typeof hb === 'object') {
+    const fam = hb.Pn !== undefined ? 'E axial compression' : 'F flexure';
+    const ids = Object.keys(hb.checks && typeof hb.checks === 'object' ? hb.checks : {}).filter(k => k !== 'member.flexure.positive_region');
+    const fails = dc.filter(c => failsWithoutHoles(c) && ids.includes(c.id) && fin(c.ratio) !== null).sort((a, b) => b.ratio - a.ratio);
+    if (fails.length) { add(fails[0].id, hb.ratio, 'holes_strength_bound.ratio', `${fam} (strength without holes)`); }
+    else if (fin(hb.ratio) !== null && hb.ratio > 1) { out.push({ ratio: hb.ratio, check: null, limitState: `${fam} (strength without holes)`, path: 'holes_strength_bound.ratio', kind: 'holes' }); }
+    if (fin(hb.ratio_positive) !== null) { add('member.flexure.positive_region', hb.ratio_positive, 'holes_strength_bound.ratio_positive', 'F positive region (strength without holes)'); }
+  }
+  const sb = d.shear && typeof d.shear === 'object' ? d.shear.bound_without_holes : null;
+  if (sb && typeof sb === 'object') {
+    if (sb.fails === true) { add('member.shear', sb.ratio, 'shear.bound_without_holes.ratio', 'G2 shear (strength without holes)'); }
+    if (sb.h2_fails === true) { add('member.bending_shear', sb.h2_total, 'shear.bound_without_holes.h2_total', 'H2 bending + shear (strength without holes)'); }
+  }
+  const wb = d.web_crippling && typeof d.web_crippling === 'object' ? d.web_crippling.bound_without_holes : null;
+  if (wb && typeof wb === 'object') {
+    if (wb.fails === true) { add('member.web_crippling', wb.ratio, 'web_crippling.bound_without_holes.ratio', 'G5 web crippling (strength without holes)'); }
+    if (wb.h3_fails === true) { add('member.bending_web_crippling', wb.h3_ratio, 'web_crippling.bound_without_holes.h3_ratio', 'H3 bending + web crippling (strength without holes)'); }
+  }
+  const ih = d.interaction_holes_bound;
+  if (ih && typeof ih === 'object') {
+    const unr = fin(ih.total_unrounded) !== null;
+    add('member.axial_bending', unr ? ih.total_unrounded : ih.total, unr ? 'interaction_holes_bound.total_unrounded' : 'interaction_holes_bound.total', 'H1.2 axial + bending (strength without holes)');
+  }
+  return out;
+}
+/** 결과의 하한 불합격(utils.js lengthBoundFailure 와 같은 규칙) — pass false · utilization_valid false 일 때 빈 길이의 하한 · 구멍 없는 강도의 하한 가운데 가장 큰 비 */
+export function resultBound(d: any): LengthBound | null {
+  if (!d || typeof d !== 'object' || d.pass !== false || d.utilization_valid !== false) { return null; }
+  let best = lengthBoundFailure(d);
+  for (const c of holesBoundCandidates(d)) { if (!best || c.ratio > best.ratio) { best = c; } }
+  return best;
+}
+export const HOLES_BOUND_WHY = '구멍 조항을 평가하지 못했지만(까닭은 아래), 구멍은 강도를 낮추기만 하므로 소요가 구멍 없는 강도(식이 보장하는 상한)를 넘으면 구멍이 있어도 넘는다 — NG 다. '
+  + '판정비는 그 상한으로 낸 비(엔진의 holes_strength_bound · bound_without_holes · interaction_holes_bound) — 구멍을 평가한 판정비가 아니다';
 export const LENGTH_BOUND_WHY = '길이를 비워 가정한 길이로 낸 결과이지만, 길이와 상관없는 하한(가장 유리한 길이의 강도)으로도 넘는다 — 어느 길이에서나 NG 다. '
   + '판정비는 그 하한의 비(엔진의 length_independent_bound · interaction_length_bound), 가정한 길이로 낸 이용률은 참고';
 

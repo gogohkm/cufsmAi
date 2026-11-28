@@ -1,11 +1,11 @@
 {
  "about": "K2 phase 0 golden — examples. Recorded from the current code; 'k2-change' entries are the behaviour K2 is meant to change.",
- "recorded": "2026-11-25",
+ "recorded": "2026-11-26",
  "entries": [
   {
    "id": "Example/test.csd.SI.saved",
    "expect": "pin",
-   "reason": "2026-11-25 남은 작업 H-A: 결정 R2 · R4 — 새 칸 loadComboStandard(#select-load-combo-standard, 처음 asce7_10, 시험의 다른 값 kds_41_12_00) · lapForceModelConfirmed(#chk-lap-force-model-confirmed, 처음 false, 다른 값 true). 처음 값의 엔진 본문은 그대로",
+   "reason": "2026-11-26 구멍 · 보강재 · 비틀림(결정 T7): 새 칸 25 개(웹 구멍 10 · 횡방향 웹 보강재 6 · §H4 9 — designState group holes · stiffeners · torsion). 처음 값은 모두 「없음」 · 빈 칸 · 꺼짐이라 처음 값의 엔진 본문은 그대로",
    "value": {
     "unitSystem": "SI",
     "analysisMethod": "DSM",
@@ -79,6 +79,31 @@
     "wcEdgeDistance": 0,
     "wcNWebs": 1,
     "wcFastenerSpacing": 0,
+    "holeShape": "none",
+    "holeDepth": null,
+    "holeLength": null,
+    "holeSpacing": null,
+    "holeEndDistance": null,
+    "holeWebOffset": null,
+    "holeCornerRadius": null,
+    "holeEdgeStiffened": false,
+    "holeBearingDistance": null,
+    "holeWithinBearing": false,
+    "stiffenerMode": "none",
+    "stiffenerSpacing": null,
+    "stiffenerKind": "",
+    "stiffenerIs": null,
+    "stiffenerArea": null,
+    "stiffenerFy": null,
+    "torsionMode": "none",
+    "torsionFBending": null,
+    "torsionFTorsion": null,
+    "torsionFBendingMax": null,
+    "torsionAtJunction": false,
+    "torsionEccentricity": null,
+    "torsionSpan": null,
+    "torsionLoad": "",
+    "torsionSupport": "",
     "templateType": "",
     "tplH": 3.937007874015748,
     "tplB": 1.968503937007874,
@@ -173,6 +198,14 @@
       "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. 1.0 파일(입력 기록 없음)은 처음 값으로 열린다 — 저장본의 KxLx · KyLy · KtLt · Lb 가 null, chkColdWork 가 false 가 된 것뿐이다."
      },
      "date": "2026-11-25"
+    },
+    {
+     "step": "H(구멍 · 보강재 · 비틀림)",
+     "from": {
+      "expect": "pin",
+      "reason": "2026-11-25 남은 작업 H-A: 결정 R2 · R4 — 새 칸 loadComboStandard(#select-load-combo-standard, 처음 asce7_10, 시험의 다른 값 kds_41_12_00) · lapForceModelConfirmed(#chk-lap-force-model-confirmed, 처음 false, 다른 값 true). 처음 값의 엔진 본문은 그대로"
+     },
+     "date": "2026-11-26"
     }
    ]
   },
@@ -184,7 +217,7 @@
   {
    "id": "Example/test.csd.US.saved",
    "expect": "pin",
-   "reason": "2026-11-25 남은 작업 H-A: 결정 R2 · R4 — 새 칸 loadComboStandard(#select-load-combo-standard, 처음 asce7_10, 시험의 다른 값 kds_41_12_00) · lapForceModelConfirmed(#chk-lap-force-model-confirmed, 처음 false, 다른 값 true). 처음 값의 엔진 본문은 그대로",
+   "reason": "2026-11-26 구멍 · 보강재 · 비틀림(결정 T7): 새 칸 25 개(웹 구멍 10 · 횡방향 웹 보강재 6 · §H4 9 — designState group holes · stiffeners · torsion). 처음 값은 모두 「없음」 · 빈 칸 · 꺼짐이라 처음 값의 엔진 본문은 그대로",
    "value": {
     "unitSystem": "US",
     "analysisMethod": "DSM",
@@ -258,6 +291,31 @@
     "wcEdgeDistance": 0,
     "wcNWebs": 1,
     "wcFastenerSpacing": 0,
+    "holeShape": "none",
+    "holeDepth": null,
+    "holeLength": null,
+    "holeSpacing": null,
+    "holeEndDistance": null,
+    "holeWebOffset": null,
+    "holeCornerRadius": null,
+    "holeEdgeStiffened": false,
+    "holeBearingDistance": null,
+    "holeWithinBearing": false,
+    "stiffenerMode": "none",
+    "stiffenerSpacing": null,
+    "stiffenerKind": "",
+    "stiffenerIs": null,
+    "stiffenerArea": null,
+    "stiffenerFy": null,
+    "torsionMode": "none",
+    "torsionFBending": null,
+    "torsionFTorsion": null,
+    "torsionFBendingMax": null,
+    "torsionAtJunction": false,
+    "torsionEccentricity": null,
+    "torsionSpan": null,
+    "torsionLoad": "",
+    "torsionSupport": "",
     "templateType": "",
     "tplH": 3.937007874015748,
     "tplB": 1.968503937007874,
@@ -352,6 +410,14 @@
       "reason": "처음 값(2026-11-25, 업무 탭 통일 작업문서 5절 2번의 결정): 유효 길이 · 비지지 길이(KxLx · KyLy · KtLt · Lb)의 처음 값을 3000 mm → 빈 칸, 냉간가공(chkColdWork)을 켬 → 끔. 1.0 파일(입력 기록 없음)은 처음 값으로 열린다 — 저장본의 KxLx · KyLy · KtLt · Lb 가 null, chkColdWork 가 false 가 된 것뿐이다."
      },
      "date": "2026-11-25"
+    },
+    {
+     "step": "H(구멍 · 보강재 · 비틀림)",
+     "from": {
+      "expect": "pin",
+      "reason": "2026-11-25 남은 작업 H-A: 결정 R2 · R4 — 새 칸 loadComboStandard(#select-load-combo-standard, 처음 asce7_10, 시험의 다른 값 kds_41_12_00) · lapForceModelConfirmed(#chk-lap-force-model-confirmed, 처음 false, 다른 값 true). 처음 값의 엔진 본문은 그대로"
+     },
+     "date": "2026-11-26"
     }
    ]
   },

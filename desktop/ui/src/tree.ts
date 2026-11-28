@@ -6,7 +6,7 @@ import { esc, tip } from './dom';
 import { hhmm, lengthAssumed, num, ratio, ratioText, sigText } from './format';
 import { BC_KO, FAMILY_KO, LOADCASE_KO, sectionLabel } from './names';
 import { assumptionLines, isDefault, memberRuns, noFsmRuns, state, type CheckRow, type NoFsm } from './store';
-import { blankByAi, branchKids, branchSummary, caseReady, type Branch } from './caseView';
+import { blankByAi, branchKids, branchSummary, caseReady, type Branch, type CaseKid } from './caseView';
 import { caseTag } from './caseFields';
 import { si } from './units';
 import { reportSummary, valCountsText, valGroups, valLabel } from './checklist';
@@ -14,8 +14,9 @@ import { actorOf, actorTag, afterBase, basePointAt, BY_KO, chg, groupName, histo
 import { glyph, itemOfRow, markOf, rv } from './reviews';
 import { alts, visibleAlts } from './alts';
 import { asm, instructions, openQuestions, questions, reports, srcs, work } from './work';
-import { comboStandard, comboStandardTip, fastenerText, forceModelTag, lengthBoundHtml, reasonNote, utilHtml } from './notices';
+import { checkRatioHtml, comboStandard, comboStandardTip, fastenerText, forceModelTag, lengthBoundHtml, reasonNote, utilHtml } from './notices';
 import { docs, draftLabel, draftsOf, issueCls, issueLabel } from './docs';
+import { psecKids } from './spansecs';
 import { dmg } from './damage';
 
 export type Tab = 'work' | 'model' | 'result' | 'doc';
@@ -104,7 +105,7 @@ const passFilter = (r: CheckRow) => !treeFilter || (r.run === treeFilter.run && 
 function rowNode(r: CheckRow): TNode {
   const ng = r.pass === false;
   const dot = r.pass === true ? 'ok' : r.pass === false ? 'ng' : 'un';
-  const ratioCell = r.kind === 'ls' && typeof r.ratio === 'number' ? ratio(r.ratio, ng, `${r.src}ratio`)
+  const ratioCell = r.kind === 'ls' && typeof r.ratio === 'number' ? checkRatioHtml(r.us, r.ratio, ng, `${r.src}ratio`, true)
     : r.kind === 'na' ? '<span class="vl faint">해당 없음</span>' : r.kind === 'ls' ? '<span class="vl faint">비 없음</span>' : '<span class="vl un">미검토</span>';
   // R4-2: 확인 표시 ✓ · ◌(호스트의 get_reviews — 그 줄의 항목)
   const g = rv.loaded ? glyph(itemOfRow(r)) : '';
@@ -196,6 +197,10 @@ export function buildTree(tab: Tab): TNode[] {
           ...(out.length ? [n('chk:OUT', '범위 밖', { v: String(out.length), faint: true, tip: '엔진이 이 검토의 범위 밖으로 둔 것(구현 안 됨 · 입력 없음) — 판정에 들어가지 않는다' })] : []),
         ] : undefined,
       }),
+      // 2026-11-28 결정 S8: 경간마다 단면을 쓴 퍼린 결과의 단면마다(성질 · 좌굴값 · 서명곡선) — 그런 결과일 때만
+      ...(state.psec && chkStage.state === 'ok' ? [n('psec', '퍼린 단면', { v: String(state.psec.us.length), open: true,
+        tip: '경간마다 단면 — 단면마다의 성질 · 좌굴값(정 · 부) · 데크 강성 · 서명곡선(퍼린 결과의 단면 블록). 해석 탭의 좌굴 해석은 S1(모델)의 것',
+        kids: psecKids().map(x => n(x.k, x.t, { v: x.v, tip: x.tip })) })] : []),
       stageNode('conn', '접합부 검토', 'conn', state.lap || state.conn ? { kids: [
         ...(state.lap ? [n('conn:lap', `랩 · ${fastenerText(state.lap.us)}`, { dot: state.lap.us.pass === true ? 'ok' : state.lap.us.pass === false ? 'ng' : 'un', tagHtml: forceModelTag(state.lap.us, true) || undefined,
           vHtml: utilHtml(state.lap.us, state.lap.us.utilization, 'lap:utilization') || undefined,
@@ -321,7 +326,9 @@ function workTree(): TNode[] {
 
 /** 검토 상태(K2 — get_case_inputs)의 가지 하나: 값 · 출처 꼬리표 */
 function caseKidNodes(b: Branch): TNode[] {
-  return branchKids(b).map(k => n(k.k, k.t, { vHtml: k.vHtml, tagHtml: k.src ? caseTag(k.src, blankByAi(k.k.slice(5))) : undefined }));
+  const node = (k: CaseKid): TNode => n(k.k, k.t, { vHtml: k.vHtml, tagHtml: k.src ? caseTag(k.src, blankByAi(k.k.slice(5))) : undefined, tip: k.tip,
+    ...(k.kids ? { kids: k.kids.map(node), open: true } : {}) });
+  return branchKids(b).map(node);
 }
 function caseBranch(b: Branch, t: string): TNode {
   if (!caseReady()) { return n(b, t, { v: '읽는 중', vCls: 'un', tip: state.caseErr ? `검토 상태를 읽지 못함 — ${state.caseErr}` : '호스트의 검토 상태(get_case_inputs)를 읽는 중' }); }

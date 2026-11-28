@@ -131,6 +131,11 @@
         document.querySelectorAll('.span-tbl-len, .span-tbl-lapl, .span-tbl-lapr').forEach(el => {
             inputUnitMap.push([null, 'length_ft', el]);
         });
+        // 2026-11-28 결정 S1: 단면 목록의 치수 칸(립 각도는 단위 없음)
+        document.querySelectorAll('.sec-p[data-u]').forEach(el => {
+            const ut = el.getAttribute('data-u');
+            if (ut && UNIT[ut]) { inputUnitMap.push([null, ut, el]); }
+        });
 
         if (oldSys && oldSys !== _unitSystem) {
             inputUnitMap.forEach(([id, ut, directEl]) => {
@@ -159,6 +164,10 @@
                     return isFinite(v) ? String(Number((v / oldFactor * newFactor).toPrecision(12))) : tok;
                 }).join(', ');
             });
+            // 2026-11-28 결정 S1: 단면 목록의 S1 줄 · Ix 칸도 새 단위로(치수 칸은 위에서 바꿨다 — 그 정확한 값으로 다시 그린다)
+            if (typeof renderSectionList === 'function' && globalThis.StcfsdDesignState && document.getElementById('sec-list-tbody')) {
+                renderSectionList(globalThis.StcfsdDesignState.collectSections(document, fromDisplay));
+            }
         }
 
         // (1) 모든 data-unit 속성을 가진 라벨 텍스트 갱신
@@ -217,7 +226,14 @@
                 _syncAnalysisWidgetsFromModel(model);
                 renderPreprocessor();
                 renderStressPreview();
+                // 2026-11-28 결정 S1 · S2: 단면 목록의 S1 줄(모델) · 템플릿이 맞는지 — 칸의 지금 값(사람이 친 것)을 다시 그린다
+                if (typeof renderSectionList === 'function') { renderSectionList(_secDs() ? _secDs().collectSections(document, fromDisplay) : []); }
                 sendTreeUpdate();
+                break;
+            case 'sectionListInfo':
+                // 결정 S1: 호스트가 구한 단면마다의 성질(Ix — 템플릿 치수로 만든 단면)
+                _sectionInfo = (msg.data && msg.data.info) || {};
+                if (typeof _updateSectionIx === 'function') { _updateSectionIx(); }
                 break;
             case 'analysisStarted':
                 setStatus('Running analysis...', 'running');
@@ -289,6 +305,7 @@
                 break;
             case 'propertiesResult':
                 renderProperties(msg.data);
+                if (typeof _updateSectionIx === 'function') { _updateSectionIx(); }
                 sendTreeUpdate();
                 break;
             case 'propertiesError':
@@ -439,6 +456,7 @@
             case 'caseAck':
                 // K2: 호스트가 받아들인 판. 받지 않은 키(충돌 · 검사)는 호스트가 caseState 로 다시 보낸다.
                 if (msg.data && Number.isInteger(msg.data.rev)) { _caseRev = msg.data.rev; }
+                if (msg.data && Array.isArray(msg.data.rejected) && msg.data.rejected.length) { _showRejectedEdits(msg.data.rejected); }
                 break;
             case 'caseState':
                 _caseApplyState(msg.data);
@@ -1167,6 +1185,8 @@
             var lapSupEl = /** @type {HTMLInputElement|null} */ (document.getElementById('conn-lap-support'));
             var lapSup = lapSupEl && lapSupEl.value !== '' ? Number(lapSupEl.value) : null;
             var lapStated = !!(/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked);
+            // 2026-11-28 결정 S1: 경간마다 단면인 퍼린 결과에서 지점을 비우면 그 결과의 지배 랩(호스트 requests.ts lapSectionFor 와 같은 규칙)
+            if (!Number.isInteger(lapSup)) { var _gls = globalThis.StcfsdUtils.governingLapSupport(_lastPurlinResult); if (_gls !== null) { lapSup = _gls; } }
             var lapSec = globalThis.StcfsdUtils.deriveLapSection(_lastPurlinResult, Number.isInteger(lapSup) ? lapSup : null, { stated: lapStated });
             var haveSe = lapSec.Se !== null;
             var lpSe = haveSe ? lapSec.Se : undefined;
@@ -1199,7 +1219,23 @@
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-conn-zero-demand'))?.checked) { data.zero_demand_stated = true; }
             // 결정 R2: 패스너 힘 분배(모든 패스너가 고르게)로 판정함을 밝혔을 때만
             if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-force-model-confirmed'))?.checked) { data.lap_force_model_confirmed = true; }
+            // 결정 S1 · S5: 그 랩이 두 단면을 이으면 두 부재(호스트 본문과 같은 함수)
+            var _two = globalThis.StcfsdUtils.lapTwoMembers(_lastPurlinResult, Number.isInteger(lapSup) ? lapSup : null, { stated: lapStated });
+            // 검증 2026-11-28 의 3: 경간마다 단면의 퍼린 결과가 없으면 두 부재를 단면 목록에서(t · 깊이 — 호스트 lapSectionFor 와 같은 함수). 지점이 없고 경간의 단면이 다르면 막는다
+            var _lapListErr = null;
+            if (!_two) {
+                const ds = globalThis.StcfsdDesignState;
+                const ss = [];
+                document.querySelectorAll('.span-tbl-sec').forEach((el) => { ss.push(/** @type {HTMLSelectElement} */ (el).value || 'S1'); });
+                const tplEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('select-template'));
+                const fl = globalThis.StcfsdUtils.lapMembersFromSections(ss, ds ? ds.collectSections(document, fromDisplay) : [],
+                    { template: tplEl ? tplEl.value : '', H: _optNum('tpl-H', 'length'), B: _optNum('tpl-B', 'length'), t: _optNum('tpl-t', 'thickness') },
+                    Number.isInteger(lapSup) ? lapSup : null);
+                if (fl && fl.error) { _lapListErr = fl.error; } else if (fl) { _two = fl; }
+            }
+            globalThis.StcfsdUtils.applyLapTwoMembers(data, _two);
             if (_blockIfMissing('Lap 접합부')) { return; }
+            if (_lapListErr) { setStatus('Lap 접합부: ' + _lapListErr, 'error'); return; }
             vscode.postMessage({ command: 'runLapConnection', data });
         });
     }
@@ -3783,6 +3819,20 @@
         'F4': 'DSM Distortional Buckling Flexural Strength',
         'F4.1': 'DSM Distortional Buckling Flexural Strength',
         'G2.1': 'Shear Strength Without Transverse Stiffeners',
+        // 결정 T7(2026-11-26): 구멍 · 횡방향 웹 보강재 · 휨 + 비틀림
+        'E2.5': 'Global Buckling of Members With Holes — Fcre per Appendix 2 (length-weighted section properties)',
+        'E3.2.2': 'Local Buckling of Members With Holes — Pnℓ ≤ Pynet = Anet Fy, Pcrℓ including holes',
+        'E4.2': 'Distortional Buckling of Members With Holes — Pnd with Pynet (Eq. E4.2-1 – E4.2-8)',
+        'F2.2': 'Lateral-Torsional Buckling of Members With Holes — Fcre per Appendix 2',
+        'F3.2.2': 'Local Buckling of Members With Holes — Mnℓ ≤ Mynet = Sfnet Fy, Mcrℓ including holes',
+        'F4.2': 'Distortional Buckling of Members With Holes — Mnd with Mynet (Eq. F4.2-1 – F4.2-6)',
+        'G2.2': 'Shear Strength of Webs With Transverse Stiffeners — tension field (a ≤ 2h)',
+        'G2.3': 'Shear Buckling Coefficient kv — (b) webs with transverse stiffeners',
+        'G3': 'Shear Strength of C-Section Webs With Holes — Vn = qs Vn (Eq. G3-1 – G3-3)',
+        'G4': 'Transverse Web Stiffeners',
+        'G4.1': 'Transverse Web Stiffeners — spacing, Is ≥ Is,min (Eq. G4.1-1), Ast (Eq. G4.1-2)',
+        'G6': 'Web Crippling of C-Section Webs With Holes — Pn × Rc (Eq. G6-1, G6-2)',
+        'H4': 'Combined Bending and Torsional Loading — Mn = R Mnℓo (Eq. H4-1)',
         'G5': 'Web Crippling Strength — Pn = Ct²Fy sin θ...',
         'H1.2': 'Combined Axial + Bending: P/Pa + Mx/Max + My/May ≤ 1.0',
         'H2': 'Combined Bending + Shear: √((M/Malo)² + (V/Va)²) ≤ 1.0 (Malo = local-buckling strength with Fn = Fy)',
@@ -4026,9 +4076,17 @@
                 } else {
                     html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
                 }
+                // 2026-11-28 결정 S1: 지점 i 오른쪽 경간의 단면(처음 값 S1 — 모델). 선택지는 단면 목록(_spanSectionOptions)
+                if (i < n) {
+                    html += '<td style="padding:2px 3px"><select class="span-tbl-sec" data-idx="' + i + '" style="width:100%;font-size:10px;padding:2px 2px" title="' + _esc(SPAN_SECTION_TIP) + '">'
+                        + _spanSectionOptions('S1') + '</select></td>';
+                } else {
+                    html += '<td style="padding:1px;color:#666;text-align:center">—</td>';
+                }
                 html += '</tr>';
             }
             tbody.innerHTML = html;
+            _refreshSpanSectionSelects();
 
             // 캔틸레버 기본 지점조건 설정 (F-N)
             if (st === 'cantilever') {
@@ -4042,6 +4100,143 @@
         const nInput = document.getElementById('config-n-spans');
         if (nInput) nInput.style.display = (st === 'cont-n') ? 'inline-block' : 'none';
     }
+
+    // ============================================================
+    // 2026-11-28 결정 S1 – S4: 경간마다 다른 퍼린 단면 — 「단면 목록」(S1 = 모델, S2 … = 같은 템플릿의 치수)과 경간 표의 「단면」 칸.
+    // 칸은 검토 상태의 sections · spanSections(designState.collectSections · collectDesignInputs) — 바뀌면 다른 칸처럼 caseEdit 로.
+    // 본문은 designState.spanSectionsPayload(호스트와 같은 함수) — 모든 경간 S1 이면 본문에 아무것도 없다.
+    // ============================================================
+    var SPAN_SECTION_TIP = '이 경간의 단면 — S1 = 지금 모델, S2 … = 단면 목록. 경간의 Ix · 데크 강성 · §I6.2.1 R 은 그 단면에서. '
+        + '랩은 두 부재가 강성의 비로 M · V 를 나눠 부재마다 검토(설계 매뉴얼의 강도의 합은 참고), 춤이 다른 두 부재의 랩은 평가하지 않습니다. '
+        + '「경간별 Ix」 를 직접 넣으면 그 값을 쓰고 단면의 Ix 와 1 % 넘게 다르면 알립니다.';
+    /** @type {Record<string, any>} 호스트가 알린 단면마다의 성질 {S2: {Ixx, A, error}} */
+    var _sectionInfo = {};
+    function _secDs() { return globalThis.StcfsdDesignState; }
+    /** 모델이 단면 목록을 쓸 수 있는 템플릿 단면인가 — {tpl, why} */
+    function _sectionListTemplate() {
+        const ds = _secDs();
+        const m = model;
+        if (!m || !Array.isArray(m.node) || m.node.length === 0) { return { tpl: null, why: '단면이 없습니다 — 먼저 ① 탭에서 템플릿으로 단면을 만드십시오.' }; }
+        if (m.sectionEdited) { return { tpl: null, why: '단면을 손으로 고쳤습니다 — 단면 목록은 템플릿으로 만든 단면에서만 씁니다(모든 경간 S1).' }; }
+        const t = m.sectionTemplate;
+        if (!t || !ds || !ds.SECTION_TEMPLATE_PARAMS[t]) {
+            return { tpl: null, why: t === 'chs' ? '원형관은 단면 목록을 쓰지 않습니다(모든 경간 S1).' : '직접 그린 단면 — 단면 목록은 템플릿으로 만든 단면에서만 씁니다(모든 경간 S1).' };
+        }
+        return { tpl: t, why: null };
+    }
+    /** 경간 칸의 선택지(S1 과 단면 목록의 id) */
+    function _spanSectionOptions(value) {
+        const ds = _secDs();
+        const ids = ds ? ds.sectionIds(ds.collectSections(document, fromDisplay)) : ['S1'];
+        return ids.map((id) => '<option value="' + _esc(id) + '"' + (id === value ? ' selected' : '') + '>' + _esc(id) + '</option>').join('');
+    }
+    /** 단면 목록이 바뀐 뒤 경간 칸의 선택지를 다시(그 단면이 없어진 경간은 S1 — 호스트의 규칙과 같다) */
+    function _refreshSpanSectionSelects() {
+        const T = _sectionListTemplate();
+        const ds = _secDs();
+        const ids = ds ? ds.sectionIds(ds.collectSections(document, fromDisplay)) : ['S1'];
+        document.querySelectorAll('.span-tbl-sec').forEach((el) => {
+            const sel = /** @type {HTMLSelectElement} */ (el);
+            const cur = ids.includes(sel.value) ? sel.value : 'S1';
+            sel.innerHTML = _spanSectionOptions(cur);
+            sel.value = cur;
+            // 템플릿 단면이 아니면 S1 만(이미 다른 단면이면 S1 로 되돌릴 수 있게 열어 둔다)
+            sel.disabled = !T.tpl && cur === 'S1' && ids.length === 1;
+            sel.title = T.tpl ? SPAN_SECTION_TIP : T.why;
+        });
+    }
+    /** 단면 하나의 치수 칸 글(그 단위의 12 자리) */
+    function _secShown(v, unit) { return v == null || !isFinite(v) ? '' : String(Number((unit ? toDisplay(v, unit) : v).toPrecision(12))); }
+    /**
+     * 단면 목록을 그린다 — S1(모델 — 읽기만)과 S2 …(치수 칸 · 이름 · 지우기). 칸에는 정확한 US 값을 함께(designState.setShown — 반올림이 값으로 새지 않게).
+     * list = 상태의 꼴 [{id, name, template, params}] (US).
+     */
+    function renderSectionList(list) {
+        const ds = _secDs();
+        const tbody = document.getElementById('sec-list-tbody');
+        if (!ds || !tbody) { return; }
+        const rows = Array.isArray(list) ? list : [];
+        const T = _sectionListTemplate();
+        const keys = ['H', 'B', 'D', 't', 'r', 'qlip'];
+        const sp = (model && model.sectionParams) || {};
+        let html = '<tr class="sec-row-s1"><td style="padding:2px 4px;font-weight:600">S1</td><td style="padding:2px 4px" class="hint">모델' + (model && model.sectionTemplate ? ' (' + _esc(model.sectionTemplate) + ')' : '') + '</td>';
+        keys.forEach((k) => {
+            const u = ds.SECTION_PARAM_UNITS[k];
+            const used = T.tpl ? ds.SECTION_TEMPLATE_PARAMS[T.tpl].includes(k) : (sp[k] !== undefined);
+            html += '<td style="padding:2px 4px;text-align:right">' + (used && typeof sp[k] === 'number' ? _esc(_secShown(sp[k], u)) : '—') + '</td>';
+        });
+        html += '<td class="sec-ix" data-sec-id="S1" style="padding:2px 4px;text-align:right">—</td><td></td></tr>';
+        rows.forEach((s) => {
+            const tplKeys = ds.SECTION_TEMPLATE_PARAMS[s.template] || [];
+            const bad = T.tpl && s.template !== T.tpl ? '템플릿 ' + s.template + ' — 모델(' + T.tpl + ')과 달라 쓸 수 없습니다(지우십시오)' : (!T.tpl ? T.why : '');
+            html += '<tr class="sec-row" data-sec-id="' + _esc(s.id) + '" data-template="' + _esc(s.template || '') + '"' + (bad ? ' style="background:rgba(255,152,0,0.12)" title="' + _esc(bad) + '"' : '') + '>'
+                + '<td style="padding:2px 4px;font-weight:600">' + _esc(s.id) + '</td>'
+                + '<td style="padding:2px 3px"><input type="text" class="sec-name" maxlength="40" style="width:100%;font-size:10px;padding:2px 3px" placeholder="이름" title="단면의 이름(보고서 · 기록에 — 판정에는 쓰지 않는다)"></td>';
+            keys.forEach((k) => {
+                if (!tplKeys.includes(k)) { html += '<td style="padding:1px;color:#666;text-align:center">—</td>'; return; }
+                const u = ds.SECTION_PARAM_UNITS[k];
+                html += '<td style="padding:2px 3px"><input type="number" class="sec-p" data-p="' + k + '"' + (u ? ' data-u="' + u + '"' : '') + ' step="any" style="width:100%;font-size:10px;padding:2px 3px;text-align:right" title="'
+                    + _esc((ds.SECTION_PARAM_LABELS[k] || k) + (k === 'H' || k === 'B' || k === 't' ? ' — 꼭 넣어야 합니다(0 보다 큰 수)' : ' — 비우면 엔진이 그 템플릿의 규칙대로')) + '"></td>';
+            });
+            html += '<td class="sec-ix" data-sec-id="' + _esc(s.id) + '" style="padding:2px 4px;text-align:right">—</td>'
+                + '<td><button class="sec-del btn-small" data-sec-id="' + _esc(s.id) + '" title="이 단면을 지웁니다 — 이 단면을 쓰던 경간은 S1(모델)로 돌아갑니다" style="font-size:10px;padding:0 5px">✕</button></td></tr>';
+        });
+        tbody.innerHTML = html;
+        rows.forEach((s) => {
+            const row = tbody.querySelector('.sec-row[data-sec-id="' + s.id + '"]');
+            if (!row) { return; }
+            const nm = /** @type {HTMLInputElement|null} */ (row.querySelector('.sec-name'));
+            if (nm) { nm.value = s.name || ''; }
+            Object.keys(s.params || {}).forEach((k) => {
+                const el = row.querySelector('.sec-p[data-p="' + k + '"]');
+                const v = s.params[k];
+                const u = ds.SECTION_PARAM_UNITS[k];
+                if (el) { ds.setShown(el, _secShown(v, u), typeof v === 'number' && u ? v : undefined); }
+            });
+        });
+        const addBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById('btn-sec-add'));
+        if (addBtn) { addBtn.disabled = !T.tpl || rows.length >= ds.MAX_SECTIONS; addBtn.title = T.tpl ? '모델과 같은 템플릿(' + T.tpl + ')의 단면을 하나 더 — 처음 치수는 모델의 것' : T.why; }
+        const why = document.getElementById('sec-list-reason');
+        if (why) { why.textContent = T.why || ''; why.style.display = T.why ? 'block' : 'none'; }
+        _refreshSpanSectionSelects();
+        _updateSectionIx();
+    }
+    /** 단면마다의 Ix 칸 — S1 은 화면의 단면 성질, S2 … 는 호스트가 알린 것(sectionListInfo) */
+    function _updateSectionIx() {
+        document.querySelectorAll('.sec-ix[data-sec-id]').forEach((el) => {
+            const id = el.getAttribute('data-sec-id');
+            const inf = id === 'S1' ? (lastProps ? { Ixx: lastProps.Ixx } : null) : (_sectionInfo || {})[id];
+            if (inf && inf.error) { el.textContent = '⚠'; el.setAttribute('title', String(inf.error)); return; }
+            el.textContent = inf && typeof inf.Ixx === 'number' ? fmtVal(inf.Ixx, 'inertia') : '—';
+            el.setAttribute('title', 'Ix (' + unitLabel('inertia') + ') — ' + (id === 'S1' ? '지금 모델의 단면 성질' : '이 치수로 만든 단면의 성질(호스트가 구함)'));
+        });
+    }
+    const btnSecAdd = document.getElementById('btn-sec-add');
+    if (btnSecAdd) {
+        btnSecAdd.addEventListener('click', () => {
+            const ds = _secDs();
+            const T = _sectionListTemplate();
+            if (!ds || !T.tpl) { setStatus(T.why || '단면 목록을 쓸 수 없습니다', 'warn'); return; }
+            const list = ds.collectSections(document, fromDisplay);
+            const id = ds.nextSectionId(list);
+            if (!id || list.length >= ds.MAX_SECTIONS) { return; }
+            const sp = (model && model.sectionParams) || {};
+            const params = {};
+            ds.SECTION_TEMPLATE_PARAMS[T.tpl].forEach((k) => { params[k] = typeof sp[k] === 'number' && isFinite(sp[k]) ? sp[k] : null; });
+            list.push({ id, name: null, template: T.tpl, params });
+            renderSectionList(list);
+            _caseReport('user');
+        });
+    }
+    document.addEventListener('click', (ev) => {
+        const t = /** @type {HTMLElement|null} */ (ev.target);
+        const del = t && t.closest ? t.closest('.sec-del') : null;
+        if (!del) { return; }
+        const ds = _secDs();
+        const id = del.getAttribute('data-sec-id');
+        renderSectionList(ds.collectSections(document, fromDisplay).filter((x) => x.id !== id));
+        _caseReport('user');
+    });
 
     if (selSpanType) {
         selSpanType.addEventListener('change', buildSpanTable);
@@ -4106,6 +4301,14 @@
             const wcSection = document.getElementById('design-wc-section');
             if (cmRow) cmRow.style.display = (t === 'combined') ? 'flex' : 'none';
             if (wcSection) wcSection.style.display = (t === 'flexure' || t === 'combined') ? 'block' : 'none';
+            // 결정 T6 · T7: 구멍 — 압축 · 휨 · 조합 · 자동 계산 넷, 보강재 — 휨 · 조합 · 자동 계산 넷, §H4 — 직접 입력의 휨 · 조합만
+            const holesSec = document.getElementById('design-holes-section');
+            const stiffSec = document.getElementById('design-stiffeners-section');
+            const torsionSec = document.getElementById('design-torsion-section');
+            if (holesSec) holesSec.style.display = (needsLengths) ? 'block' : 'none';
+            if (stiffSec) stiffSec.style.display = needsLbCb ? 'block' : 'none';
+            if (torsionSec) torsionSec.style.display = (!isCalc && needsLbCb) ? 'block' : 'none';
+            if (typeof updateWebOptionRows === 'function') updateWebOptionRows();
             if (lenTitle) {
                 lenTitle.style.display = needsLengths ? 'block' : 'none';
                 // K·L(압축 유효좌굴길이)과 Lb(휨 비지지길이)는 다른 개념 — 표시 대상에 맞는 제목
@@ -4148,6 +4351,40 @@
             _prevCalc = nowCalc;
         });
     }
+
+    /**
+     * 결정 T7: 구멍 · 보강재 · 비틀림 구역 안의 칸 보이기 — 고른 것(없음 · 모양 · 길)과 부재 유형(§G3 · §G6 의 칸은 휨 · 조합 · 자동 계산)에
+     * 따라. 머리 옆의 글(없음 · 원형 …)도. 값은 바꾸지 않는다 — 숨긴 칸은 요청에 가지 않는다(designState.memberWebOptions 가 같은 규칙).
+     */
+    function updateWebOptionRows() {
+        const val = (id) => { const el = /** @type {HTMLSelectElement|null} */ (document.getElementById(id)); return el ? el.value : ''; };
+        const show = (id, on, disp) => { const el = document.getElementById(id); if (el) { el.style.display = on ? (disp || 'block') : 'none'; } };
+        const text = (id, s) => { const el = document.getElementById(id); if (el) { el.textContent = s; } };
+        const mt = val('select-member-type');
+        const g = isCalcMode(mt) || mt === 'flexure' || mt === 'combined';
+        const shape = val('select-hole-shape');
+        const hasHole = shape === 'circular' || shape === 'noncircular';
+        show('design-hole-fields', hasHole);
+        show('design-hole-g-row', hasHole && g, 'flex');
+        show('design-hole-radius-wrap', shape === 'noncircular', 'inline');
+        show('design-hole-g6-rows', hasHole && g);
+        const lh = /** @type {HTMLInputElement|null} */ (document.getElementById('design-hole-Lh'));
+        // 원형은 Lh = dh(엔진의 규칙) — 칸을 쓰지 않는다(값은 그대로 두고 보내지 않는다)
+        if (lh) { lh.disabled = shape === 'circular'; lh.placeholder = shape === 'circular' ? '= dh' : ''; }
+        text('sec-holes-state', shape === 'circular' ? '원형' : shape === 'noncircular' ? '비원형' : '없음');
+        const st = val('select-stiffener-mode') === 'present';
+        show('design-stiffener-fields', st);
+        text('sec-stiffeners-state', st ? '있음' : '없음');
+        const tr = val('select-torsion-mode');
+        show('design-torsion-direct', tr === 'direct');
+        show('design-torsion-eccentric', tr === 'eccentric');
+        text('sec-torsion-state', tr === 'direct' ? '응력을 직접' : tr === 'eccentric' ? '편심 하중' : '없음');
+    }
+    ['select-hole-shape', 'select-stiffener-mode', 'select-torsion-mode'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.addEventListener('change', updateWebOptionRows); }
+    });
+    updateWebOptionRows();
 
     // Design 실행
     const btnDesign = document.getElementById('btn-run-design');
@@ -4218,9 +4455,55 @@
                 const span = opt ? opt.getAttribute('data-span') : null;
                 return span ? { R_uplift: R, span_type: span } : { R_uplift: R };
             })(),
-            // 계약 §6.4: 「준 0 은 정말 0」 — 사람이 칸으로 밝혔을 때만(호스트의 요청과 같은 자리 — 끝)
+            // 계약 §6.4: 「준 0 은 정말 0」 — 사람이 칸으로 밝혔을 때만(호스트의 요청과 같은 자리)
             ...((/** @type {HTMLInputElement|null} */ (document.getElementById('chk-design-zero-demand')))?.checked ? { zero_demand_stated: true } : {}),
+            // 결정 T7: 웹 구멍 · 횡방향 웹 보강재 · §H4 — 「없음」 이 아닌 구역의 키만(호스트 requests.ts 와 같은 함수 — 끝)
+            ..._webOptions(isCalcMode(rawMemberType) ? 'purlin' : memberType),
         };
+    }
+    /**
+     * 결정 T7: 구멍 · 보강재 · 비틀림 구역의 엔진 키(designState.memberWebOptions — 호스트와 같은 함수). 빈 필수 칸(구멍 모양을 골랐을 때의
+     * dh · 비원형의 Lh)은 설계 Fy 처럼 막는다(_missingInputs).
+     */
+    function _webOptions(scope) {
+        const ds = globalThis.StcfsdDesignState;
+        const ins = ds.collectDesignInputs({ document, fromDisplay, getUnitSystem: () => _unitSystem });
+        const out = ds.memberWebOptions((k) => (k in ins ? ins[k] : null), scope);
+        out.missing.forEach((m) => { _missingInputs.push(_missEntry(m.id, m.label)); });
+        // 2026-11-26: 칸의 규칙(designState.validateValue — 호스트 · MCP 와 같은 규칙)에 맞지 않는 값(0 이하 · 음수)은 보내지 않고 막는다
+        (out.invalid || []).forEach((m) => { _webInvalid.push({ ..._missEntry(m.id, m.label), rule: ds.webOptionRuleText(m.rule) }); });
+        return out.data;
+    }
+    /** @type {Array<{label: string, el: HTMLElement|null, tab: string|null, rule: string}>} */
+    let _webInvalid = [];
+    /** 맞지 않는 값이 있으면 막고 어느 칸 · 무엇이 틀렸는지(상태줄 · 설계 검증 상자 · 칸 강조) */
+    function _blockIfInvalid(what) {
+        const bad = _webInvalid; _webInvalid = [];
+        if (bad.length === 0) { return false; }
+        const msg = what + ': 입력 값이 맞지 않습니다 — ' + bad.map((m) => _missLabel(m) + ' ' + m.rule).join(', ');
+        setStatus(msg, 'error');
+        showDesignValidation(msg);
+        bad.forEach((m) => { if (m.el) { m.el.classList.add('input-missing'); m.el.title = m.label + ' ' + m.rule; } });
+        return true;
+    }
+    /**
+     * 2026-11-26: 호스트가 칸의 값을 받지 않았다(caseAck.rejected — 규칙에 맞지 않는 값 host.case.invalid_value) — 그 칸을 강조하고 까닭을
+     * 상태줄에. 화면의 칸은 그대로 둔다(사람이 고친다) — 실행은 _blockIfInvalid 가 막는다.
+     */
+    function _showRejectedEdits(rejected) {
+        const ds = globalThis.StcfsdDesignState;
+        if (!Array.isArray(rejected) || !ds || typeof ds.fieldMeta !== 'function') { return; }
+        const shown = [];
+        rejected.forEach((r) => {
+            if (!r || r.reason_code !== 'host.case.invalid_value') { return; }
+            const m = ds.fieldMeta(r.key);
+            if (!m || !(m.min === 'positive' || m.min === 'nonnegative')) { return; }
+            const el = document.getElementById(m.id);
+            const lab = (ds.WEB_OPTION_LABELS && ds.WEB_OPTION_LABELS[r.key]) || r.key;
+            if (el) { el.classList.add('input-missing'); el.title = lab + ' ' + ds.webOptionRuleText(m.min); }
+            shown.push(lab + ' ' + ds.webOptionRuleText(m.min));
+        });
+        if (shown.length) { setStatus('입력 값이 맞지 않습니다 — ' + shown.join(', ') + ' (이 값은 검토 상태에 쓰지 않았습니다)', 'error'); }
     }
     function showDesignValidation(msg, focusId) {
         const box = document.getElementById('design-validation');
@@ -4240,9 +4523,11 @@
     if (btnDesign) {
         btnDesign.addEventListener('click', () => {
             clearDesignValidation();
+            _webInvalid = [];
             const data = collectDesignRunPayload();
             if (!data) { return; }
-            if (_blockIfMissing('설계 검토')) { return; }
+            if (_blockIfMissing('설계 검토')) { _webInvalid = []; return; }
+            if (_blockIfInvalid('설계 검토')) { return; }
 
             // P2: §H1.2 약축 — Muy>0인데 May_strength 미입력 시 Python 에러 전에 차단
             if (data.member_type === 'combined' && data.Muy > 0 && !(data.May_strength > 0)) {
@@ -4280,6 +4565,8 @@
                     'wc_support_fastener_spacing'].forEach(k => { if (data[k] !== undefined) opts[k] = data[k]; });
                 // 계약 §6.3: 사람이 밝힌 랩 구속(확인했을 때만)
                 if (/** @type {HTMLInputElement|null} */ (document.getElementById('chk-lap-restrained'))?.checked) { opts.lap_restrained = true; }
+                // 결정 T6 · T7: 구멍 · 횡방향 웹 보강재는 구간 검토에 그대로(§H4 는 아니다 — 'purlin' 범위)
+                Object.keys(data).forEach(k => { if (k.startsWith('hole_') || k.startsWith('stiffener_') || k === 'transverse_stiffeners') { opts[k] = data[k]; } });
                 vscode.postMessage({ command: 'runPurlinDesign', data: { ...loads, ...opts, Fy: data.Fy, Fu: data.Fu } });
                 return;
             }
@@ -4547,6 +4834,17 @@
                     return { error: '「경간별 Ix」(② 하중계산 탭) 개수(' + ixs.length + ')가 경간 수(' + spanLens.length + ')와 다릅니다.' };
                 }
                 data.I_span_in4 = ixs;
+            }
+            // 2026-11-28 결정 S1 · S2: 경간마다 단면 — 호스트 본문과 같은 함수(designState.spanSectionsPayload). 모든 경간 S1 이면 아무것도 넣지 않는다
+            {
+                const ds = globalThis.StcfsdDesignState;
+                const ss = [];
+                document.querySelectorAll('.span-tbl-sec').forEach((el) => { ss.push(/** @type {HTMLSelectElement} */ (el).value || 'S1'); });
+                const tplEl = /** @type {HTMLSelectElement|null} */ (document.getElementById('select-template'));
+                const pl = ds.spanSectionsPayload(ss, ds.collectSections(document, fromDisplay), tplEl ? tplEl.value : '');
+                if (pl.error) { return { error: pl.error }; }
+                if (pl.missing.length) { return { error: '단면 목록의 빈 칸: ' + pl.missing.map((m) => m.label).join(', ') + ' — 넣은 뒤 다시 실행하세요.' }; }
+                if (pl.data) { data.span_sections = pl.data.span_sections; data.sections = pl.data.sections; }
             }
             return data;
     }
@@ -5094,7 +5392,12 @@
             html += '<strong>Auto Parameters:</strong><br>';
             if (ap.deck) {
                 html += 'Deck: k&phi;=' + _ruv(ap.deck.kphi, 'rotStiff') + ' ' + _rul('rotStiff') +
-                    ', kx=' + _ruv(ap.deck.kx, 'latStiff') + ' ' + _rul('latStiff') + '<br>';
+                    ', kx=' + _ruv(ap.deck.kx, 'latStiff') + ' ' + _rul('latStiff')
+                    // 결정 S7′ · F2 의 2: 경간마다 단면이면 데크 강성은 한 번 — 가장 작은 kφ 와 가장 작은 kx 를 따로(값마다 그 단면, 설계 매뉴얼 II-1C)
+                    + (ap.deck_basis && ap.deck_basis.kphi_section_id && Array.isArray(ap.deck_basis.by_section) && ap.deck_basis.by_section.length > 1
+                        ? ' <span class="hint">(모든 경간 — ' + (ap.deck_basis.kphi_section_id === ap.deck_basis.kx_section_id
+                            ? '단면 ' + _esc(ap.deck_basis.kphi_section_id) + ' 의 값, kφ · kx 가 가장 작은 단면'
+                            : 'kφ 는 단면 ' + _esc(ap.deck_basis.kphi_section_id) + ', kx 는 단면 ' + _esc(ap.deck_basis.kx_section_id) + ' 의 값 — 가장 작은 값을 따로') + ')</span>' : '') + '<br>';
                 // V4-34: 경고(warnings)만 경고 색. 가정은 보통 글, 범위 안내(scope_notes — 「예비설계 추정」 등)는 접힌 글.
                 _deckNotes(ap.deck).warnings.forEach(w => {
                     html += '<span style="color:var(--vscode-editorWarning-foreground)">⚠ ' + _esc(userText(w)) + '</span><br>';
@@ -5359,6 +5662,109 @@
     }
 
     // 설계 결과 렌더링
+    /**
+     * 결정 T7: 설계 요약의 「웹 구멍」 · 전단(곡선 · kv · qs) · 「보강재 §G4.1」 · 「휨 + 비틀림 §H4」 묶음. 결과에 그 묶음이 있을 때만(입력이
+     * 없으면 아무것도 그리지 않는다). 평가하지 못한 것은 「평가하지 못함」 과 엔진의 까닭(한국어 · 화면 단위)으로 — 구멍 없는 값으로 판정하지 않는다.
+     */
+    function _webOptionsHtml(data) {
+        if (!data || typeof data !== 'object') { return ''; }
+        const dc = Array.isArray(data.design_checks) ? data.design_checks : [];
+        const chk = (id) => dc.find(c => c && c.id === id) || null;
+        const verdictTxt = (c) => {
+            if (!c) { return ''; }
+            const v = c.verdict === 'pass' ? _v3(true) : c.verdict === 'fail' ? _v3(false) : _v3(null);
+            // 2026-11-26: 구멍 없는 강도의 상한으로 낸 불합격(trusted false) — 평가한 비가 아니라 그 상한의 비라고, 까닭과 함께
+            const fwh = _U && typeof _U.failsWithoutHoles === 'function' && _U.failsWithoutHoles(c);
+            const why = c.verdict === 'not_evaluated' || c.verdict === 'not_applicable' || fwh ? _U.checkReason(c, _uo()) : null;
+            return '<span style="color:' + v.color + '">' + (c.verdict === 'not_applicable' ? '해당 없음' : v.short) + '</span>'
+                + (typeof c.ratio === 'number' ? (fwh ? ' (구멍 없는 강도로 낸 비 ' + c.ratio.toFixed(3) + ')' : ' (비 ' + c.ratio.toFixed(3) + ')') : '')
+                + (why ? '<div class="hint">' + _esc(userText(why)) + '</div>' : '');
+        };
+        const val = (v, u) => (typeof v === 'number' ? fmtVal(v, u) + ' ' + unitLabel(u) : '—');
+        // props-table 의 마지막 칸은 30px(단면 속성 표의 단위 칸) — 이 묶음의 값 칸은 글이 길어 그 폭을 쓰지 않는다(렌더 시험 web_options W1 · W2)
+        const row = (k, v) => '<tr><td>' + k + '</td><td style="width:auto;white-space:normal;font-size:11px;color:var(--vscode-foreground)">' + v + '</td></tr>';
+        const box = (title, rows) => '<div class="web-option-block" style="margin:6px 0;padding:4px 6px;border-left:3px solid var(--vscode-panel-border)">'
+            + '<b style="font-size:12px">' + title + '</b><table class="props-table" style="font-size:11px;margin-top:2px">' + rows + '</table></div>';
+        let h = '';
+        const ho = data.holes && typeof data.holes === 'object' ? data.holes : null;
+        if (ho) {
+            // 엔진 8f9126e: 간격을 주지 않으면 구멍 하나(비지지 길이마다 — holes.single_hole, s 는 null)
+            let r = row('구멍', (ho.shape === 'circular' ? '원형' : '비원형') + ' — dh ' + val(ho.dh, 'length') + ', Lh ' + val(ho.Lh, 'length')
+                + (ho.single_hole ? ', 간격 없음 — 비지지 길이마다 구멍 하나' : ', s ' + val(ho.s, 'length')) + (ho.web_offset ? ', 치우침 ' + val(ho.web_offset, 'length') : ''));
+            if (ho.Anet != null || ho.Sfnet != null) { r += row('순단면 (구멍 자리)', 'Anet ' + val(ho.Anet, 'area') + ', Sfnet ' + val(ho.Sfnet, 'modulus')); }
+            const el = [];
+            if (ho.Pcrl_h != null) { el.push('Pcrℓ,h ' + val(ho.Pcrl_h, 'force')); }
+            if (ho.Pcrd_h != null) { el.push('Pcrd,h ' + val(ho.Pcrd_h, 'force')); }
+            if (ho.Mcrl_h != null) { el.push('Mcrℓ,h ' + val(ho.Mcrl_h, 'moment')); }
+            if (ho.Mcrd_h != null) { el.push('Mcrd,h ' + val(ho.Mcrd_h, 'moment')); }
+            if (ho.tr_P != null || ho.tr_M != null) { el.push('tr ' + val(ho.tr_M != null ? ho.tr_M : ho.tr_P, 'length')); }
+            if (el.length) { r += row('구멍의 탄성 좌굴값', el.join(', ')); }
+            const ny = [];
+            if (ho.Pynet != null) { ny.push('Pynet ' + val(ho.Pynet, 'force')); }
+            if (ho.Mynet != null) { ny.push('Mynet ' + val(ho.Mynet, 'moment')); }
+            if (ny.length) { r += row('순단면 항복', ny.join(', ')); }
+            const fam = [];
+            if ('compression_evaluated' in ho) { fam.push('압축(§E2.5 · §E3.2.2 · §E4.2) ' + (ho.compression_evaluated ? '평가함' : '평가하지 못함')); }
+            if ('flexure_evaluated' in ho) { fam.push('휨(§F2.2 · §F3.2.2 · §F4.2) ' + (ho.flexure_evaluated ? '평가함' : '평가하지 못함')); }
+            const why = _N ? _N.lines(ho, { units: _unitSystem, lang: 'ko', lists: ['reasons'] }).map(l => userText(l.text)) : (ho.reasons || []);
+            r += row('평가', (fam.length ? fam.join(' · ') : (ho.evaluated ? '평가함' : '평가하지 못함'))
+                + (why.length ? why.map(s => '<div class="hint">' + _esc(s) + '</div>').join('') : ''));
+            const ap = chk('member.applicability.holes');
+            if (ap) { r += row('적용 범위', verdictTxt(ap)); }
+            // 엔진 8f9126e: 구멍 조항을 평가하지 못했지만 구멍 없는 강도의 상한으로도 넘은 검토 — 불합격은 그 상한에 선다
+            const fw = dc.filter(c => _U && typeof _U.failsWithoutHoles === 'function' && _U.failsWithoutHoles(c));
+            if (fw.length) {
+                r += row('판정', '<span style="color:' + _v3(false).color + '">' + _v3(false).short + '</span> — ' + _esc(_U.boundFailureText({ basis: 'holes' }))
+                    + '<div class="hint">' + fw.map(c => _esc(c.name_ko || c.id) + ' (' + _esc(c.id) + ') 비 ' + (typeof c.ratio === 'number' ? c.ratio.toFixed(3) : '—')).join('<br>') + '</div>');
+            }
+            h += box('웹 구멍 — 부록 2 · 구멍이 있는 부재', r);
+        }
+        const sh = data.shear && typeof data.shear === 'object' && ('curve' in data.shear || 'evaluated' in data.shear) ? data.shear : null;
+        if (sh) {
+            let r = row('곡선', _esc(String(sh.curve || '—')) + (sh.equation ? ' — ' + _esc(String(sh.equation)) : ''));
+            r += row('kv', typeof sh.kv === 'number' ? sh.kv.toFixed(3) + (sh.kv_equation ? ' (' + _esc(String(sh.kv_equation)) + ')' : '') : '—');
+            if (sh.qs != null) { r += row('qs (§G3)', Number(sh.qs).toFixed(3) + (sh.c != null ? ', c ' + val(sh.c, 'length') : '')); }
+            if (sh.reference_only) { r += row('참고값', 'Vn ' + val(sh.Vn, 'force') + ' — 보강하지 않은 웹(§G2.1), 판정에 쓰지 않음'); }
+            const bw = sh.bound_without_holes && typeof sh.bound_without_holes === 'object' ? sh.bound_without_holes : null;
+            if (bw) {
+                r += row('구멍 없는 웹의 강도 (§G3 상한)', 'Vn ≤ ' + val(bw.Vn, 'force') + ', 설계강도 ≤ ' + val(bw.design_strength, 'force')
+                    + (bw.fails ? ' — 소요가 넘음(구멍이 있어도 불합격)' : ' — 소요가 넘지 않음(§G3 을 평가하지 못해 판정 없음)')
+                    + (bw.h2_fails ? '; §H2 도 넘음' : ''));
+            }
+            // 엔진 H2 후속: 그 전단 묶음의 범위 글은 평가한 것과 맞다(§G3 적용 · 평가하지 못함 · 보강된 웹)
+            const scp = _scopeList(sh);
+            if (scp.length) { r += row('적용 범위', scp.map(s => '<div class="hint">' + _esc(s) + '</div>').join('')); }
+            const sc = chk('member.shear');
+            if (sc) { r += row('전단 판정', verdictTxt(sc)); }
+            h += box('전단 — ' + (sc && sc.clause ? '§' + _esc(sc.clause) : '§G2'), r);
+        }
+        const st = data.web_stiffeners && typeof data.web_stiffeners === 'object' ? data.web_stiffeners : null;
+        if (st) {
+            let r = '';
+            if (st.a != null) { r += row('간격 a', val(st.a, 'length') + (typeof st.a_over_h === 'number' ? ' — a/h ' + st.a_over_h.toFixed(3) + ' ≤ ' + Number(st.a_over_h_limit).toFixed(3) : '')); }
+            if (st.Is != null || st.Is_min != null) { r += row('Is ≥ Is,min (Eq. G4.1-1)', val(st.Is, 'inertia') + ' / ' + val(st.Is_min, 'inertia')); }
+            if (st.As != null || st.Ast_min != null) { r += row('Ast ≥ 최소 (Eq. G4.1-2)', val(st.As, 'area') + ' / ' + val(st.Ast_min, 'area')); }
+            r += row('§G4.1', verdictTxt(chk('member.web_stiffeners')) || (st.conforming === true ? '맞음' : st.conforming === false ? '맞지 않음' : '평가하지 못함'));
+            h += box('횡방향 웹 보강재 — §G4.1', r);
+        }
+        const to = data.torsion && typeof data.torsion === 'object' ? data.torsion : null;
+        if (to) {
+            let r = row('길', to.route === 'computed' ? '편심 하중으로(비틀림 단순 지지 한 경간)' : '응력을 직접');
+            if (to.evaluated) {
+                r += row('R', Number(to.R).toFixed(3) + (to.increased_15pct ? ' (웹–플랜지 이음 15 % 증가, 증가 전 ' + Number(to.R_raw).toFixed(3) + ')' : ''));
+                r += row('Mn = R·Mnℓo', val(to.Mn, 'moment') + ' → 설계강도 ' + val(to.design_strength, 'moment') + ', 소요 ' + val(to.Mu, 'moment'));
+                if (to.route === 'computed') {
+                    r += row('지배 점', '절점 ' + _esc(String(to.node)) + ', 경간의 ' + val(to.y, 'length') + ' — fb ' + val(to.f_bending, 'stress') + ', fw ' + val(to.f_torsion, 'stress'));
+                } else {
+                    r += row('그 점의 응력', 'fb ' + val(to.f_bending, 'stress') + ', fw ' + val(to.f_torsion, 'stress'));
+                }
+            }
+            r += row('§H4', verdictTxt(chk('member.bending_torsion')) || '—');
+            h += box('휨 + 비틀림 — §H4', r);
+        }
+        return h;
+    }
+
     function renderDesignResult(data) {
         data = _fp(data);
         if (!data) { return; }
@@ -5378,8 +5784,18 @@
 
         // 에러 처리
         if (data.error) {
-            summaryEl.innerHTML = `<p style="color:var(--vscode-errorForeground)">${_esc(_engineErrorText(data.error))}</p>`;
+            // 2026-11-26: 구멍 · 보강재 · 비틀림 입력의 잘못된 값(엔진 'holes: …' · 'stiffeners: …' · 'torsion: …')은 어느 구역 · 칸 · 무엇이 틀렸는지
+            const _ie = _U && typeof _U.inputErrorText === 'function' ? _U.inputErrorText(data.error) : null;
+            summaryEl.innerHTML = `<p style="color:var(--vscode-errorForeground)">${_esc(_ie || _engineErrorText(data.error))}</p>`
+                + (_ie ? '<p class="hint">결과가 없습니다 — 그 칸을 고친 뒤 다시 실행하세요. 앞의 결과는 지금 입력의 결과가 아니라 지웠습니다.</p>' : '');
             stepsEl.innerHTML = '';
+            // 앞 결과의 조합 · 웹 크리플링 카드와 참조 조항을 남기지 않는다(지금 입력의 결과가 아니다)
+            if (interTitle) { interTitle.style.display = 'none'; }
+            if (interEl) { interEl.style.display = 'none'; interEl.innerHTML = ''; }
+            if (refEl) { refEl.innerHTML = ''; }
+            _lastReport = '';
+            if (btnCopyReport) { btnCopyReport.style.display = 'none'; }
+            if (_ie) { setStatus(_ie, 'error'); }
             return;
         }
 
@@ -5415,24 +5831,72 @@
         // 퍼린 구간별 결과 (host design_purlin) — 구간마다 aisi_design 한 번
         if (data.purlin_mode && Array.isArray(data.purlin_regions) && data.purlin_regions.length > 0) {
             const _dsLbl = dm === 'LRFD' ? 'φMn' : 'Mn/Ω';
-            summaryHtml += '<table class="props-table" style="font-size:11px;margin-bottom:6px"><tr><th>구간</th><th>Ly</th><th>Cb</th><th>Mu</th><th>' + _dsLbl + ' (부재당)</th><th>β</th><th>이용률</th><th>판정</th></tr>';
+            // 2026-11-28 결정 S1 · S3′: 경간마다 단면이면 「단면」 열 — 랩은 두 부재(단면 · 강도의 몫, 강도의 합의 비 = 판정), 단면이 바뀌는 구간은 검토한 단면들
+            const _ms = Array.isArray(data.purlin_sections);
+            summaryHtml += '<table class="props-table" id="purlin-region-table" style="font-size:11px;margin-bottom:6px"><tr><th>구간</th>' + (_ms ? '<th>단면</th>' : '') + '<th>Ly</th><th>Cb</th><th>Mu</th><th>' + _dsLbl + ' (부재당)</th><th>β</th><th>이용률</th><th>판정</th></tr>';
             data.purlin_regions.forEach(rg => {
                 const rr = rg && rg.result ? rg.result : null;
                 const rv = _v3(rr);
                 const isGov = data.purlin_governing && rg.id != null && data.purlin_governing.id === rg.id;
+                const lm = _ms && Array.isArray(rg.lap_members) ? rg.lap_members : null;
+                const _sos = rg.sum_of_strengths && typeof rg.sum_of_strengths === 'object' ? rg.sum_of_strengths : null;
+                const _pc = (v) => (typeof v === 'number' ? (v * 100).toFixed(1) + '%' : '평가하지 못함');
+                const _rst = rg.reference_stiffness_share && typeof rg.reference_stiffness_share.ratio === 'number' ? rg.reference_stiffness_share : null;
+                const secCell = !_ms ? '' : '<td class="purlin-sec-cell"' + (_rst
+                    ? ' title="' + _esc('참고(강성의 몫 I_i / (I_1 + I_2) 로 부재마다 본 값): 지배 부재 ' + (_rst.ratio * 100).toFixed(1) + '% — 판정이 아님') + '"' : '') + '>'
+                    + (lm ? lm.map((m, i) => _esc(m.section_id) + (typeof m.share === 'number' ? ' ' + (m.share * 100).toFixed(1) + '%' : '') + (rg.governing_member === i + 1 ? '＊' : '')).join(' | ')
+                        + (rg.lap_evaluable === false ? '<br><span class="hint">춤이 달라 평가하지 못함</span>' : '')
+                        + (_sos ? '<br><span class="hint">강도의 합: 휨 ' + _pc(_sos.flexure_ratio) + (_sos.Vu != null ? ' · 전단 ' + _pc(_sos.shear_ratio) : '')
+                            + (typeof _sos.bending_shear_ratio === 'number' ? ' · §H2 ' + (_sos.bending_shear_ratio * 100).toFixed(1) + '%' : '') + '</span>' : '')
+                        + (_rst ? '<br><span class="hint">강성의 몫 ' + (_rst.ratio * 100).toFixed(1) + '% (참고)</span>' : '')
+                    : Array.isArray(rg.sections_checked) ? rg.sections_checked.map((m) => _esc(m.section_id)).join(' · ') + '<br><span class="hint">단면마다 검토</span>'
+                    : _esc(rg.section_id || '—')) + '</td>';
                 summaryHtml += '<tr' + (isGov ? ' style="font-weight:700;background:rgba(79,195,247,0.1)"' : '') + '>'
                     + '<td>' + _esc(_regionLabel(rg.label || rg.kind || '')) + (rg.R_uplift != null ? ' (R=' + rg.R_uplift + ')' : '') + '</td>'
+                    + secCell
                     + '<td>' + (rg.Ly_in != null ? fmtVal(rg.Ly_in, 'length') : '—') + '</td>'
                     + '<td>' + (rg.Cb != null ? Number(rg.Cb).toFixed(2) : '—') + '</td>'
-                    + '<td>' + (rg.members === 2
+                    + '<td>' + (lm
+                        ? lm.map((m) => fmtVal(m.Mu, 'moment') + ' ' + _esc(m.section_id)).join('<br>') + '<br><span class="hint">합 ' + fmtVal(rg.Mu, 'moment') + '</span>'
+                        : rg.members === 2
                         ? fmtVal(rg.Mu / 2, 'moment') + ' /부재<br><span class="hint">합 ' + fmtVal(rg.Mu, 'moment') + '</span>'
                         : fmtVal(rg.Mu, 'moment')) + '</td>'
-                    + '<td>' + (rr && !rr.error ? fmtVal(rr.design_strength, 'moment') : '—') + '</td>'
+                    // 검증 F2 의 6: 서로 다른 두 단면의 랩은 한 부재의 강도가 아니라 두 부재 설계 강도의 합(항 · Σ) — 같은 두 부재 · 한 단면은 그대로
+                    + '<td>' + (lm && _sos && lm.length === 2 && rg.lap_evaluable !== false && lm[0].section_id !== lm[1].section_id && Array.isArray(_sos.design_strengths)
+                        ? _sos.design_strengths.map((v, i) => (typeof v === 'number' ? fmtVal(v, 'moment') : '—') + ' ' + _esc(lm[i].section_id)).join('<br>')
+                            + '<br><span class="hint">Σ ' + (typeof _sos.design_strength_sum === 'number' ? fmtVal(_sos.design_strength_sum, 'moment') : '—') + '</span>'
+                        : rr && !rr.error ? fmtVal(rr.design_strength, 'moment') : '—') + '</td>'
                     + '<td>' + (typeof rg.beta_dist === 'number' ? rg.beta_dist.toFixed(3) : '—') + '</td>'
-                    + '<td>' + (rr && typeof rr.utilization === 'number' ? (rr.utilization * 100).toFixed(1) + '%' : '—') + '</td>'
+                    // 2026-11-26: 구간 결과도 같은 규칙(utils.lengthBoundFailure) — 구멍 없는 강도로도 넘은 구간은 그 상한의 비(＊)
+                    + '<td>' + (() => {
+                        const _rb = rr && _U && typeof _U.lengthBoundFailure === 'function' ? _U.lengthBoundFailure(rr) : null;
+                        if (_rb) { return '<span title="' + _esc(_U.boundFailureText(_rb) + (_rb.governing_check ? ' — ' + _rb.governing_check : '')) + '">' + (_rb.ratio * 100).toFixed(1) + '%＊</span>'; }
+                        return rr && typeof rr.utilization === 'number' ? (rr.utilization * 100).toFixed(1) + '%' : '—';
+                    })() + '</td>'
                     + '<td style="color:' + rv.color + '">' + (rr && rr.error ? '오류: ' + _esc(rr.error) : rv.short) + '</td></tr>';
             });
-            summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: Ly ' + unitLabel('length') + ', Mu·설계강도 ' + unitLabel('moment') + '. 굵은 행 = 지배 구간. 랩 구간은 두 부재가 M · V 를 반씩 진다는 가정(아래 가정)으로 부재당 Mu 와 한 부재 강도를 비교. β = §2.3.3.3 뒤틀림 모멘트 구배 계수(하중 분석의 구간 M1/M2 · Ly).</div>';
+            summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: Ly ' + unitLabel('length') + ', Mu·설계강도 ' + unitLabel('moment') + '. 굵은 행 = 지배 구간. '
+                + (_ms ? '랩 구간은 두 부재 강도의 합으로 판정(설계 매뉴얼 II-1A · II-2A 의 가정 (c)) — 부재마다 강도의 몫(단면 열의 %)을 그 단면으로 검토, ＊ = 지배 부재, 「강성의 몫」 은 참고. 춤이 다른 랩 · 부재 강도를 얻지 못한 랩은 평가하지 못함.'
+                    : '랩 구간은 두 부재가 M · V 를 반씩 진다는 가정(아래 가정)으로 부재당 Mu 와 한 부재 강도를 비교.')
+                + ' β = §2.3.3.3 뒤틀림 모멘트 구배 계수(하중 분석의 구간 M1/M2 · Ly).</div>';
+            // 결정 S1 · S8: 단면마다의 성질 · 좌굴값(서명곡선은 검토 화면에서 단면을 골라 본다)
+            if (_ms) {
+                const ids = Array.isArray(data.purlin_span_sections) ? data.purlin_span_sections : [];
+                summaryHtml += '<div style="font-weight:600;font-size:11px;margin:4px 0 2px">경간마다 단면: ' + ids.map((id, i) => (i + 1) + ' ' + _esc(id)).join(' · ') + '</div>'
+                    + '<table class="props-table" id="purlin-sections-table" style="font-size:11px;margin-bottom:6px"><tr><th>단면</th><th>경간</th><th>t</th><th>Ix</th><th>Sf</th><th>+M Mcrl</th><th>+M Mcrd</th><th>−M Mcrl</th><th>−M Mcrd</th><th>kφ</th></tr>';
+                data.purlin_sections.forEach((x) => {
+                    const p = x.dsm_pos || {}, n = x.dsm_neg || {}, dk = x.deck_used || {};
+                    const t = x.params && typeof x.params.t === 'number' ? x.params.t : null;
+                    const f = (v, u) => (typeof v === 'number' && isFinite(v) ? fmtVal(v, u) : '—');
+                    summaryHtml += '<tr><td>' + _esc(x.id) + (x.name ? ' <span class="hint">' + _esc(x.name) + '</span>' : (x.source === 'model' ? ' <span class="hint">모델</span>' : '')) + '</td>'
+                        + '<td>' + (x.spans || []).map((j) => j + 1).join(', ') + '</td><td>' + f(t, 'thickness') + '</td>'
+                        + '<td>' + f(x.props && x.props.Ixx, 'inertia') + '</td><td>' + f(x.props && x.props.Sf, 'modulus') + '</td>'
+                        + '<td>' + f(p.Mxxcrl, 'moment') + '</td><td>' + f(p.Mxxcrd, 'moment') + '</td><td>' + f(n.Mxxcrl, 'moment') + '</td><td>' + f(n.Mxxcrd, 'moment') + '</td>'
+                        + '<td>' + f(dk.kphi, 'rotStiff') + '</td></tr>';
+                });
+                summaryHtml += '</table><div class="hint" style="font-size:10px;margin-bottom:4px">단위: t ' + unitLabel('thickness') + ', Ix ' + unitLabel('inertia') + ', Sf ' + unitLabel('modulus')
+                    + ', Mcr ' + unitLabel('moment') + ', kφ ' + unitLabel('rotStiff') + '. 좌굴값은 그 단면의 S-S 서명곡선(설계 Fy). 데크 강성은 모든 경간에 한 값 — 쓰이는 단면 가운데 가장 작은 kφ 와 가장 작은 kx 를 따로 골라 한 번(설계 매뉴얼 II-1C).</div>';
+            }
         }
 
         // Strength comparison cards for compression/flexure
@@ -5491,6 +5955,14 @@
             summaryHtml += '<b style="color:#4fc3f7">' + designLabel + ' = ' + (designVal != null ? fmtVal(designVal, uType) : '-') + ' ' + unit + '</b>';
             summaryHtml += ' <span style="color:var(--vscode-descriptionForeground)">(' + mode + ')</span>';
             summaryHtml += '</div>';
+            // 2026-11-26: 구멍 조항을 평가하지 못한 결과 — 위 카드는 구멍 없는 계산(판정에 쓰지 않는 참고값)
+            if (data.holes_evaluated === false) {
+                const _hb = data.holes_strength_bound && typeof data.holes_strength_bound === 'object' ? data.holes_strength_bound : null;
+                const _hbv = _hb ? (isC ? _hb.Pn : _hb.Mn) : null;
+                summaryHtml += '<div class="hint" style="font-size:11px;color:#ff9800">구멍 조항을 평가하지 못함 — 위 강도는 구멍 없는 계산(참고, 판정에 쓰지 않음)'
+                    + (typeof _hbv === 'number' ? '. 구멍이 있는 강도의 상한(구멍 없는 강도): ' + (isC ? 'Pn' : 'Mn') + ' ≤ ' + fmtVal(_hbv, uType) + ' ' + unit
+                        + ', 설계강도 ≤ ' + fmtVal(_hb.design_strength, uType) + ' ' + unit : '') + '</div>';
+            }
         } else if (mt === 'tension') {
             const fU = unitLabel('force');
             summaryHtml += '<table style="width:100%;font-size:12px">';
@@ -5545,6 +6017,11 @@
             summaryHtml += '<div class="utilization-fill ' + cls + '" style="width:' + Math.min(pct, 100) + '%"></div>';
             summaryHtml += '<span class="utilization-label">' + pct + '% ' + verdictOf(data).label + '</span>';
             summaryHtml += '</div>';
+            // 2026-11-26: 구멍 없는 강도의 상한으로 낸 확실한 불합격 — 그 비 · 검토 · 까닭(utils.lengthBoundFailure 의 basis 'holes')
+            if (_lbf && _lbf.basis === 'holes') {
+                summaryHtml += '<div class="hint" style="font-size:11px;color:var(--vscode-errorForeground)">NG — ' + _esc(_U.boundFailureText(_lbf))
+                    + (_lbf.governing_check ? ' (지배: ' + _esc(_lbf.governing_check) + ', 비 ' + _lbf.ratio.toFixed(3) + ')' : '') + '</div>';
+            }
         }
 
         // ── 정모멘트 구간: 부모멘트와 동일한 양식 (강도 카드 + 이용률 바) ──
@@ -5607,12 +6084,15 @@
                 const cv = _v3(c && typeof c === 'object' ? c : null);
                 // 엔진 E-1: 빈 길이를 가정해 낸 항목(reference_only)은 판정이 아니다 — 비는 참고값, 까닭을 함께
                 const refOnly = !!(c && c.reference_only);
-                const why = c && c.length_assumed ? (c.reason_ko || (typeof c.reason === 'string' ? c.reason : '')) : '';
-                summaryHtml += '<tr><td>' + _esc(c && c.name) + (why ? '<div class="hint">' + _esc(why) + '</div>' : '') + '</td><td>'
+                // 2026-11-26: 구멍 없는 강도로도 넘은 항목(fails_without_holes)도 그 까닭을
+                const why = c && (c.length_assumed || c.fails_without_holes) ? (c.reason_ko || (typeof c.reason === 'string' ? c.reason : '')) : '';
+                // 까닭(긴 글)은 줄을 바꾼다 — 첫 칸은 nowrap 이라 그대로면 비 · 판정 칸이 화면 밖으로 밀린다(렌더 시험 web_options W2)
+                summaryHtml += '<tr><td' + (why ? ' style="white-space:normal"' : '') + '>' + _esc(c && c.name) + (why ? '<div class="hint" style="white-space:normal">' + _esc(why) + '</div>' : '') + '</td><td>'
                     + (c && typeof c.ratio === 'number' ? c.ratio.toFixed(3) + (refOnly ? ' (참고)' : '') : '—') + '</td><td style="color:' + cv.color + '">' + cv.short + '</td></tr>';
             });
             summaryHtml += '</table>';
         }
+        summaryHtml += _webOptionsHtml(data);
         if (data.auto_generated_section) {
             summaryHtml += '<div class="warn-badge" style="margin:4px 0">⚠ 단면 성질을 템플릿 치수로 자동 생성했습니다 (section_source=' + _esc(data.section_source || 'auto') + ')</div>';
         }
@@ -5802,6 +6282,13 @@
                 <table style="width:100%;font-size:12px;margin-top:4px">
                     ${_summaryRow(((wc.section_family === 'built_up_i' || (wc.n_webs || 1) > 1) ? 'Pn (web crippling, 웨브 ' + (wc.n_webs || 2) + '개 합계)' : 'Pn (web crippling)'),
                         wc.Pn != null ? wc.Pn : (wc.error ? '미평가' : null), wc.Pn != null ? _rul('force') : '', wc.Pn != null ? '' : '#ff9800', 'force')}
+                    ${typeof wc.Rc === 'number' ? _summaryRow('§G6 Rc (구멍)', wc.Rc.toFixed(4) + (wc.g6 && wc.g6.equation ? ' — Eq. ' + _esc(wc.g6.equation) : ''), '') : ''}
+                    ${wc.Pn_without_holes != null ? _summaryRow('Pn (구멍 없음, §G5)', wc.Pn_without_holes, _rul('force'), '', 'force') : ''}
+                    ${wc.evaluated === false ? _summaryRow('§G6', '평가하지 못함' + (wc.reason ? ' — ' + _esc(userText(typeof wc.reason === 'string' ? wc.reason : (wc.reason_ko || ''))) : ''), '', '#ff9800') : ''}
+                    ${(wc.g6 || wc.bound_without_holes || wc.evaluated === false) && _scopeList(wc).length ? _summaryRow('적용 범위', _scopeList(wc).map(s => _esc(s)).join('; '), '') : ''}
+                    ${wc.bound_without_holes && typeof wc.bound_without_holes === 'object' ? _summaryRow('Pn 구멍 없음 (§G6 상한)', fmtVal(wc.bound_without_holes.Pn, 'force') + ' ' + _rul('force')
+                        + (wc.bound_without_holes.fails ? ' — P 가 넘음(구멍이 있어도 불합격)' : ' — P 가 넘지 않음(판정 없음)') + (wc.bound_without_holes.h3_fails ? '; §H3 도 넘음' : ''), '',
+                        wc.bound_without_holes.fails || wc.bound_without_holes.h3_fails ? _v3(false).color : '#ff9800') : ''}
                     ${_summaryRow('Equation', wc.equation || '-', '')}
                     ${_summaryRow('Table', wc.table || '-', '')}
                     ${_summaryRow('Section family', wc.section_family || wc.section_type || '-', '')}
@@ -6088,6 +6575,8 @@
                 else if (sys === 'SI' && _unitSystem !== 'SI') switchToSI();
             },
             afterRestore: _fireRestoredInputUpdates,
+            // 결정 S1: 단면 목록(경간 표의 선택지가 그것을 쓴다 — 표보다 먼저)
+            renderSections: renderSectionList,
             // V4-10: 복원 전에 모든 칸을 처음 값으로 — 파일에 없는 칸이 이전 프로젝트 값을 지니지 않게.
             initialInputs: _initialInputs,
         }, data);
@@ -6104,7 +6593,7 @@
             // 복원(또는 처음 값으로 되돌림) 뒤에도 해석 조건 칸은 지금 모델을 따른다.
             _syncAnalysisWidgetsFromModel(model);
             ['select-member-type', 'select-template', 'select-load-case', 'conn-single-type',
-                'select-deck-type', 'chk-beta-dist', 'chk-cold-work'].forEach(id => {
+                'select-deck-type', 'chk-beta-dist', 'chk-cold-work', 'select-hole-shape', 'select-stiffener-mode', 'select-torsion-mode'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) { el.dispatchEvent(new Event('change', { bubbles: true })); }
             });

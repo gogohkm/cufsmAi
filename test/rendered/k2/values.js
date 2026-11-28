@@ -55,6 +55,14 @@ const NON_DEFAULT = {
   wcN: 3.5, wcR: 0.1875, wcP: 2,     // in, in, kips
   wcSupport: 'IOF', wcFastened: 'unfastened', wcWebConfig: 'nested_z', wcFamily: 'Z', wcFlangeCondition: 'unstiffened',
   wcLo: 2, wcEdgeDistance: 1.5, wcNWebs: 2, wcFastenerSpacing: 12,
+  // 결정 T7(2026-11-26): 웹 구멍 — Design Manual II-10 의 비원형 구멍(1.5 × 4.5 in, s = 24 in, r 0.25 in, 끝 9.75 in, x 7.25 in)
+  holeShape: 'noncircular', holeDepth: 1.5, holeLength: 4.5, holeSpacing: 24, holeEndDistance: 9.75, holeWebOffset: 0.25,
+  holeCornerRadius: 0.25, holeEdgeStiffened: true, holeBearingDistance: 7.25, holeWithinBearing: true,
+  // 횡방향 웹 보강재 — 쌍, a = 10 in, Is 0.05 in⁴, Ast 0.5 in², Fys 50 ksi
+  stiffenerMode: 'present', stiffenerSpacing: 10, stiffenerKind: 'pair', stiffenerIs: 0.05, stiffenerArea: 0.5, stiffenerFy: 50,
+  // §H4 — 길 ②(편심 하중; 길 ① 의 칸도 저장된다): Design Manual II-11 의 e 1.05 in · L 300 in · 등분포
+  torsionMode: 'eccentric', torsionFBending: -4.1, torsionFTorsion: -1.29, torsionFBendingMax: -4.5, torsionAtJunction: true,
+  torsionEccentricity: 1.05, torsionSpan: 300, torsionLoad: 'uniform', torsionSupport: 'simple',
   // 템플릿 — 8ZS2.25x059 (II-2A): H 8, B 2.25, D 0.91, t 0.059, r 0.1875, 립 50°
   templateType: 'lippedz', tplH: 8, tplB: 2.25, tplD: 0.91, tplT: 0.059, tplR: 0.1875, tplQlip: 50,
   // 해석 탭

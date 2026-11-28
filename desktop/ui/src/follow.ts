@@ -78,6 +78,8 @@ export function itemOfKey(tab: Tab, key: string): Item | null {
     }
     return { kind: 'result', id: 'member_design' };
   }
+  // 2026-11-28 결정 S8: 퍼린 단면(그 결과의 단면 블록) — 보기 계약의 어휘로는 부재 검토 결과
+  if (key === 'psec' || key.startsWith('psec:')) { return { kind: 'result', id: 'member_design' }; }
   if (tab === 'model' && MODEL_ID[key]) { return { kind: 'model', id: MODEL_ID[key] }; }
   if (RESULT_ID[key]) { return { kind: key === 'props' ? 'model' : 'result', id: RESULT_ID[key] }; }
   return null;
