@@ -4171,7 +4171,7 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
       detail: `${pr.error ? `design_purlin ${short(pr.error)} · ` : ''}호스트 ${JSON.stringify(host.spans?.spanSections)} · S2 t ${host.sections?.[0]?.params?.t} ${hostOk} | 트리 「${t.ssName}」 ${t.ss} [${t.ssTag}] · 「${t.list}」 · 「${t.s2t}」 ${treeOk}`
         + ` | 정보 창 열 ${info.head.join('/')} · 칸 ${info.cells.join(',')} · 목록 ${info.rows.join(',')} · Ix(S2) ${info.ix2} ${infoOk} | 수 ${n.compared}개 = get_case_inputs · MCP(${JSON.stringify(n.bySrc)})${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
   });
-  await step('s03 퍼린 결과 — 구간마다 단면 꼬리표(트리 · 구간 표), 랩(S1|S2)의 두 부재 줄(단면 · 경간 · 역할 · 몫 · Mu · Vu · 판정비 · 판정)과 지배 부재 표시, 몫의 근거, 강도의 합은 「참고 — 판정에 쓰지 않음」(판정비가 아니다), 수 = MCP(SI)', 's03_regions_lap_members', async () => {
+  await step('s03 퍼린 결과 — 구간마다 단면 꼬리표(트리 · 구간 표), 랩(S1|S2)의 판정 = 두 부재 강도의 합(휨 Mu / Σ φMn · 전단 Vu / Σ φVn · 구간의 판정비 · 판정), 두 부재 줄(단면 · 경간 · 역할 · φMn · φVn · M 몫 · V 몫 · 판정비 · 판정)과 지배 부재, 근거의 글, 강성의 몫은 「참고 — 판정에 쓰지 않음」(판정비가 아니다), 수 = MCP(SI)', 's03_regions_lap_members', async () => {
     const regs = sTwo?.regions ?? [];
     const li = regs.findIndex(g => Array.isArray(g.lap_members) && g.lap_members.length === 2 && g.lap_members[0].section_id !== g.lap_members[1].section_id && g.result?.pass !== null);
     const pi = regs.findIndex(g => g.kind === 'positive' && g.section_id === 'S2');
@@ -4179,9 +4179,18 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const k = await firstKey(`purlin:${li}`);
     await select('result', k);
     await sleep(300);
-    const s = await ev(`(()=>{const b=document.querySelector('#info [data-region-sec]'); const ms=[...(b?.querySelectorAll('tr[data-lap-member]')??[])];
-      return {block:!!b, members:ms.map(r=>({i:+r.dataset.lapMember, gov:r.dataset.gov==='1', sec:r.children[1].textContent.trim().split(' ')[0], span:r.children[2].textContent.trim(), role:r.children[3].dataset.role ?? '', roleTip:r.children[3].dataset.tip ?? '', v:r.querySelector('[data-member-verdict]')?.dataset.memberVerdict})),
-        basis:b?.querySelector('[data-share-basis]')?.textContent ?? '', ref:b?.querySelector('[data-sum-ref]')?.textContent ?? '', refV:b?.querySelector('[data-sum-ref] [data-ratio-ref]')?.dataset.ratioRef ?? null, refIsRatio:!!b?.querySelector('[data-sum-ref] [data-ratio]'),
+    // 랩의 두 부재 — 부재가 열(정보 창이 좁다): 머리 칸 th[data-lap-member] · 칸마다 data-m(부재) · data-f(무엇)
+    const s = await ev(`(()=>{const b=document.querySelector('#info [data-region-sec]'); const ms=[...(b?.querySelectorAll('th[data-lap-member]')??[])];
+      const c=(j,f)=>b.querySelector('[data-m="'+j+'"][data-f="'+f+'"]');
+      return {block:!!b, members:ms.map(h=>{const j=+h.dataset.lapMember; return {i:j, gov:h.dataset.gov==='1', sec:c(j,'sec')?.textContent.trim() ?? '', span:c(j,'span')?.textContent.trim() ?? '', role:c(j,'role')?.dataset.role ?? '', roleTip:c(j,'role')?.dataset.tip ?? '', v:c(j,'verdict')?.dataset.memberVerdict};}),
+        shares:ms.map(h=>{const j=+h.dataset.lapMember; return [c(j,'shareM')?.querySelector('[data-share-m] [data-src]')?.dataset.src ?? '', c(j,'shareV')?.querySelector('[data-share-v] [data-src]')?.dataset.src ?? ''];}),
+        strengths:ms.map(h=>[...b.querySelectorAll('[data-m="'+h.dataset.lapMember+'"] [data-src]')].map(e=>e.dataset.src.split('.').pop())),
+        fl:+(b?.querySelector('[data-lap-sum] [data-sum-flexure] [data-ratio]')?.dataset.v ?? NaN), sh:+(b?.querySelector('[data-lap-sum] [data-sum-shear] [data-ratio]')?.dataset.v ?? NaN),
+        gv:+(b?.querySelector('[data-lap-sum] [data-sum-gov] [data-ratio]')?.dataset.v ?? NaN), gvV:b?.querySelector('[data-sum-verdict]')?.dataset.sumVerdict ?? null,
+        parts:[...(b?.querySelectorAll('[data-lap-sum] [data-src]')??[])].map(e=>e.dataset.src.replace(/^purlin:regions\\.\\d+\\./,'')),
+        basis:b?.querySelector('[data-strength-basis]')?.textContent ?? '', basisKey:b?.querySelector('[data-strength-basis]')?.dataset.strengthBasis ?? '',
+        ref:b?.querySelector('[data-stiff-ref]')?.textContent ?? '', refV:[...(b?.querySelectorAll('[data-stiff-ref] [data-ratio-ref]')??[])].map(e=>+e.dataset.ratioRef),
+        refIsRatio:!!b?.querySelector('[data-stiff-ref] [data-ratio]') || !!b?.querySelector('[data-stiff-ref] .verdict'), old:!!b?.querySelector('[data-share-basis], [data-sum-ref]'),
         label:${S}.state.runs.find(x=>x.key==='purlin:${li}')?.label ?? '', loc:document.querySelector('#info')?.innerText.includes('단면 ')};})()`);
     const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
     const tags = await ev(`${S}.state.runs.filter(x=>x.area==='purlin' && x.key!=='purlin').map(x=>x.label.split(' · ').pop())`);
@@ -4193,61 +4202,99 @@ async function screenSteps({ br, serve, api, ready, token, tmp, csd, mcp, design
     const gov = (lapR?.governing_member ?? 0) - 1;
     const memOk = s.members.length === 2 && s.members.every((x, j) => x.sec === m[j].section_id && x.span === String(m[j].span + 1) && x.gov === (j === gov) && x.v === (m[j].pass === true ? 'ok' : m[j].pass === false ? 'ng' : 'none'))
       && s.members.every((x, j) => x.role === String(m[j].role ?? '')) && s.members.some(x => /이어지는 부재/.test(x.roleTip)) && s.members.some(x => /랩 끝에서 끝나는 부재/.test(x.roleTip));
-    const refOk = /참고 — 판정에 쓰지 않음/.test(s.ref) && s.refV !== null && relClose(Number(s.refV), lapR.reference_sum_of_strengths.ratio) && !s.refIsRatio;
+    // 결정 S3′: 판정 = 두 부재 강도의 합 — 휨 · 전단의 비 · 구간의 판정비 · 판정이 호스트의 것, 두 몫(M · V)과 두 강도(φMn · φVn)가 부재마다(수는 아래 MCP 와 견줌)
+    const sum = lapR?.sum_of_strengths ?? {};
+    const want = ['Mu', 'design_strengths.0', 'design_strengths.1', 'design_strength_sum', 'flexure_ratio', 'Vu', 'shear_strengths.0', 'shear_strengths.1', 'shear_strength_sum', 'shear_ratio', 'result.utilization'];
+    const sumOk = lapR?.strength_basis === 'sum_of_strengths' && relClose(s.fl, sum.flexure_ratio) && relClose(s.sh, sum.shear_ratio) && relClose(s.gv, lapR.result.utilization)
+      && s.gvV === (lapR.result.pass === true ? 'ok' : lapR.result.pass === false ? 'ng' : 'none') && want.every(k => s.parts.includes(k.startsWith('result.') ? k : `sum_of_strengths.${k}`))
+      && s.basisKey === 'sum_of_strengths' && /두 부재 강도의 합/.test(s.basis) && /II-1A/.test(s.basis) && !s.old
+      && s.shares.every(([a, b], j) => a.endsWith(`lap_members.${j}.share`) && b.endsWith(`lap_members.${j}.share_V`)) && s.strengths.every(x => x.includes('design_strength') && x.includes('shear_strength'));
+    const rm = lapR?.reference_stiffness_share?.members ?? [];
+    const refOk = /참고 — 판정에 쓰지 않음/.test(s.ref) && /강성/.test(s.ref) && s.refV.length === rm.length && rm.length === 2 && rm.every((x, j) => relClose(s.refV[j], x.utilization)) && !s.refIsRatio;
     const tagOk = JSON.stringify(tags) === JSON.stringify(wantTags) && JSON.stringify(drawer) === JSON.stringify(regs.map(g => (Array.isArray(g.lap_members) && g.lap_members.length ? g.lap_members.map(x => x.section_id).join('|') : Array.isArray(g.sections_checked) ? g.sections_checked.map(x => x.section_id).join('·') : g.section_id || '—')));
-    return { ok: li >= 0 && pi >= 0 && !!pos && s.block && memOk && /강성\(Ix\)의 비/.test(s.basis) && refOk && tagOk && / · S2 · /.test(posRow) && n.bad.length === 0 && (n.bySrc.purlin ?? 0) >= 10,
-      detail: `랩 구간 ${lapR?.id}(${s.label}) · 부재 ${s.members.map(x => `${x.i}:${x.sec}/경간 ${x.span}/${x.role}/${x.v}${x.gov ? '★' : ''}`).join(' | ')} ${memOk} · 몫 「${short(s.basis, 50)}」`
-        + ` · 참고 「${short(s.ref, 80)}」 = ${s.refV} (엔진 ${lapR?.reference_sum_of_strengths?.ratio}) 판정비 아님 ${!s.refIsRatio} ${refOk} · 꼬리표 ${tags.join(',')} ${tagOk} · 정모멘트 S2 줄 「${short(posRow, 60)}」 · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+    return { ok: li >= 0 && pi >= 0 && !!pos && s.block && memOk && sumOk && refOk && tagOk && / · S2 · /.test(posRow) && n.bad.length === 0 && (n.bySrc.purlin ?? 0) >= 20,
+      detail: `랩 구간 ${lapR?.id}(${s.label}) · 부재 ${s.members.map(x => `${x.i}:${x.sec}/경간 ${x.span}/${x.role}/${x.v}${x.gov ? '★' : ''}`).join(' | ')} ${memOk}`
+        + ` · 강도의 합: 휨 ${s.fl} (호스트 ${sum.flexure_ratio}) · 전단 ${s.sh} (${sum.shear_ratio}) · 구간 ${s.gv} ${s.gvV} (${lapR?.result?.utilization} ${lapR?.result?.pass}) · 근거 「${short(s.basis, 60)}」 ${sumOk}`
+        + ` · 참고 「${short(s.ref, 60)}」 = ${s.refV.join(' | ')} (호스트 ${rm.map(x => x.utilization).join(' | ')}) 판정비 아님 ${!s.refIsRatio} ${refOk} · 꼬리표 ${tags.join(',')} ${tagOk} · 정모멘트 S2 줄 「${short(posRow, 60)}」 · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
   });
-  await step('s04 퍼린 단면(결과 탭) — 단면마다 성질 · 좌굴값(정 · 부) · 데크 강성(정보 창), 가운데 = 그 단면의 서명곡선: 단면 고르기 S1 → S2 · 곡선 고르기 +M → −M 이 그림을 바꾼다(점 수 = 엔진), 수 = MCP(SI)', 's04_section_picker', async () => {
+  await step('s04 퍼린 단면(결과 탭) — 단면마다 성질 · 좌굴값(정 · 부 하나씩) · 쓴 데크 강성 한 값(kφ 가 가장 작은 단면의 것 — 결정 S7′)과 이 단면의 값(다를 때 참고)(정보 창), 가운데 = 그 단면의 서명곡선: 단면 고르기 S1 → S2 · 곡선 고르기 +M → −M(둘만)이 그림을 바꾼다(점 수 = 엔진), 수 = MCP(SI)', 's04_section_picker', async () => {
     const secs = sTwo?.sections ?? [];
     await select('result', 'psec:S1');
     await sleep(300);
     const cv = () => ev(`(()=>{const d=document.querySelector('#center [data-draw="psec-curve"]'); return d ? {id:d.dataset.psec, c:d.dataset.psecCurveOn, pts:+d.dataset.points, cp:d.querySelectorAll('circle.cp').length, mk:[...d.querySelectorAll('g.mn')].map(g=>g.dataset.k), pick:d.querySelectorAll('[data-pick]').length,
-      on:[...d.querySelectorAll('[data-psec-pick].on')].map(e=>e.dataset.psecPick)} : null;})()`);
+      on:[...d.querySelectorAll('[data-psec-pick].on')].map(e=>e.dataset.psecPick), curves:[...d.querySelectorAll('[data-psec-curve]')].map(e=>e.dataset.psecCurve)} : null;})()`);
+    const deckOf = () => ev(`(()=>{const b=document.querySelector('#info [data-psec-deck]'); return {used:b?.querySelector('[data-deck-used]')?.dataset.deckUsed ?? null, rule:b?.querySelector('[data-deck-rule]')?.textContent ?? '', own:!!b?.querySelector('[data-deck-own]'),
+      srcs:[...(b?.querySelectorAll('[data-src]')??[])].map(e=>e.dataset.src.replace(/^purlin:sections\\.\\d+\\./,'')), dsm:[...document.querySelectorAll('#info [data-psec-dsm]')].map(e=>e.dataset.psecDsm)};})()`);
     const a = await cv();
+    const d1 = await deckOf();
+    const n1 = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
     const tree = await ev(`[...document.querySelectorAll('#tree .row[data-k^="psec:"]')].map(r=>r.dataset.k)`);
     await ev(`document.querySelector('#center [data-psec-pick="S2"]').click()`);
     await sleep(400);
     const b = await cv();
-    const sel = await ev(`({tree:document.querySelector('#tree .row.on')?.dataset.k ?? null, title:document.querySelector('#info [data-psec-title]')?.dataset.psecTitle ?? null, dsm:[...document.querySelectorAll('#info [data-psec-dsm]')].map(e=>e.dataset.psecDsm)})`);
+    const sel = await ev(`({tree:document.querySelector('#tree .row.on')?.dataset.k ?? null, title:document.querySelector('#info [data-psec-title]')?.dataset.psecTitle ?? null})`);
+    const d2 = await deckOf();
     await ev(`document.querySelector('#center [data-psec-curve="neg"]').click()`);
     await sleep(400);
     const c = await cv();
     const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('purlin:')), { purlinSI: sTwo });
     const S1 = secs.find(x => x.id === 'S1'), S2 = secs.find(x => x.id === 'S2');
+    // 결정 S7′: 쓴 값은 단면마다 같은 한 값(어느 단면의 것인지), 이 단면의 값은 다를 때만 — 호스트의 deck_used · deck_own 그대로
+    const differs = (x) => !!x?.deck_own && (x.deck_own.kphi !== x.deck_used?.kphi || x.deck_own.kx !== x.deck_used?.kx);
+    const deckOk = [[d1, S1], [d2, S2]].every(([d, x]) => d.used === String(x?.deck_used?.section_id) && /한 번 계산/.test(d.rule) && /kφ 가 가장 작은 단면/.test(d.rule) && d.own === differs(x)
+      && ['deck_used.kphi', 'deck_used.kx'].every(k => d.srcs.includes(k)) && (!d.own || ['deck_own.kphi', 'deck_own.kx'].every(k => d.srcs.includes(k))) && JSON.stringify(d.dsm) === '["pos","neg"]')
+      && S1?.deck_used?.section_id === S2?.deck_used?.section_id && S1.deck_used.kphi === S2.deck_used.kphi && differs(S1) !== differs(S2);
     const ok = JSON.stringify(tree) === JSON.stringify(secs.map(x => `psec:${x.id}`)) && a && a.id === 'S1' && a.c === 'pos' && a.pts === S1.curves.pos.lengths.length && a.cp === a.pts && a.pick === 0 && a.mk.length >= 1 && JSON.stringify(a.on) === '["S1"]'
-      && b && b.id === 'S2' && b.pts === S2.curves.pos.lengths.length && sel.tree === 'psec:S2' && sel.title === 'S2' && sel.dsm.includes('pos') && sel.dsm.includes('neg')
-      && c && c.id === 'S2' && c.c === 'neg' && c.pts === S2.curves.neg.lengths.length && n.bad.length === 0 && (n.bySrc.purlin ?? 0) >= 8;
-    return { ok, detail: `트리 ${tree.join(',')} · S1 +M ${a?.pts}점(엔진 ${S1?.curves?.pos?.lengths?.length}) 극소 ${a?.mk?.join('/')} · 고르기 칸 ${a?.pick} → S2 ${b?.id} ${b?.pts}점 · 트리 ${sel.tree} · 정보 창 ${sel.title} (${sel.dsm.join(',')})`
-      + ` → −M ${c?.c} ${c?.pts}점(엔진 ${S2?.curves?.neg?.lengths?.length}) · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
+      && JSON.stringify(a.curves) === '["pos","neg"]' && JSON.stringify(Object.keys(S1.curves).sort()) === '["neg","pos"]'
+      && b && b.id === 'S2' && b.pts === S2.curves.pos.lengths.length && sel.tree === 'psec:S2' && sel.title === 'S2' && deckOk
+      && c && c.id === 'S2' && c.c === 'neg' && c.pts === S2.curves.neg.lengths.length && n1.bad.length === 0 && n.bad.length === 0 && (n1.bySrc.purlin ?? 0) >= 12 && (n.bySrc.purlin ?? 0) >= 8;
+    return { ok, detail: `트리 ${tree.join(',')} · S1 +M ${a?.pts}점(엔진 ${S1?.curves?.pos?.lengths?.length}) 극소 ${a?.mk?.join('/')} · 곡선 ${a?.curves?.join(',')} · 고르기 칸 ${a?.pick}`
+      + ` · 데크 S1: 쓴 값 ${d1.used} 의 것 · 이 단면의 값 ${d1.own} (호스트 kφ ${S1?.deck_used?.kphi} / 자신 ${S1?.deck_own?.kphi}) · S2: ${d2.used} · ${d2.own} · 「${short(d1.rule, 50)}」 ${deckOk}`
+      + ` → S2 ${b?.id} ${b?.pts}점 · 트리 ${sel.tree} · 정보 창 ${sel.title} (${d2.dsm.join(',')}) → −M ${c?.c} ${c?.pts}점(엔진 ${S2?.curves?.neg?.lengths?.length}) · 수 ${n1.compared} + ${n.compared}개 = MCP${[...n1.bad, ...n.bad].length ? ` · 어긋남 ${[...n1.bad, ...n.bad].slice(0, 3).join(' / ')}` : ''}` };
   });
-  await step('s05 알림 · 점검 · 랩 접합 — 새 알림(경간마다 단면 · 랩 강성의 몫 · 강도의 합 참고)이 한국어로(code 는 data-code), 점검의 val.load_analysis.span_sections · deck_section.2 · dsm_section.2 · lap_members, 랩 접합(지점을 정하지 않음 → 지배 랩)의 두 부재 · 「어느 랩」', 's05_notices_lap', async () => {
+  await step('s05 알림 · 점검 · 랩 접합 — 새 알림(경간마다 단면 · 랩은 두 부재 강도의 합)이 한국어로(code 는 data-code), 점검의 val.load_analysis.span_sections · deck_once(데크 강성 한 번) · dsm_section.2 · lap_members(강도의 합), 랩 접합(지점을 정하지 않음 → 지배 랩)의 두 부재(Mnℓ · Vn) · 휨 = Mnℓ,1 + Mnℓ,2 · 강도의 합이 정한 검토 · 강성의 몫은 참고 · 「어느 랩」', 's05_notices_lap', async () => {
     const asm = await ev(`${S}.state.runs.flatMap(r=>[...r.assumptions, ...r.warnings, ...r.neTexts]).concat(${S}.state.runs.flatMap(r=>r.rows.filter(x=>x.noteCode).map(x=>({code:x.noteCode,text:x.name}))))`);
     const has = (code, re) => asm.some(x => x.code === code && re.test(x.text) && !x.text.includes(code));
-    const notesOk = has('host.purlin.sections_per_span', /경간마다 단면/) && has('host.purlin.lap_two_members_stiffness', /강성의 비/);
+    const gone = ['host.purlin.lap_two_members_stiffness', 'host.purlin.lap_stiffness_share', 'host.purlin.sum_of_strengths_reference'];
+    const notesOk = has('host.purlin.sections_per_span', /경간마다 단면/) && has('host.purlin.lap_two_members_sum', /두 부재 강도의 합/) && !asm.some(x => gone.includes(x.code));
     const v = await hVal();
-    const vIds = ['val.load_analysis.span_sections', 'val.load_analysis.deck_section.2', 'val.load_analysis.dsm_section.2', 'val.load_analysis.lap_members'];
-    const vText = await ev(`[...document.querySelectorAll('#center table.valt tr.vr')].filter(t=>${JSON.stringify(vIds)}.includes(t.dataset.id)).map(t=>t.textContent)`);
-    const valOk = vIds.every(id => v.state.includes(id) && v.table.includes(id)) && vText.length === vIds.length && vText.every(t => /단면|랩/.test(t) && !/val\.load_analysis/.test(t));
+    const vIds = ['val.load_analysis.span_sections', 'val.load_analysis.deck_once', 'val.load_analysis.dsm_section.2', 'val.load_analysis.lap_members'];
+    const vRows = Object.fromEntries(await ev(`[...document.querySelectorAll('#center table.valt tr.vr')].filter(t=>${JSON.stringify(vIds)}.includes(t.dataset.id)).map(t=>[t.dataset.id, t.textContent])`));
+    const vText = vIds.map(id => vRows[id] ?? '');
+    const valOk = vIds.every(id => v.state.includes(id) && v.table.includes(id)) && vText.every(t => /단면|랩/.test(t) && !/val\.load_analysis/.test(t))
+      && /데크 강성/.test(vRows['val.load_analysis.deck_once'] ?? '') && /한 번/.test(vRows['val.load_analysis.deck_once'] ?? '') && /강도의 합/.test(vRows['val.load_analysis.lap_members'] ?? '')
+      && !v.state.some(id => /^val\.load_analysis\.deck_section\./.test(id));
     const sl = await mcp.tool('set_case_inputs', { inputs: { connLapLeft: 24, connLapRight: 33, connMu: 144, connVu: 2.5, connFastenerDia: 0.19, connNRows: 2, connLapPnvs: 1.2, connEdgeDist: 0.5, connLapSupport: null }, reason: '시험 — 랩 접합(지점 비움)' });
     const lap = await mcp.tool('run_case_check', { what: 'lap', units: 'SI', detail: 'full' });
     const L = lap?.result ?? lap;
     await settle(`!!s.lap && s.lap.us.lap_two_members===true`, '랩 결과', 60_000).catch(() => undefined);
     await select('result', 'conn:lap');
     await sleep(300);
-    const li = await ev(`({block:!!document.querySelector('#info [data-lap-two-block]'), rows:[...document.querySelectorAll('#info tr[data-lap-two]')].map(r=>r.children[1].textContent.trim()), auto:document.querySelector('#info [data-lap-auto]')?.dataset.lapAuto ?? null,
-      gov:[...document.querySelectorAll('#info [data-member-gov]')].map(e=>e.dataset.memberGov), ref:!!document.querySelector('#info [data-lap-sum-ref] [data-ratio-ref]'),
+    const li = await ev(`({block:!!document.querySelector('#info [data-lap-two-block]'), rows:[...document.querySelectorAll('#info [data-lap-two-block] th[data-lap-two]')].map(h=>document.querySelector('#info [data-lap-two-block] [data-m="'+h.dataset.lapTwo+'"][data-f="sec"]')?.textContent.trim() ?? ''), auto:document.querySelector('#info [data-lap-auto]')?.dataset.lapAuto ?? null,
+      mem:[...document.querySelectorAll('#info [data-lap-two-block] th[data-lap-two]')].map(h=>[...document.querySelectorAll('#info [data-lap-two-block] [data-m="'+h.dataset.lapTwo+'"] [data-src]')].map(e=>e.dataset.src.split('.').pop())),
+      gov:[...document.querySelectorAll('#info [data-member-gov]')].map(e=>e.dataset.memberGov), bySum:[...document.querySelectorAll('#info [data-member-gov][data-by-sum]')].map(e=>e.dataset.memberGov),
+      sum:document.querySelector('#info [data-lap-two-block] [data-lap-sum]')?.textContent ?? '', sumSrc:[...document.querySelectorAll('#info [data-lap-two-block] [data-lap-sum] [data-src]')].map(e=>e.dataset.src),
+      ref:document.querySelector('#info [data-lap-stiff-ref]')?.textContent ?? '', refV:[...document.querySelectorAll('#info [data-lap-stiff-ref] [data-ratio-ref]')].map(e=>+e.dataset.ratioRef),
+      refIsRatio:!!document.querySelector('#info [data-lap-stiff-ref] [data-ratio]'), old:!!document.querySelector('#info [data-lap-sum-ref], #info [data-share-basis]'),
       codes:[...document.querySelectorAll('#info [data-code]')].map(e=>({code:e.dataset.code, text:e.textContent})), raw:/host\\.(purlin|lap)\\./.test(document.getElementById('review').innerText)})`);
-    const n = compareNumbers((await numbers('#info')).filter(x => x.src.startsWith('lap:lap_members') || x.src.startsWith('lap:flexure_reference')), { lapSI: L });
+    const n = compareNumbers((await numbers('#info')).filter(x => /^lap:(lap_members|flexure_reference|Mn_lap|phi_Mn_lap)/.test(x.src)), { lapSI: L });
     // 「어느 랩」: 모든 랩을 견줬으면 governing_support, 평가하지 못한 랩 · 넣지 않은 양력 랩이 있으면 governing_support_partial(이 사례는 양력이 있다)
     const lapCode = (codes) => codes.some(c => li.codes.some(x => x.code === c && /랩/.test(x.text) && !x.text.includes(c)));
     const lapCodes = lapCode(['host.lap.two_sections']) && lapCode(['host.lap.governing_support', 'host.lap.governing_support_partial']);
+    // 결정 S3′: 강도의 합이 정한 검토(member_governing 의 'sum') = 화면의 「두 부재 강도의 합」 표시, 강성의 몫은 참고(호스트의 dcr · §H2 의 참고 비)
+    const mg = L?.member_governing ?? {};
+    const wantSum = Object.keys(mg).filter(k => mg[k] === 'sum');
+    const bsRef = (L?.design_checks ?? []).find(c => c.id === 'lap.bending_shear')?.reference_stiffness_share?.ratio;
+    const sumOk = L?.strength_basis === 'sum_of_strengths' && wantSum.length >= 2 && JSON.stringify([...li.bySum].sort()) === JSON.stringify([...wantSum].sort()) && /Mnℓ,1 \+ Mnℓ,2/.test(li.sum) && /두 부재 강도의 합/.test(li.sum)
+      && ['lap:Mn_lap', 'lap:phi_Mn_lap'].every(k => li.sumSrc.includes(k)) && li.mem.length === 2 && li.mem.every(x => x.includes('Mnl') && x.includes('Vn')) && !li.old;
+    const refOk = /참고 — 판정에 쓰지 않음/.test(li.ref) && /강성/.test(li.ref) && !li.refIsRatio && li.refV.length === (typeof bsRef === 'number' ? 2 : 1)
+      && relClose(li.refV[0], L.flexure_reference_stiffness_share.dcr) && (typeof bsRef !== 'number' || relClose(li.refV[1], bsRef));
     const lapOk = !sl.error && !lap.error && L?.lap_two_members === true && L?.section_source?.support_defaulted === true && li.block && JSON.stringify(li.rows) === JSON.stringify(L.section_source.members.map(m => m.section_id))
       && li.auto === String(L.section_source.support) && li.gov.length >= 3 && lapCodes && !li.raw;
-    return { ok: notesOk && valOk && lapOk && n.bad.length === 0 && (n.bySrc.lap ?? 0) >= 8,
-      detail: `알림 ${notesOk} (${asm.filter(x => /^host\.(purlin|lap)\./.test(x.code ?? '')).map(x => x.code.split('.').pop()).join(',')}) · 점검 ${valOk} (${vText.map(t => short(t, 24)).join(' | ')})`
-        + ` | 랩 ${lap.error ? short(lap.error) : `두 부재 ${L?.lap_two_members} · 지점 ${L?.section_source?.support} 자동 ${L?.section_source?.support_defaulted}`} → 정보 창 ${li.rows.join('|')} · 어느 랩 ${li.auto} · 정한 부재 ${li.gov.join(',')} · 참고 ${li.ref} · 알림 code ${lapCodes} · 날 code 없음 ${!li.raw} ${lapOk}`
+    return { ok: notesOk && valOk && lapOk && sumOk && refOk && n.bad.length === 0 && (n.bySrc.lap ?? 0) >= 12,
+      detail: `알림 ${notesOk} (${asm.filter(x => /^host\.(purlin|lap)\./.test(x.code ?? '')).map(x => x.code.split('.').pop()).join(',')}) · 점검 ${valOk} (${vText.map(t => short(t, 30)).join(' | ')})`
+        + ` | 랩 ${lap.error ? short(lap.error) : `두 부재 ${L?.lap_two_members} · 지점 ${L?.section_source?.support} 자동 ${L?.section_source?.support_defaulted}`} → 정보 창 ${li.rows.join('|')} · 어느 랩 ${li.auto} · 정한 것 ${li.gov.join(',')} (합 ${li.bySum.join(',')} — 호스트 ${wantSum.join(',')})`
+        + ` · 휨 「${short(li.sum, 60)}」 ${sumOk} · 참고 ${li.refV.join(' | ')} (호스트 ${L?.flexure_reference_stiffness_share?.dcr} | ${bsRef}) 판정비 아님 ${!li.refIsRatio} ${refOk} · 알림 code ${lapCodes} · 날 code 없음 ${!li.raw} ${lapOk}`
         + ` · 수 ${n.compared}개 = MCP${n.bad.length ? ` · 어긋남 ${n.bad.slice(0, 3).join(' / ')}` : ''}` };
   });
   await step('s06 춤이 다른 S2(H 10 in) — 그 랩 구간은 「평가하지 못함」(합격으로 그리지 않는다: 트리 미검토 · 띠 빗금 · 부재 줄 판정 없음 · 까닭 한국어), 구간 알림 host.purlin.region_not_evaluated, 전체는 OK 가 아니다', 's06_depth_mismatch', async () => {

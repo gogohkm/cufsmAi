@@ -1132,7 +1132,7 @@ function boot(): void {
     }
     const fit = t.closest('[data-fit]');
     if (fit) { fitZoom(fit.getAttribute('data-fit')!, $('center')); return; }
-    // 2026-11-28 결정 S8: 퍼린 단면 보기 — 단면 고르기(그 단면의 줄로) · 곡선 고르기(정 · 부 · 데크 강성마다)
+    // 2026-11-28 결정 S8 · S7′: 퍼린 단면 보기 — 단면 고르기(그 단면의 줄로) · 곡선 고르기(정 · 부)
     const ps = t.closest('[data-psec-pick]');
     if (ps) { select('result', `psec:${ps.getAttribute('data-psec-pick')}`); return; }
     const pc = t.closest('[data-psec-curve]');

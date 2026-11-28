@@ -223,9 +223,10 @@ export function locWords(loc: any): string[] {
     n(loc.span) !== null ? `경간 ${loc.span}` : '',
     n(loc.region_support) !== null ? `구간의 지점 ${loc.region_support}` : '',
     loc.demand_basis === 'envelope' ? '소요 = 포락선' : loc.demand_basis === 'combination' ? '소요 = 지배 조합의 도표' : '',
-    // 2026-11-28 결정 S1 · S3: 경간마다 단면이면 그 지점을 검토한 단면, 랩이면 그 부재의 몫(강성의 비 — 소요는 그 몫)
+    // 2026-11-28 결정 S1 · S3′: 경간마다 단면이면 그 지점을 검토한 단면, 랩이면 그 부재의 강도 몫(M — 소요는 그 몫), V 의 몫이 다르면 그것도
     typeof loc.section_id === 'string' ? `단면 ${loc.section_id}` : '',
-    n(loc.member_share) !== null ? `몫 ${(loc.member_share * 100).toFixed(1)} %` : '',
+    n(loc.member_share) !== null ? `${n(loc.member_share_V) !== null ? 'M 몫' : '몫'} ${(loc.member_share * 100).toFixed(1)} %` : '',
+    n(loc.member_share_V) !== null ? `V 몫 ${(loc.member_share_V * 100).toFixed(1)} %` : '',
   ].filter(Boolean);
 }
 const POINT_KO = (p: string): string => (p === 'M_max' ? 'M 최대' : p === 'V_max' ? 'V 최대' : /^support\s+/.test(p) ? `지점 ${p.replace(/^support\s+/, '')}` : p);
